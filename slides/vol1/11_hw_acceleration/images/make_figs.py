@@ -512,19 +512,29 @@ for value in (5, 10, 20, 50):
     edge = (1 - 1 / value) / (1 - 1 / 1000)
     ax.text(1150, edge, f"{value}×", va="center", ha="left", fontsize=10,
             color=C["memory"], fontweight="bold")
-for p_frac, label, offset in ((0.95, "ResNet-50: 18.6×", (-8, 10)),
-                              (0.80, "GPT-2 decode: 4.9×", (-8, 10))):
-    ax.plot([247], [p_frac], "o", ms=9, color=C["danger"], mec="white", mew=1.5)
-    ax.annotate(label, (247, p_frac), xytext=offset, textcoords="offset points",
-                ha="right", fontsize=11, fontweight="bold", color=C["danger"],
-                bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.85))
+points = [(0.95, "ResNet-50: 18.6×", (-8, 10)), (0.80, "GPT-2 decode: 4.9×", (-8, 10))]
+marks = []
+for p_frac, label, offset in points:
+    dot, = ax.plot([247], [p_frac], "o", ms=9, color=C["danger"], mec="white", mew=1.5)
+    text = ax.annotate(label, (247, p_frac), xytext=offset, textcoords="offset points",
+                       ha="right", fontsize=11, fontweight="bold", color=C["danger"],
+                       bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none",
+                                 alpha=0.85))
+    marks.append((dot, text))
 ax.set_xscale("log")
 ax.set_xticks([1, 10, 100, 1000])
 ax.set_xticklabels(["1", "10", "100", "1,000"])
 ax.set_yticks([0.8, 0.85, 0.9, 0.95, 1.0])
 ax.set_xlabel("Accelerator gain (log scale)")
 ax.set_ylabel("Accelerated fraction")
-sp.save(fig, out / "amdahl.svg")
+# Step 1 shows only the ResNet-50 point; amdahl.svg (both points) is the final
+# step and the thumbnail. Both files keep the same canvas.
+fig.savefig(out / "amdahl.svg", format="svg", bbox_inches="tight", pad_inches=0.15,
+            facecolor="white")
+marks[1][0].set_alpha(0.0)
+marks[1][1].set_alpha(0.0)
+marks[1][1].get_bbox_patch().set_alpha(0.0)
+sp.save(fig, out / "amdahl_step1.svg")
 
 # ---------------------------------------------------------------- compiler
 sp.hbars(out / "compiled.svg", [
@@ -532,5 +542,44 @@ sp.hbars(out / "compiled.svg", [
     ("Compiled FP16 (56 kernels)", 0.33, "compute", "0.33 ms: 10.6× faster"),
 ], "ms", log=False, value_fmt="{:.2f}", xlabel="ResNet-50 batch one on an H100 (modeled)",
     size=sp.SHORT)
+
+# ---------------------------------------------------------------- bandwidth taper
+# Slide variant of HA margin figure 2 (Sec. 11.5.4): HBM 3,350, NVLink 900,
+# PCIe 64, network 50 GB/s. HBM over PCIe = 52x (derived).
+taper_rows = [("HBM", 3350, "memory", "3,350 GB/s"), ("NVLink", 900, "network", "900"),
+              ("PCIe", 64, "danger", "64"), ("Network", 50, "neutral", "50")]
+fig, ax = plt.subplots(figsize=(5.8, 2.1))
+for i, (label, value, color_key, text) in enumerate(taper_rows):
+    y = len(taper_rows) - 1 - i
+    ax.barh(y, value, color=C[color_key], height=0.62)
+    ax.text(-0.01, y, label, transform=ax.get_yaxis_transform(), ha="right",
+            va="center", fontsize=13, fontweight="bold", color=C["text"])
+    ax.text(value * 1.15, y, text, va="center", fontsize=13, fontweight="bold",
+            color=C[color_key])
+ax.set_xscale("log")
+ax.set_xlim(20, 60000)
+ax.set_ylim(-0.6, len(taper_rows) - 0.4)
+ax.set_yticks([])
+ax.minorticks_off()
+ax.set_xticks([100, 1000, 10000])
+ax.set_xticklabels(["100", "1,000", "10,000"])
+ax.spines["left"].set_visible(False)
+ax.grid(axis="x", color=C["grid"], linewidth=0.6)
+ax.set_axisbelow(True)
+ax.set_xlabel("Bandwidth from one H100 (GB/s, log scale)")
+sp.save(fig, out / "taper.svg")
+
+# ---------------------------------------------------------------- INT8 twice
+# H100 dense peaks: FP16 989 TFLOP/s, INT8 1,979 TOPS; ResNet-50 8.2 GFLOP per
+# image over each peak: about 8 and 4 microseconds (HA Sec. 11.4.5, Lighthouse
+# 11.1, Napkin Math 11.6).
+sp.hbars(out / "int8peak.svg", [
+    ("FP16", 989, "compute", "989 TFLOP/s"),
+    ("INT8", 1979, "danger", "1,979 TOPS: 2×"),
+], "", log=False, xlabel="H100 dense peak", size=(2.9, 1.5))
+sp.hbars(out / "int8floor.svg", [
+    ("FP16", 8.3, "compute", "8 µs"),
+    ("INT8", 4.1, "danger", "4 µs"),
+], "", log=False, xlabel="ResNet-50 arithmetic, one image", size=(2.9, 1.5))
 
 print("figures written")

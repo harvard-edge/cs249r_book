@@ -28,7 +28,7 @@
 \usepackage{booktabs,amsmath}
 \usetikzlibrary{arrows.meta,positioning}
 \graphicspath{{images/}}
-\setcounter{mlsystotalsections}{5}
+\setcounter{mlsystotalsections}{4}
 
 \title{Hardware Acceleration}
 \author{Vijay Janapa Reddi}
@@ -50,14 +50,16 @@
   {\setlength{\fboxsep}{0pt}\alt<#2|handout:0>{\colorbox{OrangeL}{\strut\ttfamily #1}}{\colorbox{white}{\strut\ttfamily #1}}}\\}
 % A tier row in the memory table: name, size, latency
 \newcommand{\tier}[3]{\textbf{#1} & #2 & #3 \\}
+% A lighthouse row in the binding-resource table, shown from overlay #1 on
+\newcommand{\lrow}[5]{\uncover<#1->{\textbf{#2}} & \uncover<#1->{#3} & \uncover<#1->{#4} & \uncover<#1->{#5} \\}
 
 \begin{document}
 
 % =============================================================================
 % TITLE AND HOOK
 % =============================================================================
-\mlsysnote{[0.5 min] Read the thesis aloud once. Today opens the box that every earlier lecture treated as a peak rate and a bandwidth: what is inside an accelerator, why moving data costs more than computing on it, and how a chip keeps its arithmetic busy. The notes total about 71 minutes, which leaves a few minutes for questions. FLEX: the [OPTIONAL] frames give a 60-minute version.}
-\mlsystitle{Hardware Acceleration}{Accelerators win by keeping data close to arithmetic: a byte from off-chip memory costs far more than the operation it feeds, so a chip reaches its peak only when memory, dataflow, and reuse keep its arrays fed.}{cover_hw_acceleration.png}
+\mlsysnote{[0.5 min] Read the thesis aloud once. Today opens the box that every earlier lecture treated as a peak rate and a bandwidth: what is inside an accelerator, why moving data costs more than computing on it, and how a chip keeps its arithmetic busy. The notes total about 71.5 minutes, which leaves a few minutes for questions. FLEX: the [OPTIONAL] frames give a 60-minute version. The next lecture (11b, Part 2) takes the mapping questions: dataflows, tiling, and compilers.}
+\mlsystitle{Hardware Acceleration}{Accelerators win by keeping data close to arithmetic: a byte from off-chip memory costs far more than the operation it feeds.}{cover_hw_acceleration.png}
 
 \begin{frame}{Voice search would have doubled Google's datacenters}
   \mlsysactivity{Predict}{2 min}
@@ -97,8 +99,8 @@
   \thumbline{energy_step3}{Explain why accelerators are built around reuse, not faster arithmetic.}\\[0.15cm]
   \thumbline{roof_h100_step3}{Compute a chip's ridge point for each number format.}\\[0.15cm]
   \thumbline{layers_step4}{Place a layer on the roofline and name the lever that moves it.}\\[0.15cm]
-  \thumbline{measured_tiles_step2}{Predict when a layer's shape wastes the hardware.}
-  \note{[1 min] The driving question: why does moving data cost more than computing it, and how does an accelerator keep its arithmetic fed? Read the four outcomes; each thumbnail is the figure that teaches it. Say that the lecture runs from one chip, to how memory feeds it, to which limit binds a given layer, to who decides how a layer is laid onto the chip, and ends by following one tensor through the machine. FLEX: [CORE].}
+  \thumbline{amdahl}{Bound a whole job's speedup with Amdahl's law, and name the resource a workload exhausts first.}
+  \note{[1 min] The driving question: why does moving data cost more than computing it, and how does an accelerator keep its arithmetic fed? Read the four outcomes; each thumbnail is the figure that teaches it. Say that the lecture runs from one chip, to how memory feeds it, to which ceiling binds a given layer, and ends on the two limits a faster chip cannot remove: work it never touches, and the resource each workload exhausts first. FLEX: [CORE].}
 \end{frame}
 
 % =============================================================================
@@ -156,7 +158,7 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Hardware Acceleration, \S11.3 and \S11.4.2; footnote 13 (NVIDIA 2017).}
-  \note{[2.5 min] Step 1: three execution units for three kinds of work. The vector unit applies one operation to many elements: ReLU, residual adds. The matrix unit does matrix multiplication, where convolutions and projections end up. The special-function unit approximates exponentials, GELU, and reciprocal square roots. Step 2: the two lighthouses use them differently. ResNet-50 touches the special-function path only for its final 1,000-way softmax; GPT-2 XL uses it every step, for softmax over the context and GELU in every block. Step 3: the first Tensor Cores (Volta, 2017) took peak FP16 from 21.2 to 125 TFLOP/s, about 6 times. One instruction does 2,048 multiply-accumulates (MACs), work that would otherwise take 64 fused multiply-add (FMA) instructions per thread. INT8 gains twice: half the bytes of FP16 and smaller multipliers, so more fit on the die. WARN: a peak always names a precision. LINK: Lecture 8 met warps; SIMT detail is reading. FLEX: [OPTIONAL] step 3.}
+  \note{[2.5 min] Step 1: three execution units for three kinds of work. The vector unit applies one operation to many elements: ReLU, residual adds. The matrix unit does matrix multiplication, where convolutions and projections end up. The special-function unit approximates exponentials, GELU, and reciprocal square roots. Step 2: the two lighthouses use them differently. ResNet-50 touches the special-function path only for its final 1,000-way softmax; GPT-2 XL uses it every step, for softmax over the context and GELU in every block. Step 3: the first Tensor Cores (Volta, 2017) took peak FP16 from 21.2 to 125 TFLOP/s, about 6 times. One instruction does 2,048 multiply-accumulates (MACs), work that would otherwise take 64 fused multiply-add (FMA) instructions per thread. INT8 gains twice, which the Roofline segment puts numbers on. WARN: a peak always names a precision. LINK: Lecture 8 met warps; SIMT detail is reading. FLEX: [OPTIONAL] step 3.}
 \end{frame}
 
 \begin{frame}{A systolic array reuses each operand across a whole row}
@@ -175,7 +177,7 @@
     \end{column}
   \end{columns}
   \mlsyscredit{After Hardware Acceleration, figure 6 and \S11.4.4; Kung 1982; Jouppi et al. 2023.}
-  \note{[2.5 min] A systolic array is a grid of multiply-add cells that pass data to their neighbors on every clock tick; this one is weight stationary, the design inside the TPU. Step 1: each cell holds one weight and does one multiply-add per cycle. Step 2: activations enter at the left edge and pass from cell to neighbor; each one loaded once is used by every cell in its row. Step 3: partial sums flow down each column, adding one product per cell, and leave at the bottom as outputs. No value returns to a register file or memory between cells; a neighbor wire replaces a memory read. A 128 by 128 array does 16,384 multiply-accumulates (MACs) per cycle; the first TPU's array was 256 by 256. ENGAGE: in an N by N array, how many times is each activation used after one load? Expected: N times. WARN: the diagram omits timing: each row's inputs enter one cycle later than the row above, so the array takes a few cycles to fill and drain, and it is efficient only when the matrix fills it (segment 4). FLEX: [CORE].}
+  \note{[2.5 min] A systolic array is a grid of multiply-add cells that pass data to their neighbors on every clock tick; this one is weight stationary, the design inside the TPU. Step 1: each cell holds one weight and does one multiply-add per cycle. Step 2: activations enter at the left edge and pass from cell to neighbor; each one loaded once is used by every cell in its row. Step 3: partial sums flow down each column, adding one product per cell, and leave at the bottom as outputs. No value returns to a register file or memory between cells; a neighbor wire replaces a memory read. A 128 by 128 array does 16,384 multiply-accumulates (MACs) per cycle; the first TPU's array was 256 by 256. ENGAGE: in an N by N array, how many times is each activation used after one load? Expected: N times. WARN: the diagram omits timing: each row's inputs enter one cycle later than the row above, so the array takes a few cycles to fill and drain; the next lecture runs this array cycle by cycle, with its fill and drain. FLEX: [CORE].}
 \end{frame}
 
 \begin{frame}{Systolic reuse cuts energy per MAC 233$\times$}
@@ -249,12 +251,46 @@
         \tier{Shared mem.}{228 KB/SM}{17 ns}
         \tier{L2}{50 MB}{150 ns}
         \tier{HBM}{80 GB}{300 ns}
-        \bottomrule\end{tabular}\\[0.15cm]
-        Off the chip: NVLink 900, PCIe 64, network 50 GB/s, against HBM's 3,350.}
+        \bottomrule\end{tabular}}
     \end{column}
   \end{columns}
   \mlsyscredit{H100 values: Hardware Acceleration, Lighthouse 11.2 (energies are 45 nm estimates), Napkin Math 11.2, \S11.5.4, table 17.}
-  \note{[2.5 min] One tier per step on the same diagram. Step 1: registers, inside the compute units: a few cycles, about 0.1 pJ per access. Step 2: on-chip SRAM. Each streaming multiprocessor (SM, one of the H100's processing tiles) has 228 KB of shared memory, a scratchpad the program manages, about 17 ns away; all SMs share a 50 MB L2 cache, about 150 ns away. Step 3: HBM, 3.35 TB/s, but a dependent request takes about 300 ns, more than 100 cycles at 2 GHz, and about 160 pJ per byte. ENGAGE: why can HBM not feed a 16,384-MAC array directly? Expected: too few bytes per cycle; operands must be staged and reused on chip. Step 4: leaving the package costs more: NVLink 900 GB/s, PCIe 64, network 50. WARN: register and HBM energies are 45 nm estimates; latencies are Hopper values. LINK: Lecture 7 owns host transfers. FLEX: [CORE].}
+  \note{[2.5 min] One tier per step on the same diagram. Step 1: registers, inside the compute units: a few cycles, about 0.1 pJ per access. Step 2: on-chip SRAM. Each streaming multiprocessor (SM, one of the H100's processing tiles) has 228 KB of shared memory, a scratchpad the program manages, about 17 ns away; all SMs share a 50 MB L2 cache, about 150 ns away. Step 3: HBM, 3.35 TB/s, but a dependent request takes about 300 ns, more than 100 cycles at 2 GHz, and about 160 pJ per byte. ENGAGE: why can HBM not feed a 16,384-MAC array directly? Hold the answer; the next slide computes it. Step 4: the four tiers in one table; the links off the package come two slides on. WARN: register and HBM energies are 45 nm estimates; latencies are Hopper values. LINK: Lecture 7 owns host transfers. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{From HBM alone, an H100 needs 295$\times$ its bandwidth}
+  \mlsysactivity{Estimate}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.42\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \textbf{Given}\\[0.1cm]
+        Required bandwidth $=$ rate $/$ intensity\\
+        Rate: 989 TFLOP/s (FP16)\\
+        No reuse: about 1 FLOP/byte\\
+        HBM: 3.35 TB/s
+      \end{mlsyscard}
+      {\footnotesize What bandwidth would the arrays need?}
+    \end{column}
+    \begin{column}{0.54\textwidth}
+      \normalsize
+      \uncover<2->{$989 \text{ TFLOP/s} \,/\, 1 \text{ FLOP/byte} = 989$ TB/s\\[0.2cm]
+        against 3.35 TB/s:\\[0.2cm]
+        {\Large\textbf{\textcolor{mlsysaccent}{295$\times$ short}}}\\[0.3cm]}
+      \uncover<3->{\small A cycle is 500 ps; an HBM access is 100+ cycles. Operands must be staged in SRAM and registers and reused there.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Hardware Acceleration, equation 3 (\S11.6.3) and Napkin Math 11.2. The 295$\times$ is derived; it is the FP16 ridge again.}
+  \note{[3 min] Equation 3: to sustain a compute rate, memory must deliver the rate divided by the intensity, in bytes per second. ENGAGE: one minute in pairs. Step 2: with no reuse, about 1 FLOP per byte, keeping 989 TFLOP/s busy needs 989 TB/s. HBM gives 3.35 TB/s, about 295 times too little. The ratio is the FP16 ridge point from the next segment: a kernel must reuse each byte about 295 times before the arithmetic, not memory, sets the pace. Step 3: latency makes it worse. At 2 GHz a cycle is 500 ps, and an HBM access takes more than 100 cycles (Napkin Math 11.2). Land the segment: each step away from the arrays is slower and costlier, so operands must be staged in SRAM and registers and reused there. WARN: 295 is derived here from equation 3, not printed in the chapter. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Bandwidth falls at every step away from the chip}
+  \mlsysactivity{Predict}{1 min}
+  \centering
+  \safeimg[width=0.92\textwidth,height=3.9cm,keepaspectratio]{taper.pdf}\\[0.2cm]
+  \only<1|handout:0>{\normalsize An offloaded model streams its weights over which link?}%
+  \only<2-|handout:1>{\normalsize PCIe: 64 GB/s, 52$\times$ below HBM.}
+  \mlsyscredit{After Hardware Acceleration, \S11.5.4 and its margin figure (H100 class). The 52$\times$ is derived.}
+  \note{[2 min] Real numbers for one H100-class node, log scale. HBM delivers 3,350 GB/s inside the package. NVLink to a neighboring GPU gives 900, PCIe to the host CPU 64, and the network to another server about 50. ENGAGE: a model whose weights do not fit in HBM is offloaded to host memory. Which link carries the weights every time they are needed? Step 2: PCIe, 52 times slower than HBM. Every step outward costs about an order of magnitude. WARN: these are peak link rates; the point is the ratio, not the exact figure. LINK: Lecture 7 owns host transfers and their overlap with compute; scaling across chips is Volume II. FLEX: [OPTIONAL].}
 \end{frame}
 
 % =============================================================================
@@ -327,7 +363,7 @@
   \end{tabular}\\[0.35cm]
   {\normalsize Which are compute bound? What fraction of peak can the others reach?}
   \mlsyscredit{Hardware Acceleration, Napkin Math 11.4, 11.5, 11.7, 11.8, 11.10.}
-  \note{[3 min] ENGAGE: three minutes in pairs: divide FLOPs by bytes, compare with 295, and for any layer below the ridge multiply intensity by 3.35 TB/s. Step 2: QKV 1,046.7 and the convolution 563.1 are above the ridge: compute bound. The FC head is 30.5 FLOP/byte, so its ceiling is 3.35 times 30.5, about 102 TFLOP/s, 10.3 percent of peak. LayerNorm, 2.0: 6.7 TFLOP/s, 0.7 percent. Decode, 1: 3.4 TFLOP/s, 0.3 percent. Why: the convolution reuses each 3 by 3 weight at every position; the FC head reuses a weight only across the batch; LayerNorm does about eight operations per element read and written; decode reads every weight for one token. WARN: these are bounds from the stated traffic models, not measurements. FLEX: [CORE].}
+  \note{[4 min] ENGAGE: three minutes in pairs: divide FLOPs by bytes, compare with 295, and for any layer below the ridge multiply intensity by 3.35 TB/s. Step 2: QKV 1,046.7 and the convolution 563.1 are above the ridge: compute bound. The FC head is 30.5 FLOP/byte, so its ceiling is 3.35 times 30.5, about 102 TFLOP/s, 10.3 percent of peak. LayerNorm, 2.0: 6.7 TFLOP/s, 0.7 percent. Decode, 1: 3.4 TFLOP/s, 0.3 percent. Why: the convolution reuses each 3 by 3 weight at every position; the FC head reuses a weight only across the batch; LayerNorm does about eight operations per element read and written; decode reads every weight for one token. WARN: these are bounds from the stated traffic models, not measurements. FLEX: [CORE].}
 \end{frame}
 
 \begin{frame}{On one H100, layers span 0.3 to 100 percent of peak}
@@ -353,6 +389,22 @@
   \note{[2.5 min] ENGAGE: guess a batch size before step 2. Step 1: only the ridge line and the question. Step 2: with batch B, each weight read is reused B times, so while the weight bytes dominate, intensity is roughly B: about 1 at batch one, about 31 at batch 32. Step 3: at batch 512 it reaches 341.3, above the 295 ridge. Solving equation 5 for 295.2 gives a crossing near batch 415; this number is derived here, not printed in the chapter. The curve bends at large batch because input and output bytes grow with B. WARN: batching buys intensity with waiting time: requests queue until a batch forms. LINK: Lecture 13 develops that trade between throughput and latency. FLEX: [OPTIONAL]; if cut, give the 1, 31, 341 sequence in one sentence on the previous slide.}
 \end{frame}
 
+\begin{frame}{INT8 helps twice: half the bytes, twice the multipliers}
+  \begin{columns}[c]
+    \begin{column}{0.48\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.3cm,keepaspectratio]{int8peak.pdf}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \centering\uncover<2->{\safeimg[width=\textwidth,height=3.3cm,keepaspectratio]{int8floor.pdf}}
+    \end{column}
+  \end{columns}
+  \vspace{0.25cm}
+  \centering\small Each INT8 value is half the bytes of FP16; its multipliers are smaller, so twice as many fit.\\[0.1cm]
+  \uncover<3->{\footnotesize\textcolor{midgray}{2:4 sparsity doubles the rate again, only for weights in the pattern (Lecture 10).}}
+  \mlsyscredit{Hardware Acceleration, \S11.4.5, Lighthouse 11.1, footnote 18 (Choquette 2023). Floors are 8.2 GFLOP over each peak.}
+  \note{[2.5 min] Two separate gains, both from the narrower format. Step 1: the H100's INT8 path peaks at 1,979 trillion operations per second against 989 TFLOP/s for FP16: smaller multipliers, so twice as many fit in the same area. And each INT8 value is one byte, half of FP16, so the same bandwidth moves twice as many values. Step 2: what the higher peak means for ResNet-50: its 8.2 GFLOP per image takes about 8 microseconds at the FP16 peak and about 4 at the INT8 peak. These are floors; real single-image inference takes far longer, which the synthesis returns to. Step 3: NVIDIA's 2:4 sparse Tensor Cores double the rate again, but only for weights pruned to that pattern. ENGAGE: if INT8 doubles the peak but bandwidth stays 3.35 TB/s, what happens to the ridge? Expected: it doubles, to 591. That is the next slide. FLEX: [CORE].}
+\end{frame}
+
 \begin{frame}{INT8 lifts the ceiling, so a layer can fall below it}
   \mlsysactivity{Diagnose}{2 min}
   \centering
@@ -366,127 +418,58 @@
 \end{frame}
 
 % =============================================================================
-% SECTION: MAPPING
+% SECTION: THE LIMIT
 % =============================================================================
-\mlsysnote{[0.5 min] The roofline says what is possible; mapping decides how close a kernel gets. Read the divider question.}
-\mlsysdivider{Who decides which operand stays near the arithmetic?}{Hardware Acceleration, \S11.7, \S11.8}
-\section{Mapping}
+\mlsysnote{[0.5 min] The roofline bounds one layer. Now step back to the whole job, and to choosing a chip. Read the divider question.}
+\mlsysdivider{How much can a faster chip speed up the whole job?}{Hardware Acceleration, \S11.1 (Theorem 11.1, Lighthouse 11.1), \S11.11}
+\section{The Limit}
 
-\begin{frame}{Two correct loop orders differ 36$\times$ in weight reads}
+\begin{frame}{A 247$\times$ faster path gives ResNet-50 only 18.6$\times$}
   \begin{columns}[c]
-    \begin{column}{0.60\textwidth}
-      \footnotesize\setlength{\baselineskip}{0pt}\setlength{\lineskip}{0pt}
-      \codeline{\textcolor{midgray}{\# weight stationary}}{1}
-      \codeline{for i, k:}{1}
-      \codeline{\ \ w = weights[i,k]\ \ \textcolor{midgray}{\# reused 32 times}}{1}
-      \codeline{\ \ for j: Z[i,j] += w * input[k,j]}{1}
-      \codeline{\textcolor{midgray}{\# output stationary}}{2}
-      \codeline{for i, j:}{2}
-      \codeline{\ \ acc = sum(weights[i,k]*input[k,j] for k)}{2}
-      \codeline{\ \ Z[i,j] = acc\ \ \textcolor{midgray}{\# written once}}{2}
-      \codeline{\textcolor{midgray}{\# input stationary}}{3}
-      \codeline{for k, j:}{3}
-      \codeline{\ \ x = input[k,j]\ \ \textcolor{midgray}{\# reused 512 times}}{3}
-      \codeline{\ \ for i: Z[i,j] += weights[i,k] * x}{3}
-    \end{column}
-    \begin{column}{0.38\textwidth}
+    \begin{column}{0.50\textwidth}
       \centering
-      \uncover<3->{\safeimg[width=\textwidth,height=2.3cm,keepaspectratio]{weight_reads.pdf}\\[0.1cm]
-      {\footnotesize Example 11.4: 16 filters of 3$\times$3 on an 8$\times$8 input.}}
+      \only<1|handout:0>{\safeimg[width=\textwidth,height=5.2cm,keepaspectratio]{amdahl_step1.pdf}}%
+      \only<2-|handout:1>{\safeimg[width=\textwidth,height=5.2cm,keepaspectratio]{amdahl.pdf}}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \normalsize
+      $\text{Speedup} = \dfrac{1}{(1-p) + p/G}$\\[0.35cm]
+      \small\textbf{ResNet-50:} $p$ = 0.95, $G$ = 247: \textbf{18.6$\times$}\\[0.2cm]
+      \uncover<2->{\textbf{GPT-2 decode:} $p$ = 0.80: \textbf{4.9$\times$}; with the 67$\times$ bandwidth gain, 4.7$\times$. Ceiling: 5$\times$.}
     \end{column}
   \end{columns}
-  \mlsyscredit{Hardware Acceleration, listing 15 (abridged; weights 512$\times$256, input 256$\times$32) and Example 11.4 (modeled).}
-  \note{[2.5 min] The same matrix multiply in three loop orders; all compute the same result. The operand the inner loops reuse without changing stays local. Step 1: weight stationary: hold one weight, stream inputs and partial sums past it; each weight is fetched once and used 32 times. This is the TPU's dataflow. Step 2: output stationary: keep one running sum in a local accumulator; each output is written once. Step 3: input stationary: hold one input, reused 512 times. The bars: in the chapter's small convolution, filters held while sweeping all 36 positions need 144 weight reads; if the filters do not fit and spill, each position reloads all 144 weights, 5,184 reads, 36 times more. ENGAGE: which order would you pick for one weight matrix applied to a large batch? Expected: weight stationary. WARN: a 7-deep loop nest has 5,040 orders per memory level; compilers search them. FLEX: [CORE].}
+  \mlsyscredit{After Hardware Acceleration, figure 2 and equation 1; Lighthouse 11.1 (an illustrative scenario: 1,979 TOPS against about 8 TOPS).}
+  \note{[3 min] Amdahl's law from Lecture 1, now with the chapter's numbers. The heatmap shows whole-job speedup against the gain on the accelerated path (horizontal, log scale) and the fraction of the original time that gets it (vertical). Step 1: ResNet-50 inference, 95 percent accelerated, the path 247 times faster (the H100's 1,979 INT8 TOPS against an assumed 8 TOPS CPU): 1 over (0.05 + 0.95/247), about 18.6 times. Above a gain of about 100 the contours go flat: the 5 percent left over sets the ceiling. Step 2: GPT-2 decode, with 80 percent accelerated: 4.9 times, and never more than 5. Decode is bandwidth bound, so its real gain is the bandwidth ratio, 67 times, which gives 4.7: the gain barely matters once the unaccelerated part dominates. ENGAGE: what would raise ResNet-50's 18.6? Expected: shrink the 5 percent (data loading, preprocessing), not speed the matrix path. WARN: the 8 TOPS CPU is the chapter's scenario. FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{One column past the tile halves the array's use}
-  \mlsysactivity{Predict}{1 min}
-  \begin{columns}[c]
-    \begin{column}{0.40\textwidth}
-      \centering\safeimg[width=\textwidth,height=4.2cm,keepaspectratio]{tiling.pdf}\\[0.05cm]
-      {\footnotesize 1,024 tiles; 32,768 tile products}
-    \end{column}
-    \begin{column}{0.58\textwidth}
-      \centering
-      \only<1|handout:0>{\vspace{1.4cm}{\small A 4,096-wide layer on a 128$\times$128 array.}}%
-      \only<2|handout:0>{\vspace{1.0cm}{\normalsize The layer width becomes \textbf{129}.\\[0.2cm] Array use along that dimension?}\\[0.3cm]{\Large\textbf{\textcolor{RedLine}{???}}}}%
-      \only<3-|handout:1>{\safeimg[width=\textwidth,height=4.4cm,keepaspectratio]{cliff.pdf}\\[0.05cm]
-        {\footnotesize 129$\times$129: $(129/256)^2$, about 25\%}}
-    \end{column}
-  \end{columns}
-  \mlsyscredit{Hardware Acceleration, \S11.7.5 and its margin figure; footnote 14.}
-  \note{[2.5 min] Step 1: tiling. A 4,096 by 4,096 layer does not fit a 128 by 128 array, so the compiler cuts the output into 32 by 32 = 1,024 tiles of 128 by 128, and each output tile sums 32 tile products along the reduction dimension: 32,768 tile products. Tiles are staged in on-chip SRAM so each byte from HBM is reused 128 times. Step 2: ENGAGE: vote. Step 3: 129 needs two tiles, and the second does one useful column out of 128: 129 out of 256, about 50 percent. If both dimensions are 129, about 25 percent. WARN: this is a model of one array dimension; real libraries pick smaller tiles to soften the cliff, which the next slide measures. This is why model designers choose channel counts like 512, not 500, and Tensor Cores prefer dimensions in multiples of 8 or 16. FLEX: [CORE].}
-\end{frame}
-
-\begin{frame}{Measured: 8 more columns cost an A100 36 percent more time}
-  \centering
-  \mlsyssteps[width=0.95\textwidth,height=5.0cm,keepaspectratio]{measured_tiles_step}{2}\\[0.1cm]
-  \uncover<2->{\small Throughput falls each time the width passes a multiple of the 128-wide tile.}
-  \mlsyscredit{Measured: NVIDIA, \emph{Matrix Multiplication Background User's Guide}, figure 7 (A100-SXM4-80GB, cuBLAS 11.4, M = 27,648, K = 4,096, 256$\times$128 tiles forced). Values read from the published plot.}
-  \note{[2.5 min] Real data for the cliff, from NVIDIA's own performance guide. A matrix multiply on an A100 with one dimension N swept in steps of 8, the library forced to use tiles 128 wide along N. Step 1: up to N = 128, about 190 TFLOP/s. ENGAGE: what happens at 136? Step 2: at N = 136 a second tile per row is added with only 8 of its 128 columns useful. The work grew about 6 percent; the time grew about 36 percent, 0.15 to 0.21 ms, and throughput fell to about 148 TFLOP/s. The same saw-tooth repeats past 256 and 384, smaller each time because the waste is a smaller share. WARN: NVIDIA notes that cuBLAS would normally choose narrower tiles here to reduce the effect; the forced tile isolates the mechanism. NVIDIA's guide also gives V100's FP16 ridge as 138.9 FLOP/byte, matching the chapter's 139. FLEX: [CORE].}
-\end{frame}
-
-\begin{frame}{A compiler made ResNet-50 batch one 10.6$\times$ faster (modeled)}
-  \centering
-  \safeimg[width=0.92\textwidth,height=3.2cm,keepaspectratio]{compiled.pdf}\\[0.25cm]
-  \uncover<2->{\small The arithmetic itself: about 8 $\mu$s at FP16, 4 $\mu$s at INT8.\\[0.2cm]
-    \begin{mlsyscard}{OrangeLine}
-      \small Example 11.3: a team moves to A100s; profiling shows the Tensor Cores never engaged. The shapes and data types selected other kernels.
-    \end{mlsyscard}}
-  \mlsyscredit{Hardware Acceleration, \S11.8 (modeled, not measured), \S11.4.5, and Example 11.3.}
-  \note{[2 min] Who makes the mapping choices in practice: compilers and runtimes such as XLA, TVM, and TensorRT. Step 1: the chapter's model of one ResNet-50 image on an H100. Eager execution launches 174 framework kernels one Python call at a time, about 3.53 ms. Compiled, the kernels are fused into 56 and launched as one graph, about 0.33 ms, 10.6 times faster with the same arithmetic. Step 2: the arithmetic itself would take about 8 microseconds at FP16 and 4 at INT8, so even the compiled pass is almost all launch and overhead. Example 11.3: the fast path is used only when shapes, layouts, and types match it; check which kernel ran. WARN: these latencies are modeled, as the slide says. LINK: Lecture 7 owns graph capture; Lecture 13 runtime selection. FLEX: [OPTIONAL].}
-\end{frame}
-
-% =============================================================================
-% SECTION: ONE TENSOR
-% =============================================================================
-\mlsysnote{[0.5 min] Put it together by following one tensor. Read the divider question.}
-\mlsysdivider{Where does one activation travel, and what does the trip cost?}{Hardware Acceleration, \S11.5.2 (Lighthouse 11.2), \S11.1, \S11.11}
-\section{One Tensor}
-
-\begin{frame}{One map fits shared memory at INT8, not at FP16}
-  \begin{columns}[c]
-    \begin{column}{0.52\textwidth}
-      \centering
-      \only<1|handout:0>{\mlsyskitfig[width=\textwidth,height=4.6cm,keepaspectratio]{machine_hl_hbm}}%
-      \only<2-3|handout:0>{\mlsyskitfig[width=\textwidth,height=4.6cm,keepaspectratio]{machine_hl_sram}}%
-      \only<4-|handout:1>{\mlsyskitfig[width=\textwidth,height=4.6cm,keepaspectratio]{machine_hl_compute}}
-    \end{column}
-    \begin{column}{0.46\textwidth}
-      \small
-      {\footnotesize\textcolor{midgray}{ResNet-50 stage-2 output: 56$\times$56$\times$64}}\\[0.15cm]
-      \only<1|handout:0>{\textbf{HBM}: 201 KB per image at INT8, 401 KB at FP16.\\[0.1cm] About 300 ns per dependent request; about 32.1 $\mu$J to read one image's map.}%
-      \only<2|handout:0>{\textbf{L2}, 50 MB: holds the whole batch of 32 at INT8 (6.4 MB), if the next kernel runs soon.}%
-      \only<3|handout:0>{\mlsysactivity{Predict}{1 min}\textbf{Shared memory}, 228 KB per SM.\\[0.1cm] Does one image's map fit at FP16? At INT8?}%
-      \only<4-|handout:1>{\footnotesize
-        \begin{tabular}{@{}lP{0.6\textwidth}@{}}\toprule
-        HBM & 201 KB (INT8), 401 KB (FP16) \\
-        L2, 50 MB & the batch of 32 at INT8 \\
-        Shared, 228 KB & INT8 fits; \textcolor{RedLine}{FP16 does not} \\
-        Registers & about 0.1 pJ per access \\
-        \bottomrule\end{tabular}\\[0.2cm]
-        \small The format decides which tier can hold the data.}
-    \end{column}
-  \end{columns}
-  \mlsyscredit{Hardware Acceleration, Lighthouse 11.2 (H100; energies are 45 nm estimates).}
-  \note{[3.5 min] The same diagram as segment 2, now following one activation map, the output of a ResNet-50 stage-2 convolution: 56 by 56 positions by 64 channels. Step 1: the previous kernel wrote it to HBM. One image's map is 201 KB at INT8, 401 KB at FP16; reading it once costs about 32.1 microjoules at 160 pJ per byte. Step 2: L2 is shared by all SMs; 50 MB holds the whole batch at INT8 if the next kernel uses it soon. Step 3: ENGAGE: 30 seconds; fingers up for fits or does not fit, FP16 then INT8. Step 4: INT8 fits (201 under 228 KB); FP16 does not (401). The registers feed the Tensor Cores at about 0.1 pJ per access. The point: a number format is also a placement decision. WARN: a kernel stages tiles, not whole maps; whole-map fit is the chapter's simple test. FLEX: [CORE].}
+\begin{frame}{Each lighthouse exhausts a different resource on one H100}
+  \centering\footnotesize
+  \renewcommand{\arraystretch}{1.25}
+  \begin{tabular}{@{}llll@{}}
+    \toprule
+    \textbf{Lighthouse} & \textbf{Bytes, FP16 / INT8} & \textbf{Ops per inference} & \textbf{Binding resource} \\
+    \midrule
+    \lrow{1}{ResNet-50}{51.2 MB / 25.6 MB}{8.2 GFLOP}{Arithmetic, once batched}
+    \lrow{2}{MobileNetV2}{7.0 MB / 3.5 MB}{0.6 GFLOP}{Launch overhead; depthwise bandwidth}
+    \lrow{3}{GPT-2 XL decode}{3 GB / 1.5 GB}{3 GFLOP/token}{\textcolor{RedLine}{HBM bandwidth}}
+    \lrow{4}{DLRM}{100 GB tables}{few per lookup}{\textcolor{RedLine}{Capacity: 100 GB vs 80 GB}}
+    \lrow{5}{Keyword spotting}{400 KB / 200 KB}{20 MFLOP}{None: built for a microcontroller}
+    \bottomrule
+  \end{tabular}\\[0.3cm]
+  \uncover<5->{\normalsize Choose the chip by the resource the workload exhausts first.}
+  \mlsyscredit{Hardware Acceleration, table 17 (\S11.11).}
+  \note{[2.5 min] The chapter's selection rule, one lighthouse per step, all on the same H100. Step 1: ResNet-50 is compute bound once batching amortizes its weights; it rewards arithmetic throughput on an INT8 path. Step 2: MobileNetV2 is small; on an H100 it is limited by kernel launch overhead and by the bandwidth of its depthwise layers, and it was built for a phone's neural processor. Step 3: GPT-2 XL decode rereads all 3 GB of FP16 weights for every token: HBM bandwidth binds. Step 4: DLRM's embedding tables, about 100 GB, exceed one H100's 80 GB: capacity binds before either ceiling. Step 5: keyword spotting needs none of the H100; its constraint is a microcontroller's milliwatt budget. ENGAGE: which upgrade helps DLRM: more TFLOP/s, more bandwidth, or more memory? Expected: more memory. Land the segment: work the accelerator never touches caps the whole job, and each workload exhausts a different resource first. FLEX: [CORE].}
 \end{frame}
 
 \begin{frame}{True or false: three claims about faster chips}
   \mlsysactivity{Vote}{2 min}
-  \begin{columns}[c]
-    \begin{column}{0.40\textwidth}
-      \centering\safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{amdahl.pdf}\\[0.05cm]
-      {\scriptsize Speedup against gain and accelerated fraction}
-    \end{column}
-    \begin{column}{0.58\textwidth}
-      \tfcard{A 247$\times$ faster matrix path makes ResNet-50 about 247$\times$ faster.}{With 5\% unaccelerated: 18.6$\times$.}
-      \tfcard{An A100 has 4.8$\times$ a T4's peak, so batch one runs 4.8$\times$ faster.}{The ceilings differ 6.4$\times$: the bandwidth ratio.}
-      \tfcard{One peak rating describes an H100 at every precision.}{989 TFLOP/s FP16 against 67 FP32.}
-    \end{column}
-  \end{columns}
-  \mlsyscredit{After Hardware Acceleration, figure 2 and equation 1; Lighthouse 11.1 (illustrative scenario); \S11.12.}
-  \note{[3 min] Peer instruction: vote on all three, one minute with a neighbor, vote again. Step 2: all false. One: Amdahl's law (Lecture 1). If 95 percent of the time gets a 247 times gain and 5 percent gets none, the speedup is 1 over (0.05 + 0.95/247), about 18.6 times. The heatmap shows speedup against gain and accelerated fraction; above a gain of about 100 the contours go flat. For GPT-2 decode with 80 percent accelerated, the cap is 5 times. Two: at batch one both chips are bandwidth bound, so their ceilings differ by their bandwidth ratio, 6.4 times; the A100's higher peak contributes nothing. Three: FP16 Tensor Cores give 989 TFLOP/s, the FP32 cores 67. WARN: the 247 times assumes an 8 TOPS CPU; it is the chapter's scenario. FLEX: [OPTIONAL]; for a 60-minute version keep statement one.}
+  \vspace{0.2cm}
+  \normalsize
+  \tfcard{A 247$\times$ faster matrix path makes ResNet-50 about 247$\times$ faster.}{With 5\% unaccelerated: 18.6$\times$.}
+  \tfcard{An A100 has 4.8$\times$ a T4's peak, so batch one runs 4.8$\times$ faster.}{The ceilings differ 6.4$\times$: the bandwidth ratio.}
+  \tfcard{One peak rating describes an H100 at every precision.}{989 TFLOP/s FP16 against 67 FP32.}
+  \mlsyscredit{Hardware Acceleration, equation 1; Lighthouse 11.1 (illustrative scenario); \S11.12.}
+  \note{[3 min] The chapter's fallacies as the section's check. Peer instruction: vote on all three, one minute with a neighbor, vote again. Step 2: all false. One: the Amdahl frame: with 5 percent of the time unaccelerated, 1 over (0.05 + 0.95/247) is about 18.6 times. Two: at batch one both chips are bandwidth bound, so their ceilings differ by their bandwidth ratio, 6.4 times; the A100's higher peak contributes nothing. Three: FP16 Tensor Cores give 989 TFLOP/s, the FP32 cores 67, about 15 times apart; quoting the wrong peak misclassifies kernels. WARN: the 247 times assumes an 8 TOPS CPU; it is the chapter's scenario. FLEX: [OPTIONAL]; for a 60-minute version keep statement two.}
 \end{frame}
 
 % =============================================================================
@@ -505,14 +488,14 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Photo: TPU v4 board, Jouppi et al. (CC BY 4.0), Wikimedia Commons. Hardware Acceleration, Example 11.1, footnotes 2 and 6, \S11.8.}
-  \note{[2.5 min] Back to the hook. Step 1: the answer was C. Each segment gave one reason. The energy ladder: a DRAM read costs about 173 multiplies. The systolic array: each operand loaded once is used 256 times across the first TPU's array. The memory hierarchy: a 24 MB on-chip buffer held activations. The roofline: dense layers above the ridge keep that array busy. The photo is a later TPU (v4) board; the design idea is the same. Step 2: the Lecture 10 puzzle. At large batch, ResNet-50 sits near its arithmetic ceiling, so INT8's faster datapath shows up as 5.9 times. At batch one, the INT8 arithmetic takes about 4 microseconds of a pass that the chapter models at 0.3 ms or more; the rest is launch overhead and memory traffic, so a faster datapath barely moves it. ENGAGE: ask who changed their vote from A. FLEX: [CORE].}
+  \note{[2.5 min] Back to the hook. Step 1: the answer was C. Each segment gave one reason. The energy ladder: a DRAM read costs about 173 multiplies. The systolic array: each operand loaded once is used 256 times across the first TPU's array. The memory hierarchy: a 24 MB on-chip buffer held activations. The roofline: dense layers above the ridge keep that array busy. The photo is a later TPU (v4) board; the design idea is the same. Step 2: the Lecture 10 puzzle. At large batch, ResNet-50 sits near its arithmetic ceiling, so INT8's faster datapath shows up as 5.9 times. At batch one, the INT8 arithmetic takes about 4 microseconds of a pass that the chapter models at 0.3 ms or more; the rest is launch overhead and memory traffic, so a faster datapath barely moves it. Where that overhead goes, and what a compiler removes, is next lecture's. ENGAGE: ask who changed their vote from A. FLEX: [CORE].}
 \end{frame}
 
 \begin{frame}{Takeaways}
   \thumbline{energy_step3}{Moving a value costs far more than computing on it; accelerators win by reuse, in arrays and on-chip memory.}\\[0.15cm]
   \thumbline{roof_h100_step3}{The ridge is peak over bandwidth, one per number format, and it rises every generation.}\\[0.15cm]
   \thumbline{layers_step4}{Below the ridge, only fewer bytes or more reuse help; above it, only a faster datapath.}\\[0.15cm]
-  \thumbline{measured_tiles_step2}{Loop order and shapes that fill the tiles decide how much of the peak a layer reaches.}
+  \thumbline{amdahl}{Work outside the fast path caps the whole job, and each workload exhausts a different resource first.}
   \note{[1.5 min] One line per segment. Ask students which slide taught each line. If short on time, read the first and third.}
 \end{frame}
 
@@ -520,23 +503,22 @@
   \normalsize
   \begin{itemize}\setlength{\itemsep}{0.35cm}
     \item The ridge rose from 139 to 295 FLOP/byte in seven years. Should model designers chase intensity, or chip designers spend area on bandwidth?
-    \item The first TPU won by giving up flexibility. Which workloads of the next five years would a fixed systolic design serve badly?
+    \item DLRM's tables exceed one H100's memory and keyword spotting needs none of its arithmetic. Should one design serve all five lighthouses, or each regime get its own chip?
     \item Much of the field runs on one vendor's software stack. Is that lock-in a cost, or a reason the field moved fast?
   \end{itemize}
-  \note{[1 min] No single answer. Pick one for two minutes of discussion if time allows, or assign one as a short written response. The first previews Lecture 12; the second connects to mixture-of-experts and dynamic models.}
+  \note{[1 min] No single answer. Pick one for two minutes of discussion if time allows, or assign one as a short written response. The first previews Lecture 12; the second returns to the lighthouse table.}
 \end{frame}
 
 \begin{frame}{Read and explore}
   \small
   \begin{itemize}\setlength{\itemsep}{0.12cm}
-    \item \textbf{Read:} Hardware Acceleration, \S11.1 to \S11.8 and \S11.11; Napkin Math 11.1, 11.5, 11.6, 11.9, 11.10 by hand (mlsysbook.ai).
+    \item \textbf{Read:} Hardware Acceleration, \S11.1 to \S11.6 and \S11.11; Napkin Math 11.1, 11.5, 11.6, 11.9, 11.10 by hand (mlsysbook.ai).
     \item Jouppi et al., ``In-Datacenter Performance Analysis of a Tensor Processing Unit,'' ISCA 2017.
     \item Williams, Waterman, Patterson, ``Roofline: An Insightful Visual Performance Model,'' CACM 2009.
     \item Sze, Chen, Yang, Emer, ``Efficient Processing of Deep Neural Networks: A Tutorial and Survey,'' Proc. IEEE 2017.
-    \item Kung, ``Why Systolic Architectures?'' IEEE Computer 1982.
-    \item NVIDIA, \emph{Matrix Multiplication Background User's Guide} (tile and wave quantization).
+    \item Horowitz, ``Computing's Energy Problem (and What We Can Do about It),'' ISSCC 2014.
   \end{itemize}
-  \note{[0.5 min] The chapter first, with Checkpoints 11.3 and 11.5 and the self-check questions at the end of each section. Jouppi et al. is the hook from the source, including the TPU's own roofline. Williams et al. is the roofline paper, short and readable. Sze et al. covers dataflows and reuse in one survey. Kung is the original case for systolic arrays. NVIDIA's guide is the source of the measured tile curve. FLEX: add the TinyTorch matrix-multiplication and acceleration modules if your course assigns them.}
+  \note{[0.5 min] The chapter first, with Checkpoints 11.3 and 11.5 and the self-check questions at the end of each section. Jouppi et al. is the hook from the source, including the TPU's own roofline. Williams et al. is the roofline paper, short and readable. Sze et al. covers dataflows and reuse in one survey. Horowitz is the source of the energy ladder. FLEX: add the TinyTorch matrix-multiplication and acceleration modules if your course assigns them.}
 \end{frame}
 
 \begin{frame}[c]
@@ -545,11 +527,11 @@
       \centering\includegraphics[width=\textwidth,height=3.4cm,keepaspectratio]{layers_step4}
     \end{column}
     \begin{column}{0.56\textwidth}
-      {\small\textcolor{lightgray}{NEXT LECTURE \textbar{} BENCHMARKING}}\\[0.5cm]
-      {\LARGE\bfseries Every vendor claims to be fastest. How do we measure fairly?}
+      {\footnotesize\textcolor{lightgray}{NEXT LECTURE \textbar{} HARDWARE ACCELERATION, PART 2}}\\[0.5cm]
+      {\LARGE\bfseries The roofline lets ResNet-50's stage-3 conv reach 989 TFLOP/s. What gets it there?}
     \end{column}
   \end{columns}
-  \note{[0.5 min] Today's points were bounds from a model. Lecture 12 measures where a workload actually sits against its roofline, and how to compare chips when each vendor quotes a different peak.}
+  \note{[0.5 min] Today gave the ceilings. Next lecture is about reaching them: the same matrix multiply runs 75 times faster on the same GPU under one mapping than under another, and the lecture takes apart where each step of that gain comes from.}
 \end{frame}
 
 \end{document}

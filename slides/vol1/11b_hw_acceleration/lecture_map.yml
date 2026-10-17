@@ -1,0 +1,276 @@
+chapter: 11_hw_acceleration
+lecture: "11b"
+title: "Hardware Acceleration, Part 2: Mapping a Computation onto the Chip"
+layer: hardware
+minutes: 75
+notes_minutes: 70.5
+target_ideas: 30
+thesis: "A chip reaches the ceiling its roofline promises only when the mapping keeps the right operand in the right tier: the loop order picks what stays, the tile size sets reuse within on-chip capacity, the shapes must fill whole tiles and whole waves, and a compiler searches these choices for every layer."
+
+hook:
+  minutes: "0-4"
+  setup: "Step 1: one matrix multiply, about 4,096 square in FP32, on one RTX A6000. A naive CUDA kernel, one thread per output element, reaches 309 GFLOP/s. Step 2: the class predicts how fast NVIDIA's cuBLAS library runs the same multiply on the same GPU. Step 3: the reveal, 23,250 GFLOP/s, 75 times faster, as two horizontal bars on a log axis. Same chip, same arithmetic, same answer."
+  question_to_class: "The naive kernel reaches 309 GFLOP/s. How fast does cuBLAS run the same multiply on the same GPU? A) about 2x B) about 10x C) about 75x D) about 1,000x"
+  payoff: "C, 75x. None of the faster kernels does less arithmetic. Each step of Boehm's ladder changes where operands live and how often they cross a memory boundary: coalesced loads (6.4x), tiles staged in shared memory (1.5x), register tiles of growing size (2.8x, then 1.9x), wider loads, an autotuned tile size, and warp-level tiles. The synthesis returns to the ladder and labels each rung with the lecture's segment that explains it. D is the misconception that the gap is a hardware gap; A is the belief that a correct kernel is a fast kernel."
+  sources:
+    - "Simon Boehm, How to Optimize a CUDA Matmul Kernel for cuBLAS-like Performance: a Worklog (siboehm.com/articles/22/CUDA-MMM, 2022), results table: 1 naive 309.0 GFLOP/s (1.3 percent of cuBLAS); 2 global-memory coalescing 1,986.5 (8.5); 3 shared-memory caching 2,980.3 (12.8); 4 1D blocktiling 8,474.7 (36.5); 5 2D blocktiling 15,971.7 (68.7); 6 vectorized memory access 18,237.3 (78.4); 9 autotuning 19,721.0 (84.8); 10 warptiling 21,779.3 (93.7); cuBLAS 23,249.6 (100). SGEMM in FP32 on the author's A6000; the worked analysis uses 4,092-square matrices. Read 2026-10-17."
+    - "Ratios derived from the table: 23,249.6 / 309.0 = 75.2x; step ratios 6.4x, 1.5x, 2.8x, 1.9x, 1.14x, 1.08x, 1.10x, 1.07x."
+
+recall: "Part 1 (Lecture 11): close your notes. What is the H100's FP16 ridge point? Where does ResNet-50's stage-3 3x3 convolution sit against it, and what rate does the roofline allow it? (295.2 FLOP/byte; 563.1 FLOP/byte at batch 32, above the ridge; up to the 989 TFLOP/s FP16 ceiling.) The roofline gives the ceiling for the best schedule. Today asks what that schedule is and who finds it."
+
+driving_question: "How does a computation get mapped onto an accelerator's arrays and memory tiers, and what does each mapping choice cost?"
+
+goals:
+  - "Trace a systolic array cycle by cycle and estimate how much input keeps it busy."
+  - "Count the operand traffic of a loop order and a tile, and test a tile against on-chip capacity."
+  - "Predict what a dimension one past a tile, or a tile count one past a wave, costs."
+  - "Say what a compiler decides for a model, and diagnose a kernel that misses its fast path."
+
+running_example: "Three cases at three scales. The matrix multiply of the hook (about 4,096 square, FP32, RTX A6000, 309 to 23,250 GFLOP/s) opens and closes the lecture. The chapter's dense layer (listing 14: weights 512x256, a batch of 32 inputs, 4,194,304 MACs) carries the traffic count for loop orders and tiles, and the chapter's 4,096-wide layer on a 128x128 array carries tile intensity, capacity, and the width-129 cliff. ResNet-50 on the H100 carries the compiler segment and the closing trip of one 56x56x64 activation map (Lighthouse 11.2), where every mapping choice of the lecture decides one step."
+
+segments:
+  - name: The Array
+    divider_question: "What happens inside a systolic array, cycle by cycle?"
+    read: "§11.4.4, §11.7.4, §11.7.5 (the 2x2 trace), Systems Perspective 11.1"
+    concept_questions: [2, 3, 4, 5]
+    minutes: 18
+    land: "Inputs enter skewed so the right operands meet in the right cell; the array is full only between fill and drain, so it needs hundreds of input rows per weight load, and the loop order decides which operand stays while the others stream."
+  - name: The Tile
+    divider_question: "How large a block fits on chip, and what happens at its edge?"
+    read: "§11.7.5 (tiling fundamentals, equation 6, the fringe penalty); NVIDIA Matrix Multiplication Background guide, sections 3.1 and 3.2"
+    concept_questions: [6, 7, 8, 9, 10]
+    minutes: 17
+    land: "A tile's edge sets how many times each loaded byte is reused, every live buffer must fit the tier at once, and a shape one past a tile or one past a wave pays for the whole extra tile or the whole extra wave."
+  - name: The Compiler
+    divider_question: "Who makes these choices for every layer of a model?"
+    read: "§11.7.2, §11.7.6, §11.7.7, §11.8, Example 11.3"
+    concept_questions: [11, 12, 13]
+    minutes: 13
+    land: "A compiler fuses, selects kernels, plans memory, and schedules, searching a space no engineer can enumerate; the fast path runs only when shapes, types, and layouts match it, so check which kernel ran."
+  - name: One Activation
+    divider_question: "Where does one activation travel, and which choice decides each step?"
+    read: "§11.5.2 (Lighthouse 11.2), Napkin Math 11.6"
+    concept_questions: [14]
+    minutes: 6.5
+    land: "Each step of an activation's trip is a mapping decision: fusion keeps it out of HBM, its format decides which tier can hold it, and the tile and dataflow decide how long it stays next to the arithmetic."
+
+concept_questions:
+  - id: 1
+    q: "Where does a 75x gain on the same chip come from?"
+    picture: "New log-axis bars (make_figs.py hook_step1..2): naive 309 GFLOP/s, then a '???' bar for cuBLAS; step 2 reveals 23,250 with '75x' on the plot"
+    numbers: "Boehm 2022 results table: 309.0 and 23,249.6 GFLOP/s, FP32 SGEMM, RTX A6000; 75.2x derived"
+    example: "One SGEMM, eight kernels"
+    read: "§11.7 opening (two schedules, one tensor)"
+  - id: 2
+    q: "How does a systolic array compute a matrix product, cycle by cycle?"
+    picture: "Step 0 recalls Part 1's static weight-stationary grid (systolic_step3, copied). Then a new 2x2 trace drawn at slide size (make_figs.py trace2_step1..4): cycle 0, a00 enters PE00; cycle 1, a00 b00 moves down to PE10 as a01 enters row 2 one cycle late, C00 leaves; cycle 2, a00 reaches PE01 and C01 leaves one cycle after C00; final frame with the skew diagonal drawn"
+    numbers: "Chapter's 2x2 trace (§11.7.5): PE00 holds b00, PE01 b01, PE10 b10, PE11 b11; C00 emerges in cycle 1, C01 in cycle 2; operands propagate one hop per cycle"
+    example: "A 2x2 tile product, the smallest array that shows the skew"
+    read: "§11.7.5 (the weight-stationary trace), §11.4.4, figure 5"
+  - id: 3
+    q: "What do fill and drain cost, and how much input keeps the array busy?"
+    picture: "New 4x4 wavefront diagram (make_figs.py wave4_step1..3): cells shaded by the cycle they first become busy, at cycle 2 (filling), cycle 5 (full), cycle 9 (draining); then new bars of utilization for a 128x128 array at 1, 128, 1,024, and 4,096 input rows"
+    numbers: "Derived from the chapter's skew (one hop per cycle): an N x N weight-stationary array streaming B input rows takes about B + 2N - 2 cycles, so busy fraction B / (B + 2N - 2); N = 128 (TPU v4, Jouppi et al. 2023): B = 1 gives 0.4 percent, B = 128 gives 34 percent, B = 1,024 gives 80 percent, B = 4,096 gives 94 percent. Weight loading adds about N more cycles per tile and is ignored. Labeled derived and idealized."
+    example: "One weight tile of a TPU-style 128x128 array"
+    read: "§11.7.5 (fill and drain), §11.4.4"
+  - id: 4
+    q: "Which operand stays, and how does the loop order choose it?"
+    picture: "Three small copies of the same 4x4 grid side by side (new, make_figs.py stationary_step1..3), one per dataflow, the resident operand drawn inside the cells and the streamed operands as arrows: weight, output, input stationary; beside each, its three lines of listing 15 (moved from Part 1's code frame). Final step: a new derived traffic table for the listing-14 layer"
+    numbers: "Listing 14 layer: weights 512x256, inputs 256x32, 4,194,304 MACs; each weight reused 32 times, each input 512 times, each output accumulates 256 products (§11.7.4). Derived traffic with one scalar held locally, counted in element moves to the slower tier: weight stationary 131,072 weight reads, 4,194,304 input reads, 8,388,608 partial-sum reads and writes; output stationary 4,194,304 weight reads, 4,194,304 input reads, 16,384 output writes; input stationary 8,192 input reads, 4,194,304 weight reads, 8,388,608 partial-sum moves. Each order saves exactly one operand."
+    example: "The chapter's 256-to-512 dense layer at batch 32"
+    read: "§11.7.3, §11.7.4, listing 15"
+  - id: 5
+    q: "Can a mix of stationary operands beat any single one, and can any of them rescue batch-one decode?"
+    picture: "Step 1: Example 11.4 as a by-hand count (moved from Part 1): 144 against 5,184 weight reads, Part 1's weight_reads bars copied. Step 2: new bars from Chen et al. 2016: row stationary against the other dataflows, energy 1.4x to 2.5x lower on AlexNet convolutional layers, at least 1.3x on fully connected layers at batch above 16 (range bars, not per-layer values). Step 3: vote card on GPT-2 XL decode at batch one"
+    numbers: "Example 11.4: 16 filters of 3x3 on an 8x8 input, 36 output positions, 16 x 9 = 144 weight loads against 36 x 144 = 5,184, 36x (modeled). Chen, Emer, Sze, ISCA 2016 abstract: RS more energy efficient than existing dataflows by 1.4x to 2.5x in convolutional layers and at least 1.3x in fully connected layers for batch size larger than 16, AlexNet, same area and parallelism (read 2026-10-17 from MIT DSpace 1721.1/102369). Decode: every weight is used once per token at batch one, so no stationary choice recovers reuse that does not exist (Systems Perspective 11.1)."
+    example: "Eyeriss's row-stationary dataflow; GPT-2 XL decode on a weight-stationary array"
+    read: "§11.7.4 (Example 11.4, row stationary), Systems Perspective 11.1"
+  - id: 6
+    q: "How much traffic does tiling save on a real layer?"
+    picture: "New worked frame (make_figs.py layertile_step1..3): the listing-14 weights as a 512x256 block cut into four 128-row tiles, the 256x32 input block beside it, one output tile shaded; step 2 a capacity line (64 KB + 16 KB + 16 KB = 96 KB against 228 KB); step 3 log bars of element moves, output stationary untiled 8,404,992 against tiled 180,224, '47x fewer'"
+    numbers: "Derived from listing 14 and Lighthouse 11.2's 228 KB shared memory per H100 SM: all weights in FP16 are 256 KB and do not fit one SM; a 128-row weight tile is 64 KB, the whole input 16 KB, a 128x32 FP32 output tile 16 KB, 96 KB in all; four tiles read each weight once (131,072), the input four times (32,768), and write each output once (16,384): 180,224 element moves against 8,404,992 untiled, 46.6x"
+    example: "The same 256-to-512 layer at batch 32"
+    read: "§11.7.5 (tiling fundamentals, explicit staging, listing 17)"
+  - id: 7
+    q: "How does the tile's size set arithmetic intensity?"
+    picture: "New log bars (make_figs.py tileintensity): the chapter's 4,096-square FP16 multiply, intensity with no reuse 0.5, with 128x128 tiles 64, with 256x128 tiles 85, with every operand loaded once 1,365 FLOP/byte; Part 1's tiling.pdf (copied) as the inset"
+    numbers: "Derived from §11.7.5: 1,024 output tiles x 32 reduction tiles = 32,768 tile products; each loads two 128x128 FP16 tiles (65,536 bytes) for 2 x 128^3 = 4.19 MFLOP, 64 FLOP/byte; in general T_M T_N / (T_M + T_N) FLOP/byte for FP16 tiles, 85.3 for 256x128; no reuse 2 FLOP per 4 bytes = 0.5; all three matrices loaded once 2 x 4,096^3 / (3 x 4,096^2 x 2 bytes) = 1,365. NVIDIA guide: 'larger tiles have more data reuse'; tile sizes from 256x128 (most efficient) to 64x64 (least)"
+    example: "A 4,096-wide layer on a 128-wide array"
+    read: "§11.7.5"
+  - id: 8
+    q: "How large a tile fits on chip?"
+    picture: "Estimate card with equation 6 on the slide; new stacked bars (make_figs.py capacity_step1..3) against a 228 KB line: 128x128x128 tile single buffered, double buffered, then the reduction tile doubled to 256"
+    numbers: "Equation 6 with FP16 operands and an FP32 accumulator: 2(128)(128) + 2(128)(128) + 4(128)(128) = 131,072 bytes (128 KiB); double-buffered operands add 65,536, 196,608 bytes (192 KiB), under 228 KB; T_K = 256 doubles both operand buffers, 196,608 single buffered and 327,680 bytes (320 KiB) double buffered, over the budget (derived; the chapter's hypothetical single local store, sized here at the H100 SM's 228 KB). On a GPU the accumulator lives in registers, budgeted separately (§11.7.5)."
+    example: "One SM-sized local store"
+    read: "§11.7.5 (equation 6, tiling challenges)"
+  - id: 9
+    q: "What happens when a dimension is one past the tile?"
+    picture: "Part 1's predict frame moved here (tiling.pdf and cliff.pdf copied), then Part 1's measured frame moved here (measured_tiles_step1..2 copied): A100 achieved TFLOP/s against N with 256x128 tiles forced"
+    numbers: "Width 129 on a 128-wide array: 129/256, about 50 percent; 129x129: (129/256)^2, about 25 percent (§11.7.5, modeled). NVIDIA guide figure 7 (A100-SXM4-80GB, cuBLAS 11.4, M = 27,648, K = 4,096, 256x128 tiles forced; values read from the published plot for Part 1): about 190 TFLOP/s at N = 128 and 148 at N = 136, 0.153 to 0.208 ms, 36 percent more time for 6.25 percent more work; guide text: the extra tile holds 'only 8/128 = 6.25% useful data'"
+    example: "Why channel counts are 512, not 500"
+    read: "§11.7.5, footnote 14"
+  - id: 10
+    q: "What happens when the number of tiles is one past a wave?"
+    picture: "New SM-grid diagram (make_figs.py wave_step1..2): 108 boxes for the A100's SMs; step 1 one full wave of 9 x 12 = 108 tiles; step 2 N = 1,544: a second wave of 9 tiles lights 9 of 108 boxes, with 'duration about doubles' on the plot"
+    numbers: "NVIDIA guide section 3.2: A100 has 108 SMs; 256x128 tiles, one per SM, so a wave is 108 tiles; M = 2,304 gives 9 tiles per column; N = 1,536 gives 12 per row, 108 tiles, one full wave; 1,536 < N <= 1,664 gives 117 tiles, one full wave and a tail of 9 using 9/108 = 8.33 percent of the SMs; 'GFLOPS roughly halve and duration roughly doubles from N = 1536 to N = 1544'; the work grows 0.5 percent (derived). Dimension guidance (guide Table 1, cuBLAS 11.0 or later): FP16 most efficient at multiples of 8, on A100 multiples of 64; INT8 at 16, on A100 128."
+    example: "One GEMM on an A100, 8 columns past a full wave"
+    read: "NVIDIA Matrix Multiplication Background guide, section 3.2; §11.8.3 (split-K and occupancy)"
+  - id: 11
+    q: "How large is the mapping space, and how does a compiler search it?"
+    picture: "Slide variant of book margin-003 (make_figs.py space_step1..2): placement 1,024, loop order 5,040, parallelization 120 per memory level, log bars; step 2 adds three levels, 4^15 placements, about 1.07 billion; then a two-bar line from Ansor's abstract"
+    numbers: "7! = 5,040 orders for a 7-deep nest; 6!/3! = 120; 4^5 = 1,024; three levels 4^15 = 1,073,741,824 (§11.7.2, margin figure; product derived). Ansor (Zheng et al., OSDI 2020, abstract, read 2026-10-17): up to 3.8x, 2.6x, and 1.7x over the prior state of the art on Intel CPU, ARM CPU, and NVIDIA GPU"
+    example: "Rule-based, cost-model, and profile-guided kernel selection (§11.8.2)"
+    read: "§11.7.2, §11.8.2 (kernel selection)"
+  - id: 12
+    q: "What does a compiler do to ResNet-50, and where does fusion stop paying?"
+    picture: "New pipeline diagram (make_figs.py compiler_step1..4), one stage lit per step: graph optimization (Conv-BN-ReLU fused), kernel selection (Tensor Core GEMM), memory planning (liveness intervals as five bars sharing two buffers), scheduling (copy and compute on two streams); then Part 1's compiled bars (copied: 3.53 against 0.33 ms, 174 against 56 kernels, modeled); then a measured range bar from TVM"
+    numbers: "§11.8 (modeled): 3.53 ms eager to 0.33 ms compiled FP16, 10.6x, 174 kernels fused into 56; arithmetic floor 8 us FP16, 4 us INT8 (§11.4.5). TVM (Chen et al., OSDI 2018, Figure 4, NVIDIA Titan X): fused operators 1.2x to 2x faster than unfused on conv+bn+relu (128x28x28, 1x1x128x256), depthwise conv+bn+relu (512x14x14, 3x3x512), an RNN cell, and an LSTM cell (hidden 128); read 2026-10-17. Limits (§11.7.7): a fused kernel that exceeds the registers per thread spills to local memory backed by DRAM, and high register use lowers occupancy; training-mode batch norm needs batch reductions and does not fuse like an element-wise op. No measured register-pressure number is shown."
+    example: "ResNet-50 compiled for H100 inference"
+    read: "§11.8 opening, §11.8.2, §11.7.7"
+  - id: 13
+    q: "Why do Tensor Cores sometimes never engage, and how do we tell?"
+    picture: "Diagnose card (Example 11.3) beside the chapter's 3x3x3 layout example redrawn as two memory strips (new, make_figs.py layout_step1..2): NHWC places a pixel's channels side by side, NCHW places a channel's pixels side by side; the Tensor Core reads channel vectors"
+    numbers: "Example 11.3: an A100 migration where profiling shows idle Tensor Cores because shapes and data types selected other kernels; dimension multiples from the NVIDIA guide (8 for FP16, 64 on A100); a layout transpose reads and writes every element with no arithmetic (§11.7.6); NHWC is the TensorFlow default for convolutions on NVIDIA GPUs (§11.7.6)"
+    example: "A transformer moved to A100s; a ResNet-50 in NCHW on a Tensor Core path"
+    read: "Example 11.3, §11.7.6, footnote 14"
+  - id: 14
+    q: "Where does one activation travel, and which mapping choice decides each step?"
+    picture: "Part 1's activation-trip frame moved here (kit machine_hl_hbm, _sram, _compute): HBM, L2, shared memory, registers, with the deciding choice written beside each tier this time (fusion, scheduling order, format and tile, dataflow); predict step at shared memory; then new bars of HBM energy per image per layer boundary, INT8 against FP16, against the fused case"
+    numbers: "Lighthouse 11.2: stage-2 output 56x56x64, 201 KB per image INT8, 401 KB FP16, 6.4 MB for 32 at INT8; HBM about 300 ns dependent, about 60 ns to stream one image's map, about 160 pJ per byte (45 nm estimate), 32.1 uJ to read one image's map at INT8; L2 50 MB, about 150 ns; shared memory 228 KB, about 17 ns; registers about 0.1 pJ per access. Derived: one unfused boundary writes and rereads the map, about 64 uJ per image at INT8 and 128 uJ at FP16; fused, the map need not cross HBM. Napkin Math 11.6: stage-3 conv 1,126 FLOP/byte with INT8 activations, about 569 if they stay FP16, against the 590.7 INT8 ridge, a choice the compiler makes."
+    example: "One ResNet-50 activation map on its way to a Tensor Core"
+    read: "§11.5.2 (Lighthouse 11.2), Napkin Math 11.6, §11.8"
+
+worked_examples:
+  - name: "The 2x2 systolic trace (§11.7.5)"
+    steps: ["given: weights b00, b01, b10, b11 held in four cells; activations a00 and a01 enter the two rows", "cycle 0: a00 meets b00 in PE00", "cycle 1: a00 b00 moves down to PE10, where a01 must arrive now, one cycle after a00 entered row 1; C00 leaves", "cycle 2: a00 has moved right to PE01 and its product reaches PE11 as a01 arrives; C01 leaves one cycle after C00", "meaning: the skew makes operands with the same reduction index meet; filling and draining cost cycles in which part of the array is idle"]
+  - name: "Traffic for one dense layer: three loop orders, then tiles (listing 14, derived)"
+    steps: ["given: weights 512x256, inputs 256x32, 4,194,304 MACs, 228 KB on chip", "one held scalar: weight stationary reads each weight once but moves partial sums 8.4M times; output stationary writes each output once but reads 8.4M operands; input stationary reads each input once", "tile: four 128-row weight tiles, 64 KB + 16 KB + 16 KB = 96 KB, fits", "count: 131,072 + 32,768 + 16,384 = 180,224 element moves against 8,404,992, about 47x fewer", "meaning: a stationary order saves one operand; a tile that fits saves all three"]
+  - name: "Equation 6: does the tile fit? (student exercise)"
+    steps: ["given: FP16 operands, FP32 accumulator, T_M = T_N = T_K = 128, 228 KB budget", "single buffered: 32 + 32 + 64 KiB = 128 KiB", "double-buffered operands: 192 KiB, fits", "double T_K to 256: 192 KiB single, 320 KiB double buffered, does not fit", "meaning: longer reductions amortize the accumulator but cost operand space; every live buffer counts at once"]
+  - name: "One wave and nine tiles (NVIDIA guide 3.2)"
+    steps: ["given: A100, 108 SMs, 256x128 tiles, one per SM; M = 2,304", "N = 1,536: 9 x 12 = 108 tiles, one wave", "N = 1,544: 9 x 13 = 117 tiles, a full wave plus a tail of 9", "result: the tail uses 8.33 percent of the SMs and takes nearly a full wave's time; throughput roughly halves for 0.5 percent more work", "meaning: shapes must fill the tiles and the waves; pad or choose dimensions with the hardware's counts in mind"]
+
+active_learning:
+  - at_minute: 2
+    type: predict
+    prompt: "A naive kernel runs a 4,096-square FP32 multiply at 309 GFLOP/s on an RTX A6000. How fast does cuBLAS run it on the same GPU? A) 2x B) 10x C) 75x D) 1,000x"
+    answer: "C: 23,250 GFLOP/s, 75x (Boehm 2022). Every faster kernel does the same arithmetic; the gain is in where operands live."
+  - at_minute: 5.5
+    type: retrieval
+    prompt: "Close your notes. H100 FP16 ridge? ResNet-50 stage-3 conv intensity at batch 32? What does the roofline allow it?"
+    answer: "295.2 FLOP/byte; 563.1; compute bound, up to 989 TFLOP/s (Napkin Math 11.5, 11.10)."
+  - at_minute: 10.5
+    type: predict
+    prompt: "In the 2x2 array, a00 enters PE00 in cycle 0 and its product moves down to PE10 in cycle 1. Which activation must reach PE10 in cycle 1, and when must it enter its row?"
+    answer: "a01, entering row 2 one cycle after a00 entered row 1; operands with the same reduction index must meet (§11.7.5)."
+  - at_minute: 15.5
+    type: estimate
+    prompt: "A 128x128 array streams B input rows through one weight tile in about B + 2N - 2 cycles. Busy fraction at B = 1, 128, and 1,024?"
+    answer: "0.4, 34, and 80 percent (derived). A weight-stationary array needs hundreds of rows per weight tile, which is why batch one wastes it (LINK Lecture 13 owns the latency cost of batching)."
+  - at_minute: 23
+    type: concept_question
+    prompt: "GPT-2 XL decodes at batch one on a weight-stationary array. Which change recovers weight reuse? A) output stationary B) input stationary C) row stationary D) none of them; only batching or fewer bytes per weight"
+    answer: "D. Each weight is used once per token, so no dataflow recovers reuse that does not exist (Systems Perspective 11.1)."
+  - at_minute: 32
+    type: estimate
+    prompt: "Equation 6, FP16 operands, FP32 accumulator, 128x128x128 tile, 228 KB local store. Does it fit single buffered? Double buffered? With the reduction tile doubled to 256?"
+    answer: "128 KiB yes; 192 KiB yes; 320 KiB double buffered, no (derived from equation 6)."
+  - at_minute: 35
+    type: predict
+    prompt: "A 128x128 array runs a layer of width 128 at full use. The width becomes 129. Array use along that dimension?"
+    answer: "129/256, about 50 percent; 129x129 about 25 percent (§11.7.5). Then the measured A100 curve: 36 percent more time for 6.25 percent more work."
+  - at_minute: 49
+    type: predict
+    prompt: "TVM fuses conv + batch norm + ReLU into one kernel on a Titan X. Same arithmetic. Faster by about 1.05x, 1.2 to 2x, or 10x?"
+    answer: "1.2x to 2x across its four fused workloads (TVM Figure 4), from fewer memory accesses; the gain stops where the fused kernel runs out of registers (§11.7.7)."
+  - at_minute: 52.5
+    type: diagnose
+    prompt: "A team moves a transformer to A100s. The profile shows the Tensor Cores idle. Name three causes to check, and how to confirm which kernel ran."
+    answer: "Data type (FP32 instead of FP16 or BF16), dimensions off the preferred multiples (8 for FP16, 64 on A100), a layout that forces a transpose or a fallback kernel; confirm with the profiler's kernel names (Example 11.3, §11.7.6, NVIDIA guide)."
+  - at_minute: 57.5
+    type: predict
+    prompt: "One image's 56x56x64 activation map: does it fit one SM's 228 KB of shared memory at FP16? At INT8?"
+    answer: "FP16 401 KB, no; INT8 201 KB, yes (Lighthouse 11.2)."
+  - at_minute: 62.5
+    type: concept_question
+    prompt: "True or false: (1) a production compiler finds the best mapping for every layer; (2) a larger tile is always faster; (3) the right stationary operand fixes batch-one decode; (4) vendor-tuned kernels cost nothing later."
+    answer: "All false. (1) Ansor still found up to 3.8x over prior compilers and libraries, and the mapping space per level runs to thousands of orders (§11.7.2, Definition 11.4 pitfall). (2) Every live buffer must fit (equation 6), and larger tiles leave larger fringes and fewer tiles per wave. (3) No reuse exists to recover (Systems Perspective 11.1). (4) Vendor intrinsics and layouts lock code to one platform (§11.12)."
+
+open_questions:
+  - "Compilers search mapping spaces with cost models and measurement, and hand-written kernels still lead on new hardware for months. Should the next accelerator be designed so that a compiler can map it well, even at some cost in peak rate?"
+  - "Model designers already choose widths of 512 rather than 500 for the hardware. How far should architecture choices follow tile and wave sizes, and who should decide: the model team or the compiler?"
+  - "A fixed dataflow (the first TPU) is efficient and inflexible; a GPU is flexible and depends on software to find reuse. Which wins as models change faster than chips?"
+
+more_examples:
+  - "Boehm 2022: eight CUDA kernels for one SGEMM, 309 to 21,779 GFLOP/s against cuBLAS's 23,250 on an RTX A6000."
+  - "NVIDIA Matrix Multiplication Background guide: tile quantization (N = 128 to 136) and wave quantization (N = 1,536 to 1,544) measured on an A100."
+  - "Eyeriss (Chen et al. 2016): row-stationary dataflow, 1.4x to 2.5x more energy efficient on AlexNet convolutional layers."
+  - "TVM (Chen et al. 2018): fused operators 1.2x to 2x faster on a Titan X; Ansor (Zheng et al. 2020): up to 3.8x, 2.6x, 1.7x on Intel CPU, ARM CPU, NVIDIA GPU."
+  - "TPU v4: 128x128 BF16 systolic arrays, two cores per chip (Jouppi et al. 2023, table 18)."
+  - "Pointer only: FlashAttention tiles attention through shared memory (Lecture 8b owns it); quantized kernels that unpack INT4 inside the multiply (Lecture 10b owns them)."
+
+left_to_reading:
+  - concept: "Placement and allocation tables (tables 9 to 11), graph neural network placement"
+    why: "Catalog material; the mapping-space frame carries the combinatorics."
+  - concept: "Implicit against explicit tiling and hybrid tiling (table 12)"
+    why: "The worked layer uses explicit staging; the table is reference."
+  - concept: "Mapping by model family and hybrid mapping (table 14, §11.7.8, §11.7.9)"
+    why: "Summary of the lecture's mechanisms applied per family; good reading after the lecture."
+  - concept: "Code generation targets (PTX mma.sync, Intel AMX, Arm Scalable Matrix Extension) and FPGA flows"
+    why: "Detail; Part 1 showed the mma instruction."
+  - concept: "Runtime: dynamic shapes, optimization profiles, tactic selection, split-K under a workspace limit"
+    why: "Lecture 13 owns runtime selection; one note on the compiler frame and one on the wave frame."
+  - concept: "Heterogeneous SoC mapping, cache maintenance on non-coherent engines, DVFS (§11.10)"
+    why: "Reading in both parts; Lecture 2 taught the power wall and Lecture 10b the phone's DSP speedup."
+  - concept: "Beyond one accelerator (§11.9)"
+    why: "Awareness only in Volume I; Part 1's taper names it."
+
+closing:
+  return_to_hook: "Back to the 75x. Read the ladder rung by rung with today's segments: coalesced loads are a layout choice (6.4x, segment 3), shared-memory caching is explicit tile staging (segment 2), 1D and 2D block tiles raise the tile edge and with it the reuse per byte (2.8x and 1.9x, segment 2), autotuning searches tile sizes (segment 3), and warp tiles add one more tier of the same idea. The same multiply on the same chip: every rung changed where operands live. Then the H100: the stage-3 conv's 563 FLOP/byte becomes a reachable ceiling only with tiles that fit, shapes that fill them, and activations that stay INT8 and on chip."
+  read_and_practice: ["§11.4.4, §11.7 (all), §11.8, Lighthouse 11.2", "Example 11.4 and equation 6 by hand; Checkpoint 11.4", "self-check questions for §11.7 and §11.8", "Boehm's worklog, kernels 1 to 5, with the code open", "TinyTorch matrix-multiplication and acceleration modules, if assigned"]
+  further_reading:
+    - cite: "Hardware Acceleration, §11.7 (Hardware Mapping) and §11.8 (Compilers and Runtimes)"
+      url: "https://mlsysbook.ai"
+      why: "Dataflows, tiling with equation 6, layouts, fusion limits, and the compilation pipeline, with every number."
+    - cite: "Boehm, How to Optimize a CUDA Matmul Kernel for cuBLAS-like Performance: a Worklog, 2022"
+      url: "https://siboehm.com/articles/22/CUDA-MMM"
+      why: "The hook, kernel by kernel, with code and measurements."
+    - cite: "NVIDIA, Matrix Multiplication Background User's Guide"
+      url: "https://docs.nvidia.com/deeplearning/performance/dl-performance-matrix-multiplication/index.html"
+      why: "Tile and wave quantization measured on an A100, and the dimension rules for Tensor Cores."
+    - cite: "Chen, Emer, Sze, Eyeriss: A Spatial Architecture for Energy-Efficient Dataflow for Convolutional Neural Networks, ISCA 2016"
+      url: "https://doi.org/10.1109/ISCA.2016.40"
+      why: "The dataflow taxonomy and the row-stationary design, with an energy comparison."
+    - cite: "Chen et al., TVM: An Automated End-to-End Optimizing Compiler for Deep Learning, OSDI 2018"
+      url: "https://arxiv.org/abs/1802.04799"
+      why: "Graph fusion, schedules, and learned cost models in one compiler."
+    - cite: "Kung, Why Systolic Architectures?, IEEE Computer 1982"
+      url: "https://doi.org/10.1109/mc.1982.1653825"
+      why: "The original argument, including the timing that makes the array work."
+  bridge: "Lecture 12: every vendor claims to be fastest. How do we measure fairly?"
+
+coverage:
+  primary_taught: ["Stationary dataflows (systolic trace, three orders on one grid, traffic table, Example 11.4, Eyeriss, decode vote)", "Tiling (layer traffic, tile intensity, equation 6, width-129 cliff modeled and measured, wave quantization)"]
+  primary_recalled_from_part1: ["Energy ladder (one line in the activation trip)", "Roofline and ridge point (retrieval; stage-3 conv and Napkin Math 11.6 in the trip)", "Operand-supply hierarchy (the tiers, now with the mapping choice at each)", "Accelerator anatomy (static systolic grid recalled)"]
+  primary_left_to_part1: ["Matching primitives to execution units", "Amdahl's law"]
+  secondary: ["Compilers and runtimes (pipeline on ResNet-50, mapping space, Ansor, TVM; runtime selection pointed to Lecture 13)", "Fusion limits on accelerators (register pressure, occupancy, training-mode batch norm; TVM range)", "Tensor layouts (Example 11.3 diagnose)"]
+  touches_reused: ["Lecture 7: fusion traffic rule and graph capture (one LINK on the compiler frame; not retaught)", "Lecture 8b: FlashAttention tiling (pointer only)", "Lecture 10: channel counts in tile multiples (LINK on the cliff frame)", "Lecture 10b: fused dequantization (pointer only)", "Lecture 11 Part 1: ridges, stage-3 conv, tiers, static systolic grid, Napkin Math 11.6"]
+  hand_offs: ["Lecture 12 owns measured position against the roofline (MLPerf ResNet-50 about 8x below the ceiling)", "Lecture 13 owns batching's latency cost, runtime selection, engine build times, and shape profiles"]
+
+notes_for_author:
+  - "Every outside number was read on 2026-10-17: Boehm's results table (siboehm.com); the NVIDIA guide's sections 2.2, 3.1, 3.2 and Table 1 (text values only; the per-N throughputs on the tile frame come from Part 1's reading of the figure 7 SVG); Eyeriss abstract (MIT DSpace); TVM Figure 4 text (arXiv 1802.04799, PDF); Ansor abstract (arXiv 2006.06762)."
+  - "Boehm's table does not name its GPU or size in the table itself; the text names his A6000 as the benchmark machine and analyzes 4,092-square FP32 matrices. The hook slide says 'about 4,096 square, FP32, RTX A6000' and the credit names the worklog."
+  - "TVM's Figure 4 gives a range (1.2x to 2x) in its text; per-workload bar values are not printed and are not shown."
+  - "Derived and labeled derived on the slide: the fill-and-drain busy fraction B/(B + 2N - 2); the per-order traffic table and the tiled-layer count for listing 14; tile intensities 0.5, 64, 85.3, 1,365; equation-6 capacities; the 4^15 product; per-boundary HBM energy 64 and 128 uJ; the 0.5 percent work increase on the wave frame."
+  - "The equation-6 frame uses the H100 SM's 228 KB as the budget of the chapter's hypothetical single local store; the WARN says a GPU keeps accumulators in registers and budgets them separately (§11.7.5)."
+  - "No register-pressure or occupancy measurement is shown; the fusion-limits step states the mechanism from §11.7.7 only."
+  - "The compiled-latency bars (3.53 to 0.33 ms) are modeled in the chapter and stay labeled modeled."
+
+build_notes_2026_10_17:
+  - "Built as planned, 33 frames, 70.5 minutes of notes. Changes from the storyboard, all to keep text at 8 pt or larger:"
+  - "Frame 6 opens on the 2x2 grid drawn as a static picture (weights held, activations right, sums down) instead of a copy of Part 1's 4x4 systolic_step3, so the build never swaps one drawing for another. The trace runs cycles 0 to 3, so all four outputs leave (C10 and C11 follow the chapter's stated stagger); row 1's queue shows '?' until cycle 1 for the predict."
+  - "Frame 7 streams 8 input rows and shows cycles 2, 6, and 11 (6, 16, and 6 cells busy), so the array is full in the middle snapshot; 14 cycles and 57 percent are derived."
+  - "Frame 21 shows the modeled compiled latency as one line of numbers (174 to 56 kernels, 3.53 to 0.33 ms) rather than Part 1's compiled bars, which were unreadable below the pipeline."
+  - "Frame 27 step 2 states Napkin Math 11.6 in one line instead of an int8ridge thumbnail, which was unreadable at that size."
+  - "The capacity plot uses KB of 1,024 bytes (equation 6 gives 131,072 bytes for 128 KB); the slide credit says so."
+  - "Titles shortened where they ran under the activity tag: frames 2, 6, and 8."
