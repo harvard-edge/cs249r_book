@@ -1,0 +1,296 @@
+chapter: 14_ml_ops
+lecture: 14
+title: ML Operations
+layer: operations
+minutes: 75
+notes_minutes: 71
+target_ideas: 30
+thesis: "A deployed model can be fully available and completely wrong, so operations must measure behavior, not uptime, and must price every control it adds: the evidence it waits for, the memory a safe release holds, and the run a retraining costs."
+
+hook:
+  minutes: "0-5"
+  setup: "Zillow Offers bought homes on the strength of its price forecasts. Two quarters drawn as grouped bars from Zillow's own shareholder letters. Q2 2021: bought 3,805 homes, sold 2,086, 3,142 in inventory; the letter credits 'strengthening our pricing models and automation'. Q3 2021: bought 9,680, sold 3,032, 9,790 in inventory and 8,172 more under contract. The question appears before the cost is shown."
+  question_to_class: "Zillow's pricing service answered every request on time all quarter. Which dashboard would have flagged the problem in Q3? A) server uptime B) p99 latency C) HTTP error rate D) none of them"
+  payoff: "D. The error was in the forecast, not the service: Zillow had bought homes above its revised estimates of future sale prices, took a $304 million inventory write-down, expected $240 to $265 million more in Q4, wound down Zillow Offers, and cut about 25 percent of its workforce. The letter: 'the unpredictability in forecasting home prices far exceeds what we anticipated.' Nothing crashed. The synthesis returns to these bars and diagnoses them by D·A·M axis."
+  sources:
+    - "chapter §14.2.6, War Story 14.1"
+    - "Zillow Group Q3 2021 shareholder letter, Form 8-K exhibit 99.3, 2021-11-02: https://www.sec.gov/Archives/edgar/data/1617640/000161764021000085/exhibit993.htm (9,680 bought; 3,032 sold; 9,790 in inventory; 8,172 under contract; $304 million write-down; $240 to $265 million expected in Q4; about 25 percent workforce; 'convert only about 10% of the serious sellers'; unit economics 'swinging approximately 1,200 basis points from Q2')"
+    - "Zillow Group Q3 2021 press release, Form 8-K exhibit 99.1: https://www.sec.gov/Archives/edgar/data/1617640/000161764021000085/q32021991.htm ('unpredictability in forecasting home prices far exceeds what we anticipated'; Homes revenue below outlook 'due primarily to renovation and resale capacity constraints')"
+    - "Zillow Group Q2 2021 shareholder letter, Form 8-K exhibit 99.3: https://www.sec.gov/Archives/edgar/data/1617640/000161764021000053/exhibit993.htm (3,805 bought; 2,086 sold; 3,142 in inventory; 'strengthening our pricing models and automation')"
+
+driving_question: "How do we know a deployed model is still right, and what does it cost to find out and to fix it?"
+
+recall: "Lecture 13 ended with a service that is up and fast. Ask: name three things Lecture 13's dashboard measures (p99 latency, utilization against the queueing knee, cold-start time, KV memory). Then ask which of them changes when the answers become wrong. None. Lecture 13 handed this lecture release (canary, rollback), monitoring, drift and skew detection, and the model registry."
+
+running_example: "The chapter's DLRM ranking service (illustrative): 94 percent click-prediction accuracy at launch, 88 percent by week four, noticed by a product manager in week eight; 1,000,000 requests a day; 100 GB of embedding tables on two H100s. Real anchors: Zillow Offers (hook and synthesis), Knight Capital (release), Google's ten-year postmortem set (debt), Rabanser et al. measured detection curves (monitoring), Facebook's retraining cadences and freshness measurement (retraining)."
+
+segments:
+  - name: Silent Failure
+    divider_question: "How can a model fail while every health check is green?"
+    read: "§14.1"
+    concept_questions: [2, 3]
+    land: "A model is a fit to data the world keeps moving away from, so correctness is a quantity operations must keep measuring, through a loop of controls that each cost something."
+    minutes: 9.0
+  - name: Hidden Debt
+    divider_question: "Where does an ML system break, if not in the model?"
+    read: "§14.2, §14.3"
+    concept_questions: [4, 5, 6, 7]
+    land: "Most of an ML system is not the model, and its debt hides in data coupling no code review sees; automation pays back in weeks, and only a request-keyed parity test proves two pipelines agree."
+    minutes: 12.5
+  - name: Safe Release
+    divider_question: "How does a new model reach traffic without risking all of it?"
+    read: "§14.4"
+    concept_questions: [8, 9, 10]
+    land: "Every release needs a staged exposure, a check that every node runs what was tested, and a rollback that has been rehearsed; for a capacity-bound model each of those holds a second full copy in memory."
+    minutes: 11.0
+  - name: Detection
+    divider_question: "How long before we know the model has drifted?"
+    read: "§14.5"
+    concept_questions: [11, 12]
+    land: "Detection is bounded by how fast evidence arrives, not by tooling, and every day of delay has a price; a signal helps only when it reaches an owner with a deadline."
+    minutes: 10.5
+  - name: Respond
+    divider_question: "Retrain, roll back, or wait?"
+    read: "§14.6, §14.7"
+    concept_questions: [13, 14, 15]
+    land: "Retraining is an economic decision with a square-root optimum, and an incident is a data question first; the response is chosen by cost and evidence, not by habit."
+    minutes: 11.0
+
+concept_questions:
+  - id: 1
+    q: "Why can a system be fully available and completely wrong?"
+    picture: "Hook: new grouped bars (slideplot) of Zillow Offers homes bought, sold, and in inventory, Q2 against Q3 2021, then a big-number frame with the write-down."
+    numbers: "Q2 2021: 3,805 bought, 2,086 sold, 3,142 in inventory. Q3 2021: 9,680 bought, 3,032 sold, 9,790 in inventory, 8,172 under contract; $304 million write-down; $240 to $265 million expected in Q4; about 25 percent of the workforce (Zillow shareholder letters, Q2 and Q3 2021, read from the SEC filings)."
+    example: "The forecast service never failed a request; the forecasts were wrong in both directions by more than the models anticipated."
+    read: "§14.2.6 (War Story 14.1)"
+  - id: 2
+    q: "How much accuracy does a model lose when nothing changes but time?"
+    picture: "Book fig-temporal-shift (Wild-Time): six datasets, each with accuracy or AUC on held-out data from the training period against data from a later period; checked for legibility, else a slide variant redrawn from the same values."
+    numbers: "Drops of 4.0 (FMoW satellite), 7.8 (arXiv), 9.0 (HuffPost), 11.7 (MIMIC readmission), 18.0 (MIMIC mortality AUC), 18.5 points (Yearbook) (Yao et al. 2022, chapter figure 1)."
+    example: "Recall only: Lecture 1's Google Flu Trends and the degradation equation; this frame adds six measured cases, not the equation again."
+    read: "§14.1"
+  - id: 3
+    q: "What is the operations loop, and what does each step cost the machine?"
+    picture: "New SVG, one icon one change per frame: five steps in a ring (detect, diagnose, decide, release, recover), each step lit with its machine cost on the ranking service."
+    numbers: "Detect: telemetry bytes per second; diagnose: replay over logged requests; decide: accelerator-hours that contend with serving; release: a second resident copy of 100 GB of tables; recover: a known-good version kept warm (§14.1, table 1)."
+    example: "The three interfaces (data-model, model-infrastructure, production-monitoring) named in the notes as where each step's controls live."
+    read: "§14.1"
+  - id: 4
+    q: "Where does an ML system break, if not in the model?"
+    picture: "Two panels: book fig-technical-debt (model code one box of ten) beside new bars of Google's measured outage causes by how characteristic of ML they were."
+    numbers: "Sculley et al. 2015: a mature system can be at most 5 percent ML code (§14.2.5). Measured: 96 postmortems over about ten years for one of Google's largest ML pipelines; causes rated 0 (not at all ML) account for about 61 outages, rated 4 (entirely ML) about 24, the middle ratings about 11; about 60 percent had a distributed-systems component (Papasian and Underwood, How ML Breaks, USENIX OpML 2020 slides, values read from the bar charts)."
+    example: "One of their cases: a pipeline lost read permission after a data source was copied to save resources, and stopped processing new data."
+    read: "§14.2, §14.2.5"
+  - id: 5
+    q: "Why can a correction not undo what a prediction already did?"
+    picture: "Book fig-correction-cascades-flowchart (models A to D, dashed arcs to revalidate), then the same chain redrawn for Zillow: forecast, purchase, inventory, write-down, labeled with Q3 counts."
+    numbers: "Q3 2021: 9,680 bought against 3,032 sold; 9,790 homes in inventory and 8,172 under contract when the forecast was revised; the purchase horizon required forecasting prices 'three to six months into the future' (Zillow Q3 letter)."
+    example: "The chapter's remedy: cap the inventory any one forecast can create, keep manual override before purchase, and a circuit breaker on forecast uncertainty (§14.2.6)."
+    read: "§14.2.2, §14.2.6"
+  - id: 6
+    q: "When does automating a manual retraining job pay for itself?"
+    picture: "Slide variant of book margin-001 (slideplot line plot): cumulative manual hours rising 4 h per week against an 80 h one-time pipeline; crossover marked at week 20; final step a dashed line for a pipeline with 1 h per week of upkeep (crossover at about week 27)."
+    numbers: "Napkin Math 14.1: 80 h / 4 h per week = 20 weeks with zero upkeep (book). With upkeep u, break-even is 80 / (4 - u); u = 1 h gives 26.7 weeks (derived, labeled). Self-check: 120 h / 6 h per week = 20 weeks."
+    example: "The team that retrains by hand runs out of time to ship new models."
+    read: "§14.2 (Napkin Math 14.1)"
+  - id: 7
+    q: "How do we prove training and serving compute the same feature?"
+    picture: "Build on one diagram: the same recorded request replayed through the versioned training and serving transforms; step 2 means of user_session_length, 45 against 12 minutes; step 3 the counterexample table (requests A and B: 12 and 45 min against 45 and 12 min), marginal distributions identical, so a K-S screen passes while the keyed comparison flags both."
+    numbers: "Ranking service: 8 percent accuracy loss with no change to model code or weights; training mean 45 min, serving 12 min (§14.3.1.1, illustrative). Skew cost: 1 percent x 1,000,000 queries/day x $0.10 = $365,000 a year (equation 2)."
+    example: "Wall-clock duration in the offline pipeline, foreground-active time on the serving path. Registry and lineage (equation 1) named in the notes as what makes the replay possible."
+    read: "§14.1.1, §14.3.1"
+  - id: 8
+    q: "Why does every release need staged exposure and a check of every node?"
+    picture: "One number (SRE: about 70 percent of outages come from changes to a live system), then eight server icons with the seventh-of-eight pattern: seven green with new code, one red still carrying Power Peg."
+    numbers: "Google SRE book, ch. 1: 'roughly 70% of outages are due to changes in a live system'. SEC order 34-70694: new code deployed to seven of eight SMARS servers; no second technician review and no written procedure requiring one."
+    example: "The repurposed flag that meant 'new retail program' on seven servers meant 'run Power Peg' on the eighth."
+    read: "§14.4.3 (War Story 14.2)"
+  - id: 9
+    q: "What does a safe release cost in memory?"
+    picture: "Book fig-ml-ops-dlrm-node-day (eight H100s over 24 hours: serving copy on two, hot standby on two, retraining run on four for six hours, then a canary), revealed with a highlight band per row; final step three small bars for the three workloads' second-copy cost."
+    numbers: "DLRM: 100 GB of tables on two H100s; a 5 percent canary, shadow, A/B arm, blue-green switch, or hot standby each takes 2 -> 4 H100s; ResNet-50's 51.2 MB FP16 copy fits beside the serving copy; KWS dual-bank OTA adds a 200 KB bank in 4 MB of flash (table 11). Retraining: 4 H100s x 6 h = 24 accelerator-hours, leaving room for exactly one further copy (figure 8)."
+    example: "Shadow scores every request twice; canary and A/B divert traffic but still hold a full copy."
+    read: "§14.4.3, §14.4.5, §14.6.2"
+  - id: 10
+    q: "Why must rollback be tiered, rehearsed, and state-aware?"
+    picture: "Table 9 as three rows (immediate, rapid, delayed) beside a diagram of the ranking service's embedding cache: v2 changes the embedding dimension, a weights-only revert to v1 reads v2's cached vectors."
+    numbers: "Knight's untested response: uninstalling the new code from the seven correct servers made all eight run Power Peg (SEC order ¶27)."
+    example: "KWS dual-bank OTA: the bootloader reverts to Bank A automatically when the watchdog or self-test fails (§14.4.4)."
+    read: "§14.4.3 (rollback strategies)"
+  - id: 11
+    q: "What does monitoring watch that a health check cannot?"
+    picture: "Book fig-uptime-iceberg, built in three steps: the uptime tip; data health and model health below the waterline; the four monitoring layers (infrastructure, input checks, drift statistics, outcomes joined to matured labels) tagged on it."
+    numbers: "Knight: 97 automated 'Power Peg disabled' e-mails reached staff before the 9:30 a.m. open, were not designed as alerts, and were not acted on (SEC order ¶19). Ranking service: label coverage and pending outcomes (§14.5.2)."
+    example: "A signal no one owns is not monitoring."
+    read: "§14.5, §14.8.3"
+  - id: 12
+    q: "How long does it take to confirm that quality has dropped, and what does the wait cost?"
+    picture: "Estimate card, then the book margin ladder (17 minutes against 10 days) redrawn, then new line plot of measured detection accuracy against number of samples for small, medium, and large shifts, with a second axis giving the time to collect those samples at 1 label per second and at 100 labels per day; then the silent-failure cost card and two bars."
+    numbers: "Napkin Math 14.2: 1,000 labeled outcomes at 1 per second = 16.7 minutes; at 100 per day = 10 days (book). Measured: Rabanser et al. 2019, Table 2a, univariate BBSDs on MNIST and CIFAR-10 with simulated shifts, detection accuracy at 10, 20, 50, 100, 200, 500, 1,000, 10,000 samples: small 0.00, 0.00, 0.14, 0.14, 0.18, 0.36, 0.40, 0.54; medium 0.14, 0.21, 0.39, 0.38, 0.42, 0.57, 0.66, 0.76; large 0.32, 0.54, 0.78, 0.82, 0.83, 0.92, 0.96, 1.00."
+    example: "What the delay costs (Napkin Math 14.3): $50M a year x 0.05 x 28/365 = $191,781 at a monthly review against $6,849 with daily checks, $184,932 more per incident. Fraud chargebacks and loan repayments arrive weeks to months later (§14.10)."
+    read: "§14.5.2 (Napkin Math 14.2, 14.3)"
+  - id: 13
+    q: "How often do production teams retrain, and what does staleness cost?"
+    picture: "Two panels: Facebook's Table II as a cadence ladder (hourly to multi-monthly) and new bars of normalized entropy against days between training and test, redrawn from He et al. 2014 Fig. 2."
+    numbers: "Hazelwood et al. 2018, Table II: Search hourly; Sigma sub-daily; News Feed daily; Language Translation and Speech Recognition weekly; Lumos multi-monthly; Facer every N photos. He et al. 2014 §3.2: training on one day and testing on the next six, 'NE can be reduced by approximately 1% by going from training weekly to training daily', while 'the majority of feature engineering experiments only manage to decrease Normalized Entropy by a fraction of a percentage'; bar values read from Fig. 2 (LR+Trees about 95.7 percent at a 0-day delay, about 96.7 at 6 days, relative NE) and labeled approximate."
+    example: "The chapter's table 16 starting points (ads daily, fraud weekly, demand monthly, imaging quarterly) match the spread."
+    read: "§14.6.1"
+  - id: 14
+    q: "What retraining interval minimizes total cost?"
+    picture: "Focus slide for the square-root law, then a slide variant of book margin-002 (amortized run cost falling as C/T, staleness rising as Q V A0 gamma T / 2) drawn with the chapter's parameters so the crossing sits at 3 days; then the worked example."
+    numbers: "T* ~= sqrt(2C / (Q V A0 gamma)) (equation 12). Q = 1,000,000/day, V = $0.50, A0 = 0.94, gamma = 0.0024/day, C = $5,000 -> sqrt(8.87) = 2.98, about 3 days (Napkin Math 14.6, table 17). 4x traffic -> about 1.5 days; 4x run cost -> 2x longer (table 18). Accelerator share of C: 4 H100s x 6 h = 24 h, $96, 1.9 percent; validation, deployment, and rollout risk are the rest (§14.6.2)."
+    example: "Scheduled 90-day retraining dips below the 0.88 floor each cycle; a triggered policy does not in the zero-delay model (figure 9), named in the notes."
+    read: "§14.6.2, §14.6.3"
+  - id: 15
+    q: "At 2 AM click-through drops 12 percent with no stack trace. What do you check first?"
+    picture: "Diagnose slide: four candidate causes as cards; then the debugging tree with the kit D·A·M triangle (data vertex lit); then table 20's slices as bars (desktop 94, iOS 92, Android 88, tablet 62, overall 91)."
+    numbers: "Severity P0 to P3 with deadlines 15 min, 1 h, 4 h, 24 h (table 19); slice table 20; the session-duration repair restores transform and cache namespace together, not only weights (§14.7.1)."
+    example: "Data pipeline integrity first, because altered inputs reach every prediction; Papasian and Underwood's postmortems point the same way."
+    read: "§14.7.1"
+
+worked_examples:
+  - name: "Napkin Math 14.1: when automation pays"
+    steps: ["given: manual retrain 4 engineering hours a week; pipeline build 80 hours once", "break-even: 80 / 4 = 20 weeks", "with 1 hour a week of upkeep: 80 / 3 = 26.7 weeks (derived)", "result: automation pays whenever upkeep stays below the manual load it replaces", "meaning: manual work grows with every model; the pipeline does not"]
+  - name: "Napkin Math 14.2 and Rabanser et al.: how long to confirm drift"
+    steps: ["given: an evidence budget of 1,000 labeled outcomes", "high traffic, 1 label per second: 1,000 s = 16.7 minutes", "low traffic, 100 labels a day: 10 days", "measured: at 1,000 samples a large shift is caught 96 percent of the time, a small one 40 percent (label-free detector)", "meaning: arrival rate and shift size, not tooling, set detection time"]
+  - name: "Napkin Math 14.3: the cost of a silent failure"
+    steps: ["given: $50M annual revenue; a skew bug costs 5 percent of conversions", "monthly review: 28 days, $50M x 0.05 x 28/365 = $191,781", "daily checks: 1 day, $6,849", "difference: $184,932 per incident; 4 incidents a year, about $739,726", "meaning: the saving is real only if the alert reaches someone who acts"]
+  - name: "Napkin Math 14.6: optimal retraining interval for the ranking service"
+    steps: ["given: Q = 1,000,000 requests/day, V = $0.50, A0 = 0.94, gamma = 0.24 percent per day, C = $5,000", "denominator: 1,000,000 x 0.50 x 0.94 x 0.0024 = 1,128", "T* = sqrt(10,000 / 1,128) = sqrt(8.87) = 2.98, about 3 days", "sensitivity: 4x traffic -> 1.5 days; 4x run cost -> 6 days", "accelerators are $96 of the $5,000; cut validation cost to shorten T*"]
+
+active_learning:
+  - at_minute: 0.5
+    type: predict
+    prompt: "Zillow's pricing service answered every request on time all quarter. Which dashboard would have flagged the Q3 problem? A) uptime B) p99 latency C) HTTP error rate D) none of them"
+    answer: "D. The forecasts were wrong while the service was healthy: $304 million write-down, $240 to $265 million more expected, wind-down, about 25 percent of staff (Q3 2021 letter). Students who pick C assume wrong answers raise errors."
+  - at_minute: 14.5
+    type: concept_question
+    prompt: "The ranking service fell from 94 to 88 percent over four weeks. Which monitor fires first? A) uptime B) p99 latency C) HTTP 5xx rate D) click-through by user cohort, compared with last month"
+    answer: "D. Gradual drift is caught by trend analysis on a quality signal (table 4); A to C stayed green the whole time. Follow-up: D needs click labels, which arrive within hours for ranking, not for every product. (Illustrative ranking service, §14.1: 94 to 88 percent in four weeks, noticed in week eight.)"
+  - at_minute: 23
+    type: estimate
+    prompt: "A team spends 6 hours a week retraining a churn model by hand. A pipeline takes 120 hours to build. When does it pay back, and what if the pipeline needs 2 hours a week of upkeep?"
+    answer: "120 / 6 = 20 weeks (chapter self-check); with 2 hours of upkeep 120 / 4 = 30 weeks (derived). Students who answer 'never, because the pipeline needs upkeep' miss that only the difference matters."
+  - at_minute: 31.5
+    type: predict
+    prompt: "Knight's eighth server is flooding the market. Engineers uninstall the new code from the seven servers where it was deployed correctly. What happens?"
+    answer: "It got worse: all eight servers now ran the old Power Peg path for the incoming orders (SEC order ¶27). Total: 212 parent orders, 4 million executions, 397 million shares, about 45 minutes, $460 million loss. A rollback that was never rehearsed is a new deployment under pressure."
+  - at_minute: 43
+    type: estimate
+    prompt: "A monitoring policy needs 1,000 labeled outcomes to confirm a 5-point accuracy drop. How long at 1 label per second? At 100 labels per day?"
+    answer: "16.7 minutes and 10 days (Napkin Math 14.2). Then the measured curve: even label-free detection catches a small shift only 40 percent of the time at 1,000 samples (Rabanser et al. 2019)."
+  - at_minute: 48
+    type: estimate
+    prompt: "A recommender earns $50M a year. A skew bug cuts conversions 5 percent. What does the bug cost if found at a monthly review (28 days) against a daily check?"
+    answer: "$191,781 against $6,849; $184,932 more per incident (Napkin Math 14.3). Common error: forgetting to scale by 28/365 and answering $2.5M."
+  - at_minute: 54.5
+    type: estimate
+    prompt: "T* ~= sqrt(2C / (Q V A0 gamma)). Q = 1,000,000/day, V = $0.50, A0 = 0.94, gamma = 0.0024/day, C = $5,000. How often should the ranking service retrain? What if traffic quadruples?"
+    answer: "About 3 days (2.98); 4x traffic gives about 1.5 days (Napkin Math 14.6, table 18). Students who answer 'daily, like Facebook News Feed' should see that cadence is a cost result, not a convention."
+  - at_minute: 58
+    type: diagnose
+    prompt: "2 AM: click-through fell 12 percent in an hour. No stack trace, no crashed process. Data pipeline, model drift, seasonal traffic, or noise: which do you check first, and why?"
+    answer: "The data pipeline: schema, missing values, a changed transform, because a data fault reaches every prediction and can be checked in minutes (debugging tree, §14.7.1). Drift does not move 12 percent in an hour. Then slice: 91 percent overall can hide a tablet slice at 62 percent (table 20)."
+  - at_minute: 61.5
+    type: retrieval
+    prompt: "Back to Zillow. Close your notes. Diagnose the failure by D·A·M axis, then name the one operations control that would have limited it."
+    answer: "Data: the market moved after training, and outcomes (resale prices) arrived 3 to 6 months after each purchase, so detection was slow. Algorithm: point forecasts with errors larger than the models anticipated, in both directions, and no uncertainty used to throttle purchases. Machine: renovation and resale capacity constrained, so inventory piled up (9,790 homes, 8,172 more under contract). Control: an exposure cap or circuit breaker on purchases tied to forecast uncertainty (§14.2.6)."
+
+open_questions:
+  - "When a drift alert fires but outcome labels will not arrive for weeks, who decides to wait, and what should that decision cost them if they are wrong?"
+  - "A model whose predictions trigger irreversible purchases or trades: should it ever act without a human-set exposure cap? Who sets the cap, the modeling team or the business?"
+  - "A canary on a capacity-bound model doubles the accelerators holding it. Is a shadow on a 1 percent sample enough evidence, and what does it fail to show?"
+
+more_examples:
+  - "YouTube recommendations: the system's own rankings become tomorrow's training signal (Covington et al. 2016; §14.2.6)."
+  - "A/B sizing: a 2 percent relative lift on a 5 percent conversion rate needs about 745,644 users per variant; at 25,000 users only about 0.5 points absolute is detectable (equation 4, §14.4.3)."
+  - "PSI decomposition for an age shift sums to 0.029, below the 0.1 warning band, although several bins moved 3 points (table 13)."
+  - "Monitoring budget: one model, three variants, 50 metrics at 15 s, 30 days: about $261 a month, $253 of it dashboard queries (Napkin Math 14.5)."
+  - "Telemetry volume: 1M requests/s x 1 KB = 1 GB/s; keeping 1 trace in 60 cuts it to 16.7 MB/s (Napkin Math 14.4)."
+  - "Single-model MLOps return: ($100K + $36K) / $30K = 4.53x (equation 13)."
+  - "ML Test Score: data 6, model 7, infrastructure 5, monitoring 1 scores 1, because the composite is the minimum category (Breck et al. 2017; §14.8.1)."
+  - "Oura Ring sleep staging: accelerometer only 57 percent, multi-sensor 79 percent, human scorers agree at about 82 to 83 percent (Altini and Kinnunen 2021; §14.9.1)."
+  - "Fraud threshold: with missed fraud 5x as costly as a blocked user, total cost is minimized near 0.34, not 0.50 (figure 10)."
+  - "Knight in numbers: 4 million executions in 154 stocks, about $3.5 billion net long in 80 stocks and $3.15 billion net short in 74 (SEC order ¶17); $12 million penalty."
+
+left_to_reading:
+  - concept: "A/B release decisions (randomization unit, power, guardrails, preregistration, CUPED)"
+    why: "Secondary; Lecture 12 taught differences beyond noise. One line and the 745,644-user number in the notes of the release-memory frame."
+  - concept: "Cost of observability (telemetry cost rate, cardinality, tiered retention, monitoring budget)"
+    why: "Secondary and better read than heard; the 1-in-60 sampling number is in the notes of the iceberg frame."
+  - concept: "Operational maturity and ML Test Score; investment economics"
+    why: "Secondary; the min-category rule is an optional vote in the notes of the takeaways frame if time allows."
+  - concept: "Infrastructure as code, serving-artifact validation, notebooks in production, CI/CD stage list"
+    why: "Detail better read than heard; the converted-artifact check (INT8 drops on rare slices) is one line in the notes of the release frame. Lecture 10 owns quantization."
+  - concept: "Feature stores and point-in-time correctness"
+    why: "Lecture 4 owns training-serving consistency; the parity frame teaches the test, the notes name the feature store as the usual fix."
+  - concept: "Drift taxonomy, PSI bands, K-S statistic"
+    why: "Taught in Lecture 4; recalled in one line on the parity and detection frames, never retaught."
+  - concept: "Edge operations (KWS OTA, telemetry under a power budget) and ClinAIOps"
+    why: "Case studies better read; the KWS dual-bank cost appears in the release-memory frame. Clinical accountability previews Lecture 15."
+  - concept: "Governance, roles, on-call tiers, stakeholder communication"
+    why: "Organizational detail; one sentence in the notes of the diagnose frame. Fairness and governance gates are owned by Lecture 15."
+
+closing:
+  return_to_hook: "Back to Zillow's bars, annotated by axis. D: the market moved and resale outcomes arrived months after purchase, so evidence was slow. A: point forecasts with errors larger than anticipated, in both directions, unused as a throttle. M: renovation and resale capacity capped sales, so inventory reached 9,790 homes with 8,172 under contract. Every server stayed up. The missing control was not a better model but an operations one: an exposure cap and a circuit breaker between prediction and purchase."
+  read_and_practice: ["§14.1, §14.2.6, §14.3.1, §14.4.3 to §14.4.5, §14.5.2, §14.6.2, §14.7.1, §14.10", "Self-check questions for §14.1, §14.2, §14.4, §14.6", "Napkin Math 14.1, 14.2, 14.3, 14.6; Checkpoints 14.2 and 14.4"]
+  further_reading:
+    - cite: "ML Operations, §14.4 and §14.6"
+      url: ""
+      why: "Release controls with their memory cost, and the retraining economics this lecture compresses."
+    - cite: "Sculley et al., Hidden Technical Debt in Machine Learning Systems, NeurIPS 2015"
+      url: "https://papers.nips.cc/paper/5656-hidden-technical-debt-in-machine-learning-systems"
+      why: "The catalog of ML-specific debt: entanglement, correction cascades, undeclared consumers, glue code."
+    - cite: "U.S. SEC, Order Instituting Proceedings, Knight Capital Americas LLC, Release No. 34-70694, 2013"
+      url: "https://www.sec.gov/litigation/admin/2013/34-70694.pdf"
+      why: "An 18-page primary account of a partial deployment, an unowned alert stream, and an unrehearsed rollback."
+    - cite: "Rabanser, Günnemann, and Lipton, Failing Loudly: An Empirical Study of Methods for Detecting Dataset Shift, NeurIPS 2019"
+      url: "https://arxiv.org/abs/1810.11953"
+      why: "Measured detection accuracy against sample count and shift size."
+    - cite: "Papasian and Underwood, How ML Breaks: A Decade of Outages for One Large ML Pipeline, USENIX OpML 2020"
+      url: "https://www.usenix.org/conference/opml20/presentation/papasian"
+      why: "96 postmortems from one production pipeline: most causes were not ML."
+    - cite: "Breck et al., The ML Test Score: A Rubric for ML Production Readiness and Technical Debt Reduction, IEEE Big Data 2017"
+      url: "https://doi.org/10.1109/bigdata.2017.8258038"
+      why: "28 concrete tests and the min-category score."
+
+bridge: "Lecture 15: monitoring keeps a model faithful to its objective. What if the objective was wrong, and the system does exactly what it was told and still causes harm?"
+
+coverage:
+  primary_taught: ["Operations loop (loop frame, synthesis)", "Layered monitoring and detection delay (iceberg, detection estimate, Rabanser curves, silent-failure cost, 97 e-mails)", "Safe release and tested rollback (SRE 70 percent, Knight seven of eight, Knight rollback predict, tiered and stateful rollback)", "Release safety costs resident memory (DLRM node-day figure, table 11)", "Request-keyed parity testing (parity build and swapped-value counterexample)", "Reproducibility and the model registry (notes of the parity and rollback frames; equation 1 and registry promote/rollback)"]
+  primary_left_to_reading: []
+  secondary: ["Retraining economics (taught: Facebook cadences, T* focus and worked example)", "Hidden technical debt (taught: debt diagram, Papasian outages, Zillow cascade, automation break-even)", "Incident response (taught: diagnose frame, severity, slices)", "A/B release decisions (reading; one number in notes)", "Cost of observability (reading; notes)", "Operational maturity (reading; optional vote)"]
+  touches_reused: ["Lecture 1: silent degradation, Google Flu Trends, degradation equation (recall line only)", "Lecture 1: D·A·M diagnosis (kit triangle in diagnose frame and synthesis)", "Lecture 3: the lifecycle is a loop, monitoring cadences (not redrawn)", "Lecture 4: training-serving consistency definition, three drift types, K-S and PSI (recalled, not retaught)", "Lecture 8: checkpoints (rollback notes)", "Lecture 10: quantization slices in the converted-artifact note", "Lecture 12: verification gap and differences beyond noise (A/B note)", "Lecture 13: latency budget and stage tracing, queueing headroom (recall frame)"]
+  hand_offs: ["Lecture 13 hands over canary and rollback, monitoring, drift and skew detection, and the model registry: all taught here", "Lecture 15 owns bias feedback loops, fairness gates, privacy and governance, and explanation cost (previews named once on the next-lecture frame)"]
+
+notes_for_author:
+  - "Book bug: margin-002 labels the optimum 'T* ≈ 1 d', but Napkin Math 14.6 and table 17 give sqrt(2 x 5,000 / (1,000,000 x 0.50 x 0.94 x 0.0024)) = 2.98, about 3 days. The course plan's 'about one day' inherits the figure. The slide redraws the figure at 3 days."
+  - "Book vs SEC order: War Story 14.2 says Knight handled 'over 17 percent of NYSE volume' and the stale server sent '~1,400 orders/sec'. Neither number is in SEC Release 34-70694, which says Knight's trading was about 10 percent of all trading in listed U.S. equities and gives 212 parent orders, 4 million executions, 397 million shares, about 45 minutes, $460 million. The slides use only the SEC numbers. The chapter's rescue-financing and acquisition sentences are not in the order either."
+  - "Zillow's per-home gross profit in Q3 2021 (about -$80,771 in exhibit 99.2) includes the write-down allocation and is not used on slides."
+  - "Papasian and Underwood values (about 61, 0, 9, 2, 24 outages by ML-ness 0 to 4; 38, 1, 32, 12, 13 by distributed-ness) are read from bar charts in the OpML 2020 slides, sum to 96, and are labeled 'read from chart'. A published paper with a table was not found."
+  - "He et al. 2014 Fig. 2 bar heights are read from the figure and labeled approximate; the slide's claim rests on the quoted text (about 1 percent NE, weekly to daily)."
+  - "Rabanser et al. measure label-free shift detection (black-box softmax shift detection); Napkin Math 14.2 is about labeled outcomes. The slide says so: label-free detection is the fast path, and it still needs hundreds of samples for small shifts."
+  - "The ranking service numbers (94 to 88 percent, 45 against 12 minutes, 8 percent loss, gamma = 0.0024, C = $5,000) are the chapter's illustrative scenario; every slide that shows them says 'illustrative'."
+
+build_note:
+  date: "2026-10-17"
+  result: "35 frames, 72 presenting pages, 35 handout pages, 72 notes pages; notes total 71.5 minutes; fit check passes with no overfull boxes. Figures in images/make_figs.py; every value is sourced in its docstring."
+  sources_rechecked: "SEC Release 34-70694 re-read from the PDF (paragraphs 15 to 19, 27, and the $12 million penalty); every Knight number on the slides is from the order. Zillow Q2 and Q3 2021 shareholder letters and Q3 press release re-read from the SEC filings (all counts, the write-down, the Q4 range, the 25 percent workforce cut, and the quotations). Rabanser et al. Table 2a, Hazelwood et al. Table II, He et al. Sec. 3.2 and Fig. 2, and the Papasian and Underwood 'Finding #1' chart re-read from the sources. T* recomputed from equation 12: 2.98 days."
+  changes:
+    - change: "New frame 'Exposure grows in stages: shadow, canary, then ramp' (2.5 min, a three-step router diagram) before the node-day frame; correction cascade, silent-failure cost, Facebook cadence, and open questions each lose 0.5 min."
+      reason: "The lead asked for a picture and a step-by-step explanation of staged rollout, canaries, and shadow deployment; the plan showed only their memory cost."
+    - change: "Node-day frame's final step lists the second copy per workload as text (DLRM, ResNet-50, keyword spotter) instead of three bars."
+      reason: "The three costs are in different units (accelerators, MB of HBM, KB of flash); as bars they needed a derived share axis and rendered under the legibility floor in a column."
+    - change: "Rabanser frame title 'Small shifts need ten times more samples to detect' replaced by 'Large shifts show up in 20 samples; small ones need 10,000'."
+      reason: "Table 2a shows large shifts pass 0.5 detection accuracy at 20 samples and small ones only at 10,000, a factor of 500, not ten."
+    - change: "Book figures for the correction cascade, the uptime iceberg, and Wild-Time redrawn as slide variants (cascade_step, iceberg, wildtime_step); the technical-debt figure drawn in TikZ as Lecture 0 does."
+      reason: "At slide size the book figures' labels render near 5 to 6 pt. The variants keep the book's labels and values (Wild-Time values from the figure's alt text)."
+    - change: "He et al. freshness drawn as a line of relative NE against delay, not bars."
+      reason: "The paper's axis starts at 95 percent; bars on a truncated axis exaggerate the differences."
+    - change: "Knight's 97 e-mails shown as a card beside the iceberg rather than an inset on it; the iceberg's four monitoring layers listed beside it."
+      reason: "Tags on the redrawn iceberg would cover its labels."
+    - change: "Title slide uses the chapter's blueprint cover; the older cover's generated image has garbled text."
+      reason: "Garbled labels read as errors on the first slide."
+    - change: "Retrieval frame's four Lecture 13 gauges drawn in TikZ; estimate frames put the given values in a full-width card above the plot."
+      reason: "Fit: a narrow card wrapped each value onto several lines."
+  not_used_old_images: ["canary-deployment.svg", "cicd-pipeline-ml.svg", "degradation-equation.svg", "drift-detection-flow.svg", "maturity-model.svg", "monitoring-dashboard-ml.svg"]
