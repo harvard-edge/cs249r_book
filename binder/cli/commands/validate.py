@@ -65,6 +65,8 @@ def _is_chapter_qmd(path) -> bool:
     name = path.name
     if name.startswith("index-vol") or path.stem in _NON_CHAPTER_STEMS:
         return False
+    if path.parent.name in VOLUME_DIRS:
+        return False
     if any(part.startswith("_") for part in path.parts[:-1]):
         return False
     if any(part.startswith("vol") and part not in VOLUME_DIRS for part in path.parts[:-1]):
@@ -13178,6 +13180,8 @@ class ValidateCommand:
             vol_usage: Dict[str, List[Tuple[str, int]]] = defaultdict(list)
             chapter_usage: Dict[str, List[Tuple[str, int]]] = defaultdict(list)
             for qmd in sorted(v_dir.rglob("*.qmd")):
+                if not _is_chapter_qmd(qmd) and "frontmatter/notation" not in str(qmd):
+                    continue
                 files_checked += 1
                 qmd_text = qmd.read_text(encoding="utf-8")
                 qmd_rel = str(qmd.relative_to(project_root))
@@ -13197,14 +13201,17 @@ class ValidateCommand:
                 # are declared there, not in the notation table; the declaration
                 # line itself is not a use (2026-10-08).
                 local_decl = set()
+                local_line = 1
                 fm_end = 0
                 if qmd_text.startswith("---"):
                     head = qmd_text.split("\n---", 1)[0]
                     fm_end = head.count("\n") + 2
                     lm = re.search(r"^notation-local:\s*\[(.*?)\]\s*$", head, re.M)
                     if lm:
+                        local_line = head.count("\n", 0, lm.start()) + 1
                         local_decl = {macro_aliases.get("\\" + n, "\\" + n)
                                       for n in re.findall(r"\\?([A-Z][A-Za-z]*)", lm.group(1))}
+                local_used = set()
                 for lineno, line in enumerate(qmd_text.splitlines(), 1):
                     if lineno <= fm_end:
                         continue
@@ -13212,6 +13219,7 @@ class ValidateCommand:
                         macro_name = "\\" + m.group(1)
                         canon = macro_aliases.get(macro_name, macro_name)
                         if canon in local_decl:
+                            local_used.add(canon)
                             continue
                         if canon in all_macros:
                             vol_usage[canon].append((qmd_rel, lineno))
@@ -13219,6 +13227,28 @@ class ValidateCommand:
                             # chapter's own notes cannot keep a row alive (2026-10-08).
                             if not in_notation:
                                 chapter_usage[canon].append((qmd_rel, lineno))
+
+                for m in sorted(local_decl - all_macros):
+                    issues.append(ValidationIssue(
+                        file=qmd_rel, line=local_line, code="notation-local-unknown",
+                        message=f"Macro {m} in notation-local is not registered in mlsysim.Notation",
+                        severity="error",
+                        suggestion=f"Register {m} in mlsysim/mlsysim/notation/data/*.yaml or remove it from notation-local",
+                    ))
+                for m in sorted(local_decl & set(table_macros.keys())):
+                    issues.append(ValidationIssue(
+                        file=qmd_rel, line=local_line, code="notation-local-redundant",
+                        message=f"Macro {m} in notation-local is already in {vol}'s notation table (line {table_macros[m]})",
+                        severity="error",
+                        suggestion=f"Remove {m} from {qmd_rel} notation-local so the volume's notation table governs it",
+                    ))
+                for m in sorted((local_decl & all_macros) - local_used):
+                    issues.append(ValidationIssue(
+                        file=qmd_rel, line=local_line, code="notation-local-unused",
+                        message=f"Macro {m} is declared in {qmd_rel} notation-local (line {local_line}) but is never used in the chapter",
+                        severity="error",
+                        suggestion=f"Remove unused macro {m} from {qmd_rel} notation-local",
+                    ))
 
             # 1. Under-coverage: Used in volume, but missing from notation table
             missing = set(vol_usage.keys()) - set(table_macros.keys())
@@ -13555,7 +13585,8 @@ class ValidateCommand:
         books = next((p for p in [root, *root.parents] if p.name == "books" and (p / "vol1").is_dir()), root / "books")
         repo = books.parent
         from cli.checks import notation_strict as ns
-        files = sorted(books.glob("vol*/**/*.qmd")) + sorted(books.glob("vol*/**/*_quizzes.json"))
+        qmds = [f for f in sorted(books.glob("vol*/**/*.qmd")) if f.parent.name not in VOLUME_DIRS]
+        files = qmds + sorted(books.glob("vol*/**/*_quizzes.json"))
         files = [f for f in files if "_build" not in f.parts]
         return repo, ns, files
 
@@ -13628,23 +13659,53 @@ class ValidateCommand:
             files_checked=checked, issues=issues, elapsed_ms=int((time.time() - t0) * 1000))
 
     def _run_notation_conventions(self, root: Path) -> ValidationRunResult:
-        """Every registry entry follows the naming and field conventions (no exemption list)."""
+        """Every registry entry follows the naming and field conventions and is used in the book."""
         t0 = time.time()
-        repo, _, _ = self._notation_strict_inputs(root)
+        repo, _, files = self._notation_strict_inputs(root)
         if str(repo / "mlsysim") not in sys.path:
             sys.path.insert(0, str(repo / "mlsysim"))
         from mlsysim.notation import Notation
         from mlsysim.notation.types import convention_problems
         issues: List[ValidationIssue] = []
+        aliases = Notation.aliases()
+        used_macros = set(CORE_REQUIRED_ROWS)
+        macro_pat = re.compile(r"\\([A-Z][A-Za-z0-9]*)")
+        for f in files:
+            if f.name == "notation.qmd":
+                continue
+            text = f.read_text(encoding="utf-8")
+            text = re.sub(r"(?m)^notation-local:\s*\[.*?\]\s*$", "", text)
+            for m in macro_pat.findall(text):
+                raw = "\\" + m
+                used_macros.add(aliases.get(raw, raw))
         for s_ in Notation.list():
-            probs = convention_problems(s_)
+            probs = list(convention_problems(s_))
             if probs:
                 issues.append(ValidationIssue(file=f"mlsysim/mlsysim/notation/data/{s_.domain}.yaml", line=1,
                                               code="notation-convention",
                                               message=f"{s_.macro}: " + "; ".join(probs),
                                               rule_doc="mlsysim/mlsysim/notation/data/README.md"))
+            if s_.macro not in used_macros:
+                issues.append(ValidationIssue(
+                    file=f"mlsysim/mlsysim/notation/data/{s_.domain}.yaml", line=1,
+                    code="notation-registry-unused",
+                    message=f"{s_.macro} is defined in {s_.domain}.yaml but is never used in any chapter or quiz",
+                    suggestion=f"Remove unused macro {s_.macro} from mlsysim/mlsysim/notation/data/{s_.domain}.yaml and run `python3 tools/build_notation.py`",
+                    rule_doc="mlsysim/mlsysim/notation/data/README.md"))
+        macros_tex = repo / "books" / "shared" / "_includes" / "_macros.tex"
+        if macros_tex.exists():
+            tex_macros = set(re.findall(r"\\newcommand\{\\([A-Za-z0-9]+)\}", macros_tex.read_text(encoding="utf-8")))
+            expected_tex = {s_.macro.lstrip("\\") for s_ in Notation.list()} | {k.lstrip("\\") for k in aliases.keys()} | {"Glyph"}
+            if tex_macros != expected_tex:
+                diff = sorted((tex_macros ^ expected_tex))[:5]
+                issues.append(ValidationIssue(
+                    file="books/shared/_includes/_macros.tex", line=1,
+                    code="notation-macros-unsynced",
+                    message=f"_macros.tex is out of sync with mlsysim/notation/data/*.yaml (e.g., {', '.join(diff)})",
+                    suggestion="Run `python3 tools/build_notation.py` and `python3 tools/generate_notation_stub.py`",
+                    rule_doc="mlsysim/mlsysim/notation/data/README.md"))
         return ValidationRunResult(
-            name="notation-conventions", description="Registry entries follow the naming and field conventions",
+            name="notation-conventions", description="Registry entries follow conventions and are used in the book",
             files_checked=len(Notation), issues=issues, elapsed_ms=int((time.time() - t0) * 1000))
 
     def _run_notation_forms(self, root: Path) -> ValidationRunResult:
@@ -13677,7 +13738,7 @@ class ValidateCommand:
         issues: List[ValidationIssue] = []
         files = 0
         for qmd in sorted(books.glob("vol*/**/*.qmd")):
-            if "/frontmatter/" in str(qmd) and ("_notation" in qmd.name or qmd.name == "notation.qmd"):
+            if not _is_chapter_qmd(qmd):
                 continue
             files += 1
             text = qmd.read_text(encoding="utf-8")
