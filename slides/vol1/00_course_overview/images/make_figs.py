@@ -73,6 +73,7 @@ def roofline_train_decode():
     points = [("Generating\ntext", 1.0, "memory", (-10, 6), "right", "bottom"),
               ("Training,\nlarge batch\n(illustrative)", 5000.0, "compute",
                (0, -12), "center", "top")]
+    # Step 0 is the empty roofline (axes and ridge only), shown first.
     for k in range(0, len(points) + 1):
         fig, ax = sp.plt.subplots(figsize=sp.SIZE)
         mem, cmp_ = xs <= ridge, xs >= ridge
@@ -111,11 +112,13 @@ def roofline_train_decode():
 
 roofline_train_decode()
 
-# Utilization is energy: joules per generated token
+# Utilization is energy: joules per generated token (values from calcs.py).
+# Drawn for a column beside Google's measured breakdown (Elsworth et al. 2025).
 sp.hbars_steps(out / "energy_utilization", [
-    ("Well batched", 1.1, "compute"),
-    ("Poorly batched (10% of the rate)", 6.6, "danger", "6.6 J per token: 6× more"),
-], "J per token", log=False, value_fmt="{:.1f}", size=sp.SHORT)
+    ("Batched", 1.1, "compute", "1.1 J"),
+    ("10% of\nthe rate", 6.6, "danger", "6.6 J: 6× more"),
+], "J per token", log=False, value_fmt="{:.1f}", size=(3.4, 2.1),
+    xlabel="Joules per token")
 
 # Datacenter electricity (IEA)
 sp.hbars_steps(out / "datacenter_electricity", [
