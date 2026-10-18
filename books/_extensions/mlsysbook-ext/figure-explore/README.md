@@ -10,7 +10,9 @@ remain owned by the chapter. No post-render HTML patch is required.
 
 The primary web experience follows the original figure's objects and connections:
 values travel, representations transform, storage persists, and ownership changes.
-Preserve the diagram's topology and semantic colors. A moving value must have a
+Preserve the technical relationships and semantic colors, while allowing a new
+layout, focused scenes, or a different visual analogy when it teaches better.
+The printed layout is not a constraint on the web illustration. A moving value must have a
 recognizable source, destination, and consequence; a traveling dot alone does not
 explain a mechanism. Show copies as copies, reads as reads, and release only after
 the last consumer. Logical dataflow must not imply measured memory traffic.
@@ -43,8 +45,8 @@ Selection requires four answers:
    figure and prose do not already convey as clearly?
 4. Does that learning value justify the controls and added visual complexity?
 
-Preserve the original objects, labels, assumptions, topology, palette, and
-caption. State any worked-case simplification. Reading-time playback must not
+Preserve the original technical meaning, labels, assumptions, palette, and
+caption; the web geometry may change. State any worked-case simplification. Reading-time playback must not
 imply measured machine latency. Do not invent counters or hardware effects to
 make a conceptual diagram appear dynamic. There is no animation quota.
 

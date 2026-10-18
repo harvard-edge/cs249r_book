@@ -14,16 +14,47 @@ select Explore, and press Play or Next. The generated page is an isolated copy o
 the actual themed chapter. The canonical build, chapter source, static artwork,
 caption, and production lesson remain unchanged. This is not a published update.
 
-The prototype retains both input branches and the compute, INT32, requantization,
-activation, and output chain. Labeled tokens travel along connections. The
-accumulator retains earlier contributions until the next product arrives. Its
-sum changes 0 → 24 → 44 → 84 at the default scale; the final INT8 value 17
-reconstructs to 0.42. Optional arithmetic exposes the current transformation.
-Back and menu jumps settle immediately; Next illustrates the transition. Pause
-freezes motion as well as progression. Reduced motion keeps inspectable states.
-Narrow views stack the same connected blocks vertically in a contained diagram
-and follow the active block. Desktop retains the source's horizontal chain.
-This responsive layout is a prototype tradeoff to evaluate with actual learners.
+The second prototype uses larger teaching scenes rather than reproducing the
+printed layout. A small route preserves context while the active mechanism has
+space to explain itself:
+
+- A real-value number line shows the original marker and the nearest level.
+  `0.31` snaps to `0.30`; a separate aligned code row identifies stored code `6`.
+  All three indexed inputs remain visible as converted codes are written.
+- A multiply/retain scene preserves both indexed operand arrays, makes logical
+  zero-point removal visible, and keeps the old register value during travel.
+  The arrived product produces `24 + 20`, then the register settles on `44`.
+- Output conversion distinguishes the wide integer sum, its represented real
+  quantity, and the final INT8 code. The finer case adds output rounding; the
+  coarse case is already on the output grid. Connected ReLU passage preserves
+  `17`, with stored zero `−4` labeled separately.
+
+Selecting an input inspects its approximation; changing spacing compares the
+same input at the same operation. Clicking a calculation block pauses playback
+and opens the current arithmetic. Back/menu jumps settle immediately; Play
+animates the selected operation, Next illustrates the next one, and Replay
+restarts the story. No scene autoplays on opening. Reduced motion keeps the
+same inspectable states. Phone scenes fit the reading column naturally, with
+no internal panning, clipped diagram viewport, or automatic scrolling.
+
+The default products remain 24, 20, 40; the sum is 84, and final code 17
+represents 0.42. Finer activation spacing produces sum 163, represented sum
+0.4075, and final code 16 representing 0.40. Neither scale clips these inputs.
+Clipping examples or negative output examples require new grid endpoint and
+pre-ReLU illustrations; this prototype does not claim to cover them.
+
+## Feedback and verification
+
+Two rounds of simulated novice, visual-design, and technical reviews motivated
+this revision. They are not real student participation or learning evidence.
+The review record separates observed interface issues from learning hypotheses.
+
+`learner-session.html` and `learner-session.txt` provide a blank, optional actual
+learner session: predict a transformation, trace the next pair, and explain why
+the wider sum persists. The local notebook sends nothing automatically and can
+export notes only on request. A click or completed playback is not mastery.
+Actual learner feedback remains to be collected and incorporated when available.
+See `verification.txt` for the scoped runtime, visual, and fallback checks.
 
 ## Software decision
 
