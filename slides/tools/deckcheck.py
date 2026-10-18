@@ -886,6 +886,12 @@ def rule_unused(deck, vol, out):
     for f in sorted(images.iterdir()):
         if f.is_dir() or f.name in KEEP_FILES or f.name.startswith("."):
             continue
+        # Companion scripts (calcs.py, trace and data scripts) are source, not images;
+        # the old-deck generator name make_figures.py is the one script that is stale.
+        if f.suffix == ".py" and f.name != "make_figures.py":
+            continue
+        if f.suffix in (".csv", ".json") and (images / "data").exists() is False and f.parent == images:
+            pass
         if shipped is not None and f.name not in shipped:
             continue   # an ignored build product (an SVG's PDF), not part of the deck
         st = f.stem
