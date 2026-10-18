@@ -10,7 +10,9 @@ referenced itself) left every callout header pale on pale text. Chromium never
 showed it, and loading with the OS already dark never exercised the toggle path.
 
 Checks, per page:
-  * text contrast >= 3:1 against the effective background (skips SVG and math)
+  * text contrast >= 3:1 against the effective background, whole page including navbar,
+    sidebar and footer (skips SVG and math)
+  * page regions (body, navbar, sidebar, footer) are dark
   * callout headers (``details[class*="callout-"] > summary``) are dark
   * fenced code blocks are dark and padded
   * section numbers (``.header-section-number``) reach 4.5:1
@@ -49,7 +51,7 @@ PAGE_JS = r"""
   const out = {issues: [], counts: {callouts: 0, code: 0, numbers: 0, figures: 0}};
   const add = o => { if (out.issues.length < 25) out.issues.push(o); out.total = (out.total || 0) + 1; };
 
-  const root = document.querySelector('main') || document.body;
+  const root = document.body;  // navbar, sidebar and footer too: a white footer once hid outside <main>
   const seen = new Set();
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   for (let n; (n = walker.nextNode());) {
@@ -61,6 +63,11 @@ PAGE_JS = r"""
     const bg = effBg(el), fg = over(parse(cs.color), bg), c = contrast(fg, bg);
     if (c < 3.0) add({kind: 'text-contrast', tag: el.tagName, text: t.slice(0, 40), contrast: +c.toFixed(2)});
   }
+  // Page regions must themselves be dark. Contrast alone cannot see a white footer under dark text.
+  ['body', '.nav-footer', 'nav.navbar', '#quarto-sidebar', '#quarto-margin-sidebar'].forEach(sel => {
+    const el = document.querySelector(sel);
+    if (el && el.getBoundingClientRect().height > 0 && lum(effBg(el)) > 0.2) add({kind: 'region-light', region: sel, luminance: +lum(effBg(el)).toFixed(2)});
+  });
   document.querySelectorAll('details[class*="callout-"] > summary').forEach(s => {
     out.counts.callouts++;
     if (lum(effBg(s)) > 0.35) add({kind: 'callout-header-light', cls: s.parentElement.className.toString().slice(0, 40), text: s.textContent.trim().slice(0, 30)});
@@ -132,9 +139,9 @@ def main() -> int:
                 page.goto(f"http://127.0.0.1:{port}/{rel}", wait_until="load", timeout=45000)
                 page.wait_for_timeout(1500)
                 toggle = page.locator("a.quarto-color-scheme-toggle")
-                if toggle.count() == 0:
-                    results[rel] = {"skipped": "no colour-scheme toggle"}
-                    print(f"skip  {rel} (no toggle)")
+                if toggle.count() == 0 or not toggle.first.is_visible():
+                    results[rel] = {"skipped": "no usable colour-scheme toggle"}
+                    print(f"skip  {rel} (no usable toggle)")
                     continue
                 toggle.first.click()
                 page.wait_for_timeout(800)
