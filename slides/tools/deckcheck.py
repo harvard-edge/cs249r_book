@@ -840,7 +840,7 @@ def rule_next(deck, vol, out):
             f"(expected NEXT LECTURE | {nxt.title.upper()})")
 
 
-KEEP_FILES = {"make_figs.py", "SOURCES.yml"}
+KEEP_FILES = {"make_figs.py", "calcs.py", "SOURCES.yml"}
 OUT_EXT = (".svg", ".pdf", ".png", ".jpg", ".jpeg")
 
 
