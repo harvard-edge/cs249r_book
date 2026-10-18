@@ -6,7 +6,7 @@ import json
 import pytest
 
 from mlsysim.core.units import ureg
-from mlsysim.engine.v2_10_experiments import (
+from mlsysim.labs.experiments.v2_10_experiments import (
     FormatEvidence,
     PlacementResult,
     Request,

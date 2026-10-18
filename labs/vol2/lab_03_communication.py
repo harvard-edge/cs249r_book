@@ -24,7 +24,7 @@ async def _():
 
     import plotly.graph_objects as go
     from mlsysim.core.units import Q_
-    from mlsysim.engine.v2_03_experiments import (
+    from mlsysim.labs.experiments.v2_03_experiments import (
         OVERLAP_WINDOW_OPTIONS, OVERLAP_WINDOW_QUANTITIES, PAYLOAD_OPTIONS,
         PAYLOAD_QUANTITIES, TRAFFIC_PATTERN_OPTIONS, alpha_beta_experiment,
         burst_spacing_params, congestion_experiment, default_overlap_label,

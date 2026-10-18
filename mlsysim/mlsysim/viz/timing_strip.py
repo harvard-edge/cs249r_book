@@ -14,8 +14,7 @@
 from dataclasses import dataclass, field
 from typing import Optional, Sequence
 
-from .plots import COLORS, set_book_style
-from .style import MIN_FONT_PT
+from .style import MIN_FONT_PT, set_book_style
 
 __all__ = [
     "VOL4_ROLES",

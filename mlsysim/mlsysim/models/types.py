@@ -120,7 +120,7 @@ class Workload(BaseModel):
     def _validate_data_rate(cls, v):
         return require_unit_family(v, ureg.byte / ureg.second, "data_rate", "data")
 
-    def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
+    def lower(self, precision: Quantity | str = BYTES_FP16) -> ComputationGraph:
         """
         Lowers the workload into a hardware-agnostic computation graph.
 
@@ -128,6 +128,8 @@ class Workload(BaseModel):
         directly.  Subclasses (Transformer, CNN, etc.) override this with
         architecture-specific lowering.
         """
+        from ..core.units import resolve_precision
+        prec_qty = resolve_precision(precision)[1] if isinstance(precision, str) else precision
         if self.parameters is None and self.model_size is not None:
             weight_bytes = self.model_size.to(ureg.byte)
             ops = self.inference_flops if self.inference_flops else (0 * ureg.flop)
@@ -142,7 +144,7 @@ class Workload(BaseModel):
             raise NotImplementedError(
                 f"{type(self).__name__} has no 'parameters'; override lower() or set parameters."
             )
-        bpp = precision.to(ureg.byte).magnitude
+        bpp = prec_qty.to(ureg.byte).magnitude
         param_count = self.parameters.to(ureg.count).magnitude
         weight_bytes = (param_count * bpp * ureg.byte).to(ureg.byte)
         ops = self.inference_flops if self.inference_flops else (2 * param_count * ureg.flop)
@@ -154,13 +156,17 @@ class Workload(BaseModel):
             arithmetic_intensity=(ops / weight_bytes).to("flop/byte"),
         )
 
-    def size_in_bytes(self, precision: Quantity = BYTES_FP16) -> Quantity:
-        if self.model_size is not None:
+    def size_in_bytes(self, precision: Quantity | str = BYTES_FP16) -> Quantity:
+        if self.model_size is not None and precision in (BYTES_FP16, "fp16", "bf16"):
             return self.model_size
         if self.parameters is not None:
+            from ..core.units import resolve_precision
+            prec_qty = resolve_precision(precision)[1] if isinstance(precision, str) else precision
             param_count = self.parameters.to(ureg.count).magnitude
-            bpp = precision.to(ureg.byte).magnitude
+            bpp = prec_qty.to(ureg.byte).magnitude
             return (param_count * bpp * ureg.byte).to(ureg.byte)
+        if self.model_size is not None:
+            return self.model_size
         raise NotImplementedError("Workload must define either parameters or model_size to calculate size in bytes.")
 
 class TransformerWorkload(Workload):
@@ -236,13 +242,10 @@ class TransformerWorkload(Workload):
             )
         return self
 
-    def size_in_bytes(self, precision: Quantity = BYTES_FP16) -> Quantity:
-        param_count = self.parameters.to(ureg.count).magnitude
-        bpp = precision.to(ureg.byte).magnitude
-        return (param_count * bpp * ureg.byte).to(ureg.byte)
-
-    def get_kv_cache_size(self, seq_len: int, batch_size: int, precision: Quantity = BYTES_FP16) -> Quantity:
+    def get_kv_cache_size(self, seq_len: int, batch_size: int, precision: Quantity | str = BYTES_FP16) -> Quantity:
+        from ..core.units import resolve_precision
         from ..physics import calc_kv_cache_size, calc_mla_cache_size
+        prec_qty = resolve_precision(precision)[1] if isinstance(precision, str) else precision
 
         if self.kv_lora_rank is not None and self.qk_rope_head_dim is not None:
             return calc_mla_cache_size(
@@ -251,14 +254,14 @@ class TransformerWorkload(Workload):
                 qk_rope_head_dim=self.qk_rope_head_dim,
                 seq_len=seq_len,
                 batch_size=batch_size,
-                bytes_per_elem=precision,
+                bytes_per_elem=prec_qty,
             )
 
         h_dim = self.hidden_dim or 4096
         n_heads = self.heads or 32
         head_dim = h_dim // n_heads
         n_kv_heads = self.kv_heads or n_heads
-        return calc_kv_cache_size(n_layers=self.layers, n_heads=n_kv_heads, head_dim=head_dim, seq_len=seq_len, batch_size=batch_size, bytes_per_elem=precision)
+        return calc_kv_cache_size(n_layers=self.layers, n_heads=n_kv_heads, head_dim=head_dim, seq_len=seq_len, batch_size=batch_size, bytes_per_elem=prec_qty)
 
     def training_memory(self, batch_size: int, seq_len: int, precision: str = "fp16", optimizer: str = "adam", strategy: str = "selective", zero_stage: int = 0, dp_size: int = 1, is_lora: bool = False, lora_rank: int = 16) -> Quantity:
         """
@@ -335,7 +338,7 @@ class TransformerWorkload(Workload):
         
         return (weight_mem + grad_mem + opt_mem + act_mem).to(ureg.GiB)
 
-    def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
+    def lower(self, precision: Quantity | str = BYTES_FP16) -> ComputationGraph:
         ops = self.inference_flops or (2 * self.parameters.to(ureg.count).magnitude * ureg.flop)
         weights = self.size_in_bytes(precision)
         return ComputationGraph(
@@ -358,7 +361,7 @@ class SparseTransformerWorkload(TransformerWorkload):
     def _validate_active_parameters(cls, v):
         return require_unit_family(v, ureg.count, "active_parameters", "count")
 
-    def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
+    def lower(self, precision: Quantity | str = BYTES_FP16) -> ComputationGraph:
         # For MoE, total parameters define the memory footprint,
         # but active parameters define the computation flops.
         ops = self.inference_flops or (2 * self.active_parameters.to(ureg.count).magnitude * ureg.flop)
@@ -378,12 +381,7 @@ class CNNWorkload(Workload):
     inference_flops: Quantity
     layers: Optional[int] = None
 
-    def size_in_bytes(self, precision: Quantity = BYTES_FP16) -> Quantity:
-        param_count = self.parameters.to(ureg.count).magnitude
-        bpp = precision.to(ureg.byte).magnitude
-        return (param_count * bpp * ureg.byte).to(ureg.byte)
-
-    def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
+    def lower(self, precision: Quantity | str = BYTES_FP16) -> ComputationGraph:
         weights = self.size_in_bytes(precision)
         return ComputationGraph(
             name=self.name,
@@ -401,21 +399,18 @@ class SSMWorkload(Workload):
     state_size: int
     hidden_dim: int
     inference_flops: Optional[Quantity] = None
-    
-    def size_in_bytes(self, precision: Quantity = BYTES_FP16) -> Quantity:
-        param_count = self.parameters.to(ureg.count).magnitude
-        bpp = precision.to(ureg.byte).magnitude
-        return (param_count * bpp * ureg.byte).to(ureg.byte)
 
-    def get_state_cache_size(self, batch_size: int, precision: Quantity = BYTES_FP16) -> Quantity:
+    def get_state_cache_size(self, batch_size: int, precision: Quantity | str = BYTES_FP16) -> Quantity:
         # State space model memory footprint is independent of sequence length (O(1) w.r.t seq_len)
         # Represents the recursive state vector maintained by the model (e.g., Mamba)
         # Typically: layers * batch * hidden_dim * state_size * precision
-        bpp = precision.to(ureg.byte).magnitude
+        from ..core.units import resolve_precision
+        prec_qty = resolve_precision(precision)[1] if isinstance(precision, str) else precision
+        bpp = prec_qty.to(ureg.byte).magnitude
         size_bytes = self.layers * batch_size * self.hidden_dim * self.state_size * bpp
         return (size_bytes * ureg.byte).to(ureg.byte)
 
-    def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
+    def lower(self, precision: Quantity | str = BYTES_FP16) -> ComputationGraph:
         ops = self.inference_flops or (2 * self.parameters.to(ureg.count).magnitude * ureg.flop)
         weights = self.size_in_bytes(precision)
         return ComputationGraph(
@@ -434,13 +429,8 @@ class DiffusionWorkload(Workload):
     denoising_steps: int
     resolution: int
     inference_flops: Optional[Quantity] = None  # FLOPs for ONE denoising step
-    
-    def size_in_bytes(self, precision: Quantity = BYTES_FP16) -> Quantity:
-        param_count = self.parameters.to(ureg.count).magnitude
-        bpp = precision.to(ureg.byte).magnitude
-        return (param_count * bpp * ureg.byte).to(ureg.byte)
 
-    def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
+    def lower(self, precision: Quantity | str = BYTES_FP16) -> ComputationGraph:
         # Total inference flops = Flops per step * denoising steps
         base_ops = self.inference_flops or (2 * self.parameters.to(ureg.count).magnitude * ureg.flop)
         total_ops = base_ops * self.denoising_steps
@@ -465,12 +455,7 @@ class EmbodiedWorkload(Workload):
     layers: Optional[int] = None
     hidden_dim: Optional[int] = None
 
-    def size_in_bytes(self, precision: Quantity = BYTES_FP16) -> Quantity:
-        param_count = self.parameters.to(ureg.count).magnitude
-        bpp = precision.to(ureg.byte).magnitude
-        return (param_count * bpp * ureg.byte).to(ureg.byte)
-
-    def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
+    def lower(self, precision: Quantity | str = BYTES_FP16) -> ComputationGraph:
         base_ops = self.inference_flops or (2 * self.parameters.to(ureg.count).magnitude * ureg.flop)
         weights = self.size_in_bytes(precision)
         return ComputationGraph(

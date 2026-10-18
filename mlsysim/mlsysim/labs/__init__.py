@@ -54,6 +54,9 @@ except ImportError:
 
 
 def __getattr__(name: str):
+    if name == "experiments":
+        import importlib
+        return importlib.import_module(".experiments", __name__)
     if not _UI_AVAILABLE and name in _UI_EXPORTS:
         raise ImportError(
             f"'{name}' requires the 'labs' extra (marimo). "
@@ -65,5 +68,7 @@ def __getattr__(name: str):
 __all__ = [
     "DesignLedger",
     "LedgerState",
+    "experiments",
     *sorted(_UI_EXPORTS),
 ]
+

@@ -15,15 +15,15 @@ import math
 from dataclasses import dataclass
 from typing import Any, Literal, Mapping, Sequence
 
-from ..core.types import Quantity
-from ..core.units import resolve_precision, ureg
-from ..models.registry import Models
-from ..models.types import TransformerWorkload, Workload
-from ..physics import calc_activation_memory, calc_pipeline_bubble
-from ..systems.registry import Systems
-from ..systems.types import Fleet
-from .solvers.distributed import DistributedModel
-from .solvers.training import TrainingMemoryModel
+from mlsysim.core.types import Quantity
+from mlsysim.core.units import resolve_precision, ureg
+from mlsysim.models.registry import Models
+from mlsysim.models.types import TransformerWorkload, Workload
+from mlsysim.physics import calc_activation_memory, calc_pipeline_bubble
+from mlsysim.systems.registry import Systems
+from mlsysim.systems.types import Fleet
+from mlsysim.engine.solvers.distributed import DistributedModel
+from mlsysim.engine.solvers.training import TrainingMemoryModel
 
 
 ScalingMode = Literal["strong", "weak"]

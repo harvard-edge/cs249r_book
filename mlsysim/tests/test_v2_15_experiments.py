@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from mlsysim.core.units import Q_
-from mlsysim.engine.v2_15_experiments import (
+from mlsysim.labs.experiments.v2_15_experiments import (
     PlacementSite,
     WorkloadPlacement,
     calculate_energy,

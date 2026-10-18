@@ -23,10 +23,10 @@ import math
 from typing import Any, Literal
 
 from mlsysim.core.units import Q_, ureg
-from mlsysim.engine.v2_01_experiments import evaluate_c3_scaling
-from mlsysim.engine.v2_01_experiments import restore_quantities as restore_v2_01_quantities
-from mlsysim.engine.v2_07_experiments import checkpoint_tradeoff
-from mlsysim.engine.v2_10_experiments import (
+from mlsysim.labs.experiments.v2_01_experiments import evaluate_c3_scaling
+from mlsysim.labs.experiments.v2_01_experiments import restore_quantities as restore_v2_01_quantities
+from mlsysim.labs.experiments.v2_07_experiments import checkpoint_tradeoff
+from mlsysim.labs.experiments.v2_10_experiments import (
     Request,
     ServiceModel,
     illustrative_track_scenario,
@@ -34,7 +34,7 @@ from mlsysim.engine.v2_10_experiments import (
     deserialize_quantity as deserialize_v2_10_quantity,
     serialize_quantity as serialize_v2_10_quantity,
 )
-from mlsysim.engine.v2_15_experiments import (
+from mlsysim.labs.experiments.v2_15_experiments import (
     calculate_energy,
     check_facility,
     deserialize_experiment_value as deserialize_v2_15_value,

@@ -8,7 +8,7 @@ from dataclasses import replace
 import pytest
 
 from mlsysim.core.units import Q_
-from mlsysim.engine.v1_13_experiments import (
+from mlsysim.labs.experiments.v1_13_experiments import (
     ArrivalPhase,
     MODEL_ID,
     REPLAY_METHOD,

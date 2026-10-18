@@ -12,13 +12,13 @@ import json
 from math import ceil, sqrt
 from typing import Any, Mapping, Sequence
 
-from ..core.types import Quantity
-from ..core.units import Q_, ureg
-from ..hardware.registry import Hardware
-from ..hardware.types import HardwareNode
-from ..models.registry import Models
-from ..models.types import Workload
-from .solvers.compression import CompressionModel
+from mlsysim.core.types import Quantity
+from mlsysim.core.units import Q_, ureg
+from mlsysim.hardware.registry import Hardware
+from mlsysim.hardware.types import HardwareNode
+from mlsysim.models.registry import Models
+from mlsysim.models.types import Workload
+from mlsysim.engine.solvers.compression import CompressionModel
 
 
 TRACK_IDS = ("iphone", "oura_ring", "robotaxi", "cloud_fleet")

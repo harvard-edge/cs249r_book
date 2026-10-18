@@ -18,8 +18,8 @@ import math
 from dataclasses import dataclass, fields, is_dataclass
 from typing import Literal, Mapping
 
-from ..core.units import Q_, ureg
-from ..physics.reliability import calc_failure_probability, calc_mtbf_cluster
+from mlsysim.core.units import Q_, ureg
+from mlsysim.physics.reliability import calc_failure_probability, calc_mtbf_cluster
 
 
 DeploymentCoupling = Literal["independent_devices", "coupled_job"]

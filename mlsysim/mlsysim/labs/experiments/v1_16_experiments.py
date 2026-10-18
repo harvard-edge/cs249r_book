@@ -294,19 +294,19 @@ def replay_evidence_arm(
     if not isinstance(arm, Mapping) or not isinstance(arm.get("inputs"), Mapping):
         raise ValueError("evidence arm must contain an inputs mapping")
     if model_id == "v1_04_experiments":
-        from mlsysim.engine.v1_04_experiments import replay_experiment
+        from mlsysim.labs.experiments.v1_04_experiments import replay_experiment
 
         return replay_experiment({"method": model_key, "inputs": arm["inputs"]})
     if model_id == "v1_02_experiments":
-        from mlsysim.engine.v1_02_experiments import replay as replay_v1_02
+        from mlsysim.labs.experiments.v1_02_experiments import replay as replay_v1_02
 
         return replay_v1_02(model_key, arm["inputs"])
     if model_id == "v1_03_experiments":
-        from mlsysim.engine.v1_03_experiments import replay as replay_v1_03
+        from mlsysim.labs.experiments.v1_03_experiments import replay as replay_v1_03
 
         return replay_v1_03(model_key, arm["inputs"])
     if model_id == "v1_05_experiments":
-        from mlsysim.engine.v1_05_experiments import replay as replay_v1_05
+        from mlsysim.labs.experiments.v1_05_experiments import replay as replay_v1_05
 
         return replay_v1_05(model_key, arm["inputs"])
     if model_id == "constraint_explorer":
@@ -316,27 +316,27 @@ def replay_evidence_arm(
             raise ValueError(f"unknown pilot model_key {model_key!r}")
         return evaluate(**arm["inputs"])
     if model_id == "v1_06_experiments":
-        from mlsysim.engine.v1_06_experiments import replay_snapshot
+        from mlsysim.labs.experiments.v1_06_experiments import replay_snapshot
 
         return replay_snapshot({"model_key": model_key, "inputs": arm["inputs"]})
     if model_id == "v1_07_experiments":
-        from mlsysim.engine.v1_07_experiments import replay as replay_v1_07
+        from mlsysim.labs.experiments.v1_07_experiments import replay as replay_v1_07
 
         return replay_v1_07(model_key, arm["inputs"])
     if model_id == "v1_09_experiments":
-        from mlsysim.engine.v1_09_experiments import replay
+        from mlsysim.labs.experiments.v1_09_experiments import replay
 
         return replay(model_key, arm["inputs"])
     if model_id == "v1_08_experiments":
-        from mlsysim.engine.v1_08_experiments import replay as replay_v1_08
+        from mlsysim.labs.experiments.v1_08_experiments import replay as replay_v1_08
 
         return replay_v1_08(model_key, arm["inputs"])
     if model_id == "v1_10_experiments":
-        from mlsysim.engine.v1_10_experiments import replay as replay_v1_10
+        from mlsysim.labs.experiments.v1_10_experiments import replay as replay_v1_10
 
         return replay_v1_10(model_key, arm["inputs"])
     if model_id == "v1_11_experiments":
-        from mlsysim.engine.v1_11_experiments import replay_experiment
+        from mlsysim.labs.experiments.v1_11_experiments import replay_experiment
 
         if track_id is None:
             raise ValueError("track_id is required to replay Chapter 11 evidence")
@@ -344,7 +344,7 @@ def replay_evidence_arm(
             {"model_key": model_key, "track_id": normalize_track_id(track_id), "inputs": arm["inputs"]}
         )
     if model_id == "v1_12_experiments":
-        from mlsysim.engine.v1_12_experiments import replay as replay_v1_12
+        from mlsysim.labs.experiments.v1_12_experiments import replay as replay_v1_12
 
         return replay_v1_12(model_key, arm["inputs"])
     if model_id == "v1_16_experiments":
@@ -363,10 +363,10 @@ def replay_evidence_arm(
             raise ValueError(f"unknown Chapter 15 model_key {model_key!r}")
         return methods[model_key](**arm["inputs"])
     if model_id == "v1_14_experiments":
-        from mlsysim.engine.v1_14_experiments import replay_experiment
+        from mlsysim.labs.experiments.v1_14_experiments import replay_experiment
 
         return replay_experiment(model_key, arm["inputs"])
-    from mlsysim.engine.v1_13_experiments import REPLAY_METHOD, replay_serving_snapshot
+    from mlsysim.labs.experiments.v1_13_experiments import REPLAY_METHOD, replay_serving_snapshot
 
     if model_key != REPLAY_METHOD:
         raise ValueError(f"unsupported Chapter 13 model_key {model_key!r}")

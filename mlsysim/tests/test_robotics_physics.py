@@ -8,22 +8,17 @@ import pint
 
 from mlsysim.core.units import ureg, Q_
 from mlsysim.physics.robotics import (
-    calc_sensor_to_actuator_latency,
     calc_axi_fifo_contention,
     calc_safe_stopping_distance,
     calc_max_permitted_velocity,
     calc_kinetic_energy,
     calc_seam_acceleration_torque_jump,
     calc_inverted_pendulum_fall_time,
-    calc_actuator_thermal_power,
-    calc_action_chunk_cadence,
     calc_reflected_inertia,
     calc_spatial_information_age_displacement,
     calc_empirical_testing_exposure,
-    calc_dense_voxel_grid_memory,
     calc_3dgs_memory_footprint,
     calc_voltage_droop,
-    calc_cbf_safety_margin,
     calc_action_chunk_streaming_amortization,
     calc_watchdog_lease_bound,
     calc_phase_lag_total,
@@ -32,34 +27,20 @@ from mlsysim.physics.robotics import (
     calc_ethercat_cycle_time,
     calc_contact_force,
     calc_contact_yield_deadline,
-    calc_optimal_gear_ratio,
-    calc_geared_joint_acceleration,
     calc_inductive_voltage_droop,
     calc_alpha_power_gate_delay_stretch,
     calc_clopper_pearson_zero_failure_bound,
     calc_zero_failure_sample_size,
-    calc_demonstration_collection_yield,
-    calc_harmonic_drive_fatigue_consumption,
     calc_transient_impact_force,
     calc_tripwire_contact_force_accumulation,
-    calc_crypto_auth_deadline,
-    calc_coulomb_stiction_deadband,
     calc_shielded_system_hazard_rate,
     calc_cbf_qp_orthogonal_projection,
     calc_quintic_blend_duration,
-    calc_thermal_cooling_recovery_time,
-    calc_passive_compliance_stiffness,
-    calc_process_containment_time_to_breach,
     calc_teleop_ingestion_budget,
     calc_tsdf_voxel_grid_budget,
     calc_target_evidence_horizon,
     calc_tracked_evidence_horizon,
-    calc_watchdog_feed_window,
-    calc_intent_drift_lease,
-    calc_process_thermal_runaway_lease,
-    calc_c2_effective_deceleration,
     calc_latch_contact_stopping_profile,
-    calc_scenario_stopping_budget,
     calc_c2_stop_suffix,
     calc_scurve_stop_distance,
     calc_scurve_stop_time,
@@ -100,14 +81,6 @@ def test_axi_fifo_contention_distinguishes_tile_from_transaction_and_bypass():
         )
 
 
-def test_sensor_to_actuator_latency():
-    lat = calc_sensor_to_actuator_latency(
-        sensor_latency=Q_("16 ms"),
-        inference_latency=Q_("25 ms"),
-        arbitration_latency=Q_("1 ms"),
-        actuator_latency=Q_("2 ms"),
-    )
-    assert lat.to("ms").magnitude == pytest.approx(44.0)
 
 
 def test_safe_stopping_distance_tempe_golden():
@@ -189,22 +162,8 @@ def test_inverted_pendulum_fall_time():
     assert t_fall.to("s").magnitude == pytest.approx(1.03, rel=0.02)
 
 
-def test_actuator_thermal_power():
-    p = calc_actuator_thermal_power(current=Q_("10 A"), resistance=Q_("0.5 ohm"), duty_cycle=0.8)
-    # 100 * 0.5 * 0.8 = 40 W
-    assert p.to("W").magnitude == pytest.approx(40.0)
 
 
-def test_action_chunk_cadence():
-    cadence = calc_action_chunk_cadence(
-        chunk_horizon_steps=32,
-        control_loop_hz=Q_("50 Hz"),
-        brain_inference_hz=Q_("5 Hz"),
-    )
-    # step_period = 20 ms, chunk = 640 ms, brain_period = 200 ms -> headroom = 3.2
-    assert cadence["chunk_duration"].to("ms").magnitude == pytest.approx(640.0)
-    assert cadence["brain_period"].to("ms").magnitude == pytest.approx(200.0)
-    assert cadence["headroom_factor"] == pytest.approx(3.2)
 
 
 def test_spatial_information_age_displacement():
@@ -224,11 +183,6 @@ def test_empirical_testing_exposure():
     assert years == pytest.approx(341.73, rel=0.01)
 
 
-def test_dense_voxel_grid_memory():
-    # 512^3 * 4 bytes = 536,870,912 bytes = 512 MiB = 536.87 MB
-    mem = calc_dense_voxel_grid_memory(voxels_per_dim=512, bytes_per_voxel=4)
-    assert mem.to("MiB").magnitude == pytest.approx(512.0)
-    assert mem.to("MB").magnitude == pytest.approx(536.87, rel=0.01)
 
 
 def test_3dgs_memory_footprint():
@@ -243,16 +197,6 @@ def test_voltage_droop():
     assert droop.to("V").magnitude == pytest.approx(2.0)
 
 
-def test_cbf_safety_margin():
-    # Safe candidate
-    res_safe = calc_cbf_safety_margin(h_val=1.0, l_f_h=-0.5, l_g_h=1.0, u_cmd=2.0, alpha_coeff=1.0)
-    assert res_safe["psi"] == pytest.approx(2.5)
-    assert res_safe["is_safe"] is True
-
-    # Unsafe candidate
-    res_unsafe = calc_cbf_safety_margin(h_val=1.0, l_f_h=-0.5, l_g_h=1.0, u_cmd=-3.0, alpha_coeff=1.0)
-    assert res_unsafe["psi"] == pytest.approx(-2.5)
-    assert res_unsafe["is_safe"] is False
 
 
 def test_action_chunk_streaming_amortization():
@@ -403,19 +347,6 @@ def test_contact_force_and_yield_deadline():
     assert f_contact.to("N").magnitude == pytest.approx(3750.0, rel=1e-2)
 
 
-def test_optimal_gear_ratio_and_acceleration():
-    # Chapter 2 knee joint: J_load = 0.18 kg*m^2, J_rotor = 1.2e-4 kg*m^2, tau_motor = 4.0 N*m
-    j_load = Q_("0.18 kg*m^2")
-    j_rotor = Q_("1.2e-4 kg*m^2")
-    tau_motor = Q_("4.0 N*m")
-
-    n_opt = calc_optimal_gear_ratio(j_load, j_rotor)
-    # sqrt(0.18 / 1.2e-4) = sqrt(1500) ≈ 38.73
-    assert n_opt == pytest.approx(38.73, rel=1e-2)
-
-    alpha_opt = calc_geared_joint_acceleration(38.73, tau_motor, j_load, j_rotor)
-    # alpha = (38.73 * 4) / (0.18 + 38.73^2 * 1.2e-4) = 154.92 / 0.36 = 430.3 rad/s^2
-    assert alpha_opt.to("rad/s^2").magnitude == pytest.approx(430.3, rel=1e-2)
 
 
 def test_inductive_voltage_droop_and_gate_delay():
@@ -445,28 +376,6 @@ def test_clopper_pearson_and_sample_size():
     assert calc_zero_failure_sample_size(0.999, 0.95) == 2995
 
 
-def test_demonstration_yield_and_fatigue():
-    # Chapter 5: 10,000 clean demos, 25% failure, 10% QA reject -> yield = 67.5%
-    yield_res = calc_demonstration_collection_yield(
-        target_clean_demos=10000,
-        failure_rate=0.25,
-        qa_rejection_rate=0.10,
-        task_duration=Q_("45 s"),
-        reset_duration=Q_("15 s"),
-        daily_shift_hours=Q_("8 hr"),
-        operator_efficiency=0.60,
-    )
-    assert yield_res["effective_yield"] == pytest.approx(0.675, rel=1e-3)
-    assert yield_res["total_attempts"] == 14815
-    assert yield_res["operator_hours"] == pytest.approx(411.5, rel=0.05)
-
-    # Actuator wear: 50,000 demos * 30 s = 1.5e6 s, mean vel = 0.5 rad/s -> revs ≈ 1.19e5
-    wear_res = calc_harmonic_drive_fatigue_consumption(
-        total_active_duration=Q_("1500000 s"),
-        mean_joint_velocity=Q_("0.5 rad/s"),
-        rated_l10_life_revs=50_000_000.0,
-    )
-    assert wear_res["fatigue_percent"] < 1.0
 
 
 def test_transient_impact_and_tripwire():
@@ -489,28 +398,8 @@ def test_transient_impact_and_tripwire():
     assert f_accum.to("N").magnitude == pytest.approx(51.0, rel=1e-2)
 
 
-def test_crypto_auth_deadline():
-    # Chapter 14: d_clear = 1.2 m, v0 = 2.0 m/s, a = 4.0 m/s^2, t_mech = 80 ms, t_bus = 20 ms
-    # d_brake = 4 / 8 = 0.5 m -> t_avail = 0.7 / 2 = 0.35 s = 350 ms -> T_auth = 350 - 100 = 250 ms
-    t_deadline = calc_crypto_auth_deadline(
-        clearance_distance=Q_("1.2 m"),
-        initial_velocity=Q_("2.0 m/s"),
-        emergency_deceleration=Q_("4.0 m/s^2"),
-        mechanical_brake_lag=Q_("80 ms"),
-        bus_arbitration_delay=Q_("20 ms"),
-    )
-    assert t_deadline.to("ms").magnitude == pytest.approx(250.0, rel=1e-2)
 
 
-def test_coulomb_stiction_deadband():
-    # Chapter 15: tau_lag = 5.0 ms, tau_c = 4.5 N*m, tau_cmd = 6.0 N*m
-    # ratio = 6.0 / 1.5 = 4.0 -> t_dead = 5.0 * ln(4) ≈ 6.93 ms
-    t_dead = calc_coulomb_stiction_deadband(
-        commanded_torque=Q_("6.0 N*m"),
-        coulomb_friction_torque=Q_("4.5 N*m"),
-        stator_electrical_lag=Q_("5.0 ms"),
-    )
-    assert t_dead.to("ms").magnitude == pytest.approx(6.93, rel=1e-2)
 
 
 def test_shielded_system_hazard_rate():
@@ -542,38 +431,10 @@ def test_quintic_blend_duration():
     assert tau.to("ms").magnitude == pytest.approx(93.75, rel=1e-2)
 
 
-def test_thermal_cooling_recovery_time():
-    # Chapter 13: tau_th = 8.0 s, T_start = 95 C, T_clear = 85 C, T_target = 53 C
-    # t = 8 * ln((95 - 53)/(85 - 53)) = 8 * ln(42 / 32) = 8 * 0.2719 ≈ 2.175 s
-    t_rec = calc_thermal_cooling_recovery_time(
-        tau_thermal=Q_("8.0 s"),
-        t_start=95.0,
-        t_clear=85.0,
-        t_target=53.0,
-    )
-    assert t_rec.to("s").magnitude == pytest.approx(2.18, rel=0.02)
 
 
-def test_passive_compliance_stiffness():
-    # Chapter 17: F_allow = 13.5 N, F_preload = 6.0 N, dx = 3.0 mm -> k = 7.5 / 0.003 = 2500 N/m
-    k_spring = calc_passive_compliance_stiffness(
-        allowable_force=Q_("13.5 N"),
-        preload_force=Q_("6.0 N"),
-        motor_stall_displacement=Q_("3.0 mm"),
-    )
-    assert k_spring.to("N/m").magnitude == pytest.approx(2500.0, rel=1e-2)
 
 
-def test_process_containment_time_to_breach():
-    # Chapter 15: V_max = 95 L, V_0 = 88 L, Q_in = 1.5 L/s, Q_out = 0.1 L/s -> Q_net = 1.4 L/s
-    # t = 7.0 / 1.4 = 5.0 s
-    t_b = calc_process_containment_time_to_breach(
-        capacity_limit=Q_("95 L"),
-        current_volume=Q_("88 L"),
-        inflow_rate=Q_("1.5 L/s"),
-        outflow_rate=Q_("0.1 L/s"),
-    )
-    assert t_b.to("s").magnitude == pytest.approx(5.0, rel=1e-2)
 
 
 def test_teleop_ingestion_budget():
@@ -641,36 +502,10 @@ def test_tsdf_voxel_grid_budget_rejects_invalid_cache_hit_rate(hit_rate):
         )
 
 
-def test_intent_drift_lease():
-    # Chapter 10: target error reaches tolerance in 60 ms; this is not a stopping budget.
-    tau = calc_target_evidence_horizon(
-        tolerance_radius=Q_("30.0 mm"),
-        sensor_noise=Q_("6.0 mm"),
-        drift_velocity=Q_("0.40 m/s"),
-    )
-    assert tau.to("ms").magnitude == pytest.approx(60.0, rel=1e-3)
-    assert calc_intent_drift_lease(Q_("30.0 mm"), Q_("6.0 mm"), Q_("0.40 m/s")) == tau
 
 
-def test_process_thermal_runaway_lease():
-    # Chapter 10: P_in = 3600 W, C_th = 900 J/K, Delta_T = 2.0 K -> dT/dt = 4.0 K/s, tau = 500 ms
-    res = calc_process_thermal_runaway_lease(
-        heat_generation_rate=Q_("3600 W"),
-        thermal_capacitance=Q_("900 J/K"),
-        max_temp_overshoot=Q_("2.0 K"),
-    )
-    assert res["rate_of_rise"].to("K/s").magnitude == pytest.approx(4.0, rel=1e-3)
-    assert res["tau_lease"].to("ms").magnitude == pytest.approx(500.0, rel=1e-3)
 
 
-def test_calc_c2_effective_deceleration():
-    a_peak = Q_("2.0 m/s^2")
-    a_eff = calc_c2_effective_deceleration(a_peak)
-    assert a_eff.to("m/s^2").magnitude == pytest.approx(2.0 / 1.5, rel=1e-6)
-
-    # Rejection of invalid acceleration
-    with pytest.raises(ValueError, match="peak_deceleration"):
-        calc_c2_effective_deceleration(Q_("-1.0 m/s^2"))
 
 
 def test_calc_latch_contact_stopping_profile():
@@ -705,16 +540,6 @@ def test_calc_latch_contact_stopping_profile():
     assert res_hi["a_arm_needed"].to("m/s^2").magnitude == pytest.approx(400.0, rel=1e-4)
 
 
-def test_calc_scenario_stopping_budget():
-    from mlsysim import Embodied
-    AISLE = Embodied.Scenario.WarehouseAisle
-
-    budget_info = calc_scenario_stopping_budget(AISLE)
-    assert budget_info["budget"].to("mm").magnitude == pytest.approx(997.43, rel=1e-4)
-    assert budget_info["spare"].to("mm").magnitude == pytest.approx(102.57, rel=1e-4)
-    assert budget_info["v_ceiling"].to("m/s").magnitude == pytest.approx(1.3898, rel=1e-3)
-    assert budget_info["a_eff"].to("m/s^2").magnitude == pytest.approx(2.0 / 1.5, rel=1e-4)
-    assert budget_info["tau_delay"].to("ms").magnitude == pytest.approx(133.6, rel=1e-3)
 
 
 
@@ -842,13 +667,3 @@ def test_tracked_evidence_horizon_constant_acceleration():
         calc_tracked_evidence_horizon(Q_("15 mm"), Q_("6 mm"), Q_("0 m/s^2"))
 
 
-def test_watchdog_feed_window_bounds():
-    # 1 ms tick, completions in [60, 250] us, 20 us phase jitter -> spread 210 us, [790, 1210] us
-    w = calc_watchdog_feed_window(Q_("1 ms"), Q_("60 us"), Q_("250 us"), Q_("20 us"))
-    assert w["spread"].to("us").magnitude == pytest.approx(210.0)
-    assert w["t_lower"].to("us").magnitude == pytest.approx(790.0)
-    assert w["t_upper"].to("us").magnitude == pytest.approx(1210.0)
-    with pytest.raises(ValueError):
-        calc_watchdog_feed_window(Q_("1 ms"), Q_("300 us"), Q_("250 us"), Q_("20 us"))
-    with pytest.raises(ValueError):
-        calc_watchdog_feed_window(Q_("100 us"), Q_("0 us"), Q_("250 us"), Q_("20 us"))

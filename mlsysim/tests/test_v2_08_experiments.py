@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from mlsysim.engine.v2_08_experiments import (
+from mlsysim.labs.experiments.v2_08_experiments import (
     TRACKS,
     dominant_resource_fairness,
     dominant_shares,

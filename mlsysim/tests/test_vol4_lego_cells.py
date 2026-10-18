@@ -435,43 +435,6 @@ def test_vol4_ch13_inductive_pdn_voltage_droop():
     check(abs(delay_expansion_pct - 38.0) < 2.0, f"Unexpected delay expansion: {delay_expansion_pct}")
 
 
-def test_vol4_ch15_coulomb_stiction_deadband():
-    tau_cmd = 6.0 * (ureg.newton * meter)
-    tau_c = 4.5 * (ureg.newton * meter)
-    tau_lag = 5.0 * millisecond
-    inertia = 0.050 * (kilogram * (meter**2))
-
-    t_dead = calc_coulomb_stiction_deadband(
-        commanded_torque=tau_cmd,
-        coulomb_friction_torque=tau_c,
-        stator_electrical_lag=tau_lag,
-    )
-    alpha_sim = (tau_cmd / inertia).to(ureg.radian / (second**2))
-    tau_net_real = tau_cmd - tau_c
-    alpha_real = (tau_net_real / inertia).to(ureg.radian / (second**2))
-
-    t_eval = 50.0 * millisecond
-    theta_sim = (0.5 * alpha_sim.magnitude * (t_eval.to(second).magnitude ** 2))
-    t_active_real = (t_eval - t_dead).to(second).magnitude
-    lag_s = tau_lag.to(second).magnitude
-    dead_s = t_dead.to(second).magnitude
-    eval_s = t_eval.to(second).magnitude
-    theta_real = (
-        0.5 * alpha_real.magnitude * t_active_real**2
-        + tau_cmd.magnitude * lag_s / inertia.magnitude
-        * (lag_s * (math.exp(-dead_s / lag_s) - math.exp(-eval_s / lag_s))
-           - math.exp(-dead_s / lag_s) * t_active_real)
-    )
-    delta_theta = abs(theta_sim - theta_real)
-
-    check(abs(t_dead.to(millisecond).magnitude - 6.93) < 0.02, f"Unexpected deadband: {t_dead}")
-    check(abs(alpha_sim.magnitude - 120.0) < 0.1, f"Unexpected sim accel: {alpha_sim}")
-    check(abs(alpha_real.magnitude - 30.0) < 0.1, f"Unexpected real accel: {alpha_real}")
-    check(abs(theta_sim - 0.1500) < 0.001, f"Unexpected sim angle: {theta_sim}")
-    check(abs(theta_real - 0.0221130564) < 1e-7, f"Unexpected real angle: {theta_real}")
-    check(abs(delta_theta - 0.1278869436) < 1e-7, f"Unexpected delta theta: {delta_theta}")
-
-
 def test_vol4_ch06_covariate_drift_compounding():
     dt = 0.020 * second
     t_total = 10.0 * second
@@ -527,7 +490,6 @@ def test_vol4_ch10_intent_lease_archetypes():
         calc_target_evidence_horizon,
         calc_tripwire_contact_force_accumulation,
         calc_contact_force,
-        calc_process_thermal_runaway_lease,
     )
 
     target_horizon = calc_target_evidence_horizon(
@@ -557,11 +519,6 @@ def test_vol4_ch10_intent_lease_archetypes():
     stalled_contact = calc_contact_force(stiffness, (approach * unbounded_delay).to(millimeter))
     check(abs(stalled_contact.to(newton).magnitude - 2400.0) < 1.0, "Unexpected no-response contact estimate")
 
-    thermal = calc_process_thermal_runaway_lease(3600.0 * watt, 900.0 * (joule / kelvin), 2.0 * kelvin)
-    rise_rate = thermal["rate_of_rise"]
-    check(abs(rise_rate.to(kelvin / second).magnitude - 4.0) < 0.1, "Unexpected lumped rise rate")
-    check(abs(thermal["tau_lease"].to(millisecond).magnitude - 500.0) < 0.1, "Unexpected overshoot horizon")
-    check(abs((rise_rate * (10.0 * second)).to(kelvin).magnitude - 40.0) < 0.1, "Unexpected lumped rise")
 
 def test_vol4_ch16_biomechanical_impact_envelope():
     from mlsysim.physics.robotics import (

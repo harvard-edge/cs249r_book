@@ -8,15 +8,30 @@ except ImportError:
     np = None
 
 from .style import (
+    BODY_FIGSIZE,
     COLORS,
+    MIN_FONT_PT,
     WEB_FIG_DPI,
     bar_compare,
     finalize_web_figure as _finalize_web_figure,
+    plt,
     set_book_style,
     setup_plot,
-    plt,
 )
-from .style import BODY_FIGSIZE, MIN_FONT_PT
+
+__all__ = [
+    "BODY_FIGSIZE",
+    "COLORS",
+    "MIN_FONT_PT",
+    "WEB_FIG_DPI",
+    "bar_compare",
+    "plt",
+    "set_book_style",
+    "setup_plot",
+    "plot_roofline",
+    "plot_distributed_roofline",
+    "plot_evaluation_scorecard",
+]
 
 
 def plot_roofline(hardware_node, workloads=None, title=None):
@@ -386,7 +401,7 @@ def plot_evaluation_scorecard(evaluation):
     ratios = [l1_ratio, l2_ratio]
     
     # 3. OUTPUT (Visualization)
-    fig, ax, colors, plt = setup_plot(figsize=(BODY_FIGSIZE[0], 3.6))
+    fig, ax, colors, _plt = setup_plot(figsize=(BODY_FIGSIZE[0], 3.6))
     bar_colors = [colors['RedLine'] if r > 1.0 else colors['GreenLine'] for r in ratios]
     bars = ax.barh(levels, ratios, color=bar_colors, alpha=0.7, edgecolor='black')
     

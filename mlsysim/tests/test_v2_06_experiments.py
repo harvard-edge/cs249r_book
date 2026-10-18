@@ -3,7 +3,7 @@ import math
 
 import pytest
 
-from mlsysim.engine.v2_06_experiments import (
+from mlsysim.labs.experiments.v2_06_experiments import (
     TRACK_IDS,
     algorithm_cases,
     algorithm_crossover,

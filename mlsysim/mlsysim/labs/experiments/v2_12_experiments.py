@@ -12,8 +12,8 @@ from dataclasses import dataclass
 from math import ceil
 from typing import Mapping, Sequence
 
-from ..core.types import Quantity
-from ..core.units import USD, count, hour, minute
+from mlsysim.core.types import Quantity
+from mlsysim.core.units import USD, count, hour, minute
 
 
 def _fraction(name: str, value: float) -> float:

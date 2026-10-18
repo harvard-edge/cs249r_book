@@ -1,6 +1,6 @@
 import pytest
 
-from mlsysim.engine.v2_11_experiments import (
+from mlsysim.labs.experiments.v2_11_experiments import (
     TRACKS,
     client_records,
     compare_architectures,

@@ -23,7 +23,7 @@ async def _():
         native_bootstrap(__file__)
 
     import plotly.graph_objects as go
-    from mlsysim.engine.v2_06_experiments import (
+    from mlsysim.labs.experiments.v2_06_experiments import (
         algorithm_cases, algorithm_crossover, compression_comparison,
         overlap_bucket_options, overlap_timeline, routing_cases,
         semantic_exchange, topology_comparison, track_profile,

@@ -19,8 +19,8 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Iterable, Mapping, Sequence
 
-from ..core.types import Quantity
-from ..core.units import Q_
+from mlsysim.core.types import Quantity
+from mlsysim.core.units import Q_
 
 
 TRACK_IDS = ("tinyml", "mobile", "edge", "cloud")

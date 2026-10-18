@@ -12,7 +12,6 @@ from . import models
 from . import platforms
 from . import infrastructure
 from . import systems
-from . import sim
 from . import physics
 from . import embodied
 from . import sensors
@@ -37,10 +36,6 @@ from .actuators.registry import Actuators
 from .agents.registry import (
     Agents,
     ReferencePlatforms as AgentPlatforms,
-    CodingAgents,
-    DeliberationAgents,
-    MultiAgents,
-    InteractiveAgents,
 )
 from .ops import Ops
 from .engine import calibration

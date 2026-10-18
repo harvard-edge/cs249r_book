@@ -12,8 +12,8 @@ from dataclasses import dataclass, fields, is_dataclass
 import math
 from typing import Any, Literal, Mapping, Sequence
 
-from ..core.types import Quantity
-from ..core.units import Q_
+from mlsysim.core.types import Quantity
+from mlsysim.core.units import Q_
 
 
 Track = Literal["tinyml", "mobile", "edge", "cloud"]
