@@ -9,39 +9,6 @@ from mlsysim.core._validation import validate_nonnegative, validate_positive
 from .actuation import calc_tripwire_contact_force_accumulation
 
 
-def calc_sensor_to_actuator_latency(
-    sensor_latency,
-    inference_latency,
-    arbitration_latency,
-    actuator_latency,
-):
-    """
-    Calculate the total end-to-end perception-to-actuation loop latency.
-
-    Source: modeling assumption. The stages are summed as a serial pipeline,
-    not taken from a published model; sampling phase, jitter, and queueing
-    between stages are ignored.
-
-    Parameters
-    ----------
-    sensor_latency : Quantity
-        Sensor capture and transmission delay (e.g. camera frame exposure + USB/CSI bus).
-    inference_latency : Quantity
-        Policy inference duration on neural accelerator (e.g. VLA, Diffusion Policy).
-    arbitration_latency : Quantity
-        Deterministic nervous system / Control Barrier Function arbitration delay.
-    actuator_latency : Quantity
-        Motor controller response time and CAN/EtherCAT bus transit delay.
-
-    Returns
-    -------
-    Quantity
-        Total closed-loop latency in milliseconds or seconds.
-    """
-    total = sensor_latency + inference_latency + arbitration_latency + actuator_latency
-    return total.to(ureg.millisecond)
-
-
 def calc_safe_stopping_distance(
     velocity,
     total_latency,
@@ -427,32 +394,6 @@ def calc_scurve_rest_to_rest_time(distance, max_acceleration, max_jerk):
     }
 
 
-def calc_c2_effective_deceleration(peak_deceleration):
-    """
-    Calculate the equivalent constant deceleration for a C2-continuous stop.
-
-    A C2-continuous stop suffix entered from cruise velocity v with peak
-    deceleration a_peak requires stopping distance d_C2 = 0.75 * v^2 / a_peak
-    (derived in calc_c2_stop_suffix). The equivalent constant deceleration
-    a_eff that achieves the exact same stopping distance (v^2 / (2 * a_eff) = d_C2) is:
-
-        a_eff = a_peak / 1.5 = (2 / 3) * a_peak
-
-    Parameters
-    ----------
-    peak_deceleration : Quantity
-        Peak credible deceleration of the C2 stop profile (e.g. m/s^2).
-
-    Returns
-    -------
-    Quantity
-        Equivalent constant deceleration in m/s^2.
-    """
-    validate_positive(peak_deceleration, "peak_deceleration")
-    a = peak_deceleration.to(ureg.meter / ureg.second**2)
-    return (a / 1.5).to(ureg.meter / ureg.second**2)
-
-
 def calc_latch_contact_stopping_profile(
     approach_velocity=None,
     tripwire_force=None,
@@ -544,83 +485,4 @@ def calc_latch_contact_stopping_profile(
         "a_arm_needed": a_need,
         "t_arm_stop": t_stop,
         "df_dt": df_dt,
-    }
-
-
-def calc_scenario_stopping_budget(
-    scenario,
-    *,
-    velocity=None,
-    deceleration=None,
-    c2_profile=True,
-):
-    """
-    Calculate stopping distance budget, spare clearance, and speed ceiling for a scenario.
-
-    Consolidates scenario-level stopping physics from an EmbodiedSiteScenario
-    (e.g., WarehouseAisle):
-    1. Pre-braking delay tau_delay is taken from scenario.tau_delay.
-    2. Operating velocity defaults to scenario.v_aisle.
-    3. Peak deceleration defaults to scenario.a_brake.
-    4. When c2_profile=True, calculates effective constant deceleration
-       a_eff = calc_c2_effective_deceleration(deceleration); otherwise a_eff = deceleration.
-    5. Localization and tracking overhead is overhead_loc = scenario.delta_loc + scenario.eps_track.
-    6. Physical margin is phys_margin = scenario.delta_margin.
-    7. Total stopping distance budget:
-       budget = calc_safe_stopping_distance(v, tau_delay, a_eff, loc_margin=overhead_loc, physical_margin=phys_margin)
-    8. Residual spare clearance:
-       spare = scenario.d_clear - budget
-    9. Maximum permitted velocity ceiling:
-       v_ceiling = calc_max_permitted_velocity(scenario.d_clear, tau_delay, a_eff, loc_margin=overhead_loc, physical_margin=phys_margin)
-
-    Parameters
-    ----------
-    scenario : EmbodiedSiteScenario
-        Site scenario instance containing d_clear, delta_loc, eps_track, delta_margin,
-        tau_delay, and default speeds.
-    velocity : Quantity, optional
-        Operating velocity to evaluate (default: scenario.v_aisle).
-    deceleration : Quantity, optional
-        Loaded deceleration (default: scenario.a_brake).
-    c2_profile : bool, optional
-        Whether the stop follows a C2-continuous profile (default: True).
-
-    Returns
-    -------
-    dict
-        - "budget": Total safe stopping distance budget (Quantity in mm).
-        - "spare": Residual clearance margin d_clear - budget (Quantity in mm).
-        - "v_ceiling": Maximum safe operating velocity (Quantity in m/s).
-        - "a_eff": Effective deceleration used (Quantity in m/s^2).
-        - "tau_delay": Pre-braking delay (Quantity in ms).
-        - "overhead_loc": Localization and tracking uncertainty (Quantity in m).
-    """
-    v = velocity if velocity is not None else scenario.v_aisle
-    a_peak = deceleration if deceleration is not None else scenario.a_brake
-
-    validate_positive(v, "velocity")
-    validate_positive(a_peak, "deceleration")
-
-    a_eff = calc_c2_effective_deceleration(a_peak) if c2_profile else a_peak
-    tau = scenario.tau_delay
-    overhead_loc = (scenario.delta_loc + scenario.eps_track).to(ureg.meter)
-    phys_margin = scenario.delta_margin.to(ureg.meter)
-
-    budget = calc_safe_stopping_distance(
-        v, tau, a_eff, loc_margin=overhead_loc, physical_margin=phys_margin
-    ).to(ureg.millimeter)
-
-    spare = (scenario.d_clear - budget).to(ureg.millimeter)
-
-    v_ceil = calc_max_permitted_velocity(
-        scenario.d_clear, tau, a_eff, loc_margin=overhead_loc, physical_margin=phys_margin
-    ).to(ureg.meter / ureg.second)
-
-    return {
-        "budget": budget,
-        "spare": spare,
-        "v_ceiling": v_ceil,
-        "a_eff": a_eff,
-        "tau_delay": tau,
-        "overhead_loc": overhead_loc,
     }

@@ -36,34 +36,6 @@ def calc_spatial_information_age_displacement(velocity, information_age):
     return dx.to(ureg.meter)
 
 
-def calc_dense_voxel_grid_memory(voxels_per_dim: int, bytes_per_voxel: int = 4):
-    """
-    Calculate volumetric memory footprint for a dense 3D cubic voxel grid.
-
-    Equation:
-        Memory = (N_voxels)^3 * bytes_per_voxel
-
-    Source: standard cubic voxel discretization, O(N^3) spatial complexity.
-
-    Parameters
-    ----------
-    voxels_per_dim : int
-        Grid resolution along one dimension (e.g. 512 or 1024).
-    bytes_per_voxel : int, optional
-        Storage bytes per voxel state (default 4 bytes for float32 occupancy/TSDF).
-
-    Returns
-    -------
-    Quantity
-        Memory footprint in bytes (auto-scalable to MB / GB).
-    """
-    validate_at_least(voxels_per_dim, 1, "voxels_per_dim")
-    validate_at_least(bytes_per_voxel, 1, "bytes_per_voxel")
-
-    total_bytes = (voxels_per_dim ** 3) * bytes_per_voxel
-    return total_bytes * ureg.byte
-
-
 def calc_3dgs_memory_footprint(num_gaussians: int, bytes_per_gaussian: int = 56):
     """
     Calculate spatial state memory footprint for 3D Gaussian Splatting (3DGS).
@@ -333,14 +305,6 @@ def calc_free_space_expiry(free_depth, loc_bound, protective_clearance, approach
     return calc_linear_invalidation_horizon(loc_bound, approach_speed, free_depth - protective_clearance)
 
 
-def calc_intent_drift_lease(tolerance_radius, sensor_noise, drift_velocity):
-    """Compatibility name for :func:`calc_target_evidence_horizon`.
-
-    The result limits target-evidence age, not the time needed to stop.
-    """
-    return calc_target_evidence_horizon(tolerance_radius, sensor_noise, drift_velocity)
-
-
 def calc_teleop_ingestion_budget(
     num_cameras: int,
     rgb_width: int,
@@ -423,45 +387,4 @@ def calc_teleop_ingestion_budget(
         "bw_tactile": bw_tac,
         "bw_total": bw_total,
         "storage_per_hour": storage_1hr,
-    }
-
-
-def calc_demonstration_collection_yield(
-    target_clean_demos: int,
-    failure_rate: float = 0.25,
-    qa_rejection_rate: float = 0.10,
-    task_duration=None,
-    reset_duration=None,
-    daily_shift_hours=None,
-    operator_efficiency: float = 0.60,
-):
-    """
-    Calculate physical demonstration collection yield, total attempts, and required labor hours.
-
-    Equation:
-        eta = (1 - failure_rate) * (1 - qa_rejection_rate)
-        n_attempts = ceil(target_clean_demos / eta)
-        t_total_attempt_sec = n_attempts * (task_duration + reset_duration)
-        operator_hours = t_total_attempt_sec / (3600 * operator_efficiency)
-    """
-    validate_at_least(target_clean_demos, 1, "target_clean_demos")
-    t_task = (45.0 * ureg.second) if task_duration is None else task_duration
-    t_reset = (15.0 * ureg.second) if reset_duration is None else reset_duration
-    shift_h = (8.0 * ureg.hour) if daily_shift_hours is None else daily_shift_hours
-
-    eta = (1.0 - failure_rate) * (1.0 - qa_rejection_rate)
-    n_attempts = math.ceil(target_clean_demos / eta)
-
-    cycle_sec = (t_task + t_reset).to(ureg.second).magnitude
-    total_sec = n_attempts * cycle_sec
-
-    op_hours = total_sec / (3600.0 * operator_efficiency)
-    shift_len = shift_h.to(ureg.hour).magnitude
-    op_days = op_hours / shift_len
-
-    return {
-        "effective_yield": float(eta),
-        "total_attempts": int(n_attempts),
-        "operator_hours": float(op_hours),
-        "operator_days": float(op_days),
     }

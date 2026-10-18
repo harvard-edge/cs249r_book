@@ -12,7 +12,6 @@ from . import models
 from . import platforms
 from . import infrastructure
 from . import systems
-from . import sim
 from . import physics
 from . import embodied
 from . import sensors

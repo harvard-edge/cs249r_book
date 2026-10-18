@@ -85,37 +85,6 @@ def test_calc_kv_cache_bytes_per_token():
     assert expl_token.to("KiB").magnitude == pytest.approx(320.0)
 
 
-def test_calc_tool_wait_stranded_tax():
-    from mlsysim.physics import calc_tool_wait_stranded_tax
-    from mlsysim.core.units import ureg
-
-    GB = ureg.gigabyte
-    second = ureg.second
-
-    # Chapter 01 numbers: 8x H100 (640 GB total, 160 GB static weights -> 480 GB dynamic)
-    # Context 160k tokens, m_kv = 51.2 GB
-    # 60s wait @ $24/hr, 4 concurrent agents, 20 pipeline tools
-    res = calc_tool_wait_stranded_tax(
-        node_hbm_capacity=640.0 * GB,
-        model_weights_memory=160.0 * GB,
-        kv_memory=51.2 * GB,
-        tool_wait_duration=60 * second,
-        hourly_node_cost=24.0,
-        num_gpus=8,
-        num_concurrent_agents=4,
-        num_pipeline_tools=20,
-    )
-    assert res["m_hbm_dynamic"].to(GB).magnitude == pytest.approx(480.0)
-    assert res["m_hbm_dynamic_per_gpu"].to(GB).magnitude == pytest.approx(60.0)
-    assert res["pct_stranded_single"] == pytest.approx(0.106666, rel=1e-3)
-    assert res["m_stranded_concurrent"].to(GB).magnitude == pytest.approx(204.8)
-    assert res["pct_stranded_concurrent"] == pytest.approx(0.426666, rel=1e-3)
-    assert res["cost_turn"] == pytest.approx(0.40, rel=1e-3)
-    assert res["cost_pipeline"] == pytest.approx(8.00, rel=1e-3)
-
-
-
-
 def test_lighthouse_workload_profiles():
     """Research, remediation, and support workloads carry one book-wide set of inputs."""
     from mlsysim.agents.types import RemediationWorkload, ResearchWorkload, SupportWorkload

@@ -169,40 +169,6 @@ def calc_inverted_pendulum_fall_time(
     return tau_0.to(ureg.second)
 
 
-def calc_actuator_thermal_power(current, resistance, duty_cycle: float = 1.0):
-    """
-    Calculate average ohmic stator heat dissipation in electromagnetic actuators.
-
-    Equation:
-        P_loss = (I^2 * R) * duty_cycle
-
-    Source: Joule heating P = I^2 * R (OpenStax, University Physics Volume 2,
-    Sec. 9.5, Eq. 9.13) for one winding at constant resistance. Scaling by
-    duty_cycle is a modeling assumption; it takes the current as constant
-    while on and zero while off, and ignores the rise of winding resistance
-    with temperature.
-
-    Parameters
-    ----------
-    current : Quantity
-        Phase current flowing through actuator windings (e.g. Amperes).
-    resistance : Quantity
-        Phase winding resistance (e.g. Ohms).
-    duty_cycle : float, optional
-        Operating duty cycle fraction (0.0 to 1.0).
-
-    Returns
-    -------
-    Quantity
-        Thermal loss power in Watts.
-    """
-    validate_positive(resistance, "resistance")
-    validate_nonnegative(current, "current")
-
-    power = (current ** 2) * resistance * duty_cycle
-    return power.to(ureg.watt)
-
-
 def calc_voltage_droop(current, internal_resistance):
     """
     Calculate DC bus voltage droop across internal battery and cable resistance.
@@ -278,44 +244,6 @@ def calc_contact_yield_deadline(yield_force, stiffness, approach_velocity):
     return t.to(ureg.millisecond)
 
 
-def calc_optimal_gear_ratio(load_inertia, rotor_inertia) -> float:
-    """
-    Calculate inertia matching gear ratio maximizing joint output angular acceleration.
-
-    Equation:
-        N* = sqrt(J_load / J_rotor)
-    """
-    validate_positive(load_inertia, "load_inertia")
-    validate_positive(rotor_inertia, "rotor_inertia")
-
-    j_l = load_inertia.to(ureg.kg * (ureg.meter**2))
-    j_r = rotor_inertia.to(ureg.kg * (ureg.meter**2))
-
-    n_star = math.sqrt((j_l / j_r).magnitude)
-    return float(n_star)
-
-
-def calc_geared_joint_acceleration(gear_ratio: float, motor_torque, load_inertia, rotor_inertia):
-    """
-    Calculate joint output angular acceleration under geared transmission.
-
-    Equation:
-        ddot_q = (N * tau_motor) / (J_load + N^2 * J_rotor)
-    """
-    validate_positive(gear_ratio, "gear_ratio")
-    validate_positive(motor_torque, "motor_torque")
-    validate_positive(load_inertia, "load_inertia")
-    validate_positive(rotor_inertia, "rotor_inertia")
-
-    tau = motor_torque.to(ureg.newton * ureg.meter)
-    j_l = load_inertia.to(ureg.kg * (ureg.meter**2))
-    j_r = rotor_inertia.to(ureg.kg * (ureg.meter**2))
-
-    j_total = j_l + (gear_ratio**2) * j_r
-    alpha = (gear_ratio * tau) / j_total
-    return alpha.to(ureg.radian / (ureg.second**2))
-
-
 def calc_inductive_voltage_droop(loop_inductance, current_slew_rate):
     """
     Calculate inductive voltage drop across power distribution network (PDN) during current transients.
@@ -363,34 +291,6 @@ def calc_alpha_power_gate_delay_stretch(
     return {
         "stretch_ratio": float(ratio),
         "delay_expansion_percent": float(expansion_pct),
-    }
-
-
-def calc_harmonic_drive_fatigue_consumption(
-    total_active_duration,
-    mean_joint_velocity,
-    rated_l10_life_revs: float = 50_000_000.0,
-):
-    """
-    Calculate cumulative shaft revolutions and L10 fatigue consumption for strain wave / harmonic gearboxes.
-
-    Equation:
-        revolutions = (omega_mean * T_active) / (2 * pi)
-        fatigue_fraction = revolutions / L10_rated
-    """
-    validate_positive(total_active_duration, "total_active_duration")
-    validate_positive(mean_joint_velocity, "mean_joint_velocity")
-
-    t_sec = total_active_duration.to(ureg.second).magnitude
-    omega = mean_joint_velocity.to(ureg.radian / ureg.second).magnitude
-
-    revs = (omega * t_sec) / (2.0 * math.pi)
-    fraction = revs / rated_l10_life_revs
-
-    return {
-        "cumulative_revolutions": float(revs),
-        "fatigue_fraction": float(fraction),
-        "fatigue_percent": float(fraction * 100.0),
     }
 
 
@@ -495,28 +395,6 @@ def calc_tripwire_contact_force_accumulation(
     return f_lat.to(ureg.newton)
 
 
-def calc_coulomb_stiction_deadband(commanded_torque, coulomb_friction_torque, stator_electrical_lag):
-    """
-    Calculate deadtime duration before shaft acceleration occurs under stator electrical lag and Coulomb stiction.
-
-    Equation:
-        t_dead = tau_lag * ln(tau_cmd / (tau_cmd - tau_c))
-    """
-    validate_positive(commanded_torque, "commanded_torque")
-    validate_positive(coulomb_friction_torque, "coulomb_friction_torque")
-    validate_positive(stator_electrical_lag, "stator_electrical_lag")
-
-    cmd = commanded_torque.to(ureg.newton * ureg.meter).magnitude
-    coulomb = coulomb_friction_torque.to(ureg.newton * ureg.meter).magnitude
-    lag = stator_electrical_lag.to(ureg.millisecond)
-
-    if cmd <= coulomb:
-        return float("inf") * ureg.millisecond
-
-    ratio = cmd / (cmd - coulomb)
-    return (lag * math.log(ratio)).to(ureg.millisecond)
-
-
 def calc_quintic_blend_duration(delta_torque, max_allowable_jerk):
     """
     Compute minimum blend duration for quintic polynomial trajectory to bound torque jerk.
@@ -529,48 +407,6 @@ def calc_quintic_blend_duration(delta_torque, max_allowable_jerk):
     j_max = max_allowable_jerk.to(ureg.newton * ureg.meter / ureg.second)
     tau = (1.875 * d_tau) / j_max
     return tau.to(ureg.millisecond)
-
-
-def calc_thermal_cooling_recovery_time(tau_thermal, t_start, t_clear, t_target):
-    """
-    Calculate thermal cooling duration back to safe recovery threshold under Newton cooling.
-
-    Equation:
-        t = tau_th * ln((T_start - T_target) / (T_clear - T_target))
-    """
-    validate_positive(tau_thermal, "tau_thermal")
-
-    t_s = float(t_start.magnitude) if hasattr(t_start, "magnitude") else float(t_start)
-    t_c = float(t_clear.magnitude) if hasattr(t_clear, "magnitude") else float(t_clear)
-    t_tgt = float(t_target.magnitude) if hasattr(t_target, "magnitude") else float(t_target)
-
-    num = t_s - t_tgt
-    den = t_c - t_tgt
-    if den <= 0 or num <= 0:
-        raise ValueError("Invalid temperature gradient: target must be below start and clear thresholds.")
-
-    t_recov = (tau_thermal * math.log(num / den)).to(ureg.second)
-    return t_recov
-
-
-def calc_passive_compliance_stiffness(allowable_force, preload_force, motor_stall_displacement):
-    """
-    Size series compliance spring stiffness to prevent brittle fracture within motor stall displacement.
-
-    Equation:
-        k_spring <= (F_allow - F_preload) / Delta_x_stall
-    """
-    validate_positive(allowable_force, "allowable_force")
-    validate_nonnegative(preload_force, "preload_force")
-    validate_positive(motor_stall_displacement, "motor_stall_displacement")
-
-    delta_f = (allowable_force - preload_force).to(ureg.newton)
-    if delta_f.magnitude <= 0:
-        raise ValueError("Allowable force must exceed preload force.")
-
-    dx = motor_stall_displacement.to(ureg.meter)
-    k = delta_f / dx
-    return k.to(ureg.newton / ureg.meter)
 
 
 def calc_quasistatic_spill_acceleration(inner_radius, freeboard, gravity=None):

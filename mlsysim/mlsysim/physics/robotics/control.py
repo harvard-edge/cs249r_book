@@ -8,50 +8,8 @@ import numpy as np
 from mlsysim.core.units import ureg
 from mlsysim.core._validation import validate_at_least, validate_nonnegative, validate_positive
 
+
 CANFD_DATA_FIELD_SIZES = (0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64)
-
-
-
-def calc_action_chunk_cadence(chunk_horizon_steps: int, control_loop_hz, brain_inference_hz):
-    """
-    Evaluate the freshness and execution headroom of an action chunking policy.
-
-    Source: action chunking, predicting a sequence of actions per policy query,
-    is from Zhao et al., "Learning Fine-Grained Bimanual Manipulation with
-    Low-Cost Hardware" (ACT), arXiv:2304.13705. The chunk-duration and
-    headroom arithmetic (chunk steps over control rate, divided by the
-    inference period) is a modeling assumption of this package, not taken
-    from that paper.
-
-    Parameters
-    ----------
-    chunk_horizon_steps : int
-        Number of consecutive actions predicted in a single model inference chunk.
-    control_loop_hz : Quantity
-        Execution frequency of the low-level nervous system / motor loop (e.g. Hz).
-    brain_inference_hz : Quantity
-        Inference rate of the high-level neural policy (e.g. Hz).
-
-    Returns
-    -------
-    dict
-        Execution window duration, inference budget, and headroom factor.
-    """
-    validate_at_least(chunk_horizon_steps, 1, "chunk_horizon_steps")
-    validate_positive(control_loop_hz, "control_loop_hz")
-    validate_positive(brain_inference_hz, "brain_inference_hz")
-
-    step_period = (1.0 / control_loop_hz).to(ureg.second)
-    chunk_duration = chunk_horizon_steps * step_period
-    brain_period = (1.0 / brain_inference_hz).to(ureg.second)
-
-    headroom_factor = (chunk_duration / brain_period).to_base_units().magnitude
-
-    return {
-        "chunk_duration": chunk_duration.to(ureg.millisecond),
-        "brain_period": brain_period.to(ureg.millisecond),
-        "headroom_factor": headroom_factor,
-    }
 
 
 def calc_action_chunk_streaming_amortization(
@@ -267,48 +225,6 @@ def calc_watchdog_lease_bound(
         "t_lease_max": t_total_delay,
         "d_brake": d_brake.to(ureg.meter),
         "d_drift_allowable": d_drift.to(ureg.meter),
-    }
-
-
-def calc_watchdog_feed_window(period, completion_min, completion_max, phase_jitter):
-    """
-    Calculate the feed-interval range a windowed watchdog must accept from a healthy tick.
-
-    If a controller feeds once after each successful tick, the watchdog measures
-    the interval between feeds. With the completion offset from tick start in
-    [c_min, c_max] and the tick-start phase jitter bounded by J_phase,
-
-    Equation:
-        spread = (c_max - c_min) + J_phase
-        T_feed in [T_period - spread, T_period + spread]
-
-    The early (T_lower) and late (T_upper) trip points are configured around this
-    range; the late-trip response must still fit a separately derived fault
-    budget.
-
-    Source: interval between successive completions of a periodic task whose
-    completion offsets are bounded (difference of two bounded offsets plus the
-    release jitter); derived here.
-
-    Returns
-    -------
-    dict
-        spread, t_lower, t_upper (all in microseconds).
-    """
-    validate_positive(period, "period")
-    validate_nonnegative(completion_min, "completion_min")
-    validate_nonnegative(phase_jitter, "phase_jitter")
-    if completion_max < completion_min:
-        raise ValueError("completion_max must be >= completion_min.")
-
-    spread = (completion_max - completion_min + phase_jitter).to(ureg.microsecond)
-    t_lower = (period - spread).to(ureg.microsecond)
-    if t_lower.magnitude <= 0:
-        raise ValueError(f"Feed spread {spread} consumes the whole period {period}.")
-    return {
-        "spread": spread,
-        "t_lower": t_lower,
-        "t_upper": (period + spread).to(ureg.microsecond),
     }
 
 
@@ -655,46 +571,6 @@ def calc_ethercat_cycle_time(
     }
 
 
-def calc_cbf_safety_margin(h_val, l_f_h, l_g_h, u_cmd, alpha_coeff: float = 1.0):
-    """
-    Evaluate the forward-invariance safety margin of a Control Barrier Function (CBF).
-
-    Equation:
-        psi = L_f h(x) + L_g h(x) * u + alpha * h(x)
-
-    When psi >= 0, the candidate control command u guarantees that the system state
-    remains forward-invariant within the safe set C = {x : h(x) >= 0}.
-
-    Source: Ames et al., "Control Barrier Functions: Theory and Applications",
-    IEEE ECC, 2019.
-
-    Parameters
-    ----------
-    h_val : float or Quantity
-        Current barrier function evaluation h(x) (dimensionless or margin).
-    l_f_h : float or Quantity
-        Lie derivative along uncontrolled drift vector field L_f h(x).
-    l_g_h : float or Quantity
-        Lie derivative along control input vector field L_g h(x).
-    u_cmd : float or Quantity
-        Candidate actuation setpoint command proposed by the neural policy.
-    alpha_coeff : float, optional
-        Class-K gain coefficient alpha (default 1.0).
-
-    Returns
-    -------
-    dict
-        Safety margin psi, forward-invariant boolean status, and barrier value.
-    """
-    margin = l_f_h + (l_g_h * u_cmd) + (alpha_coeff * h_val)
-    is_safe = margin.magnitude >= 0 if hasattr(margin, "magnitude") else margin >= 0
-    return {
-        "psi": margin,
-        "is_safe": bool(is_safe),
-        "h_x": h_val,
-    }
-
-
 def calc_cbf_qp_orthogonal_projection(u_nom, a_vec, b_scalar):
     """
     Project onto a supplied abstract half-space in Euclidean control coordinates.
@@ -729,119 +605,6 @@ def calc_cbf_qp_orthogonal_projection(u_nom, a_vec, b_scalar):
         "correction_norm": correction,
         "lambda_star": lam,
         "was_modified": True,
-    }
-
-
-def calc_crypto_auth_deadline(
-    clearance_distance,
-    initial_velocity,
-    emergency_deceleration,
-    mechanical_brake_lag=None,
-    bus_arbitration_delay=None,
-):
-    """
-    Calculate maximum allowable cryptographic verification latency before kinematic stopping envelope breaches clearance.
-
-    Equation:
-        d_brake = v0^2 / (2 * a)
-        T_auth_max = (d_clear - d_brake) / v0 - t_mech - t_bus
-    """
-    validate_positive(clearance_distance, "clearance_distance")
-    validate_positive(initial_velocity, "initial_velocity")
-    validate_positive(emergency_deceleration, "emergency_deceleration")
-
-    t_mech = (0.0 * ureg.second) if mechanical_brake_lag is None else mechanical_brake_lag.to(ureg.second)
-    t_bus = (0.0 * ureg.second) if bus_arbitration_delay is None else bus_arbitration_delay.to(ureg.second)
-
-    v0 = initial_velocity.to(ureg.meter / ureg.second)
-    a = emergency_deceleration.to(ureg.meter / (ureg.second**2))
-    d_clear = clearance_distance.to(ureg.meter)
-
-    d_brake = ((v0**2) / (2.0 * a)).to(ureg.meter)
-    if d_clear < d_brake:
-        raise ValueError(f"Clearance {d_clear} is insufficient even with zero auth latency (braking requires {d_brake}).")
-
-    t_avail = (d_clear - d_brake) / v0
-    t_deadline = t_avail - t_mech - t_bus
-    return t_deadline.to(ureg.millisecond)
-
-
-def calc_process_containment_time_to_breach(
-    capacity_limit,
-    current_volume,
-    inflow_rate,
-    outflow_rate=None,
-):
-    """
-    Calculate time until liquid container or buffer capacity is breached under flow surge.
-
-    Equation:
-        t_breach = (V_max - V_0) / (Q_in - Q_out)
-    """
-    validate_positive(capacity_limit, "capacity_limit")
-    validate_nonnegative(current_volume, "current_volume")
-    validate_positive(inflow_rate, "inflow_rate")
-
-    q_out = (0.0 * (ureg.liter / ureg.second)) if outflow_rate is None else outflow_rate.to(ureg.liter / ureg.second)
-    v_max = capacity_limit.to(ureg.liter)
-    v_0 = current_volume.to(ureg.liter)
-    q_in = inflow_rate.to(ureg.liter / ureg.second)
-
-    q_net = q_in - q_out
-    if q_net.magnitude <= 0:
-        return float("inf") * ureg.second
-
-    headroom = v_max - v_0
-    if headroom.magnitude <= 0:
-        return 0.0 * ureg.second
-
-    t_breach = (headroom / q_net).to(ureg.second)
-    return t_breach
-
-
-def calc_process_thermal_runaway_lease(
-    heat_generation_rate,
-    thermal_capacitance,
-    max_temp_overshoot,
-):
-    """
-    Calculate lumped thermal rise rate and an assumed overshoot horizon.
-
-    This heat-capacity model does not predict thermal runaway or venting;
-    those require chemistry, initial temperature, cooling, and validated thresholds.
-
-    Equation:
-        dT_dt = P_in / C_th
-        tau = Delta_T_max / dT_dt
-
-    Parameters
-    ----------
-    heat_generation_rate : Quantity
-        Internal Joule/dissipative heat input rate P_in (e.g. W).
-    thermal_capacitance : Quantity
-        Lumped system thermal capacitance C_th (e.g. J/K).
-    max_temp_overshoot : Quantity
-        Permissible temperature rise Delta_T_max (e.g. K).
-
-    Returns
-    -------
-    dict
-        rate_of_rise and tau_lease, the latter an overshoot horizon only.
-    """
-    validate_positive(heat_generation_rate, "heat_generation_rate")
-    validate_positive(thermal_capacitance, "thermal_capacitance")
-    validate_positive(max_temp_overshoot, "max_temp_overshoot")
-
-    p = heat_generation_rate.to(ureg.watt)
-    c_th = thermal_capacitance.to(ureg.joule / ureg.kelvin)
-    delta_t = max_temp_overshoot.to(ureg.kelvin)
-
-    dt_dt = p / c_th
-    tau = delta_t / dt_dt
-
-    return {
-        "rate_of_rise": dt_dt.to(ureg.kelvin / ureg.second),
-        "tau_lease": tau.to(ureg.millisecond),
     }
 
 
