@@ -8,7 +8,8 @@ value is sourced:
 
   - Stack numbers (one per layer, each from the lecture that taught it, with
     the value and source recorded in that lecture's lecture_map.yml):
-    TPU 30 to 80x performance per watt (L11, Jouppi et al. 2017); 8.6 ms of
+    TPU 30 to 80x performance per watt (L11, Jouppi et al. 2017); a datasheet
+    20 against a sustained 1.5 TOPS/W (L12, chapter Sec. 12.7 scenario); 8.6 ms of
     eager host time against 0.9 ms of weight reads for one GPT-2 XL token
     (L7, Frameworks Sec. 7.1); 7B model 14 GB in FP16 against a phone's 8 GB
     (L10, Model Compression Sec. 10.1); 16 bytes per parameter, PaLM about
@@ -18,7 +19,9 @@ value is sourced:
     percent (L15, Obermeyer et al. 2019); Tay suspended after 16 hours (L4,
     War Story 4.1); GPT-2 saw each WebText token about 17 times (L9).
   - Fleet failure chain: chapter Sec. 16.1 (composite scenario, margin
-    figure); MobileNetV2 journey: chapter table 2 (8.7x fewer FLOPs for a
+    figure). Lecture tags name the deck that teaches each idea: calibration
+    set (10b), training-serving skew (4, 13b), drift (4b, 14b), slices
+    against one aggregate metric (12b). MobileNetV2 journey: chapter table 2 (8.7x fewer FLOPs for a
     3x3, 256-output-channel layer; INT8 is 1/4 of FP32 storage; p99 < 50 ms).
   - Roofline: H100 3.35 TB/s, FP16 989 TFLOP/s, INT8 1,979 TOPS; ridges
     295 and 591 FLOP/byte; GPT-2 XL decode 1 FLOP/byte; GPT-2 XL QKV
@@ -144,7 +147,7 @@ layers = [
     ("Training", "16 bytes per parameter: PaLM ≈ 100 H100s", "L8", 0.12),
     ("Models", "7B model in FP16 = 14 GB; phone has 8 GB", "L10", 0.17),
     ("Frameworks", "Host 8.6 ms against 0.9 ms of weight reads", "L7", 0.22),
-    ("Hardware", "TPU: 30 to 80× performance per watt", "L11", 0.12),
+    ("Hardware", "TPU 30 to 80× perf/W; 1.5 TOPS/W sustained, not 20", "L11, L12", 0.12),
 ]
 for i, (name, num, lec, op) in enumerate(layers):
     y = 20 + i * 64
@@ -167,10 +170,10 @@ g.write("stack_numbers", 1)
 # The fleet failure chain, tagged by lecture (frames 3, 6, 29)
 # =============================================================================
 g = Svg(900, 390)
-stages = [("INT8\ncalibration", C["compute"], C["compute_l"], "Lecture 10\ncalibration set"),
-          ("Firmware\npreprocessing", C["neutral"], C["neutral_l"], "Lectures 4, 13\ntraining-serving skew"),
-          ("Input shift on\none cohort", C["neutral"], C["neutral_l"], "Lecture 14\ndrift"),
-          ("Accuracy\n−4 points", C["danger"], C["danger_l"], "Lecture 12\naggregate metric only")]
+stages = [("INT8\ncalibration", C["compute"], C["compute_l"], "Lecture 10b\ncalibration set"),
+          ("Firmware\npreprocessing", C["neutral"], C["neutral_l"], "Lectures 4, 13b\ntraining-serving skew"),
+          ("Input shift on\none cohort", C["neutral"], C["neutral_l"], "Lectures 4b, 14b\ndrift"),
+          ("Accuracy\n−4 points", C["danger"], C["danger_l"], "Lecture 12b\naggregate metric only")]
 for i, (lab, stroke, fill, tag) in enumerate(stages):
     x = 20 + i * 222
     g.rect(x, 30, 190, 100, fill, stroke, sw=2.5)
@@ -199,11 +202,11 @@ phases = [
     ("Architecture", "Depthwise separable:\n8.7× fewer FLOPs per layer", "L6"),
     ("Training", "Large batches to train;\nserves one image at a time", "L8"),
     ("Data selection", "Milder augmentation\nfor a small model", "L9"),
-    ("Compression", "INT8: 1/4 the bytes of FP32", "L10"),
+    ("Compression", "INT8: 1/4 the bytes of FP32", "L10b"),
     ("Acceleration", "Do the phone's NPU\nkernels run INT8?", "L11"),
     ("Benchmarking", "Gain must survive\npreprocessing and transfer", "L12"),
     ("Serving", "p99 under 50 ms", "L13"),
-    ("Operations", "Accuracy tracked\nper device cohort", "L14"),
+    ("Operations", "Accuracy tracked\nper device cohort", "L14b"),
 ]
 for i, (name, num, lec) in enumerate(phases):
     row, col = divmod(i, 3)
