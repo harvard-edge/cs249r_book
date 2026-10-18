@@ -165,6 +165,7 @@ from .robotics import (
     calc_quasistatic_spill_acceleration,
     calc_intent_drift_lease,
     calc_process_thermal_runaway_lease,
+    calc_axi_fifo_contention,
 )
 
 from .quantities import (
@@ -322,6 +323,7 @@ __all__ = [
     "calc_quasistatic_spill_acceleration",
     "calc_intent_drift_lease",
     "calc_process_thermal_runaway_lease",
+    "calc_axi_fifo_contention",
     "transfer_time",
     "compute_time",
     "energy_from_power",
