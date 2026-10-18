@@ -1,0 +1,353 @@
+chapter: 02_compute_infrastructure
+lecture: "02"
+title: "Compute Infrastructure"
+subtitle: "From one accelerator to a pod"
+layer: facility
+minutes: 75
+notes_minutes: 71
+core_minutes: 59
+target_ideas: 30
+thesis: "Memory, communication, power, and reliability walls bind at successive physical scales, and capacity bought at peak FLOP/s is not capacity delivered."
+
+hook:
+  minutes: "0-4"
+  setup: "Photo of an H100 card with its datasheet: 989 TFLOP/s dense FP16, 3.35 TB/s HBM. Llama-3 70B serves one user at batch 1; each token reads 141.2 GB of FP16 weights and does 1.4e11 FLOPs."
+  question_to_class: "Which takes longer per token: the arithmetic, the weight transfer, or about equal?"
+  payoff: "Weight transfer: 42.1 ms against 0.14 ms of arithmetic, 99.7 percent of the sum. The synthesis returns to the same H100 and shows the share of its peak that becomes progress at each scale: 0.34 percent (decode bound, FP16), 45 percent (assumed local training efficiency, FP8), 21 percent (8,192-GPU scenario, derived)."
+  sources: ["chapter Napkin Math 2.1 (Sec. 2.3.1)", "photo: shared library nvidia-h100-pcie.jpg (Geekerwan, CC BY 3.0)"]
+
+recall: "Lecture 1's Fleet Law, T_step(N) = T_compute/N + T_comm(N) + T_sync(N) - T_overlap; students circle the terms the hardware sets (device rate, link bandwidth)."
+
+driving_question: "What limits the useful compute that an accelerator, a node, a rack, and a pod can deliver?"
+
+running_example: "The course's reference job (Archetype A): a 175B dense transformer, mixed-precision Adam, 16 B per parameter of persistent state (2.8 TB), on H100s; 1,024 GPUs in 128 DGX H100 nodes as the reference cluster, and the chapter's 8,192-GPU pod scenario (Napkin Math 2.4). The decode examples switch to Llama-3 70B, as the chapter does (Sec. 2.3.1), and the slides say so."
+
+goals:
+  - "Test an accelerator for capacity and for bandwidth separately, with the roofline."
+  - "Place tensor, pipeline, and data parallelism on the bandwidth staircase."
+  - "Size a rack's power and cooling, and name its failure domains."
+  - "Turn a training budget into wall-clock hours from sustained, not peak, throughput."
+
+segments:
+  - name: "The Walls"
+    divider_question: "What limits the useful compute that a fleet can deliver?"
+    read: "Sec. 2.1"
+    concept_questions: [1, 2]
+    minutes: 10
+    land: "Four walls bind at four physical scales, and relieving one exposes the next."
+  - name: Accelerator
+    divider_question: "Does the model fit, and how fast do its bytes arrive?"
+    read: "Sec. 2.2 to 2.4"
+    concept_questions: [3, 4, 5, 6]
+    minutes: 15.5
+    land: "Capacity decides whether a model fits and bandwidth decides how fast low-reuse phases run; the roofline tells which ceiling binds before any purchase."
+  - name: Node
+    divider_question: "Where must each kind of traffic run, inside and between nodes?"
+    read: "Sec. 2.5"
+    concept_questions: [7, 8, 9]
+    minutes: 15
+    land: "A node aggregates capacity but each memory stays private, so the partition puts its most frequent exchanges on the fastest wires."
+  - name: Rack
+    divider_question: "Can the building power and cool what the fleet bought?"
+    read: "Sec. 2.6"
+    concept_questions: [10, 11, 12]
+    minutes: 12.5
+    land: "Power delivery, cooling, and failure domains bound how much compute a building can install."
+  - name: Pod
+    divider_question: "How much of the purchased peak becomes training progress?"
+    read: "Sec. 2.4.1, 2.7, 2.8"
+    concept_questions: [13, 14, 15]
+    minutes: 10.5
+    land: "Diagnose the binding constraint first, then compare sustained useful work per dollar; 12.0 compute hours become 25.5 wall-clock hours."
+
+concept_questions:
+  - id: 1
+    q: "How much of an accelerator's datasheet does batch-1 decode use?"
+    picture: "H100 photo with datasheet numbers; log bars 0.14 ms arithmetic against 42.1 ms weight transfer"
+    numbers: "Llama-3 70B, 1.4e11 FLOPs and 141.2 GB per token; 989 TFLOP/s, 3.35 TB/s (Napkin Math 2.1); ratio 298 (calcs.py)"
+    example: "Llama-3 70B decode on one H100-equivalent path"
+    read: "Sec. 2.3.1"
+  - id: 2
+    q: "Which physical resource runs out first at each scale?"
+    picture: "Walls ladder (new SVG, built in four steps): accelerator, node, rack, pod"
+    numbers: "3.35 TB/s HBM feeding 989 TFLOP/s; NVLink 450 against InfiniBand 50 GB/s (9x); 33.5 kW against 12 kW; 10,000 GPUs at 50,000 h MTTF, about 5 h (Sec. 2.1, 2.5.1, 2.6, 2.7.1)"
+    example: "The chapter's figure 1 examples"
+    read: "Sec. 2.1"
+  - id: 3
+    q: "Why does HBM deliver so much more bandwidth than DDR5, and at what price?"
+    picture: "AMD Fiji package photo (GPU die and four HBM stacks on an interposer) beside the DDR5 against HBM3 table"
+    numbers: "200 GB/s against 3.35 TB/s (16.8x, about 17x), 64 against 1,024 bits, 20 against 4 pJ/bit, $3 against $10 to $15 per GB (table 5); 64 pJ operand fetch against 1.5 pJ MAC, 42x (Sec. 2.3.1)"
+    example: "H100 HBM3"
+    read: "Sec. 2.3.1"
+  - id: 4
+    q: "Are capacity and bandwidth the same test?"
+    picture: "Two-panel build: 141.2 GB against 80 GB, then decode floors 69.2, 42.1, 17.6 ms at A100, H100, B200 bandwidth"
+    numbers: "Sec. 2.3.1; floors computed in calcs.py (the chapter prints 17.7 for B200)"
+    example: "Llama-3 70B FP16; the HBM-capacity pitfall (192 GB HBM2e at 69.2 ms against 80 GB HBM3 with INT8 at 21 ms)"
+    read: "Sec. 2.3.1, 2.10"
+  - id: 5
+    q: "How does the roofline screen a purchase?"
+    picture: "H100 FP16 roofline with real ceilings; decode batch 1, batch 64, and training points added one per step; then the H200 predict"
+    numbers: "Ridge 295.2 FLOP/byte; 0.34 percent at I = 1; 21.7 percent at I = 64; training at 2,048 local tokens (Example 2.2, table 7); H200 1.4x bandwidth, 1.6x capacity, modeled decode 1.4x (Napkin Math 2.2)"
+    example: "H100 against H200"
+    read: "Sec. 2.3.2"
+  - id: 6
+    q: "What does specialization buy, and what does it bet?"
+    picture: "Die arithmetic share bars (approximate) beside a TPU v4 board photo; Epoch AI scatter of FP16 TFLOP/s per watt"
+    numbers: "CPU 5-10, GPU 50-60, TPU 70-80, ASIC over 90 percent (figure 2); TPU v1 92 TOPS INT8 in 75 W, 15 months (Example 2.1, Jouppi et al. 2017); 64 devices, fit about 1.2x per year; V100 0.42 to B200 2.25 TFLOP/s/W, 5.4x, against 18x peak and 3.3x TDP (table 2, figure 5)"
+    example: "TPU origin; NVIDIA V100 to B200"
+    read: "Sec. 2.2"
+  - id: 7
+    q: "Does the 175B training state fit in one node?"
+    picture: "Real HGX B200 baseboard photo with DGX H100 card; then stacked bars of 2.8 TB against 640 GB and 375 GB per GPU under TP-8 against 80 GB"
+    numbers: "350 + 350 + 700 + 700 + 700 GB plus 100 to 400 GB activations (table 11); per GPU 175 + 87.5 + 87.5 + 25 = 375 GB; 112.5 GB after offload (Example 2.4; the chapter rounds to 113)"
+    example: "175B on one DGX H100"
+    read: "Sec. 2.5.3"
+  - id: 8
+    q: "How much does each physical boundary cost?"
+    picture: "Staircase bars built in three steps beside an InfiniBand switch photo"
+    numbers: "10 GB in 3.0, 22.2, 200 ms at 3,350, 450, 50 GB/s (Napkin Math 2.3)"
+    example: "One 10 GB buffer"
+    read: "Sec. 2.5.1"
+  - id: 9
+    q: "Which parallelism goes on which tier, and why?"
+    picture: "Three lanes (tensor, pipeline, data) with size, frequency, overlap; then NVLink against PCIe stacked bars"
+    numbers: "201 MB, 192 times per step; 201 MB per micro-batch per boundary; 350 GB once per step (Sec. 2.5.1, table 10); ring 352 MB, 0.783 ms, 150.3 ms per step, compute 57.1 percent; PCIe 1,057 ms, communication 84.1 percent (Sec. 2.5.2, Example 2.3)"
+    example: "TP-8 for the 175B model"
+    read: "Sec. 2.5.1, 2.5.2"
+  - id: 10
+    q: "How much power does a training rack draw, and how fast is that growing?"
+    picture: "GB200 NVL72 rack photo with rack-power bars; two-panel plot of package ratings and Epoch AI largest-system power"
+    numbers: "12, 33.5, 100, 120 kW (Sec. 2.6, 2.6.2); H100 700 W to B300 1,400 W (2x); Frontier 40 MW to about 350 MW (9x) (figure 13; Epoch AI via MLSysIM)"
+    example: "GB200 NVL72; Frontier"
+    read: "Sec. 2.6.1"
+  - id: 11
+    q: "How much air, or water, removes a rack's heat?"
+    picture: "Q = m c dT with given values; air against water flow bars; cooling-tower photo"
+    numbers: "6.6 kg/s, 5.5 m3/s, 11,713 CFM of air for 100 kW at 15 K (Sec. 2.6.2); water 1.6 kg/s and 3,466x less volume (derived); GB200 NVL72 172 L/min at 10 K (derived from the chapter's inputs)"
+    example: "100 kW liquid-class rack"
+    read: "Sec. 2.6.2"
+  - id: 12
+    q: "What does one fault take out with it?"
+    picture: "Nested failure domains (GPU, node, rack, hall and row, building) beside the Pompidou website notice during the OVHcloud fire"
+    numbers: "OVHcloud Strasbourg, 10 March 2021, over 3.6 million websites offline (War Story 2.1); CDU 4 h: $2,048 for 256 GPUs, $80,000 for a 10,000-GPU synchronous job (Sec. 2.6.4, illustrative $2 per GPU-hour)"
+    example: "OVHcloud SBG2"
+    read: "Sec. 2.5.5, 2.6.4"
+  - id: 13
+    q: "How often does a 10,000-GPU pod lose a GPU?"
+    picture: "Frontier photo beside the pod's numbers"
+    numbers: "9.89 EFLOP/s FP16, 500 TB/s injection, 7 MW of GPUs; 50,000 / 10,000 = 5 h (Sec. 2.7.1)"
+    example: "Warehouse-scale computer"
+    read: "Sec. 2.7.1"
+  - id: 14
+    q: "Why plan on sustained, not peak, throughput, and how long does the 175B run take?"
+    picture: "Peak against eta = 0.4 bars; then the pod chain bars built in three steps"
+    numbers: "1,000 to 2,500 GPU-hours at 40 percent (Sec. 2.4.1); 3.15e23 FLOPs, 8,192 H100 at 1,979 TFLOP/s FP8; 5.4 h at full peak (derived), 12.0 h at 45 percent, 21.4, 22.1, 24.3, 25.5 h (Napkin Math 2.4)"
+    example: "175B on 8,192 H100s"
+    read: "Sec. 2.4.1, 2.7"
+  - id: 15
+    q: "Which constraint binds each workload, and how should hardware be compared?"
+    picture: "Diagnose table, answers revealed"
+    numbers: "Table 17; DLRM 10 TB needs at least 15 DGX H100 nodes of HBM (Lighthouse 2.1); Mixtral-8x7B 12.9B of 46.7B active (Sec. 2.8)"
+    example: "Training, decode, recommender, mixture of experts"
+    read: "Sec. 2.8"
+
+concept_trace:
+  - concept: "Infrastructure walls cascade"
+    frame: "Four walls bind at four physical scales"
+    shows: "Walls ladder built one scale per step (walls_step1..4)"
+  - concept: "Capacity and bandwidth are separate tests"
+    frame: "Capacity decides whether it fits; bandwidth decides how fast"
+    shows: "Two-panel build, then the roofline frame 'Decode sits at 1 FLOP/byte, far left of the H100 ridge at 295' as the procurement screen"
+  - concept: "Plan on sustained throughput"
+    frame: "A run planned at peak needs 1/eta times the GPU-hours"
+    shows: "Peak against eta = 0.4 bars (1,000 to 2,500 GPU-hours) and the sources of the gap"
+  - concept: "Bandwidth hierarchy dictates placement"
+    frame: "Frequent exchanges stay on fast links; rare ones cross the cluster"
+    shows: "Placement lanes built in three steps, after the staircase frame"
+  - concept: "Node aggregates private memories"
+    frame: "Does the 175B training state fit in one node?"
+    shows: "Stacked bars: 2.8 TB against 640 GB, then 375 GB per GPU against 80 GB; preceded by the HGX baseboard photo frame"
+  - concept: "Rack power wall"
+    frame: "A training rack draws 3 to 10 times a server rack's 12 kW"
+    shows: "GB200 NVL72 photo and rack-power bars; then the package-against-system power plot"
+  - concept: "Workload-matched hardware selection"
+    frame: "Diagnose: what binds each workload first?"
+    shows: "Four-workload table with binding constraint and comparison metric revealed"
+  - concept: "Specialization as a bet on workload stability (secondary)"
+    frame: "Specialization raises the arithmetic share by betting on the workload"
+    shows: "Die-share bars and TPU v4 board photo"
+  - concept: "Physical failure domains (secondary)"
+    frame: "One building fire took 3.6 million websites offline in 2021"
+    shows: "Nested failure domains and the OVHcloud fire screenshot"
+  - concept: "Pod sizing from the training budget (secondary)"
+    frame: "The 175B run: 12.0 hours of compute becomes 25.5 hours"
+    shows: "Pod chain bars"
+  - concept: "Arithmetic per watt at fixed precision (secondary)"
+    frame: "Peak FLOP/s per watt rises about 1.2x per year"
+    shows: "Epoch AI scatter with the four NVIDIA parts circled"
+  - concept: "Cooling class and heat removal (secondary)"
+    frame: "How much air carries away 100 kW?"
+    shows: "Q = m c dT, air against water bars, cooling tower photo"
+
+worked_examples:
+  - name: "Napkin Math 2.3: the bandwidth staircase"
+    steps: ["given: one 10 GB buffer; HBM 3,350, NVLink 450, InfiniBand 50 GB/s", "HBM 3.0 ms", "NVLink 22.2 ms", "InfiniBand 200 ms, 9x NVLink", "meaning: frequency and overlap decide placement; tensor parallelism inside the node, data parallelism across the cluster"]
+  - name: "Table 11 and Example 2.4: 175B training memory on one DGX H100"
+    steps: ["given: 16 B per parameter, 175B parameters, 640 GB per node", "2.8 TB of persistent state plus 100 to 400 GB activations", "TP-8 per GPU: 175 + 87.5 + 87.5 + 25 = 375 GB against 80 GB", "offload moments and master: 112.5 GB still too large", "TP-8 x DP-128 with ZeRO: 43.75 + 1.37 = 45.1 GB before gradients and activations", "meaning: the node is a fast unit, and the state must be sharded across nodes"]
+  - name: "Example 2.3: tensor parallelism over NVLink and PCIe"
+    steps: ["given: 192 AllReduces of 201 MB, ring factor 1.75, 200 ms compute (assumed)", "NVLink: 0.783 ms each, 150.3 ms, compute 57.1 percent", "PCIe Gen5: 5.51 ms each, 1,057 ms, communication 84.1 percent", "meaning: the most frequent exchange belongs on the fastest link"]
+  - name: "Napkin Math 2.4: training time for 175B"
+    steps: ["given: 6PD = 3.15e23 FLOPs; 8,192 H100 at 1,979 TFLOP/s FP8", "100 percent of peak: 5.4 h (derived)", "45 percent local efficiency: 12.0 h", "scaling efficiency 0.56: 21.4 h", "x1.03, x1.10, x1.05: 22.1, 24.3, 25.5 h", "meaning: about 21 percent of the purchased FP8 peak becomes progress (derived)"]
+
+active_learning:
+  - at_minute: 1
+    type: predict
+    prompt: "Llama-3 70B at batch 1 on an H100: arithmetic, weight transfer, or about equal?"
+    answer: "Weight transfer, 42.1 ms against 0.14 ms (Napkin Math 2.1)."
+  - at_minute: 4
+    type: retrieval
+    prompt: "Write the Fleet Law from Lecture 1; circle the terms that depend on the hardware."
+    answer: "T_compute/N (device rate) and T_comm(N) (link bandwidth); failures interrupt every term."
+  - at_minute: 15.5
+    type: predict
+    prompt: "H200 against H100: same FP16 peak, 1.4x bandwidth, 1.6x capacity. Batch-1 decode speedup? 1.0x, 1.4x, 1.6x, 2x"
+    answer: "1.4x, the bandwidth ratio (Napkin Math 2.2)."
+  - at_minute: 27.5
+    type: estimate
+    prompt: "Does the 175B training state fit in one 640 GB node? Split eight ways, how much per GPU?"
+    answer: "2.8 TB of persistent state does not fit; 375 GB per GPU against 80 GB (Example 2.4)."
+  - at_minute: 38
+    type: predict
+    prompt: "Move tensor parallelism from NVLink to PCIe Gen5. What share of the step is communication?"
+    answer: "84.1 percent over PCIe, 42.9 percent over NVLink, with 200 ms of assumed compute and no overlap (Example 2.3)."
+  - at_minute: 47.5
+    type: estimate
+    prompt: "How much air removes 100 kW at a 15 K rise? How much water?"
+    answer: "6.6 kg/s, 5.5 m3/s of air; about 1.6 L/s of water (derived), about 3,500x less volume."
+  - at_minute: 60.5
+    type: diagnose
+    prompt: "Name the binding constraint for large-batch 175B training, 70B batch-1 decode, a 10 TB embedding recommender, and mixture-of-experts training."
+    answer: "Compute then interconnect; memory bandwidth; memory capacity; fabric bisection (table 17)."
+  - at_minute: 66
+    type: concept_question
+    prompt: "True or false: more GPUs always mean faster training; size cooling for average power; enough HBM capacity settles the choice; all GPU-hours are equivalent."
+    answer: "All false: 8x hardware gives 5.4x speed (0.83 to 0.56 modeled); synchronized phases reach 700 W together; 69.2 ms against 21 ms; H100 is 7.9x a V100's FP16 peak (Sec. 2.10)."
+
+open_questions:
+  - "A building lasts 15 to 20 years and accelerators turn over every few. What should a facility be designed for?"
+  - "Specialized silicon gains efficiency by betting on today's operators. When is the bet worth it?"
+  - "Facility redundancy or better checkpoints: which buys more completed training per dollar?"
+
+more_examples:
+  - "Google TPU v1 (Jouppi et al. 2017): 92 TOPS INT8 in 75 W; 30 to 80x performance per watt on its inference workloads."
+  - "Cerebras WSE-3 (Cerebras S-1, 2024): 900,000 cores, 44 GB of on-wafer SRAM; weight streaming from MemoryX at 1.2 TB/s (Sec. 2.2.1, 2.9.2)."
+  - "AMD MI300X: 192 GB HBM at 5.3 TB/s; Gaudi 2: 24 integrated 100 GbE ports (Sec. 2.5.2)."
+  - "Llama 3 405B pretraining: faulty GPUs and HBM3 errors caused nearly half of the unexpected interruptions (Dubey et al. 2024, via Sec. 2.5.5)."
+  - "CXL over PCIe Gen5 at 64 GB/s against HBM3 at 3.35 TB/s, 52x (Sec. 2.9.1)."
+  - "Google's data-center tax: nearly 30 percent of cycles in common building blocks (Kanev et al. 2015, via Sec. 2.5.2)."
+
+left_to_reading:
+  - concept: "Wafer-scale engines, chiplets, CXL, optical circuit switching"
+    why: "Technologies that move a wall; one line each in the notes and open questions (Sec. 2.2.1, 2.2.2, 2.9)."
+  - concept: "PCIe hierarchy and NUMA placement inside a node"
+    why: "Detail better read than heard (Sec. 2.5.1)."
+  - concept: "Power delivery path and PUE accounting"
+    why: "PUE belongs to Lecture 15 (facility overhead boundary); the power path is in the transient notes only."
+  - concept: "MLPerf and benchmarking"
+    why: "Read Sec. 2.8.2; Lecture 9 owns the measurement contract."
+  - concept: "Inference-specific infrastructure and the serving estimate"
+    why: "Lecture 10 owns serving (Sec. 2.8.3)."
+
+closing:
+  return_to_hook: "Back to the H100's 989 TFLOP/s: decode is bound at 0.34 percent of FP16 peak; local training is assumed at 45 percent of FP8 peak; an 8,192-GPU run delivers about 21 percent; around the device sit 33.5 kW per rack and a GPU failure every 5 h at 10,000 GPUs."
+  read_and_practice: ["Sec. 2.3, 2.5, 2.6, 2.7", "the chapter's self-check questions", "redo Napkin Math 2.4 with a scaling efficiency of 0.83"]
+  further_reading:
+    - cite: "Compute Infrastructure, Sec. 2.3 to 2.7"
+      url: "https://mlsysbook.ai"
+      why: "Every number of today's lecture, with the napkin math in full."
+    - cite: "Jouppi et al., In-Datacenter Performance Analysis of a Tensor Processing Unit, ISCA 2017"
+      url: "https://doi.org/10.1145/3079856.3080246"
+      why: "The specialization bet in the designers' own words."
+    - cite: "Williams, Waterman, and Patterson, Roofline, CACM 2009"
+      url: "https://doi.org/10.1145/1498765.1498785"
+      why: "The origin of the roofline."
+    - cite: "Barroso, Holzle, and Ranganathan, The Datacenter as a Computer, 2019"
+      url: "https://doi.org/10.1007/978-3-031-01761-2"
+      why: "The warehouse-scale computer."
+    - cite: "Pilz et al., Trends in AI Supercomputers, 2025; Epoch AI data"
+      url: "https://arxiv.org/abs/2504.16026"
+      why: "The power data behind today's plot."
+    - cite: "Dubey et al., The Llama 3 Herd of Models, 2024"
+      url: "https://arxiv.org/abs/2407.21783"
+      why: "Interruptions measured on a real 16,384-GPU run."
+  bridge: "Lecture 3, Network Fabrics: what decides how long a collective takes on a real fabric?"
+
+callbacks:
+  - {lecture: 1, concept: "Fleet Law", where: "retrieval slide text and note; title note; pod chain note"}
+  - {lecture: 1, concept: "Reliability gap", where: "pod failure note"}
+  - {lecture: 1, concept: "Compute-optimal allocation (6PD)", where: "pod chain note"}
+  - {lecture: 3, concept: "Alpha-beta model", where: "staircase note"}
+  - {lecture: 3, concept: "Bisection bandwidth and topology economics", where: "diagnose note"}
+  - {lecture: 3, concept: "Network Fabrics (next lecture)", where: "closing frame label and note"}
+  - {lecture: 5, concept: "Collective contracts / Ring AllReduce", where: "goals note; node photo note; PCIe predict note"}
+  - {lecture: 5, concept: "Exposed communication under overlap", where: "pod chain note"}
+  - {lecture: 6, concept: "Parallelism plans, sharded data parallelism (ZeRO)", where: "goals note; TP-8 x DP-128 credit and note; placement credit"}
+  - {lecture: 6, concept: "Scaling efficiency", where: "pod chain note"}
+  - {lecture: 7, concept: "Fleet failure rate, recovery", where: "failure domains note; pod note"}
+  - {lecture: 9, concept: "Program goodput (MFU as a measure)", where: "roofline note; sustained-throughput credit"}
+  - {lecture: 10, concept: "Serving and batching", where: "H200 predict note"}
+  - {lecture: 15, concept: "Facility overhead boundary (PUE), grid side of the power ramp", where: "transient note; cooling note"}
+  - {lecture: "reading", concept: "Roofline recap", where: "roofline credit and note: Appendix A"}
+
+coverage:
+  primary_taught: ["Infrastructure walls cascade", "Capacity and bandwidth are separate tests", "Plan on sustained throughput", "Bandwidth hierarchy dictates placement", "Node aggregates private memories", "Rack power wall", "Workload-matched hardware selection"]
+  primary_left_to_reading: []
+  secondary: ["Specialization as a bet on workload stability", "Physical failure domains", "Pod sizing from the training budget", "Arithmetic per watt at fixed precision", "Cooling class and heat removal"]
+
+storyboard:
+  - {min: 0.5, type: title, title: "Compute Infrastructure", visual: "blueprint cover"}
+  - {min: 0.5, type: divider, title: "The Walls"}
+  - {min: 3, type: predict, title: "Which takes longer per token: math or bytes?", visual: "H100 photo; hook_decode bars", steps: 2}
+  - {min: 2, type: retrieval, title: "Recall: which Fleet Law terms does hardware set?", steps: 2}
+  - {min: 1.5, type: goals, title: "What limits the useful compute at each physical scale?"}
+  - {min: 2.5, type: build-up, title: "Four walls bind at four physical scales", visual: "walls_step1..4", steps: 4}
+  - {min: 0.5, type: divider, title: "Accelerator"}
+  - {min: 2.5, type: real-world, title: "HBM sits beside the die and gives about 17x DDR5's bandwidth", visual: "AMD Fiji HBM photo; table 5"}
+  - {min: 2.5, type: comparison, title: "Capacity decides whether it fits; bandwidth decides how fast", visual: "two_tests_step1..2", steps: 2}
+  - {min: 2.5, type: predict, title: "How much faster does an H200 decode?", visual: "h200_ratio", steps: 2}
+  - {min: 3, type: data-plot, title: "Decode sits at 1 FLOP/byte, far left of the H100 ridge at 295", visual: "roofline_step1..3", steps: 3}
+  - {min: 2.5, type: real-world, title: "Specialization raises the arithmetic share by betting on the workload", visual: "die_share; TPU v4 photo"}
+  - {min: 2, type: data-plot, title: "Peak FLOP/s per watt rises about 1.2x per year", visual: "perwatt (Epoch AI)"}
+  - {min: 0.5, type: divider, title: "Node"}
+  - {min: 1.5, type: real-world, title: "A node joins eight GPUs, but each keeps its memory private", visual: "HGX B200 photo; DGX H100 card"}
+  - {min: 3.5, type: exercise, title: "Does the 175B training state fit in one node?", visual: "node_state_step1..2", steps: 3}
+  - {min: 2, type: worked-example, title: "Adding 128-way data parallelism brings each GPU to about 45 GB", steps: 4}
+  - {min: 2.5, type: data-plot, title: "One 10 GB buffer: 3 ms in HBM, 22 ms on NVLink, 200 on InfiniBand", visual: "staircase_step1..3; InfiniBand photo", steps: 3}
+  - {min: 2.5, type: build-up, title: "Frequent exchanges stay on fast links; rare ones cross the cluster", visual: "placement_step1..3", steps: 3}
+  - {min: 2.5, type: predict, title: "What does PCIe do to tensor parallelism?", visual: "tp_links", steps: 2}
+  - {min: 0.5, type: divider, title: "Rack"}
+  - {min: 2, type: real-world, title: "A training rack draws 3 to 10 times a server rack's 12 kW", visual: "GB200 NVL72 photo; rack_power"}
+  - {min: 2.5, type: data-plot, title: "The largest AI system drew 9x more power in three years", visual: "power_trend (Epoch AI)"}
+  - {min: 2, type: big-number, title: "A barrier swings every GPU from 400 W to 700 W at once"}
+  - {min: 2.5, type: exercise, title: "How much air carries away 100 kW?", visual: "cooling_flow; cooling tower photo", steps: 2}
+  - {min: 3, type: real-world, title: "One building fire took 3.6 million websites offline in 2021", visual: "failure_domains; Pompidou notice screenshot"}
+  - {min: 0.5, type: divider, title: "Pod"}
+  - {min: 2, type: real-world, title: "At 10,000 GPUs, some GPU fails about every five hours", visual: "Frontier photo"}
+  - {min: 2, type: build-up, title: "A run planned at peak needs 1/eta times the GPU-hours", steps: 3}
+  - {min: 3, type: worked-example, title: "The 175B run: 12.0 hours of compute becomes 25.5 hours", visual: "pod_chain_step1..3", steps: 3}
+  - {min: 3, type: diagnose, title: "Diagnose: what binds each workload first?", steps: 2}
+  - {min: 0.5, type: divider, title: "Wrap-Up"}
+  - {min: 2, type: synthesis, title: "Of the H100's 989 TFLOP/s, a fraction becomes progress", visual: "delivered; H100 photo"}
+  - {min: 2.5, type: concept-question, title: "Vote: true or false?", steps: 2}
+  - {min: 1, type: takeaways, title: "Takeaways"}
+  - {min: 0.5, type: open-questions, title: "Open questions"}
+  - {min: 0.5, type: read, title: "Read and explore"}
+  - {min: 0.5, type: next, title: "What decides how long a collective takes on a real fabric?", visual: "InfiniBand photo"}
+
+notes_for_author:
+  - "Every derived number is computed in images/calcs.py; slides and notes copy its printed values. Where calcs differs from the chapter's rounding (B200 floor 17.6 against the chapter's 17.7; 112.5 against 113 GB; 188 against 190 mV), the deck uses the computed value."
+  - "The hook follows the course plan (Napkin Math 2.1, Llama-3 70B); the running case switches to the 175B model from the node segment on, and the slides say which model is in use."
+  - "Photos: the H100 is the PCIe card (the running case uses SXM5); the eight-GPU baseboard is B200 generation; Frontier is AMD-based. Each caption and note says so."
+  - "The Pompidou screenshot (Commons, CC BY-SA 4.0) shows a real website notice during the OVHcloud fire; it is the closest open-licensed artifact of the incident found on Commons."
+  - "Old-deck images in images/ are unused (listed in the report for removal with git rm)."
