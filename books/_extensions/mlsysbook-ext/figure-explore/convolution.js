@@ -25,6 +25,10 @@
     const phaseNames=['place window','accumulate row 1','accumulate row 2','accumulate row 3','write output'];
     const opts=[['0','Start: input and filter'],...Array.from({length:10},(_,i)=>[String(i+1),`[0, ${Math.floor(i/5)}] · ${phaseNames[i%5]}`]),...Array.from({length:23},(_,i)=>[String(11+i),`[${Math.floor((i+2)/5)}, ${(i+2)%5}] · nine MACs and write`]),['34','Complete: reuse and cost']];
     opts.forEach(([value,text])=>{const o=make('option','',text);o.value=value;menu.append(o);});label.append(menu);controls.append(label);
+    const guidance=make('p','mlsys-conv-note','Predict the edge output’s sign, then choose Work through an edge. Next pauses playback and advances one calculation.');
+    const shortcuts=make('div','mlsys-conv-shortcuts');
+    const edgeButton=make('button','','Work through an edge'),completeButton=make('button','','See complete output');
+    [edgeButton,completeButton].forEach(b=>{b.type='button';shortcuts.append(b);});
     const status=make('p','mlsys-conv-status');status.setAttribute('aria-live','polite');status.setAttribute('aria-atomic','true');
     const diagram=svgEl('svg',{viewBox:'0 0 620 590',role:'img','aria-label':'A violet five by five output above an orange sliding three by three window in the seven by seven input.'});
     const title=(x,y,text)=>{const e=svgEl('text',{x,y,class:'mlsys-conv-svg-title'});e.textContent=text;diagram.append(e);};
@@ -47,10 +51,13 @@
     kernel.flat().forEach(v=>kernelGrid.append(make('span','',v)));kernelPanel.append(kernelTitle,kernelGrid,make('p','','The same weights stay in use at all 25 positions.'));
     const mathPanel=make('section'),mathTitle=make('h4','','Current products'),products=make('div','mlsys-conv-products'),productCells=[];
     for(let i=0;i<9;i++){const e=make('span');products.append(e);productCells.push(e);}
-    const accumulator=make('p','mlsys-conv-accumulator'),operation=make('p','mlsys-conv-operation');mathPanel.append(mathTitle,products,accumulator,operation);work.append(kernelPanel,mathPanel);
+    const coordinate=make('p','mlsys-conv-coordinate'),accumulator=make('p','mlsys-conv-accumulator'),operation=make('p','mlsys-conv-operation');
+    const calculationControls=make('div','mlsys-conv-calculation-controls'),previousCalculation=make('button','','Previous calculation'),nextCalculation=make('button','','Next calculation');
+    [previousCalculation,nextCalculation].forEach(b=>{b.type='button';calculationControls.append(b);});
+    mathPanel.append(mathTitle,coordinate,products,accumulator,operation,calculationControls);work.append(kernelPanel,mathPanel);
     const narration=make('p','mlsys-conv-narration'),counts=make('p','mlsys-conv-counts');
     const body=make('div','mlsys-conv-body');body.append(diagram,work);
-    root.append(intro,scope,controls,status,body,narration,counts,make('p','mlsys-conv-note','MAC and access counts are logical scalar work, not measured memory transactions or timings. Neighboring windows overlap; caching or tiling can capture reuse, but this drawing does not predict speedup. No activation function is applied.'));
+    root.append(intro,scope,controls,shortcuts,guidance,status,body,narration,counts,make('p','mlsys-conv-note','MAC means multiply-accumulate: multiply an input by a weight and add the product to the running sum. MAC and access counts are logical scalar work, not measured memory transactions or timings. Neighboring windows overlap; caching or tiling can capture reuse, but this drawing does not predict speedup. No activation function is applied.'));
     function render(){
       root.classList.toggle('mlsys-conv-paused', !running);
       const complete=state===34,started=state>0,p=complete?24:state>=11?state-9:Math.max(0,Math.floor((state-1)/5)),phase=complete||state>=11?4:state===0?-1:(state-1)%5,r=Math.floor(p/5),c=p%5;
@@ -64,6 +71,8 @@
       productCells.forEach((e,i)=>{const a=Math.floor(i/3),b=i%3,v=input[r+a][c+b],w=kernel[a][b];e.textContent=`${v} × ${w} = ${v*w}`;e.classList.toggle('mlsys-conv-product-done',a<rowsDone);e.classList.toggle('mlsys-conv-product-current',phase>=1&&phase<=3&&a===phase-1);});
       const macs=complete?225:p*9+rowsDone*3,writes=complete?25:p+(phase===4?1:0);
       status.textContent=complete?'Complete · all 25 outputs written':!started?'Ready · 7 − 3 + 1 = 5 positions on each axis':`Output [${r}, ${c}] · ${(state>=11?'nine MACs and write':phaseNames[phase])}`;
+      coordinate.textContent=`Output [${r}, ${c}] uses input rows ${r}–${r+2}, columns ${c}–${c+2}. Indices start at zero.`;
+      previousCalculation.disabled=state===0;nextCalculation.disabled=complete;
       accumulator.textContent=`Accumulator: ${started?sum:0}${phase===4?' → output ['+r+', '+c+']':''}`;
       const terms=phase>=1&&phase<=3?kernel[phase-1].map((w,j)=>`${input[r+phase-1][c+j]} × (${w})`).join(' + '):'';
       operation.textContent=terms?`Add this row: ${terms}.` : complete?'Each output sums nine products.':phase===4?(state>=11?'Repeat the same nine-product sum, then write once. All nine current products are shown.':'Write once after all nine products; reset the accumulator for the next window.'):'Start this output with an accumulator of zero.';
@@ -73,9 +82,11 @@
       root.dataset.convolutionState=state;root.dataset.convolutionMacs=macs;root.dataset.convolutionWrites=writes;
     }
     function pause(){running=false;clearTimeout(timer);timer=null;if(!destroyed)render();}
-    function schedule(){timer=setTimeout(()=>{if(!running||destroyed)return;state++;if(state===34)running=false;render();if(running)schedule();},1600);}
+    function schedule(){timer=setTimeout(()=>{if(!running||destroyed)return;state++;if(state===34)running=false;render();if(running)schedule();},state<=10?6000:1200);}
     on(buttons.play,'click',()=>{if(running)return pause();if(state===34)state=0;running=true;render();schedule();});
     on(buttons.back,'click',()=>{pause();state=Math.max(0,state-1);render();});on(buttons.next,'click',()=>{pause();state=Math.min(34,state+1);render();});on(buttons.restart,'click',()=>{pause();state=0;render();});
+    on(edgeButton,'click',()=>{pause();state=6;render();});on(completeButton,'click',()=>{pause();state=34;render();});
+    on(previousCalculation,'click',()=>{pause();state=Math.max(0,state-1);render();});on(nextCalculation,'click',()=>{pause();state=Math.min(34,state+1);render();});
     on(menu,'change',()=>{const next=Number(menu.value);pause();state=next;render();});on(document,'visibilitychange',()=>{if(document.hidden)pause();});
     const observer=typeof IntersectionObserver==='undefined'?null:new IntersectionObserver(entries=>{if(!entries[0].isIntersecting&&running)pause();},{threshold:.1});observer?.observe(root);
     render();return{pause,destroy(){if(destroyed)return;pause();destroyed=true;observer?.disconnect();abort.abort();root.replaceChildren();}};

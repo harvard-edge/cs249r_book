@@ -32,6 +32,41 @@ caption. State any worked-case simplification. Reading-time playback must not
 imply measured machine latency. Do not invent counters or hardware effects to
 make a conceptual diagram appear dynamic. There is no animation quota.
 
+## Learner-centered pilot iteration
+
+Three simulated learner-perspective reviewers examined convolution, quantized
+arithmetic, and KV paging. No students were recruited, and no learning gains
+were measured. Their observations motivated three focused changes:
+
+- Convolution gives detailed arithmetic more reading time, offers paused jumps
+  to an edge example and completed output, and keeps local stepping and current
+  input/output coordinates near calculations on narrow screens.
+- Quantization compares both declared scales side by side, including computed
+  integer sums, reconstructed results, errors, and unchanged operand bytes.
+  Local cues connect representation changes to the current result.
+- KV paging lets a reader inspect an allocated logical-page lookup and check
+  whether a request's pages are reusable before or after its final consumer.
+
+Prediction prompts and self-check feedback are learning supports, not measured
+assessment. Whether these changes improve understanding remains an untested
+hypothesis. The catalog review record separates simulated observations from
+that hypothesis and supplies a five-task protocol for actual learner sessions.
+No external contact or analytics was added. The 16-lesson roster, chapter prose,
+and static artwork are unchanged.
+
+All four HTML jobs passed on final build 20261018-100612-17815. Convolution and
+paging passed four-profile runtime, targeted task, and visual checks on the
+preceding build 094548, with their code unchanged in the final build.
+Quantization passed those checks again in four profiles on final build 100612
+after visual feedback prompted a mobile table-fit and dark-caption repair.
+All 12 pilot task/profile cases pass across this scoped combination. Final
+loading, ID, and freshness checks passed for all 16 lessons across 15 chapter
+pages. Full-runtime proof for the 13 unchanged lessons remains historical.
+Reviewers inspected the task captures; these checks do not establish student
+understanding or learning gains.
+The final catalog resolves 707 chapter anchors and exactly 16 Explore markers,
+with 691 static entries and clean desktop-light/narrow-dark layouts.
+
 ## Selective rollout
 
 All 674 highlight-only players have been withdrawn. Two of their figures now
@@ -59,7 +94,7 @@ appears in the catalog and review record.
 Fresh four-profile runtime proof covers 15 unchanged factories on build 182142
 and convolution on final build 183145 after a responsive-layout fix. The two new
 lessons passed 172 state/profile captures with independent numeric and overflow
-checks; quantization also passed eight states at an alternate scale. Human
+checks; quantization also passed eight states at an alternate scale. Visual
 review inspected convolution window contacts and representative final chapter
 renders. This is a scoped combination of checks, not an assertion that all 16
 full runtime tests were rerun on the final build or a blanket semantic approval.

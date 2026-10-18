@@ -19,7 +19,11 @@
     const stepLabel=el('label','','Step '), menu=el('select'); menu.id=root.id+'-sequence';stepLabel.htmlFor=menu.id;
     stages.forEach((s,i)=>{const o=el('option','',`${i+1}. ${s}`);o.value=i;menu.append(o);});stepLabel.append(menu);controls.append(stepLabel);
     const scenarioLabel=el('label','mlsys-qmm-scenario','Activation scale '), scenario=el('select');scenario.id=root.id+'-scale';scenarioLabel.htmlFor=scenario.id;
-    for(const scale of [0.1,0.05]) {const o=el('option','',String(scale));o.value=scale;scenario.append(o);}scenarioLabel.append(scenario);
+    function addScales(select){for(const [value,label] of [[0.1,'0.10 — coarser spacing'],[0.05,'0.05 — finer spacing']]){const option=el('option','',label);option.value=value;select.append(option);}}
+    addScales(scenario);scenarioLabel.append(scenario);
+    const scaleHelp=el('p','mlsys-qmm-scale-help','Scale is the spacing between represented real values. Change it at any step to compare immediately; replay only to trace why. A smaller spacing also narrows the real range covered by the same INT8 integers and can cause clipping on larger inputs.');
+    const cue=el('p','mlsys-qmm-cue');
+    const chain=el('p','mlsys-qmm-chain','Cell notation: original real → stored integer → reconstructed real.');
     const status=el('div','mlsys-qmm-status');status.setAttribute('aria-live','polite');status.setAttribute('aria-atomic','true');
     const heading=el('h4',''), narration=el('p','');status.append(heading,narration);
     const pipeline=el('div','mlsys-qmm-pipeline');
@@ -35,18 +39,30 @@
     const outTitle=el('h5','','Requantize → activation → INT8'), outValue=el('strong','mlsys-qmm-result'), outDetail=el('p');output.append(outTitle,outValue,outDetail);
     pipeline.append(operands,compute,accumulator,output);
     const equation=el('div','mlsys-qmm-equation'), comparison=el('p','mlsys-qmm-comparison'), storage=el('p','mlsys-qmm-storage');
+    const resultPanel=el('section','mlsys-qmm-result-panel'), resultTitle=el('h5','','Compare the same calculation'), resultScenarioLabel=el('label','mlsys-qmm-scenario','Activation scale '), resultScenario=el('select');
+    resultScenario.id=root.id+'-result-scale';resultScenarioLabel.htmlFor=resultScenario.id;addScales(resultScenario);resultScenarioLabel.append(resultScenario);
+    const table=el('table','mlsys-qmm-table'), caption=el('p','mlsys-qmm-table-description','Both choices keep the same inputs, weight scale, output scale, and zero-points.'),thead=el('thead'), header=el('tr'), tbody=el('tbody');
+    ['Quantity','Coarser: 0.10','Finer: 0.05'].forEach(label=>{const th=el('th','',label);th.scope='col';header.append(th);});thead.append(header);caption.id=root.id+'-comparison-description';table.setAttribute('aria-describedby',caption.id);table.append(thead,tbody);
+    const prompt=el('p','','With finer activation spacing, what changes in raw INT8 operand storage?'), answers=el('div','mlsys-qmm-answers'), feedback=el('p','mlsys-qmm-feedback');feedback.setAttribute('aria-live','polite');
+    for(const [correct,label] of [[false,'Fewer operand bytes'],[true,'Same bytes, different rounding']]){const button=el('button','',label);button.type='button';on(button,'click',()=>{feedback.textContent=`${correct?'Correct.':'Both choices still use the same bytes.'} Six INT8 operand values occupy 6 bytes in either case; spacing changes rounding and represented range, not integer width. Finer spacing is not universally better: a narrower range can clip larger values.`;});answers.append(button);}
+    resultPanel.append(resultTitle,resultScenarioLabel,caption,table,prompt,answers,feedback);
     const assumptions=el('p','mlsys-qmm-assumptions','Signed INT8 range [−128, 127]. Round to nearest, ties away from zero; saturate after rounding. Chosen scales avoid clipping here. Nonzero zero-points must be subtracted before multiplication. Activation is ReLU for this worked example; the positive output passes unchanged.');
-    root.append(intro,controls,scenarioLabel,status,pipeline,equation,comparison,storage,assumptions);
-    function data(){
-      const qx=x.map(v=>clamp(round(v/sx)+zx)), qw=w.map(v=>clamp(round(v/sw)+zw));
+    root.append(intro,controls,scenarioLabel,cue,scaleHelp,status,chain,pipeline,equation,comparison,resultPanel,storage,assumptions);
+    function data(scale=sx,atStage=stage){
+      const qx=x.map(v=>clamp(round(v/scale)+zx)), qw=w.map(v=>clamp(round(v/sw)+zw));
       const terms=qx.map((v,i)=>(v-zx)*(qw[i]-zw));
-      const count=Math.max(0,Math.min(3,stage-2)), acc=terms.slice(0,count).reduce((a,b)=>a+b,0), total=terms.reduce((a,b)=>a+b,0);
-      const qy=clamp(round(total*sx*sw/sy)+zy), activated=Math.max(zy,qy), reconstructed=(activated-zy)*sy, reference=x.reduce((a,v,i)=>a+v*w[i],0);
+      const count=Math.max(0,Math.min(3,atStage-2)), acc=terms.slice(0,count).reduce((a,b)=>a+b,0), total=terms.reduce((a,b)=>a+b,0);
+      const qy=clamp(round(total*scale*sw/sy)+zy), activated=Math.max(zy,qy), reconstructed=(activated-zy)*sy, reference=x.reduce((a,v,i)=>a+v*w[i],0);
       return {qx,qw,terms,count,acc,total,qy,activated,reconstructed,reference};
     }
     function render(){
       const d=data();root.dataset.stage=stage;root.dataset.accumulator=d.acc;root.dataset.finalAccumulator=d.total;root.dataset.output=d.activated;root.dataset.reconstructed=fmt(d.reconstructed);
-      heading.textContent=`${stage+1} / ${stages.length} · ${stages[stage]}`; menu.value=stage;scenario.value=sx;
+      heading.textContent=`${stage+1} / ${stages.length} · ${stages[stage]}`; menu.value=stage;scenario.value=sx;resultScenario.value=sx;
+      cue.textContent=`Current scale ${sx.toFixed(2)} · INT32 sum ${d.acc} · ${d.count} of 3 products accumulated${stage>=6?` · reconstructed output ${fmt(d.reconstructed)}`:''}`;
+      resultPanel.hidden=stage!==7;
+      tbody.replaceChildren();
+      const choices=[data(0.1,7),data(0.05,7)];
+      for(const [label,values] of [['Activation scale',['0.10','0.05']],['INT32 sum',choices.map(v=>v.total)],['Output INT8',choices.map(v=>v.activated)],['Reconstructed real',choices.map(v=>fmt(v.reconstructed))],['Absolute error',choices.map(v=>fmt(Math.abs(v.reconstructed-v.reference)))],['Raw INT8 operand bytes',choices.map(v=>v.qx.length+v.qw.length)]]){const tr=el('tr'),th=el('th','',label);th.scope='row';tr.append(th);values.forEach(value=>tr.append(el('td','',String(value))));tbody.append(tr);}
       inputs.forEach((a,j)=>{
         const quantized=stage>=(j===0?1:2), source=j===0?x:w, qs=j===0?d.qx:d.qw, scale=j===0?sx:sw, zero=j===0?zx:zw;
         a.card.classList.toggle('mlsys-qmm-quantized',quantized);
@@ -64,13 +80,13 @@
       outDetail.textContent=stage>=6?`Multiplier (sₓ × s𝓌) / sᵧ = ${fmt(sx*sw/sy)}. ${stage===7?'ReLU leaves this positive represented value unchanged.':'Apply scale, round, add output zero-point −4, then clamp.'}`:'The accumulator is not an INT8 output. Requantize only after all three contributions arrive.';
       const description=[
         'The two input paths begin in floating point. Keep the same three pairs throughout; the exact floating-point dot product is 0.4086.',
-        `Quantize x using q = clamp(round(x / ${sx}) + 3). Each cell now shows original value → stored integer → reconstructed value; the representation has changed.`,
+        `Quantize x using q = clamp(round(x / ${sx}) + 3). The representation has changed; use the cell notation above the operands to compare each value.`,
         'Quantize w with scale 0.05 and zero-point 0. Both operands are now integer arrays. Their scale and zero-point metadata are still required to interpret them.',
         `Read the first pair, subtract its zero-points, and multiply. The accumulator changes from 0 to ${d.terms[0]}; neither stored integer alone is the original real value.`,
         `Add the second product ${d.terms[1]} to the previous sum ${d.terms[0]}. A reduction retains its partial sum instead of emitting an output for each pair.`,
         `Add the third product ${d.terms[2]}. The complete sum is ${d.total}. INT32 accumulation protects a longer reduction from the limited INT8 range; ${d.total>127?'this sum already exceeds signed INT8’s maximum of 127.':'this tiny sum happens to fit INT8.'}`,
         `Rescale the complete INT32 sum into output units: round(${d.total} × ${fmt(sx*sw/sy)}) − 4 = ${d.qy}. This conversion changes scale and rounds; it is not an 8-bit truncation.`,
-        `The output integer ${d.activated} reconstructs to ${fmt(d.reconstructed)}. Compared with the floating result 0.4086, signed error is ${fmt(d.reconstructed-d.reference)}. Try the other activation scale and replay: the arithmetic and rounding change together.`
+        `The output integer ${d.activated} reconstructs to ${fmt(d.reconstructed)}. Compared with the floating result 0.4086, signed error is ${fmt(d.reconstructed-d.reference)}. Change the activation scale here to compare the result immediately at this same step. Replay to trace the changed rounding.`
       ];narration.textContent=description[stage];
       equation.textContent=stage<1?'Reference: 0.31 × 0.42 + (−0.52) × (−0.18) + 0.77 × 0.24 = 0.4086':stage<3?`Quantizer: q = clamp(round(r / s) + z). Reconstruction: r̂ = s × (q − z).` :stage<6?`INT32 partial sum: ${d.terms.slice(0,d.count).join(' + ')} = ${d.acc}`:`Output: (${d.activated} − (${zy})) × ${sy} = ${fmt(d.reconstructed)}`;
       comparison.hidden=stage!==7;comparison.textContent=`FP reference ${fmt(d.reference)} → reconstructed ${fmt(d.reconstructed)} · signed error ${fmt(d.reconstructed-d.reference)} · absolute error ${fmt(Math.abs(d.reconstructed-d.reference))}`;
@@ -82,7 +98,7 @@
     on(buttons.play,'click',()=>{if(running)return pause();if(stage===7)stage=0;running=true;render();schedule();});
     on(buttons.back,'click',()=>{pause();stage=Math.max(0,stage-1);render();});on(buttons.next,'click',()=>{pause();stage=Math.min(7,stage+1);render();});
     on(buttons.restart,'click',()=>{pause();stage=0;render();});on(menu,'change',()=>{const v=Number(menu.value);pause();stage=v;render();});
-    on(scenario,'change',()=>{const v=Number(scenario.value);pause();sx=v;render();});on(document,'visibilitychange',()=>{if(document.hidden)pause();});
+    for(const select of [scenario,resultScenario])on(select,'change',()=>{const v=Number(select.value);pause();sx=v;feedback.textContent='';render();});on(document,'visibilitychange',()=>{if(document.hidden)pause();});
     const observer=typeof IntersectionObserver==='undefined'?null:new IntersectionObserver(entries=>{if(!entries[0].isIntersecting&&running)pause();},{threshold:.1});observer?.observe(root);
     render();return {pause,destroy(){if(destroyed)return;pause();destroyed=true;observer?.disconnect();abort.abort();root.replaceChildren();}};
   };
