@@ -20,8 +20,9 @@ Every value is from the rendered chapter (Model Training) unless noted:
   - Run time by format: 518, 70, 35 days (Napkin Math 8.7).
   - Per-layer activations at batch 32, 1,024 tokens: projections 419.4 MB,
     feed-forward 419.4 MB, scores 4,194.3 MB, LayerNorm about 10 MB
-    (Napkin Math 8.3). The 2,048-token bar is derived from the same formulas
-    (scores times 4, the rest times 2) and labeled derived.
+    (Napkin Math 8.3). The scores are three saved copies at 2 + 1 + 2 bytes
+    per entry (softmax output, dropout mask, output after dropout; Napkin Math 8.3);
+    the split of the bar follows those byte counts.
   - Tiling: 4,096^2 x 4 B = 67.1 MB; 128^2 x 4 B = 65.5 KB (Sec. 8.6.4);
     228 KB of shared memory per SM (Hardware Acceleration).
   - Stored per head at 4,096 tokens: 138.4 MB against 4.2 MB (Sec. 8.6.4).
@@ -63,18 +64,26 @@ names = ["FP32", "Mixed\nprecision", "Flash-\nAttention", "2 micro-\nbatches"]
 totals = [598, 311, 109.6, 66.8]
 
 
-def scoreboard(path, k, costs=None):
+def scoreboard(path, k, costs=None, alt=False):
+    """alt adds option B of the vote, segment checkpointing at 35.5 GB, as a
+    hollow bar beside the chosen option (Napkin Math 8.8)."""
     fig, ax = plt.subplots(figsize=(5.8, 2.6))
     for i, t in enumerate(totals):
         shown = i < k
         a = 1.0 if shown else 0.0
-        ax.bar(i, 24, 0.58, color=C["neutral"], alpha=a)
-        ax.bar(i, t - 24, 0.58, bottom=24, color=C["data"], alpha=a)
-        label(ax, i, max(t, CAP) + 18, f"{t:g} GB", C["data"] if t < CAP else C["danger"],
-              shown, ha="center", fontsize=13)
+        xpos = i - 0.17 if (alt and i == 3) else i
+        width = 0.32 if (alt and i == 3) else 0.58
+        ax.bar(xpos, 24, width, color=C["neutral"], alpha=a)
+        ax.bar(xpos, t - 24, width, bottom=24, color=C["data"], alpha=a)
+        label(ax, xpos, max(t, CAP) + 18, f"{t:g} GB", C["data"] if t < CAP else C["danger"],
+              shown, ha="center", fontsize=13 if not (alt and i == 3) else 11)
         if costs:
             label(ax, i, 395, costs[i], C["compute"], i > 0,
                   ha="center", va="bottom", fontsize=10.5, linespacing=1.1)
+    if alt:
+        ax.bar(3.19, 35.5, 0.32, color="white", edgecolor=C["compute"], lw=1.8, ls="--")
+        ax.text(3.19, 150, "B:\n35.5", color=C["compute"], fontsize=13,
+                fontweight="bold", ha="center", va="bottom", linespacing=1.0)
     ax.axhline(CAP, color=C["memory"], lw=2, ls="--", zorder=0)
     ax.text(3.55, CAP, "H100\n85.9 GB", color=C["memory"], fontsize=11,
             fontweight="bold", ha="left", va="center")
@@ -82,6 +91,9 @@ def scoreboard(path, k, costs=None):
         ax.text(2.0, 520, "What each step cost", color=C["compute"], fontsize=12,
                 fontweight="bold", ha="center")
     else:
+        if alt:
+            ax.text(3.45, 440, "dashed: B, checkpoint", color=C["compute"], fontsize=11,
+                    fontweight="bold", ha="right")
         ax.text(3.45, 560, "gray: static 24 GB", color=C["neutral"], fontsize=11,
                 fontweight="bold", ha="right")
         ax.text(3.45, 500, "green: activations", color=C["data"], fontsize=11,
@@ -93,8 +105,9 @@ def scoreboard(path, k, costs=None):
     sp.save(fig, path)
 
 
-for k in range(1, 5):
+for k in (1, 2):
     scoreboard(out / f"scoreboard_step{k}.svg", k)
+scoreboard(out / "scoreboard_step4.svg", 4, alt=True)
 scoreboard(out / "scoreboard_costs.svg", 4,
            costs=["", "FP32 master,\nloss scaling", "recomputed\ntiles",
                   "update every\ntwo passes"])
@@ -263,8 +276,10 @@ for k in (1, 2):
 rng = np.random.default_rng(7)
 exps = rng.normal(-22, 4.2, 40000)
 bins = np.arange(-44, 22, 1.0)
+G_BEFORE = np.log2(1e-6)          # about 2^-19.9
+G_AFTER = np.log2(1e-6 * 1024)    # 1.02e-3, about 2^-9.9
 for k in (1, 2):
-    fig, ax = plt.subplots(figsize=(5.8, 2.4))
+    fig, ax = plt.subplots(figsize=(5.0, 2.3))
     ax.axvspan(-24, -14, color=C["data_l"], alpha=0.6, lw=0)
     ax.axvspan(-14, 16, color=C["data_l"], alpha=1.0, lw=0)
     ax.axvspan(-44, -24, color=C["danger_l"], alpha=0.6, lw=0)
@@ -272,21 +287,38 @@ for k in (1, 2):
     ax.bar(e[:-1] + 0.5, h, 0.9, color=C["neutral"], alpha=1.0 if k == 1 else 0.25)
     h2, e2 = np.histogram(exps + 10, bins)
     ax.bar(e2[:-1] + 0.5, h2, 0.9, color=C["compute"], alpha=1.0 if k == 2 else 0.0)
-    top = h.max() * 1.18
-    ax.text(1, top, "FP16 normal range", color=C["data"], fontsize=11,
+    top = h.max() * 1.6
+    ax.text(-3, top, "FP16 normal", color=C["data"], fontsize=12,
             fontweight="bold", ha="center", va="top")
-    ax.text(-19, top, "subnormal", color=C["data"], fontsize=10, ha="center", va="top")
-    ax.text(-34, top, "becomes zero", color=C["danger"], fontsize=11, fontweight="bold",
-            ha="center", va="top")
-    label(ax, -6, h2.max() * 0.62, "× S = 2¹⁰:\nshift right by 10", C["compute"], k == 2,
-          ha="left", fontsize=11)
+    ax.text(-19, top, "sub-\nnormal", color=C["data"], fontsize=11, ha="center", va="top",
+            linespacing=1.0)
+    ax.text(-35, top, "becomes\nzero", color=C["danger"], fontsize=12, fontweight="bold",
+            ha="center", va="top", linespacing=1.0)
+    # the 65,504 ceiling, just below 2^16
+    ax.axvline(16, color=C["danger"], lw=2.5)
+    ax.text(15.3, top * 0.80, "overflow\n65,504", color=C["danger"], fontsize=11,
+            fontweight="bold", ha="right", va="top", linespacing=1.0)
+    # one gradient of 1e-6, before and after scaling
+    ymark = h.max() * 1.05
+    ax.plot([G_BEFORE], [ymark], "o", ms=10, color=C["text"], mec="white", mew=1.5)
+    ax.text(G_BEFORE - 1.2, ymark, "10⁻⁶", color=C["text"], fontsize=12,
+            fontweight="bold", ha="right", va="center")
+    a2 = 1.0 if k == 2 else 0.0
+    ax.annotate("", xy=(G_AFTER - 0.6, ymark), xytext=(G_BEFORE + 0.7, ymark),
+                arrowprops=dict(arrowstyle="-|>", color=C["compute"], lw=2.2, alpha=a2))
+    ax.plot([G_AFTER], [ymark], "o", ms=10, color=C["compute"], mec="white", mew=1.5,
+            alpha=a2)
+    label(ax, G_AFTER + 1.2, ymark, "1.02×10⁻³", C["compute"], k == 2,
+          ha="left", va="center", fontsize=12)
+    label(ax, -1, h.max() * 0.55, "× S = 2¹⁰:\nshift by 10", C["compute"], k == 2,
+          ha="left", va="center", fontsize=12, linespacing=1.05)
     ax.set_xlim(-44, 21)
     ax.set_ylim(0, top * 1.05)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
-    ax.set_xticks([-40, -30, -24, -14, 0, 16],
-                  ["2⁻⁴⁰", "2⁻³⁰", "2⁻²⁴", "2⁻¹⁴", "1", "2¹⁶"])
-    ax.set_xlabel("Gradient magnitude (log scale). Illustrative shape.", fontsize=11)
+    ax.set_xticks([-40, -32, -24, -14, 0, 8, 16],
+                  ["2⁻⁴⁰", "2⁻³²", "2⁻²⁴", "2⁻¹⁴", "1", "2⁸", "2¹⁶"], fontsize=12)
+    ax.set_xlabel("Gradient magnitude (log scale). Illustrative shape.", fontsize=12)
     sp.save(fig, out / f"loss_scale_step{k}.svg")
 
 # 7. Run time by format (after Part 1's precision_days, narrowed for a column)
@@ -297,39 +329,43 @@ sp.hbars(out / "precision_days_col.svg", [
 ], "days", log=False, size=(3.9, 2.2),
     xlabel="Days on one H100, 50% utilization")
 
-# 8. One layer's activation bytes at batch 32 ---------------------------------
-parts = [(419.4, "proj.", "memory"), (419.4, "FFN", "compute"),
-         (4194.3, "attention scores 4,194", "danger"), (10, "", "neutral")]
-for k in (1, 2, 3):
-    fig, ax = plt.subplots(figsize=(5.8, 2.2))
-    for i, (seq, mult_s, mult_r) in enumerate([(1024, 1, 1), (2048, 4, 2)]):
-        y = 1 - i
-        shown = i == 0 or k == 3
-        x = 0
-        for j, (w, text, ck) in enumerate(parts):
-            ww = w * (mult_s if j == 2 else mult_r)
-            ax.barh(y, ww, left=x, color=C[ck], height=0.55, edgecolor="white",
-                    alpha=1.0 if shown else 0.0)
-            if j == 2 and i == 1:
-                label(ax, x + ww / 2, y, "scores 16,777 (91%)", "white", shown,
-                      ha="center", va="center", fontsize=11)
-            x += ww
-        label(ax, x + 250, y, f"{x:,.0f} MB" + ("" if i == 0 else " (derived)"),
-              C["text"], shown, va="center", fontsize=11)
-        ax.text(-150, y, f"{seq:,} tokens", ha="right", va="center", fontsize=12,
-                fontweight="bold", color=C["text"])
-    # component names under the 1,024-token bar, in their bar colors
-    for xt, t, ck in [(0, "projections 419", "memory"), (5900, "feed-forward 419", "compute"),
-                      (12300, "scores 4,194: 83%", "danger")]:
-        ax.text(xt, 0.55, t, color=C[ck], fontsize=10.5, fontweight="bold", va="center")
-    label(ax, 9000, 1.0, "× 48 layers: scores are\n201 of 287 GB (70%)", C["danger"],
-          k >= 2, ha="left", va="center", fontsize=11)
-    ax.set_xlim(0, 22500)
-    ax.set_ylim(-0.5, 1.7)
+# 8. One layer's activation bytes at batch 32 (recall from Part 1), then the
+# three saved copies of the scores that FlashAttention stops storing --------
+parts = [(419.4, "memory"), (419.4, "compute"), (4194.3, "danger"), (10, "neutral")]
+copies = [(2, "P\n2 B"), (1, "mask\n1 B"), (2, "dropped P\n2 B")]
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.8, 2.3))
+    x = 0
+    for w, ck in parts:
+        ax.barh(1.45, w, left=x, color=C[ck], height=0.5, edgecolor="white")
+        x += w
+    ax.text(x + 150, 1.45, f"{x:,.0f} MB", va="center", fontsize=13,
+            fontweight="bold", color=C["text"])
+    for xt, t, ck in [(0, "proj. 419", "memory"), (2300, "scores 4,194: 83%", "danger")]:
+        ax.text(xt, 1.0, t, color=C[ck], fontsize=12, fontweight="bold", va="center")
+    ax.text(8100, 2.05, "× 48 layers: scores are 201 of 287 GB", color=C["danger"],
+            fontsize=12, fontweight="bold", va="center", ha="right")
+    shown = k == 2
+    a = 1.0 if shown else 0.0
+    x0 = 838.8
+    for nbytes, t in copies:
+        w = 4194.3 * nbytes / 5
+        ax.barh(0, w, left=x0, color=C["danger_l"], height=0.62, edgecolor=C["danger"],
+                lw=1.5, hatch="//", alpha=a)
+        label(ax, x0 + w / 2, 0, t, C["danger"], shown, ha="center", va="center",
+              fontsize=12, linespacing=1.0,
+              bbox=dict(fc="white", ec="none", pad=1.5, alpha=a))
+        x0 += w
+    for xe in (838.8, 838.8 + 4194.3):
+        ax.plot([xe, xe], [1.2, 0.31], color=C["danger"], lw=1.2, ls=":", alpha=a)
+    label(ax, 5250, 0, "FlashAttention\nstores none; it keeps\na max and a sum per row", C["memory"],
+          shown, va="center", fontsize=12, linespacing=1.05)
+    ax.set_xlim(0, 8200)
+    ax.set_ylim(-0.45, 2.3)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
-    ax.set_xticks([0, 5000, 10000, 15000, 20000], ["0", "5,000", "10,000", "15,000", "20,000"])
-    ax.set_xlabel("MB saved per layer for backward, batch 32, FP16", fontsize=11)
+    ax.set_xticks([0, 2000, 4000], ["0", "2,000", "4,000"])
+    ax.set_xlabel("MB saved per layer for backward, batch 32, FP16", fontsize=12)
     sp.save(fig, out / f"layer_bytes_step{k}.svg")
 
 # 9. Standard attention on the kit's accelerator node -----------------------
@@ -356,23 +392,39 @@ def text(x, y, s, color, size=20, weight=700, anchor="start"):
 
 
 for k in (1, 2, 3):
-    body = kit_body("machine_hl_hbm" if k == 1 else "machine_hl_sram")
+    body = kit_body("machine_hl_hbm" if k != 2 else "machine_hl_sram")
     extra = []
-    blue, red = C["memory"], "#A51C30"
+    blue, red, gray = C["memory"], "#A51C30", "#888888"
     extra.append(text(575, 368, "HBM", blue, 27))
     extra.append(text(575, 402, "80 GB, 3.35 TB/s", blue, 25, 400))
     if k >= 2:
-        extra.append(text(575, 60, "On-chip SRAM", blue, 27))
-        extra.append(text(575, 94, "30 to 50 MB,", blue, 25, 400))
-        extra.append(text(575, 126, "15 to 20 TB/s", blue, 25, 400))
-        extra.append(text(575, 158, "228 KB per SM", blue, 25, 400))
+        side = blue if k == 2 else gray
+        extra.append(text(575, 50, "On-chip SRAM", side, 27))
+        extra.append(text(575, 84, "30 to 50 MB,", side, 25, 400))
+        extra.append(text(575, 116, "15 to 20 TB/s", side, 25, 400))
+        extra.append(text(575, 148, "228 KB per SM", side, 25, 400))
     if k == 3:
-        extra.append('<line x1="145" y1="350" x2="145" y2="320" stroke="#A51C30" stroke-width="12"/>')
-        extra.append(text(575, 222, "Standard attention:", red, 25))
-        extra.append(text(575, 256, "write S, read S,", red, 25, 400))
-        extra.append(text(575, 290, "write P, read P", red, 25, 400))
-        extra.append(text(10, 485, "Scores alone: about 32 FLOP per byte; the ridge is 295",
-                          red, 24))
+        # SRAM bypassed: gray it out
+        extra.append('<rect x="76" y="106" width="138" height="218" rx="10" fill="white" '
+                     'fill-opacity="0.9" stroke="none"/>')
+        extra.append(text(145, 270, "bypassed", gray, 22, 700, "middle"))
+        # four numbered transfers between the compute units and HBM
+        for j, (xa, down) in enumerate([(290, True), (350, False), (410, True), (470, False)]):
+            y1, y2 = (318, 380) if down else (380, 318)
+            head = y2 - 10 if down else y2 + 10
+            extra.append(f'<line x1="{xa}" y1="{y1}" x2="{xa}" y2="{head}" stroke="{red}" '
+                         'stroke-width="5"/>')
+            tip = (f"{xa - 11},{head} {xa + 11},{head} {xa},{y2 + 6}" if down else
+                   f"{xa - 11},{head} {xa + 11},{head} {xa},{y2 - 6}")
+            extra.append(f'<polygon points="{tip}" fill="{red}"/>')
+            extra.append(f'<circle cx="{xa}" cy="347" r="15" fill="white" stroke="{red}" '
+                         'stroke-width="2.5"/>')
+            extra.append(text(xa, 348, str(j + 1), red, 20, 700, "middle"))
+        extra.append(text(575, 200, "Standard attention:", red, 25))
+        extra.append(text(575, 234, "1 write S,  2 read S,", red, 25, 400))
+        extra.append(text(575, 268, "3 write P,  4 read P", red, 25, 400))
+        extra.append(text(10, 485, "Scores only: d_head / 2 = 64 / 2 = 32 FLOP per byte; ridge 295",
+                          red, 23))
     svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="900" height="500" '
            'viewBox="0 0 900 500">\n<rect width="900" height="500" fill="white"/>\n'
            + body + "\n" + "\n".join(extra) + "\n</svg>\n")
@@ -464,7 +516,7 @@ for k in (1, 2):
 
 # 13. Segment checkpointing (copied from Part 1's generator) -----------------
 for k in (1, 2):
-    fig, ax = plt.subplots(figsize=(5.8, 2.1))
+    fig, ax = plt.subplots(figsize=(5.8, 2.3))
     for s in range(8):
         x0 = s * 1.0
         ax.add_patch(plt.Rectangle((x0 + 0.02, 0.0), 0.12, 1.0, fc=C["data"], ec=C["data"]))
@@ -474,15 +526,15 @@ for k in (1, 2):
                                    ec=C["compute"] if rebuilt else C["neutral_l"],
                                    lw=2 if rebuilt else 1.2, ls="-" if rebuilt else "--"))
     label(ax, 0.0, 1.12, "kept: 8 segment inputs, 0.84 GB", C["data"], True,
-          fontsize=12, va="bottom")
-    label(ax, 5.56, -0.12, "rebuilt in backward, one at a time: 10.7 GB", C["compute"], k == 2,
-          fontsize=12, va="top", ha="center")
-    label(ax, 8.05, 1.12, "dropped", C["neutral"], True, fontsize=12, va="bottom",
+          fontsize=15, va="bottom")
+    label(ax, 5.56, -0.12, "rebuilt in backward,\none at a time: 10.7 GB", C["compute"],
+          k == 2, fontsize=15, va="top", ha="center", linespacing=1.05)
+    label(ax, 8.05, 1.12, "dropped", C["neutral"], True, fontsize=15, va="bottom",
           ha="right")
-    label(ax, 0.56, -0.12, "6 layers", C["neutral"], True, fontsize=11, va="top",
-          ha="center", fontweight="normal")
+    label(ax, 0.56, -0.12, "6 layers", C["neutral"], True, fontsize=15, va="top",
+          ha="center")
     ax.set_xlim(-0.05, 8.1)
-    ax.set_ylim(-0.6, 1.5)
+    ax.set_ylim(-1.05, 1.55)
     ax.axis("off")
     sp.save(fig, out / f"ckpt_segments_step{k}.svg")
 
@@ -502,6 +554,8 @@ for k in (1, 2):
         ax.plot([kk], [u], "o", ms=9, color=C["compute"], mec="white", mew=1.5)
         ax.text(xt, yt, txt, ha=ha, va="center", fontsize=11.5, fontweight="bold",
                 color=C["compute"])
+    ax.text(40, 24, "memory ≈ k + 48/k\n(L = 48 layers)", ha="center", va="top",
+            fontsize=12, fontweight="bold", color=C["compute"], linespacing=1.05)
     label(ax, 9, 3.8, "71% less memory, about 33% more arithmetic", C["data"], k == 2,
           va="center", fontsize=11.5)
     ax.set_xlim(0, 50)

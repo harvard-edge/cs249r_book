@@ -3,7 +3,7 @@ lecture: "08b"
 title: "Model Training, Part 2: Fitting the Step"
 layer: training
 minutes: 75
-notes_minutes: 70
+notes_minutes: 71
 target_ideas: 30
 thesis: "A training step that needs seven accelerators' worth of memory fits on one once each memory term meets the technique that removes it: 16-bit formats halve the activations, tiling stops storing the attention scores, and micro-batches or recomputation trade time for the rest, each at a cost the engineer must name."
 
@@ -85,7 +85,7 @@ concept_questions:
     read: "§8.6.3"
   - id: 7
     q: "Where do one GPT-2 XL layer's activation bytes go?"
-    picture: "One stacked bar per layer at batch 32: projections 419 MB, feed-forward 419 MB, attention scores 4,194 MB, LayerNorm about 10 MB; step 2 the same bar for sequence length 2,048 (scores quadruple, the rest double), labeled derived"
+    picture: "One stacked bar per layer at batch 32: projections 419 MB, feed-forward 419 MB, attention scores 4,194 MB, LayerNorm about 10 MB; labeled as a recall from Part 1; step 2 splits the score bar into its three saved copies (P 2 B, dropout mask 1 B, P after dropout 2 B), none of which FlashAttention stores (revised 2026-10-18; the 2,048-token bar repeated Part 1)"
     numbers: "Per layer 5,043 MB line items; scores 5 bytes x 25 heads x 1,024^2 x 32 = 4,194 MB, 83 percent of the line items (derived share); across the step about 201 of 287 GB, 70 percent (Napkin Math 8.3, §8.6.4). Library total 286.9 GB exceeds the 242.1 GB line items because it counts saved inputs the list omits (Napkin Math 8.3)"
     example: "Each score is saved three times for backward: FP16 probabilities, a 1-byte dropout mask, and the dropped-out probabilities"
     read: "§8.3.3"
@@ -142,7 +142,7 @@ worked_examples:
   - name: "Swamping and the master copy (derived from the FP16 format, §8.6.3)"
     steps: ["given: weight 0.5, update 0.0001 per step, FP16 and FP32", "FP16 grid spacing near 0.5 is 2^-11 = 4.9e-4; half a step is 2.4e-4", "0.0001 is below half a step: 0.5 + 0.0001 rounds to 0.5", "after 10,000 updates: FP16 still 0.5, FP32 1.5", "meaning: keep a 32-bit master copy for the update; BF16 (spacing 3.9e-3) needs it too"]
   - name: "Online softmax by hand (derived toy, §8.6.4)"
-    steps: ["given: one row of scores (1, 3, 2, 5) in two blocks of two", "block 1: m = 3, l = e^-2 + e^0 = 1.135", "block 2: new max 5; rescale l by e^(3-5) = 0.135; add e^-3 + e^0; l = 1.203", "result: l equals the direct sum over the full row; probabilities 0.015, 0.112, 0.041, 0.831", "meaning: the row never has to sit in memory at once, so no score matrix is stored"]
+    steps: ["given: one row of scores (1, 3, 2, 5) in two blocks of two", "block 1: m = 3, l = e^-2 + e^0 = 1.135", "block 2: new max 5; rescale l by e^(3-5) = 0.135; add e^-3 + e^0; l = 1.203", "with values v = (10, 20, 30, 40): running output O after block 1 = 10e^-2 + 20 = 21.35; after block 2 = 21.35 e^-2 + 30e^-3 + 40 = 44.38, the whole-row value", "result: O / l = 44.38 / 1.203 = 36.9, the softmax-weighted average of the values, exact", "meaning: the row never has to sit in memory at once, so no score matrix is stored"]
   - name: "Napkin Math 8.8: GPT-2 XL in eight checkpointed segments"
     steps: ["given: 48 layers, batch 32, 85.6 GB of activations with FlashAttention, 24 GB static", "keep 8 segment inputs: 8 x 32 x 1,024 x 1,600 x 2 B = 0.84 GB", "rebuild one six-layer segment at a time: 10.7 GB", "11.5 GB of activations, 35.5 GB in all, about 50 GB to spare", "cost: one extra forward per layer, about one-third more arithmetic, 47 days instead of 35"]
   - name: "Napkin Math 8.10: the scoreboard (running across all three segments)"
@@ -204,7 +204,7 @@ left_to_reading:
   - concept: "Autocast and GradScaler API"
     why: "Lecture 7 owns the mechanism; this lecture owns when and why, and shows the policy, not the calls."
   - concept: "FP8 recipes and per-tensor scaling; Tensor Core datapath"
-    why: "Lectures 10 and 11 own reduced-precision datapaths; FP8 appears as one bar on the precision ladder and one open question."
+    why: "Lectures 10b and 11 own reduced-precision datapaths; FP8 appears as one bar on the precision ladder and one open question."
   - concept: "The full memory hierarchy, tiling for matrix multiplication, the roofline"
     why: "Lecture 11 owns them (and Lecture 2 introduced the roofline); this lecture uses two tiers, HBM and on-chip SRAM, and one intensity comparison."
   - concept: "Feeding the accelerator: storage tiers, loader workers, prefetching"
@@ -245,8 +245,8 @@ coverage:
   primary_touched: ["Profile to find the binding term (synthesis: fit first, then profile; taught in Part 1)", "Training-time law (checkpointing enters through utilization; taught in Part 1)"]
   primary_left_to_reading: []
   secondary: ["IO-aware attention (taught in depth; this lecture owns FlashAttention tiling for the course)", "Training input pipeline (pointer to Lecture 4b and Part 1)", "Single-node data parallelism and sharding (one line)"]
-  touches_reused: ["Lecture 5: FP16 range and gradient underflow", "Lecture 6b: the score matrix cannot be stored (this lecture shows how tiling avoids it)", "Lecture 7: autocast, GradScaler, saved tensors, recomputation mechanism", "Lecture 2 and Lecture 11: roofline ridge 295.2 (used once)", "Part 1: 16 B/param, the 311 GB bar, MFU"]
-  hand_offs: ["Lecture 11 recalls FlashAttention as the IO-aware answer and owns the full hierarchy", "Lecture 10 owns quantization formats below 16 bits"]
+  touches_reused: ["Lecture 5: FP16 range and gradient underflow", "Lecture 6b: the score matrix cannot be stored (this lecture shows how tiling avoids it)", "Lecture 7: the framework API (autocast, GradScaler, torch.utils.checkpoint); this deck calls back to it and does not re-teach it", "Lecture 2 and Lecture 11: roofline ridge 295.2 (used once)", "Part 1: 16 B/param, the 311 GB bar, MFU"]
+  hand_offs: ["Lecture 11 recalls FlashAttention as the IO-aware answer and owns the full hierarchy", "Lecture 10b owns quantization formats below 16 bits"]
 
 notes_for_author:
   - "Outside numbers were checked against the papers on 2026-10-17: Dao et al. 2022 Figure 2 left and Figure 1 (7.6x), and Table 2 (up to 3x); Chen et al. 2016 abstract (48G to 7G, 30 percent); Micikevicius et al. 2018 section 3.2 (SSD diverges unscaled, a factor of 8 suffices; 2048x swamping ratio) and Figure 2b (about 5 percent of weight gradients below 2^-24). Figure 3's 67 percent zeros are exact zeros in FP32 and are not used on the slide."
@@ -256,3 +256,4 @@ notes_for_author:
   - "Capacity line is 85.9 GB (80 GiB in decimal GB), as in the chapter and Part 1."
   - "Ownership: this lecture owns FlashAttention tiling and online softmax (Lectures 6, 6b, 7, and 11 point here). The memory hierarchy stays at two tiers, with a LINK to Lecture 11. Lecture 5 already showed FP16's range and gradient underflow; this lecture recalls it in one line and goes on to swamping, master weights, and loss-scaling policy, which only this chapter covers."
   - "2026-10-17 build: deck written as 08b_training.tex, 35 frames, notes 71 minutes (10.5 tagged [OPTIONAL]). Changes from the storyboard: an opening section divider (The Step, 0.5 min) so the header shows five sections; the precision run-time bars are a narrower column version (precision_days_col); the checkpointing frame adds a color key under the book figure; the vote frame reveals the scoreboard only (a separate memory-and-days chart was cut as too small to read). The loss-scaling histogram is illustrative (labeled), after Micikevicius et al. 2018 Figure 3. Online softmax is a TikZ build with the toy row on the slide. The book's mixed-precision and accumulation figures are built with masks over the PNG (the book SVGs are glyph outlines and cannot be split)."
+  - "2026-10-18 revision (review round 1): 36 frames, 74 overlay pages, notes 71 minutes, 9.5 of them tagged [OPTIONAL] (the earlier 10.5 was a miscount). Changes: the true-or-false vote is a two-column table with a header row; the open-questions LINK and the hand-off name Lecture 10b; online softmax adds a value row and a running-output column, so the rescaling of the partial output is worked, not asserted (5.5 min, from the attention-bytes slide, now a 1.5 min recall plus the three saved copies); the attention-traffic figure draws four numbered HBM transfers and grays out the bypassed SRAM, and shows d_head / 2 = 64 / 2 = 32 FLOP per byte (Model Training, Sec. 8.3.4); the SRAM figures of 30 to 50 MB and 15 to 20 TB/s are kept because the chapter states them (Sec. 8.3) and the credit now cites it; the FlashAttention slide drops its small scoreboard for one line, 311 to 109.6 GB; the Run B card says small gradients fall below FP16's floor and become zero; the loss-scaling figure marks 1e-6 before and 1.02e-3 after scaling and the 65,504 overflow ceiling; the mixed-precision slide's line and ENGAGE no longer repeat Part 1, and autocast is a LINK to Lecture 7; accumulation shows a divide-by-K tag; checkpointing is two frames (book figure with slide-size labels; GPT-2 XL segments at larger type); the square-root curve is labeled k + 48/k; the vote scoreboard adds option B as a dashed 35.5 GB bar; the synthesis caption and the last takeaway replace two slogans, and the repeated eight-H100 FLEX line is gone."
