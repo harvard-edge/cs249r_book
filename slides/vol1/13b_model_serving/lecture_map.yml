@@ -3,13 +3,13 @@ lecture: "13b"
 title: "Model Serving, Part 2: Serving a Stream of Tokens"
 layer: serving
 minutes: 75
-notes_minutes: 70
+notes_minutes: 72
 target_ideas: 30
 thesis: "A language-model server meets two deadlines from one memory: decode bandwidth sets the floor of every token, the KV cache sets how many conversations share each weight read, and the scheduler decides who waits, so a tighter deadline, a longer context, or an idle slot each shows up as fewer tokens per accelerator and more joules and dollars per token."
 
 hook:
   minutes: "0-4"
-  setup: "One server, one model, three deadlines. MLPerf Inference v5.0, Dell PowerEdge XE9680 with 8x H100-SXM-80GB running Llama 2 70B (submission 5.0-0020). Step 1: one bar, Offline (no deadline) 31,217 tokens/s. Step 2: a second bar, Server under the conversational bound (TTFT 2,000 ms, TPOT 200 ms) 30,904 tokens/s, 99 percent of Offline. Step 3: the question, with a third bar hidden: Server under the interactive bound (TTFT 450 ms, TPOT 40 ms). Step 4 (reveal): 12,979 tokens/s, 42 percent of the conversational rate. Annotation on the plot: 'same chips, same model, 5x tighter TPOT: 2.4x fewer tokens'."
+  setup: "One server, one model, three deadlines. MLPerf Inference v5.0, Dell PowerEdge XE9680 with 8x H100-SXM-80GB running Llama 2 70B (submission 5.0-0020). Step 1: one bar, Offline (no deadline) 31,217 tokens/s. Step 2: a second bar, Server under the conversational bound (TTFT 2,000 ms, TPOT 200 ms) 30,904 tokens/s, 99 percent of Offline. Step 3: the question, with a third bar hidden: Server under the interactive bound (TTFT 450 ms, TPOT 40 ms). Step 4 (reveal): 12,979 tokens/s, 42 percent of the conversational rate. Annotation on the plot: 'The same server keeps 2.4 times fewer tokens per second when TPOT tightens 5 times.'"
   question_to_class: "The interactive bound tightens TPOT from 200 to 40 ms. How many tokens per second does the same server keep? A) about the same B) about 80 percent C) about 40 percent D) about 10 percent"
   payoff: "C: 12,979 against 30,904 tokens/s, 42 percent. Students who answer A reason that each token already takes far less than 40 ms (the decode floor); students who answer D scale throughput with the deadline. The lecture builds the mechanism: a decode step's time grows with the batch it carries, so a TPOT bound caps the batch; a TTFT bound caps how long new prompts may wait for a slot; and memory caps both. The synthesis returns with Little's law: sequences in decode at once are at most tokens/s x TPOT, at most 519 under 40 ms against 6,181 under 200 ms."
   sources:
@@ -106,8 +106,8 @@ concept_questions:
     read: "§13.9.4"
   - id: 8
     q: "What happens to running decodes when a long prompt joins the batch, and how does chunked prefill bound it?"
-    picture: "Diagnose then answer. Step 1: a measured symptom card: Sarathi-Serve Fig. 1, Yi-34B under vLLM, generation stalls lasting several seconds. Step 2: new derived timeline for Llama 3 8B INT4 on one H100 with 32 active decodes: steps every 2.8 ms; a 1,000-token prefill joins and one step takes about 44.7 ms, past the 20 ms TPOT for all 32 streams. Step 3: the same prompt in four 256-token chunks: four steps of about 13.5 ms, each under 20 ms; the new request's first token arrives near 54 ms instead of 44.7 ms."
-    numbers: "Derived from the book's case study (labeled 'derived: bandwidth floor plus prefill at 40 percent of peak, linear in tokens'): decode step 4 GB + 32 x 1,256 x 131,072 B = 9.27 GB, / 3.35 TB/s = 2.8 ms; prefill 41.9 ms for 1,000 tokens (§13.10.3), 10.7 ms per 256-token chunk. Measured: Agrawal et al., Sarathi-Serve, OSDI 2024: stalls 'can last over several seconds' in vLLM; 2.6x higher serving capacity for Mistral-7B on one A100 and up to 3.7x for Yi-34B on two A100s against vLLM under tail-latency constraints (abstract). Book: chunks of e.g. 512 tokens co-scheduled with active decodes (§13.9.4)."
+    picture: "Diagnose then answer. Step 1: a measured symptom card: Sarathi-Serve Fig. 1, Yi-34B under vLLM, generation stalls lasting several seconds. Step 2: new derived timeline for Llama 3 8B INT4 on one H100 with 32 active decodes: steps every 2.8 ms; a 1,000-token prefill joins and one step takes about 44.7 ms, past the 20 ms TPOT for all 32 streams. Step 3: the same prompt in four 250-token chunks: four steps of about 13.2 ms, each under 20 ms; the new request's first token arrives near 53 ms instead of 44.7 ms."
+    numbers: "Derived from the book's case study (labeled 'derived: bandwidth floor plus prefill at 40 percent of peak, linear in tokens'): decode step 4 GB + 32 x 1,256 x 131,072 B = 9.27 GB, / 3.35 TB/s = 2.8 ms; prefill 41.9 ms for 1,000 tokens (§13.10.3), 10.5 ms per 250-token chunk. Measured: Agrawal et al., Sarathi-Serve, OSDI 2024: stalls 'can last over several seconds' in vLLM; 2.6x higher serving capacity for Mistral-7B on one A100 and up to 3.7x for Yi-34B on two A100s against vLLM under tail-latency constraints (abstract). Book: chunks of e.g. 512 tokens co-scheduled with active decodes (§13.9.4)."
     example: "A RAG request with a long retrieved document arriving in a busy chat service."
     read: "§13.9.4 (Sarathi-Serve paragraph)"
   - id: 9
@@ -144,7 +144,7 @@ concept_questions:
     q: "What sets the energy of one generated token?"
     picture: "Part 1's joules_token bars moved here (GPT-2 XL decode, batch 1 0.99 J against batch 32 0.12 J, derived at a constant 1 kW node), with the measured reason beside them: Splitwise's token-phase power is flat as the batch grows. Final step one number: Google's median Gemini prompt energy fell 33x in a year, 1.4x of it from utilization."
     numbers: "Derived: 1,000 W / 1,010 tokens/s = 0.99 J; 1,000 W / 8,200 tokens/s = 0.12 J (node power from Napkin Math 13.5, token rates from §13.9.2); labeled 'derived, constant power assumed'. Measured: Splitwise Sec. III-F and Fig. 8, token-phase power 'does not vary when increasing the number of tokens to process'. Elsworth et al. 2025 (arXiv 2508.15734, Sec. 4): 33x per-prompt energy reduction May 2024 to May 2025, 23x from models and 1.4x from utilization; median prompt 0.24 Wh."
-    example: "Recall only, one line: Lecture 0's 1.1 J against 6.6 J per token (Napkin Math 13.5). Lecture 15 owns carbon and lifecycle accounting."
+    example: "Recall only, one line: Lecture 0's 1.1 J against 6.6 J per token (Napkin Math 13.5). Lecture 15b owns carbon and lifecycle accounting."
     read: "§13.9.6 (Napkin Math 13.5)"
   - id: 15
     q: "What does a million tokens cost, and which limit sets the price?"
@@ -227,7 +227,7 @@ left_to_reading:
   - concept: "Decoding strategies: greedy, beam search, temperature, top-k, nucleus sampling (§13.9.3)"
     why: "One more-examples line on beam width multiplying cache; the sampling variants add little serving cost."
   - concept: "Tensor-parallel serving within a node (§13.9.5)"
-    why: "Named in the notes of the disaggregation frame; Lecture 8b owns model parallelism."
+    why: "Named in the notes of the disaggregation frame; named in §13.9.5 and left to reading; no Volume I lecture teaches it."
   - concept: "KV-cache offloading and session affinity in depth (§13.9.5, §13.9.6)"
     why: "One estimate line (34 ms reload) and one note on the sharing frame; the routing policy is better read."
   - concept: "Weight-only quantization for decode (Systems Perspective 13.6)"
@@ -267,8 +267,8 @@ coverage:
   secondary: ["Speculative decoding (taught: equation 15 worked estimate)", "Serving economics (taught for tokens: Llama 3 8B cost floor, API price trend)"]
   recalled_from_part_1: ["Serving inverts training", "Latency budget", "Queueing sets headroom (Little's law reused at the synthesis)", "Batching trades latency for throughput (the decode batch is its token-level form)"]
   outside_the_chapter: ["Disaggregated prefill and decode (DistServe, Splitwise), taught as segment 4"]
-  touches_reused: ["Lecture 6b: decode reads every weight per token; KV cache per token (131,072 B for Llama 3.1 8B; 307.2 KB for GPT-2 XL); grouped-query attention (one recall line, never re-derived)", "Lecture 0: 1.1 against 6.6 J per token (recall line)", "Lecture 7: graph capture (the 576-kernel eager step, one line)", "Lecture 10b: INT4 weights cut decode bytes (one line)", "Lecture 12: MLPerf scenarios and TTFT/TPOT as a measurement statement (hook)"]
-  hand_offs: ["Part 1 (Lecture 13) owns the latency budget, queueing, dynamic batching of fixed-output models, cold start, and the ResNet-50 capacity plan", "Lecture 6b owns the KV cache's size per token and why decode reads every weight", "Lecture 8 owns FlashAttention tiling; Lecture 8b owns model parallelism", "Lecture 14 owns release, monitoring, drift, and skew detection", "Lecture 15 owns energy and carbon accounting beyond joules per token"]
+  touches_reused: ["Lecture 6b: decode reads every weight per token; KV cache per token (131,072 B for Llama 3.1 8B; 307.2 KB for GPT-2 XL); grouped-query attention (one recall line, never re-derived)", "Lecture 0: 1.1 against 6.6 J per token (recall line)", "Lecture 7: graph capture (the 576-kernel eager step, one line)", "Lecture 10b: INT4 weights cut decode bytes (one line)", "Lecture 12: MLPerf Offline and Server scenarios (hook); TTFT and TPOT are defined first in this lecture"]
+  hand_offs: ["Part 1 (Lecture 13) owns the latency budget, queueing, dynamic batching of fixed-output models, cold start, and the ResNet-50 capacity plan", "Lecture 6b owns the KV cache's size per token and why decode reads every weight", "Lecture 8b owns FlashAttention tiling; model parallelism is named in §13.9.5 and left to reading; no Volume I lecture teaches it", "Lecture 14 owns release, monitoring, drift, and skew detection", "Lecture 15b owns energy and carbon accounting beyond joules per token"]
 
 notes_for_author:
   - "Disaggregation is not in the chapter. Segment 4 teaches it from DistServe and Splitwise, which the chapter already cites in part (Splitwise is not in the chapter's bibliography; DistServe is not cited). A paragraph in §13.9.4 after chunked prefill would let the book own it."
@@ -290,3 +290,16 @@ build_note:
     - "vLLM's batched-requests result (13.6 against 30.4) is a card on the paging frame rather than a second bar chart, so the block-table diagram keeps legible size."
     - "Frame titles shortened where the activity tag collided: 'Estimate: tokens per speculative round', 'Continuous batching refills a freed slot', 'Why 40 ms keeps fewer tokens than 200 ms'."
   not_rechecked: "Outside-paper values (Splitwise, Orca, vLLM, Sarathi-Serve, DistServe, Elsworth et al.) and the MLPerf values are taken from this plan's provenance; this build did not re-read the PDFs."
+  round1_fixes:
+    date: "2026-10-18"
+    applied:
+      - "Callbacks: carbon and lifecycle to Lecture 15b; FlashAttention to 8b; model parallelism named in §13.9.5 and left to reading (no Volume I lecture teaches it); the hook's LINK now says Lecture 12 introduced the MLPerf scenarios and TTFT and TPOT are new here."
+      - "Synthesis: a derived memory line. 8 x 85.9 = 687 GB, less 141 GB of 16-bit Llama 2 70B weights (4 x the chapter's 35.3 GB at 4 bits) = 546 GB; 1,256 x 327,680 B = 412 MB per stream (context assumed, the case study's length); about 1,300 streams. At 200 ms memory binds (6,181 > 1,300), at 40 ms the deadline binds (519 < 1,300). With 8-bit weights and cache: 617 GB / 206 MB = about 3,000, same conclusion. WARN line now: 30,904 / 12,979 = 2.4 times the servers."
+      - "Cache estimate: step 3 is a new derived Llama 3 8B figure (kv_budget_8b: 69.8 GB budget, 65 conversations full at 8,192 tokens); the 70B-class chart moves to step 4 with an in-figure title."
+      - "Precision stated on the slides: 16-bit on the cache estimate, 4-bit on the stall and cost slides; the paged-budget slide adds the chapter's 469 bound for 4-bit weights."
+      - "Chunked prefill and prefix sharing are [CORE]; the sharing slide states the 34 ms PCIe Gen4 x16 reload (1.07 GB / 32 GB/s, §13.8.4) and session affinity. Paged budget and joules per token are tagged [OPTIONAL] in their opening tag, matching their FLEX."
+      - "Joules per token: a gray batch-1 bar at the chapter's 600 W low-use power (0.59 J, derived); the note explains that the token rate, not power, sets the gap."
+      - "Cost slide: the prefill limit is labeled as assumed, the bound names the Llama 3 8B case study, the plot caption says list prices are input tokens only."
+      - "Definitions on slides: TTFT and TPOT key on the hook; goodput on the DistServe slide; beam search glossed on the sharing slide. Style: 'chats' to 'conversations' where a result is stated; hook annotation rewritten as a sentence; storyboard reference dropped."
+    skipped:
+      - "Splitwise power plot for the hardware-choice card: the plan has no extracted values from Splitwise Figs. 8 and 9, and reading them off the figure would add unsourced numbers."

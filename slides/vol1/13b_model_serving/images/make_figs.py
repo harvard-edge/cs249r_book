@@ -51,7 +51,10 @@ Part 1's hook_cost bars as the recall thumbnail.
     per 512-token OPT-66B request, 11.3 GB/s at 10 requests/s; NVLink
     600 GB/s.
   - Joules per token, derived: 1,000 W node (MS Napkin Math 13.5) over
-    1,010 and 8,200 tokens/s.
+    1,010 and 8,200 tokens/s; 600 W (300 W GPU + 300 W host at low use,
+    Napkin Math 13.5) over 1,010 tokens/s = 0.59 J.
+  - KV budget, Llama 3 8B, derived: 131,072 B per token, 69.8 GB free;
+    65 conversations of 8,192 tokens = 69.8 GB (MS Sec. 13.9.5).
 
 Run from this folder: python3 make_figs.py
 """
@@ -89,9 +92,9 @@ HOOK = [("No deadline\n(Offline)", 31216.8, "neutral", "31,217"),
         ("TTFT 450 ms,\nTPOT 40 ms", 12979.4, "danger", "12,979  (42%)")]
 
 
-def hook_fig(path, k, size=(5.8, 2.6), note=True, fs=12):
+def hook_fig(path, k, size=(5.8, 2.6), note=True, fs=12, xlabel=True, rows=None):
     fig, ax = plt.subplots(figsize=size)
-    for i, (lab, v, ck, txt) in enumerate(HOOK):
+    for i, (lab, v, ck, txt) in enumerate(rows or HOOK):
         y = 2 - i
         shown = i < k if i < 2 else k >= 4
         ax.barh(y, v / 1000, color=C[ck], height=0.6, alpha=1.0 if shown else 0.0)
@@ -103,20 +106,29 @@ def hook_fig(path, k, size=(5.8, 2.6), note=True, fs=12):
         ax.text(v / 1000 + 0.5, y, txt, va="center", fontsize=fs, fontweight="bold",
                 color=C[ck], alpha=1.0 if shown else 0.0)
     if note:
-        ax.text(39, -0.75, "same chips, same model; 5× tighter TPOT: 2.4× fewer tokens",
+        ax.text(39, -0.75, "The same server keeps 2.4 times fewer tokens per second when TPOT tightens 5 times.",
                 ha="right", va="center", fontsize=11, color=C["danger"],
                 fontweight="bold", alpha=1.0 if k >= 4 else 0.0)
     ax.set_yticks([])
     ax.set_xlim(0, 40)
     ax.set_ylim(-1.1 if note else -0.5, 2.5)
     ax.spines["left"].set_visible(False)
-    ax.set_xlabel("Thousand tokens/s, Llama 2 70B on one 8× H100 server")
+    if xlabel:
+        ax.set_xlabel("Thousand tokens/s, Llama 2 70B on one 8× H100 server")
+    else:
+        ax.set_xticks([])
+        ax.spines["bottom"].set_visible(False)
     sp.save(fig, path)
 
 
 for k in (1, 2, 3, 4):
     hook_fig(out / f"hook_step{k}.svg", k)
-hook_fig(out / "hook_thumb.svg", 4, size=(3.6, 2.0), note=False, fs=10)
+# Synthesis thumbnail: three values in large type, no axis title.
+THUMB = [("Offline", 31216.8, "neutral", "31,217"),
+         ("200 ms", 30903.6, "compute", "30,904"),
+         ("40 ms", 12979.4, "danger", "12,979")]
+hook_fig(out / "hook_thumb.svg", 4, size=(3.6, 1.6), note=False, fs=16, xlabel=False,
+         rows=THUMB)
 
 # ------------------------------------------- recall thumbnail (Part 1 hook)
 sp.hbars(out / "recall_cost.svg", [
@@ -430,9 +442,39 @@ for k in (1, 2, 3):
     ax.text(0, DEC + 1.5, "2.8 ms", ha="center", fontsize=10.5, color=C["memory"],
             fontweight="bold")
     ax.set_ylabel("Step time (ms)\n= wait for next token")
-    tag(ax, "Derived: Llama 3 8B INT4, one H100, 32 running decodes; prefill at 40% of "
+    tag(ax, "Derived: Llama 3 8B, 4-bit weights (4 GB), one H100, 32 running decodes; prefill at 40% of "
         "peak, linear in tokens.", y=-0.16)
     sp.save(fig, out / f"stall_step{k}.svg")
+
+# ------------------------------------------- KV budget, Llama 3 8B (derived)
+# 131,072 B per token, 69.8 GB free after 16.1 GB of FP16 weights on an
+# 85.9 GB H100 (MS Sec. 13.9.5). 65 x 8,192 x 131,072 B = 69.8 GB.
+ctx8 = np.linspace(0, 16384, 200)
+fig, ax = plt.subplots(figsize=(5.8, 2.9))
+ax.axhspan(69.8, 125, color=C["danger_l"], alpha=0.6, lw=0)
+ax.axhline(69.8, color=C["danger"], lw=2, ls="--")
+ax.text(16200, 72, "budget: 69.8 GB", ha="right", va="bottom",
+        fontsize=11, color=C["danger"], fontweight="bold")
+for b, ck in ((16, "data"), (32, "compute"), (65, "network")):
+    kv = b * ctx8 * 131072 / 1e9
+    ax.plot(ctx8, kv, color=C[ck], lw=3)
+    if b < 65:
+        ax.text(16600, b * 16384 * 131072 / 1e9, f"{b} conversations", ha="left",
+                va="center", fontsize=11, color=C[ck], fontweight="bold")
+ax.plot([8192], [65 * 8192 * 131072 / 1e9], "o", ms=9, color=C["network"], mec="white",
+        mew=1.5, zorder=5)
+ax.text(300, 96, "65 conversations:\nfull at 8,192 tokens", ha="left", va="top",
+        fontsize=11, color=C["network"], fontweight="bold")
+ax.set_xlim(0, 16384)
+ax.set_ylim(0, 100)
+ax.set_xticks([0, 4096, 8192, 12288, 16384])
+ax.set_xticklabels(["0", "4K", "8K", "12K", "16K"])
+ax.set_xlabel("Context length (tokens)")
+ax.set_ylabel("KV cache (GB, FP16)")
+ax.set_title("Llama 3 8B, 16-bit weights, one H100", fontsize=12, fontweight="bold",
+             loc="left")
+tag(ax, "Derived from Model Serving, Sec. 13.9.5: 131,072 B per token", y=-0.26)
+sp.save(fig, out / "kv_budget_8b.svg")
 
 # ------------------------------------------- KV budget, 70B class (variant)
 ctx = np.linspace(0, 32768, 200)
@@ -445,15 +487,15 @@ for b, ck in ((1, "memory"), (4, "data"), (16, "compute"), (32, "network")):
     kv = b * ctx * 327680 / 1e9
     ax.plot(ctx, kv, color=C[ck], lw=3)
     if b > 4:
-        xe = 118e9 / (b * 327680)
-        lx, ly = xe * 0.97, b * xe * 327680 / 1e9 + 2
+        xe = 102e9 / (b * 327680)
+        lx, ly = xe * 0.96, 102
     else:
         lx = 24000 if b == 4 else 32000
         ly = b * lx * 327680 / 1e9 + 3
     ax.text(lx, ly, f"batch {b}", ha="right", fontsize=11, color=C[ck], fontweight="bold")
 x32 = 50.6e9 / (32 * 327680)
 ax.plot([x32], [50.6], "o", ms=9, color=C["network"], mec="white", mew=1.5, zorder=5)
-ax.annotate("32 chats: full near 4,800 tokens", (x32, 50.6), xytext=(17500, 74),
+ax.annotate("32 conversations: full near 4,800 tokens", (x32, 50.6), xytext=(17500, 74),
             fontsize=11, color=C["network"], fontweight="bold",
             arrowprops=dict(arrowstyle="-", color=C["network"]))
 ax.set_xlim(0, 32768)
@@ -462,6 +504,8 @@ ax.set_xticks([0, 8192, 16384, 24576, 32768])
 ax.set_xticklabels(["0", "8K", "16K", "24K", "32K"])
 ax.set_xlabel("Context length (tokens)")
 ax.set_ylabel("KV cache (GB, FP16)")
+ax.set_title("Larger model: 70B class, 4-bit weights, 50.6 GB left", fontsize=12,
+             fontweight="bold", loc="left")
 tag(ax, "After Model Serving, figure 8: 70B-class model, grouped-query attention, one H100",
     y=-0.26)
 sp.save(fig, out / "kv_budget.svg")
@@ -631,7 +675,7 @@ for k in (1, 2):
                 fontweight="bold", alpha=a)
         ax.text(3.4 + v / 26.2 * 1.9 + 0.05, y + 0.22, txt, va="center", fontsize=10.5,
                 fontweight="bold", color=C[ck], alpha=a)
-    ax.text(4.3, 0.35, "100 chats (derived)", ha="center", fontsize=9.5,
+    ax.text(4.3, 0.35, "100 conversations (derived)", ha="center", fontsize=9.5,
             color=C["neutral"], alpha=a)
     ax.set_xlim(0, 6.0)
     ax.set_ylim(-0.2, 2.6)
@@ -702,7 +746,7 @@ for k in (1, 2):
                     ha=ha, fontsize=9, color=C["text"])
     if k >= 2:
         ax.axhline(0.066, color=C["data"], lw=2.5)
-        ax.text(2022.75, 0.058, "\\$0.066: case study's floor (derived)", ha="left",
+        ax.text(2022.75, 0.058, "\\$0.066: Llama 3 8B\ncase-study bound (derived)", ha="left",
                 va="top", fontsize=9.5, color=C["data"], fontweight="bold")
     ax.set_yscale("log")
     ax.set_ylim(0.02, 80)
@@ -712,14 +756,15 @@ for k in (1, 2):
     ax.set_yticks([0.1, 1, 10])
     ax.set_yticklabels(["\\$0.10", "\\$1", "\\$10"])
     ax.set_ylabel("List price, \\$ per million input tokens", fontsize=10)
-    tag(ax, "After Model Serving, figure 9 (vendor list prices, historical)", y=-0.12)
+    tag(ax, "After Model Serving, figure 9 (list prices: input tokens only)", y=-0.12)
     sp.save(fig, out / f"api_price_step{k}.svg")
 
 # ------------------------------------------------------ joules per token
 sp.hbars(out / "joules_token.svg", [
-    ("Batch 1", 0.99, "danger", "0.99 J per token"),
-    ("Batch 32", 0.12, "data", "0.12 J per token"),
+    ("Batch 1, 1 kW", 0.99, "danger", "0.99 J per token"),
+    ("Batch 1, 600 W", 0.59, "neutral", "0.59 J per token"),
+    ("Batch 32, 1 kW", 0.12, "data", "0.12 J per token"),
 ], "", log=False, value_fmt="{:.2f}", size=sp.SHORT,
-    xlabel="GPT-2 XL decode, joules per token (derived: 1 kW node, constant power)")
+    xlabel="GPT-2 XL decode, joules per token (derived; gray: the chapter's low-use power)")
 
 print("figures written")
