@@ -100,10 +100,94 @@ VOLUMES = {
         ]),
 }
 
+# Volumes III and IV use a few more keys, all optional:
+#   bar          label of the vertical bar beside every layer (Volume I's
+#                data=True is bar="Data"; Volume III's is "Trajectory")
+#   tabs         a short tag drawn before each layer name (part numerals)
+#   gap_below    the layer with a wider, labeled gap beneath it (Volume IV's
+#                proposal boundary, between Brain and Nervous System)
+#   envelope     (name, label, lectures): a dashed outline around every
+#                layer (Volume IV's governance envelope); highlighting the
+#                name lights the outline instead of a layer
+#   slugs        file-name overrides for layer names
+#   extra        extra highlight figures: {slug: [layer, layer]}
+#   course_cols  draw the course order as columns, one list of COURSE
+#                group indices per column, so a long semester stays legible
+#   card_labels  the layer tag printed on course-order cards, per layer
+VOLUMES[3] = dict(
+    stack=["Model", "Memory", "Tools", "Runtime", "Learning",
+           "Agents at Scale"],
+    roadmap={"Model": [2, 3], "Memory": [4, 5, 6], "Tools": [7, 8, 9],
+             "Runtime": [10, 11, 12, 13, 14], "Learning": [15, 16, 17],
+             "Agents at Scale": [18, 19], "Trajectory": [1, 20]},
+    data=False, bar="Trajectory", parts=None,
+    tabs=["I", "II", "III", "IV", "V", "VI"],
+    slugs={"Agents at Scale": "scale"},
+    course=[
+        ("Start", [(1, "Introduction", "all")]),
+        ("Part I  The Model", [(2, "Foundation Model", "Model"),
+                               (3, "Test-Time Compute", "Model")]),
+        ("Part II  Agent Memory", [(4, "Context Engineering", "Memory"),
+                                   (5, "KV Cache", "Memory"),
+                                   (6, "Long-Term Memory", "Memory")]),
+        ("Part III  Tool Use", [(7, "Tool Calling", "Tools"),
+                                (8, "Sandboxes", "Tools"),
+                                (9, "Agent Security", "Tools")]),
+        ("Part IV  The Agent Runtime", [(10, "Agent Harness", "Runtime"),
+                                        (11, "Durable Execution", "Runtime"),
+                                        (12, "Failure Recovery", "Runtime"),
+                                        (13, "Agent Evaluation", "Runtime"),
+                                        (14, "Operating Agents", "Runtime")]),
+        ("Part V  Learning", [(15, "Trajectory Curation", "Learning"),
+                              (16, "Fine-Tuning", "Learning"),
+                              (17, "RLVR", "Learning")]),
+        ("Part VI  Agents at Scale", [(18, "Multi-Agent", "Agents at Scale"),
+                                      (19, "Agent Economics", "Agents at Scale")]),
+        ("Close", [(20, "Conclusion", "all")]),
+    ],
+    course_cols=[[0, 1], [2], [3], [4], [5], [6, 7]],
+)
+VOLUMES[4] = dict(
+    stack=["World", "Boundary", "Body", "Nervous System", "Brain"],
+    roadmap={"World": [5, 7], "Boundary": [1, 8], "Body": [2],
+             "Nervous System": [4, 12, 13], "Brain": [3, 6, 8, 9, 10, 11]},
+    data=False, parts=None,
+    gap_below="Brain",
+    envelope=("Governance", "Governance (Part IV)", [14, 15, 16, 17]),
+    slugs={"Nervous System": "nervous"},
+    extra={"boundary_brain": ["Boundary", "Brain"]},
+    course=[
+        ("Start", [(1, "The Causal Boundary", "Boundary")]),
+        ("Part I  The Machine Anatomy", [(2, "The Physical Body", "Body"),
+                                         (3, "The Cognitive Brain", "Brain"),
+                                         (4, "The Nervous System", "Nervous System")]),
+        ("Part II  Teaching the Machine", [(5, "Physical Data", "World"),
+                                           (6, "Policy Training", "Brain"),
+                                           (7, "Closed-Loop Evaluation", "World")]),
+        ("Part III  Running the Machine", [(8, "Sensor Perception", "Boundary and Brain"),
+                                           (9, "Spatial Memory", "Brain"),
+                                           (10, "Grounded Intent", "Brain")]),
+        ("", [(11, "Trajectory Planning", "Brain"),
+              (12, "Safety Enforcement", "Nervous System"),
+              (13, "Workload Placement", "Nervous System")]),
+        ("Part IV  Governing the Machine", [(14, "Supervisory Intervention", "Governance"),
+                                            (15, "Adversarial Verification", "Governance"),
+                                            (16, "Deployment Release", "Governance"),
+                                            (17, "Responsible Physical AI", "Governance")]),
+        ("Close", [(18, "Engineering Physical AI", "all")]),
+    ],
+    course_cols=[[0, 1], [2], [3], [4], [5], [6]],
+    card_labels={"Nervous System": "Nervous System",
+                 "Boundary and Brain": "Boundary, Brain",
+                 "Governance": "Governance"},
+)
+
 # Set from VOLUMES by main(); Volume I by default.
 STACK, ROADMAP, COURSE = (VOLUMES[1]["stack"], VOLUMES[1]["roadmap"],
                           VOLUMES[1]["course"])
 DATA, PARTS = True, None
+BAR, TABS, GAP_BELOW, ENVELOPE = "Data", None, None, None
+SLUGS, EXTRA, COURSE_COLS, CARD_LABELS = {}, {}, None, {}
 
 
 def svg(body, w=W, h=H, label=""):
@@ -131,6 +215,7 @@ def stack(accent, highlight=None, upto=None, data=None, roadmap=False):
     shown from the bottom (build steps); hidden layers are left empty so
     every step has the same geometry."""
     data = DATA if data is None else data
+    hls = set(highlight) if isinstance(highlight, (list, tuple)) else {highlight}
     x0, y0, bw, gap = 60, 28, 640 if not roadmap else 560, 10
     bh = 48 if roadmap else 54
     if roadmap:
@@ -141,6 +226,20 @@ def stack(accent, highlight=None, upto=None, data=None, roadmap=False):
         total = 7 * bh + 6 * gap
         gap = 8
         bh = (total - (n - 1) * gap) / n
+    # Proposal gap: layers below gap_below sit pgap lower.
+    gi = STACK.index(GAP_BELOW) if GAP_BELOW else None
+    pgap = 46 if GAP_BELOW else 0
+    epad, ehead = 16, 46
+    if ENVELOPE:
+        # Room for the envelope's outline and its header band.
+        x0 += epad
+        ytop_env = y0
+        y0 += ehead
+
+    def ylayer(i):
+        y = y0 + (n - 1 - i) * (bh + gap)
+        return y + pgap if gi is not None and i < gi else y
+
     out = []
     if PARTS:
         x0 = 120
@@ -163,33 +262,78 @@ def stack(accent, highlight=None, upto=None, data=None, roadmap=False):
     for i, name in enumerate(STACK):
         if upto is not None and i >= upto:
             continue
-        y = y0 + (n - 1 - i) * (bh + gap)
-        on = highlight == name
+        y = ylayer(i)
+        on = name in hls
         dim = highlight is not None and not on
         fill_op = 1.0 if on else (0.10 if dim else 0.12 + 0.05 * (i % 3))
         out.append(rect(x0, y, bw, bh, accent, opacity=fill_op))
         col = C["white"] if on else (C["pale"] if dim else accent)
-        out.append(text(x0 + 22, y + bh / 2, name.replace("&", "&amp;"),
+        tx = x0 + 22
+        if TABS:
+            # The part numeral, in a fixed column before the layer name.
+            out.append(text(tx, y + bh / 2, TABS[i], size=20, weight=700,
+                            fill=col, extra=' opacity="0.75"'))
+            tx += 58
+        out.append(text(tx, y + bh / 2, name.replace("&", "&amp;"),
                         size=26 if n <= 7 else 23,
                         weight=700 if on else 600, fill=col))
         if roadmap:
             out += chips(x0 + bw - 14, y + bh / 2, ROADMAP[name], accent, on)
+    if gi is not None and (upto is None or upto > n):
+        # The proposal boundary: a dashed line across the gap, labeled.
+        cy = ylayer(gi) + bh + (gap + pgap) / 2
+        dim = highlight is not None and not hls & {STACK[gi], STACK[gi - 1]}
+        col = C["pale"] if dim else C["gray"]
+        out.append(f'<line x1="{x0}" y1="{cy}" x2="{x0 + bw}" y2="{cy}" '
+                   f'stroke="{col}" stroke-width="2.5" '
+                   f'stroke-dasharray="9,6"/>\n')
+        # Name on the line at the left; what each side may do, right.
+        out.append(rect(x0 + 10, cy - 13, 186, 26, C["white"], rx=4))
+        out.append(text(x0 + 22, cy, "Proposal boundary", size=18, weight=700,
+                        fill=col))
+        out.append(text(x0 + bw - 14, cy - 14, "above: may only propose",
+                        size=15, weight=600, fill=col, anchor="end"))
+        out.append(text(x0 + bw - 14, cy + 14, "below: may command",
+                        size=15, weight=600, fill=col, anchor="end"))
     if data and (upto is None or upto > n):
         dx = x0 + bw + 14
-        dh = n * bh + (n - 1) * gap
-        on = highlight == "Data"
+        dh = n * bh + (n - 1) * gap + pgap
+        on = BAR in hls
         dim = highlight is not None and not on
         out.append(rect(dx, y0, 56, dh, accent,
                         opacity=1.0 if on else (0.10 if dim else 0.18)))
         cx, cy = dx + 28, y0 + dh / 2
         col = C["white"] if on else (C["pale"] if dim else accent)
-        out.append(text(cx, cy, "DATA", size=22, weight=700, fill=col,
+        out.append(text(cx, cy, BAR.upper(), size=22, weight=700, fill=col,
                         anchor="middle",
                         extra=f' letter-spacing="3" transform="rotate(-90 {cx} {cy})"'))
         if roadmap:
-            out += chips(dx + 28, y0 + dh + 26, ROADMAP["Data"], accent, on,
+            out += chips(dx + 28, y0 + dh + 26, ROADMAP[BAR], accent, on,
                          anchor="middle")
+    if ENVELOPE and (upto is None or upto > n + (1 if gi is not None else 0)):
+        # The governance envelope: an outline around every layer, with a
+        # header band carrying its label (and, on the roadmap, its lectures).
+        ename, elabel, elects = ENVELOPE
+        on = ename in hls
+        dim = highlight is not None and not on
+        ex, ew = x0 - epad, bw + 2 * epad
+        ebot = ylayer(0) + bh + epad
+        col = C["pale"] if dim else accent
+        if on:
+            out.append(rect(ex, ytop_env, ew, ehead - 8, accent, rx=10))
+            out.append(rect(ex, ytop_env, ew, ebot - ytop_env, "none",
+                            accent, 4, rx=12))
+        else:
+            out.append(rect(ex, ytop_env, ew, ebot - ytop_env, "none", col,
+                            2.5, rx=12, extra=' stroke-dasharray="10,7"'))
+        hy = ytop_env + (ehead - 8) / 2
+        out.append(text(x0 + 6, hy, elabel, size=22, weight=700,
+                        fill=C["white"] if on else col))
+        if roadmap:
+            out += chips(x0 + bw - 14, hy, elects, accent, on)
     width = x0 + bw + 14 + 56 + 40 if data else x0 + bw + 40
+    if ENVELOPE:
+        width += epad
     return svg("".join(out), w=width, label="ML system stack")
 
 
@@ -239,6 +383,51 @@ def course_order(accent):
             x += cw + gap
         y += rowh
     return svg("".join(out), w=x0 + 4 * (cw + gap), h=y, label="Course order")
+
+
+def course_columns(accent):
+    """The semester as columns, read left to right: each column holds one
+    or two parts, a header above each part and its lecture cards below.
+    Volumes III and IV use it; their semesters are too long for one row
+    per part to stay legible on a slide. A part with an empty label
+    continues the part in the previous column, aligned with its cards."""
+    out = []
+    cw, ch, gap, colgap, head, pgap = 196, 84, 10, 16, 64, 14
+    x, ymax = 4, 0
+    for col in COURSE_COLS:
+        y = 4
+        for gi in col:
+            part, lectures = COURSE[gi]
+            if part:
+                words = part.split("  ")
+                lines = [words[0]] + (wrap(words[1], 22) if len(words) > 1 else [])
+                for k, w in enumerate(lines):
+                    out.append(text(x + 2, y + 12 + k * 20, w.replace("&", "&amp;"),
+                                    size=18 if k == 0 else 16, weight=700,
+                                    fill=C["gray"]))
+            y += head
+            for n, title, layer in lectures:
+                lit = layer != "all"
+                out.append(rect(x, y, cw, ch, accent, opacity=0.14 if lit else 0.06,
+                                stroke=accent, sw=1.2, rx=8))
+                if layer in CARD_LABELS:
+                    where = CARD_LABELS[layer]
+                elif lit:
+                    where = f"{layer.split(' & ')[0].split()[-1]} layer"
+                else:
+                    where = "whole stack"
+                out.append(text(x + 10, y + 18, f"L{n}", size=17, weight=700,
+                                fill=accent))
+                out.append(text(x + 52, y + 18, where, size=15, weight=600,
+                                fill=C["gray"]))
+                for k, line in enumerate(wrap(title, 16)):
+                    out.append(text(x + 10, y + 45 + k * 23, line.replace("&", "&amp;"),
+                                    size=19, weight=700, fill=C["text"]))
+                y += ch + gap
+            y += pgap
+        ymax = max(ymax, y - pgap - gap)
+        x += cw + colgap
+    return svg("".join(out), w=x - colgap + 4, h=ymax + 4, label="Course order")
 
 
 def wrap(s, n):
@@ -360,6 +549,8 @@ def dam(accent, hl=None):
 
 def layer_slug(name):
     """File-name form of a layer: 'Fabric & Storage' -> 'fabric'."""
+    if name in SLUGS:
+        return SLUGS[name]
     return name.split(" & ")[0].split()[0].lower()
 
 
@@ -380,19 +571,32 @@ def main():
         # Each volume has its own stack (the agent stack, the physical
         # stack); add its layers, roadmap, and course to VOLUMES first.
         raise SystemExit(f"Volume {args.volume} stack not defined yet")
-    global STACK, ROADMAP, COURSE, DATA, PARTS
+    global STACK, ROADMAP, COURSE, DATA, PARTS, BAR, TABS, GAP_BELOW
+    global ENVELOPE, SLUGS, EXTRA, COURSE_COLS, CARD_LABELS
     v = VOLUMES[args.volume]
     STACK, ROADMAP, COURSE = v["stack"], v["roadmap"], v["course"]
-    DATA, PARTS = v["data"], v["parts"]
+    PARTS = v["parts"]
+    BAR = v.get("bar", "Data" if v["data"] else None)
+    DATA = BAR is not None
+    TABS, GAP_BELOW, ENVELOPE = v.get("tabs"), v.get("gap_below"), v.get("envelope")
+    SLUGS, EXTRA = v.get("slugs", {}), v.get("extra", {})
+    COURSE_COLS, CARD_LABELS = v.get("course_cols"), v.get("card_labels", {})
     accent = ACCENT[args.volume]
     out = Path(__file__).parent / f"vol{args.volume}"
     out.mkdir(exist_ok=True)
-    figs = {"course_order": course_order(accent),
+    figs = {"course_order": (course_columns(accent) if COURSE_COLS
+                             else course_order(accent)),
             "stack": stack(accent),
             "stack_roadmap": stack(accent, roadmap=True)}
-    for name in STACK + (["Data"] if DATA else []):
+    marks = ([BAR] if DATA else []) + ([ENVELOPE[0]] if ENVELOPE else [])
+    for name in STACK + marks:
         figs[f"stack_{layer_slug(name)}"] = stack(accent, highlight=name)
-    for k in range(1, len(STACK) + (2 if DATA else 1)):
+    for slug, names in EXTRA.items():
+        figs[f"stack_{slug}"] = stack(accent, highlight=names)
+    # One build step per layer, then one per mark (bar, proposal
+    # boundary, envelope) in that order.
+    steps = len(STACK) + DATA + bool(GAP_BELOW) + bool(ENVELOPE)
+    for k in range(1, steps + 1):
         figs[f"stack_build{k}"] = stack(accent, upto=k)
     for k in range(1, 5):
         figs[f"machine_step{k}"] = machine(accent, step=k)
