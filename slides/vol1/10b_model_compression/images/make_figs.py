@@ -435,12 +435,94 @@ for k in (1, 2):
 # 8. Symmetric against asymmetric, MobileNet-v1 per-channel PTQ (Table 3)
 # ---------------------------------------------------------------------------
 zp_rows = [
-    dict(label="Symmetric (z = 0)", value=59.1, color="danger", text="59.1"),
-    dict(label="Asymmetric (z ≠ 0)", value=70.3, color="data", text="70.3"),
+    dict(label="Symmetric weights (z = 0)", value=59.1, color="danger", text="59.1"),
+    dict(label="Asymmetric weights (z ≠ 0)", value=70.3, color="data", text="70.3"),
     dict(label="Float", value=70.9, color="neutral", text="70.9"),
 ]
 bars_save(out / "zeropoint.svg", zp_rows, [1, 1, 1], xlim=(0, 82), size=(5.4, 1.6),
-          xlabel="MobileNet-v1 top-1 (%), INT8 post-training, per-channel")
+          xlabel="MobileNet-v1 top-1 (%), INT8 post-training, per-channel weights;\n"
+                 "activations quantized the same way in both")
+
+# ---------------------------------------------------------------------------
+# 8b. Symmetric and asymmetric mapping at slide size (redraw after the
+#     chapter's figure 22). Symmetric INT8: [-1, 1] onto -127..127, z = 0.
+#     Asymmetric INT8: [-0.5, 1.5] onto -128..127; s = 2 / 255, real zero at
+#     code -128 + round(0.5 / s) = -128 + 64 = -64 (derived).
+# ---------------------------------------------------------------------------
+fig, axes = plt.subplots(1, 2, figsize=(5.9, 1.75))
+for ax, (lo, hi, qlo, qhi, zq, title, ck) in zip(axes, (
+        (-1.0, 1.0, -127, 127, 0, "Symmetric: z = 0", "memory"),
+        (-0.5, 1.5, -128, 127, -64, "Asymmetric: z = −64", "data"))):
+    # real line on top (y = 1), integer line below (y = 0), drawn on 0..1
+    ax.plot([0, 1], [1, 1], color=C["text"], lw=1.5)
+    ax.plot([0, 1], [0, 0], color=C["neutral"], lw=1.5)
+    xr0 = (0 - lo) / (hi - lo)
+    xq0 = (zq - qlo) / (qhi - qlo)
+    for xr, xq, lab, qlab, hl in ((0, 0, f"α = {lo:g}", f"{qlo}", False),
+                                  (xr0, xq0, "0", f"{zq}", True),
+                                  (1, 1, f"β = {hi:g}", f"{qhi}", False)):
+        col = C["danger"] if hl else C[ck]
+        ax.annotate("", (xq, 0.06), (xr, 0.94),
+                    arrowprops=dict(arrowstyle="-|>", color=col, lw=1.6))
+        ax.plot([xr], [1], "o", ms=7, color=col)
+        ax.plot([xq], [0], "s", ms=6, color=col)
+        ax.text(xr, 1.18, lab.replace("-", "−"), ha="center", fontsize=12,
+                fontweight="bold", color=col)
+        ax.text(xq, -0.42, qlab.replace("-", "−"), ha="center", fontsize=12,
+                fontweight="bold", color=col)
+    ax.text(0.5, 1.62, title, ha="center", fontsize=13, fontweight="bold", color=C[ck])
+    ax.set_xlim(-0.12, 1.12)
+    ax.set_ylim(-0.55, 1.85)
+    ax.axis("off")
+axes[0].text(-0.16, 1, "real", ha="right", va="center", fontsize=12, fontweight="bold")
+axes[0].text(-0.16, 0, "INT8", ha="right", va="center", fontsize=12, fontweight="bold",
+             color=C["neutral"])
+fig.tight_layout(w_pad=2.0)
+sp.save(fig, out / "calranges.svg")
+
+# ---------------------------------------------------------------------------
+# 10b. Activation histogram at slide size, redrawn from the chapter's figure
+#      21 (illustrative bars, after Wu et al. 2020; bins of 0.1 read from the
+#      book's SVG source). Step 2 marks the three calibration methods; the
+#      percentile and entropy positions are illustrative (the chapter assigns
+#      no percentile rank to its 1.1 boundary).
+# ---------------------------------------------------------------------------
+hist_px = [238, 228, 218, 200, 175, 145, 115, 90, 70, 52, 40, 30, 23, 18, 14,
+           11, 9, 7, 6, 4, 3]
+hist = np.array(hist_px) / 240
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.8, 2.45))
+    for i, h in enumerate(hist):
+        tail = i >= 11
+        ax.bar(0.1 * i + 0.05, h, width=0.092,
+               color=C["danger_l"] if tail else C["memory_l"],
+               edgecolor=C["danger"] if tail else C["memory"], lw=0.8)
+    if k == 1:
+        ax.axvline(1.1, color=C["data"], lw=1.8, ls="--")
+        ax.text(1.13, 0.9, "clip at 1.1?", fontsize=12, fontweight="bold", color=C["data"])
+        ax.axvline(2.5, color=C["neutral"], lw=1.8, ls="--")
+        ax.text(2.47, 0.9, "cover all: 2.5", fontsize=12, fontweight="bold",
+                color=C["neutral"], ha="right")
+        ax.annotate("rare tail", (1.65, 0.07), (1.75, 0.45), fontsize=12,
+                    fontweight="bold", color=C["danger"],
+                    arrowprops=dict(arrowstyle="-|>", color=C["danger"], lw=1.4))
+    else:
+        for x, lab, ck, ha in ((2.5, "max: up to the largest\nvalue, no clipping", "neutral", "right"),
+                               (1.5, "percentile:\ndrop the top\n0.1%", "compute", "left"),
+                               (1.1, "entropy (KL):\nclosest rounded\nhistogram", "data", "right")):
+            ax.axvline(x, color=C[ck], lw=1.8, ls="--")
+            dx = -0.04 if ha == "right" else 0.04
+            ax.text(x + dx, 0.55 if ck == "neutral" else 0.97, lab, fontsize=11, fontweight="bold", color=C[ck],
+                    ha=ha, va="top")
+        ax.text(2.5, -0.33, "Percentile and entropy positions illustrative",
+                fontsize=9.5, color=C["neutral"], ha="right")
+    ax.set_xlim(0, 2.55)
+    ax.set_ylim(0, 1.05)
+    ax.set_yticks([])
+    ax.spines["left"].set_visible(False)
+    ax.set_xticks([0, 0.5, 1.0, 1.5, 2.0, 2.5])
+    ax.set_xlabel("Activation value, one ResNet-50 layer (illustrative)")
+    sp.save(fig, out / f"calhist_step{k}.svg")
 
 # ---------------------------------------------------------------------------
 # 9. Per-channel ranges: a schematic redraw after Nagel et al. 2019, Fig. 2.
@@ -543,21 +625,21 @@ absmax = [87.76, 16.55, 15.11, 14.59, 19.08]
 llmint8 = [25.83, 15.93, 14.44, 13.24, 12.45]
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 2.5))
-    ax.axvspan(6.0, 16, color=C["danger_l"], alpha=0.6 if k == 2 else 0.0, zorder=0)
+    ax.axvspan(6.0, 15, color=C["danger_l"], alpha=0.6 if k == 2 else 0.0, zorder=0)
     ax.plot(size_b, f32, "o-", color=C["neutral"], lw=2.2, ms=7)
     ax.plot(size_b, absmax, "o-", color=C["danger"], lw=2.2, ms=7)
     a = 1.0 if k == 2 else 0.0
     ax.plot(size_b, llmint8, "s--", color=C["data"], lw=2.0, ms=6, alpha=a)
-    ax.text(13.6, 19.08, "INT8, one scale\nper tensor: 19.08", fontsize=11,
+    ax.text(19, 19.08, "INT8, one scale\nper tensor: 19.08", fontsize=11,
             fontweight="bold", color=C["danger"], va="center")
-    ax.text(13.6, 12.2, "32-bit float: 12.45" if k == 1 else
+    ax.text(19, 12.2, "32-bit float: 12.45" if k == 1 else
             "32-bit float and\nLLM.int8(): 12.45", fontsize=11, fontweight="bold",
             color=C["neutral"] if k == 1 else C["data"], va="center")
     ax.text(6.3, 60, "outlier features\nin every layer", fontsize=10.5,
             fontweight="bold", color=C["danger"], alpha=a)
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_xlim(0.09, 60)
+    ax.set_xlim(0.09, 15)
     ax.set_ylim(10, 100)
     ax.set_xticks(size_b)
     ax.set_xticklabels(["125M", "1.3B", "2.7B", "6.7B", "13B"])
@@ -622,12 +704,75 @@ for k in (1, 2):
               size=(5.8, 2.1), xlabel="OPT-6.7B WikiText perplexity (lower is better)")
 
 # ---------------------------------------------------------------------------
-# 14. Two regimes on a schematic roofline (copied from Lecture 10)
+# 14. Two mechanisms on a schematic roofline. Positions are illustrative; the
+#     ratios are the chapter's: decode 3.3 -> 1.06 GB per token, 65 -> 21 ms
+#     (Napkin Math 10.4, 3.1x); H100 dense INT8 1,979 against FP16 989
+#     tera-ops/s (Napkin Math 10.2). One shape stands for both machines.
+#     Step 1: FP16 points. Step 2: decode moves along the slope (fewer bytes
+#     per operation). Step 3: a second, INT8 roof at twice the height; the
+#     MLP point rises to it (INT8 also halves its bytes, so it moves right);
+#     the decode point does not move.
 # ---------------------------------------------------------------------------
-sp.roofline_steps(out / "roofline_int", [
-    ("Decode, INT4: 3.1×", 20.0, "memory"),
-    ("Large-batch MLP, INT8: 2×", 3000.0, "compute"),
-], note="Schematic axes")
+RIDGE, ROOF = 100.0, 1.0
+xs = np.logspace(-1.5, 4.5, 300)
+dec16, dec4 = 6.0, 6.0 * 3.1
+mlp16, mlp8 = 3000.0, 6000.0
+FS = 10.5
+for k in (1, 2, 3):
+    fig, ax = plt.subplots(figsize=(4.5, 3.0))
+    roof = np.minimum(ROOF, xs / RIDGE * ROOF)
+    ax.plot(xs[xs <= RIDGE], roof[xs <= RIDGE], color=C["memory"], lw=3)
+    ax.plot(xs[xs >= RIDGE], roof[xs >= RIDGE], color=C["compute"], lw=3)
+    ax.text(0.75, 0.028, "memory slope", color=C["memory"], fontsize=FS,
+            fontweight="bold", ha="center", va="center", rotation=44)
+    # decode points
+    ax.plot([dec16], [dec16 / RIDGE], "o", ms=10, color=C["memory"], mec="white",
+            mew=1.5, zorder=5, alpha=0.45 if k >= 2 else 1.0)
+    ax.annotate("Decode, FP16:\n65 ms per token", (dec16, dec16 / RIDGE), (8, -6),
+                textcoords="offset points", ha="left", va="top", fontsize=FS,
+                fontweight="bold", color=C["memory"])
+    a2 = 1.0 if k >= 2 else 0.0
+    if True:
+        ax.annotate("", (dec4, dec4 / RIDGE), (dec16 * 1.08, dec16 / RIDGE * 1.08),
+                    arrowprops=dict(arrowstyle="-|>", color=C["data"], lw=2.2, alpha=a2))
+        ax.plot([dec4], [dec4 / RIDGE], "o", ms=10, color=C["data"], mec="white",
+                mew=1.5, zorder=5, alpha=a2)
+        ax.annotate("INT4 weights: 21 ms\n(3.1× fewer bytes)", (dec4, dec4 / RIDGE),
+                    (-8, 6), textcoords="offset points", ha="right", va="bottom",
+                    fontsize=FS, fontweight="bold", color=C["data"], alpha=a2)
+    # MLP points
+    ax.plot([mlp16], [ROOF], "o", ms=10, color=C["compute"], mec="white", mew=1.5,
+            zorder=5, alpha=0.45 if k >= 3 else 1.0)
+    ax.annotate("MLP, large batch:\nFP16 roof, 989", (mlp16, ROOF), (0, -12),
+                textcoords="offset points", ha="center", va="top", fontsize=FS,
+                fontweight="bold", color=C["compute"])
+    a3 = 1.0 if k >= 3 else 0.0
+    if True:
+        xi = xs[(xs >= RIDGE) & (xs <= 2 * RIDGE)]
+        ax.plot(xi, xi / RIDGE * ROOF, color=C["memory"], lw=2, ls="--", alpha=a3)
+        xr = xs[xs >= 2 * RIDGE]
+        ax.plot(xr, np.full_like(xr, 2 * ROOF), color=C["danger"], lw=2.4, ls="--", alpha=a3)
+        ax.text(230, 2 * ROOF * 1.25, "INT8 roof: 1,979 (2×)", color=C["danger"],
+                fontsize=FS, fontweight="bold", va="bottom", alpha=a3)
+        ax.annotate("", (mlp8, 2 * ROOF * 0.95), (mlp16 * 1.06, ROOF * 1.04),
+                    arrowprops=dict(arrowstyle="-|>", color=C["danger"], lw=2.0, alpha=a3))
+        ax.plot([mlp8], [2 * ROOF], "o", ms=10, color=C["danger"], mec="white", mew=1.5,
+                zorder=5, alpha=a3)
+        ax.text(500, 0.008, "Decode does not move:\nits math stays 16-bit",
+                fontsize=FS - 0.5, color=C["neutral"], fontweight="bold", va="center",
+                alpha=a3)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlim(0.035, 3e4)
+    ax.set_ylim(3e-3, 6)
+    ax.minorticks_off()
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_xlabel("Operations per byte moved")
+    ax.set_ylabel("Operations per second")
+    ax.text(0.01, 0.99, "Schematic; positions illustrative", transform=ax.transAxes,
+            ha="left", va="top", fontsize=9, color=C["neutral"])
+    sp.save(fig, out / f"roofint_step{k}.svg")
 
 # ---------------------------------------------------------------------------
 # 15. Bytes per token for GPT-2 XL on the phone: fused against unfused
@@ -719,5 +864,24 @@ for k in (2, 3):
              color=C["neutral"])
     fig.tight_layout(w_pad=1.5)
     sp.save(fig, out / f"waterfall_step{k}.svg")
+
+# Frame time alone, large enough to read in half a slide (synthesis frame)
+fig, ax = plt.subplots(figsize=(3.6, 2.6))
+for i, v in enumerate(timev):
+    ax.bar(i, v, color=C["compute"], width=0.7)
+    inside_bar = v < 40
+    ax.text(i, v / 2 if inside_bar else v + 4, f"{v:g} ms", ha="center",
+            va="center" if inside_bar else "bottom", fontsize=13, fontweight="bold",
+            color="white" if inside_bar else C["compute"])
+ax.axhline(33, color=C["danger"], lw=1.5, ls="--")
+ax.text(2.42, 33, " 33 ms\n budget", color=C["danger"], fontsize=12, fontweight="bold",
+        ha="left", va="center", clip_on=False)
+ax.set_xticks(range(3))
+ax.set_xticklabels(stages, fontsize=11)
+ax.set_ylim(0, 150)
+ax.set_ylabel("Frame time (ms)")
+ax.grid(axis="y", color=C["grid"], linewidth=0.6)
+ax.set_axisbelow(True)
+sp.save(fig, out / "waterfall_time.svg")
 
 print("figures written")
