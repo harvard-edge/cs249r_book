@@ -21,6 +21,13 @@ local function current_source(lesson)
   source_valid[lesson.source] = pandoc.utils.sha1(text) == lesson.source_sha1
   return source_valid[lesson.source]
 end
+local function current_bundle(lesson)
+  if not lesson.bundle or not lesson.bundle_sha1 or not lesson.lesson_sha1 then return false end
+  local f = io.open(extension_dir .. '/' .. lesson.bundle, 'rb')
+  if not f then return false end
+  local bytes = f:read('*a'); f:close()
+  return pandoc.utils.sha1(bytes) == lesson.bundle_sha1
+end
 local function enhance(el)
   local name=el.attributes['data-explore']
   if not name or not quarto.doc.is_format('html:js') then return nil end
@@ -32,15 +39,20 @@ local function enhance(el)
   if key and not current_source(lesson) then
     warn('stale source mapping for '..key..'; review artwork and rerun compile_figure_explore.py --enroll');return nil
   end
+  if name=='mechanism-scene' and not current_bundle(lesson) then
+    warn('missing or stale mechanism bundle for '..tostring(key));return nil
+  end
   quarto.doc.add_html_dependency({name='mlsys-figure-explore',version='0.2.0',
     scripts={{path='figure-views.js',attribs={defer=true}},{path='figure-explore.js',attribs={defer=true}}},stylesheets={'figure-views.css'}})
   local scripts={{path=lesson.script,attribs={defer=true}}}
   local volume = lesson.volume and string.format('%d',lesson.volume) or ''
+  if name=='mechanism-scene' then table.insert(scripts,{path=lesson.bundle,attribs={defer=true}}) end
   if name=='guided-figure' then table.insert(scripts,{path='guided-lessons-vol'..volume..'.js',attribs={defer=true}}) end
-  quarto.doc.add_html_dependency({name='mlsys-explore-'..name..(name=='guided-figure' and '-vol'..volume or ''),version='0.2.0',scripts=scripts,stylesheets={lesson.stylesheet}})
+  quarto.doc.add_html_dependency({name='mlsys-explore-'..name..((name=='guided-figure' or name=='mechanism-scene') and '-vol'..volume or ''),version=(name=='mechanism-scene' and '0.3.0-'..(lesson.runtime_sha1 or 'unversioned'):sub(1,12)..'-'..lesson.bundle_sha1:sub(1,12) or '0.2.0'),scripts=scripts,stylesheets={lesson.stylesheet}})
   el.attributes['data-mlsys-explore']=name
   if key then
     el.attributes['data-mlsys-explore-key']=key
+    if name=='mechanism-scene' then el.attributes['data-mlsys-lesson-sha1']=lesson.lesson_sha1 end
     el.attributes['data-mlsys-art-sha1']=lesson.art_structural_sha1 or lesson.art_sha1
     el.attributes['data-mlsys-art-kind']=lesson.art_kind
   end
