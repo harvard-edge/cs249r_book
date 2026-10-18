@@ -53,3 +53,9 @@ For complete details, see: [`CUSTOM_EXTENSIONS.md`](./CUSTOM_EXTENSIONS.md)
 
 ---
 **When in doubt, DON'T reinstall - ask the team first!**
+
+### Figure Explore
+
+`mlsysbook-ext/figure-explore` adds opt-in Diagram / Explore views to existing
+body figures for HTML while retaining static PDF/EPUB output. See its
+[authoring and verification guide](mlsysbook-ext/figure-explore/README.md).
