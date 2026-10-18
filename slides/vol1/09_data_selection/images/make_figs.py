@@ -130,47 +130,103 @@ GENS = [1, 2, 3, 4, 5]
 ACC = [95, 92, 88, 83, 78]
 
 
-def collapse(size=(5.8, 2.3), stem="collapse", label_note=True):
-    for k in (1, 2):
+def collapse(size=(5.8, 2.3), stem="collapse", label_note=True, steps=(1, 2), font=1.0):
+    for k in steps:
         fig, ax = plt.subplots(figsize=size)
         n = 1 if k == 1 else 5
         ax.plot(GENS[:n], ACC[:n], color=C["danger"], lw=3, marker="o", ms=9)
-        ax.text(1.12, 95.6, "95%", color=C["danger"], fontsize=13, fontweight="bold")
+        ax.text(1.12, 95.6, "95%", color=C["danger"], fontsize=13 * font, fontweight="bold")
         if k == 2:
-            ax.text(4.85, 78.0, "78%", color=C["danger"], fontsize=13, fontweight="bold",
+            ax.text(4.85, 78.0, "78%", color=C["danger"], fontsize=13 * font, fontweight="bold",
                     ha="right", va="center")
-            ax.text(3.0, 94.5, "−17 points in five generations", color=C["danger"],
-                    fontsize=12, fontweight="bold", ha="left")
+            if label_note:
+                ax.text(3.0, 94.5, "−17 points in five generations", color=C["danger"],
+                        fontsize=12, fontweight="bold", ha="left")
         ax.set_xlim(0.7, 5.3)
         ax.set_ylim(74, 99)
         ax.set_xticks(GENS)
-        ax.set_xticklabels([f"Gen {g}" for g in GENS])
-        ax.set_ylabel("Accuracy (%)")
+        ax.set_xticklabels([f"Gen {g}" for g in GENS] if label_note else [str(g) for g in GENS])
+        ax.tick_params(labelsize=11 * font)
+        ax.set_ylabel("Accuracy (%)", fontsize=11 * font)
+        if not label_note:
+            ax.set_xlabel("Generation", fontsize=11 * font)
         ax.grid(axis="y", color=C["grid"], lw=0.6)
         if label_note:
             note(ax, "Illustrative scenario from the chapter, not a measurement", y=-0.34)
         sp.save(fig, out / f"{stem}_step{k}.svg")
 
 
-def collapse_tails():
-    """Column figure: recursive training narrows the distribution's tails.
-    Shape is illustrative (after Shumailov et al. 2024's mechanism)."""
-    fig, ax = plt.subplots(figsize=(3.6, 2.2))
-    x = np.linspace(-4, 4, 400)
-    for sd, ck, lab, xy in ((1.0, "neutral", "Real data", (1.9, 0.30)),
-                            (0.55, "danger", "Gen 5", (0.65, 0.68))):
-        y = np.exp(-x ** 2 / (2 * sd ** 2)) / (sd * np.sqrt(2 * np.pi))
-        ax.plot(x, y, color=C[ck], lw=2.5)
-        ax.text(*xy, lab, color=C[ck], fontsize=12, fontweight="bold")
-    ax.annotate("rare cases lost", xy=(-2.4, 0.03), xytext=(-4.0, 0.42),
-                fontsize=11, color=C["danger"],
-                arrowprops=dict(arrowstyle="->", color=C["danger"], lw=1.5))
-    ax.set_yticks([])
-    ax.set_xticks([])
-    ax.set_xlabel("Feature value")
-    ax.spines["left"].set_visible(False)
-    note(ax, "Shape illustrative", y=-0.22)
-    sp.save(fig, out / "collapse_tails.svg")
+# -----------------------------------------------------------------------------
+# 3b. Learning curves: efficient selection against random sampling
+# -----------------------------------------------------------------------------
+def ppd_curve():
+    """Slide variant of the chapter's figure 3 (illustrative curves): the
+    efficient curve plateaus near 25 percent of the data, random sampling
+    climbs across the whole budget, and the gap is read at a 20 percent
+    budget. The curve shapes reproduce the book figure; no value on them is
+    a measurement, and none is printed."""
+    x = np.linspace(0, 100, 400)
+    eff = 95 * (1 - np.exp(-x / 6.5))
+    rnd = 95 * (1 - np.exp(-x / 25))
+    for k in (1, 2):
+        fig, ax = plt.subplots(figsize=(5.8, 2.7))
+        ax.plot(x, rnd, color=C["neutral"], lw=3, ls="--")
+        ax.plot(x, eff, color=C["memory"], lw=3.5)
+        ax.text(62, 42, "Random sampling", color=C["neutral"], fontsize=13, fontweight="bold")
+        ax.text(30, 99, "Efficient selection", color=C["memory"], fontsize=13, fontweight="bold")
+        if k == 2:
+            y20e, y20r = 95 * (1 - np.exp(-20 / 6.5)), 95 * (1 - np.exp(-20 / 25))
+            ax.annotate("", xy=(20, y20r + 1), xytext=(20, y20e - 1),
+                        arrowprops=dict(arrowstyle="<->", color=C["danger"], lw=2))
+            ax.text(21.5, 34, "same data budget:\naccuracy gap", color=C["danger"],
+                    fontsize=12, fontweight="bold", va="center")
+            x90r = -25 * np.log(1 - 90 / 95)
+            x90e = -6.5 * np.log(1 - 90 / 95)
+            ax.annotate("", xy=(x90r - 1, 90), xytext=(x90e + 1, 90),
+                        arrowprops=dict(arrowstyle="<->", color=C["data"], lw=2))
+            ax.text(x90r, 80, "same target:\ndata saved", color=C["data"],
+                    fontsize=12, fontweight="bold", ha="center", va="top")
+        ax.set_xlim(0, 100)
+        ax.set_ylim(0, 108)
+        ax.set_yticks([0, 50, 100])
+        ax.set_xlabel("Dataset size (% of total)")
+        ax.set_ylabel("Accuracy (%)")
+        ax.grid(axis="y", color=C["grid"], lw=0.6)
+        sp.save(fig, out / f"ppd_curve_step{k}.svg")
+
+
+# -----------------------------------------------------------------------------
+# 3c. Curriculum warmup: linear pacing serves about half the samples
+# -----------------------------------------------------------------------------
+def warmup():
+    """Linear pacing (chapter Sec. 9.4.1): epoch j of a W-epoch warmup serves
+    the easiest j/W of the D samples, so the warmup serves D(W+1)/2 in place
+    of W*D. W = 10 is an illustrative choice: 5.5 D of 10 D."""
+    W = 10
+    j = np.arange(1, W + 1)
+    frac = j / W
+    assert abs(frac.sum() - (W + 1) / 2) < 1e-9
+    fig, ax = plt.subplots(figsize=(5.8, 2.5))
+    ax.bar(j, np.ones(W), color="white", edgecolor=C["neutral"], lw=1.2, ls="--", width=0.75)
+    ax.bar(j, frac, color=C["data"], width=0.75)
+    post = np.arange(W + 1, W + 4)
+    ax.bar(post, np.ones(3), color=C["neutral_l"], edgecolor=C["neutral"], lw=1, width=0.75)
+    ax.text(W + 2, 1.06, "full data", ha="center", fontsize=11, color=C["neutral"])
+    ax.text(1.0, 1.24, "Warmup serves 5.5 D samples in place of 10 D",
+            fontsize=13, fontweight="bold", color=C["data"])
+    ax.text(1.0, 1.10, "dashed: what full-data epochs would serve", fontsize=11,
+            color=C["neutral"])
+    ax.set_xticks(list(j) + list(post))
+    ax.set_xticklabels([str(v) for v in j] + ["", "", ""])
+    ax.set_xlim(0.4, W + 3.6)
+    ax.set_ylim(0, 1.38)
+    ax.set_yticks([0, 0.5, 1.0])
+    ax.set_yticklabels(["0", "D/2", "D"])
+    ax.set_xlabel("Epoch (warmup W = 10, illustrative)")
+    ax.set_ylabel("Samples served")
+    ax.grid(axis="y", color=C["grid"], lw=0.6)
+    ax.set_axisbelow(True)
+    sp.save(fig, out / "warmup.svg")
 
 
 # -----------------------------------------------------------------------------
@@ -386,9 +442,10 @@ def roi():
     for n, v in zip(runs, vals):
         ck = "data" if v > 0 else "danger"
         ax.plot([n], [v], "o", ms=9, color=C[ck], zorder=5)
-        ax.annotate(f"{v:+.1f}%", (n, v), xytext=(-8, 4) if n == 50 else (8, -14),
+        off, ha = {50: ((-8, 4), "right"), 5: ((-6, -20), "right")}.get(n, ((9, -20), "left"))
+        ax.annotate(f"{v:+.0f}%", (n, v), xytext=off,
                     textcoords="offset points", fontsize=12, fontweight="bold",
-                    color=C[ck], ha="right" if n == 50 else "left")
+                    color=C[ck], ha=ha)
     ax.set_xscale("log")
     ax.set_xticks([1, 5, 10, 50])
     ax.set_xticklabels(["1", "5", "10", "50"])
@@ -523,11 +580,45 @@ def data_path():
         (out / f"data_path_step{k}.svg").write_text(svg_doc(W, H, b))
 
 
+def synthetic_porch():
+    """Schematic of domain-randomized synthetic porch frames for the
+    discussion slide (drawn here; no openly licensed photo of synthetic
+    training frames was found). No numbers."""
+    W, H = 900, 335
+    tiles = [("Noon, blue door", "#E9E2D0", "#3A6EA5", "#BFB8A8", 1.0, "person"),
+             ("Dusk, red door", "#B7A58C", "#A23B32", "#8C8170", 0.75, "person"),
+             ("Night, porch light", "#3B3F55", "#5C4A3A", "#2E3142", 0.5, "shadow")]
+    b = ""
+    for i, (lab, wall, door, floor, lum, who) in enumerate(tiles):
+        x0, y0, w, h = 15 + 297 * i, 20, 275, 230
+        b += f'<rect x="{x0}" y="{y0}" width="{w}" height="{h}" fill="{wall}"/>\n'
+        b += f'<rect x="{x0}" y="{y0 + 170}" width="{w}" height="60" fill="{floor}"/>\n'
+        b += f'<rect x="{x0 + 30}" y="{y0 + 40}" width="70" height="130" fill="{door}"/>\n'
+        b += f'<circle cx="{x0 + 88}" cy="{y0 + 108}" r="4" fill="#D9C27A"/>\n'
+        b += f'<rect x="{x0 + 120}" y="{y0 + 55}" width="14" height="22" rx="3" fill="#F2D27A" opacity="{lum}"/>\n'
+        if who == "person":
+            col = "#2B2B2B" if lum > 0.8 else "#4A3A30"
+            b += f'<circle cx="{x0 + 200}" cy="{y0 + 85}" r="17" fill="{col}"/>\n'
+            b += f'<rect x="{x0 + 180}" y="{y0 + 104}" width="40" height="70" rx="12" fill="{col}"/>\n'
+            b += f'<rect x="{x0 + 183}" y="{y0 + 170}" width="12" height="35" fill="{col}"/>\n'
+            b += f'<rect x="{x0 + 205}" y="{y0 + 170}" width="12" height="35" fill="{col}"/>\n'
+        else:
+            b += (f'<path d="M{x0 + 160},{y0 + 205} L{x0 + 260},{y0 + 205} L{x0 + 240},{y0 + 180} '
+                  f'L{x0 + 200},{y0 + 178} Z" fill="#15161F" opacity="0.8"/>\n')
+        b += text(x0 + w / 2, y0 + h + 34, lab, 26, weight="bold")
+    b += text(450, 322, "Rendered: every label is known exactly.", 24,
+              color=C["neutral"])
+    (out / "synthetic_porch.svg").write_text(svg_doc(W, H, b))
+
+
 if __name__ == "__main__":
     data_wall()
     gpt2_tokens()
     collapse()
-    collapse_tails()
+    collapse(size=(2.9, 2.2), stem="collapse_final", label_note=False, steps=(2,), font=1.1)
+    ppd_curve()
+    warmup()
+    synthetic_porch()
     tokens_per_param()
     scoreboard()
     dedup_hours()
