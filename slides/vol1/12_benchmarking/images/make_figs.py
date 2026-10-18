@@ -286,7 +286,7 @@ mfu_rows = [
     dict(label="Roofline ceiling", value=40200, color="compute",
          text="40,200 images/s", step=1),
     dict(label="MLPerf, per H100", value=5000, color="danger",
-         text="about 5,000 (chapter value)", step=3, pending="???", pending_from=2),
+         text="about 5,000 (chapter estimate)", step=3, pending="???", pending_from=2),
 ]
 for k in (1, 2, 3, 4):
     fig, ax = plt.subplots(figsize=(5.8, 2.0))
@@ -300,8 +300,8 @@ for k in (1, 2, 3, 4):
         ax.plot([4660, 7050], [-0.42, -0.42], color=C["text"], lw=2)
         for x in (4660, 7050):
             ax.plot([x, x], [-0.52, -0.32], color=C["text"], lw=2)
-        ax.text(7600, -0.42, "MLPerf v4.0 logs: 4,660 to 7,050",
-                va="center", fontsize=10, color=C["text"])
+        ax.text(7600, -0.42, "MLPerf v4.0 logs: 7,000 (8 GPUs), 4,660 (64 GPUs)",
+                va="center", fontsize=11, color=C["text"])
     ax.set_ylim(-0.75, 1.6)
     ax.set_xlabel("Training throughput (images/s per H100)")
     sp.save(fig, out / f"mfu_step{k}.svg")

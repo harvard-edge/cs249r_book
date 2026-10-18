@@ -182,12 +182,16 @@ for k in (1, 2):
     al = 1.0 if k >= 2 else 0.0
     for i, (s, ck, lab) in enumerate(((DELL, "compute", "Dell runs"), (EOS, "memory", "Eos runs"))):
         y = 1 - i
+        ok_sorted = sorted(float(r["minutes"]) for r in RUNS
+                           if r["system"] == s and r["status"] == "success")
         for r in RUNS:
             if r["system"] != s:
                 continue
             x = float(r["minutes"])
             if r["status"] == "success":
-                a2.plot(x, y, "o", ms=10, color=C[ck], mec="white", mew=1.2, alpha=al, zorder=4)
+                # Alternate neighbors up and down so close runs stay visible.
+                jit = 0.2 if ok_sorted.index(x) % 2 == 0 else -0.2
+                a2.plot(x, y + jit, "o", ms=8, color=C[ck], mec="white", mew=1.0, alpha=al, zorder=4)
             else:
                 a2.plot(x, y, "o", ms=11, mfc="white", mec=C["danger"], mew=2, alpha=al, zorder=4)
                 a2.plot(x, y, "x", ms=7, color=C["danger"], mew=2, alpha=al, zorder=5)
@@ -359,55 +363,73 @@ ax.set_xlabel("Samples needed (log scale)", fontsize=11)
 sp.save(fig, out / "sizing.svg")
 
 # =============================================================================
-# Worked example: the interval on the hook's difference, then H200
+# Worked example: the runs, then the interval on the hook's difference, then H200
+# Drawn for the right column of the slide. Step 1 shows the nine converged runs
+# (raw times) with each mean; steps 2 to 5 build the interval below them.
 # =============================================================================
-for k in (1, 2, 3, 4):
-    fig, (a1, a2) = plt.subplots(1, 2, figsize=(5.8, 1.75),
-                                 gridspec_kw=dict(width_ratios=[1.6, 1], wspace=0.25))
+for k in (1, 2, 3, 4, 5):
+    fig, (a0, a1, a2) = plt.subplots(3, 1, figsize=(3.45, 2.45),
+                                     gridspec_kw=dict(height_ratios=[1.1, 1, 1], hspace=0.95))
+    # Top: the converged runs behind the two means
+    for y, s, ck, lab in ((1, DELL, "compute", "Dell"), (0, EOS, "memory", "Eos")):
+        xs = sorted(runs(s))
+        for n, x in enumerate(xs):
+            jit = 0.17 if n % 2 == 0 else -0.17
+            a0.plot(x, y + jit, "o", ms=7, color=C[ck], mec="white", mew=0.8, zorder=4)
+        m = st.mean(xs)
+        a0.plot([m, m], [y - 0.4, y + 0.4], color=C["text"], lw=2.5, zorder=5)
+        a0.text(13.127, y, lab, ha="right", va="center", fontsize=11, fontweight="bold", color=C[ck])
+    a0.set_xlim(13.13, 13.33)
+    a0.set_ylim(-0.6, 1.6)
+    a0.set_yticks([])
+    a0.spines["left"].set_visible(False)
+    a0.set_xticks([13.15, 13.20, 13.25, 13.30])
+    a0.set_xticklabels(["13.15", "13.20", "13.25", "13.30 min"], fontsize=10)
+    # Middle: Eos minus Dell
     w = W_DELL
-    a1.axvline(0, color=C["neutral"], lw=1.5, ls="--")
-    a1.text(0.003, 1.05, "no difference", fontsize=10, color=C["neutral"], va="bottom")
-    a1.plot(w["d"], 0.5, "o", ms=11, color=C["compute"], zorder=5)
-    a1.text(w["d"], 0.78, f"{w['d']:.3f} min", ha="center", fontsize=11, fontweight="bold",
-            color=C["compute"])
-    if k >= 2:
-        a1.annotate("", xy=(w["d"] - w["se"], 0.18), xytext=(w["d"] + w["se"], 0.18),
-                    arrowprops=dict(arrowstyle="|-|", color=C["neutral"], lw=1.5))
-        a1.text(w["d"] + w["se"] + 0.006, 0.18, f"±1 SE ({w['se']:.4f})", va="center",
-                fontsize=10, color=C["neutral"], fontweight="bold")
+    on = 1.0 if k >= 2 else 0.0
+    a1.axvline(0, color=C["neutral"], lw=1.5, ls="--", alpha=on)
+    a1.plot(w["d"], 0.5, "o", ms=10, color=C["compute"], zorder=5, alpha=on)
     if k >= 3:
+        a1.annotate("", xy=(w["d"] - w["se"], 1.15), xytext=(w["d"] + w["se"], 1.15),
+                    arrowprops=dict(arrowstyle="|-|", color=C["neutral"], lw=1.5))
+        a1.text(w["d"] + w["se"] + 0.008, 1.15, "±1 SE", va="center",
+                fontsize=10.5, color=C["neutral"], fontweight="bold")
+    if k >= 4:
         a1.plot([w["lo"], w["hi"]], [0.5, 0.5], color=C["compute"], lw=6, solid_capstyle="butt", zorder=4)
-        a1.text(w["lo"], -0.15, f"{w['lo']:.3f}", ha="center", fontsize=11, fontweight="bold",
-                color=C["compute"])
-        a1.text(w["hi"], -0.15, f"{w['hi']:.3f}", ha="center", fontsize=11, fontweight="bold",
-                color=C["compute"])
-    a1.set_xlim(-0.03, 0.25)
-    a1.set_ylim(-0.35, 1.3)
+        a1.text(w["hi"] + 0.006, 0.5, f"{w['lo']:.3f} to {w['hi']:.3f}", va="center",
+                fontsize=11, fontweight="bold", color=C["compute"])
+    a1.text(-0.075, 0.5, "Eos − Dell", ha="right", va="center", fontsize=11,
+            fontweight="bold", color=C["compute"], alpha=on)
+    a1.set_xlim(-0.07, 0.36)
+    a1.set_ylim(-0.2, 1.5)
     a1.set_yticks([])
     a1.spines["left"].set_visible(False)
-    a1.set_xticks([0, 0.1, 0.2])
-    a1.set_title("Eos minus Dell", fontsize=12, fontweight="bold", color=C["compute"])
-    a1.set_xlabel("Difference in mean run time (min)")
-    al = 1.0 if k >= 4 else 0.0
+    a1.set_xticks([0, 0.1, 0.2, 0.3])
+    a1.set_xticklabels(["0", "0.1", "0.2", "0.3"], fontsize=10)
+    for s_ in a1.spines.values():
+        s_.set_alpha(on)
+    a1.tick_params(colors=C["text"] if k >= 2 else "white")
+    # Bottom: Eos minus H200
+    al = 1.0 if k >= 5 else 0.0
     h = W_H200
+    a2.axvline(0, color=C["neutral"], lw=1.5, ls="--", alpha=al)
     a2.plot([h["lo"], h["hi"]], [0.5, 0.5], color=C["data"], lw=6, solid_capstyle="butt", alpha=al)
-    a2.plot(h["d"], 0.5, "o", ms=11, color=C["data"], alpha=al, zorder=5)
-    a2.text(h["d"], 0.78, f"{h['d']:.2f} min", ha="center", fontsize=11, fontweight="bold",
-            color=C["data"], alpha=al)
-    a2.text(h["lo"], -0.15, f"{h['lo']:.2f}", ha="center", fontsize=11, fontweight="bold",
-            color=C["data"], alpha=al)
-    a2.text(h["hi"], -0.15, f"{h['hi']:.2f}", ha="center", fontsize=11, fontweight="bold",
-            color=C["data"], alpha=al)
-    a2.set_xlim(1.1, 1.37)
-    a2.set_ylim(-0.35, 1.3)
+    a2.plot(h["d"], 0.5, "o", ms=10, color=C["data"], alpha=al, zorder=5)
+    a2.text(h["lo"] - 0.03, 0.5, f"{h['lo']:.2f} to {h['hi']:.2f}", ha="right", va="center",
+            fontsize=11, fontweight="bold", color=C["data"], alpha=al)
+    a2.text(-0.075 * 1.45 / 0.43, 0.5, "Eos − H200", ha="right", va="center", fontsize=11,
+            fontweight="bold", color=C["data"], alpha=al)
+    a2.set_xlim(-0.07 * 1.45 / 0.43, 1.45)
+    a2.set_ylim(-0.2, 1.5)
     a2.set_yticks([])
     a2.spines["left"].set_visible(False)
-    a2.set_xticks([1.15, 1.25, 1.35])
-    a2.set_title("Eos minus H200", fontsize=12, fontweight="bold", color=C["data"], alpha=al)
-    a2.set_xlabel("(min; zero is far left)", alpha=al)
+    a2.set_xticks([0, 0.5, 1.0])
+    a2.set_xticklabels(["0", "0.5", "1.0"], fontsize=10)
+    a2.set_xlabel("Difference in mean run time (min)", fontsize=10.5, labelpad=2, alpha=al)
     for s_ in a2.spines.values():
         s_.set_alpha(al)
-    a2.tick_params(colors=C["text"] if k >= 4 else "white")
+    a2.tick_params(colors=C["text"] if k >= 5 else "white")
     sp.save(fig, out / f"interval_step{k}.svg")
 
 # =============================================================================
