@@ -392,6 +392,42 @@ bar_steps("review", [
 ], 2, (5.8, 1.45), 3e7, "Cases per 100 reviewer-hours (log scale)", log=True, xmin=100,
     note="6 minutes is an assumption; 1.2 s is the measured average (ProPublica, 2023)")
 
+# Time per case against cases per reviewer-hour (2026-10-18; replaces the
+# book's monitoring margin figure, book_margin_002, whose axes read "time per
+# alert"). Time per case = 3,600 s / cases per hour. Points: 6 min each
+# (assumption) = 10 an hour, 1,000 per 100 h; Cigna 1.2 s each (ProPublica,
+# 2023) = 3,000 an hour, 300,000 per 100 h. The dashed minimum is
+# illustrative and carries no number.
+review_min_s = 120  # illustrative position of the minimum, not a sourced value
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.8, 2.35))
+    xs = [10 ** (i / 50) for i in range(0, 201)]
+    ax.plot(xs, [3600 / x for x in xs], color=C["text"], lw=1.8)
+    ax.axhspan(0.1, review_min_s, color=C["danger"], alpha=0.10, lw=0)
+    ax.axhline(review_min_s, color=C["danger"], lw=1.5, ls="--")
+    ax.text(9000, review_min_s / 1.4, "Minimum for a\nsubstantive review\n(illustrative)",
+            fontsize=11, color=C["danger"], fontweight="bold", va="top", ha="right")
+    ax.text(1.15, 2.0, "Rubber-stamp zone", fontsize=12, color=C["danger"],
+            fontweight="bold", va="center")
+    ax.plot([10], [360], "o", color=C["memory"], ms=8)
+    ax.text(14, 520, "Credit service: 6 min each,\n1,000 per 100 reviewer-hours",
+            fontsize=11, color=C["memory"], fontweight="bold", va="bottom")
+    a = 1.0 if k >= 2 else 0.0
+    ax.plot([3000], [1.2], "o", color=C["danger"], ms=8, alpha=a)
+    ax.text(2400, 0.42, "Cigna: 1.2 s each,\n300,000 per 100 h ", fontsize=11,
+            color=C["danger"], fontweight="bold", ha="right", va="center", alpha=a)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlim(1, 10000)
+    ax.set_ylim(0.15, 20000)
+    ax.set_yticks([1, 60, 3600])
+    ax.set_yticklabels(["1 s", "1 min", "1 h"])
+    ax.set_xlabel("Cases per reviewer-hour (log scale)")
+    ax.set_ylabel("Time per case")
+    ax.grid(color=C["grid"], linewidth=0.6)
+    ax.set_axisbelow(True)
+    sp.save(fig, out / f"review_zone_step{k}.svg")
+
 
 # =============================================================================
 # Segment 4: governance as a data system
