@@ -541,6 +541,13 @@ class Volume:
                          key=lambda p: order_key(p.name))
         self.decks = [Deck(p) for p in folders]
         self.by_id = {d.id: d for d in self.decks}
+        # Lectures named in the volume's course plan (built or not), so a callback
+        # to a lecture still being built is not reported as an unknown lecture.
+        self.planned = set()
+        plan = Path.home() / "GitHub/AIConfigs/projects/MLSysBook/.claude/docs/slides" / self.name / "COURSE_PLAN.md"
+        if plan.exists():
+            self.planned = {re.sub(r"^0+(?=\d)", "", m) for m in
+                            re.findall(r"^#{2,4} Lecture (\d+b?)\b", plan.read_text(), re.M)}
         self.book = None
         roots = [Path(concepts_root)] if concepts_root else BOOK_ROOTS.get(self.name, [])
         for r in roots:
@@ -774,6 +781,8 @@ def rule_callbacks(deck, vol, out):
         loc = label or ""
         norms = [re.sub(r"^0+(?=\d)", "", x) for x in ids]
         for lid, norm in zip(ids, norms):
+            if norm not in vol.by_id and norm in vol.planned:
+                continue   # in the course plan, not built yet
             if norm not in vol.by_id:
                 key = (norm, slide, line, loc)
                 if key in seen:
@@ -889,6 +898,11 @@ def rule_unused(deck, vol, out):
         # Companion scripts (calcs.py, trace and data scripts) are source, not images;
         # the old-deck generator name make_figures.py is the one script that is stale.
         if f.suffix == ".py" and f.name != "make_figures.py":
+            continue
+        # Data read by a companion script (calcs.py and the like) counts as used.
+        if f.suffix in (".json", ".csv", ".yaml", ".txt") and any(
+                f.name in s.read_text(errors="ignore") or f.stem.split("_")[0] in s.read_text(errors="ignore")
+                for s in images.glob("*.py")):
             continue
         if f.suffix in (".csv", ".json") and (images / "data").exists() is False and f.parent == images:
             pass
