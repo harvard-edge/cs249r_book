@@ -5,22 +5,22 @@ Every value is sourced from the rendered chapter (ML Lifecycle) unless noted:
   - Six stages and their artifacts: Sec. 3.1.
   - Day-153 timeline: Sec. 3.1.2 (days 1, 90, 120, 150, 151, 152, 153; 92 and
     94 percent sensitivity; 4 GB model; about 500 MB reserved for the model).
-  - MobileNetV2: about 14 MB of FP32 weights (Sec. 3.4).
+  - Model weights: torchvision parameter counts from a real run
+    (data/count_params.py), times 4 bytes, via calcs.py. Derived values for
+    every figure come from calcs.py.
   - Repair schedule: Example 3.1 (1 + 2 + 2 + 1 days).
   - CrowdFlower 2016 survey shares: chapter figure 4 (60, 19, 9, 5, 4, 3).
   - Accuracy trap: 90 percent healthy population (Sec. 3.5.1, Sec. 3.8.1);
     illustrative population of 100.
-  - Floors: sensitivity above 90, specificity above 80 percent (Sec. 3.5.1).
-    Lab operating point 97.5 / 93.4 percent, AUC 0.99 (Gulshan et al. 2016,
-    Sec. 3.7). The threshold-sweep curve and the clinic point are illustrative.
+  - Floors: sensitivity above 90, specificity above 80 percent (Sec. 3.5.1),
+    drawn over the measured ROC curve of Gulshan et al., JAMA 2016, Fig. 2A
+    (inset). The clinic point is illustrative.
   - Cloud against edge: Napkin Math 3.3 ($136,250 per year; $250,000 plus
     $34,125 per year; payback about 2.4 years).
   - Monitoring cadences: Sec. 3.11.1 (minute, day, week, month, quarter).
   - 224-pixel demonstration: fundus photo by Hao et al. (CC BY 4.0, Wikimedia
     Commons), shrunk to the ImageNet default of 224 x 224 (Sec. 3.7.2).
     Lesion widths measured on that photo (see shrink_demo).
-  - Ungradable examples: illustrative degradations of the same photo, after
-    the causes Beede et al. 2020 report (Sec. 3.1.2).
   - Stage contracts: chapter table 2; audit case: Checkpoint 3.3 (Sec. 3.11).
   - Release gate: Sec. 3.8 (manifest), Sec. 3.8.1 (94 percent overall), the
     Sec. 3.8 self-check (76 percent for cataract patients), Sec. 3.10.2
@@ -34,6 +34,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import calcs as K  # noqa: E402
 
 out = Path(__file__).parent
 C = sp.C
@@ -175,8 +178,6 @@ def loop(name, show_art=True, show_return=True, hl=None, dam=False):
 loop("loop_step1.svg", show_art=False, show_return=False)
 loop("loop_step2.svg", show_art=True, show_return=False)
 loop("loop_step3.svg")
-loop("loop_dam.svg", dam=True)
-loop("loop_hl1.svg", hl=1)
 
 
 # A compact loop for a column slot (the diagnose and closing slides): the same
@@ -333,22 +334,39 @@ for s in (1, 2, 3):
 # 4. Data plots
 # -----------------------------------------------------------------------------
 # Model memory against the clinic reservation (Sec. 3.1.2, Sec. 3.4)
+# Weights of three torchvision models: parameter counts from a real run of
+# data/count_params.py (torchvision 0.28.0), times 4 bytes (FP32), in calcs.py.
+_pc = K.param_counts()
+_mb = {k: v * K.FP32_BYTES / 1e6 for k, v in _pc.items()}
 sp.hbars(out / "memory_fit.svg", [
-    ("Model on day 151", 4000, "danger", "4 GB: 8× the reservation"),
-    ("Reserved for the model", 500, "neutral", "about 500 MB"),
-    ("MobileNetV2 weights (FP32)", 14, "compute", "about 14 MB"),
-], "MB", xlabel="Memory (MB, log scale)")
+    ("Model on day 151", K.MODEL_MB, "danger",
+     f"4 GB: {K.MODEL_MB / K.RESERVED_MB:.0f}× the reservation"),
+    ("Reserved for the model", K.RESERVED_MB, "neutral", "about 500 MB"),
+    ("VGG-16 weights", _mb["vgg16"], "neutral", f"{_mb['vgg16']:.0f} MB"),
+    ("ResNet-50 weights", _mb["resnet50"], "compute", f"{_mb['resnet50']:.0f} MB"),
+    ("MobileNetV2 weights", _mb["mobilenet_v2"], "compute",
+     f"{_mb['mobilenet_v2']:.0f} MB"),
+], "MB", size=(5.8, 2.15), xlabel="Memory (MB, log scale; weights in FP32)")
 
-# Where practitioners say the time goes (CrowdFlower 2016, chapter figure 4)
-sp.hbars(out / "time_sinks.svg", [
-    ("Cleaning and organizing data", 60, "data", "60%"),
-    ("Collecting datasets", 19, "data", "19%"),
-    ("Mining data for patterns", 9, "neutral", "9%"),
-    ("Other", 5, "neutral", "5%"),
-    ("Refining algorithms", 4, "compute", "4%"),
-    ("Building training sets", 3, "neutral", "3%"),
-], "%", log=False, size=(5.8, 2.9),
-    xlabel="Share naming it their biggest time sink (%)")
+
+# Where practitioners say the time goes (CrowdFlower 2016, chapter figure 4).
+# Step 1 hides the algorithms bar for the predict question; step 2 shows it.
+def time_sinks(step):
+    rows = []
+    for name, v in K.SURVEY:
+        ck = "data" if v in (60, 19) else ("compute" if "algorithms" in name
+                                            else "neutral")
+        if step == 1 and "algorithms" in name:
+            rows.append((name, 0, ck, "?"))
+        else:
+            rows.append((name, v, ck, f"{v}%"))
+    sp.hbars(out / f"time_sinks_step{step}.svg", rows, "%", log=False,
+             size=(5.8, 2.9),
+             xlabel="Share of respondents naming it their biggest time sink (%)")
+
+
+time_sinks(1)
+time_sinks(2)
 
 
 # Repair schedule (Example 3.1): each task waits for the one before
@@ -420,67 +438,84 @@ patients(1)
 patients(2)
 
 
-# The operating point: two floors, the pass corner, an illustrative sweep
-def roc(step):
-    import numpy as np
-    fig, ax = sp.plt.subplots(figsize=(5.8, 2.75))
-    ax.fill_between([80, 100], 90, 100, color=C["data_l"])
-    ax.axhline(90, color=C["danger"], lw=2, ls="--")
-    ax.axvline(80, color=C["danger"], lw=2, ls="--")
-    ax.text(99.3, 91.4, "Pass", ha="right", fontsize=14, fontweight="bold",
-            color=C["data"])
-    ax.text(50.8, 91.0, "sensitivity floor 90%", fontsize=11, color=C["danger"])
-    ax.text(80.6, 61.5, "specificity\nfloor 80%", fontsize=11, color=C["danger"])
+# The measured ROC curve (Gulshan et al., JAMA 2016, Fig. 2A inset: EyePACS-1,
+# 1 - specificity 0 to 30 percent, sensitivity 70 to 100 percent), cropped from
+# the published PDF page rendered at 300 dpi. The floors from stage 1 and the
+# illustrative clinic point are drawn over it. Axis calibration: tick marks
+# located on the 300 dpi page render (x = 0 at column 571, x = 30 at 1125;
+# y = 70 at row 1116, y = 100 at row 551.5), shifted by the crop origin.
+CROP0 = (505, 525)
+X0, X30, Y70, Y100 = 571, 1125, 1116, 551.5
+CLINIC_POINT = (88.0, 80.0)      # illustrative (specificity, sensitivity), Sec. 3.8
+
+
+def roc_px(spec, sens, k):
+    fpr = 100 - spec
+    x = X0 + (X30 - X0) * fpr / 30 - CROP0[0]
+    y = Y70 - (Y70 - Y100) * (sens - 70) / 30 - CROP0[1]
+    return x * k, y * k
+
+
+def roc_real(step):
+    from PIL import Image, ImageDraw
+    k = 3                                      # upsample so overlays are crisp
+    base = Image.open(out / "gulshan2016_fig2a_inset.png").convert("RGB")
+    im = base.resize((base.width * k, base.height * k), Image.LANCZOS)
+    d = ImageDraw.Draw(im, "RGBA")
+    red = (165, 28, 48)
     if step >= 2:
-        # illustrative sweep, TPR = FPR ** a with AUC = 1 / (1 + a) = 0.99
-        a = 1 / 0.99 - 1
-        fpr = np.linspace(0.0005, 0.5, 400)
-        ax.plot(100 * (1 - fpr), 100 * fpr ** a, color=C["text"], lw=2.5)
-        ax.text(51, 94.6, "threshold sweep (illustrative)", fontsize=10,
-                color=C["neutral"])
-        ax.plot([93.4], [97.5], "o", ms=11, color=C["memory"], mec="white", mew=1.5,
-                zorder=5)
-        ax.annotate("Lab: 97.5% / 93.4%", (93.4, 97.5), xytext=(84.0, 82.0),
-                    fontsize=12, fontweight="bold", color=C["memory"],
-                    arrowprops=dict(arrowstyle="-", color=C["memory"], lw=1.2))
+        # pass corner: specificity >= 80 (1 - spec <= 20), sensitivity >= 90
+        x20, y90 = roc_px(80, 90, k)
+        x0, ytop = roc_px(100, 100, k)
+        d.rectangle([x0, ytop, x20, y90], fill=(46, 125, 50, 40))
+        _, ybot = roc_px(100, 70, k)
+        xr, _ = roc_px(70, 90, k)
+        for a, b in (((x0, y90), (xr, y90)), ((x20, ytop), (x20, ybot))):
+            n = 24
+            for i in range(0, n, 2):
+                p = (a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n)
+                q = (a[0] + (b[0] - a[0]) * (i + 1) / n,
+                     a[1] + (b[1] - a[1]) * (i + 1) / n)
+                d.line([p, q], fill=red, width=12)
     if step >= 3:
-        ax.plot([88], [80], "o", ms=11, color=C["danger"], mec="white", mew=1.5,
-                zorder=5)
-        ax.annotate("Clinic photos, same\nthreshold (illustrative)", (88, 80),
-                    xytext=(53.0, 72.0), fontsize=12, fontweight="bold",
-                    color=C["danger"],
-                    arrowprops=dict(arrowstyle="-", color=C["danger"], lw=1.2))
-    ax.set_xlim(50, 100)
-    ax.set_ylim(60, 100)
-    ax.set_xlabel("Specificity (%): healthy patients cleared")
-    ax.set_ylabel("Sensitivity (%)")
-    sp.save(fig, out / f"roc_step{step}.svg")
+        cx, cy = roc_px(*CLINIC_POINT, k)
+        r = 34
+        d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=red,
+                  outline="white", width=8)
+    im.thumbnail((1400, 1400))
+    im.save(out / f"roc_real_step{step}.png")
 
 
 for s in (1, 2, 3):
-    roc(s)
+    roc_real(s)
 
 
-# Cloud against edge cumulative cost (Napkin Math 3.3)
+# Cloud against edge cumulative cost (Napkin Math 3.3), values from calcs.py
+_images = K.CLINICS * K.PATIENTS_PER_CLINIC_DAY * K.DAYS_YEAR
+CLOUD_K = (_images * K.CLOUD_PER_IMAGE + K.CLOUD_NETWORK) / 1000
+EDGE_RUN_K = (K.EDGE_MAINT + _images * K.EDGE_PER_IMAGE) / 1000
+CAPEX_K = K.CLINICS * K.EDGE_DEVICE / 1000
+
+
 def cost(step):
     import numpy as np
     t = np.linspace(0, 5, 100)
-    cloud = 136.25 * t
-    edge = 250 + 34.125 * t
+    cloud = CLOUD_K * t
+    edge = CAPEX_K + EDGE_RUN_K * t
     fig, ax = sp.plt.subplots(figsize=(5.8, 2.6))
     ax.plot(t, cloud, color=C["neutral"], lw=3.5)
-    ax.text(5.05, cloud[-1], "Cloud\n\\$136k per year", va="center", fontsize=12,
+    ax.text(5.05, cloud[-1], f"Cloud\n\\${CLOUD_K:.0f}k per year", va="center", fontsize=12,
             fontweight="bold", color=C["neutral"])
     if step >= 2:
         ax.plot(t, edge, color=C["memory"], lw=3.5)
-        ax.text(5.05, edge[-1] - 20, "Edge\n\\$250k + \\$34k per year", va="center",
+        ax.text(5.05, edge[-1] - 20, f"Edge\n\\${CAPEX_K:.0f}k + \\${EDGE_RUN_K:.0f}k per year", va="center",
                 fontsize=12, fontweight="bold", color=C["memory"])
     if step >= 3:
-        tc = 250 / (136.25 - 34.125)
-        ax.plot([tc], [136.25 * tc], "o", ms=11, color=C["text"], mec="white",
+        tc = CAPEX_K / (CLOUD_K - EDGE_RUN_K)
+        ax.plot([tc], [CLOUD_K * tc], "o", ms=11, color=C["text"], mec="white",
                 mew=1.5, zorder=5)
         ax.axvline(tc, color=C["text"], lw=1, ls=":")
-        ax.text(tc + 0.08, 30, "pays back at 2.4 years", fontsize=12,
+        ax.text(tc + 0.08, 30, f"pays back at {tc:.1f} years", fontsize=12,
                 fontweight="bold", color=C["text"])
     ax.set_xlim(0, 5)
     ax.set_ylim(0, 720)
@@ -495,12 +530,13 @@ for s in (1, 2, 3):
     cost(s)
 
 # Monitoring cadences (Sec. 3.11.1), in minutes on a log scale
+_cm = K.cadence_minutes()
 sp.hbars(out / "cadences.svg", [
-    ("Quarter", 131400, "neutral", "architecture review"),
-    ("Month", 43800, "neutral", "population coverage"),
-    ("Week", 10080, "memory", "labeled accuracy, drift tests"),
-    ("Day", 1440, "memory", "referral rate, confidence"),
-    ("Minute", 1, "danger", "camera misconfigured"),
+    ("Quarter", _cm["Quarter"], "neutral", "architecture review"),
+    ("Month", _cm["Month"], "neutral", "population coverage"),
+    ("Week", _cm["Week"], "memory", "labeled accuracy, drift tests"),
+    ("Day", _cm["Day"], "memory", "referral rate, confidence"),
+    ("Minute", _cm["Minute"], "danger", "camera misconfigured"),
 ], "min", size=(5.4, 2.6), xlabel="How long each signal takes to trust (minutes, log scale)")
 
 
@@ -533,28 +569,6 @@ def shrink_demo():
 
 
 shrink_demo()
-
-
-# What an ungradable photo looks like: the same fundus photo with three
-# degradations the clinic study reports (lighting, focus, undilated pupils).
-# Illustrative: made from the Hao et al. photo, not the study's images.
-def degraded():
-    from PIL import Image, ImageEnhance, ImageFilter
-    import numpy as np
-    im = Image.open(out / "fundus-dr-hao.png").convert("RGB")
-    w, h = im.size
-    sq = im.crop((30, 0, 30 + h, h)).resize((420, 420), Image.LANCZOS)
-    sq.save(out / "fundus_ok.png")
-    ImageEnhance.Brightness(sq).enhance(0.28).save(out / "fundus_dark.png")
-    sq.filter(ImageFilter.GaussianBlur(7)).save(out / "fundus_blur.png")
-    a = np.asarray(sq).astype(float)
-    yy, xx = np.mgrid[0:420, 0:420]
-    r = np.hypot(xx - 210, yy - 210) / 210
-    mask = np.clip((0.62 - r) / 0.22, 0.0, 1.0) ** 1.5
-    Image.fromarray((a * mask[..., None]).astype("uint8")).save(out / "fundus_pupil.png")
-
-
-degraded()
 
 
 # -----------------------------------------------------------------------------
