@@ -38,6 +38,11 @@ Replay restarts the story. No scene autoplays on opening. Reduced motion keeps t
 same inspectable states. Phone scenes fit the reading column naturally, with
 no internal panning, clipped diagram viewport, or automatic scrolling.
 
+Keyboard shortcuts work only while focus is inside the animation: N next,
+P previous, K play/pause, R restart. Tab into the figure or click its background
+to focus it. A visible guide and button shortcut metadata expose the mappings.
+Dropdowns, editable fields, modified keys, and held-key repeats are excluded.
+
 Each operation has an explicit action cue: Read → Round → Store, or Read pair →
 Multiply → Add. Continuous playback holds completed results for 3.5 seconds.
 On phones, compact controls and the current action stay visible while the scene

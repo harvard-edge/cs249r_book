@@ -18,6 +18,9 @@
     let selectedScene = true, dead = false, version = 0, animations = [], holdTimer = null, scene, particles;
     const stages = ['Start: two float arrays', 'Quantize activations', 'Quantize weights', 'Accumulate pair 1', 'Accumulate pair 2', 'Accumulate pair 3', 'Requantize the sum', 'Activate and write output'];
     root.classList.add('mlsys-flow');
+    root.tabIndex = 0;
+    root.setAttribute('role', 'region');
+    root.setAttribute('aria-label', 'Interactive quantization animation');
     let figureFrame = null;
     const intro = el('p', 'flow-intro', 'Follow values as they lose precision and build one retained sum.');
     const route = el('ol', 'flow-route');
@@ -30,6 +33,12 @@
     const menuLabel = el('label', '', 'Sequence '), menu = el('select');
     stages.forEach((label, i) => { const option = el('option', '', `${i + 1}. ${label}`); option.value = i; menu.append(option); });
     menuLabel.append(menu); controls.append(menuLabel);
+    const shortcuts = el('p', 'flow-shortcuts');
+    shortcuts.append('With focus in this animation: ');
+    for (const [key, label, control] of [['N', 'next', 'next'], ['P', 'previous', 'back'], ['K', 'play/pause', 'play'], ['R', 'restart', 'restart']]) {
+      const hint = el('span'); hint.append(el('kbd', '', key), ' ' + label); shortcuts.append(hint, ' ');
+      buttons[control].setAttribute('aria-keyshortcuts', key);
+    }
     const settings = el('label', 'flow-settings', 'Activation spacing '), scaleMenu = el('select');
     for (const [value, label] of [['0.1', '0.10 — coarser grid'], ['0.05', '0.05 — finer grid']]) { const option = el('option', '', label); option.value = value; scaleMenu.append(option); }
     settings.append(scaleMenu);
@@ -44,7 +53,7 @@
     detail.append(summary, equation, assumptions);
     const scope = el('p', 'flow-scope', 'Moving values are reads: source arrays stay available. Seconds and distances are illustrative. Product trails are a visual history, not extra storage. Finer spacing narrows the real range; it is not universally more accurate.');
     const clock = el('span', 'flow-clock'); clock.setAttribute('aria-hidden', 'true');
-    root.append(intro, route, controls, settings, message, board, note, detail, scope, clock);
+    root.append(intro, route, controls, shortcuts, settings, message, board, note, detail, scope, clock);
 
     function action(title, phase) { actionTitle.textContent = title; root.dataset.flowAction = phase; beat.textContent = {ready:'Ready',read:'Read',round:'Round',store:'Store',multiply:'Multiply',add:'Add',activate:'ReLU',result:'Result'}[phase] || phase; }
     function data() {
@@ -298,6 +307,15 @@
       else startStep(step === 7 ? 1 : step + 1);
     });
     on(buttons.next, 'click', () => { if (animating) { clearMotion(); playing = false; selectedScene = false; drawSettled(); } else { playing = false; startStep(Math.min(7, step + 1)); } });
+    on(root, 'pointerdown', e => { if (!e.target.closest('button,select,input,textarea,a,summary,[role=button],[contenteditable]')) root.focus({preventScroll: true}); });
+    on(root, 'keydown', e => {
+      if (e.defaultPrevented || e.repeat || e.isComposing || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+      if (e.target.closest('input,textarea,select,[contenteditable],[role=textbox]')) return;
+      const control = {n:'next', p:'back', k:'play', r:'restart'}[e.key.toLowerCase()];
+      if (!control) return;
+      e.preventDefault(); e.stopPropagation();
+      if (!buttons[control].disabled) buttons[control].click();
+    });
     on(buttons.back, 'click', () => seek(Math.max(0, step - 1)));
     on(buttons.restart, 'click', () => { selected = 0; seek(0); });
     on(menu, 'change', () => seek(Number(menu.value)));
