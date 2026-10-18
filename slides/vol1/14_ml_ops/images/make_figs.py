@@ -242,7 +242,7 @@ loop = [  # name, cx, cy, cost line 1, cost line 2, where the cost sits
     ("Release", 255, 372, "a second resident copy:", "100 GB of tables", "below"),
     ("Recover", 165, 180, "a known-good", "version kept warm", "below"),
 ]
-for k in (1, 2, 3):
+for k in (1, 2, 3, 4):
     p = svg_open(900, 480)
     p.append('<ellipse cx="450" cy="225" rx="285" ry="160" fill="none" '
              'stroke="#BBBBBB" stroke-width="3" stroke-dasharray="8 6"/>')
@@ -255,10 +255,21 @@ for k in (1, 2, 3):
         p.append(line(x1, y1, x2, y2, "#888888", 3.5, "n"))
     for i, (nm, cx, cy, c1, c2, where) in enumerate(loop):
         lit = (k >= 2 and i < 2) or (k >= 3 and i >= 2)
+        later = k == 4 and i < 3
+        if later:
+            lit = False
         p.append(rect(cx - 95, cy - 30, 190, 60,
                       C["compute_l"] if lit else "#F4F4F4",
                       C["compute"] if lit else "#999999", 3, 10))
-        p.append(text(cx, cy + 10, nm, 29, C["text"], "bold"))
+        p.append(text(cx, cy + 10, nm, 29, "#999999" if later else C["text"],
+                      "bold"))
+        if later:
+            if where == "right":
+                p.append(text(cx + 108, cy + 9, "Part 2", 26, C["neutral"],
+                              "bold", "start"))
+            else:
+                p.append(text(cx, cy + 66, "Part 2", 26, C["neutral"], "bold"))
+            continue
         if not lit:
             continue
         if where == "right":
@@ -458,9 +469,9 @@ def nodeday(k):
     fig, ax = plt.subplots(figsize=(3.9, 2.4))
     blocks = [  # y0, h, x0, w, fill, edge, label, step
         (0, 2, 0, 24, "memory_l", "memory", "Serving copy: 100 GB of tables", 1),
-        (2, 2, 0, 24, "data_l", "data", "Hot standby: previous version", 1),
-        (4, 4, 0, 6, "compute_l", "compute", "Retrain\n4 × 6 h\n= 24\nGPU-h", 2),
-        (4, 2, 6, 18, "network_l", "network", "Canary: new candidate", 2),
+        (2, 2, 0, 24, "data_l", "data", "Hot standby: previous version", 2),
+        (4, 4, 0, 6, "compute_l", "compute", "Retrain\n4 × 6 h\n= 24\nGPU-h", 3),
+        (4, 2, 6, 18, "network_l", "network", "Canary: new candidate", 3),
     ]
     for y0, h, x0, w, f, e, lab, st in blocks:
         a = 1.0 if k >= st else 0.0
@@ -468,7 +479,7 @@ def nodeday(k):
                                    edgecolor=C[e], lw=2, alpha=a))
         ax.text(x0 + w / 2, 8 - y0 - h / 2, lab, ha="center", va="center",
                 fontsize=11, color=C["text"], alpha=a)
-    a = 1.0 if k >= 2 else 0.0
+    a = 1.0 if k >= 3 else 0.0
     ax.add_patch(plt.Rectangle((6, 0.02), 18, 1.96, facecolor="white",
                                edgecolor=C["neutral"], lw=1.5, ls="--", alpha=a))
     ax.text(15, 1, "Free: one more copy", ha="center", va="center",
@@ -485,6 +496,7 @@ def nodeday(k):
 
 nodeday(1)
 nodeday(2)
+nodeday(3)
 
 # -----------------------------------------------------------------------------
 # 10. Rollback: weights revert, the cache does not
@@ -736,3 +748,232 @@ for k in (1, 2, 3):
                     p.append(text(xs[i] + 160, 396, "gate", 20, C["neutral"]))
     save_svg(p, f"release_step{k}.svg")
 print("release written")
+
+
+# =============================================================================
+# Added 2026-10-18 for the Part 1 revision (Rebuild and Trace segment, A/B
+# release decision, dual-bank update, stepped rollback). Sources:
+#   - Equation 1 and footnote 4 (DVC): chapter Sec. 14.1.1.
+#   - Registry lifecycle, lineage, registry bypass: Sec. 14.3.1.2 and
+#     footnote 7; promotion gate's five checks: Sec. 14.7.2.
+#   - Continuous training pipeline, seven stages: chapter figure 6, Sec. 14.3.2.
+#   - Serving-artifact checks and the INT8 case: Sec. 14.4.2.
+#   - A/B sizing: equation 4, Sec. 14.4.3 (745,644 users per variant for a
+#     2 percent relative lift on 5 percent conversion; about 0.5 points
+#     absolute detectable with 25,000 users per variant); table 10.
+#   - Dual-bank update: Sec. 14.4.4 and table 11 (200 KB model, 4 MB flash).
+#   - Stateful rollback: Sec. 14.4.3 and Checkpoint 14.2.
+# =============================================================================
+
+# Rollback in three steps: consistent, weights-only revert, restored together
+for k in (1, 2, 3):
+    p = svg_open(560, 420)
+    wv = "v2" if k == 1 else "v1 (reverted)"
+    ok = k == 1 or k == 3
+    p.append(rect(4, 8, 250, 86, C["memory_l"], C["memory"], 2.5, 8))
+    p.append(text(129, 44, "Model weights", 26, C["text"], "bold"))
+    p.append(text(129, 78, "v1" if k == 3 else wv, 25, C["memory"], "bold"))
+    cfill, cst = (C["data_l"], C["data"]) if ok else (C["danger_l"], C["danger"])
+    p.append(rect(306, 8, 250, 86, cfill, cst, 2.5, 8))
+    p.append(text(431, 44, "Embedding cache", 26, C["text"], "bold"))
+    p.append(text(431, 78, "v1 vectors" if k == 3 else "v2 vectors", 25, cst, "bold"))
+    if k == 1:
+        p.append(text(280, 150, "v2 serving: weights and cache agree", 25,
+                      C["data"], "bold"))
+    if k >= 2:
+        p.append(line(256, 51, 302, 51, C["danger"] if k == 2 else C["data"], 3,
+                      "r" if k == 2 else "d"))
+    if k == 2:
+        p.append(text(280, 150, "v1 reads vectors from v2's space", 25,
+                      C["danger"], "bold"))
+        p.append(text(280, 182, "(v2 changed the embedding size)", 23, C["neutral"]))
+    if k == 3:
+        p.append(text(280, 150, "restored together: v1 agrees again", 25,
+                      C["data"], "bold"))
+        p.append(rect(4, 204, 552, 210, "#F7F7F7", C["data"], 2.5, 10))
+        p.append(text(280, 244, "A tested rollback restores together:", 25,
+                      C["data"], "bold"))
+        for j, s_ in enumerate(("the weights, from the registry",
+                                "the feature transform version",
+                                "the cache (invalidate or swap)")):
+            p.append(text(36, 290 + j * 40, "• " + s_, 24, C["text"],
+                          anchor="start"))
+    save_svg(p, f"rollback_step{k}.svg")
+
+
+# Equation 1: a model is a function of four versioned inputs and the rounding
+inputs = [("Code", "Git commit"), ("Data", "DVC hash"),
+          ("Config", "config file"), ("Environment", "container image")]
+for k in (1, 2):
+    p = svg_open(900, 470)
+    for i, (nm, tag) in enumerate(inputs):
+        y = 20 + i * 100
+        p.append(rect(10, y, 300, 82, C["data_l"], C["data"], 2.5, 8))
+        p.append(text(160, y + 36, nm + " (version)", 27, C["text"], "bold"))
+        p.append(text(160, y + 68, tag, 24, C["data"]))
+        p.append(line(312, y + 41, 452, 210, "#555555", 3))
+    p.append(rect(458, 160, 170, 100, C["memory_l"], C["memory"], 3, 10))
+    p.append(text(543, 205, "training", 26, C["text"], "bold"))
+    p.append(text(543, 236, "pipeline f", 26, C["text"], "bold"))
+    p.append(line(630, 210, 716, 210, "#555555", 3))
+    p.append(rect(722, 160, 168, 100, C["compute_l"], C["compute"], 3, 10))
+    p.append(text(806, 205, "deployed", 26, C["text"], "bold"))
+    p.append(text(806, 236, "model", 26, C["text"], "bold"))
+    if k >= 2:
+        p.append(rect(458, 330, 432, 110, "white", C["danger"], 2.5, 10, "8 6"))
+        p.append(text(674, 368, "+ nondeterminism", 27, C["danger"], "bold"))
+        p.append(text(674, 400, "summation order, seeds,", 24, C["danger"]))
+        p.append(text(674, 428, "kernels, hardware", 24, C["danger"]))
+        p.append(line(543, 328, 543, 266, C["danger"], 3, "r", "6 4"))
+    save_svg(p, f"repro_step{k}.svg")
+
+
+# The registry: lifecycle, lineage, promotion gate
+for k in (1, 2, 3):
+    p = svg_open(900, 470)
+    states = [("candidate", 10), ("staging", 235), ("production", 460),
+              ("retired", 685)]
+    for nm, x in states:
+        prod = nm == "production"
+        p.append(rect(x, 30, 200, 70, C["memory_l"] if prod else "#F4F4F4",
+                      C["memory"] if prod else "#888888", 3 if prod else 2.5, 10))
+        p.append(text(x + 100, 74, nm, 27, C["text"], "bold"))
+    for x in (212, 437, 662):
+        p.append(line(x, 65, x + 20, 65, "#555555", 3))
+    p.append(text(335, 24, "promote", 22, C["neutral"], anchor="middle"))
+    p.append(path("M 560 102 C 560 150, 335 150, 335 106", C["danger"], 3, "r"))
+    p.append(text(447, 160, "roll back to the exact evaluated artifact", 23,
+                  C["danger"], "bold"))
+    if k >= 2:
+        chain = ["raw logs", "snapshot", "features", "training run", "weights",
+                 "endpoint"]
+        for i, nm in enumerate(chain):
+            x = 10 + i * 148
+            p.append(rect(x, 210, 132, 60, C["data_l"], C["data"], 2.5, 8))
+            p.append(text(x + 66, 248, nm, 22, C["text"], "bold"))
+            if i < len(chain) - 1:
+                p.append(line(x + 133, 240, x + 146, 240, "#555555", 2.5, None))
+        p.append(text(450, 298, "lineage: each artifact hashed and linked to its inputs",
+                      23, C["data"], "bold"))
+    if k >= 3:
+        p.append(rect(10, 324, 880, 136, "white", C["memory"], 3, 10))
+        p.append(text(30, 356, "Promotion gate, staging to production:", 24,
+                      C["memory"], "bold", "start"))
+        gate = ["signed feature contract", "lineage hash", "subgroup metrics",
+                "canary SLO and rollback rule", "named owner"]
+        for i, g in enumerate(gate):
+            x = 30 + (i // 3) * 440
+            y = 392 + (i % 3) * 30
+            p.append(text(x, y, "• " + g, 22, C["text"], anchor="start"))
+    save_svg(p, f"registry_step{k}.svg")
+
+
+# The continuous training pipeline (slide variant of chapter figure 6)
+stages = [("Ingest", "data"), ("Validate data", "data"), ("Transform", "data"),
+          ("Train", "compute"), ("Evaluate", "compute"),
+          ("Validate model", "danger"), ("Register", "memory")]
+for k in (1, 2):
+    p = svg_open(900, 345)
+    p.append(rect(330, 10, 240, 54, "#F4F4F4", "#888888", 2.5, 8))
+    p.append(text(450, 45, "retraining trigger", 24, C["text"], "bold"))
+    p.append(line(450, 66, 450, 104, "#555555", 3))
+    for i, (nm, ck) in enumerate(stages):
+        if k == 1 and i >= 3:
+            continue
+        row, col = (0, i) if i < 4 else (1, 6 - i)
+        x = 10 + col * 222
+        y = 110 + row * 120
+        gate = nm == "Validate model"
+        p.append(rect(x, y, 200, 74, C[ck + "_l"], C[ck], 4 if gate else 2.5, 10))
+        p.append(text(x + 100, y + 45, nm, 24, C["text"], "bold"))
+        if i < len(stages) - 1 and not (k == 1 and i == 2):
+            if i < 3:
+                p.append(line(x + 202, y + 37, x + 218, y + 37, "#555555", 3))
+            elif i == 3:
+                p.append(line(x + 100, y + 76, x + 100, y + 116, "#555555", 3))
+            else:
+                p.append(line(x - 2, y + 37, x - 18, y + 37, "#555555", 3))
+    if k == 2:
+        p.append(text(10 + 1 * 222 + 100, 334, "gate: blocks a worse model",
+                      22, C["danger"], "bold"))
+    save_svg(p, f"cicd_step{k}.svg")
+
+
+# The artifact that ships is not the checkpoint that passed
+for k in (1, 2):
+    p = svg_open(900, 380)
+    boxes = [("Checkpoint", "passed evaluation", "memory"),
+             ("Compile, quantize", "graph, INT8", "compute"),
+             ("Serving engine", "what users get", "network")]
+    for i, (a_, b_, ck) in enumerate(boxes):
+        x = 10 + i * 300
+        p.append(rect(x, 30, 260, 96, C[ck + "_l"], C[ck], 3, 10))
+        p.append(text(x + 130, 72, a_, 26, C["text"], "bold"))
+        p.append(text(x + 130, 106, b_, 23, C[ck]))
+        if i < 2:
+            p.append(line(x + 262, 78, x + 296, 78, "#555555", 3))
+    if k == 2:
+        checks = ["same outputs, slice by slice", "peak memory at load",
+                  "warm-up and startup time", "runtime version pinned"]
+        p.append(text(450, 186, "Check the engine, not the checkpoint:", 25,
+                      C["danger"], "bold"))
+        for i, c_ in enumerate(checks):
+            x = 40 + (i % 2) * 440
+            y = 236 + (i // 2) * 56
+            p.append(rect(x, y - 34, 400, 48, "white", C["danger"], 2.5, 8))
+            p.append(text(x + 200, y - 2, c_, 24, C["text"], "bold"))
+    save_svg(p, f"artifact_step{k}.svg")
+
+
+# A/B sizing (equation 4): users needed against users available
+fig, ax = plt.subplots(figsize=(4.6, 1.3))
+for i, (lab, v, ck, s_) in enumerate((
+        ("Needed: 2% lift on 5%", 745644, "danger", "745,644"),
+        ("Available", 25000, "data", "25,000"))):
+    y = 1 - i
+    ax.barh(y, v, color=C[ck], height=0.6)
+    ax.text(v * 1.25, y, s_, va="center", fontsize=12, color=C[ck],
+            fontweight="bold")
+    ax.text(700, y, lab + " ", ha="right", va="center", fontsize=12,
+            color=C["text"], fontweight="bold")
+ax.set_xscale("log")
+ax.minorticks_off()
+ax.set_xlim(1000, 4e6)
+ax.set_xticks([1e3, 1e4, 1e5, 1e6])
+ax.set_xticklabels(["1K", "10K", "100K", "1M"])
+ax.set_yticks([])
+ax.set_ylim(-0.6, 1.6)
+ax.spines["left"].set_visible(False)
+ax.set_xlabel("Users per variant (log scale)", fontsize=11)
+ax.grid(axis="x", color=C["grid"], linewidth=0.6)
+ax.set_axisbelow(True)
+sp.save(fig, out / "ab_users.svg")
+
+
+# Dual-bank update on the keyword spotter (Sec. 14.4.4)
+for k in (1, 2):
+    p = svg_open(900, 400)
+    p.append(text(10, 32, "4 MB of flash on the device", 25, C["neutral"], "bold",
+                  "start"))
+    p.append(rect(10, 50, 880, 110, "#F7F7F7", "#888888", 2.5, 8))
+    p.append(rect(24, 64, 420, 82, "#E8E8E8", "#999999", 2, 6))
+    p.append(text(234, 113, "firmware and runtime", 24, C["neutral"], "bold"))
+    p.append(rect(460, 64, 200, 82, C["data_l"], C["data"], 3, 6))
+    p.append(text(560, 100, "Bank A", 25, C["data"], "bold"))
+    p.append(text(560, 130, "200 KB, running", 21, C["data"]))
+    p.append(rect(674, 64, 200, 82, C["network_l"], C["network"], 3, 6, "8 5"))
+    p.append(text(774, 100, "Bank B", 25, C["network"], "bold"))
+    p.append(text(774, 130, "200 KB, new", 21, C["network"]))
+    if k == 2:
+        p.append(rect(560, 220, 330, 80, "white", C["danger"], 2.5, 8))
+        p.append(text(725, 254, "watchdog and self-test", 24, C["danger"], "bold"))
+        p.append(text(725, 284, "on the first inferences", 22, C["danger"]))
+        p.append(line(774, 162, 774, 214, C["network"], 3))
+        p.append(path("M 556 262 C 480 262, 560 200, 560 166", C["danger"], 3, "r"))
+        p.append(text(360, 252, "fault, hang, or late:", 24, C["danger"], "bold"))
+        p.append(text(360, 284, "bootloader reverts to A", 24, C["danger"], "bold"))
+        p.append(text(450, 366, "No technician needed; the cost is a second 200 KB bank.",
+                      24, C["text"], "bold"))
+    save_svg(p, f"dualbank_step{k}.svg")
+
+print("Part 1 revision figures written")

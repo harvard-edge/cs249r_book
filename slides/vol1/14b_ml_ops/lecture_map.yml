@@ -1,0 +1,292 @@
+chapter: 14_ml_ops
+lecture: "14b"
+title: "ML Operations, Part 2: Watching and Acting"
+layer: operations
+minutes: 75
+notes_minutes: 71.5
+target_ideas: 30
+thesis: "Once a model is live, operations learns that it has gone wrong only as fast as evidence arrives, so every monitor, alert threshold, retraining interval, and incident response is a choice priced in samples, days, false alarms, and dollars."
+
+hook:
+  minutes: "0-4.5"
+  setup: "Unity's Audience Pinpointer, the machine-learning tool that chose which players to show an advertiser's game to. Step 1: a timeline drawn as one horizontal axis, February to December 2022. February and March shaded: the quarter in which, by the company's account, a platform fault reduced the tool's accuracy and part of its training data lost its value, 'due in part to us ingesting bad data from a large customer'. A marker on 10 May 2022: the first-quarter earnings call where the problem was disclosed. The question appears before the cost."
+  question_to_class: "The bad data entered during the first quarter. Which signal could have caught it before the model trained on it? A) GPU utilization B) p99 latency of the ad service C) a schema and distribution check on each incoming batch of training data D) the quarterly revenue report"
+  payoff: "C. D is the signal that actually surfaced it in public. Step 2: three stacked bars on the same timeline for Q2, Q3, Q4: of an estimated $110 million 2022 revenue impact, about 60 percent fell in the second quarter, 30 percent in the third, 10 percent in the fourth. Step 3: the recovery, in the CEO's words: 'data rebuilding, model training and improvement', in sequence; and the remediation: 'We are deploying monitoring, alerting and recovery systems and processes to promptly mitigate future complex data issues.' Every server answered on time. Part 1 showed why such failures are silent; today builds the monitoring, alerting, and recovery that sentence promises, and prices each one. The synthesis returns to this timeline."
+  sources:
+    - "chapter §14.5.2 (data quality monitoring catches input defects before outcomes arrive), §14.7.1"
+    - "Unity Software Q1 2022 earnings call, 10 May 2022, transcript (The Motley Fool, https://www.fool.com/earnings/call-transcripts/2022/05/11/unity-software-inc-u-q1-2022-earnings-call-transcr/): J. Riccitiello, 'a fault in our platform that resulted in reduced accuracy for our Audience Pinpointer tool'; 'we lost the value of a portion of our data, training data due in part to us ingesting bad data from a large customer'; 'approximately $110 million in 2022 with no carryover impact to 2023'; 'data rebuilding, model training and improvement'; 'We are deploying monitoring, alerting and recovery systems and processes to promptly mitigate future complex data issues.' L. Visoso: 'We quantified this headwind at $110 million with roughly 60% impacting the second quarter, 30% impacting the third quarter' and 10 percent the fourth (confirmed on the call transcript, 2026-10-18). J. Riccitiello: Operate 'started the year strong in January, but then significantly slowed down in February and March.'"
+
+driving_question: "Once a model is live, how do we learn that it has gone wrong, how long does that take, and when should we retrain, roll back, or wait?"
+
+goals:
+  - "Say what each monitoring layer can see and when, and join predictions to outcomes without mistaking pending labels for wrong answers."
+  - "Compute how long a drop takes to confirm from its size, the traffic, and the label delay, and price the wait."
+  - "Set an alert so it fires on changes that matter and reaches someone who can act."
+  - "Derive the retraining interval that minimizes total cost, and triage an incident from data first to a new check."
+
+recall: "Part 1 (Lecture 14), close your notes: name the five steps of the operations loop, and the three controls every release needs. (Detect, diagnose, decide, release, recover. Staged exposure, a check that every node runs the tested version, a rehearsed and state-aware rollback; for the ranking service each holds a second 100 GB copy of the tables.) Part 1's loop ring returns with release and recover checked; today lights detect, diagnose, and decide. One line from Part 1's hook: Zillow's forecasts were wrong while every server stayed up."
+
+running_example: "The chapter's DLRM ranking service (illustrative, carried from Part 1): 94 percent click-prediction accuracy at launch, 88 percent by week four; 1,000,000 requests a day; clicks arrive within hours; decay fitted at 0.24 percent a day; a $5,000 retraining run. Real anchors: Unity's 2022 Audience Pinpointer incident (hook and synthesis), Google's data-validation logs from more than 700 production pipelines (Breck et al. 2019), Rabanser et al.'s measured detection curves, a measured ICU alarm study (Drew et al. 2014), Facebook's retraining cadences and freshness measurement (Hazelwood et al. 2018; He et al. 2014)."
+
+segments:
+  - name: What to Watch
+    divider_question: "What can a monitor see, and when can it see it?"
+    read: "§14.5, §14.5.2 (outcome join, data quality monitoring)"
+    concept_questions: [1, 2, 3]
+    land: "Each layer sees a different failure at a different delay: infrastructure per request, input checks per batch, drift statistics after hundreds of samples, and outcomes only when labels mature; a missing label is pending, not wrong."
+    minutes: 11.5
+  - name: How Fast
+    divider_question: "How long before we can confirm the model got worse?"
+    read: "§14.5.2 (Napkin Math 14.2, 14.3)"
+    concept_questions: [4, 5, 6, 7]
+    land: "Confirmation time is the label delay plus the evidence a drop needs divided by the rate labels arrive; halving the drop quadruples the evidence, and every day of waiting has a price."
+    minutes: 11.5
+  - name: When to Alert
+    divider_question: "When should a monitor wake someone up?"
+    read: "§14.5.2 (feature distribution monitoring, PSI policy), §14.7.1 (severity, alert fatigue)"
+    concept_questions: [8, 9, 10]
+    land: "At production scale significance is free, so an alert needs an effect size, a false-alarm budget, an owner, and a deadline; a drift band opens an investigation, never a retraining run."
+    minutes: 9.0
+  - name: Retrain or Wait
+    divider_question: "When is a retraining run worth its cost?"
+    read: "§14.6"
+    concept_questions: [11, 12, 13]
+    land: "A run pays when recovered value beats compute, validation, deployment, and risk; the best interval balances the staleness triangle against the run cost and grows only as the square root of that cost; detection delay sets the floor a trigger actually holds."
+    minutes: 15.5
+  - name: Respond
+    divider_question: "The alert has fired. What do we check first, and what does a fix restore?"
+    read: "§14.7.1, §14.8.1"
+    concept_questions: [14, 15]
+    land: "An incident is a data question first; the repair restores the whole contract (transform, cache, weights) and is verified on replay before traffic, and the incident ends only when it has become a check."
+    minutes: 9.5
+
+concept_questions:
+  - id: 1
+    q: "What does each monitoring layer see, and how long after the failure?"
+    picture: "Slide variant of book fig-uptime-iceberg (Part 1 drew it as iceberg.svg; regenerate a copy here), built in four steps, one layer per step tagged with when it can fire: infrastructure telemetry (per request, seconds), input checks (per batch, before inference), drift statistics on inputs and predictions (after hundreds of samples, no labels), outcomes joined to matured labels (after the label delay). Final step: Breck et al. Table 1 as bars beside the iceberg."
+    numbers: "Google's data-validation system on more than 700 production pipelines, most recent 30 days (Breck et al. 2019, Table 1): share of pipelines on which each anomaly fired on some day: new feature column 10 percent, out-of-domain categorical values 6, missing feature column 6, data completely missing 3, feature present in too few examples 3; of those that fired, 53 to 100 percent were fixed. Google Play case: features always present in training were always missing in serving logs; removing that skew raised app installs on the main landing page by 2 percent (same paper, §6.2)."
+    example: "Unity's bad customer data was an input-layer failure; the revenue report was the outcome layer, a quarter later. GPU busy time is not compute efficiency (Lecture 8 owns MFU; one LINK line); per-stage latency tracing is Lecture 13's budget used as a diagnostic (one line)."
+    read: "§14.5, §14.5.1, §14.5.2 (data quality monitoring)"
+  - id: 2
+    q: "How do we measure accuracy when outcomes arrive late?"
+    picture: "New diagram built in three steps: (1) a prediction log (request ID, time, score, served version) and an outcome log (request ID, event time, observation time) joined by request ID; (2) a time axis with each prediction's outcome window: mature-positive, mature-negative, and still-pending requests drawn differently; (3) label coverage per version printed under the axis, the candidate's low and the incumbent's high."
+    numbers: "Chapter's rule: a request with no purchase while its window is open is unknown, not negative; each metric and slice reports label coverage, the fraction of eligible predictions with resolved outcomes; outcomes are attributed to the served version, not to whichever model is live when the label arrives (§14.5.2)."
+    example: "A candidate compared on two days of pending outcomes against an incumbent on thirty days of complete ones looks worse for no reason except the calendar."
+    read: "§14.5.2 (joining predictions to outcomes)"
+  - id: 3
+    q: "What can per-feature monitors miss?"
+    picture: "New 2x2 build: two binary sensor flags. Training population: half (off, off), half (on, on). Serving population: half (on, off), half (off, on). Step 2: each flag's histogram, unchanged (50/50 both times). Step 3: the joint table, completely reversed. Small inset: listing 4's freshness rule (max_staleness 6 h, fallback to default)."
+    numbers: "Chapter's counterexample (§14.5.2, feature distribution monitoring); freshness policy 6 h with fallback (listing 4); one representative incident: a database migration silently changed an aggregation window and input monitoring flagged user_lifetime_value within two days (§14.5.2, data freshness monitoring)."
+    example: "Even perfect training-serving parity would not catch this population change; joint statistics on selected feature pairs or cohorts complement marginal screens. Lecture 4b owns K-S and PSI on one feature; this frame shows only what they cannot see."
+    read: "§14.5.2 (feature distribution monitoring, data freshness monitoring)"
+  - id: 4
+    q: "How many labeled outcomes does it take to confirm a drop?"
+    picture: "New bar plot (slideplot), log y-axis: labeled outcomes needed to detect a drop from 95 percent accuracy with 95 percent confidence and 80 percent power, for drops of 5, 2, and 1 point; a horizontal line at the chapter's 1,000-outcome policy budget."
+    numbers: "Derived with the one-sample binomial sizing of Lecture 12b (z = 1.96 and 0.84): 95 to 90 percent needs about 185 outcomes; 95 to 93, about 1,030; 95 to 94, about 3,930. Napkin Math 14.2 budgets 1,000 for a 5-point drop, above the statistical floor to allow for label noise, dependence, and per-slice checks (book)."
+    example: "Evidence grows as one over the drop squared: a drop half as large needs about four times the outcomes. LINK Lecture 12b, which sized test sets and repeated runs with the same formula; do not rederive it."
+    read: "§14.5.2 (Napkin Math 14.2), §14.4.3 (equation 4)"
+  - id: 5
+    q: "How long does confirmation take, from traffic and label delay?"
+    picture: "Estimate card, then a time ladder on a log axis (minutes to months), built in two steps: (1) Napkin Math 14.2's two collection times, 16.7 minutes and 10 days; (2) the label delay added in front of each, with published delays as rungs: ranking clicks within hours, card chargebacks up to 120 days, Zillow's resale prices three to six months after purchase."
+    numbers: "Time to confirm = label delay + outcomes needed / labeled outcomes per unit time (derived from the chapter's detection-delay row of table 28 plus its statement that labels lag traffic). 1,000 outcomes at 1 per second = 16.7 min; at 100 per day = 10 days (Napkin Math 14.2). Clicks arrive within hours (§14.1); Visa: an issuer may open a card-absent fraud dispute up to 120 calendar days from the transaction processing date (Visa Core Rules and Visa Product and Service Rules, 18 April 2026 edition, table 11-29, Dispute Condition 10.4; confirmed 2026-10-18); Zillow forecast resale 'three to six months into the future' (Zillow Q3 2021 letter, Part 1's source)."
+    example: "The ranking service can confirm a drop within an afternoon; a fraud model may wait four months for the same evidence. No tool removes the label delay; only a proxy signal or a label-free test can move earlier."
+    read: "§14.5.2 (Napkin Math 14.2), §14.10 (last fallacy)"
+  - id: 6
+    q: "How fast can a label-free detector see a shift?"
+    picture: "Rabanser et al. detection-accuracy curves (moved from Part 1; regenerate from Part 1's make_figs.py values): detection accuracy against samples for small, medium, and large shifts, with a second axis giving collection time at 1 sample per second and at 100 per day."
+    numbers: "Rabanser et al. 2019, Table 2a (univariate BBSDs, MNIST and CIFAR-10, simulated shifts), detection accuracy at 10, 20, 50, 100, 200, 500, 1,000, 10,000 samples: small 0.00, 0.00, 0.14, 0.14, 0.18, 0.36, 0.40, 0.54; medium 0.14, 0.21, 0.39, 0.38, 0.42, 0.57, 0.66, 0.76; large 0.32, 0.54, 0.78, 0.82, 0.83, 0.92, 0.96, 1.00."
+    example: "Label-free detection needs no outcome, so it runs at traffic speed, not label speed; it still needs about 20 samples for a large shift and more than 1,000 for a small one, and it says the inputs moved, not that accuracy fell."
+    read: "§14.5.2; Rabanser et al. 2019"
+  - id: 7
+    q: "What does each day of delay cost?"
+    picture: "Estimate card and two horizontal bars (moved from Part 1): monthly review against a daily check."
+    numbers: "Napkin Math 14.3: $50M x 0.05 x 28/365 = $191,781 at a monthly review; $6,849 with a daily check; $184,932 more per incident; 4 incidents a year, about $739,726 (book). The chapter's caveat: the comparison assumes the incident starts just after a check and ends at the next one; label delay and diagnosis come on top."
+    example: "Combine with question 5: a daily check on a model whose labels arrive in 120 days does not detect in one day. The saving belongs to the label-free and input-layer monitors."
+    read: "§14.5.2 (Napkin Math 14.3)"
+  - id: 8
+    q: "Why does a significance test page on harmless shifts at production scale?"
+    picture: "New line plot (slideplot), log x-axis of samples per side: the K-S critical value at 95 percent confidence falling as one over the square root of n, with points at 1,000, 100,000, and 1,000,000; a horizontal line at the 0.1 effect-size gate of listing 2."
+    numbers: "Critical value 1.36 x sqrt(2/n) for equal samples (Lecture 4b's Napkin Math 4.5 formula): 0.061 at n = 1,000 and 0.006 at 100,000 (both computed in Lecture 4b); 0.0019 at 1,000,000 (derived). Listing 2 pauses promotion only when the statistic exceeds 0.1 (book)."
+    example: "A monitor comparing a day of serving traffic with the training set rejects equality for shifts fifty times smaller than the gate. The detections are real; paging on them is the error. LINK Lecture 4b for the test itself; this frame adds only the scale argument."
+    read: "§14.5.2 (feature distribution monitoring)"
+  - id: 9
+    q: "How many false alarms does a monitor raise when nothing has changed?"
+    picture: "Two steps. (1) New bars: expected false alerts per day for 150 metric series each tested once a day, at per-test false-positive rates of 0.05, 0.01, and 0.001. (2) Measured: a bar of ICU monitor alarms, 88.8 percent of annotated arrhythmia alarms false (Drew et al. 2014), as the human cost of an untuned threshold."
+    numbers: "150 series = 3 deployment variants x 50 metrics (Napkin Math 14.5). Derived: 150 x 0.05 = 7.5 false alerts a day; x 0.01 = 1.5; x 0.001 = 0.15, about one a week. Drew et al. 2014: 461 adult ICU patients, 31 days, 2,558,760 unique alarms; 88.8 percent of 12,671 annotated arrhythmia alarms were false positives. Breck et al. 2019, §6.1: a human on call 'might miss or ignore the alert depending on their cognitive load'."
+    example: "The chapter's remedies for alert fatigue: consolidate related alerts, use thresholds that follow weekly and seasonal patterns, retire alerts that are rarely actionable, and require a follow-up ticket before any alert is silenced (§14.7.1)."
+    read: "§14.7.1 (on-call practices), §14.5.3 (Napkin Math 14.5)"
+  - id: 10
+    q: "What turns a drift signal into an action?"
+    picture: "Vote frame on table 13's age-bin bars (training against serving shares, six bins; three bins moved 3 points; PSI 0.029). Reveal: the three PSI bands drawn as an escalation ladder (continue, investigate, notify the owner), then table 19's severity rungs (P0 15 min, P1 1 h, P2 4 h, P3 24 h) with an owner on each."
+    numbers: "Table 13: contributions 0.0067, 0.0038, 0.0021, 0.0021, 0.0067, 0.0079, total 0.029, below the 0.1 warning band (book). Bands below 0.1, 0.1 to 0.25, at least 0.25 are conventions, not laws (§14.5.2, footnote 22). Severity deadlines from table 19 (illustrative policy in the chapter)."
+    example: "Knight's 97 'Power Peg disabled' e-mails (Part 1) are the counterexample in one line: a signal with no owner and no deadline. PSI is never a retraining trigger by itself (§14.5.2)."
+    read: "§14.5.2 (PSI policy, table 13), §14.7.1 (table 19)"
+  - id: 11
+    q: "Why does a drift alert not authorize a retraining run?"
+    picture: "New balance diagram from listing 5: on one pan, estimated value recovered (from quality loss, feature drift, prediction shift); on the other, compute, validation, deployment, and rollout risk; a gate below it that also requires fresh validation data. Second step: Facebook's cadence ladder and He et al.'s freshness line (moved from Part 1) as the measured range of answers."
+    numbers: "Equation 3 and listing 5 (book). Hazelwood et al. 2018, Table II: Search hourly; Sigma sub-daily; News Feed daily; Language Translation and Speech Recognition weekly; Lumos multi-monthly. He et al. 2014 §3.2: about 1 percent normalized entropy gained by training daily instead of weekly; Fig. 2 values labeled approximate (Part 1's sources)."
+    example: "Three policies (§14.6.1): scheduled, triggered, continuous. Continuous retraining minimizes staleness but lets corrupted or adversarial data reach the weights before anyone looks; Unity trained on a large customer's bad data."
+    read: "§14.6.1"
+  - id: 12
+    q: "What retraining interval minimizes total cost?"
+    picture: "New build on one sawtooth (A(t) = A0 e^(-gamma t), reset every T): (1) one cycle's lost value shaded as a triangle of base T and height Q V A0 gamma T, area (1/2) Q V A0 gamma T^2; (2) the run cost C added once per cycle; (3) cost per day = C / T + (1/2) Q V A0 gamma T, drawn as the falling and rising curves (slide variant of margin-002 redrawn at the chapter's numbers, crossing at 3 days); (4) the minimum marked where the triangle equals C. Then the focus slide for equation 12."
+    numbers: "Equations 8 to 12 (book). Derived observation: at T*, (1/2) Q V A0 gamma T*^2 = C, so each cycle's staleness loss equals one run's cost, and the total cost rate is 2C / T*. Ranking service: Q = 1,000,000/day, V = $0.50, A0 = 0.94, gamma = 0.0024/day, C = $5,000; Q V A0 gamma = $1,128 per day per day; T* = sqrt(10,000/1,128) = 2.98 days (Napkin Math 14.6, table 17). Cost per day (derived from the same formula): daily $5,564, every 3 days $3,359, weekly $4,662, monthly $17,087. Sensitivity (table 18): 4x run cost doubles T*; 4x traffic or decay halves it. Accelerators: 4 H100s x 6 h = 24 accelerator-hours, $96, 1.9 percent of C (§14.6.2)."
+    example: "Cutting validation cost, not training time, shortens T*: the accelerators are under 2 percent of the run. The margin-002 book figure labels T* about 1 day; the slide uses the chapter's computed 3 days (Part 1 note for the author)."
+    read: "§14.6.2 (Napkin Math 14.6, tables 17 and 18)"
+  - id: 13
+    q: "Does a trigger beat a schedule, and what does detection delay do to it?"
+    picture: "Book fig-rotting-asset-curve (scheduled 90-day sawtooth dipping below the 0.88 floor, triggered sawtooth touching it), at a legible size or redrawn with the same parameters; final step adds one dashed triggered cycle that keeps falling for a detection delay before it resets."
+    numbers: "Derived from equation 8 with the chapter's gamma = 0.0024/day: 0.94 falls to 0.88 in ln(0.94/0.88) / 0.0024 = 27.5 days, matching the four-week slide of §14.1; with a 1-day delay the reset happens at 0.878; with Napkin Math 14.2's 10-day low-traffic delay, at 0.859. At 90 days with no retraining, 0.757 (derived)."
+    example: "The chapter's zero-delay model shows a trigger never dips below the floor; with the delays of segment 2 it does, so the floor actually held is the threshold minus the decay during detection. Sudden drops with a cause inside the system go to incident response, not retraining (§14.6.3)."
+    read: "§14.6.3"
+  - id: 14
+    q: "At 2 AM click-through drops 12 percent with no stack trace. What do you check first?"
+    picture: "Diagnose frame moved from Part 1: four candidate causes as cards; then the debugging tree's five stages with the kit D·A·M triangle (data vertex lit); then table 20's slices as bars (desktop 94, iOS 92, Android 88, tablet 62, overall 91)."
+    numbers: "Debugging tree order: data pipeline integrity, training-serving skew by replay, slices, temporal dynamics, model attribution (§14.7.1). Table 20 (book): overall 91 percent hides a tablet slice at 62 percent on 5 percent of traffic."
+    example: "Data first, because an altered input reaches every prediction and can be checked in minutes; drift does not move 12 percent in an hour. Feature attribution comes last and says what the model relied on, not what caused the error (Lecture 15 owns explanation methods; one line)."
+    read: "§14.7.1 (debugging tree, slice analysis)"
+  - id: 15
+    q: "What does a repair restore, and how does an incident become a check?"
+    picture: "New timeline build of the chapter's session-duration incident: alert; replay of exact inputs reproduces wall-clock against foreground-active time; restore the prior serving transform and its feature-cache namespace; verify on replay; bounded canary; mature outcomes later. Two crossed-out alternatives beside it: weights-only rollback (the transform stays broken) and immediate retraining (teaches against the defect). Final step: the six-phase checklist ending in Prevent, and a vote on the ML Test Score (data 6, model 7, infrastructure 5, monitoring 1)."
+    numbers: "Repair sequence and the 'restore the contract' argument (§14.7.1). Postmortems required for P0 and P1, naming the monitoring gap and the check that would have caught it (§14.7.1). ML Test Score: 28 tests, 7 per category, 0.5 manual and 1 automated; composite = minimum category, so 6, 7, 5, 1 scores 1 (§14.8.1, Breck et al. 2017). Measured checks at work: at Google more than 70 percent of pipelines had a model unit test; of more than 80,000 executions in one month, 6 percent failed, which the paper reads as wrong assumptions about the data or an underspecified schema (Breck et al. 2019, §6.1)."
+    example: "Unity's remediation sentence is the Prevent phase: monitoring, alerting, and recovery systems added after the incident. Part 1's 96 Google postmortems (Papasian and Underwood) exist because every outage got one (one LINK line)."
+    read: "§14.7.1 (debugging checklist, session-duration defect), §14.8.1"
+
+worked_examples:
+  - name: "Detection time from drop size, traffic, and label delay"
+    steps: ["given: a 95 percent model; confirm a 5-point drop; policy budget 1,000 labeled outcomes (Napkin Math 14.2)", "statistical floor: about 185 outcomes for 5 points, 1,030 for 2, 3,930 for 1 (derived with Lecture 12b's sizing)", "high traffic, 1 label per second: 1,000 s = 16.7 minutes; low traffic, 100 per day: 10 days (book)", "add the label delay: clicks within hours; chargebacks up to 120 days; resale 3 to 6 months", "meaning: label delay and drop size, not tooling, set detection time; label-free tests and input checks are the only way to move earlier"]
+  - name: "Napkin Math 14.3: the cost of waiting (moved from Part 1)"
+    steps: ["given: $50M annual revenue; a skew bug costs 5 percent of conversions", "monthly review, 28 days: $191,781", "daily check, 1 day: $6,849", "difference: $184,932 per incident; about $739,726 at 4 incidents a year", "meaning: the saving is real only if the daily check can see the failure without waiting for labels"]
+  - name: "False alarms from a monitor with nothing to find"
+    steps: ["given: 150 metric series (3 variants x 50 metrics, Napkin Math 14.5), each tested once a day", "at a 0.05 false-positive rate: 7.5 false alerts a day (derived)", "at 0.001: 0.15 a day, about one a week (derived)", "measured human cost: 88.8 percent of 12,671 annotated ICU arrhythmia alarms were false (Drew et al. 2014)", "meaning: a threshold is a budget of false alarms, set together with an effect size and an owner"]
+  - name: "Napkin Math 14.6, derived from the sawtooth"
+    steps: ["given: Q = 1,000,000/day, V = $0.50, A0 = 0.94, gamma = 0.0024/day, C = $5,000", "staleness per cycle is a triangle: (1/2) x 1,128 x T^2 dollars", "cost per day: 5,000 / T + 564 T; minimum where the triangle equals C", "T* = sqrt(10,000 / 1,128) = 2.98 days; $3,359 a day against $5,564 daily and $4,662 weekly (derived)", "accelerators are $96 of the $5,000; cut validation cost to shorten T*"]
+
+active_learning:
+  - at_minute: 0.5
+    type: predict
+    prompt: "Unity's bad training data entered during the first quarter of 2022. Which signal could have caught it before the model trained on it? A) GPU utilization B) p99 latency C) a schema and distribution check on each incoming batch D) the quarterly revenue report"
+    answer: "C. D is what surfaced it, at the 10 May earnings call, with an estimated $110 million 2022 impact. Students who pick A or B are still reading Lecture 13's dashboard."
+  - at_minute: 14.5
+    type: concept_question
+    prompt: "A candidate model has served for 2 days; the incumbent's numbers cover the previous 30. Measured conversion is 3 points lower for the candidate. Roll back, retrain, or neither?"
+    answer: "Neither yet. The candidate's recent requests are mostly pending, and a missing purchase inside an open window is unknown, not negative. Compare cohorts with matured windows under the same horizon and report label coverage (§14.5.2). The '3 points' is an illustrative number for the vote, labeled so."
+  - at_minute: 22.5
+    type: estimate
+    prompt: "Confirming a 5-point drop takes 1,000 labeled outcomes. How long for the ranking service (1 per second, labels within hours), for a low-traffic model (100 per day), and for a fraud model whose chargebacks arrive within 120 days?"
+    answer: "About 17 minutes plus a few hours; 10 days; up to about four months plus the collection time. Students who answer 'one day, because we check daily' confuse the check's cadence with the evidence's arrival."
+  - at_minute: 29
+    type: estimate
+    prompt: "A recommender earns $50M a year. A skew bug cuts conversions 5 percent. What does the bug cost if found at a monthly review (28 days) against a daily check?"
+    answer: "$191,781 against $6,849; $184,932 more per incident (Napkin Math 14.3). Common error: forgetting 28/365 and answering $2.5M."
+  - at_minute: 36.5
+    type: vote
+    prompt: "The age feature's PSI is 0.029; three bins moved 3 points each. Page the on-call engineer, open a ticket for the owner, or log it?"
+    answer: "Log it and keep watching outcomes and critical slices: 0.029 is below the 0.1 warning band (table 13). A page needs a severity, which needs impact, which PSI alone does not show. Students who say 'page' read a visible histogram change as harm."
+  - at_minute: 49
+    type: estimate
+    prompt: "T* is about sqrt(2C / (Q V A0 gamma)). Q = 1,000,000/day, V = $0.50, A0 = 0.94, gamma = 0.0024/day, C = $5,000. How often should the ranking service retrain? What if a cheaper validation path cuts C to $1,250?"
+    answer: "About 3 days (2.98); at a quarter of the run cost, about 1.5 days (table 18). Students who answer 'daily, like News Feed' should see that cadence is a cost result."
+  - at_minute: 55.5
+    type: diagnose
+    prompt: "2 AM: click-through fell 12 percent in an hour. No stack trace, no crashed process. Data pipeline, model drift, seasonal traffic, or noise: which first, and why?"
+    answer: "The data pipeline: schema, missing values, a changed transform. A data fault reaches every prediction and is checked in minutes; drift does not move 12 percent in an hour. Then slice: 91 percent overall can hide a tablet slice at 62 percent (table 20)."
+  - at_minute: 62
+    type: vote
+    prompt: "An ML Test Score audit gives data 6, model 7, infrastructure 5, monitoring 1. Leadership proposes two more model tests next quarter. What is the score now, and what should be added next?"
+    answer: "1, the minimum category; more model tests leave it at 1. Add monitoring: schema-change alerts, skew checks, staleness alerts (§14.8.1)."
+  - at_minute: 64
+    type: retrieval
+    prompt: "Back to Unity. Close your notes. For each loop step (detect, diagnose, decide, respond), name the control this lecture built and when it would have fired."
+    answer: "Detect: a schema and distribution check on each incoming customer batch, before training, with no labels needed. Diagnose: data first; lineage names the batch. Decide: roll back to the last model trained on known-good data, since retraining on bad data repeats the fault, and retrain only after the data is rebuilt. Respond: a postmortem that turns the bad batch into a validation rule, which is what 'monitoring, alerting and recovery systems' means."
+
+open_questions:
+  - "A fraud model's outcomes arrive within 120 days. Until then only label-free signals exist. Should a drift alert alone ever be allowed to roll back a model, and who pays for a rollback that turns out to be unnecessary?"
+  - "One false page a week costs an engineer's sleep; one missed failure costs $184,932. How should a team set the threshold, and should the person on call have a say?"
+  - "Continuous retraining minimizes staleness and maximizes exposure to bad data. For a model trained on customers' uploads, as Unity's was, is any automatic retraining safe?"
+
+more_examples:
+  - "Monitoring budget: 3 variants x 50 metrics at 15 s for 30 days is 25.9M points, about $261 a month, $253 of it dashboard queries (Napkin Math 14.5); full-fidelity telemetry at 1M requests/s is 1 GB/s, one trace in 60 is 16.7 MB/s (Napkin Math 14.4)."
+  - "Infrastructure counters: a GPU above 85 percent busy time with memory bandwidth under 70 percent is a possible compute limit; 50 to 85 percent with bandwidth above 85 is a possible bandwidth limit (table 12); confirm with achieved FLOP rate (Lecture 8)."
+  - "Stage tracing: p99 rose from 80 to 110 ms while inference stayed at 45 ms and feature retrieval went from 25 to 55 ms; route to the feature-store owners, not a rollback (§14.5 self-check 4)."
+  - "Model test logs at Google: more than 70 percent of pipelines had a model unit test; of more than 80,000 executions in a month, 6 percent failed (Breck et al. 2019, §6.1)."
+  - "Monitoring benefit/cost: 5 incidents prevented x $50K against $50K a year of monitoring = 5x (equation 7)."
+  - "Monitor the monitor: an independent heartbeat catches a dead telemetry pipeline (§14.5.3)."
+  - "Keyword spotter: with no labels on the device, health is read from wake rate, duty cycle, false-wake reports, and confidence distributions (table 5, §14.9.1)."
+  - "Circuit breaker: trips on broken-input invariants (feature bounds, missing-feature rate, output collapse), not on gradual drift, and serves a heuristic or cached fallback (§14.8.4)."
+
+left_to_reading:
+  - concept: "Infrastructure telemetry and hardware utilization signatures (table 12, thermal, power)"
+    why: "Lecture 8 owns MFU and Lecture 11 the roofline; one LINK line on the iceberg frame and one more-examples item."
+  - concept: "Stage-level latency tracing"
+    why: "Lecture 13 owns the latency budget; one line on the iceberg frame."
+  - concept: "Cost of observability (equations 5 to 7, cardinality, tiered retention)"
+    why: "Secondary; Napkin Math 14.5's 150 series supply the false-alarm frame, and the $253-of-$261 query cost is in its notes."
+  - concept: "Drift taxonomy, K-S and PSI computation, KL divergence"
+    why: "Lecture 4b owns them; this lecture uses their outputs (scale of the K-S critical value, PSI bands as policy) with one LINK line each."
+  - concept: "Binomial sample sizing and statistical power"
+    why: "Lecture 12b owns them; the evidence-size frame quotes three derived counts and points back."
+  - concept: "Feature attribution (SHAP) and counterfactual analysis"
+    why: "Lecture 15 owns explanation methods; one line on the diagnose frame."
+  - concept: "On-call tiers, runbook contents, roles, governance gates, stakeholder communication"
+    why: "Organizational detail better read; the alert-fatigue remedies appear in the false-alarm notes. Lecture 15 owns fairness gates and per-group telemetry."
+  - concept: "Maturity levels, design patterns (circuit breaker, bulkhead, redundancy limit), investment economics"
+    why: "Secondary; the ML Test Score vote carries the maturity idea and the circuit breaker is a more-examples item."
+  - concept: "Edge (KWS) and ClinAIOps case studies"
+    why: "Better read; Part 1 shows the dual-bank update; Lecture 15 previews clinical accountability."
+
+closing:
+  return_to_hook: "Unity's timeline again, now with the lecture's instruments drawn on it. An input check on each customer batch fires before training (segment 1); it needs no labels, so it fires in minutes, while the outcome layer, revenue, waited a quarter (segment 2); its threshold is set on effect size and its alert has an owner (segment 3); the decision is roll back to a model trained on known-good data, not retrain on the bad batch (segment 4); and the postmortem turns that batch into a validation rule (segment 5). The company's own remediation sentence names the same three things: monitoring, alerting, and recovery."
+  read_and_practice: ["§14.5, §14.5.2, §14.6, §14.7.1, §14.8.1, §14.10", "Self-check questions for §14.5, §14.6, §14.7, §14.8; Checkpoints 14.3, 14.4, 14.5", "Napkin Math 14.2, 14.3, 14.5, 14.6 by hand; recompute T* for C = $1,250 and $20,000"]
+  further_reading:
+    - cite: "ML Operations, §14.5 to §14.7"
+      url: ""
+      why: "Monitoring layers, detection delay, the PSI policy, retraining economics, and the incident workflow with every number."
+    - cite: "Breck, Polyzotis, Roy, Whang, and Zinkevich, Data Validation for Machine Learning, SysML 2019"
+      url: "https://mlsys.org/Conferences/2019/doc/2019/167.pdf"
+      why: "How Google validates every batch against a schema, with a month of anomaly statistics from more than 700 pipelines."
+    - cite: "Rabanser, Günnemann, and Lipton, Failing Loudly: An Empirical Study of Methods for Detecting Dataset Shift, NeurIPS 2019"
+      url: "https://arxiv.org/abs/1810.11953"
+      why: "Measured detection accuracy against sample count and shift size."
+    - cite: "Beyer, Jones, Petoff, and Murphy (eds.), Site Reliability Engineering, O'Reilly 2016, ch. 6 (Monitoring Distributed Systems) and ch. 15 (Postmortem Culture)"
+      url: "https://sre.google/sre-book/table-of-contents/"
+      why: "What makes an alert worth a page, and how a blameless postmortem turns an incident into a fix."
+    - cite: "Drew et al., Insights into the Problem of Alarm Fatigue with Physiologic Monitor Devices, PLOS ONE 2014"
+      url: "https://doi.org/10.1371/journal.pone.0110274"
+      why: "What an untuned threshold does to the people who must answer it: 2.56 million alarms in 31 days."
+    - cite: "Breck et al., The ML Test Score: A Rubric for ML Production Readiness and Technical Debt Reduction, IEEE Big Data 2017"
+      url: "https://doi.org/10.1109/bigdata.2017.8258038"
+      why: "28 concrete tests and the minimum-category score."
+
+bridge: "Lecture 15: monitoring keeps a model faithful to its objective. What if the objective was wrong, and the system does exactly what it was told and still causes harm?"
+
+coverage:
+  primary_taught: ["Layered monitoring and detection delay (iceberg with when-each-layer-fires, prediction-outcome join and label coverage, evidence size, detection time from traffic and label delay, Rabanser curves, cost of waiting, K-S scale, false-alarm budget, PSI as escalation policy, severity and owner)", "Operations loop (recall frame; detect, diagnose, decide lit)"]
+  primary_recalled_from_part1: ["Safe release and tested rollback (recall; rollback as the decision in the synthesis)", "Release safety costs resident memory (one line: retraining contends with the standby copy)", "Request-keyed parity testing (stage 2 of the debugging tree; the session-duration repair)", "Reproducibility and the model registry (rollback to a known-good version in the synthesis)"]
+  secondary: ["Retraining economics (taught in full: gate, policies, cadences, sawtooth derivation of T*, sensitivity, trigger with delay)", "Incident response (taught: debugging tree, slices, repair restores the contract, postmortem and Prevent)", "Operational maturity (ML Test Score vote)", "Cost of observability (150 series in the false-alarm frame; notes)", "Hidden technical debt (Part 1)", "A/B release decisions (Part 1)"]
+  touches_reused: ["Lecture 4b: drift types, K-S and PSI (one LINK line each; outputs used, not retaught)", "Lecture 12b: binomial sizing and power (three derived counts, one LINK line)", "Lecture 1: degradation equation and D·A·M (one line; kit triangle)", "Lecture 8: MFU (one line)", "Lecture 13: latency budget as a diagnostic (one line)", "Part 1 (Lecture 14): loop ring, Knight's 97 e-mails, Zillow, Papasian and Underwood postmortems (one line each)"]
+  hand_offs: ["Part 1 (Lecture 14) owns silent failure, debt, reproducibility and the registry, parity testing, staged release, A/B release decisions, release memory, and rollback", "Lecture 15 owns per-group telemetry, bias feedback loops, fairness gates, and explanation cost"]
+
+notes_for_author:
+  - "Part 2 receives from Part 1: the iceberg frame, the detection estimate, the Rabanser frame, the silent-failure cost estimate, the Facebook cadence frame, the T* focus and worked example, and the 2 AM diagnose frame. Their values are unchanged; regenerate the figures from copies of Part 1's make_figs.py functions in this folder, since decks do not share an images folder."
+  - "Unity: the call transcript (10 May 2022) supports the fault, the bad customer data, the $110 million 2022 estimate, 'roughly 60% impacting the second quarter', the recovery sequence, and the remediation sentence. The 30 and 10 percent for Q3 and Q4 come from secondary coverage; check against the call or the Q1 2022 shareholder letter (8-K, 10 May 2022) before drawing them, else draw only Q2. The transcript does not say when the fault was detected; the slide must not claim a detection date, only that it affected February and March and was disclosed on 10 May."
+  - "Derived numbers, each labeled 'derived' on its slide and computed in make_figs.py: 185, 1,030, 3,930 outcomes (one-sample binomial, two-sided 95 percent, 80 percent power, from 95 percent); K-S critical 0.0019 at n = 1,000,000; false alerts 7.5, 1.5, 0.15 a day for 150 series; cost per day at T = 1, 3, 7, 30 days; 27.5 days to 0.88 and resets at 0.878 and 0.859 after 1- and 10-day delays."
+  - "The 'time to confirm = label delay + outcomes / rate' sum is the chapter's detection-delay row (table 28) plus its statement that labels lag traffic (Napkin Math 14.2 systems insight); the chapter does not write the sum as one formula. The slide says 'derived'."
+  - "Visa's 120-day cardholder dispute limit is from secondary summaries of the Visa Core Rules; confirm in the current Visa Core Rules and Visa Product and Service Rules PDF before building, or replace the rung with the chapter's 'weeks to months' (§14.10)."
+  - "The 3-point conversion gap in the pending-outcomes vote is illustrative and labeled so; the rule it tests is the chapter's."
+  - "Breck et al. 2019 Table 1 measures evaluation pipelines over the most recent 30 days; 'fired' means an anomaly fired on any day, 'fixed' means none of that type for two days afterward. Quote the paper's definitions in the notes."
+
+build_note:
+  date: "2026-10-18"
+  result: "36 frames (title, 5 dividers, and focus included), 73 presenting pages, 36 handout pages, 73 notes pages; notes total 71.5 minutes (about 59 without [OPTIONAL] notes); fit check passes. Figures in images/make_figs.py with every source in its docstring."
+  facts_settled:
+    - "Unity: the Q1 2022 earnings call transcript (10 May 2022) states the 60, 30, and 10 percent split of the $110 million 2022 estimate (L. Visoso), so all three quarters are drawn. The slowdown band covers February and March, the CEO's words for when Operate slowed; no detection date is drawn or claimed, and the notes say so."
+    - "Visa: the 120-day limit is confirmed in Visa's published rules (18 April 2026 edition, table 11-29, card-absent fraud), as the issuer's dispute time limit from the processing date; the slide says 'Card fraud: disputes, up to 120 days' and the credit names the table."
+    - "Breck et al. 2019 Table 1 re-read from the PDF: fired 10, 6, 6, 3, 3 percent; fixed 65, 66, 53, 65, 82 percent; more than 700 pipelines; Google Play 2 percent. Drew et al. 2014 abstract re-read: 461 patients, 31 days, 2,558,760 alarms, 12,671 annotated, 88.8 percent false."
+    - "Labeled illustrative on the slide: the pending-outcome vote (10 against 7 percent conversion, 95 and 20 percent resolved) and the ranking service. Labeled derived: outcome counts (185, 1,030, 3,930), the confirmation-time sum, the K-S value at 1,000,000, false alerts per day, cost per day at four cadences, and the delayed-trigger resets."
+  changes_from_storyboard:
+    - "Frame 5's Google bars became their own frame (data for segment 1 at legible size); a goals frame follows the recall frame, as in Part 1."
+    - "The joint-distribution frame drops the freshness inset; listing 4's 6-hour rule is in its notes."
+    - "The sawtooth derivation is drawn as value lost per day (a straight line resetting every T), so one cycle's loss is a visible triangle; the cost-per-day curves appear on the estimate frame."
+    - "The trigger-with-delay frame is redrawn over 120 days, not 365, so the three sawtooths stay readable."
+    - "The ML Test Score vote and the six-phase checklist share one frame; the 6 percent of 80,000 model-test runs is in its notes."
