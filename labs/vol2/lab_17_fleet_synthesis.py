@@ -24,7 +24,7 @@ async def _():
         native_bootstrap(__file__)
 
     import plotly.graph_objects as go
-    from mlsysim.engine.v2_17_experiments import (
+    from mlsysim.labs.experiments.v2_17_experiments import (
         REQUIRED_MODELS, adverse_condition, apply_patch, audit_ledger_evidence,
         compare_equal_budget_repairs, evaluation_record, evaluate_configuration,
         instructor_repair_plans, instructor_scenario, instructor_stress,

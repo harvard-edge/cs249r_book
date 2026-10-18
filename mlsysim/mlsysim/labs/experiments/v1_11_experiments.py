@@ -13,10 +13,10 @@ from dataclasses import dataclass, fields, is_dataclass
 from math import ceil
 from typing import Literal, Mapping, Sequence
 
-from ..core.types import Quantity
-from ..core.units import Q_, resolve_precision, ureg
-from ..hardware import Hardware
-from ..hardware.types import HardwareNode
+from mlsysim.core.types import Quantity
+from mlsysim.core.units import Q_, resolve_precision, ureg
+from mlsysim.hardware import Hardware
+from mlsysim.hardware.types import HardwareNode
 
 
 MODEL_ID = "v1_11_experiments"

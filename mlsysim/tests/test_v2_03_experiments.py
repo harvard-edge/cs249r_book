@@ -3,7 +3,7 @@ import json
 import pytest
 
 from mlsysim.core.units import Q_
-from mlsysim.engine.v2_03_experiments import (
+from mlsysim.labs.experiments.v2_03_experiments import (
     alpha_beta_experiment,
     burst_spacing_params,
     build_traffic_matrix,

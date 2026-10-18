@@ -4,7 +4,7 @@ import math
 import pytest
 
 from mlsysim.core.units import Q_, ureg
-from mlsysim.engine.v1_05_experiments import (
+from mlsysim.labs.experiments.v1_05_experiments import (
     EVALUATE_MODEL_KEY,
     NUMERICAL_MODEL_KEY,
     TRACKS,

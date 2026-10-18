@@ -33,7 +33,7 @@ async def _():
         native_bootstrap(__file__)
 
     import plotly.graph_objects as go
-    from mlsysim.engine.v2_08_experiments import (
+    from mlsysim.labs.experiments.v2_08_experiments import (
         TRACKS,
         fairness_comparison,
         gang_backfill_comparison,

@@ -24,7 +24,7 @@ async def _():
 
     import plotly.graph_objects as go
     from mlsysim.core.units import Q_
-    from mlsysim.engine.v2_04_experiments import (
+    from mlsysim.labs.experiments.v2_04_experiments import (
         SCENARIO_ASSUMPTION, TIER_PLANS, evaluate_tier_plan,
         evaluate_track_cache, evaluate_track_checkpoint, evaluate_track_demand,
         evaluate_track_layout, make_miss_burst_trace, serialize_for_evidence,

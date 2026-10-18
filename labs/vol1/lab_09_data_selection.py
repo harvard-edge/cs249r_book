@@ -27,7 +27,7 @@ async def _():
 
     import plotly.graph_objects as go
     from mlsysim.core.units import Q_
-    from mlsysim.engine.v1_09_experiments import (
+    from mlsysim.labs.experiments.v1_09_experiments import (
         MODEL_ID, TRACKS, acquisition_option, compare_policies,
         full_pool_baseline, learning_curve, population_shift,
         selection_amortization, serialize_value,

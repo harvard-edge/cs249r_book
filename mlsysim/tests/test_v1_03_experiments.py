@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from mlsysim.engine.v1_03_experiments import (
+from mlsysim.labs.experiments.v1_03_experiments import (
     STAGES,
     TRACKS,
     compare_iteration_plans,

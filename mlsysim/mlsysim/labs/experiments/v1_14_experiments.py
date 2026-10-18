@@ -13,8 +13,8 @@ import json
 from math import ceil, floor, sqrt
 from typing import Any, Literal, Mapping, Sequence
 
-from ..core.types import Quantity
-from ..core.units import Q_
+from mlsysim.core.types import Quantity
+from mlsysim.core.units import Q_
 
 
 TrackId = Literal["tinyml", "mobile", "edge", "cloud"]

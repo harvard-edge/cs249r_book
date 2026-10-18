@@ -24,7 +24,7 @@ async def _():
 
     import plotly.graph_objects as go
     from mlsysim import Models, Systems
-    from mlsysim.engine.v2_05_experiments import (
+    from mlsysim.labs.experiments.v2_05_experiments import (
         compare_straggler_policy,
         get_capacity_dimensions,
         get_parallel_layout_specs,
