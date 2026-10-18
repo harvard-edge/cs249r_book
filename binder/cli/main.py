@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cli.core.config import ConfigManager
 from cli.core.discovery import ChapterDiscovery, VOLUME_DIRS
+from cli.core.process import build_lock
 from cli.commands.build import BuildCommand
 from cli.commands.preview import PreviewCommand
 from cli.commands.doctor import DoctorCommand
@@ -714,7 +715,7 @@ class MLSysBookCLI:
         stdout_redirect = redirect_stdout(sys.stderr) if json_output else nullcontext()
 
         try:
-            with stdout_redirect:
+            with build_lock(self.root_dir), stdout_redirect:
                 if build_all:
                     # Every volume in turn; --parallel runs them side by side instead.
                     ok = True
