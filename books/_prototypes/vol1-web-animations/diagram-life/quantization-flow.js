@@ -18,18 +18,23 @@
     let selectedScene = true, dead = false, version = 0, animations = [], holdTimer = null, scene, particles;
     const stages = ['Start: two float arrays', 'Quantize activations', 'Quantize weights', 'Accumulate pair 1', 'Accumulate pair 2', 'Accumulate pair 3', 'Requantize the sum', 'Activate and write output'];
     root.classList.add('mlsys-flow');
+    let figureFrame = null;
     const intro = el('p', 'flow-intro', 'Follow values as they lose precision and build one retained sum.');
     const route = el('ol', 'flow-route');
     ['Float inputs', 'Integer grid', 'Multiply & retain', 'INT8 output'].forEach(label => route.append(el('li', '', label)));
     const controls = el('div', 'flow-controls'), buttons = {};
-    for (const [key, label] of [['play', 'Play'], ['back', 'Back'], ['next', 'Next'], ['restart', 'Restart']]) { const b = el('button', '', label); b.type = 'button'; buttons[key] = b; controls.append(b); }
+    for (const [key, label] of [['next', 'Next'], ['back', 'Back'], ['play', 'Play'], ['restart', 'Restart']]) { const b = el('button', '', label); b.type = 'button'; b.dataset.flowControl = key; buttons[key] = b; controls.append(b); }
+    buttons.next.title = 'During motion, finish and hold the current result. Otherwise, illustrate the next operation.';
+    buttons.next.setAttribute('aria-description', buttons.next.title);
+    const beat = el('span', 'flow-beat', 'Ready'); beat.setAttribute('aria-hidden', 'true'); controls.append(beat);
     const menuLabel = el('label', '', 'Sequence '), menu = el('select');
     stages.forEach((label, i) => { const option = el('option', '', `${i + 1}. ${label}`); option.value = i; menu.append(option); });
     menuLabel.append(menu); controls.append(menuLabel);
     const settings = el('label', 'flow-settings', 'Activation spacing '), scaleMenu = el('select');
     for (const [value, label] of [['0.1', '0.10 — coarser grid'], ['0.05', '0.05 — finer grid']]) { const option = el('option', '', label); option.value = value; scaleMenu.append(option); }
     settings.append(scaleMenu);
-    const narration = el('p', 'flow-narration'); narration.setAttribute('aria-live', 'polite');
+    const message = el('div', 'flow-message'), actionTitle = el('strong', 'flow-action-title'), narration = el('p', 'flow-narration');
+    message.setAttribute('aria-live', 'polite'); message.append(actionTitle, narration);
     const board = shape('svg', {class: 'flow-scene', role: 'group', 'aria-label': 'A worked quantized dot product, showing approximation and retained accumulation.'});
     const defs = shape('defs'), marker = shape('marker', {id: root.id + '-flow-arrow', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 6, markerHeight: 6, orient: 'auto'});
     marker.append(shape('path', {d: 'M0 0L10 5L0 10Z', fill: 'currentColor'})); defs.append(marker);
@@ -39,8 +44,9 @@
     detail.append(summary, equation, assumptions);
     const scope = el('p', 'flow-scope', 'Moving values are reads: source arrays stay available. Seconds and distances are illustrative. Product trails are a visual history, not extra storage. Finer spacing narrows the real range; it is not universally more accurate.');
     const clock = el('span', 'flow-clock'); clock.setAttribute('aria-hidden', 'true');
-    root.append(intro, route, controls, settings, narration, board, note, detail, scope, clock);
+    root.append(intro, route, controls, settings, message, board, note, detail, scope, clock);
 
+    function action(title, phase) { actionTitle.textContent = title; root.dataset.flowAction = phase; beat.textContent = {ready:'Ready',read:'Read',round:'Round',store:'Store',multiply:'Multiply',add:'Add',activate:'ReLU',result:'Result'}[phase] || phase; }
     function data() {
       const qx = x.map(v => clamp(round(v / spacing) + 3));
       const qw = w.map(v => clamp(round(v / .05)));
@@ -108,8 +114,9 @@
       w.forEach((v, i) => card(centers[i] - width / 2, 198, width, 80, `w[${i}]`, fmt(v), '', 'quant'));
       text(pw ? 180 : 380, 342, 'Two arrays → one dot product', 'scene-heading');
       text(pw ? 180 : 380, 385, '6 FP32 values · 24 operand bytes', 'scene-small');
+      action('Ready · Identify the inputs', 'ready');
       narration.textContent = 'Start with six floating-point values. Keep their identities while changing representation.';
-      note.textContent = 'Play follows the whole story. Next illustrates one operation; the sequence menu jumps to an inspectable result.';
+      note.textContent = 'Use Next to illustrate one operation and hold its result. Play follows the whole story, with reading pauses.';
     }
     function selectValue(index) { clearMotion(); playing = false; selected = index; selectedScene = true; drawSettled(); }
     function drawQuant(index, completed, settled) {
@@ -126,7 +133,8 @@
       const qgrid = grid(values[index], scale, zero, pw ? 270 : 190, `Nearest level for ${name}[${index}]`);
       if (settled) { qgrid.dot.style.transform = `translate(${qgrid.mid - qgrid.originalX}px,0)`; qgrid.label.textContent = fmt(qgrid.represented); }
       else qgrid.error.style.opacity = 0;
-      narration.textContent = settled ? `${name}[${index}]: ${fmt(values[index])} is represented as ${fmt(qgrid.represented)}, stored as code ${codes[index]}.` : `Follow ${name}[${index}] to its nearest real level, then store that level’s integer code.`;
+      action(settled ? 'Result · Rounded value and code' : '1/3 · Read the selected value', settled ? 'result' : 'read');
+      narration.textContent = settled ? `${name}[${index}]: ${fmt(values[index])} → ${fmt(qgrid.represented)} → code ${codes[index]}.` : `${name}[${index}] · original value ${fmt(values[index])}.`;
       note.textContent = (activation ? '' : 'Weights may be quantized offline. ') + 'Select an input to inspect its rounding. Stored codes label real levels.';
       return {grid: qgrid, src, dst, values, codes, scale, zero, name};
     }
@@ -162,7 +170,8 @@
       text(pw ? 180 : 380, trailY - 24, 'Added products · visual trace', 'scene-small');
       const history = [];
       for (let j = 0; j < 3; j++) history.push(card((pw ? [70, 180, 290] : [180, 380, 580])[j] - (pw ? 48 : 75), trailY, pw ? 96 : 150, 68, `pair ${j + 1}`, j < done ? String(d.terms[j]) : '—', '', 'acc', j === i));
-      narration.textContent = settled ? `The register now holds ${total}.${i === 2 ? ' The reduction is complete.' : ' Keep it for the next pair.'}` : `Pair ${i + 1}: the register retains ${previous} while the next product is formed.`;
+      action(settled ? 'Result · Keep the updated sum' : '1/3 · Read the operand pair', settled ? 'result' : 'read');
+      narration.textContent = settled ? `Retained total: ${total}.${i === 2 ? ' Reduction complete.' : ' Ready for the next pair.'}` : `Pair ${i + 1} · read the operands; retain ${previous}.`;
       note.textContent = total > 127 && settled ? `${total} exceeds signed INT8’s maximum, 127. The sum stays wide until the reduction finishes.` : 'This small sum may fit INT8; longer reductions may not. The accumulator stays wide until the reduction finishes.';
       return {sourceX, sourceW, compute, register, centered, product, regValue, regStatus, history, previous, total, i};
     }
@@ -176,6 +185,7 @@
         if (settled) { qgrid.dot.style.transform = `translate(${qgrid.mid - qgrid.originalX}px,0)`; qgrid.label.textContent = fmt(d.real); qgrid.error.textContent = Math.abs(d.rawReal - d.real) < 1e-9 ? 'Already on an output level · no new rounding error' : 'output rounding change ' + signed(d.real - d.rawReal); }
         else qgrid.error.style.opacity = 0;
         text(cx, pw ? 465 : 385, settled ? `Stored output code ${d.requantized} · real value ${fmt(d.real)}` : 'Output code is written after rounding', 'scene-heading');
+        action(settled ? 'Result · Wide sum → output code' : '1/3 · Interpret the wide sum', settled ? 'result' : 'read');
         narration.textContent = settled ? `Sum ${d.total} represents ${fmt(d.rawReal)}; output code ${d.requantized} represents ${fmt(d.real)}.` : 'Interpret the wide sum in real units, then round onto the output grid.';
         note.textContent = 'The accumulator is retained while requantization reads it. The output uses a different spacing and zero-point.';
         return {grid: qgrid};
@@ -192,6 +202,7 @@
       text(cx, factsY + 36, `Absolute error ${fmt(Math.abs(d.real - .4086))}`, 'scene-small');
       text(cx, factsY + 90, 'Operand values: 24 bytes FP32 → 6 bytes INT8', 'scene-small');
       text(cx, factsY + 118, 'INT32 register: 4 bytes · metadata and workspace excluded', 'scene-tiny');
+      action(settled ? 'Result · Final INT8 output' : '1/3 · Read the output code', settled ? 'result' : 'read');
       narration.textContent = settled ? `ReLU preserves this positive value. Output code ${d.output} represents ${fmt(d.real)}.` : `Read code ${d.requantized}, pass ReLU, then write the final output.`;
       note.textContent = 'Change activation spacing to compare the same inputs. Smaller error here does not establish a speedup or a universally better scale.';
       return {a, gate, out};
@@ -217,42 +228,66 @@
       tween(g, points.map(([x, y]) => ({transform: `translate(${x}px,${y}px)`})), duration);
       return g;
     }
-    function hold() { holdTimer = setTimeout(() => { if (!playing || dead) return; if (step === 7) { playing = false; setState(data().total, false); } else startStep(step + 1); }, 1200); }
+    function hold() { holdTimer = setTimeout(() => { if (!playing || dead) return; if (step === 7) { playing = false; setState(data().total, false); } else startStep(step + 1); }, 3500); }
     function endStage() { animations.forEach(a => a.cancel()); animations = []; animating = false; paused = false; selectedScene = false; drawSettled(); if (playing) hold(); }
     function startStep(next) {
       const keepPlaying = playing; clearMotion(); playing = keepPlaying; step = next; animating = true; selectedScene = false;
       if (reduced.matches) { endStage(); return; }
       const d = data();
       if (step <= 2) {
-        for (let index = 0; index < 3; index++) cue(index * 2600, () => {
+        for (let index = 0; index < 3; index++) cue(index * 4200, () => {
           const view = drawQuant(index, index, false); updateMath();
           view.grid.dot.style.opacity = 0;
-          const read = packet(fmt(view.values[index]), view.name + '[' + index + '] FP32', [[view.src[index].x, view.src[index].y], [view.grid.originalX, view.grid.y]], 250);
-          cue(300, () => { read.remove(); view.grid.dot.style.opacity = 1; });
-          tween(view.grid.dot, [{transform: 'translate(0px,0px)'}, {transform: `translate(${view.grid.mid - view.grid.originalX}px,0px)`}], 650, 350);
-          cue(1050, () => { view.grid.label.textContent = fmt(view.grid.represented); view.grid.error.style.opacity = 1; });
-          cue(1300, () => { const p = packet(view.codes[index], view.name + '[' + index + '] INT8', [[view.grid.mid, view.grid.codeY], [view.dst[index].x, view.dst[index].y]], 650); cue(700, () => { p.remove(); view.dst[index].value.textContent = String(view.codes[index]); view.dst[index].sub.textContent = 'represents ' + fmt(view.grid.represented); }); });
+          const read = packet(fmt(view.values[index]), view.name + '[' + index + '] FP32', [[view.src[index].x, view.src[index].y], [view.grid.originalX, view.grid.y]], 400);
+          cue(450, () => { read.remove(); view.grid.dot.style.opacity = 1; });
+          cue(1000, () => {
+            action('2/3 · Round to a real level', 'round');
+            narration.textContent = `${fmt(view.values[index])} → nearest real level. Original marker retained.`;
+            tween(view.grid.dot, [{transform: 'translate(0px,0px)'}, {transform: `translate(${view.grid.mid - view.grid.originalX}px,0px)`}], 650);
+          });
+          cue(1700, () => { view.grid.label.textContent = fmt(view.grid.represented); view.grid.error.style.opacity = 1; narration.textContent = `${fmt(view.values[index])} → ${fmt(view.grid.represented)} · change ${signed(view.grid.represented - view.values[index])}.`; });
+          cue(2800, () => {
+            action('3/3 · Store the integer code', 'store');
+            narration.textContent = `Code ${view.codes[index]} represents ${fmt(view.grid.represented)}; source retained.`;
+            const p = packet(view.codes[index], view.name + '[' + index + '] INT8', [[view.grid.mid, view.grid.codeY], [view.dst[index].x, view.dst[index].y]], 650);
+            cue(700, () => { p.remove(); view.dst[index].value.textContent = String(view.codes[index]); view.dst[index].sub.textContent = 'represents ' + fmt(view.grid.represented); });
+          });
         });
-        cue(7800, endStage);
+        cue(12600, endStage);
       } else if (step <= 5) {
         const view = drawReduction(step - 3, false); updateMath();
-        const center = [view.compute.x + view.compute.w / 2, view.compute.y + view.compute.h / 2], p1 = packet(d.qx[view.i], `x[${view.i}] code`, [[view.sourceX[view.i].x, view.sourceX[view.i].y], [view.compute.x, center[1] - 25]], 550);
-        cue(600, () => { p1.remove(); view.centered.textContent = `${d.qx[view.i]} − 3 → ${d.qx[view.i] - 3}`; const p2 = packet(d.qw[view.i], `w[${view.i}] code`, [[view.sourceW[view.i].x, view.sourceW[view.i].y], [view.compute.x, center[1] + 25]], 500); cue(550, () => { p2.remove(); view.centered.textContent = `${d.qx[view.i] - 3} × ${d.qw[view.i]}`; view.product.textContent = `product ${d.terms[view.i]}`; }); });
-        cue(1300, () => { const p = packet(d.terms[view.i], 'product', [[view.compute.x + view.compute.w, center[1]], [view.register.x, center[1]]], 650); cue(700, () => { p.remove(); view.regValue.textContent = `${view.previous} + ${d.terms[view.i]}`; view.regValue.classList.add('is-adding'); view.regStatus.textContent = 'adding product'; narration.textContent = `Product ${d.terms[view.i]} arrived. Add it to the retained ${view.previous}.`; }); });
-        cue(2700, endStage);
+        const center = [view.compute.x + view.compute.w / 2, view.compute.y + view.compute.h / 2];
+        const p1 = packet(d.qx[view.i], `x[${view.i}] code`, [[view.sourceX[view.i].x, view.sourceX[view.i].y], [view.compute.x, center[1] - 25]], 650);
+        cue(700, () => { p1.remove(); view.centered.textContent = `${d.qx[view.i]} − 3 → ${d.qx[view.i] - 3}`; });
+        cue(1100, () => {
+          const p2 = packet(d.qw[view.i], `w[${view.i}] code`, [[view.sourceW[view.i].x, view.sourceW[view.i].y], [view.compute.x, center[1] + 25]], 650);
+          cue(700, () => { p2.remove(); view.centered.textContent = `${d.qx[view.i] - 3} × ${d.qw[view.i]}`; });
+        });
+        cue(2100, () => { action('2/3 · Form the product', 'multiply'); view.product.textContent = `product ${d.terms[view.i]}`; narration.textContent = `Product ${d.terms[view.i]} · register still ${view.previous}.`; });
+        cue(3000, () => {
+          action('3/3 · Add to the retained sum', 'add');
+          const p = packet(d.terms[view.i], 'product', [[view.compute.x + view.compute.w, center[1]], [view.register.x, center[1]]], 650);
+          cue(700, () => { p.remove(); view.regValue.textContent = `${view.previous} + ${d.terms[view.i]}`; view.regValue.classList.add('is-adding'); view.regStatus.textContent = 'adding product'; narration.textContent = `Arrived: ${d.terms[view.i]}. Add to retained ${view.previous}.`; });
+        });
+        cue(4900, endStage);
       } else if (step === 6) {
         const view = drawOutput(false); updateMath();
-        tween(view.grid.dot, [{transform: 'translate(0px,0px)'}, {transform: `translate(${view.grid.mid - view.grid.originalX}px,0px)`}], 850, 350);
-        cue(1250, () => { view.grid.label.textContent = fmt(d.real); view.grid.error.style.opacity = 1; });
-        cue(2400, endStage);
+        cue(1200, () => { action('2/3 · Round to the output grid', 'round'); tween(view.grid.dot, [{transform: 'translate(0px,0px)'}, {transform: `translate(${view.grid.mid - view.grid.originalX}px,0px)`}], 850); });
+        cue(2100, () => { view.grid.label.textContent = fmt(d.real); view.grid.error.style.opacity = 1; action('3/3 · Identify the output code', 'store'); });
+        cue(3800, endStage);
       } else {
         const view = drawOutput(false); updateMath();
-        const points = phone() ? [[view.a.x, view.a.y], [view.gate.x, view.gate.y], [view.gate.x, view.gate.y], [view.gate.x, 185], [view.out.x, 185], [view.out.x, view.out.y]] : [[view.a.x, view.a.y], [view.gate.x, view.gate.y], [view.gate.x, view.gate.y], [view.out.x, view.out.y]];
-        packet(d.output, 'INT8', points, 1800);
-        cue(750, () => { view.gate.value.textContent = String(d.output); });
-        cue(2000, endStage);
+        cue(900, () => {
+          action('2/3 · Apply ReLU', 'activate');
+          const points = phone() ? [[view.a.x, view.a.y], [view.gate.x, view.gate.y], [view.gate.x, view.gate.y], [view.gate.x, 185], [view.out.x, 185], [view.out.x, view.out.y]] : [[view.a.x, view.a.y], [view.gate.x, view.gate.y], [view.gate.x, view.gate.y], [view.out.x, view.out.y]];
+          packet(d.output, 'INT8', points, 1800);
+          cue(750, () => { view.gate.value.textContent = String(d.output); });
+        });
+        cue(2900, () => { action('3/3 · Write the INT8 output', 'store'); view.out.value.textContent = String(d.output); view.out.sub.textContent = 'represents ' + fmt(d.real); });
+        cue(3900, endStage);
       }
     }
+
     function seek(next) { clearMotion(); playing = false; step = next; selectedScene = true; drawSettled(); }
     function pause() { playing = false; paused = true; clearTimeout(holdTimer); animations.forEach(a => a.pause()); setState(Number(root.dataset.accumulator), animating); }
     on(buttons.play, 'click', () => {
@@ -262,16 +297,28 @@
       else if (selectedScene && step > 0) startStep(step);
       else startStep(step === 7 ? 1 : step + 1);
     });
-    on(buttons.next, 'click', () => { playing = false; startStep(Math.min(7, step + 1)); });
+    on(buttons.next, 'click', () => { if (animating) { clearMotion(); playing = false; selectedScene = false; drawSettled(); } else { playing = false; startStep(Math.min(7, step + 1)); } });
     on(buttons.back, 'click', () => seek(Math.max(0, step - 1)));
     on(buttons.restart, 'click', () => { selected = 0; seek(0); });
     on(menu, 'change', () => seek(Number(menu.value)));
     on(scaleMenu, 'change', () => { spacing = Number(scaleMenu.value); seek(step); });
     on(root, 'mlsys-view-change', e => { if (e.detail?.view !== 'explore') pause(); });
     on(document, 'visibilitychange', () => { if (document.hidden) pause(); }); on(window, 'beforeprint', pause);
-    on(window, 'resize', () => seek(step)); on(reduced, 'change', () => seek(step));
+    let stickyFrame = null;
+    function stickyTop() {
+      if (!figureFrame) { figureFrame = root.closest('.mlsys-figure-views'); figureFrame?.classList.add('mlsys-flow-figure'); }
+      const candidates = [...document.querySelectorAll('header,nav,.fixed-top,#quarto-announcement')].map(n => ({rect:n.getBoundingClientRect(),style:getComputedStyle(n)})).filter(({rect,style}) => ['fixed','sticky'].includes(style.position) && rect.width >= innerWidth * .5 && rect.bottom > 0 && style.visibility !== 'hidden');
+      let clearance = 0;
+      for (let i = 0; i < 4; i++) for (const {rect} of candidates) if (rect.top <= clearance + 4) clearance = Math.max(clearance, rect.bottom);
+      root.style.setProperty('--flow-sticky-top', Math.ceil(clearance) + 'px');
+    }
+    on(window, 'scroll', () => { if (stickyFrame === null) stickyFrame = requestAnimationFrame(() => { stickyFrame = null; stickyTop(); }); });
+    on(document, 'transitionend', stickyTop);
+    let lastPhone = phone();
+    on(window, 'resize', () => { if (phone() !== lastPhone) { lastPhone = phone(); seek(step); } stickyTop(); }); on(reduced, 'change', () => seek(step));
     const observer = new IntersectionObserver(entries => { if (!entries[0].isIntersecting) pause(); }); observer.observe(root);
-    drawSettled();
-    return {pause, destroy() { dead = true; playing = false; clearMotion(); observer.disconnect(); abort.abort(); root.replaceChildren(); }};
+    drawSettled(); stickyTop();
+    stickyFrame = requestAnimationFrame(() => { stickyFrame = null; stickyTop(); });
+    return {pause, destroy() { if (stickyFrame !== null) cancelAnimationFrame(stickyFrame); dead = true; playing = false; clearMotion(); observer.disconnect(); abort.abort(); figureFrame?.classList.remove('mlsys-flow-figure'); root.replaceChildren(); }};
   };
 })();

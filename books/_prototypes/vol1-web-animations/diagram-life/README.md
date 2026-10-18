@@ -14,7 +14,7 @@ select Explore, and press Play or Next. The generated page is an isolated copy o
 the actual themed chapter. The canonical build, chapter source, static artwork,
 caption, and production lesson remain unchanged. This is not a published update.
 
-The second prototype uses larger teaching scenes rather than reproducing the
+The third prototype uses larger teaching scenes rather than reproducing the
 printed layout. A small route preserves context while the active mechanism has
 space to explain itself:
 
@@ -32,10 +32,16 @@ space to explain itself:
 Selecting an input inspects its approximation; changing spacing compares the
 same input at the same operation. Clicking a calculation block pauses playback
 and opens the current arithmetic. Back/menu jumps settle immediately; Play
-animates the selected operation, Next illustrates the next one, and Replay
-restarts the story. No scene autoplays on opening. Reduced motion keeps the
+animates the selected operation. Next illustrates one operation and holds its
+result; pressing Next during motion finishes that operation without advancing.
+Replay restarts the story. No scene autoplays on opening. Reduced motion keeps the
 same inspectable states. Phone scenes fit the reading column naturally, with
 no internal panning, clipped diagram viewport, or automatic scrolling.
+
+Each operation has an explicit action cue: Read → Round → Store, or Read pair →
+Multiply → Add. Continuous playback holds completed results for 3.5 seconds.
+On phones, compact controls and the current action stay visible while the scene
+scrolls. Mobile viewport height changes preserve an in-progress animation.
 
 The default products remain 24, 20, 40; the sum is 84, and final code 17
 represents 0.42. Finer activation spacing produces sum 163, represented sum
