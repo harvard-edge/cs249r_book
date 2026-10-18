@@ -224,11 +224,11 @@ class MlsysPlanSchema(BaseModel):
                     "hardware total accelerators must be divisible by hardware.accelerators_per_node "
                     f"(got {total_accelerators} and {accelerators_per_node})"
                 )
-            # Step 3: use the most specific bandwidth source available.
+            # Step 3: use the most specific one-way bandwidth source available.
             intra_node_bw = (
                 self.hardware.intra_node_bw
-                or (self._hardware_obj.nvlink.bandwidth if self._hardware_obj.nvlink else None)
-                or (self._hardware_obj.interconnect.bandwidth if self._hardware_obj.interconnect else None)
+                or (self._hardware_obj.nvlink.bandwidth_per_direction if self._hardware_obj.nvlink else None)
+                or (self._hardware_obj.interconnect.bandwidth_per_direction if self._hardware_obj.interconnect else None)
                 or self.hardware.fabric_bandwidth
             )
             # Step 4: compile the declarative plan into the Fleet object used by

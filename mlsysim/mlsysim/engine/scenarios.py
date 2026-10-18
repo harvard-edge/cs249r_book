@@ -6,6 +6,7 @@ from ..models.types import Workload
 from ..hardware.types import HardwareNode
 from ..systems.types import Fleet
 from ..core.exceptions import OOMError, SLAViolation
+from ..core.registry import Registry
 from .evaluation import SystemEvaluation, EvaluationLevel
 from ..models.registry import Models as _Models
 from ..hardware.registry import Hardware as _Hardware
@@ -48,7 +49,7 @@ class Scenario(BaseModel):
         
         # --- LEVEL 1: FEASIBILITY ---
         from .solvers import DataModel
-        weights = self.workload.size_in_bytes()
+        weights = self.workload.size_in_bytes(precision=precision)
         mem_feasible = weights <= hardware.memory.capacity
         
         # Data Pipeline Check
@@ -62,7 +63,15 @@ class Scenario(BaseModel):
             else:
                 data_summary = f" | Data Pipeline: OK ({ds.utilization*100:.1f}%)"
 
-        feasible = mem_feasible and (data_status == "PASS")
+        # Power Budget Check (if both scenario power_budget and hardware tdp exist)
+        power_feasible = True
+        power_summary = ""
+        if self.power_budget is not None and getattr(hardware, "tdp", None) is not None:
+            power_feasible = hardware.tdp <= self.power_budget
+            if not power_feasible:
+                power_summary = f" | Power Wall: TDP {hardware.tdp.to(self.power_budget.units):.1f~P} > budget {self.power_budget:.1f~P}"
+
+        feasible = mem_feasible and (data_status == "PASS") and power_feasible
         f_status = "PASS" if feasible else "FAIL"
         
         # Dynamic unit scaling for summary
@@ -72,8 +81,13 @@ class Scenario(BaseModel):
         l1 = EvaluationLevel(
             level_name="Feasibility", 
             status=f_status, 
-            summary=mem_summary + data_summary,
-            metrics={"weight_size": weights, "capacity": hardware.memory.capacity, "data_stalled": data_status == "FAIL"}
+            summary=mem_summary + data_summary + power_summary,
+            metrics={
+                "weight_size": weights,
+                "capacity": hardware.memory.capacity,
+                "data_stalled": data_status == "FAIL",
+                "power_feasible": power_feasible,
+            }
         )
 
         # --- LEVEL 2: PERFORMANCE ---
@@ -155,7 +169,7 @@ class Scenario(BaseModel):
             
         return True
 
-class Scenarios:
+class Scenarios(Registry):
     """
     Executable scenario registry.
 

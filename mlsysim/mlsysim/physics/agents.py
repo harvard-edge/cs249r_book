@@ -551,7 +551,8 @@ def calc_kv_cache_bytes_per_token(
     validate_at_least(d_head, 1, "head_dim")
 
     bpe = bytes_per_elem if hasattr(bytes_per_elem, "units") else bytes_per_elem * ureg.byte
-    return (2 * layers * kv_heads * d_head * bpe).to(ureg.byte)
+    total = 2 * layers * kv_heads * d_head * bpe
+    return total.to(ureg.byte) if hasattr(total, "to") else total * ureg.byte
 
 
 def calc_tool_wait_stranded_tax(
