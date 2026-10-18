@@ -49,7 +49,7 @@ ops = [
 ]
 for k, step in ((1, 2), (2, None)):
     sp.hbars(out / f"ops_surface_step{k}.svg", ops, "", log=False, step=step,
-             xlabel="Operators each backend must implement (2025)")
+             xlabel="Operators defined (2025)")
 
 # -- GPT-2 XL decode: who sets the step time (three steps) -------------------
 sp.hbars_steps(out / "decode", [
@@ -107,10 +107,12 @@ def timeline(path, k):
         t += 11
     ax.text(2, 1.45, "Python dispatch", color=C["neutral"], fontsize=11, fontweight="bold")
     ax.text(t + 0.8, 1, "55 μs", va="center", fontsize=12, fontweight="bold", color=C["danger"])
+    ax.text(0, 0.5, "launch cost (5 μs each) omitted; it would widen each gap",
+            va="center", fontsize=10, color=C["neutral"])
     if k == 2:
         ax.barh(0, 5, left=0, color=C["neutral_l"], edgecolor=C["neutral"], height=0.55)
         ax.barh(0, 4, left=5, color=C["compute"], height=0.55)
-        ax.text(9.8, 0, "9 μs: one launch, one fused kernel", va="center", fontsize=12,
+        ax.text(9.8, 0, "9 μs: 5 μs launch + 4 μs fused kernel", va="center", fontsize=12,
                 fontweight="bold", color=C["compute"])
     ax.set_xlim(0, 62)
     ax.set_ylim(-0.5, 1.8)

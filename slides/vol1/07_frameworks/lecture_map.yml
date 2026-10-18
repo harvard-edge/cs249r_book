@@ -2,7 +2,7 @@ chapter: 07_frameworks
 lecture: 7
 title: ML Frameworks
 minutes: 75
-notes_minutes: 71
+notes_minutes: 72
 target_ideas: 30
 layer: frameworks
 thesis: "Between the Python a model is written in and the kernels an accelerator runs, the framework silently decides when each operation executes, what training keeps for its gradients, and where every tensor lives, and those decisions can cost more time and memory than the model's arithmetic."
@@ -13,7 +13,7 @@ hook:
   payoff: "The interface failed: the meaning of the numbers it carried was implicit. A framework is the interface between a model's Python and the accelerator, and it makes three decisions the code never states. The synthesis returns to the orbiter with the three silent costs this lecture measured."
   sources: ["chapter War Story 7.1 (Mars Climate Orbiter Mishap Investigation Board 1999)", "photo: NASA, public domain, Wikimedia Commons"]
 driving_question: "What does the framework decide between a model's Python and the accelerator, and what does each decision cost?"
-recall: "Lecture 6: an architecture fixes how many operations a model performs and how many bytes they touch. It does not say when each operation runs, how its gradient is computed, or which device runs it."
+recall: "Lectures 6 and 6b: an architecture fixes how many operations a model performs and how many bytes they touch. It does not say when each operation runs, how its gradient is computed, or which device runs it."
 running_example: "Two cases carry the lecture. GPT-2 XL decoding one token at batch 1 on an H100 (3 GB of FP16 weights, 576 kernel launches) carries execution; the chapter's two-layer MNIST network (784-128-10, batch 32) carries the training step. ResNet-50 at batch 64 carries training memory."
 
 segments:
@@ -76,8 +76,8 @@ concept_questions:
     read: "§7.3.2"
   - id: 6
     q: "What can go wrong when a framework captures a graph by tracing?"
-    picture: "Code: a traced function with a data-dependent branch"
-    numbers: "Traced with input [1.0]; called with [-1.0] it still returns x * 2 = -2 (listing 3)"
+    picture: "Code: a traced function with a data-dependent branch; then the same function under torch.compile, with the graph break at the branch, each branch compiled on first use, a shape guard, and a recompile"
+    numbers: "Traced with input [1.0]; called with [-1.0] it still returns x * 2 = -2 (listing 3); under torch.compile it returns -3 (§7.3.6, torch.compile footnote)"
     example: "torch.jit.trace; torch.compile guards and graph breaks"
     read: "§7.3.6"
   - id: 7
@@ -111,10 +111,10 @@ concept_questions:
     example: "MulBackward, AddBackward, AccumulateGrad"
     read: "§7.3.3, §7.4.1, §7.4.3"
   - id: 12
-    q: "Why does training need so much more memory than the weights?"
+    q: "Why does training need so much more memory than the weights? What does the framework expose to reduce it?"
     picture: "Code beside the picture: two-layer backward reads saved values; log bar plot of ResNet-50 memory built in three steps (new plot after the chapter margin figure)"
     numbers: "102.4 MB FP32 weights; + 102.4 MB gradients + 204.8 MB Adam + 8 to 12 GB saved activations = 8.4 to 12.4 GB, 82 to 121x (§7.4.3); batch 512: 64 to 96 GB of activations, above an 80 GB H100 (§7.10)"
-    example: "ResNet-50, batch 64, 224x224"
+    example: "ResNet-50, batch 64, 224x224; then the API slide: autocast, GradScaler, and checkpoint (listings 12 and 9), mechanism only"
     read: "§7.4.2, §7.4.3"
   - id: 13
     q: "What breaks if code overwrites a value the tape saved?"
@@ -212,7 +212,7 @@ closing:
     - cite: "Mars Climate Orbiter Mishap Investigation Board, Phase I Report, NASA, 1999"
       url: "https://llis.nasa.gov/llis_lib/pdf/1009464main1_0641-mr.pdf"
       why: "A short report on how an implicit interface lost a spacecraft."
-  bridge: "Lecture 8: what does it cost to run the training loop to completion?"
+  bridge: "Lecture 8: why does training cost so much more than inference, and what decides whether a step fits on one accelerator?"
 
 left_to_reading:
   - concept: "Framework abstraction ladder (BLAS, NumPy, autodiff frameworks, §7.2)"
@@ -221,8 +221,8 @@ left_to_reading:
     why: "Secondary; practiced in TinyTorch and named in the training-step notes; API detail is better read."
   - concept: "Major frameworks compared (§7.8)"
     why: "Secondary; folded into the framework-choice discussion and one note on what each lets the compiler see."
-  - concept: "Mixed precision and checkpointing mechanics (autocast, GradScaler)"
-    why: "Secondary here; Lecture 8 owns when and why. Checkpointing is named on the memory slide."
+  - concept: "When and why to use mixed precision and checkpointing (formats, loss-scale policy, checkpoint placement, bytes saved)"
+    why: "Lecture 8b owns it. This lecture shows only the framework API (autocast, GradScaler, checkpoint)."
   - concept: "Tensor rank, strides, and layout (§7.5.1)"
     why: "Secondary; NCHW against NHWC is the hook's ML example; strides are TinyTorch module 01."
   - concept: "Static runtimes for microcontrollers (§7.3.8)"
@@ -231,7 +231,7 @@ left_to_reading:
 coverage:
   primary_taught: ["Three framework problems", "Eager, graph, and JIT execution", "Dispatch overhead law", "Kernel fusion", "Reverse-mode autodiff", "Saved forward state", "Compilation breakeven"]
   primary_left_to_reading: []
-  secondary: ["Tensor metadata and placement (taught: devices segment)", "Choosing a framework (taught: discussion)", "Framework abstraction ladder (reading)", "Module abstraction (reading, TinyTorch)", "Major frameworks compared (discussion notes)", "Mixed precision and checkpointing mechanics (Lecture 8)"]
+  secondary: ["Tensor metadata and placement (taught: devices segment)", "Choosing a framework (taught: discussion)", "Framework abstraction ladder (reading)", "Module abstraction (reading, TinyTorch)", "Major frameworks compared (discussion notes)", "Mixed precision and checkpointing API (taught: one slide, mechanism only; Lecture 8b owns when and why)"]
 
 notes_for_author:
   - "The 15 us per-operation cost (10 us Python dispatch + 5 us launch) is the chapter's illustrative model; slides label it a model, not a measurement."
@@ -240,3 +240,4 @@ notes_for_author:
   - "The framework-choice latencies are the chapter's hypothetical project measurements (§7.9)."
   - "The in-place example uses sigmoid (whose backward reads its saved output) rather than the chapter's unnamed custom activation; behavior matches Example 7.2."
   - "The serial and overlapped copy timelines are schematic; only the 0.6 ms copy time is a chapter number."
+  - "2026-10-18 revision (review round 1): added a torch.compile slide after the trace predict (graph break at the data-dependent branch, compile on first use, shape guard and recompile; §7.3.6 and footnote 13) and an autocast, GradScaler, and checkpoint API slide after the ResNet-50 memory slide (listings 12 and 9; mechanism only, Lecture 8b owns when and why). Callbacks now name Lectures 6 and 6b, 8 and 8b, 11b, and 4b where each owns the topic; the closing question matches Lecture 8's driving question. Operator slide title now 123 to 203, x-axis 'Operators defined'. Autograd slide shows the chain-rule product and the forward against reverse pass count with the 40 GB Jacobian. Iron-law symbol legend on the three-decisions slide; H100 caption corrected to the shroud; compiled timeline labels both cost models and is tagged cut first; framework footer on the discuss slide; nn.Module sentence in the training-step note. Notes 72.0 minutes; [OPTIONAL] slides total 7 minutes. Handout 40 pages."
