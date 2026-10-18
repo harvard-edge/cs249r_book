@@ -6,6 +6,22 @@ remain owned by the chapter. No post-render HTML patch is required.
 
 ## Selection: changing state must teach something
 
+### Bring the original diagram to life
+
+The primary web experience follows the original figure's objects and connections:
+values travel, representations transform, storage persists, and ownership changes.
+Preserve the diagram's topology and semantic colors. A moving value must have a
+recognizable source, destination, and consequence; a traveling dot alone does not
+explain a mechanism. Show copies as copies, reads as reads, and release only after
+the last consumer. Logical dataflow must not imply measured memory traffic.
+
+Keep one short explanation beside the action. Make numerical derivations an
+optional inspection layer attached to the current operation. A separate arithmetic
+worksheet is useful supplementary material, but it does not substitute for an
+animated version of the source diagram. The Diagram view remains complete and
+unchanged for print. The diagram-life review covers all 16 retained mechanisms;
+its proposed revisions are plans, not implemented coverage.
+
 Keep a figure static unless interaction makes its mechanism easier to understand.
 An Explore view earns its place when a reader can follow an actual change in
 values, location, ownership, lifetime, dependencies, resource use, or permission,
