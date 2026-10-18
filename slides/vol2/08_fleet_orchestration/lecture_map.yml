@@ -1,0 +1,400 @@
+chapter: 08_fleet_orchestration
+lecture: "08"
+title: "Fleet Orchestration"
+subtitle: "Who Gets Which Accelerators, When, and Where"
+layer: reliability
+minutes: 75
+notes_minutes: 71.5
+core_minutes: 58
+target_ideas: 30
+thesis: "A scheduler first finds the allocations a job can run on and only then divides them fairly, and most of the capacity a fleet loses comes from a mismatch between its policy and its hardware rather than from the scheduling algorithm."
+
+hook:
+  minutes: "0-3.5"
+  setup: "Beside a credited photo of Sierra (LLNL), a shared GPU supercomputer, the chapter's debugging example (Example 8.2, §8.12.2): a 1,024-GPU cluster built over three procurement cycles, 400 A100-80 GB, 424 A100-40 GB, and 200 V100-32 GB (table 8). The dashboard reads 60 percent average utilization while more than 50 jobs wait in the queue. Beside it, one measured number: Microsoft's Philly cluster ran at about 52 percent mean GPU utilization (Jeon et al. 2019, as cited in §8.8)."
+  question_to_class: "Why do 50 jobs wait beside idle GPUs? A) the cluster needs more GPUs; B) the scheduling algorithm is too simple; C) the policies do not fit the hardware; D) the network is too slow."
+  payoff: "Held open until the synthesis. C: users copied A100-80 GB templates for 35 GB jobs, the pools fragmented, and V100 nodes were avoided, so the A100-40 GB and V100 pools sat idle while jobs queued for A100-80 GB. Capability matching, memory profiling, and backfill raised utilization to 84 percent, about 246 fully active GPU-equivalents, which replaces 410 raw GPUs, $7.2M a year at $2/GPU-hour (derived in images/calcs.py; the chapter rounds to about $7M). The scheduler enforced its policies correctly; the policies were written for a fleet that no longer existed."
+  sources:
+    - "Fleet Orchestration, Example 8.2 and tables 8 and 9 (§8.12.2): a constructed debugging example, labeled as the chapter's example on the slide."
+    - "Jeon et al., 'Analysis of Large-Scale Multi-Tenant GPU Clusters for DNN Training Workloads,' USENIX ATC 2019: mean GPU utilization about 52 percent, as cited in §8.8 and figure 13."
+    - "Derived checks: 0.24 × 1,024 = 246 GPU-equivalents; 246 / 0.60 = 410 raw GPUs; 410 × 8,760 h × $2 = $7.2M (chapter: about $7M)."
+
+recall: "Lecture 7, close your notes: what does one recovery from a failure cost the 175B job on 1,024 GPUs? (Detect 60 s, restart 3 min, load the 2.45 TB checkpoint 24.5 s, warm up 2 min: about 6.4 min per event, plus the rework since the last checkpoint; Fault Tolerance, Napkin Math 7.3.) The restart term includes scheduler queue time: replacement nodes must come from somewhere. Today asks who grants them."
+
+driving_question: "Who gets which accelerators, when, and where, and how do we know the fleet is used well?"
+
+goals:
+  - "Explain why a rigid training job needs all of its accelerators at once, and how a scheduler admits it without deadlock or starvation."
+  - "Filter a request to the allocations it can run on, then share those fairly, and measure fairness in waiting time."
+  - "Place a 3D-parallel job on the topology and decide when to start small, wait, or resize."
+  - "Price a preemption and a spot interruption, and separate allocated, active, and productive capacity."
+
+running_example: "The 175B reference job (Archetype A (GPT-4/Llama-3)): a 1,024-GPU pretraining gang held for weeks, its 2.45 TB resumable checkpoint, its 64-GPU fine-tuning run (the preemption victim of §8.8.1), and its 64-GPU elastic replica (8-way tensor parallel within a node, 8 pipeline stages, §8.7.1). Shown as the real system once: MLPerf Training v3.1 GPT-3 175B on NVIDIA Eos H100 (512 to 10,752 GPUs). Hook and synthesis: the chapter's 1,024-GPU heterogeneous cluster (Example 8.2). Measured anchors: the Kalos LLM cluster trace (Hu et al. 2024, AcmeTrace), Microsoft Philly (Jeon et al. 2019), NERSC Perlmutter (Li et al. 2023), OpenAI's 7,500-node Kubernetes clusters (Sigler 2021), NVIDIA's NCCL all_reduce_perf on one 8-H100 node."
+
+segments:
+  - name: Admission
+    divider_question: "What must a scheduler decide before any job runs?"
+    read: "§8.1, §8.2, §8.4.3, §8.5"
+    concept_questions: [1, 2, 3, 4]
+    land: "A scheduler separates admission, placement, and reconciliation, and a rigid gang either receives every accelerator it needs at once or holds none; reservation and backfill keep the waiting gang from starving or idling the fleet."
+    minutes: 15
+  - name: Fairness
+    divider_question: "What is a fair share of accelerators a job cannot use?"
+    read: "§8.3, §8.4.1, §8.4.2, §8.9"
+    concept_questions: [5, 6, 7, 8, 9]
+    land: "Fairness is computed only over allocations a job can run, measured in waiting time rather than GPU-hours, and an ML fleet's mix of tiny and huge jobs makes waiting time climb far faster with load than a uniform queue."
+    minutes: 12
+  - name: Placement
+    divider_question: "Where should a job's accelerators sit, and how many should it get?"
+    read: "§8.6, §8.7"
+    concept_questions: [10, 11, 12]
+    land: "Two allocations of the same size deliver different speed because bandwidth steps down at the node edge, and an elastic job trades a declared size range and a measured resize cost for starting before the full gang is free."
+    minutes: 11.5
+  - name: Interruption
+    divider_question: "What does it cost to take an accelerator back?"
+    read: "§8.8, §8.10, §8.11"
+    concept_questions: [13, 14, 15]
+    land: "Every preemption, spot reclamation, and quota reclaim pays lost work plus restart, so a discount, a shared device, or a borrowed GPU pays only after those costs are counted."
+    minutes: 13
+  - name: Utilization
+    divider_question: "How do we know the fleet is used well?"
+    read: "§8.12, §8.13"
+    concept_questions: [16, 17]
+    land: "Allocated, active, and productive capacity are three different numbers; a full queue beside idle accelerators usually means a policy written for an older fleet."
+    minutes: 6.5
+
+concept_questions:
+  - id: 1
+    q: "How lopsided is the job mix a fleet scheduler serves?"
+    picture: "New plot from the AcmeTrace data in MLSysIM (Literature.Series.AcmeKalosJobSizes): share of jobs and share of GPU time for three size classes (1 GPU, 2 to 128 GPUs, 256 or more), revealed in two steps."
+    numbers: "Kalos, March to August 2023, 19,907 GPU jobs: 1 GPU 86 percent of jobs, 0.1 percent of GPU time; 2 to 128 GPUs 9 percent and 4 percent; 256 or more 4 percent and 96 percent (Hu et al., NSDI 2024; §8.1 and figure 1). Class sums derived from the trace rows."
+    example: "Two teams on 1,000 GPUs: a 512-GPU month-long run and hundreds of 8-GPU one-hour experiments (§8.1)."
+    read: "§8.1"
+  - id: 2
+    q: "What does a cluster scheduler decide, and why is that a distributed-systems problem?"
+    picture: "New three-stage build: admission (quota, priority, gang) then placement (capability, topology, power, I/O) then reconciliation (desired against observed: start, retry, evict, fence), with a partition marked on the last stage."
+    numbers: "A 32-GPU allocation on 4 nodes loses one node before launch: 24 GPUs sit idle while the scheduler re-plans (§8.2). A timeout does not prove the old job stopped; reuse needs revocation or fencing (§8.2)."
+    example: "Slurm (slurmctld authoritative allocation) and Kubernetes (controllers reconcile desired state in etcd); real request lines from §8.5.1 and listing 1."
+    read: "§8.2, §8.2.1, §8.5"
+  - id: 3
+    q: "Why must a rigid training job get every accelerator at once?"
+    picture: "New build on an 8-GPU pool against time: J1 takes 4, J2 takes 4, both wait with zero progress; then gang allocation gives J1 all 8 while J2 holds none."
+    numbers: "At $2/GPU-hour, a deadlock that strands a 10,000-GPU cluster wastes $20,000 per hour; two 1,024-GPU gangs stuck at 900 GPUs each burn about $1,800 per hour apiece (§8.4.3). OpenAI's Kubernetes clusters reached 7,500 nodes and adopted the coscheduling plugin for group admission (War Story 8.1, Sigler 2021)."
+    example: "Kubernetes' default scheduler places pods one at a time; 60 of 64 pods can hold GPUs while 4 wait. A Volcano PodGroup with minMember 64 binds none until all 64 fit (§8.5.2)."
+    read: "§8.4.3, §8.5.2"
+  - id: 4
+    q: "How does a waiting gang avoid starving without idling the fleet?"
+    picture: "New two-step diagram after the book's backfill figure: running jobs until the reservation start, a backfill window, a short job admitted and a long job held."
+    numbers: "900 GPUs free, a 1,024-GPU gang at the head of the queue, 124 more GPUs not free for at least 2 hours: a 128-GPU, 2-hour job may backfill (§8.4.3, Lifka 1995)."
+    example: "Slurm job arrays (--array=0-99) as the opposite of a gang: independent trials that fill small gaps (§8.5.1)."
+    read: "§8.4.3"
+  - id: 5
+    q: "What does dominant-resource fairness equalize, and what must it check first?"
+    picture: "New grouped bars: two tenants' shares of GPUs, CPU, memory, and network, with a line at the 0.50 dominant share; step 3 a feasibility card crossing out allocations that are not one gang, in one NVLink domain, on 80 GB devices."
+    numbers: "Table 1, §8.4.1: 8 GPUs, 32 cores, 256 GB, 80 Gb/s; A replica 1 GPU, 4 cores, 32 GB, 10 Gb/s; B worker 2 GPUs, 2 cores, 16 GB, 20 Gb/s; 4 A replicas and 2 B workers give both tenants a dominant share of 0.50 (Ghodsi et al. 2011)."
+    example: "Feasibility before fairness (principle 15): a fair share of accelerators a job cannot run on delivers no progress."
+    read: "§8.4.1"
+  - id: 6
+    q: "How can GPUs be free and still unusable?"
+    picture: "New 8 by 8 slot grid (illustrative layout): 19 free slots, 30 percent of capacity, scattered so no node is empty; a pending 8-GPU job is blocked."
+    numbers: "19 of 64 free, 30 percent (figure 3, §8.4.2); 6-GPU jobs on 8-GPU nodes reach 75 percent effective capacity (§8.4.2)."
+    example: "A 4-GPU NVLink request cannot use 2 GPUs on node A and 2 on node B (§8.4.2)."
+    read: "§8.4.2"
+  - id: 7
+    q: "How should fairness be measured when job sizes differ by four orders of magnitude?"
+    picture: "New log-scale bars from the Kalos trace: mean GPU-hours per job by size class; slowdown defined on the slide."
+    numbers: "Derived from the trace: 1-GPU jobs average 0.12 GPU-hours, 2 to 128 GPUs 28.6, 256 or more 1,658. Slowdown S = (W + T) / T; a one-hour job that waits nine hours has S = 10 (§8.3)."
+    example: "Equal dominant shares over a month can coexist with one team's jobs waiting days (§8.3 self-check)."
+    read: "§8.3"
+  - id: 8
+    q: "How fast does waiting grow with load in a queue of mixed job sizes?"
+    picture: "New plot of the M/G/1 waiting-time multiple against offered load for Cs = 1, Cs = 3, and the Kalos lower bound, with the values at 0.8 marked."
+    numbers: "Pollaczek-Khinchine (Napkin Math 8.1): at rho = 0.8, Cs = 1 gives 4 times the mean job, Cs = 3 gives 20 times. Derived from the Kalos size-class means: Cs is at least 5.0 (between-class variance only), so at least 52 times. Single-server model; labeled."
+    example: "Minute-long debugging jobs sharing a queue with week-long training runs (§8.3)."
+    read: "§8.3, Napkin Math 8.1"
+  - id: 9
+    q: "Which signal should a scheduler use for which objective?"
+    picture: "Table: Tiresias, Gandiva, Themis, Pollux, each with its signal, target, and the integration it needs (table 5)."
+    numbers: "Pollux: average job completion time 37 to 50 percent lower than the schedulers it was compared against (Qiao et al. 2021, as cited in §8.9.4); that result belongs to its testbed and trace."
+    example: "Tiresias needs only accounting records; Pollux needs a training loop that accepts batch-size changes (§8.9.5)."
+    read: "§8.9"
+  - id: 10
+    q: "How much bandwidth does a job lose when it leaves the node?"
+    picture: "Real photos (HGX 8-GPU board, InfiniBand switch) beside a measured plot: NCCL all_reduce_perf bus bandwidth on one 8-H100 node against message size, with a line at one NDR port's 50 GB/s."
+    numbers: "Measured: 467.9 GB/s bus bandwidth at 1 GiB in place on one 8× H100 node (NVIDIA exemplar-performance all_reduce_perf sample, MLSysIM series). Spec, chapter values: H100 NVLink 450 GB/s per direction, one NDR port 50 GB/s per direction, 9 times (§8.4.2, §8.6.1)."
+    example: "The bandwidth staircase of Lecture 2 seen from the scheduler."
+    read: "§8.6.1"
+  - id: 11
+    q: "What does a topology-unaware placement cost a 3D-parallel job?"
+    picture: "New build: tensor-parallel group inside one node, pipeline stages under one leaf, data-parallel replicas across racks; then the tensor-parallel group split across two nodes."
+    numbers: "Napkin Math 8.2: 256 GPUs, TP 8 × PP 4 × DP 8; 1 GB activation exchange 2.2 ms at 450 GB/s, 20 ms at 50 GB/s, 9 times, at every layer of every step."
+    example: "The 175B job's 64-GPU replica: 8-way tensor parallel inside each node, 8 pipeline stages across nodes (§8.7.1)."
+    read: "§8.6.2"
+  - id: 12
+    q: "Should a job start small, wait for its full allocation, or grow when GPUs free?"
+    picture: "New timelines of GPUs held against hours for three strategies, epochs revealed; then measured MLPerf Training GPT-3 175B time-to-train against GPUs on a log-log plot with the ideal line."
+    numbers: "Napkin Math 8.3: 24 h window; 128 GPUs at 1 epoch/h, 256 at 1.8, 512 at 3.2; 10-minute resize. Start small 24 epochs; wait 4 h for 512: 64; step up to 256 at hour 4: 39.7. Derived GPU-hours: 3,072, 10,240, 5,632. Measured MLPerf Training v3.1 (NVIDIA Eos, H100): 512 GPUs 58.3 min, 4,096 8.58 min, 10,752 3.92 min; 21 times the GPUs, 14.9 times faster (derived; global batch changes with scale)."
+    example: "torchrun --nnodes=4:16 declares a 32 to 128 worker range (listing 2, §8.7.1)."
+    read: "§8.7"
+  - id: 13
+    q: "What does one preemption cost, and how does it spread?"
+    picture: "New stacked bar: lost work, relaunch, reload, warmup; step 2 the daily total at 12 events; inset tree of a cascade reaching k + k^2 jobs."
+    numbers: "§8.8.1: 15 min lost work, 3 min relaunch, 24.5 s reload of the 2.45 TB checkpoint, 2 min warmup: 20.4 min, $44 at $2/GPU-hour for the 64-GPU run; 12 a day: 4.1 h, 261 GPU-hours."
+    example: "The 64-GPU fine-tuning run of the 175B model as the low-priority victim."
+    read: "§8.8.1"
+  - id: 14
+    q: "Is spot capacity always cheaper for training?"
+    picture: "True-or-false vote; then bars of billed cost and wall-clock for on-demand against spot (Systems Perspective 8.4) and the effective-cost relation."
+    numbers: "Fallacy (§8.13): 65 percent discount, 45 min billed overhead after each 2 h of progress: about 52 percent savings. Systems Perspective 8.4: 70B model, 512 GPUs, 14 days: on-demand $344,064; spot $161,567 with 196 interruptions; 53.0 percent savings, 34.2 percent longer. Notice windows: AWS 2 min, GCP preemptible up to 30 s (§8.8.2)."
+    example: "Correlated reclamation of one zone's pool (Systems Perspective 8.3)."
+    read: "§8.8.2, §8.8.3, §8.13"
+  - id: 15
+    q: "When should accelerators be shared, and how much can be borrowed?"
+    picture: "Credited A100 photo; memory bars for one 7B model alone and two sharing an 80 GB device; MIG profiles; then the diurnal training-serving shift and the quota guarantee against borrowing."
+    numbers: "Measured: on NERSC Perlmutter, 50 percent of jobs used less than 25 percent of their allocated GPU memory (Li et al. 2023, §8.10.2). Napkin Math 8.4: 26 GB per 7B model; 180 GPUs exclusive against 130 shared, 27.8 percent fewer, about $876,000 a year. Napkin Math 8.5: 75 percent static against 88 percent dynamic on 1,024 GPUs, 133 GPUs, about $2.3M a year. Example 8.1: 500 GPUs idle for 3 weeks, $504,000."
+    example: "A 175B serving replica as one 8-GPU tensor-parallel unit (§8.10)."
+    read: "§8.10, §8.11"
+  - id: 16
+    q: "Which utilization number is the dashboard showing?"
+    picture: "New three-bar build: allocated 500, active 350, productive 280 GPU-equivalents; then measured Kalos GPU time by final job state."
+    numbers: "§8.12.1: 500 allocated, 350 active (70 percent), 280 productive (56 percent). Kalos trace (derived shares): completed 31 percent of GPU time, failed 6 percent, canceled 61 percent, other states 2 percent."
+    example: "A zombie job that keeps 128 GPUs allocated after a rank failure (§8.12.3)."
+    read: "§8.12.1, §8.12.3"
+  - id: 17
+    q: "Does high utilization prove a healthy cluster?"
+    picture: "True-or-false vote on the M/G/1 curve (Cs = 1): at 0.98 the mean wait is 49 times the mean job."
+    numbers: "Derived from Napkin Math 8.1: rho / (1 - rho) = 0.98 / 0.02 = 49 at Cs = 1. §8.13: a cluster at 98 percent where researchers stop submitting."
+    example: "Pitfall 'Treating high utilization as proof of cluster health' (§8.13)."
+    read: "§8.13"
+
+concept_trace:
+  - concept: Scheduler as allocation control plane
+    frame: "A scheduler admits, places, then reconciles every job"
+    shows: "Three-step build of admission, placement, and reconciliation, ending with a partition and the fence before reuse."
+  - concept: Gang scheduling
+    frame: "Two jobs holding half a pool each make zero progress"
+    shows: "Three-step build on an 8-GPU pool: partial holds deadlock, then atomic gang allocation; followed by the PodGroup predict and the backfill frame."
+  - concept: Feasibility before fairness
+    frame: "Fair shares count only allocations a job can run"
+    shows: "DRF bars for two tenants reaching dominant share 0.50, then the feasibility filter (gang, NVLink domain, 80 GB) that removes allocations before the fair share is taken."
+  - concept: Scheduling objectives and matched signals
+    frame: "Each research scheduler matches one signal to one goal"
+    shows: "Table of four schedulers with signal, target, and integration; preceded by the slowdown frame (Kalos job sizes) and the M/G/1 estimate."
+  - concept: Topology-aware placement
+    frame: "What does splitting a TP group across nodes cost?"
+    shows: "Two-step build of a 3D-parallel placement on nodes, leaf, and spine, with 2.2 ms against 20 ms per 1 GB exchange."
+  - concept: Elastic scheduling contract
+    frame: "Which plan finishes the most epochs in 24 hours?"
+    shows: "Timelines of three strategies with epochs and GPU-hours, the 10-minute resize, and the declared 32 to 128 worker range."
+  - concept: Interruption economics
+    frame: "One forced preemption costs the 64-GPU run 20.4 minutes"
+    shows: "Stacked bar of lost work, relaunch, reload, and warmup, the daily total at 12 events, and the k + k^2 cascade; followed by the spot true-or-false frame with effective cost."
+  - concept: Utilization tiers
+    frame: "One team holds 500 GPUs and does useful work on 280"
+    shows: "Three-step bar build of the tiers with the evidence each gap calls for."
+
+worked_examples:
+  - name: "Gang deadlock and group admission (§8.4.3, §8.5.2, War Story 8.1)"
+    steps:
+      - "Given: an 8-GPU pool; J1 and J2 each need all 8."
+      - "Incremental placement gives each 4; neither completes a collective; both wait forever (hold-and-wait)."
+      - "Gang allocation: J1 receives all 8 at once; J2 holds nothing until J1 ends."
+      - "Result: no partial holds, no deadlock; on a 10,000-GPU cluster a full deadlock wastes $20,000 per hour."
+      - "Meaning: Kubernetes needs a PodGroup (Volcano, Coscheduling) to give a rigid job this contract."
+  - name: "Napkin Math 8.2: placement of a 256-GPU 3D-parallel job"
+    steps:
+      - "Given: TP 8 × PP 4 × DP 8; NVLink 450 GB/s, InfiniBand 50 GB/s per direction."
+      - "Good: each TP group inside one node; a 1 GB exchange takes 1 / 450 = 2.2 ms."
+      - "Bad: a TP group split across two nodes; the same exchange takes 1 / 50 = 20 ms."
+      - "Result: 9 times slower, at every layer of every step."
+      - "Meaning: place the most frequent exchange on the fastest tier first."
+  - name: "Napkin Math 8.3: the elastic decision"
+    steps:
+      - "Given: 24 h; 128 GPUs 1 epoch/h, 256 GPUs 1.8, 512 GPUs 3.2; resize 10 min; 512 free at hour 4."
+      - "Start small: 24 × 1 = 24 epochs."
+      - "Wait: 20 × 3.2 = 64 epochs."
+      - "Step up to 256: 4 + (24 - 4 - 0.17) × 1.8 = 39.7 epochs."
+      - "Meaning: waiting wins this job's epochs; stepping up does more work per GPU-hour and leaves 256 GPUs for the queue."
+  - name: "Preemption overhead (§8.8.1)"
+    steps:
+      - "Given: forced stop of the 64-GPU fine-tuning run; 15 min since the last checkpoint."
+      - "Add relaunch 3 min, reload 24.5 s, warmup 2 min: 20.4 min."
+      - "64 GPUs × 20.4 / 60 h × $2 = $44 per event."
+      - "12 events a day: 4.1 h, 261 GPU-hours."
+      - "Meaning: a per-job preemption budget bounds the loss of the job at the bottom of every cascade."
+
+active_learning:
+  - at_minute: 0.5
+    type: diagnose
+    prompt: "Why do 50 jobs wait beside idle GPUs? A) more GPUs B) better algorithm C) policies do not fit the hardware D) network"
+    answer: "Held to the synthesis: C. Copied A100-80 GB templates, fragmentation, and V100 avoidance; the fix raised utilization from 60 to 84 percent (table 9)."
+  - at_minute: 3.5
+    type: retrieval
+    prompt: "Close your notes: what does one recovery cost the 175B job on 1,024 GPUs?"
+    answer: "Detect 60 s, restart 3 min, load 24.5 s, warm up 2 min: about 6.4 min, plus rework since the last checkpoint (Fault Tolerance, Napkin Math 7.3)."
+  - at_minute: 17
+    type: predict
+    prompt: "If only 60 of 64 pods fit, what happens?"
+    answer: "Under the default scheduler, 60 pods bind and hold their GPUs while 4 wait, and nothing trains. With a PodGroup of minMember 64, the scheduler reserves tentatively and binds none until all 64 fit (§8.5.2)."
+  - at_minute: 29
+    type: estimate
+    prompt: "How long does a mixed queue wait at 80 percent load?"
+    answer: "4 × (1 + Cs^2) / 2: 4 times the mean job at Cs = 1, 20 times at Cs = 3, at least 52 times at the Kalos lower bound Cs = 5.0 (derived)."
+  - at_minute: 37.5
+    type: estimate
+    prompt: "A 1 GB tensor-parallel exchange: how long inside a node, and how long across two?"
+    answer: "1 GB / 450 GB/s = 2.2 ms; 1 GB / 50 GB/s = 20 ms; 9 times, at every layer (Napkin Math 8.2)."
+  - at_minute: 40.5
+    type: predict
+    prompt: "Which plan finishes the most epochs in 24 hours?"
+    answer: "Waiting for 512 GPUs: 64 epochs; stepping up: 39.7; starting small: 24. Stepping up does the most epochs per GPU-hour (7.0 against 6.25 per 1,000, derived)."
+  - at_minute: 49.5
+    type: concept_question
+    prompt: "True or false: spot capacity is always cheaper for training."
+    answer: "False as stated. 45 min of billed overhead per 2 h of progress turns a 65 percent discount into about 52 percent savings; enough overhead or replay erases it (§8.13)."
+  - at_minute: 62.5
+    type: concept_question
+    prompt: "True or false: a cluster at 98 percent utilization is healthy."
+    answer: "False. In the M/G/1 model the mean wait at 0.98 is 49 times the mean job at Cs = 1; allocation does not show useful work or headroom (§8.13)."
+  - at_minute: 64.5
+    type: diagnose
+    prompt: "Back to the hook: which answer, and what fixed it?"
+    answer: "C. Table 9: 60 to 84 percent; about 246 GPU-equivalents, 410 raw GPUs, $7.2M a year (derived)."
+
+open_questions:
+  - "Should a scheduler ever give a team less than its fair share to start a gang that serves the whole organization sooner? Who should decide?"
+  - "Kalos users canceled jobs that held 61 percent of GPU time. Is a canceled run waste, or is cancellation a normal way to end exploratory training?"
+  - "As one pretraining run grows toward the whole fleet, does a shared scheduler still help, or does each frontier run need its own cluster?"
+
+more_examples:
+  - "OpenAI, Scaling Kubernetes to 7,500 Nodes (Sigler 2021): coscheduling plugin for group admission; preflight taints for GPU health (War Stories 8.1, 8.2)."
+  - "Microsoft Philly trace (Jeon et al., ATC 2019): mean GPU utilization about 52 percent."
+  - "Kalos and Seren clusters, AcmeTrace (Hu et al., NSDI 2024): job sizes, durations, and final states in LLM development."
+  - "NERSC Perlmutter (Li et al. 2023): half of jobs used under a quarter of their GPU memory."
+  - "Kubernetes Kueue (ClusterQueue, cohorts, borrowing) and Volcano (PodGroup); Slurm job arrays and heterogeneous jobs."
+  - "MLPerf Training v3.1 GPT-3 175B on NVIDIA Eos: 512 to 10,752 H100 GPUs."
+
+left_to_reading:
+  - concept: "Heterogeneous gang scheduling for RLHF (§8.4.5)"
+    why: "Second-order detail; the gang idea is taught on homogeneous jobs."
+  - concept: "Priority inversion and wait-for graphs (§8.4.4)"
+    why: "Named in the backfill note as holistic preemption; the full chain is better read than heard."
+  - concept: "Fair-share priority with usage decay (equation 1)"
+    why: "Slurm mechanism detail; the slowdown measure carries the fairness idea."
+  - concept: "Hybrid Slurm and Kubernetes architectures (§8.5.5)"
+    why: "One line on the paradigms frame; the ownership rule (one layer authorizes each placement) is the point."
+  - concept: "Rail-optimized rank mapping and topology discovery (§8.6.3, §8.6.4)"
+    why: "Named in notes; Lecture 3 owns rails and silent fabric waste."
+  - concept: "Capacity reservation tiers (§8.8.4, table 4)"
+    why: "Named in the spot note; the portfolio shares are illustrative."
+  - concept: "Namespace and tenant security isolation (§8.11.3)"
+    why: "Lecture 13 owns security controls; one line on the sharing frame."
+
+closing:
+  return_to_hook: "Table 9 answers the hook: copied templates, fragmentation, and avoidance of old nodes; capability matching, memory profiling, and backfill raised the cluster from 60 to 84 percent without new hardware."
+  read_and_practice:
+    - "§8.4 (core allocation constraints), §8.6 and §8.7 (placement and elasticity), §8.8.1 and §8.12"
+    - "Self-check questions for §8.4, §8.8, and §8.12; Napkin Math 8.1 to 8.5 by hand"
+    - "Checkpoints 8.1 and 8.4"
+  further_reading:
+    - cite: "Fleet Orchestration, §8.4 and §8.12"
+      url: ""
+      why: "The allocation constraints and the utilization debugging example."
+    - cite: "Ghodsi et al., Dominant Resource Fairness, NSDI 2011"
+      url: "https://www.usenix.org/conference/nsdi11/technical-sessions/presentation/dominant-resource-fairness-fair-allocation-multiple"
+      why: "The multi-resource fairness rule the lecture filters before applying."
+    - cite: "Burns et al., Borg, Omega, and Kubernetes, CACM 2016"
+      url: "https://doi.org/10.1145/2890784"
+      why: "How Google's control planes moved from batch allocation to reconciliation."
+    - cite: "Hu et al., Characterization of Large Language Model Development in the Datacenter, NSDI 2024"
+      url: "https://github.com/InternLM/AcmeTrace"
+      why: "The job-size and job-state data used today, released as AcmeTrace."
+    - cite: "Qiao et al., Pollux, OSDI 2021"
+      url: "https://www.usenix.org/conference/osdi21/presentation/qiao"
+      why: "A scheduler that couples allocation to batch size and learning progress."
+    - cite: "Sigler, Scaling Kubernetes to 7,500 Nodes, OpenAI blog, 2021"
+      url: "https://openai.com/index/scaling-kubernetes-to-7500-nodes/"
+      why: "Group admission and health checks in a production training fleet."
+  bridge: "Next lecture, Fleet Efficiency: an allocation is the start of efficiency, not evidence of it. How much of a held allocation becomes progress, and which loss is largest?"
+
+callbacks:
+  - {lecture: "7", concept: "Recovery-time budget and fencing", where: "recall frame (slide, note, credit); control-plane note (fence before reuse); preemption note"}
+  - {lecture: "7", concept: "Elastic recovery invariants", where: "elastic frame note"}
+  - {lecture: "7", concept: "Young-Daly checkpoint interval", where: "spot frame note"}
+  - {lecture: "7", concept: "Fleet failure rate", where: "control-plane frame note"}
+  - {lecture: "1", concept: "Fleet Law", where: "focus slide note"}
+  - {lecture: "1", concept: "CAP choice under partition", where: "control-plane frame note"}
+  - {lecture: "2", concept: "Bandwidth hierarchy dictates placement", where: "bandwidth frame note"}
+  - {lecture: "3", concept: "Traffic-matched topology", where: "placement frame note (rails)"}
+  - {lecture: "4", concept: "Checkpoint storm", where: "preemption frame note"}
+  - {lecture: "4", concept: "Data stall ratio", where: "utilization tiers note"}
+  - {lecture: "6", concept: "Scaling efficiency and the scaling wall", where: "MLPerf scaling frame note"}
+  - {lecture: "6", concept: "Critical batch size", where: "research schedulers note (Pollux)"}
+  - {lecture: "9", concept: "ML goodput", where: "utilization tiers note; next-lecture frame"}
+  - {lecture: "9", concept: "Scheduling goodput", where: "utilization tiers note"}
+  - {lecture: "10", concept: "KV cache as admission budget", where: "sharing frame note (one-clause gloss)"}
+  - {lecture: "10", concept: "Phase-aware autoscaling and cold start", where: "diurnal frame note"}
+  - {lecture: "12", concept: "Utilization as the economic invariant", where: "quota frame note"}
+  - {lecture: "13", concept: "Security controls priced on a C3 axis", where: "sharing frame note"}
+
+coverage:
+  primary_taught:
+    - Scheduler as allocation control plane
+    - Gang scheduling
+    - Feasibility before fairness
+    - Scheduling objectives and matched signals
+    - Topology-aware placement
+    - Elastic scheduling contract
+    - Interruption economics
+    - Utilization tiers
+  primary_left_to_reading: []
+  secondary:
+    - "Batch versus declarative orchestration: paradigms frame (optional)"
+    - "Quota guarantees bounded by reclaim: quota frame (optional)"
+    - "Serving envelope and accelerator sharing: sharing frame and diurnal frame"
+    - "Waiting time versus utilization: M/G/1 estimate and the utilization true-or-false frame"
+
+storyboard:
+  - {min: 0.5, type: title, title: "Fleet Orchestration", visual: "blueprint cover"}
+  - {min: 3, type: diagnose, title: "Why do 50 jobs wait beside idle GPUs?", visual: "new: three pools of the 1,024-GPU cluster with the dashboard reading; Philly 52 percent strip", steps: 1}
+  - {min: 2.5, type: retrieval, title: "What does one recovery cost the 175B job?", visual: "new: recovery-budget bar (Napkin Math 7.3)", steps: 2}
+  - {min: 1, type: goals, title: "Who gets which accelerators, when, and where?", visual: "four thumbnails"}
+  - {min: 1.5, type: focus, title: "Where orchestration enters", visual: "equation with placement and preemption terms named"}
+  - {min: 0.5, type: divider, title: "Admission"}
+  - {min: 2, type: data, title: "4% of jobs held 96% of GPU time in one LLM cluster", visual: "new plot, AcmeTrace (MLSysIM)", steps: 2}
+  - {min: 1.5, type: real-world, title: "Slurm grants a batch; Kubernetes reconciles a declaration", visual: "Frontier photo, real sbatch and pod-spec lines"}
+  - {min: 2.5, type: build, title: "A scheduler admits, places, then reconciles every job", visual: "new diagram", steps: 3}
+  - {min: 3, type: build, title: "Two jobs holding half a pool each make zero progress", visual: "new gang diagram", steps: 3}
+  - {min: 3, type: predict, title: "If only 60 of 64 pods fit, what happens?", visual: "real Volcano PodGroup YAML", steps: 2}
+  - {min: 2, type: build, title: "Backfill fills the wait without delaying the gang", visual: "new backfill diagram", steps: 2}
+  - {min: 0.5, type: divider, title: "Fairness"}
+  - {min: 3, type: build, title: "Fair shares count only allocations a job can run", visual: "new DRF bars + feasibility card", steps: 3}
+  - {min: 2, type: assertion-evidence, title: "19 GPUs are free, yet no node can take an 8-GPU job", visual: "new slot grid"}
+  - {min: 1.5, type: data, title: "Mean job size spans 0.12 to 1,658 GPU-hours", visual: "new plot, AcmeTrace (derived)"}
+  - {min: 3, type: estimate, title: "How long does a mixed queue wait at 80% load?", visual: "new M/G/1 plot", steps: 3}
+  - {min: 2, type: table, title: "Each research scheduler matches one signal to one goal", visual: "table 5 with Pollux result"}
+  - {min: 0.5, type: divider, title: "Placement"}
+  - {min: 2.5, type: real-world + data, title: "A node's NVLink measures 468 GB/s; each network port gives 50", visual: "HGX and InfiniBand photos; NCCL measured plot"}
+  - {min: 3, type: estimate, title: "What does splitting a TP group across nodes cost?", visual: "new placement build", steps: 2}
+  - {min: 3, type: predict, title: "Which plan finishes the most epochs in 24 hours?", visual: "new strategy timelines", steps: 2}
+  - {min: 2, type: data, title: "On 21× the GPUs, GPT-3 175B trained 14.9× faster", visual: "new plot, MLPerf Training v3.1 (MLSysIM)"}
+  - {min: 0.5, type: divider, title: "Interruption"}
+  - {min: 3, type: build, title: "One forced preemption costs the 64-GPU run 20.4 minutes", visual: "new stacked bar + cascade tree", steps: 2}
+  - {min: 2.5, type: concept-question, title: "Is spot capacity always cheaper for training?", visual: "new cost bars", steps: 2}
+  - {min: 2.5, type: real-world + data, title: "Two 7B models share one A100; a 175B replica takes eight", visual: "A100 photo, new memory bars, MIG profiles"}
+  - {min: 1.5, type: data, title: "Lending idle serving GPUs lifts the fleet from 75% to 88%", visual: "new diurnal plot (illustrative shape, notebook averages)"}
+  - {min: 1.5, type: diagram + real config, title: "A quota guarantee holds only as far as it can be reclaimed", visual: "new quota bars"}
+  - {min: 0.5, type: divider, title: "Utilization"}
+  - {min: 2.5, type: build, title: "One team holds 500 GPUs and does useful work on 280", visual: "new tier bars", steps: 3}
+  - {min: 1.5, type: data, title: "61% of Kalos GPU time went to jobs later canceled", visual: "new plot, AcmeTrace (derived)"}
+  - {min: 2, type: concept-question, title: "Does 98% utilization mean a healthy cluster?", visual: "M/G/1 curve", steps: 2}
+  - {min: 3.5, type: synthesis, title: "The 1,024-GPU cluster needed new policies, not GPUs", visual: "new before-after pool bars (table 9)", steps: 2}
+  - {min: 1.5, type: takeaways, title: "Takeaways"}
+  - {min: 1, type: open-questions, title: "Open questions"}
+  - {min: 1, type: read, title: "Read and explore"}
+  - {min: 0.5, type: next, title: "NEXT LECTURE | FLEET EFFICIENCY"}
+
+notes_for_author:
+  - "Example 8.2's table 9 mixes tiers: the A100-80 GB row reports allocated and active, the others allocated only, so the pool rows do not weight to the cluster-wide 60 and 84 percent (400 × 0.95 + 424 × 0.64 = 651 of 1,024, 64 percent allocated). The deck plots the table as printed and states the cluster row as the chapter's value."
+  - "The Kalos trace's job-state split (61 percent of GPU time in canceled jobs) is computed from the AcmeTrace rows in MLSysIM; the chapter does not use it. It is shown as a measured illustration that job state is not productivity."
+  - "The Kalos lower bound Cs >= 5.0 is derived here from size-class means (between-class variance only) and is labeled derived."
