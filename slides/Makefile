@@ -324,6 +324,20 @@ PY ?= python3
 kit:
 	@$(PY) assets/kit/make_kit.py --volume $(or $(V),1)
 
+# One deck in any volume, safe to run for many decks at once: converts only
+# this deck's SVGs (and its volume's kit), then builds the presenting PDF.
+#   make deck V=2 D=06_distributed_training
+deck-svgs:
+	@find vol$(V)/$(D) assets/kit/vol$(V) -name "*.svg" 2>/dev/null | while read svg; do \
+		pdf="$${svg%.svg}.pdf"; \
+		if [ ! -f "$$pdf" ] || [ "$$svg" -nt "$$pdf" ]; then \
+			$(SVG2PDF) --export-filename="$$pdf" "$$svg" 2>/dev/null && echo "  ✓ $$pdf" || echo "  ✗ $$svg"; \
+		fi; \
+	done
+
+deck: deck-svgs
+	$(call build-chapter-impl,vol$(V),$(BUILD_DIR)/vol$(V),$(D))
+
 # Fit check: LaTeX overflow mapped to frames, plus rendered bleed per page.
 fit:
 	@$(PY) tools/fitcheck.py vol$(V)/$(D)/$(D).tex --pdf $(BUILD_DIR)/vol$(V)/$(D).pdf --log vol$(V)/$(D)/$(D).log
