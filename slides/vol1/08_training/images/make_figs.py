@@ -236,7 +236,7 @@ for i, (name, parts, total) in enumerate(rows):
     ax.text(max(x, CAP) + 3, y, total, va="center", fontsize=13, fontweight="bold",
             color=C["danger"] if x > CAP else C["data"])
 ax.axvline(CAP, color=C["memory"], lw=2, ls="--", zorder=0)
-ax.text(CAP + 2, 1.42, "H100: 85.9 GB", color=C["memory"], fontsize=11,
+ax.text(CAP + 2, 1.42, "H100: 85.9 GB (80 GiB)", color=C["memory"], fontsize=11,
         fontweight="bold", va="bottom")
 ax.set_xlim(0, 215)
 ax.set_ylim(-0.55, 1.75)
@@ -359,7 +359,7 @@ for k in range(1, 5):
         label(ax, i, max(t, CAP) + 18, f"{t:g} GB", C["data"] if t < CAP else C["danger"],
               shown, ha="center", fontsize=13)
     ax.axhline(CAP, color=C["memory"], lw=2, ls="--", zorder=0)
-    ax.text(3.55, CAP, "H100\n85.9 GB", color=C["memory"], fontsize=11,
+    ax.text(3.55, CAP, "H100\n85.9 GB\n(80 GiB)", color=C["memory"], fontsize=11,
             fontweight="bold", ha="left", va="center")
     ax.text(3.45, 560, "gray: static 24 GB", color=C["neutral"], fontsize=11,
             fontweight="bold", ha="right")

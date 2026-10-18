@@ -85,7 +85,7 @@ energy_rows = [
     ("FP32 add", 0.9, "compute", "0.9 pJ"),
     ("FP32 multiply", 3.7, "compute", "3.7 pJ"),
     ("SRAM read (8 KB)", 5, "memory", "5 pJ"),
-    ("DRAM read", 640, "danger", "640 pJ = 173 multiplies"),
+    ("DRAM read (32-bit)", 640, "danger", "640 pJ = 173 multiplies"),
 ]
 for k, shown in ((1, 3), (2, 4), (3, 5)):
     sp.hbars(out / f"energy_step{k}.svg", energy_rows, "pJ", step=shown,

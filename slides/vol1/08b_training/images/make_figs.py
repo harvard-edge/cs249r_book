@@ -85,7 +85,7 @@ def scoreboard(path, k, costs=None, alt=False):
         ax.text(3.19, 150, "B:\n35.5", color=C["compute"], fontsize=13,
                 fontweight="bold", ha="center", va="bottom", linespacing=1.0)
     ax.axhline(CAP, color=C["memory"], lw=2, ls="--", zorder=0)
-    ax.text(3.55, CAP, "H100\n85.9 GB", color=C["memory"], fontsize=11,
+    ax.text(3.55, CAP, "H100\n85.9 GB\n(80 GiB)", color=C["memory"], fontsize=11,
             fontweight="bold", ha="left", va="center")
     if costs:
         ax.text(2.0, 520, "What each step cost", color=C["compute"], fontsize=12,
@@ -491,7 +491,7 @@ for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 2.5))
     ax.plot(bs, mem, color=C["data"], lw=2.8)
     ax.axhline(CAP, color=C["memory"], lw=2, ls="--")
-    ax.text(0.5, CAP + 4, "H100: 85.9 GB", color=C["memory"], fontsize=11,
+    ax.text(0.5, CAP + 4, "H100: 85.9 GB (80 GiB)", color=C["memory"], fontsize=11,
             fontweight="bold")
     ax.text(39.5, 8, "24 GB + 2.68 GB per sequence", ha="right",
             va="bottom", color=C["data"], fontsize=11, fontweight="bold")
