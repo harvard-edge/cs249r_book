@@ -12,7 +12,7 @@ Individual accelerators fail rarely, but scaling to thousands of nodes multiplie
 
 ## How to Use This Appendix {.unnumbered}
 
-This appendix is designed as a reference, intended for moving from intuition ("failures happen more often at scale") to quantitative engineering decisions ("how often should one checkpoint?" or "how many spare nodes are needed?"). It translates component-level reliability metrics into cluster-wide checkpoint cadences and availability bounds.
+This appendix serves as a reference for moving from intuition ("failures happen more often at scale") to quantitative engineering decisions ("how often should one checkpoint?" or "how many spare nodes are needed?"). It translates component-level reliability metrics into cluster-wide checkpoint cadences and availability bounds.
 
 ```{python}
 #| echo: false
@@ -193,13 +193,13 @@ The worked examples in this appendix use a `{python} ReliabilityFoundations.cano
 
 ## Failure Probability at Scale {#sec-appdx-reliability-foundations-failure-probability}
 
-Consider a training run on a `{python} ReliabilityFoundations.canonical_cluster_gpus_str`-GPU cluster running for 30 days. The probability that at least one modeled node component fails during that time is effectively 100 percent, and that answer determines whether the system needs fault tolerance as a core design requirement or as an optional feature.
+Consider a training run on a `{python} ReliabilityFoundations.canonical_cluster_gpus_str`-GPU cluster running for 30 days. The probability that at least one modeled node component fails during that time is effectively 100 percent. That answer determines whether the system needs fault tolerance as a core design requirement or as an optional feature.
 
-Individual hardware components are remarkably reliable. A data center-grade GPU operates for tens of thousands of hours before failing. The physics of large-scale systems, however, works against reliability: every additional component is another opportunity for failure, and the aggregate failure rate scales linearly with component count. Component-level failure rates aggregate systematically into cluster-wide failure predictions.
+Individual hardware components are reliable. A data center-grade GPU operates for tens of thousands of hours before failing. The physics of large-scale systems, however, works against reliability: every additional component is another opportunity for failure, and the aggregate failure rate scales linearly with component count. Component-level failure rates aggregate systematically into cluster-wide failure predictions.
 
 ### Probability tools for failure analysis {#sec-appdx-reliability-foundations-probability-tools}
 
-When a 10,000-GPU training job requires every accelerator and network card to stay healthy at the same time, a 99.99 percent per-device daily survival rate still leaves the job with less than a 40 percent chance of finishing a single day uninterrupted. Four results from elementary probability carry that failure arithmetic throughout this book. Each assumes that components fail independently; correlated failures, such as a shared power feed or a common software bug, violate that assumption and must be modeled separately.
+A 10,000-GPU training job requires every accelerator and network card to stay healthy at the same time. At a 99.99 percent per-device daily survival rate, the job still has less than a 40 percent chance of finishing a single day uninterrupted. Four results from elementary probability carry that failure arithmetic throughout this book. Each assumes that components fail independently; correlated failures, such as a shared power feed or a common software bug, violate that assumption and must be modeled separately.
 
 The first is the product rule for independent events. If a job needs all $\RequiredComponentCount$ of its components and each is available with probability $\ComponentAvailability$, the job's components are all available with probability
 
@@ -211,7 +211,7 @@ The second is its complement, the probability that at least one of $\RequiredCom
 
 $$ \Pr(\text{at least one}) = 1-(1-\IndependentEventProbability)^{\RequiredComponentCount} \approx \RequiredComponentCount \IndependentEventProbability\quad \text{when } \RequiredComponentCount \IndependentEventProbability\ll 1 $$ {#eq-reliability-at-least-one}
 
-The linear approximation in @eq-reliability-at-least-one holds only while $\RequiredComponentCount \IndependentEventProbability$ is small; as $\RequiredComponentCount$ grows, the probability approaches 1. This arithmetic is why one slow worker paces a large synchronous job. A delay that strikes any one worker rarely strikes some worker of a large synchronous job on almost every step.
+The linear approximation in @eq-reliability-at-least-one holds only while $\RequiredComponentCount \IndependentEventProbability$ is small; as $\RequiredComponentCount$ grows, the probability approaches 1. This arithmetic is why one slow worker paces a large synchronous job. A delay that rarely strikes any one worker strikes some worker of a large synchronous job on almost every step.
 
 The third is the exponential lifetime model. A component with constant failure rate $\ComponentFailureRate$ survives to time $\TimeInstant$ with probability $e^{-\ComponentFailureRate \TimeInstant}$ and has mean time to failure $1/\ComponentFailureRate$. The model is memoryless. A component that has run for a year is no more likely to fail in the next hour than a new one, which is why it describes the useful-life phase and not burn-in or wear-out. The earliest of $\RequiredComponentCount$ independent exponential failures is itself exponential with rate $\RequiredComponentCount\ComponentFailureRate$, so the time to the first failure among $\RequiredComponentCount$ identical components has mean $1/(\RequiredComponentCount\ComponentFailureRate)$. That single fact is the origin of the $1/\RequiredComponentCount$ scaling of system MTBF in @eq-mtbf-cluster.
 
@@ -219,7 +219,7 @@ The fourth is the Poisson count. Under the same model, the number of failures in
 
 ### Component failure rates {#sec-appdx-reliability-foundations-component-rates}
 
-A single data center GPU fails roughly once every 5.7 years of continuous operation—a rate of about 0.00002 failures per hour that is too small to write conveniently in engineering tables. Reliability engineers therefore characterize components using two complementary metrics. The **failure in time (FIT)** rate counts failures per $10^9$ device-hours of operation, a unit chosen because individual components fail so rarely that failures-per-hour would produce inconveniently small numbers. The reciprocal quantity, **mean time to failure (MTTF)**, calculates average lifetime in hours (@eq-mttf-from-fit):
+A single data center GPU fails roughly once every 5.7 years of continuous operation, a rate of about 0.00002 failures per hour that is too small to write conveniently in engineering tables. Reliability engineers therefore characterize components using two complementary metrics. The **failure in time (FIT)** rate counts failures per $10^9$ device-hours of operation, a unit chosen because individual components fail so rarely that failures-per-hour would produce inconveniently small numbers. The reciprocal quantity, **mean time to failure (MTTF)**, calculates average lifetime in hours (@eq-mttf-from-fit):
 
 $$ \MeanTimeToFailure = \frac{10^9}{\text{FIT}} $$ {#eq-mttf-from-fit}
 
@@ -322,7 +322,7 @@ class ReliabilityStringsMtbfRecap:
     cluster_mtbf_10k_hours_str = fmt_time(R.cluster_mtbf_10k.to(hour).magnitude, 'hour', precision=2, commas=True, style='word')
 ```
 
-Reliability degrades linearly with component count at each level, and the levels compound, which is the **MTBF cascade**\index{MTBF cascade}. A node with `{python} ReliabilityStringsMtbfRecap.node_mtbf_hours_str` MTBF sounds reliable. A cluster of `{python} ReliabilityStringsMtbfRecap.nodes_10k_str` such nodes has an MTBF of just `{python} ReliabilityStringsMtbfRecap.cluster_mtbf_10k_hours_str`, so a failure every few hours is the expected steady state. @Tbl-mtbf-cluster carries that arithmetic across fleet sizes, with aggregate MTBF falling in inverse proportion to GPU count.
+Reliability degrades linearly with component count at each level, and the levels compound, which is the **MTBF cascade**\index{MTBF cascade}. A node with `{python} ReliabilityStringsMtbfRecap.node_mtbf_hours_str` MTBF sounds reliable. A cluster of `{python} ReliabilityStringsMtbfRecap.nodes_10k_str` such nodes has an MTBF of `{python} ReliabilityStringsMtbfRecap.cluster_mtbf_10k_hours_str`, so a failure every few hours is the expected steady state. @Tbl-mtbf-cluster carries that arithmetic across fleet sizes, with aggregate MTBF falling in inverse proportion to GPU count.
 
 ```{python}
 #| echo: false
@@ -375,7 +375,7 @@ for n_gpus in R.cluster_sizes:
 
 : **Cluster MTBF by Scale**: As cluster size grows, the aggregate MTBF shrinks proportionally. At `{python} ReliabilityFoundations.canonical_cluster_gpus_str` GPUs, failures occur every few hours; at `{python} ReliabilityFoundations.mega_cluster_gpus_str` GPUs, they occur continuously. Node configuration (DGX H100): `{python} ReliabilityFoundations.gpus_per_node_str` GPUs and `{python} ReliabilityFoundations.nics_per_node_str` NICs per node in the series sum; its `{python} ReliabilityFoundations.psus_per_node_str` PSUs are `{python} ReliabilityFoundations.psus_required_str`+`{python} ReliabilityFoundations.psus_redundant_str` redundant and add no term. {#tbl-mtbf-cluster}
 
-The transition from hundreds of GPUs to tens of thousands is a qualitative regime shift. While about `{python} ReliabilityFoundations.mtbf_256_days_str` days pass between failures at `{python} ReliabilityFoundations.research_cluster_gpus_str` GPUs, a `{python} ReliabilityFoundations.canonical_cluster_gpus_str`-GPU cluster expects multiple failures per shift, and at `{python} ReliabilityFoundations.mega_cluster_gpus_str` GPUs failures become a continuous background condition in which the system is never fully healthy.
+The transition from hundreds of GPUs to tens of thousands is a qualitative regime shift. About `{python} ReliabilityFoundations.mtbf_256_days_str` days pass between failures at `{python} ReliabilityFoundations.research_cluster_gpus_str` GPUs. A `{python} ReliabilityFoundations.canonical_cluster_gpus_str`-GPU cluster, in contrast, expects multiple failures per shift. At `{python} ReliabilityFoundations.mega_cluster_gpus_str` GPUs, failures become a continuous background condition in which the system is never fully healthy.
 
 ### Probability of failure during a job {#sec-appdx-reliability-foundations-job-failure}
 
@@ -436,15 +436,15 @@ for n_gpus in R.cluster_sizes:
 
 : **Probability of at Least One Failure**: For large clusters and multi-day jobs, failure is a near-certainty. Any system operating in the bottom-right region of this table must treat fault tolerance as a core design requirement, not an optimization. {#tbl-failure-prob}
 
-For any cluster above a few thousand GPUs running jobs longer than a day, the probability of experiencing at least one failure is effectively 100 percent. This is why @sec-fault-tolerance-reliability treats fault tolerance not as a defensive measure but as a fundamental architectural requirement.
+For any cluster above a few thousand GPUs running jobs longer than a day, the probability of experiencing at least one failure is effectively 100 percent. This is why @sec-fault-tolerance-reliability treats fault tolerance as an architectural requirement rather than a defensive measure.
 
-The exponential failure model assumes a constant failure rate, which holds during the steady-state useful-life phase. During burn-in (first few hundred hours) and wear-out (approaching end-of-life), failure rates are higher. In practice, fleet operators observe that newly deployed nodes show 2--3$\times$ higher failure rates in their first week, making burn-in testing essential before admitting nodes to production clusters. That inevitability of failure during long training jobs raises a practical question: given that failures will interrupt execution, how is the lost progress minimized?
+The exponential failure model assumes a constant failure rate, which holds during the steady-state useful-life phase. During burn-in (first few hundred hours) and wear-out (approaching end-of-life), failure rates are higher. In practice, fleet operators observe that newly deployed nodes show 2--3$\times$ higher failure rates in their first week, making burn-in testing essential before admitting nodes to production clusters. Because failures will interrupt long training jobs, the practical question is how to minimize the lost progress.
 
 ---
 
 ## Checkpoint Optimization {#sec-appdx-reliability-foundations-checkpoint-optimization}
 
-Every checkpoint saves progress at the cost of execution time: checkpointing too rarely lets a single failure destroy hours of training, whereas checkpointing too frequently turns checkpoint writing itself into the bottleneck. The Young-Daly formula gives the first-order optimal balance point between those two losses, and it depends on just two measurable quantities: how long a checkpoint takes to write and how often failures occur [@young1974; @daly2006].
+Every checkpoint saves progress at the cost of execution time. Checkpointing too rarely lets a single failure destroy hours of training, whereas checkpointing too frequently turns checkpoint writing itself into the bottleneck. The Young-Daly formula gives the first-order optimal balance point between those two losses, and it depends on two measurable quantities: how long a checkpoint takes to write and how often failures occur [@young1974; @daly2006].
 
 ### The Young-Daly model {#sec-appdx-reliability-foundations-young-daly}
 
@@ -454,7 +454,7 @@ $$ \OptimalCheckpointInterval = \sqrt{2 \times \CheckpointWriteTime \times \Syst
 
 where $\CheckpointWriteTime$ is the checkpoint write time in seconds and $\SystemMtbf$ is the cluster or job-level system MTBF in seconds.
 
-The intuition behind @eq-young-daly is geometric-mean-like. When checkpoints are cheap relative to the MTBF ($\CheckpointWriteTime \ll \SystemMtbf$, the common case), the optimal interval sits between the two time scales: if checkpoints took zero time, the optimal cadence would be every step, whereas if the system never failed, no checkpoints would be required, and the square root interpolates between those extremes.
+The intuition behind @eq-young-daly is geometric-mean-like. When checkpoints are cheap relative to the MTBF ($\CheckpointWriteTime \ll \SystemMtbf$, the common case), the optimal interval sits between the two time scales. If checkpoints took zero time, the optimal cadence would be every step. If the system never failed, no checkpoints would be required. The square root interpolates between those extremes.
 
 The formula assumes that failures follow an exponential distribution (memoryless property) and that checkpoint cost $\CheckpointWriteTime$ is small compared to $\SystemMtbf$. The examples below adopt these assumptions. Correlated outages, changing hazard rates, long writes, and asynchronous persistence can require a more detailed model.
 
@@ -611,7 +611,7 @@ class WorkedExampleYoungDaly:
 
 **Interpretation**: The optimal checkpoint interval is approximately `{python} WorkedExampleYoungDaly.yd_tau_min_str`. The overhead from checkpointing alone is $\CheckpointWriteTime/\OptimalCheckpointInterval \approx$ `{python} WorkedExampleYoungDaly.yd_overhead_str` of training time.
 
-**Systems insight**: If the cluster were doubled to `{python} WorkedExampleYoungDaly.n_gpus_20k_str` GPUs, the MTBF would halve, and the optimal interval would shrink to `{python} WorkedExampleYoungDaly.tau_20k_min_str`, so the system checkpoints more frequently because failures happen more often. Larger clusters are faster but must interrupt themselves more often to protect progress, the fundamental tension at scale.
+**Systems insight**: If the cluster were doubled to `{python} WorkedExampleYoungDaly.n_gpus_20k_str` GPUs, the MTBF would halve and the optimal interval would shrink to `{python} WorkedExampleYoungDaly.tau_20k_min_str`. The system therefore checkpoints more frequently because failures happen more often. Larger clusters are faster but must interrupt themselves more often to protect progress, which is the tension at scale.
 
 :::
 
@@ -621,7 +621,7 @@ The boundary conditions of the Young-Daly formula merit attention. When $\Checkp
 
 ## Recovery Budgets {#sec-appdx-reliability-foundations-recovery-budgets}
 
-When a failure occurs, the system does not instantly resume training. Detection, rescheduling, reloading state, and replaying lost work each consume time. Understanding this recovery anatomy reveals which phase dominates and where to invest engineering effort.
+When a failure occurs, the system does not instantly resume training. Detection, rescheduling, reloading state, and replaying lost work each consume time. The recovery anatomy shows which phase dominates and where engineers should invest effort.
 
 ### The anatomy of recovery time {#sec-appdx-reliability-foundations-recovery-anatomy}
 
@@ -657,7 +657,7 @@ class RecoveryAnatomy:
     t_total_min_str = fmt_time(round(R.t_recovery_total_s.to(minute).magnitude) * minute, minute, precision=0, commas=True)
 ```
 
-@Tbl-recovery-anatomy breaks recovery into the phases that determine how long the cluster remains below full productivity after a failure. Separating detection, rescheduling, checkpoint reload, and replay highlights which operational bottlenecks dominate total downtime.
+@Tbl-recovery-anatomy breaks recovery into the phases that determine how long the cluster remains below full productivity after a failure. Because detection, rescheduling, checkpoint reload, and replay appear as separate rows, the table shows which operational bottlenecks dominate total downtime.
 
 | **Phase**                             |              **Typical duration**             | **What happens**                                                                                                        |
 |:--------------------------------------|:---------------------------------------------:|:------------------------------------------------------------------------------------------------------------------------|
@@ -669,7 +669,7 @@ class RecoveryAnatomy:
 
 : **Recovery Time Breakdown**: Each phase contributes to the total time between failure and full-speed resumption. For the `{python} ReliabilityFoundations.canonical_cluster_gpus_str`-GPU, `{python} ReliabilityFoundations.gpt3_params_b_str`-model scenario, replay dominates because it recomputes work lost since the last checkpoint. {#tbl-recovery-anatomy}
 
-Decomposing this sequence shows that replay time $\LostWorkReplayTime$ typically dominates, controlled directly by the checkpoint interval: on average, half the interval must be replayed. This creates a reinforcing loop with the Young-Daly formula. Shorter intervals mean less replay but more checkpoint overhead, and the formula finds the minimum of this sum. The other phases offer distinct engineering levers: more aggressive heartbeat intervals shorten $\FailureDetectionTime$ (at the cost of false positives), preallocated hot spare nodes shorten $\JobRestartTime$ through the fleet orchestration policies covered in @sec-fleet-orchestration, and higher storage bandwidth or smaller checkpoints shorten $\CheckpointLoadTime$, motivating the compression and sharding techniques discussed in @sec-fault-tolerance-reliability.
+In this sequence, replay time $\LostWorkReplayTime$ typically dominates and is controlled directly by the checkpoint interval, since on average half the interval must be replayed. This creates a reinforcing loop with the Young-Daly formula. Shorter intervals mean less replay but more checkpoint overhead, and the formula finds the minimum of this sum. The other phases offer distinct engineering levers. More aggressive heartbeat intervals shorten $\FailureDetectionTime$, at the cost of false positives. Preallocated hot spare nodes shorten $\JobRestartTime$ through the fleet orchestration policies covered in @sec-fleet-orchestration. Higher storage bandwidth or smaller checkpoints shorten $\CheckpointLoadTime$, which motivates the compression and sharding techniques discussed in @sec-fault-tolerance-reliability.
 
 ### Runtime goodput under failures {#sec-appdx-reliability-foundations-goodput}
 
@@ -692,7 +692,7 @@ class ReliabilityStringsGoodputRecap:
 1. **Checkpoint overhead** ($\sim$ `{python} ReliabilityStringsGoodputRecap.overhead_ckpt_pct_str`): Training pauses during each checkpoint write.
 2. **Recovery and rework overhead** ($\sim$ `{python} ReliabilityStringsGoodputRecap.overhead_failure_pct_str`): Time lost to detection, rescheduling, reloading, and replaying work discarded after each failure.
 
-At `{python} ReliabilityFoundations.canonical_cluster_gpus_str`-GPU scale, failures and checkpointing together can consume a substantial fraction of wall time. If they consume a fraction $\OperationalOverheadFraction$, a fixed amount of useful work takes $1/(1-\OperationalOverheadFraction)$ times its fault-free duration, not merely that duration plus $\OperationalOverheadFraction$ of it. The fleet orchestration strategies in @sec-fleet-orchestration and @sec-ops-scale focus on narrowing this gap, because every percentage point of overhead recovered translates directly to dollars saved and training time shortened.
+At `{python} ReliabilityFoundations.canonical_cluster_gpus_str`-GPU scale, failures and checkpointing together can consume a substantial fraction of wall time. If they consume a fraction $\OperationalOverheadFraction$, a fixed amount of useful work takes $1/(1-\OperationalOverheadFraction)$ times its fault-free duration, not merely that duration plus $\OperationalOverheadFraction$ of it. The fleet orchestration strategies in @sec-fleet-orchestration and @sec-ops-scale focus on narrowing this gap, because every percentage point of overhead recovered saves dollars and shortens training time.
 
 ::: {#psp-appendix-reliability-hidden-cost-scale .callout-perspective title="The hidden cost of scale"}
 
@@ -727,7 +727,7 @@ The three canonical strategies represent different points in the trade-off space
 
 ### The availability stacking formula {#sec-appdx-reliability-foundations-availability}
 
-For serving workloads, availability is typically expressed as a percentage: 99 percent ("two nines"), 99.9 percent ("three nines"), and so on. Redundancy improves availability by running $\RedundantReplicaCount$ independent replicas. Under an idealized model with reliable routing and enough capacity on any surviving replica, the system is unavailable only when all replicas are simultaneously down, which @eq-availability-stacked captures with $\ReplicaAvailability$ denoting the availability of a single replica and $\RedundantReplicaCount$ the number of replicas:
+For serving workloads, availability is typically expressed as a percentage: 99 percent ("two nines"), 99.9 percent ("three nines"), and so on. Redundancy improves availability by running $\RedundantReplicaCount$ independent replicas. Under an idealized model with reliable routing and enough capacity on any surviving replica, the system is unavailable only when all replicas are simultaneously down. @Eq-availability-stacked captures this, with $\ReplicaAvailability$ denoting the availability of a single replica and $\RedundantReplicaCount$ the number of replicas:
 
 $$ \RedundantServiceAvailability= 1 - (1 - \ReplicaAvailability)^\RedundantReplicaCount $$ {#eq-availability-stacked}
 
@@ -799,13 +799,13 @@ class AvailabilityProse:
 
 Stacking independent redundant replicas achieves large availability gains. Two replicas that are each available `{python} AvailabilityProse.single_pct_str` of the time yield `{python} AvailabilityProse.two_pct_str` availability, reducing annual downtime from `{python} AvailabilityProse.down_one_str` to `{python} AvailabilityProse.down_two_str`. This is why inference serving systems almost universally deploy multiple replicas behind a load balancer. The cost of an extra replica is small compared to the business value of four-nines availability.
 
-The independence assumption is critical, however. Correlated failures, such as power outages affecting an entire rack, software bugs triggered by a specific input, or network partitions isolating a failure domain, defeat availability stacking. This is why @sec-fault-tolerance-reliability emphasizes failure domain isolation: replicas must be placed in different racks, different power zones, and ideally different data centers to reduce shared failure modes. Placement alone does not eliminate common software, control-plane, or regional dependencies.
+The result, however, depends on the independence assumption. Correlated failures, such as power outages affecting an entire rack, software bugs triggered by a specific input, or network partitions isolating a failure domain, defeat availability stacking. This is why @sec-fault-tolerance-reliability emphasizes failure domain isolation: replicas must be placed in different racks, different power zones, and ideally different data centers to reduce shared failure modes. Placement alone does not eliminate common software, control-plane, or regional dependencies.
 
 ---
 
 ## Checkpoint Intervals Beyond the First-Order Approximation {#sec-appdx-reliability-daly-2nd-order}
 
-When a multi-terabyte checkpoint takes several minutes to flush to shared storage and a 100,000-GPU cluster fails every half hour, the checkpoint write is no longer negligible next to the failure interval, and the cluster can suffer a second crash while still writing the snapshot. Young's first-order approximation is most accurate when checkpoint time is small relative to the failure interval; Daly's analysis develops higher-order checkpoint models for regimes where write time is a substantial fraction of MTBF [@daly2006]. The simplified renewal model below shows why finite checkpoint time changes the optimum without claiming to reproduce Daly's full recovery model.
+When a multi-terabyte checkpoint takes several minutes to flush to shared storage and a 100,000-GPU cluster fails every half hour, the checkpoint write is no longer negligible next to the failure interval. The cluster can then suffer a second crash while still writing the snapshot. Young's first-order approximation is most accurate when checkpoint time is small relative to the failure interval; Daly's analysis develops higher-order checkpoint models for regimes where write time is a substantial fraction of MTBF [@daly2006]. The simplified renewal model below shows why finite checkpoint time changes the optimum without claiming to reproduce Daly's full recovery model.
 
 ### Renewal model and small-cost expansion {#sec-appdx-reliability-daly-proof}
 
@@ -851,7 +851,7 @@ For one attention head, let $\AttentionScoreMatrix = \AttentionQueryMatrix\Atten
 
 $$ \CorruptedAttentionScoreMatrix = \frac{(\AttentionQueryMatrix+ \FiniteChange\AttentionQueryMatrix) \AttentionKeyMatrix^T}{\sqrt{\AttentionHeadDimension}} = \AttentionScoreMatrix + \FiniteChange\AttentionScoreMatrix $$
 
-where $\FiniteChange\AttentionScoreMatrix$ is nonzero only in row $\MatrixRowIndex$, with entries $\FiniteChange \AttentionScoreEntry = \FiniteChange\QueryVector_i \cdot \KeyVector_j/\sqrt{\AttentionHeadDimension}$ for the corrupted query row $\FiniteChange\QueryVector_i$ and key row $\KeyVector_j$. Passing the perturbed score row through the normalization step shifts the entire row's attention weights, so the attention probability perturbation for token row $\MatrixRowIndex$ is:
+where $\FiniteChange\AttentionScoreMatrix$ is nonzero only in row $\MatrixRowIndex$, with entries $\FiniteChange \AttentionScoreEntry = \FiniteChange\QueryVector_i \cdot \KeyVector_j/\sqrt{\AttentionHeadDimension}$ for the corrupted query row $\FiniteChange\QueryVector_i$ and key row $\KeyVector_j$. Passing the perturbed score row through the normalization step shifts the entire row's attention weights. The attention probability perturbation for token row $\MatrixRowIndex$ is therefore:
 
 $$ \FiniteChange\AttentionWeightVector_i = \operatorname{softmax}\left( \AttentionScoreRow + \FiniteChange\AttentionScoreRow \right) - \operatorname{softmax}\left( \AttentionScoreRow \right) $$
 
@@ -859,7 +859,7 @@ A large corrupted query component can strongly change several attention logits, 
 
 $$ \operatorname{softmax}(\AttentionScoreRow + \FiniteChange\AttentionScoreRow)_j \to 1, \qquad \operatorname{softmax}(\AttentionScoreRow + \FiniteChange\AttentionScoreRow)_{k \neq j} \to 0 $$
 
-This is a conditional saturation limit, not an inevitable consequence of a bit flip. The selected key depends on the corrupted logits; a corrupted query element does not identify one corrupted key. The softmax derivative is $\partial \SoftmaxOutputProbability_j/\partial \AttentionScoreSummand = \SoftmaxOutputProbability_j(\KroneckerIndicator_{jk}-\SoftmaxOutputProbability_k)$, which tends toward zero under saturation rather than diverging. Other paths through the computation can still produce large or nonfinite activations and gradients. If invalid state enters the optimizer or a collective, it can propagate across ranks; detection and recovery must therefore verify state before resuming from a clean checkpoint.
+This is a conditional saturation limit, not an inevitable consequence of a bit flip. The selected key depends on the corrupted logits; a corrupted query element does not identify one corrupted key. The softmax derivative is $\partial \SoftmaxOutputProbability_j/\partial \AttentionScoreSummand = \SoftmaxOutputProbability_j(\KroneckerIndicator_{jk}-\SoftmaxOutputProbability_k)$, which tends toward zero under saturation rather than diverging. Other paths through the computation can still produce large or nonfinite activations and gradients. If invalid state enters the optimizer or a collective, it can propagate across ranks. Detection and recovery must therefore verify state before resuming from a clean checkpoint.
 
 ---
 
@@ -890,6 +890,6 @@ class ReliabilitySummaryRecap:
     cluster_mtbf_10k_hours_str = fmt_time(cluster_mtbf_10k.to(hour).magnitude, 'hour', precision=2, commas=True, style='word')
 ```
 
-Failure is a physical constraint of scale. Under independent, constant component failure rates, a single GPU's mean lifetime is `{python} ReliabilitySummaryRecap.gpu_mttf_yr_str`, yet the modeled `{python} ReliabilityFoundations.canonical_cluster_gpus_str`-GPU cluster fails on average every `{python} ReliabilitySummaryRecap.cluster_mtbf_10k_hours_str`, because node failure rates sum across components and cluster MTBF divides by node count. The probability that a job is interrupted grows with its duration relative to that interval, so long runs on large clusters must plan for recovery rather than hope to avoid it.
+Failure is a physical constraint of scale. Under independent, constant component failure rates, a single GPU's mean lifetime is `{python} ReliabilitySummaryRecap.gpu_mttf_yr_str`. Yet the modeled `{python} ReliabilityFoundations.canonical_cluster_gpus_str`-GPU cluster fails on average every `{python} ReliabilitySummaryRecap.cluster_mtbf_10k_hours_str`, because node failure rates sum across components and cluster MTBF divides by node count. The probability that a job is interrupted grows with its duration relative to that interval, so long runs on large clusters must plan for recovery rather than hope to avoid it.
 
-Recovery has four modeled phases (detection, rescheduling, reloading, and replay), and replay is controlled by the checkpoint interval. The Young-Daly formula $\OptimalCheckpointInterval = \sqrt{2 \CheckpointWriteTime \, \SystemMtbf}$ (principle \ref{pri-young-daly}) balances write overhead against expected rework when writes are short compared with the MTBF, and @sec-appdx-reliability-daly-2nd-order examines finite-cost effects under a simplified renewal model. Checkpoint/restart suits batch training, redundancy suits latency-sensitive serving, and elastic training sits between them. Independent replicas reduce unavailability multiplicatively, to $(1-\ReplicaAvailability)^\RedundantReplicaCount$ for $\RedundantReplicaCount$ replicas, but only to the extent that failure-domain isolation keeps their failures independent.
+Recovery has four modeled phases (detection, rescheduling, reloading, and replay), and replay is controlled by the checkpoint interval. The Young-Daly formula $\OptimalCheckpointInterval = \sqrt{2 \CheckpointWriteTime \, \SystemMtbf}$ (principle \ref{pri-young-daly}) balances write overhead against expected rework when writes are short compared with the MTBF. @Sec-appdx-reliability-daly-2nd-order examines finite-cost effects under a simplified renewal model. Checkpoint/restart suits batch training, redundancy suits latency-sensitive serving, and elastic training sits between them. Independent replicas reduce unavailability multiplicatively, to $(1-\ReplicaAvailability)^\RedundantReplicaCount$ for $\RedundantReplicaCount$ replicas, but only to the extent that failure-domain isolation keeps their failures independent.
