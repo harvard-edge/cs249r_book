@@ -117,21 +117,23 @@ concept_questions:
     read: "NVIDIA Matrix Multiplication Background guide, section 3.2; §11.8.3 (split-K and occupancy)"
   - id: 11
     q: "How large is the mapping space, and how does a compiler search it?"
-    picture: "Slide variant of book margin-003 (make_figs.py space_step1..2): placement 1,024, loop order 5,040, parallelization 120 per memory level, log bars; step 2 adds three levels, 4^15 placements, about 1.07 billion; then a two-bar line from Ansor's abstract"
-    numbers: "7! = 5,040 orders for a 7-deep nest; 6!/3! = 120; 4^5 = 1,024; three levels 4^15 = 1,073,741,824 (§11.7.2, margin figure; product derived). Ansor (Zheng et al., OSDI 2020, abstract, read 2026-10-17): up to 3.8x, 2.6x, and 1.7x over the prior state of the art on Intel CPU, ARM CPU, and NVIDIA GPU"
+    picture: "Slide variant of book margin-003 (make_figs.py space_step1..2): placement 1,024, loop order 5,040, parallelization 120 per memory level, log bars; step 2 adds the three choices combined at one level, about 620 million; then a line from Ansor's abstract"
+    numbers: "7! = 5,040 orders for a 7-deep nest; 6!/3! = 120; 4^5 = 1,024; combined at one level 1,024 x 5,040 x 120 = 619,315,200 (§11.7.2, margin figure; product derived); each further memory level multiplies the count again. Ansor (Zheng et al., OSDI 2020, abstract, read 2026-10-17): up to 3.8x, 2.6x, and 1.7x over the prior state of the art on Intel CPU, ARM CPU, and NVIDIA GPU"
     example: "Rule-based, cost-model, and profile-guided kernel selection (§11.8.2)"
     read: "§11.7.2, §11.8.2 (kernel selection)"
   - id: 12
     q: "What does a compiler do to ResNet-50, and where does fusion stop paying?"
     picture: "New pipeline diagram (make_figs.py compiler_step1..4), one stage lit per step: graph optimization (Conv-BN-ReLU fused), kernel selection (Tensor Core GEMM), memory planning (liveness intervals as five bars sharing two buffers), scheduling (copy and compute on two streams); then Part 1's compiled bars (copied: 3.53 against 0.33 ms, 174 against 56 kernels, modeled); then a measured range bar from TVM"
     numbers: "§11.8 (modeled): 3.53 ms eager to 0.33 ms compiled FP16, 10.6x, 174 kernels fused into 56; arithmetic floor 8 us FP16, 4 us INT8 (§11.4.5). TVM (Chen et al., OSDI 2018, Figure 4, NVIDIA Titan X): fused operators 1.2x to 2x faster than unfused on conv+bn+relu (128x28x28, 1x1x128x256), depthwise conv+bn+relu (512x14x14, 3x3x512), an RNN cell, and an LSTM cell (hidden 128); read 2026-10-17. Limits (§11.7.7): a fused kernel that exceeds the registers per thread spills to local memory backed by DRAM, and high register use lowers occupancy; training-mode batch norm needs batch reductions and does not fuse like an element-wise op. No measured register-pressure number is shown."
-    example: "ResNet-50 compiled for H100 inference"
+    example: "ResNet-50 compiled for H100 inference; a fused kernel's register count against resident threads on an H100 SM"
+    revision_2026_10_18: "The compiler frame now shows 174 -> 56 kernels and 0.33 ms compiled with about 8 us of arithmetic (overhead floor; Lecture 7's dispatch overhead law; Lecture 13's Example 13.6 for the runtime table) instead of 3.53 -> 0.33 ms. The fusion frame now pictures the limit: derived bars of resident threads per H100 SM at 32, 64, 128, and 255 registers per thread (2,048, 1,024, 512, 256), from the CUDA Programming Guide, compute capability 9.0, Tables 30 and 31 (65,536 registers and 2,048 threads per SM, 255 registers per thread; read 2026-10-18). TVM's 1.2 to 2x is one setup line."
     read: "§11.8 opening, §11.8.2, §11.7.7"
   - id: 13
     q: "Why do Tensor Cores sometimes never engage, and how do we tell?"
     picture: "Diagnose card (Example 11.3) beside the chapter's 3x3x3 layout example redrawn as two memory strips (new, make_figs.py layout_step1..2): NHWC places a pixel's channels side by side, NCHW places a channel's pixels side by side; the Tensor Core reads channel vectors"
     numbers: "Example 11.3: an A100 migration where profiling shows idle Tensor Cores because shapes and data types selected other kernels; dimension multiples from the NVIDIA guide (8 for FP16, 64 on A100); a layout transpose reads and writes every element with no arithmetic (§11.7.6); NHWC is the TensorFlow default for convolutions on NVIDIA GPUs (§11.7.6)"
     example: "A transformer moved to A100s; a ResNet-50 in NCHW on a Tensor Core path"
+    revision_2026_10_18: "The diagnose figure (make_figs.py diag_step1..4) now leads with the example's two causes: data type (FP16 or BF16 selects a Tensor Core kernel; FP32 selects CUDA cores unless TF32 is on) and shape (an illustrative width of 1,000 = 15 x 64 + 40 against the A100's multiples of 64, padded to 1,024); layout follows as a third check labeled for convolutions."
     read: "Example 11.3, §11.7.6, footnote 14"
   - id: 14
     q: "Where does one activation travel, and which mapping choice decides each step?"
@@ -181,8 +183,8 @@ active_learning:
     answer: "129/256, about 50 percent; 129x129 about 25 percent (§11.7.5). Then the measured A100 curve: 36 percent more time for 6.25 percent more work."
   - at_minute: 49
     type: predict
-    prompt: "TVM fuses conv + batch norm + ReLU into one kernel on a Titan X. Same arithmetic. Faster by about 1.05x, 1.2 to 2x, or 10x?"
-    answer: "1.2x to 2x across its four fused workloads (TVM Figure 4), from fewer memory accesses; the gain stops where the fused kernel runs out of registers (§11.7.7)."
+    prompt: "An H100 SM has 65,536 registers. A fused kernel needs 128 registers per thread. How many threads can the SM hold?"
+    answer: "65,536 / 128 = 512, a quarter of the 2,048 maximum (CUDA Programming Guide, compute capability 9.0; derived). Fewer resident threads hide less latency; past 255 registers per thread the compiler spills to DRAM-backed local memory (§11.7.7)."
   - at_minute: 52.5
     type: diagnose
     prompt: "A team moves a transformer to A100s. The profile shows the Tensor Cores idle. Name three causes to check, and how to confirm which kernel ran."
@@ -261,9 +263,9 @@ notes_for_author:
   - "Every outside number was read on 2026-10-17: Boehm's results table (siboehm.com); the NVIDIA guide's sections 2.2, 3.1, 3.2 and Table 1 (text values only; the per-N throughputs on the tile frame come from Part 1's reading of the figure 7 SVG); Eyeriss abstract (MIT DSpace); TVM Figure 4 text (arXiv 1802.04799, PDF); Ansor abstract (arXiv 2006.06762)."
   - "Boehm's table does not name its GPU or size in the table itself; the text names his A6000 as the benchmark machine and analyzes 4,092-square FP32 matrices. The hook slide says 'about 4,096 square, FP32, RTX A6000' and the credit names the worklog."
   - "TVM's Figure 4 gives a range (1.2x to 2x) in its text; per-workload bar values are not printed and are not shown."
-  - "Derived and labeled derived on the slide: the fill-and-drain busy fraction B/(B + 2N - 2); the per-order traffic table and the tiled-layer count for listing 14; tile intensities 0.5, 64, 85.3, 1,365; equation-6 capacities; the 4^15 product; per-boundary HBM energy 64 and 128 uJ; the 0.5 percent work increase on the wave frame."
+  - "Derived and labeled derived on the slide: the fill-and-drain busy fraction B/(B + 2N - 2); the per-order traffic table and the tiled-layer count for listing 14; tile intensities 0.5, 64, 85.3, 1,365; equation-6 capacities; the 619,315,200 one-level product; resident threads per H100 SM at 32, 64, 128, and 255 registers per thread; input reads for a row of 128 weight-stationary cells, 4,194,304 / 128 = 32,768; per-boundary HBM energy 64 and 128 uJ; the 0.5 percent work increase on the wave frame."
   - "The equation-6 frame uses the H100 SM's 228 KB as the budget of the chapter's hypothetical single local store; the WARN says a GPU keeps accumulators in registers and budgets them separately (§11.7.5)."
-  - "No register-pressure or occupancy measurement is shown; the fusion-limits step states the mechanism from §11.7.7 only."
+  - "No register-pressure or occupancy measurement is shown; the fusion-limits frame shows derived resident-thread counts from NVIDIA's published per-SM limits and states the mechanism from §11.7.7."
   - "The compiled-latency bars (3.53 to 0.33 ms) are modeled in the chapter and stay labeled modeled."
 
 build_notes_2026_10_17:
@@ -274,3 +276,14 @@ build_notes_2026_10_17:
   - "Frame 27 step 2 states Napkin Math 11.6 in one line instead of an int8ridge thumbnail, which was unreadable at that size."
   - "The capacity plot uses KB of 1,024 bytes (equation 6 gives 131,072 bytes for 128 KB); the slide credit says so."
   - "Titles shortened where they ran under the activity tag: frames 2, 6, and 8."
+
+revision_2026_10_18:
+  - "Round-1 review applied. Notes still total 70.5 minutes; 33 handout pages, 79 overlays."
+  - "Traffic frame: states that the first three rows count one cell with no neighbors, adds a fourth row (weight stationary along a row of 128 cells: inputs 4,194,304 / 128 = 32,768, derived), and takes Example 11.4's bars as its last step (3 min). The Eyeriss frame keeps Eyeriss and the decode vote (2 min)."
+  - "Tiled-layer frame: the matrices sit beside the capacity and traffic figure, and a fourth step shows the tiled loop (listing 17, abridged) with the explicit-versus-implicit staging distinction in the note (4 min). The tile-intensity frame drops the tiling inset (2 min)."
+  - "Titles no longer give away activity answers: 'Every live buffer must fit in the local store' and 'A shape one past the tile pays for a whole tile'."
+  - "Mapping-space step 2 is the one-level product, 619,315,200, about 620 million (derived), replacing the 4^15 placement count."
+  - "The wave frame's callback to Lecture 13 for split-K was wrong (neither 13 nor 13b covers it); the note now points to §11.8.3."
+  - "Closing ladder: the H100 claim is split by precision (FP16: 563 against the 295 ridge, 989 TFLOP/s; INT8: 1,126 with INT8 activations, 569 without, against the 591 ridge). The boundary frame's step 2 is now a one-line recall; its numbers stay in the note."
+  - "The measured-tile note derives 36 percent as 1.0625 x 190 / 148 = 1.36 instead of the 0.15 and 0.21 ms pair; the plot's annotation sits left of the 256 gridline."
+

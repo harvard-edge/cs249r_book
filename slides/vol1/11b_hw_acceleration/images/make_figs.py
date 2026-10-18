@@ -43,7 +43,14 @@ Chapter sources:
   - Equation 6 (HA Sec. 11.7.5): 2 T_M T_K + 2 T_K T_N + 4 T_M T_N bytes.
   - Mapping space per memory level: 4^5 = 1,024 placements, 7! = 5,040
     orders, 6!/3! = 120 parallelizations (HA Sec. 11.7.2, margin figure);
-    4^15 for three levels.
+    all three at one level 1,024 x 5,040 x 120 = 619,315,200 (derived).
+  - H100 registers (NVIDIA CUDA Programming Guide, compute capability 9.0,
+    Table 30 and Table 31, read 2026-10-18): 64 K 32-bit registers per SM,
+    at most 2,048 resident threads per SM, at most 255 registers per
+    thread. Resident threads at r registers per thread: min(2,048,
+    65,536 / r), rounded down to whole warps of 32 (derived; ignores
+    per-block limits): 32 -> 2,048, 64 -> 1,024, 128 -> 512, and
+    255 -> 65,536 / 255 = 257, rounded down to 8 warps = 256 threads.
   - Figures carried over from Lecture 11 Part 1 (same code, same sources):
     weight_reads (Example 11.4), tiling and cliff (Sec. 11.7.5), measured
     tiles (NVIDIA guide figure 7), layers (Napkin Math 11.4 to 11.10),
@@ -424,30 +431,34 @@ sp.save(fig, out / "eyeriss.svg")
 # Listing 14 layer: W 512 x 256 (FP16), X 256 x 32 (FP16), Z 512 x 32 (FP32
 # accumulators). Four 128-row weight tiles. Capacity against one H100 SM's
 # 228 KB; traffic counts derived.
-def layertile_svg(step):
-    parts = svg_open(900, 410)
-    # matrices (rows at 0.5 px)
-    parts.append(rect(30, 30, 150, 256, "white", C["compute"], 2.5, 2))
-    for k in (1, 3):
-        y = 30 + 64 * k
-        parts.append(f'<line x1="30" y1="{y}" x2="180" y2="{y}" stroke="{C["compute"]}" '
+def layertile_mats_svg():
+    """The three matrices with one 128-row weight tile (static picture)."""
+    parts = svg_open(380, 292)
+    parts.append(rect(20, 10, 150, 200, "white", C["compute"], 2.5, 2))
+    for y in (110, 160):
+        parts.append(f'<line x1="20" y1="{y}" x2="170" y2="{y}" stroke="{C["compute"]}" '
                      f'stroke-width="1.5" stroke-dasharray="6,4"/>')
-    parts.append(f'<line x1="30" y1="158" x2="180" y2="158" stroke="{C["compute"]}" '
-                 f'stroke-width="1.5" stroke-dasharray="6,4"/>')
-    parts.append(rect(30, 94, 150, 64, C["compute_l"], C["compute"], 3, 2))
-    parts.append(svg_text(105, 126, "tile: 128 rows", 20, "700", C["compute"]))
-    parts.append(svg_text(105, 310, "W  512 × 256", 22, "700", C["compute"]))
-    parts.append(svg_text(203, 110, "×", 30, "700", C["text"]))
-    parts.append(rect(226, 30, 40, 128, C["memory_l"], C["memory"], 2.5, 2))
-    parts.append(svg_text(246, 180, "X", 22, "700", C["memory"]))
-    parts.append(svg_text(246, 206, "256 × 32", 20, "700", C["memory"]))
-    parts.append(svg_text(291, 110, "=", 30, "700", C["text"]))
-    parts.append(rect(314, 30, 40, 256, "white", C["data"], 2.5, 2))
-    parts.append(rect(314, 94, 40, 64, C["data_l"], C["data"], 3, 2))
-    parts.append(svg_text(334, 310, "Z  512 × 32", 22, "700", C["data"]))
-    # capacity (step 2): 1.6 px per KB from x = 450
+    parts.append(rect(20, 60, 150, 50, C["compute_l"], C["compute"], 3, 2))
+    parts.append(svg_text(95, 85, "128 rows", 26, "700", C["compute"]))
+    parts.append(svg_text(192, 60, "×", 34, "700", C["text"]))
+    parts.append(rect(215, 10, 40, 100, C["memory_l"], C["memory"], 2.5, 2))
+    parts.append(svg_text(277, 60, "=", 34, "700", C["text"]))
+    parts.append(rect(300, 10, 40, 200, "white", C["data"], 2.5, 2))
+    parts.append(rect(300, 60, 40, 50, C["data_l"], C["data"], 3, 2))
+    for x, y, name, dims, col in ((95, 240, "W", "512 × 256", C["compute"]),
+                                  (235, 140, "X", "256 × 32", C["memory"]),
+                                  (320, 240, "Z", "512 × 32", C["data"])):
+        parts.append(svg_text(x, y, name, 28, "700", col))
+        parts.append(svg_text(x, y + 34, dims, 24, "700", col))
+    write_svg("layertile_mats.svg", parts)
+
+
+def layertile_cost_svg(step):
+    """Step 1 blank (keeps the slot), step 2 capacity, step 3 traffic."""
+    parts = svg_open(440, 350)
+    # capacity (step 2): 1.6 px per KB
     a2 = 1.0 if step >= 2 else 0.0
-    x0, s = 450, 1.6
+    x0, s = 10, 1.6
     parts.append(f'<g opacity="{a2}">')
     parts.append(svg_text(x0, 22, "One SM holds 228 KB", 22, "700", C["text"], "start"))
     x = x0
@@ -482,13 +493,14 @@ def layertile_svg(step):
         parts.append(svg_text(x0, y, label, 20, "400", C["text"], "start"))
         parts.append(rect(x0, y + 13, xpos(v) - x0, 32, col, col, 1, 0))
         parts.append(svg_text(xpos(v) + 8, y + 29, f"{v:,}", 21, "700", col, "start"))
-    parts.append(svg_text(x0 + 300, 340, "47× fewer", 28, "700", C["data"], "start"))
+    parts.append(svg_text(x0 + 250, 335, "47× fewer", 28, "700", C["data"], "start"))
     parts.append('</g>')
-    write_svg(f"layertile_step{step}.svg", parts)
+    write_svg(f"layertile_cost_step{step}.svg", parts)
 
 
+layertile_mats_svg()
 for k in (1, 2, 3):
-    layertile_svg(k)
+    layertile_cost_svg(k)
 
 # ================================================================ tile intensity
 # FP16 4,096-square multiply: T_M T_N / (T_M + T_N) FLOP per byte loaded for
@@ -579,7 +591,7 @@ space_rows = [
     ("Placement", 1024, "neutral", "4⁵ = 1,024"),
     ("Loop order", 5040, "neutral", "7! = 5,040"),
     ("Parallelization", 120, "neutral", "6!/3! = 120"),
-    ("Placement, 3 levels", 4 ** 15, "danger", "4¹⁵ ≈ 1.07 billion"),
+    ("All three, one level", 1024 * 5040 * 120, "danger", "≈ 620 million"),
 ]
 for k in (1, 2):
     logbars(out / f"space_step{k}.svg", space_rows,
@@ -665,25 +677,21 @@ def compiler_svg(step):
 for k in (1, 2, 3, 4):
     compiler_svg(k)
 
-# ================================================================ TVM fusion range
-fig, ax = plt.subplots(figsize=(5.8, 1.2))
-ax.barh(0, 2.0 - 1.2, left=1.2, color=C["data"], height=0.5)
-ax.text(2.06, 0, "1.2–2× faster", va="center", fontsize=13, fontweight="bold",
-        color=C["data"])
-ax.text(-0.01, 0, "Fused, 4 workloads", transform=ax.get_yaxis_transform(),
-        ha="right", va="center", fontsize=12, fontweight="bold", color=C["text"])
-ax.axvline(1, color=C["neutral"], lw=2)
-ax.text(1.02, 0.52, "unfused = 1×", fontsize=10, color=C["neutral"], va="center")
-ax.set_xlim(0.9, 2.8)
-ax.set_ylim(-0.5, 0.75)
-ax.set_yticks([])
-ax.set_xticks([1, 1.5, 2, 2.5])
-ax.set_xticklabels(["1×", "1.5×", "2×", "2.5×"])
-ax.spines["left"].set_visible(False)
-ax.grid(axis="x", color=C["grid"], linewidth=0.6)
-ax.set_axisbelow(True)
-ax.set_xlabel("Speedup on an NVIDIA Titan X (TVM, Figure 4)")
-sp.save(fig, out / "tvmfusion.svg")
+# ================================================================ registers and resident threads
+# H100 SM (compute capability 9.0, CUDA Programming Guide Tables 30 and 31):
+# 65,536 registers, at most 2,048 threads, at most 255 registers per thread.
+def resident_threads(regs):
+    return min(2048, (65536 // regs) // 32 * 32)
+
+
+reg_rows = []
+for regs, color_key in ((32, "data"), (64, "memory"), (128, "memory"), (255, "danger")):
+    threads = resident_threads(regs)
+    share = 100 * threads / 2048
+    reg_rows.append((f"{regs} registers", threads, color_key,
+                     f"{threads:,} threads: {share:g}%"))
+sp.hbars(out / "regs.svg", reg_rows, "threads", log=False, size=(5.8, 1.55),
+         xlabel="Threads resident on one H100 SM (derived)")
 
 
 # ================================================================ liveness (illustrative)
@@ -724,46 +732,69 @@ for k in (1, 2):
     liveness_fig(k)
 
 
-# ================================================================ NHWC and NCHW
-# HA Sec. 11.7.6: a 3 x 3 x 3 RGB image in linear memory, both orders.
-def layout_svg(step):
-    cell, x0 = 31, 25
-    parts = svg_open(900, 250, (C["text"],))
-    chans = [(C["danger"], C["danger_l"]), (C["data"], C["data_l"]),
-             (C["memory"], C["memory_l"])]
-    orders = [("NHWC: a pixel's three channels sit side by side",
-               [(p, ch) for p in range(9) for ch in range(3)]),
-              ("NCHW: a channel's nine pixels sit side by side",
-               [(p, ch) for ch in range(3) for p in range(9)])]
-    for k, (title, seq) in enumerate(orders):
-        y = 38 + k * 128
-        alpha = 1.0 if k == 0 or step >= 2 else 0.0
-        parts.append(f'<g opacity="{alpha}">')
-        parts.append(svg_text(x0, y - 20, title, 22, "700", C["text"], "start"))
-        for j, (pix, ch) in enumerate(seq):
-            x = x0 + j * cell
-            stroke, fill = chans[ch]
-            parts.append(rect(x, y, cell - 3, 40, fill, stroke, 1.5, 3))
-            parts.append(svg_text(x + (cell - 3) / 2, y + 20, str(pix), 21, "700", stroke))
-        if k == 0:
-            parts.append(f'<path d="M{x0} {y + 46} v8 h{3 * cell - 3} v-8" fill="none" '
-                         f'stroke="{C["text"]}" stroke-width="2.5"/>')
-            parts.append(svg_text(x0 + 3 * cell + 8, y + 58,
-                                  "pixel 0: one read of 3 adjacent channels", 20, "700",
-                                  C["text"], "start"))
+# ================================================================ Example 11.3: three checks
+# Data type and shape: NVIDIA Matrix Multiplication Background guide, Table 1
+# (FP16 multiples of 8, on A100 multiples of 64). The width 1,000 is
+# illustrative. Layout: HA Sec. 11.7.6, the 3 x 3 x 3 RGB image.
+def diag_svg(step):
+    parts = svg_open(900, 284, (C["text"],))
+    good, bad = (C["data"], C["data_l"]), (C["danger"], C["danger_l"])
+
+    def head(x, y, text):
+        parts.append(svg_text(x, y, text, 22, "700", C["text"], "start"))
+
+    def pill(x, y, w, text, colors):
+        parts.append(rect(x, y, w, 36, colors[1], colors[0], 2, 6))
+        parts.append(svg_text(x + w / 2, y + 18, text, 19, "700", colors[0]))
+
+    # 1: data type (top left)
+    parts.append(f'<g opacity="{1.0 if step >= 2 else 0.0}">')
+    head(10, 16, "1  Data type")
+    pill(10, 36, 420, "FP16 or BF16 → Tensor Core kernel", good)
+    pill(10, 80, 420, "FP32 → CUDA cores, unless TF32 is on", bad)
+    parts.append('</g>')
+    # 2: shape (top right), an illustrative width of 1,000 in blocks of 64
+    parts.append(f'<g opacity="{1.0 if step >= 3 else 0.0}">')
+    head(462, 16, "2  Shape (width 1,000, illustrative)")
+    bw, x0 = 24, 462
+    for k in range(16):
+        x = x0 + k * (bw + 2)
+        if k < 15:
+            parts.append(rect(x, 36, bw, 34, C["compute_l"], C["compute"], 1.5, 3))
         else:
-            for j in (0, 9, 18):
-                xc = x0 + j * cell + (cell - 3) / 2
-                parts.append(arrow(xc, y + 78, xc, y + 46, C["text"], 2.5))
-            parts.append(svg_text(x0 + 19 * cell + 4, y + 66,
-                                  "pixel 0: three reads, 9 apart", 20, "700", C["text"],
-                                  "start"))
-        parts.append('</g>')
-    write_svg(f"layout_step{step}.svg", parts)
+            parts.append(rect(x, 36, bw, 34, "white", C["danger"], 2, 3, 1.0, "4,3"))
+            parts.append(rect(x, 36, bw * 40 / 64, 34, C["danger_l"], C["danger"], 1.5, 3))
+    parts.append(svg_text(x0, 92, "1,000 = 15 × 64 + 40", 19, "700", C["danger"],
+                          "start"))
+    parts.append(svg_text(x0, 118, "A100: multiples of 64; pad to 1,024", 19, "700",
+                          C["data"], "start"))
+    parts.append('</g>')
+    # 3: layout (bottom), the first nine values of the 3 x 3 RGB image
+    parts.append(f'<g opacity="{1.0 if step >= 4 else 0.0}">')
+    head(10, 156, "3  Layout, for convolutions: the first nine values in memory")
+    chans = {"R": bad, "G": good, "B": (C["memory"], C["memory_l"])}
+    seqs = [("NHWC", [c + str(p) for p in range(3) for c in "RGB"]),
+            ("NCHW", ["R" + str(p) for p in range(9)])]
+    for k, (name, seq) in enumerate(seqs):
+        y = 176 + k * 54
+        parts.append(svg_text(10, y + 20, name, 21, "700", C["text"], "start"))
+        for j, lab in enumerate(seq):
+            col = chans[lab[0]]
+            x = 90 + j * 46
+            parts.append(rect(x, y, 42, 40, col[1], col[0], 1.5, 3))
+            parts.append(svg_text(x + 21, y + 20, lab, 18, "700", col[0]))
+        parts.append(svg_text(90 + 9 * 46 + 6, y + 20, "…", 22, "700", C["neutral"],
+                              "start"))
+        note = ("pixel 0's channels: one read" if k == 0
+                else "pixel 0's channels: 9 apart")
+        parts.append(svg_text(550, y + 20, note, 20, "700",
+                              C["data"] if k == 0 else C["danger"], "start"))
+    parts.append('</g>')
+    write_svg(f"diag_step{step}.svg", parts)
 
 
-for k in (1, 2):
-    layout_svg(k)
+for k in (1, 2, 3, 4):
+    diag_svg(k)
 
 # ================================================================ HBM energy per boundary
 MAP_BYTES = 56 * 56 * 64  # one image, INT8 (HA Lighthouse 11.2)
@@ -781,10 +812,19 @@ sp.hbars(out / "boundary.svg", [
 # ================================================================ carried over from Part 1
 # The same code as Lecture 11 Part 1's make_figs.py, so the moved frames keep
 # their figures and sources.
-sp.hbars(out / "weight_reads.svg", [
-    ("Filters held", 144, "data", "144"),
-    ("Filters spilled", 5184, "danger", "5,184: 36×"),
-], "reads", log=False, xlabel="Weight reads", size=(2.7, 1.35))
+fig, ax = plt.subplots(figsize=(4.6, 0.95))
+for y, (label, value, color_key, text) in enumerate((
+        ("Filters spilled", 5184, "danger", "5,184 reads: 36×"),
+        ("Filters held", 144, "data", "144 reads"))):
+    ax.barh(y, value, color=C[color_key], height=0.62)
+    ax.text(-0.01, y, label, transform=ax.get_yaxis_transform(), ha="right",
+            va="center", fontsize=14, fontweight="bold", color=C["text"])
+    ax.text(value + 80, y, text, va="center", fontsize=14, fontweight="bold",
+            color=C[color_key])
+ax.set_xlim(0, 8200)
+ax.set_ylim(-0.5, 1.5)
+ax.axis("off")
+sp.save(fig, out / "weight_reads.svg")
 
 
 def tiling_svg():
@@ -858,8 +898,8 @@ for k in (1, 2):
     for edge in (128, 256, 384):
         ax.axvline(edge, color=C["neutral"], lw=1, ls=":")
     alpha = 1.0 if k == 2 else 0.0
-    ax.annotate("136: 148 TFLOP/s\n6% more work, 36% more time",
-                (136, 148.2), xytext=(160, 72), textcoords="data",
+    ax.annotate("136: 148 TFLOP/s\n6% more work,\n36% more time",
+                (136, 148.2), xytext=(150, 22), textcoords="data",
                 fontsize=11, fontweight="bold", color=C["danger"], alpha=alpha,
                 arrowprops=dict(arrowstyle="->", color=C["danger"], alpha=alpha))
     ax.annotate("128: 190 TFLOP/s", (128, 189.7), xytext=(150, 284),
