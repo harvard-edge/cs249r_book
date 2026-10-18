@@ -14,6 +14,7 @@
     const signed = n => (n > 0 ? '+' : '') + fmt(n);
     const reduced = matchMedia('(prefers-reduced-motion: reduce)');
     const phone = () => matchMedia('(max-width:600px)').matches;
+    let manualStepping = true;
     let step = 0, spacing = .1, selected = 0, playing = false, animating = false, paused = false;
     let selectedScene = true, dead = false, version = 0, animations = [], holdTimer = null, scene, particles;
     const stages = ['Start: two float arrays', 'Quantize activations', 'Quantize weights', 'Accumulate pair 1', 'Accumulate pair 2', 'Accumulate pair 3', 'Requantize the sum', 'Activate and write output'];
@@ -27,7 +28,7 @@
     ['Float inputs', 'Integer grid', 'Multiply & retain', 'INT8 output'].forEach(label => route.append(el('li', '', label)));
     const controls = el('div', 'flow-controls'), buttons = {};
     for (const [key, label] of [['next', 'Next'], ['back', 'Back'], ['play', 'Play'], ['restart', 'Restart']]) { const b = el('button', '', label); b.type = 'button'; b.dataset.flowControl = key; buttons[key] = b; controls.append(b); }
-    buttons.next.title = 'During motion, finish and hold the current result. Otherwise, illustrate the next operation.';
+    buttons.next.title = 'Show one visual action, then pause. Press again to continue.';
     buttons.next.setAttribute('aria-description', buttons.next.title);
     const beat = el('span', 'flow-beat', 'Ready'); beat.setAttribute('aria-hidden', 'true'); controls.append(beat);
     const menuLabel = el('label', '', 'Sequence '), menu = el('select');
@@ -73,7 +74,9 @@
       menu.value = step; scaleMenu.value = spacing;
       const phase = step === 0 ? 0 : step <= 2 ? 1 : step <= 5 ? 2 : 3;
       [...route.children].forEach((node, i) => { node.classList.toggle('is-current', i === phase); node.classList.toggle('is-done', i < phase); if (i === phase) node.setAttribute('aria-current', 'step'); else node.removeAttribute('aria-current'); });
-      buttons.back.disabled = step === 0; buttons.next.disabled = step === 7;
+      buttons.back.disabled = step === 0; buttons.next.disabled = step === 7 && !moving;
+      root.dataset.paused = String(paused);
+      root.dataset.stepMode = manualStepping ? 'manual' : 'continuous';
       buttons.play.textContent = playing || animating && !paused ? 'Pause' : step === 7 && !selectedScene ? 'Replay' : 'Play';
       buttons.play.setAttribute('aria-pressed', String(playing || animating && !paused));
     }
@@ -125,7 +128,7 @@
       text(pw ? 180 : 380, 385, '6 FP32 values · 24 operand bytes', 'scene-small');
       action('Ready · Identify the inputs', 'ready');
       narration.textContent = 'Start with six floating-point values. Keep their identities while changing representation.';
-      note.textContent = 'Use Next to illustrate one operation and hold its result. Play follows the whole story, with reading pauses.';
+      note.textContent = 'Next shows one visual action, then pauses. Press Next again to continue. Play runs the whole sequence.';
     }
     function selectValue(index) { clearMotion(); playing = false; selected = index; selectedScene = true; drawSettled(); }
     function drawQuant(index, completed, settled) {
@@ -237,6 +240,8 @@
       tween(g, points.map(([x, y]) => ({transform: `translate(${x}px,${y}px)`})), duration);
       return g;
     }
+    function checkpoint(ms) { cue(ms, () => { if (manualStepping) { pause(); actionTitle.textContent += ' · paused'; } }); }
+    function resumeAction() { paused = false; actionTitle.textContent = actionTitle.textContent.replace(/ · paused$/, ''); animations.forEach(a => a.play()); setState(Number(root.dataset.accumulator), true); }
     function hold() { holdTimer = setTimeout(() => { if (!playing || dead) return; if (step === 7) { playing = false; setState(data().total, false); } else startStep(step + 1); }, 3500); }
     function endStage() { animations.forEach(a => a.cancel()); animations = []; animating = false; paused = false; selectedScene = false; drawSettled(); if (playing) hold(); }
     function startStep(next) {
@@ -249,6 +254,7 @@
           view.grid.dot.style.opacity = 0;
           const read = packet(fmt(view.values[index]), view.name + '[' + index + '] FP32', [[view.src[index].x, view.src[index].y], [view.grid.originalX, view.grid.y]], 400);
           cue(450, () => { read.remove(); view.grid.dot.style.opacity = 1; });
+          checkpoint(700); checkpoint(2000); checkpoint(3700);
           cue(1000, () => {
             action('2/3 · Round to a real level', 'round');
             narration.textContent = `${fmt(view.values[index])} → nearest real level. Original marker retained.`;
@@ -265,6 +271,7 @@
         cue(12600, endStage);
       } else if (step <= 5) {
         const view = drawReduction(step - 3, false); updateMath();
+        checkpoint(1950); checkpoint(2500); checkpoint(4100);
         const center = [view.compute.x + view.compute.w / 2, view.compute.y + view.compute.h / 2];
         const p1 = packet(d.qx[view.i], `x[${view.i}] code`, [[view.sourceX[view.i].x, view.sourceX[view.i].y], [view.compute.x, center[1] - 25]], 650);
         cue(700, () => { p1.remove(); view.centered.textContent = `${d.qx[view.i]} − 3 → ${d.qx[view.i] - 3}`; });
@@ -281,11 +288,13 @@
         cue(4900, endStage);
       } else if (step === 6) {
         const view = drawOutput(false); updateMath();
+        checkpoint(800); checkpoint(2080); checkpoint(2500);
         cue(1200, () => { action('2/3 · Round to the output grid', 'round'); tween(view.grid.dot, [{transform: 'translate(0px,0px)'}, {transform: `translate(${view.grid.mid - view.grid.originalX}px,0px)`}], 850); });
         cue(2100, () => { view.grid.label.textContent = fmt(d.real); view.grid.error.style.opacity = 1; action('3/3 · Identify the output code', 'store'); });
         cue(3800, endStage);
       } else {
         const view = drawOutput(false); updateMath();
+        checkpoint(600); checkpoint(2750); checkpoint(3300);
         cue(900, () => {
           action('2/3 · Apply ReLU', 'activate');
           const points = phone() ? [[view.a.x, view.a.y], [view.gate.x, view.gate.y], [view.gate.x, view.gate.y], [view.gate.x, 185], [view.out.x, 185], [view.out.x, view.out.y]] : [[view.a.x, view.a.y], [view.gate.x, view.gate.y], [view.gate.x, view.gate.y], [view.out.x, view.out.y]];
@@ -301,12 +310,16 @@
     function pause() { playing = false; paused = true; clearTimeout(holdTimer); animations.forEach(a => a.pause()); setState(Number(root.dataset.accumulator), animating); }
     on(buttons.play, 'click', () => {
       if (playing || animating && !paused) { pause(); return; }
-      playing = true;
-      if (animating) { paused = false; animations.forEach(a => a.play()); setState(Number(root.dataset.accumulator), true); }
+      manualStepping = false; playing = true;
+      if (animating) { resumeAction(); }
       else if (selectedScene && step > 0) startStep(step);
       else startStep(step === 7 ? 1 : step + 1);
     });
-    on(buttons.next, 'click', () => { if (animating) { clearMotion(); playing = false; selectedScene = false; drawSettled(); } else { playing = false; startStep(Math.min(7, step + 1)); } });
+    on(buttons.next, 'click', () => {
+      manualStepping = true; playing = false;
+      if (animating) { if (paused) resumeAction(); }
+      else startStep(Math.min(7, step + 1));
+    });
     on(root, 'pointerdown', e => { if (!e.target.closest('button,select,input,textarea,a,summary,[role=button],[contenteditable]')) root.focus({preventScroll: true}); });
     on(root, 'keydown', e => {
       if (e.defaultPrevented || e.repeat || e.isComposing || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;

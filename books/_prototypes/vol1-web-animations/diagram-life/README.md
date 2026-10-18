@@ -32,8 +32,9 @@ space to explain itself:
 Selecting an input inspects its approximation; changing spacing compares the
 same input at the same operation. Clicking a calculation block pauses playback
 and opens the current arithmetic. Back/menu jumps settle immediately; Play
-animates the selected operation. Next illustrates one operation and holds its
-result; pressing Next during motion finishes that operation without advancing.
+animates the selected operation. Next illustrates one visual action and pauses: Read, then Round, then Store.
+Pressing Next resumes only as far as the next action boundary. It never skips
+the unfinished operation. Repeated presses during motion do not queue actions.
 Replay restarts the story. No scene autoplays on opening. Reduced motion keeps the
 same inspectable states. Phone scenes fit the reading column naturally, with
 no internal panning, clipped diagram viewport, or automatic scrolling.
@@ -43,7 +44,8 @@ P previous, K play/pause, R restart. Tab into the figure or click its background
 to focus it. A visible guide and button shortcut metadata expose the mappings.
 Dropdowns, editable fields, modified keys, and held-key repeats are excluded.
 
-Each operation has an explicit action cue: Read → Round → Store, or Read pair →
+Manual stepping pauses indefinitely at each action boundary. Only Play enables
+continuous playback. Each operation has an explicit action cue: Read → Round → Store, or Read pair →
 Multiply → Add. Continuous playback holds completed results for 3.5 seconds.
 On phones, compact controls and the current action stay visible while the scene
 scrolls. Mobile viewport height changes preserve an in-progress animation.
