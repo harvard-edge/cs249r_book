@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Data plots for Lecture 7 (ML Frameworks).
 
-Every value is from the rendered chapter (ML Frameworks):
+Derived values come from calcs.py (figure_values() and the data loaders);
+inputs are from the rendered chapter (ML Frameworks) unless noted:
   - Operator counts (Sec. 7.3.6, figure 6): PyTorch ATen native functions
     2,658 (v2.9, 2025); TensorFlow operator registry 1,563 (v2.20, 2025);
     ONNX 203; Core ATen IR 192; JAX lax primitives about 135; XLA HLO 123.
@@ -12,9 +13,8 @@ Every value is from the rendered chapter (ML Frameworks):
   - Dispatch share (Sec. 7.3.4, illustrative model): 15 us per operation;
     a 1 us kernel spends 94 percent of its step in dispatch, a 100 us
     kernel 13 percent.
-  - Five small operations (Sec. 7.3.6, figure 7): eager, each 1 us kernel
-    waits on 10 us of Python dispatch; compiled, one 5 us launch and a
-    4 us fused kernel.
+  - PyTorch 2 speedups (Ansel et al., ASPLOS 2024, Table 3): TorchInductor
+    geometric-mean speedup over eager on an NVIDIA A100, float32, per suite.
   - ResNet-50 training memory (Sec. 7.4.3, illustrative): 102.4 MB of FP32
     weights; 8.4 to 12.4 GB in all at batch 64; batch 512 holds 64 to 96 GB
     of saved activations (Sec. 7.10) against an 80 GB H100.
@@ -22,6 +22,8 @@ Every value is from the rendered chapter (ML Frameworks):
     per direction; PCIe Gen5 x16 64 GB/s.
   - One MNIST training step (Sec. 7.7.3): 13.1 MFLOP at 67 TFLOP/s FP32 is
     about 0.2 us; 1.2 MB at 3.35 TB/s is about 0.4 us; host 95 us.
+  - ResNet-50 memory over two training steps, measured on the Apple GPU
+    (data/resnet50_memory.csv, written by profile_frameworks.py).
 
 Run from this folder: python3 make_figs.py
 """
@@ -33,6 +35,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import calcs  # noqa: E402
+
+V = calcs.figure_values()
 
 out = Path(__file__).parent
 C = sp.C
@@ -53,15 +60,18 @@ for k, step in ((1, 2), (2, None)):
 
 # -- GPT-2 XL decode: who sets the step time (three steps) -------------------
 sp.hbars_steps(out / "decode", [
-    ("Read 3 GB of weights (HBM)", 0.9, "memory", "0.9 ms"),
-    ("Launch 576 kernels", 2.88, "neutral", "2.9 ms"),
-    ("Eager: dispatch + launch", 8.64, "danger", "8.6 ms"),
+    ("Read 3 GB of weights (HBM)", V["decode_read_ms"], "memory", f"{V['decode_read_ms']:.1f} ms"),
+    (f"Launch {V['decode_kernels']} kernels", V["decode_launch_ms"], "neutral",
+     f"{V['decode_launch_ms']:.1f} ms"),
+    ("Eager: dispatch + launch", V["decode_host_ms"], "danger", f"{V['decode_host_ms']:.1f} ms"),
 ], "ms", log=False, xlabel="Time for one decoding step on an H100 (ms)")
 
 
 # -- Dispatch share of a small and a large operation (two steps) -------------
 def dispatch_share(path, k):
-    rows = [("Small op\n(1 μs kernel)", 15, 1), ("Large op\n(100 μs kernel)", 15, 100)]
+    t = V["t_op_us"]
+    rows = [("Small op\n(1 μs kernel)", t, calcs.SMALL_KERNEL_US),
+            ("Large op\n(100 μs kernel)", t, calcs.LARGE_KERNEL_US)]
     fig, ax = plt.subplots(figsize=sp.SHORT)
     for i, (label, disp, kern) in enumerate(rows):
         y = 1 - i
@@ -93,45 +103,54 @@ for k in (1, 2):
     dispatch_share(out / f"dispatch_share_step{k}.svg", k)
 
 
-# -- Five small operations: eager against compiled (two steps) ---------------
-def timeline(path, k):
-    fig, ax = plt.subplots(figsize=sp.SHORT)
-    ys = {"Eager": 1, "Compiled": 0}
-    for name, y in ys.items():
-        ax.text(-0.01, y, name, transform=ax.get_yaxis_transform(), ha="right",
+# -- PyTorch 2 measured speedups (two steps: inference, then training) -------
+def pt2_speedups(path, k):
+    suites = list(calcs.PT2_TABLE3)
+    fig, ax = plt.subplots(figsize=sp.SIZE)
+    hgt = 0.36
+    for i, suite in enumerate(suites):
+        y = len(suites) - 1 - i
+        inf, trn = calcs.PT2_TABLE3[suite]
+        ax.text(-0.01, y, suite, transform=ax.get_yaxis_transform(), ha="right",
                 va="center", fontsize=13, fontweight="bold", color=C["text"])
-    t = 0
-    for _ in range(5):
-        ax.barh(1, 10, left=t, color=C["neutral_l"], edgecolor=C["neutral"], height=0.55)
-        ax.barh(1, 1, left=t + 10, color=C["compute"], height=0.55)
-        t += 11
-    ax.text(2, 1.45, "Python dispatch", color=C["neutral"], fontsize=11, fontweight="bold")
-    ax.text(t + 0.8, 1, "55 μs", va="center", fontsize=12, fontweight="bold", color=C["danger"])
-    ax.text(0, 0.5, "launch cost (5 μs each) omitted; it would widen each gap",
-            va="center", fontsize=10, color=C["neutral"])
-    if k == 2:
-        ax.barh(0, 5, left=0, color=C["neutral_l"], edgecolor=C["neutral"], height=0.55)
-        ax.barh(0, 4, left=5, color=C["compute"], height=0.55)
-        ax.text(9.8, 0, "9 μs: 5 μs launch + 4 μs fused kernel", va="center", fontsize=12,
+        ax.barh(y + hgt / 2, inf, height=hgt, color=C["compute"])
+        ax.text(inf + 0.04, y + hgt / 2, f"{inf:.2f}×", va="center", fontsize=12,
                 fontweight="bold", color=C["compute"])
-    ax.set_xlim(0, 62)
-    ax.set_ylim(-0.5, 1.8)
+        shown = k >= 2
+        ax.barh(y - hgt / 2, trn if shown else 0, height=hgt, color=C["memory"],
+                alpha=1.0 if shown else 0.0)
+        ax.text(trn + 0.04, y - hgt / 2, f"{trn:.2f}×", va="center", fontsize=12,
+                fontweight="bold", color=C["memory"], alpha=1.0 if shown else 0.0)
+    ax.axvline(1.0, color=C["neutral"], lw=1.5, ls="--")
+    ax.text(1.0, len(suites) - 0.45, " eager = 1×", color=C["neutral"], fontsize=10,
+            fontweight="bold", va="bottom", ha="left")
+    ax.text(2.0, 2.78, "inference", color=C["compute"], fontsize=12, fontweight="bold",
+            ha="left", va="bottom")
+    ax.text(2.75, 2.78, "training", color=C["memory"], fontsize=12, fontweight="bold",
+            ha="left", va="bottom", alpha=1.0 if k >= 2 else 0.0)
+    ax.set_xlim(0, 3.3)
+    ax.set_ylim(-0.6, len(suites) + 0.1)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
-    ax.set_xlabel("Time (μs); orange = kernel running on the accelerator")
+    ax.grid(axis="x", color=C["grid"], linewidth=0.6)
+    ax.set_axisbelow(True)
+    ax.set_xlabel("Geometric-mean speedup over eager (A100, float32)")
     sp.save(fig, path)
 
 
 for k in (1, 2):
-    timeline(out / f"python_tax_step{k}.svg", k)
+    pt2_speedups(out / f"pt2_speedup_step{k}.svg", k)
 
 
 # -- ResNet-50 training memory, log scale (three steps) ----------------------
 def train_memory(path, k):
+    w = V["resnet_weights_mb"]
+    lo, hi = V["resnet_total_gb"]
+    a_lo, a_hi = V["resnet_act512_gb"]
     rows = [
-        ("FP32 weights", 102.4, 102.4, "memory", "102.4 MB"),
-        ("Training, batch 64", 8400, 12400, "compute", "8.4–12.4 GB in all"),
-        ("Saved activations,\nbatch 512", 64000, 96000, "danger", "64–96 GB"),
+        ("FP32 weights", w, w, "memory", f"{w:.1f} MB"),
+        ("Training, batch 64", lo * 1e3, hi * 1e3, "compute", f"{lo:.1f}–{hi:.1f} GB in all"),
+        ("Saved activations,\nbatch 512", a_lo * 1e3, a_hi * 1e3, "danger", f"{a_lo:.0f}–{a_hi:.0f} GB"),
     ]
     fig, ax = plt.subplots(figsize=sp.SIZE)
     n = len(rows)
@@ -147,8 +166,8 @@ def train_memory(path, k):
                     edgecolor=C[ck], height=0.62)
         ax.text(hi * 1.15, y, text, va="center", fontsize=13, fontweight="bold", color=C[ck])
     if k >= 3:
-        ax.axvline(80000, ymin=0.0, ymax=0.42, color=C["neutral"], lw=1.5, ls="--")
-        ax.text(70000, -0.72, "H100: 80 GB", ha="right", va="center", fontsize=10,
+        ax.axvline(calcs.H100_GB * 1e3, ymin=0.0, ymax=0.42, color=C["neutral"], lw=1.5, ls="--")
+        ax.text(calcs.H100_GB * 1e3 * 0.875, -0.72, f"H100: {calcs.H100_GB} GB", ha="right", va="center", fontsize=10,
                 fontweight="bold", color=C["neutral"])
     ax.set_xscale("log")
     ax.set_xlim(30, 3e6)
@@ -171,15 +190,64 @@ for k in (1, 2, 3):
 sp.hbars_steps(out / "bandwidth", [
     ("HBM3, on device", 3350, "memory", "3,350 GB/s"),
     ("NVLink 4.0, GPU to GPU", 450, "network", "450 GB/s each way"),
-    ("PCIe Gen5 x16, host link", 64, "network", "64 GB/s: 52× below HBM"),
+    ("PCIe Gen5 x16, host link", 64, "network", f"64 GB/s: {V['hbm_over_pcie']:.0f}× below HBM"),
 ], "GB/s", log=False, xlabel="Bandwidth on one H100 (GB/s)")
 
 # -- One MNIST training step: where the time goes (three steps) --------------
 sp.hbars_steps(out / "mnist_step", [
-    ("Arithmetic, 13.1 MFLOP", 0.2, "compute", "0.2 μs"),
-    ("Memory traffic, 1.2 MB", 0.4, "memory", "0.4 μs"),
-    ("Host dispatch and launch", 95, "danger", "95 μs"),
+    ("Arithmetic, 13.1 MFLOP", V["mnist_compute_us"], "compute", f"{V['mnist_compute_us']:.1f} μs"),
+    ("Memory traffic, 1.2 MB", V["mnist_memory_us"], "memory", f"{V['mnist_memory_us']:.1f} μs"),
+    ("Host dispatch and launch", V["mnist_host_us"], "danger", f"{V['mnist_host_us']:.0f} μs"),
 ], "μs", xlabel="Time on an H100 (μs, log scale; lower bounds and a host model)",
     value_fmt="{:g}")
+
+# -- ResNet-50 memory over two training steps, measured (two steps) ----------
+def resnet_measured(path, k):
+    rows, n_params = calcs.load_resnet_memory()
+    w_gb = n_params * calcs.FP32_B / 1e9
+    fig, ax = plt.subplots(figsize=(5.8, 2.5))
+    show = [r for r in rows if r[1] <= k]
+    xs = list(range(len(show)))
+    gb = [r[4] / 1e9 for r in show]
+    n1 = sum(1 for r in rows if r[1] == 1)
+    for s in (1, 2):
+        if s > k:
+            continue
+        idx = [i for i, r in enumerate(show) if r[1] == s]
+        fwd = [i for i in idx if show[i][2] == "forward"]
+        bwd = [i for i in idx if show[i][2] in ("backward", "after_backward")]
+        ax.axvspan(fwd[0], fwd[-1], color=C["memory_l"], lw=0)
+        ax.axvspan(bwd[0], bwd[-1], color=C["compute_l"], lw=0)
+    ax.plot(xs, gb, color=C["memory"], lw=2.0)
+    p1 = max(range(n1), key=lambda i: rows[i][4])
+    ax.text(p1 + 6, rows[p1][4] / 1e9 + 0.05, f"peak {rows[p1][4] / 1e9:.1f} GB", fontsize=12,
+            fontweight="bold", color=C["memory"], va="bottom")
+    f1 = [i for i in range(n1) if rows[i][2] == "forward"]
+    b1 = [i for i in range(n1) if rows[i][2] == "backward"]
+    ax.text((f1[0] + f1[-1]) / 2, 6.55, "forward", ha="center", fontsize=12,
+            fontweight="bold", color=C["memory"])
+    ax.text((b1[0] + b1[-1]) / 2, 6.55, "backward", ha="center", fontsize=12,
+            fontweight="bold", color=C["compute"])
+    ax.axhline(w_gb, color=C["neutral"], lw=1.5, ls="--")
+    ax.text(n1 * 0.5, w_gb + 0.12, f"weights {w_gb * 1e3:.0f} MB", ha="center",
+            va="bottom", fontsize=11, fontweight="bold", color=C["neutral"])
+    if k >= 2:
+        p2 = max(range(n1, len(rows)), key=lambda i: rows[i][4])
+        ax.text(p2 + 6, rows[p2][4] / 1e9 + 0.05, f"{rows[p2][4] / 1e9:.1f} GB", fontsize=12,
+                fontweight="bold", color=C["memory"], va="bottom")
+    ax.set_xlim(0, len(rows))
+    ax.set_ylim(0, 7.2)
+    ax.set_xticks([n1 / 2, n1 + n1 / 2])
+    ax.set_xticklabels(["training step 1", "training step 2"])
+    ax.tick_params(axis="x", length=0, labelsize=12)
+    ax.set_ylabel("Allocated (GB)")
+    ax.set_xlabel("One sample after each layer's forward and backward", fontsize=11)
+    ax.grid(axis="y", color=C["grid"], linewidth=0.6)
+    ax.set_axisbelow(True)
+    sp.save(fig, path)
+
+
+for k in (1, 2):
+    resnet_measured(out / f"resnet_measured_step{k}.svg", k)
 
 print("figures written")
