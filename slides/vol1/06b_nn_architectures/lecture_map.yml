@@ -3,7 +3,7 @@ lecture: "06b"
 title: "Network Architectures, Part 2: Transformers and Recommenders"
 layer: models
 minutes: 75
-notes_minutes: 71.5
+notes_minutes: 72.0
 target_ideas: 30
 thesis: "Attention and embedding lookups move the binding limit from arithmetic to memory: a transformer pays score work that grows with the square of its context and a cache that grows with every token it keeps, and a recommender must find room for its tables before any arithmetic runs."
 
@@ -103,7 +103,7 @@ concept_questions:
     q: "What would storing the scores cost?"
     picture: "Part 1's score-memory parabola (12 heads, FP16, one layer), then the Napkin Math 6.1 given card and lines"
     numbers: "4,096 tokens: 33.6 MB per head per layer (Definition 6.5), 0.40 GB for 12 heads, 1.61 GB at 8,192 (derived); 100,000 tokens x 12 heads: 1.2 x 10^11 scores, 240 GB per layer, 7,680 GB for 32 retained layers (Napkin Math 6.1)"
-    example: "BERT's 512 positions: 4,096 tokens would need 64x the score memory, and no memory fix adds positions the model never learned (Example 6.4). Note: Lecture 8 shows how tiling avoids storing the scores."
+    example: "BERT's 512 positions: 4,096 tokens would need 64x the score memory, and no memory fix adds positions the model never learned (Example 6.4). Note: Lecture 8b shows how tiling avoids storing the scores."
     read: "6.6.4, 6.7.4"
   - id: 9
     q: "Why does one model process a prompt in parallel but write its reply one token at a time?"
@@ -115,11 +115,11 @@ concept_questions:
     q: "Why does decode read every weight for every token?"
     picture: "two bars on a log axis: decode at 1 FLOP/byte against the H100 ridge at 295 FLOP/byte (both FP16); then the estimate card"
     numbers: "decode 1.0 FLOP/byte in FP16 (6.7.4); H100 989 TFLOP/s dense FP16 and 3.35 TB/s, ridge 295 FLOP/byte (MLSysIM H100); a 70B model streams 140 GB per token (6.7.4): 140 GB / 3.35 TB/s = 42 ms, at most about 24 tokens/s for one sequence (derived)"
-    example: "A faster arithmetic unit does not help; the bytes per token do. Note: Lecture 13 shows what a server does about this."
+    example: "A faster arithmetic unit does not help; the bytes per token do. Note: Lecture 13b shows how a server batches decode to share each weight read."
     read: "6.7.4"
   - id: 11
     q: "What is the KV cache, and how large is it per token?"
-    picture: "the per-token formula 2 x layers x KV width x bytes, filled in for GPT-2 XL; then Part 1's three-memory plot regenerated"
+    picture: "a two-step build of one layer's cache after 'The cat sat on': query, key, and value rows per token; then decode appends k5 and v5, the new query q5 reads every row, and the old queries are crossed out. Then the per-token formula 2 x layers x KV width x bytes, filled in for GPT-2 XL, with KV width = KV heads x head width (GPT-2 XL 25 x 64 = 1,600; Llama 3.1 8B 8 x 128 = 1,024) and a strip of 32 query heads grouped onto 8 key-value heads; then Part 1's three-memory plot regenerated"
     numbers: "GPT-2 XL 2 x 48 x 1,600 x 2 B = 307.2 KB per token (6.7.4); 314.6 MB at its 1,024-token window (derived); the cache passes the 3 GB of FP16 weights near 10,000 tokens; one layer's scores would fill an 80 GB device near 41,000 (6.7.4, figure 13)"
     example: "Keys and values are kept because each new query reads all of them; old queries are never read again (6.7.4)"
     read: "6.7.4"
@@ -131,7 +131,7 @@ concept_questions:
     read: "6.7.4"
   - id: 13
     q: "Why does a recommender turn IDs into table rows?"
-    picture: "one big number (79 percent of AI inference cycles at Meta went to recommendation, Gupta et al. 2020), then book fig-dlrm-pipeline"
+    picture: "one big number (79 percent of AI inference cycles at Facebook went to recommendation, Gupta et al. 2020), then book fig-dlrm-pipeline"
     numbers: "Gupta et al. 2020; DLRM four stages (Naumov et al. 2019; 6.8.2)"
     example: "User 1042 is no closer to user 1043 than to user 9,000,000 (6.8.1); GPT-2 XL's 80M-weight token table is the same structure"
     read: "6.8.1, 6.8.2"
@@ -181,8 +181,8 @@ active_learning:
     answer: "C, about 10 percent (3.36B of 34.8B). Attention's products overtake the rest only past 6 d = 9,600 tokens."
   - at_minute: 33
     type: concept_question
-    prompt: "True or false: (1) BERT could read 4,096 tokens on an accelerator with enough memory. (2) Twelve heads of width 64 do twelve times the score arithmetic of one head of width 768."
-    answer: "(1) False: BERT learned 512 positions, and 4,096 tokens would also need 64x the score memory. (2) False: the head widths sum to 768, so the arithmetic is the same."
+    prompt: "True or false: (1) BERT could read 4,096 tokens on an accelerator with enough memory. (2) A tiled attention kernel that never stores the scores makes attention's work grow linearly with context."
+    answer: "(1) False: BERT learned 512 positions, and 4,096 tokens would also need 64x the score memory. (2) False: tiling removes the S^2 storage; the S^2 multiply-adds remain (6.6.4)."
   - at_minute: 39
     type: estimate
     prompt: "A 70B model in FP16 decodes one sequence on an H100 (3.35 TB/s). At best, how many tokens per second?"
@@ -197,8 +197,8 @@ active_learning:
     answer: "51.2 GB, 64 percent; two tables 102.4 GB do not fit."
   - at_minute: 61
     type: diagnose
-    prompt: "Fill in the binding limit for each lighthouse, and say which ones could train on one accelerator."
-    answer: "ResNet-50 compute; MobileNetV2 latency on a phone; KWS power; GPT-2 XL decode bandwidth; DLRM capacity. All train on one accelerator except DLRM, whose 400 GB of training state does not fit."
+    prompt: "Part 1's three rows (ResNet-50, MobileNetV2, KWS) are shown filled in gray. Fill in the binding limit for GPT-2 XL and DLRM, and say which models could train on one accelerator."
+    answer: "GPT-2 XL decode bandwidth (at its size, kernel launch overhead competes; Lecture 7); DLRM capacity. Part 1's rows: ResNet-50 compute; MobileNetV2 compute under a phone's latency budget; KWS power. All train on one accelerator except DLRM, whose 400 GB of training state does not fit."
 
 open_questions:
   - "A longer window costs memory in proportion and score work in square. Is it worth it when models use long contexts less well? On Fiction.LiveBench, DeepSeek-R1-0528 scores 0.917 at 400 tokens and 0.583 at 60K (MLSysIM literature series fiction_livebench_by_length)."
@@ -215,16 +215,16 @@ left_to_reading:
   - concept: "Positional encodings (sinusoidal, rotary)"
     why: "One line in the block notes; the systems cost is negligible beside attention and the cache."
   - concept: "Tiled attention (FlashAttention) and online softmax"
-    why: "Owned by Lecture 8, which teaches how tiling avoids storing the scores; this lecture says only that the scores would not fit."
+    why: "Owned by Lecture 8b, which teaches how tiling avoids storing the scores; this lecture says only that the scores would not fit, and that tiling removes the storage but not the S^2 arithmetic."
   - concept: "Batching decode, KV cache budgets under load, paging, continuous batching, serving metrics"
-    why: "Owned by Lecture 13; this lecture owns what the architecture commits the machine to (bytes per token, cache per token)."
+    why: "Owned by Lecture 13b; this lecture owns what the architecture commits the machine to (bytes per token, cache per token)."
   - concept: "Architecture selection flowchart and the wildlife-monitoring worked example"
     why: "A procedure better read than heard; the diagnose activity practices its core."
   - concept: "Shared building blocks table and data movement primitives other than all-to-all"
-    why: "Summary material in 6.9.3; Lectures 8 and 11 use the primitives."
+    why: "Summary material in 6.9.3; Lecture 11 matches primitives to execution units. Embedding-table partitioning is left to 6.8.3; no Volume I lecture teaches it."
 
 closing:
-  return_to_hook: "Price one 1M-token request with a model of Llama 3.1 8B's shape (illustrative, since its card states a 128K window): score work 250,000x a 2K window, about 5 x 10^17 FLOP of attention per prompt, nearly 9 minutes of an H100's peak (half with the causal mask); scores 2 TB per head per layer if stored, so they cannot be (Lecture 8); KV cache 131 GB against 80 GB of device memory. The window is a memory budget before it is a feature."
+  return_to_hook: "Price one 1M-token request with a model of Llama 3.1 8B's shape (illustrative, since its card states a 128K window): score work 250,000x a 2K window, about 5 x 10^17 FLOP of attention per prompt, nearly 9 minutes of an H100's peak (half with the causal mask); scores 2 TB per head per layer if stored, so they cannot be (Lecture 8b); KV cache 131 GB against 80 GB of device memory. A 1M-token window first has to fit in memory."
   read_and_practice: ["Network Architectures, 6.6 to 6.10", "self-check questions in 6.6, 6.7, and 6.8", "TinyTorch attention module"]
   further_reading:
     - cite: "Network Architectures, 6.7.4 and 6.9 (Comparing and Choosing Architectures)"
@@ -249,7 +249,7 @@ closing:
 coverage:
   primary_taught:
     - Quadratic attention
-    - "Autoregressive decode and the KV cache (phase physics and per-token sizing; serving budgets are Lecture 13)"
+    - "Autoregressive decode and the KV cache (phase physics and per-token sizing; serving budgets are Lecture 13b)"
     - Embedding capacity wall
     - Architecture selection by workload profile
     - "Every family lowers onto GEMM (fused QKV projection, the block's MLP, DLRM's MLPs; convolution's lowering is taught in Part 1)"
@@ -259,8 +259,8 @@ coverage:
     - Inductive bias buys data and cost
     - "Skip connections and normalization (recalled in the transformer block)"
   boundaries:
-    - "Lecture 8 owns tiled attention; Part 2 shows why the scores cannot be stored and stops there."
-    - "Lecture 13 owns batching decode, the KV budget under load, paging, and continuous batching; it recalls 307.2 KB per token from this lecture and reuses Llama 3 8B's 131,072 B per token, which agrees with Part 2's 131 KB bar."
+    - "Lecture 8b owns tiled attention; Part 2 shows why the scores cannot be stored and stops there."
+    - "Lecture 13b owns batching decode, the KV budget under load, paging, and continuous batching. Lecture 13 recalls 307.2 KB per token; Lecture 13b reuses Llama 3 8B's 131,072 B per token, which agrees with Part 2's 131 KB bar."
   secondary: []
 
 notes_for_author:
@@ -269,6 +269,7 @@ notes_for_author:
   - "Llama 3.1 8B's window is recorded in MLSysIM only on Llama3_70B; add context_length to Llama3_8B if the deck computes from it."
   - "Table 8 intensities are FP32 weight-only proxies; the deck never places them against the FP16 ridge of 295."
   - "The recommender request (26 features, one 128-wide FP32 row each) is illustrative: Criteo has 26 categorical features, but production requests can be multi-hot, and DLRM benchmark configurations often use narrower rows."
-  - "2026-10-17 build: KV cache bars use decimal KB, as GPT-2 XL's 307.2 KB does: Llama 2 7B 524 KB, Llama 3.1 8B 131 KB (131,072 B, as Lecture 13 uses), Llama 2 70B 328 KB (2.6 MB unshared), PaLM 121 KB. The plan's 512 KB and 128 KB were the same byte counts in binary units."
+  - "2026-10-17 build: KV cache bars use decimal KB, as GPT-2 XL's 307.2 KB does: Llama 2 7B 524 KB, Llama 3.1 8B 131 KB (131,072 B, as Lecture 13b uses), Llama 2 70B 328 KB (2.6 MB unshared), PaLM 121 KB. The plan's 512 KB and 128 KB were the same byte counts in binary units."
   - "2026-10-17 build: the book figures for attention (figures 8, 9, 10), the transformer (11), prefill and decode (12), and DLRM (14) have labels too small at slide size, so the deck uses slide-size redraws credited 'after the chapter's figure'; only the all-to-all margin figure is used as is. Part 1's plots that moved here (state_memory, quadratic, context_memory, capacity) are regenerated from a copy of Part 1's code in images/make_figs.py."
   - "2026-10-17 build: the 79 percent share is quoted from Gupta et al. 2020 as the plan gives it; the chapter itself says only 'most of its AI inference cycles'."
+  - "2026-10-18 revision (round 1 review): callbacks now name Lecture 8b (FlashAttention tiling) and Lecture 13b (LLM serving: batching decode, paging); the embedding-partitioning LINK to Lecture 8 is replaced by a pointer to 6.8.3. New frame before the KV formula: a two-step picture of one layer's cache (keys and values kept, each decode step appends a row and the new query reads every row, old queries crossed out). The formula slide gains a step: KV width = KV heads x head width, with a strip of 32 query heads grouped onto 8 key-value heads. The prefill and decode slide is redrawn at full size with the KV cache bar, so the term is named with a picture before it is sized; the recall plot's label no longer uses the term early. The 3.34 TFLOP prompt total moved from the GPT-2 XL weights slide to the predict reveal (with its derivation) so the predict is not spoiled. True-or-false claim 2 is now the tiling claim (6.6.4); the heads claim repeated a slide title. The chapter's KV-growth pitfall is a WARN on the sharing slide. The lighthouse diagnose shows Part 1's three rows in gray and asks only for GPT-2 XL and DLRM (3.5 min); MobileNetV2 reads 'Compute (phone latency)' per 6.11. Label collisions fixed in block_macs (annotations on the plot), million_request, context_memory, and state_memory. Notes 72.0 minutes; 9.5 minutes tagged [OPTIONAL]."

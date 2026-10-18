@@ -112,8 +112,9 @@ def state_memory():
     ax.plot(s, KV_XL * s, color=C["danger"], lw=3.5)
     ax.text(10500, 3.07e9, "3.1 GB", color=C["danger"], fontsize=12,
             fontweight="bold", va="center")
-    ax.text(150, 3e8, "GPT-2 XL KV cache:\n307.2 KB per token",
-            color=C["danger"], fontsize=12, fontweight="bold", ha="center")
+    ax.text(1500, 1e5, "Transformer: 307.2 KB\nkept per token (GPT-2 XL)",
+            color=C["danger"], fontsize=12, fontweight="bold", ha="center",
+            va="center")
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlim(10, 1e4)
@@ -174,15 +175,17 @@ def block_macs(step):
     ax.plot(s, 2 * s ** 2 * D_XL, color=C["memory"], lw=3.2)
     ax.text(140, 3e11, "Projections + MLP: 12 S d²", color=C["compute"],
             fontsize=11.5, fontweight="bold")
-    ax.text(330, 2.5e7, "Attention products: 2 S² d", color=C["memory"],
-            fontsize=11.5, fontweight="bold")
-    notes = [  # shown from step k: (x, label, color)
-        (2, 1024, "1,024 tokens:\nattention is\nabout 10%", C["text"]),
-        (3, 6 * D_XL, "6d = 9,600:\nequal", C["danger"]),
-        (4, 1e5, "100K tokens:\nattention is\n10× the rest", C["memory"]),
+    ax.text(1.4e4, 3e10, "Attention\nproducts: 2 S² d", color=C["memory"],
+            fontsize=11.5, fontweight="bold", va="top", linespacing=1.05)
+    notes = [  # shown from step k: (x, label, color, text position, ha, va)
+        (2, 1024, "1,024 tokens:\nattention is about 10%", C["text"],
+         (1150, 1.2e9), "left", "top"),
+        (3, 6 * D_XL, "6d = 9,600:\nequal", C["danger"],
+         (7500, 1.5e12), "right", "bottom"),
+        (4, 1e5, "100K tokens: attention\nis 10× the rest", C["memory"],
+         (5.5e4, 1.8e14), "center", "bottom"),
     ]
-    ys = [0.86, 0.50, 0.22]
-    for (k, x, label, col), yy in zip(notes, ys):
+    for k, x, label, col, pos, ha, va in notes:
         alpha = 1.0 if step >= k else 0.0
         lo, hi = sorted((2 * x * x * D_XL, 12 * x * D_XL ** 2))
         if k == 3:
@@ -193,8 +196,8 @@ def block_macs(step):
             for y in (lo, hi):
                 ax.plot([x], [y], "o", ms=7, color=col, mec="white", zorder=5,
                         alpha=alpha)
-        fig.text(0.80, yy, label, color=col, fontsize=11, fontweight="bold",
-                 va="center", alpha=alpha, linespacing=1.05)
+        ax.text(*pos, label, color=col, fontsize=11, fontweight="bold",
+                ha=ha, va=va, alpha=alpha, linespacing=1.05)
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlim(128, 2e5)
@@ -208,7 +211,7 @@ def block_macs(step):
     ax.set_ylabel("MACs per block\n(log scale)")
     ax.grid(color=C["grid"], lw=0.6)
     save(fig, out / f"block_macs_step{step}.svg",
-         dict(left=0.13, right=0.77, bottom=0.20, top=0.97))
+         dict(left=0.13, right=0.97, bottom=0.20, top=0.97))
 
 
 # --- Segment 2: the S-squared parabola (Part 1's plot, column size) --------
@@ -272,7 +275,8 @@ def context_memory(step):
     s = np.logspace(np.log10(512), np.log10(131072), 200)
     dev = 80 * 2 ** 30 / 1e9
     ax.axhline(dev, color=C["danger"], lw=1.3, ls=":")
-    ax.text(600, dev / 2.2, "One 80 GB accelerator", color=C["danger"], fontsize=11)
+    ax.text(600, dev / 1.5, "One 80 GB accelerator", color=C["danger"], fontsize=11,
+            va="top")
     ax.plot(s, np.full_like(s, 3.0), color=C["memory"], lw=3.2)
     ax.text(600, 3.0 * 1.4, "Weights, 3 GB (fixed)", color=C["memory"],
             fontsize=12, fontweight="bold")
@@ -415,7 +419,7 @@ def million_request(step):
     scores = 2 * s ** 2 / 1e9                      # 2,000 GB per head per layer
     rows = [("Weights, BF16", weights, "memory", f"{weights:.1f} GB"),
             ("KV cache, 1M tokens", kv, "compute", f"{kv:.0f} GB"),
-            ("Scores if stored", scores, "danger", "2 TB per head per layer")]
+            ("Scores if stored", scores, "danger", "2 TB per head, per layer")]
     fig, ax = plt.subplots(figsize=(5.8, 1.95))
     n = len(rows)
     for i, (label, v, ck, txt) in enumerate(rows):
@@ -428,9 +432,16 @@ def million_request(step):
                         ls="--", lw=1.4, height=0.6)
             else:
                 ax.barh(y, v - 1, left=1, color=C[ck], height=0.6)
-            ax.text(v * 1.15 if not ghost else 2.2, y, txt, va="center",
-                    fontsize=12, fontweight="bold",
-                    color=C[ck] if not ghost else C["danger"])
+            if ghost:
+                ax.text(1.12, y, txt, va="center", ha="left", fontsize=11,
+                        fontweight="bold", color=C["danger"], zorder=6,
+                        bbox=dict(facecolor="white", edgecolor="none", pad=1.5))
+            elif v < 80:
+                ax.text(v / 1.12, y, txt, va="center", ha="right", fontsize=12,
+                        fontweight="bold", color="white")
+            else:
+                ax.text(v * 1.15, y, txt, va="center", fontsize=12,
+                        fontweight="bold", color=C[ck])
         ax.text(0.92, y, label, ha="right", va="center", fontsize=12,
                 fontweight="bold", color=C["text"] if shown else "white")
     ax.axvline(80, color=C["danger"], lw=2, ls=":")
