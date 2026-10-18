@@ -2603,6 +2603,51 @@ Checkpointing and fusion (@sec-ml-frameworks-memory-management-strategies-b008) 
 
 Allocation itself is also slow. Invoking device memory allocation and release (`cudaMalloc` and `cudaFree`) incurs substantial driver overhead, and `cudaFree` can block the host until all previously queued device work completes, draining accelerator command queues [@paszke2019pytorch]. To eliminate this latency, modern frameworks intercept allocations with **caching allocators**\index{Memory management!caching allocators} that maintain pools of pre-reserved device memory blocks across training iterations. Suballocating from these pools amortizes device allocation costs and avoids the synchronizations that these calls can force, though varying tensor lifetimes can still induce memory fragmentation.
 
+The snapshots in @fig-allocator-live-cached-blocks distinguish tensor lifetime from allocator reservation. They assume a fixed pool with no additional segment growth, compaction, or virtual-address remapping, so the free-block geometry determines whether a request fits.
+
+::: {#fig-allocator-live-cached-blocks fig-env="figure" fig-pos="htb" fig-cap="**Live and Cached Allocator Blocks**: Equal widths represent equal amounts of a fixed virtual-address pool. Releasing a tensor makes its block reusable without reducing the reserved pool. After splitting a cached block and releasing another tensor, the remaining free regions cannot satisfy the larger contiguous request. The example permits no pool growth, compaction, or remapping." fig-alt="Three equal-width pool snapshots show tensors A, B, and C; then a hatched cached block in place of B; then cached regions separated by live tensors D and C. A dashed request spans more units than either free region."}
+
+```{.tikz}
+\begin{tikzpicture}[font=\footnotesize\sffamily,
+ live/.style={draw=BlueLine,fill=BlueL,line width=0.75pt},
+ cached/.style={draw=BlueLine,fill=white,pattern=north east lines,pattern color=BlueLine!45,line width=0.75pt}]
+\node[anchor=west,font=\small\sffamily\bfseries] at (0,0.7) {(a) All blocks live};
+\node[anchor=east,text=GrayLine] at (12,0.7) {Increasing virtual address $\longrightarrow$};
+\draw[live] (0,-0.35) rectangle (4,0.35);
+\draw[live] (4,-0.35) rectangle (8,0.35);
+\draw[live] (8,-0.35) rectangle (12,0.35);
+\node at (2,0) {Tensor A};\node at (6,0) {Tensor B};\node at (10,0) {Tensor C};
+\node[anchor=west] at (0,-0.85) {Reserved: 12 units\qquad Live: 12\qquad Reusable: 0};
+\node[anchor=west,font=\small\sffamily\bfseries] at (0,-1.65) {(b) Release B; retain its storage in the pool};
+\draw[live] (0,-2.7) rectangle (4,-2);
+\draw[cached] (4,-2.7) rectangle (8,-2);
+\draw[live] (8,-2.7) rectangle (12,-2);
+\node at (2,-2.35) {Tensor A};\node[fill=white,inner sep=2pt] at (6,-2.35) {Cached: 4 units};\node at (10,-2.35) {Tensor C};
+\node[anchor=west] at (0,-3.2) {Reserved: 12 units\qquad Live: 8\qquad Reusable: 4};
+\node[anchor=west,font=\small\sffamily\bfseries] at (0,-4) {(c) Reuse part of B for D; release A};
+\draw[cached] (0,-5.05) rectangle (4,-4.35);
+\draw[live] (4,-5.05) rectangle (6,-4.35);
+\draw[cached] (6,-5.05) rectangle (8,-4.35);
+\draw[live] (8,-5.05) rectangle (12,-4.35);
+\node[fill=white,inner sep=2pt] at (2,-4.7) {Cached: 4 units};
+\node at (5,-4.7) {D: 2};
+\node[fill=white,inner sep=2pt] at (7,-4.7) {Free: 2};
+\node at (10,-4.7) {Tensor C};
+\node[anchor=west] at (0,-5.55) {Reserved: 12 units\qquad Live: 6\qquad Reusable: 6\qquad Largest free block: 4};
+\draw[RedLine,dashed,line width=0.85pt] (0,-6.85) rectangle (6,-6.15);
+\node[text=RedLine] at (3,-6.5) {Request: 6 contiguous units};
+\node[anchor=west,align=left,text=RedLine,text width=51mm] at (6.6,-6.5) {Cannot fit in either free block\\under this fixed-pool policy};
+\draw[live] (0,-7.7) rectangle (0.45,-7.35);
+\node[anchor=west] at (0.6,-7.525) {Live tensor storage};
+\draw[cached] (5.2,-7.7) rectangle (5.65,-7.35);
+\node[anchor=west] at (5.8,-7.525) {Cached and reusable};
+\end{tikzpicture}
+```
+
+:::
+
+The failed request needs one contiguous virtual-address range, not physically contiguous DRAM. A real allocator may obtain another segment or use a different reuse policy, so this snapshot explains a possible failure under the stated policy rather than predicting every out-of-memory error. Device usage also includes allocations outside this pool.
+
 ::: {#psp-frameworks-caching-allocator-utilization .callout-perspective title="Caching allocator and utilization"}
 
 Caching allocators primarily reduce allocation overhead and improve block reuse. Two considerations remain:

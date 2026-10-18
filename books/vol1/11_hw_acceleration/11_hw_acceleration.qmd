@@ -2775,6 +2775,55 @@ True memory irregularity arises instead from unstructured sparsity,[^fn-sparsity
 
 Irregularity degrades performance through distinct mechanisms, and treating them as one memory problem can point to the wrong optimization. Scattered addresses may turn one logical access into several memory transactions, so each fetched cache line carries few useful payload bytes. Indirection can also serialize address generation: the system must fetch an index or pointer before it knows which payload to request, limiting memory-level parallelism even when aggregate bandwidth remains available. Input-dependent routing creates a third failure mode when some processing elements receive longer queues than others; completion time follows the slowest queue while neighboring units idle. Variable-sized allocations may fragment capacity, but fragmentation is neither necessary nor sufficient for irregular access. A sequential stream can saturate bandwidth without being irregular, whereas a dependent lookup chain can stall far below peak bandwidth.
 
+The paired address strips in @fig-irregular-address-transactions isolate spatial utilization from address dependence. The example counts traffic at a declared sector interface, so it does not infer physical DRAM traffic from logical addresses alone.
+
+::: {#fig-irregular-address-transactions fig-env="figure" fig-pos="htb" fig-cap="**Spatial Utilization and Address Dependencies**: Each cell is a four-byte word; heavy outlines mark aligned 16-byte sectors fetched at an illustrative interface. With a cold cache, no reuse, and requests merged within each sector, adjacent requests fetch one sector while scattered requests fetch four for the same useful payload. The separate dependency chain shows why a payload read may have to wait even when bandwidth is available." fig-alt="Two strips of sixteen word cells show four adjacent requested addresses within one sector and four scattered requested addresses in separate sectors. Below, arrows connect an index read, a known payload address, and a dependent payload read."}
+
+```{.tikz}
+\begin{tikzpicture}[font=\footnotesize\sffamily,
+ flow/.style={-{Stealth[length=1.8mm]},line width=0.8pt,shorten >=2pt,shorten <=2pt}]
+\node[anchor=west,font=\small\sffamily\bfseries] at (0,0.7) {(a) Adjacent requests};
+\node[anchor=west] at (0,0.15) {Requested byte addresses: 0, 4, 8, 12};
+\foreach \i in {0,...,15} {\draw[GrayLine,fill=white] (0.75*\i,-0.85) rectangle ++(0.75,0.65);}
+\foreach \i/\addr in {0/0,1/4,2/8,3/12} {
+ \draw[BlueLine,fill=GreenL] (0.75*\i,-0.85) rectangle ++(0.75,0.65);
+ \node at (0.75*\i+0.375,-0.525) {\addr};
+}
+\draw[BlueLine,line width=1pt] (0,-0.85) rectangle (3,-0.2);
+\foreach \x/\lab in {1.5/0--15,4.5/16--31,7.5/32--47,10.5/48--63} {\node[text=GrayLine] at (\x,-1.25) {\lab};}
+\node[anchor=west] at (0,-1.9) {Useful payload: 16 B\qquad Fetched: one 16 B sector};
+\node[anchor=west,font=\small\sffamily\bfseries] at (0,-2.8) {(b) Scattered requests};
+\node[anchor=west] at (0,-3.35) {Requested byte addresses: 0, 16, 32, 48};
+\foreach \i in {0,...,15} {\draw[BlueLine,fill=BlueL] (0.75*\i,-4.35) rectangle ++(0.75,0.65);}
+\foreach \i/\addr in {0/0,4/16,8/32,12/48} {
+ \draw[BlueLine,fill=GreenL] (0.75*\i,-4.35) rectangle ++(0.75,0.65);
+ \node at (0.75*\i+0.375,-4.025) {\addr};
+}
+\foreach \x/\lab in {0/0--15,3/16--31,6/32--47,9/48--63} {
+ \draw[BlueLine,line width=1pt] (\x,-4.35) rectangle ++(3,0.65);
+ \node[text=GrayLine] at (\x+1.5,-4.75) {\lab};
+}
+\node[anchor=west] at (0,-5.4) {Useful payload: 16 B\qquad Fetched: four 16 B sectors};
+\draw[BlueLine,fill=GreenL] (0,-6.15) rectangle (0.45,-5.8);
+\node[anchor=west] at (0.55,-5.975) {Requested word};
+\draw[BlueLine,fill=BlueL] (4.2,-6.15) rectangle (4.65,-5.8);
+\node[anchor=west] at (4.75,-5.975) {Fetched surplus};
+\draw[GrayLine,fill=white] (8.6,-6.15) rectangle (9.05,-5.8);
+\node[anchor=west] at (9.15,-5.975) {Not fetched};
+\draw[GrayLine,line width=0.5pt] (0,-6.7) -- (12,-6.7);
+\node[anchor=west,font=\small\sffamily\bfseries] at (0,-7.3) {(c) Dependent address: a separate constraint};
+\node[draw=BlueLine,fill=BlueL,align=center,text width=25mm,minimum height=12mm,inner sep=4pt] (idx) at (1.6,-8.5) {Read index\\or pointer};
+\node[draw=GrayLine,fill=GrayL,align=center,text width=25mm,minimum height=12mm,inner sep=4pt] (addr) at (6,-8.5) {Payload address\\becomes known};
+\node[draw=BlueLine,fill=BlueL,align=center,text width=25mm,minimum height=12mm,inner sep=4pt] (data) at (10.4,-8.5) {Issue dependent\\payload read};
+\draw[flow] (idx.east) -- (addr.west);
+\draw[flow] (addr.east) -- (data.west);
+\end{tikzpicture}
+```
+
+:::
+
+Packing requests into fewer sectors reduces surplus bytes at that interface. It does not remove the dependency in the lower panel: the payload request still waits until the index or pointer returns its address. Increasing bandwidth and exposing independent requests therefore address different limits.
+
 Diagnosis should therefore begin with the mechanism that prevents forward progress. A low ratio of useful payload bytes to transferred bytes indicates poor spatial utilization or coalescing. Long memory stalls alongside unused bandwidth indicate dependent misses or too few concurrent requests to hide latency. Uneven queue depths or per-route work reveal load imbalance rather than a cache-capacity problem. Cache hit rate alone cannot distinguish these cases because a miss can waste bandwidth, expose latency, or both. Each diagnosis implies a different remedy: packing or blocking improves spatial utilization, reordering and prefetching expose concurrent requests, structured sparse formats reduce indexing overhead, and routing or partitioning balances work. The memory hierarchy determines the cost of the remaining accesses, while dataflow and tensor-layout choices determine how much irregularity software can remove before execution reaches the hardware.
 
 The optimization order follows that diagnosis. Representation comes first when the format is under system control because a block-structured sparse format or grouped routing can remove indirection before a kernel executes. Request organization comes next: accesses issued together should target adjacent addresses, and enough independent requests must remain in flight to hide unavoidable latency. Additional cache capacity or bandwidth helps only when profiling shows that the regularized request stream still exhausts that resource. More bandwidth cannot resolve a serial pointer dependency, and more capacity cannot rebalance skewed work. The objective is to expose as much regular structure as possible while confining unavoidable irregularity to the smallest portion of execution.

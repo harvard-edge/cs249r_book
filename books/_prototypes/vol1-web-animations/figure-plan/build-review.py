@@ -65,6 +65,7 @@ def build():
         'source_revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
         'scope': 'All numbered chapters in the four canonical PDF configurations. Supplementary figure inventory is separate; appendix/frontmatter needs were not audited.',
         'review_basis': 'Structured source review: chapter outlines, all body-figure captions/anchors, and targeted prose at proposed gaps. Not an exhaustive sentence-level audit, rendered-artwork approval, student study, or publication.',
+        'static_delivery': json.loads((HERE / 'static-delivery.json').read_text()) if (HERE / 'static-delivery.json').exists() else None,
         'methods': methods, 'chapters': chapters, 'supplemental_figures': supplemental,
         'counts': {'chapters': len(chapters), 'existing_chapter_figures': sum(len(c['figures']) for c in chapters), 'supplemental_figures': len(supplemental), 'proposed_figures': sum(len(c['needs']) for c in chapters), 'reuse_opportunities': sum(len(c.get('reuse_opportunities', [])) for c in chapters), 'animation_candidates': sum(len(c['animation_candidates']) for c in chapters), 'registered_players_in_inventory': sum(f['key'] in registry for f in figures)},
     }

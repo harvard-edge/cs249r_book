@@ -1005,6 +1005,14 @@ A fresh evaluation is not a single point on the roofline. Its prefill reuses eac
 $$\ProposerInferenceTime \approx \max\!\left(\frac{\PrefillOperations}{\EfficiencyHw\,\PeakRate},\ \frac{\WeightMemory}{\SustainedMemoryBandwidth}\right) + (\EmittedTokenCount-1)\,\frac{\WeightMemory}{\SustainedMemoryBandwidth}$$ {#eq-brain-eval-latency}
 Here $\PrefillOperations$ counts the prefill's operations, $\PeakRate$ is the processor's peak arithmetic rate at the activation precision, and $\EfficiencyHw$ is the fraction of that rate the prefill achieves. The prefill cannot finish before its own weight sweep, hence the maximum; the prefill emits the first token, and each of the other $\EmittedTokenCount - 1$ tokens costs one more sweep. Notebook \ref{nbk-brain-intent-model-latency} prices both phases for the machine's intent model.
 
+Prefill creates KV state that decode extends within one evaluation. @Fig-03-request-local-prefill-decode follows a single observation through prefill, first-token sampling, and subsequent decode passes, then marks the boundary at which the running machine rebuilds its context.
+
+::: {#fig-03-request-local-prefill-decode fig-env="figure" fig-pos="htb" fig-cap="**KV State Within One Intent Evaluation**: Prefill processes camera and instruction tokens and supplies the output from which the first token is sampled. Each subsequent decode pass takes the previously sampled token, reads prior keys and values, and appends the input token's keys and values before sampling the next output. The cache panels are successive snapshots of one growing cache, with schematic token counts. The running machine's single-observation intent model begins the next independent evaluation with new context rather than retaining this cache across control evaluations." fig-alt="Camera and instruction inputs enter prefill, followed by two sampled-token and decode stages. Three cache snapshots grow from three to five cells. A lower strip shows a new observation leading to new prefill and new KV state."}
+![](images/svg/request_local_prefill_decode.svg)
+:::
+
+Cache reuse avoids recomputing the prefix projections during that evaluation. It neither refreshes the captured observation nor turns token state into a spatial memory of the room. A model that deliberately retains observation history has a different memory and bandwidth obligation.
+
 ::: {#nbk-brain-intent-model-latency .callout-notebook title="Pricing one intent-model evaluation"}
 
 **Problem**: The mobile manipulator's intent model is a `{python} IntentModelLatency.params_str`-parameter vision-language model sized after OpenVLA [@kim2024openvla], running on the application processor. Where OpenVLA decodes a step of end-effector motion, the machine's model decodes the same number of tokens to name a target pose (@sec-brain-proposer-interface). How long does one fresh evaluation take, which resource binds each part of it, and what renewal rate can the machine therefore state?

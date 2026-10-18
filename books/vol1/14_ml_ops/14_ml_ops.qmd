@@ -1473,6 +1473,32 @@ Rollback procedures that have never been exercised often fail during an active i
 
 ML systems vary in statefulness, which directly governs rollback complexity. For stateless workloads like tabular classification and static regression, rollback requires only swapping model weights or routing traffic back to the prior container, because individual inferences share no execution context. In contrast, stateful models (including sequential recommenders, session-based search rankers, and conversational systems) accumulate transient user state. Reverting such workloads can demand session resets, schema shims for cached context vectors, or explicit state migration. Capturing versioned checkpoints at deployment boundaries mitigates this friction, but clean restoration remains an architectural property that requires empirical validation rather than assumption. The ranking service is the stateful case. It precalculates dense user and item embeddings and holds them in low-latency caches, so if version 2 rotates the latent vector space or changes the embedding dimension, the cached vectors become meaningless to a rolled-back version 1. A stateful rollback must therefore orchestrate atomic cache invalidation or dual-version namespace switching alongside weight redeployment to prevent scoring queries against incompatible vector spaces. In systems with feedback loops, the most complex failure mode arises when bad predictions pollute downstream feature logs or clickstream training sets during the degraded window. Reverting the serving binary then leaves contaminated data in the retraining corpus, and that data must be expunged or quarantined before previous behavior is restored.
 
+The compatible unit of rollback is larger than the weights. @Fig-rollback-compatible-bundles separates the bundle selected for a new request from the bundle retained by a request already in flight.
+
+::: {#fig-rollback-compatible-bundles fig-env="figure" fig-pos="htb" fig-cap="**Rollback Preserves a Compatible Version Bundle**: New requests switch to the previous model together with its feature schema and embedding namespace. Requests already admitted to the candidate retain their pinned bundle until completion or confirmed cancellation. Pairing old weights with the new namespace is invalid; reverting routing does not repair logs collected during the degraded interval." fig-alt="A routing box above two bundles, each containing matching weights, schema, and embedding-cache namespace. Solid and dashed arrows distinguish newly admitted and already admitted requests. A central dashed box marks an invalid cross-version pairing, and a separate lower box identifies degraded-window logs."}
+
+```{.tikz}
+\begin{tikzpicture}[font=\footnotesize\sffamily,line join=round,
+ box/.style={draw=BlueLine,fill=BlueL!45,line width=.7pt,rounded corners=2pt,align=center,minimum width=4.2cm,minimum height=1.35cm},
+ arr/.style={-{Stealth[length=4pt]},draw=GrayLine,line width=.8pt,shorten >=2pt},
+ note/.style={font=\scriptsize\sffamily,align=center}]
+\node[draw=GrayLine,fill=GrayL!30,rounded corners=2pt,align=center,minimum width=12.6cm,minimum height=.8cm] (route) at (6.3,4.55) {Router pins model, feature schema, and embedding namespace at admission};
+\node[box] (old) at (2.5,2.65) {\textbf{Bundle 1: previous release}\\weights 1 $\cdot$ schema 1\\embedding/cache namespace 1};
+\node[box] (new) at (10.1,2.65) {\textbf{Bundle 2: candidate release}\\weights 2 $\cdot$ schema 2\\embedding/cache namespace 2};
+\draw[arr,GreenLine] (route.south -| old.north)--node[note,left,align=right] {new requests\\after rollback} (old.north);
+\draw[arr,dashed] (route.south -| new.north)--node[note,right,align=left] {already admitted\\requests stay pinned} (new.north);
+\node[note,text=RedLine,draw=RedLine,dashed,fill=RedL!35,text width=2.6cm,minimum height=1.35cm] at (6.3,2.65) {Invalid pairing:\\weights 1 with\\namespace 2};
+\node[note,text width=4.4cm,anchor=north] at (2.5,1.65) {Switch the routing target to the complete compatible bundle.};
+\node[note,text width=4.4cm,anchor=north] at (10.1,1.65) {Retain until requests finish or their cancellation is confirmed.};
+\node[draw=RedLine,fill=RedL!35,rounded corners=2pt,align=center,text width=12cm,inner sep=7pt] at (6.3,.2)
+ {Degraded-window logs: quarantine or repair before retraining};
+\end{tikzpicture}
+```
+
+:::
+
+The router must select the compatible model, schema, and namespace as one decision at request admission. A cutover changes that decision for later requests; it does not migrate earlier requests into a different vector space. Keeping the candidate bundle available until those requests finish or their cancellation is confirmed preserves the contract during coexistence, while log quarantine addresses a separate repair obligation.
+
 #### A/B testing for model validation {#sec-ml-operations-ab-testing-model-validation-e480}
 
 A/B testing\index{A/B testing!statistical model validation} provides the statistical foundation for deployment decisions by comparing model versions under controlled conditions. Unlike canary deployments (which validate operational stability), A/B tests measure whether a new model improves business outcomes with statistical confidence.

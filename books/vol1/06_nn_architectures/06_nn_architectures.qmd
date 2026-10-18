@@ -1967,6 +1967,66 @@ These memory, compute, and data-movement patterns converge in ResNet-50 [@he2016
 
 ResNet-50's compute-bound profile assumes abundant hardware resources, yet most inference runs on devices with power budgets three orders of magnitude smaller than a data center accelerator. Standard convolutions scale as $\mathcal{O}(\SpatialPositionCount\times \KernelSize^2 \times \InputChannelCount\times \OutputChannelCount)$, a compute volume that exceeds the strict energy budgets of always-on edge devices. To bridge this gap, efficient architectures like **depthwise separable CNNs (DS-CNN)**\index{Depthwise separable convolution}\index{Convolution!depthwise separable} decompose the standard convolution into two distinct operations. This factorization, introduced by Sifre in the context of feature extraction [@sifre2014rigid] and popularized by MobileNet [@howard2017mobilenets], decouples spatial filtering from cross-channel combination. The depthwise convolution\index{Convolution!depthwise} applies filters to each input channel independently ($\KernelSize\times \KernelSize\times \InputChannelCount$ parameters), while the pointwise convolution\index{Convolution!pointwise} uses a $1{\times}1$ convolution to project channels to the output dimension ($1 \times 1 \times \InputChannelCount\times \OutputChannelCount$ parameters). Per output position, a standard layer performs $\KernelSize^2 \InputChannelCount \OutputChannelCount$ multiply-accumulates, while the factorized pair performs $\KernelSize^2 \InputChannelCount+ \InputChannelCount \OutputChannelCount$. Dividing the two shows that the decomposition reduces parameter count and FLOPs to roughly $\frac{1}{\OutputChannelCount} + \frac{1}{\KernelSize^2}$ of standard convolution, a reduction factor approaching $\KernelSize^2$, or about 8--9$\times$ for $3{\times}3$ filters with large $\OutputChannelCount$. That reduction makes real-time execution feasible on resource-constrained microcontrollers.
 
+The channel paths in @fig-depthwise-pointwise-channels show where the arithmetic reduction comes from. The depthwise stage produces one intermediate value per input channel at each output position, and the pointwise stage combines those values across channels.
+
+::: {#fig-depthwise-pointwise-channels fig-env="figure" fig-pos="htb" fig-cap="**Spatial Filtering and Channel Mixing**: At one output position, the standard layer combines spatial and channel sums separately for each output filter. The factorized layer first filters each input channel, then mixes the intermediate values into the same output shape. The lower panel uses one spatial filter per input channel, or depth multiplier one." fig-alt="Two panels show three input patches and two output channels. The upper panel connects all input channels to each output filter. The lower panel passes each channel through a separate spatial filter before a shared pointwise mixer."}
+
+```{.tikz}
+\begin{tikzpicture}[font=\footnotesize\sffamily,
+ flow/.style={-{Stealth[length=1.6mm]},line width=0.65pt,shorten >=2pt,shorten <=2pt},
+ mem/.style={draw=BlueLine,fill=BlueL,minimum width=7mm,minimum height=7mm,inner sep=2pt},
+ op/.style={draw=OrangeLine,fill=OrangeL,align=center,inner sep=4pt},
+ val/.style={draw=BlueLine,fill=BlueL,minimum width=6mm,minimum height=6mm,inner sep=1pt}]
+\node[anchor=west,font=\small\sffamily\bfseries] at (0,0.6) {(a) Standard convolution};
+\node[anchor=west] at (0,0.05) {One output position; three input channels, two output channels};
+\foreach \y/\lab in {-0.9/1,-1.9/2,-2.9/3} {
+ \node[mem] (a\lab) at (0.8,\y) {};
+ \draw[BlueLine,thin] (0.45,\y-0.12) -- (1.15,\y-0.12) (0.45,\y+0.12) -- (1.15,\y+0.12);
+ \draw[BlueLine,thin] (0.68,\y-0.35) -- (0.68,\y+0.35) (0.92,\y-0.35) -- (0.92,\y+0.35);
+ \node[anchor=east] at (0.35,\y) {\lab};
+}
+\node[align=center] at (0.8,-3.65) {Input\\patches};
+\draw[GrayLine] (1.4,-0.5) -- (1.6,-0.5) -- (1.6,-3.3) -- (1.4,-3.3);
+\node[op,text width=39mm,minimum height=14mm] (f1) at (5.7,-1.0) {Output filter 1\\spans all three channels\\spatial + channel sum};
+\node[op,text width=39mm,minimum height=14mm] (f2) at (5.7,-2.8) {Output filter 2\\spans all three channels\\spatial + channel sum};
+\draw[flow] (1.6,-1.9) -- (2.7,-1.9) |- (f1.west);
+\draw[flow] (2.7,-1.9) |- (f2.west);
+\node[val] (o1) at (10.6,-1.0) {1};
+\node[val] (o2) at (10.6,-2.8) {2};
+\draw[flow] (f1.east) -- (o1.west);
+\draw[flow] (f2.east) -- (o2.west);
+\node[align=center] at (10.6,-3.65) {Output\\channels};
+\draw[GrayLine,line width=0.5pt] (0,-4.4) -- (12.2,-4.4);
+\begin{scope}[yshift=6mm]
+\node[anchor=west,font=\small\sffamily\bfseries] at (0,-5.4) {(b) Depthwise + pointwise convolution};
+\foreach \y/\lab in {-6.4/1,-7.4/2,-8.4/3} {
+ \node[mem] (b\lab) at (0.8,\y) {};
+ \draw[BlueLine,thin] (0.45,\y-0.12) -- (1.15,\y-0.12) (0.45,\y+0.12) -- (1.15,\y+0.12);
+ \draw[BlueLine,thin] (0.68,\y-0.35) -- (0.68,\y+0.35) (0.92,\y-0.35) -- (0.92,\y+0.35);
+ \node[anchor=east] at (0.35,\y) {\lab};
+ \node[op,minimum width=19mm,minimum height=7mm] (d\lab) at (3.6,\y) {Filter \lab};
+ \node[val] (v\lab) at (6.1,\y) {\lab};
+ \draw[flow] (b\lab.east) -- (d\lab.west);
+ \draw[flow] (d\lab.east) -- (v\lab.west);
+}
+\node[op,text width=18mm,minimum height=27mm] (mix) at (8.65,-7.4) {$1\times1$\\channel\\mixer};
+\foreach \lab in {1,2,3} {\draw[flow] (v\lab.east) -- (mix.west |- v\lab.east);}
+\node[val] (p1) at (11.4,-6.8) {1};
+\node[val] (p2) at (11.4,-8.0) {2};
+\draw[flow] (mix.east |- p1.west) -- (p1.west);
+\draw[flow] (mix.east |- p2.west) -- (p2.west);
+\node[align=center] at (0.8,-9.2) {Same input\\channels};
+\node[align=center] at (3.6,-9.2) {Separate spatial\\filters};
+\node[align=center] at (6.1,-9.2) {Intermediate\\channels};
+\node[align=center] at (11.4,-9.2) {Same output\\shape};
+\end{scope}
+\end{tikzpicture}
+```
+
+:::
+
+The shared spatial filter within each input channel restricts the functions the factorized layer can represent. Matching input and output shapes therefore does not make the pair an algebraically equivalent replacement for an arbitrary trained standard convolution. An implementation may also materialize the intermediate activations, adding a memory cost that the MAC count alone does not reveal.
+
 MobileNet [@howard2017mobilenets]\index{MobileNet}\index{Depthwise separable convolution!MobileNet} made this factorization the basis of a model family, challenging the trend toward ever-larger networks by designing for the battery and latency budgets of smartphones and embedded devices. MobileNetV2\index{MobileNetV2!latency-constrained deployment} anchors the chapter's edge-efficiency lighthouse, reaching competitive accuracy at a fraction of ResNet-50's arithmetic, and its small compute footprint made it a natural target for compression and lower-precision deployment, which stores and computes with fewer bits per value.
 
 ::: {.column-margin .margin-pointer}

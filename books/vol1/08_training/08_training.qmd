@@ -4751,6 +4751,44 @@ The key algorithmic insight relies on the structure of @eq-attention. Softmax no
 
 No full $\SequenceLength{\times}\SequenceLength$ score or probability matrix is written to HBM. A $128{\times}128$ FP32 score tile, for example, occupies 65.5 KB compared with 67.1 MB for a $4096{\times}4096$ matrix. Other inputs, outputs, and running statistics remain, so the tile is not necessarily the largest tensor in the entire kernel.
 
+The storage boundary distinguishes the tiled algorithm from the materialized implementation. @Fig-training-attention-storage follows the same inputs and output through both paths; only the materialized path writes the full intermediate matrices to HBM.
+
+::: {#fig-training-attention-storage fig-env="figure" fig-pos="htb" fig-cap="**Attention Across the Memory Boundary**: The materialized path writes score and probability matrices to HBM between kernels. The tiled path retains only current blocks and running softmax state in SRAM, then writes completed output tiles. Inputs and outputs still occupy HBM; the savings come from avoiding full quadratic intermediates, not from removing attention arithmetic. The drawing shows forward execution, not a complete training-memory budget." fig-alt="Two vertical paths begin with queries, keys, and values in HBM. The materialized path alternates orange compute boxes with blue HBM boxes for full scores and full probabilities before writing the output. The tiled path encloses score tiles, probability tiles, and running state in one SRAM region and writes completed output tiles to HBM. Solid arrows point downward in both paths."}
+
+```{.tikz}
+\begin{tikzpicture}[font=\footnotesize\sffamily,>=stealth,line width=0.75pt,
+ mem/.style={draw=BlueLine,fill=BlueL!45,minimum width=5.8cm,minimum height=0.68cm,align=center},
+ calc/.style={draw=OrangeLine,fill=OrangeL!45,minimum width=5.8cm,minimum height=0.6cm,align=center},
+ flow/.style={->,draw=GreenLine,shorten >=2pt,shorten <=2pt}]
+\node[font=\small\sffamily\bfseries] at (0,0.65) {(a) Materialized attention};
+\node[font=\small\sffamily\bfseries] at (6.7,0.65) {(b) Tiled attention};
+\node[mem] (ai) at (0,0) {HBM: queries, keys, values};
+\node[calc] (aqk) at (0,-1.05) {Compute scores};
+\node[mem] (as) at (0,-2.1) {HBM: full score matrix};
+\node[calc] (asoft) at (0,-3.15) {Compute row softmax};
+\node[mem] (ap) at (0,-4.2) {HBM: full probability matrix};
+\node[calc] (av) at (0,-5.25) {Weight and sum values};
+\node[mem] (ao) at (0,-6.3) {HBM: attention output};
+\foreach \a/\b in {ai/aqk,aqk/as,as/asoft,asoft/ap,ap/av,av/ao} {\draw[flow] (\a) -- (\b);}
+\node[mem] (bi) at (6.7,0) {HBM: queries, keys, values};
+\draw[BlueLine,dashed,fill=BlueL!15] (3.75,-1.0) rectangle (9.65,-5.65);
+\node[align=center] at (6.7,-1.35) {On-chip SRAM: one working set};
+\node[calc,minimum width=5.15cm] (bt) at (6.7,-2.1) {Current score and probability tiles};
+\node[draw=BlueLine,fill=BlueL!45,minimum width=5.15cm,minimum height=1.05cm,align=center] (bs) at (6.7,-3.6) {Keep running row maximum,\\normalizer, and partial output};
+\node[align=center] (br) at (6.7,-5.0) {Repeat for each key/value tile;\\normalize the completed output tile};
+\node[mem] (bo) at (6.7,-6.3) {HBM: attention output};
+\draw[flow] (bi) -- (6.7,-1.05);
+\draw[flow] (6.7,-1.65) -- (bt);
+\draw[flow] (bt) -- (bs);
+\draw[flow] (bs) -- (br);
+\draw[flow] (br) -- (bo);
+\end{tikzpicture}
+```
+
+:::
+
+Keeping the intermediate tiles on chip removes their HBM writeback and reload. It does not remove the input reads or output writes, and backward propagation still requires saved statistics and recomputation.
+
 ```pseudocode
 #| label: algo-streaming-attention
 #| pdf-line-number: true
