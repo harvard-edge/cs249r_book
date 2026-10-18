@@ -1,0 +1,282 @@
+chapter: 03_network_fabrics
+lecture: "03"
+title: "Network Fabrics"
+layer: fabric
+minutes: 75
+notes_minutes: 71
+core_minutes: 62.5
+target_ideas: 30
+thesis: "Synchronous training releases correlated bursts that every worker waits on, so a fabric is judged by how quickly its collectives complete, tail included; link speed only bounds that time."
+
+hook:
+  minutes: "0-3.5"
+  setup: "Microsoft, 2016: a dead server with an incomplete IP-to-MAC entry froze the lossless RoCE traffic class on switches it never sent through. A generic data-center photo (labeled as not Microsoft's) with four answer choices."
+  question_to_class: "How can a dead server stop unrelated traffic? A) its NIC sent corrupt packets; B) switches paused one another in a loop; C) routing sent all flows to it; D) a power fault spread."
+  payoff: "B. Flooded lossless packets plus PFC PAUSE frames closed a cyclic buffer dependency (Segment 4, deadlock slide); the synthesis places the freeze at Level 4 of the five-level model."
+  sources: ["chapter War Story 3.1 (Guo et al., SIGCOMM 2016)", "photo: shared library datacenter-server-racks.jpg (Carl Lender, CC BY 2.0)"]
+
+driving_question: "What decides how long a collective takes on a real fabric, and why does a fabric that looks healthy still waste accelerator time?"
+
+recall: "Lecture 2's staircase: 10 GB over HBM 3.0 ms, NVLink 22.2 ms, one InfiniBand port 200 ms (Compute Infrastructure, Napkin Math 2.3)."
+
+running_example: "Archetype A reference job: 175B dense transformer, 350 GB of 16-bit gradients (342 MB per rank, which the chapter rounds to 350 MB), on 1,024 H100s in 128 nodes, one 400 Gb/s NDR port (50 GB/s per direction) per GPU. Shown as real hardware (an eight-GPU HGX board, B200 generation, labeled), as measured data (NCCL all_reduce_perf on 8 H100s), and as the DGX SuperPOD design (4 units of 256 GPUs)."
+
+goals:
+  - "Explain why a training fabric is judged by completion time and its tail."
+  - "Predict whether startup latency or bandwidth sets a message's time."
+  - "Price a topology by its bisection bandwidth and match its wiring to the traffic."
+  - "Diagnose a lossless fabric that freezes and a link that silently slows a job."
+
+segments:
+  - name: The Fabric
+    divider_question: "What does a training job need from the network?"
+    read: "§3.1, §3.2"
+    concept_questions: [1, 2, 3, 4]
+    minutes: 15.5
+    land: "A training fabric is judged by when its last required transfer completes, and synchronized elephant flows break the averages that data-center networks rely on."
+  - name: Transport
+    divider_question: "How long does one message take, and what sets that time?"
+    read: "§3.3, §3.4"
+    concept_questions: [5, 6, 7, 8]
+    minutes: 14.5
+    land: "Startup latency prices small messages and bandwidth prices large ones; check where the messages sit before buying either."
+  - name: Topology
+    divider_question: "How much traffic can cross the cluster, and at what price?"
+    read: "§3.5"
+    concept_questions: [9, 10, 11]
+    minutes: 12.5
+    land: "Bisection bandwidth prices the cut, and the right wiring follows the traffic the parallelism plan sends across it."
+  - name: Under Load
+    divider_question: "What happens when synchronized traffic loads the fabric?"
+    read: "§3.6, §3.7"
+    concept_questions: [12, 13, 14]
+    minutes: 13
+    land: "Under synchronized load, losslessness, congestion control, and routing decide whether provisioned bandwidth becomes completed collectives."
+  - name: Operations
+    divider_question: "Why does a slow fabric raise no alarm, and how is it found?"
+    read: "§3.8, §3.9"
+    concept_questions: [15]
+    minutes: 8
+    land: "Fabric faults appear as slowdowns, so detection compares delivered throughput with a baseline and diagnoses from the application down."
+
+concept_questions:
+  - id: 1
+    q: "How can a dead server stop traffic that never reaches it?"
+    picture: "Data-center photo with four choices; answered later with the deadlock cycle"
+    numbers: "Microsoft RoCE fleet, tens of thousands of servers (War Story 3.1)"
+    example: "Microsoft PFC deadlock, 2016"
+    read: "§3.6.2"
+  - id: 2
+    q: "How much bandwidth does a GPU lose when traffic leaves its node?"
+    picture: "HGX board photo beside a per-direction bandwidth-by-year plot (NVLink, InfiniBand, Ethernet)"
+    numbers: "H100 NVLink 450 GB/s per direction against one NDR port 50 GB/s, 9x (MLSysIM interconnect series; §3.1); illustrative 30 ms exposed AllReduce in a 230 ms step, 13% (figure 2)"
+    example: "DGX H100 node, one NIC per GPU"
+    read: "§3.1"
+  - id: 3
+    q: "How does synchronous training change what a network must deliver?"
+    picture: "Flow timelines: many short independent web flows against a few long training flows released together, with a barrier at the slowest flow"
+    numbers: "Table 1's five inversions; BSP and p99 defined on the slide"
+    example: "Gradient AllReduce at the end of backward"
+    read: "§3.2"
+  - id: 4
+    q: "Why does static ECMP hashing fail with a few elephant flows?"
+    picture: "Four paths, eight flows: even 2/2/2/2 against hashed 4/2/2/0"
+    numbers: "Exchange takes 2x the even split (§3.6.4 scenario)"
+    example: "Data-parallel gradient flows on a leaf-spine fabric"
+    read: "§3.2, §3.6.4"
+  - id: 5
+    q: "What does RDMA remove from the data path, and why does distance push links to optics?"
+    picture: "Kernel TCP stack (two copies) against RDMA verbs with GPUDirect; photos of a DAC cable and an optical module with a reach table"
+    numbers: "Kernel TCP tens of microseconds against low single-digit microseconds (Def. 3.3); DAC 1 to 3 m about $50, AOC 3 to 30 m about $500; 10,000 GPUs: 20,000 spine links, $10M, 400 kW (Systems Perspective 3.2, assumptions)"
+    example: "NCCL over verbs with GPUDirect RDMA"
+    read: "§3.3, §3.4.1"
+  - id: 6
+    q: "Where do InfiniBand and RoCE put losslessness, and what does a drop cost?"
+    picture: "Two panels: credits (InfiniBand) and PFC PAUSE plus ECN marks (RoCE); InfiniBand switch photo"
+    numbers: "Go-Back-N resend window 50 GB/s x 5 us = 250 KB (§3.4.3)"
+    example: "Reliable-delivery contract: completion with a bounded recovery tail"
+    read: "§3.4.2, §3.4.3"
+  - id: 7
+    q: "When does startup latency set a message's time, and when does bandwidth?"
+    picture: "Worked example table, then log-log alpha-beta plot with knees and the two messages marked"
+    numbers: "4 KB: 1.58 against 5.32 us (3.4x); 350 MB: 7.0 against 28.0 ms (4x); RoCE at 400 Gb/s 5.08 us and 7.0 ms; n* = 75 KB (NDR), 62.5 KB (RoCE 100G) (Napkin Math 3.1); 10 KB HDR to NDR 1.90 to 1.70 us, 10.5% (§3.11)"
+    example: "Pipeline control message against gradient shard"
+    read: "§3.4.4"
+  - id: 8
+    q: "Does a measured collective follow the two-parameter model?"
+    picture: "Verbatim all_reduce_perf rows beside measured points against the model"
+    numbers: "Floor 17 us, 274 GB/s algbw at 16 GB, knee 4.7 MB, up to 1.7x the model at 8 to 128 MB (MLSysIM NCCLAllReduceH100Node; figure 8)"
+    example: "8 H100s over NVLink (labeled as intra-node)"
+    read: "§3.4.4"
+  - id: 9
+    q: "What limits traffic that must cross the cluster?"
+    picture: "Two halves of 512 GPUs with the cut; 1:1 then 4:1"
+    numbers: "512 x 50 GB/s = 25.6 TB/s; 4:1 gives 6.4 TB/s (Def. 3.4)"
+    example: "Reference cluster"
+    read: "§3.5"
+  - id: 10
+    q: "How does a fat-tree scale, and what does oversubscription cost?"
+    picture: "Radix-4 fat-tree with four equal-cost paths; switch-port photo; vendor radix table; worked oversubscription bars"
+    numbers: "k=64: 2,048 hosts (2 tiers), 65,536 (3 tiers), 5,120 switches; 102.4 Tb/s as 256 x 400G ports, derived; 4:1 spine: 0.200 against 0.799 s, throughput 0.53, $142.1M of $300M (Napkin Math 3.2, 30% share is a scenario input)"
+    example: "Quantum-2 class switches"
+    read: "§3.5.2, §3.10.1"
+  - id: 11
+    q: "How should wiring follow the parallelism plan?"
+    picture: "Rail-optimized wiring in three steps; TPU v4 board photo with torus against fat-tree bars"
+    numbers: "8 rails of 128 GPUs; 1.8 against 0.6 us switch latency if a rail fits one switch (Napkin Math 3.3); 4,096 endpoints: torus 512 cut links, 25.6 TB/s, 24 hops against fat-tree 2,048 links, 102.4 TB/s, 5 switches; OCS reconfigures in 10 to 30 ms (§3.5.4, §3.5.5)"
+    example: "DGX SuperPOD rails; Google TPU v4 optical circuit switches"
+    read: "§3.5.3 to §3.5.5"
+  - id: 12
+    q: "Does a non-blocking fabric prevent incast?"
+    picture: "Ethernet switch photo; offered load against egress bars"
+    numbers: "256 x 50 GB/s = 12.8 TB/s into 50 GB/s (256x); 32 MB fills in 2.5 us, drains in 640 us (Def. 3.10, derived)"
+    example: "Checkpoint writes or shard reads to one storage node"
+    read: "§3.6.5"
+  - id: 13
+    q: "How does a lossless fabric fail?"
+    picture: "PFC pause spreading in three steps with a victim flow; four-switch deadlock cycle with the Microsoft card"
+    numbers: "4,096-GPU cluster, 24,576 transceivers, 21.8% daily chance of at least one degrading (Napkin Math 3.4, assumed rate); watchdog example 50 to 200 ms"
+    example: "Microsoft 2016 deadlock"
+    read: "§3.6.1, §3.6.2"
+  - id: 14
+    q: "What do congestion control and routing do, and how did two production fabrics choose?"
+    picture: "DCQCN feedback loop; ECMP figure repaired by adaptive routing; SuperPOD against Grand Teton table"
+    numbers: "SuperPOD: 32-node units of 256 H100s, 12.8 TB/s injection, 4 units = 1,024; Meta: two 24,576-H100 clusters, 400 Gb/s endpoints, RoCE ran without DCQCN (§3.7; Gangidi et al. 2024)"
+    example: "NVIDIA DGX SuperPOD and Meta Grand Teton"
+    read: "§3.6.3, §3.6.4, §3.7"
+  - id: 15
+    q: "Why do fabric faults raise no alarm, and how are they found?"
+    picture: "Cumulative lost GPU-hours; NCCL bus bandwidth baseline by size; five-step diagnosis ladder; SR-IOV slices"
+    numbers: "10% bandwidth loss, 2 to 3% slower, 14,746 to 22,118 GPU-hours over 30 days on 1,024 GPUs ($29,491 to $44,237 at $2); about 3 degraded links of 3,000, 95% chance of at least one (§3.9, scenarios); busbw 177 to 401 GB/s at 8 to 128 MB, 480 at 16 GB (MLSysIM); step 4.2 to 4.8 s, one pair at 24 of 48 GB/s (Checkpoint 3.5); 8 VFs x 50 Gb/s, 100 GB burst holds a port 2 s (§3.8)"
+    example: "A link trained at HDR instead of NDR"
+    read: "§3.8, §3.9"
+
+concept_trace:
+  - concept: "ML traffic inversion"
+    frame: "Synchronous training releases its flows together"
+    shown_by: "Three-step flow timeline (web against training, barrier at the slowest flow); BSP and p99 glossed on the slide"
+  - concept: "RDMA reliable-delivery contract"
+    frame: "InfiniBand prevents drops with credits; RoCE adds pauses"
+    shown_by: "Credits and PFC/ECN panels, 'reliable-delivery contract' line, 250 KB Go-Back-N window; preceded by the RDMA path build"
+  - concept: "Alpha-beta model"
+    frame: "A 4 KB message pays startup; a 350 MB shard pays bandwidth"
+    shown_by: "Alpha-beta model card with T(n) = alpha + n/beta and the worked table revealed row by row, crossover 75 KB"
+  - concept: "Bisection bandwidth and topology economics"
+    frame: "Bisection bandwidth caps traffic that crosses the middle"
+    shown_by: "Two-step cut figure (25.6 then 6.4 TB/s), then the fat-tree radix table and the 4:1 cost exercise"
+  - concept: "Traffic-matched topology"
+    frame: "Rails give each GPU rank its own switch network"
+    shown_by: "Three-step rail wiring build (slot cabling, rail 0, bridging spine)"
+  - concept: "Lossless fabric hazards"
+    frame: "Four full queues waiting on each other never drain"
+    shown_by: "Deadlock cycle figure and the Microsoft card; preceded by the PFC spreading build with a victim flow"
+  - concept: "Fabric behavior under load"
+    frame: "Congestion control and adaptive routing act before overflow"
+    shown_by: "DCQCN loop figure beside the ECMP collision repaired by adaptive routing; incast activity just before"
+  - concept: "Silent fabric waste"
+    frame: "A 10% bandwidth loss can waste 22,000 GPU-hours unseen"
+    shown_by: "Cumulative GPU-hours plot; diagnosis ladder on 'Step time rose 14%. Where do you look first?'"
+
+worked_examples:
+  - name: "Napkin Math 3.1: the alpha-beta crossover"
+    steps: ["given: NDR alpha 1.5 us, beta 50 GB/s; RoCE 100G alpha 5 us, beta 12.5 GB/s", "4 KB: 1.58 against 5.32 us", "350 MB: 7.0 against 28.0 ms", "RoCE at 400 Gb/s: 5.08 us, 7.0 ms", "n* = alpha beta = 75 KB: small messages buy latency, large ones bandwidth"]
+  - name: "Fallacy: more bandwidth always means faster training"
+    steps: ["given: alpha 1.5 us; HDR 25 GB/s; NDR 50 GB/s; 10 KB", "HDR 1.90 us", "NDR 1.70 us", "10.5% faster for 2x link rate"]
+  - name: "Napkin Math 3.2: the cost of oversubscription"
+    steps: ["given: 1,024 GPUs, $300M, 5 GB per GPU, ring crossing the cut, 30% communication share (scenario)", "crossing bytes 5 x 1.998 x 512 = 5,115 GB", "0.200 s at 25.6 TB/s against 0.799 s at 6.4 TB/s", "throughput 1/(0.70 + 0.30 x 4) = 0.53", "47.4% of $300M = $142.1M idle-equivalent"]
+  - name: "Checkpoint 3.5: diagnosing a slowdown"
+    steps: ["given: step 4.2 to 4.8 s, utilization 92 to 85%", "check timeline and data path", "collective log", "ib_write_bw finds 24 of 48 GB/s", "counters and symbol errors confirm a half-rate link that paces the ring"]
+
+active_learning:
+  - at_minute: 1
+    type: predict
+    prompt: "How can a dead server stop unrelated traffic? (four choices)"
+    answer: "B: switches paused one another in a loop; revealed in Segment 4."
+  - at_minute: 3.5
+    type: retrieval
+    prompt: "Time to move 10 GB through HBM, NVLink, InfiniBand."
+    answer: "3.0, 22.2, 200 ms."
+  - at_minute: 12.5
+    type: predict
+    prompt: "Eight flows, four paths: how slow is the worst?"
+    answer: "Hashed 4/2/2/0: the exchange takes 4 units against 2, twice as long."
+  - at_minute: 25.5
+    type: estimate
+    prompt: "Does 2x bandwidth speed up a 10 KB message?"
+    answer: "1.90 to 1.70 us, 10.5% faster."
+  - at_minute: 34.5
+    type: estimate
+    prompt: "What does a 4:1 spine cost a $300M cluster?"
+    answer: "0.200 to 0.799 s, throughput 0.53, $142.1M equivalent idle capacity."
+  - at_minute: 42.5
+    type: predict
+    prompt: "Does a non-blocking fabric prevent incast?"
+    answer: "No; 12.8 TB/s into a 50 GB/s port fills 32 MB in 2.5 us."
+  - at_minute: 52.5
+    type: discuss
+    prompt: "InfiniBand or RoCE: which would you build?"
+    answer: "InfiniBand for predictable tails; Ethernet when multi-vendor supply and shared tooling dominate; Meta built both."
+  - at_minute: 59
+    type: diagnose
+    prompt: "Step time rose 14%. Where do you look first?"
+    answer: "Timeline and data path, then collective log, pairwise RDMA test (24 of 48 GB/s), counters, symbol errors."
+  - at_minute: 63.5
+    type: concept_question
+    prompt: "Four fallacies as true or false."
+    answer: "All false (10 KB gains 10.5%; iperf tests TCP; routing adds no capacity; faults show as slowdowns)."
+
+open_questions:
+  - "Should a training fabric be lossless at all, or recover losses quickly at the endpoints?"
+  - "If off-node links approached NVLink bandwidth, which parallelism decisions would change?"
+  - "A fleet runs dense training and mixture-of-experts serving together. Which topology serves both?"
+
+more_examples:
+  - "Microsoft RoCE deadlock, 2016 (Guo et al., SIGCOMM 2016)"
+  - "Meta's 24,576-H100 RoCE and InfiniBand clusters for Llama 3 (Meta Engineering 2024; Gangidi et al., SIGCOMM 2024)"
+  - "NVIDIA DGX SuperPOD reference architecture (RA-11333-001, 2023)"
+  - "Google TPU v4 optical circuit switching (Jouppi et al., ISCA 2023)"
+  - "NCCL all_reduce_perf sample output on 8 H100s (NVIDIA exemplar-performance, via MLSysIM)"
+  - "Ultra Ethernet Specification 1.0 (2025): packet spraying and selective recovery"
+
+left_to_reading:
+  - concept: "Link physics sets cluster geometry (secondary)"
+    why: "One optional slide (copper against optics, PAM4 and FEC in the note); SerDes power and link budgets left to §3.3.3."
+  - concept: "Fabric sharing and isolation (secondary)"
+    why: "One optional slide (SR-IOV slices, virtual lanes); network slices and ETS left to §3.8.2."
+  - concept: "Co-packaged optics, UEC, CXL composition"
+    why: "§3.10 moves the ceiling but owns no first-order concept; named in open questions and notes."
+
+further_reading:
+  - cite: "Network Fabrics, §3.2 to §3.9 and §3.11"
+    why: "The chapter; redo Napkin Math 3.2 for a 2:1 spine (23.1%)."
+  - cite: "Hockney, The Communication Challenge for MPP, Parallel Computing, 1994"
+    why: "The alpha-beta model."
+  - cite: "Al-Fares, Loukissas, and Vahdat, A Scalable, Commodity Data Center Network Architecture, SIGCOMM 2008"
+    why: "Fat-trees from commodity switches."
+  - cite: "Guo et al., RDMA over Commodity Ethernet at Scale, SIGCOMM 2016"
+    why: "RoCE at scale and the deadlock incident."
+  - cite: "Gangidi et al., RDMA over Ethernet for Distributed AI Training at Meta Scale, SIGCOMM 2024"
+    why: "A modern RoCE training fabric."
+  - cite: "Jouppi et al., TPU v4: An Optically Reconfigurable Supercomputer for Machine Learning, ISCA 2023"
+    why: "Optical circuit switching."
+
+callbacks:
+  - {lecture: 1, concept: "Fleet Law", where: "goals note; mechanism notes name T_comm and T_sync"}
+  - {lecture: 1, concept: "Synchronous tight coupling", where: "inversion slide note"}
+  - {lecture: 2, concept: "Bandwidth hierarchy dictates placement", where: "recall slide, credit, and note; title note"}
+  - {lecture: 5, concept: "Exposed communication under overlap", where: "timeline slide note"}
+  - {lecture: 5, concept: "Ring AllReduce and the bandwidth bound", where: "oversubscription exercise note; crossover slide note"}
+  - {lecture: 6, concept: "Parallelism plan as joint placement", where: "rails slide note"}
+  - {lecture: 8, concept: "Topology-aware placement", where: "rails note; congestion-control note; true/false note"}
+  - {lecture: 7, concept: "Gray failure detection", where: "silent-waste slide note"}
+  - {lecture: 4, concept: "Checkpoint write path", where: "incast note; SR-IOV note; next-lecture slide"}
+
+coverage:
+  primary_taught: ["ML traffic inversion", "RDMA reliable-delivery contract", "Alpha-beta model", "Bisection bandwidth and topology economics", "Traffic-matched topology", "Lossless fabric hazards", "Fabric behavior under load", "Silent fabric waste"]
+  primary_left_to_reading: []
+  secondary: ["Link physics sets cluster geometry (optional slide)", "Fabric sharing and isolation (optional slide)"]
+
+notes_for_author:
+  - "The running case's real hardware photo is an HGX B200 board (no CC-licensed DGX H100 photo found on Commons); every caption says B200."
+  - "The NCCL measurements are intra-node NVLink; the slides and notes say so, because no open NDR collective sweep is in MLSysIM."
+  - "Derived values are computed in images/calcs.py; the deck shows 28.0 ms where the chapter prints 28.01 ms (28.005 ms exact)."
