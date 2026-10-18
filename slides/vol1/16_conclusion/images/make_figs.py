@@ -171,7 +171,7 @@ g.write("stack_numbers", 1)
 # =============================================================================
 g = Svg(900, 390)
 stages = [("INT8\ncalibration", C["compute"], C["compute_l"], "Lecture 10b\ncalibration set"),
-          ("Firmware\npreprocessing", C["neutral"], C["neutral_l"], "Lectures 4, 13b\ntraining-serving skew"),
+          ("Firmware\npreprocessing", C["neutral"], C["neutral_l"], "Lectures 4, 14\ntraining-serving skew"),
           ("Input shift on\none cohort", C["neutral"], C["neutral_l"], "Lectures 4b, 14b\ndrift"),
           ("Accuracy\n−4 points", C["danger"], C["danger_l"], "Lecture 12b\naggregate metric only")]
 for i, (lab, stroke, fill, tag) in enumerate(stages):

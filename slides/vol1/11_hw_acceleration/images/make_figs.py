@@ -72,7 +72,7 @@ ax.grid(axis="x", color=C["grid"], linewidth=0.6)
 ax.set_axisbelow(True)
 sp.save(fig, out / "hook_gains.svg")
 
-# ---------------------------------------------------------------- recall L10
+# --------------------------------------------------------------- recall L10b
 sp.hbars(out / "recall_int8.svg", [
     ("Batch one", 1.3, "neutral", "1.3×   (0.38 → 0.30 ms)"),
     ("Large batch", 5.9, "compute", "5.9×"),

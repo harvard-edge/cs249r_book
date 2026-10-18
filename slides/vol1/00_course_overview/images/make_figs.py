@@ -171,16 +171,17 @@ stack_svg = (kit_vol1 / "stack_build8.svg").read_text()
 ACCENT = "#A51C30"
 LAYER_Y = {"Hardware": 412, "Frameworks": 348, "Models": 284, "Training": 220,
            "Serving": 156, "Operations": 92, "Applications": 28}
-ON_LAYER = {"Hardware": ["L11", "L12"], "Frameworks": ["L7"],
-            "Models": ["L5", "L6", "L10"], "Training": ["L8"],
-            "Serving": ["L13"], "Operations": ["L14"], "Applications": ["L15"]}
+ON_LAYER = {"Hardware": ["L11", "L11b", "L12", "L12b"], "Frameworks": ["L7"],
+            "Models": ["L5", "L6", "L6b", "L10", "L10b"],
+            "Training": ["L8", "L8b"], "Serving": ["L13", "L13b"],
+            "Operations": ["L14", "L14b"], "Applications": ["L15", "L15b"]}
 
 
-def badge(x, y, w, h, label):
+def badge(x, y, w, h, label, size=24):
     return (f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{h / 2}" '
             f'fill="#FFFFFF" stroke="{ACCENT}" stroke-width="1.5"/>\n'
             f'<text x="{x + w / 2}" y="{y + h / 2}" font-family="Helvetica, Arial, '
-            f'sans-serif" font-size="24" font-weight="700" fill="{ACCENT}" '
+            f'sans-serif" font-size="{size}" font-weight="700" fill="{ACCENT}" '
             f'text-anchor="middle" dominant-baseline="central">{label}</text>\n')
 
 
@@ -189,11 +190,12 @@ for layer, labels in ON_LAYER.items():
     y0 = LAYER_Y[layer]
     right = 688
     for label in reversed(labels):
-        badges += badge(right - 66, y0 + 7, 66, 40, label)
-        right -= 72
+        w = 66 if len(label) <= 3 else 80
+        badges += badge(right - w, y0 + 7, w, 40, label)
+        right -= w + 6
 # Data lectures sit inside the data bar, below its label
-for label, y in (("L4", 352), ("L9", 404)):
-    badges += badge(715, y, 54, 40, label)
+for label, y in (("L4", 300), ("L4b", 352), ("L9", 404)):
+    badges += badge(715, y, 54, 40, label, 24 if len(label) <= 2 else 20)
 (out / "stack_lectures.svg").write_text(stack_svg.replace("</svg>", badges + "</svg>"))
 
 print("figures written")
