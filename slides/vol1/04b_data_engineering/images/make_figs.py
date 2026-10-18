@@ -19,8 +19,10 @@ marked otherwise:
   - Storage supply: object store about 100 MB/s per connection, SATA SSD
     500 MB/s, NVMe 5 to 7 GB/s; eight accelerators 3.8 GB/s compressed,
     15.4 GB/s decoded (Napkin Math 4.8, Sec. 4.10.1).
-  - Dataloader: 375 img/s per worker, 3,200 img/s accelerator rate, the
-    book figure's illustrative 3,500 img/s input-pipeline cap (Sec. 4.10.4).
+  - Dataloader: 375 img/s per worker, 3,200 img/s accelerator rate; the
+    solid line is training throughput, min(375 w, 3,200); the thin dashed
+    line is loader capacity past the crossing, up to the book figure's
+    illustrative 3,500 img/s cap (Sec. 4.10.4).
   - Format: 20 of 100 equal-size columns (Napkin Math 4.9).
   - Codecs: 100 GB per epoch, gzip 120 MB/s gives 13.9 min, Snappy 500 MB/s
     gives 3.3 min (Sec. 4.10.5).
@@ -54,13 +56,16 @@ plt = sp.plt
 
 
 def bars_lines(path, rows, step=None, lines=(), log_x=True, xlim=None,
-               xlabel=None, size=sp.SIZE, note=None, xticks=None):
+               xlabel=None, size=sp.SIZE, note=None, xticks=None, fs=13,
+               tick_fs=None):
     """Horizontal bars with direct value labels and vertical reference lines.
 
     rows: (label, value, color, value_text[, "in"]); a value may be a
     (low, high) pair, drawn as a range bar.
     lines: (x, text, color, text_y[, visible]); hidden lines keep their
-    label in the layout (alpha 0) so the figure size does not change."""
+    label in the layout (alpha 0) so the figure size does not change.
+    fs sets bar and value labels; tick_fs, when given, sets the tick labels,
+    the axis label, and the reference-line labels (for plots drawn small)."""
     fig, ax = plt.subplots(figsize=size)
     n = len(rows)
     for i, r in enumerate(rows):
@@ -72,22 +77,22 @@ def bars_lines(path, rows, step=None, lines=(), log_x=True, xlim=None,
         ax.barh(y, hi - lo, left=lo, color=C[ck], height=0.62,
                 alpha=1.0 if shown else 0.0)
         ax.text(-0.01, y, label, transform=ax.get_yaxis_transform(),
-                ha="right", va="center", fontsize=13, color=C["text"],
+                ha="right", va="center", fontsize=fs, color=C["text"],
                 fontweight="bold")
         if inside:
             ax.text(hi / 1.25 if log_x else hi * 0.97, y, txt, va="center",
-                    ha="right", fontsize=13, color="white", fontweight="bold",
+                    ha="right", fontsize=fs, color="white", fontweight="bold",
                     alpha=1.0 if shown else 0.0)
         else:
             ax.text(hi * 1.18 if log_x else hi + (xlim[1] if xlim else hi) * 0.015,
-                    y, txt, va="center", fontsize=13, color=C[ck],
+                    y, txt, va="center", fontsize=fs, color=C[ck],
                     fontweight="bold", alpha=1.0 if shown else 0.0)
     for ln in lines:
         x, text, ck, ty = ln[:4]
         vis = ln[4] if len(ln) > 4 else True
         ax.axvline(x, color=C[ck], lw=2, ls="--", alpha=1.0 if vis else 0.0)
         ax.text(x * (1.12 if log_x else 1.0) if log_x else x + (xlim[1] * 0.01),
-                ty, text, color=C[ck], fontsize=11, fontweight="bold",
+                ty, text, color=C[ck], fontsize=tick_fs or 11, fontweight="bold",
                 va="center", transform=ax.get_xaxis_transform(),
                 alpha=1.0 if vis else 0.0)
     ax.set_yticks([])
@@ -104,7 +109,9 @@ def bars_lines(path, rows, step=None, lines=(), log_x=True, xlim=None,
     ax.grid(axis="x", color=C["grid"], linewidth=0.6)
     ax.set_axisbelow(True)
     if xlabel:
-        ax.set_xlabel(xlabel)
+        ax.set_xlabel(xlabel, fontsize=tick_fs) if tick_fs else ax.set_xlabel(xlabel)
+    if tick_fs:
+        ax.tick_params(axis="x", labelsize=tick_fs)
     if note:
         ax.text(1.0, -0.42, note, transform=ax.transAxes, ha="right",
                 fontsize=9, color=C["neutral"])
@@ -174,21 +181,22 @@ price_trend()
 # 3. Latency ladder against a 1 ms line (values in ms), final state only
 bars_lines(out / "latency_ladder.svg", [
     ("DRAM", 1e-4, "memory", "100 ns"),
-    ("Local NVMe SSD", 0.1, "memory", "100 µs", "in"),
+    ("Local NVMe", 0.1, "memory", "100 µs", "in"),
     ("Remote SSD", 2, "danger", "2 ms"),
     ("Object store", 20, "danger", "20 ms"),
-], lines=[(1, "1 ms", "danger", 1.05)], xlim=(3e-5, 2e3), size=(2.9, 2.2),
-    xlabel="Access latency (log)",
-    xticks=[(1e-4, "100 ns"), (1e-1, "100 µs"), (100, "100 ms")])
+], lines=[(1, "1 ms", "danger", 1.07)], xlim=(3e-5, 2e3), size=(1.75, 1.45),
+    xlabel="Access latency (log)", fs=12, tick_fs=12,
+    xticks=[(1e-4, "100 ns"), (100, "100 ms")])
 
 # 4. Sequential bandwidth by tier (table 8), ranges in MB/s
 bars_lines(out / "tier_bandwidth.svg", [
-    ("In-memory cache", (20000, 50000), "memory", "20–50 GB/s"),
-    ("Local NVMe SSD", (5000, 7000), "memory", "5–7 GB/s"),
+    ("Memory cache", (20000, 50000), "memory", "20–50 GB/s"),
+    ("Local NVMe", (5000, 7000), "memory", "5–7 GB/s"),
     ("Object store", (100, 500), "danger", "0.1–0.5 GB/s"),
     ("Archive", (10, 50), "danger", "10–50 MB/s"),
-], xlim=(5, 3e6), size=(2.9, 2.2), xlabel="Sequential bandwidth (MB/s, log)",
-    xticks=[(10, "10"), (1000, "1,000"), (1e5, "100,000")])
+], xlim=(5, 3e6), size=(1.55, 1.45), xlabel="Bandwidth (MB/s, log)",
+    fs=12, tick_fs=12,
+    xticks=[(10, "10"), (1e4, "10,000")])
 
 # 5. The accelerator's appetite: ceiling against sustained rate
 bars_lines(out / "appetite.svg", [
@@ -223,14 +231,23 @@ for k in (1, 2, 3):
 
 # 8. Dataloader choke point (variant of the book figure)
 def choke():
+    # Solid line: training throughput, min(375 w, 3,200). Thin dashed line:
+    # what the loader alone could supply past the crossing, up to the book
+    # figure's illustrative 3,500 img/s cap.
     w = np.arange(1, 17)
-    cpu = np.minimum(375 * w, 3500)
+    loader = np.minimum(375 * w, 3500)
+    train = np.minimum(375 * w, 3200)
     fig, ax = plt.subplots(figsize=(5.6, 2.5))
-    ax.plot(w, cpu, "o-", color=C["memory"], lw=2.4, ms=6)
-    ax.axhline(3200, color=C["danger"], lw=2, ls="--")
+    ax.plot(np.concatenate(([8.53], w[w >= 9])),
+            np.concatenate(([3200], loader[w >= 9])),
+            "--", color=C["neutral"], lw=1.3)
+    ax.text(12.2, 3680, "loader capacity", color=C["neutral"], fontsize=11,
+            fontweight="bold", va="center")
+    ax.plot(w, train, "o-", color=C["memory"], lw=2.4, ms=6, zorder=4)
+    ax.axhline(3200, color=C["danger"], lw=2, ls="--", zorder=3)
     ax.text(16.8, 2750, "Accelerator\n3,200 img/s", color=C["danger"], fontsize=11,
             fontweight="bold", va="center")
-    ax.fill_between(w, 0, np.minimum(cpu, 3200), color=C["memory_l"], alpha=0.5)
+    ax.fill_between(w, 0, train, color=C["memory_l"], alpha=0.5)
     ax.axvline(8.53, color=C["text"], lw=1, ls=":")
     ax.text(8.75, 600, "about 9 workers", fontsize=11, fontweight="bold", color=C["text"])
     ax.text(1.0, 2600, "Host decode binds", fontsize=11, va="center",
@@ -305,8 +322,6 @@ for k in (1, 2, 3):
     ax.set_ylim(0, 1.05)
     ax.set_xlabel("Clip loudness (dBFS)")
     ax.set_ylabel("Share of clips\nat most this loud", fontsize=11)
-    ax.text(1.0, -0.42, "Illustrative curves; D from Napkin Math 4.5",
-            transform=ax.transAxes, ha="right", fontsize=9, color=C["neutral"])
     sp.save(fig, out / f"ks_cdf_step{k}.svg")
 
 
@@ -362,7 +377,7 @@ def psi_bins():
                     color=C["text"], alpha=1.0 if k >= 2 else 0.0)
         ax.text(4.55, 33.5, "PSI terms", ha="left", fontsize=11, color=C["neutral"],
                 alpha=1.0 if k >= 2 else 0.0)
-        ax.text(2, 40.5, f"PSI = {sum(terms):.3f}: moderate (0.1 to 0.25), investigate",
+        ax.text(2, 40.5, f"PSI = {sum(terms):.3f}: moderate band (0.1 to 0.25)",
                 ha="center", fontsize=12.5, fontweight="bold", color=C["danger"],
                 alpha=1.0 if k >= 3 else 0.0)
         ax.set_xticks(x)
@@ -374,8 +389,6 @@ def psi_bins():
         ax.set_xlabel("Loudness bin (training quintiles)")
         ax.grid(axis="y", color=C["grid"], linewidth=0.6)
         ax.set_axisbelow(True)
-        ax.text(1.0, -0.4, "Illustrative shares; formula and bands from Sec. 4.12.1",
-                transform=ax.transAxes, ha="right", fontsize=9, color=C["neutral"])
         sp.save(fig, out / f"psi_bins_step{k}.svg")
 
 
