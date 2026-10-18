@@ -1,0 +1,109 @@
+---
+title: "The Actuator Zoo"
+subtitle: "Vetted specifications for the joints, gearboxes, and motors behind the physical AI examples"
+---
+
+The Actuator Zoo lists every entry in the `mlsysim.Actuators` registry: strain-wave (harmonic) joints,
+quasi-direct-drive modules, servos, frameless motors, and wheel hub motors. Each value carries units and
+a provenance record.
+
+::: {.callout-tip}
+## How to use this page
+Reference these actuators when you reason about reflected inertia, torque limits, and how fast a joint
+can actually respond to a command. Load any actuator directly in Python, for example
+`joint = mlsysim.Actuators.PandaClassJoint.CSG_25_50_ILM70x18`.
+:::
+
+```{python}
+#| echo: false
+#| output: asis
+import sys
+from pathlib import Path
+
+for candidate in [Path.cwd(), *Path.cwd().parents]:
+    pkg_dir = candidate / "mlsysim"
+    if (pkg_dir / "mlsysim" / "__init__.py").exists():
+        if str(pkg_dir) not in sys.path:
+            sys.path.insert(0, str(pkg_dir))
+        break
+
+import mlsysim
+from mlsysim import Actuators
+
+
+# Pint orders compound units alphabetically and joins them with U+22C5
+# ("m⋅N"); torque is conventionally written N·m.
+def unit_label(units):
+    label = f"{units:~P}"
+    return "N·m" if label.replace("\u22c5", "·") == "m·N" else label
+
+
+def q(value, unit=None, precision=1):
+    if value is None:
+        return "---"
+    try:
+        if unit is not None:
+            value = value.to(unit)
+        return f"{value.magnitude:,.{precision}f} {unit_label(value.units)}"
+    except Exception:
+        return f"{value:~P}"
+
+
+def entries(namespace):
+    for attr in sorted(dir(namespace)):
+        if attr.startswith("_"):
+            continue
+        item = getattr(namespace, attr)
+        if hasattr(item, "name") and hasattr(item, "metadata"):
+            yield item
+
+
+joint_groups = [
+    ("Strain-wave (harmonic) joints", "HarmonicDrive"),
+    ("Panda-class integrated joints", "PandaClassJoint"),
+    ("Quasi-direct-drive modules", "QuasiDirectDrive"),
+    ("Servos", "Servo"),
+]
+
+print("### Joints\n")
+print("| Actuator | Family | Gear ratio | Rated torque | Peak torque | Reflected inertia | Mass |")
+print("|:---|:---|:---:|:---:|:---:|:---:|:---:|")
+for label, attr in joint_groups:
+    ns = getattr(Actuators, attr, None)
+    if ns is None:
+        continue
+    for j in entries(ns):
+        ratio = f"{j.gear_ratio:g}:1" if getattr(j, "gear_ratio", None) else "---"
+        print(f"| **{j.name}** | {label} | {ratio} | {q(getattr(j, 'rated_torque', None), 'N*m')} | "
+              f"{q(getattr(j, 'peak_torque', None), 'N*m')} | "
+              f"{q(getattr(j, 'reflected_inertia', None), 'kg*m**2', 4)} | {q(getattr(j, 'mass', None), 'kg', 2)} |")
+
+print("\n### Motors\n")
+print("| Actuator | Type | Key specifications |")
+print("|:---|:---|:---|")
+for label, attr in [("Frameless motor", "FramelessMotor"), ("Wheel hub motor", "HubMotor")]:
+    ns = getattr(Actuators, attr, None)
+    if ns is None:
+        continue
+    for m in entries(ns):
+        fields = []
+        for field in type(m).model_fields:
+            if field in ("name", "metadata"):
+                continue
+            value = getattr(m, field)
+            if value is None or isinstance(value, (str, bool)):
+                continue
+            if hasattr(value, "magnitude"):
+                fields.append(f"{field.replace('_', ' ')}: {q(value)}")
+            if len(fields) == 4:
+                break
+        print(f"| **{m.name}** | {label} | {'; '.join(fields) or '---'} |")
+print()
+```
+
+## Where these numbers are used
+
+Reflected inertia grows with the square of the gear ratio, so the same motor behind a 50:1 strain-wave
+gear and behind a 9:1 quasi-direct-drive stage responds very differently to a sudden command change.
+The Volume IV planning and enforcement chapters use these entries for torque-jump and stopping
+budgets. The underlying formulas are in [`physics.robotics.actuation`](../api/physics.robotics.actuation.qmd).

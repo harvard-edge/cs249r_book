@@ -5,8 +5,6 @@ date: 2026-04-01
 categories: [serving, memory, llm]
 ---
 
-# How Much Memory Does Llama-3 70B Actually Need?
-
 Every ML engineer eventually asks: *"Can I serve Llama-3 70B on my hardware?"*
 
 The answer depends on three things: **precision**, **KV cache**, and **batch size**.
