@@ -23,7 +23,7 @@
 
 **Comes in from the previous labs:** the full pipeline, from kinematics through your own governor.\
 **Goes out:** the Physical Release Dossier and the oral defense.\
-**If the previous lab didn't finish:** staff provide reference governor firmware.
+**If the previous lab did not finish:** staff provide reference governor firmware.
 
 ---
 

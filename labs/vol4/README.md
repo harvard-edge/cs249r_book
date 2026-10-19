@@ -1,6 +1,6 @@
 # Volume IV: Physical AI Studio
 
-<h2 align="center">You can't <kbd>Ctrl</kbd> + <kbd>Z</kbd> physics.</h2>
+<h2 align="center">Physics has no <kbd>Ctrl</kbd> + <kbd>Z</kbd>.</h2>
 
 <p align="center"><em>Physical AI begins where computation stops being symbolic and becomes physical force.</em></p>
 
@@ -41,7 +41,7 @@ Read the chapter early in the week, discuss it in seminar, then put it to work i
 
 <table>
   <thead>
-    <tr><th>Week</th><th>Lab</th><th>Book part &amp; chapters</th><th>What you'll do</th><th>Due</th></tr>
+    <tr><th>Week</th><th>Lab</th><th>Book part &amp; chapters</th><th>What you do</th><th>Due</th></tr>
   </thead>
   <tbody>
     <tr><td align="center">1</td><td><a href="labs/week-01-getting-started.md"><strong>Getting Started</strong></a></td><td>Part I · Ch 1 <em>The Causal Boundary</em></td><td>Get the kit and your computer ready, learn how the station works, and learn to stop the robot safely.</td><td></td></tr>

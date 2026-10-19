@@ -10,23 +10,23 @@ title: "Milestone 06: MLPerf to Generative Serving (2018)"
 :::{.callout-tip title="What You'll Learn"}
 
 - The systematic optimization workflow: measure, optimize, validate, repeat
-- Why profiling before optimizing beats heroic rewrites
+- Why profiling before optimizing beats large rewrites
 - How to distinguish modeled storage savings, measured accuracy, and measured latency
 :::
 
 ## Overview
 
-This is the **Optimization Milestone**: the third act of the historical arc. The Foundation Milestones proved your training loop learns. The Architecture Milestones proved your layers match real data. This one proves your *optimization stack* (the Profiler in Module 14, Quantization in Module 15, Compression in Module 16, Acceleration in Module 17, KV-Cache in Module 18, and Benchmarking in Module 19) can systematically evaluate and optimize the entire **Architectural Triad** you built across the curriculum:
+This is the **Optimization Milestone**: the third act of the historical arc. The Foundation Milestones proved your training loop learns. The Architecture Milestones proved your layers match real data. This one proves your *optimization stack* (the Profiler in Module 14, Quantization in Module 15, Compression in Module 16, Acceleration in Module 17, KV-Cache in Module 18, and Benchmarking in Module 19) can evaluate and optimize, step by step, the entire **Architectural Triad** you built across the curriculum:
 
 1. **DigitMLP** (Milestone 03): Dense, parameter-bound
 2. **SimpleCNN** (the Milestone 04 architecture, untrained here): Spatial, compute-bound
 3. **TinyGPT** (the Milestone 05 architecture, untrained here): Autoregressive, memory-bandwidth and prefix-bound
 
-By 2022, ML research was sprinting while real-time interactive deployment was struggling. Generative transformers like GPT-3 and ChatGPT placed massive pressure on inference serving systems. Teams faced models too slow and expensive to serve interactively, and vendor benchmark numbers used varying datasets, batch sizes, and accuracy floors.
+By 2022, ML research was advancing faster than interactive deployment could keep up. Generative transformers like GPT-3 and ChatGPT put heavy pressure on inference serving systems. Teams faced models too slow and expensive to serve interactively, and vendor benchmark numbers used varying datasets, batch sizes, and accuracy floors.
 
-MLPerf established standardized evaluation: one protocol, one accuracy floor, and one set of reference models across CPUs, GPUs, and custom accelerators. Optimization transitioned from an afterthought to the discipline that decides who ships.
+MLPerf established standardized evaluation: one protocol, one accuracy floor, and one set of reference models across CPUs, GPUs, and custom accelerators. Optimization changed from an afterthought into the discipline that decides who ships.
 
-In this milestone, you benchmark the complete architectural triad across your optimization stack, map the **Pareto frontier** of non-dominated configurations, render a terminal trade-off curve, and diagnose why different neural architectures face fundamentally asymmetric hardware bottlenecks.
+In this milestone, you benchmark the complete architectural triad across your optimization stack, map the **Pareto frontier** of non-dominated configurations, render a terminal trade-off curve, and diagnose why different neural architectures face different hardware bottlenecks.
 
 ## What You'll Recreate
 
@@ -91,7 +91,7 @@ INT8 byte counts are read from the code arrays YOUR quantizer returned (one byte
 
 ### Part 1: Three MLPerf Benchmark Divisions
 
-MLPerf organizes workloads into distinct benchmark divisions because different machine learning domains face fundamentally different systems constraints. You evaluate the three architectures in their own divisions:
+MLPerf organizes workloads into distinct benchmark divisions because different machine learning domains face different systems constraints. You evaluate the three architectures in their own divisions:
 
 #### Division 1: Edge & Embedded Inference: `DigitMLP` (Dense)
 
@@ -109,12 +109,12 @@ Primary Bottleneck: Dense weight memory capacity (SRAM/Flash storage footprint).
 
 ![](../assets/images/diagrams/m06_division1_mlp_pareto.svg)
 
-**Division 1 Takeaway:** Fully connected feed-forward models are memory-bound by weight parameters. INT8 Quantization shrinks weight memory by $3.95\times$ (from 9,640 B to 2,442 B, scale and zero-point metadata included) with no accuracy change in this run (86.5% on the held-out test set), which puts it on the measured frontier. Baseline FP32 is dominated in this run because INT8 matched its accuracy with less weight memory. Unstructured pruning zeros 50% of the weights with minimal accuracy degradation (86.0%), but requires sparse index storage (such as CSR) to translate sparsity into physical memory reductions.
+**Division 1 Takeaway:** Fully connected feed-forward models are memory-bound by weight parameters. INT8 Quantization shrinks weight memory by $3.95\times$ (from 9,640 B to 2,442 B, scale and zero-point metadata included) with no accuracy change in this run (86.5% on the held-out test set), which puts it on the measured frontier. Baseline FP32 is dominated in this run because INT8 matched its accuracy with less weight memory. Unstructured pruning zeros 50% of the weights with little accuracy loss (86.0%), but requires sparse index storage (such as CSR) to translate sparsity into physical memory reductions.
 
 :::{.callout-warning title="MLSys Reality Check: Storage Compression ≠ Compute Acceleration Without Hardware INT8 Support"}
 Quantizing model weights from FP32 to INT8 achieves a modeled **$4.0\times$ reduction in weight memory** and memory bandwidth. However, pure Python and NumPy run *simulated quantization*: weights are stored in 8-bit precision but dequantized back to FP32 at runtime to execute standard BLAS GEMM.
 
-Without dedicated hardware execution units (such as NVIDIA DP4A / Tensor Cores, Apple Neural Engine, or ARM NEON dot-product instructions), CPU inference latency remains flat or slightly slower. Real-world systems engineers strictly separate **storage and bandwidth gains** from **compute execution speedups**.
+Without dedicated hardware execution units (such as NVIDIA DP4A / Tensor Cores, Apple Neural Engine, or ARM NEON dot-product instructions), CPU inference latency remains flat or slightly slower. Systems engineers keep **storage and bandwidth gains** separate from **compute execution speedups**.
 :::
 
 #### Division 2: Spatial Vision & Compute: `SimpleCNN` (Spatial)
@@ -136,7 +136,7 @@ Primary Bottleneck: 2D sliding convolution loops and spatial feature extraction 
 **Division 2 Takeaway:** Convolutional networks have a compact parameter footprint (2.66 KB) but high computational intensity across spatial loops. In this run, Baseline FP32 and INT8 Quantization form the measured frontier: INT8 shrinks storage about $3.7\times$ (down to 714 B) while its outputs still agree with the FP32 model's at about 99.99% cosine similarity, and 50% pruning drops agreement to about 95% without saving memory under dense array storage.
 
 :::{.callout-tip title="Kernel Lowering: Lowering 7 Spatial Loops to BLAS GEMM (Module 17)"}
-While quantization addresses model storage, Module 17's **kernel acceleration** attacks the spatial convolution compute bottleneck. By unfolding the input feature map via `im2col` into a 2D patch matrix, the 7 nested Python loops of standard `Conv2d` are lowered into a single vectorized matrix multiplication (`vectorized_matmul`), delivering an empirical **$>70\times$ speedup** (1.83 ms down to 0.02 ms in forward execution)!
+While quantization addresses model storage, Module 17's **kernel acceleration** targets the spatial convolution compute bottleneck. By unfolding the input feature map via `im2col` into a 2D patch matrix, the 7 nested Python loops of standard `Conv2d` are lowered into a single vectorized matrix multiplication (`vectorized_matmul`), delivering an empirical **$>70\times$ speedup** (1.83 ms down to 0.02 ms in forward execution).
 :::
 
 #### Division 3: Generative LLM Serving: `TinyGPT` (Autoregressive)
@@ -156,11 +156,11 @@ Primary Bottleneck: $O(N^2)$ causal prefix recomputation and DRAM weight streami
 
 ![](../assets/images/diagrams/m06_division3_gpt_pareto.svg)
 
-**Division 3 Takeaway:** Autoregressive generation is throttled by causal attention history and weight streaming. KV-Cache memoization skips quadratic prefix reprocessing (in this run, replay latency fell from 5.44 ms to 3.71 ms, about $1.5\times$), and its logits match recompute to within floating-point rounding. INT8 quantization shrinks weight memory about $3.96\times$ (113,152 B to 28,584 B, scale and zero-point metadata included). Combined (`Full Stack`), latency is 3.81 ms, close to KV-cache alone (3.71 ms), at 45 KB including the cache. In this run all four strategies sit on the measured frontier, because each trades latency, memory, and agreement differently; none is best on all three.
+**Division 3 Takeaway:** Autoregressive generation is limited by causal attention history and weight streaming. KV-Cache memoization skips quadratic prefix reprocessing (in this run, replay latency fell from 5.44 ms to 3.71 ms, about $1.5\times$), and its logits match recompute to within floating-point rounding. INT8 quantization shrinks weight memory about $3.96\times$ (113,152 B to 28,584 B, scale and zero-point metadata included). Combined (`Full Stack`), latency is 3.81 ms, close to KV-cache alone (3.71 ms), at 45 KB including the cache. In this run all four strategies sit on the measured frontier, because each trades latency, memory, and agreement differently; none is best on all three.
 
 ### Part 1 (continued): Kernel Acceleration & Systems Speedups
 
-Beyond model compression (quantization and pruning), Milestone 06 evaluates the systems-level kernel optimizations you authored in Modules 17 and 18. Each optimization attacks a distinct computational bottleneck:
+Beyond model compression (quantization and pruning), Milestone 06 evaluates the systems-level kernel optimizations you authored in Modules 17 and 18. Each optimization targets a different computational bottleneck:
 
 :::{.callout-note title="🏎️ Kernel 1: Dense Matrix Multiply (Module 17 Vectorization)"}
 - **Baseline (3 Nested Interpreter Loops):** 5.17 ms
@@ -259,24 +259,24 @@ The measured candidates still execute dense float32 operations. Packed storage a
 
 ## Historical Context
 
-Before MLPerf, comparing ML systems was guesswork. Vendors picked their own datasets, batch sizes, and accuracy targets, then claimed wins. MLPerf forced a common protocol: same models, same data, same accuracy floor: so a "2× faster" claim could finally be checked instead of believed.
+Before MLPerf, comparing ML systems was guesswork. Vendors picked their own datasets, batch sizes, and accuracy targets, then claimed wins. MLPerf forced a common protocol: same models, same data, same accuracy floor, so a "2× faster" claim could be checked instead of believed.
 
-That protocol marks the moment ML engineering became as load-bearing as ML research. Building a model is step one. Shipping it inside a latency budget, on hardware your users actually own, is where production value lives, and where careers are made.
+That protocol marks the point at which ML engineering became as important as ML research. Building a model is only the first step. The production value lies in shipping it within a latency budget, on hardware your users own.
 
 ## Systems Insights: Asymmetric Architectural Bottlenecks
 
-The most profound lesson of MLPerf is that **optimization is not one-size-fits-all**. Each architecture in the triad is constrained by a fundamentally different physical bottleneck:
+MLPerf shows that **optimization is not one-size-fits-all**. Each architecture in the triad is constrained by a different physical bottleneck:
 
 1. **DigitMLP (1986): Dense, Parameter-Bound:**
    - **The Bottleneck:** Over 99% of its memory footprint resides in fully connected weight matrices ($64 \times 32$ and $32 \times 10$). Computational FLOPs are negligible ($< 5{,}000$).
    - **The Winning Optimization:** **INT8 Quantization** (Module 15) compresses weight storage by $3.95\times$, with no accuracy change in our run (86.5% before and after). Pruning (Module 16) zeros half the weights, but dense array storage is unchanged without sparse index encodings (e.g., CSR).
 
 2. **SimpleCNN (1998): Spatial, Compute-Bound:**
-   - **The Bottleneck:** Parameter memory is minuscule (2.6 KB), but sliding 2D convolution windows across feature maps requires thousands of nested loop iterations. The model is compute-bound and Python loop overhead dominates.
-   - **The Winning Optimization:** **Vectorization & SIMD** (Module 17) transforms spatial convolutions into matrix operations (im2col / GEMM), removing interpreter overhead and handing the arithmetic to an optimized BLAS library.
+   - **The Bottleneck:** Parameter memory is small (2.6 KB), but sliding 2D convolution windows across feature maps requires thousands of nested loop iterations. The model is compute-bound and Python loop overhead dominates.
+   - **The Winning Optimization:** **Vectorization & SIMD** (Module 17) turns spatial convolutions into matrix operations (im2col / GEMM), removing interpreter overhead and handing the arithmetic to an optimized BLAS library.
 
 3. **TinyGPT (2017–2022): Autoregressive, Memory-Bandwidth & Prefix-Bound:**
-   - **The Bottleneck:** Autoregressive token-by-token generation re-evaluates self-attention keys and values over an ever-expanding prefix. Naive generation scales as $O(N^2)$ in total computation, repeatedly re-reading and re-projecting past tokens through memory.
+   - **The Bottleneck:** Autoregressive token-by-token generation re-evaluates self-attention keys and values over a growing prefix. Naive generation scales as $O(N^2)$ in total computation, repeatedly re-reading and re-projecting past tokens through memory.
    - **The Winning Optimization:** **KV-Cache Memoization** (Module 18) caches prior key and value tensors, so each new token projects only itself while attention still reads the whole cached prefix ($O(t)$ per step instead of $O(t^2)$). Combined with INT8 quantization to cut weight memory traffic, these are two techniques production LLM serving commonly combines.
 
 ## Read why
@@ -289,7 +289,7 @@ With Milestone 06, the optimization arc is complete. You have:
 
 - Built every core component (Modules 01–13)
 - Implemented and measured optimization techniques (Modules 14–19)
-- Proven mastery across six landmark systems (Milestones 01–06)
+- Reproduced six landmark systems (Milestones 01–06)
 
 Next, test your framework in the open-ended **Capstone** (Module 20: Torch Olympics), and check your Module 17 kernels against native C++ SIMD, Metal, and Triton ones in **Milestone 07: Custom Kernels**, with the optional extensions described in [Extending TinyTorch](../extensions.qmd).
 

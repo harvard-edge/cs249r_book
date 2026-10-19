@@ -20,7 +20,7 @@
 - **The authority path:** every motion passes through the STM32 before it reaches a motor
 
 **Goes out to Lab 1:** a ready station, a working computer setup, and a team that can arm, move, and stop the robot safely.\
-**If something didn't finish:** staff help you finish setup before Lab 1.
+**If something did not finish:** staff help you finish setup before Lab 1.
 
 ---
 

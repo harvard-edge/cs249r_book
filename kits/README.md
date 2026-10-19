@@ -16,7 +16,7 @@
 >
 > Hardware Kits shipped with the **2026** MLSysBook refresh. Labs, build recipes, board notes, and PDF exports are **actively iterated** as hardware and SDKs evolve.
 >
-> **Feedback** — [GitHub issues](https://github.com/harvard-edge/cs249r_book/issues) or pull requests.
+> **Feedback:** [GitHub issues](https://github.com/harvard-edge/cs249r_book/issues) or pull requests.
 <!-- EARLY-RELEASE-CALLOUT:END -->
 
 ## What This Is

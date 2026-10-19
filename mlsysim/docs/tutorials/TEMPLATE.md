@@ -10,7 +10,7 @@ Every tutorial follows this template exactly. Consistency is pedagogical.
 1. **One tutorial = one core question.** The title IS the question. Every cell exists to answer it.
 2. **Predict → Compute → Reflect.** Before showing code output, tell the reader what to expect.
    After showing it, explain what it means. This is the learning cycle.
-3. **The "aha moment" is sacred.** Every tutorial has exactly ONE insight that changes how the
+3. **The central finding is the point of the tutorial.** Every tutorial has exactly ONE insight that changes how the
    reader thinks. Frame it, build to it, land it in the Key Insight callout.
 4. **Real hardware, real models.** No toy examples. Every tutorial uses published specs from the Zoo.
 5. **Code-first, prose-second.** Keep prose tight. The insight comes from the numbers, not from
@@ -88,7 +88,7 @@ Format: **[Tutorial Name](link)**: one-sentence description of what it adds.>
 |-------------|---------|-------------|
 | `{.callout-note}` | Prerequisites, Background, Learning Objectives | Factual, informational |
 | `{.callout-tip}` | Background concepts | Helpful context |
-| `{.callout-important}` | **Key Insight** (the aha moment) | Exactly ONCE per tutorial |
+| `{.callout-important}` | **Key Insight** (the central finding) | Exactly ONCE per tutorial |
 | `{.callout-warning}` | Common mistakes / pitfalls | Only when there is a real trap |
 
 ---

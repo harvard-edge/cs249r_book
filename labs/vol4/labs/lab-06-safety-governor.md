@@ -23,7 +23,7 @@
 
 **Comes in from the previous lab:** a working, disturbance-tested autonomous loop.\
 **Goes out to the next lab:** your governor firmware, watchdog, and fault-injection evidence.\
-**If the previous lab didn't finish:** staff provide a reference autonomous loop.
+**If the previous lab did not finish:** staff provide a reference autonomous loop.
 
 ---
 
