@@ -1,0 +1,320 @@
+chapter: 07_tool_calling
+lecture: "07"
+title: "Tool Calling"
+layer: tools
+locator: a
+minutes: 75
+notes_minutes: 72
+core_minutes: 61
+target_ideas: 30
+thesis: "Generating a call cannot authorize it: the runtime validates, authorizes, dispatches, and settles each call, and keeps an uncertain outcome marked unknown until it can check it."
+
+hook:
+  minutes: "0-4.5"
+  setup: "War Story 7.1, shown as the real artifacts: the user's request ('Have a look at issues in my open source repo pacman and address them!'), the attacker's public issue, and two diff lines of the public pull request the agent opened with a salary and relocation plans from a private repository (Invariant Labs, 26 May 2025)."
+  question_to_class: "Every call was schema-valid and carried a valid token. Which check would have stopped the leak? A) schema validation B) authentication C) a per-call grant check D) a better-aligned model"
+  payoff: "C. No check compared the target repository with the task. The synthesis applies the four runtime stages to the three calls: the grant check refuses the first private read (read-only, A0), so the pull request is never dispatched."
+  sources:
+    - "Tool Calling, War Story 7.1 (§7.4.3)"
+    - "https://invariantlabs.ai/blog/mcp-github-vulnerability (screenshots mcp-claude-prompt.png, mcp-gh-issue.png, mcp-gh-pr.png)"
+
+recall: "Close your notes: what does a model call return (Lecture 2: a proposal checked against its invocation contract), and what does a retrieval result record (Lecture 6: the source version it observed, src/pool.py at r17)?"
+
+driving_question: "Why does a tool call that parses cleanly still need a runtime between it and the world?"
+
+goals:
+  - "Trace one call through validation, authorization, dispatch, and a matched observation."
+  - "Decide whether a timed-out call may be retried, and what settles it if not."
+  - "Shape a bounded observation that records what it dropped and what it proves."
+  - "Price a tool catalog in tokens and judge a toolkit by cost per accepted task."
+
+running_example: "The repair agent's turn on src/pool.py (Lighthouse 1.1 as the chapter uses it): read at r17, conditional patch to r18, the reproducer test_waiter_notified_on_return, its test log, and the five-minute test job on r18. For effects whose outcome is uncertain, the chapter's staging restart: POST /containers/srv-stage-04/restart times out after 2 s. The running case appears as a real system once: 500 public trajectories of a real bash-only repair agent (mini-SWE-agent 1.0.0) on SWE-bench Verified."
+
+segments:
+  - name: Mediation
+    divider_question: "What stands between a proposed call and its effect?"
+    read: "§7.2 to §7.4"
+    concept_questions: [1, 2, 3, 4, 5, 6]
+    land: "A schema, a token, and a tool list each grant nothing; the runtime checks every call, reads included, against the task, and a precondition on current state commits with the write."
+    minutes: 17.5
+  - name: Retries
+    divider_question: "What may a runtime do after a timeout?"
+    read: "§7.5"
+    concept_questions: [7, 8, 9, 10]
+    land: "A timeout is missing knowledge: retry only on safe semantics, endpoint deduplication, or evidence that also rules out the attempt in flight; otherwise record the effect unsettled."
+    minutes: 14
+  - name: Observations
+    divider_question: "What should come back to the model?"
+    read: "§7.6 to §7.8"
+    concept_questions: [11, 12, 13, 14]
+    land: "An observation reports what was measured, what was dropped, and what is still running; detection of a finished job belongs to the runtime."
+    minutes: 15
+  - name: Toolkit
+    divider_question: "Which tools should the model see on each turn?"
+    read: "§7.9 and §7.10"
+    concept_questions: [15, 16, 17]
+    land: "A catalog is a token budget and granularity moves work between model and tool; a toolkit is judged by cost per accepted task and the reach it leaves bounded, and neither grants authority."
+    minutes: 11
+
+concept_questions:
+  - id: 1
+    q: "What happens between a proposed call and its effect?"
+    picture: "loop_step1-4: model, runtime (validate, authorize, dispatch, shape), tool; per-call-ID results strip (redraw of §7.2.1 figure 1)."
+    numbers: "None; three calls, two rejected before dispatch."
+    example: "call_3 invalid, call_2 not granted, call_1 dispatched and shaped."
+    read: "§7.2.1, §7.2.2"
+  - id: 2
+    q: "What must the enforcing component be?"
+    picture: "Anderson 1972 report cover and page 25 (principles A to C), real scan."
+    numbers: "Anderson, ESD-TR-73-51 Vol. II, October 1972."
+    example: "An unrestricted shell beside a checked file tool breaks 'always invoked'."
+    read: "§7.2.2, Definition 7.2"
+  - id: 3
+    q: "What does a schema settle, and what does it leave open?"
+    picture: "conditional_replace_file schema excerpt (listing 2) beside table 1 (structure, authority, limits, preconditions)."
+    numbers: "None."
+    example: "A numeric path fails structure; a symlinked path passes structure and must be resolved by the tool."
+    read: "§7.3.1, §7.3.2"
+  - id: 4
+    q: "Where must a version precondition be checked?"
+    picture: "cas_step1-3: read r17, teammate commits r18, unconditioned write loses the change, conditional write is rejected."
+    numbers: "Revisions r17, r18 (chapter)."
+    example: "The repair agent's patch to src/pool.py."
+    read: "§7.3.3"
+  - id: 5
+    q: "What does discovering a tool grant?"
+    picture: "Real create_pull_request descriptor (owner and repo free strings) and bar chart of the real GitHub MCP server's 131 tools."
+    numbers: "Measured at commit e3809fe: 131 tools, 71 mutating, 106 take the repository as any string, 13 declare destructive, 2 declare idempotent (calcs.py). Adapters 12 pairwise vs 7 with a protocol (chapter figure; derived)."
+    example: "MCP tools/list and tools/call; annotations untrusted (spec 2025-11-25)."
+    read: "§7.4"
+  - id: 6
+    q: "Which call should the runtime have refused, and why is the runtime the deputy?"
+    picture: "incident_step1-2: list_issues, get_file_contents (private), create_pull_request; grant check refuses the private read."
+    numbers: "None."
+    example: "Hardy's compiler and billing file (1988)."
+    read: "§7.4.3, Definition 7.3"
+  - id: 7
+    q: "What does a timeout tell the runtime?"
+    picture: "worlds_step1-3: request lost, reply lost, still in flight; the chapter's {transport_status: timeout, effect_status: unknown}."
+    numbers: "Staging restart, 2 s timeout (chapter)."
+    example: "POST /containers/srv-stage-04/restart."
+    read: "§7.5, Definition 7.4"
+  - id: 8
+    q: "How often does one blind retry duplicate?"
+    picture: "dup_plot: formula vs measured duplicates per 20,000 operations at 1, 2, 4 percent reply loss, plus 2 percent with deduplication."
+    numbers: "NM 7.1: P(timeout) 3.96 percent, P(dup) 1.9208 percent, 3,842 a day of 200,000 (derived). Measured on a localhost HTTP harness: 171, 361, 762 vs 192, 384, 768 predicted; 0 with deduplication."
+    example: "50 workers x 4,000 mutating calls a day."
+    read: "§7.5.2, Napkin Math 7.1"
+  - id: 9
+    q: "Why can't an unchanged probe authorize a retry?"
+    picture: "delayed_step1-3 (redraw of §7.5.1 figure) with the 'retry only on proof the attempt expired' card."
+    numbers: "None."
+    example: "Attempt A delayed, B sent after an unchanged probe, two restarts; reconciliation probe written before dispatch with a baseline hash."
+    read: "§7.5.1, §7.5.4"
+  - id: 10
+    q: "What makes a retry harmless?"
+    picture: "Repeat-behavior table (read, set desired state, produce an event) and opid_step1-2 (operation-ID lookup, four outcomes), with the real IETF Idempotency-Key header."
+    numbers: "IETF draft-ietf-httpapi-idempotency-key-header-07: 422 for reuse with another payload, 409 while outstanding."
+    example: "A deliberate second restart an hour later needs a new operation ID."
+    read: "§7.5.2, §7.5.3"
+  - id: 11
+    q: "How large is a real test log against a context window?"
+    picture: "Real pytest transcript (20,001 tests, one failure at the end)."
+    numbers: "Measured: 1,601,040 bytes, 381,274 cl100k tokens, 4.2 bytes per token, 3.0 windows of 128,000 (derived). NM 7.2: 24 MB / 3 = 8,000,000 tokens, 62.5 windows, 4,000 tokens = 3.1 percent, 120,000 carried tokens, $0.36 / $0.036."
+    example: "Head-only truncation keeps PASSED lines and drops the failure."
+    read: "§7.6.1, Napkin Math 7.2"
+  - id: 12
+    q: "How does an adapter bound capture and still disclose what it dropped?"
+    picture: "headtail_step1-3 (redraw of §7.6.1 figure 3)."
+    numbers: "Measured pipe capacity 65,536 bytes (macOS)."
+    example: "Staged view: status, head, notice, tail, handle obs_42."
+    read: "§7.6.1, §7.6.2"
+  - id: 13
+    q: "How often does a real repair agent cut its outputs?"
+    picture: "obs_hist: characters per command output over 500 real runs, cap at 10,000."
+    numbers: "18,076 outputs, 298 cut (1.6 percent), 253 of 500 runs; largest 793,216 characters staged as 10,614. SWE-agent Table 3: 100-line viewer 18.0 percent, full file 12.7 percent."
+    example: "The agent's real <elided_chars> notice."
+    read: "§7.6"
+  - id: 14
+    q: "What does a job acknowledgment mean, and who should watch the job?"
+    picture: "job_states with RFC 9110 202 text; poll_plot (cost vs detection delay)."
+    numbers: "NM 7.3: 59 polls, 1,933,312 input tokens, $0.8764 per job; $0.43 at 10 s, $0.13 at 30 s (derived). Measured: SIGTERM to a shell left 3 workers running; process-group signal stopped all."
+    example: "job_tests_18 at r18, accepted_pending."
+    read: "§7.7, §7.8"
+  - id: 15
+    q: "What does a tool catalog cost on every call?"
+    picture: "catalog_step1-3: measured GitHub catalog, NM 7.4 full and selected."
+    numbers: "Measured 28,986 tokens for 131 descriptors, median 165, largest 1,519, 22.6 percent of 128,000. NM 7.4: 15,000 vs 2,200, 12,800 released, break-even 1.33 descriptors."
+    example: "Static staging and prefix caching."
+    read: "§7.9.1, Napkin Math 7.4"
+  - id: 16
+    q: "How much work should one tool do?"
+    picture: "deep_shallow (redraw of §7.9.2 figure 4) with SWE-agent card; then the Exercise 9 discussion."
+    numbers: "SWE-agent Table 1: shell-only 11.0, SWE-agent 18.0 percent (1.64x, derived); Table 3: no edit 10.3. Exercise 9: $1.50 vs $1.11 tokens only; $4.00 vs $11.37 with change losses; break-even 0.0011."
+    example: "run_shell vs 12 structured tools."
+    read: "§7.9.2, §7.9.3, Exercise 9"
+  - id: 17
+    q: "Why is a click still a tool call?"
+    picture: "MiniWoB++ real task frame; click_step1-3 (schematic)."
+    numbers: "Proposed click (640, 420) (chapter)."
+    example: "Staging dialog replaced by a production dialog before dispatch."
+    read: "§7.10"
+
+concept_trace:
+  - concept: "Complete mediation"
+    frame: "Every call passes four runtime stages before and after it acts"
+    shows: "loop_step1-4 build; step 4 adds the line 'Complete mediation: every call, reads included, passes the check'."
+  - concept: "Action-time preconditions"
+    frame: "An action-time precondition commits with the write"
+    shows: "cas_step1-3: lost update vs conditional write rejected (preceded by the schema-vs-checks table)."
+  - concept: "Discovery is not authority"
+    frame: "A real descriptor offers any repository; nothing ties it to the task"
+    shows: "Real create_pull_request descriptor and measured bars (106 of 131 tools accept any repository); line 'Discovery is not authority'."
+  - concept: "Settlement before retry"
+    frame: "An unchanged probe cannot rule out an attempt still in flight"
+    shows: "delayed_step1-3 with the 'retry only on proof the attempt expired' card; preceded by the three-outcomes build and the measured duplicate plot."
+  - concept: "Operation identity"
+    frame: "Operation identity across attempts makes a retry harmless"
+    shows: "opid_step1-2: one op ID per intent, fresh attempt IDs, endpoint lookup with four outcomes; real IETF header."
+  - concept: "Bounded observation"
+    frame: "Head, notice, and tail keep capture memory fixed for any log"
+    shows: "headtail_step1-3 and the measured pipe capacity; real data on the next frame (500 runs)."
+  - concept: "Acknowledgment is not completion"
+    frame: "Acknowledgment means queued, not done"
+    shows: "job_states (accepted, running, completed, failed, unavailable) beside the RFC 9110 202 text."
+  - concept: "Toolkit staging"
+    frame: "One real catalog costs 28,986 tokens on every call"
+    shows: "catalog_step1-3 (measured catalog, NM 7.4 full, selected) and the break-even inequality."
+
+worked_examples:
+  - name: "Napkin Math 7.1: which retry path duplicates an effect?"
+    given: "Request and reply loss 2 percent each; one blind retry; 200,000 mutating calls a day."
+    steps: ["P(timeout) = 1 - 0.98^2 = 3.96 percent", "P(dup) = 0.98 x 0.02 x 0.98 = 1.9208 percent", "1.9208 percent x 200,000 = 3,842 a day", "measured on a real socket: 361 per 20,000 vs 384 predicted; 0 with deduplication"]
+    result: "Duplicates track reply loss; deduplication removes the path."
+    meaning: "Network hardening shrinks the duplicate rate; an endpoint contract removes it."
+  - name: "A real log and Napkin Math 7.2"
+    given: "Measured 1,601,040-byte pytest log; chapter's 24 MB log at 3 bytes per token, 4,000-token shaped view carried 30 calls at $3 per million."
+    steps: ["381,274 tokens = 3.0 windows (measured)", "24e6 / 3 = 8,000,000 tokens = 62.5 windows", "4,000 / 128,000 = 3.1 percent", "4,000 x 30 = 120,000 tokens = $0.36 ($0.036 cached)"]
+    result: "The raw log cannot be admitted; the shaped view costs again on every call that carries it."
+    meaning: "Shape, disclose omissions, and prune once acted on."
+  - name: "Napkin Math 7.3: the cost of asking whether a job finished"
+    given: "300 s job, polls every 5 s, 32,768 input and 40 output tokens per poll, 95 percent cached at $0.30 per million, $3 uncached, $15 output."
+    steps: ["ceil(300/5) - 1 = 59 polls", "59 x 32,768 = 1,933,312 input tokens: $0.8410", "59 x 40 = 2,360 output tokens: $0.0354", "total $0.8764; 10 s: $0.43; 30 s: $0.13"]
+    result: "Model polling trades cost directly against detection delay; runtime polling costs no inference."
+    meaning: "Wake the model only when an observation can change the next decision."
+  - name: "Exercise 9: one shell or twelve tools"
+    given: "12 tools x 350 vs one of 500 tokens; 30 calls; $1.20 attempt, acceptance 0.80 vs 0.78; change outside the task 0.001 vs 0.004 at $2,000."
+    steps: ["saved 111,000 tokens = $0.333; shell attempt $0.867", "C_eff tokens only: $1.50 vs $1.11", "with losses: $4.00 vs $11.37", "shell break-even change probability 0.0011"]
+    result: "The structured toolkit wins once uncontained changes are priced."
+    meaning: "Rank toolkits by cost per accepted task and bounded reach, not selection accuracy."
+
+active_learning:
+  - at_minute: 0.5
+    type: predict
+    prompt: "Every call parsed and authenticated. Which check would have stopped the leak?"
+    answer: "C, a per-call grant check against the task; schema and token passed; alignment did not stop it."
+  - at_minute: 4.5
+    type: retrieval
+    prompt: "What does a model call return, and what does a retrieval result record?"
+    answer: "A proposal checked against its invocation contract; the source version observed (r17)."
+  - at_minute: 18
+    type: concept_question
+    prompt: "True or false: a schema-valid call is safe; a dry run holds r17; a read needs authorization."
+    answer: "False, false, true."
+  - at_minute: 23
+    type: diagnose
+    prompt: "Which call should the runtime have refused?"
+    answer: "The first private-repository read (A0); the grant check keyed to the task refuses it and the pull request is never sent."
+  - at_minute: 29
+    type: estimate
+    prompt: "With 2 percent request and reply loss and one blind retry, what fraction of calls execute twice?"
+    answer: "1.9208 percent, 3,842 a day of 200,000; measured 361 vs 384 per 20,000; 0 with deduplication."
+  - at_minute: 40.5
+    type: estimate
+    prompt: "How many 128,000-token windows does this real 1.6 MB test log fill?"
+    answer: "381,274 tokens, 3.0 windows; the chapter's 24 MB log is 62.5."
+  - at_minute: 52.5
+    type: estimate
+    prompt: "What does model-directed polling of a 300 s job every 5 s cost?"
+    answer: "59 calls, 1,933,312 input tokens, $0.8764."
+  - at_minute: 60
+    type: discuss
+    prompt: "One shell tool or twelve structured tools?"
+    answer: "Shell wins on tokens alone ($1.11 vs $1.50) and loses once change losses are priced ($11.37 vs $4.00)."
+  - at_minute: 65.5
+    type: retrieval
+    prompt: "For each call in the leak, which check acts, and what does it record?"
+    answer: "Validate passes all; authorize refuses the private read; nothing dispatched to settle; the observation records a bounded refusal."
+
+open_questions:
+  - "What would make a tool descriptor trustworthy: a signature, a test suite, an audit?"
+  - "Which actions should an agent never take through pixels?"
+  - "Who should set a task's grants: the user, the runtime, or a policy the model drafts and a human approves?"
+
+more_examples:
+  - "Invariant Labs GitHub MCP exploit, 26 May 2025 (hook)."
+  - "github/github-mcp-server tool snapshots at e3809fe: 131 tools, 28,986 tokens (measured)."
+  - "mini-SWE-agent 1.0.0 trajectories on SWE-bench Verified: head-and-tail truncation in a real agent (measured)."
+  - "IETF draft-ietf-httpapi-idempotency-key-header-07; RFC 9110 §15.3.3 (202 Accepted)."
+  - "Anderson, Computer Security Technology Planning Study, 1972 (reference monitor)."
+  - "MiniWoB++ (after Shi et al., ICML 2017): click-based web tasks."
+  - "Real terminal transcript: pipefail, exit 256 -> 0, SIGKILL -> 137; process-group cancellation (measured)."
+
+further_reading:
+  - cite: "Saltzer and Schroeder, The Protection of Information in Computer Systems, 1975"
+    url: "https://doi.org/10.1109/proc.1975.9939"
+    why: "Complete mediation and least privilege as a checklist for the tool boundary."
+  - cite: "Hardy, The Confused Deputy, 1988"
+    url: "https://doi.org/10.1145/60609.60611"
+    why: "Three pages on authority that follows the program instead of the request."
+  - cite: "Birrell and Nelson, Implementing Remote Procedure Calls, 1984"
+    url: "https://doi.org/10.1145/2080.357392"
+    why: "Why a caller cannot know whether an unacknowledged call ran."
+  - cite: "Helland, Idempotence Is Not a Medical Condition, 2012"
+    url: "https://doi.org/10.1145/2181796.2187821"
+    why: "Receivers make retries harmless."
+  - cite: "Yang et al., SWE-agent, NeurIPS 2024"
+    url: "https://arxiv.org/abs/2405.15793"
+    why: "Measured effect of model-oriented tool interfaces."
+
+left_to_reading:
+  - concept: "Batches and forced calls (Bernstein's conditions)"
+    why: "Detail better read than heard; Exercise 7 practices it."
+  - concept: "Stateless cursors and pagination"
+    why: "Detail of §7.6.2; mentioned only as the handle in the staged view."
+  - concept: "Leases and fencing tokens"
+    why: "Owned by Lecture 11; named once in a note."
+
+callbacks:
+  - {lecture: 2, concept: "Proposal boundary", where: "recall slide and note"}
+  - {lecture: 2, concept: "Invocation contract", where: "recall slide and note"}
+  - {lecture: 2, concept: "Grammar-constrained decoding", where: "schema slide note"}
+  - {lecture: 6, concept: "Retrieval contract", where: "recall slide note"}
+  - {lecture: 1, concept: "Side-effect classes (authority levels A0 to A3)", where: "map slide note; repeat-behavior note"}
+  - {lecture: 1, concept: "Six-phase turn lifecycle", where: "four-stages slide note"}
+  - {lecture: 1, concept: "Invariant closure", where: "exit-status note"}
+  - {lecture: 1, concept: "Cost per accepted task", where: "discussion slide note"}
+  - {lecture: 4, concept: "Working-set partition", where: "real-log estimate note"}
+  - {lecture: 5, concept: "Paused-state policy", where: "acknowledgment slide note"}
+  - {lecture: 5, concept: "Radix prefix cache", where: "catalog slide note"}
+  - {lecture: 8, concept: "Containment beneath the model / isolation envelopes", where: "diagnose note, deep-tool note, discussion note, next lecture"}
+  - {lecture: 9, concept: "Structural prompt injection", where: "hook note, diagnose note, synthesis note"}
+  - {lecture: 11, concept: "Durable intent before dispatch", where: "delayed-attempt note"}
+  - {lecture: 11, concept: "Fencing tokens", where: "operation-identity note"}
+  - {lecture: 12, concept: "Compensation (trajectory saga)", where: "delayed-attempt note"}
+
+closing:
+  return_to_hook: "Synthesis applies validate, authorize, settle, observe to the leak's three calls: the grant check refuses the first private read; nothing is dispatched to settle; the model receives a bounded refusal."
+  read_and_practice: ["§7.2 to §7.10", "Checkpoints 7.1 to 7.4", "Napkin Math 7.1 to 7.4", "Exercises 1, 2, 9"]
+  bridge: "Next lecture (Agent Sandboxes): a call passed every check. What limits what its code can reach?"
+
+coverage:
+  primary_taught: ["Complete mediation", "Action-time preconditions", "Discovery is not authority", "Settlement before retry", "Operation identity", "Bounded observation", "Acknowledgment is not completion", "Toolkit staging"]
+  primary_left_to_reading: []
+  secondary: ["Reconciliation probe (delayed-attempt slide)", "Repeat-behavior classes (optional slide)", "Confused deputy (diagnose slide)", "Computer-use tool calls (optional click slide)"]
+
+notes_for_author:
+  - "Real-data measurements made for this deck (scripts in images/data/): retry harness on localhost, pipe capacity, exit-status transcript, process-group cancellation, pytest log tokens, GitHub MCP descriptor tokens, 500-run observation sizes."
+  - "The IETF draft assigns 422 to key reuse with a different payload and 409 to an outstanding request; the chapter uses 409 for the mismatch. The slide shows the draft; the note names the difference."
+  - "pytest returns exit status 5 when it collects zero tests; the chapter's claim that a runner with an unmatched filter exits 0 holds for some runners but not pytest. The note says so."
+  - "Altitude: the hook and credits name GitHub MCP, pytest, and SWE-agent as sources of real artifacts; slide titles name no product."
