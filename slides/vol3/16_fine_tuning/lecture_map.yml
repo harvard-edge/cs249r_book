@@ -1,0 +1,199 @@
+chapter: 16_fine_tuning
+lecture: "16"
+title: Trajectory Fine-Tuning
+minutes: 75
+notes_minutes: {total: 71, core: 53.5}
+layer: learning
+locator: origin
+target_ideas: 30
+thesis: "Training on trajectories teaches whatever the loss touches, so observations stay context, targets are chosen spans, and a lower loss is never by itself a release decision."
+hook:
+  minutes: "0-3"
+  setup: "Five real repair agents on SWE-bench Verified, 2,100 published transcripts, split by the role that produced each character."
+  question_to_class: "How much of a repair run did the model write?"
+  payoff: "12 to 31 percent; observations are 56 to 72 percent. Only the model's region can hold a target, and the synthesis shows that the target is a part of it."
+  sources: ["MLSysIM Literature.SweBenchTrajectories (github.com/SWE-bench/experiments)", "Trajectory Fine-Tuning, figure 2 (§16.4.3)"]
+driving_question: "Why can training on a useful recovery record teach the model to repeat the mistake instead of the correction?"
+running_example: "The repair agent's recovery record trace_r19_01_redacted_v1: e2 refused, e3 schema query, e4 corrected edit, e5 check summary, e6 report; recovery_targets_v1 selects e3, e4, e6; trained into trained_policy_v1 (§16.1, §16.12). Shown as the real system through SWE-agent, OpenHands, and mini-SWE-agent repair transcripts."
+concept_questions:
+  - q: "How much of a recorded repair run did the model write?"
+    picture: "roles_step1-2: stacked role shares of 5 real configurations"
+    numbers: "model output 12 to 31%, observations 56 to 72% (SWE via MLSysIM)"
+    example: "Sonnet 3.5 with SWE-agent 0.x, 500 runs"
+    read: "§16.4.3"
+  - q: "What exactly is a training example for one model call?"
+    picture: "real chat-template rendering (Qwen2.5, transformers 5.7.0)"
+    numbers: "51 of 304 tokens are model output (data/template_render.txt)"
+    example: "two parallel tool calls and their replies, rendered in the user role"
+    read: "§16.3.1-16.3.2"
+  - q: "Which behavior belongs in weights, context, or runtime?"
+    picture: "homes_step1-3"
+    numbers: "none; table 1"
+    example: "inspect-after-refusal (weights), tool schema (context), validation (runtime)"
+    read: "§16.2.1"
+  - q: "What does per-call serialization cost?"
+    picture: "triangle.svg and swe_tokens.svg"
+    numbers: "15.5x at 30 turns (derived); median 387,196 summed input against 3,852 output tokens, 500 SWE-agent runs"
+    example: "a runtime that compacts history"
+    read: "§16.3.3"
+  - q: "Which positions receive loss, and what do masked tokens still do?"
+    picture: "mask_step1-3 (book figure 1 redrawn)"
+    numbers: "m_t = 1 on e4 and e6 only"
+    example: "the recovery record"
+    read: "§16.4.1"
+  - q: "How are labels aligned, and where does a double shift hide?"
+    picture: "transformers ForCausalLMLoss source"
+    numbers: "ignore_index -100"
+    example: "loader and loss both shift"
+    read: "§16.4.2"
+  - q: "How much does an unmasked loss dilute each target?"
+    picture: "inventory.svg"
+    numbers: "77.1% observations, 4.9% targets, 20.5x dilution (NM 16.1, illustrative)"
+    example: "rationale selected or kept as context (13.4% or 4.9%)"
+    read: "§16.4.3"
+  - q: "How do token and example averaging weight a long and a short example?"
+    picture: "norm.svg"
+    numbers: "96.97% against 3.03%, 32x (NM 16.2); split trace 6.25% to 57.1% (Ex 3)"
+    example: "30-turn repair trace and a one-turn lookup"
+    read: "§16.5.1"
+  - q: "Why must reductions across micro-batches sum before dividing?"
+    picture: "HF blog quote and our ForCausalLMLoss run"
+    numbers: "3.925 against 0.746 (data/accum_test.txt)"
+    example: "October 2024 gradient-accumulation fix"
+    read: "§16.5.1"
+  - q: "What does packing buy, and what must it preserve?"
+    picture: "occupancy.svg, blockmask_step1-2, packing run"
+    numbers: "19.1% to 76.6% (NM 16.2); logit difference 1.20 against 0 (data/packing_test.txt)"
+    example: "lookup packed with the repair trace"
+    read: "§16.5.2-16.5.3"
+  - q: "What is exposure bias, and how large is its horizon penalty?"
+    picture: "offcorpus.svg with Navlab photo; bounds_step1-2"
+    numbers: "18 against 0.6 at H = 30, eps = 2%, u = 1; saturation at 50 steps (NM 16.3)"
+    example: "the version conflict trained_policy_v1 never saw"
+    read: "§16.6.1"
+  - q: "How does DAgger close the coverage gap?"
+    picture: "dagger_step1-3; Super Tux Kart data"
+    numbers: "DAgger never fell after 15 iterations; SMILe about 2 falls per lap after 20 (Ross et al. 2011, Figure 2, §5.1)"
+    example: "fault-injected record: error masked, diagnosis and call selected"
+    read: "§16.6.2"
+  - q: "When does a preference pair beat imitation, and what does its score mean?"
+    picture: "prefpair.svg; NM 16.4 table"
+    numbers: "margin 0.6, score 0.646, loss 0.437; at beta 0.4 score 0.769 (illustrative)"
+    example: "targeted tests against full suite after every edit"
+    read: "§16.8"
+  - q: "When does distillation pay?"
+    picture: "distill.svg"
+    numbers: "$48,000 uncached, $4,800 cached, $15,000 redistillation (Ex 8, illustrative)"
+    example: "support agent's 3,000-token checklist"
+    read: "§16.9"
+  - q: "What does LoRA train, and what memory does it keep?"
+    picture: "PEFT run on Llama 3 8B config; loramem.svg"
+    numbers: "8,388,608 trainable (0.1044%); 128 GB to 16.13 GB, 7.9x, bound 8x (NM 16.5); GPT-3 175B 1.2 TB to 350 GB (Hu et al. §4.2)"
+    example: "rank 16 on q_proj and o_proj"
+    read: "§16.10"
+  - q: "What evidence promotes a fine-tuned policy?"
+    picture: "Example 16.1 predict; Ex 9 scorecard"
+    numbers: "C_eff $2.00 against $2.27; PRE 0.02 to 0.12 (Ex 9, illustrative)"
+    example: "all-token run with the lower loss"
+    read: "§16.11"
+concept_trace:
+  - concept: Three homes for behavior
+    frame: "Weights hold procedure; context holds contracts; runtime enforces"
+    shown_by: "homes_step1-3 build"
+  - concept: Delivered-prefix serialization
+    frame: "A chat template fixes the delivered prefix, token for token"
+    shown_by: "real rendered template with roles colored; serialization line on the slide"
+  - concept: Loss masking
+    frame: "The loss mask trains one author and conditions on the other"
+    shown_by: "mask_step1-3 build (mask row, attention line)"
+  - concept: Loss normalization
+    frame: "Token averaging gives the long trace 32x the lookup's weight"
+    shown_by: "norm.svg and the split-record build; Exercise 3 estimate"
+  - concept: Exposure bias
+    frame: "Exposure bias arises because teacher forcing hides mistakes"
+    shown_by: "offcorpus.svg, then the bounds predict and DAgger build"
+  - concept: Preference training
+    frame: "When both repairs pass, a preference pair ranks them"
+    shown_by: "prefpair.svg with the DPO loss and TRL defaults"
+  - concept: Trajectory distillation
+    frame: "Distilling a checklist pays only if it changes slower than the bill"
+    shown_by: "distill.svg with context and teacher distillation defined"
+  - concept: Adapter state and modularity
+    frame: "LoRA trains two thin matrices beside each frozen one; How much memory does training 0.10% keep?"
+    shown_by: "PEFT run output and loramem.svg"
+  - concept: Packed-example isolation (secondary)
+    frame: "Packed examples must not read each other: test it"
+    shown_by: "blockmask build and real equivalence run"
+  - concept: Schema augmentation (secondary)
+    frame: "One static schema lets the weights memorize argument names"
+    shown_by: "stale-key JSON and SFA/PRE definitions (optional slide)"
+  - concept: Closed-loop release criterion (secondary)
+    frame: "Should the lower-loss checkpoint ship?"
+    shown_by: "predict with token counts, then the Ex 9 scorecard"
+worked_examples:
+  - name: "Napkin Math 16.1: stored tokens and selected targets"
+    steps: ["16,384 stored tokens, 12,640 observations", "960 response tokens, 160 refused", "800 targets, 4.9%", "16,383 / 800 = 20.5x dilution", "masking changes what is learned, not the compute"]
+  - name: "Exercise 3: normalization and segmentation"
+    steps: ["6,000 targets against 15 x 200", "token 66.7%, example 6.25%", "split into 20 records", "example 57.1%, token unchanged", "declare the rule"]
+  - name: "Napkin Math 16.3: the same error rate on two state distributions"
+    steps: ["H = 30, eps = 0.02", "H^2 eps = 18", "u H eps = 0.6", "gap 30x; saturation at 50", "label learner states"]
+  - name: "Napkin Math 16.5: adapter memory"
+    steps: ["8,388,608 adapter parameters", "16 B trained, 2 B frozen", "16.13 GB against 128 GB", "7.9x, bound 8x", "the lever is the frozen base's precision"]
+active_learning:
+  - {at_minute: 1, type: predict, prompt: "How much of a repair run did the model write?", answer: "12 to 31 percent"}
+  - {at_minute: 14, type: diagnose, prompt: "Why does every target sit one token late?", answer: "the loader and the loss both shift labels"}
+  - {at_minute: 19, type: concept_question, prompt: "Which spans get m_t = 1?", answer: "C: e3, e4, e6 with stop tokens; never append a stop token to a cut-off response"}
+  - {at_minute: 27, type: estimate, prompt: "How much of the update is the repair trace?", answer: "66.7% token; 6.25% to 57.1% example after the split"}
+  - {at_minute: 35, type: predict, prompt: "What does a 2% error cost over 30 steps?", answer: "18 on reference states, 0.6 on learner states"}
+  - {at_minute: 47, type: concept_question, prompt: "Is a 0.646 score the chance a repair succeeds?", answer: "No; 0.769 at doubled beta with the same log-probabilities"}
+  - {at_minute: 53, type: predict, prompt: "How much memory does training 0.10% keep?", answer: "12.6 percent: 16.13 of 128 GB"}
+  - {at_minute: 57, type: predict, prompt: "Should the lower-loss checkpoint ship?", answer: "neither yet; different units; promote on closed-loop acceptance"}
+  - {at_minute: 60, type: diagnose, prompt: "Higher acceptance: should this candidate ship?", answer: "hold; C_eff $2.27 against $2.00, PRE 0.02 to 0.12"}
+  - {at_minute: 62, type: concept_question, prompt: "Vote: true or false? (fallacies)", answer: "all four false"}
+open_questions:
+  - "Train the model to write its own reasoning, or keep reasoning as context? What would you measure?"
+  - "When is an on-call DAgger labeler more expensive than the failures it prevents?"
+  - "With weekly schema changes, should agents be fine-tuned on tool use at all, or only on procedure?"
+more_examples:
+  - "October 2024 transformers gradient-accumulation fix (huggingface.co/blog/gradient_accumulation)"
+  - "TRL SFTConfig assistant_only_loss and packing defaults (TRL 1.16.0)"
+  - "LoRA on GPT-3 175B: 1.2 TB to 350 GB; 100 adapters 354 GB against 35 TB (Hu et al. §4.2)"
+  - "ALVINN on Carnegie Mellon's Navlab (Pomerleau 1988)"
+  - "Super Tux Kart DAgger experiment (Ross et al. 2011)"
+left_to_reading:
+  - {concept: "Optional rationale regimes (§16.4.4)", why: "detail; raised as an open question"}
+  - {concept: "Reference log-probability cache keys (§16.8.2)", why: "detail; one line on the DPO slide"}
+  - {concept: "RoPE shift-invariance proof (§16.5.3)", why: "the test is taught; the proof is reading"}
+further_reading:
+  - {cite: "Ross, Gordon, Bagnell, A Reduction of Imitation Learning and Structured Prediction to No-Regret Online Learning, AISTATS 2011", url: "https://arxiv.org/abs/1011.0686", why: "both regret bounds and the Super Tux Kart data"}
+  - {cite: "Rafailov et al., Direct Preference Optimization, NeurIPS 2023", url: "https://arxiv.org/abs/2305.18290", why: "the derivation a span surrogate relaxes"}
+  - {cite: "Hu et al., LoRA, 2021", url: "https://arxiv.org/abs/2106.09685", why: "low-rank updates and measured memory savings"}
+  - {cite: "Krell et al., Efficient Sequence Packing Without Cross-Contamination, 2021", url: "https://arxiv.org/abs/2107.02027", why: "packing as an equivalence to test"}
+  - {cite: "Hugging Face, Fixing Gradient Accumulation, 2024", url: "https://huggingface.co/blog/gradient_accumulation", why: "a real normalization incident"}
+segments:
+  - {name: Records, minutes: "6-24", aha: "A trajectory has two authors; only selected policy spans are targets, and masked observations are still read."}
+  - {name: Batches, minutes: "24-36", aha: "Normalization and packing can change the lesson unless declared and tested."}
+  - {name: Coverage, minutes: "36-47", aha: "Where error is measured sets the horizon penalty."}
+  - {name: Updates, minutes: "47-62", aha: "Objective, source, and artifact are independent choices; parameter share is not memory share."}
+  - {name: Release, minutes: "62-71", aha: "Promote on closed-loop acceptance and C_eff, never on loss."}
+callbacks:
+  - {lecture: 15, concept: "Recovery demonstrations, Learning artifacts, Capability-gap triage (intervention ladder), Mixture specification", where: "title note, recall slide, homes note, normalization note"}
+  - {lecture: 2, concept: "Proposal boundary", where: "homes note"}
+  - {lecture: 2, concept: "Quadratic resend and prefix reuse", where: "per-call serialization note"}
+  - {lecture: 4, concept: "Context compaction", where: "per-call serialization note"}
+  - {lecture: 7, concept: "Settlement before retry", where: "DAgger note"}
+  - {lecture: 1, concept: "Horizon compounding", where: "bounds note"}
+  - {lecture: 1, concept: "Cost per accepted task", where: "scorecard note"}
+  - {lecture: 13, concept: "Task acceptance contract, Paired comparison", where: "promotion predict note, scorecard note"}
+  - {lecture: 5, concept: "Reusable is not applicable (prefix-cache compatibility)", where: "adapter-record note"}
+  - {lecture: 8, concept: "Least privilege", where: "adapter-record note"}
+  - {lecture: 19, concept: "Adaptation payback", where: "distillation note"}
+  - {lecture: 17, concept: "Sampled reward contrast (next lecture)", where: "DAgger note, next-lecture slide"}
+coverage:
+  primary_taught: ["Three homes for behavior", "Delivered-prefix serialization", "Loss masking", "Loss normalization", "Exposure bias", "Preference training", "Trajectory distillation", "Adapter state and modularity"]
+  primary_left_to_reading: []
+  secondary: ["Schema augmentation (optional slide)", "Packed-example isolation (core slide)", "Closed-loop release criterion (core slide)"]
+notes_for_author:
+  - "SWE-agent token sums are as the agent recorded them; caching inside the agent is not visible."
+  - "Super Tux Kart values are read from Ross et al. Figure 2; the slide says so."
+  - "Llama 3 8B configuration came from an ungated mirror (NousResearch); dimensions match Meta's published config."
