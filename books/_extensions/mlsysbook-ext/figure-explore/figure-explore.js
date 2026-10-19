@@ -103,6 +103,55 @@
     });
     return text.replace(/#([A-Za-z_][\w:.-]*)/g, (whole, id) => ids.has(id) ? '#' + ids.get(id) : whole);
   };
+  const verifiedPng = async (buffer, outer) => {
+    const bytes = new Uint8Array(buffer);
+    const signature = [137,80,78,71,13,10,26,10];
+    if (bytes.length < 33 || signature.some((value, index) => bytes[index] !== value)) {
+      throw new Error('Invalid canonical PNG artwork.');
+    }
+    const header = new DataView(buffer);
+    if (header.getUint32(8) !== 13 || String.fromCharCode(...bytes.subarray(12,16)) !== 'IHDR') {
+      throw new Error('Invalid canonical PNG dimensions.');
+    }
+    const width = header.getUint32(16), height = header.getUint32(20);
+    if (!width || !height || width > 0x7fffffff || height > 0x7fffffff) {
+      throw new Error('Invalid canonical PNG dimensions.');
+    }
+    for (const [name, value] of [['mlsysArtWidth', width], ['mlsysArtHeight', height]]) {
+      if (outer.dataset[name] !== undefined && Number(outer.dataset[name]) !== value) {
+        throw new Error('PNG dimensions changed since region review.');
+      }
+    }
+    // Reuse the verified bytes: a wrapper must never fetch an unchecked image.
+    const chunks = [];
+    for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+      chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 0x8000)));
+    }
+    const source = 'data:image/png;base64,' + btoa(chunks.join(''));
+    const decoded = new Image();
+    decoded.src = source;
+    await decoded.decode();
+    if (decoded.naturalWidth !== width || decoded.naturalHeight !== height) {
+      throw new Error('Canonical PNG could not be decoded at its reviewed dimensions.');
+    }
+    const namespace = 'http://www.w3.org/2000/svg';
+    const wrapper = document.createElementNS(namespace, 'svg');
+    wrapper.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    wrapper.setAttribute('width', String(width));
+    wrapper.setAttribute('height', String(height));
+    wrapper.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    wrapper.dataset.mlsysArtworkKind = 'png';
+    wrapper.dataset.mlsysArtworkWidth = String(width);
+    wrapper.dataset.mlsysArtworkHeight = String(height);
+    const image = document.createElementNS(namespace, 'image');
+    image.setAttribute('x', '0');
+    image.setAttribute('y', '0');
+    image.setAttribute('width', String(width));
+    image.setAttribute('height', String(height));
+    image.setAttribute('href', source);
+    wrapper.append(image);
+    return wrapper;
+  };
   const verifyArtwork = async (outer, nodes) => {
     const images = [];
     for (const node of nodes) if (node.nodeType === 1) {
@@ -120,7 +169,14 @@
     if (hash !== outer.dataset.mlsysArtSha1 || source !== (original.currentSrc || original.src)) {
       throw new Error('Artwork changed since region review; review and recompile the lesson.');
     }
-    if (svgText === null) return null;
+    if (svgText === null) {
+      if (outer.dataset.mlsysArtKind !== 'png') return null;
+      const wrapper = await verifiedPng(bytes, outer);
+      if (source !== (original.currentSrc || original.src)) {
+        throw new Error('Artwork changed while the canonical PNG was decoded.');
+      }
+      return wrapper;
+    }
     const parsed = new DOMParser().parseFromString(svgText, 'image/svg+xml');
     if (parsed.querySelector('parsererror') || parsed.documentElement.localName !== 'svg') throw new Error('Invalid canonical SVG artwork.');
     return document.importNode(parsed.documentElement, true);

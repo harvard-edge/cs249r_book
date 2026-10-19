@@ -11,6 +11,57 @@
   let serial = 0;
   const abortError = () => new DOMException('Playback interrupted', 'AbortError');
 
+  // One header watcher serves every mounted player. Read the transformed header
+  // bounds during its scroll transition; never reposition or scroll the page.
+  const stickyPlayers = new Set();
+  let headerFrame = 0, headerUntil = 0, watchedHeader = null;
+  let headerResize = null, headerMutation = null, lastHeaderOffset = null;
+  function updateHeaderOffset(now) {
+    headerFrame = 0;
+    const header = document.querySelector('#quarto-header');
+    if (header !== watchedHeader) {
+      headerResize?.disconnect(); headerMutation?.disconnect();
+      watchedHeader = header;
+      if (header) {
+        headerResize?.observe(header);
+        headerMutation?.observe(header, {attributes:true, subtree:true, childList:true, attributeFilter:['class','style','hidden']});
+      }
+    }
+    const offset = Math.max(0, Math.ceil(header?.getBoundingClientRect().bottom || 0));
+    if (offset !== lastHeaderOffset) {
+      document.documentElement.style.setProperty('--mlsys-original-header-offset', offset + 'px');
+      lastHeaderOffset = offset;
+    }
+    if (stickyPlayers.size && now < headerUntil) headerFrame = requestAnimationFrame(updateHeaderOffset);
+  }
+  function scheduleHeaderOffset() {
+    if (!stickyPlayers.size) return;
+    headerUntil = performance.now() + 650;
+    if (!headerFrame) headerFrame = requestAnimationFrame(updateHeaderOffset);
+  }
+  function watchHeader(root) {
+    stickyPlayers.add(root);
+    if (stickyPlayers.size === 1) {
+      headerResize = typeof ResizeObserver === 'function' ? new ResizeObserver(scheduleHeaderOffset) : null;
+      headerMutation = new MutationObserver(scheduleHeaderOffset);
+      window.addEventListener('scroll', scheduleHeaderOffset, {passive:true});
+      window.addEventListener('resize', scheduleHeaderOffset, {passive:true});
+      document.addEventListener('visibilitychange', scheduleHeaderOffset);
+    }
+    scheduleHeaderOffset();
+    return () => {
+      stickyPlayers.delete(root);
+      if (stickyPlayers.size) return;
+      cancelAnimationFrame(headerFrame); headerFrame = 0;
+      headerResize?.disconnect(); headerMutation?.disconnect();
+      headerResize = null; headerMutation = null; watchedHeader = null; lastHeaderOffset = null;
+      window.removeEventListener('scroll', scheduleHeaderOffset);
+      window.removeEventListener('resize', scheduleHeaderOffset);
+      document.removeEventListener('visibilitychange', scheduleHeaderOffset);
+      document.documentElement.style.removeProperty('--mlsys-original-header-offset');
+    };
+  }
+
   function create(options) {
     const { root, outer, title, scope, steps, render, transition } = options;
     if (!root || !outer || !Array.isArray(steps) || !steps.length || typeof render !== 'function') {
@@ -55,6 +106,20 @@
     const nextButton = button('Next', 'Next step (N)');
     const restartButton = button('Restart', 'Restart (R)');
     const expandButton = button('Expand', 'Inspect the diagram in an expanded view');
+    for (const [control, label, symbol] of [[restartButton,'Restart','↺'],[expandButton,'Expand','↗']]) {
+      control.setAttribute('aria-label', label);
+      const full = make('span', 'mlsys-original-control-full', label);
+      const short = make('span', 'mlsys-original-control-short', symbol);
+      short.setAttribute('aria-hidden', 'true');
+      control.replaceChildren(full, short);
+    }
+    const currentCue = make('div', 'mlsys-original-current-cue');
+    currentCue.setAttribute('aria-hidden', 'true');
+    const cueStep = make('span', 'mlsys-original-cue-step');
+    const cueState = make('span', 'mlsys-original-cue-state');
+    currentCue.append(cueStep, cueState); controls.append(currentCue);
+    const owningFigure = outer.matches('figure') ? outer : outer.querySelector(':scope > figure');
+    let stopHeaderWatch = () => {};
     const sequenceLabel = make('label', 'mlsys-original-sequence', 'Sequence ');
     const sequence = make('select');
     sequence.id = id + '-sequence';
@@ -85,6 +150,9 @@
     }
     function syncControls() {
       const selected = target == null ? index : target;
+      cueStep.textContent = (target != null ? 'Next ' : '') + (selected + 1) + ' / ' + steps.length + ' · ' + steps[selected].label;
+      cueStep.title = cueStep.textContent;
+      cueState.textContent = target != null ? (clock?.running || !clock ? 'Moving' : 'Paused') : clock && !clock.running ? 'Paused' : playing ? 'Reading' : index === steps.length - 1 ? 'Complete' : 'Step';
       sequence.value = String(selected);
       playButton.textContent = playing || clock?.running || (phase === 'moving' && !clock) ? 'Pause' : index === steps.length - 1 && target == null ? 'Replay' : 'Play';
       backButton.disabled = index === 0 && target == null;
@@ -331,6 +399,8 @@
       destroyed = true;
       observer?.disconnect();
       mutation.disconnect();
+      stopHeaderWatch();
+      owningFigure?.classList.remove('mlsys-original-sticky-frame');
       listeners.forEach(remove => remove());
       root.replaceChildren();
       root.classList.remove('mlsys-original-player');
@@ -340,6 +410,8 @@
       root.removeAttribute('tabindex');
     }
     endpoint(0);
+    owningFigure?.classList.add('mlsys-original-sticky-frame');
+    stopHeaderWatch = watchHeader(root);
     return { go, next, back, play, pause, restart, expand, closeExpanded, destroy,
       get state() { return { index, target, playing, phase, paused: !!clock && !clock.running, destroyed }; } };
   }

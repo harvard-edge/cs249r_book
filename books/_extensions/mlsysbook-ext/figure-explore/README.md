@@ -37,6 +37,63 @@ its runtime assets, data bundle where present, and the shared player. The browse
 passes the verified original SVG to the factory and isolates inline SVG IDs so
 multiple figures cannot reuse each other's glyphs or paint servers.
 
+### Full-chapter author fixtures (QA only)
+
+Build a candidate inside its original chapter without enrolling it or copying
+an entire rendered site:
+
+```sh
+python3 binder/tools/scripts/build_original_figure_fixture.py \
+  --entry books/_prototypes/vol1-web-animations/original-v1-kv-cache-growth/entry.json
+```
+
+The JSON result contains the fixture path and URL. Serve `books` on port 8882,
+or pass `--base-url` for the existing local books server. `--art-index` selects
+an artwork index (default `/tmp/figures-animation-art-current/index.json`).
+`--output` selects an ignored directory under `books/_build`; the default is
+`books/_build/original-rollout-fixtures/<entry-directory>/index.html`.
+
+The helper preserves the full chapter and its static figure, disables all old
+Explore enrollments, and mounts only the candidate factory. Existing relative
+styles and images resolve through one ignored source-site symlink shared by
+all fixtures from that site. Current shared-player and factory assets load from
+the extension. The production `bundle` loads first. Additional data modules may be declared as `data_script` or
+`data_scripts` in the entry's `implementation`, or supplied with repeatable
+`--data-script FILE.js`; they load before the factory. Repeated filenames are loaded once, in first-declared order.
+
+Explore opens paused. `window.fixturePlayer` and `window.fixtureRoot` expose
+the candidate controller and root for local checks; `window.fixtureError`
+records initialization failure. Diagram, print, and failed initialization retain
+the original static figure and caption. The fixture uses the loader's current
+SVG fragment-isolation algorithm and the same PNG wrapper coordinates and
+metadata, but deliberately bypasses production freshness/enrollment checks.
+It is author QA, not an integrated build or review acceptance. Production
+validation must still use a freshly compiled chapter with the real loader.
+
+### Verified PNG artwork for original-art factories
+
+`context.verifiedArtwork` is also available for registered PNG artwork. The
+controller first verifies the exact fetched bytes against the registered SHA-1,
+checks the PNG header, and decodes those same bytes. It returns an SVG wrapper
+with `viewBox="0 0 W H"` and matching `width` and `height` in intrinsic PNG pixels.
+The wrapper has `data-mlsys-artwork-kind="png"`,
+`data-mlsys-artwork-width="W"`, and `data-mlsys-artwork-height="H"`. Its sole initial
+child is an SVG `image` at `(0, 0)`, sized `W × H`, whose `href` embeds the verified
+bytes as a PNG data URL. It performs no second artwork network request.
+
+A factory may clone this SVG and add authored overlays in its original pixel
+coordinates. The raster itself contains no SVG objects to select or move;
+inspect the original PNG before defining any regions or alternative interactive
+layout. Keep the static diagram unchanged. Do not replace the source drawing
+with a generic mechanism diagram. SVG artwork continues to arrive as its
+original parsed SVG with fragment IDs namespaced before the factory runs.
+
+If optional `data-mlsys-art-width` or `data-mlsys-art-height` attributes are supplied,
+they must match the PNG header and decoded dimensions. Hash, fetch, dimension,
+decode, or source-URL drift failures prevent the factory from running and leave
+the original static figure and caption intact. No controller or player API
+changes are required; factories that do not use `verifiedArtwork` are unaffected.
+
 Before extending the manifest, independently review the source artwork and
 surrounding section, compute added values in a reproducible calculation, test
 the mechanism's invariants, and inspect actual chapter renders on desktop and
