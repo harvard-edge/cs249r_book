@@ -59,20 +59,30 @@ Outside values typed below, each with its source:
     replicates): ID macro F1 47.0 (1.4), average accuracy 75.7 (0.3); OOD
     macro F1 31.0 (1.3), average accuracy 71.6 (2.5).
 
+Run statistics and every derived number come from calcs.py (imported below;
+it prints each value with its slide label). New data sources (2026-10-19):
+  - Recht et al. 2019 appendix table (ImageNetV2 MatchedFrequency, top-1),
+    recht2019_imagenetv2_top1.csv: the recht.svg scatter.
+  - Zhang et al. 2024 abstract (GSM1k, up to 8 percent): gsm1k.svg.
+The earlier two-panel range-bar figure is no longer drawn (replaced by these two).
+
 Run from this folder with the MLSysBook venv (needs matplotlib and scipy):
   python3 make_figs.py
 """
 
-import csv
 import math
 import statistics as st
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import slideplot as sp  # noqa: E402
 from matplotlib.patches import Rectangle  # noqa: E402
-from scipy import stats  # noqa: E402
+import calcs  # noqa: E402
+from calcs import (RUNS, SYSTEMS, EOS, DELL, H200, SCORE, PUB, CV,  # noqa: E402
+                   W_DELL, W_DELL_ALL, W_H200, ACC, BINOM_HW, VAL_IMAGES,
+                   N_ACC, N_P90, N_P99, runs, pct, runs_to_resolve, half_width_pct)
 
 plt = sp.plt
 C = sp.C
@@ -84,83 +94,8 @@ def tag(ax, text, where=(0.0, -0.32), size=9):
             color=C["neutral"], ha="left")
 
 
-# =============================================================================
-# Data and derived statistics
-# =============================================================================
-RUNS = list(csv.DictReader(open(out / "mlperf_v40_resnet_runs.csv")))
-SCALE = 1.0042232277526395            # scaling.json in every ResNet folder
-SYSTEMS = [  # key, row label, color
-    ("eos_ngc24.04_mxnet", "Eos, 8x H100", "memory"),
-    ("XE9680x8H100-SXM-80GB", "Dell, 8x H100", "compute"),
-    ("h200_ngc24.04_mxnet", "NVIDIA, 8x H200", "data"),
-    ("eos_n8_ngc24.04_mxnet", "Eos, 64x H100", "network"),
-]
-EOS, DELL, H200, N8 = (s[0] for s in SYSTEMS)
-
-
-def runs(system, converged=True):
-    return [float(r["minutes"]) for r in RUNS if r["system"] == system
-            and (r["status"] == "success" or not converged)]
-
-
-def trimmed(system):
-    """MLPerf run rule: a failed run counts as the slowest; drop both ends."""
-    ok = sorted(runs(system))
-    failed = len(runs(system, converged=False)) - len(ok)
-    v = ok + [math.inf] * failed
-    return st.mean(v[1:-1])
-
-
-def welch(a, b):
-    """Difference mean(a) - mean(b) with its Welch 95 percent interval."""
-    va, vb = st.variance(a) / len(a), st.variance(b) / len(b)
-    se = math.sqrt(va + vb)
-    df = (va + vb) ** 2 / (va ** 2 / (len(a) - 1) + vb ** 2 / (len(b) - 1))
-    t = stats.t.ppf(0.975, df)
-    d = st.mean(a) - st.mean(b)
-    return dict(d=d, se=se, df=df, t=t, lo=d - t * se, hi=d + t * se)
-
-
-SCORE = {s: trimmed(s) for s, _, _ in SYSTEMS}
-PUB = {s: SCORE[s] * SCALE for s in SCORE}
-CV = {s: st.stdev(runs(s)) / st.mean(runs(s)) * 100 for s, _, _ in SYSTEMS}
-EOS_MEAN = st.mean(runs(EOS))
-EOS_SD = st.stdev(runs(EOS))
-W_DELL = welch(runs(EOS), runs(DELL))
-W_DELL_ALL = welch(runs(EOS), runs(DELL, converged=False))
-W_H200 = welch(runs(EOS), runs(H200))
-ACC = [float(r["top1"]) for r in RUNS]
-P_ACC = st.mean(ACC) / 100
-VAL_IMAGES = 50000                     # ImageNet validation set
-BINOM_HW = 1.96 * math.sqrt(P_ACC * (1 - P_ACC) / VAL_IMAGES) * 100
-Z95, Z99 = stats.norm.ppf(0.975), stats.norm.ppf(0.995)
-N_ACC = Z95 ** 2 * 0.95 * 0.05 / 0.01 ** 2
-N_P90 = Z99 ** 2 * 0.90 * 0.10 / 0.005 ** 2
-N_P99 = Z99 ** 2 * 0.99 * 0.01 / 0.0005 ** 2
-
-
-def pct(x):
-    return 100 * x / EOS_MEAN
-
-
-def runs_to_resolve(diff_pct):
-    d = diff_pct / 100 * EOS_MEAN
-    return 2 * (Z95 + stats.norm.ppf(0.80)) ** 2 * EOS_SD ** 2 / d ** 2
-
-
-print("Scores (trimmed mean, published = x %.6f):" % SCALE)
-for s, lab, _ in SYSTEMS:
-    print(f"  {lab:16s} trimmed {SCORE[s]:.4f}  published {PUB[s]:.4f}  CV {CV[s]:.3f}%")
-print("Eos converged mean %.4f SD %.4f; spread %.2f%%" % (
-    EOS_MEAN, EOS_SD, 100 * (max(runs(EOS)) - min(runs(EOS))) / EOS_MEAN))
-for name, w in (("Eos-Dell", W_DELL), ("Eos-Dell all five", W_DELL_ALL), ("Eos-H200", W_H200)):
-    print(f"  {name}: d {w['d']:.4f} SE {w['se']:.4f} df {w['df']:.2f} t {w['t']:.3f} "
-          f"CI [{w['lo']:.4f}, {w['hi']:.4f}] = {pct(w['d']):.2f}% [{pct(w['lo']):.2f}, {pct(w['hi']):.2f}]")
-print("Top-1 range %.3f to %.3f, mean %.3f, SD %.3f; 50k binomial 95%% half-width %.3f pts" % (
-    min(ACC), max(ACC), st.mean(ACC), st.stdev(ACC), BINOM_HW))
-print("n: accuracy %.0f, p90 %.0f, p99 %.0f" % (N_ACC, N_P90, N_P99))
-print("runs per system to resolve 0.5%%: %.1f, 1%%: %.1f" % (runs_to_resolve(0.5), runs_to_resolve(1.0)))
-print("speedup 8 to 64 GPUs %.2f, efficiency %.3f" % (SCORE[EOS] / SCORE[N8], SCORE[EOS] / (8 * SCORE[N8])))
+# Every derived number is computed and printed by calcs.py (one block per slide).
+calcs.report()
 
 # =============================================================================
 # Hook: two published scores, then the ten runs behind them
@@ -302,7 +237,7 @@ for k in (1, 2):
 # =============================================================================
 dell = sorted([r for r in RUNS if r["system"] == DELL], key=lambda r: float(r["minutes"]))
 for k in (1, 2, 3):
-    fig, ax = plt.subplots(figsize=(5.8, 1.95))
+    fig, ax = plt.subplots(figsize=(5.8, 1.7))
     for j, r in enumerate(dell):
         x = float(r["minutes"])
         y = 4 - j
@@ -435,32 +370,32 @@ for k in (1, 2, 3, 4, 5):
 # =============================================================================
 # How many runs: 95 percent half-width of a mean against run count (Eos SD)
 # =============================================================================
+# Drawn for the right column of the slide (left column: runs_demo.py and its output).
 ns = list(range(2, 31))
-hw = [100 * stats.t.ppf(0.975, n - 1) * EOS_SD / math.sqrt(n) / EOS_MEAN for n in ns]
-need = math.ceil(runs_to_resolve(0.5))
+hw = [half_width_pct(n) for n in ns]
 for k in (1, 2):
-    fig, ax = plt.subplots(figsize=(5.8, 2.1))
+    fig, ax = plt.subplots(figsize=(3.5, 2.55))
     ax.plot(ns, hw, color=C["memory"], lw=3)
     for y, lab in ((1.0, "1%"), (0.5, "0.5%")):
         ax.axhline(y, color=C["neutral"], lw=1, ls="--")
-        ax.text(27, y + 0.04, lab, va="bottom", fontsize=11, color=C["neutral"], fontweight="bold")
-    h5 = hw[ns.index(5)]
+        ax.text(30, y + 0.04, lab, va="bottom", ha="right", fontsize=11, color=C["neutral"],
+                fontweight="bold")
+    h5 = half_width_pct(5)
     ax.plot(5, h5, "o", ms=10, color=C["danger"], zorder=5)
-    ax.text(5.8, h5 + 0.12, f"MLPerf minimum, 5 runs: ±{h5:.2f}%", fontsize=11,
+    ax.text(6.2, h5 + 0.1, f"5 runs: ±{h5:.2f}%", fontsize=11.5,
             fontweight="bold", color=C["danger"])
     al = 1.0 if k >= 2 else 0.0
-    h20 = hw[ns.index(20)]
+    h20 = half_width_pct(20)
     ax.plot(20, h20, "o", ms=10, color=C["data"], zorder=5, alpha=al)
-    ax.text(20, h20 + 0.15, f"20 runs: ±{h20:.2f}%", ha="center", fontsize=11,
+    ax.text(20, h20 + 0.17, f"20 runs: ±{h20:.2f}%", ha="center", fontsize=11.5,
             fontweight="bold", color=C["data"], alpha=al)
     ax.set_ylim(0, 1.6)
-    ax.set_xlim(2, 32)
+    ax.set_xlim(2, 31)
+    ax.set_xticks([5, 10, 15, 20, 25, 30])
     ax.set_xlabel("Runs averaged")
-    ax.set_ylabel("95% half-width\n(% of 13.26 min)")
+    ax.set_ylabel("95% half-width (%)")
     ax.grid(color=C["grid"], lw=0.6)
     sp.save(fig, out / f"runs_step{k}.svg")
-print("runs plot: n=5 %.2f%%, n=20 %.2f%%, resolve 0.5%% needs %d runs per system" % (
-    hw[ns.index(5)], hw[ns.index(20)], need))
 
 # =============================================================================
 # Napkin Math 12.5: independent interval, then the disagreement threshold
@@ -503,8 +438,6 @@ best = max(eos_runs, key=lambda r: float(r["top1"]))
 worst = min(eos_runs, key=lambda r: float(r["top1"]))
 gap = round((float(best["top1"]) - float(worst["top1"])) / 100 * VAL_IMAGES)
 limit = gap ** 2 / 3.84
-print("McNemar on Eos runs %s and %s: %d images, regression only if b + c <= %.0f" % (
-    best["run"], worst["run"], gap, limit))
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 1.5))
     ax.set_xlim(0, 12000)
@@ -533,27 +466,23 @@ for k in (1, 2):
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 2.2))
     t = [i * 20 for i in range(11)]
-    lat = [2.4 + 1.5 * (1 - math.exp(-x / 70)) for x in t]
+    lat = [calcs.drift(x) for x in t]
     ax.fill_between(t, [v - 0.08 for v in lat], [v + 0.08 for v in lat],
                     color=C["neutral_l"], zorder=0)
     ax.plot(t, lat, color=C["neutral"], lw=2, zorder=1)
     ax.text(200, lat[-1] + 0.22, "device warms", ha="right", fontsize=10,
             color=C["neutral"], fontweight="bold")
-    xs = [10 + 18 * i for i in range(10)]
-    if k == 1:
-        labels = ["A"] * 5 + ["B"] * 5
-    else:
-        labels = ["A", "B"] * 5
+    xs = calcs.ORDER_TIMES
+    labels = calcs.ORDER_BLOCKED if k == 1 else calcs.ORDER_INTER
     for x, lab in zip(xs, labels):
-        y = 2.4 + 1.5 * (1 - math.exp(-x / 70))
+        y = calcs.drift(x)
         ck = "memory" if lab == "A" else "compute"
         ax.plot(x, y, "o", ms=15, color=C[ck], zorder=4)
         ax.text(x, y, lab, ha="center", va="center", fontsize=9.5, color="white",
                 fontweight="bold", zorder=5)
-    a_mean = st.mean(2.4 + 1.5 * (1 - math.exp(-x / 70)) for x, lab in zip(xs, labels) if lab == "A")
-    b_mean = st.mean(2.4 + 1.5 * (1 - math.exp(-x / 70)) for x, lab in zip(xs, labels) if lab == "B")
-    msg = (f"Blocked order: B looks {100 * (b_mean / a_mean - 1):.0f}% slower" if k == 1
-           else f"Interleaved: B looks {100 * (b_mean / a_mean - 1):.0f}% slower")
+    effect = calcs.order_effects()[k - 1]
+    msg = (f"Blocked order: B looks {effect:.0f}% slower" if k == 1
+           else f"Interleaved: B looks {effect:.0f}% slower")
     ax.text(5, 4.25, msg, fontsize=12, fontweight="bold",
             color=C["danger"] if k == 1 else C["data"])
     ax.text(5, 3.95, "A and B are the same code", fontsize=10, color=C["neutral"])
@@ -620,7 +549,7 @@ for k in (1, 2):
 # =============================================================================
 # Benchmark fingerprinting: Galaxy S4, same test under two names (AnandTech)
 # =============================================================================
-fig, ax = plt.subplots(figsize=(5.8, 1.3))
+fig, ax = plt.subplots(figsize=(6.2, 0.95))
 for y, lab, v, ck, txt in ((1, "GFXBench 2.7: 480 MHz", 37.9, "memory", "37.9M triangles/s"),
                            (0, "GLBenchmark 2.5.1: 532 MHz", 43.2, "danger", "43.2M  (+14%)")):
     ax.barh(y, v, color=C[ck], height=0.62)
@@ -633,32 +562,37 @@ ax.set_xlabel("Triangle throughput, identical test, mean of 5 runs")
 sp.save(fig, out / "fingerprint.svg")
 
 # =============================================================================
-# Fresh test sets: rebuilt image sets (Recht) and GSM1k (Zhang)
+# Fresh test sets: Recht et al. 2019 table (ImageNetV2 MatchedFrequency, top-1),
+# one dot per model, redrawn at slide size; GSM1k (Zhang et al. 2024, abstract)
 # =============================================================================
-fig, (a1, a2) = plt.subplots(1, 2, figsize=(5.8, 2.1),
-                             gridspec_kw=dict(width_ratios=[2, 1.15], wspace=0.55))
-for i, (lo, hi, lab) in enumerate([(3, 15, "CIFAR-10"), (11, 14, "ImageNet")]):
-    a1.bar(i, hi - lo, bottom=lo, color=C["memory"], width=0.5)
-    a1.text(i, hi + 0.6, f"{lo} to {hi}", ha="center", fontsize=12, fontweight="bold",
-            color=C["memory"])
-a1.set_xticks([0, 1])
-a1.set_xticklabels(["CIFAR-10", "ImageNet"], fontsize=11)
-a1.set_ylim(0, 18)
-a1.set_ylabel("accuracy drop (points)")
-a1.set_title("Images rebuilt by the\noriginal procedure", fontsize=11, fontweight="bold")
-a1.text(0.5, -0.36, "harder images; ranking kept", transform=a1.transAxes, ha="center",
-        fontsize=10.5, fontweight="bold", color=C["memory"])
-a2.bar(0, 8, color=C["danger"], width=0.5)
-a2.text(0, 8.6, "up to 8%", ha="center", fontsize=12, fontweight="bold", color=C["danger"])
-a2.set_xticks([0])
-a2.set_xticklabels(["GSM1k"], fontsize=11)
-a2.set_xlim(-0.6, 0.6)
-a2.set_ylim(0, 18)
-a2.set_title("New grade-school\nmath problems", fontsize=11, fontweight="bold")
-a2.set_ylabel("accuracy drop (%)")
-a2.text(0.5, -0.36, "memorization", transform=a2.transAxes, ha="center", fontsize=10.5,
-        fontweight="bold", color=C["danger"])
-sp.save(fig, out / "freshsets.svg")
+rows = calcs.recht_rows()
+fig, ax = plt.subplots(figsize=(3.7, 2.75))
+ax.plot([55, 85], [55, 85], color=C["text"], lw=1.8, ls="--")
+ax.text(66.5, 70.5, "same accuracy", rotation=31, fontsize=10.5, color=C["text"],
+        fontweight="bold", ha="center")
+ax.plot([o for _, o, _ in rows], [n for _, _, n in rows], "o", ms=5.5, color=C["memory"],
+        mec="white", mew=0.5, zorder=4)
+gaps = [o - n for _, o, n in rows]
+ax.text(84, 50.5, f"{len(rows)} models\n{min(gaps):.1f} to {max(gaps):.1f}\npoints lower;\norder kept",
+        ha="right", va="top", fontsize=11, fontweight="bold", color=C["memory"])
+ax.set_xlim(55, 85)
+ax.set_ylim(40, 75)
+ax.set_xticks([60, 70, 80])
+ax.set_yticks([40, 50, 60, 70])
+ax.set_xlabel("Original ImageNet top-1 (%)")
+ax.set_ylabel("Rebuilt test set (%)")
+ax.grid(color=C["grid"], lw=0.6)
+sp.save(fig, out / "recht.svg")
+
+fig, ax = plt.subplots(figsize=(2.2, 2.75))
+ax.bar(0, 8, color=C["danger"], width=0.5)
+ax.text(0, 8.5, "up to 8%", ha="center", fontsize=12, fontweight="bold", color=C["danger"])
+ax.set_xticks([0])
+ax.set_xticklabels(["GSM1k\nagainst GSM8k"], fontsize=11)
+ax.set_xlim(-0.6, 0.6)
+ax.set_ylim(0, 15)
+ax.set_ylabel("accuracy drop (%)")
+sp.save(fig, out / "gsm1k.svg")
 
 # =============================================================================
 # Accuracy against latency on one phone (Sandler et al. 2018, Table 4)
@@ -666,7 +600,7 @@ sp.save(fig, out / "freshsets.svg")
 pts = [("MobileNetV1", 113, 70.6, False), ("MobileNetV2", 75, 72.0, True),
        ("NASNet-A", 183, 74.0, False), ("MobileNetV2 (1.4)", 143, 74.7, True)]
 for k in (1, 2):
-    fig, ax = plt.subplots(figsize=(5.8, 2.3))
+    fig, ax = plt.subplots(figsize=(4.5, 2.6))
     for name, lat, acc, front in pts:
         col = C["memory"] if k == 1 else (C["data"] if front else C["neutral"])
         ax.plot(lat, acc, "o", ms=13, color=col, mec="white", mew=1.5, zorder=5)
@@ -681,8 +615,8 @@ for k in (1, 2):
                     fontweight="bold", color=col)
     if k == 2:
         ax.plot([75, 143], [72.0, 74.7], color=C["data"], lw=3, zorder=3)
-    ax.set_xlim(55, 210)
-    ax.set_ylim(69.0, 76.0)
+    ax.set_xlim(55, 215)
+    ax.set_ylim(69.0, 76.2)
     ax.set_xlabel("Latency on a Pixel 1 CPU core (ms)")
     ax.set_ylabel("ImageNet top-1 (%)")
     ax.grid(color=C["grid"], lw=0.6)
@@ -718,8 +652,7 @@ sp.save(fig, out / "lottery.svg")
 # ECE by hand: three bins, 100 predictions (constructed for the slide)
 # =============================================================================
 bins = [(20, 0.65, 0.60), (30, 0.85, 0.80), (50, 0.97, 0.84)]
-ece = sum(n / 100 * abs(c - a) for n, c, a in bins)
-print("ECE (illustrative bins) = %.4f" % ece)
+ece = calcs.ece(bins)
 for k in (1, 2, 3):
     fig, ax = plt.subplots(figsize=(3.4, 2.6))
     ax.plot([0.5, 1.0], [0.5, 1.0], color=C["data"], lw=2, ls="--")
@@ -783,26 +716,30 @@ for k in (1, 2):
 
 # =============================================================================
 # WILDS iWildCam2020: in-distribution against unseen camera traps (Koh et al.)
+# Drawn for the left column; the paper's camera-trap images sit on the right.
 # =============================================================================
-fig, ax = plt.subplots(figsize=(5.8, 2.0))
-groups = [("Average accuracy", 75.7, 0.3, 71.6, 2.5), ("Macro F1", 47.0, 1.4, 31.0, 1.3)]
+fig, ax = plt.subplots(figsize=(3.5, 2.7))
+groups = [("Average\naccuracy", 75.7, 0.3, 71.6, 2.5), ("Macro F1", 47.0, 1.4, 31.0, 1.3)]
 for i, (lab, idv, ids, oodv, oods) in enumerate(groups):
-    x = i * 1.9
-    ax.bar(x - 0.3, idv, yerr=ids, width=0.56, color=C["memory"], capsize=4,
+    x = i * 1.6
+    ax.bar(x - 0.28, idv, yerr=ids, width=0.5, color=C["memory"], capsize=4,
            error_kw=dict(lw=1.2, ecolor=C["text"]))
-    ax.bar(x + 0.3, oodv, yerr=oods, width=0.56, color=C["danger"], capsize=4,
+    ax.bar(x + 0.28, oodv, yerr=oods, width=0.5, color=C["danger"], capsize=4,
            error_kw=dict(lw=1.2, ecolor=C["text"]))
-    ax.text(x - 0.3, idv + 3.5, f"{idv}", ha="center", fontsize=11, fontweight="bold", color=C["memory"])
-    ax.text(x + 0.3, oodv + 3.5, f"{oodv}", ha="center", fontsize=11, fontweight="bold", color=C["danger"])
-    ax.text(x, -9, lab, ha="center", va="center", fontsize=12, fontweight="bold")
-    ax.text(x + 0.95, (idv + oodv) / 2, f"−{idv - oodv:.1f}", fontsize=13, fontweight="bold",
-            color=C["danger"], va="center")
-ax.text(3.4, 80, "traps seen in training", fontsize=10.5, color=C["memory"], fontweight="bold")
-ax.text(3.4, 70, "unseen traps", fontsize=10.5, color=C["danger"], fontweight="bold")
-ax.set_xticks([])
-ax.set_xlim(-0.75, 5.2)
-ax.set_ylim(0, 90)
+    ax.text(x - 0.28, idv + 3.5, f"{idv}", ha="center", fontsize=11, fontweight="bold", color=C["memory"])
+    ax.text(x + 0.28, oodv + 3.5, f"{oodv}", ha="center", fontsize=11, fontweight="bold", color=C["danger"])
+    ax.text(x, 104, f"−{idv - oodv:.1f}", ha="center", fontsize=13, fontweight="bold",
+            color=C["danger"])
+ax.set_xticks([0, 1.6])
+ax.set_xticklabels([g[0] for g in groups], fontsize=11.5)
+ax.set_xlim(-0.65, 2.25)
+ax.set_ylim(0, 112)
+ax.set_yticks([0, 25, 50, 75])
 ax.set_ylabel("percent")
+ax.legend(handles=[Rectangle((0, 0), 1, 1, color=C["memory"]), Rectangle((0, 0), 1, 1, color=C["danger"])],
+          labels=["traps seen in training", "unseen traps"], fontsize=11, frameon=False,
+          loc="upper center", bbox_to_anchor=(0.5, -0.24), ncol=2, handlelength=1.0,
+          columnspacing=1.0)
 sp.save(fig, out / "wilds.svg")
 
 print("figures written")
