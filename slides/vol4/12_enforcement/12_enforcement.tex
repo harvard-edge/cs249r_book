@@ -1,0 +1,605 @@
+% =============================================================================
+% Lecture 12: Safety Enforcement
+% Physical AI: Machine Learning Systems That Sense and Act (Volume IV), Chapter 12
+% =============================================================================
+% Thesis: an admitted plan earns authority one tick at a time, inside a
+% stopping envelope, with minimal correction and a state-matched fallback held
+% in reserve.
+% Running case: the warehouse mobile manipulator (the running machine) at the
+% rack end, at the cage-door latch, and at the coworker's hand.
+% Hook and synthesis: Therac-25 (SE War Story 12.1).
+%
+% Build: make deck V=4 D=12_enforcement   (figures: images/make_figs.py,
+%        numbers: images/calcs.py)
+% Plan:  lecture_map.yml in this folder.
+% =============================================================================
+
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+\mlsyssetup{
+  volume={Volume IV},
+  chapter={Chapter 12},
+  chaptertitle={Safety Enforcement},
+  layer=nervous,
+  logo={../../assets/img/logo-mlsysbook.png},
+  instlogo={../../assets/img/logo-harvard.png},
+}
+\usepackage[T1]{fontenc}
+\usepackage[scaled=0.9]{helvet}
+\usepackage{courier}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{booktabs,amsmath}
+\graphicspath{{images/}}
+\setcounter{mlsystotalsections}{4}
+
+\title{Safety Enforcement}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+% Diagram role colors (Volume IV palette), for text beside figures
+\definecolor{rolegreen}{HTML}{047857}
+\definecolor{rolered}{HTML}{991B1B}
+\definecolor{roleblue}{HTML}{1D4ED8}
+% A large answer choice for predict and concept-question slides
+\newcommand{\choice}[2]{\textbf{\textcolor{mlsysaccent}{#1}}\enspace #2}
+\newcommand{\answerat}[3]{\alt<#1->{\colorbox{mlsysaccent!15}{\choice{#2}{#3}}}{\choice{#2}{#3}}}
+% A goal or takeaway line with its text-free thumbnail
+\newcommand{\thumbline}[2]{%
+  \begin{minipage}[c]{2.6cm}\centering\includegraphics[width=2.5cm,height=0.95cm,keepaspectratio]{#1}\end{minipage}%
+  \hspace{0.3cm}\begin{minipage}[c]{0.74\textwidth}\small #2\end{minipage}}
+% One line of a worked example, shown from overlay #1 on
+\newcommand{\wstep}[2]{\uncover<#1->{#2}\\[0.2cm]}
+% An exact excerpt of a datasheet, log, or code
+\newenvironment{logblock}[1][7]{\par\ttfamily\fontsize{#1}{8.6}\selectfont\raggedright\setlength{\parskip}{0pt}}{\par}
+\newcommand{\logrow}[2]{\makebox[\linewidth][l]{#1\hfill #2}\\}
+
+\begin{document}
+
+% =============================================================================
+% TITLE AND HOOK
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Read the thesis aloud once. This is the third lecture of Part III, whose law is the third law, proposal is not permission. Today that law becomes a mechanism that runs every millisecond. Core minutes: about 60.5 of the 70 in these notes. FLEX: notes tagged [OPTIONAL] can be cut; cut first the three-ceilings plot, the energy tank, and the separation-distance slide.}
+\mlsystitle{Safety Enforcement}{An admitted plan earns authority one tick at a time, inside a stopping envelope, with minimal correction and a state-matched fallback held in reserve.}{cover_enforcement_blueprint.png}
+
+\begin{frame}{Predict: what stopped the beam?}
+  \mlsysactivity{Predict}{2 min}
+  \centering
+  \safeimg[width=0.86\textwidth,height=3.9cm,keepaspectratio]{therac_hook.pdf}\\[0.1cm]
+  {\small Therac-25, 1985 to 1987: a fast operator edit raced the software.}\\[0.12cm]
+  {\normalsize\choice{A}{a second software check}\quad\choice{B}{the operator}\quad\answerat{2}{C}{nothing; six patients overdosed}}
+  \mlsyscredit{Safety Enforcement, War Story 12.1; Leveson and Turner, ``An Investigation of the Therac-25 Accidents,'' IEEE Computer, 1993. Diagram simplified.}
+  \note{[2.5 min] LINK: every earlier lecture in Part III produced a proposal or a plan. Today asks who may refuse one. NARRATE: the Therac-25 was a radiation therapy machine with an electron mode and a high-current X-ray mode that needs a tungsten target rotated into the beam. Its predecessor, the Therac-20, also checked the turntable with hardware microswitches. The Therac-25 removed them and trusted software. A fast operator edit raced the software, and the 25 MeV beam fired without the target in place. ENGAGE: vote A, B, or C. Step 2: C. Six patients received doses estimated at 4,000 to 20,000 rads, up to 100 times the therapeutic level, and three died (the chapter, from Leveson and Turner). Students who choose A assume a second check is independent; it ran on the same processor and shared the same race. WARN: the lesson is not that software is bad. It is that a protective layer cannot be its own backstop. FLEX: [CORE]. The synthesis returns to this picture.}
+\end{frame}
+
+\begin{frame}{Recall: what must every motion already carry?}
+  \mlsysactivity{Retrieval}{1.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.55\textwidth}
+      {\Large\bfseries Close your notes.}\\[0.2cm]
+      {\normalsize What must a trajectory contain before it is admitted? How long does the base take to stop from 1.5~m/s?}\\[0.3cm]
+      \uncover<2->{\small Its timing, a smooth join to the present state, and a \textbf{\textcolor{mlsysaccent}{resident stop}} that runs without the proposer.\\[0.1cm]
+      From 1.5~m/s: 750~ms at constant deceleration; \textbf{1,031.25~ms} as an S-curve whose deceleration ramps up and down.}
+    \end{column}
+    \begin{column}{0.41\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.0cm,keepaspectratio]{thumb_recall_stop.pdf}\\[0.05cm]
+      {\footnotesize Gray: constant deceleration. Green: S-curve.}\\[0.2cm]
+      \uncover<3->{\begin{mlsyscard}{mlsysaccent}\small\textbf{Today:} that stop was checked once, at admission. The machine then runs 1,000 ticks a second.\end{mlsyscard}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Lecture 11, Trajectory Planning; Safety Enforcement, \S12.10 (derived values from the reference S-curve).}
+  \note{[1.5 min] NARRATE: give 45 seconds. Step 2: Lecture 11's trajectory record carries timing, a C2 (smooth to the second derivative) join, and a stop suffix that the safety microcontroller holds in its own memory. From the 1.5 m/s drive limit at 2 m/s squared, a constant-deceleration stop takes 750 ms; the jerk-limited S-curve takes 1,031.25 ms because deceleration ramps up and down at a bounded jerk of 7.11 m/s cubed. Step 3: admission checked all this before motion began. Ask: what can change in the next second that admission could not see? (Expected: the body lags, a person steps out, a payload loads a joint, the proposer stalls.) FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Why does an admitted plan need permission on every tick?}
+  \thumbline{thumb_budget_step4.pdf}{Build the finished stopping budget and read the speed ceiling it sets for the aisle.}\\[0.2cm]
+  \thumbline{thumb_proj_step3.pdf}{Turn that budget into a barrier on the next torque, and correct a proposal by the least change.}\\[0.2cm]
+  \thumbline{thumb_hand_force.pdf}{Size contact margins: the force at brake onset, and a free against a clamped hand.}\\[0.2cm]
+  \thumbline{thumb_ladder_step4.pdf}{Pick the fallback that matches the state, and say which layer carries the certified claim.}\\[0.12cm]
+  {\footnotesize\textcolor{midgray}{Third law: proposal is not permission.\quad New record: the enforcement record.}}
+  \note{[1.5 min] NARRATE: the driving question is the title. Four goals, one per segment; each thumbnail is the shape of the figure that teaches it. The running machine carries every number: the warehouse mobile manipulator, a wheeled base with an arm, at the rack end where a person may step out, at the spring-latched cage door, and at the packing station where it hands a mug to a coworker. Most of its values are labeled illustrative or derived in the book; each segment pairs them with a published datasheet or measurement. Pathways: control students know barrier functions under other names; machine learning students should read the control appendix on Lyapunov and barrier functions; embedded students will recognize the watchdog and the cycle budget. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{The proposer may propose; only the 1 ms checker may command}
+  \begin{columns}[c]
+    \begin{column}{0.72\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=4.6cm,keepaspectratio]{gate_step}{2}
+    \end{column}
+    \begin{column}{0.26\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.4cm,keepaspectratio]{tiago-mobile-manipulator.jpg}\\[0.05cm]
+      {\footnotesize A real mobile manipulator (PAL Robotics TIAGo++), the running machine's class}
+    \end{column}
+  \end{columns}
+  \vspace{0.1cm}
+  {\small MCU: the safety microcontroller. STO: safe torque off, which removes drive torque in hardware.}
+  \mlsyscredit{Safety Enforcement, \S12.1 and \S12.8; Simplex: Seto et al., ACC 1998. Photo: PAL Robotics, CC BY-SA 4.0, Wikimedia Commons.}
+  \note{[2.5 min] LINK: Lecture 4 placed the permission path on a separate safety microcontroller and gave it the chunk lease and timers; Lecture 3's chunk policy renews a proposal every 50 ms. NARRATE: Step 1: the learned proposer sits above the proposal boundary and may only propose. The enforcer on the MCU checks the proposal against current conditions on every 1 ms tick and does one of three things: admit it, correct it, or fall back to a response it holds itself. Only its output reaches the drives. This is the Simplex pattern from Carnegie Mellon in the 1990s: an untested controller drives the plant while a verified one stands ready. Step 2: beneath the MCU sits a certified floor of scanner, drive safe torque off, and spring brakes, on a hardware path that works if the MCU itself fails. The photo is a real robot of the same class, not the book's reference machine. ENGAGE: which of the Therac-25's two boxes does the certified floor replace? (Expected: the hardware interlock.) FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: ENVELOPE
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] First the reservation every other mechanism defends: how much clearance a stop needs, and what speed that allows.}
+\mlsysdivider{How fast may the machine approach the rack end?}{Safety Enforcement, \S12.1 and \S12.2}
+\section{Envelope}
+
+\begin{frame}{Predict: does the drive limit fit the rack end?}
+  \mlsysactivity{Predict}{1 min}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=4.8cm,keepaspectratio]{budget_step}{4}\\[0.05cm]
+  {\small Red line: clear distance, 1,100~mm. Tracking inset: the body may lag its reference by 40~mm. Hatched: dispatch travel.}
+  \mlsyscredit{Safety Enforcement, table 1 and Napkin Math 12.1 (illustrative and derived values of the running machine); rows by owner: Lectures 1, 2, 4, 8, 11, 13.}
+  \note{[3.5 min] LINK: Lecture 1's elementary budget had two terms; Lectures 2, 4, 8, and 11 each added one. ENGAGE: before step 1, vote: does a stop from the 1.5 m/s drive limit fit the 1.10 m clear distance? NARRATE: Step 1: braking at 2 m/s squared (562.5 mm), localization and protective allowances (150 mm), and delay travel: brake onset, the lease path, and observation age. Total 913 mm. It fits. Step 2: Lecture 11's jerk ramps add 210.94 mm; the total 1,124 mm overruns by 23.84 mm. Step 3: today's term, the tracking inset. The feedback tracker guarantees the body stays within 40 mm of its reference only inside its qualified envelope. Total 1,164 mm, 63.84 mm past the line. Step 4: the same rows at 1.3 m/s total 969 mm, and Lecture 13's dispatch-to-admission allocation (hatched, 82.3 mm) still fits. WARN: if worn bearings double the true tracking error to 80 mm while the enforcer still assumes 40, the base spends 40 mm the budget never granted. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{The finished budget caps the aisle at 1.44 m/s}
+  \begin{columns}[T]
+    \begin{column}{0.38\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \small\textbf{Given (running machine)}\\[0.05cm]
+        Clear distance 1,100 mm\\
+        Allowances $50+100+40$ mm\\
+        Deceleration 2~m/s$^2$\\
+        Jerk limit 7.11~m/s$^3$\\
+        Pre-brake delay 133.6~ms
+      \end{mlsyscard}
+      {\footnotesize\textcolor{midgray}{Illustrative and derived values (Napkin Math 12.1).}}
+    \end{column}
+    \begin{column}{0.60\textwidth}
+      \small
+      \wstep{2}{Room to brake: $1{,}100-190=910$~mm}
+      \wstep{2}{Jerk ramps act as delay: $133.6+140.6=274.2$~ms}
+      \wstep{3}{Ceiling: $-a\tau+\sqrt{(a\tau)^2+2aD}=-0.548+1.985=\mathbf{1.44}$~m/s}
+      \wstep{4}{At 1.3~m/s: spare \textbf{131.0}~mm, or \textbf{100.8}~ms of delay}
+      \wstep{5}{Dispatch travel 82.3~mm leaves \textbf{\textcolor{mlsysaccent}{48.7~mm}}, 37.5~ms}
+      {\footnotesize\textcolor{midgray}{$a$: deceleration. $\tau$: effective delay. $D$: room to brake.}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Safety Enforcement, Napkin Math 12.1 and equation 2; dispatch-to-admission allocation 63.3 ms (Lecture 13).}
+  \note{[3 min] LINK: Lecture 2 owns the velocity ceiling as the root of the stopping inequality; today extends it. NARRATE: Step 2: the fixed allowances (localization 50, protective 100, tracking 40 mm) leave 910 mm to brake in. Above 0.56 m/s the jerk ramps cost the same as an extra delay of a over 2J, 140.6 ms, so the effective delay is 274.2 ms. Step 3: the quadratic root gives 1.44 m/s, below the 1.5 m/s the motors allow. Step 4: the team picks 1.3 m/s. Its rows total 968.99 mm, leaving 131.0 mm, which is 100.8 ms at that speed. Step 5: the 63.3 ms Lecture 13 allocates between dispatch and admission costs 82.3 mm and leaves a 48.7 mm reserve, 37.5 ms. Lecture 14 spends that reserve on takeovers and cannot claim the 100.8 ms again. ENGAGE: what does each extra millisecond of pipeline delay cost at 1.3 m/s? (Expected: 1.3 mm; 10 ms lowers the ceiling about 14 mm/s.) WARN: 1.3 m/s is a candidate until loaded timing and braking measurements confirm it. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{A certified scanner keeps its own budget: 85 ms to respond}
+  \begin{columns}[c]
+    \begin{column}{0.40\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.3cm,keepaspectratio]{jungheinrich-agv.jpg}\\[0.03cm]
+      {\footnotesize Jungheinrich ERC 213a driverless truck; scanner at the front corner}
+    \end{column}
+    \begin{column}{0.57\textwidth}
+      {\small\textbf{SICK nanoScan3 safety laser scanner, datasheet}}\par\vspace{0.08cm}
+      \begin{logblock}[7.5]
+        \logrow{Protective field range}{3 m}
+        \logrow{Warning field range}{10 m}
+        \logrow{Response time}{85 ms}
+        \logrow{Protective field supplement}{65 mm}
+        \logrow{Safety integrity level}{SIL 2 (IEC 61508)}
+        \logrow{Performance level}{PL d (EN ISO 13849)}
+      \end{logblock}
+      \vspace{0.2cm}
+      \uncover<2->{\small At 1.3~m/s: 85~ms is \textbf{110.5~mm} of travel before the outputs switch (derived). The field must still hold the stop and allowances.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{SICK NANS3-CAAZ30AA1 product data sheet, 2024-12-17 (excerpt). Photo: Marc Auledas Noguera, CC BY 4.0, Wikimedia Commons (cropped).}
+  \note{[2.5 min] NARRATE: the learned perception path is not the only thing watching the aisle. Industrial driverless trucks carry a safety laser scanner whose protective field is configured in its own firmware; when an obstacle enters the field, its safety outputs switch, without software, perception, or the lease. The photo shows a real driverless stacker with a scanner low on the front corner. The excerpt is a real datasheet for one such scanner, the SICK nanoScan3: a 3 m protective field and an 85 ms response time, certified to PL d (a performance level, a grade for a safety function under ISO 13849) and SIL 2. Step 2: 85 ms at 1.3 m/s is 110.5 mm (derived). ENGAGE: why can this path not reuse the software budget? (Expected: it bypasses the software delays, but braking, tracking, localization, and the protective cushion still apply; the field is sized from its own timing.) WARN: a certified component does not certify the sensor-to-stop path; the drive and brakes must also be measured. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Estimate: what does a 200 ms host stall cost?}
+  \mlsysactivity{Estimate}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.42\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \small\textbf{Given}\\[0.05cm]
+        Aisle speed 1.3~m/s\\
+        Chunk lease 60~ms (on the MCU)\\
+        Spare at 1.3~m/s: 131.0~mm\\
+        Now the host's operating system enforces the lease, and it stalls 200~ms.
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.54\textwidth}
+      \only<1|handout:0>{\normalsize In pairs: how much extra unbraked travel? Does the stop still fit?}%
+      \uncover<2->{\small Extra time: $200-60=140$~ms\\[0.15cm]
+      Extra travel: $0.140\times1.3=\mathbf{182}$~mm\\[0.15cm]
+      Overrun: $182-131.0=\textbf{\textcolor{errorstroke}{50.99~mm}}$ into the rack\\[0.3cm]
+      {\footnotesize An unprotected integrator that delays braking 150~ms costs 195~mm, 63.99~mm past the spare (illustrative).}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Safety Enforcement, \S12.2.1 and \S12.3 (derived from the running machine's illustrative values).}
+  \note{[2.5 min] LINK: Lecture 4 placed lease expiry on the MCU's own clock. ENGAGE: two minutes in pairs. Step 2: the base keeps moving for 140 ms longer than the budget allows: 182 mm. The spare is 131.0 mm, so the base overruns by 50.99 mm. That is why the lease timer lives on the MCU and gates motor power, not in a host process. Mention the second case: integrator windup. If a controller's integral term kept summing error while the drive was saturated, it must unwind before braking starts; an illustrative 150 ms unwind costs 195 mm. WARN: students may say the 60 ms lease is the protection; it protects only if the clock that enforces it survives the stall. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{The envelope is a ceiling that changes with clearance}
+  \begin{columns}[c]
+    \begin{column}{0.56\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=5.2cm,keepaspectratio]{portrait_step}{3}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \small\textbf{Every tick, in this order:}\\[0.15cm]
+      \uncover<2->{1.\enspace Is the current state inside the envelope? If not, \textbf{\textcolor{errorstroke}{STOP}}: no new command can undo the speed already reached.\\[0.2cm]}
+      \uncover<3->{2.\enspace Only then clamp the proposed speed to the ceiling at today's clearance.\\[0.2cm]
+      {\footnotesize\textcolor{midgray}{Recoverable set: the states from which the resident stop still succeeds.}}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Safety Enforcement, Definition 12.1, figure 5, and \S12.2.2 (pre-dispatch boundary, running machine).}
+  \note{[2 min] NARRATE: axes are clear distance ahead and speed. Step 1: braking alone allows the parabola v equals the square root of 2 a D. Step 2: the stopping envelope, the set of states from which the resident stop, after every worst-case delay, still halts with all margins intact. It sits inside the parabola, shifted by delay travel, the jerk ramps, and the allowances. At 1.10 m its height is 1.44 m/s. Step 3: the governor checks the current state first; a state outside the envelope selects STOP at once, because lowering the commanded speed cannot remove momentum already present. Only a state inside is allowed to clamp the proposed speed. LINK: Lecture 11 owns the same boundary in time, as inevitable collision states. ENGAGE: why must the check order be state first? (Expected: a clamp acts on the next command; the stop must fit from the state the machine is in now.) WARN: payload, floor, and motor heat move the boundary; a datasheet deceleration overstates it. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{A walking person cuts the base's ceiling to 0.26 m/s}
+  \centering
+  \safeimg[width=0.92\textwidth,height=4.6cm,keepaspectratio]{ceilings.pdf}\\[0.1cm]
+  {\small The walking person charges the stop by its duration, not its distance.}
+  \mlsyscredit{Safety Enforcement, \S12.2.1 and figure 3 (subtotal ceilings before dispatch allocation; derived). Approach speed 1.6 m/s: ISO 13855.}
+  \note{[1.5 min] NARRATE: the stop each speed needs, against the 1.10 m clear distance. Dark: dry floor, ceiling 1.44 m/s. Orange: a sealed floor inspected to a friction coefficient of 0.12, so traction caps deceleration at 1.18 m/s squared; ceiling 1.23 m/s. Red: a person who keeps walking toward the base at 1.6 m/s, the ISO 13855 approach speed. The person closes the gap for the whole reaction and stop, so the ceiling falls to 0.26 m/s; a jerk-limited stop from there takes 382 ms while the person walks 612 mm. With the 63.3 ms dispatch allocation charged, the three become 1.35, 1.17, and 0.19 m/s. ENGAGE: why does slowing down help so little against a walking person? (Expected: below 0.56 m/s the jerk limit stretches the stop's duration, and duration is what the person's travel charges.) LINK: the design instead restricts crossings at aisle ends, a premise Lecture 18's residual-claims register tracks; Lecture 9 kept the occlusion term. FLEX: [OPTIONAL].}
+\end{frame}
+
+% =============================================================================
+% SECTION: BARRIER
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Land the segment aloud: clearance is a composite margin, and the finished budget sets the speed below the motor's limit. Next: how that margin becomes a limit on the next torque command.}
+\mlsysdivider{How does a stopping margin become a limit on the next command?}{Safety Enforcement, \S12.3 to \S12.6.1}
+\section{Barrier}
+
+\begin{frame}{Gravity takes 75\% of the torque and quadruples the stop}
+  \begin{columns}[c]
+    \begin{column}{0.56\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.4cm,keepaspectratio]{gravity.pdf}\\[0.1cm]
+      {\small Loaded joint at 1.2~rad/s, 0.80~m lever. Gravity holds 65.25 of 87~N$\cdot$m.}\\[0.1cm]
+      \uncover<2->{\small Net braking: $(87-65.25)/3 = \mathbf{7.25}$~rad/s$^2$, a quarter of 29.}
+    \end{column}
+    \begin{column}{0.41\textwidth}
+      {\small\textbf{Franka Research 3, datasheet}}\par\vspace{0.08cm}
+      \begin{logblock}[7.5]
+        \logrow{Degrees of freedom}{7}
+        \logrow{Rated payload}{3 kg}
+        \logrow{Joint torque limits}{A1-A4: \textpm87 Nm}
+        \logrow{}{A5-A7: \textpm12 Nm}
+        \logrow{Force/Torque sensing}{all 7 axes}
+        \logrow{Weight}{\textasciitilde{} 18.3 kg}
+      \end{logblock}
+      \vspace{0.15cm}
+      {\footnotesize The datasheet gives the peak. Braking authority is what the peak leaves after gravity.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Safety Enforcement, Napkin Math 12.2 and figure 6 (illustrative inertia, speed, and bias). Franka Research 3 datasheet R02212 2.3 (excerpt).}
+  \note{[3 min] NARRATE: the arm carries a mug down toward the packing station. The real datasheet on the right is the class of arm the book registers: 87 N m peak on the four large joints, 12 N m on the wrist, about 18 kg. Step 1: with no bias the joint brakes at 87 over 3 kg m squared, 29 rad/s squared; the tool stops in 19.86 mm. Descending, gravity on arm and mug takes 65.25 N m (75 percent, illustrative) in the direction of motion. Only 21.75 N m brakes, 7.25 rad/s squared, and the tool travels 79.45 mm: four times as far, 59.59 mm the datasheet-based enforcer never budgeted. Ascending, gravity helps: 11.35 mm. LINK: Lecture 2 owns credible deceleration; this is the same idea with a sign. ENGAGE: why exactly four times? (Expected: stopping distance scales as one over deceleration, and a quarter of the torque is left.) WARN: braking authority is direction-dependent; never treat it as one number. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{A barrier on distance alone gives the motor no say}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=3.6cm,keepaspectratio]{reldeg_step}{2}\\[0.15cm]
+  \uncover<2->{\normalsize $h(\theta,\omega)=\theta-\dfrac{\omega^2}{2\,\alpha_{\text{net}}}\ \ge 0$}\\[0.1cm]
+  \uncover<2->{\footnotesize $h$: barrier, the margin left. $\theta$: angular clearance. $\omega$: approach speed. $\alpha_{\text{net}}$: net braking deceleration.}
+  \mlsyscredit{Safety Enforcement, \S12.4, Definition 12.2, \S12.4.1, and equation 5.}
+  \note{[2.5 min] NARRATE: a control barrier function is a margin h that stays non-negative inside the safe set, and the rule that every admitted command keeps h from falling faster than a gain times h itself. Then a state that starts safe stays safe. Step 1: write h as raw clearance. Torque becomes acceleration, which integrates to velocity, which integrates to position: two integrations, relative degree two. The rate of h is minus the velocity, with no torque in it, so at the boundary the only safe command would need infinite torque. A distance-only filter reacts after momentum has made contact certain. Step 2: subtract the distance needed to stop. Now the rate of h contains torque (relative degree one), and the rule becomes a limit on the next torque. Its zero level is the stopping budget written in state space. ENGAGE: what does h equal at 79.45 mm and 1.2 rad/s? (Expected: zero.) WARN: relative degree counts integrators between the input and the margin, not physical degrees of freedom. Pathway: machine learning students should read the control appendix on barrier functions. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Inside 79.45 mm the barrier asks for more than the joint has}
+  \centering
+  \safeimg[width=0.92\textwidth,height=4.3cm,keepaspectratio]{barrier_torque.pdf}\\[0.05cm]
+  {\small $\tau \le -\tau_{\text{bias}} + I\,\alpha_{\text{net}}\left(\gamma h/\omega - 1\right)$}\\[0.03cm]
+  {\footnotesize $\tau$: next torque. $\tau_{\text{bias}}$: gravity, 65.25~N$\cdot$m. $I$: inertia, 3~kg$\cdot$m$^2$. $\gamma$: barrier gain, 10~s$^{-1}$.}
+  \mlsyscredit{Safety Enforcement, \S12.4.1, equation 6, and its figure (stipulated joint dynamics).}
+  \note{[2 min] NARRATE: equation 6 solves the barrier rule for torque: a half-space the next command must satisfy. Across: tool clearance. Up: the braking torque the barrier demands for the descending arm at 1.2 rad/s. At 110 mm it asks 80.1 N m. Most of that is not deceleration: 65.25 N m only cancels gravity (dotted line). At 79.45 mm, h equals zero and it asks the full 87 N m peak. At 70 mm it asks 89.1, more than the joint has: the state is outside the viable set, and no controller starting there can prevent contact under these assumptions. ENGAGE: what follows for when the filter must start acting? (Expected: well before the boundary, while the demand is still below the peak.) WARN: everywhere inside the safe set the demand is at most the peak; that bound makes h a valid barrier under input limits. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Vote: clamp each joint, or project the pair?}
+  \mlsysactivity{Concept question}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.50\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=5.2cm,keepaspectratio]{proj_step}{3}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \small Barrier on two joints: $2\tau_1+\tau_2\le 5$~N$\cdot$m.\\ The proposal $(3.5,\,3)$ gives 10.\\[0.25cm]
+      \choice{A}{clamp joint 1 to 2: done}\\[0.1cm]
+      \answerat{3}{B}{project onto the line: $\lambda^*=1$}\\[0.1cm]
+      \choice{C}{replace it with a stop}\\[0.25cm]
+      \uncover<3->{\footnotesize Projection $(1.5,\,2)$ meets the barrier with the smallest change, 2.236~N$\cdot$m; the clamp still gives~7.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Safety Enforcement, \S12.6.1 and figure 7 (illustrative two-axis values; derived).}
+  \note{[3 min] ENGAGE: vote, then pairs, then vote again. Step 1: the green half-space is every torque pair the barrier admits. The proposal at (3.5, 3) breaches it by 5. Step 2: the per-axis clamp cuts joint 1 to 2 and passes joint 2: 2 times 2 plus 3 is 7, still 2 outside, and the direction turns from 40.6 to 56.3 degrees. Step 3: B. The least-change projection moves along the barrier's normal by lambda star equal to 1, to (1.5, 2): exactly on the line, an intervention of 2.236 N m. C is safe but throws away the learned competence. WARN: the projection also rotates the torque vector, so the tool's path changes; the MCU reports the intervention so the planner replans from the corrected state. A structurally invalid proposal (a jump in position, a target inside a wall) is vetoed, not projected. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}[fragile]{The minimal-intervention filter has a closed form}
+  \begin{columns}[T]
+    \begin{column}{0.47\textwidth}
+      \normalsize $\min_u \tfrac12\lVert u-u_{\text{nom}}\rVert^2$\\[0.05cm]
+      \quad s.t.\ $a^\top u\le b$,\ \ $u_{\min}\le u\le u_{\max}$\\[0.25cm]
+      \small $u^*=u_{\text{nom}}-\lambda^* a$,\\
+      $\lambda^*=\max\!\left(0,\ \dfrac{a^\top u_{\text{nom}}-b}{\lVert a\rVert^2}\right)$\\[0.2cm]
+      {\footnotesize A safe proposal gives $\lambda^*=0$ and passes untouched. CBF-QP: control barrier function quadratic program.}
+    \end{column}
+    \begin{column}{0.51\textwidth}
+      {\footnotesize\textbf{images/qp\_run.py, run with SciPy 1.18.1}}\par\vspace{0.06cm}
+      \begin{logblock}[7]
+u0 = np.array([3.5, 3.0])\\
+a = np.array([2.0, 1.0])\\
+b = 5.0\\
+cost = lambda u: 0.5 * np.sum((u - u0) ** 2)\\
+safe = \{"type": "ineq",\\
+\hspace*{4.2em}"fun": lambda u: b - a @ u\}\\
+r = minimize(cost, u0, method="SLSQP",\\
+\hspace*{6.3em}constraints=[safe])\\
+lam = max(0.0, (a @ u0 - b) / (a @ a))\\[0.1cm]
+\textbf{SLSQP\ \ u* = [1.5 2. ]\ \ iterations: 2}\\
+\textbf{closed u* = [1.5 2. ]\ \ lambda* = 1.0}
+      \end{logblock}
+      \vspace{0.15cm}
+      {\footnotesize On the MCU: an active-set solver, 150~$\mu$s allotted inside each 1~ms tick.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Safety Enforcement, equations 7 and 8, \S12.6.4. Code: images/qp\_run.py (imports and print lines omitted).}
+  \note{[2 min] NARRATE: equation 7 is the CBF-QP: find the torque closest to the proposal that satisfies the barrier half-space and the actuator limits. With one active barrier and no active limit, equation 8 gives the answer in closed form: subtract lambda star times the normal, where lambda star is the breach divided by the normal's squared length, and zero when the proposal is already safe. The right column is real output: the file in the deck's images folder solves the two-joint example with SciPy's general solver and with the closed form; both return (1.5, 2). This is the shield: a safe proposal costs nothing and passes untouched. WARN: if an actuator bound becomes active, projecting and then clipping can break the barrier again; the solver must handle the intersection. ENGAGE: for the latch, treat speed as one axis with ceiling 0.03 m/s; what are lambda star and the admitted speed for a 0.10 m/s proposal? (Expected: 0.07 and 0.03 m/s.) FLEX: [OPTIONAL].}
+\end{frame}
+
+% =============================================================================
+% SECTION: CONTACT
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Land the segment aloud: the kinetic barrier turns the stopping margin into a half-space on the next torque, and the filter removes only the part that violates it. But at the cage door, touching is the task.}
+\mlsysdivider{What is the margin when touching is the task?}{Safety Enforcement, \S12.6.2}
+\section{Contact}
+
+\begin{frame}{At the latch, force keeps rising while the brake engages}
+  \centering
+  \mlsyssteps[width=0.92\textwidth,height=4.6cm,keepaspectratio]{latch_step}{2}\\[0.05cm]
+  {\small Plate stiffness $4.0\times10^5$~N/m: at 0.03~m/s, force rises 12~N per ms; 2~ms to react.}
+  \mlsyscredit{Safety Enforcement, equations 11 and 12 and figure 8 (illustrative stiffness, tripwire, and loop time; derived).}
+  \note{[2.5 min] NARRATE: at contact the kinetic barrier admits only zero speed, which would freeze the gripper before it pressed the latch. The margin becomes force. Step 1: at the guarded 0.03 m/s, force rises at stiffness times speed, 12 N per ms. The tripwire fires at 15 N, but detection, command, and torque rise take 2 ms, so braking begins at 39 N. The arm then has 0.15 mm of plate travel before the 100 N latch limit, so it must stop at about 3 m/s squared, in about 10 ms. Step 2: the chunk policy proposed 0.10 m/s. Braking starts at 95 N, and stopping in the 12.5 micrometers left needs 400 m/s squared. LINK: Lecture 7's evaluation record sampled only the guarded speed; no trial ran at 0.10. ENGAGE: which half of the refusal is physical and which is evidential? WARN: these numbers treat the arm as rigid; real compliance softens the rise, which is why the stiffness of a series compliance is part of the margin. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{An energy tank lets the arm spend only work it has earned}
+  \begin{columns}[c]
+    \begin{column}{0.58\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{tank.pdf}
+    \end{column}
+    \begin{column}{0.40\textwidth}
+      \small Tank level $E$: a software tally.\\[0.1cm]
+      $\dot E=\underbrace{\dot q^\top D\,\dot q}_{\text{damping credit}}-\underbrace{\tau_{\text{act}}^\top\dot q}_{\text{active work}}$\\[0.2cm]
+      Barrier: $E-E_{\text{reserve}}\ge 0$.\\[0.2cm]
+      {\footnotesize $\dot q$: joint speeds. $D$: virtual damping. $\tau_{\text{act}}$: active torque.}\\[0.1cm]
+      {\footnotesize Energy does not bound force: a stiff passive contact can still push hard.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Safety Enforcement, \S12.6.2, equations 9 and 10; Ferraguti et al., ICRA 2013; Hogan 1985.}
+  \note{[1.5 min] NARRATE: a passive system can return no more energy than it stored and absorbed, so contact with a passive environment stays bounded. The tank enforces that by bookkeeping. Every joule that virtual damping removes from the arm's motion is credited; active work pushed into the contact is debited; the controller may spend only what the tank holds above a reserve. At the reserve, no active work is admitted, and a proposed force is cut to what the tank can pay for this tick. WARN: two things the tank does not do. It credits only damping the actuator actually realized, so saturation or delay needs a conservative bound; and it does not bound force, so a separately qualified force channel with its own sensor is required. ENGAGE: why can a passive spring against a steel plate still exceed the latch limit? (Expected: force is stiffness times compression, which energy alone does not cap.) FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Estimate: does a 0.10 m/s handover pass 50 N?}
+  \mlsysactivity{Estimate}{2.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.38\textwidth}
+      \centering\safeimg[width=\textwidth,height=1.55cm,keepaspectratio]{ur16e-cobot.jpg}\\[0.02cm]
+      {\footnotesize UR16e collaborative arm}\\[0.02cm]
+      \begin{mlsyscard}{mlsysaccent}\footnotesize
+        Arm 12~kg, hand 0.6~kg\\ Hand spring $k$: 75~N/mm\\
+        $F=v\sqrt{k\,m}$,\ \ $m=(1/m_h+1/m_r)^{-1}$
+      \end{mlsyscard}
+      {\scriptsize\textcolor{midgray}{$v$: speed. $k$: hand spring. $m$: reduced mass.}}
+    \end{column}
+    \begin{column}{0.59\textwidth}
+      \only<1|handout:0>{\normalsize In pairs: the peak force on a free hand, and on a clamped one?}%
+      \uncover<2->{\centering\safeimg[width=\textwidth,height=2.7cm,keepaspectratio]{hand_force.pdf}\\
+      \raggedright\small Free: $m=0.571$~kg, $0.10\times207=\mathbf{20.7}$~N\\
+      Clamped: $m=12$~kg, $0.10\times949=\mathbf{\textcolor{errorstroke}{94.9}}$~N\\[0.05cm]
+      Speed ceilings: 0.24 and \textbf{0.053}~m/s}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Safety Enforcement, Napkin Math 12.3 and equation 13; hand values from the ISO/TS 15066 body model. Photo: Auledas, CC BY-SA 4.0, Wikimedia Commons.}
+  \note{[3 min] LINK: Lecture 6's spring-mass contact bound set the moving mass's kinetic energy equal to the peak spring energy; here two bodies move. ENGAGE: two minutes in pairs. Step 2: a free hand recoils, so only the relative motion compresses it, through the reduced mass, 0.571 kg (the light hand dominates). The stiffness term is the square root of 75,000 times 0.571, 207 N per m/s, so 0.10 m/s gives 20.7 N, inside the 50 N criterion. A hand trapped against a rack upright cannot recoil; the full 12 kg arm-side mass (half the arm plus its payload, an estimate) acts: 949 N per m/s and 94.9 N, which fails. The criterion allows 0.24 m/s for a free hand but only 0.053 m/s for a clamped one. WARN: the 0.10 m/s handover ceiling is valid only while the geometry excludes clamping: the handover point is in free space, with no upright or arm link within reach. That premise goes in the record. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Measured: speeds set for 280 N gave 228 to 427 N}
+  \begin{columns}[c]
+    \begin{column}{0.62\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{kirschner.pdf}\\[0.02cm]
+      {\footnotesize Dark: central test position. Light: outer position.}
+    \end{column}
+    \begin{column}{0.36\textwidth}
+      \centering\safeimg[width=\textwidth,height=1.9cm,keepaspectratio]{kuka-lbr-iiwa.jpg}\\[0.03cm]
+      {\footnotesize KUKA LBR iiwa, one of the four arms tested}\\[0.2cm]
+      \raggedright\small Four real arms, clamped-hand speed from the formula, force measured with a sensor device: the error reached \textbf{\textcolor{errorstroke}{147~N}}.
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Kirschner et al., ``ISO/TS 15066: How Different Interpretations Affect Risk Assessment,'' arXiv 2203.02706, Table II (hand, B1). Photo: KUKA Laboratories, CC BY-SA 3.0, Wikimedia Commons.}
+  \note{[2 min] NARRATE: the clamped-hand model is a premise; this is what happened when someone measured it. Kirschner and colleagues took the ISO/TS 15066 hand values (0.6 kg, 75 N/mm, a 280 N threshold), treated the hand as clamped, computed each robot's allowed speed (0.28 to 0.40 m/s), and drove four commercial arms into a force-measurement device at two positions. Measured peaks ranged from 228 to 427 N; the Techman TM5 at the central position exceeded the target by 147 N, 1.52 times. The same formula underestimated some arms and overestimated others. ENGAGE: what does this say about the 0.053 m/s ceiling on the previous slide? (Expected: it is arithmetic on assumed masses and stiffness; only a measurement on this arm in this pose settles it.) WARN: the paper's conclusion is that the formula should not be used alone to estimate constrained contact. The arithmetic is exact; the premise is what needs evidence. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Against a walking person, the person's travel is 70\% of it}
+  \centering
+  \safeimg[width=0.92\textwidth,height=3.1cm,keepaspectratio]{ssm.pdf}\\[0.15cm]
+  {\small Person: 1.6~m/s for $133.6+166$~ms. Robot: 0.96~m/s for 133.6~ms, then a 79~mm stop.}\\[0.1cm]
+  {\footnotesize\textcolor{midgray}{A certified version needs safety-rated sensors; a vision pipeline carries no rating.}}
+  \mlsyscredit{Safety Enforcement, \S12.8.3 (ISO 10218-2:2025, Annex L; Marvel and Norcross 2017; derived).}
+  \note{[1.5 min] NARRATE: speed and separation monitoring keeps a protective separation between a moving arm and a person: the person's travel during the robot's reaction and stop, the robot's reaction travel, its stopping travel, plus intrusion and position margins. For the descending arm: the person at 1.6 m/s over 133.6 ms of reaction and 166 ms of the gravity-biased stop, 479 mm; the tool at 0.96 m/s over the reaction, 128 mm; the stop, 79 mm. Total 686 mm before margins, and the person is 70 percent of it. ENGAGE: which term would a faster perception model shrink, and by how much? (Expected: both reaction terms; every millisecond saves 1.6 plus 0.96 mm.) WARN: ISO 3691-4 tests driverless trucks against a stationary person; a person who keeps walking is outside that test, which is why the base relies on aisle-crossing rules. FLEX: [OPTIONAL].}
+\end{frame}
+
+% =============================================================================
+% SECTION: RESERVE
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Land the segment aloud: in contact, force replaces distance as the margin, and every ceiling rests on a premise only measurement settles. Now: what runs when no correction exists.}
+\mlsysdivider{What runs when no correction exists?}{Safety Enforcement, \S12.6.3 to \S12.10}
+\section{Reserve}
+
+\begin{frame}{Every barrier rests on five premises, each with a detector}
+  \centering
+  \safeimg[width=0.92\textwidth,height=5.0cm,keepaspectratio]{premises.pdf}\\[0.05cm]
+  {\small A premise no detector watches is an assumption.}
+  \mlsyscredit{Safety Enforcement, \S12.6.3 (conditions of forward invariance) and \S12.6.4.}
+  \note{[2 min] NARRATE: the barrier guarantee holds in continuous time under five conditions: the model is right within a validated error; disturbances stay within a bound; the actuators can deliver the correction within a qualified effort error and delay; the solver finishes inside its budget; and the sample period is short enough that drift between samples does not cross the boundary. Each one has a detector that runs every tick. When a detector trips, the enforcer cannot restore permission by assuming better numbers; it selects a response whose premises survive. ENGAGE: which premise does a slippery floor break, and which detector sees it? (Expected: disturbance and actuation authority; none on this machine, since wheel friction is not measured, so the floor becomes an operating restriction.) WARN: matching encoder position to the reference is a proxy, not proof of where the body is. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{The whole check must finish in 250 of 400 microseconds}
+  \centering
+  \safeimg[width=0.92\textwidth,height=3.2cm,keepaspectratio]{cycle.pdf}\\[0.2cm]
+  {\small WCET: worst-case execution time, declared here and tested under load.}\\[0.1cm]
+  {\small A held command drifts \textbf{1.501}~mm in one 1~ms tick at 1.5~m/s and 2~m/s$^2$ (derived).}
+  \mlsyscredit{Safety Enforcement, \S12.6.3 and \S12.6.4 (declared allocations; the unloaded run is an illustrative estimate).}
+  \note{[1.5 min] NARRATE: inside each 1 ms tick: latch state 30 microseconds, verify proposal and lease 15, check tracking 10, the QP solve 150, stage the output 15, reserve 30, a declared worst case of 250 inside a 400 microsecond deadline. An unloaded run takes about 135, but that is not a bound. Between ticks the drive holds the last command, a zero-order hold, so the plant drifts one full period: at 1.5 m/s and 2 m/s squared, 1.501 mm, a small part of the 100 mm protective margin. LINK: Lecture 4 owns WCET; Lecture 13 tests whether this declared WCET survives a loaded chip. ENGAGE: can an overrunning interrupt routine detect its own overrun? (Expected: no; an independent timer must select the fallback.) WARN: a real-time operating system's name does not bound interference from shared memory or peripherals. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{The arbiter jumps to the rung whose prerequisites still hold}
+  \begin{columns}[c]
+    \begin{column}{0.70\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=4.9cm,keepaspectratio]{ladder_step}{4}
+    \end{column}
+    \begin{column}{0.28\textwidth}
+      \centering\safeimg[width=\textwidth,height=1.9cm,keepaspectratio]{estop-haas-cnc.jpg}\\[0.02cm]
+      {\footnotesize Emergency stop button}\\[0.1cm]
+      \safeimg[width=0.55\textwidth,height=1.9cm,keepaspectratio]{pilz-pnoz-s4.jpg}\\[0.02cm]
+      {\footnotesize Safety relay, Pilz PNOZ s4}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Safety Enforcement, \S12.8.1, Definition 12.3, figures 9 and 10. Photos: Flygklubben, CC BY-SA 4.0; Pilz GmbH \& Co. KG, CC BY-SA 3.0; Wikimedia Commons.}
+  \note{[3 min] NARRATE: four resident responses, chosen every tick by the check that failed and the measured state. Step 1: PROJECT, the least-change correction, while a feasible correction exists. Step 2: HOLD, a powered position hold, only at standstill, when the lease or heartbeat lapses. Step 3: STOP, the resident S-curve stop, in motion; the drive function it maps to is a ramp-monitored safe stop 1. Step 4: INHIBIT, safe torque off plus spring brakes, on a hardware path, only when the MCU itself fails (brownout, clock loss, a watchdog timeout). The photos show the hardware end: a real emergency stop button and a safety relay with force-guided contacts that removes drive enable. WARN: the rungs are alternatives, not an escalation; the arbiter never steps down one at a time. ENGAGE: the lease lapses; which rung at 1.3 m/s, and which at standstill? (Expected: STOP; HOLD.) FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Vote: is cutting torque the safest stop?}
+  \mlsysactivity{Concept question}{2 min}
+  \centering
+  \only<1|handout:0>{\safeimg[width=0.9\textwidth,height=4.0cm,keepaspectratio]{thumb_ladder_step4.pdf}\\[0.2cm]
+  {\normalsize The proposer's host crashes while the base cruises at 1.3~m/s.}\\[0.15cm]
+  {\normalsize\choice{A}{Yes: cut torque at once}\qquad\choice{B}{No: run the resident STOP first}}}%
+  \only<2-|handout:1>{\safeimg[width=0.9\textwidth,height=4.2cm,keepaspectratio]{stop_sto.pdf}\\[0.1cm]
+  {\normalsize\answerat{2}{B}{STO removes torque; it does not brake. The heartbeat trips in 30~ms, then STOP.}}}
+  \mlsyscredit{Safety Enforcement, \S12.8.1, \S12.8.2, table 3, and Pitfall in \S12.11 (derived S-curve; brake set time illustrative).}
+  \note{[2.5 min] ENGAGE: vote. Step 2: B. Safe torque off (STO) de-energizes the inverter gates so the motor cannot produce torque, but it does not brake; an unbraked base coasts on its momentum, and spring brakes set only after their coils decay, 30 to 80 ms on this machine, with no stopping capacity credited. The MCU instead detects the silent heartbeat within 30 ms and runs the resident S-curve stop: 931.25 ms and 605.31 mm from 1.3 m/s, the travel the budget reserved. Power is removed only after confirmed standstill. WARN: students who pick A treat STO as the strongest rung. For a moving base or a gravity-loaded arm, removing torque can make things worse; for a humanoid mid-stride it causes a fall. IEC 60204-1 calls these stop categories 0 (power off), 1 (controlled stop, then power off), and 2 (power kept). FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Cruise 2023: a fallback for the wrong state dragged a person}
+  \begin{columns}[c]
+    \begin{column}{0.35\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.0cm,keepaspectratio]{cruise-bolt-av.jpg}\\[0.03cm]
+      {\footnotesize A Cruise robotaxi of the fleet type, San Francisco}
+    \end{column}
+    \begin{column}{0.63\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.4cm,keepaspectratio]{cruise.pdf}\\[0.15cm]
+      \raggedright\small A missing track was read as free space. Fallbacks change state only on positive evidence.
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Safety Enforcement, War Story 12.2 (Exponent 2024; Quinn Emanuel 2024; California DMV 2023). Photo: Dllu, CC BY-SA 4.0, Wikimedia Commons.}
+  \note{[2 min] NARRATE: October 2, 2023, San Francisco. A human-driven car struck a pedestrian into the robotaxi's lane. The robotaxi hit her and made an emergency stop. Its collision classifier placed her at the side rather than under the car, a side collision, whose fallback was a pullover to clear traffic. The tracker had seen her only intermittently, so it marked the lane ahead as clear, and the car accelerated from standstill into the pullover, dragging her about 6.1 m (20 ft) at up to 3.4 m/s (7.7 mph). The DMV suspended the permits, and Cruise recalled software on 950 vehicles. ENGAGE: in ladder terms, what should the arbiter have selected after the impact? (Expected: hold with restraint; no new motion while the state is uncertain.) LINK: Lecture 17 owns who answered for this decision. WARN: the photo shows the vehicle type, not the vehicle in the incident. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{The certified claim rests on the floor beneath the QP}
+  \begin{columns}[c]
+    \begin{column}{0.66\textwidth}
+      \scriptsize
+      \begin{tabular}{@{}P{2.5cm}P{3.2cm}P{1.7cm}@{}}\toprule
+        \textbf{Response} & \textbf{Certified counterpart} & \textbf{Level} \\\midrule
+        PROJECT, admission & none; recorded as a premise & none claimed \\
+        Lease, heartbeat & MCU watchdog commands STO or SS1 & \textbf{\textcolor{mlsysaccent}{rated}} \\
+        Person at rack end & scanner protective field & PL d \\
+        STOP on the base & ramp-monitored SS1, then brake & PL d \\
+        Arm speed limits & arm safety controller & PL d (Class II) \\\bottomrule
+      \end{tabular}\\[0.12cm]
+      {\footnotesize PL: performance level (ISO 13849-1). SS1: safe stop 1. Arm 18~kg, so ISO 10218-1:2025 Class II.}
+    \end{column}
+    \begin{column}{0.32\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.4cm,keepaspectratio]{pilz-safety-controller.jpg}\\[0.03cm]
+      {\footnotesize A modular safety controller (Pilz) in a cabinet}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Safety Enforcement, \S12.8.3 and table 4 (ISO 3691-4, ISO 13849-1, IEC 61800-5-2, ISO 10218-1/2:2025). Photo: Helfmann, CC BY-SA 4.0, Wikimedia Commons.}
+  \note{[2 min] NARRATE: a safety case cannot cite an unrated numerical solver as its hazard control. On a production machine the formal claim rests on certified functions beneath the permission path: the scanner's protective field, the drives' safe stops, and the arm's safety controller, each graded by a performance level, which combines the channel architecture, the mean time to dangerous failure, diagnostic coverage, and common-cause defenses. ISO 3691-4 sets PL d for braking and person detection on the base; ISO 10218-1:2025 sets PL d for a Class II arm. Above that floor, the MCU path is an unrated performance layer whose job is to keep the learned proposer from tripping the floor. One narrow piece of it is rated: the watchdog that revokes authority when the lease or heartbeat lapses. LINK: Lecture 4 owns independence; Lecture 16 owns how a certification authorizes one configuration. ENGAGE: why rate only the watchdog? (Expected: small scope, so it can be qualified.) FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{The enforcement record binds each tick to its evidence}
+  \begin{columns}[T]
+    \begin{column}{0.58\textwidth}
+      {\footnotesize\textbf{Admitted command, one per 1~ms tick}}\par\vspace{0.06cm}
+      \begin{logblock}[7.2]
+        \logrow{token\_sequence\_id}{uint64, +1 each tick}
+        \logrow{parent\_trajectory\_digest}{SHA-256}
+        \logrow{admitted\_control\_vector}{float32[N] N$\cdot$m}
+        \logrow{intervention\_vector}{nonzero if projected}
+        \logrow{barrier\_margin}{must be $\ge 0$}
+        \logrow{tracking\_error}{base $\le$ 40 mm}
+        \logrow{active\_fallback\_rung}{PROJECT ... INHIBIT}
+        \logrow{lease\_remaining\_ns}{STOP or HOLD at 0}
+      \end{logblock}
+    \end{column}
+    \begin{column}{0.40\textwidth}
+      \small\textbf{Contract} (signed, before deployment): tracking bound, barrier gains, deadlines, effort-error bounds, rung routing.\\[0.15cm]
+      \textbf{Audit log}: every proposal, intervention, solve time, and veto.\\[0.15cm]
+      {\footnotesize Each number carries its category: measured, derived, datasheet, or illustrative.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Safety Enforcement, \S12.10 and table 5 (abridged).}
+  \note{[1.5 min] NARRATE: this lecture's record, the tenth in the record chain. Three parts. The contract is signed before deployment and fixes the tracking bound, barrier coefficients, timer deadlines, and which rung each failed check selects. The admitted command is the per-tick output: a sequence number and a digest that bind it to its parent trajectory (Lecture 11's record), the torque actually admitted, the intervention, the barrier margin, the tracking error, the active rung, and the lease remaining. The drives receive only the setpoint and limits inside a safety fieldbus frame; the rest goes to the audit log. ENGAGE: after a stop at the rack end, which field tells an investigator whether the proposer or the plant was at fault? (Expected: the intervention vector and active rung, with the tracking error.) WARN: the 931.25 ms stop in the record is derived; only loaded stopping trials make it measured. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% CLOSE
+% =============================================================================
+\begin{frame}{Retrieval: what did the Therac-25 lack?}
+  \mlsysactivity{Retrieval}{1.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.52\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.4cm,keepaspectratio]{synthesis.pdf}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \only<1|handout:0>{\normalsize Close your notes. Name the four jobs of the permission path, and the one thing beneath it.}%
+      \uncover<2->{\small 1.\enspace Reserve the stop: 1.44~m/s ceiling\\
+      2.\enspace Correct by the least change\\
+      3.\enspace Respect contact force: 39 against 100~N\\
+      4.\enspace Hold a state-matched fallback\\[0.15cm]
+      Beneath: a certified hardware path that works when the MCU does not.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Safety Enforcement, War Story 12.1 and \S12.12.}
+  \note{[2.5 min] Back to the hook. ENGAGE: 60 seconds of writing. Step 2: the four jobs. Reserve the stop: the finished budget caps the aisle at 1.44 m/s and leaves 48.7 mm at 1.3 m/s. Correct by the least change: the kinetic barrier makes the stop a half-space on the next torque, and the projection removes only the violating part. Respect contact force: at the latch the margin is force at brake onset, 39 against 100 N; at the hand it is the geometry that excludes clamping. Hold a state-matched fallback: STOP in motion, HOLD at standstill, INHIBIT only when the MCU fails. The Therac-25 had one software path and nothing beneath it. The running machine has the enforcer and, separately, the certified floor. WARN: neither layer is enough alone; the floor is coarse and trips often without the enforcer, and the enforcer cannot back itself up. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Takeaways}
+  \thumbline{thumb_budget_step4.pdf}{The finished stopping budget, tracking inset included, caps the aisle at 1.44~m/s, below the 1.5~m/s drive limit.}\\[0.15cm]
+  \thumbline{thumb_proj_step3.pdf}{A kinetic barrier turns the stop into a torque half-space; the filter removes only the part that violates it.}\\[0.15cm]
+  \thumbline{thumb_hand_force.pdf}{In contact, force is the margin: 39~N at brake onset at the latch; 20.7 against 94.9~N for a free and a clamped hand.}\\[0.15cm]
+  \thumbline{thumb_ladder_step4.pdf}{The fallback matches the state and the surviving hardware; the certified floor beneath the QP carries the formal claim.}
+  \note{[1.5 min] [CORE] One line per segment. Ask students which slide taught each line. If short on time, read the first and the fourth.}
+\end{frame}
+
+\begin{frame}{Open questions}
+  \begin{columns}[c]
+    \begin{column}{0.64\textwidth}
+      \small
+      \begin{itemize}\setlength{\itemsep}{0.12cm}
+        \item Policies trained with the safety filter in the loop learn to avoid its boundary. Does that make the filter less necessary, or harder to audit?
+        \item A humanoid cannot stop by removing torque. What is its INHIBIT rung?
+        \item Should the QP itself be certified, or should certification stay with simpler functions beneath it?
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.34\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.2cm,keepaspectratio]{kuka-lbr-iiwa.jpg}\\[0.05cm]
+      {\footnotesize Torque sensing in every joint, a design for contact}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: KUKA Laboratories GmbH, CC BY-SA 3.0, Wikimedia Commons.}
+  \note{[1 min] [OPTIONAL] No single answer. The first comes from \S12.7.1 and Hsu et al. 2024 on filter-aware training. The second follows from the fallback discussion: on underactuated machines the last rung is itself an active controller. The third is the choice \S12.8.3 describes between an unrated performance layer and a fully certified firmware stack.}
+\end{frame}
+
+\begin{frame}{Read and explore}
+  \small
+  \begin{itemize}\setlength{\itemsep}{0.02cm}
+    \item \textbf{Read:} Safety Enforcement, \S12.1 to \S12.12; Checkpoints 12.1 to 12.3; Napkin Math 12.1 to 12.3 by hand.
+    \item Ames et al., ``Control Barrier Functions: Theory and Applications,'' ECC 2019.
+    \item Hsu, Hu, and Fisac, ``The Safety Filter,'' Annual Review of Control, Robotics, and Autonomous Systems, 2024.
+    \item Sha, ``Using Simplicity to Control Complexity,'' IEEE Software, 2001.
+    \item Leveson and Turner, ``An Investigation of the Therac-25 Accidents,'' IEEE Computer, 1993.
+    \item Kirschner et al., ``ISO/TS 15066: How Different Interpretations Affect Risk Assessment,'' arXiv 2022.
+  \end{itemize}
+  \note{[1 min] [CORE] The chapter first, with its three checkpoints. Ames et al. is the standard tutorial on barrier functions and the QP filter. Hsu et al. unify barrier functions, reachability, and backup-set filters. Sha states the runtime-assurance argument behind Simplex. Leveson and Turner reconstruct the Therac-25. Kirschner et al. show why contact-force models need measurement. FLEX: add the control appendix for students without a control background.}
+\end{frame}
+
+\begin{frame}[c]
+  \begin{columns}[c]
+    \begin{column}{0.34\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.2cm,keepaspectratio]{thumb_stack_nervous.pdf}
+    \end{column}
+    \begin{column}{0.62\textwidth}
+      {\small\textcolor{lightgray}{NEXT LECTURE \textbar{} WORKLOAD PLACEMENT}}\\[0.5cm]
+      {\LARGE\bfseries Why can a safety check miss its deadline on its own processor core?}
+    \end{column}
+  \end{columns}
+  \note{[1 min] [CORE] Every budget today assumed the enforcer meets its 250 microsecond worst case on every tick. Lecture 13 tests that claim on real silicon: shared memory, power, clocks, and heat can delay the check even when it has its own core, and the placement record says which tests could refute the design.}
+\end{frame}
+
+\end{document}
