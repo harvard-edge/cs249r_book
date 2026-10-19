@@ -14,7 +14,8 @@ default and the complete print/no-JavaScript fallback.
 
 `mechanisms/implementations.json` selects source-art factories for convolution,
 prefill/decode, quantized multiplication, ring AllReduce, bounded stream
-ingestion, and ray evidence epochs. Enrollment is not visual acceptance. The
+ingestion, ray evidence epochs, KV paging, FSDP allocation lifetimes, KV
+copy-on-write, and shared capture-buffer ownership. Enrollment is not visual acceptance. The
 original-art catalog separates the accepted prototype, new implementations
 awaiting review, existing mechanisms needing adaptation, and static figures.
 Historical tests below apply to their recorded snapshots, not to this new pass.
@@ -25,6 +26,8 @@ guided-scan controller. Both read build-time timing from the single
 `books/config/shared/html/figure-explore.yml`, imported by all HTML volumes.
 `movement-ms` controls illustrative movement; `reading-pause-ms` controls the
 pause between actions during Play. Neither represents machine execution time.
+Reduced-motion navigation commits the next state immediately, without an
+intermediate animation clock that a visibility pause could interrupt.
 Invalid or missing settings leave the static figure available.
 
 The compiler binds each replacement to the existing source and artwork hashes,
@@ -59,6 +62,17 @@ every state, checks local SVG references, keyboard navigation, narrow layouts,
 and browser-print fallback. Figure-specific checks also verify numerical,
 ownership, and evidence invariants. These checks cover the rebuilt chapters;
 they do not assert a new full-volume PDF or EPUB build.
+
+The memory lessons distinguish mappings from payload copies and allocation
+from initialization. KV paging preserves other requests while E resolves its
+scattered blocks and releases them after its last consumer. Copy-on-write
+reserves a private tail, copies initialized entries, changes only B's table,
+then writes the new position. FSDP adds a fixed current-residency view beside
+the original phase history, keeps saved activations through parameter release,
+and separates backward-state release from gradient reduction. Capture
+buffers compare alternative storage paths and preserve converted pages B when
+capture pages A become reusable. Future source panels and phase columns are
+reference views, not additional simultaneous allocations.
 
 ## Selection: changing state must teach something
 

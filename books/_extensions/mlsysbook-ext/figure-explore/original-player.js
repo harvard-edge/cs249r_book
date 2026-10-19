@@ -195,11 +195,18 @@
       clearAction();
       const token = epoch;
       const from = index;
+      // Reduced motion has no intermediate state to pause. Commit directly;
+      // an observer pause must not strand a zero-duration animation clock.
+      if (reduce.matches) {
+        endpoint(next);
+        if (playing) dwell();
+        return;
+      }
       target = next;
       phase = 'moving';
       syncControls();
       controller = new AbortController();
-      const duration = reduce.matches ? 0 : movementMs;
+      const duration = movementMs;
       try {
         const done = startClock(transition ? duration : 0);
         done.catch(() => {}); // A synchronous setup failure must not leak the clock promise.

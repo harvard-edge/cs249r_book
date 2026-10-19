@@ -124,12 +124,16 @@
     ],
     "actual_treatments": {
       "static": 639,
-      "mechanism-scene": 92,
+      "mechanism-scene": 88,
       "convolution": 1,
       "original-prefill": 1,
       "original-quantization": 1,
+      "original-kv-paging": 1,
       "original-ring-allreduce": 1,
+      "original-fsdp-lifetime": 1,
+      "original-kv-copy-on-write": 1,
       "original-stream-ingestion": 1,
+      "original-capture-buffer": 1,
       "original-ray-epochs": 1
     },
     "actual_statuses": {
@@ -9897,7 +9901,7 @@
       "renderer": "TikZ",
       "assets": [],
       "context": "**PagedAttention**\\index{PagedAttention!memory fragmentation solution},[^fn-paged-attention-memory] introduced in vLLM, resolves this fragmentation by applying operating system virtual memory paging to accelerator memory [@kwon2023]. In static contiguous allocation, reserving maximum sequence length memory up front causes internal waste, while freed regions may be too small or poorly placed to satisfy a new contiguous reservation. Instead of allocating one contiguous region per sequence, PagedAttention divides the KV cache into fixed-size blocks mapped through a block table. A sequence's cache can therefore occupy noncontiguous physical blocks. When a sequence completes, its blocks return to a free pool for reuse. Rather than copying noncontiguous blocks into a temporary contiguous buffer before computing attention, a specialized PagedAttention CUDA kernel traverses the block table directly, staging noncontiguous blocks into on-chip SRAM during query-key multiplication. By eliminating external fragmentation and bounding internal waste to each sequence's last, partially filled block, PagedAttention reduced KV-cache waste below 4 percent in the reported evaluation and enabled substantially higher batch concurrency on the same accelerator hardware [@kwon2023]. Paging decides where cache blocks live, however. It does not reduce how many blocks each sequence needs, and that number grows with every generated token.\n\nA block table separates a sequence's token order from its physical placement. @Fig-serving-paged-kv-mapping uses an eight-block pool: requests C and D occupy the middle pairs, leaving four free blocks in two separated runs. A request E that needs four blocks can use those scattered blocks without moving C or D.\n",
-      "actual_treatment": "mechanism-scene",
+      "actual_treatment": "original-kv-paging",
       "actual_status": "implemented-awaiting-review",
       "status": "implemented-awaiting-review",
       "actual_review_basis": "Authored mechanism passes strict schema, declared invariants, and companion calculations; current implementation inspection remains pending.",
@@ -9907,46 +9911,9 @@
       "built_explore_present": false,
       "runtime_verification": "Schema, declared invariant, and companion calculation validation passed; actual themed chapter behavior review pending.",
       "visual_verification": "Actual themed chapter state/case inspection pending; validation is not visual approval.",
-      "actual_question": "How does an ordered sequence use noncontiguous blocks safely?",
-      "actual_scope": "Source eight-block pool, equal block sizes, requests C/D/E, no prefix sharing. E has four pages and a partially filled final block; paging does not change KV bytes per token.",
-      "actual_steps": [
-        {
-          "id": "free",
-          "title": "Inspect the fragmented free pool",
-          "explanation": "C and D leave free blocks in two separated runs. E needs four equal-size blocks.",
-          "result": "Four free blocks exist, but they do not form one contiguous run."
-        },
-        {
-          "id": "allocate",
-          "title": "Allocate E’s four page mappings",
-          "explanation": "Assign E logical pages to physical blocks 0, 1, 4, and 5. The partially filled last block remains allocated.",
-          "result": "E’s logical order is preserved even though its physical blocks are separated."
-        },
-        {
-          "id": "lookup",
-          "title": "Resolve E logical page 2 to block 4",
-          "explanation": "Resolve logical page 2 through E’s table entry 2; it names physical block 4.",
-          "result": "Logical page 2 skips C’s blocks because E’s table names block 4."
-        },
-        {
-          "id": "read",
-          "title": "Read E logical page 2",
-          "explanation": "Read physical block 4 using the resolved table value. The source block remains resident.",
-          "result": "The query receives a copy; E’s original block remains allocated."
-        },
-        {
-          "id": "finish",
-          "title": "Finish E’s pending access",
-          "explanation": "The final E access finishes. No in-flight E reader remains, but E still owns its blocks.",
-          "result": "E can now release its blocks because its pending access has finished."
-        },
-        {
-          "id": "release",
-          "title": "Release E’s blocks and mappings",
-          "explanation": "Return only E’s unshared blocks to the free pool and invalidate E’s mappings.",
-          "result": "C and D retain their original blocks; E’s former blocks can serve another request."
-        }
-      ],
+      "actual_question": "How do ordered cache pages resolve to scattered blocks without moving other requests?",
+      "actual_scope": "Original eight-block pool with unchanged C/D ownership, no prefix sharing or compaction, and explicitly illustrative record capacity.",
+      "actual_steps": [],
       "chapter_url": ""
     },
     {
@@ -15118,7 +15085,7 @@
         "images/svg/fsdp-parameter-lifetime.svg"
       ],
       "context": "Full sharding adds parameter-readiness dependencies that replicated DDP avoids. With one sharding unit per layer, the forward pass needs an AllGather\\index{AllGather!FSDP parameter prefetch} to reconstruct parameters ($\\LayerParameterPayload$ bytes). Resharding after forward requires another gather before backward ($\\LayerParameterPayload$ bytes), followed by a ReduceScatter\\index{ReduceScatter!FSDP gradient reduction} for gradients ($\\LayerParameterPayload$ bytes under equal communication precision). For a model with $\\LayerCount$ layers, this schedule performs about $3\\LayerCount$ collective operations per step. DDP instead AllReduces gradient buckets as they become ready. At large worker counts, the ideal per-worker transfer volumes approach $3\\ParameterPayload$ bytes versus $2\\ParameterPayload$ for DDP. Here $\\ParameterPayload$ is the model's parameter bytes at the communication precision, not full training state, and it equals $\\GradientPayload$ when parameters and gradients travel at the same width. These volumes do not determine elapsed time alone. While layer $\\LayerIndex$ computes, layer $\\LayerIndex+1$ can prefetch parameters, subject to memory headroom and fabric contention.\n\nThe allocation lifetimes in @fig-fsdp-parameter-lifetime separate persistent ownership from the temporary buffers needed to execute one sharding unit.\n",
-      "actual_treatment": "mechanism-scene",
+      "actual_treatment": "original-fsdp-lifetime",
       "actual_status": "implemented-awaiting-review",
       "status": "implemented-awaiting-review",
       "actual_review_basis": "Authored mechanism passes strict schema, declared invariants, and companion calculations; current implementation inspection remains pending.",
@@ -15128,64 +15095,9 @@
       "built_explore_present": false,
       "runtime_verification": "Schema, declared invariant, and companion calculation validation passed; actual themed chapter behavior review pending.",
       "visual_verification": "Actual themed chapter state/case inspection pending; validation is not visual approval.",
-      "actual_question": "Why can gathered weights disappear while activations must remain?",
-      "actual_scope": "One rank and one FSDP unit; reshard after forward, no prefetch. Slots count logical allocations, not bytes; shard storage may alias full buffers. Optimizer update is outside this scene.",
-      "actual_steps": [
-        {
-          "id": "start",
-          "title": "Shards retained",
-          "explanation": "The rank begins with its persistent ownership.",
-          "result": "Persistent shards establish the rank’s allocation floor before full weights arrive."
-        },
-        {
-          "id": "gather-f",
-          "title": "Gather forward parameters",
-          "explanation": "AllGather reconstructs the full unit on this rank.",
-          "result": "Full weights now permit forward computation; the parameter shard remains owned."
-        },
-        {
-          "id": "forward",
-          "title": "Execute forward",
-          "explanation": "Forward creates saved activations for backward.",
-          "result": "Backward now has a future claim on the saved activations."
-        },
-        {
-          "id": "reshard-f",
-          "title": "Release forward gathered parameters",
-          "explanation": "The forward consumer has finished; saved activations still have a future consumer.",
-          "result": "Full weights are gone, but saved activations cannot be released before backward."
-        },
-        {
-          "id": "gather-b",
-          "title": "Gather backward parameters",
-          "explanation": "Backward needs full parameters again under this resharding policy.",
-          "result": "Backward has both its reconstructed weights and its saved forward activations."
-        },
-        {
-          "id": "backward",
-          "title": "Execute backward",
-          "explanation": "Backward consumes the saved activations and produces a full local gradient.",
-          "result": "The gradient is available; backward has completed its last reads of activations and gathered weights."
-        },
-        {
-          "id": "release-a",
-          "title": "Release consumed activations",
-          "explanation": "The final activation consumer has completed.",
-          "result": "Consumed activations no longer occupy memory; the gradient remains available for reduction."
-        },
-        {
-          "id": "release-p",
-          "title": "Release backward gathered parameters",
-          "explanation": "Backward no longer needs the gathered parameter buffer.",
-          "result": "Gathered weights are gone; the full gradient still awaits reduction."
-        },
-        {
-          "id": "reduce",
-          "title": "ReduceScatter the full gradient",
-          "explanation": "The full local gradient becomes this rank’s reduced gradient shard.",
-          "result": "ReduceScatter leaves a gradient shard alongside the persistent parameter and optimizer shards."
-        }
-      ],
+      "actual_question": "Why do activations survive parameter release, and when can backward temporaries be freed?",
+      "actual_scope": "One rank and one sharding unit with resharding after forward; phase columns depict logical lifetimes rather than storage locations, bytes, or duration.",
+      "actual_steps": [],
       "chapter_url": ""
     },
     {
@@ -26403,7 +26315,7 @@
       "first_wave": true,
       "proposed_treatment": "animated",
       "proposal_review_basis": "Caption, alt description, and local source context; original proposal retained as planning evidence.",
-      "actual_treatment": "mechanism-scene",
+      "actual_treatment": "original-kv-copy-on-write",
       "status": "implemented-awaiting-review",
       "actual_status": "implemented-awaiting-review",
       "review_basis": "Inspected canonical rendered original PNG. Preserves panel order, labels, color roles, and governing ownership/uncertainty/conservation claim. Native HTML state controller; actual chapter render verification remains required.",
@@ -26412,52 +26324,9 @@
       "runtime_verification": "Schema, declared invariant, and companion calculation validation passed; actual themed chapter behavior review pending.",
       "visual_verification": "Actual themed chapter state/case inspection pending; validation is not visual approval.",
       "selection_reason": "Block lookup, copy-on-write tail copying, and appending change the mapping and data.",
-      "actual_question": "Which KV entries must be copied before a fork appends?",
-      "actual_scope": "The source’s ten-token prefix, four-token blocks, tables [3,7,9], and private block 14. Full blocks 3 and 7 are summarized by their table entries; only tails are expanded. Tail sequences distinguish unwritten null entries from valid KV; the ownership register records whether the physical block is allocated.",
-      "actual_steps": [
-        {
-          "id": "initial",
-          "title": "Candidate A retains the original tail",
-          "explanation": "Full blocks 3 and 7 and the initialized tail at block 9 belong to A.",
-          "result": "The original tail has valid entries followed by unwritten capacity."
-        },
-        {
-          "id": "resolve",
-          "title": "Resolve logical position 9",
-          "explanation": "Integer division selects the table entry; modulo selects the initialized slot.",
-          "result": "The selected table entry locates the block; the remainder locates its slot."
-        },
-        {
-          "id": "fork",
-          "title": "Fork B by sharing the prefix",
-          "explanation": "Both candidates reference the existing blocks; no KV entry has been copied.",
-          "result": "Both tables reference one original tail without duplicating its initialized KV."
-        },
-        {
-          "id": "allocate",
-          "title": "Reserve private block 14 for B",
-          "explanation": "The private tail is allocated before any initialized entry is copied.",
-          "result": "B owns an empty private block; no copied KV is readable there yet."
-        },
-        {
-          "id": "copy",
-          "title": "Copy initialized tail entries",
-          "explanation": "Copy only positions 8 and 9. Unwritten capacity remains null; the source tail survives.",
-          "result": "The private tail now contains the initialized source entries; the source remains intact."
-        },
-        {
-          "id": "remap",
-          "title": "Remap only B’s tail table entry",
-          "explanation": "B now resolves its tail to the initialized private copy; A still resolves to block 9.",
-          "result": "Only B changes its mapping, leaving A’s original tail reachable."
-        },
-        {
-          "id": "append",
-          "title": "Append position 10 to B’s private tail",
-          "explanation": "The append initializes one free entry without modifying A’s original tail.",
-          "result": "B’s appended KV occupies its private tail while A’s sequence stays unchanged."
-        }
-      ],
+      "actual_question": "How can one candidate append without overwriting another candidate’s cached prefix?",
+      "actual_scope": "Original ten-position prefix, four-position blocks, and physical IDs; candidate B copies initialized tail entries before changing its mapping and appending.",
+      "actual_steps": [],
       "chapter_url": "",
       "built_explore_present": false,
       "metadata_issue": "",
@@ -34010,7 +33879,7 @@
         "images/svg/shared_capture_buffer_lifecycle.svg"
       ],
       "context": "[^fn-iommu-dmabuf-sharing]: **IOMMU (Input-Output Memory Management Unit)**: The device-side counterpart of the CPU's MMU. It translates the addresses a DMA engine issues through page tables the kernel controls, so the ISP, CPU, and GPU can share one set of physical pages without copying while each device stays confined to its own mappings. A translation miss on that path is one more source of ingestion delay that the measured budget must include. \\index{Memory!IOMMU}\n\nSharing pages changes the ownership of a captured payload rather than removing the payload's journey through memory. @Fig-08-shared-capture-buffer separates physical storage from device mappings and marks the release that permits the capture engine to reuse that storage.\n",
-      "actual_treatment": "mechanism-scene",
+      "actual_treatment": "original-capture-buffer",
       "actual_status": "implemented-awaiting-review",
       "status": "implemented-awaiting-review",
       "actual_review_basis": "Authored mechanism passes strict schema, declared invariants, and companion calculations; current implementation inspection remains pending.",
@@ -34020,58 +33889,9 @@
       "built_explore_present": false,
       "runtime_verification": "Schema, declared invariant, and companion calculation validation passed; actual themed chapter behavior review pending.",
       "visual_verification": "Actual themed chapter state/case inspection pending; validation is not visual approval.",
-      "actual_question": "What permits capture-page reuse after zero-copy access?",
-      "actual_scope": "One schematic frame F, source page set A and an ISP-converted output B. Mappings are aliases, not new payload buffers. Task coordinates encode logical obligations, not durations or simultaneous execution; platform-specific synchronization details are abstracted into an explicit handoff.",
-      "actual_steps": [
-        {
-          "id": "s0",
-          "title": "DMA owns capture A",
-          "explanation": "The capture engine writes frame F; no consumer may read incomplete capture pages.",
-          "result": "Frame identity alone does not imply identical storage."
-        },
-        {
-          "id": "s1",
-          "title": "Complete the DMA write",
-          "explanation": "DMA completion establishes that the capture write is finished; platform synchronization is still required.",
-          "result": "Frame identity alone does not imply identical storage."
-        },
-        {
-          "id": "s2",
-          "title": "Order access and admit mapped readers",
-          "explanation": "Required device ordering and cache maintenance complete before CPU, ISP, and GPU access the same physical A pages.",
-          "result": "A still cannot be reused while any mapping is retained."
-        },
-        {
-          "id": "s3",
-          "title": "Finish ISP conversion into B",
-          "explanation": "The ISP writes a different representation to B while preserving frame identity F and retaining its A reference.",
-          "result": "A still cannot be reused while any mapping is retained."
-        },
-        {
-          "id": "s4",
-          "title": "CPU releases its A reference",
-          "explanation": "The CPU finishes reading and releases its mapping; other consumers still retain A.",
-          "result": "A still cannot be reused while any mapping is retained."
-        },
-        {
-          "id": "s5",
-          "title": "ISP releases its A reference",
-          "explanation": "Conversion is complete, so the ISP now releases its A reference; the GPU still retains A.",
-          "result": "A still cannot be reused while any mapping is retained."
-        },
-        {
-          "id": "s6",
-          "title": "GPU releases the final A reference",
-          "explanation": "The final capture-page consumer finishes and releases A. B remains independently owned downstream.",
-          "result": "No outstanding reader reference remains."
-        },
-        {
-          "id": "s7",
-          "title": "Requeue capture A",
-          "explanation": "The driver returns A to the capture queue only after completion, synchronization, and all consumer releases.",
-          "result": "B remains allocated independently of capture-page reuse."
-        }
-      ],
+      "actual_question": "When can capture storage be reused while a converted representation of the same frame remains live?",
+      "actual_scope": "Original copy/shared alternatives and ownership strip; mappings reference A, converted B retains frame identity, and release follows the final consumer.",
+      "actual_steps": [],
       "chapter_url": ""
     },
     {

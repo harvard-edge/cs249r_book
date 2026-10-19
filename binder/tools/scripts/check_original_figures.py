@@ -1,6 +1,7 @@
 """Check every original-art endpoint, local SVG references, keys, and print in real chapter builds."""
 from pathlib import Path
 import json,re
+import yaml
 from playwright.sync_api import sync_playwright
 import argparse
 parser=argparse.ArgumentParser(description=__doc__)
@@ -8,11 +9,18 @@ parser.add_argument('--build-root',type=Path,required=True)
 parser.add_argument('--base-url',default='http://127.0.0.1:8882')
 parser.add_argument('--engine',choices=['chromium','webkit'],default='chromium')
 parser.add_argument('--screenshots',type=Path,default=Path('/tmp/originals-final-review'))
+parser.add_argument('--keys',help='Optional comma-separated implementation keys to check')
 args=parser.parse_args()
 root=Path(__file__).resolve().parents[3]
 run=args.build_root if args.build_root.is_absolute() else root/args.build_root
 ext=root/'books/_extensions/mlsysbook-ext/figure-explore'
 manifest=json.loads((ext/'mechanisms/implementations.json').read_text());registry=json.loads((ext/'figure-registry.json').read_text());summary=json.loads((run/'summary.json').read_text())
+timing=yaml.safe_load((root/'books/config/shared/html/figure-explore.yml').read_text())['figure-explore']
+if args.keys:
+ selected=args.keys.split(',')
+ unknown=set(selected)-set(manifest)
+ if unknown:parser.error('Unknown implementation keys: '+', '.join(sorted(unknown)))
+ manifest={key:manifest[key] for key in selected}
 out=args.screenshots;out.mkdir(parents=True,exist_ok=True)
 report=[]
 with sync_playwright() as p:
@@ -24,7 +32,7 @@ with sync_playwright() as p:
   for width,theme in [(1440,'light'),(390,'light'),(1440,'dark'),(390,'dark')]:
    page=b.new_page(viewport={'width':width,'height':1100},color_scheme=theme,reduced_motion='reduce');errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
    page.goto(url);outer=page.locator('#'+entry['figure_id']);page.wait_for_function('(id)=>document.getElementById(id).dataset.mlsysExploreState==="ready"',arg=entry['figure_id'])
-   comp=outer.locator('.mlsys-original-player,.life-panel');assert comp.is_visible();assert outer.get_attribute('data-mlsys-movement-ms')=='1800';assert outer.get_attribute('data-mlsys-reading-pause-ms')=='5000'
+   comp=outer.locator('.mlsys-original-player,.life-panel');assert comp.is_visible();assert outer.get_attribute('data-mlsys-movement-ms')==str(timing['movement-ms']);assert outer.get_attribute('data-mlsys-reading-pause-ms')==str(timing['reading-pause-ms'])
    menu=comp.locator('.mlsys-original-sequence select,.life-sequence select');values=menu.locator('option').evaluate_all('(xs)=>xs.map(x=>x.value)')
    assert comp.get_attribute('data-playing') in [None,'false'];assert comp.get_attribute('data-running') in [None,'false']
    for value in values:
@@ -34,8 +42,14 @@ with sync_playwright() as p:
    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'),key
    for value in [values[len(values)//2],values[-1]]:
     menu.select_option(value);comp.screenshot(path=str(out/f"{key.replace(':','--')}-{width}-{theme}-{value}.png"))
-   before=comp.get_attribute('data-step');comp.focus();page.keyboard.press('p');page.keyboard.press('n');page.wait_for_timeout(50)
-   assert comp.get_attribute('data-step')==before,(key,before,comp.get_attribute('data-step'))
+   # Full-component screenshots can leave the controls outside the viewport.
+   # Test keyboard navigation with the figure visible and its observer settled.
+   comp.locator('button').first.evaluate('(button)=>button.scrollIntoView({block:"center",behavior:"instant"})')
+   page.evaluate('()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+   before=int(comp.get_attribute('data-step'));comp.focus();page.keyboard.press('p')
+   assert int(comp.get_attribute('data-step'))==max(0,before-1),(key,'back')
+   page.keyboard.press('n')
+   page.wait_for_function('([id,step])=>document.getElementById(id).querySelector(".mlsys-original-player,.life-panel").dataset.step===step',arg=[entry['figure_id'],str(before)])
    page.emulate_media(media='print');assert not comp.is_visible();assert outer.locator('.mlsys-diagram-panel').is_visible()
    assert not errors,(key,errors)
    report.append({'key':key,'width':width,'theme':theme,'states':len(values),'paint_references':'local','keys':'passed','print':'static'})

@@ -38,6 +38,11 @@ with sync_playwright() as p:
    page.evaluate("document.querySelector('#outer').hidden=false; player.go(2)")
    page.emulate_media(reduced_motion='reduce');page.evaluate('player.next()');page.wait_for_function('player.state.index===3')
    assert not page.evaluate('player.state.playing')
+   # Reduced-motion navigation commits atomically, even when a visibility or
+   # explicit pause arrives before the next animation frame.
+   page.evaluate('player.go(0); player.next(); player.pause()')
+   assert page.evaluate('player.state.index===1 && player.state.target===null && player.state.phase==="idle"')
+   page.evaluate('player.play()');page.wait_for_function('player.state.index===3 && !player.state.playing')
    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
    page.evaluate('player.go(1); player.next()');page.wait_for_timeout(20);page.evaluate('player.back()');assert page.evaluate('player.state.index')==1;page.evaluate('player.expand(); player.play()');page.wait_for_timeout(30);page.evaluate('player.destroy()');page.wait_for_timeout(400);assert page.locator('#root').text_content()=='';assert page.locator('dialog').count()==0
    assert not errors,errors
