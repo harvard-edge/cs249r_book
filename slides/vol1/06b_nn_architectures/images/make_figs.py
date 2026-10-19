@@ -22,7 +22,7 @@ slide that shows them says so.
     dense FP16 and 3.35 TB/s HBM, PCIe Gen5 x16 64 GB/s (MLSysIM H100).
   - Context memory: Part 1's redraw of the chapter's figure 13 (GPT-2 XL,
     FP16 weights 3 GB, KV 307.2 KB per token, one layer's scores with 25
-    heads, one 80 GiB accelerator).
+    heads, one 80 GB accelerator, decimal as labeled).
   - KV cache per token, FP16, 2 x layers x key-value width x 2 bytes:
     GPT-2 XL 48 x 1,600; Llama 2 7B 32 x 4,096 (32 key-value heads);
     Llama 3.1 8B 32 x 1,024 (8 key-value heads of 128); Llama 2 70B
@@ -36,10 +36,13 @@ slide that shows them says so.
   - One 1M-token request on a model of Llama 3.1 8B's shape (illustrative;
     its card states a 128K window): BF16 weights 2 x 8.03B; KV cache
     131,072 B per token; scores 2 B x S^2 per head per layer.
+  - FlashAttention measured runtime and memory (Dao et al., NeurIPS 2022,
+    arXiv 2205.14135v2, Tables 20 and 21; A100 40 GB, batch 16, 8 heads of
+    64, FP16), from calcs.py.
   - Fiction.LiveBench, DeepSeek-R1-0528 (MLSysIM literature series
     fiction_livebench_by_length; Epoch AI, CC BY 4.0).
 
-Run from this folder: python3 make_figs.py
+Run from this folder: python3 make_figs.py (derived values: calcs.py)
 """
 
 import csv
@@ -50,6 +53,9 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import calcs  # noqa: E402  (shared inputs: FlashAttention tables)
 
 out = Path(__file__).parent
 C = sp.C
@@ -136,7 +142,7 @@ def gpt2xl_params():
     attn = 4 * D_XL ** 2 * L_XL / 1e9          # 0.49B
     mlp = 8 * D_XL ** 2 * L_XL / 1e9           # 0.98B
     table = VOCAB * D_XL / 1e9                 # 0.08B
-    fig, ax = plt.subplots(figsize=(5.8, 1.55))
+    fig, ax = plt.subplots(figsize=(5.8, 1.3))
     segs = [(attn, "compute", f"Attention\nprojections {attn:.2f}B"),
             (mlp, "memory", f"MLP {mlp:.2f}B"),
             (table, "network", "")]
@@ -162,9 +168,8 @@ def gpt2xl_params():
     ax.spines["left"].set_visible(False)
     ax.set_xticks([0, 0.5, 1.0, 1.5])
     ax.set_xticklabels(["0", "0.5B", "1.0B", "1.5B"])
-    ax.set_xlabel("Weights (48 blocks × 12 d², d = 1,600, plus the token table)")
     save(fig, out / "gpt2xl_params.svg",
-         dict(left=0.03, right=0.97, bottom=0.30, top=0.97))
+         dict(left=0.03, right=0.97, bottom=0.17, top=0.97))
 
 
 # --- Segment 2: where a block's MACs go as context grows (derived) ---------
@@ -241,21 +246,21 @@ def quadratic():
 
 # --- Segment 3: decode intensity against the H100 ridge --------------------
 def decode_ridge():
-    ridge = H100_FLOPS / H100_BW
-    fig, ax = plt.subplots(figsize=(5.8, 1.45))
-    rows = [("Decode, batch one, FP16", 1.0, "memory", "1 FLOP/byte"),
-            ("H100 balance (ridge)", ridge, "compute", f"{ridge:.0f} FLOP/byte")]
+    ridge = calcs.H100_FLOPS / calcs.H100_BW
+    fig, ax = plt.subplots(figsize=(3.4, 1.1))
+    rows = [("Decode,\nbatch 1", 1.0, "memory", "1 FLOP/byte"),
+            ("H100\nridge", ridge, "compute", f"{ridge:.0f} FLOP/byte")]
     for i, (label, v, ck, txt) in enumerate(rows):
         y = 1 - i
         ax.barh(y, v - 0.3, left=0.3, color=C[ck], height=0.6)
-        ax.text(0.27, y, label, ha="right", va="center", fontsize=12.5,
-                fontweight="bold", color=C["text"])
+        ax.text(0.26, y, label, ha="right", va="center", fontsize=11.5,
+                fontweight="bold", color=C["text"], linespacing=1.0)
         inside = v > 50
         ax.text(v / 1.15 if inside else v * 1.2, y, txt, va="center",
-                ha="right" if inside else "left", fontsize=12.5,
+                ha="right" if inside else "left", fontsize=11.5,
                 fontweight="bold", color="white" if inside else C[ck])
     ax.set_xscale("log")
-    ax.set_xlim(0.3, 4000)
+    ax.set_xlim(0.3, 1000)
     ax.set_ylim(-0.55, 1.55)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
@@ -266,14 +271,14 @@ def decode_ridge():
     ax.grid(axis="x", color=C["grid"], lw=0.6)
     ax.set_axisbelow(True)
     save(fig, out / "decode_ridge.svg",
-         dict(left=0.40, right=0.97, bottom=0.33, top=0.97))
+         dict(left=0.26, right=0.92, bottom=0.40, top=0.98))
 
 
 # --- Segment 3: three memories as context grows (Part 1's redraw) ----------
 def context_memory(step):
     fig, ax = plt.subplots(figsize=(5.8, 2.35))
     s = np.logspace(np.log10(512), np.log10(131072), 200)
-    dev = 80 * 2 ** 30 / 1e9
+    dev = calcs.DEV_GB                     # 80 GB, decimal, as labeled
     ax.axhline(dev, color=C["danger"], lw=1.3, ls=":")
     ax.text(600, dev / 1.5, "One 80 GB accelerator", color=C["danger"], fontsize=11,
             va="top")
@@ -288,9 +293,9 @@ def context_memory(step):
                 color=C["compute"], fontsize=11, fontweight="bold")
     if step >= 3:
         ax.plot(s, 25 * s ** 2 * 2 / 1e9, color=C["danger"], lw=3.2, ls="--")
-        x = np.sqrt(80 * 2 ** 30 / 50)
+        x = np.sqrt(calcs.DEV_GB * 1e9 / (calcs.H_XL * calcs.FP16))
         ax.plot([x], [dev], "o", ms=9, color=C["danger"], mec="white", zorder=5)
-        ax.text(x / 1.9, dev * 2.2, "One layer's scores\nfill it near 41K",
+        ax.text(x / 1.9, dev * 2.2, "One layer's scores\nfill it near 40K",
                 color=C["danger"], fontsize=11, fontweight="bold", ha="right")
     ax.set_xscale("log")
     ax.set_yscale("log")
@@ -493,6 +498,42 @@ def fiction_livebench():
          dict(left=0.22, right=0.95, bottom=0.22, top=0.96))
 
 
+
+# --- Quadratic: FlashAttention measured (Dao et al. 2022, Tables 20 and 21) --
+def flash_measured():
+    seq = calcs.FA_SEQ
+    fig, axs = plt.subplots(1, 2, figsize=(5.6, 1.4))
+    panels = [(axs[0], calcs.FA_TIME_PT, calcs.FA_TIME_FA, "Runtime (ms)",
+               "FlashAttention:\n×4 per doubling", (0.1, 3e4), 0.45),
+              (axs[1], [m / 1e3 for m in calcs.FA_MEM_PT],
+               [m / 1e3 for m in calcs.FA_MEM_FA], "Memory (GB)",
+               "FlashAttention:\n×2 per doubling", (0.01, 3000), 0.045)]
+    for ax, pt, fa, ylab, lab, ylim, ylab_y in panels:
+        ax.plot(seq[:len(pt)], pt, color=C["danger"], lw=2.8, marker="o", ms=4.5)
+        ax.plot(seq, fa, color=C["memory"], lw=2.8, marker="o", ms=4.5)
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_xlim(100, 9e4)
+        ax.set_ylim(*ylim)
+        ax.set_xticks([128, 1024, 8192, 65536])
+        ax.set_xticklabels(["128 tokens", "1K", "8K", "64K"])
+        ax.minorticks_off()
+        ax.set_ylabel(ylab)
+        ax.grid(color=C["grid"], lw=0.6)
+        ax.text(8.5e4, ylab_y, lab, ha="right", va="center", fontsize=10.5,
+                fontweight="bold", color=C["memory"], linespacing=1.0)
+    axs[0].set_yticks([1, 100, 1e4])
+    axs[0].set_yticklabels(["1", "100", "10⁴"])
+    axs[1].set_yticks([0.01, 1, 100])
+    axs[1].set_yticklabels(["0.01", "1", "100"])
+    axs[0].text(140, 2.5e3, "PyTorch:\nstores scores", color=C["danger"],
+                fontsize=10.5, fontweight="bold", va="center", linespacing=1.0)
+    axs[1].text(140, 300, "PyTorch: out of\nmemory after 4K", color=C["danger"],
+                fontsize=10.5, fontweight="bold", va="center", linespacing=1.0)
+    save(fig, out / "flash_measured.svg",
+         dict(left=0.12, right=0.985, bottom=0.17, top=0.97, wspace=0.42))
+
+
 context_windows()
 state_memory()
 gpt2xl_params()
@@ -508,15 +549,7 @@ capacity()
 for k in (1, 2, 3):
     million_request(k)
 fiction_livebench()
+flash_measured()
 
 
-# --- The toy attention head: values printed for the slide and notes --------
-q = np.array([[1, 0], [0, 1], [1, 1], [1, 0]], float)
-k = np.array([[2, 0], [0, 2], [1, 1], [0, 0]], float)
-v = np.array([[1, 0], [0, 1], [1, 1], [0, 0]], float)
-scores = q @ k.T / np.sqrt(2)
-w = np.exp(scores) / np.exp(scores).sum(axis=1, keepdims=True)
-print("toy scores\n", scores.round(2))
-print("toy weights\n", w.round(2))
-print("toy outputs\n", (w @ v).round(2))
 print("figures written")
