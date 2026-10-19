@@ -86,6 +86,9 @@
       b.setAttribute('aria-keyshortcuts',({next:'N',back:'P',play:'K',restart:'R'})[id]);
       controls.append(b); buttons[id]=b;
     }
+    const scanButton=node('button','Complete the scan');scanButton.type='button';scanButton.dataset.control='scan';
+    controls.append(scanButton);
+    const scope=node('p','Single input channel · stride 1 · no padding or bias · output before activation. The filter is used without flipping.','life-scope');
     const label=node('label','Step ','life-sequence'), menu=node('select');
     menu.setAttribute('aria-label','Animation sequence'); label.append(menu);
     const narration=node('div','','life-narration'), heading=node('strong'), explanation=node('p');
@@ -115,8 +118,10 @@
     for (const [text,color] of [['Input window','#ff8000'],['Input contributions','#2455d6'],['Output activations','#a64ca6']]) {
       const chip=node('span',text); chip.style.setProperty('--chip',color); legend.append(chip);
     }
-    const progress=node('p','','life-progress');
-    panel.append(controls,keys,label,narration,workspace,legend,progress);
+    const progress=node('p','','life-progress'), checkpoint=node('p','','life-checkpoint'), takeaway=node('p','','life-takeaway');
+    checkpoint.textContent='Two windows show the pattern. Complete the scan applies the same filter at the remaining positions; Next continues the detailed steps.';
+    takeaway.textContent='The same filter weights produce every output. Overlapping windows reuse input values, creating opportunities to reuse data in fast memory. The drawing shows logical computation; the execution schedule determines which data remains on chip.';
+    panel.append(controls,keys,scope,label,narration,workspace,legend,progress,checkpoint,takeaway);
     const movement=Number(outer.dataset.movementMs), hold=Number(outer.dataset.readingPauseMs);
     if (!(movement>0) || !(hold>=0)) throw new Error('Missing build-time timing.');
     const media=matchMedia('(prefers-reduced-motion: reduce)');
@@ -127,7 +132,7 @@
       states.push({row,col,phase:'write',title:`Position (${row}, ${col}): store the output`,text:'One activation is now stored in the corresponding output cell. The other input values remain available for overlapping windows.'});
     }
     states.forEach((s,i) => {const o=node('option',`${i+1}. ${s.title}`);o.value=i;menu.append(o);});
-    let index=0, completed=0, running=false, moving=false, timer=null, effects=[], finishAction=null, motionFrame=null, motionTick=null;
+    let index=0, completed=0, running=false, moving=false, scanning=false, timer=null, effects=[], finishAction=null, motionFrame=null, motionTick=null;
     const coordinates=s => {
       if(s.pose) return {window:[orangeOrigin,add(orangeOrigin,scale(lower.x,3)),add(orangeOrigin,scale(add(lower.x,lower.y),3)),add(orangeOrigin,scale(lower.y,3))],output:originalOutput,shift:{x:0,y:0}};
       const {row,col}=s, window=corners(lower,col,row,3);
@@ -155,6 +160,15 @@
       paintCalculation(s);
       paintDiagramValues(s);
       heading.textContent=s.title; explanation.textContent=s.text; menu.value=String(index);
+      if(scanning&&moving) {
+        heading.textContent=`Position (${s.row}, ${s.col}): apply the shared filter`;
+        explanation.textContent='The window moves to the next position. The same multiply-and-sum operation produces its output; the value appears when the window arrives.';
+      }
+      checkpoint.hidden=index!==6||moving||scanning;
+      takeaway.hidden=index!==states.length-1||moving;
+      // Keep the control footprint stable as the walkthrough reaches its checkpoint.
+      scanButton.disabled=index<6||index===states.length-1||moving||scanning;
+      scanButton.title=index<6?'Available after the first two output values are stored.':'Apply the shared filter at the remaining positions.';
       buttons.back.disabled=index===0; buttons.restart.disabled=index===0&&!moving;
       buttons.next.disabled=index===states.length-1&&!moving;
       buttons.next.textContent=moving?'Finish':'Next'; buttons.play.textContent=running?'Pause':index===states.length-1?'Replay':'Play';
@@ -262,9 +276,10 @@
       clearTimeout(timer);timer=null;running=false;effects.forEach(e=>e.pause());
       if(motionFrame!==null)cancelAnimationFrame(motionFrame);motionFrame=null;paint();
     }
-    function seek(i) {cancel();running=false;moving=false;index=completed=i;paint();}
-    function schedule() {if(running&&index<states.length-1) timer=setTimeout(()=>advance(true),hold);}
+    function seek(i) {cancel();running=false;moving=false;scanning=false;index=completed=i;paint();}
+    function schedule() {if(running&&index<states.length-1) timer=setTimeout(()=>advance(true),scanning?0:hold);}
     function advance(autoplay=false) {
+      if(!autoplay)scanning=false;
       if(moving){running=false;finishAction?.();return;}
       if(index===states.length-1)return;
       clearTimeout(timer);timer=null;
@@ -272,7 +287,12 @@
       const s=states[index];applyPose(s);drawOutputs(s);paint();
       const duration=media.matches?0:movement;
       const finish=()=>{
-        cancel();moving=false;completed=index;if(index===states.length-1)running=false;paint();schedule();
+        // The overview scan combines move/combine/write into one window action.
+        // Its completed state is the same write state used by detailed stepping.
+        if(scanning)index+=s.phase==='move'?2:s.phase==='combine'?1:0;
+        cancel();moving=false;completed=index;
+        if(index===states.length-1||(index===6&&!scanning))running=false;
+        paint();schedule();
       };
       finishAction=finish;
       if(!duration){finish();return;}
@@ -316,6 +336,10 @@
     }
     buttons.next.addEventListener('click',()=>advance()); buttons.back.addEventListener('click',()=>seek(Math.max(0,index-1)));
     buttons.restart.addEventListener('click',()=>seek(0)); buttons.play.addEventListener('click',play);
+    scanButton.addEventListener('click',()=>{
+      if(moving||index===states.length-1)return;
+      clearTimeout(timer);timer=null;scanning=true;advance(true);
+    });
     menu.addEventListener('change',()=>seek(Number(menu.value)));
     outer.addEventListener('keydown',event=>{
       if(event.repeat||event.altKey||event.ctrlKey||event.metaKey||event.shiftKey||event.target.closest('input,select,textarea,[contenteditable]'))return;

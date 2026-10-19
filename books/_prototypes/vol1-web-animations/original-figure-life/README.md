@@ -24,6 +24,14 @@ contributions, not hardware packets or measured transfer time.
 Play runs once; Next performs one action and stops. Back, Restart, and exact
 sequence jumps restore completed states. Keyboard hints remain visible. Reduced
 motion skips interpolation, and print restores the original static image.
+The guided playback pauses after the first two completed windows. Complete the
+scan then applies the filter at each remaining position without repeating the
+separate arithmetic phases; Next and the sequence menu retain the detailed path.
+The scan uses the same movement duration as manual steps, supports pause/resume,
+and writes each value only when that window arrives. A visible scope line
+identifies the single-channel, pre-activation case. The completed scan connects
+weight sharing and overlapping windows to opportunities for data reuse without
+claiming a particular memory schedule.
 The prototype reads the shared build-time timing attributes already emitted by
 the supplied chapter render; it has no independent playback-speed defaults.
 
@@ -62,3 +70,7 @@ checks pause/resume and each row selector without advancing the lesson, and
 exports intermediate motion frames plus chapter and calculation screenshots.
 Window motion and connector endpoints share one interpolation clock; SVG path
 interpolation support is not required.
+
+`check-guided.py` verifies the two-window autoplay checkpoint, the optional scan,
+all completed output labels, return to detailed steps, and real-motion scan
+pause/resume. Run it with `--engine chromium` or `--engine webkit`.
