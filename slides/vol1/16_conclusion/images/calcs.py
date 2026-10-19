@@ -247,6 +247,10 @@ if __name__ == "__main__":
     show("faulty GPU share of 419 (count)", f"{148 / UNEXPECTED * 100:.1f}% (Table 5 prints 30.1%)")
     show("GPU-category share of 419 (counts)", f"{gpu / UNEXPECTED * 100:.1f}% (text: 58.7%)")
 
+    head("Lecture 0's three questions: datacenter electricity (IEA, Energy and AI, 2025)")
+    DC_TWH_2024, DC_TWH_2030 = 415, 945
+    show("2030 over 2024", f"{DC_TWH_2030 / DC_TWH_2024:.1f}x")
+
     head("Slide 30: voice request, GPT-2 XL reply")
     show("weights per token", f"{GPT2_BYTES / 1e9:.0f} GB")
     show("memory floor", f"{GPT2_MEM_MS:.1f} ms")
