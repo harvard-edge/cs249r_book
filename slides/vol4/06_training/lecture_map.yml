@@ -1,0 +1,302 @@
+chapter: 06_training
+lecture: "06"
+title: "Policy Training"
+layer: brain
+minutes: 75
+notes_minutes: 70
+core_minutes: 56
+target_ideas: 30
+thesis: "Every training regime leaves a dependency the training score does not show, so a checkpoint is trusted only inside the region its experience supports, and the policy manifest records that region."
+
+hook:
+  minutes: "0-4"
+  setup: "OpenAI's Dactyl: a 24-joint Shadow Hand in a motion-capture cage beside the MuJoCo simulation it learned in (book photo, War Story 6.1). The authors reported frequent breakages at the wrist, and each repair changed the plant."
+  question_to_class: "The policy scored a median of 50 consecutive rotations in simulation. What did the real hand manage?"
+  payoff: "A median of 13 over 10 physical trials (1 to 50). The synthesis reads Dactyl's history as a manifest: omissions (tendons, backlash, delay) cost the physical median down to 0 to 2 when held out; the fixes that helped (action smoothing, a locked wrist, median 28.5) lived outside the policy; repairs changed the plant under evaluation."
+  sources: ["Andrychowicz et al., IJRR 2020, Tables 3, 4, 5 and section 6.3 (arXiv 1808.00177)", "chapter War Story 6.1, figure 5 photo"]
+
+driving_question: "Why can a training score rise while the robot gets worse?"
+
+recall: "Lecture 5: a provenance record lists known absences beside its supported cells; a robot's own actions carry a cloned policy off the demonstrated states (the second law, endogenous data)."
+
+running_example: "Real: Dactyl (simulation median 50, physical median 13; randomization and memory ablations). Arithmetic: the book's cage-door latch with a 100 N limit and a 15 N tripwire, guarded 0.03 m/s and fast 0.10 m/s approaches, and its checkpoints latch-bc-01 (cloned), latch-sim-02 (simulator teacher, distilled), latch-res-03 (gated residual on the arm), and latch-bc-recovery-02 (recovery demonstrations). The running machine is a reference platform; the deck shows a real robot of its class (PAL TIAGo++) and says so."
+
+goals:
+  - "Name the hidden dependency each training regime leaves."
+  - "Tell mode averaging from drift, and check a decoder's deadline."
+  - "Price experience on the machine and in a simulator."
+  - "Compute a declared ODD as supported cells minus omissions."
+
+segments:
+  - name: Demonstrations
+    divider_question: "What does a cloned policy do where demonstrators disagree?"
+    read: "6.2.2 to 6.2.6"
+    concept_questions: [2, 3, 4, 5, 6]
+    minutes: 15
+    land: "Demonstrations fail by averaging modes and by drifting off the archive; the decoder that fixes averaging must still fit its deadline, and only recovery data fixes drift."
+  - name: Rewards
+    divider_question: "What does a reward ask for, and what does a log support?"
+    read: "6.2.1, 6.2.7, 6.2.8"
+    concept_questions: [7, 8, 9, 10]
+    minutes: 13
+    land: "A reward specifies everything the optimizer will chase, a log supports only the actions it tried, and a pretrained base supports none of this machine's cells."
+  - name: Interaction
+    divider_question: "What does experience cost on the machine, and in a simulator?"
+    read: "6.3 to 6.5"
+    concept_questions: [11, 12, 13, 14]
+    minutes: 17
+    land: "Trial on the machine costs days and wear; simulation costs fidelity, measured channel by channel; neither is free evidence."
+  - name: The Manifest
+    divider_question: "Where may a trained checkpoint be trusted?"
+    read: "6.6 to 6.8"
+    concept_questions: [15, 16]
+    minutes: 10
+    land: "The manifest turns a training history into a claim with stated limits."
+
+concept_questions:
+  - id: 1
+    q: "Why did a policy that scored a median of 50 in simulation manage 13 on the real hand?"
+    picture: "Dactyl cage and MuJoCo rendering; dot plot of the 10 physical trials against the simulation median"
+    numbers: "Simulation median 50 (100 trials), physical median 13 (10 trials: 50, 41, 29, 27, 14, 12, 6, 4, 4, 1); Andrychowicz et al. 2020, Table 3"
+    example: "Dactyl block reorientation"
+    read: "6.4, War Story 6.1"
+  - id: 2
+    q: "What does a squared-error policy do where demonstrations split?"
+    picture: "Column with left and right demonstrations; the mean drives into the column (built in 3 steps)"
+    numbers: "pi*(o) = E[a | o]; [v, +w] and [v, -w] average to [v, 0] (equation 3)"
+    example: "Mobile base passing a column; Push-T rollouts from the Diffusion Policy paper (Figure 3, 40 rollouts)"
+    read: "6.2.3"
+  - id: 3
+    q: "Which failure does a multimodal decoder fix, and which needs recovery data?"
+    picture: "Three regions (demonstrated, recoverable, no restoring action) and velocity against torque drift (schematic)"
+    numbers: "Velocity error integrates once (grows as t), torque error twice (t squared); 6.2.4"
+    example: "Base at the column against latch arm on a sagged door"
+    read: "6.2.4"
+  - id: 4
+    q: "What does a chunked imitation policy fit?"
+    picture: "LeRobot ACT config and loss (real code, commit df0763a); ALOHA teleoperation photo"
+    numbers: "chunk_size 100, n_action_steps 100, L1 loss plus KL weight 10.0; book: Huber penalty on normalized residuals"
+    example: "ACT on ALOHA (Zhao et al. 2023)"
+    read: "6.2.5"
+  - id: 5
+    q: "Does a 16-step diffusion head fit the machine's deadlines?"
+    picture: "Latency bars against the 25 ms step and 50 ms renewal, built in 3 steps"
+    numbers: "ACT 40 ms; flow 4 steps 18 ms; DDIM 16 steps 48 ms = 8 + 16 x 2.5; slack 10 and 2 ms; +5 ms jitter gives 53 ms, 3 ms past (Napkin Math 6.1)"
+    example: "latch-bc-01 with an illustrative diffusion head"
+    read: "6.2.6"
+  - id: 6
+    q: "How many denoising steps fit each deadline?"
+    picture: "Given card; two answers revealed"
+    numbers: "6 steps (23 ms) for 25 ms; 14 steps (43 ms) for 50 ms with 5 ms jitter free (derived, Checkpoint 6.1)"
+    example: "Evaluation budget"
+    read: "6.2.6"
+  - id: 7
+    q: "What does the reward the engineer writes ask for?"
+    picture: "Equation 1 with the force term revealed; legged_gym reward scales (real code)"
+    numbers: "15 N tripwire, 100 N limit; 320 decisions of 25 ms per 8 s opening; legged_gym torques -0.00001, action_rate -0.01"
+    example: "latch-sim-02's teacher dropped the force term"
+    read: "6.2.1"
+  - id: 8
+    q: "How long a horizon does a discount see?"
+    picture: "Weight of the door-open reward across the opening for gamma 0.99 and 0.9978"
+    numbers: "0.99^320 = 0.04; horizon 100 steps = 2.5 s; gamma >= 0.9978 for half weight (derived)"
+    example: "Doubling the setpoint rate halves the horizon in seconds"
+    read: "6.2.1"
+  - id: 9
+    q: "Why does greedy offline RL trust actions the log never tried?"
+    picture: "Fitted Q with a spurious peak off the log; conservative fit pulled down (schematic)"
+    numbers: "CQL objective (Kumar et al. 2020); lower bound on expected value only"
+    example: "Latch log of successes and tripwire failures"
+    read: "6.2.7"
+  - id: 10
+    q: "Does a generalist pretrained on 970K episodes support this machine's cells?"
+    picture: "Open X-Embodiment Fig. 1; latch scenario table of 6 cells"
+    numbers: "OpenVLA-7B on 970K episodes; 1 supported cell, 5 known absences"
+    example: "Post-training the machine's intent model"
+    read: "6.2.8"
+  - id: 11
+    q: "What does a million physical trials cost?"
+    picture: "Log ladder of campaign time, built in 3 steps; Google arm farm photo"
+    numbers: "92.6, 138.9, 439.8 days; 14 rigs 31.4 days; 4.0 x 10^6 load reversals; HIL-SERL 2.5 h = 750 trials; simulation 43.4 min (Napkin Math 6.2, derived)"
+    example: "Levine et al. 2018 farm; HIL-SERL learning curves (Luo et al. 2025, Figure 5)"
+    read: "6.3, 6.3.1"
+  - id: 12
+    q: "How fast does GPU simulation generate experience?"
+    picture: "Rudin et al. Figures 1 and 7 (simulated and physical ANYmal)"
+    numbers: "4,096 robots x 24 steps = 98,304 per update; 1,500 updates in under 20 min; 34.1 simulated days at 50 Hz (derived)"
+    example: "legged_gym on one workstation GPU"
+    read: "6.4.1"
+  - id: 13
+    q: "What force does a rigid arm put on the latch the simulator called safe?"
+    picture: "Peak force against robot-side stiffness, built in 3 steps"
+    numbers: "Penalty spring 1.6 x 10^4 N/m gives 37.5 N; rigid arm 189.7 N; break-even 1.54 x 10^5 N/m; guarded 56.9 N (Napkin Math 6.3, derived)"
+    example: "latch-sim-02's plunge"
+    read: "6.4.2"
+  - id: 14
+    q: "What are the channels of the reality gap, and what does randomization cover?"
+    picture: "Four-panel gap vector (illustrative); Dactyl ablation and memory dot plots (real); distillation diagram"
+    numbers: "Illustrative: 20 against 40 ms to 10 N; 49.5 ms p99 gives 9.9 mm; +3.2 mm bias; 6 mm against 2 mm tolerance. Real: Dactyl medians 13, 8.5, 2, 2, 0 (Table 4); LSTM 13 against FF 3.5 and 3 (Table 5); 1.5 h against about 50 h"
+    example: "Dactyl"
+    read: "6.5, 6.5.1"
+  - id: 15
+    q: "Does a fine-tuned checkpoint keep its evidence?"
+    picture: "Gated residual block diagram"
+    numbers: "20,000 steps = 500 s of contact; 1.5 percent above 15 N = 300 samples (derived)"
+    example: "latch-res-03"
+    read: "6.6, 6.6.1"
+  - id: 16
+    q: "Where may a trained checkpoint be evaluated?"
+    picture: "Manifest fields beside the OpenVLA model card; three checkpoint grids built in 3 steps"
+    numbers: "Fast approach: tripwire 0.375 ms, brake 2.375 ms, limit 2.5 ms, 0.125 ms left (derived, 6.4.2)"
+    example: "latch-bc-01 declared, latch-res-03 held, latch-bc-recovery-02 requests the displaced cell"
+    read: "6.8"
+
+concept_trace:
+  - concept: Training-regime hidden dependency
+    frame: "Each source of experience leaves its own hidden dependency"
+    shows: "Five-row table; the dependency column revealed on step 2"
+  - concept: Mode averaging
+    frame: "Squared error sends the policy between two valid routes"
+    shows: "Column figure built in 3 steps with the conditional-mean equation"
+  - concept: Decoder renewal slack
+    frame: "A 16-step diffusion head leaves 2 ms of its 50 ms renewal"
+    shows: "Latency bars against both deadlines, jitter step in red"
+  - concept: Offline RL support limit
+    frame: "Greedy offline learning trusts actions the log never tried"
+    shows: "Fitted Q with a spurious peak off the logged actions, then the conservative fit"
+  - concept: Physical RL exploration cost
+    frame: "A million latch trials take 440 days with manual resets"
+    shows: "Log ladder of campaign days and the load-reversal line"
+  - concept: Reality gap as a vector
+    frame: "The reality gap has four channels, each in its own units"
+    shows: "Four panels built one channel per step"
+  - concept: Update is a new checkpoint
+    frame: "Does a fine-tuned checkpoint keep its evidence?"
+    shows: "Gated residual diagram and the answer line on step 3"
+  - concept: Policy manifest
+    frame: "The policy manifest records how a checkpoint was produced"
+    shows: "Field table filled for the latch, with a real model card beside it; the next frame computes the declared ODD"
+
+secondary_coverage:
+  Reward as specification: "The reward the engineer writes is the whole objective"
+  Pretrained borrowed competence: "970K episodes of other robots join none of the latch cells"
+  Simulator contact exploit: "What force does a rigid arm put on the latch?"
+  Privileged information limits: "The student cannot recover a state its sensors never see (optional)"
+  Paired probing: "Reality gap frame, note and step text"
+  Velocity versus torque drift: "Which failure does a multimodal decoder fix? (right panel)"
+  Chunk imitation objective: "In LeRobot, ACT predicts 100 setpoints per query (optional)"
+  RL value functions: "Value and advantage score one action against the usual one (optional)"
+
+worked_examples:
+  - name: "Napkin Math 6.1: renewal slack"
+    steps: ["Given ACT 40 ms; DDIM 16 evaluations, 8 ms encoder, 48 ms total; 25 ms step, 50 ms renewal, 5 ms jitter", "2.5 ms per evaluation; flow 4 steps 18 ms", "slack 10 ms and 2 ms", "DDIM plus jitter ends 3 ms past renewal", "the chunk lease, not the decoder, bounds the stale prefix"]
+  - name: "Napkin Math 6.2: the reset wall"
+    steps: ["10^6 trials, 8 s rollout, 4 or 30 s reset", "92.6, 138.9, 439.8 days", "14 rigs: 31.4 days; reversals unchanged at 4.0 x 10^6", "HIL-SERL 750 trials; simulation 43.4 min", "only fewer trials relieves both calendar and wear"]
+  - name: "Napkin Math 6.3: the soft-spring exploit"
+    steps: ["9 kg at 0.10 m/s, 2.4 mm penetration, plate 4.0 x 10^5 N/m", "simulated 37.5 N", "rigid arm 189.7 N", "break-even robot stiffness 1.54 x 10^5 N/m", "a push test decides; the guarded approach peaks at 56.9 N"]
+  - name: "Declared ODD for three checkpoints"
+    steps: ["data support: 1 cell", "omission log holds latch-res-03", "recovery archive requests the displaced cell", "fast column out by the 0.125 ms contact deadline"]
+
+active_learning:
+  - at_minute: 3
+    type: predict
+    prompt: "How many rotations did the real hand manage?"
+    answer: "Median 13 of 10 trials against 50 in simulation."
+  - at_minute: 5
+    type: retrieval
+    prompt: "What does a provenance record list beside its cells, and why does a cloned policy meet unseen states?"
+    answer: "Known absences; endogenous covariate shift (the second law)."
+  - at_minute: 16.5
+    type: concept_question
+    prompt: "Which failure does a multimodal decoder fix?"
+    answer: "Mode averaging only; drift needs recovery experience."
+  - at_minute: 24
+    type: estimate
+    prompt: "How many denoising steps fit each deadline?"
+    answer: "6 for 25 ms; 14 for 50 ms with 5 ms jitter free."
+  - at_minute: 36
+    type: concept_question
+    prompt: "Which candidate earns the displaced-plate cell?"
+    answer: "C, recovery demonstrations at the displaced plate, and only as a request to evaluation."
+  - at_minute: 46
+    type: predict
+    prompt: "What force does a rigid arm put on the latch?"
+    answer: "189.7 N, 1.9 times the 100 N limit."
+  - at_minute: 54.5
+    type: diagnose
+    prompt: "Does a fine-tuned checkpoint keep its evidence?"
+    answer: "No; new weights are a new checkpoint."
+  - at_minute: 61.5
+    type: concept_question
+    prompt: "True or false: four fallacy claims"
+    answer: "F, F, T (memory), F."
+
+open_questions:
+  - "How many paired probes close an omission-log entry for contact stiffness, and who decides the tolerance?"
+  - "Could pretraining ever count as support for this machine? What would a pretraining episode need to record?"
+  - "Should the wear budget of on-machine RL be set before training, like a compute budget?"
+
+more_examples:
+  - "QT-Opt: over 580,000 real grasp attempts (Kalashnikov et al. 2018), chapter 6.3"
+  - "Rudin et al. 2022 capped hardware command speed at 0.6 m/s because the terrain map was imperfect (paper section 4.3)"
+  - "pi*0.6 with RECAP more than doubled throughput on reported tasks (Physical Intelligence 2025), chapter 6.6.2"
+  - "OpenVLA model card: out of scope for unseen embodiments (huggingface.co/openvla/openvla-7b)"
+  - "OpenAI Rubik's cube with automatic domain randomization (OpenAI et al. 2019)"
+
+further_reading:
+  - cite: "Sutton and Barto, Reinforcement Learning: An Introduction, 2nd ed., 2018"
+    url: "http://incompleteideas.net/book/the-book-2nd.html"
+    why: "MDPs, value functions, and policy gradients from first principles."
+  - cite: "Ross, Gordon, and Bagnell, A Reduction of Imitation Learning and Structured Prediction to No-Regret Online Learning, AISTATS 2011"
+    url: "https://proceedings.mlr.press/v15/ross11a.html"
+    why: "Compounding error and DAgger."
+  - cite: "Chi et al., Diffusion Policy, IJRR 2025"
+    url: "https://arxiv.org/abs/2303.04137"
+    why: "Multimodal action decoders on real robots."
+  - cite: "Andrychowicz et al., Learning Dexterous In-Hand Manipulation, IJRR 2020"
+    url: "https://arxiv.org/abs/1808.00177"
+    why: "The deck's real case, with its ablations and breakages."
+  - cite: "Peng et al., Sim-to-Real Transfer of Robotic Control with Dynamics Randomization, ICRA 2018"
+    url: "https://arxiv.org/abs/1710.06537"
+    why: "Dynamics randomization and memory."
+  - cite: "Luo et al., Precise and Dexterous Robotic Manipulation via Human-in-the-Loop RL, Science Robotics 2025"
+    url: "https://arxiv.org/abs/2410.21845"
+    why: "Demonstration-seeded RL on a real arm in hours."
+
+callbacks:
+  - {lecture: 1, concept: "Causal boundary", where: "hook note"}
+  - {lecture: 1, concept: "Proposal boundary", where: "distillation frame note"}
+  - {lecture: 2, concept: "Thermal duty limits", where: "reset wall note"}
+  - {lecture: 2, concept: "Transmission compliance and backlash", where: "soft-spring predict note"}
+  - {lecture: 3, concept: "Mode averaging (preview)", where: "mode averaging note"}
+  - {lecture: 3, concept: "Chunking is a supply lever", where: "ACT code note"}
+  - {lecture: 3, concept: "Two-speed brain", where: "pretraining frame note"}
+  - {lecture: 4, concept: "Chunk lease", where: "decoder slack note"}
+  - {lecture: 4, concept: "Delay spends phase margin", where: "reality gap note"}
+  - {lecture: 5, concept: "Provenance record", where: "title note, recall frame, manifest note"}
+  - {lecture: 5, concept: "Compounding error and recoverability", where: "recall note, drift vote note"}
+  - {lecture: 5, concept: "Operational design domain", where: "declared ODD note"}
+  - {lecture: 5, concept: "Intervention curation", where: "candidate vote note"}
+  - {lecture: 5, concept: "Embodiment contract", where: "pretraining note, open questions note"}
+  - {lecture: 7, concept: "Evaluation record", where: "goals note, candidate vote note, ODD note, next-lecture frame"}
+  - {lecture: 14, concept: "Causal intervention masking", where: "candidate vote note"}
+  - {lecture: 14, concept: "Authority record", where: "HIL-SERL note"}
+  - {lecture: 16, concept: "Update is a new checkpoint (split)", where: "residual frame note"}
+
+left_to_reading:
+  - concept: "Asymmetric actor-critic details, history length, auxiliary losses"
+    why: "Optional distillation frame covers the limit; detail better read (6.5.1)."
+  - concept: "PPO clipped objective and policy-gradient estimator"
+    why: "Named in notes only; equations in 6.3 and 6.4.1 and the ML appendix."
+  - concept: "Post-training regime table (noise steering, advantage conditioning)"
+    why: "Second lecture; 6.6.2 and table 3."
+  - concept: "Learned world models as simulators"
+    why: "Second lecture; 6.4.3."
+
+second_lecture_split: "After 6.2: Part A, learning from demonstrations and logs (regimes, mode averaging, drift, chunking, decoders, offline RL, pretrained generalists, value functions); Part B, learning from interaction (physical RL cost, simulation throughput, contact exploit, reality gap, randomization, distillation, world models, fine-tuning and post-training regimes, manifest). In this deck the cut falls at the Interaction divider; Part A would expand the Demonstrations and Rewards segments, Part B the Interaction and Manifest segments plus 6.4.3 and 6.6.2."
+
+closing:
+  return_to_hook: "Dactyl read as a manifest: score 50 against 13; omissions held out cut the median to 0 to 2; fixes outside the weights (smoothing, locked wrist, 28.5); repairs changed the plant."
+  record: "Policy manifest"
+  read_and_practice: ["6.1 to 6.10", "Checkpoints 6.1 to 6.3", "Redo Napkin Math 6.3 for 0.05 m/s"]
+  next: "Lecture 7, Closed-Loop Evaluation: why can a robot pass every trial and still lack the evidence to deploy?"
