@@ -57,12 +57,15 @@
 % A line of real configuration or code
 \newcommand{\codeline}[1]{{\ttfamily\footnotesize #1}\\}
 
+% Golden thread (D4): the Fleet Law term and C3 axis this lecture acts on, once, on the goals slide
+\newcommand{\fleetterm}[2]{\par\vspace{0.08cm}{\small\textcolor{mlsysaccent}{\textbf{Fleet Law term:}}~#1\qquad\textcolor{mlsysaccent}{\textbf{C$^3$ axis:}}~#2\par}}
+
 \begin{document}
 
 % =============================================================================
 % TITLE AND HOOK
 % =============================================================================
-\mlsysnote{[0.5 min] FLEX: [CORE] Read the thesis aloud once. Lecture 7 kept one job alive through failures; today asks who grants that job its accelerators, and how a shared fleet decides among many jobs. The notes total about 71.5 minutes. Notes tagged [OPTIONAL] can be cut; cutting all of them leaves a complete lecture of about 58 minutes. Cut first the paradigms, quota, and job-state slides; the core argument does not depend on them.}
+\mlsysnote{[0.5 min] FLEX: [CORE] Read the thesis aloud once. Lecture 7 kept one job alive through failures; today asks who grants that job its accelerators, and how a shared fleet decides among many jobs. The notes total about 70 minutes. Notes tagged [OPTIONAL] can be cut; cutting all of them leaves a complete lecture of about 58.5 minutes. Cut first the paradigms, quota, and job-state slides; the core argument does not depend on them.}
 \mlsystitle{Fleet Orchestration}{A scheduler first finds the allocations a job can run on, then shares them fairly; most lost capacity is a policy that no longer fits the hardware.}{cover_fleet_orchestration_blueprint.png}
 
 \begin{frame}{Why do 50 jobs wait beside idle GPUs?}
@@ -105,18 +108,19 @@
 \end{frame}
 
 \begin{frame}{Who gets which accelerators, when, and where?}
-  \normalsize
-  \begin{itemize}\setlength{\itemsep}{0.12cm}
+  \small
+  \begin{itemize}\setlength{\itemsep}{0.05cm}\small
     \item Explain why a rigid job needs all its accelerators at once, and admit it without deadlock or starvation.
     \item Filter a request to the allocations it can run on, share those fairly, and measure fairness in waiting time.
     \item Place a 3D-parallel job on the topology, and decide whether to start small, wait, or resize.
     \item Price a preemption and a spot interruption, and separate allocated, active, and productive capacity.
   \end{itemize}
-  {\footnotesize\textcolor{midgray}{Running case: the 175B reference job on 1,024 GPUs, its 64-GPU fine-tuning run, and its 2.45 TB checkpoint.}}
-  \note{[1 min] NARRATE: The driving question is in the title, with a second half, how do we know the fleet is used well? Four goals, one per part of the lecture, plus a short last part on measurement. The running case is the volume's 175B reference job, with its 1,024-GPU pretraining gang held for weeks, its 64-GPU fine-tuning run, and its 2.45 TB checkpoint. FLEX: [CORE]}
+  {\footnotesize\textcolor{midgray}{Running case: the 175B job on 1,024 GPUs, its 64-GPU fine-tuning run, its 2.45 TB checkpoint.}}
+  \fleetterm{$T_{\text{sync}}(N)$}{Coordination ($C_3$)}
+  \note{[1 min] NARRATE: The driving question is in the title, with a second half, how do we know the fleet is used well? Four goals, one per part of the lecture, plus a short last part on measurement. The running case is the volume's 175B reference job, with its 1,024-GPU pretraining gang held for weeks, its 64-GPU fine-tuning run, and its 2.45 TB checkpoint. The accent line at the bottom names the Fleet Law term and C$^3$ axis that today's mechanisms act on; say it once. FLEX: [CORE]}
 \end{frame}
 
-\mlsysnote{[1.5 min] LINK: Lecture 1 taught the Fleet Law. NARRATE: Name where today's decisions land. Placement decides which links carry each collective, so it sets the communication term of every step. Preemption and recovery, spread over the run, add to the synchronization term, which counts coordination time. Queue wait and gang admission happen before the first step, so they lengthen completion time and never appear in the step. ENGAGE: A job waits 4 hours for a compact placement that saves 10 percent per step. Which term improves, and what pays for it? (Expected: communication improves; completion time pays the 4 hours.) WARN: A faster step is not a faster job if the wait to get it is long. FLEX: [CORE]}
+\mlsysnote{[1.5 min] LINK: Lecture 1 taught the Fleet Law. NARRATE: Name where today's decisions land. Placement decides which links carry each collective, so it sets the communication term of every step. Preemption and recovery, spread over the run, add to the synchronization term, which counts coordination time. Queue wait and gang admission happen before the first step, so they lengthen completion time and never appear in the step. ENGAGE: A job waits 4 hours for a compact placement that saves 10 percent per step. Which term improves, and what pays for it? (Expected: communication improves; completion time pays the 4 hours.) WARN: A long wait can erase the gain of a faster step. FLEX: [CORE]}
 \mlsysfocus{Where orchestration enters}{%
 $\Tstep(N) = \dfrac{\Tcomp}{N} + \underbrace{\Tcomm(N)}_{\text{placement}} + \underbrace{\Tsync(N)}_{\text{preemption, recovery}} - \Tover$\\[0.4cm]
 {\normalsize Queue wait comes before the first step and adds only to completion time.}}
@@ -174,7 +178,7 @@ $\Tstep(N) = \dfrac{\Tcomp}{N} + \underbrace{\Tcomm(N)}_{\text{placement}} + \un
   \centering
   \mlsyssteps[width=0.96\textwidth,height=5.7cm,keepaspectratio]{gang_step}{3}
   \mlsyscredit{Fleet Orchestration, \S8.4.3 and figure 4; War Story 8.1 (Sigler 2021, OpenAI).}
-  \note{[3 min] NARRATE: An 8-GPU pool, two jobs that each need all 8. Synchronous training needs every rank in every collective, so 4 of 8 GPUs complete zero steps; they do not complete half as many. Step 1: placed one GPU at a time, J1 gets 4 and waits for the rest. Step 2: J2 gets the other 4 and also waits. Each holds what the other needs. This is a hold-and-wait deadlock, and all 8 GPUs burn power at zero progress. Step 3: gang scheduling grants J1 all 8 at once; J2 holds nothing until J1 ends. At the chapter's \$2 per GPU-hour, a deadlock that strands a 10,000-GPU cluster wastes \$20,000 an hour. OpenAI used exactly this two-job example when it scaled Kubernetes to 7,500 nodes, and added group admission. ENGAGE: Does giving J1 higher priority fix it? (Expected: no; priority orders requests, it does not stop partial holds.) WARN: Atomicity must cover every resource the group needs, including its NVLink domain and network share, or the deadlock moves one layer down. FLEX: [CORE]}
+  \note{[3 min] NARRATE: An 8-GPU pool, two jobs that each need all 8. Synchronous training needs every rank in every collective, so 4 of 8 GPUs complete zero steps. Step 1: placed one GPU at a time, J1 gets 4 and waits for the rest. Step 2: J2 gets the other 4 and also waits. Each holds what the other needs. This is a hold-and-wait deadlock, and all 8 GPUs burn power at zero progress. Step 3: gang scheduling grants J1 all 8 at once; J2 holds nothing until J1 ends. At the chapter's \$2 per GPU-hour, a deadlock that strands a 10,000-GPU cluster wastes \$20,000 an hour. OpenAI used exactly this two-job example when it scaled Kubernetes to 7,500 nodes, and added group admission. ENGAGE: Does giving J1 higher priority fix it? (Expected: no; priority orders requests, it does not stop partial holds.) WARN: Atomicity must cover every resource the group needs, including its NVLink domain and network share, or the deadlock moves one layer down. FLEX: [CORE]}
 \end{frame}
 
 \begin{frame}{If only 60 of 64 pods fit, what happens?}
@@ -200,7 +204,7 @@ $\Tstep(N) = \dfrac{\Tcomp}{N} + \underbrace{\Tcomm(N)}_{\text{placement}} + \un
     \end{column}
   \end{columns}
   \mlsyscredit{Fleet Orchestration, \S8.5.2 (group admission; Volcano and the Coscheduling plugin).}
-  \note{[3 min] LINK: The deadlock, on a real platform. NARRATE: Kubernetes' default scheduler makes 64 separate placement decisions. ENGAGE: One minute, vote. Step 2: B. Sixty pods bind and hold their GPUs; four stay pending; the job cannot form its communication group, so nothing trains. A is what an elastic job could do, if the framework and scheduler agreed on a smaller group; a rigid job cannot. C is wrong: Kubernetes has no notion that the 64 pods belong together. The fix is group admission. A PodGroup declares a minimum membership of 64. The scheduler reserves a place for each member as it finds one, binds none until all 64 are placed, and releases every reservation if the attempt times out. Volcano and the Coscheduling plugin implement this; OpenAI adopted the coscheduling plugin. WARN: Group admission does not make launches simultaneous; the framework still forms its group at rendezvous. FLEX: [CORE]}
+  \note{[3 min] LINK: The deadlock, on a real platform. NARRATE: Kubernetes' default scheduler makes 64 separate placement decisions. ENGAGE: One minute, vote. Step 2: B. Sixty pods bind and hold their GPUs; four stay pending; the job cannot form its communication group, so nothing trains. A is what an elastic job could do, if the framework and scheduler agreed on a smaller group; a rigid job cannot. C is wrong, because Kubernetes has no notion that the 64 pods belong together. The fix is group admission. A PodGroup declares a minimum membership of 64. The scheduler reserves a place for each member as it finds one, binds none until all 64 are placed, and releases every reservation if the attempt times out. Volcano and the Coscheduling plugin implement this; OpenAI adopted the coscheduling plugin. WARN: Group admission does not make launches simultaneous; the framework still forms its group at rendezvous. FLEX: [CORE]}
 \end{frame}
 
 \begin{frame}{Backfill fills the wait without delaying the gang}
@@ -234,7 +238,7 @@ $\Tstep(N) = \dfrac{\Tcomp}{N} + \underbrace{\Tcomm(N)}_{\text{placement}} + \un
     \end{column}
   \end{columns}
   \mlsyscredit{Fleet Orchestration, \S8.4.1 and table 1; Ghodsi et al., NSDI 2011 (dominant resource fairness).}
-  \note{[3 min] NARRATE: Equal GPU counts are not fair when one tenant exhausts CPU and another the network. Dominant resource fairness (DRF) takes each tenant's largest share of any resource, its dominant share, and equalizes that. Step 1: one A replica uses 1 of 8 GPUs, 4 of 32 cores, 32 of 256 GB, and 10 of 80 Gb/s, an eighth of each. Four replicas give A one half everywhere. Step 2: a B worker takes 2 of 8 GPUs and a quarter of the network, so two workers give B a dominant share of one half, though only 0.125 of the CPU and memory. Both tenants sit at 0.50. Step 3: a fair target is not yet a placement. If B's two workers form one 4-GPU gang that must sit in one NVLink domain on 80 GB GPUs, four scattered or smaller GPUs give B nothing. ENGAGE: Which comes first, the filter or the share? (Expected: the filter, the book's feasibility-before-fairness principle, because a fair share of accelerators a job cannot run on delivers no progress.) WARN: When no equal-share placement exists, the scheduler should report the binding constraint rather than show an infeasible share as service. FLEX: [CORE]}
+  \note{[3 min] NARRATE: Equal GPU counts are not fair when one tenant exhausts CPU and another the network. Dominant resource fairness (DRF) takes each tenant's largest share of any resource, its dominant share, and equalizes that. Step 1: one A replica uses 1 of 8 GPUs, 4 of 32 cores, 32 of 256 GB, and 10 of 80 Gb/s, an eighth of each. Four replicas give A one half everywhere. Step 2: a B worker takes 2 of 8 GPUs and a quarter of the network, so two workers give B a dominant share of one half, though only 0.125 of the CPU and memory. Both tenants sit at 0.50. Step 3: a fair target still needs a placement. If B's two workers form one 4-GPU gang that must sit in one NVLink domain on 80 GB GPUs, four scattered or smaller GPUs give B nothing. ENGAGE: Which comes first, the filter or the share? (Expected: the filter, the book's feasibility-before-fairness principle, because a fair share of accelerators a job cannot run on delivers no progress.) WARN: When no equal-share placement exists, the scheduler should report the binding constraint rather than show an infeasible share as service. FLEX: [CORE]}
 \end{frame}
 
 \begin{frame}{19 GPUs are free, yet no node can take an 8-GPU job}
@@ -367,31 +371,12 @@ $\Tstep(N) = \dfrac{\Tcomp}{N} + \underbrace{\Tcomm(N)}_{\text{placement}} + \un
     \end{column}
     \begin{column}{0.48\textwidth}
       {\ttfamily\scriptsize torchrun -{}-nnodes=4:16 -{}-nproc\_per\_node=8}\\
-      {\footnotesize an elastic scheduling contract: 32 to 128 workers}
+      {\footnotesize an elastic scheduling contract: 32 to 128 workers}\\[0.1cm]
+      {\scriptsize\textcolor{midgray}{Recall Lecture 6: 21$\times$ the GPUs trained GPT-3 14.9$\times$ faster.}}
     \end{column}
   \end{columns}
   \mlsyscredit{Fleet Orchestration, Napkin Math 8.3 and listing 2; GPU-hours derived.}
-  \note{[3 min] NARRATE: Elastic scheduling replaces keep-or-kill with a contract made of a size range, the valid increments, a measured resize cost, and a scaling curve. One job, 24 hours. Start small: 128 GPUs now. Wait: queue 4 hours for 512. Step up: start on 128, and at hour 4 pause 10 minutes and grow to 256, leaving the other 256 for queued jobs. ENGAGE: Vote, then step 2. Wait: 20 hours at 3.2 is 64 epochs. Step up: 4 plus 19.83 times 1.8, 39.7. Start small: 24. Waiting wins this job's epochs, but per 1,000 GPU-hours stepping up does 7.0 epochs against 6.25 (derived), because 256 GPUs scale at 90 percent and 512 at 80. Which plan is right depends on whether the fleet values this job's finish or all jobs' work. WARN: Increments are not free choices. The 175B job resizes by whole 64-GPU replicas, 8-way tensor parallel times 8 stages, and the global batch changes unless each worker takes more; judge a resize by time to target quality. The recovery rules that make a resize safe are Lecture 7's. torchrun declares the range; it does not acquire nodes. FLEX: [CORE]}
-\end{frame}
-
-\begin{frame}{On 21$\times$ the GPUs, GPT-3 175B trained 14.9$\times$ faster}
-  \begin{columns}[c]
-    \begin{column}{0.56\textwidth}
-      \centering
-      \safeimg[width=\textwidth,height=5.4cm,keepaspectratio]{mlperf_gpt3.pdf}
-    \end{column}
-    \begin{column}{0.40\textwidth}
-      \small
-      The running case's model on a real fleet: 512 to 10,752 H100 GPUs.\\[0.25cm]
-      \begin{mlsyscard}{mlsysaccent}\small
-        Each added GPU buys less. A scheduler gives GPUs to the job whose next GPU returns the most.
-      \end{mlsyscard}
-      \vspace{0.1cm}
-      {\footnotesize Global batch grows from 2,048 to 2,688 with scale.}
-    \end{column}
-  \end{columns}
-  \mlsyscredit{MLCommons, MLPerf Training v3.1, GPT-3 175B, NVIDIA Eos (closed), read from MLSysIM. Speedup derived: 58.3 / 3.92.}
-  \note{[2 min] LINK: Lecture 6 owns scaling efficiency. NARRATE: The 175B reference job's model, measured. In MLPerf Training v3.1, NVIDIA's Eos cluster trained the GPT-3 175B benchmark slice in 58.3 minutes on 512 H100s and 3.92 minutes on 10,752: 21 times the GPUs, 14.9 times faster, about 71 percent of ideal (derived). The dashed line is ideal scaling from the 512 point. ENGAGE: A queued 64-GPU job waits while this job could grow from 8,192 to 10,752 GPUs. What does the scheduler compare? (Expected: this job's marginal speedup per added GPU against the progress the queued job would make.) WARN: The global batch changes between submissions, so these points mix strong scaling with convergence effects; they show the shape of scaling for a job whose batch changes with size. Land the segment aloud. Placement decides the speed of an allocation of a given size, and elasticity decides its size; both are judged by completion time, including the wait. FLEX: [OPTIONAL] The elastic slide carries the decision.}
+  \note{[3.5 min] NARRATE: an elastic contract replaces keep-or-kill with a size range, valid increments, a measured resize cost, and a scaling curve. One job, 24 hours. Start small: 128 GPUs now. Wait: queue 4 hours for 512. Step up: start on 128, and at hour 4 pause 10 minutes and grow to 256, leaving the other 256 for queued jobs. ENGAGE: Vote, then step 2. Wait: 20 hours at 3.2 is 64 epochs. Step up: 4 plus 19.83 times 1.8, 39.7. Start small: 24. Waiting wins this job's epochs, but per 1,000 GPU-hours stepping up does 7.0 epochs against 6.25 (derived), because 256 GPUs scale at 90 percent and 512 at 80. The right plan depends on whether the fleet values this job's finish or all work. WARN: the 175B job resizes only by whole 64-GPU replicas (TP 8 times 8 stages), and its global batch changes; judge a resize by time to target quality. LINK: the gray line recalls Lecture 6's falling return per added GPU. ENGAGE: a queued 64-GPU job waits while this job could grow. What does the scheduler compare? (Expected: each job's marginal progress per added GPU.) Land the segment aloud. Placement sets the speed of an allocation, elasticity sets its size, and both are judged by completion time, including the wait. FLEX: [CORE]}
 \end{frame}
 
 % =============================================================================
@@ -406,7 +391,7 @@ $\Tstep(N) = \dfrac{\Tcomp}{N} + \underbrace{\Tcomm(N)}_{\text{placement}} + \un
     \begin{column}{0.68\textwidth}
       \centering
       \safeimg[width=\textwidth,height=4.2cm,keepaspectratio]{preempt.pdf}\\[0.2cm]
-      \uncover<2->{\small Interruption economics: 12 forced preemptions a day: \textbf{4.1 h}, or \textbf{261 GPU-hours} of the 64-GPU run.}
+      \uncover<2->{\small In interruption economics, 12 forced preemptions a day cost \textbf{4.1 h}, or \textbf{261 GPU-hours} of the 64-GPU run.}
     \end{column}
     \begin{column}{0.29\textwidth}
       \centering

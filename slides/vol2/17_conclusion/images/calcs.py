@@ -115,6 +115,8 @@ def main():
         show(f"Llama 3 interruptions, {cat}", k, "{:.0f}")
     show("Llama 3 interruptions, total", sum(cats.values()), "{:.0f}")
     show("Llama 3 GPU share of unexpected, percent", 100 * cats["GPU"] / LLAMA_UNEXPECTED, "{:.0f}")
+    show("Llama 3 non-GPU unexpected interruptions", LLAMA_UNEXPECTED - cats["GPU"], "{:.0f}")
+    show("Llama 3 non-GPU share of unexpected, percent", 100 * (LLAMA_UNEXPECTED - cats["GPU"]) / LLAMA_UNEXPECTED, "{:.0f}")
     show("Llama 3 interruptions per day", LLAMA_UNEXPECTED / LLAMA_DAYS, "{:.1f}")
 
     print("== Tail at scale")
@@ -122,6 +124,7 @@ def main():
     show("P(at least one slow of 100), percent", 100 * (1 - (1 - P_SLOW) ** FANOUT), "{:.1f}")
     show("Dean-Barroso all-leaves p99 / one-leaf p99", DB_ALL_LEAVES_P99_MS / DB_ONE_LEAF_P99_MS, "{:.0f}")
     show("Rare failures per day at 1M requests", REQ_PER_DAY * P_RARE, "{:.0f}")
+    show("Rare failures per day at 10M requests", 10 * REQ_PER_DAY * P_RARE, "{:.0f}")
     show("Straggler step-time multiplier", 1 / STRAGGLER_SPEED, "{:.2f}")
     show("Straggler throughput loss, percent", 100 * (1 - STRAGGLER_SPEED), "{:.0f}")
 
@@ -139,6 +142,7 @@ def main():
     show("Retained fraction 2,048", 1 - o2, "{:.3f}")
     show("Break-even step speedup", retained, "{:.3f}")
     show("Accelerator-hours change at ideal 2x, percent", 100 * (2 * retained / 2 - 1), "{:.1f}")
+    show("Step speedup above which doubling saves accelerator-hours", 2 * retained, "{:.3f}")
     ms_speedup = MEGASCALE[1024] / MEGASCALE[512]
     show("MegaScale measured speedup 512 -> 1,024", ms_speedup, "{:.2f}")
     show("Accelerator-hours change at measured speedup, percent",
@@ -174,6 +178,8 @@ def main():
     show("Fleet energy saving, illustrative, percent",
          100 * LINK_SHARE_ILLUS * (1 - LINK_ENERGY_RATIO), "{:.0f}")
     show("Fleet saving ceiling at link share, percent", 100 * LINK_SHARE_ILLUS, "{:.0f}")
+    show("Fleet energy saving at twice the link share, percent",
+         100 * 2 * LINK_SHARE_ILLUS * (1 - LINK_ENERGY_RATIO), "{:.0f}")
 
 
 main()

@@ -212,6 +212,8 @@ def show():
     for k, v in LOAD.items():
         p(f"load 350 GB, {k}: {v:.2f} s")
     p(f"rollout: {ROLLOUT / TB:.0f} TB; object store {ROLLOUT_OBJ_S:.0f} s; file system {ROLLOUT_PFS_S:.0f} s")
+    all_fast = 0.99 ** 100  # 100 servers, each slow 1 percent of the time (Sec. 4.3.6)
+    p(f"fan-out: all 100 fast {all_fast:.3f}; at least one slow {(1 - all_fast) * 100:.1f}% of steps")
 
 
 if __name__ == "__main__":
