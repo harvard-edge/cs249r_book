@@ -69,7 +69,7 @@
   \centering\normalsize\choice{A}{2$\times$}\qquad\choice{B}{10$\times$}\qquad\choice{C}{75$\times$}\qquad\choice{D}{1,000$\times$}\\[0.15cm]
   \uncover<2->{\normalsize Same chip, same arithmetic, same answer.}
   \mlsyscredit{Boehm, ``How to Optimize a CUDA Matmul Kernel for cuBLAS-like Performance: a Worklog,'' 2022 (siboehm.com), results table; GPU and matrix size from the article's text. 75$\times$ derived.}
-  \note{[3.5 min] Step 1: a naive kernel gives each GPU thread one output element; it reaches 309 billion floating-point operations per second (GFLOP/s). ENGAGE: vote with fingers before the reveal. Step 2: C. cuBLAS reaches 23,250 GFLOP/s, 75 times faster, on the same GPU with the same arithmetic and the same result. Simon Boehm wrote eight faster kernels between the two, and none of them does less arithmetic. Each changes where operands live and how often they cross a memory boundary: coalesced loads (neighboring threads read neighboring addresses) gave 6.4 times, tiles staged in shared memory 1.5, larger register tiles 2.8 and then 1.9, and wider loads, autotuning, and tiles per warp (a group of 32 threads) the rest. WARN: D is the belief that the gap is hardware; A is the belief that a correct kernel is a fast one. These are FP32 results without Tensor Cores, from one engineer's worklog on one GPU. LINK: Part 1 gave the ceiling; today is the schedule that reaches it. The synthesis returns to this ladder. FLEX: [CORE].}
+  \note{[3 min] Step 1: a naive kernel gives each GPU thread one output element; it reaches 309 billion floating-point operations per second (GFLOP/s). ENGAGE: vote with fingers before the reveal. Step 2: C. cuBLAS reaches 23,250 GFLOP/s, 75 times faster (23,249.6 / 309.0 = 75.2, calcs.py), on the same GPU with the same arithmetic and the same result. Simon Boehm wrote eight faster kernels between the two, and none of them does less arithmetic; each changes where operands live and how often they cross a memory boundary. The Tile segment shows two of them as code, and the synthesis labels every rung. WARN: D is the belief that the gap is hardware; A is the belief that a correct kernel is a fast one. These are FP32 results without Tensor Cores, from one engineer's worklog on one GPU. LINK: Part 1 gave the ceiling; today is the schedule that reaches it. FLEX: [CORE].}
 \end{frame}
 
 \begin{frame}{Recall: what did the roofline promise the stage-3 conv?}
@@ -80,7 +80,8 @@
       \small H100, FP16:\\[0.1cm]
       What is the ridge point?\\[0.1cm]
       Where does ResNet-50's stage-3 3$\times$3 conv sit at batch 32?\\[0.1cm]
-      What rate does the roofline allow it?
+      What rate does the roofline allow it?\\[0.15cm]
+      \mlsysphoto[width=0.62\textwidth,height=1.1cm,keepaspectratio]{nvidia-h100-pcie.jpg}
     \end{column}
     \begin{column}{0.58\textwidth}
       \centering
@@ -88,8 +89,8 @@
         {\small Ridge 295; conv 563 FLOP/byte; ceiling 989 TFLOP/s.}}
     \end{column}
   \end{columns}
-  \mlsyscredit{Hardware Acceleration, Napkin Math 11.5 and 11.10.}
-  \note{[1.5 min] ENGAGE: 45 seconds, written, notes closed. Step 2: the H100's FP16 ridge is 295.2 FLOP/byte (989 TFLOP/s over 3.35 TB/s). The stage-3 convolution does 563.1 FLOP per byte at batch 32, above the ridge, so the roofline allows it up to the 989 TFLOP/s FP16 ceiling. Say the open part: the roofline assumes the best schedule. It does not say what that schedule is, or who finds it. That is today. LINK: Lecture 11, Part 1. FLEX: [CORE].}
+  \mlsyscredit{Hardware Acceleration, Napkin Math 11.5 and 11.10. Photo: Geekerwan, CC BY 3.0, Wikimedia Commons.}
+  \note{[1.5 min] The photo is Part 1's H100 card (PCIe); the numbers are the SXM part's. ENGAGE: 45 seconds, written, notes closed. Step 2: the H100's FP16 ridge is 295.2 FLOP/byte (989 TFLOP/s over 3.35 TB/s). The stage-3 convolution does 563.1 FLOP per byte at batch 32, above the ridge, so the roofline allows it up to the 989 TFLOP/s FP16 ceiling. Say the open part: the roofline assumes the best schedule. It does not say what that schedule is, or who finds it. That is today. LINK: Lecture 11, Part 1. FLEX: [CORE].}
 \end{frame}
 
 \begin{frame}{How does a computation get mapped onto the chip?}
@@ -105,7 +106,7 @@
 % =============================================================================
 % SECTION: THE ARRAY
 % =============================================================================
-\mlsysnote{[0.5 min] Start inside the array that Part 1 drew as a static picture. Read the divider question. The stack on the left shows where today sits: the hardware layer, as in Part 1.}
+\mlsysnote{[0.5 min] Start inside the array that Part 1 drew as a static picture. Read the divider question. The stack on the left shows where today sits: the hardware layer, as in Part 1. [CORE]}
 \mlsysdivider{What happens inside a systolic array, cycle by cycle?}{Hardware Acceleration, \S11.4.4, \S11.7.4, \S11.7.5 (the 2$\times$2 trace)}
 \section{The Array}
 
@@ -120,14 +121,33 @@
   \only<4|handout:0>{$C_{01}$ leaves one cycle after $C_{00}$; the second input row follows one cycle behind.}%
   \only<5-|handout:1>{Each row starts one cycle later, so operands with the same reduction index meet.}
   \mlsyscredit{Hardware Acceleration, \S11.7.5 (the 2$\times$2 trace) and figure 5; Kung 1982. $C_{10}$ and $C_{11}$ follow the same stagger.}
-  \note{[4.5 min] Step 1: Part 1's picture at 2 by 2. Each processing element (PE) holds one weight; activations move right, partial sums move down, one hop per cycle. $C_{00} = a_{00}b_{00} + a_{01}b_{10}$. Step 2, cycle 0: $a_{00}$ meets $b_{00}$ in PE00. ENGAGE: in cycle 1 that product moves down to PE10, which holds $b_{10}$. Which activation must be there, and when must it enter? Step 3: $a_{01}$, entering row 1 one cycle late. PE10 adds its product and $C_{00}$ leaves. Meanwhile $a_{00}$ moved right to PE01 and $a_{10}$ entered PE00. Step 4, cycle 2: $C_{01}$ and $C_{10}$ leave. Step 5, cycle 3: $C_{11}$ leaves. Two input rows took four cycles on a 2 by 2 array. WARN: students picture every cell starting at once; the skew is what makes the right operands meet. FLEX: [CORE].}
+  \note{[4 min] Step 1: Part 1's picture at 2 by 2. Each processing element (PE) holds one weight; activations move right, partial sums move down, one hop per cycle. $C_{00} = a_{00}b_{00} + a_{01}b_{10}$. Step 2, cycle 0: $a_{00}$ meets $b_{00}$ in PE00. ENGAGE: in cycle 1 that product moves down to PE10, which holds $b_{10}$. Which activation must be there? Step 3: $a_{01}$, entering row 1 one cycle late. PE10 adds its product and $C_{00}$ leaves, while $a_{00}$ moves right and $a_{10}$ enters PE00. Steps 4 and 5: $C_{01}$ and $C_{10}$ leave in cycle 2, $C_{11}$ in cycle 3. Two input rows took four cycles on a 2 by 2 array. WARN: students picture every cell starting at once; the skew is what makes the right operands meet. FLEX: [CORE].}
 \end{frame}
 
 \begin{frame}{A 4$\times$4 array fills, runs full, then drains}
   \centering
   \mlsyssteps[width=\textwidth,height=5.7cm,keepaspectratio]{wave4_step}{3}
   \mlsyscredit{Derived from Hardware Acceleration, \S11.7.5 (one hop per cycle). Weight loading not shown.}
-  \note{[2.5 min] The same timing on a 4 by 4 array streaming 8 input rows through one set of weights. Each cell shows which input row it is working on. Step 1, cycle 2: only the top-left corner has work; 6 of 16 cells are busy. Step 2, cycle 6: the wavefront covers the array; all 16 cells are busy, but only for cycles 6 and 7. Step 3, cycle 11: the array drains from the top left; 6 cells are busy again. Eight rows take 8 + 2(4) $-$ 2 = 14 cycles, so the cells are busy 57 percent of the time on average. ENGAGE: what would raise that share? Expected: more input rows per weight load. WARN: the count ignores the cycles to load the weights themselves, which makes the real share lower. FLEX: [OPTIONAL]; if cut, state the B + 2N $-$ 2 count on the next frame.}
+  \note{[2 min] The same timing on a 4 by 4 array streaming 8 input rows through one set of weights; each cell shows the input row it works on. Step 1, cycle 2: 6 of 16 cells are busy. Step 2, cycle 6: all 16 are busy, but only for cycles 6 and 7. Step 3, cycle 11: the array drains; 6 cells are busy again. Eight rows take 8 + 2(4) $-$ 2 = 14 cycles, so the cells are busy 57 percent of the time on average (calcs.py). ENGAGE: what would raise that share? Expected: more input rows per weight load. WARN: the count ignores the cycles to load the weights, which makes the real share lower. FLEX: [OPTIONAL]; if cut, state the B + 2N $-$ 2 count on the next frame.}
+\end{frame}
+
+\begin{frame}{A real array: four 128$\times$128 units, 11 percent of the die}
+  \begin{columns}[c]
+    \begin{column}{0.58\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.2cm,keepaspectratio]{tpuv4i-floorplan.png}\\[0.05cm]
+      {\footnotesize\textcolor{midgray}{TPUv4i floorplan: MXU = one 128$\times$128 systolic array}}
+    \end{column}
+    \begin{column}{0.40\textwidth}
+      \small
+      Four MXUs per core: 65,536 MACs per cycle.\\[0.25cm]
+      MXUs: \textbf{11\%} of the die.\\
+      On-chip memory (CMEM): \textbf{28\%}.\\[0.25cm]
+      \uncover<2->{Eight production apps, average share of peak FLOP/s:\\[0.1cm]
+        {\Large\bfseries\textcolor{RedLine}{33\%}}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Jouppi et al., ``Ten Lessons From Three Generations Shaped Google's TPUv4i,'' ISCA 2021: Figure 6 (floorplan), Tables 1 and 7. 65,536 = 4 $\times$ 128 $\times$ 128 (calcs.py).}
+  \note{[1.5 min] A real chip with the arrays we just traced. Google's TPUv4i, an inference TPU, has four matrix units (MXUs) per core, each a 128 by 128 systolic array, 65,536 multiply-accumulates per cycle (derived). Read the floorplan: the four MXUs sit in a row beside the vector unit, and the paper reports them at 11 percent of the die; the common memory, CMEM, takes 28 percent. Most of the silicon feeds the arrays. ENGAGE: if the arrays are this small a share, what limits how much work they do? Step 2: measured on eight of Google's production applications, the chip averaged 33 percent of its peak FLOP/s (Table 7). The arrays sit idle most of the time, because of fill and drain, batch, and memory, the subject of the next slide. WARN: TPUv4i is the inference sibling of TPU v4; both use 128 by 128 MXUs. FLEX: [CORE].}
 \end{frame}
 
 \begin{frame}{A 128$\times$128 array needs hundreds of rows per load}
@@ -211,24 +231,33 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Derived from Hardware Acceleration, listing 14 ($W$ 512$\times$256, $X$ 256$\times$32) and \S11.7.4: element moves; a partial sum is one read and one write per MAC; 4,194,304 / 128 = 32,768. Example 11.4 (modeled).}
-  \note{[3 min] One row per step. The first three rows isolate the loop order: one cell, no neighbors, holding one value. Step 1: weight stationary reads each of the 131,072 weights once, but an input for every MAC, 4.2 million, and reads and writes a partial sum for every MAC, 8.4 million. Step 2: output stationary writes each of the 16,384 outputs once and streams 4.2 million weights and 4.2 million inputs. Step 3: input stationary reads each of the 8,192 inputs once. Each order saves one operand (green); the other two pay per MAC. ENGAGE: which of the three moves the fewest? Expected: output stationary, 8.4 million against about 12.6 million. Step 4: the array we traced. In a row of 128 weight-stationary cells each input enters once and passes past 128 held weights, so input reads fall to 4,194,304 / 128 = 32,768 (derived). A full array also passes partial sums down its columns, removing most of that traffic too. Step 5: Example 11.4. Holding all 16 filters over 36 output positions takes 144 weight reads; spilled, each position reloads all 144: 5,184 reads, 36 times more (modeled). WARN: real kernels hold a tile, the next segment. FLEX: [OPTIONAL] steps 1 to 3; keep step 4.}
+  \note{[2.5 min] One row per step; the first three isolate the loop order: one cell, no neighbors, one held value. Step 1: weight stationary reads each of the 131,072 weights once, but an input for every MAC, 4.2 million, and reads and writes a partial sum for every MAC, 8.4 million. Step 2: output stationary writes each of the 16,384 outputs once and streams 4.2 million weights and 4.2 million inputs. Step 3: input stationary reads each of the 8,192 inputs once. ENGAGE: which of the three moves the fewest? Expected: output stationary, 8.4 million against 12.7 million (weight stationary) and 12.6 million (input stationary), from calcs.py. Step 4: in a row of 128 weight-stationary cells each input enters once and passes 128 held weights, so input reads fall to 4,194,304 / 128 = 32,768 (derived); a full array also passes partial sums down its columns. Step 5: Example 11.4. Holding all 16 filters over 36 output positions takes 144 weight reads; spilled, each position reloads all 144: 5,184 reads, 36 times more (modeled). WARN: real kernels hold a tile, the next segment. FLEX: [OPTIONAL] steps 1 to 3; keep step 4.}
 \end{frame}
 
 \begin{frame}{Holding several operands helps only where reuse exists}
   \mlsysactivity{Vote}{1.5 min}
   \centering
-  \safeimg[width=0.66\textwidth,height=2.9cm,keepaspectratio]{eyeriss.pdf}\\[0.2cm]
+  \begin{columns}[c]
+    \begin{column}{0.22\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.3cm,keepaspectratio]{eyeriss-die.jpg}\\
+      {\scriptsize\textcolor{midgray}{Eyeriss die: 168 PEs}}
+    \end{column}
+    \begin{column}{0.66\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.7cm,keepaspectratio]{eyeriss.pdf}
+    \end{column}
+  \end{columns}
+  \vspace{0.1cm}
   \uncover<2->{\raggedright\small GPT-2 XL decode, batch one, weight-stationary array: which change recovers weight reuse?\\[0.05cm]
     \choice{A}{Output stationary}\quad\choice{B}{Input stationary}\quad\choice{C}{Row stationary}\quad\choice{D}{None of them}}\\[0.15cm]
   \uncover<3->{\centering\small\textbf{D.} Each weight is used once per token. No reuse is left to recover.}
-  \mlsyscredit{Chen, Emer, Sze, ``Eyeriss,'' ISCA 2016 (abstract; same area and parallelism); Hardware Acceleration, Systems Perspective 11.1.}
-  \note{[2 min] Step 1: Eyeriss holds rows of weights, inputs, and partial sums together, a row-stationary dataflow. On AlexNet it used 1.4 to 2.5 times less energy than the other dataflows on convolutional layers, and at least 1.3 times less on fully connected layers above batch 16. Holding several operands pays because a convolution reuses all three. Step 2: ENGAGE: vote, discuss with a neighbor for 30 seconds, vote again. Step 3: D. At batch one each weight meets one input per token, so the levers are batching, fewer bytes per weight, or more bandwidth. Land the segment: inputs enter skewed so the right operands meet; the array is full only between fill and drain; the loop order picks which operand stays, and neighbors share what streams. FLEX: [CORE].}
+  \mlsyscredit{Die photo: Chen, Krishna, Emer, Sze, MIT (eyeriss.mit.edu). Chen, Emer, Sze, ``Eyeriss,'' ISCA 2016 (abstract; same area and parallelism); Hardware Acceleration, Systems Perspective 11.1.}
+  \note{[2 min] Step 1: the die photo is the fabricated Eyeriss test chip (ISSCC 2016): an on-chip buffer on the left and a spatial array of 168 processing elements, 12 by 14, on the right. Eyeriss holds rows of weights, inputs, and partial sums together, a row-stationary dataflow. On AlexNet it used 1.4 to 2.5 times less energy than the other dataflows on convolutional layers, and at least 1.3 times less on fully connected layers above batch 16. Holding several operands pays because a convolution reuses all three. Step 2: ENGAGE: vote, discuss with a neighbor for 30 seconds, vote again. Step 3: D. At batch one each weight meets one input per token, so the levers are batching, fewer bytes per weight, or more bandwidth. Land the segment: inputs enter skewed so the right operands meet; the array is full only between fill and drain; the loop order picks which operand stays, and neighbors share what streams. FLEX: [CORE].}
 \end{frame}
 
 % =============================================================================
 % SECTION: THE TILE
 % =============================================================================
-\mlsysnote{[0.5 min] One held value saves one operand. A block of values held on chip can save all three. Read the divider question.}
+\mlsysnote{[0.5 min] One held value saves one operand. A block of values held on chip can save all three. Read the divider question. [CORE]}
 \mlsysdivider{How large a block fits on chip, and what happens at its edge?}{Hardware Acceleration, \S11.7.5 (equation 6); NVIDIA, Matrix Multiplication Background guide, \S3}
 \section{The Tile}
 
@@ -252,7 +281,38 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Derived from Hardware Acceleration, listing 14, listing 17 (abridged), and Lighthouse 11.2 (228 KB shared memory per H100 SM). FP16 operands, FP32 outputs.}
-  \note{[4 min] The same layer on one H100 streaming multiprocessor (SM) with 228 KB of shared memory. Step 1: all the weights at FP16 are 256 KB and do not fit, so cut $W$ into four tiles of 128 rows. Step 2: one weight tile is 64 KB, the whole input 16 KB, one 128 by 32 FP32 output tile 16 KB: 96 KB, which fits. Step 3: load a weight tile once, stream the input past it, write its outputs once. Each weight is read once (131,072), the input four times (32,768), each output written once (16,384): 180,224 element moves against 8,404,992 untiled, about 47 times fewer. ENGAGE: why is the input read four times? Expected: once per weight tile. Step 4: the loop that makes a tile (listing 17, abridged). Each pass copies one weight tile and the input into shared memory, runs every multiply-add on the copies, and writes one block of outputs. This is explicit staging: the program decides what stays, as a GPU kernel does. A cache stages implicitly through the loop bounds alone (listing 16), and it can evict the tile before its reuse is done. WARN: derived counts for one SM. LINK: FlashAttention (Lecture 8b) tiles attention the same way. FLEX: [CORE].}
+  \note{[3 min] The same layer on one H100 streaming multiprocessor (SM) with 228 KB of shared memory. Step 1: all the weights at FP16 are 256 KB and do not fit, so cut $W$ into four tiles of 128 rows. Step 2: one weight tile is 64 KB, the whole input 16 KB, one 128 by 32 FP32 output tile 16 KB: 96 KB, which fits. Step 3: load a weight tile once, stream the input past it, write its outputs once. Each weight is read once (131,072), the input four times (32,768), each output written once (16,384): 180,224 element moves against 8,404,992 untiled, about 47 times fewer. ENGAGE: why is the input read four times? Expected: once per weight tile. Step 4: the loop that makes a tile (listing 17, abridged): copy one weight tile and the input into shared memory, run every multiply-add on the copies, write one block of outputs. The program decides what stays; a cache (listing 16) can evict the tile before its reuse is done. WARN: derived counts for one SM. LINK: FlashAttention (Lecture 8b) tiles attention the same way. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}[fragile]{The hook's kernels: the tile moves into shared memory}
+  \mlsysactivity{Estimate}{1 min}
+  \vspace{-0.3cm}
+  \begin{columns}[T]
+    \begin{column}{0.56\textwidth}
+      {\footnotesize\textbf{Kernel 1, naive} (309 GFLOP/s)}\\[-0.3cm]
+\begin{semiverbatim}\scriptsize
+for (int i = 0; i < K; ++i) \{
+  tmp += A[x * K + i] * B[i * N + y];
+\}
+\end{semiverbatim}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      {\small Global loads per multiply-add in each?}\\[0.1cm]
+      \uncover<2->{\small\textbf{Kernel 1: 2. Kernel 3: 2 per 32, 32$\times$ fewer.}}
+    \end{column}
+  \end{columns}
+  \vspace{0.1cm}{\footnotesize\textbf{Kernel 3, shared memory} (2,980 GFLOP/s): As, Bs are 32$\times$32 \texttt{\_\_shared\_\_} arrays}\\[-0.3cm]
+\begin{semiverbatim}\scriptsize
+for (int bkIdx = 0; bkIdx < K; bkIdx += BLOCKSIZE) \{
+  As[threadRow * BLOCKSIZE + threadCol] = A[threadRow * K + threadCol];
+  \textcolor{midgray}{...}
+  for (int dotIdx = 0; dotIdx < BLOCKSIZE; ++dotIdx) \{
+    tmp += As[threadRow * BLOCKSIZE + dotIdx] *
+           Bs[dotIdx * BLOCKSIZE + threadCol];
+  \}
+\end{semiverbatim}
+  \mlsyscredit{Code: github.com/siboehm/SGEMM\_CUDA @ 5a7dcc5, src/kernels 1 and 3 (MIT, Simon Boehm), excerpts; BLOCKSIZE = 32. GFLOP/s: Boehm 2022 (A6000). 32$\times$: calcs.py.}
+  \note{[2 min] Real code, from the repository behind the hook's ladder. Kernel 1 gives each thread one output; its inner loop reads one element of A and one of B from global memory (HBM) for every multiply-add. Kernel 3 gives each block of threads a 32 by 32 output tile. Each pass of the outer loop copies one 32 by 32 tile of A and one of B into shared memory, each thread copying one element of each, waits for the whole block, then runs 32 multiply-adds per thread from the on-chip copies. ENGAGE: count global loads per multiply-add in each. Step 2: kernel 1, 2; kernel 3, 2 per 32, a 32-fold cut (calcs.py). This is the four-tile count of the last slide, written as a kernel. The measured gain is 9.6 times over kernel 1 (2,980.3 / 309.0, calcs.py), smaller than 32, and part of it is kernel 2's coalescing, which kernel 3 keeps. WARN: tiles in shared memory are only the first rung; kernels 4 and 5 hold larger tiles in registers for another 5.4 times. FLEX: [OPTIONAL].}
 \end{frame}
 
 \begin{frame}{A tile's edge sets how often each loaded byte is reused}
@@ -321,7 +381,7 @@
 % =============================================================================
 % SECTION: THE COMPILER
 % =============================================================================
-\mlsysnote{[0.5 min] Loop order, tile size, and shape fit, for every layer of every model on every chip: no engineer makes these by hand. Read the divider question.}
+\mlsysnote{[0.5 min] Loop order, tile size, and shape fit, for every layer of every model on every chip: no engineer makes these by hand. Read the divider question. [CORE]}
 \mlsysdivider{Who makes these choices for every layer of a model?}{Hardware Acceleration, \S11.7.2, \S11.7.6, \S11.7.7, \S11.8}
 \section{The Compiler}
 
@@ -339,7 +399,33 @@
   \uncover<5->{\normalsize ResNet-50, batch one, H100 (modeled):\\[0.05cm]
     \textbf{174 kernels $\rightarrow$ 56}\qquad\textbf{\textcolor{mlsysaccent}{0.33 ms compiled, of which the arithmetic is about 8 $\mu$s}}}
   \mlsyscredit{Hardware Acceleration, \S11.8 (ResNet-50 for GPU inference; latencies modeled, not measured) and \S11.4.5.}
-  \note{[3.5 min] The chapter compiles ResNet-50 for GPU inference in four stages. Step 1: graph optimization fuses each Conv-BatchNorm-ReLU into one kernel, so the activation does not round-trip through HBM. Step 2: kernel selection picks a Tensor Core implementation where shapes, types, and layout allow. Step 3: memory planning computes when each tensor is live and lets tensors that are never live together share one buffer. Step 4: scheduling overlaps copies with computation on separate queues. Step 5: the chapter's model of batch one on an H100: 174 framework kernels fused into 56. The compiled FP16 pass takes 0.33 ms, and the arithmetic in it takes about 8 microseconds, so even the compiled pass sits on the overhead floor. Most of the chapter's gain over eager execution comes from fusing kernels and launching them as one graph, which removes dispatch and launch overhead, not from tiling or memory planning. WARN: the latencies are modeled. LINK: Lecture 7's dispatch overhead law explains the floor, and Lecture 7 owns graph capture and the fusion traffic rule; Lecture 13 shows the eager-to-compiled latency table runtime by runtime (Example 13.6). FLEX: [CORE].}
+  \note{[3 min] The chapter compiles ResNet-50 for GPU inference in four stages. Step 1: graph optimization fuses each Conv-BatchNorm-ReLU into one kernel, so the activation does not round-trip through HBM. Step 2: kernel selection picks a Tensor Core implementation where shapes, types, and layout allow. Step 3: memory planning lets tensors that are never live together share one buffer. Step 4: scheduling overlaps copies with computation on separate queues. Step 5: the chapter's model of batch one on an H100: 174 framework kernels fused into 56. The compiled FP16 pass takes 0.33 ms, and the arithmetic in it about 8 microseconds (8.2 GFLOP at 989 TFLOP/s is 8.3, calcs.py), so even the compiled pass sits on the overhead floor; most of the gain over eager execution comes from fusing kernels and launching them as one graph. WARN: the latencies are modeled. LINK: Lecture 7's dispatch overhead law explains the floor, and Lecture 7 owns graph capture and the fusion traffic rule; Lecture 13 shows the eager-to-compiled latency table runtime by runtime (Example 13.6). FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}[fragile]{Real compiler output: BN and ReLU become one pass}
+  \vspace{-0.25cm}
+  {\footnotesize\textbf{TorchInductor's generated code} for Conv $\rightarrow$ BN $\rightarrow$ ReLU, 64 channels, 56$\times$56, inference}\\[-0.3cm]
+\begin{semiverbatim}\scriptsize
+cpp_fused_convolution_0(arg1_1, arg0_1, buf0, buf1)
+buf2 = extern_kernels.convolution(buf0, buf1, stride=(1, 1), padding=(1, 1), \textcolor{midgray}{...})
+buf3 = reinterpret_tensor(buf0, \textcolor{midgray}{...}); del buf0  # reuse
+cpp_fused__native_batch_norm_legit_no_training_relu_1(
+    buf2, arg2_1, arg3_1, arg4_1, arg5_1, buf3)
+\end{semiverbatim}
+  \vspace{-0.5cm}
+  \uncover<2->{{\footnotesize\textbf{Inside the fused kernel}, per 4$\times$4 block:}\\[0.05cm]
+  \scriptsize\renewcommand{\arraystretch}{0.92}
+  \begin{tabular}{@{}l@{\hspace{0.5cm}}l@{}}
+    \texttt{transpose\_mxn<\textcolor{midgray}{...}>(in\_ptr0 + \textcolor{midgray}{...}, tmp0, \textcolor{midgray}{...});} & \textcolor{mlsysaccent}{\textbf{one load}} of conv output \\
+    \texttt{auto tmp4 = tmp1 - tmp3;} & $-$ mean \\
+    \texttt{auto tmp13 = tmp4 * tmp12;} & $\times\, 1/\sqrt{\text{var} + \epsilon}$ \\
+    \texttt{auto tmp16 = tmp13 * tmp15;} & $\times$ scale \\
+    \texttt{auto tmp19 = tmp16 + tmp18;} & $+$ shift \\
+    \texttt{auto tmp20 = at::vec::clamp\_min(tmp19, decltype(tmp19)(0));} & ReLU \\
+    \texttt{tmp20.store(out\_ptr0 + \textcolor{midgray}{...});} & \textcolor{mlsysaccent}{\textbf{one store}} \\
+  \end{tabular}}
+  \mlsyscredit{Run here: TORCH\_LOGS=output\_code python3 images/fused\_kernel.py (torch 2.13.0, Apple M5 Max CPU). ``...'' marks omitted code; one line break added.}
+  \note{[2 min] Real output, not a diagram: this deck's images folder holds a script that compiles one Conv-BatchNorm-ReLU block on a 64-channel 56 by 56 map with torch.compile and prints what the compiler generated (command in the credit; PyTorch 2.13.0 on a laptop CPU, so the kernels are C++; on a GPU they would be Triton). Step 1: the four stages of the last slide, in four lines. Kernel selection: the convolution goes to an external library kernel, extern\_kernels.convolution. Layout: cpp\_fused\_convolution\_0 first copies input and weights into channels-last order, the NHWC layout of the Diagnose slide. Memory planning: buf3 reuses buf0's memory, and the compiler marks it \# reuse. Fusion: batch norm and ReLU are one kernel. Step 2: inside it, each 4 by 4 block of the convolution's output is read once (and transposed back to the PyTorch layout), then normalized, scaled, shifted, clamped at zero, and stored once. ENGAGE: how many passes over the map would separate BN and ReLU kernels make? Expected: four, a read and a write each; fused, two, which saves 1.61 MB of FP32 traffic per image (calcs.py). WARN: a GPU compiler can also fold BN into the convolution's weights; Lecture 10 did that fold by hand. FLEX: [CORE].}
 \end{frame}
 
 \begin{frame}{More registers per thread, fewer threads per SM}
@@ -366,15 +452,45 @@
   \noindent\small\textbf{\textcolor{OrangeLine}{Example 11.3:}} a team moves a transformer to A100s. The profile shows the Tensor Cores idle. Name three causes to check.\\[0.2cm]
   \centering
   \mlsyssteps[width=\textwidth,height=3.85cm,keepaspectratio]{diag_step}{4}\\[0.05cm]
-  \uncover<5->{\small Then read the kernel names in the profiler.}
+  \uncover<5->{\small Then check which path ran: kernel names in the profiler, and the framework's flags.}
   \mlsyscredit{Hardware Acceleration, Example 11.3, \S11.7.6, footnote 24; NVIDIA, Matrix Multiplication Background guide, Table 1. The width 1,000 is illustrative.}
-  \note{[3 min] ENGAGE: two minutes in pairs: name three causes. The chapter's diagnosis names two: shapes and data types that selected less efficient kernels. Step 2: data type. FP16 or BF16 inputs select a Tensor Core kernel; FP32 inputs select a kernel on the ordinary CUDA cores unless the framework allows TF32. Step 3: shape. NVIDIA's guide lists the most efficient dimensions for FP16 as multiples of 8, and on an A100 multiples of 64. A width of 1,000, an illustrative value, is 15 blocks of 64 and 40 left over; padding to 1,024 makes it 16 whole blocks. Step 4: layout, which matters for convolutions, not the transformer's matrix multiplies. The chapter's 3 by 3 RGB image: NHWC stores each pixel's three channels side by side, so one read gets a channel vector; NCHW stores each channel's nine pixels together, so one pixel's channels are nine elements apart. cuDNN's Tensor Core convolutions favor NHWC; given NCHW, the runtime transposes the tensor, moving every element with no arithmetic, or falls back to a slower kernel. Step 5: confirm with the profiler's kernel names which path ran. Land the segment: a compiler searches a space no engineer can enumerate, but the fast path runs only when shapes, types, and layouts match it. FLEX: [CORE].}
+  \note{[2.5 min] ENGAGE: two minutes in pairs: name three causes. The chapter's diagnosis names two: shapes and data types that selected less efficient kernels. Step 2: data type. FP16 or BF16 inputs select a Tensor Core kernel; FP32 inputs select a kernel on the ordinary CUDA cores unless the framework allows TF32. Step 3: shape. NVIDIA's guide lists the most efficient FP16 dimensions as multiples of 8, on an A100 multiples of 64. An illustrative width of 1,000 is 15 blocks of 64 and 40 left over (calcs.py); padding to 1,024 makes 16 whole blocks. Step 4: layout, which matters for convolutions. NHWC stores each pixel's three channels side by side; NCHW stores each channel's nine pixels together, so one pixel's channels are nine elements apart. cuDNN's Tensor Core convolutions favor NHWC; given NCHW, the runtime transposes the tensor or falls back to a slower kernel. The Inductor output two slides back did that transpose on a CPU. Step 5: confirm which path ran; the next slide shows the flag behind cause 1. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}[fragile]{One default flag keeps an FP32 matmul off the Tensor Cores}
+  \vspace{-0.1cm}
+  {\footnotesize\textbf{PyTorch documentation}, CUDA semantics, ``TF32 on Ampere (and later) devices'' (A100):}
+\begin{semiverbatim}\scriptsize
+a_full = torch.randn(10240, 10240, dtype=torch.double,
+                     device=\textquotesingle{}cuda\textquotesingle{})
+\textcolor{midgray}{...}
+torch.backends.cuda.matmul.allow_tf32 = True
+ab_tf32 = a @ b  # takes 0.016s on GA100
+\textcolor{midgray}{...}
+torch.backends.cuda.matmul.allow_tf32 = False
+ab_fp32 = a @ b  # takes 0.11s on GA100
+\end{semiverbatim}
+  \vspace{-0.45cm}
+  \begin{columns}[T]
+    \begin{column}{0.58\textwidth}
+      {\footnotesize\textbf{Run here} (torch 2.13.0), the defaults:}\\[-0.35cm]
+\begin{semiverbatim}\scriptsize
+torch.backends.cuda.matmul.allow_tf32 = False
+torch.backends.cudnn.allow_tf32 = True
+\end{semiverbatim}
+    \end{column}
+    \begin{column}{0.40\textwidth}
+      \vspace{0.1cm}\normalsize\uncover<2->{\textbf{6.9$\times$ for one flag:}\\ 19.5 TFLOP/s against 134 (derived)}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{github.com/pytorch/pytorch v2.9.0, docs/source/notes/cuda.rst (BSD-3); ``...'' marks omitted lines, one line break added. Rates: 2 $\times$ 10,240$^3$ FLOP over each time (calcs.py).}
+  \note{[1.5 min] Two real artifacts for cause 1. Top: PyTorch's own documentation times one 10,240-square FP32 matrix multiply on an A100 (GA100) twice. With TF32 allowed, the Tensor Cores run it in 0.016 s; with TF32 off, the CUDA cores take 0.11 s. Bottom: printed here with torch 2.13.0, the default for matrix multiplies is False, while convolutions through cuDNN default to True. ENGAGE: a team ports FP32 transformer code to A100s and sees idle Tensor Cores; which line explains it? Expected: the matmul default. Step 2: 0.11 / 0.016 = 6.9 times (calcs.py); the documentation says about 7. The derived rates, 19.5 TFLOP/s and 134, sit at and below the A100 datasheet's 19.5 FP32 and 156 TF32 peaks, so the flag decides which ceiling applies. WARN: TF32 keeps 10 mantissa bits; the same page reports a relative error about two orders of magnitude larger than FP32. The fix is a decision about accuracy, not a free switch. In a profiler the two runs show different kernel names; reading them is the habit the Diagnose slide asks for. FLEX: [CORE].}
 \end{frame}
 
 % =============================================================================
 % SECTION: ONE ACTIVATION
 % =============================================================================
-\mlsysnote{[0.5 min] Put the mapping choices together by following one activation map. Read the divider question.}
+\mlsysnote{[0.5 min] Put the mapping choices together by following one activation map. Read the divider question. [CORE]}
 \mlsysdivider{Where does one activation travel, and which choice decides each step?}{Hardware Acceleration, \S11.5.2 (Lighthouse 11.2), Napkin Math 11.6}
 \section{One Activation}
 
@@ -403,15 +519,16 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Hardware Acceleration, Lighthouse 11.2 (H100; energies are 45 nm estimates).}
-  \note{[3.5 min] The same machine diagram as Part 1's memory tiers, now following one map and naming the choice behind each step. Step 1: the previous kernel wrote the map to HBM: 201 KB per image at INT8, 401 KB at FP16, about 32.1 microjoules to read once at 160 pJ per byte. Whether it goes there at all is a fusion decision. Step 2: L2's 50 MB holds the whole batch at INT8, if the next kernel runs soon; the schedule decides. Step 3: ENGAGE: fingers up for fits or does not fit, FP16 then INT8. Step 4: INT8 fits one SM's 228 KB (201); FP16 does not (401). Format and tile size decide which tier can hold it. The SRAM box stands for L2, shared memory, and registers. The registers feed the Tensor Cores at about 0.1 pJ per access, and the dataflow decides how long a value stays there. WARN: a kernel stages tiles, not whole maps; whole-map fit is the chapter's simple test. FLEX: [CORE].}
+  \note{[3 min] Part 1's machine diagram, now following one map and naming the choice behind each step. Step 1: the previous kernel wrote the map to HBM: 201 KB per image at INT8, 401 KB at FP16, about 32.1 microjoules to read once at the chapter's 160 pJ per byte, a 45 nm DRAM estimate (next slide). Whether it goes there at all is a fusion decision. Step 2: L2's 50 MB holds the whole batch at INT8 (6.4 MB), if the next kernel runs soon; the schedule decides. Step 3: ENGAGE: fingers up for fits or does not fit, FP16 then INT8. Step 4: INT8 fits one SM's 228 KB (201); FP16 does not (401). Format and tile size decide which tier can hold it. The registers feed the Tensor Cores at about 0.1 pJ per access, and the dataflow decides how long a value stays there. WARN: a kernel stages tiles, not whole maps; whole-map fit is the chapter's simple test. FLEX: [CORE].}
 \end{frame}
 
 \begin{frame}{Fused, the map skips HBM; in INT8, each trip costs half}
   \centering
-  \safeimg[width=0.95\textwidth,height=3.6cm,keepaspectratio]{boundary.pdf}\\[0.3cm]
+  \safeimg[width=0.95\textwidth,height=3.6cm,keepaspectratio]{boundary.pdf}\\[0.1cm]
+  {\small 160 pJ/byte is a 45 nm DRAM estimate; 7 nm HBM2 I/O is 31 to 56. The ratios hold.}\\[0.25cm]
   \uncover<2->{\normalsize Recall, Part 1: activations kept INT8 decide which side of\\ the INT8 ridge this conv sits on.}
-  \mlsyscredit{Derived from Hardware Acceleration, Lighthouse 11.2 (160 pJ per byte, 45 nm estimate; a write assumed to cost as much as a read); Napkin Math 11.6.}
-  \note{[2.5 min] Step 1: each unfused layer boundary writes the map to HBM and reads it back. At 160 pJ per byte that is about 64 microjoules per image at INT8 and about 128 at FP16. Fused, the map stays on chip and pays neither trip. These energies are derived and assume a write costs as much as a read. Step 2: recall Part 1's diagnosis. With INT8 weights and INT8 activations, the stage-3 convolution reaches 1,126 FLOP per byte; if its activations stay FP16 between layers, it reaches only about 569, below the 590.7 INT8 ridge. Whether activations stay INT8 is a choice the compiler makes. Land the segment: fusion keeps the map out of HBM, its format decides which tier can hold it, and the tile and dataflow decide how long it stays next to the arithmetic. FLEX: [OPTIONAL] step 2.}
+  \mlsyscredit{Derived (calcs.py): Hardware Acceleration, Lighthouse 11.2 (write = read), Napkin Math 11.6; Jouppi et al., ISCA 2021, Table 2 (HBM2, 64-bit access, I/O only).}
+  \note{[2.5 min] Step 1: each unfused layer boundary writes the map to HBM and reads it back. At the chapter's 160 pJ per byte that is about 64 microjoules per image at INT8 and about 128 at FP16; fused, the map stays on chip and pays neither trip. State the basis: 160 pJ per byte is Horowitz's 45 nm estimate for an off-chip DRAM read (640 pJ per 32-bit word), and it is not an H100 measurement. TPUv4i's authors updated the table to 7 nm: DDR3/4 I/O stays at about 162 pJ per byte, while HBM2, stacked beside the die, costs 31 to 56 pJ per byte for I/O alone, so the INT8 boundary costs 12.5 to 22.6 microjoules (calcs.py). The absolute values fall 2.8 to 5.1 times; the comparison does not change: fusion removes both trips and INT8 halves them. Step 2: recall Part 1. With INT8 activations the stage-3 convolution reaches 1,126 FLOP per byte; with FP16 activations about 569, below the 590.7 INT8 ridge. The compiler makes that choice. Land the segment: fusion keeps the map out of HBM, its format decides which tier can hold it, and the tile and dataflow decide how long it stays next to the arithmetic. FLEX: [OPTIONAL] step 2.}
 \end{frame}
 
 \begin{frame}{True or false: four claims about mapping}
@@ -427,7 +544,7 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Hardware Acceleration, Definition 11.4, equation 6, Systems Perspective 11.1, \S11.12; Zheng et al. 2020; NVIDIA guide \S2.3.}
-  \note{[3 min] Peer instruction: vote on all four, one minute with a neighbor, vote again. Step 2: all false. One: on GPUs, compilers such as XLA find strong mappings for common kernels, but for systolic arrays and custom chips compiler mappings can still lag hand-tuned schedules (Definition 11.4), and Ansor's gains show how much earlier compilers missed. Two: equation 6 caps the tile, and NVIDIA's guide notes that larger tiles leave fewer tiles to run in parallel. Three: at batch one there is no weight reuse to recover (Systems Perspective 11.1). Four: the chapter's fallacy: code full of vendor intrinsics, assembly, and nonstandard layouts takes months to port when a cheaper accelerator arrives (\S11.12). FLEX: [OPTIONAL]; for a 60-minute version keep statements two and three.}
+  \note{[2.5 min] Peer instruction: vote on all four, one minute with a neighbor, vote again. Step 2: all false. One: for systolic arrays and custom chips, compiler mappings can still lag hand-tuned schedules (Definition 11.4), and Ansor's gains show how much earlier compilers missed. Two: equation 6 caps the tile, and NVIDIA's guide notes that larger tiles leave fewer tiles to run in parallel. Three: at batch one there is no weight reuse to recover (Systems Perspective 11.1). Four: the chapter's fallacy: code full of vendor intrinsics, assembly, and nonstandard layouts takes months to port when a cheaper accelerator arrives (\S11.12). FLEX: [OPTIONAL]; for a 60-minute version keep statements two and three.}
 \end{frame}
 
 % =============================================================================
@@ -438,7 +555,7 @@
   \safeimg[width=0.95\textwidth,height=4.2cm,keepaspectratio]{ladder.pdf}\\[0.1cm]
   \uncover<2->{\small H100 stage-3 conv. At FP16, 563 FLOP/byte can reach 989 TFLOP/s only with tiles that fit and shapes that fill them. At INT8 it also needs INT8 activations: 1,126, not 569, against the 591 ridge.}
   \mlsyscredit{Boehm, ``How to Optimize a CUDA Matmul Kernel for cuBLAS-like Performance: a Worklog,'' 2022, results table (FP32, one A6000); Hardware Acceleration, Napkin Math 11.6 and 11.10.}
-  \note{[3 min] Back to the hook. Step 1: Boehm's kernels, rung by rung, each labeled with today's idea. Coalesced loads, 6.4 times: a layout choice, threads reading adjacent addresses. Shared-memory tiles: explicit tile staging. One- and two-dimensional register tiles, 2.8 and 1.9 times: a bigger tile, more reuse per byte loaded. Vector loads: wider transactions. Autotuning: a search over tile sizes, what a compiler does. Warp tiles: one more tier of the same idea. Every rung keeps operands closer to the arithmetic; none does less arithmetic. Step 2: the same reasoning on the H100, one precision at a time. At FP16 the stage-3 conv does 563 FLOP per byte, above the 295 ridge, so it can reach the 989 TFLOP/s FP16 ceiling only with tiles that fit shared memory and shapes that fill whole tiles and waves. On the INT8 path it also needs its activations kept INT8: then it does 1,126 FLOP per byte, above the 591 INT8 ridge; with FP16 activations it does about 569, just below it. ENGAGE: which rung would you try first on a new chip? FLEX: [CORE].}
+  \note{[2.5 min] Back to the hook. Step 1: Boehm's kernels, rung by rung, each labeled with today's idea (step ratios from calcs.py). Coalesced loads, 6.4 times: a layout choice. Shared-memory tiles, 1.5: the staging we read in kernel 3. Register tiles, 2.8 and 1.9: a bigger tile, more reuse per byte. Vector loads: wider transactions. Autotuning: a search over tile sizes, what a compiler does. Warp tiles: one more tier. Every rung keeps operands closer to the arithmetic; none does less arithmetic. Step 2: the same reasoning on the H100, one precision at a time. At FP16 the stage-3 conv does 563 FLOP per byte, above the 295 ridge, so it can reach the 989 TFLOP/s FP16 ceiling only with tiles that fit shared memory and shapes that fill whole tiles and waves. On the INT8 path it also needs its activations kept INT8: then it does 1,126 FLOP per byte, above the 591 INT8 ridge; with FP16 activations it does about 569, just below it. ENGAGE: which rung would you try first on a new chip? FLEX: [CORE].}
 \end{frame}
 
 \begin{frame}{Takeaways}
@@ -446,7 +563,7 @@
   \thumbline{layertile_cost_step3}{A loop order keeps one operand in place; a tile that fits keeps all three close.}\\[0.15cm]
   \thumbline{wave_step2}{A shape one past a tile, or a tile count one past a wave, pays for the whole extra tile or wave.}\\[0.15cm]
   \thumbline{compiler_step4}{A compiler searches these choices for every layer; check which kernel actually ran.}
-  \note{[1 min] One line per segment. Ask students which slide taught each line. If short on time, read the second and third.}
+  \note{[1 min] One line per segment. Ask students which slide taught each line. If short on time, read the second and third. [CORE]}
 \end{frame}
 
 \begin{frame}{Open questions}
@@ -456,7 +573,7 @@
     \item Model designers already choose widths of 512 rather than 500. Who should fit shapes to tiles and waves: the model team or the compiler?
     \item A fixed dataflow is efficient and inflexible; a GPU depends on software to find reuse. Which wins as models change faster than chips?
   \end{itemize}
-  \note{[1 min] No single answer. Pick one for two minutes of discussion if time allows, or assign one as a short written response. The first connects to Ansor and Definition 11.4; the third to the first TPU from Part 1.}
+  \note{[1 min] No single answer. Pick one for two minutes of discussion if time allows, or assign one as a short written response. The first connects to Ansor and Definition 11.4; the third to the first TPU from Part 1. [CORE]}
 \end{frame}
 
 \begin{frame}{Read and explore}
@@ -469,7 +586,7 @@
     \item Chen et al., ``TVM: An Automated End-to-End Optimizing Compiler,'' OSDI 2018.
     \item Kung, ``Why Systolic Architectures?'' IEEE Computer 1982.
   \end{itemize}
-  \note{[0.5 min] The chapter first, with Checkpoint 11.4 and the self-check questions for \S11.7 and \S11.8. Boehm's worklog takes the hook kernel by kernel; read kernels 1 to 5 with the code open. NVIDIA's guide is the source of the measured tile and wave curves. Eyeriss gives the dataflow taxonomy and the row-stationary design. TVM shows fusion, schedules, and learned cost models in one compiler. Kung is the original case for systolic arrays, including their timing. FLEX: add the TinyTorch matrix-multiplication and acceleration modules if your course assigns them.}
+  \note{[0.5 min] The chapter first, with Checkpoint 11.4 and the self-check questions for \S11.7 and \S11.8. Boehm's worklog takes the hook kernel by kernel; read kernels 1 to 5 with the code open. NVIDIA's guide is the source of the measured tile and wave curves. Eyeriss gives the dataflow taxonomy and the row-stationary design. TVM shows fusion, schedules, and learned cost models in one compiler. Kung is the original case for systolic arrays, including their timing. FLEX: add the TinyTorch matrix-multiplication and acceleration modules if your course assigns them. [CORE]}
 \end{frame}
 
 \begin{frame}[c]
@@ -482,7 +599,7 @@
       {\LARGE\bfseries Every vendor claims to be fastest. How do we measure fairly?}
     \end{column}
   \end{columns}
-  \note{[0.5 min] Both parts of this lecture reasoned from ceilings and models. Lecture 12 measures where a real run sits below those ceilings, and how to compare chips when each vendor quotes a different peak.}
+  \note{[0.5 min] Both parts of this lecture reasoned from ceilings and models. Lecture 12 measures where a real run sits below those ceilings, and how to compare chips when each vendor quotes a different peak. [CORE]}
 \end{frame}
 
 \end{document}

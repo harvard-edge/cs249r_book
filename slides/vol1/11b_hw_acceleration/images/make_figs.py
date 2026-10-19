@@ -68,6 +68,11 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import calcs  # noqa: E402  (every derived label below comes from calcs.OUT)
+
+V = calcs.OUT
+
 C = sp.C
 plt = sp.plt
 out = Path(__file__).parent
@@ -331,10 +336,10 @@ def wave4_svg(step):
                           1.5, 3))
     parts.append(svg_text(px, 196, "cycle 0", 20, "400", C["neutral"], "start"))
     parts.append(svg_text(px + 13 * 32 + 28, 196, "13", 20, "400", C["neutral"], "end"))
-    parts.append(svg_text(px, 250, "8 input rows: 8 + 2·4 − 2 = 14 cycles", 23, "700",
-                          C["text"], "start"))
-    parts.append(svg_text(px, 285, "busy on average: 8 / 14 = 57%", 23, "400",
-                          C["text"], "start"))
+    parts.append(svg_text(px, 250, f"8 input rows: 8 + 2·4 − 2 = {V['c4']} cycles", 23,
+                          "700", C["text"], "start"))
+    parts.append(svg_text(px, 285, f"busy on average: 8 / {V['c4']} = {V['busy4']}%", 23,
+                          "400", C["text"], "start"))
     parts.append(svg_text(x0, 372, "Orange: busy (number = input row it works on).   "
                           "Gray: done.   White: not reached yet.", 20, "400",
                           C["neutral"], "start"))
@@ -488,12 +493,15 @@ def layertile_cost_svg(step):
     def xpos(v):
         return x0 + (np.log10(v) - 4) * 100
 
-    for y, v, col, label in ((244, 8404992, C["danger"], "untiled, output stationary"),
-                             (312, 180224, C["data"], "four weight tiles")):
+    untiled = int(V["untiled"].replace(",", ""))
+    tiled = int(V["tiled"].replace(",", ""))
+    for y, v, col, label in ((244, untiled, C["danger"], "untiled, output stationary"),
+                             (312, tiled, C["data"], "four weight tiles")):
         parts.append(svg_text(x0, y, label, 20, "400", C["text"], "start"))
         parts.append(rect(x0, y + 13, xpos(v) - x0, 32, col, col, 1, 0))
         parts.append(svg_text(xpos(v) + 8, y + 29, f"{v:,}", 21, "700", col, "start"))
-    parts.append(svg_text(x0 + 250, 335, "47× fewer", 28, "700", C["data"], "start"))
+    parts.append(svg_text(x0 + 250, 335, f"{float(V['tile_gain']):.0f}× fewer", 28, "700",
+                          C["data"], "start"))
     parts.append('</g>')
     write_svg(f"layertile_cost_step{step}.svg", parts)
 
@@ -507,9 +515,9 @@ for k in (1, 2, 3):
 # square-ish tiles (derived from HA Sec. 11.7.5).
 tile_rows = [
     ("No reuse", 0.5, "danger", "0.5"),
-    ("128 × 128 tiles", 128 * 128 / 256, "memory", "64"),
-    ("256 × 128 tiles", 256 * 128 / 384, "memory", "85"),
-    ("Load each once", 2 * 4096 ** 3 / (3 * 4096 ** 2 * 2), "compute", "1,365"),
+    ("128 × 128 tiles", float(V["i128"]), "memory", f"{float(V['i128']):.0f}"),
+    ("256 × 128 tiles", float(V["i256"]), "memory", f"{float(V['i256']):.0f}"),
+    ("Load each once", float(V["ionce"]), "compute", f"{float(V['ionce']):,.0f}"),
 ]
 logbars(out / "tileintensity.svg", tile_rows, [(1, "1"), (10, "10"), (100, "100"),
                                               (1000, "1,000")], (0.2, 40000),
@@ -591,7 +599,8 @@ space_rows = [
     ("Placement", 1024, "neutral", "4⁵ = 1,024"),
     ("Loop order", 5040, "neutral", "7! = 5,040"),
     ("Parallelization", 120, "neutral", "6!/3! = 120"),
-    ("All three, one level", 1024 * 5040 * 120, "danger", "≈ 620 million"),
+    ("All three, one level", int(V["space"].replace(",", "")), "danger",
+     f"≈ {round(int(V['space'].replace(',', '')) / 1e6, -1):.0f} million"),
 ]
 for k in (1, 2):
     logbars(out / f"space_step{k}.svg", space_rows,
@@ -797,15 +806,17 @@ for k in (1, 2, 3, 4):
     diag_svg(k)
 
 # ================================================================ HBM energy per boundary
-MAP_BYTES = 56 * 56 * 64  # one image, INT8 (HA Lighthouse 11.2)
-PJ_PER_BYTE = 160         # 45 nm estimate (HA Lighthouse 11.2)
-int8_uj = 2 * MAP_BYTES * PJ_PER_BYTE / 1e6
-fp16_uj = 2 * 2 * MAP_BYTES * PJ_PER_BYTE / 1e6
+# 160 pJ per byte: HA Lighthouse 11.2, 45 nm DRAM estimate; 7 nm HBM2 I/O
+# range from Jouppi et al. 2021, Table 2. Values from calcs.py.
+fp16_uj = float(V["b_fp16"])
+int8_uj = float(V["b_int8"])
+hbm_lo, hbm_hi = (float(x) for x in V["b_hbm"].split(" to "))
 sp.hbars(out / "boundary.svg", [
-    ("Unfused, FP16", fp16_uj, "danger", f"{fp16_uj:.0f} µJ"),
-    ("Unfused, INT8", int8_uj, "memory", f"{int8_uj:.0f} µJ"),
+    ("Unfused, FP16, 45 nm", fp16_uj, "danger", f"{fp16_uj:.0f} µJ"),
+    ("Unfused, INT8, 45 nm", int8_uj, "memory", f"{int8_uj:.0f} µJ"),
+    ("Unfused, INT8, 7 nm HBM2", hbm_hi, "neutral", f"{hbm_lo:.1f} to {hbm_hi:.1f} µJ"),
     ("Fused", 0.0, "data", "about 0: the map stays on chip"),
-], "µJ", log=False, size=sp.SHORT,
+], "µJ", log=False, size=(5.8, 2.0),
     xlabel="HBM energy per image at one layer boundary (µJ, derived)")
 
 
@@ -898,7 +909,8 @@ for k in (1, 2):
     for edge in (128, 256, 384):
         ax.axvline(edge, color=C["neutral"], lw=1, ls=":")
     alpha = 1.0 if k == 2 else 0.0
-    ax.annotate("136: 148 TFLOP/s\n6% more work,\n36% more time",
+    ax.annotate(f"136: 148 TFLOP/s\n6% more work,\n"
+                f"{100 * (float(V['time36']) - 1):.0f}% more time",
                 (136, 148.2), xytext=(150, 22), textcoords="data",
                 fontsize=11, fontweight="bold", color=C["danger"], alpha=alpha,
                 arrowprops=dict(arrowstyle="->", color=C["danger"], alpha=alpha))
