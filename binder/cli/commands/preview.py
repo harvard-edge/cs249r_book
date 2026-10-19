@@ -5,10 +5,6 @@ Handles starting development servers with live reload for interactive developmen
 """
 
 import subprocess
-import signal
-import sys
-from pathlib import Path
-from typing import List, Optional
 from rich.console import Console
 
 console = Console()
@@ -34,39 +30,17 @@ class PreviewCommand:
             format_type: Format to preview ('html' only supported)
 
         Returns:
-            True if server started successfully, False otherwise
+            True if the server exited cleanly or was stopped with Ctrl+C.
         """
         if format_type != "html":
-            console.print(f"[yellow]⚠️ Preview only supports HTML format, not {format_type}[/yellow]")
+            console.print(f"[red]❌ Preview supports HTML only, not {format_type}. "
+                          f"Build other formats with: ./binder/binder build {format_type}[/red]")
             return False
 
         console.print("[blue]🌐 Starting full book preview server...[/blue]")
-
-        # Setup config
         config_name = self.config_manager.activate_config(format_type)
         console.print(f"[blue]🔗 Using {config_name}[/blue]")
-        console.print("[dim]🛑 Press Ctrl+C to stop the server[/dim]")
-
-        try:
-            # Start Quarto preview server
-            preview_cmd = ["quarto", "preview"]
-
-            console.print(f"[blue]💻 Command: {' '.join(preview_cmd)}[/blue]")
-
-            # Run preview server (this will block until Ctrl+C)
-            result = subprocess.run(
-                preview_cmd,
-                cwd=self.config_manager.book_dir
-            )
-
-            return result.returncode == 0
-
-        except KeyboardInterrupt:
-            console.print("\n[yellow]🛑 Preview server stopped[/yellow]")
-            return True
-        except Exception as e:
-            console.print(f"[red]❌ Preview server error: {e}[/red]")
-            return False
+        return self._serve(["quarto", "preview"])
 
     def preview_chapter(self, chapter_name: str) -> bool:
         """Start preview server for a specific chapter.
@@ -75,9 +49,8 @@ class PreviewCommand:
             chapter_name: Name of the chapter to preview
 
         Returns:
-            True if server started successfully, False otherwise
+            True if the server exited cleanly or was stopped with Ctrl+C.
         """
-        # Find the chapter file
         chapter_file = self.chapter_discovery.find_chapter_file(chapter_name)
         if not chapter_file:
             console.print(f"[red]❌ No chapter found matching '{chapter_name}'[/red]")
@@ -85,33 +58,26 @@ class PreviewCommand:
             self.chapter_discovery.show_chapters()
             return False
 
-        target_path = str(chapter_file.relative_to(self.config_manager.book_dir))
-        chapter_display_name = str(chapter_file.relative_to(self.config_manager.book_dir)).replace(".qmd", "")
-
-        console.print(f"[blue]🌐 Starting preview for[/blue] [bold]{chapter_display_name}[/bold]")
-
-        # Setup HTML config for preview
+        target_path = chapter_file.relative_to(self.config_manager.book_dir).as_posix()
+        console.print(f"[blue]🌐 Starting preview for[/blue] [bold]{target_path.removesuffix('.qmd')}[/bold]")
         self.config_manager.activate_config("html")
+        return self._serve(["quarto", "preview", target_path])
 
+    def _serve(self, preview_cmd: list) -> bool:
+        """Run ``quarto preview`` in the books directory until it exits or Ctrl+C stops it."""
         console.print("[dim]🛑 Press Ctrl+C to stop the server[/dim]")
-
+        console.print(f"[blue]💻 Command: {' '.join(preview_cmd)}[/blue]")
         try:
-            # Start Quarto preview for specific file
-            preview_cmd = ["quarto", "preview", target_path]
-
-            console.print(f"[blue]💻 Command: {' '.join(preview_cmd)}[/blue]")
-
-            # Run preview server (this will block until Ctrl+C)
-            result = subprocess.run(
-                preview_cmd,
-                cwd=self.config_manager.book_dir
-            )
-
-            return result.returncode == 0
-
+            result = subprocess.run(preview_cmd, cwd=self.config_manager.book_dir)
         except KeyboardInterrupt:
             console.print("\n[yellow]🛑 Preview server stopped[/yellow]")
             return True
-        except Exception as e:
-            console.print(f"[red]❌ Preview server error: {e}[/red]")
+        except FileNotFoundError as e:
+            console.print(f"[red]❌ Could not start quarto: {e}[/red]")
+            console.print("[yellow]Check that Quarto is installed and on PATH: ./binder/binder doctor[/yellow]")
             return False
+        if result.returncode != 0:
+            console.print(f"[red]❌ {' '.join(preview_cmd)} exited with code {result.returncode} "
+                          f"(in {self.config_manager.book_dir}); see its output above.[/red]")
+            return False
+        return True

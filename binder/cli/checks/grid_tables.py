@@ -6,8 +6,6 @@ Grid tables use + for corners and borders. Pipe tables are the book's canonical 
 from __future__ import annotations
 
 import re
-from pathlib import Path
-from typing import List, Tuple
 
 
 def parse_alignment(separator_line: str) -> list[str]:

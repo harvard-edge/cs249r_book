@@ -279,6 +279,13 @@ class HardwareNode(BaseModel):
     def _validate_dispatch_tax(cls, v):
         return require_dimensionality(v, ureg.second, "dispatch_tax")
 
+    @property
+    def embodied_carbon(self) -> Optional[Quantity]:
+        """Embodied manufacturing carbon as a Pint Quantity in kg, if present."""
+        if self.embodied_carbon_kg is None:
+            return None
+        return Q_(self.embodied_carbon_kg, "kg")
+
     def ridge_point(self, precision: Optional[str] = None) -> Quantity:
         """
         Calculates the Roofline ridge point (Intensity threshold).

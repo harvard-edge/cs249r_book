@@ -18,15 +18,15 @@ import re
 import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
 from cli.core.bib_mechanical import run_mechanical_fixes
+from cli.core.discovery import display_path, qmd_files_under
 
 console = Console()
 
@@ -224,10 +224,7 @@ class BibCommand:
         if path_arg:
             p = Path(path_arg)
             return p if p.is_absolute() else Path.cwd() / p
-        base = self.config_manager.book_dir
-        if vol1 or vol2:
-            return base
-        return base
+        return self.config_manager.book_dir
 
     # ------------------------------------------------------------------
     # Helpers
@@ -239,26 +236,18 @@ class BibCommand:
             return [root]
         return sorted(root.rglob("*.bib"))
 
-    def _find_qmd_files(self, root: Path) -> List[Path]:
-        """Find all .qmd files under root."""
-        if root.is_file():
-            return [root] if root.suffix == ".qmd" else []
-        return sorted(root.rglob("*.qmd"))
-
     def _count_entries(self, bib_path: Path) -> int:
         """Count @type{key, entries in a .bib file."""
-        try:
-            content = bib_path.read_text(encoding="utf-8")
-            return len(re.findall(r"^@\w+\{", content, re.MULTILINE))
-        except Exception:
-            return 0
+        content = bib_path.read_text(encoding="utf-8")
+        return len(re.findall(r"^@\w+\{", content, re.MULTILINE))
 
     def _extract_cited_keys(self, qmd_path: Path) -> Set[str]:
-        """Extract all citation keys from a .qmd file."""
-        try:
-            content = qmd_path.read_text(encoding="utf-8")
-        except Exception:
-            return set()
+        """Extract all citation keys from a .qmd file.
+
+        Read errors propagate: treating an unreadable chapter as citing nothing
+        would mark its entries unused and let ``bib clean`` delete them.
+        """
+        content = qmd_path.read_text(encoding="utf-8")
         # Standard @key citations
         keys = set(re.findall(r"@([\w\d:\-_.]+)", content))
         # Filter out cross-ref prefixes
@@ -271,30 +260,17 @@ class BibCommand:
 
     def _extract_bib_keys(self, bib_path: Path) -> Set[str]:
         """Extract all entry keys from a .bib file."""
-        try:
-            content = bib_path.read_text(encoding="utf-8")
-            return set(re.findall(r"^@\w+\{([^,\s]+)", content, re.MULTILINE))
-        except Exception:
-            return set()
+        content = bib_path.read_text(encoding="utf-8")
+        return set(re.findall(r"^@\w+\{([^,\s]+)", content, re.MULTILINE))
 
     def _bib_for_qmd(self, qmd_path: Path) -> Optional[Path]:
         """Find the .bib file referenced in a .qmd file's YAML front matter."""
-        try:
-            content = qmd_path.read_text(encoding="utf-8")
-        except Exception:
-            return None
+        content = qmd_path.read_text(encoding="utf-8")
         m = re.search(r"^bibliography:\s*([\w\-.]+\.bib)\s*$", content, re.MULTILINE)
         if m:
             bib = qmd_path.parent / m.group(1)
             return bib if bib.exists() else None
         return None
-
-    def _relative(self, path: Path) -> str:
-        """Return ``path`` relative to the book dir, or the full path if it lies outside."""
-        try:
-            return str(path.relative_to(self.config_manager.book_dir))
-        except ValueError:
-            return str(path)
 
     # ------------------------------------------------------------------
     # Mechanical fixes
@@ -338,7 +314,7 @@ class BibCommand:
         for bib in bib_files:
             count = self._count_entries(bib)
             total += count
-            table.add_row(self._relative(bib), str(count))
+            table.add_row(display_path(bib, self.config_manager.book_dir), str(count))
 
         console.print(Panel(table, title="Bibliography Files", border_style="cyan"))
         console.print(
@@ -352,7 +328,7 @@ class BibCommand:
 
     def _run_clean(self, root: Path, dry_run: bool = False) -> bool:
         """Remove unused entries from .bib files."""
-        qmd_files = self._find_qmd_files(root)
+        qmd_files = qmd_files_under(root)
         if not qmd_files:
             console.print("[yellow]No QMD files found.[/yellow]")
             return False
@@ -389,7 +365,7 @@ class BibCommand:
         if is_narrow:
             console.print(
                 "[yellow]⚠ Narrow scope:[/yellow] Only citations from QMD files "
-                f"under [cyan]{self._relative(root)}[/cyan] are visible.\n"
+                f"under [cyan]{display_path(root, self.config_manager.book_dir)}[/cyan] are visible.\n"
                 "  Entries cited by other chapters may appear unused. "
                 "Use the full [cyan]books[/cyan] tree for safe cleaning.\n"
             )
@@ -403,7 +379,7 @@ class BibCommand:
         for bib_path, cited_keys in sorted(bib_cited.items()):
             bib_keys = self._extract_bib_keys(bib_path)
             unused = bib_keys - cited_keys
-            rel = self._relative(bib_path)
+            rel = display_path(bib_path, self.config_manager.book_dir)
 
             if not unused:
                 console.print(f"  [green]✓[/green] {rel}: all {len(bib_keys)} entries used")
@@ -485,6 +461,8 @@ class BibCommand:
             "Mechanical section 5 fixes ([cyan]binder bib mechanical[/cyan])...\n"
         )
         if run_mechanical_fixes(repo, mechanical_files) != 0:
+            console.print("[red]Step 1/3 failed: fix the mechanical issues reported above, then rerun "
+                          "./binder/binder bib normalize.[/red]")
             return False
 
         if not shutil.which("pre-commit"):
@@ -590,7 +568,8 @@ class BibCommand:
         if result.returncode == 0:
             console.print("\n[green]Done.[/green]")
             return True
-        console.print("\n[red]sync-preserve reported failures.[/red]")
+        console.print(f"\n[red]{script.name} exited with code {result.returncode}; "
+                      "see the failures it printed above.[/red]")
         return False
 
     # ------------------------------------------------------------------
@@ -664,7 +643,9 @@ class BibCommand:
         if not resolved:
             console.print(
                 "[red]Authentication failed:[/red] Could not verify or retrieve canonical "
-                "metadata from primary external registries."
+                "metadata from primary external registries. Lookup errors, if any, are "
+                "printed above; check the identifier or pass a different source "
+                "(--doi, --arxiv, --isbn, --url)."
             )
             return False
 
@@ -757,7 +738,7 @@ class BibCommand:
         else:
             source_desc, resolved = f"URL {url}", bib_gateway.fetch_url(url)
         if not resolved:
-            console.print(f"[red]Could not resolve {source_desc}.[/red]")
+            console.print(f"[red]Could not resolve {source_desc}; lookup errors, if any, are printed above.[/red]")
             return False
 
         ok, msg, _ = bib_gateway.reseal_entry(repo, key, resolved, note, dry_run=dry_run)

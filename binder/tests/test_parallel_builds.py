@@ -377,3 +377,90 @@ def test_debug_bisection_writes_truncated_chapters_only_into_the_workspace(tmp_p
     failing = debugger._binary_search_sections(session, chapter, "training", "vol1", "pdf", relative)
     assert failing == 3
     assert session.labels[:2] == ["preamble", "full"]
+
+
+def _dead_pid() -> int:
+    process = subprocess.Popen([sys.executable, "-c", "pass"])
+    process.wait()
+    return process.pid
+
+
+def test_stale_runs_of_exited_processes_are_removed_and_pruned(repo):
+    snapshot = workspace.take_snapshot(repo)
+    dead = _dead_pid()
+    stale = workspace.create_workspace(snapshot, workspace.workspace_path(f"20261019-120000-{dead}", "worker-1"))
+    live = workspace.create_workspace(snapshot, workspace.workspace_path(f"20261019-120001-{os.getppid()}", "worker-1"))
+    kept = workspace.create_workspace(snapshot, workspace.workspace_path(f"20261019-120002-{dead}", "worker-1"))
+    workspace.mark_kept(kept)
+    other = workspace.WORKSPACE_ROOT / "not-a-run"
+    other.mkdir()
+    assert registered_worktrees(repo) == 4
+
+    removed = workspace.remove_stale_runs(repo)
+
+    assert removed == [stale.path.parent.resolve()]
+    assert not stale.path.parent.exists()
+    assert live.path.exists() and kept.path.exists() and other.exists()
+    assert registered_worktrees(repo) == 3
+
+    assert workspace.remove_stale_runs(repo, include_kept=True) == [kept.path.parent.resolve()]
+    assert live.path.exists()
+    workspace.remove_workspace(live)
+    assert registered_worktrees(repo) == 1
+
+
+def test_run_jobs_sweeps_stale_runs_before_starting(repo, tmp_path):
+    snapshot = workspace.take_snapshot(repo)
+    leftover = workspace.create_workspace(
+        snapshot, workspace.workspace_path(f"20261019-120000-{_dead_pid()}", "worker-1"))
+    results = run_jobs(repo, [BuildJob("pdf", "vol1")], tmp_path / "run")
+    assert results[0].ok
+    assert not leftover.path.parent.exists()
+    assert list(workspace.WORKSPACE_ROOT.iterdir()) == []
+    assert registered_worktrees(repo) == 1
+
+
+def test_kept_workspaces_are_marked_and_survive_the_sweep(repo, tmp_path):
+    results = run_jobs(repo, [BuildJob("pdf", "vol1")], tmp_path / "run", keep_workspaces=True)
+    assert results[0].ok
+    (run_dir,) = list(workspace.WORKSPACE_ROOT.iterdir())
+    assert (run_dir / workspace.KEEP_MARKER).exists()
+    workspace.remove_stale_runs(repo, include_kept=True)  # own pid: still not stale
+    assert run_dir.exists()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="process groups are POSIX-only")
+def test_sigterm_during_run_jobs_stops_builds_and_removes_worktrees(repo, tmp_path):
+    import threading
+    timer = threading.Timer(2.0, os.kill, (os.getpid(), signal.SIGTERM))
+    timer.start()
+    started = time.monotonic()
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            run_jobs(repo, [BuildJob("pdf", "vol1", "slow")], tmp_path / "run")
+    finally:
+        timer.cancel()
+    assert time.monotonic() - started < 30
+    assert list(workspace.WORKSPACE_ROOT.iterdir()) == []
+    assert registered_worktrees(repo) == 1
+    assert signal.getsignal(signal.SIGTERM) is not None
+
+
+def test_legacy_volume_words_are_chapters_with_all():
+    cli = object.__new__(MLSysBookCLI)
+    assert cli._parse_build_args(["pdf", "intro", "--all"])[1:4] == (None, True, "intro")
+
+
+def test_interrupt_during_build_all_stops_remaining_volumes(tmp_path):
+    built = []
+
+    def build_volume(volume, *args, **kwargs):
+        built.append(volume)
+        cli.build_command.interrupted = True
+        return False
+
+    cli = object.__new__(MLSysBookCLI)
+    cli.config_manager = SimpleNamespace(book_dir=tmp_path, show_active_config=lambda: None)
+    cli.build_command = SimpleNamespace(build_volume=build_volume, interrupted=False)
+    assert not cli.handle_build_command(["pdf", "--all"])
+    assert built == ["vol1"]

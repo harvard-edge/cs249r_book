@@ -59,7 +59,15 @@ def _pick_slope_label_x(x_slope_start, ridge_point, workload_ais):
     return float(10.0**best_u)
 
 
-def plot_roofline(hardware_node, workloads=None, title=None):
+def plot_roofline(
+    hardware_node,
+    workloads=None,
+    title=None,
+    *,
+    efficiency: float = 1.0,
+    batch_size: int = 1,
+    precision: str = "fp16",
+):
     """
     Plots a publication-quality Roofline Model for a given HardwareNode.
 
@@ -68,9 +76,10 @@ def plot_roofline(hardware_node, workloads=None, title=None):
     - Memory-bound and compute-bound regions shaded and labeled
     - Memory bandwidth ceiling (diagonal) and compute ceiling (flat)
     - Workloads plotted with bottleneck classification
+    - Optional efficiency derate, batch_size, and precision forwarded to SingleNodeModel
     """
     # 1. PARAMETERS
-    peak_flops = hardware_node.compute.peak_flops.to("TFLOPs/s").magnitude
+    peak_flops = hardware_node.compute.peak_flops.to("TFLOPs/s").magnitude * efficiency
     peak_bw = hardware_node.memory.bandwidth.to("GB/s").magnitude
     ridge_point = peak_flops / (peak_bw / 1000)  # FLOP/Byte
 
@@ -134,7 +143,13 @@ def plot_roofline(hardware_node, workloads=None, title=None):
         from ..engine.solvers import SingleNodeModel
 
         for model in workloads:
-            profile = SingleNodeModel().solve(model, hardware_node, efficiency=1.0)
+            profile = SingleNodeModel().solve(
+                model,
+                hardware_node,
+                batch_size=batch_size,
+                precision=precision,
+                efficiency=efficiency,
+            )
             ai = profile.arithmetic_intensity.magnitude
             perf = min(peak_bw * ai / 1000, peak_flops)
             resolved_workloads.append((model, ai, perf))

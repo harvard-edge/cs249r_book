@@ -37,8 +37,8 @@ def main():
             precision="fp16"
         )
         
-        print(f"Latency (Batch 1): {prof.latency:.2f}")
-        print(f"Memory Footprint: {prof.memory_footprint.to('GB'):.2f}")
+        print(f"Latency (Batch 1): {prof.latency:.2f~P}")
+        print(f"Memory Footprint: {prof.memory_footprint.to('GB'):.2f~P}")
         print(f"Bottleneck: {prof.bottleneck}")
         
     except Exception as e:

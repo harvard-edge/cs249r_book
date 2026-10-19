@@ -203,7 +203,7 @@ def test_cli_prefixed_html_uses_volume_scoped_dispatch(tmp_path):
     command.build_chapters_with_volume = Mock(return_value=True)
     command.build_html_only = Mock(return_value=True)
     cli = object.__new__(MLSysBookCLI)
-    cli.config_manager = Mock()
+    cli.config_manager = Mock(book_dir=books)
     cli.build_command = command
     assert cli.handle_build_command(['html', 'vol4/01_boundary/01_boundary.qmd'])
     command.build_chapters_with_volume.assert_called_once_with(
@@ -355,3 +355,25 @@ def test_chapters_from_several_volumes_are_rejected(tmp_path):
     assert not command.build_chapters(['vol4/01_boundary', 'vol3/05_memory'], 'pdf')
     command.build_chapters_with_volume.assert_not_called()
     command._run_command.assert_not_called()
+
+
+@pytest.mark.parametrize('start', ('.', 'books', 'binder'))
+def test_config_manager_root_is_repository_root_from_any_start_dir(tmp_path, start):
+    (tmp_path / 'books' / 'config').mkdir(parents=True)
+    (tmp_path / 'books' / 'vol1').mkdir()
+    (tmp_path / 'binder').mkdir()
+    manager = ConfigManager(tmp_path / start)
+    assert manager.book_dir == tmp_path / 'books'
+    assert manager.root_dir == tmp_path
+
+
+def test_chapter_list_falls_back_to_line_scan_when_yaml_is_invalid(tmp_path, capsys):
+    from binder.cli.core.discovery import get_chapters_from_config
+
+    config = tmp_path / 'config' / '_quarto-pdf-vol1.yml'
+    config.parent.mkdir()
+    stems = [f'0{i}_ch' for i in range(1, 7)]
+    config.write_text('book:\n  chapters:\n' + ''.join(f'    - vol1/{s}/{s}.qmd\n' for s in stems)
+                      + '  bad: [unclosed\n')
+    assert get_chapters_from_config(tmp_path, 'vol1') == stems
+    assert 'falling back to a line scan' in capsys.readouterr().err

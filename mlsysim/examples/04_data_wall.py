@@ -29,7 +29,7 @@ def main():
     storage_bw = Q_("3.0 GB/s")
     
     print(f"Storage Bandwidth: {storage_bw}")
-    print(f"Batch Data Size: {batch_bytes.to('MB'):.2f}\n")
+    print(f"Batch Data Size: {batch_bytes.to('MB'):.2f~P}\n")
     
     print(f"{'GPU':<10} | {'Compute Time':<15} | {'I/O Time':<15} | {'GPU Utilization':<15}")
     print("-" * 65)

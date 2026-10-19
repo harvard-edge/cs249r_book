@@ -115,6 +115,16 @@ class Sourced(float):
         """Returns the underlying float value of the sourced scalar."""
         return float(self)
 
+    @property
+    def magnitude(self) -> float:
+        """Quantity-compatible alias returning the underlying float value."""
+        return float(self)
+
+    def to(self, unit: str = "dimensionless"):
+        """Convert this dimensionless sourced scalar to a Pint Quantity."""
+        from .units import Q_
+        return Q_(float(self), "dimensionless").to(unit)
+
     def render_markdown(self) -> str:
         """
         Renders a Markdown representation of the sourced scalar.

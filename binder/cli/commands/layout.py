@@ -32,6 +32,8 @@ from rich.panel import Panel
 from rich.rule import Rule
 from rich.table import Table
 
+from ..core.discovery import format_volume_display_name
+
 console = Console()
 
 
@@ -1547,7 +1549,7 @@ class LayoutCommand:
             console.print("[red]Use --vol1 or --vol2.[/red]")
             return False
 
-        volume_label = "Volume I" if volume == "vol1" else "Volume II"
+        volume_label = format_volume_display_name(volume)
         if build_first:
             console.print(
                 f"[bold blue]Auto layout[/bold blue] building {volume_label} PDF first"
@@ -2290,8 +2292,6 @@ class LayoutCommand:
 
         by_issue = Counter(row["finding"].issue for row in rows)
         overlaps = by_issue.get("overlap", 0)
-        ob = by_issue.get("overflow-bottom", 0)
-        ot = by_issue.get("overflow-top", 0)
 
         if csv:
             self._render_margin_geometry_csv(rows)
@@ -3205,11 +3205,15 @@ class LayoutCommand:
         try:
             import pypdf  # type: ignore
         except ImportError:
+            print("binder layout: pypdf is not installed, so findings will not name their chapter "
+                  "or printed page label (pip install pypdf)", file=sys.stderr)
             return [], []
 
         try:
             r = pypdf.PdfReader(str(pdf_path))
-        except Exception:
+        except Exception as exc:
+            print(f"binder layout: could not read the outline of {pdf_path} ({type(exc).__name__}: {exc}), "
+                  "so findings will not name their chapter", file=sys.stderr)
             return [], []
 
         n = len(r.pages)
@@ -3739,7 +3743,6 @@ class LayoutCommand:
             return None
 
         body_bottom = max(c["bottom"] for c in body_chars)
-        body_top = min(c["top"] for c in body_chars)
 
         usable_height = footer_y - header_y
         whitespace_pts = footer_y - body_bottom
