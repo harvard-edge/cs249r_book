@@ -69,8 +69,13 @@ def batch_ms(b):
 HOOK_B1_USD, HOOK_B8_USD = 3.92, 0.52
 HOOK_B1_MS, HOOK_B8_MS = 3.5, 3.8
 hook_ratio = HOOK_B1_USD / HOOK_B8_USD
-hook_extra_ms = HOOK_B8_MS - HOOK_B1_MS
-hook_extra_pct = hook_extra_ms / HOOK_B8_MS * 100
+# Panel fix L7: the extra time of a batch of 8 comes from the example's own
+# rates (283 and 2,129 requests/s), not from the rounded 3.5 and 3.8 ms labels.
+HOOK_B1_RATE, HOOK_B8_RATE = 283, 2129   # requests/s, MS Example 13.1
+hook_b1_ms = 1 / HOOK_B1_RATE * 1000
+hook_b8_ms = 8 / HOOK_B8_RATE * 1000
+hook_extra_ms = hook_b8_ms - hook_b1_ms
+hook_extra_pct = hook_extra_ms / hook_b8_ms * 100
 
 # ---------------------------------------------------------------------------
 # Recall from Lecture 12: MLPerf Inference v5.0, 5.0-0032, RTX 4090,
@@ -353,7 +358,8 @@ syn_cards_photo = est_final / 4              # the photo shows four H100 cards
 def main():
     head("Hook (Example 13.1)")
     show("cost ratio", f"{f(hook_ratio)}x")
-    show("batch 8 adds", f"{f(hook_extra_ms)} ms ({f(hook_extra_pct, 0)} percent of 3.8 ms)")
+    show("batch 1 / batch 8 time from rates", f"{hook_b1_ms:.3f} / {hook_b8_ms:.3f} ms")
+    show("batch 8 adds", f"{hook_extra_ms:.2f} ms ({hook_extra_pct:.0f} percent of the batch-8 time)")
     head("Recall Lecture 12")
     show("one at a time", f"about {sig(ss_rate, 3):,.0f}/s")
     show("Offline over one at a time", f"{f(off_over_ss)}x")

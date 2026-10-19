@@ -247,7 +247,10 @@ def cost():
 def roi():
     invest = BUILD + OPERATE
     vals = {n: (SAVE_PER_RUN * n - invest) / invest * 100 for n in (1, 5, 10, 50)}
-    return dict(invest=invest, vals=vals, breakeven=invest / SAVE_PER_RUN)
+    # Panel fix L10: the slide shows savings as a multiple of the investment
+    # (savings / investment) instead of a percentage return such as +809%.
+    mult = {n: SAVE_PER_RUN * n / invest for n in (1, 5, 10, 50)}
+    return dict(invest=invest, vals=vals, mult=mult, breakeven=invest / SAVE_PER_RUN)
 
 
 if __name__ == "__main__":
@@ -393,4 +396,6 @@ if __name__ == "__main__":
     show("investment ($)", f"{o['invest']:,}")
     for n, val in o["vals"].items():
         show(f"return after {n} runs (%)", f"{val:+.0f}")
+    for n, m in o["mult"].items():
+        show(f"savings / investment after {n} runs (x)", f"{m:.1f}")
     show("break-even (runs)", f"{o['breakeven']:.1f}")

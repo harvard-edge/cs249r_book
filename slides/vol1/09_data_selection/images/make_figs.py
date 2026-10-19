@@ -386,19 +386,19 @@ def cost():
 def roi():
     o = calcs.roi()
     inv, save = o["invest"], calcs.SAVE_PER_RUN
-    runs = np.array(list(o["vals"]))
-    vals = np.array(list(o["vals"].values()))
+    runs = np.array(list(o["mult"]))
+    vals = np.array(list(o["mult"].values()))
     fig, ax = plt.subplots(figsize=(5.8, 2.3))
     xs = np.linspace(1, 50, 200)
-    ax.plot(xs, (save * xs - inv) / inv * 100, color=C["data"], lw=3)
-    ax.axhline(0, color=C["neutral"], lw=1)
+    ax.plot(xs, save * xs / inv, color=C["data"], lw=3)
+    ax.axhline(1, color=C["neutral"], lw=1)
     ax.axvline(o["breakeven"], color=C["neutral"], lw=1, ls="--")
-    ax.text(o["breakeven"] * 1.05, 500, f"break-even:\n{o['breakeven']:.1f} runs", color=C["neutral"], fontsize=11)
+    ax.text(o["breakeven"] * 1.05, 5.2, f"break-even:\n{o['breakeven']:.1f} runs", color=C["neutral"], fontsize=11)
     for n, v in zip(runs, vals):
-        ck = "data" if v > 0 else "danger"
+        ck = "data" if v > 1 else "danger"
         ax.plot([n], [v], "o", ms=9, color=C[ck], zorder=5)
         off, ha = {50: ((-8, 4), "right"), 5: ((-6, -20), "right")}.get(n, ((9, -20), "left"))
-        ax.annotate(f"{v:+.0f}%", (n, v), xytext=off,
+        ax.annotate(f"{v:.1f}$\\times$", (n, v), xytext=off,
                     textcoords="offset points", fontsize=12, fontweight="bold",
                     color=C[ck], ha=ha)
     ax.set_xscale("log")
@@ -406,9 +406,9 @@ def roi():
     ax.set_xticklabels(["1", "5", "10", "50"])
     ax.minorticks_off()
     ax.set_xlim(0.85, 60)
-    ax.set_ylim(-260, 950)
+    ax.set_ylim(-1.2, 10.5)
     ax.set_xlabel("Training runs that reuse the deduplicated data (log scale)")
-    ax.set_ylabel("Return (%)")
+    ax.set_ylabel("Savings / cost")
     ax.grid(axis="y", color=C["grid"], lw=0.6)
     sp.save(fig, out / "roi_runs.svg")
 

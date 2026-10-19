@@ -115,7 +115,7 @@ concept_questions:
   - id: 10
     q: "Why does decode read every weight for every token?"
     picture: "two bars on a log axis: decode at 1 FLOP/byte against the H100 ridge at 295 FLOP/byte (both FP16); then the estimate card"
-    numbers: "decode 1.0 FLOP/byte in FP16 (6.7.4); H100 989 TFLOP/s dense FP16 and 3.35 TB/s, ridge 295 FLOP/byte (MLSysIM H100); a 70B model streams 140 GB per token (6.7.4): 140 GB / 3.35 TB/s = 42 ms, at most about 24 tokens/s for one sequence (derived)"
+    numbers: "decode 1.0 FLOP/byte in FP16 (6.7.4); H100 989 TFLOP/s dense FP16 and 3.35 TB/s, ridge 295 FLOP/byte (MLSysIM H100); a 70B model streams 140 GB per token (6.7.4), more than one 80 GB H100 holds; split across two H100s as in §16.4, each reads 70 GB: 70 GB / 3.35 TB/s = 20.9 ms, at most about 48 tokens/s for one sequence (derived)"
     example: "A faster arithmetic unit does not help; the bytes per token do. Note: Lecture 13b shows how a server batches decode to share each weight read."
     read: "6.7.4"
   - id: 11
@@ -155,7 +155,7 @@ worked_examples:
   - name: "GPT-2 XL's weights and FLOPs from the block rule"
     steps: ["given: 48 blocks, d = 1,600, MLP width 4d, vocabulary 50,257", "12 d^2 = 30.7M weights per block; x 48 = 1.47B; + 80M token table = about 1.55B (published 1.5B)", "FLOPs per token: 2 per weight = 2.95 GFLOP (chapter: 3 GFLOP/token)", "a 1,024-token prompt: 3.34 TFLOP, attention products 0.32 TFLOP, about 10 percent", "scores add work, not weights; past 9,600 tokens they add most of the work"]
   - name: "One token from a 70B model"
-    steps: ["given: 140 GB of FP16 weights, H100 at 3.35 TB/s and 989 TFLOP/s (MLSysIM)", "every weight read once per token: 140 GB / 3.35 TB/s = 42 ms", "at most about 24 tokens/s for one sequence, whatever the peak", "intensity 1 FLOP/byte against a ridge of 295"]
+    steps: ["given: 140 GB of FP16 weights, too big for one 80 GB H100; two H100s at 3.35 TB/s and 989 TFLOP/s each (MLSysIM)", "every weight read once per token, 70 GB on each GPU at once: 70 GB / 3.35 TB/s = 21 ms", "at most about 48 tokens/s for one sequence, whatever the peak", "intensity 1 FLOP/byte against a ridge of 295"]
   - name: "Napkin Math 6.2: the capacity wall"
     steps: ["given: 100M items, 128-wide, FP32", "51.2 GB", "64 percent of an 80 GB A100", "a second table: 102.4 GB, does not fit", "shrink, move, or partition"]
 
@@ -186,8 +186,8 @@ active_learning:
     answer: "(1) False: BERT learned 512 positions, and 4,096 tokens would also need 64x the score memory. (2) False: tiling removes the S^2 storage; the S^2 multiply-adds remain (6.6.4)."
   - at_minute: 39
     type: estimate
-    prompt: "A 70B model in FP16 decodes one sequence on an H100 (3.35 TB/s). At best, how many tokens per second?"
-    answer: "140 GB per token / 3.35 TB/s = 42 ms, about 24 tokens/s, independent of the 989 TFLOP/s peak."
+    prompt: "A 70B model in FP16 (140 GB) decodes one sequence on two H100s (3.35 TB/s each). At best, how many tokens per second?"
+    answer: "70 GB per GPU per token / 3.35 TB/s = 21 ms, about 48 tokens/s, independent of the 989 TFLOP/s peak."
   - at_minute: 44
     type: predict
     prompt: "GPT-2 XL as context grows: which comes first, the KV cache passing the weights or one layer's stored scores filling 80 GB?"
@@ -265,8 +265,9 @@ coverage:
   secondary: []
 
 notes_for_author:
+  - "2026-10-19, panel fixes. Worked example 4 no longer puts 140 GB of FP16 weights on one 80 GB H100: the card says the model is split across two H100s (as Conclusion §16.4 does), each reads 70 GB per token, 70 GB / 3.35 TB/s = 20.9 ms, at most about 48 tokens/s (calcs.py; H3). The diagnose table's intensity column is headed 'FLOP/byte (FP32)', so its 0.50 is not set against the FP16 decode slide's 1.0. The Decode divider's read line is one line ('§6.7.2 and §6.7.4') and clears the section watermark. Goals frame carries the course-thread strip (fast enough, algorithm, machine; H1). The packed-projection code, the attention-share predict, the true-or-false vote, the cache-crossing predict, and the scattered-gather bars moved to [OPTIONAL]; the core runs about 51.5 minutes (M1). The by-hand toy stays [CORE] because goal 1 depends on it."
   - "Sources checked on 2026-10-17. Mudigere et al.: the arXiv abstract (2104.05158, Facebook) reads 'We demonstrate the capability to train very large DLRMs with up to 12 Trillion parameters'; the slide quotes it and cites the arXiv number and the ISCA 2022 version. Llama 3.1 8B: the Hugging Face model card lists '128k' context. Context windows: OpenAI DevDay post (6 Nov 2023) 'a 128k context window'; Anthropic Claude 2.1 (21 Nov 2023) 'a limit of 200,000 tokens'; Google Gemini 1.5 (15 Feb 2024) standard 128,000 tokens and up to 1 million in limited preview, so the 1M point is labeled 'preview'. The OpenAI page refused automated fetch; its wording was confirmed through the post's indexed text."
-  - "Derived values are marked on each slide: the toy's numbers, GPT-2 XL's 1.55B and 2.95 GFLOP, the 10 percent share, the 42 ms decode bound, the Llama and PaLM KV sizes, the recommender's bytes and request-rate bounds, and the 1M-token synthesis."
+  - "Derived values are marked on each slide: the toy's numbers, GPT-2 XL's 1.55B and 2.95 GFLOP, the 10 percent share, the 21 ms decode bound, the Llama and PaLM KV sizes, the recommender's bytes and request-rate bounds, and the 1M-token synthesis."
   - "Llama 3.1 8B's window is recorded in MLSysIM only on Llama3_70B; add context_length to Llama3_8B if the deck computes from it."
   - "Table 8 intensities are FP32 weight-only proxies; the deck never places them against the FP16 ridge of 295."
   - "The recommender request (26 features, one 128-wide FP32 row each) is illustrative: Criteo has 26 categorical features, but production requests can be multi-hot, and DLRM benchmark configurations often use narrower rows."

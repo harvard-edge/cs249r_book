@@ -378,3 +378,127 @@ def cascades():
 cascades()
 
 print("figures written")
+
+
+# ---------------------------------------------------------------------------
+# Synthetic audio for the keyword spotter (Data Engineering, S4.4.3 and
+# Example 4.2), drawn from real synthesized audio instead of the chapter's
+# generic figure 7. artifacts/tts_alexa.wav is macOS text-to-speech, made with
+#   say -v Samantha -o tts_alexa.wav --file-format=WAVE --data-format=LEI16@16000 "Alexa"
+# padded to a one-second clip. The room response is simulated (white noise
+# under an exponential decay with a 0.5 s reverberation time, fixed seed), and
+# the SpecAugment masks follow Park et al. 2019 (one frequency band, one time
+# span). Three steps reveal one panel each; every step keeps all three axes.
+# ---------------------------------------------------------------------------
+def synthetic_audio():
+    import warnings
+    from scipy.io import wavfile
+    from scipy.signal import spectrogram, fftconvolve
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")    # say writes a FLLR chunk scipy skips
+        sr, x = wavfile.read(out / "artifacts" / "tts_alexa.wav")
+    x = x.astype(float) / 32768.0
+    clip = np.zeros(sr)                       # one-second KWS clip
+    start = int(0.15 * sr)
+    clip[start:start + len(x)] = x[: sr - start]
+    rng = np.random.default_rng(4)
+    rt60 = 0.5                                # seconds, simulated room
+    t = np.arange(int(rt60 * sr)) / sr
+    rir = rng.standard_normal(len(t)) * np.exp(-6.9 * t / rt60)
+    rir[0] = 1.0
+    wet = fftconvolve(clip, rir)[:sr]
+    wet *= np.max(np.abs(clip)) / np.max(np.abs(wet))
+
+    def spec(sig):
+        f, tt, S = spectrogram(sig, fs=sr, nperseg=400, noverlap=240)   # 25 ms, 10 ms hop
+        return f / 1000, tt, 10 * np.log10(S + 1e-10)
+
+    f, tt, S0 = spec(clip)
+    _, _, S1 = spec(wet)
+    S2 = S1.copy()
+    fmask = (f >= 2.0) & (f < 3.2)            # one frequency band
+    tmask = (tt >= 0.45) & (tt < 0.58)        # one time span
+    floor = S1.max() - 80
+    S2[fmask, :] = floor
+    S2[:, tmask] = floor
+    panels = [("1  Text-to-speech", S0), ("2  + room echo", S1),
+              ("3  + masks", S2)]
+    vmax = max(S0.max(), S1.max())
+    for k in (1, 2, 3):
+        fig, axes = plt.subplots(1, 3, figsize=(6.2, 1.5), sharey=True)
+        for i, (ax, (title, S)) in enumerate(zip(axes, panels)):
+            ax.set_title(title, fontsize=11, fontweight="bold", color=C["text"],
+                         loc="left", alpha=1.0 if i < k else 0.0)
+            if i < k:
+                ax.pcolormesh(tt, f, S, shading="auto", cmap="magma",
+                              vmin=vmax - 80, vmax=vmax, rasterized=True)
+                if i == 2:
+                    ax.text(0.97, 2.6, "band", color="white", fontsize=10,
+                            ha="right", va="center", fontweight="bold")
+                    ax.text(0.515, 6.0, "span", color="white", fontsize=10,
+                            ha="center", va="center", fontweight="bold",
+                            rotation=90)
+            else:
+                ax.set_facecolor("white")
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, 8)
+            ax.set_xticks([0, 0.5, 1])
+            ax.set_xticklabels(["0", "0.5", "1"])
+            for side in ("top", "right"):
+                ax.spines[side].set_visible(False)
+        axes[0].set_ylabel("kHz")
+        axes[1].set_xlabel("seconds", fontsize=11)
+        axes[0].set_yticks([0, 4, 8])
+        fig.subplots_adjust(wspace=0.16)
+        sp.save(fig, out / f"synthetic_audio_step{k}.svg")
+
+
+synthetic_audio()
+
+
+# ---------------------------------------------------------------------------
+# Forced alignment, redrawn at slide size from the chapter's figure 14
+# (Data Engineering, S4.6.6; Mazumder et al., NeurIPS 2021): four stages, each
+# with the chapter's example sentence carried through. The word chips mark
+# boundaries only; their widths are not timings. Corpus counts from S4.6.6.
+# ---------------------------------------------------------------------------
+def forced_alignment():
+    G, GL, O, OL = C["data"], C["data_l"], C["compute"], C["compute_l"]
+    heads = ["Sentence audio\n+ transcript", "Forced alignment\nfinds word edges",
+             "Cut 1 s clips\nfor each keyword", "Train the\nkeyword model"]
+    s = ""
+    xs = [10, 237, 464, 691]
+    for j, (x, h) in enumerate(zip(xs, heads)):
+        s += box(x, 8, 200, 74, GL, G, h, 21, True)
+        if j < 3:
+            s += arrow(x + 200, 45, x + 227, 45, "#666666", 3)
+    # 1: the transcript the audio comes with
+    s += box(10, 112, 200, 150, "#F7F7F7", "#999999", "", rx=8)
+    s += txt(110, 150, "“he gazed up", 22, False, C["text"])
+    s += txt(110, 182, "the steep bank”", 22, False, C["text"])
+    s += txt(110, 228, "words, no times", 20, True, "#666666")
+    # 2: the same words with their edges found
+    s += box(237, 112, 200, 150, "#F7F7F7", "#999999", "", rx=8)
+    rows = [["he", "gazed", "up"], ["the", "steep", "bank"]]
+    for r, words in enumerate(rows):
+        x = 246
+        for w in words:
+            wd = 12 + 11 * len(w)
+            hl = w == "bank"
+            s += box(x, 126 + r * 46, wd, 36, OL if hl else "white", O if hl else "#999999",
+                     w, 19, hl, rx=4)
+            x += wd + 5
+    s += txt(337, 228, "edges found", 20, True, "#666666")
+    # 3: one clip cut around one word
+    s += box(464, 112, 200, 150, "#F7F7F7", "#999999", "", rx=8)
+    s += box(504, 132, 120, 50, OL, O, "bank", 24, True, rx=4)
+    s += txt(564, 204, "one 1 s clip", 20, True, "#666666")
+    s += txt(564, 232, "labeled “bank”", 20, True, "#666666")
+    # 4: the corpus that results
+    s += box(691, 112, 200, 150, GL, G, "", rx=8)
+    for m, ln in enumerate(["23.4M clips", "340K keywords", "50 languages"]):
+        s += txt(791, 146 + m * 40, ln, 23, True, C["text"])
+    svg(out / "forced_alignment.svg", s, w=900, h=270)
+
+
+forced_alignment()

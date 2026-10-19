@@ -205,6 +205,9 @@ def main():
         show(f"{k} tokens/s", f"{v:,.0f}; per GPU {v / 8:,.0f}; vs H100 {v / mp['H100']:.2f}x")
     show("bandwidth H200 / H100", f"{hw['H200'][0]:.2f} / {hw['H100'][0]:.2f} = {hw['H200'][0] / hw['H100'][0]:.2f}x")
     show("FP16 dense peak H200 / H100", f"{hw['H200'][1]:.0f} / {hw['H100'][1]:.0f} = {hw['H200'][1] / hw['H100'][1]:.2f}x")
+    # Memory capacity: 80 GB (H100 SXM) and 141 GB (H200 SXM), from the
+    # MLPerf system names (H100-SXM-80GB, H200-SXM-141GB) and NVIDIA datasheets.
+    show("memory capacity H200 / H100", f"141 / 80 = {141 / 80:.2f}x")
 
     print("\n[GPT-2 decode profile, data/gpt2_profile.txt]")
     # GPT-2 small config (Hugging Face 'gpt2' config.json): n_layer 12,

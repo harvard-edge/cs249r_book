@@ -54,12 +54,28 @@
     minimum height=0.5cm, align=center, text=darktext, font=\footnotesize},
 }
 
+
+% Course-thread strip (panel fix H1): the two halves of the dual mandate and
+% the three iron-law factors; 1 fills the parts this lecture works on.
+\tikzset{threadcell/.style={rounded corners=3pt, inner xsep=3pt, inner ysep=2.5pt,
+  font=\scriptsize, text depth=0.25ex, text height=1.5ex}}
+\newcommand{\threadcell}[3]{\ifnum#1=1\relax
+  \tikz[baseline=(c.base)]\node[threadcell, fill=#2, text=white, font=\scriptsize\bfseries](c){#3};%
+  \else\tikz[baseline=(c.base)]\node[threadcell, draw=#2!45, text=midgray](c){#3};\fi}
+\newcommand{\threadstrip}[5]{{\centering\mbox{%
+  {\scriptsize\textcolor{midgray}{Dual mandate}}\enspace
+  \threadcell{#1}{VioletLine}{Right}\,\threadcell{#2}{VioletLine}{Fast enough}\quad
+  {\scriptsize\textcolor{midgray}{Iron law}}\enspace
+  \threadcell{#3}{GreenLine}{Samples/Task (D)}\,{\footnotesize$\times$}\,%
+  \threadcell{#4}{OrangeLine}{FLOPs/Sample (A)}\,{\footnotesize$\times$}\,%
+  \threadcell{#5}{BlueLine}{Seconds/FLOP (M)}}\par}}
+
 \begin{document}
 
 % =============================================================================
 % TITLE
 % =============================================================================
-\mlsysnote{[0.5 min] Read the thesis once. Say what today is: the second half of the architectures chapter. Last lecture priced the families whose weights are fixed (dense, convolutional, recurrent). Today prices two bets whose memory grows with the input or exceeds the device: attention and the transformer built on it, and the recommender's embedding tables. The lecture ends by filling one table for all five lighthouse models. Notes total about 71.5 minutes. FLEX: [CORE]. Notes tagged [OPTIONAL] can be cut; cutting all of them leaves a complete lecture of about 62 minutes.}
+\mlsysnote{[0.5 min] Read the thesis once. Say what today is: the second half of the architectures chapter. Last lecture priced the families whose weights are fixed (dense, convolutional, recurrent). Today prices two bets whose memory grows with the input or exceeds the device: attention and the transformer built on it, and the recommender's embedding tables. The lecture ends by filling one table for all five lighthouse models. Notes total about 71.5 minutes. FLEX: [CORE]. Notes tagged [OPTIONAL] can be cut; cutting all of them leaves a complete lecture of about 51.5 minutes.}
 \mlsystitle{Network Architectures, Part~2}{Attention and embedding tables move the limit from arithmetic to memory.}{cover_nn_architectures_blueprint.png}
 
 % =============================================================================
@@ -96,15 +112,14 @@
     \begin{column}{0.36\textwidth}
       \begin{mlsyscard}{mlsysaccent}
         \textbf{Running example}\\[0.1cm]
-        GPT-2 XL\\
+        GPT-2 XL (Lighthouse 6.4)\\
         48 blocks, width 1,600\\
         1.5B weights\\
         3 GFLOP per token
       \end{mlsyscard}
     \end{column}
     \begin{column}{0.60\textwidth}
-      \small\textbf{By the end of today, you will be able to}
-      \begin{itemize}\setlength{\itemsep}{0.15cm}
+      \begin{itemize}\setlength{\itemsep}{0.12cm}
         \item Compute an attention head by hand, and count its work for any context.
         \item Count a transformer block's weights and FLOPs, and find where attention dominates.
         \item Explain why decode reads every weight per token, and size the KV cache.
@@ -112,8 +127,9 @@
       \end{itemize}
     \end{column}
   \end{columns}
-  \mlsyscredit{GPT-2 XL: Network Architectures, Lighthouse 6.4 (Radford et al. 2019).}
-  \note{[1.5 min] The driving question is the title. Part 1 ended with arithmetic intensity: work per byte, compared with the machine's balance. Today's two families break that frame in two ways. A transformer adds memory that grows with the input; a recommender holds tables that may not fit at all. The card is today's running example: GPT-2 XL, 48 blocks of width 1,600, 1.5 billion weights, about 3 GFLOP per generated token. Four goals, one per segment; the closing table tests all four. FLEX: [CORE].}
+  \vspace{0.25cm}
+  \threadstrip{0}{1}{0}{1}{1}
+  \note{[1.5 min] The driving question is the title. Part 1 ended with arithmetic intensity: work per byte, compared with the machine's balance. Today's two families break that frame in two ways. A transformer adds memory that grows with the input; a recommender holds tables that may not fit at all. The card is today's running example: GPT-2 XL, 48 blocks of width 1,600, 1.5 billion weights, about 3 GFLOP per generated token. Read the four goals (what students will be able to do), one per segment; the closing table tests all four. The strip fills the algorithm factor, which attention and tables set, the machine factor, because memory now binds, and the fast-enough half. FLEX: [CORE].}
 \end{frame}
 
 % =============================================================================
@@ -235,7 +251,7 @@
   \only<5|handout:0>{\textbf{Your turn, in pairs:} row 2's scores, weights, and output.}%
   \only<6-|handout:1>{Equal queries (1 and 4) read the same mix. Work: $4^2 \times 2 = 32$ MACs, twice: $S^2 d$ each.}
   \mlsyscredit{Illustrative toy, values computed in images/make\_figs.py. Operator: Network Architectures, \S6.6.2.}
-  \note{[5 min] Worked example 1, by hand. The numbers are a toy chosen for easy arithmetic, not a trained model. Step 1: four tokens, each with a query, key, and value of width two. Step 2: token 1's query (1, 0) against each key gives 2, 0, 1, 0; divided by the square root of 2: 1.41, 0, 0.71, 0. Two design points live here. Queries and keys come from different weight matrices, so ``1 looks at 3'' need not score like ``3 looks at 1''. The divisor keeps the scores' variance near one as the head widens, so softmax does not saturate. Step 3: softmax of row 1: 0.51, 0.12, 0.25, 0.12. Step 4: those weights mix the value rows: (0.75, 0.37). Step 5: ENGAGE, two minutes in pairs on row 2. Expected: scores 0, 1.41, 0.71, 0; weights 0.12, 0.51, 0.25, 0.12; output (0.37, 0.75), the mirror of row 1. Step 6: rows 1 and 4 share a query and read the same mix, whatever their positions: attention routes by content. Token 3 spreads its weight about 0.31 over tokens 1 to 3. Work: 32 multiply-adds for the scores and 32 for the mix, S squared times d each. WARN: students who skip the softmax use raw scores as weights. FLEX: [CORE].}
+  \note{[5 min] [CORE] Worked example 1, by hand. The numbers are a toy chosen for easy arithmetic, not a trained model. Step 1: four tokens, each with a query, key, and value of width two. Step 2: token 1's query (1, 0) against each key gives 2, 0, 1, 0; divided by the square root of 2: 1.41, 0, 0.71, 0. Two design points live here. Queries and keys come from different weight matrices, so ``1 looks at 3'' need not score like ``3 looks at 1''. The divisor keeps the scores' variance near one as the head widens, so softmax does not saturate. Step 3: softmax of row 1: 0.51, 0.12, 0.25, 0.12. Step 4: those weights mix the value rows: (0.75, 0.37). Step 5: ENGAGE, two minutes in pairs on row 2. Expected: scores 0, 1.41, 0.71, 0; weights 0.12, 0.51, 0.25, 0.12; output (0.37, 0.75), the mirror of row 1. Step 6: rows 1 and 4 share a query and read the same mix, whatever their positions: attention routes by content. Token 3 spreads its weight about 0.31 over tokens 1 to 3. Work: 32 multiply-adds for the scores and 32 for the mix, S squared times d each. WARN: students who skip the softmax use raw scores as weights.}
 \end{frame}
 
 \begin{frame}{Twelve heads of 64 cost the same as one head of 768}
@@ -286,7 +302,7 @@ att = F.softmax(att, dim=-1)
   \textcolor{OrangeLine}{\textbf{Orange:}} the two $S^2 d$ products.}
   \uncover<3->{Both lower onto matrix multiplies.}
   \mlsyscredit{nanoGPT model.py, class CausalSelfAttention, lines 35 to 69 (github.com/karpathy/nanoGPT, commit 3adf61e, MIT). ``...'' marks omitted lines and the argument bias=config.bias; indentation and comments removed.}
-  \note{[2 min] Real code: nanoGPT, a few hundred lines that load the published GPT-2 weights. Step 1: read it top down; the first two lines are from the constructor, the rest from forward. c\_attn is the packed projection from two slides back, one d by 3d matrix; split cuts its output into Q, K, and V, and the omitted lines reshape each into n\_head heads of width C over n\_head. Then the equation, line by line: q times k transposed, scaled by one over the square root of the head width; the causal mask sets later positions to minus infinity; softmax; att times v. Step 2: the green lines are the weights, 3 d squared plus d squared, 4 d squared. The orange lines are the two products whose cost grows with S squared; neither holds a weight. Step 3: every colored line is a matrix multiply, which is how a GPU runs attention; the softmax and mask are element-wise passes. ENGAGE: ``Which line would you change for grouped-query attention?'' Expected: the projection, so K and V get fewer heads than Q. WARN: on PyTorch 2 nanoGPT calls one fused kernel instead of these four lines (Lecture 8b); the arithmetic is the same. FLEX: [CORE].}
+  \note{[2 min] [OPTIONAL] Real code: nanoGPT, a few hundred lines that load the published GPT-2 weights. Step 1: read it top down; the first two lines are from the constructor, the rest from forward. c\_attn is the packed projection from two slides back, one d by 3d matrix; split cuts its output into Q, K, and V, and the omitted lines reshape each into n\_head heads of width C over n\_head. Then the equation, line by line: q times k transposed, scaled by one over the square root of the head width; the causal mask sets later positions to minus infinity; softmax; att times v. Step 2: the green lines are the weights, 3 d squared plus d squared, 4 d squared. The orange lines are the two products whose cost grows with S squared; neither holds a weight. Step 3: every colored line is a matrix multiply, which is how a GPU runs attention; the softmax and mask are element-wise passes. ENGAGE: ``Which line would you change for grouped-query attention?'' Expected: the projection, so K and V get fewer heads than Q. WARN: on PyTorch 2 nanoGPT calls one fused kernel instead of these four lines (Lecture 8b); the arithmetic is the same. FLEX: cut freely.}
 \end{frame}
 
 \begin{frame}[fragile]{A transformer block: attention and an MLP, each with a skip}
@@ -371,7 +387,7 @@ x = x + self.mlp(self.ln_2(x))
   \uncover<2->{\normalsize 3.36B of 34.8B MACs. The quadratic term is still small here.\\[0.1cm]
   {\small Whole prompt: $1{,}024 \times 2.95$ GFLOP $=$ 3.02 TFLOP, $+$ 0.32 attention $=$ 3.34 TFLOP}}
   \mlsyscredit{Derived from the block account, \S6.7.3 and \S6.7.4: $12Sd^2$ against $2S^2d$, $d = 1{,}600$.}
-  \note{[2 min] ENGAGE: vote with fingers. Many will pick A, because ``attention is quadratic'' sounds like ``attention is most of the work''. Step 2: C. Per block, the projections and MLP cost 12 S d squared, 31.5 billion multiply-adds at 1,024 tokens; the two attention products cost 2 S squared d, 3.36 billion. About 10 percent. The last line prices the whole prompt: 1,024 tokens times the 2.95 GFLOP of weight work per token is 3.02 TFLOP; the attention products over all 48 blocks add 0.32 TFLOP (3.36 billion multiply-adds, two FLOPs each, times 48); 3.34 TFLOP in all. WARN: quadratic describes how a cost grows, not how large it is today; a quadratic term with a small coefficient can stay behind a linear one for a long way. FLEX: [CORE].}
+  \note{[2 min] [OPTIONAL] ENGAGE: vote with fingers. Many will pick A, because ``attention is quadratic'' sounds like ``attention is most of the work''. Step 2: C. Per block, the projections and MLP cost 12 S d squared, 31.5 billion multiply-adds at 1,024 tokens; the two attention products cost 2 S squared d, 3.36 billion. About 10 percent. The last line prices the whole prompt: 1,024 tokens times the 2.95 GFLOP of weight work per token is 3.02 TFLOP; the attention products over all 48 blocks add 0.32 TFLOP (3.36 billion multiply-adds, two FLOPs each, times 48); 3.34 TFLOP in all. WARN: quadratic describes how a cost grows, not how large it is today; a quadratic term with a small coefficient can stay behind a linear one for a long way. FLEX: if cut, give the 10 percent share on the next slide.}
 \end{frame}
 
 \begin{frame}{Attention's products overtake the rest only past 9,600 tokens}
@@ -412,14 +428,14 @@ x = x + self.mlp(self.ln_2(x))
   \centering
   \uncover<3->{\safeimg[width=14.2cm]{flash_measured.pdf}}
   \mlsyscredit{Network Architectures, Example 6.4 (Devlin et al. 2019) and \S6.6.4. Plot: Dao et al., NeurIPS 2022, Tables 20 and 21 (A100, batch 16, 8 heads of 64, FP16).}
-  \note{[2.5 min] ENGAGE: thumbs up or down for each claim, then reveal. Claim 1: false for two reasons. BERT was pretrained with 512 learned position embeddings, so positions beyond 512 do not exist for the model, however much memory there is. And the limit was set partly by cost: 4,096 tokens would need (4,096 over 512) squared, 64 times the score memory. Claim 2: false. A tiled kernel streams blocks of scores through on-chip memory and never writes the full S by S matrix, so the quadratic storage goes away; every one of the S squared scores is still computed, so the quadratic arithmetic stays (section 6.6.4). Step 3: the measurement, from the FlashAttention paper's tables on an A100. Right: the tiled kernel's memory doubles when the sequence doubles, 0.84 GB at 4K and 13.4 GB at 64K, while standard PyTorch attention needs 20 times more at 4K and then runs out. Left: the tiled kernel's runtime still grows four times per doubling (3,272 times from 1K to 64K, against 4,096 for a pure square). Landing line for the segment: ``Score work grows with the square of the context; it dominates only past about six times the model width, and storing the scores would not fit long before that.'' FLEX: [CORE].}
+  \note{[2.5 min] [OPTIONAL] ENGAGE: thumbs up or down for each claim, then reveal. Claim 1: false for two reasons. BERT was pretrained with 512 learned position embeddings, so positions beyond 512 do not exist for the model, however much memory there is. And the limit was set partly by cost: 4,096 tokens would need (4,096 over 512) squared, 64 times the score memory. Claim 2: false. A tiled kernel streams blocks of scores through on-chip memory and never writes the full S by S matrix, so the quadratic storage goes away; every one of the S squared scores is still computed, so the quadratic arithmetic stays (section 6.6.4). Step 3: the measurement, from the FlashAttention paper's tables on an A100. Right: the tiled kernel's memory doubles when the sequence doubles, 0.84 GB at 4K and 13.4 GB at 64K, while standard PyTorch attention needs 20 times more at 4K and then runs out. Left: the tiled kernel's runtime still grows four times per doubling (3,272 times from 1K to 64K, against 4,096 for a pure square). Landing line for the segment: ``Score work grows with the square of the context; it dominates only past about six times the model width, and storing the scores would not fit long before that.'' FLEX: if cut, say the land line earlier.}
 \end{frame}
 
 % =============================================================================
 % SECTION: DECODE
 % =============================================================================
 \mlsysnote{[0.5 min] The hook's second number: memory per request. It comes from generating text one token at a time. FLEX: [CORE].}
-\mlsysdivider{Why does generating text wait on memory?}{Network Architectures, \S6.7.2 (prefill and decode) and \S6.7.4 (Autoregressive decoding)}
+\mlsysdivider{Why does generating text wait on memory?}{Network Architectures, \S6.7.2 and \S6.7.4}
 \section{Decode}
 
 \begin{frame}{One model runs a prompt in parallel and a reply one token at a time}
@@ -470,23 +486,23 @@ x = x + self.mlp(self.ln_2(x))
       \centering
       \safeimg[width=\textwidth]{decode_ridge.pdf}\\[0.05cm]
       \raggedright\normalsize
-      \uncover<2->{Every weight read per token: 140 GB\\[0.1cm]}
-      \uncover<3->{140 GB $\div$ 3.35 TB/s $=$ 42 ms per token\\[0.1cm]}
-      \uncover<4->{{\large\textbf{\textcolor{mlsysaccent}{At most 24 tokens/s}}}}
+      \uncover<2->{140 GB per token, split: 70 GB on each GPU\\[0.1cm]}
+      \uncover<3->{70 GB $\div$ 3.35 TB/s $=$ 21 ms per token\\[0.1cm]}
+      \uncover<4->{{\large\textbf{\textcolor{mlsysaccent}{At most about 48 tokens/s}}}}
     \end{column}
     \begin{column}{0.38\textwidth}
       \begin{mlsyscard}{mlsysaccent}
-        \small\textbf{Given:} 70B model, FP16\\
-        H100: 3.35 TB/s, batch one
+        \small\textbf{Given:} 70B, FP16: 140 GB\\
+        Two H100s: 80 GB and\\3.35 TB/s each
       \end{mlsyscard}
       \vspace{0.15cm}
       \centering
-      \includegraphics[width=\textwidth,height=2.2cm,keepaspectratio]{amd-fiji-hbm.jpg}\\[0.02cm]
+      \includegraphics[width=\textwidth,height=1.7cm,keepaspectratio]{amd-fiji-hbm.jpg}\\[0.02cm]
       {\footnotesize\textcolor{midgray}{Four HBM stacks beside a GPU die}}
     \end{column}
   \end{columns}
-  \mlsyscredit{Intensity and 140 GB: \S6.7.4. H100: 989 TFLOP/s dense FP16, 3.35 TB/s (MLSysIM). Photo: AMD Fiji package, C. Spille/pcgameshardware.de, CC BY-SA 4.0, Wikimedia Commons.}
-  \note{[3.5 min] Worked example 4. The photo is where the 3.35 TB/s comes from: high-bandwidth memory, DRAM dies stacked and set beside the processor on one silicon interposer, here AMD's Fiji GPU of 2015 with four stacks; an H100 packages its HBM3 stacks the same way. Step 1, the bars: decode at batch one with 16-bit weights does 2 FLOPs per 2-byte weight, 1 FLOP per byte (chapter 6.7.4). An H100 does 989 trillion FP16 FLOPs per second and reads 3.35 TB per second, so it needs 295 FLOPs per byte to keep its arithmetic busy. Decode sits 295 times below that line. ENGAGE: two minutes in pairs: tokens per second for one sequence. Step 2: a 70-billion-parameter model in FP16 is 140 GB, and every byte is read for every token. Step 3: 140 GB divided by 3.35 TB per second is 42 milliseconds. Step 4: at most about 24 tokens per second, whatever the peak FLOP/s; the arithmetic would take well under a millisecond, and reading the KV cache only adds to the bytes. WARN: students reach for the 989 TFLOP/s and get thousands of tokens per second; ask which number the weights travel through. LINK, one line only: Lecture 13b shows how a server batches decode to share each weight read. FLEX: [CORE].}
+  \mlsyscredit{Intensity and 140 GB: \S6.7.4; split: \S16.4. H100: 989 TFLOP/s dense FP16, 3.35 TB/s (MLSysIM). Photo: AMD Fiji package, C. Spille/pcgameshardware.de, CC BY-SA 4.0, Wikimedia Commons.}
+  \note{[3.5 min] Worked example 4. The photo shows where the 3.35 TB/s comes from: stacks of high-bandwidth memory beside the processor (AMD's Fiji GPU of 2015; an H100 packages its HBM3 the same way). Step 1: decode at batch one with 16-bit weights does 2 FLOPs per 2-byte weight, 1 FLOP per byte (chapter 6.7.4). An H100 does 989 trillion FP16 FLOPs per second and reads 3.35 TB per second, so it needs 295 FLOPs per byte to keep its arithmetic busy. Decode sits 295 times below that line. ENGAGE: two minutes in pairs on tokens per second. Step 2: a 70-billion-parameter model in FP16 is 140 GB, more than one 80 GB H100 holds, so it is split across two; every byte is still read for every token, 70 GB on each GPU at the same time. Step 3: 70 GB divided by 3.35 TB per second is 21 milliseconds. Step 4: at most about 48 tokens per second, whatever the peak FLOP/s; the arithmetic takes well under a millisecond, and the KV cache only adds bytes. WARN: students reach for the 989 TFLOP/s and get thousands of tokens per second; ask which number the weights travel through. LINK, one line only: Lecture 13b shows how a server batches decode to share each weight read. FLEX: [CORE].}
 \end{frame}
 
 \begin{frame}{The KV cache keeps keys and values; each step reads them all}
@@ -555,7 +571,7 @@ x = x + self.mlp(self.ln_2(x))
   {\normalsize Predict: which comes first as context grows, the cache passing the weights,\\or one layer's scores (if stored) filling 80 GB?}\\[0.15cm]
   \mlsyssteps[width=0.92\textwidth,height=4.6cm,keepaspectratio]{context_memory_step}{3}
   \mlsyscredit{Slide redraw of the chapter's context-memory figure (\S6.7.4, figure 13): GPT-2 XL, FP16; KV 307.2 KB per token; scores for one layer, 25 heads.}
-  \note{[2 min] ENGAGE: thirty seconds, write a guess for each and which comes first. Three memories for one model as the context grows, log scales. Step 1: the weights, 3 GB in FP16, flat; they do not depend on context. Step 2: the KV cache for one request grows in a straight line, 307.2 KB per token, and passes the weights near 10,000 tokens. Step 3: one layer's scores, if stored, grow with the square and would fill an 80 GB accelerator near 40,000 tokens. Answer: the cache passes the weights first. The cache is the cost that cannot be tiled away, because decode needs it at every step. This plot uses GPT-2 XL's 25 heads (figure 13); the 240 GB example used Napkin Math 6.1's 12. WARN: the orange and red lines also cross, near 6,100 tokens; that crossing answers nothing here, so read the two dots. WARN: batching shares the weights across requests but not the caches; each request keeps its own. FLEX: [CORE].}
+  \note{[2 min] [OPTIONAL] ENGAGE: thirty seconds, write a guess for each and which comes first. Three memories for one model as the context grows, log scales. Step 1: the weights, 3 GB in FP16, flat; they do not depend on context. Step 2: the KV cache for one request grows in a straight line, 307.2 KB per token, and passes the weights near 10,000 tokens. Step 3: one layer's scores, if stored, grow with the square and would fill an 80 GB accelerator near 40,000 tokens. Answer: the cache passes the weights first. The cache is the cost that cannot be tiled away, because decode needs it at every step. This plot uses GPT-2 XL's 25 heads (figure 13); the 240 GB example used Napkin Math 6.1's 12. WARN: the orange and red lines also cross, near 6,100 tokens; that crossing answers nothing here, so read the two dots. WARN: batching shares the weights across requests but not the caches; each request keeps its own. FLEX: if cut, say the cache passes the weights near 10,000 tokens.}
 \end{frame}
 
 \begin{frame}{In a real server, the KV cache takes over 30 percent of memory}
@@ -654,7 +670,7 @@ x = x + self.mlp(self.ln_2(x))
     \end{column}
   \end{columns}
   \mlsyscredit{Illustrative request: 26 categorical features as in Criteo (Naumov et al. 2019); 128-wide FP32 rows, 512 B (\S6.8.3). Bounds derived from MLSysIM H100 (HBM, PCIe Gen5 x16).}
-  \note{[2.5 min] An illustrative request, shaped like the Criteo benchmark DLRM was published on: 26 categorical features, one 128-wide FP32 row each, 512 bytes per row. Step 1: the tables live in HBM, the accelerator's memory; each feature's ID lights one row, at an address that depends on the data, so the next address cannot be predicted. Step 2: the gather copies the 26 rows, 13.3 KB, with no arithmetic at all. Step 3: the interaction layer takes dot products among 27 vectors (the 26 rows and the bottom MLP's output), 351 pairs of 128, 44,928 multiply-adds: about 7 FLOPs per byte gathered, far below the H100's 295. Step 4: so the bytes set the rate. If every row streamed at HBM's 3.35 TB/s, one accelerator could feed at most 252 million such requests per second; if the tables sat in host memory across PCIe at 64 GB/s, 4.8 million, 52 times fewer. WARN: these are upper bounds. Scattered 512-byte reads reach less than either peak, and popular rows stay in cache while the long tail goes to DRAM. ENGAGE: ``What decides which of these two bars you get?'' Expected: whether the tables fit in HBM, the next slide. FLEX: [CORE].}
+  \note{[2.5 min] [OPTIONAL] An illustrative request, shaped like the Criteo benchmark DLRM was published on: 26 categorical features, one 128-wide FP32 row each, 512 bytes per row. Step 1: the tables live in HBM, the accelerator's memory; each feature's ID lights one row, at an address that depends on the data, so the next address cannot be predicted. Step 2: the gather copies the 26 rows, 13.3 KB, with no arithmetic at all. Step 3: the interaction layer takes dot products among 27 vectors (the 26 rows and the bottom MLP's output), 351 pairs of 128, 44,928 multiply-adds: about 7 FLOPs per byte gathered, far below the H100's 295. Step 4: so the bytes set the rate. If every row streamed at HBM's 3.35 TB/s, one accelerator could feed at most 252 million such requests per second; if the tables sat in host memory across PCIe at 64 GB/s, 4.8 million, 52 times fewer. WARN: these are upper bounds. Scattered 512-byte reads reach less than either peak, and popular rows stay in cache while the long tail goes to DRAM. ENGAGE: ``What decides which of these two bars you get?'' Expected: whether the tables fit in HBM, the next slide. FLEX: if cut, go to the capacity estimate.}
 \end{frame}
 
 \begin{frame}[fragile]{Estimate: does one table fit an 80 GB accelerator?}
@@ -721,7 +737,7 @@ EE = nn.EmbeddingBag(n, m, mode="sum", sparse=True)
   \renewcommand{\arraystretch}{1.3}
   \begin{tabular}{@{}l l r r l@{}}
     \toprule
-    \textbf{Lighthouse} & \textbf{Family} & \textbf{FLOP/byte} & \textbf{Training state} & \textbf{Binding limit} \\
+    \textbf{Lighthouse} & \textbf{Family} & \textbf{\shortstack[r]{FLOP/byte\\(FP32)}} & \textbf{Training state} & \textbf{Binding limit} \\
     \midrule
     \textcolor{midgray}{ResNet-50} & \textcolor{midgray}{CNN} & \textcolor{midgray}{80.1} & 409.6 MB & \textcolor{midgray}{Compute} \\
     \textcolor{midgray}{MobileNetV2} & \textcolor{midgray}{depthwise CNN} & \textcolor{midgray}{42.8} & 56.1 MB & \textcolor{midgray}{Compute (phone latency)} \\

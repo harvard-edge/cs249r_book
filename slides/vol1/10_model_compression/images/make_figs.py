@@ -490,7 +490,7 @@ for k in (1, 2):  # step 3 (INT8) belongs to Part 2
 sp.hbars(out / "paper_real.svg", [
     ("Paper: 2× × 4×", 8, "neutral", "8×"),
     ("Realized", 1.5, "danger", f"1.5×  ({100 * 1.5 / 8:.1f}% of paper)"),
-], "×", log=False, size=(5.8, 1.15), xlabel="Speedup (illustrative)")
+], "×", log=False, size=(5.8, 1.9), xlabel="Speedup (illustrative)")
 
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 1.0))
@@ -755,5 +755,44 @@ ax.grid(axis="x", color=C["grid"], linewidth=0.6)
 ax.set_axisbelow(True)
 ax.set_xlabel("Relative to width 1.0, dense (median of 1,000 runs)")
 sp.save(fig, out / "cpu_measure.svg")
+
+# ---------------------------------------------------------------------------
+# 16. Deep Compression cliffs, redrawn at slot size (panel fix L10). Data:
+# the points of the chapter's fig-compression-methods (TikZ table in
+# 10_model_compression.qmd), from Han, Mao, Dally 2016 (AlexNet on ImageNet).
+# Marker-less points in the book table are the lines' extensions off the axis.
+# ---------------------------------------------------------------------------
+CLIFF = {
+    "Pruning + quantization": ("data", [(2.74, -4.7), (2.71, -1.82), (2.75, -1.25), (2.90, -0.60),
+        (3.11, -0.24), (3.32, -0.10), (3.69, -0.01), (4.25, 0.010), (5.00, 0.02),
+        (5.70, 0.02), (6.39, 0.02), (7.37, 0.02)]),
+    "Pruning only": ("compute", [(4.05, -4.7), (4.25, -4.2), (5.29, -1.99), (6.25, -1.04),
+        (7.15, -0.6), (8.35, -0.28), (10.01, -0.073), (11.15, 0.005), (12.55, 0.05)]),
+    "Quantization only": ("memory", [(6.45, -4.7), (6.48, -3.66), (6.65, -2.21), (7.19, -1.06),
+        (8.07, -0.58), (9.9, -0.3), (13.03, -0.13), (16.07, -0.05), (19.3, 0.01)]),
+    "SVD": ("danger", [(14.19, -4.7), (15.09, -2.58), (15.7, -1.86), (16.9, -1.35),
+        (19.62, -0.83)]),
+}
+fig, ax = plt.subplots(figsize=(5.8, 3.0))
+label_at = {"Pruning + quantization": (2.2, 0.3, "left"), "Pruning only": (10.0, 0.3, "left"),
+            "Quantization only": (15.3, 0.3, "left"), "SVD": (17.2, -3.6, "left")}
+for name, (ck, pts) in CLIFF.items():
+    xs, ys = zip(*pts)
+    ax.plot(xs, ys, color=C[ck], lw=2.6)
+    ax.plot(xs[1:], ys[1:], "o", ms=5, color=C[ck], mfc="white", mew=1.8)
+    lx, ly, ha = label_at[name]
+    ax.text(lx, ly, name, color=C[ck], fontsize=12, fontweight="bold", ha=ha)
+ax.axhline(0, color=C["neutral"], lw=1)
+ax.set_xlim(2, 20)
+ax.set_ylim(-4.5, 0.9)
+ax.set_xticks([2, 5, 10, 15, 20])
+ax.set_xticklabels(["2%", "5%", "10%", "15%", "20%"])
+ax.set_yticks([-4, -3, -2, -1, 0])
+ax.set_yticklabels(["-4", "-3", "-2", "-1", "0"])
+ax.set_xlabel("Model size kept (% of original)")
+ax.set_ylabel("Accuracy change (points)")
+ax.grid(color=C["grid"], lw=0.6)
+ax.set_axisbelow(True)
+sp.save(fig, out / "cliff_methods.svg")
 
 print("figures written")

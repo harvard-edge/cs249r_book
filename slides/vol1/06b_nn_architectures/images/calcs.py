@@ -210,6 +210,13 @@ def main():
     show("time per token (ms)", f"{t * 1e3:.1f}")
     show("tokens per second", f"{1 / t:.1f}")
     show("arithmetic time per token (ms)", f"{2 * 70e9 / H100_FLOPS * 1e3:.2f}")
+    # 140 GB does not fit one 80 GB H100; split across two H100s (tensor
+    # parallel, as Conclusion S16.4 does), each reads its 70 GB half per token
+    # at the same time, so the floor halves (communication not counted).
+    t2 = (w70 / 2) / H100_BW
+    show("two H100s: weights per GPU (GB)", f"{w70 / 2 / 1e9:.0f}")
+    show("two H100s: time per token (ms)", f"{t2 * 1e3:.1f}")
+    show("two H100s: tokens per second", f"{1 / t2:.1f}")
 
     head("KV cache per token")
     show("GPT-2 XL (B)", f"{KV_XL:,}")

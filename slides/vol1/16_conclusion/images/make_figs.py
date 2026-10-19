@@ -254,7 +254,7 @@ g.write("chain", 3)
 g = Svg(900, 362)
 phases = [
     ("Envelope", "Watt-scale power,\nheat, battery", "L2"),
-    ("Architecture", f"Depthwise separable:\n{K.DW_RATIO:.1f}× fewer FLOPs", "L6"),
+    ("Architecture", f"Depthwise separable, 256 ch.:\n{K.DW_RATIO:.1f}× fewer FLOPs", "L6"),
     ("Training", "Large batches to train;\nserves one image", "L8"),
     ("Data selection", "Milder augmentation\nfor a small model", "L9"),
     ("Compression", f"INT8: {K.INT8_OF_FP32 * 100:.0f}% of\nFP32's bytes", "L10b"),

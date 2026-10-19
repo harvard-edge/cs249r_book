@@ -150,6 +150,8 @@ if __name__ == "__main__":
     p("Labeling vs training")
     p(f"  ResNet-50 run: {TRAIN_HOURS:.2f} h on {GPUS} GPUs; ${TRAIN_USD[0]:.2f} to ${TRAIN_USD[1]:.2f}")
     p(f"  ratio: {RATIO[0]:,.0f} to {RATIO[1]:,.0f} times")
+    # Slide: inputs are $20 to $40 estimates, so the ratio is rounded to hundreds.
+    p(f"  ratio, rounded to hundreds (slide): {round(RATIO[0], -2):,.0f} to {round(RATIO[1], -2):,.0f} times")
     p("Kappa")
     p(f"  p_e = {P_E:.2f}; kappa at p_o = {P_O_EXAMPLE}: {KAPPA_EXAMPLE:.2f}")
     p("Active learning")

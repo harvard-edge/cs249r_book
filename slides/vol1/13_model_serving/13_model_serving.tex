@@ -46,23 +46,38 @@
 % One line of a worked example: shown from overlay #1 on
 \newcommand{\wstep}[2]{\uncover<#1->{#2}\\[0.22cm]}
 
+% Course-thread strip (panel fix H1): the two halves of the dual mandate and
+% the three iron-law factors; 1 fills the parts this lecture works on.
+\tikzset{threadcell/.style={rounded corners=3pt, inner xsep=3pt, inner ysep=2.5pt,
+  font=\scriptsize, text depth=0.25ex, text height=1.5ex}}
+\newcommand{\threadcell}[3]{\ifnum#1=1\relax
+  \tikz[baseline=(c.base)]\node[threadcell, fill=#2, text=white, font=\scriptsize\bfseries](c){#3};%
+  \else\tikz[baseline=(c.base)]\node[threadcell, draw=#2!45, text=midgray](c){#3};\fi}
+\newcommand{\threadstrip}[5]{{\centering\mbox{%
+  {\scriptsize\textcolor{midgray}{Dual mandate}}\enspace
+  \threadcell{#1}{VioletLine}{Right}\,\threadcell{#2}{VioletLine}{Fast enough}\quad
+  {\scriptsize\textcolor{midgray}{Iron law}}\enspace
+  \threadcell{#3}{GreenLine}{Samples/Task (D)}\,{\footnotesize$\times$}\,%
+  \threadcell{#4}{OrangeLine}{FLOPs/Sample (A)}\,{\footnotesize$\times$}\,%
+  \threadcell{#5}{BlueLine}{Seconds/FLOP (M)}}\par}}
+
 \begin{document}
 
 % =============================================================================
 % TITLE AND HOOK
 % =============================================================================
-\mlsysnote{[0.5 min] [CORE] Read the thesis aloud once. Lecture 12 measured models under a load generator that decided when each request arrived; today the users decide. The lecture follows one ResNet-50 image service through its latency budget, its queue, its batches, and its startup, and closes with what each request costs on different hardware. Part 2 (Lecture 13b) serves a stream of tokens. The notes total about 70 minutes, which leaves a few minutes for questions. FLEX: frames marked [OPTIONAL] give a 50-minute version.}
+\mlsysnote{[0.5 min] [CORE] Read the thesis aloud once. Lecture 12 measured models under a load generator that decided when each request arrived; today the users decide. The lecture follows one ResNet-50 image service through its latency budget, its queue, its batches, and its startup, and closes with what each request costs on different hardware. Part 2 (Lecture 13b) serves a stream of tokens. The notes total about 71 minutes, which leaves a few minutes for questions. FLEX: cutting the frames marked [OPTIONAL] leaves a complete lecture of about 49.5 minutes.}
 \mlsystitle{Model Serving, Part~1}{Serving reverses training's priorities: every request must finish before its deadline, so a service is sized by its latency budget and its queue's headroom.}{cover_model_serving_blueprint.png}
 
 \begin{frame}{Predict: what does serving one image at a time cost?}
   \mlsysactivity{Predict}{2 min}
   \centering
-  {\normalsize Same GPU, same ResNet-50. Batch 8 adds 0.3 ms. How much more does batch 1 cost?}\\[0.15cm]
+  {\normalsize Same GPU, same ResNet-50. Batch 8 adds 0.2 ms. How much more does batch 1 cost?}\\[0.15cm]
   \mlsyssteps[width=0.85\textwidth,height=3.4cm,keepaspectratio]{hook_cost_step}{2}\\[0.2cm]
   {\large\choice{A}{10\% more}\qquad\choice{B}{2$\times$}\qquad\answer{C}{7.5$\times$}\qquad\choice{D}{25$\times$}}\\[0.15cm]
-  \uncover<2->{\normalsize\textbf{\textcolor{mlsysaccent}{7.5$\times$ the cost for 0.3 ms.}}}
+  \uncover<2->{\normalsize\textbf{\textcolor{mlsysaccent}{7.5$\times$ the cost for 0.2 ms.}}}
   \mlsyscredit{Model Serving, Example 13.1: the book's modeled ResNet-50 profile on one H100 at \$4 per hour (283 and 2,129 requests/s). The book rounds the ratio to 8$\times$.}
-  \note{[3 min] Step 1: one H100 rented at \$4 an hour serves ResNet-50 one image at a time: 3.5 ms per image, 283 requests per second, \$3.92 per million requests. These are the chapter's modeled reference numbers, not a measurement. Say that batch 8 takes 3.8 ms, only 0.3 ms longer. ENGAGE: students vote A to D with fingers before the reveal. Step 2: C. Batch 8 serves 2,129 requests per second, so a million requests cost \$0.52; \$3.92 over \$0.52 is 7.5. Students who chose A reasoned from latency: 0.3 ms is under 10 percent. Why so cheap: each forward pass pays a fixed cost: 174 kernel launches (a kernel is one GPU program, and each launch costs host time, Lecture 7) and one read of the weights that eight images now share. WARN: students will conclude ``always batch''. Hold that: the rest of the lecture is about what the batch costs the request that waits for it. LINK: the synthesis returns to these two bars as a fleet: 36 GPUs against 3. FLEX: [CORE].}
+  \note{[3 min] Step 1: one H100 rented at \$4 an hour serves ResNet-50 one image at a time: 3.5 ms per image, 283 requests per second, \$3.92 per million requests. These are the chapter's modeled reference numbers, not a measurement. Say that batch 8 takes 3.8 ms, only about 0.2 ms longer (8 / 2,129 s against 1 / 283 s, 0.22 ms; the rounded labels suggest 0.3). ENGAGE: students vote A to D with fingers before the reveal. Step 2: C. Batch 8 serves 2,129 requests per second, so a million requests cost \$0.52; \$3.92 over \$0.52 is 7.5. Students who chose A reasoned from latency: 0.22 ms is 6 percent. Why so cheap: each forward pass pays a fixed cost: 174 kernel launches (a kernel is one GPU program, and each launch costs host time, Lecture 7) and one read of the weights that eight images now share. WARN: students will conclude ``always batch''. Hold that: the rest of the lecture is about what the batch costs the request that waits for it. LINK: the synthesis returns to these two bars as a fleet: 36 GPUs against 3. FLEX: [CORE].}
 \end{frame}
 
 \begin{frame}{Lecture 12 measured two extremes; a live service runs between}
@@ -80,20 +95,38 @@
   \note{[1.5 min] Retrieval from Lecture 12. Ask the class to recall the two numbers before showing them: the same RTX 4090 reported 0.28 ms per query one at a time, about 3,550 per second, and 44,411 per second with every input available at once, 12.5 times more. Step 2: a photo-upload service runs neither. Its requests arrive at random times, and each must return before a deadline at a high percentile. That is MLPerf's Server scenario: Poisson arrivals (random, independent arrivals at a steady average rate) scored by the highest rate that keeps the 99th-percentile latency under a bound. The stack on the left is the course map; today is the serving layer. FLEX: [CORE].}
 \end{frame}
 
+\begin{frame}{Training is judged by the whole run, serving by each request}
+  \centering
+  \small\renewcommand{\arraystretch}{1.3}
+  \begin{tabular}{@{}l>{\raggedright\arraybackslash}p{5.3cm}>{\raggedright\arraybackslash}p{6.6cm}@{}}
+    \toprule
+    & \textbf{Training} & \leavevmode\uncover<2->{\textbf{\textcolor{mlsysaccent}{Serving}}} \\
+    \midrule
+    \textbf{Objective} & Samples per second over the run & \leavevmode\uncover<2->{Each request's p99 under its deadline} \\
+    \textbf{Batch} & Large: 7,040 img/s at batch 32 & \leavevmode\uncover<2->{As small as the deadline needs: 283/s at batch 1} \\
+    \textbf{Utilization} & As close to 100\% busy as possible & \leavevmode\uncover<2->{At most 67.5\% busy for a 50 ms p99} \\
+    \textbf{Failure} & The run finishes late & \leavevmode\uncover<2->{A user waits past the deadline} \\
+    \bottomrule
+  \end{tabular}
+  \mlsyscredit{Model Serving, \S13.1 and \S13.4; ResNet-50 on one H100 (table 8, modeled). The 67.5\% bound is this lecture's fleet estimate.}
+  \note{[1.5 min] [CORE] The chapter's first idea: serving inverts training's priorities. Step 1, the training column: Lectures 8 and 8b judged a run by its total throughput, so they chose the largest batch that fit and tried to keep the accelerator busy all the time; a slow step only delays the end of the run. Step 2, the serving column, row by row. The objective is each request's tail latency, not the average rate. The batch is set by the deadline: at batch 1 the same H100 serves 283 images per second against 7,040 at batch 32. The machine must keep idle capacity: the queueing segment will show that a 50 ms p99 target allows at most 67.5 percent utilization. A failure is one user waiting, not a late run. ENGAGE: which training habit would hurt a service most? Expected: running the accelerator near 100 percent busy, because waiting time explodes near full load. LINK: Lecture 12's Offline and Server scenarios measure these two columns.}
+\end{frame}
+
 \begin{frame}{Precomputed answers take over 300 times less GPU time}
   \centering
   \safeimg[width=0.92\textwidth,height=3.6cm,keepaspectratio]{static_dynamic.pdf}\\[0.3cm]
   {\small Static: photos labeled overnight. Dynamic: moderation within 100 ms.}
   \mlsyscredit{Model Serving, \S13.1.1: batch 1 at 3.5 ms (modeled); 89,500 images/s for a compiled INT8 engine at large batch (MLPerf, as cited).}
-  \note{[1.5 min] [CORE] Two ways to serve the same ResNet-50. Static inference precomputes: a photo application classifies all 10,000 images in a user's library overnight and stores the labels, so browsing is only a lookup. Dynamic inference answers on demand: a content-moderation service must score each uploaded image within a 100 ms deadline. One at a time at 3.5 ms, the library takes 35 s of H100 time; at the 89,500 images per second MLPerf measured for a compiled INT8 engine at large batch, 0.11 s, 313 times less (the chapter rounds to about 320). ENGAGE: why not precompute everything? (Expected: the inputs must be known in advance; new uploads, new users, and new models break it, and stored answers go stale.) Production systems mix the two: precompute the frequent queries, serve the rest live. LINK: Lecture 12's Offline and Server scenarios are these two regimes. Today is about the dynamic one, where the deadline makes every request expensive.}
+  \note{[1.5 min] [OPTIONAL] Two ways to serve the same ResNet-50. Static inference precomputes: a photo application classifies all 10,000 images in a user's library overnight and stores the labels, so browsing is only a lookup. Dynamic inference answers on demand: a content-moderation service must score each uploaded image within a 100 ms deadline. One at a time at 3.5 ms, the library takes 35 s of H100 time; at the 89,500 images per second MLPerf measured for a compiled INT8 engine at large batch, 0.11 s, 313 times less (the chapter rounds to about 320). ENGAGE: why not precompute everything? (Expected: the inputs must be known in advance; new uploads, new users, and new models break it, and stored answers go stale.) Production systems mix the two: precompute the frequent queries, serve the rest live. LINK: Lecture 12's Offline and Server scenarios are these two regimes. Today is about the dynamic one, where the deadline makes every request expensive. FLEX: cutting it loses the static-against-dynamic contrast.}
 \end{frame}
 
 \begin{frame}{When must every request finish, and what does that cost?}
   \thumbline{thumb_timeline.pdf}{Split one request's time across its stages, and predict what a faster model buys.}\\[0.25cm]
   \thumbline{thumb_knee.pdf}{Size a fleet from a tail-latency target with Little's law and the queueing knee.}\\[0.25cm]
   \thumbline{thumb_window.pdf}{Choose a batch window, and plan for replicas that take seconds to start.}\\[0.25cm]
-  \thumbline{thumb_cost.pdf}{Price a request in accelerators and dollars, and say when cheaper hardware wins.}
-  \note{[1 min] [CORE] The driving question: what does it take for every request, not the average one, to finish before its deadline, and what does that cost? Four goals, one per part of the lecture. Each thumbnail is the figure that teaches it. Two words to define now. Latency is the time one request takes. Throughput is how many requests finish per second. Training cared about throughput; serving must deliver both, for every request.}
+  \thumbline{thumb_cost.pdf}{Price a request in accelerators and dollars, and say when cheaper hardware wins.}\par\vspace{0.3cm}
+  \threadstrip{0}{1}{0}{0}{1}
+  \note{[1 min] [CORE] The driving question: what does it take for every request, not the average one, to finish before its deadline, and what does that cost? Four goals, one per part of the lecture. Each thumbnail is the figure that teaches it. Two words to define now. Latency is the time one request takes. Throughput is how many requests finish per second. Training cared about throughput; serving must deliver both, for every request. The strip fills the machine factor of the iron law and the fast-enough half of the dual mandate.}
 \end{frame}
 
 % =============================================================================
@@ -114,7 +147,7 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Photo: Geekerwan, CC BY 3.0, Wikimedia Commons. Timeline: Model Serving, figure 3 and table 3.}
-  \note{[3 min] One JPEG arrives at an inference server; follow it lane by lane. The card on the right is the kind of accelerator the GPU lane stands for, the H100 that every number in this lecture assumes. The forward pass is the chapter's modeled number; the host phases are stated assumptions (table 3). Step 1: the host CPU decodes the JPEG (3 ms), resizes it to 224 by 224 pixels (1 ms), and normalizes the pixel values (0.5 ms). Step 2: the tensor crosses PCIe, the link between host and accelerator (0.5 ms); the GPU runs the forward pass (3.5 ms); the host picks the top five classes (0.1 ms). Step 3: the GPU waited 5 ms before it had any work. The request takes 8.6 ms and the model is 3.5 of it, 41 percent; preprocessing is 52 percent. ENGAGE: ask which lane a model engineer would normally optimize. The latency budget is this whole bar measured against the deadline (the service-level objective, SLO); every stage spends from the same allowance. FLEX: [CORE].}
+  \note{[2.5 min] One JPEG arrives at an inference server; follow it lane by lane. The card on the right is the kind of accelerator the GPU lane stands for, the H100 that every number in this lecture assumes. The forward pass is the chapter's modeled number; the host phases are stated assumptions (table 3). Step 1: the host CPU decodes the JPEG (3 ms), resizes it to 224 by 224 pixels (1 ms), and normalizes the pixel values (0.5 ms). Step 2: the tensor crosses PCIe, the link between host and accelerator (0.5 ms); the GPU runs the forward pass (3.5 ms); the host picks the top five classes (0.1 ms). Step 3: the GPU waited 5 ms before it had any work. The request takes 8.6 ms and the model is 3.5 of it, 41 percent; preprocessing is 52 percent. ENGAGE: ask which lane a model engineer would normally optimize. The latency budget is this whole bar measured against the deadline (the service-level objective, SLO); every stage spends from the same allowance. FLEX: [CORE].}
 \end{frame}
 
 \begin{frame}{In a recommender, embedding lookups bind, not the model}
@@ -129,13 +162,13 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Model Serving, table 3 (ResNet-50) and Lighthouse 13.1, table 4 (DLRM, 10 ms p99 budget). Photo: Theodore Christopher, CC0, Wikimedia Commons.}
-  \note{[1.5 min] [CORE] Step 1: the ResNet-50 request from the previous slide as one bar: 8.6 ms, the model 41 percent, preprocessing the largest stage. Step 2: a second model, DLRM, a recommender with a 10 ms p99 budget. Parsing the request takes 0.5 ms; fetching more than 100 embedding vectors from tables that hold about 100 GB takes 6 ms; the neural network (an MLP) takes 1.5 ms, 17 percent; ranking and filtering take 1 ms. ENGAGE: which resource would you buy more of for each service? (Expected: host CPU or GPU decoding for ResNet-50; memory bandwidth and capacity for DLRM.) WARN: in both cases the stage an ML engineer would optimize first, the model, is not the one that binds. The lesson is to time every stage before optimizing any. LINK: Lecture 6b showed why embedding lookups are memory bound.}
+  \note{[1.5 min] [OPTIONAL] Step 1: the ResNet-50 request from the previous slide as one bar: 8.6 ms, the model 41 percent, preprocessing the largest stage. Step 2: a second model, DLRM, a recommender with a 10 ms p99 budget. Parsing the request takes 0.5 ms; fetching more than 100 embedding vectors from tables that hold about 100 GB takes 6 ms; the neural network (an MLP) takes 1.5 ms, 17 percent; ranking and filtering take 1 ms. ENGAGE: which resource would you buy more of for each service? (Expected: host CPU or GPU decoding for ResNet-50; memory bandwidth and capacity for DLRM.) WARN: in both cases the stage an ML engineer would optimize first, the model, is not the one that binds. The lesson is to time every stage before optimizing any. LINK: Lecture 6b showed why embedding lookups are memory bound. FLEX: cutting it loses the DLRM budget.}
 \end{frame}
 
 \begin{frame}{Overlapping host and GPU work raises GPU use to 78 percent}
   \centering
   \mlsyssteps[width=0.95\textwidth,height=5.8cm,keepaspectratio]{pipeline_step}{2}
-  \note{[1.5 min] Step 1: serial service. Each request runs its full 8.6 ms before the next begins, so the GPU is busy 3.5 ms of every 8.6 ms, 41 percent. Step 2: pipelining. While the GPU runs request one, the host already decodes request two. A request now finishes every 4.5 ms, the length of the slower stage, so the GPU is busy 3.5 of every 4.5 ms, 78 percent. ENGAGE: why not 100 percent? Because the host stage is the slower one; a second preprocessing worker removes that cap. LINK: this is the double buffering of Lecture 7 (prepare the next input while the current one runs), applied to the request path. WARN: pipelining raises throughput, not the latency of one request; that request still takes 8.6 ms. FLEX: [CORE]; the batching segment's fixed-cost argument assumes this duty-cycle idea.}
+  \note{[1.5 min] Step 1: serial service. Each request runs its full 8.6 ms before the next begins, so the GPU is busy 3.5 ms of every 8.6 ms, 41 percent. Step 2: pipelining. While the GPU runs request one, the host already decodes request two. A request now finishes every 4.5 ms, the length of the slower stage, so the GPU is busy 3.5 of every 4.5 ms, 78 percent. ENGAGE: why not 100 percent? Because the host stage is the slower one; a second preprocessing worker removes that cap. LINK: this is the double buffering of Lecture 7 (prepare the next input while the current one runs), applied to the request path. WARN: pipelining raises throughput, not the latency of one request; that request still takes 8.6 ms. FLEX: [OPTIONAL]; cutting it loses pipelining; the batching segment's fixed-cost argument assumes this duty-cycle idea.}
 \end{frame}
 
 \begin{frame}{Predict: what does a 10$\times$ faster model buy the user?}
@@ -257,7 +290,7 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Model Serving, \S13.11, first fallacy (M/M/1 model).}
-  \note{[2.5 min] Peer instruction: vote, one minute with a neighbor, vote again. Step 2: C. At 80 percent busy with 3.5 ms service, the mean time inside is 17.6 ms, of which 14.1 ms is waiting. The faster model serves the same traffic at 41 percent busy, so the mean falls to 3.0 ms and the wait to 1.2 ms. The request gets faster twice: once in service and again in the queue that lower utilization drains. A is the fixed-fraction Amdahl reasoning from the predict slide, which ignores load. D confuses a long queue with a fixed cost. WARN: this does not contradict Amdahl's law. Amdahl holds the other stages fixed; under load, the queueing delay itself depends on the service time. Land the segment aloud: waiting grows as 1 over (1 minus utilization), so a tail target fixes the highest safe utilization, and that utilization, not the peak rate, sizes the fleet. FLEX: [CORE].}
+  \note{[2.5 min] Peer instruction: vote, one minute with a neighbor, vote again. Step 2: C. At 80 percent busy with 3.5 ms service, the mean time inside is 17.6 ms, of which 14.1 ms is waiting. The faster model serves the same traffic at 41 percent busy, so the mean falls to 3.0 ms and the wait to 1.2 ms. The request gets faster twice: once in service and again in the queue that lower utilization drains. A is the fixed-fraction Amdahl reasoning from the predict slide, which ignores load. D confuses a long queue with a fixed cost. WARN: this does not contradict Amdahl's law. Amdahl holds the other stages fixed; under load, the queueing delay itself depends on the service time. Land the segment aloud: waiting grows as 1 over (1 minus utilization), so a tail target fixes the highest safe utilization, and that utilization, not the peak rate, sizes the fleet. FLEX: [OPTIONAL]; cutting it loses the 2x-model vote.}
 \end{frame}
 
 \begin{frame}{Predict: what share of 100-way requests is on time?}
@@ -332,7 +365,7 @@ Request concurrency: 1
   \centering
   \mlsyssteps[width=0.92\textwidth,height=5.0cm,keepaspectratio]{runtime_step}{2}
   \mlsyscredit{Model Serving, Example 13.6, table 14 (the reference profile, modeled, one term changed per row).}
-  \note{[2 min] [CORE] The same batch-1 image on six serving runtimes, each changing one term of the chapter's model. Step 1: PyTorch eager takes 3.53 ms, mostly fixed cost. TorchScript runs the same kernels from a graph executor, removing per-operation Python dispatch: 1.79 ms. ONNX Runtime also fuses each convolution with its normalization and activation, 174 kernels down to 56: 0.61 ms. TensorRT replays the whole fused pass as one captured graph: 0.38 ms, 9.3 times faster, still in 32-bit. Step 2: lower precision. FP16 gives 0.33 ms and INT8 0.30 ms, only 1.3 times more than FP32. ENGAGE: why does INT8 help so little at batch 1? (Expected: once host overhead is gone, the per-kernel floor dominates a single image; precision pays when per-image arithmetic dominates, at large batch.) WARN: INT8 also needs calibration data and ties the deployment to one vendor's engine. LINK: Lecture 7 (graph capture and fusion) and Lecture 10b (quantization).}
+  \note{[2 min] [OPTIONAL] The same batch-1 image on six serving runtimes, each changing one term of the chapter's model. Step 1: PyTorch eager takes 3.53 ms, mostly fixed cost. TorchScript runs the same kernels from a graph executor, removing per-operation Python dispatch: 1.79 ms. ONNX Runtime also fuses each convolution with its normalization and activation, 174 kernels down to 56: 0.61 ms. TensorRT replays the whole fused pass as one captured graph: 0.38 ms, 9.3 times faster, still in 32-bit. Step 2: lower precision. FP16 gives 0.33 ms and INT8 0.30 ms, only 1.3 times more than FP32. ENGAGE: why does INT8 help so little at batch 1? (Expected: once host overhead is gone, the per-kernel floor dominates a single image; precision pays when per-image arithmetic dominates, at large batch.) WARN: INT8 also needs calibration data and ties the deployment to one vendor's engine. LINK: Lecture 7 (graph capture and fusion) and Lecture 10b (quantization). FLEX: cutting it loses the runtime comparison.}
 \end{frame}
 
 \begin{frame}{Measured on an L4: 1.9$\times$ the latency buys 4.3$\times$ the throughput}
@@ -381,7 +414,7 @@ Request concurrency: 1
     \end{column}
   \end{columns}
   \mlsyscredit{NVIDIA Triton Inference Server user guide, docs/user\_guide/model\_configuration.md and batcher.md, github.com/triton-inference-server/server (main @ 57b3eba). Three separate examples, quoted exactly.}
-  \note{[1.5 min] [CORE] A real artifact: three configuration examples from the Triton Inference Server user guide, quoted exactly. Each is a separate example in the guide; a real model's config.pbtxt holds one dynamic\_batching block with whichever fields it needs. Step 2: max\_batch\_size is the cap from the previous slide; Triton's example model ``simple'' sets 8. Step 3: preferred\_batch\_size names sizes worth sending at once; the guide says most models should not set it. Step 4: max\_queue\_delay\_microseconds is the timeout: the batcher may hold a request at most this long for others to join, then sends what it has. The default is zero delay, so the server batches only requests that are already waiting. ENGAGE: the guide's example waits 100 microseconds; the next slide's trace waits 12 ms. Which service needs the longer timeout? (Expected: the one with sparse traffic and a loose deadline; at 100 microseconds and 500 requests per second, a batch rarely gains a second request.) WARN: these two numbers are the whole policy; the queueing analysis is how to choose them.}
+  \note{[1.5 min] [OPTIONAL] A real artifact: three configuration examples from the Triton Inference Server user guide, quoted exactly. Each is a separate example in the guide; a real model's config.pbtxt holds one dynamic\_batching block with whichever fields it needs. Step 2: max\_batch\_size is the cap from the previous slide; Triton's example model ``simple'' sets 8. Step 3: preferred\_batch\_size names sizes worth sending at once; the guide says most models should not set it. Step 4: max\_queue\_delay\_microseconds is the timeout: the batcher may hold a request at most this long for others to join, then sends what it has. The default is zero delay, so the server batches only requests that are already waiting. ENGAGE: the guide's example waits 100 microseconds; the next slide's trace waits 12 ms. Which service needs the longer timeout? (Expected: the one with sparse traffic and a loose deadline; at 100 microseconds and 500 requests per second, a batch rarely gains a second request.) WARN: these two numbers are the whole policy; the queueing analysis is how to choose them. FLEX: cutting it loses the real config.}
 \end{frame}
 
 \begin{frame}{Predict: does the oldest request meet 50 ms?}
@@ -474,7 +507,7 @@ Request concurrency: 1
     \end{column}
   \end{columns}
   \mlsyscredit{Run for this course: images/coldstart\_log.py, PyTorch 2.13.0 on an Apple arm64 CPU, 4 threads, random weights. Lines quoted from its output; some lines skipped, long lines wrapped.}
-  \note{[2 min] [CORE] Real output, produced for this course by running images/coldstart\_log.py: a fresh Python process plays a new replica of ResNet-50 on a laptop CPU, and each line is stamped with seconds since the process began. Some lines are skipped and long lines are wrapped. Step 2: the weights, 102 MB, load in 18 ms through pickle and 2 ms through safetensors, because the file sits in the operating system's page cache; from cloud storage the same step takes seconds, as the previous slide said. Step 3: torch.compile, PyTorch's compiler and the CPU counterpart of building a TensorRT engine, takes 10.7 of the 12.4 seconds before the replica is ready, 86 percent. Step 4: a second new process that finds the compiled code in a cache is ready at 2.7 s, 4.6 times sooner. That is the 35 s against 1.5 s of the previous slide at laptop scale. ENGAGE: what must a team ship with each model version to get run 2's start in production? (Expected: the compiled artifact or a warm cache for the exact hardware and software versions.) WARN: a cached engine is valid only for the exact GPU, driver, and library versions it was built for; an upgrade silently brings back run 1.}
+  \note{[2 min] [OPTIONAL] Real output, produced for this course by running images/coldstart\_log.py: a fresh Python process plays a new replica of ResNet-50 on a laptop CPU, and each line is stamped with seconds since the process began. Some lines are skipped and long lines are wrapped. Step 2: the weights, 102 MB, load in 18 ms through pickle and 2 ms through safetensors, because the file sits in the operating system's page cache; from cloud storage the same step takes seconds, as the previous slide said. Step 3: torch.compile, PyTorch's compiler and the CPU counterpart of building a TensorRT engine, takes 10.7 of the 12.4 seconds before the replica is ready, 86 percent. Step 4: a second new process that finds the compiled code in a cache is ready at 2.7 s, 4.6 times sooner. That is the 35 s against 1.5 s of the previous slide at laptop scale. ENGAGE: what must a team ship with each model version to get run 2's start in production? (Expected: the compiled artifact or a warm cache for the exact hardware and software versions.) WARN: a cached engine is valid only for the exact GPU, driver, and library versions it was built for; an upgrade silently brings back run 1. FLEX: cutting it loses the real startup log.}
 \end{frame}
 
 \begin{frame}{Loading a model on demand takes six times a 50 ms deadline}

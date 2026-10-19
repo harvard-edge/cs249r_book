@@ -64,6 +64,11 @@ PALM_CHIPS = 6144
 # (chapter table 2). Cost ratio standard / separable = 1 / (1/N + 1/K^2).
 K, N_OUT = 3, 256
 DW_RATIO = 1 / (1 / N_OUT + 1 / K**2)
+# Panel fix L8: Lecture 6 derived the ratio for a 64-channel layer
+# (36,864 against 4,672 MACs per output pixel); the 8.7x above is the
+# chapter's 256-channel case, so the slides credit table 2 for it.
+N_OUT_L6 = 64
+DW_RATIO_L6 = 1 / (1 / N_OUT_L6 + 1 / K**2)
 INT8_OF_FP32 = 8 / 32
 
 # Slide 9: roofline ridges on one H100 ----------------------------------------
@@ -170,6 +175,7 @@ if __name__ == "__main__":
 
     head("Slides 3 and 7: MobileNetV2")
     show("depthwise separable FLOP ratio, 3x3, 256 out", f"{DW_RATIO:.1f}x")
+    show("depthwise separable FLOP ratio, 3x3, 64 out (Lecture 6)", f"{DW_RATIO_L6:.1f}x")
     show("INT8 bytes as a fraction of FP32", f"{INT8_OF_FP32:.2f}")
 
     head("Slide 9: roofline")
