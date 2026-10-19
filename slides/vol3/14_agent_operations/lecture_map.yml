@@ -1,0 +1,290 @@
+chapter: 14_agent_operations
+lecture: "14"
+title: "Operating Agents"
+layer: runtime
+locator: hsa
+minutes: 75
+notes_minutes: 70.5
+core_minutes: 57.5
+target_ideas: 30
+thesis: "Live traffic honors none of an offline evaluation's choices, so operation needs traces that keep rare failures, postmortems that test causes by rerunning, and staged releases whose monitors take calendar time."
+
+hook:
+  minutes: "0-3.5"
+  setup: "The April 2025 GPT-4o sycophancy rollback (War Story 14.1). Timeline built in three steps from OpenAI's own postmortem: rollout Thursday 24 to Friday 25 April; two days live and monitored; system-prompt patch Sunday night; full rollback from Monday 28 April, about 24 hours. Beside it the exact excerpt: the offline evaluations, especially behavior tests, generally looked good, and the small A/B test indicated users liked the model."
+  question_to_class: "What stopped the update? A) an offline evaluation B) the A/B test's metrics C) signals outside the declared checks"
+  payoff: "C. OpenAI reports no deployment evaluation tracked sycophancy; early usage, internal signals, and user feedback caught it. A release gate passes exactly the criteria it declares. The synthesis maps each of the lecture's four mechanisms onto one label of the same timeline."
+  sources:
+    - "OpenAI, 'Expanding on what we missed with sycophancy,' 2 May 2025 (Wayback Machine copy of 10 Oct 2026), read 2026-10-19."
+    - "Operating Agents, War Story 14.1 (§14.5.3)."
+
+recall: "Lecture 13, close your notes: candidate_v2 accepted more of 150 paired tasks than baseline_v1; did it clear a 2-point noninferiority margin? (No: the paired interval runs from -3.21 to 11.12 points; about 217 pairs would only center the lower limit on the margin, Agent Evaluation NM 13.1.) Thumbnail: a text-free interval crossing a dashed margin. The H·S·A locator (hsa) is shown on the same slide."
+
+driving_question: "Why does a configuration that clears its offline evaluation still need evidence gathered while it runs?"
+
+goals:
+  - "Attribute a trial's time along its critical path, and say what a trace, the trajectory log, and the accounting record each guarantee."
+  - "Design retention that keeps rare failures within a storage budget."
+  - "Test a postmortem hypothesis by a controlled branch, and state what it does not establish."
+  - "Size a canary by calendar time, and separate measured from unmeasured harm."
+  - "Apply a declared release gate to an evidence record."
+
+running_example: "The repair agent (Lighthouse 1.1) in production as candidate_v2 against baseline_v1. One trial on the connection-pool repair receives a silently truncated search result, then proposes rewriting a file outside the repair scope, which the runtime refuses before dispatch (OA §14.1, §14.4). Shown as a real system twice: real OpenTelemetry spans of the chapter's timing trial (images/trace_run.py, OpenTelemetry Python SDK 1.27.0), and SWE-agent, a real repair agent whose resolve rate moves with its observation interface (Yang et al. 2024, Table 3)."
+
+segments:
+  - name: Traces
+    divider_question: "Where did one trial spend its time, and what can its trace prove?"
+    read: "§14.2"
+    concept_questions: [1, 2, 3]
+    land: "Trace to explain one trial, log to recover, account to count; the critical path, not the sum of spans, explains elapsed time."
+    minutes: 10
+  - name: Retention
+    divider_question: "Which traces should we keep, and who decides when?"
+    read: "§14.3"
+    concept_questions: [4, 5, 6]
+    land: "Keep traces by verdict, with a known control sample, and take every population rate from the accounting record."
+    minutes: 12
+  - name: Postmortems
+    divider_question: "How do we find out why one trial failed?"
+    read: "§14.4"
+    concept_questions: [7, 8, 9]
+    land: "A postmortem keeps findings at their boundaries and tests a cause by a controlled branch; its conclusion holds for that fixture."
+    minutes: 12.5
+  - name: Staged release
+    divider_question: "How much live work should a new configuration touch, and for how long?"
+    read: "§14.5"
+    concept_questions: [10, 11, 12, 13]
+    land: "The sample size fixes the measured harm; the canary share sets calendar time and the exposure to unmeasured harm; rollback stops admission and leaves settlement."
+    minutes: 15.5
+  - name: Release gate
+    divider_question: "What must a release show before it widens?"
+    read: "§14.6"
+    concept_questions: [14, 15]
+    land: "A release is a declared conjunction applied to a decision record; inconclusive is not approval."
+    minutes: 7.5
+
+concept_questions:
+  - q: "What does a trace record, and how do spans relate?"
+    picture: "Dapper paper Figure 2 (five spans, parent ids, overlapping helpers); real OpenTelemetry span output of our timing trial."
+    numbers: "Dapper Figure 2 (Sigelman et al. 2010); trace_run.json spans."
+    example: "The repair trial's retrieve, propose, tests, lint, and report spans."
+    read: "§14.2"
+  - q: "Why does summing spans overstate elapsed time, and what is the critical path?"
+    picture: "Gantt of the real run with the critical path outlined and the 0.5 s gap hatched; then the tests cut to 1 s."
+    numbers: "Leaf sum 13.2 s, path 11.2 s, gap 0.5 s, segment 11.7 s; tests cut to 1 s gives 7.7 s, saving 4.0 s of a 5.0 s cut; lint cut saves 0 (NM 14.1, Checkpoint 14.1; derived)."
+    example: "Napkin Math 14.1 (hypothetical intervals) and our replay of it."
+    read: "§14.2.3"
+  - q: "What do the diagnostic trace, the trajectory log, and the accounting record each guarantee?"
+    picture: "One runtime event fanned into three cards, revealed in three steps."
+    numbers: "None; claims from Systems Perspective 14.1 and §14.3.1."
+    example: "A test exits 0 with failed assertions; a span times out while a valid patch is written."
+    read: "§14.2.1, §14.2.2, §14.3.1"
+  - q: "What does tracing cost, and why sample?"
+    picture: "Dapper Table 2 latency change by sampling rate."
+    numbers: "+16.3% at every request, +2.12% at 1/16, -0.20% at 1/1024 (error 2.5%); first production rate about 1/1024 (Sigelman et al. 2010, Table 2 and §4.4)."
+    example: "Google web search cluster."
+    read: "§14.3.1 footnote"
+  - q: "How often does head sampling keep no trace of a rare failure?"
+    picture: "(1-p)^n curves for p = 1%, 5%, 10%."
+    numbers: "1% and 10 occurrences: 90.4%; 10% and 5: 59%; 10% and 50: 0.5%; 5% and 20: 35.8% (Purpose, §14.3.1, Checkpoint 14.2; derived)."
+    example: "An intermittent repair-agent failure mode."
+    read: "§14.3.1"
+  - q: "How does verdict-aware tail selection work, and what does it cost?"
+    picture: "Tail-selection pipeline (book figure 1 redrawn) in two steps; real OpenTelemetry Collector tail_sampling config; retention bars."
+    numbers: "336 GB/day all, 16.8 GB head (20 of 400 failures/h expected), 23.184 GB tail (all 400), 14.5x less than all; floor 16.8 GB/day, 3.2 GB per control point (NM 14.2; derived)."
+    example: "10,000 trials an hour of 1.4 MB."
+    read: "§14.3.2, §14.3.3"
+  - q: "What does a postmortem establish, and at which boundary?"
+    picture: "TWA 800 reconstruction photo beside three findings built in steps."
+    numbers: "None."
+    example: "Truncated observation, out-of-scope proposal, refusal before dispatch."
+    read: "§14.4, Table 4"
+  - q: "Which experiment tests whether fixing the adapter would complete the repair?"
+    picture: "Replay modes diagram; branch outcome bars."
+    numbers: "Original 1/20 accepted, 19 forbidden; warning 8/20, 12 budget stops; paginated 20/20 (Example 14.1, hypothetical)."
+    example: "Example 14.1."
+    read: "§14.4.1, §14.4.3"
+  - q: "What does a clean diagnostic run bound?"
+    picture: "Wilson upper limit on failure rate against clean runs; SWE-agent interface ablation with derived intervals."
+    numbers: "20/20 leaves up to 16.1%; 73 clean runs to fall below 5% (derived). SWE-agent 100-line window 18.0% vs full file 12.7% (54 vs 38 of 300), intervals overlap (Yang et al. 2024 Table 3; intervals derived)."
+    example: "Paginated interface branch; SWE-agent."
+    read: "§14.4.3, §14.4.4"
+  - q: "What question does each release stage answer?"
+    picture: "Canary-in-a-coal-mine photo beside the stage flow (book figure 2 redrawn), every failure routed to one admission hold."
+    numbers: "None."
+    example: "candidate_v2 fails the offline gate and stays offline."
+    read: "§14.5, §14.5.1, §14.5.2"
+  - q: "How does a sequential test decide, and how many labels does it need?"
+    picture: "Wald photo; SPRT corridor with illustrative walks."
+    numbers: "Boundaries 4.5539 and -2.9857; per failure +0.9163, per success -0.1823; increment 0.09233; about 45.24 labels (NM 14.3; derived)."
+    example: "Monitor of 0.90 against 0.75, alpha 0.01, beta 0.05."
+    read: "§14.5.3"
+  - q: "How long does a canary take, and which harm does its share control?"
+    picture: "Hours to decision against canary share; measured against unmeasured harm bars."
+    numbers: "5%: 15.58 h; 10%: 8.04 h; 100%: 1.25 h. Excess failures about 7.0 at 5% and 11.3 at full; unmeasured exposure 5% of full (NM 14.3, §14.5.3; derived)."
+    example: "60 eligible tasks an hour, labels 0.5 h late."
+    read: "§14.5.3"
+  - q: "What does a web-service canary rule miss for an agent, and what does rollback leave?"
+    picture: "Argo Rollouts canary and analysis excerpt with a four-row diagnosis; rollback intervals with OpenAI's 24-hour quote."
+    numbers: "Promotion at 40 min with 2 labeled tasks of about 45 needed (derived from Argo's example applied to NM 14.3); rollback about 24 h (OpenAI 2025a)."
+    example: "The repair agent under Argo's background-analysis example."
+    read: "§14.5.4, §14.5.5"
+  - q: "What does a decision record hold?"
+    picture: "Claim and evidence table built row by row; paired interval with the margin and a planned 217-pair interval."
+    numbers: "Interval -3.21 to 11.12 points against -2; 217 pairs (Agent Evaluation NM 13.1); 217-pair interval derived."
+    example: "candidate_v2's trial, diagnosis, comparison, and disposition."
+    read: "§14.6.1, §14.6.2, Table 8"
+  - q: "What does a declared release gate decide, and what can it not see?"
+    picture: "Focus slide with equation 5; predict slide with Argo's three outcomes."
+    numbers: "Four terms at 5%: up to 20% (union bound), 18.5% if independent; Bonferroni 1.25% each (derived)."
+    example: "candidate_v2 fails the first term."
+    read: "§14.6.3"
+
+concept_trace:
+  - concept: "Trajectory traces"
+    frame: "Summing spans gives 13.2 s; the critical path explains 11.2 s"
+    shown_by: "A real span record (trace id, span id, parent, timestamps, status UNSET) and the run's Gantt; then the three-records build ('Three records carry three different guarantees')."
+  - concept: "Trace retention"
+    frame: "Tail selection waits for the verdict before it keeps a trace"
+    shown_by: "Two-step pipeline: accounting record outside the buffer, four verdict classes with eviction order; then the NM 14.2 retention bars ('Tail selection keeps every failure for 14.5x less storage')."
+  - concept: "Postmortem by intervention"
+    frame: "Diagnose: which interface change fixed the repair?"
+    shown_by: "Three branches from one saved prefix, outcome bars revealed after the vote; preceded by the three findings build ('A postmortem keeps each finding at its own boundary')."
+  - concept: "Staged release"
+    frame: "Each release stage answers its own question"
+    shown_by: "Four-step stage flow with the shared admission hold; then the SPRT corridor and the calendar-time estimate."
+  - concept: "Release gate"
+    frame: "A release gate is a declared conjunction (focus) and Predict: which gate term stops candidate_v2?"
+    shown_by: "Equation 5 with each term labeled; the vote reveals the failing term and the family-wise error."
+  - concept: "Critical path (secondary)"
+    frame: "Estimate: cut the tests to 1 s. How much faster?"
+    shown_by: "Gantt with the tests cut and a question mark, then lint outlined as the new critical path."
+  - concept: "Empirical safety case (secondary)"
+    frame: "The decision record keeps each claim with its own evidence"
+    shown_by: "Claim, evidence, and residual uncertainty per row, built in four steps."
+
+worked_examples:
+  - name: "Napkin Math 14.1: the critical path"
+    steps: ["given: five spans, tests and lint in parallel, 11.7 s segment", "sum of leaves 13.2 s", "path 11.2 s plus 0.5 s gap", "cut tests to 1 s: lint takes over, 7.7 s", "result: 4.0 s saved of a 5.0 s cut; cutting lint saves 0", "meaning: optimize only the path, then remeasure"]
+  - name: "Napkin Math 14.2: verdict-aware retention"
+    steps: ["given: 10,000 trials/h, 1.4 MB, 400 failed, 100 pending", "all: 336 GB/day", "head 5%: 16.8 GB, 20 failures/h expected", "tail: 23.184 GB, all failures", "floor 16.8 GB plus 3.2 GB per control point"]
+  - name: "Napkin Math 14.3: a canary takes calendar time"
+    steps: ["given: 0.90 vs 0.75, alpha 0.01, beta 0.05", "boundaries 4.55 and -2.99; about 45.24 labels", "5% of 60/h is 3/h: 15.08 h plus 0.5 h", "10%: 8.0 h", "excess failures about 7 (5%) vs 11 (full); unmeasured exposure scales with the share"]
+  - name: "Example 14.1: a controlled test of observation completeness"
+    steps: ["given: saved prefix, three branches, 20 runs each", "original 1/20, warning 8/20, paginated 20/20", "blocking a forbidden edit is not a repair", "20/20 still allows 16% failures; 73 runs for 5%"]
+
+active_learning:
+  - at_minute: 0.5
+    type: predict
+    prompt: "What stopped the GPT-4o update? A) offline evaluation B) A/B metrics C) signals outside the declared checks"
+    answer: "C (OpenAI 2025a: no deployment evaluation tracked sycophancy)."
+  - at_minute: 3.5
+    type: retrieval
+    prompt: "Did candidate_v2 clear the 2-point margin on 150 pairs?"
+    answer: "No; interval -3.21 to 11.12; about 217 pairs to center the lower limit on the margin."
+  - at_minute: 11
+    type: estimate
+    prompt: "Cut the tests from 6 s to 1 s. How much faster is the segment?"
+    answer: "4.0 s (11.7 to 7.7 s); lint becomes critical."
+  - at_minute: 18
+    type: estimate
+    prompt: "A failure mode occurred 20 times under a 5% head sample. Chance of no trace?"
+    answer: "0.95^20 = 36%."
+  - at_minute: 32.5
+    type: diagnose
+    prompt: "Which interface change fixed the repair?"
+    answer: "Paginated, 20/20, on this prefix only; the warning removed forbidden edits but left 12 budget stops."
+  - at_minute: 47
+    type: estimate
+    prompt: "How long does a 5% canary take to decide?"
+    answer: "45.24 / 3 = 15.08 h plus 0.5 h = 15.58 h; 8.0 h at 10%."
+  - at_minute: 49.5
+    type: concept_question
+    prompt: "True or false: a 5% canary does less damage than a full release before its monitor decides."
+    answer: "False for the measured regression (7 vs 11 excess failures); true for unmeasured harm (5% exposure)."
+  - at_minute: 51.5
+    type: diagnose
+    prompt: "What would Argo's example canary rule miss for the repair agent?"
+    answer: "Promotes at 40 min with 2 of about 45 labels; HTTP status is not the verdict; repeated looks; abort leaves effects unsettled."
+  - at_minute: 61
+    type: predict
+    prompt: "Which gate term stops candidate_v2?"
+    answer: "Paired acceptance; the other terms were never measured. Four terms at 5% each: up to 20% family-wise error."
+  - at_minute: 63.5
+    type: retrieval
+    prompt: "Match each label on the rollback timeline to one of today's mechanisms."
+    answer: "Gate criteria; verdict-keyed retention and accounting; canary share and admission stop; controlled postmortem and settlement."
+
+open_questions:
+  - "Some harms, like sycophancy, have no cheap automatic grader. Can a release gate include a human judgment and still be declared before data?"
+  - "Labels for agent tasks arrive hours late. Should a canary slow admission until verdicts catch up, and who pays for the wait?"
+  - "Traces of agent work hold customers' code and data. How long may a team keep them for diagnosis?"
+
+more_examples:
+  - "OpenAI GPT-4o sycophancy rollback, April 2025 (OpenAI 2025a, 2025b)."
+  - "Google Dapper: 1/1024 sampling in production and its measured overhead (Sigelman et al. 2010)."
+  - "OpenTelemetry Collector tail_sampling processor and its sampling_trace_dropped_too_early counter."
+  - "OpenTelemetry GenAI semantic conventions: content capture off by default, references to external storage."
+  - "SWE-agent interface ablations (Yang et al. 2024, Table 3)."
+  - "Argo Rollouts canary steps and AnalysisTemplate; Successful, Failed, Inconclusive runs."
+  - "NTSB reconstruction of TWA Flight 800 as hypothesis testing on physical evidence."
+  - "Google SRE book example postmortem (Beyer et al. 2016, Appendix D)."
+
+further_reading:
+  - cite: "Operating Agents, §14.2 to §14.6, Checkpoints 14.1 to 14.4"
+    why: "The chapter's own derivations and checkpoints."
+  - cite: "Sigelman et al., Dapper, a Large-Scale Distributed Systems Tracing Infrastructure, Google, 2010"
+    url: "https://research.google/pubs/dapper-a-large-scale-distributed-systems-tracing-infrastructure/"
+    why: "Production tracing and the cost of sampling."
+  - cite: "Wald, Sequential Tests of Statistical Hypotheses, Annals of Mathematical Statistics, 1945"
+    url: "https://doi.org/10.1214/aoms/1177731118"
+    why: "The SPRT, its boundaries, and its average sample number."
+  - cite: "Kohavi, Tang, and Xu, Trustworthy Online Controlled Experiments, 2020"
+    url: "https://doi.org/10.1017/9781108653985"
+    why: "Assignment units and rollout pitfalls."
+  - cite: "Beyer et al., Site Reliability Engineering, 2016, ch. 15"
+    url: "https://sre.google/sre-book/postmortem-culture/"
+    why: "The blameless postmortem."
+  - cite: "OpenAI, Expanding on what we missed with sycophancy, 2025"
+    url: "https://openai.com/index/expanding-on-sycophancy/"
+    why: "A release postmortem in its authors' words."
+
+left_to_reading:
+  - concept: "Trace context propagation and W3C headers"
+    why: "Detail better read than heard; one line in the three-records note (a trace id correlates, it does not authorize)."
+  - concept: "Pseudonymization with keyed hashes and replay fidelity after redaction"
+    why: "Covered on the optional privacy slide; the chapter's §14.3.3 and §14.3.4 carry the detail."
+  - concept: "Release measurements table (goodput, intervention burden, behavioral change)"
+    why: "Goodput is owned by Lecture 19; the focus slide names it in one line."
+
+callbacks:
+  - {lecture: "13", concept: "Paired comparison", where: "recall slide, staged-release stages note, decision record, gate predict, SWE-agent note"}
+  - {lecture: "13", concept: "Task sampling and score intervals", where: "Wilson slide (credit and note)"}
+  - {lecture: "13", concept: "Hermetic evaluation gym (matching-request rule)", where: "replay-modes note"}
+  - {lecture: "11", concept: "Trajectory log", where: "three-records figure and note"}
+  - {lecture: "11", concept: "Record and replay", where: "replay-modes credit and note; Dapper note (happened-before order)"}
+  - {lecture: "11", concept: "Resume protocol", where: "rollback note"}
+  - {lecture: "12", concept: "Compensation / incident containment", where: "rollback note"}
+  - {lecture: "10", concept: "Trajectory budget vector", where: "rollback note"}
+  - {lecture: "7", concept: "Bounded observation", where: "findings note"}
+  - {lecture: "2", concept: "Quadratic resend and prefix reuse", where: "privacy note"}
+  - {lecture: "1", concept: "Lighthouse workloads (repair agent)", where: "goals note"}
+  - {lecture: "19", concept: "Critical-path acceleration ceiling", where: "critical-path estimate note (hand-off)"}
+  - {lecture: "19", concept: "Trajectory goodput", where: "focus-slide note (hand-off)"}
+  - {lecture: "15", concept: "Capability-gap triage", where: "next-lecture note"}
+
+closing:
+  return_to_hook: "The rollback timeline returns with four labels (no criterion, detected outside the gate, admission stop, then settlement), and students match each to the gate, verdict-keyed retention, the canary share and rollback, and the controlled postmortem."
+  read_and_practice: ["§14.2 to §14.6", "Checkpoints 14.1 to 14.4", "Napkin Math 14.2 and 14.3 by hand", "Exercises 1, 2, and 5"]
+  bridge: "Next lecture (Trajectory Curation): is an accepted trajectory a good training example?"
+
+coverage:
+  primary_taught: ["Trajectory traces", "Trace retention", "Postmortem by intervention", "Staged release", "Release gate"]
+  primary_left_to_reading: []
+  secondary: ["Critical path", "Empirical safety case"]
+
+notes_for_author:
+  - "The concept map marks this chapter's five first-order concepts as pending your confirmation (split from Agent Evaluation, 2026-10-13). The deck teaches all five as primary."
+  - "The chapter text never uses the phrase 'safety case'; the concept map's 'Empirical safety case' is taught through Table 8's decision record."
+  - "The hook quote contains OpenAI's own em dashes, kept as quoted material."
+  - "The real-span artifact comes from images/trace_run.py, which needs opentelemetry-sdk (not in the book venv); its outputs trace_run.json and trace_run_console.txt are committed with it."
