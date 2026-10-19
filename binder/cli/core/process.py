@@ -53,7 +53,7 @@ def local_render_env(root_dir: Path, base: Optional[Mapping[str, str]] = None) -
                 if candidate.is_file():
                     venv_py = candidate
         except Exception:
-            pass
+            pass  # best-effort probe: no git, or not a checkout; render without the shared venv
     if venv_py.is_file():
         if not env.get("QUARTO_PYTHON"):
             env["QUARTO_PYTHON"] = str(venv_py.absolute())
@@ -113,7 +113,7 @@ def _signal_group(process: subprocess.Popen, terminate: bool) -> None:
 
 @contextlib.contextmanager
 def interrupts_as_keyboard_interrupt() -> Iterator[None]:
-    """Raise ``KeyboardInterrupt`` for SIGINT and SIGTERM inside the block.
+    """Raise ``KeyboardInterrupt`` for SIGINT, SIGTERM and SIGHUP inside the block.
 
     Build code then unwinds through its own ``finally`` blocks, which stop the
     renderer and restore generated files, instead of exiting mid-cleanup. The
@@ -128,7 +128,10 @@ def interrupts_as_keyboard_interrupt() -> Iterator[None]:
         """Signal handler that raises ``KeyboardInterrupt`` naming the signal."""
         raise KeyboardInterrupt(f"Interrupted by signal {signum}")
 
-    previous = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
+    signals = [signal.SIGINT, signal.SIGTERM]
+    if hasattr(signal, "SIGHUP"):
+        signals.append(signal.SIGHUP)  # the terminal running the build was closed
+    previous = {sig: signal.getsignal(sig) for sig in signals}
     for sig in previous:
         signal.signal(sig, _raise)
     try:

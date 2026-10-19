@@ -11,10 +11,9 @@ from rich.console import Console
 
 @dataclass(frozen=True)
 class ArtifactCleanupResult:
-    """Counts of removed artifacts and restored config backups (dry runs count them too)."""
+    """Number of artifacts removed (a dry run counts what it would remove)."""
 
     cleaned_count: int
-    restored_count: int
 
 
 def clean_build_artifacts(
@@ -23,57 +22,17 @@ def clean_build_artifacts(
     dry_run: bool = False,
     console: Console | None = None,
 ) -> ArtifactCleanupResult:
-    """Clean Quarto build artifacts and restore fast-build config backups."""
+    """Remove the book's build output and Quarto caches: ``_build/``, ``index_files/``, ``.quarto/``."""
     out = console or Console()
     book_dir = Path(book_dir)
 
-    out.print("[bold blue]Build Artifact Cleanup[/bold blue]")
-
-    restored_count = 0
-    for config_ext in ["_quarto-html.yml", "_quarto-pdf.yml"]:
-        config_file = book_dir / "config" / config_ext
-        backup_file = config_file.with_suffix(f"{config_file.suffix}.fast-build-backup")
-
-        if backup_file.exists():
-            if not dry_run:
-                shutil.copy(backup_file, config_file)
-                backup_file.unlink()
-            restored_count += 1
-            out.print(f"[green]  Restored: {config_file.name}[/green]")
-        else:
-            out.print(f"[dim]  Already clean: {config_file.name}[/dim]")
+    out.print(f"[bold blue]Build Artifact Cleanup[/bold blue] [dim]({book_dir})[/dim]")
 
     artifacts_to_clean = [
         (book_dir / "_build", "Build directory (all formats)"),
         (book_dir / "index_files", "Book index files"),
         (book_dir / ".quarto", "Quarto cache (book)"),
     ]
-
-    contents_core = book_dir / "core"
-    if contents_core.exists():
-        for chapter_dir in contents_core.glob("*/"):
-            if not chapter_dir.is_dir():
-                continue
-            for files_dir in chapter_dir.glob("*_files"):
-                if not files_dir.is_dir():
-                    continue
-                figure_html_dir = files_dir / "figure-html"
-                if figure_html_dir.exists():
-                    artifacts_to_clean.append(
-                        (
-                            figure_html_dir,
-                            f"Quarto figure artifacts ({chapter_dir.name})",
-                        )
-                    )
-
-            figure_html_direct = chapter_dir / "figure-html"
-            if figure_html_direct.exists():
-                artifacts_to_clean.append(
-                    (
-                        figure_html_direct,
-                        f"Quarto figure artifacts ({chapter_dir.name})",
-                    )
-                )
 
     cleaned_count = 0
     for artifact_path, description in artifacts_to_clean:
@@ -92,7 +51,4 @@ def clean_build_artifacts(
     else:
         out.print("[green]  No artifacts to clean[/green]")
 
-    return ArtifactCleanupResult(
-        cleaned_count=cleaned_count,
-        restored_count=restored_count,
-    )
+    return ArtifactCleanupResult(cleaned_count=cleaned_count)

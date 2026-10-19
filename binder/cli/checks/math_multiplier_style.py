@@ -165,7 +165,6 @@ def _audit_file(path: Path) -> list[Violation]:
     in_python = False
 
     for lineno, line in enumerate(lines, 1):
-        stripped = line.strip()
         if not in_fence and CELL_START.match(line):
             in_fence = True
             in_python = bool(PYTHON_CELL_START.match(line))

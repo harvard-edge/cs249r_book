@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 import subprocess
 from pathlib import Path
-from typing import List, Set, Tuple
+from typing import List, Tuple
 
 
 def extract_tikz_blocks(content: str, filepath: str) -> List[Tuple[str, int]]:

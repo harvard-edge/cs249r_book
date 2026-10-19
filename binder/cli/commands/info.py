@@ -19,7 +19,21 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from ..core.discovery import display_path, qmd_files_under
+
 console = Console()
+
+
+def _read_text(path: Path) -> Optional[str]:
+    """Return *path*'s text, or None after warning on stderr that it was skipped.
+
+    The warning goes to stderr so CSV and JSON output on stdout stay clean.
+    """
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        print(f"binder info: skipped unreadable {path}: {exc}", file=sys.stderr)
+        return None
 
 # ---------------------------------------------------------------------------
 # Patterns
@@ -187,7 +201,7 @@ class InfoCommand:
 
         ``--path`` wins (relative paths resolve against the current directory);
         otherwise ``--vol1``/``--vol2`` select that volume directory under the
-        book dir, and the fallback is ``<book_dir>/contents``. Existence is not
+        book dir, and the fallback is the whole book dir. Existence is not
         checked here.
         """
         if path_arg:
@@ -198,19 +212,12 @@ class InfoCommand:
             return base / "vol1"
         if vol2:
             return base / "vol2"
-        return base / "contents"
-
-    def _qmd_files(self, root: Path) -> List[Path]:
-        """Return ``root`` if it is a ``.qmd`` file, else every ``.qmd`` file under it, sorted."""
-        if root.is_file():
-            return [root] if root.suffix == ".qmd" else []
-        return sorted(root.rglob("*.qmd"))
+        return base
 
     def _chapter_name(self, path: Path) -> str:
         """Extract a human-readable chapter name from a QMD file."""
-        try:
-            content = path.read_text(encoding="utf-8")
-        except Exception:
+        content = _read_text(path)
+        if content is None:
             return path.stem
         # Skip YAML front matter
         if content.startswith("---"):
@@ -221,13 +228,6 @@ class InfoCommand:
         if m:
             return m.group(1).strip()
         return path.stem.replace("_", " ").title()
-
-    def _relative(self, path: Path) -> str:
-        """Return ``path`` relative to the book dir, or the full path if it lies outside."""
-        try:
-            return str(path.relative_to(self.config_manager.book_dir))
-        except ValueError:
-            return str(path)
 
     # ------------------------------------------------------------------
     # Stats
@@ -241,7 +241,7 @@ class InfoCommand:
         otherwise prints a summary or per-chapter Rich table. Returns False when
         no ``.qmd`` files are found under ``root``.
         """
-        files = self._qmd_files(root)
+        files = qmd_files_under(root)
         if not files:
             console.print("[yellow]No QMD files found.[/yellow]")
             return False
@@ -255,7 +255,7 @@ class InfoCommand:
         all_stats: List[Dict] = []
         for path in chapter_files:
             stats = self._count_file(path)
-            stats["file"] = self._relative(path)
+            stats["file"] = display_path(path, self.config_manager.book_dir)
             stats["chapter"] = self._chapter_name(path)
             all_stats.append(stats)
 
@@ -284,9 +284,8 @@ class InfoCommand:
 
     def _count_file(self, path: Path) -> Dict:
         """Count elements in a single QMD file."""
-        try:
-            content = path.read_text(encoding="utf-8")
-        except Exception:
+        content = _read_text(path)
+        if content is None:
             return self._empty_stats()
 
         lines = content.splitlines()
@@ -521,7 +520,7 @@ class InfoCommand:
             figs = self._extract_figures(path)
             for i, fig in enumerate(figs, 1):
                 fig["chapter"] = chapter
-                fig["file"] = self._relative(path)
+                fig["file"] = display_path(path, self.config_manager.book_dir)
                 fig["seq"] = i  # per-chapter sequential number
             all_figures.extend(figs)
 
@@ -582,7 +581,7 @@ class InfoCommand:
 
     def _chapter_files_from_root(self, root: Path) -> List[Path]:
         """Get chapter QMD files from a directory, filtering out parts/."""
-        files = self._qmd_files(root)
+        files = qmd_files_under(root)
         return [f for f in files if "/parts/" not in str(f)]
 
     # ------------------------------------------------------------------
@@ -614,7 +613,8 @@ class InfoCommand:
             try:
                 raw = resolved.read_text(encoding="utf-8")
                 parsed = yaml.safe_load(raw)
-            except Exception:
+            except (OSError, yaml.YAMLError) as exc:
+                print(f"binder info: skipped unparsable config {resolved}: {exc}", file=sys.stderr)
                 continue
             if parsed and "book" in parsed:
                 return resolved, parsed, raw
@@ -637,7 +637,8 @@ class InfoCommand:
             resolved = config_path
             try:
                 parsed = yaml.safe_load(resolved.read_text(encoding="utf-8"))
-            except Exception:
+            except (OSError, yaml.YAMLError) as exc:
+                print(f"binder info: skipped unparsable config {resolved}: {exc}", file=sys.stderr)
                 continue
             if not parsed:
                 continue
@@ -692,8 +693,8 @@ class InfoCommand:
         """Return True if the manifest header appears in the file's first 200 chars."""
         try:
             return _MANIFEST_HEADER in path.read_text(encoding="utf-8")[:200]
-        except Exception:
-            return False
+        except (OSError, UnicodeDecodeError):
+            return False  # an unreadable file is not a manifest candidate
 
     def _find_latex_manifest(
         self, explicit_path: Optional[str], vol: Optional[str]
@@ -738,9 +739,8 @@ class InfoCommand:
     def _parse_latex_manifest(path: Path) -> List[Dict]:
         """Parse a LaTeX figure manifest into [{number, page}, ...]."""
         figures: List[Dict] = []
-        try:
-            content = path.read_text(encoding="utf-8")
-        except Exception:
+        content = _read_text(path)
+        if content is None:
             return figures
         for m in _LATEX_FIG_PAT.finditer(content):
             figures.append({"number": m.group(1), "page": m.group(2)})
@@ -752,9 +752,8 @@ class InfoCommand:
 
     def _extract_figures(self, path: Path) -> List[Dict]:
         """Extract all figures from a QMD file, deduplicating by label."""
-        try:
-            content = path.read_text(encoding="utf-8")
-        except Exception:
+        content = _read_text(path)
+        if content is None:
             return []
 
         raw: List[Dict] = []
@@ -1035,7 +1034,7 @@ class InfoCommand:
 
     def _run_concepts(self, root: Path, ns) -> bool:
         """Extract key concepts from QMD files."""
-        files = self._qmd_files(root)
+        files = qmd_files_under(root)
         chapter_files = [f for f in files if "/parts/" not in str(f) and "/frontmatter/" not in str(f)]
 
         if not chapter_files:
@@ -1052,9 +1051,8 @@ class InfoCommand:
         heading_pat = re.compile(r"^(#{1,6})\s+(.*)")
 
         for path in chapter_files:
-            try:
-                content = path.read_text(encoding="utf-8")
-            except Exception:
+            content = _read_text(path)
+            if content is None:
                 continue
 
             lines = content.splitlines()
@@ -1091,7 +1089,7 @@ class InfoCommand:
 
             # Print
             name = chapter[:40] if len(chapter) <= 40 else chapter[:38] + "…"
-            console.print(f"\n[bold cyan]{name}[/bold cyan]  [dim]({self._relative(path)})[/dim]")
+            console.print(f"\n[bold cyan]{name}[/bold cyan]  [dim]({display_path(path, self.config_manager.book_dir)})[/dim]")
 
             if h2_topics:
                 console.print(f"  [yellow]Topics:[/yellow] {', '.join(h2_topics[:8])}")
@@ -1113,7 +1111,7 @@ class InfoCommand:
 
     def _run_headers(self, root: Path, ns) -> bool:
         """List all section headers with levels."""
-        files = self._qmd_files(root)
+        files = qmd_files_under(root)
         chapter_files = [f for f in files if "/parts/" not in str(f)]
 
         if not chapter_files:
@@ -1129,11 +1127,11 @@ class InfoCommand:
 
         total = 0
         for path in chapter_files:
-            try:
-                lines = path.read_text(encoding="utf-8").splitlines()
-            except Exception:
+            content = _read_text(path)
+            if content is None:
                 continue
-            rel = self._relative(path)
+            lines = content.splitlines()
+            rel = display_path(path, self.config_manager.book_dir)
             if len(rel) > 28:
                 rel = "…" + rel[-27:]
             for line in lines:
@@ -1159,7 +1157,7 @@ class InfoCommand:
         """Find acronyms in parentheses (e.g., (CNN), (GPU))."""
         from collections import Counter
 
-        files = self._qmd_files(root)
+        files = qmd_files_under(root)
         if not files:
             console.print("[yellow]No QMD files found.[/yellow]")
             return False
@@ -1169,9 +1167,8 @@ class InfoCommand:
         acronym_files: Dict[str, List[str]] = defaultdict(list)
 
         for path in files:
-            try:
-                content = path.read_text(encoding="utf-8")
-            except Exception:
+            content = _read_text(path)
+            if content is None:
                 continue
             found = set()
             for m in acronym_pat.finditer(content):
@@ -1179,7 +1176,7 @@ class InfoCommand:
                 acronym_counts[acr] += 1
                 found.add(acr)
             for acr in found:
-                acronym_files[acr].append(self._relative(path))
+                acronym_files[acr].append(display_path(path, self.config_manager.book_dir))
 
         if not acronym_counts:
             console.print("[yellow]No acronyms found.[/yellow]")
