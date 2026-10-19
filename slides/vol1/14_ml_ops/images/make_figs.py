@@ -30,21 +30,11 @@ Every value is sourced. "Chapter" means the rendered ML Operations chapter.
     two H100s, four H100s for six hours of retraining, one free copy slot).
   - Rollback state: chapter Sec. 14.4.3 and Checkpoint 14.2 (embedding
     dimension change, cached state restored with the weights).
-  - Detection time: Napkin Math 14.2 (1,000 labels; 1 per second, 16.7
-    minutes; 100 per day, 10 days).
-  - Detection accuracy against samples: Rabanser, Guennemann, and Lipton,
-    "Failing Loudly", NeurIPS 2019, Table 2a (univariate BBSDs).
-  - Silent-failure cost: Napkin Math 14.3 ($191,781 against $6,849).
-  - Retraining cadences: Hazelwood et al., HPCA 2018, Table II.
-  - Freshness: He et al., "Practical Lessons from Predicting Clicks on Ads at
-    Facebook", 2014, Fig. 2, LR plus trees; bar heights read from the figure
-    (approximate).
-  - Optimal retraining interval: equation 12 and Napkin Math 14.6 with the
-    chapter's illustrative parameters (Q = 1,000,000 per day, V = $0.50,
-    A0 = 0.94, gamma = 0.0024 per day, C = $5,000), so T* = 2.98 days. The
-    book's margin figure labels the crossing "about 1 d"; this redraw uses
-    the formula.
-  - Slices: chapter table 20.
+  - Derived values (Wild-Time drops, break-even weeks, node-day counts, A/B
+    users per variant) come from calcs.py in this folder.
+  - Part 2 figures (detection time, Rabanser, silent-failure cost, retraining
+    cadence, freshness, T*, slices, iceberg) moved to Lecture 14b and are
+    generated there.
 
 Plots are drawn small (about 3 to 5 in wide) because the slide shows them at
 about 5 cm tall; drawn at that size their 11 to 13 pt type stays at 8 pt or
@@ -58,6 +48,8 @@ import sys
 from pathlib import Path
 
 import numpy as np
+
+import calcs
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
@@ -157,8 +149,8 @@ def small_hbars(path_, rows, size, xlim, ticks, ticklabels, xlabel, log=False,
 # 1. Zillow Offers, Q2 against Q3 2021 (grouped bars, two steps)
 # -----------------------------------------------------------------------------
 cats = ["Bought", "Sold", "In inventory"]
-q2 = [3805, 2086, 3142]
-q3 = [9680, 3032, 9790]
+q2 = [calcs.Q2_BOUGHT, calcs.Q2_SOLD, calcs.Q2_INV]
+q3 = [calcs.Q3_BOUGHT, calcs.Q3_SOLD, calcs.Q3_INV]
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(4.6, 2.1))
     w = 0.4
@@ -171,7 +163,7 @@ for k in (1, 2):
         ax.bar(i + w / 2, v, w, color=C["danger"], alpha=a)
         ax.text(i + w / 2, v + 250, f"{v:,}", ha="center", va="bottom",
                 fontsize=10, color=C["danger"], fontweight="bold", alpha=a)
-    ax.text(2 + w / 2 + 0.24, 6000, "+8,172\nunder\ncontract", ha="left",
+    ax.text(2 + w / 2 + 0.24, 6000, f"+{calcs.Q3_CONTRACT:,}\nunder\ncontract", ha="left",
             va="center", fontsize=11, color=C["danger"], alpha=a)
     ax.text(-0.5, 12300, "Q2 2021", color=C["neutral"], fontsize=12,
             fontweight="bold", ha="left")
@@ -192,15 +184,9 @@ for k in (1, 2):
 # -----------------------------------------------------------------------------
 # 2. Wild-Time: the same model on later data (dumbbells, two steps)
 # -----------------------------------------------------------------------------
-wild = [  # name, training period, later period
-    ("Yearbook portraits", 98.0, 79.5),
-    ("MIMIC mortality (AUC)", 90.9, 72.9),
-    ("MIMIC readmission", 73.0, 61.3),
-    ("HuffPost news", 79.4, 70.4),
-    ("arXiv papers", 53.8, 45.9),
-    ("FMoW satellite", 58.1, 54.1),
-]
-drops = ["18.5", "18.0", "11.7", "9.0", "7.8", "4.0"]
+# training and later-period scores, plotted to one decimal as in the chapter
+wild = [(n, calcs.r(a_, 1), calcs.r(b_, 1)) for n, a_, b_ in calcs.WILD]
+drops = [calcs.f(d, 1) for _, d in calcs.WILD_DROPS]
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(4.4, 2.5))
     n = len(wild)
@@ -216,9 +202,9 @@ for k in (1, 2):
                 fontweight="bold", color=C["danger"], alpha=alpha)
         ax.text(41, y, name, va="center", ha="right", fontsize=12,
                 color=C["text"], alpha=max(alpha, 0.6))
-    ax.text(98.0, n - 0.3, "training\nperiod", color=C["memory"], fontsize=11,
+    ax.text(wild[0][1], n - 0.3, "training\nperiod", color=C["memory"], fontsize=11,
             ha="center", va="bottom", fontweight="bold")
-    ax.text(79.5, n - 0.3, "later\nperiod", color=C["danger"], fontsize=11,
+    ax.text(wild[0][2], n - 0.3, "later\nperiod", color=C["danger"], fontsize=11,
             ha="center", va="bottom", fontweight="bold")
     ax.set_yticks([])
     ax.set_ylim(-0.6, n - 0.4)
@@ -285,7 +271,7 @@ for k in (1, 2, 3, 4):
 # 4. Google outages by how characteristic of ML the cause was
 # -----------------------------------------------------------------------------
 fig, ax = plt.subplots(figsize=(3.2, 2.1))
-vals = [61, 0, 9, 2, 24]
+vals = calcs.OUTAGES
 cols = [C["neutral"]] * 4 + [C["compute"]]
 for i, v in enumerate(vals):
     ax.bar(i, v, 0.62, color=cols[i])
@@ -296,7 +282,7 @@ ax.set_xticklabels(["0\nnot ML", "1", "2", "3", "4\nall ML"], fontsize=11)
 ax.set_ylim(0, 72)
 ax.set_yticks([0, 20, 40, 60])
 ax.tick_params(axis="y", labelsize=11)
-ax.set_ylabel("Outages (of 96)", fontsize=11)
+ax.set_ylabel(f"Outages (of {sum(vals)})", fontsize=11)
 ax.set_xlabel("How ML-specific the cause was", fontsize=11)
 ax.grid(axis="y", color=C["grid"], linewidth=0.6)
 ax.set_axisbelow(True)
@@ -332,8 +318,9 @@ for k in (1, 2):
     if k == 2:
         p.append(text(12, 238, "Zillow Offers, Q3 2021: the chain runs through the world",
                       24, C["neutral"], "bold", "start"))
-        xs = chain(p, 256, [("Forecast", "home prices"), ("Purchase", "9,680 homes"),
-                            ("Inventory", "9,790 + 8,172"), ("Write-down", "$304 million")],
+        xs = chain(p, 256, [("Forecast", "home prices"), ("Purchase", f"{calcs.Q3_BOUGHT:,} homes"),
+                            ("Inventory", f"{calcs.Q3_INV:,} + {calcs.Q3_CONTRACT:,}"),
+                            ("Write-down", f"${calcs.WRITE_DOWN_M} million")],
                    C["danger"], C["danger_l"])
         p.append(path(f"M {xs[0]+98} 338 C {xs[0]+98} 410, {xs[1]+98} 410, {xs[1]+98} 342",
                       C["neutral"], 2.5, "n", "7 5"))
@@ -346,26 +333,29 @@ for k in (1, 2):
 # 6. When automation pays (Napkin Math 14.1), two steps
 # -----------------------------------------------------------------------------
 weeks = np.linspace(0, 40, 200)
+BUILD, MANUAL, UPKEEP = 80, 4, 1          # Napkin Math 14.1; upkeep is the deck's
+BE = calcs.breakeven(BUILD, MANUAL)
+BE_UP = calcs.breakeven(BUILD, MANUAL, UPKEEP)
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(4.3, 2.0))
-    ax.plot(weeks, 4 * weeks, color=C["danger"], lw=3)
-    ax.plot(weeks, [80] * len(weeks), color=C["memory"], lw=3)
-    ax.fill_between(weeks[weeks >= 20], 80, 4 * weeks[weeks >= 20],
+    ax.plot(weeks, MANUAL * weeks, color=C["danger"], lw=3)
+    ax.plot(weeks, [BUILD] * len(weeks), color=C["memory"], lw=3)
+    ax.fill_between(weeks[weeks >= BE], BUILD, MANUAL * weeks[weeks >= BE],
                     color=C["danger_l"])
-    ax.plot([20], [80], "o", ms=10, color=C["text"], zorder=5)
-    ax.text(21.5, 45, "break-even:\n80 / 4 = 20 weeks", fontsize=11,
+    ax.plot([BE], [BUILD], "o", ms=10, color=C["text"], zorder=5)
+    ax.text(BE + 1.5, 45, f"break-even:\n{BUILD} / {MANUAL} = {calcs.f(BE, 0)} weeks", fontsize=11,
             fontweight="bold", color=C["text"])
     ax.text(40.8, 160, "Manual:\n4 h a week", color=C["danger"], fontsize=11,
             fontweight="bold", va="center")
     ax.text(40.8, 72, "Pipeline:\n80 h once", color=C["memory"], fontsize=11,
             fontweight="bold", va="center")
     a = 1.0 if k == 2 else 0.0
-    ax.plot(weeks, 80 + 1 * weeks, color=C["memory"], lw=2.5, ls="--", alpha=a)
-    ax.plot([80 / 3], [80 + 80 / 3], "o", ms=9, color=C["memory"], alpha=a,
+    ax.plot(weeks, BUILD + UPKEEP * weeks, color=C["memory"], lw=2.5, ls="--", alpha=a)
+    ax.plot([BE_UP], [BUILD + UPKEEP * BE_UP], "o", ms=9, color=C["memory"], alpha=a,
             zorder=5)
-    ax.text(40.8, 118, "+1 h a week", color=C["memory"], fontsize=11,
+    ax.text(40.8, 118, f"+{UPKEEP} h a week", color=C["memory"], fontsize=11,
             va="center", alpha=a)
-    ax.text(1, 135, "with upkeep: 80 / 3\n= 26.7 weeks (derived)", fontsize=11,
+    ax.text(1, 135, f"with upkeep: {BUILD} / {MANUAL - UPKEEP}\n= {calcs.f(BE_UP, 1)} weeks (derived)", fontsize=11,
             color=C["memory"], alpha=a, fontweight="bold")
     ax.set_xlim(0, 40)
     ax.set_ylim(0, 170)
@@ -421,16 +411,22 @@ for k in (1, 2, 3):
 # -----------------------------------------------------------------------------
 # 8. Knight Capital: seven of eight servers updated (SEC 34-70694, para. 15-16)
 # -----------------------------------------------------------------------------
-p = svg_open(900, 230)
-for i in range(8):
+p = svg_open(900, 175)
+for i in range(calcs.SERVERS):
     x = 12 + i * 111
-    bad = i == 7
+    bad = i >= calcs.UPDATED
     col, fill = (C["danger"], C["danger_l"]) if bad else (C["data"], C["data_l"])
-    p.append(rect(x + 10, 10, 80, 130, fill, col, 3, 8))
-    for j in range(4):
-        p.append(line(x + 24, 38 + j * 22, x + 76, 38 + j * 22, col, 3, None))
-    p.append(text(x + 50, 176, f"Server {i+1}", 23, C["text"], "bold"))
-    p.append(text(x + 50, 210, "Power Peg" if bad else "new code", 20, col, "bold"))
+    p.append(rect(x + 14, 8, 72, 92, fill, col, 3, 8))
+    for j in range(3):
+        p.append(line(x + 26, 32 + j * 22, x + 74, 32 + j * 22, col, 3, None))
+    p.append(text(x + 50, 132, f"Server {i+1}", 24, C["text"], "bold"))
+    if bad:
+        p.append(text(894, 170, "Power Peg", 25, col, "bold", "end"))
+# one label under the seven updated servers
+x7 = 12 + (calcs.UPDATED - 1) * 111
+p.append(line(30, 146, x7 + 80, 146, C["data"], 2.5, None))
+p.append(text((30 + x7 + 80) / 2, 170, f"new code on {calcs.UPDATED} of {calcs.SERVERS}",
+              25, C["data"], "bold"))
 save_svg(p, "knight_servers.svg")
 
 
@@ -440,7 +436,9 @@ def ktime(k):
     p.append(line(20, 130, 880, 130, "#999999", 4, None))
     marks = [(130, "8:01", "first automated e-mail:", "“Power Peg disabled”"),
              (440, "9:30", "market opens;", "97 e-mails by now"),
-             (770, "about 10:15", "about 45 minutes", "after the open")]
+             (770, "about " + f"{(calcs.OPEN_MIN + calcs.KNIGHT_MIN) // 60}:"
+              f"{(calcs.OPEN_MIN + calcs.KNIGHT_MIN) % 60:02d}",
+              f"about {calcs.KNIGHT_MIN} minutes", "after the open")]
     for i, (x, t, a_, b_) in enumerate(marks):
         if i == 2 and k < 2:
             continue
@@ -470,7 +468,8 @@ def nodeday(k):
     blocks = [  # y0, h, x0, w, fill, edge, label, step
         (0, 2, 0, 24, "memory_l", "memory", "Serving copy: 100 GB of tables", 1),
         (2, 2, 0, 24, "data_l", "data", "Hot standby: previous version", 2),
-        (4, 4, 0, 6, "compute_l", "compute", "Retrain\n4 × 6 h\n= 24\nGPU-h", 3),
+        (4, 4, 0, 6, "compute_l", "compute",
+         f"Retrain\n{calcs.RETRAIN_GPUS} × {calcs.RETRAIN_H} h\n= {calcs.RETRAIN_GPUS * calcs.RETRAIN_H}\nGPU-h", 3),
         (4, 2, 6, 18, "network_l", "network", "Canary: new candidate", 3),
     ]
     for y0, h, x0, w, f, e, lab, st in blocks:
@@ -499,213 +498,7 @@ nodeday(2)
 nodeday(3)
 
 # -----------------------------------------------------------------------------
-# 10. Rollback: weights revert, the cache does not
-# -----------------------------------------------------------------------------
-p = svg_open(560, 420)
-p.append(rect(4, 8, 250, 86, C["memory_l"], C["memory"], 2.5, 8))
-p.append(text(129, 44, "Model weights", 26, C["text"], "bold"))
-p.append(text(129, 76, "v2 to v1 (reverted)", 23, C["memory"]))
-p.append(rect(306, 8, 250, 86, C["danger_l"], C["danger"], 2.5, 8))
-p.append(text(431, 44, "Embedding cache", 26, C["text"], "bold"))
-p.append(text(431, 76, "still v2 vectors", 23, C["danger"]))
-p.append(line(256, 51, 302, 51, C["danger"], 3, "r"))
-p.append(text(280, 138, "v1 reads vectors from v2's space", 25, C["danger"], "bold"))
-p.append(text(280, 170, "(v2 changed the embedding size)", 23, C["neutral"]))
-p.append(rect(4, 204, 552, 210, "#F7F7F7", C["data"], 2.5, 10))
-p.append(text(280, 244, "A tested rollback restores together:", 25, C["data"], "bold"))
-for j, s_ in enumerate(("the weights, from the registry", "the feature transform version",
-                        "the cache (invalidate or swap)")):
-    p.append(text(36, 290 + j * 40, "• " + s_, 24, C["text"], anchor="start"))
-save_svg(p, "rollback_cache.svg")
-
-
-# -----------------------------------------------------------------------------
-# 11. Detection time: 1,000 labels at two arrival rates (Napkin Math 14.2)
-# -----------------------------------------------------------------------------
-small_hbars("detect_ladder.svg", [
-    ("1 per second", 16.7, "data", "16.7 min"),
-    ("100 per day", 14400, "danger", "10 days"),
-], size=(3.8, 1.15), xlim=(1, 3e5), ticks=[1, 60, 14400],
-    ticklabels=["1 min", "1 hour", "10 days"],
-    xlabel="Time to collect 1,000 labels (log scale)", log=True, label_x=0.9)
-
-
-# -----------------------------------------------------------------------------
-# 12. Detection accuracy against samples (Rabanser et al. 2019, Table 2a)
-# -----------------------------------------------------------------------------
-ns = [10, 20, 50, 100, 200, 500, 1000, 10000]
-acc = {
-    "Large shift": ([0.32, 0.54, 0.78, 0.82, 0.83, 0.92, 0.96, 1.00], "data"),
-    "Medium shift": ([0.14, 0.21, 0.39, 0.38, 0.42, 0.57, 0.66, 0.76], "compute"),
-    "Small shift": ([0.00, 0.00, 0.14, 0.14, 0.18, 0.36, 0.40, 0.54], "danger"),
-}
-for k in (1, 2):
-    fig, ax = plt.subplots(figsize=(4.3, 2.1))
-    for i, (lab, (v, ck)) in enumerate(acc.items()):
-        a = 1.0 if (i < 2 or k == 2) else 0.0
-        ax.plot(ns, v, "o-", color=C[ck], lw=3, ms=6, alpha=a)
-        ax.text(13000, v[-1], lab, color=C[ck], fontsize=11, fontweight="bold",
-                va="center", alpha=a)
-    a = 1.0 if k == 2 else 0.0
-    ax.axvline(1000, color=C["neutral"], ls="--", lw=1.2, alpha=a)
-    ax.text(1150, 0.16, "at 1,000:\nlarge 0.96\nsmall 0.40", ha="left",
-            fontsize=10, color=C["text"], alpha=a, fontweight="bold", va="center")
-    ax.axhline(0.5, color=C["grid"], lw=1)
-    ax.set_xscale("log")
-    ax.minorticks_off()
-    ax.set_xlim(8, 12000)
-    ax.set_ylim(-0.03, 1.05)
-    ax.set_xticks([10, 100, 1000, 10000])
-    ax.set_xticklabels(["10\n10 s\n2.4 h", "100\n1.7 min\n1 day",
-                        "1,000\n16.7 min\n10 days", "10,000\n2.8 h\n100 days"],
-                       fontsize=10)
-    ax.text(-0.09, -0.07, "samples\nat 1/s\nat 100/day", ha="right", va="top",
-            fontsize=10, color=C["neutral"], transform=ax.transAxes)
-    ax.set_yticks([0, 0.5, 1.0])
-    ax.tick_params(axis="y", labelsize=10)
-    ax.set_ylabel("Detection accuracy", fontsize=11)
-    ax.grid(axis="y", color=C["grid"], linewidth=0.6)
-    sp.save(fig, out / f"rabanser_step{k}.svg")
-
-
-# -----------------------------------------------------------------------------
-# 13. Cost of a silent failure (Napkin Math 14.3)
-# -----------------------------------------------------------------------------
-small_hbars("silent_cost.svg", [
-    ("Monthly review", 191781, "danger", "$191,781"),
-    ("Daily check", 6849, "data", "$6,849"),
-], size=(3.8, 1.15), xlim=(0, 290000), ticks=[0, 100000, 200000],
-    ticklabels=["$0", "$100K", "$200K"], xlabel="Revenue lost per incident",
-    label_x=-4000, value_pad=5000)
-
-
-# -----------------------------------------------------------------------------
-# 14. Retraining cadence at Facebook (Hazelwood et al. 2018, Table II) and
-#     freshness (He et al. 2014, Fig. 2)
-# -----------------------------------------------------------------------------
-fig, ax = plt.subplots(figsize=(2.7, 2.3))
-rungs = [("Hourly", "Search"), ("Sub-daily", "Sigma"), ("Daily", "News Feed"),
-         ("Weekly", "Translation,\nSpeech"), ("Multi-monthly", "Lumos")]
-for i, (cad, svc) in enumerate(rungs):
-    y = len(rungs) - 1 - i
-    ax.plot([0], [y], "o", ms=10, color=C["memory"])
-    ax.text(-0.15, y, cad, ha="right", va="center", fontsize=11,
-            fontweight="bold", color=C["memory"])
-    ax.text(0.15, y, svc, ha="left", va="center", fontsize=11, color=C["text"])
-ax.plot([0, 0], [0, len(rungs) - 1], color=C["memory"], lw=2, zorder=0)
-ax.set_xlim(-1.6, 1.4)
-ax.set_ylim(-0.5, len(rungs) - 0.5)
-ax.axis("off")
-sp.save(fig, out / "fb_cadence.svg")
-
-fig, ax = plt.subplots(figsize=(2.9, 1.8))
-days = list(range(7))
-ne = [95.65, 95.88, 95.67, 95.92, 96.02, 96.33, 96.63]
-ax.plot(days, ne, "o-", color=C["compute"], lw=3, ms=7)
-ax.set_xticks(days)
-ax.tick_params(labelsize=10)
-ax.set_xlabel("Days between training and test", fontsize=11)
-ax.set_ylabel("Relative NE (%)", fontsize=11)
-ax.set_ylim(95.4, 96.9)
-ax.set_yticks([95.5, 96.0, 96.5])
-ax.text(0.0, 96.62, "lower is better", fontsize=10, color=C["neutral"],
-        va="center")
-ax.grid(axis="y", color=C["grid"], linewidth=0.6)
-note(ax, "Read from the paper's figure; approximate", 0.0, -0.45)
-sp.save(fig, out / "he_freshness.svg")
-
-
-# -----------------------------------------------------------------------------
-# 15. The optimal retraining interval, redrawn from equation 12
-# -----------------------------------------------------------------------------
-Q, V, A0, G, CR = 1_000_000, 0.50, 0.94, 0.0024, 5000
-slope = Q * V * A0 * G  # 1,128 dollars of staleness per day, per day
-tstar = math.sqrt(2 * CR / slope)
-T = np.linspace(0.6, 10, 300)
-run = CR / T
-stale = 0.5 * slope * T
-for k in (1, 2):
-    fig, ax = plt.subplots(figsize=(3.5, 2.1))
-    ax.plot(T, run, color=C["memory"], lw=3)
-    ax.plot(T, stale, color=C["danger"], lw=3)
-    ax.text(5.0, 1000, "run cost C/T", color=C["memory"], fontsize=11,
-            fontweight="bold", va="bottom")
-    ax.text(10.2, 5300, "staleness", color=C["danger"], fontsize=11,
-            fontweight="bold", va="center")
-    a = 1.0 if k == 2 else 0.0
-    ax.plot(T, run + stale, color=C["text"], lw=2.5, ls="--", alpha=a)
-    ax.plot([tstar], [CR / tstar + 0.5 * slope * tstar], "o", ms=10,
-            color=C["text"], alpha=a, zorder=5)
-    ax.axvline(tstar, color=C["neutral"], lw=1.2, ls=":", alpha=a)
-    ax.text(tstar + 0.3, 7400, f"T* = {tstar:.2f} days", fontsize=12,
-            fontweight="bold", color=C["text"], alpha=a)
-    ax.text(10.2, 6600, "total", fontsize=11, color=C["text"], fontweight="bold",
-            va="center", alpha=a)
-    ax.set_xlim(0, 10)
-    ax.set_ylim(0, 8500)
-    ax.tick_params(labelsize=10)
-    ax.set_xlabel("Retraining interval T (days)", fontsize=11)
-    ax.set_ylabel("Cost per day ($)", fontsize=11)
-    ax.set_yticks([0, 4000, 8000])
-    ax.set_yticklabels(["0", "4,000", "8,000"])
-    ax.grid(color=C["grid"], linewidth=0.6)
-    ax.set_axisbelow(True)
-    sp.save(fig, out / f"tstar_step{k}.svg")
-
-
-# -----------------------------------------------------------------------------
-# 16. Slices hide a failing segment (table 20)
-# -----------------------------------------------------------------------------
-fig, ax = plt.subplots(figsize=(3.0, 2.2))
-rows = [("Desktop (45%)", 94, "neutral", "94%"), ("iOS (30%)", 92, "neutral", "92%"),
-        ("Android (20%)", 88, "neutral", "88%"), ("Tablet (5%)", 62, "danger", "62%"),
-        ("Overall", 91, "memory", "91%")]
-for i, (lab, v, ck, s_) in enumerate(rows):
-    y = len(rows) - 1 - i
-    ax.barh(y, v, color=C[ck], height=0.62)
-    ax.text(v + 1.5, y, s_, va="center", fontsize=12, color=C[ck], fontweight="bold")
-    ax.text(-2, y, lab, ha="right", va="center", fontsize=12, fontweight="bold",
-            color=C["text"])
-ax.set_xlim(0, 112)
-ax.set_xticks([0, 50, 100])
-ax.tick_params(labelsize=10)
-ax.set_yticks([])
-ax.spines["left"].set_visible(False)
-ax.set_xlabel("Accuracy (traffic share)", fontsize=11)
-ax.grid(axis="x", color=C["grid"], linewidth=0.6)
-ax.set_axisbelow(True)
-sp.save(fig, out / "slices.svg")
-
-print("figures written; T* =", round(tstar, 2), "days")
-
-
-# -----------------------------------------------------------------------------
-# 17. The uptime iceberg, a slide variant of the chapter's figure with the
-#     same labels at a size the room can read
-# -----------------------------------------------------------------------------
-p = svg_open(600, 440)
-waves = " ".join(f"L {x} {122 + (8 if (x // 20) % 2 else -8)}" for x in range(20, 600, 20))
-p.append(path(f"M 0 122 {waves}", C["data"], 3, None))
-p.append('<polygon points="236,124 282,62 300,40 318,62 364,124" fill="#D4EFDF" '
-         f'stroke="{C["data"]}" stroke-width="3"/>')
-p.append(text(380, 74, "Uptime:", 24, C["data"], "bold", "start"))
-p.append(text(380, 102, "service health", 23, C["data"], anchor="start"))
-p.append('<polygon points="130,132 470,132 525,250 470,425 130,425 75,250" '
-         f'fill="{C["data"]}" stroke="{C["data"]}" stroke-width="3"/>')
-p.append(text(205, 178, "Data health", 24, "white", "bold"))
-p.append(text(395, 178, "Model health", 24, "white", "bold"))
-p.append(line(300, 160, 300, 400, "white", 1.5, None, None, 0.6))
-for j, (a_, b_) in enumerate((("data drift", "accuracy"), ("broken pipelines", "concept drift"),
-                              ("schema change", "bias"), ("data outage", "weak segments"))):
-    y = 222 + j * 46
-    p.append(text(205, y, a_, 22, "white"))
-    p.append(text(395, y, b_, 22, "white"))
-save_svg(p, "iceberg.svg")
-print("iceberg written")
-
-
-# -----------------------------------------------------------------------------
-# 18. Release modes: shadow, canary, staged ramp (chapter Sec. 14.4.3 and
+# 10. Release modes: shadow, canary, staged ramp (chapter Sec. 14.4.3 and
 #     table 11; the 5 percent canary is the ranking service's)
 # -----------------------------------------------------------------------------
 for k in (1, 2, 3):
@@ -828,75 +621,24 @@ for k in (1, 2):
     save_svg(p, f"repro_step{k}.svg")
 
 
-# The registry: lifecycle, lineage, promotion gate
-for k in (1, 2, 3):
-    p = svg_open(900, 470)
-    states = [("candidate", 10), ("staging", 235), ("production", 460),
-              ("retired", 685)]
-    for nm, x in states:
-        prod = nm == "production"
-        p.append(rect(x, 30, 200, 70, C["memory_l"] if prod else "#F4F4F4",
-                      C["memory"] if prod else "#888888", 3 if prod else 2.5, 10))
-        p.append(text(x + 100, 74, nm, 27, C["text"], "bold"))
-    for x in (212, 437, 662):
-        p.append(line(x, 65, x + 20, 65, "#555555", 3))
-    p.append(text(335, 24, "promote", 22, C["neutral"], anchor="middle"))
-    p.append(path("M 560 102 C 560 150, 335 150, 335 106", C["danger"], 3, "r"))
-    p.append(text(447, 160, "roll back to the exact evaluated artifact", 23,
-                  C["danger"], "bold"))
-    if k >= 2:
-        chain = ["raw logs", "snapshot", "features", "training run", "weights",
-                 "endpoint"]
-        for i, nm in enumerate(chain):
-            x = 10 + i * 148
-            p.append(rect(x, 210, 132, 60, C["data_l"], C["data"], 2.5, 8))
-            p.append(text(x + 66, 248, nm, 22, C["text"], "bold"))
-            if i < len(chain) - 1:
-                p.append(line(x + 133, 240, x + 146, 240, "#555555", 2.5, None))
-        p.append(text(450, 298, "lineage: each artifact hashed and linked to its inputs",
-                      23, C["data"], "bold"))
-    if k >= 3:
-        p.append(rect(10, 324, 880, 136, "white", C["memory"], 3, 10))
-        p.append(text(30, 356, "Promotion gate, staging to production:", 24,
-                      C["memory"], "bold", "start"))
-        gate = ["signed feature contract", "lineage hash", "subgroup metrics",
-                "canary SLO and rollback rule", "named owner"]
-        for i, g in enumerate(gate):
-            x = 30 + (i // 3) * 440
-            y = 392 + (i % 3) * 30
-            p.append(text(x, y, "• " + g, 22, C["text"], anchor="start"))
-    save_svg(p, f"registry_step{k}.svg")
-
-
-# The continuous training pipeline (slide variant of chapter figure 6)
-stages = [("Ingest", "data"), ("Validate data", "data"), ("Transform", "data"),
-          ("Train", "compute"), ("Evaluate", "compute"),
-          ("Validate model", "danger"), ("Register", "memory")]
-for k in (1, 2):
-    p = svg_open(900, 345)
-    p.append(rect(330, 10, 240, 54, "#F4F4F4", "#888888", 2.5, 8))
-    p.append(text(450, 45, "retraining trigger", 24, C["text"], "bold"))
-    p.append(line(450, 66, 450, 104, "#555555", 3))
-    for i, (nm, ck) in enumerate(stages):
-        if k == 1 and i >= 3:
-            continue
-        row, col = (0, i) if i < 4 else (1, 6 - i)
-        x = 10 + col * 222
-        y = 110 + row * 120
-        gate = nm == "Validate model"
-        p.append(rect(x, y, 200, 74, C[ck + "_l"], C[ck], 4 if gate else 2.5, 10))
-        p.append(text(x + 100, y + 45, nm, 24, C["text"], "bold"))
-        if i < len(stages) - 1 and not (k == 1 and i == 2):
-            if i < 3:
-                p.append(line(x + 202, y + 37, x + 218, y + 37, "#555555", 3))
-            elif i == 3:
-                p.append(line(x + 100, y + 76, x + 100, y + 116, "#555555", 3))
-            else:
-                p.append(line(x - 2, y + 37, x - 18, y + 37, "#555555", 3))
-    if k == 2:
-        p.append(text(10 + 1 * 222 + 100, 334, "gate: blocks a worse model",
-                      22, C["danger"], "bold"))
-    save_svg(p, f"cicd_step{k}.svg")
+# The registry lifecycle: four states, promote and roll back (Sec. 14.3.1.2).
+# Lineage is shown by the real dvc.lock on the previous frame; the promotion
+# gate sits beside the MLflow screenshot on this one.
+p = svg_open(900, 178)
+states = [("candidate", 10), ("staging", 235), ("production", 460),
+          ("retired", 685)]
+for nm, x in states:
+    prod = nm == "production"
+    p.append(rect(x, 30, 200, 70, C["memory_l"] if prod else "#F4F4F4",
+                  C["memory"] if prod else "#888888", 3 if prod else 2.5, 10))
+    p.append(text(x + 100, 74, nm, 27, C["text"], "bold"))
+for x in (212, 437, 662):
+    p.append(line(x, 65, x + 20, 65, "#555555", 3))
+p.append(text(335, 24, "promote", 22, C["neutral"], anchor="middle"))
+p.append(path("M 560 102 C 560 150, 335 150, 335 106", C["danger"], 3, "r"))
+p.append(text(447, 166, "roll back to the exact evaluated artifact", 24,
+              C["danger"], "bold"))
+save_svg(p, "registry.svg")
 
 
 # The artifact that ships is not the checkpoint that passed
@@ -925,26 +667,27 @@ for k in (1, 2):
     save_svg(p, f"artifact_step{k}.svg")
 
 
-# A/B sizing (equation 4): users needed against users available
-fig, ax = plt.subplots(figsize=(4.6, 1.3))
-for i, (lab, v, ck, s_) in enumerate((
-        ("Needed: 2% lift on 5%", 745644, "danger", "745,644"),
-        ("Available", 25000, "data", "25,000"))):
+# A/B sizing (equation 4): users needed against users available, drawn at
+# its slot (about 7.5 by 2.8 cm)
+fig, ax = plt.subplots(figsize=(3.0, 1.1))
+rows = (("Needed", calcs.N_NEEDED, "danger", f"{math.ceil(calcs.N_NEEDED):,}"),
+        ("Have", calcs.N_AVAIL, "data", f"{calcs.N_AVAIL:,}"))
+for i, (lab, v, ck, s_) in enumerate(rows):
     y = 1 - i
     ax.barh(y, v, color=C[ck], height=0.6)
-    ax.text(v * 1.25, y, s_, va="center", fontsize=12, color=C[ck],
+    ax.text(v * 1.3, y, s_, va="center", fontsize=11, color=C[ck],
             fontweight="bold")
-    ax.text(700, y, lab + " ", ha="right", va="center", fontsize=12,
+    ax.text(700, y, lab + " ", ha="right", va="center", fontsize=11,
             color=C["text"], fontweight="bold")
 ax.set_xscale("log")
 ax.minorticks_off()
-ax.set_xlim(1000, 4e6)
+ax.set_xlim(1000, 1e7)
 ax.set_xticks([1e3, 1e4, 1e5, 1e6])
-ax.set_xticklabels(["1K", "10K", "100K", "1M"])
+ax.set_xticklabels(["1K", "10K", "100K", "1M"], fontsize=10)
 ax.set_yticks([])
 ax.set_ylim(-0.6, 1.6)
 ax.spines["left"].set_visible(False)
-ax.set_xlabel("Users per variant (log scale)", fontsize=11)
+ax.set_xlabel("Users per variant (log)", fontsize=10)
 ax.grid(axis="x", color=C["grid"], linewidth=0.6)
 ax.set_axisbelow(True)
 sp.save(fig, out / "ab_users.svg")
