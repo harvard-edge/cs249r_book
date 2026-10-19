@@ -1940,23 +1940,23 @@ class DispatchOverheadScales:
     # The per-op overhead this chapter already taught the reader is Python
     # dispatch plus kernel launch. A local 5.0 literal here contradicted that
     # and the registry, understating the overhead threefold.
-    small_dispatch_us = (Ops.RuntimeOverheads.PythonDispatch + Ops.RuntimeOverheads.KernelLaunch).to(microsecond).magnitude
-    small_hw_us = 2.6
+    small_dispatch = Ops.RuntimeOverheads.PythonDispatch + Ops.RuntimeOverheads.KernelLaunch
+    small_hw = 2.6 * microsecond  # scenario assumption: small MLP device time
 
     # Scenario 2: GPT-3 layer (device bound)
-    large_hw_us = 100_000.0  # 100 ms
-    large_dispatch_us = GPT2DecodeDispatch.kernels_per_block * small_dispatch_us  # one transformer block's eager kernels
+    large_hw = 100_000.0 * microsecond  # scenario assumption: 100 ms device time
+    large_dispatch = GPT2DecodeDispatch.kernels_per_block * small_dispatch  # one transformer block's eager kernels
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Small Model
-    small_sw_total = small_ops_count * small_dispatch_us
-    small_total_time = small_sw_total + small_hw_us
-    small_overhead_ratio = small_sw_total / small_hw_us
-    small_overhead_pct = (small_sw_total / small_total_time) * 100
-    small_speedup_limit = small_total_time / small_hw_us
+    small_sw_total = small_ops_count * small_dispatch
+    small_total_time = small_sw_total + small_hw
+    small_overhead_ratio = (small_sw_total / small_hw).to("").magnitude
+    small_overhead_pct = (small_sw_total / small_total_time).to("").magnitude * 100
+    small_speedup_limit = (small_total_time / small_hw).to("").magnitude
 
     # Step 2: Large Model
-    large_overhead_ratio = large_dispatch_us / large_hw_us
+    large_overhead_ratio = (large_dispatch / large_hw).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(small_overhead_ratio >= 1.0, f"Small model ratio ({small_overhead_ratio:.1f}) implies it is NOT overhead bound.")
@@ -1964,19 +1964,19 @@ class DispatchOverheadScales:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     dispatch_n_ops_str = fmt_count(small_ops_count, precision=0, commas=False, label="op")
-    dispatch_us_per_op_str = fmt_time(small_dispatch_us, 'microsecond', precision=0, commas=False, per="op")
-    dispatch_hw_time_us_str = fmt_time(small_hw_us, 'microsecond', precision=1, commas=False)
+    dispatch_us_per_op_str = fmt_time(small_dispatch, 'microsecond', precision=0, commas=False, per="op")
+    dispatch_hw_time_us_str = fmt_time(small_hw, 'microsecond', precision=1, commas=False)
 
     dispatch_sw_time_us_str = fmt_time(small_sw_total, 'microsecond', precision=0, commas=False)
     dispatch_ratio_small_str = fmt_ratio(small_overhead_ratio, precision=1, commas=False)
     dispatch_overhead_pct_str = fmt_percent(round(small_overhead_pct) / 100, precision=0, commas=False, style='prose')
     dispatch_compilation_speedup_mult_str = fmt_multiple(small_speedup_limit, precision=1, commas=False)
 
-    gpt3_hw_time_us_str = fmt_time(large_hw_us, 'microsecond', precision=0)
-    gpt3_hw_time_ms_str = fmt_time(round(large_hw_us / 1000), 'millisecond', precision=0, commas=False)
-    gpt3_sw_time_us_str = fmt_time(large_dispatch_us, 'microsecond', precision=0, commas=False)
+    gpt3_hw_time_us_str = fmt_time(large_hw, 'microsecond', precision=0)
+    gpt3_hw_time_ms_str = fmt_time(round(large_hw.to('millisecond')), 'millisecond', precision=0, commas=False)
+    gpt3_sw_time_us_str = fmt_time(large_dispatch, 'microsecond', precision=0, commas=False)
     dispatch_ratio_large_str = fmt_ratio(large_overhead_ratio, precision=4, commas=False)
-    t_sw_math = fmt_math(f"\\HostSoftwareTime \\approx {large_dispatch_us:.0f} \\, \\MicroUnitPrefix\\text{{s}}")
+    t_sw_math = fmt_math(f"\\HostSoftwareTime \\approx {large_dispatch.to(microsecond).magnitude:.0f} \\, \\MicroUnitPrefix\\text{{s}}")
 ```
 
 Applying @eq-dispatch-overhead means comparing the software overhead $\HostSoftwareTime= \DispatchedOperationCount\cdot \OperationDispatchOverhead$ with the hardware execution time $\DeviceHardwareTime$ (both in seconds). The regime depends on the size of individual operations rather than on the model's parameter count. Notebook \ref{nbk-frameworks-dispatch-tax} contrasts a small multilayer perceptron with a large transformer layer to quantify when host overhead or device arithmetic bounds the system.
@@ -4039,7 +4039,7 @@ The analytical model yields ~`{python} MnistTrainingStepCalc.mnist_total_mflop_s
 
 - $\IronLawComputeTime \approx$ `{python} MnistTrainingStepCalc.mnist_total_mflop_str`/`{python} MnistTrainingStepCalc.h100_peak_tflop_per_s_str` FP32 ≈ `{python} MnistTrainingStepCalc.mnist_t_compute_us_str`
 - $\IronLawMemoryTime \approx$ `{python} MnistTrainingStepCalc.mnist_mem_traffic_mb_str`/`{python} MnistTrainingStepCalc.h100_mem_bw_tb_per_s_str` ≈ `{python} MnistTrainingStepCalc.mnist_t_memory_us_str`
-- Under a one-kernel-per-modeled-operator assumption, the `{python} MnistTrainingStepCalc.mnist_forward_ops_str` selected forward operators and `{python} MnistTrainingStepCalc.mnist_backward_ops_str` backward operators require `{python} MnistTrainingStepCalc.mnist_driver_launches_str` driver launches. Python dispatches each of the `{python} MnistTrainingStepCalc.mnist_forward_ops_str` forward operations individually, whereas `backward()` enters the C++ autograd engine once and launches all `{python} MnistTrainingStepCalc.mnist_backward_ops_str` backward kernels without returning to the Python interpreter between them, giving `{python} MnistTrainingStepCalc.mnist_python_entries_str` Python entries in total. The illustrative host cost is therefore `{python} MnistTrainingStepCalc.mnist_python_entries_str` × `{python} MnistTrainingStepCalc.mnist_python_cost_str` plus `{python} MnistTrainingStepCalc.mnist_driver_launches_str` × `{python} MnistTrainingStepCalc.mnist_launch_cost_str`, or `{python} MnistTrainingStepCalc.mnist_t_overhead_us_str`.
+- Under a one-kernel-per-modeled-operator assumption, the `{python} MnistTrainingStepCalc.mnist_forward_ops_str` selected forward operators and `{python} MnistTrainingStepCalc.mnist_backward_ops_str` backward operators require `{python} MnistTrainingStepCalc.mnist_driver_launches_str` driver launches. Python dispatches each of the `{python} MnistTrainingStepCalc.mnist_forward_ops_str` forward operations individually, whereas `backward()` enters the C++ autograd engine once and launches all `{python} MnistTrainingStepCalc.mnist_backward_ops_str` backward kernels without returning to the Python interpreter between them, giving `{python} MnistTrainingStepCalc.mnist_python_entries_str` Python entries in total. The illustrative host cost is therefore `{python} MnistTrainingStepCalc.mnist_python_entries_str` $\times$ `{python} MnistTrainingStepCalc.mnist_python_cost_str` plus `{python} MnistTrainingStepCalc.mnist_driver_launches_str` $\times$ `{python} MnistTrainingStepCalc.mnist_launch_cost_str`, or `{python} MnistTrainingStepCalc.mnist_t_overhead_us_str`.
 - The excluded optimizer step is not small. An FP32 Adam update reads each parameter, its gradient, and two moments and writes three of them, 28 bytes per parameter, so the `{python} MnistTrainingStepCalc.mnist_n_params_str` parameters of this network move about `{python} MnistTrainingStepCalc.mnist_adam_step_mb_str`, more than the whole modeled forward and backward traffic. Counting its launches and the omitted Python calls only raises the host cost above this lower bound.
 
 This dispatch model excludes autograd traversal overhead, allocation, and the operations omitted from the table. A profile must still establish the actual launch count, particularly for loss kernels. Host costs are added without overlap here. In this model, $\HostSoftwareTime$ exceeds the ideal lower bounds $\IronLawComputeTime$ and $\IronLawMemoryTime$ by more than an order of magnitude, so the overhead ratio of @eq-dispatch-overhead sits far above 1 and the step is overhead-bound\index{Overhead-bound!small model training} under these assumptions. This is the small multilayer perceptron (MLP) regime of notebook \ref{nbk-frameworks-dispatch-tax}, now reached from a real training loop. Profiling has a specific job here, which is to confirm that measured kernel times, achieved bandwidth, and host-device overlap match the model before acting on it. When dispatch dominates, three mechanisms attack the launch overhead from different angles. Kernel fusion via `torch.compile` merges consecutive memory-bound operations into a single kernel, which avoids intermediate round-trips to HBM and collapses launch boundaries. Batch size scaling grows the arithmetic payload linearly while keeping dispatch overhead constant, which amortizes fixed launch latency across more compute work. Graph capture removes repeated Python work in captured regions and allows CUDA Graph replay to submit a captured launch sequence with less host overhead, without requiring the entire step to become one fused kernel.
