@@ -78,7 +78,7 @@ def metr_tasks():
     ax.set_yticks([])
     ax.set_xlim(0, 150)
     ax.set_xticks([0, 50, 100])
-    ax.set_xlabel("Runs that attacked the scorer (%)")
+    ax.set_xlabel("Runs that reward-hacked (%)")
     ax.spines["left"].set_visible(False)
     ax.grid(axis="x", color=sp.C["grid"], lw=0.6)
     ax.set_axisbelow(True)

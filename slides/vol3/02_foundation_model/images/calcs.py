@@ -186,6 +186,10 @@ show("NM2.2: prefill work no reuse / reuse (s)", f"{resent(H) * tp:.2f} / {fresh
 show("NM2.2: decode work (s)", f"{H * K * td:.2f}")
 show("NM2.2: 60 turns: re-sent growth / fresh growth",
      f"{resent(60) / resent(30):.1f}x / {fresh(60) / fresh(30):.1f}x")
+show("NM2.2: 60 turns: re-sent input tokens / fresh prefill", f"{resent(60):,} / {fresh(60):,}")
+# the two terms of equation 9 separately: first prompt grows with H, appends with H(H-1)/2
+show("NM2.2: 60 turns: first-prompt term growth / appended term growth",
+     f"{(60 * S0r) / (30 * S0r):.1f}x / {(60 * 59) / (30 * 29):.2f}x")
 show("NM2.2: 90 turns: re-sent growth / fresh growth",
      f"{resent(90) / resent(30):.1f}x / {fresh(90) / fresh(30):.1f}x")
 

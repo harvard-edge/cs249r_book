@@ -455,32 +455,41 @@ sp.save = _sp_save
 # =============================================================================
 # 14. Re-sent input against fresh prefill (Ch. NM 2.2), three steps
 # =============================================================================
-def resend(k):
+# Doubling the horizon (Ch. NM 2.2 inputs; the 60-turn growth is calcs.py "60 turns"),
+# three steps: the recalled 30-turn resend, the 60-turn resend, then fresh prefill.
+def resend60(k):
     fig, ax = plt.subplots(figsize=(5.8, 2.6))
-    H, S0, D = 30, 8000, 1500
-    t = list(range(1, H + 1))
+    S0, D = 8000, 1500
+    t = list(range(1, 61))
     cum_resent, cum_fresh, a, b = [], [], 0, 0
-    for j in range(H):
+    for j in range(60):
         a += S0 + j * D
         b += S0 if j == 0 else D
-        cum_resent.append(a / 1e3)
-        cum_fresh.append(b / 1e3)
-    ax.plot(t, cum_resent, color=C["danger"], lw=3, alpha=1 if k >= 2 else 0)
+        cum_resent.append(a / 1e6)
+        cum_fresh.append(b / 1e6)
+    ax.plot(t[:30], cum_resent[:30], color=C["danger"], lw=3)
+    ax.plot(t[29:], cum_resent[29:], color=C["danger"], lw=3, alpha=1 if k >= 2 else 0)
     ax.plot(t, cum_fresh, color=C["data"], lw=3, alpha=1 if k >= 3 else 0)
-    ax.text(29.5, cum_resent[-1], f"re-sent {cum_resent[-1]:,.1f}k", ha="right", va="bottom",
+    ax.plot([30], [cum_resent[29]], "o", color=C["danger"], ms=7)
+    ax.text(31.5, cum_resent[29], f"30 turns: {cum_resent[29] * 1e3:,.1f}k", ha="left", va="top",
+            fontsize=12, color=C["danger"], fontweight="bold")
+    g_r = cum_resent[59] / cum_resent[29]
+    g_f = cum_fresh[59] / cum_fresh[29]
+    ax.text(58.5, cum_resent[59], f"60 turns: {cum_resent[59] * 1e3:,.0f}k ({g_r:.1f}\u00d7)", ha="right", va="bottom",
             fontsize=12, color=C["danger"], fontweight="bold", alpha=1 if k >= 2 else 0)
-    ax.text(29.5, cum_fresh[-1] + 40, f"fresh prefill {cum_fresh[-1]:,.1f}k", ha="right", va="bottom",
-            fontsize=12, color=C["data"], fontweight="bold", alpha=1 if k >= 3 else 0)
-    ax.set_xlim(1, 30)
-    ax.set_ylim(0, 1000)
+    ax.text(58.5, cum_fresh[59] + 0.12, f"fresh prefill {cum_fresh[59] * 1e3:,.1f}k ({g_f:.1f}\u00d7)",
+            ha="right", va="bottom", fontsize=12, color=C["data"], fontweight="bold",
+            alpha=1 if k >= 3 else 0)
+    ax.set_xlim(1, 60)
+    ax.set_ylim(0, 3.6)
     ax.set_xlabel("Turn")
-    ax.set_ylabel("Cumulative input\n(thousand tokens)", fontsize=11)
+    ax.set_ylabel("Cumulative input\n(million tokens)", fontsize=11)
     ax.grid(axis="y", color=C["grid"], lw=0.6)
-    sp.save(fig, out / f"resend_step{k}.svg")
+    sp.save(fig, out / f"resend60_step{k}.svg")
 
 
 for k in (1, 2, 3):
-    resend(k)
+    resend60(k)
 
 
 # =============================================================================

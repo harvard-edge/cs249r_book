@@ -162,6 +162,7 @@ pairs = list(zip(top[:-1], top[1:]))
 tied = sum(abs(a["mean_score"] - b["mean_score"]) < Z95 * math.hypot(a["stderr"], b["stderr"]) for a, b in pairs)
 se_typ = med([r["stderr"] for r in top])
 print(f"models {len(rows)}; top 25 neighbor pairs tied {tied} of {len(pairs)}; typical SE {100*se_typ:.1f}; gap needed {100*Z95*math.sqrt(2)*se_typ:.1f} points")
+print(f"median SE of top 25: {100*se_typ:.3f} points; 1.96 x sqrt(2) x median SE = {100*Z95*math.sqrt(2)*se_typ:.2f}")
 print(f"top score {100*top[0]['mean_score']:.1f} ({top[0]['model']}); 25th {100*top[-1]['mean_score']:.1f}")
 
 # ---------------------------------------------------------------------------

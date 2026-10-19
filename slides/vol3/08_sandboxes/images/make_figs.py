@@ -178,6 +178,35 @@ def attenuate_steps():
 
 
 # ===========================================================================
+# 4b. Expiry and revocation (ch §8.4.3), 3 steps: expiry refuses new opens,
+#     an open writable handle still writes, revocation closes it and stops the worker
+# ===========================================================================
+def revoke_steps():
+    rows = [
+        (70, "new open for writing", "refused: expired", C["data"]),
+        (170, "write on an open handle", "still succeeds", C["danger"]),
+        (270, "close handle, stop worker", "revocation confirmed", C["data"]),
+    ]
+    for step in (1, 2, 3):
+        g = SVG(900, 320)
+        g.rect(10, 34, 180, 272, fill=AME_L, stroke=AME)
+        g.text(100, 92, "edit grant", TB, AME, "bold")
+        g.text(100, 134, "expires", T, INK)
+        g.text(100, 162, "at 300 s", T, INK)
+        g.text(100, 222, "read, write", T, mono=True)
+        g.text(100, 252, "repo/", T, mono=True)
+        for k, (y, act, res, col) in enumerate(rows, start=1):
+            if step < k:
+                continue
+            g.line(190, y, 206, y, AME, sw=3)
+            g.rect(210, y - 36, 350, 72, fill="white", stroke=GRAY)
+            g.text(385, y + 8, act, T)
+            g.line(560, y, 584, y, col, arrow="ag" if col == C["data"] else "ar")
+            g.text(596, y + 8, res, T, col, "bold", anchor="start")
+        g.save(f"revoke_step{step}")
+
+
+# ===========================================================================
 # 5. Four envelopes: where a system call lands (ch §8.5, figure 4), 4 steps
 # ===========================================================================
 def envelopes_steps():
@@ -256,20 +285,6 @@ def reset_steps():
             g.text(450, 308, "one leftover proves failure: destroy, rebuild",
                    T, C["danger"], "bold")
         g.save(f"reset_step{step}")
-
-
-# ===========================================================================
-# 8. H.S.A locator with authority lit (column slot, 6 x 4 cm)
-# ===========================================================================
-def locator():
-    g = SVG(360, 250)
-    for i, (lab, on) in enumerate((("H  horizon", False), ("S  state", False),
-                                   ("A  authority", True))):
-        y = 8 + i * 68
-        g.rect(20, y, 320, 56, fill=AME_L if on else "white", stroke=AME if on else GRAY, sw=3)
-        g.text(180, y + 38, lab, 28, AME if on else "#999999", "bold")
-    g.text(180, 238, "bounded today", 26, AME, "bold")
-    g.save("locator_a")
 
 
 # ===========================================================================
@@ -473,10 +488,10 @@ if __name__ == "__main__":
     reach_steps()
     admit_steps()
     attenuate_steps()
+    revoke_steps()
     envelopes_steps()
     egress_steps()
     reset_steps()
-    locator()
     syscall_plots()
     setup_plot()
     cow_plots()

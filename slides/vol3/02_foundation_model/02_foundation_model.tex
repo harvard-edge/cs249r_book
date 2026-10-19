@@ -104,7 +104,7 @@
 
 \begin{frame}{A model call returns a proposal; the runtime acts on it}
   \centering
-  \mlsyssteps[width=0.98\textwidth,height=5.8cm,keepaspectratio]{boundary_step}{3}\\
+  \mlsyssteps[width=0.98\textwidth,height=5.6cm,keepaspectratio]{boundary_step}{3}\\
   {\footnotesize Inference service: the system that hosts the weights and samples tokens.}
   \note{[3 min] [CORE] Step 1: the model and the inference service, the system that hosts the weights and samples tokens, produce only text: read\_file("src/pool.py"). The chapter calls it a proposal (Definition 2.1): it carries zero ambient authority and changes nothing until the runtime validates, authorizes, and executes it. Step 2: the runtime first checks the schema (path is a string, no extra keys), then checks the path against the task's grant, so ../../etc/passwd fails here. Step 3: the tool runs in a sandbox, and the runtime appends the observation, the file excerpt, to the next prompt. The model has no memory between calls; it sees the file only because the runtime resends it. LINK: these are the six phases of a turn from Lecture 1; only the call belongs to the model. ENGAGE: what does a rejected proposal cost? (One model call, counted in $C_{\text{eff}}$; no change to the world.) WARN: logging a tool request as an executed action lets fluent text stand in for evidence. Lecture 7 owns how the runtime mediates every call.}
 \end{frame}
@@ -522,8 +522,8 @@
   \note{[2 min] [OPTIONAL] Two real measurements. Left: our 0.5B model on a laptop CPU, batch one. A 2,048-token prompt prefilled in 2.05 s, about 1.0 ms per token; decode took 35.1 ms per token. One output token cost about 35 prompt tokens of time (25 to 41 across runs). The ratio is smaller than 295 because a laptop CPU does not reach its arithmetic peak on prefill; the direction is the same. Right: a public trace of 8,819 production code-completion requests to an LLM service. The median request sent 1,469 prompt tokens and received 13 output tokens; input is 98.7 percent of all tokens. If those requests ran at the chapter's reference floors, output would still take 80 percent of the service time (derived). ENGAGE: an engineer wants to cut latency by 10 percent; trim the prompt or the reply? (The reply, unless queueing or a very long prompt dominates.) WARN: the trace is code completion, not an agent; it shows the token mix of real traffic.}
 \end{frame}
 
-\begin{frame}{How much input does a 30-turn repair resend?}
-  \mlsysactivity{Predict}{3.5 min}
+\begin{frame}{Double the turns: how much more resend?}
+  \mlsysactivity{Predict}{3 min}
   \begin{columns}[c]
     \begin{column}{0.36\textwidth}
       \begin{mlsyscard}{mlsysaccent}
@@ -531,19 +531,19 @@
         First prompt: 8,000\\
         Appended per turn: 1,500\\
         Output per call: 200\\
-        Turns $H$: 30
+        30 turns resend \textbf{892,500}
       \end{mlsyscard}
       \vspace{0.1cm}
-      {\small\choice{A}{about 50k}\\ \choice{B}{about 250k}\\ \answerat{2}{C}{about 900k}}
+      {\small At 60 turns, re-sent input grows:\\[0.05cm] \choice{A}{2$\times$}\quad \answerat{2}{B}{3.5$\times$}\quad \choice{C}{4$\times$}}
     \end{column}
     \begin{column}{0.60\textwidth}
       \centering
-      \mlsyssteps[width=\textwidth,height=4.2cm,keepaspectratio]{resend_step}{3}\\[0.02cm]
-      \uncover<3->{\footnotesize Quadratic resend: 892,500 tokens. Prefix reuse: 51,500 fresh, \textbf{17.3$\times$} less.}
+      \mlsyssteps[width=\textwidth,height=4.2cm,keepaspectratio]{resend60_step}{3}\\[0.02cm]
+      \uncover<3->{\footnotesize Resend is quadratic in turns; fresh prefill is linear. At 30 turns, prefill takes 63.68 s, or 3.67 s with reuse; decode takes 126.45 s.}
     \end{column}
   \end{columns}
-  \mlsyscredit{The Foundation Model, Napkin Math 2.2 and equation 9 (scenario values). Arithmetic: images/calcs.py.}
-  \note{[3.5 min] [CORE] ENGAGE: the runtime keeps an append-only log and resends the full history on every call. Vote on the total input tokens sent over 30 turns. Step 2: C. Equation 9: 30 times 8,000 plus 1,500 times 30 times 29 over 2 is 892,500 tokens. Input is 99.3 percent of all tokens; output is only 6,000. Students who pick A add the appends once; students who pick B forget that every turn resends everything before it. The growth is quadratic in the horizon. Step 3: with prefix reuse, the server keeps the attention state of a repeated prefix, so only the new suffix needs fresh prefill: 51,500 tokens, 17.3 times less. At the reference floor prefill work falls from 63.68 s to 3.67 s; decode stays 126.45 s. Doubling to 60 turns multiplies resent input 3.5 times but fresh prefill only 1.9 times. WARN: reuse requires an exact token prefix; changing one early token, such as a timestamp in the system prompt, forces fresh prefill from there. LINK: Lecture 4 orders context for reuse; Lecture 5 owns the cache; Lecture 19 prices it.}
+  \mlsyscredit{The Foundation Model, Napkin Math 2.2 and equation 9 (scenario values); reference floors from equations 7 and 8. Arithmetic: images/calcs.py.}
+  \note{[3 min] [CORE] LINK: 30 turns resend 892,500 tokens because the runtime resends the whole history on every call (equation 9: $H \cdot 8{,}000 + 1{,}500 \cdot H(H-1)/2$). Recall it in 15 seconds. ENGAGE: vote on the growth when the run doubles to 60 turns. Step 2: B, 3.5 times, 3,135,000 tokens. The appended term grows 4.07 times and the first-prompt term 2.0 times, so the total lands between them. Students who pick A treat resend as linear; students who pick C forget the fixed first prompt. Step 3: with prefix reuse the server keeps the attention state of a repeated prefix, so only the new suffix needs fresh prefill: 96,500 tokens, 1.9 times the 30-turn 51,500 (already 17.3 times less than the resend). At the reference floors, 30 turns of prefill take 63.68 s without reuse and 3.67 s with it; decode takes 126.45 s either way. Once the prefix is reused, output tokens set the time again. WARN: reuse requires an exact token prefix; one changed early token, such as a timestamp in the system prompt, forces fresh prefill from there. LINK: Lecture 4 orders context for reuse; Lecture 5 owns the cache; Lecture 19 prices it. FLEX: [CORE].}
 \end{frame}
 
 \begin{frame}{A whole-file edit misses a 15 s deadline that a diff meets}
