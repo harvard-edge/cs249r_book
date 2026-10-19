@@ -1,0 +1,296 @@
+chapter: 10_inference
+lecture: "10"
+title: "Serving at Scale"
+subtitle: "Serving language models within latency targets"
+layer: runtime
+minutes: 75
+notes_minutes: 71.5
+core_minutes: 59.5
+target_ideas: 30
+thesis: "Serving capacity is the rate of requests that meet their latency contract, and for language models memory for attention state bounds that rate."
+
+hook:
+  minutes: "0-3"
+  setup: "Napkin Math 10.1 as a predict build. Step 1: a $2M training bar for a 70B model. Step 2: a hidden bar for first-year serving with ???: 1 million daily users, 50 requests each, $0.001 per request (scenario input, labeled on the slide). Step 3: $18.25M, 9.1x the training run."
+  question_to_class: "What does the first year of serving cost? A) about $2M B) about $5M C) about $18M D) about $200M"
+  payoff: "C. 18.25 billion requests a year at $0.001; a 10 percent cut in cost per request saves $1.8M a year. The synthesis prices a token from measured data: the top H100 configurations in InferenceX deliver 479, 82, and 14 output tokens/s per GPU at 13, 50, and 100 tokens/s per user, so at a hypothetical $4.00 per GPU-hour a million output tokens costs $2.32, $13.53, or $80.46. The latency contract sets the cost."
+  sources: ["Serving at Scale, Napkin Math 10.1", "InferenceX (SemiAnalysis), DeepSeek-R1 FP8 1k/1k, snapshot 2026-10-12 via MLSysIM", "Serving at Scale, table 25 (hypothetical price)", "images/calcs.py"]
+
+recall: "Lecture 9 (Fleet Efficiency): ML goodput = scheduling x runtime x program goodput. None of the three factors sees a request that arrives after its deadline; today adds SLO goodput on top."
+
+driving_question: "How many requests can a fleet serve within its latency targets, and what does each one cost?"
+
+goals:
+  - "Define SLO goodput and the serving tax, and read a measured throughput and latency frontier."
+  - "Size concurrency with Little's law, and work an iteration-level batching schedule."
+  - "Budget KV memory as an admission limit, and pick the lever for each factor."
+  - "Decide how to split phases and shard a replica, and test a decode step against its target."
+  - "Route, contain, and scale a fleet of replicas under real traffic."
+
+running_example: "The chapter's reference replica: a 70B GQA model (Llama 3.1 70B config.json: 80 layers, 64 query heads, 8 KV heads, head width 128, 131,072-token context) on one 8x H100 node (80 GiB, 85.9 GB of HBM each; 687.2 GB per node), FP16 weights 141.2 GB (Napkin Math 10.5), 17.65 GB per GPU; Napkin Math 10.7 keeps the chapter's round 140 GB on decimal 80 GB GPUs and says so; 327,680 B of KV per token; 526.0 GB free for KV (Napkin Math 10.5); constructed batch-one decode budget 85 / 69.7 / 49.6 ms (table 26). It is fed by measured traffic: the Azure LLM inference trace 2023 (Patel et al., ISCA 2024; 19,366 chat requests in one hour, median prompt 1,020 and answer 129 tokens, mean answer 211) and the 2024 one-week conversation trace (Stojkovic et al., HPCA 2025). Measured cross-hardware anchor: InferenceX DeepSeek-R1 FP8."
+
+segments:
+  - name: Contract
+    divider_question: "What counts as a served request?"
+    read: "§10.1 to §10.4"
+    concept_questions: [1, 2, 3]
+    land: "Capacity is completed requests inside the contract, and the contract sets the batch."
+    real_data: "InferenceX frontiers (325 configurations); Azure trace log row"
+    minutes: 9.5
+  - name: Batching
+    divider_question: "How long should a request wait to share a step?"
+    read: "§10.6"
+    concept_questions: [4, 5, 6]
+    land: "Batching converts waiting into reuse up to a knee, and iteration-level admission keeps the batch full."
+    real_data: "InferenceX B200 SGLang concurrency sweep; Azure 2023 answer lengths (50 percent idle in fixed batches of 8, derived)"
+    minutes: 14.5
+  - name: KV Memory
+    divider_question: "How many requests can one replica hold?"
+    read: "§10.7 and §10.9"
+    concept_questions: [7, 8, 9]
+    land: "Free HBM over per-request state sets admission, and every lever changes one factor of that ratio."
+    real_data: "Llama 3.1 70B config.json; Azure median chat (1,397 requests fit, derived); vLLM-measured 60 to 80 percent waste (as cited in §10.7.2)"
+    minutes: 12.5
+  - name: Phases and Shards
+    divider_question: "Should prefill and decode share a worker, and how many GPUs per replica?"
+    read: "§10.8, §10.10, §10.15.1"
+    concept_questions: [10, 11, 12, 13]
+    land: "Prefill and decode want opposite hardware, so chunk or split them, and shard only as far as the per-token collectives allow."
+    real_data: "InferenceX split-pool against colocated bars (B200, H200); vLLM engine flags"
+    minutes: 14.5
+  - name: Fleet
+    divider_question: "How does a fleet of replicas keep the tail inside the contract?"
+    read: "§10.11 to §10.13"
+    concept_questions: [14, 15]
+    land: "A fleet routes on remaining work, budgets the fan-out tail, and keeps ready headroom against bursts it cannot forecast."
+    real_data: "Azure 2024 one-week trace and 2023 per-second code arrivals"
+    minutes: 11.5
+
+concept_questions:
+  - id: 1
+    q: "What counts as serving capacity?"
+    picture: "Vote frame: X completes 1,200 req/s at 70 percent within targets, Y 1,000 at 95 percent."
+    numbers: "840 against 950 (calcs.py); Serving at Scale §10.3.1 self-check"
+    example: "A benchmark of short prompts ranks two systems backward."
+    read: "§10.3.1"
+  - id: 2
+    q: "Where does a request's latency budget go outside the model?"
+    picture: "tax_step1-2: 70 ms model in a 100 ms target; 4 exchanges cost 0.2 to 2 ms; the rest is routing, serialization, coordination, queueing."
+    numbers: "Serving at Scale §10.3.2, equation 1 (illustrative)"
+    example: "Queueing grows without bound near capacity; co-location removes a network hop."
+    read: "§10.3.2"
+  - id: 3
+    q: "How much does the latency target change per-GPU output?"
+    picture: "frontier_step1-3: measured InferenceX frontiers."
+    numbers: "B200 6,256 tok/s/GPU at 13 tok/s/user against 208 at 100+ (30x); at 50 tok/s/user H100 82, GB200 NVL72 3,653 (44x) against about 2.3x peak FP8 (chapter §10.6.2)."
+    example: "DeepSeek-R1 FP8, 1,024 tokens in and out."
+    read: "§10.6.2"
+  - id: 4
+    q: "Why does batching help, and where does it stop helping?"
+    picture: "knee.svg: X(B) = B / (t0 + B t_req), knees at 2 (vision) and 80 (LLM decode); conc_measured.svg (optional)."
+    numbers: "Napkin Math 10.2; measured B200 SGLang: 17 to 1,073 tok/s/GPU (63x) as concurrency goes 1 to 512, while per-user rate falls 139 to 18 (7.8x)."
+    example: "Eight GPUs divide both costs, so the knee does not move."
+    read: "§10.6.2"
+  - id: 5
+    q: "How many requests are in flight, and how many replicas does a rate need?"
+    picture: "Estimate frame, Little's law worked line by line."
+    numbers: "1,000 req/s x 0.1 s = 100; 13 replicas at 80 percent; chat: 211 tokens x 50 ms = 10.55 s, 10,550 in flight (derived)."
+    example: "A streamed answer lasts seconds, so it holds KV memory for seconds."
+    read: "§10.6.2 (Theorem 10.1)"
+  - id: 6
+    q: "Why does fixed batch membership waste slots, and how does iteration-level batching recover them?"
+    picture: "lengths.svg (Azure answer histogram, idle share) and cb_step1-2 (Napkin Math 10.3 schedule)."
+    numbers: "37.5 percent idle in the chapter example; 50 percent (chat) and 63 percent (code) for batches of 8 consecutive trace requests (derived); vLLM 2 to 4x throughput (§10.6.5)."
+    example: "R5, R6, R7 join at iterations 50, 100, 150."
+    read: "§10.6.4 to §10.6.5"
+  - id: 7
+    q: "How much memory does one cached token cost, and which lever changes which factor?"
+    picture: "Equation anatomy beside the real Llama 3.1 70B config.json; lever table."
+    numbers: "2 x 80 x 8 x 128 x 2 = 327,680 B (equation 5)."
+    example: "GQA caches one eighth of 64-head attention; paging changes waste, not bytes."
+    read: "§10.7.1"
+  - id: 8
+    q: "How many requests fit in a replica's KV budget?"
+    picture: "kv_step1-2: 12 blocks of 42.9 GB against 1,397 median chats in 526 GB."
+    numbers: "687.2 - 141.2 - 20 = 526.0 GB; 42.9 GB per 128K request, 12 fit (Napkin Math 10.5); median Azure chat 1,149 tokens, 377 MB, 1,397 fit (derived)."
+    example: "Long context binds memory 116 times harder than chat."
+    read: "§10.7.1"
+  - id: 9
+    q: "How do paging, prefix sharing, and precision change admission?"
+    picture: "paging_step1-2; precision.svg (optional)."
+    numbers: "60 to 80 percent of reserved KV unused in earlier systems (vLLM authors, §10.7.2); 6.6 TB to 1.3 TB with a shared 2,000-token prompt (Napkin Math 10.6); max batch 372 to 901 (2.4x, Napkin Math 10.7)."
+    example: "Shared prefix blocks must stay inside one tenant."
+    read: "§10.7.2 to §10.7.4, §10.9"
+  - id: 10
+    q: "Why do prefill and decode want different hardware?"
+    picture: "roofline_step1-3 beside an H100 photo."
+    numbers: "Ridge 989 TFLOP/s / 3.35 TB/s = 295 FLOP/byte (derived); decode about 1 to 80 FLOP/byte; median Azure prompt 1,020 tokens."
+    example: "A faster tensor core helps prefill only."
+    read: "§10.8.1"
+  - id: 11
+    q: "What does a long prefill do to streams already decoding, and what does chunking cost?"
+    picture: "chunk_step1-2: monolithic prefill against 512-token chunks."
+    numbers: "ceil(10,000 / 512) = 20 iterations (Example 10.5)."
+    example: "Sarathi-Serve (Agrawal et al., OSDI 2024)."
+    read: "§10.8.2"
+  - id: 12
+    q: "When do separate prefill and decode pools pay for the KV handoff?"
+    picture: "disagg.svg: InferenceX split-pool against colocated bars at 25, 50, 100 tok/s/user."
+    numbers: "Handoff alpha + M/beta: 377 MB in 0.8 ms (NVLink) or 7.5 ms (InfiniBand); 42.9 GB in 95 ms (derived); split pools 1.7 to 2.9x better at 25 and 50 tok/s/user, tie or lose at 100."
+    example: "DistServe (Zhong et al., OSDI 2024)."
+    read: "§10.8.3"
+  - id: 13
+    q: "How many GPUs should a replica use, and does it meet its per-token target?"
+    picture: "tp_step1-2 (Example 10.6); budget_step1-4 (table 26 and speculation)."
+    numbers: "4.35 ms per layer = 3.75 + 2 x 0.3; 2,400 to 348 ms, 6.9x; decode step 85 to 69.7 to 49.6 ms; speculation 3.52 tokens per 53.6 ms round, 15.2 ms per token, 3.26x."
+    example: "Speculation meets average TPOT and misses a per-gap TBT of 50 ms."
+    read: "§10.10.1 to §10.10.2, §10.15.1, §10.7.6"
+  - id: 14
+    q: "How should a router choose a replica, and why does fan-out hurt the tail?"
+    picture: "p2c.svg (simulated balls into bins) beside an Ashburn photo; fanout.svg."
+    numbers: "Busiest replica 7.6 against 3.6 jobs at 100,000 replicas (simulated); 68.2 percent balanced utilization (Example 10.8); 1 - 0.99^100 = 63 percent; 1,000 slow events/s at 10^7 QPS (Lighthouse 10.2)."
+    example: "LLM load signal: active tokens, remaining decode, KV pressure."
+    read: "§10.11.1 to §10.11.5"
+  - id: 15
+    q: "When must the fleet add capacity, and how does it contain overload and noisy tenants?"
+    picture: "traffic.svg (Azure 2024 week, 2023 per-second code arrivals) beside an H100 node photo; breaker.svg; TenantQuota listing."
+    numbers: "Weekday trough 25 to 38, peak 62 to 80 req/s (2.2x); busiest second 67 against mean 2.6; cold start 6.7 min; predictive peak 45 to 30 replicas (Example 10.12); noisy neighbor 5x burst, quota 120 QPS (Example 10.9)."
+    example: "ChatGPT, 20 March 2023: cached data crossed users (War Story 10.1), handed to Lecture 13."
+    read: "§10.11.10, §10.12, §10.13"
+
+concept_trace:
+  - concept: "Serving cost dominance"
+    frame: "Predict: training or a year of serving?"
+    shows: "hook_step1-3 bars, $2M against $18.25M; returned in the synthesis frame with measured cost per token."
+  - concept: "SLO goodput and the serving tax"
+    frame: "Vote: which configuration has more capacity?  and  A 100 ms target leaves 30 ms outside the model"
+    shows: "840 against 950 reveal and definition line; tax_step1-2 budget bar with equation 1."
+  - concept: "Batch formation trades waiting for reuse"
+    frame: "Throughput saturates past a knee near t0 / treq  and  Estimate: how many requests are in flight?"
+    shows: "knee.svg with both knees; Little's law worked lines."
+  - concept: "Iteration-level batching"
+    frame: "Iteration-level batching refills a slot when a request ends"
+    shows: "cb_step1-2 slot schedule, idle hatching then R5 to R7 joining."
+  - concept: "Prefill-decode interference and chunked prefill"
+    frame: "A whole prefill lands in every active stream's token gap  and  Split pools pay a KV handoff and win at slower streams"
+    shows: "chunk_step1-2 timeline; handoff equation and InferenceX split-pool bars."
+  - concept: "KV cache as admission budget"
+    frame: "A cached token costs bytes in every layer  and  Estimate: how many requests fit in 526 GB?"
+    shows: "Equation with config.json and lever table; kv_step1-2 blocks under the 526 GB line."
+  - concept: "Serving parallelism chosen by the SLO"
+    frame: "Sharding divides compute and adds AllReduces per layer"
+    shows: "Per-request Fleet Law and tp_step1-2 bars; line 'Weights set the minimum shard count; the SLO chooses the serving parallelism.'"
+  - concept: "State-aware request routing"
+    frame: "Two random probes halve the busiest replica's load"
+    shows: "p2c.svg simulation and the LLM load-signal line."
+
+worked_examples:
+  - name: "Little's law for a chat fleet (Theorem 10.1, extended)"
+    steps: ["Given 1,000 req/s, 100 ms mean, batch of 8 in 80 ms, 80 percent target", "100 in flight", "13 replicas", "Chat: mean answer 211 tokens at 50 ms TPOT = 10.55 s", "10,550 in flight, each holding KV memory (4.4 TB, derived)"]
+  - name: "Napkin Math 10.5: KV-cache capacity"
+    steps: ["327,680 B per token", "526.0 GB free", "42.9 GB per 128K request", "12 fit", "Median Azure chat: 1,397 fit (derived)"]
+  - name: "Decode step against a 50 ms TPOT (§10.15.1)"
+    steps: ["Baseline 85 ms", "INT4 weights: 69.7 ms", "Fusion and graph replay: 49.6 ms", "Speculation: 3.52 tokens per 53.6 ms round, 15.2 ms per token", "Per-gap TBT 53.6 ms misses a 50 ms TBT target"]
+
+active_learning:
+  - at_minute: 0.5
+    type: predict
+    prompt: "Training or a year of serving?"
+    answer: "C, $18.25M, 9.1x the $2M run."
+  - at_minute: 4.5
+    type: retrieval
+    prompt: "Name the three factors of ML goodput. Which sees a late request?"
+    answer: "S x R x P; none sees a deadline."
+  - at_minute: 10
+    type: concept_question
+    prompt: "X: 1,200 req/s at 70 percent; Y: 1,000 at 95 percent. Which has more capacity?"
+    answer: "Y: 950 against 840."
+  - at_minute: 20.5
+    type: estimate
+    prompt: "How many requests are in flight?"
+    answer: "100 (vision); 13 replicas; 10,550 for chat (derived)."
+  - at_minute: 33
+    type: estimate
+    prompt: "How many requests fit in 526 GB?"
+    answer: "12 at 128K tokens; 1,397 median chats (derived)."
+  - at_minute: 39.5
+    type: concept_question
+    prompt: "True or false: what does memory buy? (four fallacies)"
+    answer: "False, false, false, true."
+  - at_minute: 52.5
+    type: predict
+    prompt: "Does the replica meet a 50 ms TPOT after INT4 weights?"
+    answer: "No: 69.7 ms; fusion and replay reach 49.6 ms; speculation meets mean TPOT but misses per-gap TBT."
+  - at_minute: 58
+    type: diagnose
+    prompt: "How often is a 100-leaf request slow when each leaf meets p99?"
+    answer: "63 percent; each leaf needs about p99.99."
+  - at_minute: 65.5
+    type: retrieval
+    prompt: "Name four things that set the cost of one served request."
+    answer: "Contract, batching, KV memory, phases and shards, fleet."
+
+open_questions:
+  - "Reasoning models choose how many tokens to spend. Who should set the per-request budget, the user, the provider, or the model?"
+  - "Split pools win at some per-user targets and lose at others. Should a fleet switch between layouts as load changes?"
+  - "Serving cost recurs for every request. When does a cheaper, smaller model that misses some answers serve users better?"
+
+more_examples:
+  - "InferenceX open benchmark (SemiAnalysis): 325 measured DeepSeek-R1 FP8 configurations across H100, H200, B200, B300, GB200, GB300, MI300X, MI325X, MI355X."
+  - "Azure LLM inference traces 2023 and 2024 (Patel et al. 2024; Stojkovic et al. 2025), CC BY."
+  - "vLLM engine arguments as a map of the lecture's knobs (vllm/engine/arg_utils.py)."
+  - "ChatGPT outage of 20 March 2023 (War Story 10.1)."
+  - "Archetype B (DLRM at Scale): embedding sharding and the tail at scale (Lighthouses 10.1, 10.2)."
+
+left_to_reading:
+  - concept: "Expert parallelism for MoE serving and embedding sharding detail (§10.10.4, §10.10.5)"
+    why: "Owned in mechanism by Lecture 6; named in the sharding note and the batching table only."
+  - concept: "Quantization method families (GPTQ, AWQ, SmoothQuant, QuaRot) and block-wise scaling (§10.9.1 to §10.9.5)"
+    why: "Detail better read than heard; the precision decision is shown on one optional slide."
+  - concept: "Multi-LoRA serving and BGMV kernels (§10.7.9)"
+    why: "Adapter locality is named in the KV budget; kernels are reading."
+  - concept: "Global inference: edge caching, cross-region failover, cost-aware regions (§10.14)"
+    why: "Second-lecture material; the US-East photo and routing slide carry the fleet view."
+  - concept: "Spot instances and warm pool tiers (§10.13.3, §10.13.4)"
+    why: "Interruption economics are owned by Lecture 8."
+
+closing:
+  return_to_hook: "The synthesis prices a token from the measured H100 frontier at three per-user targets ($2.32, $13.53, $80.46 per million output tokens, 35x apart) and lists what sets cost per request, segment by segment."
+  read_and_practice: ["§10.3, §10.6 to §10.8, §10.11, §10.15.1", "the chapter's self-check questions", "Napkin Math 10.5 by hand"]
+  further_reading:
+    - cite: "Yu et al., Orca, OSDI 2022"
+      why: "Iteration-level scheduling."
+    - cite: "Kwon et al., Efficient Memory Management for LLM Serving with PagedAttention, SOSP 2023"
+      why: "KV waste measured and the block table."
+    - cite: "Agrawal et al., Sarathi-Serve, OSDI 2024"
+      why: "Chunked prefill."
+    - cite: "Zhong et al., DistServe, OSDI 2024"
+      why: "Separate prefill and decode pools."
+    - cite: "Mitzenmacher, The Power of Two Choices in Randomized Load Balancing, IEEE TPDS 2001"
+      why: "The two-choices bound."
+  bridge: "Next lecture (Edge Intelligence): when should a model learn on the device, and what does a fleet of phones learn from?"
+
+callbacks:
+  - {lecture: 9, concept: "ML goodput", where: "recall frame, slide and credit; vote note"}
+  - {lecture: 9, concept: "Tensor-parallel collectives under contention", where: "decode-budget predict note"}
+  - {lecture: 1, concept: "Fleet Law", where: "sharding frame note"}
+  - {lecture: 2, concept: "Thread: the bandwidth staircase", where: "split-pools note"}
+  - {lecture: 2, concept: "Capacity and bandwidth are separate tests", where: "true-or-false note"}
+  - {lecture: 3, concept: "Alpha-beta model", where: "serving-tax note; split-pools note"}
+  - {lecture: 4, concept: "Hedged reads against storage tail latency", where: "fan-out diagnose note"}
+  - {lecture: 6, concept: "Tensor parallelism in the fast domain", where: "sharding frame note"}
+  - {lecture: 7, concept: "Graceful degradation ladder", where: "overload note"}
+  - {lecture: 8, concept: "Quota guarantees bounded by reclaim; Serving envelope and accelerator sharing", where: "tenant quota note"}
+  - {lecture: 13, concept: "Security controls priced on a C3 axis (cache isolation on serving paths)", where: "tenant quota note"}
+  - {lecture: 11, concept: "next lecture", where: "closing frame"}
+  - {lecture: 1, concept: "Thread: C3 taxonomy and the Fleet Law (D4)", where: "goals slide, Fleet Law term line: T_compute/N and T_sync(N); Compute (C1) and Coordination (C3)"}
+coverage:
+  primary_taught: ["Serving cost dominance", "SLO goodput and the serving tax", "Batch formation trades waiting for reuse", "Iteration-level batching", "Prefill-decode interference and chunked prefill", "KV cache as admission budget", "Serving parallelism chosen by the SLO", "State-aware request routing"]
+  primary_left_to_reading: []
+  secondary: ["Paged KV allocation and prefix sharing (taught)", "Serving precision decision (optional slide)", "Speculative decoding (decode-budget build)", "Per-request compute budget (optional slide)", "Overload containment (optional slide)", "Token-denominated tenant isolation (optional slide)", "Phase-aware autoscaling and cold start (traffic slide)", "Tail latency under fan-out (diagnose)"]
+
+notes_for_author:
+  - "The chapter is marked for a second lecture; this deck covers the replica in depth and the fleet in one segment. Global inference (§10.14), MoE serving, and multi-LoRA are the natural second-lecture content."
+  - "Real data added from outside the chapter: the Azure LLM traces (CC BY, stored under images/data/) and InferenceX via MLSysIM. Lead may prefer not to ship 1 MB of trace CSV in the repo; make_figs.py and calcs.py read it."
+  - "The replica photo shows an HGX B200 board (eight-GPU layout); no openly licensed photo of an 8x H100 board was found on Commons. The H100 node photo (TSUBAME 4.0, HPE Cray XD665) holds four H100s."
+  - "2026-10-19 sweep (D4, D10). D4: the goals slide names, once, the Fleet Law term (T_compute/N and T_sync(N)) and C3 axis (Compute (C1) and Coordination (C3)) in the volume's one form (the \\fleetterm line). The 15 per-slide \\cterm tags moved into the notes (each note now ends with its C3 axis or Fleet Law term), so every deck of the volume uses one form. D10: X-not-Y constructions and reveal colons rewritten. No exhibit here is retold from another lecture (D3)."

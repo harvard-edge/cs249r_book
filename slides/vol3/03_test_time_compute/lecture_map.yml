@@ -1,0 +1,308 @@
+chapter: 03_test_time_compute
+lecture: "03"
+title: "Test-Time Compute"
+subtitle: "When more deliberation is worth its cost"
+layer: model
+locator: h
+minutes: 75
+notes_minutes: 70.5
+core_minutes: 62.0
+target_ideas: 30
+thesis: "Extra deliberation raises the chance of success only through the information it adds, and only an executed check adds a fact the model did not have, so deliberation is a budget with a stopping rule."
+
+hook:
+  minutes: "0-6"
+  setup: "The repair agent (Lighthouse 1.1) faces a connection-pool stall: requests wait although a connection is idle. Two explanations fit, a timeout that aborts too early or a lost wake-up on return. The runtime can ask for a 1,024-token explanation or run a prepared 40 ms test. Step 1 shows the explanation bar (21.58 s at 21.075 ms per token); step 2 adds the test bar. Then a real run of a 40-line reproducer written for the lecture (images/pool_reproducer.py) shows the waiter blocked 25.1 ms beside an idle connection; the probe took 32.8 ms of wall clock."
+  question_to_class: "How many times longer does the explanation take than the test? A) 5x B) 50x C) about 500x D) 5,000x"
+  payoff: "C: 539.5x (NM 3.1, illustrative). Only the test observes the program. The real trace refutes the timeout hypothesis; later the same probe rejects the model's own timeout patch (blocked 54.3 ms, FAIL) and passes the notify patch (0.0 ms, PASS). The synthesis returns to the trace with the chapter's diagnostic order."
+  sources: ["Test-Time Compute, Napkin Math 3.1 (section 3.1)", "images/pool_trace.txt, one real run on 2026-10-18"]
+
+driving_question: "When is another token, candidate, check, or model call worth its cost?"
+
+goals:
+  - "Compare depth, breadth, and feedback by the information, time, and money each spends."
+  - "Separate a pool that holds a fix from a selector that returns one."
+  - "Compute how far a passing check can be trusted at a given base rate."
+  - "Bound a search, revise a plan along its dependencies, and stop in the right order."
+
+thread_tag: "H·S·A thread: closes the horizon exposure"   # golden-thread line on the goals slide (sweep D4, 2026-10-19)
+running_example: "The repair agent's connection-pool repair (Lighthouse 1.1, introduced in Lecture 1), carried through every segment: the stall and its two hypotheses (hook), the real reproducer run and CPython's queue.put notify (segment 1), the candidate pool A to D of table 3 and the repair-agent coverage curve of Brown et al. (segment 2), the deleted-assertion loophole (segment 3), the plan graph whose diagnosis the waiter-return test refutes, public repair-agent runs, and the three policies of NM 3.7 (segment 4). Most chapter inputs are hypothetical; the slides say illustrative."
+
+segments:
+  - name: Allocation
+    divider_question: "Where can the next unit of work go?"
+    read: "§3.1, §3.2"
+    concept_questions: [1, 2, 3, 4]
+    land: "The same output ceiling buys different latency, memory, and money on each axis, and only feedback buys a new fact."
+    minutes: 12.5
+  - name: Selection
+    divider_question: "Does the pool hold a fix, and will the selector return it?"
+    read: "§3.3"
+    concept_questions: [5, 6, 7, 8]
+    land: "A pool is only as good as its selector, and a selector may return a candidate only on a verifier's pass."
+    minutes: 11.5
+  - name: Verification
+    divider_question: "How far can a passing check be trusted?"
+    read: "§3.4"
+    concept_questions: [9, 10, 11]
+    land: "A pass inherits the base rate, and search pushes candidates into the check's blind spots."
+    minutes: 12
+  - name: Search
+    divider_question: "How is a search shaped, revised, paid for, and stopped?"
+    read: "§3.5 to §3.7"
+    concept_questions: [12, 13, 14, 15, 16]
+    land: "Revise along recorded dependencies, charge every branch, stop in order (ceiling, acceptance, margin), and let the deadline pick the operating point."
+    minutes: 18
+
+concept_questions:
+  - id: 1
+    q: "What can another unit of work buy, and which kind adds a new fact?"
+    picture: "Hook bars (explanation 21.58 s against a 40 ms test) and the real reproducer trace (trace_bug)."
+    numbers: "NM 3.1: 1,024 tokens x 21.075 ms = 21.58 s, 539.5x a 40 ms test, $0.01536 (derived, calcs.hook). Real run: B blocked 25.1 ms after the return; probe 32.8 ms (pool_trace.txt)."
+    example: "Raise the timeout or fix the wake-up."
+    read: "§3.1"
+  - id: 2
+    q: "What are depth, breadth, and feedback, and how does each depend on the last step?"
+    picture: "Three-panel build (axes_step1..3), redrawn from TTC figure 2."
+    numbers: "Definition 3.1 (test-time compute budget)."
+    example: "One long derivation, four patches in parallel, three edit-test-revise rounds."
+    read: "§3.2"
+  - id: 3
+    q: "Why does an executed check find what generation cannot?"
+    picture: "Real code: CPython 3.12 Lib/queue.py get() wait loop and put() ending in not_empty.notify() (queue_code), with the real probe runs on both patches."
+    numbers: "Timeout raised to 60 ms: B blocked 54.3 ms, FAIL; notify on return: 0.0 ms, PASS, 6.7 ms (pool_trace.txt)."
+    example: "The model's proposed timeout patch makes the stall longer."
+    read: "§3.1, §3.2.3"
+  - id: 4
+    q: "What does one 4,096-token ceiling cost on each axis, and when does extra compute pay at all?"
+    picture: "Paired bars of time and bill (alloc_step1..2); table of Snell et al. results by difficulty bin."
+    numbers: "NM 3.2: depth 86.32 s $0.07373; breadth 21.58 s $0.11059 (1.50x depth, 12,288 extra input tokens); feedback 69.24 s $0.09522 (16,380 input tokens); at 8x the prompt the premium is 98,304 tokens, $0.29 (derived, calcs.axes). Snell et al. 2024: five difficulty bins of pass@1 from 2,048 samples (§3.2); beam search over-optimizes on easy bins and beats best-of-N on bins 3 and 4, matching it with 4x less compute, 16 vs 64 generations (§5.3, Fig. 3); revisions best on easy questions (§6.2, Fig. 7); FLOPs-matched, a 14x larger model is beaten except on the hardest questions (§1, §7, Fig. 9)."
+    example: "Route by estimated difficulty; escalate near-zero-yield tasks."
+    read: "§3.2.4 to §3.2.6, Example 3.1"
+  - id: 5
+    q: "How often does a pool of k candidates hold a pass, and what does a parallel pool cost?"
+    picture: "pass@k bars 1, 2, 4, 8 (passk_step1..4) and candidates per accepted repair (poolcost)."
+    numbers: "NM 3.3, p = 0.30: 30.0, 51.0, 76.0, 94.2 percent; the eighth adds 2.5 points; 8.5 against 3.3 candidates per accepted repair, 2.5x; 3.14 expected sequential rounds (derived, calcs.pool)."
+    example: "Breadth buys one round."
+    read: "§3.3.3"
+  - id: 6
+    q: "Does a larger pool make the runtime return more correct answers?"
+    picture: "Brown et al. coverage and majority-vote curves with repair-agent coverage (coverage_step1..3)."
+    numbers: "MLSysIM Literature.RepeatedSamplingMajority/Coverage (recomputed per-sample labels): 8B coverage 27 to 98 percent, vote 43 at 10,000 samples; 70B coverage 48 to 98, vote 59; after 256 samples the 8B vote gains 0.2 points, coverage 10.1; repair coverage 16 percent at 1 sample, 56 at 250."
+    example: "Tests make the repair agent's coverage usable; voting cannot."
+    read: "§3.2.2, §3.3.3, figure 3"
+  - id: 7
+    q: "How is pass@k estimated from n samples, and why per task?"
+    picture: "Real code: openai/human-eval estimator (humaneval_code); true-or-false card on a mixed workload."
+    numbers: "Exercise 2(d): n = 20, c = 4, k = 5: subset 0.718, plug-in 0.672. Mixed workload: plug-in 94.2 percent, true 50.0 percent (derived, calcs.estimator, calcs.pool)."
+    example: "Half the tasks never pass."
+    read: "§3.3.3, §3.8"
+  - id: 8
+    q: "What may a selector return, and when must it abstain?"
+    picture: "Table 3 pool A to D with check results; Definition 3.2 on the slide."
+    numbers: "Check costs from §3.3.2: about 5 ms for a compiled test in a warm container, 800 ms for an LLM judge (notes)."
+    example: "D passes the reproducer; acceptance is still pending."
+    read: "§3.3.1, §3.3.2"
+  - id: 9
+    q: "Where does a check attach, and what does a step label catch?"
+    picture: "Real data: one annotated PRM800K line (prm800k)."
+    numbers: "PRM800K, about 800,000 step labels (TTC §3.4.1 footnote; README); the line: error at step 3 of 16, answer 320,000 against 40,000, verifier score 0.0108, 278,270 ms of labeling (4.6 min, derived)."
+    example: "An outcome check sees only the final answer."
+    read: "§3.4.1"
+  - id: 10
+    q: "What share of passing candidates is valid?"
+    picture: "Precision against valid-candidate rate with three marked points (precision_step1..3); expected loss against output bill (loss)."
+    numbers: "NM 3.4: 2.88 valid and 1.216 invalid passes of 64; precision 70.31 percent; 82.6 with false acceptance halved; 83.3 with the valid rate doubled; any selection 98.55 percent; defective per attempt 29.26 percent; $146.28 per attempt against a $0.98 output bill (149x); false-pass exposure 70.70 percent (derived, calcs.verifier)."
+    example: "A pass inherits the base rate."
+    read: "§3.4.2"
+  - id: 11
+    q: "What does picking the top score do to a check?"
+    picture: "Exact expected maximum of N standard normals against the sqrt(2 ln N) asymptote (selection)."
+    numbers: "Exact E[max]: 1.03 at N = 4, 2.34 at 64; asymptote 2.88 at 64; a 0.5 percent loophole appears in 27.4 percent of 64-candidate pools (derived, calcs.selection; TTC equation 4)."
+    example: "Deleting the failing assertion passes the test."
+    read: "§3.4.3"
+  - id: 12
+    q: "Where does each search structure prune?"
+    picture: "Credited photos (Shannon's endgame machine, Newell and Simon, AlphaGo Game 4 record), then the three-panel build (topo_step1..3), redrawn from TTC figure 7."
+    numbers: "Structure only; sizes illustrative."
+    example: "Best-of-N, beam, tree search with visit counts."
+    read: "§3.6.1"
+  - id: 13
+    q: "How much does a step check shrink a search tree?"
+    picture: "Bars of nodes generated: no pruning, a flat 68 percent cut, pruned (prune_step1..3)."
+    numbers: "b = 5, r = 0.68, depth 3: b_eff 1.6; 155 against 25.8 nodes, 83.4 percent fewer; flat reference 49.6; threshold r > 1 - 1/b = 80 percent (derived, calcs.pruning)."
+    example: "Rejecting a parent removes its subtree."
+    read: "§3.6.2"
+  - id: 14
+    q: "When a test refutes a premise, what must be regenerated?"
+    picture: "Plan graph build (plan_step1..3) after TTC table 5 and figure 5."
+    numbers: "NM 3.5: 12 nodes of 150 tokens, 3 replaced: 450 against 1,800 tokens, 75 percent avoided (notes; derived, calcs.revision)."
+    example: "The waiter-return test refutes the timeout diagnosis."
+    read: "§3.5"
+  - id: 15
+    q: "What does a search really spend, and on what?"
+    picture: "Four accounts, flat against beam (accounts). The public repair-agent runs are recalled in one line of the beam note; Lecture 19 owns them (sweep D3, 2026-10-19)."
+    numbers: "Recall only: one 2024 run, $5.10 per resolved task, 77 percent of spend unresolved (MLSysIM, owned by Lecture 19). NM 3.6: output 8,192 against 4,608 (43.75 percent fewer, $0.054); input 65,536 against 156,288 ($0.272 more); 22.58 s against 19.92 s; $0.3195 against $0.5447; break-even at 17.3 percent of list input price (derived, calcs.swe_runs, calcs.beam)."
+    example: "Charging only the returned patch."
+    read: "§3.6.4, §3.6.5, §3.8"
+  - id: 16
+    q: "In what order does a search stop, and which policy does the deadline allow?"
+    picture: "Stopping-precedence flow (stop_step1..3) after TTC figure 8; policy scatter (policy_step1..3)."
+    numbers: "NM 3.7: round 31.07 s; three rounds 93.22 s past a 75 s deadline; A 40 percent $0.0529, B 98.32 percent $0.1720 (3.3x A), C 61 percent $0.0594, 49.72 s expected (derived, calcs.policies)."
+    example: "Checkpoint 3.2."
+    read: "§3.6.6, §3.7"
+
+concept_trace:
+  - concept: Allocation axes
+    frame: "Depth, breadth, and feedback spend one budget three ways"
+    shown_by: "axes_step1..3 build; numbers on the next two frames"
+  - concept: Budgeted deliberation
+    frame: "Extra compute pays where the model can sometimes succeed"
+    shown_by: "Snell et al. difficulty table and the 14x FLOPs-matched line"
+  - concept: Coverage is not selection
+    frame: "Pools cover 98% of problems; majority vote returns 43%"
+    shown_by: "coverage_step1..3 (Brown et al. via MLSysIM)"
+  - concept: Ranking is not acceptance
+    frame: "A ranker orders candidates; only a verifier may accept one"
+    shown_by: "table 3 pool with the verifier definition and the abstain line"
+  - concept: Verifier precision
+    frame: "At 5% valid candidates, 30% of passes are broken"
+    shown_by: "precision_step1..3 curve with equation 3 on the slide"
+  - concept: Selection pressure
+    frame: "Picking the top score selects the scorer's error"
+    shown_by: "selection plot (exact expected maximum) and the 27.4 percent loophole"
+  - concept: Step-level evidence
+    frame: "A step label catches the error at step 3 of 16"
+    shown_by: "PRM800K annotated line"
+  - concept: Revisable candidate plans
+    frame: "A refuted premise invalidates only its descendants"
+    shown_by: "plan_step1..3 build"
+  - concept: Search tree pruning (secondary)
+    frame: "Predict: what does a 68% step check save?"
+    shown_by: "prune_step1..3"
+  - concept: Search accounting (secondary)
+    frame: "Beam search saves output tokens and pays more for input"
+    shown_by: "accounts"
+  - concept: Stopping precedence (secondary)
+    frame: "Vote: which stopping rule decides first?"
+    shown_by: "stop_step1..3"
+  - concept: Deliberation operating point (secondary)
+    frame: "The deadline decides which policy can run"
+    shown_by: "policy_step1..3"
+
+worked_examples:
+  - name: "Napkin Math 3.2: one decision, three allocations"
+    steps: ["Given: 4,096-token prompt and output ceiling, 21.075 ms per token, $3 and $15 per million tokens", "Time: 86.32, 21.58, 69.24 s", "Bill: $0.0737, $0.1106, $0.0952", "Breadth premium 12,288 tokens, 1.5x depth", "Only feedback adds a fact"]
+  - name: "Napkin Math 3.4: yield and risk under asymmetric verifier error"
+    steps: ["Given: 64 candidates, 5 percent valid, 10 percent false rejection, 2 percent false acceptance", "Passes: 2.88 valid, 1.216 invalid", "Precision 70.31 percent", "Defective per attempt 29.26 percent, $146.28 against $0.98 of output", "Halving false acceptance or doubling the valid rate moves precision; pool size does not"]
+  - name: "Napkin Math 3.7: three policies, one deadline"
+    steps: ["Given: p = 0.40, revision 0.35, 31.07 s per round, 75 s deadline, 8 workers", "A: 40 percent, $0.0529 per accepted repair", "B: 98.32 percent, $0.1720", "C: two rounds fit, 61 percent, $0.0594; a third round ends at 93.22 s", "The deadline picks the operating point"]
+
+active_learning:
+  - at_minute: 1
+    type: predict
+    prompt: "How much slower is the explanation than the test?"
+    answer: "539.5x (21.58 s against 40 ms)."
+  - at_minute: 7
+    type: retrieval
+    prompt: "Write C_eff and the 10-turn success at 99 percent per turn."
+    answer: "E[C_attempt]/p_acc; 90.4 percent."
+  - at_minute: 12
+    type: predict
+    prompt: "Which patch makes the probe pass: raise the timeout to 60 ms, notify on return, or either?"
+    answer: "Notify on return: 0.0 ms, PASS; the timeout patch blocks 54.3 ms, FAIL (real runs)."
+  - at_minute: 19
+    type: estimate
+    prompt: "Extra input tokens for 4-way breadth over depth, at 4,096 and at 8x the prompt?"
+    answer: "12,288 tokens; 98,304 tokens, $0.29; with one stream at a time breadth takes 86.32 s."
+  - at_minute: 22
+    type: predict
+    prompt: "How often does a pool of 8 at 30 percent hold a pass?"
+    answer: "94.2 percent; 8.5 against 3.3 candidates per accepted repair."
+  - at_minute: 31
+    type: concept_question
+    prompt: "True or false: average p across a mixed workload, then apply pass@k."
+    answer: "False: 50.0 percent, not 94.2."
+  - at_minute: 39
+    type: estimate
+    prompt: "What does one attempt of the 64-candidate policy risk?"
+    answer: "29.26 percent defective, $146.28 expected loss, 149x the $0.98 output bill; with false acceptance halved, precision 82.6 percent (83.3 with the valid rate doubled)."
+  - at_minute: 49
+    type: predict
+    prompt: "How many nodes does a 68 percent step check save at b = 5, depth 3?"
+    answer: "25.8 of 155, 83.4 percent fewer."
+  - at_minute: 56
+    type: concept_question
+    prompt: "Checkpoint 3.2: near the ceiling, holding a passing candidate, with a high gain estimate, which rule decides?"
+    answer: "The ceiling or the acceptance check; the candidate goes to the acceptance gate; the marginal rule is never consulted."
+  - at_minute: 63
+    type: retrieval
+    prompt: "In what order do you diagnose an expensive deliberation policy?"
+    answer: "Availability (pass@k per task), precision at the base rate, then rounds by marginal gain per dollar."
+
+open_questions:
+  - "Reasoning models choose how many hidden tokens to spend. Who should set that budget: the model, the runtime, or the user paying for it?"
+  - "Difficulty is unknown before the attempt. How cheap can a difficulty estimate be and still route the budget well?"
+  - "When a check becomes the target of search, how often must it be re-measured on selected candidates?"
+
+more_examples:
+  - "Brown et al. 2024, SWE-bench Lite repair coverage, 16 to 56 percent over 250 samples (MLSysIM)."
+  - "Li et al. 2022 (AlphaCode): deduplication and behavioral clustering narrow a very large sample pool to a handful of submissions (§3.3.1)."
+  - "Gao et al. 2023: proxy reward keeps rising while a held-out reward peaks and falls under best-of-N (§3.4.3)."
+  - "AlphaGo, Game 4 against Lee Sedol (2016): PUCT tree search steered by a learned prior."
+
+further_reading:
+  - cite: "Test-Time Compute, §3.1 to §3.9, Checkpoints 3.1 and 3.2, Exercises 2, 3, 9"
+    why: "The chapter's derivations and the exercises on pool sizing, check strictness, and stopping."
+  - cite: "Brown et al., Large Language Monkeys: Scaling Inference Compute with Repeated Sampling, 2024"
+    url: "https://arxiv.org/abs/2407.21787"
+    why: "Coverage against selection, with released per-sample labels."
+  - cite: "Snell et al., Scaling LLM Test-Time Compute Optimally Can Be More Effective Than Scaling Model Parameters, 2024"
+    url: "https://arxiv.org/abs/2408.03314"
+    why: "How difficulty changes the most effective allocation."
+  - cite: "Lightman et al., Let's Verify Step by Step, ICLR 2024"
+    url: "https://github.com/openai/prm800k"
+    why: "Outcome against step supervision; PRM800K."
+  - cite: "Gao, Schulman, and Hilton, Scaling Laws for Reward Model Overoptimization, ICML 2023"
+    why: "How proxy scores diverge from held-out scores as selection grows."
+
+left_to_reading:
+  - concept: "pass@k unbiased estimator derivation"
+    why: "Shown as real code; the derivation is better read (§3.3.3)."
+  - concept: "PUCT selection rule (equation 5)"
+    why: "Named in notes; the formula is better read than heard (§3.6.1)."
+  - concept: "Marginal stopping rule (equation 7) conditional form"
+    why: "The order of stopping checks is taught; the conditional-probability form is left to §3.6.6."
+  - concept: "Scorer input growth (equation 2)"
+    why: "Stated in the notes of the step-label frame; worked in Exercise 4."
+
+callbacks:
+  - {lecture: 1, concept: "Lighthouse workloads (repair agent)", where: "hook note"}
+  - {lecture: 1, concept: "Cost per accepted task", where: "recall slide and note; Snell note; public runs note"}
+  - {lecture: 1, concept: "Horizon compounding", where: "recall slide and note"}
+  - {lecture: 1, concept: "Invariant closure", where: "stopping note"}
+  - {lecture: 1, concept: "Closure evidence levels", where: "step-label note"}
+  - {lecture: 2, concept: "Output-bound call latency", where: "hook note; NM 3.2 note"}
+  - {lecture: 2, concept: "Checks certify named properties", where: "real-run note"}
+  - {lecture: 2, concept: "Invocation contract", where: "recall note"}
+  - {lecture: 2, concept: "Sampling shapes candidates, not correctness", where: "axes note"}
+  - {lecture: 2, concept: "Quadratic resend and prefix reuse", where: "NM 3.2 note"}
+  - {lecture: 4, concept: "Context compaction", where: "next-lecture note"}
+  - {lecture: 5, concept: "Copy-on-write block sharing", where: "NM 3.2 note"}
+  - {lecture: 5, concept: "Radix prefix cache", where: "search-structure note"}
+  - {lecture: 8, concept: "Copy-on-write workspace", where: "search-structure note"}
+  - {lecture: 10, concept: "Budget reservation", where: "accounts note"}
+  - {lecture: 12, concept: "Trajectory saga (compensation of branch effects)", where: "plan-revision note"}
+  - {lecture: 13, concept: "Repeated-run consistency", where: "pass@k code note"}
+  - {lecture: 13, concept: "Grader isolation", where: "selection-pressure note"}
+  - {lecture: 13, concept: "Matched-budget evaluation", where: "policy note; open questions note"}
+  - {lecture: 17, concept: "Reward hacking", where: "selection-pressure note"}
+  - {lecture: 19, concept: "Cost per accepted task, cohort form (public SWE-bench Verified runs: $5.10 per resolved task, 77 percent on failures)", where: "beam note, one line (sweep D3, 2026-10-19: the full frame moved to its owner)"}
+
+bridge: "Next lecture, Context Engineering: deliberation left failed patches, traces, and stale passes. Which belong in the next call?"
+
+notes_for_author:
+  - "The running case is shown as a real program through a reproducer written for the lecture (images/pool_reproducer.py). Its trace is one real run, frozen in pool_trace.txt; rerunning it changes the milliseconds, so calcs.py reads the saved file."
+  - "Slides keep model and product names out of the text; the Brown et al. models appear as 8B and 70B, and the public repair runs by year. Full names are in the credits and SOURCES.yml."
+  - "The Newell and Simon photo carries an 'AAAI 25th anniversary' caption burned into the image."
+  - "Sweep 2026-10-19 (D3): the frame 'Real repair agents spend up to 77% on attempts that fail' was cut; Lecture 19 owns the public SWE-bench Verified cost data. images/swe.svg and swe.pdf are now unused (deckcheck unused-images) and its generator in make_figs.py is idle; delete them when convenient. The two minutes went to the verifier-precision estimate (Step 4) and a second vote on stopping precedence."

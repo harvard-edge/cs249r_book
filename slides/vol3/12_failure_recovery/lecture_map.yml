@@ -1,0 +1,321 @@
+chapter: 12_failure_recovery
+lecture: "12"
+title: "Failure Recovery"
+subtitle: "Repairing a world left half changed"
+layer: runtime
+locator: ha
+minutes: 75
+notes_minutes: 70.5
+core_minutes: 62
+target_ideas: 30
+thesis: "A durable record does not change the world, so recovery decides on incomplete evidence: settle before retrying, compensate in dependency order, check before the point of no return, and stop loops that raise no error."
+
+hook:
+  minutes: "0-4"
+  setup: "Knight Capital, 1 August 2012 (War Story 12.1). The order router SMARS ran on 8 servers; a deployment of new NYSE Retail Liquidity Program code missed one, which still held Power Peg, retired in 2003, and the new code reused its flag. Photo of the NYSE trading floor. Operators then uninstalled the new code from the other 7 servers."
+  question_to_class: "What did the rollback do? A) the runaway orders stopped B) nothing changed C) all 8 servers ran the retired path"
+  payoff: "C. Next frame shows SEC Release 34-70694 paragraph 27 itself and the paragraph 17 numbers: 212 parent orders, 4 million executions, more than 397 million shares in about 45 minutes, $460 million realized loss. Three questions are left on the board (what to check before going live, what should have halted the router, what made the rollback unsafe); the synthesis answers them row by row."
+  sources:
+    - "U.S. SEC, Release No. 34-70694, Knight Capital Americas LLC (16 Oct 2013), paras. 1, 12 to 19, 27; read from the PDF 2026-10-19."
+    - "Failure Recovery, War Story 12.1 (§12.8)."
+
+recall: "Lecture 11, close your notes: a worker crashes after dispatching test_r18. What did it write first, and what does the replacement know? (Durable intent before dispatch; control state rebuilt from the log, not the model; an intent with no result stays in doubt.) Thumbnail: a text-free log strip with one dashed record."
+
+driving_question: "Why can an agent that records every step it takes still leave the world half changed?"
+
+goals:
+  - "Classify each outcome as established, established absent, or unknown, and register its cleanup before dispatch."
+  - "Choose among retry, repair, compensation, and escalation, and price one repair against unwinding."
+  - "Order a plan so every possible check precedes its one irreversible step, and price the loss that remains."
+  - "Detect a loop that raises no error, and price how late it is stopped."
+  - "Contain shared failures with one retry owner, scoped breakers, and caps, and hold a suspect trajectory."
+
+thread_tag: "H·S·A thread: closes the horizon and authority exposures"   # golden-thread line on the goals slide (sweep D4, 2026-10-19)
+running_example: "The repair agent (Lighthouse 1.1) repairing the connection-pool race: to test candidate ws_r18 it provisions a temporary integration-test environment through provision_test_env_r18, bound as env_r18_01 when evidence arrives, with cleanup release_test_env_r18; test_r18 is the in-doubt test from Lecture 11. Shown as a real system through a real cloud API's documentation (EC2 idempotency and TerminateInstances), a real saga sample (Temporal samples-go), and a real stuck detector (OpenHands 0.59.0). The remediation agent (Lighthouse 12.1) carries the pivot segment."
+
+segments:
+  - name: Settlement
+    divider_question: "What does the runtime owe for an effect it cannot see?"
+    read: "§12.2, §12.3"
+    concept_questions: [1, 2, 3, 4]
+    land: "An outcome is established, established absent, or unknown, and cleanup is registered before the effect exists and ordered as a graph."
+    minutes: 13.5
+  - name: Repair
+    divider_question: "Retry, repair, unwind, or hand off?"
+    read: "§12.4"
+    concept_questions: [5, 6, 7]
+    land: "Evidence class first, admission second, expected cost last, compared at the same endpoint."
+    minutes: 10
+  - name: Pivots
+    divider_question: "Where must checks run when a step cannot be undone?"
+    read: "§12.5"
+    concept_questions: [8, 9, 10]
+    land: "Run every check that can precede the pivot before it, and own what remains after it."
+    minutes: 11
+  - name: Loops
+    divider_question: "How does the runtime stop a loop that raises no error?"
+    read: "§12.6"
+    concept_questions: [11, 12]
+    land: "Detection latency sets a loop's cost, and the admission gate enforces the hold whatever the prompt says."
+    minutes: 9.5
+  - name: Containment
+    divider_question: "What contains failures that many trajectories share?"
+    read: "§12.7, §12.8"
+    concept_questions: [13, 14, 15]
+    land: "One retry owner, scoped breakers, and caps bound shared load; an incident hold stops model work while preregistered cleanup runs."
+    minutes: 12
+
+concept_questions:
+  - id: 1
+    q: "What may the runtime believe after a timeout?"
+    picture: "Real artifact: Amazon EC2 documentation excerpt (a mutating request can time out after the operation completes; client tokens) beside the documented TerminateInstances reply (running to shutting-down)."
+    numbers: "None derived; three evidence states (§12.2)."
+    example: "provision_test_env_r18 times out: unknown, reservation and owner kept."
+    read: "§12.2"
+  - id: 2
+    q: "What does compensation restore?"
+    picture: "Equation 2 with its symbols glossed, then the predicate table for env_r18_01 (allocated, depended on: false before and after; billing and audit outside P)."
+    numbers: "Equation 2, Definition 12.2."
+    example: "Restoring snapshot ws_r18 does not release the remote environment."
+    read: "§12.3.2"
+  - id: 3
+    q: "When must cleanup be registered?"
+    picture: "Real code: temporalio/samples-go saga/workflow.go (014be0f) registers the withdrawal compensation in a defer after Withdraw returns; predict where it leaks; then the redrawn saga flow in three builds."
+    numbers: "Retry policy MaximumAttempts 3 (the sample)."
+    example: "Gray 1981 logged the compensator after the step returned; the trajectory saga writes the template before dispatch."
+    read: "§12.2 footnote 2, §12.3.1"
+  - id: 4
+    q: "In what order does cleanup run, and what does an unresolved node block?"
+    picture: "Cleanup graph build: five nodes; step 2 the cancel reply is lost and only dependents block."
+    numbers: "Exercise 1: reverse stack 105 s, graph 75 s (derived)."
+    example: "Branch-scoped compensation releases only what one branch owns alone (notes)."
+    read: "§12.3.4, §12.3.5"
+  - id: 5
+    q: "Does another attempt help without new information?"
+    picture: "Decision-order build (decide_step); the Huang et al. self-correction data is recalled in one line of its note (Lecture 2 owns it; sweep D3, 2026-10-19)."
+    numbers: "Recall only: self-review without new evidence lowered accuracy; a check's verdict raised it (Lecture 2)."
+    example: "The chapter's Olausson 2024 result for code repair under matched budgets."
+    read: "§12.4.1 footnote 4"
+  - id: 6
+    q: "In what order does recovery choose?"
+    picture: "Redrawn decision figure in three builds: evidence class, admission, expected cost; diagnose activity on three failures."
+    numbers: "None."
+    example: "Timeout, HTTP 429, and local schema rejection lead to different choices."
+    read: "§12.4.1, §12.4.2"
+  - id: 7
+    q: "When does one bounded repair beat unwinding?"
+    picture: "Plot of expected cost over fallback cost against p for seconds and dollars, with p* marked and the p = 0.5 point."
+    numbers: "NM 12.1: C_fallback 86.6 s and $0.162; C_repair 4.09 s and $0.00987; p* 4.7% (s), 6.1% ($); at p = 0.5, 47.39 s, 45.3% less (all derived in calcs.py)."
+    example: "Repair episode cap counted at admission (notes)."
+    read: "§12.4.3, §12.4.4"
+  - id: 8
+    q: "What makes a step irreversible?"
+    picture: "Outside incident: Dulles Airport photo, the 04:09 to 05:27 UTC window plot, and the vendor's prevention item quoting a canary deployment; then the three recovery contracts table."
+    numbers: "78 min (derived), 8.5 million Windows devices (Microsoft estimate)."
+    example: "Snapshot, environment release, package publication."
+    read: "§12.5.1"
+  - id: 9
+    q: "How should a plan be ordered around a pivot?"
+    picture: "Table 4 drawn as two plans in two builds; remediation agent's commitment region beside a miner's canary photo."
+    numbers: "None."
+    example: "Publishing agent; remediation agent's fleet rollout as pivot with approval at it."
+    read: "§12.5.2, Lighthouse 12.1"
+  - id: 10
+    q: "How much loss does a pre-pivot check remove?"
+    picture: "Loss bars in three builds: rollout first, canary first (caught and missed), catch rate 90%."
+    numbers: "NM 12.2: $480 to $134.40 (3.6× less), missed 71.4%; +10 points of catch rate saves $43.20, 2.2× the $20 attempt (derived)."
+    example: "Remediation agent."
+    read: "§12.5.2"
+  - id: 11
+    q: "How does a runtime notice a loop that raises no error?"
+    picture: "Redrawn digest strip (period 2); OpenHands stuck.py and agent_controller.py excerpt (now core)."
+    numbers: "Recall only: step repetition 15.7 percent of 1,642 multi-agent traces (Cemri et al. 2025; Lecture 18 shows the data)."
+    example: "Repair agent toggling patches A and B on ws_r18; test_r18 polling as a false alarm."
+    read: "§12.6.1"
+  - id: 12
+    q: "What does a late stop cost, and what happens when the watchdog fires?"
+    picture: "Cumulative input against turns with early stop and ceiling (two builds); finding, hold, three responses."
+    numbers: "NM 12.3: 1,397,500 against 10,600 input tokens, $4.42 against $0.050, 88.7×; turn 25 cuts input 3.9× (derived)."
+    example: "pending_control hold from Lecture 10."
+    read: "§12.6.2, §12.6.3"
+  - id: 13
+    q: "Why do layered retries hurt, and what do jitter and caps bound?"
+    picture: "Real artifact: AWS SDK retry docs (default 3 attempts, backoff formula); retry tree 1, 3, 9, 27; jitter bars; measured durations of retry-sustained metastable incidents."
+    numbers: "27 against 3 (derived); 64,000/s against 64/s, 0.128 expected in 2 ms; 160 rejected, 236 of 300 free (NM 12.4, derived); 12 of 21 incidents, 57% (Huang et al., OSDI 2022, Table 1, derived count)."
+    example: "Agent loop, gateway, client library."
+    read: "§12.7.2, §12.7.3"
+  - id: 14
+    q: "When should a circuit breaker open?"
+    picture: "Vote on Exercise 4's window; classified against count-all bars; resilience4j default configuration card."
+    numbers: "0.40 against 0.70 (derived); resilience4j failureRateThreshold 50, minimumNumberOfCalls 100, waitDurationInOpenState 60000 ms."
+    example: "One malformed trajectory must not open the breaker for every tenant."
+    read: "§12.7.1"
+  - id: 15
+    q: "What does containment stop, and what must it keep running?"
+    picture: "Incident figure: supervisor outside the agent, hold at each dispatch gate, cleanup service with a narrow grant, quarantine closure, kept record."
+    numbers: "None."
+    example: "Blocked package_search disclosure with test_r18 and provisioning still open (Example 12.2)."
+    read: "§12.8"
+
+concept_trace:
+  - concept: "Compensation"
+    frame: "Compensation restores only the predicates it declares"
+    shown_by: "Equation 2 and the env_r18_01 predicate table (build 3 steps)."
+  - concept: "Trajectory saga"
+    frame: "A trajectory saga registers cleanup before dispatch"
+    shown_by: "Redrawn saga flow, three builds: register with unbound target, dispatch with bind or unknown, release with prerequisites and two outcomes; preceded by the Temporal predict frame."
+  - concept: "Cleanup graph"
+    frame: "Estimate: how long does this cleanup take?"
+    shown_by: "Five-node graph; build 2 marks the blocked dependents of a lost cancel reply."
+  - concept: "Recovery decision order"
+    frame: "Recovery chooses by evidence, then admission, then cost"
+    shown_by: "Redrawn decision figure, three builds."
+  - concept: "Repair break-even"
+    frame: "Repair first pays when one attempt in 16 succeeds"
+    shown_by: "Expected-cost plot with p* on two axes and the worked steps."
+  - concept: "Commitment regions"
+    frame: "Hoist every check ahead of the single pivot"
+    shown_by: "First plan against reordered plan with the pivot line; contracts table on the previous frame; priced on 'Estimate: what does a canary save per task?'."
+  - concept: "Semantic watchdog"
+    frame: "A digest that repeats two turns back flags an oscillation"
+    shown_by: "Digest strip with period 2 and gate hold; cost on 'Predict: what does stopping at turn 4 save?'; responses on 'The watchdog's finding becomes an admission hold'."
+  - concept: "Incident containment"
+    frame: "Containment holds model work and keeps cleanup running"
+    shown_by: "Incident figure."
+  - concept: "Dependency containment (secondary)"
+    frame: "Predict: how many requests reach the service?"
+    shown_by: "Retry tree and SDK default; breaker window on 'Vote: does this breaker open?'."
+
+worked_examples:
+  - name: "Repair against unwind at matched readiness (NM 12.1)"
+    steps: ["given: compensation 40.6 s, rebuild 46 s with 38,500 in and 3,100 out tokens; repair 2,390 in, 180 out, 0.09 s + 180/50 s + 0.4 s; $3 and $15 per million", "C_fallback = 86.6 s, $0.162; C_repair = 4.09 s, $0.00987", "p* = 4.7% (s), 6.1% ($)", "at p = 0.5: 47.39 s, 45.3% less than unwinding now", "meaning: when the fallback discards expensive preparation, repair first pays for any failure class whose measured p clears the ratio"]
+  - name: "Expected irreversible loss around a pivot (NM 12.2)"
+    steps: ["given: 4% wrong, $12,000 consequence, 80% caught, 90% revert fidelity, $20 attempt", "rollout first: $480", "canary first: $38.40 caught + $96 missed = $134.40, 3.6× less", "71.4% of the remainder is missed changes; +10 points of catch rate saves $43.20", "meaning: the remaining loss belongs in the cost per accepted task, charged to every attempt"]
+  - name: "What an undetected loop costs (NM 12.3)"
+    steps: ["given: 1,000-token first input, +1,100 per turn, 300 output tokens, $3 and $15 per million, 10 s per turn", "ceiling at 50 turns: 1,397,500 input tokens, $4.42, 8.33 min", "stop after turn 4: 10,600 tokens, $0.050, 40 s", "ratio 88.7×; turn 25 already cuts input 3.9×", "meaning: detection latency sets the cost; the budget ceiling is a backstop"]
+  - name: "Cleanup graph against reverse stack (Exercise 1)"
+    steps: ["given: end test 30 s, preserve 20 s, release 40 s after both, revoke 5 s after release, scratch 10 s", "stack: 105 s", "graph: longest path 30 + 40 + 5 = 75 s", "lost cancel reply: artifacts and scratch settle; release and revoke blocked and owned", "meaning: an unresolved node blocks only its transitive dependents"]
+
+active_learning:
+  - at_minute: 0.5
+    type: predict
+    prompt: "Knight's operators uninstall the new code from the 7 correct servers. What happens?"
+    answer: "C, all 8 servers run Power Peg (SEC para. 27)."
+  - at_minute: 4.5
+    type: retrieval
+    prompt: "Close your notes: a worker crashes after dispatching test_r18. What did it write first, and what does the replacement know?"
+    answer: "Durable intent; control state from the log; outcome unknown."
+  - at_minute: 13.5
+    type: predict
+    prompt: "In the Temporal saga sample, the withdrawal takes effect but every reply is lost. What compensates it?"
+    answer: "B, nothing: the compensation is registered in a defer only after Withdraw returns success."
+  - at_minute: 18
+    type: estimate
+    prompt: "Five cleanup operations: total time as a reverse stack and as a graph; then the test's cancel reply is lost."
+    answer: "105 s against 75 s; artifacts and scratch settle, release and revoke blocked and owned."
+  - at_minute: 24
+    type: diagnose
+    prompt: "Provisioning timeout, HTTP 429 on a mutating call, local schema rejection: which recoveries can each use?"
+    answer: "Unknown: probe or keep owned, no second create; 429: only what the contract proves, backoff times a permitted retry; local rejection: never sent, repair or unwind."
+  - at_minute: 37.5
+    type: estimate
+    prompt: "4% wrong changes, $12,000 consequence, canary catches 80%, revert avoids 90%: expected loss with and without the canary?"
+    answer: "$480 against $134.40, 3.6× less; 71.4% of the remainder is missed changes."
+  - at_minute: 46
+    type: predict
+    prompt: "A loop runs to a 50-turn ceiling or stops after turn 4. Ceiling cost over stop cost: 12.5×, 25×, or 89×?"
+    answer: "89× (88.7×, derived), because resent input grows with the square of the turns."
+  - at_minute: 51
+    type: predict
+    prompt: "Agent loop, gateway, and client library each allow 3 attempts. How many requests reach the failing service?"
+    answer: "27, against 3 with a single owner."
+  - at_minute: 56.5
+    type: concept_question
+    prompt: "50 outcomes: 14 timeouts, 6 server errors, 12 validation rejections, 3 denials, 15 successes; trip at 0.50. Does the breaker open?"
+    answer: "No under classification: 20/50 = 0.40; a count-all breaker sees 0.70 and opens for every tenant."
+  - at_minute: 62
+    type: concept_question
+    prompt: "True or false: six claims about recovery (§12.10)."
+    answer: "F, F, T, F, F, T with the chapter's rebuttals."
+  - at_minute: 64
+    type: retrieval
+    prompt: "For each of Knight's failures, name the runtime mechanism that answers it."
+    answer: "Checks before the pivot; hold at each dispatch gate; recovery passes admission; a progress check outside the component; a finding becomes an enforced hold."
+
+open_questions:
+  - "A watchdog that ends useful backtracking costs acceptances; one that waits costs tokens. How should a team set its window?"
+  - "Who should own a duty that outlives every worker and model call, such as an environment whose release stays unconfirmed for days?"
+  - "What is the canary slice for an agent that acts once per task?"
+
+more_examples:
+  - "Amazon EC2 RunInstances client tokens and the IdempotentParameterMismatch error (EC2 Developer Guide)."
+  - "OpenHands stuck detector: five scenarios including the six-step alternation (release 0.59.0)."
+  - "AWS SDK retry quota: a 500-token bucket, 14 tokens per transient retry (AWS SDKs and Tools Reference Guide)."
+  - "CrowdStrike Channel File 291, 19 July 2024: published 04:09, reverted 05:27 UTC; canary deployment adopted afterward (PIR)."
+  - "Metastable failures in the wild: AWS4 (7 Dec 2021, 9.3 h), IBM1 (73.53 h) sustained by retries (Huang et al., OSDI 2022)."
+  - "Knight's 97 'Power Peg disabled' e-mails before the open, never treated as alerts (SEC para. 19)."
+
+left_to_reading:
+  - concept: "Transactional outbox (Example 12.1) and the finalization contract (§12.5.3, §12.5.4)"
+    why: "One line each in the notes of the reorder frame; the FINALIZING state is Lecture 10's."
+  - concept: "Breaker probe slot, breaker_generation fencing, and cooldown doubling (§12.7.1, figure 4)"
+    why: "Named in the breaker vote notes; the state machine is better read."
+  - concept: "Restriction ordering by exposure per minute (§12.8.1, Exercise 8)"
+    why: "Time; assign Exercise 8."
+  - concept: "Fault-test plan and outcome dimensions (§12.9.3, table 10)"
+    why: "A testing method best practiced as an assignment; paired comparison is Lecture 13's."
+  - concept: "Repair episode identity and cap (§12.4.4)"
+    why: "Stated in the notes of the repair break-even frame."
+
+closing:
+  return_to_hook: "Five Knight failures mapped to five mechanisms: the missed server and no review to checks before the pivot; no halt outside the router to a hold at each dispatch gate; the live rollback to recovery passing the same admission; no orders-out against orders-in comparison to a progress check outside the component; 97 ignored e-mails to a finding that becomes an enforced hold."
+  read_and_practice: ["§12.2 to §12.9", "Checkpoints 12.1 to 12.5", "Exercises 1, 2, 6, 9"]
+  further_reading:
+    - cite: "Gray, The Transaction Concept: Virtues and Limitations, VLDB 1981"
+      url: "https://jimgray.azurewebsites.net/papers/thetransactionconcept.pdf"
+      why: "Why transactions break for long cross-organization work; compensation."
+    - cite: "Garcia-Molina and Salem, Sagas, SIGMOD 1987"
+      url: "https://doi.org/10.1145/38713.38742"
+      why: "The saga and its recovery strategies."
+    - cite: "Helland, Life Beyond Distributed Transactions, CIDR 2007"
+      url: "https://www.cidrdb.org/cidr2007/papers/cidr07p15.pdf"
+      why: "Agreement without distributed transactions: tentative operations, cancellation, idempotence."
+    - cite: "Brooker, Timeouts, Retries, and Backoff with Jitter, Amazon Builders' Library, 2019"
+      url: "https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/"
+      why: "Layered retry amplification and jitter in practice."
+    - cite: "Huang et al., Metastable Failures in the Wild, OSDI 2022"
+      url: "https://www.usenix.org/conference/osdi22/presentation/huang-lexiang"
+      why: "Measured incidents in which retries sustained outages."
+  bridge: "Lecture 13 (Agent Evaluation): one run succeeded and every effect settled. Does the configuration work?"
+
+callbacks:
+  - {lecture: "11", concept: "Durable intent before dispatch; resume protocol; checkpoint binding", where: "recall frame; saga predict notes; compensation step 3"}
+  - {lecture: "10", concept: "Settlement rule", where: "EC2 frame notes"}
+  - {lecture: "10", concept: "Bounded-liability admission (admission check)", where: "decision-order notes"}
+  - {lecture: "10", concept: "Approval escrow", where: "remediation canary notes"}
+  - {lecture: "10", concept: "Trajectory budget vector (budget ceiling)", where: "loop predict notes"}
+  - {lecture: "10", concept: "Harness owns continuation (pending_control hold)", where: "watchdog responses notes"}
+  - {lecture: "7", concept: "Operation identity", where: "EC2 frame notes"}
+  - {lecture: "7", concept: "Reconciliation probe (result recovery)", where: "saga flow notes"}
+  - {lecture: "7", concept: "Settlement before retry", where: "decision-order notes"}
+  - {lecture: "2", concept: "Quadratic resend", where: "loop predict notes"}
+  - {lecture: "5", concept: "Little's law", where: "jitter notes"}
+  - {lecture: "9", concept: "Information-flow labels", where: "incident notes"}
+  - {lecture: "1", concept: "Cost per accepted task; remediation agent; repair agent; H·S·A exposures", where: "hook, goals, canary estimate and loop notes, DQ frame"}
+  - {lecture: "3", concept: "Feedback axis (revising from observations)", where: "decision-order notes"}
+  - {lecture: "2", concept: "Checks certify named properties (Huang et al. self-correction data, one-line recall)", where: "decision-order note"}
+  - {lecture: "18", concept: "Multi-agent failure data (MAST, one-line recall)", where: "OpenHands stuck-detector note"}
+  - {lecture: "13", concept: "Agent evaluation (next lecture)", where: "next-lecture frame"}
+  - {lecture: "14", concept: "Staged release", where: "open questions notes"}
+
+coverage:
+  primary_taught: ["Compensation", "Trajectory saga", "Cleanup graph", "Recovery decision order", "Repair break-even", "Commitment regions", "Semantic watchdog", "Incident containment"]
+  primary_left_to_reading: []
+  secondary: ["Dependency containment (taught: retry owner, breaker classification, caps)"]
+
+notes_for_author:
+  - "Most notebook inputs are scenario values; their slides say 'illustrative' with the notebook number."
+  - "Outside material added for real data and artifacts: SEC paragraph 27 crop; EC2 docs; Temporal samples-go saga (registers compensation after the step, the chapter's pitfall); Huang et al. 2024 Tables 2 and 3; CrowdStrike PIR and Microsoft estimate; MAST (multi-agent traces); OpenHands 0.59.0 stuck detector; AWS SDK retry docs; resilience4j defaults; Huang et al. OSDI 2022 Table 1. Product names appear only as artifacts and incidents."
+  - "The retry-sustained count (12 of 21) is our count of Huang et al.'s Table 1; the paper states 'more than 50%'."
+  - "The chapter's 'Power Peg retired in 2003' is used as given."
+  - "Sweep 2026-10-19 (D3): two optional frames were cut, 'A check's verdict raised accuracy; self-review lowered it' (Huang et al.; Lecture 2 owns it, as the book's Ch 2 cites it) and 'Step repetition led failures in 1,642 multi-agent traces' (MAST; Lecture 18 owns it). Each is recalled in one line. Time went to the recovery decision order (Olausson's matched-budget result, +1 min), a pair round on the Diagnose cards (+1 min), and the OpenHands stuck-detector frame, now core (+1 min). Open item: the Repair segment no longer shows published measured data; its worked example is illustrative (NM 12.1). A plot of Olausson et al.'s self-repair results, which the chapter cites, would close the gap. images/huang_bars.svg/.pdf and mast_bars.svg/.pdf are now unused (deckcheck unused-images)."

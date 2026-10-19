@@ -1,0 +1,535 @@
+% =============================================================================
+% Lecture 10: The Agent Harness
+% Agentic Machine Learning Systems (Volume III), Chapter 10
+% =============================================================================
+% Thesis: the decision to continue lives outside the model; a deterministic
+% harness owns the trajectory record, its state transitions, its approvals,
+% and its budgets.
+% Hook and synthesis: the July 2025 code-freeze deletion (War Story 10.1),
+% shown as the agent's own replies. Running case: the repair agent's turn on
+% candidate r18 (Lighthouse 1.1 as the chapter uses it), shown as a real
+% system through public mini-SWE-agent trajectories on SWE-bench Verified.
+%
+% Build: make deck V=3 D=10_agent_harness   (figures: images/make_figs.py)
+% Plan:  lecture_map.yml in this folder.
+% Numbers: images/calcs.py prints every derived value; sources named there.
+% =============================================================================
+
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+\mlsyssetup{
+  volume={Volume III},
+  chapter={Chapter 10},
+  chaptertitle={The Agent Harness},
+  layer=runtime,
+  logo={../../assets/img/logo-mlsysbook.png},
+  instlogo={../../assets/img/logo-harvard.png},
+}
+\usepackage[T1]{fontenc}
+\usepackage[scaled=0.9]{helvet}
+\usepackage{courier}
+% Code and real tool output: Inconsolata is narrower than Courier.
+\usepackage[varqu,scaled=0.95]{zi4}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{booktabs,amsmath}
+\usetikzlibrary{arrows.meta,positioning}
+\graphicspath{{images/}}
+\setcounter{mlsystotalsections}{4}
+
+\title{The Agent Harness}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+% A large answer choice for predict and concept-question slides
+\newcommand{\choice}[2]{\textbf{\textcolor{mlsysaccent}{#1}}\enspace #2}
+% A choice that is highlighted from overlay #1 on (the answer)
+\newcommand{\answerat}[3]{\alt<#1->{\colorbox{mlsysaccent!15}{\choice{#2}{#3}}}{\choice{#2}{#3}}}
+% A goal or takeaway line with its thumbnail
+\newcommand{\thumbline}[2]{%
+  \begin{minipage}[c]{2.6cm}\centering\includegraphics[width=2.5cm,height=0.95cm,keepaspectratio]{#1}\end{minipage}%
+  \hspace{0.3cm}\begin{minipage}[c]{0.74\textwidth}\small #2\end{minipage}}
+% One line of a worked example: shown from overlay #1 on
+\newcommand{\wstep}[2]{\uncover<#1->{#2}\\[0.2cm]}
+% A block of real code or output, set in type at the legibility floor
+\newcommand{\codeblock}[1]{%
+  \begin{mlsyscard}{midgray}\footnotesize\ttfamily\raggedright #1\end{mlsyscard}}
+% Indentation inside a code block
+\newcommand{\ind}[1]{\hspace*{#1em}}
+% Golden-thread tag: one line on the goals slide naming the H·S·A term this lecture acts on
+\newcommand{\hsathread}[1]{{\scriptsize\textbf{\textcolor{mlsysaccent}{H·S·A thread:}} #1\par}}
+
+\begin{document}
+
+% =============================================================================
+% TITLE AND HOOK
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Read the thesis aloud once. Part III gave the runtime checks for one call: mediation, sandboxes, information flow. Today the question is the whole run: who decides whether the agent takes another step. The notes total about 71.5 minutes; the core lecture is about 59. FLEX: cutting every [OPTIONAL] frame (the lever frame, the control table, the control room, fair scheduling, the meter, the ceiling evidence, the step-ceiling plot, the open questions) leaves a complete lecture. Cut first the control room and the step-ceiling plot.}
+\mlsystitle{The Agent Harness}{A deterministic harness outside the model decides whether a trajectory continues, because it owns the trajectory record, its state transitions, its approvals, and its budgets.}{cover_interrupts_blueprint.png}
+
+\begin{frame}{Predict: what would have stopped the deletion?}
+  \mlsysactivity{Predict}{3 min}
+  \begin{columns}[c]
+    \begin{column}{0.42\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.6cm,keepaspectratio]{replit_admission.jpg}
+    \end{column}
+    \begin{column}{0.55\textwidth}
+      \small July 2025. A coding agent works under a code and action freeze stated in its instructions. It runs a database command and deletes the production database.\\[0.3cm]
+      {\normalsize Which control would have stopped it?}\\[0.2cm]
+      \choice{A}{state the freeze in the prompt more often}\\[0.1cm]
+      \choice{B}{a model that keeps the rule on 99\% of turns}\\[0.1cm]
+      \answerat{2}{C}{a rule checked at dispatch, outside the model}\\[0.1cm]
+      \choice{D}{a database snapshot}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Jason Lemkin (@jasonlk), X posts of 18 July 2025, screenshot of the agent's reply (cropped); reported by The Register, 21 July 2025. The Agent Harness, War Story 10.1.}
+  \note{[3.5 min] [CORE] A real incident, shown as the user posted it. Jason Lemkin was building an application with a hosted coding agent and had placed the project under a code and action freeze, stated in natural language. The screenshot is the agent's own reply after the fact: it ran a database push command without asking and deleted the production database during the freeze. ENGAGE: one minute; vote with fingers. Step 2: C. A (more repetition) changes only how likely the model is to comply; Lemkin told The Register he had told the agent eleven times in capitals not to fabricate data, and it still did. B fails on some turn of a long run; the first segment computes how often. D is real and it mattered: the snapshot rollback restored the data, although the agent claimed rollback was impossible. A snapshot repairs the damage after the fact; it does not stop the command. Only C stops it: a check at the dispatch boundary that refuses any mutation of the production target while the freeze flag is set, whatever the model generates. WARN: students who blame the model ``for disobeying'' treat the model as the enforcement point; the lecture moves enforcement into the runtime. Avoid ``panicked'' or ``lied''; it generated text. FLEX: [CORE]; the synthesis returns here.}
+\end{frame}
+
+\begin{frame}{Recall: what settles a call that timed out?}
+  \mlsysactivity{Retrieval}{1.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.56\textwidth}
+      {\Large\bfseries Close your notes.}\\[0.3cm]
+      {\normalsize What does a model call return? After a timeout, may the runtime retry the call?}\\[0.3cm]
+      \uncover<2->{\small A model call returns a \textbf{\textcolor{mlsysaccent}{proposal}}, checked against its invocation contract (complete, well formed, within limits).\\[0.15cm]
+      A timeout leaves the effect \textbf{\textcolor{mlsysaccent}{unknown}}, so settle it with evidence before any retry.}
+    \end{column}
+    \begin{column}{0.40\textwidth}
+      \uncover<3->{\begin{mlsyscard}{mlsysaccent}\small\textbf{Today:} each check so far covered one call. Who decides whether the trajectory takes another step at all?\end{mlsyscard}}
+    \end{column}
+  \end{columns}
+  \note{[1.5 min] [CORE] Retrieval, 45 seconds. Step 2: Lecture 2 established that a model call returns a proposal, checked against its invocation contract (complete, well formed, within limits). Lecture 7 established settlement before retry: a timeout says nothing about whether the effect happened, so the runtime settles the outcome with evidence before it repeats a call. Step 3: both rules act on one call. A run has dozens of calls, an operator who may press pause, a reviewer who may take two hours, and a budget. ENGAGE: in the hook, which single call was the problem? (Expected: the database push, one dispatch among many; the decision to run it was made nowhere outside the model.) FLEX: a student who missed Lectures 2 and 7 needs only this slide.}
+\end{frame}
+
+\begin{frame}{The harness is where the runtime closes the horizon}
+  \begin{columns}[c]
+    \begin{column}{0.40\textwidth}
+      \centering\mlsyskitfig[width=\textwidth,height=5.4cm,keepaspectratio]{stack_runtime}
+    \end{column}
+    \begin{column}{0.18\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.6cm,keepaspectratio]{hsa_locator_h.pdf}\\[0.1cm]
+      {\footnotesize H: horizon, in turns}
+    \end{column}
+    \begin{column}{0.38\textwidth}
+      {\large\bfseries Why must the decision to continue an agent live outside the model that proposes its next step?}
+    \end{column}
+  \end{columns}
+  \note{[1 min] [CORE] Part IV, The Agent Runtime, starts here: the harness today, then durable execution, failure recovery, evaluation, and operation. On the H·S·A locator only the horizon axis is lit: the number of turns the trajectory runs, which Lecture 1 defined. Part III closed authority one call at a time; the harness closes the horizon, the whole run. Read the driving question aloud. Every segment answers part of it.}
+\end{frame}
+
+\begin{frame}{By the end of today you can}
+  \thumbline{thumb_compound.pdf}{Explain why a rule the model keeps on almost every turn still fails across a run.}\\[0.2cm]
+  \thumbline{thumb_states.pdf}{Trace a turn through the trajectory record, guarded state changes, and a late result.}\\[0.2cm]
+  \thumbline{thumb_pause.pdf}{Bound how long a pause waits, and hold an approval without dispatching it.}\\[0.2cm]
+  \thumbline{thumb_admit.pdf}{Admit a call by its bounded liability, and choose a ceiling from real runs.}\\[0.25cm]
+  \hsathread{closes the horizon exposure}
+  \note{[1 min] [CORE] Four goals, one per segment; each thumbnail is the figure that teaches it. Running case: the repair agent from Lecture 1, fixing a connection-pool race. Today it has just produced candidate patch r18, a test of r18 is running, and an operator wants to pause it. Two thumbnails are measurements: the pause plot was measured on a laptop for this lecture, and the ceiling evidence comes from 2,100 public repair-agent runs.}
+\end{frame}
+
+% =============================================================================
+% SECTION: CONTINUATION
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] First segment: why the model cannot own the decision to continue, and what a real agent loop does instead.}
+\mlsysdivider{Who decides whether the agent takes another step?}{The Agent Harness, \S10.1 and \S10.2}
+\section{Continuation}
+
+\begin{frame}{A rule kept on 99\% of turns fails in 26\% of 30-turn runs}
+  \centering
+  \mlsyssteps[width=0.92\textwidth,height=5.2cm,keepaspectratio]{compound_step}{2}\\[0.05cm]
+  \uncover<2->{\small Five public repair agents ran 23 to 64 model calls per task at the median.}
+  \mlsyscredit{Derived: $0.99^{H}$ (equation 1.1). Medians: 2,100 public SWE-bench Verified trajectories of five agent configurations (MLSysIM, Literature.SweBenchTrajectories).}
+  \note{[2.5 min] [CORE] LINK: Lecture 1's horizon compounding: success over a run is $(1-\epsilon)^H$. Step 1: apply it to an instruction instead of a task. A model that keeps a freeze or a budget rule on 99 percent of turns keeps it on all 30 turns $0.99^{30} = 0.74$ of the time (derived), so 26 percent of 30-turn runs break it at least once. Step 2: are real runs that long? The shaded band is measured: five public agent configurations on the same 500 repository-repair tasks ran 23 to 64 model calls at the median. At 64 calls the rule holds on every turn only 53 percent of the time. ENGAGE: what per-turn compliance would keep the rule on all 64 turns 99 percent of the time? (Expected: about 99.98 percent per turn; no prompt delivers that, and nobody measures it.) WARN: the 99 percent is illustrative, as in the chapter; the war story reports no compliance rate. The point is the shape: any per-turn rate below one decays with horizon. A check in the runtime holds on every turn because it does not depend on the model. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{A real agent loop runs every proposed command at once}
+  \begin{columns}[c]
+    \begin{column}{0.66\textwidth}
+      \codeblock{\alt<2->{\textcolor{RedLine}{\textbf{def step(self) -> list[dict]:}}}{def step(self) -> list[dict]:}\\
+      \ind{2}"""Query the LM, execute actions."""\\
+      \ind{2}\alt<2->{\textcolor{RedLine}{\textbf{return self.execute\_actions(self.query())}}}{return self.execute\_actions(self.query())}\\[0.3em]
+      def execute\_actions(self, message: dict)\\
+      \ind{6}-> list[dict]:\\
+      \ind{2}\alt<3->{\textcolor{RedLine}{\textbf{outputs = [self.env.execute(action)}}}{outputs = [self.env.execute(action)}\\
+      \ind{4}\alt<3->{\textcolor{RedLine}{\textbf{for action in message.get("extra",}}}{for action in message.get("extra",}\\
+      \ind{6}\alt<3->{\textcolor{RedLine}{\textbf{\{\}).get("actions", [])]}}}{\{\}).get("actions", [])]}\\
+      \ind{2}return self.add\_messages(...)}
+    \end{column}
+    \begin{column}{0.31\textwidth}
+      \small
+      \uncover<2->{Each step makes one model call, then runs its actions.\\[0.25cm]}
+      \uncover<3->{Every proposed command runs.\\[0.25cm]
+      No state to pause, no grant check, no approval hold.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{mini-SWE-agent, src/minisweagent/agents/default.py, tag v2.1.0, lines 99 to 101 and 119 to 122 (MIT license; line breaks added, docstring and return shortened). Lecture 1's 2025 runs used v1.0.0.}
+  \note{[3 min] [CORE] This is real code from a public research agent, mini-SWE-agent 2.1.0, the version that produced 1,000 of the public repair runs on the previous slide. It is short on purpose: its authors use it to show how little an agent needs to score well on a benchmark. Step 1: read step() aloud. Step 2: one step is one model call followed by its actions. Step 3: execute\_actions runs every command the reply proposed, in a fresh shell, with no check between proposal and effect. The benchmark makes that safe: each run gets its own disposable container. LINK: this is the loop popularized by ReAct (Yao et al. 2023) and the six-phase turn of Lecture 1 with the decisions removed. ENGAGE: where in this code would an operator's pause land? (Expected: nowhere; there is no state outside the message list and the Python call stack.) WARN: the code is not wrong for its purpose. The lesson is what is missing once the same loop touches a production database: a place for control state, a check before each dispatch, and a hold for actions that need review. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{The harness decides what runs; the model only proposes}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=6.3cm,keepaspectratio]{harness_step}{2}
+  \mlsyscredit{After The Agent Harness, \S10.2, figure 1 (redrawn).}
+  \note{[2.5 min] [CORE] Step 1: the prototype loop of the last slide. The proposed call runs at once, results go back through the message list, and all state lives there. Three outside requests have nowhere to land: an operator's pause, a spend ceiling, a required approval. Step 2: the same loop inside a harness. Definition 10.1: the agent harness is the runtime component that owns the agent loop for one trajectory: it assembles each model call, interprets the reply, decides whether and when each proposed tool call is dispatched, and keeps the record through which outside components inspect, pause, bound, or stop continuation. Its four parts are the rest of the lecture: the trajectory record, guarded transitions, control and approval paths, and budgets reserved first. This is the chapter's principle of trajectory-level encapsulation: the runtime governs each model call as one step of a whole trajectory. ENGAGE: which of the four parts would have stopped the hook's deletion? (Expected: the admission check on the guarded transition, with a freeze flag in the record.) WARN: a harness may still be written as a loop or coroutine; what matters is that its decisions read and write a record outside the model.}
+\end{frame}
+
+\begin{frame}{Predict: a result arrives during the pause}
+  \mlsysactivity{Predict}{2 min}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=5.3cm,keepaspectratio]{turn_step}{4}\\[0.1cm]
+  \only<1-3|handout:0>{\small The test of r18 passes while the trajectory is paused. Does the result restart the model?}%
+  \only<4-|handout:1>{\small No. The result settles its charge; only a resume, after a fresh check, admits the next call.}
+  \mlsyscredit{The Agent Harness, \S10.2.2, table 1 (one turn of the repair agent on candidate r18), drawn as a timeline.}
+  \note{[2.5 min] [CORE] The running case, one turn under supervision. Step 1: from READY the harness confirms no pending operator request, free model capacity, and budget for the most this call could cost; it sets that amount aside and sends. Step 2: the reply proposes running the regression test on r18. The harness records the call's usage, checks the test against permissions and budget, sets aside its maximum cost, registers it, then sends it. Step 3: the operator asks to pause while the test runs. The harness stops admitting new work but keeps owning the running test and its cost, then steps through READY to PAUSED. ENGAGE: one minute in pairs: what changes? Step 4: the result is authenticated and recorded, and its charge settles, but the trajectory stays paused and the model's context is unchanged. Only the operator's resume, followed by a fresh check of state, permissions, evidence, and budget, returns it to READY. WARN: ``the model sees the pass and continues'' lets a tool event decide continuation. The wait kept the workspace and the running test, but no worker thread (supervised waiting). FLEX: [CORE]. Land the segment aloud: the decision to continue is a runtime decision, made from a record, at every step.}
+\end{frame}
+
+% =============================================================================
+% SECTION: RECORD
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Second segment: the record the harness decides from, and the rules for changing it.}
+\mlsysdivider{What does the harness decide from, and how may it change?}{The Agent Harness, \S10.3 and \S10.4}
+\section{Record}
+
+\begin{frame}{The trajectory record holds what a transcript cannot}
+  \begin{columns}[c]
+    \begin{column}{0.45\textwidth}
+      {\small\textbf{A real saved run} (mini-SWE-agent)}\\[0.1cm]
+      \codeblock{\{"info": \{\\
+      \ind{1}"model\_stats": \{\\
+      \ind{2}"instance\_cost": 3.2862315,\\
+      \ind{2}"api\_calls": 80\},\\
+      \ind{1}"exit\_status": "LimitsExceeded"\},\\
+      \ind{0}"messages": [ \dots 167 \dots ]\}}
+      {\footnotesize Two counters and a transcript. Nothing records running jobs, reservations, grants, or a pending pause.}
+    \end{column}
+    \begin{column}{0.52\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.3cm,keepaspectratio]{record_fields.pdf}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Left: SWE-bench Verified submission 20260217\_mini-v2.0.0\_claude-4-6-opus, django\_\_django-16263.traj.json (excerpt; cost shortened to 7 decimals). Right: after The Agent Harness, \S10.3, table 2.}
+  \note{[3 min] [CORE] Left: what a real run saves, from the public trajectory of one repair task (mini-SWE-agent with Claude Opus 4.6, Django issue 16263): a cost counter, a call counter, an exit status, and 167 messages. That is enough to grade the run, and it is all the loop had while it ran. Right: Definition 10.2. The trajectory record is the per-trajectory control state that only the harness writes: identity and task contract, lifecycle state and counters, references to the context and live plan, accounting, grants and workspace leases, current invocations and which results are still eligible, a held approval, and the outstanding obligations in the operation table. ENGAGE: an operator asks ``is a test of r18 still running, and how much may it still bill?'' Which row answers? (Expected: obligations and accounting; the transcript cannot.) WARN: three misreadings. The model never writes the record; it may read its remaining budget, but a reply cannot change the meter. The record stores references (hashes, URIs, job handles) and copies no context or workspace. And the record lives in host memory: making it survive a crash is Lecture 11's trajectory log. The live plan in the continuation row separates proposed steps, steps in flight, and verified evidence; it extends the revisable plan of Lecture 3 with work in flight. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{A lever frame lets a lever move only when its interlock allows}
+  \begin{columns}[c]
+    \begin{column}{0.60\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.5cm,keepaspectratio]{leverframe_oban.jpg}
+    \end{column}
+    \begin{column}{0.37\textwidth}
+      \small Each lever sets a signal or a switch.\\[0.2cm]
+      Bars under the floor lock any lever whose move would conflict with the current route.\\[0.2cm]
+      The signaller proposes; the frame decides.
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Lever frame in the interlocking Oban tower, Saskatchewan Railway Museum. SriMesh, CC BY-SA 3.0, Wikimedia Commons.}
+  \note{[1 min] [OPTIONAL] A real interlocking tower from a Canadian railway crossing, now in a museum. In a mechanical interlocking, each lever sets a signal or a switch, and locking bars under the frame make it physically impossible to pull a lever whose move conflicts with the route already set. The rule does not depend on the signaller remembering it. NARRATE: the next slide draws the same idea for an agent: a table of legal moves, and a guard on each move that the current record must satisfy. ENGAGE: what plays the role of the locking bars in a harness? (Expected: the guard predicates on each edge, evaluated against the record.) WARN: the analogy covers guards only; a railway frame has no budgets or late results. FLEX: [OPTIONAL]; cut if short.}
+\end{frame}
+
+\begin{frame}{The trajectory moves only along guarded edges}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=5.9cm,keepaspectratio]{states_step}{3}
+  \mlsyscredit{After The Agent Harness, \S10.4, table 3 and figure 2 (redrawn).}
+  \note{[3 min] [CORE] Step 1: the ordinary cycle. READY to CALLING\_MODEL when a call is admitted, CALLING\_MODEL to WAITING\_TOOL when a tool call is admitted, back to READY when the wait policy is met. Step 2: two detours. Pause is entered only from READY, and resume returns there; a reply with no admissible action returns to READY; a proposal that policy requires reviewed is held in AWAITING\_APPROVAL and goes to WAITING\_TOOL only when it is approved and the dispatch guards pass. Step 3: every exit, whether a completion request, a cancel, a kill, an exhausted budget, or a passed deadline, goes through FINALIZING, which stops admission, runs the completion check, and settles or hands off what is still owed. Terminal states are absorbing; a retry is a new trajectory. ENGAGE: why may pause not be entered straight from CALLING\_MODEL? (Expected: it would orphan the stream and its cost; the harness first withdraws the call's eligibility, then steps through READY.) WARN: a legal edge alone does not admit a transition. Each edge carries a guard, evaluated against the record at that instant: no pending control hold, valid credentials and approvals, resolved dependencies, deadline slack, capacity, and the budget reservation. Also: a reply status named COMPLETED ends one call and leaves the task open. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}[t]{Diagnose: two schedulers admit at version 41}
+  \mlsysactivity{Diagnose}{2 min}\vspace{-0.6cm}
+  \begin{columns}[T]
+    \begin{column}{0.73\textwidth}
+      \codeblock{def transition(rec, new\_state, decision, admit=None):\\
+      \ind{2}with rec.lock:\\
+            \ind{4}edge = (rec.state, new\_state)\\
+      \ind{4}if (edge not in LEGAL\\
+      \ind{8}or not GUARDS[edge](rec, decision)):\\
+      \ind{6}raise IllegalTransition(edge, decision.id)\\
+      \ind{4}\alt<3->{\textcolor{RedLine}{\textbf{if decision.seen\_version != rec.record\_version:}}}{if decision.seen\_version != rec.record\_version:}\\
+      \ind{6}\alt<3->{\textcolor{RedLine}{\textbf{raise StaleDecision(decision.id)}}}{raise StaleDecision(decision.id)}\\
+      \ind{4}if admit is not None: admit(rec)  \# reserve, register\\
+      \ind{4}rec.state = new\_state; rec.record\_version += 1}
+    \end{column}
+    \begin{column}{0.24\textwidth}
+      \centering\safeimg[width=0.85\textwidth,height=2.3cm,keepaspectratio]{hoare.jpg}\\[0.05cm]
+      {\footnotesize C.\,A.\,R. Hoare: monitors (1974)}\\[0.1cm]
+      \raggedright
+      \uncover<2->{\footnotesize Both read version 41. Which line stops the loser? What has it reserved?}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Code: The Agent Harness, \S10.4.1, listing 1 (simplified: guard lookup folded into the test, lines joined, history append omitted). Photo: Tony Hoare at FLoC 2006, Dennis Hamilton, CC BY 2.0, Wikimedia Commons.}
+  \note{[3.5 min] [CORE] The chapter's supervisory procedure, a short form of listing 1. Step 1: read it top to bottom. The record lock makes the record a monitor in Hoare's sense (1974): shared data reached only through short procedures that run one at a time. The edge must be legal and have a registered guard, and the guard must pass. Then admit() reserves the budget, registers the call ID, and marks the expected observation eligible, all before anything is sent: the register-before-send rule, so even an instant reply finds its record. The send happens after the lock is released, so a slow model never blocks a pause. Step 2: ENGAGE, two minutes in pairs: two scheduler workers both read record\_version 41 and both try to admit a model call. Step 3: the winner commits and moves the version to 42; the loser's seen\_version check raises StaleDecision. Because reservation and registration happen after the check, inside the lock, the loser has reserved nothing and sent nothing. (Optimistic concurrency control, Kung and Robinson 1981.) WARN: students often answer ``the lock stops it''; the lock only orders them, the version check rejects the stale decision. A pause committed first blocks the call; one committed after finds owned work it cannot erase. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{A late result settles its charge but cannot enter the turn}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=6.2cm,keepaspectratio]{late_step}{3}
+  \mlsyscredit{After The Agent Harness, \S10.3 (settlement rule) and \S10.4.2, listing 2.}
+  \note{[3 min] [CORE] Step 1: the test of r18 is sent under control epoch 7. The wait deadline passes: the harness records the outcome as unknown, since the test may still have run, and advances the epoch to 8 because this turn has withdrawn its claim on the result. A minute later the test reports that r18 passed. Step 2: every authentic result goes to the operation table: evidence kept with its exact scope, reserved charge turned into actual usage. Step 3: the result does not enter the current turn. It was registered under epoch 7, the turn is at 8, so it is not staged; splicing it in would be observation crossing. This is the settlement rule, the trajectory form of Lecture 7's settlement before retry: withdrawing a result's eligibility never clears its obligation, and only authenticated evidence releases a reservation. It also guards the exit: no terminal state until every obligation is settled or transferred. ENGAGE: the timeout fired, so may the harness release the test's \$0.50 reservation? (Expected: no; the job may still bill.) WARN: a timeout ends the harness's wait, never the remote operation. FLEX: [CORE]. Land the segment aloud: one record, written only by the harness, changed only along guarded edges, and every effect keeps an owner until evidence settles it.}
+\end{frame}
+
+% =============================================================================
+% SECTION: CONTROL
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Third segment: an operator's pause, a cancel, a kill, and an approval that may take hours.}
+\mlsysdivider{How fast can an operator stop a run, and how is a sensitive action held?}{The Agent Harness, \S10.5 to \S10.7}
+\section{Control}
+
+\begin{frame}{A pause waited 72 s for the reply and 21 ms with a cancel}
+  \centering
+  \mlsyssteps[width=0.92\textwidth,height=5.1cm,keepaspectratio]{pause_step}{3}\\[0.05cm]
+  {\footnotesize Measured: a 7B model, 4-bit, on one laptop; pause sent 0.1 s after the call; 3 runs each.}
+  \mlsyscredit{Measured 2026-10-19 (images/data/pause\_latency.py): qwen2.5 7B Q4\_K\_M on Ollama, Apple M5 Max. Reference: The Agent Harness, \S10.5.1, $K_{\max} \times t_{\text{dec}}$ at 21.075 ms per token.}
+  \note{[2.5 min] [CORE] A turn boundary is where control takes effect: just before each model call and each tool call. Checking for a pause only when a reply ends lets the call in flight postpone it. Step 1: measured for this lecture. A local 7-billion-parameter model streamed replies with output allowances from 256 to 4,096 tokens; the pause arrived 0.1 s after each call. Waiting for the reply to end held the pause for 3.4 s at 256 tokens and 71.7 s on average at 4,096 (70.0 to 72.6 s over three runs). Step 2: the chapter's estimate, $K_{\max} \times t_{\text{dec}}$: at its reference 21.075 ms per output token, a 4,096-token allowance postpones the boundary 86.3 s (derived). Our laptop decoded about 15 ms per token; same shape. Step 3: streaming cancellation. The harness closed the stream when the pause arrived; the pause held within 21 ms at every allowance. A short call sent right after each cancel started within 0.12 s, so the server had stopped generating. LINK: Lecture 2's output-bound call latency is the reason: decode time grows with output length. ENGAGE: halve the allowance; the wait? (Expected: halves; cancellation removes the dependence.) WARN: a cancel stops local waiting at once, but the call's reservation stays until the server reports what it generated. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Pause, cancel, and kill change admission in different ways}
+  \begin{columns}[c]
+    \begin{column}{0.58\textwidth}
+      \footnotesize
+      \begin{tabular}{@{}P{1.45cm}P{3.0cm}P{3.0cm}@{}}\toprule
+        \textbf{Request} & \textbf{Effect on work} & \textbf{Outcome}\\\midrule
+        Pause & hold new admission; keep owners & READY to PAUSED \\[0.05cm]
+        Resume & recheck evidence and limits & PAUSED to READY \\[0.05cm]
+        Cancel & request cancellation & FINALIZING \\[0.05cm]
+        Kill & enforce on local work & FINALIZING, outcomes split \\[0.05cm]
+        Budget stop & deny ordinary admission & FINALIZING, funded \\\bottomrule
+      \end{tabular}
+    \end{column}
+    \begin{column}{0.39\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.6cm,keepaspectratio]{replit_stop.jpg}\\[0.05cm]
+      {\footnotesize The hook's agent: a stop after dispatch came too late.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Table after The Agent Harness, \S10.5.2, table 6. Screenshot: Jason Lemkin (@jasonlk), X posts of 18 July 2025 (cropped).}
+  \note{[2 min] [OPTIONAL] Right: another part of the same reply from the hook. The user typed ``No'', ``Stop'', ``You didn't even ask'', and the reply says it was already too late. A stop request reaches the harness only at a turn boundary, and a command already dispatched has its effect. That is why the freeze must be checked before dispatch. Left: what each control does. A pause holds new admission and keeps an owner for every running job; it moves READY to PAUSED with no runnable gap. A resume rechecks permissions, evidence, and limits; what the pause withdrew (an expired token, a withdrawn approval, a canceled partial reply) is not restored. A cancel requests cancellation and accounts for owned work in FINALIZING. A kill enforces against local work it supervises (processes, tokens, workers), using the sandbox reset contract from Lecture 8, and records confirmed and unresolved outcomes separately. A budget or deadline stop denies ordinary admission but keeps the funded finalization work. ENGAGE: which of these refunds a running job's cost? (Expected: none; only settlement evidence does.) WARN: interrupting with new instructions does more than append to the prompt; the harness records it and decides which pending proposals it supersedes. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Vote: which reply may the harness dispatch?}
+  \mlsysactivity{Concept question}{2.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.62\textwidth}
+      \normalsize
+      \choice{A}{valid JSON from a canceled stream}\\[0.25cm]
+      \choice{B}{a full reply after a pause withdrew it}\\[0.25cm]
+      \answerat{2}{C}{a COMPLETED reply, validated and admitted}\\[0.25cm]
+      \choice{D}{a late reply to a timed-out call}
+    \end{column}
+    \begin{column}{0.35\textwidth}
+      \uncover<2->{\begin{mlsyscard}{mlsysaccent}\small Only C. A partial or late payload is kept for diagnosis and never becomes a call.\end{mlsyscard}}
+    \end{column}
+  \end{columns}
+  \note{[2.5 min] [CORE] Fallacy from the chapter: a parseable reply is dispatchable after cancellation. ENGAGE: vote, discuss with a neighbor for one minute, vote again. Step 2: only C. A: the buffer of a canceled stream can hold a syntactically valid tool call; syntax is a serialization property and confers no authority. B: once eligibility is withdrawn (by a pause or a timeout), an apparently complete reply is diagnostic evidence; it still settles the call's usage. D: a late reply to a timed-out call is the same case. Any later action must come from a fresh turn that passes status routing and admission. Tie it to the state machine: only a reply with status COMPLETED proceeds to validation; TRUNCATED, REFUSED, REJECTED, and CANCELED return to READY with a bounded observation. WARN: a tolerant JSON parser that closes dangling brackets is exactly how A happens in practice. The related fallacy: ``asynchronous coroutines suffice''. A coroutine yields its thread but has no record a pause can update and no guarded admission; it leaves the 72 s wait of the last measurement in place. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Escrow holds the exact proposal until dispatch rechecks it}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=6.3cm,keepaspectratio]{escrow_step}{3}
+  \mlsyscredit{After The Agent Harness, \S10.7, figure 3 (redrawn).}
+  \note{[3 min] [CORE] The repair agent proposes submitting r18 for internal review, and policy requires an engineer's sign-off. Definition 10.3: approval escrow is the harness's retention of an undispatched proposal pending required approval and dispatch admission. Step 1: what is held. The exact proposal, its destination, the evidence it cites (the named checks, with their limited scope), its preconditions, its expiry, all bound by one digest. Lecture 9's action-bound approval defined that digest; change any argument or artifact and the approval no longer matches. Step 2: the trajectory enters AWAITING\_APPROVAL without sending anything; it releases its worker but keeps its record and, by policy, its workspace. The model takes no part in the decision. Step 3: an approval is one precondition and orders nothing. At the dispatch boundary the harness recomputes the digest, checks expiry, budget, rate limits, and grants. Approved and current: register, reserve, send. Approved with no capacity: stays held. Denied, expired, or stale: a refusal observation to READY. Silence expires a request; the audit record says so. ENGAGE: a reviewer approves after the operator paused the run. What happens? (Expected: the pause withdrew the request, so the late approval is audit evidence only.) WARN: a duplicate or replayed webhook must not dispatch twice: admission marks the held request consumed in the same atomic update. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Estimate: how much memory waits in escrow?}
+  \mlsysactivity{Estimate}{3 min}
+  \begin{columns}[T]
+    \begin{column}{0.40\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \small\textbf{Given (illustrative)}\\[0.05cm]
+        Repair: 6 review requests per hour; decisions take 2 h on average; 512 MiB workspace lease each\\[0.1cm]
+        Remediation: 2 per hour; 15 min decisions; 6 min to diagnose, 9 to apply
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.56\textwidth}
+      \small
+      \wstep{2}{Little's law: held $= \lambda W = 6/\text{h} \times 2\,\text{h} = \mathbf{12}$}
+      \wstep{2}{$12 \times 512$ MiB $=$ \textbf{6 GiB} of workspaces, no user waiting}
+      \wstep{3}{Remediation: $2 \times 0.25 = 0.5$ held; approval is 15 of 30 min}
+      \uncover<3->{\textbf{\textcolor{mlsysaccent}{Halving review time halves the repair memory and cuts remediation's degraded time by a quarter.}}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{The Agent Harness, Lighthouse 10.1 (scenario inputs). Little's law: Lecture 5. Derived values: images/calcs.py.}
+  \note{[3 min] [CORE] ENGAGE: two minutes, in pairs, before any reveal. LINK: Lecture 5's Little's law, $L = \lambda W$: mean items held equal arrival rate times mean time held. Step 2: the repair agent's review requests arrive at 6 per hour and a decision takes 2 hours on average, so 12 trajectories wait in AWAITING\_APPROVAL at once. Each keeps its 512 MiB workspace lease, so escrow holds 6 GiB of sandbox memory while no user is waiting (derived). Step 3: the remediation agent from Lecture 1 binds differently. At 2 requests per hour and 15-minute decisions, half a trajectory is held on average, so memory is negligible; the cost is time. Time to mitigate is 6 + 15 + 9 = 30 minutes, and approval is 50 percent of it, all with the service degraded. Halving the decision time halves the repair agent's held memory to 3 GiB and removes 7.5 of remediation's 30 minutes (derived). WARN: Little's law gives the mean, and peaks run higher. A burst of reviews after an incident, or a reviewer who clears the queue once a day, holds far more for as long as the backlog lasts; size the pool from the arrival pattern. A waiting trajectory still pays Lecture 5's residency tax if its KV cache stays resident. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Operators watch poorly when almost nothing goes wrong}
+  \begin{columns}[c]
+    \begin{column}{0.46\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.3cm,keepaspectratio]{tmi2_control_room.png}
+    \end{column}
+    \begin{column}{0.51\textwidth}
+      \small Bainbridge (1983): automating most of a process leaves people the job of monitoring it, and attention fades on a stream where almost nothing fails.\\[0.3cm]
+      A gate that approves every request adds no closure.\\[0.2cm]
+      Reserve review for high-blast-radius actions.
+    \end{column}
+  \end{columns}
+  \mlsyscredit{TMI-2 control room, 1979, several days after the start of the accident. Report of the President's Commission on the Accident at Three Mile Island, p. 108; public domain, Wikimedia Commons.}
+  \note{[1 min] [OPTIONAL] A real supervisory control room: Three Mile Island Unit 2, photographed several days into the 1979 accident, the setting that shaped human-factors research on supervising automation. Bainbridge's ``Ironies of Automation'' (1983) observed that automating most of a process leaves the human operator the residual job of monitoring it, and people sustain attention poorly on a stream in which almost nothing goes wrong. An approval queue in which nearly every request is benign is that stream, and it trains the reviewer to approve. ENGAGE: a reviewer approves 200 routine requests a day. What does one more approval tell you? (Expected: almost nothing; the gate's precision sets what closure it supplies, and its presence alone supplies none.) WARN: do not claim the TMI accident was approval fatigue; the photo shows the setting of supervisory control and claims no cause. Grants, sandboxes, and automated checks should handle routine actions; reserve human review for policy-mandated or high-blast-radius ones. Land the segment aloud: control takes effect at turn boundaries, streaming cancellation removes the wait, and an approval is a held proposal that dispatch rechecks. FLEX: [OPTIONAL].}
+\end{frame}
+
+% =============================================================================
+% SECTION: BUDGETS
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Last segment: sharing model service across trajectories, and bounding what one trajectory may spend.}
+\mlsysdivider{How much may one trajectory consume, and who decides?}{The Agent Harness, \S10.8 and \S10.9}
+\section{Budgets}
+
+\begin{frame}{Weights split the token charge; call size splits the calls}
+  \centering
+  \mlsyssteps[width=0.88\textwidth,height=2.8cm,keepaspectratio]{drr_step}{2}\\[0.3cm]
+  \small Interactive: weight 3, 2,500-token calls.\quad Maintenance: weight 1, 42,000-token calls.\\[0.1cm]
+  \uncover<2->{9.6 interactive calls per round; one maintenance call every 5.25 rounds.}
+  \mlsyscredit{The Agent Harness, NM 10.1 (illustrative); weighted deficit round-robin simulated over 10,000 rounds in images/calcs.py.}
+  \note{[2 min] [OPTIONAL] When r18's test finishes, the repair trajectory returns to READY and competes for model calls with an interactive session and maintenance jobs. The scheduling unit is a READY trajectory's next model call. Each call is charged its full input plus its maximum output allowance, because a cache hit is not guaranteed before dispatch. Weighted deficit round-robin (Shreedhar and Varghese 1995) gives each class a quantum per round by weight and carries unspent credit forward. Step 1: weights 3 to 1 with an 8,000-token quantum per unit weight: interactive receives 75 percent of the charge. Step 2: interactive calls cost 2,500, so 24,000 / 2,500 = 9.6 per round; a maintenance call costs 42,000, so it needs 5.25 rounds of credit; interactive sends about 50 times as many calls, 98 percent of them (derived; the simulation agrees). ENGAGE: how would you help maintenance without touching interactive service? (Expected: compact its prompts; at 20,000 input tokens it sends a call every 2.75 rounds.) WARN: weights divide capacity, they do not create it, and a credit cap below 42,000 stalls maintenance forever. Provider quotas (an HTTP 429 when full) and sandbox capacity are separate gates, and a call the scheduler selects still passes the atomic admission check. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{A runaway loop passes every check made on a single call}
+  \centering
+  \mlsyssteps[width=0.92\textwidth,height=5.2cm,keepaspectratio]{runaway_step}{3}\\[0.05cm]
+  \uncover<2->{\small $\mathbf{B} = \langle$ turns, tokens, wall time, dollars $\rangle$, reported by its largest used fraction}
+  \mlsyscredit{After The Agent Harness, \S10.9.1, figure 4 and table 9 (redrawn). Percentages: NM 10.3 (illustrative).}
+  \note{[3 min] [CORE] Step 1: a runaway retry loop. A patch fails its test; the model proposes a variant; it fails; each failure appends an error trace. Every call is well formed and within per-call limits, and after dozens of turns the run has spent its money without progress. Errors dilute the instructions (Lecture 4's usable working context). Step 2: the trajectory budget vector, kept outside the context: turns, tokens, wall time, and dollars, each with a defined meter. Retries and failed calls are charged; wall time runs during waits. The warning signal is the largest used fraction, here turns at 75 percent in the chapter's illustrative run. When the next call does not fit in some dimension, admission refuses it and the run finalizes. Step 3: before the hard stop, staged escalation. Steer: tell the model the remaining allowance and ask for a smaller step or a report. Restrict: narrow grants or disable delegation. Finalize: use the protected reserve for checks, report, and cleanup. ENGAGE: why not let the model watch its own budget? (Expected: it may read it, but cooperation decays like the first slide's rule.) WARN: detecting that a loop makes no progress is Lecture 12's semantic watchdog; a budget stops it without understanding it. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{A real harness checked its \$3.00 limit and spent \$3.29}
+  \begin{columns}[c]
+    \begin{column}{0.56\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{overshoot.pdf}
+    \end{column}
+    \begin{column}{0.41\textwidth}
+      \codeblock{if 0 < self.config.step\_limit\\
+      \ind{2}<= self.n\_calls or\\
+      \ind{2}\textcolor{RedLine}{\textbf{0 < self.config.cost\_limit}}\\
+      \ind{2}\textcolor{RedLine}{\textbf{<= self.cost:}}\\
+      \ind{2}raise LimitsExceeded(...)\\
+      self.n\_calls += 1\\
+      message = self.model.query(...)}
+      {\footnotesize 8 of 500 runs ended above \$3.00.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{mini-SWE-agent v2.1.0, the version this run's trajectory records, default.py lines 105 to 114 (line breaks added). Run: SWE-bench Verified, 20260217\_mini-v2.0.0\_claude-4-6-opus, django\_\_django-16263 (cost\_limit 3.0).}
+  \note{[2.5 min] [CORE] The running case as a real system: a public repair agent on a real Django issue. Left: the run's settled cost after each of its 80 model calls, from its saved trajectory. Right: the agent's limit check, real code. It runs before each call and compares the cost already settled with the limit; the call's own cost is added after it returns. Before call 80 the run had spent \$2.995, under \$3.00, so the call was admitted; it cost \$0.29 and the run stopped at \$3.29, 9.5 percent over its limit (derived). Across the 500 runs of this configuration, 8 ended above \$3.00, by \$0.06 on average and \$0.29 at most (derived from MLSysIM). ENGAGE: what would the check need to know before call 80 to refuse it? (Expected: the most that call could cost: its input plus its full output allowance, at full price.) WARN: this code is fit for its purpose, a benchmark with a soft cap where 29 cents does not matter. The lesson is general: a check of settled spend reports a budget; it does not enforce one. The next slide makes the test exact. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Estimate: may the harness admit this call?}
+  \mlsysactivity{Estimate}{3 min}
+  \begin{columns}[c]
+    \begin{column}{0.36\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \small\textbf{Given (illustrative)}\\[0.05cm]
+        Allowance \$3.50; settled \$2.58\\
+        Test job reserved \$0.50\\
+        Finalization reserve \$0.30\\
+        Next call: 50,000 in, 4,096 out\\
+        \$3 and \$15 per million tokens
+      \end{mlsyscard}
+      \small\uncover<2->{Liability $= 0.15 + 0.06 = \mathbf{\$0.21}$}
+    \end{column}
+    \begin{column}{0.61\textwidth}
+      \centering
+      \mlsyssteps[width=\textwidth,height=4.4cm,keepaspectratio]{admit_step}{2}\\[0.1cm]
+      \uncover<2->{\footnotesize actual $+$ reserved $+$ liability $+$ final reserve $\le$ allowance}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{The Agent Harness, NM 10.2 and equations 1 and 2. Derived values: images/calcs.py.}
+  \note{[3.5 min] [CORE] ENGAGE: two minutes, in pairs: admit or refuse? Step 1: the spend check of the last slide sees \$3.50 minus \$2.58 = \$0.92 of headroom, and the call fits. Step 2: equation 2 bounds the call's liability: every input token at the undiscounted input price, cached or not, plus the full output allowance at the output price: 50,000 at \$3 per million is \$0.15, and 4,096 at \$15 per million is \$0.06, \$0.21 in all. Definition 10.4, bounded-liability admission: admit only if actual consumption plus outstanding reservations plus this liability plus the protected finalization reserve fits the allowance, in every dimension. The test's \$0.50 is a budget reservation, released only by settlement evidence. Headroom is \$0.12, so the call is refused; admitted, it would leave the final checks \$0.09 short (all derived). WARN: input is 71 percent of the liability, so a smaller output cap barely helps; the call fits only with about 19,500 input tokens (compaction) or after the test settles. LINK: Lecture 3 reserved within one search; the harness reserves for every operation. Pitfall: releasing it on a timeout frees 14 percent of the allowance while the job may still bill. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{The leading meter changes when the prefix cache misses}
+  \centering
+  \mlsyssteps[width=0.88\textwidth,height=5.0cm,keepaspectratio]{meter_step}{2}\\[0.05cm]
+  \uncover<2->{\small 30 turns: \$0.50 with reuse, \$2.77 when every token is billed uncached.}
+  \mlsyscredit{The Agent Harness, NM 10.3 (illustrative): allowances 40 turns, 2 million tokens, 900 s, \$3.50. Derived values: images/calcs.py.}
+  \note{[2 min] [OPTIONAL] LINK: Lecture 2's 30-turn trajectory: an 8,000-token first prompt, 1,500 tokens appended per turn, 200 output tokens per turn, 892,500 input tokens over the run. Metered against the chapter's illustrative budget at 460 s on the clock. Step 1: with prefix reuse, each turn's earlier prefix (841,000 tokens) is billed at the cached rate: \$0.50 in all. Turns lead at 75 percent; tokens 44.9, time 51.1, dollars 14.2 percent. Step 2: the same tokens billed uncached cost \$2.77, and dollars lead at 79.1 percent (all derived). The token meter counts cached input in full, so it cannot see the change. ENGAGE: a ceiling sized from the cached bill: which runs hit it first? (Expected: exactly the runs that miss the cache, for example after a long approval wait evicts it.) WARN: reserve at the undiscounted rate and size the dollar allowance from the no-reuse cost, so a cache miss does not become a budget stop. Lecture 19 prices what reuse is worth across a workload. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{A p90 ceiling halts 15 to 31\% of failed runs}
+  \begin{columns}[c]
+    \begin{column}{0.47\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.0cm,keepaspectratio]{ceiling_cdf.pdf}
+    \end{column}
+    \begin{column}{0.50\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.0cm,keepaspectratio]{ceiling_bars.pdf}
+    \end{column}
+  \end{columns}
+  \vspace{0.05cm}
+  {\centering\footnotesize p90 ceiling: the call count that 90\% of accepted runs stayed within.\par}
+  \mlsyscredit{Measured: five public SWE-bench Verified configurations, 2,100 runs (MLSysIM; The Agent Harness, \S10.9.5, figure 5). Post hoc truncation of unconstrained runs.}
+  \note{[2.5 min] [OPTIONAL] Choosing the ceiling. Left: one configuration (mini-SWE-agent with Claude Opus 4.6, 500 tasks): the cumulative share of runs by model calls, accepted solid, failed dashed. Failed runs take more calls: medians 31 against 21. A ceiling at the accepted runs' 90th percentile, 46 calls, would halt 10 percent of eventual successes and 30 percent of eventual failures. Right: all five configurations. The ceiling halts at most 10 percent of successes but 15 to 31 percent of failures, so the tail of the call distribution is mostly spend on runs that will not be accepted. The ceiling itself ranges from 46 to 101 calls, and two agents on the same model need 82 and 101: a ceiling cannot be copied from another configuration. ENGAGE: what number decides between two ceilings? (Expected: Lecture 1's cost per accepted task, counting failed and budget-halted runs; for this configuration the measured runs cost \$0.73 per accepted task.) WARN: these are post hoc truncations; a ceiling the agent can see changes how it spends its calls. The estimate locates a candidate; a policy evaluation with matched budgets, Lecture 13, confirms it. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Raising the step ceiling helped two models and not three}
+  \centering
+  \safeimg[width=0.88\textwidth,height=5.3cm,keepaspectratio]{osworld.pdf}
+  \mlsyscredit{OSWorld, the same model at 15, 50, and 100 enforced steps (Xie et al., NeurIPS 2024; values via Epoch AI Benchmarking Hub; MLSysIM). The Agent Harness, \S10.9.5, figure 6.}
+  \note{[1 min] [OPTIONAL] The confirmation the last slide asked for: the same model run under enforced step ceilings, on a computer-use benchmark. From 50 to 100 steps, two models keep gaining (the top line to 63 percent, o3 to 23) and three stay flat or fall slightly. The strongest model gains 20 points from 15 to 100 steps. ENGAGE: you run the flat model at 100 steps; what do the extra 50 steps buy? (Expected: nothing in success, and the full cost of every run that uses them.) WARN: the knee, where one exists, belongs to the model and harness, and another pair moves it. FLEX: [OPTIONAL]. Land the segment aloud: a budget is an admission decision, made by reserving each operation's worst case before it runs, and its ceiling is chosen by cost per accepted task.}
+\end{frame}
+
+% =============================================================================
+% CLOSE
+% =============================================================================
+\begin{frame}{One dispatch rule turns the deletion into a refusal}
+  \mlsysactivity{Retrieval}{1.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.30\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.6cm,keepaspectratio]{replit_admission.jpg}
+    \end{column}
+    \begin{column}{0.67\textwidth}
+      \only<1|handout:0>{\normalsize Close your notes. Name the two checks the harness runs, and apply each to the hook.}%
+      \only<2->{\footnotesize
+      \begin{tabular}{@{}P{3.1cm}P{5.7cm}@{}}\toprule
+        \textbf{In the hook} & \textbf{Harness answer} \\\midrule
+        Freeze only in the prompt & freeze flag in the record; admission refuses the mutation \\[0.05cm]
+        ``Stop'' after the command & control at turn boundaries, before dispatch \\[0.05cm]
+        ``Rollback is impossible'' & read the operation table \\[0.05cm]
+        A rule kept 99\% per turn & a guard holds on every turn \\\bottomrule
+      \end{tabular}\\[0.15cm]}
+      \uncover<3->{\footnotesize\textbf{\textcolor{mlsysaccent}{Before work: does every control, grant, and budget still admit it? After: has evidence settled it, and who owns it until then?}}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Jason Lemkin (@jasonlk), X posts of 18 July 2025. The Agent Harness, War Story 10.1 and \S10.11.}
+  \note{[3.5 min] [CORE] Back to the hook. Step 1: retrieval, 60 seconds. Step 2: each failure in the incident has a harness answer. The freeze lived only in the prompt; as a flag in the trajectory record, the admission check at the dispatch boundary refuses any mutation of the production target, and the model receives a refusal observation instead of causing an effect. The user's ``Stop'' arrived after the command ran; control takes effect at turn boundaries, before dispatch. The agent's claim that rollback was impossible was false; the harness reads outcomes from its operation table and the systems it supervises, never from generated text. And a rule kept on 99 percent of turns fails on some turn of a long run, while a guard holds on every turn. Step 3: the chapter's summary in two checks. Before any new work: do the control signals, grants, capacity, and reserved budget still admit it? After any operation ends or stops: has authenticated evidence settled it, and if not, who owns it? LINK: this is Lecture 1's invariant closure applied to the horizon: the bound sits below the model, and it covers the whole trajectory. ENGAGE: which of the four rows would a better model fix? (Expected: none reliably.) FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Takeaways}
+  \thumbline{thumb_compound.pdf}{A rule kept on 99\% of turns fails in 26\% of 30-turn runs; continuation belongs to the runtime.}\\[0.12cm]
+  \thumbline{thumb_states.pdf}{One harness-written record changes only along guarded edges, registered before anything is sent.}\\[0.12cm]
+  \thumbline{thumb_late.pdf}{A timeout or pause withdraws eligibility; only evidence settles an effect and its charge.}\\[0.12cm]
+  \thumbline{thumb_pause.pdf}{Streaming cancellation holds a pause in milliseconds; escrow holds an action until dispatch rechecks it.}\\[0.12cm]
+  \thumbline{thumb_admit.pdf}{Bounded-liability admission reserves the worst case first; choose the ceiling by cost per accepted task.}
+  \note{[1.5 min] [CORE] One line per idea; the first comes from segment 1, the second and third from segment 2, the fourth from segment 3, and the last from segment 4. Ask students which slide taught each line. If short on time, read the first and the last.}
+\end{frame}
+
+\begin{frame}{Open questions}
+  \normalsize
+  \begin{itemize}\setlength{\itemsep}{0.3cm}
+    \item A budget stops a loop without knowing whether it makes progress. What evidence would let a harness stop a stalled run earlier without halting runs that are about to succeed?
+    \item Approval adds closure only when reviewers inspect. How should a team decide which actions deserve a human, and how would it measure whether review still works?
+    \item Many paid tools have no enforceable cost ceiling. Should a harness refuse them, wrap them, or accept a declared overshoot?
+  \end{itemize}
+  \note{[1 min] [OPTIONAL] No single answer. Pick one for discussion or assign one as a short written response. The first leads into Lecture 12's semantic watchdog. The second follows from Bainbridge and from approval escrow's cost in held resources. The third is the chapter's point about open-ended paid tools in \S10.9.2.}
+\end{frame}
+
+\begin{frame}{Read and explore}
+  \small
+  \begin{itemize}\setlength{\itemsep}{0.02cm}
+    \item \textbf{Read:} The Agent Harness, \S10.2 to \S10.9; Checkpoints 10.1 to 10.3; Napkin Math 10.1 to 10.3 by hand; exercises 1 and 2.
+    \item Harel, ``Statecharts,'' Science of Computer Programming, 1987: guards on transitions.
+    \item Hoare, ``Monitors,'' Communications of the ACM, 1974: serialized access to shared state.
+    \item O'Neil, ``The Escrow Transactional Method,'' ACM TODS, 1986: reservations against an invariant.
+    \item Shreedhar and Varghese, ``Deficit Round Robin,'' SIGCOMM 1995: fair sharing with carried credit.
+    \item Bainbridge, ``Ironies of Automation,'' Automatica, 1983: why human monitoring degrades.
+  \end{itemize}
+  \note{[1 min] [CORE] The chapter first, with its checkpoints and exercises 1 (where a pause lands) and 2 (admission after settlement). Harel puts the guard on the edge; Hoare's monitor is the record lock; O'Neil's escrow method is the ancestor of bounded-liability admission (his escrow is a reserved amount, which this lecture calls a reservation); Shreedhar and Varghese give the scheduler; Bainbridge explains approval fatigue. To explore the real system: read mini-SWE-agent's default.py (about 150 lines) and add a record, a pause flag, and a reservation-based cost check to it. FLEX: add the lab your course uses for agent runtimes.}
+\end{frame}
+
+\begin{frame}[c]
+  \begin{columns}[c]
+    \begin{column}{0.34\textwidth}
+      \centering\mlsyskitfig[width=\textwidth,height=4.2cm,keepaspectratio]{stack_runtime}
+    \end{column}
+    \begin{column}{0.62\textwidth}
+      {\small\textcolor{lightgray}{NEXT LECTURE \textbar{} DURABLE EXECUTION}}\\[0.5cm]
+      {\LARGE\bfseries The host crashes after the test is sent. What does the runtime know when it restarts?}
+    \end{column}
+  \end{columns}
+  \note{[0.5 min] [CORE] Today's record lives in host memory. If the host fails after reserving and dispatching the test of r18 but before recording its response, the record, its reservation, the held approval, and the evidence are gone. Lecture 11 writes the intent to a durable log before dispatch and rebuilds control state from it, without asking the model again or repeating an effect that already happened.}
+\end{frame}
+
+\end{document}

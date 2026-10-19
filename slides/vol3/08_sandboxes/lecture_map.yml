@@ -1,0 +1,239 @@
+chapter: 08_sandboxes
+lecture: "08"
+title: "Agent Sandboxes"
+subtitle: "Limiting what agent code can reach"
+layer: tools
+locator: a
+minutes: 75
+notes_minutes: 71.5
+core_minutes: 62
+target_ideas: 30
+thesis: "What admitted code can reach is set by the environment it runs in, so containment is enforced beneath the process and priced in setup time, memory, and verified reset."
+
+hook:
+  minutes: "0-6"
+  setup: "Real system first. War Story 8.1 (§8.2): Google released Gemini CLI on 25 June 2025; on 27 June Tracebit showed a README with the GPL text hiding a prompt injection that ran an approved grep chained to env | curl, whitespace pushing the payload off-screen. Shown with Tracebit's own screenshots: the command Gemini ran, and the confirmation prompt the user saw."
+  question_to_class: "Every command was schema-valid and approved. Which layer should have stopped the exfiltration: a better model, the approval prompt, or the environment the command ran in?"
+  payoff: "The command inherited the full authority of the developer's shell. A sandbox run below the process would have blocked the read and the outbound socket regardless of what the model proposed. Fixed in v0.1.14, 25 July 2025."
+  sources:
+    - "Cox (Tracebit), Code Execution Through Deception: Gemini AI CLI Hijack, 28 July 2025 (screenshots retrieved 2026-10-19)"
+    - "Agent Sandboxes, War Story 8.1"
+
+driving_question: "Why must the limit on what an agent's code can reach be enforced below the model?"
+thread_tag: "H·S·A thread: closes the authority exposure"   # golden-thread line on the goals slide (sweep D4, 2026-10-19)
+
+running_example: "The connection-pool repair agent (Lighthouse 1.1), shown through the chapter's adversarial README variant (§8.1): a vendored README hides instructions to upload ~/.aws/credentials, and the agent proposes a schema-valid run_shell that reads them."
+
+recall: "Lecture 7 checked a call's arguments: structure, authority, state. A run_shell call with valid arguments can still read any file and open any socket its process can reach. Retrieval, 1.5 minutes."
+
+concept_questions:
+  - q: "What is the blast radius of an admitted command?"
+    picture: "The README attack: a schema-valid run_shell reads credentials"
+    numbers: "Cybench: best unguided exploit solve rate 17.5 percent (2024) to 93 percent (2026), 40 CTF tasks"
+    example: "~/.aws/credentials read by an injected command"
+    read: "§8.1, §8.2"
+  - q: "Why is pruning an interpreter's globals not a boundary?"
+    picture: "total.__globals__ and the subclass walk reach the supervisor's state"
+    numbers: "Our run: 251 classes reachable from an empty tuple, API_KEY recovered, no import"
+    example: "eval with an empty __builtins__"
+    read: "§8.3"
+  - q: "What does a capability grant admit?"
+    picture: "The five-clause admit check (equation 1)"
+    numbers: "authentic, op in rights, target in objects, condition, time < expiry"
+    example: "read on repo/; no write on ~/.aws"
+    read: "§8.4.1"
+  - q: "How does delegation stay safe?"
+    picture: "Edit grant and two children: test rejected, scan valid"
+    numbers: "child ⊑ parent on every axis; chained-caveat token cannot widen"
+    example: "test grant asks for execute the parent never held"
+    read: "§8.4.2"
+  - q: "When does revoked authority actually stop working?"
+    picture: "revoke_step1-3: after expiry a new open is refused, a write on an already-open handle still succeeds, and closing the handle and stopping the worker confirms revocation"
+    numbers: "edit grant expires at 300 s; handle opened at 250 s (chapter scenario)"
+    example: "the repair worker's writable descriptor to src/pool.py outlives the edit grant"
+    read: "§8.4.3"
+  - q: "Where does a credential live?"
+    picture: "A host-side broker holds the token; the guest never sees it"
+    numbers: "fetch permitted, push and other repos refused"
+    example: "git fetch through a source-service adapter"
+    read: "§8.4.4"
+  - q: "Where does a system call land in each envelope?"
+    picture: "Four envelopes: container, user-space kernel, microVM, bytecode"
+    numbers: "syscall tax per 1,000,000 calls: 0.15 s container, 0.10 s microVM, 3.6 s user-space (36x)"
+    example: "gVisor measured: gofer path 45.5 us vs 0.22 us native"
+    read: "§8.5"
+  - q: "Pay envelope setup once or per call?"
+    picture: "Setup share falls as useful work per call grows"
+    numbers: "15 ms setup, 3 ms work: 83.3 percent setup; 135 ms work for a 10 percent cap; 5.7x over reuse"
+    example: "a parser called 100 times vs a multi-turn trajectory"
+    read: "§8.5.5 (Napkin Math 8.1)"
+  - q: "How much does a workspace cost to provision?"
+    picture: "Full copy vs copy-on-write, 32 workspaces"
+    numbers: "76.8 GB vs 1.28 GB, 60x; our APFS run: 938 ms full copy vs 90 ms clone"
+    example: "32 copies of a 2.4 GB base"
+    read: "§8.6.2 (Napkin Math 8.2)"
+  - q: "Why is egress enforced outside the guest?"
+    picture: "Packet filter and mediator cover each other's blind spot"
+    numbers: "a DNS lookup carries data out; resolve against an exact allowlist"
+    example: "HTTP_PROXY in the guest does nothing to a raw socket"
+    read: "§8.7"
+  - q: "When is a used sandbox safe to reuse?"
+    picture: "Four state domains cleared, then verified"
+    numbers: "a leftover proves failure; a clean scan does not prove success"
+    example: "a daemon double-forked out of the process group"
+    read: "§8.8.1"
+  - q: "What sizes a sandbox pool?"
+    picture: "Miss probability vs restore time; memory vs copy-on-write"
+    numbers: "600 active leases (N=λT); reserve 2 holds only below 23 ms restore; 322 GB vs 39 GB, 8.3x"
+    example: "2 trajectories/s, 300 s leases"
+    read: "§8.8.3 (Napkin Math 8.3)"
+
+worked_examples:
+  - name: "Napkin Math 8.1: setup once or per call"
+    steps: ["15 ms setup, 3 ms work, 100 calls", "fresh 1,800 ms vs reuse 315 ms", "5.7x", "setup is 83.3 percent of a fresh call", "135 ms of work to hold setup under 10 percent"]
+  - name: "Napkin Math 8.2: provisioning by copy-on-write"
+    steps: ["32 workspaces, 2.4 GB base, 40 MB written each", "full 76.8 GB vs CoW 1.28 GB", "60x fewer bytes", "we measured 938 ms vs 90 ms on APFS", "copy-on-write tracks what you write"]
+  - name: "Napkin Math 8.3: sizing a pool"
+    steps: ["2 traj/s, 300 s lease", "N_active = 600", "1 standby misses 2.96 percent, 2 misses 0.044 percent", "322 GB private vs 39 GB CoW", "cost is memory-seconds over the horizon"]
+
+active_learning:
+  - at_minute: 3
+    type: concept_question
+    prompt: "Gemini CLI exfiltrated credentials though every command was approved. Which layer should stop it: model, approval prompt, or environment?"
+    answer: "The environment. A sandbox below the process blocks the read and the socket whatever the model proposes; the approval prompt was defeated by whitespace, and alignment bounds nothing."
+  - at_minute: 20
+    type: predict
+    prompt: "An empty __builtins__ and one helper, total. What can eval('total.__globals__') reach?"
+    answer: "The helper's defining module: API_KEY, 251 loaded classes, open handles. Our run confirms it, with no import."
+  - at_minute: 30.5
+    type: predict
+    prompt: "After expiry, which write still works? (edit grant expired at 300 s; a writable handle was opened at 250 s)"
+    answer: "The write on the already-open handle. Expiry refuses new opens only; revocation is complete when the runtime closes the handle and stops the worker (§8.4.3)."
+  - at_minute: 40
+    type: diagnose
+    prompt: "Pick an envelope for a 3 ms log parser, a multi-turn repair, and an unreviewed customer binary."
+    answer: "Bytecode per call; microVM retained for the trajectory; ephemeral microVM, no credentials, egress denied. The syscall tax and horizon decide."
+  - at_minute: 63
+    type: concept_question
+    prompt: "True or false: six fallacies of sandboxing (§8.9)."
+    answer: "All false: removing names is not removing authority; a label is not a boundary; cost is memory not boot; an allowed destination is not approval of the payload; an empty workspace is not a clean tenant; idle-host restore time undersizes the reserve."
+  - at_minute: 68
+    type: diagnose
+    prompt: "A reclaimed instance passed a file scan, but a daemon still holds a socket. May it return to standby?"
+    answer: "No. The network-and-broker domain failed; a leftover proves failure. Destroy and rebuild from the baseline."
+
+open_questions:
+  - "Accelerators join the isolation boundary: a passed-through GPU shares an IOMMU group and leaves activations in device memory. How should a pool price and scrub a shared accelerator?"
+  - "A permitted channel still leaks: the submit_report request carries private source to an approved service. Is that a sandbox problem at all, or does it belong to information flow?"
+  - "A rate-limited DNS resolver narrows a covert channel without closing it. When is narrowing enough?"
+
+more_examples:
+  - "Gemini CLI allow-list bypass, Tracebit 2025 (War Story 8.1)"
+  - "gVisor user-space kernel, Young et al. HotCloud 2019 (measured system-call tax)"
+  - "Firecracker microVM, Agache et al. NSDI 2020 (measured boot CDF)"
+  - "SWE-bench pooled evaluation sandboxes, Jimenez et al. 2024"
+  - "Landlock and seccomp-bpf as the policy compiler on Linux"
+
+left_to_reading:
+  - concept: "Structural prompt injection, lethal trifecta, information-flow labels"
+    why: "Owned by Lecture 9 (Agent Security); glossed here in one line"
+  - concept: "Grader isolation"
+    why: "Owned by Lecture 13; the read-only test mount previews it"
+  - concept: "Checkpoint binding of the workspace lease"
+    why: "Owned by Lecture 11"
+  - concept: "Hardware virtualization internals (VMX, EPT, two-stage page walk)"
+    why: "Detail better read than heard; the microVM boundary is taught, the page-walk tax noted"
+
+callbacks:
+  - lecture: "Lecture 7"
+    concept: "Complete mediation"
+    where: "divider 1 recall and the admit-check slide"
+  - lecture: "Lecture 7"
+    concept: "Confused deputy"
+    where: "credential-broker slide note (the run_shell worker as the confused deputy one layer down)"
+  - lecture: "Lecture 7"
+    concept: "Settlement before retry"
+    where: "reset-contract note (an external effect emitted before reset stays unsettled)"
+  - lecture: "Lecture 5"
+    concept: "Little's law"
+    where: "pool-sizing slide (N_active = lambda * T_hold)"
+  - lecture: "Lecture 1"
+    concept: "Zero ambient authority"
+    where: "ambient-authority slide (the requirement extends to processes a tool call starts)"
+  - lecture: "Lecture 1"
+    concept: "Side-effect classes"
+    where: "blast-radius-by-authority slide (A0 to A3 containment obligations)"
+  - lecture: "Lecture 1"
+    concept: "Invariant closure"
+    where: "containment-beneath-the-model slide and the close"
+
+closing:
+  return_to_hook: "The Gemini CLI command and the README run_shell both run below the model; a sandbox blocks the read and the socket, but the submit_report channel it was permitted still leaks."
+  read_and_practice:
+    - "§8.2 to §8.8; Checkpoints 8.1 and 8.2"
+    - "Napkin Math 8.1 to 8.4 by hand; Exercises 1, 3, 6"
+    - "run images/measure.py to reproduce every measurement"
+  further_reading:
+    - cite: "Saltzer and Schroeder, The Protection of Information in Computer Systems, 1975"
+      url: "https://doi.org/10.1109/PROC.1975.9939"
+      why: "Least privilege, complete mediation, fail-safe defaults: the design canon the chapter applies"
+    - cite: "Lampson, A Note on the Confinement Problem, 1973"
+      url: "https://doi.org/10.1145/362375.362389"
+      why: "Covert channels: why a DNS lookup is a channel and a rate limit only narrows it"
+    - cite: "Agache et al., Firecracker, NSDI 2020"
+      url: "https://www.usenix.org/conference/nsdi20/presentation/agache"
+      why: "A production microVM: device surface, boot latency, and memory overhead"
+    - cite: "Young et al., The True Cost of Containing: a gVisor Case Study, HotCloud 2019"
+      url: "https://www.usenix.org/conference/hotcloud19/presentation/young"
+      why: "The measured system-call tax of a user-space kernel"
+    - cite: "Dennis and Van Horn, Programming Semantics for Multiprogrammed Computations, 1966"
+      url: "https://doi.org/10.1145/365230.365252"
+      why: "Capabilities: unforgeable references that bind authority to the reference"
+
+segments:
+  - name: Reach
+    divider_question: "What can admitted code actually reach, and where must the limit live?"
+    read: "§8.1 to §8.3"
+    minutes: 15
+    land: "A schema-valid call runs with all the authority of its process; pruning globals hides names and leaves reach intact, so the limit must be enforced beneath the process."
+  - name: Capabilities
+    divider_question: "How does the runtime hand code only what the task needs?"
+    read: "§8.4"
+    minutes: 15
+    land: "A capability binds authority to an unforgeable reference with a lifetime; attenuation narrows but never widens, revocation is complete only when live handles close, and a broker keeps the secret out of the guest."
+  - name: Envelopes
+    divider_question: "Which boundary fits the code, the authority, and the horizon?"
+    read: "§8.5"
+    minutes: 14
+    land: "The four envelopes differ in where a system call lands, which sets the trusted base and the per-call tax; setup is amortized over the trajectory."
+  - name: Workspace and Egress
+    divider_question: "How does state persist across turns without leaking out?"
+    read: "§8.6, §8.7"
+    minutes: 14
+    land: "Copy-on-write makes provisioning track what the agent writes; egress is enforced on the host path, and a permitted channel can still carry data out."
+  - name: Pools and Reset
+    divider_question: "How does a platform serve the next tenant without delay or leakage?"
+    read: "§8.8"
+    minutes: 12
+
+coverage:
+  primary_taught:
+    - "Containment beneath the model"
+    - "In-process restriction fails"
+    - "Capability grants"
+    - "Attenuation and revocation"
+    - "Isolation envelopes"
+    - "Copy-on-write workspace"
+    - "Egress control"
+    - "Reset contract"
+  secondary:
+    - "Credential brokering"
+    - "Sandbox pool sizing"
+    - "Least privilege"
+    - "Ambient authority"
+    - "Blast radius"
+  primary_left_to_reading: []
+
+notes_for_author:
+  - "Book inconsistency carried from the course plan: the margin stack's computer-analogy tab labels are dropped on the slide divider (kit already does this)."
+  - "Pool memory numbers follow the chapter's binary-MiB convention (512 MB = 512 MiB) so 322.1 GB and 39.0 GB reproduce; noted in calcs.py."

@@ -1,0 +1,319 @@
+chapter: 01_introduction
+lecture: "01"
+title: "Introduction"
+subtitle: "Why adding machines does not divide the time"
+layer: none   # spans the stack; no layer key in \mlsyssetup
+minutes: 75
+notes_minutes: 71.5
+core_minutes: 56.5
+target_ideas: 30
+thesis: "Leaving one machine is a discontinuity, because the network, power, and routine failure take over from local memory and the fleet becomes the unit of engineering."
+
+hook:
+  minutes: "0-3"
+  setup: "Photo of an InfiniBand switch and cables. One data-parallel worker of a 175B model computes for 1.2 s (scenario input), then sends about 700 GB of 16-bit gradients by ring AllReduce over a 200 Gb/s (25 GB/s) InfiniBand HDR link, with no overlap. HDR is named on the card because the node slide uses the newer NDR port (50 GB/s): NVLink is 18 times the hook's link and 9 times NDR (calcs.py)."
+  question_to_class: "How long does one step take? A) 1.3 s B) 3 s C) 12 s D) 29 s"
+  payoff: "D. 700 / 25 = 28 s of exposed transfer plus 1.2 s of compute = 29.2 s; the accelerator computes 4.1 percent of the time. The synthesis returns to the 29.2 s step and names the Fleet Law term each fix shortens."
+  sources: ["Introduction, Napkin Math 1.1, Sec. 1.5.5", "photo: ChrisDag, CC BY 2.0, Wikimedia Commons (images/SOURCES.yml)", "values: images/calcs.py"]
+
+driving_question: "Why does adding machines not divide the time, and what does the fleet charge in communication, coordination, and failure?"
+
+recall: "Lecture 0 named C3 (Compute, Communication, Coordination) and the failure clock: with an assumed 50,000 h per-GPU MTTF, a 16,384-GPU job (Llama 3 405B, the job of Lecture 0's prediction 2, which Lecture 0 left unanswered) stops about every 3 hours; students check their Lecture 0 cards, and this slide is the reveal (50,000 / 16,384 = 3.05 h, derived in calcs.py; MTTF from Sec. 1.1). Single-machine foundations (iron law, roofline, HBM, 16 bytes per parameter) are assumed and pointed to Appendix A."
+
+running_example: "A 175B dense transformer on about 1,000 accelerators. The book's reference job (Archetype A in concrete form, Sec. 1.6.1): mixed-precision Adam, 16 B per parameter (2.8 TB), 1,024 H100s in 128 nodes of 8. Its published counterpart: OPT-175B on 992 80 GB A100s (Zhang et al. 2022, Sec. 2.4 and 2.5), shown through its own logbook. GPT-3 175B (Brown et al. 2020, Table 2.1) carries the allocation estimate, and Llama 3 405B (Dubey et al. 2024) the measured scaling and interruption numbers."
+
+goals:
+  - "Explain why fleets keep growing, and size a compute-optimal run with C = 6ND."
+  - "Explain what synchronous coupling and the network wall change when a job leaves one node."
+  - "Use communication intensity and the Fleet Law to find the term that binds a step."
+  - "Compute the reliability gap a^N, and place a decision on the fleet stack."
+
+segments:
+  - name: Demand
+    divider_question: "Why does one machine stop being enough?"
+    read: "Sec. 1.1, Sec. 1.3"
+    concept_questions: [1, 2, 3, 4]
+    minutes: 10.5
+    land: "Scaling laws make each gain predictable and expensive, and half the growth in training compute came from more accelerators running longer."
+  - name: Leaving
+    divider_question: "What changes when a job leaves one machine?"
+    read: "Sec. 1.2, Sec. 1.4.2"
+    concept_questions: [5, 6, 7, 8, 9]
+    minutes: 12
+    land: "Leaving the node buys capacity and charges bandwidth, waiting, and consistency."
+  - name: Communication
+    divider_question: "How many bytes cross the network per step, and when do they bind?"
+    read: "Sec. 1.2.3, 1.2.4, 1.5.5"
+    concept_questions: [10, 11, 12]
+    minutes: 12
+    land: "Bytes per local FLOP against the fabric's balance decides whether the network sets the step."
+  - name: Fleet Law
+    divider_question: "Where does a distributed step spend its time?"
+    read: "Sec. 1.5"
+    concept_questions: [13, 14, 15]
+    minutes: 15.5
+    land: "More devices shrink only the compute term, so every fix must name the term it shortens and every efficiency number must name its measure."
+  - name: Failure
+    divider_question: "What does a job that needs every component pay in failures?"
+    read: "Sec. 1.4, Sec. 1.6"
+    concept_questions: [16, 17]
+    minutes: 8
+    land: "A job that needs all N parts has availability a^N, so recovery replaces prevention; the stack says where each decision lives."
+
+concept_questions:
+  - id: 1
+    q: "Where did the growth in training compute come from?"
+    picture: "growth_bars: yearly growth factors on a log scale (compute, count, duration, rate per accelerator), with a GTX 580 die photo (AlexNet) and an H100 card photo (Llama 3)"
+    numbers: "146 Epoch AI runs, 2012 to 2024: compute 3.9x per year = count 1.6x x duration 1.3x x rate 2.0x; count and duration give 51 percent of the exponent (fit in make_figs.py from MLSysIM's copy of Epoch AI, reproducing Sec. 1.1 figure 1b). AlexNet 2 GPUs, Llama 3 16,384 H100s (Sec. 1.1)"
+    example: "AlexNet 2012 to Llama 3 2024"
+    read: "Sec. 1.1"
+  - id: 2
+    q: "What does each further gain in model quality cost?"
+    picture: "powerlaw: the parameter term A/N^alpha of the Hoffmann et al. fit, with each halving marked as a x7.7 step"
+    numbers: "L(R) = A R^-alpha + L_inf (theorem 1.1); halving the reducible term needs 2^(1/alpha) times R; alpha = 0.34 gives 7.7x (derived, calcs.py; A = 406.4, alpha = 0.34 from MLSysIM's Chinchilla registry, Hoffmann et al. 2022 eq. 10)"
+    example: "Scaling laws as the fleet's demand curve"
+    read: "Sec. 1.3.3"
+  - id: 3
+    q: "How should a fixed budget be split between parameters and tokens?"
+    picture: "isoflop: three IsoFLOP curves from the Hoffmann et al. parametric fit (6e18, 1.3e20, 3e21 FLOPs) with their valleys"
+    numbers: "C = 6ND; Gopher-budget projection 63B parameters on 1.4T tokens, about 22 tokens per parameter, about 5.3e23 FLOPs (Sec. 1.3.2; calcs.py)"
+    example: "Doubling the model and halving tokens at a fixed budget raises loss"
+    read: "Sec. 1.3.2"
+  - id: 4
+    q: "Was GPT-3 trained compute-optimally?"
+    picture: "GPT-3's model card row (Brown et al. 2020, Table 2.1) beside the worked estimate"
+    numbers: "C = 6 x 175B x 300B = 3.15e23 FLOPs; 1.7 tokens per parameter against about 20; at 20, N = sqrt(C/120) = 51B and D = 1.0T (derived, calcs.py)"
+    example: "GPT-3 175B"
+    read: "Sec. 1.3.2"
+  - id: 5
+    q: "How much slower is the link out of a node than the link inside it?"
+    picture: "Photo of an HGX B200 eight-GPU baseboard beside bars NVLink 450 against InfiniBand NDR 50 GB/s"
+    numbers: "450 against 50 GB/s per accelerator per direction, about 9x (Sec. 1.2; calcs.py)"
+    example: "H100 server, one 400 Gb/s NDR port per accelerator"
+    read: "Sec. 1.2"
+  - id: 6
+    q: "What changes when the job leaves the node?"
+    picture: "discontinuity build: one node with the memory wall; then a fleet with the network wall, a scheduler, one failed and one slow node"
+    numbers: "Bisection bandwidth does not grow by adding workers (Sec. 1.1)"
+    example: "The scale moment"
+    read: "Sec. 1.1"
+  - id: 7
+    q: "Why does one slow worker slow the whole synchronous job?"
+    picture: "coupling build: MapReduce retries one task; synchronous training waits at the AllReduce"
+    numbers: "One worker 10 percent slow on the critical path slows the job by nearly 10 percent (Sec. 1.2.1)"
+    example: "MapReduce (Dean and Ghemawat 2004) against data-parallel training"
+    read: "Sec. 1.2.1"
+  - id: 8
+    q: "In what sense is a data center one computer?"
+    picture: "Photo of data-center racks beside the table: bus = fabric, disk = distributed storage, OS = orchestrator"
+    numbers: "A 100 MW facility can limit training more than any chip's TFLOP/s (Sec. 1.2.2, footnote 4)"
+    example: "Barroso et al., The Datacenter as a Computer"
+    read: "Sec. 1.2.2"
+  - id: 9
+    q: "When a worker goes silent mid-step, what must the runtime choose?"
+    picture: "Vote slide with three choices"
+    numbers: "none; the CAP theorem (Brewer 2000; Gilbert and Lynch 2002)"
+    example: "Synchronous halts; asynchronous goes stale; federated diverges"
+    read: "Sec. 1.4.2"
+  - id: 10
+    q: "How many bytes does one worker send per step?"
+    picture: "ring_bars: FP32 gradient 700 GB, ring traffic 1,400 GB (FP32) and 700 GB (FP16); photo of an InfiniBand cable"
+    numbers: "2(N-1)/N times the gradient, about 2 for large N (1.996 at N = 512, calcs.py) (Sec. 1.2.3)"
+    example: "175B parameters"
+    read: "Sec. 1.2.3"
+  - id: 11
+    q: "How much of the step does exposed communication take, and what does it cost in energy?"
+    picture: "napkin build: step bars over InfiniBand and Ethernet; energy-boundary card"
+    numbers: "28 s and 4.1 percent over 200 Gb/s InfiniBand; 56 s and 2.1 percent over 100 Gb/s Ethernet; 196 J per worker per step at 35 pJ/bit; 196 MJ over 1M steps (Napkin Math 1.1; calcs.py)"
+    example: "Napkin Math 1.1"
+    read: "Sec. 1.5.5"
+  - id: 12
+    q: "When does the network, not compute, set the step?"
+    picture: "ci build: step time against communication intensity with the fabric balance; the 175B worker; workloads Alpha and Beta"
+    numbers: "Worker: 6 x 175B x 8,192 = 8.6e15 FLOPs, 700 GB, CI 8.1e-5 B/FLOP; balance 25 GB/s / 312 TFLOP/s = 8.0e-5 (Sec. 1.2.4; calcs.py). Alpha 1e-7, Beta 1e-4 (self-check 6). Llama 3 405B: 430 to 400 BF16 TFLOP/s per GPU (43 to 41 percent MFU) from 8,192 to 16,384 GPUs at 16M tokens per batch, a 7 percent drop (Dubey et al. 2024, Table 4)"
+    example: "Llama 3 405B: only data parallelism doubled (64 to 128); Lecture 6 reads the full Table 4 layout"
+    read: "Sec. 1.2.4"
+  - id: 13
+    q: "Which evidence does each C3 axis leave?"
+    picture: "c3: three boxes with term and evidence; then PyTorch's own synchronous SGD code built line by line (compute, all_reduce, implicit barrier)"
+    numbers: "none beyond the definitions (Sec. 1.5, definition 1.2)"
+    example: "PyTorch tutorial dist_tuto, average_gradients"
+    read: "Sec. 1.5, 1.5.3"
+  - id: 14
+    q: "What is the Fleet Law, and what does doubling N do to each term?"
+    picture: "Focus slide; fleetlaw build (N then 2N, illustrative units 10 to 8 against ideal 5)"
+    numbers: "Scaling efficiency T1/(N TN); compute fraction f; doubling example speedup 1.25, 0.62 of ideal (illustrative, calcs.py)"
+    example: "Diagnose: 0.8 + 1.0 + 0.2 = 2.0 s, f = 0.40 (Sec. 1.5 self-check 3)"
+    read: "Sec. 1.5.4"
+  - id: 15
+    q: "Why do four efficiency numbers for large runs disagree?"
+    picture: "measures: GPT-3 about 20 percent of peak (run average); Megatron-LM 52 percent of peak on 3,072 A100s; Llama 3 41 percent MFU; Llama 3 more than 90 percent effective training time"
+    numbers: "Patterson et al. 2021; Narayanan et al. 2021; Dubey et al. 2024, Table 4 and Sec. 3.3.4 (all as cited in Sec. 1.5.4)"
+    example: "Naming the efficiency measure"
+    read: "Sec. 1.5.4"
+  - id: 16
+    q: "How likely is it that every node a job needs is up at once?"
+    picture: "an build: a^N for 99.9 and 99.99 percent nodes"
+    numbers: "0.999^1,000 = 36.8 percent; 0.999^10,000 = 0.0045 percent; 0.9999^10,000 = 36.8 percent; 99.99 percent is 52.6 minutes down per year (Sec. 1.4.1; calcs.py)"
+    example: "OPT-175B: at least 35 manual and 70+ automatic restarts and more than 100 hosts cycled in about 2 months on 992 A100s (Zhang et al. 2022, Sec. 2.5), with a verbatim excerpt of the team's notes; one restart every 14 h or less (derived); Llama 3 one interruption every 3.1 h (derived from Dubey et al. 2024)"
+    read: "Sec. 1.4.1"
+  - id: 17
+    q: "Where does a decision live, and which workload tests it?"
+    picture: "Kit stack (eight rows, four parts) beside the archetype table"
+    numbers: "Archetype A communication, B coordination, C compute per device (Sec. 1.6.1, table 3)"
+    example: "Governance as the fleet's control plane"
+    read: "Sec. 1.6"
+
+concept_trace:
+  - concept: "Scale moment"
+    frame: "Leaving the node moves the binding wall to the network"
+    shows: "discontinuity build (one node, memory wall; fleet, network wall, failed and slow nodes) with the caption naming the scale moment; growth bars give the evidence"
+  - concept: "Synchronous tight coupling"
+    frame: "A synchronous step waits for its slowest worker"
+    shows: "coupling build: MapReduce retries one task; synchronous GPUs wait at the AllReduce"
+  - concept: "Scaling laws as the demand curve"
+    frame: "Each halving of the reducible loss costs a fixed multiple"
+    shows: "power-law equation and the x7.7-per-halving staircase plot; slide text names the demand curve"
+  - concept: "Reliability gap"
+    frame: "Predict: are 1,000 nodes all up at once?"
+    shows: "a^N curves for 99.9 and 99.99 percent nodes with 36.8 and 0.0045 percent marked; OPT-175B log slide follows"
+  - concept: "Communication intensity"
+    frame: "Communication intensity is bytes sent per local operation"
+    shows: "CI equation and the step-time-against-CI plot with the fabric balance and the 175B worker; the Alpha and Beta estimate places two more points"
+  - concept: "C3 taxonomy"
+    frame: "The C³ taxonomy splits a step by the evidence it leaves"
+    shows: "three-box figure with each axis, its Fleet Law term, and its evidence; the PyTorch code build maps lines to the axes"
+  - concept: "Fleet Law"
+    frame: "The Fleet Law (focus) and Doubling N halves only the compute term"
+    shows: "the law with each term braced by its axis; the N and 2N timeline build"
+  - concept: "Fleet stack"
+    frame: "Decisions fixed in lower rows constrain the rows above"
+    shows: "kit stack figure, eight rows in four parts, beside the archetype table"
+
+worked_examples:
+  - name: "Napkin Math 1.1: the time and energy cost of communication"
+    steps: ["given: 700 GB per worker per step (FP16 ring), 1.2 s compute (scenario), 200 Gb/s InfiniBand and 100 Gb/s Ethernet, 35 pJ/bit", "700 / 25 GB/s = 28 s; step 29.2 s; compute fraction 4.1 percent", "Ethernet 12.5 GB/s: 56 s; 2.1 percent", "energy 700e9 x 8 x 35 pJ = 196 J per worker per step; 196 MJ over 1M steps", "meaning: line rate is optimistic and no overlap is pessimistic; compare designs only inside one energy boundary"]
+  - name: "GPT-3 compute-optimal allocation (Sec. 1.3.2)"
+    steps: ["given: 175B parameters, 300B tokens (Brown et al. 2020, Table 2.1), C = 6ND, about 20 tokens per parameter", "C = 3.15e23 FLOPs", "D/N = 1.7, about 12 times below 20", "at 20: N = sqrt(C/120) = 51B, D = 1.0T", "meaning: the allocation prices the work; the Fleet Law prices the time"]
+  - name: "Communication intensity of the 175B worker (Sec. 1.2.4)"
+    steps: ["given: 8,192 tokens per worker per step, 700 GB sent, A100 312 TFLOP/s, one 25 GB/s link", "FLOPs = 6 x 175B x 8,192 = 8.6e15", "CI = 700e9 / 8.6e15 = 8.1e-5 B/FLOP; balance 8.0e-5", "meaning: at the balance the exchange takes about as long as compute (27.6 s at peak), so without overlap the step roughly doubles"]
+  - name: "The reliability gap (Sec. 1.4.1)"
+    steps: ["given: a = 99.9 percent per node, independent failures", "0.999^1,000 = 36.8 percent", "0.999^10,000 = 0.0045 percent", "add a nine: 0.9999^10,000 = 36.8 percent", "meaning: a nine moves the collapse ten times right; recovery replaces prevention"]
+
+active_learning:
+  - at_minute: 0.5
+    type: predict
+    prompt: "How long does one training step take? A) 1.3 s B) 3 s C) 12 s D) 29 s"
+    answer: "D: 1.2 + 28 = 29.2 s; compute 4.1 percent."
+  - at_minute: 3
+    type: retrieval
+    prompt: "Close your notes. Name the three C3 axes. How often did a 16,384-GPU job stop?"
+    answer: "Compute, Communication, Coordination; about every 3 hours (50,000 h / 16,384 = 3.05 h)."
+  - at_minute: 14
+    type: estimate
+    prompt: "Was GPT-3 trained compute-optimally? Given 175B parameters, 300B tokens, C = 6ND, about 20 tokens per parameter."
+    answer: "C = 3.15e23 FLOPs; 1.7 tokens per parameter; at 20 the same budget buys 51B parameters on 1.0T tokens. Undertrained for its size."
+  - at_minute: 26.5
+    type: concept_question
+    prompt: "A worker goes silent mid-step. A) wait and halt, B) proceed on stale state, C) both consistency and availability."
+    answer: "A or B; C is ruled out under a partition (CAP). Synchronous picks A; asynchronous and federated pick B."
+  - at_minute: 37
+    type: estimate
+    prompt: "Which workload stops scaling first? Alpha: 10 MB, 1e14 FLOPs; Beta: 1 GB, 1e13 FLOPs."
+    answer: "Alpha CI 1e-7 B/FLOP, far below the 8.0e-5 balance; Beta 1e-4, 1,000 times higher and past it. Beta stops scaling first."
+  - at_minute: 50
+    type: diagnose
+    prompt: "T_compute/N 0.8 s, T_comm 1.0 s, T_sync 0.2 s, no overlap. Which fix first?"
+    answer: "B, overlap the AllReduce with backward and check the fabric; f = 0.40; option A saves at most 0.4 s of 2.0 s."
+  - at_minute: 52.5
+    type: concept_question
+    prompt: "True or false: (1) 2x faster accelerators halve the hook's step; (2) a plan for 3x delivers 3x."
+    answer: "Both false: 29.2 to 28.6 s, 2.1 percent; 3 x 0.6 = 1.8x when overhead is 40 percent of the scaled step (Sec. 1.8)."
+  - at_minute: 57
+    type: predict
+    prompt: "1,000 nodes at 99.9 percent: how often are all up at once? A) 99.9 B) 90 C) 37 D) 0.005 percent"
+    answer: "C, 36.8 percent; 0.0045 percent at 10,000; 36.8 percent at 10,000 with 99.99 percent nodes."
+  - at_minute: 64.5
+    type: retrieval
+    prompt: "Close your notes. For each fix, name the Fleet Law term it changes: faster chips, 16-bit or compressed gradients, overlap, faster fabric, checkpoint and restart."
+    answer: "T_compute/N (2.1 percent here); T_comm (fewer bytes); T_overlap (hides time); T_comm (per byte); T_sync (failures)."
+
+open_questions:
+  - "Which will limit the next frontier run first: power, the network, failures, or data?"
+  - "Should a fleet be built never to fail, or to recover fast? Who decides how much work it may lose?"
+  - "One foundation model sits under thousands of products. When it is biased or wrong, whose system failed? (Sec. 1.4.3)"
+
+more_examples:
+  - "OPT-175B on 992 A100s: at least 35 manual and 70+ automatic restarts, more than 100 hosts cycled in about 2 months (Zhang et al. 2022, Sec. 2.5; metaseq chronicles)."
+  - "Llama 3 405B: 419 unexpected interruptions in 54 days on 16,384 H100s (Dubey et al. 2024, Sec. 3.3.4); 43 to 41 percent MFU from 8,192 to 16,384 GPUs (Table 4)."
+  - "Meta's Research SuperCluster, 16,000 A100s on 200 Gb/s InfiniBand; Google TPU v4 pods of 4,096 chips (Sec. 1.1)."
+  - "Megatron-LM at 52 percent of peak on 3,072 A100s (Narayanan et al. 2021)."
+  - "Horovod fuses small gradient tensors to pay the per-message cost fewer times (Sergeev and Del Balso 2018, Sec. 1.2.3)."
+  - "Edge fallacy: a car at 120 km/h covers 3.33 m per 100 ms of delay (Sec. 1.8)."
+
+further_reading:
+  - cite: "Introduction, Sec. 1.1 to 1.6 and 1.8, with the self-checks"
+    url: "https://mlsysbook.ai"
+    why: "Every number in this lecture, and the C3 and Fleet Law definitions."
+  - cite: "Barroso, Hölzle, and Ranganathan, The Datacenter as a Computer, 3rd ed., 2019"
+    url: "https://doi.org/10.1007/978-3-031-01761-2"
+    why: "The warehouse-scale computer view."
+  - cite: "Kaplan et al., Scaling Laws for Neural Language Models, 2020"
+    url: "https://arxiv.org/abs/2001.08361"
+    why: "The power laws that make fleets worth buying."
+  - cite: "Hoffmann et al., Training Compute-Optimal Large Language Models, 2022"
+    url: "https://arxiv.org/abs/2203.15556"
+    why: "The compute-optimal allocation and the IsoFLOP curves."
+  - cite: "Zhang et al., OPT: Open Pre-trained Transformer Language Models, 2022, Sec. 2.5, and the metaseq logbook"
+    url: "https://arxiv.org/abs/2205.01068"
+    why: "A candid record of training a 175B model on about 1,000 GPUs."
+  - cite: "Dubey et al., The Llama 3 Herd of Models, 2024, Sec. 3.3"
+    url: "https://arxiv.org/abs/2407.21783"
+    why: "Parallelism configuration, MFU, and interruption measurements at 16,384 GPUs."
+
+callbacks:
+  - {lecture: 0, concept: "C3 taxonomy (named)", where: "recall slide title and notes; C3 slide note"}
+  - {lecture: 0, concept: "Fleet stack (built row by row)", where: "stack slide note; title note"}
+  - {lecture: 0, concept: "Failure clock (16,384 GPUs, 3.05 h)", where: "recall slide, its credit and note; scale-moment note"}
+  - {lecture: 2, concept: "Bandwidth hierarchy dictates placement", where: "node bandwidth slide note"}
+  - {lecture: 2, concept: "Rack power wall; cooling class and heat removal", where: "WSC slide note; open questions note"}
+  - {lecture: 2, concept: "Next lecture (Compute Infrastructure)", where: "closing slide label and note"}
+  - {lecture: 3, concept: "Bisection bandwidth and topology economics", where: "discontinuity slide note; WSC slide note"}
+  - {lecture: 4, concept: "Compute-optimal allocation (data-limited project, data pipelines)", where: "GPT-3 estimate note; WSC note (storage row)"}
+  - {lecture: 5, concept: "Ring AllReduce and the bandwidth bound", where: "ring slide note"}
+  - {lecture: 5, concept: "Gradient compression with error feedback", where: "Llama 3 slide note (with Lecture 6)"}
+  - {lecture: 6, concept: "Synchronization models and stragglers", where: "coupling slide note; CAP vote note"}
+  - {lecture: 6, concept: "Sharded data parallelism", where: "Llama 3 slide note (with Lecture 5)"}
+  - {lecture: 6, concept: "Scaling efficiency and the scaling wall", where: "Fleet Law timeline note"}
+  - {lecture: 7, concept: "Fleet failure rate (MTTF/N), recovery", where: "a^N slide note; OPT slide note; open questions note"}
+  - {lecture: 8, concept: "CAP choice under partition (recall); orchestrator row", where: "CAP vote note; WSC note"}
+  - {lecture: 9, concept: "ML goodput", where: "efficiency measures note"}
+  - {lecture: 13, concept: "Extraction budgets; poisoning", where: "stack slide note"}
+  - {lecture: 15, concept: "Energy accounting boundary (facility overhead and carbon)", where: "Napkin Math slide note; open questions note"}
+  - {lecture: 16, concept: "Assurance case", where: "stack slide note"}
+  - {lecture: 6, concept: "Parallelism plan as joint placement (Llama 3 Table 4 layout, pointer, D3)", where: "Llama 3 batch slide gray line and note"}
+left_to_reading:
+  - concept: "Warehouse-scale computer"
+    why: "Taught on one optional slide; the rest is better read (Sec. 1.2.2)."
+  - concept: "Governance as the fleet control plane"
+    why: "One line on the stack slide; Lectures 13 and 16 own the mechanisms (Sec. 1.4.3)."
+  - concept: "Operational regimes: data scaling regimes, posttraining and test-time scaling, breakdown table"
+    why: "Detail better read than heard (Sec. 1.3.3 to 1.3.6); the GPT-3 estimate carries the compute-limited against data-limited choice in its note."
+  - concept: "Projection from D·A·M to C3"
+    why: "One sentence in the Fleet Law focus note and Appendix A; the volume does not use D·A·M as a framing device."
+  - concept: "Edge distribution constraints"
+    why: "Lecture 11 owns local training; one line in the archetype table (Archetype C)."
+
+coverage:
+  primary_taught: ["Scale moment", "Synchronous tight coupling", "Scaling laws as the demand curve", "Reliability gap", "Communication intensity", "C3 taxonomy", "Fleet Law", "Fleet stack"]
+  primary_left_to_reading: []
+  secondary: ["Compute-optimal allocation (taught, optional IsoFLOP slide plus core estimate)", "Naming the efficiency measure (optional slide)", "Energy accounting boundary (card on the Napkin Math slide)", "Governance as the fleet control plane (one line)", "CAP choice under partition (optional vote)", "Warehouse-scale computer (optional slide)"]
+
+notes_for_author:
+  - "Every derived number is computed in images/calcs.py (inputs sourced in comments); the printed values were copied onto the slides and notes and re-checked on 2026-10-18."
+  - "Outside numbers were read from the papers on 2026-10-18: OPT-175B Sec. 2.4 and 2.5 (992 80 GB A100s, 147 TFLOP/s per GPU, at least 35 manual restarts, over 100 hosts, 70+ automatic restarts, 2 months); the metaseq 10_percent_update.md quote (verbatim); Llama 3 Table 4 (430 and 400 TFLOP/s, 43 and 41 percent BF16 MFU, TP 8, PP 16, DP 64 and 128, 16M tokens) and Sec. 3.3.4 (466 interruptions, 419 unexpected, 54 days, more than 90 percent effective training time); GPT-3 Table 2.1 (175.0B, 96 layers, d_model 12288, 96 heads, 3.2M batch, 300 billion tokens); PyTorch tutorial dist_tuto code (BSD 3-Clause)."
+  - "The Chinchilla fit constants (E, A, B, alpha, beta) are not in this worktree's MLSysIM registry; make_figs.py reads them from the book-source checkout's registry beside it (MLSysBook-slides-vsrc/mlsysim). When this worktree's MLSysIM is updated, that fallback is no longer needed."
+  - "The OPT restart interval (14 h or less) takes 'over the course of 2 months' as 60 days and both restart counts as lower bounds."
+  - "Rhythm: no run of more than three frames without a photo or real artifact (GPT-3 model card, Llama 3 configuration, PyTorch code, OPT notes)."
+  - "Old deck files in images/ (the earlier SVG and PDF figures and cover_introduction.png) are unused and listed for removal."
+  - "2026-10-19 sweep (D3, D4, D10, FIX_PASS_PLAN section 4). The recall slide now asks students to check prediction 2 on their Lecture 0 card and reveals the 3.05 h here (answer A), since the rebuilt Lecture 0 gives no answer. D3: the Llama 3 batch slide drops Meta's TP/PP/DP table, which Lecture 6 owns, and keeps the MFU plot as communication-intensity evidence with a one-line pointer to Lecture 6. D4: the goals slide names the Fleet Law term (all four) and C3 axis (all three); this lecture owns them. D10: X-not-Y constructions and reveal colons rewritten."

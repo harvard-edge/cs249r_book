@@ -1,0 +1,326 @@
+chapter: 11_edge_intelligence
+lecture: "11"
+title: "Edge Intelligence"
+subtitle: "Learning on the devices the fleet serves"
+layer: runtime
+minutes: 75
+notes_minutes: 71
+target_ideas: 30
+thesis: "Learning on devices pays only when a measured gain survives the device's memory, energy, and thermal allowance, and a federated model learns from the devices that were admitted, not from the fleet that was deployed."
+
+hook:
+  minutes: "0-4"
+  setup: "Gboard, Google's phone keyboard (book figure 1, the real screenshot from Xu et al. 2023). In 2018 Google trained its next-word model, a 1.4-million-parameter recurrent network, on phones by federated averaging. Phones joined only when charging, idle, on an unmetered network, and with at least 2 GB of memory available. Step 1: two bars, top-1 recall on client-owned typing caches, n-gram baseline 12.5 percent and the same network trained in the data center 15.0 percent. Step 2 (reveal): the federated network, 15.8 percent."
+  question_to_class: "Did the model trained on idle, charging phones beat the identical model trained in the data center? A) much worse B) about the same C) better."
+  payoff: "C on client caches (15.8 against 15.0, Table 4); on server logs the two tie (16.4 against 16.5, Table 3), and live click-through rates tie (2.35 against 2.36 percent, Table 6). It took 3,000 rounds over 4 to 5 days, about 7 times slower than data-center training of the same model (Bonawitz et al. 2019, footnote 3). The lecture asks what each phone paid, what crossed the network, and whose typing the model learned: only phones that passed the admission test taught it."
+  sources:
+    - "Hard et al., Federated Learning for Mobile Keyboard Prediction, arXiv:1811.03604, 2018: §3 (1.4 million parameters, 1.4 MB shipped after quantization), §5 (eligibility: at least 2 GB of memory available, charging, un-metered network, idle; 100 to 500 client updates close a round; 3,000 rounds, 600 million sentences, 1.5 million clients, 4 to 5 days), Table 3 (server logs top-1 recall: n-gram 13.0, server CIFG 16.5, federated 16.4 percent), Table 4 (client caches: 12.5 +/- 0.2, 15.0 +/- 0.5, 15.8 +/- 0.3), Table 6 (CTR: 2.13, 2.36, 2.35 percent). Read from the paper 2026-10-18."
+    - "Bonawitz et al., Towards Federated Learning at Scale: System Design, MLSys 2019, §8 and footnote 3 (each round about 2 to 3 minutes; roughly 7x slower than comparable data-center training). Read from the paper 2026-10-18."
+    - "Chapter §11.2.2 and figure 1 (Gboard screenshot, Xu et al. 2023)."
+
+recall: "Lecture 10, close your notes: what is SLO goodput? (The rate of requests that meet their latency contract, not the raw request rate.) And the Fleet Law from Lecture 1: T_step = T_compute/N + T_comm + T_sync - T_overlap. Today the serving deadline moves onto the phone, where background learning must not break it, and the law is read for one federated round."
+
+driving_question: "When should a model learn on the device, and what does a fleet of phones actually learn from?"
+
+goals:
+  - "Decide whether a product needs on-device learning, and test whether one update fits a phone's background memory."
+  - "Write the admission test for background learning, and price one update in battery."
+  - "Run one federated round through the Fleet Law: local work, uplink bytes, and secure aggregation."
+  - "Measure whom a federated model learned from, and say what a release contains once models learn after release."
+
+running_example: "Archetype C (Federated MobileNet), carried as the phone keyboard. The measured system is Gboard (Hard et al. 2018; Bonawitz et al. 2019): 1.4M-parameter model, 100 to 500 updates per round, 130 percent over-selection, 3,000 rounds. The chapter's scenario numbers carry the device side: a keyboard update of 50 to 100 MB in a 200 to 300 MB background allowance (§11.3.1); the 10M-parameter model whose 40 MB of weights grow to a 360 MB training stack (figure 3); a 4.5 W, 30-minute update taking 15 percent of a 15 Wh battery (Napkin Math 11.1); a 2.5 MB compressed update against 200 MB of raw images a week (Napkin Math 11.3). The slides say each time whether a number is measured (Gboard, MLPerf Tiny, AI Benchmark, Apple ratings, McMahan et al.) or the chapter's illustrative scenario."
+
+segments:
+  - name: Should It Learn
+    divider_question: "Should the device learn at all, and can its memory hold an update?"
+    read: "§11.1, §11.2, §11.3.1 to §11.3.4, §11.4"
+    concept_questions: [1, 2, 3, 4, 5, 6]
+    land: "Local inference is forced by deadlines, local learning only by a measured gain; an update must fit the background allowance, not installed RAM, and each adaptation method shrinks a different term of that budget."
+    minutes: 20
+  - name: When It May Run
+    divider_question: "When may a phone spend its battery and heat on learning?"
+    read: "§11.3.5, §11.3.4 (figure 6)"
+    concept_questions: [7, 8, 9]
+    land: "Background learning runs only when energy, heat, and the foreground deadline all have slack; charging relaxes only energy, and the test that protects each phone also picks who teaches the shared model."
+    minutes: 10
+  - name: The Federated Round
+    divider_question: "How do millions of phones train one shared model?"
+    read: "§11.6, §11.7.1, §11.7.2, §11.7.4"
+    concept_questions: [10, 11, 12, 13, 14]
+    land: "A round waits on the slowest awaited phone and a slow uplink; local steps trade uplink rounds for client drift; a small update saves bytes only below the break-even round count; secure aggregation hides each update at the price of a survivor floor."
+    minutes: 19
+  - name: Who It Learns From
+    divider_question: "Whom did the model learn from, and what ships once it keeps learning?"
+    read: "§11.7.1, §11.7.5, §11.8, §11.10, §11.11.4"
+    concept_questions: [15, 16, 17]
+    land: "Completed updates come from the admitted, fast, and charged phones, so coverage is measured per cohort; once models learn after release, the release is a versioned policy with a gate, a recovery point, and a coverage hold."
+    minutes: 12
+
+concept_questions:
+  - id: 1
+    q: "What crosses the device boundary in each design?"
+    picture: "New diagram, built in three steps: panel 0, a frozen model plus local features (no training); panels A local-only and B centralized; panel C federated (only updates up, shared weights down). A dashed device boundary runs through all four."
+    numbers: "Chapter figure 2 and table 1. Gboard keeps typed text on the phone and sends updates (Hard et al. 2018 §4)."
+    example: "News app: local topic preferences into a frozen model (table 1)."
+    read: "§11.2.1, §11.2.3"
+  - id: 2
+    q: "Which requirement forces inference onto the device, and does it force learning there too?"
+    picture: "New bar plot: foreground deadlines (control 10 ms, AR/VR 20 ms, camera 33 ms, voice 500 ms) against the 50 to 200 ms network round-trip band."
+    numbers: "§11.2.1 (deadlines and round-trip range)."
+    example: "A camera pipeline at 33 ms runs a fixed model offline; it learns locally only if adaptation shows a measured gain."
+    read: "§11.2.1"
+  - id: 3
+    q: "Why does a model whose weights fit fail to train?"
+    picture: "New stacked bar, three steps: 40 MB weights; plus 40 MB gradients and 80 MB Adam moments; plus 200 MB saved activations = 360 MB, against a 200 to 300 MB background allowance band."
+    numbers: "Chapter figure 3 (illustrative configuration, 9x); keyboard profile 50 to 100 MB update in 200 to 300 MB (§11.3.1)."
+    example: "10M-parameter FP32 model on a phone with 8 GB installed."
+    read: "§11.3.1, equation 1"
+  - id: 4
+    q: "How wide is the device range one fleet must serve?"
+    picture: "Photos (phone, Jetson AGX Orin, ESP32-S3 board, Arduino Nano) beside the chapter's memory ladder: phone 16 GB, IoT device up to 1 GB, microcontroller 256 KB."
+    numbers: "Chapter figure (§11.3.4 memory ladder); 65,536x memory range (§11.3.2); 35 TOPS against 0.03 TOPS, about 1,200x (§11.7.5.2, illustrative ratings)."
+    example: "Budget phones with 4 GB leave 1 to 2 GB for ML work (§11.4.3)."
+    read: "§11.3.2, §11.3.4"
+  - id: 5
+    q: "Does a faster NPU make on-device training fast?"
+    picture: "Apple Neural Engine peak ratings by chip (MLSysIM series from Apple's statements), A17 Pro photo; card: one update step moves about 800 MB, at 51 GB/s about 16 ms before arithmetic; HBM3 3,350 GB/s against mobile 51 to 77 GB/s."
+    numbers: "Apple ratings 0.6 TOPS (A11, 2017) to nearly 35 (A17 Pro, 2023), precision unstated (figure 5); 800 MB per step, 20x the weight bytes, 51 GB/s, 16 ms; 44 to 65x gap (§11.3.4)."
+    example: "The 10M-parameter model of question 3."
+    read: "§11.3.4 (The mobile memory wall)"
+  - id: 6
+    q: "Which term of the update budget does each adaptation method shrink?"
+    picture: "Equation 1 as a stacked bar (resident weights, trainable state, peak activations plus workspace) with bias-only, LoRA/adapters, TinyTL, and head-only mapped to the term each shrinks; built in three steps."
+    numbers: "LoRA rank 4 on 768 x 768: 589,824 to 6,144 trainable parameters (§11.4.3); TinyTL up to 6.5x training-memory saving (Cai et al. 2020, via §11.4.2); Napkin Math 11.2: 400 MB against 42 MB, 9.5x."
+    example: "Keyboard: one adapter per user; camera: ten switchable contexts."
+    read: "§11.4"
+  - id: 7
+    q: "What does one background update cost in battery?"
+    picture: "Estimate card and a 15 Wh battery bar with 2.25 Wh shaded."
+    numbers: "Napkin Math 11.1: 4.5 W x 0.5 h = 2.25 Wh = 15 percent of 15 Wh; burst 10 W empties 15 Wh in about 1.5 h (Lighthouse 11.1)."
+    example: "Voice-assistant fine-tune."
+    read: "§11.3.5"
+  - id: 8
+    q: "How large is a training second against an inference?"
+    picture: "MLPerf Tiny and vendor energy per inference (MLSysIM EdgeInferenceBenchmarks, chapter figure 6) with a band for one second of training at 2 to 3 W."
+    numbers: "Keyword spotting 30 to 160 uJ; Coral 4.8 mJ; Jetson AGX Orin 15 mJ (ResNet-50); 2 to 3 J per training second (§11.3.4)."
+    example: "An always-on wake-word detector."
+    read: "§11.3.4"
+  - id: 9
+    q: "When may the runtime admit an update?"
+    picture: "Equation 2 revealed term by term; Gboard's real eligibility rules beneath."
+    numbers: "Equation 2; Gboard: charging, idle, unmetered network, at least 2 GB available (Hard et al. 2018 §5); 4x day-night swing in participating devices (Bonawitz et al. 2019 §9)."
+    example: "Keyboard (Example 11.1)."
+    read: "§11.3.5"
+  - id: 10
+    q: "What does one federated round cost in Fleet Law terms?"
+    picture: "New round timeline in three steps: select 1.3K and broadcast; local epochs with a straggler; deadline, upload, aggregate; each span labeled with its Fleet Law term."
+    numbers: "Equation 3; Gboard: 100 to 500 updates per round, about 2 to 3 min per round, 3,000 rounds (Hard et al. 2018 §5; Bonawitz et al. 2019 §8)."
+    example: "Keyboard round."
+    read: "§11.1, §11.6.2"
+  - id: 11
+    q: "Does more local work per round cut the rounds to target?"
+    picture: "McMahan et al. 2017 Table 2 replotted: rounds to 99 percent on the MNIST CNN against updates per round u, IID and pathological non-IID, FedSGD baseline marked."
+    numbers: "IID: 626 rounds (FedSGD) to 18 (u = 1,200), 34.8x; non-IID: 483 to 173, 2.8x; non-IID E = 5, B = full: 1,000 rounds, 0.5x (Table 2)."
+    example: "Client drift; FedProx and SCAFFOLD (§11.6.2)."
+    read: "§11.6.2"
+  - id: 12
+    q: "Is a 2.5 MB update a bandwidth saving?"
+    picture: "Cumulative upload per device against rounds, with the 200 MB raw-data line; daily and hourly schedules marked."
+    numbers: "Napkin Math 11.3: 200 MB against 2.5 MB, 80x per round; break-even after 80 rounds; 7 rounds a week saves, 168 a week loses; equation 4; 50 MB adapter at 1 Mb/s about 400 s (derived, decimal MB)."
+    example: "Camera personalization."
+    read: "§11.7.2"
+  - id: 13
+    q: "How can the server sum updates it cannot read, and what does that cost?"
+    picture: "Masked cells: A adds s, B subtracts s, the sum cancels (chapter figure 16, redrawn); then a dropout leaves masks uncancelled, survivors' shares rebuild them, and a floor of survivors is required."
+    numbers: "Bonawitz et al. 2017 (masking); Bonawitz et al. 2019 §6: four-round protocol, costs grow quadratically with users, limiting one instance to hundreds of users, so groups of at least k are aggregated per Aggregator."
+    example: "Gboard production rounds."
+    read: "§11.7.4"
+  - id: 14
+    q: "How many selected phones finish a round?"
+    picture: "Bonawitz et al. 2019 Table 1 as bars, with the logged session shapes (-v[]+^, -v[]+#, -v[!) as the real log artifact: 75 percent complete, 22 percent rejected as late, 2 percent interrupted. Shown in segment 3, before the dropout frame."
+    numbers: "1,116,401 / 327,478 / 29,771 sessions; dropout 6 to 10 percent; server selects 130 percent of target (§9 and Appendix A)."
+    example: "Over-selection (§11.7.1)."
+    read: "§11.7.1"
+  - id: 15
+    q: "Whose behavior does the shared model learn?"
+    picture: "Coverage funnel (deployed, admitted, selected, completed) with cohort shares; then coverage ratio bars; AI Benchmark spread across phones."
+    numbers: "Coverage ratio definition (§11.7.1); funnel shares illustrative (chapter figure 13); AI Benchmark: about 400x across 2020 to 2026 processors, 14x within one generation (§11.7.5.2, MLSysIM series)."
+    example: "Budget phones that rarely charge overnight."
+    read: "§11.7.1, §11.7.5.2"
+  - id: 16
+    q: "What goes wrong over a year of small local updates?"
+    picture: "Illustrative curves: new-task accuracy rises, old-task accuracy falls; shared base aggregated, personal head kept local."
+    numbers: "Illustrative (chapter forgetting figure); FedPer partition (Arivazhagan et al. 2019, via §11.7.3)."
+    example: "Activity tracker that learns cycling and forgets walking."
+    read: "§11.5.2, §11.7.3, §11.8"
+  - id: 17
+    q: "What does a release contain once models learn after release?"
+    picture: "Shadow gate: frozen baseline and adapted candidate on the same inputs; disagreement above tau holds the candidate; validated outcome clears or rolls back."
+    numbers: "Up to 50 model versions active at once (table 9); policy bundle by tier (§11.9, §11.10)."
+    example: "Voice assistant on 50 million devices: rank 32 LoRA on flagships, rank 16 on mid-tier, bias-only on budget phones (§11.9)."
+    read: "§11.10"
+
+concept_trace:
+  - concept: "Local training must earn its place"
+    frame: "Three designs differ in what crosses the device boundary"
+    shows: "boundary_step1-3: panel 0 (frozen model plus local features) before A, B, C"
+  - concept: "Update working set within the background allowance"
+    frame: "Predict: will this model train in 300 MB?"
+    shows: "amp_step1-3: 40 MB weights growing to 360 MB against the 200 to 300 MB allowance"
+  - concept: "Background adaptation admission"
+    frame: "An update runs only if all three tests hold"
+    shows: "equation 2 revealed term by term, Gboard's eligibility rules beneath"
+  - concept: "FedAvg under sampling and non-IID data"
+    frame: "Predict: does more local work cut the rounds?"
+    shows: "fedavg_step1-2: McMahan et al. Table 2, IID against non-IID"
+  - concept: "Participation selection"
+    frame: "Diagnose: whose typing does the model learn?"
+    shows: "coverage_step1-2: funnel and coverage ratio bars"
+  - concept: "Federated uplink budget"
+    frame: "Estimate: is a 2.5 MB update a saving?"
+    shows: "uplink: cumulative uploads crossing 200 MB at round 80; equation 4 on the card"
+  - concept: "Secure aggregation"
+    frame: "Masks hide each update and cancel in the sum; A dropout leaves masks that survivors must rebuild"
+    shows: "secagg_step1-3 and secagg_drop"
+  - concept: "Adaptive fleet release policy"
+    frame: "Once models learn after release, the release is a policy"
+    shows: "gate_step1-2 and the policy-bundle card"
+
+secondary_trace:
+  - concept: "Adaptation method by budget term"
+    frame: "Each adaptation method shrinks a different budget term"
+  - concept: "Scarce local evidence allocation"
+    frame: "A year of small updates can forget"
+  - concept: "On-device drift and forgetting"
+    frame: "A year of small updates can forget"
+  - concept: "Personalization state boundary"
+    frame: "A year of small updates can forget (shared base, personal head)"
+  - concept: "Version-compatible aggregation"
+    frame: "Once models learn after release, the release is a policy (versions bound to round and base)"
+
+worked_examples:
+  - name: "Napkin Math 11.1: battery drain"
+    steps: ["given: 4.5 W for 30 min; 15 Wh battery", "2.25 Wh", "15 percent", "admission must gate energy, heat, and foreground deadline separately"]
+  - name: "Napkin Math 11.3: updates against raw data"
+    steps: ["given: 200 MB raw a week; 2.5 MB update", "80x per round", "break-even 80 rounds", "daily rounds save, hourly rounds lose"]
+  - name: "Coverage ratio (illustrative)"
+    steps: ["given: budget phones 20 percent of the fleet, 5 percent of completed updates", "ratio 0.25", "stratify among admitted phones", "a phone never admitted cannot be reweighted back"]
+  - name: "Napkin Math 11.2: the hidden cost of personalization"
+    steps: ["10 x 40 MB = 400 MB", "40 MB + 10 x 0.2 MB = 42 MB", "9.5x total, 200x per context"]
+
+active_learning:
+  - at_minute: 1
+    type: predict
+    prompt: "Did the phone-trained keyboard model beat the data-center model?"
+    answer: "C: 15.8 against 15.0 percent top-1 recall on client caches (Hard et al. Table 4); ties on logs."
+  - at_minute: 5
+    type: retrieval
+    prompt: "What is SLO goodput? Write the Fleet Law."
+    answer: "Requests per second that meet the latency contract (Lecture 10); T_step = T_compute/N + T_comm + T_sync - T_overlap (Lecture 1)."
+  - at_minute: 15
+    type: predict
+    prompt: "A 10M-parameter model has 40 MB of FP32 weights. Will its full fine-tune fit a 300 MB allowance?"
+    answer: "No: 360 MB with Adam and 200 MB of saved activations (figure 3)."
+  - at_minute: 28
+    type: estimate
+    prompt: "4.5 W for 30 minutes on a 15 Wh battery: what share?"
+    answer: "2.25 Wh, 15 percent."
+  - at_minute: 33
+    type: concept_question
+    prompt: "Which admission test does charging relax?"
+    answer: "Energy only; heat and the foreground deadline remain."
+  - at_minute: 39
+    type: predict
+    prompt: "Non-IID clients, 5 local epochs: more or fewer rounds than one step per round?"
+    answer: "More: 1,000 against 483 (McMahan et al. Table 2)."
+  - at_minute: 43
+    type: estimate
+    prompt: "200 MB raw a week against a 2.5 MB update: when do uploads break even?"
+    answer: "80 rounds; daily saves, hourly loses."
+  - at_minute: 50
+    type: concept_question
+    prompt: "True or false: federated learning keeps data local, so it is private."
+    answer: "False: updates leak (gradient inversion); secure aggregation and differential privacy guard different boundaries."
+  - at_minute: 57
+    type: diagnose
+    prompt: "Budget phones are 20 percent of the fleet and 5 percent of completed updates. Ratio and fix?"
+    answer: "0.25; stratified sampling among admitted phones and per-cohort evaluation; never-admitted phones need a policy change."
+  - at_minute: 66
+    type: retrieval
+    prompt: "Close your notes: what did the Gboard model cost each phone, the network, and the population?"
+    answer: "A gated update; 3,000 rounds of uploads; only charging, idle, unmetered phones with 2 GB taught it."
+
+open_questions:
+  - "Gboard's eligibility rule (charging, idle, unmetered) protects users and skews the population. Who should decide that trade, and on what evidence?"
+  - "Phone NPUs keep growing in TOPS but rarely run backward passes. Should phone chips be designed for training at all?"
+  - "If a model keeps learning on 50 million devices, what does it mean to certify it?"
+
+more_examples:
+  - "Gboard next-word prediction (Hard et al. 2018) and production system (Bonawitz et al. 2019)."
+  - "Apple Neural Engine ratings, 2017 to 2023 (Apple statements via MLSysIM)."
+  - "MLPerf Tiny keyword spotting on Syntiant Core 2 and STM32N6 (MLSysIM EdgeInferenceBenchmarks)."
+  - "ETH Zurich AI Benchmark processor ranking (MLSysIM series, snapshot 2026-10-12)."
+  - "Williston, Florida, 7 May 2016 (NTSB HAR-17/02)."
+
+further_reading:
+  - cite: "Edge Intelligence, §11.3 to §11.7, with Napkin Math 11.1 to 11.3"
+    why: "The chapter's budgets, admission test, and federated round."
+  - cite: "McMahan et al., Communication-Efficient Learning of Deep Networks from Decentralized Data, AISTATS 2017"
+    url: "https://arxiv.org/abs/1602.05629"
+    why: "FedAvg and the IID against non-IID round counts."
+  - cite: "Bonawitz et al., Towards Federated Learning at Scale: System Design, MLSys 2019"
+    url: "https://arxiv.org/abs/1902.01046"
+    why: "The production system: eligibility, over-selection, secure aggregation groups, session outcomes."
+  - cite: "Hard et al., Federated Learning for Mobile Keyboard Prediction, 2018"
+    url: "https://arxiv.org/abs/1811.03604"
+    why: "The keyboard case with measured recall and click-through."
+  - cite: "Bonawitz et al., Practical Secure Aggregation for Privacy-Preserving Machine Learning, CCS 2017"
+    url: "https://doi.org/10.1145/3133956.3133982"
+    why: "The masking and recovery protocol."
+  - cite: "Cai et al., TinyTL, NeurIPS 2020"
+    url: "https://arxiv.org/abs/2007.11622"
+    why: "Why activations, not trainable parameters, bind on-device training."
+
+callbacks:
+  - {lecture: 10, concept: "SLO goodput and the serving tax", where: "recall frame; admission frame note"}
+  - {lecture: 1, concept: "Fleet Law", where: "recall frame; Archetype C frame; round timeline figure labels and note"}
+  - {lecture: 1, concept: "C3 taxonomy", where: "Archetype C frame note"}
+  - {lecture: 2, concept: "Rack power wall", where: "Archetype C frame note"}
+  - {lecture: 2, concept: "Capacity and bandwidth are separate tests", where: "NPU ratings frame card and note"}
+  - {lecture: 6, concept: "Synchronization models and stragglers", where: "round timeline frame note"}
+  - {lecture: 5, concept: "Gradient compression with error feedback", where: "uplink frame note"}
+  - {lecture: 13, concept: "Differential privacy", where: "privacy concept-question frame and note"}
+  - {lecture: 13, concept: "Leakage through authorized outputs", where: "privacy concept-question frame note"}
+  - {lecture: 13, concept: "Poisoning as a bilevel attack", where: "secure aggregation dropout frame note"}
+  - {lecture: 8, concept: "Feasibility before fairness", where: "coverage diagnose frame and note"}
+  - {lecture: 14, concept: "Shift taxonomy", where: "forgetting frame note"}
+  - {lecture: 12, concept: "Staged rollout exposure budget", where: "release frame and note"}
+  - {lecture: 12, concept: "Dependency-aware registry", where: "release frame note"}
+  - {lecture: 12, concept: "ML Operations at Scale (next lecture title)", where: "closing frame"}
+  - {lecture: 1, concept: "Thread: C3 taxonomy and the Fleet Law (D4)", where: "goals slide, Fleet Law term line: T_compute/N and T_comm(N); Compute (C1) and Communication (C2)"}
+left_to_reading:
+  - concept: "Sparse updates and contribution analysis (TinyTrain, §11.4.4)"
+    why: "Detail; the budget-term slide names the idea."
+  - concept: "Compressed replay representations and MFCCs (§11.5.3)"
+    why: "Detail better read than heard."
+  - concept: "Cross-silo federation (§11.6.1)"
+    why: "Lecture stays on cross-device phones; table 6 contrasts."
+  - concept: "Continual self-supervised learning (§11.8.1)"
+    why: "Second-order detail."
+
+closing:
+  return_to_hook: "Gboard matched the data-center model because each phone passed an admission test, sent a small update over 3,000 rounds, and summed through the coordinator; the learned population was charging, idle, unmetered phones with 2 GB free."
+  read_and_practice: ["§11.3 to §11.7", "Napkin Math 11.1 to 11.3", "self-check questions §11.3, §11.7"]
+  bridge: "Next lecture, ML Operations at Scale: a release that keeps changing is one of hundreds of models sharing features and owners; how does an organization keep them all versioned and recoverable?"
+
+coverage:
+  primary_taught: ["Local training must earn its place", "Update working set within the background allowance", "Background adaptation admission", "FedAvg under sampling and non-IID data", "Participation selection", "Federated uplink budget", "Secure aggregation", "Adaptive fleet release policy"]
+  primary_left_to_reading: []
+  secondary: ["Adaptation method by budget term", "Scarce local evidence allocation", "On-device drift and forgetting", "Personalization state boundary", "Version-compatible aggregation"]
+
+numbers: "Every derived number on the slides and in the notes is computed and printed by images/calcs.py; its inputs carry their sources."
+
+notes_for_author:
+  - "Second deck possible: boundary after segment 2 (device side) and segments 3 and 4 (fleet side)."
+  - "The coverage-funnel shares and forgetting curves are illustrative, as in the chapter, and are labeled so on the slides."
+  - "2026-10-19 sweep (D4, D10). D4: the goals slide names, once, the Fleet Law term (T_compute/N and T_comm(N)) and C3 axis (Compute (C1) and Communication (C2)) in the volume's one form (the \\fleetterm line). D10: X-not-Y constructions and reveal colons rewritten. No exhibit here is retold from another lecture (D3)."

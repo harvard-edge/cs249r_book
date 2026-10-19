@@ -1,0 +1,639 @@
+% =============================================================================
+% Lecture 13: Agent Evaluation
+% Agentic Machine Learning Systems (Volume III), Chapter 13
+% =============================================================================
+% Thesis: a completed run is one draw from a stochastic process judged by a
+% fallible grader, so a claim about a configuration needs a contract, a sealed
+% environment, a calibrated grader, enough paired tasks, and its cost.
+% Hook: NM 13.2, a task accepted on 90 percent of single runs passes all 8
+% recurrences 43 percent of the time. Running case: the repair agent's
+% candidate_v2 against baseline_v1 (the chapter's worksheet), plus a small real
+% evaluation run for this lecture (images/data/eval_run.py): 12 repair tasks,
+% 8 runs each, two configurations of a local model, a sealed grader.
+%
+% Build: make deck V=3 D=13_evaluation   (figures: images/make_figs.py)
+% Plan:  lecture_map.yml in this folder.
+% Numbers: images/calcs.py prints every derived value; sources named there.
+% =============================================================================
+
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+\mlsyssetup{
+  volume={Volume III},
+  chapter={Chapter 13},
+  chaptertitle={Agent Evaluation},
+  layer=runtime,
+  logo={../../assets/img/logo-mlsysbook.png},
+  instlogo={../../assets/img/logo-harvard.png},
+}
+\usepackage[T1]{fontenc}
+\usepackage[scaled=0.9]{helvet}
+\usepackage{courier}
+% Code and real tool output: Inconsolata is narrower than Courier.
+\usepackage[varqu,scaled=0.95]{zi4}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{booktabs,amsmath}
+\usetikzlibrary{arrows.meta,positioning}
+\graphicspath{{images/}}
+\setcounter{mlsystotalsections}{5}
+
+\title{Agent Evaluation}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+% A large answer choice for predict and concept-question slides
+\newcommand{\choice}[2]{\textbf{\textcolor{mlsysaccent}{#1}}\enspace #2}
+% A choice that is highlighted from overlay #1 on (the answer)
+\newcommand{\answerat}[3]{\alt<#1->{\colorbox{mlsysaccent!15}{\choice{#2}{#3}}}{\choice{#2}{#3}}}
+% A goal or takeaway line with its thumbnail
+\newcommand{\thumbline}[2]{%
+  \begin{minipage}[c]{2.6cm}\centering\includegraphics[width=2.5cm,height=0.95cm,keepaspectratio]{#1}\end{minipage}%
+  \hspace{0.3cm}\begin{minipage}[c]{0.74\textwidth}\raggedright\small #2\end{minipage}}
+% One line of a worked example: shown from overlay #1 on
+\newcommand{\wstep}[2]{\uncover<#1->{#2}\\[0.2cm]}
+% A block of real code or output, set in type at the legibility floor
+\newcommand{\codeblock}[1]{%
+  \begin{mlsyscard}{midgray}\footnotesize\ttfamily\raggedright #1\end{mlsyscard}}
+% Indentation inside a code block
+\newcommand{\ind}[1]{\hspace*{#1em}}
+% Golden-thread tag: one line on the goals slide naming the H·S·A term this lecture acts on
+\newcommand{\hsathread}[1]{{\scriptsize\textbf{\textcolor{mlsysaccent}{H·S·A thread:}} #1\par}}
+% Volume III role colors used in the figures, for text beside them
+\definecolor{figblue}{HTML}{0284C7}
+\definecolor{figpurple}{HTML}{7C3AED}
+\definecolor{figred}{HTML}{DC2626}
+\definecolor{figgreen}{HTML}{16A34A}
+
+\begin{document}
+
+% =============================================================================
+% TITLE AND HOOK
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Read the thesis aloud once. Lecture 12 left the repair agent recovered: a fresh check passes on its workspace and its temporary environment is released. Today asks what that pass proves. The notes total about 70.5 minutes; the core lecture is about 58. FLEX: cutting every [OPTIONAL] frame (the scaffold spread, the leakage log, the judge-bias table, the tasks-or-repeats budget, the Wilson panel, the token table, open questions) leaves a complete lecture. Cut first the judge-bias table and the open questions.}
+\mlsystitle{Agent Evaluation}{A completed run is one draw judged by a fallible grader; a claim about a configuration needs a contract, a sealed environment, a calibrated grader, enough paired tasks, and its cost.}{cover_evaluation_blueprint.png}
+
+\begin{frame}{Predict: how often does a 90\% agent pass 8 times?}
+  \mlsysactivity{Predict}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.40\textwidth}
+      \small A support agent answers one recurring question correctly on \textbf{90\%} of single runs.\\[0.25cm]
+      {\normalsize How often is it right on all 8 recurrences?}\\[0.25cm]
+      \choice{A}{about 90\%}\\[0.1cm]
+      \choice{B}{about 70\%}\\[0.1cm]
+      \answerat{2}{C}{about 43\%}\\[0.1cm]
+      \choice{D}{about 10\%}
+    \end{column}
+    \begin{column}{0.58\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=5.0cm,keepaspectratio]{hook_step}{2}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Agent Evaluation, Napkin Math 13.2 (illustrative rate); curves from equations 4 and 5 (images/calcs.py).}
+  \note{[3 min] [CORE] Napkin Math 13.2. One run of a recurring task is accepted 90 percent of the time. ENGAGE: one minute, vote with fingers. Step 2: C. Recurrences compound exactly as turns do in Lecture 1's horizon compounding: 0.9 to the 8th is 0.43. At 80 percent per run it is 17 percent. The blue curve is the opposite claim, pass@8: at least one of 8 runs passes, effectively 100 percent. The purple curve, pass$^k$ (read "pass power k"), is that all k pass. Same system, same runs; one quantifier says near certain, the other says a coin flip. Students who chose A think a rate per run is a rate per customer; students who chose B subtracted 8 times something. To hold 90 percent over 8 recurrences, a single run must pass 98.7 percent of the time: the failure rate must fall from 10 to 1.3 percent, a 7.6 times cut. WARN: the 90 percent is illustrative. Two slides on, the same gap appears in published measurements. FLEX: [CORE]; the synthesis returns here.}
+\end{frame}
+
+\begin{frame}{Recall: what did recovery leave unanswered?}
+  \mlsysactivity{Retrieval}{1.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.56\textwidth}
+      {\Large\bfseries Close your notes.}\\[0.3cm]
+      {\normalsize Lecture 12: what does compensation undo, and what does a durable record not do?}\\[0.3cm]
+      \uncover<2->{\small \textbf{\textcolor{mlsysaccent}{Compensation}} reverses completed effects in dependency order.\\[0.1cm]
+      A durable record does not change the world, so recovery decides on incomplete evidence.}
+    \end{column}
+    \begin{column}{0.40\textwidth}
+      \centering\safeimg[width=\textwidth,height=1.3cm,keepaspectratio]{thumb_saga.pdf}\\[0.05cm]
+      {\footnotesize forward steps, then compensations in reverse}\\[0.2cm]
+      \uncover<3->{\begin{mlsyscard}{mlsysaccent}\small\textbf{Today:} recovery kept ws\_r18 unresolved and released the test environment. Did the task succeed?\end{mlsyscard}}
+    \end{column}
+  \end{columns}
+  \note{[1.5 min] [CORE] Retrieval, 45 seconds. Step 2: Lecture 12 taught compensation: when a multi-step task must be abandoned, the runtime reverses completed effects in dependency order. A durable log (Lecture 11) records what happened but does not undo it. Step 3: the chapter's running case. Recovery reconstructed candidate workspace ws\_r18, kept its interrupted test unresolved instead of guessing, and released the integration-test environment. Every runtime mechanism so far guards execution integrity: permitted actions, a durable log, undone partial effects. None of them says whether the patch fixes the bug. ENGAGE: the agent reports ``done.'' Which of the closure evidence levels from Lecture 1 is that? (Expected: self-report, the weakest.) FLEX: a student who missed Lecture 12 needs only this slide.}
+\end{frame}
+
+\begin{frame}{Measured: under 25\% of retail tasks pass all 8 trials}
+  \begin{columns}[c]
+    \begin{column}{0.50\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{callcentre.jpg}\\[0.05cm]
+      {\footnotesize A customer support floor: the work the support agent replaces}
+    \end{column}
+    \begin{column}{0.47\textwidth}
+      \small\textbf{$\tau$-bench} (Yao et al., 2024): simulated customers, real tool APIs, graded on the final database state.\\[0.3cm]
+      Strongest function-calling agent tested:\\[0.1cm]
+      {\large\textbf{\textcolor{figblue}{under 50\%}}} of tasks on one run\\[0.1cm]
+      {\large\textbf{\textcolor{figpurple}{under 25\%}}} pass$^8$, retail domain
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Yao et al., ``$\tau$-bench,'' arXiv 2406.12045, abstract (gpt-4o). Photo: Petiatil, public domain, Wikimedia Commons.}
+  \note{[1 min] [CORE] The support agent is the course's interactive responder (Lecture 1's lighthouses). Its work is a customer asking a policy question, again and again, in many sessions. $\tau$-bench, from 2024, simulates that customer with a language model, gives the agent real tool APIs and a policy document, and grades each conversation by comparing the final database state with the goal state. It introduced pass$^k$ to agent benchmarks. The strongest agent its authors tested succeeded on fewer than half the tasks once, and in the retail domain fewer than a quarter of tasks passed all 8 trials. ENGAGE: why can the support agent not retry? (Expected: the customer has already read the wrong answer.) WARN: the specific agents will age; the pattern does not, because consistency over repeats always sits below single-run success once any task passes with probability below one. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Evaluation examines all three exposures at once}
+  \begin{columns}[c]
+    \begin{column}{0.36\textwidth}
+      \centering\mlsyskitfig[width=\textwidth,height=5.2cm,keepaspectratio]{stack_runtime}
+    \end{column}
+    \begin{column}{0.20\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.6cm,keepaspectratio]{hsa_locator_hsa.pdf}\\[0.1cm]
+      {\footnotesize H: horizon, in turns\\ S: state carried\\ A: authority held}
+    \end{column}
+    \begin{column}{0.38\textwidth}
+      {\large\bfseries Why is a completed agent run not enough evidence that the configuration behind it works?}
+    \end{column}
+  \end{columns}
+  \note{[1 min] [CORE] Part IV, the runtime, continues. On the H·S·A locator from Lecture 1, all three axes are lit. Evaluation checks the state a result rests on (the artifact and the environment), the resources its horizon consumed (tokens, money, time), and the authority it exercised (what it touched). Lectures 10 to 12 kept a run safe; today decides what a set of runs proves. Read the driving question aloud. Every segment answers part of it.}
+\end{frame}
+
+\begin{frame}{By the end of today you can}
+  \thumbline{thumb_dims_step2.pdf}{Write an acceptance contract with four verdicts, and keep unresolved trials in the count.}\\[0.16cm]
+  \thumbline{thumb_gym_step3.pdf}{Design a hermetic trial whose grader neither the agent nor its code can reach.}\\[0.16cm]
+  \thumbline{thumb_confusion_step2.pdf}{Calibrate a grader by its false-acceptance rate on reference failures.}\\[0.16cm]
+  \thumbline{thumb_hook_step2.pdf}{Size an interval, compare two configurations by paired tasks, and pick pass@k or pass$^k$.}\\[0.16cm]
+  \thumbline{thumb_batch.pdf}{Compare policies under a matched budget by cost per accepted task.}\\[0.16cm]
+  \hsathread{closes all three exposures}
+  \note{[1 min] [CORE] Five goals, one per segment. Running case: the repair agent's connection-pool repair, task pool\_repair\_01. A new configuration, candidate\_v2 (a changed prompt, tool schemas, recovery policy, or model), must be compared with the deployed baseline\_v1. A fresh trial of candidate\_v2 produces a new workspace, ws\_r19. Beside the chapter's worksheet we ran a small real evaluation for this lecture: 12 repair tasks, 8 runs each, two configurations of a local model, graded by sealed tests. Its numbers appear in every segment.}
+\end{frame}
+
+% =============================================================================
+% SECTION: ACCEPTANCE
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] First segment: what counts as one accepted task.}
+\mlsysdivider{What evidence credits one trial as an accepted task?}{Agent Evaluation, \S13.1 and \S13.2}
+\section{Acceptance}
+
+\begin{frame}{The same model scores 58\% to 80\% across 11 scaffolds}
+  \centering
+  \safeimg[width=0.95\textwidth,height=6.0cm,keepaspectratio]{scaffold.pdf}
+  \mlsyscredit{Terminal-Bench 2.0 leaderboard (Merrill et al. 2026) via the Epoch AI Benchmarking Hub; MLSysIM, Literature.TerminalBenchHarness. Models with 5 or more scaffolds.}
+  \note{[2 min] [OPTIONAL] Real leaderboard data. Each row is one model; each dot is the same model run inside a different agent scaffold (the prompts, tool definitions, and control loop around it) on the same terminal-task benchmark. The purple row, claude-opus-4-6, scores from 58 to 80 percent across 11 scaffolds. The median spread across the 16 models is 14 points, against a median reported standard error of about 3 points, so the spreads are far larger than sampling noise. ENGAGE: a team reports ``model X scores 70 percent.'' What is missing from that claim? (Expected: the scaffold, so the full configuration.) WARN: students credit the model for a score the configuration earned. This is why the system under test, candidate\_v2, is declared in full: model, prompts, tools, harness. FLEX: [OPTIONAL]; say the 58 to 80 sentence if cut.}
+\end{frame}
+
+\begin{frame}{An accepted task needs evidence in four dimensions}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=5.4cm,keepaspectratio]{dims_step}{2}
+  \mlsyscredit{After Agent Evaluation, \S13.2.1, table 1 and definition 13.1.}
+  \note{[2 min] [CORE] Definition 13.1: an accepted task is a completion credited to a trial because the evidence satisfies its declared outcome, process, resource, and residual-duty criteria. A trial is one execution; a rerun is a new trial of the same task. Step 1: four separate evidence streams. Proposal validity: a schema rejection that the agent then repairs need not fail the trial. Execution behavior: a timeout can leave the test unresolved. Task outcome: checks on the exact bytes of ws\_r19, never an earlier result from ws\_r18. Constraint compliance: authority, budget, and who owns leftover work. Step 2: the streams supply the criteria, and each audits an exposure: compliance the authority exercised, outcome checks the state the result rests on, resource checks what the horizon consumed. This is Lecture 1's task contract made checkable. ENGAGE: good final code, but the agent read a forbidden credential store. Accepted? (Expected: no; a good outcome does not erase a prohibited effect.) WARN: collapsing all checks into one bit makes a repaired schema error look like a broken patch. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Pending and unknown trials stay in the denominator}
+  \begin{columns}[c]
+    \begin{column}{0.36\textwidth}
+      \small
+      \textbf{\textcolor{figgreen}{pass}}: evidence meets the criterion\\[0.08cm]
+      \textbf{\textcolor{figred}{fail}}: evidence shows a violation\\[0.08cm]
+      \textbf{pending}: check still running\\[0.08cm]
+      \textbf{unknown}: no evidence at the cutoff\\[0.25cm]
+      Accept only if every mandatory criterion passes. Any fail ends it.
+    \end{column}
+    \begin{column}{0.62\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=3.6cm,keepaspectratio]{verdicts_step}{2}\\[0.05cm]
+      {\footnotesize 100 trials: 60 accepted, 25 failed, 15 unresolved (illustrative)}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Agent Evaluation, \S13.2.3, the four-verdict rule. Counts illustrative; rates from images/calcs.py.}
+  \note{[2.5 min] [CORE] Each criterion resolves to one of four verdicts. Pending and unknown are evaluation verdicts, kept apart from the trajectory's own states. The aggregation short-circuits: one established failure of a mandatory criterion fails the trial; acceptance needs every mandatory criterion to pass; otherwise the trial stays pending or unknown. Step 1: 100 trials, of which 15 timed out or crashed. The chapter's default counts them as not accepted, 60 percent, and reports the bounds from resolving all of them either way, 60 to 75 percent. Step 2: the common mistake. Drop the 15 and the rate becomes 70.6 percent. ENGAGE: which tasks are most likely to time out? (Expected: the hard ones, so dropping them leaves the easy ones; that is survivorship bias.) WARN: dropping open trials also lowers the reported cost per accepted task without making the system cheaper. LINK: Lecture 10's bounded-liability admission keeps outstanding reservations separate from settled charges; a cutoff does not cancel a running cloud job. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{A real grader once scored skipped tests as a full fix}
+  \begin{columns}[T]
+    \begin{column}{0.56\textwidth}
+      {\footnotesize\textbf{SWE-bench harness}, grading.py (excerpt)}\\[0.05cm]
+      \codeblock{def compute\_fail\_to\_pass(report):\\
+      \ind{1}total = len(success) + len(failure)\\
+      \ind{1}\alt<2->{\textcolor{figred}{\textbf{if total == 0:}}}{if total == 0:}\\
+      \ind{2}\alt<2->{\textcolor{figred}{\textbf{return 1}}}{return 1}\\
+      \ind{1}return len(success) / total\\[0.4em]
+      def test\_failed(case, sm):\\
+      \ind{1}return key is None or sm[key] in [\\
+      \ind{2}FAILED, ERROR,\\
+      \ind{2}\alt<3->{\textcolor{figpurple}{\textbf{\# a skipped F2P test is not a resolution}}}{\# a skipped F2P test is not a resolution}\\
+      \ind{2}SKIPPED]}
+    \end{column}
+    \begin{column}{0.41\textwidth}
+      \small FAIL\_TO\_PASS: tests the fix must turn green. PASS\_TO\_PASS: tests that must stay green.\\[0.2cm]
+      Resolved only if both rates equal 1.\\[0.2cm]
+      \uncover<2->{\textcolor{figred}{No evidence counts as 1.}\\[0.15cm]}
+      \uncover<3->{\textcolor{figpurple}{Missing evidence now fails.}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{github.com/SWE-bench/SWE-bench, swebench/harness/grading.py at commit 02e7a74 (2 September 2026). Excerpt; dictionary lookups shortened, comment line shortened.}
+  \note{[2.5 min] [CORE] Real grader code from the most widely used repair benchmark. SWE-bench grades a patch with two test lists: FAIL\_TO\_PASS tests reproduce the reported bug and must turn green; PASS\_TO\_PASS tests guard existing behavior and must stay green. A task counts as resolved only when both pass rates equal 1. Step 2: when a list is empty, the function returns 1. An absent observation becomes a perfect score. Step 3: the second function. Its comment in the source says it in full: a skipped FAIL\_TO\_PASS test is not a resolution; without counting skips as failures, a patch that makes every such test skip lands in neither list and scores as fully resolved. The maintainers changed it so that missing evidence fails. ENGAGE: under the four-verdict rule, what should a skipped required test be? (Expected: fail or unknown; it never defaults to pass.) WARN: a grader is software, and its defaults are evaluation policy. The repository's August 2026 commits also add ``reject eval runs with no results and no sign the test suite ran.'' FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Diagnose: can trial ws\_r19 be accepted now?}
+  \mlsysactivity{Diagnose}{3 min}
+  \footnotesize
+  \begin{tabular}{@{}P{3.0cm}P{6.6cm}P{2.9cm}@{}}\toprule
+    \textbf{Required evidence} & \textbf{Observed so far} & \textbf{Verdict} \\\midrule
+    Defect check & reproducer passed on ws\_r19 & pass \\
+    Regression suite & no complete result yet & \alt<2->{\textbf{\textcolor{mlsysaccent}{pending}}}{\textbf{?}} \\
+    Report scope & names the check run and missing coverage & pass \\
+    Permitted process & malformed proposal corrected before dispatch & pass \\
+    Resource accounting & final usage of one operation not in & \alt<2->{\textbf{\textcolor{mlsysaccent}{pending}}}{\textbf{?}} \\
+    Residual duties & a service accepted the leftover operation & pass (handoff) \\\bottomrule
+  \end{tabular}\\[0.25cm]
+  \normalsize
+  \only<1|handout:0>{No row has failed. Accept, reject, or neither?}%
+  \only<2->{\small\textbf{Neither: pending.} At the cutoff, open rows become \textbf{unknown}; one failed regression makes it \textbf{fail}.}
+  \mlsyscredit{Agent Evaluation, Example 13.1 and table 2 (repair\_accept\_v1).}
+  \note{[3 min] [CORE] Example 13.1. The trial submits ws\_r19 under the contract repair\_accept\_v1, which has six conditions. ENGAGE: two minutes in pairs. Read the table and decide. Step 2: neither. No row has failed, so the trial is not rejected; two required rows have not produced evidence, so it is not accepted. Its verdict is pending. If the regression suite later reports a failed assertion, it becomes fail at once, and the unresolved charge stays recorded. If the observation window closes first, the open rows become unknown. Students who say ``accept'' read the passing defect check as task completion; a targeted pass supports only its coverage. Students who say ``reject'' treat missing as failed. WARN: the handoff row passes only the handoff criterion; the external outcome is still unresolved, and a pass on one dimension never fills a gap in another. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Measured: 11 of 12 buggy functions pass their visible test}
+  \begin{columns}[c]
+    \begin{column}{0.52\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.5cm,keepaspectratio]{coverage.pdf}\\[0.1cm]
+      {\footnotesize Of baseline\_v1's 88 visible passes, \textbf{26} (29.5\%) fail the sealed tests.}
+    \end{column}
+    \begin{column}{0.45\textwidth}
+      {\footnotesize\textbf{One real submission}: passes the visible test, fails a sealed one}\\[0.05cm]
+      \codeblock{class BoundedPool:\\
+      \ind{1}...\\
+      \ind{1}def release(self, c):\\
+      \ind{2}\textcolor{figred}{if c in self.held:}\\
+      \ind{3}raise ValueError(...)\\
+      \ind{2}self.held.add(c)\\
+      \ind{2}self.free.append(c)}
+      {\footnotesize Sealed check: \texttt{release(5)} on a fresh pool must raise. It does not.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Measured 2026-10-19 for this lecture (images/data/eval\_run.py): qwen2.5 7B Q4\_K\_M on Ollama, temperature 0.8, 12 tasks $\times$ 8 runs per configuration; grader in a separate interpreter.}
+  \note{[2.5 min] [CORE] Our run. Twelve small repair tasks, each a buggy Python function with a description and one visible test; a sealed grader holds four or five hidden tests per task and runs them in a separate interpreter with a 10 second cutoff. First fact, before any model ran: the original buggy code passes its own visible test in 11 of 12 tasks. Left: 91.7 percent of trials pass the visible test in both configurations; only 64.6 and 68.8 percent pass the sealed tests. Right: one real submission for the connection-pool task. The model added a set of held connections but tests the wrong condition, so releasing a connection that was never acquired succeeds. The visible test never exercises that path. This is the coverage rule: a check establishes only what its cases exercise. LINK: Lecture 2's checks certify named properties. ENGAGE: what would a sealed test for the chapter's race condition need that a unit test lacks? (Expected: concurrent acquires, many interleavings.) WARN: a visible test the agent sees is fine as feedback; it cannot be the acceptance test. Land the segment aloud: acceptance is evidence on the exact artifact against declared criteria, and open verdicts stay counted. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: THE GYM
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Second segment: make trials comparable, and keep the evidence out of the agent's reach.}
+\mlsysdivider{How do we make trials comparable and keep the grader out of reach?}{Agent Evaluation, \S13.3}
+\section{The Gym}
+
+\begin{frame}{A hermetic gym declares what is provided, simulated, or blocked}
+  \begin{columns}[c]
+    \begin{column}{0.40\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.0cm,keepaspectratio]{glovebox.jpg}\\[0.03cm]
+      {\footnotesize A glovebox: work goes in through sealed ports}
+    \end{column}
+    \begin{column}{0.57\textwidth}
+      \small
+      \textbf{Fixture} pool\_fixture\_v1 pins:\\[0.05cm]
+      \hspace*{0.3cm}source revision and defect text\\
+      \hspace*{0.3cm}toolchain and package versions\\
+      \hspace*{0.3cm}service emulators and their faults\\
+      \hspace*{0.3cm}files the agent may read or edit\\[0.2cm]
+      \textbf{Hermetic} = every source of variation is declared, bounded, and recorded.\\[0.15cm]
+      \textcolor{midgray}{It promises neither identical model replies nor production fidelity.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Agent Evaluation, \S13.3 and table 3. Photo: Rune.welsh, CC BY-SA 3.0, Wikimedia Commons.}
+  \note{[1.5 min] [CORE] The glovebox is the picture of a hermetic boundary: the chemist works inside through sealed gloves, and the atmosphere inside is declared and controlled. An evaluation gym does the same for a trial. Its task fixture, pool\_fixture\_v1, pins the starting source revision and defect description, the language toolchain and package versions, the simulated test services, and the files the agent may touch. If a library updates between candidate\_v2's trials and baseline\_v1's, the score difference measures the update. Hermetic does not mean identical model replies; serving nondeterminism remains (Lecture 11's replay), so the run records every source of variation it cannot control. ENGAGE: a mock cloud API that always returns HTTP 200 at once. Which recovery claim can it never test? (Expected: handling a dropped acknowledgment or a timeout.) WARN: a perfect score against a simplified mock shows competence only in that simplified world; say what the fixture omits. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Grader isolation keeps the grader outside the agent and its code}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=6.1cm,keepaspectratio]{gym_step}{3}
+  \mlsyscredit{After Agent Evaluation, \S13.3.3 and \S13.3.4, figure 2 (redrawn).}
+  \note{[3.5 min] [CORE] Step 1: the task sandbox, one per trial. The agent edits and runs checks; writes land in a copy-on-write layer over a read-only base image; service fixtures stand in for dependencies; egress is blocked. Reset is more than git checkout: kill background processes, revoke session credentials, discard the layer (Lecture 8's reset contract). Step 2: the captured artifact ws\_r19 crosses to a grading boundary. A trusted controller holds the hidden tests, the criteria, and the result store, outside the candidate's reach. Step 3: submitted code stays untrusted after the agent stops. The controller sends selected tests to a separate, limited execution of the candidate, treats its stdout and exit code as untrusted observations, and binds each verdict to the SHA-256 digest of ws\_r19. ENGAGE: hidden tests imported into the candidate's own Python interpreter. What can the candidate do? (Expected: monkey-patch assertions or the test runner.) Then ask which step stops each: a timer overwritten, an evaluator patched, a cached answer returned. (Expected: Step 2 keeps the scorer out of reach; Step 3 keeps candidate code from touching it.) LINK: Lecture 17 opens with what a reachable scorer does: METR's o3 hacked 39 of 128 runs that could see it. WARN: read-only mounts stop overwrites but still allow reading. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{The reference fix leaked through the sandbox's git history}
+  \begin{columns}[T]
+    \begin{column}{0.60\textwidth}
+      {\footnotesize\textbf{An agent's tool call in a SWE-bench Verified trial}}\\[0.05cm]
+      \codeblock{cd /testbed \&\& git log -{}-oneline -{}-all\\
+      \ind{1}| grep -i "bracket\textbackslash|parametrize\textbackslash|modpath"\\[0.4em]
+      \textcolor{figred}{Fix incorrect result of getmodpath method.}\\
+      -\ind{1}s = ".".join(parts)\\
+      -\ind{1}return s.replace(".[", "[")\\
+      +\ind{1}return ".".join(parts)}
+    \end{column}
+    \begin{column}{0.37\textwidth}
+      \small The task's future commits were still in the repository.\\[0.15cm]
+      \texttt{git log -{}-all} returned the reference fix.\\[0.25cm]
+      \textcolor{midgray}{Mitigation: remove remotes, branches, tags, and the reflog.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{SWE-bench issue \#465, ``Repo State Loopholes During Agentic Evaluation,'' J. Kahn, 3 September 2025 (pytest-dev\_\_pytest-6202 trajectory). Excerpt.}
+  \note{[2.5 min] [CORE] A real leakage report, September 2025. In a SWE-bench Verified trial on a pytest bug, the agent ran git log over all branches and searched for words from the issue. The repository inside the sandbox still held commits from after the task's starting point, and the log printed the reference fix, diff and all. The reporter found the same pattern in trajectories from several models. The mitigation: remove the remote, every branch, tags, and the reflog from the fixture. Pre-trial leakage takes three forms: contamination (the solution was in pretraining data), retrieval (an index holds it), and runtime leakage (a memory store or the environment carries it from an earlier run). ENGAGE: was the sandbox broken? (Expected: no; egress may have been blocked. The fixture held the answer.) WARN: a similarity threshold against training data never proves independence. LINK: Lecture 15 owns the task-group split protocol that keeps contaminated records out of training. FLEX: [CORE]; with the grader-isolation frame, this is the segment's real evidence.}
+\end{frame}
+
+\begin{frame}{Vote: which suite still leaks after a clean reset?}
+  \mlsysactivity{Concept question}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.62\textwidth}
+      \normalsize
+      \choice{A}{hidden tests mounted read-only in the workspace}\\[0.2cm]
+      \choice{B}{a held-out suite used to pick each prompt change}\\[0.2cm]
+      \choice{C}{a sealed controller with a fresh suite per release}\\[0.2cm]
+      \answerat{2}{D}{both A and B}
+    \end{column}
+    \begin{column}{0.35\textwidth}
+      \centering\safeimg[width=0.75\textwidth,height=2.3cm,keepaspectratio]{ballot_box.jpg}\\[0.03cm]
+      {\footnotesize A ballot box: a slot in, nothing out}
+      \uncover<2->{\begin{mlsyscard}{mlsysaccent}\footnotesize B leaks through the team's tuning while every sandbox stays clean. Retire a suite once it steers decisions.\end{mlsyscard}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Agent Evaluation, \S13.3.5 and \S13.6 (pitfall); Dwork et al., Science 2015. Photo: National Museum of American History, public domain, Wikimedia Commons.}
+  \note{[2.5 min] [CORE] Peer instruction: vote, a minute with a neighbor, vote again. Step 2: D. A leaks directly: read-only stops overwrites and still allows reading, so candidate code can open the hidden tests. B leaks with every sandbox perfectly clean: each prompt or tool change chosen because it fixed a held-out failure moves information from the suite into the configuration. After enough rounds the score measures fit to that suite, and a paired interval on it understates the uncertainty (Dwork et al., the reusable holdout). C is the design to aim for. The ballot box is the picture: a submission goes in through a slot, and nothing inside reaches back out. ENGAGE: what is the cheapest procedural fix for B? (Expected: develop on a separate suite; retire a held-out suite into development use once it has steered decisions; hold a fresh one for the release claim.) Land the segment aloud: comparable trials need a pinned fixture, a full reset, a grader out of reach, and a suite nobody tuned on. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: GRADERS
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Third segment: the grader itself is a measuring instrument with error rates.}
+\mlsysdivider{How wrong is the grader, and how would we know?}{Agent Evaluation, \S13.4}
+\section{Graders}
+
+\begin{frame}{False acceptance and failure among accepted are different rates}
+  \centering
+  \mlsyssteps[width=0.92\textwidth,height=4.4cm,keepaspectratio]{confusion_step}{2}\\[0.05cm]
+  {\small A random audit of accepted reports estimates only the blue rate.}
+  \mlsyscredit{Agent Evaluation, \S13.4.2; counts from exercise 3 (judge B, 200 research-agent reports; hypothetical). Rates from images/calcs.py.}
+  \note{[3 min] [CORE] To calibrate a grader we need an independent reference assessment of whether each criterion actually held. Here a model judge, B, grades 200 research-agent reports, and an independent reference finds 80 failures and 120 passes. Step 1: condition on reference failures, the purple row. B accepted 16 of 80: a false-acceptance rate of 20 percent (Wilson interval 12.7 to 30.0 percent). That is the rate that predicts how often B approves a broken submission. Step 2: condition on B's acceptances, the blue column: 16 of 130 accepted reports failed, 12.3 percent. That is one minus the precision of B's pass verdict, Lecture 3's verifier precision, and it moves with the base rate of failures. A random audit of accepted outputs estimates only the blue number; the purple one needs reference-assessed failures, including those B rejected. ENGAGE: a new candidate fails more often. Which rate changes even if B does not? (Expected: failure among accepted.) WARN: re-running a grader on the same submission measures only whether it agrees with itself. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Model judges change verdicts when two answers swap places}
+  \centering
+  \safeimg[width=0.86\textwidth,height=4.2cm,keepaspectratio]{zheng.pdf}\\[0.1cm]
+  {\small Pairwise judging: each pair judged twice, answer order swapped.}
+  \mlsyscredit{Zheng et al., ``Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena,'' NeurIPS 2023, Table 2 (default prompt; second-position and error shares not labeled).}
+  \note{[1.5 min] [OPTIONAL] Real measurements of model judges. Zheng et al. showed each judge the same pair of answers twice, swapping their order. GPT-4 gave the same verdict both times 65.0 percent of the time and favored whichever answer came first 30.0 percent of the time. GPT-3.5 was consistent 46.2 percent of the time; Claude-v1 only 23.8 percent, favoring the first position 75.0 percent of the time. They also measured a preference for longer answers, and found the evidence for judges preferring their own outputs inconclusive. These are 2023 judges; the lesson is the protocol. Pairwise judging declares order swapping, ties, and abstentions before scoring, keeps them in the denominator, and treats candidate text as untrusted input that may not revise the rubric. ENGAGE: how would you measure this bias on your own judge? (Expected: swap order on a held set and count changed verdicts.) WARN: a judge from a different model family is not independent by that fact alone. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Estimate: do two agreeing judges prove anything?}
+  \mlsysactivity{Estimate}{2.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.40\textwidth}
+      \centering
+      \uncover<2->{\safeimg[width=\textwidth,height=4.0cm,keepaspectratio]{kappa.pdf}}
+    \end{column}
+    \begin{column}{0.57\textwidth}
+      \small Two judges each pass \textbf{90\%} of reports, independently of what the reports say.\\[0.15cm]
+      {\normalsize How often do they agree? What is Cohen's $\kappa$?}\\[0.2cm]
+      $\kappa = \dfrac{p_o - p_e}{1 - p_e}$\\[0.05cm]
+      {\footnotesize $p_o$: observed agreement;\enspace $p_e$: agreement by chance}\\[0.2cm]
+      \wstep{2}{$p_o = 0.9^2 + 0.1^2 = \mathbf{82\%}$}
+      \wstep{3}{$p_e = 82\%$ as well, so $\kappa = \mathbf{0}$}
+      \uncover<3->{\footnotesize\textcolor{midgray}{Agreement measures consistency; only reference failures measure correctness.}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Agent Evaluation, \S13.4.3 and \S13.6 (fallacy); Cohen 1960. Values from images/calcs.py.}
+  \note{[2.5 min] [CORE] The chapter's fallacy: a grader that is isolated and agrees with a second judge is correct. ENGAGE: two minutes, compute it. Step 2: both pass with probability 0.81, both fail with 0.01; they agree on 82 percent of reports while ignoring the reports. Step 3: Cohen's kappa subtracts the agreement expected from each rater's label frequencies, here also 0.82, so kappa is 0. Students who say ``82 percent agreement is high'' forget that concentrated labels produce agreement by chance. WARN: even a high kappa says only that the raters are consistent; two judges that share a blind spot agree on the same wrong answers. Kappa is undefined when chance agreement is 1. The fix is the previous slide's calibration against reference-assessed failures. Checkpoint 13.2 asks the same at 80 percent: agreement 68 percent, kappa 0. Land the segment aloud: a grader is characterized against independent reference failures, and recalibrated whenever its rubric, model, inputs, or population change. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: STATISTICS
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Fourth segment: from single trials to a claim about a configuration.}
+\mlsysdivider{How many tasks does a claim need, and how do we compare two configurations?}{Agent Evaluation, \S13.5.1 to \S13.5.4}
+\section{Statistics}
+
+\begin{frame}{New tasks shrink both variance terms; repeats shrink one}
+  \begin{columns}[c]
+    \begin{column}{0.45\textwidth}
+      \small
+      $\operatorname{Var}(\hat{p}) = \dfrac{\sigma_{\text{task}}^2}{N} + \dfrac{\sigma_{\text{run}}^2}{N\,r}$\\[0.2cm]
+      {\footnotesize $N$ tasks, $r$ runs each; $\sigma_{\text{task}}^2$: spread in task difficulty; $\sigma_{\text{run}}^2$: spread across runs of one task}\\[0.25cm]
+      {\footnotesize Pilot: mean 0.6, $\sigma_{\text{task}}^2 = 0.08$, so $\sigma_{\text{run}}^2 = 0.16$. Budget: 600 graded runs.}
+    \end{column}
+    \begin{column}{0.53\textwidth}
+      \centering
+      \only<1|handout:0>{\safeimg[width=\textwidth,height=3.5cm,keepaspectratio]{designs_step1.pdf}\\[0.05cm]{\footnotesize New tasks free: one run each wins}}%
+      \only<2->{\safeimg[width=\textwidth,height=3.5cm,keepaspectratio]{designs_step2.pdf}\\[0.05cm]{\footnotesize A new fixture costs 10 runs: 5 runs each wins}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Agent Evaluation, \S13.5.1, equation 1; numbers from exercise 1 (hypothetical). Standard errors from images/calcs.py.}
+  \note{[2.5 min] [OPTIONAL] Equation 1 splits the variance of the estimated acceptance rate into a task term and a run term. More runs per task shrink only the run term; more tasks shrink both. Step 1: exercise 1's pilot. With a mean of 0.6 and between-task variance 0.08, the within-task variance is 0.6 times 0.4 minus 0.08, 0.16. With 600 graded runs and new tasks free, 600 tasks run once give a standard error of 2.00 points; 200 tasks run 3 times, 2.58; 100 tasks run 6 times, 3.27. Step 2: a new hermetic fixture costs as much as 10 runs. Now 40 tasks run 5 times each is best, 5.29 points; 54 tasks run once give 6.67. Repeats earn their place only because tasks are expensive. The ratio 0.16 over 0.08, 2 runs, is where the run term stops dominating. ENGAGE: which population does the 40-task estimate describe? (Expected: the task population those 40 were sampled from.) WARN: 20 tasks run 10 times give 200 trials and only 20 independent task samples; tasks from one repository are clustered too. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Measured: 24 of 24 neighboring ranks are statistical ties}
+  \centering
+  \safeimg[width=0.92\textwidth,height=4.6cm,keepaspectratio]{ranks.pdf}\\[0.05cm]
+  {\small Standard errors near 2 points: two systems need a gap of about 5.4 points to separate.}
+  \mlsyscredit{Epoch AI Benchmarking Hub, SWE-bench Verified runs under one scaffold (33 models; top 25 shown), 95\% intervals from reported standard errors; MLSysIM, Literature.SweBenchVerifiedRuns.}
+  \note{[2.5 min] [CORE] Real leaderboard data: one evaluator ran 33 models on SWE-bench Verified under the same scaffold and reported a standard error for each. These are the top 25, from 83.5 down to 70.7 percent resolved, each with its 95 percent interval. With standard errors near 2 points, an independent-samples comparison needs a gap of about 5.4 points. The arithmetic is 1.96 times the square root of 2 times the median standard error of the 25, 1.96 points, which gives 5.43 (calcs.py). Every one of the 24 neighboring pairs falls short of it. ENGAGE: is the model at rank 1 better than the model at rank 2? (Expected: these data cannot say.) WARN: this is the chapter's pitfall in reverse. Checking whether separate intervals overlap is too conservative for a release decision; the paired exercise two slides on does better with the same tasks. Student intuition says a leaderboard is a ranking; it is a ranking with ties. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Zero failures in 50 tasks still allows a 7\% failure rate}
+  \centering
+  \safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{wilson.pdf}\\[0.05cm]
+  {\small Wilson centers on $\dfrac{x + z^2/2}{n + z^2}$, uses the hypothesized rate in its variance, and never leaves $[0, 1]$.}
+  \mlsyscredit{Agent Evaluation, \S13.5.2, equation 2 and figure 4 (panel B, redrawn); Brown, Cai, and DasGupta 2001. Intervals from images/calcs.py.}
+  \note{[1.5 min] [OPTIONAL] Three results at 50 tasks, the size of many agent safety suites. Gray: the textbook Wald interval, p plus or minus 1.96 times the square root of p(1-p)/n. Purple: Wilson's 1927 score interval, equation 2. With 0 of 50, Wald collapses to zero width and claims future violations are impossible; Wilson runs from 0 to 7.13 percent. Read with outcomes reversed, a clean record of 50 tasks is consistent with a violation rate up to 7.13 percent. With 2 of 50, Wald's lower limit is minus 1.43 percent, an impossible probability; Wilson gives 1.10 to 13.46. At 25 of 50 the two nearly coincide. Brown, Cai, and DasGupta showed in 2001 that Wald's coverage is erratic at sizes textbooks call safe. ENGAGE: the remediation agent made no wrong change in 60 replica tasks. May it drop human approval? (Expected: not on this alone; exercise 2 prices the Wilson upper limit against the approval cost, and no replica can exercise an irreversible production write.) WARN: an interval covers only sampling noise; grader error and contamination add to it. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Exercise: does candidate\_v2 clear a 2-point gate?}
+  \mlsysactivity{Exercise}{3.5 min}
+  \begin{columns}[T]
+    \begin{column}{0.44\textwidth}
+      \footnotesize\textbf{150 task pairs, one trial each}\\[0.1cm]
+      \begin{tabular}{@{}lcc@{}}\toprule
+        & \textbf{cand.\ acc.} & \textbf{cand.\ rej.} \\\midrule
+        \textbf{base acc.} & 70 & \textcolor{figred}{\textbf{12}} \\
+        \textbf{base rej.} & \textcolor{figgreen}{\textbf{18}} & 50 \\\bottomrule
+      \end{tabular}\\[0.2cm]
+      Gate: lower 95\% limit of the gain $> -2$ points.\\[0.2cm]
+      \uncover<3->{\small Pairing leaves \textbf{\textcolor{figpurple}{40\%}} of the independent-arm variance: unpaired arms need 2.5$\times$ the tasks.}
+    \end{column}
+    \begin{column}{0.53\textwidth}
+      \small
+      \wstep{2}{Gain $= (18 - 12)/150 = \mathbf{4}$ points}
+      \wstep{2}{Paired interval: $-3.21$ to $11.12$ points}
+      \wstep{2}{$-3.21 < -2$: \textbf{\textcolor{figred}{gate not met}}; held}
+      \wstep{3}{Pairs for a 4-point gain to clear it: $150 \times (7.21/6)^2 \approx \mathbf{217}$}
+      \wstep{3}{If the true gain is zero: about \textbf{1,948}}
+      \uncover<3->{\footnotesize\textcolor{midgray}{McNemar exact $p = 0.362$ answers a different question.}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Agent Evaluation, \S13.5.3, table 4 and Napkin Math 13.1 (hypothetical); Newcombe 1998 method 10; McNemar 1947. Values from images/calcs.py.}
+  \note{[3.5 min] [CORE] Napkin Math 13.1. Both configurations ran once on each of 150 sampled tasks, under the same criteria and allowances, and each task's pair of outcomes is kept together. ENGAGE: two minutes; compute the gain, then decide. Step 2: only discordant pairs move the gain: 18 tasks only the candidate passed, 12 only the baseline passed, 6 over 150 is 4 points. Newcombe's paired-score interval (method 10, which combines the two Wilson intervals through their within-pair correlation) runs from minus 3.21 to 11.12 points. The declared tolerance is 2 points, so noninferiority is not established, and since the interval includes zero, neither is superiority. The candidate is held. Step 3: the knob is the planned number of pairs. The lower half-width, 7.21, must fall below 6; half-widths shrink as one over root n, so about 217 pairs, which clears the gate only half the time. A true gain of zero needs the half-width inside 2 points, 1,948 pairs (the chapter rounds to about 1,900). The last line on the left: pairing leaves 40 percent of the independent-arm variance, so unpaired cohorts need 2.5 times the tasks. WARN: rerunning the comparison until one look passes is a different, uncalibrated test. LINK: Lecture 14 owns the release gate that uses this. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Measured: our candidate gained 4.2 points, inside the noise}
+  \begin{columns}[c]
+    \begin{column}{0.42\textwidth}
+      \footnotesize\textbf{96 run pairs (12 tasks $\times$ 8 runs)}\\[0.1cm]
+      \begin{tabular}{@{}lcc@{}}\toprule
+        & \textbf{cand.\ acc.} & \textbf{cand.\ rej.} \\\midrule
+        \textbf{base acc.} & 60 & \textcolor{figred}{\textbf{2}} \\
+        \textbf{base rej.} & \textcolor{figgreen}{\textbf{6}} & 28 \\\bottomrule
+      \end{tabular}\\[0.2cm]
+      \small Gain \textbf{4.2} points;\\ paired interval $-1.9$ to $10.3$\\[0.1cm]
+      {\footnotesize candidate\_v2: one retry after a failed visible test}
+    \end{column}
+    \begin{column}{0.55\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{run_curves.pdf}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Measured 2026-10-19 for this lecture (images/data/eval\_run.py): qwen2.5 7B Q4\_K\_M, Ollama, temperature 0.8. Interval: Newcombe method 10 treating run pairs as independent (images/calcs.py).}
+  \note{[2.5 min] [CORE] Our run, as a paired comparison. baseline\_v1 makes one model call and submits. candidate\_v2 runs the visible test and, if it fails, sends the error back once. Both ran 8 times on each of the 12 tasks, run against run. Left: 60 pairs both accepted, 28 both rejected, 6 only the candidate, 2 only the baseline. Gain 4.2 points; the paired interval runs from minus 1.9 to 10.3 points, McNemar exact p 0.289. Like the chapter's worksheet: more accepted tasks, no established gain. Right: per-task pass@k and pass$^k$ from the 8 graded runs (equations 4 and 5). Candidate pass@8 is 91.7 percent; pass$^8$ is 50.0 percent for both. Most tasks here are all-or-nothing for this model, so pass$^k$ flattens fast. ENGAGE: our 96 pairs come from only 12 tasks. Is the interval too narrow or too wide? (Expected: too narrow; runs of one task are correlated, so the effective sample is closer to 12 clusters, the first slide of this segment.) WARN: the retry helped only where a visible test could catch the bug. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{The deployment decides between pass@k and pass$^k$}
+  \footnotesize
+  \begin{tabular}{@{}P{2.4cm}P{4.4cm}P{5.4cm}@{}}\toprule
+    \textbf{Workload} & \textbf{Checker it admits} & \textbf{Metric the claim needs} \\\midrule
+    Repair agent & sealed tests on the exact artifact & selected acceptance under budget; pass@k only with the checker in the loop \\[0.05cm]
+    Research agent & calibrated judge, citation checks & selected acceptance, with the judge's error rates \\[0.05cm]
+    Remediation agent & state-delta checks on a replica & \textbf{pass$^k$} over recurring incidents, zero forbidden effects \\[0.05cm]
+    Support agent & policy rubric per answer & \textbf{pass$^k$} across sessions on one question \\\bottomrule
+  \end{tabular}\\[0.3cm]
+  \small A check before delivery turns a failed run into a retry; without one, only consistency counts.
+  \mlsyscredit{Agent Evaluation, \S13.5.4, Lighthouse 13.1 and table 6.}
+  \note{[2 min] [CORE] Lighthouse 13.1: the four lighthouses from Lecture 1 need different quantifiers. The repair agent can buy acceptance with checked retries: a pool that contains a pass is worth something only if a sealed checker selects it (Lecture 3: coverage is not selection), so it reports selected acceptance and prices it. The support agent cannot retry an answer a customer has read, so its claim is pass$^k$, the hook. The remediation agent's release rests on limits statistics cannot supply: an irreversible production write that no replica exercises. The research agent's number is only as good as its judge. ENGAGE: our candidate\_v2 retried after a visible test. Which row does that make it? (Expected: the repair row: a checker in the loop converts availability into selected acceptance, but only up to that checker's coverage.) WARN: repeating one task overstates consistency across new tasks (Jensen's inequality; the chapter's 53 against 49 percent example). Land the segment aloud: sample tasks, report intervals, pair the comparison, and let the deployment pick the quantifier. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: BUDGET
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Last segment: every score has a price, and the comparison must include it.}
+\mlsysdivider{What did each accepted task cost?}{Agent Evaluation, \S13.5.5}
+\section{Budget}
+
+\begin{frame}{Measured: the costliest agent paid 55$\times$ for lower accuracy}
+  \begin{columns}[c]
+    \begin{column}{0.64\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.0cm,keepaspectratio]{kapoor.pdf}
+    \end{column}
+    \begin{column}{0.33\textwidth}
+      \small HumanEval, 164 problems, 5 runs each.\\[0.2cm]
+      \textcolor{figred}{\textbf{LATS (GPT-4)}}: 88.0\%, \$134.50\\[0.1cm]
+      \textcolor{figpurple}{\textbf{Warming (GPT-4)}}: 93.2\%, \$2.45\\[0.25cm]
+      {\footnotesize Purple: simple baselines built by the authors.}\\[0.2cm]
+      {\footnotesize\textbf{Matched-budget evaluation} fixes tasks, criteria, and envelope first.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Kapoor et al., ``AI Agents That Matter,'' arXiv 2407.01502, Table A1 (mean of 5 runs; total API cost, 2024 prices). Redrawn; ratio from images/calcs.py.}
+  \note{[2 min] [CORE] Real measurements. Kapoor and colleagues reran published code agents on HumanEval's 164 problems, five times each, and recorded accuracy and total API cost. The top-left is the place to be. LATS with GPT-4, a tree search agent, reached 88.0 percent for 134.50 dollars. Their simple baselines on the same model, which retry or raise the sampling temperature after a failed test (``warming''), reached 92.0 to 93.2 percent for 2.45 to 2.51 dollars; warming cost 55 times less than LATS and was more accurate (derived). A single GPT-4 call gave 89.6 percent for 1.93 dollars. ENGAGE: a leaderboard ranks by accuracy alone. What does it reward? (Expected: designs that retry until something passes, at any cost.) WARN: the costs are 2024 API prices; the dollar values will change, and the gap between the designs is the lesson. The chapter's fallacy: the configuration with the higher accuracy is the better configuration. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Estimate: batch or sequential, at the same cap?}
+  \mlsysactivity{Estimate}{3 min}
+  \begin{columns}[T]
+    \begin{column}{0.40\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \small\textbf{Given (NM 13.3)}\\[0.05cm]
+        Pass probability $p = 0.4$\\
+        Cap: 3 candidates\\
+        Generate \$0.03, check \$0.01
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.57\textwidth}
+      \small
+      \wstep{2}{Either way, $1 - 0.6^3 = \mathbf{78.4\%}$ find a pass}
+      \wstep{2}{Batch: $3 \times \$0.04 = \$0.12$ per trial}
+      \wstep{2}{Sequential: $0.784/0.4 = 1.96$ candidates, \$0.0784}
+      \wstep{3}{Per accepted: \$0.12$/0.784 = \mathbf{\$0.153}$ against \$0.0784$/0.784 = \mathbf{\$0.100}$}
+      \wstep{3}{Sequential cost is $(\$0.03 + \$0.01)/p$ for any cap}
+      \uncover<3->{\footnotesize\textcolor{midgray}{Doubling $p$ halves it, to \$0.05.}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Agent Evaluation, \S13.5.5, equation 6 and Napkin Math 13.3 (illustrative prices). Values from images/calcs.py.}
+  \note{[3 min] [CORE] Napkin Math 13.3. A fixed task, pass probability 0.4 per candidate, at most 3 isolated candidates, an exact checker. ENGAGE: two minutes in pairs: which policy costs less per accepted task, and by how much? Step 2: both find a passing candidate with probability 78.4 percent. The batch generates and checks all three, 12 cents per trial. Sequential generation stops at the first pass and starts 1.96 candidates on average, 7.84 cents. Step 3: charge every initiated trial, failed ones included, to the accepted ones: 15.3 cents against 10.0 cents, a 53 percent premium for the same acceptance. Under sequential stopping the cost per accepted task is generation plus checking over p, whatever the cap, so raising the cap buys acceptance at no extra cost per accepted task, and the one knob is a better generator. LINK: Lecture 1's cost per accepted task, now as an evaluation metric; Lecture 3 owns the operating point this compares. WARN: these formulas ignore deadlines, checker errors, and task variety; measure those as part of the policy. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Measured: the retry cost 10\% more tokens per acceptance}
+  \begin{columns}[c]
+    \begin{column}{0.52\textwidth}
+      \footnotesize
+      \begin{tabular}{@{}lrr@{}}\toprule
+        & \textbf{baseline\_v1} & \textbf{candidate\_v2} \\\midrule
+        Trials & 96 & 96 \\
+        Model calls & 96 & 105 \\
+        Accepted & 62 & 66 \\
+        Tokens, all trials & 21,587 & 25,242 \\
+        \textbf{Tokens per accepted} & \textbf{348} & \textbf{382} \\\bottomrule
+      \end{tabular}
+    \end{column}
+    \begin{column}{0.45\textwidth}
+      \small A comparison at a matched budget reports allowances, actual use, and acceptance together.\\[0.2cm]
+      Failed trials' tokens are charged to the accepted ones.\\[0.2cm]
+      \textcolor{midgray}{\footnotesize Tokens, time, and dollars stay separate streams.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Measured 2026-10-19 for this lecture (images/data/eval\_run.py); input plus output tokens as reported by Ollama. Ratios from images/calcs.py.}
+  \note{[2 min] [OPTIONAL] Our run, priced. baseline\_v1 spent 21,587 tokens on 96 trials and accepted 62: 348 tokens per accepted task. candidate\_v2's retry added 9 model calls; it spent 25,242 tokens and accepted 66: 382 tokens per accepted task, about 10 percent more (derived). Its 4.2-point gain is not established, and it costs more per acceptance. A matched-budget comparison reports the allowances, the actual use, and budgeted acceptance: accepted and within the ceiling. ENGAGE: under what condition would candidate\_v2 be the better buy? (Expected: if a powered paired sample established the gain, and an accepted task is worth more than the extra tokens.) WARN: on a laptop the tokens are free; on an API they are dollars, and time is a third stream. LINK: Lecture 14 adds the cost of staged release on live traffic. Land the segment aloud: compare policies on the same tasks, criteria, and envelope, and charge every failed attempt. FLEX: [OPTIONAL].}
+\end{frame}
+
+% =============================================================================
+% CLOSE
+% =============================================================================
+\begin{frame}{One completed run cannot vouch for a configuration}
+  \mlsysactivity{Retrieval}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.38\textwidth}
+      \centering\safeimg[width=\textwidth,height=1.6cm,keepaspectratio]{thumb_hook_step2.pdf}\\[0.02cm]
+      {\footnotesize one run 90\%;\ all 8 runs 43\%}\\[0.15cm]
+      \only<1|handout:0>{\normalsize Close your notes. Name five things a single completed run lacks.}
+    \end{column}
+    \begin{column}{0.59\textwidth}
+      \uncover<2->{\footnotesize
+      \begin{tabular}{@{}P{2.5cm}P{5.9cm}@{}}\toprule
+        \textbf{Missing} & \textbf{What supplies it} \\\midrule
+        Criteria & a contract with four verdicts \\
+        Clean evidence & a pinned fixture, a sealed grader \\
+        A trusted grader & a measured false-acceptance rate \\
+        A sample & many tasks, an interval, pairing \\
+        A price & cost per accepted task, failures charged \\\bottomrule
+      \end{tabular}}\\[0.12cm]
+      \uncover<3->{\small candidate\_v2 is \textbf{\textcolor{mlsysaccent}{held}} until about 217 pairs.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Agent Evaluation, \S13.5.3 and \S13.7. Hook: Napkin Math 13.2.}
+  \note{[2.5 min] [CORE] Back to the driving question. Step 1: retrieval, 90 seconds. Step 2: one row per segment. A completed run lacks declared criteria (and its open verdicts must stay counted); clean evidence (a fixture that pins the world, a grader the agent and its code cannot reach, a suite nobody tuned on); a trusted grader (one calibrated by its false-acceptance rate on reference failures); a sample (new tasks ahead of repeats, with an interval, compared in pairs); and a price (every failed attempt charged to the accepted ones). The hook's 43 percent is the sample row: a single run is one draw. Step 3: the worked comparison. candidate\_v2 accepted more paired tasks, yet the interval cannot rule out a loss beyond the 2-point tolerance, so it is held, and the next step is a powered sample of about 217 pairs planned before data arrive. Our own run reached the same verdict. ENGAGE: which row would you skip first under a deadline, and what would it cost? FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Takeaways}
+  \thumbline{thumb_dims_step2.pdf}{Acceptance is evidence on the exact artifact against declared criteria; open verdicts stay in the count.}\\[0.12cm]
+  \thumbline{thumb_gym_step3.pdf}{A pinned fixture, a full reset, and a grader outside both agent and code make trials comparable.}\\[0.12cm]
+  \thumbline{thumb_confusion_step2.pdf}{A grader's false-acceptance rate needs reference failures; two agreeing judges can both be wrong ($\kappa = 0$ at 82\%).}\\[0.12cm]
+  \thumbline{thumb_hook_step2.pdf}{Sample tasks, pair the comparison, plan the count; 90\% per run is 43\% over 8 runs.}\\[0.12cm]
+  \thumbline{thumb_batch.pdf}{Compare policies at a matched budget; charge failures to acceptances (\$0.153 against \$0.100).}
+  \note{[1.5 min] [CORE] One line per segment. Ask students which slide taught each line. If short on time, read the first and the fourth.}
+\end{frame}
+
+\begin{frame}{Open questions}
+  \begin{columns}[c]
+    \begin{column}{0.64\textwidth}
+      \small
+      \begin{itemize}\setlength{\itemsep}{0.12cm}
+        \item Calibrating a model judge needs expert labels. How many, and how often, as the judge and the agents change?
+        \item Public benchmarks leak into training data within months. Can a shared benchmark stay valid, or must every team hold a private, rotating suite?
+        \item How should an evaluation score an agent that reaches a correct result by an unsafe path the contract did not name?
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.33\textwidth}
+      \centering\mlsysphoto[width=\textwidth,height=3.4cm,keepaspectratio]{datacenter-server-racks.jpg}\\[0.05cm]
+      {\footnotesize Server racks: where every graded trial runs and is billed}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: Carl Lender, CC BY 2.0, Wikimedia Commons.}
+  \note{[1 min] [OPTIONAL] No single answer. Pick one for discussion or assign one as a short written response. The first follows from \S13.4: calibration needs independent reference failures, and the calibration must be redone whenever the rubric, judge, evidence interface, or population changes. The second follows from \S13.3.5 and Recht et al. 2019, who rebuilt ImageNet's test set and measured accuracy drops across models. The third is the process criteria of \S13.4.1: a contract can only enforce what it names.}
+\end{frame}
+
+\begin{frame}{Read and explore}
+  \small
+  \begin{itemize}\setlength{\itemsep}{0.03cm}
+    \item \textbf{Read:} Agent Evaluation, \S13.2 to \S13.5; Checkpoints 13.1 to 13.3; Napkin Math 13.1 to 13.3 by hand; exercises 1, 3, and 4.
+    \item Yao et al., ``$\tau$-bench,'' 2024: pass$^k$ for tool-using agents.
+    \item Kapoor et al., ``AI Agents That Matter,'' 2024: cost beside accuracy.
+    \item Zheng et al., ``Judging LLM-as-a-Judge,'' NeurIPS 2023: judge biases.
+    \item Dwork et al., ``The Reusable Holdout,'' Science 2015: adaptive overfitting.
+    \item Brown, Cai, and DasGupta, ``Interval Estimation for a Binomial Proportion,'' 2001.
+  \end{itemize}
+  \note{[1 min] [CORE] The chapter first, with its checkpoints and the three napkin-math notebooks; exercise 4 reruns this lecture's paired comparison with complete numbers. $\tau$-bench introduced pass$^k$ for agents. Kapoor et al. argue for cost and accuracy together and audit holdout sets. Zheng et al. measure model-judge biases. Dwork et al. explain why a reused held-out set stops measuring generalization. Brown, Cai, and DasGupta show why Wilson replaces Wald. FLEX: assign images/data/eval\_run.py as a lab: rerun it, add a task, and recompute the interval.}
+\end{frame}
+
+\begin{frame}[c]
+  \begin{columns}[c]
+    \begin{column}{0.34\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.4cm,keepaspectratio]{thumb_canary.pdf}
+    \end{column}
+    \begin{column}{0.62\textwidth}
+      {\small\textcolor{lightgray}{NEXT LECTURE \textbar{} OPERATING AGENTS}}\\[0.5cm]
+      {\LARGE\bfseries An offline evaluation passed. Why does a release still need live evidence?}
+    \end{column}
+  \end{columns}
+  \note{[0.5 min] [CORE] Lecture 14, Operating Agents. An offline comparison ends with a verdict on a sampled task population; it cannot say why one trial failed, and live traffic honors none of its choices. Next time: traces that keep rare failures, postmortems that test a cause by rerunning the recorded trajectory, and staged releases, like the small canary share in the thumbnail, whose monitors take calendar time.}
+\end{frame}
+
+\end{document}

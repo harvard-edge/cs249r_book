@@ -4,7 +4,7 @@ name: '📊 Slides · 🚀 Publish (Live)'
 # Lecture Slides — Production Deploy with PDF Release
 # =============================================================================
 #
-# Builds all 35 Beamer slide decks to PDF + PPTX, creates a GitHub Release
+# Builds every Beamer slide deck to PDF + PPTX, creates a GitHub Release
 # with downloadable archives, and deploys the Quarto slides portal.
 #
 # Flow:
@@ -147,7 +147,7 @@ jobs:
         working-directory: slides
         run: |
           make svgs
-          for vol in vol1 vol2; do
+          for vol in vol1 vol2 vol3 vol4; do
             mkdir -p _build/$vol
             for ch_dir in $vol/*_*/; do
               tex_file=$(ls $ch_dir/*.tex 2>/dev/null | head -1)
@@ -164,15 +164,72 @@ jobs:
             done
           done
 
+      # The build loop above tolerates per-deck pdflatex failures; this gate
+      # stops the publish before any upload, release, or deploy if a deck
+      # folder with a .tex has no PDF in _build/.
+      - name: 🔍 Verify every deck built a PDF
+        working-directory: slides
+        run: |
+          missing=()
+          for vol in vol1 vol2 vol3 vol4; do
+            for ch_dir in $vol/*_*/; do
+              tex_file=$(ls $ch_dir/*.tex 2>/dev/null | head -1)
+              [ -z "$tex_file" ] && continue
+              tex_name=$(basename "$tex_file" .tex)
+              [ -f "_build/$vol/$tex_name.pdf" ] || missing+=("$vol/$tex_name.pdf")
+            done
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "❌ ${#missing[@]} deck(s) have no PDF:"
+            for m in "${missing[@]}"; do echo "   - $m"; done
+            exit 1
+          fi
+          echo "✅ Every deck folder with a .tex has its PDF"
+
       - name: 📊 Convert PDFs to PPTX
         working-directory: slides
         run: |
+          # Speaker notes: pdf2pptx copies each slide's note into the PPTX
+          # notes pane when <deck>-notes.pdf sits beside <deck>.pdf. Decks on
+          # the current theme build notes; older decks skip without them.
+          for vol in vol1 vol2 vol3 vol4; do
+            v=${vol#vol}
+            for ch_dir in $vol/*_*/; do
+              d=$(basename "$ch_dir")
+              [ -f "$ch_dir/$d.tex" ] || continue
+              make notes V=$v D=$d > /dev/null 2>&1 || true
+            done
+          done
           echo "Converting PDFs to PowerPoint..."
-          for vol in vol1 vol2; do
+          for vol in vol1 vol2 vol3 vol4; do
             if ls _build/$vol/*.pdf 1>/dev/null 2>&1; then
               python3 scripts/pdf2pptx.py _build/$vol/*.pdf --output-dir _build/$vol --dpi 300
             fi
           done
+          # The release ships presenting PDFs and PPTX only.
+          rm -f _build/vol*/*-notes.pdf
+
+      # pdf2pptx runs per volume and the PDF gate above cannot see its
+      # failures; this gate stops the publish before the artifact upload
+      # and release if a deck folder with a .tex has no PPTX in _build/.
+      - name: 🔍 Verify every deck has a PPTX
+        working-directory: slides
+        run: |
+          missing=()
+          for vol in vol1 vol2 vol3 vol4; do
+            for ch_dir in $vol/*_*/; do
+              tex_file=$(ls $ch_dir/*.tex 2>/dev/null | head -1)
+              [ -z "$tex_file" ] && continue
+              tex_name=$(basename "$tex_file" .tex)
+              [ -f "_build/$vol/$tex_name.pptx" ] || missing+=("$vol/$tex_name.pptx")
+            done
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "❌ ${#missing[@]} deck(s) have no PPTX:"
+            for m in "${missing[@]}"; do echo "   - $m"; done
+            exit 1
+          fi
+          echo "✅ Every deck folder with a .tex has its PPTX"
 
       - name: 📦 Upload slide artifacts
         uses: actions/upload-artifact@v7
@@ -200,15 +257,19 @@ jobs:
         run: |
           cd builds
 
-          # PDF archives (preserve vol1/ vol2/ folder structure inside zip)
+          # PDF archives (preserve vol1/ ... vol4/ folder structure inside zip)
           zip -r ../MLSysBook-Slides-Vol1-PDF.zip vol1/*.pdf
           zip -r ../MLSysBook-Slides-Vol2-PDF.zip vol2/*.pdf
-          zip -r ../MLSysBook-Slides-All-PDF.zip vol1/*.pdf vol2/*.pdf
+          zip -r ../MLSysBook-Slides-Vol3-PDF.zip vol3/*.pdf
+          zip -r ../MLSysBook-Slides-Vol4-PDF.zip vol4/*.pdf
+          zip -r ../MLSysBook-Slides-All-PDF.zip vol1/*.pdf vol2/*.pdf vol3/*.pdf vol4/*.pdf
 
           # PPTX archives
           zip -r ../MLSysBook-Slides-Vol1-PPTX.zip vol1/*.pptx
           zip -r ../MLSysBook-Slides-Vol2-PPTX.zip vol2/*.pptx
-          zip -r ../MLSysBook-Slides-All-PPTX.zip vol1/*.pptx vol2/*.pptx
+          zip -r ../MLSysBook-Slides-Vol3-PPTX.zip vol3/*.pptx
+          zip -r ../MLSysBook-Slides-Vol4-PPTX.zip vol4/*.pptx
+          zip -r ../MLSysBook-Slides-All-PPTX.zip vol1/*.pptx vol2/*.pptx vol3/*.pptx vol4/*.pptx
 
           # Per-deck files: GitHub Releases is a flat namespace, so vol1/00_course_overview.pdf
           # and vol2/00_course_overview.pdf collide. Stage prefixed copies for upload.
@@ -220,6 +281,14 @@ jobs:
           for f in vol2/*.pdf vol2/*.pptx; do
             [ -e "$f" ] || continue
             cp "$f" "../release-flat/vol2_$(basename "$f")"
+          done
+          for f in vol3/*.pdf vol3/*.pptx; do
+            [ -e "$f" ] || continue
+            cp "$f" "../release-flat/vol3_$(basename "$f")"
+          done
+          for f in vol4/*.pdf vol4/*.pptx; do
+            [ -e "$f" ] || continue
+            cp "$f" "../release-flat/vol4_$(basename "$f")"
           done
 
           cd ..
@@ -252,34 +321,40 @@ jobs:
           body: |
             ## ML Systems Lecture Slides
 
-            Complete slide decks for the ML Systems curriculum.
+            Lecture decks for the Machine Learning Systems textbook, with the slides site at https://mlsysbook.ai/slides/.
 
-            **Volume I** (17 decks): Introduction through Conclusion — single-machine ML systems
-            **Volume II** (18 decks): Introduction through Conclusion — distributed ML at scale
-            **TinyML** (5 chapters): HarvardX Professional Certificate — edge & embedded ML
+            - **Volume I**, *Introduction to Machine Learning Systems*: one lecture per chapter, from the course overview to the conclusion, with the larger chapters in two parts.
+            - **Volume II**, *Scaling Machine Learning Systems*: one lecture per chapter.
+            - **Volume III**, *Agentic Machine Learning Systems*: one lecture per chapter, from the course overview to the conclusion. The book is in preparation.
+            - **Volume IV**, *Physical AI: Machine Learning Systems That Sense and Act*: one lecture per chapter, from the course overview to the conclusion. The book is in preparation.
+            - **TinyML**: the courseware from the HarvardX Professional Certificate in Tiny Machine Learning.
 
-            Vol I/II decks include speaker notes, active learning exercises, and original SVG diagrams.
+            Every deck has speaker notes, class activities, and figures drawn from source.
 
-            ### Downloads — PDF
-            - **MLSysBook-Slides-All-PDF.zip** — All 35 Vol I/II decks
-            - **MLSysBook-Slides-Vol1-PDF.zip** — Volume I only
-            - **MLSysBook-Slides-Vol2-PDF.zip** — Volume II only
+            ### PDF downloads
+            - **MLSysBook-Slides-All-PDF.zip**: Volumes I to IV
+            - **MLSysBook-Slides-Vol1-PDF.zip**: Volume I
+            - **MLSysBook-Slides-Vol2-PDF.zip**: Volume II
+            - **MLSysBook-Slides-Vol3-PDF.zip**: Volume III
+            - **MLSysBook-Slides-Vol4-PDF.zip**: Volume IV
 
-            ### Downloads — PowerPoint
-            Image-based PPTX (not editable text) — use for presenter mode and annotations.
-            - **MLSysBook-Slides-All-PPTX.zip** — All 35 Vol I/II decks
-            - **MLSysBook-Slides-Vol1-PPTX.zip** — Volume I only
-            - **MLSysBook-Slides-Vol2-PPTX.zip** — Volume II only
+            ### PowerPoint downloads
+            Each PowerPoint slide is an image of the PDF page, so the text is not editable. The notes pane holds the speaker notes, which appear in presenter view.
+            - **MLSysBook-Slides-All-PPTX.zip**: Volumes I to IV
+            - **MLSysBook-Slides-Vol1-PPTX.zip**: Volume I
+            - **MLSysBook-Slides-Vol2-PPTX.zip**: Volume II
+            - **MLSysBook-Slides-Vol3-PPTX.zip**: Volume III
+            - **MLSysBook-Slides-Vol4-PPTX.zip**: Volume IV
 
-            ### Downloads — TinyML (HarvardX edX)
-            - **MLSysBook-TinyML-All.zip** — All slides, readings, and supplementary materials
-            - **MLSysBook-TinyML-Slides.zip** — 178 slide decks only
-            - **MLSysBook-TinyML-Readings.zip** — 127 readings only
+            ### TinyML downloads (HarvardX on edX)
+            - **MLSysBook-TinyML-All.zip**: slides, readings, and supplementary material
+            - **MLSysBook-TinyML-Slides.zip**: slides only
+            - **MLSysBook-TinyML-Readings.zip**: readings only
 
-            Individual Vol I/II chapter files (PDF + PPTX) are also attached below.
+            The PDF and PowerPoint file for each lecture are also attached below.
 
             ### Source
-            - Vol I/II LaTeX source: [slides/](${{ github.server_url }}/${{ github.repository }}/tree/main/slides)
+            - LaTeX source for all four volumes: [slides/](${{ github.server_url }}/${{ github.repository }}/tree/main/slides)
             - TinyML courseware: [tinyMLx/courseware](https://github.com/tinyMLx/courseware/tree/master/edX)
           draft: false
           prerelease: false
@@ -287,16 +362,24 @@ jobs:
             MLSysBook-Slides-All-PDF.zip
             MLSysBook-Slides-Vol1-PDF.zip
             MLSysBook-Slides-Vol2-PDF.zip
+            MLSysBook-Slides-Vol3-PDF.zip
+            MLSysBook-Slides-Vol4-PDF.zip
             MLSysBook-Slides-All-PPTX.zip
             MLSysBook-Slides-Vol1-PPTX.zip
             MLSysBook-Slides-Vol2-PPTX.zip
+            MLSysBook-Slides-Vol3-PPTX.zip
+            MLSysBook-Slides-Vol4-PPTX.zip
             MLSysBook-TinyML-All.zip
             MLSysBook-TinyML-Slides.zip
             MLSysBook-TinyML-Readings.zip
             release-flat/vol1_*.pdf
             release-flat/vol2_*.pdf
+            release-flat/vol3_*.pdf
+            release-flat/vol4_*.pdf
             release-flat/vol1_*.pptx
             release-flat/vol2_*.pptx
+            release-flat/vol3_*.pptx
+            release-flat/vol4_*.pptx
           make_latest: true
 
       - name: ✅ Verify Release has required archives
@@ -305,7 +388,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # The nine top-level archives are the authoritative set. If each of
+          # The thirteen top-level archives are the authoritative set. If each of
           # these is present, the release is correct regardless of how many
           # individual per-deck files attached or whether the action exited
           # non-zero on a transient metadata-update 404.
@@ -313,9 +396,13 @@ jobs:
             MLSysBook-Slides-All-PDF.zip
             MLSysBook-Slides-Vol1-PDF.zip
             MLSysBook-Slides-Vol2-PDF.zip
+            MLSysBook-Slides-Vol3-PDF.zip
+            MLSysBook-Slides-Vol4-PDF.zip
             MLSysBook-Slides-All-PPTX.zip
             MLSysBook-Slides-Vol1-PPTX.zip
             MLSysBook-Slides-Vol2-PPTX.zip
+            MLSysBook-Slides-Vol3-PPTX.zip
+            MLSysBook-Slides-Vol4-PPTX.zip
             MLSysBook-TinyML-All.zip
             MLSysBook-TinyML-Slides.zip
             MLSysBook-TinyML-Readings.zip
@@ -344,14 +431,14 @@ jobs:
             echo "   archives verified present — treating as transient and passing."
           fi
 
-          echo "✅ Release verified: all 9 required archives present."
+          echo "✅ Release verified: all 13 required archives present."
 
   # ===========================================================================
   # Stage 3: Deploy Quarto portal
   # ===========================================================================
   deploy-portal:
     name: '🌐 Deploy Portal'
-    needs: [guard, prepare]
+    needs: [guard, prepare, build-pdfs]   # never deploy a portal whose deck links would 404
     if: inputs.confirm == 'PUBLISH'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -367,6 +454,9 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: ${{ vars.PYTHON_VERSION || '3.12' }}
+
+      - name: 📦 Install generator dependencies
+        run: pip install pyyaml
 
       - name: 🔧 Setup Quarto
         uses: quarto-dev/quarto-actions/setup@v2
@@ -442,6 +532,6 @@ jobs:
           DESCRIPTION: ${{ inputs.description }}
         run: |
           gh release create "$NEW_TAG" \
-            --title "Slides v${NEW_RELEASE_ID} — ${DESCRIPTION}" \
+            --title "Slides v${NEW_RELEASE_ID}: ${DESCRIPTION}" \
             --notes "${DESCRIPTION}" \
             --draft

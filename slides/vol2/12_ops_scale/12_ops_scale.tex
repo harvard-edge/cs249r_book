@@ -1,1523 +1,597 @@
 % =============================================================================
-% Chapter 12: ML Operations at Scale — Vol II Lecture Slides
+% Lecture 12: ML Operations at Scale
+% Scaling Machine Learning Systems (Volume II), Chapter 12
 % =============================================================================
-% IMAGES:
-%   - n-models-complexity.pdf    - platform-roi.pdf
-%   - mlops-maturity.pdf         - model-registry-deps.pdf
-%   - ml-cicd-pipeline.pdf       - staged-rollout.pdf
-%   - monitoring-pyramid.pdf     - feature-freshness.pdf
+% Thesis: at portfolio scale the operational object is the dependency graph of
+% models, features, and owners, so releases, alerts, and costs are contracts on
+% that graph.
+% Running case: a recommendation portfolio (Archetype B) whose shared feature
+% and embedding feed many models; hook and synthesis: Example 12.2.
+%
+% Build: make deck V=2 D=12_ops_scale   (figures: images/make_figs.py)
+% Plan:  lecture_map.yml in this folder.
+% Numbers: the rendered chapter and cited sources; derived values say so.
 % =============================================================================
+
 \documentclass[aspectratio=169, 12pt]{beamer}
 \usepackage{../../assets/beamerthememlsys}
-
 \mlsyssetup{
-  volume       = {Volume II},
-  chapter      = {Chapter 12},
-  logo         = {../../assets/img/logo-mlsysbook.png},
-  instlogo     = {../../assets/img/logo-harvard.png},
-  chaptertitle = {ML Operations at Scale},
+  volume={Volume II},
+  chapter={Chapter 12},
+  chaptertitle={ML Operations at Scale},
+  layer=operations,
+  logo={../../assets/img/logo-mlsysbook.png},
+  instlogo={../../assets/img/logo-harvard.png},
 }
-
-% --- Fonts ---
 \usepackage[T1]{fontenc}
 \usepackage[scaled=0.9]{helvet}
 \usepackage{courier}
 \renewcommand{\familydefault}{\sfdefault}
-
-% --- Packages ---
-\usepackage{booktabs}
-\usepackage{amsmath}
-
-% --- Image paths ---
-\graphicspath{
-  {images/}
-}
-
-% --- Chapter-specific macros ---
-\newcommand{\TCO}{\text{TCO}_{\text{ML}}}
-
-% --- Helper: safe image include ---
-\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
-  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
-    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
-      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{%
-        \centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
-    }%
-  }%
-}
-
-% --- Section count ---
-\setcounter{mlsystotalsections}{6}
+\usepackage{booktabs,amsmath}
+\graphicspath{{images/}}
+\setcounter{mlsystotalsections}{5}
 
 \title{ML Operations at Scale}
 \author{Vijay Janapa Reddi}
 \institute{Harvard University}
 \date{}
 
+% A large answer choice for predict and concept-question slides
+\newcommand{\choice}[2]{\textbf{\textcolor{mlsysaccent}{#1}}\enspace #2}
+% A choice that is highlighted from overlay #1 on (the answer)
+\newcommand{\answerat}[3]{\alt<#1->{\colorbox{mlsysaccent!15}{\choice{#2}{#3}}}{\choice{#2}{#3}}}
+% A goal or takeaway line with its thumbnail
+\newcommand{\thumbline}[2]{%
+  \begin{minipage}[c]{2.6cm}\centering\includegraphics[width=2.5cm,height=0.95cm,keepaspectratio]{#1}\end{minipage}%
+  \hspace{0.3cm}\begin{minipage}[c]{0.74\textwidth}\small #2\end{minipage}}
+% One line of a worked example: shown from overlay #1 on
+\newcommand{\wstep}[2]{\uncover<#1->{#2}\\[0.2cm]}
+
+% Golden thread (D4): the Fleet Law term and C3 axis this lecture acts on, once, on the goals slide
+\newcommand{\fleetterm}[2]{\par\vspace{0.08cm}{\small\textcolor{mlsysaccent}{\textbf{Fleet Law term:}}~#1\qquad\textcolor{mlsysaccent}{\textbf{C$^3$ axis:}}~#2\par}}
+
 \begin{document}
 
 % =============================================================================
-% TITLE SLIDE
+% TITLE AND HOOK
 % =============================================================================
-\mlsystitle{ML Operations at Scale}{From Single-Model to Platform Engineering}{cover_ops_scale.png}
+\mlsysnote{[0.5 min] [CORE] Read the thesis aloud once. Last lecture ended at the edge of the fleet; today the fleet runs hundreds of models at once, and the question is how to operate them. The notes total about 71.5 minutes. FLEX: notes tagged [OPTIONAL] can be cut; cutting all of them leaves a complete lecture of about 62 minutes. Cut first the open questions, the burn-rate rule, and the TCO slide.}
+\mlsystitle{ML Operations at Scale}{At portfolio scale the unit to operate is the dependency graph of models, features, and owners, so releases, alerts, and costs become contracts on that graph.}{cover_ops_scale_blueprint.png}
 
-% =============================================================================
-% LEARNING OBJECTIVES
-% =============================================================================
-\begin{frame}{Learning Objectives}
-\note{
-% -- LINK: Connect to prior chapters
-Students built serving infrastructure in Part III. This chapter asks:
-what happens when you manage not one model, but a hundred?
-
-% -- NARRATE: What to SAY
-Read each objective aloud, pausing on ``platform ROI,'' ``feature store
-architectures'' (LO 7 --- new this year), and ``TCO framework.'' These three
-anchor the quantitative and architectural reasoning for the entire chapter.
-
-% -- ENGAGE: Specific question
-Ask: ``How many of you have deployed more than one model to production?
-At what count did ad hoc practices start breaking?''
-Give 10 seconds for a show of hands.
-
-% -- WARN: Specific misconception
-Students assume operations scale linearly with model count.
-Correct: dependencies grow as O(N^2), alerts as O(N*M).
-
-% -- FLEX: [CORE]
-[CORE] Never skip --- objectives frame the entire lecture.
-IF AHEAD: Ask students to rank which objective they most want to master.
-IF SHORT: Read objectives without elaboration, move on.
-}
-
-\small
-\begin{enumerate}
-  \item Calculate \textbf{platform ROI} to justify shared ML infrastructure
-  \item Design \textbf{dependency-aware model registries} for multi-model portfolios
-  \item Implement \textbf{CI/CD pipelines} tailored to model risk profiles
-  \item Architect \textbf{hierarchical monitoring} that prevents alert fatigue
-  \item Quantify \textbf{ML technical debt} using deployment velocity and toil metrics
-  \item Compare \textbf{centralized}, \textbf{embedded}, and \textbf{hybrid} organizational patterns
-  \item Evaluate \textbf{feature store architectures} for freshness SLOs and point-in-time correctness
-  \item Apply the \textbf{TCO framework} to make infrastructure investment decisions
-\end{enumerate}
-
+\begin{frame}{Predict: which signal moved in 48 hours?}
+  \mlsysactivity{Predict}{2 min}
+  \centering
+  \mlsyssteps[width=0.92\textwidth,height=4.0cm,keepaspectratio]{hook_step}{2}\\[0.05cm]
+  {\small A ranking model at 25,000 queries/s passes every offline and latency gate (p99: 99\% of requests are faster). Then an upstream schema change ships.}\\[0.15cm]
+  {\normalsize\choice{A}{HTTP errors}\quad\choice{B}{p99 latency}\quad\answerat{2}{C}{feature nulls and conversion}\quad\choice{D}{all four}}
+  \mlsyscredit{ML Operations at Scale, Example 12.2 (scenario numbers; the timeline shape is illustrative).}
+  \note{[3 min] [CORE] Step 1: a product-ranking model serving 25,000 queries per second passed offline validation and its latency gate (under 12 ms per request). An upstream team changes a schema. ENGAGE: vote with fingers; which rows on this dashboard move? Step 2: C. The change made one user-affinity feature null for 8 percent of queries. The server imputed null as 0.0, a valid float, so no request failed and no request slowed. Conversion fell 3.2 percent, and nothing alerted for 48 hours. Students who pick A or B assume a broken input breaks the service; students who pick D assume every failure shows up in health metrics. WARN: the model did not change. The model's owner, the feature's owner, and the serving owner each saw a healthy component. LINK: at fleet scale this is the ordinary failure, because the feature feeds many models owned by different teams. Today's question is what controls on the shared graph would have caught it, and how fast. The synthesis returns to this timeline.}
 \end{frame}
 
-\begin{frame}{Visual Language}
-\note{
-% -- NARRATE: What to SAY
-Point to each card: ``Blue = compute, green = data, orange = routing,
-red = error. These are consistent across every diagram in this course.
-When you see red in a pipeline diagram, something is bottlenecked.''
-
-% -- FLEX: [OPTIONAL]
-[OPTIONAL] Skip if students have seen this in a previous chapter deck.
-IF SHORT: Say ``same color system as last lecture'' and advance.
-}
-
-\small
-Throughout this course, colors carry meaning:
-
-\vspace{0.3cm}
-\begin{columns}[T]
-  \begin{column}{0.45\textwidth}
-    \begin{mlsyscard}{computestroke}
-    \textbf{Blue} --- Compute / Processing\\
-    {\footnotesize GPU ops, forward/backward pass, inference}
-    \end{mlsyscard}
-    \vspace{0.15cm}
-    \begin{mlsyscard}{datastroke}
-    \textbf{Green} --- Data / Memory\\
-    {\footnotesize Data flow, caches, healthy paths}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.45\textwidth}
-    \begin{mlsyscard}{routingstroke}
-    \textbf{Orange} --- Routing / Scheduling\\
-    {\footnotesize Load balancers, batch windows}
-    \end{mlsyscard}
-    \vspace{0.15cm}
-    \begin{mlsyscard}{errorstroke}
-    \textbf{Red} --- Error / Cost / Bottleneck\\
-    {\footnotesize Loss, decode phase, waste}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
+\begin{frame}{Recall: whose health does a federated fleet report?}
+  \mlsysactivity{Retrieval}{1.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.58\textwidth}
+      {\Large\bfseries Close your notes.}\\[0.3cm]
+      {\normalsize A phone fleet reports that a new model version is healthy. Why can that report mislead the release?}\\[0.3cm]
+      \uncover<2->{\small Only admitted devices train and report: charging, idle, on an unmetered network.\\[0.1cm]
+      The deployed fleet includes devices that never report, so health evidence covers a selected population.}
+    \end{column}
+    \begin{column}{0.38\textwidth}
+      \centering\mlsysphoto[width=0.75\textwidth,height=2.6cm,keepaspectratio]{smartphone-in-hand.jpg}\\[0.15cm]
+      \uncover<3->{\begin{mlsyscard}{mlsysaccent}\small\textbf{Today:} the same question for a data center. Which models, features, and owners does a release touch, and who sees it fail?\end{mlsyscard}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: Dennis Cort\'es, CC0, Wikimedia Commons.}
+  \note{[1.5 min] [CORE] Give 60 seconds; this recalls Lecture 11. Step 2: participation selection, owned by Lecture 11. Only devices that meet the admission rules (charging, idle, on Wi-Fi) participate and report, so a release looks healthy on the devices that report while the devices that never report run it unobserved. Lecture 11's adaptive release policy follows from this, with weeks-long rollouts and many versions live at once. Step 3: today moves the same question into the data center. A release there also touches every model that consumes a changed feature or embedding. FLEX: a student who missed Lecture 11 needs only step 2.}
 \end{frame}
 
-
-
-% =============================================================================
-\section{Platform Operations}
-% =============================================================================
-
-\begin{frame}{The N-Models Problem}
-\note{
-% -- LINK: Connect to prior concept
-Students just saw the learning objectives listing platform ROI and dependency
-management. This slide makes the problem visceral: why platforms exist.
-
-% -- NARRATE: What to SAY
-Point to the diagram: ``At 10 models, a few shared data sources. At 50,
-the dependency graph is a hairball. At 100, a single upstream change
-cascades unpredictably.'' Trace the quadratic growth curve.
-
-% -- ENGAGE: Specific question
-Ask: ``At your organization, how many models share the same data sources?''
-Expected answer: most students underestimate --- typical is 5--10 shared sources.
-
-% -- WARN: Specific misconception
-Students assume managing 100 models is 100x the work of managing one.
-Correct: dependencies grow as O(N^2), so 100 models is closer to 10,000x
-the coordination complexity.
-
-% -- FLEX: [CORE]
-[CORE] This motivates the entire chapter.
-IF AHEAD: Ask ``At what N does your dependency graph become unmanageable?''
-IF SHORT: Show diagram, state O(N^2), move on.
-}
-
-% --- Full-width diagram ---
-\centering
-\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{n-models-complexity.pdf}
-
-\vspace{0.1cm}
-\mlsysinsight{Key:}{Per-model practices collapse at $\sim$50 models. Dependencies grow as $O(N^2)$.}
-
-\end{frame}
-
-\begin{frame}{Operational Complexity Growth}
-\note{
-% -- LINK: Connect to prior concept
-The N-models diagram showed the complexity curve. This table puts
-concrete operational labels on each step of that curve.
-
-% -- NARRATE: What to SAY
-Walk column by column: ``At 1 model, monitoring is a single dashboard.
-At 100, you have 100 dashboards nobody reads. Debugging shifts from
-local to distributed tracing --- a qualitatively different skill.''
-
-% -- ENGAGE: Specific question
-Ask: ``Which column transitions from manageable to unmanageable first?''
-Expected answer: monitoring (it is the first to break because alert
-volume grows as N times M metrics).
-
-% -- WARN: Specific misconception
-Students focus on deployment coordination but miss that monitoring
-breaks first. Alert fatigue precedes deployment chaos.
-
-% -- FLEX: [OPTIONAL]
-[OPTIONAL] This table reinforces the N-models diagram.
-IF SHORT: Point to the monitoring row, state the key insight, advance.
-IF AHEAD: Ask students to fill in a ``1000 models'' column mentally.
-}
-
-\footnotesize
-\renewcommand{\arraystretch}{1.15}
-\begin{tabular}{@{}llll@{}}
-  \toprule
-  \textbf{Aspect} & \textbf{1 Model} & \textbf{10 Models} & \textbf{100 Models} \\
-  \midrule
-  \textbf{Deployment}  & None             & Ad hoc            & Critical path \\
-  \textbf{Dependencies}& None             & Some overlap      & Dense graph \\
-  \textbf{Monitoring}  & 1 dashboard      & 10 dashboards     & Unmanageable \\
-  \textbf{On-call}     & Single team      & Multi-team        & Org-wide \\
-  \textbf{Utilization} & Often idle       & Moderate sharing  & Efficiency critical \\
-  \textbf{Debugging}   & Local            & Cross-team        & Distributed tracing \\
-  \bottomrule
-\end{tabular}
-
-\vspace{0.15cm}
-\mlsysalert{Consequence:}{100 models with independent failure modes create a constant stream of alerts that masks genuine emergencies.}
-
-\end{frame}
-
-\begin{frame}{Quantifying Platform ROI}
-\note{
-% -- LINK: Connect to prior concept
-The complexity table showed operations becoming unmanageable. This slide
-answers: what is the economic case for investing in a platform?
-
-% -- NARRATE: What to SAY
-Point to the equation: ``N is model count, T-saved is hours per model,
-C-eng is engineer cost. The numerator grows linearly with N; the
-denominator is fixed.'' Walk through the worked example: ``50 models,
-40 hours each, \$150/hr = \$3.6M before, \$1.6M after. 56\% savings.''
-
-% -- ENGAGE: Specific question
-Ask: ``At what model count does your organization need a platform team?''
-Give 10 seconds. Expected: most say 50--100; the surprise is 20--50.
-
-% -- WARN: Specific misconception
-Students think platform ROI is linear. Correct: it is superlinear because
-shared infrastructure amortizes over all models simultaneously.
-
-% -- FLEX: [CORE]
-[CORE] The ROI equation is the quantitative anchor for the chapter.
-IF AHEAD: Ask ``What if T-saved is only 10 hours instead of 30?''
-IF SHORT: Show equation, state the 56\% number, skip the worked example detail.
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.48\textwidth}
-    \safeimg[width=\textwidth,height=5.5cm,keepaspectratio]{platform-roi.pdf}
-  \end{column}
-  \begin{column}{0.48\textwidth}
-    $$\text{ROI}_{\text{platform}} = \frac{N \times T_{saved} \times C_{eng}}{C_{platform}}$$
-
-    \vspace{0.15cm}
-    {\footnotesize
-    \textbf{Worked example} (50 models):
-    \begin{itemize}\setlength\itemsep{0pt}
-      \item Before: 50 $\times$ 40 hrs $\times$ \$150 = \$3.6M/yr
-      \item After: 50 $\times$ 10 hrs $\times$ \$150 + \$667K = \$1.6M/yr
-      \item \textcolor{datastroke}{\textbf{Savings: 56\%}} (\$2M/yr)
-    \end{itemize}
-    }
-
-    \vspace{0.1cm}
-    \mlsysconcept{Threshold:}{Break-even at 20--50 models.}
-  \end{column}
-\end{columns}
-
-\end{frame}
-
-% --- ACTIVE LEARNING: Micro-Retrieval Cue ---
-\begin{frame}{Quick Check}
-\note{
-% -- NARRATE: What to SAY
-Pause 15 seconds. Then cold-call. Answer: 20--50 models.
-Say: ``Most students guess 100+. The surprise is the threshold is
-much lower because shared infrastructure amortizes across all models.''
-
-% -- FLEX: [OPTIONAL]
-[OPTIONAL] Micro-retrieval cue reinforcing the ROI slide.
-IF SHORT: Skip entirely --- the predict exercise covers this ground.
-}
-
-\centering
-\vspace{1.0cm}
-{\Large\bfseries Quick Check}
-
-\vspace{0.6cm}
-{\large At what model count does platform investment\\typically break even?}
-
-\vspace{0.5cm}
-{\normalsize\textcolor{midgray}{15 seconds --- then I will cold-call.}}
-
-\end{frame}
-
-
-
-\begin{frame}{MLOps Maturity Hierarchy}
-\note{
-% -- LINK: Connect to prior concept
-The ROI equation showed that platforms pay for themselves. This slide
-asks: what does the maturity journey look like?
-
-% -- NARRATE: What to SAY
-Point to each level: ``L0 = scripts on laptops. L1 = per-model CI/CD,
-the most common state. L2 = shared platform, where the superlinear
-returns kick in. L3 = enterprise governance across the org.'' Emphasize
-the L1-to-L2 transition: ``This is where most organizations stall.''
-
-% -- ENGAGE: Specific question
-Ask: ``Where is your organization on this staircase?''
-Show of hands for each level. Most will cluster at L0--L1.
-
-% -- WARN: Specific misconception
-Students think the jump from L0 to L1 is the hard part. Correct:
-L0-to-L1 is just adding CI/CD. The L1-to-L2 jump requires
-organizational change --- shared infrastructure, common APIs, platform team.
-
-% -- FLEX: [OPTIONAL]
-[OPTIONAL] Reinforces the platform investment argument.
-IF SHORT: Show staircase, name the four levels, emphasize L1-to-L2, advance.
-}
-
-% --- Full-width diagram ---
-\centering
-\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{mlops-maturity.pdf}
-
-\vspace{0.1cm}
-\small
-\begin{columns}[T]
-  \begin{column}{0.22\textwidth}
-    \centering
-    \textcolor{errorstroke}{\textbf{L0: Manual}}\\
-    {\scriptsize Ad hoc, 1--2 models}
-  \end{column}
-  \begin{column}{0.22\textwidth}
-    \centering
-    \textcolor{routingstroke}{\textbf{L1: Per-Model}}\\
-    {\scriptsize CI/CD per model}
-  \end{column}
-  \begin{column}{0.22\textwidth}
-    \centering
-    \textcolor{computestroke}{\textbf{L2: Platform}}\\
-    {\scriptsize Shared infra}
-  \end{column}
-  \begin{column}{0.22\textwidth}
-    \centering
-    \textcolor{datastroke}{\textbf{L3: Enterprise}}\\
-    {\scriptsize Org-wide governance}
-  \end{column}
-\end{columns}
-
-\end{frame}
-
-% --- ACTIVE LEARNING 1: Predict ---
-\begin{frame}{Predict: When Does Platform Investment Pay Off?}
-\note{[2 min] Prediction exercise. Students write for 60 seconds.
-Do NOT reveal the answer yet. This primes the platform economics discussion.
-Ask 2--3 students to share.}
-
-\centering
-\vspace{1.0cm}
-{\Large\bfseries Think--Write--Share}
-
-\vspace{0.6cm}
-{\large Your organization has 30 models, each costing\\
-40 engineer-hours/month in operational toil.\\[0.3cm]
-\alert{At what model count does a \$2M platform pay for itself?}}
-
-\vspace{0.6cm}
-{\normalsize Write your estimate. \textcolor{midgray}{(60 seconds)}}
-
+\begin{frame}{How do we run hundreds of models without $N^2$ work?}
+  \begin{columns}[c]
+    \begin{column}{0.30\textwidth}
+      \centering\mlsyskitfig[width=\textwidth,height=4.7cm,keepaspectratio]{stack_operations}
+    \end{column}
+    \begin{column}{0.66\textwidth}
+      \small
+      \begin{itemize}\setlength{\itemsep}{0.1cm}
+        \item Trace a change through a model registry's dependency graph to its impact set.
+        \item Show how a point-in-time join keeps training and serving features consistent.
+        \item Size a canary stage, an experiment, and an alert policy with numbers.
+        \item Decide when owning a fleet beats renting it, from sustained utilization.
+      \end{itemize}
+    \end{column}
+  \end{columns}
+  \fleetterm{$T_{\text{sync}}(N)$}{Coordination ($C_3$)}
+  \note{[1.5 min] [CORE] The driving question: how does an organization run hundreds of models without its operations work growing with the square of their count? The stack on the left is the volume's fleet stack; today is the Operations row, above Runtime and Serving and below Assurance. It is the fleet's control plane: the registry, feature store, release pipeline, monitoring, and cost accounting that every model shares. Four goals, one per part of the lecture; segments 2 and 3 share the third. In C\textsuperscript{3} terms (Lecture 1), this lecture is the coordination axis at its widest, because the Fleet Law charges synchronization inside one step while operations pays coordination on every release, rollback, and shared dependency. The accent line at the bottom names the Fleet Law term and C$^3$ axis that today's mechanisms act on; say it once.}
 \end{frame}
 
 % =============================================================================
-\section{Multi-Model Management}
+% SECTION: GRAPH
 % =============================================================================
+\mlsysnote{[0.5 min] [CORE] First segment: why the unit to operate is the whole dependency graph.}
+\mlsysdivider{Why does running 100 models cost more than 100 times one?}{ML Operations at Scale, \S12.2 and \S12.3}
+\section{Graph}
 
-\begin{frame}{Dependency-Aware Model Registry}
-\note{
-% -- LINK: What prior concept connects to this slide
-The N-models problem showed dependencies grow as O(N-squared). This slide
-makes dependency cascades concrete: one silent upstream change poisons
-all downstream consumers.
-
-% -- NARRATE: What to SAY while showing this slide
-[3 min] Walk through the dependency graph: ``When the embedding model
-updates silently, every downstream model receives garbage features.
-Without a dependency-aware registry, organizations discover these
-cascades through production failures --- not proactive monitoring.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``What happens when the embedding model updates silently?''
-Give 10 seconds. [Expected: garbage predictions for all downstream models.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students think pinning model versions prevents cascades.
-Correct framing: pinning delays the problem but creates technical debt ---
-eventually you must propagate updates through the entire graph.
-
-% -- FLEX: [CORE] + contingency
-[CORE] Dependency management is the central multi-model challenge.
-IF AHEAD: Ask ``How would you test a model update against all its consumers?''
-IF SHORT: Show diagram, state the cascade failure mode, move on.
-}
-
-% --- Full-width diagram ---
-\centering
-\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{model-registry-deps.pdf}
-
-\vspace{0.1cm}
-\mlsysalert{Without tracking:}{Organizations discover dependencies through production failures.}
-
+\begin{frame}{Pairwise couplings grow as $N^2/2$ while alerts grow as $N$}
+  \centering
+  \mlsyssteps[width=0.92\textwidth,height=5.3cm,keepaspectratio]{load_step}{3}
+  \note{[3 min] [CORE] The chapter's sketch of operational load, on log axes. The shapes are assumptions; the chapter says so and so should you. Step 1: alerts grow linearly, because each model brings its own monitored metrics; the red dashed line is what one team can absorb. Step 2: deployment coordination grows a little faster, drawn as N log N. Step 3: once models share features, embeddings, pipelines, and GPU pools, any pair can conflict, and N models form about N$^2$/2 pairs. The total crosses one team's capacity near 50 models. ENGAGE: at 100 models, which term dominates? (Expected: conflicts; 5,000 pairs against 2,000 alert units in the sketch.) WARN: the recorded dependencies decide which pairs can conflict. A portfolio of 100 independent models has almost no conflict term; a dense one crosses early. The crossing marks where repeated work outgrows a team; no organization can read its own threshold off the plot. LINK: this is why the chapter's first claim is that load follows coupling. FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{Ensemble Management}
-\note{
-% -- LINK: Connect to prior concept
-The Dependency-Aware Model Registry showed that cascades happen when the
-embedding model updates silently. Ensemble management is the operational
-answer: how do you safely update one component of a 10--50 model pipeline?
-
-% -- NARRATE: What to SAY
-[3 min] Walk through the deployment stages: ``Shadow logs but does not
-serve---this is where you verify the new component does not produce
-garbage outputs. Canary routes 1\% of live traffic. Staged ramps from
-5\% to 100\% while monitoring business metrics. Soak watches for
-delayed effects: a personalization model may look fine at 100\% traffic
-for three days but start degrading on day seven as feedback loops kick in.''
-Point to the interaction effects callout: ``A component update that
-improves its local metric---say, the retrieval model improves recall by
-5\%---might degrade the full system because the ranking model was trained
-on the old retrieval distribution. The ranking model has never seen
-the new set of candidates.''
-
-% -- ENGAGE: Specific question
-Ask: ``What happens if the ranking model updates but the retrieval model
-does not?'' Give 15 seconds. Expected: the ranking model now scores
-candidates from a distribution it was never trained on, potentially
-producing low-quality or unsafe rankings despite passing all unit tests.
-
-% -- WARN: Specific misconception
-Students assume updating one model in an ensemble is safe as long as
-individual model metrics improve. Correct: the ensemble is a joint
-distribution. Changing one component changes the joint, and the other
-components were trained on the old joint. System-level metrics
-(engagement, revenue, safety) are the only reliable signal.
-
-% -- FLEX: [OPTIONAL]
-[OPTIONAL] Ensemble interaction effects are important for RecSys heavy courses.
-IF SHORT: Show staged deployment table; state the interaction-effects warning; advance.
-IF AHEAD: Ask ``How would you use shadow mode to safely test a new retrieval model?''
-}
-
-\footnotesize
-\textbf{A single recommendation request invokes 10--50 models:}
-
-\vspace{0.1cm}
-\renewcommand{\arraystretch}{1.1}
-\begin{tabular}{@{}llrl@{}}
-  \toprule
-  \textbf{Deploy Stage} & \textbf{Actions} & \textbf{Duration} & \textbf{Rollback Trigger} \\
-  \midrule
-  \textbf{Shadow}       & Log only, not served        & 24--48 h  & Quality below threshold \\
-  \textbf{Canary}       & 1\% traffic                 & 4--8 h    & Statistical regression \\
-  \textbf{Staged}       & 5\% $\to$ 25\% $\to$ 100\% & 24--72 h  & Business metric drop \\
-  \textbf{Soak}         & Full traffic, extended watch & 7--14 d   & Delayed effects \\
-  \bottomrule
-\end{tabular}
-
-\vspace{0.15cm}
-\begin{mlsyscard}{routingstroke}
-{\footnotesize\textbf{Interaction effects:} A component change improving local metrics might degrade system-level performance through subtle interactions.}
-\end{mlsyscard}
-
+\begin{frame}{A million models were trained on workflows from under 150 authors}
+  \centering
+  \safeimg[width=0.92\textwidth,height=3.6cm,keepaspectratio]{fbl.pdf}\\[0.15cm]
+  {\small Used by more than 25\% of Meta's engineers; more than 6 million predictions/s.}
+  \mlsyscredit{Meta Engineering, ``Introducing FBLearner Flow: Facebook's AI backbone,'' 9 May 2016 (runs: one month, April).}
+  \note{[1.5 min] [OPTIONAL] Measured, from Meta's 2016 account of FBLearner Flow, the platform the chapter's case study names. More than a million models trained since launch; more than 500,000 workflow runs in one month; fewer than 150 people wrote the workflows; more than a quarter of the engineering organization used it; the prediction service made more than 6 million predictions per second. Read the ratio aloud: thousands of model owners run a few hundred shared workflows. That sharing is the platform's economy, because each team stops rebuilding pipelines, and also its coupling, because a defect or a change in one shared workflow reaches every model that runs it. ENGAGE: who should approve a change to a workflow that 10,000 models use? (Expected: the change needs its consumers' evidence, which is the registry's job on the next slide.) FLEX: [OPTIONAL]; the previous slide carries the argument.}
 \end{frame}
 
-\begin{frame}{Model-Type Operations Diversity}
-\note{[2 min] Different model types need fundamentally different operational
-patterns. Fraud detection needs hourly updates; LLMs need monthly staged
-rollouts. The principle: risk profile determines operational cadence.}
+\begin{frame}{A dependency-aware registry turns edges into an impact set}
+  \centering
+  \mlsyssteps[width=0.92\textwidth,height=4.7cm,keepaspectratio]{registry_step}{3}\\[0.05cm]
+  {\footnotesize MLflow records versions: \texttt{mlflow.register\_model(...)}; load \texttt{models:/MyModel@champion}}
+  \mlsyscredit{After ML Operations at Scale, figure 3 and \S12.3.1. Code: MLflow Model Registry documentation (mlflow.org).}
+  \note{[3 min] [CORE] The code line is real, MLflow's registry call and its alias URI. A standard registry records versions and lets consumers load a version by alias (champion); it does not by itself record who consumes what, and that edge list is what fleet operations adds. Step 1: an embedding model E moves from version 3.1 to 3.2. It passed its own evaluation. Per-model validation does not establish that its consumers still work. Step 2: the registry records who consumes what. Traversing downstream edges gives the impact set: retrieval at hop 1, three rankers at hop 2, the ensemble at hop 3. The release controller re-evaluates each consumer on the new embeddings, blocks E until all pass, and rolls out a compatible version set with a validated rollback target. Step 3: the fraud model has no recorded edge, so traversal does not flag it. If it does read E and nobody recorded that, the graph is wrong and the outage finds the edge. ENGAGE: why does the rollback unit grow with the graph? (Expected: reverting E alone can break a ranker retrained on v3.2; the rollback must restore a compatible set.) Lecture 4 owns versioned artifacts and commit boundaries; the registry adds the edges between them. FLEX: [CORE].}
+\end{frame}
 
-\footnotesize
-\renewcommand{\arraystretch}{1.15}
-\begin{tabular}{@{}lllll@{}}
-  \toprule
-  \textbf{Model Type} & \textbf{Update Freq.} & \textbf{Deploy} & \textbf{Primary Risk} & \textbf{Rollback} \\
-  \midrule
-  \textbf{LLM}   & Monthly     & Staged, careful  & Quality, safety     & Hours--days \\
-  \textbf{RecSys} & Daily--weekly & Shadow, A/B     & Engagement drop     & Minutes \\
-  \textbf{Fraud}  & Hourly--daily & Rapid + rollback & False negatives     & Seconds \\
-  \textbf{Vision} & Weekly--monthly & Canary         & Accuracy regression & Minutes \\
-  \bottomrule
-\end{tabular}
-
-\vspace{0.15cm}
-\mlsysconcept{Principle:}{Risk profile determines operational cadence.}
-
-\vspace{0.1cm}
-{\footnotesize LLMs operate slowly because quality regressions are hard to detect. Fraud detection operates continuously because adversaries do not wait.}
-
+\begin{frame}{Check: true or false at fleet scale?}
+  \mlsysactivity{Vote}{2 min}
+  \normalsize
+  \choice{1}{Operational work grows linearly with model count.}\uncover<2->{\enspace\textbf{\textcolor{errorstroke}{False}}}\\[0.3cm]
+  \choice{2}{Per-model metrics such as loss and accuracy are enough.}\uncover<2->{\enspace\textbf{\textcolor{errorstroke}{False}}}\\[0.3cm]
+  \choice{3}{A feature that keeps its name and type is safe to redefine.}\uncover<2->{\enspace\textbf{\textcolor{errorstroke}{False}}}\\[0.45cm]
+  \uncover<2->{\small One redefined shared feature: \textbf{14 models}, \textbf{5 teams}, ranking accuracy down \textbf{12\%}, \textbf{18 hours} of debugging.}
+  \mlsyscredit{ML Operations at Scale, \S12.12 (fallacies) and Example 12.3.}
+  \note{[2.5 min] [CORE] Peer instruction: vote on all three, a minute with a neighbor, vote again. Step 2: all three are false, and the chapter gives the numbers. (1) Shared dependencies make coordination grow faster than the count; in the monitoring scenario, 100 models with 10 metrics checked every 5 minutes at a 5 percent false-positive rate give 14,400 raw false crossings a day; segment 4 derives it. (2) Shared-feature drift can lower several models' accuracy at once; their metrics show the harm but not the common cause. (3) Example 12.3: a platform team changed the shared feature user\_engagement\_score from a 30-day z-score to a 7-day min-max scale, in place. The name and the float type stayed; the meaning changed. Fourteen downstream models across five teams consumed it, ranking accuracy fell 12 percent, and the teams spent 18 hours debugging. The fix is an immutable new version, user\_engagement\_score\_v2, and a consumer declaration in the registry. Students who answer true to (3) trust schema checks, which test the type and cannot test the meaning. Land the segment aloud: the operational object is the graph, and every edge is a contract. FLEX: [CORE].}
 \end{frame}
 
 % =============================================================================
-\section{CI/CD at Scale}
+% SECTION: FEATURES
 % =============================================================================
+\mlsysnote{[0.5 min] [CORE] The registry knows which models consume a feature. It cannot say whether training and serving saw the same value. That is the feature store's contract.}
+\mlsysdivider{How do training and serving agree on what a feature meant?}{ML Operations at Scale, \S12.4}
+\section{Features}
 
-\begin{frame}{ML CI/CD Pipeline}
-\note{[3 min] Walk through the pipeline stages and gates. Key difference
-from software CI/CD: must validate data, model performance, and fairness ---
-not just code correctness. Each stage is idempotent. Ask: ``Which gate
-is most likely to catch a silent regression?''}
-
-% --- Full-width diagram ---
-\centering
-\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{ml-cicd-pipeline.pdf}
-
-\vspace{0.1cm}
-\mlsysinsight{Key difference:}{ML CI/CD validates \textbf{data + model + fairness}, not just code.}
-
+\begin{frame}[fragile]{One feature definition feeds two stores with opposite access paths}
+  \begin{columns}[c]
+    \begin{column}{0.60\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.9cm,keepaspectratio]{fstore.pdf}
+    \end{column}
+    \begin{column}{0.38\textwidth}
+{\footnotesize Feast, a real feature store:}
+\begin{semiverbatim}\scriptsize
+driver_stats_fv = FeatureView(
+  name="driver_hourly_stats",
+  entities=[driver],
+  ttl=timedelta(days=1),
+  schema=[
+    Field(name="conv_rate",
+          dtype=Float32), ...
+\end{semiverbatim}
+    \end{column}
+  \end{columns}
+  \vspace{0.1cm}
+  {\footnotesize Freshness SLO (service-level objective): days for demographics, seconds for the last click. Lookups get 5 to 10 ms of 50 ms.}
+  \mlsyscredit{After ML Operations at Scale, figure 5, \S12.4.2, \S12.4.6. Code: Feast quickstart, docs.feast.dev (abridged).}
+  \note{[2.5 min] [CORE] The code is Feast's quickstart: one FeatureView declares the feature's name, its entity, its schema, and a time-to-live, and Feast materializes it into both stores. Training scans terabytes of history to build millions of examples; serving fetches one user's latest feature vector inside a few milliseconds. One store cannot serve both access patterns well, so the platform splits storage and keeps one versioned definition writing both. That makes training-serving skew, a difference in processing between the two paths, a property the platform can test once for every team. Scale on the bottom: 1 billion recommendations a day, each fetching 100 features, is 100 billion lookups a day, about 1.16 million per second before peaks. If the recommendation budget is 50 ms, the store gets 5 to 10 ms. A freshness SLO (service-level objective, a target on a measured indicator) names how stale a feature may be: days for demographics, minutes for session context, seconds for the last action. ENGAGE: a refresh timestamp is recent; does that prove the feature is fresh? (Expected: no; rewriting an old value updates the timestamp, so monitors need source progress, the event time processed through.) WARN: a stale feature leaves the endpoint fast and available. FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{Staged Rollout Strategy}
-\note{
-% -- LINK: Connect to prior concept
-The ML CI/CD pipeline showed the stages that gate a model before promotion.
-This slide shows what happens after the gate opens: how to release safely
-when unit tests cannot guarantee real-world behavior.
-
-% -- NARRATE: What to SAY
-[3 min] Walk through the rollout diagram: ``Shadow logs but does not serve.
-Canary routes 1\% of live traffic. Staged ramps from 5\% to 25\% to 100\%.
-Soak watches for delayed effects at full traffic over 7--14 days.''
-Point to the canary duration formula: ``At 1M req/hr with a 1\% canary,
-you need 10,000 samples to detect a statistically significant regression,
-which takes a minimum of 1 hour. The total confident rollout is about
-4 hours. An instant blue-green deployment skips all of this.''
-State the 20$\times$ risk reduction: ``A 5\% canary limits blast radius
-by 20$\times$ relative to full rollout. If the model is broken, only 5\%
-of users see the failure, not 100\%.''
-
-% -- ENGAGE: Specific question
-Ask: ``What does the 20$\times$ risk reduction protect against?'' Give 10
-seconds. Expected: it limits the blast radius of a regression -- it does
-NOT prevent the regression from occurring, it only controls how many users
-are affected before detection.
-
-% -- WARN: Specific misconception
-Students assume canary deployment prevents regressions. Correct: canary
-only limits blast radius -- it reduces the percentage of users exposed to
-a bad model before rollback, but it does not make detection faster.
-The regression still occurs; canary just contains it. Fast detection
-requires good monitoring (alert system from the previous section).
-
-% -- FLEX: [CORE]
-[CORE] Staged rollouts are a quantitative safety argument, not just best practice.
-IF SHORT: Show diagram, state 20$\times$ blast radius reduction; skip formula.
-IF AHEAD: Ask ``What if your 1\% canary is demographically unrepresentative of the full user base?''
-}
-
-% --- Full-width diagram ---
-\centering
-\safeimg[width=0.88\textwidth,height=4.0cm,keepaspectratio]{staged-rollout.pdf}
-
-\vspace{0.1cm}
-\small
-\textbf{Canary duration:} $t_{stage} = \frac{n_{samples}}{r_{requests} \times p_{stage}}$
-
-\vspace{0.1cm}
-{\footnotesize At 1M req/hr with 1\% canary: 10K samples needed $\to$ 1 hour minimum.\\
-Total confident rollout: $\sim$4 hours (vs.\ instant blue-green with no safety net).}
-
+\begin{frame}{Predict: what does a naive join feed the model?}
+  \mlsysactivity{Predict}{2 min}
+  \centering
+  \mlsyssteps[width=0.92\textwidth,height=3.7cm,keepaspectratio]{pit_step}{2}\\[0.05cm]
+  {\small A training example: prediction at noon. Feature: \texttt{total\_clicks\_today}.}\\[0.05cm]
+  {\footnotesize Feast: \texttt{store.get\_historical\_features(entity\_df=entity\_df, ...)}}\\[0.03cm]
+  \uncover<2->{\small Join on the time the value became \textbf{available}.}
+  \mlsyscredit{After ML Operations at Scale, figure 6 and listing 2. Code: Feast quickstart, docs.feast.dev.}
+  \note{[3 min] [CORE] ENGAGE: one minute. The user clicked ten times today, four before the noon prediction. The training pipeline joins this example to the feature table. What value does the model see? Step 2: a point-in-time join takes the latest feature value at or before the prediction time, which is 4. A naive join to the end-of-day table takes 10, 2.5 times the value the deployed model will ever see at noon. Feast's get\_historical\_features call does this join for every row of the entity table, using each row's timestamp. This is data leakage. The model learns from the future, offline metrics look excellent, and production quality falls. The SQL in listing 2 filters feature\_timestamp at or before event\_timestamp. The chapter warns that this column must record when the value became available to serving. If it records only the source event time, a late arrival or a backfill passes the filter. So the store keeps both timestamps. For 100 million users, 1,000 features, and hourly snapshots for a year, the store holds 876 trillion values; at 32 bytes per row (value, key, two timestamps) about 28 PB before compression, three quarters of it metadata (\S12.4.3). WARN: students who say 10 think the table is wrong; the table is right for midnight and wrong for noon. FLEX: [CORE].}
 \end{frame}
 
-% --- ACTIVE LEARNING 2: Exercise ---
-\begin{frame}{Your Turn: Cost of a Delayed Alert}
-\note{[3 min] Give students 90 seconds. Answer: 432M requests $\times$ 0.005
-lost CTR $\times$ \$0.50/click = \$1.08M. The insight: a ``minor'' 0.5\%
-regression at scale is a million-dollar daily disaster.}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    {\normalsize\bfseries Calculate the Loss}
-
-    \vspace{0.2cm}
-    A recommendation model has a silent bug reducing CTR by 0.5\% (5.0\% $\to$ 4.5\%).
-    \begin{itemize}
-      \item 5,000 QPS, each click worth \$0.50
-      \item Detection takes 24 hours
-    \end{itemize}
-
-    \vspace{0.15cm}
-    \textbf{How much revenue is lost?}
-
-    {\footnotesize\textcolor{midgray}{(90 seconds --- then compare with a neighbor)}}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \pause
-    \begin{mlsyscard}{errorstroke}
-    \textbf{Solution:}\\[0.1cm]
-    {\footnotesize
-    Requests: 5K $\times$ 86,400 = 432M\\
-    Lost clicks: 432M $\times$ 0.005 = 2.16M\\
-    Loss: 2.16M $\times$ \$0.50\\[0.1cm]
-    $=$ \textcolor{errorstroke}{\textbf{\$1,080,000}}\\[0.1cm]
-    Every hour of faster detection saves \textbf{\$45K}.
-    }
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
+\begin{frame}{Google's schema checks each fired on up to 10\% of pipelines}
+  \begin{columns}[c]
+    \begin{column}{0.64\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.3cm,keepaspectratio]{breck.pdf}
+    \end{column}
+    \begin{column}{0.33\textwidth}
+      \begin{mlsyscard}{mlsysaccent}\small\textbf{Google Play, measured:} features always present in training, always missing in serving logs. Removing the skew raised app installs \textbf{2\%} (A/B test).\end{mlsyscard}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Breck et al., ``Data Validation for Machine Learning,'' MLSys 2019, Table 1 and \S6.2. Baylor et al., ``TFX,'' KDD 2017, \S7.}
+  \note{[2 min] [OPTIONAL] Measured data from Google's production validation system, part of TFX. Over more than 700 pipelines in 30 days, the bars give the share of pipelines on which each schema check fired at least once: a new feature column in 10 percent, a missing feature column in 6, unexpected category values in 6, a feature present in too few examples in 3, data completely missing in 3. These are the checks a data contract enforces before a model trains or serves. The card measures the chapter's training-serving skew. Google Play found features that were always present in training and always missing from serving logs; an online A/B test showed that removing the skew raised the app install rate on the store's main page by 2 percent. ENGAGE: why is ``missing feature column'' worse than ``new feature column''? (Expected: a missing input is silently imputed, as in the hook; a new one is unused.) FLEX: [OPTIONAL]; cut if short and say the Play result aloud.}
 \end{frame}
 
-\begin{frame}{CI/CD Patterns by Model Type}
-\note{[2 min] Connect back to model-type diversity. LLMs: quality-gated,
-days to weeks. Fraud: threshold-gated, hours with seconds rollback.
-The key: one-size-fits-all CI/CD fails at platform scale.}
-
-\footnotesize
-\renewcommand{\arraystretch}{1.15}
-\begin{tabular}{@{}lllll@{}}
-  \toprule
-  \textbf{Pattern} & \textbf{Model Type} & \textbf{Validation} & \textbf{Rollout} & \textbf{Rollback} \\
-  \midrule
-  \textbf{Quality-gated}   & LLM   & Human eval + safety  & Days--weeks & Hours \\
-  \textbf{Metric-driven}   & RecSys & Engagement metrics  & Hours--days & Minutes \\
-  \textbf{Threshold-gated} & Fraud  & Precision/recall    & Hours       & Seconds \\
-  \textbf{Accuracy-focused} & Vision & Classification     & Days        & Minutes \\
-  \bottomrule
-\end{tabular}
-
-\vspace{0.15cm}
-\begin{mlsyscard}{crimson}
-{\footnotesize \textbf{Rollout risk:} $R = P_{\text{regression}} \times I_{\text{regression}} \times E_{\text{exposure}}$. Reduce any factor to reduce total risk.}
-\end{mlsyscard}
-
+\begin{frame}{Estimate: what did five days of a broken feature cost?}
+  \mlsysactivity{Estimate}{2 min}
+  \begin{columns}[T]
+    \begin{column}{0.40\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \small\textbf{Given (constructed)}\\[0.05cm]
+        CTR 4.2\% $\rightarrow$ 3.87\%, $-8$\%\\
+        Revenue \$15M/week, tracks CTR\\
+        Undetected for 5 days
+      \end{mlsyscard}
+      \small
+      \wstep{2}{$0.08 \times \$15\text{M} \times 5/7 = \mathbf{\$857\text{K}}$}
+      \uncover<3->{4 h alert (derived): $\approx \$28.6\text{K}$}
+    \end{column}
+    \begin{column}{0.57\textwidth}
+      \centering
+      \uncover<3->{\safeimg[width=\textwidth,height=3.6cm,keepaspectratio]{feature_cost.pdf}}\\[0.1cm]
+      \uncover<3->{\footnotesize Cause: a pipeline version changed the aggregation window; the definition did not change.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{ML Operations at Scale, \S12.4.7 (debugging a data quality incident; constructed values).}
+  \note{[3 min] [CORE] ENGAGE: two minutes in pairs. A recommendation model's click-through rate (CTR) fell from 4.2 to 3.87 percent over five days. Freshness checks were green, because features arrived inside their 1-hour SLO. Step 2: if revenue falls with CTR, the loss is 8 percent of \$15 million a week for five sevenths of a week, \$857K. Step 3: with an alert and containment in 4 hours instead of 120, the loss is a thirtieth, about \$28.6K, 97 percent less (derived). How was it found? The mean of user\_engagement\_score moved from 0.42 to 0.31; lineage tied the shift to a pipeline version deployed five days earlier; replaying the same records through both versions showed the new pipeline used a different aggregation window under an unchanged definition. Only that replay proved the defect; the distribution shift alone did not. WARN: the feature was fresh and well-typed; freshness and schema checks cannot catch a changed computation. The control is a distribution gate (the chapter's 10 percent band) plus semantic tests. Land the segment aloud: a feature is a versioned interface with a timestamp contract; availability time, version, and lineage make it testable. FLEX: [CORE].}
 \end{frame}
 
 % =============================================================================
-\section{Monitoring at Scale}
+% SECTION: RELEASES
 % =============================================================================
+\mlsysnote{[0.5 min] [CORE] The graph and the features define a candidate. Now: how much live traffic may it touch before we trust it?}
+\mlsysdivider{How much live traffic may a candidate touch before we trust it?}{ML Operations at Scale, \S12.5}
+\section{Releases}
 
-\mlsysfocus{The False Alarm Tax}{%
-$P(\text{false alert}) = 1 - (1-\alpha)^N$\\[0.3cm]
-{\normalsize With $\alpha=0.05$, $N=1000$: $P \approx 1.0$}%
-}
-
-\begin{frame}{Alert Fatigue: The Math}
-\note{[3 min] This is the key quantitative insight. Even at 3-sigma
-specificity, 100 models with 10 metrics generate 864 false alerts/day.
-At 2-sigma: 14,400/day. Operators learn to ignore everything.
-Ask: ``How many alerts per day before your on-call team gives up?''}
-
-\small
-\textbf{100 models $\times$ 10 metrics $\times$ 5-min checks:}
-
-\vspace{0.15cm}
-{\footnotesize
-\renewcommand{\arraystretch}{1.2}
-\begin{tabular}{@{}lrrr@{}}
-  \toprule
-  \textbf{Threshold} & \textbf{FPR} & \textbf{Daily False Alerts} & \textbf{Status} \\
-  \midrule
-  2-sigma (95\%)   & 5.0\%  & 14,400 & \textcolor{errorstroke}{\textbf{Useless}} \\
-  3-sigma (99.7\%) & 0.3\%  & 864    & \textcolor{routingstroke}{\textbf{Overwhelming}} \\
-  4-sigma (99.99\%) & 0.01\% & 29    & \textcolor{datastroke}{\textbf{Manageable}} \\
-  \bottomrule
-\end{tabular}
-}
-
-\vspace{0.15cm}
-\mlsysalert{Destructive dynamic:}{Operators ignore alerts $\to$ genuine issues get lost $\to$ monitoring provides \emph{negative} value.}
-
+\begin{frame}{Rollout risk is regression probability $\times$ harm $\times$ exposure}
+  \begin{columns}[c]
+    \begin{column}{0.36\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.6cm,keepaspectratio]{canary-coal-mine.jpg}\\[0.05cm]
+      {\footnotesize A 1928 canary for carbon monoxide tests. A canary release goes to a small share of traffic first.}
+    \end{column}
+    \begin{column}{0.60\textwidth}
+      \centering
+      \mlsyssteps[width=\textwidth,height=4.3cm,keepaspectratio]{exposure_step}{2}\\[0.05cm]
+      \uncover<2->{\footnotesize A silent 0.5-point CTR loss at 5,000 requests/s costs \textbf{\$1.08M per day}.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: George McCaa, U.S. Bureau of Mines, public domain, Wikimedia Commons. ML Operations at Scale, equation 8 and Napkin Math 12.5, 12.6.}
+  \note{[2.5 min] [CORE] The photo shows a mining foreman in 1928 holding the cage of a canary used to test for carbon monoxide; the bird reacted to the gas before the miners did, which gave canary releases their name. The chapter writes rollout risk as a product: the probability the change regresses, times the harm per exposed unit, times the units exposed. Each term has its own lever. Pre-release evaluation lowers the probability; a validated fallback lowers the harm; traffic limits and fast containment lower exposure. Step 1: a blue-green switch moves all traffic at once, so every user meets a latent bug until rollback. Step 2: a 5 percent canary exposes a twentieth of the traffic for the same time to rollback, 20 times less exposure. Exposure also accumulates in time. Napkin Math 12.6: a silent bug that drops CTR from 5 to 4.5 percent at 5,000 requests per second loses 432 million times 0.005, 2.16 million clicks a day, \$1.08 million at \$0.50 per click. ENGAGE: when does a smaller canary not reduce risk? (Expected: when it takes longer to reveal the failure, because exposure is share times time.) WARN: 20 times assumes the same detection time in both cases. FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{Hierarchical Monitoring Architecture}
-\note{[3 min] The solution to alert fatigue. Four levels: business,
-portfolio, model, infrastructure. High-level metrics trigger alarms;
-lower-level metrics serve investigation only. Walk through the pyramid.}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.48\textwidth}
-    \safeimg[width=\textwidth,height=5.5cm,keepaspectratio]{monitoring-pyramid.pdf}
-  \end{column}
-  \begin{column}{0.48\textwidth}
-    \textbf{Four abstraction levels:}
-
-    \vspace{0.15cm}
-    \textcolor{errorstroke}{\textbf{L1 Business:}} Revenue, engagement\\
-    {\scriptsize Few metrics, high signal, exec attention}
-
-    \vspace{0.1cm}
-    \textcolor{routingstroke}{\textbf{L2 Portfolio:}} RecSys lift, fraud rate\\
-    {\scriptsize Domain-level aggregation}
-
-    \vspace{0.1cm}
-    \textcolor{computestroke}{\textbf{L3 Model:}} Accuracy, latency, drift\\
-    {\scriptsize Investigation on anomaly only}
-
-    \vspace{0.1cm}
-    \textcolor{datastroke}{\textbf{L4 Infra:}} GPU util, feature store\\
-    {\scriptsize Platform team routing}
-
-    \vspace{0.1cm}
-    \mlsysconcept{Principle:}{Alert upward, investigate downward.}
-  \end{column}
-\end{columns}
-
+\begin{frame}[fragile]{A canary stage lasts until its planned sample arrives}
+  \begin{columns}[c]
+    \begin{column}{0.64\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=4.2cm,keepaspectratio]{stages_step}{2}
+    \end{column}
+    \begin{column}{0.34\textwidth}
+{\footnotesize Argo Rollouts canary:}
+\begin{semiverbatim}\scriptsize
+strategy:
+  canary:
+    steps:
+      - setWeight: 10
+      - pause:
+          duration: 1h
+      - setWeight: 20
+      - pause: \{\}
+\end{semiverbatim}
+    \end{column}
+  \end{columns}
+  \vspace{0.1cm}\centering
+  {\small $t_{\text{stage}} = n / (r \times p)$:\quad $10{,}000 / (10^6\text{/h} \times 0.01) = 1$ h\quad at 5\%: 12 min}\\[0.05cm]
+  \uncover<2->{\small The slowest outcome to observe sets the schedule: 4 h for clicks, 7 to 14 days of soak for delayed effects.}
+  \mlsyscredit{ML Operations at Scale, equation 7, \S12.5.5, table 7 (illustrative durations). Code: Argo Rollouts docs, canary example (abridged).}
+  \note{[2.5 min] [CORE] The code is the canary example from Argo Rollouts, a Kubernetes release controller: set 10 percent of traffic, pause an hour, set 20, pause until a person promotes. The question is how long each pause must be. A stage's duration comes from evidence. Equation 7: the time to collect n guardrail samples is n divided by the request rate r times the stage's traffic share p. Here a model serves 1 million requests an hour and each stage needs about 10,000 samples per variant, a guardrail sample sized to catch a large regression. At 1 percent that takes 1 hour; at 5 percent, 12 minutes. Step 1: the organization's configured ladder: 1 percent for 2 hours (twice the minimum), 5 and 25 percent for 30 minutes each, 50 percent for an hour, then all traffic. Step 2: about 4 hours in all. That schedule fits fast outcomes such as errors and clicks. An ensemble change whose effects surface through delayed outcomes needs a soak of 7 to 14 days, and a multi-region rollout repeats the evidence region by region. ENGAGE: a low-traffic region runs a 10 percent canary. Is it safer than 1 percent in a large region? (Expected: not necessarily; it may collect fewer samples.) WARN: elapsed time alone never establishes confidence. FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{The Control Plane That Disappeared (2021)}
-\note{
-% -- LINK: Connect to prior concept
-The hierarchical monitoring pyramid showed how to detect problems. This war
-story shows what happens when the control plane that runs your monitoring
-shares the same failure domain as the systems it watches.
-
-% -- NARRATE: What to SAY
-[2 min] Walk through the four fields: ``On October 4, 2021, a single
-misconfigured BGP command disconnected Facebook's data centers from each
-other. The routing withdrawal also took down the DNS servers and internal
-management tools needed for remote recovery. Engineers could not use
-standard SSH or web consoles to fix the outage because those tools depended
-on the same network plane that had just failed. Teams restored connectivity
-over hours using constrained out-of-band paths.'' Point to the Systems
-lesson: ``This is not just a Facebook problem. Your ML platform has the
-same trap: training schedulers, model registries, feature stores, and
-inference routers all share the same auth, DNS, and network plane. When
-that plane fails, so does your ability to diagnose and recover.''
-
-% -- ENGAGE: Specific question
-Ask: ``If your model registry becomes unreachable during an incident, can
-your on-call engineer still roll back a bad model without it? Do you have
-runbooks that work when your tools are down?''
-Give 15 seconds. Expected: most students have not thought through
-out-of-band recovery for ML platform failures.
-
-% -- WARN: Specific misconception
-Students assume the control plane and data plane fail independently.
-Correct: in shared cloud infrastructure, they often share DNS, auth, and
-network fabric. An incident that takes down one can take down both.
-Recovery tooling must be physically isolated to survive the same failure
-mode it is designed to fix.
-
-% -- FLEX: [CORE]
-[CORE] War stories anchor abstract monitoring principles in real cost.
-IF SHORT: Read Context and Systems lesson only; skip Consequence details.
-IF AHEAD: Ask ``What would you isolate first to prevent this in your ML platform?''
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.48\textwidth}
-    \textbf{Context:} Meta's global services depended on a backbone network
-    carrying internal control traffic for Facebook, Instagram, and WhatsApp.
-
-    \vspace{0.15cm}
-    \textbf{Failure:} Oct 4, 2021 --- a BGP command intended to assess
-    backbone capacity unintentionally disconnected data centers from each
-    other. The routing withdrawal also broke DNS and internal recovery tools.
-
-    \vspace{0.15cm}
-    \textbf{Consequence:} Major services unavailable globally for hours;
-    recovery required constrained out-of-band paths because standard
-    management tools depended on the failed network plane.
-  \end{column}
-  \begin{column}{0.48\textwidth}
-    \begin{mlsyscard}{errorstroke}
-    {\footnotesize\textbf{Systems lesson:}\\[0.1cm]
-    The control plane is a dependency with its own blast radius. ML
-    platforms expose the same trap: training schedulers, model registries,
-    feature stores, and inference routers share the auth, DNS, and network
-    plane that an incident can take down.\\[0.1cm]
-    \textbf{Required:} explicit isolation between the control plane and
-    the ML systems that depend on it.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
+\begin{frame}{Estimate: users per variant to see a 0.5-point lift?}
+  \mlsysactivity{Estimate}{2 min}
+  \begin{columns}[T]
+    \begin{column}{0.44\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \small\textbf{Given}\\[0.05cm]
+        Baseline CTR $p = 0.05$; lift $\delta = 0.005$\\
+        95\% confidence, 80\% power
+      \end{mlsyscard}
+      \small
+      $n = \dfrac{(1.96 + 0.84)^2 \cdot 2p(1-p)}{\delta^2}$\\[0.15cm]
+      \uncover<2->{$= 7.84 \times 0.095 / 0.000025 = \mathbf{29{,}792}$}\\[0.1cm]
+      \uncover<3->{1\% baseline, 0.05 point: \textbf{620,928}}
+    \end{column}
+    \begin{column}{0.53\textwidth}
+      \centering\uncover<3->{\safeimg[width=\textwidth,height=4.9cm,keepaspectratio]{mde.pdf}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{ML Operations at Scale, equation 4 and \S12.5.3. Netflix Technology Blog, 2017 (interleaving).}
+  \note{[3 min] [CORE] ENGAGE: two minutes. The sample size n per variant for two proportions: the critical values for 95 percent confidence and 80 percent power, 1.96 and 0.84, squared, times twice the baseline variance, over the squared lift. Step 2: 7.84 times 0.095 over 0.000025, 29,792 per variant, about 60,000 in all; at 1 million requests a day split evenly, under 2 hours if outcomes are immediate. Step 3: a 1 percent baseline and a 0.05-point lift need 620,928 per variant (the chapter rounds an intermediate and prints 620,800), about 30 hours. The curve shows n growing as one over the lift squared, so halving the lift quadruples the sample. Students who answer 300 forget to square the lift. Three ways the budget breaks (\S12.5.3): twenty uncorrected tests give a 64 percent chance of at least one false win (1 minus 0.95 to the 20th); peeking every hour at 1.96 inflates false positives, so the plan fixes a sequential boundary in advance; and spillover between treated and control users (a SUTVA violation) halved the lift in the chapter's sensitivity example. Interleaving needs more than 100 times fewer users for some ranking tests (Netflix). FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{Drift Detection: PSI}
-\note{[2 min] Two types of drift: covariate (input $P(X)$ changes) and
-concept ($P(Y|X)$ changes). PSI is cheap to compute and serves as a leading
-indicator. Thresholds: $<$0.1 stable, 0.1--0.25 investigate, $\geq$0.25 act.
-Monitoring lag: 2\% accuracy drop needs $\sim$2,500 labeled samples.}
 
-\footnotesize
-\textbf{Population Stability Index} detects feature distribution shift:
 
-\vspace{0.05cm}
-$$PSI = \sum_{i=1}^{n} (A_i - E_i) \times \ln\left(\frac{A_i}{E_i}\right)$$
-
-\vspace{0.05cm}
-\renewcommand{\arraystretch}{1.1}
-\begin{tabular}{@{}lll@{}}
-  \toprule
-  \textbf{PSI Value} & \textbf{Interpretation} & \textbf{Action} \\
-  \midrule
-  $< 0.1$          & No significant shift   & Continue monitoring \\
-  $0.1$ -- $0.25$  & Moderate shift          & Investigate \\
-  $\geq 0.25$      & Significant shift       & \textcolor{errorstroke}{\textbf{Immediate action}} \\
-  \bottomrule
-\end{tabular}
-
-\vspace{0.1cm}
-\mlsysalert{Monitoring lag:}{Detecting a 2\% accuracy drop needs $\sim$2,500 samples. At 1K labels/hr $\to$ \textbf{2.5 hrs} broken. PSI on inputs is faster.}
-
+\begin{frame}[fragile]{Google's TFX blocks a candidate that misses its thresholds}
+  \begin{columns}[c]
+    \begin{column}{0.47\textwidth}
+{\footnotesize TFX Evaluator gate (abridged):}
+\begin{semiverbatim}\scriptsize
+threshold=tfma.MetricThreshold(
+  value_threshold=
+    tfma.GenericValueThreshold(
+      lower_bound=\{'value': 0.5\}),
+  change_threshold=
+    tfma.GenericChangeThreshold(
+      direction=tfma.MetricDirection
+               .HIGHER_IS_BETTER,
+      absolute=\{'value': -1e-10\}))
+\end{semiverbatim}
+    \end{column}
+    \begin{column}{0.51\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.4cm,keepaspectratio]{tfx_load.pdf}\\[0.1cm]
+      {\footnotesize Measured: loading a new model raised p99.9 latency 7 to 10$\times$ until loads got their own thread.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Code: TFX Evaluator guide, tensorflow.org. Data: Baylor et al., ``TFX,'' KDD 2017, \S6.1 (Google Play).}
+  \note{[1.5 min] [OPTIONAL] Real code from TFX's Evaluator guide. A candidate passes only if its metric clears an absolute floor (value\_threshold, here 0.5) and does not fall below the current production model (change\_threshold, higher is better, by no more than a tiny tolerance). These are two of the chapter's three performance-gate conditions; the third bounds regressions on secondary metrics. The gate runs per slice when slicing specs are given. The plot is measured in the same platform. While a new model version loaded from disk, the 99.9th-percentile inference latency was 500 to 1,500 ms, because loading competed with request threads; a dedicated thread pool of one or two threads for loading cut it to 75 to 150 ms, 7 to 10 times lower (calcs.py). The release itself is a load event, so the system-performance gate must be measured while versions swap, which is a row of the contract on the next slide. ENGAGE: which plane does each half of this slide belong to? (Expected: offline behavior; system performance.) FLEX: [OPTIONAL].}
 \end{frame}
 
-% --- ACTIVE LEARNING 3: Discussion ---
-\begin{frame}{Discussion: Which Monitoring Level Fires First?}
-\note{[3 min] Turn-and-talk. Students discuss in pairs for 90 seconds.
-The answer depends on the failure mode: infrastructure failures show at L4 first,
-while data drift shows at L3 then propagates to L2/L1.}
-
-\centering
-\vspace{0.5cm}
-{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
-
-\vspace{0.45cm}
-{\large An upstream feature pipeline silently starts\\
-returning null values for 3\% of users.\\[0.25cm]
-\alert{Which monitoring level detects this first?\\
-How long until the business metric dashboard shows a dip?}}
-
-\vspace{0.45cm}
-\begin{columns}[c]
-  \begin{column}{0.22\textwidth}\centering\small L1\\Business\end{column}
-  \begin{column}{0.22\textwidth}\centering\small L2\\Portfolio\end{column}
-  \begin{column}{0.22\textwidth}\centering\small L3\\Model\end{column}
-  \begin{column}{0.22\textwidth}\centering\small L4\\Infra\end{column}
-\end{columns}
-
+\begin{frame}{One versioned record binds every plane of release evidence}
+  \centering\footnotesize\renewcommand{\arraystretch}{1.05}
+  \begin{tabular}{@{}p{3.3cm}p{6.1cm}p{3.7cm}@{}}\toprule
+    \textbf{Evidence plane} & \textbf{The contract pins} & \textbf{Accountable owner}\\\midrule
+    Offline behavior & evaluation set, slices, baseline, thresholds & model and domain owner\\
+    \uncover<2->{System performance} & \uncover<2->{hardware, load model, tail latency, cost} & \uncover<2->{serving and SRE owners}\\
+    \uncover<2->{Responsibility} & \uncover<2->{fairness slices, privacy, safety claims} & \uncover<2->{risk owner}\\
+    \uncover<3->{Online experiment} & \uncover<3->{unit, power, correction, stopping, guardrails} & \uncover<3->{experiment owner}\\
+    \uncover<3->{Recovery and audit} & \uncover<3->{tested rollback, versions, seeds, approvals} & \uncover<3->{release and platform}\\\bottomrule
+  \end{tabular}\\[0.2cm]
+  \uncover<4->{\small Thresholds and rollback are fixed before exposure; every sign-off names one artifact.}
+  \mlsyscredit{ML Operations at Scale, table 15 and \S12.5.8 (the evaluation contract principle).}
+  \note{[2.5 min] [CORE] The chapter's failure case: a candidate passes offline accuracy on one dataset, passes latency on a lighter synthetic load, and enters an A/B test with no tested rollback. Each check passed, and none evaluated the same release state. The evaluation contract is one versioned record that pins, for one artifact and its dependencies, the evidence in five planes. Step 1: offline behavior. Step 2: system performance under the production load model, and responsibility evidence; Lecture 16 owns the fairness criteria, and the gate enforces the organization's chosen one as a versioned threshold. Step 3: the online experiment from the last slides, and recovery, which allows no exposure without a tested rollback. Step 4: invalidation is the return path. Drift beyond the evaluated population, a feature or label change, or exhausted latency headroom sends the candidate back to the owning gate. Fixing thresholds before exposure stops a primary-metric gain from redefining success after the fact. ENGAGE: who promotes? (Expected: a named release authority, only when all sign-offs refer to the same artifact; the platform automates gates but cannot waive a failed claim.) Land the segment aloud: exposure is a budget, and evidence is one versioned contract. FLEX: [CORE].}
 \end{frame}
 
 % =============================================================================
-\section{Features \& Organization}
+% SECTION: ALERTS
 % =============================================================================
+\mlsysnote{[0.5 min] [CORE] Promotion ends the release, and the risk continues. Production changes under the model; monitoring must notice, and someone must act.}
+\mlsysdivider{Which of a thousand alarms deserves a page, and who acts?}{ML Operations at Scale, \S12.6 and \S12.7}
+\section{Alerts}
 
-\begin{frame}{Feature Freshness: Batch vs.\ Streaming}
-\note{
-% -- LINK: Connect to prior concept
-The monitoring section showed how to detect when model behavior drifts.
-Feature freshness is one of the fastest ways to cause that drift without
-changing the model at all.
-
-% -- NARRATE: What to SAY
-[3 min] Point to the diagram: ``Freshness latency $L_{\text{freshness}}$
-is the gap between when an event happens and when the model can use a
-feature derived from it. Batch: 12--24 hours. Streaming: 1--5 seconds.
-That is a 10,000$\times$ improvement, which translates to 10--20\%
-engagement lift in recommendation systems because the model can react
-to what users just did rather than what they did yesterday.'' Then pivot
-to fraud: ``For fraud detection the same gap gives adversaries a 24-hour
-window to exploit patterns the model does not yet see.''
-
-% -- ENGAGE: Specific question
-Ask: ``For fraud detection, how stale can features be before adversaries
-exploit the window?'' Give 15 seconds. Expected: any lag beyond a few
-minutes is exploitable for high-velocity card fraud.
-
-% -- WARN: Specific misconception
-Students assume streaming is always better and always worth the cost.
-Correct: streaming is expensive to build, operate, and maintain. Batch
-is cheaper and adequate for the majority of features (user demographics,
-long-term preferences, slowly-changing signals). The right question is
-not ``should we stream?'' but ``which features need freshness SLOs under
-5 minutes, and for which can we tolerate 12 hours?'' Most features fall
-in the batch category; streaming the wrong ones wastes engineering budget.
-
-% -- FLEX: [OPTIONAL]
-[OPTIONAL] Freshness motivates the dual-store architecture on the next slide.
-IF SHORT: State the $L_{\text{freshness}}$ formula and the 24-hour fraud window; advance.
-}
-
-% --- Full-width diagram ---
-\centering
-\safeimg[width=0.88\textwidth,height=4.2cm,keepaspectratio]{feature-freshness.pdf}
-
-\vspace{0.05cm}
-\small
-$L_{\text{freshness}} = T_{\text{available}} - T_{\text{event}}$
-
-\vspace{0.05cm}
-{\footnotesize Streaming: \textbf{10--20\% engagement lift}. For fraud detection, day-old features give adversaries a 24-hour exploitation window.}
-
+\begin{frame}{Estimate: false alarms per day from 1,000 checks?}
+  \mlsysactivity{Estimate}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.66\textwidth}
+      \centering\safeimg[width=\textwidth,height=1.95cm,keepaspectratio]{grafana-wikidata-maxlag-panel.png}
+    \end{column}
+    \begin{column}{0.31\textwidth}\footnotesize
+      Wikidata's Grafana lag panel, 27 to 28 Feb 2022, 0 to 20 s.\\
+      Red line: 10 s limit.\\
+      Orange line: 5 s limit.
+    \end{column}
+  \end{columns}
+  \vspace{0.1cm}
+  \begin{columns}[c]
+    \begin{column}{0.45\textwidth}
+      \small 100 models $\times$ 10 metrics, every 5 min; 3-sigma: $p = 0.003$\\[0.05cm]
+      \uncover<2->{$1{,}000 \times 288 \times 0.003 = \mathbf{864}$/day\\
+      2-sigma, $p = 0.05$: \textbf{14,400}/day}
+    \end{column}
+    \begin{column}{0.52\textwidth}
+      \centering\uncover<3->{\safeimg[width=\textwidth,height=3.3cm,keepaspectratio]{alerts.pdf}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Screenshot: Max Lag panel of a Wikidata Grafana dashboard (cropped), Addshore, AGPL, Wikimedia Commons. ML Operations at Scale, Napkin Math 12.7 and equation 9.}
+  \note{[3 min] [CORE] The screenshot is one panel of a real Grafana dashboard for one service, Wikidata's edit pipeline. It plots replication lag over a day and a half, with a red limit at 10 seconds and an orange one at 5; the lag spikes past both limits several times. A fleet has such a panel for every metric of every model. ENGAGE: two minutes. 100 models with 10 metrics each, checked every 5 minutes (288 checks a day), with 3-sigma thresholds, a false-positive rate of 0.003 per check on a stable process. Step 2: 1,000 monitors times 288 times 0.003 is about 864 false threshold crossings a day. Loosen to 2 sigma, about 0.05, and it is 14,400. Even if 99 percent are deduplicated, 144 pages a day remain. Step 3: equation 9. With M independent checks, the chance of at least one false alert is 1 minus (1 minus p) to the M; at 3 sigma it reaches 0.95 at 1,000 checks, at 2 sigma it is near 1 by 100. This is the chapter's multiple-testing problem from experiments, now in monitoring. WARN: the curve gives the chance of at least one false crossing; it says nothing about the fraction of pages that are false. Operators who see mostly useless pages learn to ignore pages. FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{Feature Store: Dual-Store Architecture (1/2)}
-\note{
-% -- LINK: Connect to prior concept
-The Feature Freshness slide showed the latency gap between batch and
-streaming. This slide explains the architectural pattern that solves it:
-why you need two separate stores, not one clever database.
-
-% -- NARRATE: What to SAY
-[2 min] Walk through the architecture: ``Training needs high-throughput
-batch scans over years of history. Serving needs sub-10-ms point lookups
-for individual requests. No single database efficiently satisfies both
-constraints. The dual-store pattern resolves this: an offline store
-(BigQuery, Snowflake, data lake) handles the terabyte-scale analytical
-scans for training. An online store (Redis, DynamoDB, Bigtable) handles
-the millisecond key-value lookups for inference. A materialization layer
-keeps them in sync.''
-
-% -- ENGAGE: Specific question
-Ask: ``Why can't one database serve both training and inference?''
-Give 10 seconds. Expected: training needs sequential scans over TB,
-serving needs single-key lookups under 10 ms --- no DB optimizes both.
-
-% -- WARN: Specific misconception
-Common error: students assume streaming features into a single DB is
-``simpler'' than two stores. Correct: a single DB suffers from impedance
-mismatch -- either too slow for serving or too expensive for training.
-
-% -- FLEX: [CORE]
-[CORE] This slide covers LO 7 (feature store architectures). Do not skip.
-IF SHORT: Focus on the invariant $f_{\text{train}}(x) \equiv f_{\text{serve}}(x)$.
-IF AHEAD: Ask ``What is the role of the materialization layer?''
-}
-
-\footnotesize
-\textbf{The core conflict:}
-\begin{itemize}\setlength\itemsep{0pt}
-  \item Training: TB-scale sequential scans, hours latency OK
-  \item Serving: single-entity lookups, $<$10 ms p99
-  \item One DB cannot efficiently satisfy both
-\end{itemize}
-
-\vspace{0.08cm}
-\textbf{Dual-store pattern:}
-\begin{itemize}\setlength\itemsep{0pt}
-  \item \textcolor{datastroke}{\textbf{Offline store}} (BigQuery/S3/Iceberg): training data, high throughput
-  \item \textcolor{computestroke}{\textbf{Online store}} (Redis/DynamoDB): serving, low latency
-  \item \textbf{Materialization layer}: keeps both stores in sync
-\end{itemize}
-
-\vspace{0.08cm}
-\mlsysconcept{Invariant:}{$f_{\text{train}}(x) \equiv f_{\text{serve}}(x)$ ---
-{\footnotesize training-serving skew silently destroys accuracy when this breaks.}}
-
+\begin{frame}{Alerts route by level, and each level has an owner}
+  \centering
+  \safeimg[width=0.88\textwidth,height=4.6cm,keepaspectratio]{pyramid.pdf}\\[0.1cm]
+  {\small 60 of 100 models crossing at once points to a shared cause, so check the shared pipeline first.}
+  \mlsyscredit{After ML Operations at Scale, figure 11, table 17, and listing 6.}
+  \note{[2.5 min] [CORE] The hierarchy turns a flood into routing. Business signals at the top (revenue or conversion from recommendations) are few and high confidence; the incident lead watches them. Portfolio signals (engagement lift, fraud caught, false-positive rate) route to the domain team that owns a model family. Model signals (task quality, latency, recent deployments) support the model owner's diagnosis. Infrastructure signals (GPU availability, feature store latency, network, storage) go to the platform team. Urgent local failures still page their owners directly. Correlation across the fleet is the second tool. When a large share of models turn anomalous at once (listing 6 escalates above 60 percent), a shared feature pipeline or service becomes the leading hypothesis, and one incident replaces sixty pages. Drift is monitored here too, and a population stability index above 0.25 opens a review, but whether the shift calls for retraining is Lecture 14's decision; the fleet monitor's job ends when calibrated evidence reaches the model owner. Lecture 7 owns observability for one distributed job; this level adds the fleet architecture. ENGAGE: in the hook, which level should have paged, and whom? (Expected: a portfolio or model quality signal routed to the feature's data owner.) FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{Feature Store: Point-in-Time Correctness (2/2)}
-\note{
-% -- LINK: Connect to prior concept
-The dual-store architecture ensures training and serving use the same
-feature pipeline. This slide covers the subtlest correctness requirement:
-point-in-time joins. Even with the right architecture, naive time handling
-causes data leakage.
-
-% -- NARRATE: What to SAY
-[1 min] Explain point-in-time correctness: ``Training must join features
-as they existed \emph{at the event timestamp}, not current values. A user
-had 4 clicks at noon; a naive join supplies the end-of-day value of 10 ---
-2.5$\times$ inflation and guaranteed production failure. At 10,000 models
-sharing the same feature platform, data leakage risk multiplies. Point-in-time
-joins must be an infrastructure guarantee, not a per-team check.''
-
-% -- ENGAGE: Specific question
-Ask: ``What happens to the fraud model if the online store's user
-transaction feature is 10 minutes stale but training used 1-minute windows?''
-Expected: the model scores stale features --- adversaries exploit the window.
-
-% -- FLEX: [CORE]
-[CORE] Point-in-time correctness is the key correctness invariant for feature stores.
-IF SHORT: State the 2.5$\times$ inflation example and advance.
-}
-
-\begin{mlsyscard}{routingstroke}
-{\small\textbf{Point-in-time correctness:}\\[0.1cm]
-Training must join features as they existed \emph{at the event timestamp},
-not current values.
-
-\vspace{0.1cm}
-\textbf{Example}: A user had 4 clicks at noon; a naive join supplies the
-end-of-day value of 10 --- \textbf{2.5$\times$ inflation} and guaranteed
-production failure.
-
-\vspace{0.1cm}
-At 10,000 models sharing the same feature platform, data leakage risk
-multiplies. Point-in-time joins are an \textbf{infrastructure guarantee},
-not a per-team check.}
-\end{mlsyscard}
-
+\begin{frame}{The worst SLO dimension stops promotion}
+  \centering
+  \safeimg[width=0.92\textwidth,height=4.6cm,keepaspectratio]{slo_vector.pdf}\\[0.05cm]
+  {\small An endpoint can return HTTP 200 with stale features. Promote only if $\max_k B_k \le 1$.}
+  \mlsyscredit{After ML Operations at Scale, figure 12 and table 18 (illustrative values).}
+  \note{[2.5 min] [CORE] Availability alone cannot summarize an ML service. Each service carries a vector of SLOs: availability, latency, freshness, and model quality, each with an indicator, a target, a window, and an owner. For each dimension the budget consumed B is the observed violating fraction over the allowed fraction, so B equal to 1 means that dimension's budget is spent. Ratios are comparable after this normalization; raw milliseconds and accuracy points are not. Here availability, latency, and quality are healthy, freshness is at 1.30, and the mean, 0.70, looks fine. The maximum governs. Freshness exceeds its budget, so promotion stops and the data owner falls back to a safe feature path. Each dimension's owner carries its own consequence (table 18): serving halts a rollout on fast availability burn; the model owner rolls back or routes to a baseline on quality. ENGAGE: why not average? (Expected: a severe regression hides behind three healthy dimensions, which is the hook.) WARN: unlabeled predictions cannot silently count as passing the quality dimension; missing evidence needs its own policy. FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{Organizational Patterns for ML Platforms}
-\note{
-% -- LINK: Connect to prior concept
-The Feature Store architecture requires a shared platform team to maintain
-consistency guarantees. This slide asks: what organizational structure
-should own and operate that platform?
-
-% -- NARRATE: What to SAY
-[2 min] Walk column by column: ``Centralized gives you consistency but
-creates a bottleneck --- every model team waits for platform approvals.
-Embedded gives velocity but fragments your feature store, monitoring, and
-CI/CD into per-team silos that can't talk to each other. Hybrid is the
-practical answer for 50--100 models: a core platform team owns shared
-infrastructure (the dual-store feature store, hierarchical monitoring,
-CI/CD gates) while domain leads embedded in product teams handle
-domain-specific needs.''
-
-% -- ENGAGE: Specific question
-Ask: ``At 75 models across 3 product lines, which pattern would you choose
-and why?'' Give 15 seconds. Expected: hybrid is the right answer, because
-centralized would bottleneck 75 model teams and embedded would produce
-75 inconsistent feature pipelines.
-
-% -- WARN: Specific misconception
-Students assume centralized is always better because consistency is good.
-Correct: centralized works well above 100 models where the platform team
-is fully staffed and specialized. Below that threshold, a two-person
-platform team is a constant bottleneck for 75 model teams trying to ship.
-
-% -- FLEX: [OPTIONAL]
-[OPTIONAL] Organizational patterns are contextual.
-IF SHORT: Show the table; state the 50--100 model hybrid threshold; advance.
-IF AHEAD: Discuss what happens to organizational patterns when a startup
-acquires a large ML platform --- how do embedded engineers integrate?
-}
-
-\footnotesize
-\renewcommand{\arraystretch}{1.15}
-\begin{tabular}{@{}lp{3.2cm}p{3.2cm}p{3.2cm}@{}}
-  \toprule
-  & \textbf{Centralized} & \textbf{Embedded} & \textbf{Hybrid} \\
-  \midrule
-  \textbf{Structure}  & Single platform team & ML eng in each team & Core + domain leads \\
-  \textbf{Strength}   & Consistency          & Responsiveness       & Balanced \\
-  \textbf{Risk}       & Bottleneck           & Fragmentation        & Coordination cost \\
-  \textbf{Best for}   & 100+ models          & 10--20 models        & 50--100 models \\
-  \bottomrule
-\end{tabular}
-
-\vspace{0.15cm}
-\begin{mlsyscard}{computestroke}
-{\footnotesize \textbf{Decision factors:} Model count, model similarity, org size, regulatory requirements, and infrastructure maturity determine the optimal pattern.}
-\end{mlsyscard}
-
+\begin{frame}[fragile]{Google pages when the error budget burns 14.4 times too fast}
+  \begin{columns}[c]
+    \begin{column}{0.58\textwidth}
+\begin{semiverbatim}\scriptsize
+expr: (
+  job:slo_errors_per_request:ratio_rate1h
+      \{job="myjob"\} > (14.4*0.001)
+and
+  job:slo_errors_per_request:ratio_rate5m
+      \{job="myjob"\} > (14.4*0.001)
+)
+severity: page
+\end{semiverbatim}
+    \end{column}
+    \begin{column}{0.39\textwidth}
+      \small
+      \begin{tabular}{@{}lll@{}}\toprule
+        \textbf{Burn} & \textbf{Window} & \textbf{Budget}\\\midrule
+        14.4 & 1 h & 2\% $\to$ page\\
+        6 & 6 h & 5\% $\to$ page\\
+        1 & 3 d & 10\% $\to$ ticket\\\bottomrule
+      \end{tabular}\\[0.2cm]
+      {\footnotesize 99.9\% SLO over 30 days.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Google, \textit{The Site Reliability Workbook}, ch.~5, ``Alerting on SLOs'' (first clause of the recommended rule; sre.google/workbook/alerting-on-slos).}
+  \note{[1.5 min] [OPTIONAL] Real configuration: the first clause of the multiwindow, multi-burn-rate alert that Google's SRE workbook recommends, in Prometheus syntax. Burn rate is how fast a service spends its error budget relative to the SLO; a burn rate of 1 spends exactly the budget over the window. For a 99.9 percent SLO over 30 days (720 hours), a burn of 14.4 sustained for one hour spends 14.4 over 720, 2 percent of the month's budget, and pages. The short 5-minute window must agree, so the page stops soon after the burn stops. A burn of 6 over 6 hours (5 percent) also pages; a burn of 1 over 3 days (10 percent) opens a ticket. The chapter applies the same control to every dimension of the SLO vector, so a fast burn in freshness or quality pages its owner and stops promotion. ENGAGE: why two windows? (Expected: the long window avoids paging on a blip; the short one resets the alert quickly.) FLEX: [OPTIONAL].}
 \end{frame}
 
-\begin{frame}{Edge Fleet MLOps: Version Skew (1/2)}
-\note{
-% -- LINK: Connect to prior concept
-The data-center MLOps patterns just covered assume controlled infrastructure.
-This slide extends the same framework to millions of heterogeneous edge devices
-where you cannot force an immediate rollout.
-
-% -- NARRATE: What to SAY
-[2 min] Walk through the two challenges: ``In a data center, a rollout
-completes in hours. In an edge fleet, it takes weeks because devices
-are offline, battery-saving, or on restricted networks. At any moment,
-an organization may have 50 different model versions active. Every
-upstream data pipeline must be backwards-compatible with models deployed
-months ago.'' Then federated monitoring: ``You cannot stream raw predictions
-back due to privacy and bandwidth --- devices compute local error rates and
-transmit only aggregated, anonymized metrics. Fleet health must be reconstructed
-from fragmented signals.''
-
-% -- ENGAGE: Specific question
-Ask: ``If you have 50 model versions active and want to add a new feature
-to your upstream data pipeline, what constraints does version skew impose?''
-Give 20 seconds. Expected: the new pipeline must produce outputs compatible
-with all 50 active versions, or you must maintain parallel pipelines until
-the oldest versions retire.
-
-% -- WARN: Specific misconception
-Students assume edge MLOps is just data-center MLOps with lower power.
-Correct: the operational contract is fundamentally different. Recovery
-is probabilistic, not deterministic.
-
-% -- FLEX: [CORE]
-[CORE] Covers Key Takeaways bullet on edge fleet management.
-IF SHORT: State the 50-version-skew number; advance to HIL CI/CD slide.
-IF AHEAD: Ask ``How would you design a canary rollout when 10\% of devices
-are always offline?''
-}
-
-\footnotesize
-\textbf{Challenge 1: Extreme version skew}
-\begin{itemize}\setlength\itemsep{0pt}
-  \item Data-center rollout: hours; edge fleet rollout: weeks to months
-  \item Up to \textbf{50 concurrent model versions} active simultaneously
-  \item Upstream data pipelines must stay backwards-compatible across all versions
-\end{itemize}
-
-\vspace{0.12cm}
-\textbf{Challenge 3: Federated monitoring}
-\begin{itemize}\setlength\itemsep{0pt}
-  \item Cannot stream raw predictions back (privacy + bandwidth constraints)
-  \item Devices compute local error rates; transmit only aggregated, anonymized metrics
-  \item Fleet health must be reconstructed from fragmented signals
-\end{itemize}
-
-\vspace{0.1cm}
-\mlsysalert{Key difference:}{Edge recovery is probabilistic, not deterministic --- a bad model takes weeks to roll back, not seconds.}
-
+\begin{frame}{Meta's 2021 outage also disabled the tools needed to fix it}
+  \begin{columns}[c]
+    \begin{column}{0.40\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.3cm,keepaspectratio]{meta-prineville.jpg}\\[0.05cm]
+      {\footnotesize Meta's Prineville, Oregon data center. On 4 October 2021 every Meta data center lost the backbone.}
+    \end{column}
+    \begin{column}{0.57\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.4cm,keepaspectratio]{meta_timeline.pdf}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: Intel Free Press, CC BY 2.0, Wikimedia Commons. Times: Cloudflare blog, 4 Oct.~2021. Janardhan, Meta Engineering postmortem, 5 Oct.~2021.}
+  \note{[2.5 min] [CORE] War Story 12.1. A maintenance command meant to assess backbone capacity disconnected Meta's data centers globally; a bug in the audit tool failed to stop it. DNS servers, having lost the data centers, withdrew their BGP announcements, the routes that tell the internet how to reach them. Measured from outside by Cloudflare: routing changes peaked around 15:40 UTC; facebook.com stopped resolving around 15:50 and returned around 21:20, about 5.5 hours; resolvers saw 30 times the usual DNS queries as clients retried. The loss of DNS and the network also disabled the internal tools and remote access needed to recover, so engineers went onsite and worked through secure-access procedures, then restored load gradually because data centers had dropped tens of megawatts and a sudden return could fail again. For ML platforms, the lesson is that the registry, feature store, scheduler, and router share auth, DNS, and network planes. Treat the control plane as a hard dependency with a bounded blast radius and keep an administrative path that works when it is down. ENGAGE: which ML control in this lecture would fail with the network? (Expected: rollback, since the coordinator and the registry are unreachable.) FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{Edge Fleet MLOps: HIL CI/CD (2/2)}
-\note{
-% -- LINK: Connect to prior concept
-Version skew showed that edge rollouts take weeks. This slide covers the
-quality gate that prevents bad models from entering that slow propagation path.
-
-% -- NARRATE: What to SAY
-[1 min] ``Passing accuracy gates is not enough for edge. A model must also
-be validated on physical or emulated target hardware: specific NPU architectures,
-microcontrollers, DSPs. A model that passes accuracy but exceeds the 1 MB memory
-limit of a budget microcontroller, or triggers thermal throttling on a specific
-SoC, is rejected at the HIL stage, not in production. Edge failures discovered
-in production cannot be rolled back in seconds --- they take weeks to propagate.''
-
-% -- FLEX: [CORE]
-[CORE] HIL CI/CD is the key distinction between edge and data-center MLOps.
-IF SHORT: State the three rejection criteria and the weeks-to-rollback cost.
-}
-
-\begin{mlsyscard}{computestroke}
-{\footnotesize\textbf{Challenge 2: Hardware-in-the-Loop (HIL) CI/CD}\\[0.05cm]
-Accuracy gates are \textbf{necessary but not sufficient} for edge deployments.\\[0.05cm]
-CI/CD must include a \textbf{HIL stage}: validate on physical or emulated fleet hardware
-\emph{before} promotion.\\[0.05cm]
-A model is \textbf{rejected} if it:
-\begin{itemize}\setlength\itemsep{0pt}
-  \item Exceeds 1 MB memory on a budget microcontroller
-  \item Triggers thermal throttling on a specific SoC
-  \item Exceeds latency budget on a target NPU/DSP
-\end{itemize}
-Edge failures discovered in production cannot be rolled back in seconds ---
-they take \textbf{weeks to propagate} through the fleet.}
-\end{mlsyscard}
-
-\end{frame}
-
-\begin{frame}{TCO Framework for ML Systems}
-\note{[3 min] The four-component cost structure evolves with scale. Early-stage:
-iteration-dominated (optimize velocity). Production: inference-dominated
-(optimize efficiency). Walk through the equation and the shift.
-Ask: ``Which cost component dominates at your organization?''}
-
-\small
-$$\TCO = C_{\text{train}} + C_{\text{infer}} + C_{\text{data}} + C_{\text{iter}}$$
-
-\vspace{0.15cm}
-{\footnotesize
-\renewcommand{\arraystretch}{1.2}
-\begin{tabular}{@{}lll@{}}
-  \toprule
-  \textbf{Component} & \textbf{Early Stage} & \textbf{Production Scale} \\
-  \midrule
-  $C_{\text{train}}$  & Dominant (experimentation)     & Fixed (scheduled retraining) \\
-  $C_{\text{infer}}$  & Negligible (few users)         & \textcolor{errorstroke}{\textbf{Dominant}} (70--80\% of TCO) \\
-  $C_{\text{data}}$   & Small (curated datasets)       & Growing (storage + pipelines) \\
-  $C_{\text{iter}}$   & \textcolor{routingstroke}{\textbf{Dominant}} (engineer time)  & Reduced by automation \\
-  \bottomrule
-\end{tabular}
-}
-
-\vspace{0.15cm}
-\mlsysconcept{Strategy:}{Match optimization investment to current cost structure.}
-
-\end{frame}
-
-\begin{frame}{Quantifying ML Technical Debt}
-\note{
-% -- LINK: What prior concept connects to this slide
-The TCO framework showed cost structure. Technical debt is the hidden cost
-that erodes deployment velocity --- Sculley et al.\ called it ``the high-interest
-credit card of ML.''
-
-% -- NARRATE: What to SAY while showing this slide
-[3 min] Walk through the debt categories: ``Configuration debt: 3--5x more config
-code than model code. Data debt: unstable input features that break silently.
-Pipeline debt: glue code connecting systems nobody owns. Monitoring debt:
-\$750K/yr from 15 incidents at \$50K each.'' Point to the audit framework:
-``Measure deployment velocity (deploys/week), toil ratio (manual/total hours),
-and incident rate. Teams with high debt see 70--80\% capacity consumed by
-maintenance.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``What fraction of your team's time goes to maintaining existing models
-vs.\ building new ones?'' Give 10 seconds. [Expected: most say 50\%+. The
-surprise is that 70--80\% is common at mature organizations without debt management.]
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students think technical debt is inevitable and should wait.
-Correct framing: debt compounds --- monitoring debt alone costs \$750K/yr.
-Early investment in debt reduction has superlinear ROI.
-
-% -- FLEX: [CORE] + contingency
-[CORE] Technical debt quantification is a key learning objective.
-IF AHEAD: Ask ``Which debt category would you audit first?''
-IF SHORT: Show the table and state the 70--80\% maintenance number.
-}
-
-\footnotesize
-\textbf{ML Technical Debt Categories} (Sculley et al., NeurIPS 2015):
-
-\vspace{0.1cm}
-\renewcommand{\arraystretch}{1.1}
-{\scriptsize
-\begin{tabular}{@{}lllr@{}}
-  \toprule
-  \textbf{Debt Category} & \textbf{Symptom} & \textbf{Metric} & \textbf{Annual Cost} \\
-  \midrule
-  \textbf{Configuration} & 3--5$\times$ more config than model code & Config LOC ratio & Eng.\ velocity \\
-  \textbf{Data}          & Unstable input features break silently  & Feature staleness & Data quality \\
-  \textbf{Pipeline}      & Glue code nobody owns                  & Ownership gaps    & Incident rate \\
-  \textbf{Monitoring}    & 15 incidents $\times$ \$50K each        & MTTR, false alerts & \textbf{\$750K/yr} \\
-  \bottomrule
-\end{tabular}
-}
-
-\vspace{0.1cm}
-\begin{mlsyscard}{errorstroke}
-{\footnotesize \textbf{Debt audit metrics:} Deployment velocity (deploys/week), toil ratio (manual/total hrs), incident rate. Teams with unmanaged debt: \textbf{70--80\% capacity on maintenance}.}
-\end{mlsyscard}
-
-\end{frame}
-
-% --- ACTIVE LEARNING: Alert System Design Exercise ---
-\begin{frame}{Your Turn: Design an Alert System}
-\note{
-% -- LINK: What prior concept connects to this slide
-Alert fatigue showed 14,400 false alerts/day at 2-sigma. This exercise asks
-students to calculate false alert rates at different thresholds for a real
-portfolio size.
-
-% -- NARRATE: What to SAY while showing this slide
-[3 min] Read the parameters. Give 90 seconds. After pause reveal: ``At 3-sigma,
-FPR = 0.003, checks = 200 x 8 x 288 = 460,800, false alerts = 1,382/day.
-At 4-sigma, FPR = 0.0001, false alerts = 46/day --- manageable.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Students must calculate false alert rates at two thresholds. Key insight:
-the jump from 3-sigma to 4-sigma cuts false alerts by 30x.
-
-% -- WARN: What students will get wrong on THIS topic
-Common error: students apply the same threshold to all metrics. Correct
-framing: business-critical metrics need 3-sigma; infrastructure metrics
-can use 4-sigma with investigation-only routing.
-
-% -- FLEX: [CORE] + contingency
-[CORE] Quantitative exercise for the monitoring section.
-IF SHORT: Reduce to 60 seconds; show the 3-sigma answer only.
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    {\normalsize\bfseries Design the Alert Thresholds}
-
-    \vspace{0.15cm}
-    \textbf{Portfolio}: 200 models, 8 metrics each.\\
-    \textbf{Check interval}: 5 minutes (288/day).
-
-    \vspace{0.1cm}
-    \textbf{Calculate daily false alerts at:}
-    \begin{enumerate}
-      \item 3-sigma (FPR = 0.003)
-      \item 4-sigma (FPR = 0.0001)
-    \end{enumerate}
-
-    {\footnotesize\textcolor{midgray}{(90 seconds --- then compare with a neighbor)}}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \pause
-    \begin{mlsyscard}{computestroke}
-    \textbf{Solution:}\\[0.1cm]
-    {\footnotesize
-    Checks/day: $200 \times 8 \times 288$\\
-    = 460,800 checks\\[0.1cm]
-    3-sigma: $460{,}800 \times 0.003$\\
-    = \textcolor{errorstroke}{\textbf{1,382 false alerts/day}}\\[0.1cm]
-    4-sigma: $460{,}800 \times 0.0001$\\
-    = \textcolor{datastroke}{\textbf{46 false alerts/day}}\\[0.1cm]
-    30$\times$ reduction!
-    }
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
+\begin{frame}{Diagnose: engagement fell 5\% with no recent deploy}
+  \mlsysactivity{Diagnose}{2 min}
+  \begin{columns}[T]
+    \begin{column}{0.34\textwidth}
+      \begin{mlsyscard}{errorstroke}\small
+        Recommendation engagement down 5\% in the last hour. Servers healthy, latency normal, no model deploy in 4 hours.
+      \end{mlsyscard}
+      \vspace{0.15cm}
+      {\footnotesize Contain first: pause promotions, keep a fallback ready.}
+    \end{column}
+    \begin{column}{0.62\textwidth}
+      \small
+      \wstep{2}{\textbf{1.} Freshness: \texttt{user\_features} 3 h stale, SLO 1 h}
+      \wstep{3}{\textbf{2.} Pipeline: Kafka consumer lag 10M events (normal 10K)}
+      \wstep{4}{\textbf{3.} Broker disk 95\% full on one partition (hypothesis)}
+      \wstep{5}{\textbf{4.} Free capacity: lag and freshness recover, model unchanged}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{ML Operations at Scale, \S12.7.2 (attribution analysis, illustrative trace) and table 23.}
+  \note{[2.5 min] [CORE] ENGAGE: one minute. What do you check first, and what do you not do? Take answers; most students restart the ranker or roll it back. Step 2: the runbook checks shared dependencies before local containers. Feature freshness: user features are 3 hours stale against a 1-hour SLO. Step 3: the feature pipeline's Kafka consumer is 10 million events behind, against 10,000 normally. Step 4: one broker's disk is 95 percent full; the chapter calls this a leading hypothesis until a test supports it. Step 5: freeing capacity while preserving committed data and offsets restores consumer progress and freshness without touching the model, which supports the hypothesis. Responders keep watching engagement, because recovered freshness does not prove the user impact ended. The general order is the runbook's control loop: detect user impact, localize the shared dependency, bound the blast radius, escalate by evidence to the owner, and learn from the gap (a freshness gate). WARN: rolling back the ranker here wastes the first half hour and changes nothing. The postmortem asks which signal would have caught it sooner and names an owner for that control. Land the segment aloud: alerts route through a hierarchy to owners; the worst budget dimension governs; containment comes before root cause. FLEX: [CORE].}
 \end{frame}
 
 % =============================================================================
-\section{Wrap-Up}
+% SECTION: ECONOMICS
 % =============================================================================
+\mlsysnote{[0.5 min] [CORE] All of this runs on expensive hardware. When is the fleet worth its cost, and who answers for its spend?}
+\mlsysdivider{When does owning the fleet pay, and who answers for its spend?}{ML Operations at Scale, \S12.8 and \S12.9}
+\section{Economics}
 
-\begin{frame}{Fallacies}
-\note{[2 min] Four common misconceptions with quantitative evidence.}
-
-\footnotesize
-\textbf{Fallacy:} \textit{Operational complexity grows linearly with model count.}\\
-100 models $\times$ 10 metrics at 5\% FPR $\to$ 14,400 false alerts/day. Dependencies grow as $O(N^2)$.
-
-\vspace{0.08cm}
-\textbf{Fallacy:} \textit{Platform investment only makes sense after 100+ models.}\\
-A \$2M platform breaks even at $\sim$20 models. By 100, migration cost is 3--5$\times$ the initial build.
-
-\vspace{0.08cm}
-\textbf{Fallacy:} \textit{Monitoring training metrics provides sufficient observability.}\\
-20 ms upstream slowdown $\to$ 30\% latency degradation across 10--50 downstream models.
-
-\vspace{0.08cm}
-\textbf{Fallacy:} \textit{Technical debt is inevitable and should wait.}\\
-Monitoring debt: \$750K/yr (15 incidents $\times$ \$50K). Teams see 70--80\% capacity on maintenance.
-
+\begin{frame}{Failed and killed jobs used 55\% of a cluster's GPU time}
+  \centering
+  \safeimg[width=0.92\textwidth,height=4.6cm,keepaspectratio]{philly.pdf}\\[0.15cm]
+  {\small In-use GPUs averaged \textbf{52\%} utilization.}
+  \mlsyscredit{Jeon et al., ``Analysis of Large-Scale Multi-Tenant GPU Clusters for DNN Training Workloads,'' USENIX ATC 2019, Tables 3 and 6.}
+  \note{[2.5 min] [CORE] Measured, from Microsoft's Philly clusters: a two-month trace of 96,260 deep learning jobs on a multi-tenant cluster of thousands of GPUs. Top bar: 69 percent of jobs passed, 14 percent were killed by users, 17 percent failed. Bottom bar: the killed and failed jobs together used about 55 percent of all GPU time (37.7 plus 17.8). The paper also reports that GPUs held by running jobs were busy about 52 percent of the time on average. So a cluster can look fully allocated while much of its time produces no useful model. The chapter's word for the metric that matters is useful utilization. Lecture 8 owns the allocated, active, and productive utilization tiers, and Lecture 9 owns ML goodput, the product that charges each lost hour to scheduling, runtime, or program. The platform's part (\S12.8.5) is computing those factors per team and workload class, so a portfolio dashboard says which owner must act. ENGAGE: would early stopping of doomed runs be a scheduler fix or a program fix? (Expected: program goodput, owned by the training team; the paper finds many jobs reach their best loss well before their last epoch.) FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{Pitfalls}
-\note{[2 min] Three operational pitfalls. If short: cover just the first two.}
-
-\footnotesize
-\textbf{Pitfall:} \textit{Applying independent alerting to every model and metric.}\\
-With $N=1000$ independent tests at $\alpha=0.05$: $P(\text{false alert}) = 1 - 0.95^{1000} \approx 1.0$. Operators ignore the noise; genuine incidents vanish. Use \textbf{hierarchical monitoring}.
-
-\vspace{0.15cm}
-\textbf{Pitfall:} \textit{Treating all deployments with uniform rollout procedures.}\\
-Fraud detection needs hourly updates with seconds-fast rollback. LLMs need multi-day shadow testing. \textbf{Risk-based policies} must match model type.
-
-\vspace{0.15cm}
-\textbf{Pitfall:} \textit{Defaulting to batch feature computation for all features.}\\
-Daily batch yields $L_{\text{freshness}} \approx 12$--24 hrs; streaming achieves 1--5 seconds. For recommendations, streaming yields \textbf{10--20\% engagement lift}; for fraud, batch gives adversaries a 24-hour window.
-
+\begin{frame}{Owning beats renting only above a sustained utilization}
+  \begin{columns}[c]
+    \begin{column}{0.72\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=4.4cm,keepaspectratio]{buyrent_step}{2}
+    \end{column}
+    \begin{column}{0.26\textwidth}
+      \centering\mlsysphoto[width=\textwidth,height=2.2cm,keepaspectratio]{nvidia-h100-pcie.jpg}\\[0.05cm]
+      {\footnotesize An NVIDIA H100 (PCIe card shown; the cluster uses SXM GPUs in 8-GPU nodes).}
+    \end{column}
+  \end{columns}
+  {\small Utilization is the economic invariant. Break-even: 42.5\% (one node), 59.7\% (this cluster), 53.9\% (10,000 GPUs).}
+  \mlsyscredit{ML Operations at Scale, figure 13, table 30; 50\% line derived (calcs.py). Photo: Geekerwan, CC BY 3.0, Wikimedia Commons.}
+  \note{[2.5 min] [CORE] The chapter's running cluster: 1,024 H100s in 128 nodes. Owning pays a capital step, \$44.8M of servers at \$350,000 per node, \$5M of InfiniBand, \$10M of facility, \$59.8M in all, then a shallow \$1.5M a year for power and staff. Renting at \$4 per GPU-hour starts at zero and climbs with use. Step 1: at 80 percent sustained utilization, rent is \$2.39M a month and overtakes ownership at 26.4 months, inside a three-year life. Step 2: at 50 percent (derived), rent is \$1.50M a month and the lines do not cross within 36 months. The economic invariant is that ownership wins only above a sustained useful utilization. The break-even moves with the cost boundary drawn: 42.5 percent for one node counting only purchase and energy, 59.7 percent for this cluster with network and facility, 53.9 percent for the 10,000-GPU scenario. The same invariant prices reserves inside a platform: warm rollback capacity, canary headroom, and regional replicas earn their idle cost only through the reliability they buy. ENGAGE: a team trains one big model a year. Own or rent? (Expected: rent; the chapter finds \$3.6M per run owned for six runs a year against \$1.4M to \$2.8M rented.) FLEX: [CORE].}
 \end{frame}
 
-% --- RETRIEVAL PRACTICE ---
-
-% --- MUDDIEST POINT ---
-\begin{frame}{Muddiest Point}
-\note{[2 min] Quick anonymous poll. Students write on a slip of paper or submit
-digitally. Collect and scan for patterns. Address the top 2--3 confusions in the
-next lecture's opening. This closes the feedback loop.}
-
-\centering
-\vspace{1.0cm}
-{\Large\bfseries What was the \alert{muddiest point} today?}
-
-\vspace{0.8cm}
-{\normalsize Write down the concept you found \textbf{most confusing}.}
-
-\vspace{0.5cm}
-{\small\textcolor{midgray}{Anonymous. One sentence. Submit before you leave.}}
-
+\begin{frame}{Estimate: own or rent 10,000 H100s for three years?}
+  \mlsysactivity{Estimate}{2.5 min}
+  \begin{columns}[T]
+    \begin{column}{0.40\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \small\textbf{Own:} 1,250 nodes $\times$ \$350K\\
+        + \$25M network + \$75M facility\\
+        + (\$4.7M power + \$5M staff)/yr\\[0.05cm]
+        \textbf{Rent:} \$4/GPU-h at 80\% busy
+      \end{mlsyscard}
+      \centering\mlsysphoto[width=0.7\textwidth,height=1.3cm,keepaspectratio]{google-datacenter-dalles-substation.jpg}
+    \end{column}
+    \begin{column}{0.57\textwidth}
+      \small
+      \wstep{2}{Own: $\$537.5\text{M} + 3 \times \$9.7\text{M} \approx \mathbf{\$566.7\text{M}}$}
+      \wstep{2}{Rent: $10^4 \times \$4 \times 8{,}760 \times 0.8 = \$280.3\text{M/yr}$, $\mathbf{\$841.0\text{M}}$}
+      \wstep{3}{Saving \$274.3M; break-even $566.7 / 1{,}051.2 = \mathbf{53.9\%}$}
+      \uncover<3->{\footnotesize\textcolor{midgray}{Scenario values: GPU-only power; no maintenance or financing.}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{ML Operations at Scale, Napkin Math 12.9 and table 30. Photo: substation, Google data center, The Dalles; Visitor7, CC BY-SA 3.0, Wikimedia Commons.}
+  \note{[3 min] [CORE] ENGAGE: two minutes in pairs. The photo is the substation beside Google's data center at The Dalles, Oregon, which supplies the power a fleet needs before any accelerator is useful. Step 2: owning 1,250 DGX H100 nodes (10,000 GPUs): \$437.5M of hardware, about \$25M of fabric and \$75M for a liquid-cooled hall, \$537.5M up front. Each year adds a GPU-only electricity estimate, 10,000 times 700 W times PUE 1.1 times 8,760 hours times \$0.07 per kWh, \$4.7M, and \$5M of staff, for \$566.7M over three years. Renting the same GPUs 80 percent of the time costs \$280.3M a year, \$841.0M over three. Step 3: owning saves \$274.3M. The break-even utilization is the owned total over the rent for every hour of three years, 10,000 times \$4 times 26,280 hours, \$1,051.2M, which gives 53.9 percent. Below that, renting is cheaper. WARN: the chapter calls this a scenario comparison; host and network power, maintenance, and financing would move the break-even. Late capacity is also a reliability failure, because GPUs arrive in 6 to 12 months while substations and halls take 12 to 30, and the longest prerequisite sets the schedule (\S12.9.5). FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{What Were the Key Ideas?}
-\note{[2 min] Retrieval practice. Students write 90 seconds, no notes.
-Do NOT show next slide yet. Walk around the room.}
-
-\centering
-\vspace{1.5cm}
-{\Large\bfseries Close your notes.}
-
-\vspace{0.8cm}
-{\large Write down the \textbf{4 most important concepts} from today.}
-
-\vspace{0.8cm}
-{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
-
+\begin{frame}{The dominant cost term flips from iteration to inference}
+  \centering
+  \safeimg[width=0.92\textwidth,height=3.6cm,keepaspectratio]{tco.pdf}\\[0.15cm]
+  {\small $\text{TCO} = C_{\text{train}} + C_{\text{infer}} + C_{\text{data}} + C_{\text{iter}}$. Optimize the term that dominates.}
+  \mlsyscredit{ML Operations at Scale, equation 12 and table 31 (constructed budgets).}
+  \note{[1.5 min] [OPTIONAL] The lifecycle cost has four terms over one accounting horizon, each counted once: training, inference, data, and iteration (experiments and maintenance). The chapter's two constructed budgets: a startup with one model spends \$47,500 a month, 84 percent of it on engineers iterating; a 50-model company spends \$980,000 a month, and inference is the largest term at 41 percent. The optimization target flips with it. For the company, INT8 quantization costing \$80K that cuts a \$400K inference bill by 40 percent pays back in two weeks; a training optimization of the same cost pays back in 1.8 months. Lecture 10 owns why recurring serving cost overtakes a one-time training bill. The platform investment follows the same logic. The benefit-cost ratio is models times hours saved times hourly cost over platform cost, 50 times 20 times \$150 over \$120,000, 1.25 at 50 models; at 20 models the same platform loses half its cost. ENGAGE: which term would a RAG design grow? (Expected: inference and data, through prompt tokens and the index.) FLEX: [OPTIONAL]. Land the segment aloud: utilization decides whether capacity pays; the dominant TCO term decides where optimization pays; attribution makes each team answer for its share.}
 \end{frame}
 
-\begin{frame}{Key Takeaways}
-\note{[2 min] Reveal. Walk through each bullet. Emphasize quantitative
-anchors: 56\% savings, 14,400 alerts, 20$\times$ risk reduction,
-\$1.08M daily loss.}
-
-\scriptsize
-\begin{itemize}\setlength\itemsep{0pt}
-  \item \textbf{Platform ROI is superlinear}: Break-even at 20--50 models. 50 models saves 56\% (\$2M/yr).
-  \item \textbf{Dependencies grow as $O(N^2)$}: Per-model practices collapse at $\sim$50 models.
-  \item \textbf{Risk profile determines cadence}: LLMs: months. Fraud: hours. One-size CI/CD fails.
-  \item \textbf{Alert fatigue is mathematical}: 100 models $\times$ 10 metrics $\to$ 14,400 false alerts/day. Use hierarchical monitoring.
-  \item \textbf{Staged rollouts reduce risk 20$\times$}: 5\% canary limits blast radius.
-  \item \textbf{Feature stores enforce the invariant} $f_{\text{train}}(x) \equiv f_{\text{serve}}(x)$: dual offline/online architecture prevents training-serving skew at platform scale.
-  \item \textbf{Edge fleet demands HIL CI/CD}: Up to 50 concurrent model versions; accuracy gates alone are insufficient --- validate on physical NPU/DSP before promotion.
-  \item \textbf{TCO shifts with scale}: Early = iteration-dominated; production = inference-dominated.
-\end{itemize}
-
+% =============================================================================
+% CLOSE
+% =============================================================================
+\begin{frame}{Which control would have stopped the 48 hours?}
+  \mlsysactivity{Retrieval}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.55\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{hook_synth.pdf}
+    \end{column}
+    \begin{column}{0.42\textwidth}\small
+      \only<1|handout:0>{\normalsize Close your notes. Name one control from each segment that would have caught the null feature, and how soon.}%
+      \only<2->{\small
+      \textbf{Graph:} the registry lists every consumer of the feature\\[0.08cm]
+      \textbf{Features:} a contract gate on null rate\\[0.08cm]
+      \textbf{Releases:} the change gets its own canary and guardrails\\[0.08cm]
+      \textbf{Alerts:} a quality SLO dimension pages the data owner\\[0.08cm]
+      \textbf{Economics:} each hour costs about \$45K at the \$1.08M/day rate}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{ML Operations at Scale, Example 12.2; \$1.08M/day from Napkin Math 12.6 (a different scenario; per-hour figure derived).}
+  \note{[3 min] [CORE] Back to the hook. Step 1: retrieval, 90 seconds. Step 2: every segment has an answer. Graph: the registry records which models consume the user-affinity feature, so the upstream schema change has an impact set and its consumers are re-tested. Features: a data contract checks null rate and distribution at ingestion and blocks the change before serving; the green marker on the timeline. Releases: an upstream schema change is a release and gets a canary with conversion as a guardrail. Alerts: the SLO vector's quality and freshness dimensions page the data owner within hours instead of days, and the hierarchy routes it to the feature's owner. Economics: exposure is priced by time; at the delayed-alert rate of Napkin Math 12.6, about \$1.08M a day, each hour costs about \$45K (derived; that notebook's traffic and click value, not Example 12.2's, which gives no dollar value). WARN: no single control suffices; the hook passed every per-model gate. ENGAGE: which control is cheapest to add? (Expected: the null-rate gate, a check on data the pipeline already reads.) FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{References}
-\note{[1 min] Point students to canonical papers.}
-
-\small
-\mlsysref{Sculley+15}{Sculley et al. ``Hidden Technical Debt in ML Systems.'' NeurIPS 2015.}
-\mlsysref{Covington+16}{Covington et al. ``Deep Neural Networks for YouTube Recommendations.'' RecSys 2016.}
-\mlsysref{Chapelle+12}{Chapelle et al. ``Large-Scale Validation and Analysis of Interleaved Search Evaluation.'' TOIS 2012.}
-\mlsysref{Kohavi+09}{Kohavi et al. ``Controlled Experiments on the Web.'' KDD 2009.}
-\mlsysref{Hardt+16}{Hardt et al. ``Equality of Opportunity in Supervised Learning.'' NeurIPS 2016.}
-\mlsysref{Paleyes+22}{Paleyes et al. ``Challenges in Deploying ML.'' ACM Comp.\ Surveys, 2022.}
-
+\begin{frame}{Takeaways}
+  \normalsize
+  \begin{itemize}\setlength{\itemsep}{0.18cm}
+    \item The unit to operate is the dependency graph; a release names its impact set and a compatible version set.
+    \item A feature is a versioned interface; join on availability time, version semantic changes.
+    \item Exposure is share times time; one versioned contract binds all release evidence.
+    \item Alerts route by level to owners, and the worst SLO dimension stops promotion.
+    \item Owning pays only above a sustained useful utilization; the dominant cost term picks the fix.
+  \end{itemize}
+  \note{[1 min] [CORE] One line per segment. Ask students which slide taught each line. If short on time, read the first and the fourth.}
 \end{frame}
 
-\begin{frame}{Next Lecture: Security and Privacy}
-\note{[1 min] Forward hook. A globally distributed fleet that autonomously
-adapts presents an expansive attack surface. Data poisoning, model extraction,
-and differential privacy are the next challenges.}
-
-\centering
-\vspace{0.8cm}
-{\large A fleet that is globally distributed\\
-and autonomously adapting presents an\\
-\alert{expansive attack surface.}}
-
-\vspace{0.6cm}
-\begin{columns}[c]
-  \begin{column}{0.30\textwidth}
-    \centering
-    \begin{mlsyscard}{errorstroke}
-    {\small\bfseries Data Poisoning}\\[0.1cm]
-    {\scriptsize Corrupt training data}
-    \end{mlsyscard}
+\begin{frame}{Open questions}
+  \begin{columns}[c]
+  \begin{column}{0.66\textwidth}
+  \small
+  \begin{itemize}\setlength{\itemsep}{0.3cm}
+    \item A central platform team enforces invariants once but can become a queue. Where should the boundary sit for 80 models across four domains?
+    \item The evaluation contract fixes thresholds before exposure. Who may change them after a surprising result, and how is that recorded?
+    \item Late capacity is a reliability failure. Should a fleet hold idle GPUs as insurance, and who pays for them?
+  \end{itemize}
   \end{column}
-  \begin{column}{0.30\textwidth}
-    \centering
-    \begin{mlsyscard}{computestroke}
-    {\small\bfseries Model Extraction}\\[0.1cm]
-    {\scriptsize Steal model via API}
-    \end{mlsyscard}
+  \begin{column}{0.32\textwidth}
+    \centering\mlsysphoto[width=\textwidth,height=3.5cm,keepaspectratio]{datacenter-server-racks.jpg}\\[0.05cm]
+    {\footnotesize Server racks in a data center.}
   \end{column}
-  \begin{column}{0.30\textwidth}
-    \centering
-    \begin{mlsyscard}{datastroke}
-    {\small\bfseries Differential Privacy}\\[0.1cm]
-    {\scriptsize Protect training data}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
-\vspace{0.4cm}
-{\normalsize\textbf{How do we defend the fleet?}}
-
+  \end{columns}
+  \mlsyscredit{Photo: Carl Lender, CC BY 2.0, Wikimedia Commons.}
+  \note{[1 min] [OPTIONAL] No single answer. The first is the chapter's organizational scenario (\S12.10.4): 50 engineers, 8 teams, 80 models across recommendation, fraud, search, and ads; the chapter suggests a hybrid with a central team of 12 to 15 and embedded domain leads, as a hypothesis to test. The second asks how invalidation and governance interact. The third ties the utilization invariant to capacity planning under lead time.}
 \end{frame}
 
-
-
-\appendix
-
-\begin{frame}{Backup: Platform ROI Sensitivity Analysis}
-\note{
-% -- NARRATE: What to SAY while showing this slide
-Backup. Shows how ROI changes with engineer cost and model count. Use when
-students ask ``what if our engineers cost less?'' or ``we only have 15 models.''
-
-% -- FLEX: [OPTIONAL] + contingency
-[OPTIONAL] Only show if students question the 20--50 model break-even.
-}
-
-\footnotesize
-\textbf{Platform break-even varies with engineer cost and model count:}
-
-\vspace{0.15cm}
-\renewcommand{\arraystretch}{1.15}
-\begin{tabular}{@{}lrrr@{}}
-  \toprule
-  \textbf{Engineer Cost} & \textbf{10 Models} & \textbf{30 Models} & \textbf{50 Models} \\
-  \midrule
-  \$100/hr & ROI: 0.5$\times$ & ROI: 1.4$\times$ & ROI: 2.3$\times$ \\
-  \$150/hr & ROI: 0.7$\times$ & ROI: \textbf{2.1$\times$} & ROI: \textbf{3.4$\times$} \\
-  \$200/hr & ROI: 1.0$\times$ & ROI: 2.8$\times$ & ROI: 4.5$\times$ \\
-  \bottomrule
-\end{tabular}
-
-\vspace{0.15cm}
-\begin{mlsyscard}{crimson}
-{\footnotesize At \$150/hr engineer cost, break-even is $\sim$15 models. The threshold is lower than most teams expect because shared infrastructure amortizes across all models simultaneously.}
-\end{mlsyscard}
-
+\begin{frame}{Read and explore}
+  \small
+  \begin{itemize}\setlength{\itemsep}{0.02cm}
+    \item \textbf{Read:} ML Operations at Scale, \S12.2 to \S12.9; Napkin Math 12.5, 12.7, 12.9 by hand; the self-check questions.
+    \item Sculley et al., ``Hidden Technical Debt in Machine Learning Systems,'' NeurIPS 2015.
+    \item Breck et al., ``Data Validation for Machine Learning,'' MLSys 2019.
+    \item Kohavi, Tang, and Xu, \textit{Trustworthy Online Controlled Experiments}, 2020.
+    \item Beyer et al., \textit{Site Reliability Engineering}, 2016, and the SRE Workbook, ch.~5.
+    \item Jeon et al., ``Multi-Tenant GPU Clusters for DNN Training,'' USENIX ATC 2019.
+  \end{itemize}
+  \note{[0.5 min] [CORE] The chapter first, with its self-checks. Sculley et al. name the debt that platforms pay down. Breck et al. describe the data validation measured today. Kohavi, Tang, and Xu is the reference for experiment sizing and its pitfalls. The SRE books define error budgets and burn-rate alerts. Jeon et al. measure where a shared GPU cluster's time goes. FLEX: add the lab your course uses for operations.}
 \end{frame}
 
-\begin{frame}{Backup: Monitoring Tier Design Patterns}
-\note{
-% -- NARRATE: What to SAY while showing this slide
-Backup. Detailed monitoring tier configuration for production deployments.
-Use when students ask how to implement hierarchical monitoring.
-
-% -- FLEX: [OPTIONAL] + contingency
-[OPTIONAL] Implementation detail for students building monitoring systems.
-}
-
-\footnotesize
-\renewcommand{\arraystretch}{1.15}
-\begin{tabular}{@{}lllr@{}}
-  \toprule
-  \textbf{Tier} & \textbf{Metrics} & \textbf{Alert Target} & \textbf{Threshold} \\
-  \midrule
-  \textbf{L1 Business}    & Revenue, engagement      & Executive + on-call & 4-sigma \\
-  \textbf{L2 Portfolio}   & Domain-level aggregation  & Domain lead         & 3.5-sigma \\
-  \textbf{L3 Model}       & Per-model accuracy, drift & Investigation only  & 3-sigma \\
-  \textbf{L4 Infra}       & GPU util, feature store   & Platform team       & 3-sigma \\
-  \bottomrule
-\end{tabular}
-
-\vspace{0.15cm}
-\textbf{Key pattern:} L1/L2 alert humans. L3/L4 feed dashboards for investigation \emph{after} higher-tier alerts fire. This prevents the 14,400 false alerts/day problem.
-
+\begin{frame}[c]
+  \begin{columns}[c]
+    \begin{column}{0.34\textwidth}
+      \centering\mlsyskitfig[width=\textwidth,height=4.2cm,keepaspectratio]{stack_assurance}
+    \end{column}
+    \begin{column}{0.62\textwidth}
+      {\small\textcolor{lightgray}{NEXT LECTURE \textbar{} SECURITY AND PRIVACY}}\\[0.5cm]
+      {\LARGE\bfseries What can an attacker learn or change through a model that works correctly?}
+    \end{column}
+  \end{columns}
+  \note{[0.5 min] [CORE] Today made the fleet versioned, gated, and observable. Lecture 13 asks what an adversary can do through the same interfaces. The endpoints, shared feature pipelines, and telemetry stores we made reliable are also where an authenticated caller can copy a model or a participant can change what the fleet learns; defending them starts from a threat model.}
 \end{frame}
-
 
 \end{document}

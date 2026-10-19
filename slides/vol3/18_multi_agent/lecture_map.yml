@@ -1,0 +1,327 @@
+chapter: 18_multi_agent
+lecture: "18"
+title: "Multi-Agent Coordination"
+subtitle: "When splitting a task across agents pays"
+layer: scale
+locator: hsa
+minutes: 75
+notes_minutes: 71
+core_minutes: 59
+target_ideas: 30
+thesis: "Splitting a task adds boundaries one agent did not have, so delegation pays only when it beats one equally funded controller on cost per accepted task or on a deadline."
+
+hook:
+  minutes: "0.5-4"
+  setup: "Anthropic's multi-agent research system (War Story 18.1): the builders' own architecture figure (lead agent, parallel search subagents) beside their exact sentence: agents use about 4 times the tokens of chat, multi-agent systems about 15 times. The system scored 90.2 percent higher than one agent on the team's internal research evaluation."
+  question_to_class: "Per accepted task, is the multi-agent system cheaper? A) yes, always B) no, never C) only on tasks one agent usually fails"
+  payoff: "C. The token multiple is 15/4 = 3.75, so delegation must multiply acceptance by more than 3.75; that is possible only where one agent succeeds at most 26.7 percent of the time (NM 18.6, derived). Even read as a 1.902 acceptance multiple, the 90.2 percent gain leaves cost per accepted task 1.97 times the single agent's. The synthesis returns with NM 18.7: delegation bought deadline coverage at 1.5 times the cost, and the research workload is breadth-first where the repair migration is coupled."
+  sources:
+    - "Hadfield et al., 'How we built our multi-agent research system,' Anthropic Engineering, 13 June 2025, https://www.anthropic.com/engineering/multi-agent-research-system (read 2026-10-19)."
+    - "Multi-Agent Coordination, War Story 18.1 (§18.3.3) and Napkin Math 18.6 (§18.9.2)."
+
+recall: "Lecture 17, close your notes: 8,192 rollouts, 10 percent truly pass, the verifier accepts every pass and 2.5 percent of failures; what share of rewards go to failures? (18.4 percent: 184.32 false against 819.20 true accepts; RL NM 17.1.) Thumbnail: text-free true and false accept bars. The hsa locator is shown on the same slide."
+
+driving_question: "Why can splitting a task across several agents cost more and deliver less than giving one agent the same resources?"
+
+goals:
+  - "Estimate the useful worker count from the serial fraction and the per-worker overhead."
+  - "Separate dependencies, messages, and ownership, and bound a delegation tree before it runs."
+  - "Explain why a clean merge can still be invalid, and publish only a checked candidate."
+  - "Compute what agreement among correlated reviewers can certify."
+  - "Bound in-flight work, authority, and spending after a split."
+
+thread_tag: "H·S·A thread: multiplies all three exposures"   # golden-thread line on the goals slide (sweep D4, 2026-10-19)
+running_example: "The repair agent (Lighthouse 1.1) migrates an authentication module (migration_task_01), split between worker_interface_01 and worker_caller_01 from repo_base_01 (MA §18.1 to §18.9). The research agent (Lighthouse 18.1) is the contrasting breadth-first workload, shown as the real system in the hook and synthesis (Hadfield et al. 2025 architecture figure). The remediation agent appears once, in the reservation estimate (Exercise 7)."
+
+segments:
+  - name: Splitting
+    divider_question: "What does a split add, and when can it pay?"
+    read: "§18.2, §18.9"
+    concept_questions: [1, 2, 3, 4, 5]
+    land: "The serial fraction sets the ceiling, overhead sets the useful fleet, and only a matched trial against a capable single controller decides."
+    minutes: 15
+  - name: Structure
+    divider_question: "Which structures must the runtime keep separate?"
+    read: "§18.3, §18.4"
+    concept_questions: [6, 7, 8, 9, 10]
+    land: "Three graphs kept separate, admission enforced by the runtime, and a typed contract on every handoff."
+    minutes: 14.5
+  - name: Merging
+    divider_question: "Why can two clean patches still break the build?"
+    read: "§18.5"
+    concept_questions: [11, 12]
+    land: "Isolate each worker, revalidate dependencies, check the exact candidate, and publish by compare-and-swap."
+    minutes: 8
+  - name: Reviewers
+    divider_question: "What does agreement among reviewers prove?"
+    read: "§18.6"
+    concept_questions: [13]
+    land: "Correlated reviewers are one signal; buy a different kind of check."
+    minutes: 9
+  - name: In flight
+    divider_question: "What bounds the work still in flight?"
+    read: "§18.7, §18.8"
+    concept_questions: [14, 15, 16]
+    land: "Barriers compound tails, credit windows bound queues, cancellation closes admission while admitted work settles, and grants narrow while allowances are reserved."
+    minutes: 12
+
+concept_questions:
+  - q: "What does a delegated worker add that a capable single controller lacks?"
+    picture: "Two-step build: one controller with parallel calls; a supervisor with child trajectories and red boundary tags (redraw of MA Table 1)."
+    numbers: "None."
+    example: "Interface and caller workers of migration_task_01."
+    read: "§18.2, §18.2.1"
+  - q: "What caps the speedup of a split, and what is the coordination tax?"
+    picture: "Gene Amdahl photo beside equation 1 with each term labeled."
+    numbers: "Ceiling 1/(1-p); any gain needs c(N) < p(1 - 1/N) (MA equation 1)."
+    example: "Planning, integration, and final assessment as the serial housekeeping."
+    read: "§18.2.2"
+  - q: "How many workers does a partition support?"
+    picture: "Speedup against N for c = 0.02 and 0.01, ceiling 5."
+    numbers: "p = 0.80, c = 0.02: t(4) 0.460, optimum 6 at 0.433 (2.31x), t(8) 0.440; c = 0.01: 9 workers, 2.71x; sqrt(p/c) 6.32 (NM 18.1; derived)."
+    example: "Napkin Math 18.1 (hypothetical workload)."
+    read: "§18.2.2"
+  - q: "Can added workers make a task slower?"
+    picture: "USL curves for repair and research with the retrograde region shaded."
+    numbers: "Repair sigma 0.20, kappa 0.02: N* 6.32, 6 workers 2.31x, slower than one worker from 41 (0.981); research sigma 0.10, kappa 0.002: 21 workers, 5.47x, 3.5 times wider (Theorem 18.1, Lighthouse 18.1; derived)."
+    example: "Repair migration against breadth-first research."
+    read: "§18.9.3"
+  - q: "When does a token multiple pay for itself, and what is a fair comparison?"
+    picture: "Break-even line p_multi = 3.75 p_single with the infeasible region shaded; the builders' 'economic viability' sentence; matched-trial envelope diagram."
+    numbers: "m = 15/4 = 3.75; break-even single-agent success 26.7%; 1.902 acceptance multiple gives 1.97x cost (NM 18.6; Hadfield et al. 2025)."
+    example: "The research system's token bill."
+    read: "§18.9.1, §18.9.2"
+  - q: "Which three graphs must a runtime keep separate?"
+    picture: "Three panels built one per step: dependency, communication, supervision, on the same S, I, C, T nodes."
+    numbers: "None."
+    example: "Interface and caller workers that talk only through the supervisor."
+    read: "§18.3"
+  - q: "What does a full mesh cost compared with a supervisor?"
+    picture: "Real AutoGen 0.2 group-chat broadcast loop beside deliveries per round."
+    numbers: "N(N-1) against 2N: 56 against 16 at N = 8, ratio 3.5 (MA §18.3.1; derived)."
+    example: "microsoft/autogen 0.2, groupchat.py, commit c631b34."
+    read: "§18.3.1"
+  - q: "What bounds completion time on a slot pool?"
+    picture: "Gantt of NM 18.2 with the critical path outlined and the 26.5 s slack marked."
+    numbers: "W 275 s, W/4 68.75 s, critical path 174.5 s, 1.58x over serial; cutting v5 by 20 s gives 154.5 s, cutting v6 changes nothing (NM 18.2, Checkpoint 18.1; derived)."
+    example: "A seven-node repository upgrade."
+    read: "§18.3.2"
+  - q: "Who decides how many children run, and what does a supervisor do when one fails?"
+    picture: "Builders' excerpt on 50 subagents beside a fan-out tree with breadth, concurrency, depth, and reservation; Erlang/OTP supervisor code, Joe Armstrong photo, and a one_for_one against one_for_all blast-radius figure."
+    numbers: "50 subagents for simple queries (Hadfield et al. 2025); intensity 1 in period 5 (OTP docs example)."
+    example: "War Story 18.1."
+    read: "§18.3.3, §18.3.4"
+  - q: "What must cross each handoff?"
+    picture: "Condensed Listings 1 and 2: envelope by reference; receipt with runtime fields in green and worker claims in red."
+    numbers: "receipt_bytes 8,192; summary 256 tokens (Listing 1). NM 18.3 in the note: 288,000 against 23,700 tokens, 12.2x (derived)."
+    example: "worker_caller_01's envelope and receipt."
+    read: "§18.4"
+  - q: "Why is a clean merge not a valid change?"
+    picture: "Three-step build: base, interface lands, caller merges with no conflict and fails its tests."
+    numbers: "Disjoint writes for two workers 90.4%; shared write 9.6% at 2, 63.9% at 5, 94.4% at 8 (equation 4, 1,000 files, 10 each; derived)."
+    example: "foo(a) becomes foo(a, b)."
+    read: "§18.5, §18.5.1"
+  - q: "How does guarded publication work?"
+    picture: "git-worktree and git-update-ref documentation excerpts beside the four-step gate built in four steps with the moved-head loop."
+    numbers: "None."
+    example: "Listing 3 (integrate)."
+    read: "§18.5.2, §18.5.3"
+  - q: "What does agreement among reviewers certify?"
+    picture: "Shuttle general purpose computers with the PASS/BFS quotes; Kim et al. agreement-on-errors bars; floor plot built in two steps."
+    numbers: "Majority false approval at 5: 5.79% independent, 16.68% mixture; unanimous 0.032% against 3.92% (122x); floor 15.0%; at 15: 0.42% against 15.6% (NM 18.4; derived). Same wrong answer about 60% against 33% random (Kim et al. 2025, Helm)."
+    example: "Five reviewers assume the old interface still exists."
+    read: "§18.6"
+  - q: "Is a fan-out on time if each worker usually is?"
+    picture: "F^N curve with 7 workers below even odds and the 6-of-8 point; Dean and Barroso Table 1."
+    numbers: "0.9^8 = 43.05%, 6 of 8 = 96.19%, below even at 7 (NM 18.5); one leaf 10 ms against all leaves 140 ms at the 99th percentile; hedging 1,800 to 74 ms for 2% more requests (Dean and Barroso 2013)."
+    example: "Read-only analysis against the two-part migration."
+    read: "§18.7.3"
+  - q: "What bounds queued work between agents?"
+    picture: "Kanban board with WIP limits beside wait bars."
+    numbers: "mu 0.08/s; 2,952 queued after 10 min; 10.2 h wait; window 8 gives 100 s; window 4 for under a minute (§18.7.4; derived)."
+    example: "Diff producer and reviewer agent."
+    read: "§18.7.4"
+  - q: "What do cancellation and delegated authority bound, and what do they leave?"
+    picture: "Cancellation build (generation counters, gateway rejection, admitted test job keeps its owner); attenuation build with the confused-deputy attempt; reservation estimate."
+    numbers: "Exercise 7(a): $39 available, $60 copied liability, first child admitted with $19 left, $13 equal split (derived)."
+    example: "migration_task_01 cancel; the remediation agent's three children."
+    read: "§18.7.1, §18.7.2, §18.8"
+
+concept_trace:
+  - concept: "Delegation adds boundaries"
+    frame: "A delegated worker owns a whole child trajectory"
+    shown_by: "Build: one controller with parallel calls, then child trajectories with red 'new boundary' tags."
+  - concept: "Coordination overhead"
+    frame: "The serial part caps speedup; overhead grows per worker"
+    shown_by: "Equation 1 with c(N) labeled as the coordination tax and the gain condition; then the NM 18.1 speedup plot ('Six workers minimize elapsed time here, at 2.3 times') and the estimate."
+  - concept: "Three delegation structures"
+    frame: "Dependencies, messages, and ownership are three graphs"
+    shown_by: "Three panels on the same nodes, built one per step."
+  - concept: "Spawning as admission"
+    frame: "The runtime decides how many children may run"
+    shown_by: "Builders' 50-subagent excerpt beside the tree marked with breadth, concurrent slots, depth, and atomic reservation."
+  - concept: "Typed envelopes and receipts"
+    frame: "An envelope binds the child; a receipt separates claims"
+    shown_by: "Condensed Listings 1 and 2, runtime evidence in green and worker claims in red."
+  - concept: "Clean merge is not a valid change"
+    frame: "Predict: different files, no merge conflict. Safe?"
+    shown_by: "Three-step merge build ending in a clean merge that fails its tests; then the guarded-publication gate ('Publication checks the exact candidate, then compares and swaps')."
+  - concept: "Correlated reviewers"
+    frame: "Shared difficulty puts a floor under majority error"
+    shown_by: "Independent curve, then the mixture curve and the 15.0% floor; real correlated-error data on the frame before."
+  - concept: "Matched single-controller baseline"
+    frame: "A matched baseline gives one controller the same budget"
+    shown_by: "Matched-envelope diagram; the break-even plot before it and the NM 18.7 table in the synthesis."
+  - concept: "Amdahl's law (secondary)"
+    frame: "The serial part caps speedup; overhead grows per worker"
+    shown_by: "Equation with c = 0 and the 1/(1-p) cap; USL plot (optional)."
+  - concept: "Slot-pool critical-path bound (secondary)"
+    frame: "Diagnose: which node should the team speed up?"
+    shown_by: "Gantt with the critical path and slack; the max(W/N, L) bound beside it."
+  - concept: "Fan-out completion contracts (secondary)"
+    frame: "Vote: each worker is on time 90%. Is the fan-out?"
+    shown_by: "F^N curve and the 6-of-8 point."
+  - concept: "Subtree cancellation (secondary)"
+    frame: "Cancellation closes admission; admitted work must still settle"
+    shown_by: "Three-step build with generation counters at the gateway."
+  - concept: "Attenuated delegation (secondary)"
+    frame: "Each hop narrows authority; allowances are reserved"
+    shown_by: "Grant tree with partitioned allowances and the rejected confused-deputy attempt; then the reservation estimate."
+  - concept: "Credit-window flow control (secondary)"
+    frame: "A credit window caps the queue and its staleness"
+    shown_by: "Kanban board and the 10.2 h against 100 s bars (optional frame)."
+
+worked_examples:
+  - name: "Napkin Math 18.1: screening a work partition"
+    steps: ["given: p = 0.80, c = 0.02 per added worker, at most 16", "t(4) 0.460, t(6) 0.433, t(8) 0.440", "optimum 6 workers, 2.3x; ceiling 5x", "c = 0.01: 9 workers, 2.7x", "meaning: the serial fraction is the larger lever"]
+  - name: "Napkin Math 18.2: DAG scheduling"
+    steps: ["given: seven nodes, 4 slots", "W = 275 s, W/4 = 68.75 s", "critical path 174.5 s, attained", "v6 has 26.5 s slack; v5 is on the path", "cut v5 by 20 s: 154.5 s; cut v6: no change"]
+  - name: "Napkin Math 18.4: the correlated floor"
+    steps: ["given: 5 reviewers, q = 0.20, rho = 0.40", "independent majority 5.79%", "beta mixture 16.68%; unanimous 0.032% against 3.92%", "floor 15.0%; 15 reviewers 15.6%", "meaning: buy a different check"]
+  - name: "Napkin Math 18.6 and 18.7: break-even and deadline coverage"
+    steps: ["given: 15x and 4x token multiples", "m = 3.75; break-even single success 26.7%", "NM 18.7: both accept 80; on time 78 against 70", "$18 against $12; $0.225 against $0.150 (1.5x)", "$0.75 per extra on-time acceptance"]
+
+active_learning:
+  - at_minute: 0.5
+    type: predict
+    prompt: "Did 15 times the tokens pay? A) always B) never C) only on tasks one agent usually fails"
+    answer: "C; break-even needs single-agent success at most 26.7%."
+  - at_minute: 4
+    type: retrieval
+    prompt: "What share of rewards go to failures (RL NM 17.1)?"
+    answer: "18.4%."
+  - at_minute: 12.5
+    type: estimate
+    prompt: "p = 0.9, c = 0.02: halve c or halve the serial work?"
+    answer: "Now 7 workers, 2.87x, ceiling 10x; halve c: 9 workers, 3.57x; halve serial: 7 workers, 3.27x, ceiling 20x."
+  - at_minute: 26
+    type: diagnose
+    prompt: "Cut v6 or v5 by 20 s?"
+    answer: "v5: 174.5 to 154.5 s; v6 has 26.5 s of slack."
+  - at_minute: 35.5
+    type: predict
+    prompt: "Different files, no merge conflict. Safe?"
+    answer: "No; the caller still calls foo(a). A clean merge does not make the change valid."
+  - at_minute: 49.5
+    type: concept_question
+    prompt: "Ten more reviewers, one protected test, or unanimity?"
+    answer: "One protected test; ten more move 16.68% toward the 15.0% floor; unanimity still 3.92%."
+  - at_minute: 52.5
+    type: concept_question
+    prompt: "True or false: if each worker is on time 90%, a fan-out of 8 usually is."
+    answer: "False: 43.05%; a 6-of-8 rule gives 96.19% only for interchangeable results."
+  - at_minute: 61.5
+    type: estimate
+    prompt: "Three children ask $20 each from a $50 balance with a $5 reserve and $6 open work."
+    answer: "$39 available; $60 copied liability; first admitted, others refused; $13 each fits."
+  - at_minute: 63.5
+    type: retrieval
+    prompt: "Name today's control for three MAST failure modes."
+    answer: "Typed envelope; completion contract and budgets; protected check of the exact candidate."
+
+open_questions:
+  - "Reviewer correlation must be measured on known-invalid candidates. Where does a team get enough of them for its own code?"
+  - "Agents can talk in shared chats or pass typed receipts. When is the richer channel worth its quadratic cost?"
+  - "As models improve, does a single controller with parallel tools make most delegation unnecessary?"
+
+more_examples:
+  - "Anthropic multi-agent research system: 4x and 15x tokens, 90.2% on an internal evaluation, 50 subagents for simple queries, token usage explains 80% of BrowseComp variance (Hadfield et al. 2025)."
+  - "AutoGen 0.2 GroupChatManager broadcast loop (microsoft/autogen, commit c631b34)."
+  - "Erlang/OTP supervisor strategies and restart intensity (OTP documentation)."
+  - "git worktree and git update-ref compare-and-swap (git-scm.com)."
+  - "Space Shuttle: four GPCs in a redundant set, BFS independently programmed by Rockwell (Spector and Gifford 1984; Tomayko 1988)."
+  - "Kim et al. 2025: models agree on about 60% of shared errors on Helm."
+  - "Dean and Barroso 2013: 10 ms against 140 ms 99th-percentile fan-out; hedging 1,800 to 74 ms for 2% more requests."
+  - "Cemri et al. 2025 (MAST): 1,642 traces, 14 failure modes, design 44.2%, misalignment 32.3%, verification 23.5%."
+  - "Knight and Leveson 1986: 27 independent versions failed coincidentally far more than independence allowed (note only)."
+
+further_reading:
+  - cite: "Multi-Agent Coordination, §18.2 to §18.10, Checkpoints 18.1 to 18.3"
+    why: "The chapter's own derivations and checkpoints."
+  - cite: "Hadfield et al., How we built our multi-agent research system, Anthropic Engineering, 2025"
+    url: "https://www.anthropic.com/engineering/multi-agent-research-system"
+    why: "A production orchestrator-worker system and its token bill."
+  - cite: "Knight and Leveson, An Experimental Evaluation of the Assumption of Independence in Multiversion Programming, IEEE TSE, 1986"
+    url: "https://doi.org/10.1109/TSE.1986.6312924"
+    why: "The experiment that broke the independence assumption for software."
+  - cite: "Gunther, A General Theory of Computational Scalability Based on Rational Functions, 2008"
+    url: "https://arxiv.org/abs/0808.1431"
+    why: "The universal scalability law; contention against coherency."
+  - cite: "Dean and Barroso, The Tail at Scale, CACM, 2013"
+    url: "https://doi.org/10.1145/2408776.2408794"
+    why: "Fan-out tails and hedged requests, with measurements."
+  - cite: "Cemri et al., Why Do Multi-Agent LLM Systems Fail?, NeurIPS 2025"
+    url: "https://arxiv.org/abs/2503.13657"
+    why: "A failure taxonomy from 1,642 traces."
+
+left_to_reading:
+  - concept: "Leases with fencing for non-mergeable resources (Table 5)"
+    why: "One ENGAGE line on the publication slide; mechanism owned by Lecture 11 (fencing tokens)."
+  - concept: "Evidence preservation during cleanup (Table 7) and stale-policy windows (Table 8)"
+    why: "Named in the cancellation note; detail better read than heard."
+  - concept: "Approval requests across a delegation tree (§18.8.3)"
+    why: "One ENGAGE line on the attenuation slide; action-bound approval is owned by Lecture 9."
+  - concept: "Reference passing (NM 18.3)"
+    why: "Worked in the envelope note as an ENGAGE question."
+
+callbacks:
+  - {lecture: "17", concept: "False accepts in the reward (RL NM 17.1)", where: "recall slide and note"}
+  - {lecture: "1", concept: "Cost per accepted task", where: "hook note, break-even note"}
+  - {lecture: "1", concept: "Horizon compounding", where: "barrier note"}
+  - {lecture: "1", concept: "Lighthouse workloads (repair and remediation agents)", where: "goals note, reservation estimate note"}
+  - {lecture: "3", concept: "Coverage is not selection (self-consistency votes)", where: "delegation-boundary note"}
+  - {lecture: "2", concept: "Quadratic resend and prefix reuse", where: "group-chat note"}
+  - {lecture: "4", concept: "Context invalidation", where: "credit-window note"}
+  - {lecture: "5", concept: "Little's law", where: "credit-window note"}
+  - {lecture: "7", concept: "Settlement before retry", where: "barrier note (hedging a mutation)"}
+  - {lecture: "7", concept: "Confused deputy", where: "attenuation note"}
+  - {lecture: "8", concept: "Capability grants; Attenuation and revocation", where: "attenuation note"}
+  - {lecture: "8", concept: "Copy-on-write workspace", where: "publication note"}
+  - {lecture: "9", concept: "Action-bound approval", where: "attenuation note"}
+  - {lecture: "10", concept: "Bounded-liability admission", where: "spawning note"}
+  - {lecture: "10", concept: "Settlement rule", where: "cancellation note"}
+  - {lecture: "11", concept: "Durable intent before dispatch", where: "envelope note"}
+  - {lecture: "11", concept: "Fencing tokens", where: "publication note"}
+  - {lecture: "12", concept: "Cleanup graph", where: "cancellation note"}
+  - {lecture: "13", concept: "Matched-budget evaluation", where: "matched-trial note"}
+  - {lecture: "13", concept: "Grader isolation", where: "publication note, reviewer vote note"}
+  - {lecture: "14", concept: "Critical path", where: "Gantt note"}
+  - {lecture: "15", concept: "Bounded collection flow (collection credits)", where: "credit-window note"}
+  - {lecture: "19", concept: "Cohort cost per accepted task (hand-off)", where: "break-even note, next-lecture note"}
+  - {lecture: "19", concept: "Budget conservation (hand-off)", where: "reservation estimate note"}
+
+closing:
+  return_to_hook: "The NM 18.7 matched cohort: both designs accept 80; only delegation meets 75 on time (78 against 70) at $18 against $12, 1.5x per accepted task, $0.75 per extra on-time acceptance. The research system is breadth-first (21 workers can pay under the scalability law); the repair migration is coupled (6 at most, and only for a deadline)."
+  read_and_practice: ["§18.2 to §18.10", "Checkpoints 18.1 to 18.3", "Napkin Math 18.1, 18.4, 18.6 by hand", "Exercises 1, 2, 5, and 8"]
+  bridge: "Next lecture (Agent Economics): why can a model with a tenth of the token price cost more per finished task?"
+
+coverage:
+  primary_taught: ["Delegation adds boundaries", "Coordination overhead", "Three delegation structures", "Spawning as admission", "Typed envelopes and receipts", "Clean merge is not a valid change", "Correlated reviewers", "Matched single-controller baseline"]
+  primary_left_to_reading: []
+  secondary: ["Subtree cancellation", "Fan-out completion contracts", "Credit-window flow control", "Attenuated delegation", "Slot-pool critical-path bound", "Amdahl's law"]
+
+notes_for_author:
+  - "The hook and synthesis name a product system (Anthropic's research system) because the chapter's War Story 18.1 does; the AutoGen, Erlang/OTP, and git artifacts are added per the brief's request for real framework code."
+  - "Knight and Leveson's PDF could not be retrieved; their result is stated in a note only, in the chapter's own terms, with no numbers beyond the chapter's (27 versions)."
+  - "The Kim et al. 'about 60%' is the paper's own rounded Helm average from its introduction; the plot shows it as 'about 60%'."
+  - "The kanban image is a drawn illustration (Wikimedia Commons), credited; it shows WIP limits, the analogy the slide needs."

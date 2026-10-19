@@ -1,0 +1,255 @@
+chapter: 07_frameworks
+lecture: 7
+title: ML Frameworks
+subtitle: "What the framework decides between Python and the accelerator"
+minutes: 75
+notes_minutes: 71
+target_ideas: 30
+layer: frameworks
+thesis: "Between the Python a model is written in and the kernels an accelerator runs, the framework silently decides when each operation executes, what training keeps for its gradients, and where every tensor lives, and those decisions can cost more time and memory than the model's arithmetic."
+hook:
+  minutes: "0-6"
+  setup: "War Story 7.1: NASA's Mars Climate Orbiter (1999). Lockheed Martin's ground software reported thruster impulse in pound-force seconds; JPL's navigation software read the numbers as newton-seconds, a factor of 4.45. The orbiter reached Mars at 57 km instead of the planned 226 km and was lost. Photo of the orbiter in test, then a diagram of the two programs and the interface between them."
+  question_to_class: "Each program passed its own tests. What failed?"
+  payoff: "The interface failed: the meaning of the numbers it carried was implicit. A framework is the interface between a model's Python and the accelerator, and it makes three decisions the code never states. The synthesis returns to the orbiter with the three silent costs this lecture measured."
+  sources: ["chapter War Story 7.1 (Mars Climate Orbiter Mishap Investigation Board 1999)", "photo: NASA, public domain, Wikimedia Commons"]
+driving_question: "What does the framework decide between a model's Python and the accelerator, and what does each decision cost?"
+recall: "Lectures 6 and 6b: an architecture fixes how many operations a model performs and how many bytes they touch. It does not say when each operation runs, how its gradient is computed, or which device runs it."
+running_example: "Two cases carry the lecture. GPT-2 XL decoding one token at batch 1 on an H100 (3 GB of FP16 weights, 576 kernel launches) carries execution; the chapter's two-layer MNIST network (784-128-10, batch 32) carries the training step. ResNet-50 at batch 64 carries training memory."
+
+segments:
+  - name: Execution
+    divider_question: "When does each operation run, and what can the framework see?"
+    read: "§7.3.1 to §7.3.6"
+    concept_questions: [3, 4, 5, 6]
+    land: "A framework can optimize only what it sees together. Eager execution shows it one operation at a time, a captured graph shows it the whole region."
+  - name: Overhead
+    divider_question: "Why does a fast accelerator sit idle waiting for Python?"
+    read: "§7.3.4, §7.3.6, §7.3.7"
+    concept_questions: [7, 8, 9]
+    land: "Every eager operation pays about 15 microseconds on the host, so small operations are overhead bound, and compiling pays once its cost is spread over enough runs."
+  - name: Autodiff
+    divider_question: "Why does training have to remember the forward pass?"
+    read: "§7.4"
+    concept_questions: [10, 11, 12]
+    land: "Reverse mode gets every gradient in one backward pass by keeping the forward values, so what the tape stores sets training memory, far beyond the weights."
+  - name: Devices
+    divider_question: "How far apart are the host and the accelerator?"
+    read: "§7.5.2 and §7.5.3"
+    concept_questions: [13, 14]
+    land: "The host link is 52 times slower than device memory, so placement, pinned memory, and overlap decide whether copies sit on the critical path."
+  - name: One Step
+    divider_question: "Where does one training step's time go?"
+    read: "§7.7 and §7.9"
+    concept_questions: [15, 16]
+    land: "A small training step is overhead bound before any profiler runs: 95 microseconds of host time against well under a microsecond of device work."
+
+concept_questions:
+  - id: 1
+    q: "How can two correct programs make a wrong system?"
+    picture: "Photo of the Mars Climate Orbiter in test; TikZ diagram of ground software, interface, navigation software, and the planned and actual orbits, built in three steps"
+    numbers: "4.45x unit mismatch (lbf·s against N·s); periapsis 57 km against the planned 226 km (War Story 7.1)"
+    example: "Mars Climate Orbiter, 1999; in ML: NCHW against NHWC layouts, quantization scales"
+    read: "§7.2"
+  - id: 2
+    q: "What three problems does every framework solve, and which iron-law term does each touch?"
+    picture: "TikZ build: Python on top, accelerator below, three decisions in between, each tied to one iron-law term"
+    numbers: "Execution -> overhead L_lat; differentiation -> bytes D_vol (and operations); abstraction -> hardware efficiency (chapter §7.1, table 1)"
+    example: "One decoding step of a language model"
+    read: "§7.1"
+  - id: 3
+    q: "What is eager execution?"
+    picture: "Code beside the picture: five lines of PyTorch, the active line boxed, the graph growing with real values"
+    numbers: "y = x * 2 gives [2., 4.] immediately (Example 7.1)"
+    example: "print(y) inside the computation works"
+    read: "§7.3.3"
+  - id: 4
+    q: "What is graph execution, and what does it change?"
+    picture: "Code beside the picture: TensorFlow 1.x placeholder and Session; the graph built with no values, then run"
+    numbers: "print(y) gives Tensor(\"mul:0\"), not a value; sess.run returns [3.] (listing 2)"
+    example: "Same x * 2 + 1 computation as the eager slide"
+    read: "§7.3.5"
+  - id: 5
+    q: "What does seeing the whole graph buy? (kernel fusion)"
+    picture: "TikZ build: three kernels with three HBM round trips, then one fused kernel"
+    numbers: "Unfused chain of k elementwise ops moves 2kNb bytes; fused moves 2Nb; LayerNorm, dropout, ReLU: about 3x less traffic and 3 launches -> 1 (§7.3.2); FlashAttention up to 9x fewer HBM accesses (Dao et al. 2022)"
+    example: "LayerNorm -> dropout -> ReLU"
+    read: "§7.3.2"
+  - id: 6
+    q: "What can go wrong when a framework captures a graph by tracing?"
+    picture: "Code: a traced function with a data-dependent branch; then the same function under torch.compile, with the graph break at the branch, each branch compiled on first use, a shape guard, and a recompile"
+    numbers: "Traced with input [1.0]; called with [-1.0] it still returns x * 2 = -2 (listing 3); under torch.compile it returns -3 (§7.3.6, torch.compile footnote)"
+    example: "torch.jit.trace; torch.compile guards and graph breaks"
+    read: "§7.3.6"
+  - id: 7
+    q: "How many operators must a compiler handle? (data)"
+    picture: "Bar plot built in two steps: eager operator surfaces against compiler cores (new plot)"
+    numbers: "PyTorch ATen 2,658 (v2.9, 2025), TensorFlow 1,563 (v2.20), ONNX 203, Core ATen IR 192, JAX lax about 135, XLA HLO 123; a 13 to 14x gap (§7.3.6, figure 6)"
+    example: "A new accelerator backend implements the core set"
+    read: "§7.3.6"
+  - id: 8
+    q: "How long does the host take to issue one GPT-2 XL decoding step?"
+    picture: "Bars built in three steps: weight read, launches, eager dispatch (new plot)"
+    numbers: "3 GB / 3.35 TB/s = 0.9 ms; 48 blocks x 12 kernels = 576 launches; 576 x 5 us = 2.9 ms; 576 x 15 us = 8.6 ms (§7.1)"
+    example: "Batch-1 decode on an H100"
+    read: "§7.1, §7.3.6"
+  - id: 9
+    q: "Why does a small operation spend most of its time not computing?"
+    picture: "Two normalized bars: dispatch against kernel for a small and a large operation (new plot, after the chapter's margin figure)"
+    numbers: "15 us dispatch + 1 us kernel = 94% dispatch; 15 us + 100 us = 13% (§7.3.4); overhead ratio = N_ops t_dispatch / (T_compute + T_memory), small MLP 90/2.6 = 34.6, GPT-3 layer 0.0018 (Napkin Math 7.2)"
+    example: "ReLU on a small vector against a large matrix multiply"
+    read: "§7.3.4, §7.3.7"
+  - id: 10
+    q: "How does compiling remove the gaps, and when does it pay for itself?"
+    picture: "Timeline plot of five small ops, eager and compiled (new plot after figure 7); worked breakeven"
+    numbers: "Eager 5 x (10 us + 1 us) = 55 us, compiled 5 us launch + 4 us fused kernel = 9 us (§7.3.6); ResNet-50 1,450 -> 2,150 img/s, 30 s compile, breakeven about 134,000 images; 10 code changes on 10,000 images: 6.9 s eager against 304.7 s compiled, 44.2x slower (table 4, §7.10, hypothetical)"
+    example: "CUDA Graphs: 576 launches -> one submission"
+    read: "§7.3.6, §7.3.7, §7.10"
+  - id: 11
+    q: "How does autodiff compute every gradient in one pass?"
+    picture: "Code beside the picture: x * 2 + 1 recorded on the tape, then walked in reverse with gradients"
+    numbers: "dz/dz = 1, dz/dy = 1, dz/dx = 2 (§7.3.3); forward mode needs one pass per parameter; a 100,000-wide layer's Jacobian would take 40 GB in FP32 (§7.4.1)"
+    example: "MulBackward, AddBackward, AccumulateGrad"
+    read: "§7.3.3, §7.4.1, §7.4.3"
+  - id: 12
+    q: "Why does training need so much more memory than the weights? What does the framework expose to reduce it?"
+    picture: "Code beside the picture: two-layer backward reads saved values; log bar plot of ResNet-50 memory built in three steps (new plot after the chapter margin figure)"
+    numbers: "102.4 MB FP32 weights; + 102.4 MB gradients + 204.8 MB Adam + 8 to 12 GB saved activations = 8.4 to 12.4 GB, 82 to 121x (§7.4.3); batch 512: 64 to 96 GB of activations, above an 80 GB H100 (§7.10)"
+    example: "ResNet-50, batch 64, 224x224; then the API slide: autocast, GradScaler, and checkpoint (listings 12 and 9), mechanism only"
+    read: "§7.4.2, §7.4.3"
+  - id: 13
+    q: "What breaks if code overwrites a value the tape saved?"
+    picture: "Code: an in-place add after sigmoid and the error it raises"
+    numbers: "Version counter on each tensor; mismatch at backward raises an error (Example 7.2)"
+    example: "In-place edit to save memory"
+    read: "§7.3.3"
+  - id: 14
+    q: "How far apart are host memory and device memory?"
+    picture: "H100 photo beside a bandwidth bar plot built in three steps (new plot)"
+    numbers: "HBM3 3.35 TB/s, NVLink 450 GB/s per direction, PCIe Gen5 x16 64 GB/s, 52.3x; 4 MB tensor: 1.2, 8.9, 62.5 us (table 7)"
+    example: "A batch of 64 FP32 images, 38.5 MB: 0.6 ms over PCIe (§7.5.3)"
+    read: "§7.5.2"
+  - id: 15
+    q: "How does a training loop keep the accelerator fed?"
+    picture: "TikZ timelines of serial and overlapped copy and compute; TikZ pipeline of 4 workers, 8 prefetched batches, pinned buffer; DataLoader code with the active line boxed"
+    numbers: "Overlapped interval approaches max(T_compute, T_transfer) (§7.5.2); 4 workers x prefetch_factor 2 = 8 batches in flight (§7.5.3); 1,000 img/s at 224x224 needs 150.5 MB/s"
+    example: "DataLoader(num_workers=4, prefetch_factor=2, pin_memory=True) and .to(non_blocking=True)"
+    read: "§7.5.2, §7.5.3"
+  - id: 16
+    q: "Where does one training step's time go, and how should a team choose a framework?"
+    picture: "Code beside labels: the MNIST step, one line per framework problem; log bars of compute, memory, and host time (new plot); scenario card for the framework choice"
+    numbers: "13.1 MFLOP -> 0.2 us at 67 TFLOP/s FP32; 1.2 MB -> 0.4 us at 3.35 TB/s; host 5 x 10 us + 9 x 5 us = 95 us; Adam moves 2.85 MB (§7.7.3); embedded scenario: 18 ms / 140 MB against 15 ms / 90 MB under 20 ms / 256 MB (§7.9, hypothetical)"
+    example: "Two-layer MNIST MLP at batch 32"
+    read: "§7.7, §7.9"
+
+worked_examples:
+  - name: "The GPT-2 XL decoding step (§7.1)"
+    steps: ["given: 3 GB FP16 weights, 3.35 TB/s HBM, 48 blocks x 12 kernels, 5 us launch, 10 us Python dispatch", "weight read: 3 GB / 3.35 TB/s = 0.9 ms", "launches: 576 x 5 us = 2.9 ms", "eager: 576 x 15 us = 8.6 ms", "result: the host takes about 10x the device's time", "meaning: capture and replay (CUDA Graphs) or fusion, not a faster accelerator"]
+  - name: "Compilation breakeven (equation 3, table 4, §7.10)"
+    steps: ["given: ResNet-50 1,450 img/s eager, 2,150 compiled, 30 s compile (hypothetical)", "saving per image: 0.690 - 0.465 = 0.225 ms", "breakeven: 30 s / 0.225 ms = about 134,000 images", "prototyping: 10,000 images, 10 changes: 6.9 s eager against 304.7 s compiled", "meaning: stay eager while the code changes; compile for long runs and serving"]
+  - name: "ResNet-50 training memory (§7.4.3)"
+    steps: ["given: 25.6M parameters, batch 64, 224x224, FP32, Adam", "weights 102.4 MB, gradients 102.4 MB, Adam 204.8 MB", "saved activations 8 to 12 GB", "result: 8.4 to 12.4 GB, 82 to 121x the weights", "batch 512: 64 to 96 GB of activations, above 80 GB", "meaning: checkpointing trades recomputation for memory"]
+  - name: "One MNIST training step (§7.7.3)"
+    steps: ["given: 784-128-10 MLP, batch 32, FP32, H100", "work: 13.1 MFLOP -> 0.2 us", "traffic: 1.2 MB -> 0.4 us", "host: 5 Python entries x 10 us + 9 launches x 5 us = 95 us", "result: overhead ratio far above 1", "meaning: fuse, batch, or capture"]
+
+active_learning:
+  - at_minute: 1
+    type: predict
+    prompt: "Each program passed its own tests. What failed?"
+    answer: "The interface: impulse left the ground software in lbf·s and was read as N·s, 4.45x off (War Story 7.1)."
+  - at_minute: 13
+    type: predict
+    prompt: "In TensorFlow 1.x graph mode, what does print(y) show before the session runs?"
+    answer: "A symbolic node name, Tensor(\"mul:0\", ...), not numbers: the graph is recorded first and run later (listing 2)."
+  - at_minute: 17.5
+    type: predict
+    prompt: "A function with a data-dependent branch is traced with input [1.0], then called with [-1.0]. What does it return?"
+    answer: "-2: the trace froze the x * 2 branch the example took (listing 3); tracing warns but does not fail."
+  - at_minute: 23.5
+    type: predict
+    prompt: "Reading GPT-2 XL's weights takes 0.9 ms. How long does an eager framework take just to issue the step's 576 kernels? A 0.1 ms, B 1 ms, C 3 ms, D 9 ms"
+    answer: "D, 8.6 ms: 576 x (10 us dispatch + 5 us launch). Launches alone would be C, 2.9 ms (§7.1)."
+  - at_minute: 31.5
+    type: estimate
+    prompt: "Compiling ResNet-50 takes 30 s and raises throughput from 1,450 to 2,150 images/s. How many images until it pays off?"
+    answer: "30 s / (1/1,450 - 1/2,150 s) = about 134,000 images; a prototyping loop that recompiles 10 times per 10,000 images runs 44x slower (table 4, §7.10)."
+  - at_minute: 41.5
+    type: predict
+    prompt: "ResNet-50's FP32 weights are 102.4 MB. Training at batch 64 holds how many times that: 2, 10, or 100?"
+    answer: "About 100: the chapter's estimate is 8.4 to 12.4 GB (82 to 121x); a measured run on an Apple GPU peaked at 5.8 GB (56x). Saved activations are almost all of it (§7.4.3)."
+  - at_minute: 47.5
+    type: diagnose
+    prompt: "An engineer adds an in-place a += 1 after a sigmoid to save memory; backward fails. Why?"
+    answer: "sigmoid's backward reads its saved output; the in-place write bumped the tensor's version counter, so autograd refuses rather than compute a wrong gradient (Example 7.2)."
+  - at_minute: 52
+    type: estimate
+    prompt: "A batch of 64 FP32 images at 224x224x3 must cross PCIe Gen5 (64 GB/s). How long? How long would the same bytes take inside HBM?"
+    answer: "38.5 MB: 0.6 ms over PCIe, about 11.5 us in HBM (§7.5.3, table 7). It costs nothing only if it overlaps compute."
+  - at_minute: 63
+    type: discuss
+    prompt: "Embedded Linux CPU, 20 ms p99, 256 MB. PyTorch -> ONNX Runtime: 18 ms, 140 MB. TensorFlow -> TF Lite: 15 ms, 90 MB. The team already runs PyTorch and ONNX. Which path?"
+    answer: "Both pass the filters; the chapter's team keeps PyTorch with ONNX Runtime because a second stack costs more than the unused headroom, and re-checks if the target tightens (§7.9)."
+
+open_questions:
+  - "Should the default execution mode be eager or compiled? Who should pay for the compile step: the researcher or the deployment team?"
+  - "Activation checkpointing trades arithmetic for memory. On which workloads would you never use it?"
+  - "Operator coverage, not peak throughput, often decides whether a model runs on a new accelerator. Is that a reason to standardize on a small operator core like ONNX, or does it slow research down?"
+
+more_examples:
+  - "Mars Climate Orbiter Mishap Investigation Board, Phase I report, 1999."
+  - "PyTorch 2 and torch.compile (Ansel et al., ASPLOS 2024): bytecode capture with guards and graph breaks."
+  - "FlashAttention (Dao et al. 2022): fusion that keeps the attention matrix on chip, up to 9x fewer HBM accesses."
+  - "TensorFlow Lite Micro (David et al. 2021): a fixed tensor arena for a 256 KB microcontroller."
+  - "CUDA Graphs: one host submission replays a captured launch sequence; serving systems capture one graph per batch size."
+  - "Horace He, Making Deep Learning Go Brrrr From First Principles (2022): profiler traces of overhead-bound and host-ahead execution, and the batch-doubling test for overhead."
+
+closing:
+  return_to_hook: "The orbiter was lost because the meaning of an exchanged number was implicit. A framework makes three implicit decisions: when operations run (8.6 ms of host time against 0.9 ms of weight reads), what training keeps (8.4 to 12.4 GB against 102.4 MB of weights), and where data lives (52x between HBM and PCIe). Making them explicit is the engineer's job."
+  read_and_practice: ["ML Frameworks §7.1 to §7.7, §7.9, §7.10", "Self-check questions after §7.3, §7.4, §7.5, §7.7", "Napkin Math 7.1 and 7.2", "TinyTorch modules 01 Tensor, 05 DataLoader, 06 Autograd"]
+  further_reading:
+    - cite: "ML Frameworks, §7.3 to §7.7"
+      url: "https://mlsysbook.ai"
+      why: "Every number in this lecture, derived."
+    - cite: "Paszke et al., PyTorch: An Imperative Style, High-Performance Deep Learning Library, NeurIPS 2019"
+      url: "https://arxiv.org/abs/1912.01703"
+      why: "Why eager execution, the tape, and the caching allocator were designed as they were."
+    - cite: "Ansel et al., PyTorch 2: Faster Machine Learning Through Dynamic Python Bytecode Transformation and Graph Compilation, ASPLOS 2024"
+      url: "https://doi.org/10.1145/3620665.3640366"
+      why: "How torch.compile captures graphs from eager code, with guards and graph breaks."
+    - cite: "Baydin et al., Automatic Differentiation in Machine Learning: a Survey, JMLR 2018"
+      url: "https://jmlr.org/papers/v18/17-468.html"
+      why: "Forward against reverse mode, and why reverse mode fits training."
+    - cite: "Mars Climate Orbiter Mishap Investigation Board, Phase I Report, NASA, 1999"
+      url: "https://llis.nasa.gov/llis_lib/pdf/1009464main1_0641-mr.pdf"
+      why: "A short report on how an implicit interface lost a spacecraft."
+  bridge: "Lecture 8: why does training cost so much more than inference, and what decides whether a step fits on one accelerator?"
+
+left_to_reading:
+  - concept: "Framework abstraction ladder (BLAS, NumPy, autodiff frameworks, §7.2)"
+    why: "Secondary; one line in the hook notes. The history is better read than heard."
+  - concept: "Module abstraction (nn.Module, parameter discovery, eval mode, state_dict, hooks, §7.6)"
+    why: "Secondary; practiced in TinyTorch and named in the training-step notes; API detail is better read."
+  - concept: "Major frameworks compared (§7.8)"
+    why: "Secondary; folded into the framework-choice discussion and one note on what each lets the compiler see."
+  - concept: "When and why to use mixed precision and checkpointing (formats, loss-scale policy, checkpoint placement, bytes saved)"
+    why: "Lecture 8b owns it. This lecture shows only the framework API (autocast, GradScaler, checkpoint)."
+  - concept: "Tensor rank, strides, and layout (§7.5.1)"
+    why: "Secondary; NCHW against NHWC is the hook's ML example; strides are TinyTorch module 01."
+  - concept: "Static runtimes for microcontrollers (§7.3.8)"
+    why: "Named in the framework-choice notes; Lecture 2 introduced the TinyML tier."
+
+coverage:
+  primary_taught: ["Three framework problems", "Eager, graph, and JIT execution", "Dispatch overhead law", "Kernel fusion", "Reverse-mode autodiff", "Saved forward state", "Compilation breakeven"]
+  primary_left_to_reading: []
+  secondary: ["Tensor metadata and placement (taught: devices segment)", "Choosing a framework (taught: discussion)", "Framework abstraction ladder (reading)", "Module abstraction (reading, TinyTorch)", "Major frameworks compared (discussion notes)", "Mixed precision and checkpointing API (taught: one slide, mechanism only; Lecture 8b owns when and why)"]
+
+notes_for_author:
+  - "2026-10-19, panel fixes. Goals slide carries the course-thread strip with the fast-enough half and the machine factor filled (H1). Eight frames moved to [OPTIONAL] so the core runs about 52 minutes (M1): the traced-branch predict, the host-time predict and its answer, the compiled-speedup bars, the training-memory predict and the measured activation curve (Lecture 5 owns the four kinds of state; panel M3), the precision and recomputation calls (Lecture 8b), and the DataLoader slide. The backward-rule slide moved to [CORE] so saved forward state stays on a core slide. The title note now states the cut."
+  - "The 15 us per-operation cost (10 us Python dispatch + 5 us launch) is the chapter's illustrative model; slides label it a model, not a measurement."
+  - "The ResNet-50 compile throughputs and 30 s compile time are the chapter's hypothetical table 4 values; the slide says hypothetical."
+  - "The ResNet-50 activation range (8 to 12 GB at batch 64) is the chapter's illustrative scenario; batch 512 scales it linearly as §7.10 does."
+  - "The framework-choice latencies are the chapter's hypothetical project measurements (§7.9)."
+  - "The in-place example uses sigmoid (whose backward reads its saved output) rather than the chapter's unnamed custom activation; behavior matches Example 7.2."
+  - "The serial and overlapped copy timelines are schematic; only the 0.6 ms copy time is a chapter number."
+  - "2026-10-18 revision (review round 1): added a torch.compile slide after the trace predict (graph break at the data-dependent branch, compile on first use, shape guard and recompile; §7.3.6 and footnote 13) and an autocast, GradScaler, and checkpoint API slide after the ResNet-50 memory slide (listings 12 and 9; mechanism only, Lecture 8b owns when and why). Callbacks now name Lectures 6 and 6b, 8 and 8b, 11b, and 4b where each owns the topic; the closing question matches Lecture 8's driving question. Operator slide title now 123 to 203, x-axis 'Operators defined'. Autograd slide shows the chain-rule product and the forward against reverse pass count with the 40 GB Jacobian. Iron-law symbol legend on the three-decisions slide; H100 caption corrected to the shroud; compiled timeline labels both cost models and is tagged cut first; framework footer on the discuss slide; nn.Module sentence in the training-step note. Notes 72.0 minutes; [OPTIONAL] slides total 7 minutes. Handout 40 pages."
+  - "2026-10-18 visual pass (real artifacts and measurements): Units slide now shows the Mishap Investigation Board's own encounter figure (Phase I report, figure 4, p. 14; NASA, public domain) in place of the hand-drawn orbit sketch. Graph-mode slide is now a 1-minute predict (print(y)), which closes the 17.5-minute activity gap. torch.compile slide quotes real TORCH_LOGS output (graph-break reason; recompile guard failure), and the jit.trace note quotes the real TracerWarning and the 2.14 deprecation warning. New slide after the dispatch-share slide: two published PyTorch profiler traces (Horace He, 2022) showing GPU idle gaps between small kernels and the host running ahead on large ones. The illustrative compiled-timeline slide (figure 7) is removed. New slide after the breakeven estimate: TorchInductor geometric-mean speedups from Ansel et al. 2024, Table 3 (A100, FP32, three suites), with the Table 4 ablation (1.91x falls to 0.80x without fusion and inlining). Tape slide renamed 'Reverse-mode autodiff ...' and its comments show the grad_fn class names PyTorch prints. ResNet-50 estimate slide is now a 1-minute predict; new slide after it shows a measured memory timeline (torchvision ResNet-50, batch 64, FP32, Adam, Apple M5 Max GPU, PyTorch 2.14.1): peak 5.8 GB, 56x the weights, Adam state +206 MB after step 1, batch 128 rises 2.00x as far. The measurement is below the chapter's 8.4 to 12.4 GB scenario (0.69 of its low end); the slide and notes say so, and the closing table now cites the measured peak. Diagnose slide shows the real RuntimeError text with the version numbers. MNIST step slide gains a measured step 4 (eager, Apple GPU, median of 7 trials: batch 32 1.10 ms, batch 1,024 0.92 ms). Decode note now says host and device time overlap rather than add. All derived numbers are computed in images/calcs.py; measured data come from images/profile_frameworks.py (writes images/data/). make_figs.py imports calcs.py. Notes 71.0 minutes; [OPTIONAL] slides total 5.5 minutes. Handout 42 pages."

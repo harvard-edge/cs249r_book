@@ -1,0 +1,679 @@
+% =============================================================================
+% Lecture 14: Operating Agents
+% Agentic Machine Learning Systems (Volume III), Chapter 14
+% =============================================================================
+% Thesis: live traffic honors none of an offline evaluation's choices, so
+% operation needs traces that keep rare failures, postmortems that test causes
+% by controlled rerun, and staged releases whose monitors take calendar time.
+% Hook and synthesis: the April 2025 GPT-4o sycophancy rollback (War Story
+% 14.1; OpenAI 2025a). Running case: the repair agent's candidate_v2 trial
+% whose search result was silently truncated (OA 14.1, 14.4, 14.6).
+%
+% Build: make deck V=3 D=14_agent_operations   (figures: images/make_figs.py)
+% Plan:  lecture_map.yml in this folder.
+% Numbers: images/calcs.py prints every derived value; sources named there.
+% =============================================================================
+
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+\mlsyssetup{
+  volume={Volume III},
+  chapter={Chapter 14},
+  chaptertitle={Operating Agents},
+  layer=runtime,
+  logo={../../assets/img/logo-mlsysbook.png},
+  instlogo={../../assets/img/logo-harvard.png},
+}
+\usepackage[T1]{fontenc}
+\usepackage[scaled=0.9]{helvet}
+\usepackage{courier}
+% Code and real tool output: Inconsolata is narrower than Courier.
+\usepackage[varqu,scaled=0.95]{zi4}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{booktabs,amsmath}
+\usetikzlibrary{arrows.meta,positioning}
+\graphicspath{{images/}}
+\setcounter{mlsystotalsections}{5}
+
+\title{Operating Agents}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+% A large answer choice for predict and concept-question slides
+\newcommand{\choice}[2]{\textbf{\textcolor{mlsysaccent}{#1}}\enspace #2}
+% A choice that is highlighted from overlay #1 on (the answer)
+\newcommand{\answerat}[3]{\alt<#1->{\colorbox{mlsysaccent!15}{\choice{#2}{#3}}}{\choice{#2}{#3}}}
+% A goal or takeaway line with its thumbnail
+\newcommand{\thumbline}[2]{%
+  \begin{minipage}[c]{2.6cm}\centering\includegraphics[width=2.5cm,height=0.95cm,keepaspectratio]{#1}\end{minipage}%
+  \hspace{0.3cm}\begin{minipage}[c]{0.74\textwidth}\small\raggedright #2\end{minipage}}
+% One line of a worked example: shown from overlay #1 on
+\newcommand{\wstep}[2]{\uncover<#1->{#2}\\[0.2cm]}
+% An identifier from the running case, in code type
+\newcommand{\op}[1]{\texttt{#1}}
+% An exact excerpt of real tool output, a config, or a document
+\newenvironment{logblock}[1][7.2]{\par\ttfamily\fontsize{#1}{8.6}\selectfont\raggedright\setlength{\parskip}{0pt}}{\par}
+% Code indentation of n spaces in the current monospace font
+\newcommand{\ind}[1]{\hspace*{#1\fontcharwd\font`0}}
+% Golden-thread tag: one line on the goals slide naming the H·S·A term this lecture acts on
+\newcommand{\hsathread}[1]{{\scriptsize\textbf{\textcolor{mlsysaccent}{H·S·A thread:}} #1\par}}
+% Colors used in the figures, for text beside them
+\definecolor{figviolet}{HTML}{7C3AED}
+\definecolor{figred}{HTML}{CB202D}
+\definecolor{figgreen}{HTML}{008F45}
+
+\begin{document}
+
+% =============================================================================
+% TITLE AND HOOK
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Read the thesis aloud once. Lecture 13 ended with a verdict on a sampled task set. Today the configuration meets live work, where nobody chose the inputs. Notes total about 70.5 minutes; the core lecture is about 57.5 minutes. FLEX: notes tagged [OPTIONAL] can be cut. Cut first the Dapper figure, the Dapper overhead plot, the privacy excerpt, the replay modes, the SWE-agent plot, the postmortem record, the drift slide, and the open questions. Every concept the chapter owns stays on a core slide.}
+\mlsystitle{Operating Agents}{Live traffic honors none of an offline evaluation's choices, so operation needs traces that keep rare failures, postmortems that test causes by rerunning, and staged releases whose monitors take calendar time.}{cover_observability_blueprint.png}
+
+\begin{frame}{Predict: what stopped the GPT-4o update?}
+  \mlsysactivity{Predict}{3 min}
+  \centering
+  \mlsyssteps[width=0.96\textwidth,height=3.7cm,keepaspectratio]{hook_step}{3}\\[0.05cm]
+  \begin{columns}[T]
+    \begin{column}{0.55\textwidth}
+      \begin{logblock}[7]
+        One of the key problems with this launch was that our offline evaluations{\textemdash}especially those testing behavior{\textemdash}generally looked good. Similarly, the A/B tests seemed to indicate that the small number of users who tried the model liked it.
+      \end{logblock}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \small
+      \choice{A}{an offline evaluation}\\
+      \choice{B}{the A/B test's metrics}\\
+      \answerat{3}{C}{signals outside the declared checks}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{OpenAI, ``Expanding on what we missed with sycophancy,'' 2 May 2025 (excerpt and timeline); Operating Agents, War Story 14.1 (\S14.5.3).}
+  \note{[3 min] [CORE] NARRATE: a real release of a model that millions of people talk to. Step 1: on Thursday 24 April 2025 OpenAI began rolling out a GPT-4o update to ChatGPT and finished on Friday. The excerpt is OpenAI's own postmortem: the offline evaluations looked good and a small A/B test looked good. Step 2: for two days the update was live and monitored. The model had become sycophantic: overly agreeable, validating doubts and anger. ENGAGE: one minute; vote on what caught it. Step 3: C. Early usage, internal signals, and user feedback outside the declared criteria; OpenAI reports no deployment evaluation tracked sycophancy. A system-prompt patch went out Sunday night, a full rollback began Monday 28 April, and it took about 24 hours. WARN: students who pick A or B assume a check passes only good releases; a check passes exactly what it measures. LINK: today's four mechanisms each map onto one piece of this timeline; the synthesis returns to it. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Recall: what did the paired comparison decide?}
+  \mlsysactivity{Retrieval}{1.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.56\textwidth}
+      {\Large\bfseries Close your notes.}\\[0.2cm]
+      {\normalsize \op{candidate\_v2} accepted more of 150 paired tasks than \op{baseline\_v1}. Did it clear a 2-point noninferiority margin?}\\[0.25cm]
+      \uncover<2->{\small \textbf{\textcolor{mlsysaccent}{No:}} the paired interval runs from $-3.21$ to $11.12$ points, below $-2$.\\[0.08cm]
+      About \textbf{217} pairs would center its lower limit on the margin.}
+    \end{column}
+    \begin{column}{0.40\textwidth}
+      \centering\safeimg[width=\textwidth,height=1.3cm,keepaspectratio]{thumb_recall.pdf}\\[0.25cm]
+      \safeimg[width=0.4\textwidth,height=1.7cm,keepaspectratio]{hsa_locator_hsa.pdf}\\[0.02cm]
+      {\footnotesize All three exposures lit: horizon, state, authority}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Agent Evaluation, Napkin Math 13.1 (\S13.5; illustrative). Locator: Operating Agents, \S14.1.}
+  \note{[1.5 min] [CORE] Retrieval from Lecture 13. Give 45 seconds. Step 2: the candidate gained 4 points on 150 pairs, 18 candidate-only against 12 baseline-only acceptances, but the paired interval's lower limit, $-3.21$, does not clear the $-2$ margin, so the comparison is inconclusive and the candidate stays offline. About 217 pairs would only center the lower limit on the margin. The thumbnail is that interval crossing the margin. NARRATE the locator: operating a configuration carries every exposure at once: the state a failure leaves, the horizon before a monitor decides, and the authority a rollback cannot recall. ENGAGE: the comparison says nothing about one question. Which? (Expected: why a particular trial failed, and what the configuration does on live work.) FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Why does a configuration that passed offline need live evidence?}
+  \thumbline{thumb_trace.pdf}{Attribute a trial's time along its critical path, and say what a trace, the trajectory log, and the accounting record each guarantee.}\\[0.08cm]
+  \thumbline{thumb_retain.pdf}{Design retention that keeps rare failures within a storage budget.}\\[0.08cm]
+  \thumbline{thumb_branch.pdf}{Test a postmortem hypothesis by a controlled branch, and state what it does not establish.}\\[0.08cm]
+  \thumbline{thumb_canary.pdf}{Size a canary by calendar time, and separate measured from unmeasured harm.}\\[0.08cm]
+  \thumbline{thumb_gate.pdf}{Apply a declared release gate to an evidence record.}\\[0.08cm]
+  {\footnotesize\textcolor{midgray}{Running case: a \op{candidate\_v2} trial gets a cut search result, proposes an out-of-scope edit, and is refused.}}\\[0.04cm]
+  \hsathread{closes all three exposures}
+  \note{[1 min] [CORE] The driving question is the title. Five goals, one per segment; each thumbnail is the shape of the figure that teaches it. The running case is the repair agent from Lecture 1, now in production as candidate\_v2. Read the case line aloud. Aggregate counts record that this trial failed. They cannot say whether the model, the observation adapter, a slow dependency, or the runtime is responsible, or whether repairing one of them would change the outcome. That takes evidence the offline harness never collected.}
+\end{frame}
+
+% =============================================================================
+% SECTION: TRACES
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] First: what record explains one trial, and what does that record not guarantee?}
+\mlsysdivider{Where did one trial spend its time, and what can its trace prove?}{Operating Agents, \S14.2}
+\section{Traces}
+
+\begin{frame}{A trace ties every span of one request to its parent}
+  \begin{columns}[c]
+    \begin{column}{0.66\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.9cm,keepaspectratio]{dapper_fig2.png}
+    \end{column}
+    \begin{column}{0.31\textwidth}
+      \small A \textbf{span}: one unit of work with an id, a parent id, a start, and an end.\\[0.2cm]
+      Children can overlap; the parent encloses them.\\[0.2cm]
+      \textcolor{mlsysaccent}{\textbf{In an agent:}} each model call, tool run, and check is a span of one trial.
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Sigelman et al., ``Dapper, a Large-Scale Distributed Systems Tracing Infrastructure,'' Google Technical Report dapper-2010-1, 2010, Figure 2.}
+  \note{[2 min] [OPTIONAL] NARRATE: this is the figure from Google's Dapper paper, the system that put distributed tracing into production in the 2000s. One front-end request becomes five spans across servers. Each box is a span: a name, a span id, a parent id, and start and end times on a shared time axis. Span 3 calls two helpers at once, so spans 4 and 5 overlap. The parent links let a tool rebuild the tree from records written on different machines; OpenTelemetry carries this model today. ENGAGE: Backend.DoSomething lasts from about 24 to 30. How long do its two helpers add if you sum them? (Expected: about 4 plus 4, more than the parent's own 6; overlapping children cannot be summed.) WARN: timestamps from two hosts are comparable only with a clock-alignment model; apparent overlap can be clock skew. LINK: the chapter's footnote ties this to the happened-before order of Lecture 11's replay. FLEX: [OPTIONAL]; the next slide carries the same idea on our own trial.}
+\end{frame}
+
+\begin{frame}{Summing spans gives 13.2 s; the critical path explains 11.2 s}
+  \begin{columns}[c]
+    \begin{column}{0.40\textwidth}
+      {\footnotesize\textbf{One span, as the SDK printed it}}\par\vspace{0.04cm}
+      \begin{logblock}[6.9]
+        "name": "execute\_tool run\_tests",\\
+        "context": \{\\
+        \ind{2}"trace\_id": "0x1596bb73...4735e",\\
+        \ind{2}"span\_id": "0x4a9024d72e831b30"\},\\
+        "parent\_id": "0x49a4d3d19d5f64e2",\\
+        "start\_time": "...T13:16:17.118234Z",\\
+        "end\_time": \ind{2}"...T13:16:23.119211Z",\\
+        "status": \{"status\_code": "UNSET"\},\\
+        "attributes": \{\\
+        \ind{2}"gen\_ai.operation.name": "execute\_tool",\\
+        \ind{2}"gen\_ai.tool.name": "run\_tests"\}
+      \end{logblock}
+    \end{column}
+    \begin{column}{0.58\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=4.2cm,keepaspectratio]{run_step}{2}
+    \end{column}
+  \end{columns}
+  \vspace{0.05cm}
+  \uncover<2->{\centering\footnotesize Violet outline: the critical path, the longest chain of dependent spans. Red band: 0.5 s no span explains.\par}
+  \mlsyscredit{OpenTelemetry Python SDK 1.27.0, ConsoleSpanExporter output (excerpt). Spans from images/trace\_run.py, which replays Napkin Math 14.1's intervals (\S14.2.3, illustrative) with sleep().}
+  \note{[2.5 min] [CORE] NARRATE: we ran the chapter's timing trial (Napkin Math 14.1) through the real OpenTelemetry SDK, with sleeps standing in for the work, so these are genuine spans. Left: the record for the test run. It carries a trace id shared by the trial, its own span id, its parent, two timestamps, and attributes from the GenAI conventions. Its status is UNSET: the span says how the operation ended, nothing about whether the task passed. Step 1: the timeline. The model proposes two checks; tests and lint run together; the model writes the report. Step 2: the five leaf spans sum to 13.2 s, but tests and lint overlap, so the dependency chain retrieve, propose, tests, report explains 11.2 s. The run lasted 11.7 s; 0.5 s between the tests ending and the report starting belongs to no span. ENGAGE: is that 0.5 s idle time? (Expected: unknown; serialization or bookkeeping went uninstrumented, so add a span there.) WARN: never sum span durations into latency. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Estimate: cut the tests to 1 s. How much faster?}
+  \mlsysactivity{Estimate}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.38\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \small\textbf{Given (Napkin Math 14.1)}\\[0.05cm]
+        Tests 6.0 s and lint 2.0 s run in parallel; segment 11.7 s.\\[0.03cm]
+        A cache cuts the tests to 1.0 s.
+      \end{mlsyscard}
+      \small
+      \uncover<2->{Lint now limits the checks: $11.7 \rightarrow \mathbf{7.7}$ s, a saving of \textbf{\textcolor{mlsysaccent}{4.0 s}} from a 5.0 s cut.}
+    \end{column}
+    \begin{column}{0.60\textwidth}
+      \centering
+      \only<1|handout:0>{\safeimg[width=\textwidth,height=4.9cm,keepaspectratio]{cut_step1.pdf}}%
+      \only<2-|handout:1>{\safeimg[width=\textwidth,height=4.9cm,keepaspectratio]{cut_step2.pdf}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Operating Agents, Napkin Math 14.1 and Checkpoint 14.1 (\S14.2.3; hypothetical intervals). Derived in images/calcs.py.}
+  \note{[2.5 min] [CORE] ENGAGE: two minutes in pairs. Where does the report span start now, and how long is the segment? Step 2: with tests at 1 s, lint at 2 s becomes the slower check. The report starts 0.5 s after lint ends, at 5.7 s, and ends at 7.7 s. The 5 s cut buys 4 s, because a parallel branch saves only up to the gap to the next-longest branch. Cutting lint instead saves nothing: it was never on the path. Students who answer 6.7 s forgot that lint takes over; students who answer 9.2 s cut the wrong span. WARN: this assumes the other durations stay fixed. A real change can alter contention, caching, or how many tokens the model writes, so the saving must be measured in a controlled trial. LINK: Lecture 19 prices an acceleration by the critical-path time it removes; today we only measure the path. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Three records carry three different guarantees}
+  \centering
+  \mlsyssteps[width=0.96\textwidth,height=5.7cm,keepaspectratio]{records_step}{3}
+  \mlsyscredit{Operating Agents, \S14.2.1, Systems Perspective 14.1, \S14.2.2, and \S14.3.1.}
+  \note{[2.5 min] [CORE] One runtime event can write to three records, often with the same operation id. Step 1: the diagnostic trace serves timing and debugging. Under load a tracing pipeline may sample, truncate payloads, or drop spans, legitimately. Step 2: the trajectory log from Lecture 11 holds the acknowledged state transitions recovery rebuilds from; it is never sampled. A runtime that rebuilt state from traces would corrupt recovery the first time telemetry shed load. Step 3: the accounting record lists every admitted trial with its configuration, criteria, verdict status, spend, and every drop. Sampling may thin traces; it never thins this record, so every population rate comes from it. ENGAGE: true or false: a green span means the task passed. (Expected: false. A test process can exit 0 with failed assertions; a span can time out while the candidate still writes a valid patch. The verdict comes from sealed checks, often after the spans close.) WARN: a trace id correlates; it does not authorize a tool call. Land the segment: trace to explain, log to recover, account to count. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: RETENTION
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Traces cost CPU, network, and storage, and they hold private data. Which ones survive?}
+\mlsysdivider{Which traces should we keep, and who decides when?}{Operating Agents, \S14.3}
+\section{Retention}
+
+\begin{frame}{Tracing every request cost Google search 16\% in latency}
+  \centering
+  \safeimg[width=0.88\textwidth,height=4.4cm,keepaspectratio]{dapper_bars.pdf}\\[0.1cm]
+  {\small Dapper's first production version kept about 1 trace in 1,024 requests.}
+  \mlsyscredit{Sigelman et al., ``Dapper,'' Google Technical Report dapper-2010-1, 2010, Table 2 (web search cluster; measurement error 2.5\% for latency) and \S4.4.}
+  \note{[1.5 min] [OPTIONAL] Real measurements from the Dapper paper. Google traced its web search cluster at different sampling rates and measured average latency. Tracing every request added 16.3 percent; one in 16 added 2.12 percent; one in 1,024 changed latency by $-0.20$ percent, inside the 2.5 percent measurement error. Throughput moved at most 1.48 percent. So the first production Dapper sampled about one request in 1,024, which was enough for high-traffic services because anything interesting recurred thousands of times. ENGAGE: what goes wrong at one in 1,024 for an agent fleet that runs a few thousand trials a day? (Expected: a rare failure may never be sampled; the next slide computes how often.) WARN: these are a 2010 web search cluster's overheads; an agent trace is larger per trial and dominated by payloads, so storage usually binds before CPU does. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Estimate: does a 5\% sample keep a rare failure?}
+  \mlsysactivity{Estimate}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.36\textwidth}
+      \small \textbf{Head sampling} decides at the start of a trial, before its outcome.\\[0.15cm]
+      P(no trace of a mode seen $n$ times)\\[0.05cm]
+      $= (1-p)^{n}$\\[0.2cm]
+      {\normalsize A mode occurs 20 times at $p = 5\%$.}\\[0.15cm]
+      \uncover<2->{$0.95^{20} = \mathbf{\textcolor{mlsysaccent}{36\%}}$ chance of no trace}
+    \end{column}
+    \begin{column}{0.62\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=5.2cm,keepaspectratio]{miss_step}{2}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Operating Agents, \S14.3.1, Purpose, and Checkpoint 14.2. Derived in images/calcs.py.}
+  \note{[2.5 min] Head sampling keeps each trial independently with probability $p$, decided at ingestion before the outcome is known. A failure mode that occurs $n$ times leaves no detailed trace with probability $(1-p)^n$. Step 1: the chapter's two anchors. At 1 percent, a failure that recurs 10 times leaves no detailed record 90 percent of the time. At 10 percent, a mode seen 5 times leaves nothing 59 percent of the time; it takes 50 occurrences to push the miss below 0.5 percent. ENGAGE: two minutes. A mode has occurred 20 times under a 5 percent sample. Step 2: 0.95 to the 20th is 0.36, so a 36 percent chance that engineers have zero examples to inspect. WARN: head sampling is fine for population averages, such as mean latency, if the inclusion probability is recorded; it fails exactly on the rare events postmortems need. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Tail selection waits for the verdict before it keeps a trace}
+  \centering
+  \mlsyssteps[width=0.96\textwidth,height=5.6cm,keepaspectratio]{tail_step}{2}
+  \mlsyscredit{Redrawn from Operating Agents, figure 1 and Table 3 (\S14.3.2).}
+  \note{[2.5 min] [CORE] Step 1: two paths. Every admitted trial enters the accounting record directly, so the denominator survives anything the buffer loses. Its trace body waits in a staging buffer until the declared verdict window closes; a slow regression suite can report hours later. Step 2: the buffer then classifies by evidence, with a precedence order so no trace is kept twice. Failed criteria and policy violations are kept first. Pending or unknown verdicts are kept provisionally, with a deadline. Unusually slow, costly, or intervention-heavy accepted trials are kept above declared thresholds. Ordinary accepted trials get a known random control sample, here 2 percent, because a failure trace means little without normal ones to compare against. Under memory pressure the buffer evicts from the bottom. If the window expires first, the accounting record flags the missing detail. ENGAGE: why can't you estimate the failure rate from the kept traces? (Expected: selection enriched failures; the rate comes from the accounting record, or from samples with recorded inclusion probabilities.) WARN: size the buffer for incident bursts of long, tool-heavy trials, which averages understate. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{A real tail sampler decides after a fixed wait}
+  \begin{columns}[T]
+    \begin{column}{0.50\textwidth}
+      {\footnotesize\textbf{Collector configuration (excerpt)}}\par\vspace{0.05cm}
+      \begin{logblock}[7.2]
+        processors:\\
+        \ind{2}tail\_sampling:\\
+        \ind{4}decision\_wait: 10s\\
+        \ind{4}num\_traces: 100\\
+        \ind{4}policies:\\
+        \ind{6}[\\
+        \ind{8}\textcolor{midgray}{[...]}\\
+        \ind{10}type: latency,\\
+        \ind{10}latency: \{threshold\_ms: 5000, [...]\}\\
+        \ind{10}type: probabilistic,\\
+        \ind{10}probabilistic: \{sampling\_percentage: 10\}\\
+        \ind{10}type: status\_code,\\
+        \ind{10}status\_code: \{status\_codes: [ERROR, UNSET]\}
+      \end{logblock}
+    \end{column}
+    \begin{column}{0.47\textwidth}
+      \small
+      \textbf{decision\_wait}: the verdict window, 10 s.\\[0.15cm]
+      \textbf{status\_code}: span status, which carries no task verdict.\\[0.15cm]
+      \textbf{num\_traces}: the buffer. Its FAQ names the failure:\\[0.05cm]
+      \begin{logblock}[7.2]sampling\_trace\_dropped\_too\_early\end{logblock}
+      \vspace{0.15cm}
+      \uncover<2->{\textcolor{mlsysaccent}{\textbf{For an agent:}} feed the verdict back as an attribute, and set the wait past the slowest grader.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{OpenTelemetry Collector Contrib, processor/tailsamplingprocessor/README.md, commit b123684 (example policies abridged; FAQ).}
+  \note{[1.5 min] [CORE] A real configuration of the OpenTelemetry Collector's tail-sampling processor, from its documentation. It buffers spans for decision\_wait, 10 seconds here, holds at most num\_traces traces in memory, then applies policies: keep traces slower than 5 s, keep 10 percent at random, keep traces whose status is ERROR or UNSET. Map it onto the last slide. The wait is the verdict window, the in-memory count is the staging buffer, the probabilistic policy is the control sample. The FAQ names the buffer-eviction failure: a counter called sampling\_trace\_dropped\_too\_early. ENGAGE: what does this configuration get wrong for the repair agent? (Expected: the task verdict arrives minutes or hours later, so a 10 s wait decides on span status, which is not the verdict.) Step 2: the fix: write the verdict back as a span attribute or event when it arrives, and size the wait and buffer for the slowest grader. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Tail selection keeps every failure for 14.5\texorpdfstring{$\times$}{x} less storage}
+  \centering
+  \safeimg[width=0.92\textwidth,height=3.4cm,keepaspectratio]{retention.pdf}\\[0.15cm]
+  \small 10,000 trials an hour, 1.4 MB each: 400 failed, 100 pending, 9,500 ordinary.\\[0.08cm]
+  \uncover<2->{Floor: failed and pending, \textbf{16.8 GB} a day. Each point of control sampling adds \textbf{3.2 GB}.}
+  \mlsyscredit{Operating Agents, Napkin Math 14.2 (\S14.3.2; hypothetical workload, decimal GB, 24 h). Derived in images/calcs.py.}
+  \note{[2 min] [CORE] Napkin Math 14.2. Keeping every 1.4 MB trace body for 24 hours costs 336 GB. Head sampling at 5 percent keeps 500 traces an hour, 16.8 GB a day, but only an expected 20 of the 400 failures and 5 of the 100 pending trials each hour, and nothing guarantees those. Tail selection keeps all 400 failed, all 100 pending, and 2 percent of the 9,500 ordinary trials, 190: 690 traces an hour, 23.184 GB a day, 14.5 times less than keeping everything. It costs more than head sampling and buys a guarantee. Step 2: retention has two terms. The floor is set by the failure-plus-pending rate, 16.8 GB a day here; each percentage point of control sampling adds 3.2 GB. ENGAGE: during an outage the failure rate triples. Which term grows? (Expected: the floor; plan for it.) WARN: these are raw payload bytes; indexes, replication, the accounting record, and the ingest buffer add more. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Traces should reference prompts kept in a restricted store}
+  \begin{columns}[T]
+    \begin{column}{0.55\textwidth}
+      {\footnotesize\textbf{OpenTelemetry GenAI conventions (excerpt)}}\par\vspace{0.05cm}
+      \begin{logblock}[7.2]
+        Model instructions, user messages, and model outputs are considered sensitive and are often large in size.\\[0.1cm]
+        OpenTelemetry instrumentations SHOULD NOT capture them by default, but SHOULD provide an option for users to opt in.\\[0.1cm]
+        [...] 3. Store content externally and record references on the spans.
+      \end{logblock}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \small Capture typed codes, versions, latencies, and hashes; keep raw payloads in a restricted store.\\[0.15cm]
+      Redaction is fallible, and a redacted trace no longer replays bit for bit.\\[0.15cm]
+      \textcolor{mlsysaccent}{\textbf{When raw bytes expire, narrow the claim.}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{OpenTelemetry semantic-conventions-genai, docs/gen-ai/gen-ai-spans.md, ``Capturing instructions, inputs, and outputs,'' commit 547934a (excerpt). Operating Agents, \S14.3.3 and \S14.3.4.}
+  \note{[1.5 min] [OPTIONAL] The OpenTelemetry conventions for model spans say the same thing as the chapter. Prompts and outputs are sensitive and large, so instrumentation should not capture them by default, and in production the recommended pattern stores content outside the telemetry backend with references on the spans. The chapter adds three points. Minimize at the capture boundary inside the runtime, before payloads reach queues and search indexes; prefer leaving a field out over scrubbing it, because regular expressions, entropy detectors, and entity recognizers all miss cases. Pseudonymize with a keyed hash so one customer's actions link across traces, and rotate the key. Redaction changes the bytes the model saw, which can shift token boundaries, so a redacted trace does not replay exactly. ENGAGE: a raw payload has expired and only its digest remains. What replay claim survives? (Expected: none about the original run; a fresh run on a synthetic fixture tests the class of problem.) LINK: quadratic resend from Lecture 2 also hits traces that copy the whole context into every span; content digests keep growth linear. FLEX: [OPTIONAL].}
+\end{frame}
+
+% =============================================================================
+% SECTION: POSTMORTEMS
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Land the segment aloud: keep failures by verdict, count from the accounting record. Now use a kept trace to find a cause.}
+\mlsysdivider{How do we find out why one trial failed?}{Operating Agents, \S14.4}
+\section{Postmortems}
+
+\begin{frame}{A postmortem keeps each finding at its own boundary}
+  \begin{columns}[c]
+    \begin{column}{0.40\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.4cm,keepaspectratio]{twa800_a.jpg}\\[0.04cm]
+      {\footnotesize TWA Flight 800, rebuilt by the NTSB from recovered wreckage}
+    \end{column}
+    \begin{column}{0.58\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=5.5cm,keepaspectratio]{findings_step}{3}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: NTSB, public domain, Wikimedia Commons. Findings: Operating Agents, \S14.4 and Table 4.}
+  \note{[2 min] [CORE] NARRATE: the photo shows TWA Flight 800, a 747 lost in 1996, rebuilt by the National Transportation Safety Board from pieces recovered from the sea. Investigators rebuild in order to test hypotheses against physical evidence, and the report separates contributing causes instead of naming one culprit. Site reliability engineering adopted the same blameless stance for software; agent postmortems extend it from people to components. Step 1: our trial's first finding: the observation adapter cut the search result in the middle of an excerpt with no truncation notice, which the bounded-observation contract of Lecture 7 requires. Step 2: the model then proposed rewriting a file outside the repair scope. Step 3: the runtime refused that proposal before dispatch, as designed. ENGAGE: who is to blame? (Expected: the question is wrong. Three findings at three boundaries; each needs its own evidence.) WARN: the model's own explanation of why it failed is a generated hypothesis that needs its own evidence. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Three replay modes answer three different questions}
+  \centering
+  \safeimg[width=0.94\textwidth,height=4.8cm,keepaspectratio]{replay.pdf}
+  \mlsyscredit{Operating Agents, \S14.4.1; the three uses of a recorded trajectory come from Durable Execution (\S11).}
+  \note{[2 min] [OPTIONAL] LINK: Lecture 11 owns the three uses of a recorded trajectory; here they become the postmortem's instruments. Time-travel replay folds recorded decisions to recover exactly what the model received at the failure: the truncated excerpt. It inspects the past and creates no new outcome. Regression replay runs deterministic component code against captured inputs with live effects disabled: feed the captured search output through the old and the revised adapter and confirm that the old one omitted the partial-result marker. No model call is needed. A counterfactual branch forks from a saved prefix, changes one thing, and collects fresh model calls along the new path. Only the branch can say whether a complete observation would have produced an accepted repair. ENGAGE: a branch asks the search tool for page 2. Why can't it reuse the next recorded tool result? (Expected: the request changed; recorded responses are reusable only under Lecture 13's matching-request rule, or replay fabricates a success.) FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Diagnose: which interface change fixed the repair?}
+  \mlsysactivity{Diagnose}{3 min}
+  \centering
+  \mlsyssteps[width=0.94\textwidth,height=3.5cm,keepaspectratio]{branches_step}{2}\\[0.1cm]
+  {\small Postmortem by intervention changes one thing per branch; prefix, model, sampling, budget, checks, and gate stay fixed.}\\[0.06cm]
+  \uncover<2->{\small Warning only removes the forbidden edits, yet 12 runs stop at the budget before any repair.}
+  \mlsyscredit{Operating Agents, Example 14.1 (\S14.4.3; hypothetical outcomes).}
+  \note{[3.5 min] [CORE] Example 14.1, the controlled experiment. A private copy of a saved prefix of the repair trial is restored for every run, under three branches: the original interface with the defect, an added warning that search results may be incomplete, and a revised paginated interface with typed partial-result metadata and a way to fetch the rest. Everything else is frozen, and each branch gets 20 fresh continuations. ENGAGE: three minutes; predict each branch's accepted count, vote, compare with a neighbor, then vote again. Step 2: original, 1 accepted and 19 propose the forbidden rewrite. Warning only, 8 accepted, 0 forbidden, 12 run out of budget. Paginated, 20 of 20. The gate blocked every forbidden write in all branches. WARN: the warning removed the forbidden proposals but did not produce repairs; safety enforcement and task completion are separate outcomes. The result supports evaluating the paginated interface package more widely. It does not show the marker alone did it, and it does not clear the model. These runs stay out of release metrics; pooling them would inflate the sample. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{20 of 20 accepted still allows a failure rate of 16\%}
+  \begin{columns}[c]
+    \begin{column}{0.58\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.0cm,keepaspectratio]{wilson.pdf}
+    \end{column}
+    \begin{column}{0.39\textwidth}
+      \small Wilson 95\% upper limit on the failure rate after $n$ clean runs.\\[0.2cm]
+      Below 5\% takes \textbf{73} consecutive accepted runs.\\[0.2cm]
+      \textcolor{mlsysaccent}{\textbf{And all 73 come from one prefix and one fixture.}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Operating Agents, Example 14.1 and Checkpoint 14.3; Wilson interval as in Agent Evaluation (\S13.5). Derived in images/calcs.py.}
+  \note{[2.5 min] [CORE] The chapter's pitfall: treating a clean diagnostic run as closing the incident. With the Wilson score interval from Lecture 13, 20 accepted runs out of 20 still leave the true failure rate as high as 16 percent at 95 percent confidence. Pushing the upper limit below 5 percent takes 73 consecutive clean runs (Checkpoint 14.3, derived). Every one of those runs starts from the same saved prefix and fixture, so the bound describes this situation and says nothing about the task population. ENGAGE: put intervals on the three branches of the last slide. (Expected: original 1 of 20, 0.009 to 0.236; warning only 8 of 20, 0.219 to 0.613; paginated 20 of 20, 0.839 to 1.000. Paginated separates from both on this prefix; the other two overlap.) LINK: Lecture 7's published ablation is this kind of evidence at scale: one model resolved 18.0 percent of 300 issues with a 100-line file window and 12.7 percent with whole files. ENGAGE: what would generalize the fix? (Expected: a paired evaluation on a fresh task sample, Lecture 13's method.) WARN: a rollback is the other false close; it stops new work and leaves earlier writes in place. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{A postmortem record separates findings from open questions}
+  \begin{columns}[T]
+    \begin{column}{0.47\textwidth}
+      {\footnotesize\textbf{An SRE postmortem (excerpt)}}\par\vspace{0.05cm}
+      \begin{logblock}[7]
+        Root Causes: Cascading failure due to combination of exceptionally high load and a resource leak [...]\\[0.08cm]
+        Trigger: Latent bug triggered by sudden increase in traffic.\\[0.08cm]
+        Where we got lucky\\
+        Server logs had stack traces pointing to file descriptor exhaustion as cause for crash
+      \end{logblock}
+    \end{column}
+    \begin{column}{0.50\textwidth}
+      \footnotesize
+      \begin{tabular}{@{}P{2.2cm}P{4.3cm}@{}}\toprule
+        \textbf{Record line} & \textbf{Our trial}\\\midrule
+        Established & cut result without notice; refused out-of-scope edit\\[0.04cm]
+        Tested change & paginated interface, one saved prefix\\[0.04cm]
+        Verification & adapter and gate tests; task-level reruns\\[0.04cm]
+        Still open & other fixtures, retention gaps, release evidence\\\bottomrule
+      \end{tabular}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Beyer et al., \emph{Site Reliability Engineering}, O'Reilly 2016, Appendix D, ``Example Postmortem'' (the book's illustrative incident; excerpt). Operating Agents, Table 5.}
+  \note{[1.5 min] [OPTIONAL] Left: the example postmortem from Google's Site Reliability Engineering book, a published template written about an illustrative outage. It separates the root causes from the trigger, and it records where the team got lucky: evidence that happened to exist. Right: the chapter's record for our trial, condensed from Table 5. Established findings are the two facts the trace shows. The tested change names the interface revision and the single saved prefix it was tested from. Verification lists the deterministic adapter and admission tests and the task-level reruns. The open questions name untested fixtures, what retention did not keep, who owns any residual operations, and what release still needs. ENGAGE: which line would a team most likely leave out? (Expected: still open; that line keeps a fixture result from turning into a release claim.) Land the segment: a postmortem tests an explanation by intervening, and its conclusion holds for the fixture it ran. FLEX: [OPTIONAL].}
+\end{frame}
+
+% =============================================================================
+% SECTION: STAGED RELEASE
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] The fix works on one fixture. How much live work may the revised configuration touch, and how fast?}
+\mlsysdivider{How much live work should a new configuration touch, and for how long?}{Operating Agents, \S14.5}
+\section{Staged release}
+
+\begin{frame}{Each release stage answers its own question}
+  \begin{columns}[c]
+    \begin{column}{0.36\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.6cm,keepaspectratio]{canary_mine.jpg}\\[0.04cm]
+      {\footnotesize A miner with a canary cage, U.S. Bureau of Mines}
+    \end{column}
+    \begin{column}{0.61\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=5.6cm,keepaspectratio]{stages_step}{4}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: George McCaa, U.S. Bureau of Mines, public domain, Wikimedia Commons. Stages redrawn from Operating Agents, figure 2 (\S14.5).}
+  \note{[2 min] [CORE] Step 1: the offline gate, Lecture 13's paired comparison with its declared margin. candidate\_v2 failed it, so it stays offline however good its traces look. Step 2: shadow execution gives a candidate an authorized copy of live inputs as a separate experiment; the baseline still serves the task, and the candidate's output is withheld. Discarding output does not license sending private data to a new service, and reads still take locks and quotas. Step 3: a canary assigns a fraction $f$ of eligible live tasks, with real effects, under a policy declared before any task is assigned. It is assigned per trajectory, never per model call, and retries and resumes keep their cohort. Step 4: wider release is the next stage with its own question. Every failure routes to one admission hold. The photo: miners carried canaries to meet gas first. ENGAGE: what does the canary protect? (Expected: nothing it meets; it warns early, and the tasks it exposes still bear the harm.) FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Shadow runs show drift in the tool mix before live traffic}
+  \begin{columns}[c]
+    \begin{column}{0.58\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.6cm,keepaspectratio]{js_bars.pdf}
+    \end{column}
+    \begin{column}{0.39\textwidth}
+      \small Jensen-Shannon divergence: a symmetric, bounded distance between two distributions, here of tool calls.\\[0.15cm]
+      Maximum $\ln 2 = 0.693$ nats.\\[0.15cm]
+      \textcolor{mlsysaccent}{\textbf{Read it against two baseline samples of the same size.}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Operating Agents, \S14.5.1, equation 1 (hypothetical distributions; natural logarithms). Lin, IEEE Trans. Inf. Theory, 1991. Derived in images/calcs.py.}
+  \note{[1.5 min] [OPTIONAL] Before a candidate touches live tasks, a shadow run can show that its operating pattern changed: which tools it calls, how many tokens, how long. The baseline sends 70 percent of its tool calls to tests and 30 to lint; the candidate splits them evenly. That plainly visible shift has a Jensen-Shannon divergence of only 0.021 nats, 3 percent of the 0.693 maximum two configurations with no common tool would reach. So a useful alert threshold is a small number, and it means something only against the divergence between two baseline samples of the same size. ENGAGE: the paginated interface calls the search tool more often. Regression? (Expected: not by itself; the intended repair may change the tool mix. A divergence alarm routes to review; acceptance decides.) WARN: a shadow cannot supply evidence about production effects it deliberately prevented. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{A sequential test stops when evidence crosses a boundary}
+  \begin{columns}[c]
+    \begin{column}{0.22\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.6cm,keepaspectratio]{wald.jpg}\\[0.04cm]
+      {\footnotesize Abraham Wald}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=4.9cm,keepaspectratio]{sprt_step}{2}
+    \end{column}
+    \begin{column}{0.27\textwidth}
+      \footnotesize Test acceptance 0.90 against a degraded 0.75.\\[0.1cm]
+      Each failure: $+0.92$\\
+      Each success: $-0.18$\\[0.1cm]
+      Errors: 1\% false hold, 5\% missed.\\[0.1cm]
+      \uncover<2->{\textbf{\textcolor{mlsysaccent}{About 45 labeled tasks}} on average under 0.75.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: Konrad Jacobs, MFO, CC BY-SA 2.0 de, Wikimedia Commons. Operating Agents, equations 2 to 4 and Napkin Math 14.3 (illustrative); Wald 1945. Walks illustrative.}
+  \note{[2.5 min] [CORE] Abraham Wald developed the sequential probability ratio test during the Second World War for industrial inspection: decide as evidence accumulates instead of after a fixed sample. Step 1: the canary monitor of Napkin Math 14.3 compares acceptance 0.90 against a specified degradation to 0.75. Each labeled task moves the log-likelihood ratio: a failure up by 0.92, a success down by 0.18. Cross 4.55 and the test selects the degraded hypothesis, so the policy holds admission; cross $-2.99$ and it selects 0.90 against that alternative. Between them, keep sampling. The boundaries come from the error targets, 1 percent false hold and 5 percent missed degradation. Step 2: two illustrative walks. Under 0.75 the expected stopping count is about 45 labeled tasks. ENGAGE: how many failures in a row trip the hold from the start? (Expected: five; 4 failures reach 3.67, 5 reach 4.58.) WARN: rerunning a fixed-sample test after every label inflates false alarms far above its nominal level (Johari et al. 2017); the sequential design declares how evidence is used before collecting it. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Estimate: how long does a 5\% canary take to decide?}
+  \mlsysactivity{Estimate}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.38\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \small\textbf{Given (Napkin Math 14.3)}\\[0.05cm]
+        About 45.24 labeled tasks\\
+        60 eligible tasks an hour\\
+        Canary share 5\%\\
+        Each label arrives 0.5 h late
+      \end{mlsyscard}
+      \small
+      \uncover<2->{$60 \times 0.05 = 3$ tasks an hour\\[0.04cm]
+      $45.24 / 3 = 15.08$ h, plus 0.5 h\\[0.04cm]
+      \textbf{\textcolor{mlsysaccent}{15.58 h}}; at 10\%, 8.0 h}
+    \end{column}
+    \begin{column}{0.60\textwidth}
+      \centering\uncover<2->{\safeimg[width=\textwidth,height=5.0cm,keepaspectratio]{calendar.pdf}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Operating Agents, Napkin Math 14.3 (\S14.5.3; hypothetical rates, no-overshoot approximation). Derived in images/calcs.py.}
+  \note{[2.5 min] [CORE] ENGAGE: two minutes. The sample count comes from the hypotheses and error targets alone; the traffic share sets only how fast samples arrive. Step 2: 5 percent of 60 tasks an hour is 3 candidate tasks an hour, so about 45.24 labels take 15.08 hours of admission, plus half an hour for the last labels: about 15.58 hours to a decision. Doubling the share to 10 percent cuts it to about 8.0 hours; full allocation takes 1.25 hours. The time scales as one over the share. WARN: 45 is an average over both decisions; single canaries run longer, and the count until an alarm is a different number; keep hard admission and effect limits beside it. Choose the share from the decision deadline and from the exposure you can tolerate to harms the monitor does not measure. Students who answer 45 minutes forgot the share; students who answer 15 hours forgot the label delay. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Vote: does a small canary limit a regression's damage?}
+  \mlsysactivity{Vote}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.42\textwidth}
+      \normalsize True or false?\\[0.2cm]
+      \small A 5\% canary does less damage than a full release before its monitor decides.\\[0.3cm]
+      \uncover<2->{\textbf{\textcolor{figred}{False}} for the measured regression: about 7 against 11 excess failures.\\[0.15cm]
+      \textbf{\textcolor{figgreen}{True}} for harm no monitor measures: 5\% of the exposure.}
+    \end{column}
+    \begin{column}{0.56\textwidth}
+      \centering\uncover<2->{\safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{harm_bars.pdf}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Operating Agents, \S14.5.3 and Fallacy 2 (\S14.7); Napkin Math 14.3 scenario (illustrative). Derived in images/calcs.py.}
+  \note{[2 min] [CORE] Peer instruction: vote, one minute with a neighbor, vote again. Step 2: both. Under the degraded hypothesis each candidate task fails 0.15 more often than the baseline. The monitor decides after about 45 labeled tasks plus the tasks admitted while labels are pending, so the measured regression costs about (45.24 + 1.5) times 0.15, 7 excess failures, at 5 percent, and (45.24 + 30) times 0.15, 11, at full allocation. The share enters only through the label delay. Harms the monitor does not measure accrue on every admitted candidate task until something else notices, so their rate scales with the share: 5 percent of full exposure. The sample size fixes the measured harm; the canary's size limits the unmeasured harm. WARN: students expect damage proportional to traffic for both. LINK: the sycophancy update was an unmeasured harm at full scale. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}[t]{Diagnose: what does this rule miss for agents?}
+  \mlsysactivity{Diagnose}{3 min}
+  \vspace{-0.15cm}
+  \begin{columns}[T]
+    \begin{column}{0.44\textwidth}
+      {\footnotesize\textbf{Rollout steps}}\par\vspace{0.03cm}
+      \begin{logblock}[7]
+        steps:\\
+        - setWeight: 20\\
+        - pause: \{duration: 10m\}\\
+        - setWeight: 40\\
+        - pause: \{duration: 10m\}\\
+        \textcolor{midgray}{[... 60, 80, each 10m]}
+      \end{logblock}
+      \vspace{0.08cm}
+      {\footnotesize\textbf{Analysis template}}\par\vspace{0.03cm}
+      \begin{logblock}[7]
+        interval: 5m\\
+        successCondition: result[0] >= 0.95\\
+        failureLimit: 3\\
+        query: [...] response\_code!\textasciitilde"5.*" [...]
+      \end{logblock}
+    \end{column}
+    \begin{column}{0.53\textwidth}
+      \small Apply it to the repair agent: 60 tasks an hour, labels 0.5 h late.\\[0.15cm]
+      \uncover<2->{\footnotesize
+      \begin{tabular}{@{}P{2.3cm}P{4.6cm}@{}}\toprule
+        \textbf{Rule} & \textbf{Agent problem}\\\midrule
+        100\% at 40 min & \textbf{2} labeled tasks of 45 needed\\[0.03cm]
+        HTTP non-5xx & sees span status only\\[0.03cm]
+        check every 5 min & repeated looks inflate false alarms\\[0.03cm]
+        abort: weight 0 & in-flight effects still unsettled\\\bottomrule
+      \end{tabular}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Argo Rollouts documentation, docs/features/analysis.md, background-analysis example, commit 176a66f (excerpt). Labeled-task count derived in images/calcs.py.}
+  \note{[3 min] [CORE] A real progressive-delivery rule from the Argo Rollouts documentation, written for a web service. The rollout sends 20 percent of traffic to the canary, waits 10 minutes, then 40, 60, 80, and is fully promoted after 40 minutes. In the background a query checks every 5 minutes that at least 95 percent of requests did not return an HTTP 5xx; three failures abort, setting the weight back to zero. ENGAGE: three minutes in pairs: list what goes wrong if the repair agent runs under this rule. Step 2: at 60 tasks an hour with labels arriving 30 minutes late, only the tasks admitted in the first 10 minutes have verdicts when promotion happens: 2 labeled tasks against the 45 the sequential test needs (derived). Success is HTTP status, which is span status. Checking every 5 minutes is repeated peeking. Abort stops new traffic but does not settle the patches and tool calls in flight. WARN: the rule is not wrong for its web service; it is wrong for a workload whose verdict is late and whose effects outlast a request. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Rollback stops new admission; it does not settle effects}
+  \centering
+  \safeimg[width=0.92\textwidth,height=3.6cm,keepaspectratio]{rollback.pdf}\\[0.1cm]
+  \begin{columns}[T]
+    \begin{column}{0.48\textwidth}
+      \begin{logblock}[7]
+        The full rollback took around 24 hours to manage stability and avoid introducing new issues across the deployment.
+      \end{logblock}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \small A \textbf{tripwire} stops admission at once: a verified forbidden dispatch, an exhausted allowance, too much unresolved work.
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Operating Agents, \S14.5.4 (illustrative intervals). Quote: OpenAI, ``Expanding on what we missed with sycophancy,'' 2 May 2025.}
+  \note{[1.5 min] [CORE] Three intervals that teams report as one. Detection: a monitor or a person notices. Admission stop: the policy prevents new candidate work; for a verified forbidden dispatch, an exhausted release allowance, or too much unresolved candidate work, a hard tripwire does this at once without waiting for 45 labels, because a deterministic breach would otherwise repeat. Settlement: every candidate task already in flight keeps its original identity and runs to an outcome, or is compensated under Lecture 12's recovery policy with an accountable owner. A baseline worker cannot take over a candidate trajectory without Lecture 11's resume checks. Even OpenAI's rollback of a stateless chat model took about 24 hours. ENGAGE: why does a task-count cap alone not bound the damage? (Expected: each task's effects must also be bounded, by Lecture 10's per-trajectory budget at enforcing endpoints.) WARN: effects that cannot be undone or remain unknown at the cutoff stay out of any average that implies everything was restored. Land the segment. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: RELEASE GATE
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Join the evidence: one record, one declared rule, one decision about candidate\_v2.}
+\mlsysdivider{What must a release show before it widens?}{Operating Agents, \S14.6}
+\section{Release gate}
+
+\begin{frame}{The decision record keeps each claim with its own evidence}
+  \begin{columns}[c]
+    \begin{column}{0.47\textwidth}
+      \footnotesize
+      \begin{tabular}{@{}P{1.7cm}P{4.4cm}@{}}\toprule
+        \textbf{Claim} & \textbf{Evidence, and what is left}\\\midrule
+        Trial accepted & targeted check passed; regression suite \textbf{pending}\\[0.04cm]
+        \leavevmode\uncover<2->{Interface defect} & \leavevmode\uncover<2->{controlled branches; \textbf{one} saved prefix}\\[0.04cm]
+        \leavevmode\uncover<3->{Not worse} & \leavevmode\uncover<3->{150 pairs; interval crosses the margin}\\[0.04cm]
+        \leavevmode\uncover<4->{Disposition} & \leavevmode\uncover<4->{\textbf{\textcolor{mlsysaccent}{keep baseline\_v1}}; plan a powered sample}\\\bottomrule
+      \end{tabular}
+    \end{column}
+    \begin{column}{0.51\textwidth}
+      \centering\uncover<3->{\safeimg[width=\textwidth,height=4.2cm,keepaspectratio]{paired.pdf}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Operating Agents, \S14.6.1 to \S14.6.2 and Table 8. Interval: Agent Evaluation, Napkin Math 13.1 (illustrative); 217-pair interval derived.}
+  \note{[3 min] [CORE] The chapter's decision record, condensed from Table 8. Each row is a claim with its evidence and its residual uncertainty, which is what the concept map calls an empirical safety case: claim, argument, evidence, assumptions, and what remains unknown, kept separate. Step 1: the trial produced ws\_r19; its targeted check passed, but its full regression suite and its final bill are pending, so the trial is not accepted. Step 2: the interface repair is supported on one saved prefix; that is evidence about the defect, and the revised configuration needs its own evaluation. Step 3: the 150-pair comparison of candidate\_v2 as submitted; the interval crosses the $-2$ margin. Gray: about 217 pairs would only center the lower limit on the margin (derived). Step 4: keep baseline\_v1 and plan a powered paired sample before collecting more data. ENGAGE: a teammate proposes dropping the hardest tasks and rerunning. (Expected: that measures a sanitized workload; a changed protocol needs a fresh, independent sample.) FLEX: [CORE].}
+\end{frame}
+
+\mlsysnote{[1.5 min] [CORE] The release gate as a declared rule, written before data. Read each term. The lower limit $L$ of the paired acceptance interval must exceed minus the tolerance $\delta$. Candidate trajectory goodput, accepted tasks per hour of observation, must stay within a relative tolerance $\rho$ of the baseline on matched load; Lecture 19 develops goodput as a capacity metric. The 99th-percentile completion time must meet the deadline $D$, a cohort objective over all tasks. Verified violations $V$ must be zero. A logical AND: no term compensates for another, so excellent latency cannot buy back an inconclusive acceptance interval. WARN: the gate checks only its four terms. A drift alarm such as the Jensen-Shannon divergence routes to review and never fails the gate by itself.}
+\mlsysfocus{A release gate is a declared conjunction}{%
+{\normalsize $\text{Ship} = \mathbf{1}[L > -\delta] \;\wedge\; \mathbf{1}[\mathcal{G}_{\text{cand}} \ge (1-\rho)\,\mathcal{G}_{\text{base}}] \;\wedge\; \mathbf{1}[T_{99} \le D] \;\wedge\; \mathbf{1}[V = 0]$}\\[0.5cm]
+{\small paired acceptance \quad goodput \quad tail latency \quad violations}\\[0.4cm]
+{\normalsize Every term must hold. Nothing outside the four is checked.}%
+}
+
+\begin{frame}{Predict: which gate term stops candidate\_v2?}
+  \mlsysactivity{Predict}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.52\textwidth}
+      \small
+      \choice{A}{paired acceptance, $L > -\delta$}\\[0.1cm]
+      \choice{B}{goodput}\\[0.1cm]
+      \choice{C}{tail latency}\\[0.1cm]
+      \choice{D}{violations, $V = 0$}\\[0.25cm]
+      \uncover<2->{\textbf{\textcolor{mlsysaccent}{A}}: $-3.21 < -2$, so Ship $= 0$. B to D were never measured.}\\[0.15cm]
+      \uncover<3->{Four terms at 5\% each: up to \textbf{20\%} chance one verdict is wrong. Test each at 1.25\%.}
+    \end{column}
+    \begin{column}{0.45\textwidth}
+      {\footnotesize\textbf{A real analysis run has three outcomes}}\par\vspace{0.05cm}
+      \begin{logblock}[7]
+        Completed runs are considered Successful, Failed, or Inconclusive, and the result of the run affect if the Rollout's update will continue, abort, or pause, respectively.
+      \end{logblock}
+      \vspace{0.1cm}
+      {\footnotesize Label each term satisfied, failed, or inconclusive.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Operating Agents, \S14.6.3, equation 5. Argo Rollouts documentation, docs/features/analysis.md, commit 176a66f (excerpt). Family-wise numbers derived in images/calcs.py.}
+  \note{[2.5 min] [CORE] ENGAGE: one minute; vote. Step 2: A. The paired interval's lower limit, $-3.21$, is below the $-2$ tolerance, so the first term fails and the conjunction is zero. The other three terms were never measured for candidate\_v2, so the report labels them unmeasured, which the gate never counts as passed. The decision: retain baseline\_v1, finish the regression runs for ws\_r19, reconcile open token and tool charges, and preregister a powered sample. Students who pick D assume a clean safety record can carry a release. Step 3: four statistical verdicts each allowed a 5 percent error can be wrong together up to 20 percent of the time (the union bound; 18.5 percent if independent). The simplest control tests each at 5 percent divided by 4, 1.25 percent. The Argo excerpt shows a real system that already reports three outcomes per check; a gate should label each term satisfied, failed, or inconclusive, and never turn inconclusive into approval. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% CLOSE
+% =============================================================================
+\begin{frame}{Each mechanism answers one part of the rollback}
+  \mlsysactivity{Retrieval}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.30\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.0cm,keepaspectratio]{thumb_hook_step4.pdf}\\[0.05cm]
+      {\footnotesize Rollout 24 to 25 April; rollback from 28 April, about 24 h}
+    \end{column}
+    \begin{column}{0.67\textwidth}
+      \only<1|handout:0>{\normalsize Close your notes. Match each label to one of today's mechanisms: no criterion; detected outside the gate; admission stop; then settlement.}%
+      \only<2->{\footnotesize
+      \begin{tabular}{@{}P{2.4cm}P{6.6cm}@{}}\toprule
+        \textbf{Label} & \textbf{Mechanism}\\\midrule
+        No criterion & The gate passes what it declares; add a sycophancy evaluation.\\[0.03cm]
+        Detected outside & Keep traces by verdict and feedback; count from the accounting record.\\[0.03cm]
+        Admission stop & A small share bounds unmeasured harm; rollback stops admission.\\[0.03cm]
+        Then settlement & Test causes by controlled rerun; settle what already ran.\\\bottomrule
+      \end{tabular}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{OpenAI, ``Expanding on what we missed with sycophancy,'' 2 May 2025; Operating Agents, War Story 14.1.}
+  \note{[3 min] [CORE] Back to the hook. Retrieval: 90 seconds, close notes, match each label to a mechanism. Step 2: No criterion: a release gate passes exactly the criteria it declares; OpenAI's response was a new blocking evaluation for behavior, the durable fix for the next release. Detected outside: what caught it were signals no gate term watched; retention keyed to verdicts and user feedback keeps those cases inspectable, and their rate comes from the accounting record. Admission stop: the update went to all users after a small A/B test; a smaller staged share would have limited exposure to the unmeasured harm, though no monitor of the declared metrics would have stopped it. The prompt patch and rollback stopped new exposure. Then settlement: a postmortem that tests causes by controlled change, which OpenAI describes as several training changes that looked beneficial alone. ENGAGE: which of these would have changed the launch decision itself? (Expected: an explicit behavior criterion; OpenAI reports expert testers felt something was off.) FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Takeaways}
+  \thumbline{thumb_trace.pdf}{A trace correlates one trial's spans; the critical path explains its time; span status describes the call and carries no verdict.}\\[0.12cm]
+  \thumbline{thumb_retain.pdf}{Head sampling misses rare failures (59\% at 10\%, five occurrences). Keep by verdict; count from the accounting record.}\\[0.12cm]
+  \thumbline{thumb_branch.pdf}{A postmortem tests a cause by a controlled branch; 20 of 20 still allows 16\% failures on that fixture.}\\[0.12cm]
+  \thumbline{thumb_canary.pdf}{The sample size fixes the measured harm; the canary share sets calendar time and unmeasured exposure.}\\[0.12cm]
+  \thumbline{thumb_gate.pdf}{A release gate is a declared conjunction; an inconclusive term never counts as passed.}
+  \note{[1.5 min] [CORE] One line per segment. Ask students which slide taught each line. If short on time, read the second and the fourth.}
+\end{frame}
+
+\begin{frame}{Open questions}
+  \begin{columns}[c]
+    \begin{column}{0.62\textwidth}
+      \small
+      \begin{itemize}\setlength{\itemsep}{0.12cm}
+        \item Some harms, like sycophancy, have no cheap automatic grader. Can a release gate include a human judgment and still be declared before data?
+        \item Labels for agent tasks arrive hours late. Should a canary slow admission until verdicts catch up, and who pays for the wait?
+        \item Traces of agent work hold customers' code and data. How long may a team keep them for diagnosis?
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.35\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.6cm,keepaspectratio]{twa800_b.jpg}\\[0.04cm]
+      {\footnotesize The TWA 800 reconstruction, used for training until 2021}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: NTSB, public domain, Wikimedia Commons.}
+  \note{[1 min] [OPTIONAL] No single answer. Pick one for discussion or assign one as a short written response. The first comes from OpenAI's own process change: it committed to block launches on qualitative signals. The second follows from Napkin Math 14.3, where label delay adds both calendar time and exposure. The third pairs the chapter's privacy section with its retention budgets: pseudonym keys rotate, but a postmortem may need to follow one entity for weeks. The photo: the NTSB kept its reconstruction for about 20 years as a training aid; evidence kept for learning has its own cost and its own access rules.}
+\end{frame}
+
+\begin{frame}{Read and explore}
+  \small
+  \begin{itemize}\setlength{\itemsep}{0cm}
+    \item \textbf{Read:} Operating Agents, \S14.2 to \S14.6; Checkpoints 14.1 to 14.4; Napkin Math 14.2 and 14.3 by hand.
+    \item Sigelman et al., ``Dapper,'' Google, 2010: tracing at production scale, and its sampling.
+    \item Wald, ``Sequential Tests of Statistical Hypotheses,'' 1945: the SPRT and its boundaries.
+    \item Kohavi, Tang, and Xu, \emph{Trustworthy Online Controlled Experiments}, 2020: assignment units and rollout pitfalls.
+    \item Beyer et al., \emph{Site Reliability Engineering}, 2016, ch. 15: the blameless postmortem.
+    \item OpenAI, ``Expanding on what we missed with sycophancy,'' 2025: a release postmortem in its authors' words.
+  \end{itemize}
+  \note{[1 min] [CORE] The chapter first, with its four checkpoints; work the two retention and canary notebooks by hand. Dapper introduced production tracing and measured its sampling overhead. Wald's paper derives the sequential test's boundaries and average sample number. Kohavi, Tang, and Xu is the practitioner's guide to controlled experiments in production, including why the unit of assignment matters. The SRE book's chapter 15 sets out the blameless postmortem. OpenAI's post is a rare public account of why a release passed its gates. FLEX: add the observability or rollout tool your course uses.}
+\end{frame}
+
+\begin{frame}[c]
+  \begin{columns}[c]
+    \begin{column}{0.34\textwidth}
+      \centering\safeimg[width=\textwidth,height=1.6cm,keepaspectratio]{thumb_next.pdf}
+    \end{column}
+    \begin{column}{0.62\textwidth}
+      {\small\textcolor{lightgray}{NEXT LECTURE \textbar{} TRAJECTORY CURATION}}\\[0.5cm]
+      {\LARGE\bfseries Is an accepted trajectory a good training example?}
+    \end{column}
+  \end{columns}
+  \note{[0.5 min] [CORE] Operation leaves a qualified record: verdicts in the accounting record, traces kept with their inclusion probabilities, and a postmortem that separated an interface defect from a model behavior and a runtime refusal. Lecture 15 asks what to learn from that record. Its first decision is triage: today's truncation failure needs an interface fix, and training on it would leave the adapter defect in place.}
+\end{frame}
+
+\end{document}
