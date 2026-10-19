@@ -96,3 +96,13 @@ requiring help, with participant consent. Use a comparable transfer question
 afterward and retain both successful and unsuccessful responses. Treat this as
 formative usability and comprehension evidence. A learning-gain claim would
 require a separately designed comparison study and analysis.
+
+Author review of the new static figures
+
+Open generated-figures.html for the 26 reviewed PNGs and their actual chapter
+lead-ins, captions, and following explanations. Decisions and notes remain in
+the reviewer's browser; Export my review downloads them without sending them.
+Author sign-off is separate from the recorded implementation reviews.
+
+Rebuild this focused gallery against an explicitly selected HTML run:
+  python3 books/_prototypes/vol1-web-animations/figure-plan/build-generated-figures.py --build-root books/_build/parallel/RUN
