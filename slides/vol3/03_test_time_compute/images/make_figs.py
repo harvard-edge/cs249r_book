@@ -50,6 +50,32 @@ V3 = {
 }
 
 
+class plain_log_ticks:
+    """Write log-axis ticks as plain numbers (1, 10, 100), not 10 with a
+    superscript, whose exponent is too small to read in a column."""
+
+    def __init__(self, every=1):
+        self.every = every  # label every n-th decade, so wide ranges do not collide
+
+    def __enter__(self):
+        from matplotlib.ticker import FuncFormatter, LogLocator, NullFormatter
+        every = self.every
+        self.save = sp.save
+
+        def save(fig, path):
+            for ax in fig.axes:
+                if ax.get_xscale() == "log":
+                    if every > 1:
+                        ax.xaxis.set_major_locator(LogLocator(base=10.0 ** every))
+                    ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:,.0f}"))
+                    ax.xaxis.set_minor_formatter(NullFormatter())
+            self.save(fig, path)
+        sp.save = save
+
+    def __exit__(self, *exc):
+        sp.save = self.save
+
+
 def tag(ax, text, x=0.0, y=-0.22):
     ax.text(x, y, text, transform=ax.transAxes, fontsize=9, color=C["neutral"],
             ha="left", va="top")
@@ -89,6 +115,10 @@ def hook():
             ("Run the targeted test", 40, "data", "40 ms")]
     sp.hbars_steps(str(out / "hook"), rows, "ms", log=True, size=(5.8, 1.7),
                    xlabel="Time (ms, log scale)")
+    # The same two bars drawn for a half-width column (the closing retrieval slide)
+    with plain_log_ticks(every=2):
+        sp.hbars(str(out / "hook_col.svg"), rows, "ms", log=True, size=(2.6, 0.9),
+                 xlabel="Time (ms, log scale)")
 
 
 # --------------------------------------------------------------------------
@@ -181,7 +211,7 @@ def passk():
                    xlabel="Pool holds a pass (%)")
     rows2 = [("Pool of 8", p["par_per_acc"], "compute", f"{p['par_per_acc']:.1f}"),
              ("Retry to a pass", p["seq_per_acc"], "data", f"{p['seq_per_acc']:.1f}")]
-    sp.hbars(str(out / "poolcost.svg"), rows2, "", log=False, size=(3.6, 1.1),
+    sp.hbars(str(out / "poolcost.svg"), rows2, "", log=False, size=(3.6, 0.75),
              xlabel="Candidates per accepted repair")
 
 
@@ -261,7 +291,9 @@ def precision():
         sp.save(fig, out / f"precision_step{k}.svg")
     rows = [("Incident loss", v["loss_attempt"], "danger", f"${v['loss_attempt']:.2f}"),
             ("Output bill", v["out_bill"], "neutral", f"${v['out_bill']:.2f}")]
-    sp.hbars(str(out / "loss.svg"), rows, "", log=True, size=(3.4, 1.1), xlabel="Dollars per attempt (log)")
+    with plain_log_ticks():
+        sp.hbars(str(out / "loss.svg"), rows, "", log=True, size=(3.4, 0.95),
+                 xlabel="Dollars per attempt (log)")
 
 
 # --------------------------------------------------------------------------

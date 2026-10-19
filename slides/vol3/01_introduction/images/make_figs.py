@@ -173,24 +173,24 @@ def stochastic():
     for k in (1, 2):
         s = Svg(640, 470)
         s.box(6, 6, 628, 330, NEUTRAL, rx=8, sw=1.5)
-        s.text(20, 32, "Live loop: one trajectory", 20, "bold", GRAY)
-        role_box(s, 20, 44, 270, 74, "Model", "≈ processor", MODEL)
-        role_box(s, 350, 44, 270, 74, "Agent memory", "≈ memory hierarchy", MEMORY)
-        role_box(s, 20, 156, 600, 66, "Agent runtime", "≈ operating system", RUNTIME)
-        role_box(s, 20, 258, 270, 70, "Tool use", "≈ input and output", TOOLS)
+        s.text(20, 32, "Live loop: one trajectory", 21, "bold", GRAY)
+        role_box(s, 20, 44, 270, 74, "Model", "≈ processor", MODEL, sub_size=20)
+        role_box(s, 350, 44, 270, 74, "Agent memory", "≈ memory hierarchy", MEMORY, sub_size=20)
+        role_box(s, 20, 156, 600, 66, "Agent runtime", "≈ operating system", RUNTIME, sub_size=20)
+        role_box(s, 20, 258, 270, 70, "Tool use", "≈ input and output", TOOLS, sub_size=20)
         s.box(350, 258, 270, 70, NEUTRAL, dash="6 5")
         s.text(485, 288, "Environment", 21, "bold", INK, "middle")
-        s.text(485, 312, "repositories, services", 19, color=GRAY, anchor="middle")
-        s.line(110, 118, 110, 154, GRAY); s.text(118, 142, "proposal", 19, color=GRAY)
-        s.line(220, 156, 220, 120, GRAY); s.text(228, 142, "context", 19, color=GRAY)
+        s.text(485, 312, "repositories, services", 20, color=GRAY, anchor="middle")
+        s.line(110, 118, 110, 154, GRAY); s.text(118, 142, "proposal", 20, color=GRAY)
+        s.line(220, 156, 220, 120, GRAY); s.text(228, 142, "context", 20, color=GRAY)
         s.line(450, 118, 450, 154, GRAY); s.line(540, 156, 540, 120, GRAY)
         s.line(110, 222, 110, 256, GRAY); s.line(220, 258, 220, 224, GRAY)
-        s.text(118, 246, "call", 19, color=GRAY); s.text(228, 246, "result", 19, color=GRAY)
+        s.text(118, 246, "call", 20, color=GRAY); s.text(228, 246, "result", 20, color=GRAY)
         s.line(290, 284, 348, 284, GRAY); s.line(348, 306, 292, 306, GRAY)
         s.box(6, 356, 628, 108, NEUTRAL, rx=8, sw=1.5, dash="6 5")
-        s.text(20, 380, "Across tasks", 20, "bold", GRAY)
-        role_box(s, 20, 388, 290, 66, "Learning", "≈ recompiling", MODEL, size=21)
-        role_box(s, 330, 388, 290, 66, "Agents at scale", "≈ scale-out", NEUTRAL, size=21)
+        s.text(20, 380, "Across tasks", 21, "bold", GRAY)
+        role_box(s, 20, 388, 290, 66, "Learning", "≈ recompiling", MODEL, size=21, sub_size=20)
+        role_box(s, 330, 388, 290, 66, "Agents at scale", "≈ scale-out", NEUTRAL, size=21, sub_size=20)
         if k == 2:
             for x, y, w, h in ((14, 38, 282, 86),):
                 s.box(x, y, w, h, ("none", FAULT[1], ""), rx=8, sw=4)
@@ -488,12 +488,12 @@ def cost_bars():
     rows = [("Baseline", c["base"], "neutral"), ("Half token price", c["price_cut"], "memory"),
             ("Acceptance 60%", c["better"], "data")]
     for k in (1, 2):
-        fig, ax = plt.subplots(figsize=(3.3, 2.0))
+        fig, ax = plt.subplots(figsize=(3.3, 1.5))
         for i, (lab, v, ck) in enumerate(rows):
             y = 2 - i
             shown = i == 0 or k == 2
             ax.barh(y, v, color=C[ck], height=0.6, alpha=1.0 if shown else 0.0)
-            ax.text(-0.15, y, lab, ha="right", va="center", fontsize=12, fontweight="bold")
+            ax.text(-0.15, y, lab, ha="right", va="center", fontsize=13, fontweight="bold")
             txt = f"${v:.2f}" if shown else "?"
             ax.text((v if shown else 0) + 0.12, y, txt, va="center", fontsize=13, fontweight="bold",
                     color=C[ck] if shown else C["danger"])

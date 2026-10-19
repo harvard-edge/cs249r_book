@@ -29,6 +29,7 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 sys.path.insert(0, str(HERE))
+from matplotlib.ticker import FuncFormatter  # noqa: E402
 import slideplot as sp  # noqa: E402
 import calcs  # noqa: E402
 from matplotlib.patches import Rectangle  # noqa: E402
@@ -170,6 +171,33 @@ def hook():
         ax.set_xticks([0, 39, 120, 128])
         ax.set_xlabel("Thousand tokens in one 128K-token request (illustrative)")
         sp.save(fig, out / f"hook_step{k}.svg")
+    # The final state again, drawn for a narrow column (the retrieval slide);
+    # the turn-21 verdict is set as slide text beside it.
+    fig, ax = plt.subplots(figsize=(2.4, 0.9))
+    x = 0
+    for lab, v, col in fixed:
+        ax.barh(0, v / 1000, left=x / 1000, color=col, height=0.55, edgecolor="white")
+        x += v
+    ax.barh(0, calcs.RESERVE / 1000, left=limit / 1000, height=0.55, color="white",
+            edgecolor=C["neutral"], hatch="///", lw=1)
+    for t in range(b["overflow_turn"]):
+        left = start_obs + t * calcs.OBS_TURN
+        over = left + calcs.OBS_TURN > limit
+        ax.barh(0, calcs.OBS_TURN / 1000, left=left / 1000, height=0.55,
+                color=C["danger"] if over else "#fbbf24", edgecolor="white", lw=0.6)
+    ax.plot([limit / 1000] * 2, [-0.36, 0.36], color=C["danger"], lw=1.8, ls="--")
+    ax.text(0, 0.36, "Instructions\nand tools 15K", ha="left", va="bottom", fontsize=11,
+            color=C["text"])
+    ax.text(128, 0.36, "Output\nreserve 8K", ha="right", va="bottom", fontsize=11,
+            color=C["neutral"])
+    ax.text(15, -0.34, "Task state 24K", ha="left", va="top", fontsize=11, color=C["text"])
+    ax.set_xlim(0, 128)
+    ax.set_ylim(-0.75, 0.4)
+    ax.set_yticks([])
+    ax.spines["left"].set_visible(False)
+    ax.set_xticks([0, 39, 120])
+    ax.set_xlabel("Thousand tokens in one\n128K-token request (illustrative)")
+    sp.save(fig, out / "hook_col.svg")
 
 
 def recall_fig():
@@ -367,6 +395,8 @@ def dilution():
                         arrowprops=dict(arrowstyle="->", color=col, lw=1.3))
     ax.set_xscale("log")
     ax.minorticks_off()
+    # Plain tick labels: a 10 with a superscript exponent is too small on the slide.
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v / 1000:,.0f}K" if v >= 1000 else f"{v:,.0f}"))
     ax.set_xlim(10, 2e5)
     ax.set_ylim(0, 108)
     ax.set_xlabel("Keys in the request (log scale)")

@@ -422,6 +422,20 @@ save(fig, "mask.svg")
 # =============================================================================
 # 12. Measured on a laptop and in a real trace (run; Azure 2023 code trace)
 # =============================================================================
+# Log ticks as plain numbers (1, 10, 100): a 10 with a superscript exponent
+# is too small to read in a half-width column.
+_sp_save = sp.save
+
+
+def _plain_ticks_save(fig, path):
+    from matplotlib.ticker import FuncFormatter, NullFormatter
+    for ax in fig.axes:
+        ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:,.0f}"))
+        ax.xaxis.set_minor_formatter(NullFormatter())
+    _sp_save(fig, path)
+
+
+sp.save = _plain_ticks_save
 tm = RUN["timing"]
 pre_ms = tm["prefill_s_median"] / tm["prompt_tokens"] * 1e3
 dec_ms = tm["decode_s_per_token_median"] * 1e3
@@ -435,6 +449,7 @@ gen = [int(r["GeneratedTokens"]) for r in rows]
 sp.hbars(out / "azure.svg", [("prompt", statistics.median(ctx), "memory", f"{statistics.median(ctx):,.0f}"),
                              ("output", statistics.median(gen), "compute", f"{statistics.median(gen):,.0f}")],
          "tokens", log=True, size=(3.6, 1.9), xlabel="median tokens per request (log)")
+sp.save = _sp_save
 
 
 # =============================================================================

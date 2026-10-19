@@ -490,6 +490,25 @@ def generations_fig(path):
 generations_fig(out / "generations.svg")
 
 # -------------------------------------------------- exclusion vs rebuild
+# Log ticks are written as times (1 µs, 1 ms, 1 s): a 10 with a superscript
+# exponent is too small to read on the slide.
+_save = sp.save
+
+
+def _time_ticks_save(fig, path):
+    from matplotlib.ticker import FixedLocator, NullFormatter
+    names = {1e-6: "1 µs", 1e-3: "1 ms", 1.0: "1 s"}
+    for ax in fig.axes:
+        lo, hi = ax.get_xlim()
+        ticks = [t for t in sorted(names) if lo <= t <= hi]
+        ax.xaxis.set_major_locator(FixedLocator(ticks))
+        ax.set_xticklabels([names[t] for t in ticks])
+        ax.xaxis.set_minor_locator(FixedLocator([10.0 ** e for e in range(-7, 2)]))
+        ax.xaxis.set_minor_formatter(NullFormatter())
+    _save(fig, path)
+
+
+sp.save = _time_ticks_save
 sp.hbars(out / "exclusion.svg", [
     ("Exclude 8 entries", K.excl_write, "data", f"{K.excl_write * 1e6:.1f} µs"),
     ("Check 50 candidates", K.excl_query, "data", f"{K.excl_query * 1e6:.1f} µs"),
@@ -498,7 +517,8 @@ sp.hbars(out / "exclusion.svg", [
      f"{K.sync_remote_batch * 1e3:.0f} ms"),
     ("Re-index, remote per file", K.sync_remote_serial, "danger",
      f"{K.sync_remote_serial:.2f} s"),
-], "", log=True, size=(5.8, 2.7), xlabel="Added work per edit, seconds (log; stipulated costs)")
+], "", log=True, size=(5.8, 2.7), xlabel="Added work per edit (log; stipulated costs)")
+sp.save = _save
 
 # ------------------------------------------------ Liu et al. position curve
 fig, ax = plt.subplots(figsize=(5.8, 2.4))

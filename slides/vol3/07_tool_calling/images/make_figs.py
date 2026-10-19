@@ -243,6 +243,25 @@ def incident():
             s.text(20, 390, "The first private read is read-only, and a per-call grant check refuses it.",
                    19, GRAY, anchor="start", italic=True)
         s.save(f"incident_step{k}")
+    # The refused chain again, stacked for a half-width column (the retrieval slide)
+    s = Svg(640, 400)
+    s.text(20, 32, "Task: address the issues in one public repo", 22, INK, anchor="start",
+           weight="bold")
+    for i, (n, name, target, role) in enumerate(calls):
+        y = 52 + i * 116
+        s.rect(20, y, 280, 96, "white" if i == 0 else role)
+        s.text(160, y + 30, name, 21, INK, weight="bold", mono=True)
+        s.text(160, y + 57, target, 20, GRAY)
+        s.text(160, y + 83, "schema ok, token ok", 20, ROLE["memory"][2])
+        if i < 2:
+            s.arrow(160, y + 96, 160, y + 114, "gray")
+    s.text(320, 108, "reads the attacker's issue", 20, GRAY, anchor="start")
+    s.cross(300, 168, 14)
+    s.box(360, 172, 270, 96, "fault", "Grant check refuses", "target not in the task",
+          fs=21, sfs=20)
+    s.arrow(360, 220, 304, 220, "red")
+    s.text(320, 342, "never dispatched", 20, ROLE["fault"][2], anchor="start")
+    s.save("incident_col")
 
 
 # ------------------------------------------------ 5. three worlds
@@ -340,33 +359,35 @@ def delayed():
 
 # -------------------------------------------------- 8. operation ID
 def opid():
+    # Drawn on the slot's own shape (about 2.9 to 1), so no label falls below the floor.
     for k in (1, 2):
-        s = Svg(900, 440)
-        s.rect(8, 8, 300, 424, "sys", rx=12, fill="#faf5ff")
-        s.text(24, 38, "Runtime", 22, ROLE["sys"][2], anchor="start", weight="bold")
-        s.box(28, 56, 260, 74, "sys", "Admit intent", "op ID made once", fs=22, sfs=18)
-        s.arrow(158, 130, 158, 156, "violet")
-        s.box(28, 158, 260, 74, "sys", "Attempt k", "same op ID, new attempt ID", fs=22, sfs=17)
-        s.arrow(158, 232, 158, 258, "red", dash=True)
-        s.box(28, 260, 260, 74, "fault", "Timeout", "effect unknown", fs=22, sfs=18)
-        s.arrow(0, 0, 0, 0, "violet", path="M28,297 L16,297 L16,195 L26,195")
-        s.arrow(158, 334, 158, 352, "red", dash=True)
-        s.box(28, 354, 260, 70, "white", "Unresolved", "attempts used up", fs=21, sfs=17,
+        s = Svg(1100, 380)
+        s.rect(8, 6, 340, 368, "sys", rx=12, fill="#faf5ff")
+        s.text(24, 34, "Runtime", 22, ROLE["sys"][2], anchor="start", weight="bold")
+        s.box(28, 48, 300, 64, "sys", "Admit intent", "op ID made once", fs=22, sfs=20)
+        s.arrow(178, 112, 178, 132, "violet")
+        s.box(28, 134, 300, 64, "sys", "Attempt k", "same op ID, new attempt ID", fs=22, sfs=20)
+        s.arrow(178, 198, 178, 218, "red", dash=True)
+        s.box(28, 220, 300, 64, "fault", "Timeout", "effect unknown", fs=22, sfs=20)
+        s.arrow(0, 0, 0, 0, "violet", path="M28,252 L16,252 L16,166 L26,166")
+        s.arrow(178, 284, 178, 304, "red", dash=True)
+        s.box(28, 306, 300, 62, "white", "Unresolved", "attempts used up", fs=22, sfs=20,
               dash=True)
         if k == 2:
-            s.rect(332, 8, 560, 424, "tool", rx=12, fill="#fffbeb")
-            s.text(348, 38, "Endpoint", 22, ROLE["tool"][2], anchor="start", weight="bold")
-            s.arrow(288, 195, 358, 195, "violet")
-            s.box(360, 150, 200, 92, "tool", "Look up op ID", "caller, scope, args", fs=21,
-                  sfs=17)
-            outs = [("Completed", "return kept result", "memory", 60),
-                    ("Still running", "return pending", "struct", 150),
-                    ("Args differ", "reject the reuse", "fault", 240),
-                    ("Not found", "execute + record", "tool", 330)]
+            s.rect(372, 6, 720, 368, "tool", rx=12, fill="#fffbeb")
+            s.text(388, 34, "Endpoint", 22, ROLE["tool"][2], anchor="start", weight="bold")
+            s.arrow(328, 166, 398, 166, "violet")
+            s.box(400, 126, 250, 80, "tool", "Look up op ID", "caller, scope, args", fs=22,
+                  sfs=20)
+            outs = [("Completed", "return kept result", "memory", 48),
+                    ("Still running", "return pending", "struct", 128),
+                    ("Args differ", "reject the reuse", "fault", 208),
+                    ("Not found", "execute + record", "tool", 288)]
             for t, sub, role, y in outs:
-                s.arrow(0, 0, 0, 0, "gray", path=f"M560,196 L590,196 L590,{y + 36} L612,{y + 36}")
-                s.box(614, y, 262, 72, role, t, sub, fs=21, sfs=17)
-            s.text(745, 425, "effect + record: one transaction", 16, GRAY)
+                s.arrow(0, 0, 0, 0, "gray", path=f"M650,166 L680,166 L680,{y + 32} L708,{y + 32}")
+                s.box(710, y, 362, 64, role, t, sub, fs=22, sfs=20)
+            s.text(525, 330, "effect + record:", 20, GRAY)
+            s.text(525, 356, "one transaction", 20, GRAY)
         s.save(f"opid_step{k}")
 
 

@@ -346,7 +346,7 @@ def cpa_bars():
         ("Baseline", c["base"], "neutral", f"${c['base']:.2f}"),
         ("Halve token price", c["cheaper"], "compute", f"${c['cheaper']:.2f}"),
         ("Acceptance 40% to 60%", c["better"], "data", f"${c['better']:.2f}"),
-    ], "$", log=False, xlabel="Cost per accepted task ($, illustrative)", size=(5.8, 2.1))
+    ], "$", log=False, xlabel="Cost per accepted task ($, illustrative)", size=(3.0, 1.5))
 
 
 if __name__ == "__main__":
