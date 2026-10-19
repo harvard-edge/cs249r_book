@@ -10,19 +10,21 @@ Every value is sourced. "Chapter" means the rendered Data Selection chapter.
   - GPT-2 on WebText: about 10 billion unique tokens, 30 billion asked for by
     the compute-optimal fit, about 167 billion processed, about 17 passes,
     4.4 days and 590 kWh on one eight-H100 machine (chapter, Sec. 9.1).
-  - Collapse curve: the chapter's illustrative scenario (Sec. 9.10 and its
-    margin figure), 95 to 78 percent over five recursive generations; the
-    middle points are read from the book's margin figure. Mechanism:
-    Shumailov et al. 2024. Labeled illustrative on the plot.
   - Tokens per parameter: GPT-3 about 1.7 (Brown et al. 2020), Llama 2 70B
     about 28.6 (Touvron et al. 2023), Chinchilla reference about 20
-    (Hoffmann et al. 2022), GPT-2 on WebText 6.7 (chapter, Sec. 9.2.3).
+    (Hoffmann et al. 2022), GPT-2 XL 6.7 unique (WebText) and 111 training
+    tokens per parameter (chapter, Sec. 9.1 and 9.2.3); all computed in
+    calcs.py.
   - Selection inequality scoreboard: Example 9.2 and Sec. 9.7.1. Baseline
     211 min; Option A saves 188.8 min after 42 s of scoring; Option B saves
     189.1 min after 18 s; rescoring every epoch costs 70 min plus 21 min.
+    Percentages computed in calcs.py from these minutes (89.5 and 89.6;
+    the chapter prints 89.7 and 89.9 from an unrounded baseline).
   - Deduplication: near-duplicate shares 3.04 percent (C4) and 13.63 percent
-    (RealNews), Lee et al. 2022, applied to GPT-2's 4.4-day (105.6 h),
-    590 kWh run (chapter, Sec. 9.3.2).
+    (RealNews), Lee et al. 2022, applied to GPT-2's 105-hour, 590 kWh run
+    (chapter, Sec. 9.3.2; hours computed in calcs.py).
+  - MinHash page text: the 61-word C4 sentence Lee et al. 2022 found 61,036
+    times (arXiv:2107.06499v2, footnote 1).
   - Coverage floor: 1M examples, 0.1 percent rare (1,000), unstratified
     10 percent coreset keeps about 100, illustrative floor of 150 (chapter,
     Sec. 9.3.4 and 9.10).
@@ -38,7 +40,7 @@ Every value is sourced. "Chapter" means the rendered Data Selection chapter.
     90 epochs from 6.1 h to 3.2 h at e = 2 (Napkin Math 9.5).
   - Cost breakdown: Napkin Math 9.6, an illustrative scenario, recomputed at
     the chapter's 1.28M images and 148 GB: $50,000 acquisition, $64,000
-    labels, $35.52 storage, $421 compute (105.3 GPU-h at $4). ROI of a
+    labels, $35.52 storage, $421 compute (105 GPU-h at $4). ROI of a
     $55,000 deduplication pipeline saving $10,000 per run (tables 13, 14).
 
 Run from this folder with the MLSysBook venv (it imports mlsysim):
@@ -52,7 +54,9 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import slideplot as sp  # noqa: E402
+import calcs  # noqa: E402
 
 plt = sp.plt
 C = sp.C
@@ -116,83 +120,14 @@ def data_wall():
 # 2. GPT-2 on WebText: unique, compute-optimal, processed tokens
 # -----------------------------------------------------------------------------
 def gpt2_tokens():
+    g = calcs.gpt2()
+    uniq, opt, done = calcs.WEBTEXT_TOKENS / 1e9, g["optimal"] / 1e9, g["tokens"] / 1e9
     sp.hbars(out / "gpt2_tokens.svg", [
-        ("Unique in WebText", 10, "data", "10 B"),
-        ("Compute-optimal", 30, "neutral", "30 B"),
-        ("Processed in training", 167, "compute", "167 B: 17 passes"),
+        ("Unique in WebText", uniq, "data", f"{uniq:.0f} B"),
+        ("Compute-optimal", opt, "neutral", f"{opt:.0f} B"),
+        ("Processed in training", done, "compute",
+         f"{done:.0f} B: {g['passes']:.0f} passes"),
     ], "B", log=False, xlabel="Tokens (billions)", size=(4.2, 1.7))
-
-
-# -----------------------------------------------------------------------------
-# 3. The collapse curve (chapter's illustrative scenario)
-# -----------------------------------------------------------------------------
-GENS = [1, 2, 3, 4, 5]
-ACC = [95, 92, 88, 83, 78]
-
-
-def collapse(size=(5.8, 2.3), stem="collapse", label_note=True, steps=(1, 2), font=1.0):
-    for k in steps:
-        fig, ax = plt.subplots(figsize=size)
-        n = 1 if k == 1 else 5
-        ax.plot(GENS[:n], ACC[:n], color=C["danger"], lw=3, marker="o", ms=9)
-        ax.text(1.12, 95.6, "95%", color=C["danger"], fontsize=13 * font, fontweight="bold")
-        if k == 2:
-            ax.text(4.85, 78.0, "78%", color=C["danger"], fontsize=13 * font, fontweight="bold",
-                    ha="right", va="center")
-            if label_note:
-                ax.text(3.0, 94.5, "−17 points in five generations", color=C["danger"],
-                        fontsize=12, fontweight="bold", ha="left")
-        ax.set_xlim(0.7, 5.3)
-        ax.set_ylim(74, 99)
-        ax.set_xticks(GENS)
-        ax.set_xticklabels([f"Gen {g}" for g in GENS] if label_note else [str(g) for g in GENS])
-        ax.tick_params(labelsize=11 * font)
-        ax.set_ylabel("Accuracy (%)", fontsize=11 * font)
-        if not label_note:
-            ax.set_xlabel("Generation", fontsize=11 * font)
-        ax.grid(axis="y", color=C["grid"], lw=0.6)
-        if label_note:
-            note(ax, "Illustrative scenario from the chapter, not a measurement", y=-0.34)
-        sp.save(fig, out / f"{stem}_step{k}.svg")
-
-
-# -----------------------------------------------------------------------------
-# 3b. Learning curves: efficient selection against random sampling
-# -----------------------------------------------------------------------------
-def ppd_curve():
-    """Slide variant of the chapter's figure 3 (illustrative curves): the
-    efficient curve plateaus near 25 percent of the data, random sampling
-    climbs across the whole budget, and the gap is read at a 20 percent
-    budget. The curve shapes reproduce the book figure; no value on them is
-    a measurement, and none is printed."""
-    x = np.linspace(0, 100, 400)
-    eff = 95 * (1 - np.exp(-x / 6.5))
-    rnd = 95 * (1 - np.exp(-x / 25))
-    for k in (1, 2):
-        fig, ax = plt.subplots(figsize=(5.8, 2.7))
-        ax.plot(x, rnd, color=C["neutral"], lw=3, ls="--")
-        ax.plot(x, eff, color=C["memory"], lw=3.5)
-        ax.text(62, 42, "Random sampling", color=C["neutral"], fontsize=13, fontweight="bold")
-        ax.text(30, 99, "Efficient selection", color=C["memory"], fontsize=13, fontweight="bold")
-        if k == 2:
-            y20e, y20r = 95 * (1 - np.exp(-20 / 6.5)), 95 * (1 - np.exp(-20 / 25))
-            ax.annotate("", xy=(20, y20r + 1), xytext=(20, y20e - 1),
-                        arrowprops=dict(arrowstyle="<->", color=C["danger"], lw=2))
-            ax.text(21.5, 34, "same data budget:\naccuracy gap", color=C["danger"],
-                    fontsize=12, fontweight="bold", va="center")
-            x90r = -25 * np.log(1 - 90 / 95)
-            x90e = -6.5 * np.log(1 - 90 / 95)
-            ax.annotate("", xy=(x90r - 1, 90), xytext=(x90e + 1, 90),
-                        arrowprops=dict(arrowstyle="<->", color=C["data"], lw=2))
-            ax.text(x90r, 80, "same target:\ndata saved", color=C["data"],
-                    fontsize=12, fontweight="bold", ha="center", va="top")
-        ax.set_xlim(0, 100)
-        ax.set_ylim(0, 108)
-        ax.set_yticks([0, 50, 100])
-        ax.set_xlabel("Dataset size (% of total)")
-        ax.set_ylabel("Accuracy (%)")
-        ax.grid(axis="y", color=C["grid"], lw=0.6)
-        sp.save(fig, out / f"ppd_curve_step{k}.svg")
 
 
 # -----------------------------------------------------------------------------
@@ -202,7 +137,8 @@ def warmup():
     """Linear pacing (chapter Sec. 9.4.1): epoch j of a W-epoch warmup serves
     the easiest j/W of the D samples, so the warmup serves D(W+1)/2 in place
     of W*D. W = 10 is an illustrative choice: 5.5 D of 10 D."""
-    W = 10
+    W = calcs.W
+    wv = calcs.warmup()
     j = np.arange(1, W + 1)
     frac = j / W
     assert abs(frac.sum() - (W + 1) / 2) < 1e-9
@@ -212,7 +148,7 @@ def warmup():
     post = np.arange(W + 1, W + 4)
     ax.bar(post, np.ones(3), color=C["neutral_l"], edgecolor=C["neutral"], lw=1, width=0.75)
     ax.text(W + 2, 1.06, "full data", ha="center", fontsize=11, color=C["neutral"])
-    ax.text(1.0, 1.24, "Warmup serves 5.5 D samples in place of 10 D",
+    ax.text(1.0, 1.24, f"Warmup serves {wv['served']:g} D samples in place of {wv['full']} D",
             fontsize=13, fontweight="bold", color=C["data"])
     ax.text(1.0, 1.10, "dashed: what full-data epochs would serve", fontsize=11,
             color=C["neutral"])
@@ -222,7 +158,7 @@ def warmup():
     ax.set_ylim(0, 1.38)
     ax.set_yticks([0, 0.5, 1.0])
     ax.set_yticklabels(["0", "D/2", "D"])
-    ax.set_xlabel("Epoch (warmup W = 10, illustrative)")
+    ax.set_xlabel(f"Epoch (warmup W = {W}, illustrative)")
     ax.set_ylabel("Samples served")
     ax.grid(axis="y", color=C["grid"], lw=0.6)
     ax.set_axisbelow(True)
@@ -233,31 +169,39 @@ def warmup():
 # 4. Tokens per parameter
 # -----------------------------------------------------------------------------
 def tokens_per_param():
-    rows = [("GPT-3 (175 B)", 1.7, "neutral", "1.7"),
-            ("GPT-2 XL on WebText", 6.7, "danger", "6.7"),
-            ("Llama 2 70B", 28.6, "neutral", "28.6")]
+    """GPT-2 XL appears twice: its unique tokens (WebText) and its training
+    tokens (the run repeated WebText). Chinchilla's reference of about 20
+    counts training tokens, each seen about once in that study."""
+    t = calcs.tokens_per_param()
+    rows = [("GPT-3 (175 B)", t["gpt3"], "neutral", f"{t['gpt3']:.1f}"),
+            ("GPT-2 XL, unique in WebText", t["gpt2_unique"], "danger",
+             f"{t['gpt2_unique']:.1f}"),
+            ("GPT-2 XL, training tokens", t["gpt2_trained"], "compute",
+             f"{t['gpt2_trained']:.0f}: WebText {calcs.gpt2()['passes']:.0f} times"),
+            ("Llama 2 70B", t["llama2"], "neutral", f"{t['llama2']:.1f}")]
+    n = len(rows)
     for k in (1, 2):
-        fig, ax = plt.subplots(figsize=(5.8, 2.1))
+        fig, ax = plt.subplots(figsize=(5.8, 2.4))
         for i, (lab, v, ck, txt) in enumerate(rows):
-            y = 2 - i
+            y = n - 1 - i
             col = C[ck] if (k == 2 or ck == "neutral") else C["neutral"]
             ax.barh(y, v, color=col, height=0.6)
             ax.text(-0.01, y, lab, transform=ax.get_yaxis_transform(), ha="right",
                     va="center", fontsize=13, fontweight="bold", color=C["text"])
-            ax.text(v + 0.4, y, txt, va="center", fontsize=13, fontweight="bold", color=col)
+            ax.text(v + 1.5, y, txt, va="center", fontsize=13, fontweight="bold", color=col)
         alpha = 1.0 if k == 2 else 0.0
-        ax.axvline(20, color=C["data"], lw=2, ls="--", alpha=alpha)
-        ax.text(20.4, 2.45, "Chinchilla reference: about 20", color=C["data"], fontsize=11,
-                fontweight="bold", alpha=alpha, va="bottom")
-        ax.text(20.8, 1.0, "6.7 is a third of 20", color=C["danger"], fontsize=12,
-                fontweight="bold", va="center", alpha=alpha)
+        ax.axvline(calcs.CHINCHILLA_TPP, color=C["data"], lw=2, ls="--", alpha=alpha)
+        ax.text(calcs.CHINCHILLA_TPP + 1.5, n - 0.55, "Chinchilla reference: about 20",
+                color=C["data"], fontsize=11, fontweight="bold", alpha=alpha, va="bottom")
+        ax.text(calcs.CHINCHILLA_TPP + 12, 2.0, "unique: a third of 20", color=C["danger"],
+                fontsize=12, fontweight="bold", va="center", alpha=alpha)
         ax.set_yticks([])
-        ax.set_xlim(0, 36)
-        ax.set_ylim(-0.5, 2.9)
+        ax.set_xlim(0, 150)
+        ax.set_ylim(-0.5, n - 0.1)
         ax.spines["left"].set_visible(False)
         ax.grid(axis="x", color=C["grid"], lw=0.6)
         ax.set_axisbelow(True)
-        ax.set_xlabel("Training tokens per parameter")
+        ax.set_xlabel("Tokens per parameter")
         sp.save(fig, out / f"tokens_per_param_step{k}.svg")
 
 
@@ -265,10 +209,16 @@ def tokens_per_param():
 # 5. Selection inequality scoreboard (stacked: scoring + training)
 # -----------------------------------------------------------------------------
 def scoreboard():
-    rows = [("Full data", 0.0, 211.0, "211 min"),
-            ("Coreset, target scores once", 0.7, 211 - 188.8 - 0.7, "saves 89.7%"),
-            ("Coreset, proxy scores once", 0.3, 211 - 189.1 - 0.3, "saves 89.9%"),
-            ("Coreset, rescore every epoch", 70.0, 21.0, "70 + 21 min: saves 57%")]
+    v = calcs.scoreboard()
+    base, sa, sb = calcs.BASE_MIN, calcs.SCORE_A_S / 60, calcs.SCORE_B_S / 60
+    rows = [("Full data", 0.0, base, f"{base:.0f} min"),
+            ("Coreset, target scores once", sa, base - calcs.SAVE_A_MIN - sa,
+             f"saves {v['save_a_pct']:.1f}%"),
+            ("Coreset, proxy scores once", sb, base - calcs.SAVE_B_MIN - sb,
+             f"saves {v['save_b_pct']:.1f}%"),
+            ("Coreset, rescore every epoch", v["rescore_min"], v["sub_min"],
+             f"{v['rescore_min']:.0f} + {v['sub_min']:.0f} min: saves "
+             f"{v['rescore_save_pct']:.0f}%")]
     show_upto = {1: 1, 2: 3, 3: 4}
     for k in (1, 2, 3):
         fig, ax = plt.subplots(figsize=(5.8, 2.4))
@@ -302,9 +252,10 @@ def scoreboard():
 # 6. Deduplication returns hours of GPT-2's run
 # -----------------------------------------------------------------------------
 def dedup_hours():
-    run_h, run_kwh = 4.4 * 24, 590
-    rows = [("C4: 3.04% near-duplicates", 3.04),
-            ("RealNews: 13.63% near-duplicates", 13.63)]
+    g = calcs.gpt2()
+    run_h, run_kwh = g["hours"], g["kwh"]
+    rows = [(f"C4: {calcs.DUP_C4}% near-duplicates", calcs.DUP_C4),
+            (f"RealNews: {calcs.DUP_REALNEWS}% near-duplicates", calcs.DUP_REALNEWS)]
     for k in (1, 2):
         fig, ax = plt.subplots(figsize=(5.8, 1.8))
         for i, (lab, pct) in enumerate(rows):
@@ -323,7 +274,7 @@ def dedup_hours():
         ax.spines["left"].set_visible(False)
         ax.grid(axis="x", color=C["grid"], lw=0.6)
         ax.set_axisbelow(True)
-        ax.set_xlabel("Hours of GPT-2's 106-hour run saved")
+        ax.set_xlabel(f"Hours of GPT-2's {run_h:.0f}-hour run saved")
         sp.save(fig, out / f"dedup_hours_step{k}.svg")
 
 
@@ -331,21 +282,24 @@ def dedup_hours():
 # 7. Coverage floor
 # -----------------------------------------------------------------------------
 def coverage():
-    rows = [("Rare examples in the 1M pool", 1000, "neutral", "1,000"),
-            ("Kept by an unstratified 10% coreset", 100, "danger", "about 100"),
-            ("Kept with the floor reserved first", 150, "data", "150")]
+    v = calcs.coverage()
+    fl = calcs.FLOOR
+    rows = [("Rare examples in the 1M pool", v["rare"], "neutral", f"{v['rare']:,.0f}"),
+            ("Kept by an unstratified 10% coreset", v["kept"], "danger",
+             f"about {v['kept']:.0f}"),
+            ("Kept with the floor reserved first", fl, "data", f"{fl}")]
     for k in (1, 2, 3):
         fig, ax = plt.subplots(figsize=(5.8, 2.1))
-        for i, (lab, v, ck, txt) in enumerate(rows):
+        for i, (lab, val, ck, txt) in enumerate(rows):
             y = 2 - i
             a = 1.0 if i < k else 0.0
-            ax.barh(y, v, color=C[ck], height=0.6, alpha=a)
+            ax.barh(y, val, color=C[ck], height=0.6, alpha=a)
             ax.text(-0.01, y, lab, transform=ax.get_yaxis_transform(), ha="right",
                     va="center", fontsize=13, fontweight="bold", color=C["text"])
-            ax.text(max(v, 150) + 25, y, txt, va="center", fontsize=13,
+            ax.text(max(val, fl) + 25, y, txt, va="center", fontsize=13,
                     fontweight="bold", color=C[ck], alpha=a)
-        ax.axvline(150, color=C["data"], lw=1.5, ls="--")
-        ax.text(150, 2.45, " floor: 150 (illustrative)", color=C["data"], fontsize=11,
+        ax.axvline(fl, color=C["data"], lw=1.5, ls="--")
+        ax.text(fl, 2.45, f" floor: {fl} (illustrative)", color=C["data"], fontsize=11,
                 fontweight="bold", va="bottom")
         ax.set_yticks([])
         ax.set_xlim(0, 1300)
@@ -383,7 +337,8 @@ def fixmatch():
 # 10. Data echoing
 # -----------------------------------------------------------------------------
 def echo():
-    r = 10100 / 5250
+    r = calcs.echo()["r"]
+    h = calcs.echo()
     e = np.linspace(1, 3.2, 200)
     for k in (1, 2, 3):
         fig, ax = plt.subplots(figsize=(5.8, 2.5))
@@ -392,7 +347,7 @@ def echo():
             ax.axvline(r, color=C["neutral"], lw=1, ls="--")
             ax.text(r + 0.04, 60, f"e = r = {r:.2f}", color=C["neutral"], fontsize=11)
             ax.plot([2], [100], "o", ms=11, color=C["compute"], mec="white", mew=1.5, zorder=5)
-            ax.annotate("e = 2: 90 epochs, 6.1 h to 3.2 h", (2, 100), xytext=(8, -26),
+            ax.annotate(f"e = 2: 90 epochs, {h['h_no']:.1f} h to {h['h_e2']:.1f} h", (2, 100), xytext=(8, -26),
                         textcoords="offset points", fontsize=12, fontweight="bold",
                         color=C["compute"])
         if k == 3:
@@ -400,7 +355,7 @@ def echo():
             ax.text(2.35, 103, "host twice as fast (r = 0.5)", color=C["memory"],
                     fontsize=11, fontweight="bold")
         ax.plot([1], [100 / r], "o", ms=11, color=C["danger"], mec="white", mew=1.5, zorder=5)
-        ax.annotate("no echo: busy 52%", (1, 100 / r), xytext=(10, -4),
+        ax.annotate(f"no echo: busy {h['busy']:.0f}%", (1, 100 / r), xytext=(10, -4),
                     textcoords="offset points", fontsize=12, fontweight="bold",
                     color=C["danger"])
         ax.set_xlim(0.9, 3.2)
@@ -416,29 +371,29 @@ def echo():
 # 11. Cost breakdown and amortized ROI
 # -----------------------------------------------------------------------------
 def cost():
-    labels = 1.28e6 * 0.05
-    storage = 148 * 0.02 * 12
-    compute = 30 * 3.51 * 4
-    total = 50000 + labels + storage + compute
-    assert round(total) == 114457, total
+    k = calcs.cost()
     sp.hbars(out / "cost_bars.svg", [
-        ("Acquisition (licensed images)", 50000, "data", "$50,000"),
-        ("Labels (1.28M at $0.05)", labels, "data", "$64,000"),
-        ("Storage (148 GB, 12 months)", storage, "neutral", "$36"),
-        ("Compute (30 runs on one H100)", compute, "compute", "$421 = 0.4%"),
-    ], "", log=True, xlabel="Dollars (log scale); total $114,457", size=(5.8, 2.3))
+        ("Acquisition (licensed images)", calcs.ACQ_USD, "data", f"${calcs.ACQ_USD:,}"),
+        (f"Labels (1.28M at ${calcs.LABEL_PRICE:.2f})", k["labels"], "data",
+         f"${k['labels']:,.0f}"),
+        (f"Storage ({calcs.IMAGENET_GB} GB, {calcs.MONTHS} months)", k["storage"], "neutral",
+         f"${k['storage']:.0f}"),
+        ("Compute (30 runs on one H100)", k["compute"], "compute",
+         f"${k['compute']:,} = {k['compute_pct']:.1f}%"),
+    ], "", log=True, xlabel=f"Dollars (log scale); total ${k['total']:,.0f}", size=(5.8, 2.3))
 
 
 def roi():
-    runs = np.array([1, 5, 10, 50])
-    vals = (10000 * runs - 55000) / 55000 * 100
-    assert [round(v, 1) for v in vals] == [-81.8, -9.1, 81.8, 809.1], vals
+    o = calcs.roi()
+    inv, save = o["invest"], calcs.SAVE_PER_RUN
+    runs = np.array(list(o["vals"]))
+    vals = np.array(list(o["vals"].values()))
     fig, ax = plt.subplots(figsize=(5.8, 2.3))
     xs = np.linspace(1, 50, 200)
-    ax.plot(xs, (10000 * xs - 55000) / 55000 * 100, color=C["data"], lw=3)
+    ax.plot(xs, (save * xs - inv) / inv * 100, color=C["data"], lw=3)
     ax.axhline(0, color=C["neutral"], lw=1)
-    ax.axvline(5.5, color=C["neutral"], lw=1, ls="--")
-    ax.text(5.8, 500, "break-even:\n5.5 runs", color=C["neutral"], fontsize=11)
+    ax.axvline(o["breakeven"], color=C["neutral"], lw=1, ls="--")
+    ax.text(o["breakeven"] * 1.05, 500, f"break-even:\n{o['breakeven']:.1f} runs", color=C["neutral"], fontsize=11)
     for n, v in zip(runs, vals):
         ck = "data" if v > 0 else "danger"
         ax.plot([n], [v], "o", ms=9, color=C[ck], zorder=5)
@@ -489,9 +444,14 @@ def arrow(x1, y, x2, op=1.0, color="#666666"):
 
 def minhash():
     """Document, shingles, signature, bands and buckets, candidate check.
-    Shingle text and signature values are illustrative; 128 hashes, 8M
-    documents, and 4.1 GB come from the chapter (Sec. 9.3.2). All pairs:
-    8e6 x 8e6 / 2 = 3.2e13 comparisons, computed here."""
+    The page text is the start of the 61-word C4 sentence that Lee et al.
+    2022 found 61,036 times (arXiv:2107.06499v2, footnote 1); signature
+    values are illustrative. 128 hashes, 8M documents come from the chapter
+    (Sec. 9.3.2); pairs, read time, and signature size are computed in
+    calcs.py."""
+    m = calcs.minhash()
+    mant, ex = f"{m['pairs']:.1e}".split("e+")
+    sup = str(int(ex)).translate(str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹"))
     W, H = 900, 360
     xs = [20, 240, 470, 690]
     for k in range(1, 5):
@@ -500,14 +460,17 @@ def minhash():
         # column 1: document
         b += text(xs[0] + 95, 40, "Web page", 18, weight="bold", op=vis[0])
         b += box(xs[0], 60, 190, 150, C["neutral"], "#F4F4F4", op=vis[0])
-        for i, line in enumerate(["the cat sat on", "the mat and the", "cat sat on the", "mat again ..."]):
+        for i, line in enumerate(["by combining", "fantastic ideas,", "interesting", "arrangements, ..."]):
             b += text(xs[0] + 14, 95 + 30 * i, line, 17, anchor="start", op=vis[0])
+        b += text(xs[0] + 95, 236, "61,036 copies in C4", 16, color=C["danger"],
+                  weight="bold", op=vis[0])
         # column 2: shingles
         b += arrow(xs[0] + 196, 135, xs[1] - 6, op=vis[1])
         b += text(xs[1] + 95, 40, "Shingles", 18, weight="bold", op=vis[1])
-        for i, sh in enumerate(["the cat sat", "cat sat on", "sat on the", "on the mat"]):
-            b += box(xs[1], 62 + 37 * i, 190, 30, C["memory"], C["memory_l"], sw=1.5, op=vis[1], rx=4)
-            b += text(xs[1] + 95, 83 + 37 * i, sh, 16, op=vis[1])
+        for i, sh in enumerate(["by combining fantastic", "combining fantastic ideas",
+                                "fantastic ideas, interesting", "ideas, interesting arr..."]):
+            b += box(xs[1] - 8, 62 + 37 * i, 206, 30, C["memory"], C["memory_l"], sw=1.5, op=vis[1], rx=4)
+            b += text(xs[1] + 95, 83 + 37 * i, sh, 14, op=vis[1])
         # column 3: signature
         b += arrow(xs[1] + 196, 135, xs[2] - 6, op=vis[2])
         b += text(xs[2] + 95, 40, "Signature", 18, weight="bold", op=vis[2])
@@ -532,11 +495,12 @@ def minhash():
         b += text(xs[3] + 95, 210, "same bucket:", 15, color=C["data"], weight="bold", op=vis[3])
         b += text(xs[3] + 95, 230, "compare only these", 15, color=C["data"], weight="bold", op=vis[3])
         # bottom line: the all-pairs cost, crossed out in the last step
-        b += text(450, 295, "All pairs of 8M pages: 3.2 × 10¹³ comparisons", 19,
+        b += text(450, 295, f"All pairs of 8M pages: {mant} × 10{sup} comparisons", 19,
                   color=C["neutral"], op=vis[3])
         b += (f'<line x1="225" y1="289" x2="675" y2="289" stroke="{C["danger"]}" '
               f'stroke-width="2.5" opacity="{vis[3]}"/>\n')
-        b += text(450, 335, "Instead: one 40 GB read (6 s) and 4.1 GB of signatures", 19,
+        b += text(450, 335, f"Instead: one {calcs.WEBTEXT_GB} GB read ({m['read_s']:.0f} s) and "
+                  f"{m['sig_gb']:.1f} GB of signatures", 19,
                   color=C["data"], weight="bold", op=vis[3])
         (out / f"minhash_step{k}.svg").write_text(svg_doc(W, H, b))
 
@@ -544,15 +508,22 @@ def minhash():
 def data_path():
     """ResNet-50 on one H100: four stages (book figure, redrawn at slide
     size). Numbers: chapter, Napkin Math 9.4 and 9.5 and its data-path
-    figure."""
+    figure. The 126 s epoch is the chapter's; derived values come from
+    calcs.py."""
+    p = calcs.data_path()
     W, H = 900, 330
-    stages = [("Local NVMe", "storage", C["memory"], C["memory_l"], "148 GB read", "21 s per epoch"),
-              ("Host CPUs", "decode, augment", C["data"], C["data_l"], "needs 10,100", "images/s"),
-              ("PCIe link", "", C["network"], C["network_l"], "193 GB", "3 s per epoch"),
-              ("H100", "accelerator", C["compute"], C["compute_l"], "126 s, 88 kJ", "per epoch")]
-    notes = {3: ["Coreset: 63 s, 44 kJ", "scoring: 42 s, once"],
-             0: ["Halves only if the", "74 GB subset is written"],
-             1: ["Supplies only 5,250/s:", "the slow stage"]}
+    stages = [("Local NVMe", "storage", C["memory"], C["memory_l"],
+               f"{calcs.IMAGENET_GB} GB read", f"{p['read_s']:.0f} s per epoch"),
+              ("Host CPUs", "decode, augment", C["data"], C["data_l"],
+               f"needs {calcs.DEMAND_IPS:,}", "images/s"),
+              ("PCIe link", "", C["network"], C["network_l"], f"{p['decoded_gb']:.0f} GB",
+               f"{p['pcie_s']:.0f} s per epoch"),
+              ("H100", "accelerator", C["compute"], C["compute_l"],
+               f"{calcs.CH_EPOCH_S} s, {p['epoch_kj']:.0f} kJ", "per epoch")]
+    notes = {3: [f"Coreset: {p['pruned_s']:.0f} s, {p['pruned_kj']:.0f} kJ",
+                 f"scoring: {calcs.SCORE_A_S} s, once"],
+             0: ["Halves only if the", f"{p['half_gb']:.0f} GB subset is written"],
+             1: [f"Supplies only {calcs.HOST_IPS:,}/s:", "the slow stage"]}
     order = [3, 0, 1]
     xs = [10, 240, 470, 700]
     for k in range(1, 4):
@@ -580,45 +551,10 @@ def data_path():
         (out / f"data_path_step{k}.svg").write_text(svg_doc(W, H, b))
 
 
-def synthetic_porch():
-    """Schematic of domain-randomized synthetic porch frames for the
-    discussion slide (drawn here; no openly licensed photo of synthetic
-    training frames was found). No numbers."""
-    W, H = 900, 335
-    tiles = [("Noon, blue door", "#E9E2D0", "#3A6EA5", "#BFB8A8", 1.0, "person"),
-             ("Dusk, red door", "#B7A58C", "#A23B32", "#8C8170", 0.75, "person"),
-             ("Night, porch light", "#3B3F55", "#5C4A3A", "#2E3142", 0.5, "shadow")]
-    b = ""
-    for i, (lab, wall, door, floor, lum, who) in enumerate(tiles):
-        x0, y0, w, h = 15 + 297 * i, 20, 275, 230
-        b += f'<rect x="{x0}" y="{y0}" width="{w}" height="{h}" fill="{wall}"/>\n'
-        b += f'<rect x="{x0}" y="{y0 + 170}" width="{w}" height="60" fill="{floor}"/>\n'
-        b += f'<rect x="{x0 + 30}" y="{y0 + 40}" width="70" height="130" fill="{door}"/>\n'
-        b += f'<circle cx="{x0 + 88}" cy="{y0 + 108}" r="4" fill="#D9C27A"/>\n'
-        b += f'<rect x="{x0 + 120}" y="{y0 + 55}" width="14" height="22" rx="3" fill="#F2D27A" opacity="{lum}"/>\n'
-        if who == "person":
-            col = "#2B2B2B" if lum > 0.8 else "#4A3A30"
-            b += f'<circle cx="{x0 + 200}" cy="{y0 + 85}" r="17" fill="{col}"/>\n'
-            b += f'<rect x="{x0 + 180}" y="{y0 + 104}" width="40" height="70" rx="12" fill="{col}"/>\n'
-            b += f'<rect x="{x0 + 183}" y="{y0 + 170}" width="12" height="35" fill="{col}"/>\n'
-            b += f'<rect x="{x0 + 205}" y="{y0 + 170}" width="12" height="35" fill="{col}"/>\n'
-        else:
-            b += (f'<path d="M{x0 + 160},{y0 + 205} L{x0 + 260},{y0 + 205} L{x0 + 240},{y0 + 180} '
-                  f'L{x0 + 200},{y0 + 178} Z" fill="#15161F" opacity="0.8"/>\n')
-        b += text(x0 + w / 2, y0 + h + 34, lab, 26, weight="bold")
-    b += text(450, 322, "Rendered: every label is known exactly.", 24,
-              color=C["neutral"])
-    (out / "synthetic_porch.svg").write_text(svg_doc(W, H, b))
-
-
 if __name__ == "__main__":
     data_wall()
     gpt2_tokens()
-    collapse()
-    collapse(size=(2.9, 2.2), stem="collapse_final", label_note=False, steps=(2,), font=1.1)
-    ppd_curve()
     warmup()
-    synthetic_porch()
     tokens_per_param()
     scoreboard()
     dedup_hours()
