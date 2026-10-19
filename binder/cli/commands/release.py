@@ -22,6 +22,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from ..core.discovery import format_volume_display_name
+
 console = Console()
 
 SCHEMA_VERSION = "binder-release/v1"
@@ -452,7 +454,7 @@ class ReleaseCommand:
             argv = (*argv, "--layout")
         return _stage(
             f"build-{volume}-pdf",
-            f"Build {self._volume_label(volume)} PDF",
+            f"Build {format_volume_display_name(volume)} PDF",
             "artifact",
             "required",
             argv,
@@ -463,7 +465,7 @@ class ReleaseCommand:
 
     def _pdf_verify_stages(self, volume: str) -> list[ReleaseStage]:
         """Create one required ``check pdf --scope`` stage per ``PDF_VERIFY_SCOPES`` entry."""
-        volume_label = self._volume_label(volume)
+        volume_label = format_volume_display_name(volume)
         return [
             _stage(
                 f"pdf-{volume}-{stage_id}",
@@ -711,10 +713,6 @@ class ReleaseCommand:
         except (OSError, subprocess.TimeoutExpired):
             return ""
         return completed.stdout.strip() if completed.returncode == 0 else ""
-
-    def _volume_label(self, volume: str) -> str:
-        """Return "Volume I" for ``vol1`` and "Volume II" for any other volume key."""
-        return "Volume I" if volume == "vol1" else "Volume II"
 
     def _excerpt(self, text: str, limit: int) -> str:
         """Normalize line endings, strip, and truncate to ``limit`` chars with a marker."""

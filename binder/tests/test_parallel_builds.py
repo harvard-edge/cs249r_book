@@ -444,3 +444,23 @@ def test_sigterm_during_run_jobs_stops_builds_and_removes_worktrees(repo, tmp_pa
     assert list(workspace.WORKSPACE_ROOT.iterdir()) == []
     assert registered_worktrees(repo) == 1
     assert signal.getsignal(signal.SIGTERM) is not None
+
+
+def test_legacy_volume_words_are_chapters_with_all():
+    cli = object.__new__(MLSysBookCLI)
+    assert cli._parse_build_args(["pdf", "intro", "--all"])[1:4] == (None, True, "intro")
+
+
+def test_interrupt_during_build_all_stops_remaining_volumes(tmp_path):
+    built = []
+
+    def build_volume(volume, *args, **kwargs):
+        built.append(volume)
+        cli.build_command.interrupted = True
+        return False
+
+    cli = object.__new__(MLSysBookCLI)
+    cli.config_manager = SimpleNamespace(book_dir=tmp_path, show_active_config=lambda: None)
+    cli.build_command = SimpleNamespace(build_volume=build_volume, interrupted=False)
+    assert not cli.handle_build_command(["pdf", "--all"])
+    assert built == ["vol1"]

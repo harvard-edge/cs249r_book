@@ -53,7 +53,7 @@ def local_render_env(root_dir: Path, base: Optional[Mapping[str, str]] = None) -
                 if candidate.is_file():
                     venv_py = candidate
         except Exception:
-            pass
+            pass  # best-effort probe: no git, or not a checkout; render without the shared venv
     if venv_py.is_file():
         if not env.get("QUARTO_PYTHON"):
             env["QUARTO_PYTHON"] = str(venv_py.absolute())
