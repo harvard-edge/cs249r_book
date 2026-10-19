@@ -50,7 +50,7 @@ def save(fig, path):
 
 
 def hbars(path, rows, unit, log=True, xlabel=None, step=None, note=None,
-          value_fmt="{:,.0f}", size=SIZE, vlines=None):
+          value_fmt="{:,.0f}", size=SIZE, vlines=None, fontsize=13):
     """Horizontal bars, one per row, top to bottom.
 
     rows: list of (label, value, color_key) or (label, value, color_key,
@@ -59,6 +59,8 @@ def hbars(path, rows, unit, log=True, xlabel=None, step=None, note=None,
     as a 1 ms deadline or a budget; drawn dashed with the label at the top.
     step: show only the first
     `step` rows (the rest keep their slot so the axes do not move).
+    fontsize: label size in points; raise it (about 16) when the plot is
+    drawn for a column slot.
     """
     fig, ax = plt.subplots(figsize=size)
     n = len(rows)
@@ -71,17 +73,17 @@ def hbars(path, rows, unit, log=True, xlabel=None, step=None, note=None,
         ax.barh(y, v if shown else 0, color=C[ck], height=0.62,
                 alpha=1.0 if shown else 0.0)
         ax.text(-0.01, y, label, transform=ax.get_yaxis_transform(),
-                ha="right", va="center", fontsize=13, color=C["text"],
+                ha="right", va="center", fontsize=fontsize, color=C["text"],
                 fontweight="bold")
         # Every step draws every value label (hidden ones invisible), so the
         # tight bounding box, and the figure size, are the same in every step.
         ax.text(v * (1.15 if log else 1.01) if log else v + max(vals) * 0.01,
-                y, shown_text, va="center", fontsize=13, color=C[ck],
+                y, shown_text, va="center", fontsize=fontsize, color=C[ck],
                 fontweight="bold", alpha=1.0 if shown else 0.0)
     ax.set_yticks([])
     for x, label, ck in (vlines or []):
         ax.axvline(x, color=C[ck], lw=1.5, ls="--", zorder=1)
-        ax.text(x, n - 0.45, " " + label, color=C[ck], fontsize=10,
+        ax.text(x, n - 0.45, " " + label, color=C[ck], fontsize=fontsize - 3,
                 fontweight="bold", va="bottom", ha="left")
     if log:
         ax.set_xscale("log")
