@@ -1,0 +1,270 @@
+chapter: 11_durable_execution
+lecture: "11"
+title: "Durable Execution"
+layer: runtime
+locator: hs
+minutes: 75
+notes_minutes: 70.5
+core_minutes: 59
+target_ideas: 30
+thesis: "To survive a crash without repeating an effect, the runtime records what it is about to do before doing it and rebuilds control state from the log, not by asking the model again."
+
+hook:
+  minutes: "0-4"
+  setup: "The chapter's worksheet crash, run for real. The repair agent has dispatched the integration test of candidate r18 (operation test_r18, workspace snapshot ws_r18); its worker crashes before the result. A replacement worker reruns the original task prompt. Measured for this lecture: the same task prompt sent 30 times to qwen2.5 7B (Ollama, Q4_K_M) at temperature 0.8 produced 8 distinct first tool calls (16 read a file, 9 searched, 5 ran the tests); at temperature 0 on one laptop, 1 distinct reply in 30."
+  question_to_class: "A new worker reruns the original prompt. What happens? A) it continues where the old worker stopped B) it waits for the test result C) a new path, maybe a second test"
+  payoff: "C. A restart is a new sample; when it reruns the test, a second job launches while the first may still run and bill. The synthesis answers with the resume protocol applied to test_r18, using the measured keyed Temporal run in which the retry found job_tests_1 by operation id."
+  sources: ["chapter §11.1", "images/data/resample.py and resample.json (measured 2026-10-19)"]
+  war_story_note: "The chapter has no war story (course plan Risks, item 2). The hook is the chapter's constructed worksheet, made real by running it; the outside incident (AWS DynamoDB, October 2025) is used in segment 3 for fencing."
+
+recall: "Lecture 10: where does the trajectory record live, and what may close an operation that was sent? (In the harness: state, reservations, approvals, operation table; only evidence settles an operation.) Lecture 7's settlement before retry in one line. Today: what survives when that worker dies."
+
+driving_question: "Why must an agent write down what it is about to do before it does it?"
+
+running_example: "The repair agent (Lecture 1's lighthouse) at the chapter's worksheet crash: candidate r18, workspace snapshot ws_r18, record snapshot record_R_ckpt, operation test_r18 under attempt1, owner_epoch 7 then 8. Shown as a real system: a Temporal workflow (Python SDK 1.34.0, local dev server 1.32.0) whose worker was SIGKILLed one second into the test, in two variants (unkeyed executor launched job_tests_2 again; keyed executor reused job_tests_1)."
+
+segments:
+  - name: The Log
+    divider_question: "What can a replacement worker rebuild after a crash?"
+    read: "§11.1, §11.2"
+    concept_questions: [1, 2, 3]
+    land: "Recovery state comes from an append-only log that outlives the worker, folded without the model."
+    minutes: 13
+  - name: Intent
+    divider_question: "When must the intent reach storage, and which storage counts?"
+    read: "§11.3"
+    concept_questions: [4, 5, 6, 7, 8]
+    land: "The intent becomes durable under a named failure domain before the request leaves; a crash after it leaves an operation in doubt that only evidence or the endpoint's contract settles."
+    minutes: 19
+  - name: Checkpoints
+    divider_question: "How do record and files restart together, and who may act?"
+    read: "§11.4, §11.5"
+    concept_questions: [9, 10, 11, 12]
+    land: "A checkpoint binds record and files to one log position; logging stretches the optimal stride; resume proves, owns, restores, reconciles, then admits."
+    minutes: 18
+  - name: Replay
+    divider_question: "How do we reproduce and debug a run that already happened?"
+    read: "§11.6 to §11.8"
+    concept_questions: [13, 14, 15]
+    land: "Reproduction replays recorded replies; debugging starts at the first mismatched boundary; retention follows the recovery and replay promise."
+    minutes: 13
+
+concept_questions:
+  - q: "What does a crash erase, and why is the context window not the record?"
+    picture: "lost_step1-2: worker memory (test_r18 dispatched, $0.50 reserved, grants, pending approval) beside the context window; crash crosses out memory"
+    numbers: "none (worksheet)"
+    example: "the worksheet crash"
+    read: "§11.1"
+  - q: "How does a replacement rebuild control state without the model?"
+    picture: "fold_step1-3: five logged events folded by a reducer into a record with test_r18 unresolved; R_j = fold(R_0, e_1..e_j)"
+    numbers: "Temporal crash run: 1 model call in the whole run, 19 history events"
+    example: "event history excerpt of the real crash run (events 5, 7, 11, 12, 15)"
+    read: "§11.2.1"
+  - q: "Which record can rebuild a trajectory?"
+    picture: "concept question, four choices"
+    numbers: "fallacy: final context window (§11.9), credential at turn 7 compacted at turn 12"
+    example: "compaction (Lecture 4) hides a leak"
+    read: "§11.2, §11.9"
+  - q: "When must the intent be durable, and what does each crash position prove?"
+    picture: "intent_step1-2: propose, admit, intent ack, dispatch, evidence; zones not dispatched, in doubt, established"
+    numbers: "equation 1"
+    example: "test_r18 intent with operation and attempt ids"
+    read: "§11.3.2"
+  - q: "What does a retry of an in-doubt operation do?"
+    picture: "crashrun_step1-2: measured lanes, unkeyed (second job at 3.9 s) and keyed (job reused)"
+    numbers: "measured: kill 1.0 s after launch; second launch 3.89 s after the first"
+    example: "Temporal heartbeat timeout, attempt 2"
+    read: "§11.3.3"
+  - q: "Against which failures does an acknowledgment hold?"
+    picture: "SSD board photo (DRAM cache, controller, NAND) and the macOS fsync(2) manual page"
+    numbers: "three tiers of table 2"
+    example: "fsync returns before the drive flushes"
+    read: "§11.3.1"
+  - q: "What does each acknowledgment cost?"
+    picture: "acks: measured bars"
+    numbers: "write 0.024 ms, fsync 0.043 ms, F_FULLFSYNC 3.0 ms (70x), 300 appends of 512 B, Apple M5 Max"
+    example: "chapter exercise 1's 6.5 ms quorum (illustrative)"
+    read: "§11.3.1"
+  - q: "When does a missing intent prove non-dispatch?"
+    picture: "replica_step1-2: authoritative log with intent vs lagging replica"
+    numbers: "none"
+    example: "pitfall: incomplete replica (§11.9), exercise 8"
+    read: "§11.3.3"
+  - q: "What does a checkpoint bind?"
+    picture: "ckpt_step1-3: record_R_ckpt and ws_r18 bound at position c; manifest published after bytes; torn checkpoint"
+    numbers: "none"
+    example: "worksheet checkpoint"
+    read: "§11.4.1"
+  - q: "How often should a logged trajectory checkpoint?"
+    picture: "cadence: expected overhead vs stride, logged and re-executed"
+    numbers: "NM 11.1: strides 10/25/50 cost 8/6/10 s; optimum 22 vs 1.6 turns; 14.1x; every turn 52 s; full vs delta 3.2 GB vs 64 MB (50.5x)"
+    example: "NM 11.1 crash trace"
+    read: "§11.4.2, §11.4.3"
+  - q: "What must happen before a resumed worker acts?"
+    picture: "resume_step1-3: prove, own, restore, reconcile, admit"
+    numbers: "equation 7; measured next-call prefill 0.12 s warm vs 8.7 s cold (10,202 tokens); chapter 2.3 s for 32,768 tokens"
+    example: "test_r18 probed by id"
+    read: "§11.5"
+  - q: "How does a resource exclude a stalled former owner?"
+    picture: "AWS DynamoDB incident (photo of Ashburn data centers, quotes) then fence_step1-3"
+    numbers: "19 to 20 October 2025, 11:48 PM to 2:40 AM PDT; three Enactors"
+    example: "delayed DNS Enactor applying an old plan"
+    read: "§11.5.1"
+  - q: "Does temperature 0 reproduce a trajectory?"
+    picture: "feynman: 1,000 completions split at token 103"
+    numbers: "Thinking Machines: 80 distinct of 1,000, 992 vs 8; laptop 1 of 30; 0.99^30 = 74%"
+    example: "fallacy §11.9"
+    read: "§11.6, §11.9"
+  - q: "What does each replay mode answer, and how does replay fail?"
+    picture: "replay_step1-2 (live vs replay) and the real Temporal NondeterminismError for a reordered harness"
+    numbers: "none"
+    example: "revised harness that runs the test before the model"
+    read: "§11.6"
+  - q: "Where did two runs first differ, and what does that prove?"
+    picture: "diverge_step1-2: boundary-by-boundary comparison; mismatch at turn 19 context"
+    numbers: "retention NM 11.2: 3.96 MB log + 50 MB snapshot, 1.5 cents a year, 0.7% of $2.10, snapshot 93% of bytes"
+    example: "compaction drops 'regression suite omitted'"
+    read: "§11.7, §11.8"
+
+concept_trace:
+  - concept: Failure-domain durability
+    frame: "An acknowledgment covers only the failures its storage survives"
+    shows: "SSD board photo labeled DRAM cache, controller, NAND; macOS fsync(2) excerpt; caption names failure-domain durability; next frame's measured acknowledgments and three-tier table"
+  - concept: Trajectory log
+    frame: "The log is folded into the record, without calling the model"
+    shows: "fold_step1-3 build: typed events, reducer, rebuilt record with test_r18 unresolved; fold equation"
+  - concept: Durable intent before dispatch
+    frame: "Intent before dispatch makes every escaped effect visible"
+    shows: "intent_step1-2 build: ordering with durability barrier and crash-position zones"
+  - concept: Completeness rule
+    frame: "A missing intent proves non-dispatch only in a complete log"
+    shows: "replica_step1-2: authoritative log holds the intent, lagging replica does not; slide line states the completeness rule"
+  - concept: Checkpoint binding
+    frame: "A checkpoint binds record and files to one log position"
+    shows: "ckpt_step1-3: record_R_ckpt and ws_r18 bound to position c, manifest after durable bytes, torn checkpoint crossed"
+  - concept: Resume protocol
+    frame: "Resume proves, owns, restores, reconciles, then admits"
+    shows: "resume_step1-3: five stages built in order; resume protocol time equation"
+  - concept: Record and replay
+    frame: "Replay substitutes recorded inputs; three modes, three answers"
+    shows: "replay_step1-2 live vs replay with stubbed model and disconnected tools; the three modes named on the slide; next frame's real replay failure"
+
+worked_examples:
+  - name: "The real crash run (Temporal)"
+    steps: ["given: a workflow that calls the model, then the test; worker SIGKILLed 1.0 s into the test", "history: model reply in event 7; test retried as attempt 2 after a heartbeat timeout", "unkeyed executor: job_tests_2 launched 3.9 s after job_tests_1", "keyed executor: job_tests_1 found by operation id and reused", "meaning: logging replaced resampling; only the endpoint's contract made the retry safe"]
+  - name: "Napkin Math 11.1: checkpoint cadence on a fixed crash trace"
+    steps: ["given: 100 turns, crashes after 37 and 83, 0.5 s pause, 1 s restore, 0.1 s per logged turn", "stride 10: 5 + 2 + 1 = 8 s; stride 25: 2 + 2 + 2 = 6 s; stride 50: 1 + 2 + 7 = 10 s", "optimum sqrt(2 x 0.5 / (0.02 x 0.1)) = 22 turns; re-executed at 20 s: 1.6 turns", "result: 25 wins; logging lengthens the stride 14.1x", "meaning: a crash costs reconstruction, not resampling; the minimum is flat"]
+  - name: "Measured acknowledgment ladder"
+    steps: ["given: 512-byte intent appends, 300 each, laptop SSD", "write 0.024 ms, fsync 0.043 ms, F_FULLFSYNC 3.0 ms", "map to the three failure tiers", "meaning: a fast acknowledgment from the wrong tier is a false durability claim"]
+  - name: "Napkin Math 11.2: the price of keeping every recovery input"
+    steps: ["given: 30 turns x (4 + 128) KB, 50 MB snapshot, $23 per TB-month, 12 months", "log 3.96 MB, total 54 MB", "1.5 cents a year, 0.7% of a $2.10 attempt; log alone 0.05%", "meaning: retention follows the promise; share workspace bases"]
+
+active_learning:
+  - at_minute: 0.5
+    type: predict
+    prompt: "A new worker reruns the original prompt. What happens?"
+    answer: "C: 8 distinct first steps in 30 restarts; 5 reran the test."
+  - at_minute: 4
+    type: retrieval
+    prompt: "Where does the trajectory record live? What may close an operation that was sent?"
+    answer: "In the harness's memory; only evidence settles an operation."
+  - at_minute: 17
+    type: concept_question
+    prompt: "Which record can rebuild the trajectory?"
+    answer: "C, the typed event log with payloads; the final context window is the chapter's fallacy."
+  - at_minute: 23
+    type: predict
+    prompt: "The engine retries the test; one executor is keyed by operation id. What runs?"
+    answer: "Unkeyed: a second job (job_tests_2). Keyed: job_tests_1 reused."
+  - at_minute: 28
+    type: predict
+    prompt: "How long does each acknowledgment take?"
+    answer: "write 0.024 ms, fsync 0.043 ms, F_FULLFSYNC 3.0 ms."
+  - at_minute: 41
+    type: estimate
+    prompt: "Which checkpoint stride wins on this trace?"
+    answer: "8, 6, 10 s; stride 25; optimum about 22 turns."
+  - at_minute: 52
+    type: concept_question
+    prompt: "Does temperature 0 reproduce a trajectory?"
+    answer: "False: 80 of 1,000 distinct on a shared server; 0.99^30 = 74%."
+  - at_minute: 60
+    type: diagnose
+    prompt: "Where did the two runs first differ?"
+    answer: "Turn 19, assembled context: compaction dropped the coverage limit."
+  - at_minute: 65
+    type: retrieval
+    prompt: "List, in order, what the replacement worker does before it runs anything."
+    answer: "Prove the log, own with epoch 8, restore and fold, probe test_r18 by id, admit under current limits."
+
+open_questions:
+  - "Many tools offer no status query and no idempotency key. Should a runtime refuse them, wrap them, or escalate every in-doubt call to a person?"
+  - "A hosted model can change underneath a long run. How should a runtime record what it called, when the provider does not say?"
+  - "Recovery data is cheap to keep but holds prompts, outputs, and leaked secrets. Who decides how long it lives?"
+
+more_examples:
+  - "AWS DynamoDB us-east-1 disruption, 19 to 20 October 2025: a delayed DNS Enactor applied an old plan after a one-time newer-than check (aws.amazon.com/message/101925)."
+  - "Thinking Machines, Defeating Nondeterminism in LLM Inference, 2025: 80 distinct completions of 1,000 at temperature 0."
+  - "Pillai et al., OSDI 2014: 60 crash vulnerabilities in eleven applications (chapter footnote)."
+  - "METR Time Horizon v1.1: 50% task length from 4 minutes (2023) to about 17 hours (April 2026)."
+  - "Temporal event history and Replayer NondeterminismError (run for this lecture)."
+
+left_to_reading:
+  - concept: "Event schema table (table 1) in full"
+    why: "detail better read; the fold slide names the event families"
+  - concept: "Full vs incremental restore time and consolidation (exercise 9)"
+    why: "the snapshot-bytes slide gives the write side; restore arithmetic is exercise work"
+  - concept: "Storage engine contract (§11.8.4): semantic deduplication, LSM compaction"
+    why: "engineering detail; Checkpoint 11.4 covers it"
+  - concept: "In-doubt action (secondary)"
+    why: "taught on the predict crash-run slide, not separately"
+
+closing:
+  return_to_hook: "Synthesis frame: the restart from the prompt sampled a new path and reran the test; the durable runtime proves the log, takes epoch 8, restores and folds, probes test_r18 by id (job_tests_1 found in the keyed run), then admits."
+  read_and_practice: ["§11.2 to §11.8", "Checkpoints 11.1 to 11.4", "Napkin Math 11.1 and 11.2", "exercises 1, 3, 8", "images/data scripts rerun every measurement"]
+  further_reading:
+    - cite: "Mohan et al., ARIES, ACM TODS 1992"
+      url: "https://doi.org/10.1145/128765.128770"
+      why: "write-ahead logging and repeating history"
+    - cite: "Young, A First Order Approximation to the Optimum Checkpoint Interval, CACM 1974"
+      url: "https://doi.org/10.1145/361147.361115"
+      why: "the checkpoint balance the lecture modifies"
+    - cite: "Elnozahy et al., A Survey of Rollback-Recovery Protocols, ACM Computing Surveys 2002"
+      url: "https://doi.org/10.1145/568522.568525"
+      why: "why logging nondeterministic inputs changes checkpoints"
+    - cite: "Helland, Life Beyond Distributed Transactions, CIDR 2007"
+      url: "https://www.cidrdb.org/cidr2007/papers/cidr07p15.pdf"
+      why: "idempotent identified messages across ownership boundaries"
+    - cite: "Burckhardt et al., Durable Functions, OOPSLA 2021"
+      url: "https://doi.org/10.1145/3485510"
+      why: "formal semantics of durable workflows"
+  bridge: "Next lecture (Failure Recovery): the log records every step; why can a recovered run still leave the world half changed?"
+
+callbacks:
+  - {lecture: 1, concept: "Lighthouse workloads (repair agent)", where: "hook note; goals note"}
+  - {lecture: 1, concept: "H·S·A exposures", where: "driving-question frame note"}
+  - {lecture: 1, concept: "Horizon compounding", where: "temperature-0 vote note"}
+  - {lecture: 2, concept: "Recorded calls replay, served calls do not", where: "real engine history frame note"}
+  - {lecture: 4, concept: "Context compaction", where: "crash-erases note; diagnose note"}
+  - {lecture: 5, concept: "Radix prefix cache", where: "prefill frame note"}
+  - {lecture: 7, concept: "Settlement before retry", where: "recall note; predict crash-run note"}
+  - {lecture: 7, concept: "Reconciliation probe", where: "predict crash-run note"}
+  - {lecture: 8, concept: "Copy-on-write workspace", where: "checkpoint binding note"}
+  - {lecture: 10, concept: "Trajectory record", where: "recall frame and note; title note; crash-erases note"}
+  - {lecture: 10, concept: "Settlement rule", where: "recall note"}
+  - {lecture: 10, concept: "Approval escrow", where: "resume note"}
+  - {lecture: 10, concept: "Bounded-liability admission", where: "resume note"}
+  - {lecture: 12, concept: "Compensation", where: "Gray frame note"}
+  - {lecture: 12, concept: "Failure Recovery (next lecture)", where: "synthesis note; next-lecture frame"}
+  - {lecture: 13, concept: "Task sampling and score intervals", where: "replay modes note"}
+  - {lecture: 14, concept: "Trace retention", where: "retention note; open questions note"}
+
+coverage:
+  primary_taught: [Failure-domain durability, Trajectory log, Durable intent before dispatch, Completeness rule, Checkpoint binding, Resume protocol, Record and replay]
+  primary_left_to_reading: []
+  secondary: [Checkpoint stride, First-divergence localization, Recovery retention, Fencing tokens, In-doubt action]
+
+notes_for_author:
+  - "The chapter has no war story. The hook is the worksheet crash, run for real on a laptop; the AWS DynamoDB October 2025 incident is used for fencing. Consider it for the chapter."
+  - "Product names appear only in credits and on the real-artifact frames (Temporal, Ollama, macOS, AWS), following Lecture 10's precedent."
+  - "Measurements are one laptop (Apple M5 Max, macOS 26.4) and are labeled measured; the scripts are in images/data."
