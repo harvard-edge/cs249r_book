@@ -11,6 +11,7 @@ TinyTorch.
 shared/styles/
 ├── _brand.scss               # raw brand colours (single source of truth)
 ├── _ecosystem-base.scss      # light-mode ecosystem defaults
+├── _ecosystem-base-dark.scss # dark-mode ecosystem defaults (MLSys·im docs)
 ├── _site-dark.scss           # dark-mode rules used by the site (landing/about/etc.)
 ├── _dark-code.scss           # dark inline code, code blocks, syntax tokens (all sites)
 ├── _dark-captions.scss       # dark figure/table captions (all sites)
@@ -37,6 +38,7 @@ shared/styles/
     ├── _theme-labs.scss
     ├── _theme-kits.scss
     ├── _theme-instructors.scss
+    ├── _theme-mlsysim.scss   # MLSys·im (cyan)
     └── _theme-tinytorch.scss
 ```
 

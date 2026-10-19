@@ -18,7 +18,7 @@ This appendix is a quantitative reference for serving systems. Use the queuing s
 
 ## Serving Performance Analysis {#sec-appdx-appendix-inference-serving}
 
-When a GPT-3 serving replica receives a burst of 100 queries per second, an aggressive batch size can saturate high-bandwidth memory with key-value states while a conservative batch size causes the arrival queue to grow without bound. Serving performance analysis therefore has two coupled layers. The queue determines how requests wait, batch, and shed under stochastic arrivals; the key-value cache determines how much live state the accelerator can hold while meeting the latency budget. The subsections that follow derive the queuing model first, then connect that model to memory-capacity limits in the worked serving examples.
+When a GPT-3 serving replica receives a burst of 100 queries per second, an aggressive batch size can saturate high-bandwidth memory with key-value states while a conservative batch size causes the arrival queue to grow without bound. Serving performance analysis therefore has two coupled layers. The queue determines how requests wait, batch, and shed under stochastic arrivals; the key-value cache determines how much live state the accelerator can hold while meeting the latency budget. Because a batch cannot execute until it both clears the arrival queue and fits in device memory, sizing a serving replica requires solving the queuing delay curve first and then bounding candidate batch sizes against key-value cache capacity.
 
 ### Queuing theory for batched inference {#sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0}
 
@@ -55,7 +55,7 @@ The effective rate increases with batch size, approaching the asymptotic limit $
 
 #### Response time analysis {#sec-appdx-inference-scale-response-time-analysis-ffc3}
 
-The total response time $\RequestResponseTime$ for a request consists of three sequential components. Each arriving query must wait for prior batches, accumulate with peer requests into a new batch, and then execute on the accelerator:
+Amortizing fixed launch and weight-loading overhead raises server throughput, but a client experiences end-to-end latency rather than kernel throughput alone. Before a request ever executes on the accelerator, it must wait for prior batches to clear and pause in the staging buffer while peer requests arrive to complete its own batch, splitting total response time $\RequestResponseTime$ into three sequential components:
 
 $$ \mathbb{E}[\RequestResponseTime] = \mathbb{E}[\QueueWaitTime] + \mathbb{E}[\BatchFormationDelay] + \mathbb{E}[\BatchServiceTime] $$
 
@@ -83,7 +83,7 @@ When batches reliably fill before timeout, this expression approaches $\mathbb{E
 
 #### Optimal batch size derivation {#sec-appdx-inference-scale-optimal-batch-size-derivation-3a3c}
 
-The optimal batch size $\BatchSize$ minimizes expected response time subject to throughput requirements. The optimization balances the batch-accumulation penalty against the queuing delay reduction from higher service rates:
+Increasing the batch size $\BatchSize$ pulls the three latency components in opposite directions: a larger batch raises the effective service rate and drains the arrival queue faster, yet it forces every request to wait longer during batch formation and adds $\MarginalRequestServiceTime$ per additional request during execution. The optimal batch size $\BatchSize$ minimizes expected response time across those competing terms subject to throughput stability:
 
 $$\BatchSize= \operatorname{arg\,min}_{\BatchSize} \mathbb{E}[\RequestResponseTime(\BatchSize)] \quad \text{subject to} \quad \EffectiveServiceRate(\BatchSize) > \ArrivalRate$$
 
@@ -528,7 +528,7 @@ This matches the response-time decomposition: roughly `{python} LittlesLawVerify
 
 #### Batch size selection framework given an SLO {#sec-appdx-inference-scale-decision-framework-batch-size-selection-given-sla-8e4e}
 
-Production systems must select batch size to meet SLOs, typically specified as latency percentiles (for example, p99 latency < 200 ms). The following framework systematizes this decision:
+The 100 QPS analysis screened candidate batches by mean response time $\mathbb{E}[\RequestResponseTime]$, but production serving contracts enforce tail latency percentiles (for example, p99 latency < 200 ms) rather than averages. Selecting a production batch size under a tail-latency SLO follows a five-step procedure:
 
 ##### Step 1 characterize service time {.unnumbered}
 
@@ -621,11 +621,11 @@ Four properties of these curves guide the choice of batch size across candidate 
 3. **SLO-Constrained Optimum**\index{SLO!constrained optimum}: The best feasible batch size depends on the optimization objective and measured end-to-end latency, including queuing and batch formation. An SLO boundary can constrain that choice without guaranteeing an intersection or a unique optimum.
 4. **Diminishing Returns**\index{Diminishing returns}: In the schematic, fixed work becomes a smaller fraction of each batch, so successive batch-size increases yield smaller throughput gains.
 
-The queuing-theoretic framework provides the mathematical foundation for the batching strategies introduced in @sec-inference-scale-batching-strategies-scale-6733. Where intuition might suggest "larger batches are better for throughput," stability constraints, latency targets, and diminishing returns create a well-defined optimal operating region that varies by model type and deployment requirements.
+The queuing-theoretic framework provides the mathematical foundation for the batching strategies introduced in @sec-inference-scale-batching-strategies-scale-6733. Where intuition might suggest "larger batches are better for throughput," stability constraints, latency targets, and diminishing returns create a well-defined optimal operating region that varies by model type and deployment requirements. For autoregressive transformers, any candidate batch inside that queuing-feasible region must also fit its live attention state into accelerator memory.
 
 ### KV cache fundamentals {#sec-appdx-inference-scale-kv-cache-fundamentals-2ccd}
 
-During a single 2,048-token GPT-3 generation request, the key and value vectors accumulated across all 96 layers consume roughly 9.4 GB of high-bandwidth memory. A batch of 32 concurrent requests therefore exhausts the remaining memory of an eight-GPU A100 node before compute ever saturates. @Sec-inference-scale-kv-cache-management-04ed defines the KV cache and the paged allocation that manages it, and @sec-appdx-dam-taxonomy-transformer-arithmetic gives its per-token size. This section expands the sizing math behind that definition: why the cache reduces per-token compute, why its memory grows with sequence length and batch size, and why unmanaged allocation can fragment HBM [@kwon2023].
+During a single 2,048-token GPT-3 generation request, the key and value vectors accumulated across all 96 layers consume roughly 9.4 GB of high-bandwidth memory. A batch of 32 concurrent requests therefore exhausts the remaining memory of an eight-GPU A100 node before compute ever saturates. @Sec-inference-scale-kv-cache-management-04ed defines the KV cache and the paged allocation that manages it, and @sec-appdx-dam-taxonomy-transformer-arithmetic gives its per-token size. Sizing a serving node around those per-token states requires accounting for three coupled effects: how caching trades quadratic recomputation for linear memory growth, how the resulting footprint scales with sequence length and batch size, and why naive contiguous reservation fragments HBM [@kwon2023].
 
 For a standard attention implementation at fixed model width, autoregressive generation without caching requires $\mathcal{O}(\SequenceLength^2)$ computation per token because each transformer layer recomputes the full prefix, including attention among its tokens. The KV cache stores previously computed key and value vectors, allowing each new token to attend to the prefix in $\mathcal{O}(\SequenceLength)$ computation. For serving at scale, this compute saving creates a memory-management challenge, because KV cache memory can exceed model weights for long contexts. The cache size grows linearly with both sequence length and batch size as calculated by @eq-kv-cache-size:
 
@@ -699,7 +699,7 @@ Evaluating @eq-kv-cache-size for a concrete multi-GPU node shows how quickly the
 
 `{python} AppdxKVCacheSizing.kv_per_req_display_math`
 
-Across `{python} AppdxKVCacheSizing.num_gpus_str`$\times$ A100 80-GB GPUs (`{python} AppdxKVCacheSizing.total_hbm_str` total HBM), storing model weights in FP16 consumes `{python} AppdxKVCacheSizing.weights_mem_str`, leaving `{python} AppdxKVCacheSizing.remaining_mem_str` for activation and KV cache memory. Dividing that residual capacity by the per-request cache gives a capacity-only upper bound of `{python} AppdxKVCacheSizing.max_batch_size_str` concurrent requests. This bound assumes balanced sharding and reserves no memory for activations, workspaces, runtime state, or allocator losses; an implementable batch must be smaller. Device nameplate capacities are converted to decimal GB before subtracting the decimal model footprint.
+Across `{python} AppdxKVCacheSizing.num_gpus_str`$\times$ A100 80-GB GPUs (`{python} AppdxKVCacheSizing.total_hbm_str` total HBM), storing model weights in FP16 consumes `{python} AppdxKVCacheSizing.weights_mem_str`, leaving `{python} AppdxKVCacheSizing.remaining_mem_str` for activation and KV cache memory. Dividing that residual capacity by the per-request cache gives a capacity-only upper bound of `{python} AppdxKVCacheSizing.max_batch_size_str` concurrent requests. This bound assumes balanced sharding and reserves no memory for activations, workspaces, runtime state, or allocator losses; an implementable batch must be smaller (device nameplate capacities are converted to decimal GB before subtracting the decimal model footprint). Together with @tbl-batch-size-comparison, this capacity ceiling closes the two-layer serving model: queuing dynamics set the minimum batch size needed for stability and latency headroom, while HBM capacity caps the maximum concurrent batch at long context lengths.
 
 ## Summary {.unnumbered}
 

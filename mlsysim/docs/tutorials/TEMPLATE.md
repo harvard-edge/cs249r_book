@@ -75,39 +75,9 @@ This is the "tweet-length" summary. Bold the core claim.>
 
 ---
 
-## Your Turn                             ← Always exactly 3 exercises
-
-::: {.callout-caution}
-## Exercises
-
-**Exercise 1: Predict before you compute.**
-<Always the first exercise. Forces the reader to form a hypothesis before running code.
-Structure: predict → run → compare → explain the gap.>
-
-**Exercise 2: Change one variable.**
-<Modify a single parameter and predict the effect. Builds intuition for sensitivity.>
-
-**Exercise 3: Connect to another domain.**
-<Use a different solver or compose solvers. Shows that walls interact.>
-
-**Self-check:** <One quick mental calculation to verify understanding.>
-:::
-
----
-
-## Key Takeaways
-
-::: {.callout-tip}
-## Summary
-<Exactly 3–5 bullet points. Each maps to a "What You Will Learn" objective.
-Use the same verb structure. The reader should be able to check them off.>
-:::
-
----
-
 ## Next Steps
 <3–4 links to related tutorials, organized by domain cluster.
-Format: **[Tutorial Name](link)** — one-sentence description of what it adds.>
+Format: **[Tutorial Name](link)**: one-sentence description of what it adds.>
 ```
 
 ---
@@ -116,11 +86,10 @@ Format: **[Tutorial Name](link)** — one-sentence description of what it adds.>
 
 | Callout Type | Purpose | When to Use |
 |-------------|---------|-------------|
-| `{.callout-note}` | Prerequisites, Background, What You Will Learn | Factual, informational |
-| `{.callout-tip}` | Background concepts, Summary/Takeaways | Helpful context |
+| `{.callout-note}` | Prerequisites, Background, Learning Objectives | Factual, informational |
+| `{.callout-tip}` | Background concepts | Helpful context |
 | `{.callout-important}` | **Key Insight** (the aha moment) | Exactly ONCE per tutorial |
-| `{.callout-caution}` | Exercises | Always in "Your Turn" section |
-| `{.callout-warning}` | Common mistakes / pitfalls | Only when there's a real trap |
+| `{.callout-warning}` | Common mistakes / pitfalls | Only when there is a real trap |
 
 ---
 

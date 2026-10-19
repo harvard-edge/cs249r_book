@@ -7,23 +7,23 @@ categories: ["node", "advanced"]
 
 ## The Question
 
-The `Engine.evaluate()` function is great for standard roofline analysis, but what if you want to insert a proprietary power model into the middle of the evaluation? What if you need to log every analytical result to a database or an MLOps platform like Weights & Biases?
+The `Engine.evaluate()` function serves standard roofline analysis well. Some workflows, however, need to insert a proprietary power model into the middle of the evaluation, or to log every analytical result to a database or an MLOps platform like Weights & Biases.
 
 **How do we extend the core framework without forking it?**
 
 ::: {.callout-note}
-## What You Will Learn
+## Learning Objectives
 
 - **Compose** custom execution graphs using the `Pipeline` class.
-- **Inject** your own analytical solvers into the evaluation flow.
+- **Inject** custom analytical solvers into the evaluation flow.
 - **Register** callback middleware to log or intercept data.
 :::
 
 ## 1. Setup
 
-First, import the necessary modules. We will use the `Pipeline` orchestrator directly instead of relying on the high-level `Engine`.
+First, import the necessary modules. This tutorial uses the `Pipeline` orchestrator directly instead of relying on the high-level `Engine`.
 
-```python
+```{python}
 import mlsysim
 from mlsysim.engine.pipeline import Pipeline
 from mlsysim.solvers import DistributedModel, EconomicsModel
@@ -31,11 +31,12 @@ from mlsysim.solvers import DistributedModel, EconomicsModel
 
 ## 2. The Composable Pipeline
 
-The `Pipeline` object accepts a list of resolvers. When you call `.run()`, it executes them in order. Critically, **the output of an early solver is automatically made available as input to later solvers.**
+The `Pipeline` object accepts a list of resolvers. Calling `.run()` executes them in order, and **the output of an early solver is automatically made available as input to later solvers.**
 
-Let's build a standard evaluation pipeline:
+A standard evaluation pipeline looks like this:
 
-```python
+```{python}
+#| warning: false
 # 1. Define the execution graph
 pipe = Pipeline([
     DistributedModel(),
@@ -57,14 +58,16 @@ tco = results["EconomicsModel"].tco_usd
 print(f"Total Cost of Ownership: ${tco:,.2f}")
 ```
 
+For `{python} mlsysim.Models.Language.Llama3_8B.name` on the `{python} f"{mlsysim.Systems.Clusters.Frontier_8K.total_accelerators:,}"`-GPU `{python} mlsysim.Systems.Clusters.Frontier_8K.name` cluster over 30 days, `DistributedModel` computes a scaling efficiency of `{python} f"{results['DistributedModel'].scaling_efficiency:.1%}"` and feeds into `EconomicsModel`, which reports a 30-day TCO of **`{python} f"${tco:,.2f}"`**.
+
 ## 3. Injecting Custom Solvers
 
-Because the pipeline is dynamic, you can insert custom analytical solvers. Suppose you wrote a custom plugin (as described in the [Extending the Engine](../extending-the-engine.qmd) guide) called `PowerEfficiencyModel`.
+Because the pipeline is dynamic, it accepts custom analytical solvers. Suppose a custom plugin called `PowerEfficiencyModel` has been written (as described in the [Extending the Engine](../extending-the-engine.qmd) guide).
 
-You can just snap it into the DAG:
+It slots directly into the DAG:
 
 ```python
-# Assuming you wrote this class
+# Assuming a custom ForwardModel subclass is defined:
 # class PowerEfficiencyModel(ForwardModel): ...
 
 custom_pipe = Pipeline([
@@ -79,16 +82,17 @@ custom_pipe = Pipeline([
 
 ## 4. Callbacks (Middleware)
 
-MLSys·im supports middleware hooks. If you want to log metrics to an external platform (like a database, MLflow, or Weights & Biases), you can write a Callback class with an `on_stage_end` method.
+MLSys·im supports middleware hooks. To log metrics to an external platform (like a database, MLflow, or Weights & Biases), write a Callback class with an `on_stage_end` method.
 
 The pipeline will trigger this method every time a solver finishes.
 
-```python
+```{python}
+#| warning: false
 class WandbLogger:
     def on_stage_end(self, stage_name: str, result):
         print(f"[W&B Callback] Logging data for {stage_name}...")
 
-        # If the result is a Pydantic model, we can dump it to a dict
+        # If the result is a Pydantic model, dump it to a dict
         if hasattr(result, "model_dump"):
             metrics = result.model_dump(exclude_none=True)
 
@@ -99,8 +103,8 @@ class WandbLogger:
 pipe.register_callback(WandbLogger())
 
 # Run the pipeline again to see the callback fire
-print("\\nRunning Pipeline with Callback:")
-pipe.run(
+print("Running Pipeline with Callback:")
+_ = pipe.run(
     model=mlsysim.Models.Language.Llama3_8B,
     fleet=mlsysim.Systems.Clusters.Frontier_8K,
     batch_size=32,
@@ -110,8 +114,10 @@ pipe.run(
 )
 ```
 
-## What You Learned
+---
 
-- **`Pipeline`** allows you to build custom, sequential execution graphs.
-- **Data flows automatically**: outputs from Stage N become inputs to Stage N+1.
-- **Callbacks** enable seamless integration with MLOps tracking tools without altering the core resolver logic.
+## Next Steps
+
+- **[Design Space Exploration](12_design_space_exploration.qmd)**: Wrap a composable `Pipeline` inside the `DSE` engine to search parameter grids
+- **[The Differential Explainer](02_differential_explainer.qmd)**: Automatically explain performance deltas between two pipeline runs
+- **[Extending the Engine](../extending-the-engine.qmd)**: Implement custom `ForwardModel` and `InverseSolver` classes

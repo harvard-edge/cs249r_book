@@ -8,13 +8,14 @@ by comparing the same GPU fleet across different regional grids.
 import mlsysim
 from mlsysim.infrastructure.types import Datacenter
 from mlsysim.solvers import SustainabilityModel
+from mlsysim.systems.types import Fleet
 
 def main():
     print("Scenario: Training Llama-3-70B on 512 H100 GPUs for 30 days\n")
     
     # 1. Setup the Fleet
     node = mlsysim.Systems.Nodes.DGX_H100
-    fleet = mlsysim.Fleet(
+    fleet = Fleet(
         name="Frontier Training Cluster",
         node=node,
         count=64, # 64 nodes * 8 GPUs = 512 GPUs

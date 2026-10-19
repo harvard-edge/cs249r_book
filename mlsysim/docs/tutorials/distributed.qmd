@@ -1,11 +1,64 @@
 ---
 title: "Distributed Training: 3D Parallelism and Scaling Efficiency"
-subtitle: "Discover why 1024 GPUs rarely deliver 1024× speedup — and how to minimize the gap."
+subtitle: "Discover why 1024 GPUs rarely deliver 1024× speedup, and how to minimize the gap."
 ---
-::: {.callout-note}
-## Background: Why distributed training?
 
-Some models are too large to fit in a single GPU's memory, and some training jobs would take months on one GPU. **Distributed training** splits the work across many GPUs. This tutorial explores the three main ways to split work and the overhead each one introduces. You should complete the Hello World and LLM Serving tutorials before this one.
+```{python}
+#| echo: false
+#| output: false
+import mlsysim
+from mlsysim import Systems
+from mlsysim.solvers import DistributedModel
+from mlsysim.systems.types import Fleet
+
+_model = mlsysim.Models.Language.Llama3_70B
+_cluster = mlsysim.Systems.Clusters.Research_256
+_solver = DistributedModel()
+
+_params_b = _model.parameters.to("Gparam").magnitude
+_grad_gb = _model.size_in_bytes("fp16").to("GB").magnitude
+
+_r_dp = _solver.solve(
+    model=_model, fleet=_cluster, batch_size=256,
+    precision="fp16", tp_size=1, pp_size=1
+)
+_eff_gpus_dp = _cluster.total_accelerators * _r_dp.scaling_efficiency
+_wasted_gpus_dp = _cluster.total_accelerators - _eff_gpus_dp
+
+_eth100 = Systems.Fabrics.Ethernet_100G
+_ib_hdr = Systems.Fabrics.InfiniBand_HDR
+_ib_ndr = Systems.Fabrics.InfiniBand_NDR
+_bw_ratio_ndr = (_ib_ndr.bandwidth / _eth100.bandwidth).to("dimensionless").magnitude
+
+_r_eth100 = _solver.solve(
+    model=_model,
+    fleet=Fleet(name="Custom", node=Systems.Nodes.DGX_H100, count=32, fabric=_eth100),
+    batch_size=256, precision="fp16"
+)
+_r_ib_ndr = _solver.solve(
+    model=_model,
+    fleet=Fleet(name="Custom", node=Systems.Nodes.DGX_H100, count=32, fabric=_ib_ndr),
+    batch_size=256, precision="fp16"
+)
+
+_r_pp8_m1 = _solver.solve(
+    model=_model, fleet=_cluster, batch_size=256,
+    precision="fp16", tp_size=1, pp_size=8, microbatch_count=1
+)
+_r_pp8_m16 = _solver.solve(
+    model=_model, fleet=_cluster, batch_size=256,
+    precision="fp16", tp_size=1, pp_size=8, microbatch_count=16
+)
+_r_opt = _solver.solve(
+    model=_model, fleet=_cluster, batch_size=256,
+    precision="fp16", tp_size=8, pp_size=4, microbatch_count=16
+)
+```
+
+::: {.callout-note}
+## Background: Why distributed training is needed
+
+Some models are too large to fit in a single GPU's memory, and some training jobs would take months on one GPU. **Distributed training** splits the work across many GPUs. This tutorial explores the three main ways to split work and the overhead each one introduces. Complete the Hello World and LLM Serving tutorials before this one.
 :::
 
 Scaling a training job from 1 GPU to 1024 GPUs incurs overhead at every step.
@@ -13,7 +66,7 @@ Communication, pipeline stalls, and coordination each chip away at theoretical s
 Understanding where that efficiency goes, and how to recover it, is what separates
 a well-tuned distributed training job from an expensive waste of cluster time.
 
-By the end of this tutorial you will understand:
+This tutorial explains:
 
 - How **Data Parallelism**, **Tensor Parallelism**, and **Pipeline Parallelism** decompose work across GPUs
 - Why synchronization (ring all-reduce) overhead depends on model size and network bandwidth
@@ -38,14 +91,6 @@ The product $\text{DP} \times \text{TP} \times \text{PP} = \text{total GPUs}$.
 
 ## 1. Setup
 
-```{python}
-#| echo: false
-#| output: false
-# Build-system path setup — hidden from students
-import mlsysim  # installed via `pip install mlsysim` (see workflow)
-import mlsysim
-```
-
 ```python
 import mlsysim
 from mlsysim.solvers import DistributedModel
@@ -61,20 +106,20 @@ model = mlsysim.Models.Language.Llama3_70B
 # (DGX is NVIDIA's pre-built server containing 8 H100 GPUs connected via NVLink)
 cluster = mlsysim.Systems.Clusters.Research_256
 
-print(f"Model:   {model.name}  ({model.parameters.to('Gparam'):.0f} params)")
+print(f"Model:   {model.name}  ({model.parameters.to('Gparam').magnitude:.1f}B params)")
 print(f"Cluster: {cluster.name}")
 print(f"  Nodes: {cluster.count}  ×  {cluster.node.accelerators_per_node} GPUs/node")
 print(f"  Total: {cluster.total_accelerators} accelerators")
-print(f"  Fabric: {cluster.fabric.name} @ {cluster.fabric.bandwidth.to('GB/s'):.0f} GB/s/link")
+print(f"  Fabric: {cluster.fabric.name} @ {cluster.fabric.bandwidth.to('GB/s').magnitude:.1f} GB/s/link")
 ```
 
 ---
 
 ## 2. Visualizing 3D Parallelism
 
-Before working through the numbers, consider how 3D parallelism decomposes a training job across a cluster. Each dimension splits work differently and introduces a different type of overhead:
+Before working through the numbers, consider how 3D parallelism decomposes a training job across a cluster (`{python} f"{_model.layers}"` layers across `{python} f"{_cluster.total_accelerators}"` GPUs). Each dimension splits work differently and introduces a different type of overhead:
 
-**Data Parallelism (DP=4)** — each GPU holds a full model copy and processes 1/4 of the batch. After the backward pass, gradients are synchronized via All-Reduce.
+**Data Parallelism (DP=4).** Each GPU holds a full model copy and processes 1/4 of the batch. After the backward pass, gradients are synchronized via All-Reduce.
 
 ```{mermaid}
 %%| fig-cap: "Data Parallelism: replicate the model, split the batch, synchronize gradients."
@@ -84,7 +129,7 @@ flowchart LR
     R3 <-.->|"All-Reduce"| R4["Replica 4<br/>Batch 4/4"]
 ```
 
-**Tensor Parallelism (TP=2)** — each layer is split across GPUs. Requires fast interconnect (NVLink).
+**Tensor Parallelism (TP=2).** Each layer is split across GPUs, which requires a fast interconnect (NVLink).
 
 ```{mermaid}
 %%| fig-cap: "Tensor Parallelism: split each layer across GPUs, communicate via NVLink."
@@ -92,7 +137,7 @@ flowchart LR
     G1["GPU 0<br/>Left half of each layer"] <-->|"All-Gather<br/>(NVLink)"| G2["GPU 1<br/>Right half of each layer"]
 ```
 
-**Pipeline Parallelism (PP=4)** — model layers are partitioned across stages. Activations flow forward; gradients flow backward.
+**Pipeline Parallelism (PP=4).** Model layers are partitioned across stages. Activations flow forward; gradients flow backward.
 
 ```{mermaid}
 %%| fig-cap: "Pipeline Parallelism: partition layers across stages, activations flow forward."
@@ -108,9 +153,9 @@ The key insight: **DP** uses inter-node bandwidth (network fabric), **TP** uses 
 
 ## 3. Baseline: Pure Data Parallelism
 
-Start with the simplest configuration — no model splitting, just replicate the full model
-on every GPU and split the batch. The per-GPU compute time is determined by the same
-roofline model you used in the Hello World tutorial. The new element here is **communication
+Start with the simplest configuration: no model splitting, only the full model replicated
+on every GPU and the batch split across them. The per-GPU compute time is determined by the same
+roofline model used in the Hello World tutorial. The new element here is **communication
 overhead**: after each training step, all GPUs must synchronize their gradients via the
 network before the next step can begin.
 
@@ -138,11 +183,11 @@ print(f"Parallelism:                 DP={result_dp.parallelism['dp']}  TP={resul
 ```
 
 ::: {.callout-note}
-## What does scaling efficiency mean?
+## What scaling efficiency means
 
-If scaling efficiency is 80%, then your 256-GPU cluster is delivering the equivalent of
-about 205 fully-utilized GPUs. The other ~51 GPUs worth of compute is being spent on
-communication overhead. This is the **communication tax** of distributed training.
+At a scaling efficiency of **`{python} f"{_r_dp.scaling_efficiency:.1%}"`**, a `{python} f"{_cluster.total_accelerators}"`-GPU cluster delivers the equivalent of
+about **`{python} f"{_eff_gpus_dp:.0f}"` fully utilized GPUs**. The remaining **`{python} f"{_wasted_gpus_dp:.0f}"` GPUs** worth of compute goes to
+communication overhead (`{python} f"{_r_dp.dp_communication_latency.to('ms'):~.1f}"` of ring all-reduce out of every `{python} f"{_r_dp.step_latency_total.to('ms'):~.1f}"` step). This is the **communication tax** of distributed training.
 
 The tax is paid in **ring all-reduce**: after the backward pass, every GPU must synchronize
 gradients with every other GPU. The time to do this grows with model size and shrinks with
@@ -191,7 +236,7 @@ for fab_name, fabric in fabrics:
     )
     print(
         f"{fab_name:>10}  "
-        f"{fabric.bandwidth.to('GB/s'):>10.0f~}  "
+        f"{fabric.bandwidth.to('GB/s'):>10.1f~}  "
         f"{r.dp_communication_latency.to('ms'):>14.2f~}  "
         f"{r.scaling_efficiency:>11.1%}"
     )
@@ -200,9 +245,8 @@ for fab_name, fabric in fabrics:
 ::: {.callout-warning}
 ## Fabric choice determines scaling efficiency
 
-Upgrading from 100GbE to InfiniBand NDR roughly doubles the effective inter-node bandwidth.
-On a model the size of Llama-70B (140 GB of gradients per step in fp16), that difference
-is significant. For smaller models, it matters less — compute time dominates.
+Upgrading from 100GbE (`{python} f"{_eth100.bandwidth.to('GB/s'):~.1f}"`) to InfiniBand NDR (`{python} f"{_ib_ndr.bandwidth.to('GB/s'):~.0f}"`) increases inter-node link bandwidth by **`{python} f"{_bw_ratio_ndr:.0f}×"`**.
+On `{python} _model.name` (`{python} f"{_grad_gb:.1f} GB"` of FP16 gradients per step), that upgrade cuts DP communication latency from `{python} f"{_r_eth100.dp_communication_latency.to('ms'):~.0f}"` to `{python} f"{_r_ib_ndr.dp_communication_latency.to('ms'):~.0f}"` and lifts scaling efficiency from `{python} f"{_r_eth100.scaling_efficiency:.1%}"` to `{python} f"{_r_ib_ndr.scaling_efficiency:.1%}"`. For smaller models, it matters less, because compute time dominates.
 :::
 
 ---
@@ -231,7 +275,6 @@ for pp_size in [1, 2, 4, 8]:
         # Only show interesting combinations
         if pp_size == 1 and m > 1:
             continue
-        tp = min(8, cluster.total_accelerators // (pp_size * 4))
         r = solver.solve(
             model=model,
             fleet=cluster,
@@ -255,11 +298,11 @@ for pp_size in [1, 2, 4, 8]:
 ## Recovering bubble efficiency
 
 Increasing the number of **microbatches** ($M$) reduces the bubble fraction. With $M = 16$
-and $P = 8$, the bubble is only $7/(7+16) ≈ 30\%$ of the pipeline, down from $88\%$ with
+and $P = 8$, the bubble is only $7/(7+16) = `{python} f"{_r_pp8_m16.bubble_fraction:.1%}"`$ of the pipeline, down from $`{python} f"{_r_pp8_m1.bubble_fraction:.1%}"`$ with
 $M = 1$.
 
 In practice, frameworks like Megatron-LM use **interleaved pipeline schedules** that further
-reduce the bubble. But even with the standard 1F1B schedule, choosing $M \gg P$ is essential.
+reduce the bubble. Even with the standard 1F1B schedule, however, choosing $M \gg P$ is essential.
 :::
 
 ---
@@ -267,9 +310,7 @@ reduce the bubble. But even with the standard 1F1B schedule, choosing $M \gg P$ 
 ## 6. Finding the Optimal Configuration
 
 Now combine all three parallelism strategies and find the configuration that maximizes
-scaling efficiency for the `Research_256` cluster. In practice, 70-80% scaling efficiency
-on hundreds of GPUs is considered excellent. Below 50% typically signals a suboptimal
-parallelism configuration or insufficient network bandwidth.
+scaling efficiency for the `Research_256` cluster (`{python} f"{_cluster.total_accelerators}"` GPUs over `{python} _cluster.fabric.name`).
 
 ```{python}
 configs = [
@@ -307,41 +348,9 @@ for desc, tp, pp, m in configs:
         print(f"{desc:<26}  {'INFEASIBLE':>44}  ({e})")
 ```
 
----
-
-## Your Turn
-
-::: {.callout-caution}
-## Exercises
-
-**Exercise 1: Predict before you observe.**
-For a 256-GPU cluster training Llama-3.1-70B, predict: will DP=256, TP=1, PP=1 have higher or lower scaling efficiency than DP=32, TP=4, PP=2? Write your prediction and reasoning, then run both configurations. Were you right?
-
-**Exercise 2: Find the optimal configuration.**
-Sweep all valid 3D parallelism configurations for 256 GPUs (where DP x TP x PP = 256). Which configuration maximizes scaling efficiency? Is it the same for Ethernet 100G vs. InfiniBand NDR? (Hint: valid TP values are divisors of 8, the GPUs per node: 1, 2, 4, 8. For each TP, valid PP values are divisors of 256/TP.)
-
-**Exercise 3: The microbatch lever.**
-With PP=8, sweep microbatch count M from 1 to 64. Plot the pipeline bubble fraction vs. M. At what value of M does the bubble fraction drop below 10%? (Use the formula from Section 5: bubble = (P-1)/(P-1+M). Predict the answer analytically before running the sweep.)
-
-**Self-check:** Why must tensor parallelism (TP) stay within a single node on most clusters? What would happen to communication overhead if TP crossed node boundaries?
-:::
+Confining `TP=8` within each 8-GPU node over NVLink (`{python} f"{_cluster.node.intra_node_bw.to('GB/s'):~.0f}"`) and pairing `PP=4` ($M=16$) with `DP={python} f"{_r_opt.parallelism['dp']}"` raises scaling efficiency from `{python} f"{_r_dp.scaling_efficiency:.1%}"` (`{python} f"{_r_dp.effective_throughput.magnitude:.1f}"` samples/s) under pure DP to **`{python} f"{_r_opt.scaling_efficiency:.1%}"`** (**`{python} f"{_r_opt.effective_throughput.magnitude:.1f}"` samples/s**)---both fitting the model shards inside per-GPU HBM and shrinking the cross-node DP gradient payload by $8 \times 4 = 32\times$.
 
 ---
-
-## What You Learned
-
-- **3D Parallelism** decomposes the training problem across $\text{DP} \times \text{TP} \times \text{PP}$ GPUs,
-  each with distinct communication costs.
-- **Ring all-reduce** is the network tax of data parallelism. It grows with model size and
-  shrinks with fabric bandwidth. Switching from 100GbE to InfiniBand can recover 10-30%
-  efficiency on large models.
-- **Pipeline bubbles** waste GPU cycles proportional to $\frac{P-1}{P-1+M}$. Use large
-  microbatch counts ($M \gg P$) to minimize waste.
-- **Scaling efficiency below 100%** is normal and unavoidable. A well-tuned job at 70-80%
-  efficiency on hundreds of GPUs is excellent. Below 50% signals a configuration problem.
-
----
-
 
 ## Advanced: Network Topologies
 
@@ -353,7 +362,7 @@ oversubscription, or per-hop latency.
 
 For this release, the built-in `DistributedModel` exposes the core ring and
 hierarchical all-reduce model. Use the lower-level formulas in
-`mlsysim.physics` when you want to compare algorithmic assumptions directly.
+`mlsysim.physics` to compare algorithmic assumptions directly.
 
 ---
 

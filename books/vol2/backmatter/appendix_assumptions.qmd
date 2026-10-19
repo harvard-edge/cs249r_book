@@ -11,9 +11,15 @@ Every quantitative example in this book, from cluster failure rates to collectiv
 
 ## How to Use This Appendix {.unnumbered}
 
-Use this appendix to verify a fleet-scale estimate, swap in an alternative assumption (for example, NDR vs. HDR fabric, Quebec vs. Poland carbon intensity, or a different model FLOPs utilization (MFU)), or identify which numerical constants a chapter calculation depends on. Locate the relevant section, read the `Value` and `Unit` columns, and substitute those values into target arithmetic.
+Use this appendix to verify a fleet-scale estimate, swap in an alternative assumption (for example, NDR vs. HDR fabric, Quebec vs. Poland carbon intensity, or a different model FLOPs utilization (MFU)), or identify which numerical constants a chapter calculation depends on. Locate the relevant section, read the `Value` and `Unit` columns, and substitute those values into target arithmetic:
 
-A short napkin-math callout at the start shows how several assumptions combine (failure rate, AllReduce time, carbon footprint). Hardware and link bandwidths are ceilings unless a chapter states an effective-bandwidth discount. Treat the tables as this edition's shared assumption sheet, not immutable physical laws.
+- **When auditing or substituting the baseline 175B training job**: Use @sec-appdx-fleet-reference-workload and the Foundational Hardware Recap section.
+- **When scaling a calculation across cluster sizes or network fabrics**: Use the Cluster Reference Configurations, Network and Interconnect Specifications, and Communication Model Parameters sections.
+- **When estimating failure frequency or recovery downtime**: Use the component lifetime and recovery tables in the Reliability Assumptions section.
+- **When pricing power, water, carbon, or cloud infrastructure**: Use the Sustainability Assumptions and Economic Assumptions sections.
+- **When discounting peak FLOP/s to delivered throughput or checking units and sources**: Use the Capacity Planning Assumptions and Unit Conventions sections, and trace each constant's evidence class in @sec-appdx-fleet-assumption-provenance.
+
+Three worked estimates in napkin math \ref{nbk-appendix-assumptions-quick-calculations-constants} combine these constants to calculate cluster failure rate, AllReduce time, and monthly carbon footprint. Hardware and link bandwidths are ceilings unless a chapter states an effective-bandwidth discount; treat the tables as this edition's shared assumption sheet rather than immutable physical laws.
 
 ```{python}
 #| echo: false
@@ -188,7 +194,7 @@ class H100Recap:
 
 ## Foundational Hardware Recap {.unnumbered}
 
-Distributed-systems reasoning in this book builds on single-node performance bounds. @Tbl-fleet-foundation-recap recaps the H100 assumptions used as the primary accelerator reference in this book. @Sec-appdx-dam-taxonomy derives the single-machine quantities built on these specifications, including the ridge point, the memory hierarchy, and the per-parameter memory of training.
+Before a fleet calculation can attribute a slowdown to collective communication or stragglers, it needs the compute, memory-bandwidth, capacity, and thermal ceilings of one accelerator in isolation. The book's primary single-node reference is the NVIDIA H100 (@tbl-fleet-foundation-recap), and @sec-appdx-dam-taxonomy derives the single-machine quantities built on these specifications, including the ridge point, the memory hierarchy, and the per-parameter memory of training.
 
 | **Category** |       **Assumption**      |                 **Value**                 |
 |:-------------|:-------------------------:|:-----------------------------------------:|
@@ -253,7 +259,7 @@ class ArchetypeARecap:
 
 ## Reference Workload {#sec-appdx-fleet-reference-workload}
 
-Where a chapter needs a concrete training job, it uses the Archetype A running instance that @sec-introduction-archetype-gpt4llama3-b02f fixes. @Tbl-fleet-archetype-a restates it so that any calculation built on it can be audited or rerun with a different model or cluster. A chapter that studies a different model or cluster size says so explicitly.
+Single-accelerator ceilings turn into concrete multi-node requirements as soon as a model's training state exceeds the capacity of one H100. Where a chapter needs a concrete training job, it uses the Archetype A running instance that @sec-introduction-archetype-gpt4llama3-b02f fixes (@tbl-fleet-archetype-a), so that any calculation built on that baseline can be audited or rerun with a different model or cluster. A chapter that studies a different model or cluster size says so explicitly.
 
 | **Assumption**                       |                                                                     **Value**                                                                      |
 |:-------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------:|
@@ -294,7 +300,7 @@ class ClusterConstants:
 
 ## Cluster Reference Configurations {.unnumbered}
 
-This book uses four **canonical cluster tiers**\index{Assumptions!cluster tiers} (256, 2,048, 8,192, and 100,000 GPUs) to illustrate how system behavior changes across scale. They are editorial reference points aligned with common research-lab, production, large-training, and hyperscale fleets, not measurements from a single deployment. @Tbl-fleet-cluster-sizes defines GPU counts. Chapters derive node counts, failure rates, and network requirements from these baselines and the assumptions in subsequent tables.
+A communication or fault-tolerance design that works cleanly on the 1,024-GPU Archetype A reference cluster can be unnecessary on a 256-GPU research allocation yet fail completely on a 100,000-GPU hyperscale fleet. Four **canonical cluster tiers**\index{Assumptions!cluster tiers} (256, 2,048, 8,192, and 100,000 GPUs) therefore anchor how system behavior changes across scale (@tbl-fleet-cluster-sizes). They are editorial reference points aligned with common research-lab, production, large-training, and hyperscale fleets, not measurements from a single deployment, and chapters derive node counts, failure rates, and network requirements from these baselines and the assumptions in subsequent tables.
 
 | **Assumption**                        |                        **Value**                         |                            **Unit**                           |
 |:--------------------------------------|:--------------------------------------------------------:|:-------------------------------------------------------------:|
@@ -393,7 +399,7 @@ Distributed training and inference are bottlenecked by data movement between mac
 
 ### Intra-node interconnects {.unnumbered}
 
-Within a single node, GPUs communicate over NVLink or PCIe. These bandwidths (@tbl-fleet-intra-node) determine whether tensor parallelism (which requires high-bandwidth, low-latency communication) is viable within the node boundary. These values are collected here for convenience and reused throughout the fleet-scale chapters.
+Splitting a single transformer layer across eight GPUs inside a server requires an all-reduce on every forward and backward pass, which is viable at hundreds of gigabytes per second over NVLink but stalls over a host PCIe bus. Those intra-node bandwidths and latencies (@tbl-fleet-intra-node) determine which fine-grained parallelism strategies must remain within the node boundary.
 
 | **Assumption**                  |                     **Value**                     |                        **Unit**                        |
 |:--------------------------------|:-------------------------------------------------:|:------------------------------------------------------:|
@@ -428,7 +434,7 @@ Once data crosses the node boundary, bandwidth drops by an order of magnitude an
 
 ### Wide-area network {.unnumbered}
 
-Cross-region communication introduces latency floors set by the speed of light in optical fiber. For a `{python} NetworkConstants.wan_example_km_str` link (roughly New York to London), the minimum one-way latency is `{python} NetworkConstants.wan_example_km_str`/`{python} NetworkConstants.wan_fiber_speed_km_per_s_str` = `{python} NetworkConstants.wan_latency_ms_str`, orders of magnitude higher than intra-data-center latency. This physical constraint is why geo-distributed training uses asynchronous methods or careful placement of pipeline stages, and why federated learning (@sec-edge-intelligence) tolerates stale gradients. Network specifications define how fast data moves, but they say nothing about how often the machines sending that data fail. The next section quantifies the reliability of individual components, the building blocks from which cluster-level failure rates are derived.
+Cross-region communication introduces latency floors set by the speed of light in optical fiber. For a `{python} NetworkConstants.wan_example_km_str` link (roughly New York to London), the minimum one-way latency is `{python} NetworkConstants.wan_example_km_str`/`{python} NetworkConstants.wan_fiber_speed_km_per_s_str` = `{python} NetworkConstants.wan_latency_ms_str`, orders of magnitude higher than intra-data-center latency. This physical constraint is why geo-distributed training uses asynchronous methods or careful placement of pipeline stages, and why federated learning (@sec-edge-intelligence) tolerates stale gradients. Network specifications define how fast data moves across links and regions, but a multi-thousand-node training job can sustain those transfer rates only while every participating accelerator, network card, and switch remains healthy.
 
 ```{python}
 #| echo: false
@@ -501,7 +507,7 @@ At fleet scale, component failures are statistical certainties rather than excep
 
 ### Component MTTF {.unnumbered}
 
-The component MTTFs in @tbl-fleet-mttf are steady-state values that exclude the early "infant mortality" period after deployment and the "wear-out" period (beyond rated lifetime). Sources include large-GPU research-cluster analysis [@kokolis2025], TPUv4 supercomputer resiliency and operations [@zu2024tpuv4], and warehouse-scale machine design [@barroso2019].
+A single data-center GPU runs for tens of thousands of hours on average before failing, yet combining eight GPUs and eight NICs per server across a thousand nodes turns multi-year component lifetimes into a cluster interruption every few hours. The steady-state component MTTFs in @tbl-fleet-mttf exclude the early "infant mortality" period after deployment and the late "wear-out" period beyond rated lifetime, drawing on large-GPU research-cluster analysis [@kokolis2025], TPUv4 supercomputer resiliency and operations [@zu2024tpuv4], and warehouse-scale machine design [@barroso2019].
 
 | **Assumption**                     |                         **Value**                          |                             **Unit**                            |
 |:-----------------------------------|:----------------------------------------------------------:|:---------------------------------------------------------------:|
@@ -517,7 +523,7 @@ The component MTTFs in @tbl-fleet-mttf are steady-state values that exclude the 
 
 ### Recovery time assumptions {.unnumbered}
 
-Failure detection and recovery introduce downtime that compounds with cluster size. @Tbl-fleet-recovery lists the assumptions used in checkpoint interval optimization (the Young-Daly formula in @sec-fault-tolerance-young-daly) and effective throughput calculations throughout this book. These reliability constants quantify how often failures occur and how long recovery takes. Productive training steps also incur recurring communication overhead, and the parameters in the next section determine its cost.
+When one of those components fails, the cluster loses wall-clock time not only to replaying steps since the last snapshot, but also to expiring the heartbeat timer, allocating a replacement node, and streaming the checkpoint back from storage. @Tbl-fleet-recovery lists the detection, rescheduling, and storage-bandwidth assumptions used in checkpoint interval optimization (the Young-Daly formula in @sec-fault-tolerance-young-daly) and effective throughput calculations throughout this book.
 
 | **Assumption**                         |                               **Value**                                |                                **Unit**                               |
 |:---------------------------------------|:----------------------------------------------------------------------:|:---------------------------------------------------------------------:|
@@ -526,6 +532,8 @@ Failure detection and recovery introduce downtime that compounds with cluster si
 | Checkpoint write bandwidth (aggregate) | `{python} ReliabilityConstants.checkpoint_write_bw_gb_per_s_value_str` | `{python} ReliabilityConstants.checkpoint_write_bw_gb_per_s_unit_str` |
 
 : **Recovery Time Parameters**: Design assumptions for heartbeat, reschedule, and checkpoint-write bandwidth (Young-Daly context [@young1974; @daly2006]). Recovery before replay $\approx$ detect + reschedule + checkpoint size divided by storage bandwidth; for a `{python} ReliabilityConstants.recovery_model_b_str`-parameter model with a `{python} ReliabilityConstants.recovery_ckpt_bpp_str`-byte-per-parameter checkpoint, about `{python} ReliabilityConstants.recovery_time_s_str` per failure. {#tbl-fleet-recovery}
+
+Together with @tbl-fleet-mttf, these recovery parameters determine how much wall time is lost when hardware fails. Even on fault-free steps, however, distributed training stalls whenever workers synchronize gradients or activations across the network.
 
 ```{python}
 #| echo: false
@@ -569,7 +577,7 @@ class CommModelConstants:
 
 ## Communication Model Parameters {.unnumbered}
 
-This book models communication cost using the $\MessageStartupLatency$-$\LinkBandwidth$ framework: $\PointToPointTransferTime(\PointToPointMessageSize) = \MessageStartupLatency+ \PointToPointMessageSize/\LinkBandwidth$, where $\MessageStartupLatency$ is startup latency and $\LinkBandwidth$ is sustained bandwidth [@hockney1994]. @Tbl-fleet-alpha-beta lists values from fabric specifications, vendor product documentation, and large-cluster training studies [@infiniband2000spec; @gangidi2024rdma; @nvidia2026quantumX800; @ethernetAlliance2025roadmap; @jiang2024megascale]. They feed collective-communication models in @sec-collective-communication and parallelism comparisons in @sec-distributed-training-systems.
+A small control message or fine-grained collective pays a per-message software and fabric launch delay on every hop even on a 400 Gbps link, whereas a multi-gigabyte gradient synchronization is governed by sustained byte rate. The book's communication models capture both regimes with the $\MessageStartupLatency$-$\LinkBandwidth$ framework, $\PointToPointTransferTime(\PointToPointMessageSize) = \MessageStartupLatency+ \PointToPointMessageSize/\LinkBandwidth$, where $\MessageStartupLatency$ is startup latency and $\LinkBandwidth$ is sustained bandwidth [@hockney1994]. @Tbl-fleet-alpha-beta lists values from fabric specifications, vendor product documentation, and large-cluster training studies [@infiniband2000spec; @gangidi2024rdma; @nvidia2026quantumX800; @ethernetAlliance2025roadmap; @jiang2024megascale], feeding the collective-communication models in @sec-collective-communication and parallelism comparisons in @sec-distributed-training-systems.
 
 | **Assumption**                                            |                             **Value**                              |                              **Unit**                             |
 |:----------------------------------------------------------|:------------------------------------------------------------------:|:-----------------------------------------------------------------:|
@@ -585,7 +593,7 @@ This book models communication cost using the $\MessageStartupLatency$-$\LinkBan
 
 ### AllReduce cost model {.unnumbered}
 
-The ring AllReduce (the most common collective for gradient synchronization) transmits $2(\DeviceCount-1)\CollectivePayloadSize/\DeviceCount$ bytes per rank, where $\DeviceCount$ is the number of ranks and $\CollectivePayloadSize$ is the collective payload size. For large $\DeviceCount$, this approaches $2\CollectivePayloadSize$ bytes per rank. @Tbl-fleet-allreduce lists the constants used in AllReduce cost estimation. The sustainability section that follows captures the physical power, water, and carbon costs of running the surrounding facility.
+Synchronizing a $\CollectivePayloadSize$-byte gradient buffer across $\DeviceCount$ data-parallel ranks via ring AllReduce transmits $2(\DeviceCount-1)\CollectivePayloadSize/\DeviceCount$ bytes per rank, which approaches $2\CollectivePayloadSize$ bytes per rank as $\DeviceCount$ grows. @Tbl-fleet-allreduce lists the asymptotic bandwidth factor and node-boundary count used in AllReduce cost estimation.
 
 | **Assumption**                  |                        **Value**                         |                            **Unit**                           |
 |:--------------------------------|:--------------------------------------------------------:|:-------------------------------------------------------------:|
@@ -593,6 +601,8 @@ The ring AllReduce (the most common collective for gradient synchronization) tra
 | GPUs per node                   | `{python} CommModelConstants.dgx_h100_gpus_per_node_str` | `{python} CommModelConstants.dgx_h100_gpus_per_node_unit_str` |
 
 : **AllReduce Cost Parameters**: Ring AllReduce factor of 2 from the standard ring algorithm [@gibiansky2017baidu]. The DGX H100 node (`{python} CommModelConstants.dgx_gpus_per_node_count_str` GPUs per node) sets the intra-node versus inter-node boundary in hierarchical collectives. {#tbl-fleet-allreduce}
+
+Compute, network, and reliability constants determine how long a training or serving job runs on the cluster; operating that cluster in a real data center also requires budgeting the electrical power, cooling water, and grid carbon consumed by the surrounding facility.
 
 ```{python}
 #| echo: false
@@ -650,7 +660,7 @@ The environmental impact of fleet-scale ML depends on three factors: how much po
 
 ### Power usage effectiveness {.unnumbered}
 
-PUE is the ratio of total facility power to IT equipment power (@eq-pue). A PUE of 1.0 would mean no facility energy beyond the IT equipment. The following values are illustrative facility scenarios, not universal bounds or guarantees of a cooling technology. @Tbl-fleet-pue lists the reference PUE values used throughout this book.
+A 10,000-GPU cluster drawing megawatts of IT power requires additional megawatts for the chillers, fans, and power distribution that keep the accelerators within their thermal envelope. That facility overhead is captured by PUE, the ratio of total facility power to IT equipment power (@eq-pue), where a PUE of 1.0 would mean zero energy beyond the IT equipment itself. The reference tiers in @tbl-fleet-pue represent illustrative facility scenarios rather than universal bounds of a cooling technology.
 
 | **Assumption**                     |                        **Value**                         |                            **Unit**                           |
 |:-----------------------------------|:--------------------------------------------------------:|:-------------------------------------------------------------:|
@@ -663,7 +673,7 @@ PUE is the ratio of total facility power to IT equipment power (@eq-pue). A PUE 
 
 ### Water usage effectiveness {.unnumbered}
 
-WUE measures liters of water consumed per kilowatt-hour of IT energy [@thegreengrid2011wue]. Evaporative cooling towers achieve excellent PUE but consume significant water; a closed liquid loop can limit water consumption at the rack, but facility water use still depends on the heat-rejection system outside that loop. For that reason the reference tiers in @tbl-fleet-wue separate air-cooled, evaporative, and closed-loop liquid cooling.
+Evaporative cooling towers achieve low PUE by evaporating water to reject heat, whereas a closed liquid loop limits water loss at the rack while still depending on the heat-rejection system outside that loop. To quantify that cooling trade-off, WUE measures liters of water consumed per kilowatt-hour of IT energy [@thegreengrid2011wue], and @tbl-fleet-wue separates air-cooled, evaporative, and closed-loop liquid reference tiers.
 
 | **Assumption**            |                       **Value**                        |                           **Unit**                          |
 |:--------------------------|:------------------------------------------------------:|:-----------------------------------------------------------:|
@@ -690,7 +700,7 @@ The same training run emits vastly different amounts of CO$_2$ depending on the 
 
 ### Power density {.unnumbered}
 
-Dense AI accelerator racks can draw substantially more power than conventional racks. Whether liquid cooling is required depends on the installed heat-removal capacity, airflow, and server design, rather than a universal rack-power threshold. @Tbl-fleet-power-density lists the reference rack power levels used in @sec-compute-infrastructure and @sec-sustainable-ai, anchored to current AI power-and-cooling product disclosures [@dell2026powercool; @schneider2024ai132kw]. These sustainability constants capture the physical and environmental costs of running a fleet. The economic constants in the next section translate those physical costs into dollar values to complete the total-cost-of-ownership picture.
+Packing eight high-wattage accelerators and their host and network hardware into a server chassis pushes AI racks far past the thermal load of conventional enterprise racks. Whether liquid cooling is required depends on the installed heat-removal capacity, airflow, and server design rather than a universal rack-power threshold, and @tbl-fleet-power-density lists the reference rack power levels used in @sec-compute-infrastructure and @sec-sustainable-ai, anchored to current AI power-and-cooling product disclosures [@dell2026powercool; @schneider2024ai132kw].
 
 | **Assumption**                       |                            **Value**                             |                                **Unit**                               |
 |:-------------------------------------|:----------------------------------------------------------------:|:---------------------------------------------------------------------:|
@@ -700,6 +710,8 @@ Dense AI accelerator racks can draw substantially more power than conventional r
 | Air-cooling practical limit per rack |   `{python} SustainabilityConstants.AIR_COOLING_LIMIT_KW_str`    |    `{python} SustainabilityConstants.AIR_COOLING_LIMIT_KW_unit_str`   |
 
 : **Rack Power Density**: Illustrative rack-power tiers and air-cooling limit [@davis2022uptime; @dell2026powercool; @schneider2024ai132kw]. The listed AI rack scenarios (`{python} SustainabilityConstants.rack_ai_low_kw_str`--`{python} SustainabilityConstants.rack_ai_high_kw_str`) exceed the illustrative `{python} SustainabilityConstants.air_cooling_limit_kw_str` air-cooling reference; the feasible limit depends on the installed system. {#tbl-fleet-power-density}
+
+These sustainability constants quantify the megawatts, water volume, and carbon emissions of operating a fleet; converting those physical resource draws and accelerator allocations into project budgets requires unit prices for compute hours, electricity, and network egress.
 
 ```{python}
 #| echo: false
@@ -745,7 +757,7 @@ class EconomicConstants:
 
 ## Economic Assumptions {.unnumbered}
 
-Fleet-scale cost estimates depend on GPU rental rates, electricity pricing, and data transfer charges. These are illustrative hyperscaler-order rates (2024–2025 magnitude) for ratio analysis, not quotes for a specific contract. @Tbl-fleet-economic supports @sec-ops-scale and @sec-inference-scale total cost of ownership (TCO) napkin math. The capacity-planning constants in the next section quantify the gap between peak capability and achievable throughput by measuring what fraction of each resource unit performs useful work.
+A multi-week training run on thousands of GPUs or a global serving tier streaming responses across regions accumulates millions of dollars in compute rental, facility electricity, and network egress charges. The prices in @tbl-fleet-economic provide illustrative hyperscaler-order rates (2024–2025 magnitude) for total cost of ownership (TCO) ratio analysis in @sec-ops-scale and @sec-inference-scale, not quotes for a specific contract.
 
 | **Assumption**                  |                           **Value**                           |                              **Unit**                              |
 |:--------------------------------|:-------------------------------------------------------------:|:------------------------------------------------------------------:|
@@ -755,7 +767,9 @@ Fleet-scale cost estimates depend on GPU rental rates, electricity pricing, and 
 | Cloud electricity price         |   `{python} EconomicConstants.cloud_electricity_per_kwh_str`  |  `{python} EconomicConstants.cloud_electricity_per_kwh_unit_str`   |
 | Cloud egress price per GB       |      `{python} EconomicConstants.cloud_egress_per_gb_str`     |     `{python} EconomicConstants.cloud_egress_per_gb_unit_str`      |
 
-: **Fleet-Scale Economic Parameters**: Illustrative GPU-hour, electricity, and egress rates for TCO examples (substitute contract pricing for absolute budgets). The fleet GPU-hour reference is the price per in-service accelerator-hour used by the volume's fleet cost examples; the cloud rental rates are public list-price anchors for comparison. {#tbl-fleet-economic}
+: **Fleet-Scale Economic Parameters**: Illustrative GPU-hour, electricity, and egress rates for TCO examples (substitute contract pricing for absolute budgets). The fleet GPU-hour reference is the price per in-service accelerator-hour used by this book's fleet cost examples; the cloud rental rates are public list-price anchors for comparison. {#tbl-fleet-economic}
+
+Pricing an accelerator-hour settles what a cluster allocation costs per unit of wall time, but converting that hourly spend into delivered training progress requires discounting datasheet peak FLOP/s by kernel utilization, multi-node scaling efficiency, and operational downtime.
 
 ```{python}
 #| echo: false
@@ -827,7 +841,7 @@ class CapacityConstants:
 
 ## Capacity Planning Assumptions {.unnumbered}
 
-The capacity-planning assumptions\index{Assumptions!capacity planning} quantify two related phenomena: (1) the fraction of peak hardware performance that real workloads achieve (model FLOPs utilization), and (2) how efficiently that performance scales as more machines are added (scaling efficiency). Together they determine the effective compute available for a given cluster size and budget, which is the number that matters for project planning. Because these factors compound across the fleet, the planning equation is multiplicative:
+Multiplying a cluster's GPU count by the H100's datasheet peak FLOP/s overstates delivered training throughput by more than a factor of three, because single-device kernel inefficiency, multi-node communication stalls, and out-of-step operational downtime each take a cut. The capacity-planning assumptions\index{Assumptions!capacity planning} quantify the fraction of peak hardware performance that real workloads sustain on one device (MFU), how efficiently that performance scales as more machines are added (scaling efficiency), and what share of wall time is lost to operational pauses. Because these factors compound across the fleet, the planning equation is multiplicative:
 
 $$ \EffectiveFleetThroughput = \DeviceCount\PeakRate \times \ModelFlopsUtilization \times \ScalingEfficiency \times (1 - \OperationalOverheadFraction) $$
 
@@ -835,7 +849,7 @@ Here $\EffectiveFleetThroughput$ is effective fleet throughput, $\DeviceCount\Pe
 
 ### Model FLOPs utilization {.unnumbered}
 
-MFU measures useful model FLOP/s divided by hardware peak FLOP/s over a stated measurement window. Synchronization and idle time within that window lower MFU even though they contribute no model FLOPs. An MFU of 0.50 means the workload achieves half the peak FLOP/s. @Tbl-fleet-mfu lists the reference MFU ranges used in training time and cost estimates throughout this book.
+Even on a single accelerator, memory-bandwidth stalls, kernel launch gaps, and non-matmul operations prevent a model from sustaining datasheet peak throughput. MFU measures useful model FLOP/s divided by hardware peak FLOP/s over a stated measurement window, so an MFU of 0.50 means the workload achieves half of peak FLOP/s; synchronization and idle time within that window lower MFU even though they contribute no model FLOPs. @Tbl-fleet-mfu lists the reference MFU ranges used in training time and cost estimates throughout this book.
 
 | **Assumption**               |                       **Value**                        |                           **Unit**                          |
 |:-----------------------------|:------------------------------------------------------:|:-----------------------------------------------------------:|
@@ -848,7 +862,7 @@ MFU measures useful model FLOP/s divided by hardware peak FLOP/s over a stated m
 
 ### Scaling efficiency {.unnumbered}
 
-Scaling efficiency $\ScalingEfficiency = \SingleDeviceRunTime/(\DeviceCount\times \MultiDeviceRunTime)$ measures how much of the added compute actually reduces training time. @Tbl-fleet-scaling lists the tiers the book plans with. From 256 GPUs up, these values match MLSysIM's modeled efficiency curve for the 175B reference job at a fixed GPT-3 global batch. They extend the multi-GPU scaling sweep of @fig-fleet-orchestration-scaling-efficiency-curve in @sec-fleet-orchestration out to 8,192 accelerators. The 32-GPU tier is a book convention, since one tensor- and pipeline-parallel replica of that job needs 64 GPUs. Production systems retain more at scale by training with a larger global batch and, where they pipeline, by interleaving stages. Published large language model (LLM) training runs built this way report near-linear scaling on thousands of accelerators [@jiang2024megascale; @chowdhery2022palm].
+Expanding a job from one node to hundreds of nodes adds gradient synchronization and pipeline bubble stalls that stretch each step beyond its single-device baseline. Scaling efficiency $\ScalingEfficiency = \SingleDeviceRunTime/(\DeviceCount\times \MultiDeviceRunTime)$ measures how much of the added compute actually reduces training time, and @tbl-fleet-scaling lists the tiers this book plans with. From 256 GPUs up, these values match MLSysIM's modeled efficiency curve for the 175B reference job at a fixed GPT-3 global batch. They extend the multi-GPU scaling sweep of @fig-fleet-orchestration-scaling-efficiency-curve in @sec-fleet-orchestration out to 8,192 accelerators. The 32-GPU tier is a book convention, since one tensor- and pipeline-parallel replica of that job needs 64 GPUs. Production systems retain more at scale by training with a larger global batch and, where they pipeline, by interleaving stages. Published large language model (LLM) training runs built this way report near-linear scaling on thousands of accelerators [@jiang2024megascale; @chowdhery2022palm].
 
 | **Assumption**                  |                      **Value**                       |                          **Unit**                         |
 |:--------------------------------|:----------------------------------------------------:|:---------------------------------------------------------:|
@@ -861,7 +875,7 @@ Scaling efficiency $\ScalingEfficiency = \SingleDeviceRunTime/(\DeviceCount\time
 
 ### Overhead budgets {.unnumbered}
 
-Real training jobs spend a fraction of wall time on noncompute activities: pipeline bubble idle time, checkpoint writes, failure recovery, and scheduled maintenance. @Tbl-fleet-overhead lists the overhead budgets assumed throughout this book. When measured as nonoverlapping fractions of the same wall-time window, these fractions are additive: total overhead at fleet scale is approximately `{python} CapacityConstants.overhead_pipeline_pct_str` + `{python} CapacityConstants.overhead_checkpoint_pct_str` + `{python} CapacityConstants.overhead_failure_pct_str` + `{python} CapacityConstants.overhead_maintenance_pct_str` = `{python} CapacityConstants.overhead_total_pct_str`, leaving `{python} CapacityConstants.overhead_useful_pct_str` outside these listed overhead categories. This combined budget includes pipeline bubbles; the planning equation above excludes them from its operational factor because scaling efficiency already accounts for them. All of the tables above use the unit conventions in @tbl-fleet-units, applying decimal data prefixes ($\text{KB} = 10^3$ bytes), separating work (FLOPs) from throughput (FLOP/s), and following the aliases below.
+Real training jobs spend a fraction of wall time on noncompute activities: pipeline bubble idle time, checkpoint writes, failure recovery, and scheduled maintenance. @Tbl-fleet-overhead lists the overhead budgets assumed throughout this book. When measured as nonoverlapping fractions of the same wall-time window, these fractions are additive: total overhead at fleet scale is approximately `{python} CapacityConstants.overhead_pipeline_pct_str` + `{python} CapacityConstants.overhead_checkpoint_pct_str` + `{python} CapacityConstants.overhead_failure_pct_str` + `{python} CapacityConstants.overhead_maintenance_pct_str` = `{python} CapacityConstants.overhead_total_pct_str`, leaving `{python} CapacityConstants.overhead_useful_pct_str` outside these listed overhead categories. This combined budget includes pipeline bubbles; the multiplicative planning equation excludes them from its operational factor $\OperationalOverheadFraction$ because scaling efficiency $\ScalingEfficiency$ already accounts for them.
 
 | **Assumption**                             |                         **Value**                          |                             **Unit**                            |
 |:-------------------------------------------|:----------------------------------------------------------:|:---------------------------------------------------------------:|
@@ -871,6 +885,8 @@ Real training jobs spend a fraction of wall time on noncompute activities: pipel
 | Wall-time overhead (scheduled maintenance) |   `{python} CapacityConstants.overhead_maintenance_str`    |    `{python} CapacityConstants.overhead_maintenance_unit_str`   |
 
 : **Overhead Budgets (Fraction of Wall Time)**: Book-convention wall-time fractions for pipeline bubbles, checkpointing, failure recovery, and maintenance, engineering targets, not physical constants. Combined `{python} CapacityConstants.overhead_total_pct_str` overhead $\Rightarrow$ `{python} CapacityConstants.overhead_effective_days_str` of effective work in a 30-day run. {#tbl-fleet-overhead}
+
+Combining hardware peaks, link rates, reliability intervals, facility power, dollar rates, and utilization fractions in a single calculation requires a consistent set of dimensional prefixes and unit aliases.
 
 ```{python}
 #| echo: false
@@ -921,9 +937,9 @@ class UnitConstants:
 
 ## Unit Conventions {.unnumbered}
 
-@Tbl-fleet-units fixes the unit conventions used in every quantitative example in this book. Each row gives the multiplier $\UnitAliasMultiplier$ in `1 alias` $=$ $\UnitAliasMultiplier$ `base`. Data prefixes use decimal SI ($\text{KB} = 10^3$ bytes, not 1024). Throughput quantities (FLOP/s, GB/s) combine these aliases with time; adding incompatible dimensions (bytes to FLOP/s) is a category error in napkin math, not a unit conversion.
+Combining an accelerator memory capacity in gigabytes, a checkpoint payload in terabytes, and a link rate in gigabits per second produces silent factor-of-eight or base-2-versus-base-10 errors unless every table shares one dimensional system. Every quantitative example in this book therefore follows the unit conventions in @tbl-fleet-units, where each row gives the multiplier $\UnitAliasMultiplier$ in `1 alias` $=$ $\UnitAliasMultiplier$ `base`. Data prefixes use decimal SI ($\text{KB} = 10^3$ bytes, not 1024). Throughput quantities (FLOP/s, GB/s) combine these aliases with time; adding incompatible dimensions (bytes to FLOP/s) is a category error in napkin math, not a unit conversion.
 
-Hardware capacity labels are the one deliberate exception\index{Assumptions!nameplate capacity}. Reference tables may retain vendor nameplate numbers and labels; the byte budgets used in calculations follow the device assumptions stored in the book's hardware registry. For example, the book models an 80 GB accelerator with $80 \times 2^{30}$ bytes, so a node of eight such devices holds $640 \times 2^{30}$ bytes rather than $640 \times 10^9$. These are modeled capacity assumptions, not universal guarantees inferred from the labels. Every other data quantity, including model footprints, KV-cache sizes, checkpoint volumes, and collective payloads, uses the decimal prefixes above. Where a worked example subtracts a computed footprint from a device capacity, the stored capacity byte budget is converted to decimal units alongside the footprint so that the arithmetic printed on the page is the arithmetic a reader can reproduce.
+Hardware capacity labels are the one deliberate exception\index{Assumptions!nameplate capacity}. Reference tables may retain vendor nameplate numbers and labels; the byte budgets used in calculations follow the device assumptions stored in the book's hardware registry. For example, the book models an 80 GB accelerator with $80 \times 2^{30}$ bytes, so a node of eight such devices holds $640 \times 2^{30}$ bytes rather than $640 \times 10^9$. These are modeled capacity assumptions, not universal guarantees inferred from the labels. Every other data quantity, including model footprints, KV-cache sizes, checkpoint volumes, and collective payloads, uses those decimal SI prefixes. Where a worked example subtracts a computed footprint from a device capacity, the stored capacity byte budget is converted to decimal units alongside the footprint so that the arithmetic printed on the page is the arithmetic a reader can reproduce.
 
 | **Alias** |               **Multiplier**               |              **Base unit**               |
 |:----------|:------------------------------------------:|:----------------------------------------:|
@@ -992,7 +1008,7 @@ class AssumptionsSummaryRecap:
 
 ## Assumption Provenance {#sec-appdx-fleet-assumption-provenance}
 
-@Tbl-fleet-assumption-provenance-catalog maps each appendix section to its source category and primary literature references, providing an audit trail for the book's numerical constants. The catalog separates empirical hardware measurements from modeled scaling profiles and editorial conventions, so a reader can see which numbers change with a hardware generation and which reflect a deployment choice.
+The reference tables in this appendix mix H100 datasheet ceilings, empirical failure rates from warehouse-scale fleets, modeled MLSysIM scaling curves, and illustrative cloud rental rates, and treating all four as interchangeable measurements would misstate what an estimate proves. Each section therefore carries an explicit source classification and primary bibliography in @tbl-fleet-assumption-provenance-catalog, separating empirical hardware measurements from modeled scaling profiles and editorial conventions so a reader can see which numbers change with a hardware generation and which reflect a deployment choice.
 
 | **Appendix section**                                      | **Source type**                   | **Primary references**                                             |
 |:----------------------------------------------------------|:----------------------------------|:-------------------------------------------------------------------|
@@ -1016,4 +1032,4 @@ class AssumptionsSummaryRecap:
 
 ## Summary {.unnumbered}
 
-This appendix is the book's shared fleet-scale assumption sheet. Every napkin-math estimate in the chapters should trace to a row in the tables above, and @tbl-fleet-assumption-provenance-catalog records whether that row comes from a datasheet, a fleet study, an MLSysIM model, an illustrative rate, or a book convention. Reliability rows set the failure clock, with failure a steady-state condition at `{python} AssumptionsSummaryRecap.training_10k_gpus_str` or more GPUs (@sec-appdx-reliability-foundations models it in depth). Communication rows decide whether synchronous training is viable, and the `{python} AssumptionsSummaryRecap.tcp_ndr_latency_ratio_mult_str` startup-latency gap between InfiniBand NDR and TCP explains why training clusters favor RDMA fabrics. Sustainability rows expose location as a lever, since grid carbon intensity differs by `{python} AssumptionsSummaryRecap.carbon_low_high_ratio_mult_str` between Norway and Poland. Capacity rows bridge peak hardware to useful throughput. At `{python} AssumptionsSummaryRecap.frontier_8k_gpus_str` GPUs, about `{python} AssumptionsSummaryRecap.scaling_eff_8192_pct_str` of ideal scaling is realized for the reference job at a fixed batch, and the listed overheads consume about `{python} AssumptionsSummaryRecap.overhead_total_pct_str` of wall time. When a deployment differs in fabric, region, MFU, or cluster size, substitute its values and re-evaluate the corresponding formulas.
+Fleet-scale back-of-envelope estimates stay comparable across chapters only when they draw from a single shared assumption sheet. Every napkin-math calculation in this book traces to a row in the reference tables of this appendix, and @tbl-fleet-assumption-provenance-catalog records whether that row comes from a datasheet, a fleet study, an MLSysIM model, an illustrative rate, or a book convention. Reliability rows set the failure clock, with failure a steady-state condition at `{python} AssumptionsSummaryRecap.training_10k_gpus_str` or more GPUs (@sec-appdx-reliability-foundations models it in depth). Communication rows decide whether synchronous training is viable, and the `{python} AssumptionsSummaryRecap.tcp_ndr_latency_ratio_mult_str` startup-latency gap between InfiniBand NDR and TCP explains why training clusters favor RDMA fabrics. Sustainability rows expose location as a lever, since grid carbon intensity differs by `{python} AssumptionsSummaryRecap.carbon_low_high_ratio_mult_str` between Norway and Poland. Capacity rows bridge peak hardware to useful throughput. At `{python} AssumptionsSummaryRecap.frontier_8k_gpus_str` GPUs, about `{python} AssumptionsSummaryRecap.scaling_eff_8192_pct_str` of ideal scaling is realized for the reference job at a fixed batch, and the listed overheads consume about `{python} AssumptionsSummaryRecap.overhead_total_pct_str` of wall time. When a deployment differs in fabric, region, MFU, or cluster size, substitute its values and re-evaluate the corresponding formulas.
