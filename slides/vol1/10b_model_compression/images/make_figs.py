@@ -37,9 +37,11 @@ Outside papers were read on 2026-10-17.
     Horowitz energy (table 8); Napkin Math 10.1 and 10.4; listing 2 weights;
     blur waterfall (fig-compression-waterfall, illustrative); GPT-2 XL
     streaming times (table 1).
-  - Derived on the slides and labeled so: the 3-bit toy grid, the unfused
-    dequantization traffic 0.75 + 3 + 3 + 0.31 = 7.06 GB (about 138 ms at
-    51.2 GB/s).
+  - Derived values (ratios, step sizes, bytes per token, the unfused
+    dequantization traffic, speedups) are computed in calcs.py and imported.
+  - Published figures shown as images (not generated here): Wu et al. 2020
+    Fig. 2, Nagel et al. 2019 Fig. 2, Dettmers et al. 2022 Fig. 3(a); see
+    SOURCES.yml.
 
 Run from this folder: python3 make_figs.py
 """
@@ -50,7 +52,9 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import slideplot as sp  # noqa: E402
+import calcs  # noqa: E402  every derived value below comes from calcs.py
 
 plt = sp.plt
 C = sp.C
@@ -194,15 +198,19 @@ for k in (1, 2, 3):
 # ---------------------------------------------------------------------------
 # 2. Bit fields to scale: what each format spends its bits on (3 steps)
 # ---------------------------------------------------------------------------
+def smaller(bits):
+    return f"{32 // bits}× smaller"
+
+
 formats = [
     # name, sign, exponent, mantissa, integer bits, note, step
     ("FP32", 1, 8, 23, 0, "baseline", 1),
-    ("BF16", 1, 8, 7, 0, "FP32's range, 2× smaller", 1),
-    ("FP16", 1, 5, 10, 0, "max 65,504, 2× smaller", 1),
-    ("FP8 E4M3", 1, 4, 3, 0, "max 448, 4× smaller", 2),
-    ("FP8 E5M2", 1, 5, 2, 0, "max 57,344, 4× smaller", 2),
-    ("INT8", 0, 0, 0, 8, "256 levels, 4× smaller", 3),
-    ("INT4", 0, 0, 0, 4, "16 levels, 8× smaller", 3),
+    ("BF16", 1, 8, 7, 0, f"FP32's range, {smaller(16)}", 1),
+    ("FP16", 1, 5, 10, 0, f"max 65,504, {smaller(16)}", 1),
+    ("FP8 E4M3", 1, 4, 3, 0, f"max 448, {smaller(8)}", 2),
+    ("FP8 E5M2", 1, 5, 2, 0, f"max 57,344, {smaller(8)}", 2),
+    ("INT8", 0, 0, 0, 8, f"{2 ** 8} levels, {smaller(8)}", 3),
+    ("INT4", 0, 0, 0, 4, f"{2 ** 4} levels, {smaller(4)}", 3),
 ]
 BW = 15  # px per bit
 X0 = 150
@@ -243,14 +251,7 @@ for k in (1, 2, 3):
 # ---------------------------------------------------------------------------
 # 3. Float grid against integer grid on one log axis (derived)
 # ---------------------------------------------------------------------------
-e4m3 = []
-for ef in range(16):
-    for mf in range(8):
-        if ef == 15 and mf == 7:
-            continue  # the single NaN pattern
-        v = (mf / 8) * 2.0 ** -6 if ef == 0 else (1 + mf / 8) * 2.0 ** (ef - 7)
-        e4m3.append(v)
-e4m3 = np.array(sorted(e4m3))
+e4m3 = calcs.e4m3_values()
 assert len(e4m3) == 127 and e4m3.max() == 448
 pos = e4m3[e4m3 > 0]
 below1 = int((e4m3 < 1).sum())          # 56, zero included
@@ -282,8 +283,8 @@ for k in (1, 2):
 # ---------------------------------------------------------------------------
 # 4. Energy per operation (copied from Lecture 10; Horowitz 2014 via table 8)
 # ---------------------------------------------------------------------------
-ops = [("Add", 0.90, 0.03, "30×"), ("Multiply", 3.70, 0.20, "18.5×"),
-       ("Multiply-accumulate", 4.60, 0.30, "15×")]
+ops = [(n, f32, i8, f"{calcs.r(calcs.energy_ratio(f32, i8), 1):g}×")
+       for n, f32, i8 in calcs.ENERGY]
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 2.5))
     ylabels = []
@@ -297,8 +298,8 @@ for k in (1, 2):
                 fontsize=11, color=C["neutral"], fontweight="bold")
         ylabels.append((y, name))
     vis = 1.0 if k == 2 else 0.0
-    ax.barh(-0.05, 640, height=0.42, color=C["memory"], alpha=vis)
-    ax.text(640 * 1.2, -0.05, "640 pJ", va="center", fontsize=11, color=C["memory"],
+    ax.barh(-0.05, calcs.DRAM_32, height=0.42, color=C["memory"], alpha=vis)
+    ax.text(calcs.DRAM_32 * 1.2, -0.05, f"{calcs.DRAM_32:g} pJ", va="center", fontsize=11, color=C["memory"],
             fontweight="bold", alpha=vis)
     ylabels.append((-0.05, "32-bit DRAM read"))
     for y, name in ylabels:
@@ -320,16 +321,11 @@ for k in (1, 2):
 # 5. The integer grid laid over a real range: a 3-bit toy (derived)
 #    [alpha, beta] = [-1, 2.5], b = 3: s = 3.5 / 7 = 0.5, z = round(1/0.5) = 2
 # ---------------------------------------------------------------------------
-ALPHA, BETA, B = -1.0, 2.5, 3
-S_TOY = (BETA - ALPHA) / (2 ** B - 1)
-Z_TOY = round(-ALPHA / S_TOY)
+ALPHA, BETA, B = calcs.TOY_ALPHA, calcs.TOY_BETA, calcs.TOY_B
+S_TOY, Z_TOY = calcs.TOY_S, calcs.TOY_Z
 levels = S_TOY * (np.arange(2 ** B) - Z_TOY)
-samples = [-1.4, -0.3, 0.8, 1.6, 2.9]
-
-
-def quant_toy(x):
-    q = int(np.clip(round(x / S_TOY + Z_TOY), 0, 2 ** B - 1))
-    return q, S_TOY * (q - Z_TOY)
+samples = calcs.TOY_SAMPLES
+quant_toy = calcs.quant_toy
 
 
 for k in (1, 2, 3):
@@ -358,9 +354,9 @@ for k in (1, 2, 3):
                 color=C["danger"] if hl else C["compute"], alpha=a2)
     ax.annotate("", (levels[5], -0.66), (levels[4], -0.66),
                 arrowprops=dict(arrowstyle="<->", color=C["text"], lw=1.3, alpha=a2))
-    ax.text(levels[4] + S_TOY / 2, -1.02, "s = 0.5", ha="center", fontsize=12,
+    ax.text(levels[4] + S_TOY / 2, -1.02, f"s = {S_TOY:g}", ha="center", fontsize=12,
             fontweight="bold", alpha=a2)
-    ax.text(levels[Z_TOY], -1.02, "z = 2", ha="center", fontsize=12,
+    ax.text(levels[Z_TOY], -1.02, f"z = {Z_TOY}", ha="center", fontsize=12,
             fontweight="bold", color=C["danger"], alpha=a2)
     a3 = 1.0 if k >= 3 else 0.0
     for x in samples:
@@ -386,8 +382,8 @@ for k in (1, 2):
     ax.text(-1.4, 1, "real", ha="right", va="center", fontsize=15, fontweight="bold")
     ax.text(-1.4, 0, "UINT8", ha="right", va="center", fontsize=15, fontweight="bold",
             color=C["neutral"])
-    for real, q in ((-1, 0), (0, 64), (1, 128), (3, 255)):
-        xq = -1 + q * 4 / 255
+    for real, q in zip(calcs.NM_X, calcs.nm_codes()):
+        xq = calcs.NM_ALPHA + q * calcs.NM_S
         ax.plot([real], [1], "o", ms=9, color=C["memory"])
         ax.text(real, 1.25, f"{real:g}", ha="center", fontsize=15, fontweight="bold",
                 color=C["memory"])
@@ -412,7 +408,7 @@ for k in (1, 2):
     fig, ax = plt.subplots(figsize=(4.6, 2.7))
     ax.axhspan(-S_TOY / 2, S_TOY / 2, color=C["data_l"], zorder=0)
     ax.plot(xs[inside], err[inside], color=C["data"], lw=2)
-    ax.text(1.0, 0.33, "inside: at most s/2 = 0.25", ha="center", fontsize=12,
+    ax.text(1.0, 0.33, f"inside: at most s/2 = {S_TOY / 2:g}", ha="center", fontsize=12,
             fontweight="bold", color=C["data"])
     a = 1.0 if k == 2 else 0.0
     ax.plot(xs[xs < ALPHA], err[xs < ALPHA], color=C["danger"], lw=2.4, alpha=a)
@@ -427,7 +423,7 @@ for k in (1, 2):
     ax.axhline(0, color=C["neutral"], lw=0.8)
     ax.set_xlim(-1.75, 3.25)
     ax.set_ylim(-0.85, 0.85)
-    ax.set_xlabel("Real value x (3-bit grid, s = 0.5)")
+    ax.set_xlabel(f"Real value x (3-bit grid, s = {S_TOY:g})")
     ax.set_ylabel("Error after round trip")
     sp.save(fig, out / f"rounderr_step{k}.svg")
 
@@ -452,7 +448,8 @@ bars_save(out / "zeropoint.svg", zp_rows, [1, 1, 1], xlim=(0, 82), size=(5.4, 1.
 fig, axes = plt.subplots(1, 2, figsize=(5.9, 1.75))
 for ax, (lo, hi, qlo, qhi, zq, title, ck) in zip(axes, (
         (-1.0, 1.0, -127, 127, 0, "Symmetric: z = 0", "memory"),
-        (-0.5, 1.5, -128, 127, -64, "Asymmetric: z = −64", "data"))):
+        (calcs.ASYM_LO, calcs.ASYM_HI, -128, 127, calcs.ZP_ASYM,
+         f"Asymmetric: z = −{-calcs.ZP_ASYM}", "data"))):
     # real line on top (y = 1), integer line below (y = 0), drawn on 0..1
     ax.plot([0, 1], [1, 1], color=C["text"], lw=1.5)
     ax.plot([0, 1], [0, 0], color=C["neutral"], lw=1.5)
@@ -490,7 +487,7 @@ sp.save(fig, out / "calranges.svg")
 hist_px = [238, 228, 218, 200, 175, 145, 115, 90, 70, 52, 40, 30, 23, 18, 14,
            11, 9, 7, 6, 4, 3]
 hist = np.array(hist_px) / 240
-for k in (1, 2):
+for k in (1,):  # the measured calibration ranges are Wu et al.'s own figure (next frame)
     fig, ax = plt.subplots(figsize=(5.8, 2.45))
     for i, h in enumerate(hist):
         tail = i >= 11
@@ -525,66 +522,10 @@ for k in (1, 2):
     sp.save(fig, out / f"calhist_step{k}.svg")
 
 # ---------------------------------------------------------------------------
-# 9. Per-channel ranges: a schematic redraw after Nagel et al. 2019, Fig. 2.
-#    No channel value is read from the plot; heights are schematic.
+# 9. Per-channel ranges: the slide now shows Nagel et al. 2019, Fig. 2 as
+#    published (nagel2019-fig2.png); the schematic redraw was retired
+#    2026-10-18.
 # ---------------------------------------------------------------------------
-rng = np.random.default_rng(7)
-wide = {4: 0.55, 14: 0.75, 15: 0.85, 27: 0.70, 28: 0.80, 29: 0.95}
-half = np.array([wide.get(c, rng.uniform(0.02, 0.07)) for c in range(32)])
-center = np.array([rng.uniform(-0.15, 0.15) * h for h in half])
-narrow_ch = 9
-for k in (1, 2, 3):
-    fig, ax = plt.subplots(figsize=(5.8, 2.5))
-    for c in range(32):
-        lo, hi = center[c] - half[c], center[c] + half[c]
-        ck = C["compute"] if c in wide else C["memory"]
-        ax.plot([c + 1, c + 1], [lo, hi], color=ck, lw=1.2)
-        ax.add_patch(plt.Rectangle((c + 1 - 0.32, center[c] - half[c] * 0.45), 0.64,
-                                   half[c] * 0.9, facecolor=C[("compute" if c in wide
-                                                              else "memory") + "_l"],
-                                   edgecolor=ck, lw=1.0))
-    a2 = 1.0 if k >= 2 else 0.0
-    step = 2 * half.max() / 10  # schematic level spacing: the widest channel sets it
-    for j in range(-5, 6):
-        ax.axhline(j * step, color=C["neutral"], lw=0.7, ls="--", alpha=a2, zorder=0)
-    ax.text(32.9, 5 * step, "per-tensor levels\n(schematic)", fontsize=10,
-            va="center", color=C["neutral"], fontweight="bold", alpha=a2)
-    ax.annotate("narrow channel:\nfew levels", (narrow_ch + 1, half[narrow_ch] + 0.03),
-                (5.6, 0.72), fontsize=11, fontweight="bold",
-                color=C["danger"], alpha=a2,
-                arrowprops=dict(arrowstyle="-|>", color=C["danger"], lw=1.4, alpha=a2))
-    a3 = 1.0 if k >= 3 else 0.0
-    ax.add_patch(plt.Rectangle((narrow_ch + 0.5, center[narrow_ch] - half[narrow_ch]), 1.0,
-                               2 * half[narrow_ch], facecolor="none", edgecolor=C["data"],
-                               lw=1.6, alpha=a3, zorder=7))
-    inset = ax.inset_axes([0.03, 0.03, 0.30, 0.30])
-    inset.add_patch(plt.Rectangle((0.3, -0.45), 0.4, 0.9, facecolor=C["memory_l"],
-                                  edgecolor=C["memory"], lw=1.2))
-    inset.plot([0.5, 0.5], [-1, 1], color=C["memory"], lw=1.2)
-    for j in np.linspace(-1, 1, 11):
-        inset.plot([0.1, 0.9], [j, j], color=C["data"], lw=1.0)
-    inset.add_patch(plt.Rectangle((0, -1.15), 3.2, 2.3, facecolor="white",
-                                  edgecolor=C["data"], lw=1.0, zorder=0))
-    inset.text(1.0, 0.0, "zoom: own scale,\nall 256 levels", fontsize=10, va="center",
-               fontweight="bold", color=C["data"])
-    inset.set_xlim(0, 3.2)
-    inset.set_ylim(-1.15, 1.15)
-    inset.axis("off")
-    for child in inset.get_children():
-        try:
-            child.set_alpha(a3)
-        except Exception:
-            pass
-    if k < 3:
-        inset.remove()
-    ax.set_xlim(0, 36.5)
-    ax.set_ylim(-1.05, 1.05)
-    ax.set_yticks([])
-    ax.set_xticks([1, 8, 16, 24, 32])
-    ax.set_xlabel("Output channel (32 in the layer)")
-    ax.set_ylabel("Weight range")
-    sp.save(fig, out / f"chanrange_step{k}.svg")
-
 # ---------------------------------------------------------------------------
 # 10. Per-channel scales restore MobileNetV2 (Krishnamoorthi 2018, Tables 3, 4)
 # ---------------------------------------------------------------------------
@@ -715,7 +656,12 @@ for k in (1, 2):
 # ---------------------------------------------------------------------------
 RIDGE, ROOF = 100.0, 1.0
 xs = np.logspace(-1.5, 4.5, 300)
-dec16, dec4 = 6.0, 6.0 * 3.1
+D = calcs.decode()
+MS16 = calcs.r(D["t16"] / calcs.PHONE_BW * 1e3, 0)
+MS4 = calcs.r(D["t4"] / calcs.PHONE_BW * 1e3, 0)
+SPEEDUP = calcs.r(D["t16"] / D["t4"], 1)
+INT8_X = calcs.r(calcs.H100_INT8 / calcs.H100_FP16, 0)
+dec16, dec4 = 6.0, 6.0 * SPEEDUP   # position illustrative; the ratio is computed
 mlp16, mlp8 = 3000.0, 6000.0
 FS = 10.5
 for k in (1, 2, 3):
@@ -728,7 +674,7 @@ for k in (1, 2, 3):
     # decode points
     ax.plot([dec16], [dec16 / RIDGE], "o", ms=10, color=C["memory"], mec="white",
             mew=1.5, zorder=5, alpha=0.45 if k >= 2 else 1.0)
-    ax.annotate("Decode, FP16:\n65 ms per token", (dec16, dec16 / RIDGE), (8, -6),
+    ax.annotate(f"Decode, FP16:\n{MS16:g} ms per token", (dec16, dec16 / RIDGE), (8, -6),
                 textcoords="offset points", ha="left", va="top", fontsize=FS,
                 fontweight="bold", color=C["memory"])
     a2 = 1.0 if k >= 2 else 0.0
@@ -737,13 +683,13 @@ for k in (1, 2, 3):
                     arrowprops=dict(arrowstyle="-|>", color=C["data"], lw=2.2, alpha=a2))
         ax.plot([dec4], [dec4 / RIDGE], "o", ms=10, color=C["data"], mec="white",
                 mew=1.5, zorder=5, alpha=a2)
-        ax.annotate("INT4 weights: 21 ms\n(3.1× fewer bytes)", (dec4, dec4 / RIDGE),
+        ax.annotate(f"INT4 weights: {MS4:g} ms\n({SPEEDUP:g}× fewer bytes)", (dec4, dec4 / RIDGE),
                     (-8, 6), textcoords="offset points", ha="right", va="bottom",
                     fontsize=FS, fontweight="bold", color=C["data"], alpha=a2)
     # MLP points
     ax.plot([mlp16], [ROOF], "o", ms=10, color=C["compute"], mec="white", mew=1.5,
             zorder=5, alpha=0.45 if k >= 3 else 1.0)
-    ax.annotate("MLP, large batch:\nFP16 roof, 989", (mlp16, ROOF), (0, -12),
+    ax.annotate(f"MLP, large batch:\nFP16 roof, {calcs.H100_FP16:,}", (mlp16, ROOF), (0, -12),
                 textcoords="offset points", ha="center", va="top", fontsize=FS,
                 fontweight="bold", color=C["compute"])
     a3 = 1.0 if k >= 3 else 0.0
@@ -752,7 +698,7 @@ for k in (1, 2, 3):
         ax.plot(xi, xi / RIDGE * ROOF, color=C["memory"], lw=2, ls="--", alpha=a3)
         xr = xs[xs >= 2 * RIDGE]
         ax.plot(xr, np.full_like(xr, 2 * ROOF), color=C["danger"], lw=2.4, ls="--", alpha=a3)
-        ax.text(230, 2 * ROOF * 1.25, "INT8 roof: 1,979 (2×)", color=C["danger"],
+        ax.text(230, 2 * ROOF * 1.25, f"INT8 roof: {calcs.H100_INT8:,} ({INT8_X:g}×)", color=C["danger"],
                 fontsize=FS, fontweight="bold", va="bottom", alpha=a3)
         ax.annotate("", (mlp8, 2 * ROOF * 0.95), (mlp16 * 1.06, ROOF * 1.04),
                     arrowprops=dict(arrowstyle="-|>", color=C["danger"], lw=2.0, alpha=a3))
@@ -778,12 +724,21 @@ for k in (1, 2, 3):
 # 15. Bytes per token for GPT-2 XL on the phone: fused against unfused
 #     dequantization (Napkin Math 10.4; unfused traffic derived from Sec. 10.4.1)
 # ---------------------------------------------------------------------------
+W16, W4, KV = D["w16"] / calcs.GB, D["w4"] / calcs.GB, calcs.r(D["kv"] / calcs.GB, 2)
+
+
+def tot(nbytes, approx=False):
+    gb = calcs.r(nbytes / calcs.GB, 2)
+    ms = calcs.r(nbytes / calcs.PHONE_BW * 1e3, 0)
+    return f"{gb:.2f} GB, {'≈' if approx else ''}{ms:g} ms"
+
+
 segs = [
-    ("FP16", [(3.0, "memory", "FP16 weights, 3 GB"), (0.31, "neutral", "")], "3.31 GB, 65 ms"),
-    ("INT4, fused", [(0.75, "data", ""), (0.31, "neutral", "")], "1.06 GB, 21 ms"),
+    ("FP16", [(W16, "memory", f"FP16 weights, {W16:g} GB"), (KV, "neutral", "")], tot(D["t16"])),
+    ("INT4, fused", [(W4, "data", ""), (KV, "neutral", "")], tot(D["t4"])),
     ("INT4, separate\ndequantize pass",
-     [(0.75, "data", ""), (3.0, "danger", "write FP16, 3 GB"), (3.0, "memory", "read FP16, 3 GB"),
-      (0.31, "neutral", "")], "7.06 GB, ≈138 ms"),
+     [(W4, "data", ""), (W16, "danger", f"write FP16, {W16:g} GB"),
+      (W16, "memory", f"read FP16, {W16:g} GB"), (KV, "neutral", "")], tot(D["sep"], True)),
 ]
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 2.3))
@@ -801,7 +756,7 @@ for k in (1, 2):
                 color=C["danger"] if i == 2 else C["text"], alpha=vis)
         ax.text(-0.01, y, name, transform=ax.get_yaxis_transform(), ha="right",
                 va="center", fontsize=12, fontweight="bold", color=C["text"], alpha=vis)
-    ax.text(0.0, -0.75, "green: packed INT4 weights, 0.75 GB;  gray: FP16 KV cache, 0.31 GB",
+    ax.text(0.0, -0.75, f"green: packed INT4 weights, {W4:g} GB;  gray: FP16 KV cache, {KV:g} GB",
             fontsize=10, color=C["neutral"])
     ax.set_xlim(0, 10)
     ax.set_ylim(-1.0, 2.5)
@@ -815,13 +770,19 @@ for k in (1, 2):
 # ---------------------------------------------------------------------------
 # 16. MobileNetV2 on a Pixel 2 (Krishnamoorthi 2018, Table 7)
 # ---------------------------------------------------------------------------
+def px_text(ms):
+    if ms == calcs.PX2_FP32_CPU:
+        return f"{ms:g} ms"
+    return f"{ms:g} ms ({calcs.r(calcs.PX2_FP32_CPU / ms, 1):g}×)"
+
+
 px_rows = [
-    dict(label="FP32, CPU", value=105, color="neutral", text="105 ms"),
-    dict(label="INT8, CPU", value=63, color="compute", text="63 ms (1.7×)"),
-    dict(label="INT8, DSP", value=15.5, color="data", text="15.5 ms (6.8×)"),
+    dict(label="FP32, CPU", value=calcs.PX2_FP32_CPU, color="neutral", text=px_text(calcs.PX2_FP32_CPU)),
+    dict(label="INT8, CPU", value=calcs.PX2_INT8_CPU, color="compute", text=px_text(calcs.PX2_INT8_CPU)),
+    dict(label="INT8, DSP", value=calcs.PX2_INT8_DSP, color="data", text=px_text(calcs.PX2_INT8_DSP)),
 ]
 bars_save(out / "pixel2.svg", px_rows, [1, 1, 1], xlim=(0, 150), size=(5.0, 1.9),
-          vlines=[(33.3, "33 ms frame", "danger")], boxed=True,
+          vlines=[(calcs.FRAME_MS, "33 ms frame", "danger")], boxed=True,
           xlabel="MobileNetV2 on a Pixel 2, one image (ms)")
 
 # ---------------------------------------------------------------------------
@@ -834,7 +795,7 @@ stream_rows = [
     dict(label="GPT-2 XL, FP16", value=59, color="danger", text="59 ms per token"),
 ]
 bars_save(out / "stream.svg", stream_rows, [1, 1, 1], xlim=(0, 80), size=(4.6, 2.2),
-          vlines=[(33.3, "33 ms frame", "compute")], boxed=True,
+          vlines=[(calcs.FRAME_MS, "33 ms frame", "compute")], boxed=True,
           xlabel="Read every weight once at 51.2 GB/s (ms)")
 
 stages = ["FP32\nCPU", "Pruned\nCPU", "Pruned INT8\naccelerator"]
@@ -865,23 +826,7 @@ for k in (2, 3):
     fig.tight_layout(w_pad=1.5)
     sp.save(fig, out / f"waterfall_step{k}.svg")
 
-# Frame time alone, large enough to read in half a slide (synthesis frame)
-fig, ax = plt.subplots(figsize=(3.6, 2.6))
-for i, v in enumerate(timev):
-    ax.bar(i, v, color=C["compute"], width=0.7)
-    inside_bar = v < 40
-    ax.text(i, v / 2 if inside_bar else v + 4, f"{v:g} ms", ha="center",
-            va="center" if inside_bar else "bottom", fontsize=13, fontweight="bold",
-            color="white" if inside_bar else C["compute"])
-ax.axhline(33, color=C["danger"], lw=1.5, ls="--")
-ax.text(2.42, 33, " 33 ms\n budget", color=C["danger"], fontsize=12, fontweight="bold",
-        ha="left", va="center", clip_on=False)
-ax.set_xticks(range(3))
-ax.set_xticklabels(stages, fontsize=11)
-ax.set_ylim(0, 150)
-ax.set_ylabel("Frame time (ms)")
-ax.grid(axis="y", color=C["grid"], linewidth=0.6)
-ax.set_axisbelow(True)
-sp.save(fig, out / "waterfall_time.svg")
+# The frame-time-only waterfall figure was retired 2026-10-18:
+# the Pixel 2 frame now shows the phone itself.
 
 print("figures written")
