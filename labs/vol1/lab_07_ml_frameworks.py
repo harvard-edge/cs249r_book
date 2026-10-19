@@ -23,7 +23,7 @@ async def _():
         native_bootstrap(__file__)
 
     import plotly.graph_objects as go
-    from mlsysim.engine.v1_07_experiments import (
+    from mlsysim.labs.experiments.v1_07_experiments import (
         MODEL_KEY, OPERATION_GRAPH, TRACKS, compare_dispatch,
         evaluate_compilation, evaluate_fusion, evaluate_operator_support,
         evaluate_recomputation,

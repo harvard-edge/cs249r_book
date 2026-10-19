@@ -25,7 +25,7 @@ async def _():
 
     import plotly.graph_objects as go
     from mlsysim.core.units import Q_
-    from mlsysim.engine.v2_16_experiments import (
+    from mlsysim.labs.experiments.v2_16_experiments import (
         PRIVACY_PROFILES, assess_fairness,
         audit_evidence as simulate_audit_evidence,
         check_privacy_profile, evaluate_capacity, mechanical_gate,

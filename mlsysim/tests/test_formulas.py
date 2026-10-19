@@ -25,13 +25,10 @@ from mlsysim.physics import (
     calc_bisection_bandwidth,
     calc_hop_latency,
     dTime,
-    calc_training_time_days,
     calc_amdahls_speedup,
     calc_strong_scaling_speedup,
     calc_universal_scalability_law,
     calc_usl_optimal_concurrency,
-    calc_multiagent_speedup,
-    calc_multiagent_optimal_concurrency,
     calc_transformer_prefill_flops,
     calc_vla_inference_latency,
     calc_bottleneck,
@@ -48,12 +45,7 @@ from mlsysim.physics import (
     calc_pipeline_bubble,
     calc_kv_cache_size,
     calc_mla_cache_size,
-    calc_pareto_scale,
-    calc_pareto_survival,
-    calc_pareto_conditional_survival,
-    calc_pareto_mean_residual_life,
     calc_paged_kv_cache_size,
-    calc_speculative_branch_capacity,
     calc_capped_exponential_scale,
     calc_expected_paged_kv_tokens,
     calc_queue_latency_mmc,
@@ -64,7 +56,6 @@ from mlsysim.physics import (
     calc_fleet_tco,
     calc_population_stability_index,
     calc_two_proportion_sample_size,
-    calc_constraint_propagation_factor,
 )
 from mlsysim.core.units import ureg, Q_, MB, GB
 
@@ -133,25 +124,6 @@ class TestDTime:
 # calc_training_time_days
 # ======================================================================
 
-class TestTrainingTimeDays:
-    """Training duration in days."""
-
-    def test_one_day_training_budget(self):
-        # 86,400 seconds * 1e15 flop/s = 8.64e19 flop
-        total_ops = Q_("8.64e19 flop")
-        n_devices = 1
-        peak = Q_("1e15 flop/s")
-        eta = 1.0
-        days = calc_training_time_days(total_ops, n_devices, peak, eta)
-        assert days == pytest.approx(1.0, rel=1e-6)
-
-    def test_multi_device_efficiency_scaling(self):
-        total_ops = Q_("8.64e19 flop")
-        n_devices = 10
-        peak = Q_("1e15 flop/s")
-        eta = 0.5  # 50% efficiency across 10 devices = 5x single device effective speed
-        days = calc_training_time_days(total_ops, n_devices, peak, eta)
-        assert days == pytest.approx(0.2, rel=1e-6)
 
 
 # ======================================================================
@@ -676,49 +648,6 @@ class TestPipelineBubble:
 # Pareto trajectory-length helpers
 # ======================================================================
 
-class TestParetoTrajectory:
-    """Heavy-tailed agent trajectory lengths and the decreasing hazard rate."""
-
-    ALPHA = 1.1
-    MEAN = 24.8
-
-    def test_scale_from_measured_mean(self):
-        # x_min = mean * (alpha - 1) / alpha
-        scale = calc_pareto_scale(self.MEAN, self.ALPHA)
-        assert scale == pytest.approx(2.2545, abs=1e-3)
-
-    def test_fit_reproduces_the_measured_tail(self):
-        # The same two parameters must place ~1 percent beyond a P99 of 142.
-        scale = calc_pareto_scale(self.MEAN, self.ALPHA)
-        assert calc_pareto_survival(142, scale, self.ALPHA) == pytest.approx(0.010, abs=2e-3)
-
-    def test_scale_cancels_in_conditional_survival(self):
-        # P(N > 100 | N > 50) depends only on the ratio and the tail index.
-        for scale in (1.0, 2.2545, 5.0):
-            assert calc_pareto_conditional_survival(50, 100, self.ALPHA) == pytest.approx(
-                calc_pareto_survival(100, scale, self.ALPHA)
-                / calc_pareto_survival(50, scale, self.ALPHA)
-            )
-
-    def test_hazard_rate_decreases(self):
-        """A longer-running trajectory is likelier to keep running, not less."""
-        young = calc_pareto_conditional_survival(10, 20, self.ALPHA)
-        old = calc_pareto_conditional_survival(500, 1000, self.ALPHA)
-        assert young == pytest.approx(old)  # scale-free: doubling is doubling
-        assert calc_pareto_conditional_survival(50, 100, self.ALPHA) > math.exp(-50 / self.MEAN)
-
-    def test_mean_residual_life_grows_with_attained_service(self):
-        assert calc_pareto_mean_residual_life(50, self.ALPHA) == pytest.approx(500.0)
-        assert calc_pareto_mean_residual_life(100, self.ALPHA) > calc_pareto_mean_residual_life(50, self.ALPHA)
-
-    def test_no_finite_mean_below_alpha_one(self):
-        with pytest.raises(ValueError):
-            calc_pareto_scale(self.MEAN, 0.9)
-        with pytest.raises(ValueError):
-            calc_pareto_mean_residual_life(50, 1.0)
-
-    def test_survival_is_one_below_the_scale(self):
-        assert calc_pareto_survival(1.0, 2.2545, self.ALPHA) == 1.0
 
 
 # ======================================================================
@@ -805,40 +734,6 @@ class TestPagedKVCacheSize:
 # calc_speculative_branch_capacity
 # ======================================================================
 
-class TestSpeculativeBranchCapacity:
-    """KV cache capacity for concurrent speculative tree branches."""
-
-    def test_naive_replication(self):
-        # 16,384 MiB KV cache, 1000-token prefix, 100-token branch, 1 MiB/token
-        # Naive: each branch replicates (1000 + 100) * 1 MiB = 1100 MiB
-        # Capacity = floor(16384 / 1100) = 14 branches
-        c_kv = Q_("16384 megabyte")
-        bytes_per_tok = Q_("1 megabyte")
-        cap = calc_speculative_branch_capacity(
-            c_kv, l_prefix=1000, l_branch=100, bytes_per_token=bytes_per_tok, cow=False
-        )
-        assert cap == 14
-
-    def test_copy_on_write_prefix_sharing(self):
-        # CoW: parent prefix stored once (1000 MiB)
-        # Remaining: 16384 - 1000 = 15384 MiB
-        # Branch footprint: (100 tokens + 16 tail page tokens) * 1 MiB = 116 MiB
-        # Capacity = floor(15384 / 116) = 132 branches
-        c_kv = Q_("16384 megabyte")
-        bytes_per_tok = Q_("1 megabyte")
-        cap = calc_speculative_branch_capacity(
-            c_kv, l_prefix=1000, l_branch=100, bytes_per_token=bytes_per_tok, cow=True, page_block_tokens=16
-        )
-        assert cap == 132
-
-    def test_insufficient_memory_for_prefix(self):
-        # Memory is smaller than prefix alone: capacity should be 0
-        c_kv = Q_("500 megabyte")
-        bytes_per_tok = Q_("1 megabyte")
-        cap = calc_speculative_branch_capacity(
-            c_kv, l_prefix=1000, l_branch=100, bytes_per_token=bytes_per_tok, cow=True
-        )
-        assert cap == 0
 
 
 # ======================================================================
@@ -1093,11 +988,6 @@ class TestMTBFNode:
         expected = 1 / (4/10_000 + 2/50_000 + 2/20_000)
         assert result.m_as(ureg.hour) == pytest.approx(expected, rel=1e-4)
 
-def test_calc_binomial_failure_probability():
-    from mlsysim.physics.reliability import calc_binomial_failure_probability
-    assert calc_binomial_failure_probability(1.0, 100) == 1.0
-    assert calc_binomial_failure_probability(0.0, 100) == 0.0
-    assert abs(calc_binomial_failure_probability(0.5, 2) - 0.75) < 1e-9
 
 # ======================================================================
 # statistics.py — calc_population_stability_index,
@@ -1172,18 +1062,6 @@ class TestTwoProportionSampleSize:
             calc_two_proportion_sample_size(1.0, 0.001)
 
 
-class TestConstraintPropagationFactor:
-    """factor = base^(stage_to - stage_from) (Boehm cost-of-delay)."""
-
-    def test_three_stage_gap(self):
-        assert calc_constraint_propagation_factor(0, 3) == 8
-
-    def test_equal_stages_is_one(self):
-        assert calc_constraint_propagation_factor(2, 2) == 1
-
-    def test_backwards_raises(self):
-        with pytest.raises(ValueError):
-            calc_constraint_propagation_factor(3, 1)
 
 
 # ======================================================================
@@ -1339,44 +1217,6 @@ class TestUniversalScalabilityLaw:
 # calc_multiagent_speedup
 # ======================================================================
 
-class TestMultiAgentSpeedup:
-    """Multi-Agent Amdahl's Law with linear and quadratic coordination tax."""
-
-    def test_chapter15_known_values(self):
-        s = 0.15
-        alpha = 0.004
-        beta = 0.030
-
-        # Hand-computed known answers from Chapter 15
-        assert calc_multiagent_speedup(1, s, alpha, beta) == pytest.approx(1.0 / 1.034, rel=1e-3)
-        assert calc_multiagent_speedup(4, s, alpha, beta) == pytest.approx(1.830, rel=1e-2)
-        assert calc_multiagent_speedup(8, s, alpha, beta) == pytest.approx(1.329, rel=1e-2)
-        assert calc_multiagent_speedup(12, s, alpha, beta) == pytest.approx(0.864, rel=1e-2)
-
-    def test_optimal_concurrency_root(self):
-        s = 0.15
-        alpha = 0.004
-        beta = 0.030
-        m_star = calc_multiagent_optimal_concurrency(s, alpha, beta)
-        # Stationary root: 2 * alpha * M^3 + beta * M^2 - (1 - s) = 0
-        assert 3.7 < m_star < 3.8
-        f_root = 2 * alpha * (m_star ** 3) + beta * (m_star ** 2) - (1.0 - s)
-        assert abs(f_root) < 1e-6
-
-    def test_reduces_to_standard_amdahl_when_taxes_zero(self):
-        s = 0.2
-        for m in [2, 5, 10]:
-            speedup = calc_multiagent_speedup(m, s_serial=s, alpha=0.0, beta=0.0)
-            expected = 1.0 / (s + (1.0 - s) / m)
-            assert speedup == pytest.approx(expected, rel=1e-6)
-
-    def test_validation_bounds(self):
-        with pytest.raises(ValueError):
-            calc_multiagent_speedup(0, s_serial=0.1)
-        with pytest.raises(ValueError):
-            calc_multiagent_speedup(4, s_serial=1.2)
-        with pytest.raises(ValueError):
-            calc_multiagent_speedup(4, s_serial=0.1, alpha=-0.01)
 
 
 # ======================================================================

@@ -100,20 +100,6 @@ def calc_two_proportion_sample_size(baseline_rate, detectable_lift, z_alpha=1.96
     return 2 * (float(z_alpha) + float(z_beta)) ** 2 * variance / delta ** 2
 
 
-def calc_constraint_propagation_factor(stage_from, stage_to, base=2):
-    """Cost multiplier for finding a workflow constraint at a later lifecycle stage.
-
-    Geometric cost-of-delay model: ``factor = base ** (stage_to - stage_from)``,
-    the "cost of a defect doubles per stage" rule of thumb from software
-    engineering economics (Boehm). Stages are integer lifecycle indices
-    (e.g. 0 = requirements, ... N = production); the result is a
-    dimensionless multiplier (1 when the stages are equal).
-    """
-    if stage_to < stage_from:
-        raise ValueError("stage_to must be greater than or equal to stage_from")
-    return int(base ** (stage_to - stage_from))
-
-
 # ── Rare-event estimation: plain Monte Carlo and importance sampling ────────
 def calc_monte_carlo_sample_size(failure_probability, relative_error):
     """Plain Monte Carlo draws needed to estimate a probability to a relative error.

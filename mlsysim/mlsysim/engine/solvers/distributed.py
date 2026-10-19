@@ -136,7 +136,11 @@ def _replica_profile(model: Workload, fleet: Fleet, *, batch_size: int,
         offload_spill = memory_footprint - accelerator.memory.capacity
         pcie_fallback = Q_(cal.FALLBACK_PCIE_BANDWIDTH_GB_S, "GB/s")
         pcie_bw = (
-            getattr(accelerator.interconnect, "bandwidth", pcie_fallback)
+            getattr(
+                accelerator.interconnect,
+                "bandwidth_per_direction",
+                getattr(accelerator.interconnect, "bandwidth", pcie_fallback),
+            )
             if accelerator.interconnect else pcie_fallback
         )
         effective_bw = min(accelerator.memory.bandwidth, pcie_bw)

@@ -4,12 +4,13 @@ import importlib.util
 import json
 from pathlib import Path
 import shutil
+import subprocess
 
 import pytest
 
 
 @pytest.fixture
-def provenance(tmp_path, monkeypatch):
+def provenance(tmp_path, monkeypatch, request):
     """Copy only checked inputs; mutations never touch production source files."""
     repo = Path(__file__).resolve().parents[2]
     script = repo / 'binder/tools/scripts/check_static_figure_calcs.py'
@@ -24,10 +25,15 @@ def provenance(tmp_path, monkeypatch):
     sources.update(entry['source'] for entry in record['files'])
     inputs = [repo / source for source in sources] + [record_path, delivery]
     inputs += [delivery.parent / entry['png'] for entry in manifest['figures']]
+    integrated = getattr(request, "param", False)
+    if integrated:
+        inputs.append(repo / guard.INTEGRATION_REVIEW)
     for source in inputs:
         target = tmp_path / source.relative_to(repo)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)
+        if not integrated and source.suffix == ".qmd":
+            target.write_bytes(subprocess.check_output(["git", "show", "efd1999a73:" + str(source.relative_to(repo))], cwd=repo))
     original_git = guard.subprocess.check_output
 
     def reviewed_git_bytes(args, cwd):
@@ -39,10 +45,12 @@ def provenance(tmp_path, monkeypatch):
     monkeypatch.setattr(guard.subprocess, 'check_output', reviewed_git_bytes)
     monkeypatch.setattr(guard, 'ROOT', tmp_path)
     monkeypatch.setattr(guard, 'STATIC_DELIVERY', tmp_path / delivery.relative_to(repo))
+    if not integrated:
+        guard.static_source_provenance(refresh=True)
     return guard, tmp_path / record_path.relative_to(repo), record
 
 
-def test_current_proofs_match_reviewed_source_and_pngs(provenance):
+def test_historical_proofs_match_reviewed_source_and_pngs(provenance):
     guard, _, _ = provenance
     result = guard.static_source_provenance()
     assert result['checked_figures'] == 26
@@ -108,3 +116,34 @@ def test_reviewed_png_drift_is_rejected(provenance):
     png.write_bytes(png.read_bytes() + b'changed')
     with pytest.raises(AssertionError, match='reviewed PNG changed'):
         guard.static_source_provenance()
+
+
+@pytest.mark.parametrize('provenance', [True], indirect=True)
+def test_integrated_sources_preserve_reviewed_figures(provenance):
+    guard, _, _ = provenance
+    assert guard.static_source_provenance()['checked_figures'] == 26
+
+
+@pytest.mark.parametrize('provenance', [True], indirect=True)
+@pytest.mark.parametrize('tamper', ['prose', 'figure', 'baseline'])
+def test_integration_binding_rejects_unrecorded_changes(provenance, tamper):
+    guard, _, _ = provenance
+    record_path = guard.ROOT / guard.INTEGRATION_REVIEW
+    record = json.loads(record_path.read_text())
+    entry = record['files'][0]
+    path = guard.ROOT / entry['source']
+    if tamper == 'baseline':
+        entry['before_sha256'] = '0' * 64
+        record_path.write_text(json.dumps(record))
+        message = 'integration baseline hash mismatch'
+    else:
+        raw = path.read_bytes()
+        changed = raw + b'\nUnrecorded prose.\n' if tamper == 'prose' else raw.replace(b'fig-cap="', b'fig-cap="Changed ', 1)
+        assert changed != raw
+        path.write_bytes(changed)
+        if tamper == 'figure':
+            entry['after_sha256'] = hashlib.sha256(changed).hexdigest()
+            record_path.write_text(json.dumps(record))
+        message = 'unapproved integrated source drift' if tamper == 'prose' else 'reviewed figure changed during integration'
+    with pytest.raises(AssertionError, match=message):
+        guard.pre_integration_source(entry['source'])

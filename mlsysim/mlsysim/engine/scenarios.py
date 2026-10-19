@@ -6,6 +6,7 @@ from ..models.types import Workload
 from ..hardware.types import HardwareNode
 from ..systems.types import Fleet
 from ..core.exceptions import OOMError, SLAViolation
+from ..core.registry import Registry
 from .evaluation import SystemEvaluation, EvaluationLevel
 from ..models.registry import Models as _Models
 from ..hardware.registry import Hardware as _Hardware
@@ -48,7 +49,7 @@ class Scenario(BaseModel):
         
         # --- LEVEL 1: FEASIBILITY ---
         from .solvers import DataModel
-        weights = self.workload.size_in_bytes()
+        weights = self.workload.size_in_bytes(precision=precision)
         mem_feasible = weights <= hardware.memory.capacity
         
         # Data Pipeline Check
@@ -73,7 +74,11 @@ class Scenario(BaseModel):
             level_name="Feasibility", 
             status=f_status, 
             summary=mem_summary + data_summary,
-            metrics={"weight_size": weights, "capacity": hardware.memory.capacity, "data_stalled": data_status == "FAIL"}
+            metrics={
+                "weight_size": weights,
+                "capacity": hardware.memory.capacity,
+                "data_stalled": data_status == "FAIL",
+            }
         )
 
         # --- LEVEL 2: PERFORMANCE ---
@@ -155,7 +160,7 @@ class Scenario(BaseModel):
             
         return True
 
-class Scenarios:
+class Scenarios(Registry):
     """
     Executable scenario registry.
 

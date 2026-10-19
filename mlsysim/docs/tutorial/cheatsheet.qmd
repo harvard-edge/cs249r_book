@@ -1,1 +1,274 @@
-{{< include ../../tutorial/cheatsheet.md >}}
+---
+title: "MLSys·im Cheat Sheet"
+subtitle: "Single-page reference for core equations, solver calls, and registry specifications."
+---
+
+```{python}
+#| echo: false
+#| output: false
+import mlsysim
+from mlsysim.show import table
+
+_a100_peak = mlsysim.Hardware.Cloud.A100.compute.peak_flops.to("TFLOPs/s").magnitude
+_h100_peak = mlsysim.Hardware.Cloud.H100.compute.peak_flops.to("TFLOPs/s").magnitude
+_chinchilla_ratio = int(mlsysim.Literature.Chinchilla.TokensPerParam.value)
+_quebec_ci = mlsysim.Infrastructure.Grids.Quebec.carbon_intensity_g_kwh
+_poland_ci = mlsysim.Infrastructure.Grids.Poland.carbon_intensity_g_kwh
+_ci_ratio = _poland_ci / _quebec_ci
+```
+
+## The Iron Law of ML Training
+
+```text
+Time = FLOPs / (N x Peak_FLOPS x MFU x eta_scaling x Goodput)
+```
+
+| Symbol | Meaning | Typical Range |
+|--------|---------|---------------|
+| `FLOPs` | Total operations for the workload | 6PD for training (Chinchilla) |
+| `N` | Number of accelerators | 1 to 100,000+ |
+| `Peak_FLOPS` | Hardware peak (per device) | `{python} f"{_a100_peak:.0f}"` TFLOP/s (A100 FP16), `{python} f"{_h100_peak:.0f}"` TFLOP/s (H100 FP16) |
+| `MFU` | Model FLOPs Utilization | 0.30 - 0.55 |
+| `eta_scaling` | Scaling efficiency (communication overhead) | 0.70 - 0.95 |
+| `Goodput` | Fraction of time doing useful work (1 - failures - checkpoints) | 0.85 - 0.98 |
+
+---
+
+## The 5 Key Equations
+
+### 1. Roofline Bottleneck
+
+```text
+T = max(FLOPs / Peak_effective, Bytes / BW_effective)
+```
+
+If compute time > memory time, the workload is **compute-bound** (increase FLOPS).
+If memory time > compute time, the workload is **memory-bound** (increase bandwidth).
+
+### 2. KV-Cache Memory (PagedAttention)
+
+```text
+KV_bytes = 2 x L x H_kv x D_head x S x B x bytes_per_param
+```
+
+`L` = layers, `H_kv` = KV heads, `D_head` = head dimension, `S` = sequence length, `B` = batch size.
+Factor of 2 accounts for both Key and Value tensors.
+
+### 3. Ring AllReduce Communication
+
+```text
+T_allreduce = 2(N-1)/N x M/BW + 2(N-1) x alpha
+```
+
+`N` = workers, `M` = message bytes, `BW` = link bandwidth, `alpha` = per-message latency.
+As `N` grows large, the volume term approaches `2M/BW` (bandwidth-optimal).
+
+### 4. Chinchilla Scaling Law
+
+```text
+C = 6PD           (compute-optimal training cost)
+P* = sqrt(C/120)  (optimal parameter count for budget C)
+```
+
+`P` = parameters, `D` = tokens, `C` = total FLOPs. Training is compute-optimal when
+`D ~ `{python} f"{_chinchilla_ratio}"`P` (`{python} f"{_chinchilla_ratio}"` tokens per parameter).
+
+### 5. Carbon Footprint
+
+```text
+CO2_kg = Energy_kWh x PUE x Carbon_Intensity_gCO2/kWh / 1000
+```
+
+`PUE` = Power Usage Effectiveness (1.0 = ideal, 1.1 = typical hyperscale).
+Carbon intensity varies by `{python} f"{_ci_ratio:.0f}x"` across grids in the registry (`{python} f"{_quebec_ci:.0f}"` gCO₂/kWh hydro in Quebec vs. `{python} f"{_poland_ci:.0f}"` gCO₂/kWh coal in Poland).
+
+---
+
+## Efficiency Parameter Guide
+
+| Parameter | Description | Low | Typical | High |
+|-----------|-------------|-----|---------|------|
+| `efficiency` | MFU (fraction of peak FLOPS achieved) | 0.10 | 0.30-0.50 | 0.65 |
+| `mfu` | Same as efficiency, used in fleet solvers | 0.10 | 0.35 | 0.55 |
+| Batch=1 inference | LLM decode (memory-bound) | 0.01 | 0.05 | 0.15 |
+| Batched inference | LLM prefill / CNN inference | 0.20 | 0.40 | 0.60 |
+| Training (single node) | Typical training loop | 0.20 | 0.40 | 0.55 |
+| Training (distributed) | Large cluster with comms | 0.15 | 0.30 | 0.45 |
+| FlashAttention | Fused attention kernel | 0.50 | 0.60 | 0.70 |
+| TinyML (MCU) | Microcontroller inference | 0.05 | 0.15 | 0.30 |
+
+---
+
+## Quick API Reference
+
+### 1. Single-Node Roofline
+
+```python
+from mlsysim import Engine, Hardware, Models
+
+profile = Engine.solve(
+    model=Models.Language.Llama3_8B,
+    hardware=Hardware.Cloud.H100,
+    batch_size=1,
+    precision="fp16",       # "fp32", "fp16", "int8", "int4", "fp8"
+    efficiency=0.5,
+    is_training=False,      # True for training memory/FLOPs
+)
+# Returns: PerformanceProfile with .latency, .throughput, .bottleneck,
+#          .memory_footprint, .mfu, .energy, .feasible
+```
+
+### 2. LLM Serving (Prefill + Decode)
+
+```python
+from mlsysim import Hardware, Models
+from mlsysim.solvers import ServingModel
+
+result = ServingModel().solve(
+    model=Models.Language.Llama3_8B,
+    hardware=Hardware.Cloud.H100,
+    seq_len=4096,
+    batch_size=32,
+    precision="fp16",
+)
+# Returns: ServingResult with .ttft, .itl, .kv_cache_size,
+#          .total_memory_required, .feasible
+```
+
+### 3. Distributed Training (3D Parallelism)
+
+```python
+from mlsysim import Models, Systems
+from mlsysim.solvers import DistributedModel
+
+result = DistributedModel().solve(
+    model=Models.Language.Llama3_70B,
+    fleet=Systems.Clusters.Research_256,
+    batch_size=1024,
+    tp_size=8, pp_size=4,
+    precision="fp16",
+    efficiency=0.4,
+    overlap_comm=True,
+)
+# Returns: DistributedResult with .scaling_efficiency,
+#          .step_latency_total, .dp_communication_latency,
+#          .bubble_fraction, .effective_throughput, .parallelism
+```
+
+### 4. Compression (Quantization / Pruning)
+
+```python
+from mlsysim import Hardware, Models
+from mlsysim.solvers import CompressionModel
+
+result = CompressionModel().solve(
+    model=Models.Language.Llama3_8B,
+    hardware=Hardware.Cloud.H100,
+    method="quantization",  # "quantization", "pruning", "distillation"
+    target_bitwidth=4,      # 4, 8, 16
+)
+# Returns: CompressionResult with .compression_ratio, .compressed_size_gb,
+#          .memory_savings_pct, .inference_speedup, .estimated_accuracy_delta
+```
+
+### 5. Sustainability and Economics
+
+```python
+from mlsysim import Systems, Infrastructure
+from mlsysim.solvers import SustainabilityModel, EconomicsModel
+
+fleet = Systems.Clusters.Research_256
+
+co2 = SustainabilityModel().solve(fleet, duration_days=30, datacenter=Infrastructure.Grids.Quebec, mfu=0.4)
+# Returns: SustainabilityResult with .total_energy_kwh, .carbon_footprint_kg,
+#          .water_usage_liters, .pue
+
+tco = EconomicsModel().solve(fleet, duration_days=365, mfu=0.4)
+# Returns: EconomicsResult with .tco_usd, .capex_usd, .total_opex_usd,
+#          .opex_energy_usd, .carbon_footprint_kg
+```
+
+---
+
+## The 22 Walls at a Glance
+
+| # | Wall | One-Liner |
+|---|------|-----------|
+| 1 | Compute | Peak FLOPS ceiling of a single accelerator |
+| 2 | Memory | HBM capacity and bandwidth ceilings |
+| 3 | Software | Gap between peak and achieved FLOPS (MFU) |
+| 4 | Serving | LLM inference: compute-bound prefill vs. memory-bound decode |
+| 5 | Batching | Static batching wastes memory through KV-cache fragmentation |
+| 6 | Streaming | Wafer-scale shifts bottleneck from HBM to injection interconnect |
+| 7 | Tail Latency | P99 latency grows non-linearly as utilization approaches 1.0 |
+| 8 | Ingestion | Storage I/O must supply data at the rate the accelerator consumes it |
+| 9 | Transformation | CPU preprocessing cannot keep pace with accelerator throughput |
+| 10 | Locality | Network topology limits bisection bandwidth between nodes |
+| 11 | Complexity | Chinchilla scaling laws govern compute-optimal training |
+| 12 | Reasoning | Inference-time compute scales with reasoning chain length |
+| 13 | Fidelity | Compression trades model fidelity for efficiency |
+| 14 | Communication | Distributed training requires synchronization across N nodes |
+| 15 | Fragility | Component failures are inevitable at scale (MTBF/N) |
+| 16 | Multi-tenant | Shared clusters introduce queueing delays |
+| 17 | Capital | Total cost of ownership bounds what is economically feasible |
+| 18 | Sustainability | Energy consumption converts to carbon and water footprint |
+| 19 | Checkpoint | Periodic state saves impose I/O burst penalties on training MFU |
+| 20 | Safety | Privacy and fairness guarantees impose computational overhead |
+| 21 | Sensitivity | Identifies the binding constraint via numerical partial derivatives |
+| 22 | Synthesis | Inverse Roofline: derive hardware specs from an SLA target |
+
+---
+
+## Hardware Quick Reference
+
+```{python}
+#| echo: false
+hw_rows = []
+for hw, access in [
+    (mlsysim.Hardware.Cloud.V100, "Hardware.Cloud.V100"),
+    (mlsysim.Hardware.Cloud.A100, "Hardware.Cloud.A100"),
+    (mlsysim.Hardware.Cloud.H100, "Hardware.Cloud.H100"),
+    (mlsysim.Hardware.Cloud.H200, "Hardware.Cloud.H200"),
+    (mlsysim.Hardware.Cloud.B200, "Hardware.Cloud.B200"),
+    (mlsysim.Hardware.Tiny.nRF52840, "Hardware.Tiny.nRF52840"),
+]:
+    peak = hw.compute.peak_flops.to("TFLOPs/s").magnitude
+    peak_str = f"{peak:,.0f}" if peak >= 1 else f"{peak:.6f}"
+    cap_gb = hw.memory.capacity.to("GB").magnitude
+    cap_str = f"{cap_gb:.0f} GB" if cap_gb >= 1 else f"{hw.memory.capacity.to('MB').magnitude:.2f} MB"
+    bw_tbs = hw.memory.bandwidth.to("TB/s").magnitude
+    bw_str = f"{bw_tbs:.2f} TB/s" if bw_tbs >= 0.01 else f"{hw.memory.bandwidth.to('MB/s').magnitude:.1f} MB/s"
+    tdp_w = hw.tdp.to("W").magnitude
+    tdp_str = f"{tdp_w:,.0f} W" if tdp_w >= 1 else f"{tdp_w * 1000:.0f} mW"
+    hw_rows.append([hw.name, peak_str, cap_str, bw_str, tdp_str, f"`{access}`"])
+
+table(["Accelerator", "Peak FP16 (TFLOP/s)", "Memory", "Bandwidth", "TDP", "Access"], hw_rows)
+```
+
+---
+
+## Model Quick Reference
+
+```{python}
+#| echo: false
+model_rows = []
+for m, access in [
+    (mlsysim.Models.Vision.ResNet50, "Models.Vision.ResNet50"),
+    (mlsysim.Models.Language.Llama3_8B, "Models.Language.Llama3_8B"),
+    (mlsysim.Models.Language.Llama3_70B, "Models.Language.Llama3_70B"),
+    (mlsysim.Models.Language.GPT3, "Models.Language.GPT3"),
+    (mlsysim.Models.Tiny.DS_CNN, "Models.Tiny.DS_CNN"),
+    (mlsysim.Models.Vision.MobileNetV2, "Models.Vision.MobileNetV2"),
+]:
+    p = m.parameters.to("dimensionless").magnitude
+    if p >= 1e9:
+        p_str = f"{p / 1e9:.2f}B".rstrip("0").rstrip(".") + ("B" if not f"{p / 1e9:.2f}".rstrip("0").rstrip(".").endswith("B") else "")
+        p_str = f"{p / 1e9:g}B"
+    elif p >= 1e6:
+        p_str = f"{p / 1e6:.1f}M"
+    else:
+        p_str = f"{p / 1e3:.0f}K"
+    model_rows.append([m.name, p_str, m.architecture, f"`{access}`"])
+
+table(["Model", "Parameters", "Architecture", "Access"], model_rows)
+```

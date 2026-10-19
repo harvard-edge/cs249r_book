@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from mlsysim.engine.v1_10_experiments import (
+from mlsysim.labs.experiments.v1_10_experiments import (
     CANONICAL_TRACK_IDS,
     MODEL_KEYS,
     TRACK_IDS,

@@ -1,35 +1,86 @@
 ---
 title: "Quantization: Not a Free Lunch"
-subtitle: "INT4 gives 4x speedup for decode. For training, it gives 0x."
-description: "Discover that quantization only helps when you are memory-bound. Compare the effect of INT4 on LLM decode (dramatic) vs. training (negligible). The regime determines whether the optimization works."
+subtitle: "INT4 gives 3.4× speedup for memory-bound decode. For compute-bound weight-only quantization, it gives 1.0×."
+description: "Discover that quantization helps only when a workload is memory-bound (or when native low-precision Tensor Cores boost compute). Compare the effect of INT4 on LLM decode vs. large-batch training."
 categories: ["algorithm", "intermediate"]
 ---
 
+```{python}
+#| echo: false
+#| output: false
+#| warning: false
+import mlsysim  # installed via `pip install mlsysim` (see workflow)
+from mlsysim.solvers import ServingModel, SingleNodeModel, CompressionModel
+
+Engine = mlsysim.Engine
+_model = mlsysim.Models.Language.Llama3_8B
+_hw = mlsysim.Hardware.Cloud.H100
+_serv = ServingModel()
+
+_r_fp16 = _serv.solve(model=_model, hardware=_hw, seq_len=2048, batch_size=1, precision="fp16")
+_r_int8 = _serv.solve(model=_model, hardware=_hw, seq_len=2048, batch_size=1, precision="int8")
+_r_int4 = _serv.solve(model=_model, hardware=_hw, seq_len=2048, batch_size=1, precision="int4")
+
+_itl_fp16 = _r_fp16.itl.to("ms").magnitude
+_itl_int8 = _r_int8.itl.to("ms").magnitude
+_itl_int4 = _r_int4.itl.to("ms").magnitude
+
+_w_fp16 = _r_fp16.model_weights_size.to("GB").magnitude
+_w_int8 = _r_int8.model_weights_size.to("GB").magnitude
+_w_int4 = _r_int4.model_weights_size.to("GB").magnitude
+
+_sp_dec_int8 = _itl_fp16 / _itl_int8
+_sp_dec_int4 = _itl_fp16 / _itl_int4
+
+_train_model = mlsysim.Models.Vision.ResNet50
+_train_hw = mlsysim.Hardware.Cloud.A100
+_sn = SingleNodeModel()
+
+_p_fp16 = _sn.solve(model=_train_model, hardware=_train_hw, batch_size=256, precision="fp16")
+_p_int8 = _sn.solve(model=_train_model, hardware=_train_hw, batch_size=256, precision="int8")
+_p_int4 = _sn.solve(model=_train_model, hardware=_train_hw, batch_size=256, precision="int4")
+
+_lat_fp16 = _p_fp16.latency.to("ms").magnitude
+_lat_int8 = _p_int8.latency.to("ms").magnitude
+_lat_int4 = _p_int4.latency.to("ms").magnitude
+
+_sp_tr_int8 = _lat_fp16 / _lat_int8
+_sp_tr_int4 = _lat_fp16 / _lat_int4
+
+_a100_fp16_tflops = _train_hw.compute.peak_flops.to("TFLOPs/s").magnitude
+_a100_int8_tflops = _train_hw.compute.precision_flops["int8"].to("TFLOPs/s").magnitude
+_a100_int8_ratio = _a100_int8_tflops / _a100_fp16_tflops
+
+_comp = CompressionModel()
+_c16 = _comp.solve(model=_model, hardware=_hw, method="quantization", target_bitwidth=16)
+_c8 = _comp.solve(model=_model, hardware=_hw, method="quantization", target_bitwidth=8)
+_c4 = _comp.solve(model=_model, hardware=_hw, method="quantization", target_bitwidth=4)
+```
+
 ## The Question
 
-INT4 quantization reduces model size by 4x. Intuitively, 4x fewer bytes should mean 4x
-faster. Blogs claim massive speedups. **Does INT4 always give 4x speedup?**
+INT4 quantization reduces model weight size by 4× (from `{python} f"{_w_fp16:.2f} GB"` in FP16 to `{python} f"{_w_int4:.2f} GB"` in INT4 for `{python} _model.name`). Intuitively, 4× fewer bytes should mean 4×
+faster execution. **Does INT4 always give a 4× speedup?**
 
-You already have the tools to predict the answer. Before reading further, think about
-what Tutorial 1 taught you: *which ceiling determines performance?* If quantization
-reduces bytes but not FLOPs, when would it help — and when would it do nothing?
+[Tutorial 1](01_memory_wall.qmd) already supplies the tools to predict the answer: performance is governed by whichever ceiling binds first. When quantization
+reduces bytes transferred from HBM without increasing arithmetic throughput, it accelerates memory-bound workloads and leaves compute-bound workloads unchanged.
 
-This tutorial makes the prediction, runs the experiment, and reveals that the answer
-depends entirely on the regime.
+This tutorial makes the prediction, runs the experiment, and shows that the outcome
+depends entirely on the operating regime.
 
 ::: {.callout-note}
 ## Prerequisites
 Complete [Tutorial 1: The Memory Wall](01_memory_wall.qmd) and
-[Tutorial 2: Two Phases, One Request](02_two_phases.qmd). You should understand
+[Tutorial 2: Two Phases, One Request](02_two_phases.qmd). This tutorial assumes familiarity with
 memory-bound vs. compute-bound regimes and why LLM decode is memory-bound.
 :::
 
 ::: {.callout-note}
-## What You Will Learn
+## Learning Objectives
 
 - **Predict** whether quantization will help a given workload based on its regime
 - **Measure** the speedup from INT8 and INT4 for both memory-bound and compute-bound workloads
-- **Explain** why the same optimization yields 4x in one case and 0x in another
+- **Explain** why weight-only INT4 yields `{python} f"{_sp_dec_int4:.1f}"`× in one regime and `{python} f"{_sp_tr_int4:.1f}"`× in another
 - **Evaluate** the accuracy-compression trade-off using `CompressionModel`
 :::
 
@@ -38,29 +89,22 @@ memory-bound vs. compute-bound regimes and why LLM decode is memory-bound.
 
 Quantization reduces the number of bytes per parameter:
 
-| Precision | Bytes/Param | Relative to FP16 |
-|:----------|:------------|:-----------------|
-| FP16 | 2 | 1x (baseline) |
-| INT8 | 1 | 0.5x |
-| INT4 | 0.5 | 0.25x |
+| Precision | Bytes/Param | Relative to FP16 | `{python} _model.name` Weights |
+|:----------|:------------|:-----------------|:-------------------------------|
+| FP16 | 2 | 1.0× (baseline) | `{python} f"{_w_fp16:.2f} GB"` |
+| INT8 | 1 | 0.5× | `{python} f"{_w_int8:.2f} GB"` |
+| INT4 | 0.5 | 0.25× | `{python} f"{_w_int4:.2f} GB"` |
 
 For **memory-bound** workloads, performance scales with bytes loaded from HBM per step.
-Halving bytes halves latency. For **compute-bound** workloads, performance scales with
-FLOP/s. Fewer bytes does not change the number of FLOPs, so latency stays the same.
+Halving bytes nearly halves latency. For **compute-bound** workloads, performance scales with
+FLOP/s. Fewer weight bytes do not change the number of FLOPs, so latency stays the same unless the hardware also provides higher-throughput low-precision Tensor Cores.
 
-The key question is always: *which ceiling am I hitting?*
+The key criterion is always *which ceiling the workload is hitting*.
 :::
 
 ---
 
 ## 1. Setup
-
-```{python}
-#| echo: false
-#| output: false
-import mlsysim  # installed via `pip install mlsysim` (see workflow)
-Engine = mlsysim.Engine
-```
 
 ```python
 import mlsysim
@@ -74,9 +118,10 @@ from mlsysim.solvers import CompressionModel
 
 LLM decoding at batch 1 is the textbook memory-bound workload. Each token generation
 must reload the entire model from HBM. Fewer bytes per parameter means fewer bytes to
-load means lower inter-token latency:
+load, and therefore lower inter-token latency:
 
 ```{python}
+#| warning: false
 from mlsysim.solvers import ServingModel
 from mlsysim.show import table, info
 
@@ -100,18 +145,19 @@ for prec in ["fp16", "int8", "int4"]:
 table(["Precision", "ITL", "Weights", "Speedup vs FP16"], rows)
 ```
 
-INT8 gives roughly 2x speedup. INT4 gives roughly 4x. The speedup tracks the byte
-reduction almost exactly — because the workload is purely memory-bound. Every byte
-you eliminate directly reduces the time to load model weights.
+INT8 cuts weights from `{python} f"{_w_fp16:.2f} GB"` to `{python} f"{_w_int8:.2f} GB"` and lowers ITL from `{python} f"{_itl_fp16:.2f} ms"` to `{python} f"{_itl_int8:.2f} ms"`, a **`{python} f"{_sp_dec_int8:.1f}"`×** speedup. INT4 cuts weights to `{python} f"{_w_int4:.2f} GB"` and lowers ITL to `{python} f"{_itl_int4:.2f} ms"`, a **`{python} f"{_sp_dec_int4:.1f}"`×** speedup. The speedup tracks the byte
+reduction closely (falling slightly short of 2.0× and 4.0× only because per-layer kernel launch overhead does not shrink with weight precision). Every weight byte
+removed directly reduces HBM transfer time.
 
 ---
 
-## 3. Compute-Bound Case: Training at Large Batch
+## 3. Compute-Bound Case: Large-Batch Execution
 
-Now let's try the same optimization on a compute-bound workload — ResNet-50 training
-at batch 256 on the A100:
+The same optimization behaves differently on a compute-bound workload, `{python} _train_model.name`
+at batch 256 on the `{python} _train_hw.name`:
 
 ```{python}
+#| warning: false
 from mlsysim.solvers import SingleNodeModel
 
 train_model = mlsysim.Models.Vision.ResNet50
@@ -129,35 +175,29 @@ for prec in ["fp16", "int8", "int4"]:
     if baseline_lat is None:
         baseline_lat = lat_ms
     speedup = baseline_lat / lat_ms if lat_ms > 0 else 0
-    rows.append([prec, p.latency.to('ms'), f"{p.throughput:.0f} img/s", f"{speedup:.1f}x"])
+    rows.append([prec, p.latency.to('ms'), f"{p.throughput.magnitude:.0f} img/s", f"{speedup:.1f}x"])
 
 table(["Precision", "Latency", "Throughput", "Speedup"], rows)
 ```
 
-The speedup is negligible. Why? Because at batch 256, ResNet-50 training is
-**compute-bound**. The bottleneck is arithmetic throughput (FLOP/s), not memory bandwidth.
-Reducing bytes per parameter does not change the number of FLOPs in the forward and backward
-passes. The GPU is already saturated with compute — loading weights faster does not help.
+At batch 256, `{python} _train_model.name` on the `{python} _train_hw.name` is **compute-bound**:
+weight-only INT4 (`{python} f"{_lat_int4:.2f} ms"`, `{python} f"{_p_int4.throughput.magnitude:,.0f} img/s"`) delivers **`{python} f"{_sp_tr_int4:.1f}"`×** speedup relative to FP16 (`{python} f"{_lat_fp16:.2f} ms"`, `{python} f"{_p_fp16.throughput.magnitude:,.0f} img/s"`). Because the A100 lacks native INT4 Tensor Cores in the Zoo, weight-only INT4 dequantizes weights to FP16 in registers and executes at the `{python} f"{_a100_fp16_tflops:.0f} TFLOP/s"` FP16 compute ceiling; shrinking weight traffic by 4× does nothing when arithmetic is the bottleneck. By contrast, INT8 reaches `{python} f"{_lat_int8:.2f} ms"` (**`{python} f"{_sp_tr_int8:.1f}"`×** speedup) only because the A100 provides dedicated INT8 Tensor Cores at `{python} f"{_a100_int8_tflops:.0f} TFLOP/s"` (`{python} f"{_a100_int8_ratio:.0f}"`× the FP16 compute peak).
 
 ::: {.callout-warning}
-## Nuance: INT8 Tensor Cores
+## Nuance: INT8 Tensor Cores vs. Weight-Only INT4
 
-In practice, GPUs with dedicated INT8/INT4 Tensor Cores (like A100 and H100) also gain
-*higher compute throughput* at lower precision — e.g., the A100 does 624 TFLOP/s INT8 vs.
-312 TFLOP/s FP16, a 2× compute boost. This means quantization simultaneously changes
-*both* the memory ceiling (fewer bytes) and the compute ceiling (more INT ops/sec). For
-workloads near the ridge point, this dual effect can shift the regime classification itself.
-MLSys·im's first-order model captures the memory effect; the compute boost is a
-second-order effect that depends on hardware-specific Tensor Core support.
+GPUs with dedicated INT8 Tensor Cores (such as the A100 at `{python} f"{_a100_int8_tflops:.0f} TFLOP/s"` INT8 vs. `{python} f"{_a100_fp16_tflops:.0f} TFLOP/s"` FP16, a `{python} f"{_a100_int8_ratio:.0f}"`× compute boost) raise
+*both* the memory ceiling (fewer bytes) and the compute ceiling (more INT ops/sec) when activations and weights are quantized together (W8A8). Weight-only INT4 (W4A16), by contrast, reduces HBM weight traffic by 4× while keeping arithmetic on FP16 Tensor Cores, so it accelerates memory-bound decode (`{python} f"{_sp_dec_int4:.1f}"`×) while leaving compute-bound steps unchanged (`{python} f"{_sp_tr_int4:.1f}"`×).
 :::
 
 ---
 
 ## 4. The Reveal: Same Optimization, Two Regimes
 
-Let's put the results side by side to make the contrast stark:
+Placing the results side by side makes the contrast stark:
 
 ```{python}
+#| warning: false
 rows = []
 
 # Memory-bound: LLM decode
@@ -168,8 +208,8 @@ for prec in ["fp16", "int8", "int4"]:
 decode_row.append("Memory-bound")
 rows.append(decode_row)
 
-# Compute-bound: training
-train_row = ["ResNet-50 train bs=256"]
+# Compute-bound: large-batch CNN execution
+train_row = ["ResNet-50 bs=256"]
 for prec in ["fp16", "int8", "int4"]:
     p = train_solver.solve(model=train_model, hardware=train_hw, batch_size=256, precision=prec)
     train_row.append(p.latency.to('ms'))
@@ -182,11 +222,10 @@ table(["Workload", "FP16", "INT8", "INT4", "Regime"], rows)
 ::: {.callout-important}
 ## Key Insight
 
-**Quantization reduces bytes loaded from memory. If you are memory-bound, fewer bytes
-means proportional speedup. If you are compute-bound, fewer bytes means nothing — compute,
-not memory, is the ceiling.** The regime determines whether the optimization works. INT4
-gives ~4x for LLM decode (memory-bound) and ~0x for large-batch training (compute-bound).
-The same technique, applied to different regimes, yields completely different results. Always
+**Weight-only quantization reduces bytes loaded from memory. For a memory-bound workload, fewer bytes
+mean proportional speedup. For a compute-bound workload, fewer bytes alone mean no speedup, because compute,
+not memory, is the ceiling.** The regime determines whether byte reduction works: INT4
+lowers `{python} _model.name` decode latency from `{python} f"{_itl_fp16:.2f} ms"` to `{python} f"{_itl_int4:.2f} ms"` (**`{python} f"{_sp_dec_int4:.1f}"`×** speedup, memory-bound) yet leaves `{python} _train_model.name` at batch 256 at `{python} f"{_lat_int4:.2f} ms"` (**`{python} f"{_sp_tr_int4:.1f}"`×**, compute-bound). Always
 check the regime before choosing an optimization.
 :::
 
@@ -194,8 +233,8 @@ check the regime before choosing an optimization.
 
 ## 5. The Accuracy Tax: CompressionModel
 
-Quantization is not free — it trades accuracy for speed. The `CompressionModel` quantifies
-this trade-off:
+Quantization is not free; it trades accuracy for speed and memory capacity. The `CompressionModel` quantifies
+this trade-off relative to an FP32 baseline:
 
 ```{python}
 from mlsysim.solvers import CompressionModel
@@ -219,72 +258,25 @@ for bits in [16, 8, 4]:
 table(["Bits", "Compressed", "Compression", "Accuracy", "Savings"], rows)
 ```
 
-INT8 has minimal accuracy loss (< 1%). INT4 can degrade accuracy by 2-5% depending on the
-model and calibration method. The decision is not "always quantize" — it is "quantize when
-you are memory-bound AND the accuracy cost is acceptable for your application."
+Relative to FP32, 8-bit quantization shrinks `{python} _model.name` to `{python} f"{_c8.compressed_size_gb.to('GB').magnitude:.2f} GB"` (`{python} f"{_c8.compression_ratio:.1f}"`× compression, `{python} f"{_c8.memory_savings_pct:.1f}%"` memory savings) with an estimated accuracy change of `{python} f"{_c8.estimated_accuracy_delta:+.1%}"`. Going to 4-bit shrinks weights to `{python} f"{_c4.compressed_size_gb.to('GB').magnitude:.2f} GB"` (`{python} f"{_c4.compression_ratio:.1f}"`× compression, `{python} f"{_c4.memory_savings_pct:.1f}%"` savings) with an estimated accuracy change of `{python} f"{_c4.estimated_accuracy_delta:+.1%}"`. The decision is not "always quantize" but "quantize when
+the workload is memory-bound AND the accuracy cost is acceptable for the application."
 
 ::: {.callout-warning}
 ## When NOT to Quantize
 
-- **Training**: You are compute-bound at large batch sizes. Quantization does not help and
-  introduces gradient noise that can harm convergence.
+- **Training**: Training is compute-bound at large batch sizes. Weight-only quantization does not help and
+  low-precision gradients can harm convergence.
 - **High-accuracy applications**: Medical, financial, and safety-critical systems may not
-  tolerate even 1% accuracy loss.
-- **Already compute-bound inference**: If your inference workload runs at large batch sizes
-  (e.g., offline batch processing), you are likely compute-bound already.
-:::
-
----
-
-## Your Turn
-
-::: {.callout-caution}
-## Exercises
-
-**Exercise 1: Predict before you compute.**
-Llama-3 70B has 5x more parameters than Llama-3 8B, making it even more memory-bound at
-batch 1. Before running code, predict: will INT4 give a *larger* or *smaller* speedup for
-the 70B model compared to the 8B? Write your prediction, then verify with
-`mlsysim.Models.Language.Llama3_70B`. (Hint: think about what determines speedup in the
-memory-bound regime.)
-
-**Exercise 2: Find the crossover batch size.**
-At some batch size, LLM inference transitions from memory-bound to compute-bound. At that
-point, quantization stops helping. Sweep batch sizes from 1 to 256 for Llama-3 8B on the
-H100 and compare FP16 vs. INT4 ITL. At what batch size does the INT4 speedup drop below
-2x? Below 1.5x?
-
-**Exercise 3: Accuracy-compression frontier.**
-Use `CompressionModel` to compare quantization (INT8, INT4) vs. **pruning** — a technique
-that removes parameters entirely (setting them to zero), reducing both model size and
-computation. Try sparsity levels of 0.5, 0.75, and 0.9 for Llama-3 8B. Build a table
-showing compression ratio vs. accuracy delta for each method. Which method gives the best
-compression-to-accuracy trade-off?
-
-**Self-check:** A workload has arithmetic intensity of 5 FLOP/byte and the hardware ridge
-point is 150 FLOP/byte. Is this workload memory-bound or compute-bound? Will quantization
-help? (Answer: Memory-bound. Yes, quantization will help proportionally.)
-:::
-
----
-
-## Key Takeaways
-
-::: {.callout-tip}
-## Summary
-
-- **Quantization primarily reduces bytes loaded from memory**: it helps memory-bound workloads proportionally and compute-bound workloads negligibly (though dedicated INT8/INT4 Tensor Cores also increase compute throughput)
-- **LLM decode at batch 1** is the ideal case for quantization: ~2x for INT8, ~4x for INT4
-- **Large-batch training** is compute-bound: quantization provides near-zero speedup
-- **The regime determines the outcome**: always check whether you are memory-bound or compute-bound before applying quantization
-- **Accuracy is the tax**: INT8 costs < 1%, INT4 costs 2-5% — acceptable for some applications, not for others
+  tolerate even a `{python} f"{abs(_c8.estimated_accuracy_delta):.1%}"` to `{python} f"{abs(_c4.estimated_accuracy_delta):.1%}"` accuracy loss.
+- **Already compute-bound inference**: An inference workload that runs at large batch sizes
+  (e.g., offline batch processing) is already compute-bound unless hardware supports faster low-precision arithmetic.
 :::
 
 ---
 
 ## Next Steps
 
-- **[KV-Cache: The Hidden Tax](03_kv_cache.qmd)** — Quantization also shrinks the KV-cache, allowing more concurrent users
-- **[The Memory Wall](01_memory_wall.qmd)** — Revisit the memory wall to see how quantization shifts the bandwidth bottleneck
-- **[Starving the GPU](04_starving_the_gpu.qmd)** — Another case where the bottleneck is not where you expect
-- **[Where to Invest](09_sensitivity.qmd)** — Quantify exactly how much quantization buys you compared to hardware upgrades
+- **[KV-Cache: The Hidden Tax](03_kv_cache.qmd)**: Quantization also shrinks the KV-cache, allowing more concurrent users
+- **[The Memory Wall](01_memory_wall.qmd)**: Revisit the memory wall to see how quantization shifts the bandwidth bottleneck
+- **[Starving the GPU](04_starving_the_gpu.qmd)**: Another case where the bottleneck is not where it is expected
+- **[Where to Invest](09_sensitivity.qmd)**: Quantify how much quantization buys compared to hardware upgrades

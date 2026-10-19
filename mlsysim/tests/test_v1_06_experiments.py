@@ -6,7 +6,7 @@ from dataclasses import replace
 import pytest
 
 from mlsysim.core.units import ureg
-from mlsysim.engine.v1_06_experiments import (
+from mlsysim.labs.experiments.v1_06_experiments import (
     ArchitectureCandidate,
     choose_architecture,
     default_scale_candidate,

@@ -233,7 +233,11 @@ class Engine:
             # deliberate pessimistic simplification of host-offload paging.
             pcie_fallback = Q_(cal.FALLBACK_PCIE_BANDWIDTH_GB_S, "GB/s")
             pcie_bw = (
-                getattr(hardware.interconnect, 'bandwidth', pcie_fallback)
+                getattr(
+                    hardware.interconnect,
+                    'bandwidth_per_direction',
+                    getattr(hardware.interconnect, 'bandwidth', pcie_fallback),
+                )
                 if hardware.interconnect else pcie_fallback
             )
             effective_bw = min(hardware.memory.bandwidth, pcie_bw)
@@ -387,7 +391,10 @@ class Engine:
             for bs in batch_sizes:
                 for prec in precisions:
                     try:
-                        profile = Engine.solve(model, hw, batch_size=bs, precision=prec, efficiency=efficiency)
+                        profile = Engine.solve(
+                            model, hw, batch_size=bs, precision=prec,
+                            efficiency=efficiency, raise_errors=True,
+                        )
                         results.append({
                             "hardware": hw.name,
                             "batch_size": bs,

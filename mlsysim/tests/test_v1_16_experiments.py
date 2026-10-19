@@ -2,7 +2,7 @@ from dataclasses import replace
 
 import pytest
 
-from mlsysim.engine.v1_16_experiments import (
+from mlsysim.labs.experiments.v1_16_experiments import (
     DeploymentEnvelope,
     EvidenceStatus,
     TRACK_ALIASES,
@@ -129,7 +129,7 @@ def test_malformed_ledger_records_are_incompatible(payload):
 
 
 def test_chapter_09_capture_replays_both_exact_input_arms():
-    from mlsysim.engine.v1_09_experiments import evaluate_policy
+    from mlsysim.labs.experiments.v1_09_experiments import evaluate_policy
 
     baseline = evaluate_policy("mobile", "uniform", 8)
     result = evaluate_policy("mobile", "coverage", 8)
@@ -150,7 +150,7 @@ def test_chapter_09_capture_replays_both_exact_input_arms():
 
 
 def test_chosen_result_controls_verdict_while_tested_failure_is_preserved():
-    from mlsysim.engine.v1_09_experiments import evaluate_policy
+    from mlsysim.labs.experiments.v1_09_experiments import evaluate_policy
 
     passing = evaluate_policy("mobile", "coverage", 8)
     failing = evaluate_policy("mobile", "uniform", 8)
@@ -172,7 +172,7 @@ def test_chosen_result_controls_verdict_while_tested_failure_is_preserved():
 
 
 def test_chapter_06_json_snapshot_replays_through_its_versioned_method():
-    from mlsysim.engine.v1_06_experiments import (
+    from mlsysim.labs.experiments.v1_06_experiments import (
         evaluate_candidate,
         evaluation_replay_snapshot,
         get_scenario,
@@ -198,7 +198,7 @@ def test_chapter_06_json_snapshot_replays_through_its_versioned_method():
 
 
 def test_chapter_05_evaluate_track_replays_with_optional_chosen_result():
-    from mlsysim.engine.v1_05_experiments import (
+    from mlsysim.labs.experiments.v1_05_experiments import (
         EVALUATE_MODEL_KEY,
         evaluate_track,
         snapshot,
@@ -230,7 +230,7 @@ def test_chapter_05_evaluate_track_replays_with_optional_chosen_result():
 
 
 def test_chapter_05_numerical_case_replays_with_optional_chosen_result():
-    from mlsysim.engine.v1_05_experiments import (
+    from mlsysim.labs.experiments.v1_05_experiments import (
         NUMERICAL_MODEL_KEY,
         run_numerical_case,
         snapshot,
@@ -261,7 +261,7 @@ def test_chapter_05_numerical_case_replays_with_optional_chosen_result():
 
 
 def test_chapter_07_capture_replays_with_optional_chosen_result():
-    from mlsysim.engine.v1_07_experiments import (
+    from mlsysim.labs.experiments.v1_07_experiments import (
         MODEL_KEY,
         evaluate_dispatch,
     )

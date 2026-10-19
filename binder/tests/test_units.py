@@ -259,7 +259,7 @@ def test_derived_values():
     ok = True
 
     # GPT-3 training time
-    days = calc_training_time_days(GPT3_TRAINING_OPS, 1024, A100_FLOPS_FP16_TENSOR, 0.45)
+    days = calc_training_time(GPT3_TRAINING_OPS, 1024, A100_FLOPS_FP16_TENSOR, 0.45).to(day).magnitude
     ok &= check("GPT-3 training ~25 days", days, 25.0, tol=0.1)
 
     # Waymo data rates

@@ -41,12 +41,6 @@ def dTime(total_ops, num_devices, peak_flops_per_device, efficiency_eta):
 calc_training_time = dTime
 
 
-def calc_training_time_days(total_ops, num_devices, peak_flops_per_device, efficiency_eta):
-    """Training duration in days."""
-    duration = dTime(total_ops, num_devices, peak_flops_per_device, efficiency_eta)
-    return duration.m_as(ureg.day)
-
-
 def calc_amdahls_speedup(p, s):
     """
     Overall system speedup (Amdahl's Law).

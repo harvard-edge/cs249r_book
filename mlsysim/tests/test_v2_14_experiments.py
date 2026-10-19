@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from mlsysim.engine.v2_14_experiments import (
+from mlsysim.labs.experiments.v2_14_experiments import (
     SCENARIO_IDS,
     TRACK_IDS,
     conformal_quantile,
@@ -222,7 +222,7 @@ def test_conformal_rejects_invalid_alpha(alpha):
 
 @pytest.mark.parametrize("track_id", TRACK_IDS)
 def test_track_context_defines_volume2_fleet_roles_and_scenario(track_id):
-    from mlsysim.engine.v2_14_experiments import track_context
+    from mlsysim.labs.experiments.v2_14_experiments import track_context
 
     ctx = track_context(track_id)
     assert ctx["scenario_name"]
@@ -235,7 +235,7 @@ def test_track_context_defines_volume2_fleet_roles_and_scenario(track_id):
 
 @pytest.mark.parametrize("scenario_id", SCENARIO_IDS)
 def test_trace_event_interpretation_is_causal_to_scenario(scenario_id):
-    from mlsysim.engine.v2_14_experiments import trace_event_interpretation
+    from mlsysim.labs.experiments.v2_14_experiments import trace_event_interpretation
 
     text = trace_event_interpretation(scenario_id)
     assert isinstance(text, str) and len(text) > 20

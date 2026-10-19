@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[3]
 STATIC_REVIEW_REVISION = '99cc75bfed2c434e73b30be25523ce85d4c9d2dd'
 STATIC_DELIVERY = ROOT / 'books/_prototypes/vol1-web-animations/figure-plan/static-delivery.json'
 SECTION_REVIEW = 'books/_prototypes/vol1-web-animations/figure-plan/section-integration-review.json'
+INTEGRATION_REVIEW = 'books/_prototypes/vol1-web-animations/figure-plan/dev-integration.json'
 
 
 def source(path):
@@ -45,6 +46,35 @@ def protected_source_ranges(text):
     return sorted(spans)
 
 
+def pre_integration_source(path):
+    """Recover reviewed branch bytes only for an exact hash-bound dev merge."""
+    current = (ROOT / path).read_bytes()
+    record_path = ROOT / INTEGRATION_REVIEW
+    if not record_path.exists():
+        return current
+    record = json.loads(record_path.read_text())
+    entries = [entry for entry in record['files'] if entry['source'] == path]
+    assert len(entries) <= 1, 'Duplicate integration source'
+    if not entries:
+        return current
+    entry = entries[0]
+    assert hashlib.sha256(current).hexdigest() == entry['after_sha256'], (path, 'unapproved integrated source drift')
+    reviewed = subprocess.check_output(['git', 'show', record['reviewed_branch_revision'] + ':' + path], cwd=ROOT)
+    assert hashlib.sha256(reviewed).hexdigest() == entry['before_sha256'], (path, 'integration baseline hash mismatch')
+    # A prose merge must preserve every previously reviewed figure wrapper/body.
+    def figures(raw):
+        text = raw.decode('utf-8')
+        found = {}
+        for start in re.finditer(r'(?m)^(:{3,})\s*\{#(fig-[^\s}]+)[^\n]*', text):
+            close = re.search(r'(?m)^' + re.escape(start[1]) + r'[ \t]*$', text[start.end():])
+            assert close, 'Unclosed integrated figure'
+            found[start[2]] = text[start.start():start.end() + close.end()]
+        return found
+    old_figures, current_figures = figures(reviewed), figures(current)
+    assert all(current_figures.get(key) == value for key, value in old_figures.items()), (path, 'reviewed figure changed during integration')
+    return reviewed
+
+
 def approved_prose_sources():
     """Reverse only the exact approved sequential replacements, never omit prose."""
     record = json.loads((ROOT / SECTION_REVIEW).read_text())
@@ -55,7 +85,7 @@ def approved_prose_sources():
     for entry in files:
         path = entry['source']
         assert path.startswith('books/vol') and path.endswith('.qmd') and '..' not in Path(path).parts
-        current = (ROOT / path).read_bytes()
+        current = pre_integration_source(path)
         assert hashlib.sha256(current).hexdigest() == entry['after_sha256'], (path, 'unapproved post-edit source drift')
         text = current.decode('utf-8')
         protected_after = [text[a:b] for a, b in protected_source_ranges(text)]
@@ -96,7 +126,7 @@ def static_source_provenance(refresh=False):
             ['git', 'show', STATIC_REVIEW_REVISION + ':' + entry['source']], cwd=ROOT)
         current = (ROOT / entry['source']).read_bytes()
         assert digest(reviewed) == entry['source_sha256'], (entry['key'], 'historical raw source drift')
-        reconstructed = approved.get(entry['source'], current)
+        reconstructed = approved.get(entry['source'], pre_integration_source(entry['source']))
         assert normalize(reconstructed) == normalize(reviewed), (entry['key'], 'static source content changed')
         png = (STATIC_DELIVERY.parent / entry['png']).read_bytes()
         assert digest(png) == entry['png_sha256'], (entry['key'], 'reviewed PNG changed')
@@ -118,7 +148,8 @@ def static_source_provenance(refresh=False):
             'revision, unchanged figure/math/code regions and inline math/code. It then '
             'removes only space-prefixed data-explore and '
             'data-explore-key double-quoted HTML enrollment attributes, then compares '
-            'all remaining bytes. PNG hashes remain the historical reviewed artifacts. '
+            'all remaining bytes. An optional dev-integration.json recovers exact hash-bound '
+            'pre-merge bytes after verifying unchanged figure wrappers and bodies. PNG hashes remain the historical reviewed artifacts. '
             'This provenance check does not claim a new PDF build or visual review.')
     if refresh:
         manifest['reviewed_source_revision'] = STATIC_REVIEW_REVISION

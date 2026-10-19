@@ -5,7 +5,7 @@ Each exercise is self-contained and takes 5-10 minutes.
 
 ---
 
-## Exercise 1 — The Roofline Transition (Part 1: Single-Node Performance)
+## Exercise 1: The Roofline Transition (Part 1: Single-Node Performance)
 
 **Learning Objective:** Identify the batch size where a CNN workload transitions
 from memory-bound to compute-bound on a datacenter GPU.
@@ -45,7 +45,7 @@ exact crossover point.
 ### Hint
 
 Watch for when `latency_compute > latency_memory`. The crossover is the
-Roofline ridge point. Note that the reported `bottleneck` field depends
+Roofline ridge point. The reported `bottleneck` field depends
 on the overall arithmetic intensity calculation, so inspect both latency
 components directly.
 
@@ -53,12 +53,12 @@ components directly.
 <summary><strong>Expected Answer</strong></summary>
 
 ResNet-50 on the A100 at FP16 with efficiency=0.5 is already compute-bound
-at very small batch sizes because of its high FLOP count (~8 GFLOPs per
+at small batch sizes because of its high FLOP count (~8 GFLOPs per
 image) relative to its small weight footprint (~51 MB at FP16). The compute
 term scales linearly with batch size while the memory term grows more slowly
 (weights loaded once, only activation traffic scales). For CNN workloads
 like ResNet-50, the transition may already be at batch_size=1, unlike
-Transformer decode which is memory-bound at batch_size=1. Compare with
+Transformer decode, which is memory-bound at batch_size=1. Compare with
 `Models.Language.Llama3_8B` to see a memory-bound regime.
 
 </details>
@@ -68,11 +68,11 @@ Transformer decode which is memory-bound at batch_size=1. Compare with
 Why does this transition point matter for production deployment? Compare
 ResNet-50 (compute-bound even at batch_size=1) with Llama-3-8B (memory-bound
 at batch_size=1). What hardware characteristic should you optimize for
-in each case -- peak FLOPS or memory bandwidth?
+in each case: peak FLOPS or memory bandwidth?
 
 ---
 
-## Exercise 2 — LLM Serving Capacity (Part 2: Serving and Inference)
+## Exercise 2: LLM Serving Capacity (Part 2: Serving and Inference)
 
 **Learning Objective:** Determine how many concurrent LLM requests fit in
 GPU memory, accounting for both model weights and KV-cache.
@@ -106,7 +106,7 @@ for bs in [1, 2, 4, 8, 16, 32, 64, 128]:
 
 How many concurrent Llama-3-8B requests can a single H100 (80 GB) serve
 at 4K context in FP16? What is the dominant memory consumer at that
-maximum batch size -- weights or KV-cache?
+maximum batch size: weights or KV-cache?
 
 ### Hint
 
@@ -135,7 +135,7 @@ concurrent serving capacity?
 
 ---
 
-## Exercise 3 — Quantization Trade-offs (Part 3: Compression and Efficiency)
+## Exercise 3: Quantization Trade-offs (Part 3: Compression and Efficiency)
 
 **Learning Objective:** Quantify the memory savings and inference speedup
 from INT4 quantization, and understand the accuracy trade-off.
@@ -213,7 +213,7 @@ What is the optimal compression point?
 
 ---
 
-## Exercise 4 — Parallelism Strategy Search (Part 4: Distributed Training)
+## Exercise 4: Parallelism Strategy Search (Part 4: Distributed Training)
 
 **Learning Objective:** Find the optimal 3D parallelism configuration
 (TP x PP x DP) for training a 70B model on a 64-GPU cluster.
@@ -231,7 +231,7 @@ fleet     = Systems.Clusters.Research_256  # 256 H100s
 
 ### Task
 
-Since we want 64 GPUs, build a custom fleet. Then run the optimizer.
+This exercise uses 64 GPUs, so build a custom fleet. Then run the optimizer.
 
 ```python
 from mlsysim.systems.types import Fleet
@@ -302,7 +302,7 @@ down? Which parallelism dimension should absorb the extra GPUs?
 
 ---
 
-## Exercise 5 — Carbon Geography (Part 5: Sustainability)
+## Exercise 5: Carbon Geography (Part 5: Sustainability)
 
 **Learning Objective:** Quantify how datacenter location affects the
 carbon footprint of a long training run.
@@ -352,7 +352,7 @@ is consumed by cooling and power delivery (not compute)?
 
 Quebec's carbon intensity is ~1.2 gCO2/kWh (hydro) vs. US average
 ~390 gCO2/kWh (mixed grid). The PUE overhead is the ratio of total
-facility energy to IT energy -- a PUE of 1.1 means 10% overhead.
+facility energy to IT energy. A PUE of 1.1 means 10% overhead.
 
 <details>
 <summary><strong>Expected Answer</strong></summary>
@@ -360,12 +360,12 @@ facility energy to IT energy -- a PUE of 1.1 means 10% overhead.
 - **Energy:** Both regions consume similar total energy (~180,000-220,000 kWh
   depending on PUE), since the GPUs draw the same power regardless of location.
 - **Carbon:** Virginia produces roughly **80,000-90,000 kg CO2** while Quebec
-  produces approximately **200-300 kg CO2** -- a **~99% reduction**.
+  produces approximately **200-300 kg CO2**, a **~99% reduction**.
 - **PUE overhead:** Quebec's liquid-cooled facility (PUE ~1.05) wastes ~5% on
   infrastructure vs. US average air-cooled (PUE ~1.1-1.2) wasting 10-20%.
 
 The carbon savings come entirely from the grid's energy source, not from
-using less power. This is why datacenter location is the single highest-leverage
+using less power. This is why datacenter location is the single most effective
 sustainability decision.
 
 </details>
@@ -378,7 +378,7 @@ network latency penalty if your team is in California?
 
 ---
 
-## Exercise 6 — Pareto-Optimal Serving (Part 6: Economics and Fleet Design)
+## Exercise 6: Pareto-Optimal Serving (Part 6: Economics and Fleet Design)
 
 **Learning Objective:** Given a fixed budget, find the serving configuration
 that maximizes throughput while meeting latency SLAs.
@@ -440,7 +440,7 @@ cost-per-request for Llama-3-8B serving? Is it always the newest GPU?
 Newer GPUs have higher unit cost but also higher bandwidth and FLOPS.
 The Pareto-optimal choice depends on whether serving is memory-bound
 (bandwidth matters) or compute-bound (FLOPS matter), and how many
-GPUs you can afford.
+GPUs the budget buys.
 
 <details>
 <summary><strong>Expected Answer</strong></summary>
@@ -448,14 +448,14 @@ GPUs you can afford.
 The answer depends on the specific unit costs in the registry, but the
 general finding is:
 
-- **A100:** Cheapest per-unit, so you get the most GPUs, but each has lower
+- **A100:** Cheapest per-unit, so the budget buys the most GPUs, but each has lower
   bandwidth (2 TB/s vs. 3.35 TB/s for H100). Good for throughput-oriented
-  workloads where you can batch aggressively.
+  workloads that allow aggressive batching.
 - **H100:** Best balance of cost and performance for LLM serving. Higher
   bandwidth directly reduces ITL (inter-token latency) in the memory-bound
   decode phase.
 - **B200:** Highest per-unit cost but offers FP8/INT4 support and highest
-  bandwidth (~8 TB/s). Most cost-effective only if you can use lower precision.
+  bandwidth (~8 TB/s). Most cost-effective only if the workload can run at lower precision.
 
 The Pareto frontier typically shows **H100 as the sweet spot** for FP16
 serving, with B200 winning if INT4/FP8 quantization is acceptable.
@@ -466,11 +466,11 @@ serving, with B200 winning if INT4/FP8 quantization is acceptable.
 
 How does the analysis change if you add a latency SLA (e.g., ITL < 20ms)?
 Does the Pareto-optimal choice shift when you constrain latency instead
-of just minimizing cost?
+of only minimizing cost?
 
 ---
 
-## Exercise 7 — TinyML SLA Feasibility (Part 7: Edge and TinyML)
+## Exercise 7: TinyML SLA Feasibility (Part 7: Edge and TinyML)
 
 **Learning Objective:** Determine whether a keyword-spotting CNN can meet
 a real-time SLA on a microcontroller.
@@ -548,18 +548,18 @@ Is this compute-bound or memory-bound?
 <summary><strong>Expected Answer</strong></summary>
 
 - **INT8 at efficiency=0.3:** DS-CNN inference takes approximately
-  **500ms** on the nRF52840 -- far exceeding the 30ms SLA. The workload is
+  **500ms** on the nRF52840, far exceeding the 30ms SLA. The workload is
   **compute-bound**: 6M FLOPs / (128 MOPS * 0.3) ~ 156ms of raw compute,
   plus framework overhead (dispatch tax, layer tax) pushes it past 500ms.
 - **FP16 emulated:** Even slower (~1500ms+) because the Cortex-M4F has no
   native FP16 support and falls back to the FP32 path at 64 MFLOPS.
 - **Energy:** At 15 mW TDP over ~500ms, a single inference consumes roughly
-  **8 millijoules** -- acceptable for battery operation, but the latency
+  **8 millijoules**, acceptable for battery operation, but the latency
   is the problem, not energy.
-- **The gap:** To meet 30ms, you would need either a faster MCU (e.g.,
+- **The gap:** Meeting 30ms requires either a faster MCU (e.g.,
   Cortex-M7 at 480 MHz with DSP extensions) or a smaller model (fewer FLOPs).
-  Even at efficiency=1.0, the raw compute time is 6M/128M = 47ms -- still
-  above 30ms. The nRF52840 simply cannot meet this SLA for DS-CNN.
+  Even at efficiency=1.0, the raw compute time is 6M/128M = 47ms, still
+  above 30ms. The nRF52840 cannot meet this SLA for DS-CNN.
 
 </details>
 
@@ -569,13 +569,13 @@ This result surprises many students: a "tiny" 26K-parameter model still
 cannot meet a 30ms SLA on a microcontroller. What does this teach about
 the relationship between model size and latency? Try the ESP32-S3
 (`Hardware.Tiny.ESP32_S3`) which has ~20x the compute throughput.
-Does it meet 30ms? What if you needed to run MobileNetV2 -- try
+Does it meet 30ms? What if you needed to run MobileNetV2? Try
 `Engine.solve(Models.Vision.MobileNetV2, hw, ...)` and observe
 the `feasible` field for the memory wall.
 
 ---
 
-## Exercise 8 — Capstone: Fleet Design Under Constraints (Parts 1-7)
+## Exercise 8: Capstone: Fleet Design Under Constraints (Parts 1-7)
 
 **Learning Objective:** Design a complete serving fleet for Llama-3-70B
 at 1000 QPS, within a $5M annual budget, deployed across two regions.
@@ -663,10 +663,10 @@ what regional split, and does INT4 quantization change your answer?
 
 ### Hint
 
-Llama-3-70B at FP16 requires ~140 GB -- it does not fit on a single
-H100 (80 GB). You must either use tensor parallelism (2+ GPUs per
-inference instance) or quantize to INT4 (~35 GB, fits on one H100).
-This fundamentally changes the fleet size calculation.
+Llama-3-70B at FP16 requires ~140 GB, so it does not fit on a single
+H100 (80 GB). Serving it requires either tensor parallelism (2+ GPUs per
+inference instance) or INT4 quantization (~35 GB, fits on one H100).
+This choice changes the fleet size calculation.
 
 <details>
 <summary><strong>Expected Answer</strong></summary>
@@ -678,10 +678,10 @@ This is an open-ended design exercise. A strong answer includes:
    The 2-5% accuracy trade-off is usually acceptable for serving.
 
 2. **Fleet size:** With INT4 and typical ITL of ~30-50ms per token, each
-   H100 can handle roughly 20-30 QPS. For 1000 QPS total, you need
+   H100 can handle roughly 20-30 QPS. Serving 1000 QPS total requires
    approximately 35-50 GPUs (5-7 DGX H100 nodes).
 
-3. **Regional split:** Placing 70% of capacity in Quebec dramatically
+3. **Regional split:** Placing 70% of capacity in Quebec
    reduces carbon (hydro grid at ~1.2 gCO2/kWh vs. US average at
    ~390 gCO2/kWh) while keeping 30% in US East for latency-sensitive
    users. Total CO2 stays well under 500 tonnes/year.
@@ -689,8 +689,8 @@ This is an open-ended design exercise. A strong answer includes:
 4. **Budget check:** 5-7 DGX H100 nodes at ~$200-300K each, plus
    electricity and networking, fits within the $5M annual budget.
 
-The key insight is that **compression is not just an optimization -- it is
-an architectural decision** that changes the fleet design by 2x.
+**Compression is an architectural decision, not only an optimization**,
+because it changes the fleet design by 2x.
 
 </details>
 

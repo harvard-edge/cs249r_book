@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from mlsysim.engine.v1_15_experiments import (
+from mlsysim.labs.experiments.v1_15_experiments import (
     LINEAGE_POLICIES,
     TRACKS,
     bounded_mean_release,

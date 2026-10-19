@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from mlsysim.engine.v2_07_experiments import (
+from mlsysim.labs.experiments.v2_07_experiments import (
     TRACKS,
     checkpoint_fault_fixture,
     checkpoint_tradeoff,
