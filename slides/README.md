@@ -4,14 +4,14 @@
 >
 > These Beamer decks ship with the **2026** MLSysBook refresh. Slides, figures, and speaker notes are **actively iterated** as the textbook evolves.
 >
-> **Feedback** — [GitHub issues](https://github.com/harvard-edge/cs249r_book/issues) (teaching notes, errata, and requests).
+> **Feedback:** [GitHub issues](https://github.com/harvard-edge/cs249r_book/issues) (teaching notes, errata, and requests).
 >
 > [![dev branch](https://img.shields.io/badge/branch-dev-orange?logo=git&logoColor=white)](https://github.com/harvard-edge/cs249r_book/tree/dev) [![live site](https://img.shields.io/badge/live_site-mlsysbook.ai-blue?logo=safari&logoColor=white)](https://mlsysbook.ai)
 <!-- EARLY-RELEASE-CALLOUT:END -->
 
 # ML Systems Lecture Slides
 
-Beamer slide decks for the ML Systems textbook. One deck per chapter, ready to drop into your course.
+Beamer slide decks for the ML Systems textbook. One deck per chapter, ready to use in a course.
 
 ## Quick Start
 

@@ -4,7 +4,7 @@
 >
 > Co-Labs shipped with the **2026** MLSysBook refresh. Lab notebooks, WASM builds, and scoring flows are **actively iterated** as we refine the hands-on curriculum.
 >
-> **Feedback** — [GitHub issues](https://github.com/harvard-edge/cs249r_book/issues) or pull requests.
+> **Feedback:** [GitHub issues](https://github.com/harvard-edge/cs249r_book/issues) or pull requests.
 >
 > [![dev branch](https://img.shields.io/badge/branch-dev-orange?logo=git&logoColor=white)](https://github.com/harvard-edge/cs249r_book/tree/dev) [![live site](https://img.shields.io/badge/live_site-mlsysbook.ai-blue?logo=safari&logoColor=white)](https://mlsysbook.ai)
 <!-- EARLY-RELEASE-CALLOUT:END -->
@@ -21,7 +21,7 @@
 
 ## What Are Co-Labs?
 
-Co-Labs are interactive [Marimo](https://marimo.io) notebooks that bridge the gap between **reading about ML systems** (the textbook) and **building them from scratch** (TinyTorch). Every lab runs in your browser via WebAssembly — no installation required.
+Co-Labs are interactive [Marimo](https://marimo.io) notebooks that bridge the gap between **reading about ML systems** (the textbook) and **building them from scratch** (TinyTorch). Every lab runs in your browser via WebAssembly, so no installation is required.
 
 <p align="center">
   <img src="labs-flow.svg" alt="Textbook to Co-Labs to TinyTorch learning flow" width="600">
@@ -31,9 +31,9 @@ Co-Labs are interactive [Marimo](https://marimo.io) notebooks that bridge the ga
 
 Each lab follows a consistent structure:
 
-1. **Briefing** — Learning objectives, prerequisites, and the core question
-2. **Parts A–E** — Tabbed explorations, each with a prediction lock, interactive instruments, and a reveal
-3. **Synthesis** — Key takeaways, textbook connections, and a pointer to the next lab
+1. **Briefing**: Learning objectives, prerequisites, and the core question
+2. **Parts A–E**: Tabbed explorations, each with a prediction lock, interactive instruments, and a reveal
+3. **Synthesis**: Key takeaways, textbook connections, and a pointer to the next lab
 
 Every prediction is structured (radio buttons or numeric entry, never free text). You predict first, then explore the instruments to discover whether you were right. The gap between prediction and reality is the learning moment.
 
@@ -239,7 +239,7 @@ Every prediction is structured (radio buttons or numeric entry, never free text)
 
 ## The Design Ledger
 
-Every lab saves your predictions and design decisions to the **Design Ledger** — an IndexedDB-backed persistence layer in your browser, with a local file fallback when running outside WebAssembly. Later labs read earlier decisions: Lab 08's training memory budget builds on Lab 05's activation analysis, which builds on Lab 01's magnitude calibration. The capstone labs synthesize your full Design Ledger into a portfolio.
+Every lab saves your predictions and design decisions to the **Design Ledger**, an IndexedDB-backed persistence layer in your browser with a local file fallback when running outside WebAssembly. Later labs read earlier decisions: Lab 08's training memory budget builds on Lab 05's activation analysis, which builds on Lab 01's magnitude calibration. The capstone labs synthesize your full Design Ledger into a portfolio.
 
 ## Running Labs
 

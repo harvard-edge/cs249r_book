@@ -6,8 +6,8 @@ Measurement units live in `core/units.py`, physical constants in
 `physics/constants.py`, and domain values in registries; the former
 `core/constants.py` shim is deleted (no-backward-compat policy).
 
-This document is the *registry-level* view. The *runtime* view—how workloads,
-hardware, infrastructure, and systems feed the solver layer—is the 5-layer
+This document is the *registry-level* view. The *runtime* view (how workloads,
+hardware, infrastructure, and systems feed the solver layer) is the 5-layer
 model in [architecture.qmd](architecture.qmd). The zoos below are the registries
 that populate Layers A–D of that stack.
 
