@@ -102,7 +102,7 @@ def calc_chunk_renewal_schedule(
     Fine-Grained Bimanual Manipulation with Low-Cost Hardware" (ACT), RSS 2023,
     arXiv:2304.13705, which queries its policy every step (n = 1). The
     renewal-on-the-grid requirement, the worst-case age, and the overlap count
-    are arithmetic of this package for n > 1 (Volume IV, @sec-brain-action-chunking).
+    are arithmetic of this package for n > 1 (Volume IV, Brain chapter, section on action chunking).
 
     Parameters
     ----------

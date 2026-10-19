@@ -2014,7 +2014,7 @@ Executing each request in lockstep isolation leaves specialized accelerators hea
 
 @Fig-serving-pipeline-timing sequences execution across CPU preprocessing and GPU inference to demonstrate how request pipelining recovers lost compute capacity. In serial execution (A), each request must complete its entire lifecycle (Network $\rightarrow$ CPU Preprocessing $\rightarrow$ GPU Inference $\rightarrow$ Postprocessing) before the next request begins, leaving the GPU idle for more than 50 percent of wall-clock time. Pipelining concurrent requests (B) overlaps CPU preprocessing of upcoming requests with active GPU inference on earlier inputs, eliminating the idle bubbles and maximizing accelerator duty cycle.
 
-::: {#fig-serving-pipeline-timing fig-env="figure" fig-pos="htb" fig-cap="**Request Pipelining**: Pipelining hides latency by overlapping independent operations across different hardware resources. In pipelined execution (B), the CPU processes the next request's data while the GPU executes the current request's inference. This can increase accelerator duty cycle and throughput without changing the model." fig-alt="Two timing diagrams. A (Serial): alternating CPU preprocessing, GPU inference, and idle blocks in sequence. B (Pipelined): two parallel rows where CPU preprocessing overlaps with GPU inference, eliminating idle time."}
+::: {#fig-serving-pipeline-timing data-explore="mechanism-scene" data-explore-key="vol1:fig-serving-pipeline-timing" fig-env="figure" fig-pos="htb" fig-cap="**Request Pipelining**: Pipelining hides latency by overlapping independent operations across different hardware resources. In pipelined execution (B), the CPU processes the next request's data while the GPU executes the current request's inference. This can increase accelerator duty cycle and throughput without changing the model." fig-alt="Two timing diagrams. A (Serial): alternating CPU preprocessing, GPU inference, and idle blocks in sequence. B (Pipelined): two parallel rows where CPU preprocessing overlaps with GPU inference, eliminating idle time."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\footnotesize\sffamily, scale=0.8]
@@ -4589,7 +4589,56 @@ An autoregressive\index{Autoregressive model!token generation} request finishes 
 
 [^fn-continuous-batching-llm]: **Continuous batching**\index{Continuous batching!scheduling granularity}: NVIDIA TensorRT-LLM calls the same technique "in-flight batching" [@nvidiaTensorRtLlm]. Request-level batching commits to a fixed batch for an entire generation sequence (potentially hundreds of iterations), while continuous batching reschedules at every token-generation step, a contrast that parallels preemptive OS process scheduling versus run-to-completion.
 
-Serving runtimes such as vLLM[^fn-vllm-page-table] and TensorRT-LLM improve throughput via two mechanisms: reclaiming wasted compute from completed sequences and shortening queue wait times for new arrivals [@kwon2023; @nvidiaTensorRtLlm]. However, admitting new requests dynamically creates a systems collision between prompt prefill and token decoding. Long-prompt prefill often exposes high arithmetic intensity and can occupy the GPU for tens of milliseconds. Low-batch decoding often has less weight reuse and is memory-bandwidth bound, advancing one token per active sequence at a time. When an engine executes a prefill in the same iteration as active decodes, the ongoing decode streams stall, causing severe spikes in inter-token latency. Sarathi-Serve resolves this interference through chunked prefill and stall-free batching [@agrawal2024sarathi]. By splitting long prompts into fixed-size chunks (e.g., 512 tokens) and co-scheduling a single chunk alongside active decode requests per step, the scheduler limits the prefill work admitted per iteration, reducing interference with active decodes. Measured iteration times determine the resulting token cadence.
+Serving runtimes such as vLLM[^fn-vllm-page-table] and TensorRT-LLM improve throughput via two mechanisms: reclaiming wasted compute from completed sequences and shortening queue wait times for new arrivals [@kwon2023; @nvidiaTensorRtLlm]. However, admitting new requests dynamically creates a systems collision between prompt prefill and token decoding. Long-prompt prefill often exposes high arithmetic intensity and can occupy the GPU for tens of milliseconds. Low-batch decoding often has less weight reuse and is memory-bandwidth bound, advancing one token per active sequence at a time. When an engine admits an entire long prompt before advancing active decodes, those streams wait for that prefill, stretching their inter-token gaps. Sarathi-Serve resolves this interference through chunked prefill and stall-free batching [@agrawal2024sarathi]. By splitting long prompts into fixed-size chunks (e.g., 512 tokens) and co-scheduling a single chunk alongside active decode requests per step, the scheduler limits the prefill work admitted per iteration, reducing interference with active decodes. Measured iteration times determine the resulting token cadence.
+
+The scheduling boundary determines when an existing stream can emit its next token. @Fig-serving-chunked-prefill compares admission of one complete prompt with admission of the same prompt in chunks, while keeping the active stream visible in both schedules.
+
+::: {#fig-serving-chunked-prefill data-explore="mechanism-scene" data-explore-key="vol1:fig-serving-chunked-prefill" fig-env="figure" fig-pos="htb" fig-cap="**Prefill Admission and Decode Cadence**: A new prompt P shares one worker with an active decode stream. Admitting P whole leaves a long interval between that stream's tokens. Admitting P in chunks inserts a decode step at each iteration boundary; P finishes later in the schedule shown. Both paths process the same prompt. Bar widths and token spacing are schematic, not measured durations or a throughput prediction." fig-alt="Two schedules have a prompt P row and an active-stream row. In panel a, one continuous prefill bar lies between two decode-output markers. In panel b, four labeled prefill chunks alternate with decode steps, with an output marker after each step. A horizontal arrow points right toward later time beneath both schedules. Dashed lines mark prompt completion in each panel."}
+
+```{.tikz}
+\begin{tikzpicture}[font=\footnotesize\sffamily,>=stealth,line width=0.75pt,
+ decode/.style={draw=OrangeLine,fill=OrangeL!45},
+ prefill/.style={draw=OrangeLine,fill=OrangeL!80},
+ token/.style={circle,draw=GreenLine,fill=GreenL,inner sep=1.7pt}]
+\node[anchor=west,font=\small\sffamily\bfseries] at (0,0.65) {(a) Admit the whole prompt};
+\node[anchor=east] at (1.6,0) {Prompt P};
+\node[anchor=east,align=right] at (1.6,-0.85) {Active stream};
+\draw[prefill] (2.8,-0.26) rectangle (7.8,0.26);
+\node at (5.3,0) {Complete prefill};
+\foreach \x in {2.0,8.05} {
+ \draw[decode] (\x,-1.11) rectangle ++(0.4,0.52);
+ \node[token] at (\x+0.4,-1.35) {};
+}
+\draw[RedLine,<->,shorten >=2pt,shorten <=2pt] (2.4,-1.7) -- node[below] {Long gap between output tokens} (8.45,-1.7);
+\draw[GrayLine,dashed] (7.8,0.35) -- (7.8,-0.45);
+\node[anchor=west] at (8.0,0) {P ready};
+\node[anchor=west,font=\small\sffamily\bfseries] at (0,-2.75) {(b) Admit one chunk per iteration};
+\node[anchor=east] at (1.6,-3.45) {Prompt P};
+\node[anchor=east] at (1.6,-4.3) {Active stream};
+\foreach \x/\k in {2.8/1,4.8/2,6.8/3,8.8/4} {
+ \draw[prefill] (\x,-3.71) rectangle ++(1.25,0.52);
+ \node at (\x+0.625,-3.45) {Chunk \k};
+ \draw[decode] (\x+0.85,-4.56) rectangle ++(0.4,0.52);
+ \node[token] at (\x+1.25,-4.8) {};
+}
+\draw[decode] (2,-4.56) rectangle ++(0.4,0.52);
+\node[token] at (2.4,-4.8) {};
+\draw[GrayLine,<->,shorten >=2pt,shorten <=2pt] (4.05,-5.15) -- node[below] {One iteration} (6.05,-5.15);
+\draw[GrayLine,dashed] (10.05,-3.1) -- (10.05,-3.95);
+\node[anchor=west,align=left] at (10.25,-3.45) {P ready\\later};
+\draw[->,GrayLine,shorten >=2pt] (1.9,-6.0) -- (11.4,-6.0) node[above left] {Later time (schematic)};
+\draw[decode] (0,-6.85) rectangle ++(0.4,0.3);
+\node[anchor=west] at (0.55,-6.7) {Decode step};
+\node[token] at (4.1,-6.7) {};
+\node[anchor=west] at (4.3,-6.7) {Output token};
+\draw[prefill] (8,-6.85) rectangle ++(0.4,0.3);
+\node[anchor=west] at (8.55,-6.7) {Prefill work};
+\end{tikzpicture}
+```
+
+:::
+
+Chunking creates more opportunities to advance the active streams, but each chunk still consumes accelerator time. The scheduler must choose a chunk budget from measured iteration latency; an iteration boundary alone does not guarantee a token deadline.
 
 [^fn-vllm-page-table]: **vLLM (virtual large language model (LLM))**\index{vLLM!virtual memory analogy}: An open-source serving system that enables continuous batching via its PagedAttention algorithm [@kwon2023]. Keeping KV-cache waste low lets it serve larger effective batches on the same hardware.
 
@@ -4669,7 +4718,57 @@ Keeping decode batches full, however, shifts the primary serving bottleneck to m
 *PagedAttention recovers the KV-cache waste of contiguous allocation.*
 :::
 
-**PagedAttention**\index{PagedAttention!memory fragmentation solution},[^fn-paged-attention-memory] introduced in vLLM, resolves this fragmentation by applying operating system virtual memory paging to accelerator memory [@kwon2023]. In static contiguous allocation, reserving maximum sequence length memory up front causes internal waste, while freed regions may be too small or poorly placed to satisfy a new contiguous reservation. Instead of allocating one contiguous region per sequence, PagedAttention divides the KV cache into fixed-size blocks mapped through a block table. A sequence's cache can therefore occupy noncontiguous physical blocks. When a sequence completes, its blocks return to a free pool for reuse. Rather than copying noncontiguous blocks into a temporary contiguous buffer before computing attention, a specialized PagedAttention CUDA kernel traverses the block table directly, staging noncontiguous blocks into on-chip SRAM during query-key multiplication. By eliminating external fragmentation and bounding internal waste to each sequence's last, partially filled block, PagedAttention reduced KV-cache waste below 4 percent in the reported evaluation and enabled substantially higher batch concurrency on the same accelerator hardware [@kwon2023]. Paging decides where cache blocks live, however. It does not reduce how many blocks each sequence needs, and that number grows with every generated token.
+**PagedAttention**\index{PagedAttention!memory fragmentation solution},[^fn-paged-attention-memory] introduced in vLLM, resolves this fragmentation by applying operating system virtual memory paging to accelerator memory [@kwon2023]. In static contiguous allocation, reserving maximum sequence length memory up front causes internal waste, while freed regions may be too small or poorly placed to satisfy a new contiguous reservation. Instead of allocating one contiguous region per sequence, PagedAttention divides the KV cache into fixed-size blocks mapped through a block table. A sequence's cache can therefore occupy noncontiguous physical blocks. When a sequence completes, its blocks return to a free pool for reuse. Rather than copying noncontiguous blocks into a temporary contiguous buffer before computing attention, a specialized PagedAttention CUDA kernel traverses the block table directly, staging noncontiguous blocks into on-chip SRAM during query-key multiplication. By eliminating external fragmentation and bounding internal waste to each sequence's last, partially filled block, PagedAttention reduced KV-cache waste below 4 percent in the reported evaluation and enabled substantially higher batch concurrency on the same accelerator hardware [@kwon2023]. Paging decides where cache blocks live, however. It does not reduce the KV bytes stored per token; a sequence needs another block only when its current allocation fills.
+
+A block table separates a sequence's token order from its physical placement. @Fig-serving-paged-kv-mapping uses an eight-block pool: requests C and D occupy the middle pairs, leaving four free blocks in two separated runs. A request E that needs four blocks can use those scattered blocks without moving C or D.
+
+::: {#fig-serving-paged-kv-mapping data-explore="mechanism-scene" data-explore-key="vol1:fig-serving-paged-kv-mapping" fig-env="figure" fig-pos="htb" fig-cap="**Logical Pages and Physical KV Blocks**: Request E's logical pages remain ordered even though its physical blocks are separated by other requests. Each table entry names one physical block; the partially filled last block remains allocated to E. After E completes and its pending accesses finish, its unshared blocks return to the free pool. C and D retain their blocks. The diagram assumes no prefix sharing and uses equal block sizes; paging changes placement, not the KV bytes per token." fig-alt="Four ordered logical pages of request E point downward to table entries 0, 1, 4, and 5. Elbow arrows connect those entries to blocks 0, 1, 4, and 5 in an eight-block physical pool. C occupies blocks 2 and 3, and D occupies blocks 6 and 7. Block 5 is partly filled and partly hatched. A second pool row shows E's four blocks marked free after release, while C and D remain in their original positions."}
+
+```{.tikz}
+\begin{tikzpicture}[font=\footnotesize\sffamily,>=stealth,line width=0.75pt,
+ page/.style={draw=BlueLine,fill=BlueL!45,minimum width=2.0cm,minimum height=0.6cm,align=center},
+ entry/.style={draw=GrayLine,fill=GrayL!35,minimum width=2.0cm,minimum height=0.6cm},
+ flow/.style={->,draw=GreenLine,shorten >=2pt,shorten <=2pt}]
+\node[anchor=west,font=\small\sffamily\bfseries] at (-0.1,0.8) {Request E: logical token order};
+\foreach \x/\p/\b in {1.2/0/0,4.2/1/1,7.2/2/4,10.2/3/5} {
+ \node[page] (p\p) at (\x,0) {Page \p};
+ \node[entry] (t\p) at (\x,-1.2) {Block \b};
+ \draw[flow] (p\p) -- (t\p);
+}
+\node at (5.7,-0.6) {Block table};
+\foreach \p/\x in {0/0.6,1/2.2,2/7.0,3/8.6} {
+ \draw[flow] (t\p.south) -- ++(0,-0.5) -| (\x,-2.85);
+}
+\node[anchor=west,font=\small\sffamily\bfseries] at (-0.1,-4.35) {Physical HBM pool};
+\foreach \x/\b/\owner in {0.6/0/E,2.2/1/E,3.8/2/C,5.4/3/C,7.0/4/E,8.6/5/E,10.2/6/D,11.8/7/D} {
+ \node[font=\scriptsize\sffamily] at (\x,-2.9) {\b};
+ \draw[BlueLine,fill=GrayL!45] (\x-0.7,-3.9) rectangle (\x+0.7,-3.2);
+ \node at (\x,-3.55) {\owner};
+}
+\foreach \x in {0.6,2.2,7.0} {
+ \draw[BlueLine,fill=BlueL!65] (\x-0.7,-3.9) rectangle (\x+0.7,-3.2);
+ \node at (\x,-3.55) {E};
+}
+\draw[BlueLine,fill=BlueL!65] (7.9,-3.9) rectangle (8.6,-3.2);
+\fill[pattern=north east lines,pattern color=GrayLine] (8.6,-3.9) rectangle (9.3,-3.2);
+\draw[BlueLine] (7.9,-3.9) rectangle (9.3,-3.2);
+\node at (8.25,-3.55) {E};
+\node[align=center] at (8.6,-4.35) {Unused tail;\\still E's block};
+\node[anchor=west,font=\small\sffamily\bfseries] at (-0.1,-5.15) {After E completes and releases its blocks};
+\foreach \x/\owner in {0.6/Free,2.2/Free,3.8/C,5.4/C,7.0/Free,8.6/Free,10.2/D,11.8/D} {
+ \draw[BlueLine,fill=GrayL!45] (\x-0.7,-6.35) rectangle (\x+0.7,-5.65);
+ \node at (\x,-6) {\owner};
+}
+\foreach \x in {0.6,2.2,7.0,8.6} {
+ \draw[BlueLine,fill=white] (\x-0.7,-6.35) rectangle (\x+0.7,-5.65);
+ \node at (\x,-6) {Free};
+}
+\end{tikzpicture}
+```
+
+:::
+
+The free capacity becomes usable without compacting the pool into one contiguous region. The table lookup adds indirection, and the last block can still contain unused token slots; allocation efficiency does not eliminate either cost.
 
 [^fn-paged-attention-memory]: **PagedAttention**\index{PagedAttention!memory efficiency}: The name directly references OS virtual memory paging, first implemented on the Atlas computer at Manchester (1962) to solve the same class of allocation problem, in which programs needed more memory than physically available, and contiguous allocation wasted space [@kilburn1962onelevel]. Introduced at SOSP 2023, PagedAttention applies this six-decade-old abstraction to GPU KV-cache memory; in its evaluation, the recovered memory enabled 2--4$\times$ higher throughput on the same hardware [@kwon2023].
 
@@ -4746,7 +4845,7 @@ Once contexts grow, the cache rather than the weights sets how many conversation
 
 Larger models make the cache the binding constraint sooner. For a 70-billion-parameter-class model with grouped-query attention, 4-bit weights consume `{python} KvBudget.weights70_gb_str` of the same H100, leaving `{python} KvBudget.free70_gb_str` for FP16 cache before runtime workspace. A batch of `{python} KvBudget.batch_large_str` conversations exhausts that budget at roughly `{python} KvBudget.crossing70_str` tokens of context, so serving engines trade concurrent batch size against context length to avoid out-of-memory failures (@fig-kv-cache-growth).
 
-::: {#fig-kv-cache-growth fig-env="figure" fig-pos="htb" fig-cap="**The KV-Cache Explosion**: FP16 KV-cache usage vs. context length for a 70-billion-parameter-class model with GQA. On the modeled H100's 80 GB of HBM (85.9 GB decimal), 35.3 GB of INT4 weights leave 50.6 GB for KV cache before runtime overhead. Batch size 32 reaches that cache budget at roughly 4.8k tokens, forcing a trade-off between batch size and context length." fig-alt="Line chart of FP16 KV-cache size against context length for batch sizes 1, 4, 16, and 32. All four lines rise linearly, with steeper slopes for larger batches. A red dashed horizontal line marks the cache budget remaining after the INT4 weights on the modeled H100; batch size 32 crosses it near 4.8k tokens. The region above the budget line is shaded red and labeled Out of Memory (OOM) Zone."}
+::: {#fig-kv-cache-growth data-explore="mechanism-scene" data-explore-key="vol1:fig-kv-cache-growth" fig-env="figure" fig-pos="htb" fig-cap="**The KV-Cache Explosion**: FP16 KV-cache usage vs. context length for a 70-billion-parameter-class model with GQA. On the modeled H100's 80 GB of HBM (85.9 GB decimal), 35.3 GB of INT4 weights leave 50.6 GB for KV cache before runtime overhead. Batch size 32 reaches that cache budget at roughly 4.8k tokens, forcing a trade-off between batch size and context length." fig-alt="Line chart of FP16 KV-cache size against context length for batch sizes 1, 4, 16, and 32. All four lines rise linearly, with steeper slopes for larger batches. A red dashed horizontal line marks the cache budget remaining after the INT4 weights on the modeled H100; batch size 32 crosses it near 4.8k tokens. The region above the budget line is shaded red and labeled Out of Memory (OOM) Zone."}
 
 ```{python}
 #| echo: false

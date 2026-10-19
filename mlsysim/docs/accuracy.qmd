@@ -1,8 +1,78 @@
 ---
 title: "Accuracy & Validation"
-subtitle: "How Well Do MLSys·im Predictions Match Real Hardware?"
+subtitle: "How Closely MLSys·im Predictions Match Real Hardware"
 ---
 MLSys·im is a **first-order analytical model**. It predicts performance from closed-form equations, not from cycle-accurate simulation or empirical measurement. This page documents where those predictions are accurate, where they diverge, and what drives the gap.
+
+```{python}
+#| echo: false
+#| output: false
+import mlsysim
+from mlsysim import Hardware, Models, Infrastructure, Literature
+from mlsysim.solvers import SingleNodeModel, ServingModel
+from mlsysim.engine.empirical import (
+    RESNET50_A100_TRAIN_BS256,
+    RESNET50_H100_TRAIN_BS256,
+    LLAMA3_8B_H100_BS1_ITL,
+    GPT3_175B_TRAINING_FLOPS,
+)
+from mlsysim.engine.calibration import DEFAULT_COMPUTE_EFFICIENCY, REFERENCE_MFU_SUSTAINED
+from mlsysim.physics import calc_transformer_training_flops
+
+_a100 = Hardware.Cloud.A100
+_h100 = Hardware.Cloud.H100
+_rn50 = Models.Vision.ResNet50
+_l8 = Models.Language.Llama3_8B
+_gpt3 = Models.Language.GPT3
+
+_r_a100_tr = SingleNodeModel().solve(
+    RESNET50_A100_TRAIN_BS256.workload,
+    RESNET50_A100_TRAIN_BS256.hardware,
+    **RESNET50_A100_TRAIN_BS256.solver_kwargs,
+)
+_pred_a100_tr = _r_a100_tr.throughput.m_as("1/s")
+_meas_a100_tr = float(RESNET50_A100_TRAIN_BS256.target)
+_err_a100_tr = (_pred_a100_tr - _meas_a100_tr) / _meas_a100_tr * 100
+
+_r_h100_tr = SingleNodeModel().solve(
+    RESNET50_H100_TRAIN_BS256.workload,
+    RESNET50_H100_TRAIN_BS256.hardware,
+    **RESNET50_H100_TRAIN_BS256.solver_kwargs,
+)
+_pred_h100_tr = _r_h100_tr.throughput.m_as("1/s")
+_meas_h100_tr = float(RESNET50_H100_TRAIN_BS256.target)
+_err_h100_tr = (_pred_h100_tr - _meas_h100_tr) / _meas_h100_tr * 100
+
+_r_h100_inf = SingleNodeModel().solve(_rn50, _h100, batch_size=256, precision="int8", efficiency=0.5)
+_pred_h100_inf = _r_h100_inf.throughput.m_as("1/s")
+_meas_h100_inf = float(Literature.Benchmarks.ResNet50H100InferenceOfflinePerGpu)
+_err_h100_inf = (_pred_h100_inf - _meas_h100_inf) / _meas_h100_inf * 100
+
+_r_l8_b1 = ServingModel().solve(
+    LLAMA3_8B_H100_BS1_ITL.workload,
+    LLAMA3_8B_H100_BS1_ITL.hardware,
+    **LLAMA3_8B_H100_BS1_ITL.solver_kwargs,
+)
+_pred_l8_b1_itl = _r_l8_b1.itl.m_as("ms")
+_pred_l8_b1_ttft = _r_l8_b1.ttft.m_as("ms")
+_itl_lo = float(LLAMA3_8B_H100_BS1_ITL.lower)
+_itl_hi = float(LLAMA3_8B_H100_BS1_ITL.upper)
+
+_r_l8_b32 = ServingModel().solve(_l8, _h100, seq_len=2048, batch_size=32, precision="fp16", efficiency=0.5)
+_pred_l8_b32_itl = _r_l8_b32.itl.m_as("ms")
+
+_pred_gpt3_flops = calc_transformer_training_flops(_gpt3.parameters, _gpt3.training_tokens).m_as("flop")
+_meas_gpt3_flops = float(GPT3_175B_TRAINING_FLOPS.target)
+_err_gpt3_flops = (_pred_gpt3_flops - _meas_gpt3_flops) / _meas_gpt3_flops * 100
+
+_pue_lo = Infrastructure.Datacenters.US_Hyperscale.pue
+_pue_hi = Infrastructure.Datacenters.Poland_Coal.pue
+_def_eff = float(DEFAULT_COMPUTE_EFFICIENCY)
+_mfu_lo = float(Literature.Training.MfuLow)
+_mfu_hi = float(Literature.Training.MfuHigh)
+_mfu_inf_batched = float(Literature.Training.MfuInferenceBatched)
+_ref_mfu_sust = REFERENCE_MFU_SUSTAINED
+```
 
 ::: {.callout-note}
 ## What "first-order" means
@@ -59,7 +129,7 @@ safety:
 
 ## The Accuracy Hierarchy
 
-Not all MLSys·im predictions are created equal. The table below ranks prediction types from most to least accurate, so you know how much to trust each output.
+MLSys·im predictions differ in how far they can be trusted. The table below ranks prediction types from most to least accurate.
 
 | Prediction Type | Typical Accuracy | Why |
 |:---|:---:|:---|
@@ -78,24 +148,25 @@ Not all MLSys·im predictions are created equal. The table below ranks predictio
 
 ::: {.callout-tip}
 ## The golden rule
-Trust MLSys·im for **direction** and **classification**. Be cautious with **absolute numbers**. The model tells you *which* resource is the bottleneck and *which* configuration is better. It does not promise the exact millisecond.
+Trust MLSys·im for **direction** and **classification**. Be cautious with **absolute numbers**. The model identifies *which* resource is the bottleneck and *which* configuration is better. It does not promise the exact millisecond.
 :::
 
 ---
 
 ## Validation Against Published Benchmarks
 
-The table below compares MLSys·im roofline predictions against publicly reported results from **MLPerf Inference v4.0** (July 2024) and community benchmarks.
+The table below compares MLSys·im solver predictions against the published benchmark anchors in `Literature.Benchmarks` and `mlsysim.engine.empirical`.
 
 | Workload | Hardware | Predicted | Measured | Error | Source |
 |:---|:---|:---:|:---:|:---:|:---|
-| ResNet-50 (BS=1) | A100 SXM4 | ~0.42 ms | ~0.38 ms | +11% | MLPerf Inference v4.0 |
-| ResNet-50 (BS=64) | A100 SXM4 | ~8.1 ms | ~7.5 ms | +8% | MLPerf Inference v4.0 |
-| BERT-Large (BS=1) | H100 SXM5 | ~2.1 ms | ~1.9 ms | +11% | MLPerf Inference v4.0 |
-| Llama2-70B TTFT | H100 SXM5 | ~45 ms (2K ctx) | ~40--50 ms | ±10% | vLLM benchmarks |
-| Llama2-70B ITL | H100 SXM5 | ~4.2 ms/token | ~5--8 ms/token | −25% | vLLM benchmarks |
+| ResNet-50 Train (BS=256) | `{python} f"{_a100.name}"` | `{python} f"{_pred_a100_tr:,.0f} img/s"` | `{python} f"{_meas_a100_tr:,.0f} img/s"` | `{python} f"{_err_a100_tr:+.1f}%"` | MLPerf Training v3.0 / NVIDIA DLE |
+| ResNet-50 Train (BS=256) | `{python} f"{_h100.name}"` | `{python} f"{_pred_h100_tr:,.0f} img/s"` | `{python} f"{_meas_h100_tr:,.0f} img/s"` | `{python} f"{_err_h100_tr:+.1f}%"` | MLPerf Training v3.1 |
+| ResNet-50 Inf (INT8, BS=256) | `{python} f"{_h100.name}"` | `{python} f"{_pred_h100_inf:,.0f} img/s"` | `{python} f"{_meas_h100_inf:,.0f} img/s"` | `{python} f"{_err_h100_inf:+.1f}%"` | MLPerf Inference v5.0 |
+| Llama-3 8B ITL (BS=1, 2K ctx) | `{python} f"{_h100.name}"` | `{python} f"{_pred_l8_b1_itl:.1f} ms/tok"` | `{python} f"{_itl_lo:.0f}--{_itl_hi:.0f} ms/tok"` | within band | NVIDIA NIM / TensorRT-LLM |
+| Llama-3 8B ITL (BS=32, 2K ctx) | `{python} f"{_h100.name}"` | `{python} f"{_pred_l8_b32_itl:.1f} ms/tok"` | `{python} f"{_itl_lo:.0f}--{_itl_hi:.0f} ms/tok"` | within band | vLLM / TensorRT-LLM |
+| GPT-3 175B Training FLOPs | 6PD rule | `{python} f"{_pred_gpt3_flops:.2e}"` | `{python} f"{_meas_gpt3_flops:.2e}"` | `{python} f"{_err_gpt3_flops:+.1f}%"` | Brown et al. (2020) |
 
-: {tbl-colwidths="[18,14,14,14,8,32]"}
+: {tbl-colwidths="[22,14,14,14,10,26]"}
 
 ::: {.callout-warning}
 ## ITL underprediction is expected
@@ -107,7 +178,7 @@ For the full treatment of serving-system overheads (continuous batching, PagedAt
 
 ### Interpreting the error column
 
-All errors are relative to the measured value: $\text{Error} = (\text{Predicted} - \text{Measured}) / \text{Measured}$. A positive error means MLSys·im **overpredicts** latency (conservative). A negative error means MLSys·im **underpredicts** (optimistic). The sign matters: overprediction is safer for capacity planning; underprediction is dangerous for SLA commitments.
+All errors are relative to the measured value: $\text{Error} = (\text{Predicted} - \text{Measured}) / \text{Measured}$. For latency, a positive error means MLSys·im **overpredicts** latency (conservative), and a negative error means it **underpredicts** (optimistic). Overprediction on latency is safer for capacity planning; underprediction is dangerous for SLA commitments.
 
 ---
 
@@ -121,7 +192,7 @@ The underlying roofline model is documented in the [Hardware Acceleration slides
 
 ### Scaling efficiency direction (distributed training)
 
-The model correctly predicts how scaling efficiency changes as you vary DP/TP/PP configuration. The *relative* ranking of configurations is reliable even when absolute MFU values are off by ±10%. This is because the communication cost models (Ring AllReduce, Tree AllReduce, Hierarchical AllReduce) implement bandwidth-optimal lower bounds from Patarasuk & Mueller (2009), so the relative costs scale correctly.
+The model correctly predicts how scaling efficiency changes as the DP/TP/PP configuration varies. The *relative* ranking of configurations is reliable even when absolute MFU values are off by ±10%. This is because the communication cost models (Ring AllReduce, Tree AllReduce, Hierarchical AllReduce) implement bandwidth-optimal lower bounds from Patarasuk & Mueller (2009), so the relative costs scale correctly.
 
 See the [Distributed Training slides (Vol II, Ch 6)]({{< var slides_latest >}}/vol2_06_distributed_training.pdf){target="_blank"} for the 3D parallelism framework and scaling efficiency analysis.
 
@@ -131,11 +202,11 @@ The KV-cache formula ($\text{KV} = 2 \times L \times H_{\text{kv}} \times d_{\te
 
 ### Training memory breakdown
 
-`TrainingMemoryModel` separates weights, gradients, optimizer state, activations, and communication buffers. The first three terms are direct byte counts from the model size, precision, optimizer, and ZeRO stage. Activations are the approximate term: they depend on the selected checkpointing strategy and use coefficients from transformer activation-recomputation analysis [@korthikanti2023]. Treat the model as a memory feasibility and attribution tool: it tells you which term is responsible for pressure, then empirical framework profiling can refine the activation term for a specific implementation.
+`TrainingMemoryModel` separates weights, gradients, optimizer state, activations, and communication buffers. The first three terms are direct byte counts from the model size, precision, optimizer, and ZeRO stage. Activations are the approximate term: they depend on the selected checkpointing strategy and use coefficients from transformer activation-recomputation analysis [@korthikanti2023]. Treat the model as a memory feasibility and attribution tool: it identifies which term is responsible for pressure, and empirical framework profiling can then refine the activation term for a specific implementation.
 
 ### Serving capacity planning
 
-`ServingCapacityModel` is a composition model. It uses `ServingModel` for TTFT/ITL, `ContinuousBatchingModel` for per-replica token capacity, and `TailLatencyModel` for queueing pressure. This is useful for first-pass sizing and sensitivity sweeps: if QPS doubles, or generated length doubles, you can see how many replicas are implied. Capacity depends on the request-length assumption. By default every request fills `max_seq_len`, the conservative case; passing `mean_request_tokens` sizes paged allocation for a workload of shorter, exponentially distributed requests ([KV Allocation and Batch Capacity](math.qmd#sec-batching)). Do not use the result as a production SLA guarantee. Production serving must still be validated with the target scheduler, traffic mix, batching policy, and percentile measurement.
+`ServingCapacityModel` is a composition model. It uses `ServingModel` for TTFT/ITL, `ContinuousBatchingModel` for per-replica token capacity, and `TailLatencyModel` for queueing pressure. This is useful for first-pass sizing and sensitivity sweeps: if QPS doubles, or generated length doubles, the model shows how many replicas are implied. Capacity depends on the request-length assumption. By default every request fills `max_seq_len`, the conservative case; passing `mean_request_tokens` sizes paged allocation for a workload of shorter, exponentially distributed requests ([KV Allocation and Batch Capacity](math.qmd#sec-batching)). Do not use the result as a production SLA guarantee. Production serving must still be validated with the target scheduler, traffic mix, batching policy, and percentile measurement.
 
 ### MoE routing imbalance
 
@@ -143,7 +214,7 @@ The KV-cache formula ($\text{KV} = 2 \times L \times H_{\text{kv}} \times d_{\te
 
 ### Carbon and TCO estimates
 
-Sustainability and economics estimates are usually dominated by a few explicit assumptions: PUE, energy price, regional carbon intensity, utilization, and amortization period. The main source of error is often the assumed PUE (power usage effectiveness), which varies from ~1.1 (hyperscaler) to ~1.6 (enterprise). The carbon accounting methodology aligns with the lifecycle framework in the [Sustainable AI slides (Vol II, Ch 15)]({{< var slides_latest >}}/vol2_15_sustainable_ai.pdf){target="_blank"}.
+Sustainability and economics estimates are usually dominated by a few explicit assumptions: PUE, energy price, regional carbon intensity, cluster occupancy, and amortization period. The main source of error is often the assumed PUE (power usage effectiveness), which varies from ~`{python} f"{_pue_lo:.2f}"` (hyperscaler) to ~`{python} f"{_pue_hi:.2f}"` (coal-region enterprise). The carbon accounting methodology aligns with the lifecycle framework in the [Sustainable AI slides (Vol II, Ch 15)]({{< var slides_latest >}}/vol2_15_sustainable_ai.pdf){target="_blank"}.
 
 ---
 
@@ -162,18 +233,18 @@ Sustainability and economics estimates are usually dominated by a few explicit a
 
 ### The efficiency parameter (η)
 
-MLSys·im uses `efficiency` (η, default 0.5) as a single scalar representing hardware utilization. This is the largest source of absolute error. The table below provides calibrated ranges from published benchmarks.
+MLSys·im uses `efficiency` (η, default `{python} f"{_def_eff:.1f}"`) as a single scalar representing the sustained fraction of peak hardware throughput. This is the largest source of absolute error. The table below provides calibrated ranges from published benchmarks.
 
 | Workload Type | Recommended η | Reference |
 |:---|:---:|:---|
-| Training (fp16/bf16, Megatron-LM) | 0.35--0.55 | Shoeybi et al. (2019) |
-| Inference (fp16, vLLM/TRT-LLM) | 0.25--0.45 | MLPerf Inference v4.0 |
+| Training (fp16/bf16, Megatron-LM / PaLM) | `{python} f"{_mfu_lo:.2f}--{_mfu_hi:.2f}"` | Shoeybi et al. (2019), Chowdhery et al. (2022) |
+| Inference (fp16, vLLM/TRT-LLM) | `{python} f"0.25--{_mfu_inf_batched:.2f}"` | MLPerf Inference, Pope et al. (2023) |
 | Inference (int8, quantized) | 0.20--0.40 | Community benchmarks |
 | Edge inference (TFLite, ONNX RT) | 0.15--0.30 | MLPerf Tiny |
 
 : {tbl-colwidths="[35,20,45]"}
 
-When you use the default `efficiency=0.5`, you are modeling a well-optimized training job on datacenter hardware. For inference, pass `efficiency=0.35` for more conservative estimates. For edge devices, use `efficiency=0.2`. All solvers whose compute term depends on η expose it as a parameter; defaults are starting points from the literature and benchmarks, not hidden constants.
+The default `efficiency=0.5` (`{python} f"{_def_eff:.1f}"`) models a well-optimized training job on datacenter hardware (sustained reference MFU is `{python} f"{_ref_mfu_sust:.2f}"`). For inference, pass `efficiency=0.35` for more conservative estimates. For edge devices, use `efficiency=0.2`. All solvers whose compute term depends on η expose it as a parameter; defaults are starting points from the literature and benchmarks, not hidden constants.
 
 Cross-check η against cited bands in the [Literature Zoo](zoo/literature.qmd) (`Literature.Training.MfuHigh`, `Literature.Training.MfuInferenceBatched`) and engine knobs in `mlsysim.engine.calibration.REFERENCE_MFU_SUSTAINED`.
 
@@ -189,7 +260,7 @@ MLSys·im deliberately omits the following effects. Each omission is a design de
 
 3. **Pipeline schedule variants.** MLSys·im implements the standard GPipe bubble formula: $\text{bubble} = (P - 1) / (V \cdot M + P - 1)$. Advanced schedules (zero-bubble, interleaved 1F1B with $V > 1$) can reduce bubbles by 10--20% beyond what the formula predicts.
 
-4. **Quantization kernel efficiency.** INT8/INT4 kernels achieve lower utilization than FP16 Tensor Core kernels due to dequantization overhead and less mature compiler support. MLSys·im treats precision as a pure ops-per-byte ratio.
+4. **Quantization kernel efficiency.** INT8/INT4 kernels achieve a lower fraction of peak throughput than FP16 Tensor Core kernels because of dequantization overhead and less mature compiler support. MLSys·im treats precision as a pure ops-per-byte ratio.
 
 5. **KV allocation dynamics.** `ServingModel` sizes the KV cache densely for a known sequence length. `ContinuousBatchingModel` compares max-length reservation with paged allocation under an assumed exponential request-length distribution, sized at peak occupancy. It does not model how reserved slots fill over a request's lifetime, external fragmentation in exact-size or power-of-two contiguous allocators, preemption and swapping, or paged-attention kernel latency. Kwon et al. measure 96.3% of vLLM's KV memory holding token states, against 20.4% to 38.2% for contiguous pre-allocation [@kwon2023].
 
@@ -208,7 +279,7 @@ MLSys·im deliberately omits the following effects. Each omission is a design de
 
 : {tbl-colwidths="[18,17,13,13,39]"}
 
-MLSys·im occupies a unique position: it is the only tool that covers the full stack (single-node roofline through fleet-scale TCO) in a single, composable framework. Use it when you want to **compare options before running experiments**: "Will the H100 or MI300X be better for this serving workload?" or "Does PP=4 or PP=8 give better scaling efficiency?" For production SLAs, validate with empirical benchmarks.
+MLSys·im occupies a unique position: it is the only tool that covers the full stack (single-node roofline through fleet-scale TCO) in a single, composable framework. Use it to **compare options before running experiments**: "Will the H100 or MI300X be better for this serving workload?" or "Does PP=4 or PP=8 give better scaling efficiency?" For production SLAs, validate with empirical benchmarks.
 
 For the full benchmarking methodology taxonomy (system, model, and data benchmarks), statistical rigor requirements (percentiles, confidence intervals), and MLPerf submission anatomy, see the [Benchmarking slides (Vol I, Ch 12)]({{< var slides_latest >}}/vol1_12_benchmarking.pdf){target="_blank"}.
 
@@ -265,4 +336,4 @@ For the MLPerf comparison data on this page, see [MLPerf Inference v4.0 Results]
 
 ---
 
-*If you observe a significant discrepancy between MLSys·im predictions and measured results on your hardware, please [open an issue]({{< var github_issues >}}) with the workload, hardware, and measured numbers. Discrepancies often reveal bugs or missing constants in the model.*
+*To report a significant discrepancy between MLSys·im predictions and measured hardware results, [open an issue]({{< var github_issues >}}) with the workload, hardware, and measured numbers. Discrepancies often reveal bugs or missing constants in the model.*

@@ -421,11 +421,87 @@ Benchmarks must also account for measurement sensitivity across software runtime
 
 ### Benchmark harness {#sec-benchmarking-benchmark-harness-09ea}
 
-When host software initiates an inference or training step on an accelerator, the framework runtime enqueues commands onto a work queue (such as a CUDA stream or hardware command buffer) and returns control to the CPU in microseconds. A naive timer wrapping that host-level call measures queue dispatch rather than device execution. Avoiding such measurement traps is the job of the benchmark harness\index{Benchmark harness!test infrastructure}, the software and instrumentation scaffold that feeds inputs to the system under test, coordinates execution across the asynchronous host-accelerator boundary, collects timing and power traces, and enforces reproducibility\index{Reproducibility!benchmark requirement}. A rigorous harness inserts explicit device synchronization barriers (such as `torch.cuda.synchronize()`) or queries on-device timestamp events (such as `torch.cuda.Event`), ensuring that recorded timings reflect complete kernel execution and memory transfers across the bus rather than host enqueue overhead.
+When host software initiates an inference or training step on an accelerator, the framework runtime enqueues commands onto a work queue (such as a CUDA stream or hardware command buffer) and returns control to the CPU in microseconds. A naive timer wrapping that host-level call measures queue dispatch rather than device execution. Avoiding such measurement traps is the job of the benchmark harness\index{Benchmark harness!test infrastructure}, the software and instrumentation scaffold that feeds inputs to the system under test, coordinates execution across the asynchronous host-accelerator boundary, collects timing and power traces, and enforces reproducibility\index{Reproducibility!benchmark requirement}. A rigorous harness inserts explicit device synchronization barriers (such as `torch.cuda.synchronize()`) or queries on-device timestamp events (such as `torch.cuda.Event`), ensuring that recorded timings cover the declared device-work interval rather than host enqueue overhead.
+
+The timer endpoints determine which work enters the result. @Fig-benchmark-async-timing separates the host call, the synchronized host interval, and the device-event interval for one inference.
+
+::: {#fig-benchmark-async-timing fig-env="figure" fig-pos="htb" fig-cap="**Timing Across an Asynchronous Boundary**: The host call returns after enqueueing work, before the accelerator completes it. A synchronized host timer spans enqueueing through completion; device events measure elapsed time between their positions on the stream. The timing boundaries determine whether transfers and other queued work are included." fig-alt="Two aligned host and accelerator lanes with an enqueue block, a host waiting block, and an accelerator work block. Three arrows mark the call timer, the device-event interval, and the synchronized host interval."}
+
+```{.tikz}
+\begin{tikzpicture}[font=\footnotesize\sffamily,line join=round,
+  arr/.style={-{Stealth[length=4pt]},draw=GrayLine,line width=.7pt,shorten >=2pt},
+  note/.style={align=center,font=\scriptsize\sffamily}]
+\draw[arr] (2,4.05)--(12.8,4.05) node[below left] {time};
+\node[anchor=east] at (1.7,3.35) {Host};
+\node[anchor=east,align=right] at (1.7,2.05) {Accelerator\\stream};
+\draw[GrayLine] (2,3.35)--(12.6,3.35);
+\draw[GrayLine] (2,2.05)--(12.6,2.05);
+\draw[draw=GreenLine,fill=GreenL!65] (2.2,3.05) rectangle (3.7,3.65);
+\node[note] at (2.95,3.35) {enqueue};
+\draw[draw=GrayLine,fill=GrayL!35] (3.7,3.05) rectangle (11.5,3.65);
+\node[note] at (7.6,3.35) {host waits for completion barrier};
+\draw[arr,dashed] (3.7,3.03)--(3.7,2.5)--(4.4,2.5)--(4.4,2.36);
+\draw[draw=OrangeLine,fill=OrangeL!65] (4.4,1.75) rectangle (10.6,2.35);
+\node[note] at (7.5,2.05) {work bracketed by device events};
+\draw[arr,dashed] (10.6,2.36)--(10.6,2.65)--(11.5,2.65)--(11.5,3.03);
+\draw[GrayLine,densely dotted] (2.2,3.7)--(2.2,.3);
+\draw[GrayLine,densely dotted] (3.7,3.0)--(3.7,1.0);
+\draw[GrayLine,densely dotted] (11.5,3.0)--(11.5,.3);
+\draw[<->,draw=GreenLine,line width=.9pt] (2.2,1.25)--(3.7,1.25);
+\node[note,anchor=east] at (2,1.25) {Call timer};
+\node[note,anchor=west] at (4,1.25) {returns before device work completes};
+\draw[<->,draw=OrangeLine,line width=.9pt] (4.4,.75)--(10.6,.75);
+\node[note] at (7.5,.45) {Device-event interval: elapsed time between events};
+\draw[<->,draw=GrayLine,line width=.9pt] (2.2,-.05)--(11.5,-.05);
+\node[note] at (6.85,-.4) {Synchronized host interval: enqueue, waiting, and completion};
+\end{tikzpicture}
+```
+
+:::
+
+These intervals answer different questions. Earlier device work must finish before the host timer starts. A synchronized host interval then measures elapsed completion time under the stated synchronization boundary, whereas events measure the interval between their positions in the accelerator stream. A report must state those boundaries before comparing two implementations; neither method includes work that falls outside them.
 
 Harness architecture must align with the operational regime of the deployment target. In server environments, the harness generates concurrent request traffic using an open-loop load generator, often parameterizing inter-arrival times with a Poisson distribution.[^fn-poisson-arrival-benchmark] An open-loop harness issues requests according to an independent arrival schedule regardless of server responsiveness. This decoupling exposes queuing delays and tail latency (such as p99 response times) when arrival bursts saturate available compute.
 
-In contrast, a naive benchmarking client often employs a closed-loop pattern: sending a request, blocking until the response arrives, and only then issuing the next request. This design introduces the severe measurement distortion known as **coordinated omission**\index{Coordinated omission!closed-loop measurement trap}. Consider a server that experiences a transient 500 ms garbage collection pause or memory reallocation stall. In an open-loop production environment, independent users continue submitting queries, causing dozens of requests to accumulate in the server's ingress queue; once the pause ends, every queued query suffers inflated tail latency. In a closed-loop benchmark, however, the client blocks idly during the entire 500 ms pause, sending zero traffic while the server is struggling. The benchmark records a single slow query and zero queue backlog. By coordinating request generation with server responsiveness, the closed-loop harness artificially paces traffic, systematically erasing the very queue collapse and p99 latency spikes it was constructed to measure. Conversely, offline batch processing eliminates arrival scheduling entirely; the harness pre-stages large input batches in memory to saturate accelerator execution units, maximize memory bandwidth utilization, and measure peak sustained throughput.
+In contrast, a naive benchmarking client often employs a closed-loop pattern: sending a request, blocking until the response arrives, and only then issuing the next request. This design introduces the severe measurement distortion known as **coordinated omission**\index{Coordinated omission!closed-loop measurement trap}. Consider a server that experiences a transient 500 ms garbage collection pause or memory reallocation stall. In an open-loop production environment, independent users continue submitting queries, causing dozens of requests to accumulate in the server's ingress queue; once the pause ends, every queued query suffers inflated tail latency. In a closed-loop benchmark, however, the client blocks idly during the entire 500 ms pause, sending zero traffic while the server is struggling. The benchmark records a single slow query and zero queue backlog. By coordinating request generation with server responsiveness, the closed-loop harness artificially paces traffic, systematically erasing the very queue collapse and p99 latency spikes it was constructed to measure.
+
+The missing requests are the source of the distortion. @Fig-benchmark-coordinated-omission aligns the two arrival policies against one server pause so that the change in offered work remains visible.
+
+::: {#fig-benchmark-coordinated-omission fig-env="figure" fig-pos="htb" fig-cap="**A Pause Under Two Arrival Policies**: Each green interval runs from a request arrival to its response. Independent arrivals continue through the same server pause, while one closed-loop client waits for a response before sending again. The resulting workloads differ, so the closed-loop sample omits delays that the independent stream would experience. The timeline is schematic." fig-alt="Aligned request timelines under one shaded server pause. Four open-loop requests arrive during the pause, while a closed-loop client sends one request during the pause and its next request after the response."}
+
+```{.tikz}
+\begin{tikzpicture}[font=\footnotesize\sffamily,line join=round,
+ arr/.style={-{Stealth[length=4pt]},draw=GrayLine,line width=.7pt,shorten >=2pt},
+ note/.style={font=\scriptsize\sffamily,align=center}]
+\fill[RedL!65] (4,1.05) rectangle (8.4,5.7);
+\draw[RedLine,densely dashed] (4,1.05)--(4,5.7);
+\draw[RedLine,densely dashed] (8.4,1.05)--(8.4,5.7);
+\node[note,text=RedLine] at (6.2,5.4) {server paused};
+\node[anchor=east,align=right] at (2.6,4.15) {Open loop\\independent arrivals};
+\foreach \x/\end/\y in {4.3/9.1/4.9,5.5/9.7/4.4,6.7/10.3/3.9,7.9/10.9/3.4}{
+ \fill[GreenLine] (\x,\y) circle (2.2pt);
+ \draw[arr,GreenLine] (\x,\y)--(\end,\y);
+}
+\node[note,fill=white,inner sep=2pt] at (7.6,2.85) {one row per request; arrivals continue during the pause};
+\node[anchor=east,align=right] at (2.6,1.95) {Closed loop\\one waiting client};
+
+\fill[GreenLine] (4.3,1.95) circle (2.2pt);
+\draw[arr,GreenLine] (4.3,1.95)--(9.1,1.95);
+\fill[GreenLine] (9.6,1.95) circle (2.2pt);
+\draw[arr,GreenLine] (9.6,1.95)--(10.9,1.95);
+\node[note] at (6.2,.6) {client sends no further request until the response};
+\draw[arr] (2.9,.05)--(12.8,.05) node[below left] {time};
+\node[note,anchor=west] at (0,-.65) {\textbullet\ arrival};
+\draw[arr,GreenLine] (2.1,-.65)--(3,-.65);
+\node[note,anchor=west] at (3.1,-.65) {arrival-to-response interval};
+\end{tikzpicture}
+```
+
+:::
+
+A closed-loop result is valid for a population whose clients wait in this way. It does not by itself estimate latency for an independent arrival stream, because it reduces the offered load precisely when the server slows. The harness must therefore reproduce the deployment arrival policy or report why a different policy answers the intended question.
+
+Offline batch processing eliminates arrival scheduling entirely; the harness pre-stages large input batches in memory to saturate accelerator execution units, maximize memory bandwidth utilization, and measure peak sustained throughput.
 
 [^fn-poisson-arrival-benchmark]: **Poisson distribution**\index{Poisson distribution!traffic modeling}: Named after Siméon Denis Poisson, who formalized it in 1837 while modeling wrongful conviction rates in French courts. The distribution models independent events at a constant average rate $(\ArrivalRate)$ and is a common baseline for server request arrivals. Real ML serving traffic often violates its assumptions through burstiness, correlation, and time-varying rates. A Poisson harness can therefore misestimate tail latency unless traces or stress cases cover those production patterns.
 

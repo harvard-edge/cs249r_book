@@ -321,9 +321,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // Resolve vertical collisions among margin elements (.column-margin, footnotes, margin figures)
   function resolveMarginCollisions() {
-    // Only apply on viewports wide enough to display the margin column
-    if (window.innerWidth < 992) return;
-
     const marginEls = Array.from(document.querySelectorAll('.column-margin'));
     if (!marginEls.length) return;
 
@@ -331,6 +328,10 @@ document.addEventListener('DOMContentLoaded', function() {
     marginEls.forEach(el => {
       el.style.transform = '';
     });
+
+    // Notes return to normal flow on narrow screens. A desktop translation
+    // must be cleared before this guard or it can cover the next figure.
+    if (window.innerWidth < 992) return;
 
     let prevBottom = -Infinity;
     const SPACING = 16; // 16px minimum vertical space between margin items

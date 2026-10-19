@@ -6,7 +6,10 @@ by manually sweeping a parameter (Batch Size) to find the "Cliff."
 """
 
 import mlsysim
-import pandas as pd # Optional, but common for students
+try:
+    import pandas as pd  # Optional, but common for students
+except ImportError:
+    pd = None
 
 def main():
     print("Scenario: Autonomous Vehicle Perception on Jetson Orin NX")
@@ -37,10 +40,11 @@ def main():
         # Collect for later deep analysis
         results.append(row)
 
-    # 2. Convert the list of dicts to a DataFrame for analysis
-    df = pd.DataFrame(results)
-    print("\nDataFrame Summary (First 5 rows):")
-    print(df[['scenario', 'f_status', 'p_latency']].head())
+    # 2. Convert the list of dicts to a DataFrame for analysis (if pandas is installed)
+    if pd is not None:
+        df = pd.DataFrame(results)
+        print("\nDataFrame Summary (First 5 rows):")
+        print(df[['scenario', 'f_status', 'p_latency']].head())
 
 if __name__ == "__main__":
     main()

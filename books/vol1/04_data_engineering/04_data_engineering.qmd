@@ -3269,6 +3269,36 @@ Transformation techniques\index{Data!transformation, techniques} convert data fr
 
 Preprocessing parameters fall under the same split-boundary rule as the data itself (@sec-data-engineering-data-engineering-dataset-compilation-0496). If the mean and variance, or a category vocabulary, are fitted on the entire dataset before it is split, statistics of the test examples flow into the transformation the model trains through, and the test score no longer measures generalization to unseen data. The pipeline therefore fits every transformation parameter on the training split alone and applies the frozen result to validation, test, and serving inputs.
 
+The fit and apply paths in @fig-preprocessing-fitted-state separate learning a transformation from using it. This distinction keeps held-out data outside the fitting boundary while making the serving path reproducible.
+
+::: {#fig-preprocessing-fitted-state fig-env="figure" fig-pos="htb" fig-cap="**Shared Preprocessing State**: Only the training split fits the preprocessing state. The resulting artifact supplies the same transformation code and frozen state to every application path; the model release carries that artifact with its weights." fig-alt="Training data feeds a fit operation and frozen state. A shared preprocessing artifact branches to training, validation and test, and serving. A parity test contrasts shared and independently fitted state."}
+
+```{.tikz}
+\begin{tikzpicture}[font=\small\sffamily,
+  box/.style={draw=GrayLine,line width=0.75pt,align=center,inner sep=5pt,minimum height=11mm},
+  flow/.style={-{Stealth[length=2mm]},line width=0.8pt,shorten >=2pt,shorten <=2pt}]
+\node[box,draw=GreenLine,fill=GreenL,text width=28mm] (train) at (1.7,0) {Training split\\only};
+\node[box,draw=OrangeLine,fill=OrangeL,text width=24mm] (fit) at (5.3,0) {Fit preprocessing\\once};
+\node[box,draw=BlueLine,fill=BlueL,text width=34mm] (state) at (10.1,0) {Frozen state\\means, vocabulary};
+\draw[flow] (train) -- (fit);
+\draw[flow] (fit) -- (state);
+\node[box,draw=BlueLine,fill=BlueL!40,text width=116mm,minimum height=13mm] (release) at (6.1,-1.8) {\textbf{Shared preprocessing artifact}\\Versioned transformation code + frozen state};
+\draw[flow,BlueLine] (state.south) -- (10.1,-1.8+0.65);
+\node[box,draw=OrangeLine,fill=OrangeL,text width=30mm] (a) at (1.7,-3.6) {Apply to\\training records};
+\node[box,draw=OrangeLine,fill=OrangeL,text width=30mm] (b) at (6.1,-3.6) {Apply to\\validation / test};
+\node[box,draw=OrangeLine,fill=OrangeL,text width=30mm] (c) at (10.5,-3.6) {Apply to\\serving requests};
+\foreach \n in {a,b,c} {\draw[flow,BlueLine] (\n.north |- release.south) -- (\n.north);}
+\draw[GrayLine,line width=0.5pt] (0,-4.6) -- (12.2,-4.6);
+\node[anchor=west,font=\small\sffamily\bfseries] at (0,-5.15) {Parity test: same raw record};
+\node[align=left,anchor=west,text width=116mm,font=\footnotesize\sffamily] at (0,-6.0) {Shared code + shared state $\longrightarrow$ matching deterministic features\\[4pt]
+Same code + refitted state $\longrightarrow$ possible mismatch};
+\end{tikzpicture}
+```
+
+:::
+
+For deterministic preprocessing shared by training and serving, parity tests compare transformed features for the same raw record under the released code and state. The tests declare a numerical tolerance where execution backends differ.
+
 Beyond numerical scaling, transformations convert discrete inputs through categorical encoding\index{Categorical Encoding!one-hot encoding}, extract cyclical representations from timestamps, and construct derived spatial features. Categorical encodings must handle both the categories present during training and unseen categories encountered during serving. A reliable pipeline builds the vocabulary index exclusively from the training split, serializes this dictionary with the model artifact, and maps unknown runtime tokens to an explicit out-of-vocabulary (`<UNK>`) index. Omitting this mapping causes runtime dimension mismatches or silent index collisions during online inference.
 
 Domain-specific feature engineering\index{Feature Engineering!domain knowledge} turns raw inputs into representations that expose informative signals directly to the learning algorithm [@kuhn2013]. Instead of requiring the model to discover non-linear combinations from scratch, engineered features encode domain structure directly. The audio features the keyword spotter uses, described later, are themselves engineered: they encode what is known about human hearing, so a small model does not have to learn it from data.

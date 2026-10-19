@@ -6,38 +6,38 @@ Measurement units live in `core/units.py`, physical constants in
 `physics/constants.py`, and domain values in registries; the former
 `core/constants.py` shim is deleted (no-backward-compat policy).
 
-This document is the *registry-level* view. The *runtime* view — how workloads,
-hardware, infrastructure, and systems feed the solver layer — is the 5-layer
-model in [architecture.qmd](architecture.qmd): the zoos below are the registries
+This document is the *registry-level* view. The *runtime* view—how workloads,
+hardware, infrastructure, and systems feed the solver layer—is the 5-layer
+model in [architecture.qmd](architecture.qmd). The zoos below are the registries
 that populate Layers A–D of that stack.
 
 ## Zoos
 
 | Zoo | Registry | Role |
 |-----|----------|------|
-| Hardware | `Hardware.Cloud.*`, `Hardware.Edge.*`, `Hardware.Embodied.*`, … | Chip/board/appliance specs (datasheet truth). **Canonical paths only** — no bare `Hardware.H100`. |
+| Hardware | `Hardware.Cloud.*`, `Hardware.Edge.*`, `Hardware.Embodied.*`, … | Chip/board/appliance specs (datasheet truth). **Canonical paths only** (no bare `Hardware.H100`). |
 | Embodied | `Embodied.Quadruped.*`, `Embodied.Humanoid.*`, `Embodied.Manipulator.*`, `Embodied.Drone.*`, `Embodied.AMR.*`, `Embodied.Vehicle.*` | Cyber-physical machine platforms and archetypes across the four Physical AI classes. |
 | Agents | `Agents.Coding.*`, `Agents.Deliberation.*`, `Agents.MultiAgent.*`, `Agents.Interactive.*`, `Agents.Platforms.*` | Agentic ML system profiles, execution harnesses, deliberation search architectures, and reference execution platforms. |
 | Models | `Models.*` | Workloads and architectures (parameters, layers, FLOPs). |
-| Datasets | `Datasets.*` | Data zoo — ImageNet, MNIST, CIFAR, etc. |
+| Datasets | `Datasets.*` | Data zoo: ImageNet, MNIST, CIFAR, etc. |
 | Platforms | `Platforms.*` | Abstract deployment envelopes (RAM, storage, latency ranges). Replaces `Systems.Tiers`. |
-| Infrastructure | `Infrastructure.Grids.*`, `Infrastructure.Datacenters.*`, `Infrastructure.Pricing.*`, `Infrastructure.Capacity.*` | Site/energy/economics layer — utility grid, facility PUE, pricing, and capacity facts. **Not** GPU fleets or network fabrics. |
+| Infrastructure | `Infrastructure.Grids.*`, `Infrastructure.Datacenters.*`, `Infrastructure.Pricing.*`, `Infrastructure.Capacity.*` | Site/energy/economics layer: utility grid, facility PUE, pricing, and capacity facts. **Not** GPU fleets or network fabrics. |
 | Systems | `Systems.Nodes.*`, `Systems.Racks.*`, `Systems.Fabrics.*`, `Systems.Clusters.*`, `Systems.Pods.*`, `Systems.Storage.*` | Composed physical systems and topology. Fleets live in `Systems.Clusters` (type `Fleet`); rack-level aggregates live in `Systems.Racks`. |
 | Ops | `Ops.Monitoring.*`, `Ops.TrainingRunOverheads.*` | Operational policies, thresholds, and goodput-loss profiles. |
 | Scenarios | `Scenarios.*` | Executable workload + system + constraint bundles. |
 
 ## Support (not zoos)
 
-- **`mlsysim.core.units`** — pint units, byte/bit widths, precision map.
-- **`mlsysim.physics.*`** — physical constants and formulas.
-- **`Literature.*`** — cited appendix scalars (MFU bands, Chinchilla, communication, batch-size anchors).
-- **`Scenarios.*`** — executable workload + system + constraint bundles, suitable for `Scenario.evaluate()`.
-- **`ReferenceStats.*`** — non-executable sourced anchors for real-world scenario and case-study statistics.
-- **`Systems.Reliability` / `Orchestration`** — MTTF, recovery, scheduling assumptions.
-- **`Ops.Monitoring` / `TrainingRunOverheads`** — PSI, KS, drift thresholds, training goodput-loss profiles.
-- **`mlsysim.engine.calibration`** — solver/engine default kwargs (not appendix tables).
-- **`Infrastructure.Pricing`** — cloud, storage, labeling, fleet economics (`PricePoint.rate`).
-- **Regional carbon / PUE / fleet / fabrics** — `Infrastructure.Grids`, `FacilityCooling`, `Systems.Clusters`, `Systems.Fabrics`.
+- **`mlsysim.core.units`**: pint units, byte/bit widths, precision map.
+- **`mlsysim.physics.*`**: physical constants and formulas.
+- **`Literature.*`**: cited appendix scalars (MFU bands, Chinchilla, communication, batch-size anchors).
+- **`Scenarios.*`**: executable workload + system + constraint bundles, suitable for `Scenario.evaluate()`.
+- **`ReferenceStats.*`**: non-executable sourced anchors for real-world scenario and case-study statistics.
+- **`Systems.Reliability` / `Orchestration`**: MTTF, recovery, scheduling assumptions.
+- **`Ops.Monitoring` / `TrainingRunOverheads`**: PSI, KS, drift thresholds, training goodput-loss profiles.
+- **`mlsysim.engine.calibration`**: solver/engine default kwargs (not appendix tables).
+- **`Infrastructure.Pricing`**: cloud, storage, labeling, fleet economics (`PricePoint.rate`).
+- **Regional carbon / PUE / fleet / fabrics**: `Infrastructure.Grids`, `FacilityCooling`, `Systems.Clusters`, `Systems.Fabrics`.
 
 ## Validation invariants
 
@@ -49,7 +49,7 @@ validated before they reach solver equations.
   value must be watts, and a latency value must be time.
 - **Compute work carries its own dimension.** FLOPs (and integer-op rates such
   as TOPS) live on a dedicated `[flop]` pint dimension (2026-06-06), so
-  `1 TFLOP/s` can never silently add to or convert into `900 GB/s` — pint
+  `1 TFLOP/s` can never silently add to or convert into `900 GB/s`; pint
   itself raises `DimensionalityError`. Bytes, counts, parameters, and dollars
   remain dimensionless aliases, and MLSys·im's unit-family checks keep those
   semantically distinct at every schema boundary.

@@ -13,7 +13,7 @@ single "best" design — you have a frontier of feasible operating points,
 and the SLA chooses one of them.
 """
 import mlsysim
-from mlsysim.solvers import ServingModel, TailLatencyModel
+from mlsysim.solvers import BatchingOptimizer, ServingModel, TailLatencyModel
 
 
 def main():
@@ -62,7 +62,7 @@ def main():
         })
 
     # 2. Confirm the optimum via BatchingOptimizer
-    optimizer = mlsysim.BatchingOptimizer()
+    optimizer = BatchingOptimizer()
     result = optimizer.solve(
         model=model,
         hardware=hardware,

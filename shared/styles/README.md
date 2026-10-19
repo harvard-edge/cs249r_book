@@ -37,6 +37,7 @@ shared/styles/
     ├── _theme-labs.scss
     ├── _theme-kits.scss
     ├── _theme-instructors.scss
+    ├── _theme-mlsysim.scss   # MLSys·im (cyan)
     └── _theme-tinytorch.scss
 ```
 
