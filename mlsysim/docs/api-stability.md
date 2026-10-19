@@ -3,8 +3,8 @@
 > **Applies to:** mlsysim v0.1.x
 
 This document defines which parts of the mlsysim API are stable, which are
-experimental, and what guarantees you can rely on when building on top of the
-framework.
+experimental, and what guarantees code built on top of the framework can
+rely on.
 
 ---
 
@@ -19,9 +19,9 @@ caveat: **we are pre-1.0.** Under semver, this means:
 | `0.1.x` -> `0.2.0` (minor) | Breaking changes allowed. Read the changelog before upgrading. |
 | `1.0.0` | Full stability guarantee begins. Breaking changes require a major bump. |
 
-**In practice:** if you pin to `mlsysim ~= 0.1.0` (any 0.1.x), your code will
-not break. If you upgrade to 0.2.0, expect to update imports and possibly
-adjust call signatures.
+**In practice:** code pinned to `mlsysim ~= 0.1.0` (any 0.1.x) will not
+break. Upgrading to 0.2.0 means updating imports and possibly adjusting call
+signatures.
 
 ---
 
@@ -144,8 +144,8 @@ from mlsysim.solvers import ForwardModel, DistributedModel, ServingModel
 ```
 
 The solver class hierarchy, their constructors, and their method signatures
-may change. The `Engine.solve()` facade insulates you from these changes --
-prefer it over direct solver instantiation.
+may change. The `Engine.solve()` facade insulates calling code from these changes,
+so prefer it over direct solver instantiation.
 
 Solver classes are exported from `mlsysim.solvers`, not the package root. Use
 `from mlsysim.solvers import ServingModel` so solver-specific dependencies stay
@@ -196,10 +196,10 @@ and in the changelog before the next minor release.
 
 ---
 
-## How to Protect Your Code
+## How to Protect Downstream Code
 
-1. **Pin your dependency:** `mlsysim ~= 0.1.0` (allows 0.1.x patches, blocks 0.2.0).
-2. **Use `Engine.solve()` as your primary interface.** It is the most stable entry point.
-3. **Use `mlsysim.solvers` only when you need solver-specific features.** The engine facade covers most use cases.
+1. **Pin the dependency:** `mlsysim ~= 0.1.0` (allows 0.1.x patches, blocks 0.2.0).
+2. **Use `Engine.solve()` as the primary interface.** It is the most stable entry point.
+3. **Use `mlsysim.solvers` only when solver-specific features are needed.** The engine facade covers most use cases.
 4. **Run with warnings enabled** (`python3 -W default`) to catch deprecation notices early.
 5. **Read the changelog** before any minor version upgrade.

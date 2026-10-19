@@ -1,45 +1,87 @@
 ---
 title: "KV-Cache: The Hidden Tax"
-subtitle: "At 128K context, the cache alone fills an 80 GB GPU — room for exactly one user."
-description: "Discover that KV-cache memory — not model weights, not compute — determines how many users you can serve concurrently. Sweep batch size and context length to find the real OOM boundary."
+subtitle: "At 128K context, the cache alone exceeds the model weights, leaving room for only a handful of users."
+description: "Discover that KV-cache memory, not model weights or compute, determines how many users a GPU can serve concurrently. Sweep batch size and context length to find the real OOM boundary."
 categories: ["node", "intermediate"]
 ---
 
+```{python}
+#| echo: false
+#| output: false
+import mlsysim  # installed via `pip install mlsysim` (see workflow)
+from mlsysim import Q_
+from mlsysim.solvers import ServingModel
+
+Engine = mlsysim.Engine
+_model = mlsysim.Models.Language.Llama3_8B
+_h100 = mlsysim.Hardware.Cloud.H100
+_a100 = mlsysim.Hardware.Cloud.A100
+_solver = ServingModel()
+
+_head_dim = _model.hidden_dim // _model.heads
+_bpt = 2 * 2 * _model.layers * _model.kv_heads * _head_dim
+_mha_bpt = 2 * 2 * _model.layers * _model.heads * _head_dim
+_gqa_ratio = _model.heads // _model.kv_heads
+
+_weights_gb = _model.size_in_bytes("fp16").to("GB").magnitude
+_weights_gib = _model.size_in_bytes("fp16").to("GiB").magnitude
+_cap_gib = _a100.memory.capacity.to("GiB").magnitude
+_cap_gb = _a100.memory.capacity.to("GB").magnitude
+_free_gib = (_a100.memory.capacity - _model.size_in_bytes("fp16")).to("GiB").magnitude
+_free_gb = (_a100.memory.capacity - _model.size_in_bytes("fp16")).to("GB").magnitude
+
+_r_2k = _solver.solve(model=_model, hardware=_h100, seq_len=2048, batch_size=1, precision="fp16")
+_r_4k = _solver.solve(model=_model, hardware=_h100, seq_len=4096, batch_size=1, precision="fp16")
+_r_128k = _solver.solve(model=_model, hardware=_h100, seq_len=131072, batch_size=1, precision="fp16")
+
+_kv_2k_gb = _r_2k.kv_cache_size.to("GB").magnitude
+_kv_4k_gb = _r_4k.kv_cache_size.to("GB").magnitude
+_kv_4k_gib = _r_4k.kv_cache_size.to("GiB").magnitude
+_kv_128k_gb = _r_128k.kv_cache_size.to("GB").magnitude
+_kv_128k_gib = _r_128k.kv_cache_size.to("GiB").magnitude
+_mha_128k_gb = Q_(_mha_bpt * 131072, "byte").to("GB").magnitude
+_mha_128k_gib = Q_(_mha_bpt * 131072, "byte").to("GiB").magnitude
+
+_max_b_2k = int((_a100.memory.capacity - _model.size_in_bytes("fp16")).to("byte").magnitude // (_bpt * 2048))
+_max_b_4k = int((_a100.memory.capacity - _model.size_in_bytes("fp16")).to("byte").magnitude // (_bpt * 4096))
+_max_b_128k = int((_a100.memory.capacity - _model.size_in_bytes("fp16")).to("byte").magnitude // (_bpt * 131072))
+_max_b_128k_mha = int((_a100.memory.capacity - _model.size_in_bytes("fp16")).to("byte").magnitude // (_mha_bpt * 131072))
+```
+
 ## The Question
 
-You deploy Llama-3 8B on an H100. The model weights take 16 GB. You have 64 GB left.
-Surely you can serve dozens of users concurrently?
+`{python} _model.name` is deployed on an `{python} f"{_cap_gib:.0f} GiB"` (`{python} f"{_cap_gb:.1f} GB"`) `{python} _h100.name` or `{python} _a100.name`. The model weights take `{python} f"{_weights_gb:.2f} GB"` (`{python} f"{_weights_gib:.1f} GiB"`), leaving `{python} f"{_free_gb:.1f} GB"` (`{python} f"{_free_gib:.1f} GiB"`) free.
+**Can that GPU serve dozens of users concurrently?**
 
-**Not if they have long contexts.** Every active user requires a KV-cache that grows
-linearly with sequence length. At 128K context, a single user's cache can consume the
-entire remaining memory. This tutorial shows you exactly where the real memory wall lives
+Not if they have long contexts. Every active user requires a KV-cache that grows
+linearly with sequence length. At 128K context, a single user's GQA KV-cache takes `{python} f"{_kv_128k_gb:.2f} GB"` (`{python} f"{_kv_128k_gib:.0f} GiB"`), exceeding the model weights and capping concurrency at `{python} _max_b_128k` users (or `{python} _max_b_128k_mha` user at `{python} f"{_mha_128k_gb:.1f} GB"` / `{python} f"{_mha_128k_gib:.0f} GiB"` without GQA). This tutorial shows where the real memory wall lies
 and how to push it back.
 
 ::: {.callout-note}
 ## Prerequisites
 Complete [Tutorial 1: The Memory Wall](01_memory_wall.qmd) and
-[Tutorial 2: Two Phases, One Request](02_two_phases.qmd). You should understand
+[Tutorial 2: Two Phases, One Request](02_two_phases.qmd). This tutorial assumes familiarity with
 memory-bound vs. compute-bound regimes and the two-phase LLM serving model.
 :::
 
 ::: {.callout-note}
-## What You Will Learn
+## Learning Objectives
 
 - **Calculate** the KV-cache size for any model, sequence length, and batch size
 - **Identify** the OOM boundary where KV-cache exhausts GPU memory
-- **Explain** why context length — not model size — is the binding memory constraint in serving
+- **Explain** why context length, not model size, is the binding memory constraint in serving
 - **Compare** static batching vs. paged attention for maximizing concurrent users
 :::
 
 ::: {.callout-tip}
-## Background: What Is the KV-Cache?
+## Background: The KV-Cache
 
 During LLM decoding, every attention layer stores **Key** and **Value** matrices for all
-tokens generated so far. If you have studied data structures, this is **memoization** applied
+tokens generated so far. In data-structure terms, this is **memoization** applied
 to the attention mechanism: store computed results instead of recomputing them. The names
-come from a database-style lookup: the **Query** is what you search for, the **Key** is what
-you match against, and the **Value** is what you retrieve. Without this cache, the model would
-need to recompute attention over the entire context at every step — quadratic cost. The
+come from a database-style lookup: the **Query** is what is searched for, the **Key** is what
+it is matched against, and the **Value** is what is retrieved. Without this cache, the model would
+need to recompute attention over the entire context at every step, at quadratic cost. The
 KV-cache trades memory for compute:
 
 | Factor | Effect on KV-Cache |
@@ -49,25 +91,18 @@ KV-cache trades memory for compute:
 | More users (batch) | Linear growth (independent cache per user) |
 | Lower precision | Proportional reduction (INT8 = half of FP16) |
 
-The formula: `KV-cache = 2 x layers x kv_heads x head_dim x seq_len x batch x bytes_per_element`.
+The formula is `KV-cache = 2 x layers x kv_heads x head_dim x seq_len x batch x bytes_per_element` (or `2 * 2 * layers * kv_heads * head_dim` bytes per token in FP16).
 At short contexts this is negligible. At long contexts it dominates everything.
 
 **Note on GQA (Grouped Query Attention):** Modern architectures like Llama-3 use GQA, where
-`kv_heads < num_heads`. Llama-3 8B has 32 attention heads but only 8 KV-heads, reducing
-KV-cache by 4× compared to standard multi-head attention. Using `num_heads` instead of
-`kv_heads` in the formula is a common source of 4× overestimates.
+`kv_heads < num_heads`. `{python} _model.name` has `{python} _model.layers` layers and `{python} _model.heads` attention heads (head dimension `{python} _head_dim`), yet only `{python} _model.kv_heads` KV-heads, reducing
+the FP16 KV-cache by `{python} f"{_gqa_ratio}"`× compared to standard multi-head attention (MHA): from `{python} f"{_mha_bpt:,} bytes"` (`{python} f"{_mha_bpt // 1024} KiB"`) per token under MHA down to $2 \times 2 \times `{python} _model.layers` \times `{python} _model.kv_heads` \times `{python} _head_dim` = `{python} f"{_bpt:,}"`\;\text{bytes}$ (`{python} f"{_bpt // 1024} KiB"`) per token under GQA. Using `num_heads` instead of
+`kv_heads` in the formula is a common source of `{python} f"{_gqa_ratio}"`× overestimates.
 :::
 
 ---
 
 ## 1. Setup
-
-```{python}
-#| echo: false
-#| output: false
-import mlsysim  # installed via `pip install mlsysim` (see workflow)
-Engine = mlsysim.Engine
-```
 
 ```python
 import mlsysim
@@ -76,9 +111,9 @@ from mlsysim.solvers import ServingModel
 
 ---
 
-## 2. Single-User Baseline: Where Does the Memory Go?
+## 2. Single-User Baseline: Where the Memory Goes
 
-Let's start with a single user at a modest 2K context and see how memory breaks down:
+The starting point is a single user at a modest 2K context, which shows how memory breaks down:
 
 ```{python}
 from mlsysim.solvers import ServingModel
@@ -97,19 +132,19 @@ info("Memory Breakdown",
      KV_cache_1_user=r.kv_cache_size,
      Total_memory=r.total_memory_required,
      Memory_utilization=f"{r.memory_utilization:.1%}",
-     KV_as_pct_of_total=f"{r.kv_cache_size / r.total_memory_required * 100:.1f}%")
+     KV_as_pct_of_total=f"{(r.kv_cache_size / r.total_memory_required).magnitude * 100:.1f}%")
 ```
 
-At 2K context with one user, the KV-cache is tiny — a rounding error compared to the model
-weights. This is why many engineers assume memory pressure comes from model size. They are
-about to be surprised.
+At 2K context with one user, the KV-cache is `{python} f"{_kv_2k_gb:.3f} GB"` (`{python} f"{(_r_2k.kv_cache_size / _r_2k.total_memory_required).magnitude * 100:.1f}%"` of total memory), a small fraction of the `{python} f"{_weights_gb:.2f} GB"` model
+weights (and at 4K context it is `{python} f"{_kv_4k_gb:.3f} GB"`, or `{python} f"{_kv_4k_gib:.2f} GiB"`). This is why many engineers assume memory pressure comes from model size, an
+assumption the next two sweeps overturn.
 
 ---
 
 ## 3. Batch Size Sweep: The Concurrency Wall
 
-Now let's add users. Each concurrent user needs their own KV-cache. Watch memory utilization
-climb:
+Adding users changes the picture. Each concurrent user needs its own KV-cache, so HBM occupancy
+climbs with batch size:
 
 ```{python}
 rows = []
@@ -124,15 +159,15 @@ for batch in [1, 4, 8, 16, 32, 64, 128]:
 table(["Batch", "KV-Cache", "Total", "Util", "Feasible"], rows)
 ```
 
-At 2K context, you can fit many users. The KV-cache per user is small enough that batch
-size scales comfortably. But this picture changes dramatically when we extend the context.
+At 2K context, up to `{python} _max_b_2k` concurrent users fit on an `{python} f"{_cap_gib:.0f} GiB"` (`{python} f"{_cap_gb:.1f} GB"`) A100 or H100 (and up to `{python} _max_b_4k` users at 4K context). The KV-cache per user is small enough that batch
+size scales comfortably. The picture changes sharply, however, once the context grows.
 
 ---
 
 ## 4. Context Length Sweep: The Real Memory Wall
 
-Fix batch size at 8 users and sweep context length from 512 tokens to 128K. This is where
-the hidden tax reveals itself:
+Fix batch size at 8 users and sweep context length from 512 tokens to 128K. This sweep
+exposes the hidden tax:
 
 ```{python}
 rows = []
@@ -152,14 +187,14 @@ table(["Context", "KV-Cache", "Weights", "Total", "Util", "Status"], rows)
 ## Key Insight
 
 **KV-cache grows linearly with sequence length and batch size. It is the hidden memory
-consumer that determines your maximum concurrent users — not model size, not compute, but
-cache state.** At 2K context, the cache is negligible. At 128K context, a single user's
-cache can exceed the model weights. The same 80 GB GPU that serves 64 users at short
-context can serve exactly one user at long context. The "context length" on the model card
-is not a feature — it is a memory bill.
+consumer that determines the maximum number of concurrent users: not model size, not compute, but
+cache state.** At 2K context, the cache is `{python} f"{_kv_2k_gb:.3f} GB"` per user; at 4K context, `{python} f"{_kv_4k_gb:.3f} GB"` (`{python} f"{_kv_4k_gib:.2f} GiB"`). At 128K context, a single user's
+cache is `{python} f"{_kv_128k_gb:.2f} GB"` (`{python} f"{_kv_128k_gib:.0f} GiB"`), exceeding the `{python} f"{_weights_gb:.2f} GB"` model weights. The same `{python} f"{_cap_gib:.0f} GiB"` (`{python} f"{_cap_gb:.1f} GB"`) GPU that serves `{python} _max_b_2k` users at 2K
+context (`{python} _max_b_4k` at 4K) can serve at most `{python} _max_b_128k` users at 128K context with `{python} f"{_gqa_ratio}"`× GQA (and `{python} _max_b_128k_mha` user under standard MHA). The "context length" on the model card
+is not a feature but a memory bill.
 :::
 
-Now let's see what happens when we try to serve even a single user at 128K:
+The extreme case is a single user at 128K:
 
 ```{python}
 # Single user at 128K context — the extreme case
@@ -174,28 +209,28 @@ info("Single User @ 128K Context",
      KV_cache=r_long.kv_cache_size,
      Total=r_long.total_memory_required,
      Feasible=str(r_long.feasible),
-     KV_as_pct_of_total=f"{r_long.kv_cache_size / r_long.total_memory_required * 100:.0f}%")
+     KV_as_pct_of_total=f"{(r_long.kv_cache_size / r_long.total_memory_required).magnitude * 100:.0f}%")
 ```
 
 ---
 
 ## 5. Paged Attention: Pushing Back the Wall
 
-So the KV-cache fills memory fast, and at long contexts you hit OOM with just a handful of
-users. Is the only option to buy more memory? No — the allocation strategy itself is
-wasting space. Most sequences do not actually use the maximum context length, yet static
+The KV-cache fills memory fast, and at long contexts a GPU runs out of memory with only a handful of
+users. Buying more memory is not the only option, because the allocation strategy itself
+wastes space. Most sequences do not use the maximum context length, yet static
 batching reserves memory for the worst case.
 
 Static batching allocates contiguous memory for the maximum sequence length, wasting space
 on incomplete sequences. **PagedAttention** (from vLLM) allocates KV-cache in small,
-fixed-size pages — exactly like how an operating system uses virtual memory paging to
-avoid physical memory fragmentation. Just as the OS maps virtual pages to physical frames
+fixed-size pages, in the same way an operating system uses virtual memory paging to
+avoid physical memory fragmentation. Much as the OS maps virtual pages to physical frames
 on demand, PagedAttention maps KV-cache blocks to GPU memory on demand, eliminating
 fragmentation and fitting more concurrent requests.
 
-Let's prove it with an experiment: two allocators competing for the same memory budget.
-We fix the worst-case context at 8K tokens, but draw request lengths from a long-tailed
-distribution — most requests are far shorter than the worst case, which is exactly the
+An experiment tests the claim with two allocators competing for the same memory budget.
+The worst-case context is fixed at 8K tokens, but request lengths are drawn from a long-tailed
+distribution in which most requests are far shorter than the worst case, the
 workload that punishes static allocation.
 
 **Set up the KV math.** Reuse the model and GPU from the Silicon Zoo and compute the cache
@@ -218,8 +253,8 @@ budget_tokens = int(kv_budget.to("byte").magnitude // bytes_per_token)
 ```
 
 **The two allocators.** Static contiguous reserves a full `max_seq` slot per request,
-whether the request needs it or not. Paged hands out fixed-size blocks on demand — a
-request only pays for the blocks it actually fills:
+whether the request needs it or not. Paged hands out fixed-size blocks on demand, so a
+request pays only for the blocks it fills:
 
 ```{python}
 def paged_blocks(tokens, page):
@@ -322,19 +357,19 @@ table(["System", "Max Users", "KV Allocated", "Int Frag", "Throughput"], rows)
 ::: {.callout-important}
 ## Key Insight
 
-The same 65 GiB KV budget serves **65 users at 77.8% internal fragmentation** with static
-reservation — or **259 users at 0.4%** with 16-token pages. Static pays for the worst
-case (8K) on every request even though the average request is ~4× shorter; paged pays for
-what is used. The extra concurrency buys **1.47×** decode throughput under the
+The same `{python} f"{kv_budget.to('GiB').magnitude:.0f} GiB"` KV budget serves **`{python} len(static.admitted)` users at `{python} f"{internal_frag_pct(static):.1%}"` internal fragmentation** with static
+reservation, or **`{python} len(paged16.admitted)` users at `{python} f"{internal_frag_pct(paged16):.1%}"`** with 16-token pages. Static pays for the worst
+case (`{python} f"{max_seq // 1024}K"`) on every request even though the average request is ~`{python} f"{max_seq // 2048}"`× shorter; paged pays for
+what is used. The extra concurrency buys **`{python} f"{decode_throughput(paged16) / decode_throughput(static):.2f}"`×** decode throughput under the
 memory-bound model from [Tutorial 2](02_two_phases.qmd).
 :::
 
 **The second kind of waste: external fragmentation.** The static allocator above never
 suffers from this, because every freed slot is a full `max_seq` and fits any request. That
-is exactly the trade it makes, paying in internal waste instead. A contiguous allocator
+is the trade it makes, paying in internal waste instead. A contiguous allocator
 that hands out exact sizes avoids the reservation waste but fragments under churn:
 requests finish out of order, leaving holes too small for the next long request. Paged
-allocation never does — any free block works, so external fragmentation is ~0:
+allocation never fragments this way. Any free block works, so external fragmentation is ~0:
 
 ```{python}
 class FirstFitAllocator:
@@ -425,8 +460,10 @@ entries per sequence but waste more. Sweep the page size and watch both:
 
 ```{python}
 rows = []
+by_page = {}
 for page in [8, 16, 64, 256, 1024]:
     a = fill(PagedAllocator(budget_tokens, page), lens)
+    by_page[page] = a
     n = len(a.admitted)
     blocks_per_req = sum(paged_blocks(t, page) for t in a.admitted) / n
     rows.append([page, n, f"{internal_frag_pct(a):.1%}", f"{blocks_per_req:.1f}",
@@ -436,15 +473,15 @@ table(["Page Size", "Max Users", "Int Frag", "Avg Blocks/Req",
        f"Blocks/{max_seq // 1024}K Seq", "Pool Used"], rows)
 ```
 
-16-token pages (vLLM's default) sit at the sweet spot: 0.4% waste, with about 128 blocks
-for an average request and 512 for a full 8K sequence. Going to 1024-token pages shrinks
-the block table 64-fold (8 entries for a full 8K sequence) but burns 22.0% of the cache as
-slack and serves 50 fewer users, the wrong trade for long-tail workloads.
+16-token pages (vLLM's default) sit at the sweet spot: `{python} f"{internal_frag_pct(by_page[16]):.1%}"` waste, with about `{python} f"{sum(paged_blocks(t, 16) for t in by_page[16].admitted) / len(by_page[16].admitted):.0f}"` blocks
+for an average request and `{python} paged_blocks(max_seq, 16)` for a full `{python} f"{max_seq // 1024}K"` sequence. Going to 1024-token pages shrinks
+the block table `{python} 1024 // 16`-fold (`{python} paged_blocks(max_seq, 1024)` entries for a full `{python} f"{max_seq // 1024}K"` sequence) but burns `{python} f"{internal_frag_pct(by_page[1024]):.1%}"` of the cache as
+slack and serves `{python} len(by_page[16].admitted) - len(by_page[1024].admitted)` fewer users, the wrong trade for long-tail workloads.
 
 **The third trick: sharing.** Because blocks are first-class, sequences can share them.
 Eight requests that begin with the same 1K-token system prompt (or eight beam-search
-branches that fork from one prefix) can point at the *same* blocks via reference counts —
-copy-on-write — instead of storing the prefix eight times:
+branches that fork from one prefix) can point at the *same* blocks via reference counts
+(copy-on-write) instead of storing the prefix eight times:
 
 ```{python}
 prefix, gen, n_req = 1024, 512, 8
@@ -462,66 +499,21 @@ for label, kv in [("Static (reserve max)", static_kv),
 table(["Scheme", "KV Allocated", "vs Static"], rows)
 ```
 
-Sharing the prefix cuts peak KV from 1536 MiB to 640 MiB — a 58% saving that grows with
+Sharing the prefix cuts peak KV from `{python} f"{Q_(no_share * bytes_per_token, 'byte').to('MiB').magnitude:.0f} MiB"` to `{python} f"{Q_(shared * bytes_per_token, 'byte').to('MiB').magnitude:.0f} MiB"`, a `{python} f"{1 - shared / no_share:.0%}"` saving that grows with
 the number of concurrent requests sharing the prompt. Production systems call this
-*prefix caching*; it is why shared system prompts and few-shot examples are so cheap to
+*prefix caching*; it is why shared system prompts and few-shot examples are cheap to
 serve.
 
 Paged attention therefore attacks the memory wall from three directions at once: it
-eliminates reservation waste (~78% → <1% internal fragmentation), survives churn with ~0
+eliminates reservation waste (`{python} f"{internal_frag_pct(static):.1%}"` → `{python} f"{internal_frag_pct(paged16):.1%}"` internal fragmentation), survives churn with ~0
 external fragmentation, and shares common prefixes across requests. This is why vLLM and
 TensorRT-LLM default to paged KV-cache management in production.
 
 ---
 
-## Your Turn
-
-::: {.callout-caution}
-## Exercises
-
-**Exercise 1: Predict before you compute.**
-Llama-3 70B has 80 layers (vs. 32 for the 8B model) and 8 KV-heads with 128 head_dim.
-Before running any code, predict: at seq_len=4096 and FP16, what batch size will cause OOM
-on an 80 GB H100? Write your prediction, then sweep batch sizes with
-`mlsysim.Models.Language.Llama3_70B` to find the actual limit. How close were you?
-
-**Exercise 2: Maximum users at 128K context.**
-Using the H200 (141 GB HBM3e), calculate the maximum number of concurrent users you can
-serve with Llama-3 8B at 128K context in FP16. Then try INT8. How many additional users
-does quantization buy you?
-
-**Exercise 3: Paged vs. static at long context.**
-Change `max_seq` in Section 5 to 32768 and re-run the cells. How many users do Static
-(reserve 32K) and Paged (16 tok) serve now, and why does raising the worst case hurt one
-far more than the other? Then compare Paged (16 tok) with Paged (256 tok). Does page size
-matter more when requests get longer, or less? Test your prediction by passing
-`mean=16384` to `sample_lengths`. (Hint: page slack is at most one page per request, a
-fixed cost that shrinks as a share of a longer request.)
-
-**Self-check:** If a model has 32 layers, 8 KV-heads, 128 head_dim, and uses FP16
-(2 bytes), how many bytes does the KV-cache consume per token per user?
-(Answer: 2 x 32 x 8 x 128 x 2 = 131,072 bytes = 128 KB per token.)
-:::
-
----
-
-## Key Takeaways
-
-::: {.callout-tip}
-## Summary
-
-- **KV-cache size scales linearly** with layers, KV-heads, sequence length, and batch size
-- **At short context, cache is negligible** — model weights dominate and you can serve many users
-- **At long context, cache dominates** — a single 128K user's cache can exceed model weights
-- **The OOM boundary depends on context length x batch size**, not just model size
-- **Paged attention reduces fragmentation**, fitting more concurrent requests in the same memory and sharing common prefixes across requests
-:::
-
----
-
 ## Next Steps
 
-- **[Quantization: Not a Free Lunch](05_quantization.qmd)** — Learn when reducing precision shrinks the KV-cache effectively vs. when it doesn't help
-- **[Two Phases, One Request](02_two_phases.qmd)** — Revisit the prefill/decode split now that you understand the cache pressure
-- **[Where to Invest](09_sensitivity.qmd)** — Use sensitivity analysis to quantify whether more memory or more bandwidth helps more
-- **[Silicon Zoo](../zoo/hardware.qmd)** — Compare HBM capacity across H100, H200, MI300X, and see which GPUs tolerate long context
+- **[Quantization: Not a Free Lunch](05_quantization.qmd)**: Learn when reducing precision shrinks the KV-cache effectively vs. when it does not help
+- **[Two Phases, One Request](02_two_phases.qmd)**: Revisit the prefill/decode split with the cache pressure in view
+- **[Where to Invest](09_sensitivity.qmd)**: Use sensitivity analysis to quantify whether more memory or more bandwidth helps more
+- **[Silicon Zoo](../zoo/hardware.qmd)**: Compare HBM capacity across H100, H200, MI300X, and see which GPUs tolerate long context

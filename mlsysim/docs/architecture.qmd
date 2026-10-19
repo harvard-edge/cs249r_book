@@ -5,7 +5,20 @@ subtitle: "Progressive Lowering: From Abstract Demand to Concrete Supply"
 
 MLSys·im organizes the full ML systems domain into five composable layers. Abstract workload *demand* (Layer A) is progressively mapped onto concrete hardware *supply* (Layers B--D) through analytical *solvers* (Layer E). Each layer corresponds directly to chapters in the [Machine Learning Systems](https://mlsysbook.ai) textbook and its companion [lecture slides](https://mlsysbook.ai/slides/).
 
-Understanding this stack is the key to mastering both this library and the textbook it accompanies.
+Understanding this stack is the foundation for working with both this library and the textbook it accompanies.
+
+```{python}
+#| echo: false
+# Values on this page come from the MLSys·im registries, so they cannot drift.
+import mlsysim
+from mlsysim import Hardware, Infrastructure, Models
+
+grids = Infrastructure.Grids
+ci_quebec = grids.Quebec.carbon_intensity_g_kwh
+ci_poland = grids.Poland.carbon_intensity_g_kwh
+ci_us = grids.US_Avg.carbon_intensity_g_kwh
+ci_spread = ci_poland / ci_quebec
+```
 
 ## The Stack at a Glance
 
@@ -30,13 +43,13 @@ flowchart TB
     style E fill:#e0f2fe,stroke:#0284c7,stroke-width:2px
 ```
 
-The flow reads top-to-bottom: a **Workload** (what you want to compute) and a **System** (the hardware, network, and environment you have) feed into a **Solver** (the analytical engine), which returns quantitative results you can act on.
+The flow reads top-to-bottom: a **Workload** (the computation to perform) and a **System** (the available hardware, network, and environment) feed into a **Solver** (the analytical engine), which returns quantitative results that can guide a design decision.
 
 ::: {.callout-note}
 ## Physics formulas
 Closed-form equations live in **`mlsysim.physics.*`** (performance, memory, communication,
-serving, economics, reliability). Pint units live in **`mlsysim.core.units`**; there is
-no constants module — chip, model, scenario, and system specs live only in their
+serving, economics, reliability). Pint units live in **`mlsysim.core.units`**. There is
+no constants module; chip, model, scenario, and system specs live only in their
 registries. See [Math Foundations](math.qmd).
 :::
 
@@ -45,7 +58,7 @@ registries. See [Math Foundations](math.qmd).
 The five layers are the *runtime* view: how demand meets supply through solvers.
 The registries that populate Layers A--D are organized as **ten zoos**
 (Hardware, Models, Datasets, Platforms, Infrastructure, Systems, Ops, Scenarios, Embodied, Agents)
-plus support namespaces — that *data* view is documented in
+plus support namespaces. That *data* view is documented in
 [DATA_MODEL.md](DATA_MODEL.md). Both descriptions are true at different altitudes.
 :::
 
@@ -53,14 +66,14 @@ plus support namespaces — that *data* view is documented in
 
 ## Layer A: Workloads (Demand) {#sec-layer-a}
 
-A **Workload** is a hardware-agnostic description of computational demand. The question is not "How fast is Llama-3?" but rather "How many FLOPs and memory bytes does Llama-3 *require*?"
+A **Workload** is a hardware-agnostic description of computational demand. It states how many FLOPs and memory bytes Llama-3 *requires*, not how fast Llama-3 runs.
 
 MLSys·im provides two workload types:
 
-- **`TransformerWorkload`** — LLMs and attention-based models (GPT, Llama, BERT). Defined by parameter count, layer count, hidden dimension, attention heads, and sequence length. Supports KV-cache size estimation for autoregressive inference.
-- **`CNNWorkload`** — Vision and convolutional models (ResNet, MobileNet, YOLO). Defined by parameter count and total FLOPs per forward pass.
+- **`TransformerWorkload`**: LLMs and attention-based models (GPT, Llama, BERT). Defined by parameter count, layer count, hidden dimension, attention heads, and sequence length. Supports KV-cache size estimation for autoregressive inference.
+- **`CNNWorkload`**: Vision and convolutional models (ResNet, MobileNet, YOLO). Defined by parameter count and total FLOPs per forward pass.
 
-The crucial step happens when a workload is "lowered" at a specific numerical precision (FP32, FP16, INT8, INT4). This precision lowering determines the **Arithmetic Intensity** (FLOPs/Byte) — the single ratio that decides whether a model will be compute-bound or memory-bound on any given hardware target.
+The key step comes when a workload is "lowered" at a specific numerical precision (FP32, FP16, INT8, INT4). This precision lowering determines the **Arithmetic Intensity** (FLOPs/Byte), the single ratio that decides whether a model will be compute-bound or memory-bound on any given hardware target.
 
 ::: {.callout-note}
 ## Textbook and slides
@@ -80,15 +93,15 @@ Layer A concepts are covered in the following lecture decks:
 
 ## Layer B: Hardware (Silicon) {#sec-layer-b}
 
-A **`HardwareNode`** represents a single physical accelerator — an H100 GPU, an Apple M3 chip, a Jetson Orin, or even an ESP32 microcontroller. It provides the raw physical supply:
+A **`HardwareNode`** represents a single physical accelerator, such as an H100 GPU, an Apple M3 chip, a Jetson Orin, or even an ESP32 microcontroller. It provides the raw physical supply:
 
 - **Compute:** Peak throughput (TFLOP/s) across precisions (FP32, FP16, INT8), modeled via `ComputeCore`.
 - **Memory:** HBM or SRAM capacity and transfer bandwidth (TB/s), modeled via `MemoryHierarchy`.
 - **Power:** Thermal Design Power (TDP) in watts.
 
-Every piece of silicon has a **ridge point** — the ratio of peak compute to memory bandwidth ($I^* = \text{Peak\_FLOPs} / \text{BW}$). When a workload's arithmetic intensity falls below this ridge point, the workload is memory-bound: the compute units starve waiting for data. When above, the workload is compute-bound: memory delivers data faster than the cores can consume it.
+Every piece of silicon has a **ridge point**, the ratio of peak compute to memory bandwidth ($I^* = \text{Peak\_FLOPs} / \text{BW}$). When a workload's arithmetic intensity falls below this ridge point, the workload is memory-bound: the compute units starve waiting for data. When above, the workload is compute-bound: memory delivers data faster than the cores can consume it.
 
-This is the Roofline model — the diagnostic framework at the heart of Layer E's `SingleNodeModel`.
+This is the Roofline model, the diagnostic framework at the heart of Layer E's `SingleNodeModel`.
 
 ::: {.callout-note}
 ## Textbook and slides
@@ -111,9 +124,9 @@ Hardware does not run in a vacuum. It runs in datacenters plugged into regional 
 
 A **`GridProfile`** captures this physical context:
 
-- **Carbon intensity** (g CO₂/kWh) — varies 40x across regions: Quebec's hydroelectric grid produces ~8 g CO₂/kWh; Poland's coal-dominated grid produces ~700 g CO₂/kWh.
-- **Power Usage Effectiveness (PUE)** — the ratio of total facility power to IT equipment power. A PUE of 1.1 means 10% overhead for cooling and infrastructure; 1.6 means 60%.
-- **Water Usage Effectiveness (WUE)** — liters of water consumed per kWh, determined by cooling technology (air, liquid, evaporative).
+- **Carbon intensity** (g CO₂/kWh) varies about `{python} f"{ci_spread:.0f}"`× across regions. Quebec's hydroelectric grid produces about `{python} f"{ci_quebec:.0f}"` g CO₂/kWh; Poland's coal-dominated grid produces about `{python} f"{ci_poland:.0f}"` g CO₂/kWh.
+- **Power Usage Effectiveness (PUE)** is the ratio of total facility power to IT equipment power. A PUE of 1.1 means 10% overhead for cooling and infrastructure; 1.6 means 60%.
+- **Water Usage Effectiveness (WUE)** is the liters of water consumed per kWh, which is determined by cooling technology (air, liquid, evaporative).
 
 A 1000-watt GPU running identical computations in Quebec versus Poland produces vastly different carbon footprints. This layer makes that difference quantifiable.
 
@@ -136,12 +149,12 @@ A single GPU cannot train a 100-billion-parameter model. Layer D composes indivi
 
 Core system types include:
 
-- **`Node`** — A single compute server grouping accelerators within a physical chassis (e.g., 8x H100 GPUs connected by 900 GB/s NVLink). Includes intra-node bandwidth and NIC count.
-- **`RackProfile`** — A physical rack composition that aggregates node count, accelerator count, accelerator power, and non-accelerator support power.
-- **`NetworkFabric`** — The inter-node interconnect: topology (fat-tree, rail-optimized), bandwidth (e.g., 400 Gbps InfiniBand NDR), latency, and oversubscription ratio.
-- **`Fleet`** — A collection of `Node`s connected by a `NetworkFabric`, deployed in a specific `Datacenter` (Layer C). This is the complete system that solvers operate on.
+- **`Node`**: A single compute server grouping accelerators within a physical chassis (e.g., 8x H100 GPUs connected by 900 GB/s NVLink). Includes intra-node bandwidth and NIC count.
+- **`RackProfile`**: A physical rack composition that aggregates node count, accelerator count, accelerator power, and non-accelerator support power.
+- **`NetworkFabric`**: The inter-node interconnect: topology (fat-tree, rail-optimized), bandwidth (e.g., 400 Gbps InfiniBand NDR), latency, and oversubscription ratio.
+- **`Fleet`**: A collection of `Node`s connected by a `NetworkFabric`, deployed in a specific `Datacenter` (Layer C). This is the complete system that solvers operate on.
 
-The way you structure this system — how many GPUs per node, what fabric connects them, which parallelism strategy you apply — determines your communication overhead and scaling efficiency.
+The structure of this system—how many GPUs each node holds, what fabric connects them, and which parallelism strategy runs across them—determines its communication overhead and scaling efficiency.
 
 ::: {.callout-note}
 ## Textbook and slides
@@ -161,9 +174,9 @@ Layer D concepts span four lecture decks covering the full distributed systems s
 
 ## Layer E: Solvers (Analysis) {#sec-layer-e}
 
-The previous four layers are static definitions — nouns. **Solvers** are the analytical engines — verbs — that bridge demand and supply to answer specific questions.
+The previous four layers are static definitions, the nouns of the stack. **Solvers** are its verbs: the analytical engines that bridge demand and supply to answer specific questions.
 
-Each solver implements closed-form equations from peer-reviewed systems literature. No simulation, no benchmarking, no hardware required.
+Each solver implements closed-form equations from peer-reviewed systems literature. They require no simulation, no benchmarking, and no hardware.
 
 | Solver | Bridges | Core Equation | Key Output |
 |:-------|:--------|:--------------|:-----------|
@@ -174,7 +187,7 @@ Each solver implements closed-form equations from peer-reviewed systems literatu
 | **SustainabilityModel** | D $\to$ C | PUE $\times$ grid carbon intensity | Energy (kWh), carbon (kg CO₂e), water (L) |
 | **ReliabilityModel** | D $\to$ uptime | Young-Daly optimal checkpointing | Fleet MTBF, failure probability, checkpoint interval |
 
-Solvers are composable. To answer "What is the most sustainable way to serve Llama-70B?", chain `ServingModel` (feasibility and latency) into `EconomicsModel` (cost) into `SustainabilityModel` (carbon). Each solver's typed output feeds naturally into the next.
+Solvers are composable. To find the most sustainable way to serve Llama-70B, chain `ServingModel` (feasibility and latency) into `EconomicsModel` (cost) into `SustainabilityModel` (carbon). Each solver's typed output feeds naturally into the next.
 
 ::: {.callout-note}
 ## Textbook and slides
@@ -199,23 +212,29 @@ The architecture is best understood through a concrete example. Consider the que
 
 This single question touches all five layers:
 
-```
-1. Layer A — Llama-3-70B workload: 70B parameters, GQA with 8 KV heads,
-             ~140 GB at FP16 precision
+```{python}
+#| echo: false
+#| output: asis
+llama = Models.Language.Llama3_70B
+h100 = Hardware.Cloud.H100
+print(f"""```text
+1. Layer A — Llama-3-70B workload: {llama.parameters.magnitude / 1e9:.1f}B parameters, GQA with {llama.kv_heads} KV heads,
+             ~{llama.size_in_bytes("fp16").to("GB").magnitude:.0f} GB at FP16 precision
 
-2. Layer B — H100 hardware: 990 TFLOP/s (FP16), 3.35 TB/s HBM3,
-             80 GB capacity, 700W TDP
+2. Layer B — H100 hardware: {h100.compute.peak_flops.to("TFLOPs/s").magnitude:.0f} TFLOP/s (FP16), {h100.memory.bandwidth.to("TB/s").magnitude:.2f} TB/s HBM3,
+             {h100.memory.capacity.to("GiB").magnitude:.0f} GiB capacity, {h100.tdp.to("W").magnitude:.0f} W TDP
 
-3. Layer C — Infrastructure: choose between Quebec (8 g CO₂/kWh)
-             and US Average (385 g CO₂/kWh)
+3. Layer C — Infrastructure: choose between Quebec ({ci_quebec:.0f} g CO₂/kWh)
+             and US Average ({ci_us:.0f} g CO₂/kWh)
 
-4. Layer D — System: 1 node × 4 H100s, NVLink 900 GB/s intra-node,
+4. Layer D — System: 1 node × 4 H100s, NVLink {h100.nvlink.bandwidth.to("GB/s").magnitude:.0f} GB/s intra-node,
              tensor parallelism across 4 GPUs
 
 5. Layer E — Chain three solvers:
              ServingModel  → TTFT, ITL, KV-cache feasibility
              EconomicsModel → TCO over 1 year
              SustainabilityModel → carbon footprint by region
+```""")
 ```
 
 Each layer contributes a different piece of the answer. No single layer is sufficient alone. This is why MLSys·im separates concerns into five composable layers rather than offering a monolithic "predict performance" function.
@@ -255,8 +274,8 @@ For instructors and students using the companion [lecture slides](https://mlsysb
 
 ## Where to Go Next
 
-- **[Getting Started](getting-started.qmd)** — Install MLSys·im and run your first analysis in 5 minutes.
-- **[Solver Guide](solver-guide.qmd)** — Decision guide for choosing the right analytical engine.
-- **[Math Foundations](math.qmd)** — The closed-form equations behind every solver.
-- **[Tutorials](tutorials/index.qmd)** — Hands-on notebooks for roofline analysis, distributed training, LLM serving, and sustainability.
-- **[Zoo Overview](zoo/index.qmd)** — Browse the registries of vetted hardware, embodied systems, agents, models, fleets, and infrastructure.
+- **[Getting Started](getting-started.qmd)**: Install MLSys·im and run a first analysis in 5 minutes.
+- **[Solver Guide](solver-guide.qmd)**: Decision guide for choosing the right analytical engine.
+- **[Math Foundations](math.qmd)**: The closed-form equations behind every solver.
+- **[Tutorials](tutorials/index.qmd)**: Hands-on notebooks for roofline analysis, distributed training, LLM serving, and sustainability.
+- **[Zoo Overview](zoo/index.qmd)**: Browse the registries of vetted hardware, embodied systems, agents, models, fleets, and infrastructure.

@@ -29,8 +29,8 @@ Time = FLOPs / (N x Peak_FLOPS x MFU x eta_scaling x Goodput)
 T = max(FLOPs / Peak_effective, Bytes / BW_effective)
 ```
 
-If compute time > memory time, you are **compute-bound** (increase FLOPS).
-If memory time > compute time, you are **memory-bound** (increase bandwidth).
+If compute time > memory time, the workload is **compute-bound** (increase FLOPS).
+If memory time > compute time, the workload is **memory-bound** (increase bandwidth).
 
 ### 2. KV-Cache Memory (PagedAttention)
 
