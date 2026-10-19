@@ -1740,28 +1740,28 @@ class ServingTaxMicrosecondsCalc:
     """Microsecond-scale per-request overheads as a share of the reference forward pass."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    inference_budget_us = ResNetH100Profile.eager_b1.to(microsecond).magnitude  # reference profile, batch one
-    serialization_min_us = 50
-    serialization_max_us = 500
-    dispatch_min_us = 10
-    dispatch_max_us = 50
-    data_copy_min_us = 100
-    data_copy_max_us = 500
+    inference_budget = ResNetH100Profile.eager_b1  # reference profile, batch one
+    serialization_min = 50 * microsecond  # scenario assumption: min serialization
+    serialization_max = 500 * microsecond  # scenario assumption: max serialization
+    dispatch_min = 10 * microsecond  # scenario assumption: min dispatch
+    dispatch_max = 50 * microsecond  # scenario assumption: max dispatch
+    data_copy_min = 100 * microsecond  # scenario assumption: min data copy
+    data_copy_max = 500 * microsecond  # scenario assumption: max data copy
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    micro_tax_min_us = serialization_min_us + dispatch_min_us + data_copy_min_us
-    micro_tax_max_us = serialization_max_us + dispatch_max_us + data_copy_max_us
-    micro_tax_min_pct = micro_tax_min_us / inference_budget_us * 100
-    micro_tax_max_pct = micro_tax_max_us / inference_budget_us * 100
+    micro_tax_min = serialization_min + dispatch_min + data_copy_min
+    micro_tax_max = serialization_max + dispatch_max + data_copy_max
+    micro_tax_min_pct = (micro_tax_min / inference_budget).to("").magnitude * 100
+    micro_tax_max_pct = (micro_tax_max / inference_budget).to("").magnitude * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(micro_tax_min_us == 160, "Minimum named microsecond tax should be 160 us.")
-    check(micro_tax_max_us == 1050, "Maximum named microsecond tax should be 1050 us.")
+    check(micro_tax_min == 160 * microsecond, "Minimum named microsecond tax should be 160 us.")
+    check(micro_tax_max == 1050 * microsecond, "Maximum named microsecond tax should be 1050 us.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     micro_tax_min_pct_str = fmt_percent(round(micro_tax_min_pct) / 100, precision=0, commas=False, style='prose')
     micro_tax_max_pct_str = fmt_percent(round(micro_tax_max_pct) / 100, precision=0, commas=False, style='prose')
-    inference_ms_str = fmt_time(ResNetH100Profile.eager_b1, 'millisecond', precision=1, commas=False)
+    inference_ms_str = fmt_time(inference_budget, 'millisecond', precision=1, commas=False)
 ```
 
 ```{=latex}
@@ -3101,13 +3101,12 @@ class BatchVariability:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     qps = [50, 200, 500, 1000]
-    window_ms_value = 10 * ms
+    window_ms_value = 10 * ms  # scenario assumption: 10 ms batching window
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    window_s = window_ms_value.to('second').magnitude
     mean_value = []
     for _q in qps:
-        mean_value.append(_q * window_s)
+        mean_value.append((_q * (window_ms_value / second)).to("").magnitude)
     std_value = [math.sqrt(m) for m in mean_value]
     p0_value = [math.exp(-m) for m in mean_value]
     p_ge_value = []

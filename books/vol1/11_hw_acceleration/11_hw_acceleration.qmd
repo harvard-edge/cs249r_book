@@ -622,13 +622,13 @@ The first stage of the accelerator's anatomy begins with a simpler question: why
 
 ## Hardware Specialization {#sec-hardware-acceleration-evolution-hardware-specialization-fdb7}
 
-General-purpose processors dedicate substantial silicon area and power to instruction fetch, branch prediction, out-of-order scheduling, and cache coherence, machinery built for arbitrary control flow that yields poor arithmetic density on regular, dense linear algebra. When Google deployed its first Tensor Processing Unit (TPUv1) into production data centers alongside contemporary CPUs and NVIDIA K80 GPUs, stripping away that general-purpose control machinery in favor of a dedicated matrix array produced an immediate efficiency jump (example \ref{exmp-hw-acceleration-tpuv1-vs-k80-efficiency-shock}). Whenever an algorithmic pattern becomes sufficiently dominant and structured, specialized hardware\index{Hardware specialization!evolution} outperforms general-purpose platforms by replacing dynamic control hardware with dense arithmetic arrays and software-managed data movement.
+General-purpose processors dedicate substantial silicon area and power to instruction fetch, branch prediction, out-of-order scheduling, and cache coherence, machinery built for arbitrary control flow that yields poor arithmetic density on regular, dense linear algebra. When Google deployed its first Tensor Processing Unit (TPU v1) into production data centers alongside contemporary CPUs and NVIDIA K80 GPUs, stripping away that general-purpose control machinery in favor of a dedicated matrix array produced an immediate efficiency jump (example \ref{exmp-hw-acceleration-tpuv1-vs-k80-efficiency-shock}). Whenever an algorithmic pattern becomes sufficiently dominant and structured, specialized hardware\index{Hardware specialization!evolution} outperforms general-purpose platforms by replacing dynamic control hardware with dense arithmetic arrays and software-managed data movement.
 
-::: {#exmp-hw-acceleration-tpuv1-vs-k80-efficiency-shock .callout-example title="The TPUv1 vs. K80 efficiency gap"}
+::: {#exmp-hw-acceleration-tpuv1-vs-k80-efficiency-shock .callout-example title="The TPU v1 vs. K80 efficiency gap"}
 
-**Scenario**: In 2015, Google deployed its first Tensor Processing Unit (TPUv1) into production data centers, comparing its throughput and energy efficiency against general-purpose NVIDIA K80 GPUs [@jouppi2017].
+**Scenario**: In 2015, Google deployed its first Tensor Processing Unit (TPU v1) into production data centers, comparing its throughput and energy efficiency against general-purpose NVIDIA K80 GPUs [@jouppi2017].
 
-**Diagnosis**: The K80 was a programmable GPU designed to support a broader mix of graphics and compute workloads. The TPUv1 domain-specific architecture (DSA) made a narrower, inference-focused design choice, pairing a large 8-bit systolic matrix unit with software-managed memory and simpler control.
+**Diagnosis**: The K80 was a programmable GPU designed to support a broader mix of graphics and compute workloads. The TPU v1 domain-specific architecture (DSA) made a narrower, inference-focused design choice, pairing a large 8-bit systolic matrix unit with software-managed memory and simpler control.
 
 **Systems lesson**: On the six Google inference workloads and contemporary CPU/GPU baselines evaluated in the TPU paper, tailoring silicon to the dominant matrix operations delivered 15–30$\times$ higher throughput and 30–80$\times$ better performance per watt [@jouppi2017]. Those ratios describe the evaluated systems, not every workload.
 
@@ -769,7 +769,7 @@ class CpuMlInefficiency:
 
 ### Machine learning hardware specialization {#sec-hardware-acceleration-machine-learning-hardware-specialization-09c5}
 
-That compounding gap between model demand and transistor scaling turned into an operational crisis at Google in 2013, when an internal projection showed that three minutes of daily voice search per user would require doubling the company's global CPU fleet just to serve neural-network inference (example \ref{exmp-hw-acceleration-google-tpu-voice-search}), the projection that launched the TPUv1 program introduced at the start of this section. Many important neural-network workloads concentrate their arithmetic in regular tensor operations, such as dense matrix multiplications and convolutions, with substantial data parallelism, predictable reuse, and tolerance for reduced precision. Other ML operations remain irregular, bandwidth bound, or too small to fill a wide engine, so an accelerator need not speed up every part of a model. Hardware built to exploit the regular portion forms the class of ML accelerators.
+That compounding gap between model demand and transistor scaling turned into an operational crisis at Google in 2013, when an internal projection showed that three minutes of daily voice search per user would require doubling the company's global CPU fleet just to serve neural-network inference (example \ref{exmp-hw-acceleration-google-tpu-voice-search}), the projection that launched the TPU v1 program introduced at the start of this section. Many important neural-network workloads concentrate their arithmetic in regular tensor operations, such as dense matrix multiplications and convolutions, with substantial data parallelism, predictable reuse, and tolerance for reduced precision. Other ML operations remain irregular, bandwidth bound, or too small to fill a wide engine, so an accelerator need not speed up every part of a model. Hardware built to exploit the regular portion forms the class of ML accelerators.
 
 ::: {#exmp-hw-acceleration-google-tpu-voice-search .callout-example title="The TPU capacity cliff"}
 
@@ -786,23 +786,24 @@ That compounding gap between model demand and transistor scaling turned into an 
 #| label: ml-accelerator-callout-calc
 from mlsysim.fmt import fmt, check, fmt_bandwidth, fmt_flop_rate, fmt_multiple
 
+# ┌── LEGO ───────────────────────────────────────────────
 class MlAcceleratorCallout:
     """H100 throughput and bandwidth against the host DRAM path for the ML accelerator callout."""
 
-    # LOAD
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     h100_peak_flops = Hardware.Cloud.H100.compute.peak_flops
     h100_bandwidth = Hardware.Cloud.H100.memory.bandwidth
     host_dram_bandwidth = Hardware.Tech.Storage.HostDram.bandwidth
 
-    # EXECUTE
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     hbm_vs_host_dram = (h100_bandwidth / host_dram_bandwidth).to("").magnitude
 
-    # GUARD
-    check(h100_peak_flops > 0, "H100 peak FLOP/s must be positive")
-    check(h100_bandwidth > 0, "H100 memory bandwidth must be positive")
-    check(hbm_vs_host_dram > 1, "Accelerator HBM must outrun the host DRAM path")
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(h100_peak_flops.to(TFLOP / second).magnitude - 989.0) < 1.0, "H100 peak FLOP/s drifted from 989 TFLOP/s")
+    check(abs(h100_bandwidth.to(TB / second).magnitude - 3.35) < 0.05, "H100 memory bandwidth drifted from 3.35 TB/s")
+    check(abs(hbm_vs_host_dram - 16.75) < 0.1, "H100 HBM vs host DRAM bandwidth ratio drifted from 16.75x")
 
-    # OUTPUT
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
     h100_fp16_tflop_per_s_str = fmt_flop_rate(h100_peak_flops, unit=TFLOP / second, precision=0, commas=False)
     h100_bw_tb_per_s_str = fmt_bandwidth(h100_bandwidth, unit=TB / second, precision=2, commas=False)
     host_dram_bw_gb_per_s_str = fmt_bandwidth(host_dram_bandwidth, unit=GB / second, precision=0, commas=False)
@@ -955,7 +956,7 @@ Training and inference\index{Training vs. Inference!accelerator design} load an 
 
 :::
 
-Deployment context decides which constraint binds. In data centers it is often time-to-result for training large models. An NVIDIA H100\index{NVIDIA!H100} trades hundreds of watts of power for high throughput [@choquette2023], and Google's TPUv4\index{TPU!data center integration} makes a similar trade through systolic arrays and high-bandwidth memory [@jouppi2023]; whether either lowers total cost depends on utilization, rental price, workload scaling, and the electricity rate.
+Deployment context decides which constraint binds. In data centers it is often time-to-result for training large models. An NVIDIA H100\index{NVIDIA!H100} trades hundreds of watts of power for high throughput [@choquette2023], and Google's TPU v4\index{TPU!data center integration} makes a similar trade through systolic arrays and high-bandwidth memory [@jouppi2023]; whether either lowers total cost depends on utilization, rental price, workload scaling, and the electricity rate.
 
 At the edge, the priority shifts toward energy per inference and hard latency or power limits. A smartphone camera or always-on audio path inside a few-watt budget cannot adopt a data center memory system, so edge architectures reduce movement through local scratchpads, tight integration, and dynamic voltage and frequency scaling. Because the binding constraint differs by setting, no single architecture dominates, yet the memory wall governs both. Data center chips buy capacity and bandwidth with HBM, while edge chips depend on proximity and reuse.
 
@@ -1625,7 +1626,7 @@ class AcceleratorEfficiencyAnchor:
 
 :::
 
-Kung\index{Kung, H.T.!systolic array inventor} and Leiserson\index{Leiserson, Charles E.!systolic array inventor}[^fn-systolic-array-dataflow] [@kung1979systolic] first introduced systolic arrays, formalizing their use in parallel computing architectures for efficient matrix operations [@kung1982]. Unlike general-purpose execution units, systolic arrays exploit spatial and temporal locality\index{Data Locality!spatial and temporal} by reusing operands as they propagate through the grid. Google's TPU\index{TPU!systolic array scaling} exemplifies this architectural approach: in the TPUv4, a $128{\times}128$ systolic array\index{Systolic Array!TPU configuration} of multiply-accumulate units\index{Multiply-Accumulate!MAC unit} processes matrix operations by streaming data through the array in a pipelined manner [@jouppi2023]. @Fig-systolic-array traces this 2D pipelined dataflow: a control unit stages operands into input FIFO buffers that stream activation data horizontally across the processing grid, while partial sums accumulate vertically down columns into the bottom adder-accumulator chain. Each processing element performs one multiply-accumulate per cycle and passes its operands to its neighbors, so a value loaded once is reused across an entire row or column rather than refetched from memory.
+Kung\index{Kung, H.T.!systolic array inventor} and Leiserson\index{Leiserson, Charles E.!systolic array inventor}[^fn-systolic-array-dataflow] [@kung1979systolic] first introduced systolic arrays, formalizing their use in parallel computing architectures for efficient matrix operations [@kung1982]. Unlike general-purpose execution units, systolic arrays exploit spatial and temporal locality\index{Data Locality!spatial and temporal} by reusing operands as they propagate through the grid. Google's TPU\index{TPU!systolic array scaling} exemplifies this architectural approach: in the TPU v4, a $128{\times}128$ systolic array\index{Systolic Array!TPU configuration} of multiply-accumulate units\index{Multiply-Accumulate!MAC unit} processes matrix operations by streaming data through the array in a pipelined manner [@jouppi2023]. @Fig-systolic-array traces this 2D pipelined dataflow: a control unit stages operands into input FIFO buffers that stream activation data horizontally across the processing grid, while partial sums accumulate vertically down columns into the bottom adder-accumulator chain. Each processing element performs one multiply-accumulate per cycle and passes its operands to its neighbors, so a value loaded once is reused across an entire row or column rather than refetched from memory.
 
 [^fn-systolic-array-dataflow]: **Systolic array**\index{Systolic Array!dataflow design}: Kung and Leiserson used the term for arrays in which data advances through neighboring processing elements on a regular schedule [@kung1979systolic]. Pipeline fill permits concurrent wavefronts and local reuse. The benefit depends on the stationary operand, tile, buffers, and utilization; it does not guarantee fixed DRAM savings. Irregular workloads and poorly aligned shapes remain a weaker fit because fill, drain, and idle elements consume capacity.
 
@@ -1792,7 +1793,7 @@ Modern AI accelerators support mixed-precision execution\index{Mixed-Precision C
 
 The shift toward precision diversity is evident in the evolution of AI hardware. Early architectures such as NVIDIA Volta provided Tensor Core support only for FP16, whereas later architectures, including Turing and Ampere, added integer formats and then TF32, a hybrid between FP32 and FP16, alongside BF16 [@nvidia_tf32; @nvidia2017gpu; @nvidia2018t4; @NVIDIA2020]. The generation-by-generation list of supported formats belongs with the other dated specifications in @sec-appdx-system-assumptions; the durable observation is the direction of the trend, toward more formats, each narrower than the last.
 
-The precision format used in hardware design has cascading implications across the entire system. Reducing an operand from FP32 to FP16 halves its value bytes. When those values dominate traffic, the reduction can substantially lower movement energy; the full energy budget still includes access counts, arithmetic, and other device activity [@horowitz2014]. Simultaneously, Tensor Cores and systolic arrays can pack more lower-precision multiply-accumulate units into the same silicon area, raising peak throughput [@dally2021; @dally2023]. Lower-precision integer arithmetic also consumes less energy than FP32 in representative technology studies [@horowitz2014], and the inference-focused TPUv1 was built around 8-bit multiply units [@jouppi2017]. Reduced precision can therefore cut value traffic *and* raise the supported compute ceiling at the same time.
+The precision format used in hardware design has cascading implications across the entire system. Reducing an operand from FP32 to FP16 halves its value bytes. When those values dominate traffic, the reduction can substantially lower movement energy; the full energy budget still includes access counts, arithmetic, and other device activity [@horowitz2014]. Simultaneously, Tensor Cores and systolic arrays can pack more lower-precision multiply-accumulate units into the same silicon area, raising peak throughput [@dally2021; @dally2023]. Lower-precision integer arithmetic also consumes less energy than FP32 in representative technology studies [@horowitz2014], and the inference-focused TPU v1 was built around 8-bit multiply units [@jouppi2017]. Reduced precision can therefore cut value traffic *and* raise the supported compute ceiling at the same time.
 
 ```{python}
 #| echo: false
@@ -2372,7 +2373,7 @@ Over the past two decades, peak computational capabilities have grown substantia
 
 When a workload's arithmetic intensity falls below this threshold, data transfer ($\frac{\DataVolume}{\Bandwidth}$) sets the larger of the two modeled time bounds. Accelerators attempt to tolerate memory latency (typically hundreds of clock cycles for off-chip DRAM) by maintaining thousands of concurrent execution threads and switching between active warps while memory requests remain in flight. However, when memory bandwidth saturates or when register pressure limits occupancy, the scheduler runs out of independent instructions to issue. Compute pipelines then stall, leaving high-throughput tensor cores idle while waiting for operands. Simultaneously, wide off-chip memory buses that cross capacitive printed circuit board traces and PHY interfaces consume a substantial fraction of the chip's thermal design power (TDP), which directly constrains the energy budget available for arithmetic logic [@horowitz2014; @sze2017].
 
-The time gap and the energy ladder describe the same pressure from two sides: each byte fetched from DRAM costs more time relative to the arithmetic it feeds with every generation, on top of its energy cost. The TPUv1's performance-per-watt advantage (example \ref{exmp-hw-acceleration-tpuv1-vs-k80-efficiency-shock}) came largely from minimizing that off-chip movement through systolic arrays and large on-chip SRAM [@jouppi2017]. Whether a model can exploit such a design depends on the pattern of its memory accesses, which differs sharply among parameters, activations, and optimizer state.
+The time gap and the energy ladder describe the same pressure from two sides: each byte fetched from DRAM costs more time relative to the arithmetic it feeds with every generation, on top of its energy cost. The TPU v1's performance-per-watt advantage (example \ref{exmp-hw-acceleration-tpuv1-vs-k80-efficiency-shock}) came largely from minimizing that off-chip movement through systolic arrays and large on-chip SRAM [@jouppi2017]. Whether a model can exploit such a design depends on the pattern of its memory accesses, which differs sharply among parameters, activations, and optimizer state.
 
 ```{python}
 #| echo: false
@@ -2853,6 +2854,7 @@ A recurring systems question is why accelerators cannot bypass on-chip SRAM enti
 
 ```{python}
 #| echo: false
+#| label: speed-of-light-limit-calc
 from mlsysim import Hardware
 from mlsysim.core.units import millimeter
 from mlsysim.fmt import check, fmt_area
@@ -2861,9 +2863,10 @@ from mlsysim.fmt import check, fmt_area
 class SpeedOfLightLimitCalc:
     """Chip-area reference for the signal-propagation callout."""
 
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     h100_die_area = Hardware.Cloud.H100.die_area
 
-    check(h100_die_area is not None, "H100 registry entry should expose die_area.")
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(800 <= h100_die_area.to(millimeter**2).magnitude <= 830, "H100 die area should stay near 814 mm^2.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
@@ -5341,7 +5344,7 @@ class LighthouseMemoryCompute:
     mobilenet_int8 = mobilenet.size_in_bytes(BYTES_INT8)
     gpt2_fp16 = gpt2.size_in_bytes(BYTES_FP16)
     gpt2_int8 = gpt2.size_in_bytes(BYTES_INT8)
-    gpt2_token_flops = 2 * gpt2.parameters.to(param).magnitude * flop
+    gpt2_token_flops = (2 * flop / param) * gpt2.parameters
     kws_fp16 = kws.size_in_bytes(BYTES_FP16)
     kws_int8 = kws.size_in_bytes(BYTES_INT8)
     dlrm_bytes = dlrm.model_size
@@ -5383,16 +5386,16 @@ The table turns the chapter's diagnosis into a selection rule. ResNet-50 rewards
 
 ### Processor configurations across deployment targets {#sec-hardware-acceleration-interconnects}
 
-Across data-center, server-CPU, and mobile targets, architects assemble SIMD lanes, Tensor Cores, and systolic arrays into markedly different full-chip organizations depending on which resource binds first. Training-optimized accelerators such as the NVIDIA A100 pack 108 Streaming Multiprocessors with wide SIMD units and FP16 Tensor Cores because training throughput scales with aggregate multiply-accumulate capacity across general kernels [@NVIDIA2020]. Google's TPUv4, by contrast, concentrates each chip into two cores built around large $128{\times}128$ BF16 systolic arrays, trading per-thread flexibility for area and energy efficiency on dense matrix multiplications [@jouppi2023]. Inference and edge targets shift the balance again. Intel's Sapphire Rapids dedicates Advanced Matrix Extensions (AMX) tile engines to INT8 and BF16 because server inference models tolerate reduced precision [@intel2021amx], while mobile neural engines shrink those matrix datapaths into low-power SoC blocks that prioritize energy per operation over peak throughput. @Tbl-execution-units compares these architectural configurations.
+Across data-center, server-CPU, and mobile targets, architects assemble SIMD lanes, Tensor Cores, and systolic arrays into markedly different full-chip organizations depending on which resource binds first. Training-optimized accelerators such as the NVIDIA A100 pack 108 Streaming Multiprocessors with wide SIMD units and FP16 Tensor Cores because training throughput scales with aggregate multiply-accumulate capacity across general kernels [@NVIDIA2020]. Google's TPU v4, by contrast, concentrates each chip into two cores built around large $128{\times}128$ BF16 systolic arrays, trading per-thread flexibility for area and energy efficiency on dense matrix multiplications [@jouppi2023]. Inference and edge targets shift the balance again. Intel's Sapphire Rapids dedicates Advanced Matrix Extensions (AMX) tile engines to INT8 and BF16 because server inference models tolerate reduced precision [@intel2021amx], while mobile neural engines shrink those matrix datapaths into low-power SoC blocks that prioritize energy per operation over peak throughput. @Tbl-execution-units compares these architectural configurations.
 
 | Processor                                       | **Vector execution**\index{Vector execution} |   **Matrix engine**\index{Matrix engine}   |  Processing Elements  | **Primary workloads** |
 |:------------------------------------------------|:--------------------------------------------:|:------------------------------------------:|:---------------------:|:----------------------|
 | **NVIDIA A100**\index{NVIDIA A100}              |              CUDA FP/INT lanes               |       Tensor Core instruction tiles        |        108 SMs        | Training, HPC         |
-| **Google TPUv4**\index{Google TPUv4}            |                 Vector unit                  |   $128{\times}128$ BF16 systolic arrays    |      2 cores/chip     | Training              |
+| **Google TPU v4**\index{Google TPUv4}           |                 Vector unit                  |   $128{\times}128$ BF16 systolic arrays    |      2 cores/chip     | Training              |
 | **Intel Sapphire**\index{Intel!Sapphire Rapids} |               512-bit AVX-512                | AMX tiles (up to 16 rows by 64 bytes each) |     Up to 60 cores    | Inference             |
 | Mobile NPU                                      |             CPU/GPU/DSP vectors              |            Small matrix engines            | Integrated NPU blocks | Mobile inference      |
 
-: **AI Processor Configurations**: Modern AI processors prioritize different execution unit characteristics for specific workloads: NVIDIA A100 uses wide SIMD and Tensor Cores for training, Google TPUv4 emphasizes high-throughput BF16 matrix multiplication, Intel Sapphire Rapids focuses on INT8-optimized inference, and mobile NPUs prioritize low-power execution. These variations in SIMD width, Tensor Core size, and processing element count reflect the growing diversity in AI hardware architectures. {#tbl-execution-units tbl-colwidths="[15,23,20,23,19]"}
+: **AI Processor Configurations**: Modern AI processors prioritize different execution unit characteristics for specific workloads: NVIDIA A100 uses wide SIMD and Tensor Cores for training, Google TPU v4 emphasizes high-throughput BF16 matrix multiplication, Intel Sapphire Rapids focuses on INT8-optimized inference, and mobile NPUs prioritize low-power execution. These variations in SIMD width, Tensor Core size, and processing element count reflect the growing diversity in AI hardware architectures. {#tbl-execution-units tbl-colwidths="[15,23,20,23,19]"}
 
 The pattern across these configurations reveals a consistent engineering principle: each design sacrifices generality to optimize for its target workload's dominant operation and precision. Training chips invest silicon in wide floating-point datapaths; inference chips trade precision for throughput; mobile chips trade throughput for energy efficiency. No single design dominates across all workloads, which is precisely why hardware selection depends on workload analysis rather than headline specifications.
 
@@ -5887,7 +5890,7 @@ class FeasibilityAssessment:
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(headroom >= 2 * GB, f"Expected >= 2 GB VRAM headroom, got {headroom}")
-    check(token_latency > 0 * millisecond, "Token latency must be positive.")
+    check(abs(token_latency.to(millisecond).magnitude - 140.0) < 1.0, f"Expected ~140 ms token latency, got {token_latency}")
     check(abs(roofline_ridge.to(flop / byte).magnitude - 10) < 1e-9, "Roofline checkpoint should put a 10 FLOP/byte kernel at the ridge point.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────

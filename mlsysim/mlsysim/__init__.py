@@ -17,6 +17,7 @@ from . import embodied
 from . import sensors
 from . import actuators
 from . import agents
+from . import solvers
 
 # AUTHORITATIVE API ENTRY POINTS
 from .engine.engine import Engine

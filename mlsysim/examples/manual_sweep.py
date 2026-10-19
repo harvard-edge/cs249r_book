@@ -32,7 +32,7 @@ def main():
         
         # Print a quick summary row
         status = row['p_status'] if row['f_status'] == "PASS" else "OOM"
-        latency = f"{row['p_latency']:.2f}" if row['f_status'] == "PASS" else "---"
+        latency = f"{row['p_latency']:.2f~P}" if row['f_status'] == "PASS" else "---"
         bottleneck = row.get('p_bottleneck', "---")
         
         print(f"{b:<10} | {status:<10} | {latency:<15} | {bottleneck:<15}")
