@@ -379,9 +379,7 @@ The transition from hundreds of GPUs to tens of thousands is a qualitative regim
 
 ### Probability of failure during a job {#sec-appdx-reliability-foundations-job-failure}
 
-The MTBF determines the average time between failures, but training jobs have fixed durations. Practitioners ask for the probability that their job will be interrupted at least once.
-
-Under the exponential failure model (constant failure rate), @eq-failure-probability gives the probability of at least one failure during a job of duration $\JobDuration$. The expression is the complement of the Poisson zero-failure probability over that window:
+A cluster MTBF of a few hours tells an operator how often nodes drop out on average, but a training team scheduling a 7-day or 30-day run needs the probability that at least one failure will interrupt that fixed window. Under the exponential failure model (constant failure rate), @eq-failure-probability gives the probability of at least one failure during a job of duration $\JobDuration$ as the complement of the Poisson zero-failure probability over that window:
 
 $$ \Pr(\geq 1\ \text{failure}) = 1 - e^{-\JobDuration/\MeanTimeBetweenFailures} $$ {#eq-failure-probability}
 
@@ -444,11 +442,11 @@ The exponential failure model assumes a constant failure rate, which holds durin
 
 ## Checkpoint Optimization {#sec-appdx-reliability-foundations-checkpoint-optimization}
 
-Every checkpoint saves progress at the cost of execution time. Checkpointing too rarely lets a single failure destroy hours of training, whereas checkpointing too frequently turns checkpoint writing itself into the bottleneck. The Young-Daly formula gives the first-order optimal balance point between those two losses, and it depends on two measurable quantities: how long a checkpoint takes to write and how often failures occur [@young1974; @daly2006].
+On a 10,000-GPU cluster that fails every few hours, pausing all 10,000 accelerators to flush a multi-terabyte state snapshot to shared storage stalls training, yet spacing snapshots hours apart sacrifices thousands of GPU-hours of progress whenever a node drops out. Choosing a checkpoint cadence therefore trades guaranteed write overhead against expected rework after a crash [@young1974; @daly2006].
 
 ### The Young-Daly model {#sec-appdx-reliability-foundations-young-daly}
 
-The optimal checkpoint interval balances two competing costs. Writing a checkpoint takes time $\CheckpointWriteTime$ (the **checkpoint cost**), during which no useful training occurs. The longer the interval between checkpoints, however, the more work is lost when a failure strikes, on average half the interval. @Eq-young-daly states the **Young-Daly formula** that minimizes the expected total overhead:
+During a synchronous checkpoint, writing state to storage takes time $\CheckpointWriteTime$ (the **checkpoint cost**), during which no useful training occurs. Extending the interval between checkpoints amortizes that pause, but a failure that arrives at a random point inside the interval destroys on average half the interval's work. @Eq-young-daly states the **Young-Daly formula** that minimizes the sum of those two expected losses:
 
 $$ \OptimalCheckpointInterval = \sqrt{2 \times \CheckpointWriteTime \times \SystemMtbf} $$ {#eq-young-daly}
 
@@ -456,11 +454,11 @@ where $\CheckpointWriteTime$ is the checkpoint write time in seconds and $\Syste
 
 The intuition behind @eq-young-daly is geometric-mean-like. When checkpoints are cheap relative to the MTBF ($\CheckpointWriteTime \ll \SystemMtbf$, the common case), the optimal interval sits between the two time scales. If checkpoints took zero time, the optimal cadence would be every step. If the system never failed, no checkpoints would be required. The square root interpolates between those extremes.
 
-The formula assumes that failures follow an exponential distribution (memoryless property) and that checkpoint cost $\CheckpointWriteTime$ is small compared to $\SystemMtbf$. The examples below adopt these assumptions. Correlated outages, changing hazard rates, long writes, and asynchronous persistence can require a more detailed model.
+The formula assumes that failures follow an exponential distribution (memoryless property) and that checkpoint cost $\CheckpointWriteTime$ is small compared to $\SystemMtbf$. Correlated outages, changing hazard rates, long writes, and asynchronous persistence can require a more detailed model. Under the first-order assumptions, evaluating @eq-young-daly for a concrete model requires only the cluster MTBF and the write duration $\CheckpointWriteTime$, which is set by the serialized state volume and storage bandwidth.
 
 ### Checkpoint sizing {#sec-appdx-reliability-foundations-checkpoint-sizing}
 
-Checkpoint size determines the write time $\CheckpointWriteTime$ that feeds into the Young-Daly formula. For common mixed-precision training checkpoints with the adaptive moment estimation (Adam) optimizer, each parameter requires approximately `{python} ReliabilityFoundations.ckpt_bpp_str` bytes of persistent state:
+Resuming a mixed-precision training run after a node failure requires restoring not only the low-precision weights used in the forward pass, but also the full-precision master weights and optimizer moments accumulated across prior steps, which multiplies the serialized footprint and sets the write time $\CheckpointWriteTime$ in @eq-young-daly. For common mixed-precision training checkpoints with the adaptive moment estimation (Adam) optimizer, each parameter requires approximately `{python} ReliabilityFoundations.ckpt_bpp_str` bytes of persistent state:
 
 - 2 bytes for BF16 model weights
 - 4 bytes for FP32 master weights
@@ -615,17 +613,17 @@ class WorkedExampleYoungDaly:
 
 :::
 
-The boundary conditions of the Young-Daly formula merit attention. When $\CheckpointWriteTime$ approaches $\SystemMtbf$ (checkpoint cost approaches MTBF), checkpoint and rework overheads become so large that checkpoint/restart alone may fail to maintain useful forward progress. In such cases, redundancy or elastic training becomes necessary, as discussed in @sec-appdx-reliability-foundations-strategies.
+When $\CheckpointWriteTime$ approaches $\SystemMtbf$ (checkpoint cost approaches MTBF), checkpoint and rework overheads become so large that checkpoint/restart alone may fail to maintain useful forward progress, requiring the alternative strategies in @sec-appdx-reliability-foundations-strategies. Even when $\CheckpointWriteTime \ll \SystemMtbf$, the Young-Daly cadence prices only the periodic write pause and the average step replay after a fault; a real cluster outage also stalls on failure detection, node replacement, and checkpoint reload before replay can begin.
 
 ---
 
 ## Recovery Budgets {#sec-appdx-reliability-foundations-recovery-budgets}
 
-When a failure occurs, the system does not instantly resume training. Detection, rescheduling, reloading state, and replaying lost work each consume time. The recovery anatomy shows which phase dominates and where engineers should invest effort.
+When a node drops out of a 10,000-GPU training step, every surviving accelerator idles while the control plane times out the dead heartbeat, allocates a replacement node, streams terabytes of checkpoint state back into GPU memory, and recomputes the steps lost since the last snapshot. Pricing how much wall-clock capacity those interruptions consume requires decomposing the outage into its constituent phases and translating the total stall time into runtime goodput.
 
 ### The anatomy of recovery time {#sec-appdx-reliability-foundations-recovery-anatomy}
 
-Recovery is not a single event but a pipeline of phases, each with its own time budget. @Eq-reliability-recovery-time sums them into total recovery time:
+A single hardware fault triggers four sequential recovery phases between the instant a worker stalls and the moment the job returns to new training steps. @Eq-reliability-recovery-time sums them into total recovery time:
 
 $$ \TotalFailureRecoveryTime= \FailureDetectionTime+ \JobRestartTime + \CheckpointLoadTime + \LostWorkReplayTime$$ {#eq-reliability-recovery-time}
 
@@ -673,7 +671,7 @@ In this sequence, replay time $\LostWorkReplayTime$ typically dominates and is c
 
 ### Runtime goodput under failures {#sec-appdx-reliability-foundations-goodput}
 
-Not all time spent on a training cluster produces useful progress. The fault-free step rate is the rate the configured cluster could sustain without checkpoint or recovery interruptions, and the committed step rate counts only the steps a checkpoint retains for the final model. Their ratio is the runtime goodput\index{Runtime goodput!appendix refresher} of a job whose only losses are checkpoints and failures:
+Every minute a cluster spends writing a periodic snapshot or executing the four-phase recovery pipeline of @tbl-recovery-anatomy is billed wall-clock allocation that advances the final model by zero training steps. Comparing the **committed step rate** (the steps a checkpoint retains for the final model) against the **fault-free step rate** (the rate the configured cluster could sustain without checkpoint or recovery interruptions) defines the runtime goodput\index{Runtime goodput!appendix refresher} of a job whose only losses are checkpoints and failures:
 
 $$ \RuntimeGoodput \approx \frac{\text{Committed Useful-Step Rate}}{\text{Fault-Free Step Rate}} \approx \frac{\UsefulTrainingTime}{\AllocatedWallTime} $$
 
@@ -704,11 +702,11 @@ A common misconception is that doubling cluster size halves training time. In pr
 
 ## Strategy Selection {#sec-appdx-reliability-foundations-strategy-selection}
 
-Checkpoint/restart is not the only fault tolerance strategy. For serving workloads where downtime is measured in lost revenue, redundancy provides a different structural trade-off. Elastic training can resume on a smaller allocation when valid state and a feasible parallel decomposition remain available. Choosing the right strategy depends on the workload's tolerance for latency, cost, and complexity.
+Pausing a 10,000-GPU batch training job for several minutes to reload a checkpoint and replay lost steps is an acceptable throughput tax, whereas stalling a live inference service for even a few seconds violates user-facing latency contracts and drops production traffic. Because batch training and online serving tolerate interruption on completely different time scales, fleet architectures choose among checkpoint/restart, active redundancy, and elastic resizing according to the recovery latency, spare capacity, and state-management complexity each workload can afford.
 
 ### Checkpoint/restart vs. redundancy vs. elastic training {#sec-appdx-reliability-foundations-strategies}
 
-The three canonical strategies represent different points in the trade-off space between cost, complexity, and recovery speed. **Checkpoint/restart** periodically saves full system state and rolls back to the last checkpoint after failure. It is the workhorse of large-scale training: conceptually simple, well-understood, and effective when MTBF is much larger than checkpoint cost. The weakness is that recovery requires stopping all workers and replaying lost computation.
+Whether a fault-tolerance mechanism can pause the entire job to replay work, must fail over within milliseconds, or must continue on a shrunk allocation when replacement nodes are unavailable separates the three primary recovery architectures. **Checkpoint/restart** periodically saves full system state and rolls back to the last checkpoint after failure. It is the workhorse of large-scale training: conceptually simple, well-understood, and effective when MTBF is much larger than checkpoint cost. The weakness is that recovery requires stopping all workers and replaying lost computation.
 
 **Redundancy** maintains alternate copies of state or computation. A surviving serving replica can take over only when routing, readiness, capacity, and the required request state meet the latency budget. Dedicated duplicate or triplicate execution costs 2--3$\times$ the compute resources; active-active serving instead shares normal traffic across replicas while reserving failover headroom. The justified overhead depends on the workload and recovery contract.
 
@@ -727,7 +725,7 @@ The three canonical strategies represent different points in the trade-off space
 
 ### The availability stacking formula {#sec-appdx-reliability-foundations-availability}
 
-For serving workloads, availability is typically expressed as a percentage: 99 percent ("two nines"), 99.9 percent ("three nines"), and so on. Redundancy improves availability by running $\RedundantReplicaCount$ independent replicas. Under an idealized model with reliable routing and enough capacity on any surviving replica, the system is unavailable only when all replicas are simultaneously down. @Eq-availability-stacked captures this, with $\ReplicaAvailability$ denoting the availability of a single replica and $\RedundantReplicaCount$ the number of replicas:
+A single serving replica with 99 percent availability ("two nines") still accumulates more than 87 hours of downtime per year, far exceeding the outage budget of production inference endpoints that target 99.9 percent ("three nines") or 99.99 percent ("four nines") uptime. Redundancy closes that gap by running $\RedundantReplicaCount$ independent replicas so that surviving instances absorb traffic when one replica fails. Under an idealized model with reliable routing and enough capacity on any surviving replica, the system is unavailable only when all replicas are simultaneously down. @Eq-availability-stacked captures this, with $\ReplicaAvailability$ denoting the availability of a single replica and $\RedundantReplicaCount$ the number of replicas:
 
 $$ \RedundantServiceAvailability= 1 - (1 - \ReplicaAvailability)^\RedundantReplicaCount $$ {#eq-availability-stacked}
 
@@ -825,7 +823,7 @@ For positive checkpoint cost, the equivalent derivative numerator $e^{(\Checkpoi
 
 #### Choosing the appropriate approximation {.unnumbered}
 
-The first-order formula is a useful planning estimate when writes are short compared with MTBF. When that condition fails, use a model that includes the deployment's checkpoint semantics, recovery delays, and failure exposure. The numerical condition above covers only the stated zero-restart-delay renewal model; asynchronous writes and correlated failures require different assumptions.
+The first-order formula is a useful planning estimate when writes are short compared with MTBF. When that condition fails, use a model that includes the deployment's checkpoint semantics, recovery delays, and failure exposure. The numerical condition in @eq-daly-2nd-order-tau covers only the stated zero-restart-delay renewal model; asynchronous writes and correlated failures require different assumptions. All of these checkpoint and redundancy models assume that a hardware fault announces itself by stopping a worker or failing a health check, yet some of the most damaging faults at fleet scale corrupt tensor values silently without halting execution.
 
 ---
 
@@ -847,7 +845,7 @@ If both the original and corrupted exponent fields encode finite normal values, 
 
 ### Softmax saturation and error propagation {#sec-appdx-reliability-sdc-softmax-explosion}
 
-For one attention head, let $\AttentionScoreMatrix = \AttentionQueryMatrix\AttentionKeyMatrix^T/\sqrt{\AttentionHeadDimension} \in \mathbb{R}^{\SequenceLength\times \SequenceLength}$ be the pre-softmax score matrix for sequence length $\SequenceLength$ and head dimension $\AttentionHeadDimension$. Suppose an SDC event corrupts one element of token row $\MatrixRowIndex$ of the query matrix $\AttentionQueryMatrix$, and write the resulting perturbation as $\FiniteChange\AttentionQueryMatrix$, with only that element nonzero:
+When a single-bit exponent flip inflates one query entry by a factor of $65{,}536$, the dot products in that token's attention row can jump by orders of magnitude and collapse its softmax distribution onto a single key. To trace how that perturbation propagates through one attention head, let $\AttentionScoreMatrix = \AttentionQueryMatrix\AttentionKeyMatrix^T/\sqrt{\AttentionHeadDimension} \in \mathbb{R}^{\SequenceLength\times \SequenceLength}$ be the pre-softmax score matrix for sequence length $\SequenceLength$ and head dimension $\AttentionHeadDimension$. Suppose an SDC event corrupts one element of token row $\MatrixRowIndex$ of the query matrix $\AttentionQueryMatrix$, and write the resulting perturbation as $\FiniteChange\AttentionQueryMatrix$, with only that element nonzero:
 
 $$ \CorruptedAttentionScoreMatrix = \frac{(\AttentionQueryMatrix+ \FiniteChange\AttentionQueryMatrix) \AttentionKeyMatrix^T}{\sqrt{\AttentionHeadDimension}} = \AttentionScoreMatrix + \FiniteChange\AttentionScoreMatrix $$
 
