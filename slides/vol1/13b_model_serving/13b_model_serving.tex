@@ -29,6 +29,9 @@
 \usepackage{booktabs,amsmath}
 \usetikzlibrary{arrows.meta,positioning}
 \graphicspath{{images/}}
+% The figures' compute (orange) and memory (blue) colors, for text beside them
+\definecolor{figcompute}{HTML}{E67817}
+\definecolor{figmemory}{HTML}{006395}
 \setcounter{mlsystotalsections}{5}
 
 \title{Model Serving, Part 2}
@@ -46,13 +49,19 @@
   \hspace{0.3cm}\begin{minipage}[c]{0.74\textwidth}\small #2\end{minipage}}
 % One line of a worked example: shown from overlay #1 on
 \newcommand{\wstep}[2]{\uncover<#1->{#2}\\[0.22cm]}
+% An exact excerpt of real tool output or source code, at a legible size
+\newenvironment{logblock}[1][7]{\par\ttfamily\fontsize{#1}{8.3}\selectfont\raggedright\setlength{\parskip}{0pt}}{\par}
+% One aligned "label: value" row of a tool's printed table (alignment spaces become \hfill)
+\newcommand{\logrow}[2]{\makebox[\linewidth][l]{#1\hfill #2}\\}
+% Code indentation of n spaces in the current monospace font
+\newcommand{\ind}[1]{\hspace*{#1\fontcharwd\font`0}}
 
 \begin{document}
 
 % =============================================================================
 % TITLE AND HOOK
 % =============================================================================
-\mlsysnote{[0.5 min] [CORE] Read the thesis aloud once. Part 1 served one fixed-size answer per request: a budget, a queue, a batch, a replica. Today the answer is a stream of hundreds of tokens, and each conversation holds memory until it ends. The notes total about 72 minutes. FLEX: notes tagged [OPTIONAL] can be cut; cutting all of them leaves a complete lecture of about 63 minutes. Cut first the paged-budget slide (the measured 2.2 times on the paging slide carries its point) and the open questions.}
+\mlsysnote{[0.5 min] [CORE] Read the thesis aloud once. Part 1 served one fixed-size answer per request: a budget, a queue, a batch, a replica. Today the answer is a stream of hundreds of tokens, and each conversation holds memory until it ends. The notes total about 72 minutes. FLEX: notes tagged [OPTIONAL] can be cut; cutting all of them leaves a complete lecture of about 63 minutes. Cut first the joules slide and the open questions.}
 \mlsystitle{Model Serving, Part~2}{Serving a stream of tokens: every token costs a weight read, and the KV cache sets how many conversations share it.}{cover_model_serving_blueprint.png}
 
 \begin{frame}{Predict: what does a tighter token deadline cost?}
@@ -62,14 +71,14 @@
   {\footnotesize\textcolor{midgray}{TTFT: time to first token.\quad TPOT: time per output token.}}\\[0.1cm]
   {\normalsize\choice{A}{about the same}\qquad\choice{B}{about 80\%}\qquad\answerat{4}{C}{about 40\%}\qquad\choice{D}{about 10\%}}
   \mlsyscredit{MLPerf Inference v5.0, closed, datacenter, Dell PowerEdge XE9680, 8$\times$ H100-SXM-80GB (5.0-0020): Llama 2 70B Offline, Server, and interactive Server. Bounds: v5.0 inference rules.}
-  \note{[3.5 min] [CORE] One server with eight H100s, one model, Llama 2 70B, measured in MLPerf. Step 1: with no deadline (Offline), 31,217 tokens per second. Step 2: the Server scenario with random arrivals and two deadlines: the first token within 2 s (TTFT, time to first token) and a time per output token (TPOT), each request's average gap between the tokens that follow, of at most 200 ms. MLPerf checks both bounds at the Server scenario's 99th-percentile latency rule. The server keeps 30,904 tokens per second, 99 percent. Step 3: the interactive bound tightens TPOT to 40 ms and TTFT to 450 ms. ENGAGE: students vote with fingers. Step 4: C. 12,979 tokens per second, 42 percent of the conversational rate. Students who chose A reasoned that one token takes far less than 40 ms, which is true at batch one; students who chose D scaled throughput with the deadline. WARN: the interactive run is a separate MLPerf benchmark entry with its own Offline run (30,990 tokens per second); the comparison is fair. LINK: Lecture 12 introduced MLPerf's Offline and Server scenarios; TTFT and TPOT are new today, and the next segment defines them on one request. Today explains the drop; the synthesis returns to these bars.}
+  \note{[3 min] [CORE] One server with eight H100s, one model, Llama 2 70B, measured in MLPerf. Step 1: with no deadline (Offline), 31,217 tokens per second. Step 2: the Server scenario with random arrivals and two deadlines: the first token within 2 s (TTFT, time to first token) and a time per output token (TPOT), each request's average gap between the tokens that follow, of at most 200 ms. MLPerf checks both bounds at the Server scenario's 99th-percentile latency rule. The server keeps 30,904 tokens per second, 99 percent. Step 3: the interactive bound tightens TPOT to 40 ms and TTFT to 450 ms. ENGAGE: students vote with fingers. Step 4: C. 12,979 tokens per second, 42 percent of the conversational rate. Students who chose A reasoned that one token takes far less than 40 ms, which is true at batch one; students who chose D scaled throughput with the deadline. WARN: the interactive run is a separate MLPerf benchmark entry with its own Offline run (30,990 tokens per second); the comparison is fair. LINK: Lecture 12 introduced MLPerf's Offline and Server scenarios; TTFT and TPOT are new today, and the next segment defines them on one request. Today explains the drop; the synthesis returns to these bars.}
 \end{frame}
 
 \begin{frame}{Recall: what sizes a fleet, and what does a batch cost?}
   \mlsysactivity{Retrieval}{1.5 min}
   \begin{columns}[c]
     \begin{column}{0.56\textwidth}
-      {\Large\bfseries Close your notes.}\\[0.3cm]
+      {\Large\bfseries Close your notes.}\\[0.2cm]
       {\normalsize Which three quantities size a serving fleet? What does a batch cost the request that waits for it?}\\[0.3cm]
       \uncover<2->{\small\textbf{\textcolor{mlsysaccent}{Service time}} per request\\
       \textbf{\textcolor{mlsysaccent}{Utilization}} the tail target allows\\
@@ -77,21 +86,22 @@
       A batch shares fixed costs; every request pays the wait to form it.}
     \end{column}
     \begin{column}{0.40\textwidth}
-      \centering\safeimg[width=\textwidth,height=2.3cm,keepaspectratio]{recall_cost.pdf}\\[0.3cm]
+      \centering\safeimg[width=\textwidth,height=1.3cm,keepaspectratio]{thumb_recall_cost.pdf}\\[0.02cm]
+      {\footnotesize ResNet-50: \$3.92 per million at batch 1, \$0.52 at batch 8}\\[0.15cm]
       \uncover<3->{\begin{mlsyscard}{mlsysaccent}\small\textbf{From Lecture 6b:} decode reads every weight for every token. Llama 3 8B keeps \textbf{131 KB} of KV cache per token.\end{mlsyscard}}
     \end{column}
   \end{columns}
   \mlsyscredit{Lecture 13 (Part 1): Model Serving, Example 13.1 (modeled, \$4 per GPU-hour). Lecture 6b; 131,072 B per token: Model Serving, \S13.9.5.}
-  \note{[2 min] [CORE] Retrieval from Part 1. Give 60 seconds. Step 2: service time per request; the highest utilization the tail target allows (about 68 percent for Part 1's 50 ms budget); the peak rate with headroom. A batch shares the fixed cost of a pass, which is why batch 8 cost 7.5 times less than batch 1 in the thumbnail, but each request waits for the batch to form. Step 3: one line from Lecture 6b, given, not derived again. Each decode step reads every weight to produce one token, and each token of context keeps a key and a value in every layer, the KV cache: 131,072 bytes for Llama 3 8B in 16-bit precision. ENGAGE: what changes when one request is not one forward pass but hundreds, and holds memory the whole time? Take two answers; segments 1 to 3 answer it. FLEX: a student who missed Part 1 needs only this slide.}
+  \note{[1.5 min] [CORE] Retrieval from Part 1. Give 45 seconds. Step 2: service time per request; the highest utilization the tail target allows (about 68 percent for Part 1's 50 ms budget); the peak rate with headroom. A batch shares the fixed cost of a pass, which is why batch 8 cost 7.5 times less than batch 1 in the thumbnail, but each request waits for the batch to form. Step 3: one line from Lecture 6b, given, not derived again. Each decode step reads every weight to produce one token, and each token of context keeps a key and a value in every layer, the KV cache: 131,072 bytes for Llama 3 8B in 16-bit precision. ENGAGE: what changes when one request is not one forward pass but hundreds, and holds memory the whole time? Take two answers; segments 1 to 3 answer it. FLEX: a student who missed Part 1 needs only this slide.}
 \end{frame}
 
 \begin{frame}{How does one GPU serve many chats, one token at a time?}
-  \thumbline{ttft_step4.pdf}{Say which phase sets TTFT and which sets TPOT; compute the decode floor and a speculative-decoding gain.}\\[0.22cm]
-  \thumbline{cb_step7.pdf}{Work a continuous-batching schedule, and find the largest batch a TPOT target allows.}\\[0.22cm]
-  \thumbline{paging_step4.pdf}{Budget KV memory, and show how paging and sharing raise the conversations it holds.}\\[0.22cm]
-  \thumbline{distserve_pool.pdf}{Decide when to split prefill and decode, and price a token in joules and dollars.}\\[0.15cm]
+  \thumbline{thumb_ttft_step4.pdf}{Say which phase sets TTFT and which sets TPOT; compute the decode floor and a speculative-decoding gain.}\\[0.22cm]
+  \thumbline{thumb_cb_step7.pdf}{Work a continuous-batching schedule, and find the largest batch a TPOT target allows.}\\[0.22cm]
+  \thumbline{thumb_paging_step4.pdf}{Budget KV memory, and show how paging and sharing raise the conversations it holds.}\\[0.22cm]
+  \thumbline{thumb_distserve_pool.pdf}{Decide when to split prefill and decode, and price a token in joules and dollars.}\\[0.15cm]
   {\footnotesize\textcolor{midgray}{Running models: GPT-2 XL and Llama 3 8B on one H100 (the chapter); Llama 2 70B on 8$\times$ H100 (MLPerf).}}
-  \note{[1 min] [CORE] The driving question: a chat answer is hundreds of tokens produced one at a time. How does one accelerator serve many conversations at once without breaking either deadline, and what does each token cost? Four goals, one per part of the lecture; each thumbnail is the figure that teaches it. Three models carry the numbers. GPT-2 XL (1.5 billion parameters, 3 GB in 16-bit) is the chapter's example of a bandwidth-bound decoder. Llama 3 8B is the chapter's case study. Llama 2 70B is the measured hook.}
+  \note{[1 min] [CORE] The driving question: a chat answer is hundreds of tokens produced one at a time. How does one accelerator serve many conversations at once without breaking either deadline, and what does each token cost? Four goals, one per part of the lecture; each thumbnail is the shape of the figure that teaches it. Three models carry the numbers. GPT-2 XL (1.5 billion parameters, 3 GB in 16-bit) is the chapter's example of a bandwidth-bound decoder. Llama 3 8B is the chapter's case study. Llama 2 70B is the measured hook.}
 \end{frame}
 
 % =============================================================================
@@ -105,15 +115,25 @@
   \centering
   \mlsyssteps[width=0.95\textwidth,height=5.8cm,keepaspectratio]{ttft_step}{4}
   \mlsyscredit{Patel et al., ``Splitwise,'' ISCA 2024, Table IV (Llama 2 70B, P50, no batching, conversation trace). Targets: Model Serving, Systems Perspective 13.5 (illustrative).}
-  \note{[2.5 min] [CORE] Step 1: one measured chat request, Llama 2 70B on one eight-GPU DGX-H100, no batching, the median of a conversation trace. Prefill reads the whole prompt in parallel and produces the first token at 84 ms: TTFT. Decode then produces one token every 28 ms: TPOT, the average gap between tokens. The answer of about 120 tokens ends at 3,387 ms. Step 2: decode is 97 percent of the request (our arithmetic from the two medians; the paper says most of the time). Step 3: the same request on the older DGX-A100: 155 ms, then a token every 40 ms, 4,957 ms in all. Step 4: the chapter's illustrative targets: the first token within 500 ms, then a token every 50 ms, 20 tokens per second, faster than people read. ENGAGE: which deadline does a user notice first, and which one decides whether the answer feels fast? WARN: a fast first token does not mean a fast answer; the two phases have different limits.}
+  \note{[2.5 min] [CORE] Step 1: one measured chat request, Llama 2 70B on one eight-GPU DGX-H100, no batching, the median of a conversation trace. Prefill reads the whole prompt in parallel and produces the first token at 84 ms: TTFT. Decode then produces one token every 28 ms: TPOT, the average gap between tokens. The answer of about 120 tokens ends at 3,387 ms. Step 2: decode is 98 percent of the request (our arithmetic from the two medians; the paper says most of the time). Step 3: the same request on the older DGX-A100: 155 ms, then a token every 40 ms, 4,957 ms in all. Step 4: the chapter's illustrative targets: the first token within 500 ms, then a token every 50 ms, 20 tokens per second, faster than people read. ENGAGE: which deadline does a user notice first, and which one decides whether the answer feels fast? WARN: a fast first token does not mean a fast answer; the two phases have different limits.}
 \end{frame}
 
 \begin{frame}{Prefill spends arithmetic; decode spends a weight read}
-  \centering
-  \mlsyssteps[width=0.95\textwidth,height=5.2cm,keepaspectratio]{phases_step}{4}\\[0.05cm]
-  \uncover<2->{\footnotesize Measured (Splitwise, BLOOM-176B): a 1,500-token prompt takes as long as 6 output tokens.}
-  \mlsyscredit{Model Serving, \S13.9.2 and \S13.10.3 (modeled). Patel et al., ``Splitwise,'' ISCA 2024, \S III-C.}
-  \note{[3.5 min] [CORE] Step 1: prefill. GPT-2 XL's 512-token prompt is about 1.5 TFLOP (trillion floating-point operations); at 40 percent of the H100's 16-bit peak it takes 3.9 ms. Llama 3 8B's 1,000-token prompt takes 41.9 ms. Prefill time grows with prompt length: it sets TTFT. Step 2: decode. Each step reads every weight to make one token. GPT-2 XL's 3 GB at 3.35 TB/s cannot take less than 0.9 ms. Llama 3 8B with 4-bit (INT4) weights reads 4 GB: a floor of 1.2 ms, 1.57 ms with the remaining kernel-launch cost. The measured line says the same: 1,500 prompt tokens cost as much time as 6 output tokens. Step 3: issued kernel by kernel from Python, one GPT-2 XL step spends 8.6 ms launching 576 kernels; servers capture the step as one CUDA graph, a recorded kernel sequence the GPU replays with one launch. Step 4: the case study allows 20 ms per token. One step uses 1.57 ms; 18.4 ms is room to share this weight read with other conversations. LINK: Lecture 6b placed decode at 1 FLOP per byte against the H100's ridge near 295; Lecture 7 owns graph capture; Lecture 10b owns INT4 weights.}
+  \begin{columns}[c]
+    \begin{column}{0.70\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=5.0cm,keepaspectratio]{phases_step}{4}
+    \end{column}
+    \begin{column}{0.28\textwidth}
+      \centering\mlsysphoto[width=\textwidth,height=2.4cm,keepaspectratio]{nvidia-h100-pcie.jpg}\\[0.08cm]
+      {\footnotesize NVIDIA H100 (PCIe card shown). The chapter's H100 SXM:\\[0.04cm]
+      \textbf{\textcolor{figcompute}{989 TFLOP/s}} FP16 for prefill\\
+      \textbf{\textcolor{figmemory}{3.35 TB/s}} HBM3 for decode}
+    \end{column}
+  \end{columns}
+  \vspace{0.05cm}
+  \centering\uncover<2->{\footnotesize Measured (Splitwise, BLOOM-176B): a 1,500-token prompt takes as long as 6 output tokens.}
+  \mlsyscredit{Model Serving, \S13.9.2 and \S13.10.3 (modeled). Patel et al., ``Splitwise,'' ISCA 2024, \S III-C. Photo: Geekerwan, CC BY 3.0, Wikimedia Commons.}
+  \note{[3 min] [CORE] Point to the photo: one H100 has two ceilings, 989 trillion 16-bit operations per second and 3.35 TB/s of memory bandwidth, and the two phases hit different ones. (The photo shows the PCIe card; the chapter's numbers are for the SXM module, the same chip with faster memory.) Step 1: prefill. GPT-2 XL's 512-token prompt is about 1.5 TFLOP; at 40 percent of the 16-bit peak it takes 3.9 ms. Llama 3 8B's 1,000-token prompt takes 41.9 ms. Prefill grows with prompt length: it sets TTFT. Step 2: decode reads every weight to make one token. GPT-2 XL's 3 GB at 3.35 TB/s cannot take less than 0.9 ms; Llama 3 8B with 4-bit (INT4) weights reads 4 GB, a floor of 1.2 ms, 1.57 ms with kernel-launch cost. Measured: 1,500 prompt tokens cost as much time as 6 output tokens. Step 3: issued kernel by kernel from Python, one GPT-2 XL step spends 8.6 ms launching 576 kernels; servers replay the step as one CUDA graph. Step 4: in a 20 ms TPOT, one step uses 1.57 ms; 18.4 ms is room to share this weight read. LINK: Lecture 6b placed decode at 1 FLOP per byte against the ridge near 295; Lecture 7 owns graph capture; Lecture 10b owns INT4.}
 \end{frame}
 
 \begin{frame}{Estimate: tokens per speculative round}
@@ -137,7 +157,7 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Model Serving, \S13.9.4 and equation 15 (acceptance assumed). Leviathan et al., ICML 2023.}
-  \note{[3 min] [CORE] Decode at batch one reads the weights for one token. Speculative decoding gets more than one token per read. Step 1: a small draft model, GPT-2 Small (248 MB), proposes 4 tokens in 0.30 ms. The target model then checks all 5 positions in one pass, about one weight read, 0.90 ms, because checking known tokens is parallel, like prefill. Step 2: the target keeps the longest run of draft tokens it agrees with, plus one token of its own. In this round it kept two, rejected the third, dropped the fourth, and added its own: 3 tokens. ENGAGE: two minutes in pairs; how many tokens per round on average if each draft token is kept with probability 0.7? Step 3: equation 15 gives 2.8, so 0.43 ms per token, 2.1 times faster. Students who answer 4 forget rejections; students who answer 3.8 add 0.7 times 4 to the target token without the rule that one rejection ends the run. WARN: the 0.7 is assumed. The gain shrinks as acceptance falls, and at large batch the extra positions cost arithmetic a full batch no longer has spare. FLEX: [CORE].}
+  \note{[2.5 min] [CORE] Decode at batch one reads the weights for one token. Speculative decoding gets more than one token per read. Step 1: a small draft model, GPT-2 Small (248 MB), proposes 4 tokens in 0.30 ms. The target model then checks all 5 positions in one pass, about one weight read, 0.90 ms, because checking known tokens is parallel, like prefill. Step 2: the target keeps the longest run of draft tokens it agrees with, plus one token of its own. In this round it kept two, rejected the third, dropped the fourth, and added its own: 3 tokens. ENGAGE: two minutes in pairs; how many tokens per round on average if each draft token is kept with probability 0.7? Step 3: equation 15 gives 2.8, so 0.43 ms per token, 2.1 times faster. Students who answer 4 forget rejections; students who answer 3.8 add 0.7 times 4 to the target token without the rule that one rejection ends the run. WARN: the 0.7 is assumed. The gain shrinks as acceptance falls, and at large batch the extra positions cost arithmetic a full batch no longer has spare. FLEX: [CORE].}
 \end{frame}
 
 % =============================================================================
@@ -147,14 +167,14 @@
 \mlsysdivider{How many chats can share one decode step, and who waits?}{Model Serving, \S13.9.2 and \S13.9.4}
 \section{Sharing}
 
-\begin{frame}{Batching decode shares the weights but not the KV cache}
+\begin{frame}{Batching decode shares weights but not the KV cache}
   \mlsysactivity{Predict}{1 min}
   \centering
   \mlsyssteps[width=0.95\textwidth,height=4.0cm,keepaspectratio]{decode_bytes_step}{2}\\[0.1cm]
   {\small GPT-2 XL, full 1,024-token contexts. From batch 1 to 32, each user's TPOT grows:}\\[0.15cm]
   {\normalsize\choice{A}{32$\times$}\qquad\answerat{2}{B}{about 4$\times$}\qquad\choice{C}{not at all: the weights are shared}}
   \mlsyscredit{Model Serving, \S13.9.2 (modeled; 307.2 KB of cache per token, no grouped-query sharing).}
-  \note{[2.5 min] [CORE] The KV cache holds the keys and values of every earlier token, so a step need not recompute them. GPT-2 XL keeps 307.2 KB per token, 0.31 GB for a full 1,024-token context. Step 1: batch 1. A step reads the 3 GB of weights and one cache: 3.3 GB in 1.0 ms, 1,010 tokens per second. ENGAGE: one minute, vote. Step 2: B. At batch 32 the weights are still read once, but every sequence reads its own cache: 13.1 GB, 77 percent of it cache, in 3.9 ms. Each user waits 3.9 times longer per token, and the server makes 8,200 tokens per second, 8 times more. A treats the batch as 32 separate requests; C is right only for the weight read. WARN: in Part 1 a ResNet-50 batch shared everything but the input; here every conversation brings its own growing state. LINK: Lecture 6b showed why grouped-query attention shrinks this cache; Llama 3 8B uses it, GPT-2 XL does not.}
+  \note{[2.5 min] [CORE] The KV cache holds the keys and values of every earlier token, so a step need not recompute them. GPT-2 XL keeps 307.2 KB per token, 0.31 GB for a full 1,024-token context. Step 1: batch 1. A step reads the 3 GB of weights and one cache: 3.3 GB in 1.0 ms, 1,011 tokens per second. ENGAGE: one minute, vote. Step 2: B. At batch 32 the weights are still read once, but every sequence reads its own cache: 13.1 GB, 77 percent of it cache, in 3.9 ms. Each user waits 3.9 times longer per token, and the server makes 8,204 tokens per second, 8.1 times more. A treats the batch as 32 separate requests; C is right only for the weight read. WARN: in Part 1 a ResNet-50 batch shared everything but the input; here every conversation brings its own growing state. LINK: Lecture 6b showed why grouped-query attention shrinks this cache; Llama 3 8B uses it, GPT-2 XL does not.}
 \end{frame}
 
 \begin{frame}{A TPOT target caps the batch, and memory caps it again}
@@ -162,7 +182,42 @@
   \mlsyssteps[width=0.95\textwidth,height=4.9cm,keepaspectratio]{frontier_step}{3}\\[0.0cm]
   \uncover<3->{\footnotesize Measured (Splitwise, H100): a batch of 64 only doubles TPOT; then memory runs out.}
   \mlsyscredit{Model Serving, \S13.9.2 (batch 1 and 32) and \S13.9.5 (85.9 GB, the H100's 80 GiB in decimal units). Gray points derived: (3.0 + 0.3146 B) GB / 3.35 TB/s. Patel et al., ``Splitwise,'' \S III-C, Fig.~6b.}
-  \note{[2.5 min] [CORE] Each point is one batch size. Across: tokens per second for the whole server. Up: each user's time per token. Step 1: the book's two points, batch 1 and 32, and batch 8 between them. The curve is nearly flat: adding conversations is almost free while the weight read dominates. Step 2: our extension of the same model, labeled derived: each extra conversation adds its 0.31 GB cache read. By batch 128 the step takes 12.9 ms and throughput barely grows; it can never pass 10,650 tokens per second, where cache reads are everything. A 20 ms TPOT target stops the batch at 203. Step 3: memory stops it at 263, when weights plus caches fill the 85.9 GB. ENGAGE: under a 40 ms target, which limit binds? (Expected: memory, at 263.) WARN: these are bandwidth floors with full contexts; real contexts are shorter, so real batches are larger, and kernels do not reach full bandwidth. LINK: this is the hook's mechanism: the deadline caps the batch, and the batch is the throughput. FLEX: [CORE].}
+  \note{[2.5 min] [CORE] Each point is one batch size. Across: tokens per second for the whole server. Up: each user's time per token. Step 1: the book's two points, batch 1 and 32, and batch 8 between them. The curve is nearly flat: adding conversations is almost free while the weight read dominates. Step 2: our extension of the same model, labeled derived: each extra conversation adds its 0.31 GB cache read. By batch 128 the step takes 12.9 ms and throughput barely grows; it can never pass 10,649 tokens per second, where cache reads are everything. A 20 ms TPOT target stops the batch at 203. Step 3: memory stops it at 263, when weights plus caches fill the 85.9 GB. ENGAGE: under a 40 ms target, which limit binds? (Expected: memory, at 263.) WARN: these are bandwidth floors with full contexts; real contexts are shorter, so real batches are larger, and kernels do not reach full bandwidth. LINK: this is the hook's mechanism: the deadline caps the batch, and the batch is the throughput. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{A real server reports both deadlines as distributions}
+  \begin{columns}[T]
+    \begin{column}{0.48\textwidth}
+      {\small\textbf{\textcolor{figmemory}{Short prompts:}} 213 tokens in, 512 out}\par\vspace{0.08cm}
+      \begin{logblock}
+        \logrow{Maximum request concurrency:}{64}
+        \logrow{Output token throughput (tok/s):}{6411.31}
+        \logrow{Median TTFT (ms):}{275.99}
+        \logrow{P99 TTFT (ms):}{415.40}
+        \logrow{Mean TPOT (ms):}{9.50}
+        \logrow{Median ITL (ms):}{9.27}
+        \logrow{P99 ITL (ms):}{12.55}
+      \end{logblock}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      {\small\textbf{\textcolor{figcompute}{Long prompts:}} 1,022 tokens in, 128 out}\par\vspace{0.08cm}
+      \begin{logblock}
+        \logrow{Maximum request concurrency:}{64}
+        \logrow{Output token throughput (tok/s):}{2802.42}
+        \logrow{Median TTFT (ms):}{582.78}
+        \logrow{P99 TTFT (ms):}{1584.13}
+        \logrow{Mean TPOT (ms):}{18.41}
+        \logrow{Median ITL (ms):}{11.13}
+        \logrow{P99 ITL (ms):}{\textbf{\textcolor{errorstroke}{198.59}}}
+      \end{logblock}
+    \end{column}
+  \end{columns}
+  \vspace{0.25cm}
+  {\small Llama 3.1 8B, vLLM, one H100, 64 conversations at once. ITL: inter-token latency, each gap between tokens.}\\[0.12cm]
+  \uncover<2->{\small Little's law: 64 streams $/$ 9.50 ms $=$ 6,737 tokens/s at most; measured 6,411 (95\%, derived).}\\[0.06cm]
+  \uncover<3->{\small Long prompts: the p99 gap is \textbf{\textcolor{errorstroke}{17.8$\times$}} the median. Something stalls every stream at once.}
+  \mlsyscredit{vLLM 0.10.1.1 serving benchmark, Llama-3.1-8B-Instruct, one H100 80GB HBM3; output posted in github.com/vllm-project/vllm/issues/24684 (2025-09-11). Excerpt, lines omitted; token counts per request derived.}
+  \note{[2.5 min] [CORE] Real output: a user posted these two runs of vLLM's serving benchmark on one H100 in a public vLLM issue, September 2025. Both keep 64 conversations in flight; the left run has short chat prompts (213 tokens each, derived from the totals), the right long random prompts (1,022). The tool prints the first segment's quantities: TTFT, TPOT, and ITL, the inter-token latency, every single gap between two tokens. TPOT is a per-request average; ITL keeps the spikes. Step 1: the left block. A first token in 276 ms at the median, then one every 9.5 ms, inside the chapter's 500 ms and 50 ms targets. Step 2: Little's law from Part 1: 64 streams at 9.50 ms per token produce at most 6,737 tokens per second; the server measured 6,411, 95 percent (derived). The rest is time streams spend waiting for a first token. ENGAGE: compare the right block; which number moved most? (Expected: p99 ITL, 12.55 to 198.59 ms, while the median barely moved.) Step 3: one gap in a hundred is 17.8 times the median (derived). Hold that symptom for the stall slide. WARN: the issue reported a changed benchmark default that switched the prompt set, which is why one server gives two clean runs. FLEX: [CORE].}
 \end{frame}
 
 \begin{frame}{Request-level batching holds every slot until the longest ends}
@@ -182,35 +237,44 @@
   \only<1-3|handout:0>{\normalsize In pairs: when does each of E to H start and end? What share of slot-steps is used?}%
   \only<4-|handout:1>{\small \textbf{\textcolor{mlsysaccent}{Measured, Orca:}} 36.9$\times$ the throughput of FasterTransformer at the same latency, GPT-3 175B.}
   \mlsyscredit{Illustrative schedule (derived on the slide). Yu et al., ``Orca,'' OSDI 2022, abstract. Model Serving, \S13.9.4.}
-  \note{[3.5 min] [CORE] Same grid, same requests. Continuous batching, also called iteration-level batching, rebuilds the batch at every step: when a sequence ends, a waiting request takes its slot at the next step. ENGAGE: pairs fill the grid on paper for two minutes before any reveal. Step 2: A ends at step 10; E takes slot 1. Step 3: C and E end at step 40; F and G take their slots. G ends at 60 and H takes it; D also ends at 60 and its slot idles, because no one is waiting. Step 4: all eight are done at step 100 instead of 150, 350 of 400 slot-steps used, and E finishes at 40 instead of 130. Orca introduced the technique and measured 36.9 times the throughput of FasterTransformer at the same latency on GPT-3 175B; Orca's other technique, selective batching, contributes to that number too. vLLM and TensorRT-LLM (which calls it in-flight batching) use it today. WARN: the gain needs memory for the newcomer's cache; segment 3 is about that memory. LINK: the operating-system analogy: preempt at every step instead of running each job to completion.}
+  \note{[3 min] [CORE] Same grid, same requests. Continuous batching, also called iteration-level batching, rebuilds the batch at every step: when a sequence ends, a waiting request takes its slot at the next step. ENGAGE: pairs fill the grid on paper for two minutes before any reveal. Step 2: A ends at step 10; E takes slot 1. Step 3: C and E end at step 40; F and G take their slots. G ends at 60 and H takes it; D also ends at 60 and its slot idles, because no one is waiting. Step 4: all eight are done at step 100 instead of 150, 350 of 400 slot-steps used, and E finishes at 40 instead of 130. Orca introduced the technique and measured 36.9 times the throughput of FasterTransformer at the same latency on GPT-3 175B; Orca's other technique, selective batching, contributes to that number too. vLLM and TensorRT-LLM (which calls it in-flight batching) use it today. WARN: the gain needs memory for the newcomer's cache; segment 3 is about that memory. LINK: the operating-system analogy: preempt at every step instead of running each job to completion.}
+\end{frame}
+
+\begin{frame}{Measured: better scheduling and memory move the knee right}
+  \begin{columns}[c]
+    \begin{column}{0.62\textwidth}
+      \centering\includegraphics[width=\textwidth,height=5.3cm,keepaspectratio]{vllm_fig12a.png}
+    \end{column}
+    \begin{column}{0.36\textwidth}
+      \small
+      Each curve: latency per output token as the request rate grows. The knee is the load a server can sustain.\\[0.2cm]
+      \textcolor{midgray}{\textbf{FasterTransformer}}: no iteration-level scheduling.\\[0.1cm]
+      \textbf{Orca}: continuous batching; reserves contiguous cache.\\[0.1cm]
+      \textbf{\textcolor{figmemory}{vLLM}}: continuous batching with a paged cache: \textbf{1.7 to 2.7$\times$} the rate of Orca (Oracle).
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Kwon et al., ``PagedAttention'' (vLLM), SOSP 2023, arXiv 2309.06180, Fig.~12a (OPT-13B, one A100, ShareGPT), cropped; legend rows rearranged.}
+  \note{[1.5 min] [CORE] The paper's own figure, cropped. Across: requests per second. Up: normalized latency, each request's end-to-end time divided by its output length. Every curve is flat until the server saturates, then the queue grows without bound. FasterTransformer forms a batch and runs it to completion; it saturates first. The three Orca curves use continuous batching but reserve contiguous cache (the next segment's problem); they move right in order of how little they over-reserve, Oracle knowing every length in advance. vLLM adds paging and sustains 1.7 to 2.7 times the request rate of Orca (Oracle) on ShareGPT, and up to 22 times FasterTransformer, at similar latency (the paper's numbers). ENGAGE: why does Orca (Oracle), which knows every answer's length, still saturate before vLLM? (Expected: it still reserves one contiguous region per request, so fragmentation limits the batch; segment 3.) WARN: these are Kwon et al.'s reimplementations of Orca, not the original system. FLEX: [CORE].}
 \end{frame}
 
 \begin{frame}{Diagnose: why do all streams freeze at once?}
   \mlsysactivity{Diagnose}{1.5 min}
   \begin{columns}[c]
-    \begin{column}{0.30\textwidth}
+    \begin{column}{0.31\textwidth}
       \begin{mlsyscard}{errorstroke}\small
-        TPOT is met most of the time, but every few seconds all streams pause at once. Arrivals look normal.
+        TPOT is met most of the time, but now and then all streams pause at once.
       \end{mlsyscard}
-      \vspace{0.15cm}
-      {\footnotesize Measured in vLLM: stalls of several seconds (Sarathi-Serve).}
+      \vspace{0.12cm}
+      {\footnotesize Measured (vLLM, H100, long prompts): ITL median 11.13 ms, p99 \textbf{198.59} ms.}
     \end{column}
-    \begin{column}{0.68\textwidth}
+    \begin{column}{0.67\textwidth}
       \centering
-      \only<1|handout:0>{\safeimg[width=\textwidth,height=5.0cm,keepaspectratio]{stall_step1.pdf}}%
-      \only<2-|handout:1>{\safeimg[width=\textwidth,height=5.0cm,keepaspectratio]{stall_step2.pdf}}
+      \mlsyssteps[width=\textwidth,height=4.4cm,keepaspectratio]{stall_step}{3}\\[0.08cm]
+      \uncover<3->{\footnotesize Chunked: first token near 53 ms, not 44.7. Measured: 2.6 to 3.7$\times$ the capacity of vLLM (Sarathi-Serve).}
     \end{column}
   \end{columns}
-  \mlsyscredit{Derived from Model Serving, \S13.10.3 (4 GB INT4 weights, 41.9 ms per 1,000-token prefill, 20 ms TPOT). Agrawal et al., ``Sarathi-Serve,'' OSDI 2024, Fig.~1.}
-  \note{[2.5 min] [CORE] ENGAGE: one minute; what binds? Take answers before step 2. Step 1: Llama 3 8B with INT4 weights on one H100, 32 conversations decoding. Each step reads 4 GB of weights and 32 caches of 1,256 tokens, 9.3 GB in all: 2.8 ms per step, far under the 20 ms target. Step 2: a new request with a 1,000-token prompt arrives, and continuous batching runs its prefill in the same step: 41.9 ms of prefill plus the decode, 44.7 ms. Every one of the 32 streams waits 44.7 ms for its next token, more than twice the target. The Sarathi-Serve authors measured this in vLLM and called it a generation stall. Students who say the queue reason from Part 1; the queue grows only after the stall. WARN: these step times are derived: bandwidth floor for decode, prefill at 40 percent of peak and linear in tokens. The example is a retrieval request bringing a long document into a busy chat service. FLEX: [CORE].}
-\end{frame}
-
-\begin{frame}{Chunked prefill trades a few ms of TTFT for every stream's TPOT}
-  \centering
-  \safeimg[width=0.88\textwidth,height=4.7cm,keepaspectratio]{stall_step3.pdf}\\[0.1cm]
-  {\small First token near 53 ms, not 44.7. Measured: 2.6 to 3.7$\times$ the capacity of vLLM.}
-  \mlsyscredit{Derived as on the previous slide. Agrawal et al., ``Sarathi-Serve,'' OSDI 2024, abstract (against vLLM under tail-latency limits). Model Serving, \S13.9.4.}
-  \note{[2 min] [CORE] The fix splits the prompt into chunks and adds one chunk to each decode step. Here four chunks of 250 tokens: each step carries 10.5 ms of prefill plus the 2.8 ms decode, 13.2 ms, under the 20 ms target. The 32 streams slow for four steps but never miss. The cost falls on the new request: its first token arrives after four steps, about 53 ms instead of 44.7 ms, far inside a 200 ms TTFT. Chunking spends TTFT slack to protect TPOT. The chapter's example uses chunks of 512 tokens; the chunk size is the knob. Measured: Sarathi-Serve served 2.6 times more load on Mistral-7B and up to 3.7 times on Yi-34B than vLLM under the same tail-latency limits. ENGAGE: what sets the largest safe chunk? (Expected: TPOT minus the decode step, divided by the prefill time per token: about 400 tokens here.) Land the segment aloud: a decode step costs one weight read plus every cache read, so a TPOT target caps the batch; continuous batching keeps it full; chunked prefill keeps a long prompt from stalling it. FLEX: [CORE]; the previous slide's stall needs its fix.}
+  \mlsyscredit{Derived from Model Serving, \S13.10.3 and \S13.9.4 (Llama 3 8B, 4 GB INT4 weights, 41.9 ms per 1,000-token prefill at 40\% of peak, linear in tokens; 20 ms TPOT). Agrawal et al., ``Sarathi-Serve,'' OSDI 2024, abstract.}
+  \note{[3.5 min] [CORE] ENGAGE: one minute; what binds? Take answers before step 2. Step 1: Llama 3 8B, INT4 weights, one H100, 32 conversations decoding. Each step reads 4 GB of weights and 32 caches of 1,256 tokens, 9.3 GB: 2.8 ms, far under 20 ms. Step 2: a 1,000-token prompt arrives, and continuous batching runs its prefill in the same step: 41.9 plus 2.8, 44.7 ms. All 32 streams wait 44.7 ms for their next token. This is the benchmark slide's p99 gap; Sarathi-Serve measured such generation stalls in vLLM. Step 3: split the prompt into four chunks of 250 tokens, one per step: 10.5 ms of prefill plus 2.8 ms, 13.2 ms, under the target. The new request's first token comes after four steps, about 53 ms instead of 44.7: chunking spends TTFT slack to protect TPOT. Measured: Sarathi-Serve served 2.6 times more load on Mistral-7B and up to 3.7 times on Yi-34B than vLLM under the same tail-latency limits. ENGAGE: what sets the largest safe chunk? (Expected: TPOT minus the decode step, over prefill time per token: 411 tokens, derived; the chapter uses 512.) WARN: step times are derived floors. Land the segment: the TPOT target caps the batch; continuous batching fills it; chunking protects it.}
 \end{frame}
 
 % =============================================================================
@@ -243,7 +307,7 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Model Serving, \S13.9.5 (Llama 3 8B, derived lines) and figure 8 (redrawn; 327,680 B per token assumed for the 70B class). 80 GB on the datasheet is 85.9 GB in decimal units.}
-  \note{[4 min] [CORE] ENGAGE: two minutes with a neighbor. Lecture 6b derived the 131 KB per token for Llama 3.1 8B, which has Llama 3 8B's layers and heads and a longer window; take it as given. Step 2: an 8,192-token conversation holds 131,072 bytes times 8,192, 1.07 GB. The weights leave 69.8 GB, room for about 65 conversations before any runtime workspace. The common error is forgetting the weights (80). Step 3: the estimate as a picture. Each line is one batch size of Llama 3 8B conversations; the cache grows linearly with context, and 65 conversations reach the 69.8 GB budget at 8,192 tokens (65 times 1.07 GB is 69.8 GB, derived). Step 4: a larger model, announced in the figure's title. A 70-billion-parameter-class model with 4-bit weights leaves 50.6 GB for cache. Each token costs 2.5 times the 8B model's cache, so 32 conversations fill the budget near 4,800 tokens. The slope assumes 80 layers and 8 key-value heads of 128, our assumption, which reproduces the chapter's crossing. Measured split from vLLM: a 13B model on a 40 GB A100 spends about 65 percent of memory on weights and close to 30 percent on cache. WARN: memory, not arithmetic, caps how many conversations share each weight read; every extra thousand tokens of context costs conversations. FLEX: [CORE].}
+  \note{[3.5 min] [CORE] ENGAGE: two minutes with a neighbor. Lecture 6b derived the 131 KB per token for Llama 3.1 8B, which has Llama 3 8B's layers and heads and a longer window; take it as given. Step 2: an 8,192-token conversation holds 131,072 bytes times 8,192, 1.07 GB. The weights leave 69.8 GB, room for about 65 conversations before any runtime workspace. The common error is forgetting the weights (80). Step 3: the estimate as a picture. Each line is one batch size of Llama 3 8B conversations; the cache grows linearly with context, and 65 conversations reach the 69.8 GB budget at 8,192 tokens (65 times 1.07 GB is 69.8 GB, derived). Step 4: a larger model, announced in the figure's title. A 70-billion-parameter-class model with 4-bit weights leaves 50.6 GB for cache. Each token costs 2.5 times the 8B model's cache, so 32 conversations fill the budget near 4,800 tokens. The slope assumes 80 layers and 8 key-value heads of 128, our assumption, which reproduces the chapter's crossing. Measured split from vLLM: a 13B model on a 40 GB A100 spends about 65 percent of memory on weights and close to 30 percent on cache. WARN: memory, not arithmetic, caps how many conversations share each weight read; every extra thousand tokens of context costs conversations. FLEX: [CORE].}
 \end{frame}
 
 \begin{frame}{Reserving for the longest answer wastes most of the cache}
@@ -267,14 +331,28 @@
   \note{[3 min] [CORE] PagedAttention borrows the operating system's paging (first built on the Atlas computer, 1962). The cache lives in fixed-size blocks, and a block table maps each request's logical blocks to physical blocks anywhere in memory. Step 1: a 7-token prompt fills logical block 0 and three slots of block 1; the table maps them to physical blocks 7 and 1. One slot is free. Step 2: decode makes ``fathers''; it fills the free slot, and the table's count goes to 4. Step 3: the next token needs a new block; any free block will do, here 3. Step 4: request B's blocks interleave in the same pool. No region is reserved ahead, no hole is too small, and each sequence wastes at most its last, partly filled block. The attention kernel reads the blocks through the table directly. Step 5: measured: the average batch on the same GPU grew from 13.6 requests (Orca with Oracle) to 30.4, 2.2 times. ENGAGE: what happens to a request's blocks when it ends? (Expected: they return to the free pool for the next step.) WARN: paging decides where blocks live, not how many a sequence needs. FLEX: [CORE].}
 \end{frame}
 
-\begin{frame}{Paging the actual length fits 6.5 times the conversations}
-  \centering
-  \safeimg[width=0.92\textwidth,height=3.2cm,keepaspectratio]{paged_budget.pdf}\\[0.15cm]
-  {\small 1,256 tokens $\rightarrow$ 79 blocks of 16 = 165.7 MB; 69.8 GB / 165.7 MB $\approx$ 421.}\\[0.1cm]
-  {\small Waste per conversation: at most one partly filled block, about 2 MB.}\\[0.1cm]
-  {\footnotesize\textcolor{midgray}{With the case study's 4-bit weights, the chapter's bound is about 469.}}
-  \mlsyscredit{Derived from Model Serving, \S13.9.5 (131,072 B per token, 69.8 GB free) and the \S13.10.3 workload (1,000 + 256 tokens), before runtime workspace.}
-  \note{[2 min] [OPTIONAL] Back to Llama 3 8B with 16-bit weights on one H100. A contiguous allocator that reserves the 8,192-token maximum holds 65 conversations. The case study's real conversation is 1,000 prompt tokens plus 256 generated, 1,256 tokens. Paged in 16-token blocks, it needs 79 blocks, 165.7 MB, and the same 69.8 GB holds about 421. The allocator, not the model, made a 6.5 times difference in how many conversations share each weight read. The waste per conversation is at most 15 empty token slots in its last block, about 2 MB. These numbers are derived and leave out runtime workspace; the chapter's own bound for the INT4 case study is about 469. ENGAGE: a request that grows past 1,256 tokens: what happens? (Expected: it takes another block; if none is free, the server must pause or evict a request.) FLEX: [OPTIONAL]; the previous slide's measured 2.2 times carries the point.}
+\begin{frame}[t]{vLLM's own count: 51.39 chats of 8,192 tokens, not 65}
+  \vspace{-0.25cm}\noindent{\footnotesize\textbf{The allocator:} a request gets blocks only as its tokens arrive}\par\vspace{0.05cm}
+  \begin{logblock}[7]
+    num\_required\_blocks = cdiv(num\_tokens, self.block\_size)\\
+    num\_new\_blocks = num\_required\_blocks - len(req\_blocks)\\
+    \textcolor{midgray}{[...]}\\
+    \ind{4}new\_blocks = self.block\_pool.get\_new\_blocks(num\_new\_blocks)\\
+    \ind{4}req\_blocks.extend(new\_blocks)
+  \end{logblock}
+  \vspace{0.08cm}
+  {\footnotesize\textbf{The startup log:} Llama 3 8B, 16-bit, one H100, default settings}\par\vspace{0.05cm}
+  \begin{logblock}[6.6]
+    INFO 07-20 23:32:55 [gpu\_model\_runner.py:1624] Model loading took 14.9596 GiB and 0.153384 seconds\\
+    INFO 07-20 23:32:56 [gpu\_worker.py:227] Available KV cache memory: 51.39 GiB\\
+    INFO 07-20 23:32:56 [kv\_cache\_utils.py:715] GPU KV cache size: 420,976 tokens\\
+    INFO 07-20 23:32:56 [kv\_cache\_utils.py:719] Maximum concurrency for 8,192 tokens per request: \textbf{\textcolor{errorstroke}{51.39x}}
+  \end{logblock}
+  \vspace{0.08cm}
+  \uncover<2->{\footnotesize Estimate 65 $\rightarrow$ 51.39: vLLM uses 0.9 of 80 GiB and keeps 5.65 GiB for activations (derived).}\\[0.05cm]
+  \uncover<3->{\footnotesize Paged 1,256-token chats: cdiv(1,256, 16) $=$ 79 blocks; estimate 421, vLLM's pool \textbf{333} (derived).}
+  \mlsyscredit{Code: vLLM v0.9.1 (b6553be), vllm/v1/core/single\_type\_kv\_cache\_manager.py, lines 121--127 (Apache 2.0). Log: github.com/vllm-project/vllm/issues/21266.}
+  \note{[2.5 min] [CORE] Two real artifacts. Top: vLLM's allocator, quoted from its source. A request needs the ceiling of its tokens over the block size, and only the difference from what it holds comes from the free pool: the last slide's block table in five lines of Python. Bottom: a startup log posted in a public vLLM issue, the same model as our estimate, Llama 3 8B in 16-bit on one H100 with vLLM's defaults. The weights take 14.96 GiB, 16.1 GB, as the chapter says. The pool holds 420,976 tokens; at 131,072 bytes each that is exactly the 51.39 GiB above, and 420,976 / 8,192 = 51.39 conversations (derived). Step 2: why not 65? vLLM claims 90 percent of the GPU by default, 72 GiB, and after the weights keeps 5.65 GiB that its profiling run measured for activations (derived). The estimate ignored both and was 26 percent high. Step 3: paged, a 1,256-token conversation takes cdiv(1,256, 16) = 79 blocks; the estimate's 69.8 GB holds 421, vLLM's real pool 333 (derived). ENGAGE: which assumption would you fix first? (Expected: the memory cap and workspace; the bytes per token matched exactly.) FLEX: [CORE]; the chapter's own bound for 4-bit weights is about 469.}
 \end{frame}
 
 \begin{frame}{Check: what does paging change, and what does it not?}
@@ -290,12 +368,25 @@
 \end{frame}
 
 \begin{frame}{Requests with a common prefix can share its cache blocks}
-  \centering
-  \mlsyssteps[width=0.95\textwidth,height=3.3cm,keepaspectratio]{share_step}{2}\\[0.05cm]
+  \begin{columns}[c]
+    \begin{column}{0.51\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=3.4cm,keepaspectratio]{share_step}{2}
+    \end{column}
+    \begin{column}{0.47\textwidth}
+      {\footnotesize\textbf{vLLM's cache settings} (vllm/config.py)}\par\vspace{0.05cm}
+      \begin{logblock}[6.8]
+        gpu\_memory\_utilization: float = 0.9\\
+        enable\_prefix\_caching: Optional[bool] = None
+      \end{logblock}
+      \vspace{0.05cm}
+      {\footnotesize Its docstring: ``Enabled by default for V1.''}
+    \end{column}
+  \end{columns}
+  \vspace{0.1cm}
   \uncover<2->{\footnotesize Measured (vLLM): beam search (several candidate answers per prompt) shares blocks and saves 37.6 to 55.2\% of KV memory.}\\[0.05cm]
   \uncover<2->{\footnotesize Overflow to host memory: reloading one 8,192-token cache over PCIe takes at least 34 ms, more than a 20 ms TPOT (derived). The router sends a conversation's next turn to the replica that holds its cache.}
-  \mlsyscredit{Model Serving, \S13.9.5 (2,000-token system prompt; derived sizes; reload 1.07 GB / 32 GB/s, PCIe Gen4 x16 from \S13.8.4) and \S13.9.6. Kwon et al., SOSP 2023, Fig.~15 (Alpaca trace).}
-  \note{[2.5 min] [CORE] Step 1: many requests begin with the same 2,000-token system prompt. Its cache, 262 MB for Llama 3 8B, is stored once, and every block table points at the same blocks; a request that would write into a shared block gets its own copy first (copy on write). This is prefix caching. Step 2: 100 conversations sharing one copy save about 26 GB and skip 99 times 2,000 tokens of prefill (derived). Measured in vLLM: sharing saved 6.1 to 9.8 percent of cache memory when sampling several answers to one prompt, and 37.6 to 55.2 percent in beam search. When the cache overflows anyway, a server can move idle caches to host memory, but reloading one 8,192-token cache over PCIe takes at least 1.07 GB at 32 GB/s, 34 ms, more than a 20 ms TPOT (derived). Session affinity sends a conversation's next turn to the replica that holds its cache, or the new replica recomputes the whole prefix. ENGAGE: why must the router know about the cache? (Expected: a turn sent elsewhere pays the prefill again.) Land the segment aloud: free memory divided by each conversation's cache sets concurrency; paging and sharing give back what reservation wastes.}
+  \mlsyscredit{Model Serving, \S13.9.5, \S13.9.6, \S13.8.4 (reload 1.07 GB / 32 GB/s, derived). Kwon et al., SOSP 2023, Fig.~15. Code: vLLM v0.9.1, vllm/config.py, CacheConfig, lines 1464 and 1487 (Apache 2.0).}
+  \note{[2.5 min] [CORE] Step 1: many requests begin with the same 2,000-token system prompt. Its cache, 262 MB for Llama 3 8B, is stored once, and every block table points at the same blocks; a request that would write into a shared block first gets its own copy (copy on write). This is prefix caching. The code is vLLM's own configuration: prefix caching is on by default in its current engine, and the 0.9 is the cap that made the last slide's count 51 rather than 65. Step 2: 100 conversations sharing one copy save about 26 GB and skip 99 times 2,000 tokens of prefill (derived). Measured in vLLM: sharing saved 6.1 to 9.8 percent of cache memory when sampling several answers to one prompt, and 37.6 to 55.2 percent in beam search. When the cache overflows, idle caches can move to host memory, but reloading one 8,192-token cache over PCIe takes at least 34 ms (derived), more than a 20 ms TPOT. Session affinity sends a conversation's next turn to the replica that holds its cache. ENGAGE: why must the router know about the cache? (Expected: a turn sent elsewhere pays the prefill again.) Land the segment: free memory over each conversation's cache sets concurrency; paging and sharing give back what reservation wastes.}
 \end{frame}
 
 % =============================================================================
@@ -306,11 +397,19 @@
 \section{Splitting}
 
 \begin{frame}{A GPU running both phases serves fewer requests than either alone}
-  \centering
-  \safeimg[width=0.95\textwidth,height=4.3cm,keepaspectratio]{distserve_bars.pdf}\\[0.15cm]
-  {\small Goodput: requests/s that meet both TTFT and TPOT for 90\% of requests. 512 tokens in, 64 out.}
-  \mlsyscredit{Zhong et al., ``DistServe,'' OSDI 2024, Fig.~1 and \S1 (13B model, one A100).}
-  \note{[2.5 min] [CORE] Goodput is the rate of requests that meet both deadlines, here at 90 percent attainment. DistServe measured a 13-billion-parameter model on one A100. Running both phases on one GPU, it sustains 1.6 requests per second. The same GPU doing only prefill sustains 5.6; doing only decode, 10. The phases interfere: a prefill stalls decode (the last segment), and decode steps delay the next prefill, so the colocated GPU must run lightly loaded to keep both deadlines. They also want different settings: prefill is efficient at small batches and benefits from splitting a layer across GPUs, while decode wants large batches. ENGAGE: if both phases fit on one GPU, why is the colocated number below both? (Expected: each phase's deadline is hurt by the other's work, so the GPU is kept far from full.) WARN: the three bars come from one experiment; a different model or prompt length shifts them. FLEX: [CORE].}
+  \begin{columns}[c]
+    \begin{column}{0.62\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.6cm,keepaspectratio]{distserve_bars.pdf}
+    \end{column}
+    \begin{column}{0.36\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.4cm,keepaspectratio]{nvidia-a100.png}\\[0.08cm]
+      {\footnotesize NVIDIA A100 (PCIe card shown). DistServe measured one 80 GB A100.}
+    \end{column}
+  \end{columns}
+  \vspace{0.2cm}
+  \centering{\small Goodput: requests/s that meet both TTFT and TPOT for 90\% of requests. 512 tokens in, 64 out.}
+  \mlsyscredit{Zhong et al., ``DistServe,'' OSDI 2024, Fig.~1 and \S1 (13B model, one 80 GB A100). Photo: Nvidia, CC BY-SA 4.0, Wikimedia Commons.}
+  \note{[2.5 min] [CORE] The board in the photo is the measured device: one A100, the generation before the H100. Goodput is the rate of requests that meet both deadlines, here at 90 percent attainment. DistServe measured a 13-billion-parameter model on one A100. Running both phases on one GPU, it sustains 1.6 requests per second. The same GPU doing only prefill sustains 5.6; doing only decode, 10. The phases interfere: a prefill stalls decode (the last segment), and decode steps delay the next prefill, so the colocated GPU must run lightly loaded to keep both deadlines. They also want different settings: prefill is efficient at small batches and benefits from splitting a layer across GPUs, while decode wants large batches. ENGAGE: if both phases fit on one GPU, why is the colocated number below both? (Expected: each phase's deadline is hurt by the other's work, so the GPU is kept far from full.) WARN: the three bars come from one experiment; a different model or prompt length shifts them. FLEX: [CORE].}
 \end{frame}
 
 \begin{frame}{Estimate: how many prefill GPUs per decode GPU?}
@@ -367,7 +466,7 @@
   {\small Measured (Splitwise): decode power does not rise with the batch, so the token rate sets the joules.}\\[0.15cm]
   \uncover<2->{\small Google, May 2024 to May 2025: \textbf{\textcolor{mlsysaccent}{33$\times$}} less energy per median prompt, 1.4$\times$ of it from utilization.}
   \mlsyscredit{Derived: 1 kW node and 600 W at low use (Model Serving, Napkin Math 13.5) over the token rates of \S13.9.2. Patel et al., ``Splitwise,'' Fig.~8. Elsworth et al., arXiv 2508.15734, 2025.}
-  \note{[2.5 min] [OPTIONAL] Step 1: a node draws about 1,000 W (GPU plus host share) whether a step carries one sequence or 32. Over the GPT-2 XL rates: 1,000 W / 1,010 tokens/s = 0.99 J per token at batch 1; 1,000 / 8,200 = 0.12 J at batch 32. The gray bar uses the chapter's power for a poorly used node, 300 W GPU plus 300 W host: 600 / 1,010 = 0.59 J. All derived. Even at 600 W, batch 1 costs about 5 times batch 32: power changes at most 1.7 times while the token rate changes 8 times, and Splitwise measured decode power flat with batch. LINK: Lecture 0's 1.1 J against 6.6 J per token is the same mechanism: a tenth of the token rate, with power falling only from 1,000 to 600 W. Step 2: Google's median Gemini text prompt used 33 times less energy after one year, 23 times from models and 1.4 times from busier machines; 0.24 Wh per prompt, counting host, idle reserve, and facility. WARN: the 33 times is a whole-service number, not a batching experiment. LINK: Lecture 15b owns carbon and lifecycle accounting. ENGAGE: a reasoning model writes 2,000 hidden tokens before answering; what happens to energy per question? (Expected: it grows with every token.) FLEX: [OPTIONAL].}
+  \note{[2 min] [OPTIONAL] Step 1: a node draws about 1,000 W (GPU plus host share) whether a step carries one sequence or 32. Over the GPT-2 XL rates: 1,000 W / 1,011 tokens/s = 0.99 J per token at batch 1; 1,000 / 8,204 = 0.12 J at batch 32. The gray bar uses the chapter's power for a poorly used node, 300 W GPU plus 300 W host: 600 / 1,011 = 0.59 J. All derived. Even at 600 W, batch 1 costs 4.9 times batch 32: power changes at most 1.7 times while the token rate changes 8.1 times, and Splitwise measured decode power flat with batch. LINK: Lecture 0's 1.1 J against 6.6 J per token is the same mechanism: a tenth of the token rate, with power falling only from 1,000 to 600 W. Step 2: Google's median Gemini text prompt used 33 times less energy after one year, 23 times from models and 1.4 times from busier machines; 0.24 Wh per prompt, counting host, idle reserve, and facility. WARN: the 33 times is a whole-service number, not a batching experiment. LINK: Lecture 15b owns carbon and lifecycle accounting. ENGAGE: a reasoning model writes 2,000 hidden tokens before answering; what happens to energy per question? (Expected: it grows with every token.) FLEX: [OPTIONAL].}
 \end{frame}
 
 \begin{frame}{Estimate: what does a million tokens cost on one H100?}
@@ -402,14 +501,15 @@
   \mlsysactivity{Retrieval}{1.5 min}
   \begin{columns}[c]
     \begin{column}{0.41\textwidth}
-      \centering\safeimg[width=\textwidth,height=2.0cm,keepaspectratio]{hook_thumb.pdf}\\[0.05cm]
+      \centering\safeimg[width=\textwidth,height=1.6cm,keepaspectratio]{thumb_hook_thumb.pdf}\\[0.02cm]
+      {\footnotesize Offline 31,217;\ 200 ms: 30,904;\ 40 ms: 12,979 tokens/s}\\[0.1cm]
       \uncover<2->{\footnotesize Streams in decode $\le$ tokens/s $\times$ TPOT\\[0.05cm]
-      $30{,}904 \times 0.2 = \mathbf{6{,}181}$\qquad $12{,}979 \times 0.04 = \mathbf{519}$\\[0.03cm]
-      {\footnotesize\textcolor{midgray}{(derived)}}}
+      $30{,}904 \times 0.2$: at most $\mathbf{6{,}181}$\\ $12{,}979 \times 0.04$: at most $\mathbf{519}$\\[0.03cm]
+      {\footnotesize\textcolor{midgray}{(derived bounds)}}}
     \end{column}
     \begin{column}{0.57\textwidth}\small
       \only<1|handout:0>{\normalsize Close your notes. Name the three limits on how many sequences share a decode step, and one lever for each.}%
-      \only<2->{\small Memory: 546 GB $/$ 412 MB $\approx$ \textbf{1,300} streams\\
+      \only<2->{\small Memory: 546 GB $/$ 412 MB $=$ \textbf{1,327} streams\\
       {\footnotesize\textcolor{midgray}{(derived; 16-bit weights and cache; 1,256 tokens assumed)}}\\[0.05cm]
       \textbf{\textcolor{mlsysaccent}{200 ms: memory binds.\quad 40 ms: the deadline binds.}}\\[0.15cm]}
       \uncover<3->{\small
@@ -422,25 +522,34 @@
     \end{column}
   \end{columns}
   \mlsyscredit{MLPerf Inference v5.0, 5.0-0020 (Llama 2 70B, 8$\times$ H100). Little 1961, as in Part 1.}
-  \note{[4.5 min] [CORE] Back to the hook. Step 1: retrieval, 90 seconds. Step 2: Little's law from Part 1: streams decoding at once equal tokens per second times TPOT. At most 30,904 times 0.2 = 6,181 streams under 200 ms; 12,979 times 0.04 = 519 under 40 ms (derived bounds). Eight H100s hold 8 times 85.9 = 687 GB; 16-bit Llama 2 70B weights take about 141 GB (4 times the chapter's 35.3 GB at 4 bits), leaving 546 GB. A 1,256-token conversation (the case study's length, assumed) at 327,680 bytes per token holds 412 MB, so memory fits about 546 GB / 412 MB = 1,300 streams. Under 200 ms memory binds, and the deadline has slack: 1,300 / 30,904 is a 42 ms step. That is why the conversational run keeps 99 percent. Under 40 ms only 519 fit the deadline, so the deadline binds and throughput falls to 42 percent. WARN: with 8-bit weights and cache, memory holds about 3,000 (617 GB / 206 MB), still under 6,181. Step 3: read the table; each lever moves one limit. ENGAGE: which lever first on the 40 ms server? (Expected: one that shortens the step, since the deadline binds.) WARN: serving 30,904 tokens/s under 40 ms takes about 2.4 times the servers (30,904 / 12,979, derived). FLEX: [CORE].}
+  \note{[4 min] [CORE] Back to the hook. Step 1: retrieval, 90 seconds. Step 2: Little's law from Part 1: streams decoding at once equal tokens per second times TPOT. At most 30,904 times 0.2 = 6,181 streams under 200 ms; 12,979 times 0.04 = 519 under 40 ms (derived bounds). Eight H100s hold 8 times 85.9 = 687 GB; 16-bit Llama 2 70B weights take about 141 GB (4 times the chapter's 35.3 GB at 4 bits), leaving 546 GB. A 1,256-token conversation (the case study's length, assumed) at 327,680 bytes per token holds 412 MB, so memory fits 546 GB / 412 MB = 1,327 streams. Under 200 ms memory binds, and the deadline has slack: 1,327 / 30,904 is a 43 ms step. That is why the conversational run keeps 99 percent. Under 40 ms only 519 fit the deadline, so the deadline binds and throughput falls to 42 percent. WARN: with 8-bit weights and cache, memory holds about 3,000 (617 GB / 206 MB), still under 6,181. Step 3: read the table; each lever moves one limit. ENGAGE: which lever first on the 40 ms server? (Expected: one that shortens the step, since the deadline binds.) WARN: serving 30,904 tokens/s under 40 ms takes about 2.4 times the servers (30,904 / 12,979, derived). FLEX: [CORE].}
 \end{frame}
 
 \begin{frame}{Takeaways}
-  \thumbline{phases_step4.pdf}{Prefill sets TTFT with arithmetic; decode sets TPOT with one weight read per step.}\\[0.12cm]
-  \thumbline{frontier_step3.pdf}{Each sequence adds its cache read to the step, so a TPOT target caps the batch.}\\[0.12cm]
-  \thumbline{cb_step7.pdf}{Continuous batching fills a freed slot at the next step; chunking keeps prompts from stalling it.}\\[0.12cm]
-  \thumbline{paged_budget.pdf}{Free memory over cache per conversation sets concurrency; paging and sharing recover it.}\\[0.12cm]
-  \thumbline{joules_token.pdf}{Joules and dollars per token follow how full each decode step runs.}
+  \thumbline{thumb_phases_step4.pdf}{Prefill sets TTFT with arithmetic; decode sets TPOT with one weight read per step.}\\[0.12cm]
+  \thumbline{thumb_frontier_step3.pdf}{Each sequence adds its cache read to the step, so a TPOT target caps the batch.}\\[0.12cm]
+  \thumbline{thumb_cb_step7.pdf}{Continuous batching fills a freed slot at the next step; chunking keeps prompts from stalling it.}\\[0.12cm]
+  \thumbline{thumb_kv_budget_8b.pdf}{Free memory over cache per conversation sets concurrency (65 estimated, 51.39 in vLLM's log); paging and sharing recover it.}\\[0.12cm]
+  \thumbline{thumb_joules_token.pdf}{Joules and dollars per token follow how full each decode step runs.}
   \note{[1.5 min] [CORE] One line per idea. Ask students which slide taught each line. If short on time, read the second and the fourth.}
 \end{frame}
 
 \begin{frame}{Open questions}
-  \normalsize
-  \begin{itemize}\setlength{\itemsep}{0.3cm}
-    \item Reasoning models choose to spend more tokens per question. Each costs decode time, cache memory, and joules. Where should a service cap that spending, and who sets the cap?
-    \item Prices per token fell by orders of magnitude in two years, and energy per prompt fell 33$\times$ in one. Will total serving energy fall or rise?
-    \item Decode runs well on power-capped or older accelerators. Should chip makers build chips for one phase only?
-  \end{itemize}
+  \begin{columns}[c]
+    \begin{column}{0.65\textwidth}
+      \small
+      \begin{itemize}\setlength{\itemsep}{0.12cm}
+        \item Reasoning models choose to spend more tokens per question. Each costs decode time, cache memory, and joules. Where should a service cap that spending, and who sets the cap?
+        \item Prices per token fell by orders of magnitude in two years, and energy per prompt fell 33$\times$ in one. Will total serving energy fall or rise?
+        \item Decode runs well on power-capped or older accelerators. Should chip makers build chips for one phase only?
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.33\textwidth}
+      \centering\mlsysphoto[width=\textwidth,height=3.4cm,keepaspectratio]{datacenters-ashburn-aerial.jpg}\\[0.08cm]
+      {\footnotesize Data centers and their electrical substations in Ashburn, Virginia}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: Theodore Christopher, CC0, Wikimedia Commons.}
   \note{[1.5 min] [OPTIONAL] No single answer. Pick one for discussion or assign one as a short written response. The first comes from Systems Perspective 13.7. The second is Jevons paradox (\S13.10): cheaper steam power raised total coal use in the nineteenth century; cheaper inference may raise total demand. The third follows from Splitwise's power measurements and DistServe's separate pools.}
 \end{frame}
 
