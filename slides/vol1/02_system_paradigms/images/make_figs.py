@@ -6,20 +6,22 @@ noted:
   - Power tiers: cloud 3 MW, edge 200 W, mobile 5 W, TinyML 1 mW (Sec. 2.1).
     Memory per example platform: TPU v4 pod 128 TB HBM, DGX Spark 128 GB,
     phone 8-16 GB, ESP32-S3 512 KB SRAM (table 4).
-  - Round trip in fiber at 200,000 km/s: 1,500 km gives 15 ms (Napkin Math
-    2.2), 3,600 km about 36 ms (Sec. 2.2). Budget 10 ms.
+  - Round trip in fiber at 200,000 km/s (eq. 1): the arm's 1,500 km gives
+    15 ms (Napkin Math 2.2). Measured AWS medians from us-east-1 and the
+    great-circle floors come from calcs.py (cloudping.co, 2026-10-18).
   - Camera bandwidth: 100 x 186.6 MB/s = 18.7 GB/s raw; 10 Gb/s link =
     1.25 GB/s; defect metadata 1 KB x 20 events/s = 20 KB/s (Napkin Math 2.4).
-  - Memory wall: compute doubling every 18 months (about 1.6x a year)
-    against bandwidth at about 1.2x a year; about 16x apart after ten years
-    (Sec. 2.2, illustrative rates).
+  - Memory wall: the slide shows Gholami et al., IEEE Micro 2024, Fig. 1
+    (gholami2024-hw-scaling.pdf, from the arXiv 2403.14123 source), not a
+    plot drawn here.
+  - TPU roofline: Jouppi et al., ISCA 2017, Tables 1 and 3 (inputs in calcs.py).
   - A100 roofline: 312 TFLOP/s FP16, 2.04 TB/s, ridge 153 FLOP/byte;
     ResNet-50 at batch 1: 8.2 GFLOP over 56.3 MB = 146 FLOP/byte (Napkin
     Math 2.1). Batch-1 decode with 16-bit weights: about 1 FLOP/byte (Model
     Serving, Sec. 13.9, as in Lecture 0). Batch B: about B FLOP/byte if
     weight traffic dominates (derived; KV cache and activations ignored).
-  - Thermal trace: 12 W model on a 3 W chassis, about 1 C/s, trip at 80 C
-    within 60 s, 100 FPS falls to 30 FPS (Napkin Math 2.9, illustrative).
+  - Throttling: the slide shows the 3DMark result screen (GSMArena), not a
+    plot drawn here.
   - Voice assistant: 1B devices x 32 KB/s = 32 TB/s if every microphone
     streams; on-device wake word cuts audio leaving each device about 860x,
     so about 37 GB/s (derived) (Napkin Math 2.10).
@@ -31,6 +33,9 @@ import sys
 from pathlib import Path
 
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import calcs  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
@@ -50,31 +55,40 @@ sp.hbars_steps(out / "power_tiers", [
 
 
 # ---------------------------------------------------------------------------
-# 2. Round trip in fiber against a 10 ms safety budget (two steps)
+# 2. Round trip: the fiber floor, then measured AWS medians (two steps)
 # ---------------------------------------------------------------------------
 def rtt(step):
-    rows = [("Regional cloud, 1,500 km", 15.0), ("Cross-country, 3,600 km", 36.0)]
-    fig, ax = sp.plt.subplots(figsize=(5.8, 2.1))
-    for i, (label, v) in enumerate(rows):
-        y = len(rows) - 1 - i
-        shown = i < step
-        ax.barh(y, v if shown else 0, color=C["danger"], height=0.55)
+    rows = [("Arm to cloud, 1,500 km", 1500, calcs.rtt_floor_ms(1500), None)]
+    rows += [(f"Virginia to {lab}, {km:,.0f} km", km, fl, me)
+             for lab, km, fl, me in calcs.aws_routes()]
+    fig, ax = sp.plt.subplots(figsize=(5.8, 2.75))
+    n = len(rows)
+    for i, (label, km, floor, meas) in enumerate(rows):
+        y = n - 1 - i
         ax.text(-0.01, y, label, transform=ax.get_yaxis_transform(), ha="right",
-                va="center", fontsize=13, fontweight="bold", color=C["text"])
-        if shown:
-            ax.text(v + 0.6, y, f"{v:.0f} ms", va="center", fontsize=13,
-                    fontweight="bold", color=C["danger"])
-    ax.axvline(10, color=C["data"], lw=3)
-    ax.text(10.5, 1.55, "Safety budget 10 ms", color=C["data"], fontsize=12,
+                va="center", fontsize=12, fontweight="bold", color=C["text"])
+        ax.barh(y + 0.17, floor, color=C["danger_l"], edgecolor=C["danger"],
+                lw=1.2, height=0.32)
+        ax.text(max(floor, 10) + 1.5, y + 0.17, f"{floor:.1f}" if floor < 10 else f"{floor:.0f}", va="center", fontsize=11,
+                color=C["danger"], fontweight="bold")
+        if meas is not None:
+            a2 = 1.0 if step == 2 else 0.0
+            ax.barh(y - 0.17, meas, color=C["danger"], height=0.32, alpha=a2)
+            ax.text(meas + 1.5, y - 0.17, f"{meas:.0f} measured", va="center",
+                    fontsize=11, color=C["danger"], fontweight="bold", alpha=a2)
+    ax.axvline(10, color=C["data"], lw=2.5)
+    ax.text(11, n - 0.25, "Arm budget 10 ms", color=C["data"], fontsize=11,
             fontweight="bold", va="center")
-    ax.set_xlim(0, 44)
-    ax.set_ylim(-0.6, 1.9)
+    ax.text(0.99, 0.99, "light: fiber floor\ndark: AWS median", transform=ax.transAxes,
+            ha="right", va="top", fontsize=10, color=C["neutral"])
+    ax.set_xlim(0, 185)
+    ax.set_ylim(-0.6, n + 0.05)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
     ax.grid(axis="x", color=C["grid"], lw=0.6)
     ax.set_axisbelow(True)
-    ax.set_xlabel("Round trip in fiber, propagation only (ms)")
-    sp.save(fig, out / f"rtt_distance_step{step}.svg")
+    ax.set_xlabel("Round trip (ms)")
+    sp.save(fig, out / f"rtt_measured_step{step}.svg")
 
 
 for k in (1, 2):
@@ -83,37 +97,56 @@ for k in (1, 2):
 # ---------------------------------------------------------------------------
 # 3. Factory cameras: raw video against the link (three steps)
 # ---------------------------------------------------------------------------
+CAM_RAW = 100 * 1920 * 1080 * 3 * 30      # Napkin Math 2.4 inputs
+CAM_LINK = 10e9 / 8
+CAM_META = 1e3 * 20
 sp.hbars_steps(out / "camera_bandwidth", [
-    ("100 raw camera feeds", 18.7e9, "danger", "18.7 GB/s"),
-    ("10 Gb/s factory link", 1.25e9, "neutral", "1.25 GB/s: 15× too small"),
-    ("Defect metadata only", 20e3, "data", "20 KB/s"),
+    ("100 raw camera feeds", CAM_RAW, "danger", f"{CAM_RAW / 1e9:.1f} GB/s"),
+    ("10 Gb/s factory link", CAM_LINK, "neutral",
+     f"{CAM_LINK / 1e9:.2f} GB/s: {CAM_RAW / CAM_LINK:.0f}× too small"),
+    ("Defect metadata only", CAM_META, "data", f"{CAM_META / 1e3:.0f} KB/s"),
 ], "B/s", xlabel="Data rate (bytes per second, log scale)")
 
 # ---------------------------------------------------------------------------
-# 4. Memory wall: compute against bandwidth growth over a decade
+# 4. Memory wall from published chips: Gholami et al., IEEE Micro 2024,
+#    Fig. 1, redrawn at slide size from the markers digitized in calcs.py.
+#    Trend lines are least-squares fits on log values, as in the paper.
 # ---------------------------------------------------------------------------
-yrs = np.linspace(0, 10, 101)
-comp = 2 ** (yrs / 1.5)
-bw = 1.2 ** yrs
-fig, ax = sp.plt.subplots(figsize=(5.8, 2.6))
-ax.plot(yrs, comp, color=C["compute"], lw=3.5)
-ax.plot(yrs, bw, color=C["memory"], lw=3.5)
-ax.fill_between(yrs, bw, comp, color=C["danger_l"], alpha=0.7)
-ax.text(10.2, comp[-1], "Compute\n×102", color=C["compute"], fontsize=12,
-        fontweight="bold", va="center")
-ax.text(10.2, bw[-1], "Memory\nbandwidth\n×6.2", color=C["memory"], fontsize=12,
-        fontweight="bold", va="center")
-ax.text(6.0, 7.5, "Gap ≈ 16×", color=C["danger"], fontsize=14, fontweight="bold")
-ax.set_yscale("log")
-ax.set_xlim(0, 10)
-ax.set_ylim(0.8, 200)
-ax.set_xlabel("Years")
-ax.set_ylabel("Growth (log)")
-ax.set_yticks([1, 10, 100])
-ax.set_yticklabels(["1×", "10×", "100×"])
-ax.text(0.0, -0.38, "Illustrative rates: compute doubles every 18 months, bandwidth +20% a year",
-        transform=ax.transAxes, fontsize=9, color=C["neutral"])
-sp.save(fig, out / "memory_wall.svg")
+def memory_wall():
+    pts = calcs.gholami_points()
+    fig, ax = sp.plt.subplots(figsize=(5.8, 2.75))
+    spec = [("flops", C["compute"], "Peak FLOP/s"),
+            ("dram", C["memory"], "DRAM bandwidth"),
+            ("interconnect", C["network"], "Interconnect bandwidth")]
+    for key, col, name in spec:
+        xs = [p[0] for p in pts[key]]
+        ys = [p[1] for p in pts[key]]
+        g, b, a0 = calcs.growth_per_2yr(pts[key])
+        ax.scatter(xs, ys, s=22, color=col, edgecolors="white", linewidths=0.6, zorder=3)
+        fx = np.array([min(xs), max(xs)])
+        ax.plot(fx, 10 ** (a0 + b * fx), color=col, lw=2.5, alpha=0.55, zorder=2)
+        ly = {"flops": 4e6, "dram": 500, "interconnect": 12}[key]
+        ax.text(2023.3, ly, f"{name}\n{g:.1f}× every 2 years", color=col,
+                fontsize=11, fontweight="bold", va="center", ha="left")
+    for label, (x, y), off in (("R10000", (1997.07, 1.0), (4, 8)),
+                               ("H100", (2022.7, 2.92e6), (-6, 4))):
+        ax.annotate(label, (x, y), xytext=off, textcoords="offset points",
+                    ha="left" if off[0] > 0 else "right", va="bottom",
+                    fontsize=10, color=C["text"])
+    ax.set_yscale("log")
+    ax.set_xlim(1996, 2023.2)
+    ax.set_ylim(0.3, 3e7)
+    ax.set_xticks([1996, 2002, 2008, 2014, 2020])
+    ax.set_yticks([1, 1e2, 1e4, 1e6])
+    ax.set_yticklabels(["1×", "100×", "10,000×", "1,000,000×"])
+    ax.minorticks_off()
+    ax.grid(axis="y", color=C["grid"], lw=0.6)
+    ax.set_axisbelow(True)
+    ax.set_ylabel("Growth from each\nseries' first point (log)")
+    sp.save(fig, out / "memory_wall_measured.svg")
+
+
+memory_wall()
 
 # ---------------------------------------------------------------------------
 # 5. The A100 roofline, built up, then workloads placed on it
@@ -218,40 +251,54 @@ roofline_col("roofline_decode_a",
 
 
 # ---------------------------------------------------------------------------
-# 6. Thermal wall: burst then throttle (two steps)
+# 6. The TPU (2015) roofline with six production applications, measured
+#    (Jouppi et al., ISCA 2017, Fig. 5 redrawn from Tables 1 and 3)
 # ---------------------------------------------------------------------------
-def thermal(step):
-    t = np.linspace(0, 120, 241)
-    fps = np.where(t < 60, 100, 30)
-    fig, ax = sp.plt.subplots(figsize=(5.8, 2.4))
-    m = t < 60 if step == 1 else t >= 0
-    ax.plot(t[m], fps[m], color=C["danger"] if step == 2 else C["compute"], lw=3.5)
-    ax.text(28, 106, "Burst: 100 FPS at 12 W", color=C["compute"], fontsize=12,
-            fontweight="bold", ha="center")
-    ax.axvline(60, color=C["neutral"], lw=1.2, ls="--")
-    ax.text(61, 70, "Chip reaches 80 °C\n(about 1 °C per second)", color=C["neutral"],
-            fontsize=10, va="center")
-    if step == 2:
-        ax.text(92, 38, "Sustained: 30 FPS at ≈3 W", color=C["danger"], fontsize=12,
-                fontweight="bold", ha="center")
-    ax.set_xlim(0, 120)
-    ax.set_ylim(0, 125)
-    ax.set_xlabel("Seconds of continuous use")
-    ax.set_ylabel("Frames per second")
-    ax.text(0.0, -0.4, "Illustrative trace (Napkin Math 2.9)", transform=ax.transAxes,
-            fontsize=9, color=C["neutral"])
-    sp.save(fig, out / f"thermal_wall_step{step}.svg")
+def tpu_roofline():
+    peak, ridge = calcs.TPU_PEAK, calcs.TPU_RIDGE
+    xs = np.logspace(1, 4, 400)
+    fig, ax = sp.plt.subplots(figsize=(5.8, 2.75))
+    m = xs <= ridge
+    ax.plot(xs[m], xs[m] * peak / ridge, color=C["memory"], lw=3.5)
+    ax.plot(xs[~m], [peak] * (~m).sum(), color=C["compute"], lw=3.5)
+    ax.axvline(ridge, color=C["neutral"], lw=1.2, ls="--")
+    ax.text(ridge * 0.92, 1.25, "Ridge\n1,350", color=C["neutral"], fontsize=11,
+            ha="right", va="bottom")
+    ax.text(5200, peak * 1.15, "92 TOPS peak", color=C["compute"], fontsize=11,
+            fontweight="bold", ha="center", va="bottom")
+    offs = {"MLP0": (9, -3, "left", "top"), "MLP1": (-10, 4, "right", "bottom"),
+            "LSTM0": (-11, 2, "right", "bottom"), "LSTM1": (9, -3, "left", "top"),
+            "CNN0": (4, -9, "left", "top"), "CNN1": (10, 0, "left", "center")}
+    for name, x, y in calcs.TPU_APPS:
+        ck = "memory" if x < ridge else "compute"
+        ax.plot([x], [y], "o", ms=10, color=C[ck], mec="white", mew=1.5, zorder=5)
+        dx, dy, ha, va = offs[name]
+        ax.annotate(f"{name} {y:g}", (x, y), xytext=(dx, dy),
+                    textcoords="offset points", ha=ha, va=va, fontsize=11,
+                    fontweight="bold", color=C[ck])
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlim(10, 1e4)
+    ax.set_ylim(1, 300)
+    ax.minorticks_off()
+    ax.set_xticks([10, 100, 1000, 10000])
+    ax.set_xticklabels(["10", "100", "1,000", "10,000"])
+    ax.set_yticks([1, 10, 100])
+    ax.set_yticklabels(["1", "10", "100"])
+    ax.set_xlabel("Operations per byte of weights read (log scale)")
+    ax.set_ylabel("Measured TOPS (log)")
+    sp.save(fig, out / "tpu_roofline.svg")
 
 
-for k in (1, 2):
-    thermal(k)
+tpu_roofline()
 
 # ---------------------------------------------------------------------------
 # 7. Voice assistant: audio leaving one billion devices (two steps)
 # ---------------------------------------------------------------------------
 sp.hbars_steps(out / "voice_upload", [
     ("Every microphone streams", 32e12, "danger", "32 TB/s"),
-    ("Wake word on the device", 32e12 / 860, "data", "≈37 GB/s: 860× less"),
+    ("Wake word on the device", 32e12 / 860, "data",
+     f"≈{32e12 / 860 / 1e9:.0f} GB/s: 860× less"),  # chapter's 860x
 ], "B/s", xlabel="Audio sent to the cloud (bytes per second, log scale)",
     size=sp.SHORT)
 
@@ -301,26 +348,36 @@ trends()
 #    EnergyAnchors): 10 μJ, 2.6 mJ, 15.9 mJ, 75.5 mJ, 1 kJ; span 100,000,000×.
 #    Step 2 adds Napkin Math 2.5: sending 1 MB by radio costs about 100 mJ,
 #    39 times the whole phone's 2.6 mJ; the NPU alone uses about 0.1 mJ.
+#    A measured row from MLPerf Tiny v1.2 (keyword spotting, energy track,
+#    best closed-division result, read by calcs.tiny_kws) sits under the
+#    chapter's TinyML anchor.
 # ---------------------------------------------------------------------------
 def energy(step):
+    tiny = min(calcs.tiny_kws(), key=lambda r: r[3])
     rows = [
         ("TinyML: keyword spotting", 10e-6, "compute", "≈10 μJ"),  # Greek mu: Helvetica slants the micro sign
+        ("Measured: KWS, Syntiant NDP9120", tiny[3] * 1e-6, "compute",
+         f"{tiny[3]:.1f} μJ (MLPerf Tiny)"),
         ("Mobile: MobileNetV2, phone", 2.6e-3, "memory", "≈2.6 mJ"),
-        ("Mobile: send 1 MB by radio", 0.1, "danger", "≈100 mJ: 39× the phone"),
+        ("Mobile: send 1 MB by radio", 0.1, "danger", f"≈100 mJ: {100 / 2.6:.0f}× the phone"),
         ("Edge: ResNet-50, Jetson", 15.9e-3, "data", "≈15.9 mJ"),
         ("Cloud: ResNet-50, A100", 75.5e-3, "danger", "≈75.5 mJ"),
         ("Cloud: LLM query (anchor)", 1e3, "danger", "≈1 kJ"),
     ]
-    fig, ax = sp.plt.subplots(figsize=(5.8, 2.75))
+    fig, ax = sp.plt.subplots(figsize=(5.8, 2.95))
     n = len(rows)
     for i, (label, v, ck, txt) in enumerate(rows):
         y = n - 1 - i
         send = label.startswith("Mobile: send")
+        meas = label.startswith("Measured")
         shown = step == 2 or not send
         alpha = 1.0 if shown else 0.0  # hidden rows keep their slot
         if send:
             ax.barh(y, v, left=1e-6, height=0.62, facecolor="white",
                     edgecolor=C[ck], lw=2.2, ls="--", alpha=alpha)
+        elif meas:
+            ax.barh(y, v, left=1e-6, facecolor=C["compute_l"], edgecolor=C[ck],
+                    lw=1.5, hatch="///", height=0.62)
         else:
             ax.barh(y, v, left=1e-6, color=C[ck], height=0.62)
         ax.text(-0.01, y, label, transform=ax.get_yaxis_transform(), ha="right",
@@ -329,14 +386,14 @@ def energy(step):
         ax.text(v * 2.2, y, txt, va="center", fontsize=12, fontweight="bold",
                 color=C[ck], alpha=alpha)
     # the phone's NPU alone, inside the whole-phone bar
-    ynpu = n - 2
+    ynpu = n - 3
     ax.plot([1e-4, 1e-4], [ynpu - 0.31, ynpu + 0.31], color="white", lw=2.5,
             alpha=1.0 if step == 2 else 0.0)
-    ax.text(1e-4, ynpu + 0.36, "NPU alone ≈0.1 mJ", color=C["memory"], fontsize=10,
-            fontweight="bold", ha="center", va="bottom", alpha=1.0 if step == 2 else 0.0)
+    ax.text(0.5, ynpu, "(tick: NPU alone ≈0.1 mJ)", color=C["memory"], fontsize=10,
+            fontweight="bold", ha="left", va="center", alpha=1.0 if step == 2 else 0.0)
     ax.annotate("", xy=(4e5, n - 1), xytext=(4e5, 0),
                 arrowprops=dict(arrowstyle="<->", color=C["danger"], lw=2))
-    ax.text(6e5, (n - 1) / 2, "100,000,000×", color=C["danger"], fontsize=12,
+    ax.text(6e5, (n - 1) / 2, f"{1e3 / 10e-6:,.0f}×", color=C["danger"], fontsize=12,
             fontweight="bold", rotation=90, va="center", ha="left")
     ax.set_xscale("log")
     ax.set_xlim(1e-6, 1e6)
@@ -359,13 +416,16 @@ for k in (1, 2):
 # 10. Smart doorbell scorecard on the ESP32-S3 (System Paradigms, S2.3.2 and
 #     fig. 3): 0.5 MB of weights fill 11.9% of 4.2 MB flash; 25 MFLOP at
 #     about 0.25 GFLOP/s plus 1 ms overhead = 101 ms per frame. Step 1: the
-#     200 ms chime, 101 / 200 = 51% (derived). Step 2: a 50 ms chime, 202%.
+#     200 ms chime, 101 / 200 = 50.5%; step 2: a 50 ms chime, 202% (calcs.py).
 # ---------------------------------------------------------------------------
 def doorbell(step):
-    lat = 101 / 200 * 100 if step == 1 else 202.0
-    lat_txt = "101 ms of 200 ms: 51%" if step == 1 else "101 ms of 50 ms: 202%"
+    ms = 25e6 / 0.25e9 * 1e3 + 1          # 25 MFLOP at 0.25 GFLOP/s, +1 ms
+    budget = 200 if step == 1 else 50
+    lat = ms / budget * 100
+    lat_txt = f"{ms:.0f} ms of {budget} ms: {lat:.1f}%".replace(".0%", "%")
+    flash = 0.5 / 4.2 * 100
     rows = [("Latency\nper frame", lat, "danger" if lat > 100 else "data", lat_txt),
-            ("Weights in\n4.2 MB flash", 11.9, "data", "11.9%")]
+            ("Weights in\n4.2 MB flash", flash, "data", f"{flash:.1f}%")]
     fig, ax = sp.plt.subplots(figsize=(4.0, 2.3))
     for i, (label, v, ck, txt) in enumerate(rows):
         y = 1 - i
