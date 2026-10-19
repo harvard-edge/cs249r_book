@@ -29,18 +29,6 @@ so nothing moves. Every value is sourced:
     price of fairness (Napkin Math 15.2): $150 baseline, $75 after.
   - Feedback (Napkin Math 15.3, illustrative): gap 3.0 points, factor 1.10 and
     0.90 per quarter, gate 5 points.
-  - Patterson et al. 2021, Table 4: net tCO2e GShard-600B 4.3, T5 46.7,
-    Switch 59.1, Meena 96.4, GPT-3 552.1; net kg CO2e/kWh 0.177, 0.545, 0.330,
-    0.415, 0.429 (GShard, T5, Switch, Meena, GPT-3).
-  - DLRM three-year TCO (book scenario, chapter table 10): training $38K,
-    inference $1.52M, operations $510K; modeled accelerator carbon 1.5 t and
-    97.3 t.
-  - Patterson et al. 2022: inference about 3/5 of Google's ML energy
-    (2019 to 2021). Wu et al. 2022, Fig. 3 and Sec. III: Meta AI power capacity
-    10:20:70 (experimentation, training, inference); embodied about 30 percent
-    of the carbon of large-scale ML tasks (location-based).
-  - DP-SGD per-sample gradients (chapter Sec. 15.5.2): KWS 204.8 MB per batch
-    of 256, GPT-2 1.5 TB, H100 memory 80 GB.
   - Shared threshold (chapter figure 2 and Sec. 15.3.2.1): 75 percent overall
     accuracy at one line, 81.25 percent at the other; Subgroup B's errors
     triple (1 to 3) while Subgroup A's fall to 0.
@@ -49,9 +37,12 @@ so nothing moves. Every value is sourced:
   - Next-lecture teaser: Strubell et al. 2019 (284 t estimate; car lifetime
     57 t); the measured value is revealed in Lecture 15b.
 
+Derived values come from calcs.py (imported below), never typed here.
+
 The Patterson, DLRM TCO, fleet-share, lineage, and DP-SGD figures moved to
-Lecture 15b on 2026-10-17 (copied or regenerated there); their code stays here
-so the files in this folder remain reproducible.
+Lecture 15b on 2026-10-17 and are generated there; their generators were
+removed from this file on 2026-10-19 (the old SVG and PDF files they wrote
+remain in this folder, unused).
 
 Run from this folder: python3 make_figs.py
 """
@@ -63,6 +54,9 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import calcs as calc  # noqa: E402
 
 plt = sp.plt
 C = sp.C
@@ -116,8 +110,9 @@ def bar_steps(stem, rows, steps, size, xmax, xlabel, note=None, vlines=None,
 
 
 # Hook: share of Black patients among the auto-enrolled (Obermeyer Fig. 1B)
-fig_rows = [("Ranked by predicted cost", 17.7, "neutral", "17.7%", 1),
-            ("Ranked by health", 46.5, "danger", "46.5%   2.6× as many", 3)]
+fig_rows = [("Ranked by predicted cost", calc.HOOK_COST, "neutral", f"{calc.HOOK_COST}%", 1),
+            ("Ranked by health", calc.HOOK_HEALTH, "danger",
+             f"{calc.HOOK_HEALTH}%   {calc.f(calc.HOOK_MULT)}× as many", 3)]
 for k in (1, 2, 3):
     fig, ax = plt.subplots(figsize=(5.8, 1.6))
     for i, (label, v, ck, txt, first) in enumerate(fig_rows):
@@ -130,7 +125,7 @@ for k in (1, 2, 3):
                 color=C[ck], alpha=1.0 if on else 0.0)
     # the hidden bar's slot: a dashed outline and ??? until the reveal
     show_q = k == 2
-    ax.barh(0, 46.5, height=0.6, fill=False, ls="--", lw=1.2,
+    ax.barh(0, calc.HOOK_HEALTH, height=0.6, fill=False, ls="--", lw=1.2,
             edgecolor=C["neutral"], alpha=1.0 if show_q else 0.0)
     ax.text(23, 0, "???", ha="center", va="center", fontsize=16,
             fontweight="bold", color=C["danger"], alpha=1.0 if show_q else 0.0)
@@ -145,9 +140,10 @@ for k in (1, 2, 3):
 
 # Segment 1 measured: the training label decides who is selected (Table 2)
 bar_steps("label_choice", [
-    ("Label: total cost", 14.1, "neutral", "14.1%", 1),
-    ("Label: avoidable cost", 21.0, "compute", "21.0%", 2),
-    ("Label: active chronic illnesses", 26.7, "data", "26.7%   1.9× the cost label", 3),
+    ("Label: total cost", calc.LABEL_COST, "neutral", f"{calc.LABEL_COST}%", 1),
+    ("Label: avoidable cost", calc.LABEL_AVOID, "compute", f"{calc.LABEL_AVOID}%", 2),
+    ("Label: active chronic illnesses", calc.LABEL_CHRONIC, "data",
+     f"{calc.LABEL_CHRONIC}%   {calc.f(calc.LABEL_MULT)}× the cost label", 3),
 ], 3, (5.8, 2.2), 40, "Black patients among the top 3% of predicted risk (%)")
 
 # Proxy and goal (illustrative, after Systems Perspective 15.2)
@@ -172,7 +168,7 @@ for k in (1, 2):
                 fontweight="bold", va="center", transform=ax.transData)
         ax.text(1.02, 0.95, "Satisfaction  0.95", color=C["data"], fontsize=12,
                 fontweight="bold", va="center")
-        ax.text(0.80, 1.09, "Gap 0.25", color=C["danger"], fontsize=12,
+        ax.text(0.80, 1.09, f"Gap {calc.f(calc.PROXY_GAP, 2)}", color=C["danger"], fontsize=12,
                 fontweight="bold", ha="center")
     else:
         ax.text(1.02, 1.20, "Clicks  1.20", color=C["memory"], fontsize=12,
@@ -191,13 +187,14 @@ for k in (1, 2):
     sp.save(fig, out / f"proxy_goal_step{k}.svg")
 
 # Gender Shades: one aggregate number, then the groups (Face++)
+# drawn for the right column of its frame (about 8.7 by 5.2 cm)
 bar_steps("gender_shades", [
-    ("All faces (reported)", 10.0, "neutral", "10.0%", 1),
-    ("Lighter men", 0.8, "memory", "0.8%", 2),
-    ("Darker men", 0.7, "memory", "0.7%", 2),
-    ("Lighter women", 9.8, "memory", "9.8%", 2),
-    ("Darker women", 34.5, "danger", "34.5%   43× lighter men", 2),
-], 2, (5.8, 2.5), 52, "Face++ gender-classification error (%)")
+    ("All faces (reported)", calc.GS_ALL, "neutral", f"{calc.GS_ALL}%", 1),
+    ("Lighter men", calc.GS_LM, "memory", f"{calc.GS_LM}%", 2),
+    ("Darker men", calc.GS_DM, "memory", f"{calc.GS_DM}%", 2),
+    ("Lighter women", calc.GS_LF, "memory", f"{calc.GS_LF}%", 2),
+    ("Darker women", calc.GS_DF, "danger", f"{calc.GS_DF}%  ({calc.f(calc.GS_MULT, 0)}×)", 2),
+], 2, (3.45, 2.05), 62, "Face++ gender-classification error (%)")
 
 # Margin of error against the number of examples in one group
 n = np.logspace(2, 5, 300)
@@ -206,8 +203,8 @@ fig, ax = plt.subplots(figsize=(3.6, 2.0))
 ax.plot(n, marg, color=C["memory"], lw=3)
 ax.axhline(1.0, color=C["danger"], lw=1.5, ls="--")
 ax.text(125, 1.35, "Target: ±1 point", color=C["danger"], fontsize=10, fontweight="bold")
-ax.plot([9604], [1.0], "o", ms=10, color=C["danger"], zorder=5)
-ax.annotate("9,604", (9604, 1.0), xytext=(0, 12), textcoords="offset points",
+ax.plot([calc.N_ONE_1PT], [1.0], "o", ms=10, color=C["danger"], zorder=5)
+ax.annotate(f"{calc.N_ONE_1PT:,.0f}", (calc.N_ONE_1PT, 1.0), xytext=(0, 12), textcoords="offset points",
             ha="center", fontsize=12, fontweight="bold", color=C["danger"])
 ax.set_xscale("log")
 ax.set_xlim(100, 1e5)
@@ -215,7 +212,7 @@ ax.set_ylim(0, 10)
 ax.set_xticks([100, 1000, 10000, 100000])
 ax.set_xticklabels(["100", "1,000", "10,000", "100,000"])
 ax.set_xlabel("Examples from the group (log scale)")
-ax.set_ylabel("95% margin (points)")
+ax.set_ylabel("95% margin, one group\n(points)")
 sp.save(fig, out / "margin_curve.svg")
 
 # Raji and Buolamwini 2019: darker-female error before and after the audit
@@ -255,9 +252,9 @@ for k in (1, 2):
 metrics = [("False positive rate", 44.85, 23.45, 1),
            ("False negative rate", 27.99, 47.72, 1),
            ("Precision (PPV)", 63.0, 59.0, 2),
-           ("Base rate (derived)", 51.4, 39.4, 2)]
+           ("Base rate (derived)", calc.r(calc.BASE_BLACK_PCT), calc.r(calc.BASE_WHITE_PCT), 2)]
 for k in (1, 2):
-    fig, ax = plt.subplots(figsize=(5.8, 2.4))
+    fig, ax = plt.subplots(figsize=(3.45, 1.85))
     nm = len(metrics)
     for i, (name, b, w, first) in enumerate(metrics):
         y = nm - 1 - i
@@ -265,165 +262,57 @@ for k in (1, 2):
         a = 1.0 if on else 0.0
         ax.barh(y + 0.19, b, height=0.36, color=C["compute"], alpha=a)
         ax.barh(y - 0.19, w, height=0.36, color=C["memory"], alpha=a)
-        ax.text(b + 0.8, y + 0.19, f"{b:.0f}%", va="center", fontsize=11,
+        ax.text(b + 1.0, y + 0.19, f"{b:.0f}%", va="center", fontsize=10,
                 color=C["compute"], fontweight="bold", alpha=a)
-        ax.text(w + 0.8, y - 0.19, f"{w:.0f}%", va="center", fontsize=11,
+        ax.text(w + 1.0, y - 0.19, f"{w:.0f}%", va="center", fontsize=10,
                 color=C["memory"], fontweight="bold", alpha=a)
         ax.text(-0.01, y, name, transform=ax.get_yaxis_transform(), ha="right",
-                va="center", fontsize=12, fontweight="bold", color=C["text"], alpha=a)
-    ax.text(68, 3.2, "Black defendants", color=C["compute"], fontsize=11, fontweight="bold")
-    ax.text(68, 2.75, "White defendants", color=C["memory"], fontsize=11, fontweight="bold")
+                va="center", fontsize=10, fontweight="bold", color=C["text"], alpha=a)
+    ax.text(72, 3.15, "Black", color=C["compute"], fontsize=10, fontweight="bold")
+    ax.text(72, 2.70, "White", color=C["memory"], fontsize=10, fontweight="bold")
     ax.axhline(1.5, color=C["grid"], lw=1, alpha=1.0 if k >= 2 else 0.0)
     ax.set_yticks([])
-    ax.set_xlim(0, 100)
+    ax.set_xlim(0, 90)
     ax.set_ylim(-0.6, nm - 0.4)
     ax.spines["left"].set_visible(False)
     ax.grid(axis="x", color=C["grid"], linewidth=0.6)
     ax.set_axisbelow(True)
+    ax.set_xticks([0, 20, 40, 60, 80])
     ax.set_xlabel("Percent")
     sp.save(fig, out / f"compas_step{k}.svg")
 
 # Price of fairness, Group B utility per applicant (constructed scenario)
 bar_steps("price", [
-    ("Before (TPR 60%)", 150, "memory", "$150", 1),
-    ("TPR raised to 90%", 75, "danger", "$75   half the utility", 1),
+    ("Before (TPR 60%)", calc.U_BEFORE, "memory", f"${calc.U_BEFORE:,.0f}", 1),
+    ("TPR raised to 90%", calc.U_AFTER, "danger", f"${calc.U_AFTER:,.0f}   half the utility", 1),
 ], 1, (4.4, 1.3), 260, "Group B utility per applicant (US$)")
 
 # Feedback: projected TPR gap by quarter (Napkin Math 15.3, illustrative)
+# drawn at its slot (about 13.5 by 5.2 cm); "illustrative" is in the slide credit
 q = np.arange(0, 9)
-grow = 3.0 * 1.10 ** q
-decay = 3.0 * 0.90 ** q
+grow = calc.GAP0 * calc.ALPHA ** q
+decay = calc.GAP0 * calc.ALPHA_EXPL ** q
 for k in (1, 2):
-    fig, ax = plt.subplots(figsize=(5.0, 2.7))
-    ax.axhline(5.0, color=C["danger"], lw=1.6, ls="--")
+    fig, ax = plt.subplots(figsize=(5.3, 2.05))
+    ax.axhline(calc.GATE, color=C["danger"], lw=1.6, ls="--")
     ax.text(0.1, 4.85, "Release gate: 5 points", color=C["danger"], fontsize=11,
             fontweight="bold", va="top")
     ax.plot(q, grow, "-o", color=C["compute"], lw=3, ms=6)
-    ax.plot([6], [3.0 * 1.1 ** 6], "o", ms=12, color=C["danger"], zorder=5)
-    ax.annotate("Quarter 6: 5.3", (6, 3.0 * 1.1 ** 6), xytext=(-10, 10),
+    ax.plot([calc.K_FAIL], [calc.GAP_AT_FAIL], "o", ms=12, color=C["danger"], zorder=5)
+    ax.annotate(f"Quarter {calc.K_FAIL}: {calc.f(calc.GAP_AT_FAIL)}", (calc.K_FAIL, calc.GAP_AT_FAIL), xytext=(-10, 10),
                 textcoords="offset points", ha="right", fontsize=11,
                 fontweight="bold", color=C["danger"])
-    ax.text(8.15, grow[-1], "factor 1.10", color=C["compute"], fontsize=11,
+    ax.text(8.15, grow[-1], f"factor {calc.f(calc.ALPHA, 2)}", color=C["compute"], fontsize=11,
             fontweight="bold", va="center")
     a = 1.0 if k == 2 else 0.0
     ax.plot(q, decay, "-o", color=C["data"], lw=3, ms=6, alpha=a)
-    ax.text(8.15, decay[-1], "factor 0.90\n(randomized\napprovals)", color=C["data"],
+    ax.text(8.15, decay[-1], f"factor {calc.f(calc.ALPHA_EXPL, 2)}\n(randomized\napprovals)", color=C["data"],
             fontsize=11, fontweight="bold", va="center", alpha=a)
     ax.set_xlim(0, 8)
     ax.set_ylim(0, 7.5)
     ax.set_xlabel("Quarterly retraining cycle")
     ax.set_ylabel("TPR gap (points)")
-    ax.text(0.0, -0.33, "Illustrative: factor fitted from two audits (Napkin Math 15.3)",
-            transform=ax.transAxes, fontsize=9, color=C["neutral"])
     sp.save(fig, out / f"feedback_step{k}.svg")
-
-# Patterson et al. 2021, Table 4: measured training emissions
-pat = [("GShard-600B", 4.3, "0.177"), ("T5", 46.7, "0.545"),
-       ("Switch", 59.1, "0.330"), ("Meena", 96.4, "0.415"), ("GPT-3", 552.1, "0.429")]
-# net kg CO2e/kWh per Patterson Table 4: GShard 0.177 (North Carolina),
-# T5 0.545 (Taiwan), Switch 0.330, Meena 0.415 (Georgia), GPT-3 0.429 (US average)
-for k in (1, 2):
-    fig, ax = plt.subplots(figsize=(5.8, 2.5))
-    for i, (name, v, ci) in enumerate(pat):
-        y = len(pat) - 1 - i
-        ck = "danger" if name == "GPT-3" else "neutral"
-        ax.barh(y, v, height=0.62, color=C[ck])
-        ax.text(-0.01, y, name, transform=ax.get_yaxis_transform(), ha="right",
-                va="center", fontsize=12, fontweight="bold", color=C["text"])
-        ax.text(v * 1.12, y, f"{v:g} t", va="center", fontsize=12,
-                fontweight="bold", color=C[ck])
-        ax.text(5000, y, f"{ci} kg/kWh", va="center", ha="left", fontsize=11,
-                color=C["memory"], fontweight="bold", alpha=1.0 if k == 2 else 0.0)
-    ax.text(5000, len(pat) - 0.35, "Grid intensity", fontsize=10, color=C["memory"],
-            va="bottom", alpha=1.0 if k == 2 else 0.0)
-    ax.set_xscale("log")
-    ax.set_xlim(2, 25000)
-    ax.set_ylim(-0.6, len(pat) - 0.2)
-    ax.set_yticks([])
-    ax.spines["left"].set_visible(False)
-    ax.grid(axis="x", color=C["grid"], linewidth=0.6)
-    ax.set_axisbelow(True)
-    ax.set_xlabel("Net training emissions (tonnes CO₂e, log scale)")
-    sp.save(fig, out / f"patterson_step{k}.svg")
-
-# DLRM three-year TCO and modeled accelerator carbon (book scenario, table 10)
-for k in (1, 2):
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(5.8, 2.9),
-                                   gridspec_kw={"height_ratios": [1, 1.25], "hspace": 0.9})
-    parts = [("Training", 0.038, "neutral"), ("Inference", 1.52, "compute"),
-             ("Operations", 0.51, "neutral_l")]
-    left = 0
-    for name, v, ck in parts:
-        ax1.barh(0, v, left=left, height=0.6, color=C[ck], edgecolor="white")
-        left += v
-    ax1.text(0.04, 0.55, "Training $38K (1.9%)", fontsize=11, color=C["text"],
-             va="bottom", fontweight="bold")
-    ax1.text(0.038 + 1.52 / 2, 0, "Inference $1.52M (73.5%)", fontsize=11,
-             color="white", ha="center", va="center", fontweight="bold")
-    ax1.text(0.038 + 1.52 + 0.255, 0, "Ops $510K", fontsize=11, ha="center",
-             va="center", color=C["text"], fontweight="bold")
-    ax1.set_xlim(0, 2.2)
-    ax1.set_ylim(-0.4, 1.2)
-    ax1.set_yticks([])
-    ax1.spines["left"].set_visible(False)
-    ax1.set_xlabel("Three-year cost (US$ millions)")
-    a = 1.0 if k == 2 else 0.0
-    for y, (name, v, ck) in zip((1, 0), (("12 training cycles", 1.5, "neutral"),
-                                         ("3 years of inference", 97.3, "compute"))):
-        ax2.barh(y, v, height=0.6, color=C[ck], alpha=a)
-        ax2.text(-0.01, y, name, transform=ax2.get_yaxis_transform(), ha="right",
-                 va="center", fontsize=11, fontweight="bold", color=C["text"], alpha=a)
-        ax2.text(v + 1.5, y, f"{v:g} t", va="center", fontsize=11, fontweight="bold",
-                 color=C[ck], alpha=a)
-    ax2.text(118, 0, "63×", va="center", fontsize=14, fontweight="bold",
-             color=C["danger"], alpha=a)
-    ax2.set_xlim(0, 135)
-    ax2.set_ylim(-0.5, 1.5)
-    ax2.set_yticks([])
-    ax2.spines["left"].set_visible(False)
-    ax2.spines["bottom"].set_alpha(a)
-    ax2.tick_params(axis="x", colors=C["text"] if k == 2 else "white")
-    ax2.set_xlabel("Modeled accelerator carbon (t CO₂e)",
-                   color=C["text"] if k == 2 else "white")
-    sp.save(fig, out / f"tco_step{k}.svg")
-
-# Measured fleet shares (Patterson et al. 2022; Wu et al. 2022)
-fleet = [
-    ("Google ML energy,\n2019 to 2021", [("Training ~2/5", 40, "neutral_l"),
-                                        ("Inference ~3/5", 60, "compute")], 1),
-    ("Meta AI power capacity:\nexp., training, inference", [("10", 10, "neutral_l"), ("Training 20", 20, "neutral"),
-                                ("Inference 70", 70, "compute")], 2),
-    ("Meta large ML tasks,\ncarbon", [("Embodied ~30", 30, "network"),
-                                     ("Operational ~70", 70, "neutral_l")], 3),
-]
-for k in (1, 2, 3):
-    fig, ax = plt.subplots(figsize=(5.8, 2.5))
-    for i, (label, segs, first) in enumerate(fleet):
-        y = len(fleet) - 1 - i
-        a = 1.0 if k >= first else 0.0
-        left = 0
-        for name, v, ck in segs:
-            ax.barh(y, v, left=left, height=0.62, color=C[ck], edgecolor="white", alpha=a)
-            dark = ck in ("compute", "network", "neutral")
-            ax.text(left + v / 2, y, name, ha="center", va="center", fontsize=11,
-                    fontweight="bold", color="white" if dark else C["text"], alpha=a)
-            left += v
-        ax.text(-0.01, y, label, transform=ax.get_yaxis_transform(), ha="right",
-                va="center", fontsize=11, fontweight="bold", color=C["text"], alpha=a)
-    ax.set_xlim(0, 100)
-    ax.set_ylim(-0.6, len(fleet) - 0.4)
-    ax.set_yticks([])
-    ax.spines["left"].set_visible(False)
-    ax.set_xlabel("Share (%)")
-    sp.save(fig, out / f"fleet_shares_step{k}.svg")
-
-# DP-SGD per-sample gradient memory against one accelerator (chapter Sec. 15.5.2)
-bar_steps("dpsgd", [
-    ("KWS, 200K parameters", 204.8, "memory", "204.8 MB", 1),
-    ("GPT-2, 1.5B parameters", 1.5e6, "danger", "1.5 TB", 1),
-], 1, (5.8, 1.6), 3e7, "Per-sample gradients for a batch of 256 (MB, log scale)",
-    vlines=[(8e4, "One H100: 80 GB", "neutral", 1)], log=True, xmin=30)
-
 
 # =============================================================================
 # Diagrams (SVG)
@@ -484,23 +373,23 @@ class Svg:
             (out / name).write_text(svg)
 
 
-# Hook mechanism: need, care, cost; the model sees only cost
-g = Svg(900, 330)
-for i, (lab, x) in enumerate((("Health need", 40), ("Care received", 330), ("Cost", 620))):
-    g.rect(x, 40, 240, 80, C["memory_l"] if i < 2 else C["compute_l"],
+# Hook mechanism: need, care, cost; the model sees only cost. Drawn for the
+# left column of its frame (about 8 by 5 cm), beside Obermeyer Fig. 1A.
+g = Svg(520, 330)
+for i, (lab, x) in enumerate((("Health\nneed", 5), ("Care\nreceived", 185), ("Cost", 365))):
+    g.rect(x, 20, 150, 90, C["memory_l"] if i < 2 else C["compute_l"],
            C["memory"] if i < 2 else C["compute"])
-    g.text(x + 120, 80, lab, 26, weight="bold")
-for x in (280, 570):
-    g.line(x + 2, 80, x + 46, 80, C["neutral"])
-g.text(740, 160, "The model's label", 22, C["compute"], "bold")
-g.line(740, 145, 740, 126, C["compute"])
-g.text(160, 160, "What the program\nshould target", 20, C["memory"], "bold")
+    g.text(x + 75, 65, lab, 24, weight="bold")
+for x in (155, 335):
+    g.line(x + 3, 65, x + 26, 65, C["neutral"])
+g.text(440, 150, "The model's\nlabel", 21, C["compute"], "bold")
+g.text(80, 150, "The program's\ngoal", 21, C["memory"], "bold")
 # step 2: the access gap
-g.rect(330, 205, 530, 95, C["danger_l"], C["danger"], first=2)
-g.text(595, 235, "Unequal access: at the same illness,", 22, C["danger"], "bold", first=2)
-g.text(595, 270, "$1,801 less is spent per Black patient per year", 22, C["danger"],
-       "bold", first=2)
-g.line(450, 200, 450, 126, C["danger"], first=2)
+g.rect(5, 200, 510, 120, C["danger_l"], C["danger"], first=2)
+g.text(260, 228, "Unequal access: at the same illness,", 22, C["danger"], "bold", first=2)
+g.text(260, 260, "$1,801 less is spent per year", 22, C["danger"], "bold", first=2)
+g.text(260, 292, "on a Black patient", 22, C["danger"], "bold", first=2)
+g.line(170, 196, 170, 72, C["danger"], first=2)
 g.write("care_chain", 2)
 
 # Verification against validation
@@ -622,30 +511,6 @@ g.line(262, 340, 262, 95, C["data"])
 g.text(270, 270, "retrain", 18, C["data"], "bold", "start")
 g.write("censored_loop", 1)
 
-# Lineage: an erasure request follows the graph to every derived artifact (KWS)
-g = Svg(900, 360)
-nodes = [("Recording\nand consent", 20, 140), ("Spectrogram\ncache", 200, 40),
-         ("Feature\nembeddings", 200, 240), ("Training\nsnapshot", 380, 140),
-         ("Checkpoint\nv12", 560, 140), ("Devices\nrunning v12", 740, 140)]
-edges = [(0, 1), (0, 2), (1, 3), (2, 3), (3, 4), (4, 5)]
-W, H = 150, 80
-for a, b in edges:
-    xa, ya = nodes[a][1] + W, nodes[a][2] + H / 2
-    xb, yb = nodes[b][1], nodes[b][2] + H / 2
-    g.line(xa + 2, ya, xb - 4, yb, C["neutral"], sw=2)
-    g.line(xa + 2, ya, xb - 4, yb, C["danger"], sw=4, first=2)
-for i, (lab, x, y) in enumerate(nodes):
-    g.rect(x, y, W, H, C["memory_l"], C["memory"])
-    g.rect(x, y, W, H, C["danger_l"], C["danger"], first=2, sw=3)
-    g.text(x + W / 2, y + H / 2, lab, 20, C["text"], "bold", first=1)
-g.text(95, 275, "Erasure\nrequest", 21, C["danger"], "bold", first=2)
-g.line(95, 245, 95, 226, C["danger"], first=2)
-g.text(635, 292, "Weights: retrain,\nunlearn, or other\ncontrol", 20, C["danger"], "bold", first=3)
-g.text(815, 292, "Update the\nfleet", 20, C["danger"], "bold", first=3)
-g.text(450, 345, "Illustrative lineage for the KWS pipeline (chapter Sec. 15.5.4)", 17,
-       C["neutral"], first=1)
-g.write("lineage", 3)
-
 # Shared threshold on two score distributions (chapter figure 2, regenerated in
 # two steps). Left of the line is approved; circles would repay, crosses would
 # not. 75 percent overall at the first line (A 3 errors, B 1); 81.25 percent at
@@ -708,11 +573,11 @@ g.write("interventions", 3)
 # 0.05, C strict equality at 0 with a large drop. Curve drawn through the
 # three points as y = 0.85 + 0.1729 x^0.337.
 xx = np.linspace(0, 0.18, 200)
-yy = 0.85 + 0.1729 * xx ** 0.337
+yy = calc.frontier(xx)
 fig, ax = plt.subplots(figsize=(3.9, 3.0))
 ax.plot(xx, yy, color=C["neutral"], lw=2.5, ls="--")
-for x, y, ck, lab, off, ha in ((0.18, 0.85 + 0.1729 * 0.18 ** 0.337, "danger", "A: unconstrained", (-6, 10), "left"),
-                               (0.05, 0.913, "data", "B: 91% accuracy,\ndisparity 0.05", (-12, -36), "right"),
+for x, y, ck, lab, off, ha in ((calc.DISP_A, calc.frontier(calc.DISP_A), "danger", "A: unconstrained", (-6, 10), "left"),
+                               (calc.DISP_B, calc.frontier(calc.DISP_B), "data", f"B: {calc.frontier(calc.DISP_B)*100:.0f}% accuracy,\ndisparity {calc.DISP_B}", (-12, -36), "right"),
                                (0.0, 0.85, "memory", "C: strict equality,\nlarge drop", (-8, 4), "right")):
     ax.plot([x], [y], "o", ms=11, color=C[ck], zorder=5)
     ax.annotate(lab, (x, y), xytext=off, textcoords="offset points", ha=ha,
