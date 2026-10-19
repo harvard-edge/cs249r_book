@@ -46,7 +46,8 @@ derived value says so.
     deadlines chapter table 19 (illustrative policy).
   - Retraining gate: chapter listing 5 and equation 10.
   - Retraining cadences: Hazelwood et al., HPCA 2018, Table II. Freshness:
-    He et al. 2014, Fig. 2 (bar heights read from the figure, approximate).
+    He et al. 2014, Fig. 2 is shown as the paper's own image (he_fig2.png),
+    so no redraw is generated here.
   - Sawtooth and T*: equations 8 to 12, Napkin Math 14.6, table 17. Cost per
     day at 1, 3, 7, 30 days derived from the same expression.
   - Scheduled against triggered retraining: chapter figure 9 redrawn from
@@ -71,6 +72,9 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import calcs as K  # noqa: E402  (every derived number on the slides)
 
 plt = sp.plt
 out = Path(__file__).parent
@@ -442,21 +446,13 @@ for k in (1, 2, 3):
 # -----------------------------------------------------------------------------
 # 7. Outcomes needed to confirm a drop from 95 percent (derived)
 # -----------------------------------------------------------------------------
-ZA, ZB = 1.959964, 0.841621
-
-
-def n_needed(p0, p1):
-    return ((ZA * math.sqrt(p0 * (1 - p0)) + ZB * math.sqrt(p1 * (1 - p1)))
-            / (p0 - p1)) ** 2
-
-
-drops = [(5, 0.90), (2, 0.93), (1, 0.94)]
-need = [n_needed(0.95, p1) for _, p1 in drops]  # about 185, 1,030, 3,930
+drops = K.DROPS
+need = K.NEED  # about 185, 1,030, 3,930 (calcs.py)
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(4.4, 2.4))
     for i, ((d, p1), n) in enumerate(zip(drops, need)):
         ax.bar(i, n, 0.55, color=C["danger"])
-        ax.text(i, n * 1.15, f"{round(n, -1) if n > 1000 else round(n):,.0f}",
+        ax.text(i, n * 1.15, K.need_label(n),
                 ha="center", va="bottom", fontsize=13, fontweight="bold",
                 color=C["danger"])
     a = 1.0 if k == 2 else 0.0
@@ -484,10 +480,13 @@ MIN, HOUR, DAY = 1, 60, 1440
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.6, 2.5))
     rws = [  # label, start, end, color, printed, step
-        ("1,000 labels at 1/s", MIN, 16.7, "data", "16.7 min", 1),
-        ("1,000 labels at 100/day", MIN, 10 * DAY, "danger", "10 days", 1),
+        ("1,000 labels at 1/s", MIN, K.T_FAST_S / 60, "data",
+         f"{K.f(K.T_FAST_S / 60)} min", 1),
+        ("1,000 labels at 100/day", MIN, K.T_SLOW_D * DAY, "danger",
+         f"{K.T_SLOW_D:.0f} days", 1),
         ("Ranking: clicks", HOUR, DAY, "neutral", "within hours", 2),
-        ("Card fraud: disputes", MIN, 120 * DAY, "neutral", "up to 120 days", 2),
+        ("Card fraud: disputes", MIN, K.FRAUD_DAYS * DAY, "neutral",
+         f"up to {K.FRAUD_DAYS} days", 2),
         ("Home resale prices", 90 * DAY, 180 * DAY, "neutral", "3 to 6 months", 2),
     ]
     n = len(rws)
@@ -540,8 +539,7 @@ for k in (1, 2):
     ax.set_xlim(8, 12000)
     ax.set_ylim(-0.03, 1.05)
     ax.set_xticks([10, 100, 1000, 10000])
-    ax.set_xticklabels(["10\n10 s\n2.4 h", "100\n1.7 min\n1 day",
-                        "1,000\n16.7 min\n10 days", "10,000\n2.8 h\n100 days"],
+    ax.set_xticklabels([f"{n:,}\n{a}\n{b}" for n, a, b in K.RAB_TICKS],
                        fontsize=10)
     ax.text(-0.09, -0.07, "samples\nat 1/s\nat 100/day", ha="right", va="top",
             fontsize=10, color=C["neutral"], transform=ax.transAxes)
@@ -555,21 +553,22 @@ for k in (1, 2):
 # -----------------------------------------------------------------------------
 # 10. Cost of a silent failure (Napkin Math 14.3), copied from Part 1
 # -----------------------------------------------------------------------------
-fig, ax = plt.subplots(figsize=(3.8, 1.15))
-for i, (lab, v, ck, s_) in enumerate((("Monthly review", 191781, "danger", "$191,781"),
-                                       ("Daily check", 6849, "data", "$6,849"))):
+fig, ax = plt.subplots(figsize=(3.6, 0.7))
+for i, (lab, v, ck) in enumerate((("Monthly review", K.LOSS_MONTHLY, "danger"),
+                                   ("Daily check", K.LOSS_DAILY, "data"))):
     y = 1 - i
-    ax.barh(y, v, color=C[ck], height=0.62)
-    ax.text(v + 5000, y, s_, va="center", fontsize=12, color=C[ck], fontweight="bold")
+    ax.barh(y, v, color=C[ck], height=0.66)
+    ax.text(v + 5000, y, f"${v:,.0f}", va="center", fontsize=12, color=C[ck],
+            fontweight="bold")
     ax.text(-4000, y, lab + " ", ha="right", va="center", fontsize=12,
             fontweight="bold", color=C["text"])
 ax.set_xlim(0, 290000)
 ax.set_xticks([0, 100000, 200000])
 ax.set_xticklabels(["$0", "$100K", "$200K"], fontsize=11)
 ax.set_yticks([])
-ax.set_ylim(-0.6, 1.6)
+ax.set_ylim(-0.5, 1.5)
 ax.spines["left"].set_visible(False)
-ax.set_xlabel("Revenue lost per incident", fontsize=11)
+ax.set_xlabel("Revenue lost per incident", fontsize=11, labelpad=2)
 axis_clean(ax)
 sp.save(fig, out / "silent_cost.svg")
 
@@ -582,9 +581,9 @@ crit = 1.36 * np.sqrt(2 / nn)
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(4.6, 2.4))
     ax.plot(nn, crit, color=C["memory"], lw=3)
-    for n_, s_, lab in ((1e3, "0.061", ""), (1e5, "0.006", ""),
-                        (1e6, "0.0019", " (derived)")):
-        v = 1.36 * math.sqrt(2 / n_)
+    for n_, nd, lab in ((1e3, 3, ""), (1e5, 3, ""), (1e6, 4, " (derived)")):
+        v = K.KS[n_]
+        s_ = f"{v:.{nd}f}"
         ax.plot([n_], [v], "o", ms=9, color=C["memory"], zorder=5)
         below = n_ < 1e6
         ax.text(n_ / 1.3 if below else n_ * 1.35, v * (0.5 if below else 1.25),
@@ -597,7 +596,8 @@ for k in (1, 2):
     ax.annotate("", xy=(1e6, 0.0021), xytext=(1e6, 0.092),
                 arrowprops=dict(arrowstyle="<->", color=C["danger"], lw=1.8),
                 alpha=a)
-    ax.text(1.4e6, 0.02, "50 times\nsmaller", fontsize=11, color=C["danger"],
+    ax.text(1.4e6, 0.02, f"{K.KS_GATE_RATIO:.0f} times\nsmaller", fontsize=11,
+            color=C["danger"],
             fontweight="bold", alpha=a, va="center")
     ax.set_xscale("log")
     ax.set_yscale("log")
@@ -619,35 +619,35 @@ for k in (1, 2):
 # 12. False alerts from a monitor with nothing to find (derived), and a
 #     measured alarm stream (Drew et al. 2014)
 # -----------------------------------------------------------------------------
-SERIES = 3 * 50
-fig, ax = plt.subplots(figsize=(4.6, 1.6))
+fig, ax = plt.subplots(figsize=(2.3, 1.35))
 for i, (alpha_, ck) in enumerate(((0.05, "danger"), (0.01, "compute"),
                                   (0.001, "data"))):
     y = 2 - i
-    v = SERIES * alpha_
+    v = K.FALSE_PER_DAY[alpha_]
     ax.barh(y, v, color=C[ck], height=0.62)
-    s_ = f"{v:g} a day" + ("  (about one a week)" if alpha_ == 0.001 else "")
-    ax.text(v + 0.15, y, s_, va="center", fontsize=12, color=C[ck],
-            fontweight="bold")
-    ax.text(-0.15, y, f"false-positive rate {alpha_:g}", ha="right",
+    s_ = f"{v:g} a day" + (" (1 a week)" if alpha_ == 0.001 else "")
+    ax.text(v + 0.25, y, s_, va="center", fontsize=12, color=C[ck],
+            fontweight="bold", linespacing=0.95)
+    ax.text(-0.25, y, f"rate {alpha_:g}", ha="right",
             va="center", fontsize=12, color=C["text"])
 ax.set_xlim(0, 10.5)
 ax.set_yticks([])
-ax.set_ylim(-0.6, 2.6)
+ax.set_ylim(-0.6, 2.5)
 ax.set_xticks([0, 5, 10])
+ax.tick_params(labelsize=11)
 ax.spines["left"].set_visible(False)
-ax.set_xlabel("False alerts per day, 150 series tested daily", fontsize=11)
+ax.set_xlabel("False alerts a day, 150 series", fontsize=11)
 axis_clean(ax)
 sp.save(fig, out / "falsealarm.svg")
 
-fig, ax = plt.subplots(figsize=(4.6, 0.95))
-ax.barh(0, 88.8, color=C["danger"], height=0.6)
-ax.barh(0, 11.2, left=88.8, color=C["data"], height=0.6)
-ax.text(44.4, 0, "88.8% false", ha="center", va="center", fontsize=12,
-        color="white", fontweight="bold")
+fig, ax = plt.subplots(figsize=(3.0, 0.5))
+ax.barh(0, K.ICU_FALSE_PCT, color=C["danger"], height=0.8)
+ax.barh(0, K.ICU_TRUE_PCT, left=K.ICU_FALSE_PCT, color=C["data"], height=0.8)
+ax.text(K.ICU_FALSE_PCT / 2, 0, f"{K.ICU_FALSE_PCT}% false", ha="center",
+        va="center", fontsize=12, color="white", fontweight="bold")
 ax.text(101, 0, "true", ha="left", va="center", fontsize=12, color=C["data"],
         fontweight="bold")
-ax.set_xlim(0, 112)
+ax.set_xlim(0, 118)
 ax.set_ylim(-0.5, 0.5)
 ax.axis("off")
 sp.save(fig, out / "icu.svg")
@@ -656,22 +656,21 @@ sp.save(fig, out / "icu.svg")
 # -----------------------------------------------------------------------------
 # 13. PSI: the age feature (table 13), then the escalation ladder
 # -----------------------------------------------------------------------------
-bins = ["18–25", "26–35", "36–45", "46–55", "56–65", "66+"]
-train = [15, 25, 20, 18, 12, 10]
-serve = [12, 22, 18, 20, 15, 13]
-fig, ax = plt.subplots(figsize=(4.2, 2.3))
+bins, train, serve = K.AGE_BINS, K.AGE_TRAIN, K.AGE_SERVE
+fig, ax = plt.subplots(figsize=(3.1, 1.75))
 x = np.arange(len(bins))
 ax.bar(x - 0.2, train, 0.4, color=C["memory"])
 ax.bar(x + 0.2, serve, 0.4, color=C["compute"])
-ax.text(5.6, 24.5, "training", color=C["memory"], fontsize=12, fontweight="bold",
+ax.text(5.6, 26.0, "training", color=C["memory"], fontsize=11, fontweight="bold",
         ha="right")
-ax.text(5.6, 21.5, "serving", color=C["compute"], fontsize=12, fontweight="bold",
+ax.text(5.6, 22.0, "serving", color=C["compute"], fontsize=11, fontweight="bold",
         ha="right")
 ax.set_xticks(x)
-ax.set_xticklabels(bins, fontsize=11)
-ax.set_xlabel("Age bin", fontsize=11)
-ax.set_ylabel("Share of users (%)", fontsize=11)
-ax.set_ylim(0, 28)
+ax.set_xticklabels([b_.replace("–", "–\n") for b_ in bins], fontsize=10,
+                   linespacing=0.9)
+ax.tick_params(axis="y", labelsize=10)
+ax.set_ylabel("Users (%)", fontsize=11)
+ax.set_ylim(0, 29)
 ax.set_yticks([0, 10, 20])
 axis_clean(ax, "y")
 sp.save(fig, out / "psi_bars.svg")
@@ -760,41 +759,25 @@ ax.set_ylim(-0.5, len(rungs) - 0.5)
 ax.axis("off")
 sp.save(fig, out / "fb_cadence.svg")
 
-fig, ax = plt.subplots(figsize=(2.9, 1.8))
-days = list(range(7))
-ne = [95.65, 95.88, 95.67, 95.92, 96.02, 96.33, 96.63]
-ax.plot(days, ne, "o-", color=C["compute"], lw=3, ms=7)
-ax.set_xticks(days)
-ax.tick_params(labelsize=10)
-ax.set_xlabel("Days between training and test", fontsize=11)
-ax.set_ylabel("Relative NE (%)", fontsize=11)
-ax.set_ylim(95.4, 96.9)
-ax.set_yticks([95.5, 96.0, 96.5])
-ax.text(0.0, 96.62, "lower is better", fontsize=10, color=C["neutral"],
-        va="center")
-ax.grid(axis="y", color=C["grid"], linewidth=0.6)
-ax.text(0.0, -0.45, "Read from the paper's figure; approximate",
-        transform=ax.transAxes, fontsize=9, color=C["neutral"], ha="left")
-sp.save(fig, out / "he_freshness.svg")
 
 
 # -----------------------------------------------------------------------------
 # 16. The sawtooth: value lost per day grows linearly, resets at each run
 # -----------------------------------------------------------------------------
-Q, V, A0, G, CR = 1_000_000, 0.50, 0.94, 0.0024, 5000
-SLOPE = Q * V * A0 * G          # 1,128 dollars per day, per day
-TSTAR = math.sqrt(2 * CR / SLOPE)  # 2.98 days
+Q, V, A0, G, CR = K.Q, K.V, K.A0, K.G, K.CR
+SLOPE = K.SLOPE                 # 1,128 dollars per day, per day
+TSTAR = K.TSTAR                 # 2.98 days
 for k in (1, 2, 3):
     fig, ax = plt.subplots(figsize=(5.0, 2.4))
     t = np.linspace(0, 3 * TSTAR - 1e-6, 900)
     loss = SLOPE * (t % TSTAR)
     ax.plot(t, loss, color=C["danger"], lw=3)
-    ax.text(0.15, 6100, "value lost per day\n= 1,128 × days since the last run",
+    ax.text(0.15, 6100, f"value lost per day\n= {SLOPE:,.0f} × days since the last run",
             fontsize=11, color=C["danger"], fontweight="bold", va="top")
     if k >= 2:
         tt = np.linspace(TSTAR, 2 * TSTAR - 1e-6, 200)
         ax.fill_between(tt, 0, SLOPE * (tt - TSTAR), color=C["danger_l"])
-        ax.text(4.47, 3600, "shaded cycle:\n½ × 1,128 × T²",
+        ax.text(4.47, 3600, f"shaded cycle:\n½ × {SLOPE:,.0f} × T²",
                 fontsize=11, color=C["danger"], fontweight="bold", ha="center",
                 va="bottom")
     if k >= 3:
@@ -851,7 +834,7 @@ fig, ax = plt.subplots(figsize=(3.6, 1.9))
 cad = [("Daily", 1), ("Every 3 days", 3), ("Weekly", 7), ("Monthly", 30)]
 for i, (lab, T_) in enumerate(cad):
     y = len(cad) - 1 - i
-    v = CR / T_ + 0.5 * SLOPE * T_
+    v = K.cost_per_day(T_)
     ck = "data" if T_ == 3 else "neutral"
     ax.barh(y, v, color=C[ck], height=0.62)
     ax.text(v + 300, y, f"${v:,.0f}", va="center", fontsize=12, color=C[ck],
@@ -872,8 +855,8 @@ sp.save(fig, out / "tcost.svg")
 # -----------------------------------------------------------------------------
 # 17. Scheduled against triggered retraining, and the detection delay
 # -----------------------------------------------------------------------------
-FLOOR = 0.88
-T_HIT = math.log(A0 / FLOOR) / G   # 27.5 days
+FLOOR = K.FLOOR
+T_HIT = K.T_HIT                    # 27.5 days
 
 
 def sawtooth(t, period):
@@ -887,16 +870,17 @@ for k in (1, 2, 3):
     ax.text(121, FLOOR, "floor 0.88", fontsize=11, color=C["neutral"],
             va="center", fontweight="bold")
     ax.plot(days, sawtooth(days, 90), color=C["compute"], lw=2.6)
-    ax.text(2, 0.748, "scheduled every 90 days: falls to 0.757", fontsize=11,
+    ax.text(2, 0.748, f"scheduled every 90 days: falls to {K.A_AFTER_90:.3f}", fontsize=11,
             color=C["compute"], fontweight="bold", ha="left", va="bottom")
     if k >= 2:
         ax.plot(days, sawtooth(days, T_HIT), color=C["data"], lw=2.6)
-        ax.text(60, 0.947, "trigger at 0.88: every 27.5 days", fontsize=11,
+        ax.text(60, 0.947, f"trigger at 0.88: every {T_HIT:.1f} days", fontsize=11,
                 color=C["data"], fontweight="bold", ha="center")
     if k >= 3:
         per = T_HIT + 10
         ax.plot(days, sawtooth(days, per), color=C["danger"], lw=2.2, ls=(0, (5, 3)))
-        ax.annotate("10-day detection delay:\nresets at 0.859", xy=(per, 0.859),
+        ax.annotate(f"10-day detection delay:\nresets at {K.RESET_10D:.3f}",
+                    xy=(per, K.RESET_10D),
                     xytext=(92, 0.79), fontsize=11, color=C["danger"],
                     fontweight="bold",
                     arrowprops=dict(arrowstyle="->", color=C["danger"], lw=1.5))
@@ -992,26 +976,36 @@ for i, ph in enumerate(phases):
 save_svg(p, "checklist.svg")
 
 for k in (1, 2):
-    fig, ax = plt.subplots(figsize=(3.6, 2.2))
-    cats = [("Data", 6), ("Model", 7), ("Infra.", 5), ("Monitoring", 1)]
+    fig, ax = plt.subplots(figsize=(3.0, 1.45))
+    short = {"Infrastructure": "Infra.", "Monitoring": "Monitor."}
+    cats = [(short.get(k_, k_), v_) for k_, v_ in K.MLTS.items()]
     for i, (nm, v) in enumerate(cats):
-        hi = k == 2 and v == 1
+        hi = k == 2 and v == K.MLTS_SCORE
         ck = "danger" if hi else "memory"
         ax.bar(i, v, 0.6, color=C[ck])
         ax.text(i, v + 0.2, f"{v}" if not hi else "", ha="center", va="bottom", fontsize=13,
                 fontweight="bold", color=C[ck])
     a = 1.0 if k == 2 else 0.0
     ax.axhline(1, color=C["danger"], lw=2, ls="--", alpha=a)
-    ax.text(3, 2.0, "score = 1", fontsize=12, color=C["danger"],
-            fontweight="bold", ha="center", alpha=a)
+    ax.text(3.45, 2.1, f"score = {K.MLTS_SCORE}", fontsize=11, color=C["danger"],
+            fontweight="bold", ha="right", alpha=a)
     ax.set_xticks(range(4))
-    ax.set_xticklabels([c_[0] for c_ in cats], fontsize=11)
-    ax.set_ylim(0, 8.2)
+    ax.set_xticklabels([c_[0] for c_ in cats], fontsize=10.5)
+    ax.set_xlim(-0.5, 3.5)
+    ax.set_ylim(0, 8.6)
     ax.set_yticks([0, 7])
-    ax.set_yticklabels(["0", "7"])
-    ax.set_ylabel("Tests passed (of 7)", fontsize=11)
+    ax.set_yticklabels(["0", "7"], fontsize=11)
+    ax.set_ylabel("Passed of 7", fontsize=11)
     axis_clean(ax, "y")
     sp.save(fig, out / f"mlts_step{k}.svg")
 
+# -----------------------------------------------------------------------------
+# 21. Grafana sample dashboard (Commons, public domain): the two upper rows of
+#     panels, cropped from the 1920 x 1200 download (x 75-1900, y 285-790)
+# -----------------------------------------------------------------------------
+from PIL import Image  # noqa: E402
+_g = Image.open(out / "grafana_dashboard.png").convert("RGB")
+_g.crop((75, 285, 1900, 790)).save(out / "grafana_panels.png")
+
 print("figures written; T* =", round(TSTAR, 2), "days; outcomes needed:",
-      [round(n_) for n_ in need], "; days to 0.88:", round(T_HIT, 1))
+      [K.need_label(n_) for n_ in need], "; days to 0.88:", round(T_HIT, 1))
