@@ -45,6 +45,12 @@ Every value is sourced. "Chapter" means Model Compression in Volume I.
     figures 6 and 7, illustrative); teacher softened at T = 4 (derived from
     85/10/5: 48/28/24); MLP 8d^2 against projections 4d^2 multiply-
     accumulates per token (Sec. 10.6.1).
+  - Added 2026-10-18 (visual audit): every derived number now comes from
+    calcs.py (imported as K). New: smallest_capable (Epoch AI data via
+    mlsysim), frontier_step (Howard et al. 2019, Table 3), han_step (Han et
+    al. 2015, Fig. 5 vector data), cpu_measure (measure_cpu.py run here).
+    Removed generators no longer shown: synthesis, energy, numline,
+    roofline_int, r50int8, schedule, waterfall step 3.
   - hook_step1.svg is copied from ../10b_model_compression/images (generated
     there from Krishnamoorthi 2018, Table 3) for the closing slide.
 
@@ -58,6 +64,9 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import calcs as K  # noqa: E402  (every derived number; prints its values)
 
 plt = sp.plt
 C = sp.C
@@ -160,9 +169,9 @@ GB, MB, KB = 1e9, 1e6, 1e3
 # 1. Hook: the memory ladder (log scale), and its return in the synthesis
 # ---------------------------------------------------------------------------
 ladder_rows = [
-    dict(label="175B, FP16", value=350 * GB, color="memory", text="350 GB"),
-    dict(label="7B, FP16", value=14 * GB, color="danger", text="14 GB",
-         over=3.5 * GB, over_color="data", over_text="INT4: 3.5 GB"),
+    dict(label="175B, FP16", value=K.mem_175b, color="memory", text=f"{K.mem_175b / GB:.0f} GB"),
+    dict(label="7B, FP16", value=K.mem_7b, color="danger", text=f"{K.mem_7b / GB:.0f} GB",
+         over=K.mem_7b_int4, over_color="data", over_text=f"INT4: {K.mem_7b_int4 / GB:.1f} GB"),
     dict(label="Phone RAM", value=8 * GB, color="neutral", text="8 GB"),
     dict(label="MCU SRAM", value=512 * KB, color="neutral", text="512 KB",
          over=200 * KB, over_color="data", over_text="spotter: 200 KB"),
@@ -172,22 +181,18 @@ ladder_kw = dict(log=True, xlim=(5e4, 3e14), size=(4.2, 2.9),
                  xticks=[(1e6, "1 MB"), (1e9, "1 GB"), (1e12, "1 TB")])
 bars(out / "ladder_step1.svg", ladder_rows, [1, 0, 1, 1], **ladder_kw)
 bars(out / "ladder_step2.svg", ladder_rows, [1, 1, 1, 1], **ladder_kw)
-# synthesis: the same ladder with the compressed versions overlaid
-syn = [dict(r) for r in ladder_rows]
-syn[1]["over_on"] = True
-bars(out / "synthesis_step1.svg", syn, [1, 1, 1, 1], **ladder_kw)
-syn[3]["over_on"] = True
-bars(out / "synthesis_step2.svg", syn, [1, 1, 1, 1], **ladder_kw)
-
 # ---------------------------------------------------------------------------
 # 2. Budget: time to stream the weights once on the phone's 51.2 GB/s bus
 # ---------------------------------------------------------------------------
 stream_rows = [
-    dict(label="MobileNetV2, FP32", value=0.27, color="memory",
-         text="0.27 ms: 1% of a frame"),
-    dict(label="ResNet-50, FP32", value=2.0, color="memory", text="2 ms"),
-    dict(label="GPT-2 XL, FP16", value=59, color="danger", text="59 ms per token"),
-    dict(label="GPT-2 XL, INT4", value=15, color="data", text="15 ms per token"),
+    dict(label="MobileNetV2, FP32", value=K.stream["MobileNetV2 FP32"] * 1e3, color="memory",
+         text=f"{K.stream['MobileNetV2 FP32'] * 1e3:.2f} ms: 1% of a frame"),
+    dict(label="ResNet-50, FP32", value=K.stream["ResNet-50 FP32"] * 1e3, color="memory",
+         text=f"{K.stream['ResNet-50 FP32'] * 1e3:.0f} ms"),
+    dict(label="GPT-2 XL, FP16", value=K.stream["GPT-2 XL FP16"] * 1e3, color="danger",
+         text=f"{K.stream['GPT-2 XL FP16'] * 1e3:.0f} ms per token"),
+    dict(label="GPT-2 XL, INT4", value=K.stream["GPT-2 XL INT4"] * 1e3, color="data",
+         text=f"{K.stream['GPT-2 XL INT4'] * 1e3:.0f} ms per token"),
 ]
 for k in range(1, 5):
     bars(out / f"stream_step{k}.svg", stream_rows, [i < k for i in range(4)],
@@ -357,7 +362,8 @@ for r, (lab, last, color, note) in enumerate(rows):
 svg(out / "tiles.svg", 560, 430, body)
 
 fig, ax = plt.subplots(figsize=(4.4, 2.6))
-groups = [("Parameters", 3.5, 2.6, "M", "74%"), ("MFLOP", 600, 418, "", "70%")]
+groups = [("Parameters", 3.5, 2.6, "M", f"{100 * 2.6 / 3.5:.0f}%"),
+          ("MFLOP", 600, 418, "", f"{100 * 418 / 600:.0f}%")]
 for gi, (name, full, slim, unit, pct) in enumerate(groups):
     y = 1 - gi
     ax.barh(y + 0.2, 1.0, height=0.36, color=C["neutral"])
@@ -392,8 +398,7 @@ bars(out / "distilbert.svg", distil_rows, [1, 1, 1], xlim=(0, 260), size=(4.8, 2
 # Soft targets (variant of fig-kd-targets): hard label, teacher at T = 1,
 # then the same teacher softened at T = 4 (derived: p_i^(1/4), renormalized).
 soft1 = [85, 10, 5]
-_r = np.array(soft1, float) ** 0.25
-soft4 = list(np.round(100 * _r / _r.sum()).astype(int))  # 48, 28, 24
+soft4 = K.SOFT4  # computed in calcs.py: 48, 28, 24
 for k in (1, 2, 3):
     fig, ax = plt.subplots(figsize=(4.0, 2.9))
     cls = ["Cat", "Dog", "Fox"]
@@ -420,75 +425,10 @@ for k in (1, 2, 3):
     sp.save(fig, out / f"kd_step{k}.svg")
 
 # ---------------------------------------------------------------------------
-# 9. Energy per operation, FP32 against INT8 (log scale), then a DRAM read
-# ---------------------------------------------------------------------------
-ops = [("Add", 0.90, 0.03, "30×"), ("Multiply", 3.70, 0.20, "18.5×"),
-       ("Multiply-accumulate", 4.60, 0.30, "15×")]
-for k in (1, 2):
-    fig, ax = plt.subplots(figsize=(5.8, 2.5))
-    ylabels = []
-    for i, (name, f32, i8, ratio) in enumerate(ops):
-        y = 3 - i
-        ax.barh(y + 0.19, f32, height=0.34, color=C["compute"])
-        ax.barh(y - 0.19, i8, height=0.34, color=C["neutral"])
-        ax.text(f32 * 1.2, y + 0.19, f"FP32 {f32:.2f} pJ", va="center", fontsize=11,
-                color=C["compute"], fontweight="bold")
-        ax.text(i8 * 1.2, y - 0.19, f"INT8 {i8:.2f} pJ: {ratio} less", va="center",
-                fontsize=11, color=C["neutral"], fontweight="bold")
-        ylabels.append((y, name))
-    vis = 1.0 if k == 2 else 0.0
-    ax.barh(-0.05, 640, height=0.42, color=C["memory"], alpha=vis)
-    ax.text(640 * 1.2, -0.05, "640 pJ", va="center", fontsize=11, color=C["memory"],
-            fontweight="bold", alpha=vis)
-    ylabels.append((-0.05, "32-bit DRAM read"))
-    for y, name in ylabels:
-        ax.text(-0.01, y, name, transform=ax.get_yaxis_transform(), ha="right",
-                va="center", fontsize=12, fontweight="bold", color=C["text"],
-                alpha=vis if name.startswith("32") else 1.0)
-    ax.set_xscale("log")
-    ax.set_xlim(0.01, 20000)
-    ax.set_ylim(-0.6, 3.6)
-    ax.set_yticks([])
-    ax.minorticks_off()
-    ax.spines["left"].set_visible(False)
-    ax.grid(axis="x", color=C["grid"], linewidth=0.6)
-    ax.set_axisbelow(True)
-    ax.set_xlabel("Energy (picojoules, log scale; 45 nm)")
-    sp.save(fig, out / f"energy_step{k}.svg")
-
-
-
-# ---------------------------------------------------------------------------
-# 10. Napkin Math 10.1 on a number line
-# ---------------------------------------------------------------------------
-for k in (1, 2):
-    fig, ax = plt.subplots(figsize=(4.6, 1.7))
-    ax.plot([-1.25, 3.25], [1, 1], color=C["text"], lw=1.5)
-    ax.plot([-1.25, 3.25], [0, 0], color=C["neutral"], lw=1.5)
-    ax.text(-1.4, 1, "real", ha="right", va="center", fontsize=15, fontweight="bold")
-    ax.text(-1.4, 0, "UINT8", ha="right", va="center", fontsize=15, fontweight="bold",
-            color=C["neutral"])
-    for real, q in ((-1, 0), (0, 64), (1, 128), (3, 255)):
-        xq = -1 + q * 4 / 255
-        ax.plot([real], [1], "o", ms=9, color=C["memory"])
-        ax.text(real, 1.25, f"{real:g}", ha="center", fontsize=15, fontweight="bold",
-                color=C["memory"])
-        a = 1.0 if k == 2 else 0.0
-        ax.annotate("", (xq, 0.06), (real, 0.92), alpha=a,
-                    arrowprops=dict(arrowstyle="-|>", color=C["compute"], lw=1.6, alpha=a))
-        ax.plot([xq], [0], "s", ms=8, color=C["compute"], alpha=a)
-        ax.text(xq, -0.5, f"{q}", ha="center", fontsize=15, fontweight="bold",
-                color=C["compute"], alpha=a)
-    ax.set_xlim(-2.2, 3.4)
-    ax.set_ylim(-0.6, 1.5)
-    ax.axis("off")
-    sp.save(fig, out / f"numline_step{k}.svg")
-
-# ---------------------------------------------------------------------------
 # 11. Fusion: six transfers against two (SVG, 2 steps)
 # ---------------------------------------------------------------------------
 for k in (1, 2):
-    body = text(10, 34, "Unfused: 6 transfers, 7.2 MB", 30, C["danger"], "bold")
+    body = text(10, 34, f"Unfused: 6 transfers, {K.unfused / MB:.1f} MB", 30, C["danger"], "bold")
     for i, name in enumerate(["Conv", "BN", "ReLU"]):
         x = 30 + i * 240
         body += box(x, 52, 190, 74, C["compute_l"], C["compute"], 2.5)
@@ -502,36 +442,17 @@ for k in (1, 2):
     body += arrow(665, 316, 665, 262, C["memory"], 3.5)
     body += box(30, 320, 700, 74, C["compute_l"], C["compute"], 2.5)
     body += text(380, 367, "Conv + BN + ReLU, BN folded in", 30, C["text"], "bold", "middle")
-    body += text(10, 440, "Fused: 2 transfers, 4 MB (44.8% less)", 30, C["data"], "bold")
+    body += text(10, 440, f"Fused: 2 transfers, {K.fused / MB:.0f} MB ({100 * (1 - K.fused / K.unfused):.1f}% less)", 30, C["data"], "bold")
     body += "</g>\n"
     svg(out / f"fusion_step{k}.svg", 760, 455, body)
-
-# ---------------------------------------------------------------------------
-# 12. One precision change, two regimes (schematic roofline)
-# ---------------------------------------------------------------------------
-sp.roofline_steps(out / "roofline_int", [
-    ("Decode, INT4: 3.1×", 20.0, "memory"),
-    ("Large-batch MLP, INT8: 2×", 3000.0, "compute"),
-], note="Schematic axes")
-
-# ---------------------------------------------------------------------------
-# 13. ResNet-50 INT8 on the H100 (table 13)
-# ---------------------------------------------------------------------------
-r50_rows = [
-    ("Model size", 4.0, "memory", "4×  (102.4 → 25.6 MB)"),
-    ("Batch-one latency", 1.3, "neutral", "1.3×  (0.38 → 0.30 ms)"),
-    ("Large-batch throughput", 5.9, "compute", "5.9×  (15,200 → 89,470 img/s)"),
-]
-sp.hbars_steps(out / "r50int8", r50_rows, "×", log=False,
-               xlabel="INT8 gain over FP32 (×)", value_fmt="{:g}")
 
 # ---------------------------------------------------------------------------
 # 14. Blur pipeline waterfall (variant of fig-compression-waterfall)
 # ---------------------------------------------------------------------------
 stages = ["FP32\nCPU", "Pruned\nCPU", "Pruned INT8\naccelerator"]
-memv = [14.0, 10.4, 2.6]
-timev = [125, 87, 20]
-for k in (1, 2, 3):
+memv = [K.MNV2_FP32 / MB, K.W075_PARAMS * 4 / MB, K.W075_PARAMS / MB]
+timev = [125, round(125 * 418 / 600), 20]  # 20 ms: Example 10.1, illustrative
+for k in (1, 2):  # step 3 (INT8) belongs to Part 2
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(5.8, 2.3))
     for ax, vals, ck, unit, ttl in ((a1, memv, "memory", "MB", "Weight memory (MB)"),
                                     (a2, timev, "compute", "ms", "Frame time (ms)")):
@@ -561,7 +482,7 @@ for k in (1, 2, 3):
 # ---------------------------------------------------------------------------
 sp.hbars(out / "paper_real.svg", [
     ("Paper: 2× × 4×", 8, "neutral", "8×"),
-    ("Realized", 1.5, "danger", "1.5×  (18.8% of paper)"),
+    ("Realized", 1.5, "danger", f"1.5×  ({100 * 1.5 / 8:.1f}% of paper)"),
 ], "×", log=False, size=(5.8, 1.15), xlabel="Speedup (illustrative)")
 
 for k in (1, 2):
@@ -669,27 +590,6 @@ ax.tick_params(axis="x", length=0, pad=-6)
 ax.set_xlabel("Share of weights that are zero")
 sp.save(fig, out / "breakeven.svg")
 
-# 16d. One cut or three (Sec. 10.2.1, figures 6 and 7, illustrative)
-for k in (1, 2):
-    fig, ax = plt.subplots(figsize=(4.6, 2.6))
-    ax.plot([0, 1, 2], [0.995, 0.914, 0.943], "o-", color=C["danger"], lw=2.2, ms=8)
-    ax.text(2.08, 0.943, "one cut of 6:\n0.943", va="center", fontsize=11,
-            fontweight="bold", color=C["danger"])
-    a = 1.0 if k == 2 else 0.0
-    ax.plot([0, 1, 2], [0.995, 0.971, 0.992], "s-", color=C["data"], lw=2.2, ms=7, alpha=a)
-    ax.plot([2, 3], [0.992, 0.991], "s:", color=C["data"], lw=2.2, ms=7, alpha=a)
-    ax.text(3.08, 0.991, "three cuts of 2:\n0.991", va="center", fontsize=11,
-            fontweight="bold", color=C["data"], alpha=a)
-    ax.text(2.5, 0.981, "two more\ncycles", ha="center", va="top", fontsize=9, color=C["data"], alpha=a)
-    ax.set_xticks([0, 1, 2, 3])
-    ax.set_xticklabels(["start", "cut", "fine-tune", "end"], fontsize=11)
-    ax.set_xlim(-0.3, 4.3)
-    ax.set_ylim(0.9, 1.005)
-    ax.set_ylabel("Accuracy")
-    ax.grid(axis="y", color=C["grid"], linewidth=0.6)
-    fig.text(0.01, -0.03, "Illustrative (chapter figures 6 and 7)", fontsize=9, color=C["neutral"])
-    sp.save(fig, out / f"schedule_step{k}.svg")
-
 # 16e. Multiply-accumulates per token in one transformer layer (Sec. 10.6.1)
 mlp_rows = [
     dict(label="MLP block", value=8, color="compute", text="8d²: about two thirds"),
@@ -699,5 +599,154 @@ mlp_rows = [
 bars(out / "mlpshare.svg", mlp_rows, [1, 1, 1], xlim=(0, 14), size=(5.0, 1.9),
      xticks=[(0, "0"), (4, "4d²"), (8, "8d²")],
      xlabel="Multiply-accumulates per token, per layer")
+
+
+# ---------------------------------------------------------------------------
+# 17. Added 2026-10-18 (visual audit): real data and real tool output
+# ---------------------------------------------------------------------------
+# 17a. Smallest model at >= 60 percent MMLU, redrawn at slide size from the
+# same data the book figure uses (Epoch AI Benchmarking Hub, CC BY 4.0, via
+# mlsysim Literature.Series.MMLUDenseModels; chapter fig-smallest-capable-model).
+import datetime as dt  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "mlsysim"))
+from mlsysim import Literature  # noqa: E402
+
+_rows = sorted(Literature.Series.MMLUDenseModels.entries, key=lambda r: r["date"])
+_front = []
+for _r in _rows:
+    if _r["mmlu"] >= 0.60 and (not _front or _r["parameters"] < _front[-1]["parameters"]):
+        _front.append(_r)
+
+
+def _yr(d):
+    d = dt.date.fromisoformat(d)
+    return d.year + (d.timetuple().tm_yday - 1) / 365.25
+
+
+fig, ax = plt.subplots(figsize=(3.7, 2.15))
+for hi, ck, sz in ((False, "neutral_l", 16), (True, "memory", 22)):
+    pts = [r for r in _rows if (r["mmlu"] >= 0.60) == hi]
+    ax.scatter([_yr(r["date"]) for r in pts], [r["parameters"] for r in pts], s=sz,
+               color=C[ck], zorder=2 + hi)
+fx = [_yr(r["date"]) for r in _front] + [2025.1]
+fy = [r["parameters"] for r in _front] + [_front[-1]["parameters"]]
+ax.step(fx, fy, where="post", color=C["danger"], lw=2.2, zorder=4)
+labels = {"Gopher 280B": (6, 2, "left"), "Chinchilla 70B": (6, 4, "left"),
+          "LLAMA 2 34B": (6, 4, "left"), "Mistral 7B": (6, 4, "left"),
+          "Qwen2.5-Coder-3B": (-4, -16, "right")}
+for _r in _front:
+    if _r["model"] in labels:
+        dx, dy, ha = labels[_r["model"]]
+        ax.annotate(_r["model"].replace("LLAMA", "Llama").replace("Qwen2.5-Coder-3B", "Qwen2.5-Coder 3B"),
+                    (_yr(_r["date"]), _r["parameters"]), xytext=(dx, dy),
+                    textcoords="offset points", fontsize=11, fontweight="bold",
+                    color=C["danger"], ha=ha, zorder=5,
+                    bbox=dict(facecolor="white", alpha=0.85, edgecolor="none", pad=0.4))
+ax.text(2021.55, 1.4e8, "Blue: MMLU ≥ 60%.  Gray: below.", fontsize=11, color=C["memory"])
+ax.set_yscale("log")
+ax.set_ylim(1e8, 1e12)
+ax.set_yticks([1e9, 1e10, 1e11, 1e12])
+ax.set_yticklabels(["1B", "10B", "100B", "1T"])
+ax.minorticks_off()
+ax.set_xticks([2022, 2023, 2024, 2025])
+ax.set_xlim(2021.5, 2025.2)
+ax.set_ylabel("Parameters (log)")
+ax.grid(axis="y", color=C["grid"], linewidth=0.6)
+sp.save(fig, out / "smallest_capable.svg")
+
+# 17b. Accuracy-efficiency frontier: ImageNet top-1 against Pixel 1 float
+# latency, one large core, TFLite benchmark tool (Howard et al. 2019, Table 3).
+pts = K.MNV3_TABLE3
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(5.6, 1.95))
+    for n, a, t, *_ in pts:
+        on_f = n in K.FRONTIER
+        ck = "memory" if on_f else "neutral"
+        if n == "V2 1.0":
+            ck = "danger"
+        ax.plot([t], [a], "o", ms=9, color=C[ck], zorder=3)
+    lab = {"V2 1.0": ("MobileNetV2 1.0: the blur model", 5, -16, "left", "danger"),
+           "V3-Large 0.75": ("V3-Large 0.75", -8, 6, "right", "memory"),
+           "V3-Large 1.0": ("V3-Large 1.0", -8, 6, "right", "memory"),
+           "V3-Small 1.0": ("V3-Small 1.0", 8, -12, "left", "memory"),
+           "MnasNet-A1": ("MnasNet-A1", 0, 8, "center", "neutral")}
+    for n, a, t, *_ in pts:
+        if n in lab:
+            s_, dx, dy, ha, ck = lab[n]
+            ax.annotate(s_, (t, a), xytext=(dx, dy), textcoords="offset points",
+                        fontsize=11, fontweight="bold", color=C[ck], ha=ha)
+    fr = sorted((t, a) for n, a, t, *_ in pts if n in K.FRONTIER)
+    al = 1.0 if k == 2 else 0.0
+    ax.plot([p[0] for p in fr], [p[1] for p in fr], "-", color=C["memory"], lw=2.0,
+            alpha=al, zorder=2)
+    ax.text(13, 71.0, "frontier", fontsize=12, fontweight="bold", color=C["memory"],
+            alpha=al, rotation=0)
+    ax.annotate("", (K.v3l75[2] + 1.5, K.v3l75[1] - 0.2), (K.v2[2] - 1.5, K.v2[1] + 0.2),
+                arrowprops=dict(arrowstyle="-|>", color=C["data"], lw=2.0, alpha=al))
+    ax.text(44, 69.0, f"{K.v2[2] / K.v3l75[2]:.2f}× faster,\n+{K.v3l75[1] - K.v2[1]:.1f} points",
+            fontsize=11, fontweight="bold", color=C["data"], alpha=al, ha="left", va="center")
+    ax.set_xlim(0, 80)
+    ax.set_ylim(59, 77)
+    ax.set_xlabel("Latency on a Pixel 1, float, one core (ms)")
+    ax.set_ylabel("ImageNet top-1 (%)")
+    ax.grid(color=C["grid"], linewidth=0.6)
+    ax.set_axisbelow(True)
+    sp.save(fig, out / f"frontier_step{k}.svg")
+
+# 17c. Retrain, then iterate (Han et al. 2015, Fig. 5, AlexNet top-5); points
+# extracted from the published figure's vector paths, in calcs.py.
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(3.5, 2.55))
+    series = [(K.HAN_NO_RETRAIN, "danger", "--", "o", "prune, no retrain", 1.0),
+              (K.HAN_RETRAIN, "memory", "-", "s", "prune once, retrain", 1.0),
+              (K.HAN_ITERATIVE, "data", "-", "D", "prune and retrain,\nrepeated", 1.0 if k == 2 else 0.0)]
+    for pts_, ck, ls, mk, name, a in series:
+        xs = [x for x, _ in pts_]
+        ys = [y for _, y in pts_]
+        ax.plot(xs, ys, ls, marker=mk, color=C[ck], lw=2.2, ms=6, alpha=a, clip_on=True)
+    ax.text(42, -1.6, "no retrain", fontsize=12, fontweight="bold", color=C["danger"])
+    ax.text(70, -3.9, "prune once,\nretrain", fontsize=12, fontweight="bold", color=C["memory"],
+            ha="right")
+    ax.text(96.6, -3.1, "iterative", fontsize=12, fontweight="bold", color=C["data"],
+            ha="left", alpha=1.0 if k == 2 else 0.0)
+    ax.axhline(0, color=C["text"], lw=0.8)
+    ax.set_xlim(40, 100)
+    ax.set_ylim(-4.5, 0.6)
+    ax.set_xticks([40, 60, 80, 90, 100])
+    ax.set_xticklabels(["40%", "60%", "80%", "90%", "100%"])
+    ax.set_xlabel("Weights pruned")
+    ax.set_ylabel("Top-5 change (points)")
+    ax.grid(color=C["grid"], linewidth=0.6)
+    ax.set_axisbelow(True)
+    sp.save(fig, out / f"han_step{k}.svg")
+
+# 17d. Measured on this CPU (measure_cpu.py, values via calcs.py)
+rows_ = K.CPU["rows"]
+base_ = rows_[0]
+names_ = ["Width 1.0", "Width 1.0,\n80% zeros", "Width 0.75"]
+fig, ax = plt.subplots(figsize=(5.8, 2.4))
+for i, (r, nm) in enumerate(zip(rows_, names_)):
+    y = 2 - i
+    fp = 100 * r["flops"] / base_["flops"]
+    tm = 100 * r["median_ms"] / base_["median_ms"]
+    ax.barh(y + 0.19, fp, height=0.34, color=C["neutral"])
+    ax.barh(y - 0.19, tm, height=0.34, color=C["compute"])
+    ax.text(fp + 1.5, y + 0.19, f"FLOPs {fp:.0f}%", va="center", fontsize=12,
+            fontweight="bold", color=C["neutral"])
+    ax.text(tm + 1.5, y - 0.19, f"time {tm:.0f}%  ({r['median_ms']:.1f} ms)", va="center",
+            fontsize=12, fontweight="bold", color=C["compute"])
+    ax.text(-0.01, y, nm, transform=ax.get_yaxis_transform(), ha="right", va="center",
+            fontsize=12, fontweight="bold", color=C["text"])
+ax.set_xlim(0, 150)
+ax.set_xticks([0, 50, 100])
+ax.set_xticklabels(["0", "50%", "100%"])
+ax.set_ylim(-0.6, 2.6)
+ax.set_yticks([])
+ax.spines["left"].set_visible(False)
+ax.grid(axis="x", color=C["grid"], linewidth=0.6)
+ax.set_axisbelow(True)
+ax.set_xlabel("Relative to width 1.0, dense (median of 1,000 runs)")
+sp.save(fig, out / "cpu_measure.svg")
 
 print("figures written")
