@@ -1,0 +1,264 @@
+chapter: 11_planning
+lecture: "11"
+title: "Trajectory Planning"
+layer: brain
+minutes: 75
+notes_minutes: 71.5
+core_minutes: 59
+target_ideas: 30
+thesis: "Every motion a robot follows carries its timing, a smooth join to the present state, and a stop that runs without the proposer, and admission closes before the latest moment that stop can still begin."
+
+hook:
+  minutes: "0-3"
+  setup: "Napkin Math 11.1. A replanner meets its p99 budget: 99 of 100 replacement plans arrive on time. A ten-minute mission at 5 Hz makes 3,000 handoffs. Bars of rarity (nines): p99 per handoff, the 1-in-1,000 mission target, and the per-handoff target the mission implies."
+  question_to_class: "How likely is it that all 3,000 handoffs arrive on time? A about 99%, B about 37%, C about 5%, D almost never."
+  payoff: "D: 0.99^3000 is about 8 x 10^-14; 30 late handoffs are expected per run; the mission target leaves each handoff one late plan in 3 million (p99.99997), 4.5 orders deeper than p99. No test observes that tail, so clearance cannot rest on it; every plan carries a stop. The synthesis returns: the tail sets availability, the stop sets clearance (82 + 137.5 = 219.5 of 300 mm)."
+  sources: ["Trajectory Planning, Napkin Math 11.1 (5 Hz, 600 s illustrative; independent misses assumed)", "calcs.py: hook block"]
+
+driving_question: "Why must every motion a robot follows already contain the stop it will probably never use?"
+
+running_example: "The warehouse mobile manipulator. Arm: reach for a mug past a conveyor guard at the 1 m/s TCP limit, 60 ms chunk lease renewed every 50 ms, 16 setpoints 25 ms apart, 300 mm of clearance ahead of the tool (illustrative), Panda-class limits (2.175 rad/s, 7.5 rad/s^2, 87 N m, 1,000 N m/s; Franka 2023). Base: approach to the rack end at 1.5 m/s with 1.10 m of clear distance, 2 m/s^2 credible deceleration (card values illustrative). The real system is shown as a credited photo of a commercial mobile manipulator (ER-FLEX) and a Franka arm; Ruckig 0.19.4 is run on both stops."
+
+goals:
+  - "Map a tool speed to joint rates through the Jacobian, and say why it fails near a straight elbow."
+  - "Budget replacement latency from capture to admission, and size the tail a mission demands."
+  - "Check a timed plan and its seam against torque and jerk limits, and price a quintic bridge."
+  - "Size a jerk-limited stop, and place the commitment deadline before the stop must begin."
+law_and_record: "Part III's law, proposal is not permission, named on the goals slide; record added: the trajectory record."
+
+segments:
+  - name: Handoff
+    divider_question: "What does a planner hand the controller besides a target?"
+    read: "§11.1, §11.2"
+    concept_questions: [1, 2, 3, 4]
+    land: "The planner hands over a timed record with deadlines and a latched stop, and tool-space limits must be mapped through the Jacobian to the joint limits the drives enforce."
+    minutes: 15
+  - name: Replacement
+    divider_question: "How long does a replacement plan take, and how deep is its tail?"
+    read: "§11.3"
+    concept_questions: [5, 6, 7, 8]
+    land: "Replacement takes longer than the renewal period, so requests overlap, and the tail decides whether the mission finishes; the stop decides whether the arm hits something."
+    minutes: 9.5
+  - name: Followable
+    divider_question: "Can the drives follow the plan, including its seams?"
+    read: "§11.4"
+    concept_questions: [9, 10, 11]
+    land: "A plan is followable only if every joint, seam, and timing stays inside the body's limits, and at a seam the torque rate binds first."
+    minutes: 14.5
+  - name: Stop
+    divider_question: "How long is a stop the drive can execute, and when must it begin?"
+    read: "§11.5"
+    concept_questions: [12, 13, 14]
+    land: "Every admitted plan carries a jerk-limited stop; the stop sets the operating speed, and admission closes before the stop must begin."
+    minutes: 15
+  - name: Generators
+    divider_question: "Which generator should propose the motion?"
+    read: "§11.6 to §11.8"
+    concept_questions: [15]
+    land: "Every generator is a proposer; changing it changes the compute budget, never the obligations."
+    minutes: 6
+
+concept_questions:
+  - id: 1
+    q: "What must a plan carry that a target does not?"
+    picture: "obligations_step1-3 (new): tool speed against time, timed prefix, smooth join, and the Ruckig stop from 82 ms; Franka arm photo."
+    numbers: "40 ms p99 chunk pass, tail beyond 150 ms (§11.1, illustrative); lease 60 ms, onset 82 ms, rest 357 ms (NM 11.4, derived)."
+    example: "The arm reaching for a mug on a conveyor while inference is delayed."
+    read: "§11.1"
+  - id: 2
+    q: "Does a 1 m/s tool speed fit the joints?"
+    picture: "jac_ellipse (new, after figure 1): manipulability ellipses at 90° and 10° elbows."
+    numbers: "4.9 rad/s norm and at least 3.5 rad/s on one joint at 90°; 37.8 rad/s at 10°; limit 2.175 rad/s (§11.2.1; calcs.py)."
+    example: "Panda planar links 0.316 and 0.384 m (Franka 2023)."
+    read: "§11.2.1"
+  - id: 3
+    q: "What does damped least squares buy and cost?"
+    picture: "dls (new, after the chapter's DLS plot): exact and damped joint rate against elbow angle."
+    numbers: "Damped 4.6 and 8.3 rad/s, ceiling 10 rad/s per m/s, realized motion 94.3% and 21.9% (λ = 50 mm, illustrative)."
+    example: "Ridge regression with λ² as weight decay."
+    read: "§11.2.1"
+  - id: 4
+    q: "What does the planner hand over, and who reads it?"
+    picture: "ROS 2 JointTrajectoryPoint.msg excerpt (real artifact); record_step1-3 (new): header, motion, stop, deadlines, sidecar, readers."
+    numbers: "16 setpoints x 25 ms; lease 60 ms; commitment 300, nominal end 400, rest 575 ms; stop 137.5 mm in 275 ms (§11.2.2, §11.8)."
+    example: "The mug-reach record."
+    read: "§11.2.2, §11.8"
+  - id: 5
+    q: "How long does a replacement take from capture to admission?"
+    picture: "repl_step1-3 (new): stacked bar 51.6 + 40 + 18 + 5.3 = 114.9 ms against 50 ms renewal and 60 ms lease; three overlapping requests."
+    numbers: "114.9 ms (equation 3); 114.9/50 = 2.3, at least 3 in flight (derived)."
+    example: "Pipelined chunk requests on the running machine."
+    read: "§11.3.1"
+  - id: 6
+    q: "How far do real policies predict, and how much do they execute?"
+    picture: "chunks (new): predicted against executed steps."
+    numbers: "Diffusion Policy Push-T 16/6; pi0 50/25 at 50 Hz, 0.5 s; running machine 16/2 (published configurations via §11.3.2 and table 4)."
+    example: "Push-T recovery from a displaced block."
+    read: "§11.3.1, §11.3.2"
+  - id: 7
+    q: "From which state should a replacement be planned?"
+    picture: "stale (new): joint angle against time with the stale anchor and the projected seam state."
+    numbers: "0.50 rad/s x 80 ms = 0.040 rad (2.29°), up to 28 mm at 0.70 m reach (§11.3.3, illustrative)."
+    example: "Smith predictor; real-time chunking."
+    read: "§11.3.3"
+  - id: 8
+    q: "Does a late handoff put the arm at risk?"
+    picture: "Thumbnail of the hook bars."
+    numbers: "30 late handoffs per mission (NM 11.1)."
+    example: "Concept question; the resident stop makes a late plan cost availability."
+    read: "§11.3.2"
+  - id: 9
+    q: "Which limits must a timed plan respect?"
+    picture: "Real configuration files: franka_ros panda joint_limits.yaml (joint2) and MoveIt panda_moveit_config joint_limits.yaml (panda_joint2)."
+    numbers: "2.175 rad/s, 87 N m; MoveIt 1.875 rad/s^2 and 300 rad/s^3 against the 7.5 rad/s^2 datasheet value; holding torque 20.6 N m, 23.7% (derived)."
+    example: "The same Panda arm, two sets of limits."
+    read: "§11.4, §11.4.1"
+  - id: 10
+    q: "What does a seam ask of the drive?"
+    picture: "seam_step1-2 (new, after figure 3); libfranka errors.h excerpt (real artifact); overshoot (schematic, optional)."
+    numbers: "One tick 36.7 N m and 36,700 N m/s (36.7x the 1,000 N m/s limit); 50 ms bridge 1.1 N m and 88.1 N m/s (8.8%); 33.3x smaller peak (NM 11.2; reflected inertia 0.1835 kg m^2 from MLSysIM)."
+    example: "Franka's controller aborts with joint_motion_generator_velocity_discontinuity."
+    read: "§11.4.3, §11.4.4"
+  - id: 11
+    q: "What does the fastest timing of a path cost?"
+    picture: "phase (new, after figure 4): phase plane, bang-bang and jerk-limited."
+    numbers: "516.4 ms against 528.9 ms, 12.6 ms (2.4%); 24.8 N m switch-point step (NM 11.3)."
+    example: "Shoulder swing with the rated payload."
+    read: "§11.4.5"
+  - id: 12
+    q: "How long is a stop the drive can execute?"
+    picture: "ruckig_arm: Ruckig 0.19.4 output (real tool run) against constant deceleration."
+    numbers: "275 ms and 137.5 mm (100 + 37.5) against 200 ms and 100 mm (equation 17; NM 11.4)."
+    example: "Arm stop from 1 m/s with 5 m/s^2 and 66.7 m/s^3."
+    read: "§11.5.2"
+  - id: 13
+    q: "How much clearance does a stall use?"
+    picture: "runway_step1-2 (new, after the chapter's runway bars)."
+    numbers: "82 + 137.5 = 219.5 of 300 mm, 80.5 mm spare; open mug 2.45 m/s^2, 280.4 mm stop, 362.4 mm, carry at 0.89 m/s (NM 11.4, §11.5.2)."
+    example: "Open mug of liquid (Mayer and Krechetnikov 2012)."
+    read: "§11.5.2"
+  - id: 14
+    q: "When must the stop begin, and why can admission not wait?"
+    picture: "timeline_step1-2 (new, after figure 2); base_step1-2 (new, after figure 5) with ER-FLEX photo."
+    numbers: "Preferred 240, cutoff 278, commitment 300, rest 575 ms; 197.5 of 300 mm; 200 ms late breaches by 97.5 mm. Base: 750, 1,031.25, 1,125 ms; budget 1,123.84 mm against 1,100 (§11.5.1 to §11.5.4)."
+    example: "Inevitable collision states; the aisle run."
+    read: "§11.5.1, §11.5.3, §11.5.4"
+  - id: 15
+    q: "Which generator should propose the motion?"
+    picture: "gen_timing (new): reported timings on a log scale; family table; nonholonomic base view with an Amazon drive-unit photo (optional)."
+    numbers: "Ruckig 19.8 us mean, 123 us worst (Berscheid and Kroger 2021); chunk pass 40 ms; 114.9 ms capture to admission; DWA admits 2.10 m/s on 1.10 m (derived)."
+    example: "Reach past the static conveyor guard."
+    read: "§11.6, §11.6.1"
+
+concept_trace:
+  - concept: "Trajectory record"
+    frame: "The trajectory record binds the motion to its deadlines and stop"
+    shows: "record_step1-3 build: header, motion, stop, deadlines, sidecar, readers; preceded by the ROS message that lacks them"
+  - concept: "Replacement latency and handoff tail"
+    frame: "Estimate: how many requests must overlap?"
+    shows: "repl_step1-3 build (114.9 ms, three overlapping requests); hook bars for the tail"
+  - concept: "Manipulator Jacobian"
+    frame: "Predict: does 1 m/s at the tool fit the joints?"
+    shows: "jac_ellipse with 4.9 and 37.8 rad/s"
+  - concept: "Kinodynamic feasibility"
+    frame: "The same arm ships with two sets of joint limits"
+    shows: "real joint_limits.yaml excerpts and the definition on the slide; phase plane follows"
+  - concept: "C2 seam"
+    frame: "A one-tick seam passes the torque check and fails the rate"
+    shows: "seam_step1-2: velocity and torque for one tick against a 50 ms quintic bridge"
+  - concept: "Jerk-limited stopping suffix"
+    frame: "Ruckig's jerk-limited stop runs 275 ms and 137.5 mm"
+    shows: "Ruckig output against constant deceleration; then the stall runway bars"
+  - concept: "Inevitable collision states"
+    frame: "The stop must begin before the arm is already doomed"
+    shows: "timeline_step1-2 with preferred, cutoff, and commitment marks; definition and equation 18 on the slide"
+  - concept: "Generators are proposers"
+    frame: "Generators differ in work and deadline, not in what they prove"
+    shows: "gen_timing bars and the family table"
+
+worked_examples:
+  - name: "Napkin Math 11.2: the seam spike, then the 10 ms squeeze"
+    given: "0.2 rad/s gap; reflected inertia 0.1835 kg m^2; 1 ms tick; torque-rate limit 1,000 N m/s"
+    steps: ["one tick: 36.7 N m, 36,700 N m/s", "50 ms bridge: 6 rad/s^2, 1.1 N m; 480 rad/s^3, 88.1 N m/s", "10 ms bridge: 5.5 N m; 12,000 rad/s^3, 2,202 N m/s"]
+    result: "The 10 ms bridge is 2.2x the limit; the shortest legal bridge is 14.8 ms (derived)."
+    meaning: "Torque rate fails first and grows as 1/T^2; a compressed bridge must be checked again."
+  - name: "Napkin Math 11.4: the stall runway and the open mug"
+    given: "lease 60 ms, tick 1, bus 1, onset 20 ms; 1 m/s; 5 m/s^2; 66.7 m/s^3; 300 mm"
+    steps: ["lease path 82 mm", "stop 100 + 37.5 = 137.5 mm", "219.5 mm used, 80.5 spare", "open mug: 2.45 m/s^2, 280.4 mm stop, 362.4 mm"]
+    result: "The empty reach fits; the open-mug carry must slow to 0.89 m/s."
+    meaning: "The stop belongs to the payload; the lease is a term of the stopping budget."
+  - name: "§11.5.4: the base's jerk-limited stop at the rack end"
+    given: "1.5 m/s, 2 m/s^2, 7.11 m/s^3, 1.10 m, 912.9 mm budget before the jerk term"
+    steps: ["constant 562.5 mm, 750 ms", "S-curve 773.44 mm, 1,031.25 ms (Ruckig agrees)", "budget 1,123.84 mm"]
+    result: "23.84 mm over the clear distance at the drive limit."
+    meaning: "The stop the load tolerates sets the aisle speed; Lecture 12 finishes the budget."
+
+active_learning:
+  - {at_minute: 1, type: predict, prompt: "Are all 3,000 handoffs on time?", answer: "Almost never: 8 x 10^-14; 30 late per run."}
+  - {at_minute: 4, type: retrieval, prompt: "What does an intent lease bound, and what does it not give?", answer: "Space, effort, time; it names no velocity, acceleration, or stop."}
+  - {at_minute: 10, type: predict, prompt: "Does 1 m/s at the tool fit the joints at a 90° elbow?", answer: "No: at least 3.5 rad/s on one joint against 2.175."}
+  - {at_minute: 19, type: estimate, prompt: "How many replacement requests must overlap?", answer: "114.9/50 = 2.3, at least 3."}
+  - {at_minute: 25, type: concept_question, prompt: "A late handoff: collide, stop, or keep tracking?", answer: "Stop; the mission loses time."}
+  - {at_minute: 36, type: estimate, prompt: "Squeeze the bridge to 10 ms. Does it fit?", answer: "No: 2,202 N m/s, 2.2x the limit; 14.8 ms is the shortest legal bridge."}
+  - {at_minute: 45, type: predict, prompt: "Does the open-mug stop fit in 300 mm?", answer: "No: 362.4 mm; slow to 0.89 m/s."}
+  - {at_minute: 55, type: concept_question, prompt: "True or false: on-time plans need no stop?", answer: "False: one plan in 100 is late, and the base needs 1,031.25 ms to stop."}
+  - {at_minute: 62, type: discuss, prompt: "Which generator for the guarded reach?", answer: "Route around the static guard outside the loop; chunks or an online generator near the mug; the MCU checks everything."}
+  - {at_minute: 65, type: retrieval, prompt: "Name the three things every plan carries and the deadline admission must beat.", answer: "Timing, a C2 join, a latched stop; admission closes before t_commit."}
+
+fallacies:
+  - "A trajectory can omit its stop if replacements arrive in time (true-or-false frame)."
+  - "Checking each chunk alone (in the seam and libfranka notes)."
+
+open_questions:
+  - "Who should measure a load's jerk tolerance, and on which loads?"
+  - "Should a learned policy be trained to emit C2 chunks, or should a checker always repair them?"
+  - "When should the fallback be something other than a stop?"
+
+more_examples:
+  - "Ruckig online trajectory generator, run in ruckig_run.py (Berscheid and Kroger 2021)."
+  - "MoveIt 2 time parameterization (Kunz and Stilman) and its Panda joint_limits.yaml."
+  - "libfranka discontinuity errors (errors.h)."
+  - "pi0 chunking at 50 Hz (Black et al. 2024); real-time chunking (Black et al. 2025)."
+  - "cuRobo parallel trajectory optimization (Sundaralingam et al. 2023)."
+  - "ROS 2 Nav2 DWB and MPPI controllers (Macenski et al. 2023)."
+
+further_reading:
+  - {cite: "Fraichard and Asama, Inevitable Collision States, Advanced Robotics, 2004", url: "https://doi.org/10.1163/1568553042674662", why: "The formal basis of the commitment deadline."}
+  - {cite: "Biagiotti and Melchiorri, Trajectory Planning for Automatic Machines and Robots, 2008", url: "https://doi.org/10.1007/978-3-540-85629-0", why: "The double-S stopping profile."}
+  - {cite: "Berscheid and Kroger, Jerk-Limited Real-Time Trajectory Generation with Arbitrary Target States, RSS 2021", url: "https://doi.org/10.15607/RSS.2021.XVII.015", why: "Ruckig, the generator run in this deck."}
+  - {cite: "Lynch and Park, Modern Robotics, 2017", url: "http://modernrobotics.org", why: "Jacobians, dynamics, and time scaling for students without control background."}
+  - {cite: "Chi et al., Diffusion Policy, IJRR 2025", url: "https://doi.org/10.1177/02783649241273668", why: "Receding-horizon learned chunks."}
+
+left_to_reading:
+  - {concept: "Model predictive control (secondary)", why: "Named on the generators slide with its terminal-set condition; §11.6 develops it."}
+  - {concept: "Configuration space (secondary)", why: "Glossed in the generators note; §11.2.1 and §11.6."}
+
+callbacks:
+  - {lecture: 10, concept: "Expiring intent lease", where: "recall frame; record note"}
+  - {lecture: 9, concept: "Belief record", where: "recall note; record note"}
+  - {lecture: 3, concept: "Chunking is a supply lever", where: "obligations note; chunks note"}
+  - {lecture: 3, concept: "Temporal ensembling and real-time chunking", where: "stale anchor note"}
+  - {lecture: 4, concept: "Chunk lease", where: "obligations note; record note"}
+  - {lecture: 4, concept: "Handoff record and event timing", where: "ROS message note; record note"}
+  - {lecture: 4, concept: "Authority-expiry timers", where: "ICS note"}
+  - {lecture: 5, concept: "Kinematic topology mismatch", where: "Jacobian predict note"}
+  - {lecture: 5, concept: "Operational design domain", where: "record note"}
+  - {lecture: 2, concept: "Delivered torque ceiling", where: "joint limits note"}
+  - {lecture: 2, concept: "Reflected rotor inertia", where: "seam note"}
+  - {lecture: 8, concept: "Observation age", where: "replacement latency note"}
+  - {lecture: 8, concept: "Latency waterfall", where: "replacement latency note"}
+  - {lecture: 13, concept: "Dispatch-to-admission allocation", where: "replacement latency note"}
+  - {lecture: 1, concept: "Elementary stopping budget", where: "Ruckig stop note; base stop note"}
+  - {lecture: 12, concept: "Stopping envelope", where: "ICS note; next-lecture note"}
+  - {lecture: 12, concept: "State-matched fallback ladder", where: "ICS note; open questions note"}
+  - {lecture: 12, concept: "Safety Enforcement (next lecture title)", where: "NEXT LECTURE label"}
+
+closing:
+  return_to_hook: "Why can a late plan leave clearance intact? The tail sets availability; the latched stop sets clearance (219.5 of 300 mm)."
+  read_and_practice: ["§11.1 to §11.10", "Checkpoints 11.1 to 11.3", "Napkin Math 11.2 and 11.4 by hand", "ruckig_run.py"]
+  bridge: "Lecture 12: an admitted plan still needs permission on every control tick. Why?"
+
+notes_for_author:
+  - "Ruckig 0.19.4 reproduces the chapter's two stops exactly (275.00 ms and 137.50 mm; 1,031.25 ms and 773.44 mm); ruckig_run.py needs pip install ruckig, which the MLSysBook venv lacks."
+  - "MoveIt's Panda config sets panda_joint2 acceleration at 1.875 rad/s^2, a quarter of the 7.5 rad/s^2 the chapter uses; worth a sentence in §11.4."
+  - "deckcheck cannot see 'C$^2$ seam' as the concept 'C2 seam'; the seam frame names it."
