@@ -224,6 +224,7 @@ def detex(s):
     s = s.replace("\\textbar{}", "|").replace("\\textbar", "|")
     s = s.replace("\\times", " × ").replace("\\cdot", "·").replace("\\textperiodcentered", "·")
     s = re.sub(r"\\[a-zA-Z@]+\*?", " ", s)
+    s = re.sub(r"(\w)\$\^\{?(\w+)\}?\$", r"\1\2", s)     # C$^2$ reads as C2
     s = re.sub(r"[{}$]", " ", s).replace("\x00", "$")
     s = s.replace("---", "—").replace("--", "–").replace("``", "\u201c").replace("''", "\u201d")
     return re.sub(r"\s+", " ", s).strip()
@@ -961,7 +962,7 @@ def rule_unused(deck, vol, out):
 BRITISH = re.compile(r"\b(colou?r(?<=colour)\w*|behaviour\w*|favour\w*|optimis(?:e|ed|es|ing|ation|ations|er|ers)\b|"
                      r"minimis(?:e|ed|es|ing)\b|maximis(?:e|ed|es|ing)\b|normalis(?:e|ed|es|ing|ation)\b|"
                      r"centre[sd]?\b|modelling|modelled|labelled|labelling|travelled|cancelled|"
-                     r"analys(?:e|ed|ing)\b|utilis(?:e|ed|es|ing|ation)\b|programme[sd]?\b|"
+                     r"analys(?:e|ed|ing)\b|utilis(?:e|ed|es|ing|ation)\b|programmes?\b|"
                      r"organis(?:e|ed|es|ing|ation)\b|grey\b)", re.I)
 HYPE = re.compile(r"\b(crucial(?:ly)?|massive(?:ly)?|game[- ]changing|game[- ]changer|revolutionary|"
                   r"revolutioni[sz]e[sd]?|unprecedented|cutting[- ]edge)\b", re.I)
