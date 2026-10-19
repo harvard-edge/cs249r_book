@@ -106,3 +106,18 @@ Author sign-off is separate from the recorded implementation reviews.
 
 Rebuild this focused gallery against an explicitly selected HTML run:
   python3 books/_prototypes/vol1-web-animations/figure-plan/build-generated-figures.py --build-root books/_build/parallel/RUN
+
+Full-section integration review
+
+section-integration-review.json records the complete containing-section reading
+for the 26 new figures, including the neighboring section transitions. The
+review produced targeted prose corrections in six chapter files; the record
+preserves the exact replacements and pre/post source hashes. Drawings,
+captions, equations, and executable cells remain unchanged.
+
+The static provenance checker reverses only those exact approved prose edits
+before comparing with the historical figure-review baseline. Its mutation
+tests reject unlisted prose or changes to protected figure/math/code regions.
+New HTML and PDF evidence is recorded separately from historical visual
+reviews; inherited animation acceptance is explicitly distinguished from fresh
+prose-context and one-action browser checks.

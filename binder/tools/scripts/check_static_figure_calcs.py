@@ -19,6 +19,7 @@ import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parents[3]
 STATIC_REVIEW_REVISION = '99cc75bfed2c434e73b30be25523ce85d4c9d2dd'
 STATIC_DELIVERY = ROOT / 'books/_prototypes/vol1-web-animations/figure-plan/static-delivery.json'
+SECTION_REVIEW = 'books/_prototypes/vol1-web-animations/figure-plan/section-integration-review.json'
 
 
 def source(path):
@@ -29,9 +30,63 @@ def require(text, value):
     assert value in text, f'Computed label missing from source: {value!r}'
 
 
+def protected_source_ranges(text):
+    """Protect figure bodies, executable/code fences, display math and structure."""
+    spans = []
+    for pattern in [r'(?ms)^(`{3,}|~{3,})[^\n]*\n.*?^\1[ \t]*(?:\n|$)',
+                    r'(?ms)^[ \t]*\$\$.*?\$\$[^\n]*(?:\n|$)',
+                    r'(?m)^(?:#{1,6}\s|!\[|:{3,}|`{3,}|~{3,}|\$\$).*$',
+                    r'\A---\n.*?\n---(?:\n|$)']:
+        spans.extend((m.start(), m.end()) for m in re.finditer(pattern, text, re.S if pattern.startswith('\\A') else 0))
+    for start in re.finditer(r'(?m)^(:{3,})\s*\{#fig-[^\n]*', text):
+        close = re.search(r'(?m)^' + re.escape(start[1]) + r'[ \t]*$', text[start.end():])
+        assert close, 'Unclosed figure wrapper'
+        spans.append((start.start(), start.end() + close.end()))
+    return sorted(spans)
+
+
+def approved_prose_sources():
+    """Reverse only the exact approved sequential replacements, never omit prose."""
+    record = json.loads((ROOT / SECTION_REVIEW).read_text())
+    files = record['files']
+    assert len(files) == len({f['source'] for f in files}) == 6
+    assert sum(len(f['edits']) for f in files) == 13
+    reconstructed = {}
+    for entry in files:
+        path = entry['source']
+        assert path.startswith('books/vol') and path.endswith('.qmd') and '..' not in Path(path).parts
+        current = (ROOT / path).read_bytes()
+        assert hashlib.sha256(current).hexdigest() == entry['after_sha256'], (path, 'unapproved post-edit source drift')
+        text = current.decode('utf-8')
+        protected_after = [text[a:b] for a, b in protected_source_ranges(text)]
+        for edit in reversed(entry['edits']):
+            assert edit['source'] == path
+            before, after = edit['before'], edit['after']
+            assert before != after and before.strip() and after.strip()
+            assert text.count(after) == 1, (path, 'stale or ambiguous approved replacement')
+            start = text.index(after)
+            end = start + len(after)
+            assert (start == 0 or text[:start].endswith('\n\n')) and (end == len(text) or text[end:].startswith('\n\n')), (path, 'replacement is not complete prose paragraphs')
+            assert all(end <= a or start >= b for a, b in protected_source_ranges(text)), (path, 'replacement touches protected source')
+            assert not protected_source_ranges(before) and not protected_source_ranges(after), (path, 'replacement introduces protected structure')
+            inline = r'(?<!\\)\$(?!\$).*?(?<!\\)\$|`+[^`]*`+'
+            assert re.findall(inline, before) == re.findall(inline, after), (path, 'inline math/code changed')
+            text = text[:start] + before + text[end:]
+        previous = text.encode('utf-8')
+        assert hashlib.sha256(previous).hexdigest() == entry['before_sha256'], (path, 'approved pre-edit hash mismatch')
+        baseline = subprocess.check_output(['git', 'show', record['reviewed_source_revision'] + ':' + path], cwd=ROOT)
+        assert previous == baseline, (path, 'reconstructed source differs from reviewed revision')
+        assert protected_after == [text[a:b] for a, b in protected_source_ranges(text)], (path, 'protected figure/math/code/structure changed')
+        reconstructed[path] = previous
+    binding = dict(reviewed_source_revision=record['reviewed_source_revision'], files=files)
+    digest = hashlib.sha256(json.dumps(binding, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    return reconstructed, digest
+
+
 def static_source_provenance(refresh=False):
-    """Preserve historical raw hashes; permit only two HTML enrollment attributes."""
+    """Preserve historical hashes; reverse exact approved prose, then enrollment."""
     manifest = json.loads(STATIC_DELIVERY.read_text())
+    approved, approved_digest = approved_prose_sources()
     digest = lambda data: hashlib.sha256(data).hexdigest()
     normalize = lambda data: re.sub(rb' data-explore(?:-key)?="[^"]*"', b'', data)
     assert manifest['count'] == len(manifest['figures']) == 26
@@ -41,34 +96,46 @@ def static_source_provenance(refresh=False):
             ['git', 'show', STATIC_REVIEW_REVISION + ':' + entry['source']], cwd=ROOT)
         current = (ROOT / entry['source']).read_bytes()
         assert digest(reviewed) == entry['source_sha256'], (entry['key'], 'historical raw source drift')
-        assert normalize(current) == normalize(reviewed), (entry['key'], 'static source content changed')
+        reconstructed = approved.get(entry['source'], current)
+        assert normalize(reconstructed) == normalize(reviewed), (entry['key'], 'static source content changed')
         png = (STATIC_DELIVERY.parent / entry['png']).read_bytes()
         assert digest(png) == entry['png_sha256'], (entry['key'], 'reviewed PNG changed')
         proof = dict(current_raw_source_sha256=digest(current),
                      reviewed_normalized_source_sha256=digest(normalize(reviewed)),
                      current_normalized_source_sha256=digest(normalize(current)),
-                     normalized_static_source_equal=True, reviewed_png_hash_matches=True)
+                     reconstructed_normalized_source_sha256=digest(normalize(reconstructed)),
+                     approved_prose_reversal_applied=entry['source'] in approved,
+                     normalized_static_source_equal_after_approved_reversal=True,
+                     reviewed_png_hash_matches=True)
         if refresh:
             entry['current_static_source_proof'] = proof
         else:
             assert entry['current_static_source_proof'] == proof, (entry['key'], 'stale provenance proof')
         proofs[entry['key']] = proof
     note = ('source_sha256 preserves the raw reviewed QMD at reviewed_source_revision. '
-            'Current static equivalence removes only space-prefixed data-explore and '
+            'Current static equivalence first reverses only the exact approved prose edits '
+            'in section-integration-review.json, verifying post/pre raw hashes, reviewed '
+            'revision, unchanged figure/math/code regions and inline math/code. It then '
+            'removes only space-prefixed data-explore and '
             'data-explore-key double-quoted HTML enrollment attributes, then compares '
             'all remaining bytes. PNG hashes remain the historical reviewed artifacts. '
             'This provenance check does not claim a new PDF build or visual review.')
     if refresh:
         manifest['reviewed_source_revision'] = STATIC_REVIEW_REVISION
         manifest['source_hash_scope'] = note
+        manifest['approved_prose_edits'] = dict(source=SECTION_REVIEW, edits_sha256=approved_digest,
+                                              files=6, replacements=13)
         STATIC_DELIVERY.write_text(json.dumps(manifest, indent=2) + '\n')
     else:
         assert manifest['reviewed_source_revision'] == STATIC_REVIEW_REVISION
         assert manifest['source_hash_scope'] == note
+        assert manifest['approved_prose_edits'] == dict(source=SECTION_REVIEW,
+            edits_sha256=approved_digest, files=6, replacements=13)
     return dict(reviewed_source_revision=STATIC_REVIEW_REVISION,
                 checked_figures=len(proofs), historical_raw_hashes_match=True,
-                normalized_static_sources_equal=True, reviewed_png_hashes_match=True,
-                normalization='Remove only data-explore and data-explore-key HTML enrollment attributes.',
+                normalized_static_sources_equal_after_approved_reversal=True, reviewed_png_hashes_match=True,
+                approved_prose_edits_sha256=approved_digest,
+                normalization='Reverse exact hash-bound approved prose edits; remove only data-explore and data-explore-key attributes.',
                 figures=proofs)
 
 
