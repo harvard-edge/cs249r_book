@@ -48,8 +48,19 @@
       return {origin:points[0], x:minus(points[1],points[0]), y:minus(points[3],points[0])};
     };
     const lower = grid(input[0]), upper = grid(violet[0]), orangeOrigin=polygon(orange[0])[0];
-    const originalLinks=links.map(p=>({d:p.getAttribute('d'),transform:p.getAttribute('transform')}));
-    const originalOutput=polygon(paths.find(p=>p.getAttribute('fill')==='rgb(64.99939%, 29.998779%, 64.99939%)'));
+    // Keep the two-plane drawing, but give output numbers enough vertical room.
+    const outputScale=1.45, outputBottom=Math.max(...violet.flatMap(p=>polygon(p).map(v=>v.y)));
+    const project=p=>({x:p.x,y:outputBottom+(p.y-outputBottom)*outputScale});
+    upper.origin=project(upper.origin); upper.x.y*=outputScale; upper.y.y*=outputScale;
+    const top=Math.min(...violet.flatMap(p=>polygon(p).map(v=>project(v).y)))-3;
+    const box=svg.viewBox.baseVal;
+    svg.setAttribute('viewBox',`${box.x} ${top} ${box.width} ${box.height-top}`);
+    const outputPlane=document.createElementNS(NS,'g');
+    outputPlane.setAttribute('transform',`translate(0 ${outputBottom*(1-outputScale)}) scale(1 ${outputScale})`);
+    const highlighted=paths.filter(p=>['rgb(75%, 50%, 75%)','rgb(64.99939%, 29.998779%, 64.99939%)'].includes(p.getAttribute('fill')));
+    [...svg.children].filter(el=>violet.includes(el)||highlighted.includes(el)||/clip-(?:0|1|4|5)\)/.test(el.getAttribute('clip-path')||'')).forEach(el=>outputPlane.append(el));
+
+    const originalOutput=polygon(paths.find(p=>p.getAttribute('fill')==='rgb(64.99939%, 29.998779%, 64.99939%)')).map(project);
     const at = (g,x,y) => add(g.origin, add(scale(g.x,x), scale(g.y,y)));
     const corners = (g,x,y,size=1) => [at(g,x,y),at(g,x+size,y),at(g,x+size,y+size),at(g,x,y+size)];
     const points = a => a.map(p => `${p.x},${p.y}`).join(' ');
@@ -65,7 +76,8 @@
     firstOrange.before(windowGroup);
     orange.forEach(p => windowGroup.append(p));
     const outputLayer = make('g',{}), particles = make('g',{'aria-hidden':'true'});
-    svg.append(outputLayer,particles);
+    const valueLayer=make('g',{'data-values-on-diagram':''});
+    svg.append(outputPlane,outputLayer,valueLayer,particles);
     const controls = node('div','','life-controls'), buttons={};
     for (const [id,label] of [['next','Next'],['back','Back'],['play','Play'],['restart','Restart']]) {
       const b=node('button',label); b.type='button'; b.dataset.control=id;
@@ -77,23 +89,14 @@
     const narration=node('div','','life-narration'), heading=node('strong'), explanation=node('p');
     narration.setAttribute('aria-live','polite'); narration.append(heading,explanation);
     const canvas=node('div','','life-art'); canvas.append(svg);
-    const workspace=node('div','','life-workspace'), inset=node('div','','life-values');
-    inset.hidden=true;
-    inset.setAttribute('aria-label','Optional worked values for the selected window');
+    const workspace=node('div','','life-workspace'), inset=node('details','','life-values');
+    inset.setAttribute('aria-label','Detailed calculation for the selected window');
     const example=JSON.parse(outer.querySelector('[data-example-values]').textContent);
-    const insetTitle=node('strong','Example values');
-    const sourceLink=node('a',example.label,'life-value-source'); sourceLink.href='#'+example.source_anchor;
+    const insetTitle=node('summary','Inspect the calculation');
+    const sourceLink=node('a','Illustrative values from the vertical-line example below','life-value-source'); sourceLink.href='#'+example.source_anchor;
     const valueScope=node('p',example.scope,'life-value-scope'), valuesBody=node('div');
-    inset.append(insetTitle,sourceLink,valueScope,valuesBody);
-    workspace.append(canvas,inset);
-    const valuesButton=node('button','Show values'); valuesButton.type='button';
-    valuesButton.setAttribute('aria-expanded','false'); controls.append(valuesButton);
-    const showValues=show=>{
-      inset.hidden=!show; workspace.classList.toggle('with-values',show);
-      valuesButton.textContent=show?'Hide values':'Show values'; valuesButton.setAttribute('aria-expanded',String(show));
-    };
-    valuesButton.addEventListener('click',()=>showValues(inset.hidden));
-    showValues(new URLSearchParams(location.search).get('values')==='1');
+    inset.append(insetTitle,valueScope,valuesBody);
+    workspace.append(canvas,sourceLink,inset);
     const keys=node('p','Keyboard: N Next · P Back · K Play/Pause · R Restart. Focus the animation to use shortcuts.','life-keys');
     const legend=node('div','','life-legend');
     for (const [text,color] of [['Input window','#ff8000'],['Input contributions','#2455d6'],['Output activations','#a64ca6']]) {
@@ -119,7 +122,6 @@
     };
     function applyPose(s) {
       const c=coordinates(s);
-      if(s.pose){windowGroup.removeAttribute('transform');links.forEach((p,i)=>{p.setAttribute('d',originalLinks[i].d);p.setAttribute('transform',originalLinks[i].transform);});return;}
       windowGroup.setAttribute('transform',`translate(${c.shift.x} ${c.shift.y})`);
       links.forEach((link,i) => {
         link.removeAttribute('transform');
@@ -131,17 +133,48 @@
       const count=s.pose ? 0 : s.row*5+s.col+(s.phase==='write'&&!moving?1:0);
       for(let n=0;n<count;n++) outputLayer.append(make('polygon',{points:points(corners(upper,n%5,Math.floor(n/5))),fill:'#a64ca6',stroke:'#000','stroke-width':'.24'}));
       if(s.pose) outputLayer.append(make('polygon',{points:points(originalOutput),fill:'#a64ca6',stroke:'#000','stroke-width':'.24'}));
-      progress.textContent=s.pose ? 'One input window → one output activation. No numerical values are specified in this figure.' : `${count} of 25 output activations stored · overlapping windows reuse input values.`;
+      progress.textContent=s.pose ? 'One input window → one output activation. The added numbers use the section’s vertical-line example.' : `${count} of 25 output activations stored · overlapping windows reuse input values.`;
       panel.dataset.outputs=String(count);
     }
     function paint() {
       const s=states[index]; if(!moving){applyPose(s);drawOutputs(s);}
       paintValues(s);
+      paintDiagramValues(s);
       heading.textContent=s.title; explanation.textContent=s.text; menu.value=String(index);
       buttons.back.disabled=index===0; buttons.restart.disabled=index===0&&!moving;
       buttons.next.disabled=index===states.length-1&&!moving;
       buttons.next.textContent=moving?'Finish':'Next'; buttons.play.textContent=running?'Pause':index===states.length-1?'Replay':'Play';
       Object.assign(panel.dataset,{step:String(index),committed:String(completed),moving:String(moving),running:String(running)});
+    }
+    function paintDiagramValues(s) {
+      valueLayer.replaceChildren();
+      const text=(content,x,y,size,fill,attrs={})=>{
+        const t=make('text',{x,y,'font-size':size,fill,'text-anchor':'middle','dominant-baseline':'central','font-family':'system-ui, sans-serif',...attrs});
+        t.textContent=String(content);valueLayer.append(t);return t;
+      };
+      for(let row=0;row<example.inputs.length;row++)for(let col=0;col<example.inputs[row].length;col++) {
+        const c=center(corners(lower,col,row));
+        const active=s.pose||(row>=s.row&&row<s.row+3&&col>=s.col&&col<s.col+3);
+        text(example.inputs[row][col],c.x,c.y,4.4,active?'#161616':'#64748b',{'data-input-row':row,'data-input-col':col,'font-weight':active?'700':'400','paint-order':'stroke',stroke:active?'#ff8000':'#fff','stroke-width':'.35'});
+      }
+      const count=Number(panel.dataset.outputs||0);
+      for(let n=0;n<count;n++) {
+        const value=example.positions[n],c=center(corners(upper,value.column,value.row));
+        text(value.output,c.x,c.y,4.1,'#fff',{'font-weight':'650','data-output-index':n,'paint-order':'stroke',stroke:'#6e246e','stroke-width':'.12'});
+      }
+      const kernelX=96, kernelY=top+10, cell=8;
+      text('Shared filter',kernelX+cell*1.5,kernelY-5,3.6,'#222',{'font-weight':'600'});
+      example.weights.forEach((row,r)=>row.forEach((weight,c)=>{
+        valueLayer.append(make('rect',{x:kernelX+c*cell,y:kernelY+r*cell,width:cell,height:cell,fill:'#f4f5f7',stroke:'#7c8490','stroke-width':'.18'}));
+        text(weight,kernelX+(c+.5)*cell,kernelY+(r+.5)*cell,4.6,'#222',{'data-kernel-row':r,'data-kernel-col':c});
+      }));
+      const ready=!s.pose&&(s.phase==='write'||(s.phase==='combine'&&!moving));
+      if(ready) {
+        const value=example.positions.find(p=>p.row===s.row&&p.column===s.col);
+        const x=94,y=kernelY+cell*3+5;
+        valueLayer.append(make('rect',{x,y,width:30,height:10,rx:1.5,fill:'#eef0ff',stroke:'#7662a2','stroke-width':'.25'}));
+        text(`Sum = ${value.output}`,x+15,y+5,4.2,'#46236d',{'data-diagram-sum':value.output,'font-weight':'600'});
+      }
     }
     function paintValues(s) {
       valuesBody.replaceChildren();

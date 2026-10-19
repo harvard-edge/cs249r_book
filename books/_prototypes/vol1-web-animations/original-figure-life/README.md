@@ -7,12 +7,15 @@ The manuscript, static drawing, caption, and the other animations are unchanged.
 Diagram retains the original image. Explore retains its dashed input plane,
 orange receptive field, blue connections, and violet output plane. Next separates
 moving the window, combining weighted input contributions, and storing an output
-activation. The original figure specifies no numerical inputs or weights, so
-the default view does not add numerical results. An optional Show values panel
-uses the nearby chapter's vertical-line example, explicitly labeled as added
-illustrative inputs. It follows the same selected window and shared filter;
-products and sums appear only after Combine completes, and the stored-output
-label appears after Write completes. The main drawing stays visible. The dots show logical weighted
+activation. The original static figure specifies no numerical inputs or weights. Explore
+adds the nearby chapter's vertical-line example directly to the drawing: every
+input cell carries its value, a shared-filter block sits in the diagram, and
+completed activations are written into the violet output cells. The output
+plane is enlarged vertically for readable labels. A sum appears in the drawing
+after Combine completes; the output value appears only after Write completes.
+Detailed arithmetic remains available in a collapsed Inspect the calculation
+section below the diagram.
+The dots show logical weighted
 contributions, not hardware packets or measured transfer time.
 
 Play runs once; Next performs one action and stops. Back, Restart, and exact
@@ -44,6 +47,7 @@ volume-wide implementation or a student study.
 `example-values.py` owns the illustrative inputs and computes every patch,
 product, row sum, and output in `example-values.json`. Regenerate the JSON before
 building after an example change. No hardware specifications are introduced.
-The additional browser checks in `check-values.py` verify every output position,
-value-panel toggling without state changes, and preservation of the original
-SVG paths at desktop and phone widths in both themes.
+The additional browser checks in `check-values.py` verify every input and filter
+label, every output position, sum/output commit timing, calculation disclosure
+without state changes, and preservation of the original SVG paths at desktop
+and phone widths in both themes.
