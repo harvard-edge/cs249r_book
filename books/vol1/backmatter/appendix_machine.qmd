@@ -139,7 +139,7 @@ class NumbersToKnow:
     training_flops_math = fmt_math(sci_latex(training_flops, 1))
 ```
 
-Fetching a 32-bit weight from off-chip DRAM costs hundreds of times more energy and roughly a thousand times more latency than reading it from a register, a gap that no compiler flag can erase. Like Jeff Dean's "Latency Numbers Every Programmer Should Know,"[^fn-jeff-dean-latency] the reference numbers below give the order-of-magnitude intuition that ML systems design requires. Although absolute values and ratios vary by technology and workload, the hierarchy is more durable. Memorize the relationships and use the specific values as sanity checks.
+In general systems engineering, Jeff Dean's "Latency Numbers Every Programmer Should Know"[^fn-jeff-dean-latency] gave developers a shared set of order-of-magnitude anchors for reasoning about cache misses, disk seeks, and network round trips before writing code. Machine learning systems rest on a parallel hierarchy of physical ratios: fetching a 32-bit weight from off-chip DRAM costs hundreds of times more energy and roughly a thousand times more latency than reading it from a register, a gap that no compiler flag can erase. Although absolute timings and wattages shift with every process node and workload, the relative gaps across memory tiers, precision widths, and fiber links remain stable across hardware generations. Memorizing those relationships turns back-of-envelope sizing into a fast sanity check on any design.
 
 ::: {#psp-appendix-machine-three-numbers .callout-perspective title="Three numbers that matter most"}
 
@@ -365,7 +365,7 @@ class BrakingBudget:
     travel_cm_str = fmt_qty(round(travel.to(centimeter).magnitude) * centimeter, unit=centimeter, precision=0, commas=False)
 ```
 
-Latency budgets depend on application-specific safety requirements, user expectations, and service-level objectives. @Tbl-latency-targets-ref lists illustrative targets rather than universal limits. @Sec-model-serving-latency-budget-ef40 shows how a serving system divides such a budget among its stages.
+Hardware access latencies span nanoseconds to milliseconds, but the application decides how much total delay a response can tolerate: an autonomous braking controller must act within milliseconds while a batch training job can run for days (@tbl-latency-targets-ref). These targets reflect safety envelopes, human perception thresholds, and service-level objectives rather than universal hardware limits. @Sec-model-serving-latency-budget-ef40 shows how a serving system divides such an end-to-end budget among its stages.
 
 | **Application**        |                    **Budget**                   | **Constraint**                                                                                                                                            |
 |:-----------------------|:-----------------------------------------------:|:----------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -383,11 +383,11 @@ Throughout this book, "accelerator" is the general term for hardware acceleratio
 
 :::
 
-@Sec-appdx-system-assumptions tabulates the dated accelerator specifications, including the NVIDIA H100 that serves as the book's reference machine. Next, the roofline model shows which of those specifications limits a given workload by turning compute throughput and memory bandwidth into performance ceilings.
+@Sec-appdx-assumptions-accelerator-specifications-7a21 tabulates the dated specifications for these accelerators, including the NVIDIA H100 that serves as the book's reference machine. Those device peaks, together with the reference latencies, energy ratios, and application budgets in this section, supply the raw inputs for back-of-envelope checks, but raw specifications alone do not reveal which resource binds a workload. Turning hardware numbers into a bottleneck diagnosis requires compact analytical models that relate workload demand to machine ceilings.
 
 ## Physics of Computing {#sec-appdx-machine-foundations-physics-computing-c77f}
 
-Raw hardware specifications (FLOP/s, bytes per second, watts) are necessary but insufficient for performance reasoning. Without compact analytical models, an engineer cannot distinguish a compute-bound workload from a bandwidth-bound one, or predict whether doubling the accelerator count will halve training time. The models in this section turn those distinctions into quantitative checks.
+An accelerator rated at hundreds of teraflops can still spend most of a training step waiting on memory reads, serial host dispatch, or in-flight request state. Raw hardware specifications (FLOP/s, bytes per second, watts) bound each resource in isolation, yet without analytical models an engineer cannot tell whether a slow kernel is compute-bound or bandwidth-bound, verify that a time equation is dimensionally consistent, predict whether doubling the accelerator count will halve training time, or size serving concurrency from arrival rate and latency. Four foundational models turn those hardware limits into quantitative checks.
 
 ### The Roofline model {#sec-appdx-machine-foundations-roofline-model-2529}
 
@@ -502,7 +502,7 @@ Precision moves the ridge. At INT8 the H100's peak rate doubles to `{python} H10
 
 ### Dimensional analysis {#sec-appdx-machine-foundations-dimensional-analysis-76b3}
 
-The roofline model helps diagnose *where* a bottleneck lies. Before applying any performance equation, however, it must be verified as physically meaningful. Dimensional analysis provides this sanity check: any valid equation must be **dimensionally homogeneous**\index{Dimensional homogeneity!appendix refresher}, meaning every term must resolve to the same units. If they do not, the equation contains an error.
+In the roofline calculation, dividing peak throughput ($\text{FLOP/s}$) by memory bandwidth ($\text{bytes/s}$) cancels seconds and leaves $\text{FLOP/byte}$. Dividing byte volume directly by $\text{FLOP/s}$ or adding milliseconds of network delay to seconds of compute, by contrast, produces a quantity whose units do not reduce to time, turning a back-of-envelope estimate into a silent category error. Before plugging numbers into any performance equation, **dimensional analysis** verifies that the equation is **dimensionally homogeneous**\index{Dimensional homogeneity!appendix refresher}, meaning every additive or equated term resolves to the same units.
 
 Consider both levels of the iron law of ML systems\index{Iron law of ML systems!appendix refresher} (principle \ref{pri-iron-law}) introduced in @sec-introduction-iron-law-ml-systems-c32a. First, in the multiplicative D·A·M form (@eq-intro-dam-iron-law), intermediate units cancel across the three factors to leave seconds per task:
 $$ \Time[\text{s}] = \frac{\text{Samples}}{\text{Task}} \times \frac{\text{FLOPs}}{\text{Sample}} \times \frac{\text{s}}{\text{FLOP}} = \frac{\text{s}}{\text{Task}} $$
@@ -516,17 +516,15 @@ $$ \Time[\text{s}] = \underbrace{ \frac{\DataVolume [\text{bytes}]}{\Bandwidth [
 
 The equation is physically consistent. Apply this technique to any systems equation: if the dimensions do not match, the formula is wrong. "FLOPs" and "Bandwidth" cannot be traded directly because they have different units. Any such trade-off must convert through time, as the iron law does.
 
-Once an equation is dimensionally sound, the next question is how its time terms scale across devices. @Sec-appdx-machine-foundations-amdahls-law-gustafsons-law-b741 answers that question with two complementary bounds.
+Once a single-device time equation is dimensionally sound, the next question is how its terms behave when work is partitioned across multiple processors.
 
 ### Amdahl's law and Gustafson's law {#sec-appdx-machine-foundations-amdahls-law-gustafsons-law-b741}
 
-Parallelization is the primary tool for scaling ML, but its limits depend on *how* the workload scales. The two laws differ in what they hold fixed. **Amdahl's law**\index{Amdahl's law!appendix refresher} governs how much faster a *fixed* task can run (optimizing latency). **Gustafson's law**\index{Gustafson's law!appendix refresher} governs how much *more* work can be done in the same time (optimizing throughput).
+Doubling the number of accelerators on a training job can either shorten the wall-clock time of a fixed batch or process twice as many tokens in the same time window, and serial overhead limits those two choices very differently. **Amdahl's law**\index{Amdahl's law!appendix refresher} and **Gustafson's law**\index{Gustafson's law!appendix refresher} formalize the two regimes according to what they hold fixed: Amdahl's law bounds how much faster a *fixed* task can run (optimizing latency), whereas Gustafson's law bounds how much *more* work can be completed in a fixed time budget (optimizing throughput).
 
 #### Strong scaling (Amdahl's Law) {#sec-appdx-machine-foundations-strong-scaling-amdahls-law-c6c2}
 
-Adding a thousand accelerators to a fixed training batch cannot shorten the step by more than $20\times$ if 5 percent of each step is serial host dispatch or synchronization. **Strong scaling**\index{Strong scaling!appendix refresher} measures how much faster a fixed-size problem runs as processors are added.
-
-Amdahl's law [@amdahl1967] states that speedup is limited by the serial fraction of the task.[^fn-amdahl-scaling-appendix] Let $\Time(1) = 1$ be normalized single-processor execution time, composed of serial fraction $1-\ParallelFraction$ and parallelizable fraction $\ParallelFraction$. If $\WorkerCount$ processors execute the parallel fraction with linear scaling and zero communication overhead, execution time on $\WorkerCount$ processors is:
+When an engineer splits a fixed training batch or a single inference query across more accelerators to reduce step latency, only the parallelizable matrix math shrinks; host dispatch, barrier synchronization, and sequential aggregation remain fixed. **Strong scaling**\index{Strong scaling!appendix refresher} measures how much faster such a fixed-size problem runs as processors are added, and Amdahl's law [@amdahl1967] states that the serial fraction of the task sets a hard ceiling on the resulting speedup.[^fn-amdahl-scaling-appendix] Let $\Time(1) = 1$ be normalized single-processor execution time, composed of serial fraction $1-\ParallelFraction$ and parallelizable fraction $\ParallelFraction$. If $\WorkerCount$ processors execute the parallel fraction with linear scaling and zero communication overhead, execution time on $\WorkerCount$ processors is:
 $$ \Time(\WorkerCount) = (1-\ParallelFraction) + \frac{\ParallelFraction}{\WorkerCount} $$
 The resulting theoretical speedup is:
 $$ \text{Speedup}(\WorkerCount) = \frac{\Time(1)}{\Time(\WorkerCount)} = \frac{1}{(1-\ParallelFraction) + \frac{\ParallelFraction}{\WorkerCount}} $$
@@ -622,9 +620,7 @@ No matter how many accelerators are added, this fixed workload cannot run faster
 
 #### Weak scaling (Gustafson's Law) {#sec-appdx-machine-foundations-weak-scaling-gustafsons-law-eb7e}
 
-Instead of using 1,000 accelerators to finish a small training dataset in milliseconds, large-model training uses them to process a dataset 1,000$\times$ larger in the same wall-clock time. **Weak scaling**\index{Weak scaling!appendix refresher} measures how much larger a problem can become while holding runtime fixed as processors are added.[^fn-gustafsons-law-scaling]
-
-For $\WorkerCount$ processors, let $1-\ParallelFraction$ be the serial fraction of execution time measured on those processors for the scaled workload, and $\ParallelFraction$ the parallel fraction. Gustafson's law [@gustafson1988] derives "scaled speedup" by asking how long that scaled problem would take on a single processor. On $\WorkerCount$ processors, normalized runtime is $\Time(\WorkerCount) = (1-\ParallelFraction) + \ParallelFraction = 1$. Executing the same total work on a single processor requires running the parallel fraction sequentially, taking $\Time(1) = (1-\ParallelFraction) + \WorkerCount \cdot \ParallelFraction = \WorkerCount - (1-\ParallelFraction)(\WorkerCount-1)$. The resulting scaled speedup is:
+Rather than adding accelerators to finish a small, fixed dataset in milliseconds, large-model training grows the dataset and global batch size alongside the cluster so that more work completes in the same wall-clock window. **Weak scaling**\index{Weak scaling!appendix refresher} measures how much larger a problem can become while holding runtime fixed as processors are added.[^fn-gustafsons-law-scaling] For $\WorkerCount$ processors, let $1-\ParallelFraction$ be the serial fraction of execution time measured on those processors for the scaled workload, and $\ParallelFraction$ the parallel fraction. Gustafson's law [@gustafson1988] derives "scaled speedup" by asking how long that scaled problem would take on a single processor. On $\WorkerCount$ processors, normalized runtime is $\Time(\WorkerCount) = (1-\ParallelFraction) + \ParallelFraction = 1$. Executing the same total work on a single processor requires running the parallel fraction sequentially, taking $\Time(1) = (1-\ParallelFraction) + \WorkerCount \cdot \ParallelFraction = \WorkerCount - (1-\ParallelFraction)(\WorkerCount-1)$. The resulting scaled speedup is:
 $$ \text{Scaled Speedup}(\WorkerCount) = \frac{\Time(1)}{\Time(\WorkerCount)} = \WorkerCount - (1-\ParallelFraction)(\WorkerCount - 1) $$
 
 [^fn-gustafsons-law-scaling]: **John Gustafson**\index{Gustafson, John|seealso{Gustafson's law}}: A computer scientist known for his work in parallel computing and for introducing the Unum (universal number) format. His law was a direct response to the perceived "limits" of Amdahl's Law when applied to massive scale.
@@ -716,7 +712,7 @@ In weak scaling, efficiency remains high because the useful work (training the m
 
 ### The training-time equation {#sec-appdx-machine-foundations-training-time-equation-7c3e}
 
-Weak scaling explains why large training runs grow the dataset rather than shrink the wall-clock time. The training-time equation\index{Training!time estimation} turns model size, data size, accelerator count, peak rate, and utilization into a single estimate of that wall-clock time. @Sec-model-training-iron-law-training-performance-a53f applies it to the book's training workloads. The template below is its reference form.
+Weak scaling explains why large training runs grow the dataset rather than shrink the wall-clock time, but budgeting a run still requires translating billions of parameters and tokens into days on a specific cluster. The **training-time equation**\index{Training!time estimation} combines model size, token count, accelerator count, peak rate, and sustained hardware utilization into that wall-clock estimate, which @sec-model-training-iron-law-training-performance-a53f applies to the book's training workloads.
 
 ```{python}
 #| echo: false
@@ -808,7 +804,7 @@ $$ \Time\approx \frac{6 \cdot \Parameters\cdot \DatasetSize}{\AcceleratorCount \
 
 ### Little's Law {#sec-appdx-machine-foundations-littles-law-21a3}
 
-An inference server receiving 1,000 queries per second at a 50 ms average response time holds 50 requests in flight on average. If each request occupies 1 GB of KV-cache state, a 24 GB accelerator runs out of memory before compute saturates. For capacity planning in stable inference systems, **Little's law**\index{Little's law!appendix refresher} [@little1961] relates long-run mean concurrency ($\RequestConcurrency$), mean arrival rate ($\ArrivalRate$), and mean time in system ($\RequestTimeInSystem$):[^fn-littles-law-appendix]
+Whereas the training-time equation sizes a batch job whose total token volume is known up front, an online inference server receives a continuous stream of queries, and every in-flight request holds working state in memory until its response completes. An accelerator can therefore exhaust its memory capacity from concurrent request state before its arithmetic units saturate. For capacity planning in stable inference systems, **Little's law**\index{Little's law!appendix refresher} [@little1961] relates long-run mean concurrency ($\RequestConcurrency$), mean arrival rate ($\ArrivalRate$), and mean time in system ($\RequestTimeInSystem$):[^fn-littles-law-appendix]
 $$ \RequestConcurrency = \ArrivalRate \times \RequestTimeInSystem $$
 
 The law follows from operational conservation of requests over any observation interval $[0, \ObservationIntervalLength]$. Let $\CumulativeArrivals(\TimeInstant)$ denote cumulative arrivals and $\CumulativeCompletions(\TimeInstant)$ cumulative completions, so the instantaneous in-flight queue occupancy is $\InstantaneousRequestOccupancy(\TimeInstant) = \CumulativeArrivals(\TimeInstant) - \CumulativeCompletions(\TimeInstant)$. The average number of requests in the system over $[0, \ObservationIntervalLength]$ is $\IntervalMeanOccupancy= \frac{1}{\ObservationIntervalLength}\int_0^{\ObservationIntervalLength} \InstantaneousRequestOccupancy(\TimeInstant)\,d\TimeInstant$. The total accumulated request-time $\int_0^{\ObservationIntervalLength} \InstantaneousRequestOccupancy(\TimeInstant)\,d\TimeInstant$ equals the sum of residence times $\sum_{i=1}^{\CompletedRequestCount(\ObservationIntervalLength)} \RequestResidenceTime_i$ of all $\CompletedRequestCount(\ObservationIntervalLength)$ requests completed by time $\ObservationIntervalLength$ (plus boundary terms that vanish as $\ObservationIntervalLength\to \infty$). Dividing both sides by $\ObservationIntervalLength$:
@@ -1005,7 +1001,7 @@ Energy explains why data should stay high in the hierarchy. The table gives per-
 
 ### Bandwidth versus latency {#sec-appdx-machine-foundations-bandwidth-vs-latency-5320}
 
-Upgrading a 10 Gbps network link to 100 Gbps barely changes the delivery time of a 1 KB inference request, yet it cuts the transfer of a 1 GB checkpoint tenfold. Bandwidth\index{Bandwidth!latency trade-off} (throughput) and latency\index{Latency!bandwidth trade-off} (delay) govern those two regimes as distinct constraints. For data volume $\DataVolume$ sent over effective bandwidth $\Bandwidth$ with fixed path latency $\Latency$, and assuming the latency and serialization costs do not overlap, total transfer time is:
+Widening a data link tenfold barely changes the delivery time of a small inference request or control message, yet it cuts the transfer time of a multi-gigabyte model checkpoint nearly tenfold. Bandwidth\index{Bandwidth!latency trade-off} (throughput once bytes are flowing) and latency\index{Latency!bandwidth trade-off} (the fixed delay before the first byte arrives) govern those two regimes as distinct constraints. For data volume $\DataVolume$ sent over effective bandwidth $\Bandwidth$ with fixed path latency $\Latency$, and assuming the latency and serialization costs do not overlap, total transfer time is:
 $$ \Time= \Latency + \frac{\DataVolume}{\Bandwidth} $$
 
 The crossover point is the transfer size where the two terms are equal:
@@ -1102,7 +1098,7 @@ class BandwidthLatencyExample:
 *   **Latency-dominated packet (`{python} BandwidthLatencySetup.data_kb_str`)**: Transmission time is `{python} BandwidthLatencySetup.data_kb_str` $\times$ 8/`{python} BandwidthLatencySetup.bw_gbit_per_s_str` ≈ `{python} BandwidthLatencyExample.tx_time_us_str`. Total time is approximately `{python} BandwidthLatencySetup.base_latency_ms_str` + `{python} BandwidthLatencyExample.tx_time_us_str` ≈ `{python} BandwidthLatencySetup.base_latency_ms_str`. **Result**: Fixed path and protocol latency dominates; propagation is one component.
 *   **Bandwidth-dominated checkpoint (`{python} BandwidthLatencyExample.large_data_gb_str`)**: Transmission time is `{python} BandwidthLatencyExample.large_tx_math`. Total time is `{python} BandwidthLatencyExample.large_total_math`. **Result**: Base latency is negligible; bandwidth is the bottleneck.
 
-The classes of hardware that ML systems deploy on differ sharply in these properties. A data center accelerator and a microcontroller differ by orders of magnitude in memory bandwidth, compute, and power, and those differences decide which workloads each class can run.
+How much bandwidth, compute, and memory capacity sit on either side of those links depends on the target form factor, which ranges from liquid-cooled data center racks to milliwatt sensor boards.
 
 ### Accelerator classes {#sec-appdx-machine-foundations-ai-hardware-cheat-sheet-modern-reference-4dc1}
 
@@ -1221,7 +1217,7 @@ class AcceleratorClasses:
     power_span_orders_str = fmt_int(power_span_orders, commas=False)
 ```
 
-The deployment paradigms of @sec-ml-systems-deployment-paradigm-framework-0d25 run on four classes of hardware that differ by orders of magnitude in peak rate, memory bandwidth, memory capacity, and power (@tbl-accelerator-classes-ref). Each range spans representative devices in its class rather than any single product. @Sec-appdx-assumptions-accelerator-matrix-c4d0 tabulates the products themselves.
+A model trained on a 700 W data center accelerator cannot be dropped onto a battery-powered phone or a microcontroller with a few hundred kilobytes of SRAM without redesigning the workload around the target's physical envelope. The deployment paradigms of @sec-ml-systems-deployment-paradigm-framework-0d25 run on four hardware classes whose peak throughput, memory bandwidth, memory capacity, and power budgets span orders of magnitude (@tbl-accelerator-classes-ref). Each range covers representative devices in its class rather than any single product; @sec-appdx-assumptions-accelerator-matrix-c4d0 tabulates the individual chips.
 
 | **Class**                  |                 **Peak Rate**                 |             **Memory Bandwidth**            |             **Memory Capacity**              |                   **Power**                    |                **Ridge Point**                 |
 |:---------------------------|:---------------------------------------------:|:-------------------------------------------:|:--------------------------------------------:|:----------------------------------------------:|:----------------------------------------------:|
@@ -1236,11 +1232,11 @@ Two patterns stand out across these classes. First, they span roughly `{python} 
 
 ## Numerical Representations {#sec-appdx-machine-foundations-numerical-representations-c889}
 
-The numerical format decides how many bytes each value occupies and how much energy each operation costs. In ML systems, the choice of precision (FP32 vs. BF16 vs. INT8) is a direct trade-off between statistical fidelity and hardware throughput.
+Halving a tensor's representation from 32 bits to 16 bits cuts its memory footprint and bandwidth traffic in half and doubles peak Tensor Core throughput on the same silicon, yet choosing the wrong 16-bit layout can cause small gradients to underflow to zero during training. Because the numerical format fixes both how many bytes each value occupies and how much energy each arithmetic operation costs, choosing among FP32, BF16, FP16, FP8, and INT8 is a direct trade-off between statistical fidelity and hardware throughput.
 
 ### Floating-point formats {#sec-appdx-machine-foundations-floatingpoint-format-comparison-1836}
 
-IEEE 754 standards and AI-specific numerical representations trade dynamic range (the span of representable values) against precision (the granularity of values within that range). Operational ranges and typical uses differ by format (@tbl-numerical-formats), and the bit partitions of FP32, BF16, FP16, and INT8 show where each format spends its bits (@fig-float-formats). BF16 retains FP32's full 8-bit exponent field, preserving the same dynamic range while truncating the mantissa to 7 bits, whereas FP16 widens the mantissa to 10 bits at the cost of a narrower 5-bit exponent.
+A gradient of magnitude $10^{-6}$ survives in 16-bit brain floating point (BF16) but flushes to zero in standard 16-bit IEEE floating point (FP16), even though both formats occupy two bytes. IEEE 754 standards and AI-specific floating-point representations divide a fixed bit budget between a sign bit, an exponent field that sets **dynamic range** (the span of representable magnitudes), and a mantissa field that sets **precision** (the granularity of values within that range). Operational ranges and typical uses differ by format (@tbl-numerical-formats), and the bit partitions of FP32, BF16, FP16, and INT8 show where each format spends its bits (@fig-float-formats). BF16 retains FP32's full 8-bit exponent field, preserving the same dynamic range while truncating the mantissa to 7 bits, whereas FP16 widens the mantissa to 10 bits at the cost of a narrower 5-bit exponent.
 
 | **Format** | **Bits** | **Exponent** | **Mantissa** |                  **Dynamic Range**                  | **Typical Use Case**                           |
 |:-----------|:--------:|:------------:|:------------:|:---------------------------------------------------:|:-----------------------------------------------|
@@ -1323,7 +1319,7 @@ $$ \QuantizedIntegerCode = \text{round}\left(\frac{\QuantizerInput}{\Quantizatio
 This symmetric mapping works well for weight distributions centered around zero, whereas asymmetric quantization\index{Quantization!asymmetric} handles distributions that are not centered (common after ReLU, which produces only nonnegative values) by shifting the range before scaling. Let $\ClippingRangeLowerBound$ and $\ClippingRangeUpperBound$ bound the calibrated range, clip $\QuantizerInput$ to $[\ClippingRangeLowerBound, \ClippingRangeUpperBound]$, and set the scale $\QuantizationScale= (\ClippingRangeUpperBound- \ClippingRangeLowerBound)/255$. A common unsigned 8-bit mapping is:
 $$ \QuantizedIntegerCode = \text{round}\left(\frac{\QuantizerInput- \ClippingRangeLowerBound}{\QuantizationScale}\right) $$
 
-The choice between symmetric and asymmetric quantization depends on the tensor's distribution and has measurable accuracy implications. @Sec-model-compression-quantization-precision-cd46 develops calibration, granularity, and the accuracy cost of each mapping on the book's workloads.
+The choice between symmetric and asymmetric quantization depends on the tensor's distribution and has measurable accuracy implications. @Sec-model-compression-quantization-precision-cd46 develops calibration, granularity, and the accuracy cost of each mapping on the book's workloads. Together with the floating-point formats, integer quantization completes the machine-level levers that determine how many bytes each operation moves and how much energy each arithmetic step consumes.
 
 ## Summary {.unnumbered}
 
