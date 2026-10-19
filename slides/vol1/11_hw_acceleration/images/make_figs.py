@@ -21,15 +21,13 @@ Every value is sourced. "HA" is the rendered chapter, Hardware Acceleration.
     derived here from that equation.
   - INT8 and the ridge: stage-3 3x3 563 / 1,126 / 569, stage-2 3x3 287 / 574,
     stage-2 1x1 51 / 102 FLOP/byte (HA Napkin Math 11.6).
-  - Loop order: 144 against 5,184 weight reads (HA Example 11.4).
-  - Tile fringe: utilization along one dimension w / (128 ceil(w / 128))
-    (HA Sec. 11.7.5).
-  - Measured tile quantization on an A100: NVIDIA, "Matrix Multiplication
-    Background" user guide, figure 7 (A100-SXM4-80GB, CUDA 11.2, cuBLAS
-    11.4; M = 27648, K = 4096, 256 x 128 tiles forced). The values below
-    were read from the published SVG plot's coordinates.
-  - Compiled ResNet-50 batch one, modeled: 3.53 ms eager (174 kernels),
-    0.33 ms compiled FP16 (56 kernels) (HA Sec. 11.8).
+  - Measured latency by working-set size on an H100 PCIe card: Chips and
+    Cheese, "Nvidia's H100: Funny L2, and Tons of Bandwidth" (2023); the
+    plateau values are that chart's data labels (calcs.CNC).
+  - Rising ridge: dense FP16 peak over bandwidth for V100, A100, H100, B200
+    (MLSysIM registry, as HA figure 9; calcs.OUT["ridges"]).
+  Derived values come from calcs.py. Lecture 11b's figures live in that
+  deck's own folder.
 
 Run from this folder: python3 make_figs.py
 """
@@ -41,6 +39,11 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import contextlib, io  # noqa: E401,E402
+with contextlib.redirect_stdout(io.StringIO()):
+    import calcs  # noqa: E402  (derived numbers; run calcs.py to see them)
 
 C = sp.C
 plt = sp.plt
@@ -85,12 +88,13 @@ energy_rows = [
     ("FP32 add", 0.9, "compute", "0.9 pJ"),
     ("FP32 multiply", 3.7, "compute", "3.7 pJ"),
     ("SRAM read (8 KB)", 5, "memory", "5 pJ"),
-    ("DRAM read (32-bit)", 640, "danger", "640 pJ = 173 multiplies"),
+    ("DRAM read (32-bit)", 640, "danger",
+     f"640 pJ = {calcs.OUT['dram_per_mul']} multiplies"),
 ]
 for k, shown in ((1, 3), (2, 4), (3, 5)):
     sp.hbars(out / f"energy_step{k}.svg", energy_rows, "pJ", step=shown,
              xlabel="Energy per operation or access (pJ, log scale; 45 nm)",
-             size=(5.8, 2.6))
+             size=(5.8, 2.3))
 
 # ---------------------------------------------------------------- Tensor Cores
 sp.hbars(out / "tensorcore.svg", [
@@ -198,43 +202,6 @@ def systolic_svg(step):
 for k in (1, 2, 3):
     (out / f"systolic_step{k}.svg").write_text(systolic_svg(k))
 
-# ---------------------------------------------------------------- tiling
-# A 4,096-wide output on a 128-wide array: 32 x 32 = 1,024 output tiles
-# (HA Sec. 11.7.5). One tile highlighted.
-
-
-def tiling_svg():
-    side, x0, y0, tiles = 400, 40, 30, 32
-    step_px = side / tiles
-    parts = ['<svg xmlns="http://www.w3.org/2000/svg" width="480" height="485" '
-             'viewBox="0 0 480 485">', '<rect width="480" height="485" fill="white"/>']
-    parts.append(f'<rect x="{x0}" y="{y0}" width="{side}" height="{side}" '
-                 f'fill="{C["neutral_l"]}" fill-opacity="0.35" stroke="{C["text"]}" '
-                 f'stroke-width="2"/>')
-    for i in range(1, tiles):
-        v = x0 + i * step_px
-        h = y0 + i * step_px
-        parts.append(f'<line x1="{v}" y1="{y0}" x2="{v}" y2="{y0 + side}" '
-                     f'stroke="{C["neutral"]}" stroke-width="0.6"/>')
-        parts.append(f'<line x1="{x0}" y1="{h}" x2="{x0 + side}" y2="{h}" '
-                     f'stroke="{C["neutral"]}" stroke-width="0.6"/>')
-    tx, ty = x0 + 5 * step_px, y0 + 4 * step_px
-    parts.append(f'<rect x="{tx}" y="{ty}" width="{step_px}" height="{step_px}" '
-                 f'fill="{C["compute"]}" stroke="{C["compute"]}" stroke-width="2"/>')
-    parts.append(f'<line x1="{tx + step_px}" y1="{ty + step_px / 2}" x2="{tx + 70}" '
-                 f'y2="{ty + 50}" stroke="{C["compute"]}" stroke-width="2"/>')
-    parts.append(f'<rect x="{tx + 66}" y="{ty + 30}" width="270" height="42" rx="4" '
-                 f'fill="white" stroke="{C["compute"]}" stroke-width="1.5"/>')
-    parts.append(svg_text(tx + 201, ty + 51, "one 128 × 128 tile", 26, "700",
-                          C["compute"]))
-    parts.append(svg_text(x0 + side / 2, y0 + side + 30, "4,096 = 32 tiles of 128",
-                          26, "700", C["text"]))
-    parts.append('</svg>')
-    return "\n".join(parts)
-
-
-(out / "tiling.svg").write_text(tiling_svg())
-
 # ---------------------------------------------------------------- H100 roofline
 BW = 3.35  # TB/s
 XLIM = (0.5, 5000)
@@ -265,9 +232,9 @@ def slope(ax, top):
 
 
 ceilings = [  # name, peak, ridge label, colour, line style
-    ("FP32", 67, "20", "neutral", "-"),
-    ("FP16", 989, "295", "compute", "-"),
-    ("INT8", 1979, "591", "danger", "--"),
+    ("FP32", 67, f"{float(calcs.OUT['ridge32']):.0f}", "neutral", "-"),
+    ("FP16", 989, f"{float(calcs.OUT['ridge16']):.0f}", "compute", "-"),
+    ("INT8", 1979, f"{float(calcs.OUT['ridge8']):.0f}", "danger", "--"),
 ]
 for k in (1, 2, 3):
     fig, ax = roof_axes()
@@ -334,7 +301,7 @@ def intensity(batch):
                                         + 2 * batch * WIDTH)
 
 
-crossing = 295.2 * WIDTH / (WIDTH - 2 * 295.2)  # about 415, derived
+crossing = float(calcs.OUT["crossing"])  # derived in calcs.py
 batches = np.logspace(0, np.log10(4096), 200)
 for k in (1, 2, 3):
     fig, ax = plt.subplots(figsize=(4.2, 2.5))
@@ -429,71 +396,6 @@ for k in (1, 2, 3):
     ax.set_xlabel("Arithmetic intensity at batch 32 (FLOP/byte, log scale)")
     sp.save(fig, out / f"int8ridge_step{k}.svg")
 
-# ---------------------------------------------------------------- loop order
-sp.hbars(out / "weight_reads.svg", [
-    ("Filters held", 144, "data", "144"),
-    ("Filters spilled", 5184, "danger", "5,184: 36×"),
-], "reads", log=False, xlabel="Weight reads", size=(2.7, 1.35))
-
-# ---------------------------------------------------------------- tile cliff
-widths = np.arange(64, 321)
-util = widths / (128 * np.ceil(widths / 128))
-fig, ax = plt.subplots(figsize=(3.6, 2.3))
-ax.plot(widths, util * 100, color=C["text"], lw=2.5)
-ax.axvspan(129, 256, color=C["danger_l"], zorder=0)
-ax.plot([128], [100], "o", ms=10, color=C["text"], zorder=5)
-ax.plot([129], [129 / 256 * 100], "o", ms=10, color=C["danger"], zorder=5)
-ax.text(134, 104, "128: 100%", ha="left", fontsize=12, fontweight="bold",
-        color=C["text"])
-ax.text(134, 44, "129: 50%", ha="left", fontsize=12, fontweight="bold",
-        color=C["danger"])
-ax.set_xlim(64, 320)
-ax.set_ylim(0, 118)
-ax.set_xticks([64, 128, 192, 256, 320])
-ax.set_yticks([0, 50, 100])
-ax.set_xlabel("Layer width (128-wide array)")
-ax.set_ylabel("Array use (%)")
-ax.text(0.99, 0.02, "Modeled", transform=ax.transAxes, ha="right",
-        va="bottom", fontsize=9, color=C["neutral"])
-sp.save(fig, out / "cliff.svg")
-
-# ---------------------------------------------------------------- measured
-# NVIDIA figure 7(a), A100: achieved TFLOP/s against N, read from the
-# published SVG.
-nv_n = np.arange(112, 513, 8)
-nv_tflops = np.array([
-    167.0, 177.9, 189.7, 148.2, 158.6, 163.7, 174.8, 177.3, 190.1, 192.3,
-    205.7, 205.4, 219.9, 220.0, 234.4, 232.2, 247.7, 244.7, 263.2, 192.3,
-    199.7, 202.6, 210.8, 212.5, 219.8, 221.8, 231.6, 231.1, 240.7, 241.5,
-    227.5, 250.6, 259.5, 259.1, 269.7, 213.7, 219.0, 221.5, 225.4, 227.9,
-    233.7, 235.0, 242.0, 242.2, 248.9, 248.7, 254.2, 256.0, 263.1, 262.9,
-    270.6])
-for k in (1, 2):
-    fig, ax = plt.subplots(figsize=(5.8, 2.5))
-    shown = nv_n <= 128 if k == 1 else nv_n <= 512
-    ax.plot(nv_n[shown], nv_tflops[shown], color=C["data"], lw=2.5,
-            marker="o", ms=4)
-    for edge in (128, 256, 384):
-        ax.axvline(edge, color=C["neutral"], lw=1, ls=":")
-    alpha = 1.0 if k == 2 else 0.0
-    ax.annotate("136: 148 TFLOP/s\n6% more work, 36% more time",
-                (136, 148.2), xytext=(160, 72), textcoords="data",
-                fontsize=11, fontweight="bold", color=C["danger"], alpha=alpha,
-                arrowprops=dict(arrowstyle="->", color=C["danger"], alpha=alpha))
-    ax.annotate("128: 190 TFLOP/s", (128, 189.7), xytext=(150, 284),
-                textcoords="data", fontsize=11, fontweight="bold",
-                color=C["data"], va="center",
-                arrowprops=dict(arrowstyle="->", color=C["data"]))
-    ax.text(300, 30, "???", fontsize=16, fontweight="bold", color=C["danger"],
-            ha="center", alpha=1.0 if k == 1 else 0.0)
-    ax.set_xlim(104, 520)
-    ax.set_ylim(0, 300)
-    ax.set_xticks([128, 256, 384, 512])
-    ax.set_yticks([0, 100, 200, 300])
-    ax.set_xlabel("N, output width (tiles 128 wide)")
-    ax.set_ylabel("TFLOP/s")
-    sp.save(fig, out / f"measured_tiles_step{k}.svg")
-
 # ---------------------------------------------------------------- Amdahl
 # Slide variant of HA figure 2: speedup = 1 / ((1 - p) + p / G) (HA
 # equation 1), with Lighthouse 11.1's two scenarios marked: ResNet-50,
@@ -536,28 +438,23 @@ marks[1][1].set_alpha(0.0)
 marks[1][1].get_bbox_patch().set_alpha(0.0)
 sp.save(fig, out / "amdahl_step1.svg")
 
-# ---------------------------------------------------------------- compiler
-sp.hbars(out / "compiled.svg", [
-    ("Eager (174 kernels)", 3.53, "neutral", "3.53 ms"),
-    ("Compiled FP16 (56 kernels)", 0.33, "compute", "0.33 ms: 10.6× faster"),
-], "ms", log=False, value_fmt="{:.2f}", xlabel="ResNet-50 batch one on an H100 (modeled)",
-    size=sp.SHORT)
-
 # ---------------------------------------------------------------- bandwidth taper
 # Slide variant of HA margin figure 2 (Sec. 11.5.4): HBM 3,350, NVLink 900,
-# PCIe 64, network 50 GB/s. HBM over PCIe = 52x (derived).
+# PCIe 64, network 50 GB/s, drawn for a 0.56-wide column beside the package
+# photo. HBM over PCIe (the reveal, 52x) is calcs.OUT["hbm_pcie"].
 taper_rows = [("HBM", 3350, "memory", "3,350 GB/s"), ("NVLink", 900, "network", "900"),
-              ("PCIe", 64, "danger", "64"), ("Network", 50, "neutral", "50")]
-fig, ax = plt.subplots(figsize=(5.8, 2.1))
+              ("PCIe", 64, "danger", "64"),
+              ("Network", 50, "neutral", "50")]
+fig, ax = plt.subplots(figsize=(3.6, 2.3))
 for i, (label, value, color_key, text) in enumerate(taper_rows):
     y = len(taper_rows) - 1 - i
     ax.barh(y, value, color=C[color_key], height=0.62)
-    ax.text(-0.01, y, label, transform=ax.get_yaxis_transform(), ha="right",
+    ax.text(-0.02, y, label, transform=ax.get_yaxis_transform(), ha="right",
             va="center", fontsize=13, fontweight="bold", color=C["text"])
-    ax.text(value * 1.15, y, text, va="center", fontsize=13, fontweight="bold",
+    ax.text(value * 1.18, y, text, va="center", fontsize=13, fontweight="bold",
             color=C[color_key])
 ax.set_xscale("log")
-ax.set_xlim(20, 60000)
+ax.set_xlim(20, 200000)
 ax.set_ylim(-0.6, len(taper_rows) - 0.4)
 ax.set_yticks([])
 ax.minorticks_off()
@@ -566,8 +463,68 @@ ax.set_xticklabels(["100", "1,000", "10,000"])
 ax.spines["left"].set_visible(False)
 ax.grid(axis="x", color=C["grid"], linewidth=0.6)
 ax.set_axisbelow(True)
-ax.set_xlabel("Bandwidth from one H100 (GB/s, log scale)")
+ax.set_xlabel("GB/s from one H100 (log scale)")
 sp.save(fig, out / "taper.svg")
+
+# ---------------------------------------------------------------- measured latency
+# Chips and Cheese (2023), H100 PCIe pointer chasing. Plateau values are the
+# published chart's data labels (calcs.CNC); the test size where each plateau
+# begins is read from that chart's axis (L2 by 256 KB, far L2 by 40 MB, HBM by
+# 64 MB). Drawn for the 0.46-wide column.
+cnc = calcs.CNC
+starts = [(2, cnc["L1"]), (256, cnc["L2"]), (40960, cnc["L2 far"]), (65536, cnc["HBM"])]
+fig, ax = plt.subplots(figsize=(3.4, 2.5))
+xs = [x for x, _ in starts] + [1048576]
+ys = [y for _, y in starts] + [cnc["HBM"]]
+ax.step(xs, ys, where="post", color=C["memory"], lw=2.5)
+labels = [((16, cnc["L1"]), "L1: 22.4 ns", (0, 7), "center"),
+          ((2048, cnc["L2"]), "L2: 159.7 ns", (0, 7), "center"),
+          ((40960, cnc["L2 far"]), "far L2: 294 ns", (-6, 0), "right"),
+          ((65536, cnc["HBM"]), "HBM: 377.9 ns", (-6, 0), "right")]
+for (x, y), text, off, ha in labels:
+    ax.annotate(text, (x, y), xytext=off, textcoords="offset points", ha=ha,
+                va="bottom" if off[1] else "center", fontsize=11,
+                fontweight="bold", color=C["text"])
+ax.set_xscale("log", base=2)
+ax.set_xlim(2, 1048576)
+ax.set_ylim(0, 430)
+ax.minorticks_off()
+ax.set_xticks([16, 1024, 65536, 1048576])
+ax.set_xticklabels(["16 KB", "1 MB", "64 MB", "1 GB"])
+ax.set_yticks([0, 100, 200, 300, 400])
+ax.grid(color=C["grid"], linewidth=0.5)
+ax.set_axisbelow(True)
+ax.set_xlabel("Working set (log scale)")
+ax.set_ylabel("Latency (ns)")
+sp.save(fig, out / "latency_measured.svg")
+
+# ---------------------------------------------------------------- rising ridge
+# Dense FP16 ridge per generation (calcs.OUT["ridges"]), with the 200
+# FLOP/byte kernel of the predict question: above the A100 ridge, below the
+# H100 ridge. Drawn for the 0.58-wide column.
+ridges = calcs.OUT["ridges"]
+for k in (1, 2):
+    fig, ax = plt.subplots(figsize=(3.7, 2.6))
+    years = [r[1] for r in ridges]
+    vals = [r[2] for r in ridges]
+    ax.plot(years, vals, "o-", color=C["danger"], lw=2.5, ms=9, mec="white", mew=1.5)
+    for name, year, val in ridges:
+        dy = 10 if name in ("V100", "H100") else -20
+        ax.annotate(f"{name}: {val:.0f}", (year, val), xytext=(0, dy),
+                    textcoords="offset points", ha="center",
+                    fontsize=11, fontweight="bold", color=C["danger"])
+    alpha = 1.0 if k == 2 else 0.0
+    ax.axhline(200, color=C["memory"], lw=2, ls="--", alpha=alpha)
+    ax.text(2016.5, 208, "200 FLOP/byte kernel", color=C["memory"], fontsize=11,
+            fontweight="bold", ha="left", va="bottom", alpha=alpha)
+    ax.set_xlim(2016.3, 2024.8)
+    ax.set_ylim(0, 360)
+    ax.set_xticks([2017, 2020, 2022, 2024])
+    ax.set_yticks([0, 100, 200, 300])
+    ax.grid(color=C["grid"], linewidth=0.5)
+    ax.set_axisbelow(True)
+    ax.set_ylabel("Ridge (FLOP/byte)")
+    sp.save(fig, out / f"ridge_rise_step{k}.svg")
 
 # ---------------------------------------------------------------- INT8 twice
 # H100 dense peaks: FP16 989 TFLOP/s, INT8 1,979 TOPS; ResNet-50 8.2 GFLOP per
@@ -578,8 +535,8 @@ sp.hbars(out / "int8peak.svg", [
     ("INT8", 1979, "danger", "1,979 TOPS: 2×"),
 ], "", log=False, xlabel="H100 dense peak", size=(2.9, 1.5))
 sp.hbars(out / "int8floor.svg", [
-    ("FP16", 8.3, "compute", "8 µs"),
-    ("INT8", 4.1, "danger", "4 µs"),
+    ("FP16", float(calcs.OUT["floor16"]), "compute", f"{float(calcs.OUT['floor16']):.0f} µs"),
+    ("INT8", float(calcs.OUT["floor8"]), "danger", f"{float(calcs.OUT['floor8']):.0f} µs"),
 ], "", log=False, xlabel="ResNet-50 arithmetic, one image", size=(2.9, 1.5))
 
 print("figures written")
