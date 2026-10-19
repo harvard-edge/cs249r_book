@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 INDEX_RE = re.compile(r"\\index\{([^{}]*(?:\{[^{}]*\}[^{}]*)?)\}")
 SEEREF_RE = re.compile(r"^([^|]+)\|see(?:also)?\{([^}]+)\}$")
@@ -56,19 +57,21 @@ def _skip_file(path: Path, root: Path) -> bool:
 
 
 def _rel_path(f: Path, root: Path) -> str:
-    """Return a display path relative to root, or filename if root is a file.
+    """Return a display path relative to root (or to root's directory when root is a file).
+
+    Paths outside that base come back absolute, so a cross-file reference such
+    as a duplicate definition in another chapter stays unambiguous.
 
     Args:
         f: File path.
         root: Scoping root path or file.
 
     Returns:
-        Relative path string or filename.
+        Relative path string, or the full path when f lies outside the base.
     """
-    if root.is_file():
-        return f.name
+    base = root.parent if root.is_file() else root
     try:
-        return str(f.relative_to(root))
+        return str(f.relative_to(base))
     except ValueError:
         return str(f)
 
@@ -109,32 +112,49 @@ def check_anti_patterns(root: Path) -> list[IndexIssue]:
     Returns:
         List of discovered IndexIssue instances.
     """
-    keys: set[str] = set()
+    # First (file, line) where each key and each headword appears, so a
+    # corpus-level finding can say where to start fixing.
+    keys: dict[str, tuple[str, int]] = {}
     for f in _iter_qmd_files(root):
+        rel = _rel_path(f, root)
         text = f.read_text(encoding="utf-8", errors="replace")
         for m in INDEX_RE.finditer(text):
             k = m.group(1)
-            if "|" not in k:
-                keys.add(k)
+            if "|" not in k and k not in keys:
+                keys[k] = (rel, text.count("\n", 0, m.start()) + 1)
 
-    heads: set[str] = set()
-    for k in keys:
+    heads: dict[str, tuple[str, int]] = {}
+    for k, where in keys.items():
         h = k.split("!", 1)[0]
         if "@" in h:
             h = h.split("@", 1)[1]
-        heads.add(h)
+        heads.setdefault(h, where)
 
     issues: list[IndexIssue] = []
 
-    def _add(code: str, samples: list, label: str) -> None:
-        """Append one corpus-level issue previewing up to three samples; skip if empty."""
+    def _add(code: str, samples: list, label: str, where: dict | None = None) -> None:
+        """Append one corpus-level issue previewing up to three samples; skip if empty.
+
+        The issue points at the first sample's location; each previewed sample
+        carries its own ``file:line``.
+        """
         if not samples:
             return
-        preview = "; ".join(str(s) for s in samples[:3])
+        where = keys if where is None else where
+        samples = sorted(samples)
+
+        def _loc(sample: str) -> tuple[str, int] | None:
+            return where.get(sample.split(" / ", 1)[-1])
+
+        preview = "; ".join(
+            f"{s} ({loc[0]}:{loc[1]})" if (loc := _loc(s)) else str(s)
+            for s in samples[:3]
+        )
         extra = f" (+{len(samples) - 3} more)" if len(samples) > 3 else ""
+        first = _loc(samples[0]) or ("(corpus)", 0)
         issues.append(IndexIssue(
-            file="(corpus)",
-            line=0,
+            file=first[0],
+            line=first[1],
             code=code,
             message=f"{label}: {len(samples)} hit(s) — e.g. {preview}{extra}",
         ))
@@ -165,14 +185,14 @@ def check_anti_patterns(root: Path) -> list[IndexIssue]:
         if h.endswith("s") and not h.endswith(("ss", "us", "is", "ous"))
         and len(h) > 3 and h[:-1] in heads
     ]
-    _add("plural_duplicates", plural_dups, "plural-vs-singular duplicates")
+    _add("plural_duplicates", plural_dups, "plural-vs-singular duplicates", heads)
     paren_heads = [
         h for h in heads
         if re.match(r".+\([A-Z][A-Z0-9]*\)$", h) and h not in PARENTHETICAL_ALLOWLIST
     ]
-    _add("parenthetical_acronym_heads", paren_heads, "parenthetical-acronym headwords")
+    _add("parenthetical_acronym_heads", paren_heads, "parenthetical-acronym headwords", heads)
     lc_off = [h for h in heads if h and h[0].islower() and h not in LOWERCASE_ALLOWLIST]
-    _add("lowercase_off_allowlist", lc_off, "lowercase mains off allowlist")
+    _add("lowercase_off_allowlist", lc_off, "lowercase mains off allowlist", heads)
 
     return issues
 

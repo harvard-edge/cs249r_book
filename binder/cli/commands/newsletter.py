@@ -10,7 +10,6 @@ Requires BUTTONDOWN_API_KEY environment variable for API operations.
 import json
 import os
 import re
-import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Optional

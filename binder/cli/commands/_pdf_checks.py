@@ -997,21 +997,13 @@ def scan_margin_geometry_summary(pdf_path: Path):
         return None
 
 
-def scan_margin_geometry(pdf_path: Path):
-    """Return ``(overlaps, overflows)`` from rendered margin geometry."""
-    summary = scan_margin_geometry_summary(pdf_path)
-    if summary is None:
-        return None
-    return summary.overlaps, summary.overflows
-
-
 def verify_volume_pdf(
     quarto_dir: Path,
     volume: str,
     *,
     log_path: Path | None = None,
 ) -> PdfValidationResult:
-    """Verify the default built PDF for ``volume`` (``vol1`` or ``vol2``)."""
+    """Verify the default built PDF for ``volume`` (a key of ``PDF_BY_VOLUME``)."""
     pdf_path = default_pdf_path(quarto_dir, volume)
     issues = verify_pdf(pdf_path, log_path=log_path)
     geom_summary = scan_margin_geometry_summary(pdf_path) if pdf_path.is_file() else None
@@ -1140,7 +1132,10 @@ def verify_volume_pdf(
 
 def format_checklist(result: PdfValidationResult) -> str:
     """Human-readable checklist for console output."""
-    vol_label = "Volume I" if result.volume == "vol1" else "Volume II"
+    vol_label = {
+        "vol1": "Volume I", "vol2": "Volume II", "vol3": "Volume III",
+        "vol4": "Volume IV", "tinytorch": "TinyTorch",
+    }.get(result.volume, result.volume)
     lines = [f"PDF validation ({vol_label}): {result.pdf_path.name}", ""]
     for item in result.checks:
         if item.skipped:

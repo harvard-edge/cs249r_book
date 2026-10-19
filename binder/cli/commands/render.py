@@ -88,7 +88,7 @@ def _render_one(code: str, output_path: str) -> Optional[str]:
         exec(modified, {"__name__": "__main__"})  # noqa: S102
         return None
     except Exception as e:
-        return str(e)
+        return f"{type(e).__name__}: {e}"
     finally:
         plt.close("all")
 
@@ -319,14 +319,9 @@ class RenderCommand:
             figures = _extract_python_figures(qmd_path)
 
             # Count TikZ and static images for summary
-            try:
-                content = qmd_path.read_text(encoding="utf-8")
-                tikz_count += len(re.findall(r"```\{\.tikz\}", content))
-                static_count += len(re.findall(
-                    r"!\[.*?\]\(.*?\)\{#fig-", content
-                ))
-            except Exception:
-                pass
+            content = qmd_path.read_text(encoding="utf-8")
+            tikz_count += len(re.findall(r"```\{\.tikz\}", content))
+            static_count += len(re.findall(r"!\[.*?\]\(.*?\)\{#fig-", content))
 
             if not figures:
                 skipped_chapters += 1
@@ -411,7 +406,7 @@ class RenderCommand:
         if platform.system() == "Darwin":
             try:
                 subprocess.run(["open", str(output_base)], check=False)
-            except Exception:
-                pass
+            except OSError:
+                pass  # opening the gallery is a convenience; the path is printed above
 
         return failed == 0

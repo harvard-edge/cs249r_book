@@ -22,10 +22,11 @@ from binder.cli.commands.validate import ValidateCommand
 import binder.cli.main as m
 
 
-def test_build_json_output_parseable_and_unwrapped():
+def test_build_json_output_parseable_and_unwrapped(tmp_path):
     """Ensure `binder build --json` produces valid, parseable JSON without wrapping."""
     cli = object.__new__(m.MLSysBookCLI)
-    cli.config_manager = SimpleNamespace(show_active_config=lambda: None)
+    # The build lock lives in book_dir, so point it at a scratch directory.
+    cli.config_manager = SimpleNamespace(show_active_config=lambda: None, book_dir=tmp_path)
     cli.build_command = SimpleNamespace(
         build_volume=lambda *a, **kw: True,
         _last_build_log="/a/" + "x" * 100 + ".log",
@@ -360,3 +361,15 @@ def test_validation_issue_from_template_exact_and_fallback():
     assert override_issue.severity == "warning"
 
 
+
+
+def test_describe_exception_names_type_message_and_raise_site():
+    from binder.cli.core.errors import describe_exception
+
+    try:
+        {}["missing"]
+    except KeyError as error:
+        text = describe_exception(error)
+    assert text.startswith("KeyError: 'missing' (at binder/tests/test_binder_llm_and_validation.py:")
+    assert text.endswith("in test_describe_exception_names_type_message_and_raise_site)")
+    assert describe_exception(ValueError()) == "ValueError"

@@ -11,6 +11,7 @@ than maintaining their own exclusion lists or filesystem scans.
 """
 
 import re
+import sys
 import fnmatch
 from pathlib import Path
 from typing import List, Optional, Dict, Any
@@ -71,6 +72,21 @@ def format_volume_display_name(volume: str) -> str:
     return volume.capitalize()
 
 
+def qmd_files_under(root: Path) -> List[Path]:
+    """Return *root* if it is a ``.qmd`` file, else every ``.qmd`` file below it, sorted."""
+    if root.is_file():
+        return [root] if root.suffix == ".qmd" else []
+    return sorted(root.rglob("*.qmd"))
+
+
+def display_path(path: Path, base: Path) -> str:
+    """Return *path* relative to *base* for display, or unchanged when it lies outside."""
+    try:
+        return str(path.relative_to(base))
+    except ValueError:
+        return str(path)
+
+
 # Default volume directories; dynamic discovery should be preferred via ChapterDiscovery or discover_volumes()
 VOLUME_DIRS = ["vol1", "vol2", "vol3", "vol4"]
 
@@ -116,7 +132,7 @@ def _chapters_from_html_sidebar(book_dir: Path, volume: str) -> List[str]:
 def get_chapters_from_config(book_dir: Path, volume: str) -> List[str]:
     """Return the ordered list of buildable file stems from the PDF config.
 
-    Reads ``binder/config/_quarto-pdf-{volume}.yml`` and extracts every entry
+    Reads ``books/config/_quarto-pdf-{volume}.yml`` and extracts every entry
     under ``book.chapters`` — including frontmatter, parts pages, and shared
     files.  Appendices are excluded.  Only ``index.qmd`` and ``references.qmd``
     are skipped, as they cannot be rendered standalone.
@@ -147,15 +163,16 @@ def get_chapters_from_config(book_dir: Path, volume: str) -> List[str]:
         """Return True unless the path's stem is in ``SKIP_STEMS``."""
         return Path(path_str).stem not in SKIP_STEMS
 
-    # --- YAML-aware path (preferred) ---
+    chapters: List[str] = []
+    seen: set = set()
+
+    # --- YAML-aware path (preferred); the regex scan below is the fallback ---
     try:
         import yaml  # type: ignore
 
         raw = yaml.safe_load(config_file.read_text())
         chapter_entries = raw.get("book", {}).get("chapters", [])
 
-        chapters: List[str] = []
-        seen: set = set()
         for entry in chapter_entries:
             if isinstance(entry, str):
                 path = entry
@@ -169,8 +186,9 @@ def get_chapters_from_config(book_dir: Path, volume: str) -> List[str]:
             if stem and stem not in seen:
                 seen.add(stem)
                 chapters.append(stem)
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"binder: could not read the chapter list in {config_file} as YAML ({exc}); "
+              "falling back to a line scan", file=sys.stderr)
 
     if len(chapters) < 5:
         content = config_file.read_text()
@@ -509,13 +527,16 @@ class ChapterDiscovery:
                 raise
 
             if not chapter_file:
-                available_chapters = [ch["name"] for ch in self.get_all_chapters()]
+                from difflib import get_close_matches
+
+                volume, name = self._parse_chapter_spec(chapter_name.strip())
+                available = sorted({ch["name"] for ch in self.get_all_chapters(volume=volume)})
                 console.print(f"[red]Chapter not found: {chapter_name}[/red]")
-                console.print("[yellow]Available chapters:[/yellow]")
-                for ch in available_chapters[:10]:  # Show first 10
-                    console.print(f"  - {ch}")
-                if len(available_chapters) > 10:
-                    console.print(f"  ... and {len(available_chapters) - 10} more")
+                close = get_close_matches(name.removesuffix(".qmd"), available, n=5, cutoff=0.5)
+                if close:
+                    console.print(f"[yellow]Closest chapter names: {', '.join(close)}[/yellow]")
+                list_cmd = f"./binder/binder list --{volume}" if volume else "./binder/binder list --volN"
+                console.print(f"[yellow]See every chapter with: {list_cmd}[/yellow]")
                 raise FileNotFoundError(f"Chapter not found: {chapter_name}")
 
             chapter_files.append(chapter_file)
@@ -576,7 +597,8 @@ class ChapterDiscovery:
                 try:
                     rx = re.compile(pat)
                     matches = [c for c in candidates if rx.search(c)]
-                except re.error:
+                except re.error as exc:
+                    console.print(f"[red]Invalid chapter regex {pat!r}: {exc}[/red]")
                     matches = []
             elif is_glob:
                 matches = [c for c in candidates if fnmatch.fnmatchcase(c, name_or_pat)]

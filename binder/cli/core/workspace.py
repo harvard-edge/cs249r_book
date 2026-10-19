@@ -11,12 +11,14 @@ disk rather than only what is committed.
 
 from __future__ import annotations
 
+import os
+import re
 import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Tuple
+from typing import List, Optional, Tuple
 
 #: Parent directory of every workspace binder creates. Workspaces are deleted
 #: recursively, so :func:`create_workspace` and :func:`remove_workspace`
@@ -141,6 +143,81 @@ def remove_workspace(workspace: Workspace) -> None:
         shutil.rmtree(path, ignore_errors=True)
     _git(repo_root, "worktree", "prune", check=False)
     _remove_empty_run_dir(path.parent)
+
+
+#: Run directories are named ``<YYYYMMDD>-<HHMMSS>-<pid>`` by
+#: ``cli.core.parallel.new_run_id``; the pid says whether the run is still alive.
+_RUN_DIR_NAME = re.compile(r"^\d{8}-\d{6}-(\d+)$")
+
+#: Marker left in a run directory whose workspaces were kept on purpose
+#: (``--keep-workspaces``); the automatic sweep leaves such runs alone.
+KEEP_MARKER = ".keep"
+
+
+def mark_kept(workspace: Workspace) -> None:
+    """Record that *workspace*'s run was kept for inspection."""
+    (workspace.path.parent / KEEP_MARKER).touch()
+
+
+def _pid_alive(pid: int) -> bool:
+    """Return True if a process with *pid* exists (or might: permission denied)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def stale_runs(root: Optional[Path] = None, include_kept: bool = False) -> List[Path]:
+    """Return run directories left behind by binder processes that have exited.
+
+    A run is stale when its directory name ends in a pid that no longer exists.
+    Runs of the current process, runs whose process is alive, and directories
+    that do not look like run directories are never returned. A recycled pid
+    makes a dead run look alive, which only delays its removal. Runs kept
+    with ``--keep-workspaces`` are skipped unless *include_kept* is set.
+    """
+    root = Path(root or WORKSPACE_ROOT).resolve()
+    if not root.is_dir():
+        return []
+    stale = []
+    for entry in sorted(root.iterdir()):
+        match = _RUN_DIR_NAME.match(entry.name)
+        if not match or not entry.is_dir() or entry.is_symlink():
+            continue
+        pid = int(match.group(1))
+        if not include_kept and (entry / KEEP_MARKER).exists():
+            continue
+        if pid != os.getpid() and not _pid_alive(pid):
+            stale.append(entry)
+    return stale
+
+
+def remove_stale_runs(repo_root: Optional[Path] = None, include_kept: bool = False) -> List[Path]:
+    """Delete run directories of exited binder processes and prune their worktrees.
+
+    Builds normally remove their own workspaces; this catches the ones left by
+    a build that was killed outright (SIGKILL, a crash, a closed machine).
+    After deleting, ``git worktree prune`` drops the registrations in
+    *repo_root* whose directories are gone. *include_kept* also removes runs
+    kept with ``--keep-workspaces``.
+
+    Returns:
+        The run directories that were removed.
+    """
+    removed = []
+    root = WORKSPACE_ROOT.resolve()
+    for run_dir in stale_runs(include_kept=include_kept):
+        if run_dir.parent != root:
+            continue
+        shutil.rmtree(run_dir, ignore_errors=True)
+        if not run_dir.exists():
+            removed.append(run_dir)
+    if removed and repo_root is not None:
+        _git(Path(repo_root), "worktree", "prune", check=False)
+    return removed
 
 
 def _remove_empty_run_dir(run_dir: Path) -> None:
