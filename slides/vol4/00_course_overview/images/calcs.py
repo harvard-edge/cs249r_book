@@ -1,12 +1,15 @@
 """Every derived number on the Lecture 0 slides (Volume IV, Physical AI).
 
-Run:  python3 calcs.py
+Run:  /Users/.../MLSysBook/.venv/bin/python calcs.py   (needs numpy for MLSysIM)
 Each block names the slide it serves, lists its inputs with their sources,
-and prints each result with the label the slide uses. Inputs are typed from
-the rendered chapters; only derived values are computed here.
+and prints each result with the label the slide uses. Inputs typed from a
+source carry that source; only derived values are computed here.
+
+The last block keeps the running machine's elementary stopping budget for the
+stopping-budget bar generator in make_figs.py (a kit candidate). Lecture 0 no
+longer shows that budget; Lecture 1 owns it.
 """
 
-import math
 import sys
 from pathlib import Path
 
@@ -14,34 +17,22 @@ MLSYSIM = Path(__file__).resolve().parents[4] / "mlsysim"
 
 # --- Inputs: the running machine's card (The Causal Boundary, sec. 1.4.2, table 2)
 V_DRIVE = 1.5        # m/s, drive limit (illustrative)
-A_BRAKE = 2.0        # m/s^2, credible deceleration, loaded, dry floor (illustrative)
+A_BRAKE = 2.0        # m/s^2, credible deceleration (illustrative)
 D_CLEAR = 1.10       # m, rack-end clear distance (illustrative)
-MASS = 368           # kg, loaded mass (derived upper bound)
+# Pre-brake delay terms (Napkin Math 1.1), ms: observation age, lease, tick, bus, brake onset
+DELAY_TERMS = [51.6, 60.0, 1.0, 1.0, 20.0]
 
-# --- Inputs: observation age stages (Sensor Perception, Napkin Math 8.2), ms
-AGE_STAGES = [
-    ("Half exposure", 8.0),      # 16 ms exposure, chosen
-    ("Readout", 16.6),           # datasheet
-    ("Link", 0.8),               # illustrative
-    ("DMA queue", 1.2),          # illustrative
-    ("ISP", 2.5),                # illustrative
-    ("Backbone", 22.0),          # INT8 vision backbone, illustrative
-    ("Dispatch", 0.5),           # illustrative
-]
+# --- Inputs: IFR World Robotics 2025 press release, Frankfurt, 25 Sep 2025
+IFR_INSTALLED_2024 = 542_000        # "542,000 robots installed in 2024"
+IFR_STOCK_2024 = 4_664_000          # "4,664,000 units in 2024" in operational use
 
-# --- Inputs: rest of the pre-brake delay (The Causal Boundary, Napkin Math 1.1), ms
-LEASE = 60.0
-TICK = 1.0
-BUS = 1.0
-BRAKE_ONSET = 20.0
-
-
-def obs_age():
-    return sum(v for _, v in AGE_STAGES)
+# --- Inputs: UR16e datasheet (Universal Robots) and MiR250 specifications (MiR, 2023-06-28)
+UR16E = {"payload kg": 16, "reach mm": 900, "joints": 6, "mass kg (with cable)": 33.1}
+MIR250 = {"payload kg": 250, "mass kg": 97, "safety laser scanners": 2, "3D cameras": 2}
 
 
 def tau_delay_ms():
-    return obs_age() + LEASE + TICK + BUS + BRAKE_ONSET
+    return sum(DELAY_TERMS)
 
 
 def stop_mm(v, tau_ms=None, a=A_BRAKE):
@@ -49,106 +40,48 @@ def stop_mm(v, tau_ms=None, a=A_BRAKE):
     return v * tau * 1000, v ** 2 / (2 * a) * 1000
 
 
-def main():
-    print("== Hook: one frame (Napkin Math 8.2)")
-    age = obs_age()
-    print(f"observation age at dispatch: {age:.1f} ms")
-    print(f"travel during that age at {V_DRIVE} m/s: {V_DRIVE * age:.1f} mm")
-    print(f"exposure + readout before any computation: {AGE_STAGES[0][1] + AGE_STAGES[1][1]:.1f} ms")
-    for name, v in AGE_STAGES:
-        print(f"   stage {name}: {v} ms -> {V_DRIVE * v:.1f} mm")
-
-    print("\n== Worked example 1: does the base stop inside its clearance? (Napkin Math 1.1)")
-    tau = tau_delay_ms()
-    d1, d2 = stop_mm(V_DRIVE)
-    print(f"pre-brake delay: {tau:.1f} ms")
-    print(f"delay travel: {d1:.1f} mm")
-    print(f"braking travel: {d2:.1f} mm")
-    print(f"stop: {d1 + d2:.1f} mm of {D_CLEAR * 1000:.0f} mm")
-    print(f"spare: {D_CLEAR * 1000 - d1 - d2:.1f} mm")
-    print(f"braking / delay: {d2 / d1:.2f}x ; delay adds {100 * d1 / d2:.1f} percent to braking")
-    vstar = 2 * A_BRAKE * tau / 1000
-    print(f"crossover speed: {vstar:.4f} m/s (slide: {vstar:.2f} m/s)")
-    print(f"share of stop used by delay: {100 * d1 / (d1 + d2):.1f} percent")
-
-    print("\n== Activity: halve the speed")
-    h1, h2 = stop_mm(V_DRIVE / 2)
-    print(f"0.75 m/s: delay {h1:.1f} mm, braking {h2:.1f} mm, stop {h1 + h2:.1f} mm")
-    print(f"stop shrinks by factor {(d1 + d2) / (h1 + h2):.2f}")
-    print(f"wrong answer (halving both terms): {(d1 + d2) / 2:.1f} mm")
-
-    print("\n== Pre-brake delay bar")
-    backbone = dict(AGE_STAGES)["Backbone"]
-    print(f"backbone {backbone:.0f} ms -> {V_DRIVE * backbone:.0f} mm")
-    print(f"rest of observation age {age - backbone:.1f} ms")
-    print(f"lease {LEASE:.0f} ms -> {V_DRIVE * LEASE:.0f} mm")
-    print(f"tick + bus {TICK + BUS:.0f} ms")
-    print(f"each added ms costs {V_DRIVE * 1:.1f} mm")
-    print(f"backbone share of delay: {100 * backbone / tau:.1f} percent")
-    ke = 0.5 * MASS * V_DRIVE ** 2
-    print(f"kinetic energy at drive limit: {ke:.0f} J")
-
-    print("\n== Three machine classes")
-    # Napkin Math 10.1: tripwire 15 N, plate stiffness 400 N/mm, 0.03 m/s, 2 ms loop
-    f_brake = 15 + 400 * (0.03 * 1000) * 0.002   # N/mm * mm/s * s
-    print(f"latch force at brake command: {f_brake:.0f} N against 100 N")
-    # Napkin Math 2.6: hold 87 N m, derated to 73.0 N m (chapter-derived)
-    print(f"derating 87 -> 73.0 N m: {100 * (1 - 73.0 / 87):.1f} percent")
-
-    print("\n== Clean runs (Closed-Loop Evaluation, Napkin Math 7.1, 7.2)")
-    alpha = 0.05
-    lo20 = alpha ** (1 / 20)
-    print(f"20 clean runs: lower limit {100 * lo20:.1f} percent at 95 percent")
-    for p in (0.9, 0.99, 0.999):
-        n = math.ceil(math.log(alpha) / math.log(p))
-        print(f"target {p}: {n:,} clean runs")
-    trial_s = 25 + 15   # s per trial: 25 s run + 15 s reset (illustrative)
-    print(f"20 runs: {20 * trial_s / 60:.1f} min ; 2,995 runs: {2995 * trial_s / 3600:.1f} h")
-    print(f"299 runs: {299 * trial_s / 3600:.1f} h")
-
-    print("\n== RAND against Waymo rider-only miles (sec. 7.9.1)")
-    rand_m, waymo_m = 275e6, 56.7e6
-    print(f"275 M / 56.7 M = {rand_m / waymo_m:.1f}x")
-
-    print("\n== Epoch AI compute (sec. 1.2; mlsysim Literature.ModelsByDomain)")
+def waymo_rows():
     sys.path.insert(0, str(MLSYSIM))
     from mlsysim import Literature
-    rows = Literature.ModelsByDomain.entries
+    return [(r["data_through"], r["cumulative_ro_miles_millions"])
+            for r in Literature.Series.WaymoRiderOnlyMiles.entries]
 
-    def year_max(group, year):
-        return max(r["training_flop"] for r in rows
-                   if r["domain_group"] == group and str(r["publication_date"]).startswith(year))
 
-    def model(name):
-        return next(r for r in rows if r["model"] == name and r["domain_group"] == "Robotics")
+def waymo_last_year():
+    rows = dict(waymo_rows())
+    return rows["2026-06"] - rows["2025-06"]
 
-    for name in ("OpenVLA", "GR00T N1 2B"):
-        m = model(name)
-        g = year_max("Language", m["publication_date"][:4]) / m["training_flop"]
-        print(f"{name} ({m['publication_date'][:4]}): {m['training_flop']:.2e} FLOP; gap {g:,.0f}x")
-    print(f"robotics models with compute: {sum(r['domain_group'] == 'Robotics' for r in rows)}")
 
-    print("\n== California DMV filings, Waymo (sec. 14.1; Literature.CaliforniaDisengagements)")
-    dm = [r for r in Literature.CaliforniaDisengagements.entries
-          if r["company"] == "Waymo" and r["filer_type"] in ("annual", "first_report")]
+def main():
+    print("== Hook and plot: Waymo rider-only miles (Waymo Safety Impact Data Hub via MLSysIM)")
+    rows = waymo_rows()
+    for d, m in rows:
+        print(f"   {d}: {m:.3f} million cumulative")
+    first, last = rows[0], rows[-1]
+    yr = waymo_last_year()
+    print(f"miles July 2025 to June 2026: {yr:.3f} million (slide: about {yr:.0f} million)")
+    print(f"hook choices (factor-ten ladder): {yr / 100:.2f} M, {yr / 10:.1f} M, {yr:.0f} M, {yr * 10 / 1000:.2f} B")
+    print(f"per day over that year: {yr * 1e6 / 365:,.0f} miles")
+    print(f"growth {first[0]} to {last[0]}: {last[1] / first[1]:.1f} times")
+    print(f"first: {first[1]:.1f} million ; last: {last[1]:.1f} million")
 
-    def rate(year, permit):
-        return next(r for r in dm if r["report_year"] == year and r["permit_type"] == permit)
+    print("\n== Industrial robots (IFR World Robotics 2025)")
+    print(f"installed 2024: {IFR_INSTALLED_2024:,} ; in operation: {IFR_STOCK_2024:,}")
+    print(f"in operation, millions: {IFR_STOCK_2024 / 1e6:.2f}")
+    print(f"stock per 2024 installation: {IFR_STOCK_2024 / IFR_INSTALLED_2024:.1f}")
 
-    f, l = rate(2015, "drivered_AVT"), rate(2025, "drivered_AVT")
-    d = rate(2025, "driverless_AVDT")
-    print(f"2015 safety driver: {f['miles_per_disengagement']:,.0f} mi/dis")
-    print(f"2025 safety driver: {l['miles_per_disengagement']:,.0f} mi/dis, {l['disengagements']:.0f} takeovers")
-    print(f"2025 driverless: {d['miles_per_disengagement']:,.0f} mi/dis, {d['disengagements']:.0f} disengagements")
-    for y in (2015, 2020, 2021, 2025):
-        r = rate(y, "drivered_AVT")
-        print(f"  explore row {y}: miles {r['autonomous_miles']:,.1f} diseng {r['disengagements']:.0f} "
-              f"mi/diseng {r['miles_per_disengagement']:,.1f}")
-    print(f"2020 to 2021 miles growth: {rate(2021, 'drivered_AVT')['autonomous_miles'] / rate(2020, 'drivered_AVT')['autonomous_miles']:.1f}x")
-    print(f"improvement 2015 to 2025: {l['miles_per_disengagement'] / f['miles_per_disengagement']:.1f}x")
+    print("\n== Anatomy slide: datasheet values (typed, none derived)")
+    print(f"UR16e: {UR16E}")
+    print(f"MiR250: {MIR250}")
 
-    print("\n== Course")
-    print("lectures 18 + overview; records 16 (sec. 1.11 figure)")
+    print("\n== Course map")
+    lectures = list(range(1, 19))
+    print(f"lectures after this one: {len(lectures)} ; parts: 4 ; records: 16 (sec. 1.11 figure)")
+
+    print("\n== Kit candidate only (stopping-budget bar; not shown in Lecture 0)")
+    d1, d2 = stop_mm(V_DRIVE)
+    print(f"pre-brake delay {tau_delay_ms():.1f} ms ; delay {d1:.1f} mm ; braking {d2:.1f} mm ; "
+          f"stop {d1 + d2:.1f} of {D_CLEAR * 1000:.0f} mm")
 
 
 if __name__ == "__main__":
