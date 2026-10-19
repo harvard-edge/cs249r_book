@@ -146,6 +146,32 @@ for k in (1, 2, 3):
     hook(out / f"hook_step{k}.svg", k)
 
 
+def hook_synth(path, size=(3.4, 2.7), fs=15):
+    """The hook's final step at the size of the closing slide's narrow column:
+    each row's name sits above its bar, and the values print inside the bars."""
+    rows = [("Clean test set", 91, "neutral", "91% correct"),
+            ("Lab photos", 100, "compute", "100% Speed Limit 45"),
+            ("Drive-by frames", 84.8, "danger", "84.8% Speed Limit 45")]
+    fig, ax = plt.subplots(figsize=size)
+    for i, (lab, v, ck, txt) in enumerate(rows):
+        y = 2 - i
+        ax.barh(y, v, color=C[ck], height=0.44)
+        ax.text(0, y + 0.27, lab, ha="left", va="bottom", fontsize=fs, fontweight="bold")
+        ax.text(2, y, txt, va="center", fontsize=fs - 1, fontweight="bold", color="white")
+    ax.set_xlim(0, 100)
+    ax.set_ylim(-0.35, 2.8)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for sd in ax.spines.values():
+        sd.set_visible(False)
+    ax.text(0, -0.4, "Percent, LISA-CNN road-sign classifier", ha="left", va="top",
+            fontsize=fs - 2, color=C["neutral"])
+    sp.save(fig, path)
+
+
+hook_synth(out / "hook_synth.svg")
+
+
 # ================================================== TEMPE TIMELINE (NTSB)
 def tempe(path, k):
     fig, ax = plt.subplots(figsize=(4.1, 2.3))

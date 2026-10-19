@@ -131,7 +131,7 @@ def hook(k, size=(5.9, 2.8), fs=12.5, name=None):
             ax.text(30, y, "???", ha="center", va="center", fontsize=15,
                     fontweight="bold", color=C["danger"])
     ax.axvline(6, color=C["neutral"], lw=1.2, ls=":")
-    ax.text(6.5, 3.55, "schema change", fontsize=10.5, color=C["neutral"])
+    ax.text(6.5, 3.55, "schema change", fontsize=13, color=C["neutral"])
     a3 = 1.0 if k >= 3 else 0.0
     if k >= 2:
         ax.annotate("", xy=(54, 0.55), xytext=(6, 0.55),
@@ -141,14 +141,14 @@ def hook(k, size=(5.9, 2.8), fs=12.5, name=None):
     for x, lab in ((7.5, "null-rate gate"), (10.0, "freshness and quality SLO")):
         ax.plot([x], [1.0 if lab.startswith("null") else 0.0], "v", ms=11,
                 color=V["ok"], alpha=a3, zorder=6)
-    ax.text(8.5, 1.65, "a data contract stops it here", fontsize=fs - 2, color=V["ok"],
+    ax.text(8.5, 1.65, "a data contract stops it here", fontsize=fs - 0.5, color=V["ok"],
             fontweight="bold", alpha=a3)
     ax.set_xlim(0, 60)
     ax.set_ylim(-0.6, 3.8)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
     ax.set_xticks([0, 12, 24, 36, 48, 60])
-    ax.set_xlabel("Hours after the upstream change (illustrative timeline)")
+    ax.set_xlabel("Hours after the upstream change (illustrative timeline)", fontsize=13.5)
     sp.save(fig, out / (name or f"hook_step{k}.svg"))
 
 
@@ -195,16 +195,19 @@ for k in (1, 2, 3):
     ax.minorticks_off()
     ax.set_xlabel("Models in production")
     ax.set_ylabel("Operational load")
-    tag(ax, "Assumed growth shapes (chapter figure 1), not measurements", y=-0.26)
+    tag(ax, "Assumed growth shapes (chapter figure 1), not measurements", y=-0.26, fs=11)
     sp.save(fig, out / f"load_step{k}.svg")
 
 # ------------------------------------------------------- FBLearner Flow
-sp.hbars(out / "fbl.svg", [
-    ("Models trained", 1_000_000, "memory", "> 1,000,000"),
-    ("Workflow runs, one month", 500_000, "memory", "> 500,000"),
-    ("Workflow authors", 150, "danger", "< 150"),
-], "", log=True, size=(5.8, 2.0),
-    xlabel="Count, log scale (Meta FBLearner Flow, 2016)")
+# Axis type set larger than the kit default: the plot is shown at about half size.
+LARGE_AXIS = {"xtick.labelsize": 14, "axes.labelsize": 14}
+with plt.rc_context(LARGE_AXIS):
+    sp.hbars(out / "fbl.svg", [
+        ("Models trained", 1_000_000, "memory", "> 1,000,000"),
+        ("Workflow runs, one month", 500_000, "memory", "> 500,000"),
+        ("Workflow authors", 150, "danger", "< 150"),
+    ], "", log=True, size=(5.8, 2.0),
+        xlabel="Count, log scale (Meta FBLearner Flow, 2016)")
 
 # ------------------------------------------------------- registry graph
 for k in (1, 2, 3):
@@ -253,9 +256,9 @@ box(ax, 7.9, 3.2, 2.0, 1.1, "training", V["frame_l"], V["frame"], fs=11, tc=C["t
 box(ax, 7.9, 0.9, 2.0, 1.1, "serving", V["frame_l"], V["frame"], fs=11, tc=C["text"])
 arrow(ax, (7.2, 3.75), (7.9, 3.75), V["c1"])
 arrow(ax, (7.2, 1.45), (7.9, 1.45), V["c1"])
-ax.text(6.55, 4.5, "full history: scans terabytes", ha="center", fontsize=10.5,
+ax.text(6.55, 4.5, "full history: scans terabytes", ha="center", fontsize=11.5,
         color=V["c1"], fontweight="bold")
-ax.text(6.55, 0.35, "latest value: 1.16 M lookups/s", ha="center", fontsize=10.5,
+ax.text(6.55, 0.35, "latest value: 1.16 M lookups/s", ha="center", fontsize=11.5,
         color=V["c1"], fontweight="bold")
 sp.save(fig, out / "fstore.svg")
 
@@ -294,14 +297,30 @@ for k in (1, 2):
     sp.save(fig, out / f"pit_step{k}.svg")
 
 # ------------------------------------------------------- data validation
-sp.hbars(out / "breck.svg", [
-    ("New feature column", 10, "data", "10%"),
-    ("Missing feature column", 6, "danger", "6%"),
-    ("Unexpected category value", 6, "data", "6%"),
-    ("Feature in too few examples", 3, "danger", "3%"),
-    ("Data completely missing", 3, "danger", "3%"),
-], "", log=False, size=(5.8, 2.4),
-    xlabel="Share of 700+ Google pipelines where the check fired in 30 days")
+# Drawn at the size of its slide column (about 3.7 x 2.1 in), with the long
+# check names on two lines so the type stays at 14 to 15 pt.
+breck_rows = [("New feature\ncolumn", 10, "data"),
+              ("Missing feature\ncolumn", 6, "danger"),
+              ("Unexpected\ncategory value", 6, "data"),
+              ("Feature in too\nfew examples", 3, "danger"),
+              ("Data completely\nmissing", 3, "danger")]
+fig, ax = plt.subplots(figsize=(4.6, 3.3))
+for i, (lab, v, ck) in enumerate(breck_rows):
+    y = len(breck_rows) - 1 - i
+    ax.barh(y, v, color=C[ck], height=0.62)
+    ax.text(-0.02, y, lab, transform=ax.get_yaxis_transform(), ha="right", va="center",
+            fontsize=14, fontweight="bold", color=C["text"], linespacing=1.0)
+    ax.text(v + 0.15, y, f"{v}%", va="center", fontsize=15, fontweight="bold", color=C[ck])
+ax.set_yticks([])
+ax.set_xlim(0, 13)
+ax.set_xticks(range(0, 13, 2))
+ax.set_ylim(-0.6, len(breck_rows) - 0.4)
+ax.spines["left"].set_visible(False)
+ax.grid(axis="x", color=C["grid"], linewidth=0.6)
+ax.set_axisbelow(True)
+ax.tick_params(axis="x", labelsize=14)
+ax.set_xlabel("Share of 700+ Google pipelines\nwhere the check fired in 30 days (%)", fontsize=14)
+sp.save(fig, out / "breck.svg")
 
 # ------------------------------------------------------- broken-feature cost
 fig, ax = plt.subplots(figsize=(5.2, 2.4))

@@ -107,9 +107,9 @@ def hook_fig(path, size=(5.4, 3.6), fs=15, annotate=False):
     sp.save(fig, path)
 
 
-hook_fig(out / "hook_step1.svg")
-hook_fig(out / "hook_step2.svg", annotate=True)
-hook_fig(out / "hook_thumb.svg", size=(3.6, 2.0), fs=13)
+hook_fig(out / "hook_step1.svg", size=(4.4, 2.2))
+hook_fig(out / "hook_step2.svg", size=(4.4, 2.2), annotate=True)
+hook_fig(out / "hook_thumb.svg", size=(4.0, 2.1), fs=17)
 
 
 # ===================================================== power and energy
@@ -314,12 +314,12 @@ PAT = [("T5", 11, 46.7, 0.545, "TPU v3"), ("Meena", 2.6, 96.4, 0.415, "TPU v3"),
        ("Switch", 1500, 59.1, 0.330, "TPU v3"), ("GPT-3", 175, 552.1, 0.429, "V100")]
 
 
-def patterson_fig(size=(5.4, 3.4), fs=14):
+def patterson_fig(size=(4.4, 2.6), fs=16):
     fig, ax = plt.subplots(figsize=size)
     for name, params, t, g, hw in PAT:
         ck = "danger" if name == "GPT-3" else ("data" if name == "GShard-600B" else "memory")
         ax.plot(params, t, "o", ms=12, color=C[ck], mec="white", mew=1.5)
-        off = {"T5": (8, 6), "Meena": (8, 4), "GShard-600B": (-8, 8),
+        off = {"T5": (-8, -30), "Meena": (8, 4), "GShard-600B": (-8, 8),
                "Switch": (-8, 8), "GPT-3": (10, -4)}[name]
         ha = "right" if off[0] < 0 else "left"
         ax.annotate(f"{name}\n{t:g} t", (params, t), xytext=off,
@@ -396,7 +396,7 @@ for k in (1, 2):
 
 
 # ===================================================== break-even
-def breakeven_fig(k, size=(5.4, 3.5), fs=14):
+def breakeven_fig(k, size=(4.4, 2.6), fs=16):
     fig, ax = plt.subplots(figsize=size)
     saved_kwh_day = 0.35 * 24                 # 50% of 700 W, continuous
     days = np.logspace(0, np.log10(1500), 300)
@@ -404,7 +404,7 @@ def breakeven_fig(k, size=(5.4, 3.5), fs=14):
     ax.text(1.15, EMBODIED_KG - 12, "164 kg to make", va="top",
             fontsize=fs - 2, color="#8B5A2B", fontweight="bold")
     ax.axvline(3 * 365, color=C["neutral"], lw=1.2, ls=":")
-    ax.text(3 * 365 * 0.93, 285, "3-year\nlife", ha="right", va="top",
+    ax.text(3 * 365 * 0.93, 8, "3-year\nlife", ha="right", va="bottom",
             fontsize=fs - 3, color=C["neutral"])
     if k >= 2:
         us = saved_kwh_day * GRID["US average"] / 1000 * days
@@ -458,7 +458,7 @@ def crossover_fig(size=(5.4, 3.3), fs=14):
     ax.plot(d, E_FAC / 1000, "o", ms=11, color=C["compute"])
     ax.text(d + 6, E_FAC / 1000 - 6, f"day {d:.0f}", fontsize=fs,
             fontweight="bold", color=C["compute"])
-    ax.text(110, 10, "serving: 1 billion\nprompts a day\nat 0.24 Wh", fontsize=fs - 2,
+    ax.text(110, 10, "serving: 1 billion\nprompts a day\nat 0.24 Wh", fontsize=fs - 0.5,
             color=C["compute"], fontweight="bold")
     ax.set_xlim(0, 200)
     ax.set_ylim(0, 50)

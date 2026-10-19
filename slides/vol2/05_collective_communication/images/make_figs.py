@@ -285,11 +285,11 @@ def crossover():
     ring = 2 * (N - 1) * a + 2 * (N - 1) / N * M / b
     tree = 2 * math.log2(N) * a + 2 * math.log2(N) * M / b
     mx = 114 * a * b / (12 - 2 * 63 / 64)
-    fig, ax = plt.subplots(figsize=(3.6, 2.7))
+    fig, ax = plt.subplots(figsize=(4.3, 2.7))
     ax.plot(M, ring * 1e6, color=C["c2"], lw=3)
     ax.plot(M, tree * 1e6, color=C["c1"], lw=3)
     ax.axvline(mx, color=C["neutral"], lw=1.4, ls="--")
-    ax.text(mx * 1.25, 130, "crossover\n≈ 1.1 MB", color=C["neutral"], fontsize=11,
+    ax.text(mx * 1.25, 130, "crossover\n≈ 1.1 MB", color=C["neutral"], fontsize=12.5,
             fontweight="bold", va="bottom")
     ax.text(2e3, 2.0e3, "ring", color=C["c2_t"], fontsize=13, fontweight="bold")
     ax.text(1.5e4, 300, "tree", color=C["c1"], fontsize=13, fontweight="bold")
@@ -298,7 +298,7 @@ def crossover():
     ax.plot([1e6], [1456.9], "o", color=C["c2"], ms=8)
     ax.plot([1e6], [1320], "o", color=C["c1"], ms=8)
     ax.text(1.3e3, 8e3, "1 MB: ring 1,457 μs\n          tree 1,320 μs", ha="left",
-            fontsize=11, fontweight="bold", color=C["text"])
+            fontsize=12.5, fontweight="bold", color=C["text"])
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlim(1e3, 1e8)
@@ -308,8 +308,9 @@ def crossover():
     ax.set_yticks([100, 1000, 10000, 100000])
     ax.set_yticklabels(["0.1 ms", "1 ms", "10 ms", "100 ms"])
     ax.minorticks_off()
-    ax.set_xlabel("Buffer size M")
-    ax.set_ylabel("Modeled time")
+    ax.set_xlabel("Buffer size M", fontsize=13)
+    ax.tick_params(labelsize=12.5)
+    ax.set_ylabel("Modeled time", fontsize=13)
     ax.grid(color=C["grid"], lw=0.6)
     ax.set_axisbelow(True)
     sp.save(fig, out / "crossover.svg")

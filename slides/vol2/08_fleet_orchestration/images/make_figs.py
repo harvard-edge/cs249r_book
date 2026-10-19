@@ -427,7 +427,7 @@ def mg1(k, cs_kalos, path=None, sat=False):
     load = rho / (1 - rho)
     fig, ax = plt.subplots(figsize=(5.0, 2.7) if not sat else (4.6, 2.9))
     curves = [(1.0, C["memory"], "$C_s$ = 1"), (3.0, C["compute"], "$C_s$ = 3"),
-              (cs_kalos, C["danger"], f"Kalos, $C_s \\geq {cs_kalos:.1f}$ (derived)")]
+              (cs_kalos, C["danger"], f"Kalos, $C_s \\geq {cs_kalos:.1f}$\n(derived)")]
     shown = curves[:1] if sat else curves[:k]
     for cs, col, lab in shown:
         f = (1 + cs * cs) / 2
@@ -435,8 +435,10 @@ def mg1(k, cs_kalos, path=None, sat=False):
         if not sat:
             v = 4 * f
             ax.plot([0.8], [v], "o", ms=8, color=col, mec="white", zorder=5)
-            ax.text(0.955, (0.95 / 0.05) * f, f" {lab}: {v:.0f}$\\times$", ha="left", va="center",
-                    fontsize=11, color=col, fontweight="bold")
+            two = "\n" in lab   # the two-line Kalos label grows upward from its curve
+            ax.text(0.955, (0.95 / 0.05) * f, f" {lab}: {v:.0f}$\\times$",
+                    ha="left", va="bottom" if two else "center",
+                    fontsize=13, color=col, fontweight="bold")
     if sat:
         ax.plot([0.98], [49], "o", ms=9, color=C["danger"], mec="white", zorder=5)
         ax.text(0.965, 49, "98%: 49$\\times$ ", ha="right", va="center", fontsize=12,
@@ -448,9 +450,9 @@ def mg1(k, cs_kalos, path=None, sat=False):
         ax.set_xlim(0, 1.0)
     else:
         ax.axvline(0.8, color=C["grid"], lw=1, ls="--")
-        ax.text(0.81, 0.07, "$\\rho$ = 0.8: values at the right", fontsize=10.5, color=C["neutral"])
+        ax.text(0.81, 0.07, "$\\rho$ = 0.8: values at the right", fontsize=12, color=C["neutral"])
         ax.set_xlim(0, 1.45)
-        ax.set_ylim(0.05, 600)
+        ax.set_ylim(0.05, 3000)
     ax.set_yscale("log")
     ax.set_yticks([0.1, 1, 10, 100])
     ax.set_yticklabels(["0.1", "1", "10", "100"])
@@ -777,10 +779,10 @@ if __name__ == "__main__":
     for k in (1, 2, 3):
         control_plane(k)
         gang(k)
-        drf(k)
         mg1(k, cs)
         tiers(k)
     for k in (1, 2):
+        drf(k)
         backfill(k)
         placement(k)
         elastic(k)

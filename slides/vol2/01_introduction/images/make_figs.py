@@ -95,31 +95,34 @@ def chinchilla():
 
 
 # 1. Hook: one synchronized step -------------------------------------------
-def hook(path, k):
-    fig, ax = plt.subplots(figsize=(3.4, 1.3))
+def hook(path, k, size=(3.4, 1.3), fs=11, stack=False):
+    """stack=True puts the compute label on its own line above the step label."""
+    fig, ax = plt.subplots(figsize=size)
     ax.barh(0, 1.2, color=C1, height=0.55)
-    ax.text(0, 0.5, "compute 1.2 s", ha="left", fontsize=11,
+    ax.text(0, 1.0 if stack else 0.5, "compute 1.2 s", ha="left", fontsize=fs,
             fontweight="bold", color=C1T)
     if k >= 2:
         ax.barh(0, 28, left=1.2, color=C2, height=0.55)
         ax.text(15.2, 0, "AllReduce 28 s", va="center", ha="center",
-                fontsize=11, fontweight="bold", color="white")
+                fontsize=fs, fontweight="bold", color="white")
         ax.text(29.2, 0.5, "step 29.2 s", ha="right",
-                fontsize=11, fontweight="bold", color=C2T)
+                fontsize=fs, fontweight="bold", color=C2T)
     else:
-        ax.text(29.2, 0.5, "step = ?", ha="right", fontsize=11,
+        ax.text(29.2, 0.5, "step = ?", ha="right", fontsize=fs,
                 fontweight="bold", color=C2T)
     ax.set_xlim(0, 30)
-    ax.set_ylim(-0.45, 0.95)
+    ax.set_ylim(-0.45, 1.45 if stack else 0.95)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
-    ax.set_xlabel("seconds per step (no overlap)", fontsize=10)
-    ax.tick_params(labelsize=10)
+    ax.set_xlabel("seconds per step (no overlap)", fontsize=fs - 1)
+    ax.tick_params(labelsize=fs - 1)
     sp.save(fig, path)
 
 
 hook(out / "hook_step1.svg", 1)
 hook(out / "hook_step2.svg", 2)
+# Retrieval: the same step drawn at the size of its narrow column.
+hook(out / "hook_synth.svg", 2, size=(3.1, 1.8), fs=15, stack=True)
 
 # 2. Growth decomposition (Epoch AI via MLSysIM) ----------------------------
 runs = epoch_rows()
