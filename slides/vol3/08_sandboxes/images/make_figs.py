@@ -1,0 +1,487 @@
+#!/usr/bin/env python3
+"""Data plots and diagrams for Lecture 8 (Agent Sandboxes, Volume III).
+
+Every number comes from calcs.py (which sources the rendered chapter and the
+cited papers) or is a measured value read from data/. Diagrams are SVG,
+plots are matplotlib SVG; the slides Makefile turns both into PDF.
+
+Legibility rule (slides/visuals.md §2): every figure is drawn at the shape
+of its slot so it is never shrunk.
+  - Full-width diagrams fill a slot about 14.3 x 5 cm, so the canvas is
+    900 x 300-340 units (one unit is about 0.45 pt on the slide). Text is at
+    least 22 units (about 10 pt, the \\footnotesize floor) and boxes carry
+    two or three words.
+  - Column plots fill a slot about 7.5 x 4.5 cm, so they are drawn 5.4 in
+    wide with 17-18 pt type (about 9.5-10 pt on the slide).
+The volume accent is amethyst (#581C87); figures use the book's palette.
+
+Run from this folder: python3 make_figs.py
+"""
+import sys
+from pathlib import Path
+
+import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+import slideplot as sp  # noqa: E402
+
+import calcs  # noqa: E402
+
+plt = sp.plt
+C = sp.C
+out = Path(__file__).parent
+DATA = out / "data"
+AME = "#581C87"      # Volume III accent, amethyst
+AME_L = "#E7DAF2"
+INK = "#1A1A2E"
+GRAY = "#BBBBBB"
+FONT = "Helvetica, Arial, sans-serif"
+T = 23               # body text size in canvas units (about 10 pt on slide)
+TB = 25              # bold box heading
+
+
+# ===========================================================================
+# SVG helper (text stays text; < and & escaped)
+# ===========================================================================
+class SVG:
+    def __init__(self, w=900, h=320):
+        self.w, self.h, self.p = w, h, []
+
+    def rect(self, x, y, w, h, fill="none", stroke=INK, sw=2.5, rx=10):
+        self.p.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{rx}" '
+                      f'fill="{fill}" stroke="{stroke}" stroke-width="{sw}"/>')
+
+    def line(self, x1, y1, x2, y2, stroke=INK, sw=3.5, arrow=None):
+        m = f' marker-end="url(#{arrow})"' if arrow else ""
+        self.p.append(f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" '
+                      f'stroke="{stroke}" stroke-width="{sw}"{m}/>')
+
+    def text(self, x, y, s, size=T, fill=INK, weight="normal", anchor="middle", mono=False):
+        s = str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        fam = "Courier, monospace" if mono else FONT
+        self.p.append(f'<text x="{x}" y="{y}" font-family="{fam}" font-size="{size}" '
+                      f'fill="{fill}" font-weight="{weight}" text-anchor="{anchor}">{s}</text>')
+
+    def save(self, name):
+        marks = "".join(
+            f'<marker id="{k}" markerWidth="8" markerHeight="8" refX="6" refY="3" '
+            f'orient="auto" markerUnits="strokeWidth"><path d="M0,0 L6,3 L0,6 Z" fill="{c}"/></marker>'
+            for k, c in (("ak", INK), ("ar", C["danger"]), ("ag", C["data"]), ("aa", AME)))
+        head = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {self.w} {self.h}" '
+                f'font-family="{FONT}"><defs>{marks}</defs>'
+                f'<rect width="{self.w}" height="{self.h}" fill="white"/>')
+        (out / f"{name}.svg").write_text(head + "".join(self.p) + "</svg>")
+
+
+# ===========================================================================
+# 1. Two requests through three boundaries (ch §8.2.2, figure 2), 3 steps
+# ===========================================================================
+def boundaries_steps():
+    for step in (1, 2, 3):
+        g = SVG(900, 300)
+        g.rect(8, 20, 200, 260, fill="#F7F5FA", stroke=AME)
+        g.text(108, 60, "guest", TB, AME, "bold")
+        g.text(108, 128, "run_shell", T, C["danger"], "bold", mono=True)
+        g.text(108, 228, "submit_report", 21, C["data"], "bold", mono=True)
+        for (l1, l2), gx in ((("tool", "admit"), 260), (("file", "policy"), 450),
+                             (("egress", "policy"), 640)):
+            g.rect(gx, 20, 120, 260, fill=AME_L, stroke=AME, sw=2)
+            g.text(gx + 60, 165, l1, T, AME, "bold")
+            g.text(gx + 60, 192, l2, T, AME, "bold")
+        g.rect(778, 160, 116, 110, fill="white", stroke=C["data"])
+        g.text(836, 208, "approved", 22, C["data"], "bold")
+        g.text(836, 236, "service", 22, C["data"], "bold")
+        g.line(208, 120, 256, 120, C["danger"], arrow="ar")
+        if step >= 2:
+            g.line(380, 120, 446, 120, C["danger"], arrow="ar")
+            g.text(510, 108, "✗", 46, C["danger"], "bold")
+            g.text(510, 70, "blocked", T, C["danger"], "bold")
+        if step >= 3:
+            for x1, x2 in ((208, 256), (380, 446), (570, 636)):
+                g.line(x1, 225, x2, 225, C["data"], arrow="ag")
+            g.line(760, 225, 774, 225, C["data"], arrow="ag")
+        g.save(f"boundaries_step{step}")
+
+
+# ===========================================================================
+# 2. In-process reach (ch §8.3.1), 2 steps
+# ===========================================================================
+def reach_steps():
+    items = ["module globals", "API_KEY", "251 classes", "open files"]
+    for step in (1, 2):
+        g = SVG(900, 320)
+        g.rect(8, 8, 884, 304, fill="#F7F5FA", stroke=C["neutral"], sw=2)
+        g.text(450, 46, "one supervisor process", T, C["neutral"], "bold")
+        g.rect(40, 90, 270, 160, fill="white", stroke=AME)
+        g.text(175, 132, "eval scope", TB, AME, "bold")
+        g.text(175, 175, "no builtins", T)
+        g.text(175, 212, "one helper: total", T)
+        for i, s in enumerate(items):
+            y = 70 + i * 60
+            g.rect(600, y, 270, 48, fill="white", stroke=C["danger"], sw=2)
+            g.text(735, y + 32, s, T, C["danger"], "bold")
+        if step >= 2:
+            g.line(310, 130, 594, 96, C["danger"], arrow="ar")
+            g.text(455, 88, ".__globals__", T, C["danger"], "bold", mono=True)
+            g.line(310, 215, 594, 213, C["danger"], arrow="ar")
+            g.text(455, 262, "subclass walk", T, C["danger"], "bold")
+        g.save(f"reach_step{step}")
+
+
+# ===========================================================================
+# 3. Capability admit check (ch §8.4.1, equation 1), 6 steps
+# ===========================================================================
+def admit_steps():
+    rows = [("authentic", "protected, bound to holder"),
+            ("op in rights", "read, not write"),
+            ("target in objects", "repo/, not ~/.aws"),
+            ("condition holds", "this task only"),
+            ("time < expiry", "before 300 s")]
+    for step in range(1, len(rows) + 2):
+        g = SVG(900, 340)
+        for i, (cond, gloss) in enumerate(rows):
+            y = 8 + i * 56
+            on = i < step
+            col = AME if on else GRAY
+            g.rect(60, y, 340, 46, fill=AME_L if on else "white", stroke=col, sw=2)
+            g.text(80, y + 31, cond, T, col, "bold", "start", mono=True)
+            g.text(440, y + 31, gloss, T, INK if on else GRAY, anchor="start")
+        if step > len(rows):
+            g.rect(60, 290, 780, 44, fill="white", stroke=C["data"], sw=2.5)
+            g.text(450, 320, "default reach is empty", T, C["data"], "bold")
+        g.save(f"admit_step{step}")
+
+
+# ===========================================================================
+# 4. Attenuation (ch §8.4.2), 3 steps
+# ===========================================================================
+def attenuate_steps():
+    for step in (1, 2, 3):
+        g = SVG(900, 320)
+        g.rect(270, 8, 360, 112, fill=AME_L, stroke=AME)
+        g.text(450, 44, "edit grant (parent)", TB, AME, "bold")
+        g.text(450, 76, "read, write  repo/", T, mono=True)
+        g.text(450, 106, "expires at 300 s", T, C["neutral"])
+        if step >= 2:
+            g.line(370, 120, 220, 182, AME, arrow="aa")
+            g.rect(20, 186, 400, 128, fill="white", stroke=C["danger"])
+            g.text(220, 222, "test grant", TB, C["danger"], "bold")
+            g.text(220, 256, "read, execute  repo/", T, mono=True)
+            g.text(220, 292, "rejected: adds execute", T, C["danger"], "bold")
+        if step >= 3:
+            g.line(530, 120, 680, 182, AME, arrow="aa")
+            g.rect(480, 186, 400, 128, fill="white", stroke=C["data"])
+            g.text(680, 222, "scan grant", TB, C["data"], "bold")
+            g.text(680, 256, "read  src/pool.py", T, mono=True)
+            g.text(680, 292, "valid: narrower", T, C["data"], "bold")
+        g.save(f"attenuate_step{step}")
+
+
+# ===========================================================================
+# 5. Four envelopes: where a system call lands (ch §8.5, figure 4), 4 steps
+# ===========================================================================
+def envelopes_steps():
+    cols = [(("Container", ""), ("host kernel,", "after a filter"), C["memory"], 290),
+            (("User-space", "kernel"), ("emulated in", "user space"), C["network"], 240),
+            (("MicroVM", ""), ("guest kernel,", "natively"), C["compute"], 240),
+            (("Bytecode", ""), ("no syscall;", "host imports"), C["data"], None)]
+    for step in range(1, 5):
+        g = SVG(900, 320)
+        g.line(10, 292, 890, 292, INK, 3)
+        g.text(888, 316, "host kernel", T, C["neutral"], "bold", "end")
+        for i, ((n1, n2), (w1, w2), col, depth) in enumerate(cols):
+            x = 12 + i * 222
+            on = i < step
+            c = col if on else GRAY
+            t = INK if on else GRAY
+            g.rect(x, 8, 210, 200, fill="white", stroke=c, sw=3 if on else 2)
+            g.text(x + 105, 46, n1, TB, c, "bold")
+            if n2:
+                g.text(x + 105, 76, n2, TB, c, "bold")
+            g.text(x + 105, 136, w1, T, t)
+            g.text(x + 105, 166, w2, T, t)
+            if on and depth:
+                g.line(x + 105, 208, x + 105, depth - 4, c, arrow="ak")
+        g.save(f"envelopes_step{step}")
+
+
+# ===========================================================================
+# 6. Egress: two layers outside the guest (ch §8.7.1, figure 5), 3 steps
+# ===========================================================================
+def egress_steps():
+    for step in (1, 2, 3):
+        g = SVG(900, 330)
+        g.rect(8, 20, 170, 250, fill="#F7F5FA", stroke=AME)
+        g.text(93, 60, "guest", TB, AME, "bold")
+        g.rect(280, 20, 240, 104, fill=AME_L, stroke=AME, sw=2)
+        g.text(400, 62, "packet filter", TB, AME, "bold")
+        g.text(400, 96, "IP and port", T)
+        g.rect(280, 166, 240, 104, fill=AME_L, stroke=AME, sw=2)
+        g.text(400, 208, "mediator", TB, AME, "bold")
+        g.text(400, 242, "operation, data", T)
+        g.rect(720, 100, 172, 100, fill="white", stroke=C["data"])
+        g.text(806, 142, "approved", T, C["data"], "bold")
+        g.text(806, 172, "registry", T, C["data"], "bold")
+        g.line(178, 72, 276, 72, C["danger"], arrow="ar")
+        g.text(610, 56, "raw socket", T, C["danger"], "bold")
+        g.text(610, 86, "dropped", T, C["danger"], "bold")
+        if step >= 2:
+            g.line(178, 218, 276, 218, C["data"], arrow="ag")
+            g.line(520, 218, 716, 170, C["data"], arrow="ag")
+        if step >= 3:
+            g.text(450, 316, "DNS lookups also leak: resolve an exact allowlist",
+                   T, C["danger"], "bold")
+        g.save(f"egress_step{step}")
+
+
+# ===========================================================================
+# 7. Reset contract: four state domains (ch §8.8.1, table 7), 5 steps
+# ===========================================================================
+def reset_steps():
+    doms = [("Execution, memory", "destroy or restore"),
+            ("Workspace, storage", "keep outputs, drop the rest"),
+            ("Network, broker", "retire sessions, identities"),
+            ("Host, devices", "scrub queues, device memory")]
+    for step in range(1, len(doms) + 2):
+        g = SVG(900, 330)
+        for i, (d, a) in enumerate(doms):
+            y = 8 + i * 64
+            on = i < step
+            col = AME if on else GRAY
+            g.rect(20, y, 330, 52, fill=AME_L if on else "white", stroke=col, sw=2)
+            g.text(40, y + 35, d, T, col, "bold", "start")
+            g.text(380, y + 35, a, T, INK if on else GRAY, anchor="start")
+        if step > len(doms):
+            g.rect(20, 276, 860, 48, fill="white", stroke=C["danger"], sw=2.5)
+            g.text(450, 308, "one leftover proves failure: destroy, rebuild",
+                   T, C["danger"], "bold")
+        g.save(f"reset_step{step}")
+
+
+# ===========================================================================
+# 8. H.S.A locator with authority lit (column slot, 6 x 4 cm)
+# ===========================================================================
+def locator():
+    g = SVG(360, 250)
+    for i, (lab, on) in enumerate((("H  horizon", False), ("S  state", False),
+                                   ("A  authority", True))):
+        y = 8 + i * 68
+        g.rect(20, y, 320, 56, fill=AME_L if on else "white", stroke=AME if on else GRAY, sw=3)
+        g.text(180, y + 38, lab, 28, AME if on else "#999999", "bold")
+    g.text(180, 238, "bounded today", 26, AME, "bold")
+    g.save("locator_a")
+
+
+# ===========================================================================
+# Column plots (drawn 5.4 in wide for a ~7.5 cm column; 17-18 pt type)
+# ===========================================================================
+COL = {"font.size": 17, "axes.labelsize": 17, "xtick.labelsize": 16,
+       "ytick.labelsize": 16, "legend.fontsize": 15}
+
+
+def cbars(path, rows, xlabel, log=False, height=2.6, xmax=None):
+    """Horizontal bars for a column slot: bold labels left, values at the
+    bar end, no legend. rows: (label, value, color_key, value_text)."""
+    with plt.rc_context(COL):
+        fig, ax = plt.subplots(figsize=(5.4, height))
+        n = len(rows)
+        vals = [r[1] for r in rows]
+        for i, (lab, v, ck, txt) in enumerate(rows):
+            y = n - 1 - i
+            ax.barh(y, v, color=C[ck], height=0.6)
+            ax.text(v * (1.12 if log else 1.0) + (0 if log else max(vals) * 0.02), y, txt,
+                    va="center", fontsize=17, fontweight="bold", color=C[ck])
+        ax.set_yticks(range(n))
+        ax.set_yticklabels([r[0] for r in rows][::-1], fontsize=17, fontweight="bold")
+        ax.tick_params(axis="y", length=0)
+        if log:
+            ax.set_xscale("log")
+            ax.set_xlim(min(vals) / 2, max(vals) * 30)
+        else:
+            ax.set_xlim(0, xmax or max(vals) * 1.45)
+        ax.spines["left"].set_visible(False)
+        ax.grid(axis="x", color=C["grid"], lw=0.6)
+        ax.set_axisbelow(True)
+        ax.set_xlabel(xlabel)
+        sp.save(fig, str(path))
+
+
+def syscall_plots():
+    t = calcs.syscall_tax()
+    cbars(out / "tax.svg",
+          [("Container", t["container"], "memory", f"{t['container']:.2f} s"),
+           ("MicroVM", t["microvm"], "compute", f"{t['microvm']:.2f} s"),
+           ("User-space", t["userspace"], "network", f"{t['userspace']:.1f} s")],
+          "Added s per 10⁶ calls", height=3.0, xmax=5.0)
+    # gVisor measured (Young et al. 2019, figure 3): gettimeofday latency
+    cbars(out / "gvisor.svg",
+          [("native", 0.22, "neutral", "0.22"),
+           ("runc", 0.29, "memory", "0.29"),
+           ("Sentry", 0.63, "network", "0.63"),
+           ("via host", 5.96, "network", "5.96"),
+           ("via gofer", 45.5, "danger", "45.5")],
+          "µs per call (log)", log=True, height=3.0)
+
+
+def setup_plot():
+    s = calcs.setup_amortization()
+    setup = s["setup"]
+    with plt.rc_context(COL):
+        fig, ax = plt.subplots(figsize=(5.4, 3.4))
+        work = np.linspace(0.5, 200, 400)
+        ax.plot(work, setup / (setup + work) * 100, color=AME, lw=3.5)
+        ax.axhline(10, color=C["danger"], lw=2, ls="--")
+        ax.text(198, 14, "10% cap", color=C["danger"], fontsize=17,
+                fontweight="bold", ha="right")
+        ax.plot([3], [83.3], "o", ms=12, color=C["danger"], mec="white", mew=1.5)
+        ax.text(14, 80, "3 ms work: 83%", fontsize=17, fontweight="bold",
+                color=C["danger"], va="center")
+        ax.plot([s["cap_work"]], [10], "o", ms=12, color=AME, mec="white", mew=1.5)
+        ax.text(135, 30, "135 ms", fontsize=17, fontweight="bold", color=AME, ha="center")
+        ax.set_xlabel("Useful work per call (ms)")
+        ax.set_ylabel("Setup share (%)")
+        ax.set_xlim(0, 200)
+        ax.set_ylim(0, 100)
+        ax.grid(color=C["grid"], lw=0.6)
+        ax.set_axisbelow(True)
+        sp.save(fig, str(out / "setup_share.svg"))
+
+
+def cow_plots():
+    p = calcs.provisioning()
+    cbars(out / "provision.svg",
+          [("Full copy", p["full"], "danger", f"{p['full']:.1f} GB"),
+           ("Copy-on-write", p["cow"], "data", f"{p['cow']:.2f} GB")],
+          "GB moved, 32 workspaces (log)", log=True, height=2.4)
+    c = calcs.our_runs()["clone"]
+    cbars(out / "clone.svg",
+          [("Full copy", c["full copy"], "danger", f"{c['full copy']:.0f} ms"),
+           ("Clone", c["copy-on-write clone (cp -c)"], "data",
+            f"{c['copy-on-write clone (cp -c)']:.0f} ms"),
+           ("1-byte write", c["1-byte change to the clone"], "compute",
+            f"{c['1-byte change to the clone']:.1f} ms")],
+          "ms, 2.4 GB base (log)", log=True, height=2.4)
+
+
+def pool_plots():
+    import math
+    lam, target = 2.0, 1e-3
+
+    def tail(S, mean):
+        return 1 - sum(math.exp(-mean) * mean**k / math.factorial(k) for k in range(S))
+
+    p = calcs.pool_sizing()
+    with plt.rc_context(COL):
+        fig, ax = plt.subplots(figsize=(5.4, 3.4))
+        r = np.linspace(2, 80, 400)
+        ax.plot(r, [tail(2, lam * x / 1000) for x in r], color=AME, lw=3.5)
+        ax.axhline(target, color=C["danger"], lw=2, ls="--")
+        ax.text(78, target * 1.6, "0.1% target", color=C["danger"], fontsize=17,
+                fontweight="bold", ha="right")
+        ax.plot([15], [tail(2, lam * 0.015)], "o", ms=12, color=C["data"], mec="white")
+        ax.annotate("15 ms", (15, tail(2, lam * 0.015)), xytext=(32, 1.2e-5),
+                    color=C["data"], fontsize=17, fontweight="bold",
+                    arrowprops=dict(arrowstyle="->", color=C["data"], lw=1.5))
+        ax.axvline(23, color=C["neutral"], lw=1.5, ls=":")
+        ax.text(26, 3e-2, "fails past 23 ms", color=C["neutral"], fontsize=16)
+        ax.set_yscale("log")
+        ax.set_xlabel("Restore time (ms)")
+        ax.set_ylabel("Miss, 2 standby")
+        ax.set_xlim(0, 80)
+        ax.set_ylim(1e-6, 1)
+        ax.grid(color=C["grid"], lw=0.6)
+        ax.set_axisbelow(True)
+        sp.save(fig, str(out / "pool_miss.svg"))
+    cbars(out / "pool_mem.svg",
+          [("Private", p["private"], "danger", f"{p['private']:.0f} GB"),
+           ("Shared", p["cow"], "data", f"{p['cow']:.0f} GB")],
+          "GB for 600 leases", height=2.3)
+
+
+def cybench_plot():
+    rows = calcs.cybench()
+    with plt.rc_context(COL):
+        fig, ax = plt.subplots(figsize=(5.4, 3.6))
+        yrs = [int(d[:4]) + (int(d[5:7]) - 1) / 12 + (int(d[8:10]) - 1) / 365 for d, v, s in rows]
+        for yy, (d, v, s) in zip(yrs, rows):
+            board = s == "Cybench leaderboard"
+            ax.scatter([yy], [v * 100], s=70, zorder=4,
+                       color=C["memory"] if board else "none",
+                       edgecolors=C["memory"] if board else C["danger"], linewidths=2)
+        best, bx, by = 0, [], []
+        for yy, v in sorted(zip(yrs, [r[1] for r in rows])):
+            best = max(best, v)
+            bx.append(yy)
+            by.append(best * 100)
+        ax.step(bx, by, where="post", color=C["neutral"], lw=2, ls="--")
+        ax.text(2024.5, 27, "17.5%", fontsize=18, color=C["memory"], fontweight="bold",
+                ha="center")
+        ax.text(2025.95, 93, "93%", fontsize=18, color=C["danger"], fontweight="bold",
+                va="center", ha="right")
+        ax.set_ylabel("Solved unhinted (%)")
+        ax.set_ylim(0, 105)
+        ax.set_xlim(2023.95, 2026.25)
+        ax.set_xticks([2024, 2025, 2026])
+        ax.set_xticklabels(["2024", "2025", "2026"])
+        ax.grid(color=C["grid"], lw=0.6)
+        ax.set_axisbelow(True)
+        sp.save(fig, str(out / "cybench.svg"))
+
+
+def firecracker_plot():
+    def preconf(fn):
+        blocks = (DATA / fn).read_text().strip().split("\n\n")
+        return np.array([[float(x) for x in l.split()]
+                         for l in blocks[1].strip().splitlines() if l.strip()])
+
+    s = preconf("boot-serial-fc-api-cdf.dat")
+    p = preconf("boot-parallel-100-fc-api-cdf.dat")
+    f = calcs.firecracker_boot()
+    with plt.rc_context(COL):
+        fig, ax = plt.subplots(figsize=(5.4, 3.4))
+        ax.plot(s[:, 0], s[:, 1] * 100, color=C["data"], lw=3.5)
+        ax.plot(p[:, 0], p[:, 1] * 100, color=C["network"], lw=3.5)
+        ax.annotate("one at a time", (111.5, 45), xytext=(127, 10), color=C["data"],
+                    fontsize=17, fontweight="bold",
+                    arrowprops=dict(arrowstyle="->", color=C["data"], lw=1.5))
+        ax.text(126, 40, "100 at once", color=C["network"], fontsize=17, fontweight="bold")
+        ax.axvline(f["p99"], color=C["neutral"], lw=1.5, ls="--")
+        ax.text(f["p99"] - 1, 75, f"p99 {f['p99']:.0f}", color=C["neutral"], fontsize=16,
+                ha="right")
+        ax.set_xlabel("Boot time (ms)")
+        ax.set_ylabel("Booted (%)")
+        ax.set_xlim(100, 165)
+        ax.set_ylim(0, 103)
+        ax.grid(color=C["grid"], lw=0.6)
+        ax.set_axisbelow(True)
+        sp.save(fig, str(out / "firecracker.svg"))
+
+
+# ===========================================================================
+# Screenshot crops: the one line that matters, so it can be shown large
+# (sources: tracebit_*.png, Cox/Tracebit 2025; crops are exact pixels)
+# ===========================================================================
+def crops():
+    from PIL import Image
+    Image.open(out / "tracebit_shown.png").crop((0, 8, 700, 56)).save(out / "tb_saw.png")
+    Image.open(out / "tracebit_ran.png").crop((20, 82, 1590, 132)).save(out / "tb_ran.png")
+    Image.open(out / "tracebit_fixed.png").crop((20, 335, 680, 388)).save(out / "tb_fix.png")
+
+
+if __name__ == "__main__":
+    boundaries_steps()
+    reach_steps()
+    admit_steps()
+    attenuate_steps()
+    envelopes_steps()
+    egress_steps()
+    reset_steps()
+    locator()
+    syscall_plots()
+    setup_plot()
+    cow_plots()
+    pool_plots()
+    cybench_plot()
+    firecracker_plot()
+    crops()
+    print("figures written to", out)

@@ -1,0 +1,516 @@
+% =============================================================================
+% Lecture 8: Agent Sandboxes
+% Agentic Machine Learning Systems (Volume III), Chapter 8
+% =============================================================================
+% Thesis: what admitted code can reach is set by the environment it runs in,
+% so containment is enforced beneath the process and priced in setup time,
+% memory, and verified reset.
+% Hook and synthesis: the Gemini CLI allow-list bypass (War Story 8.1,
+% Tracebit, June 2025). Running case: the connection-pool repair agent through
+% the chapter's adversarial README variant (the injected run_shell and the
+% permitted submit_report).
+%
+% Build: make deck V=3 D=08_sandboxes   (figures: images/make_figs.py)
+% Plan:  lecture_map.yml in this folder.
+% Numbers: images/calcs.py prints every derived value; sources named there.
+%          Real runs: images/measure.py (escape, startup, clone, docker).
+% =============================================================================
+
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+\mlsyssetup{
+  volume={Volume III},
+  chapter={Chapter 8},
+  chaptertitle={Agent Sandboxes},
+  layer=tools,
+  logo={../../assets/img/logo-mlsysbook.png},
+  instlogo={../../assets/img/logo-harvard.png},
+}
+\usepackage[T1]{fontenc}
+\usepackage[scaled=0.9]{helvet}
+\usepackage{courier}
+% Code and real tool output: Inconsolata is narrower than Courier, so a shell
+% line fits a column at \footnotesize.
+\usepackage[varqu,scaled=0.95]{zi4}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{booktabs,amsmath}
+\usetikzlibrary{arrows.meta,positioning}
+\graphicspath{{images/}}
+\setcounter{mlsystotalsections}{5}
+
+\title{Agent Sandboxes}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+% A large answer choice for predict and concept-question slides
+\newcommand{\choice}[2]{\textbf{\textcolor{mlsysaccent}{#1}}\enspace #2}
+% A choice highlighted from overlay #1 on (the answer)
+\newcommand{\answerat}[3]{\alt<#1->{\colorbox{mlsysaccent!15}{\choice{#2}{#3}}}{\choice{#2}{#3}}}
+% A goal or takeaway line with its thumbnail
+\newcommand{\thumbline}[2]{%
+  \begin{minipage}[c]{2.6cm}\centering\includegraphics[width=2.5cm,height=0.95cm,keepaspectratio]{#1}\end{minipage}%
+  \hspace{0.3cm}\begin{minipage}[c]{0.74\textwidth}\small #2\end{minipage}}
+% A block of real code or output at the legibility floor
+\newcommand{\codeblock}[1]{%
+  \begin{mlsyscard}{midgray}\footnotesize\ttfamily\raggedright #1\end{mlsyscard}}
+
+\begin{document}
+
+% =============================================================================
+% TITLE AND HOOK
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Read the thesis aloud once. Lecture 7 checked a call's arguments. Today the model's code runs, and the limit on what it can touch moves beneath the process. The notes total about 71 minutes; the core lecture is about 60. FLEX: cutting every [OPTIONAL] frame (the in-process native-code slide, the macaroon attenuation, the gVisor history, the accelerator aside, the open questions) leaves a complete 60-minute lecture.}
+\mlsystitle{Agent Sandboxes}{What admitted code can reach is set by the environment it runs in, so containment is enforced beneath the process and priced in setup time, memory, and verified reset.}{cover_virtualization_blueprint.png}
+
+\begin{frame}[t]{Approved at every step. What should stop it?}
+  \mlsysactivity{Predict}{3 min}\vspace{-0.2cm}
+  {\small\textbf{What the user saw}, an approved \texttt{grep} over the repository's README:}\\[0.2cm]
+  \safeimg[width=0.62\textwidth,height=0.75cm,keepaspectratio]{tb_saw.png}\\[0.2cm]
+  \uncover<2->{{\small\textbf{What ran}, the same \texttt{grep} with a payload pushed off-screen by whitespace:}\\[0.2cm]
+  \safeimg[width=\textwidth,height=0.75cm,keepaspectratio]{tb_ran.png}}\\[0.25cm]
+  \begin{columns}[T]
+    \begin{column}{0.46\textwidth}
+      \raggedright
+      \uncover<3->{\small Which layer should stop the leak?\\[0.1cm]
+      \choice{A}{a better-aligned model}\\
+      \choice{B}{the approval prompt}\\
+      \answerat{4}{C}{the environment it runs in}}
+    \end{column}
+    \begin{column}{0.50\textwidth}
+      \raggedright
+      \uncover<4->{{\small The fix, v0.1.14, asks before each new binary:}\\[0.2cm]
+      \safeimg[width=\textwidth,height=0.7cm,keepaspectratio]{tb_fix.png}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Screenshots: Cox (Tracebit), ``Gemini AI CLI Hijack,'' 2025. Agent Sandboxes, WS 8.1.}
+  \note{[5 min] [CORE] A real vulnerability. Step 1: Google released Gemini CLI on 25 June 2025. A user asks it to explore a codebase; it runs a grep over README.md, and the user approves grep for reuse. Step 2: the README held the full GNU GPL text with a prompt injection hidden inside it. The agent ran a second command that began with grep and appended \texttt{env | curl} to a remote server; a long run of whitespace pushed the payload off-screen in the confirmation prompt. Step 3: ENGAGE, one minute, vote with fingers. Step 4: C. The researchers report alignment did not stop it (A); the approval prompt was defeated by whitespace and a weak allow-list match (B). The command ran directly in the developer's shell, so it inherited all of that shell's authority. A limit enforced beneath the running process, on files and on the network, blocks the read and the socket whatever the model proposes. Step 4 also shows the fix, v0.1.14 of 25 July 2025: the prompt now names env and curl and asks before running them. A better prompt still leaves the shell's authority in place. WARN: students who pick A treat the model as the boundary; this lecture puts it in the environment.}
+\end{frame}
+
+\begin{frame}{Recall: what did Lecture 7 check on every call?}
+  \mlsysactivity{Retrieval}{1.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.56\textwidth}
+      {\Large\bfseries Close your notes.}\\[0.3cm]
+      {\normalsize Name the three things the runtime checks before it dispatches a tool call. Does any of them bound what the call's code can reach once it runs?}
+    \end{column}
+    \begin{column}{0.40\textwidth}
+      \centering\uncover<2->{\safeimg[width=\textwidth,height=4.0cm,keepaspectratio]{locator_a.pdf}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Tool Calling, \S7.2 to \S7.4. H$\cdot$S$\cdot$A locator: Agent Sandboxes, Purpose.}
+  \note{[1.5 min] [CORE] Retrieval from Lecture 7. Give 60 seconds. Answer: structure (does it match the schema), authority (is the tool permitted), and state preconditions (is the target in the expected state). None of the three bounds what the admitted code reaches once it runs: a schema-valid \texttt{run\_shell} can read any file and open any socket its process can reach. That gap is today. The locator shows where this chapter sits in the H$\cdot$S$\cdot$A exposure space: it bounds authority, what the code may change, read, and send, while horizon and state are other chapters' work.}
+\end{frame}
+
+\begin{frame}{Today: enforce the limit beneath the model, and pay for it}
+  \normalsize
+  By the end of today, you will be able to:\\[0.25cm]
+  \begin{itemize}\setlength{\itemsep}{0.22cm}
+    \item Explain why containment must sit beneath the executing process, not in the interpreter.
+    \item Bound what code can reach with a capability grant, and narrow it by attenuation.
+    \item Choose an isolation envelope from the code, the authority, and the horizon.
+    \item Price the sandbox: setup time, copy-on-write storage, pool memory, and a verified reset.
+  \end{itemize}
+  \vspace{0.2cm}
+  {\small\textcolor{midgray}{Running case: the connection-pool repair agent, and the README that asks it to upload \texttt{\textasciitilde/.aws/credentials}.}}
+  \note{[1.5 min] [CORE] The title is the driving question: why below the model rather than asked of it. Each line is one segment: reach and where the limit lives; capabilities; envelopes; and the price. The running case is the repair agent from Lecture 1, now facing the chapter's adversarial README: a vendored dependency whose README hides an instruction to upload the host's cloud credentials before running the tests. The agent proposes a schema-valid \texttt{run\_shell} that reads the credential file. LINK: Lecture 7 ended on exactly this call; today bounds what it can reach.}
+\end{frame}
+
+% =============================================================================
+% SECTION: REACH
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] The first question is what admitted code can actually reach, and why the limit cannot live in the model or in the interpreter.}
+\mlsysdivider{What can admitted code reach, and where must the limit live?}{Agent Sandboxes, \S8.1 to \S8.3}
+\section{Reach}
+
+\begin{frame}{The code proposing the exploit is getting better at it}
+  \begin{columns}[c]
+    \begin{column}{0.56\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.0cm,keepaspectratio]{cybench.pdf}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \small
+      40 professional capture-the-flag tasks, no hints.\\[0.3cm]
+      Best unguided solve rate:\\[0.1cm]
+      {\large\textbf{\textcolor{BlueLine}{17.5\%}} (2024) $\rightarrow$ \textbf{\textcolor{RedLine}{93\%}} (2026)}\\[0.3cm]
+      Admitted code is not merely buggy; it may be written by a capable exploit author.
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Zhang et al., ``Cybench,'' 2024, via Epoch AI Benchmarking Hub (MLSysIM Literature.CybenchSolveRate). Filled: leaderboard; open: lab-reported. Agent Sandboxes, figure 1.}
+  \note{[2 min] [CORE] Measured data, from the chapter's figure 1. Cybench runs 40 professional capture-the-flag security tasks; each model runs commands and observes output, and scores whether it finds and exploits the vulnerability unaided. Filled points are the public leaderboard; open points are labs' own model-card figures, so the most recent gains are self-reported under each lab's configuration. The dashed step traces the best to date: 17.5 percent for the best 2024 model, 93 percent for the latest. ENGAGE: what does this do to the threat model? (Expected: the sandbox must hold against a capable exploit author, not just a buggy script.) The attacker here is the model itself when it is steered by injected text, in exactly the environment a sandbox provides. WARN: open points are self-reported; the trend, not any single value, is the point.}
+\end{frame}
+
+\begin{frame}{A schema-valid command runs with the whole process's authority}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=5.4cm,keepaspectratio]{boundaries_step}{3}
+  \mlsyscredit{Agent Sandboxes, \S8.2.2, figure 2. The README steers the injected \texttt{run\_shell} and a permitted \texttt{submit\_report}.}
+  \note{[3 min] [CORE] The README steers two requests through the same boundaries. Step 1: the injected \texttt{run\_shell} to read \texttt{\textasciitilde/.aws/credentials} is well typed, so tool admission passes it. Step 2: the filesystem policy stops it at the read. The egress policy would also refuse the upload, but the two checks guard different things: the read check protects the file, the egress check protects the route out. Neither duplicates the other. Step 3: the second request uses a channel the task legitimately holds. The README also asks the agent to attach source files to the diagnostic report it may send through \texttt{submit\_report}. Every step is allowed, so it passes every gate, and private source reaches the approved service without any boundary being escaped. LINK: complete mediation from Lecture 7, now below the process. WARN: layering boundaries narrows what an attack can do; it does not bound what a permitted channel can carry. That gap is Lecture 9.}
+\end{frame}
+
+\begin{frame}{Blast radius widens with the task's authority level}
+  \small
+  \renewcommand{\arraystretch}{1.35}
+  \begin{tabular}{@{}>{\raggedright\arraybackslash}m{0.22\textwidth}>{\raggedright\arraybackslash}m{0.36\textwidth}>{\raggedright\arraybackslash}m{0.36\textwidth}@{}}
+    \toprule
+    \textbf{Authority} & \textbf{Exposure in scope} & \textbf{Containment obligation} \\
+    \midrule
+    $A_0$ read & data leaves through a return or an open socket & restrict readable resources; govern the return path \\
+    $A_1$ sandboxed write & task files damaged; compute consumed & confine to the workspace; cap resources; no leak to the next tenant \\
+    $A_2$ retry-safe effect & reaches a system outside the workspace & scope the operation; a reset does not undo it \\
+    $A_3$ irreversible effect & external consequence has no reversal & enforce approval at the effect boundary \\
+    \bottomrule
+  \end{tabular}
+  \mlsyscredit{Agent Sandboxes, \S8.2.2, table 1. Authority levels $A_0$ to $A_3$: Introduction, the H$\cdot$S$\cdot$A exposure space.}
+  \note{[2.5 min] [CORE] Blast radius is the set of resources and effects faulty or adversarial code can reach under the threat model: what it can read, change, disclose, or consume. How wide it must be bounded depends on the task's authority. At $A_0$, read-only, write protection buys nothing; only read isolation and egress stop disclosure. At $A_1$, mutation confined to a discardable sandbox, the obligation is the workspace boundary and resource limits. At $A_2$ and $A_3$, the action reaches outside the workspace: confining the local process does nothing to reverse a payment already sent, so these need mediation proxies and approval at the effect boundary. LINK: the side-effect classes from Lecture 1; the sandbox owns the containment obligation per class. ENGAGE: which row does the credential read sit in? (Expected: $A_0$; the damage is disclosure, so read and egress policy decide.)}
+\end{frame}
+
+\begin{frame}{Predict: what can a pruned sandbox still reach?}
+  \mlsysactivity{Predict}{2 min}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=5.4cm,keepaspectratio]{reach_step}{2}
+  \mlsyscredit{Agent Sandboxes, \S8.3.1, listing 1. Reachability is a property of the shared interpreter, not of undecidability.}
+  \note{[2.5 min] [CORE] The temptation: run a model-written analysis script in the supervisor's own interpreter, passing an empty \texttt{\_\_builtins\_\_} and one helper, \texttt{total}, to \texttt{eval}. ENGAGE: the script may call only \texttt{total}. Ask the class: can it reach anything else? Vote, then reveal. Step 1: the intended interface lets the script sum numbers and nothing else. Step 2: in ordinary Python a function keeps a live reference to the module it was defined in, \texttt{func.\_\_globals\_\_}. From the permitted \texttt{total}, generated code reads \texttt{total.\_\_globals\_\_} and recovers the supervisor's module scope: imported packages, configuration, API keys, network clients. From any literal it can walk \texttt{().\_\_class\_\_.\_\_base\_\_.\_\_subclasses\_\_()} to every loaded class, including ones that open files and spawn processes, using no import and no builtin name. WARN: this is not Rice's theorem; the escape follows from a reachable reference inside one address space, not from undecidability. A denylist of attribute names loses, because names can be assembled at run time. The fix is a boundary below the interpreter.}
+\end{frame}
+
+\begin{frame}{We ran it: an empty-builtins sandbox reaches the whole module}
+  \centering
+  \codeblock{%
+  \$ python3 supervisor.py\\
+  6\\
+  dict with 12 names; API\_KEY = sk-demo-not-a-real-key\\
+  251 classes reachable from an empty tuple}
+  \vspace{0.15cm}
+  {\footnotesize The helper \texttt{total} summed \texttt{[1,2,3]} as intended; then \texttt{total.\_\_globals\_\_} returned the supervisor's module and its \texttt{API\_KEY}.}
+  \mlsyscredit{Our run, CPython 3.14, Apple M5 Max (images/measure.py, \texttt{data/escape.txt}). Agent Sandboxes, \S8.3.1.}
+  \note{[1.5 min] [CORE] This is the escape of the previous slide, actually run, not mocked. The script defines \texttt{total}, hands \texttt{eval} an empty \texttt{\_\_builtins\_\_} and \texttt{total}, and then two expressions escape: \texttt{total.\_\_globals\_\_} returns the module namespace, including a planted \texttt{API\_KEY}, and the subclass walk reaches 251 classes from an empty tuple. The transcript is the exact output in \texttt{data/escape.txt}. The lesson: this is a language-runtime property; stripping \texttt{open} and \texttt{\_\_import\_\_} changes nothing. ENGAGE: how would a native extension (a C parser) make it worse? (Expected: it runs in the same address space, so a memory bug there corrupts the supervisor directly.) FLEX: [OPTIONAL] the native-code failure domain is \S8.3.2; mention it or skip.}
+\end{frame}
+
+\begin{frame}{The limit holds when the kernel enforces it, not the interpreter}
+  \centering
+  \codeblock{%
+  [unconfined]\ \$ cat \textasciitilde/.aws/credentials\\
+  \phantom{xx}[default]\\
+  \phantom{xx}aws\_secret\_access\_key = DUMMY-NOT-A-SECRET\ \ (exit 0)\\[0.15cm]
+  [sandboxed]\ \$ cat \textasciitilde/.aws/credentials\\
+  \phantom{xx}cat: \textasciitilde/.aws/credentials: Operation not permitted\ \ (exit 1)}
+  \vspace{0.1cm}
+  {\footnotesize Same command. Profile: \texttt{(allow default)(deny file-read* (subpath "\textasciitilde/.aws"))(deny network-outbound (remote ip))}.}
+  \mlsyscredit{Our run, macOS \texttt{sandbox-exec}, Apple M5 Max (images/measure.py, \texttt{data/seatbelt.txt}). Agent Sandboxes, \S8.2.2 (containment beneath the model).}
+  \note{[2 min] [CORE] The same README command, run twice against a dummy credentials file in a temporary directory. Unconfined, \texttt{cat} reads the file and exits 0. Under a kernel-enforced profile that denies reads under \texttt{\textasciitilde/.aws} and denies outbound connections to any IP, the identical command fails with ``Operation not permitted,'' exit 1, and in the full transcript the outbound \texttt{curl} also fails to connect. This is containment beneath the model, principle 9: the boundary is enforced by a layer the code cannot modify, so it holds whatever the model proposed. LINK: invariant closure from Lecture 1, now at the execution boundary. This is macOS Seatbelt; on Linux the same job is done by Landlock plus a seccomp filter, installed by the supervisor before \texttt{execve}. LAND the segment: a schema-valid call runs with the whole process's authority, and only a boundary below the process bounds it.}
+\end{frame}
+
+% =============================================================================
+% SECTION: CAPABILITIES
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] A boundary below the process is necessary but blunt. Capabilities say exactly what crosses it.}
+\mlsysdivider{How does the runtime hand code only what the task needs?}{Agent Sandboxes, \S8.4}
+\section{Capabilities}
+
+\begin{frame}{Ambient authority gives a process everything its identity can touch}
+  \begin{columns}[c]
+    \begin{column}{0.30\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.1cm,keepaspectratio]{ibm360_67.jpg}\\[0.03cm]
+      {\scriptsize IBM 360/67: one shared machine.}\\[0.08cm]
+      \safeimg[width=0.62\textwidth,height=1.8cm,keepaspectratio]{lampson.jpg}\\[0.03cm]
+      {\scriptsize Lampson: access matrix, 1974.}
+    \end{column}
+    \begin{column}{0.68\textwidth}
+      \small
+      \renewcommand{\arraystretch}{1.3}
+      \begin{tabular}{@{}>{\raggedright\arraybackslash}m{0.26\textwidth}>{\raggedright\arraybackslash}m{0.33\textwidth}>{\raggedright\arraybackslash}m{0.33\textwidth}@{}}
+        \toprule
+        & \textbf{Ambient authority} & \textbf{Capability} \\
+        \midrule
+        Authority from & the identity it runs as & holding a reference \\
+        Default reach & everything the identity may touch & nothing without a reference \\
+        Confused deputy & common & excluded \\
+        \bottomrule
+      \end{tabular}\\[0.2cm]
+      {\footnotesize For the README attack, the decisive row is default reach: ambient starts with \texttt{\textasciitilde/.aws/credentials} in reach; a capability starts empty.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photos: Dave Mills (public domain); Duncan.Hull (CC BY-SA 4.0), Wikimedia Commons. Agent Sandboxes, \S8.4, table 2; Lampson, ``Protection,'' 1974.}
+  \note{[2.5 min] [CORE] A process under an ordinary OS user holds whatever that identity can reach: the home directory, SSH keys, environment tokens, inherited file handles. That is ambient authority, the reach a process has by virtue of who it runs as rather than what the task handed it. A \texttt{run\_shell} worker launched as the developer is the confused deputy from Lecture 7 moved one layer down: it spends the developer's file and network authority on behalf of README text. Capabilities invert the default: authority comes from holding an unforgeable reference, default reach is empty, and the confused deputy is excluded because every access names a reference the holder was given. LINK: zero ambient authority from Lecture 1 must also hold for the processes a tool call starts. ENGAGE: why does a child process with its own address space but the developer's identity still fail this? (Expected: isolating memory does not remove ambient authority; it still inherits the identity's reach.)}
+\end{frame}
+
+\begin{frame}{A grant admits an access only if every clause holds}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=5.5cm,keepaspectratio]{admit_step}{6}
+  \mlsyscredit{Agent Sandboxes, \S8.4.1, equation 1. A capability: an unforgeable reference that designates a resource and authorizes operations on it.}
+  \note{[3 min] [CORE] A capability grant is a tuple: rights, objects, a condition, and an expiry. A proposed access names an operation, a target, and arguments; the enforcement point admits it only if every clause holds. Step by step: the reference is authentic, meaning protected and bound to this holder, by a kernel handle table or a message-authentication code; the operation is among the granted rights; the resolved target lies within the designated objects; the condition predicate holds; and the current time is before expiry. Steps build to the landing: the default reach is empty, so the task holds only what it was handed. The check is cheap, a local handle or MAC verification, orders of magnitude shorter than the model call that produced the proposal. WARN: the hard part is not the check; it is making sure no path bypasses it, which is why path resolution happens inside the kernel, closing the check-then-use race.}
+\end{frame}
+
+\begin{frame}{Predict: which derived grant may be issued?}
+  \mlsysactivity{Predict}{2 min}
+  \centering
+  \mlsyssteps[width=0.92\textwidth,height=5.0cm,keepaspectratio]{attenuate_step}{3}\\[0.05cm]
+  {\footnotesize Attenuation narrows a grant; revocation withdraws it. $G_{\text{child}} \sqsubseteq G_{\text{parent}}$ on rights, objects, conditions, expiry.}
+  \mlsyscredit{Agent Sandboxes, \S8.4.2 and \S8.4.3.}
+  \note{[2 min] [CORE] ENGAGE: show the parent edit grant, then the two proposed children, and ask which may be issued before revealing. When the repair moves from editing to testing, or delegates to a helper, handing over the full parent grant lets the helper do too much, and minting a fresh child risks adding rights the parent never held. Attenuation fixes the rule: a child may permit no more than its parent. Step 2: a proposed test grant asks for \texttt{execute}, which the edit grant never held, so it is rejected even though its expiry is shorter. Step 3: a scan grant that only reads one file, within the parent's objects and rights, with an earlier expiry, is valid. The parent stays usable after deriving a child; to actually remove write authority the runtime must withdraw or disable the parent. FLEX: [OPTIONAL] chained-caveat tokens (macaroons) let any holder append a restriction offline and pass on the narrower token, but cannot widen it, because removing a caveat needs a code the chain never reveals. Mention or skip.}
+\end{frame}
+
+\begin{frame}{A broker uses the credential without putting it in the guest}
+  \begin{columns}[T]
+    \begin{column}{0.52\textwidth}
+      \small
+      Put the repository token in the guest's environment, and any injected command can dump it.\\[0.25cm]
+      Instead, a host-side broker holds the secret and performs the authorized operation:\\[0.15cm]
+      \codeblock{%
+      guest: fetch repo/pool\\
+      \phantom{xx}$\rightarrow$ broker checks task, repo, op\\
+      \phantom{xx}$\rightarrow$ git fetch (token on host)\\
+      \phantom{xx}$\rightarrow$ objects returned, no token}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \textbf{The broker grants one operation, not the key:}\\[0.15cm]
+      \begin{tabular}{@{}>{\raggedright\arraybackslash}m{0.42\textwidth}>{\raggedright\arraybackslash}m{0.5\textwidth}@{}}
+        \toprule
+        \textbf{Permitted} & \textbf{Refused} \\
+        \midrule
+        read-only fetch of the task repository & push, or another repository \\
+        through the host adapter & obtaining the raw token \\
+        \bottomrule
+      \end{tabular}\\[0.3cm]
+      {\footnotesize Removes the most valuable target from the README attack and the Gemini CLI env dump.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Agent Sandboxes, \S8.4.4. Credential brokering keeps the secret outside the guest.}
+  \note{[2.5 min] [CORE] Scoped file and process grants still leave the external-service secret. Placing a repository token in the guest's environment or \texttt{.netrc} exposes it to any injected command that dumps the environment, exactly the Gemini CLI failure. A credential broker holds the secret on the host and uses it on behalf of an authorized request: when the worker asks to fetch its approved repository, the broker checks the bound task, repository, and operation, then performs the credentialed fetch without returning the token. Permission to fetch is not permission to push or to read another repository. LINK: the confused deputy again, denied because authority follows the request, not the identity. LAND the segment: a capability binds authority to an unforgeable reference with a lifetime; attenuation narrows but never widens; a broker keeps the secret out of the guest. WARN: brokering settles where the secret lives and what is permitted, not whether the data in a permitted request may flow out. That last question is Lecture 9.}
+\end{frame}
+
+% =============================================================================
+% SECTION: ENVELOPES
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Capabilities say what crosses the boundary. The envelope is the boundary, and the choice is an engineering trade-off.}
+\mlsysdivider{Which boundary fits the code, the authority, and the horizon?}{Agent Sandboxes, \S8.5}
+\section{Envelopes}
+
+\begin{frame}{Four envelopes differ in where a system call lands}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=5.4cm,keepaspectratio]{envelopes_step}{4}
+  \mlsyscredit{Agent Sandboxes, \S8.5, figure 4. The landing point sets the trusted base and the per-call cost.}
+  \note{[3 min] [CORE] The four envelopes differ first in where a system call lands. Step 1: a shared-kernel container runs the call in the host kernel after an in-kernel filter; one kernel bug compromises the host, so the host kernel is in the trusted base. Step 2: a user-space kernel, such as gVisor's Sentry, reimplements the Linux API in a memory-safe user-space process and services calls there, asking the host for only a narrow set. Step 3: a microVM, such as Firecracker, runs a real guest kernel behind a hardware-virtualization boundary; ordinary calls run natively in the guest, and only device I/O exits to the monitor, so a guest-kernel compromise does not hand over the host. Step 4: restricted bytecode, such as WebAssembly, has no system-call instruction at all; the guest reaches out only through host functions imported at startup. WARN: the label is not the boundary; a microVM with a writable host mount leaks exactly what its name suggests it hides.}
+\end{frame}
+
+\begin{frame}{The system-call tax splits the envelopes}
+  \begin{columns}[c]
+    \begin{column}{0.5\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{tax.pdf}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{gvisor.pdf}
+    \end{column}
+  \end{columns}
+  \vspace{0.1cm}
+  {\footnotesize\centering A build issues millions of calls. Left: illustrative tax per 1,000,000 calls (\S8.5.4). Right: gVisor measured, a call through the gofer is 45.5 $\mu$s against 0.22 $\mu$s native.}
+  \mlsyscredit{Left: Agent Sandboxes, \S8.5.4, equation 3 (illustrative). Right: Young et al., ``The True Cost of Containing,'' HotCloud 2019, figure 3.}
+  \note{[3 min] [CORE] A dependency install or test run issues tens of thousands to millions of system calls, so a few microseconds of mediation each adds up. Left: the chapter's illustrative tax per million ordinary calls. A container pays a trap and filter on each, about 0.15 s; a microVM pays a native trap, about 0.10 s, with device exits counted separately; a user-space kernel pays trap, emulation, and a context switch on every call, about 3.6 s, 36 times the microVM. Right: measured, not illustrative. Young and colleagues timed \texttt{gettimeofday} across gVisor's paths: 0.22 $\mu$s native, 0.29 in runc, 0.63 inside the Sentry on KVM, but 45.5 $\mu$s when the call must reach the gofer file proxy, over 200 times native. ENGAGE: which envelope for a call-heavy native build? (Expected: a microVM or a container, not an emulating user-space kernel.) The two panels agree: the cost is on the calls that leave the fast path.}
+\end{frame}
+
+\begin{frame}{Setup is cheap only when the work per call is large}
+  \begin{columns}[c]
+    \begin{column}{0.52\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.0cm,keepaspectratio]{setup_share.pdf}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \small
+      \textbf{Napkin Math 8.1} (illustrative)\\[0.1cm]
+      15 ms setup, 3 ms work, 100 calls.\\[0.15cm]
+      Fresh per call: $100(15{+}3) = $ \textbf{1{,}800 ms}\\
+      Reuse once: $15 + 100(3) = $ \textbf{315 ms}\\[0.1cm]
+      \textbf{\textcolor{mlsysaccent}{5.7$\times$}}, and setup is \textbf{83\%} of each fresh call.\\[0.15cm]
+      Hold setup to 10\%: need \textbf{135 ms} of work per call.
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Agent Sandboxes, \S8.5.5, Napkin Math 8.1 (illustrative profile). Values computed in images/calcs.py.}
+  \note{[3 min] [CORE] The third selection axis is the execution horizon: how long the envelope is held decides how its setup is amortized. Work the napkin math. A hypothetical trajectory makes 100 parser calls of 3 ms each, and preparing the envelope costs 15 ms. Fresh per call is 100 times 18 ms, 1,800 ms; one envelope reused for the trajectory is 15 plus 300, 315 ms, a 5.7 times difference, and setup is 83 percent of every fresh call. The curve shows setup share falling as useful work per call grows; holding it under 10 percent needs 135 ms of work per call. ENGAGE: so where does per-call setup pay? (Expected: when a call does a lot of work, or when a fresh-state policy requires it.) The log parser gets a fresh bytecode sandbox per call; the multi-turn repair holds one microVM for minutes, where 15 ms is nothing. WARN: reuse within a task is fine; reuse across tenants is never, which is the pool's job later.}
+\end{frame}
+
+\begin{frame}{Diagnose: which envelope for each workload?}
+  \mlsysactivity{Diagnose}{3 min}
+  \small
+  \renewcommand{\arraystretch}{1.4}
+  \begin{tabular}{@{}>{\raggedright\arraybackslash}m{0.42\textwidth}>{\raggedright\arraybackslash}m{0.52\textwidth}@{}}
+    \toprule
+    \textbf{Workload} & \uncover<2->{\textbf{Envelope, and why}} \\
+    \midrule
+    A 3 ms structured log parser, called hundreds of times & \uncover<2->{\textbf{\textcolor{GreenLine}{Bytecode, fresh per call.}} Pure computation; 15 ms setup is prohibitive, so no guest kernel.} \\
+    The multi-turn repair: compile, run tests, native code & \uncover<2->{\textbf{\textcolor{BlueLine}{MicroVM, held for the trajectory.}} Assume a compromised guest kernel; setup amortizes over minutes.} \\
+    An unreviewed customer-uploaded binary & \uncover<2->{\textbf{\textcolor{RedLine}{Ephemeral microVM,}} no credentials, egress denied. Refuse if it needs more.} \\
+    \bottomrule
+  \end{tabular}
+  \mlsyscredit{Agent Sandboxes, \S8.5.5. Code, authority, and horizon choose the envelope.}
+  \note{[3 min] [CORE] ENGAGE: give pairs two minutes to pick an envelope for each and name the deciding axis, then reveal. The three criteria are the workload's code, its authority, and its horizon. Row 1: pure computation over supplied inputs maps to restricted bytecode, created per call, because the work is short and needs no POSIX. Row 2: the repair runs arbitrary native code and compiles, so it needs a real kernel; the threat model assumes even a compromised guest kernel must not reach the host, which is a microVM, held for the whole trajectory so setup amortizes. Row 3: an unreviewed binary gets an ephemeral microVM stripped of credentials with egress denied, and a binary that needs more is refused rather than granted more. WARN: the security guarantee is the concrete mounts, devices, filters, and ceilings, not the envelope's name. LAND the segment: the envelope is chosen from code, authority, and horizon, and its tax is paid on different calls.}
+\end{frame}
+
+% =============================================================================
+% SECTION: WORKSPACE AND EGRESS
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] The envelope bounds reach for one run. A multi-turn task also needs state that persists across turns without leaking, and a route out that is governed.}
+\mlsysdivider{How does state persist across turns without leaking out?}{Agent Sandboxes, \S8.6 and \S8.7}
+\section{Workspace}
+
+\begin{frame}{Predict: bytes to provision 32 workspaces?}
+  \mlsysactivity{Predict}{2 min}
+  \centering
+  {\normalsize 32 workspaces on a 2.4 GB base; each task writes 40 MB. Full copy vs copy-on-write?}\\[0.2cm]
+  \begin{columns}[c]
+    \begin{column}{0.5\textwidth}
+      \centering\uncover<2->{\safeimg[width=\textwidth,height=3.4cm,keepaspectratio]{provision.pdf}\\[0.05cm]
+      {\footnotesize Illustrative, Napkin Math 8.2.}}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \centering\uncover<2->{\safeimg[width=\textwidth,height=3.4cm,keepaspectratio]{clone.pdf}\\[0.05cm]
+      {\footnotesize Our run: a 2.4 GB base, copied vs cloned on APFS.}}
+    \end{column}
+  \end{columns}
+  \vspace{0.05cm}
+  {\footnotesize\centering\uncover<2->{Copy-on-write moves \textbf{60$\times$} fewer bytes; our clone took \textbf{90 ms} against \textbf{938 ms}.}}
+  \mlsyscredit{Left: Agent Sandboxes, \S8.6.2, Napkin Math 8.2 (illustrative). Right: our run, APFS clonefile, Apple M5 Max (images/measure.py).}
+  \note{[2.5 min] [CORE] ENGAGE: ask the class to estimate the bytes each approach moves before revealing. A multi-turn task needs its edits and build artifacts to survive from one tool call to the next, but a full private copy of a large base is wasteful. Copy-on-write pins a read-only base and gives each task a writable view; reads hit the shared base, and only writes allocate private storage. Left, illustrative: 32 workspaces on a 2.4 GB base where each task writes 40 MB. A full copy moves 32 times 2.4, 76.8 GB, before any work; the copy-on-write view moves only what is written, 1.28 GB, 60 times fewer, and the ratio is just the base size over the bytes each task writes. Right, measured: we cloned a real 2.4 GB file on APFS. The full copy took 938 ms, the clone 90 ms, and a one-byte change to the clone under 1 ms. WARN: copy-on-write is a storage optimization, not an isolation boundary; keeping tasks from reading each other's layers is still the envelope's job, and the exported artifact is a clean diff, never the raw overlay upper layer.}
+\end{frame}
+
+\begin{frame}{Egress control is enforced outside the guest, in two layers}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=5.4cm,keepaspectratio]{egress_step}{3}
+  \mlsyscredit{Agent Sandboxes, \S8.7.1 and \S8.7.3, figure 5. Egress control on the host path; HTTP\_PROXY in the guest stops nothing.}
+  \note{[2.5 min] [CORE] An injected script with read access to the source can still open a socket and send it out, without ever breaking the envelope. Setting \texttt{HTTP\_PROXY} in the guest does nothing to a raw socket. Egress is enforced on the host data path, in two layers that cover each other. Step 1: a packet filter admits traffic only toward the mediator and drops a raw socket to an IP; it cannot tell a fetch from a push to the same address. Step 2: the application mediator inspects the operation and payload, but never sees a raw socket the filter already dropped. Step 3: name resolution is itself a channel. A guest can encode a secret into subdomain labels and leak it through a recursive resolver even with all direct connections blocked, so the runtime resolves against an exact-hostname allowlist, binds approval to the connected IP to stop DNS rebinding, and blocks link-local addresses like the cloud metadata endpoint. ENGAGE: what does blocking all TCP still leave open? (Expected: DNS, and any permitted channel.) LAND the segment: copy-on-write makes storage track writes; egress is enforced outside the guest, and a permitted channel can still carry data out.}
+\end{frame}
+
+% =============================================================================
+% SECTION: POOLS AND RESET
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] One task's sandbox is bounded. A platform serves many, and the cost and the leakage risk live in the pool.}
+\mlsysdivider{How does a platform serve the next tenant without delay or leakage?}{Agent Sandboxes, \S8.8}
+\section{Pools}
+
+\begin{frame}{The reset contract: four domains cleared, then verified}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=5.4cm,keepaspectratio]{reset_step}{5}
+  \mlsyscredit{Agent Sandboxes, \S8.8.1, table 7. The reset contract: fence, quiesce, export, then clear four domains.}
+  \note{[3 min] [CORE] Wiping the workspace directory does not make a used sandbox safe: a command can double-fork a daemon out of the process group, bind an abstract socket with no path, plant a key in the kernel keyring, or schedule a cron job. A reset contract names every state domain teardown must clear. First the supervisor fences the expiring lease, halting new calls and revoking its channels and credentials, then quiesces and terminates owned work. The four domains, step by step: guest execution and memory; workspace and storage, saving only permitted outputs; network and broker authority; and host services and attached devices, including accelerator memory. The landing asymmetry: finding one leftover proves reset failed, but a clean scan never proves success, so readiness checks verify that the restoration mechanism ran to completion, not that a post-hoc scan found nothing. LINK: settlement before retry from Lecture 7, an external effect emitted before the reset stays unsettled after it. An instance whose teardown cannot be confirmed is destroyed, not returned.}
+\end{frame}
+
+\begin{frame}{Snapshot restore keeps the pool warm: 110 ms, not seconds}
+  \begin{columns}[c]
+    \begin{column}{0.56\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.0cm,keepaspectratio]{firecracker.pdf}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \small
+      Cold boot pays monitor start, kernel boot, and runtime setup in sequence: seconds.\\[0.25cm]
+      A snapshot restores memory, registers, and device state in its place.\\[0.2cm]
+      Firecracker, pre-configured: \textbf{p99 153 ms} even for 100 booting at once.
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Agache et al., ``Firecracker,'' NSDI 2020, released boot data (\texttt{data/boot-*-fc-api-cdf.dat}, m5d.metal). Agent Sandboxes, \S8.8.2.}
+  \note{[2.5 min] [CORE] Cold-booting a fresh sandbox on every arrival makes the task wait while the monitor starts, the guest kernel boots, and heavy libraries load, which is seconds. Snapshotting removes that from the admission path: build a golden environment once, capture its memory, registers, and device state, and restore clean instances from it. This plot is Firecracker's own released boot data, pre-configured microVMs on a bare-metal host: the serial curve sits near 110 ms median, and even 100 booting in parallel reach a 99th percentile of 153 ms. That is the chapter's illustrative 15 ms restore target's real-world cousin: restore is milliseconds, cold boot is seconds. WARN: the golden baseline must never carry a prior tenant's files or credentials, must reseed entropy so two guests do not generate the same keys, and must be rebuilt as patches age. FLEX: [OPTIONAL] lazy restore can make the admission log look instant while pushing a page-fault storm into the first tool call.}
+\end{frame}
+
+\begin{frame}{Pool cost is memory over the horizon, not boot time}
+  \begin{columns}[c]
+    \begin{column}{0.5\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.8cm,keepaspectratio]{pool_miss.pdf}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.4cm,keepaspectratio]{pool_mem.pdf}\\[0.1cm]
+      {\footnotesize $N_{\text{active}} = \lambda\,T_{\text{hold}} = 2 \times 300 = $ \textbf{600 leases}.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Agent Sandboxes, \S8.8.3, Napkin Math 8.3 (illustrative). Little's law: Lecture 5. Values in images/calcs.py.}
+  \note{[3 min] [CORE] Two timescales size a pool. The long run is Little's law from Lecture 5: mean active leases are arrival rate times holding time. At 2 trajectories per second holding 300-second leases, that is 600 active leases, set by the trajectory horizon, not by how fast a tool call runs. The short run is the standby reserve, governed by arrivals during one restore. Left: with two standby instances the request miss probability meets the 0.1 percent target only while restore stays under about 23 ms; a ten-times-slower cold boot needs a reserve of four. Right: at 600 leases, private guest images would need about 322 GB, while copy-on-write sharing needs about 39 GB, 8.3 times less. ENGAGE: double the trajectory length; which term moves? (Expected: the active-lease memory doubles; the reserve, set by restore time, does not.) LAND the segment: cost is memory-seconds over the horizon, and a reset must clear every domain before reuse.}
+\end{frame}
+
+% =============================================================================
+% SECTION: WRAP-UP (within Pools)
+% =============================================================================
+\begin{frame}{Vote: true or false?}
+  \mlsysactivity{Vote}{2.5 min}
+  \footnotesize
+  \renewcommand{\arraystretch}{1.25}
+  \begin{tabular}{@{}>{\raggedright\arraybackslash}m{0.52\textwidth}>{\raggedright\arraybackslash}m{0.44\textwidth}@{}}
+    \toprule
+    \textbf{Claim} & \uncover<2->{\textbf{Verdict}} \\
+    \midrule
+    Removing dangerous names removes the code's authority. & \uncover<2->{\textbf{\textcolor{RedLine}{False.}} Reachable references remain; see our escape.} \\
+    A ``microVM'' label guarantees a strong boundary. & \uncover<2->{\textbf{\textcolor{RedLine}{False.}} A writable host mount leaks what the label hides.} \\
+    The cost of strong isolation is its startup latency. & \uncover<2->{\textbf{\textcolor{RedLine}{False.}} The cost is memory over the lease horizon.} \\
+    An allowed destination approves everything sent there. & \uncover<2->{\textbf{\textcolor{RedLine}{False.}} The payload is an information-flow question.} \\
+    An empty workspace proves the sandbox is ready to reuse. & \uncover<2->{\textbf{\textcolor{RedLine}{False.}} Files are one of four state domains.} \\
+    \bottomrule
+  \end{tabular}
+  \mlsyscredit{Agent Sandboxes, \S8.9 (fallacies and pitfalls).}
+  \note{[2.5 min] [CORE] ENGAGE: students write T or F for each, then compare with a neighbor. Step 2: all five are false, each a fallacy from \S8.9. One: pruning names leaves the reachable object graph; our escape slide is the proof. Two: a label names a mechanism, not a configuration; a microVM with a writable host mount or an open route exposes exactly what it seems to hide. Three: snapshot restore makes boot milliseconds, so the dominant cost is memory residency across the lease, about 39 GB for 600 leases. Four: a destination allowlist cannot read the request body; whether private data may flow is information flow. Five: files are one of four reset domains; a daemon or a keyring entry survives a file wipe. If many mark the third true, return to the pool-cost slide.}
+\end{frame}
+
+\begin{frame}{Diagnose: may this instance rejoin the pool?}
+  \mlsysactivity{Diagnose}{2 min}
+  \centering
+  \begin{mlsyscard}{errorstroke}
+  \normalsize A reclaimed instance passed a scan for leftover files. But a daemon from the previous lease, double-forked out of the process group, still holds an open socket.
+  \end{mlsyscard}
+  \vspace{0.3cm}
+  {\large Which state domain failed? May it rejoin the pool?}\\[0.3cm]
+  \uncover<2->{\textbf{\textcolor{RedLine}{Network and broker authority failed.}} A leftover proves reset failed. Destroy it and rebuild from the baseline; do not return it.}
+  \mlsyscredit{Agent Sandboxes, \S8.8.1, Checkpoint 8.2 (reset coverage).}
+  \note{[2 min] [CORE] ENGAGE: 60 seconds, name the failed domain and the disposition. The file scan is the wrong test: it covers one of four domains. The surviving daemon holds a socket, so the network-and-broker domain was not cleared, and the next tenant could inherit the connection. The asymmetry decides it: one leftover proves reset failed, so the instance is destroyed and rebuilt from the trusted baseline, never returned to standby. WARN: students may say ``kill the daemon and reuse''; the contract is destroy-and-rebuild, because a denylist of what to kill can never be complete.}
+\end{frame}
+
+\begin{frame}{Back to the README: contained, yet a permitted channel still leaks}
+  \centering
+  \safeimg[width=0.95\textwidth,height=4.8cm,keepaspectratio]{boundaries_step3.pdf}\\[0.1cm]
+  {\small \texttt{run\_shell} stops at the file policy; \texttt{submit\_report} passes every gate.}
+  \mlsyscredit{Agent Sandboxes, \S8.10. Containment holds; the permitted channel is Lecture 9's problem.}
+  \note{[2 min] [CORE] Return to the hook. The Gemini CLI command and the README's \texttt{run\_shell} both run below the model, so a sandbox blocks the credential read and the outbound socket regardless of what the model was told. That is the win: containment by architecture, not by prompt adherence. But the same README asked the agent to attach source to the report it may legitimately send, and \texttt{submit\_report} passes every boundary because each of its steps is allowed. Containment narrows what an attack can do; it does not bound what a permitted channel can carry. ENGAGE: name the one thing the sandbox cannot decide here. (Expected: whether the data in a permitted request may leave.) That is exactly where Lecture 9 begins.}
+\end{frame}
+
+\begin{frame}{Takeaways}
+  \normalsize
+  \begin{itemize}\setlength{\itemsep}{0.22cm}
+    \item A schema-valid command runs with its whole process's authority; the limit must be enforced beneath the process, not in the model or the interpreter.
+    \item A capability binds authority to an unforgeable reference with a lifetime; attenuation narrows but never widens, and a broker keeps the secret out of the guest.
+    \item Containers, user-space kernels, microVMs, and bytecode place the boundary at different layers and pay the system-call tax on different calls.
+    \item Copy-on-write makes storage track writes; egress is enforced on the host path; pool cost is memory over the horizon, and reuse needs a verified reset.
+  \end{itemize}
+  \note{[1 min] [CORE] One line per segment. Ask students to star the one they would have gotten wrong before today. The through-line: every limit is enforced below the model, which is invariant closure at the execution boundary, and every limit has a price the engineer must name.}
+\end{frame}
+
+\begin{frame}{Open questions}
+  \normalsize
+  \begin{itemize}\setlength{\itemsep}{0.32cm}
+    \item A passed-through accelerator shares an IOMMU group and leaves activations in device memory. How should a pool price and scrub a shared GPU between tenants?
+    \item The \texttt{submit\_report} leak passes every sandbox boundary. Is that a sandbox failure at all, or does it belong to information flow?
+    \item A rate-limited DNS resolver narrows a covert channel without closing it. When is narrowing enough?
+  \end{itemize}
+  \note{[1 min] [OPTIONAL] No single answer. FLEX: use one as a two-minute discussion or a written prompt. The first is the accelerator obligation of \S8.5.7 and \S8.8.1; the second is the boundary between this chapter and Lecture 9; the third is Lampson's confinement problem, where a rate limit narrows a channel's bandwidth without closing it.}
+\end{frame}
+
+\begin{frame}{Read and explore}
+  \small
+  \begin{itemize}\setlength{\itemsep}{0.04cm}
+    \item \textbf{Read:} Agent Sandboxes, \S8.2 to \S8.8; Checkpoints 8.1 and 8.2; Napkin Math 8.1 to 8.4 by hand; Exercises 1, 3, and 6.
+    \item Saltzer and Schroeder, ``The Protection of Information in Computer Systems,'' 1975.
+    \item Lampson, ``A Note on the Confinement Problem,'' 1973: three pages.
+    \item Agache et al., ``Firecracker: Lightweight Virtualization for Serverless Applications,'' NSDI 2020.
+    \item Young et al., ``The True Cost of Containing: a gVisor Case Study,'' HotCloud 2019.
+    \item Dennis and Van Horn, ``Programming Semantics for Multiprogrammed Computations,'' 1966.
+  \end{itemize}
+  \mlsyscredit{The scripts in this deck's images/ folder (measure.py) rerun every measurement shown today.}
+  \note{[0.5 min] [CORE] The chapter first, with its checkpoints. Saltzer and Schroeder name least privilege and complete mediation; Lampson defines confinement and covert channels, the DNS channel today; Agache and colleagues give a production microVM's boot and memory numbers, the Firecracker plot; Young and colleagues measure the system-call tax, the gVisor plot; Dennis and Van Horn introduce capabilities. images/measure.py reproduces the escape, the Seatbelt denial, the startup times, and the clone.}
+\end{frame}
+
+\begin{frame}[c]
+  \begin{columns}[c]
+    \begin{column}{0.34\textwidth}
+      \centering\mlsyskitfig[width=\textwidth,height=4.2cm,keepaspectratio]{stack_tools}
+    \end{column}
+    \begin{column}{0.62\textwidth}
+      {\small\textcolor{lightgray}{NEXT LECTURE \textbar{} AGENT SECURITY}}\\[0.5cm]
+      {\LARGE\bfseries The code stayed in its sandbox and called only permitted tools. How can it still work for an attacker?}
+    \end{column}
+  \end{columns}
+  \note{[0.5 min] [CORE] Today the sandbox bounded what code can reach, read, and send. But \texttt{submit\_report} showed that a permitted channel still carries private data out, and a model cannot separate instructions from the data it reads. Lecture 9 tracks where each value came from and where it may go, so an agent that stays in its sandbox cannot be turned into an attacker's deputy.}
+\end{frame}
+
+\end{document}
