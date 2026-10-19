@@ -61,9 +61,14 @@ def test_mechanism_bundle_freshness_at_render(tmp_path):
     for filename in ('figure-explore.lua','figure-explore.js','figure-views.js','figure-views.css','mechanism-scene.js','mechanism-scene.css'):
         shutil.copy(real/filename,ext/filename)
     source=tmp_path/'books/test.qmd'
+    timing=tmp_path/'timing.yml'
+    shared_timing=ROOT/'books/config/shared/html/figure-explore.yml'
+    shutil.copy(shared_timing,timing)
     static=f'''---
 filters:
   - {ext/'figure-explore.lua'}
+metadata-files:
+  - {timing}
 ---
 
 ::: {{#fig-demo fig-cap="**Original caption**: Retained static meaning."}}
@@ -86,6 +91,25 @@ Static data and complete diagram.
     assert 'data-mlsys-lesson-sha1=' in html
     assert 'mechanism-lessons-vol1.js' in html
     assert 'Retained static meaning.' in html
+    assert 'data-mlsys-movement-ms="1800"' in html
+    assert 'data-mlsys-reading-pause-ms="5000"' in html
+    timing.write_text('figure-explore:\n  movement-ms: 2400\n  reading-pause-ms: 6000\n')
+    html,_=render()
+    assert 'data-mlsys-movement-ms="2400"' in html
+    assert 'data-mlsys-reading-pause-ms="6000"' in html
+    timing.write_text('figure-explore:\n  movement-ms: fast\n  reading-pause-ms: 6000\n')
+    invalid=subprocess.run(['quarto','render',str(source),'--to','html'],cwd=tmp_path,capture_output=True,text=True)
+    assert invalid.returncode == 0,invalid.stderr
+    assert 'data-mlsys-explore=' not in source.with_suffix('.html').read_text()
+    assert 'movement-ms must be an integer' in invalid.stderr
+    # HTML-only settings do not affect a static output format.
+    static_render=subprocess.run(['quarto','render',str(source),'--to','gfm'],cwd=tmp_path,capture_output=True,text=True)
+    assert static_render.returncode == 0,static_render.stderr
+    markdown=source.with_suffix('.md').read_text()
+    assert 'data-mlsys-explore=' not in markdown
+    assert 'mechanism-scene.js' not in markdown
+    assert 'Retained static meaning.' in markdown
+    shutil.copy(shared_timing,timing)
     bundle.write_text('window.MLSysMechanismLessons = {stale:true};\n')
     html,stderr=render()
     assert 'stale mechanism bundle' in stderr
@@ -132,3 +156,12 @@ def test_validator_help_does_not_validate_empty_input():
     result=subprocess.run([sys.executable,str(ROOT/'binder/tools/scripts/validate_mechanism_lessons.py'),'--help'],capture_output=True,text=True)
     assert result.returncode==0 and 'usage:' in result.stdout
     assert '"validated"' not in result.stdout
+
+
+def test_all_html_volumes_import_one_playback_configuration():
+    import yaml
+    shared = 'config/shared/html/figure-explore.yml'
+    for volume in range(1, 5):
+        config = yaml.safe_load((ROOT / f'books/config/_quarto-html-vol{volume}.yml').read_text())
+        assert config['metadata-files'].count(shared) == 1
+        assert 'figure-explore' not in config  # No per-volume timing copies.

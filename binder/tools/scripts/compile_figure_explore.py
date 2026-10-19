@@ -215,7 +215,14 @@ def bind_current_build(catalog_data, registry, outputs, build_root):
     for volume in range(1,5):
         require(any(j.get('volume')==f'vol{volume}' and j.get('format')=='html' and j.get('chapter') is None and j.get('ok') is True for j in summary.get('jobs',[])),f'{build}: missing successful full vol{volume} HTML job')
         output=build/f'vol{volume}-html/output'
-        for name in ('mechanism-scene.js','mechanism-scene.css',f'mechanism-lessons-vol{volume}.js'):
+        assets = {'figure-explore.js', 'figure-views.js', 'figure-views.css'}
+        for entry in registry.values():
+            if entry['volume'] != volume:
+                continue
+            assets.update(entry[field] for field in ('script', 'stylesheet', 'bundle') if entry.get(field))
+            if entry.get('shared_player'):
+                assets.update(('original-player.js', 'original-player.css'))
+        for name in sorted(assets):
             matches=list(output.rglob(name))
             require(len(matches)==1,f'{build}: expected exactly one emitted {name}')
             expected=outputs[EXT/name].encode('utf-8') if EXT/name in outputs else (EXT/name).read_bytes()
@@ -230,7 +237,9 @@ def bind_current_build(catalog_data, registry, outputs, build_root):
         entry=registry.get(row['key'])
         if entry:
             require(node is not None,f"{row['key']}: figure absent from configured build")
-            expected={'data-mlsys-explore':'mechanism-scene','data-mlsys-explore-key':row['key'],'data-mlsys-lesson-sha1':entry['lesson_sha1'],'data-mlsys-art-sha1':entry.get('art_structural_sha1',entry['art_sha1']),'data-mlsys-art-kind':entry['art_kind']}
+            expected={'data-mlsys-explore':entry['name'],'data-mlsys-explore-key':row['key'],'data-mlsys-art-sha1':entry.get('art_structural_sha1',entry['art_sha1']),'data-mlsys-art-kind':entry['art_kind']}
+            if entry.get('lesson_sha1'):
+                expected['data-mlsys-lesson-sha1']=entry['lesson_sha1']
             require(all(node.get(k)==v for k,v in expected.items()),f"{row['key']}: missing/stale built mechanism freshness marker")
             row['built_explore_present']=True
             row['runtime_verification']='Schema, declared invariants, companion calculations, clean four-volume HTML assets and freshness markers verified; actual themed chapter behavior review remains separate.'
@@ -299,6 +308,51 @@ def apply_review_record(catalog_data, registry, lessons, outputs, build_root, re
     metadata['review_limit']='Recorded implementation acceptance is limited to the declared cases, profiles, and evidence. Selected entries without acceptance remain pending; static figures retain their static treatment. Simulated reviews are not student testing and establish no learning gains.'
 
 
+def apply_implementations(registry, manifests=None):
+    """Replace selected implementations, preserving every other compiled record.
+
+    Explicit production factories retain the same source/artwork provenance as
+    their selected mechanism. Their own runtime/data hashes replace the generic
+    scene's bundle identity; an unknown or stale manifest fails the whole build.
+    """
+    path = EXT/'mechanisms/implementations.json'
+    implementations = json.loads(path.read_text()) if manifests is None and path.exists() else (manifests or {})
+    for key, implementation in implementations.items():
+        if key not in registry:
+            raise ValueError(f'{key}: implementation must replace a selected compiled mechanism')
+        if set(implementation)-{'name','script','stylesheet','bundle','scope','question','shared_player'}:
+            raise ValueError(f'{key}: unknown implementation manifest field')
+        for field in ('name','script','stylesheet'):
+            value=implementation.get(field)
+            if not isinstance(value,str) or not value or '/' in value or '\\' in value:
+                raise ValueError(f'{key}: invalid implementation {field}')
+        assets=[]
+        for field in ('script','stylesheet','bundle'):
+            value=implementation.get(field)
+            if value is None: continue
+            if not isinstance(value,str) or '/' in value or '\\' in value or not (EXT/value).is_file():
+                raise ValueError(f'{key}: missing/invalid implementation {field}')
+            assets.append((EXT/value).read_bytes())
+        if 'shared_player' in implementation and type(implementation['shared_player']) is not bool:
+            raise ValueError(f'{key}: shared_player must be boolean')
+        if implementation.get('shared_player'):
+            for filename in ('original-player.js','original-player.css'):
+                if not (EXT/filename).is_file(): raise ValueError(f'{key}: missing shared player asset {filename}')
+                assets.append((EXT/filename).read_bytes())
+        entry=dict(registry[key])
+        for field in ('bundle','bundle_sha1','lesson_sha1','runtime_sha1'): entry.pop(field,None)
+        entry.update({field:implementation[field] for field in ('name','script','stylesheet')})
+        entry['runtime_sha1']=sha1(b'\x00'.join(assets))
+        if implementation.get('shared_player'): entry['shared_player']=True
+        else: entry.pop('shared_player',None)
+        if implementation.get('bundle'):
+            entry['bundle']=implementation['bundle']
+            entry['bundle_sha1']=sha1((EXT/entry['bundle']).read_bytes())
+            entry['lesson_sha1']=entry['bundle_sha1']
+        registry[key]=entry
+    return implementations
+
+
 def compile_mechanisms(args):
     """Enroll only explicitly selected, validated authored mechanisms."""
     import sys
@@ -350,20 +404,21 @@ def compile_mechanisms(args):
         for field in ('script','stylesheet'): require((EXT/entry[field]).is_file(),f'{key}: runtime asset missing {entry[field]}')
         entry['runtime_sha1']=sha1(((EXT/entry['script']).read_bytes()+b'\x00'+(EXT/entry['stylesheet']).read_bytes()))
         registry[key]=entry
+    implementations = apply_implementations(registry)
     outputs[EXT/'figure-registry.json'] = json.dumps(registry,indent=2,ensure_ascii=False)+'\n'
     # Reconcile implementation metadata without presenting validation as visual approval.
     for row in catalog_data['figures']:
         key = row['key']; lesson = lessons.get(key)
-        row['actual_treatment'] = 'mechanism-scene' if lesson else 'static'
+        row['actual_treatment'] = registry[key]['name'] if lesson else 'static'
         row['status'] = row['actual_status'] = 'implemented-awaiting-review' if lesson else 'static'
         row['first_wave'] = key in registry
         row['built_explore_present'] = False
         row['runtime_verification'] = 'Schema, declared invariant, and companion calculation validation passed; actual themed chapter behavior review pending.' if lesson else 'Static figure retained; no mechanism enrolled.'
         row['visual_verification'] = 'Actual themed chapter state/case inspection pending; validation is not visual approval.' if lesson else 'Static figure retained.'
         row['actual_review_basis'] = 'Authored mechanism passes strict schema, declared invariants, and companion calculations; current implementation inspection remains pending.' if lesson else 'Static figure retained; no mechanism is enrolled.'
-        row['actual_question'] = lesson['question'] if lesson else ''
-        row['actual_scope'] = lesson['scope'] if lesson else ''
-        row['actual_steps'] = [{'id':step['id'],'title':step['title'],'explanation':step['explanation'],'result':step['snapshot']['result']} for step in lesson['steps']] if lesson else []
+        row['actual_question'] = implementations.get(key,{}).get('question',lesson['question']) if lesson else ''
+        row['actual_scope'] = implementations.get(key,{}).get('scope',lesson['scope']) if lesson else ''
+        row['actual_steps'] = [{'id':step['id'],'title':step['title'],'explanation':step['explanation'],'result':step['snapshot']['result']} for step in lesson['steps']] if lesson and key not in implementations else []
     metadata = catalog_data['metadata']
     metadata.setdefault('proposal_source_head',metadata.get('source_head',''))
     metadata['source_head']=source_revision(metadata)
@@ -387,7 +442,7 @@ def compile_mechanisms(args):
             for key,original in catalog.items():
                 if original['source'] != source: continue
                 match=figure_match(updated,original['figure_id'])
-                addition=f' data-explore="mechanism-scene" data-explore-key="{key}"' if key in registry else ''
+                addition=f' data-explore="{registry[key]["name"]}" data-explore-key="{key}"' if key in registry else ''
                 updated=updated[:match.end()]+addition+updated[match.end():]
             require(normalized_source(updated)==normalized_source(text),f'{source}: static bytes changed')
             if updated!=text: updated_sources[ROOT/source]=updated
@@ -395,7 +450,7 @@ def compile_mechanisms(args):
         for path,content in outputs.items(): require(path.is_file() and path.read_text()==content,f'Outdated generated output: {path.relative_to(ROOT)}')
         for key,original in catalog.items():
             attrs=enrollment_attributes((ROOT/original['source']).read_text(),original['figure_id'])
-            expected=f' data-explore="mechanism-scene" data-explore-key="{key}"' if key in registry else ''
+            expected=f' data-explore="{registry[key]["name"]}" data-explore-key="{key}"' if key in registry else ''
             require(attrs==expected,f'{key}: stale/missing enrollment')
     else:
         # No source or output mutation until every lesson/art/calculation validates.

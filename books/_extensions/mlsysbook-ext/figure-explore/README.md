@@ -4,6 +4,62 @@ Opt-in Diagram / Explore views inside an existing numbered Quarto figure.
 The static figure, caption, alt text, numbering, and cross-reference anchor
 remain owned by the chapter. No post-render HTML patch is required.
 
+## Current original-art implementation
+
+The accepted convolution prototype establishes the reference presentation:
+animate the recognizable source diagram, put values in its objects, explain
+one causal action per step, and pause after a short guided example. Numerical
+details support the drawing rather than replace it. Static Diagram remains the
+default and the complete print/no-JavaScript fallback.
+
+`mechanisms/implementations.json` selects source-art factories for convolution,
+prefill/decode, quantized multiplication, ring AllReduce, bounded stream
+ingestion, and ray evidence epochs. Enrollment is not visual acceptance. The
+original-art catalog separates the accepted prototype, new implementations
+awaiting review, existing mechanisms needing adaptation, and static figures.
+Historical tests below apply to their recorded snapshots, not to this new pass.
+
+`original-player.js` provides shared stepping, playback, visible keyboard hints,
+and expanded inspection for the new factories. Convolution retains its reviewed
+guided-scan controller. Both read build-time timing from the single
+`books/config/shared/html/figure-explore.yml`, imported by all HTML volumes.
+`movement-ms` controls illustrative movement; `reading-pause-ms` controls the
+pause between actions during Play. Neither represents machine execution time.
+Invalid or missing settings leave the static figure available.
+
+The compiler binds each replacement to the existing source and artwork hashes,
+its runtime assets, data bundle where present, and the shared player. The browser
+passes the verified original SVG to the factory and isolates inline SVG IDs so
+multiple figures cannot reuse each other's glyphs or paint servers.
+
+Before extending the manifest, independently review the source artwork and
+surrounding section, compute added values in a reproducible calculation, test
+the mechanism's invariants, and inspect actual chapter renders on desktop and
+phone in both themes. An independent reviewer checks technical meaning and
+learner readability; this does not constitute student testing. A source-art
+mapping must preserve the illustrated workload and spatial relationships.
+Alternative toy cases must remain explicit supporting examples.
+
+The first source-art batch has passed independent technical and learner-view
+agent review in actual chapter HTML builds. This is not student testing or
+approval of the remaining selected mechanisms. The original-art catalog binds
+those review records to source, artwork, and runtime hashes; stale records
+return to awaiting review.
+
+Recheck the shared controller and packaged chapter endpoints with:
+
+```sh
+python3 binder/tools/scripts/check_original_player.py
+python3 binder/tools/scripts/check_original_figures.py --build-root books/_build/parallel/RUN
+python3 binder/tools/scripts/check_original_convolution.py --url CHAPTER_URL --engine webkit
+```
+
+The endpoint checker opens the targeted Explore view without autoplay, visits
+every state, checks local SVG references, keyboard navigation, narrow layouts,
+and browser-print fallback. Figure-specific checks also verify numerical,
+ownership, and evidence invariants. These checks cover the rebuilt chapters;
+they do not assert a new full-volume PDF or EPUB build.
+
 ## Selection: changing state must teach something
 
 ### Bring the original diagram to life
