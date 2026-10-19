@@ -20,7 +20,8 @@ Two outputs, both written at build time:
 
 1. Slides site (default). The lecture list between the markers
        <!-- decks:start -->  and  <!-- decks:end -->
-   in slides/volN.qmd: one row per chapter, grouped under the book's parts,
+   in slides/volN.qmd: one row per chapter, grouped under the book's parts
+   (the sections of the book's sidebar in the same HTML config),
    each lecture linking to its PDF, its PowerPoint file, and its source
    folder, and each chapter row linking to the chapter in the book. Runs as
    the slides site's Quarto pre-render, so the page never carries a
@@ -50,20 +51,41 @@ BOOKS = ROOT.parent / "books"
 RELEASE = "https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest"
 SOURCE = "https://github.com/harvard-edge/cs249r_book/tree/dev/slides"
 
-# The book's parts, by first chapter number; chapters before the first entry
-# are listed under "Introduction". Taken from books/config/_quarto-pdf-volN.yml.
-PARTS = {
-    "vol1": [(0, "Introduction"), (2, "Part I: Foundations"),
-             (5, "Part II: Development"), (9, "Part III: Optimization"),
-             (13, "Part IV: Deployment")],
-    "vol2": [(0, "Introduction"), (2, "Part I: The Fleet"),
-             (5, "Part II: Distributed ML"), (9, "Part III: Deployment at Scale"),
-             (13, "Part IV: The Responsible Fleet")],
-}
-
-
 def read_yaml(path: Path) -> dict:
     return yaml.safe_load(path.read_text()) or {}
+
+
+def book_parts(vol: str) -> dict:
+    """Map chapter folder -> the heading it is listed under in the book.
+
+    Read from the book's own sidebar in books/config/_quarto-html-volN.yml:
+    a chapter inside a `section:` entry takes that section's name ("Part I:
+    The Model"); a chapter listed on its own takes its sidebar text up to the
+    first colon ("Introduction: The Causal Boundary" -> "Introduction").
+    """
+    config_file = BOOKS / "config" / f"_quarto-html-{vol}.yml"
+    if not config_file.exists():
+        return {}
+    chapter = re.compile(rf"^{vol}/(\d+_[^/]+)/\1\.qmd$")
+    out = {}
+
+    def folder(entry) -> str:
+        href = entry.get("href", "") if isinstance(entry, dict) else str(entry)
+        found = chapter.match(str(href))
+        return found.group(1) if found else ""
+
+    sidebars = (read_yaml(config_file).get("website") or {}).get("sidebar") or []
+    if isinstance(sidebars, dict):
+        sidebars = [sidebars]
+    for sidebar in sidebars:
+        for entry in sidebar.get("contents") or []:
+            if isinstance(entry, dict) and entry.get("section"):
+                for sub in entry.get("contents") or []:
+                    if folder(sub):
+                        out[folder(sub)] = str(entry["section"])
+            elif folder(entry) and isinstance(entry, dict):
+                out[folder(entry)] = str(entry.get("text") or "").split(":")[0].strip()
+    return out
 
 
 def site_url(config: dict) -> str:
@@ -192,17 +214,23 @@ def chapter_html(ch: dict) -> list:
 
 
 def page_block(chapters: list, vol: str) -> list:
-    parts = PARTS.get(vol, [(0, "")])
+    """Chapters in order, with a heading wherever the book's part changes.
+
+    Lecture 0 (no book chapter) sits under the heading of the chapter after it.
+    """
+    parts = book_parts(vol)
+    labels = [parts.get(ch["chapter"], "") for ch in chapters]
+    for i in range(len(labels) - 2, -1, -1):
+        if not chapters[i]["chapter"]:
+            labels[i] = labels[i + 1]
     body = []
-    for i, (start, label) in enumerate(parts):
-        end = parts[i + 1][0] if i + 1 < len(parts) else 10**6
-        group = [ch for ch in chapters if start <= ch["num"] < end]
-        if not group:
-            continue
-        if label:
-            body.append(f'  <div class="part-head">{html.escape(label)}</div>')
-        for ch in group:
-            body += chapter_html(ch)
+    current = None
+    for ch, label in zip(chapters, labels):
+        if label != current:
+            if label:
+                body.append(f'  <div class="part-head">{html.escape(label)}</div>')
+            current = label
+        body += chapter_html(ch)
     return body
 
 
