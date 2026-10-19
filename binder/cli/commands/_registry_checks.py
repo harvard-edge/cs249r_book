@@ -18,6 +18,7 @@ class RegistryIssue:
     file: str = "(registry)"
     line: int = 0
     severity: str = "error"
+    suggestion: str = ""
 
 
 def repo_root_from_here() -> Path:
@@ -93,7 +94,7 @@ def check_lego_prose_literals(root: Path, paths: list[Path] | None = None) -> li
             uniq = ", ".join(dict.fromkeys(labels))
             issues.append(RegistryIssue(
                 code="lego_prose_literal",
-                message=f"L{lineno}: {uniq} — {snippet}",
+                message=f"{uniq} — {snippet}",
                 file=str(p.relative_to(root)),
                 line=lineno,
             ))
@@ -120,7 +121,7 @@ def check_lego_prose_units(root: Path, paths: list[Path] | None = None) -> list[
             uniq = ", ".join(dict.fromkeys(labels))
             issues.append(RegistryIssue(
                 code="lego_prose_unit",
-                message=f"L{lineno}: {uniq} — {snippet}",
+                message=f"{uniq} — {snippet}",
                 file=str(p.relative_to(root)),
                 line=lineno,
             ))
@@ -151,7 +152,7 @@ def check_rendered_doubled_words(
         for lineno, token, context in rendered_doubled_words.check_file(p):
             issues.append(RegistryIssue(
                 code="rendered_doubled_word",
-                message=f"L{lineno}: doubled '{token}' after substitution — {context}",
+                message=f"doubled '{token}' after substitution — {context}",
                 file=str(p.relative_to(root)),
                 line=lineno,
             ))
@@ -172,7 +173,7 @@ def check_lego_load_pint(root: Path, paths: list[Path] | None = None) -> list[Re
             uniq = ", ".join(dict.fromkeys(labels))
             issues.append(RegistryIssue(
                 code="lego_load_pint",
-                message=f"L{lineno}: {uniq} — {snippet}",
+                message=f"{uniq} — {snippet}",
                 file=str(p.relative_to(root)),
                 line=lineno,
             ))
@@ -193,17 +194,17 @@ def check_lego_equations(root: Path, paths: list[Path] | None = None) -> list[Re
             uniq = ", ".join(dict.fromkeys(labels))
             issues.append(RegistryIssue(
                 code="lego_equation",
-                message=f"L{lineno}: {uniq} — {snippet}",
+                message=f"{uniq} — {snippet}",
                 file=str(p.relative_to(root)),
                 line=lineno,
             ))
     return issues
 
 
-def run_registry_pytest(root: Path) -> list[RegistryIssue]:
-    """Run MLSysIM registry gates plus book-owned usage checks."""
+def registry_test_files(root: Path) -> list[Path]:
+    """Return the pytest files that make up the registry gate."""
     mlsysim_root = (root / "mlsysim").resolve()
-    tests = [
+    return [
         mlsysim_root / "tests" / "test_constants_allowlist.py",
         mlsysim_root / "tests" / "test_registry_no_duplicate_specs.py",
         mlsysim_root / "tests" / "test_provenance_audit.py",
@@ -212,6 +213,12 @@ def run_registry_pytest(root: Path) -> list[RegistryIssue]:
         root / "binder" / "tests" / "test_no_legacy_constant_refs.py",
         root / "binder" / "tests" / "test_mlsysim_registry_coverage.py",
     ]
+
+
+def run_registry_pytest(root: Path) -> list[RegistryIssue]:
+    """Run MLSysIM registry gates plus book-owned usage checks."""
+    mlsysim_root = (root / "mlsysim").resolve()
+    tests = registry_test_files(root)
     proc = subprocess.run(
         [sys.executable, "-m", "pytest", *map(str, tests), "-q", "-o", "addopts="],
         cwd=mlsysim_root,
@@ -220,9 +227,19 @@ def run_registry_pytest(root: Path) -> list[RegistryIssue]:
     )
     if proc.returncode == 0:
         return []
-    tail = (proc.stdout + "\n" + proc.stderr).strip().splitlines()
-    summary = tail[-1] if tail else f"pytest exited {proc.returncode}"
-    return [RegistryIssue(code="registry_pytest", message=summary)]
+    lines = (proc.stdout + "\n" + proc.stderr).strip().splitlines()
+    summary = lines[-1] if lines else f"pytest exited {proc.returncode}"
+    failed = [ln for ln in lines if ln.startswith(("FAILED ", "ERROR "))]
+    detail = "; ".join(failed[:5]) + (f" (+{len(failed) - 5} more)" if len(failed) > 5 else "")
+    rerun = f"cd mlsysim && {Path(sys.executable).name} -m pytest " + " ".join(
+        str(t.relative_to(mlsysim_root)) if t.is_relative_to(mlsysim_root)
+        else str(Path("..") / t.relative_to(root)) for t in tests
+    ) + " -q"
+    return [RegistryIssue(
+        code="registry_pytest",
+        message=f"{summary}" + (f" — {detail}" if detail else ""),
+        suggestion=f"Rerun for the full tracebacks: {rerun}",
+    )]
 
 
 def verify_appendix_lego(root: Path) -> list[RegistryIssue]:
@@ -263,20 +280,30 @@ def verify_paper_anchors(root: Path) -> list[RegistryIssue]:
     if proc.returncode == 0:
         return []
     output = (proc.stdout or proc.stderr or "").strip()
-    return [RegistryIssue(code="paper_anchors", message=output[:500] or "anchor validation failed")]
+    return [RegistryIssue(
+        code="paper_anchors",
+        message=output[:500] or f"anchor validation failed (exit {proc.returncode})",
+        suggestion=f"Rerun for the full report: cd mlsysim && python3 {script.relative_to(root / 'mlsysim')}",
+    )]
 
 
 def check_yaml_pending(root: Path) -> list[RegistryIssue]:
-    """Fail when audit YAML still has should_change=true entries."""
+    """Fail when audit YAML still has should_change=true entries, or when there is no YAML to read."""
+    if not any(yaml_dir(root).glob("*.yaml")):
+        return [RegistryIssue(
+            code="yaml_missing",
+            message=f"No audit YAML found in {yaml_dir(root).relative_to(root)}; nothing was checked.",
+            suggestion="Regenerate it: python3 binder/tools/audit/refresh_mlsysim_constants_yamls.py",
+        )]
     pending = count_should_change(root)
     if pending == 0:
         return []
     return [RegistryIssue(
         code="yaml_should_change",
         message=(
-            f"{pending} audit YAML constant(s) still marked should_change=true — "
-            "run: python3 binder/tools/audit/refresh_mlsysim_constants_yamls.py --finalize"
+            f"{pending} audit YAML constant(s) still marked should_change=true."
         ),
+        suggestion="python3 binder/tools/audit/refresh_mlsysim_constants_yamls.py --finalize",
     )]
 
 
