@@ -12,7 +12,7 @@ showed it, and loading with the OS already dark never exercised the toggle path.
 Checks, per page:
   * text contrast >= 3:1 against the effective background, whole page including navbar,
     sidebar and footer (skips SVG and math)
-  * page regions (body, navbar, sidebar, footer) are dark
+  * page regions (body, navbar, sidebar, footer, announcement bar, mobile breadcrumb bar) are dark
   * callout headers (``details[class*="callout-"] > summary``) are dark
   * fenced code blocks are dark and padded
   * section numbers (``.header-section-number``) reach 4.5:1
@@ -64,7 +64,7 @@ PAGE_JS = r"""
     if (c < 3.0) add({kind: 'text-contrast', tag: el.tagName, text: t.slice(0, 40), contrast: +c.toFixed(2)});
   }
   // Page regions must themselves be dark. Contrast alone cannot see a white footer under dark text.
-  ['body', '.nav-footer', 'nav.navbar', '#quarto-sidebar', '#quarto-margin-sidebar'].forEach(sel => {
+  ['body', '.nav-footer', 'nav.navbar', '#quarto-sidebar', '#quarto-margin-sidebar', '#quarto-announcement', '.quarto-secondary-nav'].forEach(sel => {
     const el = document.querySelector(sel);
     if (el && el.getBoundingClientRect().height > 0 && lum(effBg(el)) > 0.2) add({kind: 'region-light', region: sel, luminance: +lum(effBg(el)).toFixed(2)});
   });
@@ -138,12 +138,22 @@ def main() -> int:
             try:
                 page.goto(f"http://127.0.0.1:{port}/{rel}", wait_until="load", timeout=45000)
                 page.wait_for_timeout(1500)
-                toggle = page.locator("a.quarto-color-scheme-toggle")
-                if toggle.count() == 0 or not toggle.first.is_visible():
-                    results[rel] = {"skipped": "no usable colour-scheme toggle"}
-                    print(f"skip  {rel} (no usable toggle)")
+                if rel.endswith("404.html"):
+                    # 404 pages load their assets by deployed absolute path, so the audit's
+                    # root-served copy renders unstyled; there is nothing to judge.
+                    results[rel] = {"skipped": "404 page"}
+                    print(f"skip  {rel} (404 page)")
                     continue
-                toggle.first.click()
+                toggle = page.locator("a.quarto-color-scheme-toggle")
+                if toggle.count() == 0:
+                    results[rel] = {"skipped": "no colour-scheme toggle"}
+                    print(f"skip  {rel} (no toggle)")
+                    continue
+                # On a phone the toggle sits inside the collapsed navbar. Dispatching the click
+                # runs the same handler a reader reaches by opening the menu and tapping it.
+                toggle.first.evaluate("e => e.click()")
+                # Freeze transitions so a color mid-fade is not read as the settled color.
+                page.add_style_tag(content="*, *::before, *::after { transition: none !important; animation: none !important; }")
                 page.wait_for_timeout(800)
                 res = page.evaluate(PAGE_JS, {"figures": args.figures})
                 results[rel] = res
