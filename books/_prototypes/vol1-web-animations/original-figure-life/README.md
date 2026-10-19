@@ -8,7 +8,11 @@ Diagram retains the original image. Explore retains its dashed input plane,
 orange receptive field, blue connections, and violet output plane. Next separates
 moving the window, combining weighted input contributions, and storing an output
 activation. The original figure specifies no numerical inputs or weights, so
-this preview does not invent numerical results. The dots show logical weighted
+the default view does not add numerical results. An optional Show values panel
+uses the nearby chapter's vertical-line example, explicitly labeled as added
+illustrative inputs. It follows the same selected window and shared filter;
+products and sums appear only after Combine completes, and the stored-output
+label appears after Write completes. The main drawing stays visible. The dots show logical weighted
 contributions, not hardware packets or measured transfer time.
 
 Play runs once; Next performs one action and stops. Back, Restart, and exact
@@ -21,6 +25,7 @@ Build the local review copy from a rendered chapter that includes the shared
 playback metadata:
 
 ```sh
+python3 books/_prototypes/vol1-web-animations/original-figure-life/example-values.py
 python3 books/_prototypes/vol1-web-animations/original-figure-life/build-preview.py /path/to/output/vol1/06_nn_architectures/06_nn_architectures.html
 python3 -m http.server 8882 --bind 127.0.0.1 --directory books
 ```
@@ -34,3 +39,11 @@ These checks exercise desktop and phone layouts in both themes, pause/resume,
 manual stepping, sequence jumps, output counts, connection/window alignment,
 reduced motion, and print fallback. This is an author-review prototype, not a
 volume-wide implementation or a student study.
+
+
+`example-values.py` owns the illustrative inputs and computes every patch,
+product, row sum, and output in `example-values.json`. Regenerate the JSON before
+building after an example change. No hardware specifications are introduced.
+The additional browser checks in `check-values.py` verify every output position,
+value-panel toggling without state changes, and preservation of the original
+SVG paths at desktop and phone widths in both themes.

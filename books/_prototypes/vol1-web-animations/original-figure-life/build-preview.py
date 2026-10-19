@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build a local chapter preview; never modify the manuscript or published HTML."""
 import argparse
+import json
 from pathlib import Path
 import shutil
 
@@ -34,6 +35,12 @@ outer['data-reading-pause-ms'] = hold
 template = soup.new_tag('template', attrs={'data-original-art': ''})
 template.append(BeautifulSoup(svg_path.read_text(), 'xml').find('svg'))
 outer.append(template)
+example_path = Path(__file__).with_name('example-values.json')
+example_data = json.loads(example_path.read_text())
+assert soup.find(id=example_data['source_anchor']), 'Worked-example source anchor missing from chapter'
+example = soup.new_tag('script', type='application/json', attrs={'data-example-values': ''})
+example.string = json.dumps(example_data).replace('</', '<\\/')
+outer.append(example)
 css = soup.new_tag('link', rel='stylesheet', href='/_prototypes/vol1-web-animations/original-figure-life/original-figure.css')
 soup.head.append(css)
 script = soup.new_tag('script', src='/_prototypes/vol1-web-animations/original-figure-life/original-figure.js', defer=True)

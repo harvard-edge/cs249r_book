@@ -77,13 +77,30 @@
     const narration=node('div','','life-narration'), heading=node('strong'), explanation=node('p');
     narration.setAttribute('aria-live','polite'); narration.append(heading,explanation);
     const canvas=node('div','','life-art'); canvas.append(svg);
+    const workspace=node('div','','life-workspace'), inset=node('div','','life-values');
+    inset.hidden=true;
+    inset.setAttribute('aria-label','Optional worked values for the selected window');
+    const example=JSON.parse(outer.querySelector('[data-example-values]').textContent);
+    const insetTitle=node('strong','Example values');
+    const sourceLink=node('a',example.label,'life-value-source'); sourceLink.href='#'+example.source_anchor;
+    const valueScope=node('p',example.scope,'life-value-scope'), valuesBody=node('div');
+    inset.append(insetTitle,sourceLink,valueScope,valuesBody);
+    workspace.append(canvas,inset);
+    const valuesButton=node('button','Show values'); valuesButton.type='button';
+    valuesButton.setAttribute('aria-expanded','false'); controls.append(valuesButton);
+    const showValues=show=>{
+      inset.hidden=!show; workspace.classList.toggle('with-values',show);
+      valuesButton.textContent=show?'Hide values':'Show values'; valuesButton.setAttribute('aria-expanded',String(show));
+    };
+    valuesButton.addEventListener('click',()=>showValues(inset.hidden));
+    showValues(new URLSearchParams(location.search).get('values')==='1');
     const keys=node('p','Keyboard: N Next · P Back · K Play/Pause · R Restart. Focus the animation to use shortcuts.','life-keys');
     const legend=node('div','','life-legend');
     for (const [text,color] of [['Input window','#ff8000'],['Input contributions','#2455d6'],['Output activations','#a64ca6']]) {
       const chip=node('span',text); chip.style.setProperty('--chip',color); legend.append(chip);
     }
     const progress=node('p','','life-progress');
-    panel.append(controls,keys,label,narration,canvas,legend,progress);
+    panel.append(controls,keys,label,narration,workspace,legend,progress);
     const movement=Number(outer.dataset.movementMs), hold=Number(outer.dataset.readingPauseMs);
     if (!(movement>0) || !(hold>=0)) throw new Error('Missing build-time timing.');
     const media=matchMedia('(prefers-reduced-motion: reduce)');
@@ -119,11 +136,48 @@
     }
     function paint() {
       const s=states[index]; if(!moving){applyPose(s);drawOutputs(s);}
+      paintValues(s);
       heading.textContent=s.title; explanation.textContent=s.text; menu.value=String(index);
       buttons.back.disabled=index===0; buttons.restart.disabled=index===0&&!moving;
       buttons.next.disabled=index===states.length-1&&!moving;
       buttons.next.textContent=moving?'Finish':'Next'; buttons.play.textContent=running?'Pause':index===states.length-1?'Replay':'Play';
       Object.assign(panel.dataset,{step:String(index),committed:String(completed),moving:String(moving),running:String(running)});
+    }
+    function paintValues(s) {
+      valuesBody.replaceChildren();
+      delete inset.dataset.output;
+      if(s.pose || (moving&&s.phase==='move')) {
+        valuesBody.append(node('p',s.pose?'Advance to select an input window.':'Moving the window. Its values appear when it arrives.','life-value-status'));
+        return;
+      }
+      const value=example.positions.find(p=>p.row===s.row&&p.column===s.col);
+      if(!value)throw new Error('Missing worked window.');
+      const matrix=(title,rows,cls)=>{
+        const box=node('div','',cls),heading=node('p',title),table=node('table');
+        table.setAttribute('aria-label',title);
+        rows.forEach(row=>{const tr=node('tr');row.forEach(x=>tr.append(node('td',String(x))));table.append(tr);});
+        box.append(heading,table);return box;
+      };
+      valuesBody.append(matrix(`Orange window (${s.row}, ${s.col})`,value.patch,'life-patch'));
+      valuesBody.append(matrix('Shared filter — unchanged',example.weights,'life-filter'));
+      const ready=s.phase==='write'||(s.phase==='combine'&&!moving);
+      if(!ready) {
+        valuesBody.append(node('p',moving?'Combining the weighted inputs…':'Ready to multiply and sum.','life-value-status'));
+        return;
+      }
+      const terms=node('div','','life-products');
+      value.patch.forEach((row,r)=>{
+        const products=row.map((x,c)=>`${x} × ${example.weights[r][c]<0?'('+example.weights[r][c]+')':example.weights[r][c]}`);
+        terms.append(node('p',products.join(' + ')+` = ${value.row_sums[r]}`));
+      });
+      const rowTotals=value.row_sums.map(x=>x<0?'('+x+')':String(x));
+      terms.append(node('p',rowTotals.join(' + ')+` = ${value.output}`));
+      valuesBody.append(terms);
+      const stored=s.phase==='write'&&!moving;
+      const result=node('p',stored?`Output[${s.row}, ${s.col}] = ${value.output}`:`Sum ready: ${value.output}`,'life-value-result');
+      result.dataset.value=String(value.output);
+      valuesBody.append(result);
+      inset.dataset.output=String(value.output);
     }
     function cancel() {
       clearTimeout(timer); timer=null; effects.forEach(e=>e.cancel()); effects=[]; particles.replaceChildren(); finishAction=null;
