@@ -15,7 +15,9 @@ default and the complete print/no-JavaScript fallback.
 `mechanisms/implementations.json` selects source-art factories for convolution,
 prefill/decode, quantized multiplication, ring AllReduce, bounded stream
 ingestion, ray evidence epochs, KV paging, FSDP allocation lifetimes, KV
-copy-on-write, and shared capture-buffer ownership. Enrollment is not visual acceptance. The
+copy-on-write, shared capture-buffer ownership, activation checkpointing,
+checkpoint staging, context-prefix invalidation, and intersample overshoot.
+Enrollment is not visual acceptance. The
 original-art catalog separates the accepted prototype, new implementations
 awaiting review, existing mechanisms needing adaptation, and static figures.
 Historical tests below apply to their recorded snapshots, not to this new pass.
@@ -73,6 +75,16 @@ and separates backward-state release from gradient reduction. Capture
 buffers compare alternative storage paths and preserve converted pages B when
 capture pages A become reusable. Future source panels and phase columns are
 reference views, not additional simultaneous allocations.
+
+Activation checkpointing shows forward replay from retained checkpoints and
+releases each reconstructed activation after its backward consumer finishes.
+Checkpoint staging distinguishes an immutable captured generation from live
+training state and publishes the restore manifest only after durable writes
+and verification. Prefix invalidation preserves token identity while showing
+that the same trailing token needs new derived KV state after an earlier
+change. Intersample overshoot integrates the original acceleration profile
+along the original velocity curves; its normalized example changes the
+endpoint reserve rather than the acceleration waveform.
 
 ## Selection: changing state must teach something
 
