@@ -840,6 +840,11 @@ def rule_next(deck, vol, out):
     slide, line = deck.where(m.start())
     got = m.group(1).strip()
     if not nxt:
+        # A later lecture in the course plan that is not built yet: cannot check the title.
+        later = [x for x in vol.planned if x.rstrip("b").isdigit() and deck.id.rstrip("b").isdigit()
+                 and int(x.rstrip("b")) > int(deck.id.rstrip("b"))]
+        if later:
+            return
         out("next-lecture", "error", slide, line,
             f"the last deck of {vol.name} announces a next lecture (\"{got}\")")
         return
