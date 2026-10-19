@@ -4,22 +4,24 @@ name: '📊 Slides · 🔨 Build PDFs'
 # Lecture Slides — Build All Slide Deck PDFs
 # =============================================================================
 #
-# Compiles all 35 Beamer slide decks to PDF using xelatex + inkscape,
-# converts to PPTX for presenter mode, and uploads as workflow artifacts.
+# Compiles every Beamer slide deck in Volumes I-IV to PDF using pdflatex +
+# inkscape, converts to PPTX for presenter mode, and uploads as workflow
+# artifacts. The job fails if any deck folder with a .tex produced no PDF.
 #
 # Flow:
 #   1. INSTALL      — TeX Live + Inkscape + Metropolis theme
 #   2. CONVERT_SVGS — Makefile-driven SVG-to-PDF conversion
-#   3. BUILD_VOL1   — Compile Vol I slide decks (xelatex, 2-pass)
-#   4. BUILD_VOL2   — Compile Vol II slide decks (xelatex, 2-pass)
-#   5. CONVERT_PPTX — PDF-to-PPTX conversion for presenter mode
-#   6. UPLOAD       — Upload artifacts (slides-vol1, slides-vol2)
+#   3. BUILD_DECKS  — Compile Vol I-IV slide decks (pdflatex, 2-pass)
+#   4. CONVERT_PPTX — PDF-to-PPTX conversion for presenter mode
+#   5. UPLOAD       — Upload artifacts (slides-vol1 ... slides-vol4)
+#   6. CHECK        — Fail if any deck did not build (rebuilds it with log tail)
 #
 # Triggers:
-#   - push: dev branch, slides/**/*.tex or slides/**/*.svg changes
+#   - push: dev branch, slides/vol{1..4}/**/*.tex or *.svg, slides/assets/**
+#     (theme + kit affect every deck), slides/Makefile changes
 #   - workflow_dispatch: manual
 #
-# Deploys to: N/A (artifacts only — slides-vol1, slides-vol2)
+# Deploys to: N/A (artifacts only — slides-vol1 ... slides-vol4)
 #
 # Related:
 #   - slides-publish-live.yml — Downloads these for GitHub Release
@@ -37,6 +39,10 @@ on:
       - 'slides/vol1/**/*.svg'
       - 'slides/vol2/**/*.tex'
       - 'slides/vol2/**/*.svg'
+      - 'slides/vol3/**/*.tex'
+      - 'slides/vol3/**/*.svg'
+      - 'slides/vol4/**/*.tex'
+      - 'slides/vol4/**/*.svg'
       - 'slides/assets/**'
       - 'slides/Makefile'
       - '.github/workflows/slides-build-pdfs.yml'
@@ -86,55 +92,37 @@ jobs:
         working-directory: slides
         run: make svgs
 
-      - name: 📄 Build Vol1 Slide Decks
+      - name: 📄 Build Slide Decks (Vol I-IV)
         working-directory: slides
         run: |
-          echo "Building Volume I slides..."
-          for ch_dir in vol1/*_*/; do
-            tex_file=$(ls $ch_dir/*.tex 2>/dev/null | head -1)
-            [ -z "$tex_file" ] && continue
-            tex_name=$(basename "$tex_file" .tex)
-            echo "  Building $tex_name..."
-            cd "$ch_dir"
-            pdflatex -interaction=nonstopmode "$tex_name.tex" > /dev/null 2>&1 || true
-            pdflatex -interaction=nonstopmode "$tex_name.tex" > /dev/null 2>&1 || true
-            cd - > /dev/null
-            mkdir -p _build/vol1
-            if [ -f "$ch_dir/$tex_name.pdf" ]; then
-              cp "$ch_dir/$tex_name.pdf" "_build/vol1/$tex_name.pdf"
-              echo "    ✓ $tex_name.pdf"
-            else
-              echo "    ✗ $tex_name (build failed)"
-            fi
-            # Clean artifacts
-            rm -f $ch_dir/*.aux $ch_dir/*.nav $ch_dir/*.out $ch_dir/*.snm \
-                  $ch_dir/*.toc $ch_dir/*.vrb $ch_dir/*.fls $ch_dir/*.log \
-                  $ch_dir/$tex_name.pdf 2>/dev/null
-          done
-
-      - name: 📄 Build Vol2 Slide Decks
-        working-directory: slides
-        run: |
-          echo "Building Volume II slides..."
-          for ch_dir in vol2/*_*/; do
-            tex_file=$(ls $ch_dir/*.tex 2>/dev/null | head -1)
-            [ -z "$tex_file" ] && continue
-            tex_name=$(basename "$tex_file" .tex)
-            echo "  Building $tex_name..."
-            cd "$ch_dir"
-            pdflatex -interaction=nonstopmode "$tex_name.tex" > /dev/null 2>&1 || true
-            pdflatex -interaction=nonstopmode "$tex_name.tex" > /dev/null 2>&1 || true
-            cd - > /dev/null
-            mkdir -p _build/vol2
-            if [ -f "$ch_dir/$tex_name.pdf" ]; then
-              cp "$ch_dir/$tex_name.pdf" "_build/vol2/$tex_name.pdf"
-              echo "    ✓ $tex_name.pdf"
-            else
-              echo "    ✗ $tex_name (build failed)"
-            fi
-            rm -f $ch_dir/*.aux $ch_dir/*.nav $ch_dir/*.out $ch_dir/*.snm \
-                  $ch_dir/*.toc $ch_dir/*.vrb $ch_dir/*.fls $ch_dir/*.log \
-                  $ch_dir/$tex_name.pdf 2>/dev/null
+          # Failed decks are recorded as vol/folder/tex_name, one per line,
+          # for the final check step (which rebuilds them with output shown).
+          mkdir -p _build
+          : > _build/failed-decks.txt
+          for vol in vol1 vol2 vol3 vol4; do
+            echo "Building ${vol} slides..."
+            mkdir -p _build/$vol
+            for ch_dir in $vol/*_*/; do
+              tex_file=$(ls $ch_dir/*.tex 2>/dev/null | head -1)
+              [ -z "$tex_file" ] && continue
+              tex_name=$(basename "$tex_file" .tex)
+              echo "  Building $tex_name..."
+              cd "$ch_dir"
+              pdflatex -interaction=nonstopmode "$tex_name.tex" > /dev/null 2>&1 || true
+              pdflatex -interaction=nonstopmode "$tex_name.tex" > /dev/null 2>&1 || true
+              cd - > /dev/null
+              if [ -f "$ch_dir/$tex_name.pdf" ]; then
+                cp "$ch_dir/$tex_name.pdf" "_build/$vol/$tex_name.pdf"
+                echo "    ✓ $tex_name.pdf"
+              else
+                echo "    ✗ $tex_name (build failed)"
+                echo "${ch_dir%/}/$tex_name" >> _build/failed-decks.txt
+              fi
+              # Clean artifacts
+              rm -f $ch_dir/*.aux $ch_dir/*.nav $ch_dir/*.out $ch_dir/*.snm \
+                    $ch_dir/*.toc $ch_dir/*.vrb $ch_dir/*.fls $ch_dir/*.log \
+                    $ch_dir/$tex_name.pdf 2>/dev/null
+            done
           done
 
       - name: 🐍 Setup Python
@@ -149,7 +137,7 @@ jobs:
         working-directory: slides
         run: |
           echo "Converting PDFs to PowerPoint..."
-          for vol in vol1 vol2; do
+          for vol in vol1 vol2 vol3 vol4; do
             if ls _build/$vol/*.pdf 1>/dev/null 2>&1; then
               python3 scripts/pdf2pptx.py _build/$vol/*.pdf --output-dir _build/$vol --dpi 300
             fi
@@ -158,19 +146,34 @@ jobs:
       - name: 📊 Build Summary
         working-directory: slides
         run: |
-          v1_pdf=$(ls _build/vol1/*.pdf 2>/dev/null | wc -l)
-          v2_pdf=$(ls _build/vol2/*.pdf 2>/dev/null | wc -l)
-          v1_pptx=$(ls _build/vol1/*.pptx 2>/dev/null | wc -l)
-          v2_pptx=$(ls _build/vol2/*.pptx 2>/dev/null | wc -l)
           echo "## 📊 Slide Build Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Volume | PDFs | PPTX |" >> $GITHUB_STEP_SUMMARY
           echo "|--------|------|------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Vol I | $v1_pdf | $v1_pptx |" >> $GITHUB_STEP_SUMMARY
-          echo "| Vol II | $v2_pdf | $v2_pptx |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Total** | **$((v1_pdf + v2_pdf))** | **$((v1_pptx + v2_pptx))** |" >> $GITHUB_STEP_SUMMARY
+          total_pdf=0
+          total_pptx=0
+          for vol in vol1 vol2 vol3 vol4; do
+            case $vol in
+              vol1) label="Vol I" ;;
+              vol2) label="Vol II" ;;
+              vol3) label="Vol III" ;;
+              vol4) label="Vol IV" ;;
+            esac
+            n_pdf=$(ls _build/$vol/*.pdf 2>/dev/null | wc -l)
+            n_pptx=$(ls _build/$vol/*.pptx 2>/dev/null | wc -l)
+            echo "| $label | $n_pdf | $n_pptx |" >> $GITHUB_STEP_SUMMARY
+            total_pdf=$((total_pdf + n_pdf))
+            total_pptx=$((total_pptx + n_pptx))
+          done
+          echo "| **Total** | **$total_pdf** | **$total_pptx** |" >> $GITHUB_STEP_SUMMARY
+          n_failed=$(grep -c . _build/failed-decks.txt 2>/dev/null || true)
+          if [ "${n_failed:-0}" -gt 0 ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "❌ **$n_failed deck(s) failed to build:**" >> $GITHUB_STEP_SUMMARY
+            sed 's/^/- /' _build/failed-decks.txt >> $GITHUB_STEP_SUMMARY
+          fi
           echo ""
-          echo "✅ Built $((v1_pdf + v2_pdf)) PDFs + $((v1_pptx + v2_pptx)) PPTX"
+          echo "✅ Built $total_pdf PDFs + $total_pptx PPTX"
 
       - name: 📦 Upload Vol1 artifacts
         uses: actions/upload-artifact@v7
@@ -189,3 +192,48 @@ jobs:
             slides/_build/vol2/*.pdf
             slides/_build/vol2/*.pptx
           retention-days: 30
+
+      - name: 📦 Upload Vol3 artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: slides-vol3
+          path: |
+            slides/_build/vol3/*.pdf
+            slides/_build/vol3/*.pptx
+          retention-days: 30
+
+      - name: 📦 Upload Vol4 artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: slides-vol4
+          path: |
+            slides/_build/vol4/*.pdf
+            slides/_build/vol4/*.pptx
+          retention-days: 30
+
+      # Runs after the uploads so the decks that did build stay downloadable.
+      # Each failed deck is rebuilt once with the tail of its .log printed, so
+      # the LaTeX error is readable here without reproducing it locally.
+      - name: 🔍 Fail on missing deck PDFs
+        working-directory: slides
+        run: |
+          if ! grep -q . _build/failed-decks.txt 2>/dev/null; then
+            echo "✅ Every deck folder with a .tex produced a PDF"
+            exit 0
+          fi
+          while read -r deck; do
+            [ -z "$deck" ] && continue
+            ch_dir=$(dirname "$deck")
+            tex_name=$(basename "$deck")
+            echo "::group::✗ $deck — rebuild with log tail"
+            (cd "$ch_dir" && pdflatex -interaction=nonstopmode "$tex_name.tex" > /dev/null 2>&1) || true
+            if [ -f "$ch_dir/$tex_name.log" ]; then
+              tail -n 60 "$ch_dir/$tex_name.log"
+            else
+              echo "(no $tex_name.log produced)"
+            fi
+            echo "::endgroup::"
+          done < _build/failed-decks.txt
+          echo "❌ $(grep -c . _build/failed-decks.txt) deck(s) did not produce a PDF:"
+          sed 's/^/   - /' _build/failed-decks.txt
+          exit 1
