@@ -848,6 +848,12 @@ def rule_next(deck, vol, out):
         out("next-lecture", "error", slide, line,
             f"the last deck of {vol.name} announces a next lecture (\"{got}\")")
         return
+    # The next planned lecture is not built yet, so the next built deck is not it.
+    if deck.id.isdigit() and nxt.id.rstrip("b").isdigit():
+        gap = [x for x in vol.planned if x.isdigit() and int(deck.id) < int(x) < int(nxt.id.rstrip("b"))
+               and x not in vol.by_id]
+        if gap:
+            return
     if norm_label(got) != norm_label(nxt.title):
         out("next-lecture", "error", slide, line,
             f"says NEXT LECTURE | {got}; the next deck is Lecture {nxt.id}, \"{nxt.title}\" "
