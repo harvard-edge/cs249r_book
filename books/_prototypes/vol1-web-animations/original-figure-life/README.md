@@ -11,10 +11,13 @@ activation. The original static figure specifies no numerical inputs or weights.
 adds the nearby chapter's vertical-line example directly to the drawing: every
 input cell carries its value, a shared-filter block sits in the diagram, and
 completed activations are written into the violet output cells. The output
-plane is enlarged vertically for readable labels. A sum appears in the drawing
+plane is enlarged uniformly, preserving parallel axes in both planes. A sum appears in the drawing
 after Combine completes; the output value appears only after Write completes.
-Detailed arithmetic remains available in a collapsed Inspect the calculation
-section below the diagram.
+A visible calculation strip links one chosen input row to the matching filter
+row. It shows the products for that row and, after Combine, the addition of
+all row totals. The short calculation sits beside the drawing on desktop and
+below it on phones. Full arithmetic remains available in a collapsed Inspect the
+calculation section below the diagram.
 The dots show logical weighted
 contributions, not hardware packets or measured transfer time.
 
@@ -51,3 +54,11 @@ The additional browser checks in `check-values.py` verify every input and filter
 label, every output position, sum/output commit timing, calculation disclosure
 without state changes, and preservation of the original SVG paths at desktop
 and phone widths in both themes.
+
+
+`check-geometry.py` checks that both grid-axis directions remain parallel and
+that blue connectors meet the moving window throughout interpolation. It also
+checks pause/resume and each row selector without advancing the lesson, and
+exports intermediate motion frames plus chapter and calculation screenshots.
+Window motion and connector endpoints share one interpolation clock; SVG path
+interpolation support is not required.
