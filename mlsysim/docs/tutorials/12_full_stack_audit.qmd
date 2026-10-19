@@ -1,6 +1,6 @@
 ---
 title: "Full-Stack Audit: LLaMA-70B Training"
-subtitle: "One model, six domains, twelve walls --- a complete systems analysis in 60 seconds."
+subtitle: "One model, six domains, twelve walls: a complete systems analysis in 60 seconds."
 description: "Compose 6+ solvers across all six taxonomy domains to produce a holistic training analysis. Discover that the binding constraint is compute, but checkpoint overhead is the hidden cost."
 categories: ["capstone", "advanced"]
 ---
@@ -9,8 +9,8 @@ categories: ["capstone", "advanced"]
 
 What does a **complete** systems analysis look like? No single solver captures the full
 picture. Training a 70B-parameter model on 512 H100 GPUs involves compute walls, memory
-walls, communication overhead, checkpoint I/O, energy costs, and carbon emissions ---
-simultaneously. This tutorial traces all six taxonomy domains and exercises 12 of the 22
+walls, communication overhead, checkpoint I/O, energy costs, and carbon emissions,
+all simultaneously. This tutorial traces all six taxonomy domains and exercises 12 of the 22
 systems walls through a single workload.
 
 ::: {.callout-note}
@@ -18,12 +18,12 @@ systems walls through a single workload.
 Complete [Tutorial 0: Hello, Roofline](00_hello_roofline.qmd),
 [Tutorial 1: The Memory Wall](01_memory_wall.qmd),
 [Tutorial 6: Scaling to 1000 GPUs](06_scaling_1000_gpus.qmd), and
-[Tutorial 9: Sensitivity Analysis](09_sensitivity.qmd). You should understand
-roofline analysis, distributed training, and binding constraint identification.
+[Tutorial 9: Sensitivity Analysis](09_sensitivity.qmd). This tutorial assumes familiarity
+with roofline analysis, distributed training, and binding constraint identification.
 :::
 
 ::: {.callout-note}
-## What You Will Learn
+## Learning Objectives
 
 - **Compose** six solver families across all taxonomy domains into a holistic analysis
 - **Identify** which of the 22 systems walls bind for a real training workload
@@ -34,8 +34,8 @@ roofline analysis, distributed training, and binding constraint identification.
 ::: {.callout-tip}
 ## Solver Quick Reference
 
-This capstone uses solvers from all six domains. If you arrived via an accelerated
-learning path, here is what each solver does:
+This capstone uses solvers from all six domains. For readers who arrived via an
+accelerated learning path, the table below summarizes what each solver does:
 
 | Solver | Domain | What It Computes |
 |:-------|:-------|:-----------------|
@@ -134,8 +134,8 @@ info("Fleet Configuration",
 
 ## 2. Node (Walls 1--3): Single-GPU Roofline
 
-First, classify the per-GPU forward-backward pass. Is each GPU compute-bound or
-memory-bound during training?
+The first step classifies the per-GPU forward-backward pass as compute-bound or
+memory-bound during training.
 
 ```{python}
 from mlsysim.solvers import SingleNodeModel
@@ -152,20 +152,21 @@ info(Bottleneck=node_result.bottleneck,
      Throughput=f"{node_result.throughput:.0f} samples/s")
 ```
 
-Training at batch size 4 per GPU puts us in the compute-bound regime --- unlike inference,
-training has high arithmetic intensity due to the backward pass. Wall 1 (Compute) is the
+Training at batch size 4 per GPU puts each GPU in the compute-bound regime. Unlike inference,
+training has high arithmetic intensity because of the backward pass. Wall 1 (Compute) is the
 binding constraint at the node level.
 
-Compute-bound is good news --- it means the GPU is doing useful work, not waiting for data.
-But can the data pipeline actually keep up with 512 GPUs demanding training samples?
+Being compute-bound is good news, because the GPU is doing useful work rather than waiting
+for data. The next question is whether the data pipeline can keep up with 512 GPUs demanding
+training samples.
 
 ---
 
-## 3. Data (Walls 8--10): Can the Pipeline Keep Up?
+## 3. Data (Walls 8--10): Whether the Pipeline Can Keep Up
 
-The roofline tells us each GPU can consume data at a certain rate. But can the storage and
-preprocessing pipeline actually deliver data that fast? If not, the GPUs stall --- and
-"compute-bound" becomes a meaningless label.
+The roofline gives the rate at which each GPU can consume data, and the storage and
+preprocessing pipeline must deliver data at least that fast. If it cannot, the GPUs stall
+and "compute-bound" becomes a meaningless label.
 
 ```{python}
 from mlsysim.solvers import DataModel
@@ -188,19 +189,19 @@ info(Data_demand=data_result.demand_bw,
      Bottleneck=data_result.bottleneck)
 ```
 
-For text-based training, the data pipeline is rarely the bottleneck --- tokenized text
-is compact. But for image or video training, this wall can dominate.
+For text-based training, the data pipeline is rarely the bottleneck, because tokenized
+text is compact. For image or video training, however, this wall can dominate.
 
-The data pipeline can keep up. The GPUs are compute-bound and well-fed. But are we
-spending our compute budget wisely? A 30-day run on 512 GPUs is an enormous investment
---- the scaling laws tell us whether we are allocating it optimally.
+Here the data pipeline keeps up, and the GPUs are compute-bound and well-fed. The
+remaining question is whether the compute budget is well spent. A 30-day run on 512 GPUs
+is a large investment, and the scaling laws show whether it is allocated optimally.
 
 ---
 
 ## 4. Algorithm (Walls 11--13): Compute-Optimal Budget
 
-Is our training budget compute-optimal? The Chinchilla scaling law says
-D = 20P (tokens = 20x parameters) for optimal allocation.
+The test of whether this training budget is compute-optimal is the Chinchilla scaling
+law, which says D = 20P (tokens = 20x parameters) for optimal allocation.
 
 ```{python}
 from mlsysim.solvers import ScalingModel
@@ -231,9 +232,9 @@ If the tokens-per-parameter ratio is significantly above or below 20, the traini
 budget is not optimally allocated. Over-training wastes compute; under-training wastes
 model capacity.
 
-So far, everything looks manageable: compute-bound GPUs, adequate data pipeline,
-reasonable training budget. If we throw 512 GPUs at this, we should scale linearly,
-right? The fleet-level analysis reveals what single-node reasoning misses.
+Up to this point, the single-node indicators look manageable: compute-bound GPUs, adequate data pipeline,
+reasonable training budget. Single-node reasoning would predict linear scaling across
+512 GPUs. The fleet-level analysis reveals what that reasoning misses.
 
 ---
 
@@ -278,10 +279,10 @@ info(Fleet_MTBF=rel_result.fleet_mtbf.to('hour'),
 ```
 
 At 512 GPUs, the cluster MTBF shrinks significantly. Checkpoint overhead becomes a
-non-trivial fraction of wall-clock time --- this is the "hidden cost" that single-node
+non-trivial fraction of wall-clock time. This overhead is the "hidden cost" that single-node
 analysis misses entirely.
 
-The reliability analysis tells us HOW OFTEN the cluster fails. But failures cost money ---
+The reliability analysis shows *how often* the cluster fails. Failures cost money, however,
 and so does the energy to keep 512 GPUs running for 30 days. The operational domain
 quantifies these costs.
 
@@ -328,8 +329,8 @@ info(IT_Energy=sust_result.it_energy_kwh.to('MWh'),
 ```
 
 Quebec's hydroelectric grid makes this one of the lowest-carbon training locations in the
-world. The same run in Poland (coal-heavy grid) would produce dramatically more CO2 ---
-infrastructure geography is a first-class engineering variable.
+world. The same run in Poland (coal-heavy grid) would produce dramatically more CO2,
+which makes infrastructure geography a first-class engineering variable.
 
 ---
 
@@ -378,8 +379,8 @@ info("Synthesis (200ms per-GPU training step target)",
 ## 8. Summary Table: The Complete Picture
 
 We have now traced a single workload through all six domains. Each solver answered one
-question in isolation. But the systems engineer's job is synthesis: seeing the complete
-picture at once. The table below is that picture --- and its most important property is
+question in isolation. The systems engineer's job, however, is synthesis: seeing the complete
+picture at once. The table below is that picture, and its most important property is
 that no single row captures the full story.
 
 ```{python}
@@ -401,18 +402,18 @@ table(["Domain", "Solver", "Key Metric", "Binding Wall"], summary_rows, "<<>>")
 ::: {.callout-important}
 ## Key Insight
 
-**No single solver captures the full picture --- the systems view emerges from composition.**
+**No single solver captures the full picture; the systems view emerges from composition.**
 This end-to-end trace exercises 12 of 22 walls through a single model. The per-GPU binding
 constraint is compute (Wall 1), but the **hidden costs** only appear at fleet scale:
 checkpoint overhead (Wall 19) consumes wall-clock time proportional to the MTBF-driven
 checkpoint frequency, and infrastructure geography (Quebec vs. Poland) can change the
 carbon footprint by 40x (as [Tutorial 7](07_geography.qmd) demonstrated). A complete
-systems analysis is not one solver run --- it is the composition of all six domains.
+systems analysis is not one solver run but the composition of all six domains.
 :::
 
 ---
 
-## Your Turn
+## Practice
 
 ::: {.callout-caution}
 ## Exercises
@@ -436,8 +437,8 @@ number of H100 GPUs needed at 40% MFU. Verify with the distributed solver that t
 communication overhead is acceptable at that scale.
 
 **Exercise 4: Propose a design change.**
-Using the full-stack analysis, identify the single highest-leverage change — hardware
-upgrade, parallelism strategy, region change, or precision change — that would reduce
+Using the full-stack analysis, identify the single highest-leverage change (hardware
+upgrade, parallelism strategy, region change, or precision change) that would reduce
 TCO by at least 20%. Re-run the relevant solvers with your proposed change and compute
 the new TCO. *Write one paragraph justifying why this change has the largest impact,
 referencing at least two domains from the summary table.*
@@ -462,7 +463,7 @@ optimal interval = sqrt(2 * delta * MTBF).)
   40x and TCO by 20--30%
 - **The summary table** is the deliverable: one row per domain, solver, key metric, and
   binding wall
-- **12 of 22 walls** are exercised through a single model-fleet pair --- this is what a
+- **12 of 22 walls** are exercised through a single model-fleet pair, which is what a
   complete analysis looks like
 :::
 
@@ -470,7 +471,7 @@ optimal interval = sqrt(2 * delta * MTBF).)
 
 ## Next Steps
 
-- **[Sensitivity Analysis](09_sensitivity.qmd)** --- Dive deeper into the Analysis domain solvers
-- **[GPU vs. Wafer-Scale](10_gpu_vs_wafer.qmd)** --- See how architecture shifts the binding wall
-- **[Geography of AI](07_geography.qmd)** --- Explore how datacenter location changes sustainability
-- **[The \$9 Million GPU](08_nine_million_dollar.qmd)** --- Deep dive into TCO modeling
+- **[Sensitivity Analysis](09_sensitivity.qmd)**: Dive deeper into the Analysis domain solvers
+- **[GPU vs. Wafer-Scale](10_gpu_vs_wafer.qmd)**: See how architecture shifts the binding wall
+- **[Geography of AI](07_geography.qmd)**: Explore how datacenter location changes sustainability
+- **[The \$9 Million GPU](08_nine_million_dollar.qmd)**: Deep dive into TCO modeling

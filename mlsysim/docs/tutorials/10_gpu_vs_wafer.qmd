@@ -1,43 +1,43 @@
 ---
 title: "GPU vs. Wafer-Scale"
-subtitle: "Cerebras eliminates the memory wall --- then hits a completely different one."
-description: "Compare conventional GPU inference to Cerebras weight-streaming silicon. The binding constraint shifts from HBM bandwidth to injection bandwidth --- a qualitative regime change, not just a quantitative improvement."
+subtitle: "Cerebras eliminates the memory wall, then hits a completely different one."
+description: "Compare conventional GPU inference to Cerebras weight-streaming silicon. The binding constraint shifts from HBM bandwidth to injection bandwidth: a qualitative regime change, not only a quantitative improvement."
 categories: ["analysis", "advanced"]
 ---
 
 ## The Question
 
-Can a fundamentally different architecture change *which* wall binds? GPUs are
+A fundamentally different architecture can change *which* wall binds. GPUs are
 **weight-stationary**: weights live in HBM, and the bottleneck is HBM bandwidth.
 The Cerebras WSE-3 takes the opposite approach: it is **activation-stationary**,
 holding activations on 44 GB of on-wafer SRAM and streaming weights from external
-MemoryX nodes. Does this eliminate the memory wall --- or just move it somewhere else?
+MemoryX nodes. Does this eliminate the memory wall, or does it move the wall somewhere else?
 
 ::: {.callout-note}
 ## Prerequisites
 Complete [Tutorial 0: Hello, Roofline](00_hello_roofline.qmd),
 [Tutorial 1: The Memory Wall](01_memory_wall.qmd), and
-[Tutorial 9: Sensitivity Analysis](09_sensitivity.qmd). You should understand
-roofline analysis, binding constraints, and sensitivity-based investment decisions.
+[Tutorial 9: Sensitivity Analysis](09_sensitivity.qmd). This tutorial assumes familiarity
+with roofline analysis, binding constraints, and sensitivity-based investment decisions.
 :::
 
 ::: {.callout-note}
-## What You Will Learn
+## Learning Objectives
 
 - **Compare** GPU and Cerebras architectures on the same workload using different solvers
 - **Identify** that the binding constraint **shifts** from HBM bandwidth to injection bandwidth
 - **Compute** the optimal batch size B* where injection and compute overlap perfectly
-- **Explain** why this is a qualitative regime change, not just a quantitative speedup
+- **Explain** why this is a qualitative regime change, not only a quantitative speedup
 :::
 
 ::: {.callout-tip}
 ## Background: Two Philosophies of Memory
 
 Conventional GPUs use a two-level memory hierarchy: fast but small on-chip SRAM
-(registers, L1/L2 cache) and large but slower off-chip HBM. The fundamental insight
-of wafer-scale computing is: what if you made the chip large enough that SRAM alone
-could hold the working set? The Cerebras WSE-3 is an entire silicon wafer — 46,225 mm²
-vs. ~800 mm² for an H100 die — with 44 GB of on-wafer SRAM distributed across 900,000
+(registers, L1/L2 cache) and large but slower off-chip HBM. The central idea
+of wafer-scale computing is to make the chip large enough that SRAM alone can hold the
+working set. The Cerebras WSE-3 is an entire silicon wafer (46,225 mm²
+vs. ~800 mm² for an H100 die) with 44 GB of on-wafer SRAM distributed across 900,000
 cores.
 
 **GPU (weight-stationary):** Model weights live in HBM. At each decode step, the entire
@@ -45,8 +45,8 @@ model streams from HBM to the compute units. Activations are small and transient
 Bottleneck: HBM bandwidth.
 
 **Cerebras WSE-3 (activation-stationary):** Activations and KV-cache live on the 44 GB
-of on-wafer SRAM. But 44 GB cannot hold a 350 GB model, so weights must stream in
-layer-by-layer from external **MemoryX nodes** — dedicated memory boxes connected to the
+of on-wafer SRAM. However, 44 GB cannot hold a 350 GB model, so weights must stream in
+layer-by-layer from external **MemoryX nodes**, dedicated memory boxes connected to the
 wafer via a high-bandwidth interconnect. Bottleneck: injection bandwidth from MemoryX.
 
 Same model, same math, completely different performance physics.
@@ -73,7 +73,7 @@ from mlsysim.solvers import WeightStreamingModel, SensitivitySolver
 
 ## 2. GPU Baseline: H100 Inference
 
-We use **GPT-3 (175B)** --- a model large enough that architectural differences in how
+The workload is **GPT-3 (175B)**, a model large enough that architectural differences in how
 weights reach compute become the dominant factor. At batch size 1, each decode step must
 reload the entire model from HBM.
 
@@ -102,14 +102,14 @@ info("GPU Baseline",
 
 At batch size 1, GPT-3 requires 2 FLOPs per parameter per token but must load all 175B
 parameters (350 GB at fp16) from HBM. The arithmetic intensity is approximately
-1 FLOP/byte --- far below the H100's ridge point. The 3.35 TB/s HBM bandwidth, not the
+1 FLOP/byte, far below the H100's ridge point. The 3.35 TB/s HBM bandwidth, not the
 989 TFLOP/s compute, determines the decode latency.
 
 ---
 
 ## 3. Cerebras Path: Weight Streaming on WSE-3
 
-Now analyze the same model on the Cerebras CS-3. Instead of loading weights from HBM,
+The next cell analyzes the same model on the Cerebras CS-3. Instead of loading weights from HBM,
 the WSE-3 streams them from MemoryX nodes over a dedicated interconnect.
 
 ```{python}
@@ -166,14 +166,14 @@ The GPU and WSE-3 hit **fundamentally different walls**:
 - **GPU**: Limited by HBM bandwidth (~3.35 TB/s)
 - **WSE-3**: Limited by MemoryX injection bandwidth (~1.2 TB/s)
 
-This means the optimization strategies are completely different. For the GPU, you optimize
-by reducing bytes loaded (quantization, smaller models). For the WSE-3, you optimize by
-overlapping injection with compute (increasing batch size toward B*).
+The optimization strategies therefore differ completely. On the GPU, optimization reduces
+the bytes loaded (quantization, smaller models). On the WSE-3, it overlaps injection with
+compute (increasing batch size toward B*).
 
 ::: {.callout-important}
 ## Key Insight
 
-**The binding constraint is not a property of the model --- it is a property of the
+**The binding constraint is not a property of the model but a property of the
 model-architecture pair.** GPUs are bound by HBM bandwidth. Cerebras WSE-3 eliminates
 the HBM wall entirely (weights never touch HBM) but introduces an injection bandwidth
 wall from MemoryX. This is a **qualitative regime change**: the wall *shifted*, it did
@@ -186,8 +186,8 @@ but "which wall does it move, and what new wall does it create?"
 ## 5. The SRAM Ceiling: Finding B*
 
 The WSE-3 has a unique optimization knob: batch size controls whether compute or injection
-dominates. At the optimal batch size B*, the two pipelines overlap perfectly. But
-activations must fit in 44 GB of on-wafer SRAM --- this is the SRAM ceiling.
+dominates. At the optimal batch size B*, the two pipelines overlap perfectly.
+Activations, however, must fit in 44 GB of on-wafer SRAM, and that limit is the SRAM ceiling.
 
 ```{python}
 rows = []
@@ -241,14 +241,14 @@ print("Different architectures -> different walls -> different strategies.")
 ::: {.callout-warning}
 ## The deeper lesson
 
-When evaluating novel architectures (wafer-scale, photonic, analog, neuromorphic), do not
-ask "Is it faster?" Ask: **"Which wall does it move, and what new wall does it create?"**
+When evaluating novel architectures (wafer-scale, photonic, analog, neuromorphic), the
+useful question is not "Is it faster?" but **"Which wall does it move, and what new wall does it create?"**
 Every architecture eliminates one bottleneck by introducing another.
 :::
 
 ---
 
-## Your Turn
+## Practice
 
 ::: {.callout-caution}
 ## Exercises
@@ -285,7 +285,7 @@ Which is more cost-effective at 100 queries per second?
 - **Weight streaming** inverts the GPU memory hierarchy: activations stay on-wafer (SRAM),
   weights stream in from external memory nodes
 - **The binding constraint shifts** from HBM bandwidth (GPU) to injection bandwidth
-  (WSE-3) --- a qualitative change in system physics
+  (WSE-3), a qualitative change in system physics
 - **Optimal batch size B*** exists for weight-streaming architectures, perfectly overlapping
   injection with compute
 - **Architecture evaluation** requires asking "which wall moves?" not "which is faster?"
@@ -295,7 +295,7 @@ Which is more cost-effective at 100 queries per second?
 
 ## Next Steps
 
-- **[Sensitivity Analysis](09_sensitivity.qmd)** --- Dive deeper into partial derivatives and inverse synthesis
-- **[Full-Stack Audit](12_full_stack_audit.qmd)** --- Compose all solvers into a complete systems analysis
-- **[The Memory Wall](01_memory_wall.qmd)** --- Revisit the foundational GPU memory wall tutorial
-- **[Silicon Zoo](../zoo/hardware.qmd)** --- Compare the Cerebras CS-3, GPU fleet, and other accelerators
+- **[Sensitivity Analysis](09_sensitivity.qmd)**: Dive deeper into partial derivatives and inverse synthesis
+- **[Full-Stack Audit](12_full_stack_audit.qmd)**: Compose all solvers into a complete systems analysis
+- **[The Memory Wall](01_memory_wall.qmd)**: Revisit the foundational GPU memory wall tutorial
+- **[Silicon Zoo](../zoo/hardware.qmd)**: Compare the Cerebras CS-3, GPU fleet, and other accelerators

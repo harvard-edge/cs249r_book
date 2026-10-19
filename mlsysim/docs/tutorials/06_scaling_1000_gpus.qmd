@@ -1,37 +1,37 @@
 ---
 title: "Scaling to 1000 GPUs"
-subtitle: "At 1024 GPUs, communication overhead is the cost everyone talks about. But is it the dominant one?"
+subtitle: "At 1024 GPUs, communication overhead is the cost everyone talks about. Is it the dominant one?"
 description: "Sweep from 8 to 1024 GPUs and discover which overhead actually dominates at scale. The answer is not what most engineers expect."
 categories: ["fleet", "advanced"]
 ---
 
 ## The Question
 
-You have a 70B-parameter model and a budget for 1024 H100 GPUs. Communication overhead
-(AllReduce, pipeline bubbles) will eat some of your scaling efficiency — everyone knows that.
-But is communication really the dominant cost at scale? Or is something else quietly stealing
-more of your training time?
+A team has a 70B-parameter model and a budget for 1024 H100 GPUs. Communication overhead
+(AllReduce, pipeline bubbles) will consume some of the scaling efficiency, as every
+distributed-training engineer expects. Is communication the dominant cost at scale, or is
+something else quietly taking more of the training time?
 
 ::: {.callout-note}
 ## Prerequisites
 Complete [Tutorial 0: Hello, Roofline](00_hello_roofline.qmd) and
-[Tutorial 1: The Memory Wall](01_memory_wall.qmd). You should understand
+[Tutorial 1: The Memory Wall](01_memory_wall.qmd). This tutorial assumes familiarity with
 memory-bound vs. compute-bound regimes and the roofline model.
 :::
 
 ::: {.callout-note}
-## What You Will Learn
+## Learning Objectives
 
 - **Calculate** scaling efficiency across GPU counts from 8 to 1024
 - **Predict** cluster Mean Time Between Failures (MTBF) using the reliability model
 - **Compare** communication overhead vs. checkpoint overhead over a 30-day training run
-- **Explain** why reliability — not communication — is the dominant cost at scale
+- **Explain** why reliability, not communication, is the dominant cost at scale
 :::
 
 ::: {.callout-tip}
 ## Background: Cluster Reliability and the Young-Daly Formula
 
-At scale, hardware failures are not rare events — they are routine. If a single GPU has a
+At scale, hardware failures are not rare events; they are routine. If a single GPU has a
 Mean Time To Failure (MTTF) of 50,000 hours, a cluster of N GPUs has a collective MTBF of
 approximately MTTF / N. At 512 GPUs, that is ~97 hours. At 1024 GPUs, it drops further.
 
@@ -43,9 +43,9 @@ $$T_{\text{opt}} = \sqrt{2 \cdot \delta \cdot M}$$
 
 where $\delta$ is the time to write one checkpoint and $M$ is the cluster MTBF.
 This assumes failures arrive as a Poisson process (exponentially distributed inter-arrival
-times) and that on failure, work since the last checkpoint is lost — on average, half
-the checkpoint interval. The cost of checkpointing is not just the write time — it is
-also this rollback time.
+times) and that on failure, work since the last checkpoint is lost (on average, half
+the checkpoint interval). The cost of checkpointing is therefore not only the write time
+but also this rollback time.
 :::
 
 ---
@@ -68,8 +68,8 @@ from mlsysim import Engine
 
 ## 2. Single-Node Baseline
 
-Let's start with the simplest case: 8 GPUs in a single DGX node. No network
-fabric, no cross-node communication. This is our ceiling for scaling efficiency.
+The simplest case is 8 GPUs in a single DGX node, with no network fabric and no
+cross-node communication. This configuration sets the ceiling for scaling efficiency.
 
 ```{python}
 from mlsysim import Models, Systems
@@ -102,9 +102,9 @@ info("Single-Node Baseline",
 ```
 
 With 8 GPUs on a single node, NVLink provides enough bandwidth that communication
-overhead is small. This is our baseline — near-perfect scaling.
+overhead is small. This near-perfect scaling is the baseline.
 
-Note: This tutorial uses the three dimensions of **3D parallelism**:
+This tutorial uses the three dimensions of **3D parallelism**:
 
 - **TP (Tensor Parallelism)** = 8: splits each layer's weight matrices across 8 GPUs within a node, communicating via NVLink
 - **PP (Pipeline Parallelism)** = 1: no pipeline stages (the model is not split across sequential stages), so no pipeline bubbles
@@ -118,8 +118,8 @@ introduces pipeline bubble overhead (idle time proportional to 1/PP stages).
 
 ## 3. Scale Sweep: 8 to 1024 GPUs
 
-Now let's sweep across cluster sizes. At each scale, we measure communication
-overhead (AllReduce + pipeline bubbles) as a fraction of total step time.
+The sweep below covers a range of cluster sizes. At each scale, it measures
+communication overhead (AllReduce + pipeline bubbles) as a fraction of total step time.
 
 ```{python}
 gpu_counts = [8, 32, 64, 128, 256, 512, 1024]
@@ -154,22 +154,22 @@ table(["GPUs", "Nodes", "Comm (ms)", "Bubble (ms)", "Efficiency"], rows)
 Communication overhead grows with GPU count, but scaling efficiency degrades
 gradually. This is **Amdahl's Law** in action: if the serial fraction (communication)
 is $f$, the maximum speedup at $N$ GPUs is $1 / (f + (1-f)/N)$. At 1024 GPUs, even a
-5% serial fraction caps ideal speedup at ~20×, not 1024×. But if communication were the
+5% serial fraction caps ideal speedup at ~20×, not 1024×. If communication were the
 whole story, large-scale training would be predictable and manageable.
 
-If communication were the only overhead, we could predict scaling efficiency from
-network bandwidth alone and call it a day. The numbers above look manageable — even at
-1024 GPUs, communication takes a modest fraction of each step.
+If communication were the only overhead, scaling efficiency could be predicted from
+network bandwidth alone. The numbers above look manageable. Even at 1024 GPUs,
+communication takes a modest fraction of each step.
 
-But this analysis assumed something we have not examined: that the cluster stays up for
+This analysis, however, assumed something we have not examined: that the cluster stays up for
 the entire training run. Communication is not the whole story.
 
 ---
 
 ## 4. The Reliability Reveal
 
-Let's now ask a different question: how often does a 512-GPU or 1024-GPU cluster
-experience a hardware failure? The `ReliabilityModel` models cluster-level MTBF.
+A different question is how often a 512-GPU or 1024-GPU cluster experiences a
+hardware failure. The `ReliabilityModel` models cluster-level MTBF.
 
 ```{python}
 from mlsysim.solvers import ReliabilityModel
@@ -208,8 +208,8 @@ rolls back to the last checkpoint, discarding all work in between.
 
 ## 5. The Hidden Cost: Communication vs. Checkpoints
 
-Now the key comparison. Over a 30-day training run, how much total time is lost
-to communication overhead vs. checkpoint overhead?
+The key comparison is how much total time a 30-day training run loses to
+communication overhead vs. checkpoint overhead.
 
 ```{python}
 from mlsysim.solvers import CheckpointModel
@@ -257,8 +257,8 @@ table(["GPUs", "Comm Loss (h)", "Ckpt Loss (h)", "Ckpt/Comm"], rows)
 the cluster MTBF drops low enough that frequent checkpointing and failure rollbacks
 consume far more training time than AllReduce communication. A seemingly well-tuned
 distributed training job can lose 10-30% of its wall-clock time to checkpoint I/O
-and wasted work from rollbacks — costs that are invisible if you only measure
-communication efficiency. The first question at scale is not "how fast is my
+and wasted work from rollbacks. These costs are invisible to an engineer who measures
+only communication efficiency. The first question at scale is not "how fast is my
 network?" but "how often does something break?"
 :::
 
@@ -266,9 +266,8 @@ network?" but "how often does something break?"
 
 ## 6. The Checkpoint Size Problem
 
-The reason checkpoint overhead is so painful is that modern models produce enormous
-checkpoint files. Let's quantify the checkpoint size for Llama-3 70B with the Adam
-optimizer:
+Checkpoint overhead is costly because modern models produce large checkpoint files.
+The cell below computes the checkpoint size for Llama-3 70B with the Adam optimizer:
 
 ```{python}
 ckpt_result = ckpt_solver.solve(
@@ -292,7 +291,7 @@ Young-Daly interval for large clusters, the burden becomes a dominant factor.
 
 ---
 
-## Your Turn
+## Practice
 
 ::: {.callout-caution}
 ## Exercises
@@ -338,7 +337,7 @@ for each component.)
 
 ## Next Steps
 
-- **[Geography is a Systems Variable](07_geography.qmd)** -- Discover that location changes carbon footprint by 40$\times$
-- **[The $9M Question](08_nine_million_dollar.qmd)** -- Quantify the infrastructure cost of chain-of-thought reasoning
-- **[Sensitivity Analysis](09_sensitivity.qmd)** -- Use sensitivity sweeps to find which parameter matters most
-- **[Full Stack Audit](12_full_stack_audit.qmd)** -- Combine all solvers into a complete system analysis
+- **[Geography is a Systems Variable](07_geography.qmd)**: Discover that location changes carbon footprint by 40$\times$
+- **[The $9M Question](08_nine_million_dollar.qmd)**: Quantify the infrastructure cost of chain-of-thought reasoning
+- **[Sensitivity Analysis](09_sensitivity.qmd)**: Use sensitivity sweeps to find which parameter matters most
+- **[Full Stack Audit](12_full_stack_audit.qmd)**: Combine all solvers into a complete system analysis

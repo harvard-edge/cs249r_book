@@ -4,7 +4,7 @@ subtitle: "The First-Principles Equations Behind Every MLSys·im Solver"
 ---
 
 MLSys·im avoids "black box" heuristics. Every output traces back to one of the equations below.
-Before diving into code, read this page to understand *what* the solvers are computing and *why*.
+Read this page before the code to understand *what* the solvers compute and *why*.
 
 ::: {.callout-tip}
 ## How to read this page
@@ -20,7 +20,7 @@ or follow the **Slide Deck** links to the full lecture treatment with worked exa
 **Slide Deck:** [Hardware Acceleration (Vol I, Ch 11)]({{< var slides_latest >}}/vol1_11_hw_acceleration.pdf){target="_blank"}
 
 ::: {.callout-note appearance="simple" icon=false}
-**Intuition:** Hardware has two speed limits — how fast it can compute (FLOP/s) and how fast it can feed data to the compute units (bytes/s). Your actual throughput is whichever limit you hit first. This is why we take the *maximum* of two terms, not their sum.
+**Intuition:** Hardware has two speed limits: how fast it can compute (FLOP/s) and how fast it can feed data to the compute units (bytes/s). Actual throughput is set by whichever limit is reached first. This is why we take the *maximum* of two terms, not their sum.
 :::
 
 ### 1.1 Latency Equation
@@ -63,7 +63,7 @@ A dense layer with 2048→512, FP16, batch=1:
 - **Arithmetic Intensity:** $2.1\text{M} / 2.1\text{MB} = 1$ FLOP/byte
 - **H100 Ridge Point:** $989\text{ TF} / 3.35\text{ TB/s} \approx 296$ FLOP/byte
 
-At $I = 1 \ll 296 = I^*$, this workload is **deeply memory-bound** — the H100 achieves <1% peak utilization. Increasing to batch=64 raises $I$ to ~64, recovering significant throughput.
+At $I = 1 \ll 296 = I^*$, this workload is **deeply memory-bound**. The H100 achieves <1% peak utilization. Increasing to batch=64 raises $I$ to ~64, recovering significant throughput.
 
 Source: Slide deck exercise, Vol I Ch 11.
 :::
@@ -75,7 +75,7 @@ Source: Slide deck exercise, Vol I Ch 11.
 *Implemented in [`mlsysim.solvers.DistributedModel`](api/solvers.DistributedModel.qmd).*
 **Slide Decks:** [Distributed Training (Vol II, Ch 6)]({{< var slides_latest >}}/vol2_06_distributed_training.pdf){target="_blank"} | [Collective Communication (Vol II, Ch 5)]({{< var slides_latest >}}/vol2_05_collective_communication.pdf){target="_blank"}
 
-Real distributed training involves complex interactions between computation, communication, and scheduling. Empirical profiling requires access to expensive multi-GPU clusters and takes hours per configuration. MLSys·im decomposes the problem into independent overheads — each governed by a closed-form equation — letting you evaluate thousands of parallelism configurations in seconds.
+Real distributed training involves complex interactions between computation, communication, and scheduling. Empirical profiling requires access to expensive multi-GPU clusters and takes hours per configuration. MLSys·im decomposes the problem into independent overheads, each governed by a closed-form equation, so thousands of parallelism configurations can be evaluated in seconds.
 
 ### 2.1 Parallelism Decomposition
 
@@ -94,13 +94,13 @@ $$
 
 ### 2.2 Scaling Efficiency
 
-The solver computes an overall **scaling efficiency** — the fraction of ideal linear speedup actually achieved:
+The solver computes an overall **scaling efficiency**, the fraction of ideal linear speedup actually achieved:
 
 $$
 \eta_{\text{scale}} = \frac{T_{\text{compute}}}{T_{\text{compute}} + T_{\text{dp}} + T_{\text{tp}} + T_{\text{ep}} + T_{\text{bubble}}}
 $$
 
-An efficiency of 80% on 256 GPUs means you get the throughput of ~205 GPUs; the rest is lost to communication and pipeline bubbles. For the GPT-3 175B reference job (eight-way tensor and eight-way pipeline parallelism on HDR InfiniBand, fixed GPT-3 batch of 1,536 sequences), the solver predicts about 89% at 64 GPUs, 87% at 256, 83% at 1,024, and 56% at 8,192, where the pipeline bubble dominates. Production systems with larger batches and interleaved pipelines retain more. MegaScale's 175B MFU falls only from 59.1% to 55.2% between 3,072 and 12,288 GPUs [@jiang2024megascale].
+An efficiency of 80% on 256 GPUs delivers the throughput of ~205 GPUs; the rest is lost to communication and pipeline bubbles. For the GPT-3 175B reference job (eight-way tensor and eight-way pipeline parallelism on HDR InfiniBand, fixed GPT-3 batch of 1,536 sequences), the solver predicts about 89% at 64 GPUs, 87% at 256, 83% at 1,024, and 56% at 8,192, where the pipeline bubble dominates. Production systems with larger batches and interleaved pipelines retain more. MegaScale's 175B MFU falls only from 59.1% to 55.2% between 3,072 and 12,288 GPUs [@jiang2024megascale].
 
 ### 2.3 Ring All-Reduce (Data Parallelism) {#sec-allreduce}
 
@@ -121,7 +121,7 @@ $$
 | $\alpha$ | Per-message startup latency |
 | $\beta$ | Per-link bandwidth (bytes/s) |
 
-**Why ring all-reduce scales well:** The bandwidth term $\frac{2(N-1)}{N} \cdot \frac{M}{\beta}$ approaches $\frac{2M}{\beta}$ as $N$ grows — asymptotically **constant** in the number of GPUs. Total data transferred per GPU is always ~$2M$, regardless of cluster size. The latency term $2(N-1) \cdot \alpha$ grows linearly, but is negligible for large messages.
+**Why ring all-reduce scales well:** The bandwidth term $\frac{2(N-1)}{N} \cdot \frac{M}{\beta}$ approaches $\frac{2M}{\beta}$ as $N$ grows, so it is asymptotically **constant** in the number of GPUs. Total data transferred per GPU is always ~$2M$, regardless of cluster size. The latency term $2(N-1) \cdot \alpha$ grows linearly, but is negligible for large messages.
 
 MLSys·im also implements **tree all-reduce** (latency-optimal for small messages):
 
@@ -138,7 +138,7 @@ A 70B-parameter model in FP16 produces a 140 GB gradient. On a 1,024-GPU cluster
 
 - **Bandwidth term:** $\frac{2 \times 1023}{1024} \times \frac{140}{50} \approx 5.6$ s
 - **Latency term:** $2 \times 1023 \times 2\;\mu\text{s} \approx 4$ ms (negligible)
-- **Total:** ~5.6 s — bandwidth-dominated, as expected for large messages.
+- **Total:** ~5.6 s, bandwidth-dominated as expected for large messages.
 
 Upgrading from 100 Gb Ethernet (~12 GB/s) to NDR (~50 GB/s) recovers 10–30% scaling efficiency.
 :::
@@ -147,10 +147,10 @@ Upgrading from 100 Gb Ethernet (~12 GB/s) to NDR (~50 GB/s) recovers 10–30% sc
 
 **Slide Deck:** [Distributed Training (Vol II, Ch 6)]({{< var slides_latest >}}/vol2_06_distributed_training.pdf){target="_blank"}
 
-**Pipeline parallelism** splits a model's layers across $P$ stages. At the start of each batch, downstream stages sit idle while upstream stages produce output — the **pipeline bubble**.
+**Pipeline parallelism** splits a model's layers across $P$ stages. At the start of each batch, downstream stages sit idle while upstream stages produce output. This idle time is the **pipeline bubble**.
 
 ::: {.callout-note appearance="simple" icon=false}
-**Intuition:** You cannot change the speed of light, but you *can* change the software schedule. By assigning multiple **virtual stages** ($V$) to each GPU, we interleave execution: while a GPU waits for one virtual stage's next microbatch, it computes a different virtual stage's microbatch, hiding latency behind useful work.
+**Intuition:** The speed of light is fixed, but the software schedule *can* change. Assigning multiple **virtual stages** ($V$) to each GPU interleaves execution: while a GPU waits for one virtual stage's next microbatch, it computes a different virtual stage's microbatch, hiding latency behind useful work.
 :::
 
 With $P$ pipeline stages, $M$ microbatches, and $V$ virtual stages per GPU:
@@ -164,14 +164,14 @@ $$
 | $P=4, M=16, V=1$ | $3/19 = 15.8\%$ |
 | $P=4, M=16, V=2$ | $3/35 = 8.6\%$ |
 | $P=8, M=32, V=1$ | $7/39 = 17.9\%$ |
-| $P=16, M=16, V=1$ | $15/31 = 48.4\%$ — unacceptable |
+| $P=16, M=16, V=1$ | $15/31 = 48.4\%$ (unacceptable) |
 
-To keep the bubble below 5% with standard 1F1B ($V=1$), you need $M \geq 19 \times (P - 1)$ microbatches. Interleaved schedules ($V \geq 2$) cut this requirement proportionally.
+Keeping the bubble below 5% with standard 1F1B ($V=1$) requires $M \geq 19 \times (P - 1)$ microbatches. Interleaved schedules ($V \geq 2$) cut this requirement proportionally.
 
 ### 2.5 Expert Parallelism (Mixture of Experts) {#sec-moe}
 
 ::: {.callout-note appearance="simple" icon=false}
-**Intuition:** Dense Transformers obey a strict "Iron Law": doubling parameters doubles both memory *and* compute. Mixture of Experts (MoE) breaks this law by routing tokens to specific expert subnetworks. The **memory bound** is set by the massive *total* parameters, but the **compute bound** is set by the much smaller *active* parameters. The physical tradeoff is a network bandwidth tax (All-to-All communication) to route tokens across the cluster.
+**Intuition:** Dense Transformers obey a strict "Iron Law": doubling parameters doubles both memory *and* compute. Mixture of Experts (MoE) breaks this law by routing tokens to specific expert subnetworks. The **memory bound** is set by the *total* parameters, but the **compute bound** is set by the much smaller *active* parameters. The physical tradeoff is a network bandwidth tax (All-to-All communication) to route tokens across the cluster.
 :::
 
 When $\text{EP} > 1$, the solver adds an **All-to-All** communication penalty for token routing:
@@ -180,7 +180,7 @@ $$
 T_{\text{all-to-all}} = (N-1) \cdot \alpha \;+\; \frac{N-1}{N} \cdot \frac{M}{\beta}
 $$
 
-where $N$ is the EP degree. Compared to AllReduce, All-to-All creates $O(N^2)$ point-to-point connections, making it **latency-sensitive** — a 4 KB token routing message is latency-bound, while a 140 GB gradient sync is bandwidth-bound.
+where $N$ is the EP degree. Compared to AllReduce, All-to-All creates $O(N^2)$ point-to-point connections, making it **latency-sensitive**. A 4 KB token routing message is latency-bound, while a 140 GB gradient sync is bandwidth-bound.
 
 MoE routing is rarely perfectly balanced. MLSys·im exposes a single routing-imbalance factor $\gamma \ge 1$:
 
@@ -213,7 +213,7 @@ $$
 | $P$ | Number of model parameters |
 | $D$ | Number of training tokens |
 
-The factor of 6 comes from: 2 FLOPs per parameter per token (forward pass multiply-accumulate) × 3 passes (forward + backward for weights + backward for activations). Combined with the roofline model ([Section 1](#sec-roofline)), this gives training time:
+The factor of 6 is 2 FLOPs per parameter per token (forward pass multiply-accumulate) × 3 passes (forward + backward for weights + backward for activations). Combined with the roofline model ([Section 1](#sec-roofline)), this gives training time:
 
 $$
 T_{\text{train}} = \frac{6PD}{\text{Peak\_FLOP/s} \times \eta}
@@ -259,7 +259,7 @@ Tensor, pipeline, and expert parallelism first shard the model states across mod
 *Implemented in [`mlsysim.solvers.ServingModel`](api/solvers.ServingModel.qmd).*
 **Slide Decks:** [Model Serving (Vol I, Ch 13)]({{< var slides_latest >}}/vol1_13_model_serving.pdf){target="_blank"} | [Inference at Scale (Vol II, Ch 10)]({{< var slides_latest >}}/vol2_10_inference.pdf){target="_blank"}
 
-LLM autoregressive inference has two physically distinct phases. Understanding which phase dominates is critical for capacity planning.
+LLM autoregressive inference has two physically distinct phases. Capacity planning depends on knowing which phase dominates.
 
 ### 4.1 Pre-fill Phase (Compute-Bound)
 
@@ -316,7 +316,7 @@ $$
 | $B$ | Batch size |
 | $b_{\text{elem}}$ | Bytes per element (2 for FP16/BF16) |
 
-The factor of 2 accounts for both the K and V tensors. With **Grouped-Query Attention** (GQA), $H_{\text{kv}} < H$, significantly reducing cache size — Llama-3 70B uses 8 KV heads vs. 64 query heads, an 8× reduction.
+The factor of 2 accounts for both the K and V tensors. With **Grouped-Query Attention** (GQA), $H_{\text{kv}} < H$, which reduces cache size. Llama-3 70B uses 8 KV heads vs. 64 query heads, an 8× reduction.
 
 ::: {.callout-tip collapse="true"}
 ## Worked Example: KV-Cache Capacity Planning
@@ -327,7 +327,7 @@ Llama-3 70B: 80 layers, 8 KV heads (GQA), $d_{\text{head}} = 128$, FP16:
 - **Batch=16, seq=4096:** $327\text{K} \times 16 \times 4096 = 21.5\text{ GB}$
 - **Batch=32, seq=4096:** $327\text{K} \times 32 \times 4096 = 43\text{ GB}$
 
-Weights (35 GB in FP16) + KV-cache (43 GB) = 78 GB — barely fits on an 80 GB H100. At batch=64 or longer contexts, you must shard across multiple GPUs.
+Weights (35 GB at INT4) + KV-cache (43 GB at FP16) = 78 GB, which barely fits on an 80 GB H100. At batch=64 or longer contexts, the model must be sharded across multiple GPUs.
 
 Source: Inference at Scale slides (Vol II, Ch 10).
 :::
@@ -448,7 +448,7 @@ $$
 C_{\text{total}} = C_{\text{training}} + C_{\text{serving}} \times T_{\text{deploy}} \times Q_{\text{rate}}
 $$
 
-A 70B model costing \$2M to train, serving 1M daily users at 50 requests/day, costs ~\$18M/year in inference — 9× the training cost in year one. This is why inference optimization (batching, quantization, speculative decoding) has outsized economic impact.
+A 70B model costing \$2M to train, serving 1M daily users at 50 requests/day, costs ~\$18M/year in inference, 9× the training cost in year one. This is why inference optimization (batching, quantization, speculative decoding) has outsized economic impact.
 
 ---
 
@@ -463,7 +463,7 @@ $$
 E = \text{IT\_Power} \times \text{Hours} \times \text{PUE}
 $$
 
-**Power Usage Effectiveness** (PUE) accounts for cooling and facility overhead. A PUE of 1.0 is theoretical perfect efficiency; hyperscale datacenters achieve 1.05–1.10 (liquid-cooled) to 1.4–1.6 (air-cooled). The industry average is 1.58 — meaning 37% of energy goes to cooling and power distribution, not computation.
+**Power Usage Effectiveness** (PUE) accounts for cooling and facility overhead. A PUE of 1.0 is theoretical perfect efficiency; hyperscale datacenters achieve 1.05–1.10 (liquid-cooled) to 1.4–1.6 (air-cooled). The industry average is 1.58, meaning 37% of energy goes to cooling and power distribution, not computation.
 
 ### 5.2 Carbon Footprint
 
@@ -509,9 +509,9 @@ $$
 | Annual cost (80% util) | ~\$122K/node/yr | ~\$224K/node/yr |
 | Effective GPU-hour rate | ~\$2.40 | ~\$4.00 |
 
-**Break-even utilization:** ~55%. Below 55% sustained utilization, cloud is cheaper. At 20% utilization, on-prem costs ~\$6/GPU-hour — more expensive than cloud on-demand.
+**Break-even utilization:** ~55%. Below 55% sustained utilization, cloud is cheaper. At 20% utilization, on-prem costs ~\$6/GPU-hour, which is more expensive than cloud on-demand.
 
-The right metric is **cost per useful TFLOP-hour**, not cost per GPU-hour: an H100 delivers 6.3× the TFLOPS of an A100, so a higher sticker price may yield a lower effective cost.
+The right metric is **cost per useful TFLOP-hour**, not cost per GPU-hour. An H100 delivers 6.3× the TFLOPS of an A100, so a higher sticker price may yield a lower effective cost.
 
 Source: Compute Infrastructure slides (Vol II, Ch 2).
 :::
@@ -524,7 +524,7 @@ Source: Compute Infrastructure slides (Vol II, Ch 2).
 **Slide Deck:** [Fault Tolerance (Vol II, Ch 7)]({{< var slides_latest >}}/vol2_07_fault_tolerance.pdf){target="_blank"}
 
 ::: {.callout-note appearance="simple" icon=false}
-**Intuition:** When training on thousands of GPUs for months, hardware failures are a statistical certainty. If a node fails, you lose all progress since the last checkpoint. Checkpointing too often wastes time writing; checkpointing too rarely wastes time recomputing. The Young-Daly model finds the optimal balance.
+**Intuition:** When training on thousands of GPUs for months, hardware failures are a statistical certainty. If a node fails, the job loses all progress since the last checkpoint. Checkpointing too often wastes time writing; checkpointing too rarely wastes time recomputing. The Young-Daly model finds the optimal balance.
 :::
 
 ### 7.1 Cluster MTBF
@@ -593,7 +593,7 @@ $$
 P(\geq 1\text{ failure}) = 1 - e^{-T / \text{MTBF}}
 $$
 
-For a 30-day training run on a cluster with MTBF of 5 hours: $P = 1 - e^{-720/5} \approx 1.0$ — failure is virtually certain. This is why checkpointing ([Section 7](#sec-reliability)) is not optional at scale.
+For a 30-day training run on a cluster with MTBF of 5 hours: $P = 1 - e^{-720/5} \approx 1.0$, so failure is virtually certain. This is why checkpointing ([Section 7](#sec-reliability)) is not optional at scale.
 
 ---
 

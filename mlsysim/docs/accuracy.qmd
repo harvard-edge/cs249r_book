@@ -1,6 +1,6 @@
 ---
 title: "Accuracy & Validation"
-subtitle: "How Well Do MLSys·im Predictions Match Real Hardware?"
+subtitle: "How Closely MLSys·im Predictions Match Real Hardware"
 ---
 MLSys·im is a **first-order analytical model**. It predicts performance from closed-form equations, not from cycle-accurate simulation or empirical measurement. This page documents where those predictions are accurate, where they diverge, and what drives the gap.
 
@@ -59,7 +59,7 @@ safety:
 
 ## The Accuracy Hierarchy
 
-Not all MLSys·im predictions are created equal. The table below ranks prediction types from most to least accurate, so you know how much to trust each output.
+MLSys·im predictions differ in how far they can be trusted. The table below ranks prediction types from most to least accurate.
 
 | Prediction Type | Typical Accuracy | Why |
 |:---|:---:|:---|
@@ -78,7 +78,7 @@ Not all MLSys·im predictions are created equal. The table below ranks predictio
 
 ::: {.callout-tip}
 ## The golden rule
-Trust MLSys·im for **direction** and **classification**. Be cautious with **absolute numbers**. The model tells you *which* resource is the bottleneck and *which* configuration is better. It does not promise the exact millisecond.
+Trust MLSys·im for **direction** and **classification**. Be cautious with **absolute numbers**. The model identifies *which* resource is the bottleneck and *which* configuration is better. It does not promise the exact millisecond.
 :::
 
 ---
@@ -121,7 +121,7 @@ The underlying roofline model is documented in the [Hardware Acceleration slides
 
 ### Scaling efficiency direction (distributed training)
 
-The model correctly predicts how scaling efficiency changes as you vary DP/TP/PP configuration. The *relative* ranking of configurations is reliable even when absolute MFU values are off by ±10%. This is because the communication cost models (Ring AllReduce, Tree AllReduce, Hierarchical AllReduce) implement bandwidth-optimal lower bounds from Patarasuk & Mueller (2009), so the relative costs scale correctly.
+The model correctly predicts how scaling efficiency changes as the DP/TP/PP configuration varies. The *relative* ranking of configurations is reliable even when absolute MFU values are off by ±10%. This is because the communication cost models (Ring AllReduce, Tree AllReduce, Hierarchical AllReduce) implement bandwidth-optimal lower bounds from Patarasuk & Mueller (2009), so the relative costs scale correctly.
 
 See the [Distributed Training slides (Vol II, Ch 6)]({{< var slides_latest >}}/vol2_06_distributed_training.pdf){target="_blank"} for the 3D parallelism framework and scaling efficiency analysis.
 
@@ -131,11 +131,11 @@ The KV-cache formula ($\text{KV} = 2 \times L \times H_{\text{kv}} \times d_{\te
 
 ### Training memory breakdown
 
-`TrainingMemoryModel` separates weights, gradients, optimizer state, activations, and communication buffers. The first three terms are direct byte counts from the model size, precision, optimizer, and ZeRO stage. Activations are the approximate term: they depend on the selected checkpointing strategy and use coefficients from transformer activation-recomputation analysis [@korthikanti2023]. Treat the model as a memory feasibility and attribution tool: it tells you which term is responsible for pressure, then empirical framework profiling can refine the activation term for a specific implementation.
+`TrainingMemoryModel` separates weights, gradients, optimizer state, activations, and communication buffers. The first three terms are direct byte counts from the model size, precision, optimizer, and ZeRO stage. Activations are the approximate term: they depend on the selected checkpointing strategy and use coefficients from transformer activation-recomputation analysis [@korthikanti2023]. Treat the model as a memory feasibility and attribution tool: it identifies which term is responsible for pressure, and empirical framework profiling can then refine the activation term for a specific implementation.
 
 ### Serving capacity planning
 
-`ServingCapacityModel` is a composition model. It uses `ServingModel` for TTFT/ITL, `ContinuousBatchingModel` for per-replica token capacity, and `TailLatencyModel` for queueing pressure. This is useful for first-pass sizing and sensitivity sweeps: if QPS doubles, or generated length doubles, you can see how many replicas are implied. Capacity depends on the request-length assumption. By default every request fills `max_seq_len`, the conservative case; passing `mean_request_tokens` sizes paged allocation for a workload of shorter, exponentially distributed requests ([KV Allocation and Batch Capacity](math.qmd#sec-batching)). Do not use the result as a production SLA guarantee. Production serving must still be validated with the target scheduler, traffic mix, batching policy, and percentile measurement.
+`ServingCapacityModel` is a composition model. It uses `ServingModel` for TTFT/ITL, `ContinuousBatchingModel` for per-replica token capacity, and `TailLatencyModel` for queueing pressure. This is useful for first-pass sizing and sensitivity sweeps: if QPS doubles, or generated length doubles, the model shows how many replicas are implied. Capacity depends on the request-length assumption. By default every request fills `max_seq_len`, the conservative case; passing `mean_request_tokens` sizes paged allocation for a workload of shorter, exponentially distributed requests ([KV Allocation and Batch Capacity](math.qmd#sec-batching)). Do not use the result as a production SLA guarantee. Production serving must still be validated with the target scheduler, traffic mix, batching policy, and percentile measurement.
 
 ### MoE routing imbalance
 
@@ -173,7 +173,7 @@ MLSys·im uses `efficiency` (η, default 0.5) as a single scalar representing ha
 
 : {tbl-colwidths="[35,20,45]"}
 
-When you use the default `efficiency=0.5`, you are modeling a well-optimized training job on datacenter hardware. For inference, pass `efficiency=0.35` for more conservative estimates. For edge devices, use `efficiency=0.2`. All solvers whose compute term depends on η expose it as a parameter; defaults are starting points from the literature and benchmarks, not hidden constants.
+The default `efficiency=0.5` models a well-optimized training job on datacenter hardware. For inference, pass `efficiency=0.35` for more conservative estimates. For edge devices, use `efficiency=0.2`. All solvers whose compute term depends on η expose it as a parameter; defaults are starting points from the literature and benchmarks, not hidden constants.
 
 Cross-check η against cited bands in the [Literature Zoo](zoo/literature.qmd) (`Literature.Training.MfuHigh`, `Literature.Training.MfuInferenceBatched`) and engine knobs in `mlsysim.engine.calibration.REFERENCE_MFU_SUSTAINED`.
 
@@ -189,7 +189,7 @@ MLSys·im deliberately omits the following effects. Each omission is a design de
 
 3. **Pipeline schedule variants.** MLSys·im implements the standard GPipe bubble formula: $\text{bubble} = (P - 1) / (V \cdot M + P - 1)$. Advanced schedules (zero-bubble, interleaved 1F1B with $V > 1$) can reduce bubbles by 10--20% beyond what the formula predicts.
 
-4. **Quantization kernel efficiency.** INT8/INT4 kernels achieve lower utilization than FP16 Tensor Core kernels due to dequantization overhead and less mature compiler support. MLSys·im treats precision as a pure ops-per-byte ratio.
+4. **Quantization kernel efficiency.** INT8/INT4 kernels achieve lower utilization than FP16 Tensor Core kernels because of dequantization overhead and less mature compiler support. MLSys·im treats precision as a pure ops-per-byte ratio.
 
 5. **KV allocation dynamics.** `ServingModel` sizes the KV cache densely for a known sequence length. `ContinuousBatchingModel` compares max-length reservation with paged allocation under an assumed exponential request-length distribution, sized at peak occupancy. It does not model how reserved slots fill over a request's lifetime, external fragmentation in exact-size or power-of-two contiguous allocators, preemption and swapping, or paged-attention kernel latency. Kwon et al. measure 96.3% of vLLM's KV memory holding token states, against 20.4% to 38.2% for contiguous pre-allocation [@kwon2023].
 
@@ -208,7 +208,7 @@ MLSys·im deliberately omits the following effects. Each omission is a design de
 
 : {tbl-colwidths="[18,17,13,13,39]"}
 
-MLSys·im occupies a unique position: it is the only tool that covers the full stack (single-node roofline through fleet-scale TCO) in a single, composable framework. Use it when you want to **compare options before running experiments**: "Will the H100 or MI300X be better for this serving workload?" or "Does PP=4 or PP=8 give better scaling efficiency?" For production SLAs, validate with empirical benchmarks.
+MLSys·im occupies a unique position: it is the only tool that covers the full stack (single-node roofline through fleet-scale TCO) in a single, composable framework. Use it to **compare options before running experiments**: "Will the H100 or MI300X be better for this serving workload?" or "Does PP=4 or PP=8 give better scaling efficiency?" For production SLAs, validate with empirical benchmarks.
 
 For the full benchmarking methodology taxonomy (system, model, and data benchmarks), statistical rigor requirements (percentiles, confidence intervals), and MLPerf submission anatomy, see the [Benchmarking slides (Vol I, Ch 12)]({{< var slides_latest >}}/vol1_12_benchmarking.pdf){target="_blank"}.
 
@@ -265,4 +265,4 @@ For the MLPerf comparison data on this page, see [MLPerf Inference v4.0 Results]
 
 ---
 
-*If you observe a significant discrepancy between MLSys·im predictions and measured results on your hardware, please [open an issue]({{< var github_issues >}}) with the workload, hardware, and measured numbers. Discrepancies often reveal bugs or missing constants in the model.*
+*To report a significant discrepancy between MLSys·im predictions and measured hardware results, [open an issue]({{< var github_issues >}}) with the workload, hardware, and measured numbers. Discrepancies often reveal bugs or missing constants in the model.*

@@ -1,29 +1,29 @@
 ---
 title: "Starving the GPU"
-subtitle: "Your GPU is ready for the next batch. Your CPU is still decoding JPEGs."
-description: "Discover that the data pipeline — not the GPU — is often the binding constraint in training. Use DataModel and TransformationModel to find the crossover where CPU preprocessing stalls the accelerator."
+subtitle: "The GPU is ready for the next batch. The CPU is still decoding JPEGs."
+description: "Discover that the data pipeline, not the GPU, is often the binding constraint in training. Use DataModel and TransformationModel to find the crossover where CPU preprocessing stalls the accelerator."
 categories: ["data", "intermediate"]
 ---
 
 ## The Question
 
-You launch ResNet-50 training on an A100 and watch `nvidia-smi`. GPU utilization reads 40%.
-You expected 95%. The model is compute-bound. The hardware is top-tier. **Why is your GPU
+An engineer launches ResNet-50 training on an A100 and watches `nvidia-smi`. GPU utilization reads 40%,
+not the expected 95%. The model is compute-bound. The hardware is top-tier. **Why is the GPU
 sitting idle 60% of the time?**
 
 The answer is almost never the model or the GPU. It is the invisible pipeline upstream:
-JPEG decoding, random cropping, color jitter, and normalization — all running on the CPU.
+JPEG decoding, random cropping, color jitter, and normalization, all running on the CPU.
 When the CPU cannot prepare batches fast enough, the GPU starves.
 
 ::: {.callout-note}
 ## Prerequisites
 Complete [Tutorial 0: Hello, Roofline](00_hello_roofline.qmd) and
-[Tutorial 1: The Memory Wall](01_memory_wall.qmd). You should understand memory-bound
+[Tutorial 1: The Memory Wall](01_memory_wall.qmd). This tutorial assumes familiarity with memory-bound
 vs. compute-bound regimes and how `Engine.solve` reports bottlenecks.
 :::
 
 ::: {.callout-note}
-## What You Will Learn
+## Learning Objectives
 
 - **Measure** the GPU's step time in isolation using `SingleNodeModel`
 - **Calculate** the data pipeline's throughput using `DataModel` and `TransformationModel`
@@ -34,12 +34,12 @@ vs. compute-bound regimes and how `Engine.solve` reports bottlenecks.
 ::: {.callout-tip}
 ## Background: The Three Stages of a Training Step
 
-Every training step has three sequential stages. The slowest one determines your actual
-throughput — not the GPU alone:
+Every training step has three sequential stages. The slowest one, not the GPU alone,
+determines actual throughput:
 
-1. **Storage I/O** (Wall 8) — Read raw data from disk into CPU memory
-2. **CPU Preprocessing** (Wall 9) — Decode, resize, augment, normalize
-3. **Accelerator Compute** (Wall 1) — Forward pass, backward pass, weight update
+1. **Storage I/O** (Wall 8): Read raw data from disk into CPU memory
+2. **CPU Preprocessing** (Wall 9): Decode, resize, augment, normalize
+3. **Accelerator Compute** (Wall 1): Forward pass, backward pass, weight update
 
 The GPU cannot start until stages 1 and 2 finish. If either is slower than the GPU, the
 accelerator utilization drops below 100%. This is the data pipeline bottleneck.
@@ -64,16 +64,16 @@ from mlsysim.solvers import TransformationModel
 
 ---
 
-## 2. GPU Compute Time: The Ceiling You Think You Have
+## 2. GPU Compute Time: The Apparent Ceiling
 
-We switch from LLM serving (Tutorials 2–3) to **CNN training** because the data pipeline
-bottleneck is most visible here. LLM training on tokenized text has a tiny data footprint
-(~8 MB/s as we will see in [Tutorial 12](12_full_stack_audit.qmd)). Image training with
-JPEG decoding, resizing, and augmentation can demand 10–100× more CPU work per sample —
-this is where the GPU actually starves.
+This tutorial switches from LLM serving (Tutorials 2–3) to **CNN training** because the data pipeline
+bottleneck is most visible there. LLM training on tokenized text has a tiny data footprint
+(~8 MB/s, as [Tutorial 12](12_full_stack_audit.qmd) shows). Image training with
+JPEG decoding, resizing, and augmentation can demand 10–100× more CPU work per sample,
+and that is where the GPU starves.
 
-First, establish how fast the A100 processes a ResNet-50 training step in isolation — no
-data loading, no preprocessing, just pure compute:
+First, establish how fast the A100 processes a ResNet-50 training step in isolation, with no
+data loading and no preprocessing, only compute:
 
 ```{python}
 from mlsysim.solvers import SingleNodeModel
@@ -96,15 +96,15 @@ info("GPU Compute Baseline",
      Bottleneck=profile.bottleneck)
 ```
 
-The GPU finishes this batch in well under a tenth of a second. That is the ceiling. Now let's
-check whether the data pipeline can keep up.
+The GPU finishes this batch in well under a tenth of a second. That is the ceiling. The next
+step checks whether the data pipeline can keep up.
 
 ---
 
-## 3. Storage I/O Check: Can the Disk Deliver?
+## 3. Storage I/O Check: Disk Supply vs. Demand
 
 ImageNet images average ~500 KB each (JPEG compressed). At batch 256, the GPU demands a
-burst of data every step. Can the storage subsystem supply it?
+burst of data every step, and the storage subsystem must supply it:
 
 ```{python}
 from mlsysim.solvers import DataModel
@@ -127,7 +127,7 @@ info("Storage I/O Check",
      Is_stalled=data_result.is_stalled)
 ```
 
-Storage I/O is fine — modern NVMe SSDs can deliver multi-GB/s easily. The bottleneck is
+Storage I/O is not the problem, because modern NVMe SSDs deliver multi-GB/s. The bottleneck is
 not reading the bytes. It is *transforming* them.
 
 ---
@@ -162,10 +162,10 @@ info("CPU vs GPU Pipeline",
 ::: {.callout-important}
 ## Key Insight
 
-**The binding constraint is not silicon — it is JPEG decoding on the CPU.** The data
+**The binding constraint is not silicon but JPEG decoding on the CPU.** The data
 pipeline (Wall 9: Transformation) becomes the bottleneck before the GPU (Wall 1: Compute).
-Compare the two step times above: the GPU could get through each batch several times
-faster than your 8 CPU workers can prepare it. The GPU sits idle waiting for data. This is why production training pipelines use
+The two step times above show that the GPU could get through each batch several times
+faster than the 8 CPU workers can prepare it. The GPU sits idle waiting for data. This is why production training pipelines use
 GPU-accelerated preprocessing (NVIDIA DALI), pre-decoded datasets, or aggressive
 prefetching.
 :::
@@ -174,7 +174,7 @@ prefetching.
 
 ## 5. Batch Size Sweep: Finding the Crossover
 
-Let's sweep batch sizes to find exactly where the CPU becomes the binding constraint. At
+A sweep over batch sizes locates the point where the CPU becomes the binding constraint. At
 small batches, the GPU is slower and data arrives in time. At large batches, the GPU
 becomes more efficient but the CPU falls behind:
 
@@ -205,7 +205,7 @@ crossover = next(r[0] for r in rows if r[3] == "Transformation")
 info("Crossover", First_CPU_bound_batch=crossover)
 ```
 
-The crossover sits at the very bottom of the sweep. At the smallest batches the CPU keeps
+The crossover sits at the bottom of the sweep. At the smallest batches the CPU keeps
 up and the GPU runs at full utilization, but only a few samples later Wall 9 binds and
 never lets go. CPU transform time is strictly proportional to batch size. The GPU step is
 a fixed dispatch overhead plus a per-sample compute cost, and that fixed overhead only
@@ -217,7 +217,7 @@ transform time instead of falling to zero.
 
 ## 6. The Fix: Adding CPU Workers
 
-The simplest fix for a CPU bottleneck is more workers. Let's compare 8 vs. 16 vs. 32:
+The simplest fix for a CPU bottleneck is more workers. The sweep below compares 8, 16, and 32:
 
 ```{python}
 rows = []
@@ -238,12 +238,12 @@ for n_workers in [8, 16, 32]:
 table(["Workers", "Throughput", "GPU Util @ bs=512"], rows)
 ```
 
-Doubling workers doubles throughput — but you eventually hit either storage I/O limits
-(Wall 8) or PCIe bandwidth. The takeaway: always check *all three stages* of the pipeline.
+Doubling workers doubles throughput, but the pipeline eventually hits either storage I/O limits
+(Wall 8) or PCIe bandwidth. The lesson is to check *all three stages* of the pipeline every time.
 
 ---
 
-## Your Turn
+## Practice
 
 ::: {.callout-caution}
 ## Exercises
@@ -253,7 +253,7 @@ At batch size 64 with 8 CPU workers (2 GB/s total), will ResNet-50 training on t
 be GPU-bound or CPU-bound? Write your prediction, then run the code. What determines the
 answer? (Hint: compare `transform_time` vs. `accelerator_step_time`.)
 
-**Exercise 2: Medical imaging — larger samples.**
+**Exercise 2: Medical imaging with larger samples.**
 Medical imaging uses images 10x larger than ImageNet (~5 MB per sample). Change
 `sample_size` to `Q_("5 MB")` and re-run the batch size sweep. At what batch size does
 the CPU stall the GPU now? How many workers would you need to keep up at batch 256?
@@ -274,7 +274,7 @@ accelerator utilization? (Answer: 20/35 = 57%.)
 ::: {.callout-tip}
 ## Summary
 
-- **Data pipelines have three stages**: storage I/O, CPU preprocessing, and GPU compute — the slowest determines throughput
+- **Data pipelines have three stages**: storage I/O, CPU preprocessing, and GPU compute; the slowest determines throughput
 - **CPU preprocessing (Wall 9)** is the most common bottleneck: JPEG decode, augmentation, and normalization are all CPU-bound
 - **Batch size shifts the binding constraint**: small batches are GPU-bound; large batches often become CPU-bound
 - **Adding CPU workers** helps linearly but has diminishing returns when storage I/O becomes the limit
@@ -285,7 +285,7 @@ accelerator utilization? (Answer: 20/35 = 57%.)
 
 ## Next Steps
 
-- **[Quantization: Not a Free Lunch](05_quantization.qmd)** — When reducing precision helps (and when it doesn't)
-- **[KV-Cache: The Hidden Tax](03_kv_cache.qmd)** — Another hidden memory consumer: the KV-cache in LLM serving
-- **[Where to Invest](09_sensitivity.qmd)** — Use sensitivity analysis to decide whether more CPU workers or a faster GPU is the better investment
-- **[Silicon Zoo](../zoo/hardware.qmd)** — Compare storage and interconnect specs across GPU platforms
+- **[Quantization: Not a Free Lunch](05_quantization.qmd)**: When reducing precision helps (and when it does not)
+- **[KV-Cache: The Hidden Tax](03_kv_cache.qmd)**: Another hidden memory consumer, the KV-cache in LLM serving
+- **[Where to Invest](09_sensitivity.qmd)**: Use sensitivity analysis to decide whether more CPU workers or a faster GPU is the better investment
+- **[Silicon Zoo](../zoo/hardware.qmd)**: Compare storage and interconnect specs across GPU platforms

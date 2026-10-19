@@ -8,7 +8,7 @@ categories: [serving, memory, llm]
 Every ML engineer eventually asks: *"Can I serve Llama-3 70B on my hardware?"*
 
 The answer depends on three things: **precision**, **KV cache**, and **batch size**.
-Let's calculate it in 30 seconds.
+The calculation takes 30 seconds.
 
 ## The Weights
 
@@ -30,12 +30,12 @@ print(f"INT4 weights: {int4_size.to('GB'):.1f}")
 
 **Result:** 140 GB in FP16, 35 GB in INT4.
 
-An H100 has 80 GB. So Llama-3 70B in FP16 **does not fit on one GPU**.
-You need either tensor parallelism (TP=2) or quantization to INT4.
+An H100 has 80 GB, so Llama-3 70B in FP16 **does not fit on one GPU**.
+Serving it requires either tensor parallelism (TP=2) or quantization to INT4.
 
 ## The KV Cache (The Hidden Memory Consumer)
 
-Weights are only half the story. Each active request needs a KV cache:
+Weights are only part of the total. Each active request also needs a KV cache:
 
 ```python
 from mlsysim.physics import calc_kv_cache_size
@@ -54,7 +54,7 @@ At 160 MB per request, an 80 GB GPU serving INT4 Llama-3 70B has:
 - 45 GB remaining for KV cache
 - **45,000 MB / 160 MB ≈ 280 concurrent requests max**
 
-But at 32K context? KV cache is 1.28 GB per request → only **35 requests**.
+At 32K context, the KV cache grows to 1.28 GB per request, which leaves room for only **35 requests**.
 
 ## The Full Picture
 
@@ -72,9 +72,9 @@ print(f"Feasible: {result.feasible}")        # → False (doesn't fit!)
 print(f"Memory util: {result.memory_utilization:.1%}")
 ```
 
-**The punchline:** A "70B model" doesn't just need 140 GB. It needs
+**The conclusion:** A "70B model" needs more than 140 GB. It needs
 140 GB + (KV cache × concurrent requests). At production batch sizes,
-the KV cache can consume MORE memory than the weights.
+the KV cache can consume *more* memory than the weights.
 
 ## What To Do About It
 
@@ -86,7 +86,7 @@ the KV cache can consume MORE memory than the weights.
 | Tensor parallelism (TP=2) | Split across 2 GPUs | Adds NVLink communication |
 | PagedAttention (vLLM) | Eliminates KV fragmentation | ~20-40% more concurrent requests |
 
-## Try It Yourself
+## Reproducing the Calculation
 
 ```bash
 pip install mlsysim
