@@ -1,0 +1,565 @@
+% =============================================================================
+% Lecture 4: The Nervous System
+% Physical AI: Machine Learning Systems That Sense and Act (Volume IV), Chapter 4
+% =============================================================================
+% Thesis: the path between proposer and drives must have bounded delays, checks
+% that never wait on the proposer, and grants of authority that expire on their
+% own; the chunk lease is where those requirements meet the stopping budget.
+% Hook and synthesis: Mars Pathfinder, July 1997 (Jones 1997, after Wilner and
+% Reeves), against the running machine's stalled proposer at 1.5 m/s.
+%
+% Build: make deck V=4 D=04_nervous   (figures: images/make_figs.py,
+%        numbers: images/calcs.py, measured data: images/data/)
+% Plan:  lecture_map.yml in this folder.
+% Numbers: the rendered chapter, cited sources, and two measurements the
+% lecture authors ran (images/data); derived values come from calcs.py.
+% =============================================================================
+
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+\mlsyssetup{
+  volume={Volume IV},
+  chapter={Chapter 4},
+  chaptertitle={The Nervous System},
+  layer=nervous,
+  logo={../../assets/img/logo-mlsysbook.png},
+  instlogo={../../assets/img/logo-harvard.png},
+}
+\usepackage[T1]{fontenc}
+\usepackage[scaled=0.9]{helvet}
+\usepackage{courier}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{booktabs,amsmath}
+\graphicspath{{images/}}
+\setcounter{mlsystotalsections}{4}
+
+\title{The Nervous System}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+% A large answer choice for predict and concept-question slides
+\newcommand{\choice}[2]{\textbf{\textcolor{mlsysaccent}{#1}}\enspace #2}
+% A choice that is highlighted from overlay #1 on (the answer)
+\newcommand{\answerat}[3]{\alt<#1->{\colorbox{mlsysaccent!15}{\choice{#2}{#3}}}{\choice{#2}{#3}}}
+% A goal or takeaway line with its text-free thumbnail
+\newcommand{\thumbline}[2]{%
+  \begin{minipage}[c]{2.6cm}\centering\includegraphics[width=2.5cm,height=0.95cm,keepaspectratio]{#1}\end{minipage}%
+  \hspace{0.3cm}\begin{minipage}[c]{0.74\textwidth}\small #2\end{minipage}}
+% One line of a worked example: shown from overlay #1 on
+\newcommand{\wstep}[2]{\uncover<#1->{#2}\\[0.2cm]}
+% An exact excerpt of real source code or tool output, at a legible size
+\newenvironment{logblock}[1][7]{\par\ttfamily\fontsize{#1}{8.6}\selectfont\raggedright\setlength{\parskip}{0pt}}{\par}
+% Code indentation of n spaces in the current monospace font
+\newcommand{\ind}[1]{\hspace*{#1\fontcharwd\font`0}}
+\newcommand{\us}{\,$\mu$s}
+
+\begin{document}
+
+% =============================================================================
+% TITLE AND HOOK
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Read the thesis aloud once. Lecture 3 left two proposers that can stall, miss a deadline, or misjudge the target. Today asks what keeps the machine safe in the milliseconds after that happens. The notes total about 71 minutes; cutting every [OPTIONAL] slide leaves a complete lecture of about 56 minutes. Cut first the code slide, the running-maximum plot, and the bus slide. Three backgrounds: machine learning students meet real-time scheduling and WCET for the first time (point them to the systems appendix); embedded students will find the 7B model's latency new (machine learning appendix); control students will know phase margin and can help their neighbors on the Predict slide.}
+\mlsystitle{The Nervous System}{The path from proposer to drives must bound every delay, never wait on the proposer, and grant authority that expires on its own.}{cover_nervous_blueprint.png}
+
+\begin{frame}{Predict: why did the top-priority task stall?}
+  \mlsysactivity{Predict}{3 min}
+  \begin{columns}[c]
+    \begin{column}{0.47\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.0cm,keepaspectratio]{pathfinder_apod.jpg}\\[0.05cm]
+      {\footnotesize Mars Pathfinder, 4 July 1997}
+    \end{column}
+    \begin{column}{0.50\textwidth}
+      \small Days after landing, the lander's computer reset itself again and again. Its bus task had the \textbf{highest priority} and still missed its deadline.\\[0.3cm]
+      \choice{A}{The processor was too slow}\\[0.1cm]
+      \answerat{2}{B}{It waited on a lock a low-priority task held}\\[0.1cm]
+      \choice{C}{A memory error corrupted the scheduler}\\[0.1cm]
+      \choice{D}{The watchdog timeout was set too short}\\[0.15cm]
+      {\footnotesize\textcolor{midgray}{Watchdog: a timer that resets the computer when a task stops checking in.}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: NASA/JPL, Mars Pathfinder lander camera mosaic, public domain, Wikimedia Commons. Account: Jones 1997, reporting Wilner's RTSS keynote; Reeves 1997.}
+  \note{[3.5 min] [CORE] NARRATE: the lander ran VxWorks with preemptive priority scheduling. A high-priority task moved data on the spacecraft's information bus; a low-priority weather task published through the same shared bus, guarded by a mutex. ENGAGE: one minute, vote with fingers. Step 2: B. The weather task took the mutex; the bus task then blocked on it; a medium-priority communications task, which needed no lock, preempted the weather task and kept it from ever releasing the mutex. The bus task missed its cycle, a watchdog noticed, and the computer reset. Students who pick A assume priority guarantees speed; the processor had time to spare. Students who pick D blame the alarm for the fire: the watchdog did its job. WARN: do not explain the fix yet; segment 4 returns with the equation that names the missing bound. LINK: today the machine is our warehouse mobile manipulator. A reset on a lander at rest costs data. A moving base that stalls its checks keeps covering 1.5 mm every millisecond. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Recall: how far does the base move per thought?}
+  \mlsysactivity{Retrieval}{1.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.56\textwidth}
+      {\Large\bfseries Close your notes.}\\[0.2cm]
+      {\normalsize How often do the two proposers of Lecture 3 renew? How far does the base travel at 1.5 m/s while each one computes?}\\[0.3cm]
+      \uncover<2->{\small\textbf{\textcolor{mlsysaccent}{Intent model:}} 336 ms per evaluation, run at 2 Hz: \textbf{503 mm} of travel\\[0.05cm]
+      \textbf{\textcolor{mlsysaccent}{Chunk policy:}} 40 ms (p99), renewed every 50 ms with 16 setpoints 25 ms apart: \textbf{60 mm}}
+    \end{column}
+    \begin{column}{0.40\textwidth}
+      \centering\safeimg[width=\textwidth,height=1.5cm,keepaspectratio]{thumb_rate_ladder_step1.pdf}\\[0.15cm]
+      \uncover<3->{\begin{mlsyscard}{mlsysaccent}\small\textbf{From Lecture 1:} at 1.5 m/s the elementary stop needs \textbf{762.9 mm} of the \textbf{1.10 m} clear distance at the rack end.\end{mlsyscard}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Lecture 3 (two-speed brain); Lecture 1, Napkin Math 1.1. Travel: The Nervous System, \S4.1 (503 mm from the unrounded latency; 1.5 $\times$ 336 = 504).}
+  \note{[2 min] [CORE] Retrieval from Lecture 3. Give 45 seconds. Step 2: the 7B intent model takes 336 ms per evaluation at INT4 and runs at 2 Hz; the chunk policy needs 40 ms at p99 and renews every 50 ms, each chunk carrying 16 setpoints 25 ms apart. At the 1.5 m/s drive limit (illustrative) the base covers 503 mm during one intent evaluation and 60 mm during one chunk inference (the chapter's values, \S4.1). Step 3: one card from Lecture 1, given without re-deriving it: the elementary stop at 1.5 m/s needs 762.9 mm of the 1.10 m clear distance. ENGAGE: if the chunk policy stops renewing, what keeps the base from driving its last chunk into the person? Take two answers; the lease segment answers it. WARN: 503 mm is nearly half the clear distance, so the slow model can never be in the loop that stops the base. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{The Nervous System joins proposals to current}
+  \begin{columns}[c]
+    \begin{column}{0.50\textwidth}
+      \centering\mlsyskitfig[width=\textwidth,height=5.2cm,keepaspectratio]{stack_nervous}
+    \end{column}
+    \begin{column}{0.47\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.6cm,keepaspectratio]{erflex.jpg}\\[0.02cm]
+      {\footnotesize A real mobile manipulator: a MiR250 base carrying a UR16e arm}\\[0.15cm]
+      \footnotesize Above the proposal boundary, models \textbf{propose}. Below it, a timed path \textbf{admits or refuses} each proposal and alone drives the motors.
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: Auledas, CC BY 4.0, Wikimedia Commons (Enabled Robotics ER-FLEX). Stack: The Causal Boundary, \S1.7.}
+  \note{[1.5 min] [CORE] LINK: Lecture 1 drew the five levels and the proposal boundary between Brain and Nervous System. Today lives on the Nervous System level, lit on the stack. NARRATE: the photo is a real machine of the running machine's class: an autonomous base carrying a collaborative arm. The book's running machine is a reference platform with the same parts: a wheeled base, an articulated arm, navigation lidar, wrist cameras. Its numbers are the book's, labeled illustrative or chosen where the book says so. The Nervous System is the computing, memory, and wiring between the learned models and the motor drives. Its job is to carry proposals down, carry measurements up, and decide on every tick whether a proposal may move the hardware. WARN: the proposal boundary decides who may approve an action; the causal boundary is where an approved action becomes current in a winding. Students merge them. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Why must a machine keep checking a silent model?}
+  \thumbline{thumb_twoproc_step3.pdf}{Derive each tier's rate from a time constant; show why fast loops close in the drive.}\\[0.35cm]
+  \thumbline{thumb_seqlock_step3.pdf}{Explain how a mailbox gives the tick a fresh proposal without waiting.}\\[0.35cm]
+  \thumbline{thumb_lease_step3.pdf}{Size a chunk lease between its renewal floor and the pre-brake ceiling.}\\[0.35cm]
+  \thumbline{thumb_rta_step3.pdf}{Tell a measured percentile from a response bound, and find the term that lost its bound.}\\[0.35cm]
+  {\footnotesize\textcolor{midgray}{Part I closes on the first law, irreversibility (Lecture 1): motion granted to a proposal cannot be recalled.}}
+  \note{[1.5 min] [CORE] The driving question, which the chapter's Purpose asks: why must a moving machine keep checking its commands when its learned model stops responding? Four goals, one per segment; each thumbnail is the shape of the figure that teaches it. The bottom line names the part's law. Part I opened with the first law, irreversibility; this lecture closes Part I by turning the law into a rule of authority: a proposal may drive the motors only as long as the stopping budget can still guarantee the stop. The lecture adds one record to the record chain, the handoff record. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: TIERS
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] First segment: four loops run at four rates. Which physical constant sets each rate, and why can the model never sit inside the motor loop?}
+\mlsysdivider{Why can the learned model never sit inside the motor loop?}{The Nervous System, \S4.1 to \S4.3.1, \S4.6}
+\section{Tiers}
+
+\begin{frame}{Each tier takes its rate from a physical time constant}
+  \begin{columns}[c]
+    \begin{column}{0.64\textwidth}
+      \centering\mlsyssteps[width=9.6cm]{rate_ladder_step}{2}
+    \end{column}
+    \begin{column}{0.33\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.0cm,keepaspectratio]{tmc2209_driver.jpg}\\[0.05cm]
+      {\footnotesize A motor driver chip (TMC2209): the current loop runs in this silicon, beside the winding.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{The Nervous System, \S4.1 and \S4.3.1 (illustrative running machine). Photo: Phiarc, CC BY-SA 4.0, Wikimedia Commons.}
+  \note{[3 min] [CORE] Step 1: four tiers on one log axis, 10,000 times apart from top to bottom. Each tier runs at least ten times faster than the one above it, and none may wait on a slower one. Step 2: what sets each rate. The intent model's 500 ms comes from its prefill and weight sweeps (Lecture 3); the plant does not set it. The chunk policy pays one weight sweep per chunk of 16 setpoints, so it can renew every 50 ms. The permission tick is set by distance: each millisecond of detection delay is 1.5 mm of base travel. The current loop follows the winding: L/R = 2.7 ms puts a pole near 59 Hz, and the 20 kHz switching period samples the current every 50 microseconds. NARRATE the photo: field-oriented control rotates the phase currents into the rotor's frame every switching period, so it needs a fresh rotor angle every 50 microseconds and lives in the drive. ENGAGE: why not run the chunk policy at 1 kHz? (Expected: it would spend compute without fresher camera frames.) WARN: the 2 Hz and 20 Hz rates are today's models and will change; the method ties the lease to the plant, not to them. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Predict: can a faster tick close the loop?}
+  \mlsysactivity{Predict}{2 min}
+  \centering
+  \mlsyssteps[width=14.6cm]{phase_step}{3}\\[0.05cm]
+  {\small \textbf{Phase margin:} the extra lag a loop absorbs before it oscillates. Delay spends phase margin: each stage subtracts $\omega_c \times$ delay.}
+  \mlsyscredit{The Nervous System, \S4.3.1, equation 1 (20 Hz crossover and 5$^\circ$ allowance illustrative; worst-case execution time 250\us declared).}
+  \note{[3 min] [CORE] LINK: phase margin is how much extra lag a feedback loop can absorb before its corrections reinforce the motion instead of damping it. A pure delay subtracts the crossover frequency times the delay, here 7.2 degrees per millisecond at 20 Hz. Step 1: a joint loop with a 20 Hz crossover closed across the 1 ms tick: the sample-and-hold costs half a tick, 3.6 degrees; the declared 250 microsecond compute, 1.8. The design allows 5 degrees. ENGAGE: one minute; the bus cycle is 1 ms. Does it fit? Would a faster tick fix it? Step 2: the bus costs 7.2 degrees alone; 1.75 ms totals 12.6 degrees, 2.5 times the allowance. The allowance tolerates only 0.69 ms of delay, less than one bus cycle. Step 3: an infinitely fast tick removes the hold and compute and leaves 7.2 degrees, still over. WARN: students who answer 'raise the tick rate' treat the problem as sampling; it is transport. The fix is placement: the joint velocity and current loops close in the drives, beside the encoders, and the tick only supervises and supplies setpoints, outside the loop. Any loop closed across this bus must keep its crossover under 7.9 Hz. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{A laptop OS woke a 1 ms task up to 35.8 ms late}
+  \begin{columns}[c]
+    \begin{column}{0.64\textwidth}
+      \centering\safeimg[width=9.4cm]{jitter.pdf}
+    \end{column}
+    \begin{column}{0.33\textwidth}
+      \small 60,000 releases each. The median is fine. The tail is not:\\[0.15cm]
+      \textbf{401} releases more than one whole period late under load.\\[0.15cm]
+      At 1.5 m/s, 35.8 ms is \textbf{\textcolor{mlsysaccent}{53.7 mm}} of unchecked travel.
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Measured by the lecture authors, 19 Oct 2026: C, mach\_wait\_until, Apple M5 Max, macOS 26.4; load = 18 memory-streaming processes (images/data).}
+  \note{[2 min] [OPTIONAL] NARRATE: we measured this. A small C program asks a laptop's operating system to wake it every millisecond, 60,000 times, and records how late each wake-up is. Gray: the machine with its ordinary background work. Red: the same with 18 processes streaming memory, roughly what a large model's weight sweeps do to a shared memory system. The median is about 200 microseconds both times (the OS batches timers). The p99 is 252 and 598 microseconds. The worst wake-up was 9.9 ms late without load and 35.8 ms with it; 401 releases under load came more than a full period late. ENGAGE: if the permission tick ran here, beside the model, what would the 35.8 ms cost at the drive limit? (Expected: 53.7 mm, with no check at all.) WARN: this is not a criticism of the laptop. A general-purpose OS is built for throughput and average latency, through page faults, interrupts, and frequency changes. That is why the permission path gets its own processor. LINK: segment 4 reuses these data to show why a measured maximum is not a bound. FLEX: [OPTIONAL]; the next slide makes the same point by design.}
+\end{frame}
+
+\begin{frame}{The permission path runs where the proposer cannot reach}
+  \centering
+  \vspace*{-0.15cm}\mlsyssteps[width=14.6cm]{twoproc_step}{3}\\[0.0cm]
+  \uncover<3->{\footnotesize\textbf{Independence requirement:} under any proposer load, the tick meets its bound and can still refuse.\\ \textbf{Actuation authority:} the tick is the sole writer of every drive register.}
+  \mlsyscredit{The Nervous System, \S4.2 (figure 2), \S4.6 (figure 7), redrawn.}
+  \note{[3 min] [CORE] Step 1: the application processor runs perception, the 2 Hz intent model, and the 20 Hz chunk policy. Proposals leave it over a board link that the endpoints do not trust: every frame carries a CRC and a sequence number, and no memory is shared. Step 2: a separate safety microcontroller receives each frame into its own SRAM. A 1 kHz tick checks freshness, the lease, and kinematic limits against measured encoder state, and it is the only code that writes the drive registers: the sole writer. A safety microcontroller is more than a second chip: lockstep cores, error-correcting memory, a memory protection unit, clock and supply monitors, and a watchdog on its own oscillator. Step 3: the host has no wire to any drive register. WARN: a diagnostic or calibration port that can write a drive register breaks this even when the mailbox shows zero velocity; the chapter's example is a 35 A test current written behind the enforcer's back. And the checks must read measured state: a stripped gear leaves commanded setpoints looking safe. ENGAGE: name one thing two chips on one board can still share. (Expected: power rail, clock, heat, reset line.) Lecture 13 owns that resource-by-resource inventory. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{A hardwired stop removes torque with no processor}
+  \begin{columns}[c]
+    \begin{column}{0.40\textwidth}
+      \centering
+      \safeimg[width=0.52\textwidth,height=2.6cm,keepaspectratio]{notaus.jpg}\hspace{0.1cm}%
+      \safeimg[width=0.40\textwidth,height=2.6cm,keepaspectratio]{pilz.jpg}\\[0.05cm]
+      {\footnotesize An E-stop button and a dual-channel safety relay (Pilz PNOZ s4, rated to PL e)}\\[0.15cm]
+      {\footnotesize Safe Torque Off removes torque in hardware; a moving base may still coast, so a spring brake holds.}
+    \end{column}
+    \begin{column}{0.57\textwidth}
+      \centering\safeimg[width=8.6cm]{relay.pdf}\\[0.05cm]
+      {\small The relay's datasheet states a \textbf{maximum}. The laptop thread has none.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photos: Stahlkocher, CC BY-SA 3.0; Pilz GmbH \& Co. KG, CC BY-SA 3.0; Wikimedia Commons. Pilz PNOZ s4 datasheet 1001742-EN-05, Times. Laptop: images/data.}
+  \note{[2.5 min] [OPTIONAL] LINK: what if the safety microcontroller itself hangs? A hardwired path must still stop the drives. NARRATE: the E-stop opens two contacts at once; each feeds a force-guided relay; each relay removes one of two Safe Torque Off enables at the drive, so the inverter can no longer make torque; the relay refuses to restart unless both channels released. No processor sits in this path. The datasheet of this relay gives the delay from pressing E-STOP to its outputs opening: 10 ms typical, 20 ms maximum; at 1.5 m/s the maximum is 30 mm. Our laptop thread's worst wake-up was 35.8 ms, 53.7 mm, and it has no stated maximum at all. WARN: torque off is not a stop. A wheeled base coasts and a loaded arm falls; the drive should brake electrically first, and a spring brake holds at rest. ENGAGE: which stop does the chunk lease command, torque off or a controlled deceleration? (Expected: a state-matched controlled stop; STO is the backstop.) Lecture 12 owns the certified floor beneath the unrated permission path. FLEX: [OPTIONAL].}
+\end{frame}
+
+% =============================================================================
+% SECTION: MAILBOX
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Land segment 1 aloud: each tier takes its rate from physics, fast loops close where their sensors are, and the permission path runs on hardware the proposer cannot stall. Now the two clocks must exchange proposals.}
+\mlsysdivider{How do two clocks hand over a proposal without waiting?}{The Nervous System, \S4.3.2}
+\section{Mailbox}
+
+\begin{frame}{A queue hands the tick old plans; a mailbox the newest}
+  \centering
+  \mlsyssteps[width=14.6cm]{queue_step}{2}\\[0.1cm]
+  \uncover<2->{\small A \textbf{state message} replaces the old value in place. Backpressure cannot pause moving mass.}
+  \mlsyscredit{The Nervous System, \S4.3.2 (event and state messages, after Kopetz 2011).}
+  \note{[2.5 min] [CORE] Step 1: the usual software answer is a first-in, first-out queue. It never loses a message and delivers them in order. If the reader falls behind, or the writer bursts after a stall, the tick reads proposal 5 while proposal 9 already exists. Each queued plan was computed for a robot state that no longer exists. In a web service a queue slows the producer down; a moving base cannot be slowed by backpressure. Step 2: the mailbox holds one slot. Each new proposal overwrites the previous one, and the tick always reads the freshest complete proposal. Real-time systems call these state messages; queued, read-once messages are event messages. ENGAGE: which messages in this robot should stay event messages? (Expected: diagnostic logs and fault events, kept in an ordered ring buffer for audit.) WARN: the mailbox does not stop the tick from executing the future waypoints of a chunk it already admitted; those follow a schedule under a lease. It stops old proposals from being treated as current commands. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Predict: how long does each reader wait?}
+  \mlsysactivity{Predict}{2 min}
+  \centering
+  \mlsyssteps[width=11.0cm]{mailbox_meas_step}{2}\\[0.1cm]
+  {\small 1 kHz reader; 20 Hz writer stalls 3 ms mid-write on every fourth write; 20,000 reads each.}
+  \mlsyscredit{Measured by the lecture authors, 19 Oct 2026: C, pthreads, reader as a macOS real-time thread, Apple M5 Max (images/data/mailbox.c).}
+  \note{[2.5 min] [CORE] NARRATE the setup: we wrote the three exchanges in C. A writer thread produces a 16-waypoint chunk every 50 ms; on every fourth write it is descheduled for 3 ms halfway through, the way a page fault or a preemption would stall it. A reader runs every millisecond and records how long it spends getting a proposal. ENGAGE: one minute: for each exchange, roughly how long can the reader be held up? Step 2: the blocking mutex held the reader up to 3,766 microseconds, and 99 reads took more than a whole tick: the reader inherits every stall of the writer. The try-lock (what ros2\_control does) and the one-attempt seqlock never took more than 4.4 and 3.7 microseconds. The seqlock rejected 358 torn reads and kept the active chunk each time. WARN: the fast readers do not get a newer proposal during the stall; they get the old one, on time. Freshness is then the lease's job. Students who expect the mutex to be safe 'because the lock is short' are making Pathfinder's assumption. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{The seqlock reader makes one bounded attempt per tick}
+  \centering
+  \mlsyssteps[width=14.6cm]{seqlock_step}{3}\\[0.05cm]
+  {\small Odd counter: a write is open. Changed counter: a torn copy. Either way, keep the active chunk.}
+  \mlsyscredit{The Nervous System, \S4.3.2 (figure 4 panel b, redrawn); Lamport 1977; Kopetz and Reisinger 1993.}
+  \note{[3 min] [CORE] The writer is the receive interrupt on the microcontroller, which copies each checked frame into the slot; the reader is the tick. The writer makes the counter odd, copies, then makes it even. The reader reads the counter, copies, reads the counter again. Step 1: clean exchange. The reader sees 8 before and 8 after: accept, then check freshness, lease, and limits. Step 2: the tick, which outranks the receive interrupt, arrives mid-write and sees 9, odd: it discards the copy in constant time and keeps the active chunk; a tick later it reads 10 and accepts. Step 3: the host stalls. No frame arrives, the counter stays 10, and nothing changes; the lease keeps counting. A crashed host cannot leave the counter odd, because it never writes the slot. ENGAGE: why must the reader never retry in a loop? (Expected: a loop has no bound if writes keep colliding.) WARN: on a core with out-of-order loads the reader needs a memory barrier (DMB on Arm Cortex-M), or it may read the payload before the counter. A three-slot or four-slot mailbox always returns a complete snapshot, at the cost of more memory. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Linux readers retry; ros2\_control tries once}
+  \begin{columns}[T]
+    \begin{column}{0.68\textwidth}
+      {\small\textbf{Linux kernel} (seqlock.h, v6.6)}\par\vspace{0.08cm}
+      \begin{logblock}[7]
+        do \{\\
+        \ind{4}int s = read\_seqcount\_begin(\&seq);\\
+        \ind{4}x = X; y = Y;\\
+        \} while (\textcolor{RedLine}{\textbf{read\_seqcount\_retry}}(\&seq, s));
+      \end{logblock}
+      \vspace{0.25cm}
+      {\small\textbf{ros2\_control} (realtime\_tools 5.4.0, realtime\_buffer.hpp)}\par\vspace{0.08cm}
+      \begin{logblock}[7]
+        T * readFromRT()\\
+        \{\\
+        \ind{2}std::unique\_lock<std::mutex> guard(mutex\_, \textcolor{GreenLine}{\textbf{std::try\_to\_lock}});\\
+        \ind{2}if (guard.owns\_lock()) \{ ... \}\\
+        \ind{2}\textcolor{GreenLine}{\textbf{return realtime\_data\_;}}\\
+        \}
+      \end{logblock}
+    \end{column}
+    \begin{column}{0.29\textwidth}
+      \small\vspace{0.5cm}
+      \textcolor{RedLine}{\textbf{Retry loop:}} right for the kernel, which must return the data; unbounded for a hard tick.\\[0.9cm]
+      \textcolor{GreenLine}{\textbf{One try:}} if the writer holds the lock, return the previous command at once.
+    \end{column}
+  \end{columns}
+  \mlsyscredit{torvalds/linux v6.6, include/linux/seqlock.h lines 587 to 592 (comment markers and blank lines removed). ros-controls/realtime\_tools 5.4.0, lines 113 to 127 (comments removed; pointer swap shortened to ...).}
+  \note{[2 min] [OPTIONAL] Real code, two choices. Left: the Linux kernel's own example of a seqlock reader. It loops until it gets a clean copy, which is right for a kernel that must eventually return the data, and wrong for a tick with a deadline: if writes keep colliding, the loop has no bound. The permission tick takes one attempt and keeps the active chunk. Right: ros2\_control, the controller framework most ROS 2 robots use, reads its command buffer with a single try-lock. If the writer holds the lock, the read gives up at once and returns the previous command, the same one-attempt rule. ENGAGE: what does returning the previous command still require? (Expected: something must bound how long that previous command may keep driving: the lease.) WARN: the chapter's point is that no middleware setting replaces the lease, because none derives its time from the stopping budget or runs on the microcontroller's clock. FLEX: [OPTIONAL]; skip if short and say the two sentences of WARN.}
+\end{frame}
+
+\begin{frame}{True or false: zero loss means on-time delivery?}
+  \mlsysactivity{Concept question}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.55\textwidth}
+      \normalsize A ROS 2 topic is set to \textbf{reliable} delivery. After a network blip it reports \textbf{zero lost packets}.\\[0.3cm]
+      Is the motor command path now deterministic?\\[0.3cm]
+      \choice{T}{True}\qquad\answerat{2}{F}{False}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \uncover<2->{\begin{mlsyscard}{mlsysaccent}\small
+      Reliable delivery releases the \textbf{backlog of stale samples} after the blip.\\[0.1cm]
+      The path needs two guarantees: a \textbf{worst-case delivery bound} on the bus, and a \textbf{freshness deadline} checked by the receiver.
+      \end{mlsyscard}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{The Nervous System, \S4.10 (pitfall) and \S4.3.2; Macenski et al. 2022; OMG DDS 1.4.}
+  \note{[2 min] [CORE] The chapter's pitfall as a vote. ENGAGE: vote, discuss with a neighbor for 30 seconds, vote again. Step 2: false. A reliable transport retransmits lost samples, so after congestion it delivers a burst of queued, obsolete setpoints, each describing a robot state that no longer exists. Zero loss says every sample arrived; it says nothing about when. Switching to keep-last history with depth one and best-effort reliability removes the backlog but still bounds neither scheduling jitter nor driver latency. WARN: students from web systems treat reliability as a virtue everywhere; for state messages it is a hazard. The fix is two separate guarantees: an engineered worst-case delivery bound and a freshness deadline that the receiver enforces before acting. Land segment 2 aloud: the tick reads the freshest complete proposal in one bounded attempt and never waits for the writer; what it reads may still be old, so something must end its authority. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: LEASE
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] The tick never waits, but a stalled proposer leaves the last admitted chunk in force. How long may it keep driving?}
+\mlsysdivider{How long may a stalled proposal keep driving?}{The Nervous System, \S4.4 and \S4.9 (Napkin Math 4.1)}
+\section{Lease}
+
+\begin{frame}{A stalled proposal keeps driving until its lease ends}
+  \centering
+  \mlsyssteps[width=14.6cm]{lease_step}{3}\\[0.05cm]
+  {\small \textbf{Chunk lease:} how long an admitted chunk may drive the actuators, timed on the MCU.}
+  \mlsyscredit{The Nervous System, \S4.4, Definition 4.2 and figure 4 panel a, redrawn (illustrative timeline).}
+  \note{[2.5 min] [CORE] Step 1: the chunk policy finishes a chunk at 40 ms and at 90 ms; each is admitted, and the drives track the admitted setpoints, which the tick interpolates from 25 ms waypoints into a smooth 1 ms setpoint stream. Step 2: at 100 ms the policy stalls: a page fault, thermal throttling, an exception. The drives keep tracking the last admitted chunk, because its lease, 60 ms counted from admission at 90 ms, is still running. Only a freshly admitted chunk renews a lease. Step 3: the lease expires at 150 ms. The next tick notices, one bus cycle carries the stop, and the brakes take hold 20 ms later: brake onset at 172 ms, 82 ms and 123 mm after the last admission. ENGAGE: who notices the stall, the host or the microcontroller? (Expected: the microcontroller, on its own clock; the host may never report anything.) WARN: a heartbeat timeout is not a lease; the next slides price the lease and then separate the two. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Each millisecond of lease costs 1.5 mm of clearance}
+  \begin{columns}[c]
+    \begin{column}{0.36\textwidth}
+      \begin{mlsyscard}{mlsysaccent}\footnotesize
+        \textbf{Given (Napkin Math 4.1)}\\[0.05cm]
+        $v = 1.5$ m/s, $a_{\text{brake}} = 2$ m/s$^2$\\
+        $D_{\text{clear}} = 1{,}100$ mm; margins 150\\
+        onset 20, tick 1, bus 1 (ms)
+      \end{mlsyscard}
+      \footnotesize
+      \wstep{2}{Ceiling $= \frac{1100 - 150 - 562.5}{1.5} = \mathbf{258.3}$ ms}
+      \wstep{3}{Lease path $= 1.5 \times 62 = \mathbf{93}$ mm}
+    \end{column}
+    \begin{column}{0.61\textwidth}
+      \centering
+      \only<1-2|handout:0>{\safeimg[width=9.0cm]{budget_step1.pdf}}%
+      \only<3-|handout:1>{\safeimg[width=9.0cm]{budget_step2.pdf}}\\[0.05cm]
+      \uncover<3->{\small Last admission to brake onset: \textbf{82 ms} of 258.3 ms.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{The Nervous System, Napkin Math 4.1 and equation 2 (speed, braking, clearance, onset illustrative; tick, lease chosen). Values derived in calcs.py.}
+  \note{[3 min] [CORE] LINK: Lecture 1's stopping budget, and Lecture 2's credible deceleration of 2 m/s squared. Step 1: the terms already charged: braking $v^2/2a$ is 562.5 mm, localization error 50 mm and protective clearance 100 mm, and 30 mm of travel during the 20 ms brake onset: 742.5 mm. Step 2: equation 2 asks how long braking may wait. Clear distance minus overheads minus braking, divided by speed: 258.3 ms, the pre-brake ceiling. Step 3: the lease path is the lease plus the tick that notices its expiry plus the bus cycle that delivers the stop: 62 ms, 93 mm. The running total is 835.5 mm; 264.5 mm remain. In time, 82 ms from last admission to brake onset leaves 176.3 ms under the ceiling. ENGAGE: is the 176.3 ms spare? (Expected: no; it must still absorb the observation's age and a jerk-limited stop.) WARN: the lease is a term in the stopping budget; it is never a timeout chosen for convenience. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{A measured 7B model runs longer than the whole ceiling}
+  \begin{columns}[c]
+    \begin{column}{0.62\textwidth}
+      \centering\safeimg[width=9.2cm]{openvla.pdf}
+    \end{column}
+    \begin{column}{0.35\textwidth}
+      \small Even at INT4, one frame takes \textbf{1.30$\times$} the pre-brake ceiling and \textbf{5.6$\times$} the lease.\\[0.2cm]
+      The intent model may steer the chunk policy. It may never hold a chunk lease.
+    \end{column}
+  \end{columns}
+  \vspace{0.1cm}
+  \begin{logblock}[6.8]
+    step 355 [-0.02692 0.00776 -0.00299 0.08160 0.07292 0.04791 0.99608]\\
+    \ind{9}accuracy 0.8466 \textasciitilde0.9017 \textbf{time=336.2 ms} fps=2.96 \textasciitilde2.97
+  \end{logblock}
+  \mlsyscredit{Franklin 2024, NVIDIA Jetson AI Lab, OpenVLA tutorial: Bridge table and INT4 log (one line, wrapped), Jetson AGX Orin 64GB. Ratios derived in calcs.py.}
+  \note{[1.5 min] [OPTIONAL] Real data. NVIDIA's Jetson AI Lab ran OpenVLA, a 7B vision-language-action model, on a Jetson AGX Orin 64GB and published the time per frame at three precisions: 840 ms at FP16, 471 ms at FP8, 336 ms at INT4. The log line is the tool's own output for one frame at INT4: 336.2 ms. Lecture 3 used this measurement to check the brain's latency model. On today's axis, even the fastest build takes 1.30 times the entire pre-brake ceiling of 258.3 ms, and 5.6 times the 60 ms lease. ENGAGE: what would happen if the intent model held the lease directly? (Expected: either the lease would have to exceed the ceiling, which breaks the stopping guarantee, or the base would stop between every evaluation.) WARN: this is why the course separates the chunk lease from the intent lease. The intent model's goals expire under the intent lease, a separate grant over the goal, which Lecture 10 sizes. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Estimate: what does a 100 ms lease cost?}
+  \mlsysactivity{Estimate}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.48\textwidth}
+      \normalsize The team lengthens the lease from 60 to 100 ms to ride out proposer hiccups.\\[0.25cm]
+      How much more clear distance does that spend at 1.5 m/s?
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \small
+      \wstep{2}{Added lease: $100 - 60 = 40$ ms}
+      \wstep{2}{Added distance: $1.5 \times 40 = \mathbf{60}$ mm}
+      \wstep{2}{Running total: $742.5 + 1.5 \times 102 =$ \textbf{895.5} mm}
+      \uncover<2->{\begin{mlsyscard}{mlsysaccent}\small Continuity is bought with clearance, 1.5 mm per millisecond. A lease that reaches the ceiling commits the machine to motion it cannot stop.\end{mlsyscard}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{The Nervous System, Checkpoint 4.2 and Definition 4.2 (common pitfall). Values derived in calcs.py.}
+  \note{[2 min] [CORE] ENGAGE: two minutes with a neighbor. The chapter's checkpoint asks exactly this. Step 2: 40 ms more lease is 60 mm more travel before braking, so the running total rises from 835.5 to 895.5 mm, and the last admission now precedes brake onset by 122 ms. WARN: the 60 mm comes out of the same 264.5 mm that the observation's age and a jerk-limited stop still need. Students who say 'it is only 40 ms' are reasoning about software timeouts; here a millisecond has a length. The right response to proposer hiccups is a faster or steadier proposer, which lowers the floor; a longer lease only spends clearance. ENGAGE as a follow-up: does 100 ms still pass the lease rule on the next slide? (Expected: yes, barely, at 100 against 121.4; it spends margin the rest of the stack needs.) FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{The lease sits between a renewal floor and a ceiling}
+  \centering
+  \mlsyssteps[width=14.6cm]{leaserule_step}{2}\\[0.05cm]
+  {\small $T_{\text{chunk}} + T_{\text{jitter}} < T_{\text{lease}} \le$ ceiling $-$ tick $-$ bus $-$ onset $-$ age at admission}
+  \mlsyscredit{The Nervous System, \S4.9.1, equation 4 and table 1 (51.6 and 63.3 ms are allocations). Values derived in calcs.py.}
+  \note{[2.5 min] [CORE] Step 1: start from the 258.3 ms ceiling. Subtract the tick, the bus cycle, and the brake onset: 236.3 ms. Subtract the observation's age when it reaches the proposer, 51.6 ms, which Lecture 8 builds stage by stage. Subtract the dispatch-to-admission interval, 63.3 ms, which Lecture 13 charges to the board link and validator. A new chunk's evidence is 114.9 ms old when it is admitted, so the lease may be at most 121.4 ms. Step 2: the floor. The chunk policy renews every 50 ms, plus a 5 ms allowance for variation: 55 ms. The lease must exceed it, or the robot stutters from stop to stop. The chosen 60 ms sits just above the floor. ENGAGE: what happens if the floor rises above the ceiling? (Expected: no lease works at that speed; drive slower or renew faster.) WARN: the 40 ms p99 inference time proves neither bound; the floor needs the interval between successful admissions, and the ceiling needs worst-case delays. The lease is an unverified allocation until the vehicle shows every interval fits under load. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Four events end authority; a heartbeat renews none}
+  \begin{columns}[c]
+    \begin{column}{0.56\textwidth}
+      \centering\safeimg[width=8.2cm]{timers.pdf}\\[0.05cm]
+      {\footnotesize Authority-expiry timers run on the safety MCU's own clock.}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      {\footnotesize\textbf{ROS 2's sensor-data profile} (rmw, jazzy)}\par\vspace{0.05cm}
+      \begin{logblock}[6.8]
+        RMW\_QOS\_POLICY\_HISTORY\_KEEP\_LAST,\\
+        5,\\
+        RMW\_QOS\_POLICY\_RELIABILITY\_BEST\_EFFORT,\\
+        RMW\_QOS\_POLICY\_DURABILITY\_VOLATILE,\\
+        RMW\_QOS\_DEADLINE\_DEFAULT,\\
+        RMW\_QOS\_LIFESPAN\_DEFAULT,\\
+        RMW\_QOS\_POLICY\_LIVELINESS\_SYSTEM\_DEFAULT,\\
+        \textbf{RMW\_QOS\_LIVELINESS\_LEASE\_DURATION\_DEFAULT},
+      \end{logblock}
+      \vspace{0.1cm}
+      {\footnotesize DDS's ``liveliness lease'' says a writer is alive. It grants no authority to move.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{The Nervous System, \S4.4.1 (authority-expiry timers). ros2/rmw branch jazzy, rmw/include/rmw/qos\_profiles.h lines 27 to 34; DEFAULT is unspecified (types.h).}
+  \note{[2.5 min] [CORE] Authority over an admitted chunk ends at the earliest of four independent events: its evidence passes the freshness deadline Lecture 2 defined; its 60 ms lease expires; the host heartbeat (100 Hz, timeout 30 ms, three missed beats) goes silent; or the protective scanner trips. None waits for another. A fifth timer guards the guard: the microcontroller's 5 ms self-watchdog, fed only when all checks of a tick finish. NARRATE the code: ROS 2's sensor-data profile keeps the last 5 samples, best effort, and leaves deadline, lifespan, and the liveliness lease unspecified. Even when set, a DDS deadline only raises an event, and a liveliness lease only says the writer process is alive. ENGAGE: why can a heartbeat never renew the chunk lease? (Expected: a live process can be livelocked or emit corrupted setpoints.) WARN: the same error in firmware: feeding the watchdog from a timer interrupt proves only that interrupts run, the question litigated in Bookout v. Toyota (2013). FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{The handoff record keeps each limit with its evidence}
+  \centering
+  \safeimg[width=14.6cm]{events.pdf}\\[0.0cm]
+  \begin{columns}[T]
+    \begin{column}{0.53\textwidth}
+      \begin{mlsyscard}{mlsysaccent}\footnotesize
+        \textbf{Handoff record, H4 (plan to enforcer)}\\
+        value: lease 60 ms;\ bound kind: \textbf{requirement}\\
+        conditions: 1.5 m/s, loaded, dry floor\\
+        detector: lease timer;\ clock: safety MCU
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.43\textwidth}
+      \footnotesize Five handoffs (H1 sensing to H5 actuator), five limits: latency, bandwidth, heat, determinism, fault isolation. Only a \textbf{proven bound} may stand in for a worst case.
+    \end{column}
+  \end{columns}
+  \mlsyscredit{The Nervous System, table 1, \S4.9, Definition 4.3, tables 3 and 4 (record fields abridged).}
+  \note{[2 min] [CORE] This lecture's record. Every charge in the budget is an interval between four events: capture, dispatch, admission, brake onset. Lecture 8 derives the first interval, Lecture 13 the second, and today derived the third, 82 ms, from the lease. Together 196.9 ms; rows one and two are the 114.9 ms replacement latency that Lecture 11 uses. The handoff record states one interface limit at one of five handoffs: its value, the conditions under which it holds, its uncertainty and margin, the detector that catches an excursion, its provenance, its clock, and its bound kind: requirement, proven bound, or measured distribution. It is the second record in the record chain, after Lecture 2's limit record. ENGAGE: a bench run shows p99 = 24.5 ms against a 30 ms budget; which bound kind may it be recorded as? (Expected: measured distribution, never proven bound.) WARN: the common error is recording a bench p99 as a bound. Land segment 3 aloud: the lease is a term in the stopping budget, sized between what the proposer can renew and what the brakes can still absorb. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: BOUNDS
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] The lease counted the tick and the bus as 1 ms each, as if they were certain. What makes a deadline a guarantee?}
+\mlsysdivider{When is a deadline a guarantee?}{The Nervous System, \S4.2 and \S4.5 (Napkin Math 4.2 and 4.3)}
+\section{Bounds}
+
+\begin{frame}{Response time adds waiting to running: R = C + B + I}
+  \centering
+  \mlsyssteps[width=14.6cm]{rta_step}{3}\\[0.05cm]
+  {\small \textbf{WCET} $C$: longest run over every input and processor state. $B$: blocking. $I$: preemption.}
+  \mlsyscredit{The Nervous System, \S4.2 (figure 1, Definition 4.1), \S4.5.1, equation 3, Napkin Math 4.2 (C, D chosen; B, I illustrative).}
+  \note{[3 min] [CORE] Step 1: one unloaded run of the permission tick took 135 microseconds, an illustrative observation. The design declares a worst-case execution time of 250: the 115 between them is a claim that timing analysis must justify. A measured maximum can refute a declared WCET; it can never establish one, because a test reaches only some processor states. Step 2: the response time adds waiting. Blocking B is the longest section in which lower-priority code masks the tick, such as the link driver re-arming its DMA, 50 microseconds. Interference I is the timer and bus interrupts that preempt it, 40. R = 250 + 50 + 40 = 340. Step 3: the deadline is 400 microseconds, shorter than the 1 ms period so each setpoint is ready within its own cycle. Margin 60. The mailbox adds nothing to B, because the seqlock never makes the tick wait. ENGAGE: which term would a mutex in the mailbox change? (Expected: B, without limit.) WARN: the margin is only as dependable as its weakest term's bound. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Estimate: does the tick meet its deadline?}
+  \mlsysactivity{Estimate}{1.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.48\textwidth}
+      \normalsize A new link driver masks the tick for \textbf{120\us} instead of 50.\\[0.2cm]
+      WCET 250\us, interference 40\us, deadline 400\us.
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \small
+      \wstep{2}{$R = 250 + 120 + 40 = \mathbf{410}$\us}
+      \wstep{2}{$410 > 400$: misses by \textbf{\textcolor{mlsysaccent}{10\us}}}
+      \wstep{2}{Largest blocking that fits: $400 - 250 - 40 = 110$\us}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{The Nervous System, Checkpoint 4.1. Values derived in calcs.py.}
+  \note{[1.5 min] [CORE] ENGAGE: 60 seconds, individually. This is the chapter's checkpoint. Step 2: 410 microseconds, 10 over the deadline. Any blocking section longer than 110 microseconds breaks the schedule even though the tick's own code did not change. WARN: the miss would not show up in most test runs: the long masking section must coincide with a tick release and with interrupts, and a profiling campaign may run for days without that alignment. That is what the next slide measures. ENGAGE as a follow-up: where would a tick that misses its deadline cost the machine? (Expected: the drives hold the previous setpoint for an extra bus cycle, a full 1 ms of lag, and a late lease check costs 1.5 mm per millisecond.) FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{A longer test raised the maximum; p99 barely moved}
+  \begin{columns}[c]
+    \begin{column}{0.64\textwidth}
+      \centering\safeimg[width=9.6cm]{runmax.pdf}
+    \end{column}
+    \begin{column}{0.33\textwidth}
+      \small Under load, the worst lateness after 1,000 releases was 5.8 ms. After 60,000 it was \textbf{35.8 ms}.\\[0.2cm]
+      A measured maximum only grows with the test. A \textbf{bound} comes from analysis.
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Measured by the lecture authors (the 1 ms task of segment 1, images/data). Running p99 and maximum computed in make\_figs.py and calcs.py.}
+  \note{[2 min] [OPTIONAL] The same laptop data, read in the order it was collected. Solid lines: the largest lateness seen so far. Dashed: the p99 so far. Red is under load, gray without. After 100 releases the worst case looks like a third of a millisecond. After 1,000 it is 5.8 ms; after 60,000, 35.8 ms. The p99 settles near 600 microseconds and stays there. ENGAGE: how many releases would make the maximum stop growing? (Expected: no number does; a longer test can always meet a rarer alignment of interrupts and contention.) WARN: this is the chapter's fallacy that nominal, fault-free logs prove isolation. Thousands of clean hours show the common case. A bound comes from the response-time analysis on the last slide, run on hardware whose every delay source is bounded or removed: tightly coupled memory, no demand paging, no unbounded locks. Isolation is tested by injecting faults on purpose, which Lecture 15 owns. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Pathfinder's blocking term had no bound}
+  \begin{columns}[c]
+    \begin{column}{0.56\textwidth}
+      {\small\itshape ``... the long-running communications task, having higher priority than the meteorological task, would prevent it from running, consequently preventing the blocked information bus task from running. After some time had passed, a watchdog timer would go off ... and initiate a total system reset.''\par}
+      \vspace{0.15cm}
+      {\footnotesize Mike Jones, ``What really happened on Mars Rover Pathfinder,'' 7 Dec 1997}
+    \end{column}
+    \begin{column}{0.41\textwidth}
+      \small $R = C + \textcolor{RedLine}{\mathbf{B}} + I$\\[0.1cm]
+      $B$ = as long as medium-priority work runs\\[0.25cm]
+      \uncover<2->{\textbf{Fix:} priority inheritance (Sha et al.\ 1990), one flag uploaded to the lander. $B$ became one critical section.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Jones 1997 (after Wilner, RTSS 1997 keynote), as archived at cs.cornell.edu/courses/cs614; Reeves 1997; The Nervous System, War Story 4.1.}
+  \note{[2 min] [CORE] Back to the hook with the equation in hand. The quote is from the 1997 account that spread the story. The bus task's C and I were fine. Its B, the time waiting on a lower-priority task, had no bound: the weather task held the mutex, and the communications task, which outranked it, could run as long as it liked. ENGAGE: which protocol bounds B? Step 2: priority inheritance. The lock holder inherits the priority of the task it blocks, so medium-priority work can no longer preempt it, and B becomes at most one critical section. JPL engineers reproduced the reset on a ground replica with full event tracing, then uploaded a short program that turned the mutex's inheritance flag on. WARN: the engineers had chosen to leave inheritance off to save time in a time-critical task, and one or two unexplained resets had happened in pre-flight tests and been dismissed as hardware glitches. Our tick removes the lock entirely: the seqlock. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Nine axes overflow one CAN FD bus; EtherCAT uses 2.2\%}
+  \begin{columns}[c]
+    \begin{column}{0.60\textwidth}
+      \centering\safeimg[width=9.0cm]{bus.pdf}
+    \end{column}
+    \begin{column}{0.37\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.2cm,keepaspectratio]{can_frame_scope.jpg}\\[0.02cm]
+      {\footnotesize Measured: a 1-byte CAN frame at 1 Mbit/s, 47\us}\\[0.1cm]
+      \safeimg[width=0.6\textwidth,height=1.5cm,keepaspectratio]{asix_esc.jpg}\\[0.02cm]
+      {\footnotesize EtherCAT slave controller chip}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{The Nervous System, Napkin Math 4.3 (8-byte records, 1 and 5 Mbps, worst-case stuffing). Photos: 0o1337; Allanchou1357; CC BY-SA 4.0, Wikimedia Commons.}
+  \note{[3 min] [OPTIONAL] The bound continues on the wire. Nine axes, seven arm joints and two wheels, each send an 8-byte command and return an 8-byte feedback every 1 ms. CAN FD carries one message per frame, so 18 frames. Each spends 34 bits at the 1 Mbps nominal rate and 113 bits, worst-case stuffing included, at the 5 Mbps data rate: 56.6 microseconds. Eighteen take 1,018.8, 101.9 percent of the cycle, before any blocking or retransmission. A bus per limb passes: the arm at 79.2 percent. EtherCAT sends one frame through all nine drives; each drive reads and writes its slot as the bits pass: 22.0 microseconds, 2.2 percent. The scope photo is real: one classic CAN frame with one data byte at 1 Mbit/s takes 47 microseconds. ENGAGE: how many axes fit one CAN FD bus? (Expected: 8.) WARN: occupancy is a necessary check that falls short of a response bound, and synchronized drive clocks say nothing about how late a command arrives. Land segment 4 aloud: a deadline is a guarantee only when every term of the response time has a bound. FLEX: [OPTIONAL].}
+\end{frame}
+
+% =============================================================================
+% CLOSE
+% =============================================================================
+\begin{frame}{Retrieval: what would have saved each machine?}
+  \mlsysactivity{Retrieval}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.30\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.3cm,keepaspectratio]{pathfinder_apod.jpg}\\[0.15cm]
+      \safeimg[width=\textwidth,height=1.4cm,keepaspectratio]{thumb_budget_step2.pdf}
+    \end{column}
+    \begin{column}{0.67\textwidth}\small
+      \only<1|handout:0>{\normalsize Close your notes. For the lander and for our stalled robot: which delay had no bound, and what bounds it?}%
+      \only<2->{\textbf{Pathfinder:} blocking $B$ had no bound, so the bus task missed its deadline and the watchdog reset the computer. Priority inheritance bounds $B$.\\[0.2cm]
+      \textbf{Stalled chunk policy:} the tick never waits (one-attempt mailbox), finishes in $R = 340$ of 400\us, and the 60 ms lease ends authority: brake onset \textbf{82 ms} after the last admission, at \textbf{835.5 mm} of the 1,100 mm budget.\\[0.2cm]}
+      \uncover<3->{\textcolor{mlsysaccent}{\textbf{A reset is a fallback for a lander at rest. A moving base needs a stop that runs without the proposer.}}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: NASA/JPL, public domain. The Nervous System, Napkin Math 4.1 and 4.2.}
+  \note{[3.5 min] [CORE] Retrieval, 90 seconds, then answer the hook. Step 2: Pathfinder's high-priority task had a bounded C and I and an unbounded B; the watchdog reset was the only fallback, and on a lander sitting still it cost data and caused no damage. For our machine: the chunk policy stalls at 1.5 m/s. The tick does not wait for it, because the mailbox has no lock; its response time is bounded at 340 microseconds by analysis rather than by a test; and the lease, sized from the stopping budget, ends the stalled chunk's authority after 60 ms, so braking starts 82 ms (123 mm) after the last admission, and the budget stands at 835.5 of 1,100 mm. Step 3: say the last line. ENGAGE: which of the three answers would a faster GPU have changed? (Expected: none; only the renewal floor moves.) WARN: all of this is a design allocation until loaded tests and fault injection on the real board confirm it. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Takeaways}
+  \thumbline{thumb_twoproc_step3.pdf}{Rates come from physics; fast loops close in the drive; only the permission path writes the drives.}\\[0.3cm]
+  \thumbline{thumb_mailbox_meas_step2.pdf}{A one-slot mailbox gives the tick the freshest proposal in one bounded attempt; a mutex reader waited 3.8 ms.}\\[0.3cm]
+  \thumbline{thumb_lease_step3.pdf}{The chunk lease is a stopping-budget term between the 55 ms floor and the 121.4 ms limit; a heartbeat never renews it.}\\[0.3cm]
+  \thumbline{thumb_rta_step3.pdf}{A deadline holds only when C, B, and I each have a bound; a p99 or a measured maximum proves none.}
+  \note{[1 min] [CORE] One line per segment. Ask students which slide taught each line. The handoff record is where each of these numbers is kept, with its bound kind. If short on time, read the third and fourth.}
+\end{frame}
+
+\begin{frame}{Open questions}
+  \begin{columns}[c]
+    \begin{column}{0.62\textwidth}
+      \small
+      \begin{itemize}\setlength{\itemsep}{0.15cm}
+        \item Learned locomotion policies already run near the tick's rate. If a policy is as fast as the enforcer, what does the separate permission path still guarantee?
+        \item Two chips cost board space, power, and money. When can one system-on-chip with partitioned cores meet the same independence requirement?
+        \item Who should own the lease's number: the model team, the controls team, or the safety assessor?
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.35\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.3cm,keepaspectratio]{beckhoff_cx5120.jpg}\\[0.05cm]
+      {\footnotesize An industrial real-time controller with its own drive-network ports}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: Oleg Yunakov, CC BY-SA 4.0, Wikimedia Commons (Beckhoff CX5120).}
+  \note{[1 min] [OPTIONAL] No single answer. The first is the chapter's own question (\S4.8): rate does not confer authority, and a fast network's output is still a proposal that must pass the checks; what remains is timing, state, and a fallback. The second is the placement trade-off that Lecture 13 takes up with loaded measurements. The third has no technical answer: the lease couples a model's renewal rate, the brakes' deceleration, and a hazard analysis, and someone must sign for the number. The photo shows how industry builds the separation: a controller whose drive-network ports serve only the deterministic bus.}
+\end{frame}
+
+\begin{frame}{Read and explore}
+  \small
+  \begin{itemize}\setlength{\itemsep}{0.04cm}
+    \item \textbf{Read:} The Nervous System, \S4.1 to \S4.11; Napkin Math 4.1 to 4.3; Checkpoints 4.1 to 4.3.
+    \item Sha, Rajkumar, and Lehoczky, ``Priority Inheritance Protocols,'' 1990.
+    \item Kopetz, \emph{Real-Time Systems}, 2nd ed., 2011: state messages and temporal accuracy.
+    \item Gray and Cheriton, ``Leases,'' SOSP 1989: the lease idea, for file caches.
+    \item Jones, ``What really happened on Mars Rover Pathfinder,'' 1997, and Reeves's reply.
+    \item Buttazzo, \emph{Hard Real-Time Computing Systems}, 2011: response-time analysis.
+  \end{itemize}
+  \note{[0.5 min] [CORE] The chapter first, with the three napkin maths worked by hand. Sha et al. is the paper the Pathfinder fix applied. Kopetz explains why the mailbox exchanges state messages. Gray and Cheriton is the origin of the lease idea, for file caches. Jones and Reeves tell the Pathfinder story from the room and from JPL. Buttazzo has task sets students can analyze. FLEX: assign the systems appendix to students new to real-time scheduling.}
+\end{frame}
+
+\begin{frame}[c]
+  \begin{columns}[c]
+    \begin{column}{0.34\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.2cm,keepaspectratio]{thumb_stack_world.pdf}
+    \end{column}
+    \begin{column}{0.62\textwidth}
+      {\small\textcolor{lightgray}{NEXT LECTURE \textbar{} PHYSICAL DATA}}\\[0.5cm]
+      {\LARGE\bfseries When the permission path clamps an operator's command, what should a demonstration record?}
+    \end{column}
+  \end{columns}
+  \note{[0.5 min] [CORE] Part I is complete: the body, the brain, and the nervous system. Lecture 5 opens Part II on the World level, and its first fact is that a robot manufactures its own training data. During teleoperated openings of the spring-latched cage door, the permission path may clamp, rate-limit, or refuse an operator's request, and the body may deliver motion that differs from the admitted command. Leave the class with the question: which of the three, requested, admitted, or delivered, should a policy learn from?}
+\end{frame}
+
+\end{document}
