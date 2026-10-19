@@ -7,11 +7,11 @@ categories: ["analysis", "advanced"]
 
 ## The Question
 
-You know how to run a roofline analysis. Now you want to answer three follow-up
-questions that appear in real design reviews:
+Once a roofline analysis is done, three follow-up questions appear in real design
+reviews:
 
 - Why does training need much more memory than inference?
-- How many replicas do I need for a QPS and P99 target?
+- How many replicas does a QPS and P99 target require?
 - How much does MoE hot-expert imbalance change the communication cost?
 
 These questions are not separate systems. They are different views of the same
@@ -19,7 +19,7 @@ demand--supply framework: tensors consume memory, requests consume serving
 capacity, and routed tokens consume network bandwidth.
 
 ::: {.callout-note}
-## What You Will Learn
+## Learning Objectives
 
 - Break training memory into weights, gradients, optimizer state, activations,
   and communication buffers.
@@ -63,21 +63,23 @@ table(["Component", "Per-GPU Memory"], rows)
 print(f"Fits on H100: {memory.feasible}")
 ```
 
-The first three terms are direct byte counts. Activation memory is the term most
-sensitive to framework behavior because checkpointing changes what the backward
-pass must store versus recompute.
-
-### Exercise
-
-Change `zero_stage` from `0` to `3`. Which components shrink? Why do activations
-not shrink from ZeRO alone?
+The first three terms (`{python} f"{memory.weights.to('GB'):~.1f}"` of weights,
+`{python} f"{memory.gradients.to('GB'):~.1f}"` of gradients, and
+`{python} f"{memory.optimizer_state.to('GB'):~.1f}"` of optimizer state per rank under
+ZeRO-2 across `{python} f"{memory.parallelism['dp']}"` data-parallel ranks) are direct
+byte counts, bringing total per-GPU demand to `{python} f"{memory.total_memory.to('GB'):~.1f}"`
+(`{python} f"{memory.memory_utilization:.1%}"` of the H100's
+`{python} f"{memory.available_memory.to('GB'):~.0f}"` HBM). Activation memory
+(`{python} f"{memory.activations.to('GB'):~.1f}"`) is the term most sensitive to
+framework behavior because checkpointing changes what the backward pass must store
+versus recompute.
 
 ---
 
 ## 2. Serving Capacity Combines Three Walls
 
-A serving deployment is not sized by TTFT alone. You need base request latency,
-per-replica token capacity, and queueing pressure under load.
+A serving deployment is not sized by TTFT alone. Sizing also requires base request
+latency, per-replica token capacity, and queueing pressure under load.
 
 ```{python}
 from mlsysim.solvers import ServingCapacityModel
@@ -100,14 +102,9 @@ print(f"Estimated P99:     {capacity.estimated_p99_latency:~.1f}")
 print(f"Bottleneck:        {capacity.bottleneck}")
 ```
 
-The `efficiency` parameter is exposed because the compute-bound part of serving
+At `{python} f"{capacity.qps_target:.0f} QPS"` with a `{python} f"{capacity.target_p99_latency.to('ms'):~.0f}"` P99 target, `{python} f"{capacity.required_replicas}"` H100 replica suffices (`{python} f"{capacity.qps_capacity:.1f} QPS"` capacity at `{python} f"{capacity.utilization:.1%}"` utilization, combining `{python} f"{capacity.base_request_latency.to('ms'):~.0f}"` base request latency and `{python} f"{capacity.queue_wait_p99.to('ms'):~.0f}"` queueing wait for an estimated P99 of `{python} f"{capacity.estimated_p99_latency.to('ms'):~.0f}"`). The `efficiency` parameter is exposed because the compute-bound part of serving
 depends on implementation quality. Use the default for quick comparisons; use a
 measured efficiency value before making a production SLA commitment.
-
-### Exercise
-
-Double `output_tokens` from 64 to 128. Does the replica count change by exactly
-2x? Explain the difference between base latency and queueing latency.
 
 ---
 
@@ -136,6 +133,7 @@ moe = SparseTransformerWorkload(
 )
 
 rows = []
+routing_by_gamma = {}
 for gamma in [1.0, 1.25, 1.5, 2.0]:
     routing = MoERoutingModel().solve(
         model=moe,
@@ -145,6 +143,7 @@ for gamma in [1.0, 1.25, 1.5, 2.0]:
         routing_imbalance_factor=gamma,
         fleet=Systems.Clusters.Research_256,
     )
+    routing_by_gamma[gamma] = routing
     rows.append([
         gamma,
         f"{routing.effective_active_experts:.2f}",
@@ -155,13 +154,13 @@ for gamma in [1.0, 1.25, 1.5, 2.0]:
 table(["Imbalance", "Effective Experts", "Routed Bytes", "All-to-All"], rows)
 ```
 
-This model does not simulate a router. It gives you a clean sensitivity knob:
-if measured routing logs show a 25% hot-expert effect, set
-`routing_imbalance_factor=1.25` and see how the communication wall moves.
+This model does not simulate a router. It provides a clean sensitivity knob:
+if measured routing logs show a 25% hot-expert effect, setting
+`routing_imbalance_factor=1.25` increases the routed payload from `{python} f"{routing_by_gamma[1.0].token_dispatch_bytes.to('MB'):~.1f}"` to `{python} f"{routing_by_gamma[1.25].token_dispatch_bytes.to('MB'):~.1f}"` and raises all-to-all communication latency from `{python} f"{routing_by_gamma[1.0].all_to_all_latency.to('ms'):~.2f}"` to `{python} f"{routing_by_gamma[1.25].all_to_all_latency.to('ms'):~.2f}"`.
 
 ---
 
-## 4. What Counts as Validation?
+## 4. What Counts as Validation
 
 For these models, validation means matching the level of the approximation:
 
@@ -178,7 +177,7 @@ final production SLA.
 
 ---
 
-## Next Step
+## Next Steps
 
 Use these models inside a larger analysis:
 

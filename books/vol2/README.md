@@ -13,7 +13,7 @@
 
 Volume II moves from introductory single-machine ML systems to fleets of machines connected by high-speed networks. It covers the mathematical and algorithmic demand for scale, how to build the physical infrastructure that meets it, how to serve models to billions of users, and how to do all of this safely and responsibly.
 
-The assumed foundation is local model execution, memory hierarchy, training and inference, and accelerator basics. The advanced material explains how those constraints change when many nodes coordinate through network fabrics, message passing, and fault tolerance across racks and datacenters. Security, privacy, environmental limits, and governance enter as design requirements throughout; the final part develops their enforcement mechanisms.
+The assumed foundation is local model execution, memory hierarchy, training and inference, and accelerator basics. The advanced material explains how those constraints change when many nodes coordinate through network fabrics, message passing, and fault tolerance across racks and data centers. Security, privacy, environmental limits, and governance enter as design requirements throughout; the final part develops their enforcement mechanisms.
 
 ## What You Will Learn
 
@@ -22,7 +22,7 @@ The assumed foundation is local model execution, memory hierarchy, training and 
     <tr>
       <th width="25%">Part</th>
       <th width="20%">Focus</th>
-      <th width="55%">What You Will Learn</th>
+      <th width="55%">What you will learn</th>
     </tr>
   </thead>
   <tbody>
@@ -37,9 +37,9 @@ The assumed foundation is local model execution, memory hierarchy, training and 
       <td>How to partition workloads with 3D parallelism, coordinate collective communication primitives, survive inevitable hardware failures, and orchestrate shared clusters</td>
     </tr>
     <tr>
-      <td><b>III. Deployment at Scale</b></td>
+      <td><b>III. The Fleet in Production</b></td>
       <td>Serving and operations</td>
-      <td>How to diagnose bottlenecks and improve runtime performance, serve models under tail-latency SLOs, deploy to edge devices, and manage production MLOps lifecycles</td>
+      <td>How to measure how much of the fleet becomes useful work, serve models under tail-latency SLOs, deploy to edge devices, and manage production MLOps lifecycles</td>
     </tr>
     <tr>
       <td><b>IV. The Responsible Fleet</b></td>
@@ -57,13 +57,13 @@ The assumed foundation is local model execution, memory hierarchy, training and 
       <th width="5%">#</th>
       <th width="22%">Chapter</th>
       <th width="22%">Directory</th>
-      <th width="51%">Core Question</th>
+      <th width="51%">Core question</th>
     </tr>
   </thead>
   <tbody>
     <tr>
       <td>1</td>
-      <td><b>Introduction to Scale</b></td>
+      <td><b>Introduction</b></td>
       <td><code>01_introduction/</code></td>
       <td>Why do single-machine systems break down at production scale?</td>
     </tr>
@@ -111,13 +111,13 @@ The assumed foundation is local model execution, memory hierarchy, training and 
     </tr>
     <tr>
       <td>9</td>
-      <td><b>Performance Engineering</b></td>
+      <td><b>Fleet Efficiency</b></td>
       <td><code>09_performance_engineering/</code></td>
-      <td>How do you close the gap between hardware peak and serving throughput?</td>
+      <td>How much of an allocated fleet becomes training progress and served work, and how is the lost share recovered?</td>
     </tr>
     <tr>
       <td>10</td>
-      <td><b>Inference at Scale</b></td>
+      <td><b>Serving at Scale</b></td>
       <td><code>10_inference/</code></td>
       <td>How do you serve models to millions of concurrent requests under latency SLOs?</td>
     </tr>
@@ -129,7 +129,7 @@ The assumed foundation is local model execution, memory hierarchy, training and 
     </tr>
     <tr>
       <td>12</td>
-      <td><b>Ops at Scale</b></td>
+      <td><b>ML Operations at Scale</b></td>
       <td><code>12_ops_scale/</code></td>
       <td>How do you monitor, version, and operate fleets of production models?</td>
     </tr>
@@ -168,7 +168,7 @@ The assumed foundation is local model execution, memory hierarchy, training and 
 
 ## Prerequisites
 
-Volume II is a standalone book. It assumes an introductory ML systems course or equivalent experience with single-machine execution, memory hierarchy, training and inference pipelines, and hardware acceleration. No other book is required. Appendix A recaps the single-machine performance model (the iron law, arithmetic intensity, and the roofline), and the book introduces its own C³ framework for reasoning about fleets.
+Volume II is a standalone book. It assumes an introductory ML systems course or equivalent experience with single-machine execution, memory hierarchy, training and inference pipelines, and hardware acceleration. No other book is required. Appendix A recaps the single-machine performance model (the iron law, arithmetic intensity, and the Roofline Model), and the book introduces its own C³ taxonomy for reasoning about fleets.
 
 ## Working in the Open
 

@@ -1,0 +1,88 @@
+---
+title: "The Sensor Zoo"
+subtitle: "Vetted specifications for the cameras, LiDARs, IMUs, and safety scanners used in the physical AI examples"
+---
+
+The Sensor Zoo lists every sensor in the `mlsysim.Sensors` registry. Each entry carries units and a
+provenance record, so the timing and bandwidth numbers that feed information-age and ingestion
+budgets trace back to a datasheet.
+
+::: {.callout-tip}
+## How to use this page
+Use these sensors to budget the time between an event and the moment the system can act on it: exposure, readout, transport, and processing. Load any sensor directly in Python, for example
+`camera = mlsysim.Sensors.Camera.Sony_IMX477`.
+:::
+
+```{python}
+#| echo: false
+#| output: asis
+import sys
+from pathlib import Path
+
+for candidate in [Path.cwd(), *Path.cwd().parents]:
+    pkg_dir = candidate / "mlsysim"
+    if (pkg_dir / "mlsysim" / "__init__.py").exists():
+        if str(pkg_dir) not in sys.path:
+            sys.path.insert(0, str(pkg_dir))
+        break
+
+import mlsysim
+from mlsysim import Sensors
+
+
+def q(value, unit=None, precision=1):
+    if value is None:
+        return "---"
+    if unit is not None:
+        value = value.to(unit)
+    return f"{value.magnitude:,.{precision}f} {value.units:~P}"
+
+
+def entries(namespace):
+    for attr in sorted(dir(namespace)):
+        if attr.startswith("_"):
+            continue
+        item = getattr(namespace, attr)
+        if hasattr(item, "name") and hasattr(item, "nominal_latency"):
+            yield attr, item
+
+
+cameras = list(entries(Sensors.Camera))
+print("### Cameras\n")
+print("| Sensor | Resolution | Frame rate | Shutter | Exposure | Readout | Interface | Power |")
+print("|:---|:---:|:---:|:---|:---:|:---:|:---|:---:|")
+for _, c in cameras:
+    res = f"{c.resolution_width} × {c.resolution_height}" if c.resolution_width else "---"
+    print(f"| **{c.name}** | {res} | {q(c.frame_rate, 'Hz', 0)} | {c.shutter_type or '---'} | "
+          f"{q(c.exposure_time, 'ms')} | {q(c.readout_time, 'ms')} | {c.interface or '---'} | {q(c.nominal_power, 'W')} |")
+
+print("\n### LiDAR\n")
+print("| Sensor | Channels | Scan rate | Max range | Range accuracy | Interface | Power |")
+print("|:---|:---:|:---:|:---:|:---:|:---|:---:|")
+for _, s in entries(Sensors.LiDAR):
+    print(f"| **{s.name}** | {s.channels or '---'} | {q(s.scan_rate, 'Hz', 0)} | {q(s.max_range, 'm', 0)} | "
+          f"{q(s.range_accuracy, 'mm', 0)} | {s.interface or '---'} | {q(s.nominal_power, 'W')} |")
+
+print("\n### Inertial measurement units\n")
+print("| Sensor | DoF | Sample rate | Gyro noise density | Accel noise density | Interface |")
+print("|:---|:---:|:---:|:---:|:---:|:---|")
+for _, s in entries(Sensors.IMU):
+    gyro = f"{s.gyro_noise_density:~P}" if s.gyro_noise_density is not None else "---"
+    accel = f"{s.accel_noise_density:~P}" if s.accel_noise_density is not None else "---"
+    print(f"| **{s.name}** | {s.dofs or '---'} | {q(s.sample_rate, 'Hz', 0)} | {gyro} | {accel} | {s.interface or '---'} |")
+
+print("\n### Safety laser scanners\n")
+print("| Sensor | Protective field | Response time | Scan angle | IEC 61496 | Performance level |")
+print("|:---|:---:|:---:|:---:|:---|:---|")
+for _, s in entries(Sensors.SafetyScanner):
+    print(f"| **{s.name}** | {q(s.protective_field_range, 'm')} | {q(s.response_time, 'ms', 0)} | "
+          f"{q(s.scan_angle, 'degree', 0)} | {s.iec61496_type or '---'} | {s.performance_level or '---'} |")
+print()
+```
+
+## Where these numbers are used
+
+Sensor timing sets the floor on how stale an observation is by the time the system acts on it. The
+Volume IV chapters use these entries for information-age budgets (half the exposure plus readout,
+transport, and processing) and for multi-camera ingestion bandwidth. The underlying formulas are in
+[`physics.robotics.perception`](../api/physics.robotics.perception.qmd).

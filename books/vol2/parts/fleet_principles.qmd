@@ -6,9 +6,9 @@ format:
 
 # Fleet Principles {.unnumbered}
 
-Part I studies the warehouse-scale form of the machine learning fleet, where the network is the bus, power density limits deployment, and component failures are routine at scale. The broader fleet also includes geographically distributed serving systems and heterogeneous edge devices, whose constraints appear later in the book. The demand that this part must meet is already set. The scaling laws of @sec-vol2-intro-ai-scaling-laws-a043 reward more parameters, more training tokens, and more compute together, so each further gain in quality asks the fleet for more memory, more arithmetic, more bytes moved between machines, and more data stored and read. Part I builds the physics of supply: the silicon, the wires, the cooling systems, and the storage hierarchies that make distributed ML possible. The focus shifts from the single accelerator to the data-center-scale machine, where the engineering question is no longer how to compute on one device but how to move energy and information at a scale that challenges the limits of the physical infrastructure.
+The scaling laws of @sec-vol2-intro-ai-scaling-laws-a043 reward more parameters, more training tokens, and more compute together, so each further gain in model quality asks the fleet for more memory, more arithmetic, more bytes moved between machines, and more data stored and read. With that demand set, Part I builds the physics of supply: the silicon, the wires, the cooling systems, and the storage hierarchies of the warehouse-scale machine learning fleet, where the network is the bus, power density limits deployment, and component failures are routine at scale. The broader fleet also includes geographically distributed serving systems and heterogeneous edge devices, whose constraints appear in Part III. Across this physical foundation, the focus shifts from the single accelerator to the data-center-scale machine, and the engineering question is no longer how to compute on one device but how to move energy and information at a scale that challenges the limits of the physical infrastructure.
 
-At this scale the individual accelerator becomes one component of a larger, tightly coupled system. The principles of the fleet are therefore not best practices for cluster management. They are constraints, most of them physical, that dictate what kind of models can be trained and how they can be served. From the efficiency of specialized silicon and the heat a rack can shed to the bisection bandwidth of the network fabric, these constraints define the boundaries of the Infrastructure band of the fleet stack, the two rows (Facility and Accelerators, Fabric and Storage) on which every other part of the book rests. The C³ taxonomy tracks costs across Compute, Communication, and Coordination. An optimization can reduce total execution time while shifting which cost dominates; reducing local compute, for example, can expose communication that was previously hidden. The engineering obligation is to measure the complete path rather than assume that a local saving yields the same fleet-wide gain.
+At this scale the individual accelerator becomes one component of a larger, tightly coupled system. The principles of the fleet are therefore not best practices for cluster management. They are constraints, most of them physical, that dictate what kind of models can be trained and how they can be served. These constraints range from the efficiency of specialized silicon and the heat a rack can shed to the bisection bandwidth of the network fabric. They define the boundaries of the Infrastructure band of the fleet stack, the two rows (Facility and Accelerators, Fabric and Storage) on which every other part of the book rests. The C³ taxonomy tracks costs across Compute, Communication, and Coordination. An optimization can reduce total execution time while shifting which cost dominates; reducing local compute, for example, can expose communication that was previously hidden. The engineering obligation is to measure the complete path rather than assume that a local saving yields the same fleet-wide gain.
 
 The principles below preview the constraints that Part I makes concrete through compute infrastructure, network fabrics, and storage, in the order those chapters develop them. Their implications name some mechanisms developed later in the book; those names are signposts, not prerequisites for reading this part. The first constraint applies before any machine is assembled, because the choice of accelerator decides how much of its silicon and power go to useful arithmetic.
 
@@ -22,17 +22,27 @@ Here, $\FleetEnergyProductivity$ denotes useful computation per unit energy; the
 
 :::
 
-A specialized accelerator still holds only as much model state as its memory allows, and that capacity gives the first reason to divide a model.
+A specialized accelerator still holds only as much model state as its memory allows, and that capacity gives the first reason to divide a model. When parameters, gradients, and optimizer states outgrow a single package, the computation can proceed only by splitting that state across multiple devices.
 
 ::: {#pri-memory-capacity-gap .callout-principle title="The memory capacity gap"}
 
 **Invariant**: Frontier model memory requirements have grown faster and more irregularly than single-accelerator HBM capacity.
 
-**Implication**: When a model and its training state exceed one device's memory, the system must divide that state across devices. Part II develops the parallelism strategies for doing so: tensor parallelism divides individual operations, and pipeline parallelism assigns groups of layers to different devices. Complementary data parallelism distributes training examples across model replicas. Part I establishes the capacity and communication constraints those strategies must respect.
+**Implication**: When a model and its training state exceed one device's memory, the system must divide that state across devices. Part II develops the parallelism strategies for doing so: tensor parallelism divides individual operations, and pipeline parallelism assigns groups of layers to different devices. Complementary data parallelism distributes training examples across model replicas. Because per-device bandwidth falls roughly tenfold at each physical boundary, from device memory to the node interconnect to the cluster fabric, the division that exchanges the most data, tensor parallelism, stays inside the fastest domain. Part I establishes the capacity and communication constraints those strategies must respect.
 
 :::
 
-Dividing a model across more accelerators packs more of them into each node and rack, and every operation they perform eventually becomes heat that the facility must remove.
+Dividing a model across more accelerators packs more of them into each rack, and the rack's power budget is the first limit on that density. Keeping latency-sensitive peers close enough for high-bandwidth copper links concentrates electrical draw into a narrow physical footprint.
+
+::: {#pri-power-density-wall .callout-principle title="The power density wall"}
+
+**Invariant**: Cluster scaling is constrained by thermal dissipation limits (watts per rack) and cooling capacity, not just silicon area or floor space.
+
+**Implication**: Watts per rack, together with power-delivery losses and the cooling class the facility installs, bound how many accelerators can share a rack, and therefore how large a fast interconnect domain can be. Accelerator power has risen faster than rack power budgets, so installable compute is set by the rack envelope rather than by peak FLOP/s.
+
+:::
+
+Every watt the rack draws becomes heat that the facility must remove. Sustaining that electrical load therefore turns a power-delivery specification into a continuous heat-rejection requirement.
 
 ::: {#pri-thermodynamic-limit .callout-principle title="The thermodynamic limit"}
 
@@ -40,17 +50,7 @@ Dividing a model across more accelerators packs more of them into each node and 
 $$ \InformationTechnologyHeatLoad\leq \FacilityHeatRemovalCapacity(\text{facility},\text{cooling configuration}) $$
 where $\InformationTechnologyHeatLoad$ is the heat produced by IT equipment and $\FacilityHeatRemovalCapacity$ is the maximum heat-removal rate of the installed facility and cooling configuration.
 
-**Implication**: A rack can operate only while its heat output remains within the installed cooling system's capacity. As rack power density rises, facilities may need to reduce rack density, augment air cooling, or adopt liquid cooling to keep heat removal within that configuration-specific limit.
-
-:::
-
-At the rack level, the same heat budget becomes a density constraint.
-
-::: {#pri-power-density-wall .callout-principle title="The power density wall"}
-
-**Invariant**: Cluster scaling is constrained by thermal dissipation limits (watts per rack) and cooling capacity, not just silicon area or floor space.
-
-**Implication**: Cooling must support the rack's sustained heat output and heat flux. Engineered air cooling remains viable for configurations designed for its airflow requirements; denser configurations may require liquid cooling. The requirement follows from the server and facility design, not cluster size alone.
+**Implication**: A rack can operate only while its heat output remains within the installed cooling system's capacity. The cooling class is chosen to match that heat load. Engineered air cooling remains viable for configurations designed for its airflow, while denser configurations need cold-plate or immersion liquid loops, which carry the same heat with far less flow at a cost in serviceability and leak and loss-of-flow risk.
 
 :::
 
@@ -75,19 +75,19 @@ The $\MessageStartupLatency$-$\LinkBandwidth$ model prices one message on one pa
 
 :::
 
-A fabric that carries every exchange on time still helps only if the training pipeline can keep the accelerators fed.
+A fabric that carries every exchange on time still helps only if the training pipeline can keep the accelerators fed. Every training step begins by pulling fresh batches from storage, so an underprovisioned input path stalls the cluster before arithmetic or gradient exchange even starts.
 
 ::: {#pri-io-wall .callout-principle title="The I/O wall"}
 
-**Invariant**: When storage throughput cannot deliver training data as fast as accelerators consume it, GPUs idle regardless of their computational power.
+**Invariant**: When storage throughput cannot deliver training data as fast as accelerators consume it, accelerators idle regardless of their computational power.
 $$ \text{Utilization} = \min\!\left(1,\;\frac{\StorageBandwidth}{\AcceleratorCount \times \AcceleratorDataConsumptionRate}\right) $$
 where $\StorageBandwidth$ is aggregate storage bandwidth, $\AcceleratorCount$ is the number of accelerators, and $\AcceleratorDataConsumptionRate$ is each accelerator's data-consumption rate.
 
-**Implication**: A storage system that was adequate for 8 GPUs can become the bottleneck at 64 if its provisioned throughput cannot meet the higher aggregate demand. The I/O wall scales with the number of accelerators: at a fixed per-device consumption rate, every GPU added raises the throughput floor that storage must sustain. Without matching capacity, the data pipeline can become the limiting factor.
+**Implication**: A storage system that was adequate for 8 accelerators can become the bottleneck at 64 if its provisioned throughput cannot meet the higher aggregate demand. The I/O wall scales with the number of accelerators: at a fixed per-device consumption rate, every accelerator added raises the throughput floor that storage must sustain. Without matching capacity, the data pipeline can become the limiting factor.
 
 :::
 
-Meeting that demand requires a hierarchy rather than a single undifferentiated storage pool.
+Meeting that demand requires a hierarchy rather than a single undifferentiated storage pool. No single storage medium offers both the petabyte capacity of a training corpus and the terabyte-per-second bandwidth of an accelerator pod.
 
 ::: {#pri-storage-hierarchy .callout-principle title="The storage hierarchy principle"}
 
@@ -97,4 +97,4 @@ Meeting that demand requires a hierarchy rather than a single undifferentiated s
 
 :::
 
-These constraints make the fleet a first-class engineering object. Following the introduction's account of why single machines no longer suffice, Part I builds the physical machine from the ground up: the silicon, power, and cooling systems of the AI data center, the network fabrics that connect the fleet, and the storage hierarchy that feeds the training pipeline and preserves its checkpoints. Each chapter sets one or more terms of the Fleet Law (@eq-fleet-law). Compute infrastructure sets the per-device rate behind $\IronLawComputeTime/\DeviceCount$ and the failure exposure that later surfaces in $\SynchronizationTime(\DeviceCount)$, network fabrics set $\CommunicationTime(\DeviceCount)$ and the barrier tail, and storage adds the input stalls and checkpoint pauses that the step pays whenever prefetching and asynchronous writes cannot hide them. Together, these chapters fix the physical rates within which the communication, partitioning, and recovery mechanisms of Part II must work, for each of the lighthouse archetypes (@sec-vol2-introduction-archetypes) traced across this book.
+These constraints make the fleet a first-class engineering object. Following the introduction's account of why single machines no longer suffice, Part I builds the physical machine from the ground up, starting with the silicon, power, and cooling systems of the AI data center and the network fabrics that connect the fleet. It then turns to the storage hierarchy that feeds the training pipeline, preserves its checkpoints, versions the artifacts a run depends on, and serves retrieval at inference time. Each chapter sets one or more terms of the Fleet Law (@eq-fleet-law). Compute infrastructure sets the per-device rate behind $\IronLawComputeTime/\DeviceCount$ and the failure exposure that later surfaces in $\SynchronizationTime(\DeviceCount)$. Network fabrics set $\CommunicationTime(\DeviceCount)$ and the barrier tail. Storage adds the input stalls and checkpoint pauses that the step pays whenever prefetching and asynchronous writes cannot hide them. Together, these chapters fix the physical rates within which the communication, partitioning, and recovery mechanisms of Part II must work, for each of the lighthouse archetypes (@sec-vol2-introduction-archetypes) traced across this book.

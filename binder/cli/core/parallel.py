@@ -30,11 +30,13 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from .config import ConfigManager, get_output_file
 from .discovery import VOLUME_DIRS
-from .process import start_process_group, stop_process_group
+from .process import interrupts_as_keyboard_interrupt, start_process_group, stop_process_group
 from .workspace import (
     Snapshot,
     Workspace,
     create_workspace,
+    mark_kept,
+    remove_stale_runs,
     remove_workspace,
     take_snapshot,
     workspace_path,
@@ -286,9 +288,13 @@ class BuildSession:
 
     def close(self) -> None:
         """Remove the workspace unless ``keep`` was requested."""
-        if self.workspace is not None and not self.keep:
-            remove_workspace(self.workspace)
-            self.workspace = None
+        if self.workspace is None:
+            return
+        if self.keep:
+            mark_kept(self.workspace)
+            return
+        remove_workspace(self.workspace)
+        self.workspace = None
 
 
 def run_jobs(
@@ -304,9 +310,10 @@ def run_jobs(
 ) -> List[JobResult]:
     """Run *jobs* on up to *workers* workspaces and return the results in job order.
 
-    ``run_dir/summary.json`` records every finished job. On Ctrl-C every
-    running build is stopped, queued jobs are cancelled, workspaces are
-    removed, and ``KeyboardInterrupt`` propagates.
+    ``run_dir/summary.json`` records every finished job. On Ctrl-C, SIGTERM
+    or SIGHUP every running build is stopped, queued jobs are cancelled,
+    workspaces are removed, and ``KeyboardInterrupt`` propagates. Workspaces
+    left by earlier runs that were killed outright are removed first.
 
     Args:
         repo_root: Checkout whose working tree is snapshotted for the workspaces.
@@ -321,6 +328,26 @@ def run_jobs(
     Raises:
         ValueError: If two jobs share a name.
     """
+    remove_stale_runs(repo_root)
+    # Signals become KeyboardInterrupt so the cleanup in _run_jobs runs.
+    with interrupts_as_keyboard_interrupt():
+        return _run_jobs(
+            repo_root, jobs, run_dir, workers=workers, keep_workspaces=keep_workspaces,
+            timeout_seconds=timeout_seconds, on_start=on_start, on_finish=on_finish)
+
+
+def _run_jobs(
+    repo_root: Path,
+    jobs: Sequence[BuildJob],
+    run_dir: Path,
+    *,
+    workers: int = DEFAULT_WORKERS,
+    keep_workspaces: bool = False,
+    timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
+    on_start: Optional[Callable[[BuildJob], None]] = None,
+    on_finish: Optional[Callable[[JobResult], None]] = None,
+) -> List[JobResult]:
+    """Body of :func:`run_jobs`, run with signals turned into ``KeyboardInterrupt``."""
     jobs = list(jobs)
     if len({job.name for job in jobs}) != len(jobs):
         raise ValueError("Build jobs must have unique names")

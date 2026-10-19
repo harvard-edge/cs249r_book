@@ -3,7 +3,7 @@ from dataclasses import replace
 import pytest
 
 from mlsysim.core.units import Q_
-from mlsysim.engine.v1_14_experiments import (
+from mlsysim.labs.experiments.v1_14_experiments import (
     TRACKS,
     CanaryEvidencePolicy,
     approximate_retraining_interval,

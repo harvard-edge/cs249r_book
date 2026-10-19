@@ -9,13 +9,14 @@ import hashlib
 import json
 import re
 import ssl
+import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import certifi
 
@@ -32,6 +33,12 @@ UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML,
 # user agent from a script; fetch_url retries with this plain tool identifier.
 TOOL_UA = "mlsysbook-binder/1.0 (+https://mlsysbook.ai)"
 ACADEMIC_UA = "MLSysBook-Academic-Gateway/1.0 (mailto:vj@eecs.harvard.edu)"
+
+
+def _note_lookup_failure(what: str, exc: BaseException) -> None:
+    """Tell the user on stderr why a registry lookup failed, so "could not resolve" has a cause."""
+    print(f"bib gateway: {what} failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+
 
 DOI_REGEX = re.compile(r"\b(10\.[0-9]{4,9}/[^\s\"<>{}]+)", re.I)
 ARXIV_REGEX = re.compile(r"(?:arxiv[:\s/]|abs/|pdf/)?([0-9]{4}\.[0-9]{4,5}(?:v[0-9]+)?)", re.I)
@@ -228,8 +235,10 @@ def fetch_doi(doi: str, custom_key: str | None = None) -> dict[str, Any] | None:
             if e.code == 429:
                 time.sleep(1.5 * (attempt + 1))
             else:
+                _note_lookup_failure(f"Crossref lookup of DOI {clean_doi} (trying DataCite next)", e)
                 break
-        except Exception:
+        except Exception as e:
+            _note_lookup_failure(f"Crossref lookup of DOI {clean_doi} (attempt {attempt + 1})", e)
             time.sleep(0.5)
 
     # Fallback to DataCite
@@ -279,8 +288,8 @@ def fetch_doi(doi: str, custom_key: str | None = None) -> dict[str, Any] | None:
                         "canonical_venue": publisher,
                     },
                 }
-    except Exception:
-        pass
+    except Exception as e:
+        _note_lookup_failure(f"DataCite lookup of DOI {clean_doi}", e)
     return None
 
 
@@ -354,8 +363,8 @@ def fetch_arxiv(arxiv_input: str, custom_key: str | None = None) -> dict[str, An
                         "canonical_venue": "arXiv preprint",
                     },
                 }
-    except Exception:
-        pass
+    except Exception as e:
+        _note_lookup_failure(f"arXiv lookup of {clean_id}", e)
     return None
 
 
@@ -395,8 +404,8 @@ def fetch_isbn(isbn_input: str, custom_key: str | None = None) -> dict[str, Any]
                                     a_data = json.loads(a_resp.read().decode("utf-8"))
                                     if a_data.get("name"):
                                         author_names.append(a_data["name"])
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            _note_lookup_failure(f"OpenLibrary author lookup {auth_key}", e)
 
                 author_list = []
                 for name in author_names:
@@ -428,8 +437,8 @@ def fetch_isbn(isbn_input: str, custom_key: str | None = None) -> dict[str, Any]
                         "canonical_venue": publisher or "Publisher Catalog",
                     },
                 }
-    except Exception:
-        pass
+    except Exception as e:
+        _note_lookup_failure(f"OpenLibrary lookup of ISBN {clean_isbn}", e)
     return None
 
 
@@ -455,6 +464,7 @@ def fetch_url(
     citation_meta: dict[str, Any] = {}
 
     attempts = [(ua, ctx) for ua in (UA, TOOL_UA) for ctx in (SSL_CTX, FALLBACK_SSL_CTX)]
+    last_error: Exception | None = None
     for ua, ctx in attempts:
         req = urllib.request.Request(clean_url, headers={"User-Agent": ua})
         try:
@@ -478,10 +488,15 @@ def fetch_url(
             status_code = e.code
             if is_trusted or e.code in (401, 403, 429):
                 break
-        except Exception:
+        except Exception as e:
+            last_error = e  # try the next user agent / TLS context
             continue
 
     if not status_code or (status_code not in (200, 301, 302, 307, 308) and not is_trusted):
+        if status_code:
+            print(f"bib gateway: {clean_url} answered HTTP {status_code}", file=sys.stderr)
+        elif last_error is not None:
+            _note_lookup_failure(f"fetching {clean_url}", last_error)
         return None
 
     final_title = title_override or page_title or domain

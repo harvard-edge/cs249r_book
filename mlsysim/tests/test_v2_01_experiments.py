@@ -5,7 +5,7 @@ import json
 import pytest
 
 from mlsysim.core.units import Q_
-from mlsysim.engine.v2_01_experiments import (
+from mlsysim.labs.experiments.v2_01_experiments import (
     TRACK_PROFILES,
     compare_failure_semantics,
     evaluate_c3_scaling,

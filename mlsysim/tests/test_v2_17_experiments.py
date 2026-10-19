@@ -5,14 +5,14 @@ from dataclasses import replace
 import pytest
 
 from mlsysim.core.units import Q_
-from mlsysim.engine.v2_01_experiments import evaluate_c3_scaling, serialize_evaluation
-from mlsysim.engine.v2_07_experiments import checkpoint_tradeoff
-from mlsysim.engine.v2_10_experiments import (
+from mlsysim.labs.experiments.v2_01_experiments import evaluate_c3_scaling, serialize_evaluation
+from mlsysim.labs.experiments.v2_07_experiments import checkpoint_tradeoff
+from mlsysim.labs.experiments.v2_10_experiments import (
     illustrative_track_scenario,
     serialize_quantity,
 )
-from mlsysim.engine.v2_15_experiments import serialize_evaluator_args
-from mlsysim.engine.v2_17_experiments import (
+from mlsysim.labs.experiments.v2_15_experiments import serialize_evaluator_args
+from mlsysim.labs.experiments.v2_17_experiments import (
     REPLAY_TARGETS,
     REQUIRED_MODELS,
     ControlPatch,

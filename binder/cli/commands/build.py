@@ -13,7 +13,8 @@ from typing import Dict, List, Optional
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
-from ..core.discovery import format_volume_display_name
+from ..core.discovery import AmbiguousChapterError, format_volume_display_name
+from ..core.errors import describe_exception
 from ..core.process import (
     interrupts_as_keyboard_interrupt,
     local_render_env,
@@ -54,6 +55,9 @@ class BuildCommand:
         self.chapter_discovery = chapter_discovery
         self.verbose = verbose
         self.open_after = open_after
+        #: Set when a build was stopped by Ctrl-C or a signal, so callers looping
+        #: over several builds can stop too.
+        self.interrupted = False
 
     def _preflight_epub_hygiene(self, skip: bool = False) -> bool:
         """Run the `hygiene` scope of `./binder/binder check epub` before an EPUB build.
@@ -78,13 +82,7 @@ class BuildCommand:
             return True
 
         # Lazy import: don't pay the cost when building HTML or PDF.
-        try:
-            from cli.commands._epub_checks import find_hygiene_issues
-        except ImportError:
-            # Running from an older checkout without the check module —
-            # don't break the build, just note and continue.
-            console.print("[dim]ⓘ Hygiene preflight unavailable in this checkout; skipping.[/dim]")
-            return True
+        from ._epub_checks import find_hygiene_issues
 
         repo_root = self.config_manager.root_dir
         issues, files_checked = find_hygiene_issues(repo_root)
@@ -142,16 +140,12 @@ class BuildCommand:
             console.print("[yellow]⚠ Skipping post-build EPUB validation (--skip-validate)[/yellow]")
             return True
 
-        try:
-            from cli.commands._epub_checks import (
-                _discover_built_epubs,
-                emit_github_annotations,
-                run_epubcheck_on,
-                run_smoke_checks_on,
-            )
-        except ImportError:
-            console.print("[dim]ⓘ Post-build validation unavailable in this checkout; skipping.[/dim]")
-            return True
+        from ._epub_checks import (
+            _discover_built_epubs,
+            emit_github_annotations,
+            run_epubcheck_on,
+            run_smoke_checks_on,
+        )
 
         repo_root = self.config_manager.root_dir
         epubs = sorted(output_dir.glob("*.epub")) if output_dir is not None else _discover_built_epubs(repo_root)
@@ -285,17 +279,9 @@ class BuildCommand:
             console.print("[yellow]⚠ Skipping post-build PDF validation (--skip-validate)[/yellow]")
             return True
 
-        vol_names = {
-            "vol1": "Volume I",
-            "vol2": "Volume II",
-            "vol3": "Volume III",
-            "vol4": "Volume IV",
-            "tinytorch": "TinyTorch",
-        }
-        volume_name = vol_names.get(volume, volume)
-        console.print(f"[cyan]🔍 Post-build PDF validation ({volume_name})[/cyan]")
+        console.print(f"[cyan]🔍 Post-build PDF validation ({format_volume_display_name(volume)})[/cyan]")
 
-        from cli.commands._pdf_checks import format_checklist, verify_volume_pdf
+        from ._pdf_checks import format_checklist, verify_volume_pdf
 
         quarto_dir = self.config_manager.book_dir
         result = verify_volume_pdf(quarto_dir, volume, log_path=log_path)
@@ -432,6 +418,7 @@ class BuildCommand:
                     description=f"Building full {format_type.upper()} book",
                 )
         except KeyboardInterrupt:
+            self.interrupted = True
             console.print("[yellow]Build interrupted.[/yellow]")
             return False
 
@@ -581,10 +568,15 @@ class BuildCommand:
                     return False
             return True
         except KeyboardInterrupt:
+            self.interrupted = True
             console.print("[yellow]Build interrupted; restoring generated entry points.[/yellow]")
             return False
-        except Exception as error:
+        except (ValueError, OSError, AmbiguousChapterError) as error:
+            # Expected request problems: an unknown chapter, a missing config.
             console.print(f"[red]Build failed: {error}[/red]")
+            return False
+        except Exception as error:
+            console.print(f"[red]Build failed: {describe_exception(error)}[/red]")
             return False
         finally:
             for path, (link, content) in snapshots.items():
@@ -672,6 +664,7 @@ class BuildCommand:
                     description=f"Building {volume_name} ({format_type.upper()})",
                 )
         except KeyboardInterrupt:
+            self.interrupted = True
             console.print("[yellow]Build interrupted.[/yellow]")
             return False
         finally:
@@ -818,16 +811,21 @@ class BuildCommand:
 
         except subprocess.TimeoutExpired:
             stop_process_group(process)
-            console.print("[red]❌ Build timed out after 30 minutes[/red]")
+            console.print(f"[red]❌ Build timed out after 30 minutes: {' '.join(cmd)} (in {cwd})[/red]")
             return False
         except (KeyboardInterrupt, SystemExit):
             # Stop Quarto's process group (including TeX children) before the
             # caller restores shared generated files (2026-09-11).
             stop_process_group(process)
             raise
+        except FileNotFoundError as e:
+            stop_process_group(process)
+            console.print(f"[red]❌ Could not start {cmd[0]}: {e}[/red]")
+            console.print("[yellow]Check that it is installed and on PATH: ./binder/binder doctor[/yellow]")
+            return False
         except Exception as e:
             stop_process_group(process)
-            console.print(f"[red]❌ Command execution error: {e}[/red]")
+            console.print(f"[red]❌ Running {' '.join(cmd)} failed: {describe_exception(e)}[/red]")
             return False
 
     def _save_build_log(self, cwd: Optional[Path], text: str) -> None:
@@ -957,6 +955,6 @@ class BuildCommand:
             console.print("[red]❌ No configs were reset.[/red]")
             return False
 
-        scope = volume if volume else "all volumes"
+        scope = volume if volume else "vol1 and vol2"
         console.print(f"[green]✅ Reset {format_type.upper()} build config for {scope}[/green]")
         return True

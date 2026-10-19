@@ -22,6 +22,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cli.core.config import ConfigManager
 from cli.core.discovery import ChapterDiscovery, VOLUME_DIRS
+from cli.core.errors import describe_exception, print_traceback
+from cli.core.process import BuildInProgress, build_lock
 from cli.commands.build import BuildCommand
 from cli.commands.preview import PreviewCommand
 from cli.commands.doctor import DoctorCommand
@@ -43,12 +45,6 @@ from cli.commands.release import ReleaseCommand
 console = Console()
 
 
-try:
-    from cli.core.discovery import format_volume_display_name
-except ImportError:
-    from core.discovery import format_volume_display_name
-
-
 def _cmd(text: str) -> str:
     """Escape command examples before rendering in Rich tables."""
     return _rich_escape(text)
@@ -64,12 +60,12 @@ class MLSysBookCLI:
             verbose: If True, stream build output in real-time
             open_after: If True, open build output after successful build
         """
-        self.root_dir = Path.cwd()
         self.verbose = verbose
         self.open_after = open_after
 
         # Initialize core components
-        self.config_manager = ConfigManager(self.root_dir)
+        self.config_manager = ConfigManager(Path.cwd())
+        self.root_dir = self.config_manager.root_dir
         self.chapter_discovery = ChapterDiscovery(self.config_manager.book_dir)
 
         # Initialize command handlers
@@ -94,8 +90,9 @@ class MLSysBookCLI:
     def show_banner(self):
         """Display the CLI banner."""
         banner = Panel(
-            "[bold blue]📚 MLSysBook CLI v2.0[/bold blue]\n"
-            "[dim]⚡ Modular, maintainable, and fast[/dim]",
+            "[bold blue]📚 MLSysBook CLI (binder)[/bold blue]\n"
+            "[dim]Build, preview, and check the textbook. "
+            "Each command group takes `help`, e.g. ./binder/binder check help[/dim]",
             border_style="cyan"
         )
         console.print(banner)
@@ -215,7 +212,7 @@ class MLSysBookCLI:
 
         # Pro Tips
         examples = Text()
-        examples.append("🎯 Modular CLI Examples:\n", style="bold magenta")
+        examples.append("Examples:\n", style="bold magenta")
         examples.append("  ./binder/binder build pdf --vol1 ", style="cyan")
         examples.append("# Build Volume I as PDF\n", style="dim")
         examples.append("  ./binder/binder build pdf --vol2 ", style="cyan")
@@ -319,12 +316,13 @@ class MLSysBookCLI:
 
         if len(explicit_volumes) > 1:
             raise ValueError("Select only one volume for a build")
+        all_volumes = any(arg.lower() == "--all" for arg in args)
 
         for arg in args:
             lower = arg.lower()
-            # With --volN, words such as "intro" and "physical" are chapter
-            # queries, not legacy aliases that silently select a whole book.
-            if explicit_volumes and lower in ("intro", "scaling", "agentic", "physical"):
+            # With --volN or --all, words such as "intro" and "physical" are
+            # chapter queries, not legacy aliases that silently select a book.
+            if (explicit_volumes or all_volumes) and lower in ("intro", "scaling", "agentic", "physical"):
                 remaining.append(arg)
                 continue
             previous_volume = volume
@@ -655,21 +653,26 @@ class MLSysBookCLI:
                 no_cover,
                 print_marks,
             ) = self._parse_build_args(args)
-        except Exception as e:
-            status_console.print(f"[red]❌ Error: {e}[/red]")
+        except ValueError as e:
+            status_console.print(f"[red]❌ Invalid build arguments: {_rich_escape(str(e))}[/red]")
+            status_console.print("[yellow]See: ./binder/binder build --help[/yellow]")
             if json_output:
                 _emit_json(False, fmt=format_type, vol=volume, b_all=build_all, err_msg=str(e))
             return False
 
+        chapter_list = [ch.strip() for ch in chapters_arg.split(",")] if chapters_arg else None
+
         if build_all and chapters_arg:
             status_console.print("[red]❌ Cannot combine explicit chapters with --all[/red]")
+            status_console.print("[yellow]Build chapters one volume at a time: "
+                                 "./binder/binder build <fmt> <chapters> --volN[/yellow]")
             if json_output:
                 _emit_json(
                     False,
                     fmt=format_type,
                     vol=volume,
                     b_all=True,
-                    chs=[ch.strip() for ch in chapters_arg.split(",")],
+                    chs=chapter_list,
                     err_msg="Cannot combine explicit chapters with --all",
                 )
             return False
@@ -714,15 +717,14 @@ class MLSysBookCLI:
         stdout_redirect = redirect_stdout(sys.stderr) if json_output else nullcontext()
 
         try:
-            with stdout_redirect:
+            # Key the lock on the books directory, whose generated files collide,
+            # so builds started from different working directories still contend.
+            with build_lock(self.config_manager.book_dir), stdout_redirect:
                 if build_all:
                     # Every volume in turn; --parallel runs them side by side instead.
+                    # build_volume announces each volume itself.
                     ok = True
                     for each_volume in VOLUME_DIRS:
-                        status_console.print(
-                            f"[magenta]🏗️ Building {format_volume_display_name(each_volume)} "
-                            f"({format_type.upper()})...[/magenta]"
-                        )
                         ok = self.build_command.build_volume(
                             each_volume,
                             format_type,
@@ -731,9 +733,11 @@ class MLSysBookCLI:
                             no_cover=no_cover,
                             print_marks=print_marks,
                         ) and ok
+                        if getattr(self.build_command, "interrupted", False):
+                            # Ctrl-C stops the whole run, not just this volume.
+                            status_console.print("[yellow]Interrupted; remaining volumes were not built.[/yellow]")
+                            break
                 elif volume and not chapters_arg:
-                    volume_name = format_volume_display_name(volume)
-                    status_console.print(f"[magenta]🏗️ Building {volume_name} ({format_type.upper()})...[/magenta]")
                     ok = self.build_command.build_volume(
                         volume,
                         format_type,
@@ -745,28 +749,23 @@ class MLSysBookCLI:
                     if ok and layout_after:
                         ok = self.layout_command.run([f"--{volume}", "--no-build"])
                 elif volume and chapters_arg:
-                    chapter_list = [ch.strip() for ch in chapters_arg.split(",")]
                     status_console.print(f"[green]🏗️ Building {format_type.upper()} chapters in {volume}: {chapters_arg}[/green]")
                     ok = self.build_command.build_chapters_with_volume(chapter_list, format_type, volume, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
                 elif chapters_arg:
-                    chapter_list = [ch.strip() for ch in chapters_arg.split(",")]
                     status_console.print(f"[green]🏗️ Building {format_type.upper()} chapter(s): {chapters_arg}[/green]")
                     ok = self.build_command.build_chapters(chapter_list, format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
                 else:
-                    status_console.print(f"[green]🏗️ Building entire book ({format_type.upper()})...[/green]")
-                    if format_type == "html":
-                        ok = self.build_command.build_full("html")
-                    else:
-                        ok = self.build_command.build_full(format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
+                    ok = self.build_command.build_full(format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
         except Exception as e:
-            status_console.print(f"[red]❌ Build error: {e}[/red]")
+            detail = str(e) if isinstance(e, BuildInProgress) else describe_exception(e)
+            status_console.print(f"[red]❌ Build error: {_rich_escape(detail)}[/red]")
             if json_output:
                 _emit_json(
                     False,
                     fmt=format_type,
                     vol=volume,
                     b_all=build_all,
-                    chs=[ch.strip() for ch in chapters_arg.split(",")] if chapters_arg else None,
+                    chs=chapter_list,
                     elapsed=time.time() - t0,
                     err_msg=str(e),
                 )
@@ -778,7 +777,7 @@ class MLSysBookCLI:
                 fmt=format_type,
                 vol=volume,
                 b_all=build_all,
-                chs=[ch.strip() for ch in chapters_arg.split(",")] if chapters_arg else None,
+                chs=chapter_list,
                 elapsed=time.time() - t0,
             )
 
@@ -836,7 +835,7 @@ class MLSysBookCLI:
         """Handle clean command to remove generated build artifacts and caches.
 
         Args:
-            args: Target format or scope ('html', 'pdf', 'epub', 'artifacts', or empty for all).
+            args: Target format or scope ('html', 'pdf', 'epub', 'artifacts', 'workspaces', or empty for all).
 
         Returns:
             True on successful cleanup, False on error.
@@ -850,9 +849,11 @@ class MLSysBookCLI:
                 return self.clean_command.clean_format(target)
             elif target == "artifacts":
                 return self.clean_command.clean_artifacts()
+            elif target == "workspaces":
+                return self.clean_command.clean_workspaces()
             else:
                 console.print(f"[red]❌ Unknown clean target: {target}[/red]")
-                console.print("[yellow]💡 Available: html, pdf, epub, artifacts[/yellow]")
+                console.print("[yellow]💡 Available: html, pdf, epub, artifacts, workspaces[/yellow]")
                 return False
         else:
             # Clean all
@@ -938,7 +939,7 @@ class MLSysBookCLI:
         return self.validate_command.run(args)
 
     def handle_notation_command(self, args):
-        """Notation tools: report, find, verify, apply (binder/cli/checks/notation_strict.py).
+        """Notation tools: report, find, verify, concordance, assign, apply (binder/cli/checks/notation_strict.py).
 
         ./binder/binder notation report <files>        raw symbols per section, with candidates
         ./binder/binder notation report --json <files> the same as a work package
@@ -950,7 +951,7 @@ class MLSysBookCLI:
         """
         from cli.checks import notation_strict as ns
         if not args or args[0] in ("help", "--help", "-h"):
-            console.print(self.handle_notation_command.__doc__)
+            console.print(self.handle_notation_command.__doc__, markup=False)
             return True
         sub, rest = args[0], args[1:]
         if sub == "report":
@@ -965,8 +966,11 @@ class MLSysBookCLI:
             return ns.main(["--assign", rest[0], rest[1]]) == 0
         if sub == "apply" and len(rest) == 2:
             return ns.main(["--apply", rest[0], rest[1]]) == 0
-        console.print(f"[red]Unknown notation subcommand: {sub}[/red]")
-        console.print(self.handle_notation_command.__doc__)
+        if sub in ("report", "find", "verify", "concordance", "assign", "apply"):
+            console.print(f"[red]❌ binder notation {_rich_escape(sub)}: wrong number of arguments[/red]")
+        else:
+            console.print(f"[red]❌ Unknown notation subcommand: {_rich_escape(sub)}[/red]")
+        console.print(self.handle_notation_command.__doc__, markup=False)
         return False
 
     def handle_fix_command(self, args):
@@ -1107,13 +1111,13 @@ class MLSysBookCLI:
         try:
             workers, keep_workspaces, each_chapter, args = self._extract_parallel_options(args)
         except ValueError as error:
-            console.print(f"[red]{error}[/red]")
+            console.print(f"[red]❌ {_rich_escape(str(error))}[/red]")
             return False
         if each_chapter:
-            console.print("[red]--each-chapter belongs to `binder build`; debug always scans every chapter.[/red]")
+            console.print("[red]❌ --each-chapter belongs to `binder build`; debug always scans every chapter.[/red]")
             return False
 
-        # Parse args: first positional is format, then flags
+        usage = "Usage: ./binder/binder debug <pdf|html|epub> --volN [--chapter <name>] [--parallel [N]] [--keep-workspaces]"
         format_type = None
         volume = None
         chapter = None
@@ -1121,7 +1125,7 @@ class MLSysBookCLI:
         i = 0
         while i < len(args):
             arg = args[i]
-            m_vol = re.match(r"^--(vol\d+)$", arg.lower()) or re.match(r"^-(vol\d+)$", arg.lower())
+            m_vol = re.match(r"^--?(vol\d+)$", arg.lower())
             if m_vol:
                 volume = m_vol.group(1)
             elif arg.lower() in ("--tinytorch", "tinytorch"):
@@ -1132,19 +1136,15 @@ class MLSysBookCLI:
             elif arg in ("pdf", "html", "epub") and format_type is None:
                 format_type = arg
             else:
-                # Try as format or chapter
-                if format_type is None and arg in ("pdf", "html", "epub"):
-                    format_type = arg
-                else:
-                    console.print(f"[red]Unknown argument: {arg}[/red]")
-                    return False
+                console.print(f"[red]❌ binder debug: unknown argument '{_rich_escape(arg)}'[/red]")
+                console.print(usage, markup=False)
+                return False
             i += 1
 
-        if not format_type:
-            format_type = "pdf"  # Default to PDF
+        format_type = format_type or "pdf"
         if not volume:
-            console.print("[red]Please specify a volume (e.g. --vol1, --vol2)[/red]")
-            console.print("[yellow]Usage: ./binder/binder debug <pdf|html|epub> --volN [--chapter <name>][/yellow]")
+            console.print("[red]❌ binder debug needs a volume (for example --vol1).[/red]")
+            console.print(usage, markup=False)
             return False
 
         return self.debug_command.debug_build(
@@ -1170,6 +1170,9 @@ class MLSysBookCLI:
                 volume = m_vol.group(1)
             elif lower in ("--tinytorch", "tinytorch"):
                 volume = "tinytorch"
+            else:
+                console.print(f"[yellow]⚠️ Ignoring unrecognized argument {_rich_escape(args[0])!s}; "
+                              "listing every volume. Usage: ./binder/binder list [--vol1|--vol2|...][/yellow]")
 
         self.chapter_discovery.show_chapters(volume=volume)
         return True
@@ -1280,10 +1283,16 @@ class MLSysBookCLI:
             try:
                 return commands[command](command_args)
             except KeyboardInterrupt:
-                console.print("\n[yellow]👋 Goodbye![/yellow]")
+                console.print(f"\n[yellow]Interrupted: ./binder/binder {_rich_escape(command)} stopped before finishing.[/yellow]")
                 return False
             except Exception as e:
-                console.print(f"[red]❌ Error: {e}[/red]")
+                # An exception reaching here is a binder bug or an unhandled
+                # environment problem; show where it came from.
+                print_traceback(e)
+                console.print(f"[red]❌ ./binder/binder {_rich_escape(command)} failed with an unexpected error: "
+                              f"{_rich_escape(describe_exception(e))}[/red]")
+                console.print("[yellow]The traceback is on stderr. Run ./binder/binder doctor to check the "
+                              "toolchain if the error names a missing program or module.[/yellow]")
                 return False
         else:
             console.print(f"[red]❌ Unknown command: {command}[/red]")

@@ -1,7 +1,7 @@
 concept_map:
   schema_version: 2
   source: 06_distributed_training.qmd
-  generated_date: '2026-10-13'
+  generated_date: '2026-10-15'
   primary_concepts:
     - Data-parallel update equivalence
     - Synchronization models and stragglers
@@ -29,7 +29,8 @@ concept_map:
       puts parameter gathers on every layer's critical path.
     Scaling efficiency and the scaling wall: Substituting the Fleet Law into eta = T_1/(N T_N) shows the shrinking
       compute term eventually losing to a ring bandwidth term that stays near 2*Psi/beta, which is the scaling wall
-      of pure data parallelism.
+      of pure data parallelism, reached sooner under strong scaling (fixed global batch) than under weak scaling (fixed
+      local batch).
     Critical batch size: Beyond the gradient-noise critical batch extra samples per step buy diminishing loss reduction,
       so the useful data-parallel width is about B_crit over the local batch, and learning-rate rules only extend
       the validated range.
@@ -40,10 +41,12 @@ concept_map:
       block on the critical path of every layer, so its degree is bounded by the fast intra-node domain.
     Parallelism plan as joint placement: 'N = N_DP x N_PP x N_TP is not three independent knobs: a feasible plan
       satisfies divisibility, training-state and activation memory, the critical-batch limit, and each axis''s traffic
-      on a tier that can carry it.'
+      on a tier that can carry it, and activation recomputation buys memory feasibility at about one extra forward
+      pass per step (full) or a few percent (selective) that HFU counts but MFU does not.'
     Sparse embedding sharding: Recommendation models are dominated by multi-TB embedding tables touched sparsely,
-      so they shard tables and exchange only indexed rows, binding on aggregate memory, lookup rate, and hot rows
-      rather than on a dense gradient AllReduce.
+      so they shard tables row-wise, column-wise, or in a hot/cold hybrid and exchange only indexed rows through
+      sparse pull/push or AllToAll, binding on aggregate memory, lookup rate, and hot rows rather than on a dense
+      gradient AllReduce.
     Sequence and context parallelism: Long contexts make activations the binding memory term, so sequence parallelism
       shards norm and dropout activations at no extra ideal volume and context parallelism circulates key-value
       tiles in a ring that overlaps only above a minimum chunk length.
@@ -61,7 +64,7 @@ concept_map:
       owner: 07_fault_tolerance
     - concept: Recovery-time budget and fencing
       owner: 07_fault_tolerance
-    - concept: MFU
+    - concept: Program goodput
       owner: 09_performance_engineering
     - concept: KV cache as admission budget
       owner: 10_inference
@@ -75,8 +78,6 @@ concept_map:
     - concept: Synchronous tight coupling
       owner: 01_introduction
     - concept: Scaling laws as the demand curve
-      owner: 01_introduction
-    - concept: Lighthouse archetypes
       owner: 01_introduction
     - concept: Alpha-beta model
       owner: 03_network_fabrics
@@ -116,6 +117,13 @@ concept_map:
     - T_overlap
     - eta_scaling
     - Model FLOPs Utilization
+    - Hardware FLOPs Utilization
+    - Strong scaling
+    - Weak scaling
+    - Selective activation recomputation
+    - Row-wise embedding sharding
+    - Column-wise embedding sharding
+    - TorchRec
     - DDP
     - PyTorch DistributedDataParallel
     - Fully Sharded Data Parallel
@@ -125,7 +133,6 @@ concept_map:
     - ZeRO-3
     - NCCL
     - NVLink
-    - NVSwitch
     - InfiniBand
     - GPipe
     - PipeDream
@@ -143,7 +150,6 @@ concept_map:
     - FP8
     - E4M3
     - E5M2
-    - FP4
     - GEMM
     - QKV Projection
     - FFN
@@ -151,13 +157,11 @@ concept_map:
     - MoE
     - GShard
     - Switch Transformer
-    - Top-k Sparsification
     - QSGD
     - PowerSGD
     - LARS
     - LAMB
     - Grouped-Query Attention
-    - PagedAttention
     - Proximal Policy Optimization
     - Direct Preference Optimization
     - KL-Divergence Penalty
@@ -165,7 +169,14 @@ concept_map:
     - Reward Model
     - Reference Model
     - Policy Model
+    - Mean Time to Failure
     - Mean Time Between Failures
+    - Sequence parallelism
+    - Context parallelism
+    - Ring Attention
+    - DeepSpeed Ulysses
+    - Zero-bubble pipeline scheduling
+    - Capacity factor
   formulas:
     - T_{\text{step}}(N) = \frac{T_{\text{compute}}}{N} + T_{\text{comm}}(N) + T_{\text{sync}}(N) - T_{\text{overlap}}
     - g = \frac{1}{B} \sum_{i=1}^B \nabla_{\theta} \mathcal{L}(\theta, x_i)
@@ -175,8 +186,6 @@ concept_map:
       x_i)
     - M_{\text{total}} = 7 \times 10^9 \times 16 \text{ bytes} \approx \mathbf{112 \text{ GB}}
     - M_{\text{ZeRO3}} = \frac{112 \text{ GB}}{64} \approx \mathbf{1.75 \text{ GB}}
-    - T_{\text{step}}(N) = \underbrace{\frac{T_{\text{compute}}}{N}}_{\text{Compute-Time Term}} + \underbrace{T_{\text{comm}}(N)}_{\text{Bandwidth
-      Term}} + \underbrace{T_{\text{sync}}(N)}_{\text{Coordination Term}} - T_{\text{overlap}}
     - \eta_{\text{scaling}} = \frac{T_{\text{compute}}}{N \times T_{\text{step}}(N)} = \frac{1}{1 + \frac{N(T_{\text{comm}}(N)
       + T_{\text{sync}}(N) - T_{\text{overlap}})}{T_{\text{compute}}}}
     - \mathbb{E}[\mathcal{L}(\theta_T)] - \mathcal{L}^{\star} \leq \underbrace{\frac{L_s \|\theta_0 - \theta^{\star}\|^2}{2T}}_{\text{optimization
@@ -189,6 +198,8 @@ concept_map:
     - \eta_{\text{large}} = \sqrt{k} \cdot \eta_{\text{base}}
     - B^{*} \approx \frac{\text{tr}(\Sigma)}{\|\nabla \mathcal{L}(\theta)\|^2}
     - f_{\text{bubble}} = \frac{p-1}{m+p-1}
+    - m > 9(p-1) \text{ for } f_{\text{bubble}} < 0.1
+    - s = \text{hash}(\text{id}) \bmod N_{\text{shards}}
   methodologies:
     - Distributed step-time modeling
     - Communication-computation ratio diagnosis
@@ -201,8 +212,9 @@ concept_map:
     - ZeRO stage selection
     - FSDP sharding granularity tuning
     - Communication-computation overlap
+    - Activation recomputation budgeting
     - Scaling efficiency analysis
-    - Amdahl's Law with communication
+    - Amdahl's law with communication
     - Staleness-aware convergence analysis
     - Learning rate scaling with warmup
     - Critical batch size estimation
@@ -215,6 +227,7 @@ concept_map:
     - MFU tracking and bottleneck attribution
     - Expert routing load balancing
     - Embedding table sharding
+    - Embedding sharding strategy selection
     - Sparse pull/push embedding updates
     - Gradient bucketing for communication overlap
     - FP8 dynamic scaling

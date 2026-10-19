@@ -4,12 +4,123 @@ subtitle: "The First-Principles Equations Behind Every MLSys·im Solver"
 ---
 
 MLSys·im avoids "black box" heuristics. Every output traces back to one of the equations below.
-Before diving into code, read this page to understand *what* the solvers are computing and *why*.
+Read this page before the code to understand *what* the solvers compute and *why*.
+
+```{python}
+#| echo: false
+#| output: false
+import math
+import mlsysim
+from mlsysim import Hardware, Models, Infrastructure, Systems, Literature, Q_
+from mlsysim.solvers import DistributedModel, ContinuousBatchingModel
+from mlsysim.systems.types import Fleet
+from mlsysim.physics import (
+    calc_ring_allreduce_time,
+    calc_pipeline_bubble,
+    calc_transformer_training_flops,
+    calc_young_daly_interval,
+    calc_failure_probability,
+)
+from mlsysim.engine.calibration import TRAINING_OPTIMIZER_BYTES_ADAM
+
+_a100 = Hardware.Cloud.A100
+_h100 = Hardware.Cloud.H100
+_l8 = Models.Language.Llama3_8B
+_l70 = Models.Language.Llama3_70B
+_gpt3 = Models.Language.GPT3
+
+_a100_peak = _a100.compute.peak_flops.to("TFLOPs/s").magnitude
+_a100_bw = _a100.memory.bandwidth.to("TB/s").magnitude
+_a100_ridge = (_a100.compute.peak_flops / _a100.memory.bandwidth).to("flop/byte").magnitude
+_a100_tdp = _a100.tdp.to("W").magnitude
+
+_h100_peak = _h100.compute.peak_flops.to("TFLOPs/s").magnitude
+_h100_bw = _h100.memory.bandwidth.to("TB/s").magnitude
+_h100_cap_gib = _h100.memory.capacity.to("GiB").magnitude
+_h100_ridge = (_h100.compute.peak_flops / _h100.memory.bandwidth).to("flop/byte").magnitude
+
+_hdr = Systems.Fabrics.InfiniBand_HDR
+_dgx_a100 = Systems.Nodes.DGX_A100
+_gpt3_eff = {}
+for _n in [64, 256, 1024, 8192]:
+    _fl = Fleet(name=f"A100-{_n}", node=_dgx_a100, count=_n // 8, fabric=_hdr)
+    _dp = _n // 64
+    _gpt3_eff[_n] = DistributedModel().solve(
+        model=_gpt3, fleet=_fl, batch_size=1536, tp_size=8, pp_size=8,
+        microbatch_count=1536 // _dp, seq_len=2048
+    ).scaling_efficiency * 100
+
+_ndr_bw_gbs = Systems.Fabrics.InfiniBand_NDR.bandwidth.to("GB/s").magnitude
+_eth100_bw_gbs = Systems.Fabrics.Ethernet_100G.bandwidth.to("GB/s").magnitude
+_ar_140_bw_s = (2 * 1023 / 1024) * (140.0 / _ndr_bw_gbs)
+_ar_140_lat_ms = (2 * 1023 * 2.0) / 1000.0
+_ar_140_tot_s = calc_ring_allreduce_time(Q_("140 GB"), 1024, Systems.Fabrics.InfiniBand_NDR.bandwidth, Q_("2 us")).to("s").magnitude
+
+_bub_4_16_1 = calc_pipeline_bubble(4, 16, v_stages=1) * 100
+_bub_4_16_2 = calc_pipeline_bubble(4, 16, v_stages=2) * 100
+_bub_8_32_1 = calc_pipeline_bubble(8, 32, v_stages=1) * 100
+_bub_16_16_1 = calc_pipeline_bubble(16, 16, v_stages=1) * 100
+
+_gpt3_params_b = _gpt3.parameters.to("Bparam").magnitude
+_gpt3_tokens_b = _gpt3.training_tokens.to("Btoken").magnitude
+_gpt3_flops = calc_transformer_training_flops(_gpt3.parameters, _gpt3.training_tokens).to("flop").magnitude
+_gpt3_train_s = _gpt3_flops / (1024 * _a100.compute.peak_flops.to("flop/s").magnitude * 0.5)
+_gpt3_train_days = _gpt3_train_s / 86400
+_adam_opt_bytes = int(TRAINING_OPTIMIZER_BYTES_ADAM)
+
+_l70_params_b = _l70.parameters.to("Bparam").magnitude
+_l70_wt_gb = _l70.size_in_bytes("fp16").to("GB").magnitude
+_l70_cmp_ms = (_l70.inference_flops / _h100.compute.peak_flops).to("ms").magnitude
+_l70_mem_ms = (_l70.size_in_bytes("fp16") / _h100.memory.bandwidth).to("ms").magnitude
+_l70_tok_s = 1000.0 / _l70_mem_ms
+
+_l70_layers = _l70.layers
+_l70_heads = _l70.heads
+_l70_kv_heads = _l70.kv_heads
+_l70_gqa_ratio = _l70_heads // _l70_kv_heads
+_l70_d_head = _l70.hidden_dim // _l70_heads
+_l70_kv_tok_kb = _l70.get_kv_cache_size(1, 1, "fp16").to("KB").magnitude
+_l70_kv_b16_gb = _l70.get_kv_cache_size(4096, 16, "fp16").to("GB").magnitude
+_l70_kv_b32_gb = _l70.get_kv_cache_size(4096, 32, "fp16").to("GB").magnitude
+_l70_wt_int4_gb = _l70.size_in_bytes("int4").to("GB").magnitude
+_l70_tot_b32_gb = _l70_wt_int4_gb + _l70_kv_b32_gb
+
+_l8_kv_tok_b = int(_l8.get_kv_cache_size(1, 1, "fp16").to("byte").magnitude)
+_h100_kv_budget_tok = int(((_h100.memory.capacity - _l8.size_in_bytes("fp16")) / Q_(_l8_kv_tok_b, "byte")).to("dimensionless").magnitude)
+_cb_8k_16 = ContinuousBatchingModel().solve(model=_l8, hardware=_h100, max_seq_len=8192, mean_request_tokens=2048, max_batch_size=1000, page_size=16, precision="fp16")
+_cb_8k_2048 = ContinuousBatchingModel().solve(model=_l8, hardware=_h100, max_seq_len=8192, mean_request_tokens=2048, max_batch_size=1000, page_size=2048, precision="fp16")
+
+_grids = Infrastructure.Grids
+_ci_quebec = _grids.Quebec.carbon_intensity_g_kwh
+_ci_us = _grids.US_Avg.carbon_intensity_g_kwh
+_ci_poland = _grids.Poland.carbon_intensity_g_kwh
+_ci_spread = _ci_poland / _ci_quebec
+_it_kwh = 64 * (_a100_tdp / 1000.0) * 336
+_tot_kwh = _it_kwh * 1.2
+_co2_quebec = _tot_kwh * _ci_quebec / 1000.0
+_co2_us = _tot_kwh * _ci_us / 1000.0
+_co2_poland = _tot_kwh * _ci_poland / 1000.0
+
+_dgx_cost_k = Infrastructure.Pricing.Capital.DgxH100NodeUsd.rate.magnitude / 1000.0
+_amort_yr = int(Infrastructure.Pricing.Capital.AcceleratorServiceLifeYears.rate)
+_cloud_gpu_hr = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.magnitude
+_h100_a100_flops_ratio = _h100_peak / _a100_peak
+
+_gpu_mttf_hr = Systems.Reliability.Gpu.mttf_hours
+_mtbf_1k_hr = _gpu_mttf_hr / 1000
+_mtbf_10k_hr = _gpu_mttf_hr / 10000
+_mtbf_16k_hr = _gpu_mttf_hr / 16000
+_llama3_16k_gpus = Systems.Clusters.Meta_Llama3_16K_H100.total_accelerators
+_llama3_failures = int(Literature.TrainingRuns.Llama3_405B_UnexpectedInterruptions)
+_llama3_days = int(Literature.TrainingRuns.Llama3_405B_SnapshotDays)
+_tau_opt_min = calc_young_daly_interval(Q_("2 min"), Q_("180 min")).to("min").magnitude
+_prob_30d = calc_failure_probability(Q_("5 hour"), Q_("720 hour"))
+```
 
 ::: {.callout-tip}
 ## How to read this page
 Each section corresponds to one MLSys·im solver. Click any solver name to jump to its API docs,
-or follow the **Slide Deck** links to the full lecture treatment with worked examples and exercises.
+or follow the **Slide Deck** links to the full lecture treatment with worked examples.
 :::
 
 ---
@@ -20,7 +131,7 @@ or follow the **Slide Deck** links to the full lecture treatment with worked exa
 **Slide Deck:** [Hardware Acceleration (Vol I, Ch 11)]({{< var slides_latest >}}/vol1_11_hw_acceleration.pdf){target="_blank"}
 
 ::: {.callout-note appearance="simple" icon=false}
-**Intuition:** Hardware has two speed limits — how fast it can compute (FLOP/s) and how fast it can feed data to the compute units (bytes/s). Your actual throughput is whichever limit you hit first. This is why we take the *maximum* of two terms, not their sum.
+**Intuition:** Hardware has two speed limits: how fast it can compute (FLOP/s) and how fast it can feed data to the compute units (bytes/s). Actual throughput is set by whichever limit is reached first. This is why we take the *maximum* of two terms, not their sum.
 :::
 
 ### 1.1 Latency Equation
@@ -31,7 +142,7 @@ $$
 
 | Symbol | Meaning | Typical Range |
 |:-------|:--------|:--------------|
-| $\eta$ | Hardware utilization efficiency | 0.25–0.55 (training); ~0.35 (inference). See [Accuracy & Validation](accuracy.qmd). |
+| $\eta$ | Achieved compute efficiency | 0.25–0.55 (training); ~0.35 (inference). See [Accuracy & Validation](accuracy.qmd). |
 | Dispatch\_Tax | Kernel-launch overhead (CUDA, driver) | 0.01–0.1 ms |
 
 ### 1.2 Arithmetic Intensity and the Ridge Point
@@ -61,11 +172,11 @@ A dense layer with 2048→512, FP16, batch=1:
 - **FLOPs:** $2 \times 2048 \times 512 = 2.1\text{M}$
 - **Bytes:** $2048 \times 512 \times 2 = 2.1\text{MB}$
 - **Arithmetic Intensity:** $2.1\text{M} / 2.1\text{MB} = 1$ FLOP/byte
-- **H100 Ridge Point:** $989\text{ TF} / 3.35\text{ TB/s} \approx 296$ FLOP/byte
+- **H100 Ridge Point:** $`{python} f"{_h100_peak:.0f}"`\text{ TF} / `{python} f"{_h100_bw:.2f}"`\text{ TB/s} \approx `{python} f"{_h100_ridge:.0f}"`$ FLOP/byte (vs. $`{python} f"{_a100_peak:.0f}"`\text{ TF} / `{python} f"{_a100_bw:.2f}"`\text{ TB/s} \approx `{python} f"{_a100_ridge:.0f}"`$ FLOP/byte on A100)
 
-At $I = 1 \ll 296 = I^*$, this workload is **deeply memory-bound** — the H100 achieves <1% peak utilization. Increasing to batch=64 raises $I$ to ~64, recovering significant throughput.
+At $I = 1 \ll `{python} f"{_h100_ridge:.0f}"` = I^*$, this workload is **deeply memory-bound**. The H100 achieves <1% of peak compute. Increasing to batch=64 raises $I$ to ~64, recovering significant throughput.
 
-Source: Slide deck exercise, Vol I Ch 11.
+Source: Slide deck worked example, Vol I Ch 11.
 :::
 
 ---
@@ -75,7 +186,7 @@ Source: Slide deck exercise, Vol I Ch 11.
 *Implemented in [`mlsysim.solvers.DistributedModel`](api/solvers.DistributedModel.qmd).*
 **Slide Decks:** [Distributed Training (Vol II, Ch 6)]({{< var slides_latest >}}/vol2_06_distributed_training.pdf){target="_blank"} | [Collective Communication (Vol II, Ch 5)]({{< var slides_latest >}}/vol2_05_collective_communication.pdf){target="_blank"}
 
-Real distributed training involves complex interactions between computation, communication, and scheduling. Empirical profiling requires access to expensive multi-GPU clusters and takes hours per configuration. MLSys·im decomposes the problem into independent overheads — each governed by a closed-form equation — letting you evaluate thousands of parallelism configurations in seconds.
+Real distributed training involves complex interactions between computation, communication, and scheduling. Empirical profiling requires access to expensive multi-GPU clusters and takes hours per configuration. MLSys·im decomposes the problem into independent overheads, each governed by a closed-form equation, so thousands of parallelism configurations can be evaluated in seconds.
 
 ### 2.1 Parallelism Decomposition
 
@@ -94,13 +205,13 @@ $$
 
 ### 2.2 Scaling Efficiency
 
-The solver computes an overall **scaling efficiency** — the fraction of ideal linear speedup actually achieved:
+The solver computes an overall **scaling efficiency**, the fraction of ideal linear speedup actually achieved:
 
 $$
 \eta_{\text{scale}} = \frac{T_{\text{compute}}}{T_{\text{compute}} + T_{\text{dp}} + T_{\text{tp}} + T_{\text{ep}} + T_{\text{bubble}}}
 $$
 
-An efficiency of 80% on 256 GPUs means you get the throughput of ~205 GPUs; the rest is lost to communication and pipeline bubbles. For the GPT-3 175B reference job (eight-way tensor and eight-way pipeline parallelism on HDR InfiniBand, fixed GPT-3 batch of 1,536 sequences), the solver predicts about 89% at 64 GPUs, 87% at 256, 83% at 1,024, and 56% at 8,192, where the pipeline bubble dominates. Production systems with larger batches and interleaved pipelines retain more. MegaScale's 175B MFU falls only from 59.1% to 55.2% between 3,072 and 12,288 GPUs [@jiang2024megascale].
+An efficiency of 80% on 256 GPUs delivers the throughput of ~`{python} f"{int(round(0.80 * 256))}"` GPUs; the rest is lost to communication and pipeline bubbles. For the GPT-3 `{python} f"{_gpt3_params_b:.0f}B"` reference job (eight-way tensor and eight-way pipeline parallelism on HDR InfiniBand, fixed GPT-3 batch of 1,536 sequences), the solver predicts about `{python} f"{_gpt3_eff[64]:.0f}%"` at 64 GPUs, `{python} f"{_gpt3_eff[256]:.0f}%"` at 256, `{python} f"{_gpt3_eff[1024]:.0f}%"` at 1,024, and `{python} f"{_gpt3_eff[8192]:.0f}%"` at 8,192, where the pipeline bubble dominates. Production systems with larger batches and interleaved pipelines retain more. MegaScale's 175B MFU falls only from 59.1% to 55.2% between 3,072 and 12,288 GPUs [@jiang2024megascale].
 
 ### 2.3 Ring All-Reduce (Data Parallelism) {#sec-allreduce}
 
@@ -121,7 +232,7 @@ $$
 | $\alpha$ | Per-message startup latency |
 | $\beta$ | Per-link bandwidth (bytes/s) |
 
-**Why ring all-reduce scales well:** The bandwidth term $\frac{2(N-1)}{N} \cdot \frac{M}{\beta}$ approaches $\frac{2M}{\beta}$ as $N$ grows — asymptotically **constant** in the number of GPUs. Total data transferred per GPU is always ~$2M$, regardless of cluster size. The latency term $2(N-1) \cdot \alpha$ grows linearly, but is negligible for large messages.
+**Why ring all-reduce scales well:** The bandwidth term $\frac{2(N-1)}{N} \cdot \frac{M}{\beta}$ approaches $\frac{2M}{\beta}$ as $N$ grows, so it is asymptotically **constant** in the number of GPUs. Total data transferred per GPU is always ~$2M$, regardless of cluster size. The latency term $2(N-1) \cdot \alpha$ grows linearly, but is negligible for large messages.
 
 MLSys·im also implements **tree all-reduce** (latency-optimal for small messages):
 
@@ -134,23 +245,23 @@ The crossover point between ring and tree is approximately $M_{\text{cross}} \ap
 ::: {.callout-tip collapse="true"}
 ## Worked Example: 140 GB Gradient Sync
 
-A 70B-parameter model in FP16 produces a 140 GB gradient. On a 1,024-GPU cluster with InfiniBand NDR ($\beta = 50$ GB/s, $\alpha = 2\;\mu$s):
+A 70B-parameter model in FP16 produces a 140 GB gradient. On a 1,024-GPU cluster with InfiniBand NDR ($\beta = `{python} f"{_ndr_bw_gbs:.0f}"`$ GB/s, $\alpha = 2\;\mu$s):
 
-- **Bandwidth term:** $\frac{2 \times 1023}{1024} \times \frac{140}{50} \approx 5.6$ s
-- **Latency term:** $2 \times 1023 \times 2\;\mu\text{s} \approx 4$ ms (negligible)
-- **Total:** ~5.6 s — bandwidth-dominated, as expected for large messages.
+- **Bandwidth term:** $\frac{2 \times 1023}{1024} \times \frac{140}{`{python} f"{_ndr_bw_gbs:.0f}"`} \approx `{python} f"{_ar_140_bw_s:.1f}"`$ s
+- **Latency term:** $2 \times 1023 \times 2\;\mu\text{s} \approx `{python} f"{_ar_140_lat_ms:.0f}"`$ ms (negligible)
+- **Total:** ~`{python} f"{_ar_140_tot_s:.1f}"` s, bandwidth-dominated as expected for large messages.
 
-Upgrading from 100 Gb Ethernet (~12 GB/s) to NDR (~50 GB/s) recovers 10–30% scaling efficiency.
+Upgrading from 100 Gb Ethernet (~`{python} f"{_eth100_bw_gbs:.1f}"` GB/s) to NDR (~`{python} f"{_ndr_bw_gbs:.0f}"` GB/s) recovers 10–30% scaling efficiency.
 :::
 
 ### 2.4 Pipeline Parallelism Bubble {#sec-pipeline}
 
 **Slide Deck:** [Distributed Training (Vol II, Ch 6)]({{< var slides_latest >}}/vol2_06_distributed_training.pdf){target="_blank"}
 
-**Pipeline parallelism** splits a model's layers across $P$ stages. At the start of each batch, downstream stages sit idle while upstream stages produce output — the **pipeline bubble**.
+**Pipeline parallelism** splits a model's layers across $P$ stages. At the start of each batch, downstream stages sit idle while upstream stages produce output. This idle time is the **pipeline bubble**.
 
 ::: {.callout-note appearance="simple" icon=false}
-**Intuition:** You cannot change the speed of light, but you *can* change the software schedule. By assigning multiple **virtual stages** ($V$) to each GPU, we interleave execution: while a GPU waits for one virtual stage's next microbatch, it computes a different virtual stage's microbatch, hiding latency behind useful work.
+**Intuition:** The speed of light is fixed, but the software schedule *can* change. Assigning multiple **virtual stages** ($V$) to each GPU interleaves execution: while a GPU waits for one virtual stage's next microbatch, it computes a different virtual stage's microbatch, hiding latency behind useful work.
 :::
 
 With $P$ pipeline stages, $M$ microbatches, and $V$ virtual stages per GPU:
@@ -161,17 +272,17 @@ $$
 
 | Configuration | Bubble Fraction |
 |:-------------|:----------------|
-| $P=4, M=16, V=1$ | $3/19 = 15.8\%$ |
-| $P=4, M=16, V=2$ | $3/35 = 8.6\%$ |
-| $P=8, M=32, V=1$ | $7/39 = 17.9\%$ |
-| $P=16, M=16, V=1$ | $15/31 = 48.4\%$ — unacceptable |
+| $P=4, M=16, V=1$ | $3/19 = `{python} f"{_bub_4_16_1:.1f}"`\%$ |
+| $P=4, M=16, V=2$ | $3/35 = `{python} f"{_bub_4_16_2:.1f}"`\%$ |
+| $P=8, M=32, V=1$ | $7/39 = `{python} f"{_bub_8_32_1:.1f}"`\%$ |
+| $P=16, M=16, V=1$ | $15/31 = `{python} f"{_bub_16_16_1:.1f}"`\%$ (unacceptable) |
 
-To keep the bubble below 5% with standard 1F1B ($V=1$), you need $M \geq 19 \times (P - 1)$ microbatches. Interleaved schedules ($V \geq 2$) cut this requirement proportionally.
+Keeping the bubble below 5% with standard 1F1B ($V=1$) requires $M \geq 19 \times (P - 1)$ microbatches. Interleaved schedules ($V \geq 2$) cut this requirement proportionally.
 
 ### 2.5 Expert Parallelism (Mixture of Experts) {#sec-moe}
 
 ::: {.callout-note appearance="simple" icon=false}
-**Intuition:** Dense Transformers obey a strict "Iron Law": doubling parameters doubles both memory *and* compute. Mixture of Experts (MoE) breaks this law by routing tokens to specific expert subnetworks. The **memory bound** is set by the massive *total* parameters, but the **compute bound** is set by the much smaller *active* parameters. The physical tradeoff is a network bandwidth tax (All-to-All communication) to route tokens across the cluster.
+**Intuition:** Dense Transformers obey a strict "Iron Law": doubling parameters doubles both memory *and* compute. Mixture of Experts (MoE) breaks this law by routing tokens to specific expert subnetworks. The **memory bound** is set by the *total* parameters, but the **compute bound** is set by the much smaller *active* parameters. The physical tradeoff is a network bandwidth tax (All-to-All communication) to route tokens across the cluster.
 :::
 
 When $\text{EP} > 1$, the solver adds an **All-to-All** communication penalty for token routing:
@@ -180,7 +291,7 @@ $$
 T_{\text{all-to-all}} = (N-1) \cdot \alpha \;+\; \frac{N-1}{N} \cdot \frac{M}{\beta}
 $$
 
-where $N$ is the EP degree. Compared to AllReduce, All-to-All creates $O(N^2)$ point-to-point connections, making it **latency-sensitive** — a 4 KB token routing message is latency-bound, while a 140 GB gradient sync is bandwidth-bound.
+where $N$ is the EP degree. Compared to AllReduce, All-to-All creates $O(N^2)$ point-to-point connections, making it **latency-sensitive**. A 4 KB token routing message is latency-bound, while a 140 GB gradient sync is bandwidth-bound.
 
 MoE routing is rarely perfectly balanced. MLSys·im exposes a single routing-imbalance factor $\gamma \ge 1$:
 
@@ -213,7 +324,7 @@ $$
 | $P$ | Number of model parameters |
 | $D$ | Number of training tokens |
 
-The factor of 6 comes from: 2 FLOPs per parameter per token (forward pass multiply-accumulate) × 3 passes (forward + backward for weights + backward for activations). Combined with the roofline model ([Section 1](#sec-roofline)), this gives training time:
+The factor of 6 is 2 FLOPs per parameter per token (forward pass multiply-accumulate) × 3 passes (forward + backward for weights + backward for activations). Combined with the roofline model ([Section 1](#sec-roofline)), this gives training time:
 
 $$
 T_{\text{train}} = \frac{6PD}{\text{Peak\_FLOP/s} \times \eta}
@@ -222,12 +333,12 @@ $$
 ::: {.callout-tip collapse="true"}
 ## Worked Example: GPT-3 Training Time
 
-GPT-3 175B trained on 300B tokens:
+GPT-3 `{python} f"{_gpt3_params_b:.0f}B"` trained on `{python} f"{_gpt3_tokens_b:.0f}B"` tokens:
 
-- **Total FLOPs:** $6 \times 175 \times 10^9 \times 300 \times 10^9 = 3.15 \times 10^{23}$
-- **On 1,024 A100s** ($312\text{ TF each} \times 0.5$ MFU): $3.15 \times 10^{23} / (1024 \times 312 \times 10^{12} \times 0.5) \approx 1.97 \times 10^6\text{ s} \approx 23\text{ days}$
+- **Total FLOPs:** $6 \times `{python} f"{_gpt3_params_b:.0f}"` \times 10^9 \times `{python} f"{_gpt3_tokens_b:.0f}"` \times 10^9 = `{python} f"{_gpt3_flops / 1e23:.2f}"` \times 10^{23}$
+- **On 1,024 A100s** ($`{python} f"{_a100_peak:.0f}"`\text{ TF each} \times 0.5$ MFU): $`{python} f"{_gpt3_flops / 1e23:.2f}"` \times 10^{23} / (1024 \times `{python} f"{_a100_peak:.0f}"` \times 10^{12} \times 0.5) \approx `{python} f"{_gpt3_train_s / 1e6:.2f}"` \times 10^6\text{ s} \approx `{python} f"{_gpt3_train_days:.0f}"`\text{ days}$
 
-Narayanan et al. estimate about 34 days for this configuration [@narayanan2021]. The gap from 23 days is not a scaling loss. Their estimate counts 8 FLOPs per parameter per token, because activation recomputation repeats the forward pass, and it uses a measured 140 TFLOP/s per GPU (about 45% of peak), which already includes communication and pipeline losses.
+Narayanan et al. estimate about 34 days for this configuration [@narayanan2021]. The gap from `{python} f"{_gpt3_train_days:.0f}"` days is not a scaling loss. Their estimate counts 8 FLOPs per parameter per token, because activation recomputation repeats the forward pass, and it uses a measured 140 TFLOP/s per GPU (about 45% of peak), which already includes communication and pipeline losses.
 :::
 
 ### 3.1 Training Memory Accounting {#sec-training-memory}
@@ -248,7 +359,7 @@ For mixed-precision Adam training, the default per-parameter state is:
 |:----------|--------------------------:|:--------------|
 | Weights | 2 | Stage 3 |
 | Gradients | 2 | Stage 2+ |
-| Adam optimizer state | 12 | Stage 1+ |
+| Adam optimizer state | `{python} f"{_adam_opt_bytes}"` | Stage 1+ |
 
 Tensor, pipeline, and expert parallelism first shard the model states across model-parallel ranks. ZeRO then shards data-parallel states [@rajbhandari2020]. Activation memory scales with local microbatch size, sequence length, hidden dimension, and the chosen activation-checkpointing strategy [@korthikanti2023].
 
@@ -259,7 +370,7 @@ Tensor, pipeline, and expert parallelism first shard the model states across mod
 *Implemented in [`mlsysim.solvers.ServingModel`](api/solvers.ServingModel.qmd).*
 **Slide Decks:** [Model Serving (Vol I, Ch 13)]({{< var slides_latest >}}/vol1_13_model_serving.pdf){target="_blank"} | [Inference at Scale (Vol II, Ch 10)]({{< var slides_latest >}}/vol2_10_inference.pdf){target="_blank"}
 
-LLM autoregressive inference has two physically distinct phases. Understanding which phase dominates is critical for capacity planning.
+LLM autoregressive inference has two physically distinct phases. Capacity planning depends on knowing which phase dominates.
 
 ### 4.1 Pre-fill Phase (Compute-Bound)
 
@@ -290,11 +401,11 @@ This phase is almost always **memory-bound** because generating one token requir
 ::: {.callout-tip collapse="true"}
 ## Worked Example: Llama-3 70B Decode on H100
 
-Single-token decode, batch=1:
+Single-token decode, batch=1 (`{python} f"{_l70_params_b:.1f}B"` parameters, `{python} f"{_l70_wt_gb:.1f} GB"` in FP16):
 
-- **Compute:** $2 \times 70\text{B} / 989\text{ TF} = 0.14\text{ ms}$ (3%)
-- **Memory:** $140\text{ GB} / 3.35\text{ TB/s} = 41.8\text{ ms}$ (97%)
-- **Total:** ~42 ms/token → ~24 tokens/s
+- **Compute:** $2 \times `{python} f"{_l70_params_b:.1f}"`\text{B} / `{python} f"{_h100_peak:.0f}"`\text{ TF} = `{python} f"{_l70_cmp_ms:.2f}"`\text{ ms}$ (0.3% of memory time)
+- **Memory:** $`{python} f"{_l70_wt_gb:.1f}"`\text{ GB} / `{python} f"{_h100_bw:.2f}"`\text{ TB/s} = `{python} f"{_l70_mem_ms:.1f}"`\text{ ms}$
+- **Total:** ~`{python} f"{_l70_mem_ms:.0f}"` ms/token → ~`{python} f"{_l70_tok_s:.0f}"` tokens/s
 
 The decode phase is so memory-bound that a hypothetical 2× compute upgrade yields zero speedup. Only higher memory bandwidth (or batching) helps.
 
@@ -316,18 +427,18 @@ $$
 | $B$ | Batch size |
 | $b_{\text{elem}}$ | Bytes per element (2 for FP16/BF16) |
 
-The factor of 2 accounts for both the K and V tensors. With **Grouped-Query Attention** (GQA), $H_{\text{kv}} < H$, significantly reducing cache size — Llama-3 70B uses 8 KV heads vs. 64 query heads, an 8× reduction.
+The factor of 2 accounts for both the K and V tensors. With **Grouped-Query Attention** (GQA), $H_{\text{kv}} < H$, which reduces cache size. Llama-3 70B uses `{python} f"{_l70_kv_heads}"` KV heads vs. `{python} f"{_l70_heads}"` query heads, an `{python} f"{_l70_gqa_ratio}"`× reduction.
 
 ::: {.callout-tip collapse="true"}
 ## Worked Example: KV-Cache Capacity Planning
 
-Llama-3 70B: 80 layers, 8 KV heads (GQA), $d_{\text{head}} = 128$, FP16:
+Llama-3 70B: `{python} f"{_l70_layers}"` layers, `{python} f"{_l70_kv_heads}"` KV heads (GQA), $d_{\text{head}} = `{python} f"{_l70_d_head}"`$, FP16:
 
-- **Per-token:** $2 \times 80 \times 8 \times 128 \times 2 = 327\text{ KB}$
-- **Batch=16, seq=4096:** $327\text{K} \times 16 \times 4096 = 21.5\text{ GB}$
-- **Batch=32, seq=4096:** $327\text{K} \times 32 \times 4096 = 43\text{ GB}$
+- **Per-token:** $2 \times `{python} f"{_l70_layers}"` \times `{python} f"{_l70_kv_heads}"` \times `{python} f"{_l70_d_head}"` \times 2 = `{python} f"{_l70_kv_tok_kb:.1f}"`\text{ KB}$
+- **Batch=16, seq=4096:** $`{python} f"{_l70_kv_tok_kb:.1f}"`\text{K} \times 16 \times 4096 = `{python} f"{_l70_kv_b16_gb:.1f}"`\text{ GB}$
+- **Batch=32, seq=4096:** $`{python} f"{_l70_kv_tok_kb:.1f}"`\text{K} \times 32 \times 4096 = `{python} f"{_l70_kv_b32_gb:.1f}"`\text{ GB}$
 
-Weights (35 GB in FP16) + KV-cache (43 GB) = 78 GB — barely fits on an 80 GB H100. At batch=64 or longer contexts, you must shard across multiple GPUs.
+Weights (`{python} f"{_l70_wt_int4_gb:.1f}"` GB at INT4) + KV-cache (`{python} f"{_l70_kv_b32_gb:.1f}"` GB at FP16) = `{python} f"{_l70_tot_b32_gb:.1f}"` GB, which barely fits on an `{python} f"{_h100_cap_gib:.0f}"` GiB H100. At batch=64 or longer contexts, the model must be sharded across multiple GPUs.
 
 Source: Inference at Scale slides (Vol II, Ch 10).
 :::
@@ -401,16 +512,16 @@ and `speedup_vs_static` is $R_{\text{tok}}$ at $N_{\text{paged}}$ divided by $R_
 ::: {.callout-tip collapse="true"}
 ## Worked Example: Llama-3 8B on H100 with an 8K Context
 
-FP16 KV costs $k = 131{,}072$ bytes per token, so the H100's KV budget holds about 532,831 tokens. With $S_{\max} = 8192$ and $\bar{S} = 2048$:
+FP16 KV costs $k = `{python} f"{_l8_kv_tok_b:,}"`$ bytes per token, so the H100's KV budget holds about `{python} f"{_h100_kv_budget_tok:,}"` tokens. With $S_{\max} = 8192$ and $\bar{S} = 2048$:
 
-- **Static reservation:** $\lfloor 532{,}831 / 8192 \rfloor = 65$ requests, with 75% of every reservation unused
-- **Paged, $p = 16$:** about 128.5 blocks per request, so 259 requests with 0.4% unused
-- **Paged, $p = 2048$:** 165 requests with 36% unused
-- **Decode throughput:** paged at $p = 16$ runs about 1.56× static
+- **Static reservation:** $\lfloor `{python} f"{_h100_kv_budget_tok:,}"` / 8192 \rfloor = `{python} f"{_cb_8k_16.static_max_active_requests}"`$ requests, with `{python} f"{_cb_8k_16.static_internal_fragmentation * 100:.0f}%"` of every reservation unused
+- **Paged, $p = 16$:** about 128.5 blocks per request, so `{python} f"{_cb_8k_16.max_active_requests}"` requests with `{python} f"{_cb_8k_16.paged_internal_fragmentation * 100:.1f}%"` unused
+- **Paged, $p = 2048$:** `{python} f"{_cb_8k_2048.max_active_requests}"` requests with `{python} f"{_cb_8k_2048.paged_internal_fragmentation * 100:.0f}%"` unused
+- **Decode throughput:** paged at $p = 16$ runs about `{python} f"{_cb_8k_16.speedup_vs_static:.2f}"`× static
 
-Allocation policy matters only when memory binds. If the scheduler caps the batch below 65, both allocators admit the same requests and the speedup is 1.
+Allocation policy matters only when memory binds. If the scheduler caps the batch below `{python} f"{_cb_8k_16.static_max_active_requests}"`, both allocators admit the same requests and the speedup is 1.
 
-Source: `ContinuousBatchingModel`. The Monte Carlo allocators in the [KV-cache tutorial](tutorials/03_kv_cache.qmd) admit the same 65 and 259 requests; the tutorial's throughput ratio is lower because its single random draw happens to give the first 65 requests a below-average length.
+Source: `ContinuousBatchingModel`. The Monte Carlo allocators in the [KV-cache tutorial](tutorials/03_kv_cache.qmd) admit the same `{python} f"{_cb_8k_16.static_max_active_requests}"` and `{python} f"{_cb_8k_16.max_active_requests}"` requests; the tutorial's throughput ratio is lower because its single random draw happens to give the first `{python} f"{_cb_8k_16.static_max_active_requests}"` requests a below-average length.
 :::
 
 Kwon et al. profile contiguous pre-allocation and find that only 20.4% to 38.2% of KV-cache memory holds token states. The rest is reserved slots for future tokens, internal fragmentation from over-provisioning for the maximum length, and external fragmentation from the allocator. PagedAttention limits each request's waste to one block [@kwon2023]. The static baseline here is max-length reservation, which captures the first two kinds of waste and is modeled without external fragmentation. Exact-size and power-of-two contiguous allocators, which trade reservation waste for external fragmentation, are not modeled. Sizing both allocators with every request at its full length is a peak-occupancy view: a request mid-generation holds fewer paged blocks, so paged capacity is conservative.
@@ -431,7 +542,7 @@ $$
 Q_{\text{replica}} = \frac{R_{\text{tok}}}{G}
 $$
 
-The required replica count is the smallest $c$ such that utilization remains stable and:
+The required replica count is the smallest $c$ such that traffic intensity remains stable and:
 
 $$
 P99_{\text{request}} \approx T_{\text{base}} + P99_{\text{queue}}(Q, Q_{\text{replica}}, c)
@@ -448,7 +559,7 @@ $$
 C_{\text{total}} = C_{\text{training}} + C_{\text{serving}} \times T_{\text{deploy}} \times Q_{\text{rate}}
 $$
 
-A 70B model costing \$2M to train, serving 1M daily users at 50 requests/day, costs ~\$18M/year in inference — 9× the training cost in year one. This is why inference optimization (batching, quantization, speculative decoding) has outsized economic impact.
+A 70B model costing \$2M to train, serving 1M daily users at 50 requests/day, costs ~\$18M/year in inference, 9× the training cost in year one. This is why inference optimization (batching, quantization, speculative decoding) has outsized economic impact.
 
 ---
 
@@ -463,7 +574,7 @@ $$
 E = \text{IT\_Power} \times \text{Hours} \times \text{PUE}
 $$
 
-**Power Usage Effectiveness** (PUE) accounts for cooling and facility overhead. A PUE of 1.0 is theoretical perfect efficiency; hyperscale datacenters achieve 1.05–1.10 (liquid-cooled) to 1.4–1.6 (air-cooled). The industry average is 1.58 — meaning 37% of energy goes to cooling and power distribution, not computation.
+**Power Usage Effectiveness** (PUE) accounts for cooling and facility overhead. A PUE of 1.0 is theoretical perfect efficiency; hyperscale datacenters achieve 1.05–1.10 (liquid-cooled) to 1.4–1.6 (air-cooled). The industry average is `{python} f"{Infrastructure.Datacenters.Poland_Coal.pue:.2f}"`, meaning 37% of energy goes to cooling and power distribution, not computation.
 
 ### 5.2 Carbon Footprint
 
@@ -476,15 +587,15 @@ Where $C$ is in kg CO₂e and Carbon\_Intensity is in g CO₂e/kWh, sourced from
 ::: {.callout-tip collapse="true"}
 ## Worked Example: Training Carbon Footprint
 
-64 GPUs × 400W × 336 hours = 8,602 kWh. With PUE 1.2 = 10,322 kWh.
+64 GPUs × `{python} f"{_a100_tdp:.0f}"`W × 336 hours = `{python} f"{_it_kwh:,.0f}"` kWh. With PUE 1.2 = `{python} f"{_tot_kwh:,.0f}"` kWh.
 
 | Grid Region | Carbon Intensity | CO₂ Emissions |
 |:------------|:----------------|:--------------|
-| Quebec (hydro) | 20 g/kWh | **206 kg** |
-| US Average | 429 g/kWh | **4,428 kg** |
-| Poland (coal) | 820 g/kWh | **8,464 kg** |
+| Quebec (hydro) | `{python} f"{_ci_quebec:.0f}"` g/kWh | **`{python} f"{_co2_quebec:,.0f}"` kg** |
+| US Average | `{python} f"{_ci_us:.0f}"` g/kWh | **`{python} f"{_co2_us:,.0f}"` kg** |
+| Poland (coal) | `{python} f"{_ci_poland:.0f}"` g/kWh | **`{python} f"{_co2_poland:,.0f}"` kg** |
 
-Geographic choice alone creates a **~41× difference** for identical workloads. Combined with hardware choice (5×) and quantization (4×), the total optimization lever is up to **800×**.
+Geographic choice alone creates a **~`{python} f"{_ci_spread:.0f}"`× difference** for identical workloads. Combined with hardware choice (5×) and quantization (4×), the total optimization lever is up to **800×**.
 
 Source: Sustainable AI slides (Vol II, Ch 15).
 :::
@@ -505,13 +616,13 @@ $$
 
 | Metric | On-Prem (H100 Node) | Cloud On-Demand |
 |:-------|:--------------------|:----------------|
-| Unit cost | \$350K (amortize over 3 yr) | — |
+| Unit cost | \$`{python} f"{_dgx_cost_k:.0f}"`K (amortize over `{python} f"{_amort_yr}"` yr) | N/A |
 | Annual cost (80% util) | ~\$122K/node/yr | ~\$224K/node/yr |
-| Effective GPU-hour rate | ~\$2.40 | ~\$4.00 |
+| Effective GPU-hour rate | ~\$2.40 | ~\$`{python} f"{_cloud_gpu_hr:.2f}"` |
 
-**Break-even utilization:** ~55%. Below 55% sustained utilization, cloud is cheaper. At 20% utilization, on-prem costs ~\$6/GPU-hour — more expensive than cloud on-demand.
+**Break-even occupancy:** ~55%. Below 55% sustained occupancy, cloud is cheaper. At 20% occupancy, on-prem costs ~\$6/GPU-hour, which is more expensive than cloud on-demand.
 
-The right metric is **cost per useful TFLOP-hour**, not cost per GPU-hour: an H100 delivers 6.3× the TFLOPS of an A100, so a higher sticker price may yield a lower effective cost.
+The right metric is **cost per useful TFLOP-hour**, not cost per GPU-hour. An H100 delivers `{python} f"{_h100_a100_flops_ratio:.1f}"`× the FP16 TFLOP/s of an A100 (or 6.3× comparing H100 FP8 to A100 FP16), so a higher sticker price may yield a lower effective cost.
 
 Source: Compute Infrastructure slides (Vol II, Ch 2).
 :::
@@ -524,7 +635,7 @@ Source: Compute Infrastructure slides (Vol II, Ch 2).
 **Slide Deck:** [Fault Tolerance (Vol II, Ch 7)]({{< var slides_latest >}}/vol2_07_fault_tolerance.pdf){target="_blank"}
 
 ::: {.callout-note appearance="simple" icon=false}
-**Intuition:** When training on thousands of GPUs for months, hardware failures are a statistical certainty. If a node fails, you lose all progress since the last checkpoint. Checkpointing too often wastes time writing; checkpointing too rarely wastes time recomputing. The Young-Daly model finds the optimal balance.
+**Intuition:** When training on thousands of GPUs for months, hardware failures are a statistical certainty. If a node fails, the job loses all progress since the last checkpoint. Checkpointing too often wastes time writing; checkpointing too rarely wastes time recomputing. The Young-Daly model finds the optimal balance.
 :::
 
 ### 7.1 Cluster MTBF
@@ -535,12 +646,12 @@ $$
 \text{MTBF}_{\text{cluster}} = \frac{\text{MTBF}_{\text{component}}}{N}
 $$
 
-| Cluster Size ($N$) | System MTBF (50,000 hr/GPU) |
+| Cluster Size ($N$) | System MTBF (`{python} f"{_gpu_mttf_hr:,.0f}"` hr/GPU) |
 |:------------|:----------------|
 | 8 GPUs | ~8 months |
-| 1,000 GPUs | 50 hours |
-| 10,000 GPUs | **5 hours** |
-| 16,000 GPUs | **~3 hours** (Llama-3 scale: 419 failures in 54 days) |
+| 1,000 GPUs | `{python} f"{_mtbf_1k_hr:.0f}"` hours |
+| 10,000 GPUs | **`{python} f"{_mtbf_10k_hr:.0f}"` hours** |
+| 16,000 GPUs | **~`{python} f"{_mtbf_16k_hr:.0f}"` hours** (Llama-3 scale: `{python} f"{_llama3_failures}"` failures in `{python} f"{_llama3_days}"` days) |
 
 ### 7.2 Optimal Checkpoint Interval
 
@@ -566,14 +677,14 @@ At the optimal $\tau_{\text{opt}}$, both terms are equal, and waste is minimized
 ::: {.callout-tip collapse="true"}
 ## Worked Example: Llama-3 Scale Checkpointing
 
-16,384 GPUs, $\delta = 2$ min, cluster MTBF $M = 180$ min:
+`{python} f"{_llama3_16k_gpus:,}"` GPUs, $\delta = 2$ min, cluster MTBF $M = 180$ min:
 
-$$\tau_{\text{opt}} = \sqrt{2 \times 2 \times 180} = \sqrt{720} \approx 27\text{ min}$$
+$$\tau_{\text{opt}} = \sqrt{2 \times 2 \times 180} = \sqrt{720} \approx `{python} f"{_tau_opt_min:.0f}"`\text{ min}$$
 
 | Checkpoint Interval | Overhead |
 |:-------------------|:---------|
 | 10 min (too frequent) | 17% |
-| **27 min (optimal)** | **7%** |
+| **`{python} f"{_tau_opt_min:.0f}"` min (optimal)** | **7%** |
 | 60 min (too rare) | 15% |
 
 On a cluster costing \$10M/month, 7% overhead = \$700K/month. Async checkpointing (overlapping writes with computation) can reduce this to ~3%.
@@ -593,7 +704,7 @@ $$
 P(\geq 1\text{ failure}) = 1 - e^{-T / \text{MTBF}}
 $$
 
-For a 30-day training run on a cluster with MTBF of 5 hours: $P = 1 - e^{-720/5} \approx 1.0$ — failure is virtually certain. This is why checkpointing ([Section 7](#sec-reliability)) is not optional at scale.
+For a 30-day training run on a cluster with MTBF of `{python} f"{_mtbf_10k_hr:.0f}"` hours: $P = 1 - e^{-720/`{python} f"{_mtbf_10k_hr:.0f}"`} \approx `{python} f"{_prob_30d:.1f}"`$, so failure is virtually certain. This is why checkpointing ([Section 7](#sec-reliability)) is not optional at scale.
 
 ---
 

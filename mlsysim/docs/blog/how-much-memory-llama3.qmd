@@ -1,0 +1,166 @@
+---
+title: "How Much Memory Does Llama-3 70B Actually Need?"
+description: "A 3-minute calculation with mlsysim that answers the question every ML engineer asks."
+date: 2026-04-01
+categories: [serving, memory, llm]
+---
+
+```{python}
+#| echo: false
+#| output: false
+import mlsysim
+from mlsysim.physics import calc_kv_cache_size
+from mlsysim.solvers import ServingModel
+
+llama70b = mlsysim.Models.Language.Llama3_70B
+h100 = mlsysim.Hardware.Cloud.H100
+a100 = mlsysim.Hardware.Cloud.A100
+
+_params_b = llama70b.parameters.to("Bparam").magnitude
+_fp16_size = llama70b.size_in_bytes()
+_int8_size = llama70b.size_in_bytes(mlsysim.ureg("1 byte"))
+_int4_size = llama70b.size_in_bytes(mlsysim.ureg("0.5 byte"))
+
+_fp16_gb = _fp16_size.to("GB").magnitude
+_int8_gb = _int8_size.to("GB").magnitude
+_int4_gb = _int4_size.to("GB").magnitude
+
+_h100_gib = h100.memory.capacity.to("GiB").magnitude
+_h100_gb = h100.memory.capacity.to("GB").magnitude
+_a100_gib = a100.memory.capacity.to("GiB").magnitude
+
+_layers = llama70b.layers
+_heads = llama70b.heads
+_kv_heads = llama70b.kv_heads
+_head_dim = llama70b.hidden_dim // llama70b.heads
+_gqa_ratio = _heads // _kv_heads
+
+_kv_4k = calc_kv_cache_size(
+    n_layers=_layers,
+    n_heads=_kv_heads,
+    head_dim=_head_dim,
+    seq_len=4096,
+    batch_size=1,
+    bytes_per_elem=2,
+)
+_kv_32k = calc_kv_cache_size(
+    n_layers=_layers,
+    n_heads=_kv_heads,
+    head_dim=_head_dim,
+    seq_len=32768,
+    batch_size=1,
+    bytes_per_elem=2,
+)
+_kv_4k_gb = _kv_4k.to("GB").magnitude
+_kv_4k_mb = _kv_4k.to("MB").magnitude
+_kv_32k_gb = _kv_32k.to("GB").magnitude
+
+_rem_int4 = h100.memory.capacity - _int4_size
+_rem_int4_gb = _rem_int4.to("GB").magnitude
+_rem_int4_mb = _rem_int4.to("MB").magnitude
+_max_req_4k = int(_rem_int4.to("byte").magnitude // _kv_4k.to("byte").magnitude)
+_max_req_32k = int(_rem_int4.to("byte").magnitude // _kv_32k.to("byte").magnitude)
+```
+
+Every ML engineer eventually confronts the same capacity problem: whether `{python} llama70b.name` (`{python} f"{_params_b:.1f}B"` parameters) fits on the available hardware.
+
+The answer depends on three quantities: **precision**, **KV cache**, and **batch size**.
+The calculation takes 30 seconds.
+
+## The Weights
+
+```{python}
+#| echo: true
+import mlsysim
+
+llama70b = mlsysim.Models.Language.Llama3_70B
+
+# FP16: 2 bytes per parameter
+fp16_size = llama70b.size_in_bytes()
+print(f"FP16 weights: {fp16_size.to('GB'):~.1f}")
+
+# INT8: 1 byte per parameter
+int8_size = llama70b.size_in_bytes(mlsysim.ureg("1 byte"))
+print(f"INT8 weights: {int8_size.to('GB'):~.1f}")
+
+# INT4: 0.5 bytes per parameter
+int4_size = llama70b.size_in_bytes(mlsysim.ureg("0.5 byte"))
+print(f"INT4 weights: {int4_size.to('GB'):~.1f}")
+```
+
+**Result:** `{python} f"{_fp16_gb:.1f} GB"` in FP16, `{python} f"{_int8_gb:.1f} GB"` in INT8, and `{python} f"{_int4_gb:.1f} GB"` in INT4.
+
+An H100 or A100 has `{python} f"{_h100_gib:.0f} GiB"` (`{python} f"{_h100_gb:.1f} GB"`), so `{python} llama70b.name` in FP16 **does not fit on one GPU**.
+Serving it requires either tensor parallelism ($\text{TP}=2$) or quantization to INT8/INT4.
+
+## The KV Cache
+
+Weights are only part of the total. Each active request also needs a KV cache:
+
+```{python}
+#| echo: true
+from mlsysim.physics import calc_kv_cache_size
+
+head_dim = llama70b.hidden_dim // llama70b.heads
+kv_per_request = calc_kv_cache_size(
+    n_layers=llama70b.layers,
+    n_heads=llama70b.kv_heads,
+    head_dim=head_dim,
+    seq_len=4096,
+    batch_size=1,
+    bytes_per_elem=2,
+)
+print(f"KV cache per request (4K context): {kv_per_request.to('GB'):~.2f} ({kv_per_request.to('MB'):~.0f})")
+```
+
+At `{python} f"{_kv_4k_gb:.2f} GB"` (`{python} f"{_kv_4k_mb:,.0f} MB"`) per request across `{python} f"{_layers}"` layers and `{python} f"{_kv_heads}"` GQA KV heads (`{python} f"{_head_dim}"`-dim per head), an `{python} f"{_h100_gib:.0f} GiB"` (`{python} f"{_h100_gb:.1f} GB"`) H100 serving INT4 `{python} llama70b.name` has:
+
+- `{python} f"{_int4_gb:.1f} GB"` for weights
+- `{python} f"{_rem_int4_gb:.1f} GB"` (`{python} f"{_rem_int4_mb:,.0f} MB"`) remaining for KV cache
+- **`{python} f"{_rem_int4_gb:.1f} GB"` / `{python} f"{_kv_4k_gb:.2f} GB"` $\approx$ `{python} f"{_max_req_4k}"` concurrent requests max**
+
+At 32K context, the KV cache grows to `{python} f"{_kv_32k_gb:.2f} GB"` per request, which leaves room for at most **`{python} f"{_max_req_32k}"` concurrent requests**.
+
+## The Full Picture
+
+```{python}
+#| echo: true
+from mlsysim.solvers import ServingModel
+
+result = ServingModel().solve(
+    model=mlsysim.Models.Language.Llama3_70B,
+    hardware=mlsysim.Hardware.Cloud.H100,
+    seq_len=4096,
+    batch_size=1,
+    precision="fp16",
+)
+print(f"Feasible:    {result.feasible}")
+print(f"Memory util: {result.memory_utilization:.1%}")
+```
+
+**The conclusion:** A `{python} f"{_params_b:.1f}B"`-parameter model needs more than `{python} f"{_fp16_gb:.1f} GB"`. It needs
+`{python} f"{_fp16_gb:.1f} GB"` + ($\text{KV cache} \times \text{concurrent requests}$). At production batch sizes and long contexts,
+the KV cache can consume *more* memory than the weights.
+
+## What To Do About It
+
+| Strategy | Memory Impact | Trade-off |
+|:---------|:--------------|:----------|
+| INT4 quantization | $4\times$ smaller weights (`{python} f"{_fp16_gb:.1f} GB"` $\to$ `{python} f"{_int4_gb:.1f} GB"`) | ~2--5% accuracy loss |
+| GQA (built into Llama-3) | $`{python} f"{_gqa_ratio}"`\times$ smaller KV cache (`{python} f"{_heads}"` $\to$ `{python} f"{_kv_heads}"` KV heads) | None (architectural) |
+| KV cache INT8 | $2\times$ smaller KV cache (`{python} f"{_kv_4k_gb:.2f} GB"` $\to$ `{python} f"{_kv_4k_gb / 2:.2f} GB"` at 4K) | Negligible quality loss |
+| Tensor parallelism ($\text{TP}=2$) | Split across 2 GPUs (`{python} f"{_fp16_gb / 2:.1f} GB"` weights/GPU) | Adds NVLink communication |
+| PagedAttention (vLLM) | Eliminates KV fragmentation | ~20--40% more concurrent requests |
+
+## Reproducing the Calculation
+
+```bash
+pip install mlsysim
+mlsysim serve Llama3_70B H100 --seq-len 4096 --batch-size 1
+```
+
+---
+
+*This analysis was computed with [mlsysim](https://mlsysbook.ai/mlsysim),
+a first-principles analytical modeling framework for ML systems.
+All specifications are traceable to hardware datasheets and model cards.*

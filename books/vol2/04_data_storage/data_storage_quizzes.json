@@ -3,9 +3,9 @@
     "source_file": "books/vol2/04_data_storage/04_data_storage.qmd",
     "schema_version": 2,
     "generated_on": "2026-09-01",
-    "total_sections": 13,
-    "sections_with_quizzes": 12,
-    "sections_without_quizzes": 1
+    "total_sections": 12,
+    "sections_with_quizzes": 10,
+    "sections_without_quizzes": 2
   },
   "sections": [
     {
@@ -31,7 +31,7 @@
             "question": "An H100 accelerator consumes data from its HBM at roughly $3.35\\text{ TB/s}$, while a single local NVMe drive delivers sequential reads at roughly $7\\text{ GB/s}$. A team is designing the storage infrastructure for a 1,000-accelerator training fleet. Which conclusion follows directly from this bandwidth ratio?",
             "choices": [
               "The gap is easily bridged by standard NVMe RAID arrays because sequential read throughput scales without bound across drives.",
-              "The roughly $480\\times$ device-bandwidth gap motivates tiered staging, but required input bandwidth must be calculated from batch bytes and compute time rather than equated with HBM traffic.",
+              "The roughly $479\\times$ device-bandwidth gap motivates tiered staging, but required input bandwidth must be calculated from batch bytes and compute time rather than equated with HBM traffic.",
               "The bandwidth gap is negligible because large-scale training is entirely compute-bound and rarely exercises HBM bandwidth.",
               "The bandwidth gap disappears when high-speed InfiniBand fabrics deliver data directly into HBM from remote storage endpoints without local staging."
             ],
@@ -127,10 +127,16 @@
             "learning_objective": "Classify model rollout storage traffic as a synchronized fan-out read burst and quantify its cluster-wide volume"
           },
           {
-            "question_type": "ORDER",
-            "question": "Order the sequence of performance degradation steps that occurs when a training cluster attempts to load a dataset stored as 200 million individual small JPEG files from a parallel file system: (1) Storage data disks and network links sit largely idle despite abundant rated bandwidth, (2) Thousands of concurrent workers execute open(), stat(), and close() system calls for every 10 KB sample, (3) The training loop stalls and GPU utilization collapses while waiting for batch collation, (4) Dedicated metadata servers (MDS) become saturated by hundreds of thousands of lock acquisitions and attribute lookups per second, (5) Data loader worker threads block on serialized file descriptor operations.",
-            "answer": "The correct order is: (2) Thousands of concurrent workers execute open(), stat(), and close() system calls for every 10 KB sample, (4) Dedicated metadata servers (MDS) become saturated by hundreds of thousands of lock acquisitions and attribute lookups per second, (5) Data loader worker threads block on serialized file descriptor operations, (1) Storage data disks and network links sit largely idle despite abundant rated bandwidth, (3) The training loop stalls and GPU utilization collapses while waiting for batch collation. The pathology begins when workers flood the namespace with per-file POSIX calls (2), overwhelming the metadata servers (4), which causes data loader worker threads to block waiting for metadata responses (5); because threads are blocked on metadata, payload requests never reach data disks (1), leaving GPUs starved for training batches (3).",
-            "learning_objective": "Analyze the causal failure cascade of the small-file metadata bottleneck in parallel file systems"
+            "question_type": "MCQ",
+            "question": "A team plans one storage configuration for the whole life of a language-model project: tokenizing and deduplicating a $3\\text{ TB}$ compressed corpus into $6\\text{ TB}$ of shards, then training on those shards with periodic checkpoints. Why does the chapter conclude that no single configuration optimizes every phase?",
+            "choices": [
+              "Preprocessing reads and writes large sequential artifacts in MapReduce-like passes, while training reads immutable shards between bursty checkpoint writes, so the read/write balance and access pattern change by phase.",
+              "Training reads are dominated by small random lookups that only a database-style random-IOPS tier can serve, while preprocessing is purely sequential.",
+              "The tokenized corpus is smaller than the compressed source, so preprocessing frees capacity that the training phase cannot use.",
+              "Checkpoint writes are continuous and small, so they require a different write-ahead log configuration than preprocessing."
+            ],
+            "answer": "The correct answer is A. The fourth inversion is that the read/write ratio shifts by lifecycle phase: preprocessing scans and rewrites large artifacts, while training streams read-only shards between synchronized checkpoint bursts. Each phase loads the tiers differently, which is why ML systems use a multi-tier hierarchy rather than one storage technology. Training reads are not small random lookups, the tokenized corpus is larger than the compressed source, and checkpoints are bursty large writes, not continuous small ones.",
+            "learning_objective": "Explain why phase-dependent read/write behavior requires a multi-tier storage hierarchy"
           }
         ]
       }
@@ -273,10 +279,10 @@
             "learning_objective": "Analyze how locality-aware scheduling optimizes node recovery times and mitigates shared storage contention at fleet scale"
           },
           {
-            "question_type": "ORDER",
-            "question": "Order the four stages of the host DRAM data loading pipeline in their execution sequence: (1) Decode compressed sample representations (e.g., decompressing JPEG images or zstd text shards), (2) Collate individual processed samples into a contiguous batch in pinned host memory, (3) Read compressed binary chunks from persistent storage into host read buffers, (4) Apply data augmentations and feature transformations (e.g., cropping, flipping, token masking).",
-            "answer": "The correct order is: (3) Read compressed binary chunks from persistent storage into host read buffers, (1) Decode compressed sample representations (e.g., decompressing JPEG images or zstd text shards), (4) Apply data augmentations and feature transformations (e.g., cropping, flipping, token masking), (2) Collate individual processed samples into a contiguous batch in pinned host memory. The pipeline first reads compressed bytes from NVMe or network storage into DRAM (3), unpacks/decompresses the raw samples via CPU decode threads (1), executes stochastic transformations and augmentations on CPU cores (4), and finally packages individual tensors into a collated batch in page-locked pinned memory ready for PCIe DMA transfer to the accelerator (2).",
-            "learning_objective": "Analyze the operational stages of the host DRAM data loader pipeline from storage read to pinned-memory collation"
+            "question_type": "SHORT",
+            "question": "Compare the three primary data staging patterns (prestaging, on-demand staging, and pure streaming) in terms of job startup latency and network bandwidth consumption during multi-epoch training.",
+            "answer": "Prestaging copies the required working set before training, trading startup delay and cache capacity for fewer remote input reads during execution. On-demand staging fetches shards on first access and can reuse them in later epochs if the cache retains them. Pure streaming avoids a full-dataset staging phase but repeatedly uses the remote path and remains exposed to its tail latency. Neither on-demand staging nor streaming eliminates first-batch latency, and local staging does not eliminate unrelated network traffic such as checkpoint writes.",
+            "learning_objective": "Compare the trade-offs of prestaging, on-demand staging, and pure streaming data delivery patterns"
           }
         ]
       }
@@ -308,7 +314,7 @@
               "GDS routes network packets through host DRAM bounce buffers to perform real-time data integrity checksumming.",
               "GDS establishes a direct DMA transfer path between NVMe storage (local or NVMe-oF) and GPU memory, eliminating the CPU-mediated bounce buffer in host DRAM while retaining CPU control-plane coordination."
             ],
-            "answer": "The correct answer is D. GDS establishes a direct DMA transfer path between NVMe storage (local or NVMe-oF) and GPU memory, eliminating the CPU-mediated bounce buffer in host DRAM while retaining CPU control-plane coordination. In the traditional path, data is copied from NVMe to a kernel buffer, copied via CPU memcpy to user space, and then transferred to the GPU via PCIe DMA; GDS uses the cuFile API and `nvidia-fs` to program direct peer-to-peer DMA between the NVMe controller and GPU HBM, skipping host DRAM payload copies while the CPU continues to issue and manage I/O control requests. The HBM caching option is physically impossible given dataset-to-HBM capacity ratios. The flash compression claim mischaracterizes GDS as in-storage compute. The bounce-buffer routing option describes the exact traditional bottleneck GDS was designed to eliminate.",
+            "answer": "The correct answer is D. GDS establishes a direct DMA transfer path between NVMe storage (local or NVMe-oF) and GPU memory, eliminating the CPU-mediated bounce buffer in host DRAM while retaining CPU control-plane coordination. In the traditional path, data is copied from NVMe to a kernel buffer, copied by the CPU to user space, and then transferred to the GPU via PCIe DMA; GDS programs a direct peer-to-peer DMA between the NVMe controller and GPU HBM, skipping host DRAM payload copies while the CPU continues to issue and manage I/O control requests. The HBM caching option is physically impossible given dataset-to-HBM capacity ratios. The flash compression claim mischaracterizes GDS as in-storage compute. The bounce-buffer routing option describes the exact traditional bottleneck GDS was designed to eliminate.",
             "learning_objective": "Explain the architectural data-path modification introduced by GPUDirect Storage compared to traditional CPU-mediated I/O"
           },
           {
@@ -337,8 +343,8 @@
           },
           {
             "question_type": "ORDER",
-            "question": "Order the sequence of operations that occurs in the traditional (non-GDS) storage I/O path when an accelerator requests a batch from local NVMe: (1) The data loader process issues a POSIX read() system call traversing the VFS and filesystem drivers, (2) The NVMe controller initiates a DMA transfer of raw blocks into an OS kernel buffer in host DRAM, (3) The host CPU executes a memcpy to copy payload bytes from kernel space to user-space pinned memory, (4) The CPU initiates a cudaMemcpyAsync to trigger a PCIe DMA transfer from host DRAM to GPU HBM, (5) The accelerator launches compute kernels on the newly arrived tensor resident in HBM.",
-            "answer": "The correct order is: (1) The data loader process issues a POSIX read() system call traversing the VFS and filesystem drivers, (2) The NVMe controller initiates a DMA transfer of raw blocks into an OS kernel buffer in host DRAM, (3) The host CPU executes a memcpy to copy payload bytes from kernel space to user-space pinned memory, (4) The CPU initiates a cudaMemcpyAsync to trigger a PCIe DMA transfer from host DRAM to GPU HBM, (5) The accelerator launches compute kernels on the newly arrived tensor resident in HBM. The traditional path begins with a file-system read call (1), stages data into an OS kernel buffer via storage DMA (2), requires a CPU-mediated memory copy into user space (3), executes a second DMA transfer over PCIe to GPU memory (4), and finally enables GPU computation (5).",
+            "question": "Order the sequence of operations that occurs in the traditional (non-GDS) storage I/O path when an accelerator requests a batch from local NVMe: (1) The data loader process issues a POSIX read() system call traversing the VFS and filesystem drivers, (2) The NVMe controller initiates a DMA transfer of raw blocks into an OS kernel buffer in host DRAM, (3) The host CPU copies payload bytes from kernel space to user-space pinned memory, (4) The CPU programs a PCIe DMA transfer from host DRAM to GPU HBM, (5) The accelerator launches compute kernels on the newly arrived tensor resident in HBM.",
+            "answer": "The correct order is: (1) The data loader process issues a POSIX read() system call traversing the VFS and filesystem drivers, (2) The NVMe controller initiates a DMA transfer of raw blocks into an OS kernel buffer in host DRAM, (3) The host CPU copies payload bytes from kernel space to user-space pinned memory, (4) The CPU programs a PCIe DMA transfer from host DRAM to GPU HBM, (5) The accelerator launches compute kernels on the newly arrived tensor resident in HBM. The traditional path begins with a file-system read call (1), stages data into an OS kernel buffer via storage DMA (2), requires a CPU-mediated memory copy into user space (3), executes a second DMA transfer over PCIe to GPU memory (4), and finally enables GPU computation (5).",
             "learning_objective": "Analyze the multi-hop data movement and CPU mediation steps in the traditional storage I/O path"
           }
         ]
@@ -408,6 +414,64 @@
       }
     },
     {
+      "section_id": "#sec-storage-data-versioning-orchestration",
+      "section_title": "Versioned Data and Commit Boundaries",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "output commit boundaries and effectively exactly-once replay through stable, idempotent writes",
+            "the Data Wall and the shift from human to synthesized training data",
+            "provenance chain requirements (generator, filters, judge models, scores)",
+            "synthetic-data capacity ($1.4\\times$) versus pipeline traffic ($4.4\\times$)",
+            "provenance supporting investigation and filtering of synthetic-data reuse"
+          ],
+          "question_strategy": "Test the systems consequences of synthetic data generation. Focus on metadata overhead, verification traffic, and provenance that supports audits without guaranteeing prevention of model collapse.",
+          "difficulty_progression": "Start with replay correctness at the output commit boundary (MCQ), then synthetic-data capacity and traffic analysis (MCQ), evaluate lineage storage for audits and filtering (SHORT), and test model collapse terminology with FILL.",
+          "integration": "Builds on data engineering and responsible engineering practice; connects data governance with physical storage capacity scaling.",
+          "ranking_explanation": "Explores the emerging frontier where storage evolves from a passive bit-bucket to an active provenance and verification engine."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "A feature-pipeline worker writes the output row for click event `e42`, then crashes before it records that the write succeeded. Its replacement cannot tell whether the row was committed. Which design lets the replacement reprocess `e42` without losing the event or counting it twice?",
+            "choices": [
+              "Write each output row under a stable key such as `(feature_version, e42)`, so a replay overwrites the same row instead of appending a second one.",
+              "Switch the stage to at-most-once processing, so uncertain events are never replayed.",
+              "Deliver messages between workers over a reliable transport, so every message arrives exactly once.",
+              "Lengthen the watermark delay, so late events have more time to arrive before the window closes."
+            ],
+            "answer": "The correct answer is A. The duplicate comes from the worker's own replay, not from message delivery, so it must be removed at the output commit boundary: a replayed write under a stable key leaves the same result however many times it repeats. At-most-once processing loses `e42` instead of duplicating it, a reliable transport cannot see the worker's replay, and a watermark governs event-time completeness rather than replay correctness.",
+            "learning_objective": "Apply stable, idempotent writes at the output commit boundary to make replay after a worker failure effectively exactly-once"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A team generates a $1\\text{ TB}$ synthetic text dataset. Retained provenance adds $40\\%$ metadata overhead, and 3 verifier models each read the payload once without materializing another full copy. What persistent capacity and total pipeline traffic are required?",
+            "choices": [
+              "$1.4\\text{ TB}$ of persistent capacity and $4.4\\text{ TB}$ of traffic: $1\\text{ TB}$ payload write, $0.4\\text{ TB}$ metadata write, and $3\\text{ TB}$ of verifier reads.",
+              "Exactly $1.0\\text{ TB}$, because verifier models run entirely in GPU registers without generating persistent storage artifacts.",
+              "Roughly $0.4\\text{ TB}$, because synthetic data compresses more efficiently than natural language text.",
+              "Roughly $14\\text{ TB}$, because every verifier model stores a full $350\\text{ GB}$ copy of its internal neural activations for every sample."
+            ],
+            "answer": "The correct answer is A. Persistent capacity is $1.4\\text{ TB}$: the $1\\text{ TB}$ payload plus $0.4\\text{ TB}$ of provenance. Pipeline traffic is $4.4\\text{ TB}$: those $1.4\\text{ TB}$ of writes plus three $1\\text{ TB}$ verifier reads. Verification passes do not multiply capacity unless their outputs are materialized as additional full datasets.",
+            "learning_objective": "Distinguish persistent storage amplification from read and write traffic in a verified synthetic-data pipeline"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why synthetic training data pipelines must treat storage as an active 'provenance engine' by recording the generating model, filters, and verifier scores for each accepted sample, rather than storing plain text files.",
+            "answer": "If synthetic data is stored as unverified plain text without lineage, future models risk recursively training on uncurated, erroneous synthetic outputs produced by prior generations, triggering 'model collapse' where model diversity and output quality progressively degrade. Storing an immutable provenance chain (generating model ID, prompt template, rejection filters, and verifier reward scores) supports auditing so data can be filtered, re-weighted, or purged when a generator or judge model is found to possess systematic errors or biases.",
+            "learning_objective": "Justify retaining synthetic-sample provenance to support audits and filtering when recursive training degrades model quality"
+          },
+          {
+            "question_type": "FILL",
+            "question": "The degenerative failure mode where a machine learning model progressively degrades in quality and loses distributional diversity by recursively training on unverified synthetic data produced by earlier models is called model ____.",
+            "answer": "The correct term is collapse (or model collapse). Recursive training on generated data can degrade distributional diversity and output quality. Provenance supports audits, filtering, and removal of problematic samples; recording lineage alone does not prevent the degradation.",
+            "learning_objective": "Explain the mechanism of model collapse caused by recursive training on uncurated synthetic data"
+          }
+        ]
+      }
+    },
+    {
       "section_id": "#sec-storage-economics",
       "section_title": "Storage Economics",
       "quiz_data": {
@@ -461,26 +525,24 @@
             "question": "In cloud-based ML infrastructure, the recurring fee charged by providers per gigabyte of data transferred out of an object storage bucket across region or internet boundaries is called an ____ fee.",
             "answer": "The correct term is egress (or data egress). Egress fees scale with the volume of data read rather than the volume stored, often exceeding monthly storage capacity costs for multi-epoch deep learning workloads.",
             "learning_objective": "Explain the concept of data egress fees charged when reading datasets across cloud network boundaries"
-          },
-          {
-            "question_type": "SHORT",
-            "question": "Compare the three primary data staging patterns (prestaging, on-demand staging, and pure streaming) in terms of job startup latency and network bandwidth consumption during multi-epoch training.",
-            "answer": "Prestaging copies the required working set before training, trading startup delay and cache capacity for fewer remote input reads during execution. On-demand staging fetches shards on first access and can reuse them in later epochs if the cache retains them. Pure streaming avoids a full-dataset staging phase but repeatedly uses the remote path and remains exposed to its tail latency. Neither on-demand staging nor streaming eliminates first-batch latency, and local staging does not eliminate unrelated network traffic such as checkpoint writes.",
-            "learning_objective": "Compare the trade-offs of prestaging, on-demand staging, and pure streaming data delivery patterns"
           }
         ]
       }
     },
     {
       "section_id": "#sec-storage-inference",
-      "section_title": "Storage for Inference Workloads",
+      "section_title": "Storage for Serving",
       "quiz_data": {
         "quiz_needed": true,
         "rationale": {
           "focus_areas": [
             "cold-start load time as the serving-side storage metric (350 GB of FP16 weights)",
             "parallel loading across striped drives and the host-memory bound on a warm DRAM load",
-            "model rollout as a fan-out read burst that mirrors a checkpoint storm"
+            "model rollout as a fan-out read burst that mirrors a checkpoint storm",
+            "vector index storage footprint ($1\\text{B}$ 1536-d vectors $\\approx 6.1\\text{ TB}$ FP32)",
+            "workload inversion from sequential streaming to random-access IOPS",
+            "recall vs latency vs capacity trade-offs in HNSW and DiskANN",
+            "hybrid search storage pressures"
           ],
           "question_strategy": "Test the load-time arithmetic for one replica across tiers, then the fleet-wide rollout, so students see the inversion from sustained dataset throughput to bulk model reads.",
           "difficulty_progression": "Start with single-replica cold-start arithmetic (MCQ), explain why a warm DRAM load is bounded by host memory rather than per-GPU links (SHORT), then evaluate rollout sources at fleet scale (MCQ).",
@@ -517,28 +579,7 @@
             ],
             "answer": "The correct answer is A. The rollout reads $35\\text{ TB}$ in one burst, so time is volume divided by the aggregate rate the source can give the fleet: $35\\text{ TB} / 100\\text{ GB/s} \\approx 5.8$ minutes, or $35\\text{ TB} / 1\\text{ TB/s} = 35$ seconds. The faster option starves every training job sharing the file system, the read-side mirror of a checkpoint storm, which is why fleets stage new versions locally, roll updates across replica groups, or let loaded replicas supply the rest.",
             "learning_objective": "Size a fleet-wide model rollout against shared storage tiers and identify its interference with co-tenant training"
-          }
-        ]
-      }
-    },
-    {
-      "section_id": "#sec-data-storage-retrieval-infrastructure",
-      "section_title": "Retrieval Infrastructure and Vector Indexes",
-      "quiz_data": {
-        "quiz_needed": true,
-        "rationale": {
-          "focus_areas": [
-            "vector index storage footprint ($1\\text{B}$ 1536-d vectors $\\approx 6.1\\text{ TB}$ FP32)",
-            "workload inversion from sequential streaming to random-access IOPS",
-            "recall vs latency vs capacity trade-offs in HNSW and DiskANN",
-            "hybrid search storage pressures"
-          ],
-          "question_strategy": "Contrast retrieval infrastructure with the training fuel line. Test quantitative footprint calculations, random IOPS bottlenecks, and memory-vs-disk graph indexing trade-offs.",
-          "difficulty_progression": "Start with access-pattern inversion comparison (MCQ), evaluate recall-latency trade-offs with TF, and analyze disk-backed graph architectures (SHORT).",
-          "integration": "Builds on model serving and the network and compute infrastructure chapters; contrasts training streaming with inference-time retrieval.",
-          "ranking_explanation": "Addresses vector databases and retrieval-augmented generation as a vital modern storage workload operating under reversed access patterns."
-        },
-        "questions": [
+          },
           {
             "question_type": "MCQ",
             "question": "How does the storage performance bottleneck for a graph-based vector retrieval index at billion-vector scale contrast with the primary bottleneck of an ML training data loader?",
@@ -562,51 +603,6 @@
             "question": "A billion-entry vector index of 1536-dimensional FP32 embeddings consumes roughly $6.1\\text{ TB}$ of raw vector data plus graph adjacency overhead. Explain why systems migrate from pure in-memory indexes (HNSW) to disk-backed graph indexes (DiskANN), and identify the primary hardware trade-off involved.",
             "answer": "The raw vectors alone occupy about $6.1\\text{ TB}$. At 50 to 100 adjacency bytes per entry, minimal graph links add only $50$ to $100\\text{ GB}$; identifiers, allocator overhead, slack, and replication can add more. A disk-backed graph index keeps compact navigation representations in DRAM and fetches other data from SSD, trading lower DRAM capacity for random SSD access latency. The actual memory reduction and latency penalty depend on the representation, cache, and search settings.",
             "learning_objective": "Compare in-memory (HNSW) and disk-backed (DiskANN) vector indexing architectures in terms of capacity cost and query latency trade-offs"
-          }
-        ]
-      }
-    },
-    {
-      "section_id": "#sec-storage-synthetic-fuel",
-      "section_title": "The Synthetic Fuel Line",
-      "quiz_data": {
-        "quiz_needed": true,
-        "rationale": {
-          "focus_areas": [
-            "the Data Wall and the shift from human to synthesized training data",
-            "provenance chain requirements (generator, filters, judge models, scores)",
-            "synthetic-data capacity ($1.4\\times$) versus pipeline traffic ($4.4\\times$)",
-            "provenance supporting investigation and filtering of synthetic-data reuse"
-          ],
-          "question_strategy": "Test the systems consequences of synthetic data generation. Focus on metadata overhead, verification traffic, and provenance that supports audits without guaranteeing prevention of model collapse.",
-          "difficulty_progression": "Start with synthetic-data capacity and traffic analysis (MCQ), evaluate lineage storage for audits and filtering (SHORT), and test model collapse terminology with FILL.",
-          "integration": "Builds on data engineering and responsible engineering practice; connects data governance with physical storage capacity scaling.",
-          "ranking_explanation": "Explores the emerging frontier where storage evolves from a passive bit-bucket to an active provenance and verification engine."
-        },
-        "questions": [
-          {
-            "question_type": "MCQ",
-            "question": "A team generates a $1\\text{ TB}$ synthetic text dataset. Retained provenance adds $40\\%$ metadata overhead, and 3 verifier models each read the payload once without materializing another full copy. What persistent capacity and total pipeline traffic are required?",
-            "choices": [
-              "$1.4\\text{ TB}$ of persistent capacity and $4.4\\text{ TB}$ of traffic: $1\\text{ TB}$ payload write, $0.4\\text{ TB}$ metadata write, and $3\\text{ TB}$ of verifier reads.",
-              "Exactly $1.0\\text{ TB}$, because verifier models run entirely in GPU registers without generating persistent storage artifacts.",
-              "Roughly $0.4\\text{ TB}$, because synthetic data compresses more efficiently than natural language text.",
-              "Roughly $14\\text{ TB}$, because every verifier model stores a full $350\\text{ GB}$ copy of its internal neural activations for every sample."
-            ],
-            "answer": "The correct answer is A. Persistent capacity is $1.4\\text{ TB}$: the $1\\text{ TB}$ payload plus $0.4\\text{ TB}$ of provenance. Pipeline traffic is $4.4\\text{ TB}$: those $1.4\\text{ TB}$ of writes plus three $1\\text{ TB}$ verifier reads. Verification passes do not multiply capacity unless their outputs are materialized as additional full datasets.",
-            "learning_objective": "Distinguish persistent storage amplification from read and write traffic in a verified synthetic-data pipeline"
-          },
-          {
-            "question_type": "SHORT",
-            "question": "Explain why synthetic training data pipelines must treat storage as an active 'provenance engine' by recording the generating model, filters, and verifier scores for each accepted sample, rather than storing plain text files.",
-            "answer": "If synthetic data is stored as unverified plain text without lineage, future models risk recursively training on uncurated, erroneous synthetic outputs produced by prior generations, triggering 'model collapse' where model diversity and output quality progressively degrade. Storing an immutable provenance chain (generating model ID, prompt template, rejection filters, and verifier reward scores) supports auditing so data can be filtered, re-weighted, or purged when a generator or judge model is found to possess systematic errors or biases.",
-            "learning_objective": "Justify retaining synthetic-sample provenance to support audits and filtering when recursive training degrades model quality"
-          },
-          {
-            "question_type": "FILL",
-            "question": "The degenerative failure mode where a machine learning model progressively degrades in quality and loses distributional diversity by recursively training on unverified synthetic data produced by earlier models is called model ____.",
-            "answer": "The correct term is collapse (or model collapse). Recursive training on generated data can degrade distributional diversity and output quality. Provenance supports audits, filtering, and removal of problematic samples; recording lineage alone does not prevent the degradation.",
-            "learning_objective": "Explain the mechanism of model collapse caused by recursive training on uncurated synthetic data"
           }
         ]
       }
@@ -687,44 +683,8 @@
       "section_id": "#sec-storage-summary",
       "section_title": "Summary",
       "quiz_data": {
-        "quiz_needed": true,
-        "rationale": {
-          "focus_areas": [
-            "holistic storage hierarchy synthesis and the fuel line principle",
-            "system-level root-cause diagnosis of cluster underutilization",
-            "local checkpoint staging versus durable publication and verified restore eligibility"
-          ],
-          "question_strategy": "Synthesize the major themes of the chapter: end-to-end diagnostic evaluation, physics-economics hierarchy co-design, and checkpoint publication under a supplied failure trace.",
-          "difficulty_progression": "Start with a complex multi-metric cluster diagnostic scenario (MCQ), evaluate the overarching physics-economics hierarchy design (SHORT), and apply the checkpoint commit contract to a failure trace (SHORT).",
-          "integration": "Connects storage infrastructure to the preceding compute and networking chapters and bridges to the collective communication and distributed training chapters that follow.",
-          "ranking_explanation": "Provides a comprehensive capstone review synthesizing all core concepts, formulas, and trade-offs of Chapter 4."
-        },
-        "questions": [
-          {
-            "question_type": "MCQ",
-            "question": "A 2,048-GPU training cluster reports $40\\%$ GPU hardware utilization. Telemetry reveals: (1) GPUs spend $45\\%$ of iteration time waiting for data tensors, (2) Storage data disks on the parallel file system report less than $5\\%$ bandwidth utilization, (3) Data loader host CPU cores report $100\\%$ utilization, and (4) The dataset is stored as 50 million individual JPEG files. A worker CPU profile attributes most active CPU time to JPEG decoding, the MDS shows a sustained queue at its operation-rate limit, and the completed-batch queue repeatedly drains. Which remediation targets the two measured limiting stages?",
-            "choices": [
-              "The parallel file system network fabric is saturated; upgrade InfiniBand links between compute nodes and storage servers.",
-              "GPU HBM capacity is exhausted; apply aggressive 4-bit activation quantization to free GPU memory.",
-              "NVMe drive endurance limits have triggered write throttling; replace compute node local SSDs.",
-              "The workload is suffering from both metadata server saturation (individual small files) and CPU-bound decoding; repackage the dataset into large WebDataset tar shards and evaluate GPU JPEG decoding against its compute and HBM budget."
-            ],
-            "answer": "The correct answer is D. The MDS queue at its operation-rate limit confirms metadata contention, and the worker profile confirms decoding consumes the host CPU budget; the drained completed-batch queue connects these limits to input starvation. Sequential shards reduce per-file metadata demand, and GPU decoding is a candidate when the supported decoder, available compute, and HBM budget permit it. Compare completed-batch throughput and input wait after each change. High host CPU activity and idle data disks alone would not prove both causes.",
-            "learning_objective": "Evaluate composite storage and host-CPU data loading bottlenecks from multi-tier cluster telemetry and prescribe architectural remediations"
-          },
-          {
-            "question_type": "SHORT",
-            "question": "Synthesize how the ML storage hierarchy (spanning HBM, DRAM, NVMe, PFS, Object Storage, and Archive) co-designs bandwidth physics with capacity economics to prevent accelerator starvation.",
-            "answer": "The hierarchy places small, frequently accessed working sets near compute and larger datasets and checkpoint histories on cheaper tiers. HBM serves internal tensor traffic; DRAM supports preprocessing and buffers, NVMe stages inputs and snapshots, and shared durable tiers retain authoritative artifacts. Workload input bytes and compute time size delivery, while measured service rates, tail latency, and cache misses determine buffering. Prefetching hides bounded delays but cannot overcome a sustained rate deficit, and durability claims depend on the chosen service contract.",
-            "learning_objective": "Explain how the ML storage hierarchy balances bandwidth physics and capacity economics to sustain high accelerator utilization"
-          },
-          {
-            "question_type": "SHORT",
-            "question": "Generation g is durably committed and retained. Training resumes after locally staging all shards of g+1, but a node fails before durable publication of g+1 and its required shard is lost. Which generation may restore, and what evidence is required before g+1 could become a restore candidate?",
-            "answer": "Restore the retained committed generation g after verifying its manifest and shards. Resuming training after local staging does not publish g+1; the lost required shard prevents that generation from satisfying the restore contract. Before g+1 becomes a candidate, every expected same-step shard must be durably persisted and verified against the generation manifest, which is published last using the backend's atomic publication primitive.",
-            "learning_objective": "Apply the distinction between local staging and durable checkpoint publication to a failure trace"
-          }
-        ]
+        "quiz_needed": false,
+        "rationale": "Summary sections recap the chapter; the body and fallacy quizzes already test this material, and a quiz here would render after the chapter connection."
       }
     }
   ]

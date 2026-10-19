@@ -9,6 +9,7 @@ this checkout's sources ahead of any installed copy.
 from __future__ import annotations
 
 import contextlib
+import errno
 import os
 import signal
 import subprocess
@@ -52,7 +53,7 @@ def local_render_env(root_dir: Path, base: Optional[Mapping[str, str]] = None) -
                 if candidate.is_file():
                     venv_py = candidate
         except Exception:
-            pass
+            pass  # best-effort probe: no git, or not a checkout; render without the shared venv
     if venv_py.is_file():
         if not env.get("QUARTO_PYTHON"):
             env["QUARTO_PYTHON"] = str(venv_py.absolute())
@@ -112,7 +113,7 @@ def _signal_group(process: subprocess.Popen, terminate: bool) -> None:
 
 @contextlib.contextmanager
 def interrupts_as_keyboard_interrupt() -> Iterator[None]:
-    """Raise ``KeyboardInterrupt`` for SIGINT and SIGTERM inside the block.
+    """Raise ``KeyboardInterrupt`` for SIGINT, SIGTERM and SIGHUP inside the block.
 
     Build code then unwinds through its own ``finally`` blocks, which stop the
     renderer and restore generated files, instead of exiting mid-cleanup. The
@@ -127,7 +128,10 @@ def interrupts_as_keyboard_interrupt() -> Iterator[None]:
         """Signal handler that raises ``KeyboardInterrupt`` naming the signal."""
         raise KeyboardInterrupt(f"Interrupted by signal {signum}")
 
-    previous = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
+    signals = [signal.SIGINT, signal.SIGTERM]
+    if hasattr(signal, "SIGHUP"):
+        signals.append(signal.SIGHUP)  # the terminal running the build was closed
+    previous = {sig: signal.getsignal(sig) for sig in signals}
     for sig in previous:
         signal.signal(sig, _raise)
     try:
@@ -135,3 +139,59 @@ def interrupts_as_keyboard_interrupt() -> Iterator[None]:
     finally:
         for sig, handler in previous.items():
             signal.signal(sig, handler)
+
+
+class BuildInProgress(RuntimeError):
+    """Raised when another build already holds this checkout's build lock."""
+
+
+BUILD_LOCK_NAME = ".binder-build.lock"
+
+
+@contextlib.contextmanager
+def build_lock(root_dir: Path) -> Iterator[None]:
+    """Hold an exclusive per-checkout lock for the length of a build.
+
+    Two builds in one checkout overwrite each other's generated ``_quarto.yml``,
+    ``index.qmd`` and ``*_files/execute-results`` freeze files, so the second
+    one fails with confusing errors ("project change not allowed", a missing
+    rename target). Failing fast with a clear message is better.
+
+    The lock is an ``flock`` on a file in *root_dir*. The operating system drops
+    it when the holding process exits, however it exits, so a killed build never
+    leaves a stale lock behind. Separate worktrees have separate roots and
+    never contend. On platforms without ``fcntl`` (Windows) this does nothing.
+
+    Raises:
+        BuildInProgress: another process holds the lock; the message names its PID.
+    """
+    try:
+        import fcntl
+    except ImportError:  # pragma: no cover - Windows
+        yield
+        return
+
+    lock_path = Path(root_dir) / BUILD_LOCK_NAME
+    handle = open(lock_path, "a+")
+    try:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            if exc.errno not in (errno.EACCES, errno.EAGAIN):
+                raise
+            handle.seek(0)
+            holder = handle.read().strip() or "unknown"
+            raise BuildInProgress(
+                f"another build is already running in {Path(root_dir)} (PID {holder}). "
+                "Wait for it to finish, or build from a separate worktree."
+            ) from None
+        handle.seek(0)
+        handle.truncate()
+        handle.write(str(os.getpid()))
+        handle.flush()
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+    finally:
+        handle.close()

@@ -6,7 +6,7 @@ import json
 import pytest
 
 from mlsysim.core.units import Q_
-from mlsysim.engine.v1_04_experiments import (
+from mlsysim.labs.experiments.v1_04_experiments import (
     ProducerRecord,
     capture_experiment,
     contract_inputs,

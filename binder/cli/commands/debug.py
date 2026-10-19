@@ -37,6 +37,7 @@ from rich.text import Text
 
 from ..core.discovery import AmbiguousChapterError, format_volume_display_name
 from ..core.parallel import BuildJob, BuildSession, JobResult, new_run_id, run_jobs
+from ..core.process import interrupts_as_keyboard_interrupt
 from ..core.workspace import take_snapshot
 
 console = Console()
@@ -161,7 +162,8 @@ class DebugCommand:
 
         console.print(f"\n[bold red]Found {len(failures)} failing chapter(s):[/bold red]")
         for result in failures:
-            console.print(f"  [red]x[/red] {escape(result.job.chapter or result.job.name)}")
+            console.print(f"  [red]x[/red] {escape(result.job.chapter or result.job.name)} "
+                          f"[dim](log: {escape(str(result.log_path))})[/dim]")
         for index, result in enumerate(failures, 1):
             console.print(f"\n[bold]Phase 2 ({index}/{len(failures)}):[/bold] "
                           f"Section-level debug for [cyan]{escape(result.job.chapter)}[/cyan]\n")
@@ -177,7 +179,9 @@ class DebugCommand:
         """
         chapters = self.chapter_discovery.get_chapters_from_config(volume)
         if not chapters:
-            console.print("[red]No chapters found.[/red]")
+            config = self.book_dir / "config" / f"_quarto-pdf-{volume}.yml"
+            console.print(f"[red]No chapters found for {escape(volume)}: its chapter list comes from "
+                          f"{escape(str(config))}.[/red]")
             return None
         jobs = [BuildJob(format_type, volume, stem, CHAPTER_BUILD_ARGS, label=f"{index:02d}_{stem}")
                 for index, stem in enumerate(chapters, 1)]
@@ -203,7 +207,8 @@ class DebugCommand:
             True once the search has finished; False when the chapter cannot
             be found or parsed.
         """
-        sys.path.insert(0, str(CONTENT_SCRIPTS_DIR))
+        if str(CONTENT_SCRIPTS_DIR) not in sys.path:
+            sys.path.insert(0, str(CONTENT_SCRIPTS_DIR))
         try:
             from section_splitter import split_chapter
         except ImportError:
@@ -219,7 +224,8 @@ class DebugCommand:
                           f"{escape(', '.join(error.locations))}")
             return False
         if qmd_path is None:
-            console.print(f"[red]Chapter not found: {escape(chapter_name)}[/red]")
+            console.print(f"[red]Chapter not found in {escape(volume)}: {escape(chapter_name)}[/red]")
+            console.print(f"[yellow]See every chapter with: ./binder/binder list --{escape(volume)}[/yellow]")
             return False
 
         console.print(f"[dim]Parsing {qmd_path.name} into sections...[/dim]")
@@ -240,8 +246,10 @@ class DebugCommand:
 
         steps_dir = run_dir / "phase2" / qmd_path.stem
         relative = qmd_path.resolve().relative_to(self.repo_root.resolve())
-        with BuildSession(take_snapshot(self.repo_root), steps_dir, name=f"bisect-{qmd_path.stem}",
-                          run_id=new_run_id(), keep=keep_workspaces) as session:
+        # Signals become KeyboardInterrupt so the session removes its workspace.
+        with interrupts_as_keyboard_interrupt(), BuildSession(
+                take_snapshot(self.repo_root), steps_dir, name=f"bisect-{qmd_path.stem}",
+                run_id=new_run_id(), keep=keep_workspaces) as session:
             failing = self._binary_search_sections(session, chapter, qmd_path.stem, volume,
                                                    format_type, relative)
 

@@ -90,13 +90,16 @@ def evaluate_main(
                     
                 def _parse_val(val):
                     """Parses a command-line value into a typed physical Quantity or standard scalar."""
-                    if isinstance(val, float) or isinstance(val, int): return val
+                    if isinstance(val, (float, int)):
+                        return float(val)
+                    if hasattr(val, "magnitude"):
+                        return float(val.magnitude)
                     if isinstance(val, str):
-                        try:
-                            import re
-                            return float(re.sub(r'[^\d.]', '', val))
-                        except (ValueError, TypeError):
-                            return 0.0
+                        import re
+                        cleaned = val.replace(",", "")
+                        m = re.search(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?", cleaned)
+                        if m:
+                            return float(m.group(0))
                     return 0.0
                     
                 for assertion in schema.constraints.asserts:

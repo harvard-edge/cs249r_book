@@ -24,7 +24,7 @@ async def _():
         native_bootstrap(__file__)
 
     import plotly.graph_objects as go
-    from mlsysim.engine.v2_07_experiments import (
+    from mlsysim.labs.experiments.v2_07_experiments import (
         TRACKS, checkpoint_fault_fixture, checkpoint_tradeoff,
         get_track_scenario, replica_availability, select_restore_checkpoint,
         serving_capacity, track_scenario, training_exposure,

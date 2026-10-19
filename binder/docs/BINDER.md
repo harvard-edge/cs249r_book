@@ -633,8 +633,8 @@ How it works:
   worktree for every job it picks up.
 - Each job's log and output move to `books/_build/parallel/<run-id>/<job>/`, and
   `summary.json` lists every job. The worktrees and their temporary run
-  directory are removed at the end; `--keep-workspaces` leaves them for
-  inspection.
+  directory are removed at the end, including on Ctrl-C, SIGTERM or a closed
+  terminal; `--keep-workspaces` leaves them for inspection.
 - Workers running side by side each get a private `XDG_CACHE_HOME`, because the
   diagram filter's cache is not safe for concurrent writers.
 - Ctrl-C stops every running build (SIGTERM, then SIGKILL after 15 seconds) and
@@ -728,9 +728,14 @@ Use `./binder/binder switch <format>` to change the active configuration.
 - Never edit `books/_quarto.yml` directly; the next build overwrites it
 
 **Leftover build worktrees**
-- An interrupted `--parallel` or `debug` run that was killed outright can leave
-  worktrees in the system temporary directory; `git worktree prune` clears
-  registrations whose directories are gone, and `git worktree list` shows the rest
+- Ctrl-C, SIGTERM and a closed terminal (SIGHUP) all stop a `--parallel` or
+  `debug` run cleanly and remove its worktrees. A run killed outright (SIGKILL,
+  a crash) leaves them in the system temporary directory (`binder-workspaces/`).
+- The next `--parallel` or `debug` run removes those leftovers before it starts,
+  and `./binder/binder clean workspaces` removes them on demand. Both touch only
+  runs whose binder process has exited (the run directory name ends in its pid).
+  The automatic sweep skips runs kept with `--keep-workspaces`; `clean
+  workspaces` removes those too.
 
 ### Performance Tips
 

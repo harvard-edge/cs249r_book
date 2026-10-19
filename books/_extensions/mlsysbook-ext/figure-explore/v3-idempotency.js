@@ -1,0 +1,33 @@
+(() => {
+'use strict';window.MLSysFigureLessons=window.MLSysFigureLessons||{};
+window.MLSysFigureLessons["v3-idempotency"]=(root,context)=>{
+const abort=new AbortController(),on=(el,event,fn)=>el.addEventListener(event,fn,{signal:abort.signal});
+const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n;};
+root.classList.add('mlsys-v3');let step=0,running=false,timer=null,dead=false;
+const controls=el('div','v3-controls'),buttons={};for(const name of ['Play','Back','Next','Restart']){const b=el('button','',name);b.type='button';buttons[name.toLowerCase()]=b;controls.append(b);}
+const sequence=el('select'),lab=el('label','','Sequence ');sequence.id=(root.id||('v3-'+Math.random().toString(36).slice(2)))+'-sequence';lab.htmlFor=sequence.id;lab.append(sequence);controls.append(lab);root.append(controls);
+const diagram=el('div','v3-diagram'),status=el('p','v3-status');status.setAttribute('aria-live','polite');status.setAttribute('aria-atomic','true');root.append(diagram,status);
+const card=(title,text,cls='')=>{const n=el('section','v3-card '+cls);n.append(el('strong','',title),el('p','',text));return n;};
+const grid=(items,cls='')=>{const g=el('div','v3-grid '+cls);items.forEach(n=>g.append(n));return g;};
+let stages=[],draw=()=>{};
+
+stages=['Admit one intent','Send an attempt','Endpoint lookup','Apply selected contract outcome'];let branch='fresh';
+const branches=el('select'),branchlabel=el('label','','Endpoint case ');branches.id=sequence.id+'-case';branchlabel.htmlFor=branches.id;for(const [value,title] of [['fresh','Not found → execute'],['replay','Completed → retained result'],['inflight','Still running → pending'],['conflict','Payload differs → conflict'],['timeout','Timeout → effect unknown']]){const o=el('option','',title);o.value=value;branches.append(o);}branchlabel.append(branches);controls.append(branchlabel);on(branches,'change',()=>{pause();branch=branches.value;step=0;render();});
+draw=()=>{diagram.replaceChildren();const runtime=card('Runtime','Operation op-42 is created once. Attempt IDs change; operation identity and admitted payload stay bound.');runtime.append(card('Admit intent','op ID: op-42',step===0?'v3-active':''),card('Attempt k',step>=1?'attempt-1 → op-42':'Not sent',step===1?'v3-active':''));if(branch==='timeout'&&step===3)runtime.append(card('Timeout','Effect unknown. Retry only within the endpoint contract using op-42 and a fresh attempt ID. Attempts exhausted → unresolved.','v3-unknown'));
+const endpoint=card('Endpoint','Lookup scope: caller + resource + retention window. Authorization is checked independently on every attempt.','v3-effect');endpoint.append(card('Look up op ID',step>=2?'Lookup op-42 for this caller, resource, and payload':'Waiting for request',step===2?'v3-active':''));
+const outcomes=[['replay','Completed','Return retained result; no new effect.'],['inflight','Still running','Return pending; do not spawn another execution.'],['conflict','Payload differs','Reject ID conflict; do not execute changed payload.'],['fresh','Not found','Execute once under the supported atomic endpoint contract.']];for(const [value,title,text] of outcomes)endpoint.append(card(title,text,(step===3&&branch===value?'v3-active ':'')+(step===3&&branch!==value?'v3-muted':'')));
+if(step===3&&branch==='fresh')endpoint.append(card('One transaction','Apply effect + record result become committed together where the resource supports that transaction boundary.','v3-effect v3-active'));
+diagram.append(grid([runtime,endpoint],'v3-two'),card('This attempt’s new effects',step<3?'Not yet determined':branch==='fresh'?'1 committed effect; retained result recorded':branch==='timeout'?'Unknown to runtime; timeout is not proof of no effect':'0; selected lookup branch does not execute'));
+status.textContent=step===0?'Choose one alternative endpoint case. The cases are branches, not prerequisites that every operation visits.':step===1?'The runtime sends one attempt with the stable operation ID. A later retry would use a new attempt ID, not a new intent.':step===2?'The endpoint evaluates the selected state within its scope and retention contract. A matching identifier alone never grants authority.':({fresh:'Only an unseen operation executes. Atomic effect/result recording prevents a crash gap within a supported transaction; external effects require native downstream deduplication.',replay:'This effect happened previously. This attempt only retrieves the retained result; it does not apply the effect again.',inflight:'An earlier execution is still running. This attempt returns pending and creates no parallel side effect.',conflict:'The ID is already bound to different serialized arguments. Reject the conflict rather than mutating the operation.',timeout:'No authoritative outcome reached the runtime. Do not display a completed result or assume execution failed; reconciliation is required.'})[branch];};
+
+stages.forEach((name,i)=>{const opt=el('option','',`${i+1}. ${name}`);opt.value=i;sequence.append(opt);});
+function render(){draw();sequence.value=step;buttons.back.disabled=step===0;buttons.next.disabled=step===stages.length-1;buttons.play.textContent=running?'Pause':step===stages.length-1?'Replay':'Play';root.dataset.step=step;root.dataset.playing=String(running);}
+function pause(){running=false;clearTimeout(timer);timer=null;if(!dead)render();}
+function schedule(){timer=setTimeout(()=>{if(!running||dead)return;if(document.hidden||root.closest('[hidden]')){pause();return;}step++;if(step===stages.length-1)running=false;render();if(running)schedule();},6500);}
+on(buttons.play,'click',()=>{if(running){pause();return;}if(step===stages.length-1)step=0;running=true;render();schedule();});
+on(buttons.back,'click',()=>{pause();step=Math.max(0,step-1);render();});on(buttons.next,'click',()=>{pause();step=Math.min(stages.length-1,step+1);render();});on(buttons.restart,'click',()=>{pause();step=0;render();});on(sequence,'change',()=>{const n=Number(sequence.value);pause();step=n;render();});
+on(document,'visibilitychange',()=>{if(document.hidden)pause();});
+const obs=typeof IntersectionObserver==='undefined'?null:new IntersectionObserver(entries=>{if(!entries[0].isIntersecting&&running)pause();},{threshold:.08});obs?.observe(root);
+const hiddenObs=new MutationObserver(()=>{if(running&&root.closest('[hidden]'))pause();});for(let n=root;n;n=n.parentElement)hiddenObs.observe(n,{attributes:true,attributeFilter:['hidden']});
+render();return{pause,destroy(){pause();dead=true;abort.abort();obs?.disconnect();hiddenObs.disconnect();root.replaceChildren();}};
+};})();

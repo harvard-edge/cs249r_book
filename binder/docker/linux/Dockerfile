@@ -20,7 +20,7 @@ ENV PATH="/usr/local/texlive/bin/x86_64-linux:/usr/local/sbin:/usr/local/bin:/us
 
 # === PHASE 0: COPY DEPENDENCY FILES EARLY (for better cache efficiency) ===
 # Copy dependency files early for better cache efficiency
-COPY binder/tools/dependencies/requirements.txt /tmp/requirements.txt
+COPY binder/tools/dependencies/requirements.lock.txt /tmp/requirements.txt
 COPY binder/tools/dependencies/install_packages.R /tmp/install_packages.R
 COPY binder/tools/dependencies/required_r_packages.R /tmp/required_r_packages.R
 COPY binder/tools/dependencies/tl_packages /tmp/tl_packages
@@ -129,6 +129,7 @@ RUN echo "🚀 === STARTING SYSTEM DEPENDENCIES INSTALLATION ===" && \
 # === PHASE 3: INKSCAPE INSTALLATION ===
 RUN echo "🚀 === STARTING INKSCAPE INSTALLATION ===" && \
     echo "⏰ Estimated time: 1-2 minutes" && \
+    echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries && \
     echo "🔄 Adding Inkscape PPA repository..." && \
     apt-get update && \
     echo "📦 Installing software-properties-common..." && \

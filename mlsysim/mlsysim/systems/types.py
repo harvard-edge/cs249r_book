@@ -284,6 +284,8 @@ class RackProfile(BaseModel):
 
     @property
     def accelerator_power(self) -> Quantity:
+        if self.node.accelerator.tdp is None:
+            raise ValueError(f"{self.name}: accelerator '{self.node.accelerator.name}' has no tdp set")
         return self.accelerator_count * self.node.accelerator.tdp
 
     @property

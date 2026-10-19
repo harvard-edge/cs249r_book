@@ -1,7 +1,7 @@
 concept_map:
   schema_version: 2
   source: 04_data_storage.qmd
-  generated_date: '2026-10-13'
+  generated_date: '2026-10-15'
   primary_concepts:
     - I/O wall
     - Scoped storage hierarchy
@@ -14,6 +14,7 @@ concept_map:
     - Data stall ratio
     - Checkpoint storm
     - Hedged reads against storage tail latency
+    - Serving-time storage
   claims:
     I/O wall: Full-corpus training inverts database assumptions (large sequential shard reads, working sets larger
       than any cache, synchronized burst writes), so storage is provisioned for streaming bandwidth and burst absorption,
@@ -23,7 +24,9 @@ concept_map:
       means a 95 percent hit rate with a 100x slower miss path delivers about one-sixth of the all-hot rate.
     Input delivery budget: Required input bandwidth is the number of distinct consumers times target compute fraction
       times batch bytes over compute time, every stage of the chain must sustain it because delivered rate is the
-      minimum over stages, and prefetch absorbs variance but never a sustained deficit.
+      minimum over stages, and prefetch absorbs variance but never a sustained deficit; a direct DMA path from
+      storage into accelerator memory (GPUDirect Storage, for example) removes the host-copy stage only when that
+      copy is the limiting stage.
     Metadata-bound shard packaging: A parallel file system separates a metadata path of a few hundred thousand operations
       per second from a striped data path, so millions of small files collapse delivery to the metadata rate, and
       packaging samples into large shards amortizes opens across thousands of samples.
@@ -35,14 +38,21 @@ concept_map:
       read count, and latency need rather than dollars per GB-month.
     Versioned artifacts and commit boundaries: A fleet data pipeline is a DAG of immutable, content-identified artifacts
       that lets a run replay the exact batch behind a loss spike, and correctness under worker failure is decided
-      at the output commit boundary by replayable inputs and idempotent writes.
+      at the output commit boundary by replayable inputs and idempotent writes; generated training data, which the
+      data wall makes necessary, extends the contract with a provenance chain whose retained capacity and verification
+      traffic are budgeted separately, and that lineage is what lets an investigation of model collapse trace the
+      samples involved.
     Data stall ratio: The data stall ratio measures exposed input wait per step, and it diagnoses the input path
       only when it is separated from communication and barrier time.
     Checkpoint storm: When every writer saves at once, synchronized checkpoint bursts saturate the shared storage
       tier, so save time grows with writer count unless flushes are staggered, rate-limited, or staged locally.
     Hedged reads against storage tail latency: Sharded reads fan out across many servers so the slowest server sets
-      the step's input latency, and hedged or tied requests trade a small amount of extra load for a much shorter
-      tail.
+      the step's input latency, and a hedged read to another replica shortens that tail only when its trigger
+      sits in the measured tail, its duplicate load fits spare capacity, and the replicas sit in different failure
+      domains.
+    Serving-time storage: Serving reads bulk weights once per replica, turns a model rollout into a fan-out read
+      burst against shared tiers, and makes retrieval a chain of dependent random reads, so serving storage is
+      sized by load time and per-hop latency rather than epoch throughput.
   previews:
     - concept: Sharded data parallelism
       owner: 06_distributed_training
@@ -60,6 +70,8 @@ concept_map:
       owner: 10_inference
     - concept: Feature consistency contract
       owner: 12_ops_scale
+    - concept: Lifecycle TCO
+      owner: 12_ops_scale
   touches:
     - concept: Scaling laws as the demand curve
       owner: 01_introduction
@@ -68,8 +80,6 @@ concept_map:
     - concept: Fleet Law
       owner: 01_introduction
     - concept: C3 taxonomy
-      owner: 01_introduction
-    - concept: Lighthouse archetypes
       owner: 01_introduction
     - concept: Node aggregates private memories
       owner: 02_compute_infrastructure
@@ -92,8 +102,6 @@ concept_map:
     - Parallel File System (PFS)
     - Lustre
     - GPFS (General Parallel File System)
-    - BeeGFS
-    - WekaFS
     - Metadata Server (MDS)
     - Object Storage Server (OSS)
     - Stripe Count
@@ -104,7 +112,6 @@ concept_map:
     - Apache Parquet
     - Apache Arrow
     - HDF5
-    - LMDB
     - Erasure Coding
     - Eleven Nines Durability
     - HTTP Range Requests
@@ -130,7 +137,7 @@ concept_map:
   formulas:
     - 2{,}048 \text{ GPUs} \times 4{,}096 \text{ tokens/GPU} \times 4 \text{ bytes/token} \div 0.2\text{s} \approx
       \mathbf{168 \text{ MB/s}}
-    - 2{,}048 \text{ GPUs} \times 256 \text{ images/GPU} \times 150 \text{ KB/image} \div 0.2\text{s} \approx \mathbf{393
+    - 2{,}048 \text{ GPUs} \times 256 \text{ images/GPU} \times 116 \text{ KB/image} \div 0.2\text{s} \approx \mathbf{303
       \text{ GB/s}}
     - \text{BW}_{\text{required}} = N_{\text{GPU}} \times \eta_{\text{target}} \times \frac{D_{\text{vol,batch}}}{T_{\text{iteration}}}
     - \text{Data Stall \%} = \frac{T_{\text{step}} - T_{\text{compute}}}{T_{\text{step}}} \times 100
@@ -142,8 +149,10 @@ concept_map:
     - P(\text{contention}) = 1 - P(\text{no collision}) \approx \mathbf{40\%}
     - T_{\text{step,no overlap}} = T_{\text{I/O}} + T_{\text{compute}}
     - T_{\text{step,overlapped}} = \max(T_{\text{compute}}, T_{\text{I/O}})
-    - \text{Synthetic footprint} = \text{raw payload} \times (1 + \text{provenance overhead}) \times \text{verification
-      passes}
+    - \text{Synthetic footprint} = \text{raw payload} \times (1 + \text{provenance overhead})
+    - \text{Synthetic traffic} = \text{payload} + \text{passes} \times \text{payload} + \text{provenance metadata}
+    - \mathbb{E}[T] = h\,T_{\text{hot}} + (1-h)\,T_{\text{miss}}
+    - \text{Delivered rate} = \min_i \mu_i \geq \text{BW}_{\text{required}}
   methodologies:
     - Storage Hierarchy Design
     - Bandwidth Sizing
