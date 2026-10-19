@@ -171,3 +171,22 @@ show("Overlap: backlog per layer (ms)", tc - tb)
 show("Overlap: reduction (%)", f"{100 * (1 - ov / seq):.1f}")
 show("Overlap: 9 buckets x 0.85 ms (ms)", f"{9 * 0.85:.2f} (chapter: about 7.6)")
 show("Overlap: faster buckets, 480 + 7.6 (ms)", f"{Lyr * tb + 7.6:.1f}")
+
+# --- Horovod Timeline (Sergeev and Del Balso 2018, Figure 5), redrawn as
+# horovod_trace.svg. Phase edges read from the screenshot against its
+# 18,500 to 18,900 ms ticks (about +/-2 ms), in ms after 18,500 ms. One value is
+# printed in the screenshot's detail pane: tensors 2 to 4 start ALLREDUCE at
+# 18,663.501 ms and run 184.063 ms. Each row of the timeline is one tensor.
+HVD_T0 = 18500.0
+hvd_fast = {"negotiate": (23, 35), "wait for data": (35, 124), "NCCL": (126, 138)}
+hvd_ar_start = 18663.501 - HVD_T0      # detail pane
+hvd_ar_wall = 184.063                  # detail pane
+hvd_slow = {"negotiate": (23, 154), "wait for other tensors": (165, 273),
+            "schedule": (274, 312), "NCCL": (318, 337)}
+slow_total = hvd_ar_start + hvd_ar_wall - hvd_slow["negotiate"][0]
+show("Horovod slide: tensors 2-4, negotiate (ms)", f"{hvd_slow['negotiate'][1] - hvd_slow['negotiate'][0]:.0f}")
+show("Horovod slide: tensors 2-4, ALLREDUCE ends (ms after 18,500)", f"{hvd_ar_start + hvd_ar_wall:.1f}")
+show("Horovod slide: tensors 2-4, negotiate start to end (ms)", f"{slow_total:.0f}")
+show("Horovod slide: tensors 2-4, NCCL (ms)", f"{hvd_slow['NCCL'][1] - hvd_slow['NCCL'][0]:.0f}")
+show("Horovod note: NCCL share of tensors 2-4 span", f"{100 * (hvd_slow['NCCL'][1] - hvd_slow['NCCL'][0]) / slow_total:.0f}%")
+show("Horovod note: tensors 0-1, negotiate start to end (ms)", f"{hvd_fast['NCCL'][1] - hvd_fast['negotiate'][0]:.0f}")

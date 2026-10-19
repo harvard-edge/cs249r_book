@@ -530,7 +530,46 @@ def ring():
     sp.save(fig, out / "ring.svg")
 
 
+# 15. Horovod Timeline (Sergeev and Del Balso 2018, Figure 5), redrawn -------
+# Phase edges read from the screenshot against its 100 ms ticks (+/-2 ms);
+# the ALLREDUCE span of tensors 2 to 4 (start 163.5, 184.063 ms long) is
+# printed in its detail pane. Values and derived spans: calcs.py.
+def horovod_trace():
+    fast = [("negotiate", 23, 35), ("wait", 35, 124), ("NCCL", 126, 138)]
+    slow = [("negotiate", 23, 154), ("wait", 165, 273), ("schedule", 274, 312),
+            ("NCCL", 318, 337), ("copy", 339, 346)]
+    color = {"negotiate": C["c3"], "wait": C["neutral_l"], "schedule": C["c3_l"],
+             "NCCL": C["c2"], "copy": C["c2"]}
+    fig, ax = plt.subplots(figsize=(4.6, 3.3))
+    for row in range(5):
+        y = 4 - row
+        for name, a, b in (fast if row < 2 else slow):
+            ax.barh(y, b - a, left=a, height=0.62, color=color[name],
+                    edgecolor="white", lw=0.6)
+        ax.text(-6, y, f"tensor {row}", ha="right", va="center", fontsize=12)
+    # ALLREDUCE span of tensors 2 to 4, from the detail pane
+    ax.plot([163.5, 347.6], [-1.25, -1.25], color=C["text"], lw=1.4)
+    for x in (163.5, 347.6):
+        ax.plot([x, x], [-1.35, -1.15], color=C["text"], lw=1.4)
+    ax.text(255.5, -1.45, "AllReduce 184 ms", ha="center", va="top", fontsize=11.5)
+    ax.text(88, -0.45, "negotiate 131 ms", ha="center", va="top", fontsize=12,
+            fontweight="bold", color=C["c3"])
+    ax.text(219, -0.45, "wait", ha="center", va="top", fontsize=12, color=C["neutral"])
+    ax.text(352, -0.45, "NCCL 19 ms", ha="right", va="top", fontsize=12,
+            fontweight="bold", color=C["c2_t"])
+    ax.text(144, 4, "NCCL", ha="left", va="center", fontsize=12, fontweight="bold",
+            color=C["c2_t"])
+    ax.set_xlim(0, 360)
+    ax.set_ylim(-2.2, 4.5)
+    ax.set_yticks([])
+    ax.spines["left"].set_visible(False)
+    ax.set_xticks([0, 100, 200, 300])
+    ax.set_xlabel("Time in the trace (ms after 18,500 ms)", fontsize=12)
+    sp.save(fig, out / "horovod_trace.svg")
+
+
 if __name__ == "__main__":
+    horovod_trace()
     for k in (1, 2, 3):
         horovod(k)
         traffic(k)

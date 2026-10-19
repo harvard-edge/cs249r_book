@@ -24,6 +24,34 @@ put("hook: candidates with no grade lowered (%)", 100 * ofq_zero / ofq_cands, "{
 put("hook: candidates with at least one grade lowered (%)",
     100 * (ofq_cands - ofq_zero) / ofq_cands, "{:.1f}")
 
+# Table 2, all columns: candidates by the number of A levels whose CAG
+# exceeded the calculated grade (0, 1, 2, 3, 4), rounded to the nearest 10.
+OFQ_T2 = [78_470, 95_580, 55_730, 16_100, 220]
+for k, n in enumerate(OFQ_T2):
+    put(f"flows: candidates with {k} lowered (%)", 100 * n / ofq_cands, "{:.1f}")
+put("flows: Table 2 counts sum (check, 246,110)", sum(OFQ_T2), "{:,.0f}")
+
+# Table 1: row percentages, CAG (rows) against calculated grade (columns
+# A*, A, B, C, D, E, U); "~" (under 0.5%) entered as 0. N per CAG grade.
+OFQ_GRADES = ["A*", "A", "B", "C", "D", "E", "U"]
+OFQ_N = [91_950, 156_920, 179_700, 145_530, 61_240, 20_260, 1_810]
+OFQ_T1 = [[61, 36, 3, 0, 0, 0, 0],
+          [1, 56, 39, 3, 0, 0, 0],
+          [0, 1, 59, 37, 3, 0, 0],
+          [0, 0, 2, 59, 34, 4, 0],
+          [0, 0, 0, 5, 59, 31, 4],
+          [0, 0, 0, 1, 11, 60, 28],
+          [0, 0, 0, 0, 3, 17, 79]]
+OFQ_SPLIT = []   # per CAG grade: higher, same, one lower, two or more lower (%)
+for i, row in enumerate(OFQ_T1):
+    split = (sum(row[:i]), row[i], row[i + 1] if i + 1 < 7 else 0, sum(row[i + 2:]))
+    OFQ_SPLIT.append(split)
+    put(f"flows: CAG {OFQ_GRADES[i]} higher/same/one lower/two+ lower (%)", 0, "")
+    print("   ", split)
+lower = sum(n * (s[2] + s[3]) for n, s in zip(OFQ_N, OFQ_SPLIT)) / sum(OFQ_N)
+put("flows: entries lowered, from Table 1 (%; report text: 39)", lower, "{:.1f}")
+put("flows: Table 1 N sum (check, 457,420)", sum(OFQ_N), "{:,.0f}")
+
 # ---------------------------------------------------------------------------
 # Segment 2: the running loan model (Napkin Math 16.1, 16.2, chapter 16.5.1)
 # ---------------------------------------------------------------------------

@@ -35,9 +35,17 @@ show("hook: serving / training", f"{serve / train:.1f}x")
 show("hook: 10% cut saves ($M)", f"{0.1 * serve / 1e6:.1f}")
 
 # ------------------------------------------------------------- replica (Ch. Sec. 10.7)
-w_fp16 = 70e9 * 2                 # 70B parameters x 2 bytes (Ch. eq. 11)
-show("replica: FP16 weights (GB)", f"{w_fp16 / 1e9:.0f}")
-show("replica: weights per GPU, 8 GPUs (GB)", f"{w_fp16 / 8 / 1e9:.1f}")
+w_round = 70e9 * 2                # 70B parameters x 2 bytes, the chapter's round count
+                                  # (Ch. eq. 11; Napkin Math 10.7 uses it on decimal 80 GB GPUs)
+w_fp16 = 141.2e9                  # FP16 weights of the reference replica (Ch. Napkin Math 10.5)
+hbm_gib = 80                      # H100 HBM per GPU, 80 GiB (binary)
+hbm_gb = hbm_gib * 2**30 / 1e9
+show("replica: 80 GiB in decimal GB", f"{hbm_gb:.1f}")
+show("replica: 8 GPUs of HBM (GB, Napkin Math 10.5: 687.2)", f"{8 * hbm_gb:.1f}")
+show("replica: 8 x 80 GB decimal, the trap (GB)", f"{8 * 80}")
+show("replica: round FP16 weights, 70B x 2 B (GB)", f"{w_round / 1e9:.0f}")
+show("replica: FP16 weights (GB)", f"{w_fp16 / 1e9:.1f}")
+show("replica: weights per GPU, 8 GPUs (GB)", f"{w_fp16 / 8 / 1e9:.2f}")
 
 # ------------------------------------------------------------- Azure 2023 trace (Patel et al.)
 def trace(name):
@@ -125,7 +133,7 @@ for h in ("b200", "h200"):
 # ------------------------------------------------------------- knee (Napkin Math 10.2)
 show("knee: vision t0/treq", f"{2 / 1:.0f}")
 show("knee: LLM decode t0/treq", f"{40 / 0.5:.0f}")
-show("knee: 140 GB / 3.35 TB/s (ms)", f"{140e9 / 3.35e12 * 1e3:.1f}")
+show("knee: 141.2 GB / 3.35 TB/s (ms)", f"{w_fp16 / 3.35e12 * 1e3:.1f}")
 
 # ------------------------------------------------------------- Little's law (Theorem 10.1)
 lam = 1000
@@ -211,8 +219,8 @@ show("hetero: utilization at 15,000 QPS", f"{100 * 15000 / (10 * 1000 + 20 * 600
 show("fanout: 100 leaves at p99", f"{100 * (1 - 0.99 ** 100):.0f}%")
 show("fanout: 100 leaves at p99.99", f"{100 * (1 - 0.9999 ** 100):.1f}%")
 show("fanout: slow events per second at 1e7 QPS, 1e-4", f"{1e7 * 1e-4:,.0f}")
-show("cold start: 140 GB at 0.5 GB/s (min)", f"{140 / 0.5 / 60:.1f}")
-show("cold start: total (min)", f"{1 + 140 / 0.5 / 60 + 1:.1f}")
+show("cold start: 141.2 GB at 0.5 GB/s (min)", f"{w_fp16 / 1e9 / 0.5 / 60:.1f}")
+show("cold start: total (min)", f"{1 + w_fp16 / 1e9 / 0.5 / 60 + 1:.1f}")
 r24 = list(csv.DictReader(open(DATA / "azure_llm_conv_2024_10min.csv")))
 v = np.array([int(x["requests"]) for x in r24]) / 600
 show("traffic: week peak / minimum (req/s)", f"{v.max():.0f} / {v.min():.0f}")

@@ -126,3 +126,13 @@ for r in (1, 2, 3):
     show(f"serving: {r} replica(s) downtime (s per year)", down, ",.1f")
 show("serving: 1 replica downtime (days)", 0.01 * 365, ".2f")
 show("serving: 2 replicas downtime (min)", 1e-4 * 365 * 1440, ".1f")
+
+# --- SDC gradient-norm trace (digitized by digitize_sdc.py from the photo of
+# Jeff Dean's MLSys 2024 keynote slide; heights measured from the photographed
+# x axis, so the ratio is a reading of the photo, not a logged value) -------
+import csv as _csv  # noqa: E402
+from pathlib import Path  # noqa: E402
+with open(Path(__file__).parent / "sdc_trace.csv") as _f:
+    _rows = [(float(a), float(b)) for a, b in list(_csv.reader(_f))[1:]]
+_in = [g for t, g in _rows if 0.540 <= t <= 0.654]
+show("SDC note: tallest boxed point / median height (photo reading)", max(_in), ".1f")

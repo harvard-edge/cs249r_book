@@ -426,15 +426,17 @@ ax.set_xlabel("p99.9 latency during a model load (ms)", fontsize=13)
 sp.save(fig, out / "tfx_load.svg")
 
 # ------------------------------------------------------- false alerts
-fig, ax = plt.subplots(figsize=(5.0, 3.3))
+# Drawn for its slot under the dashboard panel: about 7.8 x 3.3 cm.
+fig, ax = plt.subplots(figsize=(5.2, 2.3))
 M = np.logspace(0, 3, 300)
-for p, ck, lab, y in ((0.003, "memory", "3-sigma, p = 0.003", 0.18), (0.05, "danger", "2-sigma, p = 0.05", 0.80)):
+for p, ck in ((0.003, "memory"), (0.05, "danger")):
     ax.plot(M, 1 - (1 - p) ** M, color=C[ck], lw=2.8)
-    ax.text(1.3, y, lab, color=C[ck], fontsize=13, fontweight="bold")
+ax.text(1.3, 0.42, "2-sigma", color=C["danger"], fontsize=13, fontweight="bold")
+ax.text(950, 0.04, "3-sigma", color=C["memory"], fontsize=13, fontweight="bold", ha="right")
 ax.axhline(1, color=C["neutral"], lw=1, ls=":")
 ax.plot([1000], [1 - 0.997 ** 1000], "o", ms=9, color=C["memory"], mec="white", zorder=5)
-ax.annotate("0.95 at 1,000", (1000, 1 - 0.997 ** 1000), xytext=(1.3, 0.60), fontsize=12, fontweight="bold",
-            color=C["memory"], arrowprops=dict(arrowstyle="-", color=C["memory"], lw=1))
+ax.text(1.3, 0.95, "3-sigma reaches 0.95\nat 1,000 checks", va="top", fontsize=12,
+        fontweight="bold", color=C["memory"], linespacing=1.0)
 ax.set_xscale("log")
 ax.set_xlim(1, 1000)
 ax.set_ylim(0, 1.05)
@@ -442,7 +444,7 @@ ax.set_xticks([1, 10, 100, 1000])
 ax.set_xticklabels(["1", "10", "100", "1,000"])
 ax.tick_params(labelsize=12)
 ax.set_xlabel("Independent checks, M", fontsize=13)
-ax.set_ylabel("P(at least one false alert)", fontsize=13)
+ax.set_ylabel("P(any false alert)", fontsize=13)
 sp.save(fig, out / "alerts.svg")
 
 # ------------------------------------------------------- monitoring pyramid

@@ -12,7 +12,10 @@ values are labeled "illustrative".
   - Tempe, 2018 (RA Sec. 14.2.2, NTSB HAR-19/03): detected 5.6 s before
     impact; reclassified among vehicle, other, bicycle; collision recognized
     1.2 s before impact; action suppressed 1 s; then alert and gradual
-    slowdown. Alert time 0.2 s before impact derived (1.2 - 1.0).
+    slowdown. The report's table of ADS parameters (HAR-19/03, p. 15 to 16)
+    logs the alert at -0.2 s, which equals 1.2 - 1.0 (checked in calcs.py).
+    The preliminary report (HWY18MH010, May 2018) gave 1.3 s for the
+    recognition; the final report's 1.2 s is used here and in Lecture 16.
   - Fleet silent corruption (RA Sec. 14.3.1 and its self-check 2):
     Pr(>= 1) = 1 - (1 - p)^N with p = 1e-4 per device-hour (assumed).
     Derived: N = 1,000 gives 0.095; N = 10,000 gives 0.632.
@@ -195,11 +198,9 @@ def tempe(path, k):
     ax.text(-0.5, 0.32, "held 1 s,\nno alert", ha="center", va="bottom", fontsize=11.5,
             fontweight="bold", color=C["danger"], alpha=a)
     ax.plot([-0.2], [0], "v", ms=10, color=C["danger"], zorder=5, alpha=a)
-    ax.text(0.35, -0.72, "alert\n0.2 s*", ha="center", va="top", fontsize=11.5,
+    ax.text(0.35, -0.72, "alert\n0.2 s out", ha="center", va="top", fontsize=11.5,
             color=C["danger"], alpha=a)
     ax.axis("off")
-    ax.text(-6.5, 1.3, "* derived: 1.2 s minus the 1 s hold", fontsize=10,
-            color=C["neutral"], alpha=a, va="top")
     sp.save(fig, path)
 
 

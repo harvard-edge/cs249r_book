@@ -14,10 +14,13 @@ def show(label, value):
     print(f"{label:<58} {value}")
 
 
-# --- Tempe timeline (RA Sec. 14.2.2; NTSB HAR-19/03) -----------------------
-recognized_s = 1.2   # collision recognized, seconds before impact
-hold_s = 1.0         # action suppressed without alert
-show("Tempe: alert time before impact (s)", f"{recognized_s - hold_s:.1f}")
+# --- Tempe timeline (RA Sec. 14.2.2; NTSB HAR-19/03, Sec. 1.5.6.1 and its table
+# of ADS parameters, p. 15 to 16; the same times as Lecture 16) -------------
+detected_s = 5.6     # first detection by the ADS, seconds before impact
+recognized_s = 1.2   # emergency (imminent collision) recognized, seconds before impact
+hold_s = 1.0         # action suppression: braking held, no alert
+show("Tempe: alert time before impact (s; the NTSB table logs -0.2)", f"{recognized_s - hold_s:.1f}")
+show("Tempe: detection to recognition (s)", f"{detected_s - recognized_s:.1f}")
 
 # --- Fleet silent corruption (RA Sec. 14.3.1 self-check; p assumed) --------
 p = 1e-4             # silent error probability per device-hour (assumed)

@@ -41,12 +41,13 @@ energy_j = ring_gb * 1e9 * 8 * pj_per_bit * 1e-12
 show("napkin: energy per worker per step (J)", f"{energy_j:.0f}")
 show("napkin: energy per worker over the run (MJ)", f"{energy_j * steps / 1e6:.0f}")
 
-# --- Failure clock (Introduction, Sec. 1.1) ----------------------------------
+# --- Failure clock (Introduction, Sec. 1.1; Lecture 0's failure slide) ------
 mttf_h = 50_000          # assumed per-GPU MTTF, hours (Sec. 1.1)
-gpus = 25_000            # GPUs in the GPT-4-class scenario (Sec. 1.1)
+gpus = 16_384            # H100s in the Llama 3 405B run (Dubey et al. 2024), the
+                         # job Lecture 0's failure-clock vote used
 mtbf = mttf_h / gpus
-show("recall: system MTBF at 25,000 GPUs (h)", f"{mtbf:.0f}")
-show("recall: interruptions per day", f"{24 / mtbf:.0f}")
+show("recall: system MTBF at 16,384 GPUs (h)", f"{mtbf:.2f}")
+show("recall: interruptions per day", f"{24 / mtbf:.1f}")
 
 # --- Scaling law (Sec. 1.3.3; Hoffmann et al. 2022 fit via MLSysIM) ----------
 alpha = 0.34             # parameter exponent of the Chinchilla parametric fit
@@ -71,6 +72,9 @@ show("estimate: optimal D at 20 tokens per parameter (T)", f"{tpp * n_opt / 1e12
 nvlink, ndr = 450.0, 50.0   # GB/s per accelerator per direction (Sec. 1.2)
 show("node: NVLink over NDR", f"{nvlink / ndr:.0f}x")
 show("node: NDR 400 Gb/s in GB/s", f"{400 / 8:.0f}")
+
+nvlink_over_hdr = nvlink / ib_gbs   # hook link: 200 Gb/s InfiniBand HDR (25 GB/s)
+show("synthesis: NVLink over the hook's HDR link", f"{nvlink_over_hdr:.0f}x")
 
 # --- Ring AllReduce traffic (Sec. 1.2.3) -------------------------------------
 params = 175e9

@@ -147,6 +147,67 @@ def hook():
                  xlabel="Share of 457,420 A level entries (%)", size=(5.2, 1.8))
 
 
+def ofqual_flows():
+    """Ofqual Figure 1 redrawn from its Table 1: for each teacher grade (CAG),
+    the share of entries whose calculated grade was higher, the same, one
+    grade lower, or two or more lower. Column slot about 7 x 5.3 cm."""
+    split = calcs.OFQ_SPLIT
+    grades = calcs.OFQ_GRADES
+    cols = [("higher", C["data"]), ("same", C["neutral_l"]), ("one lower", RED_L),
+            ("two or more lower", RED)]
+    fig, ax = plt.subplots(figsize=(4.3, 3.3))
+    for i, s in enumerate(split):
+        y = len(split) - 1 - i
+        left = 0
+        for (name, col), v in zip(cols, s):
+            ax.barh(y, v, left=left, height=0.7, color=col, edgecolor="white", lw=0.8)
+            left += v
+        lower = s[2] + s[3]
+        ax.text(101.5, y, f"{lower}%", va="center", ha="left", fontsize=12,
+                fontweight="bold", color=RED if lower else GRAY)
+    ax.text(101.5, len(split) - 0.35, "lower", va="bottom", ha="left", fontsize=12,
+            color=RED)
+    top = len(split) - 0.35
+    ax.text(0, top, "higher", ha="left", va="bottom", fontsize=12, color=C["data"])
+    ax.text(36, top, "same", ha="center", va="bottom", fontsize=12, color=GRAY)
+    ax.text(80, top, "one lower", ha="center", va="bottom", fontsize=12, color=RED,
+            fontweight="bold")
+    ax.set_yticks(range(len(split)))
+    ax.set_yticklabels(list(reversed(grades)), fontsize=12)
+    ax.set_ylabel("Teacher grade", fontsize=12)
+    ax.set_xlim(0, 100)
+    ax.set_ylim(-0.6, len(split) + 0.3)
+    ax.set_xticks([0, 50, 100])
+    ax.set_xlabel("Calculated grade, share of entries (%)", fontsize=12)
+    ax.spines["left"].set_visible(False)
+    ax.tick_params(axis="y", length=0)
+    sp.save(fig, out("ofqual_flows.svg"))
+
+
+def ofqual_candidates():
+    """Ofqual Table 2 as bars: candidates by the number of A levels lowered."""
+    n = calcs.OFQ_T2
+    pct = [100 * v / calcs.ofq_cands for v in n]
+    fig, ax = plt.subplots(figsize=(4.4, 1.8))
+    for k, p in enumerate(pct):
+        ax.bar(k, p, width=0.7, color=GRAY if k == 0 else RED)
+        ax.text(k, p + 1.5, f"{p:.0f}%" if p >= 0.5 else "<0.5%", ha="center",
+                va="bottom", fontsize=12, color=GRAY if k == 0 else RED, fontweight="bold")
+    at_least = V["hook: candidates with at least one grade lowered (%)"]
+    ax.plot([0.7, 4.3], [52, 52], color=RED, lw=1.5)
+    for x in (0.7, 4.3):
+        ax.plot([x, x], [49, 52], color=RED, lw=1.5)
+    ax.text(2.5, 54, f"{at_least:.0f}% had at least one lowered", ha="center",
+            va="bottom", fontsize=12, fontweight="bold", color=RED)
+    ax.set_xticks(range(5))
+    ax.set_xticklabels(["0", "1", "2", "3", "4"], fontsize=12)
+    ax.set_xlabel("A levels lowered per student", fontsize=12)
+    ax.set_ylim(0, 66)
+    ax.set_yticks([])
+    ax.spines["left"].set_visible(False)
+    sp.save(fig, out("ofqual_candidates.svg"))
+
+
 # ---------------------------------------------------------------------------
 # Segment 1: the assurance case, in four steps (canvas 900 x 430)
 # ---------------------------------------------------------------------------
@@ -664,6 +725,8 @@ def waymo():
 
 
 def main():
+    ofqual_flows()
+    ofqual_candidates()
     hook()
     assurance()
     lifecycle()

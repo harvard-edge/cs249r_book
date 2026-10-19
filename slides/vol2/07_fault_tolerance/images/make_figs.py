@@ -27,8 +27,11 @@ noted. MTBF values carry their basis, because the chapter uses three:
   - Serving (Sec. 7.11.2): one replica 99 percent, 3.65 days a year; two
     52.6 min; three 31.5 s. KV cache 43 GB for a Llama-family 70B model at
     128K context in BF16 (footnote 19).
-  - Degradation (Sec. 7.12.2): ViT-Large 307M, 88 percent; EfficientNet-B4
-    19M, 83 percent; MobileNet-V3-Large 5.4M, 75 percent (ImageNet top-1).
+  - Degradation (Sec. 7.12.2 names the cascade): parameter counts and
+    ImageNet-1K acc@1 from the torchvision 0.26 weights metadata, the same
+    values as the slide's card: ViT_L_16 SWAG_E2E_V1 305.2M, 88.064;
+    EfficientNet_B4 V1 19.3M, 83.384; MobileNet_V3_Large V2 5.5M, 75.274.
+    (The chapter rounds them to 307M, 19M, 5.4M and 88, 83, 75 percent.)
   - Cascade (Example 7.1): p99 45 to 800 ms; feature-service span 12 to
     700 ms; model inference 40 ms.
   - DCP trace: measured on a laptop by dcp_trace.py in this folder (four CPU
@@ -626,7 +629,8 @@ sp.save(fig, out / "serving_state.svg")
 # 15. Degradation ladder (Sec. 7.12.2) -----------------------------------------
 def degrade(path, k):
     fig, ax = plt.subplots(figsize=(3.6, 1.95))
-    pts = [("ViT-Large", 307, 88), ("EfficientNet-B4", 19, 83), ("MobileNet-V3-Large", 5.4, 75)]
+    pts = [("ViT-Large", 305.2, 88.064), ("EfficientNet-B4", 19.3, 83.384),
+           ("MobileNet-V3-Large", 5.5, 75.274)]  # torchvision 0.26 weights metadata
     xs = [p[1] for p in pts]
     ys = [p[2] for p in pts]
     for i, (nm, x, y) in enumerate(pts):
@@ -636,8 +640,8 @@ def degrade(path, k):
             ax.annotate("", xy=(x * 1.15, y + 0.3), xytext=(xs[i - 1] / 1.15, ys[i - 1] - 0.3),
                         arrowprops=dict(arrowstyle="-|>", color=C["compute"], lw=2, alpha=a))
         ax.plot([x], [y], "o", ms=12, color=C["memory"], alpha=a, zorder=5)
-        lx, ly, va = [(420, 88.0, "center"), (19 * 1.4, 82.4, "top"), (5.4 * 1.4, 74.6, "top")][i]
-        txt(ax, lx, ly, f"{nm}\n{x:g}M, {y}%", C["memory"], shown, fontsize=11, va=va,
+        lx, ly, va = [(420, 88.0, "center"), (19.3 * 1.4, 82.4, "top"), (5.5 * 1.4, 74.6, "top")][i]
+        txt(ax, lx, ly, f"{nm}\n{x:g}M, {y:.1f}%", C["memory"], shown, fontsize=11, va=va,
             ha="left", linespacing=1.0)
     txt(ax, 2.3, 92.6, "last rung: cached labels,\nor \"unavailable\"",
         C["danger"], k >= 3, fontsize=10.5, va="top", ha="left", linespacing=1.0)
@@ -683,5 +687,39 @@ def cascade(path, k):
 
 for k in (1, 2):
     cascade(out / f"cascade_step{k}.svg", k)
+
+
+# 17. Gradient-norm trace with an SDC anomaly (Fault Tolerance, figure 9) -----
+# Digitized from the keynote photo by digitize_sdc.py. The original axes
+# carry no values, so the plot shows none.
+def sdc_trace(path):
+    from PIL import Image
+    sys.path.insert(0, str(out))
+    from digitize_sdc import BOX, digitize  # noqa: E402
+    t, g = digitize(Image.open(out / "dean-gradient-norm-spike.jpg"))
+    t = t.clip(0, 1)
+    lo, hi = BOX                       # the slide's yellow box
+    fig, ax = plt.subplots(figsize=(5.2, 2.8))
+    inside = (t >= lo) & (t <= hi)
+    ax.plot(t[~inside], g[~inside], "o", ms=2.6, color=C["neutral"], mec="none")
+    ax.plot(t[inside], g[inside], "o", ms=3.4, color=C["danger"], mec="none")
+    top = g.max() * 1.08
+    ax.add_patch(sp.plt.Rectangle((lo, 0.78), hi - lo, top - 0.78, fill=False,
+                                  ec=C["danger"], lw=1.8))
+    ax.text(lo - 0.02, top * 0.93, "anomaly attributed\nto silent data\ncorruption",
+            ha="right", va="top", fontsize=13, fontweight="bold", color=C["danger"],
+            linespacing=1.05)
+    ax.text(0.98, 0.70, "normal steps", ha="right", va="center", fontsize=13,
+            color=C["neutral"])
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0.55, top * 1.02)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_xlabel("Training time", fontsize=13)
+    ax.set_ylabel("Gradient norm", fontsize=13)
+    sp.save(fig, path)
+
+
+sdc_trace(out / "sdc_trace.svg")
 
 print("figures written to", out)
