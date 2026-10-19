@@ -51,10 +51,19 @@ value is sourced:
     against 80 GB; GPT-2 3 GB per token, 0.9 ms floor, 295x the compute
     floor (chapter Sec. 16.8).
 
+  - Llama 3 Table 5 rows (frame 28) are typeset in the .tex, quoted from the
+    paper; the hours compared in llama_mtbf come from calcs.py.
+  - Power ladder (power_tiers.svg): 3 MW, 200 W, 5 W, 1 mW (System
+    Paradigms Sec. 2.1, as in Lecture 0), redrawn here at slot size.
+
+Every derived value drawn is imported from calcs.py (2026-10-19). The script
+ends by writing text-free thumb_*.svg versions of the figures used on goal,
+takeaway, recall, and part-locator slots (tools/greek_thumbs.py).
+
 Copied from other decks (credited on the slide as in the source deck):
-gft_step2.svg and ironlaw_bars_step1.svg (Lecture 1), power_tiers_step4.svg
-(Lecture 0), data_wall_step2.svg (Lecture 9), robot-arms-bmw-leipzig.jpg
-(Lecture 2, see SOURCES.yml).
+gft_step2.svg and ironlaw_bars_step1.svg (Lecture 1), data_wall_step2.svg
+(Lecture 9), robot-arms-bmw-leipzig.jpg (Lecture 2), thai-clinic-nurse.jpg
+(Lecture 3); see SOURCES.yml.
 
 Run from this folder: python3 make_figs.py
 """
@@ -136,99 +145,143 @@ class Svg:
             (out / name).write_text(svg)
 
 
+import calcs as K  # noqa: E402  (every derived value drawn below)
+from matplotlib.ticker import FixedLocator, NullLocator  # noqa: E402
+
+
+def ellipse(g, cx, cy, rx, ry, fill, stroke, first=1, sw=1.5, dash=None, last=99):
+    d = f' stroke-dasharray="{dash}"' if dash else ""
+    g.add(first, f'<ellipse cx="{cx}" cy="{cy}" rx="{rx}" ry="{ry}" fill="{fill}" '
+                 f'stroke="{stroke}" stroke-width="{sw}"{d}/>', last)
+
+
+def bars(path, rows, size, log=False, ticks=None, xlabel=None, xlim=None, fs=11,
+         lfs=None):
+    """Horizontal bars drawn at the size of their slot. rows: (label, value,
+    color key, printed value). ticks: list of (x, label) for plain tick labels
+    (no 10^n superscripts, which render too small)."""
+    fig, ax = plt.subplots(figsize=size)
+    n = len(rows)
+    vals = [r[1] for r in rows]
+    for i, (label, v, ck, txt) in enumerate(rows):
+        y = n - 1 - i
+        ax.barh(y, v, color=C[ck], height=0.62)
+        ax.text(-0.02, y, label, transform=ax.get_yaxis_transform(), ha="right",
+                va="center", fontsize=lfs or fs, color=C["text"], fontweight="bold")
+        ax.text(v * 1.15 if log else v + max(vals) * 0.02, y, txt, va="center",
+                fontsize=fs, color=C[ck], fontweight="bold")
+    ax.set_yticks([])
+    if log:
+        ax.set_xscale("log")
+    ax.set_xlim(*(xlim or ((min(vals) / 3, max(vals) * 40) if log else (0, max(vals) * 1.35))))
+    if ticks:
+        ax.xaxis.set_major_locator(FixedLocator([t for t, _ in ticks]))
+        ax.set_xticklabels([s for _, s in ticks])
+        ax.xaxis.set_minor_locator(NullLocator())
+    ax.tick_params(axis="x", labelsize=fs - 1)
+    ax.set_ylim(-0.6, n - 0.4)
+    ax.spines["left"].set_visible(False)
+    ax.grid(axis="x", color=C["grid"], linewidth=0.6)
+    ax.set_axisbelow(True)
+    if xlabel:
+        ax.set_xlabel(xlabel, fontsize=fs - 1)
+    sp.save(fig, path)
+
+
 # =============================================================================
-# The stack with one number per layer (retrieval reveal, frame 2)
+# The stack with one number per layer (retrieval reveal, frame 2).
+# Slot 0.92 textwidth x 5.6 cm: canvas 900 x 366, so 20 px renders near 8.7 pt.
 # =============================================================================
-g = Svg(900, 545)
+g = Svg(900, 366)
 layers = [
     ("Applications", "Black share enrolled: 17.7% by cost, 46.5% by need", "L15", 0.12),
     ("Operations", "$304M write-down, every server up", "L14", 0.17),
-    ("Serving", "Batch 1 costs 7.5× batch 8", "L13", 0.22),
+    ("Serving", f"Batch 1 costs {K.BATCH_COST_RATIO:.1f}× batch 8", "L13", 0.22),
     ("Training", "16 bytes per parameter: PaLM ≈ 100 H100s", "L8", 0.12),
-    ("Models", "7B model in FP16 = 14 GB; phone has 8 GB", "L10", 0.17),
+    ("Models", f"7B model in FP16 = {K.MODEL_7B_GB:.0f} GB; phone has 8 GB", "L10", 0.17),
     ("Frameworks", "Host 8.6 ms against 0.9 ms of weight reads", "L7", 0.22),
-    ("Hardware", "TPU 30 to 80× perf/W; 1.5 TOPS/W sustained, not 20", "L11, L12", 0.12),
+    ("Hardware", "TPU 30 to 80× perf/W; 20 TOPS/W rated, 1.5 sustained", "L11, L12", 0.12),
 ]
 for i, (name, num, lec, op) in enumerate(layers):
-    y = 20 + i * 64
-    g.add(1, f'<rect x="20" y="{y}" width="780" height="54" rx="8" fill="{CRIMSON}" '
+    y = 6 + i * 46
+    g.add(1, f'<rect x="10" y="{y}" width="786" height="40" rx="7" fill="{CRIMSON}" '
              f'fill-opacity="{op}"/>')
-    g.text(38, y + 27, name, 23, CRIMSON, "bold", "start")
-    g.text(215, y + 27, num, 20, C["text"], "normal", "start")
-    g.text(788, y + 27, lec, 17, CRIMSON, "bold", "end")
-g.add(1, f'<rect x="814" y="20" width="56" height="438" rx="8" fill="{CRIMSON}" '
+    g.text(24, y + 21, name, 22, CRIMSON, "bold", "start")
+    g.text(190, y + 21, num, 20, C["text"], "normal", "start")
+    g.text(786, y + 21, lec, 18, CRIMSON, "bold", "end")
+g.add(1, f'<rect x="806" y="6" width="56" height="316" rx="7" fill="{CRIMSON}" '
          f'fill-opacity="0.18"/>')
-g.add(1, f'<text {FONT} x="842" y="239" font-size="22" font-weight="700" fill="{CRIMSON}" '
+g.add(1, f'<text {FONT} x="834" y="164" font-size="22" font-weight="700" fill="{CRIMSON}" '
          f'text-anchor="middle" dominant-baseline="middle" letter-spacing="3" '
-         f'transform="rotate(-90 842 239)">DATA</text>')
-g.text(870, 500, "Data: Tay suspended 16 hours after launch (L4);  "
-       "GPT-2 saw each WebText token about 17 times (L9)", 18, C["text"], "normal", "end")
-g.line(842, 470, 842, 482, CRIMSON, arrow=False, sw=2)
+         f'transform="rotate(-90 834 164)">DATA</text>')
+g.line(834, 322, 834, 334, CRIMSON, arrow=False, sw=2)
+g.text(862, 348, "Data: Tay suspended after 16 hours (L4); each WebText token "
+       f"seen about {K.WEBTEXT_PASSES:.0f} times (L9)", 19, C["text"], "normal", "end")
 g.write("stack_numbers", 1)
 
 # =============================================================================
-# The fleet failure chain, tagged by lecture (frames 3, 6, 29)
+# The fleet failure chain, tagged by lecture (frame 6; thumbnails on 4, 31, 33).
+# Slot 0.95 textwidth x 4.9 cm: canvas 900 x 312, 19 px renders near 8.5 pt.
 # =============================================================================
-g = Svg(900, 390)
+g = Svg(900, 312)
 stages = [("INT8\ncalibration", C["compute"], C["compute_l"], "Lecture 10b\ncalibration set"),
           ("Firmware\npreprocessing", C["neutral"], C["neutral_l"], "Lectures 4, 14\ntraining-serving skew"),
           ("Input shift on\none cohort", C["neutral"], C["neutral_l"], "Lectures 4b, 14b\ndrift"),
           ("Accuracy\n−4 points", C["danger"], C["danger_l"], "Lecture 12b\naggregate metric only")]
 for i, (lab, stroke, fill, tag) in enumerate(stages):
-    x = 20 + i * 222
-    g.rect(x, 30, 190, 100, fill, stroke, sw=2.5)
-    g.text(x + 95, 80, lab, 22, stroke if i in (0, 3) else C["text"], "bold")
+    x = 10 + i * 225
+    g.rect(x, 6, 200, 86, fill, stroke, sw=2.5)
+    g.text(x + 100, 49, lab, 22, stroke if i in (0, 3) else C["text"], "bold")
     if i < 3:
-        g.line(x + 192, 80, x + 218, 80, C["neutral"], sw=3)
-    g.text(x + 95, 168, tag, 17, CRIMSON, "bold", first=2)
-g.text(450, 225, "Every team met its own target; no test crossed the interfaces.",
-       19, C["neutral"], "normal", italic=True, first=2)
+        g.line(x + 202, 49, x + 223, 49, C["neutral"], sw=3)
+    g.text(x + 100, 124, tag, 19, CRIMSON, "bold", first=2)
+g.text(450, 172, "Every team met its own target; no test crossed the interfaces.",
+       20, C["neutral"], "normal", italic=True, first=2)
 # step 3: the two measurements that would have caught it
-g.rect(20, 260, 412, 104, C["data_l"], C["data"], first=3)
-g.text(226, 292, "Skew check (principle 11)", 20, C["data"], "bold", first=3)
-g.text(226, 330, "same captured images through\nboth preprocessing paths", 17,
+g.rect(10, 196, 425, 108, C["data_l"], C["data"], first=3)
+g.text(222, 224, "Skew check (principle 11)", 21, C["data"], "bold", first=3)
+g.text(222, 268, "same captured images through\nboth preprocessing paths", 19,
        C["text"], first=3)
-g.rect(464, 260, 412, 104, C["data_l"], C["data"], first=3)
-g.text(670, 292, "Cohort-level monitoring", 20, C["data"], "bold", first=3)
-g.text(670, 330, "accuracy by device and firmware,\nfrom day one", 17, C["text"], first=3)
+g.rect(465, 196, 425, 108, C["data_l"], C["data"], first=3)
+g.text(677, 224, "Cohort-level monitoring", 21, C["data"], "bold", first=3)
+g.text(677, 268, "accuracy by device and firmware,\nfrom day one", 19, C["text"], first=3)
 g.write("chain", 3)
 
 # =============================================================================
-# One phone model through nine lectures (frame 7; chapter table 2)
+# One phone model through nine lectures (frame 7; chapter table 2).
+# Slot 0.92 textwidth x 5.5 cm: canvas 900 x 362, 18 px renders near 7.8 pt.
 # =============================================================================
-g = Svg(900, 470)
+g = Svg(900, 362)
 phases = [
-    ("Envelope", "Watt-scale power, heat, battery", "L2"),
-    ("Architecture", "Depthwise separable:\n8.7× fewer FLOPs per layer", "L6"),
-    ("Training", "Large batches to train;\nserves one image at a time", "L8"),
+    ("Envelope", "Watt-scale power,\nheat, battery", "L2"),
+    ("Architecture", f"Depthwise separable:\n{K.DW_RATIO:.1f}× fewer FLOPs", "L6"),
+    ("Training", "Large batches to train;\nserves one image", "L8"),
     ("Data selection", "Milder augmentation\nfor a small model", "L9"),
-    ("Compression", "INT8: 1/4 the bytes of FP32", "L10b"),
+    ("Compression", f"INT8: {K.INT8_OF_FP32 * 100:.0f}% of\nFP32's bytes", "L10b"),
     ("Acceleration", "Do the phone's NPU\nkernels run INT8?", "L11"),
-    ("Benchmarking", "Gain must survive\npreprocessing and transfer", "L12"),
+    ("Benchmarking", "Gain must survive\npreprocessing", "L12"),
     ("Serving", "p99 under 50 ms", "L13"),
     ("Operations", "Accuracy tracked\nper device cohort", "L14b"),
 ]
 for i, (name, num, lec) in enumerate(phases):
     row, col = divmod(i, 3)
-    x, y = 20 + col * 300, 20 + row * 150
+    x, y = 10 + col * 300, 4 + row * 112
     first = row + 1
-    g.rect(x, y, 260, 118, "white", C["neutral"], first=first, sw=2)
-    g.text(x + 14, y + 26, name, 21, CRIMSON, "bold", "start", first=first)
-    g.text(x + 248, y + 26, lec, 16, C["neutral"], "bold", "end", first=first)
-    g.text(x + 130, y + 78, num, 17, C["text"], first=first)
+    g.rect(x, y, 264, 94, "white", C["neutral"], first=first, sw=2)
+    g.text(x + 12, y + 20, name, 21, CRIMSON, "bold", "start", first=first)
+    g.text(x + 254, y + 20, lec, 18, C["neutral"], "bold", "end", first=first)
+    g.text(x + 132, y + 63, num, 18, C["text"], first=first)
     if col < 2:
-        g.line(x + 262, y + 59, x + 296, y + 59, C["neutral"], first=first, sw=2.5)
+        g.line(x + 266, y + 47, x + 298, y + 47, C["neutral"], first=first, sw=2.5)
 for row in (0, 1):
-    g.line(880, 20 + row * 150 + 120, 880, 20 + row * 150 + 145, C["neutral"],
-           arrow=False, first=row + 2, sw=2)
-    g.line(880, 20 + row * 150 + 145, 20 + 130, 20 + row * 150 + 145, C["neutral"],
-           arrow=False, first=row + 2, sw=2, dash="5 4")
-    g.line(150, 20 + row * 150 + 145, 150, 20 + (row + 1) * 150 - 2, C["neutral"],
-           first=row + 2, sw=2)
+    y0 = 4 + row * 112
+    g.line(880, y0 + 96, 880, y0 + 103, C["neutral"], arrow=False, first=row + 2, sw=2)
+    g.line(880, y0 + 103, 142, y0 + 103, C["neutral"], arrow=False, first=row + 2, sw=2,
+           dash="5 4")
+    g.line(142, y0 + 103, 142, y0 + 111, C["neutral"], first=row + 2, sw=2)
 # step 3: the propagation the chapter traces
-g.line(430, 140, 430, 168, C["danger"], first=3, sw=3)
-g.text(430, 455, "Depthwise layers go bandwidth-bound, so the next lever is bytes (INT8),"
-       " which pays only if the NPU runs it.", 16, C["danger"], "bold", first=3)
+g.text(450, 346, "Depthwise layers go bandwidth-bound, so the next lever is bytes:"
+       " INT8, if the NPU runs it.", 18, C["danger"], "bold", first=3)
 g.write("journey", 3)
 
 # =============================================================================
@@ -236,7 +289,7 @@ g.write("journey", 3)
 # =============================================================================
 import numpy as np  # noqa: E402
 
-BW, P16, P8 = 3.35, 989.0, 1979.0
+BW, P16, P8 = K.H100_BW / 1e12, K.H100_FP16 / 1e12, K.H100_INT8 / 1e12
 xs = np.logspace(np.log10(0.4), np.log10(30000), 400)
 for k in (1, 2, 3):
     fig, ax = plt.subplots(figsize=(5.8, 2.6))
@@ -244,7 +297,8 @@ for k in (1, 2, 3):
     ax.plot(xs[xs >= P16 / BW], np.full((xs >= P16 / BW).sum(), P16),
             color=C["compute"], lw=3, zorder=3)
     ax.axvline(P16 / BW, color=C["neutral"], lw=1, ls="--")
-    ax.text(P16 / BW / 1.08, 1.4, "ridge 295", color=C["neutral"], fontsize=10, ha="right")
+    ax.text(P16 / BW / 1.08, 1.4, f"ridge {K.RIDGE16:.0f}", color=C["neutral"], fontsize=10,
+            ha="right")
     on3 = 1.0 if k >= 3 else 0.0
     m = xs >= P8 / BW
     ax.plot(xs[m], np.full(m.sum(), P8), color=C["danger"], lw=2.5, ls="--", alpha=on3)
@@ -252,28 +306,29 @@ for k in (1, 2, 3):
             BW * xs[(xs >= P16 / BW) & (xs <= P8 / BW)], color=C["danger"], lw=2.5,
             ls="--", alpha=on3)
     ax.axvline(P8 / BW, color=C["danger"], lw=1, ls=":", alpha=on3)
-    ax.text(P8 / BW * 1.08, 1.4, "INT8 ridge 591", color=C["danger"], fontsize=10,
+    ax.text(P8 / BW * 1.08, 1.4, f"INT8 ridge {K.RIDGE8:.0f}", color=C["danger"], fontsize=10,
             alpha=on3)
-    ax.text(28000, P8 * 1.1, "INT8 peak 1,979", color=C["danger"], fontsize=10, ha="right", va="bottom",
-            fontweight="bold", alpha=on3)
-    ax.text(28000, P16 / 1.1, "FP16 peak 989", color=C["compute"], fontsize=10, ha="right", va="top",
-            fontweight="bold")
+    ax.text(28000, P8 * 1.1, "INT8 peak 1,979", color=C["danger"], fontsize=10, ha="right",
+            va="bottom", fontweight="bold", alpha=on3)
+    ax.text(28000, P16 / 1.1, "FP16 peak 989", color=C["compute"], fontsize=10, ha="right",
+            va="top", fontweight="bold")
     # step 1: decode
     ax.plot([1], [BW], "o", ms=11, color=C["memory"], mec="white", mew=1.5, zorder=5)
     ax.annotate("GPT-2 XL decode,\nbatch 1: 1", (1, BW), xytext=(14, 0),
                 textcoords="offset points", va="center", fontsize=11, fontweight="bold",
                 color=C["memory"])
     a2 = 1.0 if k >= 2 else 0.0
-    ax.plot([1046.7], [P16], "o", ms=11, color=C["compute"], mec="white", mew=1.5,
+    ax.plot([K.PREFILL_I], [P16], "o", ms=11, color=C["compute"], mec="white", mew=1.5,
             zorder=5, alpha=a2)
-    ax.annotate("Same model,\nbatched prefill: 1,047", (1046.7, P16), xytext=(6, -36),
-                textcoords="offset points", ha="left", va="top", fontsize=11, fontweight="bold",
-                color=C["compute"], alpha=a2)
-    ax.plot([569], [BW * 569], "o", ms=11, color=C["danger"], mec="white", mew=1.5,
-            zorder=6, alpha=on3)
-    ax.annotate("ResNet-50 conv, INT8\nweights: 569, below 591", (569, BW * 569),
-                xytext=(-30, 14), textcoords="offset points", ha="right", va="bottom",
-                fontsize=11, fontweight="bold", color=C["danger"], alpha=on3)
+    ax.annotate(f"Same model,\nbatched prefill: {K.PREFILL_I:,.0f}", (K.PREFILL_I, P16),
+                xytext=(6, -36), textcoords="offset points", ha="left", va="top", fontsize=11,
+                fontweight="bold", color=C["compute"], alpha=a2)
+    ax.plot([K.RESNET_INT8_I], [BW * K.RESNET_INT8_I], "o", ms=11, color=C["danger"],
+            mec="white", mew=1.5, zorder=6, alpha=on3)
+    ax.annotate(f"ResNet-50 conv, INT8\nweights: {K.RESNET_INT8_I}, below {K.RIDGE8:.0f}",
+                (K.RESNET_INT8_I, BW * K.RESNET_INT8_I), xytext=(-30, 14),
+                textcoords="offset points", ha="right", va="bottom", fontsize=11,
+                fontweight="bold", color=C["danger"], alpha=on3)
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlim(0.4, 30000)
@@ -288,22 +343,24 @@ for k in (1, 2, 3):
     sp.save(fig, out / f"roofline_step{k}.svg")
 
 # =============================================================================
-# The thirteen principles as a cycle: slide variant of book figure 1
+# The thirteen principles as a cycle: slide variant of book figure 1.
+# Canvas 900 x 410: at 0.92 textwidth x 5.3 cm (frame 12) 22 px renders near
+# 8 pt; at 0.88 textwidth x 5.0 cm (frame 18) near 7.6 pt.
 # =============================================================================
 PARTS = [
-    ("Foundations (Data)", 20, 20, [(1, "Data as code", "heuristic"),
-                                    (2, "Data gravity", "heuristic")]),
-    ("Development (Model)", 520, 20, [(3, "Iron law", "decomposition"),
-                                      (4, "Silicon contract", "heuristic")]),
-    ("Optimization", 520, 270, [(5, "Pareto frontier", "bound"),
-                                (6, "Arithmetic intensity", "bound"),
-                                (7, "Energy movement", "decomposition"),
-                                (8, "Amdahl's law", "bound")]),
-    ("Deployment", 20, 270, [(9, "Verification gap", "policy"),
-                             (10, "Statistical drift", "fitted model"),
-                             (11, "Skew diagnostic", "heuristic"),
-                             (12, "Latency budget", "policy"),
-                             (13, "Bias feedback", "fitted model")]),
+    ("Foundations (Data)", 6, 6, 136, [(1, "Data as code", "heuristic"),
+                                       (2, "Data gravity", "heuristic")]),
+    ("Development (Model)", 474, 6, 136, [(3, "Iron law", "decomposition"),
+                                          (4, "Silicon contract", "heuristic")]),
+    ("Optimization", 474, 190, 214, [(5, "Pareto frontier", "bound"),
+                                     (6, "Arithmetic intensity", "bound"),
+                                     (7, "Energy movement", "decomposition"),
+                                     (8, "Amdahl's law", "bound")]),
+    ("Deployment", 6, 190, 214, [(9, "Verification gap", "policy"),
+                                 (10, "Statistical drift", "fitted model"),
+                                 (11, "Skew diagnostic", "heuristic"),
+                                 (12, "Latency budget", "policy"),
+                                 (13, "Bias feedback", "fitted model")]),
 ]
 ARROW = "#7FC8E8"
 
@@ -312,30 +369,30 @@ def cycle(stem, steps=1, kinds_from=None, lit=None, trace=None):
     """kinds_from: step at which kind tags appear (None: never).
     lit: part index to light (others dimmed). trace: list of (principle,
     first step) highlighted in order."""
-    g = Svg(900, 500)
-    for p, (title, x, y, items) in enumerate(PARTS):
+    g = Svg(900, 410)
+    for p, (title, x, y, h, items) in enumerate(PARTS):
         dim = lit is not None and p != lit
         op = 0.28 if dim else 1.0
         on = lit is not None and p == lit
-        g.rect(x, y, 360, 210, "#FBEFF1" if on else "white",
+        g.rect(x, y, 420, h, "#FBEFF1" if on else "white",
                CRIMSON if on else "#BBBBBB", sw=3 if on else 2, opacity=op)
-        g.text(x + 18, y + 30, title, 24, CRIMSON, "bold", "start", opacity=op)
+        g.text(x + 16, y + 24, title, 23, CRIMSON, "bold", "start", opacity=op)
         for j, (num, name, kind) in enumerate(items):
-            ly = y + 70 + j * 29
+            ly = y + 62 + j * 34
             for pr, f in (trace or []):
                 if pr == num:
-                    g.rect(x + 8, ly - 14, 344, 28, C["compute_l"], C["compute"],
+                    g.rect(x + 6, ly - 16, 408, 32, C["compute_l"], C["compute"],
                            sw=1.5, rx=5, first=f)
-            g.text(x + 46, ly, str(num), 21, C["neutral"], "bold", "end", opacity=op)
-            g.text(x + 58, ly, name, 21, C["text"], "normal", "start", opacity=op)
+            g.text(x + 42, ly, str(num), 22, C["neutral"], "bold", "end", opacity=op)
+            g.text(x + 52, ly, name, 22, C["text"], "normal", "start", opacity=op)
             if kinds_from:
-                g.text(x + 346, ly, kind, 16, C["neutral"], "normal", "end",
+                g.text(x + 410, ly, kind, 20, C["neutral"], "normal", "end",
                        first=kinds_from, italic=True, opacity=op)
-    for x1, y1, x2, y2 in ((385, 115, 513, 115), (700, 234, 700, 266),
-                           (515, 385, 387, 385), (200, 266, 200, 234)):
-        g.line(x1, y1, x2, y2, ARROW, sw=9)
-    g.circle(450, 250, 62, "white", C["neutral"], sw=1.5, dash="4 3")
-    g.text(450, 250, "Conservation\nof complexity", 16, C["text"], "bold")
+    for x1, y1, x2, y2 in ((428, 40, 470, 40), (684, 144, 684, 186),
+                           (472, 380, 430, 380), (216, 186, 216, 144)):
+        g.line(x1, y1, x2, y2, ARROW, sw=8)
+    ellipse(g, 450, 165, 88, 40, "white", C["neutral"], dash="4 3")
+    g.text(450, 165, "Conservation\nof complexity", 19, C["text"], "bold")
     g.write(stem, steps)
 
 
@@ -346,94 +403,119 @@ cycle("cycle_trace", steps=2, trace=[(5, 1), (4, 1), (6, 1), (7, 1),
                                      (12, 2), (9, 2), (11, 2)])
 
 # =============================================================================
-# Amdahl: a 10x faster kernel inside a request that is 90 percent host
+# Amdahl: a 10x faster kernel inside a request that is 90 percent host.
+# Slot 0.85 textwidth x 3.0 cm; drawn near that size.
 # =============================================================================
+host_pct = K.SERIAL * 100
+inf_pct = (1 - K.SERIAL) * 100
 for k in (1, 2):
-    fig, ax = plt.subplots(figsize=(5.8, 1.6))
-    rows = [("Before", 90, 10, "+ inference 10% = 100%"), ("After 10× kernel", 90, 1, "+ 1% = 91%: 1.1× faster")]
+    fig, ax = plt.subplots(figsize=(3.7, 1.05))
+    rows = [("Before", host_pct, inf_pct, f"+ inference {inf_pct:.0f}% = 100%"),
+            ("After 10× kernel", host_pct, inf_pct / K.SPEEDUP,
+             f"+ {inf_pct / K.SPEEDUP:.0f}% = {K.NEW_TIME * 100:.0f}%: {K.AMDAHL:.1f}× faster")]
     for i, (lab, host, inf, tot) in enumerate(rows):
         y = 1 - i
         on = 1.0 if (i == 0 or k == 2) else 0.0
-        ax.barh(y, host, color=C["neutral"], height=0.6, alpha=on)
-        ax.barh(y, inf, left=host, color=C["compute"], height=0.6, alpha=on)
-        ax.text(45, y, "Host preprocessing 90%", ha="center", va="center", color="white",
-                fontsize=12, fontweight="bold", alpha=on)
-        ax.text(-1, y, lab, ha="right", va="center", fontsize=12, fontweight="bold",
+        ax.barh(y, host, color=C["neutral"], height=0.62, alpha=on)
+        ax.barh(y, inf, left=host, color=C["compute"], height=0.62, alpha=on)
+        ax.text(45, y, f"Host preprocessing {host_pct:.0f}%", ha="center", va="center",
+                color="white", fontsize=11, fontweight="bold", alpha=on)
+        ax.text(-1, y, lab, ha="right", va="center", fontsize=11, fontweight="bold",
                 color=C["text"], alpha=on)
-        ax.text(host + inf + 1.5, y, tot,
-                va="center", fontsize=12, fontweight="bold",
+        ax.text(host + inf + 1.5, y, tot, va="center", fontsize=11, fontweight="bold",
                 color=C["compute"] if i == 0 else C["danger"], alpha=on)
     ax.set_yticks([])
-    ax.set_xlim(0, 150)
+    ax.set_xlim(0, 100)
     ax.set_xticks([0, 25, 50, 75, 100])
-    ax.set_ylim(-0.6, 1.6)
+    ax.tick_params(axis="x", labelsize=10)
+    ax.set_ylim(-0.5, 1.5)
     ax.spines["left"].set_visible(False)
-    ax.set_xlabel("Share of the original request time (%)")
+    ax.set_xlabel("Share of the original request time (%)", fontsize=10)
     sp.save(fig, out / f"amdahl_step{k}.svg")
 
 # =============================================================================
 # Tails: illustrative scenario, then a measured Google service
 # =============================================================================
 sp.hbars(str(out / "tail_illus.svg"), [
-    ("Mean TTFT", 50, "neutral", "50 ms"),
-    ("p99 TTFT", 2000, "danger", "2,000 ms (40×)"),
+    ("Mean TTFT", K.TTFT_MEAN, "neutral", f"{K.TTFT_MEAN} ms"),
+    ("p99 TTFT", K.TTFT_P99, "danger", f"{K.TTFT_P99:,} ms ({K.TTFT_P99 / K.TTFT_MEAN:.0f}×)"),
 ], "ms", log=False, xlabel="Time to first token (ms)", size=(3.4, 1.6))
 sp.hbars(str(out / "tail_measured.svg"), [
     ("One leaf, median", 1, "memory", "1 ms"),
-    ("One leaf, p99", 10, "memory", "10 ms"),
+    ("One leaf, p99", K.LEAF_P99, "memory", f"{K.LEAF_P99} ms"),
     ("All leaves, median", 40, "danger", "40 ms"),
-    ("All leaves, p99", 140, "danger", "140 ms (14×)"),
+    ("All leaves, p99", K.ALL_P99, "danger", f"{K.ALL_P99} ms ({K.ALL_P99 / K.LEAF_P99:.0f}×)"),
 ], "ms", log=False, xlabel="Latency (ms)", size=(3.4, 2.1))
 
 # =============================================================================
-# From one GPU to a pool, and the measured Llama 3 run
+# From one GPU to a pool (frame 23). Slot 0.62 textwidth x 3.2 cm.
 # =============================================================================
-sp.hbars(str(out / "mtbf.svg"), [
-    ("One GPU (MTTF)", 50000, "neutral", "50,000 h (5.7 years)"),
-    ("A three-week run", 504, "memory", "504 h"),
-    ("1,024 GPUs (MTBF)", 48.8, "danger", "48.8 h (2 days)"),
-], "h", log=True, xlabel="Hours (log scale)", size=(5.8, 2.0))
-sp.hbars(str(out / "llama_mtbf.svg"), [
-    ("Model, 16,384 GPUs", 3.05, "neutral", "3.05 h"),
-    ("Llama 3, measured", 3.1, "danger", "3.1 h"),
-], "h", log=False, xlabel="Hours between interruptions (derived)", size=(3.6, 1.3))
+bars(out / "mtbf.svg", [
+    ("One GPU (MTTF)", K.MTTF_H, "neutral", f"{K.MTTF_H:,} h ({K.MTTF_YEARS} years)"),
+    ("A three-week run", K.RUN_H, "memory", f"{K.RUN_H} h"),
+    (f"{K.N_GPU:,} GPUs (MTBF)", K.MTBF_H, "danger",
+     f"{K.MTBF_H:.1f} h ({K.MTBF_H / 24:.0f} days)"),
+], size=(2.4, 1.05), log=True, xlim=(10, 3e6),
+    ticks=[(10, "10"), (1000, "1,000"), (100000, "100,000")],
+    xlabel="Hours (log scale)", fs=10)
+
+# Llama 3 against the model (frame 28). Slot about 0.45 textwidth x 1.9 cm.
+bars(out / "llama_mtbf.svg", [
+    (f"Model, {K.LLAMA_GPUS:,} GPUs", K.MODEL_16K_H, "neutral", f"{K.MODEL_16K_H:.2f} h"),
+    ("Llama 3, measured", K.LLAMA_GAP_H, "danger", f"{K.LLAMA_GAP_H:.1f} h"),
+], size=(1.5, 0.62), xlim=(0, 4.5), ticks=[(0, "0"), (1, "1"), (2, "2"), (3, "3"), (4, "4")],
+    xlabel="Hours between interruptions", fs=10)
+
+# Power ladder by deployment tier (frame 25; System Paradigms Sec. 2.1, as in
+# Lecture 0). Slot 0.52 textwidth x 4.0 cm.
+bars(out / "power_tiers.svg", [
+    ("Cloud", 3e6, "neutral", "3 MW"),
+    ("Edge", 200, "neutral", "200 W"),
+    ("Mobile", 5, "neutral", "5 W"),
+    ("TinyML", 1e-3, "neutral", "1 mW"),
+], size=(1.85, 1.45), log=True, xlim=(1e-4, 1e9),
+    ticks=[(1e-3, "1 mW"), (1, "1 W"), (1e6, "1 MW")],
+    xlabel="Power (log scale)", fs=10)
 
 # =============================================================================
-# A composed assistant's critical path (frame 26)
+# A composed assistant's critical path (frame 26).
+# Slot 0.88 textwidth x 4.2 cm: canvas 900 x 290, 19 px renders near 7.8 pt.
 # =============================================================================
-g = Svg(900, 330)
-nodes = {"ret": (20, 120, "Retrieval", "50 ms"), "ta": (250, 40, "Tool A", "110 ms"),
-         "tb": (250, 200, "Tool B", "70 ms"), "gen": (480, 120, "Generation", "180 ms"),
-         "ver": (710, 120, "Verifier", "30 ms")}
+g = Svg(900, 290)
+nodes = {"ret": (10, 96, "Retrieval", f"{K.RET} ms"), "ta": (245, 6, "Tool A", f"{K.TOOL_A} ms"),
+         "tb": (245, 186, "Tool B", f"{K.TOOL_B} ms"), "gen": (480, 96, "Generation", f"{K.GEN} ms"),
+         "ver": (715, 96, "Verifier", f"{K.VER} ms")}
 crit = {"ret", "ta", "gen", "ver"}
 for key, (x, y, name, ms) in nodes.items():
-    g.rect(x, y, 170, 90, "white", C["neutral"], sw=2)
-    g.text(x + 85, y + 30, name, 21, C["text"], "bold")
-    g.text(x + 85, y + 62, ms, 21, C["memory"], "bold")
+    g.rect(x, y, 175, 92, "white", C["neutral"], sw=2)
+    g.text(x + 87, y + 30, name, 23, C["text"], "bold")
+    g.text(x + 87, y + 64, ms, 23, C["memory"], "bold")
     if key in crit:
-        g.rect(x, y, 170, 90, "none", C["danger"], sw=4, first=2)
-edges = [(190, 165, 248, 95, True), (190, 165, 248, 235, False),
-         (420, 85, 478, 155, True), (420, 245, 478, 180, False),
-         (650, 165, 708, 165, True)]
+        g.rect(x, y, 175, 92, "none", C["danger"], sw=4, first=2)
+edges = [(185, 142, 243, 60, True), (185, 142, 243, 232, False),
+         (420, 52, 478, 125, True), (420, 232, 478, 160, False),
+         (655, 142, 713, 142, True)]
 for x1, y1, x2, y2, c in edges:
     g.line(x1, y1, x2, y2, C["neutral"], sw=2.5)
     if c:
         g.line(x1, y1, x2, y2, C["danger"], sw=3.5, first=2)
-g.text(795, 270, "Critical path", 18, C["danger"], "bold", first=2)
-g.text(795, 300, "50 + 110 + 180 + 30", 18, C["danger"], "bold", first=2)
+g.text(890, 222, "Critical path", 20, C["danger"], "bold", "end", first=2)
+g.text(890, 252, f"{K.RET} + {K.TOOL_A} + {K.GEN} + {K.VER} = {K.CRIT} ms", 20, C["danger"],
+       "bold", "end", first=2)
 # step 3: what can go wrong at each interface
-for x, y in ((219, 130), (449, 120), (449, 212)):
+for x, y in ((214, 101), (449, 88), (449, 196)):
     g.circle(x, y, 13, C["danger"], C["danger"], first=3)
     g.text(x, y, "×", 20, "white", "bold", first=3)
-g.text(105, 95, "invented tool name", 17, C["danger"], "bold", first=3)
-g.text(520, 100, "malformed JSON", 17, C["danger"], "bold", first=3)
-g.text(470, 240, "timeout", 17, C["danger"], "bold", "start", first=3)
+g.text(10, 70, "invented tool name", 19, C["danger"], "bold", "start", first=3)
+g.text(560, 66, "malformed JSON", 19, C["danger"], "bold", "start", first=3)
+g.text(468, 236, "timeout", 19, C["danger"], "bold", "start", first=3)
 g.write("dag", 3)
 
 # =============================================================================
-# From one node to a fleet (frame 27)
+# From one node to a fleet (frame 27).
+# Slot 0.58 textwidth x 4.8 cm: canvas 900 x 480, 27 px renders near 7.4 pt.
 # =============================================================================
-g = Svg(900, 360)
+g = Svg(900, 480)
 
 
 def node(x, y, s, first=1, last=99, hl=False):
@@ -446,55 +528,71 @@ def node(x, y, s, first=1, last=99, hl=False):
            rx=2, first=first, last=last)
 
 
-node(150, 100, 3, last=1)
-g.text(255, 300, "One node", 22, C["text"], "bold", last=1)
+node(60, 90, 4.4, last=1)
+g.text(214, 440, "One node", 27, C["text"], "bold", last=1)
 for r in range(4):
-    for c in range(5):
-        node(20 + c * 98, 20 + r * 76, 1, first=2, hl=(r == 1 and c == 1))
-        if c < 4:
-            g.line(20 + c * 98 + 70, 45 + r * 76, 20 + (c + 1) * 98, 45 + r * 76,
-                   C["network"], sw=2, arrow=False, first=2)
+    for c in range(4):
+        node(10 + c * 108, 10 + r * 100, 1.15, first=2, hl=(r == 1 and c == 1))
+        if c < 3:
+            g.line(10 + c * 108 + 80, 39 + r * 100, 10 + (c + 1) * 108, 39 + r * 100,
+                   C["network"], sw=2.5, arrow=False, first=2)
     if r < 3:
-        for c in range(5):
-            g.line(55 + c * 98, 70 + r * 76, 55 + c * 98, 96 + r * 76, C["network"],
-                   sw=2, arrow=False, first=2)
-g.text(255, 340, "A fleet: nodes joined by a network", 21, C["network"], "bold", first=2)
-rows = [("Bandwidth", "HBM inside the node", "+ network bisection"),
+        for c in range(4):
+            g.line(50 + c * 108, 68 + r * 100, 50 + c * 108, 110 + r * 100, C["network"],
+                   sw=2.5, arrow=False, first=2)
+g.text(214, 440, "A fleet: nodes on a network", 27, C["network"], "bold", first=2)
+rows = [("Bandwidth", "HBM in the node", "+ network bisection"),
         ("A failure", "an exception", "routine: fault tolerance"),
         ("Progress", "a step", "coordination")]
-for i, (head, one, many) in enumerate(rows):
-    y = 60 + i * 100
-    g.text(530, y, head, 24, CRIMSON, "bold", "start")
-    g.text(530, y + 34, one, 23, C["text"], "normal", "start", last=1)
-    g.text(530, y + 34, many, 23, C["network"], "bold", "start", first=2)
+for i, (head_, one, many) in enumerate(rows):
+    y = 40 + i * 150
+    g.text(475, y, head_, 29, CRIMSON, "bold", "start")
+    g.text(475, y + 44, one, 27, C["text"], "normal", "start", last=1)
+    g.text(475, y + 44, many, 27, C["network"], "bold", "start", first=2)
 g.write("fleet", 2)
 
 # =============================================================================
-# The voice-assistant request through four lighthouses (frame 28)
+# The voice-assistant request through four lighthouses (frame 30).
+# Slot 0.95 textwidth x 3.9 cm: canvas 900 x 248, 17 px renders near 7.6 pt.
+# The slide places one photo above each column (x = 2 + 228 i, width 215).
 # =============================================================================
-g = Svg(900, 400)
-stages = [("Wake word", "KWS, microcontroller", ["200 KB INT8", "in 1 MB flash", "20 MFLOP",
+g = Svg(900, 248)
+stages = [("Wake word", "KWS, microcontroller", ["200 KB INT8 in 1 MB", "20 MFLOP",
                                                  "milliwatts"], "Power", C["danger"]),
-          ("Front end", "MobileNetV2-sized, phone", ["600 MFLOP", "3.5 MB INT8", "5 W"],
+          ("Front end", "MobileNetV2-size, phone", ["600 MFLOP", "3.5 MB INT8", "5 W"],
            "Compute", C["compute"]),
           ("Ranking", "DLRM, cloud", ["100 GB of tables", "one H100: 80 GB"],
            "Capacity", C["network"]),
-          ("Reply", "GPT-2, cloud H100", ["3 GB per token", "0.9 ms floor",
-                                          "295× compute floor"], "Bandwidth", C["memory"])]
+          ("Reply", "GPT-2, cloud H100", [f"{K.GPT2_BYTES / 1e9:.0f} GB per token",
+                                             f"{K.GPT2_MEM_MS:.1f} ms floor",
+                                             f"{K.GPT2_MEM_MS / K.GPT2_COMP_MS:.0f}× compute floor"],
+           "Bandwidth", C["memory"])]
 for i, (name, sub, nums, bind, col) in enumerate(stages):
-    x = 15 + i * 223
-    g.rect(x, 20, 198, 250, "white", C["neutral"], sw=2)
-    g.text(x + 99, 50, name, 22, CRIMSON, "bold")
-    g.text(x + 99, 80, sub, 15, C["neutral"])
+    x = 2 + i * 228
+    g.rect(x, 2, 215, 180, "white", C["neutral"], sw=2)
+    g.text(x + 107, 26, name, 22, CRIMSON, "bold")
+    g.text(x + 107, 54, sub, 17, C["neutral"])
     for j, s in enumerate(nums):
-        g.text(x + 99, 125 + j * 34, s, 18, C["text"])
+        g.text(x + 107, 90 + j * 28, s, 19, C["text"])
     if i < 3:
-        g.line(x + 200, 145, x + 221, 145, C["neutral"], sw=2.5)
-    g.rect(x + 14, 295, 170, 60, "white", C["neutral"], sw=1.5, dash="5 4", last=i + 1)
-    g.text(x + 99, 325, "???", 24, C["danger"], "bold", last=i + 1)
-    g.rect(x + 14, 295, 170, 60, col, col, first=i + 2)
-    g.text(x + 99, 325, bind, 24, "white", "bold", first=i + 2)
-g.text(450, 383, "binding term", 15, C["neutral"], italic=True)
+        g.line(x + 216, 92, x + 227, 92, C["neutral"], sw=2.5)
+    g.rect(x + 12, 194, 191, 50, "white", C["neutral"], sw=1.5, dash="5 4", last=i + 1)
+    g.text(x + 107, 219, "binding term?", 20, C["danger"], "bold", last=i + 1)
+    g.rect(x + 12, 194, 191, 50, col, col, first=i + 2)
+    g.text(x + 107, 219, bind, 24, "white", "bold", first=i + 2)
 g.write("voice", 5)
+
+# =============================================================================
+# Text-free thumbnails for goals, takeaways, recall, and part locators: each
+# keeps its figure's shapes with every word replaced by a faint bar.
+# =============================================================================
+import subprocess  # noqa: E402
+
+THUMBS = ["chain_step2.svg", "chain_step3.svg", "roofline_step3.svg", "cycle_step2.svg",
+          "mtbf.svg", "data_wall_step2.svg"] + \
+         [f"cycle_part{p}.svg" for p in range(1, 5)]
+subprocess.run([sys.executable, str(Path(__file__).resolve().parents[3] / "tools" /
+                                    "greek_thumbs.py")] + [str(out / t) for t in THUMBS],
+               check=True)
 
 print("figures written to", out)
