@@ -3,6 +3,108 @@ title: "Tutorials"
 subtitle: "Learn ML systems reasoning through the 22 Systems Walls."
 ---
 
+```{python}
+#| echo: false
+#| output: false
+import mlsysim
+from mlsysim import Hardware, Models, Systems, Infrastructure
+from mlsysim.core.units import Q_
+from mlsysim.systems.types import Fleet, Node, NetworkFabric
+from mlsysim.solvers import (
+    ServingModel, SingleNodeModel, TransformationModel,
+    DistributedModel, ReliabilityModel, CheckpointModel,
+    SustainabilityModel, InferenceScalingModel, EconomicsModel,
+    SensitivitySolver, SynthesisSolver,
+)
+
+# Tutorial 1: A100 vs H100
+_a100 = Hardware.Cloud.A100
+_h100 = Hardware.Cloud.H100
+_t1_flops_ratio = (_h100.compute.peak_flops / _a100.compute.peak_flops).to("dimensionless").magnitude
+_t1_bw_ratio = (_h100.memory.bandwidth / _a100.memory.bandwidth).to("dimensionless").magnitude
+
+# Tutorial 3: KV-Cache at 128K context
+_m8b = Models.Language.Llama3_8B
+_h100_cap_gib = _h100.memory.capacity.to("GiB").magnitude
+_h100_cap_gb = _h100.memory.capacity.to("GB").magnitude
+_t3_r128k = ServingModel().solve(model=_m8b, hardware=_h100, seq_len=131072, batch_size=1, precision="fp16")
+_t3_kv_128k_gb = _t3_r128k.kv_cache_size.to("GB").magnitude
+_t3_kv_128k_gib = _t3_r128k.kv_cache_size.to("GiB").magnitude
+_t3_bpt = 2 * 2 * _m8b.layers * _m8b.kv_heads * (_m8b.hidden_dim // _m8b.heads)
+_t3_max_users_128k = int((_h100.memory.capacity - _m8b.size_in_bytes("fp16")).to("byte").magnitude // (_t3_bpt * 131072))
+
+# Tutorial 4: Starving the GPU
+_t4_prof = SingleNodeModel().solve(model=Models.Vision.ResNet50, hardware=_a100, batch_size=256, precision="fp16")
+_t4_trans = TransformationModel().solve(
+    batch_size=256, sample_size_bytes=Q_("500 KB"),
+    cpu_throughput=Q_("2 GB/s"), accelerator_step_time=_t4_prof.latency,
+)
+_t4_gpu_ms = _t4_prof.latency.to("ms").magnitude
+_t4_cpu_ms = _t4_trans.transform_time.to("ms").magnitude
+_t4_gpu_util = _t4_trans.accelerator_utilization
+
+# Tutorial 6: Scaling to 1000 GPUs
+_m70b = Models.Language.Llama3_70B
+_dgx = Systems.Nodes.DGX_H100
+_ib = Systems.Fabrics.InfiniBand_NDR
+_fl1024 = Fleet(name="1024-GPU", node=_dgx, count=128, fabric=_ib)
+_t6_dist = DistributedModel().solve(model=_m70b, fleet=_fl1024, batch_size=1024, precision="fp16", tp_size=8, pp_size=1)
+_t6_rel = ReliabilityModel().solve(fleet=_fl1024, job_duration_hours=30 * 24, checkpoint_time_s=60.0)
+_t6_mtbf_h = _t6_rel.fleet_mtbf.to("hour").magnitude
+_t6_ckpt = CheckpointModel().solve(
+    model=_m70b, hardware=_dgx.accelerator, optimizer="adam",
+    checkpoint_interval_hours=_t6_rel.optimal_checkpoint_interval.to("hour").magnitude,
+)
+_t6_comm_loss_h = (1.0 - _t6_dist.scaling_efficiency) * (30 * 24)
+_t6_ckpt_int_h = _t6_rel.optimal_checkpoint_interval.to("hour").magnitude
+_t6_ckpt_loss_h = ((30 * 24) / _t6_ckpt_int_h) * (_t6_ckpt.write_time_seconds.to("second").magnitude / 3600.0) + _t6_rel.expected_failures * (_t6_ckpt_int_h / 2.0)
+_t6_ckpt_comm_ratio = _t6_ckpt_loss_h / _t6_comm_loss_h
+
+# Tutorial 7: Geography
+_fl256 = Fleet(name="256-GPU", node=_dgx, count=32, fabric=_ib)
+_sust = SustainabilityModel()
+_t7_q = _sust.solve(fleet=_fl256, duration_days=30, datacenter=Infrastructure.Grids.Quebec)
+_t7_p = _sust.solve(fleet=_fl256, duration_days=30, datacenter=Infrastructure.Grids.Poland)
+_t7_us = _sust.solve(fleet=_fl256, duration_days=30, datacenter=Infrastructure.Grids.US_Avg)
+_t7_carbon_quebec = _t7_q.carbon_footprint_kg / 1000.0
+_t7_carbon_poland = _t7_p.carbon_footprint_kg / 1000.0
+_t7_carbon_us = _t7_us.carbon_footprint_kg / 1000.0
+_t7_ci_ratio = Infrastructure.Grids.Poland.carbon_intensity_g_kwh / Infrastructure.Grids.Quebec.carbon_intensity_g_kwh
+_t7_carbon_ratio = _t7_carbon_poland / _t7_carbon_quebec
+
+# Tutorial 8: The $9M Question
+_cot = InferenceScalingModel()
+_econ = EconomicsModel()
+_t8_gpt4 = Models.Language.GPT4
+_t8_r1 = _cot.solve(model=_t8_gpt4, hardware=_h100, reasoning_steps=1, context_length=2048, precision="fp16")
+_t8_r8 = _cot.solve(model=_t8_gpt4, hardware=_h100, reasoning_steps=8, context_length=2048, precision="fp16")
+_t8_mult_k8 = (_t8_r8.total_reasoning_time / _t8_r1.total_reasoning_time).to("dimensionless").magnitude
+
+def _annual_tco_for(cot_res):
+    qt_s = cot_res.total_reasoning_time.to("s").magnitude
+    gpus = int(100 / (1.0 / qt_s)) + 1
+    fl = Fleet(
+        name="Serving",
+        node=Node(name="H100 Node", accelerator=_h100, accelerators_per_node=8, intra_node_bw=Q_("900 GB/s")),
+        count=max((gpus + 7) // 8, 1),
+        fabric=NetworkFabric(name="IB NDR", bandwidth=Q_("400 Gbps").to("GB/s")),
+    )
+    return _econ.solve(fleet=fl, duration_days=365).tco_usd
+
+_t8_tco_k1 = _annual_tco_for(_t8_r1)
+_t8_tco_k8 = _annual_tco_for(_t8_r8)
+_t8_70b_r1 = _cot.solve(model=_m70b, hardware=_h100, reasoning_steps=1, context_length=2048, precision="fp16")
+_t8_70b_r8 = _cot.solve(model=_m70b, hardware=_h100, reasoning_steps=8, context_length=2048, precision="fp16")
+_t8_tco_70b_k1 = _annual_tco_for(_t8_70b_r1)
+_t8_tco_70b_k8 = _annual_tco_for(_t8_70b_r8)
+
+# Tutorial 9: Sensitivity
+_t9_sens = SensitivitySolver().solve(model=_m8b, hardware=_a100, precision="fp16")
+_t9_bw_elast = _t9_sens.sensitivities["memory_bandwidth"] / (_t9_sens.perturbation_pct / 100.0)
+_t9_fl_elast = _t9_sens.sensitivities["peak_flops"] / (_t9_sens.perturbation_pct / 100.0)
+_t9_synth = SynthesisSolver().solve(model=_m70b, target_latency=Q_("50 ms"), precision="fp16")
+```
+
 These tutorials teach quantitative reasoning about ML infrastructure using
 **MLSys·im**, the first-principles analytical modeling framework behind the
 *Machine Learning Systems* textbook. They are organized by the six domains of the
@@ -16,9 +118,9 @@ jump to any domain of interest.
 
 - **Every tutorial runs on a laptop in under 30 seconds.** No GPU required.
 - **Code cells are executable.** Clone the repo and run them, or follow along on the website.
-- **Exercises ask for a prediction first, then a verification.** This builds intuition faster than reading alone.
+- **Every walkthrough pairs first-principles formulas with live solver output.** Compare analytical bounds directly against evaluated system profiles.
 - **Tutorials within a cluster build on each other**, but clusters are largely independent.
-- **Time estimates** are for reading + running code. Add 15–20 min to complete all exercises.
+- **Time estimates** cover reading the walkthrough and running the code cells.
 :::
 
 ---
@@ -59,9 +161,9 @@ These tutorials explore the three walls that constrain a single accelerator: **c
 
 ### 1 · The Memory Wall
 
-**Question:** *Why does 3.2× more FLOP/s not give a 3.2× speedup?*
+**Question:** *Why does `{python} f"{_t1_flops_ratio:.1f}×"` more FLOP/s not give a `{python} f"{_t1_flops_ratio:.1f}×"` speedup?*
 
-Compare A100 → H100 and discover that for LLM inference, bandwidth, not compute, is the binding constraint. The most important fallacy in ML systems.
+Compare A100 → H100 and discover that for LLM inference, bandwidth (`{python} f"{_t1_bw_ratio:.1f}×"`), not compute (`{python} f"{_t1_flops_ratio:.1f}×"`), is the binding constraint. The most important fallacy in ML systems.
 ⏱ ~15 min
 
 [Start Tutorial →](01_memory_wall.qmd)
@@ -87,7 +189,7 @@ The same model on the same GPU hits two different ceilings: prefill is compute-b
 
 **Question:** *What actually limits how many users I can serve concurrently?*
 
-At 128K context length, the KV-cache alone fills an 80 GB GPU. Explore how sequence length, batch size, and paged attention interact to constrain serving capacity.
+At 128K context length, a single user's GQA KV-cache takes `{python} f"{_t3_kv_128k_gb:.1f} GB"` (`{python} f"{_t3_kv_128k_gib:.0f} GiB"`), exceeding the model weights and capping an `{python} f"{_h100_cap_gib:.0f} GiB"` (`{python} f"{_h100_cap_gb:.0f} GB"`) GPU at `{python} f"{_t3_max_users_128k}"` concurrent users. Explore how sequence length, batch size, and paged attention interact to constrain serving capacity.
 ⏱ ~20 min
 
 [Start Tutorial →](03_kv_cache.qmd)
@@ -110,9 +212,9 @@ Even the fastest accelerator sits idle if the data pipeline cannot keep up. Thes
 
 ### 4 · Starving the GPU
 
-**Question:** *Why is my GPU utilization only 40%?*
+**Question:** *Why is my GPU utilization only `{python} f"{_t4_gpu_util:.0%}"`?*
 
-A100 compute takes 48 ms per step, but the CPU augmentation pipeline is the true bottleneck. The binding constraint is JPEG decoding, not silicon.
+A100 compute takes `{python} f"{_t4_gpu_ms:.1f} ms"` per step, but the CPU augmentation pipeline requires `{python} f"{_t4_cpu_ms:.0f} ms"`. The binding constraint is JPEG decoding, not silicon.
 ⏱ ~15 min
 
 [Start Tutorial →](04_starving_the_gpu.qmd)
@@ -162,7 +264,7 @@ Distributed training introduces three new walls: **communication overhead** (Wal
 
 **Question:** *Where does my training efficiency disappear at scale?*
 
-At 1024 GPUs, AllReduce communication overhead erodes scaling efficiency. The real hidden cost, however, is reliability: cluster MTBF drops to ~20 hours, forcing frequent checkpoints that consume more wall-clock time than communication itself.
+At 1024 GPUs, AllReduce communication overhead erodes scaling efficiency. The real hidden cost, however, is reliability: cluster MTBF drops to `{python} f"{_t6_mtbf_h:.1f} hours"`, forcing frequent checkpoints that consume `{python} f"{_t6_ckpt_comm_ratio:.1f}×"` more wall-clock time than communication itself.
 ⏱ ~20 min
 
 [Start Tutorial →](06_scaling_1000_gpus.qmd)
@@ -174,7 +276,7 @@ At 1024 GPUs, AllReduce communication overhead erodes scaling efficiency. The re
 
 ## Cluster 5: Ops (Walls 17–20) {#sec-ops}
 
-*What does it cost—in dollars, carbon, and water?*
+*What does it cost, in dollars, carbon, and water?*
 
 Operational walls cover **energy** (Wall 17), **sustainability** (Wall 18), **economic cost** (Wall 19), and **safety** (Wall 20). These are the walls that determine whether a technically feasible system is actually deployable.
 
@@ -187,7 +289,7 @@ Operational walls cover **energy** (Wall 17), **sustainability** (Wall 18), **ec
 
 **Question:** *Does it matter where I train?*
 
-Same 256-GPU cluster, same model, same duration: 412 tonnes CO₂ in Iowa vs. 10 tonnes in Québec. A 40× difference from geography alone.
+Same 256-GPU cluster, same model, same duration: `{python} f"{_t7_carbon_poland:.1f} tonnes"` CO₂ in Poland vs. `{python} f"{_t7_carbon_quebec:.1f} tonnes"` in Québec (`{python} f"{_t7_carbon_us:.1f} tonnes"` US average). A `{python} f"{_t7_ci_ratio:.0f}×"` grid carbon-intensity gap (`{python} f"{_t7_carbon_ratio:.0f}×"` with PUE) from geography alone.
 ⏱ ~15 min
 
 [Start Tutorial →](07_geography.qmd)
@@ -200,7 +302,7 @@ Same 256-GPU cluster, same model, same duration: 412 tonnes CO₂ in Iowa vs. 10
 
 **Question:** *How much does chain-of-thought reasoning actually cost?*
 
-K=8 reasoning steps multiply the serving bill by 7.6×, from $1.2M to $9.1M per year. A seemingly simple algorithmic choice becomes a capital expenditure decision.
+K=8 reasoning steps multiply per-query latency and fleet cost by `{python} f"{_t8_mult_k8:.1f}×"`, scaling annual 100-QPS serving TCO from `{python} f"${_t8_tco_70b_k1/1e6:.1f}M"` to `{python} f"${_t8_tco_70b_k8/1e6:.1f}M"` for `{python} _m70b.name` (and from `{python} f"${_t8_tco_k1/1e6:.0f}M"` to `{python} f"${_t8_tco_k8/1e6:.0f}M"` for unsharded `{python} _t8_gpt4.name`). A seemingly simple algorithmic choice becomes a capital expenditure decision.
 ⏱ ~20 min
 
 [Start Tutorial →](08_nine_million_dollar.qmd)
@@ -214,7 +316,7 @@ K=8 reasoning steps multiply the serving bill by 7.6×, from $1.2M to $9.1M per 
 
 *Cross-cutting diagnostics. Which knob matters most?*
 
-These walls provide the tools for **sensitivity analysis** (Wall 21) and **synthesis** (Wall 22)—the ability to ask "what if?" and "what must be true?"
+These walls provide the tools for **sensitivity analysis** (Wall 21) and **synthesis** (Wall 22): the ability to ask "what if?" and "what must be true?"
 
 ::: {.sim-grid .sim-grid-2}
 
@@ -225,7 +327,7 @@ These walls provide the tools for **sensitivity analysis** (Wall 21) and **synth
 
 **Question:** *Should I buy more FLOPS or more bandwidth?*
 
-∂T/∂BW = −0.88 vs. ∂T/∂FLOPS = −0.06. For LLM inference, a 10% bandwidth increase yields 15× more improvement than a 10% compute increase. Then use inverse Roofline to derive the minimum hardware spec from an SLA.
+$\partial \ln T / \partial \ln \text{BW} = `{python} f"{_t9_bw_elast:.2f}"`$ vs. $\partial \ln T / \partial \ln \text{FLOPS} = `{python} f"{_t9_fl_elast:.2f}"`$. For `{python} _m8b.name` decode on `{python} _a100.name`, a `{python} f"{_t9_sens.perturbation_pct:.0f}%"` bandwidth increase cuts latency by `{python} f"{abs(_t9_sens.sensitivities['memory_bandwidth']):.1%}"`, while more compute yields `{python} f"{abs(_t9_sens.sensitivities['peak_flops']):.1%}"`. Then use inverse Roofline to derive the `{python} f"{_t9_synth.required_bw.to('TB/s'):~.1f}"` bandwidth floor from a 50 ms SLA.
 ⏱ ~20 min
 
 [Start Tutorial →](09_sensitivity.qmd)
@@ -371,21 +473,21 @@ after the capstone.
 | Time | Tutorial | Core Message | Format |
 |------|----------|-------------|--------|
 | 0–15 min | **0. Hello, Roofline** | The equation, the tool, the regime | Live coding, audience predicts |
-| 15–35 min | **1. The Memory Wall** | Why 3.2× FLOPS ≠ 3.2× speedup | Live coding, audience verifies |
+| 15–35 min | **1. The Memory Wall** | Why `{python} f"{_t1_flops_ratio:.1f}×"` FLOPS ≠ `{python} f"{_t1_flops_ratio:.1f}×"` speedup | Live coding, audience verifies |
 | 35–45 min | **Break + Q&A** | | |
-| 45–60 min | **9. Sensitivity** | Bandwidth is 15× more valuable | Live coding + derivation |
+| 45–60 min | **9. Sensitivity** | Bandwidth dominates compute in decode | Live coding + derivation |
 | 60–75 min | **6. Scaling to 1000 GPUs** | Reliability dominates communication | Pre-computed results, discussion |
 | 75–85 min | **12. Full-Stack Audit** | Composing all six domains | Summary table walkthrough |
-| 85–90 min | **Where to learn more** | Take-home exercises | |
+| 85–90 min | **Where to learn more** | Follow-up walkthroughs and resources | |
 
 *Why 5 tutorials, not 8:* Each tutorial needs enough time for the
-predict-compute-reflect cycle to land. Tutorials 2, 5, and 7 are available as
-take-home exercises for attendees who want to continue after the session.
+predict-compute-reflect cycle to land. Tutorials 2, 5, and 7 provide
+self-paced follow-up walkthroughs after the session.
 
 ### Path D+: Half-Day Workshop (3 hours)
 > *"I'm attending a half-day conference tutorial."*
 
-The full 12-tutorial sequence with hands-on exercises. All 8 tutorials from the
+The full 12-tutorial sequence with live code walkthroughs. All 8 tutorials from the
 original conference path plus Tutorials 3 (KV-Cache) and 10 (Wafer-Scale), with
 15-minute breaks between clusters.
 

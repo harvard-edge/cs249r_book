@@ -74,9 +74,9 @@ A model's **arithmetic intensity** (FLOPs ÷ Bytes) determines which ceiling it 
 ::: {.callout-note}
 ## Conventions Used in These Tutorials
 
-- **FLOP counting:** These tutorials count one multiply-accumulate (MAC) as **1 FLOP**, consistent with the MLSys Zoo constants. Industry and vendor datasheets typically count 1 MAC = 2 FLOPs. This factor of 2 shifts the ridge point: the A100's ridge is ~156 FLOP/byte in this convention but ~312 in the 2-FLOP convention. Always check which convention a paper uses before comparing numbers.
-- **Peak specs:** The tutorials use vendor-published peak Tensor Core throughput and peak HBM bandwidth. Real sustained performance is typically 70–90% of these peaks.
-- **Units:** `Q_` creates physical quantities with units (e.g., `Q_("2 TB/s")`). The `~` in format strings like `:~.2f` shows abbreviated unit names.
+- **FLOP counting:** Both the MLSys Zoo and vendor datasheets count one multiply-accumulate (MAC) as **2 FLOPs** (one multiply plus one add). Some academic papers count 1 MAC = 1 FLOP, which halves both model FLOPs and hardware peak FLOP/s. Check which convention a paper uses before comparing raw numbers.
+- **Peak vs. sustained specs:** Passing `efficiency=1.0` to `Engine.solve` evaluates the theoretical roofline ceiling using vendor-published peak Tensor Core throughput and peak HBM bandwidth. Real workloads typically sustain 40–70% of peak (`Engine.solve` defaults to `efficiency=0.5` when `efficiency` is omitted).
+- **Units:** `Q_` creates physical quantities with units (e.g., `Q_("2 TB/s")`). The `~` in format strings like `:~.2f` formats abbreviated unit symbols.
 :::
 
 ---
@@ -89,6 +89,21 @@ A model's **arithmetic intensity** (FLOPs ÷ Bytes) determines which ceiling it 
 # Build-system path setup — hidden from readers
 import mlsysim  # installed via `pip install mlsysim` (see workflow)
 Engine = mlsysim.Engine
+
+_m = mlsysim.Models.Vision.ResNet50
+_hw = mlsysim.Hardware.Cloud.A100
+_params_m = _m.parameters.to("dimensionless").magnitude / 1e6
+_flops_g = _m.inference_flops.to("GFLOPs").magnitude
+_weight_mb = (_m.parameters.to("dimensionless").magnitude * 2) / 1e6
+_peak_tflops = _hw.compute.peak_flops.to("TFLOPs/s").magnitude
+_bw_tbs = _hw.memory.bandwidth.to("TB/s").magnitude
+_bw_gbs = _hw.memory.bandwidth.to("GB/s").magnitude
+_cap_gb = _hw.memory.capacity.to("GB").magnitude
+_ridge = (_hw.compute.peak_flops / _hw.memory.bandwidth).to("flop/byte").magnitude
+_p1 = Engine.solve(model=_m, hardware=_hw, batch_size=1, precision="fp16", efficiency=1.0)
+_ai_b1 = _p1.arithmetic_intensity.to("flop/byte").magnitude
+_t_mem_ms = ((_m.parameters * mlsysim.Q_("2 byte")) / _hw.memory.bandwidth).to("ms").magnitude
+_t_cmp_ms = (_m.inference_flops / _hw.compute.peak_flops).to("ms").magnitude
 ```
 
 After `pip install mlsysim`, the import is two lines:
@@ -107,10 +122,7 @@ Pull vetted specifications from the **MLSys Zoo** instead of searching datasheet
 ```{python}
 from mlsysim.show import table, info
 
-# ResNet-50: 25M parameters, ~4.1 GFLOP per inference (counting multiply-accumulate as 1 FLOP)
 model = mlsysim.Models.Vision.ResNet50
-
-# NVIDIA A100: 312 TFLOP/s (FP16), 2.0 TB/s HBM2e, 80 GB
 hardware = mlsysim.Hardware.Cloud.A100
 
 info("Model",
@@ -124,6 +136,8 @@ info("Hardware",
      HBM_BW=hardware.memory.bandwidth.to('TB/s'))
 ```
 
+In the Zoo, `{python} f"{_m.name}"` has `{python} f"{_params_m:.1f}M"` parameters and `{python} f"{_flops_g:.1f} GFLOP"` per single-image forward pass, while the `{python} f"{_hw.name}"` provides `{python} f"{_peak_tflops:.0f} TFLOP/s"` of FP16 Tensor Core throughput, `{python} f"{_bw_tbs:.2f} TB/s"` (`{python} f"{_bw_gbs:.0f} GB/s"`) of HBM2e bandwidth, and `{python} f"{_cap_gb:.0f} GB"` of capacity.
+
 ---
 
 ## 3. Solve: One Line, One Answer
@@ -132,34 +146,36 @@ The `Engine.solve` method applies the roofline model. It calculates which of the
 speed limits the workload hits first and returns latency, throughput, and the bottleneck classification.
 
 ```{python}
-# One line: model + hardware + config → performance prediction
+# One line: model + hardware + config → theoretical roofline prediction
 profile = Engine.solve(
     model=model,
     hardware=hardware,
     batch_size=1,          # Single image inference
-    precision="fp16"       # Half-precision (16-bit floating point)
+    precision="fp16",      # Half-precision (16-bit floating point)
+    efficiency=1.0         # Theoretical roofline ceiling
 )
 
 info(Bottleneck=profile.bottleneck,
+     Arithmetic_Intensity=f"{profile.arithmetic_intensity.to('flop/byte'):~.1f}",
      Latency=profile.latency.to('ms'),
      Throughput=f"{profile.throughput:.0f} images/sec")
 ```
 
-At batch size 1, ResNet-50 performs ~4.1 GFLOP but must load ~50 MB of weights (25M params × 2 bytes). That gives an arithmetic intensity of ~82 FLOP/byte, close to the A100's ridge point of ~156 FLOP/byte. At this operating point, the two ceilings are nearly balanced, and the bottleneck label depends on exact assumptions. The main takeaway is that **most of the A100's 312 TFLOP/s is idle**; exploiting it requires larger batches.
+At batch size 1, ResNet-50 performs `{python} f"{_flops_g:.1f} GFLOP"` and transfers both model weights (`{python} f"{_weight_mb:.1f} MB"` at 2 bytes per parameter) and intermediate activations, yielding an arithmetic intensity of `{python} f"{_ai_b1:.1f} FLOP/byte"`. That sits just below the A100's theoretical ridge point of `{python} f"{_ridge:.1f} FLOP/byte"`, making batch-1 inference **memory-bound**.
 
-**Sanity check:** We can verify this with the equation from the Background. Under the 1-FLOP-per-MAC convention used here, the A100's peak is 156 TFLOP/s (the vendor-reported 312 TFLOP/s uses the 2-FLOP convention):
+**Sanity check:** The weight-transfer and compute bounds from the Background equations confirm why the two ceilings are nearly balanced at batch size 1:
 
-- $T_{\text{memory}} = 50\;\text{MB} \div 2.0\;\text{TB/s} = 0.025\;\text{ms}$
-- $T_{\text{compute}} = 4.1\;\text{GFLOP} \div 156\;\text{TFLOP/s} = 0.026\;\text{ms}$
-- $T = \max(0.025, 0.026) = 0.026\;\text{ms}$ → the two ceilings are nearly equal ✓
+- $T_{\text{memory (weights)}} = `{python} f"{_weight_mb:.1f}"`\;\text{MB} \div `{python} f"{_bw_tbs:.2f}"`\;\text{TB/s} = `{python} f"{_t_mem_ms:.3f}"`\;\text{ms}$
+- $T_{\text{compute}} = `{python} f"{_flops_g:.1f}"`\;\text{GFLOP} \div `{python} f"{_peak_tflops:.0f}"`\;\text{TFLOP/s} = `{python} f"{_t_cmp_ms:.3f}"`\;\text{ms}$
+- Including activation traffic brings total memory time to $`{python} f"{_p1.latency.to('ms').magnitude:.3f}"`\;\text{ms} > T_{\text{compute}}$, placing the operating point just on the memory-bound side of the ridge.
 
-ResNet-50 at batch 1 sits right at the ridge point. When $T_{\text{compute}} \approx T_{\text{memory}}$, the regime label is ambiguous, and that ambiguity is the lesson: the ridge is a *boundary*, not a wall. Small differences in convention or measurement can flip the label. `Engine.solve` handles the convention internally, so its reported latency may differ slightly from this back-of-envelope estimate. The skill that matters is computing the ratio and knowing *where the workload stands*.
+ResNet-50 at batch 1 sits right next to the ridge point. When $T_{\text{compute}} \approx T_{\text{memory}}$, the operating point is near the boundary between the two regimes.
 
-**Computing arithmetic intensity from first principles:** This skill extends the analysis
-to *any* model, not only those in the Zoo. The formula is FLOPs ÷ Bytes. Compare two different workloads:
+**Computing arithmetic intensity from first principles:** This ratio extends the analysis
+to any model, not only those in the Zoo. The formula is FLOPs ÷ Bytes. Compare two different workloads at batch size 1:
 
-- **ResNet-50 (batch 1):** 4.1 GFLOP ÷ 50 MB = **82 FLOP/byte** → near the A100 ridge (156), balanced
-- **LLM decode (batch 1):** Each token does ~2 FLOP per parameter but loads 2 bytes per parameter = **1 FLOP/byte** → deeply memory-bound (explored in [Tutorial 2](02_two_phases.qmd))
+- **ResNet-50 (batch 1):** `{python} f"{_flops_g:.1f} GFLOP"` across weights and activations = **`{python} f"{_ai_b1:.1f} FLOP/byte"`** → just below the A100 ridge (`{python} f"{_ridge:.1f} FLOP/byte"`), near the crossover
+- **LLM decode (batch 1):** Each token performs 2 FLOPs per parameter and loads 2 bytes per parameter = **1.0 FLOP/byte** → deeply memory-bound (explored in [Tutorial 2](02_two_phases.qmd))
 
 For an unfamiliar model, compute this ratio first. It reveals the regime
 before any code runs.
@@ -169,7 +185,7 @@ before any code runs.
 ## 4. Sweep Batch Size: Watch the Regime Shift
 
 Increasing the batch size shows when the bottleneck changes. More images per
-batch means more computation per weight load, which increases arithmetic intensity.
+batch means more computation per weight load, which increases arithmetic intensity past the `{python} f"{_ridge:.1f} FLOP/byte"` ridge point.
 
 ```{python}
 rows = []
@@ -178,14 +194,21 @@ for batch in [1, 4, 16, 32, 64, 128, 256]:
         model=model,
         hardware=hardware,
         batch_size=batch,
-        precision="fp16"
+        precision="fp16",
+        efficiency=1.0
     )
-    rows.append([batch, p.bottleneck, f"{p.throughput:.0f}/s", p.latency.to('ms')])
+    rows.append([
+        batch,
+        p.bottleneck,
+        f"{p.arithmetic_intensity.to('flop/byte'):~.1f}",
+        f"{p.throughput:.0f}/s",
+        p.latency.to('ms'),
+    ])
 
-table(["Batch", "Bottleneck", "Throughput", "Latency"], rows)
+table(["Batch", "Bottleneck", "Arithmetic Intensity", "Throughput", "Latency"], rows)
 ```
 
-We can visualize this transition on the Roofline model. The plot shows where the model sits relative to the "ridge point" (the crossover between memory-bound and compute-bound regimes).
+The roofline plot below shows where batch-1 ResNet-50 sits relative to the ridge point (the crossover between memory-bound and compute-bound regimes).
 
 ```{python}
 #| fig-width: 7
@@ -213,50 +236,9 @@ side of the ridge the workload is on.
 
 A common mistake is selecting hardware based on peak FLOP/s alone. LLM decode at batch
 size 1 performs about 1 FLOP per byte loaded, so it is deeply memory-bound, and the
-312 TFLOP/s compute ceiling is irrelevant. A GPU with half the FLOP/s but the same
+`{python} f"{_peak_tflops:.0f} TFLOP/s"` compute ceiling is irrelevant. A GPU with half the FLOP/s but the same
 bandwidth would deliver *identical* decode latency. Always
 check the regime before comparing specs.
-:::
-
----
-
-## Practice
-
-::: {.callout-caution}
-## Exercises
-
-**Exercise 1: Predict before you compute.**
-Before running any code: will ResNet-50 at `batch_size=64` be memory-bound or compute-bound
-on the A100? *Write your answer as one of: "memory-bound" or "compute-bound", plus one
-sentence of reasoning.* Then verify with `Engine.solve(...)`.
-Were you right? What would you need to know to predict correctly?
-
-**Exercise 2: Change the hardware.**
-Run the same batch size sweep on the H100 (`mlsysim.Hardware.Cloud.H100`). The H100 has
-3.2× more FLOP/s than the A100 but only 1.7× more bandwidth. How does the ridge point
-shift? At what batch size does the crossover happen on the H100 vs. the A100?
-
-**Exercise 3: Change the model.**
-Replace ResNet-50 with Llama-3 8B (`mlsysim.Models.Language.Llama3_8B`). At batch size 1, is it
-memory-bound or compute-bound? Does the answer surprise you? Why do large language models
-behave differently from CNNs at the same batch size?
-
-**Self-check:** If a model's arithmetic intensity is 50 FLOP/byte and the hardware's ridge
-point is 156 FLOP/byte, is the model memory-bound or compute-bound?
-:::
-
----
-
-## Key Takeaways
-
-::: {.callout-tip}
-## Summary
-
-- **The roofline model** predicts performance by comparing arithmetic intensity to the hardware's ridge point
-- **Memory-bound** means the GPU is waiting for data; **compute-bound** means it is saturating arithmetic units
-- **Batch size** is the primary knob for shifting between regimes; larger batches increase arithmetic intensity
-- **The ridge point** ($\text{Peak FLOP/s} \div \text{Peak BW}$) is the crossover, the most efficient operating point
-- **`Engine.solve`** is the foundational API: model + hardware + config → bottleneck, latency, throughput
 :::
 
 ---

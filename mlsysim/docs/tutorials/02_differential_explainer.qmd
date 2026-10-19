@@ -5,13 +5,43 @@ description: "Learn how to use the DifferentialExplainer to automatically compar
 categories: ["analysis", "intermediate"]
 ---
 
+```{python}
+#| echo: false
+#| output: false
+import mlsysim
+from mlsysim.engine.engine import Engine
+from mlsysim.engine.explainers import DifferentialExplainer
+
+_a100 = mlsysim.Hardware.Cloud.A100
+_h100 = mlsysim.Hardware.Cloud.H100
+_flops_ratio = (_h100.compute.peak_flops / _a100.compute.peak_flops).to("dimensionless").magnitude
+_bw_ratio = (_h100.memory.bandwidth / _a100.memory.bandwidth).to("dimensionless").magnitude
+
+_m_llm = mlsysim.Models.Language.Llama3_8B
+_prof_a100 = Engine.solve(model=_m_llm, hardware=_a100, batch_size=1)
+_prof_h100 = Engine.solve(model=_m_llm, hardware=_h100, batch_size=1)
+_lat_a100_ms = _prof_a100.latency.to("ms").magnitude
+_lat_h100_ms = _prof_h100.latency.to("ms").magnitude
+_speedup_llm = _lat_a100_ms / _lat_h100_ms
+
+_m_cnn = mlsysim.Models.Vision.ResNet50
+_prof_a100_b256 = Engine.solve(model=_m_cnn, hardware=_a100, batch_size=256)
+_prof_h100_b256 = Engine.solve(model=_m_cnn, hardware=_h100, batch_size=256)
+_speedup_b256 = (_prof_a100_b256.latency / _prof_h100_b256.latency).to("dimensionless").magnitude
+
+_prof_a100_b1 = Engine.solve(model=_m_cnn, hardware=_a100, batch_size=1)
+_prof_h100_b1 = Engine.solve(model=_m_cnn, hardware=_h100, batch_size=1)
+_speedup_b1 = (_prof_a100_b1.latency / _prof_h100_b1.latency).to("dimensionless").magnitude
+```
+
 ## The Question
 
-An analytical comparison between an A100 and an H100 might report:
-- A100 Latency: 11.0 ms
-- H100 Latency: 8.0 ms
+An analytical comparison between an `{python} _a100.name` and an `{python} _h100.name` on `{python} _m_llm.name` at batch size 1 reports:
 
-The speedup is 1.4x, yet the hardware sheet says the H100 has 3.2x more FLOP/s. **How do we automatically explain this discrepancy to a user or a stakeholder without manually digging through the formulas?**
+- A100 Latency: `{python} f"{_lat_a100_ms:.2f} ms"`
+- H100 Latency: `{python} f"{_lat_h100_ms:.2f} ms"`
+
+The speedup is `{python} f"{_speedup_llm:.2f}×"`, yet the hardware specification sheet states that the H100 has `{python} f"{_flops_ratio:.1f}×"` more FLOP/s (and `{python} f"{_bw_ratio:.2f}×"` more HBM bandwidth). **How do we automatically explain this discrepancy to a user or a stakeholder without manually digging through the formulas?**
 
 ::: {.callout-note}
 ## Learning Objectives
@@ -23,9 +53,9 @@ The speedup is 1.4x, yet the hardware sheet says the H100 has 3.2x more FLOP/s. 
 
 ## 1. Setup
 
-Import the necessary modules. The tutorial uses the standard `Engine` to get the baseline and proposed profiles, and the new `DifferentialExplainer` to compare them.
+Import the necessary modules. The tutorial uses the standard `Engine` to get the baseline and proposed profiles, and the `DifferentialExplainer` to compare them.
 
-```python
+```{python}
 import mlsysim
 from mlsysim.engine.engine import Engine
 from mlsysim.engine.explainers import DifferentialExplainer
@@ -33,12 +63,12 @@ from mlsysim.engine.explainers import DifferentialExplainer
 
 ## 2. A Memory-Bound Upgrade (The Disappointment)
 
-The classic scenario is a hardware upgrade for LLM Inference at a low batch size.
+The classic scenario is a hardware upgrade for LLM inference at a low batch size. For `{python} _m_llm.name` at batch size 1, both GPUs sit in the memory-bound regime, so the `{python} f"{_speedup_llm:.2f}×"` speedup tracks the `{python} f"{_bw_ratio:.2f}×"` HBM bandwidth ratio rather than the `{python} f"{_flops_ratio:.1f}×"` compute ratio:
 
-```python
+```{python}
 model = mlsysim.Models.Language.Llama3_8B
 
-# Get our two profiles
+# Get the two profiles
 prof_a100 = Engine.solve(model=model, hardware=mlsysim.Hardware.Cloud.A100, batch_size=1)
 prof_h100 = Engine.solve(model=model, hardware=mlsysim.Hardware.Cloud.H100, batch_size=1)
 
@@ -51,24 +81,16 @@ explanation = DifferentialExplainer.compare_performance(
 print(explanation)
 ```
 
-**Output:**
-```text
-📊 Differential Analysis: Proposal vs. Baseline
-• Speedup: 1.39x
-• Baseline Regime: Memory Bound
-• Proposal Regime: Memory Bound
+## 3. Compute-Bound Scaling and Regime Shifts
 
-Analysis: The workload remained Memory Bound. The speedup is constrained strictly by the ratio of HBM bandwidth between the two configurations. Any additional compute capacity (FLOP/s) in the proposal was left unutilized.
-```
+For a high-intensity workload such as `{python} _m_cnn.name` at batch size 256, both GPUs operate in the compute-bound regime, unlocking a `{python} f"{_speedup_b256:.2f}×"` speedup that approaches the `{python} f"{_flops_ratio:.1f}×"` peak compute ratio:
 
-## 3. A Regime Shift (The Breakthrough)
+```{python}
+cnn = mlsysim.Models.Vision.ResNet50
 
-The next case increases the batch size significantly.
-
-```python
-# At batch size 256, the A100 is struggling with compute, but the H100 has plenty
-prof_a100_batch = Engine.solve(model=model, hardware=mlsysim.Hardware.Cloud.A100, batch_size=256)
-prof_h100_batch = Engine.solve(model=model, hardware=mlsysim.Hardware.Cloud.H100, batch_size=256)
+# At batch size 256, both GPUs are compute-bound
+prof_a100_batch = Engine.solve(model=cnn, hardware=mlsysim.Hardware.Cloud.A100, batch_size=256)
+prof_h100_batch = Engine.solve(model=cnn, hardware=mlsysim.Hardware.Cloud.H100, batch_size=256)
 
 explanation_batch = DifferentialExplainer.compare_performance(
     baseline=prof_a100_batch,
@@ -78,18 +100,19 @@ explanation_batch = DifferentialExplainer.compare_performance(
 print(explanation_batch)
 ```
 
-**Output:**
-```text
-📊 Differential Analysis: Proposal vs. Baseline
-• Speedup: 2.65x
-• Baseline Regime: Compute Bound
-• Proposal Regime: Compute Bound
+When an upgrade crosses the ridge point---such as `{python} _m_cnn.name` at batch size 1, where the `{python} _a100.name` is `{python} _prof_a100_b1.bottleneck`-bound (`{python} f"{_prof_a100_b1.latency.to('ms'):~.2f}"`) and the `{python} _h100.name`'s `{python} f"{_flops_ratio:.1f}×"` higher compute ceiling shifts the bottleneck to `{python} _prof_h100_b1.bottleneck` (`{python} f"{_prof_h100_b1.latency.to('ms'):~.2f}"`, a `{python} f"{_speedup_b1:.2f}×"` speedup)---`DifferentialExplainer` flags the **Regime Shift** automatically:
 
-Analysis: The workload remained Compute Bound. The speedup is constrained strictly by the ratio of peak arithmetic throughput (FLOP/s) between the two configurations. Additional memory bandwidth was not the limiting factor.
+```{python}
+prof_a100_b1 = Engine.solve(model=cnn, hardware=mlsysim.Hardware.Cloud.A100, batch_size=1)
+prof_h100_b1 = Engine.solve(model=cnn, hardware=mlsysim.Hardware.Cloud.H100, batch_size=1)
+
+print(DifferentialExplainer.compare_performance(baseline=prof_a100_b1, proposal=prof_h100_b1))
 ```
 
-## Key Takeaways
+---
 
-- **The Differential Explainer** takes the cognitive load off the user by explicitly stating *why* an upgrade behaved the way it did.
-- It detects **Regime Shifts**, showing when a hardware upgrade actually solved the bottleneck.
-- This tool is well suited to embedding in CI/CD pipelines (e.g., leaving a comment on a GitHub PR explaining why a new model architecture will slow down production).
+## Next Steps
+
+- **[The Memory Wall](01_memory_wall.qmd)**: Explore the roofline physics behind memory-bound vs. compute-bound upgrades
+- **[Where to Invest: Sensitivity Analysis](09_sensitivity.qmd)**: Quantify partial derivatives of latency with respect to each hardware parameter
+- **[Composable Pipelines & Callbacks](01_pipeline_callbacks.qmd)**: Chain solvers and log evaluations in automated workflows

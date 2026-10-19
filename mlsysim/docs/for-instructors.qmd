@@ -1,7 +1,52 @@
 ---
 title: "For Instructors"
-subtitle: "Reproducible, hardware-independent exercises, paired with 35 lecture decks and 266 diagrams."
+subtitle: "Reproducible, hardware-independent problem sets, paired with 35 lecture decks and 266 diagrams."
 ---
+
+```{python}
+#| echo: false
+#| output: false
+import mlsysim
+from mlsysim.physics import calc_kv_cache_size
+
+Engine = mlsysim.Engine
+_resnet = mlsysim.Models.Vision.ResNet50
+_gpt2 = mlsysim.Models.Language.GPT2
+_llama70b = mlsysim.Models.Language.Llama3_70B
+_a100 = mlsysim.Hardware.Cloud.A100
+_h100 = mlsysim.Hardware.Cloud.H100
+_grids = mlsysim.Infrastructure.Grids
+
+_p_a100_b1 = Engine.solve(model=_resnet, hardware=_a100, batch_size=1, precision="fp16")
+_p_h100_b1 = Engine.solve(model=_resnet, hardware=_h100, batch_size=1, precision="fp16")
+_p_a100_b256 = Engine.solve(model=_resnet, hardware=_a100, batch_size=256, precision="fp16")
+_p_h100_b256 = Engine.solve(model=_resnet, hardware=_h100, batch_size=256, precision="fp16")
+_speedup_b1 = (_p_a100_b1.latency / _p_h100_b1.latency).to("dimensionless").magnitude
+_speedup_b256 = (_p_a100_b256.latency / _p_h100_b256.latency).to("dimensionless").magnitude
+
+_ci_iowa = _grids.Iowa.carbon_intensity_g_kwh
+_ci_quebec = _grids.Quebec.carbon_intensity_g_kwh
+_ci_us = _grids.US_Avg.carbon_intensity_g_kwh
+_ci_poland = _grids.Poland.carbon_intensity_g_kwh
+_iowa_quebec_ratio = _ci_iowa / _ci_quebec
+_poland_quebec_ratio = _ci_poland / _ci_quebec
+
+_kv_4k_gb = calc_kv_cache_size(
+    n_layers=_llama70b.layers,
+    n_heads=_llama70b.kv_heads,
+    head_dim=_llama70b.hidden_dim // _llama70b.heads,
+    seq_len=4096,
+    batch_size=1,
+    bytes_per_elem=2,
+).to("GB").magnitude
+
+_gpt2_params_b = _gpt2.parameters.to("dimensionless").magnitude / 1e9
+_llama70b_params_b = _llama70b.parameters.to("dimensionless").magnitude / 1e9
+_h100_flops = _h100.compute.peak_flops.to("TFLOPs/s").magnitude
+_h100_bw = _h100.memory.bandwidth.to("TB/s").magnitude
+_h100_ridge = (_h100.compute.peak_flops / _h100.memory.bandwidth).to("flop/byte").magnitude
+```
+
 MLSys·im provides a framework for assigning analytically grounded problem sets where every answer is deterministic and reproducible, regardless of the hardware students have access to. Combined with the companion [lecture slides](https://mlsysbook.ai/slides/), it forms a complete teaching toolkit for ML systems courses.
 
 ---
@@ -14,7 +59,7 @@ MLSys·im provides a framework for assigning analytically grounded problem sets 
 | Homework answers vary by hardware | Vetted registry specs produce identical results everywhere |
 | Hard to grade open-ended systems questions | Analytical solvers give deterministic, verifiable outputs |
 | Specifications become stale | Registry updated from official datasheets; one update propagates everywhere |
-| Students memorize without understanding | "Predict first" exercises build genuine intuition |
+| Students memorize without understanding | Analytical walkthroughs and parameter sweeps build genuine intuition |
 | No time to build slides from scratch | 35 Beamer decks with speaker notes, active learning, and SVG diagrams ready to use |
 
 ---
@@ -64,14 +109,14 @@ The [Teaching Guide](https://mlsysbook.ai/slides/teaching.html#suggested-semeste
 
 ### Pattern 2: Standalone Labs
 
-Use individual tutorials as self-contained lab assignments in any systems course. Each tutorial includes exercises with clear expected outputs:
+Use individual tutorials as self-contained lab assignments in any systems course. Each tutorial is an executable walkthrough with live code and analytical verification:
 
-| Tutorial | Duration | Key Concepts | Pairs With Slides |
-|:---------|:---------|:-------------|:------------------|
-| [Hello, Roofline](tutorials/00_hello_roofline.qmd) | 15 min | Roofline model, memory vs. compute bound | [HW Acceleration]({{< var slides_latest >}}/vol1_11_hw_acceleration.pdf) |
-| [Geography is a Systems Variable](tutorials/07_geography.qmd) | 20 min | Energy, carbon footprint, regional grids | [Sustainable AI]({{< var slides_latest >}}/vol2_15_sustainable_ai.pdf) |
-| [Two Phases of Inference](tutorials/02_two_phases.qmd) | 25 min | TTFT vs. ITL, KV-cache pressure | [Model Serving]({{< var slides_latest >}}/vol1_13_model_serving.pdf) |
-| [Scaling to 1000 GPUs](tutorials/06_scaling_1000_gpus.qmd) | 30 min | Data/tensor/pipeline parallelism | [Distributed Training]({{< var slides_latest >}}/vol2_06_distributed_training.pdf) |
+| Tutorial | Duration | Key Concepts | Example `mlsysim` Output | Pairs With Slides |
+|:---------|:---------|:-------------|:-------------------------|:------------------|
+| [Hello, Roofline](tutorials/00_hello_roofline.qmd) | 15 min | Roofline model, memory vs. compute bound | A100 to H100 ResNet-50 speedup: `{python} f"{_speedup_b1:.2f}×"` (batch 1) vs. `{python} f"{_speedup_b256:.2f}×"` (batch 256) | [HW Acceleration]({{< var slides_latest >}}/vol1_11_hw_acceleration.pdf) |
+| [Geography is a Systems Variable](tutorials/07_geography.qmd) | 20 min | Energy, carbon footprint, regional grids | Iowa (`{python} f"{_ci_iowa:.0f} gCO₂/kWh"`) vs. Quebec (`{python} f"{_ci_quebec:.0f} gCO₂/kWh"`): `{python} f"{_iowa_quebec_ratio:.0f}×"` carbon gap | [Sustainable AI]({{< var slides_latest >}}/vol2_15_sustainable_ai.pdf) |
+| [Two Phases of Inference](tutorials/02_two_phases.qmd) | 25 min | TTFT vs. ITL, KV-cache pressure | Llama-3.1-70B KV-cache at 4K context: `{python} f"{_kv_4k_gb:.2f} GB"` per request | [Model Serving]({{< var slides_latest >}}/vol1_13_model_serving.pdf) |
+| [Scaling to 1000 GPUs](tutorials/06_scaling_1000_gpus.qmd) | 30 min | Data/tensor/pipeline parallelism | 3D parallelism scaling efficiency across cluster tiers | [Distributed Training]({{< var slides_latest >}}/vol2_06_distributed_training.pdf) |
 
 ### Pattern 3: Capstone Projects
 
@@ -89,31 +134,31 @@ Advanced students compose multiple solvers to answer research-style questions. S
 
 ### Homework: Training Memory Budget (30 min)
 
-> Using `TrainingMemoryModel`, calculate the memory required to train GPT-2 (1.5B parameters) in FP16 with Adam optimizer under ZeRO Stage 0, Stage 1, and Stage 3. Explain *why* each stage reduces memory and what trade-off it introduces.
+> Using `TrainingMemoryModel`, calculate the memory required to train GPT-2 (`{python} f"{_gpt2_params_b:.1f}B"` parameters) in FP16 with Adam optimizer under ZeRO Stage 0, Stage 1, and Stage 3. Explain *why* each stage reduces memory and what trade-off it introduces.
 
 **Pairs with**: [Model Training slides]({{< var slides_latest >}}/vol1_08_training.pdf) and [Distributed Training slides]({{< var slides_latest >}}/vol2_06_distributed_training.pdf).
 
 ### Lab: Carbon-Aware Training (45 min)
 
-> Using the SustainabilityModel, calculate the carbon footprint of training GPT-3 on a 256-GPU H100 cluster in Quebec vs. US Average vs. Poland. Produce a table and a 2-paragraph analysis of why datacenter location matters more than hardware choice for carbon.
+> Using the SustainabilityModel, calculate the carbon footprint of training GPT-3 on a 256-GPU H100 cluster in Quebec (`{python} f"{_ci_quebec:.0f} gCO₂/kWh"`) vs. US Average (`{python} f"{_ci_us:.0f} gCO₂/kWh"`) vs. Poland (`{python} f"{_ci_poland:.0f} gCO₂/kWh"`, `{python} f"{_poland_quebec_ratio:.0f}×"` Quebec). Produce a table and a 2-paragraph analysis of why datacenter location matters more than hardware choice for carbon.
 
 **Pairs with**: [Sustainable AI slides]({{< var slides_latest >}}/vol2_15_sustainable_ai.pdf) (grid carbon intensity, PUE).
 
 ### Lab: LLM Serving Capacity Planning (45 min)
 
-> Using the ServingModel, determine the maximum sequence length at which Llama-3.1-70B can serve a single request on an 8-GPU H100 node without exceeding memory. Then calculate TTFT and ITL at sequence lengths of 1K, 4K, and 16K tokens. At what point does KV-cache pressure dominate?
+> Using the ServingModel, determine the maximum sequence length at which Llama-3.1-70B can serve a single request on an 8-GPU H100 node without exceeding memory. Then calculate TTFT and ITL at sequence lengths of 1K, 4K, and 16K tokens, and identify the sequence length at which KV-cache pressure dominates.
 
 **Pairs with**: [Model Serving slides]({{< var slides_latest >}}/vol1_13_model_serving.pdf) and [Inference at Scale slides]({{< var slides_latest >}}/vol2_10_inference.pdf).
 
 ### Exam Question: Back-of-Envelope
 
-> A GPU has 1,979 TFLOP/s peak compute (FP16) and 3.35 TB/s memory bandwidth. (a) What is the ridge point in FLOP/Byte? (b) A model layer has arithmetic intensity of 50 FLOP/Byte—is it compute-bound or memory-bound? (c) Another layer has arithmetic intensity of 400 FLOP/Byte—which regime is it in, and what does that imply about the benefit of moving to a GPU with 2x the bandwidth? Show your work.
+> A GPU has `{python} f"{_h100_flops:.0f} TFLOP/s"` peak dense compute (FP16) and `{python} f"{_h100_bw:.2f} TB/s"` memory bandwidth. Compute (a) the ridge point in FLOP/Byte (`{python} f"{_h100_ridge:.0f} FLOP/Byte"`), (b) whether a model layer with arithmetic intensity of 50 FLOP/Byte is compute-bound or memory-bound, and (c) which regime a layer with arithmetic intensity of 400 FLOP/Byte occupies and what that implies about the benefit of moving to a GPU with 2× the bandwidth. Show all intermediate steps.
 
 **Pairs with**: [HW Acceleration slides]({{< var slides_latest >}}/vol1_11_hw_acceleration.pdf) (roofline model, ridge point derivation).
 
 ### Capstone: Multi-Solver Design Study (1 week)
 
-> Design a training cluster for a 70B-parameter model. Use the DistributedModel to select a parallelism strategy, the EconomicsModel for TCO over 6 months, the SustainabilityModel to compare three datacenter locations, and the ReliabilityModel to determine checkpoint frequency. Present your analysis as a 3-page technical memo with quantitative justification for each decision.
+> Design a training cluster for a `{python} f"{_llama70b_params_b:.1f}B"`-parameter model. Use the DistributedModel to select a parallelism strategy, the EconomicsModel for TCO over 6 months, the SustainabilityModel to compare three datacenter locations, and the ReliabilityModel to determine checkpoint frequency. Present the analysis as a 3-page technical memo with quantitative justification for each decision.
 
 **Pairs with**: the full [Volume II slide set](https://mlsysbook.ai/slides/vol2.html), covering infrastructure, training, fault tolerance, and sustainability.
 
@@ -125,7 +170,7 @@ Because MLSys·im produces deterministic output from vetted specifications:
 
 - **Answer keys are stable**: the same `mlsysim` version produces identical numbers for every student, every semester
 - **Partial credit is straightforward**: grade the reasoning (which solver, which inputs, which bottleneck explanation), not only the number
-- **"Predict first" questions are easy to assess**: students submit their prediction *before* running code; compare the two for a conceptual understanding score
+- **Analytical predictions are easy to assess**: students can compute analytical bounds from the closed-form equations before running `mlsysim` to verify their work
 
 ::: {.callout-note}
 ## Version Pinning

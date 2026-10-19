@@ -3,6 +3,72 @@
 > Every equation in mlsysim answers one question. Here is what each one says,
 > why it matters, and how to explain it to anyone in 30 seconds.
 
+```{python}
+#| echo: false
+#| output: false
+import mlsysim
+from mlsysim import Hardware, Models, Infrastructure, Systems, Literature, Q_
+from mlsysim.solvers import ContinuousBatchingModel, EconomicsModel, SynthesisSolver
+from mlsysim.physics import calc_ring_allreduce_time
+
+_a100 = Hardware.Cloud.A100
+_h100 = Hardware.Cloud.H100
+_l8 = Models.Language.Llama3_8B
+_l70 = Models.Language.Llama3_70B
+
+_a100_peak = _a100.compute.peak_flops.to("TFLOPs/s").magnitude
+_a100_bw = _a100.memory.bandwidth.to("TB/s").magnitude
+_a100_cap_gib = _a100.memory.capacity.to("GiB").magnitude
+_a100_ridge = (_a100.compute.peak_flops / _a100.memory.bandwidth).to("flop/byte").magnitude
+
+_h100_peak = _h100.compute.peak_flops.to("TFLOPs/s").magnitude
+_h100_bw = _h100.memory.bandwidth.to("TB/s").magnitude
+_h100_cap_gib = _h100.memory.capacity.to("GiB").magnitude
+_h100_ridge = (_h100.compute.peak_flops / _h100.memory.bandwidth).to("flop/byte").magnitude
+
+_l8_params_b = _l8.parameters.to("dimensionless").magnitude / 1e9
+_l8_flops_g = _l8.inference_flops.to("GFLOPs").magnitude
+_l8_wt_gb = _l8.size_in_bytes("fp16").to("GB").magnitude
+_w1_time_ms = (_l8.inference_flops / (_h100.compute.peak_flops * 0.5)).to("ms").magnitude
+_w2_time_ms = (_l8.size_in_bytes("fp16") / _h100.memory.bandwidth).to("ms").magnitude
+
+_w3_ach = 450
+_w3_mfu_pct = int(_w3_ach / _h100_peak * 100)
+_w3_lost_pct = 100 - _w3_mfu_pct
+
+_l8_kv_4k_mb = _l8.get_kv_cache_size(4096, 1, "fp16").to("MB").magnitude
+_l8_kv_4k_mib = _l8.get_kv_cache_size(4096, 1, "fp16").to("MiB").magnitude
+_cb_4k = ContinuousBatchingModel().solve(model=_l8, hardware=_h100, max_seq_len=4096, max_batch_size=1000, precision="fp16")
+_w5_max_reqs = _cb_4k.max_active_requests
+
+_chinchilla_tpp = float(Literature.Chinchilla.TokensPerParam)
+_w14_ar_ms = calc_ring_allreduce_time(Q_("1 GB"), 8, Q_("50 GB/s"), Q_("0 us")).to("ms").magnitude
+
+_gpu_mttf_hr = Systems.Reliability.Gpu.mttf_hours
+_mtbf_1k_hr = _gpu_mttf_hr / 1000
+_mtbf_10k_hr = _gpu_mttf_hr / 10000
+_mtbf_100k_min = (_gpu_mttf_hr / 100000) * 60
+
+_c1k = Systems.Clusters.Training_1K
+_w17_gpus = _c1k.total_accelerators
+_w17_hw_m = (_w17_gpus * Infrastructure.Pricing.Capital.H100GpuPurchaseUsd.rate.magnitude) / 1e6
+_ec_1k = EconomicsModel().solve(_c1k, duration_days=365 * 3)
+_w17_elec_pct = (_ec_1k.opex_energy_usd / _ec_1k.tco_usd) * 100
+
+_grids = Infrastructure.Grids
+_ci_quebec = _grids.Quebec.carbon_intensity_g_kwh
+_ci_france = _grids.France.carbon_intensity_g_kwh
+_ci_iowa = _grids.Iowa.carbon_intensity_g_kwh
+_ci_poland = _grids.Poland.carbon_intensity_g_kwh
+_ci_poland_quebec = _ci_poland / _ci_quebec
+_ci_iowa_quebec = _ci_iowa / _ci_quebec
+
+_l70_params_b = _l70.parameters.to("dimensionless").magnitude / 1e9
+_syn70 = SynthesisSolver().solve(_l70, Q_("50 ms"), precision="fp16")
+_syn70_model_gb = _syn70.model_size.to("GB").magnitude
+_syn70_req_bw = _syn70.required_bw.to("TB/s").magnitude
+```
+
 ---
 
 ## Domain 1: Node—What One Chip Can Do
@@ -14,8 +80,8 @@
 of multiply-adds a model needs by how fast the chip can do math (adjusted for real-world
 inefficiency), and the result is the compute time.
 
-**30-second version:** "If a model needs 16 billion multiplications and the GPU
-can do 989 trillion per second at 50% efficiency, the math takes 0.03 milliseconds."
+**30-second version:** "If a `{python} f"{_l8_params_b:.0f}B"`-parameter model needs `{python} f"{_l8_flops_g:.0f}"` billion operations and the GPU
+can do `{python} f"{_h100_peak:.0f}"` trillion per second at 50% efficiency, the math takes `{python} f"{_w1_time_ms:.2f}"` milliseconds."
 
 **Why it matters:** This is the *speed limit* for any workload. No software optimization
 can make a model run faster than the hardware can crunch numbers.
@@ -29,11 +95,11 @@ can make a model run faster than the hardware can crunch numbers.
 A model's weights sit in HBM (the GPU's memory). To use them, the GPU must read them through
 a pipe with a fixed width (bandwidth). Bigger model = longer loading time.
 
-**30-second version:** "A 16 GB model on a GPU with 3.35 TB/s bandwidth takes 4.8 ms
+**30-second version:** "A `{python} f"{_l8_wt_gb:.0f} GB"` model on a GPU with `{python} f"{_h100_bw:.2f} TB/s"` bandwidth takes `{python} f"{_w2_time_ms:.1f} ms"`
 to load the weights, before any computation starts."
 
 **Why it matters:** For most LLM inference at batch size 1, this is *the* bottleneck.
-The GPU finishes the math long before it finishes reading the weights. This is why
+The GPU finishes the math long before it finishes reading the weights (the ridge point is `{python} f"{_a100_ridge:.0f} FLOP/byte"` on an A100 at `{python} f"{_a100_peak:.0f} TFLOP/s"` and `{python} f"{_a100_bw:.2f} TB/s"`, and `{python} f"{_h100_ridge:.0f} FLOP/byte"` on an H100 at `{python} f"{_h100_peak:.0f} TFLOP/s"` and `{python} f"{_h100_bw:.2f} TB/s"`). This is why
 memory bandwidth matters more than FLOPS for serving chatbots.
 
 ---
@@ -45,8 +111,8 @@ memory bandwidth matters more than FLOPS for serving chatbots.
 workload actually uses: the gap between what the hardware *could* do and what the
 software *actually* achieves. Low MFU means wasted silicon.
 
-**30-second version:** "If a GPU can do 989 TFLOP/s but training only achieves
-450 TFLOP/s, the MFU is 45%. The other 55% is lost to kernel launches, memory stalls,
+**30-second version:** "If a GPU can do `{python} f"{_h100_peak:.0f} TFLOP/s"` but training only achieves
+`{python} f"{_w3_ach} TFLOP/s"`, the MFU is `{python} f"{_w3_mfu_pct}%"`. The other `{python} f"{_w3_lost_pct}%"` is lost to kernel launches, memory stalls,
 and framework overhead."
 
 **Why it matters:** A 50% MFU means paying for twice the hardware actually in use.
@@ -75,8 +141,8 @@ first token takes 50 ms but each subsequent token takes 5 ms."
 conversation (the KV cache). This memory grows with sequence length and eats into the
 GPU's finite HBM. More concurrent requests = more KV cache = less room for new requests.
 
-**30-second version:** "Each Llama-3-8B request at 4K context needs ~500 MB of KV cache.
-An 80 GB GPU can only serve ~100 concurrent requests before running out of memory."
+**30-second version:** "Each Llama-3-8B request at 4K context needs `{python} f"{_l8_kv_4k_mb:.0f} MB"` (`{python} f"{_l8_kv_4k_mib:.0f} MiB"`) of KV cache.
+An `{python} f"{_h100_cap_gib:.0f} GiB"` GPU can only serve `{python} f"{_w5_max_reqs}"` concurrent requests before running out of memory."
 
 ---
 
@@ -94,8 +160,8 @@ from memory bandwidth to the injection interconnect speed.
 **Equation:** Erlang C queueing model (M/M/c)
 
 **Plain English:** When servers are busy, new requests have to wait in line. The
-waiting time grows *non-linearly*. At 80% utilization, the P99 latency might be 2x
-the average; at 95% utilization, it can be 10x. This is why servers cannot run at
+waiting time grows *non-linearly*. At 80% load, the P99 latency might be 2x
+the average; at 95% load, it can be 10x. This is why servers cannot run at
 100%: the tail latency destroys the SLA.
 
 **30-second version:** "It is like a highway. At 70% capacity, traffic flows. At 95%
@@ -142,7 +208,7 @@ collective communication actually gets.
 
 **Plain English:** There is a sweet spot between model size and training data. The
 Chinchilla scaling law says that, for a fixed compute budget, the optimal model size is
-proportional to the square root of the budget, and training should use 20 tokens
+proportional to the square root of the budget, and training should use `{python} f"{_chinchilla_tpp:.0f}"` tokens
 per parameter. Train a too-big model on too-little data = waste. Train a too-small
 model on too-much data = also waste.
 
@@ -187,7 +253,7 @@ the network. The time depends on how much data (gradient size) and how fast the 
 (bandwidth). As more GPUs are added, the communication cost grows, eventually dominating
 over the compute savings.
 
-**30-second version:** "1 GB of gradients across 8 GPUs at 50 GB/s NVLink takes 35 ms.
+**30-second version:** "1 GB of gradients across 8 GPUs at 50 GB/s NVLink takes `{python} f"{_w14_ar_ms:.0f} ms"`.
 That is time the GPUs spend waiting instead of computing."
 
 ---
@@ -195,12 +261,12 @@ That is time the GPUs spend waiting instead of computing."
 ### Wall 15: The Fragility Wall (Reliability)
 **Equation:** `Cluster_MTBF = Component_MTBF / N_components`
 
-**Plain English:** If one GPU fails every 50,000 hours, a 1000-GPU cluster has a failure
-every 50 hours. At 10,000 GPUs, a failure arrives every 5 hours. This is why large training
+**Plain English:** If one GPU fails every `{python} f"{_gpu_mttf_hr:,.0f}"` hours, a 1000-GPU cluster has a failure
+every `{python} f"{_mtbf_1k_hr:.0f}"` hours. At 10,000 GPUs, a failure arrives every `{python} f"{_mtbf_10k_hr:.0f}"` hours. This is why large training
 runs need checkpointing; without it, a single GPU failure wastes days of compute.
 
 **30-second version:** "At 1000 GPUs, something breaks every 2 days. At 100,000 GPUs,
-something breaks every 30 minutes."
+something breaks every `{python} f"{_mtbf_100k_min:.0f}"` minutes."
 
 ---
 
@@ -208,7 +274,7 @@ something breaks every 30 minutes."
 **Equation:** `Wait_Time = Utilization / [2 × Service_Rate × (1 - Utilization)]`
 
 **Plain English:** When multiple teams share a cluster, jobs wait in line. The wait time
-grows non-linearly with utilization. At 80% cluster utilization, the average wait is
+grows non-linearly with cluster load. At 80% cluster load, the average wait is
 2x the job duration. This is why shared research clusters feel slow even when they are
 "only" 80% busy.
 
@@ -220,9 +286,9 @@ grows non-linearly with utilization. At 80% cluster utilization, the average wai
 **Equation:** `TCO = CapEx + OpEx_energy + OpEx_maintenance`
 
 **Plain English:** The total cost of running ML infrastructure is hardware purchase
-(CapEx, amortized over 3-5 years) plus electricity plus maintenance. A 1024-GPU H100
-cluster costs ~$30M in hardware. Electricity is surprisingly small (~10% of total).
-The dominant cost lever is utilization, because idle GPUs cost the same as busy ones.
+(CapEx, amortized over 3-5 years) plus electricity plus maintenance. A `{python} f"{_w17_gpus}"`-GPU H100
+cluster costs ~$`{python} f"{_w17_hw_m:.0f}"`M in hardware. Electricity is surprisingly small (~`{python} f"{_w17_elec_pct:.0f}"`% of total).
+The dominant cost lever is occupancy, because idle GPUs cost the same as busy ones.
 
 ---
 
@@ -232,10 +298,10 @@ The dominant cost lever is utilization, because idle GPUs cost the same as busy 
 **Plain English:** Every GPU-hour converts electricity into carbon emissions. How much
 depends on three things: how much energy (determined by power and time), how efficiently
 the datacenter uses it (PUE, where a 1.4 PUE wastes 40% on cooling), and how dirty the grid
-is (Quebec hydro = 20 gCO₂/kWh vs Poland coal = 820 gCO₂/kWh).
+is (Quebec hydro = `{python} f"{_ci_quebec:.0f}"` gCO₂/kWh and France nuclear = `{python} f"{_ci_france:.0f}"` gCO₂/kWh vs Iowa coal/gas = `{python} f"{_ci_iowa:.0f}"` gCO₂/kWh and Poland coal = `{python} f"{_ci_poland:.0f}"` gCO₂/kWh).
 
-**30-second version:** "Training the same model in Quebec produces 41x less carbon than
-training it in Poland. Geography is the biggest lever for sustainable AI."
+**30-second version:** "Training the same model in Quebec produces `{python} f"{_ci_poland_quebec:.0f}"`x less carbon than
+training it in Poland (and `{python} f"{_ci_iowa_quebec:.0f}"`x less than in Iowa). Geography is the biggest lever for sustainable AI."
 
 ---
 
@@ -243,7 +309,7 @@ training it in Poland. Geography is the biggest lever for sustainable AI."
 **Equation:** `MFU_penalty = Write_Time / Checkpoint_Interval`
 
 **Plain English:** Long training runs must periodically save their state to disk in case
-of failure. This I/O burst interrupts training and reduces effective utilization. The
+of failure. This I/O burst interrupts training and reduces effective throughput. The
 optimal checkpoint frequency balances the cost of saving too often (I/O overhead) against
 the cost of saving too rarely (wasted compute when failures hit).
 
@@ -279,9 +345,9 @@ derives the hardware specs needed to meet it. This flips the Roofline model back
 instead of predicting performance from hardware, it derives the minimum hardware specs
 from a performance requirement.
 
-**30-second version:** "A 50 ms decode latency for a 140 GB model requires at least
-2.8 TB/s of memory bandwidth. That is more than one A100 provides. One H100 has the
-bandwidth (3.35 TB/s) but only 80 GiB of memory, so the 140 GB model needs tensor
+**30-second version:** "A 50 ms decode latency for a `{python} f"{_syn70_model_gb:.1f} GB"` model (`{python} f"{_l70_params_b:.1f}B"` parameters in FP16) requires at least
+`{python} f"{_syn70_req_bw:.2f} TB/s"` of memory bandwidth. That is more than one A100 provides (`{python} f"{_a100_bw:.2f} TB/s"`). One H100 has the
+bandwidth (`{python} f"{_h100_bw:.2f} TB/s"`) but only `{python} f"{_h100_cap_gib:.0f} GiB"` of memory, so the `{python} f"{_syn70_model_gb:.1f} GB"` model needs tensor
 parallelism across two H100s."
 
 ---

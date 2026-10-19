@@ -5,11 +5,63 @@ description: "Discover that the data pipeline, not the GPU, is often the binding
 categories: ["data", "intermediate"]
 ---
 
+```{python}
+#| echo: false
+#| output: false
+import mlsysim  # installed via `pip install mlsysim` (see workflow)
+from mlsysim.solvers import SingleNodeModel, DataModel, TransformationModel
+from mlsysim.core.units import Q_
+
+Engine = mlsysim.Engine
+_model = mlsysim.Models.Vision.ResNet50
+_hw = mlsysim.Hardware.Cloud.A100
+_sn = SingleNodeModel()
+_dm = DataModel()
+_tm = TransformationModel()
+
+_bs = 256
+_sample_size = Q_("500 KB")
+_worker_bw = Q_("250 MB/s")
+_n_workers = 8
+_cpu_tp = Q_("2 GB/s")
+
+_prof = _sn.solve(model=_model, hardware=_hw, batch_size=_bs, precision="fp16")
+_gpu_ms = _prof.latency.to("ms").magnitude
+_gpu_tp = _prof.throughput.magnitude
+
+_step_s = _prof.latency.to("s").magnitude
+_data_gb = (_bs * _sample_size.to("GB")).magnitude
+_demand_rate = Q_(_data_gb / _step_s, "GB/s")
+_data_res = _dm.solve(workload_data_rate=_demand_rate, hardware=_hw)
+
+_trans_res = _tm.solve(
+    batch_size=_bs,
+    sample_size_bytes=_sample_size,
+    cpu_throughput=_cpu_tp,
+    accelerator_step_time=_prof.latency,
+)
+_cpu_ms = _trans_res.transform_time.to("ms").magnitude
+_gpu_util_pct = _trans_res.accelerator_utilization * 100
+_gpu_idle_pct = 100 - _gpu_util_pct
+_slowdown = _trans_res.slowdown_factor
+_eff_tp = (_cpu_tp / _sample_size).to("1/s").magnitude
+
+_p1 = _sn.solve(model=_model, hardware=_hw, batch_size=1, precision="fp16")
+_t1 = _tm.solve(batch_size=1, sample_size_bytes=_sample_size, cpu_throughput=_cpu_tp, accelerator_step_time=_p1.latency)
+_p1024 = _sn.solve(model=_model, hardware=_hw, batch_size=1024, precision="fp16")
+_t1024 = _tm.solve(batch_size=1024, sample_size_bytes=_sample_size, cpu_throughput=_cpu_tp, accelerator_step_time=_p1024.latency)
+
+_p512 = _sn.solve(model=_model, hardware=_hw, batch_size=512, precision="fp16")
+_u_w8 = _tm.solve(batch_size=512, sample_size_bytes=_sample_size, cpu_throughput=Q_("2000 MB/s"), accelerator_step_time=_p512.latency).accelerator_utilization
+_u_w16 = _tm.solve(batch_size=512, sample_size_bytes=_sample_size, cpu_throughput=Q_("4000 MB/s"), accelerator_step_time=_p512.latency).accelerator_utilization
+_u_w32 = _tm.solve(batch_size=512, sample_size_bytes=_sample_size, cpu_throughput=Q_("8000 MB/s"), accelerator_step_time=_p512.latency).accelerator_utilization
+```
+
 ## The Question
 
-An engineer launches ResNet-50 training on an A100 and watches `nvidia-smi`. GPU utilization reads 40%,
-not the expected 95%. The model is compute-bound. The hardware is top-tier. **Why is the GPU
-sitting idle 60% of the time?**
+An engineer launches `{python} _model.name` training on an `{python} _hw.name` at batch size `{python} _bs` and watches `nvidia-smi`. Active GPU duty cycle reads **`{python} f"{_gpu_util_pct:.1f}%"`**,
+far below full saturation. The model is compute-bound. The hardware is top-tier. **Why is the GPU
+sitting idle `{python} f"{_gpu_idle_pct:.1f}%"` of the time?**
 
 The answer is almost never the model or the GPU. It is the invisible pipeline upstream:
 JPEG decoding, random cropping, color jitter, and normalization, all running on the CPU.
@@ -42,19 +94,12 @@ determines actual throughput:
 3. **Accelerator Compute** (Wall 1): Forward pass, backward pass, weight update
 
 The GPU cannot start until stages 1 and 2 finish. If either is slower than the GPU, the
-accelerator utilization drops below 100%. This is the data pipeline bottleneck.
+accelerator duty cycle drops below 100%. This is the data pipeline bottleneck.
 :::
 
 ---
 
 ## 1. Setup
-
-```{python}
-#| echo: false
-#| output: false
-import mlsysim  # installed via `pip install mlsysim` (see workflow)
-Engine = mlsysim.Engine
-```
 
 ```python
 import mlsysim
@@ -72,7 +117,7 @@ bottleneck is most visible there. LLM training on tokenized text has a tiny data
 JPEG decoding, resizing, and augmentation can demand 10–100× more CPU work per sample,
 and that is where the GPU starves.
 
-First, establish how fast the A100 processes a ResNet-50 training step in isolation, with no
+First, establish how fast the `{python} _hw.name` processes a `{python} _model.name` step at batch `{python} _bs` in isolation, with no
 data loading and no preprocessing, only compute:
 
 ```{python}
@@ -92,19 +137,18 @@ info("GPU Compute Baseline",
      Hardware=hardware.name,
      Batch_size=256,
      Step_latency=profile.latency.to('ms'),
-     Throughput=f"{profile.throughput:.0f} img/s",
+     Throughput=f"{profile.throughput.magnitude:.0f} img/s",
      Bottleneck=profile.bottleneck)
 ```
 
-The GPU finishes this batch in well under a tenth of a second. That is the ceiling. The next
+The GPU finishes this `{python} _bs`-image batch in **`{python} f"{_gpu_ms:.2f} ms"`**, setting an accelerator compute ceiling of **`{python} f"{_gpu_tp:,.0f} img/s"`**. The next
 step checks whether the data pipeline can keep up.
 
 ---
 
 ## 3. Storage I/O Check: Disk Supply vs. Demand
 
-ImageNet images average ~500 KB each (JPEG compressed). At batch 256, the GPU demands a
-burst of data every step, and the storage subsystem must supply it:
+ImageNet images average `{python} f"{_sample_size.to('KB').magnitude:.0f} KB"` each (JPEG compressed). At batch `{python} _bs` (`{python} f"{_data_gb * 1000:.0f} MB"` per step over `{python} f"{_gpu_ms:.2f} ms"`), the GPU demands `{python} f"{_demand_rate.to('GB/s').magnitude:.2f} GB/s"` of raw image data, and the storage subsystem must supply it:
 
 ```{python}
 from mlsysim.solvers import DataModel
@@ -127,7 +171,7 @@ info("Storage I/O Check",
      Is_stalled=data_result.is_stalled)
 ```
 
-Storage I/O is not the problem, because modern NVMe SSDs deliver multi-GB/s. The bottleneck is
+Storage I/O is not the problem: the `{python} f"{_demand_rate.to('GB/s').magnitude:.2f} GB/s"` demand consumes `{python} f"{_data_res.utilization:.1%}"` of the `{python} f"{_data_res.supply_bw.to('GB/s').magnitude:.1f} GB/s"` storage supply. The bottleneck is
 not reading the bytes. It is *transforming* them.
 
 ---
@@ -135,8 +179,8 @@ not reading the bytes. It is *transforming* them.
 ## 4. The Reveal: CPU Preprocessing Is the Wall
 
 Even with fast storage, the CPU must decode JPEGs, apply random crops, color jitter, and
-normalization. A typical CPU worker processes ImageNet images at ~250 MB/s. With 8 workers,
-total CPU throughput is ~2 GB/s:
+normalization. A typical CPU worker processes ImageNet images at `{python} f"{_worker_bw.to('MB/s').magnitude:.0f} MB/s"`. With `{python} _n_workers` workers,
+total CPU ingestion throughput is `{python} f"{_cpu_tp.to('GB/s').magnitude:.0f} GB/s"` (`{python} f"{_eff_tp:,.0f} img/s"` at `{python} f"{_sample_size.to('KB').magnitude:.0f} KB"` per image):
 
 ```{python}
 from mlsysim.solvers import TransformationModel
@@ -164,8 +208,7 @@ info("CPU vs GPU Pipeline",
 
 **The binding constraint is not silicon but JPEG decoding on the CPU.** The data
 pipeline (Wall 9: Transformation) becomes the bottleneck before the GPU (Wall 1: Compute).
-The two step times above show that the GPU could get through each batch several times
-faster than the 8 CPU workers can prepare it. The GPU sits idle waiting for data. This is why production training pipelines use
+The two step times above show that the `{python} _hw.name` finishes a `{python} _bs`-image batch in **`{python} f"{_gpu_ms:.2f} ms"`** (`{python} f"{_gpu_tp:,.0f} img/s"` ceiling), whereas the `{python} _n_workers` CPU workers require **`{python} f"{_cpu_ms:.1f} ms"`** (`{python} f"{_eff_tp:,.0f} img/s"` ceiling), a **`{python} f"{_slowdown:.2f}"`×** slowdown. The GPU is active for only **`{python} f"{_gpu_util_pct:.1f}%"`** of each step and sits idle for **`{python} f"{_gpu_idle_pct:.1f}%"`** waiting for data. This is why production training pipelines use
 GPU-accelerated preprocessing (NVIDIA DALI), pre-decoded datasets, or aggressive
 prefetching.
 :::
@@ -205,19 +248,18 @@ crossover = next(r[0] for r in rows if r[3] == "Transformation")
 info("Crossover", First_CPU_bound_batch=crossover)
 ```
 
-The crossover sits at the bottom of the sweep. At the smallest batches the CPU keeps
-up and the GPU runs at full utilization, but only a few samples later Wall 9 binds and
+The crossover sits at batch size **`{python} crossover`**. At batch size 1 (`{python} f"{_p1.latency.to('ms').magnitude:.2f} ms"` GPU step vs. `{python} f"{_t1.transform_time.to('ms').magnitude:.2f} ms"` CPU transform) and batch size 2, the CPU keeps
+up and the GPU runs at `{python} f"{_t1.accelerator_utilization:.0%}"` duty cycle, yet by batch size `{python} crossover` Wall 9 binds and
 never lets go. CPU transform time is strictly proportional to batch size. The GPU step is
 a fixed dispatch overhead plus a per-sample compute cost, and that fixed overhead only
 shields the GPU while batches are tiny. Once it is amortized, both costs grow linearly, so
-GPU utilization levels off at the ratio of per-sample GPU compute to per-sample CPU
-transform time instead of falling to zero.
+the GPU duty cycle levels off near `{python} f"{_t1024.accelerator_utilization:.1%}"` (at batch 1024: `{python} f"{_p1024.latency.to('ms').magnitude:.2f} ms"` GPU step vs. `{python} f"{_t1024.transform_time.to('ms').magnitude:.1f} ms"` CPU transform) instead of falling to zero.
 
 ---
 
 ## 6. The Fix: Adding CPU Workers
 
-The simplest fix for a CPU bottleneck is more workers. The sweep below compares 8, 16, and 32:
+The simplest fix for a CPU bottleneck is more workers. The sweep below compares 8, 16, and 32 workers at batch size 512:
 
 ```{python}
 rows = []
@@ -238,48 +280,8 @@ for n_workers in [8, 16, 32]:
 table(["Workers", "Throughput", "GPU Util @ bs=512"], rows)
 ```
 
-Doubling workers doubles throughput, but the pipeline eventually hits either storage I/O limits
+Doubling workers from 8 to 16 doubles active GPU duty cycle from `{python} f"{_u_w8:.1%}"` to `{python} f"{_u_w16:.1%}"`, and 32 workers (`8 GB/s`) raise it to `{python} f"{_u_w32:.1%}"`, before the pipeline eventually hits either storage I/O limits
 (Wall 8) or PCIe bandwidth. The lesson is to check *all three stages* of the pipeline every time.
-
----
-
-## Practice
-
-::: {.callout-caution}
-## Exercises
-
-**Exercise 1: Predict before you compute.**
-At batch size 64 with 8 CPU workers (2 GB/s total), will ResNet-50 training on the A100
-be GPU-bound or CPU-bound? Write your prediction, then run the code. What determines the
-answer? (Hint: compare `transform_time` vs. `accelerator_step_time`.)
-
-**Exercise 2: Medical imaging with larger samples.**
-Medical imaging uses images 10x larger than ImageNet (~5 MB per sample). Change
-`sample_size` to `Q_("5 MB")` and re-run the batch size sweep. At what batch size does
-the CPU stall the GPU now? How many workers would you need to keep up at batch 256?
-
-**Exercise 3: GPU-accelerated preprocessing.**
-If you use NVIDIA DALI to move preprocessing to the GPU, the CPU bottleneck effectively
-disappears. Model this by setting `cpu_throughput = Q_("50 GB/s")`. Run the sweep again.
-Does the bottleneck shift back to compute? What is the new GPU utilization at batch 512?
-
-**Self-check:** If the GPU step takes 20 ms and CPU preprocessing takes 35 ms, what is the
-accelerator utilization? (Answer: 20/35 = 57%.)
-:::
-
----
-
-## Key Takeaways
-
-::: {.callout-tip}
-## Summary
-
-- **Data pipelines have three stages**: storage I/O, CPU preprocessing, and GPU compute; the slowest determines throughput
-- **CPU preprocessing (Wall 9)** is the most common bottleneck: JPEG decode, augmentation, and normalization are all CPU-bound
-- **Batch size shifts the binding constraint**: small batches are GPU-bound; large batches often become CPU-bound
-- **Adding CPU workers** helps linearly but has diminishing returns when storage I/O becomes the limit
-- **Always check all three stages** before concluding that the GPU is the bottleneck
-:::
 
 ---
 

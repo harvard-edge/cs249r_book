@@ -5,9 +5,79 @@ description: "Compare identical training runs across four grid regions to discov
 categories: ["ops", "intermediate"]
 ---
 
+```{python}
+#| echo: false
+#| output: false
+import mlsysim  # installed via `pip install mlsysim` (see workflow)
+from mlsysim import Systems, Infrastructure
+from mlsysim.solvers import SustainabilityModel, EconomicsModel
+from mlsysim.systems.types import Fleet
+
+Engine = mlsysim.Engine
+
+_grids = Infrastructure.Grids
+_g_quebec = _grids.Quebec
+_g_norway = _grids.Norway
+_g_iceland = _grids.Iceland
+_g_france = _grids.France
+_g_eu = _grids.EU_Avg
+_g_germany = _grids.Germany
+_g_texas = _grids.Texas
+_g_us = _grids.US_Avg
+_g_china = _grids.China_Avg
+_g_iowa = _grids.Iowa
+_g_india = _grids.India_Avg
+_g_poland = _grids.Poland
+
+_node_count = 32
+_duration_days = 30
+_short_days = 10
+_fleet = Fleet(
+    name="256-GPU Training Cluster",
+    node=Systems.Nodes.DGX_H100,
+    count=_node_count,
+    fabric=Systems.Fabrics.InfiniBand_NDR,
+)
+
+_sust = SustainabilityModel()
+_econ = EconomicsModel()
+
+_r_q = _sust.solve(fleet=_fleet, duration_days=_duration_days, datacenter=_g_quebec)
+_r_n = _sust.solve(fleet=_fleet, duration_days=_duration_days, datacenter=_g_norway)
+_r_us = _sust.solve(fleet=_fleet, duration_days=_duration_days, datacenter=_g_us)
+_r_p = _sust.solve(fleet=_fleet, duration_days=_duration_days, datacenter=_g_poland)
+
+_carbon_q = _r_q.carbon_footprint_kg / 1000.0
+_carbon_n = _r_n.carbon_footprint_kg / 1000.0
+_carbon_us = _r_us.carbon_footprint_kg / 1000.0
+_carbon_p = _r_p.carbon_footprint_kg / 1000.0
+
+_energy_q = _r_q.total_energy_kwh.magnitude / 1000.0
+_energy_p = _r_p.total_energy_kwh.magnitude / 1000.0
+_water_us = _r_us.water_usage_liters / 1000.0
+_water_p = _r_p.water_usage_liters / 1000.0
+
+_ci_ratio_pq = _g_poland.carbon_intensity_g_kwh / _g_quebec.carbon_intensity_g_kwh
+_ci_ratio_pn = _g_poland.carbon_intensity_g_kwh / _g_norway.carbon_intensity_g_kwh
+_ratio_pq = _carbon_p / _carbon_q
+_ratio_pn = _carbon_p / _carbon_n
+
+_r_10p = _sust.solve(fleet=_fleet, duration_days=_short_days, datacenter=_g_poland)
+_carbon_10p = _r_10p.carbon_footprint_kg / 1000.0
+_ratio_10p_30q = _carbon_10p / _carbon_q
+
+_carbon_price = 50
+_tco_q = _econ.solve(fleet=_fleet, duration_days=_duration_days, grid=_g_quebec)
+_tco_p = _econ.solve(fleet=_fleet, duration_days=_duration_days, grid=_g_poland)
+_ccost_q = _carbon_q * _carbon_price
+_ccost_p = _carbon_p * _carbon_price
+_tot_q = _tco_q.tco_usd + _ccost_q
+_tot_p = _tco_p.tco_usd + _ccost_p
+```
+
 ## The Question
 
-A 256-GPU cluster trains a model for 30 days. Where that cluster is located makes no
+A `{python} _fleet.total_accelerators`-GPU cluster (`{python} _node_count` `{python} _fleet.node.name` nodes) trains a model for `{python} _duration_days` days. Where that cluster is located makes no
 difference to latency or throughput, which the hardware fixes. For carbon emissions, water
 usage, and total cost of ownership, does geography matter, and if so, by how much?
 
@@ -29,30 +99,26 @@ are required; this tutorial can be completed independently.
 ::: {.callout-tip}
 ## Background: Grid Carbon Intensity
 
-Every kilowatt-hour of electricity has a carbon cost, measured in grams of CO2 per kWh
-(gCO2/kWh). This number depends entirely on how the electricity is generated:
+Every kilowatt-hour of electricity has a carbon cost, measured in grams of $\text{CO}_2$ per kWh
+($\text{gCO}_2/\text{kWh}$). This number depends entirely on how the electricity is generated. Representative profiles from `mlsysim.Infrastructure.Grids` span nearly two orders of magnitude:
 
-| Region | Primary Source | Carbon Intensity |
-|:-------|:---------------|:-----------------|
-| Quebec | Hydroelectric | ~20 gCO2/kWh |
-| Norway | Hydroelectric | ~29 gCO2/kWh |
-| US Average | Mixed (gas, coal, renewables) | ~390 gCO2/kWh |
-| Poland | Coal-dominated | ~820 gCO2/kWh |
+| Region | Primary Source | Carbon Intensity | PUE |
+|:-------|:---------------|:-----------------|:----|
+| `{python} _g_norway.name` | Hydroelectric | `{python} f"{_g_norway.carbon_intensity_g_kwh:.0f} gCO2/kWh"` | `{python} f"{_g_norway.pue:.2f}"` |
+| `{python} _g_quebec.name` | Hydroelectric | `{python} f"{_g_quebec.carbon_intensity_g_kwh:.0f} gCO2/kWh"` | `{python} f"{_g_quebec.pue:.2f}"` |
+| `{python} _g_france.name` | Nuclear | `{python} f"{_g_france.carbon_intensity_g_kwh:.0f} gCO2/kWh"` | `{python} f"{_g_france.pue:.2f}"` |
+| `{python} _g_us.name` | Mixed (gas, coal, renewables) | `{python} f"{_g_us.carbon_intensity_g_kwh:.0f} gCO2/kWh"` | `{python} f"{_g_us.pue:.2f}"` |
+| `{python} _g_iowa.name` | Coal and gas reference | `{python} f"{_g_iowa.carbon_intensity_g_kwh:.0f} gCO2/kWh"` | `{python} f"{_g_iowa.pue:.2f}"` |
+| `{python} _g_india.name` | Coal-dominated | `{python} f"{_g_india.carbon_intensity_g_kwh:.0f} gCO2/kWh"` | `{python} f"{_g_india.pue:.2f}"` |
+| `{python} _g_poland.name` | Coal-dominated | `{python} f"{_g_poland.carbon_intensity_g_kwh:.0f} gCO2/kWh"` | `{python} f"{_g_poland.pue:.2f}"` |
 
-The range is wide. This tutorial quantifies how wide it is and whether it matters more
+The range is wide (`{python} f"{_ci_ratio_pq:.0f}×"` in grid carbon intensity between Poland and Quebec, and `{python} f"{_ci_ratio_pn:.0f}×"` between Poland and Norway). This tutorial quantifies how that spread interacts with facility PUE and whether it matters more
 than other levers such as training duration or hardware choice.
 :::
 
 ---
 
 ## 1. Setup
-
-```{python}
-#| echo: false
-#| output: false
-import mlsysim  # installed via `pip install mlsysim` (see workflow)
-Engine = mlsysim.Engine
-```
 
 ```python
 import mlsysim
@@ -63,8 +129,8 @@ from mlsysim import Engine
 
 ## 2. Two-Region Comparison
 
-The first comparison runs the same training job in two locations: Quebec (hydroelectric)
-and Poland (coal-dominated). The fleet, the model, and the 30-day duration are identical. The only variable
+The first comparison runs the same training job in two locations: `{python} _g_quebec.name` (`{python} f"{_g_quebec.carbon_intensity_g_kwh:.0f} gCO2/kWh"`, PUE `{python} f"{_g_quebec.pue:.2f}"`)
+and `{python} _g_poland.name` (`{python} f"{_g_poland.carbon_intensity_g_kwh:.0f} gCO2/kWh"`, PUE `{python} f"{_g_poland.pue:.2f}"`). The `{python} _fleet.total_accelerators`-GPU fleet, the model, and the `{python} _duration_days`-day duration are identical. The only variable
 is where the electricity comes from.
 
 ```{python}
@@ -110,15 +176,14 @@ table(
 info(Ratio=f"{ratio:.0f}x")
 ```
 
-Same cluster. Same model. Same duration. The carbon footprint differs by roughly
-**40x** depending on the electricity grid. The difference comes from a location
-decision, not from an optimization.
+Same cluster. Same model. Same `{python} _duration_days`-day duration. Because Poland's grid carbon intensity is `{python} f"{_ci_ratio_pq:.0f}×"` higher than Quebec's (`{python} f"{_g_poland.carbon_intensity_g_kwh:.0f}"` vs. `{python} f"{_g_quebec.carbon_intensity_g_kwh:.0f} gCO2/kWh"`) and its facility PUE is `{python} f"{_g_poland.pue / _g_quebec.pue:.2f}×"` higher (`{python} f"{_g_poland.pue:.2f}"` vs. `{python} f"{_g_quebec.pue:.2f}"`), the total carbon footprint differs by **`{python} f"{_ratio_pq:.0f}×"`** (`{python} f"{_carbon_p:.1f}"` tonnes vs. `{python} f"{_carbon_q:.1f}"` tonnes $\text{CO}_2$). The difference comes from a location
+decision, not from an algorithmic optimization.
 
 ---
 
 ## 3. All-Region Sweep
 
-The next sweep expands the comparison to all four grid regions in the Infrastructure Zoo,
+The next sweep expands the comparison to four grid regions in the Infrastructure Zoo,
 adding energy consumption, water usage, and PUE to the picture.
 
 ```{python}
@@ -142,17 +207,14 @@ for grid in grids:
 table(["Region", "Energy (MWh)", "Carbon (t)", "Water (kL)", "PUE"], rows)
 ```
 
-Energy consumption also varies between regions because of different PUE values. A
-modern liquid-cooled facility (PUE 1.1) wastes less energy on cooling than a legacy
-air-cooled datacenter (PUE 1.6). The dominant factor, however, is carbon intensity,
-which creates the 40x gap.
+Total facility energy varies across regions from `{python} f"{_energy_q:,.1f} MWh"` in `{python} _g_quebec.name` and `{python} _g_norway.name` (PUE `{python} f"{_g_quebec.pue:.2f}"`) to `{python} f"{_energy_p:,.1f} MWh"` in `{python} _g_poland.name` (PUE `{python} f"{_g_poland.pue:.2f}"`). Water consumption ranges from `{python} f"{_r_q.water_usage_liters / 1000.0:.1f} kL"` in closed-loop cold-climate hydro facilities to `{python} f"{_water_us:,.1f} kL"` (`{python} _g_us.name`) and `{python} f"{_water_p:,.1f} kL"` (`{python} _g_poland.name`). Combined with grid carbon intensity, emissions span `{python} f"{_carbon_n:.1f} t"` in `{python} _g_norway.name` and `{python} f"{_carbon_q:.1f} t"` in `{python} _g_quebec.name` up to `{python} f"{_carbon_p:.1f} t"` in `{python} _g_poland.name` (`{python} f"{_ratio_pq:.0f}×"` vs. Quebec and `{python} f"{_ratio_pn:.0f}×"` vs. Norway).
 
 ---
 
 ## 4. Geography vs. Training Duration
 
 The trade-off between training longer in a clean region and shorter in a dirty region
-shows up in a comparison of 30 days in Quebec against 10 days in Poland.
+shows up in a comparison of `{python} _duration_days` days in `{python} _g_quebec.name` against `{python} _short_days` days in `{python} _g_poland.name`.
 
 ```{python}
 # 30 days in Quebec
@@ -184,11 +246,9 @@ info(Ratio=f"{c_p/c_q:.1f}x")
 ## Key Insight
 
 **Geography is a larger lever than training duration for carbon footprint.** Even
-training for one-third the time in Poland produces more carbon than the full 30-day
-run in Quebec. The carbon intensity gap between hydro and coal grids is so large that
-no reasonable reduction in training time can compensate. For any organization serious
+training for one-third the time (`{python} _short_days` days vs. `{python} _duration_days` days) in `{python} _g_poland.name` emits `{python} f"{_carbon_10p:.1f}"` tonnes of $\text{CO}_2$, which is **`{python} f"{_ratio_10p_30q:.1f}×"`** more than the full `{python} _duration_days`-day run in `{python} _g_quebec.name` (`{python} f"{_carbon_q:.1f}"` tonnes). Because grid carbon intensity differs by `{python} f"{_ci_ratio_pq:.0f}×"` and total facility emissions per day differ by `{python} f"{_ratio_pq:.0f}×"`, no plausible reduction in training time can compensate for a coal-heavy grid. For any organization serious
 about sustainable AI, datacenter location is not a logistics detail but a
-first-order systems design decision with 40x impact.
+first-order systems design decision.
 :::
 
 ---
@@ -197,7 +257,7 @@ first-order systems design decision with 40x impact.
 
 Carbon pricing (through taxes or cap-and-trade) gives emissions a financial cost and
 changes the economics of datacenter location. The cell below computes TCO with a carbon
-price of $50/tonne.
+price of `${python} _carbon_price`/tonne.
 
 ```{python}
 from mlsysim.solvers import EconomicsModel
@@ -215,53 +275,8 @@ for grid in grids:
 table(["Region", "TCO ($)", "Carbon Cost ($)", "Total ($)"], rows)
 ```
 
-At $50/tonne, carbon pricing adds a visible cost differential between regions. At
-higher carbon prices (some jurisdictions already charge $100+/tonne), the difference
-becomes even more pronounced, potentially shifting which region offers the lowest TCO.
-
----
-
-## Practice
-
-::: {.callout-caution}
-## Exercises
-
-**Exercise 1: Predict before you compute.**
-Training for 30 days in Quebec vs. 10 days in Poland: which produces more carbon?
-Write your prediction, then run both scenarios. Were you right? What does this tell
-you about the relative magnitude of grid carbon intensity vs. training duration?
-
-**Exercise 2: At what carbon price does geography change the cheapest option?**
-Sweep carbon price from $0 to $500/tonne in steps of $50. For each price, calculate
-the total cost (TCO + carbon cost) for all four regions. At what price does a region
-other than the default cheapest become the best option? Print a table showing the
-crossover.
-
-**Exercise 3: Sweep PUE from 1.0 to 2.0.**
-Create custom grid profiles using `from mlsysim.infrastructure.types import GridProfile` with
-US Average carbon intensity but varying PUE. Sweep PUE from 1.0 to 2.0 in steps of
-0.1. How much does total energy increase? At what PUE does facility overhead exceed
-the IT energy itself?
-
-**Self-check:** If you train for 30 days in Quebec (20 gCO2/kWh) vs. 15 days in
-Poland (820 gCO2/kWh), and both use the same fleet and power, which produces more
-total carbon? Show the mental calculation: the ratio of carbon intensities is 41x,
-and the ratio of durations is 2x, so Poland is still 41/2 = ~20x worse.
-:::
-
----
-
-## Key Takeaways
-
-::: {.callout-tip}
-## Summary
-
-- **Grid carbon intensity creates a 40x gap** between the cleanest (Quebec, ~20 gCO2/kWh) and dirtiest (Poland, ~820 gCO2/kWh) regions
-- **Geography dominates training duration** as a sustainability lever: 10 days in Poland emits more than 30 days in Quebec
-- **PUE amplifies energy use** but carbon intensity is the dominant factor in emissions
-- **Carbon pricing changes the economics**: at $50-100/tonne, location becomes a financial variable, not only an environmental one
-- **Datacenter location is a systems design decision** with first-order impact on sustainability and, increasingly, on cost
-:::
+At `${python} _carbon_price`/tonne, carbon pricing adds `${python} f"{_ccost_q:,.0f}"` to the `{python} _duration_days`-day run in `{python} _g_quebec.name` (bringing total cost from `${python} f"{_tco_q.tco_usd:,.0f}"` to `${python} f"{_tot_q:,.0f}"`) versus `${python} f"{_ccost_p:,.0f}"` in `{python} _g_poland.name` (bringing total cost from `${python} f"{_tco_p.tco_usd:,.0f}"` to `${python} f"{_tot_p:,.0f}"`, a `${python} f"{_tot_p - _tot_q:,.0f}"` spread). At
+higher carbon prices, this location differential grows proportionally.
 
 ---
 

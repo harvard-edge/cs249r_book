@@ -90,7 +90,7 @@ MLSys·im uses the [Pint](https://pint.readthedocs.io/) library for physical uni
 |:------|:--------------|
 | `energy` | Estimated energy consumption (Joules) |
 | `memory_footprint` | Total memory required for the workload |
-| `mfu` | Model FLOPs Utilization, the fraction of peak compute achieved |
+| `mfu` | `Model FLOPs Utilization`, the fraction of peak compute achieved |
 | `feasible` | Whether the workload fits in device memory |
 
 ::: {.callout-tip}
@@ -159,11 +159,15 @@ mlsysim.Models.Tiny.WakeVision
 
 Regional grids and datacenter configurations for sustainability analysis:
 
-```python
+```{python}
+#| echo: true
 # Regional power grids -- carbon intensity varies by energy source
-mlsysim.Infrastructure.Grids.Quebec      # hydro:  ~20 gCO2/kWh
-mlsysim.Infrastructure.Grids.US_Avg      # mixed:  ~390 gCO2/kWh
-mlsysim.Infrastructure.Grids.Poland      # coal:   ~820 gCO2/kWh
+for grid in (
+    mlsysim.Infrastructure.Grids.Quebec,
+    mlsysim.Infrastructure.Grids.US_Avg,
+    mlsysim.Infrastructure.Grids.Poland,
+):
+    print(f"{grid.name:28s} ({grid.primary_source}): {grid.carbon_intensity_g_kwh:.0f} gCO2/kWh")
 ```
 
 The [Sustainable AI slides (Vol II, Ch 15)]({{< var slides_latest >}}/vol2_15_sustainable_ai.pdf){target="_blank"} explain why datacenter location is a first-class engineering decision.
@@ -227,15 +231,16 @@ Complete registry listings are available in the [Zoo reference pages](zoo/index.
 
 ## Adjusting the Efficiency Parameter
 
-The `efficiency` parameter (η) is the single most important tuning knob in
+The `efficiency` parameter ($\eta$) is the single most important tuning knob in
 MLSys·im. It represents the fraction of theoretical peak hardware performance
-that is actually achieved in practice. Most GPUs run at 2--5% of peak without optimization; well-tuned workloads reach 35--55%.
+that is actually achieved in practice. Unoptimized single-request inference often runs near `{python} f"{mlsysim.Literature.Training.MfuInferenceBatch1:.0%}"` of peak, whereas well-tuned training and batched serving workloads reach `{python} f"{mlsysim.Literature.Training.MfuLow:.0%}–{mlsysim.Literature.Training.MfuHigh:.0%}"`.
 
-```python
-# Default: well-optimized training (η = 0.5)
+```{python}
+#| echo: true
+# Default: well-optimized training (η = MfuHigh)
 profile_default = Engine.solve(
     model=model, hardware=hardware,
-    batch_size=32, precision="fp16", efficiency=0.5
+    batch_size=32, precision="fp16", efficiency=mlsysim.Literature.Training.MfuHigh
 )
 
 # Conservative: typical inference workload (η = 0.35)
@@ -244,17 +249,17 @@ profile_inference = Engine.solve(
     batch_size=32, precision="fp16", efficiency=0.35
 )
 
-print(f"Training estimate:  {profile_default.latency}")
-print(f"Inference estimate: {profile_inference.latency}")
+print(f"Training estimate:  {profile_default.latency.to('ms'):~.2f}")
+print(f"Inference estimate: {profile_inference.latency.to('ms'):~.2f}")
 ```
 
 Typical efficiency ranges:
 
-| Scenario | η range | Notes |
-|:---------|:--------|:------|
-| Well-optimized training (fp16) | 0.35--0.55 | Megatron-LM, DeepSpeed |
-| Inference (fp16) | 0.25--0.45 | vLLM, TensorRT-LLM |
-| Inference (int8) | 0.20--0.40 | Quantized serving |
+| Scenario | $\eta$ range | Notes |
+|:---------|:-------------|:------|
+| Well-optimized training (fp16) | `{python} f"{mlsysim.Literature.Training.MfuLow:.2f}–{mlsysim.Literature.Training.MfuHigh:.2f}"` | Megatron-LM, DeepSpeed |
+| Inference (fp16) | `{python} f"0.25–{mlsysim.Literature.Training.MfuInferenceBatched:.2f}"` | vLLM, TensorRT-LLM |
+| Inference (int8) | `{python} f"0.20–{mlsysim.Literature.Training.MfuInferenceBatched:.2f}"` | Quantized serving |
 
 See the [Accuracy & Validation](accuracy.qmd) page for guidance on choosing η
 for different scenarios. The gap between theoretical peak and achieved throughput is covered in detail in the [Performance Engineering slides (Vol II, Ch 9)]({{< var slides_latest >}}/vol2_09_performance_engineering.pdf){target="_blank"}.
@@ -266,7 +271,8 @@ for different scenarios. The gap between theoretical peak and achieved throughpu
 Analyses are not limited to Zoo models. Define any model by specifying its parameters
 and FLOPs:
 
-```python
+```{python}
+#| echo: true
 from mlsysim import ureg
 from mlsysim.models.types import TransformerWorkload
 
@@ -278,13 +284,13 @@ my_model = TransformerWorkload(
     hidden_dim=5120,
     heads=40,
     kv_heads=8,
-    inference_flops=2 * 13e9 * ureg.flop  # Rule of thumb: ~2 FLOPs per parameter
+    inference_flops=2 * 13e9 * ureg.flop  # Rule of thumb: 2 FLOPs per parameter
 )
 
 profile = Engine.solve(model=my_model, hardware=hardware, batch_size=1)
 print(f"Bottleneck: {profile.bottleneck}")
-print(f"Latency:    {profile.latency}")
-print(f"Feasible:   {profile.feasible}")  # Does the model fit in device memory?
+print(f"Latency:    {profile.latency.to('ms'):~.2f}")
+print(f"Feasible:   {profile.feasible}")
 ```
 
 The [Model Compression slides (Vol I, Ch 10)]({{< var slides_latest >}}/vol1_10_model_compression.pdf){target="_blank"} explain why parameter count and precision together determine both the memory footprint and the arithmetic intensity of a workload.

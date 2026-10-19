@@ -5,7 +5,34 @@ subtitle: "First-Principles Analytical Modeling with Zero Hallucinations"
 
 MLSys·im was built to solve a specific problem in machine learning systems education and engineering: **the gap between abstract intuition and cycle-accurate simulation.**
 
-When reasoning about ML infrastructure—whether sizing a serving fleet for LLaMA-3 or estimating the carbon footprint of a 10,000-GPU training run—engineers often rely on messy spreadsheets filled with hidden assumptions, unit-conversion errors, and "magic numbers." Conversely, cycle-accurate simulators require weeks of setup, deep proprietary knowledge, and hours to run a single workload.
+```{python}
+#| echo: false
+#| output: false
+import mlsysim
+from mlsysim import Hardware, Models, Systems
+
+_a100 = Hardware.Cloud.A100
+_h100 = Hardware.Cloud.H100
+_l2_70 = Models.Language.Llama2_70B
+
+_a100_peak = _a100.compute.peak_flops.to("TFLOPs/s").magnitude
+_a100_bw = _a100.memory.bandwidth.to("TB/s").magnitude
+_a100_ridge = (_a100.compute.peak_flops / _a100.memory.bandwidth).to("flop/byte").magnitude
+
+_h100_peak = _h100.compute.peak_flops.to("TFLOPs/s").magnitude
+_h100_bw = _h100.memory.bandwidth.to("TB/s").magnitude
+_h100_ridge = (_h100.compute.peak_flops / _h100.memory.bandwidth).to("flop/byte").magnitude
+
+_flops_ratio = (_h100.compute.peak_flops / _a100.compute.peak_flops).to("dimensionless").magnitude
+_bw_ratio = (_h100.memory.bandwidth / _a100.memory.bandwidth).to("dimensionless").magnitude
+
+_l2_70_wt_gb = _l2_70.size_in_bytes("fp16").to("GB").magnitude
+_ib_ndr_gbps = Systems.Fabrics.InfiniBand_NDR.bandwidth.to("Gbps").magnitude
+_mega_gpus = Systems.Clusters.Mega_100K.total_accelerators
+_train_10k_gpus = Systems.Clusters.Training_10K.total_accelerators
+```
+
+When reasoning about ML infrastructure---whether sizing a serving fleet for LLaMA-3 or estimating the carbon footprint of a `{python} f"{_train_10k_gpus:,}"`-GPU training run---engineers often rely on messy spreadsheets filled with hidden assumptions, unit-conversion errors, and "magic numbers." Conversely, cycle-accurate simulators require weeks of setup, deep proprietary knowledge, and hours to run a single workload.
 
 MLSys·im provides a third path: **First-Principles Analytical Modeling**.
 
@@ -15,7 +42,7 @@ To achieve textbook-grade rigor, the framework is built on four non-negotiable d
 
 ## 1. No Hallucinations, No Magic Numbers
 
-In an era of generative AI, it is easy to ask a language model to "estimate the latency of ResNet-50 on an A100." The model will confidently output a number—often a hallucination based on an unverified blend of internet forum posts.
+In an era of generative AI, it is easy to ask a language model to "estimate the latency of ResNet-50 on an A100." The model will confidently output a number---often a hallucination based on an unverified blend of internet forum posts.
 
 **MLSys·im does not guess.** It computes.
 
@@ -32,7 +59,7 @@ flowchart LR
     style D fill:#ecfdf5,stroke:#10b981
 ```
 
-Every number in the MLSys·im ecosystem is mathematically derived from explicit, vetted constants. If a solver needs the memory bandwidth of an H100 GPU, it does not use a hardcoded float `3000.0`. It queries the `Hardware` registry, which returns a `Sourced` object containing exactly `3.35 TB/s`, complete with a `Provenance` struct linking directly to the NVIDIA H100 PCIe Datasheet.
+Every number in the MLSys·im ecosystem is mathematically derived from explicit, vetted constants. If a solver needs the memory bandwidth of an H100 GPU, it does not use a hardcoded float `3000.0`. It queries the `Hardware` registry, which returns a `Sourced` object containing `{python} f"{_h100_bw:.2f} TB/s"`, complete with a `Provenance` struct linking directly to the NVIDIA H100 datasheet.
 
 If a student or engineer asks, *"Where did this number come from?"*, the framework provides the exact URL, the academic paper, or the empirical methodology used to derive it. There are no "magic numbers" hidden in the source code.
 
@@ -42,8 +69,8 @@ The most common source of error in back-of-the-envelope systems analysis is unit
 
 To physically prevent these errors, MLSys·im enforces **strict dimensional analysis at runtime** using the `pint` unit library.
 
-*   A workload does not require `140` memory; it requires `140 * ureg.GB`.
-*   A network does not deliver `400` bandwidth; it delivers `400 * ureg.Gbps`.
+*   A workload of `{python} f"{_l2_70_wt_gb:.0f} GB"` (Llama-2 70B in FP16) is represented with explicit units (`ureg.GB`), not as a bare number.
+*   A network link of `{python} f"{_ib_ndr_gbps:.0f} Gbps"` (InfiniBand NDR) is represented with explicit units (`ureg.Gbps`), not as a bare number.
 *   If a user accidentally attempts to add a latency (`ms`) to a throughput (`1/s`), the Python interpreter will instantly raise a `DimensionalityError`.
 
 By forcing every input, intermediate variable, and output to carry physical SI units, the framework guarantees that the mathematical "physics" of the engine are structurally sound.
@@ -55,11 +82,11 @@ MLSys·im is an **analytical engine**, not a discrete-event simulator.
 We do not track individual packets across a network switch, nor do we simulate warp-scheduler occupancies inside a GPU streaming multiprocessor. Instead, we use closed-form equations (like the Roofline model, the $\alpha$-$\beta$ communication model, and Erlang-C queueing theory) to establish the **hard physical bounds** of a system.
 
 By relying on analytical math ($Y = f(X)$):
-*   **Evaluation is instantaneous:** A full-stack analysis of a 100,000-GPU cluster takes less than 0.3 seconds on a standard laptop.
+*   **Evaluation is instantaneous:** A full-stack analysis of a `{python} f"{_mega_gpus:,}"`-GPU cluster takes less than 0.3 seconds on a standard laptop.
 *   **Bottlenecks are explicit:** The math makes it trivial to calculate gradients (Sensitivity Analysis) or invert equations to solve for required hardware (Synthesis Analysis).
-*   **Intuition is preserved:** Analytical models expose *why* a system is slow (e.g., "Arithmetic Intensity < Ridge Point"), whereas detailed simulations only show *that* it is slow.
+*   **Intuition is preserved:** Analytical models expose *why* a system behaves as it does (e.g., comparing the H100 to the A100 shows that FP16 peak compute rises `{python} f"{_flops_ratio:.1f}"`× from `{python} f"{_a100_peak:.0f}"` to `{python} f"{_h100_peak:.0f} TFLOP/s"` while HBM bandwidth rises `{python} f"{_bw_ratio:.1f}"`× from `{python} f"{_a100_bw:.2f}"` to `{python} f"{_h100_bw:.2f} TB/s"`, shifting the ridge point from `{python} f"{_a100_ridge:.0f}"` to `{python} f"{_h100_ridge:.0f} FLOP/byte"`), whereas detailed simulations only show *that* a workload is slow.
 
-To bridge the gap between theoretical peaks and realized performance, MLSys·im introduces a single, explicit **Efficiency Coefficient ($\eta$)** into compute-bound solvers (like Model FLOPs Utilization, MFU). This clearly separates the raw physics of the hardware from the software friction of the framework.
+To bridge the gap between theoretical peaks and realized performance, MLSys·im introduces a single, explicit **Efficiency Coefficient ($\eta$)** into compute-bound solvers (such as MFU). This clearly separates the raw physics of the hardware from the software friction of the framework.
 
 ## 4. Separation of Demand and Supply
 
@@ -72,17 +99,17 @@ MLSys·im enforces a strict **Demand vs. Supply abstraction**:
 flowchart TB
     subgraph Demand["<b>Demand (Workloads)</b>"]
         direction TB
-        W[<i>Transformer / CNN</i><br/>Parameters & FLOPs]
+        W["<i>Transformer / CNN</i><br/>Parameters & FLOPs"]
     end
 
     subgraph Supply["<b>Supply (Hardware & Systems)</b>"]
         direction TB
-        H[<i>Compute & Memory</i><br/>TFLOP/s & Bandwidth]
+        H["<i>Compute & Memory</i><br/>TFLOP/s & Bandwidth"]
     end
 
-    Demand -->|Lower to graph| S{<b>Solvers (Layer E)</b>}
+    Demand -->|Lower to graph| S["<b>Solvers (Layer E)</b>"]
     Supply -->|Physical Constraints| S
-    S --> R[<b>Analytical Prediction</b><br/><i>Latency, Bottleneck, Cost</i>]
+    S --> R["<b>Analytical Prediction</b><br/><i>Latency, Bottleneck, Cost</i>"]
 
     style Demand fill:#fef08a,stroke:#d97706
     style Supply fill:#ddd6fe,stroke:#7c3aed
