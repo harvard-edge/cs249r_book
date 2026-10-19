@@ -97,6 +97,11 @@ class CheckpointResult(SolverResult):
     storage_bottleneck: bool
     mfu_penalty_pct: float
 
+    @property
+    def write_time(self) -> Quantity:
+        """Checkpoint write duration as a Pint Quantity."""
+        return self.write_time_seconds
+
 
 class SustainabilityResult(SolverResult):
     """Result from SustainabilityModel: energy, carbon, and water footprint."""
@@ -107,6 +112,34 @@ class SustainabilityResult(SolverResult):
     pue: float
     region_name: str
     embodied_carbon_kg: float = 0.0
+
+    @property
+    def it_energy(self) -> Quantity:
+        """IT energy consumption as a Pint Quantity."""
+        return self.it_energy_kwh
+
+    @property
+    def total_energy(self) -> Quantity:
+        """Total facility energy consumption (post-PUE) as a Pint Quantity."""
+        return self.total_energy_kwh
+
+    @property
+    def carbon_footprint(self) -> Quantity:
+        """Total carbon footprint (operational + embodied) as a Pint Quantity in kg."""
+        from ..core.units import Q_
+        return Q_(self.carbon_footprint_kg, "kg")
+
+    @property
+    def water_usage(self) -> Quantity:
+        """Total cooling water consumption as a Pint Quantity in liters."""
+        from ..core.units import Q_
+        return Q_(self.water_usage_liters, "liter")
+
+    @property
+    def embodied_carbon(self) -> Quantity:
+        """Embodied manufacturing carbon as a Pint Quantity in kg."""
+        from ..core.units import Q_
+        return Q_(self.embodied_carbon_kg, "kg")
 
 
 class ServingResult(SolverResult):
@@ -232,6 +265,58 @@ class EconomicsResult(SolverResult):
     pue: float
     region_name: str
 
+    @property
+    def capex(self) -> Quantity:
+        """Amortized hardware CapEx as a Pint Quantity in USD."""
+        from ..core.units import Q_
+        return Q_(self.capex_usd, "USD")
+
+    @property
+    def opex_energy(self) -> Quantity:
+        """Electricity OpEx as a Pint Quantity in USD."""
+        from ..core.units import Q_
+        return Q_(self.opex_energy_usd, "USD")
+
+    @property
+    def opex_maintenance(self) -> Quantity:
+        """Maintenance OpEx as a Pint Quantity in USD."""
+        from ..core.units import Q_
+        return Q_(self.opex_maintenance_usd, "USD")
+
+    @property
+    def total_opex(self) -> Quantity:
+        """Total OpEx as a Pint Quantity in USD."""
+        from ..core.units import Q_
+        return Q_(self.total_opex_usd, "USD")
+
+    @property
+    def tco(self) -> Quantity:
+        """Total Cost of Ownership (CapEx + OpEx) as a Pint Quantity in USD."""
+        from ..core.units import Q_
+        return Q_(self.tco_usd, "USD")
+
+    @property
+    def it_energy(self) -> Quantity:
+        """IT energy consumption as a Pint Quantity."""
+        return self.it_energy_kwh
+
+    @property
+    def total_energy(self) -> Quantity:
+        """Total facility energy consumption (post-PUE) as a Pint Quantity."""
+        return self.total_energy_kwh
+
+    @property
+    def carbon_footprint(self) -> Quantity:
+        """Carbon footprint as a Pint Quantity in kg."""
+        from ..core.units import Q_
+        return Q_(self.carbon_footprint_kg, "kg")
+
+    @property
+    def water_usage(self) -> Quantity:
+        """Cooling water consumption as a Pint Quantity in liters."""
+        from ..core.units import Q_
+        return Q_(self.water_usage_liters, "liter")
+
 
 class DataResult(SolverResult):
     """Result from DataModel: data pipeline feasibility."""
@@ -306,6 +391,16 @@ class CompressionResult(SolverResult):
     memory_savings_pct: float
     inference_speedup: float = 1.0
 
+    @property
+    def original_size(self) -> Quantity:
+        """Baseline model weight size as a Pint Quantity."""
+        return self.original_size_gb
+
+    @property
+    def compressed_size(self) -> Quantity:
+        """Compressed model weight size as a Pint Quantity."""
+        return self.compressed_size_gb
+
 
 class CompressionCandidate(SolverResult):
     """One evaluated compression configuration with lab-ready feasibility metadata."""
@@ -327,6 +422,16 @@ class CompressionCandidate(SolverResult):
     guardrail_violations: List[str] = Field(default_factory=list)
     pareto_status: str = "unknown"
     source_trace: List[str] = Field(default_factory=list)
+
+    @property
+    def original_size(self) -> Quantity:
+        """Baseline model weight size as a Pint Quantity."""
+        return self.original_size_gb
+
+    @property
+    def compressed_size(self) -> Quantity:
+        """Compressed model weight size as a Pint Quantity."""
+        return self.compressed_size_gb
 
 
 class CompressionSweepResult(SolverResult):
@@ -357,6 +462,11 @@ class OrchestrationResult(SolverResult):
     avg_wait_time_days: Quantity
     avg_queue_length: float
     is_stable: bool
+
+    @property
+    def avg_wait_time(self) -> Quantity:
+        """Expected queue wait time as a Pint Quantity."""
+        return self.avg_wait_time_days
 
 
 class InferenceScalingResult(SolverResult):

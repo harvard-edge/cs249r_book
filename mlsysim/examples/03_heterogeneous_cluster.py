@@ -39,10 +39,10 @@ perf = dist_solver.solve(
 )
 
 print("--- Distributed Training Performance ---")
-print(f"Step Latency:       {perf.step_latency_total:.2f}")
+print(f"Step Latency:       {perf.step_latency_total:.2f~P}")
 print(f"Scaling Efficiency: {perf.scaling_efficiency * 100:.1f}%")
-print(f"DP Communication:   {perf.dp_communication_latency:.2f}")
-print(f"TP Communication:   {perf.tp_communication_latency:.2f}")
+print(f"DP Communication:   {perf.dp_communication_latency:.2f~P}")
+print(f"TP Communication:   {perf.tp_communication_latency:.2f~P}")
 
 # 4. Evaluate Economics (30-day training run)
 econ_solver = EconomicsModel()

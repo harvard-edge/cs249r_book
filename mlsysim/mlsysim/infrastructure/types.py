@@ -27,6 +27,18 @@ class GridProfile(BaseModel):
     def carbon_intensity_kg_kwh(self) -> float:
         return self.carbon_intensity_g_kwh / 1000.0
 
+    @property
+    def carbon_intensity(self):
+        """Regional carbon intensity as a Pint Quantity (g / kWh)."""
+        from ..core.units import Q_
+        return Q_(self.carbon_intensity_g_kwh, "gram / kWh")
+
+    @property
+    def water_intensity(self):
+        """Regional Water Usage Effectiveness (WUE) as a Pint Quantity (L / kWh)."""
+        from ..core.units import Q_
+        return Q_(self.wue, "liter / kWh")
+
     def carbon_kg(self, facility_energy_kwh: float) -> float:
         """Carbon footprint from total facility energy (PUE already applied).
 
@@ -48,6 +60,12 @@ class CoolingProfile(BaseModel):
     wue: float  # L/kWh
     metadata: Metadata = Field(default_factory=Metadata)
 
+    @property
+    def water_intensity(self):
+        """Cooling Water Usage Effectiveness (WUE) as a Pint Quantity (L / kWh)."""
+        from ..core.units import Q_
+        return Q_(self.wue, "liter / kWh")
+
 class RackProfile(BaseModel):
     """
     Represents the physical constraints of a datacenter rack.
@@ -60,6 +78,12 @@ class RackProfile(BaseModel):
     power_kw: float
     cooling_type: str
     metadata: Metadata = Field(default_factory=Metadata)
+
+    @property
+    def power(self):
+        """Rack power envelope as a Pint Quantity (kW)."""
+        from ..core.units import Q_
+        return Q_(self.power_kw, "kilowatt")
 
 class PricePoint(BaseModel):
     """Named rate (pint quantity) with provenance for economics tables."""
