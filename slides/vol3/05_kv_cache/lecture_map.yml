@@ -1,0 +1,309 @@
+chapter: 05_kv_cache
+lecture: "05"
+title: "KV Cache Management"
+layer: memory
+locator: s
+minutes: 75
+notes_minutes: 70
+core_minutes: 58
+target_ideas: 30
+thesis: "Retained attention state, and how long it stays resident, sets how many agent turns a serving node can sustain."
+
+hook:
+  minutes: "0-3.5"
+  setup: "The repair agent's r18 turn on one 8-accelerator node (image of the DGX H100 GPU tray). Memory holds 41 repair contexts; each turn generates for 5 s, then waits 45 s for its integration test. Step 1: keeping state through the test, memory allows 41 / 50 s = 0.82 turns/s; the second bar shows ???."
+  question_to_class: "If the engine releases the state during the test, how many times the turn rate can memory serve? A) same B) 2× C) 10× D) 45×"
+  payoff: "C: 41 / 5 s = 8.2 turns/s, ten times more, 1 + 45/5. The synthesis returns with 138 shared slots: 2.76 kept, 27.6 released."
+  sources: ["KV Cache Management, Napkin Math 5.4 and 5.3 (illustrative scenario)", "NVIDIA DGX H100/H200 User Guide (image)", "images/calcs.py"]
+
+recall: "Close your notes: which part of the context goes first, and what does a 30-turn trajectory resend without prefix reuse? Lecture 4's change-rate ordering (stable root first, volatile leaf last); Lecture 2's resend arithmetic, 892,500 against 51,500 prefilled tokens, 17.3× (computed in calcs.py)."
+
+driving_question: "Why can an agent that is generating nothing still exhaust the memory of the machine serving it?"
+
+goals:
+  - "Size an agent's attention state from model geometry and find how many contexts a node holds."
+  - "Show how blocks, a block table, and shared prefixes recover the memory reservation wastes."
+  - "Say when a cached prefix is reusable, and why reusable is not the same as current."
+  - "Choose keep, move, or drop for paused state, and turn slots into a turn rate."
+
+running_example: "The repair agent's r18 turn (Lighthouse 1.1): a 32,768-token request (system prompt 2,048, tool schemas 4,096, workspace 8,192, history 16,384, observation 2,048) on one DGX H100 node serving the Llama 3 70B geometry at 16 bits: 327,680 bytes per token, 10.7 GB per context, 526.0 GB KV pool, 48 raw fits, 41 with output allowance, blocks, and headroom, 138 with a 24,576-token shared workspace prefix; a 45 s integration test after 5 s of generation; reload 21 ms against recompute 1.3 s."
+
+segments:
+  - name: Footprint
+    divider_question: "How much memory does one agent context hold, and how many fit?"
+    read: "§5.1, §5.2"
+    concept_questions: [1, 2, 3, 4]
+    land: "An agent's context costs a fixed number of bytes per token, and the pool left after the weights divided by that cost sets how many contexts fit at once."
+    minutes: 10.5
+  - name: Paging
+    divider_question: "Why does a naive allocator strand most of the pool, and how do blocks fix it?"
+    read: "§5.3, §5.4"
+    concept_questions: [5, 6, 7]
+    land: "Reserving for the cap strands most of the pool; fixed blocks through a block table give it back, and forks share blocks until one writes."
+    minutes: 13.5
+  - name: Prefix Reuse
+    divider_question: "How does the next turn find the state the last turn left behind?"
+    read: "§5.5, §5.6"
+    concept_questions: [8, 9, 10, 11]
+    land: "A radix cache finds what earlier turns computed, a hit saves prefill only, and freshness stays with the harness."
+    minutes: 11
+  - name: Pauses
+    divider_question: "What should the engine do with an agent's state while its tool runs?"
+    read: "§5.7"
+    concept_questions: [12, 13, 14]
+    land: "The engine moves only reclaimable blocks, reload beats recompute when links are free, and only lossless policies leave the turn unchanged."
+    minutes: 12
+  - name: Capacity
+    divider_question: "How many agent turns per second can a full pool sustain?"
+    read: "§5.8"
+    concept_questions: [15]
+    land: "Fit is a count of slots; Little's law turns it into a rate, and every second a slot is held idle divides that rate."
+    minutes: 10.5
+
+concept_questions:
+  - id: 1
+    q: "What is the KV cache, and what does a context turn into?"
+    picture: "zones_step1-2: the r18 context's five zones (book context-anatomy figure, redrawn at slide size), then K and V grids per token per layer."
+    numbers: "Zones 2,048 / 4,096 / 8,192 / 16,384 / 2,048; shared prefix 14,336 (43.8%) (§5.2 figure); 10.7 GB (calcs.py)."
+    example: "The r18 request."
+    read: "§5.2, definition 5.1"
+  - id: 2
+    q: "How many bytes does one token keep?"
+    picture: "Real artifact: Llama 3.1 70B config.json excerpt with the layer, KV-head, and dtype lines highlighted; equation 1 revealed line by line."
+    numbers: "2 x 80 x 8 x 128 x 2 = 327,680 B (eq. 1, NM 5.1; MLSysIM registry agrees)."
+    example: "Llama 3 70B geometry, 16-bit."
+    read: "§5.2"
+  - id: 3
+    q: "How many 32K contexts fit on one node?"
+    picture: "Image of the DGX H100 GPU tray; given card; table 1 revealed; fit curve on log-log axes."
+    numbers: "687.2 - 141.2 - 20 = 526.0 GB; 48 at 32,768; 195 at 8,192; 12 at 131,072 (NM 5.1, table 1)."
+    example: "Fallacy: model size, not retained context, decides concurrency (§5.9)."
+    read: "§5.2, §5.9"
+  - id: 4
+    q: "Who sets the slope?"
+    picture: "Bars of KV bytes per token for six published geometries (MLSysIM registry, the chapter's figure 2 data)."
+    numbers: "GPT-3 4,718.6 KB, DeepSeek-V3 70.3 KB (67×), Llama 70B 327.7 KB (4.7×); 42.9 vs 9.2 GB at 131,072 tokens."
+    example: "MHA, GQA, MLA."
+    read: "§5.2"
+  - id: 5
+    q: "How much of KV memory did naive allocators fill?"
+    picture: "Kwon et al. 2023 Figure 2 redrawn as stacked horizontal bars; then internal and external fragmentation strips."
+    numbers: "Token states 20.4 / 26.8 / 38.2 percent for Orca Max / Pow2 / Oracle, 96.3 for vLLM (Kwon et al., SOSP 2023, Fig. 2); scenario 6.25 percent populated (§5.3.1); 768 free slots fail a 512 request (§5.3.2)."
+    example: "Full-cap reservation at 32,768 with mean final length 2,048."
+    read: "§5.3"
+  - id: 6
+    q: "How does a block table remove contiguity?"
+    picture: "Atlas 1963 photo; block-table build (logical blocks, table [3, 7, 9], scattered physical blocks, position 9 lookup); predict bars 48 vs 780."
+    numbers: "9 // 4 = 2, slot 1; tail at most 15 slots = 4.92 MB (16-token blocks), 20.64 MB (64), 0.2 percent of 32K (NM 5.2); 780 snapshots, 16×; waste 0.4 / 1.5 percent (§5.4.2, MLSysIM)."
+    example: "r18 at the cap gains no resident capacity."
+    read: "§5.4.1, §5.4.2"
+  - id: 7
+    q: "How do forked candidates share a prefix?"
+    picture: "Copy-on-write build: tables [3, 7, 9] twice, then B points at new block 14; PDP-10 (KL10) photo for TENEX."
+    numbers: "4 copies of 8,192 tokens = 10.7 GB without sharing (§5.4.3); table 3 ownership."
+    example: "Lecture 3's breadth sampling of candidate repairs."
+    read: "§5.4.3"
+  - id: 8
+    q: "How does the next turn find a retained prefix, and what is evicted?"
+    picture: "Radix tree build (active path, eligible dormant leaves, cascade); real SGLang evict() source."
+    numbers: "None; mechanism."
+    example: "Repair history, rejected branch, other task."
+    read: "§5.5.2, §5.5.3"
+  - id: 9
+    q: "What does a hit save, and how is reuse measured?"
+    picture: "Bars 169 ms miss vs 5 ms hit (derived); SGLang production hit rates 52.4 and 74.1 percent."
+    numbers: "578 + 22 trillion ops at 3,560 TFLOP/s = 169 ms; weight floor 5.3 ms (calcs.py, §5.5.4); SGLang §6 (Zheng et al. 2024)."
+    example: "Full-block policy reuses 8 of 10 matched tokens."
+    read: "§5.5.4"
+  - id: 10
+    q: "Does a cache hit prove the evidence is current?"
+    picture: "Vote frame; card: reusable = compatible + available + permitted; applicable is the harness's check."
+    numbers: "r17 vs r18 scenario (§5.5.1, §5.9)."
+    example: "Stale r17 failure in a cached workspace prefix."
+    read: "§5.5.1, §5.9"
+  - id: 11
+    q: "How does a long new prompt avoid stalling other streams?"
+    picture: "Monolithic vs chunked timelines (book figure redrawn)."
+    numbers: "168 ms gap vs 22 ms; prompt done 173 vs 162 ms (§5.6.2, calcs.py)."
+    example: "A 4,096-token test log arriving among 32 decodes."
+    read: "§5.6"
+  - id: 12
+    q: "What should the engine do with paused state?"
+    picture: "InferCept Table 1 tool waits (log bars) with the 42 ms round trip; motherboard tray image (2 TB host memory) with keep/move/drop table; topology diagram with reload vs recompute predict; regime map."
+    numbers: "Waits 0.09 ms to 28.6 s; recompute 37 to 40 percent of forwarding time (Abhyankar et al. 2024); 10.74 GB / 512 GB/s = 21 ms; 1.3 s recompute; 62×, 15× at quarter bandwidth (eq. 4)."
+    example: "r18's 45 s test sits in the move region."
+    read: "§5.7.1 to §5.7.3"
+  - id: 13
+    q: "What happens when many paused agents return together?"
+    picture: "Diagnose frame; resume delay staircase for 32 returns."
+    numbers: "344 GB, 0.67 s, 32× (§5.7.4)."
+    example: "A fleet of repair workers whose tests finish together."
+    read: "§5.7.4"
+  - id: 14
+    q: "Can we drop tokens the model has not attended to?"
+    picture: "StreamingLLM perplexity bars (window vs window plus 4 first tokens); card of three agent dependencies."
+    numbers: "Llama-2-13B 5,158.07 vs 5.40; Llama-2-7B 3,359.95 vs 9.59 (Xiao et al. 2024, Tables 1 and 2)."
+    example: "Dormant constraints, exact identifiers, tool-schema syntax (§5.7.5)."
+    read: "§5.7.5"
+  - id: 15
+    q: "How many turns per second can a full pool sustain?"
+    picture: "L = lambda W with the residency strip; turn-rate bars; sharing gain curve; archetype table; pool-state table."
+    numbers: "41 / 50 s = 0.82, 41 / 5 s = 8.2, tax 10× (NM 5.4); 90,292 blocks, 41 vs 138, 70.6 percent, 3.4× (NM 5.3); support 11×, 4× sharing (Lighthouse 5.1)."
+    example: "Repair vs support agent."
+    read: "§5.8"
+
+concept_trace:
+  - concept: "KV footprint and resident fit"
+    frame: "One Llama 70B token keeps 327,680 bytes of attention state; Estimate: how many 32K contexts fit here?"
+    shows: "config.json artifact with equation 1 build; given card, pool arithmetic, and table 1 reveal."
+  - concept: "Paged KV allocation"
+    frame: "A block table maps token positions to blocks anywhere in HBM; Predict: how many fit once memory is paged?"
+    shows: "3-step block-table build with the position 9 lookup; 48 vs 780 bars."
+  - concept: "Copy-on-write block sharing"
+    frame: "Forked candidates share prefix blocks and copy only a shared tail"
+    shows: "2-step build: shared tables [3, 7, 9], then B's private block 14."
+  - concept: "Radix prefix cache"
+    frame: "A radix tree finds the longest retained prefix and evicts leaves; A hit replaces 169 ms of prefill with one 5 ms pass"
+    shows: "3-step tree build with leaf-first eviction; hit-time bars, measured hit rates, and the equation 2 line."
+  - concept: "Reusable is not applicable"
+    frame: "Vote: does a hit prove the evidence current?"
+    shows: "Vote with the r17/r18 scenario; card defining reusable and applicable."
+  - concept: "Paused-state policy"
+    frame: "A paused-state policy keeps, moves, or drops private blocks; Predict: reload over host links, or recompute?"
+    shows: "Keep/move/drop table beside the host-memory image; reload vs recompute bars with the 62× reveal."
+  - concept: "Residency tax"
+    frame: "Little's law turns occupied slots into a turn rate; Holding state through the test cuts the turn rate tenfold"
+    shows: "Residency strip with W = 50 s vs 5 s and the 1 + 45/5 reveal; turn-rate bars 0.82 vs 8.2 and 2.76 vs 27.6."
+  - concept: "Lossy KV approximation"
+    frame: "Evicting tokens by past attention can break the computation"
+    shows: "StreamingLLM perplexity bars and the three agent dependencies card."
+  - concept: "Chunked prefill (secondary)"
+    frame: "Chunked prefill bounds the gap that other streams see"
+    shows: "Monolithic vs chunked timeline build (OPTIONAL frame)."
+  - concept: "Little's law (secondary)"
+    frame: "Little's law turns occupied slots into a turn rate"
+    shows: "L = lambda W with each symbol glossed on the slide."
+
+worked_examples:
+  - name: "Napkin Math 5.1: sizing the attention state"
+    steps: ["Given config.json: 80 layers, 8 KV heads, head dim 128, 2 bytes", "2 x 80 x 8 x 128 x 2 = 327,680 B per token", "32,768 tokens: 10.7 GB", "Pool 687.2 - 141.2 - 20 = 526.0 GB", "48 contexts; 195 at 8K, 12 at 128K"]
+  - name: "Equation 4: reload or recompute during the test"
+    steps: ["Given 10.74 GB, 8 x 64 GB/s, 3,560 TFLOP/s", "Reload 21 ms", "Recompute 2 x 70.6e9 x 32,768 / 3.56e15 = 1.3 s", "62×, 15× at quarter bandwidth", "Move out frees HBM for 44.98 of 45 s"]
+  - name: "Napkin Math 5.3: shared prefix fit"
+    steps: ["Given 32,768 + 2,048 tokens, 16-token blocks, 10 percent headroom, 24,576 shared", "90,292 usable blocks", "Unshared 2,176 blocks: 41", "Shared 1,536 once + 640 each: 138", "70.6 percent shared: 3.4×, near 1/(1 - f)"]
+  - name: "Napkin Math 5.4: residency tax"
+    steps: ["Given 41 slots, 5 s generate, 45 s wait", "Keep: 41 / 50 = 0.82 turns/s", "Release: 41 / 5 = 8.2 turns/s", "Tax 1 + 45/5 = 10"]
+
+active_learning:
+  - at_minute: 0.5
+    type: predict
+    prompt: "Released for the test, how many times the turn rate? A same B 2× C 10× D 45×"
+    answer: "C, 8.2 vs 0.82 turns/s."
+  - at_minute: 3.5
+    type: retrieval
+    prompt: "What goes first in a prompt, and what does a 30-turn trajectory resend without reuse?"
+    answer: "Stable root first; 892,500 vs 51,500 tokens, 17.3×."
+  - at_minute: 11
+    type: estimate
+    prompt: "How many 32K contexts fit here?"
+    answer: "526.0 GB / 10.7 GB = 48."
+  - at_minute: 24.5
+    type: predict
+    prompt: "How many fit once memory is paged?"
+    answer: "780 snapshots, about 16×; r18 at the cap gains nothing."
+  - at_minute: 28.5
+    type: concept_question
+    prompt: "True or false: paging lowers bytes per token; a request at the cap gains no capacity; ending a request frees all its blocks at once."
+    answer: "False, true, false."
+  - at_minute: 37
+    type: concept_question
+    prompt: "Does a hit prove the evidence current?"
+    answer: "B: it proves tokens and configuration match; freshness is the harness's job (Lecture 4)."
+  - at_minute: 45
+    type: predict
+    prompt: "Reload over host links, or recompute?"
+    answer: "Reload 21 ms vs recompute 1.3 s, 62×."
+  - at_minute: 49.5
+    type: diagnose
+    prompt: "32 tests finish at once; why does the last resume stall?"
+    answer: "Shared host links: 344 GB / 512 GB/s = 0.67 s, 32× one reload."
+  - at_minute: 60.5
+    type: estimate
+    prompt: "How should a support agent wait?"
+    answer: "Tax 1 + 20/2 = 11×; keep or move, never drop (0.32 s before a customer's first token); repair may drop (2.6 percent of a 50 s turn)."
+  - at_minute: 63.5
+    type: retrieval
+    prompt: "Name three levers that raise this node's turns per second."
+    answer: "Retained tokens (bytes per slot), prompt layout and sharing (slots), pause policy (seconds per slot); 0.82 to 27.6 turns/s."
+
+fallacies:
+  - "Model size, not retained context, decides concurrency: fit curve slide."
+  - "Reserving every request's maximum: Kwon bars and paging predict."
+  - "A compatible cache proves its evidence is current: vote frame."
+  - "Always moving paused state out: regime map."
+  - "Resident fit as a throughput guarantee: turn-rate bars."
+  - "KV storage as the task record: paused-state policy slide (notes, Lecture 11)."
+
+open_questions:
+  - "Should a harness pay to keep idle prefixes on a hosted service, or plan tool calls around the eviction horizon?"
+  - "Can any lossy KV scheme be validated for agents whose constraints stay dormant for dozens of turns?"
+  - "Should the harness tell the engine how long each tool will take, and who is liable when the hint is wrong?"
+
+more_examples:
+  - "Kwon et al. 2023, Figure 2: 20.4 to 38.2 percent of KV memory held token states before paging."
+  - "Zheng et al. 2024: 52.4 and 74.1 percent production hit rates in Chatbot Arena; first token 1.7× faster."
+  - "Abhyankar et al. 2024: interception times from 0.09 ms to 28.6 s; recomputation 37 to 40 percent of forwarding time."
+  - "Xiao et al. 2024: perplexity 5,158 with a sliding window, 5.40 with the first 4 tokens kept."
+  - "Atlas one-level store (1962) and TENEX copy-on-write (1972)."
+  - "NVIDIA DGX H100 user guide: 8 GPUs, 640 GB GPU memory, 2 TB host memory."
+
+further_reading:
+  - cite: "KV Cache Management, §5.2 to §5.9, Checkpoints 5.1 and 5.2, Exercises 1, 5, 6"
+    why: "The chapter's derivations and problems."
+  - cite: "Kwon et al., Efficient Memory Management for LLM Serving with PagedAttention, SOSP 2023"
+    url: "https://arxiv.org/abs/2309.06180"
+    why: "Measured waste and the block table."
+  - cite: "Zheng et al., SGLang: Efficient Execution of Structured Language Model Programs, 2024"
+    url: "https://arxiv.org/abs/2312.07104"
+    why: "Radix prefix cache and cache-aware scheduling."
+  - cite: "Abhyankar et al., InferCept, ICML 2024"
+    url: "https://arxiv.org/abs/2402.01869"
+    why: "Keep, swap, discard for tool waits, measured."
+  - cite: "Xiao et al., Efficient Streaming Language Models with Attention Sinks, ICLR 2024"
+    url: "https://arxiv.org/abs/2309.17453"
+    why: "Why evicting the first tokens breaks a model."
+  - cite: "Denning, Virtual Memory, ACM Computing Surveys, 1970"
+    why: "The virtual-memory discipline every mechanism here repeats."
+
+callbacks:
+  - {lecture: "1", concept: "Tool-wait problem", where: "hook note"}
+  - {lecture: "1", concept: "Lighthouse workloads (repair agent)", where: "hook note"}
+  - {lecture: "1", concept: "H·S·A exposures (locator)", where: "goals slide note"}
+  - {lecture: "1", concept: "Invariant closure", where: "paused-state policy note"}
+  - {lecture: "1", concept: "Cost per accepted task", where: "turn-rate note"}
+  - {lecture: "2", concept: "Quadratic resend and prefix reuse", where: "recall slide, credit, and note"}
+  - {lecture: "2", concept: "Output-bound call latency (prefill and decode)", where: "chunked prefill note"}
+  - {lecture: "3", concept: "Allocation axes (breadth sampling)", where: "copy-on-write note"}
+  - {lecture: "4", concept: "Change-rate ordering", where: "recall slide, credit, note; sharing note"}
+  - {lecture: "4", concept: "Context invalidation", where: "vote-on-freshness note"}
+  - {lecture: "4", concept: "Working-set partition", where: "fit-curve note"}
+  - {lecture: "6", concept: "Record roles", where: "vote-on-freshness note; next-lecture slide"}
+  - {lecture: "10", concept: "Supervised waiting", where: "paused-state policy note"}
+  - {lecture: "11", concept: "Trajectory log", where: "paused-state policy note"}
+  - {lecture: "19", concept: "Prefix-cache pricing and compaction payback", where: "hit slide note; open questions note"}
+
+left_to_reading:
+  - concept: "Prefill-decode disaggregation"
+    why: "One paragraph in §5.6; serving topology below agent altitude."
+  - concept: "Multi-tier parking (NVMe, cluster KV pools)"
+    why: "Named in the regime-map note only; §5.7.2."
+
+coverage:
+  primary_taught: ["KV footprint and resident fit", "Paged KV allocation", "Copy-on-write block sharing", "Radix prefix cache", "Reusable is not applicable", "Paused-state policy", "Residency tax", "Lossy KV approximation"]
+  primary_left_to_reading: []
+  secondary: ["Chunked prefill", "Little's law"]
+
+notes_for_author:
+  - "The DGX images are vendor product renders from NVIDIA's user guide (cropped to remove the guide's labels), credited as images, not photos."
+  - "The regime map's host-pressure boundary is drawn near one minute as the chapter's figure does; the slide labels it illustrative."
+  - "Hook and capacity numbers are the chapter's hypothetical scenario (NM 5.3, 5.4); slides say illustrative."
