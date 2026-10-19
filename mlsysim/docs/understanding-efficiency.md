@@ -61,7 +61,7 @@ eta actually absorbs:
 
 No analytical model can predict the combined effect of all twelve factors for
 a given workload. Even NVIDIA's own performance models use empirical
-calibration. The honest thing to do is to measure eta, not pretend to derive it.
+calibration. Eta should be measured, not derived.
 
 ---
 

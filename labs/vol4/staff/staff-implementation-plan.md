@@ -34,7 +34,7 @@ The primary objectives for this 13-week execution window:
 2. **Hardware Bring-Up & Validation:** Assemble, wire, verify, and qualify one complete **Golden Reference Station**, validating the **Four Hardware Validation Steps (Steps 1–4)**.
 3. **End-to-End Curriculum Qualification:** Execute all **8 Hands-On Student Labs** from scratch, producing verified golden artifacts, starter scripts, reference datasets, and calibration profiles.
 4. **Software & Firmware Freeze:** Compile and lock the **Golden Qualcomm Linux Image** and **STM32 Firmware Binary**.
-5. **Independent Replication Audit:** Have a secondary researcher or teaching assistant build Station 2 from scratch using only the staff documentation to ensure seamless class deployment.
+5. **Independent Replication Audit:** Have a secondary researcher or teaching assistant build Station 2 from scratch using only the staff documentation to confirm that the class deployment works from the documentation alone.
 
 ---
 

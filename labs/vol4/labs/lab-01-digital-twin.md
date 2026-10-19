@@ -21,7 +21,7 @@
 
 **Comes in from:** Getting Started: a ready station, a working computer setup, and the safety rules.\
 **Goes out to the next lab:** the body's measured limits, your IK solver, your digital twin, and a workspace map.\
-**If a part didn't finish:** staff provide a reference IK solver.
+**If a part did not finish:** staff provide a reference IK solver.
 
 ---
 

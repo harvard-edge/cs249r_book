@@ -40,7 +40,7 @@ Every Volume IV lab has five sections in this order. Copy the block below to `la
 
 **Comes in from Lab N−1:** artifacts this lab uses.\
 **Goes out to Lab N+1:** artifacts this lab produces.\
-**If Lab N−1 didn't finish:** the staff-provided substitute.
+**If Lab N−1 did not finish:** the staff-provided substitute.
 
 ---
 
