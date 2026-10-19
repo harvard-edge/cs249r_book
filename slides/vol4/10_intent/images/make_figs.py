@@ -541,24 +541,6 @@ def lifecycle():
 
 
 # ---------------------------------------------------------------------------
-# Record chain neighbors (Sec. 10.8): belief record, intent lease, trajectory
-# record. Lecture numbers from the course plan's ownership table.
-# ---------------------------------------------------------------------------
-def record_chain():
-    fig, ax = canvas(4.2, 1.6, (0, 11.6), (0, 4.4))
-    items = [("belief\nrecord", "Lecture 9", P["gray_l"], P["gray"]),
-             ("intent\nlease", "today", P["green_l"], P["green"]),
-             ("trajectory\nrecord", "Lecture 11", P["gray_l"], P["gray"])]
-    for i, (t, sub, fc, ec) in enumerate(items):
-        x = 0.2 + i * 3.9
-        box(ax, x, 1.4, 3.2, 2.8, t, fc, ec, fs=14)
-        ax.text(x + 1.6, 0.6, sub, ha="center", va="center", fontsize=13, color=P["slate"])
-        if i < 2:
-            arrow(ax, x + 3.2, 2.8, x + 3.9, 2.8, P["slate"])
-    save(fig, "record_chain")
-
-
-# ---------------------------------------------------------------------------
 # OK-Robot measured outcomes (Liu et al. 2024, Fig. 4 counts, 375 trials)
 # ---------------------------------------------------------------------------
 def okrobot_fail():
@@ -656,7 +638,6 @@ def main():
     aisle()
     lease_terms()
     lifecycle()
-    record_chain()
     okrobot_fail()
     vla_rates()
     walking()

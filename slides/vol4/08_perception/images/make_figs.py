@@ -123,72 +123,6 @@ def aisle():
 
 
 # =============================================================================
-# The stopping budget bar (recall; age is the fifth row)
-# =============================================================================
-BUDGET = [
-    ("braking", K.BRAKE, "slate"),
-    ("loc. + margin", K.D_LOC + K.D_MARGIN, "neutral"),
-    ("onset", K.ONSET, "slate"),
-    ("lease path", K.LEASE_ROW, "permit"),
-    ("age", K.D_AGE, "amber"),
-]
-
-
-def budget(step):
-    fig, ax = plt.subplots(figsize=cm(14.6, 3.9))
-    fig.subplots_adjust(0.02, 0.27, 0.98, 0.83)
-    ax.set_xlim(0, 1260)
-    ax.set_ylim(-0.6, 0.75)
-    ax.set_yticks([])
-    for s in ("left", "top", "right"):
-        ax.spines[s].set_visible(False)
-    ax.set_xticks([0, 200, 400, 600, 800, 1000, 1100])
-    ax.set_xticklabels(["0", "200", "400", "600", "800", "1,000", ""])
-    ax.set_xlabel("distance from detection (mm)", fontsize=10.5)
-    x = 0
-    n = 4 if step == 1 else 5
-    for i, (lab, w, ck) in enumerate(BUDGET[:n]):
-        ax.barh(0, w, left=x, height=0.55, color=C[ck], ec="white", lw=1.2)
-        if w > 300:
-            ax.text(x + w / 2, 0, f"{lab}\n{w:,.1f}",
-                    ha="center", va="center", fontsize=10, color="white", fontweight="bold")
-        elif w > 120:
-            ax.text(x + w / 2, 0, f"{w:,.0f}", ha="center", va="center", fontsize=10,
-                    color="white", fontweight="bold")
-            ax.text(x + w / 2, -0.47, "loc. + margin", ha="center", va="center", fontsize=9.5,
-                    color=C["neutral"])
-        x += w
-    # small rows labeled above
-    lab_y = 0.48
-    xs = K.BRAKE + K.D_LOC + K.D_MARGIN
-    ax.text(xs + K.ONSET / 2, lab_y, f"onset {K.ONSET:.0f}", ha="right", va="bottom",
-            fontsize=9.5, color=C["slate"])
-    xl = xs + K.ONSET
-    ax.text(xl + K.LEASE_ROW / 2 + 15, -0.47, f"lease {K.LEASE_ROW:.0f}", ha="left", va="center",
-            fontsize=9.5, color=C["permit"], fontweight="bold")
-    if n == 5:
-        xa = K.ROWS_1_4
-        ax.text(xa + K.D_AGE / 2, lab_y, f"age {K.D_AGE:.1f}", ha="center", va="bottom",
-                fontsize=10, color=C["amber"], fontweight="bold")
-    # clear distance
-    ax.axvline(K.D_CLEAR, color=C["veto"], lw=2, ls="--")
-    ax.text(K.D_CLEAR + 8, 0.62, "clear 1,100", color=C["veto"], fontsize=10,
-            fontweight="bold", ha="left", va="center")
-    used = K.ROWS_1_4 if n == 4 else K.ROWS_1_5
-    ax.text(0, 0.62, f"rows 1-{n}: {used:,.1f} mm", ha="left", va="center", fontsize=10.5,
-            fontweight="bold", color=C["text"])
-    if step >= 3:
-        rem = K.D_CLEAR - K.ROWS_1_5
-        ax.barh(0, rem, left=K.ROWS_1_5, height=0.55, color="white", ec=C["veto"],
-                lw=1.2, hatch="///")
-        ax.text(K.ROWS_1_5 + rem / 2, -0.47, f"{rem:.1f} left", ha="center", va="center",
-                fontsize=10, color=C["veto"], fontweight="bold")
-    save(fig, f"budget_step{step}")
-
-
-# =============================================================================
-# KITTI: lidar points projected into the color camera (real data)
-# =============================================================================
 def kitti_calib():
     v2c = {}
     for line in (DATA / "kitti" / "calib_velo_to_cam.txt").read_text().splitlines():
@@ -801,8 +735,6 @@ def kitti_sat():
 
 if __name__ == "__main__":
     aisle()
-    for s in (1, 2, 3):
-        budget(s)
     kitti_overlay()
     guard()
     for s in (1, 2, 3):

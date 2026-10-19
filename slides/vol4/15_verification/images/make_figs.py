@@ -49,28 +49,8 @@ def out(name):
     return str(HERE / f"{name}.svg")
 
 
-# -----------------------------------------------------------------------------
-# Recall: the spare at aisle speed (AV 15.2), one stacked bar
-# -----------------------------------------------------------------------------
-def recall_spare():
-    fig, ax = plt.subplots(figsize=(4.6, 1.5))
-    used = c.capture_subtotal(c.V_AISLE) * 1e3
-    da = c.V_AISLE * c.T_DA * 1e3
-    left = c.SPARE * 1e3 - da
-    ax.barh(0, used, color=SLATE, height=0.55)
-    ax.barh(0, da, left=used, color=AMBER, height=0.55)
-    ax.barh(0, left, left=used + da, color=GREEN_L, height=0.55, edgecolor=GREEN)
-    ax.axvline(c.D_CLEAR * 1e3, color=RED, lw=2.5)
-    ax.text(used / 2, 0, f"{used:.1f} mm budgeted", ha="center", va="center",
-            color="white", fontsize=12, fontweight="bold")
-    ax.text(c.D_CLEAR * 1e3 - 10, 0.52, "1,100 mm", ha="right", va="bottom", color=RED,
-            fontsize=12, fontweight="bold")
-    ax.set_xlim(0, 1150)
-    ax.set_ylim(-0.45, 0.85)
-    ax.set_yticks([])
-    ax.spines["left"].set_visible(False)
-    ax.set_xlabel("Travel at 1.3 m/s (mm)", fontsize=12)
-    sp.save(fig, out("recall_spare"))
+# The recall thumbnail is the kit's stopping-budget bar (budget_bar_aisle_step8)
+# run through tools/greek_thumbs.py: thumb_budget_bar_aisle_step8.svg.
 
 
 # -----------------------------------------------------------------------------
@@ -449,43 +429,14 @@ def evt():
     sp.save(fig, out("evt"))
 
 
-# -----------------------------------------------------------------------------
-# Close: the record chain with the fault-record set lit (Lecture 1's chain)
-# -----------------------------------------------------------------------------
-N_RECORDS = 16                 # the record chain of the course (limit record to residual-claims register)
-NAMED = {11: "authority\nrecord", 12: "fault-record\nset", 13: "release\nmanifest"}
-
-
-def chain(name, lit, done_to):
-    """The record chain as one row of 16 records; earlier records gray, the lit one red."""
-    fig, ax = plt.subplots(figsize=(5.9, 1.25))
-    w, gap = 0.30, 0.07
-    for k in range(N_RECORDS):
-        x = k * (w + gap)
-        if k == lit:
-            fc, ec = RED, RED
-        elif k < done_to:
-            fc, ec = SLATE_L, SLATE
-        else:
-            fc, ec = "white", "#BBBBBB"
-        ax.add_patch(FancyBboxPatch((x, 0.55), w, 0.42, boxstyle="round,pad=0.0,rounding_size=0.04",
-                                    fc=fc, ec=ec, lw=2 if k == lit else 1))
-        if k < N_RECORDS - 1:
-            ax.plot([x + w, x + w + gap], [0.76, 0.76], color="#BBBBBB", lw=1)
-        if k == lit:
-            ax.text(x + w / 2, 0.45, NAMED[k], ha="center", va="top", fontsize=10.5,
-                    color=RED if k == lit else TEXT, fontweight="bold" if k == lit else "normal")
-    ax.set_xlim(-0.05, N_RECORDS * (w + gap))
-    ax.set_ylim(-0.05, 1.02)
-    ax.axis("off")
-    sp.save(fig, out(name))
+# The record chain is the course kit's (assets/kit/vol4/record_chain_l15 and
+# thumb_record_chain).
 
 
 SMALL = {"font.size": 10, "axes.labelsize": 10, "xtick.labelsize": 9.5, "ytick.labelsize": 9.5}
 
 
 def main():
-    recall_spare()
     with plt.rc_context(SMALL):
         corner()
         wang()
@@ -498,8 +449,6 @@ def main():
     f1trace()
     ladder()
     is_ladder()
-    chain("chain_fault", lit=12, done_to=12)
-    chain("chain_release", lit=13, done_to=13)
 
 
 if __name__ == "__main__":

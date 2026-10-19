@@ -1,13 +1,11 @@
 """Figures for Volume IV, Lecture 0 (Course overview).
 
 Run:  python3 make_figs.py          (the figures this deck shows)
-      python3 make_figs.py --kit    (also the two kit candidates below)
 Writes SVGs here; `make deck V=4 D=00_course_overview` converts them to PDF.
 Data plots read the MLSysIM registry; derived values come from calcs.py.
 
-Kit candidates: the stopping-budget bar and the record chain are kept here
-until they move to slides/assets/kit (course plan, "The stack figure"). Lecture
-0 no longer shows them; Lecture 1 owns both ideas.
+The stopping-budget bar and the record chain live in the Volume IV kit
+(slides/assets/kit/vol4); Lecture 0 shows neither, and Lecture 1 owns both.
 """
 
 import sys
@@ -20,18 +18,11 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "mlsysim"))
 
 import matplotlib.pyplot as plt  # noqa: E402
-from matplotlib.patches import FancyBboxPatch  # noqa: E402
 import slideplot as sp  # noqa: E402
 import calcs  # noqa: E402
 
 # Volume IV roles (rules/volumes/vol4/palette.md)
-NAVY = "#1F407A"
-NERVE = "#059669"
-RED = "#DC2626"
-PLANT = "#334155"
 AMBER = "#D97706"
-GRAY = "#94A3B8"
-TEXT = "#1A1A2E"
 
 
 def out(name):
@@ -78,91 +69,9 @@ def waymo_miles(step):
     sp.save(fig, out(f"waymo_miles_step{step}.svg"))
 
 
-# ---------------------------------------------------------------------------
-# The stopping-budget bar, two segments (Napkin Math 1.1)
-# ---------------------------------------------------------------------------
-def stop_bar(step):
-    d1, d2 = calcs.stop_mm(calcs.V_DRIVE)
-    clear = calcs.D_CLEAR * 1000
-    fig, ax = plt.subplots(figsize=(5.8, 1.7))
-    ax.barh(0, d1, color=AMBER, height=0.5)
-    ax.text(d1 / 2, 0, f"{d1:.1f}", color="white", fontsize=13, ha="center", va="center",
-            fontweight="bold")
-    ax.text(d1 / 2, 0.33, "delay  v·τ", color=AMBER, fontsize=12, ha="center", va="bottom",
-            fontweight="bold")
-    a2 = 1 if step >= 2 else 0
-    ax.barh(0, d2, left=d1, color=PLANT, height=0.5, alpha=a2)
-    ax.text(d1 + d2 / 2, 0, f"{d2:.1f}", color="white", fontsize=13, ha="center", va="center",
-            fontweight="bold", alpha=a2)
-    ax.text(d1 + d2 / 2, 0.33, "braking  v²/2a", color=PLANT, fontsize=12, ha="center",
-            va="bottom", fontweight="bold", alpha=a2)
-    a3 = 1 if step >= 3 else 0
-    ax.axvline(clear, color=RED, lw=2, ls="--", alpha=a3)
-    ax.text(clear - 12, 0.33, "clear 1,100", color=RED, fontsize=12, ha="right", va="bottom",
-            fontweight="bold", alpha=a3)
-    ax.text((d1 + d2 + clear) / 2, 0, f"spare\n{clear - d1 - d2:.1f}", color=RED, fontsize=11,
-            ha="center", va="center", fontweight="bold", alpha=a3)
-    ax.set_xlim(0, 1250)
-    ax.set_ylim(-0.4, 0.75)
-    ax.set_yticks([])
-    ax.spines["left"].set_visible(False)
-    ax.set_xlabel("mm traveled from detection, 1.5 m/s")
-    sp.save(fig, out(f"stop_bar_step{step}.svg"))
-
-
-# ---------------------------------------------------------------------------
-# The record chain (sec. 1.11, figure 9): one record per lecture
-# ---------------------------------------------------------------------------
-def record_chain():
-    rows = [
-        ("Part I", "irreversibility", PLANT, [(2, "limit"), (4, "handoff")]),
-        ("Part II", "endogenous data", sp.C["data"], [(5, "provenance"), (6, "policy manifest"),
-                                                      (7, "evaluation")]),
-        ("Part III", "proposal is not", NERVE, [(8, "observation contract"), (9, "belief"),
-                                                (10, "intent lease")]),
-        ("", "permission", NERVE, [(11, "trajectory"), (12, "enforcement"),
-                                    (13, "placement")]),
-        ("Part IV", "permission must", NAVY, [(14, "authority"), (15, "fault"),
-                                              (16, "release manifest")]),
-        ("", "be earned", NAVY, [(17, "approval")]),
-        ("Close", "", RED, [(18, "residual-claims register")]),
-    ]
-    fig = plt.figure(figsize=(5.8, 2.75))
-    ax = fig.add_axes([0, 0, 1, 1])
-    ax.set_xlim(0, 5.8)
-    ax.set_ylim(-2.55, 0.2)
-    ax.axis("off")
-    rend = fig.canvas.get_renderer()
-    inv = ax.transData.inverted()
-
-    def width(t):
-        bb = t.get_window_extent(renderer=rend)
-        (x0, _), (x1, _) = inv.transform([(bb.x0, bb.y0), (bb.x1, bb.y1)])
-        return x1 - x0
-
-    y = 0
-    for part, law, c, recs in rows:
-        ax.text(0.05, y, part, color=c, fontsize=11, fontweight="bold", va="center")
-        ax.text(0.78, y, law, color=c, fontsize=10, va="center")
-        x = 2.0
-        for lec, name in recs:
-            t1 = ax.text(x + 0.06, y, f"L{lec}", color=c, fontsize=10, va="center", fontweight="bold")
-            w1 = width(t1)
-            t2 = ax.text(x + 0.06 + w1 + 0.06, y, name, color=TEXT, fontsize=10, va="center")
-            w = w1 + width(t2) + 0.18
-            ax.add_patch(FancyBboxPatch((x, y - 0.14), w, 0.28, boxstyle="round,pad=0,rounding_size=0.04",
-                                        fc="white", ec=c, lw=1.5, clip_on=False))
-            x += w + 0.07
-        y -= 0.38
-    sp.save(fig, out("record_chain.svg"))
-
 def main():
     for k in (1, 2):
         waymo_miles(k)
-    if "--kit" in sys.argv:
-        for k in (1, 2, 3):
-            stop_bar(k)
-        record_chain()
 
 
 if __name__ == "__main__":

@@ -165,7 +165,8 @@ def recovery():
 
 
 # ---------------------------------------------------------------------------
-# 3. Pre-brake delay bar, plus its scanner-path variant (full width)
+# 3. Pre-brake delay bar for the scanner path (full width); the deck builds
+#    the stopping budget itself with the kit bar (assets/kit/vol4/budget_bar_step*)
 # ---------------------------------------------------------------------------
 def delay_bar(name, scanner=False):
     fig, ax = plt.subplots(figsize=(5.6, 1.15))
@@ -402,78 +403,9 @@ def convergence():
         s.save(f"convergence_step{step}")
 
 
-# ---------------------------------------------------------------------------
-# 10. The record chain (full width, 404 x 172 pt), chapter figure 9 redrawn
-# ---------------------------------------------------------------------------
-def record_chain():
-    W, H = 404, 172
-    bw, bh, cw = 48, 32, 50.5
-    yA, yB, yC = 6, 56, 124
-    off = (cw - bw) / 2
-    s = Svg(W, H)
-    bands = [(2 * cw - 1, yA - 4, 3 * cw + 2, bh + 8, "petrol"),
-             (0, yB - 4, 2 * cw - 2, bh + 8, "slate"),
-             (2 * cw - 1, yB - 4, 6 * cw + 1 - 2 * cw, bh + 8, "navy"),
-             (3 * cw - 1, yC - 4, 5 * cw + 1, bh + 8, "green")]
-    for x, y, w, h, f in bands:
-        s.rect(x, y, w, h, fill=FILL[f], stroke="none", sw=0, rx=2)
-    def box(col, y, num, name, color=SLATE):
-        x = col * cw + off
-        s.rect(x, y, bw, bh, fill="white", stroke=color, sw=1.1)
-        s.text(x + bw / 2, y + 11, name, size=8, color=INK)
-        s.text(x + bw - 3, y + bh - 3, f"L{num}", size=7, color=GRAY, anchor="end")
-    box(0, yB, 2, "limit\nrecord")
-    box(1, yB, 4, "handoff\nrecord")
-    for i, (n, nm) in enumerate([(5, "provenance\nrecord"), (6, "policy\nmanifest"), (7, "evaluation\nrecord")]):
-        box(2 + i, yA, n, nm, PETROL)
-    for i, (n, nm) in enumerate([(8, "observation\ncontract"), (9, "belief\nrecord"), (10, "intent\nlease"),
-                                 (11, "trajectory\nrecord")]):
-        box(2 + i, yB, n, nm, NAVY)
-    box(6, yB, 12, "enforcement\nrecord", NAVY)
-    box(7, yB, 13, "placement\nrecord", NAVY)
-    for i, (n, nm) in enumerate([(14, "authority\nrecord"), (15, "fault\nrecords"), (16, "release\nmanifest"),
-                                 (17, "approval\nrecord")]):
-        box(3 + i, yC, n, nm, GREEN)
-    box(7, yC, 18, "residual-\nclaims", RED)
-    def right(col, y):
-        return col * cw + off + bw, y + bh / 2
-    def left(col):
-        return col * cw + off
-    for row, cols in ((yB, (0, 1, 2, 3, 4, 5, 6)), (yA, (2, 3)), (yC, (3, 4, 5, 6))):
-        for c in cols:
-            if row == yB and c == 1:
-                continue
-            x1, y1 = right(c, row)
-            s.line(x1, y1, left(c + 1) - 1, y1, arrow=True, sw=1.0)
-    # the handoff record forks into Part II and Part III
-    hx, hy = right(1, yB)
-    s.line(hx, hy, left(2) - 1, hy, arrow=True, sw=1.0)
-    fx = 1 * cw + cw / 2
-    s.path(f"M{fx},{yB} L{fx},{yA + bh / 2} L{left(2) - 1},{yA + bh / 2}", sw=1.0, arrow=True)
-    # evaluation joins enforcement
-    ex, ey = right(4, yA)
-    s.path(f"M{ex},{ey} L{6 * cw + cw / 2},{ey} L{6 * cw + cw / 2},{yB - 1}", sw=1.0, arrow=True)
-    # proposer limits (Lecture 3) enter the handoff record from below
-    s.line(1 * cw + cw / 2, yB + bh + 13, 1 * cw + cw / 2, yB + bh + 1, color=GRAY, sw=1.0, dash="2,2", arrow=True)
-    s.text(1 * cw + cw / 2, yB + bh + 22, "L3: proposer limits", size=7.5, color=GRAY)
-    # placement down to the authority record
-    px, py = 7 * cw + cw / 2, yB + bh
-    s.path(f"M{px},{py} L{px},{yC - 11} L{3 * cw + cw / 2},{yC - 11} L{3 * cw + cw / 2},{yC - 1}",
-           sw=1.0, arrow=True)
-    s.text(5 * cw + 4, yA + 9, "Part II: endogenous data", size=8, color=PETROL, anchor="start", weight="bold")
-    s.text(0, yB - 17, "Part I:", size=8, color=SLATE, anchor="start", weight="bold")
-    s.text(0, yB - 7.5, "irreversibility", size=8, color=SLATE, anchor="start", weight="bold")
-    s.text(6 * cw - 2, yB + bh + 12, "Part III: proposal is not permission", size=8, color=NAVY,
-           anchor="end", weight="bold")
-    s.text(3 * cw + 1, yC + bh + 12, "Part IV: permission must be earned", size=8, color=GREEN,
-           anchor="start", weight="bold")
-    s.save("record_chain")
-
-
 def main():
     chain()
     recovery()
-    delay_bar("delay_bar")
     delay_bar("delay_bar_scanner", scanner=True)
     crossover()
     tempe_bars()
@@ -481,7 +413,6 @@ def main():
     venn()
     tempe_track()
     convergence()
-    record_chain()
     print("ok")
 
 

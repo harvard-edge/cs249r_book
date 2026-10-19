@@ -237,60 +237,10 @@ def strip():
 # =============================================================================
 # The takeover tax (SI Napkin Math 14.1)
 # =============================================================================
-def tax():
-    v = K.V_AISLE
-    delay = v * K.TAU * 1e3
-    stop = K.stop_dist(v) * 1e3
-    allow = K.ALLOW * 1e3
-    rows = [("Machine alone", 0.0), ("+ in-loop takeover, 605 ms", v * K.T_IN * 1e3),
-            ("+ out-of-loop, 4.5 s", v * K.T_OOL * 1e3)]
-    xmax = 2000
-    for step in (1, 2):
-        fig, ax = plt.subplots(figsize=(5.8, 2.3))
-        for i, (lab, wait) in enumerate(rows):
-            y = len(rows) - 1 - i
-            if step == 1 and i > 0:
-                ax.text(30, y, "?", fontsize=15, va="center", color=sp.C["neutral"], fontweight="bold")
-                continue
-            left = 0
-            for w, col in [(allow, "#CBD5E1"), (delay, "#64748B"), (wait, AMBER), (stop, SLATE)]:
-                ax.barh(y, min(w, max(xmax - left, 0)), left=left, height=0.62, color=col,
-                        edgecolor="white", lw=0.8)
-                left += w
-            total = allow + delay + wait + stop
-            if total <= K.D_CLEAR * 1e3:
-                ax.text(total - 20, y, f"{total:,.0f} mm", va="center", ha="right", fontsize=12,
-                        fontweight="bold", color="white")
-            elif total <= xmax:
-                ax.text(total + 25, y, f"{total:,.0f} mm", va="center", fontsize=12, fontweight="bold",
-                        color=TXT)
-            else:
-                ax.text(xmax - 20, y, f"{total:,.0f} mm, off scale", va="center", ha="right", fontsize=12,
-                        fontweight="bold", color="white")
-        ax.axvline(K.D_CLEAR * 1e3, color=RED, lw=2, ls="--")
-        ax.text(K.D_CLEAR * 1e3 + 15, 2.48, "clear distance 1,100 mm", color=RED, fontsize=11,
-                fontweight="bold", va="bottom")
-        ax.set_yticks(range(len(rows)))
-        ax.set_yticklabels([r[0] for r in rows][::-1], fontsize=12)
-        ax.set_xlim(0, xmax)
-        ax.set_ylim(-0.5, 2.85)
-        ax.set_xticks([0, 500, 1000, 1500, 2000])
-        ax.set_xticklabels(["0", "500", "1,000", "1,500", "2,000"])
-        ax.set_xlabel("Distance to a stop (mm)", fontsize=12)
-        ax.tick_params(axis="y", length=0)
-        ax.spines["left"].set_visible(False)
-        if step == 1:
-            ax.text(1180, 2.0, "allowances, machine delay,\nthen the resident stop", fontsize=11,
-                    color=SLATE, va="center")
-        else:
-            ax.text(820, 0, "waiting before braking", fontsize=11.5, color="white",
-                    fontweight="bold", va="center", ha="center")
-        save(fig, f"tax_step{step}")
+# The takeover-tax bars are the course kit's stopping-budget bar
+# (assets/kit/vol4/budget_bar_aisle_step7) with the takeover stated in text.
 
 
-# =============================================================================
-# Zhang et al. 2019: 520 condition means of take-over time (SI 14.2.2)
-# =============================================================================
 def zhang():
     vals = np.array(K.MTOT)
     fig, ax = plt.subplots(figsize=(5.8, 2.6))
@@ -703,7 +653,6 @@ def main():
     dmv()
     propose_admit()
     strip()
-    tax()
     zhang()
     deadline()
     leases()

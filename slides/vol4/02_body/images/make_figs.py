@@ -111,46 +111,6 @@ def mug_travel():
         sp.save(fig, out(f"mug_travel_step{step}"))
 
 
-# -----------------------------------------------------------------------------
-# Stopping: three cases against the clear distance (PB figure 2)
-# -----------------------------------------------------------------------------
-def stop_bars():
-    cases = [("Body terms\n1.5 m/s", c.onset, c.brake, c.overhead),
-             ("Elementary delay\n1.5 m/s", c.blind_elem, c.brake, c.overhead),
-             ("Same delay\n2 m/s", c.blind_fast, c.brake_fast, c.overhead)]
-    clear = c.D_CLEAR * 1000
-    for step in (1, 2, 3):
-        fig, ax = plt.subplots(figsize=(5.8, 2.5))
-        for i, (name, blind, brk, ovh) in enumerate(cases):
-            y = 2 - i
-            a = 1.0 if i < step else 0.0
-            ax.barh(y, blind, color=AMBER, height=0.58, alpha=a)
-            ax.barh(y, brk, left=blind, color=SLATE, height=0.58, alpha=a)
-            ax.barh(y, ovh, left=blind + brk, color=SLATE_L, height=0.58, alpha=a)
-            total = blind + brk + ovh
-            col = RED if total > clear else TEXT
-            ax.text(1470, y, f"{total:,.1f} mm", va="center", fontsize=12,
-                    fontweight="bold", color=col, alpha=a)
-            ax.text(-25, y, name, ha="right", va="center", fontsize=11.5,
-                    color=TEXT, fontweight="bold", alpha=a)
-        ax.axvline(clear, color=RED, lw=2, ls="--")
-        ax.text(clear + 10, 2.62, "person at 1,100 mm", color=RED, fontsize=11,
-                fontweight="bold")
-        # legend as direct labels on the first bar
-        ax.text(c.onset + c.brake / 2, 2, "braking", ha="center", va="center",
-                color="white", fontsize=11, fontweight="bold")
-        ax.text(c.blind_elem / 2, 1, "blind", ha="center", va="center",
-                color="white", fontsize=11, fontweight="bold", alpha=1 if step >= 2 else 0)
-        ax.text(c.onset + c.brake + c.overhead / 2, 2, "fixed", ha="center",
-                va="center", color=TEXT, fontsize=10.5)
-        ax.set_xlim(0, 1460)
-        ax.set_ylim(-0.5, 2.9)
-        ax.set_yticks([])
-        ax.spines["left"].set_visible(False)
-        ax.set_xlabel("Distance from detection (mm)")
-        sp.save(fig, out(f"stop_bars_step{step}"))
-
-
 def vceiling():
     d = np.linspace(0.15, 2.0, 300)
     curves = [(c.T_ACT, c.A_BRAKE, SLATE, "body terms only", 2.78),
@@ -371,26 +331,9 @@ def phase_short():
     sp.save(fig, out("phase_short"))
 
 
-# -----------------------------------------------------------------------------
-# Recall thumbnail: the elementary stop of Lecture 1 (drawn, then made text-free)
-# -----------------------------------------------------------------------------
-def recall_bar():
-    fig, ax = plt.subplots(figsize=(5.8, 1.4))
-    ax.barh(0, c.blind_elem, color=AMBER, height=0.6)
-    ax.barh(0, c.brake, left=c.blind_elem, color=SLATE, height=0.6)
-    ax.axvline(1100, color=RED, lw=3, ls="--")
-    ax.set_xlim(0, 1250)
-    ax.set_yticks([])
-    ax.set_xticks([])
-    for s in ("left", "bottom"):
-        ax.spines[s].set_visible(False)
-    sp.save(fig, out("recall_bar"))
-
-
 if __name__ == "__main__":
     waterfall()
     mug_travel()
-    stop_bars()
     vceiling()
     decel_ceilings()
     volt_need()
@@ -399,5 +342,4 @@ if __name__ == "__main__":
     burst()
     bus()
     phase_short()
-    recall_bar()
     print("figures written to", HERE)

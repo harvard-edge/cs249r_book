@@ -87,37 +87,7 @@ def closed_loop(step):
     sp.save(fig, out(f"closed_loop_step{step}.svg"))
 
 
-# ---------------------------------------------------------------------------
-# Segment 1: Open X-Embodiment, episodes by robot (real data), full width
-# ---------------------------------------------------------------------------
-def oxe():
-    from collections import Counter
-    from mlsysim import Literature
-    ep = Counter()
-    for r in Literature.OpenXEmbodimentComposition.entries:
-        ep[r["robot"]] += r["episodes"] or 0
-    top = ep.most_common(8)
-    rest = sum(ep.values()) - sum(v for _, v in top)
-    n_robots = len(ep)
-    rows = [(k, v) for k, v in top] + [(f"{n_robots - 8} other robots", rest)]
-    fig, ax = plt.subplots(figsize=(5.8, 2.55))
-    for i, (k, v) in enumerate(rows):
-        y = len(rows) - 1 - i
-        col = NAVY if i < 8 else GRAY
-        ax.barh(y, v / 1000, color=col, height=0.66)
-        ax.text(v / 1000 + 8, y, f"{v / 1000:,.0f}k", va="center", fontsize=11, color=col, fontweight="bold")
-        ax.text(-8, y, k, va="center", ha="right", fontsize=11, color=TEXT, fontweight="bold")
-    ax.set_yticks([])
-    ax.spines["left"].set_visible(False)
-    ax.set_xlim(0, 820)
-    ax.set_xlabel("Episodes (thousands)", fontsize=11)
-    ax.tick_params(labelsize=10)
-    ax.text(810, 1.2, f"{n_robots} robots\n{sum(ep.values()) / 1e6:.2f} million episodes", ha="right",
-            fontsize=12, color=NAVY, fontweight="bold", va="center")
-    ax.grid(axis="x", color=sp.C["grid"], lw=0.6)
-    ax.set_axisbelow(True)
-    sp.save(fig, out("oxe_robots.svg"))
-    return n_robots, sum(ep.values())
+# Open X-Embodiment is Lecture 5's dataset; this deck recalls it in one line.
 
 
 # ---------------------------------------------------------------------------
@@ -514,133 +484,15 @@ def latch_bars():
     sp.save(fig, out("latch_bars.svg"))
 
 
-# ---------------------------------------------------------------------------
-# Segment 4: Waymo rider-only injury rates against the human benchmark (real)
-# ---------------------------------------------------------------------------
-def waymo():
-    from mlsysim import Literature
-    rows = sorted((r for r in Literature.WaymoSafetyImpact.entries if r["outcome"] == "Any-injury-reported"),
-                  key=lambda r: r["data_cut"])
-    miles = [r["ro_miles_millions"] for r in rows]
-    wy = [r["waymo_ipmm"] for r in rows]
-    hb = [r["benchmark_ipmm"] for r in rows]
-    fig, ax = plt.subplots(figsize=(5.8, 2.45))
-    ax.plot(miles, hb, "o-", color=GRAY, lw=2.5, ms=6)
-    ax.plot(miles, wy, "o-", color=NAVY, lw=2.5, ms=6)
-    ax.text(miles[-1] + 6, hb[-1], f"human benchmark\n{hb[-1]:.2f}", color=PLANT, fontsize=11,
-            fontweight="bold", va="center")
-    ax.text(miles[-1] + 6, wy[-1], f"Waymo, rider-only\n{wy[-1]:.2f}", color=NAVY, fontsize=11,
-            fontweight="bold", va="center")
-    ax.set_xlim(0, 360)
-    ax.set_ylim(0, 4.8)
-    ax.set_xticks([0, 50, 100, 150, 200, 250])
-    ax.tick_params(labelsize=10)
-    ax.set_xlabel("Cumulative rider-only miles (millions)", fontsize=11)
-    ax.set_ylabel("Injury crashes per\nmillion miles", fontsize=11)
-    ax.grid(axis="y", color=sp.C["grid"], lw=0.6)
-    sp.save(fig, out("waymo_rates.svg"))
-    return rows[-1]
+# The Waymo crash rates are Lecture 16's data; this deck recalls them in one line.
 
 
-# ---------------------------------------------------------------------------
-# Synthesis: the finished aisle budget at 1.3 m/s, one row per owning lecture
-# ---------------------------------------------------------------------------
-def budget_final(step):
-    t = c.budget_terms(c.V_AISLE, c.MU_DRY)
-    tf = c.budget_terms(c.V_AISLE, c.MU_OIL)
-    da = c.V_AISLE * c.DELTA_DA * 1000
-    segs = [("delay", t["delay"] * 1000, AMBER, "delay L1, L4, L8", 1.62),
-            ("braking", t["braking"] * 1000, PLANT, "braking L1, L2", 1.3),
-            ("jerk ramp", t["ramp"] * 1000, GRAY, "ramp L11", 1.62),
-            ("overheads", t["overhead"] * 1000, "#64748B", "overheads L12", 1.3)]
-    fig, ax = plt.subplots(figsize=(5.8, 2.45))
-    x = 0
-    for lab, v, col, tag, ty in segs:
-        ax.barh(1, v, left=x, color=col, height=0.5, edgecolor="white", lw=1)
-        if v > 300:
-            ax.text(x + v / 2, 1, f"{v:.1f}", color="white", ha="center", va="center", fontsize=10.5,
-                    fontweight="bold")
-        x += v
-    tot = x
-    if step >= 2:
-        ax.barh(1, da, left=x, color=NERVE, height=0.5, edgecolor="white", lw=1)
-        ax.text(c.D_CLEAR * 1000 + 25, 1, f"{c.D_CLEAR * 1000 - tot - da:.1f} mm spare (L16)", color=NERVE,
-                va="center", fontsize=11, fontweight="bold")
-    else:
-        ax.text(c.D_CLEAR * 1000 + 25, 1, f"{tot:.1f} mm known", color=PLANT, va="center", fontsize=11,
-                fontweight="bold")
-    if step >= 3:
-        x = 0
-        for (lab, v0, col, tag, ty), key in zip(segs, ("delay", "braking", "ramp", "overhead")):
-            v = tf[key] * 1000
-            ax.barh(0, v, left=x, color=col, height=0.5, edgecolor="white", lw=1)
-            x += v
-        ax.text(x + 25, 0, f"on the film: {x / 1000:.2f} m (L18)", color=RED, va="center", fontsize=11,
-                fontweight="bold")
-    pos = [(0, 1.72), (950, 1.72), (1850, 1.72), (0, 1.42), (950, 1.42)]
-    tags = [(tag, col) for _, _, col, tag, _ in segs] + [("dispatch L13", NERVE)]
-    for k, ((tag, col), (px, py)) in enumerate(zip(tags, pos)):
-        if k == 4 and step < 2:
-            break
-        ax.text(px, py, tag, color=col, fontsize=10.5, fontweight="bold", va="bottom")
-    ax.plot([c.D_CLEAR * 1000] * 2, [-0.4, 1.32], color=RED, lw=2, ls="--")
-    ax.text(c.D_CLEAR * 1000, -0.42, "1,100 mm clear", color=RED, fontsize=10.5, ha="center", va="top",
-            fontweight="bold", bbox=dict(fc="white", ec="none", pad=1))
-    ax.set_xlim(0, 3200)
-    ax.set_ylim(-0.75, 2.05)
-    ax.set_yticks([])
-    ax.set_xticks([])
-    for sname in ("left", "bottom"):
-        ax.spines[sname].set_visible(False)
-    sp.save(fig, out(f"budget_final_step{step}.svg"))
+# The aisle stopping budget is the course kit's bar (budget_bar_aisle_step7 and
+# step8); thumb_budget_bar_aisle_step8.svg is the kit bar run through
+# tools/greek_thumbs.py.
 
 
-# ---------------------------------------------------------------------------
-# Synthesis: the record chain, closed by the residual-claims register
-# ---------------------------------------------------------------------------
-def record_chain():
-    rows = [
-        ("Part I", "irreversibility", PLANT, [(2, "limit"), (4, "handoff")]),
-        ("Part II", "endogenous data", sp.C["data"], [(5, "provenance"), (6, "policy manifest"),
-                                                      (7, "evaluation")]),
-        ("Part III", "proposal is not", NERVE, [(8, "observation contract"), (9, "belief"),
-                                                (10, "intent lease")]),
-        ("", "permission", NERVE, [(11, "trajectory"), (12, "enforcement"), (13, "placement")]),
-        ("Part IV", "permission must", NAVY, [(14, "authority"), (15, "fault"), (16, "release manifest")]),
-        ("", "be earned", NAVY, [(17, "approval")]),
-        ("Close", "", RED, [(18, "residual-claims register")]),
-    ]
-    fig = plt.figure(figsize=(5.8, 2.75))
-    ax = fig.add_axes([0, 0, 1, 1])
-    ax.set_xlim(0, 5.8)
-    ax.set_ylim(-2.55, 0.2)
-    ax.axis("off")
-    rend = fig.canvas.get_renderer()
-    inv = ax.transData.inverted()
-
-    def width(tx):
-        bb = tx.get_window_extent(renderer=rend)
-        (x0, _), (x1, _) = inv.transform([(bb.x0, bb.y0), (bb.x1, bb.y1)])
-        return x1 - x0
-
-    y = 0
-    for part, law, col, recs in rows:
-        ax.text(0.05, y, part, color=col, fontsize=11, fontweight="bold", va="center")
-        ax.text(0.78, y, law, color=col, fontsize=10.5, va="center")
-        x = 2.0
-        for lec, name in recs:
-            hi = lec == 18
-            t1 = ax.text(x + 0.06, y, f"L{lec}", color="white" if hi else col, fontsize=10.5, va="center",
-                         fontweight="bold", zorder=4)
-            w1 = width(t1)
-            t2 = ax.text(x + 0.06 + w1 + 0.06, y, name, color="white" if hi else TEXT, fontsize=10.5,
-                         va="center", fontweight="bold" if hi else "normal", zorder=4)
-            w = w1 + width(t2) + 0.18
-            ax.add_patch(FancyBboxPatch((x, y - 0.14), w, 0.28, boxstyle="round,pad=0,rounding_size=0.04",
-                                        fc=RED if hi else "white", ec=col, lw=1.5, clip_on=False, zorder=3))
-            x += w + 0.07
-        y -= 0.38
-    sp.save(fig, out("record_chain.svg"))
+# The record chain is the course kit's (assets/kit/vol4/record_chain_l18).
 
 
 # ---------------------------------------------------------------------------
@@ -671,8 +523,6 @@ def thumb_gaps():
 def main():
     for k in (1, 2):
         closed_loop(k)
-    n_robots, n_ep = oxe()
-    print(f"OXE: {n_robots} robots, {n_ep:,.0f} episodes")
     cell_schematic()
     for k in (1, 2, 3, 4):
         audit(k)
@@ -689,13 +539,6 @@ def main():
     for k in (1, 2):
         responses(k)
     latch_bars()
-    last = waymo()
-    print(f"Waymo last cut {last['data_cut']:.0f}: {last['ro_miles_millions']} M miles, "
-          f"{last['waymo_ipmm']:.2f} against {last['benchmark_ipmm']:.2f}, {last['waymo_count']:.0f} crashes, "
-          f"reduction {-100 * last['pct_reduction']:.0f} percent")
-    for k in (1, 2, 3):
-        budget_final(k)
-    record_chain()
     thumb_register()
     thumb_gaps()
 

@@ -171,61 +171,10 @@ ax.plot(t, v, color=GREEN, lw=3.5)
 ax.set_xticks([]); ax.set_yticks([])
 save(fig, "recall_stop")
 
-# =============================================================================
-# Budget build (SE table 1, figure 1)
-# =============================================================================
-COMP = [  # (label, color, rows indices)
-    ("Braking", SLATE, [0]),
-    ("Allowances", "#94A3B8", [1]),
-    ("Delay travel", AMBER, [2, 3, 4]),
-    ("Jerk ramps", BLUE, [5]),
-    ("Tracking", GREEN, [6]),
-]
-
-
-def budget(step):
-    fig, ax = plt.subplots(figsize=(5.9, 2.75))
-    bars = [("1.5 m/s, rows 1 to 5", K.V_DRIVE, [0, 1, 2, 3, 4]),
-            ("1.5 m/s, + jerk ramps", K.V_DRIVE, [0, 1, 2, 3, 4, 5]),
-            ("1.5 m/s, + tracking", K.V_DRIVE, [0, 1, 2, 3, 4, 5, 6]),
-            ("1.3 m/s, all rows", K.V_AISLE, [0, 1, 2, 3, 4, 5, 6])]
-    for i, (lab, vv, idx) in enumerate(bars):
-        y = len(bars) - 1 - i
-        shown = i < step
-        r = K.rows(vv)
-        x = 0
-        for name, col, ids in COMP:
-            w = sum(r[j][1] for j in ids if j in idx)
-            if w <= 0:
-                continue
-            ax.barh(y, w if shown else 0, left=x, color=col, height=0.62,
-                    edgecolor="white", lw=1)
-            x += w
-        ax.text(-15, y, lab, ha="right", va="center", fontsize=11.5, color=TXT,
-                fontweight="bold", alpha=1 if shown else 0)
-        tot = sum(r[j][1] for j in idx)
-        col = RED if tot > K.D_CLEAR * 1e3 else GREEN
-        xt = max(tot + K.DISP_MM + 15, K.D_CLEAR * 1e3 + 12) if i == 3 else (
-            K.D_CLEAR * 1e3 + 12 if tot < K.D_CLEAR * 1e3 < tot + 210 else tot + 15)
-        ax.text(xt, y, f"{tot:,.0f} mm", va="center", fontsize=11.5,
-                color=col, fontweight="bold", alpha=1 if shown else 0)
-        if i == 3 and shown:
-            ax.barh(y, K.DISP_MM, left=tot, color="white", edgecolor=AMBER,
-                    hatch="///", height=0.62, lw=1)
-    for (name, col, ids), lx in zip(COMP, [0, 185, 470, 775, 1120]):
-        ax.text(lx, 3.62, name, color=col, fontsize=10.5, fontweight="bold", va="bottom")
-    ax.axvline(K.D_CLEAR * 1e3, color=RED, ls="--", lw=2)
-    ax.set_xlim(0, 1450)
-    ax.set_ylim(-0.55, 4.0)
-    ax.set_yticks([])
-    ax.spines["left"].set_visible(False)
-    ax.set_xlabel("Distance the base needs to stop (mm)", fontsize=11)
-    ax.tick_params(labelsize=10)
-    save(fig, f"budget_step{step}")
-
-
-for s in (1, 2, 3, 4):
-    budget(s)
+# The budget build is the course kit's stopping-budget bar (assets/kit/vol4,
+# budget_bar_step5 to step7 and budget_bar_aisle_step7); its goals and
+# takeaways thumbnail, thumb_budget_bar_aisle_step7.svg, is the kit bar run
+# through tools/greek_thumbs.py.
 
 # =============================================================================
 # Three ceilings (SE figure 3)

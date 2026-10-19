@@ -685,19 +685,20 @@ for s in (1, 2):
 
 
 # ============================================================== base stop
-def base(step):
-    fig, (av, ab) = plt.subplots(1, 2, figsize=cm(14.6, 5.3),
-                                 gridspec_kw=dict(width_ratios=[1, 1.15]))
-    fig.subplots_adjust(left=0.09, right=0.97, top=0.92, bottom=0.21, wspace=0.55)
+# The speed profiles of the three stops. The budget row that stacks the
+# S-curve onto the aisle run is the kit's budget_bar_step6 (assets/kit/vol4).
+def base_speed():
+    fig, av = plt.subplots(figsize=cm(11.0, 5.3))
+    fig.subplots_adjust(left=0.13, right=0.97, top=0.92, bottom=0.21)
     d = RK["base"]
     tc = 1000 * K.V_BASE / K.A_BASE
     av.plot([0, tc], [K.V_BASE, 0], color=V4["gray"], lw=2, ls="--")
     av.plot(1000 * d["t"], d["v"], color=V4["veto"], lw=2.6)
     tp = np.linspace(0, 1, 200)
     av.plot(K.T_POLY * tp, K.V_BASE * (1 - 3 * tp ** 2 + 2 * tp ** 3), color=V4["lag"], lw=2)
-    for i, (lab, col) in enumerate(((f"constant {tc:.0f} ms", V4["gray"]),
-                                    (f"S-curve {K.T_SC:,.2f} ms", V4["veto"]),
-                                    (f"polynomial {K.T_POLY:,.0f} ms", V4["lag"]))):
+    for i, (lab, col) in enumerate(((f"constant {tc:.0f} ms, {K.D_CONST:,.1f} mm", V4["gray"]),
+                                    (f"S-curve {K.T_SC:,.2f} ms, {K.D_SC:,.2f} mm", V4["veto"]),
+                                    (f"polynomial {K.T_POLY:,.0f} ms, {K.D_POLY:,.2f} mm", V4["lag"]))):
         av.text(1290, 1.55 - i * 0.2, lab, color=col, fontsize=FS_S - 1, ha="right",
                 va="top", fontweight="bold")
     av.set_xlabel("ms from stop onset", fontsize=FS_S)
@@ -705,39 +706,10 @@ def base(step):
     av.set_xlim(0, 1300)
     av.set_ylim(0, 1.65)
     av.tick_params(labelsize=FS_S - 1)
-    a = 1 if step >= 2 else 0
-    rows = [("constant", K.D_CONST, V4["gray"]), ("S-curve", K.D_SC, V4["veto"]),
-            ("polynomial", K.D_POLY, V4["lag"])]
-    other = K.BUDGET_BEFORE - K.D_CONST
-    for i, (lab, dd, col) in enumerate(rows):
-        y = 2 - i
-        ab.barh(y, other, color=V4["gray_l"], height=0.6, alpha=a)
-        ab.barh(y, dd, left=other, color=col, height=0.6, alpha=a)
-        tot = other + dd
-        ab.text(tot + 15, y, f"{tot:,.0f}", va="center", fontsize=FS_S, fontweight="bold",
-                color=col, alpha=a)
-        ab.text(-20, y, lab, ha="right", va="center", fontsize=FS_S - 1,
-                fontweight="bold", color=col)
-    ab.axvline(K.D_CLEAR_BASE, color=V4["plant"], lw=2, ls="--")
-    ab.text(K.D_CLEAR_BASE + 20, 2.55, "1,100", ha="left", fontsize=FS_S, color=V4["plant"])
-    ab.text(0, 2.42, f"gray: delay {K.DELAY_BASE:.1f}\n+ allowances {K.ALLOW_BASE:.0f}",
-            ha="left", va="bottom", fontsize=FS_S - 1, color=V4["plant"], alpha=a)
-    ab.set_xlim(0, 1450)
-    ab.set_ylim(-0.5, 3.45)
-    ab.set_yticks([])
-    ab.spines["left"].set_visible(False)
-    ab.set_xlabel("Stopping budget at 1.5 m/s (mm)", fontsize=FS_S)
-    ab.tick_params(labelsize=FS_S - 1)
-    if step < 2:
-        for s_ in ab.spines.values():
-            s_.set_alpha(0)
-        ab.tick_params(colors="white")
-        ab.xaxis.label.set_color("white")
-    save_slot(fig, f"base_step{step}.svg")
+    save_slot(fig, "base_speed.svg")
 
 
-for s in (1, 2):
-    base(s)
+base_speed()
 
 
 # ============================================================== generator timing

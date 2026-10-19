@@ -151,56 +151,9 @@ def oring(k):
     save_slot(fig, f"oring_step{k}")
 
 
-# =============================================================================
-# 2. The aisle spare (Napkin Math 16.1). Slot 14.6 x 3.0 cm.
-# =============================================================================
-def budget(k):
-    reaction = round(K.V * K.TAU, 1)
-    braking = round(K.braking_mm(K.V, K.A_BRAKE), 1)
-    segs = [("reaction", reaction, AMBER), ("braking", braking, SLATE),
-            ("loc.", K.LOC, "#9CA3AF"), ("track.", K.TRACK, "#6B7280"), ("margin", K.MARGIN, GREEN)]
-    total = sum(v for _, v, _ in segs)
-    spare = K.D_CLEAR - total
-    adm = round(K.V * K.T_DA, 1)
-    fig = plt.figure(figsize=cm(14.6, 3.2))
-    ax = fig.add_axes([0.01, 0.02, 0.98, 0.96])
-    x = 0.0
-    above = {"reaction": 0.62, "loc.": 0.62, "track.": 1.12, "margin": 0.62}
-    for i, (lab, v, col) in enumerate(segs):
-        a = 1.0 if (i < 2 or k >= 2) else 0.0
-        ax.barh(0, v, left=x, height=0.8, color=col, edgecolor="white", lw=1.2, alpha=a)
-        if lab == "braking":
-            ax.text(x + v / 2, 0, f"braking {v:.1f}", ha="center", va="center", fontsize=11,
-                    fontweight="bold", color="white", alpha=a)
-        else:
-            t = f"{lab} {v:.1f}" if lab == "reaction" else f"{lab} {v:.0f}"
-            ha = {"reaction": "left", "loc.": "right", "track.": "center", "margin": "left"}[lab]
-            xx = {"reaction": x, "loc.": x + v, "track.": x + v / 2, "margin": x}[lab]
-            ax.text(xx, above[lab], t, ha=ha, va="bottom", fontsize=10,
-                    color=TXT, alpha=a, fontweight="bold" if lab == "reaction" else "normal")
-        x += v
-    a2 = 1.0 if k >= 2 else 0.0
-    ax.barh(0, spare, left=total, height=0.8, color="white", edgecolor=GREEN, lw=1.4,
-            ls="--", alpha=a2)
-    a3 = 1.0 if k >= 3 else 0.0
-    ax.barh(0, adm, left=total, height=0.8, color=AMBER_F, edgecolor=AMBER, lw=1.2,
-            hatch="///", alpha=a3)
-    ax.axvline(K.D_CLEAR, ymin=0.12, ymax=0.82, color=RED, lw=2.4)
-    ax.text(K.D_CLEAR + 8, 0.95, "clear distance\n1,100 mm", ha="left", va="center", fontsize=10,
-            color=RED, fontweight="bold", linespacing=1.0)
-    if k == 2:
-        ax.text(K.D_CLEAR + 8, -0.25, f"spare {spare:.1f}", ha="left", va="center", fontsize=11,
-                fontweight="bold", color=GREEN)
-    if k == 3:
-        ax.text(K.D_CLEAR + 8, -0.25, f"admission {adm:.1f}\nreserve {spare - adm:.1f}",
-                ha="left", va="center", fontsize=10.5, fontweight="bold", color=AMBER,
-                linespacing=1.1)
-    ax.text(0, -0.7, f"{reaction + braking:.1f} mm" if k == 1 else f"{total:.1f} mm used",
-            ha="left", va="top", fontsize=10.5, fontweight="bold", color=TXT)
-    ax.set_xlim(-5, 1400)
-    ax.set_ylim(-1.15, 1.55)
-    ax.axis("off")
-    save_slot(fig, f"budget_step{k}")
+# The aisle stopping budget is the course kit's bar (assets/kit/vol4,
+# budget_bar_aisle_step7 and step8); thumb_budget_bar_aisle_step8.svg is the
+# kit bar run through tools/greek_thumbs.py.
 
 
 # =============================================================================
@@ -573,7 +526,6 @@ def reopen():
 if __name__ == "__main__":
     for k in (1, 2, 3):
         oring(k)
-        budget(k)
         cae(k)
         tree(k)
         manifest(k)

@@ -454,52 +454,6 @@ def lease(step):
     save_slot(fig, f"lease_step{step}")
 
 
-# ---------------------------------------------------------------- stopping budget bar
-def budget(step):
-    w, h = 9.0, 4.0
-    fig, ax = plot_axes(w, h, left=0.2, bottom=1.0, right=0.35, top=0.1)
-    y = 1.0
-    x = 0
-    ax.barh(y, K.BRAKE, left=0, color=SLATE, height=0.6, ec="white")
-    ax.text(K.BRAKE / 2, y, f"braking\n{K.BRAKE:.1f} mm", color="white", fontsize=FS_S,
-            ha="center", va="center", fontweight="bold")
-    x = K.BRAKE
-    ov = K.LOC + K.PROT
-    ax.barh(y, ov, left=x, color=GRAY, height=0.6, ec="white")
-    ax.text(x + ov / 2, y, f"{ov:.0f}", color="white", fontsize=FS_S, ha="center", va="center",
-            fontweight="bold")
-    ax.text(x + ov - 10, y - 0.4, "localization + clearance", color=GRAY, fontsize=FS_S,
-            ha="right", va="top")
-    x += ov
-    ax.barh(y, K.ONSET_MM, left=x, color=AMBER, height=0.6, ec="white")
-    ax.text(x + K.ONSET_MM - 8, y + 0.4, f"onset {K.ONSET_MM:.0f}", color=AMBER, fontsize=FS_S,
-            ha="right", va="bottom", fontweight="bold")
-    x += K.ONSET_MM
-    if step >= 2:
-        ax.barh(y, K.LEASE_PATH, left=x, color=GREEN, height=0.6, ec="white")
-        ax.text(x + K.LEASE_PATH / 2, y, f"{K.LEASE_PATH:.0f}", color="white", fontsize=FS_S,
-                ha="center", va="center", fontweight="bold")
-        ax.text(x + 8, y + 0.4, "lease path", color=GREEN_D, fontsize=FS_S, ha="left",
-                va="bottom", fontweight="bold")
-        x2 = x + K.LEASE_PATH
-        ax.text(x2 + (K.D_CLEAR - x2) / 2, y, f"left\n{K.D_CLEAR - x2:.1f}", color=GRAY,
-                fontsize=FS_S, ha="center", va="center")
-        ax.text(x2 + 8, y - 0.4, f"{x2:.1f} mm", color=GREEN_D, fontsize=FS_S, ha="left",
-                va="top", fontweight="bold")
-    else:
-        ax.text(x + 8, y - 0.4, f"{x:.1f} mm", color=SLATE, fontsize=FS_S, ha="left", va="top",
-                fontweight="bold")
-    ax.axvline(K.D_CLEAR, color=RED, ls="--", lw=1.5)
-    ax.text(K.D_CLEAR - 10, 1.95, "clear distance 1,100 mm", color=RED, fontsize=FS_S,
-            ha="right", va="bottom", fontweight="bold")
-    ax.set_xlim(0, 1150)
-    ax.set_ylim(0.15, 2.3)
-    ax.set_yticks([])
-    ax.spines["left"].set_visible(False)
-    ax.set_xlabel("Distance from detection (mm)", fontsize=FS_S)
-    save_slot(fig, f"budget_step{step}")
-
-
 # ---------------------------------------------------------------- measured OpenVLA
 def openvla():
     w, h = 9.2, 3.8
@@ -746,7 +700,6 @@ if __name__ == "__main__":
         rate_ladder(s)
         queue(s)
         mailbox_meas(s)
-        budget(s)
         leaserule(s)
         solewriter(s)
     for s in (1, 2, 3):

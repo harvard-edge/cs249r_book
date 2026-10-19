@@ -545,22 +545,8 @@ def labor():
     save(fig, "labor")
 
 
-# ---------------------------------------------------------------------------
-# Record chain neighbors: release manifest, approval record, residual-claims
-# register. Lecture numbers from the course plan's ownership table.
-# ---------------------------------------------------------------------------
-def record_chain():
-    fig, ax = canvas(4.4, 1.6, (0, 12.4), (0, 4.4))
-    items = [("release\nmanifest", "Lecture 16", P["gray_l"], P["gray"]),
-             ("approval\nrecord", "today", P["amber_l"], P["amber"]),
-             ("residual-\nclaims\nregister", "Lecture 18", P["gray_l"], P["gray"])]
-    for i, (t, sub, fc, ec) in enumerate(items):
-        x = 0.1 + i * 4.15
-        box(ax, x, 1.4, 3.6, 2.8, t, fc, ec, fs=12.5)
-        ax.text(x + 1.8, 0.6, sub, ha="center", va="center", fontsize=13, color=P["slate"])
-        if i < 2:
-            arrow(ax, x + 3.6, 2.8, x + 4.15, 2.8, P["slate"])
-    save(fig, "record_chain")
+# The record chain is the course kit's (assets/kit/vol4/record_chain_l17 and
+# thumb_record_chain).
 
 
 def main():
@@ -580,7 +566,6 @@ def main():
     exposure()
     retention()
     labor()
-    record_chain()
 
 
 if __name__ == "__main__":
