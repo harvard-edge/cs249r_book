@@ -258,7 +258,7 @@ def egress_steps():
             g.line(178, 218, 276, 218, C["data"], arrow="ag")
             g.line(520, 218, 716, 170, C["data"], arrow="ag")
         if step >= 3:
-            g.text(450, 316, "DNS lookups also leak: resolve an exact allowlist",
+            g.text(450, 316, "DNS lookups also leak, so resolve an exact allowlist",
                    T, C["danger"], "bold")
         g.save(f"egress_step{step}")
 
@@ -282,7 +282,7 @@ def reset_steps():
             g.text(380, y + 35, a, T, INK if on else GRAY, anchor="start")
         if step > len(doms):
             g.rect(20, 276, 860, 48, fill="white", stroke=C["danger"], sw=2.5)
-            g.text(450, 308, "one leftover proves failure: destroy, rebuild",
+            g.text(450, 308, "one leftover fails the reset; destroy and rebuild",
                    T, C["danger"], "bold")
         g.save(f"reset_step{step}")
 

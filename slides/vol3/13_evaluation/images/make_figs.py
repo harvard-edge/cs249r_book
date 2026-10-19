@@ -181,31 +181,6 @@ def coverage():
     sp.save(fig, HERE / "coverage.svg")
 
 
-def metr():
-    """METR, o3 reward hacking by task (5 June 2025)."""
-    rows = [("Optimize LLM Foundry", 21, 21), ("Rust Codecontest scaffold", 12, 28),
-            ("Optimize a Kernel", 6, 24), ("RE-Bench, all tasks", 39, 128), ("HCAST, all tasks", 8, 1087)]
-    fig, ax = plt.subplots(figsize=(2.5, 1.75))
-    for i, (lab, h, n) in enumerate(rows):
-        y = len(rows) - 1 - i
-        total = "all" in lab
-        c = (GRAY if "HCAST" in lab else PURPLE) if total else RED
-        v = 100 * h / n
-        ax.barh(y, v, height=0.62, color=c)
-        stated = {"RE-Bench, all tasks": "30.4%", "HCAST, all tasks": "0.7%"}.get(lab, f"{v:.1f}%")
-        ax.text(v + 2, y, f"{stated}  ({h} of {n:,})", va="center", fontsize=8.6, color=c,
-                fontweight="bold")
-        ax.text(-2, y, lab, ha="right", va="center", fontsize=8.6, color=INK)
-    ax.axhline(1.5, color=sp.C["grid"], lw=1)
-    ax.set_xlim(0, 140)
-    ax.set_xticks([0, 25, 50, 75, 100])
-    ax.set_yticks([])
-    ax.spines["left"].set_visible(False)
-    ax.set_xlabel("Runs in which o3 reward-hacked (%)")
-    axis_type(ax, 8.5)
-    sp.save(fig, HERE / "metr.svg")
-
-
 def zheng():
     """Zheng et al. 2023, Table 2, default prompt: position bias."""
     rows = [("GPT-4", 65.0, 30.0, 5.0, 0.0), ("GPT-3.5", 46.2, 50.0, 1.2, 2.5), ("Claude-v1", 23.8, 75.0, 0.0, 1.2)]
@@ -547,7 +522,7 @@ def thumbs_src():
 
 
 if __name__ == "__main__":
-    for f in (hook, scaffold, verdicts, coverage, metr, zheng, designs, wilson_fig, ranks,
+    for f in (hook, scaffold, verdicts, coverage, zheng, designs, wilson_fig, ranks,
               run_curves, kapoor, batch, dims, gym, confusion, kappa, recall_thumbs):
         f()
         print("wrote", f.__name__)

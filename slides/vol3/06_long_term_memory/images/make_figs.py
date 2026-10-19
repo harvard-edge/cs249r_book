@@ -246,7 +246,7 @@ def inverted_fig(path):
             s.text(x + 93, y + 36, f"{name}  {cnt}", size=20,
                    role="fault" if red else "memory", anchor="middle")
             x += 194
-    s.text(270, 330, "A match is an occurrence, not a role.", size=21, role="fault",
+    s.text(270, 330, "A match marks an occurrence; its role is unknown.", size=21, role="fault",
            bold=True, anchor="middle")
     s.save(path)
 
@@ -519,29 +519,6 @@ sp.hbars(out / "exclusion.svg", [
      f"{K.sync_remote_serial:.2f} s"),
 ], "", log=True, size=(5.8, 2.7), xlabel="Added work per edit (log; stipulated costs)")
 sp.save = _save
-
-# ------------------------------------------------ Liu et al. position curve
-fig, ax = plt.subplots(figsize=(5.8, 2.4))
-ax.plot(K.LIU_POS, K.LIU_ACC, "-o", color=C["memory"], lw=2.5, ms=9)
-for x, y in zip(K.LIU_POS, K.LIU_ACC):
-    if x == 5:
-        ax.text(x + 0.5, y + 0.8, f"{y:.1f}", ha="left", va="bottom", fontsize=12,
-                fontweight="bold", color=C["memory"])
-    elif x in (10, 15):
-        ax.text(x, y - 1.8, f"{y:.1f}", ha="center", va="top", fontsize=12,
-                fontweight="bold", color=C["memory"])
-    else:
-        ax.text(x, y + 2.2, f"{y:.1f}", ha="center", va="bottom", fontsize=12,
-                fontweight="bold", color=C["memory"])
-ax.axhline(K.LIU_CLOSED, color=C["danger"], lw=1.5, ls="--")
-ax.text(21.3, K.LIU_CLOSED, f"no documents\n{K.LIU_CLOSED}", fontsize=11,
-        color=C["danger"], fontweight="bold", va="center", ha="left", clip_on=False)
-ax.set_xticks(K.LIU_POS)
-ax.set_xlim(0, 21)
-ax.set_ylim(45, 85)
-ax.set_xlabel("Position of the answer among 20 retrieved documents")
-ax.set_ylabel("Accuracy (%)")
-sp.save(fig, out / "liu_position.svg")
 
 # --------------------------------------- Checkpoint 6.4 cost per accepted task
 sp.hbars_steps(str(out / "ceff"), [

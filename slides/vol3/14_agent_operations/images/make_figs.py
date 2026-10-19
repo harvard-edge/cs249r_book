@@ -452,32 +452,6 @@ ax.grid(color=C["grid"], linewidth=0.6)
 ax.set_axisbelow(True)
 sp.save(fig, out / "wilson.svg")
 
-# ================================================== SWE-agent Table 3 panels
-sw = calcs.swe()
-fig, axes = plt.subplots(1, 2, figsize=(6.3, 2.6), sharey=True)
-for ax, (title, group) in zip(axes, (("File viewer window", calcs.SWE_VIEWER),
-                                     ("Search tool", calcs.SWE_SEARCH))):
-    xpos = [0, 1.25, 2.3] if title == "Search tool" else [0, 1, 2]
-    for i, (name, pct) in enumerate(group):
-        v = sw[name]
-        i = xpos[i]
-        best = pct == max(p for _, p in group)
-        ck = "data" if best else "memory"
-        ax.errorbar([i], [pct], yerr=[[pct - v["lo"]], [v["hi"] - pct]], fmt="o", ms=9,
-                    color=C[ck], ecolor=C[ck], elinewidth=2.5, capsize=5)
-        ax.text(i + 0.12, pct, f"{pct:g}", va="center", fontsize=13, fontweight="bold",
-                color=C[ck])
-    ax.set_xticks(xpos)
-    ax.set_xticklabels([n.replace("No search", "None") for n, _ in group], fontsize=11)
-    ax.set_xlim(-0.5, 2.9)
-    ax.set_title(title, fontsize=14, fontweight="bold")
-    ax.grid(axis="y", color=C["grid"], linewidth=0.6)
-    ax.set_axisbelow(True)
-axes[0].set_ylabel("Resolved, % (95% interval)", fontsize=12)
-axes[0].tick_params(axis="y", labelsize=12)
-axes[0].set_ylim(5, 25)
-sp.save(fig, out / "swe_bars.svg")
-
 
 # =================================================== staged release (SVG)
 def stages(k):

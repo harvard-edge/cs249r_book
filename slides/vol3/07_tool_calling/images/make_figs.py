@@ -462,7 +462,7 @@ def job_states():
     s.arrow(145, 232, 145, 290, "gray", dash=True)
     s.box(10, 292, 270, 96, "struct", "unavailable", "last observed running", fs=26, sfs=21,
           dash=True)
-    s.text(10, 425, "not a failure: no rollback;", 22, ROLE["fault"][2], anchor="start",
+    s.text(10, 425, "unavailable is no failure; no rollback,", 22, ROLE["fault"][2], anchor="start",
            weight="bold")
     s.text(10, 455, "the runtime keeps watching", 22, GRAY, anchor="start")
     s.save("job_states")

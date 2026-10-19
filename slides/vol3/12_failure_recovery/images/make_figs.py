@@ -433,31 +433,6 @@ ax.grid(color=C["grid"], lw=0.6)
 sp.save(fig, out / "repair_curve.svg")
 
 
-# ---- self-correction (Huang 2024)
-fig, ax = plt.subplots(figsize=(5.8, 2.7))
-names = list(calcs.HUANG)
-series = [("standard", "One answer", C["neutral"]),
-          ("self_r2", "Self-correct, no feedback (2 rounds)", C["danger"]),
-          ("oracle", "Told when wrong (oracle label)", C["data"])]
-h = 0.26
-for j, (key, lab, col) in enumerate(series):
-    ys = [len(names) - 1 - i + (1 - j) * h for i in range(len(names))]
-    vals = [calcs.HUANG[n][key] for n in names]
-    ax.barh(ys, vals, height=h * 0.92, color=col, label=lab)
-    for y, v in zip(ys, vals):
-        ax.text(v + 1, y, f"{v:.1f}", va="center", fontsize=11, color=col,
-                fontweight="bold")
-ax.set_yticks(range(len(names)))
-ax.set_yticklabels(names[::-1], fontsize=12, fontweight="bold")
-ax.set_xlim(0, 112)
-ax.set_xlabel("Accuracy (%), GPT-3.5")
-ax.legend(fontsize=10.5, frameon=False, loc="lower right",
-          bbox_to_anchor=(1.02, -0.02))
-ax.grid(axis="x", color=C["grid"], lw=0.6)
-ax.set_axisbelow(True)
-sp.save(fig, out / "huang_bars.svg")
-
-
 # ---- CrowdStrike exposure window
 cs = calcs.crowdstrike()
 fig, ax = plt.subplots(figsize=(4.6, 1.7))
@@ -516,14 +491,6 @@ for k in (1, 2, 3):
     ax.grid(axis="x", color=C["grid"], lw=0.6)
     ax.set_axisbelow(True)
     sp.save(fig, out / f"loss_step{k}.svg")
-
-
-# ---- MAST failure modes
-sp.hbars(out / "mast_bars.svg",
-         [(n, v, "danger" if n in ("Step repetition", "Unaware of termination")
-           else "neutral", f"{v:.1f}%") for n, v in calcs.MAST],
-         "%", log=False, xlabel="Share of annotated failures (%)",
-         size=(5.8, 2.5))
 
 
 # ---- loop cost (NM 12.3)

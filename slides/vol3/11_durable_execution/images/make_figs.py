@@ -7,7 +7,6 @@ Plots use slides/assets/kit/slideplot.py. Every number drawn comes from
 calcs.py, which names its source (DE = the chapter, Durable Execution):
 
   restarts          measured: data/resample.json (30 restarts from the prompt)
-  horizon           measured: METR Time Horizon v1.1 (MLSysIM)
   lost_step1-2      DE Sec. 11.1 (what a crash erases), drawn for the slide
   fold_step1-3      DE Sec. 11.2.1, figure 1 (event sourcing), redrawn
   intent_step1-2    DE Sec. 11.3.2, figure 2 (crash position), redrawn
@@ -32,7 +31,6 @@ Run from this folder with the MLSysBook venv: python3 make_figs.py
 """
 
 import sys
-from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -183,33 +181,6 @@ def restarts():
 # =====================================================================
 # Segment 1: the log
 # =====================================================================
-def horizon():
-    h = calcs.horizons()
-    xs = [d for d, _ in h["points"]]
-    ys = [v for _, v in h["points"]]
-    fig, ax = plt.subplots(figsize=(5.8, 2.5))
-    ax.plot(xs, ys, "o-", color=C["network"], lw=2.2, ms=6, mec="white")
-    ax.set_yscale("log")
-    ticks = [1, 10, 60, 600, 3600]
-    ax.set_yticks(ticks)
-    ax.set_yticklabels(["1 min", "10 min", "1 h", "10 h", "60 h"])
-    ax.minorticks_off()
-    ax.set_ylim(0.03, 4000)
-    ax.set_xlim(date(2019, 1, 1), date(2026, 12, 31))
-    ax.tick_params(labelsize=12)
-    g = date.fromisoformat(h["gpt4_date"])
-    ax.annotate(f"{h['gpt4_min']:.0f} min (2023)", (g, h["gpt4_min"]), xytext=(-12, 16),
-                textcoords="offset points", ha="right", fontsize=13, fontweight="bold",
-                color=C["network"])
-    last = date.fromisoformat(h["last_date"])
-    ax.annotate(f"{h['last_h']:.0f} h (2026)", (last, h["last_min"]), xytext=(-12, 4),
-                textcoords="offset points", ha="right", fontsize=13, fontweight="bold",
-                color=C["danger"])
-    ax.set_ylabel("Task length at\n50% success", fontsize=12)
-    ax.grid(axis="y", color=C["grid"], lw=0.6)
-    sp.save(fig, OUT / "horizon.svg")
-
-
 def lost():
     """What one crash erases: worker memory vs the context window vs a log."""
     for k in (1, 2):
@@ -781,7 +752,6 @@ def thumbs():
 
 if __name__ == "__main__":
     restarts()
-    horizon()
     lost()
     fold()
     intent()

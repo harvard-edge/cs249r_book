@@ -14,7 +14,7 @@ legibility floor on a slide, so each is redrawn here at the size of its slot:
   - cascade_step*: AE fig-vol3-model-cascade-flowchart
   - budget_step*: AE fig-vol3-hierarchical-budget
 Real-data plots: price_trend (Epoch AI 2025), swe_cohort (SWE-bench
-trajectories), coverage (Brown et al. 2024), frontierswe (FrontierSWE V2),
+trajectories), frontierswe (FrontierSWE V2),
 inferencex (SemiAnalysis InferenceX). Full-width plots are drawn at about
 5.8 x 2.5 in with 11 to 13 pt type; column plots at 5.4 x 3.6 in with 15 pt.
 
@@ -292,31 +292,6 @@ def payback():
 
 
 payback()
-
-
-# ======================================================== coverage (real)
-cv = calcs.coverage_real()
-
-
-def coverage():
-    fig, ax = plt.subplots(figsize=COL)
-    k = [p[0] for p in cv["pts"]]
-    ax.plot(k, [p[1] * 100 for p in cv["pred"]], color=C["neutral"], lw=2.4, ls="--", marker="o", ms=6)
-    ax.plot(k, [p[1] * 100 for p in cv["pts"]], color=VIO, lw=3, marker="o", ms=8)
-    ax.text(20, 68, "independent attempts,\nsame p = 0.16", fontsize=14, color=C["neutral"])
-    ax.text(30, 30, "measured", fontsize=15, color=VIO, fontweight="bold")
-    ax.set_xscale("log", base=2)
-    ax.set_xticks([1, 4, 16, 64, 250])
-    ax.set_xticklabels(["1", "4", "16", "64", "250"])
-    ax.set_xlabel("Samples per task, k", fontsize=15)
-    ax.set_ylabel("Tasks solved (%)", fontsize=15)
-    ax.set_ylim(0, 105)
-    ax.tick_params(labelsize=14)
-    tidy(ax)
-    sp.save(fig, out / "coverage.svg")
-
-
-coverage()
 
 
 # ======================================================== waterfall
@@ -620,37 +595,6 @@ def arch(step):
 
 for k in (1, 2):
     arch(k)
-
-
-# ======================================================== Kapoor (real)
-def kapoor():
-    fig, ax = plt.subplots(figsize=COL)
-    kp = calcs.kapoor()
-    show = {"GPT-3.5": (8, -4, "left"), "Escalation": (10, -5, "left"), "GPT-4": (-10, -16, "right"),
-            "Warming (GPT-4)": (-12, 2, "right"), "LATS (GPT-4)": (0, -24, "center")}
-    for n, acc, cost in kp["rows"]:
-        base = n in ("GPT-3.5", "GPT-4")
-        simple = n in ("Warming (GPT-4)", "Retry (GPT-4)", "Escalation")
-        col = C["neutral"] if base else (VIO if simple else AMB)
-        ax.plot([cost], [acc], "o", ms=11, color=col, mec="white", zorder=4)
-        if n in show:
-            dx, dy, ha = show[n]
-            ax.annotate(n, (cost, acc), xytext=(dx, dy), textcoords="offset points", ha=ha,
-                        fontsize=15, color=col, fontweight="bold")
-    ax.text(6, 74.6, "complex agents", color=AMB, fontsize=15, fontweight="bold")
-    ax.text(6, 71.6, "simple baselines", color=VIO, fontsize=15, fontweight="bold")
-    ax.set_xscale("log")
-    ax.set_xlim(0.03, 400)
-    ax.set_ylim(70, 98)
-    ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"${v:g}"))
-    ax.set_xlabel("Total cost, 164 problems", fontsize=15)
-    ax.set_ylabel("Accuracy (%)", fontsize=15)
-    ax.tick_params(labelsize=14)
-    tidy(ax)
-    sp.save(fig, out / "kapoor.svg")
-
-
-kapoor()
 
 
 # ======================================================== recall thumbnail

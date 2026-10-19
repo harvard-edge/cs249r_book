@@ -18,8 +18,6 @@ that draw them say "illustrative".
   - prune: TTC 3.6.2 (b = 5, r = 0.68, depth 3), illustrative.
   - plan: TTC table 5 and figure 5 (invalidation and scoped regeneration).
   - accounts: NM 3.6, illustrative.
-  - swe: public SWE-bench Verified runs via MLSysIM
-    Literature.SweBenchTrajectories (costs as each agent recorded them).
   - stop: TTC figure 8 (stopping precedence), redrawn.
   - policy: NM 3.7, illustrative.
 
@@ -482,32 +480,6 @@ def accounts():
 
 
 # --------------------------------------------------------------------------
-# Public repair-agent runs: dollars per attempt and per resolved task
-# --------------------------------------------------------------------------
-def swe():
-    runs = calcs.swe_runs()
-    fig, ax = plt.subplots(figsize=(5.8, 2.3))
-    labels = [f"{r['year']} run\n{r['rate'] * 100:.0f}% resolved" for r in runs]
-    ys = list(range(len(runs)))[::-1]
-    for y, r in zip(ys, runs):
-        ax.barh(y + 0.18, r["per_attempt"], height=0.34, color=C["neutral"])
-        ax.barh(y - 0.18, r["per_resolved"], height=0.34, color=C["danger"])
-        ax.text(r["per_attempt"] + 0.06, y + 0.18, f"${r['per_attempt']:.2f}", va="center", fontsize=10.5,
-                color=C["neutral"], fontweight="bold")
-        ax.text(r["per_resolved"] + 0.06, y - 0.18,
-                f"${r['per_resolved']:.2f}   ({r['unresolved_share'] * 100:.0f}% of spend unresolved)",
-                va="center", fontsize=10.5, color=C["danger"], fontweight="bold")
-    ax.set_yticks(ys)
-    ax.set_yticklabels(labels, fontsize=10.5)
-    ax.set_xlim(0, 9.5)
-    ax.set_xlabel("Recorded model cost ($)")
-    ax.spines["left"].set_visible(False)
-    ax.text(9.4, ys[0] + 0.55, "gray: per attempt;  red: per resolved task", ha="right", fontsize=10.5,
-            color=C["text"])
-    sp.save(fig, out / "swe.svg")
-
-
-# --------------------------------------------------------------------------
 # Stopping precedence (TTC figure 8)
 # --------------------------------------------------------------------------
 def diamond(ax, x, y, w, h, text, role="neutral", alpha=1.0):
@@ -667,7 +639,6 @@ if __name__ == "__main__":
     prune()
     plan()
     accounts()
-    swe()
     stop()
     policy()
     print("figures written to", out)
