@@ -20,4 +20,30 @@ The stack has five levels, top to bottom Brain, Nervous System, Body, Boundary, 
 | `machine_step1` to `machine_step4` | One accelerator node built up: compute, SRAM, HBM, host and link | Lecture 3 (weight bytes streamed per evaluation, the memory wall); Lecture 13 (compute-board placement) |
 | `machine_hl_compute`, `_sram`, `_hbm`, `_link`, `_host` | The node with one component outlined | Same lectures; `machine_hl_hbm` for the streaming floor, `machine_hl_link` for host transfers |
 
-Not in the kit yet (listed in the course plan): the stopping-budget bar, the record-chain figure, the two-speed timing strip, the five-budget icons, and the three-machine-classes panel.
+| `record_chain` | The sixteen records in the book's spine layout (fig-01-spine): Part I limit record above the handoff record, which forks into Part II and Part III; enforcement and placement lead down to Part IV; the residual-claims register closes. Nothing lit | Lecture 1 (owner, shown once in full), Lecture 18 synthesis; full width, `width=0.92\textwidth,height=5.2cm` |
+| `record_chain_lNN` | The same figure with lecture NN's record lit (accent), earlier records normal, later ones dimmed. NN = 02, 04 to 18 (Lecture 3 has no record; its proposer limits enter the handoff record, the dashed arrow) | Each lecture's close, "the record this lecture adds", full width |
+| `thumb_record_chain` | The chain as shapes only, no text | Goal and recall thumbnails (`\thumbline`, height 1 to 2.4 cm) |
+| `budget_bar_step1` to `budget_bar_step7` | The aisle stopping budget at the drive limit, 1.5 m/s, one segment added per step (table below); step 7 overruns the 1,100 mm clear distance by 63.8 mm | Lectures 0, 1, 2, 4, 8, 11, 12; full width only (`width=0.95\textwidth,height=4.8cm`); in a column its labels fall below 5 pt |
+| `budget_bar_aisle_step1` to `budget_bar_aisle_step9` | The same bar at the aisle speed Lecture 12 chooses, 1.3 m/s: step 7 is the finished budget (969.0 mm, 131.0 spare), step 8 adds dispatch to admission (48.7 spare), step 9 the in-loop takeover (runs off the axis) | Lecture 12 (after `budget_bar_step7`), 13, 14, 16, 18 |
+
+Not in the kit yet (listed in the course plan): the two-speed timing strip, the five-budget icons, and the three-machine-classes panel.
+
+## The stopping-budget bar
+
+One bar, one segment order for the whole volume. The order is the order the course adds the terms, so a segment never moves between steps or lectures. Every number is read from MLSysIM (`Embodied.Scenario.WarehouseAisle` and the running machine, the source the chapters print from); `make kit V=4` prints the table. MLSysIM needs numpy, so run it with the project venv: `make kit V=4 PY=<repo>/.venv/bin/python`.
+
+| Step | Lecture | Segment | 1.5 m/s (mm) | 1.3 m/s (mm) |
+|---|---|---|---|---|
+| 1 | L0, L1 | Pre-brake delay, $v\,\tau_{\text{delay}}$, 133.6 ms | 200.4 | 173.7 |
+| 2 | L0, L1 | Braking, $v^2/(2a_{\text{brake}})$ | 562.5 | 422.5 |
+| 3 | L2 | Allowances: localization bound 50 + protective clearance 100 | 150.0 | 150.0 |
+| 4 | L4 | Lease path (60 ms lease + tick + bus), cut out of the delay | 93.0 | 80.6 |
+| 5 | L8 | Observation age, 51.6 ms, cut out of the delay (the rest is brake onset, 20 ms) | 77.4 | 67.1 |
+| 6 | L11 | Jerk ramps of the S-curve stop, $v a/(2J)$ | 210.9 | 182.8 |
+| 7 | L12 | Tracking bound | 40.0 | 40.0 |
+| 8 | L13 | Dispatch to admission, 63.3 ms (aisle series only) | | 82.3 |
+| 9 | L14 | In-loop takeover, 605 ms (aisle series only) | | 786.5 |
+
+Steps 4 and 5 add a named segment without adding distance: the elementary delay of Lecture 1 already contains the lease path and the observation age (Napkin Math 1.1), so those lectures open up a piece of it rather than lengthen the bar. The L0 and L1 build is `\mlsyssteps[...]{\mlsyskit/budget_bar_step}{2}`; a later lecture shows its own step as one figure, or builds from the previous step to its own with `\only`.
+
+Step 9 stacks the takeover on top of dispatch to admission, as MLSysIM's in-loop speed ceiling does (`v_takeover_in_loop_ceiling`). Napkin Math 14.1 adds the takeover to the 969.0 mm budget without dispatch to admission (overrun 655.5 mm), so step 9 prints no total; a Lecture 14 slide that quotes 655.5 mm should show step 7 of the aisle series with the takeover described in words, or the author should settle which form the chapter means.

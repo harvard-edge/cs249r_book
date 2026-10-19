@@ -10,6 +10,12 @@ deck draws them the same way:
   machine_*    one accelerator node (host, link, accelerator with HBM,
                on-chip SRAM, compute array), built up and highlighted
   dam_*        the D-A-M triangle, plain and with one vertex highlighted
+  divstack_*   (Volume I) the stack drawn for the section-divider slot,
+               legible at its placed size, one layer lit or all lit
+  record_chain_*, thumb_record_chain
+               (Volume IV) the sixteen records of the course, one lit per
+               lecture, and a text-free thumbnail
+  budget_bar_*  (Volume IV) the aisle stopping budget, one segment per step
 
 Colors follow the book's color contract: memory blue, compute orange,
 data green, interconnect violet, structure brown, danger red. The volume
@@ -64,7 +70,8 @@ VOLUMES = {
             ("Part IV  Deployment", [(13, "Serving", "Serving"), (14, "ML Operations", "Operations"),
                                       (15, "Responsible Engineering", "Applications")]),
             ("Close", [(16, "Conclusion", "all")]),
-        ]),
+        ],
+        divstack=True),
     2: dict(
         stack=["Facility & Accelerators", "Fabric & Storage",
                "Distributed Execution", "Reliability & Control",
@@ -180,7 +187,33 @@ VOLUMES[4] = dict(
     card_labels={"Nervous System": "Nervous System",
                  "Boundary and Brain": "Boundary, Brain",
                  "Governance": "Governance"},
+    records=True, budget=True,
 )
+
+# Volume IV's record chain (course plan, "The golden thread"; the book's
+# chapter 1 spine figure, fig-01-spine): one record per lecture, Lecture 3
+# none (its proposer limits enter the handoff record). Grid position is
+# (row, column): row 0 is Part II, row 1 the main strand (Part I's handoff
+# and Part III), row 2 Part IV; Part I's limit record sits above its handoff
+# record so the whole chain fits seven columns at a legible size.
+RECORDS = [  # (lecture, name lines, row, column)
+    (2, ["limit", "record"], 0, 0),
+    (4, ["handoff", "record"], 1, 0),
+    (5, ["provenance", "record"], 0, 1),
+    (6, ["policy", "manifest"], 0, 2),
+    (7, ["evaluation", "record"], 0, 3),
+    (8, ["observation", "contract"], 1, 1),
+    (9, ["belief", "record"], 1, 2),
+    (10, ["intent", "lease"], 1, 3),
+    (11, ["trajectory", "record"], 1, 4),
+    (12, ["enforcement", "record"], 1, 5),
+    (13, ["placement", "record"], 1, 6),
+    (14, ["authority", "record"], 2, 1),
+    (15, ["fault", "records"], 2, 2),
+    (16, ["release", "manifest"], 2, 3),
+    (17, ["approval", "record"], 2, 4),
+    (18, ["residual-claims", "register"], 2, 5),
+]
 
 # Set from VOLUMES by main(); Volume I by default.
 STACK, ROADMAP, COURSE = (VOLUMES[1]["stack"], VOLUMES[1]["roadmap"],
@@ -188,6 +221,12 @@ STACK, ROADMAP, COURSE = (VOLUMES[1]["stack"], VOLUMES[1]["roadmap"],
 DATA, PARTS = True, None
 BAR, TABS, GAP_BELOW, ENVELOPE = "Data", None, None, None
 SLUGS, EXTRA, COURSE_COLS, CARD_LABELS = {}, {}, None, {}
+
+# Volume IV palette roles (rules/volumes/vol4/palette.md) for the budget bar.
+V4 = {"amber": "#D97706", "amber_d": "#B45309", "amber_l": "#F59E0B",
+      "slate": "#334155", "slate_m": "#64748B", "gray": "#94A3B8",
+      "green": "#059669", "navy": "#1F407A", "red": "#DC2626",
+      "brown": "#92400E", "line": "#475569", "band": "#F1F5F9"}
 
 
 def svg(body, w=W, h=H, label=""):
@@ -547,6 +586,332 @@ def dam(accent, hl=None):
     return svg("".join(out), label="D-A-M triangle")
 
 
+# ---------------------------------------------------------------- divider stack
+def divstack(accent, highlight=None):
+    """The stack for the section-divider slot (Volume I). Drawn for its
+    placed size, 5 cm tall in a right-hand column, so a 22-unit label lands
+    near 9.5 pt. highlight: a layer name, BAR, or 'all' (every layer lit,
+    for lectures that span the stack)."""
+    n = len(STACK)
+    x0, y0, bw, bh, gap = 4, 6, 214, 38, 6
+    out = []
+    for i, name in enumerate(STACK):
+        y = y0 + (n - 1 - i) * (bh + gap)
+        on = highlight == "all" or name == highlight
+        out.append(rect(x0, y, bw, bh, accent, opacity=1.0 if on else 0.10, rx=6))
+        out.append(text(x0 + 14, y + bh / 2, name.replace("&", "&amp;"), size=22,
+                        weight=700, fill=C["white"] if on else "#7A7A7A"))
+    w = x0 + bw
+    if DATA:
+        dx, dh = x0 + bw + 8, n * bh + (n - 1) * gap
+        on = highlight in ("all", BAR)
+        out.append(rect(dx, y0, 46, dh, accent, opacity=1.0 if on else 0.10, rx=6))
+        cx, cy = dx + 23, y0 + dh / 2
+        out.append(text(cx, cy, BAR.upper(), size=20, weight=700,
+                        fill=C["white"] if on else "#7A7A7A", anchor="middle",
+                        extra=f' letter-spacing="3" transform="rotate(-90 {cx} {cy})"'))
+        w = dx + 46
+    h = y0 + n * bh + (n - 1) * gap + 6
+    return svg("".join(out), w=w + 4, h=h, label="ML system stack")
+
+
+# ---------------------------------------------------------------- record chain
+ARROW_DEFS = ('<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" '
+              'markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
+              '<path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker></defs>\n')
+
+
+def record_chain(accent, lit=None, thumb=False):
+    """The sixteen records of Volume IV in the book's spine layout (fig-01-
+    spine), redrawn for a full-width slide slot: about 14 cm wide, so an
+    18-unit label lands near 8 pt. lit: the lecture whose record is lit;
+    earlier records stay normal and later ones are dimmed. thumb: shapes
+    only, no text, heavier lines, for goal and recall thumbnails."""
+    col0, cw, bw, bh = 150, 120, 108, 64
+    X0 = 4
+    W = X0 + col0 + 6 * cw + 14
+    yrow = {0: 24, 1: 108, 2: 224}
+    H = 312
+
+    def cx(c):
+        return X0 + (col0 - bw) / 2 if c == 0 else X0 + col0 + (c - 1) * cw + 6
+
+    def box(c, r, wide=False):
+        return cx(c), yrow[r], (bw + 32 if wide else bw), bh
+
+    sw = 5 if thumb else 1.8
+    asw = 4 if thumb else 1.8
+    out = [] if thumb else [ARROW_DEFS]
+    band = V4["band"]
+    # Part bands, with their law, as in the book's figure.
+    bands = [(X0, 0, col0 - 4, 180, "I · Irreversibility", 12),
+             (X0 + col0 + 2, 0, 3 * cw - 4, 94, "II · Endogenous data", 12),
+             (X0 + col0 + 2, 100, 6 * cw - 4, 94, "III · Proposal is not permission", 184),
+             (X0 + col0 + 2, 216, 4 * cw - 4, 94, "IV · Permission must be earned", 300)]
+    for x, y, w, h, label, ly in bands:
+        out.append(rect(x, y, w, h, band, rx=8))
+        if not thumb:
+            out.append(text(x + 8, ly, label, size=16, weight=700, fill=V4["line"]))
+    # Connections first, so boxes sit on top of them.
+    mark = "" if thumb else ' marker-end="url(#ah)"'
+
+    def path(d, dash=False):
+        da = ' stroke-dasharray="6,5"' if dash else ""
+        out.append(f'<path d="{d}" fill="none" stroke="{V4["line"]}" '
+                   f'stroke-width="{asw}"{da}{mark}/>\n')
+
+    pos = {lec: (r, c) for lec, _, r, c in RECORDS}
+
+    def mid_right(lec):
+        r, c = pos[lec]
+        x, y, w, h = box(c, r)
+        return x + w, y + h / 2
+
+    def left(lec):
+        r, c = pos[lec]
+        return cx(c)
+
+    for row in ([5, 6, 7], [8, 9, 10, 11, 12, 13], [14, 15, 16, 17, 18]):
+        for a, b in zip(row, row[1:]):
+            x1, y1 = mid_right(a)
+            path(f"M {x1} {y1} H {left(b) - 2}")
+    lx = cx(0) + bw / 2
+    path(f"M {lx} {yrow[0] + bh} V {yrow[1] - 2}")                  # limit -> handoff
+    hx, hy = mid_right(4)
+    fx = (hx + left(8)) / 2
+    path(f"M {hx} {hy} H {left(8) - 2}")                             # handoff -> observation
+    path(f"M {fx} {hy} V {yrow[0] + bh / 2} H {left(5) - 2}")        # handoff -> provenance
+    ex, ey = mid_right(7)
+    path(f"M {ex} {ey} H {cx(5) + bw / 2} V {yrow[1] - 2}")          # evaluation -> enforcement
+    px = cx(6) + bw / 2
+    path(f"M {px} {yrow[1] + bh} V 200 H {cx(1) + bw / 2} V {yrow[2] - 2}")  # placement -> authority
+    rx_ = cx(3) + bw / 2
+    path(f"M {rx_} {yrow[0]} V 6 H {W - 7} V 210 H {rx_} V {yrow[2] - 2}")  # evaluation -> release
+    if not thumb:
+        # Lecture 3 has no record: its proposer limits enter the handoff record.
+        path(f"M {lx} {yrow[1] + bh + 46} V {yrow[1] + bh + 2}", dash=True)
+        out.append(text(lx, yrow[1] + bh + 60, "L3: proposer", size=16, weight=600,
+                        fill=C["gray"], anchor="middle"))
+        out.append(text(lx, yrow[1] + bh + 80, "limits", size=16, weight=600,
+                        fill=C["gray"], anchor="middle"))
+    for lec, lines, r, c in RECORDS:
+        x, y, w, h = box(c, r, wide=lec == 18)
+        if thumb:
+            out.append(rect(x, y, w, h, accent, accent, sw, rx=6, opacity=0.16))
+            continue
+        on = lit == lec
+        dim = lit is not None and lec > lit
+        stroke = accent if on else ("#CBD5E1" if dim else V4["line"])
+        out.append(rect(x, y, w, h, accent if on else C["white"], stroke, sw, rx=6))
+        col = C["white"] if on else ("#A3A3A3" if dim else C["text"])
+        for k, s in enumerate(lines):
+            out.append(text(x + w / 2, y + 16 + 19 * k, s, size=18, weight=500,
+                            fill=col, anchor="middle"))
+        out.append(text(x + w / 2, y + 53, f"L{lec}", size=16, weight=700,
+                        fill=C["white"] if on else ("#BDBDBD" if dim else C["gray"]),
+                        anchor="middle"))
+    # Six units of headroom above the band labels.
+    body = f'<g transform="translate(0,6)">{"".join(out)}</g>'
+    return svg(body, w=W, h=H + 6, label="Record chain")
+
+
+# ---------------------------------------------------------------- budget bar
+def budget_numbers():
+    """The aisle stopping budget's terms, read from MLSysIM (Embodied.Scenario.
+    WarehouseAisle and the running machine), the source the chapters print
+    from. Returns the inputs and one function per segment: mm at speed v."""
+    import sys
+    root = Path(__file__).resolve().parents[3] / "mlsysim"
+    sys.path.insert(0, str(root))
+    try:
+        from mlsysim import Embodied
+        from mlsysim.physics import calc_c2_stop_suffix
+    except ImportError as e:
+        raise SystemExit(f"Volume IV budget bar reads MLSysIM, which needs numpy and pint "
+                         f"({e}). Run with a Python that has them, for example "
+                         f"make kit V=4 PY=/path/to/.venv/bin/python")
+    A = Embodied.Scenario.WarehouseAisle
+    RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+
+    def mag(q, unit):
+        return q.to(unit).magnitude
+
+    ms, m = "millisecond", "meter"
+    t_age = mag(A.perception_age, ms)                              # 51.6 ms
+    t_lease = mag(A.t_lease + A.t_tick + A.t_bus, ms)              # 62 ms
+    t_onset = mag(A.t_brake_onset, ms)                             # 20 ms
+    tau = mag(A.tau_delay, ms)                                     # 133.6 ms
+    assert abs(tau - (t_age + t_lease + t_onset)) < 1e-9
+    a = mag(A.a_brake, "meter / second**2")                        # 2 m/s^2
+    j = mag(calc_c2_stop_suffix(RM.base.max_velocity, A.a_brake)["peak_jerk"],
+            "meter / second**3")                                   # 7.11 m/s^3
+    n = dict(
+        v_drive=mag(RM.base.max_velocity, "meter / second"),       # 1.5 m/s
+        v_aisle=mag(A.v_aisle, "meter / second"),                  # 1.3 m/s
+        clear=mag(A.d_clear, m) * 1e3,                             # 1,100 mm
+        tau=tau, t_age=t_age, t_lease=t_lease, t_onset=t_onset,
+        t_da=mag(A.t_dispatch_to_admission, ms),                   # 63.3 ms
+        t_takeover=mag(A.t_takeover_in_loop, ms),                  # 605 ms
+        a=a, j=j,
+        allow=mag(A.delta_loc + A.delta_margin, m) * 1e3,          # 150 mm
+        track=mag(A.eps_track, m) * 1e3,                           # 40 mm
+    )
+    return n
+
+
+# The fixed segment order, left to right, is the order the course adds the
+# terms, so no segment ever moves: (key, label, lecture, mm at speed v, color).
+# Lease path and observation age are carved out of the pre-brake delay
+# (its 133.6 ms already contains them, Napkin Math 1.1), so they add a named
+# segment without adding distance; every other step adds distance.
+def budget_segments(n):
+    return [
+        ("delay", "delay v·τ", 1, lambda v: v * n["tau"], V4["amber"]),
+        ("braking", "braking v²/2a", 1, lambda v: v * v / (2 * n["a"]) * 1e3, V4["slate"]),
+        ("allow", "localization + clearance", 2, lambda v: n["allow"], V4["gray"]),
+        ("lease", "lease path", 4, lambda v: v * n["t_lease"], V4["green"]),
+        ("age", "observation age", 8, lambda v: v * n["t_age"], "#007A87"),
+        ("jerk", "jerk ramps", 11, lambda v: v * n["a"] / (2 * n["j"]) * 1e3, V4["slate_m"]),
+        ("track", "tracking", 12, lambda v: n["track"], "#B6C2D1"),
+        ("da", "dispatch to admission", 13, lambda v: v * n["t_da"], V4["navy"]),
+        ("tko", "takeover", 14, lambda v: v * n["t_takeover"], V4["brown"]),
+    ]
+
+
+def fmt_mm(x):
+    return f"{x:,.1f}"
+
+
+def budget_bar(accent, n, step, v, speed_label):
+    """The aisle stopping budget as one horizontal bar at speed v, with the
+    first `step` segments of budget_segments(). Every step has the same axis,
+    and each segment's label has a fixed place, so nothing moves between
+    steps: pieces of the delay are labeled below on the left, later terms
+    below on the right, each on its own row with a leader."""
+    segs = budget_segments(n)[:step]
+    xl, xr, mmax = 20, 860, 1300.0
+    s = (xr - xl) / mmax
+
+    def X(mm):
+        return xl + min(mm, mmax) * s
+
+    fs = 20
+    by, bh = 92, 48
+    rows = {"B1": 162, "B2": 186, "B3": 210, "A1": 70, "A2": 44}
+    out = [ARROW_DEFS.replace('fill="#475569"', f'fill="{V4["brown"]}"')]
+    keys = [k for k, *_ in segs]
+    mm = {k: f(v) for k, _, _, f, _ in segs}
+    color = {k: c for k, _, _, _, c in segs}
+    color["onset"] = V4["amber"]
+    # Distance spans along the bar. Lease path and observation age are cut
+    # out of the delay block in time order: age, lease path, brake onset.
+    spans, x = {}, 0.0
+    for k in keys:
+        if k in ("lease", "age"):
+            continue
+        spans[k] = (x, x + mm[k])
+        x += mm[k]
+    total = x
+    d0, d1 = spans["delay"]
+    age = v * n["t_age"]
+    if "age" in keys:
+        spans["age"] = (d0, d0 + age)
+    if "lease" in keys:
+        spans["lease"] = (d0 + age, d0 + age + mm["lease"])
+    if "age" in keys and "lease" in keys:
+        spans["onset"] = (d0 + age + mm["lease"], d1)
+    for k, (a, b) in spans.items():
+        out.append(rect(X(a), by, X(b) - X(a), bh, color[k], C["white"],
+                        0 if k == "delay" else 1.5, rx=0))
+    if "tko" in spans and spans["tko"][1] > mmax:
+        # The takeover runs far past the axis: an arrow off the right edge.
+        out.append(f'<line x1="{xr - 2}" y1="{by + bh / 2}" x2="{xr + 24}" y2="{by + bh / 2}" '
+                   f'stroke="{V4["brown"]}" stroke-width="6" marker-end="url(#ah)"/>\n')
+
+    def lab(t, x, y, col, anchor="start"):
+        tc = C["text"] if col in ("#B6C2D1", V4["gray"]) else col
+        out.append(text(x, y, t, size=fs, weight=700, fill=tc, anchor=anchor))
+        return tc
+
+
+    texts = {
+        "age": f"observation age {fmt_mm(v * n['t_age'])}",
+        "lease": f"lease path {fmt_mm(mm.get('lease', 0))}",
+        "onset": f"brake onset {fmt_mm(v * n['t_onset'])}",
+        "jerk": f"jerk ramps {fmt_mm(mm.get('jerk', 0))}",
+        "track": f"tracking {fmt_mm(mm.get('track', 0))}",
+        "da": f"dispatch to admission {fmt_mm(mm.get('da', 0))}",
+    }
+    place = {"onset": ("B1", "r"), "lease": ("B2", "r"), "age": ("B3", "r"),
+             "jerk": ("B1", "l"), "track": ("B2", "l"), "da": ("B3", "l")}
+    for k, (row, side) in place.items():
+        if k not in spans:
+            continue
+        # A vertical leader from the segment's middle down to its row; the
+        # label sits right of it (side "r") or ends just left of it ("l").
+        a, b = spans[k]
+        lx, y = (X(a) + X(b)) / 2, rows[row]
+        tc = lab(texts[k], lx + 6 if side == "r" else lx - 6, y, color[k],
+                 "start" if side == "r" else "end")
+        out.append(f'<line x1="{lx}" y1="{by + bh}" x2="{lx}" y2="{y + 7}" '
+                   f'stroke="{tc}" stroke-width="1.5"/>\n')
+    # Above the bar: the delay (whole), the allowances, and the large terms.
+    lab(f"delay v·τ ({n['tau']:.1f} ms) {fmt_mm(mm['delay'])}", xl, rows["A1"], V4["amber"])
+    out.append(f'<line x1="{xl}" y1="{rows["A1"] + 12}" x2="{X(d1)}" y2="{rows["A1"] + 12}" '
+               f'stroke="{V4["amber"]}" stroke-width="1.5"/>\n')
+    if "braking" in spans:
+        a, b = spans["braking"]
+        out.append(text((X(a) + X(b)) / 2, by + bh / 2, f"braking v²/2a {fmt_mm(mm['braking'])}",
+                        size=fs, weight=700, fill=C["white"], anchor="middle"))
+    if "allow" in spans:
+        a, b = spans["allow"]
+        lab(f"allowances {fmt_mm(mm['allow'])}", (X(a) + X(b)) / 2, rows["A2"], V4["gray"],
+            "middle")
+        out.append(f'<line x1="{(X(a) + X(b)) / 2}" y1="{rows["A2"] + 12}" '
+                   f'x2="{(X(a) + X(b)) / 2}" y2="{by}" stroke="{C["text"]}" stroke-width="1.5"/>\n')
+    if "tko" in spans:
+        # Above, right-aligned at the axis end; the header gives its 605 ms.
+        lx = xr - 30
+        lab(f"takeover {fmt_mm(mm['tko'])}", xr, rows["A2"], V4["brown"], "end")
+        out.append(f'<line x1="{lx}" y1="{rows["A2"] + 12}" x2="{lx}" y2="{by}" '
+                   f'stroke="{V4["brown"]}" stroke-width="1.5"/>\n')
+    # The clear distance: a red line across the bar, labeled above it.
+    xc = X(n["clear"])
+    spare = n["clear"] - total
+    if spare > 0:
+        out.append(f'<pattern id="hatch" width="8" height="8" patternUnits="userSpaceOnUse" '
+                   f'patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="8" '
+                   f'stroke="{V4["red"]}" stroke-width="1.5" opacity="0.45"/></pattern>\n')
+        out.append(f'<rect x="{X(total)}" y="{by}" width="{xc - X(total)}" height="{bh}" '
+                   f'fill="url(#hatch)" stroke="{V4["red"]}" stroke-width="1"/>\n')
+        t = f"spare {fmt_mm(spare)}"
+        cxs = (X(total) + xc) / 2
+        if 0.62 * fs * len(t) + 12 < xc - X(total):
+            out.append(rect(cxs - 0.31 * fs * len(t) - 4, by + bh / 2 - 13,
+                            0.62 * fs * len(t) + 8, 26, C["white"], rx=4))
+            lab(t, cxs, by + bh / 2, V4["red"], "middle")
+    out.append(f'<line x1="{xc}" y1="{rows["A1"] + 12}" x2="{xc}" y2="{by + bh + 8}" stroke="{V4["red"]}" '
+               f'stroke-width="3" stroke-dasharray="7,4"/>\n')
+    lab(f"clear {n['clear']:,.0f} mm", xc, rows["A1"], V4["red"], "middle")
+    ya = 232
+    out.append(f'<line x1="{xl}" y1="{ya}" x2="{xr}" y2="{ya}" stroke="#888888" stroke-width="1.5"/>\n')
+    for t in range(0, int(mmax) + 1, 200):
+        out.append(f'<line x1="{X(t)}" y1="{ya}" x2="{X(t)}" y2="{ya + 6}" stroke="#888888" '
+                   f'stroke-width="1.5"/>\n')
+        out.append(text(X(t), ya + 20, f"{t:,}", size=18, weight=500, fill=C["text"],
+                        anchor="middle"))
+    head = f"{speed_label}, {v:g} m/s"
+    if "tko" not in spans:
+        head += f": the stop needs {fmt_mm(total)} mm, " + (
+            f"{fmt_mm(spare)} spare" if spare >= 0 else f"{fmt_mm(-spare)} over")
+    else:
+        head += f": an in-loop takeover adds {n['t_takeover']:.0f} ms of travel"
+    out.append(text(xl, 16, head, size=fs, weight=700, fill=C["text"]))
+    out.append(text((xl + xr) / 2, ya + 44, "distance from detection (mm)", size=18,
+                    weight=500, fill=C["gray"], anchor="middle"))
+    return svg("".join(out), w=900, h=ya + 58, label="Stopping budget")
+
+
 def layer_slug(name):
     """File-name form of a layer: 'Fabric & Storage' -> 'fabric'."""
     if name in SLUGS:
@@ -607,6 +972,34 @@ def main():
         figs["dam"] = dam(accent)
         for v in "DAM":
             figs[f"dam_{v}"] = dam(accent, hl=v)
+    vol = VOLUMES[args.volume]
+    if vol.get("divstack"):
+        # The section-divider stack (theme option dividerstack): one file per
+        # layer and mark, plus every layer lit for lectures spanning the stack.
+        for name in STACK + ([BAR] if DATA else []):
+            figs[f"divstack_{layer_slug(name)}"] = divstack(accent, highlight=name)
+        figs["divstack_all"] = divstack(accent, highlight="all")
+    if vol.get("records"):
+        figs["record_chain"] = record_chain(accent)
+        figs["thumb_record_chain"] = record_chain(accent, thumb=True)
+        for lec, *_ in RECORDS:
+            figs[f"record_chain_l{lec:02d}"] = record_chain(accent, lit=lec)
+    if vol.get("budget"):
+        n = budget_numbers()
+        segs = budget_segments(n)
+        # At the drive limit through Lecture 12's last term (the composite
+        # budget overruns there); at the aisle speed Lecture 12 chooses, every
+        # step, including Lecture 13's and Lecture 14's.
+        last_drive = max(k for k, s in enumerate(segs, 1) if s[2] <= 12)
+        for k in range(1, last_drive + 1):
+            figs[f"budget_bar_step{k}"] = budget_bar(accent, n, k, n["v_drive"], "Drive limit")
+        for k in range(1, len(segs) + 1):
+            figs[f"budget_bar_aisle_step{k}"] = budget_bar(accent, n, k, n["v_aisle"],
+                                                           "Aisle speed")
+        print("budget bar segments (mm at drive limit / aisle speed):")
+        for k, (key, label, lec, f, _) in enumerate(segs, 1):
+            print(f"  step {k}  L{lec:<3d} {label:<26s} {fmt_mm(f(n['v_drive'])):>8s} "
+                  f"{fmt_mm(f(n['v_aisle'])):>8s}")
     for name, s in figs.items():
         p = out / f"{name}.svg"
         p.write_text(s)
