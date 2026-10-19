@@ -126,7 +126,7 @@ sp.save(fig, out / "gft_ratio.svg")
 # ---------------------------------------------------------------------------
 sp.hbars_steps(out / "gpu_days", [
     ("AlexNet (2012)", 12, "neutral", "12 GPU-days"),
-    ("GPT-3 (2020)", 405 * 365, "compute", "about 148,000"),
+    ("GPT-3 (2020)", 405 * 365, "compute", f"about {round(405 * 365, -3):,.0f}"),
     ("GPT-4-class (2023)", 2.5e6, "danger", "about 2.5 million (est.)"),
 ], "GPU-days", xlabel="Accelerator-days to train (log scale)", value_fmt="{:,.0f}")
 
@@ -305,7 +305,8 @@ def amdahl(path, show_after):
         ax.text(-2, y, name, ha="right", va="center", fontsize=13, fontweight="bold",
                 color=C["text"] if vis else "white")
         if vis:
-            ax.text(left + 2, y, f"{left} ms" + ("   (-23%)" if i == 1 else ""),
+            cut = (sum(rows[0][1]) - left) / sum(rows[0][1]) * 100
+            ax.text(left + 2, y, f"{left} ms" + (f"   (-{cut:.0f}%)" if i == 1 else ""),
                     va="center", fontsize=13, fontweight="bold",
                     color=C["danger"] if i == 1 else C["text"])
     ax.set_xlim(0, 165)
@@ -379,3 +380,76 @@ ax.grid(axis="y", color=C["grid"], linewidth=0.6)
 ax.set_axisbelow(True)
 sp.save(fig, out / "compute_growth.svg")
 print("literature figures written")
+
+
+# ---------------------------------------------------------------------------
+# Measured silent degradation: ImageNet top-1 on the original validation set
+# against ImageNetV2 MatchedFrequency, one point per model (Recht et al.
+# 2019, appendix tables). Values and the fit come from calcs.py.
+# ---------------------------------------------------------------------------
+import calcs  # noqa: E402
+
+REC = calcs.load_recht()
+fig, ax = sp.plt.subplots(figsize=(5.4, 1.6))
+ox = [r[1] for r in REC]
+ny = [r[2] for r in REC]
+mx, my = sum(ox) / len(ox), sum(ny) / len(ny)
+slope = sum((x - mx) * (y - my) for x, y in zip(ox, ny)) / sum((x - mx) ** 2 for x in ox)
+icpt = my - slope * mx
+ax.plot([15, 90], [15, 90], color=C["neutral"], lw=1.5, ls="--", zorder=1)
+ax.text(54, 57, "no loss (new = original)", color=C["neutral"], fontsize=11,
+        rotation=0, ha="right", va="bottom")
+ax.plot([18, 86], [icpt + slope * 18, icpt + slope * 86], color=C["danger"], lw=2.2, zorder=2)
+ax.scatter(ox, ny, s=34, color=C["compute"], edgecolors="white", linewidths=0.6, zorder=3)
+ax.text(55, 30, f"fit: new = {slope:.2f} × original − {-icpt:.1f}",
+        color=C["danger"], fontsize=12, fontweight="bold", ha="left")
+ax.text(19, 84, f"{len(REC)} models", color=C["compute"], fontsize=12, fontweight="bold",
+        ha="left", va="top")
+ax.set_xlim(15, 90)
+ax.set_ylim(10, 90)
+ax.set_xticks([20, 40, 60, 80])
+ax.set_yticks([20, 40, 60, 80])
+ax.set_xlabel("Top-1 on original ImageNet test set (%)")
+ax.set_ylabel("ImageNetV2\ntop-1 (%)")
+ax.grid(color=C["grid"], linewidth=0.6)
+ax.set_axisbelow(True)
+sp.save(fig, out / "recht_scatter.svg")
+
+
+# ---------------------------------------------------------------------------
+# MLPerf Inference v4.0, Llama 2 70B Offline: H100 against H200, throughput
+# relative to the H100, with the bandwidth and compute ratios as reference
+# lines. Throughput from the published mlperf_log_summary.txt files; specs
+# from the MLSysIM registry (calcs.py).
+# ---------------------------------------------------------------------------
+MP = calcs.load_mlperf()
+HW = calcs.hardware_bw()
+bw_ratio = HW["H200"][0] / HW["H100"][0]
+rows = [("H100, 700 W", MP["H100"], "neutral"),
+        ("H200, 700 W", MP["H200"], "memory"),
+        ("H200, 1000 W", MP["H200 1000 W"], "memory")]
+fig, ax = sp.plt.subplots(figsize=(5.0, 1.3))
+for i, (lab, v, ck) in enumerate(rows):
+    y = len(rows) - 1 - i
+    r = v / MP["H100"]
+    ax.barh(y, r, color=C[ck], height=0.6)
+    ax.text(-0.02, y, lab, transform=ax.get_yaxis_transform(), ha="right", va="center",
+            fontsize=12, fontweight="bold", color=C["text"])
+    ax.text(r - 0.03, y, f"{r:.2f}\u00d7", ha="right", va="center", fontsize=12,
+            fontweight="bold", color="white")
+    ax.text(1.62, y, f"{v:,.0f} tokens/s", va="center", fontsize=11,
+            fontweight="bold", color=C[ck])
+ax.axvline(1.0, color=C["compute"], lw=1.8, ls="--", zorder=0)
+ax.text(0.98, 2.45, "compute ratio 1.00", color=C["compute"], fontsize=10, ha="right",
+        va="bottom", fontweight="bold")
+ax.axvline(bw_ratio, color=C["memory"], lw=1.8, ls="--", zorder=0)
+ax.text(bw_ratio + 0.02, 2.45, f"bandwidth ratio {bw_ratio:.2f}", color=C["memory"], fontsize=10,
+        ha="left", va="bottom", fontweight="bold")
+ax.set_xlim(0, 2.2)
+ax.set_ylim(-0.5, 2.95)
+ax.set_yticks([])
+ax.spines["left"].set_visible(False)
+ax.set_xticks([0, 0.5, 1.0, 1.5, 2.0])
+ax.set_xlabel("Throughput relative to H100 (8 GPUs each)")
+sp.save(fig, out / "mlperf_h200.svg")
+print("measured-evidence figures written")
