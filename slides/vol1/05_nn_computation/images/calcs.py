@@ -17,7 +17,7 @@ Measured values come from the real runs in this folder:
   data/overfit.json     (overfit_run.py: MNIST training against held-out)
 
 Run from this folder with the MLSysBook venv (it imports mlsysim):
-  /Users/VJ/GitHub/MLSysBook/.venv/bin/python calcs.py
+  ../../../../.venv/bin/python calcs.py
 """
 
 import json

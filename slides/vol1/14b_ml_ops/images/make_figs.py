@@ -362,8 +362,8 @@ for k in (1, 2, 3):
             if dot:
                 p.append(f'<circle cx="{dot}" cy="{y+15}" r="9" fill="{C["data"]}"/>')
             tx = b2 + 12 if b2 < 600 else a - 12
-            anc = "start" if b2 < 600 else "end"
-            p.append(text(tx, y + 24, lab, 23, C[ck], "bold", anc))
+            anchor = "start" if b2 < 600 else "end"
+            p.append(text(tx, y + 24, lab, 23, C[ck], "bold", anchor))
     if k >= 3:
         p.append(text(450, 466, "Every metric reports label coverage: the share resolved",
                       24, C["danger"], "bold"))

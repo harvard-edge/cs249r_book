@@ -13,7 +13,7 @@ the operator name, self CPU memory (MB) and total CPU time (ms), as
 reported by prof.key_averages(). Output: data/sdpa_profile.txt.
 
 Needs torch (not in the MLSysBook venv). Run with the mlperf-edu venv:
-  /Users/VJ/GitHub/MLSysBook/mlperf-edu/.venv/bin/python sdpa_profile.py
+  ../../../../mlperf-edu/.venv/bin/python sdpa_profile.py
 """
 import platform
 from pathlib import Path

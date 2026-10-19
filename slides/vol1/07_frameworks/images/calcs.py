@@ -8,7 +8,7 @@ one computation. Measured inputs are read from data/, which
 profile_frameworks.py writes by running PyTorch on this machine.
 
 Run from this folder with the MLSysBook venv:
-  /Users/VJ/GitHub/MLSysBook/.venv/bin/python calcs.py
+  ../../../../.venv/bin/python calcs.py
 """
 
 import re

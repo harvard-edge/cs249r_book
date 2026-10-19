@@ -22,7 +22,7 @@ and every label keeps its drawn size (8 to 9.5 pt).
     slate #334155. Resource plots keep the base contract (memory blue,
     compute orange).
 
-Run from this folder: /Users/VJ/GitHub/MLSysBook/.venv/bin/python make_figs.py
+Run from this folder: ../../../../.venv/bin/python make_figs.py
 """
 
 import contextlib

@@ -14,7 +14,7 @@ values. The files sit in the OS page cache after setup, so the load lines
 measure deserialization, not the disk.
 
 Run (the MLSysBook venv has no PyTorch; the mlperf-edu venv does):
-  PY=/Users/VJ/GitHub/MLSysBook/mlperf-edu/.venv/bin/python
+  PY=../../../../mlperf-edu/.venv/bin/python
   $PY coldstart_log.py --setup /tmp/cs && $PY coldstart_log.py /tmp/cs > coldstart_log.txt
 The slide quotes coldstart_log.txt as is; calcs.py reads it.
 """

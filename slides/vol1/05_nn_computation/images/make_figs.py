@@ -37,7 +37,7 @@ rendered chapter (Neural Computation) unless noted:
     memory-profiler timeline (pytorch-memory-timeline.png); see SOURCES.yml.
 
 Run from this folder with the MLSysBook venv:
-  /Users/VJ/GitHub/MLSysBook/.venv/bin/python make_figs.py
+  ../../../../.venv/bin/python make_figs.py
 """
 
 import sys

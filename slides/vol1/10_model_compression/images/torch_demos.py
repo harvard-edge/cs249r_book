@@ -9,7 +9,7 @@ the Python prompt prints it, so the slides can quote the transcript exactly.
   fuse:  torch.ao.quantization.fuse_modules on conv, batch norm, ReLU.
 
 Run (the MLSysBook venv has no PyTorch; the mlperf-edu venv does):
-  /Users/VJ/GitHub/MLSysBook/mlperf-edu/.venv/bin/python torch_demos.py
+  ../../../../mlperf-edu/.venv/bin/python torch_demos.py
 torch_demos.txt keeps a copy of the output.
 """
 

@@ -7,7 +7,7 @@ used there. make_figs.py imports the data loaders below so figures and
 slides share one computation.
 
 Run from this folder with the MLSysBook venv (it imports mlsysim):
-  /Users/VJ/GitHub/MLSysBook/.venv/bin/python calcs.py
+  ../../../../.venv/bin/python calcs.py
 """
 
 import json

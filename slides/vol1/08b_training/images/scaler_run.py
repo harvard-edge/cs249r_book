@@ -11,7 +11,7 @@ with a flag for steps the scaler skipped (inf or NaN found in the scaled
 gradients, which is when the scale halves).
 
 Needs torch (not in the MLSysBook venv). Run with the mlperf-edu venv:
-  /Users/VJ/GitHub/MLSysBook/mlperf-edu/.venv/bin/python scaler_run.py
+  ../../../../mlperf-edu/.venv/bin/python scaler_run.py
 Device: the Apple GPU (MPS) if present, else CPU; the device and torch
 version are written on the first line of the CSV.
 """
