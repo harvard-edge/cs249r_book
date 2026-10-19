@@ -465,7 +465,7 @@ class Deck:
                 name = Path(m.group(1)).stem if "." in Path(m.group(1)).name else Path(m.group(1)).name
                 if name in svgs:
                     used.add(name)
-                elif m.group(2):   # \mlsyssteps{prefix}{n}
+                elif m.group(2) and len(m.group(2)) <= 2:   # \mlsyssteps{prefix}{n}
                     used.update(k for k in (f"{name}{i}" for i in range(1, int(m.group(2)) + 1)) if k in svgs)
             f.figtext = " ".join(labels(svgs[n]) for n in sorted(used))
 
