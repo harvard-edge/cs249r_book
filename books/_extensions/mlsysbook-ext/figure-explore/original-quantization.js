@@ -9,6 +9,8 @@
   const number=value=>String(value).replace(/-/g,'−'), vector=values=>'['+values.map(number).join(', ')+']';
   root.classList.add('mlsys-original-quantization');
   const svg=original.cloneNode(true);svg.setAttribute('role','img');svg.setAttribute('aria-label','Original quantized matrix multiplication pipeline with synchronized example values');
+  // Reserve a clear payload-label lane; the canonical drawing stays at its original coordinates.
+  const {x:artX,y:artY,width:artWidth,height:artHeight}=svg.viewBox.baseVal;svg.setAttribute('viewBox',`${artX} ${artY-24} ${artWidth} ${artHeight+24}`);svg.setAttribute('width',String(artWidth));svg.setAttribute('height',String(artHeight+24));
   const overlay=document.createElementNS(ns,'g');overlay.classList.add('oq-overlay');svg.append(overlay);
   const canvas=document.createElement('div');canvas.className='oq-canvas';canvas.tabIndex=0;canvas.setAttribute('aria-label','Pipeline diagram. Scroll sideways to inspect on a narrow screen.');canvas.append(svg);
   const cue=document.createElement('p');cue.className='oq-scroll-cue';cue.textContent='↔ Swipe the diagram to inspect. Each step centers the current operation.';
@@ -61,17 +63,22 @@
    root.dataset.quantizationStep=String(i);
    if(canvas.scrollWidth>canvas.clientWidth){const c=cells[active[i]];canvas.scrollLeft=Math.max(0,(c.x+c.w/2)/506.511*svg.getBoundingClientRect().width-canvas.clientWidth/2);}
   }
-  const routes={1:[[30,13],[102,13]],2:[[30,77],[102,77]],3:[[102,13],[160.6,13],[160.6,45]],4:[[160.6,45],[233,45]],5:[[160.6,45],[233,45]],6:[[233,45],[306,45]],7:[[306,45],[404,45]],8:[[404,45],[477,45]]};
+  // Dock outside the box borders. The packet follows the original arrows;
+   // its payload badge stays in an empty lane, away from every label.
+  const rightPort=i=>[cells[i].x+cells[i].w+3.5,cells[i].y+cells[i].h/2];
+  const leftPort=i=>[cells[i].x-3.5,cells[i].y+cells[i].h/2];
+  const routes={1:[rightPort(0),leftPort(1)],2:[rightPort(2),leftPort(3)],3:[rightPort(1),[160.6,13.1],[160.6,28.73]],4:[rightPort(4),leftPort(5)],5:[rightPort(4),leftPort(5)],6:[rightPort(5),leftPort(6)],7:[rightPort(6),leftPort(7)],8:[rightPort(7),leftPort(8)]};
   function transition({from,to,duration,animate,onFrame}) {
    if(to!==from+1||!routes[to])return;
    calculation.textContent=equations[to];
    cells.forEach((c,j)=>c.g.classList.toggle('oq-active',to===3?(j===1||j===3):j===active[to]));
-   const tracks=to===3?[{route:routes[to],text:'xq'},{route:[[102,77],[160.6,77],[160.6,45]],text:'wq'}]:[{route:routes[to],text:['','FP x','FP w','',String(d.products[0]),number(d.products[1]),String(d.accumulator),String(d.requantized),String(d.output)][to]}];
-   tracks.forEach(({route,text})=>{const token=node('g',{class:'oq-token'});
-   token.append(node('rect',{x:-16,y:-7,width:32,height:14,rx:3}));
-   token.append(node('text',{'text-anchor':'middle',y:3},text));overlay.append(token);
+   const tracks=to===3?[{route:routes[to],text:'xq',lane:-12},{route:[rightPort(3),[160.6,76.82],[160.6,61.19]],text:'wq',lane:103}]:[{route:routes[to],lane:to===2?103:to===1?-12:13,text:['','FP x','FP w','',String(d.products[0]),number(d.products[1]),String(d.accumulator),String(d.requantized),String(d.output)][to]}];
+   tracks.forEach(({route,text,lane})=>{const token=node('g',{class:'oq-token'});
+   const packet=node('rect',{class:'oq-packet',x:-2.5,y:-2.5,width:5,height:5,rx:1});
+   const badge=node('g',{class:'oq-token-badge'});badge.append(node('rect',{x:-16,y:-7,width:32,height:14,rx:3}));
+   const pointer=node('path',{class:'oq-token-pointer'});badge.append(pointer,node('text',{'text-anchor':'middle',y:3},text));token.append(packet,badge);overlay.append(token);
    animate(token,[{opacity:1},{opacity:1}],{duration,fill:'both'});
-   onFrame(progress=>{const f=progress*(route.length-1),p=Math.min(route.length-2,Math.floor(f)),t=f-p,a=route[p],b=route[p+1];token.setAttribute('transform',`translate(${a[0]+(b[0]-a[0])*t} ${a[1]+(b[1]-a[1])*t})`);if(progress>=1)token.remove();});
+   onFrame(progress=>{const f=progress*(route.length-1),p=Math.min(route.length-2,Math.floor(f)),t=f-p,a=route[p],b=route[p+1],x=a[0]+(b[0]-a[0])*t,y=a[1]+(b[1]-a[1])*t;token.setAttribute('transform',`translate(${x} ${y})`);badge.setAttribute('transform',`translate(0 ${lane-y})`);pointer.setAttribute('d',lane<y?'M -2 7 L 0 9 L 2 7 Z':'M -2 -7 L 0 -9 L 2 -7 Z');if(progress>=1)token.remove();});
    });
   }
   return window.MLSysOriginalPlayer.create({root,outer:context.outer,title:'How do floating-point inputs become an INT8 output?',scope:'A two-term dot product, with zero-points 0 and no bias. Requantize, then apply ReLU. The original curves show other activation shapes.',steps,render,transition});

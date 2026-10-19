@@ -63,6 +63,11 @@ local function enhance(el)
   if lesson.bundle and not current_bundle(lesson) then
     warn('missing or stale mechanism bundle for '..tostring(key));return nil
   end
+  -- Original modules have no data bundle: their runtime digest is their cache identity.
+  local original_runtime = key and name:match('^original%-') and not lesson.bundle
+  if original_runtime and (type(lesson.runtime_sha1) ~= 'string' or #lesson.runtime_sha1 ~= 40 or not lesson.runtime_sha1:match('^%x+$')) then
+    warn('missing or invalid original runtime identity for '..key);return nil
+  end
   local view_assets = ''
   for _,filename in ipairs({'figure-views.js','figure-explore.js','figure-views.css'}) do
     local f = io.open(extension_dir .. '/' .. filename, 'rb')
@@ -85,7 +90,7 @@ local function enhance(el)
   local volume = lesson.volume and string.format('%d',lesson.volume) or ''
   if lesson.bundle then table.insert(scripts,{path=lesson.bundle,attribs={defer=true}}) end
   if name=='guided-figure' then table.insert(scripts,{path='guided-lessons-vol'..volume..'.js',attribs={defer=true}}) end
-  quarto.doc.add_html_dependency({name='mlsys-explore-'..name..((name=='guided-figure' or name=='mechanism-scene') and '-vol'..volume or ''),version=(lesson.bundle and '0.3.0-'..(lesson.runtime_sha1 or 'unversioned'):sub(1,12)..'-'..lesson.bundle_sha1:sub(1,12) or '0.2.0'),scripts=scripts,stylesheets={lesson.stylesheet}})
+  quarto.doc.add_html_dependency({name='mlsys-explore-'..name..((name=='guided-figure' or name=='mechanism-scene') and '-vol'..volume or ''),version=(lesson.bundle and '0.3.0-'..(lesson.runtime_sha1 or 'unversioned'):sub(1,12)..'-'..lesson.bundle_sha1:sub(1,12) or (name~='guided-figure' and lesson.runtime_sha1 and '0.2.0-'..lesson.runtime_sha1:sub(1,12) or '0.2.0')),scripts=scripts,stylesheets={lesson.stylesheet}})
   if playback then
     el.attributes['data-mlsys-movement-ms']=playback.movement
     el.attributes['data-mlsys-reading-pause-ms']=playback.hold

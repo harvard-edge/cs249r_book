@@ -1,0 +1,40 @@
+/* Original chapter artwork with synchronized physical and systems state. */
+(()=>{'use strict';window.MLSysFigureLessons=window.MLSysFigureLessons||{};
+window.MLSysFigureLessons["original-v4-frame-staleness-error"]=async(root,context)=>{
+ if(!context.verifiedArtwork||!window.MLSysOriginalPlayer)throw Error('Verified original artwork and shared player required');
+ root.classList.add("original-v4-frame-staleness-error");
+ const svg=context.verifiedArtwork.cloneNode(true),NS='http://www.w3.org/2000/svg',box=svg.viewBox.baseVal,W=box.width,H=box.height;
+ const D={"frame_ms": 16.666666666666668, "initial_mm": 0.1, "drift_mm_s": 12.0, "lever_mm": 150.0, "omega_rad_s": 0.3, "tolerance_mm": 1.0};
+ const node=(tag,attrs={},text)=>{const n=document.createElementNS(NS,tag);for(const[k,v]of Object.entries(attrs))n.setAttribute(k,v);if(text!==undefined)n.textContent=text;if(tag==='text'&&attrs.fill)n.style.setProperty('fill',attrs.fill,'important');return n;};
+ svg.querySelectorAll('text').forEach(n=>{const f=n.getAttribute('fill');if(f)n.style.setProperty('fill',f,'important');});
+ const overlay=node('g',{'data-original-state-overlay':''});svg.append(overlay);
+ const canvas=document.createElement('div');canvas.className='v4life-canvas';canvas.tabIndex=0;canvas.setAttribute('aria-label','Original chapter diagram. Swipe to inspect; Expand provides more room.');canvas.append(svg);
+ const live=document.createElement('p');live.className='v4life-live';const explanation=document.createElement('p');explanation.className='v4life-explanation';const cue=document.createElement('p');cue.className='v4life-cue';cue.textContent='Swipe the diagram to inspect it, or choose Expand.';
+ const f=v=>String(Number(v.toFixed(4))),set=(n,a)=>{for(const[k,v]of Object.entries(a))n.setAttribute(k,v);};
+ const follow=(x,y=H/2)=>{const scale=svg.getBoundingClientRect().width/W;canvas.scrollLeft=Math.max(0,(x-box.x)*scale-canvas.clientWidth/2);};
+ const state=(values,text,detail)=>{root.dataset.values=JSON.stringify(values);live.textContent=text;explanation.textContent=detail;};
+ const physical=[...svg.querySelectorAll('g')].find(n=>n.id.endsWith('physical-state')||n.querySelector('line[x1="330"][x2="415"]'));if(!physical)throw Error('Source physical wrist geometry changed');
+const link=physical.querySelector('line'),circles=physical.querySelectorAll('circle'),finger=circles[1],wrist=circles[0];
+const error=[...svg.querySelectorAll('line')].find(n=>n.getAttribute('x1')==='224'&&n.getAttribute('y1')==='90');
+const drift=[...svg.querySelectorAll('line')].find(n=>n.getAttribute('x1')==='225');
+const guide=[...svg.querySelectorAll('line')].find(n=>n.getAttribute('x1')==='330'&&n.getAttribute('x2')==='330');
+const invalid=node('text',{x:300,y:325,'text-anchor':'middle','font-size':12,fill:'#A51C30'},'STALE EDGE: INVALID');overlay.append(invalid);
+const radius=Math.hypot(85,257),angle=Math.atan2(85,257);
+const fingerLabel=[...physical.querySelectorAll('text')].find(n=>n.textContent==='finger'),wristLabel=[...physical.querySelectorAll('text')].find(n=>n.textContent==='wrist'),leverLabel=[...physical.querySelectorAll('text')].find(n=>n.textContent.startsWith('r'));
+const jointArc=[...svg.querySelectorAll('path')].find(n=>n.getAttribute('d')?.startsWith('M 330 280 A')),tipArc=[...svg.querySelectorAll('path')].find(n=>n.getAttribute('d')?.startsWith('M 330 90 A'));
+ const key=document.createElement('p');key.className='v4life-key';key.textContent="Dashed: capture pose. Solid: current wrist/finger. Green: fixed slot tolerance.";
+ let lastState=null;
+ function camera(){const compact=matchMedia('(max-width:700px)').matches&&!root.closest('dialog');svg.setAttribute('viewBox',compact?'190 60 260 340':'100 50 400 356');root.classList.toggle('v4-compact-pose',compact);syncRatio();}
+ function syncRatio(){const v=svg.getAttribute('viewBox').split(/\s+/);if(svg.getAttribute('width')!==v[2])svg.setAttribute('width',v[2]);if(svg.getAttribute('height')!==v[3])svg.setAttribute('height',v[3]);}
+ let cameraFrame=0;const cameraObserver=new ResizeObserver(()=>{cancelAnimationFrame(cameraFrame);cameraFrame=requestAnimationFrame(camera);});cameraObserver.observe(root);
+ const states=[{"f": 0, "expired": false}, {"f": 0.25, "expired": false}, {"f": 0.5, "expired": false}, {"f": 0.75, "expired": false}, {"f": 1, "expired": false}, {"f": 1, "expired": true}],steps=[{"label": "Keep the capture pose fixed", "description": "The real slot and the dashed capture pose stay fixed while the camera-to-slot edge ages."}, {"label": "Advance a quarter frame", "description": "At completion: Fresh wrist motion is being combined with an older camera edge; the small-angle lever-arm contribution grows."}, {"label": "Advance half a frame", "description": "At completion: The lever-arm term and lateral drift add to the initial error bound."}, {"label": "Advance three quarters", "description": "At completion: Numerically valid matrix operations do not establish that the edges share an epoch."}, {"label": "Reach one missed frame", "description": "At completion: The source conservative bound now exceeds the slot tolerance; this does not measure a physical strike."}, {"label": "Expire the stale edge", "description": "At completion: Reject the mixed-epoch composition. A new qualified observation or a common-epoch query is required; invalidation does not undo physical motion."}];
+ steps.forEach((step,i)=>{const description=step.description.replace(/^At completion: /,'');Object.defineProperty(step,'description',{get(){return root.dataset.lessonCommittedIndex===String(i)?description:'Next endpoint, not yet completed: '+description;}});});
+ function draw(s){lastState=s;camera();if(!key.isConnected)canvas.before(key);const fraction=s.f,wx=220+110*fraction,theta=angle*fraction,tx=wx+radius*Math.sin(theta),ty=360-radius*Math.cos(theta);
+set(link,{x1:wx,x2:tx,y2:ty});set(fingerLabel,{x:tx+11,y:ty+15});set(wristLabel,{x:wx+16});set(leverLabel,{x:(wx+tx)/2+15,y:(360+ty)/2+12});
+set(jointArc,{d:`M ${wx} 280 A 80 80 0 0 1 ${wx+80*Math.sin(theta)} ${360-80*Math.cos(theta)}`,visibility:fraction>0?'visible':'hidden'});set(tipArc,{d:`M ${wx} ${360-radius} A ${radius} ${radius} 0 0 1 ${tx} ${ty}`,visibility:fraction>0?'visible':'hidden'});set(wrist,{cx:wx});set(finger,{cx:tx,cy:ty});set(error,{x2:tx-8,y2:ty});set(drift,{x2:Math.max(225,wx-8),visibility:fraction>0?'visible':'hidden'});set(guide,{x1:wx,x2:wx});set(invalid,{visibility:s.expired?'visible':'hidden'});
+const age=D.frame_ms*fraction,trans=D.drift_mm_s*age/1000,rot=D.lever_mm*D.omega_rad_s*age/1000,bound=D.initial_mm+trans+rot;
+state({age_ms:age,translation_mm:trans,rotation_bound_mm:rot,error_bound_mm:bound,tolerance_mm:D.tolerance_mm,expired:!!s.expired},`Age ${f(age)} ms · bound ${f(bound)} / ${D.tolerance_mm} mm · ${s.expired?'edge invalid':bound>D.tolerance_mm?'bound exceeds tolerance':'bound not yet exhausted'}`,`Bound = ${D.initial_mm} + ${f(trans)} + ${f(rot)} mm. The slot stays fixed. The animated geometry exaggerates displacement; it is not the numerical error scale. ${s.expired?'Reject stale composition; physical motion is not rolled back.':''}`);follow((220+tx)/2);}
+ function render(i,{stage}){root.dataset.lessonCommittedIndex=String(i);if(!canvas.isConnected)stage.append(live,canvas,cue,explanation);draw(states[i]);root.dataset.sceneStep=String(i);}
+ function transition({from,to,onFrame}){if(to!==from+1)return;const a=states[from],b=states[to];onFrame(p=>{const s={...a};for(const k of Object.keys(b))s[k]=typeof b[k]==='number'&&typeof a[k]==='number'?a[k]+(b[k]-a[k])*p:(p===1?b[k]:a[k]);draw(s);});}
+ const controller=window.MLSysOriginalPlayer.create({root,outer:context.outer,title:"Why does a stale transform move the inferred target?",scope:"One missed wrist-camera frame. Geometry is exaggerated; the readout is a scalar bound. Zero ingestion delay isolates this contribution; actual use must charge full capture-to-use age.",steps,render,transition});const destroy=controller.destroy;controller.destroy=()=>{cameraObserver.disconnect();cancelAnimationFrame(cameraFrame);destroy();};return controller;
+};})();

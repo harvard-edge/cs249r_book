@@ -90,7 +90,9 @@
     };
     const heading = make('h4', 'mlsys-original-title', title);
     heading.id = id + '-title';
-    const assumptions = make('p', 'mlsys-original-scope', scope);
+    const assumptions = make('details', 'mlsys-original-assumptions');
+    assumptions.append(make('summary', 'mlsys-original-assumptions-summary', 'Example and assumptions'),
+      make('p', 'mlsys-original-scope', scope));
     const controls = make('div', 'mlsys-original-controls');
     controls.setAttribute('role', 'group');
     controls.setAttribute('aria-label', 'Animation controls');
@@ -130,13 +132,13 @@
       sequence.append(option);
     });
     sequenceLabel.append(sequence);
-    const hints = make('p', 'mlsys-original-shortcuts', 'Keyboard: N next · P back · K play/pause · R restart. Focus this figure to use shortcuts.');
+    const hints = make('p', 'mlsys-original-shortcuts', 'Keyboard: N next · P back · K play/pause · R restart.');
     const narration = make('div', 'mlsys-original-narration');
     narration.setAttribute('aria-live', 'polite');
     narration.setAttribute('aria-atomic', 'true');
     const stage = make('div', 'mlsys-original-stage');
     const details = make('div', 'mlsys-original-details');
-    root.append(heading, assumptions, controls, sequenceLabel, hints, narration, stage, details);
+    root.append(heading, assumptions, sequenceLabel, narration, controls, hints, stage, details);
 
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
     let index = 0, target = null, playing = false, destroyed = false;

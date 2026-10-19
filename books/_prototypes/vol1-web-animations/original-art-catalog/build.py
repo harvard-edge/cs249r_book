@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+from urllib.parse import unquote, urlsplit
 from bs4 import BeautifulSoup
 
 HERE = Path(__file__).resolve().parent
@@ -20,6 +21,70 @@ STATUSES = {
     "adapt": "Selected mechanism · needs original-art adaptation",
     "static": "Static by default",
 }
+
+
+
+def rendered_source_chapter(build_root, entry, implementation, summary=None):
+    """Resolve only a successful job's actual owning HTML, chapter or full volume.
+
+    Job output paths come from job.job and the registry source; unrelated chapter
+    success or a full-volume summary alone never establishes mounted content.
+    """
+    build_root = Path(build_root)
+    build_root = (build_root if build_root.is_absolute() else ROOT / build_root).resolve()
+    if summary is None:
+        summary_path = build_root / "summary.json"
+        if not summary_path.is_file():
+            return None
+        summary = json.loads(summary_path.read_text())
+    source = Path(entry["source"])
+    relative = source.relative_to("books").with_suffix(".html")
+    jobs = sorted(summary.get("jobs", []), key=lambda job: job.get("chapter") != source.parent.name)
+    for job in jobs:
+        if (job.get("ok") is not True or job.get("returncode") != 0
+                or job.get("format") != "html"
+                or job.get("volume") != f"vol{entry['volume']}"
+                or job.get("chapter") not in (None, source.parent.name)
+                or not isinstance(job.get("job"), str) or not job["job"]):
+            continue
+        output = (build_root / job["job"] / "output").resolve()
+        chapter = (output / relative).resolve()
+        if (not output.is_relative_to(build_root) or not chapter.is_relative_to(output)
+                or not chapter.is_file()):
+            continue
+        soup = BeautifulSoup(chapter.read_text(), "html.parser")
+        figure = soup.find(id=entry["figure_id"])
+        key = f"vol{entry['volume']}:{entry['figure_id']}"
+        if (figure is None or figure.get("data-mlsys-explore") != implementation["name"]
+                or figure.get("data-mlsys-explore-key") != key):
+            continue
+        for script in soup.find_all("script", src=True):
+            url = urlsplit(script["src"])
+            script_path = unquote(url.path)
+            if url.scheme or url.netloc or Path(script_path).name != implementation["script"]:
+                continue
+            mounted = ((output / script_path.lstrip('/')) if script_path.startswith('/')
+                       else chapter.parent / script_path).resolve()
+            if mounted.is_relative_to(output) and mounted.is_file():
+                return chapter
+    return None
+
+
+def verified_chapter_links(build_root, registry, manifest):
+    """Link enrolled implementations only when their actual source page mounts them."""
+    build_root = Path(build_root)
+    build_root = (build_root if build_root.is_absolute() else ROOT / build_root).resolve()
+    build_root.relative_to(BOOKS.resolve())
+    summary = json.loads((build_root / "summary.json").read_text())
+    ready = {}
+    for key, implementation in manifest.items():
+        if key not in registry:
+            continue
+        entry = registry[key]
+        chapter = rendered_source_chapter(build_root, entry, implementation, summary)
+        if chapter is not None:
+            ready[key] = "/" + chapter.relative_to(BOOKS.resolve()).as_posix() + "?view=explore#" + entry["figure_id"]
+    return ready
 
 
 def implementation_review_current(key, record, registry, implementation, art, build_root=None):
@@ -53,16 +118,14 @@ def implementation_review_current(key, record, registry, implementation, art, bu
         return False
     if not (reviewed_build / "summary.json").is_file():
         return False
-    summary = json.loads((reviewed_build / "summary.json").read_text())
-    jobs = [j for j in summary.get("jobs", []) if j.get("volume") == f"vol{entry['volume']}" and j.get("chapter") == source.parent.name and j.get("format") == "html"]
-    return any(j.get("ok") is True and j.get("returncode") == 0 for j in jobs)
+    return rendered_source_chapter(reviewed_build, entry, implementation) is not None
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--art-index", type=Path, default=Path("/tmp/figures-animation-art-current/index.json"))
     parser.add_argument("--manifest", type=Path, default=BOOKS / "_extensions/mlsysbook-ext/figure-explore/mechanisms/implementations.json")
-    parser.add_argument("--build-root", type=Path, help="Optional successful chapter-build run used only by the disposable preview")
+    parser.add_argument("--build-root", type=Path, help="Optional successful chapter or full-volume run used only by the disposable preview")
     args = parser.parse_args()
     catalog = json.loads((HERE.parent / "animation-catalog/catalog.json").read_text())
     selected = {x["key"]: x for x in json.loads((BOOKS / "_extensions/mlsysbook-ext/figure-explore/mechanisms/selection.json").read_text())}
@@ -81,31 +144,7 @@ def main():
     assets = output / "assets"
     assets.mkdir(parents=True, exist_ok=True)
     figures = []
-    ready = {}
-    if args.build_root:
-        build_root = args.build_root.resolve()
-        build_root.relative_to(BOOKS.resolve())
-        summary = json.loads((build_root / "summary.json").read_text())
-        for job in summary.get("jobs", []):
-            if job.get("ok") is not True or job.get("returncode") != 0 or job.get("format") != "html":
-                continue
-            for original in catalog["figures"]:
-                if original["key"] not in manifest:
-                    continue
-                source = Path(original["source"])
-                if job.get("volume") != f"vol{original['volume']}" or job.get("chapter") != original["chapter"]:
-                    continue
-                chapter = build_root / job["job"] / "output" / source.relative_to("books").with_suffix(".html")
-                if not chapter.is_file():
-                    continue
-                soup = BeautifulSoup(chapter.read_text(), "html.parser")
-                figure = soup.find(id=original["figure_id"])
-                expected = manifest[original["key"]]
-                if figure is None or figure.get("data-mlsys-explore") != expected["name"] or figure.get("data-mlsys-explore-key") != original["key"]:
-                    continue
-                if not any(expected["script"] in x.get("src", "") for x in soup.find_all("script", src=True)):
-                    continue
-                ready[original["key"]] = "/" + chapter.relative_to(BOOKS).as_posix() + "?view=explore#" + original["figure_id"]
+    ready = verified_chapter_links(args.build_root, registry, manifest) if args.build_root else {}
     for original in catalog["figures"]:
         key = original["key"]
         status = "accepted" if key == "vol1:fig-cnn" else "reviewed" if key in reviewed else "implementing" if key in current else "adapt" if key in selected else "static"

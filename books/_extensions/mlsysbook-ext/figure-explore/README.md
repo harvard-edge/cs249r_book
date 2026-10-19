@@ -12,15 +12,16 @@ one causal action per step, and pause after a short guided example. Numerical
 details support the drawing rather than replace it. Static Diagram remains the
 default and the complete print/no-JavaScript fallback.
 
-`mechanisms/implementations.json` selects source-art factories for convolution,
-prefill/decode, quantized multiplication, ring AllReduce, bounded stream
-ingestion, ray evidence epochs, KV paging, FSDP allocation lifetimes, KV
-copy-on-write, shared capture-buffer ownership, activation checkpointing,
-checkpoint staging, context-prefix invalidation, and intersample overshoot.
-Enrollment is not visual acceptance. The
-original-art catalog separates the accepted prototype, new implementations
-awaiting review, existing mechanisms needing adaptation, and static figures.
-Historical tests below apply to their recorded snapshots, not to this new pass.
+`mechanisms/implementations.json` selects the original-art factories for
+computation, memory, communication, coordination, and physical action across
+the four volumes. The current manifest contains 98 original-art implementations:
+84 newly authored modules and 14 retained implementations. The other 639
+cataloged figures remain static. There is no animation quota. The convolution
+prototype retains its separate accepted-prototype label; the remaining reviewed
+implementations use hash-bound records in the original-art catalog.
+Enrollment alone is not acceptance. Source, artwork, module, shared-runtime,
+and timing changes invalidate the relevant current review evidence.
+Historical tests below apply only to their recorded snapshots.
 
 `original-player.js` provides shared stepping, playback, visible keyboard hints,
 and expanded inspection for the new factories. Convolution retains its reviewed
@@ -31,6 +32,21 @@ pause between actions during Play. Neither represents machine execution time.
 Reduced-motion navigation commits the next state immediately, without an
 intermediate animation clock that a visibility pause could interrupt.
 Invalid or missing settings leave the static figure available.
+
+The shared layout keeps the sequence menu and current explanation above the
+playback controls, with the controls and visible N/P/K/R hints beside the
+changing diagram. Only the compact toolbar and step cue remain sticky. The
+native **Example and assumptions** disclosure retains the complete case
+description without pushing the diagram below the controls. Keep essential
+case identity visible in the diagram or its live readout; for example, a
+single-query worked case must not appear to execute a complete matrix.
+Module-specific case selectors belong before the shared toolbar. Diagram-view
+selectors may remain with the artwork.
+
+While an action is moving or paused, stored values and completed results must
+still describe the last committed state. Instructions may describe the next
+endpoint only when they clearly identify it as pending. Keep read-only operand
+selection distinct from a completed accumulation, allocation, or publication.
 
 The compiler binds each replacement to the existing source and artwork hashes,
 its runtime assets, data bundle where present, and the shared player. The browser
@@ -102,11 +118,40 @@ learner readability; this does not constitute student testing. A source-art
 mapping must preserve the illustrated workload and spatial relationships.
 Alternative toy cases must remain explicit supporting examples.
 
-The first source-art batch has passed independent technical and learner-view
-agent review in actual chapter HTML builds. This is not student testing or
-approval of the remaining selected mechanisms. The original-art catalog binds
-those review records to source, artwork, and runtime hashes; stale records
-return to awaiting review.
+The final integrated HTML run is
+`books/_build/parallel/20261020-004205-11342`; all four full-volume HTML jobs
+passed. The 84 new modules have separate current production technical and
+learner-view role records. The retained implementations combine their historical review basis with
+recorded engine evidence and current packaging verification when their own
+module bytes are unchanged. Quantization is an explicit changed-baseline
+exception: its previous review remains historical, and fresh independent
+technical and learner production proof replaces unchanged-module acceptance.
+Current emitted assets are verified separately. The
+original-art catalog binds these records to current source, artwork, runtime,
+and actual owning chapter HTML. Stale records return to awaiting review.
+
+The final packaging preserves source, artwork, shared runtime, and the other
+91 controller implementations byte for byte. Their earlier Chromium/WebKit
+checks are explicitly inherited through matching old/new audit hashes and fresh
+packaging verification. The seven focused controller fixes receive
+fresh focused production retakes in both engines; inherited reports are not
+presented as newly run against the later build.
+
+Chromium and WebKit reports record endpoint traversal, local SVG references,
+keyboard navigation, and static print fallback in desktop/narrow light/dark
+profiles. These finite browser checks do not establish numerical validity or
+continuous correctness at every instant. Technical role reviews, reproducible
+calculations, and mechanism-specific invariants remain separate evidence.
+
+Static output verification covers 14 representative figures across five
+chapters in PDF and EPUB. It is distinct from the complete four-volume HTML
+build and does not assert a fresh four-volume PDF/EPUB review. Existing
+cross-reference and MathML conversion warnings remain in the build logs;
+successful outputs do not establish full-book publication readiness.
+
+The evidence is independent agent and browser review, not actual student
+participation. No human students were recruited and no learning gains were
+measured. Each record retains its reviewed scope and limitations.
 
 Recheck the shared controller and packaged chapter endpoints with:
 
@@ -160,8 +205,9 @@ Keep one short explanation beside the action. Make numerical derivations an
 optional inspection layer attached to the current operation. A separate arithmetic
 worksheet is useful supplementary material, but it does not substitute for an
 animated version of the source diagram. The Diagram view remains complete and
-unchanged for print. The diagram-life review covers all 16 retained mechanisms;
-its proposed revisions are plans, not implemented coverage.
+unchanged for print. The older diagram-life review describes a historical
+16-lesson snapshot and its proposed revisions. It is planning history, not the
+current implementation roster or current production acceptance evidence.
 
 Keep a figure static unless interaction makes its mechanism easier to understand.
 An Explore view earns its place when a reader can follow an actual change in
@@ -189,7 +235,7 @@ caption; the web geometry may change. State any worked-case simplification. Read
 imply measured machine latency. Do not invent counters or hardware effects to
 make a conceptual diagram appear dynamic. There is no animation quota.
 
-## Learner-centered pilot iteration
+## Historical learner-centered pilot iteration
 
 Three simulated learner-perspective reviewers examined convolution, quantized
 arithmetic, and KV paging. No students were recruited, and no learning gains
@@ -224,7 +270,10 @@ understanding or learning gains.
 The final catalog resolves 707 chapter anchors and exactly 16 Explore markers,
 with 691 static entries and clean desktop-light/narrow-dark layouts.
 
-## Selective rollout
+## Historical selective rollout
+
+The counts, builds, and tests in this section describe the earlier selective
+rollout. They do not replace the current 98-implementation scope above.
 
 All 674 highlight-only players have been withdrawn. Two of their figures now
 have substantive convolution and quantization lessons; the other 672 return to
