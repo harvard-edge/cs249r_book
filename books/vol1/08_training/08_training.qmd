@@ -402,6 +402,42 @@ Every later estimate in the chapter starts from how long the run takes, and the 
 
 The iron law of ML systems (principle \ref{pri-iron-law}) supplies that decomposition directly once specialized to training.\index{Training!training-time law}\index{Training-time law!utilization gap} In its multiplicative D·A·M form, a training run processes $\DatasetSize$ tokens (Data). Each token costs roughly $6\Parameters$ forward-and-backward FLOPs (Algorithm), for $\Operations = 6 \cdot \Parameters \cdot \DatasetSize$ total operations. The machine executes those operations at a realized pace of $1/(\PeakRate \times \EfficiencyHw)$ seconds per FLOP (Machine). This training-time form of the iron law, which this chapter shortens to the training-time law, keeps that macroscopic product as the organizing equation so that every optimization technique maps to one of its factors.
 
+```{python}
+#| echo: false
+#| label: measured-utilization-anchors
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEASURED UTILIZATION OF LARGE TRAINING RUNS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @dfn-training-iron-law-training-performance (Significance item).
+# │
+# │ Goal:    Anchor the utilization factor in published large-model runs.
+# │ Show:    Megatron-Turing NLG and PaLM MFU (PaLM Table 3), and Megatron-LM's
+# │          52 percent of peak, which counts recomputed activations.
+# │ How:     Load the cited fractions from Literature.TrainingRuns.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt_percent
+
+# ┌── LEGO ───────────────────────────────────────────────
+class MeasuredUtilizationAnchors:
+    """Published utilization of large training runs, MFU versus percent of peak."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    mtnlg_mfu = float(Literature.TrainingRuns.MtNlgMfu)                   # PaLM Table 3
+    palm_mfu = float(Literature.TrainingRuns.PalmMfu)                     # PaLM Table 3
+    megatron_peak = float(Literature.TrainingRuns.MegatronLm2021PeakFraction)  # counts recomputation
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(mtnlg_mfu - 0.302) < 0.0005, f"Prose says 30.2 percent MFU for MT-NLG, got {mtnlg_mfu}")
+    check(abs(palm_mfu - 0.462) < 0.0005, f"Prose says 46.2 percent MFU for PaLM, got {palm_mfu}")
+    check(megatron_peak > palm_mfu > mtnlg_mfu, "Prose says the recomputation-inclusive figure is the highest.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    mtnlg_mfu_pct_str = fmt_percent(mtnlg_mfu, precision=1, commas=False, style="prose")
+    palm_mfu_pct_str = fmt_percent(palm_mfu, precision=1, commas=False, style="prose")
+    megatron_peak_pct_str = fmt_percent(megatron_peak, precision=0, commas=False, style="prose")
+```
+
 ::: {#dfn-training-iron-law-training-performance .callout-definition title="The training-time law"}
 
 ***The training-time law***\index{Training-time law!definition} expresses training time through the workload's operation count and its effective achieved throughput:
@@ -409,7 +445,7 @@ $$\TrainingTime= \frac{\Operations}{\PeakRate \times \EfficiencyHw}$$ {#eq-train
 
 Here $\Operations$ counts useful model forward-and-backward FLOPs, excluding rematerialization. Additional execution work is reflected in effective throughput. The factor $\EfficiencyHw$ is an effective end-to-end utilization factor, the achieved model-operation rate divided by the relevant hardware peak. Data stalls, communication, synchronization, launch overhead, and inefficient kernels all reduce this factor. Prefetching and overlap can hide part of those costs but do not guarantee their removal.
 
-1.  Significance: In the D·A·M taxonomy, these terms map directly to the three multiplicative factors. The numerator $\Operations = (\text{Samples/Task}) \times (\text{FLOPs/Sample})$ is governed by Data (training token count $\DatasetSize$) and Algorithm (model architecture or compression methods such as pruning and distillation). The Machine factor $\text{Seconds/FLOP} = 1/(\PeakRate \times \EfficiencyHw)$ combines hardware execution units at the chosen numerical precision ($\PeakRate$) with effective systems utilization ($\EfficiencyHw$), the primary engineering target. @narayanan2021 measured 44 to 52 percent of theoretical peak throughput across GPT models trained on A100 clusters. @Sec-model-compression defines the compression techniques; here they serve only to show where such methods enter the accounting.
+1.  Significance: In the D·A·M taxonomy, these terms map directly to the three multiplicative factors. The numerator $\Operations = (\text{Samples/Task}) \times (\text{FLOPs/Sample})$ is governed by Data (training token count $\DatasetSize$) and Algorithm (model architecture or compression methods such as pruning and distillation). The Machine factor $\text{Seconds/FLOP} = 1/(\PeakRate \times \EfficiencyHw)$ combines hardware execution units at the chosen numerical precision ($\PeakRate$) with effective systems utilization ($\EfficiencyHw$), the primary engineering target. Measured runs show how far below peak that factor sits. Counting only useful model arithmetic, Megatron-Turing NLG trained at `{python} MeasuredUtilizationAnchors.mtnlg_mfu_pct_str` of peak and PaLM at `{python} MeasuredUtilizationAnchors.palm_mfu_pct_str` [@chowdhery2022palm]. The `{python} MeasuredUtilizationAnchors.megatron_peak_pct_str` of peak that @narayanan2021 report for Megatron-LM is higher because their count includes the recomputed activations that $\Operations$ excludes. @Sec-model-compression defines the compression techniques; here they serve only to show where such methods enter the accounting.
 2.  Distinction: The training-time law (@eq-training-iron-law) is the macroscopic D·A·M product form of the iron law, folding every non-arithmetic delay into $\EfficiencyHw$. When $\EfficiencyHw$ is low, the unpacked three-term iron law exposes data movement ($\DataVolume/\Bandwidth$), kernel computation, and fixed latency ($\Latency$) separately to diagnose which underlying bottleneck is responsible.
 3.  Common pitfall: A frequent misconception is that $\EfficiencyHw$ is fixed by hardware. It is a pipeline property, so diagnosing which factor dominates requires profiling rather than reading hardware specs.
 
@@ -479,7 +515,7 @@ class GPT2RunTimeEnergy:
     step_energy_j_str = fmt_energy(round(step_energy.to(joule).magnitude) * joule, unit=joule, precision=0, commas=False)
 ```
 
-For GPT-2 XL on the reference H100, the law becomes a schedule. At the accelerator's `{python} ReferenceMachine.h100_peak_str` dense 16-bit peak and a utilization $\EfficiencyHw$ of `{python} GPT2RunTimeEnergy.eta_pct_str`, the high end of what large training runs sustain [@narayanan2021], the run takes about `{python} GPT2RunTimeEnergy.run_days_str` on one accelerator. That is about `{python} GPT2RunTimeEnergy.steps_m_str` steps of `{python} GPT2RunTimeEnergy.step_time_s_str` each over 32 sequences of 1,024 tokens. Time converts directly into energy. Energy is power integrated over time, $\TotalEnergy = \DevicePower \times \TrainingTime$ at constant power, so at the H100's `{python} GPT2RunTimeEnergy.tdp_w_str` thermal design power the run draws about `{python} GPT2RunTimeEnergy.run_energy_kwh_str` at the accelerator alone, about `{python} GPT2RunTimeEnergy.step_energy_j_str` per step. Every technique that shortens the run at constant power removes energy in the same proportion, which is why the utilization factor matters to an energy budget as much as to a schedule.
+For GPT-2 XL on the reference H100, the law becomes a schedule. At the accelerator's `{python} ReferenceMachine.h100_peak_str` dense 16-bit peak and a utilization $\EfficiencyHw$ of `{python} GPT2RunTimeEnergy.eta_pct_str`, a round figure at the high end of what large training runs sustain [@chowdhery2022palm], the run takes about `{python} GPT2RunTimeEnergy.run_days_str` on one accelerator. That is about `{python} GPT2RunTimeEnergy.steps_m_str` steps of `{python} GPT2RunTimeEnergy.step_time_s_str` each over 32 sequences of 1,024 tokens. Time converts directly into energy. Energy is power integrated over time, $\TotalEnergy = \DevicePower \times \TrainingTime$ at constant power, so at the H100's `{python} GPT2RunTimeEnergy.tdp_w_str` thermal design power the run draws about `{python} GPT2RunTimeEnergy.run_energy_kwh_str` at the accelerator alone, about `{python} GPT2RunTimeEnergy.step_energy_j_str` per step. Every technique that shortens the run at constant power removes energy in the same proportion, which is why the utilization factor matters to an energy budget as much as to a schedule.
 
 ::: {.column-margin .margin-pointer}
 ↩ The iron law's first estimate of a training run, the same operation-count-to-days conversion applied to a GPT-3-class model on an accelerator cluster, is established in @sec-introduction-iron-law-ml-systems-c32a.

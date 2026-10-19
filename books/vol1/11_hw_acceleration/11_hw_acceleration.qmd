@@ -3178,6 +3178,11 @@ class RooflineGap:
     bw_growth = (h_h100.memory.bandwidth / h_a100.memory.bandwidth).to_base_units().magnitude
     flops_growth = (h_h100.compute.peak_flops / h_a100.compute.peak_flops).to_base_units().magnitude
     relu_gap = h100_ridge / relu_ai
+    # Idealized roofline gain for the legacy kernel: compute roof on the A100,
+    # bandwidth slope on the H100 (both rates in FLOP/s).
+    legacy_a100_rate = min(a100_fp16_flops, legacy_ai * (flop / byte) * a100_bandwidth)
+    legacy_h100_rate = min(h100_fp16_flops, legacy_ai * (flop / byte) * h100_bandwidth)
+    legacy_gain = (legacy_h100_rate / legacy_a100_rate).to_base_units().magnitude
     dense_matmul_flops = 2 * dense_matmul_dim**3
     dense_matmul_bytes = 3 * dense_matmul_dim**2 * dense_matmul_bytes_per_val
     dense_matmul_ai = dense_matmul_flops / dense_matmul_bytes
@@ -3187,6 +3192,8 @@ class RooflineGap:
     check(h100_ridge > a100_ridge > v100_ridge, f"Ridge points must climb. H100({h100_ridge:.0f}) > A100({a100_ridge:.0f}) > V100({v100_ridge:.0f}).")
     check(abs(b200_ridge / h100_ridge - 1) < 0.1, "Prose says the B200 ridge holds near the H100 level.")
     check(relu_gap >= 1000, f"ReLU gap ({relu_gap:.0f}x) is too small.")
+    check(a100_ridge < legacy_ai < h100_ridge, "Prose says the legacy kernel sits above the A100 ridge and below the H100 ridge.")
+    check(bw_growth < legacy_gain < flops_growth, f"Prose says the legacy gain lies between the bandwidth and compute ratios, got {legacy_gain:.2f}.")
     check(dense_matmul_ai > h100_ridge, f"Large matmul should clear the H100 ridge, got AI={dense_matmul_ai:.0f}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
@@ -3207,6 +3214,7 @@ class RooflineGap:
     dense_matmul_ai_str = fmt(dense_matmul_ai, precision=1, commas=False)
     bandwidth_ratio_mult_str = fmt_multiple(bw_growth, precision=1, commas=False)
     flops_ratio_mult_str = fmt_multiple(flops_growth, precision=1, commas=False)
+    legacy_gain_mult_str = fmt_multiple(legacy_gain, precision=1, commas=False)
     full_util_pct_str = fmt_percent(1.0, precision=0, commas=False, style='prose')
 ```
 
@@ -3553,7 +3561,7 @@ plt.close()
 
 **Metric**: The ridge point $\RooflineRidgePoint = \PeakRate / \Bandwidth$ (FLOP/byte), the number of operations the hardware must perform for every byte loaded to keep its compute units busy.
 
-**Result**: The intensity needed to reach the tensor peak has increased. Under this simple HBM roofline, a kernel with $\ArithmeticIntensity$ = `{python} RooflineGap.legacy_ai_str` FLOP/byte lies above the A100 ridge but below the H100 ridge. If its intensity and implementation remain unchanged, its idealized gain is then closer to the `{python} RooflineGap.bandwidth_ratio_mult_str` bandwidth ratio than the `{python} RooflineGap.flops_ratio_mult_str` peak-compute ratio.
+**Result**: The intensity needed to reach the tensor peak has increased. Under this simple HBM roofline, a kernel with $\ArithmeticIntensity$ = `{python} RooflineGap.legacy_ai_str` FLOP/byte lies above the A100 ridge but below the H100 ridge. If its intensity and implementation remain unchanged, its idealized gain is about `{python} RooflineGap.legacy_gain_mult_str`, between the `{python} RooflineGap.bandwidth_ratio_mult_str` bandwidth ratio and the `{python} RooflineGap.flops_ratio_mult_str` peak-compute ratio, because the kernel moves from the compute roof on the A100 to the bandwidth slope on the H100.
 
 **Systems insight**: Fusion is valuable for low-intensity chains because it can remove intermediate round-trips; it is not automatically the best optimization for every kernel.
 

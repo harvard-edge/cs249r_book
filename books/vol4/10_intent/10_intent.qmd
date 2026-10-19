@@ -1536,7 +1536,75 @@ By linking `parent_belief_digest` directly to the upstream belief record and emi
 ↪ The trajectory record that embeds the lease's digest and answers to its bounds is developed in @sec-planning-trajectory-contract.
 :::
 
-Filled in for the red mug, the admitted lease links directly to the mug-handle belief record by its digest and sensor capture epoch. The target pose designates the 6-DoF mug-handle affordance frame, where localization uncertainty is bounded by the belief record's `{python} IntentLeaseArchetypes.e0_str` initial error envelope, well within the `{python} IntentLeaseArchetypes.r_tol_str` task tolerance. The evidence horizon marks the temporal threshold where unobserved conveyor belt motion causes error growth to intersect this tolerance: `{python} IntentLeaseArchetypes.tau_untracked_str` under open-loop conveyor drift, extending to `{python} IntentLeaseArchetypes.tau_tracked_str` when tracking filters provide qualified updates under residual slip. Kinematically, the lease constrains the manipulator to a `{python} IntentLeaseArchetypes.v_tcp_str` tool-center-point speed ceiling. Because the facility catalog registers no fragile payload profile for this mug, the wrench ceiling is the default profile's, and the controller enforces default joint impedance limits, relying on plant-level sorting rather than online compliance adaptation. A cataloged fragile payload would instead carry an item-specific ceiling, bounded below by the squeeze force that holds the payload through transit (@sec-appendix-control-grasp) and above by its crush limit. Grasping and subsequent handover constitute the target objective, while the MCU retains exclusive authority over the fallback trajectory. The final lease expiration deadline evaluates to the strict minimum of the admitted target horizon (shorter than these evidence-only values once the controller tracking reserve is subtracted), the administrative watchdog timeout, and the physical stopping boundary. Which term binds depends on the administrative lease and the arm's clearance, so a deployment must evaluate it under both horizons.
+```{python}
+#| label: calc-intent-mug-lease-expiry
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MUG LEASE EXPIRY: THE THREE TERMS OF THE EXPIRY BOUND
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: The red-mug lease paragraphs in @sec-intent-lease, evaluating
+# │          @eq-intent-lease-expiry-bound.
+# │
+# │ Goal:    Evaluate the minimum of the evidence horizon, the administrative
+# │          lease, and the stopping deadline for the mug, with and without a
+# │          tracker.
+# │ Show:    Stop distance at the TCP ceiling, the stopping deadline, and which
+# │          term binds in each case.
+# │ How:     Evidence horizons from IntentLeaseArchetypes; stop onset from the
+# │          tick, bus, and brake terms; credible arm deceleration derived from
+# │          the FER handbook's worst-case stopping time over a stop from the
+# │          Cartesian velocity limit; all countdowns start together, as in
+# │          @fig-10-mug-lease-timeline.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check, fmt_acceleration, fmt_latency, fmt_length, fmt_velocity
+
+class MugLeaseExpiry:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    RM = IntentLeaseArchetypes.RM
+    tau_untracked = IntentLeaseArchetypes.tau_ev_untracked
+    tau_tracked = IntentLeaseArchetypes.tau_ev_tracked
+    t_post = IntentLeaseArchetypes.t_arm_onset_after_expiry  # tick + bus + brake onset
+    v_tcp = RM.tcp_speed_limit  # admitted TCP speed ceiling, the worst case at revocation
+    v_cart_max = RM.arm.cartesian_velocity_limit  # FER Cartesian translational velocity limit
+    t_estop = RM.arm.emergency_stop_time  # FER handbook worst case: 3 kg, maximum velocity, 48 V cut
+    # Assumption: that stop began at the Cartesian limit; the handbook states only
+    # "maximum velocity" and reports the stop in joint angles, so a_arm is derived.
+    t_admin = 100.0 * millisecond  # category: chosen (scenario's administrative lease, six wrist-camera frames)
+    d_clear_arm = 300.0 * millimeter  # category: chosen (scenario's verified clearance ahead of the gripper)
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    t_frame = (1.0 / RM.wrist_camera.frame_rate).to(millisecond)
+    # Credible deceleration: the worst-case stop, averaged over a stop from the
+    # Cartesian velocity limit. A lower bound on what the arm delivers, not the
+    # controller's 13 m/s^2 command ceiling.
+    a_arm = (v_cart_max / t_estop).to(meter / second**2)
+    d_stop = (v_tcp * t_post + v_tcp**2 / (2 * a_arm)).to(millimeter)
+    t_stop_deadline = ((d_clear_arm - d_stop) / v_tcp).to(millisecond)
+    expiry_untracked = min(tau_untracked, t_admin, t_stop_deadline)
+    expiry_tracked = min(tau_tracked, t_admin, t_stop_deadline)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(t_admin > 5 * t_frame, "Prose: the administrative lease outlasts several wrist-camera frames")
+    check(abs(a_arm.magnitude - 3.08) < 0.005, f"Prose: credible arm deceleration about 3.1 m/s^2, got {a_arm}")
+    check(a_arm < RM.arm.cartesian_acceleration_limit, "The credible deceleration sits below the controller's command ceiling")
+    check(abs(d_stop.magnitude - 184.35) < 0.01, f"Prose: about 184 mm to stop, got {d_stop}")
+    check(abs(t_stop_deadline.magnitude - 115.65) < 0.01, f"Prose: stopping deadline about 116 ms, got {t_stop_deadline}")
+    check(expiry_untracked == tau_untracked, "Prose: untracked, the evidence horizon binds")
+    check(expiry_tracked == t_admin < t_stop_deadline < tau_tracked, "Prose: tracked, the administrative lease binds before the stopping deadline")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_admin_str = fmt_latency(t_admin, unit=millisecond, precision=0)
+    d_clear_arm_str = fmt_length(d_clear_arm, unit=millimeter, precision=0)
+    a_arm_str = fmt_acceleration(a_arm, unit=meter / second**2, precision=1)
+    v_cart_max_str = fmt_velocity(v_cart_max, unit=meter / second, precision=1)
+    t_estop_str = fmt_latency(t_estop, unit=millisecond, precision=0)
+    d_stop_str = fmt_length(round(d_stop.magnitude) * millimeter, unit=millimeter, precision=0)
+    t_stop_deadline_str = fmt_latency(round(t_stop_deadline.magnitude) * millisecond, unit=millisecond, precision=0)
+```
+
+Filled in for the red mug, the admitted lease links directly to the mug-handle belief record by its digest and sensor capture epoch. The target pose designates the 6-DoF mug-handle affordance frame, where localization uncertainty is bounded by the belief record's `{python} IntentLeaseArchetypes.e0_str` initial error envelope, well within the `{python} IntentLeaseArchetypes.r_tol_str` task tolerance. The evidence horizon marks the temporal threshold where unobserved conveyor belt motion causes error growth to intersect this tolerance: `{python} IntentLeaseArchetypes.tau_untracked_str` under open-loop conveyor drift, extending to `{python} IntentLeaseArchetypes.tau_tracked_str` when tracking filters provide qualified updates under residual slip. Kinematically, the lease constrains the manipulator to a `{python} IntentLeaseArchetypes.v_tcp_str` tool-center-point speed ceiling. Because the facility catalog registers no fragile payload profile for this mug, the wrench ceiling is the default profile's, and the controller enforces default joint impedance limits, relying on plant-level sorting rather than online compliance adaptation. A cataloged fragile payload would instead carry an item-specific ceiling, bounded below by the squeeze force that holds the payload through transit (@sec-appendix-control-grasp) and above by its crush limit. Grasping and subsequent handover constitute the target objective, while the MCU retains exclusive authority over the fallback trajectory.
+
+The lease expires at the earliest of the three terms of @eq-intent-lease-expiry-bound, and the mug record supplies a value for each. The scenario chooses an administrative lease of `{python} MugLeaseExpiry.t_admin_str`, long enough that one dropped wrist-camera frame does not revoke authority, and a verified clearance of `{python} MugLeaseExpiry.d_clear_arm_str` ahead of the gripper. The stopping term needs a deceleration the arm can be relied on to deliver, which is not the controller's command limit. The arm's handbook bounds its worst-case stop at `{python} MugLeaseExpiry.t_estop_str` with the full payload at maximum velocity, measured under the stopping test of EN ISO 10218-1 [@franka2021handbook]. The handbook states only "maximum velocity" and reports the stop in joint angles, so assuming that stop began at the `{python} MugLeaseExpiry.v_cart_max_str` Cartesian limit gives a derived credible deceleration of `{python} MugLeaseExpiry.a_arm_str`. At the `{python} IntentLeaseArchetypes.v_tcp_str` ceiling, that deceleration and the `{python} IntentLeaseArchetypes.t_arm_onset_str` stop onset give a stopping distance of `{python} MugLeaseExpiry.d_stop_str`, so the stopping deadline falls `{python} MugLeaseExpiry.t_stop_deadline_str` after admission. With all three countdowns started together, as in @fig-10-mug-lease-timeline, the `{python} IntentLeaseArchetypes.tau_untracked_str` evidence horizon binds first when the mug is untracked. A tracker stretches the evidence horizon to `{python} IntentLeaseArchetypes.tau_tracked_str`, and the `{python} MugLeaseExpiry.t_admin_str` administrative lease then binds before the `{python} MugLeaseExpiry.t_stop_deadline_str` stopping deadline. Subtracting the controller tracking reserve, which a deployment must still do, can only shorten the admitted target horizon and bring expiry earlier.
 
 This explicit record structure establishes a concrete boundary for automated fault-injection suites. Systems engineers validate the safety controller by injecting unnormalized quaternions, stale capture timestamps, excessive wrench thresholds, and conflicting fallback requests into the IPC stream, verifying that the Safety MCU deterministically rejects invalid proposals across all operational states and timing margins.
 

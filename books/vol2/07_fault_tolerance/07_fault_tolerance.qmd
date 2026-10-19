@@ -772,8 +772,9 @@ No single label captures all of these differences. Reliability decisions require
 # │          @fig-llama3-interruptions.
 # │
 # │ Goal: Show which failures a large training run actually meets.
-# │ Show: GPU components 268 of 419 (~64%), software bugs 54, network 35,
-# │       host components 21; six detected silent data corruptions.
+# │ Show: GPU components 268 of 419 (~64%), software 56 (54 bugs, 2
+# │       dependencies), network 35, unplanned maintenance 32, host
+# │       components 21, unknown (NCCL watchdog) 7; six detected SDCs.
 # │ How: Counts from Literature.Series.Llama3Interruptions, cross-checked
 # │      against Literature.TrainingRuns totals.
 # │
@@ -807,12 +808,19 @@ class InterruptionCauses:
     faulty_gpu = _component(rows, "Faulty GPU")
     hbm = _component(rows, "GPU HBM3 Memory")
     software = _component(rows, "Software Bug")
+    dependency = _component(rows, "Dependency")
     sdc = _component(rows, "Silent Data Corruption")
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(total == total_ref, f"Table 5 counts must sum to the registry total {total_ref}, got {total}.")
     check(0.6 <= gpu_share <= 0.7, f"Prose says GPU components caused about two-thirds, got {gpu_share:.2f}.")
-    check(cats["GPU"] > cats["Dependency"] > cats["Network"] > cats["Host"], "Prose orders GPU > software > network > host.")
+    check(
+        cats["GPU"] > cats["Dependency"] > cats["Network"] > cats["Unplanned Maintenance"] > cats["Host"] > cats["Unknown"],
+        "Prose orders GPU > software > network > maintenance > host > unknown.",
+    )
+    check(set(cats) == {"GPU", "Dependency", "Network", "Unplanned Maintenance", "Host", "Unknown"}, f"Prose names six categories, got {sorted(cats)}.")
+    check(sum(cats.values()) == total, "The categories named in prose must account for every interruption.")
+    check(software + dependency == cats["Dependency"], "Prose splits software into bugs and dependency failures.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     total_str = fmt_int(total)
@@ -823,14 +831,18 @@ class InterruptionCauses:
     faulty_gpu_str = fmt_int(faulty_gpu)
     hbm_str = fmt_int(hbm)
     software_str = fmt_int(software)
+    dependency_str = fmt_int(dependency)
+    software_cat_str = fmt_int(cats["Dependency"])
+    maintenance_str = fmt_int(cats["Unplanned Maintenance"])
+    unknown_str = fmt_int(cats["Unknown"])
     network_str = fmt_int(cats["Network"])
     host_str = fmt_int(cats["Host"])
     sdc_str = fmt_int(sdc)
 ```
 
-Production logs show which of these failures a large run actually meets. During a `{python} InterruptionCauses.days_str`-day period of Llama 3 405B pretraining on `{python} InterruptionCauses.gpus_str` H100 GPUs, Meta traced each of `{python} InterruptionCauses.total_str` unexpected interruptions to a root cause [@dubey2024llama]. Grouped by cause in @fig-llama3-interruptions, GPU components account for `{python} InterruptionCauses.gpu_count_str` of them, about `{python} InterruptionCauses.gpu_share_pct_str`, led by `{python} InterruptionCauses.faulty_gpu_str` faulty GPUs and `{python} InterruptionCauses.hbm_str` HBM memory failures. Software bugs caused `{python} InterruptionCauses.software_str`, network switches and cables `{python} InterruptionCauses.network_str`, and the remaining host hardware, from NICs to power supplies, `{python} InterruptionCauses.host_str` between them. Only `{python} InterruptionCauses.sdc_str` interruptions were attributed to silent data corruption, and that count includes only corruption that was caught. Most fault-tolerance effort therefore goes to frequent, detectable accelerator failures, while the rare silent ones demand a different kind of defense.
+Production logs show which of these failures a large run actually meets. During a `{python} InterruptionCauses.days_str`-day period of Llama 3 405B pretraining on `{python} InterruptionCauses.gpus_str` H100 GPUs, Meta attributed each of `{python} InterruptionCauses.total_str` unexpected interruptions to a root-cause component [@dubey2024llama]. Grouped by cause in @fig-llama3-interruptions, GPU components account for `{python} InterruptionCauses.gpu_count_str` of them, about `{python} InterruptionCauses.gpu_share_pct_str`, led by `{python} InterruptionCauses.faulty_gpu_str` faulty GPUs and `{python} InterruptionCauses.hbm_str` HBM memory failures. Software caused `{python} InterruptionCauses.software_cat_str`, of which `{python} InterruptionCauses.software_str` were bugs and `{python} InterruptionCauses.dependency_str` were failed dependencies. Network switches and cables caused `{python} InterruptionCauses.network_str`, unplanned host maintenance `{python} InterruptionCauses.maintenance_str`, and the remaining host hardware, from NICs to power supplies, `{python} InterruptionCauses.host_str`. The last `{python} InterruptionCauses.unknown_str` were NCCL watchdog timeouts whose underlying cause was never found. Only `{python} InterruptionCauses.sdc_str` interruptions were attributed to silent data corruption, and that count includes only corruption that was caught. Most fault-tolerance effort therefore goes to frequent, detectable accelerator failures, while the rare silent ones demand a different kind of defense.
 
-::: {#fig-llama3-interruptions fig-env="figure" fig-pos="htb" fig-cap="**Root Causes of Training Interruptions**: The 419 unexpected interruptions recorded over 54 days of Llama 3 405B pretraining on 16,384 H100 GPUs, by root-cause component and colored by category. GPU components dominate; silent data corruption appears only where it was detected. Counts are from Table 5 of @dubey2024llama; one percentage in that table (Faulty GPU) disagrees with its count, so shares here are computed from the counts." fig-alt="Horizontal bar chart of 18 root-cause components sorted by count, colored by category. Faulty GPU leads with 148 interruptions, then GPU HBM3 memory 72, software bug 54, network switch or cable 35, host maintenance 32, GPU SRAM memory 19, and GPU system processor 17. The remaining components each caused 7 or fewer, including NIC 7, NCCL watchdog timeouts 7, silent data corruption 6, and GPU thermal interface and sensor 6."}
+::: {#fig-llama3-interruptions fig-env="figure" fig-pos="htb" fig-cap="**Root Causes of Training Interruptions**: The `{python} InterruptionCauses.total_str` unexpected interruptions recorded over `{python} InterruptionCauses.days_str` days of Llama 3 405B pretraining on `{python} InterruptionCauses.gpus_str` H100 GPUs, by root-cause component and colored by category. GPU components dominate; silent data corruption appears only where it was detected. Counts are from Table 5 of @dubey2024llama; one percentage in that table (Faulty GPU) disagrees with its count, so shares here are computed from the counts." fig-alt="Horizontal bar chart of 18 root-cause components sorted by count, colored by category. Faulty GPU leads with 148 interruptions, then GPU HBM3 memory 72, software bug 54, network switch or cable 35, host maintenance 32, GPU SRAM memory 19, and GPU system processor 17. The remaining components each caused 7 or fewer, including NIC 7, NCCL watchdog timeouts 7, silent data corruption 6, and GPU thermal interface and sensor 6."}
 
 ```{python}
 #| echo: false
@@ -865,7 +877,7 @@ for _i, _r in enumerate(_rows):
 ax.set_yticks(range(len(_rows)))
 ax.set_yticklabels([r["component"] for r in _rows], fontsize=9)
 ax.set_xlim(0, 165)
-ax.set_xlabel("Unexpected interruptions in 54 days")
+ax.set_xlabel(f"Unexpected interruptions in {_C.days_str} days")
 ax.legend(
     handles=[Patch(color=c, label=_label.get(k, k)) for k, c in _ccol.items()], fontsize=9, loc="lower right", title="Category", title_fontsize=9
 )

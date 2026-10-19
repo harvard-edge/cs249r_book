@@ -3379,7 +3379,7 @@ The interplay of these four cost terms becomes concrete when evaluating an Image
 # │ How: Calculate total costs for raw data, labeling, storage, and training.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Infrastructure
+from mlsysim import Datasets, Infrastructure
 from mlsysim.core.units import GB, USD, count, hour, month
 from mlsysim.fmt import fmt_percent, fmt_usd, check, fmt_count, fmt_time, fmt_memory
 
@@ -3389,11 +3389,11 @@ class CostBreakdown:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     raw_data_cost = 50000 * USD  # scenario assumption: licensed dataset
-    label_count = 1_200_000 * count  # scenario assumption: images to label
+    label_count = Datasets.ImageNet.training_examples.to(count)  # every training image is labeled
     cost_per_label = Infrastructure.Pricing.Labeling.CrowdHigh.rate / count
     storage_rate = Infrastructure.Pricing.Storage.S3StandardLowPerTbMonth.rate
     gpu_rate = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate
-    storage_size = 150 * GB  # scenario assumption: retained training data
+    storage_size = Datasets.ImageNet.training_archive_size.to(GB)  # retained training archive
     storage_duration = 12 * month  # scenario assumption: retention time
     train_epoch_count = 100
     train_gpu_count = 1  # one H100
@@ -3421,16 +3421,16 @@ class CostBreakdown:
     # Every Amount in the table must be reproducible from the operands printed
     # beside it, so each derived cost is checked against its published rate.
     check(
-        abs(storage_cost.to(USD).magnitude - 36.0) < 1e-9,
-        f"Storage should be 150 GB x $0.02/GB/month x 12 months = $36, got {storage_cost.to(USD).magnitude:.2f}.",
+        abs(storage_cost.to(USD).magnitude - round(storage_size.to(GB).magnitude) * storage_rate.to(USD / GB / month).magnitude * 12) < 0.5,
+        f"Storage must round to the printed 148 GB x $0.02/GB/month x 12 months, got {storage_cost.to(USD).magnitude:.2f}.",
     )
     check(
         train_compute_cost < 0.1 * label_cost,
         f"Prose: even a 30-run campaign's compute stays far below labeling, got {train_compute_cost.to(USD).magnitude:.2f}.",
     )
     check(
-        abs(label_cost.to(USD).magnitude - 60_000.0) < 1e-9,
-        f"Labels should be 1.2M x $0.05 = $60,000, got {label_cost.to(USD).magnitude:.2f}.",
+        abs(label_cost.to(USD).magnitude - 1_281_167 * 0.05) < 0.01,
+        f"Labels should be 1,281,167 x $0.05 = $64,058, got {label_cost.to(USD).magnitude:.2f}.",
     )
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
@@ -3442,9 +3442,10 @@ class CostBreakdown:
     c_total_usd_str = fmt_usd(total_cost, precision=0)
     p_data_str = fmt_percent(p_data, precision=1, commas=False, style='symbol')
     p_compute_str = fmt_percent(p_compute, precision=1, commas=False, style='symbol')
-    n_labels_str = fmt_count(label_count, scale='M', precision=1)
+    n_labels_str = fmt_count(label_count, scale='M', precision=2)
+    n_labels_exact_str = fmt_count(label_count, precision=0, commas=True)
     cb_cost_per_label_str = fmt_usd(cost_per_label.to(USD / count).magnitude, precision=2, commas=False, per="label")
-    storage_size_str = fmt_memory(storage_size, unit=GB, precision=0, commas=False)
+    storage_size_str = fmt_memory(round(storage_size.to(GB).magnitude) * GB, unit=GB, precision=0, commas=False)
     storage_duration_str = fmt_time(storage_duration, month, precision=0, commas=False, style="word")
     cb_storage_rate_str = fmt_usd(storage_rate.to(USD / GB / month).magnitude, precision=2, commas=False, per="GB/month")
     cb_gpu_rate_str = fmt_usd(gpu_rate.to(USD / hour).magnitude, precision=0, commas=False, per="GPU-hour")
@@ -3465,7 +3466,7 @@ class CostBreakdown:
 | **Cost Component**                                                                                                                                                                                                       | **Calculation**                                                                                                                                        |                                        **Amount**                                        |
 |:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------:|
 | **Raw data (`{python} CostBreakdown.n_labels_str` images)**                                                                                                                                                              | Licensed dataset, flat fee                                                                                                                             |                          `{python} CostBreakdown.c_raw_usd_str`                          |
-| **Labels (crowd annotation)**                                                                                                                                                                                            | `{python} CostBreakdown.n_labels_str` $\times$ `{python} CostBreakdown.cb_cost_per_label_str`                                                          |                         `{python} CostBreakdown.c_label_usd_str`                         |
+| **Labels (crowd annotation)**                                                                                                                                                                                            | `{python} CostBreakdown.n_labels_exact_str` $\times$ `{python} CostBreakdown.cb_cost_per_label_str`                                                    |                         `{python} CostBreakdown.c_label_usd_str`                         |
 | **Storage (cloud object store)**                                                                                                                                                                                         | `{python} CostBreakdown.storage_size_str` $\times$ `{python} CostBreakdown.cb_storage_rate_str` $\times$ `{python} CostBreakdown.storage_duration_str` |                         `{python} CostBreakdown.c_store_usd_str`                         |
 | **Training campaign (`{python} CostBreakdown.train_run_count_str`, each `{python} CostBreakdown.train_epoch_count_str` in `{python} CostBreakdown.train_duration_str` on `{python} CostBreakdown.train_gpu_count_str`)** | `{python} CostBreakdown.train_gpu_hours_str` $\times$ `{python} CostBreakdown.cb_gpu_rate_str`                                                         |                         `{python} CostBreakdown.c_train_usd_str`                         |
 | **Total**                                                                                                                                                                                                                |                                                                                                                                                        |                       **`{python} CostBreakdown.c_total_usd_str`**                       |
