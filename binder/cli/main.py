@@ -837,7 +837,7 @@ class MLSysBookCLI:
         """Handle clean command to remove generated build artifacts and caches.
 
         Args:
-            args: Target format or scope ('html', 'pdf', 'epub', 'artifacts', or empty for all).
+            args: Target format or scope ('html', 'pdf', 'epub', 'artifacts', 'workspaces', or empty for all).
 
         Returns:
             True on successful cleanup, False on error.
@@ -851,9 +851,11 @@ class MLSysBookCLI:
                 return self.clean_command.clean_format(target)
             elif target == "artifacts":
                 return self.clean_command.clean_artifacts()
+            elif target == "workspaces":
+                return self.clean_command.clean_workspaces()
             else:
                 console.print(f"[red]❌ Unknown clean target: {target}[/red]")
-                console.print("[yellow]💡 Available: html, pdf, epub, artifacts[/yellow]")
+                console.print("[yellow]💡 Available: html, pdf, epub, artifacts, workspaces[/yellow]")
                 return False
         else:
             # Clean all

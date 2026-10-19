@@ -37,6 +37,7 @@ from rich.text import Text
 
 from ..core.discovery import AmbiguousChapterError, format_volume_display_name
 from ..core.parallel import BuildJob, BuildSession, JobResult, new_run_id, run_jobs
+from ..core.process import interrupts_as_keyboard_interrupt
 from ..core.workspace import take_snapshot
 
 console = Console()
@@ -240,8 +241,10 @@ class DebugCommand:
 
         steps_dir = run_dir / "phase2" / qmd_path.stem
         relative = qmd_path.resolve().relative_to(self.repo_root.resolve())
-        with BuildSession(take_snapshot(self.repo_root), steps_dir, name=f"bisect-{qmd_path.stem}",
-                          run_id=new_run_id(), keep=keep_workspaces) as session:
+        # Signals become KeyboardInterrupt so the session removes its workspace.
+        with interrupts_as_keyboard_interrupt(), BuildSession(
+                take_snapshot(self.repo_root), steps_dir, name=f"bisect-{qmd_path.stem}",
+                run_id=new_run_id(), keep=keep_workspaces) as session:
             failing = self._binary_search_sections(session, chapter, qmd_path.stem, volume,
                                                    format_type, relative)
 

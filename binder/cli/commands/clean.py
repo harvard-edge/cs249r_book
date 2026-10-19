@@ -11,6 +11,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from cli.core.artifacts import clean_build_artifacts
+from cli.core.workspace import WORKSPACE_ROOT, remove_stale_runs
 
 console = Console()
 
@@ -192,6 +193,26 @@ class CleanCommand:
         clean_build_artifacts(self.config_manager.book_dir, console=console)
         return True
 
+    def clean_workspaces(self) -> bool:
+        """Remove build worktrees left by parallel or debug runs that were killed.
+
+        Only runs whose binder process has exited are touched, so a build that
+        is still running keeps its worktrees. Runs kept with
+        ``--keep-workspaces`` are removed too.
+
+        Returns:
+            True (leftovers that cannot be removed are reported, not fatal).
+        """
+        repo_root = self.config_manager.book_dir.parent
+        removed = remove_stale_runs(repo_root, include_kept=True)
+        if removed:
+            console.print(f"[green]✅ Removed {len(removed)} leftover build run(s) from {_rich_escape(str(WORKSPACE_ROOT))}[/green]")
+            for run_dir in removed:
+                console.print(f"[dim]  {_rich_escape(run_dir.name)}[/dim]")
+        else:
+            console.print("[green]✅ No leftover build worktrees[/green]")
+        return True
+
     def print_help(self) -> None:
         """Print the `binder clean` command reference."""
         table = Table(show_header=True, header_style="bold cyan", box=None)
@@ -202,9 +223,11 @@ class CleanCommand:
         table.add_row("pdf", "Clean the active PDF output directory")
         table.add_row("epub", "Clean the active EPUB output directory")
         table.add_row("artifacts", "Clean generated build artifacts using the same native primitive used by pre-commit")
+        table.add_row("workspaces", "Remove build worktrees left by finished --parallel or debug runs (killed or --keep-workspaces)")
         console.print(Panel(table, title=_rich_escape("binder clean [target]"), border_style="cyan"))
         console.print("[dim]Examples:[/dim]")
         console.print("  [cyan]./binder/binder clean[/cyan]            [dim]# full local cleanup[/dim]")
         console.print("  [cyan]./binder/binder clean html[/cyan]       [dim]# clean HTML output only[/dim]")
         console.print("  [cyan]./binder/binder clean artifacts[/cyan]  [dim]# generated-artifact cleanup[/dim]")
+        console.print("  [cyan]./binder/binder clean workspaces[/cyan] [dim]# leftover build worktrees[/dim]")
         console.print()
