@@ -720,8 +720,10 @@ def base(step):
                 fontweight="bold", color=col)
     ab.axvline(K.D_CLEAR_BASE, color=V4["plant"], lw=2, ls="--")
     ab.text(K.D_CLEAR_BASE + 20, 2.55, "1,100", ha="left", fontsize=FS_S, color=V4["plant"])
+    ab.text(0, 2.42, f"gray: delay {K.DELAY_BASE:.1f}\n+ allowances {K.ALLOW_BASE:.0f}",
+            ha="left", va="bottom", fontsize=FS_S - 1, color=V4["plant"], alpha=a)
     ab.set_xlim(0, 1450)
-    ab.set_ylim(-0.5, 2.9)
+    ab.set_ylim(-0.5, 3.45)
     ab.set_yticks([])
     ab.spines["left"].set_visible(False)
     ab.set_xlabel("Stopping budget at 1.5 m/s (mm)", fontsize=FS_S)

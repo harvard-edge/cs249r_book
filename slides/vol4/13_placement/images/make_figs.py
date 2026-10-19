@@ -33,6 +33,8 @@ from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Rectangle  # noq
 
 calcs.main()
 V = calcs.VALUES
+BACKLOG_TX = 88                       # ch Napkin Math 13.1: transactions in one backlog
+BACKLOG_B = f"{calcs.BACKLOG_BYTES:,}"  # ch Napkin Math 13.1: bytes in one backlog
 OUT = Path(__file__).parent
 
 P = {
@@ -265,6 +267,38 @@ def board():
         box(ax, 5.3, 0.35, 6.4, 0.6, "battery and board supply: shared by all",
             P["slate_l"], P["slate"], fs=11, bold=False, lw=1.3)
         save(fig, f"board_step{k}")
+
+
+# ---------------------------------------------------------------------------
+# Shared-SoC memory path (ch 13.3.1, Napkin Math 13.1): one LPDDR5 controller
+# ---------------------------------------------------------------------------
+def socmem():
+    fig, ax = canvas(5.8, 2.2, (0, 11.6), (0, 4.4))
+    box(ax, 0.1, 0.1, 8.25, 4.25, "", "white", P["slate"], rad=0.12, lw=2)
+    ax.text(0.3, 4.02, "Application SoC, unified memory", fontsize=13,
+            fontweight="bold", color=P["slate"], va="center")
+    box(ax, 0.3, 2.95, 2.2, 0.75, "CPU cluster", P["navy_l"], P["navy"], fs=12)
+    box(ax, 2.65, 2.95, 2.8, 0.75, "NPU (proposer)", P["navy_l"], P["navy"], fs=12)
+    box(ax, 5.6, 2.95, 2.55, 0.75, "RT cores (tick)", P["green_l"], P["green"], fs=12)
+    for x in (1.4, 4.05, 6.88):
+        arrow(ax, x, 2.95, x, 2.72, P["slate"], lw=1.4)
+    box(ax, 0.3, 2.2, 7.85, 0.5, "fabric, arbiter, shared last-level cache",
+        P["red_l"], P["red"], fs=12, bold=False, lw=1.3)
+    box(ax, 0.3, 0.3, 7.85, 1.7, "", P["red_l"], P["red"], lw=1.3)
+    ax.text(0.5, 1.68, "One LPDDR5 controller, first come first served", fontsize=12,
+            color=P["red_d"], fontweight="bold", va="center")
+    box(ax, 0.5, 0.5, 0.95, 0.85, "4 KB\nread", P["green_l"], P["green"], fs=11)
+    box(ax, 1.55, 0.5, 1.0, 0.85, "telem.", P["slate_l"], P["slate"], fs=11, bold=False)
+    box(ax, 2.65, 0.5, 1.15, 0.85, "camera", P["slate_l"], P["slate"], fs=11, bold=False)
+    box(ax, 3.9, 0.5, 4.05, 0.85, "weight tile, 64 transactions", P["navy_l"], P["navy"],
+        fs=11)
+    arrow(ax, 8.15, 0.92, 8.85, 0.92, P["slate"], lw=2.0)
+    box(ax, 8.85, 0.3, 2.65, 1.7, "LPDDR5 DRAM", P["slate_l"], P["slate"], fs=12,
+        sub="204 GB/s peak", subfs=11)
+    ax.text(10.18, 3.15, f"{BACKLOG_TX} transactions,\n{BACKLOG_B} B\nserved before\nthe read",
+            ha="center", va="center", fontsize=12, color=P["red_d"], fontweight="bold",
+            linespacing=1.25)
+    save(fig, "socmem")
 
 
 # ---------------------------------------------------------------------------
@@ -577,6 +611,7 @@ if __name__ == "__main__":
     hook()
     budget()
     board()
+    socmem()
     backlog()
     measured()
     stallshare()

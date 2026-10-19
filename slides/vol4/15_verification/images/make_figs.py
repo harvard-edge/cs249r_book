@@ -172,10 +172,10 @@ def refevents():
                     color=BLUE if i == 1 else TEXT, alpha=al)
         if step >= 2:
             g = (c.capture_subtotal(v) - c.f1_bound(v)) * 1e3
-            ax.annotate("", xy=(c.f1_bound(v) * 1e3, 1.42), xytext=(c.capture_subtotal(v) * 1e3, 1.42),
+            ax.annotate("", xy=(c.f1_bound(v) * 1e3, 1.5), xytext=(c.capture_subtotal(v) * 1e3, 1.5),
                         arrowprops=dict(arrowstyle="<->", color=RED, lw=1.8))
-            ax.text((c.f1_bound(v) + c.capture_subtotal(v)) / 2 * 1e3, 1.47, f"{g:.1f} mm",
-                    ha="center", va="bottom", color=RED, fontsize=12, fontweight="bold")
+            ax.text(c.f1_bound(v) * 1e3 - 12, 1.5, f"{g:.1f} mm",
+                    ha="right", va="center", color=RED, fontsize=12, fontweight="bold")
         ax.axvline(c.D_CLEAR * 1e3, color=RED, lw=2, ls="--")
         ax.text(c.D_CLEAR * 1e3 + 15, 2.42, "clear 1,100 mm", ha="left", va="bottom",
                 color=RED, fontsize=11.5, fontweight="bold")

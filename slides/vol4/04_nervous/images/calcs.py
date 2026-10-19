@@ -69,6 +69,7 @@ show("travel in one 336 ms intent evaluation (mm, derived; the chapter prints 50
 show("travel in one 40 ms chunk inference (mm)", f"{V * T_CHUNK_P99:.0f}")
 show("chunk span, 16 setpoints x 25 ms (ms)", f"{H * SETPOINT:.0f}")
 show("setpoints per 50 ms renewal", f"{T_RENEW / SETPOINT:.0f}")
+CAL_WRITE_A = 35.0     # A, test value a diagnostic daemon writes through a calibration port (NS 4.6, illustrative)
 
 # =============================================================================
 # Slide: rate ladder (four tiers)

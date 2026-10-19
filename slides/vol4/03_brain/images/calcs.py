@@ -85,6 +85,7 @@ PATCHES = (224 // 14) ** 2
 show("patches per 224x224 view at patch 14", PATCHES)
 show("three views (tokens)", 3 * PATCHES)
 show("three views + 32 prompt + 16 state", 3 * PATCHES + 32 + 16)
+show("intent model: one view + 32 prompt (tokens)", PATCHES + 32)  # NM 3.1: S = 288
 EMBED_MB = 800 * D_MODEL * 2 / MB
 show("embeddings for S = 800, FP16 (MB)", f"{EMBED_MB:.2f}")
 KV_TOKEN = 2 * N_LAYERS * D_MODEL * 2

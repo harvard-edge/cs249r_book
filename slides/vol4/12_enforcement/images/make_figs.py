@@ -374,7 +374,7 @@ def projection(step):
     yb = K.b - K.a[0] * x
     ax.fill_between(x, yb, -1, color=GREEN_F)
     ax.plot(x, yb, color=GREEN, lw=2.5)
-    ax.text(0.1, 2.75, "admissible", color="#047857", fontsize=12, fontweight="bold")
+    ax.text(0.62, 0.05, "admissible", color="#047857", fontsize=12, fontweight="bold")
     ax.text(0.95, 4.05, "2τ₁ + τ₂ = 5", color="#047857", fontsize=11.5)
     ax.plot([0, K.u[0]], [0, K.u[1]], color=BLUE, lw=2, ls="--")
     ax.plot([K.u[0]], [K.u[1]], "o", color=BLUE, ms=10, zorder=5)

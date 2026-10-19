@@ -18,6 +18,7 @@ Sources, by figure (NS: the rendered chapter, The Nervous System):
   relay         Pilz PNOZ s4 datasheet 1001742-EN-05, Technical details, Times
                 (delay-on de-energisation with E-STOP typ. 10 ms, max. 20 ms); jitter data.
   twoproc       NS 4.2 figure 2 and 4.6 figure 7, redrawn.
+  solewriter    NS 4.6 (actuation authority; 35.0 A calibration-port write, illustrative).
   queue         NS 4.3.2 (event against state messages), new diagram.
   mailbox_meas  data/mailbox_*.npy, measured by the lecture authors (mailbox.c).
   seqlock       NS 4.3.2 figure 4 panel b, redrawn as three cases.
@@ -438,8 +439,8 @@ def lease(step):
                 ha="center", va="center", fontweight="bold")
         ax.annotate("", xy=(172, -0.72), xytext=(90, -0.72),
                     arrowprops=dict(arrowstyle="<->", color=RED_D, lw=1.2))
-        ax.text(131, -0.64, f"{K.LEASE_PATH_MS + K.T_ONSET:.0f} ms = "
-                f"{K.V * (K.LEASE_PATH_MS + K.T_ONSET):.0f} mm at 1.5 m/s", fontsize=FS_S,
+        ax.text(126, -0.64, f"{K.LEASE_PATH_MS + K.T_ONSET:.0f} ms = "
+                f"{K.V * (K.LEASE_PATH_MS + K.T_ONSET):.0f} mm to brake onset", fontsize=FS_S,
                 color=RED_D, ha="center", va="bottom", fontweight="bold", zorder=5,
                 bbox=dict(fc="white", ec="none", pad=0.5))
     ax.set_yticks([yP, yA, yL, yD])
@@ -706,6 +707,40 @@ def bus():
     save_slot(fig, "bus")
 
 
+# ---------------------------------------------------------------- sole writer
+def solewriter(step):
+    """NS 4.6 (actuation authority) and the 35.0 A calibration write (NS 4.6 example)."""
+    w, h = 14.6, 4.6
+    fig, ax = canvas(w, h)
+    box(ax, 0.1, 3.3, 4.0, 1.2, "Host proposer\n(application processor)", fc=NAVY_L, ec=NAVY)
+    arrow(ax, 2.1, 3.3, 2.1, 2.65, BLUE, ls="--")
+    box(ax, 0.1, 1.65, 4.0, 1.0, "Mailbox: base 0 m/s", fc="white", ec=GREEN)
+    arrow(ax, 4.1, 2.15, 5.0, 2.15, GREEN_D)
+    box(ax, 5.0, 1.65, 3.4, 1.0, "Permission tick\n(safety MCU)", fc=GREEN_L, ec=GREEN_D, lw=1.6)
+    arrow(ax, 8.4, 2.15, 9.4, 2.15, GREEN, lw=2.2)
+    ax.text(8.9, 2.3, "sole\nwriter", fontsize=FS_S, color=GREEN_D, fontweight="bold",
+            ha="center", va="bottom")
+    box(ax, 9.4, 1.3, 5.1, 1.7, "Drive registers\ncurrent reference, PWM,\nbridge enable",
+        fc=SLATE_L, ec=SLATE, r=0.0)
+    arrow(ax, 11.95, 1.3, 11.95, 0.95, SLATE, lw=2)
+    box(ax, 9.4, 0.15, 5.1, 0.8, "Drive-wheel motors", fc="white", ec=SLATE, r=0.0)
+    ax.text(0.1, 1.15, "Every admitted motion passed the tick's checks.", fontsize=FS_S,
+            color=GREEN_D, fontweight="bold", va="center")
+    a2 = 1.0 if step >= 2 else 0.0
+    p = FancyBboxPatch((5.0, 3.4), 3.4, 1.0, boxstyle="round,pad=0,rounding_size=0.08",
+                       fc=RED_L, ec=RED, lw=1.4, alpha=a2)
+    ax.add_patch(p)
+    ax.text(6.7, 3.9, "Diagnostic daemon\n(calibration port)", ha="center", va="center",
+            fontsize=FS, color=RED_D, alpha=a2, linespacing=1.15)
+    ax.add_patch(FancyArrowPatch((8.4, 3.9), (11.2, 3.0), arrowstyle="-|>", mutation_scale=10,
+                                 color=RED, lw=1.8, ls="--", shrinkA=0, shrinkB=0, alpha=a2))
+    ax.text(10.0, 3.95, f"writes {K.CAL_WRITE_A:.1f} A directly", fontsize=FS, color=RED_D,
+            fontweight="bold", va="bottom", alpha=a2)
+    ax.text(0.1, 0.45, "Mailbox still reads 0 m/s; no check saw the write.", fontsize=FS_S,
+            color=RED_D, fontweight="bold", va="center", alpha=a2)
+    save_slot(fig, f"solewriter_step{step}")
+
+
 if __name__ == "__main__":
     for s in (1, 2):
         rate_ladder(s)
@@ -713,6 +748,7 @@ if __name__ == "__main__":
         mailbox_meas(s)
         budget(s)
         leaserule(s)
+        solewriter(s)
     for s in (1, 2, 3):
         phase(s)
         twoproc(s)

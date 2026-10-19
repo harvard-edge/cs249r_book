@@ -503,7 +503,7 @@ def latch_bars():
             ax.text(f / 2, y, f"{f:.1f} N", va="center", ha="center", fontsize=15, fontweight="bold", color="white")
         ax.text(-4, y, lab, va="center", ha="right", fontsize=14, color=TEXT, fontweight="bold", linespacing=1.0)
     ax.axvline(c.F_FLOOR, color=RED, lw=2, ls="--")
-    ax.text(c.F_FLOOR, 2.55, "100 N declared floor", color=RED, fontsize=14, ha="center", va="bottom",
+    ax.text(c.F_FLOOR + 5, 2.55, "100 N declared floor", color=RED, fontsize=14, ha="left", va="bottom",
             fontweight="bold")
     ax.set_xlim(0, 290)
     ax.set_ylim(-0.5, 2.95)
