@@ -66,6 +66,8 @@ def get(title, outdir, name):
     ext = {"image/png": ".png", "image/jpeg": ".jpg"}.get(ii.get("mime"), ".jpg")
     if url.lower().endswith(".png"):
         ext = ".png"
+    # A name given with an image extension keeps one extension, not two.
+    name = re.sub(r"\.(jpe?g|png|gif|svg|webp)$", "", name, flags=re.I)
     out = Path(outdir)
     out.mkdir(parents=True, exist_ok=True)
     dest = out / f"{name}{ext}"
