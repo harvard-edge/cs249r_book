@@ -1,0 +1,287 @@
+chapter: 02_foundation_model
+lecture: "02"
+title: "The Foundation Model"
+subtitle: "One model call, its contract, and its cost"
+layer: model
+locator: origin
+minutes: 75
+notes_minutes: 71
+core_minutes: 58.5
+target_ideas: 28
+thesis: "A model call is a token-bounded proposal across an untrusted boundary, so it needs a contract the runtime checks, and its time and price are set mostly by output length and by the input the trajectory resends."
+
+hook:
+  minutes: "0-4"
+  setup: "War Story 2.1, redrawn from the public postmortem: three serving-side bugs between August 5 and September 12, 2025 (routing to long-context servers, 0.8% of one model's requests at first and 16% at the worst hour on August 31; a server misconfiguration that corrupted output, August 25 to September 2; a miscompiled approximate top-k, August 26 to September 12). Requests and weights were unchanged; about 30% of active coding-agent users met at least one misrouted request."
+  question_to_class: "Requests and weights did not change. Which check in an agent runtime would have noticed? A) schema check B) HTTP status C) a test of the output D) temperature 0"
+  payoff: "C. The corrupted replies finished normally and parsed, so the status and the schema passed; temperature 0 does not help because the serving path computes the logits. The synthesis returns with the full list: status and schema show nothing, a serving-configuration log locates the path, external tests see the wrong tokens, recorded responses replay the failure."
+  sources:
+    - "Anthropic, 'A postmortem of three recent issues', September 2025, https://www.anthropic.com/engineering/a-postmortem-of-three-recent-issues (dates and shares read from the page text; read 2026-10-18)."
+    - "The Foundation Model, War Story 2.1 (§2.4.3)."
+
+recall: "Lecture 1, close your notes: the repair agent's 30 steps at 99% each finish 74.0% of the time (horizon compounding, calcs.py); a $2.10 attempt accepted 40% of the time costs $5.25 per accepted task (Napkin Math 1.2). The H·S·A locator shows one call at the origin."
+
+driving_question: "Why does a capable model still need a precise contract around every call?"
+
+goals:
+  - "Separate what the model proposes from what the runtime executes, and admit a request by its full token count."
+  - "Show how temperature and top-p reshape candidates, and why only a recorded call replays."
+  - "Read a call's status first, and name the one property each check certifies."
+  - "Estimate a call's time from its output length, and the input a trajectory resends."
+
+running_example: "The repair agent's first inspection call (Lighthouse 1.1), read_file('src/pool.py'), exactly as the chapter's Listing 1 states it, run for real on Qwen2.5-Coder-0.5B-Instruct (revision ea3f247) on a laptop CPU by images/run_model.py. Real artifacts from that run: the serialized wire text (176 tokens against 23 of message text), a completed, schema-valid call naming an invented path '/path/to/repair/workspace/file.txt' in a Markdown fence (35 tokens, end of sequence), the same call cut at 24 tokens mid-path (length), next-token probabilities at the path position (path 34.6%, C 16.3%, src 11.3% at T=1; 69.2/15.4/7.4% at T=0.5; top-p 0.90 keeps 32 tokens), logits shifted by batching (150,078 of 151,936 changed, max 3.9e-5 in 32-bit), and prefill and decode timings (1.00 ms per prompt token, 35.1 ms per output token). The chapter's scenario numbers carry the worked examples (Napkin Math 2.1 to 2.3, Systems Perspective 2.1)."
+
+segments:
+  - name: Boundary
+    divider_question: "Who acts on a model's output, and does the request fit?"
+    read: "§2.2, §2.3"
+    concept_questions: [1, 2, 3, 4]
+    land: "The model proposes and the runtime decides; a request is admitted by its full serialized token count with the reply reserved."
+    minutes: 15
+  - name: Generation
+    divider_question: "Why do repeated calls differ, and what replays exactly?"
+    read: "§2.4"
+    concept_questions: [5, 6, 7]
+    land: "Sampling reshapes candidates without testing them, and only a recorded response replays exactly."
+    minutes: 12.5
+  - name: Contract
+    divider_question: "How does the runtime know a whole candidate arrived?"
+    read: "§2.5"
+    concept_questions: [8, 9]
+    land: "The status says whether a complete candidate arrived, and nothing else; only COMPLETED enters the candidate path."
+    minutes: 9.5
+  - name: Checks
+    divider_question: "What does each check on a candidate prove?"
+    read: "§2.6, §2.7"
+    concept_questions: [10, 11, 12]
+    land: "Each check certifies one property; self-review adds none, and a grammar mask guarantees syntax only for a completed reply."
+    minutes: 10.5
+  - name: Cost
+    divider_question: "What sets a call's time, and what does a trajectory resend?"
+    read: "§2.8, §2.9"
+    concept_questions: [13, 14, 15]
+    land: "One output token costs about 295 prompt tokens of service time, resent history grows with the square of the horizon, and output formats are compared on accepted repairs under one budget."
+    minutes: 12
+
+concept_questions:
+  - q: "Who acts on a model's output?"
+    picture: "boundary_step1-3: model and service emit a proposal; runtime validates, authorizes, executes, observes"
+    numbers: "One rejected proposal costs one model call and no change to the world (Definition 2.1)."
+    example: "read_file('src/pool.py'); ../../etc/passwd fails authorization"
+    read: "§2.2"
+  - q: "What does a real model actually return for the repair request?"
+    picture: "Real output card: valid JSON, invented path, Markdown fence instead of tool-call tags"
+    numbers: "35 tokens, end of sequence (images/run_model.py)"
+    example: "Fail-plausible fault (Lecture 1)"
+    read: "§2.2.2"
+  - q: "How many tokens does the request really hold?"
+    picture: "Real serialized wire text with framing grayed; real cl100k tokenizer output"
+    numbers: "176 wire tokens against 23 of message text, 153 framing (derived); flush line 5 tokens, indented 6; src/pool.py 4 tokens"
+    example: "Chat template with tools=[read_file]; tiktoken cl100k_base"
+    read: "§2.3.1"
+  - q: "When is a request admitted?"
+    picture: "admit_step1-3 stacked bars against an 8,192 window"
+    numbers: "Ceiling 7,168; 1,168 to spare; with a 2,048-token image 9,072, 880 over; reserve halved still 368 over (Checkpoint 2.1)"
+    example: "Dashboard screenshot attached to the repair request"
+    read: "§2.3.2, §2.3.3"
+  - q: "What do temperature and top-p do to a real distribution?"
+    picture: "probs_step1-3: real top-8 probabilities at the path position, T=1 and T=0.5, top-p size"
+    numbers: "path 34.6% to 69.2%; src (the named file) 11.3% to 7.4%; top-p 0.90 keeps 32 tokens"
+    example: "Greedy picks 'path' and invents a file"
+    read: "§2.4.2"
+  - q: "How much mass does halving temperature move?"
+    picture: "nm21_step1-2"
+    numbers: "Napkin Math 2.1: 78.4% to 95.0%; tail 21.6% to 5.0% (4.3x); top-p keeps 2 tokens, renormalized 81.8/18.2%"
+    example: "Hypothetical logits [12, 10.5, 9, 6, 3]"
+    read: "§2.4.2"
+  - q: "Why does a served call not replay?"
+    picture: "Measured batch table; the postmortem's top-k reproduction code"
+    numbers: "150,078 of 151,936 logits changed (98.8%), max 3.9e-5 in 32-bit, 0.25 in bf16; approximate top-k missed the max for every index >= 10,240 of 12,000"
+    example: "War Story 2.1 kernel bug"
+    read: "§2.4.3"
+  - q: "Why must the status travel with the payload?"
+    picture: "rmrf diagram; real completed and truncated calls side by side"
+    numbers: "Completed after 35 tokens; truncated at 24 tokens mid-path"
+    example: "rm -rf /tmp/scratch/cache_dir against rm -rf /tmp/scratch"
+    read: "§2.5"
+  - q: "What may the runtime do with each status?"
+    picture: "Seven-status table and the quarantining code (Listing 3)"
+    numbers: "Streaming rejection at step 96 of 4,096 skips up to 4,000 steps, 84.3 s at 21.075 ms (notes)"
+    example: "TRANSPORT_FAILURE leaves the remote outcome unknown (Birrell and Nelson 1984)"
+    read: "§2.5.2, §2.5.3"
+  - q: "What does each check certify?"
+    picture: "ladder_step1-4"
+    numbers: "Table 3 layers"
+    example: "A passing single-threaded test says nothing about the pool race"
+    read: "§2.6.1, §2.6.3"
+  - q: "Does self-review add evidence?"
+    picture: "huang_step1-2 (published data)"
+    numbers: "GPT-4 after two self-review rounds: GSM8K 95.5 to 89.0, CommonSenseQA 82.0 to 80.0, HotpotQA 49.0 to 43.0; stopped by true label: 97.5, 85.5, 59.0 (Huang et al. 2024, Tables 2 and 3)"
+    example: "The oracle shows the gain comes from external evidence"
+    read: "§2.6.2"
+  - q: "What does a grammar mask guarantee?"
+    picture: "mask: real candidates all legal inside a string; illegal raw control characters"
+    numbers: "All 8 real candidates kept; table 4"
+    example: "A truncated masked prefix is still TRUNCATED; add an unknown variant to avoid forced guesses (notes)"
+    read: "§2.7"
+  - q: "Why does output length set a call's time?"
+    picture: "Accelerator package photo with HBM stacks; equation 7 and 8 floors"
+    numbers: "71.35 us per prompt token, 21.075 ms per output token, ratio 295; first repair turn 0.571 s against 4.215 s, output 2.4% of tokens and 88.1% of time"
+    example: "Reference deployment: 70.6B, 8-bit, 1,979 TFLOP/s, 3.35 TB/s"
+    read: "§2.8.1, §2.8.2"
+  - q: "Does real traffic follow the same split?"
+    picture: "laptop and azure bar plots"
+    numbers: "Laptop 0.5B: 1.00 ms against 35.1 ms per token (ratio 35, 25 to 41 across runs); Azure 2023 code trace: median 1,469 prompt and 13 output tokens, input 98.7% of tokens, output 80% of floor time (derived)"
+    example: "Patel et al. 2024 trace"
+    read: "§2.8"
+  - q: "What does a 30-turn trajectory resend, and which output format meets a deadline?"
+    picture: "resend_step1-3; deadline_step1-2"
+    numbers: "892,500 against 51,500 (17.3x); whole file 39.58 s against local edit 2.27 s under 15 s; yield 0.57"
+    example: "Napkin Math 2.2 and 2.3"
+    read: "§2.8.3, §2.9"
+
+concept_trace:
+  - concept: "Proposal boundary"
+    frame: "A model call returns a proposal; the runtime acts on it"
+    shows: "boundary_step1-3 build: proposal card with no authority, runtime validate, authorize, execute, observation"
+  - concept: "Token-measured admission"
+    frame: "Admission counts the prompt and reserves the reply"
+    shows: "S <= S_max - K_max with admit_step1-3 bars; the real wire text on the frame before shows what S counts"
+  - concept: "Sampling shapes candidates, not correctness"
+    frame: "Temperature sharpens the guess the model already prefers"
+    shows: "Real probabilities at the path position: the named file 'src' falls from 11.3% to 7.4% when T halves"
+  - concept: "Recorded calls replay, served calls do not"
+    frame: "Sharing a batch changed 98.8% of one request's logits"
+    shows: "Measured logit table alone against batched, and the log-and-replay card"
+  - concept: "Invocation contract"
+    frame: "The runtime reads the status before the payload"
+    shows: "Seven-status table and the quarantining code; preceded by the rm -rf truncation diagram"
+  - concept: "Checks certify named properties"
+    frame: "Each check certifies one named property"
+    shows: "ladder_step1-4 build (certifies, leaves open); Bayes estimate frame shows the residual 14.37%"
+  - concept: "Output-bound call latency"
+    frame: "Every decode step reads all the weights from memory"
+    shows: "HBM package photo, equation 7 floors, the 295 ratio"
+  - concept: "Quadratic resend and prefix reuse"
+    frame: "How much input does a 30-turn repair resend?"
+    shows: "resend_step1-3: quadratic re-sent curve to 892.5k against linear fresh prefill 51.5k"
+  - concept: "Grammar-constrained decoding"
+    frame: "A grammar mask keeps every legal token, including wrong paths"
+    shows: "mask figure over the real candidates, illegal tokens at minus infinity"
+  - concept: "Interface choice under matched budgets"
+    frame: "A whole-file edit misses a 15 s deadline that a diff meets"
+    shows: "deadline_step1-2 against the 15 s line, yield 0.57, every trial in the denominator"
+
+worked_examples:
+  - name: "Napkin Math 2.1: temperature and truncation on the same logits"
+    steps: ["Given logits [12, 10.5, 9, 6, 3]", "T=1: 78.4% on v1", "T=0.5: 95.0%; tail 21.6% to 5.0% (4.3x)", "Top-p 0.90 keeps v1, v2 (0.9589), renormalized 81.8/18.2%", "Meaning: temperature concentrates mass; it does not test correctness"]
+  - name: "Systems Perspective 2.1: what a passing verdict leaves"
+    steps: ["Given 18% defective, false accept 0.65, valid pass 0.85", "Bayes: 0.117 / (0.117 + 0.697)", "14.37% of passes defective", "Halve false accept: 7.7%", "Meaning: choose a check by its false-accept rate; rerunning the same check buys nothing"]
+  - name: "Napkin Math 2.2: the price of an append-only trajectory"
+    steps: ["Given 30 turns, 8,000 first prompt, 1,500 per turn, 200 output", "892,500 input tokens resent (99.3% of tokens)", "Fresh prefill with reuse 51,500 (17.3x)", "Prefill work 63.68 s to 3.67 s; decode 126.45 s unchanged", "60 turns: 3.5x against 1.9x"]
+  - name: "Napkin Math 2.3: a repair representation under an invocation deadline"
+    steps: ["Given 15 s deadline, reference floors", "Whole file 39.58 s (98.5% decode)", "Local edit 2.27 s (17.5x faster, 6.6x margin)", "Yield 0.95 x 0.60 = 0.57", "Meaning: the deadline filters first; applicability decides when it relaxes"]
+
+active_learning:
+  - at_minute: 0.5
+    type: predict
+    prompt: "Same request, same weights: what would notice?"
+    answer: "C, a test of the output; status and schema passed because replies were well formed."
+  - at_minute: 4
+    type: retrieval
+    prompt: "30 steps at 99%; $2.10 attempt accepted 40%"
+    answer: "74.0%; $5.25"
+  - at_minute: 17.5
+    type: estimate
+    prompt: "Does halving the reply reserve admit the image?"
+    answer: "No: 6,000 + 2,048 + 512 = 8,560, 368 over; a smaller reserve risks TRUNCATED replies."
+  - at_minute: 22
+    type: predict
+    prompt: "How much mass does halving temperature move?"
+    answer: "B, 95.0%; tail 21.6% to 5.0%."
+  - at_minute: 29
+    type: concept_question
+    prompt: "True or false: greedy decoding replays a call?"
+    answer: "False: batch shape and serving changes move the logits; log the configuration and replay recorded responses."
+  - at_minute: 35.5
+    type: diagnose
+    prompt: "Which status, and which next action?"
+    answer: "Deadline: TRANSPORT_FAILURE, outcome unknown; max tokens: TRUNCATED, larger allowance; refusal: REFUSED; missing file: COMPLETED, authorization or a fresh read."
+  - at_minute: 43
+    type: estimate
+    prompt: "How many passing patches are still defective?"
+    answer: "14.37%; 7.7% with false accept halved; common error 11.7% (joint probability)."
+  - at_minute: 52
+    type: predict
+    prompt: "How much input does a 30-turn repair resend?"
+    answer: "C, 892,500; with prefix reuse 51,500 (17.3x)."
+  - at_minute: 58.5
+    type: retrieval
+    prompt: "Which records would have caught the bugs?"
+    answer: "Not status or schema; serving-config log, external tests, recorded responses."
+
+open_questions:
+  - "A provider's serving path can change under a pinned model name. What evidence should a provider publish so an agent runtime can tell?"
+  - "Grammar masks remove syntax errors at a per-token cost. When should a runtime prefer streaming rejection instead? (Exercise 6)"
+  - "Reasoning models spend hidden output tokens. Should the runtime or the provider set that budget?"
+
+more_examples:
+  - "Anthropic 2025 postmortem (War Story 2.1), including the approximate top-k reproduction code."
+  - "Lighthouse 2.1, support agent: 8,192-token prompt 0.58 s prefill, 150-token reply 3.16 s, about 47 tokens/s; 6,144-token shared prefix leaves 0.15 s fresh prefill (calcs.py; chapter rounds the reply to 3.2 s)."
+  - "Exercise 9, remediation agent: --replicas=12 truncated to --replicas=1 still parses."
+  - "Azure LLM inference trace 2023 (Patel et al., ISCA 2024)."
+  - "Hugging Face transformers TopPLogitsWarper source."
+
+left_to_reading:
+  - concept: "Multimodal token counting details (§2.3.3)"
+    why: "Shown as one bar in the admission build; detail better read."
+  - concept: "Phase timing, TTFT and TPOT accounting (§2.8.1, equation 6)"
+    why: "Lecture uses the per-token floors; the five-phase decomposition is read."
+  - concept: "Learned formatting versus runtime masks (§2.7.3)"
+    why: "One line in the mask notes; fine-tuning is Lecture 16's."
+
+closing:
+  return_to_hook: "Synthesis frame: status and schema show nothing for the 2025 bugs; a serving-configuration log, external tests, and recorded responses do."
+  read_and_practice: ["§2.2 to §2.9", "Checkpoints 2.1 to 2.4", "Napkin Math 2.1 to 2.3 by hand", "Exercises 1, 4, 9", "images/run_model.py as a lab"]
+  further_reading:
+    - cite: "Birrell and Nelson, Implementing Remote Procedure Calls, 1984"
+      url: "https://doi.org/10.1145/2080.357392"
+      why: "Why a timeout leaves the remote outcome unknown."
+    - cite: "Holtzman et al., The Curious Case of Neural Text Degeneration, ICLR 2020"
+      url: "https://arxiv.org/abs/1904.09751"
+      why: "Nucleus sampling."
+    - cite: "Willard and Louf, Efficient Guided Generation for Large Language Models, 2023"
+      url: "https://arxiv.org/abs/2307.09702"
+      why: "Grammar masks compiled to automata."
+    - cite: "Pope et al., Efficiently Scaling Transformer Inference, MLSys 2023"
+      url: "https://arxiv.org/abs/2211.05102"
+      why: "Prefill and decode floors."
+    - cite: "Huang et al., Large Language Models Cannot Self-Correct Reasoning Yet, ICLR 2024"
+      url: "https://arxiv.org/abs/2310.01798"
+      why: "Measured self-correction without external evidence."
+  bridge: "Lecture 3, Test-Time Compute: when is another token, candidate, check, or model call worth its cost?"
+
+callbacks:
+  - {lecture: "1", concept: "Horizon compounding; Cost per accepted task", where: "Recall frame (slide, credit, note)"}
+  - {lecture: "1", concept: "H·S·A exposures (origin)", where: "Recall frame note"}
+  - {lecture: "1", concept: "Six-phase turn lifecycle", where: "Boundary frame note"}
+  - {lecture: "1", concept: "Fail-plausible fault", where: "Real-call frame note"}
+  - {lecture: "1", concept: "Closure evidence levels", where: "Check-ladder frame note"}
+  - {lecture: "3", concept: "Verifier precision; Allocation axes (diversity spent by sampling)", where: "Bayes frame note; NM 2.1 frame note; next-lecture frame"}
+  - {lecture: "4", concept: "Working-set partition", where: "Wire frame note; resend frame note"}
+  - {lecture: "5", concept: "KV footprint and resident fit; Radix prefix cache", where: "Admission frame note; resend frame note"}
+  - {lecture: "7", concept: "Complete mediation; Settlement before retry (retrying uncertain actions)", where: "Boundary frame note; diagnose frame note"}
+  - {lecture: "11", concept: "Record and replay", where: "Batch-logits frame note"}
+  - {lecture: "12", concept: "Recovery decision order", where: "Status frame note; diagnose frame note"}
+  - {lecture: "13", concept: "Matched-budget evaluation; Grader calibration", where: "Deadline frame note; self-review frame note"}
+  - {lecture: "19", concept: "Prefix-cache pricing and compaction payback", where: "Resend frame note"}
+
+coverage:
+  primary_taught: ["Proposal boundary", "Token-measured admission", "Sampling shapes candidates, not correctness", "Recorded calls replay, served calls do not", "Invocation contract", "Checks certify named properties", "Output-bound call latency", "Quadratic resend and prefix reuse"]
+  primary_left_to_reading: []
+  secondary: ["Grammar-constrained decoding", "Interface choice under matched budgets"]
+
+notes_for_author:
+  - "images/run_model.py needs torch, transformers, and tiktoken (not in the book venv); it was run once and its output is data/model_runs.json. Laptop timings vary by load (ratio 25 to 41 across runs)."
+  - "The 0.5B model invented a path instead of src/pool.py; the deck uses that as a real fail-plausible example and says a frontier model would more often name the right file."
+  - "Lighthouse 2.1 states 3.2 s for the 150-token reply; calcs.py gives 3.16 s at 21.075 ms."
