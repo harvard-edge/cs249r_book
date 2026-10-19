@@ -106,7 +106,7 @@ The transition from single-machine to fleet-scale reasoning requires extending t
 
 ## Numbers Every Fleet Engineer Should Know {#sec-appdx-fleet-foundations-numbers-to-know}
 
-Just as single-machine analysis depends on a set of core numbers, fleet-scale engineering is governed by a set of predictable ratios and scaling behaviors. The single-machine numbers still apply within each node, but a new set of numbers governs the spaces between nodes. Hardware ratios vary with generation and provisioning; failure-rate scaling also depends on the assumed failure model. These reference values provide sanity checks while the stated models explain how to substitute different assumptions.
+Crossing a server chassis boundary drops per-direction interconnect bandwidth by nearly an order of magnitude from intra-node NVLink to inter-node InfiniBand, while scaling a job from one node to thousands of accelerators shrinks the expected interval between hardware failures from years to hours. Just as single-machine analysis depends on a set of core numbers within each node, fleet-scale engineering is governed by the ratios and scaling behaviors that operate between nodes. Because hardware ratios shift across generations and failure rates depend on the assumed fault model, the reference values below provide baseline sanity checks while the accompanying equations show how to substitute different system assumptions.
 
 ::: {#psp-appendix-fleet-node-level-numbers .callout-perspective title="Node-level numbers for fleet reasoning"}
 
@@ -242,7 +242,7 @@ class FleetInvariantNumbers:
 
 ### Invariant scaling ratios {.unnumbered}
 
-These relationships expose architectural trade-offs and model assumptions across the fleet. Because hardware ratios shift across generations, their numerical values must be re-evaluated for the target system.
+Three structural relationships govern how bandwidth, reliability, and collective communication behave as a cluster grows: the intra-to-inter-node bandwidth gap, the $1/\RequiredComponentCount$ scaling of system MTBF, and the asymptotic per-GPU volume of Ring AllReduce. Because hardware ratios shift across generations, their numerical values must be re-evaluated for each target system.
 
 #### Network hierarchy ratio {.unnumbered}
 
@@ -264,7 +264,7 @@ The bandwidth-optimal Ring AllReduce algorithm transfers $2(\AcceleratorCount-1)
 
 ### Communication numbers {.unnumbered}
 
-Communication defines the boundaries of parallelism. These tables quantify the bandwidth and latency at each tier of the network hierarchy, from the fastest intra-node links to the slowest wide-area connections. For any distributed ML operation, the relevant question is which network tier its communication crosses.
+Whether a parallelism strategy can exchange activations on every layer or must amortize gradient updates across microbatches depends on which tier of the network hierarchy its traffic crosses. Each step down the hierarchy trades lower per-link bandwidth and higher one-way latency for larger physical reach across racks and data centers.
 
 ```{python}
 #| echo: false
@@ -316,7 +316,7 @@ class FleetCommNumbers:
     )
 ```
 
-@Tbl-fleet-bandwidth-hierarchy lists the bandwidth tiers that determine where tensor, pipeline, and data-parallel traffic should stay local. Each row pairs a representative interconnect with its typical role in the cluster hierarchy.
+The bandwidth cliff between intra-node fabrics and scale-out network ports decides where tensor, pipeline, and data-parallel traffic must stay local (@tbl-fleet-bandwidth-hierarchy).
 
 | **Interconnect**                                           |                    **Bandwidth**                    | **Typical role**                            |
 |:-----------------------------------------------------------|:---------------------------------------------------:|:--------------------------------------------|
@@ -444,7 +444,7 @@ Failure is no longer an edge case at `{python} FleetMtbfTable.n_8192_str` GPUs a
 
 #### Checkpoint sizes {.unnumbered}
 
-Checkpointing is the primary recovery mechanism, and its cost depends on the model size. @Tbl-fleet-checkpoint-sizes shows checkpoint sizes for common mixed-precision Adam training checkpoints (`{python} FleetStateRule.ckpt_bpp_str` bytes per parameter: `{python} FleetStateRule.weight_bpp_str` bytes for BF16 weights and `{python} FleetStateRule.optim_bpp_str` bytes for FP32 master weights, momentum, and variance). Gradients are normally transient and recomputed after restore rather than serialized as durable checkpoint state.
+Checkpointing is the primary recovery mechanism, and its storage footprint grows linearly with model parameter count. A common mixed-precision Adam checkpoint serializes `{python} FleetStateRule.ckpt_bpp_str` bytes per parameter (`{python} FleetStateRule.weight_bpp_str` bytes for BF16 weights and `{python} FleetStateRule.optim_bpp_str` bytes for FP32 master weights, momentum, and variance), which sets both total checkpoint capacity and write duration at a given storage bandwidth (@tbl-fleet-checkpoint-sizes). Gradients are normally transient and recomputed after restore rather than serialized as durable checkpoint state.
 
 ```{python}
 #| echo: false
@@ -605,7 +605,7 @@ A GPU-only power proxy\index{PUE!IT load} (MW) = (number of GPUs $\times$ therma
 
 ### Current hardware reference (c. 2025--2026) {.unnumbered}
 
-These numbers (@tbl-fleet-hardware-ref) are point-in-time hardware references for back-of-envelope calculations. Compute, memory capacity, and interconnect performance evolve at different rates.
+Frontier accelerators from the 2025--2026 generation provide the point-in-time per-chip specifications needed for back-of-envelope fleet sizing (@tbl-fleet-hardware-ref), illustrating how compute throughput, memory capacity, and interconnect bandwidth evolve at different rates across vendors.
 
 ```{python}
 #| echo: false
@@ -662,7 +662,7 @@ At the cluster level, a single DGX H100 SuperPOD scalable unit packages `{python
 
 ## Scaling Physics {#sec-appdx-fleet-foundations-scaling-physics}
 
-Quadrupling a training allocation from 1,024 GPUs to 4,096 GPUs often delivers only 2.5$\times$ the step throughput because network transfers, synchronization barriers, and pipeline bubbles consume a growing share of each step. The numbers in the previous section describe what the hardware can do; scaling physics describes what happens when more of it is brought to bear. Reasoning starts from the ceiling on a single accelerator (the roofline) and then asks what survives as devices are added, governed by three models: Amdahl's Law extended to fleet overhead, the communication-computation ratio, and weak scaling behavior.
+When a training job expands from a single 8-GPU server to thousands of accelerators across a fabric, network transfers, synchronization barriers, and pipeline bubbles consume a growing share of each step. The reference numbers in @sec-appdx-fleet-foundations-numbers-to-know describe what individual links and devices can deliver; scaling physics explains how much of that capacity survives as devices are added. Reasoning starts from the ceiling on a single accelerator (the roofline) and extends it to the cluster through three models: Amdahl's Law for fleet serial overhead, the communication-computation ratio, and weak scaling.
 
 ### From the accelerator roofline to the fleet {#sec-appdx-fleet-foundations-roofline}
 
@@ -716,7 +716,7 @@ class FleetScalingCalloutRecap:
     scaling_callout_implied_eff_str = fmt_percent(implied, precision=1, commas=False, style='prose')
 ```
 
-A training job provisioned with `{python} FleetScalingCalloutRecap.scaling_callout_target_gpus_str` GPUs achieves only `{python} FleetScalingCalloutRecap.scaling_callout_observed_ratio_mult_str` the throughput of a `{python} FleetScalingCalloutRecap.scaling_callout_baseline_gpus_str`-GPU run. That observation implies about `{python} FleetScalingCalloutRecap.scaling_callout_implied_eff_str` scaling efficiency at the larger size, so scaling physics provides the diagnostic tools to determine whether the system is performing as physics allows or whether there is an engineering problem to fix.
+On a real cluster, that shift from HBM bandwidth to network and synchronization limits shows up directly in step throughput: when a training job provisioned with `{python} FleetScalingCalloutRecap.scaling_callout_target_gpus_str` GPUs achieves only `{python} FleetScalingCalloutRecap.scaling_callout_observed_ratio_mult_str` the throughput of a `{python} FleetScalingCalloutRecap.scaling_callout_baseline_gpus_str`-GPU run, the implied scaling efficiency is about `{python} FleetScalingCalloutRecap.scaling_callout_implied_eff_str` at the larger size. The three subsections that follow separate whether that loss comes from an unavoidable Amdahl serial fraction, an unfavorable communication-computation ratio, or a fixed-problem strong-scaling regime.
 
 ### Amdahl's Law at fleet scale {#sec-appdx-fleet-foundations-amdahls-fleet}
 
@@ -1038,9 +1038,7 @@ class FleetThermalRecap:
 
 ## Thermal and Power Physics {#sec-appdx-fleet-foundations-thermal-power}
 
-Compute performance ultimately converts to heat, and heat must be removed. At fleet scale, thermal and power constraints are primary concerns. They determine where construction is feasible, how densely accelerators can be packed, and what the operating costs will be. A cluster that is architecturally sound but thermally infeasible cannot be built.
-
-A cluster design calling for `{python} FleetThermalRecap.tenk_gpus_str` H100 GPUs at `{python} FleetThermalRecap.h100_tdp_w_str` each (a `{python} FleetThermalRecap.tenk_it_mw_str` GPU-only power proxy) gives `{python} FleetThermalRecap.tenk_facility_mw_typical_str` after applying PUE `{python} FleetThermalRecap.pue_typical_str`. The complete facility budget must also include host, memory, storage, and network power inside the IT boundary before applying PUE. This is the electrical load of a small town. Before optimizing software, the physics of power delivery and heat removal must be feasible.
+A cluster design calling for `{python} FleetThermalRecap.tenk_gpus_str` H100 GPUs at `{python} FleetThermalRecap.h100_tdp_w_str` each represents a `{python} FleetThermalRecap.tenk_it_mw_str` GPU-only power proxy and draws `{python} FleetThermalRecap.tenk_facility_mw_typical_str` of facility power at a typical PUE of `{python} FleetThermalRecap.pue_typical_str`, the electrical load of a small town even before adding host CPUs, memory, storage, and networking inside the IT boundary. Because every watt of electrical power delivered to silicon converts to heat that must be removed, thermal and power limits govern where a cluster can be built, how densely accelerators can be packed into each rack, and what the facility will cost to operate. A cluster that is architecturally sound in software and networking but exceeds its power-delivery or heat-removal envelope cannot be deployed.
 
 ### Power density wall {#sec-appdx-fleet-foundations-power-density}
 
