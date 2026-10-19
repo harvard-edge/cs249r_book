@@ -61,7 +61,10 @@ PAGE_JS = r"""
     const r = el.getBoundingClientRect(); if (!r.width || !r.height) continue;
     if (el.closest('svg, mjx-container, .MathJax, script, style')) continue;
     const bg = effBg(el), fg = over(parse(cs.color), bg), c = contrast(fg, bg);
-    if (c < 3.0) add({kind: 'text-contrast', tag: el.tagName, text: t.slice(0, 40), contrast: +c.toFixed(2)});
+    if (c < 3.0) add({kind: 'text-contrast', tag: el.tagName, text: t.slice(0, 40), contrast: +c.toFixed(2),
+      cls: (el.className && el.className.toString ? el.className.toString() : '').slice(0, 40),
+      within: (el.closest('#quarto-sidebar') ? 'sidebar' : el.closest('nav') ? 'nav' : el.closest('#TOC, nav[role=doc-toc]') ? 'toc' : el.closest('footer') ? 'footer' : el.closest('main') ? 'main' : ''),
+      fg: 'rgb(' + fg.slice(0, 3).map(Math.round).join(',') + ')', bg: 'rgb(' + bg.slice(0, 3).map(Math.round).join(',') + ')'});
   }
   // Page regions must themselves be dark. Contrast alone cannot see a white footer under dark text.
   ['body', '.nav-footer', 'nav.navbar', '#quarto-sidebar', '#quarto-margin-sidebar', '#quarto-announcement', '.quarto-secondary-nav'].forEach(sel => {
@@ -98,8 +101,15 @@ class _QuietHandler(http.server.SimpleHTTPRequestHandler):
         pass
 
 
-def serve(root: Path) -> tuple[socketserver.TCPServer, int]:
-    handler = functools.partial(_QuietHandler, directory=str(root))
+def serve(root: Path, base: str = "") -> tuple[socketserver.TCPServer, int]:
+    class Handler(_QuietHandler):
+        def translate_path(self, path: str) -> str:
+            # Pages such as 404.html load assets by deployed absolute path (/instructors/site_libs/...).
+            if base and path.startswith(base + "/"):
+                path = path[len(base):]
+            return super().translate_path(path)
+
+    handler = functools.partial(Handler, directory=str(root))
     server = socketserver.TCPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server, server.server_address[1]
@@ -112,6 +122,7 @@ def main() -> int:
     ap.add_argument("--figures", action="store_true", help="also require figure images to be dimmed (books)")
     ap.add_argument("--json", type=Path, help="write the full result here")
     ap.add_argument("--width", type=int, default=1400)
+    ap.add_argument("--base", default="", help="deployed path prefix, e.g. /instructors; needed to audit 404 pages")
     args = ap.parse_args()
 
     try:
@@ -126,7 +137,7 @@ def main() -> int:
         print(f"no pages match {args.glob} under {root}", file=sys.stderr)
         return 2
 
-    server, port = serve(root)
+    server, port = serve(root, args.base.rstrip('/'))
     results: dict[str, dict] = {}
     failed = 0
     with sync_playwright() as pw:
@@ -138,11 +149,11 @@ def main() -> int:
             try:
                 page.goto(f"http://127.0.0.1:{port}/{rel}", wait_until="load", timeout=45000)
                 page.wait_for_timeout(1500)
-                if rel.endswith("404.html"):
-                    # 404 pages load their assets by deployed absolute path, so the audit's
-                    # root-served copy renders unstyled; there is nothing to judge.
-                    results[rel] = {"skipped": "404 page"}
-                    print(f"skip  {rel} (404 page)")
+                if rel.endswith("404.html") and not args.base:
+                    # 404 pages load their assets by deployed absolute path, so without --base the
+                    # root-served copy renders unstyled and there is nothing to judge.
+                    results[rel] = {"skipped": "404 page (pass --base to audit)"}
+                    print(f"skip  {rel} (404 page; pass --base)")
                     continue
                 toggle = page.locator("a.quarto-color-scheme-toggle")
                 if toggle.count() == 0:
