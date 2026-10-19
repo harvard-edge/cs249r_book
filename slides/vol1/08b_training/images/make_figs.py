@@ -15,8 +15,12 @@ Every value is from the rendered chapter (Model Training) unless noted:
   - Swamping: derived from the formats and checked with numpy float16:
     FP16 spacing near 0.5 is 2^-11 = 4.9e-4; 0.5 + 0.0001 rounds to 0.5;
     10,000 such updates leave FP16 at 0.5 and take FP32 to 1.5.
-  - Loss-scaling histogram: illustrative shape (labeled), after Micikevicius
-    et al. 2018, Figure 3; FP16 normal floor 2^-14, subnormal floor 2^-24.
+  - Loss-scaling histogram: Micikevicius et al. 2018, Figure 3 (SSD
+    activation gradients), bins read from the published figure in calcs.py;
+    FP16 normal floor 2^-14, subnormal floor 2^-24; scale of 8 (Sec. 3.2).
+  - Loss-scale trace: a real torch.amp.GradScaler run (scaler_run.py,
+    data/scaler_trace.csv).
+  - Selective recomputation: Korthikanti et al. 2023, Table 4.
   - Run time by format: 518, 70, 35 days (Napkin Math 8.7).
   - Per-layer activations at batch 32, 1,024 tokens: projections 419.4 MB,
     feed-forward 419.4 MB, scores 4,194.3 MB, LayerNorm about 10 MB
@@ -26,7 +30,7 @@ Every value is from the rendered chapter (Model Training) unless noted:
   - Tiling: 4,096^2 x 4 B = 67.1 MB; 128^2 x 4 B = 65.5 KB (Sec. 8.6.4);
     228 KB of shared memory per SM (Hardware Acceleration).
   - Stored per head at 4,096 tokens: 138.4 MB against 4.2 MB (Sec. 8.6.4).
-  - Batch line: 24 GB + 2.675 GB per sequence (85.6 GB / 32, derived);
+  - Batch line: 24 GB + 2.67 GB per sequence (calcs.per_seq_gb);
     batch 16 gives 66.8 GB, batch 32 109.6 GB (Napkin Math 8.10).
   - Checkpointing: 8 segments of 6 layers, 0.84 GB of inputs plus 10.7 GB
     (Napkin Math 8.8). Checkpoint count curve k + 48/k in layer units is
@@ -43,6 +47,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
+
+import calcs  # noqa: E402
 
 plt = sp.plt
 C = sp.C
@@ -272,54 +278,72 @@ for k in (1, 2):
     axl.yaxis.label.set_alpha(a)
     sp.save(fig, out / f"swamp_step{k}.svg")
 
-# 6. Loss scaling (illustrative distribution of gradient magnitudes) --------
-rng = np.random.default_rng(7)
-exps = rng.normal(-22, 4.2, 40000)
-bins = np.arange(-44, 22, 1.0)
-G_BEFORE = np.log2(1e-6)          # about 2^-19.9
-G_AFTER = np.log2(1e-6 * 1024)    # 1.02e-3, about 2^-9.9
+# 6. Loss scaling on measured gradients: Micikevicius et al. 2018, Figure 3
+# (SSD activation gradients, FP32 training), bins read from the figure in
+# calcs.py; the zero bin (67 percent, caption) is a label, not a bar. Step 2
+# adds the same histogram scaled by 8, the factor the paper found sufficient.
+bins = [(lo, hi, p) for lo, hi, p in calcs.fig3_pct() if p]
+SHIFT = calcs.math.log2(calcs.SSD_SCALE)
 for k in (1, 2):
-    fig, ax = plt.subplots(figsize=(5.0, 2.3))
+    fig, ax = plt.subplots(figsize=(5.6, 2.25))
     ax.axvspan(-24, -14, color=C["data_l"], alpha=0.6, lw=0)
     ax.axvspan(-14, 16, color=C["data_l"], alpha=1.0, lw=0)
-    ax.axvspan(-44, -24, color=C["danger_l"], alpha=0.6, lw=0)
-    h, e = np.histogram(exps, bins)
-    ax.bar(e[:-1] + 0.5, h, 0.9, color=C["neutral"], alpha=1.0 if k == 1 else 0.25)
-    h2, e2 = np.histogram(exps + 10, bins)
-    ax.bar(e2[:-1] + 0.5, h2, 0.9, color=C["compute"], alpha=1.0 if k == 2 else 0.0)
-    top = h.max() * 1.6
-    ax.text(-3, top, "FP16 normal", color=C["data"], fontsize=12,
-            fontweight="bold", ha="center", va="top")
-    ax.text(-19, top, "sub-\nnormal", color=C["data"], fontsize=11, ha="center", va="top",
-            linespacing=1.0)
-    ax.text(-35, top, "becomes\nzero", color=C["danger"], fontsize=12, fontweight="bold",
-            ha="center", va="top", linespacing=1.0)
-    # the 65,504 ceiling, just below 2^16
+    ax.axvspan(-62, -24, color=C["danger_l"], alpha=0.6, lw=0)
+    for lo, hi, p in bins:
+        ax.bar(lo, p, hi - lo, align="edge", color=C["neutral"], edgecolor="white", lw=0.6,
+               alpha=1.0 if k == 1 else 0.3, bottom=0)
+        ax.bar(lo + SHIFT, p, hi - lo, align="edge", color="none", edgecolor=C["compute"],
+               lw=1.8, alpha=1.0 if k == 2 else 0.0)
     ax.axvline(16, color=C["danger"], lw=2.5)
-    ax.text(15.3, top * 0.80, "overflow\n65,504", color=C["danger"], fontsize=11,
+    ax.text(15.3, 4.5, "overflow\n65,504", color=C["danger"], fontsize=11,
             fontweight="bold", ha="right", va="top", linespacing=1.0)
-    # one gradient of 1e-6, before and after scaling
-    ymark = h.max() * 1.05
-    ax.plot([G_BEFORE], [ymark], "o", ms=10, color=C["text"], mec="white", mew=1.5)
-    ax.text(G_BEFORE - 1.2, ymark, "10⁻⁶", color=C["text"], fontsize=12,
-            fontweight="bold", ha="right", va="center")
-    a2 = 1.0 if k == 2 else 0.0
-    ax.annotate("", xy=(G_AFTER - 0.6, ymark), xytext=(G_BEFORE + 0.7, ymark),
-                arrowprops=dict(arrowstyle="-|>", color=C["compute"], lw=2.2, alpha=a2))
-    ax.plot([G_AFTER], [ymark], "o", ms=10, color=C["compute"], mec="white", mew=1.5,
-            alpha=a2)
-    label(ax, G_AFTER + 1.2, ymark, "1.02×10⁻³", C["compute"], k == 2,
-          ha="left", va="center", fontsize=12)
-    label(ax, -1, h.max() * 0.55, "× S = 2¹⁰:\nshift by 10", C["compute"], k == 2,
-          ha="left", va="center", fontsize=12, linespacing=1.05)
-    ax.set_xlim(-44, 21)
-    ax.set_ylim(0, top * 1.05)
-    ax.set_yticks([])
-    ax.spines["left"].set_visible(False)
-    ax.set_xticks([-40, -32, -24, -14, 0, 8, 16],
-                  ["2⁻⁴⁰", "2⁻³²", "2⁻²⁴", "2⁻¹⁴", "1", "2⁸", "2¹⁶"], fontsize=12)
-    ax.set_xlabel("Gradient magnitude (log scale). Illustrative shape.", fontsize=12)
+    ax.text(-2, 250, "FP16 normal", color=C["data"], fontsize=12, fontweight="bold",
+            ha="center", va="top")
+    ax.annotate("", xy=(14.5, 0.011), xytext=(-5.5, 0.011),
+                arrowprops=dict(arrowstyle="<->", color=C["data"], lw=1.5))
+    ax.text(4.5, 0.014, "unused", color=C["data"], fontsize=11, fontweight="bold",
+            ha="center", va="bottom")
+    ax.text(-19, 250, "sub-\nnormal", color=C["data"], fontsize=11, ha="center", va="top",
+            linespacing=1.0)
+    ax.text(-43, 250, "becomes zero in FP16", color=C["danger"], fontsize=12,
+            fontweight="bold", ha="center", va="top")
+    ax.text(-60.5, 1.6, "+ 67% exactly\nzero (own bin)", color=C["neutral"], fontsize=10.5,
+            ha="left", va="center", linespacing=1.0)
+    label(ax, -7.5, 0.045, "orange: × 8, shift by 3:\nSSD then matched FP32", C["compute"],
+          k == 2, ha="left", va="bottom", fontsize=11, linespacing=1.05)
+    ax.set_yscale("log")
+    ax.set_ylim(0.005, 300)
+    ax.set_yticks([0.01, 0.1, 1, 10], ["0.01%", "0.1%", "1%", "10%"])
+    ax.minorticks_off()
+    ax.set_xlim(-62, 18)
+    ax.set_xticks([-60, -45, -24, -14, 0, 16],
+                  ["2⁻⁶⁰", "2⁻⁴⁵", "2⁻²⁴", "2⁻¹⁴", "1", "2¹⁶"], fontsize=11)
+    ax.set_xlabel("Activation-gradient magnitude, SSD (log scale)", fontsize=11)
+    ax.set_ylabel("Share of values", fontsize=11)
     sp.save(fig, out / f"loss_scale_step{k}.svg")
+
+# 6b. A real GradScaler trace (scaler_run.py, data/scaler_trace.csv) ---------
+rows = calcs.scaler_trace()
+steps = np.array([r[0] for r in rows])
+logs = np.log2([r[1] for r in rows])
+skips = [(r[0], np.log2(r[1])) for r in rows if r[2]]
+fig, ax = plt.subplots(figsize=(3.4, 2.55))
+ax.step(steps / 1000, logs, where="post", color=C["memory"], lw=2.2)
+ax.plot([s / 1000 for s, _ in skips], [v + 1 for _, v in skips], "o", ms=6,
+        color=C["danger"], mec="white", mew=1)
+ax.text(1, 23.2, "× 2 every\n2,000 clean\nsteps", color=C["memory"], fontsize=11,
+        fontweight="bold", va="center", linespacing=1.05)
+ax.text(27.5, 26.1, "overflow: skip, ÷ 2", color=C["danger"], fontsize=11,
+        fontweight="bold", ha="right", va="bottom")
+ax.set_xlim(0, 28)
+ax.set_ylim(15, 27.4)
+ax.set_yticks([16, 20, 24], ["2¹⁶", "2²⁰", "2²⁴"])
+ax.set_xticks([0, 10, 20], ["0", "10k", "20k"])
+ax.set_xlabel("Step", fontsize=11)
+ax.set_ylabel("Loss scale S", fontsize=11)
+ax.grid(color=C["grid"], lw=0.5)
+ax.set_axisbelow(True)
+sp.save(fig, out / "scaler_trace.svg")
 
 # 7. Run time by format (after Part 1's precision_days, narrowed for a column)
 sp.hbars(out / "precision_days_col.svg", [
@@ -486,24 +510,27 @@ sp.hbars(out / "flash_store.svg", [
 
 # 12. Step memory against batch size with FlashAttention ----------------------
 bs = np.arange(0, 41)
-mem = 24 + 85.6 / 32 * bs
+PER_SEQ = calcs.per_seq_gb()
+STATIC = calcs.static_gb()
+FIT = (CAP - STATIC) / PER_SEQ
+mem = STATIC + PER_SEQ * bs
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 2.5))
     ax.plot(bs, mem, color=C["data"], lw=2.8)
     ax.axhline(CAP, color=C["memory"], lw=2, ls="--")
     ax.text(0.5, CAP + 4, "H100: 85.9 GB (80 GiB)", color=C["memory"], fontsize=11,
             fontweight="bold")
-    ax.text(39.5, 8, "24 GB + 2.68 GB per sequence", ha="right",
+    ax.text(39.5, 8, f"{STATIC:.0f} GB + {PER_SEQ:.2f} GB per sequence", ha="right",
             va="bottom", color=C["data"], fontsize=11, fontweight="bold")
     shown = k == 2
     for b, col in [(16, C["data"]), (32, C["danger"])]:
-        m = 24 + 85.6 / 32 * b
+        m = STATIC + PER_SEQ * b
         ax.plot([b], [m], "o", ms=10, color=col, mec="white", mew=1.5,
                 alpha=1.0 if shown else 0.0)
         label(ax, b - 0.8, m + 5, f"batch {b}: {m:.1f} GB", col, shown, ha="right",
               fontsize=11.5)
-    ax.plot([23.1], [CAP], "o", ms=9, color=C["memory"], mec="white", mew=1.5)
-    ax.annotate("about 23 fit", xy=(23.1, CAP), xytext=(26.5, 52), fontsize=11.5,
+    ax.plot([FIT], [CAP], "o", ms=9, color=C["memory"], mec="white", mew=1.5)
+    ax.annotate("about 23 fit", xy=(FIT, CAP), xytext=(26.5, 52), fontsize=11.5,
                 fontweight="bold", color=C["memory"],
                 arrowprops=dict(arrowstyle="-|>", color=C["memory"], lw=1.5))
     ax.set_xlim(0, 40)
@@ -565,5 +592,14 @@ for k in (1, 2):
     ax.grid(color=C["grid"], lw=0.5)
     ax.set_axisbelow(True)
     sp.save(fig, out / f"sqrt_ckpt_step{k}.svg")
+
+# 16. Selective recomputation, measured (Korthikanti et al. 2023, Table 4) ---
+base = calcs.K_TABLE4["No recompute"]
+krows = []
+for (name, ms), ck in zip(calcs.K_TABLE4.items(), ["neutral", "danger", "data"]):
+    extra = "" if ms == base else f" (+{100 * (ms / base - 1):.0f}%)"
+    krows.append((name, ms, ck, f"{ms} ms{extra}"))
+sp.hbars(out / "selective_recompute.svg", krows, "ms", log=False, size=(5.8, 1.9),
+         xlabel="One layer of a 22B GPT, forward + backward, A100 (ms)")
 
 print("figures written")
