@@ -83,7 +83,10 @@ def check(deck, floor, min_words):
         global KIT
         if KIT is None:
             KIT = kit_words()
-        small = [w for y, sz, t in body if sz < floor for w in t.split() if w not in KIT]
+        # Axis tick numbers are read less closely than labels, so they get a
+        # lower floor; any word, number or not, below 5 pt is flagged.
+        small = [w for y, sz, t in body for w in t.split() if w not in KIT and (
+                 sz < 5.0 or (sz < floor and not re.fullmatch(r"[-−+]?[\d.,:%]+[kKMGTx×%]?", w)))]
         if len(small) >= min_words:
             bad += 1
             sample = " ".join(small[:8])
