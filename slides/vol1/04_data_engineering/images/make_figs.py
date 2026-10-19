@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 """Data plots for Lecture 4 (Data Engineering).
 
-Every value is sourced from the rendered chapter (Data Engineering) unless
-marked illustrative:
-  - False wakes: 2,592,000 one-second windows a month; 99.9 percent rejection
-    gives 2,592 false wakes, 99.999 percent gives 26 (Napkin Math 4.1 and its
-    margin figure). 99.99 percent (259) is the same arithmetic.
+Every derived value comes from calcs.py (run it to print them); inputs are
+sourced from the rendered chapter (Data Engineering) unless marked:
   - Listening hours: rule of three, 2,160 h of non-keyword audio to support
     one false wake a month (Sec. 4.11); a 30-day month is 720 h.
   - Label entries: a 1920x1080 mask has 2,073,600 labels; ten boxes of four
@@ -18,7 +15,7 @@ figures moved to Lecture 4b (Data Engineering, Part 2), whose own
 images/make_figs.py regenerates them. Their old SVG and PDF files in this
 folder are no longer used by this deck.
 
-Diagrams (leakage split, skew, pipeline synthesis) are SVG
+Diagrams (leakage split by file, skew, pipeline synthesis) are SVG
 written by this script.
 
 Run from this folder: python3 make_figs.py
@@ -30,6 +27,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
 import numpy as np  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import calcs as K  # noqa: E402
 
 out = Path(__file__).parent
 C = sp.C
@@ -91,34 +91,58 @@ def steps(stem, rows, **kw):
         bars_lines(out / f"{stem}_step{k}.svg", rows, step=k, **kw)
 
 
-# 1. False wakes a month at three per-window rejection rates
-steps("false_wakes", [
-    ("99.9% rejected", 2592, "danger", "2,592 a month"),
-    ("99.99% rejected", 259, "danger", "259 a month"),
-    ("99.999% rejected", 26, "danger", "26 a month"),
-], lines=[(1, "Budget: 1 a month", "text", 1.04)],
-    xlim=(0.3, 3e5), xlabel="Expected false wakes per month (log scale)",
-    xticks=[(1, "1"), (10, "10"), (100, "100"), (1000, "1,000"), (10000, "10,000")])
+# 1. (2026-10-18) The false-wake ladder now sits on the Predict slide as a
+# small table from calcs.py; the old false-wake bar files are no longer used.
+# Measured counterpart: miss rate at 1 false alarm per 10 h (Picovoice
+# wake-word benchmark, README "Accuracy", commit 84919190fb18), redrawn at
+# slide size as vertical bars.
+def picovoice():
+    fig, ax = plt.subplots(figsize=(5.8, 2.5))
+    names = list(K.PV_MISS_PCT)
+    vals = [K.PV_MISS_PCT[n] for n in names]
+    cols = [C["neutral"], C["neutral"], C["memory"]]
+    ax.bar(range(3), vals, width=0.5, color=cols)
+    for i, v in enumerate(vals):
+        ax.text(i, v + 2, f"{v:.1f}%", ha="center", va="bottom", fontsize=14,
+                fontweight="bold", color=cols[i])
+    ax.set_xticks(range(3))
+    ax.set_xticklabels(names, fontsize=13)
+    ax.set_ylim(0, 65)
+    ax.set_yticks([0, 20, 40, 60])
+    ax.set_ylabel("Wake words missed (%)")
+    ax.grid(axis="y", color=C["grid"], linewidth=0.6)
+    ax.set_axisbelow(True)
+    ax.text(2.45, 58, f"All three held to {K.PV_FA_PER_HOUR * 10:.0f} false alarm per 10 h\n"
+            f"= {K.PV_FA_PER_MONTH:.0f} a month; budget: {K.BUDGET_PER_MONTH} a month",
+            ha="right", va="top", fontsize=12, color=C["danger"], fontweight="bold")
+    sp.save(fig, out / "pv_missrate.svg")
+
+
+picovoice()
 
 # 2. Listening needed to support the budget (rule of three)
 bars_lines(out / "listen_hours.svg", [
-    ("One month of listening", 720, "neutral", "720 h"),
-    ("Needed, zero false wakes", 2160, "data", "2,160 h  = 248 GB at 16 kHz"),
+    ("One month of listening", K.HOURS_PER_MONTH, "neutral", f"{K.HOURS_PER_MONTH} h"),
+    ("Needed, zero false wakes", K.HOURS_NEEDED, "data",
+     f"{K.HOURS_NEEDED:,.0f} h  = {K.EVAL_GB:.0f} GB at 16 kHz"),
 ], log=False, xlim=(0, 4200), size=sp.SHORT,
     xlabel="Hours of representative non-keyword audio")
 
-# 3. Label entries per image by granularity (log)
+# 3. Label entries per image by granularity (log), drawn for a 0.56-width
+# column beside a Cityscapes annotation (2026-10-18)
 steps("label_entries", [
     ("Class label", 1, "data", "1"),
-    ("Ten boxes", 40, "data", "40 numbers"),
-    ("Pixel mask, 1920×1080", 2073600, "data", "2.1 million"),
-], xlim=(0.3, 3e8), xlabel="Label entries per image (log scale)",
-    xticks=[(1, "1"), (100, "100"), (1e4, "10,000"), (1e6, "1 million")])
+    ("Ten boxes", K.BOX_ENTRIES, "data", f"{K.BOX_ENTRIES}"),
+    ("Mask, 1920×1080", K.MASK_ENTRIES, "data", f"{K.MASK_ENTRIES / 1e6:.1f} M", "in"),
+], xlim=(0.3, 1e7), xlabel="Label entries per image (log)", size=(3.6, 2.5),
+    xticks=[(1, "1"), (100, "100"), (1e4, "10$^4$"), (1e6, "10$^6$")])
 
 # 4. Labeling against one training run (log)
 steps("label_cost", [
-    ("Label 1M images", 100000, "data", r"\$100,000   (2 to 4 weeks)"),
-    ("Train ResNet-50 once", 40, "compute", r"\$20 to \$40   (1.3 hours)"),
+    ("Label 1M images", K.LABEL_BUDGET_USD, "data",
+     rf"\${K.LABEL_BUDGET_USD:,}   (2 to 4 weeks)"),
+    ("Train ResNet-50 once", K.TRAIN_USD[1], "compute",
+     rf"\${K.TRAIN_USD[0]:.0f} to \${K.TRAIN_USD[1]:.0f}   ({K.TRAIN_HOURS:.1f} hours)"),
 ], xlim=(5, 2e7), size=sp.SHORT, xlabel="Cost (US dollars, log scale)",
     xticks=[(10, r"\$10"), (1000, r"\$1,000"), (1e5, r"\$100,000")])
 
@@ -180,28 +204,27 @@ def clips(x, y, who, size=44, gap=9):
     return s
 
 
-def leak(k):
+# (2026-10-18) The two-row leakage build was replaced by leak_file below;
+# its old SVG and PDF files are no longer used.
+
+
+# One-row variant for the slide that shows TensorFlow's which_set code
+# beneath it (2026-10-18): split by file only, 900 x 165.
+def leak_file():
     A, B, Cc = SPK
-    s = txt(205, 22, "Training split", 26, True)
-    s += txt(700, 22, "Test split", 26, True)
-    rows = [(55, "Split by file", [A, A, B, B, Cc, A], [A, B, Cc],
-             "every test voice was heard in training", C["danger"])]
-    if k >= 2:
-        rows.append((195, "Split by hash of speaker key", [A, A, A, A, B, B], [Cc, Cc, Cc],
-                     "every test voice is new", C["data"]))
-    for y, name, train_clips, test_clips, msg, col in rows:
-        s += txt(20, y + 8, name, 24, True, anchor="start")
-        s += box(20, y + 28, 370, 70, "#F7F7F7", "#BBBBBB", rx=10)
-        s += clips(34, y + 41, train_clips)
-        s += box(560, y + 28, 280, 70, "#F7F7F7", "#BBBBBB", rx=10)
-        s += clips(574, y + 41, test_clips)
-        s += txt(700, y + 120, msg, 22, True, col)
-    s += txt(205, 358, "Squares are clips; letters are speakers.", 20, False, "#666666")
-    svg(out / f"leak_step{k}.svg", s, h=375)
+    s = txt(20, 18, "Split by file", 24, True, anchor="start")
+    s += txt(205, 52, "Training split", 22, True)
+    s += txt(700, 52, "Test split", 22, True)
+    s += box(20, 72, 370, 70, "#F7F7F7", "#BBBBBB", rx=10)
+    s += clips(34, 85, [A, A, B, B, Cc, A])
+    s += box(560, 72, 280, 70, "#F7F7F7", "#BBBBBB", rx=10)
+    s += clips(574, 85, [A, B, Cc])
+    s += txt(475, 95, "every test", 20, True, C["danger"])
+    s += txt(475, 120, "voice heard", 20, True, C["danger"])
+    svg(out / "leak_file.svg", s, h=155)
 
 
-for k in (1, 2):
-    leak(k)
+leak_file()
 
 
 # Training-serving skew: per-batch statistics against saved statistics (900 x 380)
