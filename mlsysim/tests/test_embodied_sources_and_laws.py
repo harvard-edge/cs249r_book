@@ -110,6 +110,9 @@ def test_panda_kinematics_and_limits():
         [7500, 3750, 5000, 6250, 7500, 10000, 10000])
     assert arm.joint_torque_rate_limit.to("N*m/s").magnitude == pytest.approx(1000.0)
     assert arm.cartesian_velocity_limit.to("m/s").magnitude == pytest.approx(1.7)
+    assert arm.cartesian_acceleration_limit.to("m/s**2").magnitude == pytest.approx(13.0)
+    assert arm.emergency_stop_time.to("ms").magnitude == pytest.approx(552.0)
+    assert arm.emergency_stop_time.provenance.id == "prov:franka-fer-handbook-stopping"
     assert arm.upper_arm_length.provenance.id == "prov:franka-fer-control-limits"
 
 

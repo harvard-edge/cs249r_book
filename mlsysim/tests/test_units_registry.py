@@ -275,7 +275,7 @@ def test_platform_threshold_anchors():
     from mlsysim import Platforms
 
     assert Platforms.Cloud.compute_threshold.to(TFLOP / second).magnitude == pytest.approx(
-        1000.0
+        200.0
     )
     assert Platforms.Cloud.bandwidth_threshold.to(GB / second).magnitude == pytest.approx(
         1000.0

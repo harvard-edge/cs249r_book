@@ -409,11 +409,29 @@ FRANKA_FER_CONTROL_LIMITS = _ds(
         "checked 2026-09-29): velocity 2.1750 rad/s on joints 1-4 and 2.6100 on "
         "5-7; acceleration 15, 7.5, 10, 12.5, 15, 20, 20 rad/s^2; jerk 7500, "
         "3750, 5000, 6250, 7500, 10000, 10000 rad/s^3; torque rate 1000 Nm/s on "
-        "every joint. FER Cartesian translation velocity 1.7 m/s. DH d3 = 0.316 m "
+        "every joint. FER Cartesian translation velocity 1.7 m/s and acceleration 13.0 m/s^2 (FER Cartesian-space limits table, re-read 2026-10-19). DH d3 = 0.316 m "
         "and d5 = 0.384 m: the current page labels the table for FR3; the Panda "
         "label with d3 = 0.316 m is in earlier revisions of the docs (commits "
         "6346f562cc and 7a46004875, control_parameters.rst). Rendered site: "
         "https://frankarobotics.github.io/docs."
+    ),
+)
+
+FRANKA_FER_STOPPING_TIMES = _ds(
+    "prov:franka-fer-handbook-stopping",
+    "Franka Emika Robot Instruction Handbook (October 2021), 'Stopping time and "
+    "distance', p. 85, measured per EN ISO 10218-1 Annex B",
+    "https://www.generationrobots.com/media/franka-emika-robot-handbook.pdf",
+    verified="2026-10-19",
+    notes=(
+        "Quoted: 'Under absolute worst case conditions (e.g. maximum payload of "
+        "3 kg and maximum velocity), the stopping distance for the Arm's main "
+        "axes (i.e. A1, A3, A5, A7) is 141.71 deg (by cutting 110/230 V) and "
+        "116.5 deg (by cutting 48 V), and the stopping time is 652 ms "
+        "(110/230 V) and 552 ms (48 V).' The registry stores the 48 V figure, "
+        "the cut a permission path makes on the arm supply. The handbook gives "
+        "stopping in joint angle and time only; a Cartesian deceleration must "
+        "be derived by the consumer and stated as such."
     ),
 )
 
@@ -974,10 +992,20 @@ NVIDIA_DLE_RESNET50_A100_TRAINING = Provenance(
 MLPERF_TRAINING_V31_RESNET50_H100 = Provenance(
     id="prov:mlperf-training-v31-resnet50-h100",
     kind=ProvenanceKind.INDUSTRY_REPORT,
-    ref="MLPerf Training v3.1 ResNet-50 results, H100 class systems",
-    url="https://mlcommons.org/benchmarks/training/",
-    verified="2026-05-31",
-    notes="Used as a broad single-accelerator throughput sanity anchor for ResNet-50/H100 teaching examples.",
+    ref=(
+        "MLPerf Training v3.1 (November 2023), closed division, available on-premises: "
+        "NVIDIA Eos_n8 (8x DGX H100, 64 H100-SXM5-80GB, MXNet NVIDIA Release 23.09), "
+        "ResNet-50; five runs, each 35 epochs in 2.49 min"
+    ),
+    url="https://github.com/mlcommons/training_results_v3.1/tree/main/NVIDIA/results/eos_n8_ngc23.09_mxnet/resnet",
+    verified="2026-10-19",
+    notes=(
+        "Per-accelerator rate = median logged training throughput (tracked_stats, "
+        "about 318,100 img/s across the five result logs) / 64 = about 4,970 img/s, "
+        "rounded to 5,000. End-to-end including evaluation is about 4,680 img/s. "
+        "The single-node Eos_n1 submission (8 H100, same release) logs about 7,050 "
+        "img/s per accelerator, so the per-accelerator rate falls with scale."
+    ),
 )
 
 MLPERF_INFERENCE_V50_RESNET50_H100 = Provenance(
