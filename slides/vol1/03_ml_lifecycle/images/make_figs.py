@@ -531,13 +531,16 @@ for s in (1, 2, 3):
 
 # Monitoring cadences (Sec. 3.11.1), in minutes on a log scale
 _cm = K.cadence_minutes()
-sp.hbars(out / "cadences.svg", [
-    ("Quarter", _cm["Quarter"], "neutral", "architecture review"),
-    ("Month", _cm["Month"], "neutral", "population coverage"),
-    ("Week", _cm["Week"], "memory", "labeled accuracy, drift tests"),
-    ("Day", _cm["Day"], "memory", "referral rate, confidence"),
-    ("Minute", _cm["Minute"], "danger", "camera misconfigured"),
-], "min", size=(5.4, 2.6), xlabel="How long each signal takes to trust (minutes, log scale)")
+# Tick labels at 14 pt so the powers of ten stay legible in the column slot.
+with sp.plt.rc_context({"xtick.labelsize": 14}):
+    sp.hbars(out / "cadences.svg", [
+        ("Quarter", _cm["Quarter"], "neutral", "architecture review"),
+        ("Month", _cm["Month"], "neutral", "population coverage"),
+        ("Week", _cm["Week"], "memory", "labeled accuracy, drift tests"),
+        ("Day", _cm["Day"], "memory", "referral rate, confidence"),
+        ("Minute", _cm["Minute"], "danger", "camera misconfigured"),
+    ], "min", size=(5.4, 2.6),
+        xlabel="How long each signal takes to trust (minutes, log scale)")
 
 
 # -----------------------------------------------------------------------------

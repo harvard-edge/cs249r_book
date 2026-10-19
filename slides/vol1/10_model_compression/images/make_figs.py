@@ -81,7 +81,10 @@ FONT = "Helvetica, Arial, sans-serif"
 # over_color, over_text.
 # ---------------------------------------------------------------------------
 def bars(path, rows, shown, log=False, xlim=None, xlabel=None, size=sp.SIZE,
-         vlines=(), xticks=None, note=None, label_size=13, boxed=False):
+         vlines=(), xticks=None, note=None, label_size=13, boxed=False,
+         text_size=12, axis_size=None):
+    """axis_size: tick, axis-label, and reference-line label size; raise it
+    with label_size and text_size when the plot is drawn for a column slot."""
     fig, ax = plt.subplots(figsize=size)
     n = len(rows)
     for i, r in enumerate(rows):
@@ -102,15 +105,15 @@ def bars(path, rows, shown, log=False, xlim=None, xlabel=None, size=sp.SIZE,
         if over_vis and "over_text" in r:
             text = r["over_text"]
         bb = dict(facecolor="white", edgecolor="none", pad=1.0, alpha=1.0 if vis else 0.0) if boxed else None
-        ax.text(tx, y, text, va="center", fontsize=12, bbox=bb, zorder=4,
+        ax.text(tx, y, text, va="center", fontsize=text_size, bbox=bb, zorder=4,
                 color=C[r.get("over_color", r["color"]) if over_vis else r["color"]],
                 fontweight="bold", alpha=1.0 if vis else 0.0)
         # reserve the widest text so every step has the same bounding box
         if "over_text" in r:
-            ax.text(tx, y, r["over_text"], va="center", fontsize=12, alpha=0.0)
+            ax.text(tx, y, r["over_text"], va="center", fontsize=text_size, alpha=0.0)
     for x, label, ck in vlines:
         ax.axvline(x, color=C[ck], lw=1.5, ls="--", zorder=1)
-        ax.text(x, n - 0.45, " " + label, color=C[ck], fontsize=10,
+        ax.text(x, n - 0.45, " " + label, color=C[ck], fontsize=axis_size or 10,
                 fontweight="bold", va="bottom", ha="left")
     if log:
         ax.set_xscale("log")
@@ -126,7 +129,9 @@ def bars(path, rows, shown, log=False, xlim=None, xlabel=None, size=sp.SIZE,
         ax.set_xticklabels([s for _, s in xticks])
         ax.minorticks_off()
     if xlabel:
-        ax.set_xlabel(xlabel)
+        ax.set_xlabel(xlabel, fontsize=axis_size)
+    if axis_size:
+        ax.tick_params(labelsize=axis_size)
     if note:
         fig.text(0.99, 0.01, note, ha="right", va="bottom", fontsize=9,
                  color=C["neutral"])
@@ -283,9 +288,11 @@ fmt_rows = [
     dict(label="COO", value=12, color="memory", text="12 B: above 66.7%"),
 ]
 bars(out / "sparsefmt_step1.svg", fmt_rows, [1, 1, 0, 0], xlim=(0, 30),
-     xlabel="Bytes stored per nonzero weight", size=(4.4, 2.6))
+     xlabel="Bytes stored per nonzero weight", size=(4.4, 2.3),
+     label_size=14, text_size=14, axis_size=13)
 bars(out / "sparsefmt_step2.svg", fmt_rows, [1, 1, 1, 1], xlim=(0, 30),
-     xlabel="Bytes stored per nonzero weight", size=(4.4, 2.6))
+     xlabel="Bytes stored per nonzero weight", size=(4.4, 2.3),
+     label_size=14, text_size=14, axis_size=13)
 
 # ---------------------------------------------------------------------------
 # 6. 2:4 sparsity: the block (SVG, column size) and measured GEMM speedups
@@ -391,9 +398,9 @@ distil_rows = [
     dict(label="Inference speed", value=160, color="compute", text="160% (1.6× faster)"),
     dict(label="Language score", value=97, color="memory", text="97%"),
 ]
-bars(out / "distilbert.svg", distil_rows, [1, 1, 1], xlim=(0, 260), size=(4.8, 2.3),
-     xticks=[(0, "0"), (100, "100 = BERT"), (200, "200")],
-     xlabel="DistilBERT relative to BERT (%)")
+bars(out / "distilbert.svg", distil_rows, [1, 1, 1], xlim=(0, 260), size=(4.4, 2.0),
+     xticks=[(0, "0"), (100, "100 = BERT"), (200, "200")], label_size=15,
+     text_size=15, axis_size=14, xlabel="DistilBERT relative to BERT (%)")
 
 # Soft targets (variant of fig-kd-targets): hard label, teacher at T = 1,
 # then the same teacher softened at T = 4 (derived: p_i^(1/4), renormalized).
@@ -556,7 +563,7 @@ for k in (1, 2):
                          str(v), 26, C["text"] if live else "#AAAAAA",
                          "bold" if live else "normal", "middle")
             if k == 2 and v != 0:
-                body += text(20 + j * CELL + CELL - 6, 20 + i * CELL + 20, f"c{j}", 15,
+                body += text(20 + j * CELL + CELL - 5, 20 + i * CELL + 22, f"c{j}", 19,
                              C["memory"], "bold", "end")
     body += text(340, 175, "×", 40, C["text"], "bold", "middle")
     for i in range(4):

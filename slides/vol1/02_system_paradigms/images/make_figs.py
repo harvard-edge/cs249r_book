@@ -100,12 +100,14 @@ for k in (1, 2):
 CAM_RAW = 100 * 1920 * 1080 * 3 * 30      # Napkin Math 2.4 inputs
 CAM_LINK = 10e9 / 8
 CAM_META = 1e3 * 20
-sp.hbars_steps(out / "camera_bandwidth", [
-    ("100 raw camera feeds", CAM_RAW, "danger", f"{CAM_RAW / 1e9:.1f} GB/s"),
-    ("10 Gb/s factory link", CAM_LINK, "neutral",
-     f"{CAM_LINK / 1e9:.2f} GB/s: {CAM_RAW / CAM_LINK:.0f}× too small"),
-    ("Defect metadata only", CAM_META, "data", f"{CAM_META / 1e3:.0f} KB/s"),
-], "B/s", xlabel="Data rate (bytes per second, log scale)")
+# Tick labels at 14 pt so the powers of ten stay legible on the slide.
+with sp.plt.rc_context({"xtick.labelsize": 14}):
+    sp.hbars_steps(out / "camera_bandwidth", [
+      ("100 raw camera feeds", CAM_RAW, "danger", f"{CAM_RAW / 1e9:.1f} GB/s"),
+      ("10 Gb/s factory link", CAM_LINK, "neutral",
+       f"{CAM_LINK / 1e9:.2f} GB/s: {CAM_RAW / CAM_LINK:.0f}× too small"),
+      ("Defect metadata only", CAM_META, "data", f"{CAM_META / 1e3:.0f} KB/s"),
+    ], "B/s", xlabel="Data rate (bytes per second, log scale)")
 
 # ---------------------------------------------------------------------------
 # 4. Memory wall from published chips: Gholami et al., IEEE Micro 2024,
@@ -389,7 +391,7 @@ def energy(step):
     ynpu = n - 3
     ax.plot([1e-4, 1e-4], [ynpu - 0.31, ynpu + 0.31], color="white", lw=2.5,
             alpha=1.0 if step == 2 else 0.0)
-    ax.text(0.5, ynpu, "(tick: NPU alone ≈0.1 mJ)", color=C["memory"], fontsize=10,
+    ax.text(0.5, ynpu, "(tick: NPU alone ≈0.1 mJ)", color=C["memory"], fontsize=12,
             fontweight="bold", ha="left", va="center", alpha=1.0 if step == 2 else 0.0)
     ax.annotate("", xy=(4e5, n - 1), xytext=(4e5, 0),
                 arrowprops=dict(arrowstyle="<->", color=C["danger"], lw=2))
@@ -398,6 +400,7 @@ def energy(step):
     ax.set_xscale("log")
     ax.set_xlim(1e-6, 1e6)
     ax.set_xticks([1e-6, 1e-4, 1e-2, 1, 1e2, 1e4, 1e6])
+    ax.tick_params(axis="x", labelsize=13)
     ax.minorticks_off()
     ax.set_ylim(-0.6, n - 0.4)
     ax.set_yticks([])

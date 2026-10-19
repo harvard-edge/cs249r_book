@@ -203,15 +203,15 @@ for k in (1, 2):
     hook_fig(k)
 
 # ================================================================ synthesis ladder
-fig, ax = plt.subplots(figsize=(5.8, 2.75))
+fig, ax = plt.subplots(figsize=(5.8, 2.6))
 n = len(BOEHM)
 for i, (label, value, color_key, tag) in enumerate(BOEHM):
     y = n - 1 - i
     ax.barh(y, value, color=C[color_key], height=0.66)
     ax.text(-0.01, y, label, transform=ax.get_yaxis_transform(), ha="right",
-            va="center", fontsize=11, fontweight="bold", color=C["text"])
+            va="center", fontsize=12.5, fontweight="bold", color=C["text"])
     text = f"{value:,.0f}" + (f"   {tag}" if tag else "")
-    ax.text(value * 1.12, y, text, va="center", fontsize=11, fontweight="bold",
+    ax.text(value * 1.12, y, text, va="center", fontsize=12.5, fontweight="bold",
             color=C[color_key])
 ax.set_xscale("log")
 ax.set_xlim(100, 2e6)
@@ -389,14 +389,14 @@ def stationary_svg(kind):
                 ya = y0 + r * (cell + gap) + cell + 2
                 parts.append(arrow(x, ya, x, ya + gap - 8, C["data"], 1.8))
             parts.append(arrow(x, y0 + span + 3, x, y0 + span + 38, C["data"]))
-        parts.append(svg_text(x0 + span / 2, y0 + span + 64, "partial sums Z move", 27,
+        parts.append(svg_text(x0 + span / 2, y0 + span + 64, "partial sums Z move", 30,
                               "700", C["data"]))
     else:
         parts.append(svg_text(x0 + span / 2, 18, "X", 30, "700", C["memory"]))
         for c in range(n):
             x = x0 + c * (cell + gap) + cell / 2
             parts.append(arrow(x, 34, x, y0 - 6, C["memory"]))
-        parts.append(svg_text(x0 + span / 2, y0 + span + 34, "each z written once", 27,
+        parts.append(svg_text(x0 + span / 2, y0 + span + 34, "each z written once", 30,
                               "700", C["data"]))
     write_svg(f"stationary_{kind}.svg", parts)
 
@@ -858,12 +858,12 @@ def tiling_svg():
                  f'fill="{C["compute"]}" stroke="{C["compute"]}" stroke-width="2"/>')
     parts.append(f'<line x1="{tx + step_px}" y1="{ty + step_px / 2}" x2="{tx + 70}" '
                  f'y2="{ty + 50}" stroke="{C["compute"]}" stroke-width="2"/>')
-    parts.append(f'<rect x="{tx + 66}" y="{ty + 30}" width="270" height="42" rx="4" '
+    parts.append(f'<rect x="{tx + 60}" y="{ty + 28}" width="310" height="46" rx="4" '
                  f'fill="white" stroke="{C["compute"]}" stroke-width="1.5"/>')
-    parts.append(svg_text(tx + 201, ty + 51, "one 128 × 128 tile", 26, "700",
+    parts.append(svg_text(tx + 215, ty + 51, "one 128 × 128 tile", 29, "700",
                           C["compute"]))
     parts.append(svg_text(x0 + side / 2, y0 + side + 30, "4,096 = 32 tiles of 128",
-                          26, "700", C["text"]))
+                          29, "700", C["text"]))
     parts.append('</svg>')
     return "\n".join(parts)
 
@@ -888,7 +888,7 @@ ax.set_yticks([0, 50, 100])
 ax.set_xlabel("Layer width (128-wide array)")
 ax.set_ylabel("Array use (%)")
 ax.text(0.99, 0.02, "Modeled", transform=ax.transAxes, ha="right",
-        va="bottom", fontsize=9, color=C["neutral"])
+        va="bottom", fontsize=11, color=C["neutral"])
 sp.save(fig, out / "cliff.svg")
 
 # NVIDIA figure 7(a), A100: achieved TFLOP/s against N, read from the
@@ -958,22 +958,25 @@ def slope(ax, top):
     ax.plot(xs, xs * BW, color=C["memory"], lw=3, zorder=3)
 
 
-def fp16_roof(ax, where=(0.02, 0.95, "left")):
+def fp16_roof(ax, where=(0.02, 0.95, "left"), size=None):
     slope(ax, PEAK16)
     ax.plot([PEAK16 / BW, XLIM[1]], [PEAK16, PEAK16], color=C["compute"], lw=3)
     ax.plot([PEAK16 / BW] * 2, [YLIM[0], 2.2], color=C["neutral"], lw=1.2, ls=":")
-    ax.text(PEAK16 / BW / 1.1, 1.3, "ridge 295", color=C["neutral"], fontsize=10,
-            ha="right")
+    ax.text(PEAK16 / BW / 1.1, 1.3, "ridge 295", color=C["neutral"],
+            fontsize=size or 10, ha="right")
     ax.text(where[0], where[1], "FP16 ceiling: 989 TFLOP/s", transform=ax.transAxes,
-            color=C["compute"], fontsize=11, fontweight="bold", ha=where[2], va="top")
+            color=C["compute"], fontsize=size or 11, fontweight="bold", ha=where[2], va="top")
 
 
 # recall: the stage-3 conv against the FP16 ridge
-fig, ax = roof_axes(size=(5.2, 2.6))
-fp16_roof(ax, (0.98, 0.42, "right"))
+fig, ax = roof_axes(size=(4.6, 2.0))
+ax.xaxis.label.set_size(13)
+ax.yaxis.label.set_size(13)
+ax.tick_params(labelsize=13)
+fp16_roof(ax, (0.98, 0.30, "right"), size=13)
 ax.plot([563.1], [PEAK16], "o", ms=11, color=C["compute"], mec="white", mew=1.5, zorder=5)
 ax.annotate("ResNet-50 stage-3 conv: 563", (563.1, PEAK16), xytext=(0, 16),
-            textcoords="offset points", ha="center", fontsize=11, fontweight="bold",
+            textcoords="offset points", ha="right", fontsize=13, fontweight="bold",
             color=C["compute"])
 sp.save(fig, out / "recall_roof.svg")
 

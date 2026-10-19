@@ -73,7 +73,8 @@ totals = [598, 311, 109.6, 66.8]
 def scoreboard(path, k, costs=None, alt=False):
     """alt adds option B of the vote, segment checkpointing at 35.5 GB, as a
     hollow bar beside the chosen option (Napkin Math 8.8)."""
-    fig, ax = plt.subplots(figsize=(5.8, 2.6))
+    # Type sized for the column slots this figure also fills (about 3.5 in).
+    fig, ax = plt.subplots(figsize=(5.4, 2.5))
     for i, t in enumerate(totals):
         shown = i < k
         a = 1.0 if shown else 0.0
@@ -82,32 +83,33 @@ def scoreboard(path, k, costs=None, alt=False):
         ax.bar(xpos, 24, width, color=C["neutral"], alpha=a)
         ax.bar(xpos, t - 24, width, bottom=24, color=C["data"], alpha=a)
         label(ax, xpos, max(t, CAP) + 18, f"{t:g} GB", C["data"] if t < CAP else C["danger"],
-              shown, ha="center", fontsize=13 if not (alt and i == 3) else 11)
+              shown, ha="center", fontsize=15 if not (alt and i == 3) else 14)
         if costs:
             label(ax, i, 395, costs[i], C["compute"], i > 0,
-                  ha="center", va="bottom", fontsize=10.5, linespacing=1.1)
+                  ha="center", va="bottom", fontsize=11.5, linespacing=1.1)
     if alt:
         ax.bar(3.19, 35.5, 0.32, color="white", edgecolor=C["compute"], lw=1.8, ls="--")
-        ax.text(3.19, 150, "B:\n35.5", color=C["compute"], fontsize=13,
+        ax.text(3.19, 150, "B:\n35.5", color=C["compute"], fontsize=14,
                 fontweight="bold", ha="center", va="bottom", linespacing=1.0)
     ax.axhline(CAP, color=C["memory"], lw=2, ls="--", zorder=0)
-    ax.text(3.55, CAP, "H100\n85.9 GB\n(80 GiB)", color=C["memory"], fontsize=11,
+    ax.text(3.55, CAP, "H100\n85.9 GB\n(80 GiB)", color=C["memory"], fontsize=14,
             fontweight="bold", ha="left", va="center")
     if costs:
-        ax.text(2.0, 520, "What each step cost", color=C["compute"], fontsize=12,
+        ax.text(2.0, 540, "What each step cost", color=C["compute"], fontsize=13,
                 fontweight="bold", ha="center")
     else:
         if alt:
-            ax.text(3.45, 440, "dashed: B, checkpoint", color=C["compute"], fontsize=11,
+            ax.text(3.45, 425, "dashed: B, checkpoint", color=C["compute"], fontsize=14,
                     fontweight="bold", ha="right")
-        ax.text(3.45, 560, "gray: static 24 GB", color=C["neutral"], fontsize=11,
+        ax.text(3.45, 575, "gray: static 24 GB", color=C["neutral"], fontsize=14,
                 fontweight="bold", ha="right")
-        ax.text(3.45, 500, "green: activations", color=C["data"], fontsize=11,
+        ax.text(3.45, 500, "green: activations", color=C["data"], fontsize=14,
                 fontweight="bold", ha="right")
-    ax.set_xticks(range(4), names, fontsize=11)
+    ax.set_xticks(range(4), names, fontsize=14)
+    ax.tick_params(axis="y", labelsize=14)
     ax.set_xlim(-0.5, 3.5)
     ax.set_ylim(0, 660)
-    ax.set_ylabel("GB per step")
+    ax.set_ylabel("GB per step", fontsize=14)
     sp.save(fig, path)
 
 

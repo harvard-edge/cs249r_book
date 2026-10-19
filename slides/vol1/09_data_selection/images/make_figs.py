@@ -453,26 +453,26 @@ def minhash():
     mant, ex = f"{m['pairs']:.1e}".split("e+")
     sup = str(int(ex)).translate(str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹"))
     W, H = 900, 360
-    xs = [20, 240, 470, 690]
+    xs = [20, 240, 485, 700]
     for k in range(1, 5):
         b = ""
         vis = [1.0 if i < k else 0.0 for i in range(4)]
         # column 1: document
-        b += text(xs[0] + 95, 40, "Web page", 18, weight="bold", op=vis[0])
-        b += box(xs[0], 60, 190, 150, C["neutral"], "#F4F4F4", op=vis[0])
+        b += text(xs[0] + 89, 40, "Web page", 18, weight="bold", op=vis[0])
+        b += box(xs[0], 60, 178, 150, C["neutral"], "#F4F4F4", op=vis[0])
         for i, line in enumerate(["by combining", "fantastic ideas,", "interesting", "arrangements, ..."]):
             b += text(xs[0] + 14, 95 + 30 * i, line, 17, anchor="start", op=vis[0])
-        b += text(xs[0] + 95, 236, "61,036 copies in C4", 16, color=C["danger"],
+        b += text(xs[0] + 89, 236, "61,036 copies in C4", 16, color=C["danger"],
                   weight="bold", op=vis[0])
         # column 2: shingles
-        b += arrow(xs[0] + 196, 135, xs[1] - 6, op=vis[1])
-        b += text(xs[1] + 95, 40, "Shingles", 18, weight="bold", op=vis[1])
+        b += arrow(xs[0] + 184, 135, xs[1] - 20, op=vis[1])
+        b += text(xs[1] + 100, 40, "Shingles", 18, weight="bold", op=vis[1])
         for i, sh in enumerate(["by combining fantastic", "combining fantastic ideas",
                                 "fantastic ideas, interesting", "ideas, interesting arr..."]):
-            b += box(xs[1] - 8, 62 + 37 * i, 206, 30, C["memory"], C["memory_l"], sw=1.5, op=vis[1], rx=4)
-            b += text(xs[1] + 95, 83 + 37 * i, sh, 14, op=vis[1])
+            b += box(xs[1] - 14, 62 + 37 * i, 228, 30, C["memory"], C["memory_l"], sw=1.5, op=vis[1], rx=4)
+            b += text(xs[1] + 100, 83 + 37 * i, sh, 15, op=vis[1])
         # column 3: signature
-        b += arrow(xs[1] + 196, 135, xs[2] - 6, op=vis[2])
+        b += arrow(xs[1] + 220, 135, xs[2] - 6, op=vis[2])
         b += text(xs[2] + 95, 40, "Signature", 18, weight="bold", op=vis[2])
         vals = ["17", "4", "92", "33", "8", "61", "25", "70"]
         for i, v in enumerate(vals):

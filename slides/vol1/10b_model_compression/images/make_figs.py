@@ -66,7 +66,10 @@ FONT = "Helvetica, Arial, sans-serif"
 # Helpers (copied from Lecture 10's generator so this folder stands alone)
 # ---------------------------------------------------------------------------
 def bars(path, rows, shown, log=False, xlim=None, xlabel=None, size=sp.SIZE,
-         vlines=(), xticks=None, note=None, label_size=13, boxed=False):
+         vlines=(), xticks=None, note=None, label_size=13, boxed=False,
+         text_size=12, axis_size=None):
+    """axis_size: tick, axis-label, and reference-line label size; raise it
+    with label_size and text_size when the plot is drawn for a column slot."""
     """Horizontal bars with a show mask; hidden rows keep their slot."""
     fig, ax = plt.subplots(figsize=size)
     n = len(rows)
@@ -81,12 +84,12 @@ def bars(path, rows, shown, log=False, xlim=None, xlabel=None, size=sp.SIZE,
         tx = r["value"] * 1.25 if log else r["value"] + (xlim[1] if xlim else 1) * 0.012
         bb = dict(facecolor="white", edgecolor="none", pad=1.0,
                   alpha=1.0 if vis else 0.0) if boxed else None
-        ax.text(r.get("tx", tx), y, r["text"], va="center", fontsize=12, bbox=bb,
+        ax.text(r.get("tx", tx), y, r["text"], va="center", fontsize=text_size, bbox=bb,
                 zorder=4, color=C[r.get("tcolor", r["color"])],
                 fontweight="bold", alpha=1.0 if vis else 0.0)
     for x, label, ck in vlines:
         ax.axvline(x, color=C[ck], lw=1.5, ls="--", zorder=1)
-        ax.text(x, n - 0.45, " " + label, color=C[ck], fontsize=10,
+        ax.text(x, n - 0.45, " " + label, color=C[ck], fontsize=axis_size or 10,
                 fontweight="bold", va="bottom", ha="left")
     if log:
         ax.set_xscale("log")
@@ -102,7 +105,9 @@ def bars(path, rows, shown, log=False, xlim=None, xlabel=None, size=sp.SIZE,
         ax.set_xticklabels([s for _, s in xticks])
         ax.minorticks_off()
     if xlabel:
-        ax.set_xlabel(xlabel)
+        ax.set_xlabel(xlabel, fontsize=axis_size)
+    if axis_size:
+        ax.tick_params(labelsize=axis_size)
     if note:
         fig.text(0.99, 0.01, note, ha="right", va="bottom", fontsize=9,
                  color=C["neutral"])
@@ -222,31 +227,31 @@ for k in (1, 2, 3):
                                ("exponent: range", C["memory_l"], C["memory"]),
                                ("mantissa: precision", C["data_l"], C["data"]),
                                ("integer levels", C["compute_l"], C["compute"])):
-        body += box(lx, 12, 22, 22, fill, stroke, 2, 2)
-        body += text(lx + 30, 30, name, 19, C["text"])
-        lx += 46 + len(name) * 10
+        body += box(lx, 8, 22, 22, fill, stroke, 2, 2)
+        body += text(lx + 30, 26, name, 20, C["text"])
+        lx += 46 + len(name) * 10.5
     for i, (name, s, e, m, b, note, step) in enumerate(formats):
-        y = 52 + i * 58
+        y = 38 + i * 44
         op = 1.0 if step <= k else 0.0
         if step == 1 and k > 1:
             op = 0.55  # recall rows recede once new formats arrive
         body += f'<g opacity="{op}">\n'
-        body += text(X0 - 12, y + 30, name, 22, C["text"], "bold", "end")
+        body += text(X0 - 12, y + 27, name, 22, C["text"], "bold", "end")
         x = X0
         for nbits, fill, stroke in ((s, C["neutral_l"], C["neutral"]),
                                     (e, C["memory_l"], C["memory"]),
                                     (m, C["data_l"], C["data"]),
                                     (b, C["compute_l"], C["compute"])):
             if nbits:
-                body += box(x, y + 6, nbits * BW, 36, fill, stroke, 2, 2)
+                body += box(x, y + 6, nbits * BW, 30, fill, stroke, 2, 2)
                 if nbits * BW >= 30:
-                    body += text(x + nbits * BW / 2, y + 31, str(nbits), 18, stroke,
+                    body += text(x + nbits * BW / 2, y + 28, str(nbits), 20, stroke,
                                  "bold", "middle")
                 x += nbits * BW
-        body += text(X0 + 32 * BW + 18, y + 31, note, 20, C["text"])
+        body += text(X0 + 32 * BW + 18, y + 28, note, 21, C["text"])
         body += "</g>\n"
     body += text(X0 + 32 * BW + 18, 30, "", 10)
-    svg(out / f"formats_step{k}.svg", 900, 470, body)
+    svg(out / f"formats_step{k}.svg", 900, 352, body)
 
 # ---------------------------------------------------------------------------
 # 3. Float grid against integer grid on one log axis (derived)
@@ -435,9 +440,9 @@ zp_rows = [
     dict(label="Asymmetric weights (z ≠ 0)", value=70.3, color="data", text="70.3"),
     dict(label="Float", value=70.9, color="neutral", text="70.9"),
 ]
-bars_save(out / "zeropoint.svg", zp_rows, [1, 1, 1], xlim=(0, 82), size=(5.4, 1.6),
-          xlabel="MobileNet-v1 top-1 (%), INT8 post-training, per-channel weights;\n"
-                 "activations quantized the same way in both")
+bars_save(out / "zeropoint.svg", zp_rows, [1, 1, 1], xlim=(0, 82), size=(6.6, 1.25),
+          label_size=15, text_size=15, axis_size=14,
+          xlabel="MobileNet-v1 top-1 (%), INT8 post-training, per-channel weights")
 
 # ---------------------------------------------------------------------------
 # 8b. Symmetric and asymmetric mapping at slide size (redraw after the
@@ -781,7 +786,8 @@ px_rows = [
     dict(label="INT8, CPU", value=calcs.PX2_INT8_CPU, color="compute", text=px_text(calcs.PX2_INT8_CPU)),
     dict(label="INT8, DSP", value=calcs.PX2_INT8_DSP, color="data", text=px_text(calcs.PX2_INT8_DSP)),
 ]
-bars_save(out / "pixel2.svg", px_rows, [1, 1, 1], xlim=(0, 150), size=(5.0, 1.9),
+bars_save(out / "pixel2.svg", px_rows, [1, 1, 1], xlim=(0, 150), size=(4.0, 1.5),
+          label_size=15, text_size=15, axis_size=14,
           vlines=[(calcs.FRAME_MS, "33 ms frame", "danger")], boxed=True,
           xlabel="MobileNetV2 on a Pixel 2, one image (ms)")
 
@@ -794,36 +800,42 @@ stream_rows = [
     dict(label="ResNet-50, FP32", value=2.0, color="memory", text="2 ms"),
     dict(label="GPT-2 XL, FP16", value=59, color="danger", text="59 ms per token"),
 ]
-bars_save(out / "stream.svg", stream_rows, [1, 1, 1], xlim=(0, 80), size=(4.6, 2.2),
+bars_save(out / "stream.svg", stream_rows, [1, 1, 1], xlim=(0, 80), size=(3.6, 1.6),
+          label_size=15, text_size=15, axis_size=14,
           vlines=[(calcs.FRAME_MS, "33 ms frame", "compute")], boxed=True,
           xlabel="Read every weight once at 51.2 GB/s (ms)")
 
-stages = ["FP32\nCPU", "Pruned\nCPU", "Pruned INT8\naccelerator"]
+stages = ["FP32, CPU", "Pruned, CPU", "Pruned INT8,\naccelerator"]
 memv = [14.0, 10.4, 2.6]
 timev = [125, 87, 20]
+# Drawn for a half-slide slot: stages are rows, shared by both panels, so
+# every label stays at slide-legible size.
 for k in (2, 3):
-    fig, (a1, a2) = plt.subplots(1, 2, figsize=(5.8, 2.3))
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(4.4, 1.55), sharey=True,
+                                 gridspec_kw={"wspace": 0.12})
     for ax, vals, ck, unit, ttl in ((a1, memv, "memory", "MB", "Weight memory (MB)"),
                                     (a2, timev, "compute", "ms", "Frame time (ms)")):
         for i, v in enumerate(vals):
             a = 1.0 if i < k else 0.0
-            ax.bar(i, v, color=C[ck], width=0.7, alpha=a)
-            inside_bar = ck == "compute" and v < 40
-            ax.text(i, v / 2 if inside_bar else v + max(vals) * 0.03, f"{v:g} {unit}",
-                    ha="center", va="center" if inside_bar else "bottom",
-                    fontsize=10 if inside_bar else 11, fontweight="bold",
-                    color="white" if inside_bar else C[ck], alpha=a)
-        ax.set_xticks(range(3))
-        ax.set_xticklabels(stages, fontsize=9)
-        ax.set_ylim(0, max(vals) * 1.2)
-        ax.set_title(ttl, fontsize=12, fontweight="bold")
-        ax.tick_params(axis="y", labelsize=10)
-    a2.axhline(33, color=C["danger"], lw=1.5, ls="--")
-    a2.text(2.45, 33, " 33 ms\n budget", color=C["danger"], fontsize=11, fontweight="bold",
-            ha="left", va="center", clip_on=False)
-    fig.text(0.01, -0.02, "Illustrative scenario (Example 10.1)", fontsize=9,
+            y = 2 - i
+            ax.barh(y, v, color=C[ck], height=0.62, alpha=a)
+            ax.text(v + max(vals) * 0.04, y, f"{v:g} {unit}", ha="left", va="center",
+                    fontsize=13, fontweight="bold", color=C[ck], alpha=a)
+        ax.set_xlim(0, max(vals) * 1.6)
+        ax.set_xticks([])
+        ax.spines["bottom"].set_visible(False)
+        ax.spines["left"].set_color(C["neutral"])
+        ax.set_title(ttl, fontsize=13, fontweight="bold")
+    a1.set_yticks(range(3))
+    a1.set_yticklabels(stages[::-1], fontsize=13)
+    a1.tick_params(axis="y", length=0)
+    a2.tick_params(axis="y", length=0)
+    a1.set_ylim(-0.5, 2.5)
+    a2.axvline(33, color=C["danger"], lw=1.5, ls="--")
+    a2.text(36, -0.45, "33 ms budget", color=C["danger"], fontsize=12.5,
+            fontweight="bold", ha="left", va="bottom")
+    fig.text(0.01, -0.08, "Illustrative scenario (Example 10.1)", fontsize=12.5,
              color=C["neutral"])
-    fig.tight_layout(w_pad=1.5)
     sp.save(fig, out / f"waterfall_step{k}.svg")
 
 # The frame-time-only waterfall figure was retired 2026-10-18:

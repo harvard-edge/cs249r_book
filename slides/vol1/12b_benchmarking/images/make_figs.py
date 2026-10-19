@@ -148,18 +148,21 @@ for k in (1, 2):
 # =============================================================================
 # Recall thumbnail: Lecture 12's hook (illustrative, Sec. 12.7)
 # =============================================================================
-fig, ax = plt.subplots(figsize=(3.4, 1.5))
-for y, lab, v, ck, txt in ((1, "Datasheet: 10 TOPS at 0.5 W", 20, "compute", "20 TOPS/W"),
-                           (0, "Sustained: 3 TOPS at 2 W", 1.5, "danger", "1.5 TOPS/W")):
+# Drawn for its column slot (about 2.4 by 1.2 in), with type to match.
+fig, ax = plt.subplots(figsize=(2.5, 1.45))
+for y, lab, v, ck, txt in ((1, "Datasheet:\n10 TOPS at 0.5 W", 20, "compute", "20 TOPS/W"),
+                           (0, "Sustained:\n3 TOPS at 2 W", 1.5, "danger", "1.5 TOPS/W")):
     ax.barh(y, v, color=C[ck], height=0.62)
-    ax.text(v + 0.4, y, txt, va="center", fontsize=12, fontweight="bold", color=C[ck])
-    ax.text(-0.3, y, lab, ha="right", va="center", fontsize=12, fontweight="bold")
+    ax.text(v + 0.6, y, txt, va="center", fontsize=14, fontweight="bold", color=C[ck])
+    ax.text(-0.6, y, lab, ha="right", va="center", fontsize=14, fontweight="bold",
+            linespacing=1.0)
 ax.set_xlim(0, 30)
 ax.set_xticks([0, 10, 20])
+ax.tick_params(labelsize=14)
 ax.set_yticks([])
 ax.spines["left"].set_visible(False)
-ax.set_xlabel("TOPS per watt")
-tag(ax, "Illustrative (Benchmarking, §12.7)", (-0.9, -0.62))
+ax.set_xlabel("TOPS per watt", fontsize=14)
+# "Illustrative" is on the slide's credit line, which this slot leaves room for.
 sp.save(fig, out / "recall_hook.svg")
 
 # =============================================================================
@@ -280,21 +283,26 @@ for k in (1, 2, 3):
 # =============================================================================
 # One formula, three sample sizes (log bars)
 # =============================================================================
-fig, ax = plt.subplots(figsize=(5.8, 1.15))
+# Drawn for its wide, short slot (about 5.0 by 0.8 in), with type to match.
+fig, ax = plt.subplots(figsize=(7.2, 1.05))
 rows = [("accuracy", N_ACC, "data", f"{N_ACC:,.0f} images"),
         ("p90", N_P90, "memory", f"{N_P90:,.0f} queries"),
         ("p99", N_P99, "danger", f"{N_P99:,.0f} queries")]
 for i, (lab, v, ck, txt) in enumerate(rows):
     y = 2 - i
     ax.barh(y, v, color=C[ck], height=0.62)
-    ax.text(v * 1.15, y, txt, va="center", fontsize=12, fontweight="bold", color=C[ck])
-    ax.text(700, y, lab, ha="right", va="center", fontsize=12, fontweight="bold")
+    ax.text(v * 1.15, y, txt, va="center", fontsize=16, fontweight="bold", color=C[ck])
+    ax.text(700, y, lab, ha="right", va="center", fontsize=16, fontweight="bold")
 ax.set_xscale("log")
 ax.set_xlim(800, 6e6)
+ax.set_xticks([1e3, 1e4, 1e5, 1e6])
+ax.set_xticklabels(["1,000", "10,000", "100,000", "1,000,000"])
+ax.minorticks_off()
+ax.tick_params(labelsize=14)
 ax.set_ylim(-0.6, 2.6)
 ax.set_yticks([])
 ax.spines["left"].set_visible(False)
-ax.set_xlabel("Samples needed (log scale)", fontsize=11)
+ax.set_xlabel("Samples needed (log scale)", fontsize=15)
 sp.save(fig, out / "sizing.svg")
 
 # =============================================================================

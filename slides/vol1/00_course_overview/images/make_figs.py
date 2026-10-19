@@ -135,12 +135,14 @@ sp.hbars_steps(out / "energy_per_op", [
 ], "pJ", xlabel="Energy (picojoules, log scale; 45 nm, Horowitz 2014)", value_fmt="{:g}")
 
 # One model, four machines: power envelope by deployment tier
-sp.hbars_steps(out / "power_tiers", [
-    ("Cloud", 3e6, "neutral", "3 MW"),
-    ("Edge", 200, "neutral", "200 W"),
-    ("Mobile", 5, "neutral", "5 W"),
-    ("TinyML", 1e-3, "neutral", "1 mW"),
-], "W", xlabel="Power (watts, log scale)", value_fmt="{:g}")
+# Tick labels at 14 pt so the powers of ten stay legible in the column slot.
+with sp.plt.rc_context({"xtick.labelsize": 14}):
+    sp.hbars_steps(out / "power_tiers", [
+        ("Cloud", 3e6, "neutral", "3 MW"),
+        ("Edge", 200, "neutral", "200 W"),
+        ("Mobile", 5, "neutral", "5 W"),
+        ("TinyML", 1e-3, "neutral", "1 mW"),
+    ], "W", xlabel="Power (watts, log scale)", value_fmt="{:g}")
 
 # Silent failure (illustrative, after the Introduction's figure in Sec. 1.6):
 # infrastructure health stays flat while recall falls from 95 to 85 percent.

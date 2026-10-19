@@ -217,7 +217,8 @@ steps("decoded_bytes", [
     (f"Decoded FP32, {K.decoded_B / K.KB:.0f} KB", K.decoded_need_GBs * 1000, "danger",
      f"{K.decoded_need_GBs:.1f} GB/s  ({K.decoded_loss:.0%} lost)"),
 ], lines=[(K.SUPPLY_MBS, f"Supply: {K.SUPPLY_MBS} MB/s", "neutral", 1.07)], log_x=False,
-    xlim=(0, 3000), size=(5.6, 1.75), xlabel="Storage bandwidth needed at 3,200 img/s (MB/s)")
+    xlim=(0, 3000), size=(6.4, 1.3), fs=15, tick_fs=14,
+    xlabel="Storage bandwidth needed at 3,200 img/s (MB/s)")
 
 # 7. Storage supply against demand (MB/s): today, the ceiling, eight A100s
 supply_rows = [
@@ -283,36 +284,38 @@ steps("format_bytes", [
     ("Row format (CSV)", 100, "neutral", f"reads {K.COLS_ALL} of {K.COLS_ALL} columns"),
     ("Columnar (Parquet)", 100 * K.COLS_USED / K.COLS_ALL, "data",
      f"reads {K.COLS_USED} columns: {K.COLS_ALL // K.COLS_USED}× less"),
-], log_x=False, xlim=(0, 175), size=(5.6, 1.5),
+], log_x=False, xlim=(0, 175), size=(6.0, 1.1), fs=15, tick_fs=14,
     xlabel="Share of the table read from disk (%)")
 
 # 9b. The profiler's step breakdown, PyTorch tutorial (published values in calcs.py)
 def profiler_bars():
     rows = [("Default", K.PROF["default loader"]),
             ("4 workers", K.PROF["num_workers=4"])]
-    fig, ax = plt.subplots(figsize=(5.4, 1.75))
+    # Drawn for its column slot (about 3.5 by 1.1 in), with type to match.
+    fig, ax = plt.subplots(figsize=(4.6, 1.1))
     for i, (lab, v) in enumerate(rows):
         y = 1 - i
         dl, rest = v["DataLoader"] / 1000, (v["step"] - v["DataLoader"]) / 1000
         ax.barh(y, dl, color=C["danger"], height=0.6)
         ax.barh(y, rest, left=dl, color=C["neutral_l"], height=0.6)
-        ax.text(-3, y, lab, ha="right", va="center", fontsize=13, color=C["text"])
+        ax.text(-3, y, lab, ha="right", va="center", fontsize=15, color=C["text"])
         ax.text(dl + rest + 2, y, f"{v['step'] / 1000:.1f} ms", va="center",
-                fontsize=13, fontweight="bold", color=C["text"])
+                fontsize=15, fontweight="bold", color=C["text"])
         if dl > 20:
             ax.text(dl / 2, y, f"DataLoader {v['dl_pct']:.1f}%", ha="center", va="center",
-                    fontsize=12, fontweight="bold", color="white")
+                    fontsize=14, fontweight="bold", color="white")
             ax.text(dl + rest / 2, y, "rest of step", ha="center", va="center",
-                    fontsize=12, color=C["text"])
+                    fontsize=14, color=C["text"])
         else:
             ax.text(dl + 2, y, f"DataLoader {v['dl_pct']:.1f}%",
-                    ha="left", va="center", fontsize=12, color=C["text"])
+                    ha="left", va="center", fontsize=14, color=C["text"])
     ax.set_xlim(0, 160)
     ax.set_ylim(-0.6, 1.6)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
     ax.set_xticks([0, 50, 100, 150])
-    ax.set_xlabel("Average step time (ms)")
+    ax.tick_params(axis="x", labelsize=14)
+    ax.set_xlabel("Average step time (ms)", fontsize=14)
     sp.save(fig, out / "profiler_steps.svg")
 
 

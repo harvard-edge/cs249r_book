@@ -79,11 +79,13 @@ for k in (1, 2):
     sp.save(fig, out / f"palm_spike_step{k}.svg")
 
 # 2. One training run against one generated token (log scale) ---------------
-sp.hbars_steps(out / "train_vs_token", [
-    ("One generated token", 3.0e9, "neutral", "3 × 10⁹ FLOPs"),
-    ("One training run", calcs.RUN_FLOP, "compute",
-     f"1.5 × 10²¹  = {calcs.RUN_FLOP / calcs.FLOP_PER_TOKEN_FWD / 1e9:.0f} billion tokens"),
-], "FLOPs", xlabel="Arithmetic (FLOPs, log scale), GPT-2", size=sp.SHORT)
+# Tick labels at 14 pt so the powers of ten stay legible on the slide.
+with sp.plt.rc_context({"xtick.labelsize": 14}):
+    sp.hbars_steps(out / "train_vs_token", [
+        ("One generated token", 3.0e9, "neutral", "3 × 10⁹ FLOPs"),
+        ("One training run", calcs.RUN_FLOP, "compute",
+         f"1.5 × 10²¹  = {calcs.RUN_FLOP / calcs.FLOP_PER_TOKEN_FWD / 1e9:.0f} billion tokens"),
+    ], "FLOPs", xlabel="Arithmetic (FLOPs, log scale), GPT-2", size=sp.SHORT)
 
 # 3. FLOPs per token: inference 2P, training 6P -------------------------------
 for k in (1, 2):
