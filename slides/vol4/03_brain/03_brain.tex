@@ -1,0 +1,617 @@
+% =============================================================================
+% Lecture 3: The Cognitive Brain
+% Physical AI: Machine Learning Systems That Sense and Act (Volume IV), Chapter 3
+% =============================================================================
+% Thesis: a learned proposer's renewal rate is bounded by the weight bytes it
+% streams per evaluation, and action chunking keeps the actuators supplied
+% without making the evidence behind the motion any fresher.
+% Running case: the warehouse mobile manipulator picks a mug off a conveyor;
+% a 7B intent model (INT4, 336 ms, 2 Hz) above an 80M chunk policy (20 Hz,
+% 16 setpoints 25 ms apart) on a Jetson AGX Orin, checked on a 1 kHz tick.
+% Hook and synthesis: the Jetson AI Lab log of OpenVLA-7B at INT4, 336 ms.
+%
+% Build: make deck V=4 D=03_brain   (figures: images/make_figs.py; numbers: images/calcs.py)
+% Plan:  lecture_map.yml in this folder.
+% =============================================================================
+
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+\mlsyssetup{
+  volume={Volume IV},
+  chapter={Chapter 3},
+  chaptertitle={The Cognitive Brain},
+  layer=brain,
+  logo={../../assets/img/logo-mlsysbook.png},
+  instlogo={../../assets/img/logo-harvard.png},
+}
+\usepackage[T1]{fontenc}
+\usepackage[scaled=0.9]{helvet}
+\usepackage{courier}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{booktabs,amsmath}
+\graphicspath{{images/}}
+\setcounter{mlsystotalsections}{4}
+
+% Figure colors, for text beside the figures
+\definecolor{figcompute}{HTML}{E67817}
+\definecolor{figmemory}{HTML}{006395}
+\definecolor{fignavy}{HTML}{1F407A}
+\definecolor{figprop}{HTML}{2563EB}
+\definecolor{figgreen}{HTML}{059669}
+\definecolor{figred}{HTML}{DC2626}
+
+\title{The Cognitive Brain}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+% A large answer choice for predict and concept-question slides
+\newcommand{\choice}[2]{\textbf{\textcolor{mlsysaccent}{#1}}\enspace #2}
+% A choice that is highlighted from overlay #1 on (the answer)
+\newcommand{\answerat}[3]{\alt<#1->{\colorbox{mlsysaccent!15}{\choice{#2}{#3}}}{\choice{#2}{#3}}}
+% A goal or takeaway line with its text-free thumbnail
+\newcommand{\thumbline}[2]{%
+  \begin{minipage}[c]{2.6cm}\centering\includegraphics[width=2.5cm,height=0.95cm,keepaspectratio]{#1}\end{minipage}%
+  \hspace{0.3cm}\begin{minipage}[c]{0.74\textwidth}\small #2\end{minipage}}
+% One line of a worked example: shown from overlay #1 on
+\newcommand{\wstep}[2]{\uncover<#1->{#2}\\[0.2cm]}
+% An exact excerpt of real tool output, a config file, or source code
+\newenvironment{logblock}[1][7]{\par\ttfamily\fontsize{#1}{8.6}\selectfont\raggedright\setlength{\parskip}{0pt}}{\par}
+% Code indentation of n spaces in the current monospace font
+\newcommand{\ind}[1]{\hspace*{#1\fontcharwd\font`0}}
+
+\begin{document}
+
+% =============================================================================
+% TITLE AND HOOK
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Read the thesis aloud once. Lecture 2 sized what the body can deliver; today is the learned model that decides what to ask the body for, and what that model costs on the robot's own processor. The notes total about 71 minutes; the [OPTIONAL] notes add up to about 10, so cutting all of them leaves a 61-minute lecture. Cut first the classical-wall photos, the cadence plot, the KV ladder, and the token-halving estimate. Every derived number is printed by images/calcs.py.}
+\mlsystitle{The Cognitive Brain}{A learned proposer renews only as fast as it streams its weights, and a chunk of setpoints keeps the arm moving without making its evidence any fresher.}{cover_brain_blueprint.png}
+
+\begin{frame}{How far does the base travel per answer?}
+  \mlsysactivity{Predict}{2 min}
+  {\small A real log line: OpenVLA-7B with 4-bit (INT4) weights on a Jetson AGX Orin}\par\vspace{0.1cm}
+  \begin{mlsyscard}{mlsysaccent}
+  \begin{logblock}[7.5]
+  \# INT4\\
+  step 355\ind{2}[-0.02692\ind{2}0.00776 -0.00299\ind{2}0.08160\ind{2}0.07292\ind{2}0.04791\ind{2}0.99608]\\
+  \ind{9}accuracy 0.8466 \textasciitilde0.9017\ind{2}\textbf{\textcolor{figred}{time=336.2 ms}}\ind{2}fps=2.96 \textasciitilde2.97
+  \end{logblock}
+  \end{mlsyscard}
+  \vspace{0.15cm}
+  \begin{columns}[c]
+    \begin{column}{0.30\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.6cm,keepaspectratio]{jetson-agx-orin-devkit.png}
+    \end{column}
+    \begin{column}{0.66\textwidth}
+      {\normalsize The base drives at its 1.5 m/s limit. How far does it move while the model computes this one answer?}\\[0.25cm]
+      {\normalsize\choice{A}{5 mm}\quad\choice{B}{50 mm}\quad\answerat{2}{C}{0.5 m}\quad\choice{D}{5 m}}\\[0.2cm]
+      \uncover<2->{\small $0.336~\text{s} \times 1.5~\text{m/s} = \mathbf{\textcolor{figred}{504~mm}}$ (derived)}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Log: Jetson AI Lab OpenVLA tutorial (Franklin 2024), Orin 64GB, JetPack 6; one line, wrapped. Photo: Auledas, CC BY 4.0, Wikimedia Commons.}
+  \note{[3.5 min] NARRATE: this is one line of real output from NVIDIA's Jetson AI Lab tutorial. OpenVLA is an open 7-billion-parameter vision-language-action (VLA) model. It reads a camera image and an instruction and returns 7 numbers, a step of hand motion (three position changes, three rotation changes, and the gripper). The model ran with 4-bit integer (INT4) weights on a Jetson AGX Orin, the module our running machine carries. One frame took 336.2 ms; the mean over the run was 336 ms. ENGAGE: vote with fingers. Step 2: C. 0.336 s times the base's 1.5 m/s drive limit is 504 mm, about half a meter, before the answer exists (derived). Students who chose A or B are thinking of the 1 kHz loops that run underneath, not of a 7B model. WARN: the picture is a developer kit; the robot uses the same module inside its chassis. LINK: Lecture 2 showed that the body can stop only so fast; today asks what the learned brain costs in time. FLEX: [CORE]. The synthesis splits the 336 ms into its two parts.}
+\end{frame}
+
+\begin{frame}{The running machine picks a mug off a moving conveyor}
+  \begin{columns}[c]
+    \begin{column}{0.27\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.0cm,keepaspectratio]{erflex-mobile-manipulator.jpg}\\[0.05cm]
+      {\scriptsize A mobile manipulator: an arm on a wheeled base}
+    \end{column}
+    \begin{column}{0.27\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.0cm,keepaspectratio]{franka-panda-arm.jpg}\\[0.05cm]
+      {\scriptsize Franka Emika Panda, the running machine's arm}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \begin{mlsyscard}{mlsysaccent}\footnotesize
+        \textbf{Processor:} Jetson AGX Orin, 43 TFLOP/s in 16-bit floating point (FP16), 204 GB/s of memory bandwidth\\[0.06cm]
+        \textbf{\textcolor{fignavy}{Intent model:}} 7B parameters, 2 Hz\\[0.06cm]
+        \textbf{\textcolor{fignavy}{Chunk policy:}} 80M, 20 Hz, 16 setpoints (joint targets) 25 ms apart\\[0.06cm]
+        \textbf{\textcolor{figgreen}{Permission path:}} 1 kHz tick\\[0.06cm]
+        \textbf{Mug:} belt 0.20 m/s, grasp tolerance 15 mm
+      \end{mlsyscard}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photos: ER-FLEX, Auledas, CC BY 4.0; Franka Emika arm, Ims, CC BY-SA 4.0; Wikimedia Commons. Values: machine card (Lecture 1); Ch.\ 3, Napkin Math 3.1 to 3.3.}
+  \note{[1.5 min] NARRATE: one task carries the whole lecture. The warehouse mobile manipulator, a wheeled base with an arm, must take a ceramic mug off a conveyor moving at 0.20 m/s and hand it to a coworker. The left photo is a real mobile manipulator of this kind (a MiR250 base with a UR16e arm), not our machine; the middle photo is the arm model our machine uses. Read the card. The application processor is the Orin; a large intent model names the target; a small chunk policy emits short sequences of setpoints, the joint targets the drives track; a separate permission path checks every proposal on a 1 kHz tick. LINK: the machine card is Lecture 1's; the rates on it are design choices this lecture prices and checks. ENGAGE: why would a machine carry two learned models instead of one? Take one answer and hold it until the Chunks segment. WARN: the card mixes chosen, derived, and illustrative values; the 70 percent bandwidth and 40 ms inference are illustrative. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Who may command, and how long is evidence fresh?}
+  \mlsysactivity{Retrieval}{1.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.58\textwidth}
+      {\Large\bfseries Close your notes.}\\[0.2cm]
+      {\normalsize Which side of the proposal boundary may command the drives? When does a measurement stop being fresh enough to act on?}\\[0.3cm]
+      \uncover<2->{\small\textbf{\textcolor{mlsysaccent}{Below}} the proposal boundary may command; the Brain above it may only propose (Lecture 1).\\[0.12cm]
+      Fresh while error ceiling $/$ speed bound has not elapsed (Lecture 2).}
+    \end{column}
+    \begin{column}{0.38\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.0cm,keepaspectratio]{thumb_drift_step1.pdf}\\[0.05cm]
+      {\footnotesize Error grows with speed until it reaches the ceiling.}\\[0.15cm]
+      \uncover<3->{\begin{mlsyscard}{mlsysaccent}\footnotesize Today's mug: 12 mm of margin $/$ 0.20 m/s $=$ \textbf{60 ms}.\end{mlsyscard}}
+    \end{column}
+  \end{columns}
+  \note{[1.5 min] NARRATE: 45 seconds, pens only. Step 2: Lecture 1's proposal boundary separates the learned models, which may only propose, from the permission path and drives, which may command. Lecture 2's freshness deadline says a measurement may support action only until the error it accumulates, speed times age, reaches the ceiling the task allows. Step 3: today's numbers. The mug's handle estimate starts 3 mm off and the grasp tolerates 15 mm, so 12 mm of margin; at the belt's 0.20 m/s that margin lasts 60 ms (Napkin Math 3.3). ENGAGE: is 60 ms longer or shorter than the 336 ms the intent model takes? (Expected: much shorter, which is the lecture's problem.) WARN: students place the permission path above the boundary because it decides; it sits below, on its own processor. LINK: Lecture 2's five budgets set what the body can deliver; today adds what the brain can deliver, and when. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Why can a robot recognize what to do yet act too late?}
+  \thumbline{thumb_mlperf_step2.pdf}{Place a learned model's latency against the robot's 50 ms and 500 ms periods, using measurements on its own processor.}\\[0.2cm]
+  \thumbline{thumb_eval_step2.pdf}{Compute the weight-streaming ceiling and one evaluation's prefill and decode; say what quantization shortens.}\\[0.2cm]
+  \thumbline{thumb_strip_step3.pdf}{Size an action chunk for supply, and bound its execution by the evidence horizon.}\\[0.2cm]
+  \thumbline{thumb_conf_success.pdf}{Say what a proposal must carry so the permission path can refuse it.}\\[0.15cm]
+  {\footnotesize\textcolor{midgray}{Part I, the first law (Lecture 1): irreversibility. Motion executed on stale or wrong evidence cannot be recalled.}}
+  \note{[1 min] LINK: Lecture 2 ended at what the body can deliver. NARRATE: the driving question is the chapter's: why can a robot recognize what to do yet still be too late to act? Four goals, one per segment; each thumbnail is the shape of the figure that teaches it. The footer names the part's law, irreversibility, from Lecture 1. Work delivered across the causal boundary cannot be recalled, so a proposal computed on evidence that has aged, or that names the wrong object, is a physical cost. FLEX: [CORE]. Lecture 3 adds no record of its own to the record chain; its proposer limits enter Lecture 4's handoff record.}
+\end{frame}
+
+% =============================================================================
+% SECTION: PROPOSERS
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] First segment: why a learned proposer at all, what it reads, and how its cost compares with the robot's periods on the robot's own module.}
+\mlsysdivider{What does a learned proposer read, and what does it cost?}{The Cognitive Brain, \S3.2, \S3.3, and the opening of \S3.4}
+\section{Proposers}
+
+\begin{frame}{A fixtured welding cell can be modeled; a rescue arena cannot}
+  \begin{columns}[T]
+    \begin{column}{0.49\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.1cm,keepaspectratio]{welding-cell-bmw-leipzig.jpg}\\[0.06cm]
+      {\footnotesize Parts arrive at known poses in fixtures.}
+    \end{column}
+    \begin{column}{0.49\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.1cm,keepaspectratio]{rescue-robot-hector.jpg}\\[0.06cm]
+      {\footnotesize Nothing arrives at a known pose.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Left: BMW Werk Leipzig body shop, CC BY-SA 2.0 DE. Right: Hector (TU Darmstadt), RoboCup German Open 2010, Mike1024, public domain. Wikimedia Commons.}
+  \note{[1.5 min] LINK: the hook's model exists because of the right-hand photo. NARRATE: left, robots spot-weld car bodies at BMW's Leipzig plant. Each chassis sits in a fixture to a fraction of a millimeter, under controlled light, behind interlock fences, so engineers can write the motion with geometry and state machines and prove properties about it. Right, a rescue robot in a test arena of tilted ramps with a doll on a shelf. No part arrives at a known pose and no CAD template describes the terrain. Hand-written rules multiply faster than they can be tested; this is the classical wall (\S3.2). Learned models enter here, trained on demonstrations. ENGAGE: is the conveyor mug pick closer to the left or the right? (Expected: the right; the mug is unfamiliar, randomly oriented, and moving.) WARN: learning does not replace the analytical controller; the feedback loops still run underneath. Learning adds a proposal stage whose cost this lecture prices. FLEX: [OPTIONAL]; skip and state the classical wall in one sentence.}
+\end{frame}
+
+\begin{frame}{OpenVLA reads 256 tokens from each 224-pixel camera view}
+  \begin{columns}[T]
+    \begin{column}{0.52\textwidth}
+      {\footnotesize\textbf{openvla/openvla-7b, config.json} (excerpt)}\par\vspace{0.06cm}
+      \begin{mlsyscard}{mlsysaccent}
+      \begin{logblock}[7]
+      "hf\_llm\_id": "meta-llama/Llama-2-7b-hf",\\
+      "image\_sizes": [\\
+      \ind{2}224,\\
+      \ind{2}224\\
+      ],\\
+      "n\_action\_bins": 256,\\
+      "timm\_model\_ids": [\\
+      \ind{2}"vit\_large\_\textbf{\textcolor{figred}{patch14}}\_reg4\_dinov2.lvd142m",\\
+      \ind{2}"vit\_so400m\_\textbf{\textcolor{figred}{patch14}}\_siglip\_224"\\
+      ],\\
+      "torch\_dtype": "bfloat16",
+      \end{logblock}
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.45\textwidth}\small
+      A token is one slice of input: an image patch, a word piece, a joint angle.\\[0.15cm]
+      \wstep{2}{$224 / 14 = 16$ patches a side, $16^2 = \mathbf{256}$ tokens per view}
+      \wstep{3}{3 views $+$ 32 prompt $+$ 16 state $\approx$ \textbf{800} tokens}
+      \wstep{4}{Embeddings: $800 \times 4{,}096 \times 2$ B $=$ 6.55 MB, against \textbf{\textcolor{figmemory}{14 GB}} of 16-bit weights}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{huggingface.co/openvla/openvla-7b, config.json (key order kept, other keys omitted). Arithmetic: Ch.\ 3, \S3.3 (illustrative three-camera case).}
+  \note{[2.5 min] LINK: the hook's 7 numbers come out of this model. NARRATE: a real file, the configuration that ships with OpenVLA-7B. It names its language backbone (Llama 2 7B), its 16-bit weight format (bfloat16), its input size (224 by 224 pixels), its two vision encoders, both with patch14 in the name, and 256 bins per action value. A transformer reads tokens, vectors that each stand for one slice of input. Step 2: 224 over 14 is 16 patches a side, 256 patch tokens per camera view. Step 3: the chapter's illustrative robot has three cameras (two wrists and an overhead mount): 768 patch tokens, plus about 32 instruction tokens and 16 joint-state tokens, about 800. Step 4: storing those 800 tokens at width 4,096 in 16 bits takes 6.55 MB. The weights take 14 GB, about 2,000 times more. ENGAGE: so where does the cost of a token go? (Expected: into the arithmetic every weight performs on it, and the cache it leaves; the storage is negligible.) WARN, for ML students: attention weights are not geometry; a strong weight between ``mug handle'' and a patch does not place the handle in meters. Appendix ML reviews transformers. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Every retained token costs 0.52 MB of key-value cache}
+  \centering
+  \safeimg[width=12.4cm]{kv_ladder.pdf}\\[0.15cm]
+  {\small OpenVLA keeps nothing between frames. Keeping 5 s of history at 10 Hz would cost \textbf{\textcolor{figred}{21.0 GB}}, more than the weights.}
+  \mlsyscredit{Ch.\ 3, equation 1 and \S3.5.2: $2 \times 32 \times 4{,}096 \times 2$ B per token, 800 tokens per step; hypothetical history. Module: 64 GiB $=$ 68.7 GB.}
+  \note{[1.5 min] LINK: the previous slide's tokens, kept. NARRATE: to relate each new token to earlier ones, every layer keeps a key and a value vector for every token it has seen: the key-value (KV) cache. For a 32-layer model of width 4,096 in 16 bits, that is 2 times 32 times 4,096 times 2 bytes, 524,288 bytes, about 0.52 MB per token. One 800-token step adds 419 MB. Single-frame models such as OpenVLA rebuild the context every frame and carry no cache, and so does our intent model. A variant that kept 5 seconds of history at 10 frames a second would hold 21.0 GB, more than the 14 GB of weights; together 35.0 GB, half of the module's 68.7 GB. ENGAGE: does that history make the model's answer fresher? (Expected: no; it adds bytes to read on the same bus that delivers camera frames.) WARN: this is the chapter's hypothetical extension, not a measured cache of a published checkpoint. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Which models answer within 50 ms on the Orin?}
+  \mlsysactivity{Predict}{2 min}
+  \centering
+  \mlsyssteps[width=14.2cm]{mlperf_step}{2}\\[0.05cm]
+  \uncover<2->{\small On the same module, \textbf{3 of 7} fit the chunk period; GPT-J 6B takes 4.2 s.}
+  \mlsyscredit{MLPerf Inference edge, single stream, p90; Jetson AGX Orin Developer Kit 64G (TensorRT); v3.1, v4.1 for GPT-J and SDXL; MLCommons via MLSysIM. Ch.\ 3, figure 9.}
+  \note{[3 min] NARRATE: MLPerf Inference is the industry benchmark; its single-stream test times one query at a time, as a robot issues them. These are NVIDIA's published results on the 64 GB Jetson AGX Orin. The red lines are the running machine's two periods: a new chunk every 50 ms, a new intent every 500 ms. ENGAGE: students predict how many of the seven models answer inside 50 ms, then vote. Step 2: three. Image classification in 0.64 ms, question answering in 5.7 ms, object detection in 11.7 ms. Speech recognition takes 94 ms. A 6-billion-parameter language model takes 4.2 s per summary, 8.4 times the intent period; the span from fastest to slowest is about 16,000 times. WARN: the GPT-J time is a whole summary, many tokens, not one robot answer; the point is the class of model. The same submission measured 10.2 s one round earlier on identical hardware, so software sets the cost as much as silicon. LINK: the next segment explains which bytes set these times. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: MEMORY WALL
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Land the first segment aloud: a learned proposer buys coverage of objects no engineer listed, and on the robot's module a large one answers in hundreds of milliseconds. Now find out why, from the bytes it moves.}
+\mlsysdivider{How often can a 7B model give a fresh answer on the Orin?}{The Cognitive Brain, \S3.4.1 (Definition 3.1, Napkin Math 3.1) and \S3.4.2}
+\section{Memory Wall}
+
+\begin{frame}{Each fresh evaluation streams every weight from DRAM}
+  \begin{columns}[c]
+    \begin{column}{0.27\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.3cm,keepaspectratio]{jetson-agx-orin-devkit.png}\\[0.08cm]
+      {\footnotesize Jetson AGX Orin\\[0.03cm]
+      \textbf{\textcolor{figcompute}{43 TFLOP/s}} dense FP16\\
+      \textbf{\textcolor{figmemory}{204 GB/s}} LPDDR5,\\ shared with the CPU}
+    \end{column}
+    \begin{column}{0.71\textwidth}
+      \centering
+      \only<1|handout:0>{\mlsyskitfig[width=\textwidth,height=4.5cm,keepaspectratio]{machine_hl_sram}}%
+      \only<2-|handout:1>{\mlsyskitfig[width=\textwidth,height=4.5cm,keepaspectratio]{machine_hl_hbm}}\\[0.02cm]
+      {\scriptsize\textcolor{midgray}{DRAM is the off-chip memory. The kit draws it as HBM; the Orin uses LPDDR5.}}
+    \end{column}
+  \end{columns}
+  \vspace{0.1cm}
+  \centering\uncover<3->{\small $f \le BW_{\text{sus}} / M_{\text{weights}} = 14~\text{GB} / 142.8~\text{GB/s}$, so 98.0 ms per sweep and at most $\mathbf{\textcolor{figred}{10.2~Hz}}$}
+  \mlsyscredit{Photo: Auledas, CC BY 4.0, Wikimedia Commons. Ch.\ 3, Definition 3.1 and Napkin Math 3.1: 70\% of the 204 GB/s peak sustained (illustrative).}
+  \note{[3 min] NARRATE: real, then abstract. The Orin promises 43 trillion 16-bit operations per second and 204 GB/s of memory bandwidth, shared by its CPU, GPU, and camera interfaces. Step 1: the abstract node. On-chip memory (SRAM) is fast but holds megabytes. Step 2: a 7B model's 14 GB of 16-bit weights cannot stay on chip, so every fresh evaluation reads them from off-chip memory. Step 3: the memory wall. At batch size 1 a robot has one request; each fetched weight is used once and discarded. At the chapter's illustrative 70 percent sustained bandwidth, 142.8 GB/s, one sweep takes 98.0 ms: at most 10.2 fresh evaluations per second before any vision or decoding, 98 times below the permission tick. ENGAGE: which helps more, a faster arithmetic unit or fewer bytes? (Expected: fewer bytes, or more bandwidth.) WARN, for embedded students: the kit labels off-chip memory HBM; the Orin's is LPDDR5. LINK: Lecture 4 derives each loop's rate from physical time constants; heat from these transfers stays in the chassis that sets Lecture 2's thermal limits. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{The weight-streaming ceiling falls as parameters grow}
+  \centering
+  \safeimg[width=14.2cm]{cadence.pdf}\\[0.05cm]
+  {\small Both proposers run below their ceilings; prefill and decoding add work.}
+  \mlsyscredit{Ch.\ 3, figure 2 and equation 2, redrawn: ceilings $= 142.8$ GB/s $/$ (parameters $\times$ 2 or 0.5 bytes). Rates: the machine card (chosen).}
+  \note{[2 min] LINK: the previous slide's bound. NARRATE: equation 2 for every model size. Across: parameters, 10 million to 100 billion. Up: fresh evaluations per second, both log scales. The solid line is the 16-bit ceiling, the dashed line the INT4 ceiling, four times higher because each weight takes half a byte instead of two. The dotted lines are the machine's three rates. The 80M chunk policy could stream its weights almost 900 times a second, yet runs at 20 Hz; the 7B intent model runs at 2 Hz under its 10.2 Hz FP16 ceiling and 40.8 Hz INT4 ceiling. ENGAGE: why does neither model reach its ceiling? (Expected: reading the input tokens and decoding the output take work that a weight sweep does not count; the next slide separates them.) WARN: a ceiling is a bound, not a predicted rate. FLEX: [OPTIONAL]; the previous slide's 10.2 Hz carries the point.}
+\end{frame}
+
+\begin{frame}{Prefill reuses each weight 288 times; decode uses it once}
+  \centering
+  \mlsyssteps[width=14.2cm]{roofline_step}{3}\\[0.05cm]
+  \uncover<3->{\small One evaluation splits into prefill (288 tokens at once) and decode (one token per pass).}
+  \mlsyscredit{Ch.\ 3, \S3.4.1 and figure 10, with the Orin's numbers on the axes: ridge $=$ 43 TFLOP/s $/$ 204 GB/s. Intensities count weight traffic only (optimistic).}
+  \note{[2.5 min] LINK: this explains the gap under each ceiling. NARRATE: the roofline (Williams, Waterman, and Patterson 2009). Across: arithmetic intensity, operations per byte fetched from off-chip memory. Up: attainable trillions of operations per second. Step 1: two roofs. Left of the ridge at 210.8 FLOP per byte, bandwidth times intensity limits; right of it, the 43 TFLOP/s peak. Step 2: decode. Each output token is a matrix-vector product, in which a 2-byte weight does one multiply and one add, 1 FLOP per byte, so at most 0.204 TFLOP/s, 0.47 percent of peak. Step 3: prefill. All 288 input tokens (256 patches and 32 instruction tokens) pass through together, so each fetched weight serves 288 tokens, past the ridge, so arithmetic binds. ENGAGE: which half does a 4-bit weight format speed up? (Expected: decode, the bandwidth-bound half.) WARN: a peak rating says nothing about batch-1 decode; students who multiply 43 TFLOP/s by the FLOPs overestimate the rate by orders of magnitude. Appendix Systems reviews the roofline. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{What does one FP16 evaluation cost?}
+  \mlsysactivity{Estimate}{3 min}
+  \centering
+  \uncover<2->{\only<2|handout:0>{\safeimg[width=14.2cm]{eval_step1.pdf}}\only<3-|handout:1>{\safeimg[width=14.2cm]{eval_step2.pdf}}}\\[0.05cm]
+  \begin{columns}[T]
+    \begin{column}{0.40\textwidth}
+      \begin{mlsyscard}{mlsysaccent}\footnotesize
+        \textbf{Given: the intent model}\\[0.04cm]
+        7B params, 288 tokens in, 7 out\\
+        Prefill: $4.05 \times 10^{12}$ FLOP at 21.5 TFLOP/s (50\%)\\
+        Sweep: 14 GB at 142.8 GB/s
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.56\textwidth}\small
+      \wstep{2}{Prefill 189 ms emits token 1; 6 decode sweeps: $6 \times 98.0 = 588$ ms}
+      \wstep{2}{FP16: 777 ms, 1.3 Hz, past the 500 ms period}
+      \wstep{3}{INT4: 3.5 GB, $6 \times 24.5 = 147$ ms; total \textbf{\textcolor{figred}{336 ms}}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Ch.\ 3, Napkin Math 3.1 and equation 4 (computed with MLSysIM). 50\% of peak and 70\% of bandwidth are illustrative.}
+  \note{[4 min] LINK: the roofline's two phases, priced. NARRATE and ENGAGE: two minutes in pairs with the card: price one 16-bit evaluation. Prefill costs two FLOPs per parameter per token, 2 times 7 billion times 288, plus a small attention term: $4.05 \times 10^{12}$ FLOP. At half the 43 TFLOP/s peak that is 188.5 ms, and it emits the first of the 7 output tokens. Step 2: each of the other 6 tokens rereads every weight, so 6 times 98.0 is 588 ms, 777 ms in all, 1.3 Hz, past the 500 ms period of a 2 Hz model. Students who answer 98 ms forget the prefill; students who answer 7 sweeps count the first token twice. Step 3: INT4 weights take 3.5 GB, each sweep 24.5 ms, so 147 ms of decode and 336 ms in all. That is the hook's number; the model has the right two terms. WARN: 50 and 70 percent are illustrative factors; the match supports the terms, not the exact constants. The machine therefore states 2 Hz, since 3 Hz would need 333 ms. Appendix Systems has the derivation. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{INT4 runs 2.5$\times$ faster on the module, and it is a new model}
+  \centering
+  \begin{tabular}{@{}lrrr@{}}\toprule
+    \textbf{Weights} & \textbf{Computed} & \textbf{Measured} & \textbf{Action score} \\\midrule
+    FP16 & 777 ms & 840 ms & 95.3\% \\
+    8-bit & 483 ms & 471 ms & 95.2\% \\
+    \textbf{INT4} & \textbf{336 ms} & \textbf{336 ms} & \textbf{\textcolor{figred}{90.1\%}} \\\bottomrule
+  \end{tabular}\\[0.3cm]
+  \uncover<2->{\small OpenVLA on a desktop robot test: bfloat16 71.3\%, INT4 71.9\%, but an INT8 build \textbf{58.1\%}, run at 1.2 Hz against the data's 5 Hz.}\\[0.15cm]
+  \uncover<3->{\small\textbf{\textcolor{mlsysaccent}{A quantized checkpoint is evaluated, calibrated, and named as its own model.}}}
+  \mlsyscredit{Measured: Jetson AI Lab (Franklin 2024); score $=$ 1 $-$ mean NRMSE, BridgeData V2. Kim et al., OpenVLA, 2024, Table 2 and \S5.3. Computed: Ch.\ 3, table 1.}
+  \note{[2.5 min] LINK: the hook's 336 ms is the INT4 row. NARRATE: the same tutorial measured three formats. Step 1: the model computed on the last slide tracks the runtime within 2.5 percent for 8-bit and 0.1 percent for INT4; it underestimates FP16 by 7.5 percent, which ran on a slower runtime. INT4 is 2.5 times faster than FP16, but the action score, how close the predicted 7 numbers are to the recorded ones, fell from 95.3 to 90.1 percent. Step 2: OpenVLA's authors measured task success on a real robot with a desktop GPU. INT4 kept 71.9 percent against 71.3 for bfloat16, but an INT8 build fell to 58.1 percent because its added operations slowed the loop to 1.2 Hz against the 5 Hz of its training data. ENGAGE: does a bit width predict the outcome? (Expected: no; the method, the kernels, the control rate they allow, and the task decide.) Step 3: so a quantized checkpoint is a new model. WARN: even zero-byte weights leave the 189 ms prefill, so no weight-only format passes 5.3 Hz. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Would half the input tokens fit a 200 ms period?}
+  \mlsysactivity{Estimate}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.44\textwidth}
+      \begin{mlsyscard}{mlsysaccent}\small
+        \textbf{Given (INT4)}\\[0.05cm]
+        Prefill 189 ms for 288 tokens, proportional to tokens\\
+        Decode: 6 sweeps of 24.5 ms\\
+        Target: 5 Hz, a 200 ms period
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.52\textwidth}\small
+      \wstep{2}{Prefill: $189 / 2 \approx 94$ ms}
+      \wstep{2}{Total: $94 + 147 = \mathbf{241}$ ms $>$ 200 ms. \textbf{\textcolor{figred}{No.}}}
+      \wstep{3}{A fit needs prefill $\le 200 - 147 = 53$ ms, about 28\% of the tokens.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Ch.\ 3, Checkpoint 3.1 (the estimate treats prefill as proportional to the token count).}
+  \note{[2 min] LINK: the last slide's prefill floor. NARRATE and ENGAGE: 90 seconds alone. Expected: halving 288 tokens halves the prefill to about 94 ms, but the 6 INT4 sweeps still take 147 ms, so 241 ms, 41 ms over a 200 ms period. Step 3: to fit, the prefill must drop to 53 ms, about 28 percent of the tokens, about 81 tokens, fewer than one camera view's 256 patches. WARN: students who answer yes halve the whole 336 ms; decode does not depend on input tokens. Integer arithmetic in the prefill, fewer tokens, or a faster compute roof are the remaining levers, and none of them reaches the 50 ms a chunk needs. FLEX: [OPTIONAL]; skip if behind and state the 241 ms result.}
+\end{frame}
+
+% =============================================================================
+% SECTION: CHUNKS
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Land the second segment aloud: one fresh evaluation of the 7B model costs a compute-bound prefill plus bandwidth-bound decode, 336 ms at INT4, and no weight format closes the gap to a 50 ms renewal. Now: how does the arm stay supplied?}
+\mlsysdivider{How does the arm stay supplied, and how long is the supply true?}{The Cognitive Brain, \S3.5.1 and \S3.5.2 (Napkin Math 3.2 and 3.3)}
+\section{Chunks}
+
+\begin{frame}{A chunk cuts weight traffic 16-fold but not reaction time}
+  \begin{columns}[c]
+    \begin{column}{0.40\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.6cm,keepaspectratio]{aloha2-workcell.png}\\[0.05cm]
+      {\scriptsize ALOHA 2: leader arms teleoperate follower arms; cameras record what the followers see.}
+    \end{column}
+    \begin{column}{0.58\textwidth}
+      \centering\mlsyssteps[width=8.4cm]{supply_step}{2}\\[0.1cm]
+      \uncover<3->{\small A new observation still changes motion only after\\ $50 + 40 = \mathbf{\textcolor{figred}{90~ms}}$, one renewal period plus one inference.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: ALOHA 2 Team, arXiv:2405.02292, CC BY 4.0. Ch.\ 3, Definition 3.2 and \S3.5.1: 40 setpoints/s $\times$ 14 GB; H $=$ 16.}
+  \note{[2.5 min] LINK: segment 2 left a 336 ms evaluation against a 25 ms setpoint step. NARRATE: ACT (action chunking with transformers) was trained on recordings like these. An operator moves the leader arms, the follower arms copy the motion, and the cameras record what they see. What such a policy learns to output is an action chunk, a short sequence of future setpoints from one view. Step 1: if the 7B model emitted one setpoint per pass at the arm's 40 setpoints per second, it would need 40 times 14 GB, 560 GB/s, 3.9 times what the bus sustains. Step 2: a chunk of 16 setpoints per pass cuts that to 35 GB/s, 24.5 percent. Step 3: the reaction latency is unchanged. With a 50 ms renewal period and a 40 ms inference, an observation captured just after a renewal waits up to 90 ms to change the motion. ENGAGE: what does the arm execute during those 90 ms? (Expected: setpoints computed from an older picture.) WARN, for robotics students: this is receding-horizon control from a learned model; the unexecuted tail is a buffer the next chunk overwrites (Appendix Control). FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Which decoder renews a fresh chunk within 50 ms?}
+  \mlsysactivity{Predict}{2 min}
+  \centering
+  \mlsyssteps[width=14.2cm]{decoder_step}{2}\\[0.05cm]
+  {\normalsize\choice{A}{FAST tokens}\quad\choice{B}{parallel head}\quad\choice{C}{flow expert}\quad\answerat{2}{D}{none of them}}
+  \mlsyscredit{Ch.\ 3, \S3.5.1, computed with MLSysIM: INT4 7B backbone, 16 setpoints of 7 values. Pertsch et al.\ 2025; Kim et al.\ 2025; Black et al.\ 2024 ($\pi_0$).}
+  \note{[2.5 min] LINK: worked example 1's 189 ms prefill. NARRATE: suppose the big backbone itself produced each 16-step chunk of 7 values. Four published decoder families differ in what follows the shared 189 ms prefill. Binned tokens: 112 tokens, each a full weight sweep. FAST compresses the trajectory with a cosine transform to about 30 tokens, still one after another. A parallel head, as in OpenVLA-OFT, folds all action tokens into one longer prefill. A flow-matching expert, as in pi-zero, refines a 600 MB head in 10 steps against the cached context. ENGAGE: vote. Step 2: D. 2.9 s, 899 ms, 264 ms, 241 ms; the decoder choice spans 12 times, yet the prefill alone is 3.8 times the 50 ms period. Students who chose C read ``flow'' as fast; it is faster only after the prefill. WARN: the decoder matters for latency and for multimodal demonstrations (Lecture 6), but no decoder removes a fresh prefill. So the machine renews with a second, smaller model. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Two proposers take 52.2 GB/s, 37\% of the sustained bus}
+  \begin{columns}[c]
+    \begin{column}{0.51\textwidth}\small
+      \wstep{1}{Amortized: $98.0 / 16 = 6.1$ ms of weight time per setpoint}
+      \wstep{2}{Renewal: $336 / 50 = \mathbf{6.7}$ periods late. Chunking supplies setpoints; it does not renew them.}
+      \wstep{3}{Chunk policy: $0.16~\text{GB} / 142.8~\text{GB/s} = 1.12$ ms per sweep}
+      \wstep{4}{Bus: $7 \times 3.5 \times 2 + 0.16 \times 20 = 49 + 3.2 = \mathbf{\textcolor{figred}{52.2~GB/s}}$}
+    \end{column}
+    \begin{column}{0.47\textwidth}
+      \centering\safeimg[width=6.8cm]{twospeed.pdf}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Ch.\ 3, Napkin Math 3.2 and figure 1. Chunk policy sized after ACT (80M parameters, FP16).}
+  \note{[2.5 min] LINK: no decoder renewed in time. NARRATE: worked example 2, the renewal gap. Step 1: if one 16-bit sweep emitted a whole 16-setpoint chunk, each setpoint would carry 6.1 ms of weight time. Step 2: but a fresh intent-model chunk still waits for a whole 336 ms evaluation, 6.7 renewal periods. Chunking supplies setpoints; it does not renew them. Step 3: so the machine adds a second proposer. The 80M chunk policy streams its 0.16 GB in 1.12 ms, 2.2 percent of its period, and spends the rest of its 40 ms target on vision and decoding. Step 4: bus share. The INT4 intent model sweeps its weights 7 times per evaluation at 2 Hz, 49 GB/s; the chunk policy 3.2 GB/s; 52.2 GB/s, 37 percent of the sustained bandwidth. The diagram is the two-speed brain. The intent model hands a target with its capture time down; the chunk policy proposes across the proposal boundary. ENGAGE: is 37 percent safe? (Expected: the average hides 147 ms of decode in every 500 ms at full bandwidth.) WARN: the 40 ms target holds only if measured under that contention (Lecture 13). FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Deployed robots run a slow model above a fast policy}
+  \begin{columns}[c]
+    \begin{column}{0.60\textwidth}
+      \centering\safeimg[width=9.0cm]{dual_rates.pdf}
+    \end{column}
+    \begin{column}{0.38\textwidth}\small
+      \textbf{Helix:} a 7B model over an 80M policy driving 35 degrees of freedom.\\[0.15cm]
+      \textbf{GR00T N1:} a vision-language model over a flow-matching transformer.\\[0.15cm]
+      Fast over slow: 22 to 29$\times$, 12$\times$, and \textbf{10$\times$} here.
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Ch.\ 3, table 2: Figure AI, Helix technical report, 2025; Bjorck et al., GR00T N1, arXiv:2503.14734, 2025. Rates as reported by each team on its own hardware.}
+  \note{[2 min] LINK: the diagram on the last slide. NARRATE: the split is not peculiar to our machine. Figure AI's Helix runs a 7-billion-parameter vision-language model at 7 to 9 Hz above an 80-million-parameter visuomotor policy at 200 Hz on a humanoid with 35 degrees of freedom (independently driven joints). NVIDIA's GR00T N1 runs its vision-language model at 10 Hz above a flow-matching action transformer at 120 Hz. Our machine's 2 Hz and 20 Hz sit below both because its intent model is larger per hertz on a smaller processor. ENGAGE: why would Helix's slow model run faster than ours with the same parameter count? (Expected: different hardware, onboard GPUs, and different input and output token counts; the rates are reported, not measured on the Orin.) WARN: these are each team's published numbers on its own hardware; compare the ratios, not the absolute rates. FLEX: [CORE]. What the slow model hands the fast one is the next segment's question.}
+\end{frame}
+
+\begin{frame}{The evidence behind a tracked mug's chunk lasts 219 ms}
+  \centering
+  \mlsyssteps[width=14.2cm]{drift_step}{3}\\[0.02cm]
+  {\small $\tau_{\text{ev}} = \sqrt{2\,(r_{\text{tol}} - e_0) / a_{\text{slip}}} = \sqrt{2 \times 12~\text{mm} / 0.5~\text{m/s}^2}$}
+  \mlsyscredit{Ch.\ 3, Napkin Math 3.3 and equation 5. Belt 0.20 m/s, slip 0.50 m/s$^2$, initial error 3 mm (illustrative); tolerance 15 mm (chosen).}
+  \note{[2.5 min] NARRATE: every setpoint in a chunk descends from one capture, so how long does that evidence stay true? Across: evidence age. Up: how far the mug has moved from where the chunk aimed. Step 1: untracked, the belt's steady 0.20 m/s uses up the 12 mm margin in 60 ms, Lecture 2's freshness deadline, before the first replacement at 90 ms. Step 2: a tracker re-estimates the mug's position and velocity each frame, so a chunk aims where the mug will be if the belt keeps its speed. Only a change of speed after capture, a residual slip of 0.50 m/s$^2$, drifts the target, by one half a t squared, so the margin lasts 219 ms, the evidence horizon. A chunk replaced at 90 ms has drifted 2.0 mm. Step 3: executed to its end at 400 ms, the chunk would put the gripper 40 mm off. ENGAGE: which number did the tracker buy? (Expected: 60 to 219 ms.) WARN: students equate a chunk's length with its validity; 400 ms of setpoints is not 400 ms of evidence. LINK: Lecture 9 owns the estimator. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Chunk 0 runs 50 ms; its last 181 ms outlast the evidence}
+  \centering
+  \mlsyssteps[width=14.2cm]{strip_step}{3}\\[0.05cm]
+  \uncover<3->{\small Four setpoints bridge a renewal; if renewal stops, the chunk lease (Lecture 4) bounds the motion.}
+  \mlsyscredit{Ch.\ 3, Napkin Math 3.3 and figure 11 (direct replacement): renewal 50 ms, inference 40 ms (illustrative target), 16 setpoints at 25 ms.}
+  \note{[3 min] NARRATE: worked example 3 on one clock, time since the capture behind chunk 0. Step 1: captures every 50 ms; each inference takes 40 ms; chunk 0 arrives at 40 ms, runs 2 setpoints for 50 ms, and is replaced at 90 ms by chunk 1. Step 2: its evidence stays within tolerance until 219 ms. Step 3: the chunk carries setpoints to 400 ms. That hatched tail, 181 ms, keeps setpoints flowing if a renewal slips, but it is not permission to finish the motion. Past 219 ms the gripper would close on where the mug used to be, and a closed grasp cannot be taken back. The minimum supply is 4 setpoints (90 over 25, rounded up). ENGAGE: why carry 16 setpoints if only 4 are needed? (Expected: slack for a late renewal, as long as each setpoint's evidence is still valid.) WARN: the tail is not owed; the next chunk may overwrite it. LINK: the chunk lease is the longest an admitted chunk may drive the actuators without an admitted successor; Lecture 4 sizes it from the stopping budget, so a stalled proposer is bounded by the lease, not by the chunk length. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{If slip quadruples, does the 90 ms age still fit?}
+  \mlsysactivity{Estimate}{1.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.42\textwidth}
+      \begin{mlsyscard}{mlsysaccent}\small
+        \textbf{Given}\\[0.05cm]
+        $\tau_{\text{ev}} = \sqrt{2 \times 12~\text{mm} / a_{\text{slip}}}$\\
+        Now $a_{\text{slip}} = 2.0$ m/s$^2$, four times 0.50\\
+        Age at replacement: 90 ms
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.54\textwidth}\small
+      \wstep{2}{$\tau_{\text{ev}}$ scales as $1/\sqrt{a}$: $219 / 2 = \mathbf{110}$ ms}
+      \wstep{2}{90 ms still fits, with \textbf{20 ms} spare; drift at 90 ms is 8.1 mm.}
+      \wstep{3}{At 10 Hz renewal the age is 140 ms, which would no longer fit.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Ch.\ 3, Checkpoint 3.2 and Napkin Math 3.3 sensitivity (10 Hz renewal: 140 ms, 6 setpoints).}
+  \note{[1.5 min] LINK: equation 5. NARRATE and ENGAGE: one minute, alone. Expected: the horizon goes as one over the square root of the slip, so four times the slip halves it, from 219 to 110 ms. The 90 ms age at replacement still fits, with 20 ms to spare, and the drift at replacement grows from 2.0 to 8.1 mm of the 12 mm margin. Step 3, the chapter's sensitivity. Renewing at 10 Hz instead of 20 raises the age to 140 ms and the minimum chunk to 6 setpoints; that fits the original 219 ms but not the new 110 ms. WARN: students who divide by 4 forget the square root. The margin, the slip, and the renewal rate together set the budget, which is why the permission path ages each chunk instead of trusting a fixed number. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{ACT blends overlapping chunks, and a blend can split modes}
+  {\footnotesize\textbf{tonyzhaozh/act, imitate\_episodes.py} (lines 255 to 259, inside the temporal-ensembling branch)}\par\vspace{0.06cm}
+  \begin{mlsyscard}{mlsysaccent}
+  \begin{logblock}[7]
+  \textbf{\textcolor{figred}{k = 0.01}}\\
+  exp\_weights = np.exp(-k * np.arange(len(actions\_for\_curr\_step)))\\
+  exp\_weights = exp\_weights / exp\_weights.sum()\\
+  exp\_weights = torch.from\_numpy(exp\_weights).cuda().unsqueeze(dim=1)\\
+  raw\_action = (actions\_for\_curr\_step * exp\_weights).sum(dim=0, keepdim=True)
+  \end{logblock}
+  \end{mlsyscard}
+  \vspace{0.1cm}
+  \begin{columns}[c]
+    \begin{column}{0.52\textwidth}
+      \centering\safeimg[width=7.6cm]{blend.pdf}
+    \end{column}
+    \begin{column}{0.46\textwidth}\small
+      Index 0 is the oldest chunk, so it weighs most.\\[0.15cm]
+      \uncover<2->{Real-time chunking instead freezes the setpoints that run during inference and fills in the rest to agree with them.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{github.com/tonyzhaozh/act, commit 742c753, imitate\_episodes.py (indentation removed). Black, Galliker, and Levine, NeurIPS 2025. Ch.\ 3, \S3.5.1.}
+  \note{[2 min] NARRATE: the real code from ACT's repository. Every chunk that covers step t is stored; the weights decay with index, so the oldest prediction gets the largest weight (with k = 0.01 and 100 overlapping chunks, the oldest weighs 2.7 times the newest). The blend smooths the seam between chunks. Two limits. First, an average of two valid predictions need not be valid. An older chunk that passes left of an obstacle and a newer one that passes right average to a path through it (the picture; Lecture 6 owns mode averaging). Second, the blend must drop contributions whose evidence has expired and carry the oldest capture time it keeps. Step 2: real-time chunking freezes the setpoints that will execute during inference and generates the rest of the new chunk to agree with them. ENGAGE: on our machine, how many chunks overlap at one step? (Expected: 16 over 2, so 8.) WARN: a blend's evidence is as old as its oldest contribution. LINK: Lecture 4 interpolates admitted setpoints per bus cycle; Lecture 11 owns smooth joins between segments. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% SECTION: REFUSABLE
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Land the third segment aloud: the arm is supplied by a fast policy, and a chunk's motion is good only while its evidence lasts, 219 ms for the tracked mug. Last segment: a proposal can arrive on time and still be wrong, so what must it carry?}
+\mlsysdivider{What must a proposal carry so the permission path can refuse it?}{The Cognitive Brain, \S3.5.3, \S3.5.4, and \S3.6}
+\section{Refusable}
+
+\begin{frame}{Only a geometric target can be checked against depth and aged}
+  \centering\footnotesize
+  \begin{tabular}{@{}P{3.1cm}P{5.0cm}P{2.2cm}P{2.2cm}@{}}\toprule
+    \textbf{Slow-to-fast handoff} & \textbf{Published examples} & \textbf{Compare with depth?} & \textbf{Age against drift?} \\\midrule
+    Latent vector & Helix; GR00T N1 (layer embeddings) & \textcolor{figred}{no} & \textcolor{figred}{no} \\[0.03cm]
+    \uncover<2->{Language subtask} & \uncover<2->{$\pi_{0.5}$; Gemini Robotics 1.5} & \uncover<2->{\textcolor{figred}{no}} & \uncover<2->{\textcolor{figred}{no}} \\[0.03cm]
+    \uncover<3->{Geometric target} & \uncover<3->{Gemini Robotics-ER (points, boxes, grasps); \textbf{this machine: pose $+$ capture time}} & \uncover<3->{\textcolor{figgreen}{\textbf{yes}}} & \uncover<3->{\textcolor{figgreen}{\textbf{yes}}} \\\bottomrule
+  \end{tabular}\\[0.15cm]
+  \uncover<4->{\small The target cost 336 ms, past the 219 ms horizon, so the tracker supplies where the mug is now.}
+  \mlsyscredit{Ch.\ 3, \S3.5.3 and table 2: Figure AI 2025; Bjorck et al.\ 2025; Black, Brown, et al.\ 2025; Gemini Robotics Team 2025a, 2025b.}
+  \note{[2.5 min] NARRATE: deployed systems pass three kinds of handoff from the slow model to the fast one. Step 1: a latent vector (Helix) or inner-layer token embeddings (GR00T N1) carry whatever the fast policy finds useful, but mean something only to that network; no checker can tell the mug from a photo of a mug, and there is no position to age. Step 2: a language subtask, as in pi-0.5 or Gemini Robotics 1.5. It can be checked against admitted task predicates, but ``pick up the mug'' names no place. Step 3: a geometric target can be compared with calibrated depth and keep-out zones and aged from the capture time of its frame. Our intent model emits a pose, the same 7 numbers OpenVLA decodes, with its capture time. Step 4: but 336 ms exceeds the 219 ms horizon, so the intent model says which mug, and the tracker says where it is now. ENGAGE: what does the machine give up? (Expected: tasks a single pose cannot express, such as folding a shirt.) WARN: text feels checkable because people read it; the permission path cannot measure it. LINK: Lecture 10 turns this target into an intent lease. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{OpenVLA's example passes its prediction straight to the robot}
+  \begin{columns}[T]
+    \begin{column}{0.59\textwidth}
+      {\footnotesize\textbf{openvla/openvla-7b model card} (usage excerpt)}\par\vspace{0.06cm}
+      \begin{mlsyscard}{mlsysaccent}
+      \begin{logblock}[6.6]
+      \# Predict Action (7-DoF; un-normalize for BridgeV2)\\
+      inputs = processor(prompt, image).to("cuda:0",\\
+      \ind{4}dtype=torch.bfloat16)\\
+      action = vla.predict\_action(**inputs,\\
+      \ind{4}unnorm\_key="bridge\_orig", do\_sample=False)\\[0.05cm]
+      \# Execute...\\
+      \textbf{\textcolor{figred}{robot.act(action, ...)}}
+      \end{logblock}
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.39\textwidth}
+      \uncover<2->{\begin{mlsyscard}{figgreen}\scriptsize
+        \textbf{A proposal requests motion and carries}\\[0.04cm]
+        \texttt{t\_capture}: oldest observation\\
+        \texttt{t\_valid} $\le$ \texttt{t\_capture} $+$ 219 ms\\
+        \texttt{horizon\_H} $=$ 16, \texttt{delta\_t} $=$ 25 ms\\
+        joint and end-effector setpoints\\
+        \texttt{model\_id}: weights, calibration\\
+        \texttt{confidence} only if qualified\\
+        \texttt{lease\_id}, \texttt{crc32}
+      \end{mlsyscard}}
+      \uncover<3->{\footnotesize The permission path decides.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{huggingface.co/openvla/openvla-7b, README usage example (two long lines wrapped). Fields: Ch.\ 3, \S3.5.4, table 3.}
+  \note{[2.5 min] LINK: the target chosen on the last slide needs a packet. NARRATE: the published usage example on OpenVLA's model card. It predicts a 7-degree-of-freedom action from an image and a prompt, then a comment says ``Execute'' and the next line hands the action to the robot. For a quick test, that is reasonable. On a moving machine, this line is where the proposal boundary belongs. Step 2: what the chapter's proposal payload carries instead. The capture time of the oldest observation behind it, which Lecture 8 makes into a dated observation; an expiry no later than capture plus the 219 ms horizon; the horizon and step; joint targets, which can be checked against joint limits, and end-effector poses, which can be checked against keep-out zones; a model\_id that names the exact quantized checkpoint and its calibration; a confidence only when a method is qualified; a lease identifier and a checksum. Step 3: the payload requests motion; it grants nothing. ENGAGE: which field lets the receiver refuse a smooth chunk that arrives late? (Expected: t\_capture and t\_valid.) WARN: the lease\_id links to a permission record; it does not let the proposer grant itself authority. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{A smooth, on-time grasp can target a printed mug}
+  \begin{columns}[c]
+    \begin{column}{0.50\textwidth}
+      \centering\safeimg[width=7.4cm]{depth_check.pdf}\\[0.05cm]
+      {\scriptsize\textcolor{midgray}{Illustrative depth along the proposed grasp}}
+    \end{column}
+    \begin{column}{0.48\textwidth}\small
+      A carton carries a photo of a mug. The policy proposes a grasp on the printed handle that arrives on time, runs smooth, and stays within joint limits.\\[0.2cm]
+      \uncover<2->{Calibrated depth shows flat cardboard, so the receiver \textbf{\textcolor{figred}{refuses}}. If depth is missing or occluded, the grasp stays unverified and is not admitted.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Ch.\ 3, \S3.6.1 (semantic hallucination). Depth profiles drawn for illustration.}
+  \note{[2 min] LINK: the payload's frame and capture time make this check possible. NARRATE: the chapter's example of an on-time wrong proposal. A discarded shipping carton carries a high-resolution printed photograph of a ceramic mug. The vision backbone attends to the texture, and the policy proposes closing the jaws around the printed handle. Every check on the packet passes. It arrived within its 40 ms budget, it is smooth, it respects joint limits, it avoids modeled obstacles. The handle is ink. Step 2: independent evidence catches it. Left, a real handle stands out of the surface in the depth image; right, the print is flat within the sensor's resolution, so the receiver refuses. If depth drops out or the region is occluded, the grasp is unverified and is not admitted. ENGAGE: could the proposer's own confidence catch this? (Expected: no; the next slide.) WARN: a numerical interface traps malformed tensors and NaNs; it cannot detect a wrong grasp plan. That is why the proposal carries its frame and capture time. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Reported confidence stays high as task success falls}
+  \begin{columns}[c]
+    \begin{column}{0.59\textwidth}
+      \centering\safeimg[width=8.6cm]{conf_success.pdf}\\[0.02cm]
+      {\scriptsize\textcolor{midgray}{Illustrative values from the chapter's table 4. OOD: out of distribution.}}
+    \end{column}
+    \begin{column}{0.39\textwidth}\small
+      Softmax outputs sum to 1 by construction and saturate far from the training data.\\[0.2cm]
+      A score is evidence only after calibration against held-out outcomes, for that model\_id.
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Ch.\ 3, table 4 (illustrative). Guo et al., ICML 2017 (overconfidence); Hein et al., CVPR 2019 (ReLU networks far from the data).}
+  \note{[1.5 min] LINK: could the proposer's confidence catch the printed mug? NARRATE: the chapter's illustrative regimes. In distribution, confidence 0.91 and success 0.89, a 0.02 gap. Near out of distribution, with glare or droplets on the lens, confidence stays at 0.89 while success falls to 0.52. With a degraded sensor, 0.84 against 0.31; far out of distribution, 0.78 against 0.08. Softmax turns scores into numbers that sum to one by algebra, and networks built from rectified linear units provably approach full confidence far from their training data (Hein et al. 2019). Chunk policies such as ACT emit no normalized score at all; a confidence must come from sample dispersion, ensemble disagreement, or a conformal threshold (Lecture 10), tied to the model\_id. ENGAGE: a filter admits every proposal above 0.78; which regimes pass? (Expected: all four, and 48 percent of near-out-of-distribution attempts fail.) WARN: these are stipulated values for teaching, labeled so on the slide. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Are these two claims true or false?}
+  \mlsysactivity{Concept question}{2.5 min}
+  \small
+  \textbf{1.}\enspace A numerically valid, smooth chunk can be executed whenever it arrives.\\[0.1cm]
+  \uncover<2->{\hspace*{0.5cm}\textbf{\textcolor{figred}{False.}} Run to its end, the mug's chunk lands 3 $+$ 40 $=$ 43 mm off against a 15 mm tolerance.}\\[0.35cm]
+  \textbf{2.}\enspace A softmax confidence of 0.98 means the grasp succeeds 98 times in 100.\\[0.1cm]
+  \uncover<3->{\hspace*{0.5cm}\textbf{\textcolor{figred}{False.}} Near out of distribution: 0.89 confidence, 0.52 success (illustrative).}\\[0.35cm]
+  \uncover<4->{\begin{mlsyscard}{figgreen}\small Permission comes from independent geometry, limits, and time, checked by the permission path.\end{mlsyscard}}
+  \mlsyscredit{Ch.\ 3, \S3.7 (fallacies), Napkin Math 3.3, table 4.}
+  \note{[2.5 min] NARRATE and ENGAGE: vote on each, discuss with a neighbor for one minute, vote again. Step 2: false. A host policy's chunk can be delayed by scheduling jitter, paging, or bus stalls; it arrives smooth and within joint limits, but the conveyor has moved the mug. Executed open loop to its end, the chapter's chunk carries the gripper 43 mm off, against 15 mm. The receiver rejects stale chunks however smooth, using their timestamps. Step 3: false. In the chapter's pitfall, glare on a glass partition fooled both the perception and the confidence head, which reported 0.98 for a reach through the barrier. A high score means one output dominated the alternatives. Step 4: permission derives from geometry measured by independent sensors, joint and torque limits, and evidence age. WARN: students who answer true to the first are thinking of software, where a late answer costs only a retry. LINK: when a command would cross a limit, Lecture 12's filter makes the smallest correction that satisfies it. FLEX: [CORE].}
+\end{frame}
+
+% =============================================================================
+% CLOSE
+% =============================================================================
+\begin{frame}{What makes one answer cost 336 ms?}
+  \mlsysactivity{Retrieval}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.36\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+      \begin{logblock}[7]
+      step 355 [...]\\
+      \ind{2}\textbf{\textcolor{figred}{time=336.2 ms}}\ind{2}fps=2.96
+      \end{logblock}
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.60\textwidth}
+      {\small Close your notes. Where do the 336 ms go? What keeps the arm from acting on stale evidence?}
+    \end{column}
+  \end{columns}
+  \vspace{0.1cm}
+  \centering\uncover<2->{\safeimg[width=14.2cm]{synthesis.pdf}}\\[0.02cm]
+  \uncover<3->{\footnotesize At 1.5 m/s one answer costs 504 mm; chunks renew within 90 ms and expire at 219 ms.}
+  \mlsyscredit{Log: Jetson AI Lab (Franklin 2024), excerpt of the hook's line. Figure: Ch.\ 3, Napkin Math 3.1 to 3.3 (computed).}
+  \note{[3.5 min] LINK: the hook. NARRATE: Step 1: 90 seconds of retrieval. Step 2: the 336 ms is 189 ms of compute-bound prefill and 147 ms of bandwidth-bound decode. Meanwhile the chunk policy renews every 50 ms, and the tracked mug's evidence lasts 219 ms. Step 3: answer the hook. At 1.5 m/s the base would cover 504 mm per answer, so the machine does not wait on the large model to move. The intent model says which mug at 2 Hz; the tracker says where it is now; the chunk policy turns that into 16 setpoints within 90 ms of capture; each chunk is aged against its evidence horizon; and every proposal carries its capture time and expiry so the permission path, below the proposal boundary (Lecture 1), can refuse it. ENGAGE: which design remedy fixes a proposer that renews too slowly, and which fixes one that is on time but wrong? (Expected: fewer tokens, smaller weights, more bandwidth, or a slower target for the first; none of them for the second, which needs refusal.) WARN: at the pick station the arm moves, not the base; the arithmetic is the same. FLEX: [CORE]. These limits go into Lecture 4's handoff record.}
+\end{frame}
+
+\begin{frame}{Takeaways}
+  \thumbline{thumb_mlperf_step2.pdf}{On the robot's own module, only small models answer within the 50 ms chunk period; a 6B language model takes seconds.}\\[0.12cm]
+  \thumbline{thumb_eval_step2.pdf}{Batch-1 decode streams every weight per token; prefill is compute-bound. INT4 cut 777 to 336 ms and made a new model.}\\[0.12cm]
+  \thumbline{thumb_strip_step3.pdf}{A chunk supplies setpoints; its evidence expires. The tracked mug's lasts 219 ms of a 400 ms chunk.}\\[0.12cm]
+  \thumbline{thumb_conf_success.pdf}{A proposal stays refusable only if it carries a checkable target, its capture time, and its expiry.}
+  \note{[1 min] NARRATE: one line per segment. Ask students which slide taught each line. If short on time, read the second and third. The whole lecture rests on the first law. Motion on stale or wrong evidence crosses the causal boundary (Lecture 1) and cannot be recalled. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}{Open questions}
+  \begin{columns}[c]
+    \begin{column}{0.64\textwidth}
+      \small
+      \begin{itemize}\setlength{\itemsep}{0.12cm}
+        \item A latent handoff lets the fast policy learn whatever helps; a geometric target lets the permission path check it. Which tasks should a robot give up to stay refusable?
+        \item If the next module doubled memory bandwidth, should the machine spend it on a larger intent model or on faster renewal?
+        \item INT4 lost 5.2 points of action score on the module but kept its success on OpenVLA's desktop test. What evidence should a team require before deploying it?
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.34\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.3cm,keepaspectratio]{jetson-orin-nx-carrier.jpg}\\[0.06cm]
+      {\footnotesize A Jetson Orin NX module on a carrier board, Computex 2025}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: 4300streetcar, CC BY 4.0, Wikimedia Commons.}
+  \note{[1 min] NARRATE: no single answer to any of these. Pick one for discussion or assign one as a short written response. The first is the chapter's open design question (\S3.9); its case for a checkable target is one position, not a settled standard. The second trades breadth of recognition against time; the photo is a smaller module of the same family, the kind of board a lighter robot carries. The third comes from table 1 and OpenVLA's Table 2. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Read and explore}
+  \small
+  \begin{itemize}\setlength{\itemsep}{0.04cm}
+    \item \textbf{Read:} The Cognitive Brain, \S3.1 to \S3.8; Checkpoints 3.1 to 3.3; Napkin Math 3.1 to 3.3 by hand.
+    \item Wulf and McKee, ``Hitting the Memory Wall,'' 1995: the two-page paper that named the limit.
+    \item Williams, Waterman, and Patterson, ``Roofline,'' CACM 2009: bound by bytes or by arithmetic.
+    \item Pope et al., ``Efficiently Scaling Transformer Inference,'' MLSys 2023: prefill and decode.
+    \item Zhao et al., ACT, RSS 2023, with its code: action chunks and temporal ensembling.
+    \item Kim et al., ``OpenVLA,'' 2024: an open 7B VLA with INT4 and INT8 measurements.
+  \end{itemize}
+  \note{[0.5 min] NARRATE: the chapter first, with its three checkpoints. Then the memory wall paper, the roofline paper, Pope et al.\ on the two phases of transformer inference, ACT and its repository, and OpenVLA. The Jetson AI Lab tutorial reproduces the hook's measurement on a module students can buy. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}[c]
+  \begin{columns}[c]
+    \begin{column}{0.36\textwidth}
+      \centering\mlsyskitfig[width=\textwidth,height=4.2cm,keepaspectratio]{stack_nervous}
+    \end{column}
+    \begin{column}{0.60\textwidth}
+      {\small\textcolor{lightgray}{NEXT LECTURE \textbar{} THE NERVOUS SYSTEM}}\\[0.5cm]
+      {\LARGE\bfseries Why must a moving machine keep checking its commands when its learned model stops responding?}
+    \end{column}
+  \end{columns}
+  \note{[0.5 min] NARRATE: today's proposers can stall, miss a deadline, or misjudge the target, and a check that waits on the proposer stalls with it. Lecture 4 places the permission path where it stays independent of the learned models, derives each tier's rate, and prices the chunk lease from the stopping budget. The proposer limits from today, 336 ms, 90 ms, 219 ms, enter its handoff record. FLEX: [CORE].}
+\end{frame}
+
+\end{document}
