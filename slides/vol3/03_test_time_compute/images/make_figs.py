@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Figures for Lecture 3 (Test-Time Compute), Volume III.
 
-Every number drawn comes from calcs.py (derived values) or from a named
-source. "TTC" is the rendered chapter, Test-Time Compute; "NM" a Napkin Math
+Every number drawn comes from calcs.py, which reads MLSysIM (Scenarios.*
+and Literature), or from the deck's own reproducer run (pool_trace.txt).
+"TTC" is the rendered chapter, Test-Time Compute; "NM" a Napkin Math
 notebook in it. Chapter scenario inputs are hypothetical, so the figures
 that draw them say "illustrative".
 
-  - hook: NM 3.1 (1,024 tokens at 21.075 ms; 40 ms test), illustrative.
+  - hook: NM 3.1 (Scenarios.ProbeVsGeneratedExplanation), illustrative.
   - axes: the three allocation axes (TTC 3.2, figure 2), redrawn at slide size.
   - alloc: NM 3.2, table 2, illustrative.
   - passk, poolcost: NM 3.3, illustrative.
@@ -30,7 +31,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import slideplot as sp  # noqa: E402
-import calcs  # noqa: E402
+import calcs as K  # noqa: E402  (records every value; figures read them)
+from deckvals import val  # noqa: E402
+from mlsysim.physics.agents import calc_pass_posterior  # noqa: E402
 from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Polygon  # noqa: E402
 
 C = sp.C
@@ -108,9 +111,10 @@ def arrow(ax, x0, y0, x1, y1, color="#64748b", ls="-", lw=1.6, alpha=1.0):
 # Hook: an explanation against a test (NM 3.1)
 # --------------------------------------------------------------------------
 def hook():
-    h = calcs.hook()
-    rows = [("Explain in 1,024 tokens", h["gen_s"] * 1000, "compute", f"{h['gen_s']:.2f} s"),
-            ("Run the targeted test", 40, "data", "40 ms")]
+    h = K.HOOK.result
+    rows = [(f"Explain in {val('hook_tokens')} tokens", K.m(h.answer_time, "ms"), "compute",
+             f"{val('hook_gen_s')} s"),
+            ("Run the targeted test", K.m(K.HOOK.probe_time, "ms"), "data", f"{val('hook_probe_ms')} ms")]
     sp.hbars_steps(str(out / "hook"), rows, "ms", log=True, size=(5.8, 1.7),
                    xlabel="Time (ms, log scale)")
     # The same two bars drawn for a half-width column (the closing retrieval slide)
@@ -172,16 +176,18 @@ def axes():
 # NM 3.2: one ceiling, three latencies and bills
 # --------------------------------------------------------------------------
 def alloc():
-    a = calcs.axes()
+    a = K.AXES.result
     names = ["Depth", "Breadth", "Feedback"]
     keys = ["depth", "breadth", "feedback"]
+    data = {"time": [K.m(getattr(a, f"{k}_time"), "s") for k in keys],
+            "bill": [K.m(getattr(a, f"{k}_cost"), "USD") for k in keys]}
     cols = [V3["think"][1], V3["think"][1], V3["tool"][1]]
     for k in (1, 2):
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(5.8, 1.8))
         for ax, field, label, fmt, show in (
                 (ax1, "time", "Generation and checks (s)", "{:.1f} s", True),
                 (ax2, "bill", "Model-token bill ($)", "${:.3f}", k >= 2)):
-            vals = [a[key][field] for key in keys]
+            vals = data[field]
             ys = [2, 1, 0]
             ax.barh(ys, vals if show else [0, 0, 0], color=cols, height=0.6)
             for y, v in zip(ys, vals):
@@ -202,13 +208,13 @@ def alloc():
 # NM 3.3: pass@k bars and the cost of a parallel pool
 # --------------------------------------------------------------------------
 def passk():
-    p = calcs.pool()
+    p = K.POOL.result
     rows = [(f"{k} candidate{'s' if k > 1 else ''}", v * 100, "data", f"{v * 100:.1f}%")
-            for k, v in sorted(p["avail"].items())]
+            for k, v in sorted(p.pass_at.items())]
     sp.hbars_steps(str(out / "passk"), rows, "%", log=False, size=(3.6, 1.9),
                    xlabel="Pool holds a pass (%)")
-    rows2 = [("Pool of 8", p["par_per_acc"], "compute", f"{p['par_per_acc']:.1f}"),
-             ("Retry to a pass", p["seq_per_acc"], "data", f"{p['seq_per_acc']:.1f}")]
+    rows2 = [(f"Pool of {val('pool_n')}", p.parallel_per_success, "compute", val("pool_par")),
+             ("Retry to a pass", p.sequential_per_success, "data", val("pool_seq"))]
     sp.hbars(str(out / "poolcost.svg"), rows2, "", log=False, size=(3.6, 0.75),
              xlabel="Candidates per accepted repair")
 
@@ -217,15 +223,16 @@ def passk():
 # Brown et al. 2024: coverage against majority vote (MLSysIM)
 # --------------------------------------------------------------------------
 def coverage():
-    from mlsysim import Literature
-    maj = Literature.RepeatedSamplingMajority.entries
-    cov = Literature.RepeatedSamplingCoverage.entries
-    series = (("Llama-3-8B-Instruct", "8B", C["memory"]), ("Llama-3-70B-Instruct", "70B", C["network"]))
-    rep = sorted([e for e in cov if e["dataset"] == "SWE-bench Lite (all 300)"], key=lambda e: e["k"])
+    S = K.COV
+    maj = getattr(K.Literature, S.majority_series).entries
+    cov = getattr(K.Literature, S.coverage_series).entries
+    series = ((S.small_model, "8B", C["memory"]), (S.large_model, "70B", C["network"]))
+    rep = sorted([e for e in cov if e["model"] == S.repair_system and e["dataset"] == S.repair_dataset],
+                 key=lambda e: e["k"])
     for k in (1, 2, 3):
         fig, ax = plt.subplots(figsize=(5.8, 2.2))
         for model, lab, col in series:
-            r = sorted([e for e in maj if e["model"] == model and e["dataset"] == "MATH"], key=lambda e: e["k"])
+            r = sorted([e for e in maj if e["model"] == model and e["dataset"] == S.dataset], key=lambda e: e["k"])
             ks = [e["k"] for e in r]
             ax.plot(ks, [100 * e["coverage"] for e in r], "-", color=col, lw=2.4)
             ax.text(ks[-1] * 1.25, 100 * r[-1]["coverage"] + (4 if lab == "70B" else -7),
@@ -236,7 +243,7 @@ def coverage():
                         f"{lab} majority vote", color=col, fontsize=11, fontweight="bold", va="center")
         if k >= 3:
             ax.plot([e["k"] for e in rep], [100 * e["coverage"] for e in rep], ":", color=C["data"], lw=2.8)
-            ax.text(14, 3, "Repair agent coverage, 1 to 250 samples (dotted)",
+            ax.text(14, 3, f"Repair agent coverage, 1 to {val('cov_repair_k')} samples (dotted)",
                     color=C["data"], fontsize=11, fontweight="bold", va="bottom", ha="left")
         ax.set_xscale("log")
         ax.set_xlim(1, 10_000)
@@ -256,25 +263,28 @@ def coverage():
 # --------------------------------------------------------------------------
 def precision():
     import numpy as np
-    v = calcs.verifier()
+    S = K.VER
     xs = np.logspace(-3, 0, 300)
-    ys = [100 * calcs.precision(x, 0.10, 0.02) for x in xs]
+    # Passing-set precision is one minus the posterior of a defect given a pass.
+    ys = [100 * (1 - calc_pass_posterior(1 - x, S.false_accept_rate, 1 - S.false_reject_rate)) for x in xs]
+    v_pct, v2_pct = 100 * S.valid_rate, 100 * K.VER_V.valid_rate
+    prec, prec_fa, prec_v = (100 * x.result.precision for x in (S, K.VER_FA, K.VER_V))
     for k in (1, 2, 3):
         fig, ax = plt.subplots(figsize=(5.8, 2.0))
         ax.plot(xs * 100, ys, color=C["text"], lw=2.4)
-        ax.axvspan(0.1, 5, color=C["danger_l"], alpha=0.6, lw=0)
+        ax.axvspan(0.1, v_pct, color=C["danger_l"], alpha=0.6, lw=0)
         if k >= 2:
-            ax.plot([5], [v["prec"] * 100], "o", ms=11, color=C["danger"], mec="white", mew=1.5, zorder=5)
-            ax.annotate(f"5% valid: {v['prec'] * 100:.1f}% of passes valid",
-                        (5, v["prec"] * 100), xytext=(12, -24), textcoords="offset points",
+            ax.plot([v_pct], [prec], "o", ms=11, color=C["danger"], mec="white", mew=1.5, zorder=5)
+            ax.annotate(f"{val('vp_v_pct')}% valid: {val('vp_prec1')}% of passes valid",
+                        (v_pct, prec), xytext=(12, -24), textcoords="offset points",
                         ha="left", va="top", fontsize=12, fontweight="bold", color=C["danger"])
         if k >= 3:
-            ax.plot([5], [v["prec_half_fa"] * 100], "o", ms=10, color=C["data"], mec="white", mew=1.5, zorder=5)
-            ax.annotate(f"false acceptance halved: {v['prec_half_fa'] * 100:.1f}%", (5, v["prec_half_fa"] * 100),
+            ax.plot([v_pct], [prec_fa], "o", ms=10, color=C["data"], mec="white", mew=1.5, zorder=5)
+            ax.annotate(f"false acceptance halved: {val('vp_half_fa')}%", (v_pct, prec_fa),
                         xytext=(-12, 6), textcoords="offset points", ha="right", va="bottom",
                         fontsize=11, fontweight="bold", color=C["data"])
-            ax.plot([10], [v["prec_double_v"] * 100], "s", ms=9, color=C["memory"], mec="white", mew=1.5, zorder=5)
-            ax.annotate(f"valid rate doubled: {v['prec_double_v'] * 100:.1f}%", (10, v["prec_double_v"] * 100),
+            ax.plot([v2_pct], [prec_v], "s", ms=9, color=C["memory"], mec="white", mew=1.5, zorder=5)
+            ax.annotate(f"valid rate doubled: {val('vp_double_v')}%", (v2_pct, prec_v),
                         xytext=(10, -6), textcoords="offset points", ha="left", va="top",
                         fontsize=11, fontweight="bold", color=C["memory"])
         ax.set_xscale("log")
@@ -287,8 +297,9 @@ def precision():
         ax.grid(axis="y", color=C["grid"], lw=0.6)
         ax.set_axisbelow(True)
         sp.save(fig, out / f"precision_step{k}.svg")
-    rows = [("Incident loss", v["loss_attempt"], "danger", f"${v['loss_attempt']:.2f}"),
-            ("Output bill", v["out_bill"], "neutral", f"${v['out_bill']:.2f}")]
+    r = K.VER.result
+    rows = [("Incident loss", K.m(r.task_loss, "USD"), "danger", f"${val('vp_task_loss')}"),
+            ("Output bill", K.m(r.output_bill, "USD"), "neutral", f"${val('vp_bill')}")]
     with plain_log_ticks():
         sp.hbars(str(out / "loss.svg"), rows, "", log=True, size=(3.4, 0.95),
                  xlabel="Dollars per attempt (log)")
@@ -299,17 +310,18 @@ def precision():
 # --------------------------------------------------------------------------
 def selection():
     import numpy as np
-    s = calcs.selection()
-    ns = sorted(s["exact"])
+    s = K.SEL.result
+    ns = sorted(s.expected_max)
     fig, ax = plt.subplots(figsize=(3.6, 2.1))
-    ax.plot(ns, [s["exact"][n] for n in ns], "o-", color=C["danger"], lw=2.4, ms=7)
-    na = np.array(sorted(s["asym"]))
-    ax.plot(na, [s["asym"][n] for n in na], "--", color=C["neutral"], lw=1.8)
+    ax.plot(ns, [s.expected_max[n] for n in ns], "o-", color=C["danger"], lw=2.4, ms=7)
+    na = np.array(sorted(s.asymptote))
+    ax.plot(na, [s.asymptote[n] for n in na], "--", color=C["neutral"], lw=1.8)
     ax.text(24, 2.75, "asymptote √(2 ln N)", color=C["neutral"], fontsize=12, ha="right", va="bottom")
-    for n in (4, 64):
-        ax.annotate(f"{s['exact'][n]:.1f}σ at N = {n}", (n, s["exact"][n]),
-                    xytext=(6, -18) if n == 4 else (-4, -40), textcoords="offset points", fontsize=12,
-                    fontweight="bold", color=C["danger"], ha="left" if n == 4 else "right")
+    small, large = K.SEL.small_pool, K.SEL.large_pool
+    for n, key in ((small, "sel_shift_small"), (large, "sel_shift_large")):
+        ax.annotate(f"{val(key)}σ at N = {n}", (n, s.expected_max[n]),
+                    xytext=(6, -18) if n == small else (-4, -40), textcoords="offset points", fontsize=12,
+                    fontweight="bold", color=C["danger"], ha="left" if n == small else "right")
     ax.set_xscale("log", base=2)
     ax.set_xticks(ns)
     ax.set_xticklabels([str(n) for n in ns])
@@ -402,12 +414,12 @@ def topo():
 # Step pruning bounds tree growth (TTC 3.6.2)
 # --------------------------------------------------------------------------
 def prune():
-    p = calcs.pruning()
-    rows = [("No pruning", p["unpruned"], "neutral", f"{p['unpruned']} nodes"),
-            ("A flat 68% cut", p["flat"], "memory", f"{p['flat']:.1f} nodes (reference)"),
-            ("Step check rejects 68%", p["pruned"], "compute", f"{p['pruned']:.1f} nodes")]
+    p = K.TREE.result
+    rows = [("No pruning", p.unpruned_nodes, "neutral", f"{val('tree_unpruned')} nodes"),
+            (f"A flat {val('tree_r_pct')}% cut", p.flat_cut_nodes, "memory", f"{val('tree_flat')} nodes (reference)"),
+            (f"Step check rejects {val('tree_r_pct')}%", p.pruned_nodes, "compute", f"{val('tree_pruned')} nodes")]
     sp.hbars_steps(str(out / "prune"), rows, "", log=False, size=(5.8, 1.6),
-                   xlabel="Nodes generated through depth 3 (5 children per node)")
+                   xlabel=f"Nodes generated through depth {val('tree_depth')} ({val('tree_b')} children per node)")
 
 
 # --------------------------------------------------------------------------
@@ -459,12 +471,16 @@ def plan():
 # NM 3.6: four accounts for flat sampling and beam search
 # --------------------------------------------------------------------------
 def accounts():
-    b = calcs.beam()
+    b = K.BEAM.result
     fields = [("out", "Output tokens", "{:,.0f}"), ("inp", "Input tokens", "{:,.0f}"),
               ("time", "Time (s)", "{:.1f}"), ("bill", "Token bill ($)", "{:.3f}")]
+    data = {"out": [b.flat_output_tokens, b.beam_output_tokens],
+            "inp": [b.flat_prompt_tokens, b.beam_prompt_tokens],
+            "time": [K.m(b.flat_elapsed, "s"), K.m(b.beam_elapsed, "s")],
+            "bill": [K.m(b.flat_token_cost, "USD"), K.m(b.beam_token_cost, "USD")]}
     fig, axs = plt.subplots(1, 4, figsize=(5.8, 1.7))
     for ax, (f, lab, fmt) in zip(axs, fields):
-        vals = [b["flat"][f], b["beam"][f]]
+        vals = data[f]
         ax.bar([0, 1], vals, color=[C["neutral"], C["compute"]], width=0.62)
         for x, v in zip([0, 1], vals):
             ax.text(x, v * 1.03, fmt.format(v), ha="center", va="bottom", fontsize=10.5, fontweight="bold",
@@ -519,9 +535,12 @@ def stop():
 # NM 3.7: three policies under one deadline
 # --------------------------------------------------------------------------
 def policy():
-    p = calcs.policies()
-    pts = [("A", "A: one candidate", C["neutral"]), ("C", "C: feedback, 2 rounds", C["data"]),
-           ("B", "B: 8 in parallel", C["compute"])]
+    po = K.POL.result
+    p = {key: dict(per_acc=K.m(getattr(po, f"{key.lower()}_cost_per_pass"), "USD"),
+                   pass_=getattr(po, f"{key.lower()}_pass"),
+                   time=K.m(po.c_time if key == "C" else po.round_time, "s")) for key in "ABC"}
+    pts = [("A", "A: one candidate", C["neutral"]), ("C", f"C: feedback, {po.rounds} rounds", C["data"]),
+           ("B", f"B: {val('pol_n')} in parallel", C["compute"])]
     for k in (1, 2, 3):
         fig, ax = plt.subplots(figsize=(5.8, 2.0))
         for i, (key, lab, col) in enumerate(pts):
