@@ -4652,3 +4652,196 @@ class Scenarios(Registry):
                     "Tables 4 and 5).",
         series=_Literature.DactylPhysicalTrials,
     )
+
+    # --- Network architectures: dense, convolutional, and recurrent layers (added 2026-10-20) ---
+    MnistMlpFirstLayer = _st.DenseLayerScenario(
+        name="The first dense layer of the 784-128-64-10 MNIST multilayer perceptron",
+        description="Flattened 28x28 digits to 128 hidden units; FP32 weights at batch one.",
+        in_features=_Datasets.MNIST.image_width * _Datasets.MNIST.image_height,
+        out_features=128,                 # scenario assumption: the running network's first hidden width
+        bytes_per_weight=_BYTES_FP32,
+    )
+    MnistMlpLayerStack = _st.LayerStackScenario(
+        name="The 784-128-64-10 MNIST multilayer perceptron, weights",
+        description="Hidden widths 128 and 64, ten classes; FP32 weights, biases omitted.",
+        dense_layers=[MnistMlpFirstLayer,
+                      MnistMlpFirstLayer.variant(name="128 to 64", in_features=MnistMlpFirstLayer.out_features,
+                                                 out_features=64),  # scenario assumption: second hidden width
+                      MnistMlpFirstLayer.variant(name="64 to 10", in_features=64,
+                                                 out_features=_Datasets.MNIST.num_classes)],
+    )
+    MnistMlpFirstLayerDoubledInput = MnistMlpFirstLayer.variant(
+        name="The same first layer on an input doubled in width and height",
+        description="56x56 inputs to 128 outputs.",
+        in_features=MnistMlpFirstLayer.in_features * 2 * 2,  # scenario assumption: image doubled in width and height
+    )
+    Dense2048Layer = _st.DenseLayerScenario(
+        name="A production-width dense layer, 2,048 to 2,048, FP32",
+        description="Weights grow as the product of the widths.",
+        in_features=2048,                 # scenario assumption: production-width layer
+        out_features=2048,
+        bytes_per_weight=_BYTES_FP32,
+    )
+    Dense1024LayerFp16 = _st.DenseLayerScenario(
+        name="A 1,024-to-1,024 dense layer in FP16",
+        description="Quadratic scaling of dense weights at a modest width.",
+        in_features=1024,                 # scenario assumption: illustrative width
+        out_features=1024,
+        bytes_per_weight=_BYTES_FP16,
+    )
+    FourPixelThreeNeuronLayer = _st.DenseForwardExampleScenario(
+        name="Four pixel intensities through a three-neuron dense layer, by hand",
+        description="A 4x3 weight matrix, one column per neuron, then ReLU.",
+        inputs=[0.8, 0.2, 0.9, 0.1],      # scenario assumption: illustrative pixel intensities
+        weights=[[0.5, 0.1, -0.2],        # scenario assumption: illustrative weights
+                 [-0.3, 0.8, 0.4],
+                 [0.2, -0.4, 0.6],
+                 [0.7, 0.3, -0.1]],
+    )
+    MnistFirstConvLayer = _st.ConvLayerScenario(
+        name="32 feature detectors on a 28x28 MNIST digit: 3x3 filters against dense units",
+        description="One grayscale channel, same padding, FP32 values.",
+        height=_Datasets.MNIST.image_height,
+        width=_Datasets.MNIST.image_width,
+        kernel=3,                         # scenario assumption: 3x3 filters
+        in_channels=1,                    # grayscale input
+        out_channels=32,                  # scenario assumption: first-layer features
+        bytes_per_value=_BYTES_FP32,
+    )
+    MnistSmallCnn = _st.LayerStackScenario(
+        name="A small MNIST CNN: Conv(32), pool, Conv(64), pool, dense 128, 10 classes",
+        description="Two 3x3 convolutions, each followed by a 2x2 pool (28 to 14 to 7), then a dense head.",
+        conv_layers=[MnistFirstConvLayer,
+                     MnistFirstConvLayer.variant(
+                         name="Second convolution, 32 to 64 channels at 14x14",
+                         height=_Datasets.MNIST.image_height // 2,   # after one 2x2 pool
+                         width=_Datasets.MNIST.image_width // 2,
+                         in_channels=MnistFirstConvLayer.out_channels,
+                         out_channels=64)],                         # scenario assumption
+        dense_layers=[MnistMlpFirstLayer.variant(
+                          name="Head: 64 maps of 7x7 to 128",
+                          in_features=64 * (_Datasets.MNIST.image_width // 4) * (_Datasets.MNIST.image_height // 4),
+                          out_features=128),                        # scenario assumption: head width
+                      MnistMlpFirstLayer.variant(name="Head: 128 to 10", in_features=128,
+                                                 out_features=_Datasets.MNIST.num_classes)],
+    )
+    ImageNetRgbFilterVersusDense = _st.ConvLayerScenario(
+        name="One feature detector on a 224x224 RGB image: a 3x3 filter against a dense unit",
+        description="Weights for one output feature; same padding.",
+        height=_Datasets.ImageNet.image_height,
+        width=_Datasets.ImageNet.image_width,
+        kernel=3,                         # scenario assumption: 3x3 filter
+        in_channels=3,                    # RGB
+        out_channels=1,                   # one feature detector
+        bytes_per_value=_BYTES_FP32,
+    )
+    ImageNet64ChannelConv = _st.ConvLayerScenario(
+        name="A 3x3 convolution on a 224x224x64 feature map to 64 features, FP32",
+        description="Same padding; the reference layer for weight sharing, reuse, activations, and factoring.",
+        height=_Datasets.ImageNet.image_height,
+        width=_Datasets.ImageNet.image_width,
+        kernel=3,                         # scenario assumption: 3x3 filter
+        in_channels=64,                   # scenario assumption: early-layer channel count
+        out_channels=64,
+        bytes_per_value=_BYTES_FP32,
+    )
+    ImageNet64ChannelConvAt1024 = ImageNet64ChannelConv.variant(
+        name="The same 3x3, 64-channel layer on a 1,024x1,024 feature map",
+        description="Convolution weights unchanged; the dense equivalent grows with the pixel count.",
+        height=1024,                      # scenario assumption: a larger input image
+        width=1024,
+    )
+    ImageNet64ChannelConvUnpadded = ImageNet64ChannelConv.variant(
+        name="The same 3x3, 64-channel layer without padding",
+        description="Valid positions only, as an unpadded unfold produces them.",
+        same_padding=False,
+    )
+    Im2colMiniature = _st.ConvLayerScenario(
+        name="im2col by hand: a 3x3 input and a 2x2 filter, no padding",
+        description="Four overlapping windows, each unfolded into one row of four values.",
+        height=3,                         # scenario assumption: miniature input
+        width=3,
+        kernel=2,                         # scenario assumption: miniature filter
+        in_channels=1,
+        out_channels=1,
+        bytes_per_value=_BYTES_FP32,
+        same_padding=False,
+    )
+    AlexNetFirstConv = _st.ConvLayerScenario(
+        name="AlexNet's first convolution: 96 filters of 11x11x3",
+        description="Krizhevsky et al. (2012), Section 3.5 and Figure 3. Weights only: the layer's stride of 4 "
+                    "is not modeled, so positions and multiply-adds do not apply.",
+        height=_Datasets.ImageNet.image_height,
+        width=_Datasets.ImageNet.image_width,
+        kernel=11,                        # Krizhevsky et al. (2012): 11x11x3 kernels
+        in_channels=3,
+        out_channels=96,                  # Krizhevsky et al. (2012): 96 kernels
+        bytes_per_value=_BYTES_FP32,
+    )
+    ThreeByThreeReceptiveField = _st.ReceptiveFieldScenario(
+        name="Receptive field of stacked 3x3 convolutions",
+        description="Three layers, and the depth needed to see a 21x21 window, without downsampling.",
+        kernel=3,                         # scenario assumption
+        layers=3,                         # scenario assumption
+        target_field=21,                  # scenario assumption: self-check target
+    )
+    PlainStackGradientDecay = _st.GradientProductScenario(
+        name="Gradient product through 50 plain layers of gain 0.9",
+        description="No skip connections; one factor per layer.",
+        gain=0.9,                         # scenario assumption: average per-layer gradient factor
+        depth=50,                         # ResNet-50's depth
+    )
+    ResidualAddFp32 = _st.ElementwiseIntensityScenario(
+        name="An unfused FP32 residual addition",
+        description="One FLOP per element; two operands read and one result written.",
+        flops_per_element=1,
+        operands_moved=3,
+        bytes_per_value=_BYTES_FP32,
+    )
+    ResNet50ConvKernelShare = _st.KernelShareScenario(
+        name="ResNet-50's 3x3 convolutions as a share of its multiply-adds",
+        description="Per 224x224 image, as the architectures chapter states the breakdown.",
+        workload=_Models.Vision.ResNet50,
+        kernel_macs=Q_(1.850, "GFLOP"),   # scenario assumption: chapter's 3x3 multiply-adds (source not stated)
+        total_macs=Q_(3.858, "GFLOP"),    # scenario assumption: chapter's total multiply-adds (source not stated)
+    )
+    ResNet50ThirtyFpsStream = _st.FrameRateHeadroomScenario(
+        name="ResNet-50 on a 30 frame-per-second stream on a 10 TFLOP/s GPU",
+        description="Planning utilization of 50 to 60 percent of peak; a 100 GFLOP detector as the heavier model.",
+        workload=_Models.Vision.ResNet50,
+        frame_rate=Q_(30, "Hz"),          # scenario assumption: video frame rate
+        peak_rate=Q_(10, "TFLOP/s"),      # scenario assumption: mid-range GPU peak
+        utilization_low=0.50,             # scenario assumption: planning utilization range
+        utilization_high=0.60,
+        alternative_flops=Q_(100, "GFLOP"),  # scenario assumption: object detector per frame
+    )
+    KwsDsCnnOnNrf52840Fp32 = _st.WeightStorageFitScenario(
+        name="The DS-CNN keyword spotter's FP32 weights on an nRF52840 microcontroller",
+        description="Arduino Nano 33 BLE Sense Rev2: 1 MB flash, 256 KB SRAM.",
+        workload=_Models.Tiny.DS_CNN,
+        hardware=_Hardware.Tiny.nRF52840,
+        bytes_per_weight=_BYTES_FP32,
+    )
+    KwsDsCnnOnNrf52840Int8 = KwsDsCnnOnNrf52840Fp32.variant(
+        name="The DS-CNN keyword spotter's INT8 weights on an nRF52840 microcontroller",
+        bytes_per_weight=_BYTES_INT8,
+    )
+    ElmanRnnStep = _st.RecurrentStepScenario(
+        name="A plain recurrent layer: 100 inputs, a 128-wide state, a 1,000-step sequence",
+        description="One affine map per step for the state and one for the input; FP32.",
+        input_dim=100,                    # scenario assumption: input width
+        hidden_dim=128,                   # scenario assumption: state width
+        bytes_per_value=_BYTES_FP32,
+        gates=1,
+        steps=1000,                       # scenario assumption: sequence length
+    )
+    LstmStep = ElmanRnnStep.variant(
+        name="An LSTM layer of the same widths: four gate maps fused per step",
+        description="Input, forget, and output gates and the candidate update.",
+        gates=4,
+    )
+    RecurrentState512Fp32 = ElmanRnnStep.variant(
+        name="A 512-wide FP32 recurrent state",
+        description="The fixed state inference keeps at any stream length.",
+        hidden_dim=512,                   # scenario assumption: illustrative state width
+    )

@@ -68,6 +68,9 @@ EventDataRecorders = _load("event_data_recorders", "EventDataRecorders", "Pre-cr
 # Published vision-language-action and dual-system robot policies (added 2026-10-20)
 # Robot policy training: sim-to-real, parallel simulation, on-robot RL (added 2026-10-20)
 RobotLearning = _load("robot_learning", "RobotLearning", "Cited figures of published robot-learning runs (Dactyl, legged_gym, HIL-SERL, QT-Opt, a grasping farm, Diffusion Policy, OpenVLA pretraining).")
+# Network architectures (added 2026-10-20)
+NetflixPrize = _load("netflix_prize", "NetflixPrize", "Cited figures of the Netflix Prize and what Netflix shipped from it (Johnston 2012; Amatriain and Basilico 2012).")
+KerasApplications = _load("keras_applications", "KerasApplications", "Keras Applications model table: top-1 accuracy and time per inference step on a CPU and an A100.")
 
 
 # ---------------------------------------------------------------------------
@@ -360,6 +363,8 @@ class Literature(Registry):
     EventDataRecorders = EventDataRecorders  # added 2026-10-20
     OnDeviceLearning = OnDeviceLearning  # added 2026-10-20
     RobotLearning = RobotLearning  # added 2026-10-20
+    NetflixPrize = NetflixPrize  # network architectures (added 2026-10-20)
+    KerasApplications = KerasApplications  # network architectures (added 2026-10-20)
     ComputeTrend = ComputeTrend
     AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks
