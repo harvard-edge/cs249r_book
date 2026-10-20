@@ -424,16 +424,17 @@ from mlsysim import *
 
 class SettlementBudget:
     # 1. LOAD: hypothetical independent message-loss probabilities.
-    request_loss = 0.02
-    reply_loss = 0.02
-    workers = 50  # hypothetical fleet size
-    calls_per_worker_day = 4_000  # hypothetical mutating calls per worker per day
+    scenario = Scenarios.BlindRetryTwoPercentLoss  # hypothetical loss rates and fleet
+    request_loss = scenario.request_loss
+    reply_loss = scenario.reply_loss
+    workers = scenario.workers  # hypothetical fleet size
+    calls_per_worker_day = scenario.calls_per_worker  # hypothetical mutating calls per worker per day
 
     # 2. EXECUTE: enumerate the timeout and duplicate-effect paths.
-    timeout_probability = 1 - (1 - request_loss) * (1 - reply_loss)
-    duplicate_probability = (1 - request_loss) * reply_loss * (1 - request_loss)
-    calls_per_day = workers * calls_per_worker_day
-    duplicates_per_day = calls_per_day * duplicate_probability
+    timeout_probability = scenario.result.timeout_probability
+    duplicate_probability = scenario.result.duplicate_probability
+    calls_per_day = scenario.result.calls
+    duplicates_per_day = scenario.result.duplicates
 
     # 3. GUARD: independently checked path probabilities.
     check(abs(timeout_probability - 0.0396) < 1e-12, "Timeout loss paths")
@@ -600,26 +601,28 @@ Line counts are convenient for display, but they offer no memory safety because 
 #| echo: false
 # What: Price a bounded observation retained in a specified set of later calls.
 # How: Separate an illustrative byte/token estimate from serialized payload size.
+from mlsysim import Scenarios
 from mlsysim.core.units import MB, Mtoken, USD, byte, token
 from mlsysim.fmt import check, fmt, fmt_int, fmt_math, fmt_memory, fmt_multiple, fmt_percent, fmt_usd
 
 class ObservationBudget:
     # LOAD: Hypothetical corpus, serialization, selection, and billing assumptions.
-    raw_bytes = 24 * MB
-    bytes_per_token = 3 * byte / token
-    window_tokens = 128_000 * token
-    shaped_tokens = 4_000 * token
-    remaining_turns = 30
-    input_price = 3 * USD / Mtoken
-    cached_fraction_price = 0.10
+    scenario = Scenarios.TwentyFourMegabyteLogObservation  # registry window; scenario sizes and prices
+    raw_bytes = scenario.raw_bytes
+    bytes_per_token = scenario.bytes_per_token
+    window_tokens = scenario.window * token
+    shaped_tokens = scenario.shaped_tokens * token
+    remaining_turns = scenario.carry_calls
+    input_price = scenario.input_price
+    cached_fraction_price = scenario.cached_fraction
 
     # EXECUTE: Only the shaped payload is eligible for the priced later requests.
-    raw_tokens = (raw_bytes / bytes_per_token).to(token)
-    raw_windows = (raw_tokens / window_tokens).to_base_units().magnitude
-    shaped_share = (shaped_tokens / window_tokens).to_base_units().magnitude
-    carried_tokens = shaped_tokens * remaining_turns
-    carried_cost_uncached = (carried_tokens * input_price).to(USD)
-    carried_cost_cached = carried_cost_uncached * cached_fraction_price
+    raw_tokens = scenario.result.raw_tokens
+    raw_windows = scenario.result.raw_windows
+    shaped_share = scenario.result.shaped_share
+    carried_tokens = scenario.result.carried_tokens
+    carried_cost_uncached = scenario.result.carried_cost_uncached
+    carried_cost_cached = scenario.result.carried_cost_cached
 
     # GUARD: Check the illustrative magnitudes without claiming task adequacy.
     check(raw_tokens.magnitude == 8_000_000, "raw token estimate")
@@ -796,28 +799,27 @@ By delegating health checks to the runtime, systems avoid redundant inference ca
 # │ How: Count scheduled checks strictly before completion; apply hypothetical
 # │      cached/uncached input and output prices. Exclude common useful calls.
 # └─────────────────────────────────────────────────────────────────────────────
-import math
 from mlsysim import *
 
 class PollingBudget:
     # ┌── 1. LOAD (Scenario assumptions) ──────────────────────────────────
-    job_duration = Q_(300, "second")  # hypothetical fixed completion time
-    poll_interval = Q_(5, "second")  # checks start one interval after dispatch
-    context_tokens = 32_768  # selected input per status call, including prior status
-    output_tokens_per_call = 40  # complete generated status request; no extra acknowledgment
-    cache_fraction = 0.95  # hypothetical aggregate input fraction billed as cached
-    input_price_per_mtok = 3.00  # hypothetical dollars per million uncached input tokens
-    cached_price_per_mtok = 0.30  # hypothetical dollars per million cached input tokens
-    output_price_per_mtok = 15.00  # hypothetical dollars per million generated tokens
+    scenario = Scenarios.ModelPollingEveryFiveSeconds  # hypothetical job, sizes, and prices
+    job_duration = scenario.job_duration  # hypothetical fixed completion time
+    poll_interval = scenario.poll_interval  # checks start one interval after dispatch
+    context_tokens = scenario.context_tokens  # selected input per status call, including prior status
+    output_tokens_per_call = scenario.output_tokens  # complete generated status request; no extra acknowledgment
+    cache_fraction = scenario.cache_hit  # hypothetical aggregate input fraction billed as cached
+    input_price_per_mtok = (scenario.input_price * Mtoken).to(USD).magnitude  # hypothetical dollars per million uncached input tokens
+    cached_price_per_mtok = (scenario.result.cached_price * Mtoken).to(USD).magnitude  # hypothetical dollars per million cached input tokens
+    output_price_per_mtok = (scenario.output_price * Mtoken).to(USD).magnitude  # hypothetical dollars per million generated tokens
 
     # ┌── 2. EXECUTE (Compute) ────────────────────────────────────────────
-    pending_calls = math.ceil((job_duration / poll_interval).to("").magnitude) - 1
-    total_input_tokens = pending_calls * context_tokens
-    total_output_tokens = pending_calls * output_tokens_per_call
-    blended_input_price = (1 - cache_fraction) * input_price_per_mtok + cache_fraction * cached_price_per_mtok
-    input_cost = total_input_tokens / 1e6 * blended_input_price
-    output_cost = total_output_tokens / 1e6 * output_price_per_mtok
-    extra_cost = input_cost + output_cost
+    pending_calls = scenario.result.polls
+    total_input_tokens = scenario.result.input_tokens
+    total_output_tokens = scenario.result.output_tokens
+    input_cost = scenario.result.input_cost.to(USD).magnitude
+    output_cost = scenario.result.output_cost.to(USD).magnitude
+    extra_cost = scenario.result.cost.to(USD).magnitude
 
     # ┌── 3. GUARD (Prose claims) ─────────────────────────────────────────
     check(pending_calls == 59, "Only scheduled checks strictly before completion count")
@@ -943,18 +945,19 @@ from mlsysim import *
 
 class ToolkitCatalogBudget:
     # 1. LOAD — stipulated counts in final serialization, not tokenizer laws.
-    registered_tools = 50
-    selected_tools = 6
-    tokens_per_descriptor = 300 * count
-    selection_overhead = 400 * count
+    scenario = Scenarios.FiftyToolCatalogSixSelected  # stipulated catalog and selection sizes
+    registered_tools = scenario.registered
+    selected_tools = scenario.selected
+    tokens_per_descriptor = scenario.descriptor_tokens * count
+    selection_overhead = scenario.selection_overhead * count
 
     # 2. EXECUTE — other request content is held fixed and excluded here.
-    static_tokens = registered_tools * tokens_per_descriptor
-    selected_descriptors = selected_tools * tokens_per_descriptor
-    selected_total = selected_descriptors + selection_overhead
-    released_capacity = static_tokens - selected_total
-    unused_descriptors = (registered_tools - selected_tools) * tokens_per_descriptor
-    breakeven_unused = (selection_overhead / tokens_per_descriptor).to("").magnitude
+    static_tokens = scenario.result.full_tokens * count
+    selected_descriptors = scenario.result.selected_descriptor_tokens * count
+    selected_total = scenario.result.selected_tokens * count
+    released_capacity = scenario.result.released_tokens * count
+    unused_descriptors = scenario.result.unused_descriptor_tokens * count
+    breakeven_unused = scenario.result.break_even_unused
 
     # 3. GUARD — compare the same descriptors and include added overhead.
     check(0 < selected_tools < registered_tools, "Selected tools form a proper subset")
@@ -1213,7 +1216,42 @@ All quantities below are hypothetical problem givens, chosen to be round, and de
 (b) The endpoint's retention is fixed at 60 s. Show that no schedule containing even one retry closes the gap, then redesign the contract so every attempt carries the original logical operation's admission timestamp and the endpoint rejects the operation more than 45 s after that timestamp. Assuming clocks agree within 2 s, which attempts may the runtime still send while preserving that expiry bound?
 (c) Critique the redesign. What new failure mode does request expiry introduce, what outcome must the runtime record when every permitted attempt times out, and which settlement mechanism from @sec-vol3-tool-calling-idempotency takes over?
 
-**9. One shell or twelve tools (Advanced; second lighthouse).** A team proposes giving the remediation agent a single `run_shell` tool with a 500-token descriptor in place of 12 structured tools of 350 tokens each, citing fewer selection errors. A trajectory makes 30 model calls at \$3 per million uncached input tokens. With structured tools, an attempt costs \$1.20, is accepted with probability 0.80, and causes an unconfined production change with probability 0.001. With the shell, those figures are an attempt cost reduced by the descriptor savings, acceptance probability 0.78, and unconfined-change probability 0.004. Each unconfined change costs \$2,000 to detect and repair.
+```{python}
+#| label: calc-vol3-tool-calling-exercise-givens
+#| echo: false
+# What: Givens of Exercise 9, read from the scenario the slides also solve.
+# How: Display stated inputs only; the reader computes the answers.
+from mlsysim import Scenarios
+from mlsysim.core.units import Mtoken, USD
+from mlsysim.fmt import check, fmt, fmt_int, fmt_usd
+
+class ToolkitExerciseGivens:
+    # 1. LOAD: hypothetical toolkit sizes, acceptance, change risk, and prices (Exercise 9).
+    scenario = Scenarios.ShellAgainstTwelveStructuredTools
+
+    # 2. EXECUTE: no derived values; the exercise asks for them.
+    input_price = (scenario.input_price * Mtoken).to(USD)
+
+    # 3. GUARD: the shell trades a smaller catalog for lower acceptance and more change risk.
+    check(scenario.shell_tokens < scenario.tools * scenario.tool_tokens, "Shell descriptor is the smaller catalog")
+    check(scenario.shell_acceptance < scenario.structured_acceptance, "Shell is accepted less often")
+    check(scenario.shell_change > scenario.structured_change, "Shell risks more unconfined changes")
+
+    # 4. OUTPUT: givens as the exercise states them.
+    shell_tokens_str = fmt_int(scenario.shell_tokens)
+    tools_str = fmt_int(scenario.tools)
+    tool_tokens_str = fmt_int(scenario.tool_tokens)
+    calls_str = fmt_int(scenario.calls)
+    input_price_str = fmt_usd(input_price, precision=0)
+    structured_attempt_str = fmt_usd(scenario.structured_attempt, precision=2)
+    structured_acceptance_str = fmt(scenario.structured_acceptance, precision=2, commas=False)
+    structured_change_str = fmt(scenario.structured_change, precision=3, commas=False)
+    shell_acceptance_str = fmt(scenario.shell_acceptance, precision=2, commas=False)
+    shell_change_str = fmt(scenario.shell_change, precision=3, commas=False)
+    change_cost_str = fmt_usd(scenario.change_cost, precision=0)
+```
+
+**9. One shell or twelve tools (Advanced; second lighthouse).** A team proposes giving the remediation agent a single `run_shell` tool with a `{python} ToolkitExerciseGivens.shell_tokens_str`-token descriptor in place of `{python} ToolkitExerciseGivens.tools_str` structured tools of `{python} ToolkitExerciseGivens.tool_tokens_str` tokens each, citing fewer selection errors. A trajectory makes `{python} ToolkitExerciseGivens.calls_str` model calls at `{python} ToolkitExerciseGivens.input_price_str` per million uncached input tokens. With structured tools, an attempt costs `{python} ToolkitExerciseGivens.structured_attempt_str`, is accepted with probability `{python} ToolkitExerciseGivens.structured_acceptance_str`, and causes an unconfined production change with probability `{python} ToolkitExerciseGivens.structured_change_str`. With the shell, those figures are an attempt cost reduced by the descriptor savings, acceptance probability `{python} ToolkitExerciseGivens.shell_acceptance_str`, and unconfined-change probability `{python} ToolkitExerciseGivens.shell_change_str`. Each unconfined change costs `{python} ToolkitExerciseGivens.change_cost_str` to detect and repair.
 
 (a) Compute the per-trajectory descriptor savings and $\CostPerAcceptedTask = \mathbb{E}[\AttemptCost]/\AcceptanceProbability$ for each design, first from token costs alone and then including expected change losses in the attempt cost.
 (b) Find the unconfined-change probability the shell design would need to match the structured design's $\CostPerAcceptedTask$.
