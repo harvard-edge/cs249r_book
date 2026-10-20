@@ -69,6 +69,19 @@ __all__ = [
     "BisectionResult",
     "IncastResult",
     "CollectiveFitResult",
+    "StorageFootprintResult",
+    "TieredCheckpointResult",
+    "CheckpointStormResult",
+    "InputDemandResult",
+    "DataStallResult",
+    "PrefetchDepthResult",
+    "TieredCacheResult",
+    "HostIoCpuResult",
+    "ObjectStorageBillResult",
+    "StreamVsStageResult",
+    "UtilizationLossResult",
+    "SyntheticFootprintResult",
+    "StorageBenchmarkResult",
 ]
 
 
@@ -744,3 +757,117 @@ class CollectiveFitResult(SolverResult):
     def model_time(self, size: Quantity) -> Quantity:
         """Modeled time for a message of ``size``: floor + size / bandwidth."""
         return (self.floor_time + size / self.bandwidth).to("microsecond")
+# ── Storage calculation results (added 2026-10-20) ────────────────
+
+class StorageFootprintResult(SolverResult):
+    """Result from StorageFootprintModel: what a training run reads, saves, and keeps."""
+    checkpoint_bytes: Quantity
+    saves: int
+    checkpoint_bytes_written: Quantity
+    write_read_ratio: float          # checkpoint bytes written / corpus bytes read
+    average_read_rate: Quantity      # corpus bytes / run duration
+    shard_count: int
+    archived_checkpoints: int
+    archive_bytes: Quantity          # retained checkpoints + source + corpus
+
+
+class TieredCheckpointResult(SolverResult):
+    """Result from TieredCheckpointModel: a save staged on local storage, then drained."""
+    checkpoint_bytes: Quantity
+    per_node_shard: Quantity
+    local_write_time: Quantity       # the training pause
+    drain_time: Quantity             # background copy to the durable tier
+    durable_share_per_node: Quantity
+    pause_fraction: float            # pause / save interval
+
+
+class CheckpointStormResult(SolverResult):
+    """Result from CheckpointStormModel: every replica writes against one logical copy."""
+    state_bytes: Quantity
+    storm_bytes: Quantity
+    storm_time: Quantity
+    single_copy_time: Quantity
+    slowdown: float
+
+
+class InputDemandResult(SolverResult):
+    """Result from InputDemandModel: bandwidth a fleet of consumers draws from storage."""
+    batch_bytes: Quantity            # one consumer's batch
+    bandwidth: Quantity
+
+
+class DataStallResult(SolverResult):
+    """Result from DataStallModel: input wait with and without overlap."""
+    sequential_step: Quantity
+    sequential_stall: float
+    overlapped_step: Quantity
+    overlapped_stall: float
+
+
+class PrefetchDepthResult(SolverResult):
+    """Result from PrefetchDepthModel: ready batches needed to cover each tier's tail."""
+    spans: Dict[str, float]          # tail latency / compute window
+    depths: Dict[str, int]           # ceil(span)
+    buffer_per_consumer: Quantity    # at the stated safety depth
+    buffer_per_node: Quantity
+
+
+class TieredCacheResult(SolverResult):
+    """Result from TieredCacheModel: mean service of a two-tier cache."""
+    hit_rate: float
+    miss_penalty: float              # miss service time / hit service time
+    mean_service: float              # in hit service times
+    delivered_fraction: float        # of the all-hit rate
+    delivered_rate: Optional[Quantity] = None
+
+
+class HostIoCpuResult(SolverResult):
+    """Result from HostIoCpuModel: CPU time per second spent issuing I/O."""
+    request_rate: float              # requests per second
+    cpu_seconds_per_second: Dict[str, float]
+
+
+class ObjectStorageBillResult(SolverResult):
+    """Result from ObjectStorageBillModel: storing and reading a dataset in object storage."""
+    storage_cost: float              # dollars over the billing period
+    egress_per_read: float           # dollars
+    egress_cost: float               # dollars, all reads
+    request_cost: float              # dollars, one GET per file
+    archive_retrieval_cost: float    # dollars, retrieval fee only
+    archive_restore_cost: float      # dollars, retrieval plus one egress
+
+
+class StreamVsStageResult(SolverResult):
+    """Result from StreamVsStageModel: reading every epoch remotely against staging per run."""
+    source_storage_cost: float       # dollars a year, both options
+    stream_egress_per_run: float
+    stream_egress_cost: float
+    stream_cost: float
+    local_storage_cost: float
+    stage_egress_cost: float
+    stage_cost: float
+    savings: float
+    break_even_epochs: float
+
+
+class UtilizationLossResult(SolverResult):
+    """Result from UtilizationLossModel: the cost of devices idled by a utilization drop."""
+    fleet_cost_per_day: float        # dollars
+    loss_per_day: float
+    loss_total: float
+
+
+class SyntheticFootprintResult(SolverResult):
+    """Result from SyntheticFootprintModel: generated data at rest and in motion."""
+    stored_bytes: Quantity
+    verification_bytes: Quantity
+    pipeline_bytes: Quantity
+    capacity_amplification: float
+    traffic_amplification: float
+
+
+class StorageBenchmarkResult(SolverResult):
+    """Result from StorageBenchmarkDemandModel: measured storage demand per accelerator."""
+    result_count: int
+    medians: Dict[str, Dict[str, float]]   # workload -> accelerator -> GB/s per accelerator
+    generation_ratios: Dict[str, float]    # workload -> newer / older accelerator

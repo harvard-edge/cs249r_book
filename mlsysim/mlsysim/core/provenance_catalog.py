@@ -2476,3 +2476,14 @@ FLEET_UTILIZATION_SNAPSHOT_SCENARIO = _est(
     ),
     verified="2026-10-15",
 )
+DEEPSEEK_3FS_README = _lit(
+    "prov:deepseek-3fs-readme",
+    "DeepSeek, Fire-Flyer File System (3FS), README, peak read throughput stress test",
+    url="https://github.com/deepseek-ai/3FS",
+    verified="2026-10-20",
+    notes=(
+        "Read stress test: 180 storage nodes, each with 2x200 Gb/s InfiniBand NICs and sixteen "
+        "14 TiB NVMe SSDs; about 500+ client nodes with one 200 Gb/s NIC each; aggregate read "
+        "throughput about 6.6 TiB/s with background traffic from training jobs."
+    ),
+)
