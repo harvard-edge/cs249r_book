@@ -76,13 +76,15 @@ A moving robot cannot pause its momentum while a learned policy computes the nex
 # │ Goal:    Pin the arm tracking rate and chunk inference latency the opening
 # │          quotes for the warehouse mobile manipulator.
 # │ Show:    1 kHz joint loop; 40 ms P99 chunk inference; 150 ms interference tail.
-# │ How:     RM registry fields; the tail is a scenario assumption.
+# │ How:     RM registry fields; the tail is the interference tail of
+# │          Scenarios.WarehouseArmChunkReplacement.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import millisecond
 from mlsysim.fmt import check, fmt_frequency, fmt_latency
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+REPLACE = Scenarios.WarehouseArmChunkReplacement
 
 class PlanningOpeningMachine:
     """Arm tracking rate and chunk-policy inference latency on the machine."""
@@ -90,10 +92,10 @@ class PlanningOpeningMachine:
     # ┌── 1. LOAD (Constants) ──────────────────────
     f_track = RM.arm.control_frequency  # category: datasheet; arm joint loop, registry
     t_chunk = RM.chunk_inference_latency  # category: illustrative; P99 incl. vision, registry
-    t_tail = 150 * millisecond  # category: illustrative; interference tail
+    t_tail = REPLACE.interference_tail  # category: illustrative; interference tail, scenario
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
-    tail_over_nominal = (t_tail / t_chunk).to("dimensionless").magnitude
+    tail_over_nominal = REPLACE.result.tail_over_inference
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(abs(f_track.to("hertz").magnitude - 1000.0) < 1e-9, "arm loop rate changed")
@@ -172,7 +174,8 @@ A path that keeps the tool inside its speed limit and clear of obstacles in work
 # │          37.8 rad/s at a 10 degree elbow.
 # │ How:     Franka FER kinematic chain (d3, d5) and joint velocity limit from
 # │          the registry (franka2023robot); smallest singular value of the
-# │          2x2 Jacobian.
+# │          2x2 Jacobian from Scenarios.WarehouseArmRightAngleElbow and
+# │          WarehouseArmNearStraightElbow (TwoLinkJointRateModel).
 # └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
 from mlsysim import *
@@ -180,12 +183,8 @@ from mlsysim.core.units import meter, radian, second
 from mlsysim.fmt import check, fmt, fmt_length, fmt_angular_velocity, fmt_velocity, fmt_int
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
-
-def _two_link_sigma_min(l1_m, l2_m, q2_deg):
-    """Smallest singular value of the planar two-link Jacobian at q1 = 0 (rank depends only on q2)."""
-    q2 = np.radians(q2_deg)
-    jac = np.array([[-l2_m * np.sin(q2), -l2_m * np.sin(q2)], [l1_m + l2_m * np.cos(q2), l2_m * np.cos(q2)]])
-    return float(np.linalg.svd(jac, compute_uv=False)[-1])
+ELBOW_GOOD = Scenarios.WarehouseArmRightAngleElbow
+ELBOW_BAD = Scenarios.WarehouseArmNearStraightElbow
 
 class PlanningTwoLinkArm:
     """Planar two-link abstraction of the arm: forward kinematics and Jacobian conditioning."""
@@ -195,16 +194,17 @@ class PlanningTwoLinkArm:
     l2 = RM.arm.forearm_length  # category: datasheet; FER DH d5, elbow to wrist, registry (franka2023robot)
     qd_max = RM.arm.joint_velocity_limits[1]  # category: datasheet; FER joints 1-4 velocity limit, registry (franka2023robot)
     v_tool = RM.tcp_speed_limit  # category: chosen; free-space TCP limit, registry
-    q2_good_deg = 90  # category: illustrative; right-angle elbow
-    q2_bad_deg = 10  # category: illustrative; nearly straight elbow
+    q2_good_deg = round(ELBOW_GOOD.elbow_angle.to("degree").magnitude)  # category: illustrative; right-angle elbow, scenario
+    q2_bad_deg = round(ELBOW_BAD.elbow_angle.to("degree").magnitude)  # category: illustrative; nearly straight elbow, scenario
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
-    reach = (l1 + l2).to(meter)
-    sig_good = _two_link_sigma_min(l1.magnitude, l2.magnitude, q2_good_deg)
-    sig_bad = _two_link_sigma_min(l1.magnitude, l2.magnitude, q2_bad_deg)
-    qd_norm_good = (v_tool / (sig_good * meter)).to(second**-1).magnitude * radian / second
-    qd_norm_bad = (v_tool / (sig_bad * meter)).to(second**-1).magnitude * radian / second
-    qd_one_good = qd_norm_good / np.sqrt(2)  # some joint must reach at least ||qdot|| / sqrt(2)
+    _good, _bad = ELBOW_GOOD.result, ELBOW_BAD.result
+    reach = _good.reach.to(meter)
+    sig_good = _good.sigma_min.to(meter).magnitude
+    sig_bad = _bad.sigma_min.to(meter).magnitude
+    qd_norm_good = _good.joint_rate_norm.to(radian / second)
+    qd_norm_bad = _bad.joint_rate_norm.to(radian / second)
+    qd_one_good = _good.joint_rate_one_joint.to(radian / second)  # some joint must reach at least ||qdot|| / sqrt(2)
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(abs(reach.magnitude - 0.700) < 1e-12, "planar reach changed")
@@ -359,9 +359,9 @@ plt.show()
 # │          bound v / (2 lambda) = 10 rad/s at any configuration.
 # │ How:     Per singular direction the DLS gain is sigma / (sigma^2 + lambda^2)
 # │          and the realized fraction sigma^2 / (sigma^2 + lambda^2)
-# │          (wampler1986manipulator; nakamura1986inverse); sigma_min from
-# │          PlanningTwoLinkArm. Chapter-local: promote to MLSysIM only if a
-# │          second chapter reuses it.
+# │          (wampler1986manipulator; nakamura1986inverse), computed by
+# │          TwoLinkJointRateModel in the two elbow scenarios that
+# │          calc-planning-two-link-arm reads.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.units import dimensionless, meter, millimeter, radian, second
 from mlsysim.fmt import check, fmt_length, fmt_angular_velocity, fmt_percent
@@ -370,25 +370,17 @@ class PlanningDLSStep:
     """Damped-least-squares IK gain and realized tool motion in the arm's weakest direction."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────
-    lam = 50 * millimeter  # category: chosen; illustrative damping, not a vendor setting
+    lam = ELBOW_GOOD.damping.to(millimeter)  # category: chosen; illustrative damping, not a vendor setting, scenario
     v_tool = PlanningTwoLinkArm.v_tool  # category: chosen; free-space TCP limit, registry
     qd_max = PlanningTwoLinkArm.qd_max  # category: datasheet; shoulder and elbow limit, registry
-    sig_good = PlanningTwoLinkArm.sig_good * meter  # derived; 90 degree elbow
-    sig_bad = PlanningTwoLinkArm.sig_bad * meter  # derived; 10 degree elbow
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
-    def _gain(sig, lam):
-        return (sig / (sig**2 + lam**2)).to(meter**-1)
-
-    def _realized(sig, lam):
-        return (sig**2 / (sig**2 + lam**2)).to(dimensionless).magnitude
-
-    rad_s = radian / second
-    qd_dls_good = (v_tool * _gain(sig_good, lam)).to(second**-1).magnitude * rad_s
-    qd_dls_bad = (v_tool * _gain(sig_bad, lam)).to(second**-1).magnitude * rad_s
-    qd_bound = (v_tool / (2 * lam)).to(second**-1).magnitude * rad_s
-    frac_good = _realized(sig_good, lam)
-    frac_bad = _realized(sig_bad, lam)
+    _good, _bad = ELBOW_GOOD.result, ELBOW_BAD.result
+    qd_dls_good = _good.damped_joint_rate.to(radian / second)
+    qd_dls_bad = _bad.damped_joint_rate.to(radian / second)
+    qd_bound = _good.damped_ceiling.to(radian / second)
+    frac_good = _good.realized_fraction
+    frac_bad = _bad.realized_fraction
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(qd_dls_good < PlanningTwoLinkArm.qd_norm_good, "damping must not raise the joint command")
@@ -457,12 +449,13 @@ Damping bounds the inverse-kinematics step; it does not make the step feasible. 
 # │          219.5 mm of 300 mm, leaving 80.5 mm; alternate path leaves
 # │          102.5 mm from its later epoch; alternate admission cutoff
 # │          300 - 22 = 278 ms from schedule origin.
-# │ How:     AISLE lease, tick, bus, and brake onset (charged as the arm's
-# │          onset, conservative); RM TCP limit; the arm's jerk bound is the
-# │          peak jerk of the reference C2 polynomial at the same peak
-# │          (calc_c2_stop_suffix), and the stop is calc_scurve_stop_distance
-# │          / calc_scurve_stop_time. The arm's worked deadlines and clearance
-# │          are defined here and read by calc-planning-arm-timeline and
+# │ How:     Scenarios.WarehouseArmStallStop (JerkLimitedStopModel): AISLE
+# │          lease, tick, bus, and brake onset (charged as the arm's onset,
+# │          conservative); RM TCP limit; the arm's jerk bound is the peak jerk
+# │          of the reference C2 polynomial at the same peak. The alternate
+# │          schedule is Scenarios.WarehouseArmCommitmentSchedule
+# │          (TrajectoryDeadlinesModel). The arm's worked deadlines and
+# │          clearance are read here and by calc-planning-arm-timeline and
 # │          calc-planning-c2-stop-clearance.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
@@ -471,6 +464,8 @@ from mlsysim.fmt import check, fmt_latency, fmt_length, fmt_velocity
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
+ARM_STOP = Scenarios.WarehouseArmStallStop
+ARM_SCHEDULE = Scenarios.WarehouseArmCommitmentSchedule
 
 class PlanningLeaseRule:
     """The arm lease path and the alternate schedule admission cutoff."""
@@ -481,25 +476,26 @@ class PlanningLeaseRule:
     t_tick = AISLE.t_tick  # category: derived; permission-loop period, registry
     t_bus = AISLE.t_bus  # category: illustrative; fieldbus cycle, registry
     t_onset = AISLE.t_brake_onset  # category: illustrative; brake onset, charged as the arm's onset
-    v_arm = RM.tcp_speed_limit  # category: chosen; free-space TCP limit, registry
-    t_blend = 240 * millisecond  # category: chosen; blend deadline
-    t_commit = 300 * millisecond  # category: chosen; physical suffix onset
-    a_arm_stop = 5.0 * meter / second**2  # category: illustrative; arm stop deceleration bound
-    d_arm_clear = 300 * millimeter  # category: illustrative; obstacle clearance
+    v_arm = ARM_STOP.speed  # category: chosen; free-space TCP limit, registry
+    t_blend = ARM_SCHEDULE.blend  # category: chosen; blend deadline, scenario
+    t_commit = ARM_SCHEDULE.commit  # category: chosen; physical suffix onset, scenario
+    a_arm_stop = ARM_STOP.deceleration  # category: illustrative; arm stop deceleration bound, scenario
+    d_arm_clear = ARM_STOP.clear_distance  # category: illustrative; obstacle clearance, scenario
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
+    _stop, _sched = ARM_STOP.result, ARM_SCHEDULE.result
     t_renew = (1 / f_renew).to(millisecond)
     t_lease_slack = (t_lease - t_renew).to(millisecond)
-    t_dispatch = (t_tick + t_bus + t_onset).to(millisecond)
-    t_lease_path = (t_lease + t_dispatch).to(millisecond)
-    d_lease_path = (v_arm * t_lease_path).to(millimeter)
-    j_arm_stop = calc_c2_stop_suffix(v_arm, a_arm_stop)["peak_jerk"]  # jerk bound: reference polynomial's peak
-    t_arm_stop = calc_scurve_stop_time(v_arm, a_arm_stop, j_arm_stop).to(millisecond)
-    arm_stop_dist = calc_scurve_stop_distance(v_arm, a_arm_stop, j_arm_stop).to(millimeter)
-    lease_total = d_lease_path + arm_stop_dist
-    lease_margin = d_arm_clear - lease_total
-    commit_margin = d_arm_clear - (v_arm * (t_commit - t_blend)).to(millimeter) - arm_stop_dist
-    t_alt_admission_cutoff = (t_commit - t_dispatch).to(millisecond)
+    t_dispatch = ARM_SCHEDULE.response.to(millisecond)
+    t_lease_path = _stop.delay.to(millisecond)
+    d_lease_path = _stop.delay_travel.to(millimeter)
+    j_arm_stop = _stop.jerk  # jerk bound: reference polynomial's peak
+    t_arm_stop = _stop.stop_time.to(millisecond)
+    arm_stop_dist = _stop.scurve_travel.to(millimeter)
+    lease_total = _stop.required_distance.to(millimeter)
+    lease_margin = _stop.spare.to(millimeter)
+    commit_margin = _sched.margin.to(millimeter)
+    t_alt_admission_cutoff = _sched.admission_cutoff.to(millisecond)
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(abs(t_lease.to(millisecond).magnitude - 60.0) < 1e-9, "chunk lease changed")
@@ -515,6 +511,7 @@ class PlanningLeaseRule:
     check(abs(lease_margin.magnitude - 80.5) < 1e-9, "arm lease-path margin changed")
     check(abs(commit_margin.magnitude - 102.5) < 1e-9, "arm commitment-path margin changed")
     check(abs(t_dispatch.magnitude - 22.0) < 1e-9, "tick + bus + onset changed")
+    check(abs((t_lease_path - t_lease - t_dispatch).to(millisecond).magnitude) < 1e-9, "lease path is not lease + tick + bus + onset")
     check(abs(t_alt_admission_cutoff.magnitude - 278.0) < 1e-9, "alternate admission cutoff changed")
     check(lease_total <= d_arm_clear, "running lease-path stop exceeds illustrative clearance")
 
@@ -583,7 +580,8 @@ If a replacement chunk takes longer from camera capture to MCU admission than th
 # │ Show:    L = t_age 51.6 + Delta_da 63.3 = 114.9 ms; inside Delta_da the
 # │          40 ms inference and the 18 ms whole-plan validation.
 # │ How:     AISLE.perception_age (Ch8), AISLE.t_dispatch_to_admission (Ch13),
-# │          AISLE.t_capture_to_admission (MLSysIM). 2026-09-29: replaced the
+# │          AISLE.t_capture_to_admission (MLSysIM), summed by
+# │          Scenarios.WarehouseArmChunkReplacement. 2026-09-29: replaced the
 # │          15 + 5 + 40 + 2 + 18 + 1 = 81 ms chapter-local stage list, whose
 # │          sensing stages disagreed with the registry's capture-to-dispatch age.
 # └─────────────────────────────────────────────────────────────────────────────
@@ -604,10 +602,11 @@ class PlanningReplacementBudget:
     t_validate = AISLE.t_plan_validate  # category: illustrative; whole-plan validation, registry (inside t_da)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
-    t_sum = AISLE.t_capture_to_admission.to(millisecond)
+    t_sum = Scenarios.WarehouseArmChunkReplacement.result.latency.to(millisecond)
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(abs(t_infer.to(millisecond).magnitude - 40.0) < 1e-9, "chunk inference latency changed")
+    check(abs((AISLE.t_capture_to_admission - t_sum).to(millisecond).magnitude) < 1e-9, "L disagrees with the registry capture-to-admission interval")
     check(abs((t_age + t_da - t_sum).to(millisecond).magnitude) < 1e-9, "L must be capture-to-dispatch plus dispatch-to-admission")
     check(abs(t_sum.magnitude - 114.91072) < 1e-6, "replacement latency changed")
     check(t_validate < t_da, "validation is counted once, inside Delta_da")
@@ -672,28 +671,32 @@ When the resident fallback works as certified, a late replacement costs availabi
 # │          derive the per-handoff design-tail target by the union bound.
 # │ Show:    K = 600 s x 5 Hz = 3000; 30 late; 0.99^3000 ~ 8e-14;
 # │          1e-3 / 3000 ~ 3.3e-7, i.e. P99.99997.
-# │ How:     Generic replanner (not the machine's 20 Hz chunk renewal);
+# │ How:     Scenarios.GenericReplannerMissionExposure (HandoffExposureModel):
+# │          a generic replanner (not the machine's 20 Hz chunk renewal);
 # │          independence assumed, as the prose states.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import second, hertz
 from mlsysim.fmt import check, fmt, fmt_int, fmt_frequency, fmt_math, sci_latex
 
+MISSION = Scenarios.GenericReplannerMissionExposure
+
 class PlanningMissionExposure:
     """Handoff count, late-handoff exposure, and union-bound design target."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────
-    t_mission = 600 * second  # category: illustrative; ten-minute mission
-    f_replan = 5 * hertz  # category: illustrative; generic replanner rate
-    p_late = 0.01  # category: definitional; exceedance of a P99 budget
-    eps_mission = 1e-3  # category: chosen; mission exceedance target
+    t_mission = MISSION.mission_time  # category: illustrative; ten-minute mission, scenario
+    f_replan = MISSION.replan_rate  # category: illustrative; generic replanner rate, scenario
+    p_late = MISSION.late_probability  # category: definitional; exceedance of a P99 budget
+    eps_mission = MISSION.mission_budget  # category: chosen; mission exceedance target, scenario
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
-    n_handoff = round((t_mission * f_replan).to("dimensionless").magnitude)
-    n_late = n_handoff * p_late
-    p_all = (1 - p_late) ** n_handoff
-    eps_handoff = eps_mission / n_handoff
-    q_pct = 100 * (1 - eps_handoff)
+    _m = MISSION.result
+    n_handoff = _m.handoffs
+    n_late = _m.expected_late
+    p_all = _m.all_on_time
+    eps_handoff = _m.per_handoff_budget
+    q_pct = 100 * _m.design_quantile
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(n_handoff == 3000, "handoff count changed")
@@ -781,8 +784,9 @@ $$\TrajectoryRecordDuration\ge \ReplanRequestOffset+\DesignLatencyQuantile(\Repl
 # │          262 ms sufficient minimum onset; selected onset 300 ms
 # │          (60 ms after preferred admission); 278 ms latest admission;
 # │          400 ms nominal end (H = 16 setpoints).
-# │ How:     RM chunk step and horizon; the rest are scenario assumptions;
-# │          eq-plan-action-chunk-horizon.
+# │ How:     RM chunk step and horizon; the rest are the scenario
+# │          assumptions of Scenarios.WarehouseArmCommitmentSchedule
+# │          (TrajectoryDeadlinesModel); eq-plan-action-chunk-horizon.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import millisecond
@@ -797,26 +801,27 @@ class PlanningArmTimeline:
     t_period = RM.chunk_step  # category: chosen; chunk setpoint period, registry
     n_horizon = RM.chunk_horizon  # category: chosen; setpoints per chunk, registry
     t_chunk = RM.chunk_inference_latency  # category: illustrative; P99 chunk pass incl. vision, registry
-    t_request = 60 * millisecond  # category: chosen; request delay
+    t_request = ARM_SCHEDULE.request_delay  # category: chosen; request delay, scenario
     f_renew = RM.chunk_rate  # category: chosen; chunk renewal rate, registry
-    q_latency = 160 * millisecond  # category: chosen; design-tail replacement-latency target
-    t_schedule_slack = 20 * millisecond  # category: chosen; scheduling slack before preferred admission
+    q_latency = ARM_SCHEDULE.latency_target  # category: chosen; design-tail replacement-latency target, scenario
+    t_schedule_slack = ARM_SCHEDULE.schedule_slack  # category: chosen; scheduling slack before preferred admission, scenario
     t_response = PlanningLeaseRule.t_dispatch  # category: derived; physical decision-to-onset allowance
     t_stop = PlanningLeaseRule.t_arm_stop  # category: derived; arm S-curve stop duration, calc-planning-lease-rule
     t_blend = PlanningLeaseRule.t_blend  # category: chosen; blend deadline, calc-planning-lease-rule
     t_commit = PlanningLeaseRule.t_commit  # category: chosen; physical suffix onset, calc-planning-lease-rule
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
-    f_step = (1 / t_period).to("hertz")
+    _sched = ARM_SCHEDULE.result
+    f_step = _sched.setpoint_rate.to("hertz")
     t_renew = (1 / f_renew).to(millisecond)
-    request_slack = t_request - t_renew
-    t_plan_exp = (n_horizon * t_period).to(millisecond)
-    t_replace_min = t_request + q_latency + t_schedule_slack  # preferred admission, not physical onset
-    t_reserve = t_schedule_slack + t_response  # full reserve in eq-plan-action-chunk-horizon
-    t_onset_min = t_request + q_latency + t_reserve
-    commit_slack = t_commit - t_replace_min
-    t_stop_end = t_commit + t_stop
-    n_window = (t_stop_end / t_period).to("dimensionless").magnitude
+    request_slack = _sched.request_slack
+    t_plan_exp = _sched.nominal_end.to(millisecond)
+    t_replace_min = _sched.preferred_admission  # preferred admission, not physical onset
+    t_reserve = _sched.reserve  # full reserve in eq-plan-action-chunk-horizon
+    t_onset_min = _sched.minimum_onset
+    commit_slack = _sched.commit_slack
+    t_stop_end = _sched.rest
+    n_window = _sched.window_periods
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(abs(t_period.to(millisecond).magnitude - 25.0) < 1e-9, "chunk setpoint period changed")
@@ -878,7 +883,7 @@ This alternate profile serves to contrast buffer structure with the production p
 # │          alternate 240 / 278 / 300 / 400 / 575 ms, 60 + 137.5 = 197.5 mm,
 # │          102.5 mm; 300 mm clearance.
 # │ How:     Reads PlanningLeaseRule and PlanningArmTimeline; the alternate
-# │          cruise is recomputed because PlanningC2Stop is defined later.
+# │          cruise is Scenarios.WarehouseArmCommitmentSchedule's blend cruise.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.units import millisecond, millimeter
 from mlsysim.fmt import check
@@ -891,8 +896,8 @@ class PlanningTimelineFigure:
     AT = PlanningArmTimeline  # category: derived; calc-planning-arm-timeline
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
-    t_run_stop_end = (LR.t_lease_path + LR.t_arm_stop).to(millisecond)
-    alt_cruise = (LR.v_arm * (AT.t_commit - AT.t_blend)).to(millimeter)
+    t_run_stop_end = ARM_STOP.result.rest_time.to(millisecond)
+    alt_cruise = ARM_SCHEDULE.result.blend_cruise.to(millimeter)
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     def _ms(q):
@@ -944,8 +949,9 @@ On the Push-T manipulation benchmark [@chi2024diffusionpolicy], frequent closed-
 # │          the replacement was requested.
 # │ Show:    0.50 rad/s x 80 ms = 0.040 rad (2.29 degrees); up to 28 mm of
 # │          tool motion at the 0.70 m planar reach.
-# │ How:     Illustrative delay and joint speed; reach from
-# │          calc-planning-two-link-arm (lever arm bounded by the reach).
+# │ How:     Scenarios.WarehouseArmStaleAnchor (StaleAnchorModel):
+# │          illustrative delay and joint speed; the lever arm is the planar
+# │          reach (bounded by it).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import millisecond, second, degree, millimeter, radian
@@ -955,13 +961,14 @@ class PlanningStalePoseGap:
     """Reference lag of a stale request-epoch pose."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────
-    t_delay = 80 * millisecond  # category: illustrative; replacement delay
-    w_joint = 0.50 * radian / second  # category: illustrative; constant joint speed
+    t_delay = Scenarios.WarehouseArmStaleAnchor.delay  # category: illustrative; replacement delay, scenario
+    w_joint = Scenarios.WarehouseArmStaleAnchor.joint_speed  # category: illustrative; constant joint speed, scenario
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
-    gap = (w_joint * t_delay).to(radian)
-    gap_deg = gap.to(degree)
-    d_tool_max = (gap.magnitude * PlanningTwoLinkArm.reach).to(millimeter)  # arc length at the full lever arm
+    _anchor = Scenarios.WarehouseArmStaleAnchor.result
+    gap = _anchor.gap.to(radian)
+    gap_deg = _anchor.gap_degrees.to(degree)
+    d_tool_max = _anchor.tool_displacement.to(millimeter)  # arc length at the full lever arm
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(abs(gap.magnitude - 0.040) < 1e-12, "stale pose gap changed")
@@ -1040,9 +1047,10 @@ A trajectory can stay completely clear of obstacles in $\FreeConfigurationSpace$
 # │          the payload alone, as a lower bound on the real joint load.
 # │ Show:    3 kg x g x 0.70 m = 20.6 N m (23.7 % of 87 N m);
 # │          3 kg x 0.70^2 + 0.1835 = 1.65 kg m^2.
-# │ How:     RM arm payload and joint torque limit (registry); planar reach
-# │          from calc-planning-two-link-arm; reflected rotor inertia of the
-# │          registered Panda-class stand-in joint. Link masses omitted
+# │ How:     Scenarios.WarehouseArmShoulderSwing (ShoulderSwingModel): RM
+# │          arm payload and joint torque limit (registry); planar reach;
+# │          reflected rotor inertia of the registered Panda-class stand-in
+# │          joint. Link masses omitted
 # │          (not in the manufacturer specification; needs identified link
 # │          parameters, e.g. gaz2019dynamic, entered in the registry with source).
 # └─────────────────────────────────────────────────────────────────────────────
@@ -1060,17 +1068,18 @@ class PlanningOneJointDynamics:
     tau_max = RM.arm.max_torque  # category: datasheet; joints 1-4 torque limit, registry
     r_reach = PlanningTwoLinkArm.reach  # category: datasheet; planar reach, calc-planning-two-link-arm
     j_rotor_ref = Actuators.PandaClassJoint.CSG_25_50_ILM70x18.reflected_inertia  # category: derived; registry stand-in joint
-    g0 = standard_gravity  # category: definitional
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
-    tau_grav = (m_pay * g0 * r_reach).to(newton * meter)
-    grav_ratio = (tau_grav / tau_max).to("dimensionless").magnitude
-    j_eff = (m_pay * r_reach**2 + j_rotor_ref).to(kilogram * meter**2)
+    _shoulder = Scenarios.WarehouseArmShoulderSwing.result
+    tau_grav = _shoulder.holding_torque.to(newton * meter)
+    grav_ratio = _shoulder.holding_share
+    j_eff = _shoulder.effective_inertia.to(kilogram * meter**2)
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(abs(tau_grav.magnitude - 20.594) < 1e-3, "payload holding torque changed")
     check(abs(j_eff.magnitude - 1.6535) < 1e-4, "payload plus rotor inertia changed")
     check(grav_ratio < 0.5, "payload gravity no longer a minority of the joint limit")
+    check(abs((Scenarios.WarehouseArmShoulderSwing.reach - r_reach).to(meter).magnitude) < 1e-12, "swing scenario reach disagrees with the planar reach")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────
     m_pay_str = fmt_mass(m_pay, unit=kilogram, precision=0)
@@ -1144,29 +1153,31 @@ class PlanningSeamInertia:
         Actuators.PandaClassJoint.CSG_25_50_ILM70x18
     )  # category: datasheet; CSG-25-50 gear ratio and torque limits, ILM 70x18 rotor plus gear input inertia
     j_reflected = joint.reflected_inertia  # category: derived; N^2 J_rotor, 0.1835 kg m^2
-    delta_omega = 0.2 * radian / second  # category: illustrative; reference velocity gap
-    dt_tick = 1 * millisecond  # category: chosen; servo tick
-    t_blend = 50 * millisecond  # category: illustrative; blend duration
-    tau_step = calc_seam_acceleration_torque_jump(joint.gear_ratio, joint.rotor_inertia, (delta_omega / dt_tick).to(radian / second**2))
-    tau_blend_mean = calc_seam_acceleration_torque_jump(joint.gear_ratio, joint.rotor_inertia, (delta_omega / t_blend).to(radian / second**2))
+    SEAM = Scenarios.PandaClassJointSeamBridge  # SeamBridgeModel on this joint
+    delta_omega = SEAM.velocity_gap  # category: illustrative; reference velocity gap, scenario
+    dt_tick = SEAM.tick.to(millisecond)  # category: chosen; servo tick, registry
+    t_blend = SEAM.bridge_duration  # category: illustrative; blend duration, scenario
+    _seam = SEAM.result
+    tau_step = _seam.step_torque
+    tau_blend_mean = _seam.mean_torque
     # Symmetric C2 velocity blend: a(u)=6*delta_omega*u*(1-u)/T.
-    tau_blend_peak = 1.5 * tau_blend_mean
-    peak_reduction = tau_step / tau_blend_peak
+    tau_blend_peak = _seam.peak_torque
+    peak_reduction = _seam.peak_reduction
     tau_rated = joint.rated_torque  # category: datasheet; L10 rated torque
     tau_peak_rated = joint.peak_torque  # category: datasheet; repeated peak torque
     # One-tick velocity change the whole repeated peak could supply to reflected rotor inertia alone.
-    dq_ceiling = (tau_peak_rated * dt_tick / j_reflected).to(radian / second)
+    dq_ceiling = _seam.velocity_ceiling.to(radian / second)
     check(abs(tau_step.magnitude - 36.7) < 0.01, "one-tick request changed")
     check(abs(tau_blend_mean.magnitude - 0.734) < 0.001, "blend mean changed")
     check(abs(tau_blend_peak.magnitude - 1.101) < 0.001, "blend peak changed")
-    check(abs(peak_reduction.magnitude - 50 / 1.5) < 0.01, "peak ratio changed")
+    check(abs(peak_reduction - 50 / 1.5) < 0.01, "peak ratio changed")
     check(abs(dq_ceiling.magnitude - 0.6921) < 1e-4, "one-tick velocity ceiling changed")
     check(delta_omega < dq_ceiling, "notebook velocity gap no longer below the one-tick ceiling")
     check(tau_step < tau_rated, "one-tick request no longer below the rated torque")
     tau_step_str = fmt_torque(tau_step, precision=1)
     tau_mean_str = fmt_torque(tau_blend_mean, precision=2)
     tau_peak_str = fmt_torque(tau_blend_peak, precision=1)
-    reduction_mult_str = fmt_multiple(peak_reduction.magnitude, precision=1)
+    reduction_mult_str = fmt_multiple(peak_reduction, precision=1)
     j_reflected_str = fmt_inertia(j_reflected, precision=2)
     tau_rated_str = fmt_torque(tau_rated, precision=0)
     tau_peak_rated_str = fmt_torque(tau_peak_rated, precision=0)
@@ -1263,9 +1274,11 @@ While a local quintic bridge resolves seam continuity through explicit boundary 
 # │          6.0 rad/s^2; peak jerk 480 rad/s^3; torque rate 88.1 N m/s
 # │          (8.8 percent of 1,000 N m/s); one-tick step 36,700 N m/s (36.7x);
 # │          halving T: 2.2 N m, 1,920 rad/s^3, 352.3 N m/s.
-# │ How:     Zero boundary accelerations and an endpoint on chunk B's
-# │          reference (position residual dw T / 2); the 3x3 system is solved
-# │          numerically and guarded against its closed form. Torque rate is
+# │ How:     Scenarios.PandaClassJointSeamBridge and its halved and 10 ms
+# │          variants (SeamBridgeModel): zero boundary accelerations and an
+# │          endpoint on chunk B's reference (position residual dw T / 2); the
+# │          3x3 system is solved numerically and guarded here against its
+# │          closed form. Torque rate is
 # │          J_refl x jerk (rigid reflected inertia only); the FER torque-rate
 # │          limit (franka2023robot) is applied to the stand-in joint, as in
 # │          calc-planning-time-parameterization.
@@ -1300,26 +1313,27 @@ class PlanningQuinticBridge:
     tau_step = PlanningSeamInertia.tau_step  # category: derived; one-tick inertial request
     tau_bridge = PlanningSeamInertia.tau_blend_peak  # category: derived; bridge peak inertial torque
     taud_max = RM.arm.joint_torque_rate_limit  # category: datasheet; FER torque-rate limit, registry (franka2023robot)
-    t_short = 10 * millisecond  # category: illustrative; compressed bridge in chk-plan-seam-feasibility
+    t_short = Scenarios.PandaClassJointSeamBridgeCompressed.bridge_duration  # category: illustrative; compressed bridge in chk-plan-seam-feasibility, scenario
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
+    _seam = Scenarios.PandaClassJointSeamBridge.result
+    _half = Scenarios.PandaClassJointSeamBridgeHalved.result
+    _short = Scenarios.PandaClassJointSeamBridgeCompressed.result
     _T = t_b.to(second).magnitude
     _dw = d_omega.to(radian / second).magnitude
-    _A = np.array([[_T**3, _T**4, _T**5], [3 * _T**2, 4 * _T**3, 5 * _T**4], [6 * _T, 12 * _T**2, 20 * _T**3]])
-    _rhs = np.array([_dw * _T / 2, _dw, 0.0])  # position, velocity, acceleration residuals
-    a3, a4, a5 = (float(c) for c in np.linalg.solve(_A, _rhs))
-    pos_res = (_dw * _T / 2) * radian
-    acc_mid = 1.5 * _dw / _T  # rad/s^2 at mid-bridge
-    j_peak = abs(6 * a3)  # rad/s^3 at both ends
+    a3, a4, a5 = _seam.coefficients
+    pos_res = _seam.position_residual.to(radian)
+    acc_mid = _seam.peak_acceleration.to(radian / second**2).magnitude  # rad/s^2 at mid-bridge
+    j_peak = _seam.peak_jerk.to(radian / second**3).magnitude  # rad/s^3 at both ends
     _j_end = abs(6 * a3 + 24 * a4 * _T + 60 * a5 * _T**2)
     _jm2 = j_refl.to(kilogram * meter**2).magnitude
-    tau_rate_bridge = (_jm2 * j_peak) * newton * meter / second
-    tau_rate_step = (tau_step / dt_tick).to(newton * meter / second)
-    step_over_limit = (tau_rate_step / taud_max).to("dimensionless").magnitude
-    bridge_share = (tau_rate_bridge / taud_max).to("dimensionless").magnitude
-    tau_half = 2 * tau_bridge
-    j_half = 4 * j_peak
-    tau_rate_half = 4 * tau_rate_bridge
+    tau_rate_bridge = _seam.torque_rate.to(newton * meter / second)
+    tau_rate_step = _seam.step_torque_rate.to(newton * meter / second)
+    step_over_limit = _seam.step_over_rate_limit
+    bridge_share = _seam.torque_rate_share
+    tau_half = _half.peak_torque
+    j_half = _half.peak_jerk.to(radian / second**3).magnitude
+    tau_rate_half = _half.torque_rate.to(newton * meter / second)
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(
@@ -1333,8 +1347,8 @@ class PlanningQuinticBridge:
     check(abs(tau_rate_step.magnitude - 36700.0) < 5.0, "one-tick torque rate changed")
     check(step_over_limit > 30 and bridge_share < 0.1, "torque-rate verdicts changed")
     check(tau_rate_half < taud_max, "half-duration bridge no longer inside the torque-rate limit")
-    _k_short = (t_b / t_short).to("dimensionless").magnitude
-    check(tau_rate_bridge * _k_short**2 > taud_max, "checkpoint: compressed bridge no longer exceeds the torque-rate limit")
+    check(not _short.within_rate_limit, "checkpoint: compressed bridge no longer exceeds the torque-rate limit")
+    check(abs(_half.peak_torque.to(newton * meter).magnitude - 2 * tau_bridge.to(newton * meter).magnitude) < 1e-9, "halved bridge torque no longer doubles")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────
     a3_math = fmt_math(
@@ -1527,8 +1541,10 @@ Because total motion duration is $\Time = \int_0^1 \frac{1}{\PathVelocity}\,d\Pa
 # │          horizontal value over the swing); FER joint-2 acceleration limit
 # │          and torque-rate limit (registry, franka2023robot); rest-to-rest
 # │          double-S without cruise, calc_scurve_rest_to_rest_time:
-# │          D = a x (x + a/j), T = 2 (x + a/j).
-# │          Ruckig timing from berscheid2021jerk, Table III.
+# │          D = a x (x + a/j), T = 2 (x + a/j); all in
+# │          Scenarios.WarehouseArmShoulderSwing (ShoulderSwingModel).
+# │          Ruckig timing from berscheid2021jerk, Table III
+# │          (Literature.TrajectoryGeneration).
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim import *
@@ -1553,34 +1569,34 @@ class PlanningTimeParam:
     """Phase-plane swing of the loaded shoulder and the cost of a jerk bound."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────
-    d_q = 0.5 * radian  # category: illustrative; swing amplitude
+    SWING = Scenarios.WarehouseArmShoulderSwing  # ShoulderSwingModel
+    d_q = SWING.swing  # category: illustrative; swing amplitude, scenario
     j_eff = PlanningOneJointDynamics.j_eff  # category: derived; payload plus reflected rotor inertia
     tau_g = PlanningOneJointDynamics.tau_grav  # category: derived; payload holding torque, held constant near horizontal
     tau_max = PlanningOneJointDynamics.tau_max  # category: datasheet; joint torque limit, registry
     qd_max = PlanningTwoLinkArm.qd_max  # category: datasheet; FER joint 2 velocity limit (franka2023robot)
     qdd_max = RM.arm.joint_acceleration_limits[1]  # category: datasheet; FER joint 2 acceleration limit, registry (franka2023robot)
     taud_max = RM.arm.joint_torque_rate_limit  # category: datasheet; FER torque-rate limit, registry (franka2023robot)
-    ruckig_mean = 19.8 * microsecond  # category: literature; 7-DoF mean, i7-8700K (berscheid2021jerk, Table III)
-    ruckig_worst = 123 * microsecond  # category: literature; 7-DoF worst case (berscheid2021jerk, Table III)
-    ruckig_dofs = 7  # category: literature; axes in the benchmark (berscheid2021jerk)
+    ruckig_mean = Literature.TrajectoryGeneration.RuckigMeanUs * microsecond  # category: literature; 7-DoF mean, i7-8700K (berscheid2021jerk, Table III)
+    ruckig_worst = Literature.TrajectoryGeneration.RuckigWorstUs * microsecond  # category: literature; 7-DoF worst case (berscheid2021jerk, Table III)
+    ruckig_dofs = round(Literature.TrajectoryGeneration.RuckigBenchmarkAxes)  # category: literature; axes in the benchmark (berscheid2021jerk)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
-    a_up = ((tau_max - tau_g) / j_eff).to(second**-2).magnitude * rad / second**2
-    a_dn = ((tau_max + tau_g) / j_eff).to(second**-2).magnitude * rad / second**2
-    a_bind = min(a_up, a_dn, qdd_max)
-    _dq, _a = d_q.magnitude, a_bind.magnitude
-    t_opt = (2 * math.sqrt(_dq / _a)) * second
-    v_peak = math.sqrt(_a * _dq) * rad / second
-    tau_step = (2 * j_eff * a_bind / rad).to(newton * meter)
-    t_step = (tau_step / taud_max).to(millisecond)
-    j_bound = (taud_max / j_eff).to(second**-3).magnitude * rad / second**3
-    _move = calc_scurve_rest_to_rest_time(d_q, a_bind, j_bound)
-    t_jerk = _move["duration"].to(second)
-    v_peak_jerk = _move["peak_velocity"].to(rad / second)
-    t_extra = (t_jerk - t_opt).to(millisecond)
-    extra_ratio = (t_extra / t_opt).to("dimensionless").magnitude
-    t_ramp = (a_bind.magnitude / j_bound.magnitude) * second  # a / j, one jerk ramp
-    t_hold = (t_jerk / 2 - t_ramp).to(millisecond)  # x in D = a x (x + a/j), T = 2 (x + a/j)
+    _swing = SWING.result
+    a_up = _swing.accel_up
+    a_dn = _swing.accel_down
+    a_bind = _swing.binding_acceleration
+    t_opt = _swing.bang_bang_time.to(second)
+    v_peak = _swing.peak_speed
+    tau_step = _swing.switch_torque_step.to(newton * meter)
+    t_step = _swing.switch_step_time.to(millisecond)
+    j_bound = _swing.jerk_bound
+    t_jerk = _swing.jerk_limited_time.to(second)
+    v_peak_jerk = _swing.jerk_limited_peak_speed.to(rad / second)
+    t_extra = _swing.penalty.to(millisecond)
+    extra_ratio = _swing.penalty_share
+    t_ramp = _swing.ramp_time.to(second)  # a / j, one jerk ramp
+    t_hold = _swing.hold_time.to(millisecond)  # x in D = a x (x + a/j), T = 2 (x + a/j)
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(abs(a_up.magnitude - 40.16) < 0.01, "upward torque-limited acceleration changed")
@@ -1590,7 +1606,8 @@ class PlanningTimeParam:
     check(abs(t_opt.to(millisecond).magnitude - 516.40) < 0.01, "time-optimal swing changed")
     check(abs(tau_step.magnitude - 24.80) < 0.01, "switch torque step changed")
     check(abs(t_jerk.to(millisecond).magnitude - 528.95) < 0.01, "jerk-limited swing changed")
-    check(_move["reaches_max_acceleration"], "jerk-limited swing no longer reaches the acceleration plateau")
+    check(_swing.reaches_plateau, "jerk-limited swing no longer reaches the acceleration plateau")
+    check(abs((_swing.effective_inertia - j_eff).to(kilogram * meter**2).magnitude) < 1e-12, "swing inertia disagrees with the one-joint cell")
     check(ruckig_worst < 1 * millisecond, "online generator worst case no longer inside a 1 ms cycle")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────
@@ -1807,10 +1824,11 @@ The stop is also a slowdown along the admitted path, not a new path. The planner
 # │          1.5 m/s and 2 m/s^2); base S-curve 1031.25 ms / 773.44 mm at
 # │          1.5 m/s vs. 843.75 mm for the polynomial; +210.94 mm, running
 # │          total 1123.84 mm, 23.84 mm past 1.10 m.
-# │ How:     RM/AISLE registry fields; calc_c2_stop_suffix for the reference
-# │          polynomial's peak jerk; calc_scurve_stop_distance and
-# │          calc_scurve_stop_time for each suffix; calc_safe_stopping_distance
-# │          with a_brake for the Ch8 total.
+# │ How:     RM/AISLE registry fields through Scenarios.WarehouseArmStallStop,
+# │          WarehouseArmCommitmentSchedule, and WarehouseBaseJerkLimitedStop
+# │          (JerkLimitedStopModel: the reference polynomial's peak jerk,
+# │          calc_scurve_stop_distance and calc_scurve_stop_time for each
+# │          suffix, and the constant-deceleration total of the Ch8 budget).
 # │
 # │ Note:    No aisle-speed value appears here; @sec-enforcement owns the
 # │          candidate-speed calculation and outstanding qualification budget.
@@ -1821,6 +1839,7 @@ from mlsysim.fmt import check, fmt_latency, fmt_length, fmt_velocity, fmt_accele
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
+BASE_STOP = Scenarios.WarehouseBaseJerkLimitedStop
 
 class PlanningC2Stop:
     """Jerk-limited stop suffix for the machine's arm and base, and the budget row it adds."""
@@ -1835,7 +1854,7 @@ class PlanningC2Stop:
     t_plan_exp = PlanningArmTimeline.t_plan_exp  # category: derived
     t_arm_stop = PlanningArmTimeline.t_stop  # category: derived; S-curve duration
     d_arm_clear = PlanningLeaseRule.d_arm_clear  # category: illustrative; obstacle clearance, calc-planning-lease-rule
-    t_wait = 200 * millisecond  # category: illustrative; tracking authority run past commitment
+    t_wait = ARM_SCHEDULE.late_wait  # category: illustrative; tracking authority run past commitment, scenario
     # Base: the stop at the rack end.
     v_drive = RM.base.max_velocity  # category: illustrative; registry drive limit
     a_brake = AISLE.a_brake  # category: illustrative; credible deceleration, loaded, dry floor
@@ -1845,28 +1864,28 @@ class PlanningC2Stop:
     d_clear = AISLE.d_clear  # category: illustrative; rack-end clear distance
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
-    arm_stop_dist = calc_scurve_stop_distance(v_arm, a_arm_peak, j_arm).to(millimeter)
-    arm_poly_dist = calc_c2_stop_suffix(v_arm, a_arm_peak)["distance"].to(millimeter)
-    arm_cruise = (v_arm * (t_commit - t_blend)).to(millimeter)
-    arm_total = arm_cruise + arm_stop_dist
-    arm_margin = d_arm_clear - arm_total
-    t_stop_end = (t_commit + t_arm_stop).to(millisecond)
-    late_cruise_arm = (v_arm * t_wait).to(millimeter)
-    late_breach_arm = late_cruise_arm - arm_margin
+    _arm, _sched, _base = ARM_STOP.result, ARM_SCHEDULE.result, BASE_STOP.result
+    arm_stop_dist = _arm.scurve_travel.to(millimeter)
+    arm_poly_dist = _arm.polynomial_distance.to(millimeter)
+    arm_cruise = _sched.blend_cruise.to(millimeter)
+    arm_total = _sched.used.to(millimeter)
+    arm_margin = _sched.margin.to(millimeter)
+    t_stop_end = _sched.rest.to(millisecond)
+    late_cruise_arm = _sched.late_cruise.to(millimeter)
+    late_breach_arm = _sched.late_breach.to(millimeter)
 
-    poly_drive = calc_c2_stop_suffix(v_drive, a_brake)
-    j_base = poly_drive["peak_jerk"].to(meter / second**3)  # jerk bound: reference polynomial's peak
-    v_plateau = (a_brake**2 / j_base).to(meter / second)
-    s_drive_time = calc_scurve_stop_time(v_drive, a_brake, j_base).to(millisecond)
-    s_drive_dist = calc_scurve_stop_distance(v_drive, a_brake, j_base).to(millimeter)
-    poly_drive_dist = poly_drive["distance"].to(millimeter)
-    brake_const = (v_drive**2 / (2 * a_brake)).to(millimeter)
-    ramp_delay = (a_brake / (2 * j_base)).to(millisecond)
-    t_const_drive = (v_drive / a_brake).to(millisecond)
-    c2_increment = s_drive_dist - brake_const
-    total_prev = calc_safe_stopping_distance(v_drive, tau_delay, a_brake, delta_loc, delta_margin).to(millimeter)
-    total_new = total_prev + c2_increment
-    excess = total_new - d_clear.to(millimeter)
+    j_base = _base.jerk.to(meter / second**3)  # jerk bound: reference polynomial's peak
+    v_plateau = _base.jerk_plateau_speed.to(meter / second)
+    s_drive_time = _base.stop_time.to(millisecond)
+    s_drive_dist = _base.scurve_travel.to(millimeter)
+    poly_drive_dist = _base.polynomial_distance.to(millimeter)
+    brake_const = _base.braking_travel.to(millimeter)
+    ramp_delay = _base.ramp_delay.to(millisecond)
+    t_const_drive = _base.braking_time.to(millisecond)
+    c2_increment = _base.jerk_ramp_travel.to(millimeter)
+    total_prev = _base.constant_required.to(millimeter)
+    total_new = _base.required_distance.to(millimeter)
+    excess = (-_base.spare).to(millimeter)
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(abs(a_arm_peak.to(meter / second**2).magnitude - 5.0) < 1e-9, "arm suffix peak changed")
@@ -1900,6 +1919,9 @@ class PlanningC2Stop:
     check(abs(total_new.magnitude - 1123.8375) < 5e-3, "Ch11 running total changed")
     check(abs(excess.magnitude - 23.8375) < 5e-3, "excess over clear distance changed")
     check(excess.magnitude > 0, "drive limit no longer exceeds the rack-end clear distance")
+    check(abs((total_prev - calc_safe_stopping_distance(v_drive, tau_delay, a_brake, delta_loc, delta_margin)).to(millimeter).magnitude) < 1e-9,
+          "constant-deceleration total disagrees with calc_safe_stopping_distance")
+    check(BASE_STOP.speed == v_drive and BASE_STOP.deceleration == a_brake, "base stop scenario no longer at the drive limit and a_brake")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────
     v_arm_str = fmt_velocity(v_arm)
@@ -1956,9 +1978,9 @@ On the running machine, as the alternate schedule's introduction noted, a stall 
 # │          100 + 37.5 = 137.5 mm in 200 + 75 = 275 ms; 219.5 of 300 mm,
 # │          80.5 mm left; response path 59.6 percent of the stop; the margin
 # │          equals 80.5 ms of further lease at the TCP limit.
-# │ How:     Reads PlanningLeaseRule; the two S-curve terms are
-# │          eq-plan-c2-stopping-suffix and are guarded against
-# │          calc_scurve_stop_distance / calc_scurve_stop_time.
+# │ How:     Reads PlanningLeaseRule and Scenarios.WarehouseArmStallStop; the
+# │          two S-curve terms are eq-plan-c2-stopping-suffix and are guarded
+# │          against the scenario's S-curve distance and time.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.units import millisecond, meter, millimeter, second
 from mlsysim.fmt import check, fmt_latency, fmt_length, fmt_velocity, fmt_acceleration, fmt_jerk, fmt_percent
@@ -1973,13 +1995,14 @@ class PlanningStallRunway:
     j = LR.j_arm_stop  # category: derived; reference polynomial's peak jerk
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
-    v_thresh = (a**2 / j).to(meter / second)
-    d_brake = (v**2 / (2 * a)).to(millimeter)
-    d_ramp = (v * a / (2 * j)).to(millimeter)
-    t_brake = (v / a).to(millisecond)
-    t_ramp = (a / j).to(millisecond)
-    path_share = (LR.d_lease_path / LR.arm_stop_dist).to("dimensionless").magnitude
-    t_margin = (LR.lease_margin / v).to(millisecond)
+    _stop = ARM_STOP.result
+    v_thresh = _stop.jerk_plateau_speed.to(meter / second)
+    d_brake = _stop.braking_travel.to(millimeter)
+    d_ramp = _stop.jerk_ramp_travel.to(millimeter)
+    t_brake = _stop.braking_time.to(millisecond)
+    t_ramp = _stop.ramp_time.to(millisecond)
+    path_share = _stop.delay_share_of_stop
+    t_margin = _stop.spare_time.to(millisecond)
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(v >= v_thresh, "arm stop no longer reaches the deceleration bound (plateau branch)")
@@ -2047,36 +2070,38 @@ While hardware qualification must establish the arm's actual response in place o
 # │          freeboard); a <= g h_f / R = 2.45 m/s^2; stop from 1.0 m/s at that
 # │          bound 280.4 mm; with 82 mm lease path 362.4 mm > 300 mm; fitting
 # │          carry speed 0.885 m/s.
-# │ How:     calc_quasistatic_spill_acceleration (free surface normal to
-# │          effective gravity, tan theta = a / g);
-# │          illustrative mug geometry; jerk bound = reference polynomial's peak
-# │          at the same peak and the TCP limit, as for the free-space stop;
-# │          calc_scurve_stop_distance and calc_scurve_max_permitted_velocity.
+# │ How:     Scenarios.WarehouseArmOpenMugStop (SpillLimitedStopModel):
+# │          calc_quasistatic_spill_acceleration (free surface normal to
+# │          effective gravity, tan theta = a / g); illustrative mug geometry;
+# │          jerk bound = reference polynomial's peak at the same peak and the
+# │          TCP limit, as for the free-space stop; calc_scurve_stop_distance
+# │          and calc_scurve_max_permitted_velocity.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import millisecond, meter, millimeter, second, standard_gravity
-from mlsysim.physics.robotics import calc_quasistatic_spill_acceleration
 from mlsysim.fmt import check, fmt_length, fmt_acceleration, fmt_velocity
+
+MUG = Scenarios.WarehouseArmOpenMugStop
 
 class PlanningMugSpill:
     """Quasi-static spill bound for an open mug and the carry speed it implies."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────
-    r_mug = 40 * millimeter  # category: illustrative; inner radius of the mug
-    h_free = 10 * millimeter  # category: illustrative; liquid surface below the rim
+    r_mug = MUG.inner_radius  # category: illustrative; inner radius of the mug, scenario
+    h_free = MUG.freeboard  # category: illustrative; liquid surface below the rim, scenario
     a_free = PlanningLeaseRule.a_arm_stop  # category: illustrative; free-space arm stop bound
     v_arm = PlanningLeaseRule.v_arm  # category: chosen; TCP limit, registry
     t_path = PlanningLeaseRule.t_lease_path  # category: derived; lease lapse plus dispatch
     d_clear = PlanningLeaseRule.d_arm_clear  # category: illustrative; obstacle clearance
-    g0 = standard_gravity  # category: definitional
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
-    rise_free = (r_mug * a_free / g0).to(millimeter)
-    a_mug = calc_quasistatic_spill_acceleration(r_mug, h_free)
-    j_mug = calc_c2_stop_suffix(v_arm, a_mug)["peak_jerk"]
-    d_mug = calc_scurve_stop_distance(v_arm, a_mug, j_mug).to(millimeter)
-    d_mug_total = (v_arm * t_path).to(millimeter) + d_mug
-    v_carry = calc_scurve_max_permitted_velocity(d_clear, t_path, a_mug, j_mug, 0 * meter, 0 * meter).to(meter / second)
+    _mug = MUG.result
+    rise_free = _mug.rise_at_free_deceleration.to(millimeter)
+    a_mug = _mug.spill_deceleration
+    j_mug = _mug.stop.jerk
+    d_mug = _mug.stop.scurve_travel.to(millimeter)
+    d_mug_total = _mug.stop.required_distance.to(millimeter)
+    v_carry = _mug.carry_speed.to(meter / second)
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(rise_free > h_free, "free-space stop no longer tips the surface past the rim")
@@ -2356,9 +2381,11 @@ The mechanisms in this chapter are durable; the systems that implement them chan
 # │ Goal:    Hold the literature values the dated table quotes.
 # │ Show:    pi0 chunk H = 50; 50 Hz robots re-infer after 25 actions (0.5 s);
 # │          Ruckig 19.8 us mean / 123 us worst for 7 DoFs.
-# │ How:     black2024pi0 (sec. IV and inference section);
-# │          PlanningTimeParam for the Ruckig figures (berscheid2021jerk).
+# │ How:     black2024pi0 (sec. IV and inference section) via
+# │          Literature.VlaSystems; PlanningTimeParam for the Ruckig figures
+# │          (berscheid2021jerk).
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
 from mlsysim.core.units import second, hertz
 from mlsysim.fmt import check, fmt_int, fmt_frequency, fmt_latency
 
@@ -2366,9 +2393,9 @@ class PlanningPractice2026:
     """Literature figures for the dated state-of-practice table."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────
-    pi0_horizon = 50  # category: literature; action chunk length H (black2024pi0)
-    pi0_rate = 50 * hertz  # category: literature; control rate of the 50 Hz robots (black2024pi0)
-    pi0_executed = 25  # category: literature; actions executed before re-inference at 50 Hz (black2024pi0)
+    pi0_horizon = round(Literature.VlaSystems.Pi0ChunkHorizon)  # category: literature; action chunk length H (black2024pi0)
+    pi0_rate = Literature.VlaSystems.Pi0ControlRateHz * hertz  # category: literature; control rate of the 50 Hz robots (black2024pi0)
+    pi0_executed = round(Literature.VlaSystems.Pi0ExecutedActions50Hz)  # category: literature; actions executed before re-inference at 50 Hz (black2024pi0)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
     pi0_reinfer = (pi0_executed / pi0_rate).to(second)
@@ -2413,7 +2440,8 @@ class PlanningPractice2026:
 # │          2.10 m/s, above the 1.5 m/s drive limit.
 # │ How:     RM base acceleration and velocity limits and chunk renewal
 # │          (registry); AISLE rack-end clear distance and a_brake; DWA
-# │          admissibility v <= sqrt(2 dist a_b) (fox1997dynamic, eq. 14).
+# │          admissibility v <= sqrt(2 dist a_b) (fox1997dynamic, eq. 14);
+# │          Scenarios.WarehouseBaseDynamicWindow (DynamicWindowModel).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import millisecond, meter, second
@@ -2433,9 +2461,10 @@ class PlanningMobileBase:
     d_clear = AISLE.d_clear  # category: illustrative; rack-end clear distance, registry
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
+    _window = Scenarios.WarehouseBaseDynamicWindow.result
     t_renew = (1 / f_renew).to(millisecond)
-    dv_window = (a_base * t_renew).to(meter / second)
-    v_admissible = ((2 * d_clear * a_brake) ** 0.5).to(meter / second)
+    dv_window = _window.half_width.to(meter / second)
+    v_admissible = _window.admissible_speed.to(meter / second)
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(abs(dv_window.magnitude - 0.1) < 1e-12, "dynamic window width changed")
