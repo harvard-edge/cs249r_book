@@ -572,3 +572,37 @@ def calc_split_conformal_min_count(alpha: float) -> int:
     if not 0.0 < alpha < 1.0:
         raise ValueError("alpha must be in (0, 1)")
     return math.ceil((1 - alpha) / alpha)
+
+
+# --- Responsible AI: group gaps as evidence (added 2026-10-20) ---------------
+
+def calc_two_proportion_z(rate_a, rate_b, n_a, n_b):
+    """Pooled two-proportion z statistic for an observed gap ``rate_a - rate_b``.
+
+    ``z = (p_a - p_b) / sqrt(p (1 - p) (1/n_a + 1/n_b))`` with the pooled rate
+    ``p = (n_a p_a + n_b p_b) / (n_a + n_b)``, the null hypothesis that both
+    groups share one rate.
+    """
+    pooled = (n_a * rate_a + n_b * rate_b) / (n_a + n_b)
+    return (rate_a - rate_b) / math.sqrt(pooled * (1 - pooled) * (1 / n_a + 1 / n_b))
+
+
+def calc_proportion_gap_interval(rate_a, rate_b, n_a, n_b, z_critical):
+    """Normal-approximation interval of a gap ``rate_a - rate_b`` (unpooled standard error).
+
+    Returns ``(low, high)``: the gap minus and plus ``z_critical`` standard errors,
+    ``se = sqrt(p_a (1 - p_a) / n_a + p_b (1 - p_b) / n_b)``.
+    """
+    gap = rate_a - rate_b
+    se = math.sqrt(rate_a * (1 - rate_a) / n_a + rate_b * (1 - rate_b) / n_b)
+    return gap - z_critical * se, gap + z_critical * se
+
+
+def calc_equal_n_for_z(rate_a, rate_b, z_critical):
+    """Per-group sample size at which the pooled two-proportion z of a fixed gap reaches ``z_critical``.
+
+    With equal groups, ``z = gap / sqrt(2 p (1 - p) / n)``, so
+    ``n = 2 p (1 - p) (z_critical / gap)^2`` with ``p`` the mean of the two rates.
+    """
+    pooled = (rate_a + rate_b) / 2
+    return 2 * pooled * (1 - pooled) * (z_critical / (rate_a - rate_b)) ** 2

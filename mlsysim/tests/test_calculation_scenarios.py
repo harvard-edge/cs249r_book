@@ -3590,3 +3590,74 @@ def test_llama31_405b_model_card_run():
     assert c.training_operations.to("flop").magnitude == approx(3.7908e25)
     assert c.achieved_rate.to("TFLOP/s").magnitude == approx(341.44)
     assert c.energy.to("GWh").magnitude == approx(21.588)
+def test_responsible_ai_group_metrics():
+    from mlsysim import Literature
+    loan = Scenarios.LoanScreeningTwoGroups
+    assert loan.positive_rate("A") == approx(0.70) and loan.positive_rate("B") == approx(0.40)
+    assert loan.tpr("A") == approx(40 / 45) and loan.tpr("B") == approx(0.60)
+    assert loan.fpr("A") == approx(30 / 55) and loan.fpr("B") == approx(0.20)
+    assert loan.ppv("A") == approx(40 / 70) and loan.ppv("B") == approx(0.75)
+    assert loan.disparate_impact == approx(4 / 7) and loan.gap("positive_rate") == approx(0.30)
+    assert loan.average_odds_difference == approx(0.5 * (40 / 45 - 0.6 + 30 / 55 - 0.2))
+    fraud = Scenarios.FraudFlagTwoGroups
+    assert fraud.positive_rate("A") == approx(0.5) and fraud.disparate_impact == approx(0.5)
+    c = Scenarios.CompasTwoYearRecidivism
+    assert c.fpr("African-American") == approx(641 / 1514) and c.fpr("Caucasian") == approx(282 / 1281)
+    assert round(100 * c.base_rate("African-American"), 1) == 52.3
+    assert Literature.Fairness.FourFifthsRuleRatio == approx(0.8)
+
+
+def test_responsible_ai_gap_evidence():
+    t = Scenarios.LoanApprovalGapTest
+    assert t.pooled_rate == approx(0.55) and t.z_critical == pytest.approx(1.95996, abs=1e-3)
+    assert t.z == pytest.approx(4.2640, abs=1e-3) and t.z_at(10) == pytest.approx(1.3484, abs=1e-3)
+    lo, hi = t.interval
+    assert (round(lo, 2), round(hi, 2)) == (0.17, 0.43)
+    slo, shi = t.interval_at(10)
+    assert (round(slo, 2), round(shi, 2)) == (-0.12, 0.72)
+    assert t.n_at_critical == pytest.approx(21.128, abs=1e-3)
+    d = Scenarios.GroupThresholdSketch
+    assert d.tpr("A", 0.75) == 0.75 and d.tpr("B", 0.75) == 0.25 and d.tpr("B", 0.45) == 0.75
+    assert d.fpr("B", 0.75) == 0 and d.fpr("B", 0.45) == 0.25
+    tax = Scenarios.CreditParityAccuracyCost
+    assert tax.accuracy_cost == approx(4.0) and tax.relative_cost == approx(4 / 85)
+    m = Scenarios.FairnessMonitor10K
+    assert m.decisions_per_day == approx(864e6) and m.records_per_day == approx(8.64e6)
+    assert m.log_per_day.to("GB").magnitude == approx(1.728) and m.false_alerts_per_interval == approx(7.5)
+    assert m.false_alerts_bonferroni == approx(0.05)
+    o = Scenarios.OfqualStandardization2020
+    assert o.split("B") == (1, 59, 37, 3) and o.split("U") == (20, 79, 0, 0)
+    assert o.entries_lowered_pct == pytest.approx(38.949, abs=1e-3)
+    assert o.candidate_rows_sum == 246_100 and o.total_candidates == 246_110
+    assert round(100 * o.at_least_one_lowered_share, 1) == 68.1
+
+
+def test_responsible_ai_safeguard_costs():
+    s = Scenarios.ExactShapEnumeration
+    assert s.subsets(20) == 1_048_576 and s.time(20).to("s").magnitude == approx(1.048576)
+    r = Scenarios.InlineShapRetrofit
+    assert r.latency_low.to("ms").magnitude == approx(150) and r.latency_high.to("ms").magnitude == approx(300)
+    assert r.capacity_low == approx(1.5) and r.capacity_high == approx(3.0)
+    x = Scenarios.ImageExplanationLog
+    assert x.monthly_low.to("TB").magnitude == approx(30) and x.monthly_high.to("TB").magnitude == approx(300)
+    u = Scenarios.Gpt3ShardedUnlearning
+    assert u.full_retrain_time.to("day").magnitude == pytest.approx(35.548, abs=1e-3) and u.planning_days == 36
+    assert u.shard_cost.to("USD").magnitude == approx(46_000) and u.shard_time.to("hour").magnitude == approx(8.64)
+    assert u.p_shard_untouched == approx(4.3171e-5, rel=1e-3) and u.shards_touched_per_day == pytest.approx(99.9957, abs=1e-3)
+    p = Scenarios.Gpt3PrivacyPlan
+    assert p.cost_strong.to("USD").magnitude == approx(13.8e6)
+    b = Scenarios.RewardModelLabelBudget
+    assert b.budget_low.to("USD").magnitude == approx(25_000) and b.spread == approx(100)
+    a = Scenarios.RadiologyAutomationBias
+    assert a.accepted_misses() == approx(0.035) and a.team_sensitivity_bound == approx(0.965)
+    assert a.accepted_misses(a.acceptance_high) == approx(0.04) and a.gain_over_ai == approx(0.015)
+    assert Scenarios.SafetyComplianceAtBillionRequests.daily_failures == approx(1e6)
+
+
+def test_responsible_ai_literature_series():
+    from mlsysim import Literature
+    dp = Literature.Series.AbadiDpSgdAccuracy.entries
+    cifar8 = next(r for r in dp if r["dataset"] == "CIFAR-10" and r["epsilon"] == 8)
+    assert cifar8["accuracy_pct"] == Literature.DifferentialPrivacy.Cifar10AbadiAccuracyAtEps8Pct
+    assert len(Literature.Series.OfqualGradeMatrix2020.entries) == 7
+    assert Literature.Fairness.OfqualReversalDayAugust2020 - Literature.Fairness.OfqualResultsDayAugust2020 == 4
