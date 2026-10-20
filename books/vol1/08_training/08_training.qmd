@@ -84,7 +84,7 @@ from mlsysim.core.units import *
 # │ How:  Retrieve model specs from Digital Twins; format costs and FLOPs.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Models, ReferenceStats
+from mlsysim import Hardware, Models, ReferenceStats, Scenarios
 from mlsysim.fmt import (
     fmt_int,
     fmt,
@@ -109,16 +109,11 @@ class TrainingScenarios:
     gpt4_cost_est = ReferenceStats.TrainingCostAnchors.Gpt4CostEstimate
     gpt2_fwd_flops = gpt2_model.inference_flops
     gpt2_total_flops = gpt2_model.training_ops
-    adam_example_model = Models.Language.Llama2_7B
-    adam_example_params = adam_example_model.parameters
+    adam_example = Scenarios.Llama2_7BMixedPrecisionAdam
+    adam_example_params = adam_example.workload.parameters
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    adam_inference = adam_example_model.size_in_bytes(BYTES_FP16)
-    adam_grad = adam_example_model.size_in_bytes(BYTES_FP16)
-    adam_master = adam_example_model.size_in_bytes(BYTES_FP32)
-    adam_moments = adam_example_model.size_in_bytes(BYTES_ADAM_STATE)
-    adam_training_state = adam_inference + adam_grad + adam_master + adam_moments
-    adam_training_memory_multiplier = (adam_training_state / adam_inference).to("").magnitude
+    adam_training_memory_multiplier = adam_example.copies
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(adam_training_memory_multiplier == 8, "Mixed-precision Adam training state should be 8x FP16 inference weights")
@@ -158,7 +153,7 @@ class TrainingScenarios:
 # │          16-byte-per-parameter mixed-precision Adam state derived in
 # │          @sec-model-training-optimization-algorithms-c6a9.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models, BYTES_ADAM_STATE, BYTES_FP16, BYTES_FP32
+from mlsysim import Models, Scenarios, BYTES_ADAM_STATE, BYTES_FP16, BYTES_FP32
 from mlsysim.core.units import param, flop, byte, MB, GB, TFLOPs, MFLOPs
 from mlsysim.fmt import check, fmt_count, fmt_flops, fmt_memory, fmt_multiple
 
@@ -167,21 +162,23 @@ class StepToRunScale:
     """One training step: two-layer MNIST classifier versus GPT-2 XL."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    gpt2 = Models.Language.GPT2
+    run = Scenarios.Gpt2XlRunOnOneH100
+    state = Scenarios.Gpt2MixedPrecisionAdamOnH100
+    block = Scenarios.Gpt2XlBatch32Block
     # Frameworks-chapter anatomy network: 784 -> 128 -> 10 with biases, batch 32
     mlp_params = (784 * 128 + 128 + 128 * 10 + 10) * param
     mlp_batch = 32
-    gpt2_batch = 32  # sequences per step (the chapter's GPT-2 configuration)
-    gpt2_seq_len = 1024  # tokens per sequence
+    gpt2_batch = block.batch_size  # sequences per step (the chapter's GPT-2 configuration)
+    gpt2_seq_len = block.context_tokens  # tokens per sequence
     flops_per_param_example = 6  # forward 2 + backward 4 FLOPs per parameter
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    state_bytes_per_param = (2 * BYTES_FP16 + BYTES_FP32 + BYTES_ADAM_STATE) / param
+    state_bytes_per_param = state.bytes_per_trained_parameter / param
     mlp_step = (flops_per_param_example * mlp_params.to(param).magnitude * mlp_batch) * flop
     mlp_state = (mlp_params * state_bytes_per_param).to(byte)
-    gpt2_tokens = gpt2_batch * gpt2_seq_len
-    gpt2_step = (flops_per_param_example * gpt2.parameters.to(param).magnitude * gpt2_tokens) * flop
-    gpt2_state = (gpt2.parameters * state_bytes_per_param).to(byte)
+    gpt2_tokens = run.tokens_per_step
+    gpt2_step = run.step_operations.to(flop)
+    gpt2_state = state.total.to(byte)
     flop_ratio = (gpt2_step / mlp_step).to("").magnitude
     state_ratio = (gpt2_state / mlp_state).to("").magnitude
 
@@ -476,7 +473,7 @@ Actual training throughput remains below the arithmetic peak whenever kernels, d
 # │ Show:    Run time in days, step time, steps, run energy, energy per step.
 # │ How:     T = O / (R_peak x eta); E = P_device x T at the H100's TDP.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Models, Literature
+from mlsysim import Hardware, Models, Literature, Scenarios
 from mlsysim.core.units import flop, param, second, day, kWh, joule
 from mlsysim.fmt import check, fmt_count, fmt_energy, fmt_percent, fmt_power, fmt_time
 
@@ -485,20 +482,18 @@ class GPT2RunTimeEnergy:
     """GPT-2 XL training run on one H100: time and accelerator energy."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    gpt2 = Models.Language.GPT2
-    h100 = Hardware.Cloud.H100
-    eta = Literature.Training.MfuHigh  # high end of measured large-model utilization
-    tokens_per_step = 32 * 1024  # 32 sequences of 1,024 tokens
-    flops_per_param_token = 6
+    run = Scenarios.Gpt2XlRunOnOneH100
+    h100 = run.hardware
+    eta = run.efficiency  # high end of measured large-model utilization
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    run_flops = gpt2.training_ops
-    run_time = (run_flops / (h100.compute.peak_flops * eta)).to(second)
-    step_flops = (flops_per_param_token * gpt2.parameters.to(param).magnitude * tokens_per_step) * flop
-    step_time = (step_flops / (h100.compute.peak_flops * eta)).to(second)
-    steps = (run_flops / step_flops).to("").magnitude
-    run_energy = (h100.tdp * run_time).to(kWh)
-    step_energy = (h100.tdp * step_time).to(joule)
+    run_flops = run.workload.training_ops
+    run_time = run.training_time.to(second)
+    step_flops = run.step_operations.to(flop)
+    step_time = run.step_time
+    steps = run.steps
+    run_energy = run.energy
+    step_energy = run.step_energy
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(34 < run_time.to(day).magnitude < 36, f"Prose says about 35 days on one H100, got {run_time.to(day):.1f}.")
@@ -657,7 +652,7 @@ This dense computational workload motivates blocked algorithms that parallelize 
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import math
-from mlsysim import Hardware, Models, Literature
+from mlsysim import Hardware, Models, Literature, Scenarios
 from mlsysim.core.units import millisecond
 from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_ratio, check, fmt_time, fmt_flops, fmt_flop_rate
 
@@ -669,16 +664,17 @@ class GPT2Compute:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    # Architecture (GPT-2 XL)
-    model = Models.Language.GPT2
-    hidden_dim = Models.Language.GPT2.hidden_dim
-    layers = Models.Language.GPT2.layers
-    heads = Models.Language.GPT2.heads  # GPT-2 XL
+    # Architecture (GPT-2 XL) and one batch-32 training step
+    block = Scenarios.Gpt2XlBatch32Block
+    model = block.workload
+    hidden_dim = model.hidden_dim
+    layers = model.layers
+    heads = model.heads  # GPT-2 XL
     head_dim = hidden_dim // heads
 
     # Training Config
-    batch = 32
-    seq_len = 1024
+    batch = block.batch_size
+    seq_len = block.context_tokens
     steps = 50_000
 
     # Hardware (reference H100) and an illustrative step-time target
@@ -710,18 +706,18 @@ class GPT2Compute:
     macs_ffn = 2 * (batch * seq_len * hidden_dim * (4 * hidden_dim))
     flops_ffn = 2 * macs_ffn
 
-    # Step 5: Total per Layer (Forward)
-    flops_layer_fwd = flops_qkv + flops_attn_pair + flops_out_proj + flops_ffn
+    # Step 5: Total per Layer (Forward), from the scenario; the breakdown above sums to it
+    flops_layer_fwd = block.layer_forward_flops.to(flop).magnitude
 
     # Step 6: Total Step (Forward + Backward)
     flops_step_fwd = flops_layer_fwd * layers
-    flops_step_total = flops_step_fwd * 3
+    flops_step_total = block.training_step_flops.to(flop).magnitude
 
     # Step 7: Total Training
     flops_training_total = flops_step_total * steps
     # The 6PD rule counts only parameter products; the gap is attention's S^2 terms
-    six_pd_step = 6 * model.parameters.magnitude * batch * seq_len
-    attn_step = flops_attn_pair * layers * 3
+    six_pd_step = block.six_p_step_flops.to(flop).magnitude
+    attn_step = block.attention_step_flops.to(flop).magnitude
     flops_layer_fwd_qty = flops_layer_fwd * flop
     flops_step_total_qty = flops_step_total * flop
     flops_training_total_qty = flops_training_total * flop
@@ -734,6 +730,8 @@ class GPT2Compute:
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(flops_training_total >= QUADRILLION, f"Training FLOPs ({flops_training_total:.1e}) too low.")
+    check(abs(flops_qkv + flops_attn_pair + flops_out_proj + flops_ffn - flops_layer_fwd) < 1e3,
+          "The per-layer breakdown must sum to the scenario's layer FLOPs.")
     check(1 < ideal_accels < 2, f"Prose says ideal arithmetic needs about two accelerators, got {ideal_accels:.2f}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
@@ -1005,13 +1003,10 @@ from mlsysim.fmt import fmt, check, fmt_count_range, fmt_memory, fmt_params
 class OptimizerScenarios:
     sgd_iters_min = 50_000
     sgd_iters_max = 500_000
-    adam_7b_params = 7 * Bparam
+    adam_7b = Scenarios.Llama2_7BMixedPrecisionAdam
+    adam_7b_params = adam_7b.workload.parameters
 
-    adam_7b_weights = memory_from_params(adam_7b_params, BYTES_FP16 / param)
-    adam_7b_gradients = adam_7b_weights
-    adam_7b_master_weights = memory_from_params(adam_7b_params, BYTES_FP32 / param)
-    adam_7b_moments = memory_from_params(adam_7b_params, BYTES_ADAM_STATE / param)
-    adam_7b_state = adam_7b_weights + adam_7b_gradients + adam_7b_master_weights + adam_7b_moments
+    adam_7b_state = adam_7b.total
 
     adam_7b_state_value = adam_7b_state.to(GB).magnitude
     check(adam_7b_state_value == 112, f"7-billion-parameter mixed-precision Adam state should be 112 GB, got {adam_7b_state_value}")
@@ -1069,8 +1064,8 @@ The costs quantified in @tbl-optimizer-properties create a design tension. Adam'
 # │ How: Compare weight, gradient, and state bytes for GPT-2.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Models
-from mlsysim.fmt import check, fmt, fmt_memory, fmt_memory_capacity, fmt_params
+from mlsysim import Hardware, Models, Scenarios
+from mlsysim.fmt import check, fmt, fmt_count, fmt_memory, fmt_memory_capacity, fmt_params
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT2Optimizer:
@@ -1080,8 +1075,10 @@ class GPT2Optimizer:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    model = Models.Language.GPT2
-    h100_mem = Hardware.Cloud.H100.memory.capacity
+    fp32 = Scenarios.Gpt2Fp32AdamOnH100
+    amp = Scenarios.Gpt2MixedPrecisionAdamOnH100
+    model = fp32.workload
+    h100_mem = fp32.hardware.memory.capacity
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     model_params = model.parameters
@@ -1091,18 +1088,13 @@ class GPT2Optimizer:
     adam_bytes = int((2 * BYTES_FP32).to(byte).magnitude)
 
     # FP32 Baseline
-    param_fp32 = model.size_in_bytes(BYTES_FP32)
-    grad_fp32 = model.size_in_bytes(BYTES_FP32)
-    adam_m_fp32 = model.size_in_bytes(BYTES_FP32)
-    adam_v_fp32 = model.size_in_bytes(BYTES_FP32)
-    total_static_fp32 = param_fp32 + grad_fp32 + adam_m_fp32 + adam_v_fp32
+    param_fp32 = fp32.weights
+    grad_fp32 = fp32.gradients
+    adam_state_fp32 = fp32.optimizer_state
+    total_static_fp32 = fp32.total
 
-    # AMP (FP16)
-    param_fp16 = model.size_in_bytes(BYTES_FP16)
-    grad_fp16 = model.size_in_bytes(BYTES_FP16)
-    master_fp32 = model.size_in_bytes(BYTES_FP32)
-    # Optimizer remains FP32
-    total_static_amp = param_fp16 + grad_fp16 + master_fp32 + adam_m_fp32 + adam_v_fp32
+    # AMP (FP16 weights and gradients, FP32 master copy; optimizer remains FP32)
+    total_static_amp = amp.total
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(round(total_static_fp32.to(GB).magnitude) == 24, f"Total static FP32 memory mismatch: {total_static_fp32}")
@@ -1115,11 +1107,12 @@ class GPT2Optimizer:
     adam_bytes_value_str = fmt(adam_bytes, precision=0, commas=False)
     param_fp32_gb_str = fmt_memory(param_fp32, unit=GB, precision=0, commas=False)
     grad_fp32_gb_str = fmt_memory(grad_fp32, unit=GB, precision=0, commas=False)
-    adam_state_gb_str = fmt_memory(adam_m_fp32 + adam_v_fp32, unit=GB, precision=0, commas=False)
+    adam_state_gb_str = fmt_memory(adam_state_fp32, unit=GB, precision=0, commas=False)
     total_static_fp32_gb_str = fmt_memory(total_static_fp32, unit=GB, precision=0, commas=False)
     total_static_amp_gb_str = fmt_memory(total_static_amp, unit=GB, precision=0, commas=False)
     h100_mem_capacity_gb_str = fmt_memory_capacity(h100_mem, unit=GiB, precision=0, commas=False)
-    h100_share_pct_str = fmt_percent(round((total_static_fp32 / h100_mem).to("").magnitude, 2), precision=0, commas=False, style="prose")
+    h100_share_pct_str = fmt_percent(round(fp32.capacity_share, 2), precision=0, commas=False, style="prose")
+    adam_update_bytes_str = fmt_count(fp32.update_bytes_per_parameter.to(byte).magnitude, commas=False, label="byte")
 
 # Note: Use GPT2Optimizer.param_fp32_gb_str directly.
 ```
@@ -1182,7 +1175,7 @@ Optimizer memory, once quantified, fixes what each update must read and write. I
 \end{algorithm}
 ```
 
-Beyond the 3$\times$ parameter-plus-state capacity footprint established above, Steps 1 and 2 of @algo-adam-update impose a severe memory-bandwidth bottleneck. The update consists of elementwise operations with an arithmetic intensity below $1\text{ FLOP/byte}$. In FP32, updating each parameter requires reading four tensors ($\LossGradient_t, \ModelParameters_t, \AdamFirstMoment_{t-1}, \AdamSecondMoment_{t-1}$) and writing three ($\AdamFirstMoment_t, \AdamSecondMoment_t, \ModelParameters_{t+1}$), streaming 28 bytes across the memory bus for roughly a dozen arithmetic operations. Because matrix execution units (such as Tensor Cores) sit idle during this memory-bound phase, high-performance training systems use fused optimizer kernels to combine moment updates, bias correction, and weight writes into a single kernel launch per parameter group, minimizing round-trips through device memory.
+Beyond the 3$\times$ parameter-plus-state capacity footprint established above, Steps 1 and 2 of @algo-adam-update impose a severe memory-bandwidth bottleneck. The update consists of elementwise operations with an arithmetic intensity below $1\text{ FLOP/byte}$. In FP32, updating each parameter requires reading four tensors ($\LossGradient_t, \ModelParameters_t, \AdamFirstMoment_{t-1}, \AdamSecondMoment_{t-1}$) and writing three ($\AdamFirstMoment_t, \AdamSecondMoment_t, \ModelParameters_{t+1}$), streaming `{python} GPT2Optimizer.adam_update_bytes_str` across the memory bus for roughly a dozen arithmetic operations. Because matrix execution units (such as Tensor Cores) sit idle during this memory-bound phase, high-performance training systems use fused optimizer kernels to combine moment updates, bias correction, and weight writes into a single kernel launch per parameter group, minimizing round-trips through device memory.
 
 #### Reducing optimizer memory {#sec-model-training-optimizer-memory-training-loop-4383}
 
@@ -1317,9 +1310,8 @@ The arithmetic side of that cost follows from the derivative equations of @sec-n
 # │ How: Calculate memory for attention, FFN, and optimizer states.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Models
+from mlsysim import Hardware, Models, Scenarios
 from mlsysim.fmt import fmt, check, fmt_count, fmt_memory, fmt_memory_capacity, fmt_percent
-from mlsysim.physics import calc_activation_memory
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT2ActivationMemory:
@@ -1329,68 +1321,59 @@ class GPT2ActivationMemory:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    acts = Scenarios.Gpt2XlBatch32Activations
+    state = Scenarios.Gpt2MixedPrecisionAdamOnH100
     # Architecture
-    model = Models.Language.GPT2
-    hidden_dim = Models.Language.GPT2.hidden_dim
-    layers = Models.Language.GPT2.layers
-    heads = Models.Language.GPT2.heads
+    model = acts.workload
+    hidden_dim = model.hidden_dim
+    layers = model.layers
+    heads = model.heads
     head_dim = hidden_dim // heads
 
     # Config
-    batch_size = 32
-    seq_len = 1024
-    bytes_per_val = BYTES_FP16.to(byte).magnitude
+    batch_size = acts.micro_batch
+    seq_len = acts.sequence
 
     # Derived
-    ffn_dim = hidden_dim * 4
+    ffn_dim = hidden_dim * acts.ffn_multiple
 
     # Hardware
-    h100_mem = Hardware.Cloud.H100.memory.capacity
+    h100_mem = state.hardware.memory.capacity
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Use library formula for activations
-    total_act = calc_activation_memory(
-        n_layers=layers, seq_len=seq_len, batch_size=batch_size, hidden_dim=hidden_dim, n_heads=heads, precision_bytes=bytes_per_val, strategy="none"
-    )
+    # Library formula for activations (Korthikanti et al. 2023, no recomputation)
+    total_act = acts.activations("none")
 
-    # Individual parts for formatting (approximate for display)
-    attn_act = batch_size * seq_len * hidden_dim * 4 * BYTES_FP16
-    ffn_act = batch_size * seq_len * ffn_dim * BYTES_FP16
-    # Attention-score buffers (Korthikanti et al. 2023): QK^T scores, softmax
-    # output, and dropout mask together cost 5*a*S^2*B bytes per layer at FP16 —
-    # the dominant term, and exactly what selective recomputation discards.
-    attn_scores = (5 * heads * seq_len * seq_len * batch_size) * byte
-    layernorm = 10.0 * MB
-    per_layer = attn_act + ffn_act + attn_scores + layernorm
+    # Per-layer line items: projections, feed-forward expansion, and the
+    # attention-score buffers (QK^T scores, softmax output, and dropout mask,
+    # 5*a*S^2*B bytes per layer at FP16), the dominant term and exactly what
+    # selective recomputation discards; plus the stated normalization buffers.
+    attn_act = acts.projection_activations_per_layer
+    ffn_act = acts.ffn_activations_per_layer
+    attn_scores = acts.score_activations_per_layer
+    layernorm = acts.normalization_per_layer
+    per_layer = acts.line_items_per_layer
 
     # Step 5: C. Parameters & State
-    params = model.size_in_bytes(BYTES_FP16)
-    grad = params
-    master = model.size_in_bytes(BYTES_FP32)
-    opt = model.size_in_bytes(BYTES_ADAM_STATE)
+    params = state.weights
+    grad = state.gradients
+    master = state.master_weights
+    opt = state.optimizer_state
 
-    peak = total_act + params + grad + master + opt
+    peak = state.training_total
 
     # Step 6: D. Optimizations
-    ckpt_act = calc_activation_memory(
-        n_layers=layers,
-        seq_len=seq_len,
-        batch_size=batch_size,
-        hidden_dim=hidden_dim,
-        n_heads=heads,
-        precision_bytes=bytes_per_val,
-        strategy="selective",
-    )
+    ckpt_act = acts.per_token_activations
     ckpt_reduction_pct = (1 - ckpt_act / total_act).to("").magnitude
-    ckpt_peak = ckpt_act + params + grad + master + opt
-    act_fp32 = total_act * 2
+    ckpt_peak = ckpt_act + state.total
+    act_fp32 = Scenarios.Gpt2XlBatch32ActivationsFp32.activations("none")
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     total_act_value = total_act.to(GB).magnitude
     params_value = params.to(GB).magnitude
     check(total_act_value >= params_value, f"Activations ({total_act_value:.1f}G) should exceed Params ({params_value:.1f}G).")
     check(ckpt_peak > h100_mem, "Selective recomputation scenario should remain above raw H100 capacity before workspace")
-    over_ratio = (peak / h100_mem).to("").magnitude
+    over_ratio = state.training_capacity_multiple
     check(3.4 < over_ratio < 3.8, f"Prose says the peak is about 3.6x the H100, got {over_ratio:.2f}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
@@ -1462,7 +1445,7 @@ class GPT2ActivationReconcile:
     total_act = GPT2ActivationMemory.total_act
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    line_items_total = per_layer * layers
+    line_items_total = GPT2ActivationMemory.acts.line_items_total
     extra_buffers = total_act - line_items_total
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -1558,9 +1541,8 @@ The comparison therefore separates a residency decision from a differentiation d
 # │          activations from the per-layer estimate without the quadratic
 # │          attention term (FlashAttention-style attention).
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Models, BYTES_ADAM_STATE, BYTES_FP16, BYTES_FP32
+from mlsysim import Hardware, Models, Scenarios
 from mlsysim.core.units import GB, GiB, param, byte
-from mlsysim.physics import calc_activation_memory
 from mlsysim.fmt import check, fmt, fmt_count, fmt_memory, fmt_memory_capacity, fmt_percent
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -1568,36 +1550,28 @@ class LlamaFinetuneMemory:
     """Full fine-tuning versus low-rank adapters for Llama 3 8B on one H100."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    model = Models.Language.Llama3_8B
-    capacity = Hardware.Cloud.H100.memory.capacity
-    batch = 4  # scenario assumption: sequences per step
-    seq = 2048  # scenario assumption: tokens per sequence
-    lora_rank = 16  # scenario assumption: adapter rank on query and value
-    head_dim = model.hidden_dim // model.heads
-    kv_dim = model.kv_heads * head_dim  # grouped-query attention value width
+    full = Scenarios.Llama3_8BFullFineTuneOnH100
+    lora = Scenarios.Llama3_8BLoraOnH100
+    acts = Scenarios.Llama3_8BBatch4Activations
+    model = full.workload
+    capacity = full.hardware.memory.capacity
+    batch = acts.micro_batch  # sequences per step
+    seq = acts.sequence  # tokens per sequence
+    lora_rank = 16  # adapter rank on query and value (the scenario's rank)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    weights = model.size_in_bytes(BYTES_FP16)
-    gradients = weights
-    master_weights = model.size_in_bytes(BYTES_FP32)
-    optimizer = model.size_in_bytes(BYTES_ADAM_STATE)
-    full_static = weights + gradients + master_weights + optimizer
-    activations = calc_activation_memory(
-        n_layers=model.layers,
-        seq_len=seq,
-        batch_size=batch,
-        hidden_dim=model.hidden_dim,
-        n_heads=model.heads,
-        precision_bytes=2,
-        strategy="selective",
-    )
-    full_total = full_static + activations
+    weights = full.weights
+    gradients = full.gradients
+    master_weights = full.master_weights
+    optimizer = full.optimizer_state
+    full_static = full.total
+    activations = full.activations
+    full_total = full.training_total
     # Adapter pair A (d x r) and B (r x d_out) on each query and value projection
-    adapter_count = model.layers * lora_rank * ((model.hidden_dim + model.hidden_dim) + (model.hidden_dim + kv_dim))
-    adapter_params = adapter_count * param
-    adapter_state = adapter_params * (2 * BYTES_FP16 + BYTES_FP32 + BYTES_ADAM_STATE) / param
-    adapter_fraction = adapter_count / model.parameters.to(param).magnitude
-    lora_total = weights + adapter_state + activations
+    adapter_count = lora.adapter_parameters
+    adapter_state = lora.adapter_state
+    adapter_fraction = lora.adapter_fraction
+    lora_total = lora.training_total
     headroom = capacity - lora_total
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -1607,6 +1581,8 @@ class LlamaFinetuneMemory:
     check(full_static > capacity, "Full fine-tuning static state must overflow one H100.")
     check(lora_total < capacity, "Adapter fine-tuning must fit one H100.")
     check(adapter_fraction < 0.002, f"Adapters should be about 0.1 percent of the parameters, got {adapter_fraction:.4f}.")
+    check(adapter_count == model.layers * lora_rank * (3 * model.hidden_dim + model.kv_heads * (model.hidden_dim // model.heads)),
+          "The scenario's adapters should be rank 16 on every query and value projection.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     params_b_str = fmt_count(model.parameters.to(param).magnitude, scale="B", precision=1, commas=False)
@@ -2660,7 +2636,7 @@ $$\text{Accelerator Utilization} = \min\left(1, \frac{\InputPipelineRate}{\Accel
 # │          supply = host cores per accelerator x per-worker decode rate.
 # └─────────────────────────────────────────────────────────────────────────────
 import math
-from mlsysim import Hardware, Models, Systems
+from mlsysim import Hardware, Models, Systems, Scenarios
 from mlsysim.core.units import flop, second
 from mlsysim.fmt import check, fmt, fmt_count, fmt_percent, fmt_rate, fmt_multiple
 
@@ -2669,24 +2645,21 @@ class ResNetFeedH100:
     """ResNet-50 on one H100: accelerator demand versus host decode supply."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    resnet = Models.Vision.ResNet50
-    h100 = Hardware.Cloud.H100
-    a100 = Hardware.Cloud.A100
+    a100_feed = Scenarios.ResNet50A100InputFeed
+    h100_feed = Scenarios.ResNet50H100InputFeed
     node = Systems.Nodes.DGX_H100
-    a100_sustained_img_s = float(Literature.Benchmarks.ResNet50A100TrainThroughput)  # registry anchor shared with the data engineering chapter
-    worker_img_s = 375  # scenario assumption: JPEG decode + augment per host worker
+    a100_sustained_img_s = a100_feed.sustained_rate.to("count/second").magnitude  # registry anchor shared with the data engineering chapter
+    worker_img_s = h100_feed.worker_rate.to("count/second").magnitude  # JPEG decode + augment per host worker
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    train_flops = (resnet.inference_flops * 3).to(flop).magnitude
-    a100_ceiling = a100.compute.peak_flops.to(flop / second).magnitude / train_flops
-    sustained_fraction = a100_sustained_img_s / a100_ceiling
-    h100_ceiling = h100.compute.peak_flops.to(flop / second).magnitude / train_flops
-    h100_demand = h100_ceiling * sustained_fraction
+    sustained_fraction = a100_feed.sustained_fraction
+    h100_ceiling = h100_feed.ceiling_rate.to("count/second").magnitude
+    h100_demand = h100_feed.sustained_rate.to("count/second").magnitude
     workers_needed = math.ceil(h100_demand / worker_img_s)
     a100_workers_needed = math.ceil(a100_sustained_img_s / worker_img_s)
-    cores_per_accel = node.host_cpu_cores // node.accelerators_per_node
-    supply = cores_per_accel * worker_img_s
-    busy_fraction = min(1.0, supply / h100_demand)
+    cores_per_accel = h100_feed.host_workers
+    supply = h100_feed.host_supply.to("count/second").magnitude
+    busy_fraction = h100_feed.busy_fraction
     demand_ratio = h100_demand / a100_sustained_img_s
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -3079,7 +3052,7 @@ optimizer.step()  # Update parameters
 
 ```
 
-The optimizer's memory traffic is exposed on this dependency path. The FP32 Adam update, which moves 28 bytes per parameter in @sec-model-training-framework-optimizer-interface-82ff, must finish before the next forward pass reads those weights. Fusing moment updates and weight writes can shorten this interval by reducing passes over HBM, even when the forward and backward matrix products already use the arithmetic units efficiently.
+The optimizer's memory traffic is exposed on this dependency path. The FP32 Adam update, which moves `{python} GPT2Optimizer.adam_update_bytes_str` per parameter in @sec-model-training-framework-optimizer-interface-82ff, must finish before the next forward pass reads those weights. Fusing moment updates and weight writes can shorten this interval by reducing passes over HBM, even when the forward and backward matrix products already use the arithmetic units efficiently.
 
 #### Batch size and parameter updates {#sec-model-training-batch-size-parameter-updates-4d0b}
 
@@ -3171,7 +3144,7 @@ A run that takes `{python} GPT2RunTimeEnergy.run_days_str` on one accelerator do
 # │          gradients are recomputed every step and are not saved; write time
 # │          = payload / NVMe Gen4 sequential bandwidth.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Models, BYTES_ADAM_STATE, BYTES_FP16, BYTES_FP32
+from mlsysim import Hardware, Models, Scenarios
 from mlsysim.core.units import GB, second
 from mlsysim.fmt import check, fmt_bandwidth, fmt_memory, fmt_multiple, fmt_time
 
@@ -3180,16 +3153,16 @@ class GPT2CheckpointPayload:
     """Mixed-precision Adam checkpoint for GPT-2 XL and its write time."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    model = Models.Language.GPT2
+    state = Scenarios.Gpt2MixedPrecisionAdamOnH100
     nvme_bw = Hardware.Tech.Storage.NvmeGen4.bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    fp16 = model.size_in_bytes(BYTES_FP16)
-    master = model.size_in_bytes(BYTES_FP32)
-    adam = model.size_in_bytes(BYTES_ADAM_STATE)
-    total = fp16 + master + adam
+    fp16 = state.weights
+    master = state.master_weights
+    adam = state.optimizer_state
+    total = state.checkpoint
     ckpt_multiplier = (total / fp16).to("").magnitude
-    write_time = (total / nvme_bw).to(second)
+    write_time = state.checkpoint_write_time(nvme_bw)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(ckpt_multiplier == 7, "Mixed-precision Adam checkpoint (no gradients) should be 7x the FP16 weights.")
@@ -3454,11 +3427,48 @@ Training bottlenecks can be investigated through three categories aligned with t
 
 Among these three regimes, data-bound stalls are the most frequently misdiagnosed because they manifest on the accelerator as idle gaps rather than saturated execution units. When host-side ingestion, decoding, or preprocessing cannot sustain the throughput demanded by device memory buses, the accelerator starves.
 
+```{python}
+#| echo: false
+#| label: gil-locked-loader-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THE GIL-LOCKED GPU
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @exmp-training-gil-locked-gpu.
+# │
+# │ Goal:    Show how serialized host preparation starves a fast accelerator.
+# │ Show:    Host preparation and accelerator time per batch; busy fraction.
+# │ How:     Preparation and compute in sequence (Scenarios.GilThreadedLoaderStall).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
+from mlsysim.core.units import millisecond
+from mlsysim.fmt import check, fmt, fmt_math, fmt_percent
+
+# ┌── LEGO ───────────────────────────────────────────────
+class GilLockedLoader:
+    """Python threads holding the GIL prepare each batch; the accelerator waits."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    loader = Scenarios.GilThreadedLoaderStall
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    prep_ms = loader.io_time.to(millisecond).magnitude
+    compute_ms = loader.compute_time.to(millisecond).magnitude
+    busy_fraction = 1 - loader.result.sequential_stall
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(busy_fraction < 0.1, f"Prose says the accelerator is busy only a few percent of the time, got {busy_fraction:.3f}.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    prep_math = fmt_math(rf"\HostPreparationTime\approx {fmt(prep_ms, precision=0, commas=False)} \text{{ ms}}")
+    compute_math = fmt_math(rf"\AcceleratorBatchTime\approx {fmt(compute_ms, precision=0, commas=False)} \text{{ ms}}")
+    busy_pct_str = fmt_percent(busy_fraction, precision=1, commas=False, style="prose")
+```
+
 ::: {#exmp-training-gil-locked-gpu .callout-example title="The GIL-locked GPU"}
 
 **Scenario**: An engineering team builds a PyTorch data-loading pipeline using standard Python `threading` for CPU-bound image preprocessing that holds the global interpreter lock (GIL).
 
-**Diagnosis**: The GIL serializes these Python-level preprocessing threads, making host preparation time ($\HostPreparationTime\approx 250 \text{ ms}$) far exceed GPU execution time ($\AcceleratorBatchTime\approx 12 \text{ ms}$), reducing the accelerator busy-time fraction to about 4.6 percent in this serial preparation-and-compute model. Here the fraction measures time spent computing, not arithmetic efficiency relative to peak throughput.
+**Diagnosis**: The GIL serializes these Python-level preprocessing threads, making host preparation time (`{python} GilLockedLoader.prep_math`) far exceed GPU execution time (`{python} GilLockedLoader.compute_math`), reducing the accelerator busy-time fraction to about `{python} GilLockedLoader.busy_pct_str` in this serial preparation-and-compute model. Here the fraction measures time spent computing, not arithmetic efficiency relative to peak throughput.
 
 **Systems lesson**: Python CPU work that holds the GIL can serialize threads and starve GPUs; native operations may release it. Process workers (`num_workers > 0`) avoid interpreter serialization, while the NVIDIA Data Loading Library (DALI) can move eligible work off the host.
 
