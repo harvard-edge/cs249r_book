@@ -17215,3 +17215,136 @@ class QuantizedDeploymentProfileScenario(BaseScenario):
     @property
     def passes_calibration(self) -> bool:
         return self.int_calibration_error_pct <= self.calibration_error_limit_pct
+
+
+# --- Supervisory intervention: takeover budgets, blends, authentication (added 2026-10-20) ---
+
+class TakeoverBudgetScenario(BaseScenario):
+    """A machine at ``speed`` at a site asks a person to take over within ``takeover``.
+
+    The site (an embodied site scenario) supplies the finished stopping
+    budget's terms: pre-brake delay, credible deceleration, the resident
+    stop's jerk bound, clear distance, localization bound, protective margin,
+    tracking inset, the dispatch-to-admission allocation, the permission tick,
+    and the chunk lease. ``configured_timeout`` is the protocol ceiling on the
+    handover timer; ``manual_lease`` is the operator's lease once the channel
+    is held (it replaces the chunk lease in the delay).
+    """
+    site: Any                                   # EmbodiedSiteScenario
+    speed: Quantity
+    takeover: Quantity                          # T_Sigma: human response + console transport
+    configured_timeout: Optional[Quantity] = None
+    manual_lease: Optional[Quantity] = None
+
+    @property
+    def result(self):
+        from .solvers import TakeoverBudgetModel
+        s = self.site
+        return TakeoverBudgetModel().solve(
+            self.speed, s.tau_delay, s.a_brake, s.d_clear, self.takeover,
+            loc_margin=s.delta_loc, physical_margin=s.delta_margin, jerk=s.j_brake,
+            tracking_bound=s.eps_track, dispatch_to_admission=s.t_dispatch_to_admission,
+            configured_timeout=self.configured_timeout, tick=s.t_tick,
+            manual_lease=self.manual_lease, chunk_lease=s.t_lease)
+
+
+class TakeoverCeilingLadderScenario(BaseScenario):
+    """One takeover budget per sourced human response, each plus the same console ``transport``."""
+    base: TakeoverBudgetScenario
+    transport: Quantity
+    responses: Dict[str, Quantity]              # key -> human response, in ladder order
+
+    @property
+    def result(self):
+        from .results import TakeoverLadderResult
+        rows = {k: self.base.variant(takeover=(t + self.transport).to("ms")).result
+                for k, t in self.responses.items()}
+        return TakeoverLadderResult(transport=self.transport, human=dict(self.responses), rows=rows)
+
+
+class BrakingBlendScenario(BaseScenario):
+    """A bumpless transfer into braking on a site's base at ``speed``, and an arm joint's blend.
+
+    The site supplies the braking deceleration, the resident stop's jerk
+    bound, and the permission tick; the arm blend takes a torque change under
+    a torque-rate ceiling.
+    """
+    site: Any                                   # EmbodiedSiteScenario
+    speed: Quantity
+    torque_change: Optional[Quantity] = None
+    torque_rate_limit: Optional[Quantity] = None
+
+    @property
+    def result(self):
+        from .solvers import BrakingBlendModel
+        s = self.site
+        return BrakingBlendModel().solve(self.speed, s.a_brake, s.j_brake, s.t_tick,
+                                         torque_change=self.torque_change,
+                                         torque_rate_limit=self.torque_rate_limit)
+
+
+class CommandAuthenticationScenario(BaseScenario):
+    """Remote commands authenticated on a machine's permission processor, priced against a takeover budget.
+
+    ``budget`` gives the speed, the partial spare, and the fallback deadline
+    before and after the dispatch-to-admission allocation; the processor clock
+    turns published cycle counts into time.
+    """
+    budget: TakeoverBudgetScenario
+    clock: Quantity
+    verify_cycles: float
+    mac_block_cycles: float
+    mac_blocks: int
+    freshness_window: Quantity
+
+    @property
+    def result(self):
+        from .solvers import CommandAuthenticationModel
+        b = self.budget.result
+        return CommandAuthenticationModel().solve(
+            self.clock, self.verify_cycles, self.mac_block_cycles, self.mac_blocks, b.speed,
+            b.machine.spare, b.deadline, b.deadline_after_admission, self.freshness_window)
+
+
+class DisengagementRecordScenario(BaseScenario):
+    """One company's filed disengagement record: first and latest years and a year-over-year swing."""
+    entries: Tuple[Dict[str, Any], ...]         # rows of Literature.CaliforniaDisengagements
+    company: str
+    first_year: int
+    latest_year: int
+    swing_from: int
+    swing_to: int
+    drivered_permit: str = "drivered_AVT"
+    driverless_permit: str = "driverless_AVDT"
+    filer_types: Tuple[str, ...] = ("annual", "first_report")
+
+    @property
+    def rows(self) -> Tuple[Dict[str, Any], ...]:
+        return tuple(r for r in self.entries
+                     if r["company"] == self.company and r["filer_type"] in self.filer_types)
+
+    def row(self, year: int, permit: Optional[str] = None) -> Dict[str, Any]:
+        p = self.drivered_permit if permit is None else permit
+        return next(r for r in self.rows if r["report_year"] == year and r["permit_type"] == p)
+
+    @property
+    def first(self):
+        return self.row(self.first_year)
+
+    @property
+    def latest(self):
+        return self.row(self.latest_year)
+
+    @property
+    def latest_driverless(self):
+        return self.row(self.latest_year, self.driverless_permit)
+
+    @property
+    def rate_drop(self) -> float:
+        """Miles per disengagement in the swing's first year over its second."""
+        return self.row(self.swing_from)["miles_per_disengagement"] / self.row(self.swing_to)["miles_per_disengagement"]
+
+    @property
+    def miles_growth(self) -> float:
+        """Autonomous miles in the swing's second year over its first."""
+        return self.row(self.swing_to)["autonomous_miles"] / self.row(self.swing_from)["autonomous_miles"]

@@ -4887,3 +4887,84 @@ def test_quantized_decode_energy_and_deployment_profile():
     r = Scenarios.ResNet50Int8ProfileH100
     assert r.top1_drop == pytest.approx(0.3) and r.passes_top1 and not r.passes_calibration
     assert r.size_reduction == pytest.approx(4) and r.energy_improvement == pytest.approx(r.throughput_gain)
+
+
+def test_supervisory_intervention_takeover_budgets():
+    """Takeover deadlines, ceilings, the session waterfall, blends, and authentication on the warehouse base (added 2026-10-20)."""
+    from mlsysim import Literature
+    from mlsysim.physics.robotics import calc_scurve_max_permitted_velocity
+    s = Scenarios
+    aisle = s.WarehouseInLoopTakeoverAtAisleSpeed.result
+    assert aisle.machine.spare.m_as("mm") == pytest.approx(131.0075)
+    assert aisle.deadline.m_as("ms") == pytest.approx(100.775)
+    assert aisle.deadline_after_admission.m_as("ms") == pytest.approx(37.46428)
+    # The machine alone matches the enforcement chapter's finished budget at the aisle speed.
+    assert aisle.machine.required_distance.m_as("mm") == pytest.approx(s.WarehouseFinishedStopAtAisleSpeed.result.required_distance.m_as("mm"))
+    assert aisle.with_takeover.required_distance.m_as("mm") == pytest.approx(1755.4925)
+    assert aisle.with_takeover_and_dispatch.required_distance.m_as("mm") == pytest.approx(1837.796436)
+    assert aisle.with_takeover.speed_ceiling.m_as("m/s") == pytest.approx(0.836188, abs=1e-6)
+    ceil_da = aisle.with_takeover_and_dispatch.speed_ceiling
+    assert ceil_da.m_as("m/s") == pytest.approx(s.WarehouseInLoopTakeoverAtAisleSpeed.site.v_takeover_in_loop_ceiling.m_as("m/s"))
+    # The hand-solved root equals the solver's ceiling on the quadratic branch.
+    w = aisle.with_takeover
+    a = w.deceleration
+    root = (a * (w.ceiling_root - w.ceiling_lead_time)).m_as("m/s")
+    assert root == pytest.approx(w.speed_ceiling.m_as("m/s"))
+    assert w.ceiling_lead_time.m_as("s") == pytest.approx(0.879225)
+    assert w.rigid_speed_ceiling.m_as("m/s") == pytest.approx(1.2320607, rel=1e-6)
+    assert aisle.timeout_ticks == 100 and aisle.timeout_ticks_after_admission == 37
+    assert aisle.takeover_over_spare == pytest.approx(6.0034731) and aisle.takeover_over_spare_after_admission == pytest.approx(16.148716, rel=1e-6)
+    ool = s.WarehouseOutOfLoopTakeoverAtAisleSpeed.result
+    assert ool.with_takeover_and_dispatch.required_distance.m_as("mm") == pytest.approx(6855.796436)
+    assert ool.with_takeover.speed_ceiling.m_as("m/s") == pytest.approx(0.19107, abs=1e-5)
+    slow = s.WarehouseInLoopTakeoverAtRequestSpeed.result
+    assert slow.deadline.m_as("ms") == pytest.approx(751.608333, rel=1e-8)
+    assert slow.spare_after_takeover.m_as("mm") == pytest.approx(109.95625)
+    assert slow.spare_after_admission.m_as("mm") == pytest.approx(62.47321)
+    assert slow.lease_extension_travel.m_as("mm") == pytest.approx(30.0)
+    assert slow.spare_after_lease.m_as("mm") == pytest.approx(32.47321)
+    assert s.WarehouseInLoopTakeoverAtRetiredSlowdown.result.time_left_after_admission.m_as("ms") == pytest.approx(-5.036, abs=5e-3)
+    crawl = s.WarehouseOutOfLoopTakeoverAtCrawl.result
+    assert crawl.time_left.m_as("s") == pytest.approx(1.32283, abs=1e-5)
+    assert crawl.spare_after_takeover.m_as("mm") == pytest.approx(198.4245, abs=1e-4)
+    assert s.WarehouseOutOfLoopTakeoverAtCrawlP99.result.time_left.m_as("s") < 0
+    assert s.WarehouseFixedWindowAtAisleSpeed.result.with_takeover.required_distance.m_as("mm") == pytest.approx(1618.9925)
+    assert round(s.WarehouseFixedWindowAtCrawl.result.with_takeover.required_distance.m_as("mm")) == 307
+    ladder = s.WarehouseTakeoverCeilingLadder.result.rows
+    ceilings = [r.with_takeover.speed_ceiling.m_as("m/s") for r in ladder.values()]
+    assert all(hi > lo for hi, lo in zip(ceilings, ceilings[1:]))
+    assert ladder["mhp_slow"].takeover == s.WarehouseInLoopTakeoverAtAisleSpeed.takeover
+    assert ladder["p90"].takeover.m_as("ms") == pytest.approx(s.WarehouseOutOfLoopTakeoverAtAisleSpeed.takeover.m_as("ms"))
+    assert ladder["mhp"].with_takeover.speed_ceiling.m_as("m/s") == pytest.approx(1.0094, abs=5e-5)
+    # The resident-stop ceiling solver agrees with the ladder's partial budget.
+    site = s.WarehouseInLoopTakeoverAtAisleSpeed.site
+    direct = calc_scurve_max_permitted_velocity(site.d_clear, site.tau_delay + ladder["surprise"].takeover, site.a_brake,
+                                                site.j_brake, site.delta_loc + site.eps_track, site.delta_margin)
+    assert direct.m_as("m/s") == pytest.approx(ladder["surprise"].with_takeover.speed_ceiling.m_as("m/s"))
+    b = s.WarehouseTakeoverBrakingBlend.result
+    assert b.window.m_as("ms") == pytest.approx(527.34375) and b.window_ticks == 528
+    assert b.blend_travel.m_as("mm") == pytest.approx(316.0531, abs=1e-4)
+    assert b.blended_stop.m_as("mm") == pytest.approx(328.4471, abs=1e-4)
+    assert b.step_stop.m_as("mm") == pytest.approx(140.625) and b.scurve_travel.m_as("mm") == pytest.approx(246.09375)
+    assert b.reserve_use.m_as("mm") == pytest.approx(156.9703, abs=1e-4)
+    assert b.reserve_use > slow.spare_after_takeover
+    assert b.arm_window.m_as("ms") == pytest.approx(37.5) and b.arm_window_ticks == 38
+    assert b.step_jerk.m_as("m/s**3") == pytest.approx(2000.0)
+    auth = s.WarehouseRemoteCommandAuthentication.result
+    assert auth.verify_time.m_as("ms") == pytest.approx(1.8) and auth.mac_time.m_as("us") == pytest.approx(4.96275)
+    assert auth.forged_to_miss == 55 and auth.forged_to_miss_after_admission == 20 and auth.forged_rate == 546
+    assert auth.spare_after_freshness.m_as("mm") == pytest.approx(1.0075)
+    rec = s.WaymoCaliforniaDisengagementRecord
+    assert rec.rate_drop > 3 and rec.miles_growth > 3
+    assert rec.latest["disengagements"] == 174
+    assert rec.row(2024)["disengagements"] == Literature.HumanTakeover.WaymoDisengagementRows2024
+    assert (Literature.HumanTakeover.WaymoDisengagementsByTestDriver2024
+            + Literature.HumanTakeover.WaymoDisengagementsByAvSystem2024) == Literature.HumanTakeover.WaymoDisengagementRows2024
+    # The take-over series reproduces the paper's mean and the stored inverted-CDF percentiles.
+    import math
+    vals = sorted(r["mean_takeover_time_s"] for r in Literature.TakeoverTimeMeta.entries)
+    assert len(vals) == 520 and sum(vals) / len(vals) == pytest.approx(2.72, abs=5e-3)
+    pct = lambda p: vals[max(math.ceil(p / 100 * len(vals)) - 1, 0)]  # noqa: E731
+    assert pct(50) == pytest.approx(site.t_takeover_driving_p50.m_as("s"))
+    assert pct(90) == pytest.approx(site.t_takeover_driving_p90.m_as("s"))
+    assert pct(99) == pytest.approx(site.t_takeover_driving_p99.m_as("s"))

@@ -1020,6 +1020,12 @@ class StoppingBudgetResult(SolverResult):
     ramp_delay: Optional[Quantity] = None        # a / (2 j): the ramps as added delay above a^2 / j
     tracking_inset: Optional[Quantity] = None    # tracking bound subtracted from the clearance
     approach_travel: Optional[Quantity] = None   # v_h (tau + T_stop): a person closing the gap
+    # The ceiling solved by hand (added 2026-10-20): the S-curve stop alone and
+    # the terms of the quadratic root, set with a jerk bound and a clear distance.
+    scurve_travel: Optional[Quantity] = None     # braking + jerk-ramp travel: the resident stop alone
+    rigid_speed_ceiling: Optional[Quantity] = None  # (D_clear - overhead - inset) / delay: instantaneous braking
+    ceiling_lead_time: Optional[Quantity] = None  # b = delay + a / (2 j), on the quadratic branch only
+    ceiling_root: Optional[Quantity] = None      # sqrt(b^2 + 2 (D_clear - overhead - inset) / a), same branch
 
     def travel_over(self, duration: Quantity) -> Quantity:
         """Distance covered at ``speed`` over ``duration`` (the cost of one term of the delay)."""
@@ -4176,4 +4182,93 @@ __all__ += [
     "TargetMaskResult", "PerInvocationSerializationResult", "TrajectoryRoleShareResult",
     "LossNormalizationResult", "SequencePackingResult", "PreferencePairResult",
     "ContextDistillationResult", "CandidateReleaseResult",
+]
+
+
+# --- Supervisory intervention: takeover deadlines, blends, authentication (added 2026-10-20) ---
+
+class TakeoverBudgetResult(SolverResult):
+    """Result from TakeoverBudgetModel: a takeover request priced against the finished stopping budget."""
+    speed: Quantity                          # speed at the request
+    takeover: Quantity                       # T_Sigma: human response plus console transport
+    dispatch_to_admission: Quantity          # allocation charged in the complete budget (zero if unstated)
+    machine: StoppingBudgetResult            # the machine alone, partial budget (pre-brake delay only)
+    machine_with_dispatch: StoppingBudgetResult   # the machine alone, dispatch-to-admission charged
+    with_takeover: StoppingBudgetResult      # the takeover waited out before braking, partial budget
+    with_takeover_and_dispatch: StoppingBudgetResult  # the same with dispatch to admission: the complete budget
+    deadline: Quantity                       # T_latest: the longest wait the partial budget allows
+    deadline_after_admission: Quantity       # T_latest less the dispatch-to-admission allocation
+    takeover_travel: Quantity                # v T_Sigma
+    admission_travel: Quantity               # v Delta_da
+    time_left: Quantity                      # deadline - takeover (negative: the takeover does not fit)
+    time_left_after_admission: Quantity      # the same after the allocation
+    spare_after_takeover: Quantity           # partial spare - takeover travel
+    spare_after_admission: Quantity          # less the dispatch-to-admission travel
+    takeover_over_spare: float               # takeover travel / partial spare
+    takeover_over_spare_after_admission: float  # takeover travel / complete spare
+    lease_extension: Optional[Quantity] = None         # manual lease - chunk lease, once the operator holds the channel
+    lease_extension_travel: Optional[Quantity] = None  # v x lease extension
+    spare_after_lease: Optional[Quantity] = None       # spare after admission, less the lease extension travel
+    configured_timeout: Optional[Quantity] = None      # protocol ceiling on the handover timer
+    timeout: Optional[Quantity] = None                 # max(0, min(configured, deadline))
+    timeout_ticks: Optional[int] = None                # whole permission ticks inside the timeout
+    timeout_after_admission: Optional[Quantity] = None  # max(0, min(configured, deadline after admission))
+    timeout_ticks_after_admission: Optional[int] = None
+
+
+class TakeoverLadderResult(SolverResult):
+    """Result from TakeoverCeilingLadderScenario: one takeover budget per sourced human response."""
+    transport: Quantity                      # console term added to every human response
+    human: Dict[str, Quantity]               # key -> human response
+    rows: Dict[str, TakeoverBudgetResult]    # key -> budget with T_Sigma = human + transport
+
+
+class BrakingBlendResult(SolverResult):
+    """Result from BrakingBlendModel: a bumpless transfer from cruise into braking, and an arm blend."""
+    speed: Quantity
+    deceleration: Quantity                   # the blended step, cruise to braking
+    jerk: Quantity                           # the resident stop's jerk bound
+    tick: Quantity
+    window: Quantity                         # 1.875 a / j
+    window_ticks: int                        # the window rounded up to whole permission ticks
+    window_budget: Quantity                  # window_ticks x tick
+    step_jerk: Quantity                      # a / tick: the same change taken in one tick
+    ramp_time: Quantity                      # a / j: the resident stop's linear jerk ramp
+    exit_speed: Quantity                     # v0 - a T / 2
+    blend_travel: Quantity                   # v0 T - a T^2 / 7
+    after_travel: Quantity                   # v_exit^2 / (2 a)
+    blended_stop: Quantity                   # blend travel + after travel
+    step_stop: Quantity                      # v0^2 / (2 a): an ideal step to braking
+    scurve_travel: Quantity                  # the resident jerk-limited stop
+    penalty_over_step: Quantity              # blended stop - step stop
+    excess_over_scurve: Quantity             # blended stop - resident stop
+    reserve_use: Quantity                    # largest growth of travel + resident stop over the blend's ticks
+    torque_change: Optional[Quantity] = None
+    torque_rate_limit: Optional[Quantity] = None
+    arm_window: Optional[Quantity] = None    # 1.875 |Delta tau| / torque-rate ceiling
+    arm_window_ticks: Optional[int] = None
+    arm_window_budget: Optional[Quantity] = None
+
+
+class CommandAuthenticationResult(SolverResult):
+    """Result from CommandAuthenticationModel: authentication as pre-brake delay, and a verifier flood."""
+    verify_time: Quantity                    # signature verification on the permission processor
+    mac_time: Quantity                       # MAC over one frame
+    verify_travel: Quantity                  # v x verify time
+    spare_after_verify: Quantity
+    mac_travel: Quantity
+    freshness_window: Quantity
+    freshness_travel: Quantity               # v x freshness window: a replay at the edge
+    spare_after_freshness: Quantity
+    deadline: Quantity                       # the verification deadline (T_latest)
+    deadline_after_admission: Quantity
+    forged_to_miss: int                      # fewest forged signed packets queued ahead that push a veto past the deadline
+    veto_verified_at: Quantity               # (n + 1) x verify time
+    forged_rate: int                         # whole packets per second the flood must sustain (rounded up)
+    forged_mac_to_miss: int                  # the same count for MAC-only frames
+    forged_to_miss_after_admission: int      # the count against the deadline after admission
+
+
+__all__ += [
+    "TakeoverBudgetResult", "TakeoverLadderResult", "BrakingBlendResult", "CommandAuthenticationResult",
 ]

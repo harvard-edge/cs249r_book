@@ -428,3 +428,25 @@ def calc_quasistatic_spill_acceleration(inner_radius, freeboard, gravity=None):
     validate_positive(freeboard, "freeboard")
     g = (1 * ureg.standard_gravity) if gravity is None else gravity
     return (g * freeboard / inner_radius).to(ureg.meter / ureg.second**2)
+
+
+def calc_smoothstep_blend_window(change, rate_limit):
+    """
+    Shortest window of a fixed-endpoint quintic smoothstep whose peak rate stays at a limit.
+
+    Equation:
+        T >= 1.875 |Delta u| / rate_max
+
+    The smoothstep alpha(s) = 10 s^3 - 15 s^4 + 6 s^5 has peak slope
+    d alpha / ds = 30/16 = 1.875 at s = 1/2, so a change Delta u spread over T
+    peaks at 1.875 Delta u / T. Unit-generic form of
+    ``calc_quintic_blend_duration``: an acceleration change against a jerk
+    bound, or a torque change against a torque-rate ceiling (added 2026-10-20).
+
+    Returns
+    -------
+    Quantity
+        Window in seconds.
+    """
+    validate_positive(rate_limit, "rate_limit")
+    return (1.875 * abs(change) / rate_limit).to(ureg.second)

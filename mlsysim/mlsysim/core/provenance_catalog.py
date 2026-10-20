@@ -4548,3 +4548,70 @@ LLAMA_BENCH_APPLE_SILICON = Provenance(
     verified="2026-10-18",
     notes="llama-bench rows for Llama 2 7B report params 6.74 B.",
 )
+
+# --- Supervisory intervention: takeover studies, regulations, embedded crypto (added 2026-10-20) ---
+OWENS_2024_ED25519_M4 = _lit(
+    "prov:owens-2024-ed25519-cortex-m4",
+    "Owens, D., et al. (2024), Efficient and Side-Channel Resistant Ed25519 on ARM Cortex-M4",
+    url="https://par.nsf.gov/servlets/purl/10507285",
+    verified="2026-10-20",
+    notes=("Abstract: 'Verify in 720,000 cycles on the ARM Cortex-M4' (optimized assembly). Table II "
+           "(kilo-cycles) prints 722 at 24 MHz and 760 at 168 MHz; the abstract's 720,000 is stored."),
+)
+SCHWABE_STOFFELEN_2016_AES_M4 = _lit(
+    "prov:schwabe-stoffelen-2016-aes-cortex-m",
+    "Schwabe, P., and Stoffelen, K. (2016), All the AES You Need on Cortex-M3 and M4, SAC 2016",
+    url="https://cryptojedi.org/papers/aesarm-20161019.pdf",
+    verified="2026-10-20",
+    notes=("Table 1 (Performance of unprotected AES), p. 6: AES-128 single block encryption, 661.7 "
+           "cycles on Cortex-M4 (659.4 on M3); unprotected table-based implementation."),
+)
+LIU_2023_SIRIUS = _lit(
+    "prov:liu-2023-sirius",
+    "Liu, H., Nasiriany, S., Zhang, L., Bao, Z., and Zhu, Y. (2023), Robot Learning on the Job: "
+    "Human-in-the-Loop Autonomy and Learning During Deployment (Sirius), RSS 2023, arXiv:2211.08416",
+    url="https://arxiv.org/abs/2211.08416",
+    verified="2026-10-20",
+    notes=("Sec. IV-D: 'average reaction time of 2 seconds, roughly corresponding to the time of 15 "
+           "robot actions. We thus set l = 15.'"),
+)
+MERAT_2014_TRANSITION = _lit(
+    "prov:merat-2014-transition-to-manual",
+    "Merat, N., Jamson, A. H., Lai, F. C. H., Daly, M., and Carsten, O. M. J. (2014), Transition to "
+    "manual: Driver behaviour when resuming control from a highly automated vehicle, "
+    "Transportation Research Part F 27:274-282",
+    url="https://eprints.whiterose.ac.uk/84460",
+    verified="2026-10-20",
+    notes="Abstract: 'it took drivers around 35-40 s to stabilise their lateral control of the vehicle.'",
+)
+UNECE_R157_ALKS = _report(
+    "prov:unece-r157-alks-2021",
+    "UN Regulation No. 157, Automated Lane Keeping Systems (ALKS), OJ L 82, 9.3.2021",
+    "https://op.europa.eu/o/opportal-service/download-handler?identifier=36fd3041-807a-11eb-9ac9-01aa75ed71a1&format=pdf&language=en&productionSystem=cellar",
+    notes=("Para 5.4.4.1: a minimum risk manoeuvre 'shall be started, earliest 10 s after the start of "
+           "the transition demand'. Para 8.3.1(d)(ii): DSSAD timestamp accuracy +/- 1,0 s. Read 2026-10-20."),
+)
+ISO_10218_1_MANUAL_REDUCED_SPEED = _report(
+    "prov:iso-10218-1-reduced-speed",
+    "ISO 10218-1, Robotics - Safety requirements - Part 1: Industrial robots, reduced speed in manual mode",
+    "https://www.iso.org/standard/73933.html",
+    notes=("Reduced speed in manual mode: tool centre point speed not exceeding 250 mm/s (2011 edition, "
+           "clause 5.6.2, as quoted by vendor training material). The standard text is paywalled and was "
+           "not re-read for the 2025 edition; needs check against ISO 10218-1:2025."),
+)
+CA_DMV_2024_DISENGAGEMENT_CSV = _report(
+    "prov:ca-dmv-2024-disengagement-csv",
+    "California DMV, 2024 Autonomous Vehicle Disengagement Reports (CSV), report year Dec 2023 to Nov 2024",
+    "https://web.archive.org/web/20250213101223/https://www.dmv.ca.gov/portal/file/2024-autonomous-vehicle-disengagement-reports-csv/",
+    notes=("Waymo LLC rows: 244, of which 230 initiated by Test Driver and 14 by AV System (counted from "
+           "the file, retrieved 2026-10-19)."),
+)
+WARSAW_DLH2904_REPORT = _report(
+    "prov:warsaw-dlh2904-report-1994",
+    "Main Commission for Aircraft Accident Investigation (Poland), Report on the Accident to Airbus A320-211 "
+    "D-AIPN at Warsaw Okecie Airport on 14 September 1993 (English translation)",
+    "http://www.rvs.uni-bielefeld.de/publications/Incidents/DOCS/ComAndRep/Warsaw/warsaw-report.html",
+    notes=("Sec. 1.1: the left gear touched the runway 9 seconds after the right; the wheel brakes 'began to "
+           "operate after about 4 seconds'; the aircraft rolled over the end of the runway at GS = 72 kts. "
+           "Sec. 1.2: fatal injuries 1 crew, 1 passenger. Read 2026-10-20."),
+)
