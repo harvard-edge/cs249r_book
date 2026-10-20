@@ -10029,3 +10029,49 @@ class Scenarios(Registry):
         interval=Q_(5, "minute"),  # Argo Rollouts docs example
         failure_limit=3,  # Argo Rollouts docs example
     )
+
+    # --- Volume I synthesis: recalled calculations (added 2026-10-20) -------
+    # The conclusion of a course recalls earlier calculations; each entry
+    # below varies an existing scenario or reuses an existing type.
+    Conv3x3At256Channels = ImageNet64ChannelConv.variant(
+        name="A 3x3 convolution from 256 to 256 channels, FP32",
+        description="A representative later layer; the standard-over-separable ratio depends only on the "
+                    "kernel and the output channels.",
+        in_channels=256,                  # scenario assumption: representative channel count
+        out_channels=256,                 # scenario assumption
+    )
+    Llama2_70B_DecodeTwoH100 = Llama2_70B_DecodeH100.variant(
+        name="Llama-2 70B batch-1 decode sharded evenly across two H100s",
+        description="Each H100 streams and multiplies half of the FP16 weights once per token; KV cache, "
+                    "activations, and communication left out.",
+        tp_size=2,                        # scenario assumption: two balanced shards
+    )
+    ChatEndpointTtftMeanVersusP99 = _st.MeanVersusTailScenario(
+        name="An LLM chat endpoint: mean time to first token against its p99",
+        description="Illustrative; the p99 is driven by long prompts and queueing behind long generations.",
+        mean=Q_(50, "ms"),                # scenario assumption: mean time to first token
+        tail_low=Q_(2000, "ms"),          # scenario assumption: p99 time to first token
+        tail_high=Q_(2000, "ms"),         # scenario assumption: one stated value
+    )
+    HostPreprocessingRequestPath = _st.AmdahlScenario(
+        name="A request that is 90 percent host preprocessing, with inference made 10x faster",
+        description="Shares of the original request time; only the accelerator inference speeds up.",
+        stages={"preprocess": Q_(90, "percent"),  # scenario assumption: CPU-bound preprocessing share
+                "inference": Q_(10, "percent")},  # scenario assumption
+        stage="inference",
+        speedup=10.0,                     # scenario assumption: rewritten inference kernel
+    )
+    ComposedAssistantRequestPath = _st.DependencyScheduleScenario(
+        name="A composed assistant request: retrieval, two tools in parallel, generation, a verifier",
+        description="Node 1 retrieval, 2 and 3 the two tools, 4 generation, 5 the verifier; negligible "
+                    "orchestration overhead.",
+        durations={1: Q_(50, "ms"), 2: Q_(110, "ms"), 3: Q_(70, "ms"),
+                   4: Q_(180, "ms"), 5: Q_(30, "ms")},  # scenario assumption: stage latencies
+        predecessors={1: [], 2: [1], 3: [1], 4: [2, 3], 5: [4]},
+        slots=2,                          # scenario assumption: the two tools run at once
+    )
+    GpuFailuresTraining1KThreeWeeks = GpuFailuresTraining1K.variant(
+        name="GPU failures across the 1,024-GPU reference cluster over a three-week run",
+        description="Independent GPU failures at the per-GPU MTTF; any failure halts the job.",
+        run_duration=Q_(21, "day"),       # scenario assumption: three-week training run
+    )
