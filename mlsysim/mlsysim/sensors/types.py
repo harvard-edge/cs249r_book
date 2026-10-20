@@ -195,6 +195,9 @@ class SafetyLaserScanner(Sensor):
     iec61496_type: str                 # e.g. "Type 3"
     performance_level: str             # ISO 13849-1, e.g. "PL d, Category 3"
     configuration: str                 # mode and object size the stored values describe
+    # Added 2026-10-20: the slower standard-mode response at the same scan count,
+    # for scanners whose datasheet states two modes (None where it states one).
+    response_time_standard_mode: Optional[Quantity] = None
 
     @field_validator("protective_field_range", mode="after")
     @classmethod
@@ -210,3 +213,8 @@ class SafetyLaserScanner(Sensor):
     @classmethod
     def _validate_scan_angle(cls, v):
         return require_dimensionality(v, ureg.degree, "scan_angle")
+
+    @field_validator("response_time_standard_mode", mode="after")
+    @classmethod
+    def _validate_response_standard(cls, v):
+        return v if v is None else require_dimensionality(v, ureg.second, "response_time_standard_mode")

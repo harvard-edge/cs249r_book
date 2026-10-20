@@ -144,6 +144,7 @@ class SafetyScanners(Registry):
         iec61496_type="Type 3",
         performance_level="PL d, Category 3",
         configuration="High-speed mode, 70/150 mm objects, 2 scans",
+        response_time_standard_mode=160.0 * ureg.millisecond,  # standard mode, 2 scans (added 2026-10-20)
         metadata=Metadata(
             provenance=pc.KEYENCE_SZ_V32,
             description="Keyence SZ-V32 Type 3 / PL d optical safety laser scanner (5.7 m protection zone).",

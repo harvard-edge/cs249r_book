@@ -1,275 +1,266 @@
 #!/usr/bin/env python3
-"""Every derived number in Lecture 16 (Deployment Release), one block per slide.
+"""Every number on the Lecture 16 slides and notes (Deployment Release), read from MLSysIM.
 
-Inputs carry their source. "DR" is the rendered chapter, Deployment Release
-(Volume IV, Chapter 16). Running-machine values are read from the MLSysIM
-registry, the same source the chapter prints from (Embodied.MobileManipulator.
-WarehouseMobileManipulator and Embodied.Scenario.WarehouseAisle), with the
-chapter's own functions, so the slide and the book agree. Outside sources are
-named where they are used. Every printed value is what the slide or its note
-shows, with the label used there. make_figs.py imports from this file.
+MLSysIM holds the inputs (the Embodied.* running machine and its aisle record,
+with the Keyence SZ-V32 scanner; Literature.* for the Challenger O-ring record
+of Dalal, Fowlkes, and Hoadley, the Rogers Commission's figures, Waymo's
+Safety Impact releases, and three NHTSA recall records) and the calculations:
+the finished stopping budgets and the weakest deceleration that still fits
+(Scenarios.WarehouseFinishedStop*), the renewal- and flag-referenced onset
+bounds (WarehouseRenewalReferencedStop, WarehouseFlagReferencedStop), the
+dim-aisle observation age (WarehouseNavCameraAge*), the stipulated argument
+(SafetyArgumentConfidence), the exposure wall (HazardExposureWall), and the
+latch and contact equations of physics.robotics. The chapter reads the same
+scenarios. This file only selects values, converts units, and formats them;
+it types no numbers. Each value is recorded with v() under the key the deck
+prints as \\val{key}; running this file writes images/numbers.tex.
+make_figs.py imports it for the figure inputs.
 
 Run from this folder: python3 calcs.py
 """
 
+import calendar
 import math
 import sys
+from datetime import date
 from pathlib import Path
 
-MLSYSIM = Path(__file__).resolve().parents[4] / "mlsysim"
-sys.path.insert(0, str(MLSYSIM))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
 
-from mlsysim import Embodied, Literature  # noqa: E402
-from mlsysim.core.units import meter, millimeter, millisecond, second, standard_gravity  # noqa: E402
+from mlsysim.physics.drivetrain import calc_required_friction  # noqa: E402
 from mlsysim.physics.robotics import (  # noqa: E402
-    calc_c2_stop_suffix,
+    calc_kinetic_energy,
     calc_latch_contact_stopping_profile,
-    calc_scurve_max_permitted_velocity,
-    calc_scurve_stop_distance,
+    calc_transient_impact_force,
 )
 
+Embodied, Scenarios, Literature = mlsysim.Embodied, mlsysim.Scenarios, mlsysim.Literature
+Q_ = mlsysim.core.units.Q_
 
-def head(title):
-    print(f"\n--- {title}")
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+SPACE = Literature.SpaceflightAnomalies
+REPORTS = Literature.IncidentReports
+RECORD = Literature.ChallengerORingDistressRecord
 
-
-def show(label, value):
-    print(f"  {label}: {value}")
-
-
-RM = Embodied.MobileManipulator.WarehouseMobileManipulator  # running machine (illustrative)
-AISLE = Embodied.Scenario.WarehouseAisle                      # aisle scene (illustrative; speeds chosen)
-G = (1 * standard_gravity).to(meter / second**2).magnitude    # 9.80665 m/s^2
-
-# =============================================================================
-# Shared inputs (DR Napkin Math 16.1 variables; registry values)
-# =============================================================================
-V = AISLE.v_aisle.to(meter / second).magnitude                 # 1.3 m/s, chosen
-D_CLEAR = AISLE.d_clear.to(millimeter).magnitude               # 1,100 mm, illustrative
-TAU = AISLE.tau_delay.to(millisecond).magnitude                # 133.6 ms = 51.6 + 82
-A_BRAKE = AISLE.a_brake.to(meter / second**2).magnitude        # 2 m/s^2, illustrative
-LOC = AISLE.delta_loc.to(millimeter).magnitude                 # 50 mm, illustrative
-TRACK = AISLE.eps_track.to(millimeter).magnitude               # 40 mm, illustrative
-MARGIN = AISLE.delta_margin.to(millimeter).magnitude           # 100 mm, chosen
-T_DA = AISLE.t_dispatch_to_admission.to(millisecond).magnitude  # 63.3 ms, illustrative allocation
-# Jerk bound: the reference C2 stop's peak jerk at the drive limit (DR NM 16.1)
-J = calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"].to(meter / second**3).magnitude
+STOP = Scenarios.WarehouseFinishedStopAtAisleSpeed
+DISPATCH = Scenarios.WarehouseFinishedStopWithDispatch
+INSPECTED = Scenarios.WarehouseFinishedStopInspectedFloor
+RESTRICTED = Scenarios.WarehouseFinishedStopRestricted
+SILENT = Scenarios.WarehouseRenewalReferencedStop
+FLAGGED = Scenarios.WarehouseFlagReferencedStop
+AGE = Scenarios.WarehouseNavCameraAgeAtAisleSpeed
+DIM = Scenarios.WarehouseNavCameraAgeDimAisle
+ARG = Scenarios.SafetyArgumentConfidence
+WALL = Scenarios.HazardExposureWall
 
 
-def braking_mm(v, a, j=J):
-    """Jerk-limited stop distance (DR NM 16.1 step 2 form), mm; valid when v >= a^2/j."""
-    return (v * v / (2 * a) + v * a / (2 * j)) * 1e3
+def m(q, unit):
+    """Magnitude of a Pint quantity in ``unit``."""
+    return q.to(unit).magnitude
 
 
-# =============================================================================
-# Recall slide: Lecture 15's fault F1 (DR 16.5.3 and NM 16.2 use the same 82 ms)
-# =============================================================================
-T_LEASE = AISLE.t_lease.to(millisecond).magnitude      # 60 ms, chosen
-T_TICK = AISLE.t_tick.to(millisecond).magnitude        # 1 ms, chosen
-T_BUS = AISLE.t_bus.to(millisecond).magnitude          # 1 ms, illustrative
-T_ONSET = AISLE.t_brake_onset.to(millisecond).magnitude  # 20 ms, illustrative
-T_SILENT = T_LEASE + T_TICK + T_BUS + T_ONSET            # 82 ms
-T_FLAGGED = T_TICK + T_BUS + T_ONSET                     # 22 ms
+def sci(key, value, fmt, label):
+    """Record a positive value as mantissa (key_mant) and power of ten (key_exp)."""
+    exp = math.floor(math.log10(value))
+    mant = value / 10 ** exp
+    if float(fmt.format(mant)) >= 10:  # the mantissa rounds up to the next decade
+        exp, mant = exp + 1, mant / 10
+    v(f"{key}_mant", mant, fmt, f"{label}, mantissa")
+    v(f"{key}_exp", exp, "{:.0f}", f"{label}, power of ten")
 
-# =============================================================================
-# Hook and segment 1: the Challenger flight record
-# Dalal, Fowlkes, and Hoadley, "Risk Analysis of the Space Shuttle: Pre-
-# Challenger Prediction of Failure," JASA 84 (1989), table 1, as posted in the
-# UCI Machine Learning Repository, "Challenger USA Space Shuttle O-Ring" data
-# set (file o-ring-erosion-or-blowby.data): per flight, O-rings at risk (6),
-# O-rings with thermal distress (erosion or blow-by), launch temperature (F),
-# leak-check pressure (psi), temporal order. Typed from the file.
-# =============================================================================
-ORING = [  # (order, launch temperature F, O-rings with distress)
-    (1, 66, 0), (2, 70, 1), (3, 69, 0), (4, 68, 0), (5, 67, 0), (6, 72, 0),
-    (7, 73, 0), (8, 70, 0), (9, 57, 1), (10, 63, 1), (11, 70, 1), (12, 78, 0),
-    (13, 67, 0), (14, 53, 2), (15, 67, 0), (16, 75, 0), (17, 70, 0), (18, 81, 0),
-    (19, 76, 0), (20, 79, 0), (21, 75, 2), (22, 76, 0), (23, 58, 1),
-]
-T_CHALLENGER = 36        # F, air at launch, 28 January 1986 (DR War Story 16.1; Rogers Commission ch. IV finding 6)
-T_JOINT_51L = 28         # F, estimated right aft field joint, +/- 5 F (Rogers Commission ch. IV finding 6a)
-T_JOINT_51L_ERR = 5
-# The data set's temperatures are the calculated joint temperatures of Rogers
-# Commission figure 7 (its distressed flights sit at 53, 57, 58, 63, 70, 70, 75 F).
-T_THIOKOL = 53           # F, Thiokol's recommended floor, the coldest prior flight (DR War Story 16.1)
 
-# =============================================================================
-# Segment 1: the three criteria and the envelope (DR 16.2, table 1)
-# =============================================================================
+def ymd(n):
+    """A YYYYMMDD record field as a date."""
+    y, md = divmod(int(n), 10 ** 4)
+    return date(y, *divmod(md, 100))
+
+
+stop, dispatch, insp = STOP.result, DISPATCH.result, INSPECTED.result
+silent, flagged = SILENT.result, FLAGGED.result
 latch_lo = calc_latch_contact_stopping_profile(AISLE.v_latch_approach, scenario=AISLE)
 latch_hi = calc_latch_contact_stopping_profile(AISLE.v_latch_high, scenario=AISLE)
-V_LATCH = AISLE.v_latch_approach.to(meter / second).magnitude   # 0.03 m/s, chosen
-V_LATCH_HI = AISLE.v_latch_high.to(meter / second).magnitude    # 0.10 m/s, illustrative
-F_LATCH_LIMIT = AISLE.f_latch_limit.to("newton").magnitude      # 100 N, illustrative
-F_CONTACT = AISLE.f_contact_criterion.to("newton").magnitude    # 50 N, chosen (site assessment)
-V_HANDOVER = AISLE.v_handover.to(meter / second).magnitude      # 0.10 m/s, chosen
-M_LOADED = RM.loaded_mass.to("kilogram").magnitude              # 368 kg (derived upper bound)
-WCET_US, DEADLINE_US = 250, 400   # enforcer WCET declared, permission deadline (DR table 2, C2)
-F_HANDOVER = 20.7                  # N, free-hand transient force at 0.10 m/s (DR 16.2; Lecture 12's model)
-F_HANDOVER_CLAMPED = 94.9          # N, clamped hand at 0.10 m/s (DR 16.2)
-V_HAND_CEIL, V_HAND_CEIL_CLAMPED = 0.24, 0.053  # m/s ceilings (DR 16.2)
+m_eff, m_hand, k_hand = RM.arm_effective_contact_mass, AISLE.m_contact_human, AISLE.k_contact_human
 
-# =============================================================================
-# Main
-# =============================================================================
+# Inputs for make_figs.py, at full precision.
+ORING = [(int(e["flight_order"]), e["joint_temp_f"], int(e["orings_distressed"])) for e in RECORD.entries]
+TEMPS = sorted(t for _, t, _ in ORING)
+# The cold group: every flight at or below the warmest temperature up to which all flights had distress.
+COLD_MAX = max(t for t in TEMPS if all(d > 0 for _, tt, d in ORING if tt <= t))
+WARM_MIN = min(t for t in TEMPS if t > COLD_MAX)
+COLD = [d for _, t, d in ORING if t <= COLD_MAX]
+WARM = [d for _, t, d in ORING if t >= WARM_MIN]
+T_CHALLENGER = SPACE.ChallengerLaunchAirF
+T_JOINT_51L = SPACE.ChallengerAftJointEstimateF
+T_JOINT_51L_ERR = SPACE.ChallengerAftJointEstimateUncertaintyF
+T_THIOKOL = SPACE.ThiokolMinimumJointTempF
+G = m(Q_(1, "standard_gravity"), "m/s**2")
+V = m(AISLE.v_aisle, "m/s")
+T_LEASE, T_TICK = m(AISLE.t_lease, "ms"), m(AISLE.t_tick, "ms")
+T_BUS, T_ONSET = m(AISLE.t_bus, "ms"), m(AISLE.t_brake_onset, "ms")
+T_SILENT, T_FLAGGED = m(SILENT.delay, "ms"), m(FLAGGED.delay, "ms")
+A_LATCH_LO = m(latch_lo["a_arm_needed"], "m/s**2")
+A_LATCH_HI = m(latch_hi["a_arm_needed"], "m/s**2")
+DISTRESSED = sum(1 for _, _, d in ORING if d > 0)
+
+
+print("== Hook: Challenger (Rogers Commission; Dalal et al. 1989 via UCI)")
+v("air_f", T_CHALLENGER, "{:.0f}", "launch air temperature, F")
+v("colder_f", SPACE.ChallengerColderThanPriorLaunchF, "{:.0f}", "colder than any previous launch, F")
+v("coldest_f", TEMPS[0], "{:.0f}", "coldest joint in the record, F")
+v("warmest_f", TEMPS[-1], "{:.0f}", "warmest joint in the record, F")
+v("thiokol_f", T_THIOKOL, "{:.0f}", "Thiokol's recommended floor, F")
+v("n_flights", len(ORING), "{:.0f}", "inspected flights in the record")
+v("n_prior", SPACE.ChallengerPriorJointFlights, "{:.0f}", "previous flights")
+v("flight_no", SPACE.ChallengerPriorJointFlights + 1, "{:.0f}", "Challenger's flight number (ordinal)")
+v("rings_words", max(e["orings_at_risk"] for e in RECORD.entries), "words", "O-rings per flight")
+v("breakup_s", SPACE.ChallengerBreakupS, "{:.0f}", "liftoff to breakup, s")
+v("joint_f", T_JOINT_51L, "{:.0f}", "right aft joint estimate, F")
+v("joint_err_f", T_JOINT_51L_ERR, "{:.0f}", "its uncertainty, F")
+v("cold_max_f", COLD_MAX, "{:.0f}", "warmest flight of the all-distressed cold group, F")
+v("warm_min_f", WARM_MIN, "{:.0f}", "coldest flight above it, F")
+v("cold_hit", sum(1 for d in COLD if d > 0), "{:.0f}", "cold flights with distress")
+v("cold_n", len(COLD), "{:.0f}", "cold flights")
+v("warm_hit", sum(1 for d in WARM if d > 0), "{:.0f}", "warm flights with distress")
+v("warm_n", len(WARM), "{:.0f}", "warm flights")
+v("n_distressed", DISTRESSED, "{:.0f}", "flights with distress")
+
+print("== Recall: fault F1, the stalled proposer (Lecture 15; DR NM 16.2)")
+v("t_lease", T_LEASE, "{:.0f}", "chunk lease, ms")
+v("t_tick", T_TICK, "{:.0f}", "permission tick, ms")
+v("t_bus", T_BUS, "{:.0f}", "fieldbus transfer, ms")
+v("t_onset", T_ONSET, "{:.0f}", "brake onset, ms")
+v("t_silent", T_SILENT, "{:.0f}", "last renewal to brake onset, ms")
+
+print("== Claims: the three criteria and the envelope (DR equation 1, table 1)")
+v("v_aisle", V, "{:.1f}", "aisle speed, m/s")
+v("d_clear_m", m(AISLE.d_clear, "m"), "{:.2f}", "clear distance, m")
+v("d_clear_mm", m(AISLE.d_clear, "mm"), "{:,.0f}", "clear distance, mm")
+v("f_latch", m(AISLE.f_latch_limit, "N"), "{:.0f}", "latch force limit, N")
+v("v_latch", m(AISLE.v_latch_approach, "m/s"), "{:.2f}", "guarded latch approach, m/s")
+v("f_contact", m(AISLE.f_contact_criterion, "N"), "{:.0f}", "handover force criterion, N")
+v("v_handover", m(AISLE.v_handover, "m/s"), "{:.2f}", "handover speed, m/s")
+v("wcet", m(AISLE.enforcer_wcet, "us"), "{:.0f}", "enforcer WCET, declared, us")
+v("deadline", m(AISLE.enforcer_deadline, "us"), "{:.0f}", "permission deadline, us")
+v("payload", m(RM.onboard_payload_capacity, "kg"), "{:.0f}", "tote-rack payload, kg")
+v("mu_min", calc_required_friction(AISLE.a_brake), "{:.3f}", "friction floor for a_brake")
+
+print("== Estimate: the aisle spare (DR Napkin Math 16.1)")
+v("tau_delay", m(AISLE.tau_delay, "ms"), "{:.1f}", "pre-brake delay, ms")
+v("a_brake", m(AISLE.a_brake, "m/s**2"), "{:.0f}", "credible deceleration, m/s^2")
+v("j_brake", m(stop.jerk, "m/s**3"), "{:.2f}", "jerk bound, m/s^3")
+v("allowances", m(stop.overhead + stop.tracking_inset, "mm"), "{:.0f}", "localization, tracking, margin, mm")
+v("d_loc", m(AISLE.delta_loc, "mm"), "{:.0f}", "localization allowance, mm")
+v("d_track", m(AISLE.eps_track, "mm"), "{:.0f}", "tracking allowance, mm")
+v("d_margin", m(AISLE.delta_margin, "mm"), "{:.0f}", "protective margin, mm")
+v("reaction", m(stop.delay_travel, "mm"), "{:.1f}", "reaction travel, mm")
+v("scurve", m(stop.scurve_travel, "mm"), "{:.1f}", "jerk-limited stop, mm")
+v("budget", m(stop.required_distance, "mm"), "{:.1f}", "budget, mm")
+v("spare", m(stop.spare, "mm"), "{:.1f}", "spare, mm")
+v("t_spare", m(stop.delay_spare, "ms"), "{:.1f}", "spare as extra delay, ms")
+v("a_min", m(stop.min_deceleration, "m/s**2"), "{:.2f}", "weakest deceleration that still fits, m/s^2")
+v("shortfall_pct", 100 * stop.deceleration_shortfall, "{:.0f}", "deceleration shortfall that spends the spare, %")
+v("t_da", m(AISLE.t_dispatch_to_admission, "ms"), "{:.1f}", "dispatch-to-admission allocation, ms")
+v("travel_da", m(stop.travel_over(AISLE.t_dispatch_to_admission), "mm"), "{:.1f}", "its travel, mm")
+v("reserve", m(dispatch.spare, "mm"), "{:.1f}", "reserve after admission work, mm")
+v("t_reserve", m(dispatch.delay_spare, "ms"), "{:.1f}", "reserve as time, ms")
+
+print("== Safety case: the exposure wall and a defeater (Lecture 7; DR 16.3.1)")
+wall_rate = min(WALL.rates, key=lambda r: m(r, "1/hour"))
+v("wall_rate_exp", math.log10(m(wall_rate, "1/hour")), "{:.0f}", "hazard-rate exponent, per hour")
+v("confidence_pct", 100 * WALL.confidence, "{:.0f}", "confidence, %")
+sci("wall_h", m(WALL.exposure(wall_rate), "hour"), "{:.1f}", "failure-free hours")
+v("mu_oil", AISLE.mu_oil_film, "{:.2f}", "clear oil film friction")
+
+print("== Premises (DR equations 2 and 3; Scenarios.SafetyArgumentConfidence)")
+v("n_premises_words", ARG.premises, "words", "required premises")
+v("p_premise", ARG.premise_confidence, "{:.2f}", "confidence per premise")
+v("p_conj", ARG.conjunction, "{:.3f}", "conjunction")
+v("p_leg", ARG.leg_confidence, "{:.2f}", "confidence per leg")
+v("p_leg_miss", 1 - ARG.leg_confidence, "{:.1f}", "one leg's failure probability")
+v("p_leg_miss2", 1 - ARG.leg_confidence, "{:.2f}", "one leg's failure probability, two places")
+v("p_legs", ARG.multilegged, "{:.2f}", "two independent legs")
+
+print("== Vote: a dim aisle (DR 16.3.2; Scenarios.WarehouseNavCameraAge*)")
+v("t_exp", m(AGE.exposure_time, "ms"), "{:.0f}", "nominal exposure, ms")
+v("t_exp_dim", m(DIM.exposure_time, "ms"), "{:.0f}", "dim-aisle exposure, ms")
+v("dt_age", m(DIM.result.age - AGE.result.age, "ms"), "{:.0f}", "added observation age, ms")
+d_dim = DIM.result.age_travel - AGE.result.age_travel
+v("dim_travel", m(d_dim, "mm"), "{:.1f}", "its travel at the aisle speed, mm")
+v("dim_share_pct", 100 * m(d_dim / stop.spare, ""), "{:.0f}", "share of the spare, %")
+
+print("== Certification: Keyence SZ-V32 (MLSysIM registry)")
+sc = RM.safety_scanner
+v("scan_fast", m(sc.response_time, "ms"), "{:.0f}", "high-speed-mode response, ms")
+v("scan_std", m(sc.response_time_standard_mode, "ms"), "{:.0f}", "standard-mode response, ms")
+v("scan_fast_mm", m(stop.travel_over(sc.response_time), "mm"), "{:.0f}", "travel during it, mm")
+v("scan_std_mm", m(stop.travel_over(sc.response_time_standard_mode), "mm"), "{:.0f}", "travel during it, mm")
+
+print("== Door predict: the latch branch (DR 16.6; Lecture 12's equations)")
+v("f_trip", m(AISLE.f_latch_tripwire, "N"), "{:.0f}", "tripwire, N")
+v("f_onset", m(latch_lo["f_at_brake_onset"], "N"), "{:.0f}", "force at brake onset, guarded, N")
+v("x_rem", m(latch_lo["x_remaining"], "mm"), "{:.2f}", "latch travel left, mm")
+v("a_arm", A_LATCH_LO, "{:.0f}", "arm deceleration needed, guarded, m/s^2")
+v("t_arm", m(latch_lo["t_arm_stop"], "ms"), "{:.0f}", "guarded arm stop, ms")
+v("v_latch_hi", m(AISLE.v_latch_high, "m/s"), "{:.2f}", "fast approach, m/s")
+v("f_onset_hi", m(latch_hi["f_at_brake_onset"], "N"), "{:.0f}", "force at brake onset, fast, N")
+v("a_arm_hi", A_LATCH_HI, "{:,.0f}", "arm deceleration needed, fast, m/s^2")
+v("a_arm_ratio", A_LATCH_HI / A_LATCH_LO, "{:.0f}", "fast over guarded")
+v("a_arm_hi_g", A_LATCH_HI / G, "{:.0f}", "fast demand, g")
+v("g_one", G, "{:.1f}", "one g, m/s^2")
+
+print("== Tree: the handover leaf (Lecture 12's transient contact model)")
+v("f_handover", m(calc_transient_impact_force(AISLE.v_handover, m_eff, k_hand, human_mass=m_hand), "N"),
+  "{:.1f}", "free-hand transient force at the handover speed, N")
+v("t_age", m(AISLE.perception_age, "ms"), "{:.1f}", "dispatch age, ms")
+
+print("== COND: restricted mug delivery (DR 16.4.1, 16.6.1)")
+v("mu_insp", AISLE.mu_inspected_floor, "{:.2f}", "inspected-floor friction")
+v("g", G, "{:.2f}", "standard gravity, m/s^2")
+v("a_insp", m(INSPECTED.deceleration, "m/s**2"), "{:.2f}", "traction-limited deceleration, m/s^2")
+v("ceiling_insp", m(insp.speed_ceiling, "m/s"), "{:.2f}", "inspected-floor ceiling, m/s")
+v("v_restricted", m(RESTRICTED.speed, "m/s"), "{:.0f}", "signed restricted speed, m/s")
+
+print("== Waymo: rider-only crash rates by outcome (Literature.WaymoSafetyImpact)")
+rows = Literature.WaymoSafetyImpact.entries
+last = max(r["data_cut"] for r in rows)
+latest = {r["outcome"]: r for r in rows if r["data_cut"] == last}
+inj, ssi, fat = latest["Any-injury-reported"], latest["Suspected Serious Injury+"], latest["Any Fatal"]
+cut_y, cut_m = divmod(int(last), 100)
+v("waymo_cut", f"{calendar.month_name[cut_m]} {cut_y}", "{}", "latest release")
+v("waymo_miles", inj["ro_miles_millions"], "{:.0f}", "rider-only miles, millions")
+for key, r in (("inj", inj), ("ssi", ssi), ("fat", fat)):
+    v(f"{key}_n", r["waymo_count"], "{:.0f}", f"{r['outcome']}: crashes")
+    v(f"{key}_lo", -100 * r["pct_reduction_ci_hi"], "{:.0f}", f"{r['outcome']}: reduction, lower bound, %")
+    v(f"{key}_hi", -100 * r["pct_reduction_ci_lo"], "{:.0f}", f"{r['outcome']}: reduction, upper bound, %")
+v("ssi_over_inj", (ssi["pct_reduction_ci_hi"] - ssi["pct_reduction_ci_lo"])
+  / (inj["pct_reduction_ci_hi"] - inj["pct_reduction_ci_lo"]), "{:.1f}", "interval width, serious injury over injury")
+
+print("== Expiry: the silent proposer (DR Napkin Math 16.2)")
+v("mm_per_ms", m(STOP.result.travel_over(Q_(1, "ms")), "mm"), "{:.1f}", "travel per ms at the aisle speed, mm")
+v("d_silent", m(silent.delay_travel, "mm"), "{:.1f}", "silent proposer, travel to onset, mm")
+v("t_flagged", T_FLAGGED, "{:.0f}", "immediate flag to onset, ms")
+v("d_flagged", m(flagged.delay_travel, "mm"), "{:.1f}", "immediate flag, travel to onset, mm")
+v("d_saved", m(silent.delay_travel - flagged.delay_travel, "mm"), "{:.0f}", "travel monitoring can save, mm")
+v("t_crossover", T_SILENT - T_FLAGGED, "{:.0f}", "flag latency that saves nothing, ms")
+
+print("== Updates: Waymo recalls (NHTSA, Literature.IncidentReports)")
+recalls = [(REPORTS.WaymoRecall24E013Vehicles, ymd(REPORTS.WaymoRecall24E013ReportDate)),
+           (REPORTS.WaymoRecall24E049Vehicles, ymd(REPORTS.WaymoRecall24E049ReportDate)),
+           (REPORTS.WaymoRecall25E034Vehicles, ymd(REPORTS.WaymoRecall25E034ReportDate))]
+for key, (n, _) in zip(("rc1", "rc2", "rc3"), recalls):
+    v(f"{key}_n", n, "{:,.0f}", "vehicles in the recall")
+(n0, d0), (n2, d2) = recalls[0], recalls[-1]
+v("rc_words", len(recalls), "words", "recalls")
+v("rc_months", (d2.year - d0.year) * (len(calendar.month_name) - 1) + d2.month - d0.month, "{:.0f}", "months from the first report to the third")
+v("rc_growth", n2 / n0, "{:.1f}", "fleet growth across the recalls, times")
+v("rc_days", (d2 - ymd(REPORTS.WaymoRecall25E034RemedyCompleteDate)).days, "{:.0f}",
+  "25E-034: days from every vehicle repaired to the report")
+
+print("== Vote: canary consequence (DR 16.10)")
+v("m_loaded", m(RM.loaded_mass, "kg"), "{:.0f}", "loaded mass, kg")
+v("ke", m(calc_kinetic_energy(RM.loaded_mass, AISLE.v_aisle), "J"), "{:.0f}", "kinetic energy at the aisle speed, J")
+
 if __name__ == "__main__":
-    head("Recall slide: Lecture 15 fault F1 (proposer stall), DR NM 16.2 step 1")
-    show("lease + tick + bus + onset (ms)", f"{T_LEASE:g} + {T_TICK:g} + {T_BUS:g} + {T_ONSET:g} = {T_SILENT:g}")
-
-    head("Hook and O-ring slide: the flight record (Dalal et al. 1989 via UCI; joint temperatures)")
-    temps = [t for _, t, _ in ORING]
-    cold = [(t, d) for _, t, d in ORING if t <= 63]
-    warm = [(t, d) for _, t, d in ORING if t >= 66]
-    show("flights in the record", len(ORING))
-    show("prior flights (Rogers Commission ch. V: 24 previous times)", 24)
-    show("coldest / warmest launch (F)", f"{min(temps)} / {max(temps)}")
-    show("flights with distress", sum(1 for _, _, d in ORING if d > 0))
-    show("flights at 63 F or below, with distress", f"{sum(1 for _, d in cold if d > 0)} of {len(cold)}")
-    show("flights at 66 F or above, with distress", f"{sum(1 for _, d in warm if d > 0)} of {len(warm)}")
-    show("Challenger air below the coldest flight joint (F)", min(temps) - T_CHALLENGER)
-    show("Challenger joint estimate below the coldest flight (F)", min(temps) - T_JOINT_51L)
-    show("distressed O-rings, cold flights / warm flights",
-         f"{sum(d for _, d in cold)} / {sum(d for _, d in warm)}")
-
-    head("Claims slide: the three criteria (DR equation 1, table 1)")
-    show("aisle speed (m/s)", V)
-    show("clear distance (mm)", D_CLEAR)
-    show("latch: guarded approach (m/s), limit (N)", f"{V_LATCH:.2f}, {F_LATCH_LIMIT:.0f}")
-    show("handover: speed (m/s), criterion (N)", f"{V_HANDOVER:.2f}, {F_CONTACT:.0f}")
-    show("enforcer WCET / deadline (us)", f"{WCET_US} / {DEADLINE_US}")
-    show("WCET share of deadline (percent)", f"{100 * WCET_US / DEADLINE_US:.1f}")
-
-    head("Estimate slide: the aisle spare (DR Napkin Math 16.1)")
-    reaction = V * TAU
-    braking = braking_mm(V, A_BRAKE)
-    brake_const = V * V / (2 * A_BRAKE) * 1e3
-    brake_jerk = V * A_BRAKE / (2 * J) * 1e3
-    show("jerk bound (m/s^3)", f"{J:.2f}")
-    show("full deceleration reached (v >= a^2/j, m/s)", f"{A_BRAKE**2 / J:.3f} <= {V}")
-    show("reaction: 1.3 m/s x 133.6 ms (mm)", f"{reaction:.1f}")
-    show("braking: v^2/2a + v a/2j (mm)", f"{brake_const:.1f} + {brake_jerk:.1f} = {braking:.1f}")
-    # The chapter rounds each term to 0.1 mm before summing (173.7 + 605.3 + 190).
-    reaction_r, braking_r = round(reaction, 1), round(braking, 1)
-    total = reaction_r + braking_r + LOC + TRACK + MARGIN
-    spare = D_CLEAR - total
-    check_lib = (AISLE.v_aisle * AISLE.tau_delay + calc_scurve_stop_distance(AISLE.v_aisle, AISLE.a_brake, J * meter / second**3)
-                 + AISLE.delta_loc + AISLE.eps_track + AISLE.delta_margin).to(millimeter).magnitude
-    show("reaction + braking (mm)", f"{reaction_r + braking_r:.1f}")
-    show("budget total (mm)", f"{total:.1f}  (MLSysIM S-curve check {check_lib:.1f})")
-    show("spare (mm)", f"{spare:.1f}")
-    show("spare as delay at 1.3 m/s (ms)", f"{spare / V:.1f}")
-    room = D_CLEAR - reaction_r - LOC - TRACK - MARGIN   # braking room
-    # Solve v^2/(2a) + v a/(2j) = room for a (smaller root: the weakest braking that still fits)
-    R = room / 1e3
-    qa, qb, qc = V / J, -2 * R, V * V
-    a_be = (-qb - math.sqrt(qb * qb - 4 * qa * qc)) / (2 * qa)
-    show("braking room (mm)", f"{room:.1f}")
-    show("break-even deceleration (m/s^2)", f"{a_be:.2f}")
-    show("shortfall that spends the spare (percent)", f"{100 * (1 - a_be / A_BRAKE):.0f}")
-    admission = round(V * T_DA, 1)
-    reserve = spare - admission
-    show("dispatch-to-admission allocation (ms)", f"{T_DA:.1f}")
-    show("admission travel: 1.3 m/s x 63.3 ms (mm)", f"{admission:.1f}")
-    show("reserve (mm)", f"{reserve:.1f}")
-    show("reserve as time at 1.3 m/s (ms)", f"{reserve / V:.1f}")
-    show("used before admission work (percent of clear distance)", f"{100 * total / D_CLEAR:.1f}")
-    v_ceiling = calc_scurve_max_permitted_velocity(AISLE.d_clear, AISLE.tau_delay, AISLE.a_brake,
-                                                   J * meter / second**3, AISLE.delta_loc + AISLE.eps_track,
-                                                   AISLE.delta_margin).to(meter / second).magnitude
-    show("partial ceiling on surveyed floors (m/s)", f"{v_ceiling:.2f}")
-
-    head("Warrant slide: the exposure wall at 95 percent (Lecture 7; DR 16.3.1)")
-    ln20 = math.log(20)
-    show("ln 20", f"{ln20:.2f}")
-    for lam in (1e-6, 1e-9):
-        hours = ln20 / lam
-        show(f"failure-free hours to show {lam:g} per hour", f"{hours:.2e}")
-        show(f"  as years of continuous operation", f"{hours / (24 * 365):,.0f}")
-
-    head("Premises slide: conjunctive premises and diverse legs (DR equations 2 and 3; stipulated)")
-    show("10 premises at 0.99 each", f"{0.99 ** 10:.3f}")
-    show("6 claims at 0.99 each", f"{0.99 ** 6:.3f}")
-    show("2 independent legs at 0.90 each", f"{1 - (1 - 0.90) ** 2:.2f}")
-    show("10 premises at 0.999 each", f"{0.999 ** 10:.3f}")
-
-    head("Certification slide: Keyence SZ-V32 datasheet (MLSysIM registry provenance)")
-    sc = RM.safety_scanner
-    show("scanner", sc.name)
-    show("registry configuration", sc.configuration)
-    show("response time (ms) / protection zone (m)", f"{sc.response_time.to(millisecond).magnitude:g} / "
-         f"{sc.protective_field_range.to(meter).magnitude:g}")
-    show("travel at 1.3 m/s during the 80 ms response (mm)", f"{V * sc.response_time.to(millisecond).magnitude:.0f}")
-    show("travel at 1.3 m/s during the 160 ms standard-mode response (mm)", f"{V * 160:.0f}")
-
-    head("Door predict: the latch branch (DR 16.6; Lecture 12's equations 12.11 and 12.12)")
-    show("onset force, guarded / fast (N)", f"{latch_lo['f_at_brake_onset'].to('newton').magnitude:.0f} / "
-         f"{latch_hi['f_at_brake_onset'].to('newton').magnitude:.0f}")
-    show("remaining latch travel, guarded (mm)", f"{latch_lo['x_remaining'].to(millimeter).magnitude:.2f}")
-    show("remaining latch travel, fast (mm)", f"{latch_hi['x_remaining'].to(millimeter).magnitude:.4f}")
-    a_lo = latch_lo["a_arm_needed"].to(meter / second**2).magnitude
-    a_hi = latch_hi["a_arm_needed"].to(meter / second**2).magnitude
-    show("arm deceleration needed, guarded / fast (m/s^2)", f"{a_lo:.2f} / {a_hi:.0f}")
-    show("guarded stop time (ms)", f"{latch_lo['t_arm_stop'].to(millisecond).magnitude:.1f}")
-    show("ratio fast / guarded", f"{a_hi / a_lo:.0f}")
-    show("fast demand in g", f"{a_hi / G:.0f}")
-
-    head("COND slide: restricted mug delivery (DR 16.4.1, 16.6.1)")
-    mu_min = A_BRAKE / G
-    a_insp = min(A_BRAKE, AISLE.mu_inspected_floor * G)
-    v_insp = calc_scurve_max_permitted_velocity(AISLE.d_clear, AISLE.tau_delay, a_insp * meter / second**2,
-                                                J * meter / second**3, AISLE.delta_loc + AISLE.eps_track,
-                                                AISLE.delta_margin).to(meter / second).magnitude
-    show("friction floor for 2 m/s^2 (all weight driven)", f"{mu_min:.3f}")
-    show("inspected floor friction", AISLE.mu_inspected_floor)
-    show("optimistic traction ceiling 0.12 x 9.81 (m/s^2)", f"{a_insp:.2f}")
-    show("partial ceiling on inspected floors (m/s)", f"{v_insp:.2f}")
-    show("signed restricted speed (m/s), chosen", 1.0)
-    show("margin of 1 m/s below the inspected ceiling (percent)", f"{100 * (1 - 1.0 / v_insp):.0f}")
-
-    head("Silent-proposer estimate (DR Napkin Math 16.2)")
-    show("silent proposer: lease+tick+bus+onset (ms)", T_SILENT)
-    show("silent travel (mm)", f"{V * T_SILENT:.1f}")
-    show("monitored, immediate flag (ms)", T_FLAGGED)
-    show("monitored travel (mm)", f"{V * T_FLAGGED:.1f}")
-    show("travel monitoring can save (mm)", f"{V * T_SILENT - V * T_FLAGGED:.0f}")
-    show("crossover flag latency (ms)", T_SILENT - T_FLAGGED)
-    show("travel per ms at 1.3 m/s (mm)", V)
-    ke = 0.5 * M_LOADED * V * V
-    show("kinetic energy, 368 kg at 1.3 m/s (J)", f"{ke:.0f}")
-
-    head("Waymo slide: rider-only crash rates by outcome (Waymo Safety Impact Data Hub via MLSysIM)")
-    rows = Literature.WaymoSafetyImpact.entries
-    last = max(r["data_cut"] for r in rows)
-    cuts = sorted({r["data_cut"] for r in rows})
-    latest = {r["outcome"]: r for r in rows if r["data_cut"] == last}
-    show("latest data cut", int(last))
-    show("releases in the registry", len(cuts))
-    show("rider-only miles (millions)", f"{latest['Any-injury-reported']['ro_miles_millions']:.0f}")
-    for name, r in sorted(latest.items(), key=lambda kv: -kv[1]["waymo_count"]):
-        lo, hi = -100 * r["pct_reduction_ci_hi"], -100 * r["pct_reduction_ci_lo"]
-        show(f"{name}: n, reduction, 95% interval (percent), width",
-             f"{r['waymo_count']:.0f}, {-100 * r['pct_reduction']:.0f}, {lo:.0f} to {hi:.0f}, {hi - lo:.0f}")
-    first = min(cuts)
-    inj0 = [r for r in rows if r["data_cut"] == first and r["outcome"] == "Any-injury-reported"][0]
-    show("first data cut and its miles (millions)", f"{int(first)}, {inj0['ro_miles_millions']:.1f}")
-    w_inj = 100 * (latest["Any-injury-reported"]["pct_reduction_ci_hi"] - latest["Any-injury-reported"]["pct_reduction_ci_lo"])
-    w_ssi = 100 * (latest["Suspected Serious Injury+"]["pct_reduction_ci_hi"] - latest["Suspected Serious Injury+"]["pct_reduction_ci_lo"])
-    show("interval width ratio, serious injury / injury", f"{w_ssi / w_inj:.1f}")
-
-    head("Recall-records slide: NHTSA campaigns (api.nhtsa.gov/recalls/campaignNumber, fetched 2026-10-19)")
-    recalls = [("24E-013", "2024-02-13", 444), ("24E-049", "2024-06-10", 672), ("25E-034", "2025-05-12", 1212)]
-    for c, d, n in recalls:
-        show(f"{c} received {d}, vehicles", n)
-    show("fleet growth across the three recalls (x)", f"{recalls[-1][2] / recalls[0][2]:.1f}")
-    # 25E-034: remedy complete 2024-12-26, report received 2025-05-12
-    from datetime import date
-    d0, d1 = date(2024, 2, 13), date(2025, 5, 12)
-    show("months from first to third recall report", (d1.year - d0.year) * 12 + d1.month - d0.month)
-    show("days from fix complete to recall report (25E-034)", (date(2025, 5, 12) - date(2024, 12, 26)).days)
-    show("days from software cutoff to fix complete (24E-013)", (date(2024, 1, 12) - date(2023, 12, 20)).days)
-
-    head("Canary note: kinetic energy (DR 16.10 fallacy)")
-    show("0.5 x 368 kg x (1.3 m/s)^2 (J)", f"{ke:.0f}")
-
-    head("Synthesis: Challenger as a release case")
-    show("Challenger joint estimate below the 53 F floor (F)", T_THIOKOL - T_JOINT_51L)
+    write(__file__)

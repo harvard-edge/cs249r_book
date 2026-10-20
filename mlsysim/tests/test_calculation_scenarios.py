@@ -5174,3 +5174,30 @@ def test_verifiable_reward_verification_clip_and_loop_capacity():
     p = Scenarios.RepairVerifierPool.result
     assert p.arrival_rate.m_as("1/s") == approx(32) and p.one_trial_busy == approx(256)
     assert p.busy == approx(768) and p.slots == 960 and p.utilization == approx(0.8)
+
+
+def test_release_scenarios_and_records():
+    """Deceleration premise, dim-aisle age, argument confidence, and the release records (added 2026-10-20)."""
+    from mlsysim import Embodied, Literature
+    stop = Scenarios.WarehouseFinishedStopAtAisleSpeed.result
+    assert stop.braking_room.m_as("mm") == pytest.approx(736.32)
+    assert stop.min_deceleration.m_as("m/s**2") == pytest.approx(1.3861067, rel=1e-6)
+    assert stop.deceleration_shortfall == pytest.approx(0.3069467, rel=1e-6)
+    from mlsysim.physics.robotics import calc_scurve_stop_distance
+    fill = calc_scurve_stop_distance(stop.speed, stop.min_deceleration, stop.jerk)
+    assert fill.m_as("mm") == pytest.approx(stop.braking_room.m_as("mm"), abs=1e-9)
+    assert Scenarios.WarehouseFinishedStopAtDriveLimit.result.min_deceleration is not None
+    nominal = Scenarios.WarehouseNavCameraAgeAtAisleSpeed.result
+    dim = Scenarios.WarehouseNavCameraAgeDimAisle.result
+    assert nominal.age.m_as("ms") == pytest.approx(51.6)
+    assert (dim.age - nominal.age).m_as("ms") == pytest.approx(8.0)
+    assert (dim.age_travel - nominal.age_travel).m_as("mm") == pytest.approx(10.4)
+    arg = Scenarios.SafetyArgumentConfidence
+    assert arg.conjunction == pytest.approx(0.99 ** 10) and arg.multilegged == pytest.approx(0.99)
+    scanner = Embodied.MobileManipulator.WarehouseMobileManipulator.safety_scanner
+    assert scanner.response_time_standard_mode.m_as("ms") == 160.0
+    rec = Literature.ChallengerORingDistressRecord
+    assert len(rec) == 23 and min(e["joint_temp_f"] for e in rec.entries) == 53
+    assert sum(1 for e in rec.entries if e["orings_distressed"] > 0) == 7
+    assert Literature.SpaceflightAnomalies.ThiokolMinimumJointTempF == 53
+    assert Literature.IncidentReports.WaymoRecall25E034Vehicles == 1212

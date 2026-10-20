@@ -426,6 +426,7 @@ class Literature(Registry):
     VnnComp2025ScoredBenchmarks = _series.VnnComp2025ScoredBenchmarks  # added 2026-10-20
     OKelly2018RareEventTable1 = _series.OKelly2018RareEventTable1  # added 2026-10-20
     Wang2025OpenVlaLiberoUntargeted = _series.Wang2025OpenVlaLiberoUntargeted  # added 2026-10-20
+    ChallengerORingDistressRecord = _series.ChallengerORingDistressRecord  # added 2026-10-20
     DataSelectionResults = DataSelectionResults  # added 2026-10-20
     TrajectoryGeneration = TrajectoryGeneration  # added 2026-10-20
     SharedHardwareInterference = SharedHardwareInterference  # added 2026-10-20
