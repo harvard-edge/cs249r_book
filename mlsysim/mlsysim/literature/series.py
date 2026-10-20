@@ -962,6 +962,19 @@ class Series:
         "Apple Neural Engine peak ratings by A-series chip, with the basis of each value.",
         numeric=("year", "tops"),
     )
+    # Added 2026-10-20: FedAvg rounds to target accuracy against local work.
+    FedAvgMnistCnnRounds = TrendSeries(
+        "fedavg_mnist_cnn_rounds",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="McMahan et al. (2017), Communication-Efficient Learning of Deep Networks from Decentralized "
+                       "Data, AISTATS 2017, Table 2 (MNIST CNN, 99% accuracy)",
+                   url="https://arxiv.org/abs/1602.05629", verified="2026-10-20",
+                   notes="Rounds to reach 99% test accuracy with 100 clients (C = 0.1); first row is FedSGD; "
+                         "batch_size inf means the full local dataset; updates_per_round u = E n / (K B); "
+                         "non-IID is the pathological two-digits-per-client split."),
+        "Communication rounds to 99% MNIST CNN accuracy for FedSGD and FedAvg, IID and non-IID.",
+        numeric=("local_epochs", "updates_per_round", "iid_rounds", "non_iid_rounds"),
+    )
     GeminiPromptEnergy = TrendSeries(
         "gemini_prompt_energy",
         _lit("Elsworth et al. (2025), Measuring the environmental impact of delivering AI at Google Scale, "

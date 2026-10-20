@@ -2578,3 +2578,84 @@ def test_firecracker_preconfigured_boot():
     assert s.median.to("ms").magnitude == approx(110) and s.tail.to("ms").magnitude == approx(115)
     h = Scenarios.FirecrackerPreconfiguredBootHundred.result
     assert h.median.to("ms").magnitude == approx(120) and h.tail.to("ms").magnitude == approx(153)
+
+
+# --- On-device learning and federated rounds (added 2026-10-20) ---
+
+def test_phone_full_update_working_set():
+    w = Scenarios.PhoneFullUpdateWorkingSet
+    assert w.weights.to("MB").magnitude == approx(40)
+    assert w.optimizer_state.to("MB").magnitude == approx(80)
+    assert w.total.to("MB").magnitude == approx(360)
+    assert (w.amplification, w.floor, w.ceiling) == (approx(9), approx(4), approx(12))
+    assert w.step_traffic.to("MB").magnitude == approx(800)
+    assert w.traffic_ratio == approx(20) and w.weight_read_share == approx(0.15)
+    assert w.step_floor.to("ms").magnitude == approx(15.625)
+
+
+def test_phone_background_fine_tune_battery():
+    b = Scenarios.PhoneBackgroundFineTuneBattery
+    assert b.required_energy.to("Wh").magnitude == approx(2.25)
+    assert b.budget_ratio == approx(0.15)
+
+
+def test_parameter_efficient_updates():
+    lr = Scenarios.TransformerLayerRank4Update
+    assert (lr.full_params, lr.update_params) == (589_824, 6_144)
+    assert lr.reduction == approx(0.98958333)
+    ad = Scenarios.CompactEncoderResidualAdapters
+    assert (ad.params_per_adapter, ad.params_total) == (25_360, 304_320)
+    assert ad.adapter_bytes.to("KB").magnitude == approx(50.72)
+    assert ad.total_bytes.to("MB").magnitude == approx(0.60864)
+
+
+def test_camera_model_personalization_storage():
+    p = Scenarios.CameraModelTenContextPersonalization
+    assert p.total_copies.to("MB").magnitude == approx(400)
+    assert p.total_shared.to("MB").magnitude == approx(42)
+    assert p.total_savings == approx(9.5238095) and p.per_context_savings == approx(200)
+
+
+def test_federated_uplink_and_adapter_upload():
+    f = Scenarios.PhoneImagesVersusQuantizedUpdates
+    assert f.update_size.to("MB").magnitude == approx(2.5)
+    assert f.reduction == approx(80) and f.break_even_rounds == approx(80)
+    assert f.weekly_upload("daily").to("MB").magnitude == approx(17.5)
+    assert f.weekly_upload("hourly").to("MB").magnitude == approx(420)
+    t = Scenarios.FederatedAdapterUploadMobileUplink
+    assert t.transfer_time("low").to("s").magnitude == approx(419.4304)
+    assert t.transfer_time("high").to("s").magnitude == approx(41.94304)
+
+
+def test_training_second_versus_wake_word_checks():
+    e = Scenarios.TrainingSecondVersusWakeWordChecks
+    assert e.checks_low == approx(12779.553) and e.checks_high == approx(95238.095)
+    assert e.detector_power.to("mW").magnitude == approx(1.575)
+    assert e.time_to_training_second_low.to("min").magnitude == approx(21.164021)
+    assert e.time_to_training_second_high.to("min").magnitude == approx(31.746032)
+
+
+def test_federated_round_mechanics():
+    d = Scenarios.ForegroundDeadlinesVersusRoundTrip
+    assert [d.local_only(k) for k in d.deadlines] == [True, True, True, False]
+    c = Scenarios.KeyboardFleetParticipationCoverage
+    assert (c.total("deployed"), c.total("admitted"), c.total("selected"), c.total("completed")) == (100, 40, 26, 20)
+    assert c.coverage_ratio("flagship") == approx(2.0) and c.coverage_ratio("budget") == approx(0.25)
+    assert c.share("budget", "completed") == approx(0.05) and c.stage_ratio("selected", "completed") == approx(1.3)
+    m = Scenarios.TwoClientPairwiseMask
+    assert m.total == [approx(0.3), approx(0.2), approx(0.2), approx(0.4)]
+    assert m.upload_a == [approx(7.5), approx(-4.7), approx(3.3), approx(9.4)]
+    g = Scenarios.AdaptedModelShadowGate
+    assert g.disagreements == 2 and g.disagreement_rate == approx(0.25) and g.hold
+    s = Scenarios.PhoneSocAiScoreSpread
+    assert s.spread("fleet") == approx(411.47273) and s.spread("generation") == approx(14.070715)
+    assert s.lowest("fleet")["processor"] == "Snapdragon 460"
+
+
+def test_on_device_learning_literature():
+    from mlsysim import Literature
+    L = Literature.OnDeviceLearning
+    assert (L.GboardNgramRecallClientPct, L.GboardServerRecallClientPct, L.GboardFederatedRecallClientPct) == (12.5, 15.0, 15.8)
+    assert (L.FlSessionsAccepted, L.FlSessionsRejectedLate, L.FlSessionsInterrupted) == (1_116_401, 327_478, 29_771)
+    rows = Literature.Series.FedAvgMnistCnnRounds.entries
+    assert (rows[0]["iid_rounds"], rows[0]["non_iid_rounds"], rows[-1]["iid_rounds"]) == (626, 483, 18)

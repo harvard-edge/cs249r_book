@@ -504,3 +504,16 @@ __all__ += [
     "calc_poisson_mean_for_reserve",
     "calc_cdf_quantile",
 ]
+
+# --- On-device training (added 2026-10-20) ---
+from .memory import (
+    calc_update_step_traffic,
+    calc_low_rank_update_params,
+    calc_residual_adapter_params,
+)
+
+__all__ += [
+    "calc_update_step_traffic",
+    "calc_low_rank_update_params",
+    "calc_residual_adapter_params",
+]

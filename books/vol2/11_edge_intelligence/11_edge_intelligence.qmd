@@ -445,20 +445,17 @@ class EdgeTrainingMemoryStack:
     """The chapter's 10M-parameter FP32 training-memory example."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    params = 10 * MILLION  # scenario assumption: compact on-device model
-    adam_moments = 2  # Adam keeps first and second moment arrays
-    activation_factor = 5  # scenario assumption: saved activations = 5x weight bytes
-    activation_factor_high = 8  # scenario assumption: upper end of the quoted range
+    stack = Scenarios.PhoneFullUpdateWorkingSet  # 10M FP32 parameters, Adam, activations 5x weights
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    weights = (params * BYTES_FP32).to(MB)
-    gradients = weights
-    optimizer_state = adam_moments * weights
-    activations = activation_factor * weights
-    total = (weights + gradients + optimizer_state + activations).to(MB)
-    amplification = (total / weights).to("").magnitude
-    floor = ((weights + gradients + optimizer_state) / weights).to("").magnitude
-    ceiling = floor + activation_factor_high
+    weights = stack.weights
+    gradients = stack.gradients
+    optimizer_state = stack.optimizer_state
+    activations = stack.activations
+    total = stack.total
+    amplification = stack.amplification
+    floor = stack.floor
+    ceiling = stack.ceiling
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(abs(weights.magnitude - 40) < 1e-6, f"10M FP32 weights drifted: {weights}")
@@ -527,10 +524,11 @@ fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(6.0, 3.5), gridspec_kw={'width_rat
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 scales_m = [1, 10, 100]
-weights = np.array([(params * MILLION * BYTES_FP32).to(MB).magnitude for params in scales_m])
-grads = weights
-opt_state = weights * 2
-activations = weights * 5
+stacks = [Scenarios.PhoneFullUpdateWorkingSet.variant(parameters=params * MILLION) for params in scales_m]
+weights = np.array([s.weights.to(MB).magnitude for s in stacks])
+grads = np.array([s.gradients.to(MB).magnitude for s in stacks])
+opt_state = np.array([s.optimizer_state.to(MB).magnitude for s in stacks])
+activations = np.array([s.activations.to(MB).magnitude for s in stacks])
 total_training = weights + grads + opt_state + activations
 amplification = total_training / weights
 
@@ -1112,24 +1110,15 @@ from mlsysim.fmt import check, fmt_memory, fmt_multiple, fmt_percent, fmt_time
 
 class EdgeUpdateTraffic:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    params = 10 * MILLION  # the 10M-parameter model of fig-training-memory-amplifier
-    weights = (params * BYTES_FP32).to(MB)
-    gradients = weights
-    adam_moments = 2 * weights
-    activations = 5 * weights  # same stated assumption as fig-training-memory-amplifier
-    mobile_bw = Hardware.Mobile.iPhone15Pro.memory.bandwidth
+    stack = Scenarios.PhoneFullUpdateWorkingSet  # the 10M-parameter model of fig-training-memory-amplifier
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    # One DRAM crossing per tensor use, no cache reuse:
+    # One DRAM crossing per tensor use, no cache reuse (calc_update_step_traffic):
     # forward reads W, writes A; backward reads A and W, writes G;
     # Adam reads W, G, both moments and writes W and both moments.
-    forward = weights + activations
-    backward = activations + weights + gradients
-    optimizer = (weights + gradients + adam_moments) + (weights + adam_moments)
-    step_traffic = (forward + backward + optimizer).to(MB)
-    weight_reads = 3 * weights
-    traffic_ratio = (step_traffic / weights).to("").magnitude
-    weight_read_share = (weight_reads / step_traffic).to("").magnitude
-    step_floor = (step_traffic / mobile_bw).to(millisecond)
+    step_traffic = stack.step_traffic
+    traffic_ratio = stack.traffic_ratio
+    weight_read_share = stack.weight_read_share
+    step_floor = stack.step_floor
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(abs(step_traffic.magnitude - 800) < 1, f"Update traffic drifted: {step_traffic}")
     check(abs(traffic_ratio - 20) < 0.01, f"Traffic ratio drifted: {traffic_ratio}")
@@ -1204,22 +1193,20 @@ An update path that fits in memory and runs on supported kernels still fails if 
 # │ How: Drain = (Power_W * Duration_H) / Battery_Wh * 100.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.units import MINUTES_PER_HOUR, hour, watt
+from mlsysim.core.units import hour, minute, watt
 from mlsysim.fmt import check, fmt, fmt_energy, fmt_percent, fmt_power, fmt_qty_int, fmt_time
 from mlsysim import ReferenceStats
 
 class EdgeBattery:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    p_train_w = 4.5  # Unconstrained (unthrottled) SoC draw during training; above the sustained envelope
-    p_train = p_train_w * watt
-    t_train_min = 30  # 30 minute adaptation job
-    battery = ReferenceStats.PhoneBattery.EnergyWh  # Modern flagship smartphone battery
-    battery_wh = battery.to(watt * hour).magnitude
+    job = Scenarios.PhoneBackgroundFineTuneBattery  # unthrottled draw, above the sustained envelope
+    p_train = job.power_draw
+    t_train_min = job.required_runtime.to(minute).magnitude
+    battery = job.battery_energy  # Modern flagship smartphone battery
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    t_train_h = t_train_min / MINUTES_PER_HOUR
-    energy = p_train * t_train_h * hour
-    energy_wh = energy.to(watt * hour).magnitude
-    drain_pct = (energy_wh / battery_wh) * 100
+    t_train_h = job.required_runtime.to(hour).magnitude
+    energy = job.required_energy
+    drain_pct = job.budget_ratio * 100
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(14 < drain_pct < 16, f"Drain {drain_pct:.1f}% unexpected")
     # ┌── 4. OUTPUT ────────────────────────────────────────
@@ -1344,14 +1331,14 @@ The memory reduction is useful only when the frozen backbone remains expressive 
 # │ Show: Published training-memory saving vs. full fine-tuning and the
 # │       memory overhead of the lite residual modules.
 # │ How: Literature values quoted in the Cai et al. (NeurIPS 2020) abstract
-# │      (arXiv:2007.11622, checked 2026-09-29); not yet in
-# │      the Literature registry, so they stay local and tagged.
+# │      (arXiv:2007.11622), read from Literature.OnDeviceLearning.
+from mlsysim import Literature
 from mlsysim.fmt import check, fmt_multiple, fmt_percent
 
 class EdgeTinyTlResults:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    memory_saving_vs_full = 6.5  # scenario assumption: Cai et al. 2020, "up to 6.5x" vs. full fine-tuning
-    lite_residual_overhead = 0.038  # scenario assumption: Cai et al. 2020, lite residual adds 3.8% memory
+    memory_saving_vs_full = Literature.OnDeviceLearning.TinyTlMemorySavingVsFull  # "up to" vs. full fine-tuning
+    lite_residual_overhead = Literature.OnDeviceLearning.TinyTlLiteResidualOverhead
     # ┌── 2. EXECUTE ───────────────────────────────────────
     full_to_tinytl_fraction = 1 / memory_saving_vs_full
     # ┌── 3. GUARD ─────────────────────────────────────────
@@ -1429,12 +1416,11 @@ from mlsysim.fmt import check, fmt_int, fmt_percent
 
 class EdgeLowRankParams:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    layer_dim = 768  # scenario assumption: square weight matrix of a generic transformer layer
-    lora_rank = 4  # scenario assumption: rank-4 low-rank update
+    update = Scenarios.TransformerLayerRank4Update  # rank 4 on a 768 x 768 transformer weight
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    full_params = layer_dim * layer_dim
-    lora_params = layer_dim * lora_rank * 2  # down- and up-projection
-    lora_reduction = 1 - lora_params / full_params
+    full_params = update.full_params
+    lora_params = update.update_params  # down- and up-projection
+    lora_reduction = update.reduction
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(full_params == 589_824, f"Full param count {full_params} unexpected")
     check(lora_params == 6_144, f"LoRA param count {lora_params} unexpected")
@@ -1494,15 +1480,13 @@ class EdgeAdapterRamRecap:
 
     # ┌── 1. LOAD ──────────────────────────────────────────
     smartphone_ram = Platforms.Mobile.ram
-    adapter_width_d = 768  # scenario assumption: hidden width of a compact transformer encoder
-    adapter_bottleneck_r = 16  # scenario assumption: residual-adapter bottleneck width
-    adapter_sites = 12  # scenario assumption: one adapter after each of 12 blocks
+    adapters = Scenarios.CompactEncoderResidualAdapters  # width 768, bottleneck 16, 12 blocks, FP16
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    params_per_adapter = 2 * adapter_width_d * adapter_bottleneck_r + adapter_bottleneck_r + adapter_width_d
-    params_total = params_per_adapter * adapter_sites
-    bytes_per_adapter = (params_per_adapter * BYTES_FP16).to(KB)
-    bytes_total = (params_total * BYTES_FP16).to(MB)
+    params_per_adapter = adapters.params_per_adapter
+    params_total = adapters.params_total
+    bytes_per_adapter = adapters.adapter_bytes.to(KB)
+    bytes_total = adapters.total_bytes.to(MB)
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(params_per_adapter == 25_360, f"Adapter parameter count {params_per_adapter} unexpected")
@@ -1537,18 +1521,15 @@ from mlsysim.fmt import check, fmt, fmt_int, fmt_memory, fmt_qty_int
 
 class StorageWall:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    model_params_m = 10
-    n_contexts = 10
-    bytes_per_param = BYTES_FP32  # FP32 for training/fine-tuning
-    adapter_params = 50000  # Rank-64 adapter
+    wall = Scenarios.CameraModelTenContextPersonalization  # 10M FP32 parameters, 50,000-parameter adapters
+    n_contexts = wall.contexts
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    size_full = memory_from_params(model_params_m * Mparam, bytes_per_param / param)
-    size_adapter = memory_from_params(adapter_params * param, bytes_per_param / param)
-    total_full = n_contexts * size_full
-    total_adapter = size_full + n_contexts * size_adapter
-    size_adapter_kb = size_adapter.to(KB).magnitude
-    per_context_savings = (size_full / size_adapter).to_base_units().magnitude
-    total_storage_savings = (total_full / total_adapter).to_base_units().magnitude
+    size_full = wall.model_size
+    size_adapter = wall.adapter_size
+    total_full = wall.total_copies
+    total_adapter = wall.total_shared
+    per_context_savings = wall.per_context_savings
+    total_storage_savings = wall.total_savings
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(per_context_savings == 200, f"Ratio {per_context_savings} unexpected")
     check(9 < total_storage_savings < 10, f"Total savings {total_storage_savings:.1f} unexpected")
@@ -1920,12 +1901,12 @@ from mlsysim.fmt import check, fmt_qty_range, fmt_time
 
 class EdgeRoundUploadTime:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    adapter_update = ReferenceStats.EdgeAdaptationTierProfile.FederatedLoraUpdate
-    uplink_low = 1 * megabit / second  # scenario assumption: constrained uplink of the federated-design checkpoint
-    uplink_high = 10 * megabit / second  # scenario assumption: same checkpoint range, upper end
+    upload = Scenarios.FederatedAdapterUploadMobileUplink  # reference adapter update, 1 to 10 Mb/s
+    uplink_low = upload.links["low"]
+    uplink_high = upload.links["high"]
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    upload_slow = (adapter_update / uplink_low).to(second)
-    upload_fast = (adapter_update / uplink_high).to(second)
+    upload_slow = upload.transfer_time("low").to(second)
+    upload_fast = upload.transfer_time("high").to(second)
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(6 < upload_slow.to(minute).magnitude < 8, f"Slow upload drifted: {upload_slow}")
     check(35 < upload_fast.magnitude < 50, f"Fast upload drifted: {upload_fast}")
@@ -2164,16 +2145,11 @@ from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_qty_int
 
 class FederatedSavings:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    n_images = 1000  # Images collected by user per week
-    img_size_kb = 200  # Compressed JPEG
-    model_params_m = 5
-    compression_ratio = 10  # Quantized updates (e.g., 4-bit)
-    bits_per_update_param = 4  # 4-bit quantized updates
+    uplink = Scenarios.PhoneImagesVersusQuantizedUpdates  # 1,000 x 200 KB images a week; 5M params at 4 bits
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    raw_data = n_images * img_size_kb * KB
-    # Update size: 5M params * 4 bits / 8 bits-per-byte = 2.5 MB
-    update = model_params_m * MILLION * bits_per_update_param / BITS_PER_BYTE * byte
-    reduction = (raw_data / update).to_base_units().magnitude
+    raw_data = uplink.raw_volume
+    update = uplink.update_size
+    reduction = uplink.reduction
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(70 < reduction < 90, f"Reduction {reduction:.1f}x unexpected")
     # ┌── 4. OUTPUT ────────────────────────────────────────
@@ -2396,34 +2372,23 @@ Across these four dimensions, illustrative peak compute ratings differ by about 
 # │ How: Max/min ai_score over windows of Literature.Series.AIBenchmarkSoCs.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_text
-
-def _window(rows, first, last):
-    return [r for r in rows if r["ai_score"] and first <= r["year"] <= last]
-
-def _hi(rows):
-    return max(rows, key=lambda r: r["ai_score"])
-
-def _lo(rows):
-    return min(rows, key=lambda r: r["ai_score"])
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MobileAISpread:
     """Spread of measured on-device AI scores across phone SoCs."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    rows = Literature.Series.AIBenchmarkSoCs.entries
-    fleet_first, last = 2020, 2026  # scenario assumption: phones from 2020 on can still be in a client fleet
-    gen_first, gen_last = 2024, 2025
+    spread = Scenarios.PhoneSocAiScoreSpread  # windows 2020-2026 (fleet) and 2024-2025 (one generation)
+    rows = spread.rows
+    fleet_first, last = spread.windows["fleet"]
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    fleet = _window(rows, fleet_first, last)
-    fleet_hi, fleet_lo = _hi(fleet), _lo(fleet)
-    fleet_spread = fleet_hi["ai_score"] / fleet_lo["ai_score"]
-    gen = _window(rows, gen_first, gen_last)
-    gen_hi, gen_lo = _hi(gen), _lo(gen)
-    gen_spread = gen_hi["ai_score"] / gen_lo["ai_score"]
+    fleet_hi, fleet_lo = spread.highest("fleet"), spread.lowest("fleet")
+    fleet_spread = spread.spread("fleet")
+    gen_hi, gen_lo = spread.highest("generation"), spread.lowest("generation")
+    gen_spread = spread.spread("generation")
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(300 <= fleet_spread <= 500, f"Prose says roughly 400x across the fleet window, got {fleet_spread:.0f}.")

@@ -7346,3 +7346,338 @@ class BootTimeCdfScenario(BaseScenario):
         times = [Q_(r["boot_ms"], "ms") for r in rows]
         return BootTimeCdfModel().solve(self.booting, times, [r["booted_fraction"] for r in rows],
                                         self.median_fraction, self.tail_fraction)
+
+
+# --- On-device learning and federated rounds (added 2026-10-20) --------------
+# One full update on a phone (working set and DRAM traffic), parameter-efficient
+# updates, personalization storage, uplink volume, the energy of a training
+# second against inference checks, and the round mechanics a federated fleet
+# exposes (deadlines, coverage, masking, shadow gating, spread of devices).
+
+class UpdateWorkingSetScenario(BaseScenario):
+    """A full on-device update with Adam: its working set and the DRAM bytes of one step.
+
+    Gradients equal the weights; the optimizer keeps ``optimizer_moments``
+    weight-sized arrays; saved activations are ``activation_factor`` times the
+    weight bytes (``activation_factor_high`` bounds the quoted range).
+    """
+    parameters: float
+    bytes_per_param: Quantity
+    optimizer_moments: int
+    activation_factor: float
+    activation_factor_high: float
+    bandwidth: Optional[Quantity] = None      # device DRAM bandwidth, for the traffic floor
+
+    @property
+    def weights(self) -> Quantity:
+        return (self.parameters * self.bytes_per_param).to("MB")
+
+    @property
+    def gradients(self) -> Quantity:
+        return self.weights
+
+    @property
+    def optimizer_state(self) -> Quantity:
+        return (self.optimizer_moments * self.weights).to("MB")
+
+    @property
+    def activations(self) -> Quantity:
+        return (self.activation_factor * self.weights).to("MB")
+
+    @property
+    def persistent(self) -> Quantity:
+        """Weights, gradients, and optimizer state: the activation-free floor."""
+        return (self.weights + self.gradients + self.optimizer_state).to("MB")
+
+    @property
+    def total(self) -> Quantity:
+        return (self.persistent + self.activations).to("MB")
+
+    @property
+    def amplification(self) -> float:
+        return (self.total / self.weights).to("").magnitude
+
+    @property
+    def floor(self) -> float:
+        return (self.persistent / self.weights).to("").magnitude
+
+    @property
+    def ceiling(self) -> float:
+        return self.floor + self.activation_factor_high
+
+    @property
+    def step_traffic(self) -> Quantity:
+        from ..physics import calc_update_step_traffic
+        traffic, _ = calc_update_step_traffic(self.weights, self.gradients, self.optimizer_state, self.activations)
+        return traffic.to("MB")
+
+    @property
+    def weight_reads(self) -> Quantity:
+        from ..physics import calc_update_step_traffic
+        _, reads = calc_update_step_traffic(self.weights, self.gradients, self.optimizer_state, self.activations)
+        return reads.to("MB")
+
+    @property
+    def traffic_ratio(self) -> float:
+        return (self.step_traffic / self.weights).to("").magnitude
+
+    @property
+    def weight_read_share(self) -> float:
+        return (self.weight_reads / self.step_traffic).to("").magnitude
+
+    @property
+    def step_floor(self) -> Quantity:
+        """Time to move one step's bytes at ``bandwidth`` (traffic alone)."""
+        return (self.step_traffic / self.bandwidth).to("millisecond")
+
+
+class LowRankUpdateScenario(BaseScenario):
+    """A rank-``rank`` update to one ``out_dim`` by ``in_dim`` weight matrix."""
+    in_dim: int
+    out_dim: int
+    rank: int
+
+    @property
+    def full_params(self) -> int:
+        return self.in_dim * self.out_dim
+
+    @property
+    def update_params(self) -> int:
+        from ..physics import calc_low_rank_update_params
+        return calc_low_rank_update_params(self.in_dim, self.out_dim, self.rank)
+
+    @property
+    def reduction(self) -> float:
+        """Share of the full layer's trainable parameters the update removes."""
+        return 1 - self.update_params / self.full_params
+
+
+class ResidualAdapterScenario(BaseScenario):
+    """Residual bottleneck adapters of ``width`` to ``bottleneck``, one at each of ``sites``."""
+    width: int
+    bottleneck: int
+    sites: int
+    bytes_per_param: Quantity
+
+    @property
+    def params_per_adapter(self) -> int:
+        from ..physics import calc_residual_adapter_params
+        return calc_residual_adapter_params(self.width, self.bottleneck)
+
+    @property
+    def params_total(self) -> int:
+        return self.params_per_adapter * self.sites
+
+    @property
+    def adapter_bytes(self) -> Quantity:
+        return (self.params_per_adapter * self.bytes_per_param).to("KB")
+
+    @property
+    def total_bytes(self) -> Quantity:
+        return (self.params_total * self.bytes_per_param).to("MB")
+
+
+class PersonalizationStorageScenario(BaseScenario):
+    """``contexts`` personalized models stored as full copies or as one backbone plus adapters."""
+    model_params: Quantity        # in param
+    adapter_params: Quantity      # in param, per context
+    bytes_per_param: Quantity     # bytes per param
+    contexts: int
+
+    @property
+    def model_size(self) -> Quantity:
+        from ..physics import memory_from_params
+        return memory_from_params(self.model_params, self.bytes_per_param)
+
+    @property
+    def adapter_size(self) -> Quantity:
+        from ..physics import memory_from_params
+        return memory_from_params(self.adapter_params, self.bytes_per_param)
+
+    @property
+    def total_copies(self) -> Quantity:
+        return self.contexts * self.model_size
+
+    @property
+    def total_shared(self) -> Quantity:
+        return self.model_size + self.contexts * self.adapter_size
+
+    @property
+    def total_savings(self) -> float:
+        return (self.total_copies / self.total_shared).to_base_units().magnitude
+
+    @property
+    def per_context_savings(self) -> float:
+        return (self.model_size / self.adapter_size).to_base_units().magnitude
+
+
+class FederatedUplinkScenario(BaseScenario):
+    """A week of raw captures against compressed model updates sent at named round cadences."""
+    items_per_week: int
+    item_size: Quantity
+    update_params: float
+    update_bits_per_param: int
+    rounds_per_week: Dict[str, int]       # cadence name -> rounds a week
+
+    @property
+    def raw_volume(self) -> Quantity:
+        return self.items_per_week * self.item_size
+
+    @property
+    def update_size(self) -> Quantity:
+        from ..core.units import BITS_PER_BYTE
+        return (self.update_params * self.update_bits_per_param / BITS_PER_BYTE * Q_(1, "byte")).to("MB")
+
+    @property
+    def reduction(self) -> float:
+        """Raw week over one update (also the break-even round count)."""
+        return (self.raw_volume / self.update_size).to_base_units().magnitude
+
+    @property
+    def break_even_rounds(self) -> float:
+        return self.reduction
+
+    def weekly_upload(self, cadence: str) -> Quantity:
+        return (self.rounds_per_week[cadence] * self.update_size).to("MB")
+
+
+class TrainingSecondVersusInferenceScenario(BaseScenario):
+    """One second of training inside a sustained power range, priced in inference checks."""
+    training_power_low: Quantity
+    training_power_high: Quantity
+    inference_energy_low: Quantity
+    inference_energy_high: Quantity
+    check_rate: Quantity                  # always-on detector checks per second
+    training_time: Quantity = Q_(1, "second")
+
+    @property
+    def training_energy_low(self) -> Quantity:
+        return (self.training_power_low * self.training_time).to("joule")
+
+    @property
+    def training_energy_high(self) -> Quantity:
+        return (self.training_power_high * self.training_time).to("joule")
+
+    @property
+    def checks_low(self) -> float:
+        """Fewest checks one training second buys: low training energy over the costliest check."""
+        return (self.training_energy_low / self.inference_energy_high).to("").magnitude
+
+    @property
+    def checks_high(self) -> float:
+        return (self.training_energy_high / self.inference_energy_low).to("").magnitude
+
+    @property
+    def detector_power(self) -> Quantity:
+        """Power of a detector at ``check_rate`` using the cheapest check."""
+        return (self.check_rate * self.inference_energy_low).to("milliwatt")
+
+    @property
+    def time_to_training_second_low(self) -> Quantity:
+        return (self.training_energy_low / self.detector_power).to("minute")
+
+    @property
+    def time_to_training_second_high(self) -> Quantity:
+        return (self.training_energy_high / self.detector_power).to("minute")
+
+
+class DeadlineVersusRoundTripScenario(BaseScenario):
+    """Foreground deadlines against a network round-trip range: which must run locally."""
+    deadlines: Dict[str, Quantity]
+    round_trip_low: Quantity
+    round_trip_high: Quantity
+
+    def local_only(self, name: str) -> bool:
+        """True when the deadline is shorter than even the fastest round trip."""
+        return self.deadlines[name] < self.round_trip_low
+
+
+class ParticipationCoverageScenario(BaseScenario):
+    """Devices per cohort at each stage of a federated round, and each cohort's coverage ratio.
+
+    Coverage ratio = cohort share of completed updates / cohort share of deployed devices.
+    """
+    stages: List[str]                        # in order, first is the deployed fleet, last completed
+    counts: Dict[str, List[int]]             # cohort -> count at each stage
+
+    def total(self, stage: str) -> int:
+        i = self.stages.index(stage)
+        return sum(c[i] for c in self.counts.values())
+
+    def share(self, cohort: str, stage: str) -> float:
+        i = self.stages.index(stage)
+        return self.counts[cohort][i] / self.total(stage)
+
+    def coverage_ratio(self, cohort: str) -> float:
+        return self.share(cohort, self.stages[-1]) / self.share(cohort, self.stages[0])
+
+    def stage_ratio(self, numerator: str, denominator: str) -> float:
+        return self.total(numerator) / self.total(denominator)
+
+
+class PairwiseMaskScenario(BaseScenario):
+    """Two clients hide their updates with a shared mask that cancels in the server's sum."""
+    update_a: List[float]
+    update_b: List[float]
+    mask: List[float]
+
+    @property
+    def upload_a(self) -> List[float]:
+        return [u + m for u, m in zip(self.update_a, self.mask)]
+
+    @property
+    def upload_b(self) -> List[float]:
+        return [u - m for u, m in zip(self.update_b, self.mask)]
+
+    @property
+    def total(self) -> List[float]:
+        """The server's sum of the two uploads: the masks cancel."""
+        return [a + b for a, b in zip(self.upload_a, self.upload_b)]
+
+
+class ShadowDisagreementScenario(BaseScenario):
+    """A frozen and an adapted model on the same inputs: label-free disagreement against a tolerance."""
+    frozen: str                               # one output label per input
+    adapted: str
+    tolerance: float
+
+    @property
+    def disagreements(self) -> int:
+        return sum(a != b for a, b in zip(self.frozen, self.adapted))
+
+    @property
+    def inputs(self) -> int:
+        return len(self.frozen)
+
+    @property
+    def disagreement_rate(self) -> float:
+        return self.disagreements / self.inputs
+
+    @property
+    def hold(self) -> bool:
+        return self.disagreement_rate > self.tolerance
+
+
+class SeriesSpreadScenario(BaseScenario):
+    """Highest over lowest ``value_key`` among rows of a Literature series in named year windows."""
+    series_name: str
+    value_key: str
+    windows: Dict[str, tuple]                 # window name -> (first year, last year), inclusive
+
+    @property
+    def rows(self) -> tuple:
+        from ..literature.registry import Literature
+        return getattr(Literature.Series, self.series_name).entries
+
+    def window(self, name: str) -> List[dict]:
+        lo, hi = self.windows[name]
+        return [r for r in self.rows if r[self.value_key] and lo <= r["year"] <= hi]
+
+    def highest(self, name: str) -> dict:
+        return max(self.window(name), key=lambda r: r[self.value_key])
+
+    def lowest(self, name: str) -> dict:
+        return min(self.window(name), key=lambda r: r[self.value_key])
+
+    def spread(self, name: str) -> float:
+        return self.highest(name)[self.value_key] / self.lowest(name)[self.value_key]

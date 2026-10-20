@@ -63,6 +63,7 @@ SandboxIsolation = _load("sandbox_isolation", "SandboxIsolation", "Cited results
 VlaSystems = _load("vla_systems", "VlaSystems", "Cited figures of published VLA and dual-system robot policies (OpenVLA, ACT, pi0, FAST, Helix, GR00T N1).")
 # Robot demonstration data and event data recorders (added 2026-10-20)
 RobotDataSystems = _load("robot_data_systems", "RobotDataSystems", "Cited figures of dated robot demonstration-data systems and interactive imitation results (DROID, Open X-Embodiment, AgiBot World, ThriftyDAgger).")
+OnDeviceLearning = _load("on_device_learning", "OnDeviceLearning", "Cited results of on-device and federated learning systems (Gboard, Google FL system, TinyTL).")  # added 2026-10-20
 EventDataRecorders = _load("event_data_recorders", "EventDataRecorders", "Pre-crash recording windows required of automotive event data recorders (49 CFR 563).")
 # Published vision-language-action and dual-system robot policies (added 2026-10-20)
 
@@ -355,6 +356,7 @@ class Literature(Registry):
     SpeechCommandsReleases = SpeechCommandsReleases  # added 2026-10-20
     RobotDataSystems = RobotDataSystems  # added 2026-10-20
     EventDataRecorders = EventDataRecorders  # added 2026-10-20
+    OnDeviceLearning = OnDeviceLearning  # added 2026-10-20
     ComputeTrend = ComputeTrend
     AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks

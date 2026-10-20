@@ -3190,3 +3190,36 @@ YOUNG_2019_GVISOR = _lit(
            "Figure 3: native 0.22, runc 0.29; gVisor on KVM: Sentry only 0.63, invoke on host "
            "5.96, help from the Gofer 45.5 (ptrace: 9.23, 9.71, 51.1). Read from the PDF."),
 )
+
+# --- On-device and federated learning results (added 2026-10-20) ---
+HARD_2018_FEDERATED_KEYBOARD = _lit(
+    "prov:hard-2018-federated-keyboard",
+    "Hard et al. (2018), Federated Learning for Mobile Keyboard Prediction, arXiv:1811.03604, "
+    "Section 5.2 and Tables 3, 4, and 6 (Gboard next-word CIFG model)",
+    url="https://arxiv.org/abs/1811.03604",
+    verified="2026-10-20",
+    notes="Read from the arXiv PDF. Recall and CTR in percent; quoted errors are 95% CIs (jackknife).",
+)
+BONAWITZ_2019_FL_AT_SCALE = _lit(
+    "prov:bonawitz-2019-fl-at-scale",
+    "Bonawitz et al. (2019), Towards Federated Learning at Scale: System Design, MLSys 2019, "
+    "Sections 6, 8 (footnote 3), 9, and Appendix A Table 1",
+    url="https://arxiv.org/abs/1902.01046",
+    verified="2026-10-20",
+    notes="Read from the arXiv PDF. Operational figures of Google's production federated learning system.",
+)
+CAI_2020_TINYTL = _lit(
+    "prov:cai-2020-tinytl",
+    "Cai et al. (2020), TinyTL: Reduce Memory, Not Parameters for Efficient On-Device Learning, NeurIPS 2020, abstract",
+    url="https://arxiv.org/abs/2007.11622",
+    verified="2026-09-29",
+    notes="Up to 6.5x training-memory saving against full fine-tuning; lite residual modules add 3.8% memory.",
+)
+MCMAHAN_2017_FEDAVG = _lit(
+    "prov:mcmahan-2017-fedavg",
+    "McMahan et al. (2017), Communication-Efficient Learning of Deep Networks from Decentralized Data, "
+    "AISTATS 2017, Table 2 (MNIST CNN, rounds to 99% test accuracy)",
+    url="https://arxiv.org/abs/1602.05629",
+    verified="2026-10-20",
+    notes="Read from the arXiv PDF; 100 clients, C = 0.1; u = E n / (K B) expected local updates per round.",
+)
