@@ -5032,3 +5032,42 @@ def test_verification_literature():
     assert len(ok) == 12 and ok.where(method="Cross-entropy", gamma=0.14)[0]["std_error"] == pytest.approx(8.88e-6)
     w = Literature.Wang2025OpenVlaLiberoUntargeted
     assert sum(e["benign_failure_pct"] for e in w.entries) / 4 == pytest.approx(23.5)
+def test_benchmarking_scenarios():
+    """Benchmarking: datasheet gap, edge board, Amdahl dilution, training ceiling, duty cycle, boundaries, MLPerf scores."""
+    c = Scenarios.DatasheetVersusSustainedEdgeChip
+    assert c.claimed_efficiency.m_as("TOPS/W") == approx(20.0) and c.sustained_efficiency.m_as("TOPS/W") == approx(1.5)
+    assert c.gap == approx(40 / 3) and c.gap == approx(c.rate_fall * c.power_rise)
+    b = Scenarios.MobileNetV2CameraTrapBoard
+    assert b.isolated_speedup == approx(7.5) and b.end_to_end_speedup == approx(3.0)
+    assert b.host_energy.m_as("mJ") == approx(1.8) and b.accelerator_energy.m_as("mJ") == approx(1.0)
+    assert b.int8_speedup == approx(10 / 3) and b.frame_budget.to("ms").magnitude == approx(100 / 3)
+    p = Scenarios.PreprocessBoundVisionPipeline
+    assert p.accelerated_total.m_as("ms") == approx(10.0) and p.overall_speedup == approx(1.8)
+    assert p.limit == approx(2.25)
+    g = Scenarios.ModelStageInFiftyMsRequest
+    assert g.accelerated_total.m_as("ms") == approx(130 / 3) and g.overall_speedup == approx(150 / 130)
+    r = Scenarios.ResNet50H100TrainingCeiling
+    assert r.training_flops_per_sample.m_as("GFLOP") == approx(24.6, rel=1e-3)
+    assert r.ceiling_rate.m_as("count/second") == approx(40203.25, rel=1e-5)
+    assert r.achieved_flops.m_as("TFLOP/s") == approx(123.0, rel=1e-3)
+    assert r.sustained_fraction == approx(0.124368, rel=1e-4) and r.ceiling_gap == approx(8.04065, rel=1e-4)
+    k = Scenarios.KeywordSpottingOnEsp32S3
+    assert k.inference_time.m_as("ms") == approx(25 / 3, rel=1e-6)
+    assert k.average_power.m_as("mW") == approx(52.916667, rel=1e-6)
+    assert k.idle_share == approx(0.937008, rel=1e-5) and k.crossover_duty == approx(1 / 9)
+    assert k.cut_saving.m_as("mW") == approx(5 / 3, rel=1e-6) and k.cut_gain == approx(0.031496, rel=1e-4)
+    e = Scenarios.GeminiMedianPromptEnergyBoundary
+    assert e.narrow.m_as("Wh") == approx(0.10) and e.full.m_as("Wh") == approx(0.24) and e.ratio == approx(2.4)
+    assert e.share("Active AI") + e.share("Active host") + e.share("Idle", "Data center") == approx(1.0)
+    assert Scenarios.FasterStepsMoreSteps.time_ratio == approx(2.5 / 1.8)
+    t = Scenarios.ModelOnlyMeanVersusProductionP99
+    assert t.gap_low == approx(10.0) and t.gap_high == approx(40 / 3)
+    m8, m64 = Scenarios.EosEightH100ResNetMLPerfV40, Scenarios.EosSixtyFourH100ResNetMLPerfV40
+    assert m8.score_minutes == approx(13.2703, rel=1e-6) and m8.published_score.m_as("minute") == approx(13.326343, rel=1e-6)
+    assert m64.score_minutes == approx(2.505543, rel=1e-6)    # the missed run counts as the slowest
+    assert m8.per_accelerator_rate.m_as("count/second") == approx(7039.66, rel=1e-5)
+    assert m64.per_accelerator_rate.m_as("count/second") == approx(4660.59, rel=1e-5)
+    s = Scenarios.EosResNetStrongScalingMLPerfV40
+    assert s.speedup == approx(5.296376, rel=1e-6) and s.efficiency == approx(0.662047, rel=1e-5)
+    i = Scenarios.ImageClassifierEightGpuScaling
+    assert i.efficiency == approx(0.75) and i.ideal_time.m_as("hour") == approx(3.0)

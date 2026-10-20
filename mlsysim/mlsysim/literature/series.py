@@ -1346,6 +1346,78 @@ class Series:
         "2:4 sparse INT8 GEMM speedup over dense by inner dimension (A100).",
         numeric=("k", "speedup"),
     )
+    # --- Benchmarking (added 2026-10-20) ---------------------------------------
+    MLPerfTrainingV40ResNetRuns = TrendSeries(
+        "mlperf_training_v4_0_resnet_runs",
+        _lit("MLCommons, MLPerf Training v4.0 results (Apache-2.0), closed division, resnet, result_N.txt "
+             "MLLOG lines (run_start, run_stop, last eval_accuracy, status, seed), retrieved 2026-10-17",
+             "https://github.com/mlcommons/training_results_v4.0",
+             "One row per run of four submissions: NVIDIA eos_ngc24.04_mxnet (8x H100), Dell "
+             "XE9680x8H100-SXM-80GB (8x H100), NVIDIA h200_ngc24.04_mxnet (8x H200), and NVIDIA "
+             "eos_n8_ngc24.04_mxnet (64x H100). minutes is run_stop minus run_start; top1 is the last "
+             "eval_accuracy in percent; status 'aborted' marks a run that missed the quality target. "
+             "The published score is the mean of the middle three of five runs (a missed run counts as "
+             "the slowest) times the scaling.json factor (Literature.Benchmarks."
+             "MLPerfTrainingV40ResNetScalingFactor)."),
+        "Per-run time to the ResNet-50 quality target in MLPerf Training v4.0 for four 8- and 64-accelerator systems.",
+        numeric=("run", "minutes", "top1", "epochs", "seed"),
+    )
+    MLPerfTrainingV40EosResNetEvals = TrendSeries(
+        "mlperf_training_v4_0_eos_resnet_result0_evals",
+        _lit("MLCommons, MLPerf Training v4.0 results (Apache-2.0), closed/NVIDIA/results/"
+             "eos_ngc24.04_mxnet/resnet/result_0.txt, eval_accuracy and run_start MLLOG lines, retrieved 2026-10-17",
+             "https://github.com/mlcommons/training_results_v4.0",
+             "One row per evaluation of run 0 on NVIDIA Eos (8x H100): epoch, wall-clock minutes since "
+             "run_start, and ImageNet top-1 in percent."),
+        "ImageNet top-1 by epoch of one MLPerf Training v4.0 ResNet-50 run on eight H100s (time to quality).",
+        numeric=("epoch", "minutes", "top1"),
+    )
+    MLPerfInferenceV50ResNet50 = TrendSeries(
+        "mlperf_inference_v5_0_resnet50",
+        _lit("MLCommons, MLPerf Inference v5.0 results (Apache-2.0), closed division, resnet50, "
+             "summary_results.json, results 5.0-0032, 5.0-0010, 5.0-0065",
+             "https://github.com/mlcommons/inference_results_v5.0",
+             "One RTX 4090 (SingleStream p90 latency and Offline throughput) and two 8x H100-SXM servers "
+             "(Offline and Server throughput); system totals as reported, all VALID."),
+        "ResNet-50 MLPerf Inference v5.0 results by scenario for one RTX 4090 and two eight-H100 servers.",
+        numeric=("accelerators", "value"),
+    )
+    MLPerfTinyV12VwwEnergy = TrendSeries(
+        "mlperf_tiny_v1_2_vww_energy",
+        _lit("MLCommons, MLPerf Tiny v1.2 results (Apache-2.0), summary.csv, retrieved 2026-10-18",
+             "https://github.com/mlcommons/tiny_results_v1.2",
+             "visual wake words (vww), closed division, rows with an energy measurement; energy_uj is the "
+             "reported Power column, microjoules per inference; throughput_ips is the reported "
+             "inferences per second where the slides use it; clock_mhz and voltage_v are the operating point "
+             "the submission's system description names (syntiant_9120_0v9_30mhz: 0.9 V, 30.7 MHz)"),
+        "Measured energy per visual-wake-words inference in MLPerf Tiny v1.2, closed division.",
+        numeric=("clock_mhz", "voltage_v", "throughput_ips", "energy_uj"),
+    )
+    LeeMobileGpuLatency = TrendSeries(
+        "lee2019_mobile_gpu_latency",
+        _lit("Lee et al. (2019), On-Device Neural Net Inference with Mobile GPUs, Tables 4 and 5",
+             "https://arxiv.org/abs/1907.01989",
+             "MobileNet v1 latency in ms, mean of 100 runs after 10 warm-up runs, by device and software path"),
+        "MobileNet v1 latency on one iPhone XS and one Pixel 3 through different software paths.",
+        numeric=("latency_ms",),
+    )
+    LeeSustainedLatency = TrendSeries(
+        "lee2019_sustained_latency",
+        _lit("Lee et al. (2019), On-Device Neural Net Inference with Mobile GPUs, Figure 8",
+             "https://arxiv.org/abs/1907.01989",
+             "MobileNet v1 latency in ms at the start and after 200 s of continuous inference; values "
+             "read from the published plot (approximate)"),
+        "MobileNet v1 latency at the start and after 200 s of sustained load, by device and processor.",
+        numeric=("start_ms", "end_ms"),
+    )
+    TummalapalliIphoneThermal = TrendSeries(
+        "tummalapalli2026_iphone_thermal",
+        _lit("Tummalapalli et al. (2026), arXiv 2603.23640 (preprint)",
+             "https://arxiv.org/abs/2603.23640",
+             "Qwen 2.5 1.5B decode rate on an iPhone 16 Pro at peak, once warm, and once hot, tokens per second"),
+        "Small-language-model decode rate on an iPhone 16 Pro by thermal state.",
+        numeric=("tokens_per_s",),
+    )
 
     # --- Quantization (added 2026-10-20) ---
     KrishnamoorthiQuantization = TrendSeries(

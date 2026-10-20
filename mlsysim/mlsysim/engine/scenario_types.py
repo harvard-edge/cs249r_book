@@ -5197,9 +5197,10 @@ class AcceleratorInputFeedScenario(BaseScenario):
     workload: Workload
     hardware: HardwareNode
     sustained_rate: Quantity          # samples per second per accelerator
-    encoded_sample: Quantity          # bytes per sample as stored
-    decoded_sample: Quantity          # bytes per sample after decode
-    supply: Any                       # StorageSubsystem that feeds the accelerators
+    # Optional (added 2026-10-20): None for a compute-ceiling comparison with no input path.
+    encoded_sample: Optional[Quantity] = None    # bytes per sample as stored
+    decoded_sample: Optional[Quantity] = None    # bytes per sample after decode
+    supply: Any = None                # StorageSubsystem that feeds the accelerators
     training_flops_factor: float = 3.0
     accelerators: int = 1
     worker_rate: Optional[Quantity] = None   # samples per second per loader worker
@@ -5229,6 +5230,16 @@ class AcceleratorInputFeedScenario(BaseScenario):
     @property
     def sustained_fraction(self) -> float:
         return (self.sustained_rate / self.ceiling_rate).to("").magnitude
+
+    @property
+    def achieved_flops(self) -> Quantity:
+        """Model arithmetic one accelerator sustains (added 2026-10-20); over peak it is the MFU."""
+        return (self.sustained_rate * self.training_flops_per_sample / Q_(1, "count")).to("TFLOP/s")
+
+    @property
+    def ceiling_gap(self) -> float:
+        """Arithmetic ceiling over the sustained rate (added 2026-10-20)."""
+        return 1 / self.sustained_fraction
 
     @property
     def total_rate(self) -> Quantity:
@@ -16532,6 +16543,198 @@ class TrajectoryRoleShareScenario(BaseScenario):
     def result(self):
         from .solvers import TrajectoryRoleShareModel
         return TrajectoryRoleShareModel().solve(self.rows)
+# --- Benchmarking (added 2026-10-20) -----------------------------------------
+class EfficiencyClaimGapScenario(BaseScenario):
+    """A datasheet operating point against a sustained one: operations per watt at each, and their ratio.
+
+    The gap is the product of the throughput fall and the power rise, so a
+    reader who compares only the throughputs underestimates it.
+    """
+    claimed_rate: Quantity
+    claimed_power: Quantity
+    sustained_rate: Quantity
+    sustained_power: Quantity
+
+    @property
+    def claimed_efficiency(self) -> Quantity:
+        return (self.claimed_rate / self.claimed_power).to("TOPS/W")
+
+    @property
+    def sustained_efficiency(self) -> Quantity:
+        return (self.sustained_rate / self.sustained_power).to("TOPS/W")
+
+    @property
+    def gap(self) -> float:
+        return (self.claimed_efficiency / self.sustained_efficiency).to("").magnitude
+
+    @property
+    def rate_fall(self) -> float:
+        return (self.claimed_rate / self.sustained_rate).to("").magnitude
+
+    @property
+    def power_rise(self) -> float:
+        return (self.sustained_power / self.claimed_power).to("").magnitude
+
+
+class HostAcceleratorBoardScenario(BaseScenario):
+    """One board, a host CPU and an attached accelerator: model-only and end-to-end latency, active energy.
+
+    The end-to-end times add host preprocessing (and, on the accelerator path,
+    the copy across the host link) to the model time; active energy is the
+    component's active power times its model-only latency, so it leaves out
+    preprocessing and idle power.
+    """
+    host_fp32_latency: Quantity
+    host_int8_latency: Quantity
+    accelerator_latency: Quantity
+    host_end_to_end: Quantity
+    accelerator_end_to_end: Quantity
+    host_power: Quantity
+    accelerator_power: Quantity
+    frame_rate: Optional[Quantity] = None   # frames per second the camera delivers
+
+    @property
+    def frame_budget(self) -> Quantity:
+        """Time per frame at ``frame_rate``: the latency each inference must meet."""
+        return (1 / self.frame_rate).to("ms")
+
+    @property
+    def int8_speedup(self) -> float:
+        return (self.host_fp32_latency / self.host_int8_latency).to("").magnitude
+
+    @property
+    def isolated_speedup(self) -> float:
+        return (self.host_int8_latency / self.accelerator_latency).to("").magnitude
+
+    @property
+    def end_to_end_speedup(self) -> float:
+        return (self.host_end_to_end / self.accelerator_end_to_end).to("").magnitude
+
+    @property
+    def power_ratio(self) -> float:
+        return (self.accelerator_power / self.host_power).to("").magnitude
+
+    @property
+    def host_energy(self) -> Quantity:
+        return (self.host_power * self.host_int8_latency).to("mJ")
+
+    @property
+    def accelerator_energy(self) -> Quantity:
+        return (self.accelerator_power * self.accelerator_latency).to("mJ")
+
+    @property
+    def energy_ratio(self) -> float:
+        return (self.host_energy / self.accelerator_energy).to("").magnitude
+
+
+class PeriodicInferencePowerScenario(BaseScenario):
+    """``workload`` run once per ``period`` on ``hardware`` at its peak ``precision`` rate, idling between runs.
+
+    Active power is the board's ``tdp`` and idle power its ``tdp_min``; average
+    power weights each by its share of the period (``DutyCycledPowerModel``).
+    ``energy_cut`` (optional) divides the energy of each inference, to show how
+    little a cheaper inference moves a duty-cycled average.
+    """
+    workload: Workload
+    hardware: HardwareNode
+    period: Quantity
+    precision: str = "int8"
+    energy_cut: Optional[float] = None
+
+    @property
+    def inference_time(self) -> Quantity:
+        return (self.workload.inference_flops / self.hardware.compute.precision_flops[self.precision]).to("ms")
+
+    @property
+    def duty(self) -> float:
+        return (self.inference_time / self.period).to("").magnitude
+
+    @property
+    def active_power(self) -> Quantity:
+        return self.hardware.tdp
+
+    @property
+    def idle_power(self) -> Quantity:
+        return self.hardware.tdp_min
+
+    @property
+    def inference_energy(self) -> Quantity:
+        return (self.active_power * self.inference_time).to("mJ")
+
+    @property
+    def result(self):
+        from .solvers import DutyCycledPowerModel
+        return DutyCycledPowerModel().solve(
+            {"active": self.active_power, "idle": self.idle_power},
+            {"active": self.duty, "idle": 1 - self.duty},
+            self.active_power,
+        )
+
+    @property
+    def active_contribution(self) -> Quantity:
+        return self.result.contributions["active"].to("mW")
+
+    @property
+    def idle_contribution(self) -> Quantity:
+        return self.result.contributions["idle"].to("mW")
+
+    @property
+    def average_power(self) -> Quantity:
+        return self.result.average_power.to("mW")
+
+    @property
+    def idle_share(self) -> float:
+        return (self.idle_contribution / self.average_power).to("").magnitude
+
+    @property
+    def crossover_duty(self) -> float:
+        """Duty cycle at which active energy equals idle energy."""
+        return (self.idle_power / (self.active_power + self.idle_power)).to("").magnitude
+
+    @property
+    def cut_saving(self) -> Quantity:
+        """Average power saved when each inference costs ``1 / energy_cut`` of its energy."""
+        return (self.active_contribution * (1 - 1 / self.energy_cut)).to("mW")
+
+    @property
+    def cut_gain(self) -> float:
+        return (self.cut_saving / self.average_power).to("").magnitude
+
+
+class MeasurementBoundaryEnergyScenario(BaseScenario):
+    """One request's energy under a narrow and a full measurement boundary (``Literature.Series`` rows).
+
+    Each row is a component with its energy and a counted flag under each
+    boundary; the two totals sum the counted rows.
+    """
+    series_name: str
+    narrow_key: str = "existing"
+    full_key: str = "comprehensive"
+
+    @property
+    def rows(self):
+        from ..literature.registry import Literature
+        return getattr(Literature.Series, self.series_name).entries
+
+    def _total(self, key: str) -> float:
+        return sum(r[f"{key}_wh"] for r in self.rows if r[f"{key}_counted"] == 1)
+
+    @property
+    def narrow(self) -> Quantity:
+        return Q_(self._total(self.narrow_key), "Wh")
+
+    @property
+    def full(self) -> Quantity:
+        return Q_(self._total(self.full_key), "Wh")
+
+    @property
+    def ratio(self) -> float:
+        return (self.full / self.narrow).to("").magnitude
+
+    def share(self, *prefixes: str) -> float:
+        """Share of the full-boundary total in the components whose names start with ``prefixes``."""
+        part = sum(r[f"{self.full_key}_wh"] for r in self.rows if r["component"].startswith(prefixes))
+        return part / self._total(self.full_key)
 
 
 class LossNormalizationScenario(BaseScenario):
@@ -17434,3 +17637,107 @@ class DiagnosticCoverageScenario(BaseScenario):
     def result(self):
         from .solvers import DiagnosticCoverageModel
         return DiagnosticCoverageModel().solve(self.strata, self.target, self.confidence)
+
+
+class StepsToQualityScenario(BaseScenario):
+    """A change that makes each step ``step_speedup`` times faster but needs ``steps_multiplier`` times the steps."""
+    step_speedup: float
+    steps_multiplier: float
+
+    @property
+    def time_ratio(self) -> float:
+        """New time to quality over old (above 1: slower)."""
+        return self.steps_multiplier / self.step_speedup
+
+
+class MeanVersusTailScenario(BaseScenario):
+    """A benchmark's mean latency against a production tail stated as a range."""
+    mean: Quantity
+    tail_low: Quantity
+    tail_high: Quantity
+
+    @property
+    def gap_low(self) -> float:
+        return (self.tail_low / self.mean).to("").magnitude
+
+    @property
+    def gap_high(self) -> float:
+        return (self.tail_high / self.mean).to("").magnitude
+
+
+class MLPerfTrainingResultScenario(BaseScenario):
+    """One MLPerf Training submission's runs (``Literature.Series`` rows) and its published score.
+
+    MLPerf's rule: drop the fastest and slowest of the runs, a run that missed
+    the quality target counting as the slowest, average the rest, and multiply
+    by the round's scaling factor. The per-accelerator rate divides the images
+    trained (epochs times the training set) by the unscaled score and the
+    accelerator count.
+    """
+    series_name: str
+    system: str
+    accelerators: int
+    dataset: Any                      # Datasets entry with ``training_examples``
+    global_batch: int
+    scaling_factor: float
+
+    @property
+    def rows(self):
+        from ..literature.registry import Literature
+        return tuple(r for r in getattr(Literature.Series, self.series_name).entries if r["system"] == self.system)
+
+    @property
+    def run_minutes(self) -> List[float]:
+        """Run times of the runs that reached the target."""
+        return [r["minutes"] for r in self.rows if r["status"] == "success"]
+
+    @property
+    def score_minutes(self) -> float:
+        failed = len(self.rows) - len(self.run_minutes)
+        ranked = sorted(self.run_minutes) + [_math.inf] * failed
+        middle = ranked[1:-1]
+        return sum(middle) / len(middle)
+
+    @property
+    def published_score(self) -> Quantity:
+        return Q_(self.score_minutes * self.scaling_factor, "minute")
+
+    @property
+    def epochs(self) -> float:
+        return self.rows[0]["epochs"]
+
+    @property
+    def per_accelerator_rate(self) -> Quantity:
+        images = self.epochs * self.dataset.training_examples.to("count").magnitude
+        return Q_(images / (self.score_minutes * 60) / self.accelerators, "count/second")
+
+    @property
+    def per_accelerator_batch(self) -> float:
+        return self.global_batch / self.accelerators
+
+
+class StrongScalingPairScenario(BaseScenario):
+    """The same fixed job on ``base_devices`` and on ``scaled_devices``: speedup, ideal time, and efficiency.
+
+    Strong-scaling efficiency is base time over (device ratio times scaled time).
+    """
+    base_devices: int
+    base_time: Quantity
+    scaled_devices: int
+    scaled_time: Quantity
+
+    @property
+    def device_ratio(self) -> float:
+        return self.scaled_devices / self.base_devices
+
+    @property
+    def speedup(self) -> float:
+        return (self.base_time / self.scaled_time).to("").magnitude
+
+    @property
+    def ideal_time(self) -> Quantity:
+        return (self.base_time / self.device_ratio).to(self.base_time.units)
+
+    @property
+    def efficiency(self) -> float:
+        return self.speedup / self.device_ratio
