@@ -50,6 +50,7 @@ from pathlib import Path
 import numpy as np
 
 import calcs
+from deckvals import val, num  # noqa: E402  (calcs puts the kit on the path)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
@@ -149,21 +150,21 @@ def small_hbars(path_, rows, size, xlim, ticks, ticklabels, xlabel, log=False,
 # 1. Zillow Offers, Q2 against Q3 2021 (grouped bars, two steps)
 # -----------------------------------------------------------------------------
 cats = ["Bought", "Sold", "In inventory"]
-q2 = [calcs.Q2_BOUGHT, calcs.Q2_SOLD, calcs.Q2_INV]
-q3 = [calcs.Q3_BOUGHT, calcs.Q3_SOLD, calcs.Q3_INV]
+q2 = [num("zq2_bought"), num("zq2_sold"), num("zq2_inv")]
+q3 = [num("zq3_bought"), num("zq3_sold"), num("zq3_inv")]
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(4.6, 2.1))
     w = 0.4
     a = 1.0 if k == 2 else 0.0
     for i, v in enumerate(q2):
         ax.bar(i - w / 2, v, w, color=C["neutral"])
-        ax.text(i - w / 2, v + 250, f"{v:,}", ha="center", va="bottom",
+        ax.text(i - w / 2, v + 250, f"{v:,.0f}", ha="center", va="bottom",
                 fontsize=10, color=C["neutral"], fontweight="bold")
     for i, v in enumerate(q3):
         ax.bar(i + w / 2, v, w, color=C["danger"], alpha=a)
-        ax.text(i + w / 2, v + 250, f"{v:,}", ha="center", va="bottom",
+        ax.text(i + w / 2, v + 250, f"{v:,.0f}", ha="center", va="bottom",
                 fontsize=10, color=C["danger"], fontweight="bold", alpha=a)
-    ax.text(2 + w / 2 + 0.24, 6000, f"+{calcs.Q3_CONTRACT:,}\nunder\ncontract", ha="left",
+    ax.text(2 + w / 2 + 0.24, 6000, f"+{val('zq3_contract')}\nunder\ncontract", ha="left",
             va="center", fontsize=11, color=C["danger"], alpha=a)
     ax.text(-0.5, 12300, "Q2 2021", color=C["neutral"], fontsize=12,
             fontweight="bold", ha="left")
@@ -185,8 +186,8 @@ for k in (1, 2):
 # 2. Wild-Time: the same model on later data (dumbbells, two steps)
 # -----------------------------------------------------------------------------
 # training and later-period scores, plotted to one decimal as in the chapter
-wild = [(n, calcs.r(a_, 1), calcs.r(b_, 1)) for n, a_, b_ in calcs.WILD]
-drops = [calcs.f(d, 1) for _, d in calcs.WILD_DROPS]
+wild = [(n, float(f"{a_:.1f}"), float(f"{b_:.1f}")) for n, a_, b_ in calcs.WILD]  # plotted at one decimal
+drops = [f"{d:.1f}" for _, d in calcs.WILD_DROPS]
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(4.4, 2.5))
     n = len(wild)
@@ -225,7 +226,7 @@ loop = [  # name, cx, cy, cost line 1, cost line 2, where the cost sits
     ("Detect", 450, 62, "telemetry bytes per second", "", "right"),
     ("Diagnose", 735, 180, "replay over", "logged requests", "below"),
     ("Decide", 645, 372, "accelerator-hours", "for a retraining run", "below"),
-    ("Release", 255, 372, "a second resident copy:", "100 GB of tables", "below"),
+    ("Release", 255, 372, "a second resident copy:", f"{val('dlrm_gb')} GB of tables", "below"),
     ("Recover", 165, 180, "a known-good", "version kept warm", "below"),
 ]
 for k in (1, 2, 3, 4):
@@ -318,9 +319,9 @@ for k in (1, 2):
     if k == 2:
         p.append(text(12, 238, "Zillow Offers, Q3 2021: the chain runs through the world",
                       24, C["neutral"], "bold", "start"))
-        xs = chain(p, 256, [("Forecast", "home prices"), ("Purchase", f"{calcs.Q3_BOUGHT:,} homes"),
-                            ("Inventory", f"{calcs.Q3_INV:,} + {calcs.Q3_CONTRACT:,}"),
-                            ("Write-down", f"${calcs.WRITE_DOWN_M} million")],
+        xs = chain(p, 256, [("Forecast", "home prices"), ("Purchase", f"{val('zq3_bought')} homes"),
+                            ("Inventory", f"{val('zq3_inv')} + {val('zq3_contract')}"),
+                            ("Write-down", f"${val('z_writedown_m')} million")],
                    C["danger"], C["danger_l"])
         p.append(path(f"M {xs[0]+98} 338 C {xs[0]+98} 410, {xs[1]+98} 410, {xs[1]+98} 342",
                       C["neutral"], 2.5, "n", "7 5"))
@@ -333,9 +334,9 @@ for k in (1, 2):
 # 6. When automation pays (Napkin Math 14.1), two steps
 # -----------------------------------------------------------------------------
 weeks = np.linspace(0, 40, 200)
-BUILD, MANUAL, UPKEEP = 80, 4, 1          # Napkin Math 14.1; upkeep is the deck's
-BE = calcs.breakeven(BUILD, MANUAL)
-BE_UP = calcs.breakeven(BUILD, MANUAL, UPKEEP)
+BUILD, MANUAL, UPKEEP = num("auto_build_h"), num("auto_manual_h"), num("auto_upkeep_h")
+BE = calcs.AUTO.breakeven.m_as("week")
+BE_UP = calcs.AUTO_UP.breakeven.m_as("week")
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(4.3, 2.0))
     ax.plot(weeks, MANUAL * weeks, color=C["danger"], lw=3)
@@ -343,19 +344,19 @@ for k in (1, 2):
     ax.fill_between(weeks[weeks >= BE], BUILD, MANUAL * weeks[weeks >= BE],
                     color=C["danger_l"])
     ax.plot([BE], [BUILD], "o", ms=10, color=C["text"], zorder=5)
-    ax.text(BE + 1.5, 45, f"break-even:\n{BUILD} / {MANUAL} = {calcs.f(BE, 0)} weeks", fontsize=11,
+    ax.text(BE + 1.5, 45, f"break-even:\n{val('auto_build_h')} / {val('auto_manual_h')} = {val('auto_be')} weeks", fontsize=11,
             fontweight="bold", color=C["text"])
-    ax.text(40.8, 160, "Manual:\n4 h a week", color=C["danger"], fontsize=11,
+    ax.text(40.8, 160, f"Manual:\n{val('auto_manual_h')} h a week", color=C["danger"], fontsize=11,
             fontweight="bold", va="center")
-    ax.text(40.8, 72, "Pipeline:\n80 h once", color=C["memory"], fontsize=11,
+    ax.text(40.8, 72, f"Pipeline:\n{val('auto_build_h')} h once", color=C["memory"], fontsize=11,
             fontweight="bold", va="center")
     a = 1.0 if k == 2 else 0.0
     ax.plot(weeks, BUILD + UPKEEP * weeks, color=C["memory"], lw=2.5, ls="--", alpha=a)
     ax.plot([BE_UP], [BUILD + UPKEEP * BE_UP], "o", ms=9, color=C["memory"], alpha=a,
             zorder=5)
-    ax.text(40.8, 118, f"+{UPKEEP} h a week", color=C["memory"], fontsize=11,
+    ax.text(40.8, 118, f"+{val('auto_upkeep_h')} h a week", color=C["memory"], fontsize=11,
             va="center", alpha=a)
-    ax.text(1, 135, f"with upkeep: {BUILD} / {MANUAL - UPKEEP}\n= {calcs.f(BE_UP, 1)} weeks (derived)", fontsize=11,
+    ax.text(1, 135, f"with upkeep: {val('auto_build_h')} / {val('auto_net_h')}\n= {val('auto_be_up_1')} weeks (derived)", fontsize=11,
             color=C["memory"], alpha=a, fontweight="bold")
     ax.set_xlim(0, 40)
     ax.set_ylim(0, 170)
@@ -412,9 +413,10 @@ for k in (1, 2, 3):
 # 8. Knight Capital: seven of eight servers updated (SEC 34-70694, para. 15-16)
 # -----------------------------------------------------------------------------
 p = svg_open(900, 175)
-for i in range(calcs.SERVERS):
+SERVERS, UPDATED = int(num("knight_servers")), int(num("knight_updated"))
+for i in range(SERVERS):
     x = 12 + i * 111
-    bad = i >= calcs.UPDATED
+    bad = i >= UPDATED
     col, fill = (C["danger"], C["danger_l"]) if bad else (C["data"], C["data_l"])
     p.append(rect(x + 14, 8, 72, 92, fill, col, 3, 8))
     for j in range(3):
@@ -423,9 +425,9 @@ for i in range(calcs.SERVERS):
     if bad:
         p.append(text(894, 170, "Power Peg", 25, col, "bold", "end"))
 # one label under the seven updated servers
-x7 = 12 + (calcs.UPDATED - 1) * 111
+x7 = 12 + (UPDATED - 1) * 111
 p.append(line(30, 146, x7 + 80, 146, C["data"], 2.5, None))
-p.append(text((30 + x7 + 80) / 2, 170, f"new code on {calcs.UPDATED} of {calcs.SERVERS}",
+p.append(text((30 + x7 + 80) / 2, 170, f"new code on {UPDATED} of {SERVERS}",
               25, C["data"], "bold"))
 save_svg(p, "knight_servers.svg")
 
@@ -434,11 +436,11 @@ save_svg(p, "knight_servers.svg")
 def ktime(k):
     p = svg_open(900, 250)
     p.append(line(20, 130, 880, 130, "#999999", 4, None))
-    marks = [(130, "8:01", "first automated e-mail:", "“Power Peg disabled”"),
-             (440, "9:30", "market opens;", "97 e-mails by now"),
-             (770, "about " + f"{(calcs.OPEN_MIN + calcs.KNIGHT_MIN) // 60}:"
-              f"{(calcs.OPEN_MIN + calcs.KNIGHT_MIN) % 60:02d}",
-              f"about {calcs.KNIGHT_MIN} minutes", "after the open")]
+    marks = [(130, f"{val('knight_alert_h')}:{val('knight_alert_min')}", "first automated e-mail:", "“Power Peg disabled”"),
+             (440, f"{val('knight_open_h')}:{val('knight_open_min')}", "market opens;",
+              f"{val('knight_emails')} e-mails by now"),
+             (770, f"about {val('knight_end_h')}:{val('knight_end_min')}",
+              f"about {val('knight_min')} minutes", "after the open")]
     for i, (x, t, a_, b_) in enumerate(marks):
         if i == 2 and k < 2:
             continue
@@ -449,9 +451,9 @@ def ktime(k):
         p.append(text(x, 200, b_, 23, C["neutral"]))
     if k >= 2:
         p.append(rect(520, 8, 370, 54, C["danger_l"], C["danger"], 2, 8))
-        p.append(text(705, 44, "212 orders: 4 million executions", 23,
+        p.append(text(705, 44, f"{val('knight_orders')} orders: {val('knight_exec_m')} million executions", 23,
                       C["danger"], "bold"))
-        p.append(text(450, 240, "154 stocks, 397 million shares, $460 million lost",
+        p.append(text(450, 240, f"{val('knight_stocks')} stocks, {val('knight_shares_m')} million shares, ${val('knight_loss_m')} million lost",
                       25, C["danger"], "bold"))
     save_svg(p, f"knight_timeline_step{k}.svg")
 
@@ -463,31 +465,37 @@ ktime(2)
 # -----------------------------------------------------------------------------
 # 9. One node over a day (redraw of chapter figure 8), two steps
 # -----------------------------------------------------------------------------
+DAY = 24                       # hours in the day drawn
+N = calcs.RANK.node_accelerators
+
+
 def nodeday(k):
     fig, ax = plt.subplots(figsize=(3.9, 2.4))
+    P, R, T = calcs.RANK.accelerators_per_copy, calcs.RANK.retrain_accelerators, num("retrain_h")
     blocks = [  # y0, h, x0, w, fill, edge, label, step
-        (0, 2, 0, 24, "memory_l", "memory", "Serving copy: 100 GB of tables", 1),
-        (2, 2, 0, 24, "data_l", "data", "Hot standby: previous version", 2),
-        (4, 4, 0, 6, "compute_l", "compute",
-         f"Retrain\n{calcs.RETRAIN_GPUS} × {calcs.RETRAIN_H} h\n= {calcs.RETRAIN_GPUS * calcs.RETRAIN_H}\nGPU-h", 3),
-        (4, 2, 6, 18, "network_l", "network", "Canary: new candidate", 3),
+        (0, P, 0, DAY, "memory_l", "memory", f"Serving copy: {val('dlrm_gb')} GB of tables", 1),
+        (P, P, 0, DAY, "data_l", "data", "Hot standby: previous version", 2),
+        (2 * P, R, 0, T, "compute_l", "compute",
+         f"Retrain\n{val('retrain_gpus')} × {val('retrain_h')} h\n= {val('retrain_gpu_h')}\nGPU-h", 3),
+        (2 * P, P, T, DAY - T, "network_l", "network", "Canary: new candidate", 3),
     ]
     for y0, h, x0, w, f, e, lab, st in blocks:
         a = 1.0 if k >= st else 0.0
-        ax.add_patch(plt.Rectangle((x0, 8 - y0 - h), w, h, facecolor=C[f],
+        ax.add_patch(plt.Rectangle((x0, N - y0 - h), w, h, facecolor=C[f],
                                    edgecolor=C[e], lw=2, alpha=a))
-        ax.text(x0 + w / 2, 8 - y0 - h / 2, lab, ha="center", va="center",
+        ax.text(x0 + w / 2, N - y0 - h / 2, lab, ha="center", va="center",
                 fontsize=11, color=C["text"], alpha=a)
     a = 1.0 if k >= 3 else 0.0
-    ax.add_patch(plt.Rectangle((6, 0.02), 18, 1.96, facecolor="white",
+    free = calcs.RANK.free_after(3)
+    ax.add_patch(plt.Rectangle((T, 0.02), DAY - T, free - 0.04, facecolor="white",
                                edgecolor=C["neutral"], lw=1.5, ls="--", alpha=a))
-    ax.text(15, 1, "Free: one more copy", ha="center", va="center",
+    ax.text((T + DAY) / 2, free / 2, f"Free: {val('free_copies_words')} more copy", ha="center", va="center",
             fontsize=11, color=C["neutral"], alpha=a)
-    ax.set_xlim(0, 24)
-    ax.set_ylim(0, 8)
-    ax.set_yticks([7.5 - i for i in range(8)])
-    ax.set_yticklabels([f"GPU {i}" for i in range(8)], fontsize=10)
-    ax.set_xticks([0, 6, 12, 18, 24])
+    ax.set_xlim(0, DAY)
+    ax.set_ylim(0, N)
+    ax.set_yticks([N - 0.5 - i for i in range(N)])
+    ax.set_yticklabels([f"GPU {i}" for i in range(N)], fontsize=10)
+    ax.set_xticks(np.arange(0, DAY + 1, T))
     ax.tick_params(axis="x", labelsize=11)
     ax.set_xlabel("Hours from the start of retraining", fontsize=11)
     sp.save(fig, out / f"nodeday_step{k}.svg")
@@ -508,10 +516,10 @@ for k in (1, 2, 3):
     p.append(text(95, 220, "live requests", 22, C["neutral"]))
     p.append(rect(470, 40, 230, 86, C["memory_l"], C["memory"], 2.5, 8))
     p.append(text(585, 76, "v1, current", 26, C["text"], "bold"))
-    p.append(text(585, 106, "100 GB copy", 22, C["memory"]))
+    p.append(text(585, 106, f"{val('dlrm_gb')} GB copy", 22, C["memory"]))
     p.append(rect(470, 262, 230, 86, C["network_l"], C["network"], 2.5, 8))
     p.append(text(585, 298, "v2, candidate", 26, C["text"], "bold"))
-    p.append(text(585, 328, "second 100 GB copy", 22, C["network"]))
+    p.append(text(585, 328, f"second {val('dlrm_gb')} GB copy", 22, C["network"]))
     p.append(line(182, 175, 466, 90, C["memory"], 4, "b"))
     if k == 1:
         p.append(line(182, 215, 466, 300, C["network"], 3, "n", "9 6"))
@@ -524,8 +532,8 @@ for k in (1, 2, 3):
                       C["text"], "bold"))
     else:
         p.append(line(182, 215, 466, 300, C["network"], 4, "n"))
-        p.append(text(270, 98, "95% of users", 23, C["memory"], "bold"))
-        p.append(text(300, 308, "5% of users", 23, C["network"], "bold"))
+        p.append(text(270, 98, f"{val('canary_rest_pct')}% of users", 23, C["memory"], "bold"))
+        p.append(text(300, 308, f"{val('canary_pct')}% of users", 23, C["network"], "bold"))
         p.append(text(712, 296, "compare clicks", 23, C["neutral"], anchor="start"))
         p.append(text(712, 324, "and p99 with v1", 23, C["neutral"], anchor="start"))
         if k == 2:
@@ -533,7 +541,7 @@ for k in (1, 2, 3):
                           C["text"], "bold"))
         else:
             xs = [60, 260, 460, 660]
-            for i, s_ in enumerate(("5%", "25%", "50%", "100%")):
+            for i, s_ in enumerate(f"{val(f'ramp_{j}')}%" for j in range(len(calcs.RANK.ramp))):
                 p.append(rect(xs[i], 384, 120, 46, C["network_l"], C["network"], 2, 6))
                 p.append(text(xs[i] + 60, 416, s_, 24, C["network"], "bold"))
                 if i < 3:
@@ -670,8 +678,8 @@ for k in (1, 2):
 # A/B sizing (equation 4): users needed against users available, drawn at
 # its slot (about 7.5 by 2.8 cm)
 fig, ax = plt.subplots(figsize=(3.0, 1.1))
-rows = (("Needed", calcs.N_NEEDED, "danger", f"{math.ceil(calcs.N_NEEDED):,}"),
-        ("Have", calcs.N_AVAIL, "data", f"{calcs.N_AVAIL:,}"))
+rows = (("Needed", calcs.AB.per_variant, "danger", val("ab_needed")),
+        ("Have", calcs.AB.available_per_variant, "data", val("ab_avail")))
 for i, (lab, v, ck, s_) in enumerate(rows):
     y = 1 - i
     ax.barh(y, v, color=C[ck], height=0.6)
@@ -696,17 +704,17 @@ sp.save(fig, out / "ab_users.svg")
 # Dual-bank update on the keyword spotter (Sec. 14.4.4)
 for k in (1, 2):
     p = svg_open(900, 400)
-    p.append(text(10, 32, "4 MB of flash on the device", 25, C["neutral"], "bold",
+    p.append(text(10, 32, f"{val('flash_mb')} MB of flash on the device", 25, C["neutral"], "bold",
                   "start"))
     p.append(rect(10, 50, 880, 110, "#F7F7F7", "#888888", 2.5, 8))
     p.append(rect(24, 64, 420, 82, "#E8E8E8", "#999999", 2, 6))
     p.append(text(234, 113, "firmware and runtime", 24, C["neutral"], "bold"))
     p.append(rect(460, 64, 200, 82, C["data_l"], C["data"], 3, 6))
     p.append(text(560, 100, "Bank A", 25, C["data"], "bold"))
-    p.append(text(560, 130, "200 KB, running", 21, C["data"]))
+    p.append(text(560, 130, f"{val('kws_kb')} KB, running", 21, C["data"]))
     p.append(rect(674, 64, 200, 82, C["network_l"], C["network"], 3, 6, "8 5"))
     p.append(text(774, 100, "Bank B", 25, C["network"], "bold"))
-    p.append(text(774, 130, "200 KB, new", 21, C["network"]))
+    p.append(text(774, 130, f"{val('kws_kb')} KB, new", 21, C["network"]))
     if k == 2:
         p.append(rect(560, 220, 330, 80, "white", C["danger"], 2.5, 8))
         p.append(text(725, 254, "watchdog and self-test", 24, C["danger"], "bold"))
@@ -715,7 +723,7 @@ for k in (1, 2):
         p.append(path("M 556 262 C 480 262, 560 200, 560 166", C["danger"], 3, "r"))
         p.append(text(360, 252, "fault, hang, or late:", 24, C["danger"], "bold"))
         p.append(text(360, 284, "bootloader reverts to A", 24, C["danger"], "bold"))
-        p.append(text(450, 366, "No technician needed; the cost is a second 200 KB bank.",
+        p.append(text(450, 366, f"No technician needed; the cost is a second {val('kws_kb')} KB bank.",
                       24, C["text"], "bold"))
     save_svg(p, f"dualbank_step{k}.svg")
 

@@ -873,3 +873,25 @@ def calc_clopper_pearson_interval(successes: int, trials: int, confidence: float
     lo = 0.0 if k == 0 else float(beta.ppf(a / 2, k, n - k + 1))
     hi = 1.0 if k == n else float(beta.ppf(1 - a / 2, k + 1, n - k))
     return lo, hi
+# --- Detectable lift and exponential decay rate (added 2026-10-20) ------------
+def calc_two_proportion_detectable_lift(baseline_rate, n_per_variant, z_alpha=1.96, z_beta=0.84):
+    """Smallest absolute lift a two-arm test with ``n_per_variant`` per arm can detect.
+
+    The common-variance sample-size formula of ``calc_two_proportion_sample_size``
+    solved for the effect: ``delta = sqrt(2 (z_alpha + z_beta)^2 p (1 - p) / n)``.
+    """
+    if not 0 < baseline_rate < 1:
+        raise ValueError("baseline_rate must be in (0, 1).")
+    if n_per_variant <= 0:
+        raise ValueError("n_per_variant must be positive.")
+    variance = baseline_rate * (1 - baseline_rate)
+    return math.sqrt(2 * (z_alpha + z_beta) ** 2 * variance / n_per_variant)
+
+
+def calc_exponential_decay_rate(initial, later, elapsed):
+    """Rate ``gamma`` of ``A(t) = A0 exp(-gamma t)`` through two readings:
+    ``gamma = ln(A0 / A1) / t``. ``elapsed`` may be a Quantity (the rate is then
+    per its unit) or a plain number."""
+    if initial <= 0 or later <= 0:
+        raise ValueError("initial and later must be positive.")
+    return math.log(initial / later) / elapsed

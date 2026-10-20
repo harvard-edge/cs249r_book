@@ -4887,3 +4887,44 @@ LI_2025_BIAS_BEHIND_THE_WHEEL = _lit(
         "2026-10-20."
     ),
 )
+
+# --- ML operations, part 1: Zillow Offers, ML outages, change-driven outages (added 2026-10-20) ---
+ZILLOW_2021_Q2_LETTER = _report(
+    "prov:zillow-2021-q2-letter",
+    "Zillow Group, Q2 2021 Shareholder Letter, SEC Form 8-K exhibit 99.3 (August 2021)",
+    "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001617640&type=8-K",
+    notes="Zillow Offers in Q2 2021: 3,805 homes purchased, 2,086 sold, 3,142 in inventory at quarter end.",
+)
+ZILLOW_2021_Q3_LETTER = _report(
+    "prov:zillow-2021-q3-letter",
+    "Zillow Group, Q3 2021 Shareholder Letter, p. 8, Homes Segment Results, SEC Form 8-K exhibit 99.3 "
+    "(2 November 2021)",
+    "https://www.sec.gov/Archives/edgar/data/1617640/000161764021000085/exhibit993.htm",
+    notes=("Purchase of 9,680 homes; 3,032 homes sold in Q3; a $304 million write-down on inventory; "
+           "9,790 homes in inventory and 8,172 under contract at quarter end."),
+)
+ZILLOW_2021_Q3_PRESS = _report(
+    "prov:zillow-2021-q3-press",
+    "Zillow Group, Q3 2021 results press release, SEC Form 8-K exhibit 99.1 (2 November 2021)",
+    "https://www.sec.gov/Archives/edgar/data/1617640/000161764021000085/",
+    notes=("Wind-down of Zillow Offers; additional write-downs of $240 million to $265 million expected in "
+           "Q4 2021; a workforce reduction of approximately 25 percent."),
+)
+PAPASIAN_HOW_ML_BREAKS_2020 = Provenance(
+    id="prov:papasian-how-ml-breaks-2020",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="Papasian and Underwood (2020), How ML Breaks: A Decade of Outages for One Large ML Pipeline, "
+        "USENIX OpML 2020, slide 21 (Finding #1)",
+    url="https://www.usenix.org/conference/opml20/presentation/papasian",
+    verified="2026-10-20",
+    notes=("Bar chart of matching outages by the 'MLness' of their cause, 0 (not at all ML) to 4 (entirely "
+           "ML); the slides give no table, so counts are read from the chart: about 61, 0, 9, 2, 24 of 96 "
+           "postmortems."),
+)
+GOOGLE_SRE_2016 = _report(
+    "prov:google-sre-2016",
+    "Beyer, Jones, Petoff, and Murphy (eds.) (2016), Site Reliability Engineering: How Google Runs "
+    "Production Systems, ch. 1, Introduction",
+    "https://sre.google/sre-book/introduction/",
+    notes="'SRE has found that roughly 70% of outages are due to changes in a live system.'",
+)

@@ -5328,3 +5328,34 @@ def test_responsibility_groups_and_records():
     assert sum(e["miss_rate_child_pct"] for e in li) / 8 == pytest.approx(43.89, abs=0.005)
     w = Literature.PedestrianAp75BySkinType.entries
     assert round(sum(e["ap75_darker_pct"] for e in w) / 8, 1) == Literature.Fairness.WilsonAp75AverageDarkerPct
+
+
+def test_ml_operations_part1_scenarios():
+    """Release footprints, automation break-even, skew cost, A/B sizing, drift (added 2026-10-20)."""
+    from mlsysim import Literature
+    from mlsysim.core.units import Q_
+    from mlsysim.physics import calc_two_proportion_detectable_lift, calc_exponential_decay_rate
+    r = Scenarios.DlrmReleaseFootprintH100
+    assert r.accelerators_per_copy == 2 and r.accelerators_for(2) == 4
+    assert r.free_during_retrain == 2 and r.free_after(3) == 2
+    assert r.retrain_accelerator_hours.m_as("hour") == pytest.approx(24)
+    n = Scenarios.ResNet50Fp16ReleaseFootprintH100
+    assert n.copy_bytes.m_as("MB") == pytest.approx(51.114064, rel=1e-6)
+    k = Scenarios.KeywordSpotterDualBankEsp32S3
+    assert k.banks_bytes.m_as("KB") == pytest.approx(400) and k.flash_share == pytest.approx(0.0953674, rel=1e-5)
+    assert Scenarios.RetrainingPipelineAutomation.breakeven.m_as("week") == pytest.approx(20)
+    assert Scenarios.RetrainingPipelineAutomationWithUpkeep.breakeven.m_as("week") == pytest.approx(80 / 3)
+    assert Scenarios.ChurnPipelineAutomationWithUpkeep.breakeven.m_as("week") == pytest.approx(30)
+    s = Scenarios.RankingSkewOnePercent
+    assert s.errors_per_day == pytest.approx(10000) and s.cost_over(Q_(365, "day")).m_as("USD") == pytest.approx(365000)
+    a = Scenarios.ConversionRelativeLiftExperiment
+    assert a.per_variant == pytest.approx(745643.57, rel=1e-6)
+    assert a.detectable_lift() == pytest.approx(0.00546129, rel=1e-5)
+    assert calc_two_proportion_detectable_lift(0.05, a.per_variant, a.z_alpha, a.z_beta) == pytest.approx(a.lift)
+    d = Scenarios.RankingServiceAccuracyDrift
+    assert d.decay_rate.m_as("1/day") == pytest.approx(0.00235564, rel=1e-5)
+    assert calc_exponential_decay_rate(1.0, 0.5, 1.0) == pytest.approx(0.693147, rel=1e-6)
+    assert Scenarios.ArgoRolloutsSuccessRateGate.failures_to_abort == 4
+    out = [row["outages"] for row in Literature.Series.OutagesByMlness.entries]
+    assert sum(out) == float(Literature.MlOperations.PapasianPostmortems)
+    assert float(Literature.IncidentReports.ZillowQ3HomesBought) == 9680

@@ -932,3 +932,13 @@ __all__ += [
 from .statistics import calc_consecutive_detection_frames, calc_clopper_pearson_interval
 
 __all__ += ["calc_consecutive_detection_frames", "calc_clopper_pearson_interval"]
+
+# --- ML operations: skew cost, detectable lift, decay rate (added 2026-10-20) ---
+from .economics import calc_skew_cost
+from .statistics import calc_two_proportion_detectable_lift, calc_exponential_decay_rate
+
+__all__ += [
+    "calc_skew_cost",
+    "calc_two_proportion_detectable_lift",
+    "calc_exponential_decay_rate",
+]

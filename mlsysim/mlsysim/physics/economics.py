@@ -144,3 +144,18 @@ def calc_ownership_breakeven_utilization(upfront_cost, fixed_cost_per_year, rent
         u* = (C_up + Y F) / (Y (R - E)).
     """
     return (upfront_cost + years * fixed_cost_per_year) / (years * (rent_per_year_full - use_cost_per_year_full))
+
+
+# ── Training-serving skew cost (added 2026-10-20) ───────────────────────────
+
+
+def calc_skew_cost(skew_rate, query_rate, cost_per_error):
+    """Cost rate of training-serving skew: ``Rate_skew * Q * C_error``.
+
+    ``skew_rate`` is the fraction of queries whose prediction skew makes wrong,
+    ``query_rate`` the query volume per unit time, and ``cost_per_error`` the
+    business cost of one wrong prediction. Returns cost per unit time.
+    """
+    if not 0 <= skew_rate <= 1:
+        raise ValueError("skew_rate must be a fraction in [0, 1].")
+    return skew_rate * query_rate * cost_per_error

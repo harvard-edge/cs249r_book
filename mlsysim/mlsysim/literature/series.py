@@ -725,6 +725,15 @@ class Series:
         "Performance on test data from the training period versus a later period, six datasets.",
         numeric=("id_mean", "id_std", "ood_mean", "ood_std"),
     )
+    OutagesByMlness = TrendSeries(
+        "outages_by_mlness",
+        _lit("Papasian and Underwood (2020), How ML Breaks: A Decade of Outages for One Large ML Pipeline, "
+             "USENIX OpML 2020, slide 21 (Finding #1)",
+             "https://www.usenix.org/conference/opml20/presentation/papasian",
+             "counts read from the bar chart (red bars, matching outages); the slides give no table"),
+        "Outages of one large ML pipeline by how characteristic of ML their cause was, 0 to 4.",
+        numeric=("mlness", "outages"),
+    )  # added 2026-10-20
     PyTorchOperatorSchemas = TrendSeries(
         "pytorch_operator_schemas",
         _lit("PyTorch aten/src/ATen/native/native_functions.yaml at each release tag (mined 2026-10-12)",
