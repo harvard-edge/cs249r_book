@@ -19093,3 +19093,397 @@ class DisclosurePenaltyScenario(BaseScenario):
     @property
     def total(self) -> float:
         return self.per_day_penalty + sum(self.others.values())
+
+
+# --- Agent cost accounting (added 2026-10-20) ---------------------------------
+# What one accepted task costs and what each lever buys; solvers in
+# engine/solvers/cost_accounting.py. Prices are Quantities in USD per Mtoken
+# unless a field says otherwise.
+
+class PriceDeclineScenario(BaseScenario):
+    """Lowest price at each fixed capability in a ``Literature`` series, fitted per year."""
+    series_name: str
+
+    @property
+    def rows(self):
+        from ..literature.registry import Literature
+        return getattr(Literature, self.series_name).entries
+
+    @property
+    def result(self):
+        from .solvers import PriceDeclineModel
+        return PriceDeclineModel().solve(self.rows)
+
+
+class CostVsScoreScenario(BaseScenario):
+    """Per-trial cost against mean score across a benchmark's configurations."""
+    series_name: str
+    trials: int                      # trials per configuration, by the benchmark's protocol
+    budget_hours: float              # time budget per trial, by the benchmark's protocol
+
+    @property
+    def rows(self):
+        from ..literature.registry import Literature
+        return getattr(Literature, self.series_name).entries
+
+    @property
+    def result(self):
+        from .solvers import CostVsScoreModel
+        return CostVsScoreModel().solve(self.rows)
+
+
+class CohortAttemptCostScenario(BaseScenario):
+    """One configuration's cohort of tasks, one bounded attempt each, all charges settled."""
+    tasks: int
+    accepted: int
+    input_price: Quantity            # USD per Mtoken
+    output_price: Quantity
+    turns: int                       # per attempt
+    input_tokens_per_turn: int
+    output_tokens_per_turn: int
+    environment_per_turn: Quantity   # USD: tools, sandbox holding, cleanup
+    assessment_per_attempt: Quantity # USD: checks not billed as sandbox time
+    triage_per_rejected: Quantity    # USD: engineer triage of each rejected attempt
+
+    @property
+    def result(self):
+        from .solvers import CohortAttemptCostModel
+        return CohortAttemptCostModel().solve(self.tasks, self.accepted, self.input_price, self.output_price,
+                                              self.turns, self.input_tokens_per_turn, self.output_tokens_per_turn,
+                                              self.environment_per_turn, self.assessment_per_attempt,
+                                              self.triage_per_rejected)
+
+
+class TokenPriceComparisonScenario(BaseScenario):
+    """Two cohort configurations under one acceptance contract: does the cheaper token win?"""
+    baseline: CohortAttemptCostScenario
+    alternative: CohortAttemptCostScenario
+
+    @property
+    def result(self):
+        from .solvers import CohortAttemptCostModel
+        return CohortAttemptCostModel.compare(self.baseline.result, self.alternative.result,
+                                              self.baseline.accepted, self.alternative.accepted)
+
+
+class ResendCacheBillScenario(BaseScenario):
+    """An append-only trajectory (``TrajectoryResendScenario``) billed under one tariff, with and without reuse."""
+    trajectory: TrajectoryResendScenario
+    input_price: Quantity            # USD per Mtoken, fresh input
+    cached_fraction: float           # cached input billed at this share of the input price
+    output_price: Quantity
+    miss_fraction: float             # share of the eligible prefix that misses, for sensitivity
+
+    @property
+    def result(self):
+        from .solvers import PrefixCacheBillModel
+        t = self.trajectory
+        return PrefixCacheBillModel().solve(t.turns, t.first_prompt, t.appended, t.output_per_turn,
+                                            self.input_price, self.cached_fraction, self.output_price,
+                                            self.miss_fraction)
+
+
+class CompactionPaybackScenario(BaseScenario):
+    """One compaction of a billed trajectory: a summary resent fresh, then shorter cached reads."""
+    bill: ResendCacheBillScenario
+    compact_turn: int                # the call that compacts
+    compact_to: int                  # tokens of the compacted context
+    summary_tokens: int              # output tokens the summary costs
+
+    @property
+    def result(self):
+        from .solvers import CompactionPaybackModel
+        b, t = self.bill, self.bill.trajectory
+        return CompactionPaybackModel().solve(t.turns, t.first_prompt, t.appended, b.input_price,
+                                              b.cached_fraction, b.output_price, self.compact_turn,
+                                              self.compact_to, self.summary_tokens)
+
+
+class RetryPolicyScenario(BaseScenario):
+    """A cheap attempt retried up to a cap, run as a batch, or one stronger attempt."""
+    pass_probability: float
+    attempt_cost: Quantity           # USD, all-in
+    max_attempts: int
+    strong_pass_probability: float
+    strong_attempt_cost: Quantity
+
+    @property
+    def result(self):
+        from .solvers import RetryPolicyModel
+        return RetryPolicyModel().solve(self.pass_probability, self.attempt_cost, self.max_attempts,
+                                        self.strong_pass_probability, self.strong_attempt_cost)
+
+
+class SerialEpisodeScenario(BaseScenario):
+    """One serial episode as disjoint intervals; the model's intervals sped up by ``model_speedup``."""
+    model_intervals: List[Quantity]
+    tests: Quantity
+    lifecycle_intervals: List[Quantity]   # sandbox creation and snapshot export
+    runtime_intervals: List[Quantity]     # runtime setup and status
+    model_speedup: float
+
+    @property
+    def result(self):
+        from .solvers import SerialEpisodeModel
+
+        def secs(xs):
+            return tuple(float(x.to("second").magnitude) for x in xs)
+        return SerialEpisodeModel().solve(secs(self.model_intervals), float(self.tests.to("second").magnitude),
+                                          secs(self.lifecycle_intervals), secs(self.runtime_intervals),
+                                          self.model_speedup)
+
+
+class SpeculativeEpisodeScenario(BaseScenario):
+    """Speculative decoding on a serial episode's model time, at two draft acceptance levels."""
+    episode: SerialEpisodeScenario
+    draft_length: int                # gamma, tokens drafted per round
+    draft_cost_ratio: float          # r, a draft token's cost as a share of a target step
+    accepted_high: float             # m, drafted tokens kept per round when drafts align
+    accepted_low: float
+
+    @property
+    def result(self):
+        from .solvers import SpeculativeEpisodeModel
+        e = self.episode.result
+        return SpeculativeEpisodeModel().solve(float(e.total_time.to("second").magnitude), e.model_fraction,
+                                               self.draft_length, self.draft_cost_ratio, self.accepted_high,
+                                               self.accepted_low)
+
+
+class ModelCascadeScenario(BaseScenario):
+    """A tiered cascade over a completed cohort, every exit under one gate, against the top tier alone."""
+    tasks: int
+    call_costs: List[Quantity]       # USD per reached tier, gate excluded
+    gate_cost: Quantity
+    call_times: List[Quantity]
+    gate_time: Quantity
+    accepted_by_tier: List[int]
+    direct_accepted: int             # the top tier alone over the whole cohort
+    false_accept_rate: Optional[float] = None       # at the first tier, for the harm case
+    harm_per_false_accept: Optional[Quantity] = None
+
+    @property
+    def result(self):
+        from .solvers import ModelCascadeModel
+        harm = None if self.harm_per_false_accept is None else float(self.harm_per_false_accept.to("USD").magnitude)
+        return ModelCascadeModel().solve(
+            self.tasks, [float(c.to("USD").magnitude) for c in self.call_costs],
+            float(self.gate_cost.to("USD").magnitude), [float(t.to("second").magnitude) for t in self.call_times],
+            float(self.gate_time.to("second").magnitude), self.accepted_by_tier, self.direct_accepted,
+            self.false_accept_rate, harm)
+
+
+class TrajectoryAdmissionScenario(BaseScenario):
+    """A stationary admitted population of trajectories against a token-per-minute quota."""
+    arrival: Quantity                # admissions per unit time
+    residence: Quantity              # time a trajectory is present
+    calls: int                       # model calls per trajectory
+    tokens_per_call: int             # quota-counted tokens per call
+    quota: Quantity                  # tokens per unit time
+    acceptance_drop: Optional[float] = None   # relative acceptance drop at fixed goodput
+
+    @property
+    def result(self):
+        from .solvers import TrajectoryAdmissionModel
+        return TrajectoryAdmissionModel().solve(self.arrival, self.residence, self.calls, self.tokens_per_call,
+                                                self.quota, self.acceptance_drop)
+
+
+class KingmanQueueScenario(BaseScenario):
+    """One server under Kingman's approximation at two utilizations, with a holding price."""
+    service: Quantity                # mean service time
+    arrival_scv: float               # c_a^2
+    service_scv: float               # c_s^2
+    low_utilization: float
+    high_utilization: float
+    holding_rate: Quantity           # USD per second of held resources
+
+    def wait_at(self, utilization: float) -> Quantity:
+        from ..physics.serving import calc_kingman_wait_ratio
+        return calc_kingman_wait_ratio(utilization, self.arrival_scv, self.service_scv) * self.service
+
+    @property
+    def result(self):
+        from .solvers import KingmanQueueModel
+        return KingmanQueueModel().solve(self.service, self.arrival_scv, self.service_scv, self.low_utilization,
+                                         self.high_utilization, float(self.holding_rate.to("USD / second").magnitude))
+
+
+class SerialTailExposureScenario(BaseScenario):
+    """Serial calls that each exceed their own tail latency independently."""
+    calls: int
+    tail_probability: float          # 0.01 for a 99th percentile
+
+    @property
+    def any_tail(self) -> float:
+        """Chance that at least one call on the path exceeds its tail."""
+        from ..physics.agents import calc_independent_success
+        return calc_independent_success(self.tail_probability, self.calls)
+
+
+class DedicatedBreakEvenScenario(BaseScenario):
+    """Renting a matched-capability API against owning capacity at a fixed hourly cost."""
+    input_per_output: float          # input tokens per output token
+    cached_fraction: float           # share of input billed at the cached price
+    input_price: Quantity            # USD per Mtoken
+    cached_price: Quantity
+    output_price: Quantity
+    fixed_per_hour: Quantity         # USD per hour, owned capacity
+    variable_price: Quantity         # USD per Mtoken output, owned capacity
+    reference_rate: Quantity         # output tokens per second at full load
+    load: float                      # operating load, a fraction of the reference rate
+
+    def _p(self, q):
+        return float(q.to("USD / Mtoken").magnitude)
+
+    def hourly_costs(self, load: float):
+        """(API, owned) dollars per hour at ``load``."""
+        from .solvers import DedicatedBreakEvenModel
+        r = self.result
+        return DedicatedBreakEvenModel.hourly_costs(load, self.reference_rate, r.api_price,
+                                                    float(self.fixed_per_hour.to("USD / hour").magnitude),
+                                                    self._p(self.variable_price))
+
+    @property
+    def result(self):
+        from .solvers import DedicatedBreakEvenModel
+        return DedicatedBreakEvenModel().solve(
+            self.input_per_output, self.cached_fraction, self._p(self.input_price), self._p(self.cached_price),
+            self._p(self.output_price), float(self.fixed_per_hour.to("USD / hour").magnitude),
+            self._p(self.variable_price), self.reference_rate, self.load)
+
+
+class ConservedBudgetScenario(BaseScenario):
+    """A root budget granted to two children; the second stops with a remote job billed late."""
+    budget: Quantity                 # USD
+    planning: Quantity               # settled before delegation
+    allocations: List[Quantity]      # granted to the first and second child
+    settled_children: List[Quantity] # each child's settled charge at its close or stop
+    pending: Quantity                # enforceable bound on the stopped child's remote job
+    late_charge: Quantity            # its final bill, received after the local stop
+    deliveries: int = 2              # times the final bill is delivered (settled once)
+
+    @property
+    def result(self):
+        from .solvers import ConservedBudgetModel
+
+        def m(q):
+            return int(round(float(q.to("USD").magnitude) * 1000))
+        return ConservedBudgetModel().solve(m(self.budget), m(self.planning), [m(x) for x in self.allocations],
+                                            [m(x) for x in self.settled_children], m(self.pending),
+                                            m(self.late_charge), self.deliveries)
+
+
+class ArchitectureChoiceScenario(BaseScenario):
+    """Single-call designs and a bounded loop under one check, with a human fallback for rejects."""
+    tickets: int                     # per month
+    single_costs: Dict[str, Quantity]        # automated charge per ticket, check excluded
+    single_acceptance: Dict[str, float]
+    loop_name: str
+    turn_cost: Quantity              # per loop turn, check excluded
+    turn_acceptance: List[float]     # conditional acceptance of each turn reached
+    check_cost: Quantity             # the same acceptance check for every candidate
+    human_cost: Quantity             # one fallback, its final check included
+    human_resolution: float          # conditional on entering fallback
+    resolution_floor: float          # declared combined-policy requirement
+    point: float = 0.01              # one point of automated acceptance
+
+    @property
+    def result(self):
+        from .solvers import ArchitectureChoiceModel
+        return ArchitectureChoiceModel().solve(self.tickets, self.single_costs, self.single_acceptance,
+                                               self.loop_name, self.turn_cost, self.turn_acceptance,
+                                               self.check_cost, self.human_cost, self.human_resolution, self.point)
+
+
+class AdaptationPaybackScenario(BaseScenario):
+    """A one-time adaptation that cuts each task's model usage, against its incremental cost."""
+    base: Dict[str, Any]             # input_tokens, output_tokens, steps, input_price, output_price
+    adapted: Dict[str, Any]
+    data_cost: Quantity
+    training_cost: Quantity
+    evaluation_cost: Quantity
+    monthly_volume: int
+    low_volume: int                  # sensitivity case
+
+    @property
+    def result(self):
+        from .solvers import AdaptationPaybackModel
+        return AdaptationPaybackModel().solve(self.base, self.adapted, self.data_cost, self.training_cost,
+                                              self.evaluation_cost, self.monthly_volume, self.low_volume)
+
+
+class WorkloadLeverScenario(BaseScenario):
+    """Attempt cost by term for several workloads, and three levers on cost per accepted task.
+
+    Each workload gives ``acceptance``, ``environment``, ``assessment`` in
+    dollars, and either ``human`` (fixed per attempt) or ``handoff`` (charged
+    per rejected attempt). The model term is ``model`` dollars, or the
+    ``bill``'s cached trajectory cost, or ``token_multiple`` chats of
+    ``chat_input``/``chat_output`` tokens at the stated tariff.
+    """
+    workloads: Dict[str, Dict[str, Any]]
+    input_price: Quantity            # USD per Mtoken, for workloads priced in chats
+    output_price: Quantity
+    acceptance_gain: float           # absolute gain for the acceptance lever
+
+    def terms(self) -> Dict[str, Dict[str, float]]:
+        p_in = self.input_price.to("USD / Mtoken").magnitude * _usd_unit()
+        p_out = self.output_price.to("USD / Mtoken").magnitude * _usd_unit()
+        out = {}
+        for name, w in self.workloads.items():
+            t = dict(w)
+            if "bill" in t:
+                t["model"] = float(t.pop("bill").result.total_cached.to("USD").magnitude)
+            elif "token_multiple" in t:
+                chat = ((t.pop("chat_input") * p_in + t.pop("chat_output") * p_out) / 1_000_000).to("USD").magnitude
+                t["model"] = t.pop("token_multiple") * chat
+            if "environment_per_turn" in t:
+                t["environment"] = t.pop("turns") * t.pop("environment_per_turn")
+            out[name] = t
+        return out
+
+    @property
+    def result(self):
+        from .solvers import WorkloadLeverModel
+        return WorkloadLeverModel().solve(self.terms(), self.acceptance_gain)
+
+
+def _usd_unit():
+    from ..core.units import USD
+    return USD
+
+
+class CoverageIndependenceScenario(BaseScenario):
+    """Measured repeated-sampling coverage of one system on one dataset, against independent trials."""
+    series_name: str
+    system: str
+    dataset: str
+
+    @property
+    def rows(self):
+        from ..literature.registry import Literature
+        return [r for r in getattr(Literature, self.series_name).entries
+                if r["model"] == self.system and r["dataset"] == self.dataset]
+
+    @property
+    def result(self):
+        from .solvers import CoverageIndependenceModel
+        return CoverageIndependenceModel().solve(self.rows)
+
+
+class ConcurrencySweepScenario(BaseScenario):
+    """One measured serving configuration from a ``ServingFrontierScenario``, swept across concurrency."""
+    frontier: ServingFrontierScenario
+    hardware: str
+    match: Dict[str, Any]            # framework, disaggregation, run date, ...
+
+    @property
+    def rows(self):
+        return self.frontier.rows(self.hardware, **self.match)
+
+    @property
+    def result(self):
+        from .solvers import ConcurrencySweepModel
+        f = self.frontier
+        return ConcurrencySweepModel().solve(self.rows, f.x_column, f.y_column)

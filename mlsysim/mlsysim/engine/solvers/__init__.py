@@ -741,3 +741,46 @@ __all__ += [
 from .supervision import DetectionShortfallModel, SupervisorQueueModel
 
 __all__ += ["DetectionShortfallModel", "SupervisorQueueModel"]
+
+# --- Agent cost accounting (added 2026-10-20) ---
+from .cost_accounting import (
+    PriceDeclineModel,
+    CostVsScoreModel,
+    CohortAttemptCostModel,
+    PrefixCacheBillModel,
+    CompactionPaybackModel,
+    RetryPolicyModel,
+    SerialEpisodeModel,
+    SpeculativeEpisodeModel,
+    ModelCascadeModel,
+    TrajectoryAdmissionModel,
+    KingmanQueueModel,
+    DedicatedBreakEvenModel,
+    ConservedBudgetModel,
+    ArchitectureChoiceModel,
+    AdaptationPaybackModel,
+    WorkloadLeverModel,
+    CoverageIndependenceModel,
+    ConcurrencySweepModel,
+)
+
+__all__ += [
+    "PriceDeclineModel",
+    "CostVsScoreModel",
+    "CohortAttemptCostModel",
+    "PrefixCacheBillModel",
+    "CompactionPaybackModel",
+    "RetryPolicyModel",
+    "SerialEpisodeModel",
+    "SpeculativeEpisodeModel",
+    "ModelCascadeModel",
+    "TrajectoryAdmissionModel",
+    "KingmanQueueModel",
+    "DedicatedBreakEvenModel",
+    "ConservedBudgetModel",
+    "ArchitectureChoiceModel",
+    "AdaptationPaybackModel",
+    "WorkloadLeverModel",
+    "CoverageIndependenceModel",
+    "ConcurrencySweepModel",
+]

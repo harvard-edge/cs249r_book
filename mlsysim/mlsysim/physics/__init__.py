@@ -932,3 +932,7 @@ __all__ += [
 from .statistics import calc_consecutive_detection_frames, calc_clopper_pearson_interval
 
 __all__ += ["calc_consecutive_detection_frames", "calc_clopper_pearson_interval"]
+# --- Agent serving economics: queue price and speculative rounds (added 2026-10-20) ---
+from .serving import calc_kingman_wait_ratio, calc_speculative_round_speedup
+
+__all__ += ["calc_kingman_wait_ratio", "calc_speculative_round_speedup"]

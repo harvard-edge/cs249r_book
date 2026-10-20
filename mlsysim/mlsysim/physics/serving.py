@@ -266,3 +266,39 @@ def calc_batch_formation_wait(batch_size: int, arrival_rate):
     a batch waits for B - 1 more and the last for none; the mean is half.
     """
     return (batch_size - 1) / (2 * arrival_rate)
+
+
+# --- Agent serving economics: queue price and speculative rounds (added 2026-10-20) ---
+
+def calc_kingman_wait_ratio(utilization: float, arrival_scv: float, service_scv: float) -> float:
+    """Mean queue wait of one server as a multiple of the mean service time (Kingman 1961).
+
+        E[W] / E[S] ~ (c_a^2 + c_s^2) / 2 * rho / (1 - rho)
+
+    A heavy-traffic approximation for a G/G/1 queue: ``arrival_scv`` and
+    ``service_scv`` are the squared coefficients of variation of interarrival
+    and service times. Exact for M/M/1 (both 1); a mean, not a tail.
+    """
+    rho = float(utilization)
+    if not 0 <= rho < 1:
+        raise ValueError("utilization must be in [0, 1)")
+    if arrival_scv < 0 or service_scv < 0:
+        raise ValueError("squared coefficients of variation must be nonnegative")
+    variability = (arrival_scv + service_scv) / 2
+    return variability * rho / (1 - rho)
+
+
+def calc_speculative_round_speedup(accepted_per_round: float, draft_length: int,
+                                   draft_cost_ratio: float) -> float:
+    """Decode-stream speedup of speculative decoding (Leviathan et al. 2023).
+
+        S = (m + 1) / (gamma r + 1)
+
+    Each round drafts ``draft_length`` (gamma) tokens at ``draft_cost_ratio``
+    (r) of a target step each, and the target's one verification step keeps
+    ``accepted_per_round`` (m) drafted tokens plus one of its own. Faster only
+    while m > gamma r.
+    """
+    if accepted_per_round < 0 or draft_length < 0 or draft_cost_ratio < 0:
+        raise ValueError("inputs must be nonnegative")
+    return (accepted_per_round + 1) / (draft_length * draft_cost_ratio + 1)
