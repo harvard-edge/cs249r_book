@@ -3381,3 +3381,73 @@ GOOGLE_SRE_SLO_ALERTING = Provenance(
     notes=("For a 99.9 percent SLO over 30 days: page on burn rate 14.4 over 1 hour (2 percent of the budget) "
            "or 6 over 6 hours (5 percent); open a ticket on burn rate 1 over 3 days (10 percent)."),
 )
+
+# --- Closed-loop evaluation sources (added 2026-10-20) ---
+NHTSA_PE16007_2017 = Provenance(
+    id="prov:nhtsa-pe16-007-2017",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="NHTSA Office of Defects Investigation, ODI Resume, Preliminary Evaluation PE 16-007, closing report (January 2017)",
+    url="https://static.nhtsa.gov/odi/inv/2016/INCLA-PE16007-7876.PDF",
+    verified="2026-10-19",
+    notes=("Figure 11 and p. 10: airbag-deployment crashes per million miles, Tesla Model S and Model X, "
+           "1.3 before and 0.8 after Autosteer installation, 'almost 40 percent'; footnote 22: all miles "
+           "before and after installation, not only miles with Autopilot in use."),
+)
+QCS_AUTOSTEER_2019 = Provenance(
+    id="prov:qcs-autosteer-2019",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="Quality Control Systems Corp. (Whitfield, R. A.), NHTSA's Implausible Safety Claim for Tesla's "
+        "Autosteer Driver Assistance System (February 2019)",
+    url="http://www.safetyresearch.net/Library/NHTSA_Autosteer_Safety_Claim.pdf",
+    verified="2026-10-19",
+    notes=("Replication from per-vehicle mileage released after a FOIA lawsuit: exact exposure before and "
+           "after installation computable for 13 percent of vehicles; in that cohort the airbag-deployment "
+           "rate rose from 0.76 to 1.21 per million miles. Values as cited in the chapter's War Story; "
+           "URL not re-fetched 2026-10-20."),
+)
+KALRA_PADDOCK_RAND_2016 = _lit(
+    "prov:kalra-paddock-rand-rr1478-2016",
+    "Kalra, N. and Paddock, S. M. (2016), Driving to Safety: How Many Miles of Driving Would It Take to "
+    "Demonstrate Autonomous Vehicle Reliability?, RAND Corporation RR-1478",
+    url="https://www.rand.org/pubs/research_reports/RR1478.html",
+    verified="2026-10-19",
+    notes=("Table 1: benchmark rates per 100 million miles (fatalities 1.09, reported injuries 77, reported "
+           "crashes 190); miles required, millions: (1) zero failures, 95 percent upper limit at the "
+           "benchmark 275 / 3.9 / 1.6; (2) rate within 20 percent at 95 percent 8,800 / 125 / 51; (3) 20 "
+           "percent better than human at 95 percent and 80 percent power 11,000 / 161 / 65."),
+)
+KUSANO_WAYMO_2025 = _lit(
+    "prov:kusano-waymo-56m-2025",
+    "Kusano, K. D. et al. (2025), Comparison of Waymo Rider-Only Crash Rates by Crash Type to Human "
+    "Benchmarks at 56.7 Million Miles, Traffic Injury Prevention 26(sup1)",
+    url="https://www.tandfonline.com/toc/gcpi20/26/sup1",
+    verified="2026-10-19",
+    notes=("56.7 million rider-only miles through January 2025; any-injury-reported crashed-vehicle rate 79 "
+           "percent and airbag-deployment rate 81 percent below an aligned human benchmark."),
+)
+MANDLEKAR_ROBOMIMIC_2021 = _lit(
+    "prov:mandlekar-robomimic-2021",
+    "Mandlekar, A. et al. (2021), What Matters in Learning from Offline Human Demonstrations for Robot "
+    "Manipulation, CoRL 2021, arXiv:2108.03298",
+    url="https://arxiv.org/abs/2108.03298",
+    verified="2026-10-20",
+    notes=("Appendix G: low-dim BC-RNN, 30 percent validation split, 3 seeds; best checkpoint against the "
+           "lowest-validation-loss checkpoint: Square (PH) 80.7 against 2.7 percent, Transport (PH) 64.0 "
+           "against 0.7 percent success."),
+)
+TRI_LBM_2025 = _lit(
+    "prov:tri-lbm-2025",
+    "TRI LBM Team (2025), A Careful Examination of Large Behavior Models for Multitask Dexterous "
+    "Manipulation, arXiv:2507.05331",
+    url="https://arxiv.org/abs/2507.05331",
+    verified="2026-10-20",
+    notes="Section 1: '1,800 rigorously controlled real-world trials' with blind A/B testing.",
+)
+LI_SIMPLER_2024 = _lit(
+    "prov:li-simpler-2024",
+    "Li, X. et al. (2024), Evaluating Real-World Robot Manipulation Policies in Simulation (SIMPLER), "
+    "CoRL 2024, arXiv:2405.05941",
+    url="https://arxiv.org/abs/2405.05941",
+    verified="2026-10-20",
+    notes="Figure 1 caption: real and simulated success of the same policies 'over ~1500 evaluation episodes'.",
+)

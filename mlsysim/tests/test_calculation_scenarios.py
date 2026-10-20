@@ -3032,3 +3032,84 @@ def test_lifecycle_tco_payback_and_platform_benefit():
     assert Scenarios.TrainingOptimizationPayback.payback.to("month").magnitude == approx(1.777778)
     assert Scenarios.SharedPlatformBenefit50.benefit_cost_ratio == approx(1.25)
     assert Scenarios.SharedPlatformBenefit20.benefit_cost_ratio == approx(0.5)
+
+
+def test_latch_evaluation_campaign():
+    c = Scenarios.LatchEvaluationCampaign
+    assert c.lower_bound == approx(0.860892) and c.failure_upper == approx(0.139108)
+    assert c.rule_of_three == approx(0.15)
+    assert [c.runs_for(t) for t in c.nine_targets] == [29, 299, 2995]
+    assert c.target_runs == 2995 and c.joint_runs == 3688
+    assert c.estimate_runs == 598 and c.estimate_rule_of_three_runs == approx(600)
+    assert c.weak_policy_clean_probability == approx(0.0692088)
+    assert c.lower_bound_with_failures == approx(0.783894)
+    assert c.fallacy_lower_bound == approx(0.997009) and c.any_false_positive == approx(0.226219)
+    assert c.cycle.to("s").magnitude == approx(40)
+    assert c.campaign_time(c.target_runs).to("hour").magnitude == approx(33.27778)
+    assert c.operator_time(c.target_runs).to("hour").magnitude == approx(66.55556)
+    assert c.shifts(c.target_runs) == approx(8.319444)
+    assert c.jam_reset_share == approx(60 / 85)
+    assert (c.table.cells, c.table.supported, c.table.absences) == (6, 1, 5)
+
+
+def test_latch_sequential_test_and_comparison():
+    s = Scenarios.LatchSequentialTest
+    assert s.success_increment == approx(0.0953102) and s.failure_increment == approx(-2.302585)
+    assert s.accept == approx(2.890372) and s.reject == approx(-2.251292)
+    assert s.runs_to_accept == 31 and s.trace_score == approx(0.0801694)
+    assert s.false_accept_bound == approx(0.05 / 0.9)
+    assert s.fixed_runs == 29 and s.fixed_rejects_acceptable == approx(0.252828)
+    a = Scenarios.LatchCheckpointComparison
+    assert a.fisher_p == approx(0.106029) and a.all_in_one_arm == approx(0.0530146)
+    assert a.failures == 4 and a.cohens_h == approx(0.283794)
+    assert a.runs_per_arm == 195 and a.runs_per_arm_for(0.2) == 393
+
+
+def test_hazard_exposure_and_missions():
+    w = Scenarios.HazardExposureWall
+    assert [w.exposure(r).to("hour").magnitude for r in w.rates] == [approx(29957.32), approx(2.995732e6), approx(2.995732e9)]
+    assert w.rig_rate.to("1/hour").magnitude == approx(3.417445e-4)
+    assert w.shortfall(w.rates[1]) == approx(341.7445) and w.fleet_time(w.rates[2]).to("year").magnitude == approx(3417.445)
+    m = Scenarios.WarehouseMissionExposure
+    assert m.mission_distance.to("m").magnitude == approx(540)
+    assert m.missions_needed == approx(299571.73) and m.calendar_time.to("hour").magnitude == approx(39942.90)
+    assert m.wheel_revolutions == approx(1.935812e8, rel=1e-5) and m.relaxed_exposure.to("hour").magnitude == approx(2995.732)
+    i = Scenarios.WarehouseSupervisedMissions
+    assert i.active_time.to("hour").magnitude == approx(10) and i.distance.to("km").magnitude == approx(54)
+    assert i.mtbi.to("minute").magnitude == approx(15.78947) and i.density.to("1/km").magnitude == approx(0.703704)
+    lo, hi = i.count_interval
+    assert lo == approx(26.8911) and hi == approx(52.1580)
+
+
+def test_heading_drift_contact_and_force_tail():
+    h = Scenarios.AisleHeadingDrift
+    assert h.angular_mse.magnitude == approx(3.046174e-4)
+    assert h.time_to_clearance.to("s").magnitude == approx(5.729869) and h.distance_to_clearance.to("m").magnitude == approx(8.594803)
+    assert h.aisle_fraction == approx(0.286493)
+    k = Scenarios.StiffSurfaceResidual
+    assert k.residual_force.to("N").magnitude == approx(1000)
+    assert k.tripwire_penetration.to("mm").magnitude == approx(0.03) and k.limit_penetration.to("mm").magnitude == approx(0.2)
+    f = Scenarios.LatchForceTail
+    assert f.tail_over_limit.to("N").magnitude == approx(15) and f.tail_over_mean == approx(115 / 12)
+
+
+def test_road_exposure_and_crash_rate_denominator():
+    r = Scenarios.RoadMilesToDemonstrate
+    for e in ("fatalities", "injuries", "crashes"):
+        assert r.recomputed_zero_failure(e) == approx(r.zero_failure[e], rel=0.02)
+    assert r.shortfall("fatalities") == approx(4.850088) and r.precision_over_fleet("fatalities") == approx(155.2028)
+    assert sorted(r.cleared) == [1.6, 3.9, 51.0]
+    assert r.requirements("crashes") == (1.6, 51.0, 65.0)
+    d = Scenarios.AutosteerCrashRateDenominator
+    assert d.reported_change == approx(-0.384615) and d.cohort_change == approx(0.592105)
+    assert d.exact_exposure_share == approx(0.13)
+
+
+def test_closed_loop_evaluation_statistics():
+    from mlsysim.physics import (calc_clopper_pearson_lower_bound, calc_clopper_pearson_zero_failure_bound,
+                                 calc_poisson_exact_interval, calc_fisher_exact_two_sided)
+    assert calc_clopper_pearson_lower_bound(20, 20) == approx(calc_clopper_pearson_zero_failure_bound(20))
+    assert calc_clopper_pearson_lower_bound(0, 20) == 0.0
+    lo, hi = calc_poisson_exact_interval(0)
+    assert lo == 0.0 and hi == approx(3.688879)
+    assert calc_fisher_exact_two_sided(10, 0, 0, 10) == approx(2 / 184756)
