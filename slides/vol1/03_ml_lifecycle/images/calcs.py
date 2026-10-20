@@ -1,235 +1,244 @@
 #!/usr/bin/env python3
-"""Every derived number in Lecture 3 (ML Lifecycle), computed from sourced inputs.
+"""Every number on the Lecture 3 (ML Lifecycle) slides and notes, read from MLSysIM.
 
-One block per slide, in deck order. Inputs carry their source as a comment;
-each printed line is a value the slide or its note shows, under the label
-used there. make_figs.py imports the inputs below so figures and slides share
-one computation. "Chapter" means the rendered ML Lifecycle chapter.
+MLSysIM holds the inputs (Literature.ScreeningStudies, Literature.Surveys,
+Literature.PredictionQuality, ReferenceStats, the registry) and the
+calculations (the retinopathy-screener Scenarios.*); the chapter reads the same
+scenarios. This file only selects values, converts units, and formats them; it
+types no numbers. Each value is recorded with v() under the key the deck prints
+as \\val{key}; running this file writes images/numbers.tex. make_figs.py imports
+this module, so figures and slides share one computation.
 
 Run from this folder: python3 calcs.py
 """
 
 import math
-import re
+import sys
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-DATA = HERE / "data"
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
+
+Models, Literature, Scenarios = mlsysim.Models, mlsysim.Literature, mlsysim.Scenarios
+ReferenceStats = mlsysim.ReferenceStats
+STUDY = Literature.ScreeningStudies
+SURVEYS = Literature.Surveys
+TORCHVISION = ReferenceStats.TorchvisionParameterCounts
+
+REQ = Scenarios.RetinopathyScreenerRequirements
+LATE = Scenarios.RetinopathyScreenerLateMemoryLimit
+ITER = Scenarios.SlowVersusFastIteration
+TRAP = Scenarios.AlwaysNormalScreener
+YIELD = Scenarios.ThaiClinicRetinalPhotoYield
+FDA = Scenarios.IdxDrPivotalTrial
+FDA_IMAGEABILITY = Scenarios.IdxDrPivotalImageability
+PHOTO = Scenarios.FundusPhotoAt224
+UPLOAD = Scenarios.RuralClinicRetinalUpload
+COST = Scenarios.RetinopathyScreeningCloudVersusEdge
+CADENCE = Scenarios.RetinopathyMonitoringCadences
+
+# CrowdFlower 2016 time sinks, in the order the chapter's figure draws them.
+SURVEY = [("Cleaning and organizing data", SURVEYS.DataScientistCleaning),
+          ("Collecting datasets", SURVEYS.DataScientistCollecting),
+          ("Mining data for patterns", SURVEYS.DataScientistMining),
+          ("Other", SURVEYS.DataScientistOther),
+          ("Refining algorithms", SURVEYS.DataScientistRefiningAlgorithms),
+          ("Building training sets", SURVEYS.DataScientistBuildingTrainingSets)]
+DATA_WORK = (SURVEYS.DataScientistCleaning, SURVEYS.DataScientistCollecting)
+
+# torchvision run shown on the memory slide: (label, parameter count)
+TORCHVISION_RUN = [("mobilenet_v2", TORCHVISION.MobileNetV2), ("resnet50", TORCHVISION.ResNet50),
+                   ("vgg16", TORCHVISION.VGG16)]
 
 
-def show(label, value):
-    print(f"  {label}: {value}")
+def m(q, unit):
+    """Magnitude of a Pint quantity in ``unit``."""
+    return q.to(unit).magnitude
 
 
-def head(title):
-    print(f"\n[{title}]")
+def pct(x):
+    """A fraction as percent."""
+    return 100 * x
 
 
-def pct(x, d=1):
-    return f"{100 * x:.{d}f}%"
+print("== Hook (Gulshan et al. 2016; Beede et al. 2020, via Literature)")
+v("gul_dev_images", round(STUDY.GulshanDevelopmentImages, -3), "{:,.0f}",
+  "development-set images, to the thousand")
+v("gul_sens", STUDY.GulshanHighSensitivityPointSensitivity, "{:.1f}", "high-sensitivity point: sensitivity, %")
+v("gul_spec", STUDY.GulshanHighSensitivityPointSpecificity, "{:.1f}", "high-sensitivity point: specificity, %")
+v("gul_hispec_sens", STUDY.GulshanHighSpecificityPointSensitivity, "{:.1f}",
+  "high-specificity point: sensitivity, %")
+v("gul_hispec_spec", STUDY.GulshanHighSpecificityPointSpecificity, "{:.1f}",
+  "high-specificity point: specificity, %")
+v("gul_eyepacs", STUDY.GulshanEyePacs1Images, "{:,.0f}", "EyePACS-1 images behind the curve")
+v("gul_graders", STUDY.GulshanEyePacs1Ophthalmologists, "{:.0f}", "ophthalmologists plotted")
+v("gul_graders_word", STUDY.GulshanEyePacs1Ophthalmologists, "words", "the same, in prose")
+v("gul_auc", STUDY.GulshanEyePacs1Auc, "{:.3f}", "EyePACS-1 AUC")
+v("beede_clinics", STUDY.BeedeClinics, "{:.0f}", "clinics observed")
+v("beede_months_word", STUDY.BeedeStudyMonths, "words", "months of observation, in prose")
+v("beede_submitted", YIELD.attempted, "{:,.0f}", "photos submitted")
+v("beede_ungradable", YIELD.rejected, "{:,.0f}", "photos rejected as ungradable")
+v("ungradable_pct", pct(YIELD.rejected_share), "{:.0f}", "ungradable share, %")
 
+print("== Day-153 failure (late-constraint scenario)")
+v("model_gb", m(LATE.model_memory, "GB"), "{:.0f}", "memory the model needs, GB")
+v("budget_mb", m(REQ.memory_budget, "MB"), "{:.0f}", "reservation for the model, MB")
+v("device_mem_lo", m(LATE.device_memory_low, "GB"), "{:.0f}", "clinic device memory, low, GB")
+v("device_mem_hi", m(LATE.device_memory_high, "GB"), "{:.0f}", "clinic device memory, high, GB")
+v("day_request", LATE.request_day, "{:.0f}", "day of the request")
+(day_a, sens_a), (day_b, sens_b) = sorted(LATE.validation_sensitivity.items())
+v("day_val_a", day_a, "{:.0f}", "first validation milestone, day")
+v("day_val_b", day_b, "{:.0f}", "second validation milestone, day")
+v("val_a_pct", pct(sens_a), "{:.0f}", "sensitivity at the first milestone, %")
+v("val_b_pct", pct(sens_b), "{:.0f}", "sensitivity at the second milestone, %")
+v("day_handoff", LATE.handoff_day, "{:.0f}", "handed to deployment, day")
+v("day_found", LATE.discovery_day, "{:.0f}", "memory need reported, day")
+v("day_check", LATE.check_day, "{:.0f}", "device checked, day")
+v("day_discard", LATE.discard_day, "{:.0f}", "work discarded, day")
+v("months_lost_word", round(m(LATE.work_discarded, "month")), "words", "months of work discarded, in prose")
+v("overrun_x", LATE.overrun_ratio, "{:.0f}", "model memory / reservation")
+v("overrun_word", LATE.overrun_ratio, "words", "the same, in prose")
 
-# ---------------------------------------------------------------------------
-# Inputs
-# ---------------------------------------------------------------------------
-# Hook (Gulshan et al., JAMA 2016, abstract and Fig. 2; Beede et al., CHI 2020,
-# as cited in chapter Sec. 3.1.2)
-LAB_SENS, LAB_SPEC = 97.5, 93.4          # EyePACS-1, high-sensitivity point
-LAB_HISPEC_SENS, LAB_HISPEC_SPEC = 90.3, 98.1   # EyePACS-1, high-specificity point
-UNGRADABLE, SUBMITTED = 393, 1838        # Beede et al. 2020
+print("== Memory: torchvision run (ReferenceStats) at FP32")
+v("fp32_bytes", m(mlsysim.BYTES_FP32 * mlsysim.core.units.param, "byte"), "{:.0f}", "bytes per FP32 weight")
+v("fp32_bytes_word", m(mlsysim.BYTES_FP32 * mlsysim.core.units.param, "byte"), "words", "the same, in prose")
+for label, n in TORCHVISION_RUN:
+    v(f"tv_{label}", m(n, "param"), "{:,.0f}", f"torchvision {label} parameters")
+    v(f"mb_{label}", m(n * mlsysim.BYTES_FP32, "MB"), "{:.0f}", f"{label} FP32 weights, MB")
+v("mnv2_mops", m(Models.Vision.MobileNetV2.inference_flops, "MFLOP"), "{:.0f}",
+  "MobileNetV2 operations per inference, millions")
 
-# Day-153 scenario (chapter Sec. 3.1.2)
-MODEL_MB = 4000                          # "needs 4 GB"
-RESERVED_MB = 500                        # clinic IT reserves about 500 MB
-DAY_REQUEST, DAY_DISCARD = 1, 153
-DAYS_PER_MONTH = 365.25 / 12
+print("== Repair schedule (late-constraint scenario)")
+REPAIR = [(name, m(d, "day")) for name, d in LATE.repair_tasks.items()]
+for key, (_, days) in zip(("rep_prep", "rep_train", "rep_val", "rep_pack"), REPAIR):
+    v(key, days, "{:.0f}", f"repair task, days")
+v("rep_total", m(LATE.repair_elapsed, "day"), "{:.0f}", "days in sequence")
+v("rep_total_word", m(LATE.repair_elapsed, "day"), "words", "the same, in prose")
+v("rep_tasks_word", len(REPAIR), "words", "dependent artifacts redone, in prose")
 
-# Real tool output: torchvision 0.28.0 parameter counts, produced by running
-# data/count_params.py (output saved in data/count_params_output.txt).
-FP32_BYTES = 4                           # bytes per FP32 weight
+print("== Time sinks (CrowdFlower 2016 via Literature)")
+v("sv_cleaning", SURVEYS.DataScientistCleaning, "{:.0f}", "cleaning and organizing, %")
+v("sv_collecting", SURVEYS.DataScientistCollecting, "{:.0f}", "collecting datasets, %")
+v("sv_data_work", sum(DATA_WORK), "{:.0f}", "data work together, %")
+v("sv_algorithms", SURVEYS.DataScientistRefiningAlgorithms, "{:.0f}", "refining algorithms, %")
 
+print("== Iteration (slow-versus-fast scenario)")
+v("it_weeks", m(ITER.window, "week"), "{:.0f}", "development window, weeks")
+v("it_months_word", round(m(ITER.window, "month")), "words", "the same window, months, in prose")
+v("it_slow_cycle", m(ITER.slow_cycle, "week"), "{:.0f}", "large run, weeks")
+v("it_slow_cycle_word", m(ITER.slow_cycle, "week"), "words", "the same, in prose")
+v("it_fast_cycle", m(ITER.fast_cycle, "hour"), "{:.0f}", "small run, hours")
+v("it_fast_cycle_word", m(ITER.fast_cycle, "hour"), "words", "the same, in prose")
+v("it_slow_start", ITER.slow_start, "{:.0f}", "large start, %")
+v("it_slow_gain", ITER.slow_gain, "{:.2f}", "large gain per run, points")
+v("it_fast_start", ITER.fast_start, "{:.0f}", "small start, %")
+v("it_fast_gain", ITER.fast_gain, "{:.1f}", "small gain per run, points")
+v("it_ceiling", ITER.ceiling, "{:.0f}", "ceiling, %")
+v("it_slow_runs", ITER.slow_runs, "{:.0f}", "large runs")
+v("it_slow_final", ITER.slow_final, "{:.1f}", "large final accuracy, %")
+v("it_hours_week", m(1 * mlsysim.core.units.week, "hour"), "{:.0f}", "hours in a week")
+v("it_fast_possible", ITER.fast_possible_runs, "{:,.0f}", "small possible runs")
+v("it_fast_runs", ITER.fast_effective_runs, "{:.0f}", "small runs a team learns from")
+v("it_fast_uncapped", ITER.fast_uncapped, "{:.0f}", "small uncapped accuracy, %")
+v("it_fast_final", ITER.fast_final, "{:.0f}", "small capped accuracy, %")
+v("it_ideas_x", ITER.ideas_ratio, "{:.1f}", "ideas tested, fast / slow")
+v("it_gap", ITER.final_gap, "{:.1f}", "gap between the final accuracies, points")
 
-def param_counts():
-    out = {}
-    for line in (DATA / "count_params_output.txt").read_text().splitlines():
-        m = re.match(r"(\w+)\s+([\d,]+) parameters", line)
-        if m:
-            out[m.group(1)] = int(m.group(2).replace(",", ""))
-    return out
+print("== Requirements and the release gate (requirements scenario)")
+v("floor_sens", pct(REQ.sensitivity_floor), "{:.0f}", "sensitivity floor, %")
+v("floor_spec", pct(REQ.specificity_floor), "{:.0f}", "specificity floor, %")
+v("power_lo", m(REQ.power_low, "W"), "{:.0f}", "clinic device power, low, W")
+v("power_hi", m(REQ.power_high, "W"), "{:.0f}", "clinic device power, high, W")
+v("gate_all_pct", pct(REQ.slice_sensitivity["all clinic photos"]), "{:.0f}", "sensitivity, all clinic photos, %")
+v("gate_cataract_pct", pct(REQ.slice_sensitivity["cataract patients"]), "{:.0f}",
+  "sensitivity, cataract patients, %")
 
+print("== Accuracy trap (always-normal scenario)")
+v("trap_pop", TRAP.population, "{:.0f}", "patients")
+v("trap_sick", TRAP.sick, "{:.0f}", "patients with disease")
+v("trap_healthy", TRAP.healthy, "{:.0f}", "healthy patients")
+v("trap_right", TRAP.true_positives + TRAP.true_negatives, "{:.0f}", "patients the model is right about")
+v("trap_acc", pct(TRAP.accuracy), "{:.0f}", "accuracy, %")
+v("trap_sens", pct(TRAP.sensitivity), "{:.0f}", "sensitivity, %")
+v("trap_missed", TRAP.missed, "{:.0f}", "cases missed")
 
-# Example 3.1 repair schedule (chapter): days per task, in sequence
-REPAIR_DAYS = [("Revise preparation", 1), ("Train new weights", 2),
-               ("Repeat validation", 2), ("Package the release", 1)]
+print("== Amazon recruiting tool (Reuters 2018 via Literature)")
+AMAZON = Literature.Fairness
+v("amazon_years", AMAZON.AmazonRecruitingHistoryYears, "{:.0f}", "years of past hiring decisions")
+v("amazon_years_word", AMAZON.AmazonRecruitingHistoryYears, "words", "the same, in prose")
+v("amazon_colleges_word", AMAZON.AmazonRecruitingWomensCollegesDowngraded, "words",
+  "all-women's colleges downgraded, in prose")
 
-# CrowdFlower 2016 survey, chapter figure 4 (share of respondents)
-SURVEY = [("Cleaning and organizing data", 60), ("Collecting datasets", 19),
-          ("Mining data for patterns", 9), ("Other", 5),
-          ("Refining algorithms", 4), ("Building training sets", 3)]
+print("== Stage 3: 224 pixels (resize scenario)")
+v("px_src_h", PHOTO.source_height, "{:.0f}", "photo height, px")
+v("px_src_w", round(PHOTO.source_width, -3), "{:,.0f}", "photo width, px, to the thousand")
+v("px_target", PHOTO.target_size, "{:.0f}", "ImageNet input side, px")
+v("px_scale", PHOTO.scale, "{:.2f}", "scale factor")
+v("lesion_lo", min(PHOTO.feature_sizes), "{:.0f}", "exudate width as captured, low, px")
+v("lesion_hi", max(PHOTO.feature_sizes), "{:.0f}", "exudate width as captured, high, px")
+v("lesion_mid", PHOTO.feature_mid, "{:.0f}", "midpoint exudate width, px")
+v("lesion_lo_224", min(PHOTO.resized_features), "{:.0f}", "exudate width at 224, low, px")
+v("lesion_hi_224", max(PHOTO.resized_features), "{:.0f}", "exudate width at 224, high, px")
+v("lesion_mid_224", PHOTO.resized(PHOTO.feature_mid), "{:.0f}", "midpoint exudate width at 224, px")
 
-# Napkin Math 3.1 (chapter)
-WEEKS = 26
-LARGE_START, LARGE_GAIN = 95.0, 0.15
-SMALL_START, SMALL_GAIN = 90.0, 0.1
-SMALL_EFFECTIVE_RUNS = 100               # chapter's effective experiments
-CEILING = 99.0
-HOURS_PER_WEEK = 24 * 7
+print("== FDA De Novo DEN180001, IDx-DR (Literature; screening-counts scenarios)")
+v("fda_enrolled", STUDY.IdxDrPivotalEnrolled, "{:.0f}", "patients enrolled")
+v("fda_sites", STUDY.IdxDrPivotalSites, "{:.0f}", "primary care sites")
+v("fda_floor_sens", STUDY.IdxDrSensitivityEndpoint, "{:.1f}", "prespecified sensitivity, %")
+v("fda_floor_spec", STUDY.IdxDrSpecificityEndpoint, "{:.1f}", "prespecified specificity, %")
+v("fda_tp", FDA.true_positives, "{:.0f}", "sick patients detected")
+v("fda_sick", FDA.sick, "{:.0f}", "sick patients")
+v("fda_tn", FDA.true_negatives, "{:.0f}", "healthy patients cleared")
+v("fda_healthy", FDA.healthy, "{:.0f}", "healthy patients")
+v("fda_sens", pct(FDA.sensitivity), "{:.1f}", "observed sensitivity, %")
+v("fda_spec", pct(FDA.specificity), "{:.1f}", "observed specificity, %")
+v("fda_sens_r", pct(FDA.sensitivity), "{:.0f}", "the same, as the summary rounds it")
+v("fda_spec_r", pct(FDA.specificity), "{:.0f}", "the same, as the summary rounds it")
+v("fda_image_r", pct(FDA_IMAGEABILITY.usable_share), "{:.0f}", "imageability, %")
 
-# Accuracy trap (chapter Sec. 3.5.1; illustrative population of 100)
-POP, SICK = 100, 10
+print("== WILDS Camelyon17 (Koh et al. 2021 via Literature)")
+wid, wood = Literature.PredictionQuality.WildsCamelyon17IdAccuracy, Literature.PredictionQuality.WildsCamelyon17OodAccuracy
+v("wilds_id", wid, "{:.1f}", "training hospitals, %")
+v("wilds_ood", wood, "{:.1f}", "hospital 5, %")
+v("wilds_drop", wid - wood, "{:.1f}", "drop, points")
 
-# 224-pixel demonstration (chapter Sec. 3.7.2; photo measured for the slide)
-IMAGENET_INPUT = 224
-PHOTO_HEIGHT_PX = 857                    # Hao et al. photo, square crop side
-LESION_PX = (8, 12)                      # exudate widths measured on the photo
+print("== Clinic upload (daily-upload scenario)")
+v("up_patients", UPLOAD.cases_per_day, "{:.0f}", "patients a day")
+v("up_photos", UPLOAD.files_per_case, "{:.0f}", "photos per patient")
+v("up_photo_mb", m(UPLOAD.file_size, "MB"), "{:.0f}", "MB per photo")
+v("up_uplink_mbit", m(UPLOAD.uplink, "Mbit/s"), "{:.0f}", "uplink, Mb/s")
+v("up_uplink_mbs", m(UPLOAD.uplink, "MB/s"), "{:.2f}", "uplink, MB/s")
+v("up_shift_h", m(UPLOAD.window, "hour"), "{:.0f}", "shift, h")
+v("up_daily_mb", m(UPLOAD.daily_volume, "MB"), "{:,.0f}", "daily volume, MB")
+v("up_daily_gb", m(UPLOAD.daily_volume, "GB"), "{:.0f}", "daily volume, GB")
+v("up_secs", m(UPLOAD.upload_time, "s"), "{:,.0f}", "upload time, s")
+v("up_hours", m(UPLOAD.upload_time, "hour"), "{:.1f}", "upload time, h")
+v("up_share", pct(UPLOAD.window_share), "{:.0f}", "share of the shift, %")
+v("up_share_1", pct(UPLOAD.window_share), "{:.1f}", "the same, one decimal")
+v("up_photo_s", m(UPLOAD.file_upload_time, "s"), "{:.0f}", "one photo, s")
+v("up_summary_kb", m(UPLOAD.summary_size, "KB"), "{:.0f}", "summary per patient, KB")
+v("up_reduction", UPLOAD.reduction, "{:,.0f}", "traffic reduction")
 
-# FDA De Novo DEN180001 (IDx-DR), decision summary pp. 6-7
-FDA_TP, FDA_SICK = 173, 198              # mtmDR+ correctly identified
-FDA_TN, FDA_HEALTHY = 556, 621           # mtmDR- with "not detected"
-FDA_ANALYZED, FDA_COMPLETED = 819, 892
-FDA_IMAGEABLE, FDA_GRADED = 819, 852
-FDA_FLOOR_SENS, FDA_FLOOR_SPEC = 85.0, 82.5   # prespecified thresholds
+print("== Cloud against edge (cost scenario)")
+v("cost_clinics", COST.sites, "{:.0f}", "clinics")
+v("cost_patients", COST.cases_per_site_day, "{:.0f}", "patients per clinic per day")
+v("cost_images_word", COST.images_per_case, "words", "images per patient, in prose")
+v("cost_cloud_img", m(COST.cloud_cost_per_image, "dollar"), "{:.2f}", "cloud per image, $")
+v("cost_cloud_inf", m(COST.cloud_inference_annual, "dollar/year"), "{:,.0f}", "cloud inference, $/year")
+v("cost_cloud_net", m(COST.cloud_fixed_annual, "dollar/year"), "{:,.0f}", "connectivity, $/year")
+v("cost_cloud_year", m(COST.cloud_annual, "dollar/year"), "{:,.0f}", "cloud per year, $")
+v("cost_device", m(COST.edge_device_cost, "dollar"), "{:.0f}", "device per clinic, $")
+v("cost_capex", m(COST.edge_capex, "dollar"), "{:,.0f}", "edge up front, $")
+v("cost_maint", m(COST.edge_maintenance_annual, "dollar/year"), "{:,.0f}", "edge maintenance, $/year")
+v("cost_edge_inf", m(COST.edge_inference_annual, "dollar/year"), "{:,.0f}", "edge inference, $/year")
+v("cost_savings", m(COST.annual_savings, "dollar/year"), "{:,.0f}", "savings, $/year")
+v("cost_payback", m(COST.payback, "year"), "{:.1f}", "payback, years")
+v("cost_cloud_k", m(COST.cloud_annual, "kilodollar/year"), "{:.0f}", "cloud per year, $k (figure)")
+v("cost_capex_k", m(COST.edge_capex, "kilodollar"), "{:.0f}", "edge up front, $k (figure)")
+v("cost_edge_k", m(COST.edge_annual, "kilodollar/year"), "{:.0f}", "edge per year, $k (figure)")
 
-# WILDS (Koh et al., ICML 2021), Table 1, Camelyon17-wilds, ERM average acc
-WILDS_ID, WILDS_OOD = 93.2, 70.3
-
-# Napkin Math 3.2 (chapter)
-PATIENTS_DAY, PHOTOS, PHOTO_MB = 100, 4, 5
-UPLINK_MBIT_S = 2
-SHIFT_H = 8
-SUMMARY_KB = 10
-
-# Napkin Math 3.3 (chapter)
-CLINICS, PATIENTS_PER_CLINIC_DAY, DAYS_YEAR = 500, 50, 365
-CLOUD_PER_IMAGE = 0.01
-CLOUD_NETWORK = 45_000
-EDGE_DEVICE = 500
-EDGE_MAINT = 25_000
-EDGE_PER_IMAGE = 0.001
-
-# Monitoring cadences (chapter Sec. 3.11.1), converted to minutes
-CADENCE_DAYS = {"Minute": 1 / 1440, "Day": 1, "Week": 7,
-                "Month": 365 / 12, "Quarter": 365 / 4}
-
-
-def cadence_minutes():
-    return {k: v * 1440 for k, v in CADENCE_DAYS.items()}
-
-
-# Lecture timing: minutes from the speaker notes ([N min] tags in the .tex)
-TEX = HERE.parent / "03_ml_lifecycle.tex"
-OPTIONAL_TITLES = ["ML behavior can change when only the data changes",
-                   "Cycle time sets how many ideas a team can test",
-                   "Edge costs more up front", "Check: true or false?"]
-REVEAL_SAVINGS = 4        # three activities run as instructor-led reveals
-SHORT_SAVINGS = 3 + 2 + 1  # Stage 6 photo only and 26-week answer given (3),
-                           # 224-pixel claim only (2), FDA step 1 only (1)
-
-
-def note_minutes():
-    import re as _re
-    tex = TEX.read_text()
-    total = sum(float(m) for m in _re.findall(r"\\(?:mlsys)?note\{\[(\d+(?:\.\d+)?) min\]", tex))
-    opt = 0.0
-    for t in OPTIONAL_TITLES:
-        i = tex.index(t)
-        m = _re.search(r"\\note\{\[(\d+(?:\.\d+)?) min\]", tex[i:])
-        opt += float(m.group(1))
-    return total, opt
-
-
-# ---------------------------------------------------------------------------
-def main():
-    head("Title note: timing")
-    total, opt = note_minutes()
-    show("notes total", f"{total:.1f} min")
-    show("optional frames", f"{opt:.1f} min")
-    show("short path", f"{total - opt - REVEAL_SAVINGS:.1f} min")
-    show("50-minute path before pacing", f"{total - opt - REVEAL_SAVINGS - SHORT_SAVINGS:.1f} min")
-
-    head("Predict: what went wrong in the clinics?")
-    show("ungradable share", pct(UNGRADABLE / SUBMITTED, 1))
-
-    head("Day-153 failure")
-    show("months of work discarded",
-         f"{(DAY_DISCARD - DAY_REQUEST) / DAYS_PER_MONTH:.1f}")
-
-    head("Memory: model against reservation; torchvision counts")
-    show("model / reservation", f"{MODEL_MB / RESERVED_MB:.0f}x")
-    for name, n in param_counts().items():
-        show(f"{name} FP32 weights", f"{n * FP32_BYTES / 1e6:.1f} MB")
-
-    head("Diagnose: redo chain (Example 3.1)")
-    show("days in sequence", sum(d for _, d in REPAIR_DAYS))
-
-    head("Time sinks (CrowdFlower 2016)")
-    show("data work (cleaning + collecting)", f"{SURVEY[0][1] + SURVEY[1][1]}%")
-
-    head("Napkin Math 3.1: iteration")
-    show("large runs", WEEKS)
-    show("large final accuracy", f"{LARGE_START + WEEKS * LARGE_GAIN:.1f}%")
-    show("small possible runs", f"{WEEKS * HOURS_PER_WEEK:,}")
-    raw = SMALL_START + SMALL_EFFECTIVE_RUNS * SMALL_GAIN
-    show("small uncapped accuracy", f"{raw:.0f}%")
-    show("small capped accuracy", f"{min(raw, CEILING):.0f}%")
-    show("ideas ratio", f"{SMALL_EFFECTIVE_RUNS / WEEKS:.1f}x")
-
-    head("Accuracy trap")
-    show("always-normal accuracy", pct((POP - SICK) / POP, 0))
-    show("always-normal sensitivity", pct(0 / SICK, 0))
-
-    head("Stage 3: 224 pixels")
-    s = IMAGENET_INPUT / PHOTO_HEIGHT_PX
-    show("scale 224/857", f"{s:.2f}")
-    show("lesion widths at 224",
-         f"{LESION_PX[0] * s:.1f} to {LESION_PX[1] * s:.1f} px")
-
-    head("FDA De Novo DEN180001 (IDx-DR)")
-    show("observed sensitivity 173/198", pct(FDA_TP / FDA_SICK))
-    show("observed specificity 556/621", pct(FDA_TN / FDA_HEALTHY))
-    show("analyzable fraction 819/892", pct(FDA_ANALYZED / FDA_COMPLETED, 0))
-    show("imageability 819/852", pct(FDA_IMAGEABLE / FDA_GRADED))
-    show("lab minus field sensitivity (97.5 vs 87.4 observed)",
-         f"{LAB_SENS - 100 * FDA_TP / FDA_SICK:.1f} points")
-
-    head("WILDS Camelyon17 (Table 1)")
-    show("ID minus OOD", f"{WILDS_ID - WILDS_OOD:.1f} points")
-
-    head("Napkin Math 3.2: upload")
-    day_mb = PATIENTS_DAY * PHOTOS * PHOTO_MB
-    mb_s = UPLINK_MBIT_S / 8
-    secs = day_mb / mb_s
-    show("daily volume", f"{day_mb:,} MB")
-    show("uplink", f"{mb_s} MB/s")
-    show("upload time", f"{secs:,.0f} s = {secs / 3600:.1f} h")
-    show("share of shift", pct(secs / 3600 / SHIFT_H, 1))
-    show("one photo", f"{PHOTO_MB / mb_s:.0f} s")
-    summary_mb = PATIENTS_DAY * SUMMARY_KB / 1000
-    show("traffic reduction", f"{day_mb / summary_mb:,.0f}x")
-
-    head("Napkin Math 3.3: cloud against edge")
-    images = CLINICS * PATIENTS_PER_CLINIC_DAY * DAYS_YEAR
-    cloud_inf = images * CLOUD_PER_IMAGE
-    cloud = cloud_inf + CLOUD_NETWORK
-    edge_inf = images * EDGE_PER_IMAGE
-    edge_run = EDGE_MAINT + edge_inf
-    capex = CLINICS * EDGE_DEVICE
-    show("images per year", f"{images:,}")
-    show("cloud inference", f"${cloud_inf:,.0f}")
-    show("cloud per year", f"${cloud:,.0f}")
-    show("edge up front", f"${capex:,.0f}")
-    show("edge inference", f"${edge_inf:,.0f}")
-    show("edge per year", f"${edge_run:,.0f}")
-    show("savings per year", f"${cloud - edge_run:,.0f}")
-    show("payback", f"{capex / (cloud - edge_run):.1f} years")
-
-    head("Monitoring cadences")
-    cm = cadence_minutes()
-    for k, v in cm.items():
-        show(f"{k} in minutes", f"{v:,.0f}")
-    show("orders of magnitude, minute to quarter",
-         f"{math.log10(cm['Quarter'] / cm['Minute']):.1f}")
-
+print("== Monitoring cadences (cadence scenario)")
+v("cad_orders_word", round(CADENCE.span_orders), "words", "orders of magnitude, minute to quarter, in prose")
 
 if __name__ == "__main__":
-    main()
+    write(__file__)
