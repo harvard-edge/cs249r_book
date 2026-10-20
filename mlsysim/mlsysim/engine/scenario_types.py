@@ -17215,3 +17215,187 @@ class QuantizedDeploymentProfileScenario(BaseScenario):
     @property
     def passes_calibration(self) -> bool:
         return self.int_calibration_error_pct <= self.calibration_error_limit_pct
+
+
+# --- Reinforcement learning from verifiable rewards (added 2026-10-20) ---
+# One update's accepted rollouts under an imperfect verifier, a fixed baseline,
+# a shaped reward, forked continuations and their bill, group-relative
+# coefficients, length normalization, reward contrast per rollout step,
+# repeated verification, a ratio clip, a sandbox slot's cycle, a group
+# barrier, and a verifier pool. Solvers in engine/solvers/reinforcement.py.
+
+
+class RewardCompositionScenario(BaseScenario):
+    """One update's rollouts scored by a verifier that accepts some failures."""
+    tasks: int
+    group: int                       # rollouts per task
+    pass_rate: float                 # true pass probability of one rollout
+    false_accept_rate: float         # P(accept | failure)
+    valid_accept_rate: float         # P(accept | pass)
+
+    @property
+    def result(self):
+        from .solvers import RewardCompositionModel
+        return RewardCompositionModel().solve(self.tasks, self.group, self.pass_rate,
+                                              self.false_accept_rate, self.valid_accept_rate)
+
+
+class CenteredRewardScenario(BaseScenario):
+    """Binary terminal rewards centered on a fixed baseline."""
+    baseline: float
+    passing_reward: float
+    failing_reward: float
+
+    @property
+    def result(self):
+        from .solvers import CenteredRewardModel
+        return CenteredRewardModel().solve(self.baseline, self.passing_reward, self.failing_reward)
+
+
+class RewardShapingScenario(BaseScenario):
+    """A shaped score R = c + alpha f - lambda len, with one pass and one failure to compare."""
+    format_weight: float             # alpha
+    length_weight: float             # lambda
+    length_cap: int                  # tokens; len = tokens / cap
+    pass_format: float
+    pass_tokens: int
+    failure_format: float
+    failure_tokens: int
+
+    @property
+    def result(self):
+        from .solvers import RewardShapingModel
+        return RewardShapingModel().solve(self.format_weight, self.length_weight, self.length_cap,
+                                          self.pass_format, self.pass_tokens, self.failure_format,
+                                          self.failure_tokens)
+
+
+class ForkValueScenario(BaseScenario):
+    """Binary continuations forked before and after one turn, with their pass counts."""
+    continuations: int               # per fork
+    passes_before: int
+    passes_after: int
+
+    @property
+    def result(self):
+        from .solvers import ForkValueModel
+        return ForkValueModel().solve(self.continuations, self.passes_before, self.passes_after)
+
+
+class ContinuationForkCostScenario(BaseScenario):
+    """A trajectory whose value is sampled by forking continuations at chosen turns."""
+    turns: int
+    tokens_per_turn: int
+    branches: int                    # continuations per fork
+    boundaries: Optional[List[int]] = None   # completed turns before each fork; None forks at every one
+
+    @property
+    def result(self):
+        from .solvers import ContinuationForkCostModel
+        return ContinuationForkCostModel().solve(self.turns, self.tokens_per_turn, self.branches,
+                                                 self.boundaries)
+
+
+class GroupCoefficientsScenario(BaseScenario):
+    """The rewards of one group of rollouts and the coefficient convention applied to them."""
+    rewards: List[float]
+    stabilizer: float                # epsilon added to the dispersion
+    bessel: bool = False             # divide the variance by G - 1 instead of G
+
+    @property
+    def result(self):
+        from .solvers import GroupCoefficientsModel
+        return GroupCoefficientsModel().solve(self.rewards, self.stabilizer, self.bessel)
+
+
+class LengthNormalizationScenario(BaseScenario):
+    """Two rollouts with one group coefficient and different lengths, averaged per rollout."""
+    short_tokens: int
+    long_tokens: int
+
+    @property
+    def result(self):
+        from .solvers import LengthNormalizationModel
+        return LengthNormalizationModel().solve(self.short_tokens, self.long_tokens)
+
+
+class RolloutStepBudgetScenario(BaseScenario):
+    """One update's tasks, group size, rollout length, and the policy's pass rate on the mix."""
+    tasks: int
+    group: int
+    turns: int
+    tokens_per_turn: int
+    pass_rate: float
+
+    @property
+    def result(self):
+        from .solvers import RolloutStepBudgetModel
+        return RolloutStepBudgetModel().solve(self.tasks, self.group, self.turns, self.tokens_per_turn,
+                                              self.pass_rate)
+
+
+class RepeatedVerificationScenario(BaseScenario):
+    """A timing-sensitive check repeated on one candidate, with an all-pass rule."""
+    incorrect_pass: float            # P(one trial passes | incorrect candidate)
+    correct_pass: float              # P(one trial passes | correct candidate)
+    trials: int
+    group: int                       # candidates graded once each in one group
+
+    @property
+    def result(self):
+        from .solvers import RepeatedVerificationModel
+        return RepeatedVerificationModel().solve(self.incorrect_pass, self.correct_pass, self.trials,
+                                                 self.group)
+
+
+class RatioClipScenario(BaseScenario):
+    """One token's old probability under a symmetric ratio clip."""
+    epsilon: float
+    probability: float
+
+    @property
+    def result(self):
+        from .solvers import RatioClipModel
+        return RatioClipModel().solve(self.epsilon, self.probability)
+
+
+class RolloutSlotCycleScenario(BaseScenario):
+    """Sandbox slots running one episode at a time, with a cold and a snapshot reset."""
+    slots: int
+    decisions: int                   # model calls per episode
+    model_time: Quantity             # per decision
+    tool_time: Quantity              # per decision
+    assessment_time: Quantity        # per episode
+    cold_reset: Quantity
+    snapshot_reset: Quantity
+
+    @property
+    def result(self):
+        from .solvers import RolloutSlotCycleModel
+        return RolloutSlotCycleModel().solve(self.slots, self.decisions, self.model_time, self.tool_time,
+                                             self.assessment_time, self.cold_reset, self.snapshot_reset)
+
+
+class GroupBarrierScenario(BaseScenario):
+    """The rollout latencies of one synchronous group."""
+    latencies: List[Quantity]
+
+    @property
+    def result(self):
+        from .solvers import GroupBarrierModel
+        return GroupBarrierModel().solve(self.latencies)
+
+
+class VerifierPoolScenario(BaseScenario):
+    """Completed trajectories arriving in batches, each verified by repeated trials."""
+    trajectories: int                # per interval
+    interval: Quantity
+    trials: int                      # per trajectory; all execute in this sizing case
+    trial_time: Quantity
+    target_utilization: float
+
+    @property
+    def result(self):
+        from .solvers import VerifierPoolModel
+        return VerifierPoolModel().solve(self.trajectories, self.interval, self.trials, self.trial_time,
+                                         self.target_utilization)

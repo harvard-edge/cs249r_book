@@ -691,3 +691,36 @@ __all__ += [
     "ContextDistillationModel",
     "CandidateReleaseModel",
 ]
+
+# --- Reinforcement learning from verifiable rewards (added 2026-10-20) ---
+from .reinforcement import (
+    RewardCompositionModel,
+    CenteredRewardModel,
+    RewardShapingModel,
+    ForkValueModel,
+    ContinuationForkCostModel,
+    GroupCoefficientsModel,
+    LengthNormalizationModel,
+    RolloutStepBudgetModel,
+    RepeatedVerificationModel,
+    RatioClipModel,
+    RolloutSlotCycleModel,
+    GroupBarrierModel,
+    VerifierPoolModel,
+)
+
+__all__ += [
+    "RewardCompositionModel",
+    "CenteredRewardModel",
+    "RewardShapingModel",
+    "ForkValueModel",
+    "ContinuationForkCostModel",
+    "GroupCoefficientsModel",
+    "LengthNormalizationModel",
+    "RolloutStepBudgetModel",
+    "RepeatedVerificationModel",
+    "RatioClipModel",
+    "RolloutSlotCycleModel",
+    "GroupBarrierModel",
+    "VerifierPoolModel",
+]

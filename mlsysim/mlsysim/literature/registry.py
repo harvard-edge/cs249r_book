@@ -77,6 +77,7 @@ VlaSystems = _load("vla_systems", "VlaSystems", "Cited figures of published VLA 
 # Robot demonstration data and event data recorders (added 2026-10-20)
 RobotDataSystems = _load("robot_data_systems", "RobotDataSystems", "Cited figures of dated robot demonstration-data systems and interactive imitation results (DROID, Open X-Embodiment, AgiBot World, ThriftyDAgger).")
 OnDeviceLearning = _load("on_device_learning", "OnDeviceLearning", "Cited results of on-device and federated learning systems (Gboard, Google FL system, TinyTL).")  # added 2026-10-20
+RlTrainingDynamics = _load("rl_training_dynamics", "RlTrainingDynamics", "Training-curve readings from RL of language models on verifiable rewards (DeepSeek-R1-Zero length, DAPO entropy).")  # added 2026-10-20
 EventDataRecorders = _load("event_data_recorders", "EventDataRecorders", "Pre-crash recording windows required of automotive event data recorders (49 CFR 563).")
 # Published vision-language-action and dual-system robot policies (added 2026-10-20)
 # Robot policy training: sim-to-real, parallel simulation, on-robot RL (added 2026-10-20)
@@ -453,6 +454,8 @@ class Literature(Registry):
     SweBenchTrajectories = _series.SweBenchTrajectories
     SweBenchMiniSonnet4Run = _series.SweBenchMiniSonnet4Run  # added 2026-10-20
     ImitationSuperTuxKart = _series.ImitationSuperTuxKart  # added 2026-10-20
+    GrpoPassAtKSteps = _series.GrpoPassAtKSteps  # added 2026-10-20
+    RlTrainingDynamics = RlTrainingDynamics  # added 2026-10-20
     RepeatedSamplingCoverage = _series.RepeatedSamplingCoverage
     RepeatedSamplingMajority = _series.RepeatedSamplingMajority
     InjectionDefenseResults = _series.InjectionDefenseResults
