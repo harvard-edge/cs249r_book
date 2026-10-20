@@ -101,3 +101,36 @@ __all__ = [
     "OrchestrationModel",
     "CompressionModel",
 ]
+
+# --- Physical-plant budgets: stopping, actuation, heat, power (added 2026-10-20) ---
+from .plant import (
+    StoppingBudgetModel,
+    SpeedStepModel,
+    FreshnessProfileModel,
+    BrakingCeilingsModel,
+    HubDriveElectricalModel,
+    GearedRotorModel,
+    GearRatioCostModel,
+    ThermalBurstModel,
+    StallDeratingModel,
+    ContinuousDeratingModel,
+    DriveBusModel,
+    ZeroFailureModel,
+    ThrottledStageModel,
+)
+
+__all__ += [
+    "StoppingBudgetModel",
+    "SpeedStepModel",
+    "FreshnessProfileModel",
+    "BrakingCeilingsModel",
+    "HubDriveElectricalModel",
+    "GearedRotorModel",
+    "GearRatioCostModel",
+    "ThermalBurstModel",
+    "StallDeratingModel",
+    "ContinuousDeratingModel",
+    "DriveBusModel",
+    "ZeroFailureModel",
+    "ThrottledStageModel",
+]

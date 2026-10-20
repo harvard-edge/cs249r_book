@@ -31,6 +31,8 @@ FleetOperations = _load("fleet_operations", "FleetOperations", "Measured fleet-o
 DatacenterElectricity = _load("datacenter_electricity", "DatacenterElectricity", "Datacenter electricity consumption and projections (LBNL, IEA).")
 AcceleratorLifecycle = _load("accelerator_lifecycle", "AcceleratorLifecycle", "Accelerator life-cycle emission trends (Schneider et al. 2025).")
 StorageSystems = _load("storage_systems", "StorageSystems", "Measured production storage-system results (3FS read stress test).")
+# Spaceflight anomaly inquiries (added 2026-10-20)
+SpaceflightAnomalies = _load("spaceflight_anomalies", "SpaceflightAnomalies", "Cited results of spaceflight anomaly inquiries (ESA Schiaparelli 2017).")
 
 
 # ---------------------------------------------------------------------------
@@ -295,6 +297,7 @@ class Literature(Registry):
     DatacenterElectricity = DatacenterElectricity
     AcceleratorLifecycle = AcceleratorLifecycle
     StorageSystems = StorageSystems
+    SpaceflightAnomalies = SpaceflightAnomalies  # added 2026-10-20
     ComputeTrend = ComputeTrend
     AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks

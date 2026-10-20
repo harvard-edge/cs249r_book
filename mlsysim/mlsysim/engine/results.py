@@ -82,6 +82,20 @@ __all__ = [
     "UtilizationLossResult",
     "SyntheticFootprintResult",
     "StorageBenchmarkResult",
+    # physical-plant budgets (added 2026-10-20)
+    "StoppingBudgetResult",
+    "SpeedStepResult",
+    "FreshnessProfileResult",
+    "BrakingCeilingsResult",
+    "HubDriveElectricalResult",
+    "GearedRotorResult",
+    "GearRatioCostResult",
+    "ThermalBurstResult",
+    "StallDeratingResult",
+    "ContinuousDeratingResult",
+    "DriveBusResult",
+    "ZeroFailureResult",
+    "ThrottledStageResult",
 ]
 
 
@@ -871,3 +885,173 @@ class StorageBenchmarkResult(SolverResult):
     result_count: int
     medians: Dict[str, Dict[str, float]]   # workload -> accelerator -> GB/s per accelerator
     generation_ratios: Dict[str, float]    # workload -> newer / older accelerator
+
+
+# ── Physical-plant budget results: stopping, actuation, heat, power (added 2026-10-20) ──
+
+class StoppingBudgetResult(SolverResult):
+    """Result from StoppingBudgetModel: the stopping distance against the clear distance."""
+    blind_travel: Quantity           # v tau
+    braking_travel: Quantity         # v^2 / (2 a)
+    travel_to_rest: Quantity         # blind travel + braking travel
+    overhead: Quantity               # localization bound + protective clearance
+    stopping_distance: Quantity
+    clearance_left: Quantity         # clear distance - stopping distance (negative: breach)
+    speed_ceiling: Quantity          # largest speed whose stop fits the clear distance
+    crossover_speed: Quantity        # speed at which v tau = v^2 / (2 a)
+    stop_time: Quantity              # v / a
+    added_delay_travel: Optional[Quantity] = None
+
+
+class SpeedStepResult(SolverResult):
+    """Result from SpeedStepModel: what raising a speed setpoint costs in braking travel."""
+    braking_growth: float            # raised braking / base braking - 1
+    braking_added: Quantity
+    equivalent_delay: Quantity       # added braking expressed as delay at the base speed
+
+
+class FreshnessProfileResult(SolverResult):
+    """Result from FreshnessProfileModel: a target's freshness deadline against an age profile."""
+    allowed_error: Quantity
+    deadline: Quantity
+    stage_sum_p50: Quantity
+    stage_sum_p99: Quantity
+    stage_sum_max: Quantity
+    focus_stage: Quantity            # the stage a benchmark reports, at the median
+    rest_of_chain: Quantity          # median chain minus that stage
+    focus_share: float               # of the median chain
+    focus_rate: Quantity             # loop rate the benchmark alone suggests
+    travel_p50: Quantity
+    travel_tail: Quantity
+    slack_p50: Quantity
+    overrun_tail: Quantity
+
+
+class BrakingCeilingsResult(SolverResult):
+    """Result from BrakingCeilingsModel: traction, tip-over, drive-torque, and back-EMF checks."""
+    wheel_torque: Quantity
+    force: Quantity
+    rotating_mass: Quantity
+    rotating_share: float
+    m_eff: Quantity
+    a_torque: Quantity
+    torque_margin: float
+    a_torque_rated: Quantity
+    mu_required: float               # all weight on the driven wheels
+    drive_load_share: float          # upper bound from the load rating
+    mu_required_rated: float         # at that load share
+    min_load_share_dry: float
+    a_traction_dry: Quantity
+    a_traction_inspected: Quantity
+    cg_ratio_max: float
+    a_tip: Optional[Quantity] = None
+    passes: bool
+    wheel_speed: Quantity
+    back_emf: Quantity
+    v_brake: Quantity
+    v_drive: Quantity
+    headroom: Quantity
+
+
+class HubDriveElectricalResult(SolverResult):
+    """Result from HubDriveElectricalModel: current rise and phase-short braking of a hub drive."""
+    time_constant: Quantity
+    ramp_time: Quantity
+    ramp_share: float                # of the brake onset
+    full_step_current: Quantity
+    step_over_peak: float
+    short_peak_electrical: Quantity  # rad/s
+    short_peak_wheel_speed: Quantity # rpm
+
+
+class GearedRotorResult(SolverResult):
+    """Result from GearedRotorModel: reflected rotor inertia and the inertia match."""
+    reflected_inertia: Quantity
+    flywheel_mass: Quantity
+    radius_of_gyration: Quantity
+    matched_ratio: float
+    acceleration_share: float        # at the stated ratio, of the matched-ratio acceleration
+
+
+class GearRatioCostResult(SolverResult):
+    """Result from GearRatioCostModel: holding heat and reflected inertia per gear ratio."""
+    motor_constant: Quantity
+    motor_torque: Dict[int, Quantity]
+    copper_loss: Dict[int, Quantity]
+    reflected_inertia: Dict[int, Quantity]
+    loss_inertia_product: Dict[int, Quantity]
+    over_peak: Dict[int, float]      # motor torque / motor peak torque
+    peak_over_rated: float
+
+
+class ThermalBurstResult(SolverResult):
+    """Result from ThermalBurstModel: burst horizons, duty screen, and periodic peak."""
+    time_constant: Quantity
+    rated_loss: Quantity
+    rated_equilibrium: Quantity
+    burst_current: Quantity
+    burst_loss: Quantity
+    asymptote: Quantity
+    horizon_cold: Quantity
+    horizon_hot: Quantity
+    hot_cut: float
+    average_loss_max: Quantity
+    duty: float
+    off_time: Quantity
+    off_time_scheduled: Quantity
+    periodic_peak: Quantity
+
+
+class StallDeratingResult(SolverResult):
+    """Result from StallDeratingModel: stall equilibrium with copper feedback, and the sustainable hold."""
+    motor_torque: Quantity
+    stall_current: Quantity
+    cold_loss: Quantity
+    feedback_constant: Quantity
+    feedback_gain: float
+    steady_rise: Quantity
+    winding_temperature: Quantity
+    sustainable_loss: Quantity
+    hot_resistance: Quantity
+    sustainable_current: Quantity
+    sustainable_hold: Quantity
+    derating: float
+
+
+class ContinuousDeratingResult(SolverResult):
+    """Result from ContinuousDeratingModel: installed continuous torque against the catalog rating."""
+    ambient_share: float
+    combined_share: float
+
+
+class DriveBusResult(SolverResult):
+    """Result from DriveBusModel: sustained sag, regenerative surge, and chopper sizing."""
+    compute_current: Quantity
+    drive_current: Quantity
+    sag: Quantity
+    sustained_full: Quantity
+    sustained_depleted: Quantity
+    margin_depleted: Quantity
+    headroom_depleted: Quantity
+    crossing_current: Quantity
+    kinetic_energy: Quantity
+    regenerated: Quantity
+    capacitor_only_endpoint: Quantity
+    capacitor_to_clamp: Quantity
+    stop_time: Quantity
+    peak_power: Quantity
+    resistor_max: Quantity
+
+
+class ZeroFailureResult(SolverResult):
+    """Result from ZeroFailureModel: the failure rate a clean campaign supports."""
+    coefficient: float               # -ln(1 - C)
+    rate_upper: float
+    one_in: float
+
+
+class ThrottledStageResult(SolverResult):
+    """Result from ThrottledStageModel: a compute-bound stage slowed by a lower clock."""
+    throttled: Quantity
+    added_age: Quantity
+    added_travel: Quantity

@@ -96,3 +96,20 @@ def calc_shielded_system_hazard_rate(brain_hazard_rate, shield_coverage: float, 
 
     p_sys = p_brain * (1.0 - shield_coverage) + p_hw
     return p_sys.to(1.0 / ureg.hour)
+
+
+def calc_zero_failure_rate_upper_bound(n_trials: int, confidence: float = 0.95) -> float:
+    """
+    Upper confidence bound on a per-trial failure rate after ``n_trials`` without failure.
+
+    Under the Poisson approximation, P(0 failures) = exp(-p n); requiring it to
+    stay at or above 1 - C gives p_upper = -ln(1 - C) / n. At 95 percent
+    confidence -ln(0.05) = 2.996, the "rule of three": p_upper ~ 3 / n.
+
+    Source: Hanley and Lippman-Hand, "If Nothing Goes Wrong, Is Everything All
+    Right?", JAMA 249(13), 1983 (the rule of three); added 2026-10-20.
+    """
+    validate_at_least(n_trials, 1, "n_trials")
+    if not (0.0 < confidence < 1.0):
+        raise ValueError(f"confidence must be in (0, 1), got {confidence}")
+    return -math.log(1.0 - confidence) / n_trials

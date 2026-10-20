@@ -80,6 +80,7 @@ class FramelessMotors(Registry):
         rotor_inertia=0.321e-4 * (ureg.kg * ureg.meter**2),   # 0.321 kg cm^2
         pole_pairs=10,
         mass=0.330 * ureg.kg,
+        no_load_speed=2110.0 * ureg.revolution / ureg.minute,  # star-serial at U_r, theoretical (Rev. 0414; added 2026-10-20)
         metadata=Metadata(
             provenance=pc.TQ_ROBODRIVE_ILM,
             description="TQ-RoboDrive ILM 70x18 frameless brushless servo kit (star-serial winding, 1.25 N·m rated torque).",

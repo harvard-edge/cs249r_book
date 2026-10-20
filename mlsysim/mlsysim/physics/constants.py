@@ -32,3 +32,11 @@ THERMAL_CONDUCTIVITY_COPPER = 400 * ureg.watt / (ureg.meter * ureg.kelvin)
 # (vol4 body and training chapters) read the limit from here.
 # Source: IEC 60085:2007, Table 1 (thermal class 155, letter designation F).
 INSULATION_CLASS_F_LIMIT = ureg.Quantity(155.0, ureg.degC)
+
+# --- Copper winding resistance (added 2026-10-20) ---------------------------
+# Temperature coefficient of resistance of annealed copper, 100 percent IACS,
+# stated at 20 degC: R(T) = R_20 [1 + alpha (T - 20 degC)]. A property of the
+# conductor, not of any motor; winding heat budgets read it from here.
+# Source: NBS Handbook 100, Copper Wire Tables (1966), alpha_20 = 0.00393 per K.
+COPPER_TEMPERATURE_COEFFICIENT = 0.00393 / ureg.kelvin
+COPPER_COEFFICIENT_REFERENCE_TEMPERATURE = ureg.Quantity(20.0, ureg.degC)
