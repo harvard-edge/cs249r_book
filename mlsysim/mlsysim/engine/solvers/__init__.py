@@ -43,6 +43,7 @@ from .storage import (
     StorageBenchmarkDemandModel,
 )
 from .embodied import StoppingBudgetModel, TractionLossModel  # added 2026-10-20
+from .embodied import OnsetTrialModel, RailHoldUpModel  # added 2026-10-20
 # Agent trajectories (added 2026-10-20)
 from .agents import (AcceptedTaskCostModel, AgentRunSummaryModel, AppendOnlyContextModel,
                      HorizonCompoundingModel, TaskHorizonTrendModel)
@@ -177,6 +178,8 @@ from .plant import (
     ContinuousDeratingModel,
     DriveBusModel,
     ZeroFailureModel,
+    ExponentialRareEventModel,
+    DiagnosticCoverageModel,
     ThrottledStageModel,
 )
 
@@ -192,6 +195,8 @@ __all__ += [
     "ContinuousDeratingModel",
     "DriveBusModel",
     "ZeroFailureModel",
+    "ExponentialRareEventModel",
+    "DiagnosticCoverageModel",
     "ThrottledStageModel",
 ]
 
@@ -691,3 +696,5 @@ __all__ += [
     "ContextDistillationModel",
     "CandidateReleaseModel",
 ]
+
+__all__ += ["OnsetTrialModel", "RailHoldUpModel"]  # added 2026-10-20

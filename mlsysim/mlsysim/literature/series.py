@@ -1642,3 +1642,49 @@ NvidiaGemmTileQuantizationA100 = _Series(
     ),
     "Tile quantization measured on an A100: achieved TFLOP/s by output width N (tiles 128 wide along N).",
 )
+
+
+# --- Fault injection, proof scale, and rare-event estimation (added 2026-10-20) ---
+VnnComp2025ScoredBenchmarks = _Series(
+    "vnncomp2025_scored_benchmarks",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=("Kaulen, K. et al. (2025), The 6th International Verification of Neural Networks Competition "
+             "(VNN-COMP 2025): Summary and Results, arXiv:2512.19007, Table 3"),
+        url="https://arxiv.org/abs/2512.19007",
+        verified="2026-10-20",
+        notes=("Table 3, Overview of all scored benchmarks: the '# Params' column, transcribed from the PDF text "
+               "layer. A single value fills both columns; 'CORA 575k, 1.1M' gives the two networks as low and "
+               "high."),
+    ),
+    "Scored VNN-COMP 2025 benchmarks and the parameter range of their networks.",
+)
+
+OKelly2018RareEventTable1 = _Series(
+    "okelly2018_rare_event_table1",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=("O'Kelly, M., Sinha, A., Namkoong, H., Duchi, J., Tedrake, R. (2018), Scalable End-to-End "
+             "Autonomous Vehicle Testing via Rare-event Simulation, NeurIPS 2018, Table 1"),
+        url="https://arxiv.org/abs/1811.00145",
+        verified="2026-10-20",
+        notes=("Table 1, estimate of the rare-event probability p_gamma (non-vision ego policy) with standard "
+               "errors, transcribed from the PDF and checked against the ar5iv rendering. Sec. 4 text: the "
+               "cross-entropy method 'achieves 2-16 times variance reduction depending on the threshold level'."),
+    ),
+    "Rare-event probability estimates of an autonomous-driving policy: naive Monte Carlo and cross-entropy.",
+)
+
+Wang2025OpenVlaLiberoUntargeted = _Series(
+    "wang2025_openvla_libero_untargeted",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=("Wang, T. et al. (2025), Exploring the Adversarial Vulnerabilities of Vision-Language-Action "
+             "Models in Robotics, ICCV 2025, arXiv:2411.13587v4, Table 1(a)"),
+        url="https://arxiv.org/abs/2411.13587",
+        verified="2026-10-20",
+        notes=("Table 1(a), untargeted results in LIBERO simulation: failure rate of OpenVLA without attack "
+               "(Benign; average 23.5 percent) and under the UADA patch attack (DoF1-3)."),
+    ),
+    "OpenVLA task failure rates on the four LIBERO suites, benign and with an adversarial patch in view.",
+)

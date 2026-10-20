@@ -4548,3 +4548,56 @@ LLAMA_BENCH_APPLE_SILICON = Provenance(
     verified="2026-10-18",
     notes="llama-bench rows for Llama 2 7B report params 6.74 B.",
 )
+# --- Fault injection and attacks on robot proposers (added 2026-10-20) ---
+JHA_2019_DRIVEFI = _lit(
+    "prov:jha-2019-drivefi",
+    "Jha, S. et al. (2019), ML-based Fault Injection for Autonomous Vehicles: A Case for Bayesian Fault "
+    "Injection (DriveFI), DSN 2019",
+    url="https://arxiv.org/abs/1907.01051",
+    verified="2026-10-20",
+    notes=("Read in the arXiv HTML of v1. Sec. I, Results: 98,400 faults; exhaustive evaluation 615 days; "
+           "561 safety-critical faults in less than 4 hours; 3690x acceleration; 460 of the 561 manifested "
+           "as hazards, in 68 of 7,200 scenes; several weeks of 5,000 random FI experiments found no hazard; "
+           "1.93 percent of single-bit GPU injections led to SDC and 7.35 percent to kernel panics and hangs. "
+           "Sec. VI-A: 2,400 GPU FI experiments into DriveAV."),
+)
+BROWN_2017_ADVERSARIAL_PATCH = _lit(
+    "prov:brown-2017-adversarial-patch",
+    "Brown, T. B., Mane, D., Roy, A., Abadi, M., Gilmer, J. (2017), Adversarial Patch, arXiv:1712.09665",
+    url="https://arxiv.org/abs/1712.09665",
+    verified="2026-10-20",
+    notes="Figure 1 caption: VGG16 reports banana at 97 percent confidence; with the patch, toaster at 99 percent.",
+)
+ROBEY_2025_ROBOPAIR = _lit(
+    "prov:robey-2025-robopair",
+    "Robey, A. et al. (2025), Jailbreaking LLM-Controlled Robots, ICRA 2025, arXiv:2410.13691",
+    url="https://arxiv.org/abs/2410.13691",
+    verified="2026-10-20",
+    notes=("Aggregate rows of 35 harmful tasks. Table 2 (Clearpath Jackal UGV, GPT-4o planner): direct prompt "
+           "1/35, RoboPAIR 35/35. Table 3 (Unitree Go2): direct prompt 3/35, RoboPAIR 35/35."),
+)
+SRS_2013_TOYOTA_BOOKOUT = _lit(
+    "prov:srs-2013-toyota-bookout",
+    "Safety Research & Strategies (2013), Toyota Unintended Acceleration and the Big Bowl of 'Spaghetti' Code",
+    url="https://www.safetyresearch.net/toyota-unintended-acceleration-and-the-big-bowl-of-spaghetti-code/",
+    verified="2026-10-20",
+    notes=("Opening paragraph: the Oklahoma jury found reckless disregard and delivered a $3 million verdict "
+           "before it could determine punitive damages (Bookout v. Toyota, 2013)."),
+)
+LEIDECKER_2011_TIN_WHISKER = _lit(
+    "prov:leidecker-2011-tin-whisker",
+    "Leidecker, H., Panashchenko, L., Brusse, J. (2011), Electrical Failure of an Accelerator Pedal Position "
+    "Sensor Caused by a Tin Whisker, 5th International Tin Whisker Symposium",
+    url="https://nepp.nasa.gov/whisker/reference/tech_papers/2011-NASA-GSFC-whisker-failure-app-sensor.pdf",
+    verified="2026-10-20",
+    notes="Extract from NASA findings: a tin whisker formed a 248 ohm resistive short in a 2003 Camry APP sensor.",
+)
+OKELLY_2018_RARE_EVENT = _lit(
+    "prov:okelly-2018-rare-event",
+    "O'Kelly, M., Sinha, A., Namkoong, H., Duchi, J., Tedrake, R. (2018), Scalable End-to-End Autonomous "
+    "Vehicle Testing via Rare-event Simulation, NeurIPS 2018",
+    url="https://arxiv.org/abs/1811.00145",
+    verified="2026-10-20",
+    notes=("Sec. 4: the cross-entropy method 'achieves 2-16 times variance reduction depending on the threshold "
+           "level' (Figure 2). Table 1 is Literature.OKelly2018RareEventTable1."),
+)
