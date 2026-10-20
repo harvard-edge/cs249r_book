@@ -435,3 +435,28 @@ __all__ += [
     "VisibilityRangeModel",
     "ThermalExpansionModel",
 ]
+
+# --- Failure recovery (added 2026-10-20) ---
+from .recovery import (
+    RepairBreakEvenModel,
+    IrreversibleLossModel,
+    UndetectedLoopModel,
+    RetryAmplificationModel,
+    BulkheadAdmissionModel,
+    RetryJitterModel,
+    CleanupGraphModel,
+    BreakerWindowModel,
+    RetrySustainedOutagesModel,
+)
+
+__all__ += [
+    "RepairBreakEvenModel",
+    "IrreversibleLossModel",
+    "UndetectedLoopModel",
+    "RetryAmplificationModel",
+    "BulkheadAdmissionModel",
+    "RetryJitterModel",
+    "CleanupGraphModel",
+    "BreakerWindowModel",
+    "RetrySustainedOutagesModel",
+]

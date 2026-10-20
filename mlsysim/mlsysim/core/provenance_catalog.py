@@ -3737,3 +3737,44 @@ NTSB_HAR_17_02 = _lit(
     notes=("The car's speed just before impact was 74 mph, with Traffic-Aware Cruise Control and "
            "Autosteer active (p. 2). Read for the Sensor Perception lecture plan, 2026-10-19."),
 )
+
+# --- Failure-recovery sources (added 2026-10-20) ----------------------------
+SEC_2013_KNIGHT_CAPITAL = _lit(
+    "prov:sec-2013-knight-capital",
+    "U.S. Securities and Exchange Commission, In the Matter of Knight Capital Americas LLC, "
+    "Release No. 34-70694, Administrative Proceeding File No. 3-15570 (16 October 2013)",
+    url="https://www.sec.gov/files/litigation/admin/2013/34-70694.pdf",
+    verified="2026-10-20",
+    notes=("Read from the order's text: eight SMARS servers, the deployment missed one, the seven "
+           "that received the new code (paras. 15, 16, 27); 212 incoming parent orders, 4 million "
+           "executions in 154 stocks for more than 397 million shares in approximately 45 minutes, "
+           "net long approximately $3.5 billion and net short approximately $3.15 billion, a $460 "
+           "million realized loss (para. 17); 97 'Power Peg disabled' e-mails (para. 19)."),
+)
+
+CROWDSTRIKE_2024_PIR = _lit(
+    "prov:crowdstrike-2024-pir",
+    "CrowdStrike, Preliminary Post Incident Review (PIR): Content Configuration Update Impacting "
+    "the Falcon Sensor and the Windows Operating System (BSOD), executive summary (24 July 2024)",
+    url="https://www.crowdstrike.com/wp-content/uploads/2024/07/CrowdStrike-PIR-Executive-Summary.pdf",
+    verified="2026-10-20",
+    notes="Update released 19 July 2024 at 04:09 UTC; hosts online between 04:09 and 05:27 UTC were affected.",
+)
+
+MICROSOFT_2024_CROWDSTRIKE_DEVICES = _lit(
+    "prov:microsoft-2024-crowdstrike-devices",
+    "Microsoft, Helping our customers through the CrowdStrike outage (blog, 20 July 2024)",
+    url="https://blogs.microsoft.com/blog/2024/07/20/helping-our-customers-through-the-crowdstrike-outage/",
+    verified="2026-10-20",
+    notes="'We currently estimate that CrowdStrike's update affected 8.5 million Windows devices, or "
+          "less than one percent of all Windows machines.'",
+)
+
+CEMRI_2025_MAST = _lit(
+    "prov:cemri-2025-mast",
+    "Cemri et al. (2025), Why Do Multi-Agent LLM Systems Fail?, arXiv:2503.13657v3",
+    url="https://arxiv.org/abs/2503.13657",
+    verified="2026-10-20",
+    notes=("Read from the HTML version: 1642 annotated execution traces (Figure 1 caption, Section 1) "
+           "from 7 MAS frameworks (Section 1); step repetition FM-1.3 at 15.7 percent (Section 4)."),
+)

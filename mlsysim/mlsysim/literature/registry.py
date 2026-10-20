@@ -32,9 +32,10 @@ DatacenterElectricity = _load("datacenter_electricity", "DatacenterElectricity",
 AcceleratorLifecycle = _load("accelerator_lifecycle", "AcceleratorLifecycle", "Accelerator life-cycle emission trends (Schneider et al. 2025).")
 StorageSystems = _load("storage_systems", "StorageSystems", "Measured production storage-system results (3FS read stress test).")
 # Incident investigation reports (added 2026-10-20)
-IncidentReports = _load("incident_reports", "IncidentReports", "Values reported by incident investigations (NTSB Tempe, Cruise pullover).")
+IncidentReports = _load("incident_reports", "IncidentReports", "Values reported by incident investigations (NTSB Tempe, Cruise pullover, the SEC Knight Capital order, the CrowdStrike PIR).")
 # Model calls and agent trajectories (added 2026-10-20)
 ServingIncidents = _load("serving_incidents", "ServingIncidents", "Reported production serving-incident figures (Anthropic 2025 postmortem).")
+MultiAgentFailures = _load("multi_agent_failures", "MultiAgentFailures", "Cited multi-agent failure-taxonomy results (MAST, Cemri et al. 2025).")  # added 2026-10-20
 SelfCorrection = _load("self_correction", "SelfCorrection", "Intrinsic self-correction results (Huang et al. 2024, GPT-4).")
 # Added 2026-10-20: benchmark error rates and documented accuracy failures.
 PredictionQuality = _load("prediction_quality", "PredictionQuality", "Cited prediction-quality results (ILSVRC-2012 errors, Google Flu Trends misses).")
@@ -407,6 +408,8 @@ class Literature(Registry):
     PoisonedRagBlackBox = _series.PoisonedRagBlackBox  # added 2026-10-20
     PagedAttentionMemoryBreakdown = _series.PagedAttentionMemoryBreakdown  # added 2026-10-20
     ToolInterceptionTimes = _series.ToolInterceptionTimes  # added 2026-10-20
+    MetastableFailures = _series.MetastableFailures  # added 2026-10-20
+    MultiAgentFailures = MultiAgentFailures  # added 2026-10-20
     AttentionSinkPerplexity = _series.AttentionSinkPerplexity  # added 2026-10-20
     SweBenchVerifiedRuns = _series.SweBenchVerifiedRuns
     CybenchSolveRate = _series.CybenchSolveRate

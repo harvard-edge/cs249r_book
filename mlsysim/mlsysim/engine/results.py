@@ -2942,3 +2942,125 @@ class VisibilityRangeResult(SolverResult):
 class ThermalExpansionResult(SolverResult):
     """Result from ThermalExpansionModel: a heated member's length change."""
     expansion: Quantity
+# --- Failure recovery: repair, irreversible loss, loops, containment (added 2026-10-20) ---
+# What the runtime decides once an effect has failed: repair against unwind,
+# checks ahead of a pivot, how late a loop is stopped, and the bounds retries,
+# jitter, bulkheads, and breakers give a shared dependency.
+
+class RepairBreakEvenResult(SolverResult):
+    """Result from RepairBreakEvenModel: one bounded repair against unwinding and rebuilding."""
+    fallback_time: Quantity                  # compensation + rebuild to the same endpoint
+    fallback_cost: Quantity                  # USD, model tokens of the rebuild
+    repair_time: Quantity                    # startup + output at the decode rate + validation
+    repair_cost: Quantity                    # USD, the whole isolated request and its output
+    break_even_time: float                   # p* on the time axis
+    break_even_cost: float                   # p* on the dollar axis
+    expected_time: Quantity                  # repair first at the assumed success probability
+    expected_cost: Quantity
+    time_saved_fraction: float               # 1 - expected / fallback
+    cost_saved_fraction: float
+    one_in: int                              # one success in this many attempts clears both axes
+
+
+class IrreversibleLossResult(SolverResult):
+    """Result from IrreversibleLossModel: expected loss with the check after or before the pivot."""
+    loss_without_check: Quantity             # P(defect) x consequence, nothing recovers
+    loss_caught: Quantity                    # caught before the pivot, the part a revert misses
+    loss_missed: Quantity                    # crossed the pivot undetected
+    loss_with_check: Quantity
+    reduction: float                         # without / with
+    missed_share: float                      # missed / with
+    loss_per_catch_step: Quantity            # loss removed by raising the catch rate one step
+    raised_catch_rate: float
+    loss_caught_raised: Quantity
+    loss_missed_raised: Quantity
+    loss_with_check_raised: Quantity
+    attempt_cost: Quantity
+    loss_vs_attempt: float                   # residual loss / attempt cost
+    step_vs_attempt: float                   # one catch step / attempt cost
+
+
+class UndetectedLoopResult(SolverResult):
+    """Result from UndetectedLoopModel: an append-only loop run to its ceiling or stopped early."""
+    appended_per_turn: int                   # output + observation added to the next input
+    ceiling_input: int                       # input tokens resent over the ceiling's turns
+    stop_input: int
+    ceiling_cost: Quantity
+    stop_cost: Quantity
+    ceiling_time: Quantity
+    stop_time: Quantity
+    cost_ratio: float
+    avoided_cost: Quantity
+    peak_request: int                        # largest input plus its output
+    fits_context: bool
+    half_turns: int
+    half_ratio: float                        # input at the ceiling / input at half the ceiling
+    input_by_turn: List[int]                 # cumulative input after 0..ceiling turns
+
+
+class RetryAmplificationResult(SolverResult):
+    """Result from RetryAmplificationModel: attempts one failing operation sends through nested layers."""
+    by_layer: List[int]                      # attempts reaching each depth, from the caller down
+    layered: int                             # attempts at the dependency
+    coordinated: int                         # one owner with the same allowance
+
+
+class BulkheadAdmissionResult(SolverResult):
+    """Result from BulkheadAdmissionModel: one burst of blocking calls, uncapped and capped."""
+    uncapped_occupied: int
+    uncapped_free: int
+    occupied: int
+    queued: int
+    rejected: int
+    protected_workers: int
+
+
+class RetryJitterResult(SolverResult):
+    """Result from RetryJitterModel: a retry cohort released together, synchronized or jittered."""
+    synchronized_rate: Quantity              # all retries inside the burst window
+    jittered_mean_rate: Quantity             # spread uniformly over the jitter span
+    spread_ratio: float
+    expected_in_window: float                # expected count in one burst-sized window
+
+
+class CleanupGraphResult(SolverResult):
+    """Result from CleanupGraphModel: cleanup as a reverse stack against a dependency graph."""
+    stack_time: Quantity                     # one at a time
+    graph_time: Quantity                     # unlimited parallelism, the longest path
+    saved_time: Quantity
+    blocked: List[str]                       # transitive dependents of the unresolved operation
+    settleable: List[str]                    # everything else, apart from the unresolved one
+
+
+class BreakerWindowResult(SolverResult):
+    """Result from BreakerWindowModel: one breaker window classified two ways."""
+    outcomes: int
+    classified_failures: int
+    classified_fraction: float
+    classified_trips: bool
+    naive_failures: int
+    naive_fraction: float
+    naive_trips: bool
+
+
+class RetrySustainedOutagesResult(SolverResult):
+    """Result from RetrySustainedOutagesModel: incidents a table lists as sustained by retries."""
+    incidents: int
+    retry_sustained: int
+    share: float
+    with_duration: List[Tuple[str, float]]   # (incident, hours), longest first
+    without_duration: List[str]
+    over_hours: int                          # retry-sustained incidents longer than the threshold
+
+
+__all__ += [
+    "RepairBreakEvenResult",
+    "IrreversibleLossResult",
+    "UndetectedLoopResult",
+    "RetryAmplificationResult",
+    "BulkheadAdmissionResult",
+    "RetryJitterResult",
+    "CleanupGraphResult",
+    "BreakerWindowResult",
+    "RetrySustainedOutagesResult",
+]

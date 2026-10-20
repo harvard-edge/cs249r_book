@@ -336,3 +336,64 @@ def calc_used_fraction(used, allowance) -> float:
     """Share of one budget dimension consumed: ``rho = used / allowance``."""
     ratio = used / allowance
     return float(ratio.to("").magnitude) if hasattr(ratio, "to") else float(ratio)
+
+
+# --- Failure recovery: repair, irreversible loss, cleanup order (added 2026-10-20) ---
+# Closed forms the runtime evaluates when an effect has failed or must be
+# undone: the break-even success rate of one bounded repair attempt, the
+# expected cost of trying repair first, the expected irreversible loss of a
+# plan whose checks precede or follow its pivot, and the elapsed time of a
+# cleanup graph. The solvers in engine/solvers/recovery.py compose them.
+
+
+def calc_repair_break_even(repair_cost, fallback_cost):
+    """
+    Success probability above which one repair attempt beats the fallback.
+
+        p* = C_repair / C_fallback
+
+    Holds when a failed attempt leaves the fallback available at unchanged
+    cost; evaluate it separately for each resource axis (seconds, dollars).
+    """
+    ratio = repair_cost / fallback_cost
+    return float(ratio.to("").magnitude) if hasattr(ratio, "to") else float(ratio)
+
+
+def calc_repair_first_expected_cost(repair_cost, fallback_cost, success_probability: float):
+    """Expected cost of attempting repair first: ``C_repair + (1 - p) C_fallback``."""
+    return repair_cost + (1 - success_probability) * fallback_cost
+
+
+def calc_expected_irreversible_loss(defect_probability: float, consequence, recoverable_fraction: float):
+    """
+    Expected loss that no recovery action can undo.
+
+        L = P(defect) x consequence x (1 - r)
+
+    ``r`` is the fraction of a defect's consequence that recovery avoids; a
+    check ahead of the pivot that catches a fraction ``v`` and reverts with
+    fidelity ``rho`` gives ``r = v rho``.
+    """
+    return defect_probability * consequence * (1 - recoverable_fraction)
+
+
+def calc_cleanup_critical_path(durations, depends_on):
+    """
+    Elapsed time of a cleanup graph run with unlimited parallelism.
+
+    ``durations`` maps each operation to its time once admitted; ``depends_on``
+    maps it to the operations that must settle first. The elapsed time is the
+    longest path through the acyclic graph; a reverse stack runs the same
+    operations one at a time and takes their sum.
+    """
+    finish = {}
+
+    def _finish(op, trail=()):
+        if op in trail:
+            raise ValueError(f"cleanup graph has a cycle through {op!r}")
+        if op not in finish:
+            start = max((_finish(d, trail + (op,)) for d in depends_on.get(op, ())), default=0 * durations[op])
+            finish[op] = start + durations[op]
+        return finish[op]
+
+    return max(_finish(op) for op in durations)
