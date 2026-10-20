@@ -140,27 +140,21 @@ The latest step changed where learned proposals come from. In digital software s
 # │       language frontier of the same year.
 # │ Show: Gap between two open robot policies and the language maximum of
 # │       their publication year.
-# │ How:  Literature.ModelsByDomain (Epoch estimates, rows with compute).
+# │ How:  Scenarios.OpenVlaComputeGap and Scenarios.Gr00tN1ComputeGap
+# │       (DomainComputeGapModel over Literature.ModelsByDomain, Epoch estimates).
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int
-
-def _year_max(rows, group, year):
-    return max(r["training_flop"] for r in rows if r["domain_group"] == group and str(r["publication_date"]).startswith(year))
-
-def _model(rows, name):
-    return next(r for r in rows if r["model"] == name and r["domain_group"] == "Robotics")
 
 class ComputeByDomain:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    rows = Literature.ModelsByDomain.entries
+    vla = Scenarios.OpenVlaComputeGap  # OpenVLA against the 2024 language maximum
+    gr00t = Scenarios.Gr00tN1ComputeGap  # GR00T N1 2B against the 2025 language maximum
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    vla = _model(rows, "OpenVLA")
-    gr00t = _model(rows, "GR00T N1 2B")
-    gap_vla = _year_max(rows, "Language", vla["publication_date"][:4]) / vla["training_flop"]
-    gap_gr00t = _year_max(rows, "Language", gr00t["publication_date"][:4]) / gr00t["training_flop"]
-    n_robotics = len(tuple(filter(lambda r: r["domain_group"] == "Robotics", rows)))
+    gap_vla = vla.result.gap
+    gap_gr00t = gr00t.result.gap
+    n_robotics = gr00t.result.domain_models_with_compute
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(gap_vla > 100 and gap_gr00t > 1000, "Prose: hundreds of times in 2024, thousands of times in 2025")
@@ -422,9 +416,11 @@ The budget has two terms that grow differently with speed: travel during the del
 # │          33 mm; at 0.75 m/s the stop is 240.8 mm. Guard: the finished
 # │          budget of @sec-enforcement-composite-budget exceeds D_clear at the
 # │          drive limit, which the prose states without printing it.
-# │ How:     RM/AISLE fields from the warehouse mobile manipulator in mlsysim;
-# │          the guard reuses calc_c2_stop_suffix and calc_scurve_stop_distance
-# │          exactly as @sec-enforcement-composite-budget does. No value is retyped.
+# │ How:     Scenarios.WarehouseAisleStopAtDriveLimit and its half-speed variant
+# │          (StoppingBudgetModel); the delay terms are RM/AISLE fields of the
+# │          warehouse mobile manipulator. The guard reuses calc_c2_stop_suffix
+# │          and calc_scurve_stop_distance exactly as
+# │          @sec-enforcement-composite-budget does. No value is retyped.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
@@ -438,40 +434,45 @@ class StoppingBudget:
     """Elementary stopping budget of the loaded base at its drive limit (illustrative inputs)."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    v = RM.base.max_velocity  # category: illustrative (drive limit)
+    STOP = Scenarios.WarehouseAisleStopAtDriveLimit
+    HALF = Scenarios.WarehouseAisleStopHalfSpeed
+    v = STOP.speed  # category: illustrative (drive limit)
     v_aisle = AISLE.v_aisle  # category: chosen (aisle speed on the card)
-    a_brake = AISLE.a_brake  # category: illustrative (credible deceleration, loaded, dry floor)
-    d_clear = AISLE.d_clear  # category: illustrative (rack-end clear distance)
+    a_brake = STOP.deceleration  # category: illustrative (credible deceleration, loaded, dry floor)
+    d_clear = STOP.clear_distance  # category: illustrative (rack-end clear distance)
     t_age = AISLE.perception_age  # category: derived (mid-exposure to proposer dispatch)
     t_backbone = AISLE.t_backbone  # category: illustrative (perception backbone, inside t_age)
     t_lease = AISLE.t_lease  # category: chosen (chunk lease)
     t_tick = AISLE.t_tick  # category: chosen (one permission tick)
     t_bus = AISLE.t_bus  # category: illustrative (one bus cycle)
     t_onset = AISLE.t_brake_onset  # category: illustrative (brake command to retarding force)
-    tau_delay = AISLE.tau_delay  # category: derived (sum of the five terms above)
+    tau_delay = STOP.delay  # category: derived (sum of the five terms above)
+    v_half = HALF.speed  # category: illustrative (half the drive limit)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    budget = STOP.result
+    budget_half = HALF.result
     tau_sum = (t_age + t_lease + t_tick + t_bus + t_onset).to(millisecond)
-    blind = (v * tau_delay).to(millimeter)
-    d_brake = (v**2 / (2 * a_brake)).to(millimeter)
-    d_stop = (blind + d_brake).to(millimeter)
-    spare = (d_clear - d_stop).to(millimeter)
-    blind_share = (blind / d_brake).to("dimensionless").magnitude
-    brake_over_blind = (d_brake / blind).to("dimensionless").magnitude
-    v_star = (2 * a_brake * tau_delay).to(meter / second)
-    d_backbone = (v * t_backbone).to(millimeter)
-    d_lease = (v * t_lease).to(millimeter)
-    d_per_ms = (v * (1 * millisecond)).to(millimeter)
-    v_half = v / 2
-    blind_half = (v_half * tau_delay).to(millimeter)
-    brake_half = (v_half**2 / (2 * a_brake)).to(millimeter)
-    d_stop_half = (blind_half + brake_half).to(millimeter)
+    blind = budget.delay_travel.to(millimeter)
+    d_brake = budget.braking_travel.to(millimeter)
+    d_stop = budget.stop_distance.to(millimeter)
+    spare = budget.spare.to(millimeter)
+    blind_share = budget.delay_share_of_braking
+    brake_over_blind = budget.braking_over_delay
+    v_star = budget.crossover_speed.to(meter / second)
+    d_backbone = budget.travel_over(t_backbone).to(millimeter)
+    d_lease = budget.travel_over(t_lease).to(millimeter)
+    d_per_ms = budget.travel_over(1 * millisecond).to(millimeter)
+    blind_half = budget_half.delay_travel.to(millimeter)
+    brake_half = budget_half.braking_travel.to(millimeter)
+    d_stop_half = budget_half.stop_distance.to(millimeter)
     # Guard only: the finished budget of @sec-enforcement-composite-budget at the drive limit
     j_brake = calc_c2_stop_suffix(v, a_brake)["peak_jerk"].to(meter / second**3)
     d_finished = (calc_scurve_stop_distance(v, a_brake, j_brake) + blind + AISLE.delta_loc + AISLE.delta_margin + AISLE.eps_track).to(millimeter)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(tau_sum.magnitude - tau_delay.to(millisecond).magnitude) < 1e-9, "tau_delay must equal its five registry terms.")
+    check(abs((v_half - v / 2).to(meter / second).magnitude) < 1e-12, "The what-if is at half the drive limit.")
     check(abs(tau_delay.to(millisecond).magnitude - 133.6) < 5e-3, f"Canon tau_delay is 133.6 ms, got {tau_delay}.")
     check(abs(d_stop.magnitude - 762.9) < 5e-3, f"Canon elementary stop is 762.9 mm, got {d_stop}.")
     check(spare.magnitude > 0, "The elementary budget must fit inside D_clear at the drive limit.")
@@ -845,11 +846,12 @@ A warehouse model that recognizes an obstacle too late cannot recover the cleara
 # │          18.7 m during suppression; 7 m/s^2 (0.71 g) chosen cap against
 # │          0.92 g (9.0 m/s^2) capability; Cruise about 20 ft (6.1 m) at up
 # │          to 7.7 mph.
-# │ How:     Literature values from NTSB/HAR-19/03 and the Quinn Emanuel report,
-# │          loaded here until the literature registry holds them. Suppression
-# │          travel uses the mean of the two recorded speeds (trapezoid rule);
-# │          no counterfactual stop is computed.
+# │ How:     Literature.IncidentReports (NTSB/HAR-19/03 and the Quinn Emanuel
+# │          report). Suppression travel is Scenarios.TempeActionSuppression,
+# │          the mean of the two recorded speeds over the suppression (trapezoid
+# │          rule); no counterfactual stop is computed.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature, Scenarios
 from mlsysim.core.units import *
 from mlsysim.fmt import fmt, fmt_latency, fmt_length, fmt_velocity, fmt_acceleration, fmt_math, check
 
@@ -857,32 +859,35 @@ class IncidentRecord:
     """Investigator-reported values for the Tempe (2018) and Cruise (2023) cases."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    # category: literature. NTSB/HAR-19/03 (2019), p. v and table pp. 15-16
-    t_detect = 5.6 * second  # first detection, before impact
-    t_recognize = 1.2 * second  # emergency recognized and suppression begins, before impact
-    v_recognize = 43.2 * mph  # recorded speed at that instant
-    t_suppress = 1.0 * second  # action-suppression period (p. 13)
-    t_supp_end = 0.2 * second  # suppression ends, before impact
-    v_supp_end = 40.5 * mph  # recorded speed at that instant
-    t_takeover = 0.02 * second  # operator takes the wheel, before impact
+    IR = Literature.IncidentReports
+    SUPP = Scenarios.TempeActionSuppression
+    # category: literature. NTSB/HAR-19/03 (2019), table pp. 15-16 and p. 13
+    t_detect = float(IR.TempeFirstDetectionS) * second  # first detection, before impact
+    t_recognize = float(IR.TempeEmergencyRecognitionS) * second  # emergency recognized and suppression begins, before impact
+    v_recognize = SUPP.speed  # recorded speed at that instant
+    t_suppress = SUPP.delay  # action-suppression period (p. 13)
+    t_supp_end = float(IR.TempeSuppressionEndS) * second  # suppression ends, before impact
+    v_supp_end = SUPP.speed_at_delay_end  # recorded speed at that instant
+    t_takeover = float(IR.TempeOperatorTakeoverS) * second  # operator takes the wheel, before impact
     # category: literature. NTSB/HAR-19/03, p. 13 and footnote 33
-    a_cap = 7.0 * meter / second**2  # ADS emergency threshold and braking cap (chosen by the developer)
-    g_capable = 0.92  # police-determined average deceleration capability in the crash area, in g
+    a_cap = float(IR.TempeAdsBrakingCapMps2) * meter / second**2  # ADS emergency threshold and braking cap (chosen by the developer)
+    g_capable = float(IR.TempeRoadDecelerationG)  # police-determined average deceleration capability in the crash area, in g
     # category: literature. Quinn Emanuel report to the Cruise boards (2024), p. 10
-    d_drag = 20 * foot  # approximate distance moved during the pullover
-    v_drag = 7.7 * mph  # maximum speed during the pullover
+    d_drag = float(IR.CruisePulloverDistanceFt) * foot  # approximate distance moved during the pullover
+    v_drag = float(IR.CruisePulloverMaxSpeedMph) * mph  # maximum speed during the pullover
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     g0 = (1 * standard_gravity).to(meter / second**2)
-    d_suppress = (0.5 * (v_recognize + v_supp_end) * t_suppress).to(meter)
+    d_suppress = SUPP.result.delay_travel.to(meter)
     a_cap_g = (a_cap / g0).to("dimensionless").magnitude
-    a_capable = (g_capable * g0).to(meter / second**2)
+    a_capable = SUPP.deceleration.to(meter / second**2)
     d_drag_m = d_drag.to(meter)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs((t_recognize - t_supp_end - t_suppress).to(second).magnitude) < 1e-9, "Suppression must span the two table rows.")
     check(abs(a_cap_g - 0.71) < 5e-3, f"NTSB states the cap as 0.71 g, got {a_cap_g}.")
     check(a_capable > a_cap, "The chosen cap must sit below the vehicle's capability.")
+    check(abs((a_capable - g_capable * g0).to(meter / second**2).magnitude) < 1e-9, "The scenario brakes at the police-measured capability.")
     check(abs(d_suppress.magnitude - 18.7) < 0.05, f"Suppression travel is about 18.7 m, got {d_suppress}.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
@@ -979,7 +984,46 @@ Verify how the Tempe mechanisms connect to the architecture:
 
 Tempe and Cruise both turned on what the machine knew when it moved or failed to brake, and both had to be reconstructed afterward from what it had recorded. The same three questions (whether the evidence behind a motion was sound, whether anything could refuse it, and whether the decision can be traced) also describe an attack and an audit. In enterprise software and distributed systems, safety, security, and accountability usually live in separate tiers. Security defends network boundaries with cryptographic tokens, reliability frameworks mitigate component failures through retries and circuit breakers, and accountability records transactions to append-only databases. In physical AI, all three converge on the causal boundary, the interface where software commands meet physical actuators. Consider the running machine crossing a warehouse aisle. It needs a valid stopping decision whether its forward cameras are obscured by dirt, an attacker has injected spoofed packets onto its internal Controller Area Network (CAN) bus, or a vision-language-action policy has hallucinated an unobstructed path. In each case the hazard is kinetic, a collision with racking or a worker. Because momentum cannot be rolled back like a failed database transaction, admission control cannot simply confirm who dispatched a command. It must determine whether executing that command now would violate the machine's physical limits.
 
-An ordinary environmental change challenges this boundary as directly as an attack. The running machine's credible deceleration of `{python} StoppingBudget.a_brake_str` rests on the premise, stated on its card, that the floor supplies a friction coefficient of at least `{python} MachineCard.mu_all_str`. When the floor cannot supply the friction the brakes ask for, traction rather than the brakes caps deceleration, and braking distance grows in inverse proportion to the available friction. Spilled hydraulic fluid can drop tire-floor friction from about $0.8$ on dry concrete to $0.2$ (an illustrative pair). A vehicle that brakes at the traction limit would see its braking distance quadruple. The running machine asks far less of a dry floor than it supplies, but $0.2$ falls below its premise. Its credible deceleration therefore no longer holds, and every clearance envelope and speed profile computed from that deceleration a moment earlier is invalid. The learned planner, processing camera streams that do not reveal the transparent slick, may continue to output an aggressive velocity command with high nominal confidence. Safety verification cannot treat the model's internal confidence as proof of physical feasibility. The machine needs independent, real-time evidence from the plant and its surroundings to detect the divergence. Such evidence includes wheel-slip telemetry, disagreement between commanded and inertial-measurement-unit (IMU) acceleration, and motor current transients. The machine can then restrict motion using a response feasible under the updated traction estimate. If the machine has already consumed the clearance that response needs, detection can support harm mitigation but cannot establish collision avoidance.
+```{python}
+#| label: boundary-floor-traction
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ A SLICK FLOOR AGAINST THE CREDIBLE DECELERATION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: the slick-floor paragraph of @sec-boundary-safety-convergence.
+# │ Goal:    Print the illustrative friction pair and check the two claims the
+# │          paragraph makes about it.
+# │ Show:    0.8 dry, 0.2 with hydraulic fluid; braking at the traction limit
+# │          quadruples; 0.2 falls below the card's 0.204 premise.
+# │ How:     Scenarios.HydraulicFluidSlickTraction (TractionLossModel) against
+# │          the running machine's credible deceleration.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
+from mlsysim.fmt import fmt, fmt_math, check
+
+class FloorTraction:
+    """Illustrative friction drop under the running machine (scenario inputs)."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    SLICK = Scenarios.HydraulicFluidSlickTraction
+    mu_before = SLICK.mu_before  # category: illustrative (tire on dry concrete)
+    mu_after = SLICK.mu_after  # category: illustrative (tire on hydraulic fluid)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    traction = SLICK.result
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(traction.braking_distance_ratio - 4) < 1e-9, "Prose says braking distance quadruples.")
+    check(not traction.premise_holds, "Prose says the slick friction falls below the card's premise.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    mu_before_math = fmt_math(fmt(mu_before, precision=1))
+    mu_after_math = fmt_math(fmt(mu_after, precision=1))
+```
+
+An ordinary environmental change challenges this boundary as directly as an attack. The running machine's credible deceleration of `{python} StoppingBudget.a_brake_str` rests on the premise, stated on its card, that the floor supplies a friction coefficient of at least `{python} MachineCard.mu_all_str`. When the floor cannot supply the friction the brakes ask for, traction rather than the brakes caps deceleration, and braking distance grows in inverse proportion to the available friction. Spilled hydraulic fluid can drop tire-floor friction from about `{python} FloorTraction.mu_before_math` on dry concrete to `{python} FloorTraction.mu_after_math` (an illustrative pair). A vehicle that brakes at the traction limit would see its braking distance quadruple. The running machine asks far less of a dry floor than it supplies, but `{python} FloorTraction.mu_after_math` falls below its premise. Its credible deceleration therefore no longer holds, and every clearance envelope and speed profile computed from that deceleration a moment earlier is invalid. The learned planner, processing camera streams that do not reveal the transparent slick, may continue to output an aggressive velocity command with high nominal confidence. Safety verification cannot treat the model's internal confidence as proof of physical feasibility. The machine needs independent, real-time evidence from the plant and its surroundings to detect the divergence. Such evidence includes wheel-slip telemetry, disagreement between commanded and inertial-measurement-unit (IMU) acceleration, and motor current transients. The machine can then restrict motion using a response feasible under the updated traction estimate. If the machine has already consumed the clearance that response needs, detection can support harm mitigation but cannot establish collision avoidance.
 
 Security threats target this same permission machinery by corrupting the evidence used to authorize motion. An adversary does not need to crack cryptographic keys or modify model weights to destabilize a physical agent; distorting the sensory inputs that inform admission decisions is sufficient. Projecting structured light patterns onto camera lenses, spoofing ultra-wideband (UWB) localization beacons, or injecting rogue packets into sensor buses can deceive the controller into approving destructive commands, even while the neural network executes its inference pipeline without numerical fault. Isolating the proposer from the permission path offers little defense if both subsystems ingest the same corrupted telemetry. Securing the causal boundary therefore requires validating the evidence itself. The validation consists of cross-checking heterogeneous sensor streams (for example, corroborating camera-based visual odometry against wheel encoders and inertial sensors), enforcing cryptographic message authentication across bus transceivers, and maintaining fail-operational plausibility checks that reject sensor readings deviating from physical conservation laws.
 
@@ -1076,9 +1120,42 @@ In shared-autonomy designs, such as a robotic surgical tool providing haptic gui
 
 ::: {.fallacy-pitfall}
 
+```{python}
+#| label: boundary-inference-stall
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ AN INFERENCE STALL (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: the pitfall on software latency in @sec-boundary-fallacies-pitfalls.
+# │ Goal:    Print the stall the pitfall names from the scenario that also
+# │          prices its travel.
+# │ Show:    a 100 ms inference hiccup, longer than the 60 ms chunk lease.
+# │ How:     Scenarios.WarehouseInferenceHiccup (scenario assumption).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Embodied, Scenarios
+from mlsysim.core.units import millisecond
+from mlsysim.fmt import fmt_latency, check
+
+class InferenceStall:
+    """The stall in the latency pitfall (scenario assumption)."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    STALL = Scenarios.WarehouseInferenceHiccup
+    t_stall = STALL.delay  # category: illustrative (inference stall)
+    t_lease = Embodied.Scenario.WarehouseAisle.t_lease  # category: chosen (chunk lease)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(t_stall > t_lease, "Pitfall: the stall outlasts the chunk lease, so the lease, not the proposer, must end the motion.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    t_stall_str = fmt_latency(t_stall, unit=millisecond, precision=0)
+```
+
 **Pitfall**: *Assuming software latency merely degrades performance gracefully.*
 
-In purely digital systems, inference latency or scheduler jitter increases response time or degrades service quality. In physical systems, timing is a functional correctness requirement. If a learned policy stalls, whether from accelerator kernel contention, memory allocation pauses, or network serialization delays, allowing its previous command to persist across subsequent control cycles turns stale intent into physical danger. For example, a mobile manipulator that repeats its last forward-velocity command during a 100 ms inference hiccup can collide with an unmapped obstacle. Actuation commands must therefore carry bounded temporal validity, enforced by hardware or real-time software watchdogs. When that validity window (the chunk lease of the stopping budget) expires without a verified update, the low-level controller must begin a fallback within its established response budget. The selected stop or hold must remain feasible for the current mechanism, state, and surviving resources.
+In purely digital systems, inference latency or scheduler jitter increases response time or degrades service quality. In physical systems, timing is a functional correctness requirement. If a learned policy stalls, whether from accelerator kernel contention, memory allocation pauses, or network serialization delays, allowing its previous command to persist across subsequent control cycles turns stale intent into physical danger. For example, a mobile manipulator that repeats its last forward-velocity command during a `{python} InferenceStall.t_stall_str` inference hiccup can collide with an unmapped obstacle. Actuation commands must therefore carry bounded temporal validity, enforced by hardware or real-time software watchdogs. When that validity window (the chunk lease of the stopping budget) expires without a verified update, the low-level controller must begin a fallback within its established response budget. The selected stop or hold must remain feasible for the current mechanism, state, and surviving resources.
 
 :::
 

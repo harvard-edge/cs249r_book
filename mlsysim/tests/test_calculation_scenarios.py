@@ -443,3 +443,65 @@ def test_codec_decode_cores():
     assert c.output_bandwidth("light").to("GB/s").magnitude == approx(84)
     assert c.decode_cores("light") == approx(56)
     assert c.decode_cores("dense") == approx(224)
+
+
+# --- Embodied stopping, floor traction, and domain compute (added 2026-10-20) --
+
+def test_warehouse_elementary_stop():
+    r = Scenarios.WarehouseAisleStopAtDriveLimit.result
+    assert r.delay.to("ms").magnitude == approx(133.6)
+    assert r.delay_travel.to("mm").magnitude == approx(200.4)
+    assert r.braking_travel.to("mm").magnitude == approx(562.5)
+    assert r.stop_distance.to("mm").magnitude == approx(762.9)
+    assert r.spare.to("mm").magnitude == approx(337.1)
+    assert r.fits
+    assert r.crossover_speed.to("m/s").magnitude == approx(0.5344)
+    assert r.braking_over_delay == approx(2.8069)
+    assert r.delay_share_of_braking == approx(0.35627)
+    assert r.speed_ceiling.to("m/s").magnitude == approx(1.8474)
+    from mlsysim.core.units import Q_
+    assert r.travel_over(Q_(1, "ms")).to("mm").magnitude == approx(1.5)
+    assert r.travel_over(Q_(22, "ms")).to("mm").magnitude == approx(33)
+
+
+def test_warehouse_stop_variants():
+    h = Scenarios.WarehouseAisleStopHalfSpeed.result
+    assert h.delay_travel.to("mm").magnitude == approx(100.2)
+    assert h.braking_travel.to("mm").magnitude == approx(140.625)
+    assert h.stop_distance.to("mm").magnitude == approx(240.825)
+    d = Scenarios.WarehouseAisleStopDoubledLease.result
+    assert d.delay.to("ms").magnitude == approx(193.6)
+    assert d.stop_distance.to("mm").magnitude == approx(852.9)
+    assert d.spare.to("mm").magnitude == approx(247.1)
+    assert Scenarios.WarehouseScannerSkippedDelay.result.delay_travel.to("mm").magnitude == approx(123)
+    assert Scenarios.WarehouseInferenceHiccup.result.delay_travel.to("mm").magnitude == approx(150)
+
+
+def test_tempe_through_the_stopping_budget():
+    s = Scenarios.TempeActionSuppression.result
+    assert s.delay_travel.to("m").magnitude == approx(18.709)
+    assert s.braking_travel.to("m").magnitude == approx(20.669)
+    assert s.crossover_speed.to("m/s").magnitude == approx(18.044)
+    assert Scenarios.TempeActionSuppressionAdsCap.result.braking_travel.to("m").magnitude == approx(26.640)
+    f = Scenarios.TempeFirstDetectionStop.result
+    assert f.braking_travel.to("m").magnitude == approx(21.442)
+    assert f.braking_time.to("s").magnitude == approx(2.1802)
+    assert f.clear_over_stop == approx(4.9753)
+
+
+def test_floor_traction_loss():
+    r = Scenarios.HydraulicFluidSlickTraction.result
+    assert r.braking_distance_ratio == approx(4.0)
+    assert r.traction_ceiling.to("m/s**2").magnitude == approx(1.9613)
+    assert r.required_friction == approx(0.20394)
+    assert not r.premise_holds
+
+
+def test_robot_policy_compute_gap():
+    v = Scenarios.OpenVlaComputeGap.result
+    assert v.reference_model == "Llama 3.1-405B"
+    assert v.gap == approx(345.45)
+    g = Scenarios.Gr00tN1ComputeGap.result
+    assert g.reference_model == "Grok 4"
+    assert g.gap == approx(7018.8)
+    assert g.domain_models_with_compute == 25

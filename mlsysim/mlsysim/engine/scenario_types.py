@@ -995,3 +995,53 @@ class CompressedReadScenario(BaseScenario):
     def decode_cores(self, codec: str) -> float:
         """Cores needed to decode at that output rate."""
         return (self.output_bandwidth(codec) / self.decode_rates[codec]).to("").magnitude
+
+
+# --- Embodied stopping, floor traction, and domain compute (added 2026-10-20) --
+
+class StoppingBudgetScenario(BaseScenario):
+    """A machine at ``speed`` that must stop: travel during ``delay``, then braking at ``deceleration``.
+
+    ``clear_distance`` closes the budget when one is stated. ``speed_at_delay_end``
+    replaces constant-speed delay travel with the trapezoid between two recorded
+    speeds; braking is still from ``speed``.
+    """
+    speed: Quantity
+    delay: Quantity
+    deceleration: Quantity
+    clear_distance: Optional[Quantity] = None
+    speed_at_delay_end: Optional[Quantity] = None
+
+    @property
+    def result(self):
+        from .solvers import StoppingBudgetModel
+        return StoppingBudgetModel().solve(self.speed, self.delay, self.deceleration,
+                                           self.clear_distance, self.speed_at_delay_end)
+
+
+class TractionLossScenario(BaseScenario):
+    """Floor friction falls from ``mu_before`` to ``mu_after`` under a machine that assumes ``deceleration``."""
+    mu_before: float
+    mu_after: float
+    deceleration: Quantity
+    drive_load_share: float = 1.0
+
+    @property
+    def result(self):
+        from .solvers import TractionLossModel
+        return TractionLossModel().solve(self.mu_before, self.mu_after, self.deceleration,
+                                         self.drive_load_share)
+
+
+class DomainComputeGapScenario(BaseScenario):
+    """``model`` from a Literature series against the largest ``reference_group`` model of its year."""
+    series_name: str
+    model: str
+    reference_group: str = "Language"
+
+    @property
+    def result(self):
+        from ..literature.registry import Literature
+        from .solvers import DomainComputeGapModel
+        rows = getattr(Literature, self.series_name).entries
+        return DomainComputeGapModel().solve(rows, self.model, self.reference_group)

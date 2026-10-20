@@ -6,14 +6,17 @@ body is 15 cm, 425 pt, wide), so nothing is scaled when it is placed:
 SVG diagrams use point units (viewBox in pt, width and height in pt) and
 matplotlib plots use their display size in inches. Labels are 8.5 to 10 pt.
 
-Sources (numbers derived in calcs.py, which this file imports):
-  - Running machine: 1.5 m/s, 2 m/s^2, 1.10 m, pre-brake delay 51.6 + 60 +
-    1 + 1 + 20 = 133.6 ms with a 22 ms backbone (The Causal Boundary,
-    §1.4.2 table 2, Napkin Math 1.1).
-  - Tempe: NTSB HAR-19/03, the table of selected parameters recorded by the
-    ADS (pp. 15-16) and footnote 33 (0.71 g ADS cap, 0.92 g road).
-  - Training compute: Epoch AI via the mlsysim registry
-    (Literature.ModelsByDomain), as the chapter's figure 2.
+Sources: every number a figure prints or plots is read from MLSysIM through
+calcs.py (deckvals val/num), which this file imports:
+  - Running machine: Embodied.MobileManipulator and Embodied.Scenario, through
+    Scenarios.WarehouseAisleStopAtDriveLimit (The Causal Boundary, Napkin Math 1.1).
+  - Tempe: Literature.IncidentReports (NTSB HAR-19/03), through
+    Scenarios.TempeActionSuppression and its ADS-cap variant.
+  - Training compute: Epoch AI via Literature.ModelsByDomain, as the
+    chapter's figure 2.
+  - The Tempe classification track (tempe_track) keeps the NTSB table's
+    intermediate times as figure data (HAR-19/03, pp. 15-16).
+Diagram coordinates, axis ranges, and tick positions are layout, not data.
   - Scope test, command chain, five levels, record chain: the chapter's
     §§1.4.1, 1.6, 1.7, 1.11 (figures 3, 6, 7, 9), redrawn at slide size.
 Colors follow the Volume IV causal-boundary palette (volumes/vol4/palette.md):
@@ -31,7 +34,8 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
 
-import calcs  # noqa: E402
+import calcs as K  # noqa: E402  (records every value; figures read them)
+from deckvals import val, num  # noqa: E402
 
 plt = sp.plt
 OUT = Path(__file__).parent
@@ -171,10 +175,12 @@ def recovery():
 def delay_bar(name, scanner=False):
     fig, ax = plt.subplots(figsize=(5.6, 1.15))
     fig.subplots_adjust(left=0.01, right=0.99, top=0.70, bottom=0.30)
-    rest = calcs.AGE - calcs.BACKBONE
-    segs = [(calcs.BACKBONE, ORANGE, "backbone\n22"), (rest, LGRAY, "rest of age 29.6"),
-            (calcs.LEASE, SLATE, "chunk lease 60"), (calcs.TICK + calcs.BUS, GREEN, ""),
-            (calcs.ONSET, "#8C8C8C", "brake\nonset 20")]
+    age, backbone, lease = num("t_age_ms"), num("t_backbone_ms"), num("t_lease_ms")
+    tick, bus, onset = num("t_tick_ms"), num("t_bus_ms"), num("t_onset_ms")
+    segs = [(backbone, ORANGE, f"backbone\n{val('t_backbone_ms')}"),
+            (num("t_rest_age_ms"), LGRAY, f"rest of age {val('t_rest_age_ms')}"),
+            (lease, SLATE, f"chunk lease {val('t_lease_ms')}"), (tick + bus, GREEN, ""),
+            (onset, "#8C8C8C", f"brake\nonset {val('t_onset_ms')}")]
     x = 0
     for i, (w, col, lab) in enumerate(segs):
         gone = scanner and i in (0, 2)
@@ -185,18 +191,17 @@ def delay_bar(name, scanner=False):
             ax.text(x + w / 2, 0, lab, ha="center", va="center", color=tc, fontsize=9, fontweight="bold", linespacing=0.95,
                     bbox=dict(fc="white", ec="none", pad=1.0) if gone else None)
         x += w
-    tau = calcs.tau_s() * 1000
-    ax.annotate("tick 1 + bus 1", xy=(calcs.AGE + calcs.LEASE + 1, -0.32),
-                xytext=(calcs.AGE + calcs.LEASE + 1, -0.62), ha="center", va="top", fontsize=9,
+    xt = age + lease + (tick + bus) / 2
+    ax.annotate(f"tick {val('t_tick_ms')} + bus {val('t_bus_ms')}", xy=(xt, -0.32),
+                xytext=(xt, -0.62), ha="center", va="top", fontsize=9,
                 color=GREEN, arrowprops=dict(arrowstyle="-", color=GREEN, lw=1.0), annotation_clip=False)
     if scanner:
-        leave = calcs.BACKBONE + calcs.LEASE
-        ax.text(0, 0.42, f"with a scanner stop, backbone and lease leave: {leave:.0f} ms, "
-                f"{calcs.V * leave:.0f} mm at 1.5 m/s", ha="left", va="bottom", fontsize=9.5,
+        ax.text(0, 0.42, f"with a scanner stop, backbone and lease leave: {val('scanner_ms')} ms, "
+                f"{val('scanner_mm')} mm at {val('v_drive')} m/s", ha="left", va="bottom", fontsize=9.5,
                 color=RED, fontweight="bold")
     else:
-        dd, _ = calcs.stop_mm()
-        ax.text(0, 0.42, f"pre-brake delay {tau:.1f} ms = {dd:.1f} mm of travel at 1.5 m/s",
+        ax.text(0, 0.42, f"pre-brake delay {val('tau_ms')} ms = {val('d_delay_mm')} mm of travel "
+                f"at {val('v_drive')} m/s",
                 ha="left", va="bottom", fontsize=9.5, color=INK, fontweight="bold")
     ax.set_xlim(0, 136)
     ax.set_ylim(-0.4, 0.4)
@@ -208,11 +213,11 @@ def delay_bar(name, scanner=False):
 # 4. Delay travel against braking travel, three steps (column)
 # ---------------------------------------------------------------------------
 def crossover():
-    t = calcs.tau_s()
+    t, a, d_clear = num("tau_s"), num("a_brake"), num("d_clear_mm")
     v = np.linspace(0, 2.0, 401)
-    delay, brake = v * t * 1000, v ** 2 / (2 * calcs.A_BRAKE) * 1000
-    vs = 2 * calcs.A_BRAKE * t
-    dd, db = calcs.stop_mm()
+    delay, brake = v * t * 1000, v ** 2 / (2 * a) * 1000
+    vs = K.m(K.r.crossover_speed, "m/s")  # exact, so the marker sits on the intersection
+    v_op, d_op = num("v_drive"), num("d_stop_mm")
     for step in (1, 2, 3):
         fig, ax = plt.subplots(figsize=(3.75, 2.25))
         fig.subplots_adjust(left=0.19, right=0.80, top=0.95, bottom=0.21)
@@ -222,18 +227,18 @@ def crossover():
             ax.plot(v, brake, color=SLATE, lw=2.2)
             ax.text(2.03, brake[-1], "braking\ntravel", color=SLATE, fontsize=9, fontweight="bold", va="center")
             ax.plot([vs], [vs * t * 1000], "o", ms=6, mfc="white", mec=INK, mew=1.5, zorder=5)
-            ax.annotate(f"crossover {vs:.2f} m/s", xy=(vs, vs * t * 1000), xytext=(0.08, 520),
+            ax.annotate(f"crossover {val('v_star')} m/s", xy=(vs, vs * t * 1000), xytext=(0.08, 520),
                         fontsize=9, fontweight="bold", color=INK,
                         arrowprops=dict(arrowstyle="-", color=INK, lw=0.9))
         if step >= 3:
             ax.plot(v, delay + brake, color=INK, lw=2.4)
             ax.text(2.03, delay[-1] + brake[-1], "sum", color=INK, fontsize=9, fontweight="bold",
                     va="center", clip_on=False)
-            ax.axhline(calcs.D_CLEAR, color=RED, lw=1.6, ls="--")
-            ax.text(0.04, calcs.D_CLEAR + 30, "clear distance 1,100 mm", color=RED, fontsize=9,
+            ax.axhline(d_clear, color=RED, lw=1.6, ls="--")
+            ax.text(0.04, d_clear + 30, f"clear distance {val('d_clear_mm')} mm", color=RED, fontsize=9,
                     fontweight="bold", va="bottom")
-            ax.plot([calcs.V], [dd + db], "o", ms=7, color=INK, zorder=5)
-            ax.text(calcs.V - 0.05, dd + db + 40, f"{dd + db:.1f} mm", fontsize=9, fontweight="bold",
+            ax.plot([v_op], [d_op], "o", ms=7, color=INK, zorder=5)
+            ax.text(v_op - 0.05, d_op + 40, f"{val('d_stop_mm')} mm", fontsize=9, fontweight="bold",
                     ha="right", va="bottom")
         ax.set_xlim(0, 2.0)
         ax.set_ylim(0, 1600)
@@ -248,24 +253,21 @@ def crossover():
 # 5. Tempe through the budget (full width bars, NTSB inputs)
 # ---------------------------------------------------------------------------
 def tempe_bars():
-    v1, v2 = calcs.V_EMERG_MPH * calcs.MPH, calcs.V_SUPP_END_MPH * calcs.MPH
-    supp = (calcs.T_EMERG - calcs.T_SUPP_END) * (v1 + v2) / 2
-    road, _ = calcs.stopping_distance(v1, calcs.G_ROAD)
-    ads, _ = calcs.stopping_distance(v1, calcs.G_ADS)
-    rows = [("traveled during the 1 s suppression", supp, RED),
-            ("full stop at the road's 0.92 g", road, SLATE),
-            ("full stop at the ADS cap, 0.71 g", ads, GRAY)]
+    rows = [(f"traveled during the {val('tempe_supp_s')} s suppression", "tempe_supp_m", RED),
+            (f"full stop at the road's {val('tempe_road_g')} g", "tempe_brake_road_m", SLATE),
+            (f"full stop at the ADS cap, {val('tempe_cap_g')} g", "tempe_brake_cap_m", GRAY)]
     fig, ax = plt.subplots(figsize=(5.6, 1.55))
     fig.subplots_adjust(left=0.43, right=0.90, top=0.97, bottom=0.27)
-    for i, (lab, val, col) in enumerate(rows):
+    for i, (lab, key, col) in enumerate(rows):
         y = len(rows) - 1 - i
-        ax.barh(y, val, color=col, height=0.62)
+        ax.barh(y, num(key), color=col, height=0.62)
         ax.text(-0.6, y, lab, ha="right", va="center", fontsize=9.5, color=INK, fontweight="bold")
-        ax.text(val + 0.4, y, f"{val:.1f} m", ha="left", va="center", fontsize=9.5, color=col, fontweight="bold")
+        ax.text(num(key) + 0.4, y, f"{val(key)} m", ha="left", va="center", fontsize=9.5, color=col,
+                fontweight="bold")
     ax.set_yticks([])
     ax.set_xlim(0, 30)
     ax.set_xticks([0, 10, 20, 30])
-    ax.set_xlabel("meters, from 43.2 mph (19.3 m/s)")
+    ax.set_xlabel(f"meters, from {val('tempe_recog_mph')} mph ({val('tempe_recog_mps')} m/s)")
     ax.spines["left"].set_visible(False)
     save_plot(fig, "tempe_bars")
 
@@ -274,7 +276,8 @@ def tempe_bars():
 # 6. Training compute by domain (Epoch AI via mlsysim), column
 # ---------------------------------------------------------------------------
 def epoch():
-    rows = [r for r in calcs.epoch_rows() if str(r["publication_date"]) >= "2018" and r["training_flop"]]
+    rows = [r for r in K.Literature.ModelsByDomain.entries
+            if str(r["publication_date"]) >= "2018" and r["training_flop"]]
     date = lambda r: dt.datetime.fromisoformat(str(r["publication_date"])[:10])
     lang = [r for r in rows if r["domain_group"] == "Language"]
     robo = [r for r in rows if r["domain_group"] == "Robotics" and "Cosmos" not in r["model"]]
@@ -284,7 +287,7 @@ def epoch():
     ax.scatter([date(r) for r in robo], [r["training_flop"] for r in robo], s=26, color=GREEN, zorder=4)
     ax.text(dt.datetime(2019, 3, 1), 3e25, "language models", color=GRAY, fontsize=9, fontweight="bold")
     ax.text(dt.datetime(2018, 3, 1), 4e16, "robotics models", color=GREEN, fontsize=9, fontweight="bold")
-    for name, (lab, (dx, dy)) in {"OpenVLA": ("OpenVLA", (-48, 14)), "GR00T N1 2B": ("GR00T N1", (-12, -26))}.items():
+    for name, (lab, (dx, dy)) in {K.VLA.model: ("OpenVLA", (-48, 14)), K.GR00T.model: ("GR00T N1", (-12, -26))}.items():
         r = next(r for r in robo if r["model"] == name)
         ax.annotate(lab, (date(r), r["training_flop"]), xytext=(dx, dy), textcoords="offset points",
                     fontsize=9, fontweight="bold", color=GREEN,
