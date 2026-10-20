@@ -3032,3 +3032,55 @@ def test_lifecycle_tco_payback_and_platform_benefit():
     assert Scenarios.TrainingOptimizationPayback.payback.to("month").magnitude == approx(1.777778)
     assert Scenarios.SharedPlatformBenefit50.benefit_cost_ratio == approx(1.25)
     assert Scenarios.SharedPlatformBenefit20.benefit_cost_ratio == approx(0.5)
+
+
+def test_query_extraction_budget():
+    e = Scenarios.ResNet50ApiExtractionBudget
+    assert e.collection_days == approx(500)
+    assert e.full_set_tier.to("USD").magnitude == approx(833.333333)
+    assert e.full_set_pay_per_query.to("USD").magnitude == approx(5000)
+    assert e.allowance_fees.to("USD").magnitude == approx(16.666667)
+    assert e.full_set_lifetime.to("USD").magnitude == approx(4916.666667)
+    assert e.lifetime_cost(5e4).to("USD").magnitude == approx(e.tier_cost(5e4).to("USD").magnitude)
+
+
+def test_output_shaping_and_attack_surface():
+    o = Scenarios.ImageNetTop5RoundedScores
+    assert o.scores_reduction == approx(200) and o.entries_removed == approx(0.995)
+    assert o.bits_removed == approx(13.287712) and o.retained_bits == approx(6.658211)
+    r = Scenarios.ReferenceJobAttackSurface
+    assert r.accelerators == 1024 and r.nodes == 128 and r.accelerators_per_replica == approx(16)
+    assert r.gradient_bytes.to("GB").magnitude == approx(350)
+    assert r.checkpoint_bytes.to("TB").magnitude == approx(2.45)
+    assert r.weight_bytes.to("GB").magnitude == approx(350)
+    assert r.allreduce_factor == approx(1.96875) and r.gather_traffic_ratio == approx(32)
+    b = Scenarios.ByzantineMeanOnReferenceJob
+    assert b.mean() == approx(157.234375) and b.median() == approx(1.0)
+
+
+def test_isolation_enclave_and_encryption_costs():
+    assert Scenarios.SecureMultiTenantServing.overhead == approx(0.15)
+    f = Scenarios.ResNet50Fp32InSgxEnclave
+    assert f.weight_bytes.to("MB").magnitude == approx(102.228128)
+    assert f.capacity_share == approx(0.761659)
+    assert Scenarios.ResNet18Int8InSgxEnclave.weight_bytes.to("MB").magnitude == approx(11.7, rel=1e-3)
+    h = Scenarios.HealthMonitoringEncryptedInference
+    assert h.encrypted_transport_latency.to("ms").magnitude == approx(20.5)
+    assert h.fhe_latency.to("second").magnitude == approx(200)
+    p = Scenarios.FiveBytePasswordPowerAnalysis
+    assert p.brute_force_guesses == 256 ** 5 and p.bytewise_guesses == 1280
+
+
+def test_differential_privacy_scenarios():
+    s = Scenarios.SalaryMeanLaplaceRelease
+    assert s.noise_scale.to("USD").magnitude == approx(200000)
+    assert s.mean_error().to("USD").magnitude == approx(200)
+    assert s.small_group_error.to("USD").magnitude == approx(2000)
+    assert Scenarios.TenReleasesBasicComposition.total_epsilon == approx(10)
+    a = Scenarios.DpSgdAccountantComparison
+    assert a.tightening(100) == approx(7.412698) and a.tightening(400) == approx(9.498039)
+    m = Scenarios.MembershipAuditAtEpsilonOne
+    assert all(m.audit(i / 200) <= m.ceiling(i / 200) + 1e-12 for i in range(201))
+    c = Scenarios.Cifar10DpSgdRun
+    assert c.sampling_rate == approx(0.08) and c.steps == 750
+    assert Scenarios.LaionWebScalePoisoning.poisoned_items == approx(40000)
