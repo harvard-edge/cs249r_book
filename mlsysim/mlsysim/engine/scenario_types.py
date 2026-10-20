@@ -655,16 +655,38 @@ class TrainingGrowthScenario(BaseScenario):
 
 
 class PublishedRunScenario(BaseScenario):
-    """A published training run: its total compute spread over its accelerators and days."""
+    """A published training run: its total compute spread over its accelerators and days.
+
+    Optional (added 2026-10-20): a run reported as ``accelerator_hours`` (a
+    model card's GPU hours) at ``device_power`` per accelerator. Its compute is
+    the workload's ``training_ops`` or, when unset, 6PD from its training tokens.
+    """
     workload: Workload
     accelerator: HardwareNode       # the part the run used, for its peak rate
+    accelerator_hours: Optional[Quantity] = None
+    device_power: Optional[Quantity] = None
+
+    @property
+    def training_operations(self) -> Quantity:
+        w = self.workload
+        if w.training_ops is not None:
+            return w.training_ops
+        from ..physics.transformer import calc_transformer_training_flops
+        return calc_transformer_training_flops(w.parameters, w.training_tokens).to("flop")
 
     @property
     def achieved_rate(self) -> Quantity:
         """Average delivered FLOP/s per accelerator over the whole run, idle time included."""
         w = self.workload
+        if self.accelerator_hours is not None:
+            return (self.training_operations / self.accelerator_hours).to("TFLOP/s")
         n = w.training_accelerators_ref.to("count").magnitude
         return (w.training_ops / (n * w.training_days_ref)).to("TFLOP/s")
+
+    @property
+    def energy(self) -> Quantity:
+        """Every accelerator hour at ``device_power``."""
+        return (self.accelerator_hours * self.device_power).to("GWh")
 
     @property
     def peak_fraction(self) -> float:
@@ -1615,13 +1637,60 @@ class ActivationMemoryScenario(BaseScenario):
     workload: Workload
     micro_batch: int
     seq_len: Optional[int] = None   # defaults to the model's context length
+    # Optional (added 2026-10-20): bytes per stored activation (2 for 16-bit),
+    # and a stated normalization buffer per layer for the per-layer line items.
+    precision_bytes: float = 2
+    normalization_per_layer: Optional[Quantity] = None
+    ffn_multiple: int = 4
+
+    @property
+    def sequence(self) -> int:
+        return self.seq_len if self.seq_len is not None else self.workload.context_length
 
     def activations(self, strategy: str) -> Quantity:
         from ..physics.memory import calc_activation_memory
         w = self.workload
-        seq = self.seq_len if self.seq_len is not None else w.context_length
-        return calc_activation_memory(w.layers, seq, self.micro_batch, w.hidden_dim,
-                                      n_heads=w.heads, strategy=strategy)
+        return calc_activation_memory(w.layers, self.sequence, self.micro_batch, w.hidden_dim,
+                                      n_heads=w.heads, precision_bytes=self.precision_bytes, strategy=strategy)
+
+    @property
+    def per_token_activations(self) -> Quantity:
+        """Activations that grow in proportion to sequence length (everything but the attention scores)."""
+        return self.activations("selective").to("GB")
+
+    @property
+    def score_activations(self) -> Quantity:
+        """Saved attention scores, which grow with the square of sequence length."""
+        return (self.activations("none") - self.activations("selective")).to("GB")
+
+    # Per-layer line items (added 2026-10-20): the tensors a reader can name.
+    def _elements(self, width) -> float:
+        return self.micro_batch * self.sequence * width
+
+    @property
+    def projection_activations_per_layer(self) -> Quantity:
+        """Query, key, value, and output projections: four tensors of the model width."""
+        return Q_(4 * self._elements(self.workload.hidden_dim) * self.precision_bytes, "byte").to("MB")
+
+    @property
+    def ffn_activations_per_layer(self) -> Quantity:
+        """The feed-forward expansion, ``ffn_multiple`` times the model width."""
+        return Q_(self._elements(self.ffn_multiple * self.workload.hidden_dim) * self.precision_bytes,
+                  "byte").to("MB")
+
+    @property
+    def score_activations_per_layer(self) -> Quantity:
+        return (self.score_activations / self.workload.layers).to("MB")
+
+    @property
+    def line_items_per_layer(self) -> Quantity:
+        norm = self.normalization_per_layer if self.normalization_per_layer is not None else Q_(0, "MB")
+        return (self.projection_activations_per_layer + self.ffn_activations_per_layer
+                + self.score_activations_per_layer + norm).to("MB")
+
+    @property
+    def line_items_total(self) -> Quantity:
+        return (self.line_items_per_layer * self.workload.layers).to("GB")
 
     @property
     def forward_equivalents(self) -> float:
@@ -2157,18 +2226,70 @@ class InputSpaceScenario(BaseScenario):
 
 
 class ClusterTrainingTimeScenario(BaseScenario):
-    """Training ``workload`` on ``n_devices`` x ``hardware`` at one end-to-end utilization (compute-bound)."""
+    """Training ``workload`` on ``n_devices`` x ``hardware`` at one end-to-end utilization (compute-bound).
+
+    Optional (added 2026-10-20): ``tokens_per_step`` turns the run into steps
+    (a step costs 6P FLOPs per token); ``hourly_price`` is the rental price of
+    one device for an hour. Energy is every device at its TDP for the whole run.
+    """
     workload: Workload
     hardware: HardwareNode
     n_devices: int
     efficiency: float
+    tokens_per_step: Optional[int] = None
+    hourly_price: Optional[Quantity] = None
+
+    def _time(self, ops) -> Quantity:
+        from ..physics.performance import dTime
+        return dTime(total_ops=ops, num_devices=self.n_devices,
+                     peak_flops_per_device=self.hardware.compute.peak_flops,
+                     efficiency_eta=self.efficiency)
 
     @property
     def training_time(self) -> Quantity:
-        from ..physics.performance import dTime
-        return dTime(total_ops=self.workload.training_ops, num_devices=self.n_devices,
-                     peak_flops_per_device=self.hardware.compute.peak_flops,
-                     efficiency_eta=self.efficiency).to("day")
+        return self._time(self.workload.training_ops).to("day")
+
+    @property
+    def delivered_rate(self) -> Quantity:
+        """FLOP/s the devices deliver together: peak times utilization."""
+        return (self.n_devices * self.hardware.compute.peak_flops * self.efficiency).to("TFLOP/s")
+
+    @property
+    def training_tokens(self) -> Quantity:
+        """Tokens the run's FLOPs cover at 6P FLOPs per token."""
+        from ..physics.transformer import calc_transformer_training_flops
+        per_token = calc_transformer_training_flops(self.workload.parameters, 1)
+        return Q_((self.workload.training_ops / per_token).to("").magnitude, "count")
+
+    @property
+    def step_operations(self) -> Quantity:
+        from ..physics.transformer import calc_transformer_training_flops
+        return calc_transformer_training_flops(self.workload.parameters, self.tokens_per_step).to("TFLOP")
+
+    @property
+    def step_time(self) -> Quantity:
+        return self._time(self.step_operations).to("second")
+
+    @property
+    def steps(self) -> float:
+        return (self.workload.training_ops / self.step_operations).to("").magnitude
+
+    @property
+    def energy(self) -> Quantity:
+        """Every device at its TDP for the whole run."""
+        return (self.n_devices * self.hardware.tdp * self.training_time).to("kWh")
+
+    @property
+    def step_energy(self) -> Quantity:
+        return (self.n_devices * self.hardware.tdp * self.step_time).to("joule")
+
+    @property
+    def device_hours(self) -> Quantity:
+        return (self.n_devices * self.training_time).to("hour")
+
+    @property
+    def rental_cost(self) -> Quantity:
+        return (self.device_hours * self.hourly_price).to("USD")
 
 
 class IronLawScenario(BaseScenario):
@@ -4970,6 +5091,18 @@ class AcceleratorInputFeedScenario(BaseScenario):
     accelerators: int = 1
     worker_rate: Optional[Quantity] = None   # samples per second per loader worker
     host_decode_cap: Optional[Quantity] = None   # samples per second the whole host can decode
+    # Optional (added 2026-10-20): loader workers the host gives each accelerator.
+    host_workers: Optional[int] = None
+
+    @property
+    def host_supply(self) -> Quantity:
+        """Samples a second the host's workers for one accelerator decode and augment."""
+        return (self.host_workers * self.worker_rate).to("count/second")
+
+    @property
+    def busy_fraction(self) -> float:
+        """Share of the time the accelerator computes when the host supply is the slower stage."""
+        return min(1.0, (self.host_supply / self.sustained_rate).to("").magnitude)
 
     @property
     def training_flops_per_sample(self) -> Quantity:
@@ -8867,6 +9000,15 @@ class TrainingStateFitScenario(BaseScenario):
     # grow in proportion to the batch.
     batch_size: Optional[int] = None
     activations: Optional[Quantity] = None
+    # Optional (added 2026-10-20): mixed precision keeps a higher-precision
+    # master copy of every trained weight (4 B, FP32) beside the 16-bit
+    # weights and gradients; None for a single-precision recipe.
+    master_bytes_per_parameter: Optional[Quantity] = None
+    # Optional (added 2026-10-20): trainable adapter parameters beside a
+    # frozen base (low-rank adapters). The base keeps only its weights; each
+    # adapter parameter carries weights, gradients, master copy, and
+    # optimizer state.
+    adapter_parameters: Optional[int] = None
 
     def activations_at(self, batch_size: int) -> Quantity:
         """Saved activations at another batch size, scaled linearly from ``activations``."""
@@ -8904,8 +9046,31 @@ class TrainingStateFitScenario(BaseScenario):
         return (self.optimizer_bytes_per_parameter / self.bytes_per_value).to("").magnitude
 
     @property
+    def master_weights(self) -> Quantity:
+        if self.master_bytes_per_parameter is None:
+            return Q_(0, "byte")
+        return (self.workload.parameters.to("count").magnitude * self.master_bytes_per_parameter).to("byte")
+
+    @property
+    def bytes_per_trained_parameter(self) -> Quantity:
+        """Weights, gradients, master copy, and optimizer state for one trained parameter."""
+        master = Q_(0, "byte") if self.master_bytes_per_parameter is None else self.master_bytes_per_parameter
+        return (2 * self.bytes_per_value + master + self.optimizer_bytes_per_parameter).to("byte")
+
+    @property
+    def adapter_state(self) -> Quantity:
+        """Everything the adapters hold: weights, gradients, master copy, optimizer state."""
+        return (self.adapter_parameters * self.bytes_per_trained_parameter).to("byte")
+
+    @property
+    def adapter_fraction(self) -> float:
+        return self.adapter_parameters / self.workload.parameters.to("count").magnitude
+
+    @property
     def total(self) -> Quantity:
-        return sum(self._state()[1:], self._state()[0])
+        if self.adapter_parameters is not None:
+            return (self.weights + self.adapter_state).to("byte")
+        return sum(self._state()[1:], self._state()[0]) + self.master_weights
 
     @property
     def copies(self) -> float:
@@ -8915,6 +9080,42 @@ class TrainingStateFitScenario(BaseScenario):
     @property
     def fits(self) -> bool:
         return self.hardware is not None and self.total <= self.hardware.memory.capacity
+
+    @property
+    def capacity_share(self) -> float:
+        """State before activations as a share of ``hardware``'s memory."""
+        return (self.total / self.hardware.memory.capacity).to("").magnitude
+
+    @property
+    def training_capacity_multiple(self) -> float:
+        """State and saved activations in units of ``hardware``'s memory."""
+        return (self.training_total / self.hardware.memory.capacity).to("").magnitude
+
+    @property
+    def checkpoint(self) -> Quantity:
+        """A resumable checkpoint: weights, master copy, and optimizer state; gradients are recomputed."""
+        return (self.weights + self.master_weights + self.optimizer_state).to("byte")
+
+    def checkpoint_write_time(self, bandwidth: Quantity) -> Quantity:
+        """Seconds to write ``checkpoint`` at ``bandwidth``."""
+        return (self.checkpoint / bandwidth).to("second")
+
+    @property
+    def update_bytes_per_parameter(self) -> Quantity:
+        """Bytes one optimizer update moves per parameter: read the gradient, the updated
+        weights, and the optimizer state; write the state and the weights back."""
+        p = self.workload.parameters.to("count").magnitude
+        updated = (self.master_weights if self.master_bytes_per_parameter is not None else self.weights) / p
+        return (self.gradients / p + 2 * updated + 2 * self.optimizer_state / p).to("byte")
+
+    @property
+    def update_traffic(self) -> Quantity:
+        return (self.update_bytes_per_parameter * self.workload.parameters.to("count").magnitude).to("GB")
+
+    @property
+    def update_time(self) -> Quantity:
+        """The optimizer update at ``hardware``'s memory bandwidth (elementwise, bandwidth-bound)."""
+        return (self.update_traffic / self.hardware.memory.bandwidth).to("ms")
 
 
 class ParameterGrowthScenario(BaseScenario):
@@ -9535,6 +9736,8 @@ class TransformerBlockScenario(BaseScenario):
     ffn_multiple: int = 4            # feed-forward width over model width
     attention_projections: int = 4   # query, key, value, output
     hardware: Optional[HardwareNode] = None
+    # Optional (added 2026-10-20): sequences of ``context_tokens`` in one training step.
+    batch_size: int = 1
 
     def _w(self):
         from ..physics.transformer import calc_transformer_block_weights
@@ -9660,6 +9863,36 @@ class TransformerBlockScenario(BaseScenario):
     @property
     def attention_time_at_peak(self) -> Quantity:
         return (self.prompt_attention_flops / self.hardware.compute.peak_flops).to("minute")
+
+    @property
+    def training_to_forward(self) -> float:
+        """A training step in forward passes: 6P over 2P per token."""
+        from ..physics.transformer import calc_transformer_training_flops, calc_transformer_decode_flops
+        p = self.workload.parameters
+        return (calc_transformer_training_flops(p, 1) / calc_transformer_decode_flops(p, 1)).to("").magnitude
+
+    @property
+    def layer_forward_flops(self) -> Quantity:
+        """One block's forward FLOPs for the whole batch: dense and attention products, two FLOPs each."""
+        return Q_(2 * self.block_macs * self.batch_size, "flop").to("GFLOP")
+
+    @property
+    def training_step_flops(self) -> Quantity:
+        """One training step counted layer by layer, attention products included."""
+        return (self.layer_forward_flops * self.workload.layers * self.training_to_forward).to("TFLOP")
+
+    @property
+    def six_p_step_flops(self) -> Quantity:
+        """The same step by the 6P-per-token rule, which omits the attention products."""
+        from ..physics.transformer import calc_transformer_training_flops
+        return calc_transformer_training_flops(self.workload.parameters,
+                                               self.batch_size * self.context_tokens).to("TFLOP")
+
+    @property
+    def attention_step_flops(self) -> Quantity:
+        """The attention products' share of a training step, all layers."""
+        return Q_(2 * self.attention_macs * self.batch_size * self.workload.layers
+                  * self.training_to_forward, "flop").to("TFLOP")
 
 
 class MaterializedScoresScenario(BaseScenario):
