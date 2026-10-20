@@ -995,3 +995,479 @@ class CompressedReadScenario(BaseScenario):
     def decode_cores(self, codec: str) -> float:
         """Cores needed to decode at that output rate."""
         return (self.output_bandwidth(codec) / self.decode_rates[codec]).to("").magnitude
+
+
+# --- Deployment paradigms: where a model can run (added 2026-10-20) ---------
+# The light barrier, data movement off the device, the roofline on one node,
+# battery and heat on a phone, and splitting a pipeline across tiers.
+
+class PropagationScenario(BaseScenario):
+    """A request sent ``distance`` over fiber and answered; optionally a budget and a measured round trip."""
+    distance: Quantity
+    budget: Optional[Quantity] = None
+    measured_round_trip: Optional[Quantity] = None
+
+    @property
+    def round_trip(self) -> Quantity:
+        """Propagation floor, ``2 x distance / v_fiber`` (no routing, queuing, or compute)."""
+        from ..physics.networking import calc_network_latency_ms
+        return Q_(calc_network_latency_ms(self.distance), "millisecond")
+
+    @property
+    def overrun(self) -> Quantity:
+        """How far the floor alone exceeds the budget (negative when it fits)."""
+        return (self.round_trip - self.budget).to("millisecond")
+
+    @property
+    def measured_over_floor(self) -> float:
+        return (self.measured_round_trip / self.round_trip).to("").magnitude
+
+
+class MeasuredRoutesScenario(BaseScenario):
+    """Measured round trips from one source to several regions, each against its fiber floor."""
+    series_name: str                 # a Literature.Series table with coordinates and p50_rtt_ms
+
+    @property
+    def routes(self) -> Dict[str, PropagationScenario]:
+        """Destination label -> propagation scenario over the great-circle distance."""
+        from ..literature.registry import Literature
+        from ..physics.networking import calc_great_circle_distance
+        out = {}
+        for r in getattr(Literature.Series, self.series_name).entries:
+            d = calc_great_circle_distance(r["source_lat"], r["source_lon"], r["dest_lat"], r["dest_lon"])
+            out[r["dest_label"]] = PropagationScenario(
+                name=f"{r['source_region']} to {r['dest_region']}",
+                description=f"Measured median against the fiber floor, {r['source_metro']} to {r['dest_metro']}.",
+                distance=d, measured_round_trip=Q_(r["p50_rtt_ms"], "millisecond"))
+        return out
+
+
+class SensorUplinkScenario(BaseScenario):
+    """``streams`` raw video streams against a shared link, and the event records that replace them."""
+    frame_width: int
+    frame_height: int
+    bytes_per_pixel: Quantity
+    frame_rate: Quantity
+    streams: int
+    link_bandwidth: Quantity
+    event_size: Quantity
+    event_rate: Quantity
+
+    @property
+    def stream_rate(self) -> Quantity:
+        return (self.frame_width * self.frame_height * self.bytes_per_pixel * self.frame_rate).to("byte/second")
+
+    @property
+    def total_rate(self) -> Quantity:
+        return (self.streams * self.stream_rate).to("byte/second")
+
+    @property
+    def link_shortfall(self) -> float:
+        """Raw aggregate over what the link carries."""
+        return (self.total_rate / self.link_bandwidth).to("").magnitude
+
+    @property
+    def event_bandwidth(self) -> Quantity:
+        return (self.event_size * self.event_rate).to("byte/second")
+
+    @property
+    def event_reduction(self) -> float:
+        """Raw aggregate over the event-record stream."""
+        return (self.total_rate / self.event_bandwidth).to("").magnitude
+
+
+class OffloadDeadlineScenario(BaseScenario):
+    """One input sent over an uplink to a remote model, against a per-frame deadline (lower bound)."""
+    payload: Quantity
+    uplink_bandwidth: Quantity
+    network_latency: Quantity
+    remote_compute_time: Quantity
+    frame_rate: Quantity
+    compression: float = 1.0          # payload bytes divided by this before sending
+
+    @property
+    def transmit_time(self) -> Quantity:
+        return (self.payload / self.compression / self.uplink_bandwidth).to("millisecond")
+
+    @property
+    def remote_response(self) -> Quantity:
+        return (self.network_latency + self.remote_compute_time).to("millisecond")
+
+    @property
+    def remote_lower_bound(self) -> Quantity:
+        """Send + round trip + remote compute; queuing and serialization excluded."""
+        return (self.transmit_time + self.remote_response).to("millisecond")
+
+    @property
+    def deadline(self) -> Quantity:
+        return (1 / self.frame_rate).to("millisecond")
+
+    @property
+    def deadline_ratio(self) -> float:
+        return (self.remote_lower_bound / self.deadline).to("").magnitude
+
+
+class SingleNodeInferenceScenario(BaseScenario):
+    """One inference of ``workload`` on ``hardware`` (roofline profile from SingleNodeModel)."""
+    workload: Workload
+    hardware: HardwareNode
+    batch_size: int = 1
+    precision: Optional[str] = None   # None: the solver's default
+    efficiency: Optional[float] = None
+
+    @property
+    def result(self):
+        from .solvers import SingleNodeModel
+        kw = {}
+        if self.precision is not None:
+            kw["precision"] = self.precision
+        if self.efficiency is not None:
+            kw["efficiency"] = self.efficiency
+        return SingleNodeModel().solve(self.workload, self.hardware, batch_size=self.batch_size, **kw)
+
+    @property
+    def traffic(self) -> Quantity:
+        """Bytes the model moves per inference: memory time x bandwidth."""
+        p = self.result
+        return (p.latency_memory * p.peak_bw_actual).to("byte")
+
+    @property
+    def intensity(self) -> Quantity:
+        return (self.workload.inference_flops * self.batch_size / self.traffic).to("flop/byte")
+
+    @property
+    def ridge(self) -> Quantity:
+        p = self.result
+        return (p.peak_flops_actual / p.peak_bw_actual).to("flop/byte")
+
+
+class RooflinePointScenario(BaseScenario):
+    """A workload of ``intensity`` on ``hardware``'s roofline: attainable rate and share of peak."""
+    hardware: HardwareNode
+    intensity: Quantity
+    precision: Optional[str] = None
+
+    @property
+    def peak(self) -> Quantity:
+        if self.precision is None:
+            return self.hardware.compute.peak_flops
+        return self.hardware.compute.precision_flops[self.precision]
+
+    @property
+    def ridge(self) -> Quantity:
+        return (self.peak / self.hardware.memory.bandwidth).to("flop/byte")
+
+    @property
+    def attainable(self) -> Quantity:
+        return min(self.peak.to("flop/second"), (self.hardware.memory.bandwidth * self.intensity).to("flop/second"))
+
+    @property
+    def peak_fraction(self) -> float:
+        return (self.attainable / self.peak).to("").magnitude
+
+
+class PublishedRooflineScenario(BaseScenario):
+    """Measured applications placed on a published roofline: a peak and the ridge where the slope meets it."""
+    peak: Quantity
+    ridge: float                       # operations per byte, in the source's own counting
+    series_name: str                   # Literature.Series table: app, ops_per_weight_byte, measured_tops
+
+    @property
+    def apps(self) -> List[dict]:
+        """Per application: intensity, measured rate, the roof above it, its share, and the binding side."""
+        from ..literature.registry import Literature
+        peak = self.peak.to("TOPS").magnitude
+        out = []
+        for r in getattr(Literature.Series, self.series_name).entries:
+            roof = min(peak, r["ops_per_weight_byte"] * peak / self.ridge)
+            out.append(dict(app=r["app"], family=r["family"], intensity=r["ops_per_weight_byte"],
+                            measured_tops=r["measured_tops"], roof_tops=roof,
+                            roof_fraction=r["measured_tops"] / roof,
+                            bound="memory" if r["ops_per_weight_byte"] < self.ridge else "compute"))
+        return out
+
+
+class AcceleratorPodScenario(BaseScenario):
+    """A pod envelope of ``pod.chips`` copies of ``accelerator``: aggregate peak and memory."""
+    pod: object                        # systems PodEnvelope
+    accelerator: HardwareNode
+
+    @property
+    def peak_flops(self) -> Quantity:
+        return self.pod.chips * self.accelerator.compute.peak_flops
+
+    @property
+    def chip_memory_total(self) -> Quantity:
+        return self.pod.chips * self.accelerator.memory.capacity
+
+
+class ClockScalingScenario(BaseScenario):
+    """Dynamic power after scaling the clock by ``frequency_ratio`` (P = C V^2 f)."""
+    frequency_ratio: float
+    voltage_tracks_frequency: bool = True
+
+    @property
+    def power_ratio(self) -> float:
+        from ..physics.power import calc_dynamic_power_ratio
+        return calc_dynamic_power_ratio(self.frequency_ratio, self.voltage_tracks_frequency)
+
+
+class GrowthGapScenario(BaseScenario):
+    """Compute doubling every ``compute_doubling_period`` against bandwidth growing ``bandwidth_growth`` a year."""
+    compute_doubling_period: Quantity
+    bandwidth_growth: float           # fractional growth per year
+    horizon: Quantity
+
+    @property
+    def compute_annual_factor(self) -> float:
+        return 2 ** (Q_(1, "year") / self.compute_doubling_period).to("").magnitude
+
+    @property
+    def bandwidth_annual_factor(self) -> float:
+        return 1 + self.bandwidth_growth
+
+    @property
+    def gap(self) -> float:
+        """Compute growth over bandwidth growth across the horizon."""
+        years = self.horizon.to("year").magnitude
+        return (self.compute_annual_factor / self.bandwidth_annual_factor) ** years
+
+
+class TrendFitScenario(BaseScenario):
+    """Log-linear fit of one group of a Literature series; growth per ``period`` of the x column."""
+    series_name: str
+    group_key: str
+    group: str
+    x_key: str
+    y_key: str
+    period: float = 1.0
+
+    @property
+    def points(self) -> List[tuple]:
+        from ..literature.registry import Literature
+        rows = getattr(Literature.Series, self.series_name).entries
+        return [(r[self.x_key], r[self.y_key]) for r in rows if r[self.group_key] == self.group]
+
+    @property
+    def fit(self) -> tuple:
+        """(growth per period, slope, intercept) of log10(y) on x."""
+        from ..physics.statistics import fit_exponential_growth
+        pts = self.points
+        return fit_exponential_growth([p[0] for p in pts], [p[1] for p in pts], self.period)
+
+    @property
+    def growth(self) -> float:
+        return self.fit[0]
+
+
+class TrendWindowScenario(BaseScenario):
+    """Maxima of series in a Literature table over year windows, and their ratios."""
+    series_name: str
+    windows: Dict[str, tuple]         # window name -> (first year, year after last)
+
+    def peak(self, series: str, window: str) -> float:
+        """Largest value of ``series`` in the named window."""
+        from ..literature.registry import Literature
+        lo, hi = self.windows[window]
+        rows = getattr(Literature.Series, self.series_name).entries
+        return max(r["value"] for r in rows if r["series"] == series and lo <= r["year"] < hi)
+
+    def growth(self, series: str, start: str, end: str) -> float:
+        return self.peak(series, end) / self.peak(series, start)
+
+
+class BatteryBudgetScenario(BaseScenario):
+    """A continuous ``power_draw`` against a battery and a required runtime."""
+    battery_energy: Quantity
+    power_draw: Quantity
+    required_runtime: Quantity
+
+    @property
+    def runtime(self) -> Quantity:
+        return (self.battery_energy / self.power_draw).to("hour")
+
+    @property
+    def required_energy(self) -> Quantity:
+        return (self.power_draw * self.required_runtime).to("Wh")
+
+    @property
+    def budget_ratio(self) -> float:
+        """Energy the required runtime needs over the battery's energy."""
+        return (self.required_energy / self.battery_energy).to("").magnitude
+
+
+class ThermalCeilingScenario(BaseScenario):
+    """A model's sustained power against a passively cooled device's ceiling, before and after a reduction."""
+    power: Quantity
+    reduction_factor: float
+    sustained_limit: Quantity
+    heating_rate: Quantity            # junction temperature rise at ``power``
+    trip_time: Quantity
+    trip_temperature: Quantity
+    burst_rate: float                 # frames per second before throttling
+    throttled_rate: float             # frames per second after
+
+    @property
+    def reduced_power(self) -> Quantity:
+        return (self.power / self.reduction_factor).to("watt")
+
+    @property
+    def headroom(self) -> Quantity:
+        """Ceiling minus the reduced power (zero means no margin)."""
+        return (self.sustained_limit - self.reduced_power).to("watt")
+
+
+class EnergyPerInferenceScenario(BaseScenario):
+    """Energy per inference across tiers: solver-derived device energies plus stated anchors."""
+    anchors: Dict[str, Quantity]
+    runs: Dict[str, SingleNodeInferenceScenario]
+
+    @property
+    def energies(self) -> Dict[str, Quantity]:
+        out = dict(self.anchors)          # stated units kept, so ratios stay exact
+        out.update({k: s.result.energy.to("joule") for k, s in self.runs.items()})
+        return out
+
+    def span(self, low: str, high: str) -> float:
+        e = self.energies
+        return (e[high] / e[low]).to("").magnitude
+
+
+class OffloadEnergyScenario(BaseScenario):
+    """Energy to send ``payload`` by radio against running the model locally."""
+    payload: Quantity
+    transmit_energy_per_byte: Quantity
+    local_run: SingleNodeInferenceScenario
+
+    @property
+    def transmit_energy(self) -> Quantity:
+        return (self.payload * self.transmit_energy_per_byte).to("mJ")
+
+    @property
+    def accelerator_energy(self) -> Quantity:
+        """The workload's registry inference energy (the accelerator alone)."""
+        return self.local_run.workload.inference_energy
+
+    @property
+    def device_energy(self) -> Quantity:
+        """The whole device over the inference window (SingleNodeModel energy)."""
+        return self.local_run.result.energy.to("joule")
+
+    @property
+    def ratio_accelerator(self) -> float:
+        return (self.transmit_energy / self.accelerator_energy).to("").magnitude
+
+    @property
+    def ratio_device(self) -> float:
+        return (self.transmit_energy / self.device_energy).to("").magnitude
+
+
+class TravelDuringLatencyScenario(BaseScenario):
+    """Distance a vehicle at ``speed`` covers during ``latency``; optionally a remote-path delay range."""
+    speed: Quantity
+    latency: Quantity
+    remote_delay_low: Optional[Quantity] = None
+    remote_delay_high: Optional[Quantity] = None
+
+    @property
+    def distance(self) -> Quantity:
+        return (self.speed * self.latency).to("meter")
+
+
+class WakeWordFleetScenario(BaseScenario):
+    """Wake-word detection for a device fleet: stream everything to the cloud, or detect on device."""
+    devices: float
+    audio_sample_rate: Quantity
+    audio_sample_bits: Quantity
+    queries_per_day: float
+    query_audio: Quantity             # audio uploaded per post-wake query
+    accelerator_time_per_query: Quantity
+    accelerators_per_datacenter: int
+    waking_hours: Quantity            # queries cluster in these hours of the day
+    peak_multiplier: float            # peak over waking-hours average
+    cloud_detection_cost: Quantity    # per device per year
+    local_power_low: Optional[Quantity] = None    # on-device detector power range
+    local_power_high: Optional[Quantity] = None
+    local_detection_cost: Optional[Quantity] = None   # per device per year
+
+    @property
+    def stream_rate(self) -> Quantity:
+        return (self.audio_sample_rate * self.audio_sample_bits).to("byte/second")
+
+    @property
+    def fleet_stream_rate(self) -> Quantity:
+        return (self.devices * self.stream_rate).to("byte/second")
+
+    @property
+    def upload_reduction(self) -> float:
+        """Audio streamed all day over audio uploaded for queries."""
+        return (Q_(1, "day") / (self.queries_per_day * self.query_audio)).to("").magnitude
+
+    @property
+    def fleet_query_rate(self) -> Quantity:
+        """Fleet audio after on-device detection (the stream cut by ``upload_reduction``)."""
+        return (self.fleet_stream_rate / self.upload_reduction).to("byte/second")
+
+    @property
+    def cloud_detection_cost_per_year(self) -> Quantity:
+        return (self.devices * self.cloud_detection_cost).to("USD/year")
+
+    @property
+    def queries_per_fleet_day(self) -> float:
+        return self.devices * self.queries_per_day
+
+    @property
+    def accelerator_hours_per_day(self) -> float:
+        return (self.queries_per_fleet_day * self.accelerator_time_per_query).to("hour").magnitude
+
+    @property
+    def datacenter_hours_per_day(self) -> float:
+        return (self.accelerators_per_datacenter * Q_(1, "day")).to("hour").magnitude
+
+    @property
+    def datacenters_average(self) -> float:
+        return self.accelerator_hours_per_day / self.datacenter_hours_per_day
+
+    @property
+    def peak_ratio(self) -> float:
+        """Peak over the all-day average: the waking-hours concentration times the peak multiplier."""
+        return self.peak_multiplier * (Q_(1, "day") / self.waking_hours).to("").magnitude
+
+    @property
+    def datacenters_peak(self) -> float:
+        return self.datacenters_average * self.peak_ratio
+
+
+class PipelineSpeedupScenario(BaseScenario):
+    """Serial pipeline stages; one stage is made ``speedup`` times faster (Amdahl's law)."""
+    stages: Dict[str, Quantity]
+    accelerated: str
+    speedup: float
+
+    @property
+    def total(self) -> Quantity:
+        return sum(self.stages.values(), Q_(0, "millisecond")).to("millisecond")
+
+    @property
+    def fraction(self) -> float:
+        """Share of the total in the accelerated stage."""
+        return (self.stages[self.accelerated] / self.total).to("").magnitude
+
+    @property
+    def accelerated_stage(self) -> Quantity:
+        return (self.stages[self.accelerated] / self.speedup).to("millisecond")
+
+    @property
+    def accelerated_total(self) -> Quantity:
+        return (self.total - self.stages[self.accelerated] + self.accelerated_stage).to("millisecond")
+
+    @property
+    def overall_speedup(self) -> float:
+        from ..physics.performance import calc_amdahls_speedup
+        return calc_amdahls_speedup(self.fraction, self.speedup)
+
+    @property
+    def limit(self) -> float:
+        """Speedup with an infinitely fast accelerated stage."""
+        from ..physics.performance import calc_amdahls_speedup
+        return calc_amdahls_speedup(self.fraction, float("inf"))
