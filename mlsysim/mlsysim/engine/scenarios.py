@@ -3066,3 +3066,137 @@ class Scenarios(Registry):
             ("stable-diffusion-xl", "Text to image", "SDXL"),
         ],
     )
+
+    # --- KV cache management on one DGX H100 node (added 2026-10-20) ----------
+    RepairRequestZones = _st.RequestZonesScenario(
+        name="Repair-agent request at revision r18, laid out in zones",
+        description="A 32,768-token request: system prompt, tool schemas, and workspace form the "
+                    "invariant shared prefix; turn history and the latest observation follow.",
+        zones={  # scenario assumption: tokens per zone, in serialization order
+            "System prompt": 2_048,
+            "Tool schemas": 4_096,
+            "Workspace": 8_192,
+            "Turn history": 16_384,
+            "Latest observation": 2_048,
+        },
+        shared_zones=3,  # system prompt, tool schemas, workspace
+    )
+    # Copied verbatim from the v2-10 inference branch; on merge keep one copy.
+    Llama3_70BLongContextAdmissionDgxH100 = _st.KvAdmissionScenario(
+        name="128K-token requests on the 70B GQA replica (8 H100s)",
+        description="FP16 weights and KV cache; HBM at the registered byte capacity, less a 20 GB "
+                    "runtime reserve.",
+        workload=_Models.Language.Llama3_70B,
+        accelerators=_Nodes.DGX_H100.accelerators_per_node,
+        hbm_per_accelerator=_ReferenceStats.ServingProfiles.H100VendorMemoryBudget,
+        weight_bytes_per_param=_BYTES_FP16,
+        reserve=Q_(20, "GB"),  # scenario assumption: system reserve
+        context_tokens=_Models.Language.Llama3_70B.context_length,
+        kv_bytes_per_elem=_BYTES_FP16,
+    )
+    Llama3_70BAgentContextAdmissionDgxH100 = Llama3_70BLongContextAdmissionDgxH100.variant(
+        name="32,768-token agent requests on the 70B GQA replica (8 H100s)",
+        description="The repair request's 32,768 retained tokens per request, same replica and reserve.",
+        context_tokens=RepairRequestZones.total_tokens,
+    )
+    Llama3_70BShortContextAdmissionDgxH100 = Llama3_70BLongContextAdmissionDgxH100.variant(
+        name="8,192-token requests on the 70B GQA replica (8 H100s)",
+        description="A short session of 8,192 retained tokens per request, same replica and reserve.",
+        context_tokens=8_192,  # scenario assumption: short-session context
+    )
+    KvBytesPerTokenByAttentionDesign = _st.KvAttentionDesignScenario(
+        name="KV bytes per token across multi-head, grouped-query, and latent attention",
+        description="Six registry geometries at 16 bits; GPT-3 (MHA), Llama 3 70B (GQA), and "
+                    "DeepSeek-V3 (MLA) as references, with one 131,072-token session.",
+        models=[_Models.Language.GPT3, _Models.Language.Llama3_405B, _Models.Language.Llama3_70B,
+                _Models.Language.Llama2_70B, _Models.Language.Mixtral_8x7B, _Models.Language.DeepSeek_V3],
+        mha=_Models.Language.GPT3,
+        gqa=_Models.Language.Llama3_70B,
+        mla=_Models.Language.DeepSeek_V3,
+        session_tokens=Llama3_70BLongContextAdmissionDgxH100.context_tokens,
+    )
+    CappedRequestsPagedAllocation = _st.PagedAllocationScenario(
+        name="Requests capped at 32,768 tokens with a mean final length of 2,048: reserved or paged",
+        description="Full-cap contiguous reservation against 16- and 64-token blocks in the same pool; "
+                    "final lengths capped exponential (a modeling assumption).",
+        pool=Llama3_70BAgentContextAdmissionDgxH100,
+        cap=32_768,  # scenario assumption: deployment cap, not a model specification
+        mean_final=2_048,  # scenario assumption: hypothetical mean final length, not a trace mean
+        small_block=16,  # scenario assumption: allocator block sizes
+        large_block=64,
+    )
+    ForkedCandidatesPrefixCopy = _st.KvForkCopyScenario(
+        name="Four candidate repairs forked from an 8,192-token prefix without block sharing",
+        description="Each candidate copies the prefix's KV state under contiguous allocation.",
+        pool=Llama3_70BAgentContextAdmissionDgxH100,
+        prefix_tokens=8_192,  # scenario assumption: processed prefix shared by the candidates
+        branches=4,  # scenario assumption: sampled candidate repairs
+    )
+    InvariantPrefixRebuildDgxH100 = _st.PrefixRebuildScenario(
+        name="A 4,096-token invariant prefix rebuilt on a miss, against a 32-token suffix pass on a hit",
+        description="Llama 3 70B geometry on one DGX H100 node; sustained prefill at 90 percent of the "
+                    "high-MFU figure (45 percent of 16-bit peak).",
+        workload=_Models.Language.Llama3_70B,
+        node=_Nodes.DGX_H100,
+        precision="fp16",
+        prefix_tokens=4_096,  # scenario assumption: invariant instructions and tool schemas
+        suffix_tokens=32,  # scenario assumption: short novel suffix after a hit
+        utilization=_Literature.Training.MfuHigh * 0.9,  # scenario assumption: sustained prefill share
+    )
+    ChunkedPrefillAmongDecodes = _st.ChunkedPrefillScenario(
+        name="A 4,096-token uncached prompt among 32 decodes, whole or in 512-token chunks",
+        description="Weight-only step time on the DGX H100 node at the sustained prefill rate.",
+        prefill=InvariantPrefixRebuildDgxH100,
+        decodes=32,  # scenario assumption: ongoing decode requests
+        prompt_tokens=4_096,  # scenario assumption: new uncached prefill
+        chunk_tokens=512,  # scenario assumption: prefill chunk per iteration
+    )
+    RepairToolWaitPausedState = _st.PausedKvStateScenario(
+        name="Repair request paused for a 45 s integration test: keep, move, or drop its KV state",
+        description="The 32,768-token request in 16-token blocks, moved over the eight PCIe host links "
+                    "in parallel; 32 such requests returning together.",
+        pool=Llama3_70BAgentContextAdmissionDgxH100,
+        prefill=InvariantPrefixRebuildDgxH100,
+        context_tokens=RepairRequestZones.total_tokens,
+        block_tokens=16,  # scenario assumption: allocation granularity
+        wait=Q_("45 s"),  # scenario assumption: stipulated integration-test wait
+        link_fraction=0.25,  # scenario assumption: links sustain a quarter of rated bandwidth
+        returns=32,  # scenario assumption: paused repairs whose tests finish together
+    )
+    RepairBlockSharingResidency = _st.KvBlockSharingScenario(
+        name="Repair requests in 16-token blocks: unshared, sharing a workspace prefix, kept or released",
+        description="32,768 input and 2,048 output tokens per request, a 24,576-token shareable "
+                    "prefix, 10 percent headroom, 5 s of generation and a 45 s test per turn.",
+        pool=Llama3_70BAgentContextAdmissionDgxH100,
+        headroom=0.10,  # scenario assumption: fraction of the pool withheld
+        context=RepairRequestZones.total_tokens,
+        output=2_048,  # scenario assumption: maximum private output tokens
+        common=24_576,  # scenario assumption: identical, compatible, shareable prefix tokens
+        block_tokens=RepairToolWaitPausedState.block_tokens,
+        generation=Q_("5 s"),  # scenario assumption: residence while generating
+        wait=RepairToolWaitPausedState.wait,
+    )
+    RepairBlockSharingResidencyLongTest = RepairBlockSharingResidency.variant(
+        name="Repair requests in 16-token blocks with a 90 s test",
+        wait=Q_("90 s"),  # scenario assumption: a test twice as long
+    )
+    RepairAgentResidency = _st.KvResidencyArchetypeScenario(
+        name="Repair agent: sharing only its system prompt and tool schemas, 5 s generation, 45 s test",
+        description="The 32,768-token repair context with the support profile's 6,144-token shared "
+                    "prefix (taken to be the same length).",
+        paused=RepairToolWaitPausedState,
+        context_tokens=RepairRequestZones.total_tokens,
+        shared_prefix=int(_Agents.Support.CustomerOps.shared_prefix.to("token").magnitude),
+        generation=RepairBlockSharingResidency.generation,
+        wait=RepairBlockSharingResidency.wait,
+    )
+    SupportAgentResidency = _st.KvResidencyArchetypeScenario(
+        name="Customer-support agent: shared policy prefix, short generation, customer reply wait",
+        description="The CustomerOps support profile's session context, shared prefix, generation "
+                    "residence, and customer reply time.",
+        paused=RepairToolWaitPausedState,
+        context_tokens=int(_Agents.Support.CustomerOps.session_context.to("token").magnitude),
+        shared_prefix=int(_Agents.Support.CustomerOps.shared_prefix.to("token").magnitude),
+        generation=_Agents.Support.CustomerOps.generation_residence,
+        wait=_Agents.Support.CustomerOps.customer_reply_time,
+    )

@@ -2784,6 +2784,15 @@ ZHENG_2024_SGLANG = _lit(
            "LLaVA-Next-34B and 74.1 percent for Vicuna-33B; first-token latency 1.7 times lower on "
            "average for Vicuna-33B. Read from arxiv.org/html/2312.07104v2."),
 )
+ABHYANKAR_2024_INFERCEPT = _lit(  # added 2026-10-20
+    "prov:abhyankar-2024-infercept",
+    "Abhyankar et al. (2024), InferCept: Efficient Intercept Support for Augmented Large Language "
+    "Model Inference, ICML 2024",
+    url="https://arxiv.org/abs/2402.01869",
+    verified="2026-10-18",
+    notes=("Abstract: discarding context at every interception and recomputing it took 37 to 40 "
+           "percent of model forwarding time in the systems measured."),
+)
 SHI_2023_DISTRACTED = _lit(
     "prov:shi-2023-distracted",
     "Shi et al. (2023), Large Language Models Can Be Easily Distracted by Irrelevant Context, "

@@ -1691,3 +1691,117 @@ def test_quantization_ensemble_confidence_and_mlperf():
     assert m.latest("gptj-99").to("s").magnitude == approx(4.17663)
     assert m.earliest("gptj-99").to("s").magnitude == approx(10.2045)
     assert m.span == approx(15566.8)
+
+
+# --- KV cache management (added 2026-10-20) ---------------------------------
+
+def test_repair_request_zones():
+    z = Scenarios.RepairRequestZones
+    assert z.total_tokens == 32768 and z.shared_tokens == 14336
+    assert z.shared_share == approx(0.4375)
+
+
+def test_llama70b_dgx_h100_kv_admission_by_context():
+    fits = {}
+    for name in ("Llama3_70BShortContextAdmissionDgxH100", "Llama3_70BAgentContextAdmissionDgxH100",
+                 "Llama3_70BLongContextAdmissionDgxH100"):
+        sc = getattr(Scenarios, name)
+        r = sc.result
+        assert r.head_dim == 128 and r.kv_per_token.to("byte").magnitude == 327680
+        assert r.hbm_total.to("GB").magnitude == approx(687.19477)
+        assert r.weights.to("GB").magnitude == approx(141.2)
+        assert r.kv_budget.to("GB").magnitude == approx(525.99477)
+        fits[sc.context_tokens] = r.max_requests
+    assert fits == {8192: 195, 32768: 48, 131072: 12}
+    agent = Scenarios.Llama3_70BAgentContextAdmissionDgxH100.result
+    assert agent.kv_per_request.to("GB").magnitude == approx(10.737418)
+
+
+def test_kv_bytes_per_token_by_attention_design():
+    r = Scenarios.KvBytesPerTokenByAttentionDesign.result
+    assert r.design == {"GPT-3 (175B)": "MHA", "Llama-3.1-405B": "GQA", "Llama-3.1-70B": "GQA",
+                        "Llama-2-70B": "GQA", "Mixtral-8x7B": "GQA", "DeepSeek-V3": "MLA"}
+    assert r.per_token["GPT-3 (175B)"].to("kB").magnitude == approx(4718.592)
+    assert r.per_token["DeepSeek-V3"].to("kB").magnitude == approx(70.272)
+    assert r.mha_over_mla == approx(67.147541) and r.gqa_over_mla == approx(4.6630237)
+    assert r.gqa_session.to("GB").magnitude == approx(42.949673)
+    assert r.mla_session.to("GB").magnitude == approx(9.2107653)
+
+
+def test_capped_requests_paged_allocation():
+    r = Scenarios.CappedRequestsPagedAllocation.result
+    assert r.reservations == 48 and r.final_length_efficiency == approx(0.0625)
+    assert r.small_block.to("MB").magnitude == approx(5.24288)
+    assert r.large_tail.to("MB").magnitude == approx(20.64384)
+    assert r.large_tail_share == approx(0.0019226)
+    assert r.small_waste == approx(0.0038961) and r.large_waste == approx(0.0154635)
+    assert r.paged_fit == 780 and r.paged_gain == approx(16.25)
+
+
+def test_forked_candidates_prefix_copy():
+    assert Scenarios.ForkedCandidatesPrefixCopy.copied.to("GB").magnitude == approx(10.737418)
+
+
+def test_invariant_prefix_rebuild_dgx_h100():
+    r = Scenarios.InvariantPrefixRebuildDgxH100.result
+    assert r.state.to("GB").magnitude == approx(1.3421773)
+    assert r.linear_ops.to("flop").magnitude == approx(5.783552e14)
+    assert r.attention_ops.to("flop").magnitude == approx(2.1990233e13)
+    assert r.sustained_rate.to("TFLOPs/s").magnitude == approx(3560.4)
+    assert r.rebuild_time.to("ms").magnitude == approx(168.61741)
+    assert r.weight_read_time.to("ms").magnitude == approx(5.2686567)
+    assert r.suffix_ops_time < r.weight_read_time
+
+
+def test_chunked_prefill_among_decodes():
+    r = Scenarios.ChunkedPrefillAmongDecodes.result
+    assert r.decode_step.to("ms").magnitude == approx(5.2686567)
+    assert r.monolithic_prefill.to("ms").magnitude == approx(162.44107)
+    assert r.monolithic_gap.to("ms").magnitude == approx(167.70973)
+    assert r.chunks == 8 and r.chunked_iteration.to("ms").magnitude == approx(21.574205)
+    assert r.chunked_done.to("ms").magnitude == approx(172.59364)
+    assert r.gap_ratio == approx(7.7736227)
+
+
+def test_repair_tool_wait_paused_state():
+    r = Scenarios.RepairToolWaitPausedState.result
+    assert r.blocks == 2048 and r.state.to("byte").magnitude == 10737418240
+    assert r.link.to("GB/s").magnitude == approx(512)
+    assert r.copy_in.to("ms").magnitude == approx(20.97152)
+    assert r.recompute.to("s").magnitude == approx(1.2995286)
+    assert r.recompute_over_reload == approx(61.966352)
+    assert r.recompute_over_reload_derated == approx(15.491588)
+    assert r.held_occupancy.to("GB*s").magnitude == approx(483.18382)
+    assert r.released_on_demand.to("s").magnitude == approx(44.979028)
+    assert r.released_prefetch.to("s").magnitude == approx(44.958057)
+    assert r.burst.to("GB").magnitude == approx(343.59738)
+    assert r.burst_time.to("s").magnitude == approx(0.67108864) and r.burst_slowdown == approx(32)
+
+
+def test_repair_block_sharing_residency():
+    r = Scenarios.RepairBlockSharingResidency.result
+    assert r.usable_blocks == 90292 and r.unshared_blocks == 2176
+    assert r.common_blocks == 1536 and r.private_blocks == 640
+    assert r.fit_unshared == 41 and r.fit_shared == 138
+    assert r.retained_rate.to("1/s").magnitude == approx(0.82)
+    assert r.released_rate.to("1/s").magnitude == approx(8.2)
+    assert r.shared_retained_rate.to("1/s").magnitude == approx(2.76)
+    assert r.shared_released_rate.to("1/s").magnitude == approx(27.6)
+    assert r.residency_factor == approx(10)
+    assert r.shared_fraction == approx(0.7058824) and r.share_gain == approx(3.3658537)
+    assert r.share_bound == approx(3.4)
+    assert Scenarios.RepairBlockSharingResidencyLongTest.result.residency_factor == approx(19)
+
+
+def test_repair_and_support_residency():
+    r = Scenarios.RepairAgentResidency.result
+    assert (r.fit_unshared, r.fit_shared) == (48, 60)
+    assert r.shared_fraction == approx(0.1875) and r.residency_factor == approx(10)
+    assert r.recompute.to("s").magnitude == approx(1.2995286)
+    assert r.reload.to("ms").magnitude == approx(20.97152)
+    assert r.recompute_share == approx(0.0259906)
+    s = Scenarios.SupportAgentResidency.result
+    assert (s.fit_unshared, s.fit_shared) == (195, 780)
+    assert s.shared_fraction == approx(0.75) and s.residency_factor == approx(11)
+    assert s.recompute.to("s").magnitude == approx(0.32488215)
+    assert s.reload.to("ms").magnitude == approx(5.24288)

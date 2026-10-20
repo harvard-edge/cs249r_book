@@ -206,3 +206,19 @@ def calc_vla_inference_latency(
         "t_total": t_total,
         "f_max": (1 / t_total).to(ureg.hertz),
     }
+
+
+def calc_weight_only_step_time(n_params, n_tokens, sustained_rate, weight_read_time):
+    """
+    Time for one forward pass over ``n_tokens`` positions, weight work only.
+
+        T(N) = max(T_weights, 2 P N / R)
+
+    The pass either waits to read every weight once (``weight_read_time``) or
+    does ``2 P N`` weight operations at ``sustained_rate``, whichever is
+    longer. Attention traffic is left out, so long contexts take longer
+    than this bound (added 2026-10-20).
+    """
+    ops = calc_transformer_decode_flops(n_params, n_tokens)
+    compute = (ops / sustained_rate).to(weight_read_time.units)
+    return max(weight_read_time, compute)

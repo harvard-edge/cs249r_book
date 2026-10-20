@@ -1067,3 +1067,57 @@ AnswerPositionAccuracy = _Series(
     ),
     "Multi-document QA accuracy by position of the answer document among 20 (GPT-3.5-Turbo).",
 )
+
+
+# --- KV cache management (added 2026-10-20) ----------------------------------
+PagedAttentionMemoryBreakdown = _Series(
+    "pagedattention_kv_memory_breakdown",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Kwon et al. (2023), Efficient Memory Management for Large Language Model Serving with "
+            "PagedAttention, SOSP 2023, Figure 2",
+        url="https://arxiv.org/abs/2309.06180",
+        verified="2026-10-18",
+        notes=(
+            "Average percentage of KV cache memory by use in three Orca variants (reservation for the "
+            "maximum length, the next power of two, or the exact final length) and vLLM, OPT-13B on one "
+            "A100 (Section 6.2 setup), read from the bar labels of Figure 2. vLLM reports only its token "
+            "states (96.3); the remaining columns are empty."
+        ),
+    ),
+    "KV memory holding token states, reservations, internal and external fragmentation (percent).",
+)
+
+ToolInterceptionTimes = _Series(
+    "infercept_interception_times",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Abhyankar et al. (2024), InferCept: Efficient Intercept Support for Augmented Large "
+            "Language Model Inference, ICML 2024, Table 1",
+        url="https://arxiv.org/abs/2402.01869",
+        verified="2026-10-18",
+        notes=(
+            "Mean interception (tool or human pause) time per augmentation, in seconds, read from "
+            "Table 1; the chatbot and image-generation times are partly estimated by the authors. "
+            "Recomputation share of forwarding time: Literature.ToolInterception."
+        ),
+    ),
+    "Mean pause per augmentation type while an LLM waits on a tool or a person (seconds).",
+)
+
+AttentionSinkPerplexity = _Series(
+    "streamingllm_attention_sink_perplexity",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Xiao et al. (2024), Efficient Streaming Language Models with Attention Sinks, ICLR 2024, "
+            "Tables 1 and 2",
+        url="https://arxiv.org/abs/2309.17453",
+        verified="2026-10-18",
+        notes=(
+            "PG19 perplexity with a KV cache of cache_tokens holding only the most recent tokens "
+            "(window_perplexity) against the same cache with the first sink_tokens kept "
+            "(sink_perplexity, 4 + cache_tokens - 4); Llama-2-13B from Table 1, Llama-2-7B from Table 2."
+        ),
+    ),
+    "Sliding-window perplexity with and without the first four tokens kept (PG19).",
+)
