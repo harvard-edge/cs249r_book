@@ -1279,6 +1279,18 @@ class Series:
         "Dynamic-power emissions of the BLOOM project by model and process.",
         numeric=("tco2e",),
     )
+    LuccioniLlmTrainingComparison = TrendSeries(
+        "luccioni_llm_training_comparison",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="Luccioni, Viguier, and Ligozat (2023), Estimating the Carbon Footprint of BLOOM, a 176B "
+                       "Parameter Language Model, JMLR 24(253), Table 4 (arXiv:2211.02001)",
+                   url="https://arxiv.org/abs/2211.02001", verified="2026-10-20",
+                   notes=("Four 175B-scale models: training energy, grid intensity, and emissions times PUE "
+                          "as Table 4 prints them; *_inferred = 1 marks a value in italics there, inferred "
+                          "by the authors because the model's paper did not report it. Added 2026-10-20.")),
+        "Training energy, grid intensity, and emissions of GPT-3, Gopher, OPT, and BLOOM.",
+        numeric=("energy_mwh", "energy_inferred", "grid_g_per_kwh", "grid_inferred", "tco2e_pue", "tco2e_inferred"),
+    )
     CsoIrelandDatacenterElectricity = TrendSeries(
         "cso_ireland_datacenter_electricity",
         Provenance(kind=ProvenanceKind.INDUSTRY_REPORT,

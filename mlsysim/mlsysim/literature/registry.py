@@ -73,6 +73,8 @@ DifferentialPrivacy = _load("differential_privacy", "DifferentialPrivacy", "Cite
 SecurityIncidents = _load("security_incidents", "SecurityIncidents", "Cited figures of documented security incidents (Stuxnet, Mirai).")
 PromptCacheAudit = _load("prompt_cache_audit", "PromptCacheAudit", "Cited results of a timing audit of prompt caching in model APIs (Gu et al. 2025).")  # added 2026-10-20
 MlOperations = _load("ml_operations", "MlOperations", "Measured ML-operations results (data validation anomalies, model-load latency, interleaving).")  # added 2026-10-20
+MachineUnlearning = _load("machine_unlearning", "MachineUnlearning", "Cited machine-unlearning speedups (SISA).")  # added 2026-10-20
+GovernanceEnforcement = _load("governance_enforcement", "GovernanceEnforcement", "Cited figures from regulatory decisions and investigations of automated decisions (DPC, ProPublica, Regulation B).")  # added 2026-10-20
 ToolInterception = _load("tool_interception", "ToolInterception", "Cited tool-interception results for augmented LLM serving (InferCept 2024).")  # added 2026-10-20
 SandboxIsolation = _load("sandbox_isolation", "SandboxIsolation", "Cited results on containing agent code: Cybench task count, gVisor system-call latency.")  # added 2026-10-20
 DistributedTracing = _load("distributed_tracing", "DistributedTracing", "Cited results of production distributed tracing (Dapper sampling).")  # added 2026-10-20
@@ -399,6 +401,8 @@ class Literature(Registry):
     SandboxIsolation = SandboxIsolation  # added 2026-10-20
     DistributedTracing = DistributedTracing  # added 2026-10-20
     MlOperations = MlOperations  # added 2026-10-20
+    MachineUnlearning = MachineUnlearning  # added 2026-10-20
+    GovernanceEnforcement = GovernanceEnforcement  # added 2026-10-20
     ExtractionAttacks = ExtractionAttacks  # added 2026-10-20
     DataPoisoning = DataPoisoning  # added 2026-10-20
     DifferentialPrivacy = DifferentialPrivacy  # added 2026-10-20

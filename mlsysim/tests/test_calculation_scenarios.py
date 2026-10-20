@@ -5654,3 +5654,52 @@ def test_closing_an_agent_course():
     assert len(g.rows) == 13 and g.rows[0]["model_key"] == "gpt_4o_inspect"
     assert g.ratio_median == pytest.approx(5.4768583, rel=1e-6)
     assert g.ratio_min == pytest.approx(3.9935368, rel=1e-6) and g.ratio_max == pytest.approx(10.2870995, rel=1e-6)
+
+
+def test_responsible_engineering_cost_carbon_and_duties():
+    """Ranking-service lifecycle cost, operational and embodied carbon, and the machine cost of
+    explanation, review, audit logs, and per-example gradients (added 2026-10-20)."""
+    t = Scenarios.RankingServiceLifecycleCost
+    assert t.inferences_per_day == pytest.approx(2e8)
+    assert t.gpu_hours_per_day.m_as("hour") == pytest.approx(2e6 / 3600)
+    assert t.gpus_busy == pytest.approx(2e6 / 3600 / 24)
+    assert t.cycle_cost.m_as("USD") == pytest.approx(3200) and t.search_time.m_as("hour") == pytest.approx(500)
+    assert t.training_cost.m_as("USD") == pytest.approx(38_400)
+    assert t.inference_cost.m_as("USD") == pytest.approx(2e6 / 3600 * 2.5 * 1095)
+    assert t.operations_cost.m_as("USD") == pytest.approx(510_000)
+    assert t.training_carbon.m_as("kg") == pytest.approx(12 * 800 * 0.16)
+    assert t.inference_carbon.m_as("kg") == pytest.approx(2e6 / 3600 * 1095 * 0.16)
+    assert t.serving_saving.m_as("USD") == pytest.approx(0.2 * t.inference_cost.m_as("USD"))
+    assert t.training_saving.m_as("USD") == pytest.approx(19_200)
+    assert Scenarios.Gpt3TrainingCarbon.carbon.m_as("metric_ton") == pytest.approx(552.123)
+    assert Scenarios.BloomTrainingCarbon.carbon.m_as("metric_ton") == pytest.approx(433_195 * 1.2 * 0.057 / 1000)
+    n = Scenarios.EvolvedTransformerSearchCarbon
+    assert n.energy.m_as("kWh") == pytest.approx(6.8 * 24 * 200 * 208 * 1.10 / 1000)
+    assert n.carbon.m_as("metric_ton") == pytest.approx(6.8 * 24 * 200 * 208 * 1.10 / 1000 * 0.431 / 1000)
+    e = Scenarios.GpuHourEmbodiedShare
+    hours = 6 * 8760 * 0.85
+    assert e.embodied_per_gpu_hour.m_as("g") == pytest.approx((150 + 2500 / 8) / hours * 1000)
+    assert e.operational_per_gpu_hour("fleet").m_as("g") == pytest.approx(160)
+    assert e.operational_per_gpu_hour("France").m_as("g") == pytest.approx(22.8)
+    x = Scenarios.CreditDenialExplanationLoad
+    assert x.denial_share == pytest.approx(1 - 6300 / 12000)
+    assert x.sampled_evaluations == pytest.approx(4.75e8) and x.exact_per_explanation == 2 ** 20
+    r = Scenarios.CreditAppealReview
+    assert r.reviewer_hours_per_day.m_as("hour") == pytest.approx(100) and r.reviewers == pytest.approx(12.5)
+    assert r.compare_hours.m_as("hour") == pytest.approx(100)
+    a = Scenarios.CreditDecisionAuditLog
+    assert a.retention_days == pytest.approx(25 * 365.25 / 12)
+    assert a.total.m_as("GB") == pytest.approx(256e6 * 25 * 365.25 / 12 / 1e9)
+    d = Scenarios.RankingServiceAuditLog
+    assert d.payload_size.m_as("byte") == 13 * 4 + 26 * 128 * 4
+    assert d.total.m_as("TB") == pytest.approx(2e8 * 256 * 365 / 1e12)
+    g = Scenarios.DpSgdPerExampleGradients
+    assert g.per_batch("KWS").m_as("byte") == pytest.approx(200_000 * 4 * 256)
+    assert g.per_batch("GPT-2").m_as("byte") == pytest.approx(1.5e9 * 4 * 256)
+
+
+def test_frontier_training_cost_trend():
+    """Frontier training-cost growth fit over Epoch's notable models (added 2026-10-20)."""
+    t = Scenarios.FrontierTrainingCostTrend
+    assert 2.5 < t.growth_per_year < 3.5
+    assert t.priciest["model"] == "Grok 4" and t.priciest["training_cost_2023usd"] > 1e8
