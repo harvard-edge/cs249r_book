@@ -3,11 +3,12 @@
 
 Every figure is drawn at the size of its slot on the 16 x 9 cm slide, so the
 slide places it at scale 1 and the type keeps its size (10 to 12 pt here).
-Derived values come from calcs.py (imported as K). Sources:
+Every number comes from calcs.py (imported as K), which reads MLSysIM, and is
+labeled with val(key), the string the slide prints. Sources:
 
-  - SP: the rendered chapter, Sensor Perception (Napkin Math 8.1 to 8.3,
-    tables 3 to 5, §8.3, 8.4, 8.6, 8.7). PB and NS: The Physical Body and
-    The Nervous System, which price rows 1 to 4 of the stopping budget.
+  - MLSysIM: the running machine and its site record, and the Scenarios.*
+    the chapter, Sensor Perception, reads (Napkin Math 8.1 to 8.3, tables 3
+    to 5, §8.3, 8.4, 8.6, 8.7).
   - KITTI raw data, drive 2011_09_26_0001 and its calibration (Geiger et al.,
     IJRR 2013; CC BY-NC-SA 3.0), in data/kitti: host-clock timestamp logs,
     Velodyne HDL-64E sweep 0, color camera image_02 frame 0, OXTS frame 0.
@@ -36,6 +37,8 @@ import slideplot as sp  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 with contextlib.redirect_stdout(io.StringIO()):
     import calcs as K  # noqa: E402  every derived value comes from calcs.py
+from deckvals import val, num  # noqa: E402
+from mlsysim.physics.robotics.sensing import calc_stereo_depth_sigma  # noqa: E402
 
 from matplotlib.patches import FancyBboxPatch, Rectangle, Polygon  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
@@ -107,17 +110,18 @@ def aisle():
     ax.add_patch(Rectangle((-0.42, -0.15), 0.42, 0.3, fc=C["permit_l"], ec=C["slate"], lw=1.6))
     ax.text(-0.21, 0.0, "base", ha="center", va="center", fontsize=10.5, fontweight="bold")
     arrow(ax, 0.03, 0.0, 0.30, 0.0, C["slate"], lw=2.2)
-    ax.text(0.33, 0.0, "1.5 m/s", ha="left", va="center", fontsize=10.5, fontweight="bold")
+    ax.text(0.33, 0.0, f"{val('v_drive')} m/s", ha="left", va="center", fontsize=10.5, fontweight="bold")
     ax.add_patch(plt.Circle((1.30, 0.28), 0.07, fc=C["veto_l"], ec=C["veto"], lw=1.8))
     ax.text(1.40, 0.28, "worker", ha="left", va="center", fontsize=10.5, color=C["veto"],
             fontweight="bold")
     arrow(ax, 1.30, 0.20, 1.30, 0.05, C["veto"], lw=1.6)
-    ax.plot([1.10, 1.10], [-0.40, 0.40], color=C["text"], lw=1, ls=":")
-    ax.text(1.12, -0.35, "rack end", ha="left", va="center", fontsize=10)
-    ax.annotate("", (1.10, -0.30), (0.0, -0.30),
+    dc = num("d_clear")
+    ax.plot([dc, dc], [-0.40, 0.40], color=C["text"], lw=1, ls=":")
+    ax.text(dc + 0.02, -0.35, "rack end", ha="left", va="center", fontsize=10)
+    ax.annotate("", (dc, -0.30), (0.0, -0.30),
                 arrowprops=dict(arrowstyle="<->", color=C["text"], lw=1.3))
-    ax.text(0.55, -0.26, "clear distance 1.10 m", ha="center", va="bottom", fontsize=10.5)
-    ax.text(0.6, 0.67, "each ms of delay: 1.5 mm of travel", ha="center", va="bottom",
+    ax.text(0.55, -0.26, f"clear distance {val('d_clear')} m", ha="center", va="bottom", fontsize=10.5)
+    ax.text(0.6, 0.67, f"each ms of delay: {val('d_per_ms')} mm of travel", ha="center", va="bottom",
             fontsize=10.5, color=C["amber"], fontweight="bold")
     save(fig, "aisle")
 
@@ -225,29 +229,29 @@ def capture(step):
     ax.set_xticks([-8, 0, 8, 16, 24, 32])
     ax.set_xlabel("time from the exposure midpoint (ms)", fontsize=10.5)
     # exposure
-    ax.barh(1.9, 16, left=-8, height=0.5, color=C["sense"])
-    ax.text(0, 1.9, "exposure 16 ms", color="white", ha="center", va="center", fontsize=10,
+    ax.barh(1.9, K.T_EXP, left=-K.T_EXP / 2, height=0.5, color=C["sense"])
+    ax.text(0, 1.9, f"exposure {val('t_exp')} ms", color="white", ha="center", va="center", fontsize=10,
             fontweight="bold")
     ax.axvline(0, color=C["permit"], lw=2)
     ax.text(0.4, 2.5, "capture epoch t₀ (midpoint)", color=C["permit"], fontsize=10.5,
             fontweight="bold", va="center")
     if step >= 2:
-        ax.barh(1.1, 16.6, left=8, height=0.5, color=C["neutral"])
-        ax.text(16.3, 1.1, "readout 16.6", color="white", ha="center", va="center", fontsize=10,
+        ax.barh(1.1, K.T_READ, left=K.T_EXP / 2, height=0.5, color=C["neutral"])
+        ax.text(K.T_EXP / 2 + K.T_READ / 2, 1.1, f"readout {val('t_readout')}", color="white", ha="center", va="center", fontsize=10,
                 fontweight="bold")
-        ax.barh(1.1, 2.0, left=24.6, height=0.5, color=C["amber"])
-        ax.text(27.0, 1.1, "link + DMA", color=C["amber"], ha="left", va="center", fontsize=10)
+        ax.barh(1.1, num("t_link_dma"), left=K.T_CAPTURE, height=0.5, color=C["amber"])
+        ax.text(K.T_ARRIVAL + 0.4, 1.1, "link + DMA", color=C["amber"], ha="left", va="center", fontsize=10)
         ax.axvline(K.T_ARRIVAL, color=C["veto"], lw=2, ls="--")
-        ax.text(K.T_ARRIVAL - 0.4, 0.25, f"arrival stamp: {K.T_ARRIVAL:.1f} ms late\n= {K.mm(K.V, K.T_ARRIVAL):.1f} mm",
+        ax.text(K.T_ARRIVAL - 0.4, 0.25, f"arrival stamp: {val('t_arrival')} ms late\n= {val('d_arrival')} mm",
                 color=C["veto"], fontsize=10.5, fontweight="bold", ha="right", va="center")
     if step >= 3:
-        ax.axvline(-8, color=C["amber"], lw=2, ls="--")
-        ax.text(-8.6, 1.1, "trigger edge:\n8 ms early = 12 mm", color=C["amber"],
+        ax.axvline(-K.T_EXP / 2, color=C["amber"], lw=2, ls="--")
+        ax.text(-K.T_EXP / 2 - 0.6, 1.1, f"trigger edge:\n{val('t_trigger')} ms early = {val('d_trigger')} mm", color=C["amber"],
                 fontsize=10, fontweight="bold", ha="right", va="center")
     # travel axis on top
     top = ax.secondary_xaxis("top", functions=(lambda t: t * K.V, lambda d: d / K.V))
     top.set_xticks([-36, -24, -12, 0, 12, 24, 36, 48])
-    top.set_xlabel("base travel at 1.5 m/s (mm)", fontsize=10)
+    top.set_xlabel(f"base travel at {val('v_drive')} m/s (mm)", fontsize=10)
     save(fig, f"capture_step{step}")
 
 
@@ -257,12 +261,11 @@ def capture(step):
 def kitti_strip():
     i = 20                                    # one logged sweep, chosen from the middle
     t0 = K.K_VS[i]
-    vs, vf, ve = 0.0, (K.K_VF[i] - t0) * 1000, (K.K_VE[i] - t0) * 1000
+    vs, vf, ve = 0.0, K.K_VF[i] - t0, K.K_VE[i] - t0
     cams = {}
-    for c in range(4):
-        t = K.K_CAM[c]
+    for c, t in K.K_CAM.items():
         j = np.argmin(abs(t - K.K_VF[i]))
-        cams[c] = (t[j] - t0) * 1000
+        cams[c] = t[j] - t0
     fig, ax = plt.subplots(figsize=cm(8.6, 4.4))
     fig.subplots_adjust(0.03, 0.27, 0.97, 0.98)
     ax.set_xlim(-4, 132)
@@ -277,12 +280,12 @@ def kitti_strip():
     ax.axvline(vf, color=C["permit"], lw=2)
     ax.text(vf - 1.5, 1.32, "faces forward:\ntriggers cameras", fontsize=10, color=C["permit"],
             ha="right", va="center", fontweight="bold")
-    for c, y, col in [(2, 0.85, C["propose"]), (3, 0.85, C["propose"]),
-                      (0, 0.3, C["neutral"]), (1, 0.3, C["neutral"])]:
+    for c, y, col in [("image_02", 0.85, C["propose"]), ("image_03", 0.85, C["propose"]),
+                      ("image_00", 0.3, C["neutral"]), ("image_01", 0.3, C["neutral"])]:
         ax.plot([cams[c]], [y], "o", ms=7, color=col, mec="white", mew=1)
-    ax.text(cams[2] + 2.5, 0.85, f"color stamps +{cams[2] - vf:.1f}", fontsize=10, color=C["propose"],
+    ax.text(cams["image_02"] + 2.5, 0.85, f"color stamps +{cams['image_02'] - vf:.1f}", fontsize=10, color=C["propose"],
             va="center", fontweight="bold")
-    ax.text(cams[0] + 2.5, 0.3, f"gray stamps +{cams[0] - vf:.1f}", fontsize=10, color=C["neutral"],
+    ax.text(cams["image_00"] + 2.5, 0.3, f"gray stamps +{cams['image_00'] - vf:.1f}", fontsize=10, color=C["neutral"],
             va="center", fontweight="bold")
     save(fig, "kitti_strip")
 
@@ -295,23 +298,24 @@ def rows():
     fig.subplots_adjust(0.22, 0.20, 0.96, 0.80)
     r = np.array([0, K.ROWS])
     x = K.V * r * K.T_READ / K.ROWS
-    ax.fill_betweenx(r, x - K.mm(K.V, K.T_EXP) / 2, x + K.mm(K.V, K.T_EXP) / 2,
+    blur = num("d_exposure")
+    ax.fill_betweenx(r, x - blur / 2, x + blur / 2,
                      color=C["sense_l"], lw=0)
     ax.plot(x, r, color=C["sense"], lw=2.6)
     ax.axvline(K.D_LOC, color=C["veto"], lw=1.8, ls="--")
-    ax.text(K.D_LOC - 1, 300, "50 mm\nallowance", color=C["veto"], fontsize=10, ha="right",
+    ax.text(K.D_LOC - 1, 300, f"{val('delta_loc')} mm\nallowance", color=C["veto"], fontsize=10, ha="right",
             va="top", fontweight="bold")
-    ax.text(K.SKEW + 1.5, K.ROWS - 120, f"{K.SKEW:.1f} mm", color=C["sense"], fontsize=11,
+    ax.text(num("d_skew") + 1.5, K.ROWS - 120, f"{val('d_skew')} mm", color=C["sense"], fontsize=11,
             fontweight="bold", va="center")
     ax.set_ylim(K.ROWS + 150, -150)
     ax.set_xlim(-14, 56)
-    ax.set_yticks([0, 1000, 2000, 3040])
-    ax.set_yticklabels(["0", "1,000", "2,000", "3,040"])
+    ax.set_yticks([0, 1000, 2000, K.ROWS])
+    ax.set_yticklabels(["0", "1,000", "2,000", val("rows")])
     ax.set_ylabel("image row")
     ax.set_xlabel("camera position (mm)")
     top = ax.secondary_xaxis("top", functions=(lambda d: d / K.V, lambda t: t * K.V))
-    top.set_xticks([0, 8, 16.6, 33])
-    top.set_xticklabels(["0", "8", "16.6", "33"])
+    top.set_xticks([0, K.T_EXP / 2, K.T_READ, 33])
+    top.set_xticklabels(["0", val("t_trigger"), val("t_readout"), "33"])
     top.set_xlabel("row read time (ms)", fontsize=10)
     save(fig, "rows")
 
@@ -336,7 +340,7 @@ def kitti_sweep():
                     linewidths=0, rasterized=True)
     ax.add_patch(Rectangle((-2.2, -0.9), 4.4, 1.8, fc="white", ec=C["veto"], lw=1.6))
     arrow(ax, 2.4, 0, 6.5, 0, C["veto"], lw=2)
-    ax.text(4.4, 2.0, f"car {K.VF:.1f} m/s", color=C["veto"], fontsize=10.5, ha="center",
+    ax.text(4.4, 2.0, f"car {val('kitti_v')} m/s", color=C["veto"], fontsize=10.5, ha="center",
             fontweight="bold", bbox=dict(fc="white", ec="none", alpha=0.85, pad=1))
     ax.plot([-3, -31], [0, 0], color=C["amber"], lw=2, ls="--")
     ax.text(-17, -6, "seam: start and end\nof one sweep", color=C["amber"], fontsize=10,
@@ -383,25 +387,35 @@ def frames():
 def errbars():
     fig, ax = plt.subplots(figsize=cm(14.6, 4.6))
     fig.subplots_adjust(0.27, 0.22, 0.97, 0.88)
-    labs = [n for n, _ in K.ERR_BARS][::-1]
-    vals = [v for _, v in K.ERR_BARS][::-1]
-    cols = [C["sense"], C["amber"], C["amber"], C["amber"], C["slate"]][::-1]
+    bars = [  # (label, value key), top to bottom
+        (f"{val('angle_err')}° mount error at {val('mount_range')} m", "d_deg_far"),
+        ("Dispatch age", "d_age"),
+        ("Arrival stamp", "d_arrival"),
+        ("Row skew", "d_skew"),
+        ("Trigger stamp", "d_trigger"),
+    ][::-1]
+    labs = [n for n, _ in bars]
+    keys = [k for _, k in bars]
+    raw = {"d_deg_far": K.m(K.MOUNT.result.angle_lateral, "mm"), "d_age": K.m(K.AGE.age_travel, "mm"),
+           "d_arrival": K.m(K.AGE.arrival_travel, "mm"), "d_skew": K.m(K.SHUTTER.skew, "mm"),
+           "d_trigger": K.m(K.AGE.trigger_travel, "mm")}
+    vals = [raw[k] for k in keys]
     cols = [C["amber"], C["sense"], C["amber"], C["amber"], C["slate"]]
     y = np.arange(len(vals))
     ax.barh(y, vals, color=cols, height=0.62)
-    for yi, v in zip(y, vals):
-        ax.text(v + 4, yi, f"{v:.1f}".replace(".0", "") + " mm", va="center", fontsize=10.5,
+    for yi, v, k in zip(y, vals, keys):
+        ax.text(v + 4, yi, f"{val(k)} mm", va="center", fontsize=10.5,
                 fontweight="bold", color=C["text"],
                 bbox=dict(fc="white", ec="none", pad=0.5))
     ax.set_yticks(y)
     ax.set_yticklabels(labs, fontsize=10.5)
     ax.axvline(K.D_LOC, color=C["slate"], lw=1.6, ls=":")
-    ax.text(K.D_LOC + 3, 4.55, "50 mm localization", fontsize=10, color=C["slate"], va="bottom")
+    ax.text(K.D_LOC + 3, 4.55, f"{val('delta_loc')} mm localization", fontsize=10, color=C["slate"], va="bottom")
     ax.axvline(K.SIDE, color=C["veto"], lw=1.8, ls="--")
-    ax.text(K.SIDE + 3, 4.55, "150 mm side clearance", fontsize=10, color=C["veto"], va="bottom")
+    ax.text(K.SIDE + 3, 4.55, f"{val('side_clearance')} mm side clearance", fontsize=10, color=C["veto"], va="bottom")
     ax.set_xlim(0, 320)
     ax.set_ylim(-0.5, 5.0)
-    ax.set_xlabel("position error at the 1.5 m/s drive limit (mm)", fontsize=10.5)
+    ax.set_xlabel(f"position error at the {val('v_drive')} m/s drive limit (mm)", fontsize=10.5)
     ax.spines["left"].set_visible(False)
     ax.tick_params(axis="y", length=0)
     save(fig, "errbars")
@@ -413,10 +427,12 @@ def errbars():
 def waterfall(step):
     fig, ax = plt.subplots(figsize=cm(14.6, 5.0))
     fig.subplots_adjust(0.20, 0.17, 0.97, 0.80)
-    n = len(K.WATERFALL)
+    names = ["Exposure midpoint", "Rolling readout", "Link transport", "DMA and queue", "ISP",
+             "Vision backbone", "Dispatch"]
+    n = len(K.STAGES)
     shown = {1: 0, 2: 2, 3: 5, 4: 7}[step]
     cols = [C["sense"], C["sense"], C["amber"], C["amber"], C["amber"], C["propose"], C["amber"]]
-    for i, (name, t, cum) in enumerate(K.WATERFALL):
+    for i, ((_, t, cum), name) in enumerate(zip(K.STAGES, names)):
         y = n - 1 - i
         vis = i < shown
         ax.barh(y, t, left=cum - t, height=0.66, color=cols[i], alpha=1.0 if vis else 0.0)
@@ -431,19 +447,19 @@ def waterfall(step):
     ax.set_xlabel("age since the exposure midpoint (ms)", fontsize=10.5)
     top = ax.secondary_xaxis("top", functions=(lambda t: t * K.V, lambda d: d / K.V))
     top.set_xticks([0, 15, 30, 45, 60, 75, 90])
-    top.set_xlabel("base travel at 1.5 m/s (mm)", fontsize=10)
+    top.set_xlabel(f"base travel at {val('v_drive')} m/s (mm)", fontsize=10)
     if step == 1:
         ax.axvline(K.T_AGE, color=C["veto"], lw=2, ls="--")
-        ax.text(K.T_AGE - 0.6, 3.0, f"dispatch at {K.T_AGE:.1f} ms:\nwhich stage\ndominates?",
+        ax.text(K.T_AGE - 0.6, 3.0, f"dispatch at {val('t_age')} ms:\nwhich stage\ndominates?",
                 color=C["veto"], fontsize=11, fontweight="bold", ha="right", va="center")
     if step >= 2:
-        ax.axvline(K.STAGES[0][1] + K.STAGES[1][1], color=C["sense"], lw=1.4, ls=":")
+        ax.axvline(K.T_CAPTURE, color=C["sense"], lw=1.4, ls=":")
     if step == 4:
         ax.axvline(K.T_AGE, color=C["veto"], lw=2, ls="--")
-        ax.text(K.T_AGE - 0.5, 2.9, f"{K.T_AGE:.1f} ms\n{K.D_AGE:.1f} mm", color=C["veto"],
+        ax.text(K.T_AGE - 0.5, 2.9, f"{val('t_age')} ms\n{val('d_age')} mm", color=C["veto"],
                 fontsize=11.5, fontweight="bold", ha="right", va="center")
     if step >= 2:
-        ax.text(K.STAGES[0][1] + K.STAGES[1][1] - 0.5, 0.4, "24.6 ms before\nany computation",
+        ax.text(K.T_CAPTURE - 0.5, 0.4, f"{val('t_capture')} ms before\nany computation",
                 color=C["sense"], fontsize=10, fontweight="bold", ha="right", va="center")
     save(fig, f"waterfall_step{step}")
 
@@ -453,17 +469,19 @@ def waterfall(step):
 # =============================================================================
 def mlperf():
     rows_ = [
-        ("RetinaNet p99,\nmeasured", K.RN_P99, C["propose"]),
-        ("backbone\nallocation", 22.0, C["propose_l"]),
-        ("exposure +\nreadout", K.EXPREAD, C["sense"]),
-        ("age at\ndispatch", K.T_AGE, C["amber"]),
+        ("RetinaNet p99,\nmeasured", "rn_p99_short", C["propose"]),
+        ("backbone\nallocation", "t_st_backbone", C["propose_l"]),
+        ("exposure +\nreadout", "t_capture", C["sense"]),
+        ("age at\ndispatch", "t_age", C["amber"]),
     ]
     fig, ax = plt.subplots(figsize=cm(8.4, 4.8))
     fig.subplots_adjust(0.30, 0.20, 0.95, 0.97)
-    for i, (lab, v, col) in enumerate(rows_):
+    for i, (lab, key, col) in enumerate(rows_):
         y = len(rows_) - 1 - i
+        v = {"rn_p99_short": K.RN_P99, "t_st_backbone": K.m(K.AISLE.t_backbone, "ms"),
+             "t_capture": K.T_CAPTURE, "t_age": K.T_AGE}[key]
         ax.barh(y, v, color=col, height=0.62, ec=C["propose"] if col == C["propose_l"] else col)
-        ax.text(v + 1, y, f"{v:.1f}".replace(".0", ""), va="center", fontsize=10.5, fontweight="bold")
+        ax.text(v + 1, y, val(key), va="center", fontsize=10.5, fontweight="bold")
         ax.text(-1.5, y, lab, ha="right", va="center", fontsize=10)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
@@ -483,8 +501,8 @@ def agegrow():
     ax.set_yticks([])
     for s in ("left", "top", "right"):
         ax.spines[s].set_visible(False)
-    ax.set_xticks([0, 25, 51.6, 75, 100, 125, 150])
-    ax.set_xticklabels(["0", "25", "51.6", "75", "100", "125", "150"])
+    ax.set_xticks([0, 25, K.T_AGE, 75, 100, 125, 150])
+    ax.set_xticklabels(["0", "25", val("t_age"), "75", "100", "125", "150"])
     ax.set_xlabel("ms since capture t₀, read on the consumer's clock", fontsize=10.5)
     ax.barh(1.5, K.T_AGE, left=0, height=0.45, color=C["amber"])
     ax.text(K.T_AGE / 2, 1.5, "observation age at dispatch", color="white", fontsize=10,
@@ -499,7 +517,7 @@ def agegrow():
     ax.text(100, 0.33, "current evidence age = now − t₀ (keeps growing)", ha="center", va="center",
             fontsize=10.5, fontweight="bold")
     ax.axvline(K.T_AGE + K.SYNC_BOUND, color=C["veto"], lw=1.8, ls="--", ymax=0.93)
-    ax.text(K.T_AGE + 1.5, 0.95, f"dispatch limit {K.T_AGE + K.SYNC_BOUND:.1f}", color=C["veto"],
+    ax.text(K.T_AGE + 1.5, 0.95, f"dispatch limit {val('t_dispatch_limit')}", color=C["veto"],
             fontsize=9.5, ha="left", va="center", fontweight="bold")
     save(fig, "agegrow")
 
@@ -509,9 +527,9 @@ def agegrow():
 # =============================================================================
 def kitti_jitter():
     series = [
-        ("lidar", np.diff(K.K_VF) * 1000, C["sense"]),
-        ("color cam", np.diff(K.K_CAM[2]) * 1000, C["propose"]),
-        ("gray cam", np.diff(K.K_CAM[0]) * 1000, C["neutral"]),
+        ("lidar", np.diff(K.K_VF), C["sense"]),
+        ("color cam", np.diff(K.K_CAM[K.COLOR]), C["propose"]),
+        ("gray cam", np.diff(K.K_CAM[K.GRAY]), C["neutral"]),
     ]
     fig, ax = plt.subplots(figsize=cm(8.4, 4.8))
     fig.subplots_adjust(0.25, 0.20, 0.96, 0.97)
@@ -537,17 +555,20 @@ def phase():
     fig, ax = plt.subplots(figsize=cm(8.0, 4.6))
     fig.subplots_adjust(0.18, 0.22, 0.96, 0.95)
     t = np.linspace(0, 100, 200)
-    pm = 45 - np.degrees(K.WC * t / 1000)
-    ok = t <= K.T_PM0
+    pm0, wc = K.m(K.PHASE.phase_margin, "deg"), K.m(K.PHASE.crossover, "rad/s")
+    t_pm, t_used = K.m(K.PHASE.result.delay_ceiling, "ms"), K.m(K.PHASE.delay, "ms")
+    pm = pm0 - np.degrees(wc * t / 1000)
+    ok = t <= t_pm
     ax.plot(t[ok], pm[ok], color=C["permit"], lw=2.4)
     ax.plot(t[~ok], pm[~ok], color=C["veto"], lw=2.4)
     ax.axhspan(-15, 0, color=C["veto_l"], lw=0)
     ax.axhline(0, color=C["text"], lw=1, ls="--")
-    ax.plot([60], [45 - math.degrees(K.WC * 0.060)], "o", color=C["amber"], ms=8)
-    ax.text(62, 45 - math.degrees(K.WC * 0.060) + 2.5, "60 ms", color=C["amber"], fontsize=10.5,
+    used_pm = pm0 - math.degrees(wc * t_used / 1000)
+    ax.plot([t_used], [used_pm], "o", color=C["amber"], ms=8)
+    ax.text(t_used + 2, used_pm + 2.5, f"{val('t_pm_used')} ms", color=C["amber"], fontsize=10.5,
             fontweight="bold", ha="left")
-    ax.plot([K.T_PM0], [0], "o", color=C["veto"], ms=8)
-    ax.text(K.T_PM0 + 2, 4, f"{K.T_PM0:.1f} ms", color=C["veto"], fontsize=10.5, fontweight="bold")
+    ax.plot([t_pm], [0], "o", color=C["veto"], ms=8)
+    ax.text(t_pm + 2, 4, f"{val('t_pm')} ms", color=C["veto"], fontsize=10.5, fontweight="bold")
     ax.text(60, -10, "unstable", color=C["veto"], fontsize=10.5, ha="right")
     ax.set_xlim(0, 100)
     ax.set_ylim(-15, 50)
@@ -562,28 +583,35 @@ def phase():
 def stereo(step):
     fig, ax = plt.subplots(figsize=cm(9.4, 5.3))
     fig.subplots_adjust(0.17, 0.19, 0.97, 0.96)
+    rig = K.STEREO
+
+    def sigma_mm(zm):
+        return calc_stereo_depth_sigma(K.Q_(zm, "m"), rig.focal_length_px, rig.baseline,
+                                       rig.disparity_sigma_px).to("mm").magnitude
+
     z = np.linspace(0.3, 10, 300)
-    ax.plot(z, [K.sigma_z_mm(v) for v in z], color=C["propose"], lw=2.6)
+    ax.plot(z, [sigma_mm(v) for v in z], color=C["propose"], lw=2.6)
     ax.text(7.6, 285, "stereo σz grows as z²", color=C["propose"], fontsize=10.5,
             fontweight="bold", ha="right")
-    ax.plot([1.10], [K.sigma_z_mm(1.10)], "o", color=C["propose"], ms=7)
-    ax.text(0.4, 205, f"rack end (1.10 m): {K.sigma_z_mm(1.10):.1f} mm", fontsize=10, color=C["propose"])
+    ax.plot([K.m(K.AISLE.d_clear, "m")], [K.m(rig.result.sigma_target, "mm")], "o", color=C["propose"], ms=7)
+    ax.text(0.4, 205, f"rack end ({val('d_clear')} m): {val('st_rack')} mm", fontsize=10, color=C["propose"])
     if step >= 2:
-        ax.axhspan(K.OS1_PREC[0], K.OS1_PREC[1], color=C["sense_l"], lw=0)
+        ax.axhspan(num("os1_prec_min"), num("os1_prec_max"), color=C["sense_l"], lw=0)
         ax.text(9.9, 15, "OS1 lidar, datasheet 1σ", color=C["sense"], fontsize=9.5,
                 ha="right", va="center", fontweight="bold")
     ax.axhline(K.D_LOC, color=C["slate"], lw=1.4, ls=":")
     ax.axhline(K.SIDE, color=C["veto"], lw=1.6, ls="--")
-    ax.text(9.9, K.D_LOC + 6, "50 mm localization", fontsize=10, color=C["slate"], ha="right")
-    ax.text(0.4, K.SIDE + 5, "150 mm side clearance", fontsize=10, color=C["veto"])
+    ax.text(9.9, K.D_LOC + 6, f"{val('delta_loc')} mm localization", fontsize=10, color=C["slate"], ha="right")
+    ax.text(0.4, K.SIDE + 5, f"{val('side_clearance')} mm side clearance", fontsize=10, color=C["veto"])
     if step >= 3:
-        for c, col in [(K.D_LOC, C["slate"]), (K.SIDE, C["veto"])]:
-            zc = K.crossover_m(c)
+        for c, key, col in [(K.D_LOC, "st_z_loc", C["slate"]), (K.SIDE, "st_z_side", C["veto"])]:
+            zc = K.m({"st_z_loc": rig.result.range_at_loc_allowance,
+                      "st_z_side": rig.result.range_at_side_clearance}[key], "m")
             ax.plot([zc], [c], "o", ms=8, color=col)
-            if c < 100:
-                ax.text(zc - 0.2, c + 4, f"{zc:.1f} m", color=col, fontsize=11, fontweight="bold", ha="right", va="bottom")
+            if c < K.SIDE:
+                ax.text(zc - 0.2, c + 4, f"{val(key)} m", color=col, fontsize=11, fontweight="bold", ha="right", va="bottom")
             else:
-                ax.text(zc + 0.15, c - 12, f"{zc:.1f} m", color=col, fontsize=11, fontweight="bold", ha="left", va="top")
+                ax.text(zc + 0.15, c - 12, f"{val(key)} m", color=col, fontsize=11, fontweight="bold", ha="left", va="top")
     ax.set_xlim(0, 10)
     ax.set_ylim(0, 330)
     ax.set_xlabel("range z (m)")
@@ -641,20 +669,20 @@ def veto():
     ax.set_xlim(0, 1000)
     ax.set_ylim(-0.4, 2.6)
     ax.set_yticks([0.3, 1.3, 2.2])
-    ax.set_yticklabels(["permission\npath", "lidar\n(20 Hz)", "vision-language\nmodel (2 Hz)"],
+    ax.set_yticklabels(["permission\npath", f"lidar\n({val('f_lidar')} Hz)", f"vision-language\nmodel ({val('f_vlm')} Hz)"],
                        fontsize=10)
     for s in ("left", "top", "right"):
         ax.spines[s].set_visible(False)
     ax.tick_params(axis="y", length=0)
     ax.set_xlabel("time (ms)", fontsize=10.5)
-    for t in (0, 500):
-        ax.barh(2.2, 470, left=t + 15, height=0.45, color=C["propose_l"], ec=C["propose"], ls="--")
-        ax.text(t + 250, 2.2, '"clear aisle"', ha="center", va="center", fontsize=10.5,
+    for t in np.arange(0, 1000, K.T_VLM):
+        ax.barh(2.2, K.T_VLM - 30, left=t + 15, height=0.45, color=C["propose_l"], ec=C["propose"], ls="--")
+        ax.text(t + K.T_VLM / 2, 2.2, '"clear aisle"', ha="center", va="center", fontsize=10.5,
                 color=C["propose"], fontweight="bold")
     hit = 650
-    for t in range(0, 1000, 50):
+    for t in np.arange(0, 1000, K.T_SWEEP):
         col = C["veto"] if t >= hit else C["sense"]
-        ax.plot([t + 25], [1.3], "o", ms=6.5, color=col)
+        ax.plot([t + K.T_SWEEP / 2], [1.3], "o", ms=6.5, color=col)
     ax.text(hit + 60, 1.60, "return inside the envelope", color=C["veto"], fontsize=10,
             fontweight="bold", va="bottom", ha="right",
             bbox=dict(fc="white", ec="none", pad=0.5))
@@ -694,13 +722,13 @@ def lostmis(step=2):
     # left: estimate before and after a missing update: spread grows, honest
     axs[0].plot(x, g(4, 12), color=C["neutral"], lw=1.5, ls="--")
     axs[0].plot(x, 0.62 * g(4, 26), color=C["permit"], lw=2.4)
-    axs[0].text(40, 0.5, "spread grows;\n16.7 ms older", color=C["permit"], fontsize=10)
+    axs[0].text(40, 0.5, f"spread grows;\n{val('t_frame')} ms older", color=C["permit"], fontsize=10)
     # right: misdated by 26.6 ms: narrow, centered 39.9 mm off
-    off = K.mm(K.V, K.T_ARRIVAL)
+    off = K.m(K.AGE.arrival_travel, "mm")
     axs[1].plot(x, g(4, 12), color=C["neutral"], lw=1.5, ls="--")
     axs[1].plot(x, g(off, 8), color=C["veto"], lw=2.4)
     axs[1].annotate("", (off, 0.35), (0, 0.35), arrowprops=dict(arrowstyle="<->", color=C["veto"], lw=1.4))
-    axs[1].text(off + 14, 0.65, f"spread shrinks;\n{off:.1f} mm off", color=C["veto"], fontsize=10)
+    axs[1].text(off + 14, 0.65, f"spread shrinks;\n{val('d_arrival')} mm off", color=C["veto"], fontsize=10)
     save(fig, "lostmis")
 
 
@@ -710,14 +738,15 @@ def lostmis(step=2):
 def kitti_sat():
     img = np.asarray(Image.open(DATA / "kitti" / "sync" / "image_02_0000000000.png").convert("RGB"))
     gray = np.asarray(Image.open(DATA / "kitti" / "sync" / "image_02_0000000000.png").convert("L"))
-    sat = gray >= 255
+    full = num("pix_max")
+    sat = gray >= full
     over = img.copy().astype(float) / 255
     over[sat] = [0.86, 0.15, 0.15]
     fig = plt.figure(figsize=cm(14.6, 4.6))
     ax = fig.add_axes([0.0, 0.08, 0.66, 0.90])
     ax.imshow(over, interpolation="bilinear")
     bare(ax)
-    ax.text(10, 360, "red: pixels clipped at 255", color="white", fontsize=10.5, fontweight="bold",
+    ax.text(10, 360, f"red: pixels clipped at {val('pix_max')}", color="white", fontsize=10.5, fontweight="bold",
             va="bottom", bbox=dict(fc=C["veto"], ec="none", pad=1.5))
     ax2 = fig.add_axes([0.73, 0.27, 0.25, 0.68])
     h = np.bincount(gray.ravel(), minlength=256) / gray.size * 100
@@ -728,7 +757,7 @@ def kitti_sat():
     ax2.set_yticks([0, 4, 8])
     ax2.set_xlabel("pixel value", fontsize=10)
     ax2.set_ylabel("% of pixels", fontsize=10)
-    ax2.text(250, h[255] - 0.3, f"{K.SAT * 100:.1f}%", color=C["veto"], fontsize=10.5,
+    ax2.text(250, h[255] - 0.3, f"{val('sat_pct')}%", color=C["veto"], fontsize=10.5,
              fontweight="bold", ha="right", va="top")
     save(fig, "kitti_sat")
 
