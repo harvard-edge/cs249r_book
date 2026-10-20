@@ -10892,3 +10892,12 @@ class Scenarios(Registry):
         series_name="AgentTimeHorizon",
         released_from="2024-01-01",  # scenario assumption: the window the comparison covers
     )
+
+    # --- SWE-bench Verified leaderboard (added 2026-10-20) ------------------------
+    SweBenchVerifiedLeaderboardOneAttempt = _st.BenchmarkLeaderboardScenario(
+        name="SWE-bench Verified submissions with one attempt per task",
+        description="Every submission folder with a results file (Literature.SweBenchVerifiedLeaderboard); "
+                    "the one-attempt submissions and their best score so far.",
+        series_name="SweBenchVerifiedLeaderboard",
+        tasks=int(_Literature.AgentEvaluation.SweBenchVerifiedTasks),
+    )

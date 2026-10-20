@@ -5186,3 +5186,11 @@ ALEITHAN_2024_SWE_BENCH_PLUS = _lit(
         "rendering on 2026-10-20."
     ),
 )
+
+# --- SWE-bench Verified: task count and the public leaderboard (added 2026-10-20) ---
+OPENAI_SWE_BENCH_VERIFIED_2024 = _report(
+    "prov:openai-swe-bench-verified-2024",
+    "Chowdhury et al. (OpenAI, 2024), Introducing SWE-bench Verified, 13 August 2024",
+    "https://openai.com/index/introducing-swe-bench-verified/",
+    notes="A human-validated subset of 500 SWE-bench tasks.",
+)

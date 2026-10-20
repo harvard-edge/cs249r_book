@@ -21146,3 +21146,54 @@ class PassingPatchAuditScenario(BaseScenario):
 
     def share(self, count: float) -> float:
         return count / self.total
+
+
+class BenchmarkLeaderboardScenario(BaseScenario):
+    """Submissions to a benchmark leaderboard scored against ``tasks`` (added 2026-10-20).
+
+    ``series_name`` is a Literature series with ``folder``, ``date`` (ISO),
+    ``attempts``, and ``resolved`` columns. Submissions with ``attempts`` equal to
+    ``attempts`` are the comparable set; the frontier is the best score so far.
+    """
+    series_name: str
+    tasks: int
+    attempts: float = 1
+
+    @property
+    def submissions(self) -> List[dict]:
+        from ..literature.registry import Literature
+        return list(getattr(Literature, self.series_name).entries)
+
+    @property
+    def comparable(self) -> List[dict]:
+        """Submissions at the stated attempts, by date (file order breaks ties)."""
+        rows = [r for r in self.submissions if r["attempts"] == self.attempts]
+        return sorted(rows, key=lambda r: r["date"])
+
+    def share(self, resolved: float) -> float:
+        return resolved / self.tasks
+
+    @property
+    def first(self) -> dict:
+        return self.comparable[0]
+
+    @property
+    def best(self) -> dict:
+        return max(self.comparable, key=lambda r: r["resolved"])
+
+    @property
+    def frontier(self) -> List[tuple]:
+        """(date, share) at each new best score."""
+        out, top = [], -1.0
+        for r in self.comparable:
+            if r["resolved"] > top:
+                top = r["resolved"]
+                out.append((r["date"], self.share(top)))
+        return out
+
+    def resolved(self, folder: str) -> float:
+        return next(r["resolved"] for r in self.submissions if r["folder"] == folder)
+
+    def ratio(self, folder: str, baseline: str) -> float:
+        """Resolved count of ``folder`` over that of ``baseline``."""
+        return self.resolved(folder) / self.resolved(baseline)

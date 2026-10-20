@@ -1904,3 +1904,44 @@ ChallengerORingDistressRecord = _Series(
     ),
     "O-ring thermal distress of the 23 inspected Space Shuttle flights before Challenger, with joint temperature.",
 )
+
+
+# --- SWE-bench Verified leaderboard and one run's calls (added 2026-10-20) ---
+SweBenchVerifiedLeaderboard = _Series(
+    "swe_bench_verified_leaderboard",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="SWE-bench Verified leaderboard submissions, github.com/SWE-bench/experiments, evaluation/verified",
+        url="https://github.com/SWE-bench/experiments/tree/main/evaluation/verified",
+        verified="2026-10-20",
+        notes=(
+            "One row per submission folder with a results/results.json: folder, date (the folder's "
+            "date prefix), name and attempts (metadata.yaml), resolved (length of the 'resolved' list "
+            "in results.json, of 500 tasks). Extracted by swebench_trend.py (slides tree, vol3 "
+            "course-overview images/); four rows re-checked against results.json on 2026-10-20."
+        ),
+    ),
+    "Resolved count of every SWE-bench Verified submission with a results file, by date and attempts.",
+)
+SweBenchMiniSonnet4Django12050Calls = _Series(
+    "swe_bench_verified_mini_v1_sonnet4_django_12050_calls",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=(
+            "SWE-bench Verified submission 20250726_mini-v1.0.0_claude-sonnet-4-20250514, "
+            "trajectory django__django-12050, per model call"
+        ),
+        url=(
+            "https://swe-bench-submissions.s3.amazonaws.com/bash-only/"
+            "20250726_mini-v1.0.0_claude-sonnet-4-20250514/trajs/django__django-12050/"
+        ),
+        verified="2026-10-20",
+        notes=(
+            "Characters of message text in the context each call read (context_chars), cumulative "
+            "characters sent, and cumulative characters newly added; the trajectories store text "
+            "without token counts. Extracted by swebench_data.py (slides tree, vol3 course-overview "
+            "images/)."
+        ),
+    ),
+    "Context read by each of the 22 model calls of one public repair-agent run, in characters.",
+)
