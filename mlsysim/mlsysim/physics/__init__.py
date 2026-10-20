@@ -755,3 +755,9 @@ from .scaling import calc_loss_reduction_compute_multiple  # added 2026-10-20
 __all__ += [
     "calc_loss_reduction_compute_multiple",
 ]
+
+from .scaling import calc_power_law_factor  # added 2026-10-20
+
+__all__ += [
+    "calc_power_law_factor",
+]
