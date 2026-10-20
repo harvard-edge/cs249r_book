@@ -158,7 +158,7 @@ v("weights_gpus", math.ceil(ratio(d.weight_bytes, H100.memory.capacity)), "words
 v("floor_a100_ms", m(DECODE.variant(hardware=A100).result.memory_time, "ms"), "{:.1f}", "decode floor A100, ms")
 v("floor_b200_ms", m(DECODE.variant(hardware=B200).result.memory_time, "ms"), "{:.1f}", "decode floor B200, ms")
 srv = Scenarios.Llama3_70B_ServingH100
-v("h200_cap_ratio", ratio(H200.memory.capacity, H100.memory.capacity), "{:.1f}", "H200 / H100 HBM capacity (registry units)")
+v("h200_cap_ratio", ratio(H200.memory.capacity, H100.memory.capacity), "{:.1f}", "H200 / H100 labeled HBM capacity")
 v("h200_speedup", ratio(srv.result.itl, srv.variant(hardware=H200).result.itl), "{:.1f}", "H200 / H100 serving-model decode speed")
 v("h200_bw_ratio", ratio(H200.memory.bandwidth, H100.memory.bandwidth), "{:.1f}", "H200 / H100 bandwidth")
 
@@ -182,6 +182,11 @@ v("h100_fp8_perwatt_ratio",
 print("== Node memory (training-state scenario)")
 s = STATE.result
 v("node_hbm_gb", DGX.accelerators_per_node * H100.memory.capacity.magnitude, "{:.0f}", "DGX H100 HBM, labeled GB")
+table = mlsysim.ReferenceStats.RecommenderAtScaleProfile.EmbeddingTableSize
+node_hbm = DGX.accelerators_per_node * H100.memory.capacity
+v("rec_table_tb", m(table, "TB"), "{:.0f}", "recommender embedding table, TB")
+v("node_hbm_decimal_gb", m(node_hbm, "GB"), "{:.0f}", "DGX H100 HBM in decimal bytes, GB")
+v("rec_min_nodes", math.ceil(ratio(table, node_hbm)), "{:.0f}", "nodes to hold the table in HBM")
 v("state_tb", m(s.persistent_state, "TB"), "{:.1f}", "persistent state, TB")
 v("weights_gb", m(s.weights, "GB"), "{:.0f}", "FP16 weights, GB")
 v("master_gb", m(s.master_weights, "GB"), "{:.0f}", "FP32 master weights, GB")

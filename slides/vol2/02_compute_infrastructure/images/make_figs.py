@@ -15,7 +15,7 @@ Every value is from the rendered chapter (Compute Infrastructure, dev build of
   - Roofline: H100 FP16 989 TFLOP/s, 3.35 TB/s, ridge 295.2 FLOP/byte;
     decode 1 FLOP/byte (0.34 percent of peak), batch 64 (about 22 percent),
     training with 2,048 local tokens (Sec. 2.3.2, Example 2.2).
-  - H200 against H100: same peak, 1.4x bandwidth, 1.6x capacity, modeled
+  - H200 against H100: same peak, 1.4x bandwidth, 1.8x labeled capacity, modeled
     decode speedup 1.4x (Napkin Math 2.2).
   - Die arithmetic share: CPU 5-10, GPU 50-60, TPU 70-80, ASIC over 90
     percent, approximate shares that mark a direction (Sec. 2.2, figure 2).
