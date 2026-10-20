@@ -82,4 +82,4 @@ export const SOCIAL_DESCRIPTION = `Physics-grounded ML systems interview prep. $
 
 export const SOCIAL_DESCRIPTION_LONG = `${QUESTION_COUNT_FORMATTED} physics-grounded ML systems questions with napkin math verification. Free, open source, no accounts, runs entirely in your browser.`;
 
-export const SOCIAL_IMAGE_ALT = `StaffML — ${QUESTION_COUNT_FORMATTED} ML systems interview questions`;
+export const SOCIAL_IMAGE_ALT = `StaffML: ${QUESTION_COUNT_FORMATTED} ML systems interview questions`;

@@ -464,7 +464,7 @@ function HomePage() {
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search topics — KV cache, roofline, quantization..."
+                placeholder="Search topics, e.g. KV cache, roofline, quantization..."
                 aria-label="Search topics"
                 data-testid="topic-search"
                 className="w-full pl-10 pr-10 py-2 bg-surface border border-border rounded-lg text-[13px] font-medium text-textPrimary placeholder:text-textTertiary focus:outline-none focus:border-borderHighlight transition-colors"

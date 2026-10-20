@@ -23,7 +23,7 @@ export const dynamic = "force-static";
 export default function manifest(): MetadataRoute.Manifest {
   const base = process.env.NEXT_PUBLIC_BASE_PATH || "";
   return {
-    name: "StaffML — ML Systems Interview Prep",
+    name: "StaffML: ML Systems Interview Prep",
     short_name: "StaffML",
     description: `Physics-grounded system design prep for ML Engineers. ${QUESTION_COUNT_DISPLAY} questions across cloud, edge, mobile, and TinyML. 100% client-side.`,
     id: `${base}/`,

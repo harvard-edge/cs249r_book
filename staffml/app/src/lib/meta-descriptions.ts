@@ -16,7 +16,7 @@ import { getLevelDef } from "./levels";
 export function levelTooltip(id: string): { title: string; body: string } {
   const def = getLevelDef(id);
   return {
-    title: `${def.id} — ${def.name} (${def.role})`,
+    title: `${def.id}: ${def.name} (${def.role})`,
     body: `${def.verb}\nExample: ${def.example}`,
   };
 }
@@ -40,11 +40,11 @@ const TRACK_DESCRIPTIONS: Record<string, { title: string; body: string }> = {
   },
   tinyml: {
     title: "TinyML track",
-    body: "Microcontroller ML: kilobytes of RAM, milliwatt power budgets, no operating system. Quantization and pruning aren't optimizations — they're requirements.",
+    body: "Microcontroller ML: kilobytes of RAM, milliwatt power budgets, no operating system. Quantization and pruning are requirements, not optimizations.",
   },
   global: {
     title: "Cross-track",
-    body: "Concepts that apply across deployment targets — fundamentals you'll see whether you serve at scale or on a microcontroller.",
+    body: "Concepts that apply across deployment targets. These fundamentals apply whether you serve at scale or on a microcontroller.",
   },
 };
 
@@ -63,11 +63,11 @@ export function trackTooltip(track: string): { title: string; body: string } {
 const COMPETENCY_DESCRIPTIONS: Record<string, { title: string; body: string }> = {
   compute: {
     title: "Compute",
-    body: "Accelerator architecture, FLOPs, arithmetic intensity, kernel design — the silicon side of inference and training.",
+    body: "Accelerator architecture, FLOPs, arithmetic intensity, kernel design. This is the silicon side of inference and training.",
   },
   memory: {
     title: "Memory",
-    body: "HBM, KV cache, model state, gradient checkpointing, paging — anything where size or bandwidth bites.",
+    body: "HBM, KV cache, model state, gradient checkpointing, paging, and anything else where size or bandwidth is the limit.",
   },
   fluency: {
     title: "Fluency",
@@ -87,7 +87,7 @@ const COMPETENCY_DESCRIPTIONS: Record<string, { title: string; body: string }> =
   },
   data: {
     title: "Data",
-    body: "Data engineering, validation, versioning, drift detection — the part of ML systems that isn't model code.",
+    body: "Data engineering, validation, versioning, drift detection. This is the part of ML systems that is not model code.",
   },
   networking: {
     title: "Networking",
@@ -95,11 +95,11 @@ const COMPETENCY_DESCRIPTIONS: Record<string, { title: string; body: string }> =
   },
   power: {
     title: "Power",
-    body: "Energy per inference, thermal budgets, datacenter PUE, sustainability — the constraint that ends up dominating at scale.",
+    body: "Energy per inference, thermal budgets, datacenter PUE, sustainability. This constraint often dominates at scale.",
   },
   optimization: {
     title: "Optimization",
-    body: "Quantization, sparsity, distillation, pruning, compilation — making models faster, smaller, cheaper without breaking them.",
+    body: "Quantization, sparsity, distillation, pruning, compilation. These techniques make models faster, smaller, and cheaper without breaking them.",
   },
   precision: {
     title: "Precision",
@@ -111,7 +111,7 @@ const COMPETENCY_DESCRIPTIONS: Record<string, { title: string; body: string }> =
   },
   parallelism: {
     title: "Parallelism",
-    body: "Data, tensor, pipeline, expert parallelism. How big models actually run on multiple devices.",
+    body: "Data, tensor, pipeline, expert parallelism. How large models run on multiple devices.",
   },
 };
 

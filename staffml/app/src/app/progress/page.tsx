@@ -148,7 +148,7 @@ export default function ProgressPage() {
             <BarChart3 className="w-8 h-8 text-accentGreen shrink-0" />
             <div>
               <h1 className="text-2xl sm:text-3xl font-extrabold text-textPrimary tracking-tight">Progress</h1>
-              <p className="text-sm text-textSecondary">Track &times; Competency &mdash; your readiness at a glance</p>
+              <p className="text-sm text-textSecondary">Readiness by track and competency</p>
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -239,10 +239,10 @@ export default function ProgressPage() {
           const totalAreas = areaScores.length;
 
           const verdict = overallPct >= 70
-            ? `You're looking strong — ${readyAreas}/${totalAreas} competencies above 70%.`
+            ? `You're looking strong: ${readyAreas}/${totalAreas} competencies above 70%.`
             : overallPct >= 40
-            ? `Making progress — ${readyAreas}/${totalAreas} competencies ready. Focus on ${weakest?.area}.`
-            : `Early stages — keep drilling. Your weakest area is ${weakest?.area} (${weakest?.pct}%).`;
+            ? `Making progress: ${readyAreas}/${totalAreas} competencies ready. Focus on ${weakest?.area}.`
+            : `Early stages. Your weakest area is ${weakest?.area} (${weakest?.pct}%).`;
 
           return (
             <div className="mb-6 p-5 rounded-xl border border-border bg-surface/80">
@@ -284,13 +284,13 @@ export default function ProgressPage() {
             </div>
             <h2 className="text-xl font-bold text-textPrimary mb-2">No data yet</h2>
             <p className="text-sm text-textSecondary mb-6 max-w-md leading-relaxed">
-              Your progress page lights up after you've drilled questions or completed a mock interview. Pick a starting point — there's no wrong choice.
+              This page fills in after you answer questions or complete a mock interview. Pick a starting point below.
             </p>
             <div className="flex flex-wrap items-center justify-center gap-2">
               <Link
                 href="/practice?level=L1"
                 className="inline-flex items-center gap-2 px-4 py-2.5 bg-surface border border-border text-textPrimary hover:border-accentBlue/60 rounded-lg transition-all text-sm font-medium"
-                title="Start with the easiest level — recall questions to warm up."
+                title="Start with the easiest level: recall questions."
               >
                 <Target className="w-4 h-4 text-accentGreen" /> Drill 5 easy
               </Link>
@@ -463,7 +463,7 @@ export default function ProgressPage() {
                     // immediately after the file is written.
                     setLastExport(getLastExportAt());
                   }}
-                  title="Download a JSON backup of your progress. Keep this file safe — it's your only way to restore."
+                  title="Download a JSON backup of your progress. Keep this file safe, because it is the only way to restore your progress."
                   className="text-xs text-textTertiary hover:text-accentBlue transition-colors flex items-center gap-1"
                 >
                   <Download className="w-3 h-3" /> Export

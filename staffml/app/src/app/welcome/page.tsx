@@ -144,7 +144,7 @@ export default function WelcomePage() {
             <Crosshair className="w-5 h-5 text-accentRed mb-2" />
             <h4 className="text-[13px] font-bold text-textPrimary mb-1">Mock Interview</h4>
             <p className="text-[11px] text-textSecondary leading-relaxed">
-              Timed gauntlet mode. The clock matters, the feedback is the signal.
+              Timed session with scoring. The clock is part of the exercise, and the feedback shows where you stand.
             </p>
           </div>
         </div>
