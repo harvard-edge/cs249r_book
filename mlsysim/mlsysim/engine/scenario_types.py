@@ -12471,6 +12471,11 @@ class GroupConfusionScenario(BaseScenario):
         c = self._c(group)
         return c["fn"] / (c["tp"] + c["fn"])
 
+    @property
+    def pooled_positive_rate(self) -> float:
+        """Share of all members, every group pooled, given a positive decision (added 2026-10-20)."""
+        return sum(self.positives(g) for g in self.groups) / sum(self.size(g) for g in self.groups)
+
     def accuracy(self, group: str) -> float:
         """Share of the group decided correctly (added 2026-10-20)."""
         c = self._c(group)
@@ -21340,3 +21345,370 @@ class RubricAuditScenario(BaseScenario):
 class SeverityPolicyScenario(BaseScenario):
     """An incident severity policy: the response deadline of each level."""
     response_deadlines: Dict[str, Quantity]
+
+
+# --- Responsible engineering: lifecycle cost, carbon accounting, and the machine
+# cost of duties (added 2026-10-20) ---------------------------------------------
+
+
+class ServiceLifecycleCostScenario(BaseScenario):
+    """A service's multi-year cost in three terms: repeated training cycles, recurring inference,
+    and operations, with a GPU-hour carbon factor.
+
+    Inference: ``daily_users`` x ``items_per_user`` requests a day, each ``service_time`` of
+    dedicated accelerator time (unbatched, not overlapped), billed at ``inference_rate``. A
+    training cycle is data preparation and a final run in GPU-hours at ``training_rate`` plus a
+    search of ``search_experiments`` at ``search_cost_per_experiment``; ``cycles`` of them over
+    ``years``. ``serving_cut`` and ``training_cut`` are fractional savings to compare.
+    """
+    daily_users: float
+    items_per_user: float
+    service_time: Quantity
+    inference_rate: Quantity          # USD per GPU-hour
+    training_rate: Quantity           # USD per GPU-hour
+    data_prep_time: Quantity          # GPU-hours per cycle
+    search_experiments: int
+    search_cost_per_experiment: Quantity
+    final_run_time: Quantity          # GPU-hours per cycle
+    cycles: int
+    years: int
+    operations_annual: Dict[str, Quantity]   # USD per year by item
+    carbon_per_gpu_hour: Quantity     # kg per GPU-hour
+    serving_cut: float = 0.0
+    training_cut: float = 0.0
+
+    @property
+    def inferences_per_day(self) -> float:
+        return self.daily_users * self.items_per_user
+
+    @property
+    def gpu_hours_per_day(self) -> Quantity:
+        return (self.inferences_per_day * self.service_time).to("hour")
+
+    @property
+    def gpus_busy(self) -> float:
+        from ..core.units import HOURS_PER_DAY
+        return self.gpu_hours_per_day.to("hour").magnitude / HOURS_PER_DAY
+
+    @property
+    def inference_cost_per_day(self) -> Quantity:
+        return (self.gpu_hours_per_day * self.inference_rate).to("dollar")
+
+    @property
+    def inference_cost_per_year(self) -> Quantity:
+        from ..core.units import DAYS_PER_YEAR
+        return (self.inference_cost_per_day * DAYS_PER_YEAR).to("dollar")
+
+    @property
+    def data_prep_cost(self) -> Quantity:
+        return (self.data_prep_time * self.training_rate).to("dollar")
+
+    @property
+    def search_cost(self) -> Quantity:
+        return (self.search_experiments * self.search_cost_per_experiment).to("dollar")
+
+    @property
+    def search_time(self) -> Quantity:
+        """GPU-hours the search buys at the training rate."""
+        return (self.search_cost / self.training_rate).to("hour")
+
+    @property
+    def final_run_cost(self) -> Quantity:
+        return (self.final_run_time * self.training_rate).to("dollar")
+
+    @property
+    def cycle_cost(self) -> Quantity:
+        return (self.data_prep_cost + self.search_cost + self.final_run_cost).to("dollar")
+
+    @property
+    def cycle_gpu_hours(self) -> Quantity:
+        return (self.data_prep_time + self.search_time + self.final_run_time).to("hour")
+
+    @property
+    def training_cost(self) -> Quantity:
+        return (self.cycle_cost * self.cycles).to("dollar")
+
+    @property
+    def service_days(self) -> int:
+        from ..core.units import DAYS_PER_YEAR
+        return DAYS_PER_YEAR * self.years
+
+    @property
+    def inference_gpu_hours(self) -> Quantity:
+        return (self.gpu_hours_per_day * self.service_days).to("hour")
+
+    @property
+    def inference_cost(self) -> Quantity:
+        return (self.inference_cost_per_day * self.service_days).to("dollar")
+
+    @property
+    def operations_per_year(self) -> Quantity:
+        return sum(self.operations_annual.values(), Q_(0, "dollar")).to("dollar")
+
+    @property
+    def operations_cost(self) -> Quantity:
+        return (self.operations_per_year * self.years).to("dollar")
+
+    @property
+    def total_cost(self) -> Quantity:
+        return (self.training_cost + self.inference_cost + self.operations_cost).to("dollar")
+
+    @property
+    def shares(self) -> Dict[str, float]:
+        t = self.total_cost
+        return {"training": (self.training_cost / t).to("").magnitude,
+                "inference": (self.inference_cost / t).to("").magnitude,
+                "operations": (self.operations_cost / t).to("").magnitude}
+
+    @property
+    def cost_ratio(self) -> float:
+        """Inference over training cost."""
+        return (self.inference_cost / self.training_cost).to("").magnitude
+
+    @property
+    def training_carbon(self) -> Quantity:
+        return (self.cycle_gpu_hours.to("hour").magnitude * self.cycles * self.carbon_per_gpu_hour).to("kg")
+
+    @property
+    def inference_carbon(self) -> Quantity:
+        return (self.inference_gpu_hours.to("hour").magnitude * self.carbon_per_gpu_hour).to("kg")
+
+    @property
+    def carbon_ratio(self) -> float:
+        return (self.inference_carbon / self.training_carbon).to("").magnitude
+
+    @property
+    def serving_saving(self) -> Quantity:
+        return (self.inference_cost * self.serving_cut).to("dollar")
+
+    @property
+    def serving_saving_carbon(self) -> Quantity:
+        return (self.inference_carbon * self.serving_cut).to("kg")
+
+    @property
+    def training_saving(self) -> Quantity:
+        return (self.training_cost * self.training_cut).to("dollar")
+
+    @property
+    def training_saving_carbon(self) -> Quantity:
+        return (self.training_carbon * self.training_cut).to("kg")
+
+
+class OperationalCarbonScenario(BaseScenario):
+    """Operational carbon = energy x PUE x grid intensity.
+
+    Give the IT energy directly (``it_energy``) or as ``devices`` drawing ``device_power`` for
+    ``duration``. ``pue`` is 1 when the energy is already counted at the facility boundary.
+    ``comparison`` is an optional emissions anchor (mass per unit) to express the result in.
+    """
+    intensity: Quantity
+    pue: float = 1.0
+    it_energy: Optional[Quantity] = None
+    devices: Optional[float] = None
+    device_power: Optional[Quantity] = None
+    duration: Optional[Quantity] = None
+    comparison: Optional[Quantity] = None
+
+    @property
+    def it_energy_total(self) -> Quantity:
+        if self.it_energy is not None:
+            return self.it_energy.to("kWh")
+        return (self.devices * self.device_power * self.duration).to("kWh")
+
+    @property
+    def energy(self) -> Quantity:
+        """Facility energy: IT energy times PUE."""
+        return (self.it_energy_total * self.pue).to("kWh")
+
+    @property
+    def carbon(self) -> Quantity:
+        from ..physics.quantities import carbon_from_energy
+        return carbon_from_energy(self.energy, self.intensity).to("metric_ton")
+
+    @property
+    def comparisons(self) -> float:
+        return (self.carbon / self.comparison).to("").magnitude
+
+
+class EmbodiedShareScenario(BaseScenario):
+    """Embodied carbon of one GPU-hour, amortized from per-device manufacturing carbon over
+    ``lifetime`` at ``utilization``, against the operational carbon of a ``gpu_power`` GPU on
+    named grids. A server's carbon is shared by ``gpus_per_server`` GPUs."""
+    server_embodied: Quantity
+    gpu_embodied: Quantity
+    lifetime: Quantity
+    utilization: float
+    gpus_per_server: int
+    gpu_power: Quantity
+    intensities: Dict[str, Quantity]
+
+    @property
+    def busy_hours(self) -> Quantity:
+        return (self.lifetime * self.utilization).to("hour")
+
+    @property
+    def server_per_hour(self) -> Quantity:
+        return (self.server_embodied / self.busy_hours.magnitude).to("kg")
+
+    @property
+    def gpu_per_hour(self) -> Quantity:
+        return (self.gpu_embodied / self.busy_hours.magnitude).to("kg")
+
+    @property
+    def embodied_per_gpu_hour(self) -> Quantity:
+        return (self.gpu_per_hour + self.server_per_hour / self.gpus_per_server).to("g")
+
+    def operational_per_gpu_hour(self, grid: str) -> Quantity:
+        return (self.gpu_power * Q_(1, "hour") * self.intensities[grid]).to("g")
+
+    def embodied_share(self, grid: str) -> float:
+        e = self.embodied_per_gpu_hour
+        return (e / (self.operational_per_gpu_hour(grid) + e)).to("").magnitude
+
+
+class ExplanationLoadScenario(BaseScenario):
+    """Reasons owed for every denial: ``decisions_per_day`` at ``denial_share``, each explained by a
+    sampling attributor of ``samples`` model evaluations or by exact Shapley over ``features``."""
+    decisions_per_day: float
+    denial_share: float
+    samples: int
+    features: int
+
+    @property
+    def notices_per_day(self) -> float:
+        return self.decisions_per_day * self.denial_share
+
+    @property
+    def sampled_evaluations(self) -> float:
+        return self.notices_per_day * self.samples
+
+    @property
+    def sampled_over_decisions(self) -> float:
+        return self.sampled_evaluations / self.decisions_per_day
+
+    @property
+    def exact_per_explanation(self) -> int:
+        return 2 ** self.features
+
+    @property
+    def exact_evaluations(self) -> float:
+        return self.notices_per_day * self.exact_per_explanation
+
+
+class ReviewStaffingScenario(BaseScenario):
+    """Substantive human review: ``appeal_rate`` of ``decisions_per_day`` at ``time_per_case`` each,
+    staffed in ``shift``-long shifts; optionally against a reported ``compare_cases`` handled at
+    ``compare_time_per_case``."""
+    decisions_per_day: float
+    appeal_rate: float
+    time_per_case: Quantity
+    shift: Quantity
+    compare_cases: Optional[float] = None
+    compare_time_per_case: Optional[Quantity] = None
+
+    @property
+    def appeals_per_day(self) -> float:
+        return self.decisions_per_day * self.appeal_rate
+
+    @property
+    def reviewer_hours_per_day(self) -> Quantity:
+        return (self.appeals_per_day * self.time_per_case).to("hour")
+
+    @property
+    def reviewers(self) -> float:
+        return (self.reviewer_hours_per_day / self.shift).to("").magnitude
+
+    @property
+    def cases_per_hour(self) -> float:
+        return (Q_(1, "hour") / self.time_per_case).to("").magnitude
+
+    @property
+    def compare_hours(self) -> Quantity:
+        return (self.compare_cases * self.compare_time_per_case).to("hour")
+
+    @property
+    def compare_cases_per_hour(self) -> float:
+        return (Q_(1, "hour") / self.compare_time_per_case).to("").magnitude
+
+
+class AuditLogVolumeScenario(BaseScenario):
+    """Audit log volume = events per day x bytes per record x retention; optionally the same
+    events logged with their full ``payload`` instead."""
+    events_per_day: float
+    record_size: Quantity
+    retention: Quantity
+    payload_size: Optional[Quantity] = None
+
+    @property
+    def retention_days(self) -> float:
+        return self.retention.to("day").magnitude
+
+    @property
+    def per_day(self) -> Quantity:
+        return (self.events_per_day * self.record_size).to("MB")
+
+    @property
+    def total(self) -> Quantity:
+        return (self.per_day * self.retention_days).to("GB")
+
+    @property
+    def payload_total(self) -> Quantity:
+        return (self.events_per_day * self.payload_size * self.retention_days).to("TB")
+
+    @property
+    def payload_ratio(self) -> float:
+        return (self.payload_size / self.record_size).to("").magnitude
+
+
+class PerExampleGradientScenario(BaseScenario):
+    """Naive DP-SGD keeps one gradient per example: ``bytes_per_param`` per parameter of each
+    named model, ``batch_size`` copies per step."""
+    models: Dict[str, Workload]
+    batch_size: int
+    bytes_per_param: Quantity
+
+    def per_example(self, name: str) -> Quantity:
+        return self.models[name].size_in_bytes(self.bytes_per_param).to("byte")
+
+    def per_batch(self, name: str) -> Quantity:
+        return (self.per_example(name) * self.batch_size).to("byte")
+
+
+class FrontierCostTrendScenario(BaseScenario):
+    """Least-squares growth of frontier training cost: log10(cost) against publication date
+    (decimal year) over the frontier-flagged rows of Literature.Series.NotableModels dated
+    ``from_year`` or later."""
+    from_year: int
+
+    @staticmethod
+    def decimal_year(s: str) -> float:
+        import datetime as _dt
+        d = _dt.date.fromisoformat(s)
+        return d.year + (d.timetuple().tm_yday - 1) / 365.25
+
+    @property
+    def rows(self) -> List[Dict[str, Any]]:
+        from ..literature.registry import Literature
+        return [r for r in Literature.Series.NotableModels.entries
+                if r["training_cost_2023usd"] and r["date"][:4] >= str(self.from_year)]
+
+    @property
+    def frontier(self) -> List[Dict[str, Any]]:
+        return [r for r in self.rows if r["frontier"] == 1]
+
+    @property
+    def fit(self) -> Tuple[float, float]:
+        """(slope, intercept) of log10(cost in 2023 USD) per decimal year."""
+        import numpy as _np
+        f = self.frontier
+        slope, intercept = _np.polyfit([self.decimal_year(r["date"]) for r in f],
+                                       _np.log10([r["training_cost_2023usd"] for r in f]), 1)
+        return float(slope), float(intercept)
+
+    @property
+    def growth_per_year(self) -> float:
+        return 10 ** self.fit[0]
+
+    @property
+    def priciest(self) -> Dict[str, Any]:
+        return max(self.frontier, key=lambda r: r["training_cost_2023usd"])

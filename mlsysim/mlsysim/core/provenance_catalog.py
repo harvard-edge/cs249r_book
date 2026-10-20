@@ -5240,3 +5240,102 @@ HE_ADS_CLICK_PREDICTION_2014 = _lit(
     verified="2026-10-20",
     notes="Training daily rather than weekly reduced normalized entropy by about 1 percent.",
 )
+
+# --- Responsible engineering: carbon accounting and duties (added 2026-10-20) ---
+PATTERSON_CARBON_2021_APPENDICES = _lit(
+    "prov:patterson-carbon-2021-appendices",
+    "Patterson et al. (2021), Carbon Emissions and Large Neural Network Training, arXiv:2104.10350v3, "
+    "Table 1, Figure 1, Sections 2.3, 2.4, and 4.1, Table 4, and Appendices C and D",
+    url="https://arxiv.org/abs/2104.10350",
+    verified="2026-10-20",
+    notes=("Evolved Transformer architecture search, measured: 6.8 days on 200 TPU v2 chips at a "
+           "measured 208 W, PUE 1.10, 0.431 kg CO2e/kWh, printed as 3.2 tCO2e (Appendix D, p. 22). "
+           "Appendix C: the proxy task makes the 2019 estimate 18.7x too high for an average "
+           "organization; Appendix D: 117,780 P100 hours at 189 W against 32,633 TPU v2 hours at "
+           "208 W, US average PUE 1.58 and grid 0.423 kg/kWh. Table 1: Transformer (Big) on P100 in an "
+           "average US datacenter 316 kWh and 0.1357 t; Evolved Transformer (Medium) on TPU v2 in "
+           "Iowa 30 kWh and 0.0024 t net. Figure 1 cumulative gains as printed. Transcribed from the "
+           "Lecture 15b slide record, whose credits name these locations."),
+)
+PATTERSON_PLATEAU_2022 = _lit(
+    "prov:patterson-plateau-2022",
+    "Patterson et al. (2022), The Carbon Footprint of Machine Learning Training Will Plateau, Then "
+    "Shrink, IEEE Computer 55(7)",
+    url="https://arxiv.org/abs/2204.05149",
+    verified="2026-10-20",
+    notes="Inference was about three fifths of Google's ML energy, 2019 to 2021; ML was 10 to 15 "
+          "percent of Google's total energy use.",
+)
+WU_SUSTAINABLE_AI_2022 = _lit(
+    "prov:wu-sustainable-ai-2022",
+    "Wu et al. (2022), Sustainable AI: Environmental Implications, Challenges and Opportunities, "
+    "MLSys 2022, Figure 3",
+    url="https://arxiv.org/abs/2111.00364",
+    verified="2026-10-20",
+    notes="Meta's AI power capacity split about 10:20:70 across experimentation, training, and "
+          "inference; embodied carbon about 30 percent of the footprint of large-scale ML tasks.",
+)
+ELSWORTH_GOOGLE_AI_FOOTPRINT_2025_EMISSIONS = _lit(
+    "prov:elsworth-google-ai-footprint-2025-emissions",
+    "Elsworth et al. (2025), Measuring the environmental impact of delivering AI at Google Scale, arXiv "
+    "2508.15734, Section 4.3",
+    url="https://arxiv.org/abs/2508.15734",
+    verified="2026-10-20",
+    notes="May 2024 to May 2025: a 44x reduction in total emissions per median Gemini Apps text prompt.",
+)
+HF_BLOOM_MODEL_CARD = _report(
+    "prov:hf-bloom-model-card",
+    "Hugging Face, bigscience/bloom model card, README.md metadata co2_eq_emissions (commit 7f10a99)",
+    "https://huggingface.co/bigscience/bloom",
+    notes="co2_eq_emissions.emissions: 24700000 (grams); retrieved 19 October 2026.",
+)
+BOURTOULE_SISA_2021 = _lit(
+    "prov:bourtoule-sisa-2021",
+    "Bourtoule et al. (2021), Machine Unlearning, IEEE S&P 2021, abstract",
+    url="https://arxiv.org/abs/1912.03817",
+    verified="2026-10-20",
+    notes="SISA training speeds unlearning 4.63x on Purchase, 2.45x on SVHN, and 1.36x on ImageNet "
+          "over retraining from scratch.",
+)
+DPC_META_IRELAND_2023 = _report(
+    "prov:dpc-meta-ireland-2023",
+    "Data Protection Commission (Ireland), Data Protection Commission announces conclusion of two "
+    "inquiries into Meta Ireland, press release, 4 January 2023",
+    "https://www.dataprotection.ie/en/news-media/data-protection-commission-announces-conclusion-two-inquiries-meta-ireland",
+    notes="Fines of EUR 210 million (Facebook) and EUR 180 million (Instagram).",
+)
+PROPUBLICA_CIGNA_2023 = _report(
+    "prov:propublica-cigna-2023",
+    "Rucker, Miller, and Armstrong, How Cigna Saves Millions by Having Its Doctors Reject Claims "
+    "Without Reading Them, ProPublica and The Capitol Forum, 25 March 2023",
+    "https://www.propublica.org/article/cigna-pxdx-medical-health-insurance-rejection-claims",
+    notes="Over two months, Cigna medical directors denied more than 300,000 requests for payment, "
+          "spending on average 1.2 seconds on each.",
+)
+YU_COCA_2022 = _lit(
+    "prov:yu-coca-2022",
+    "Yu et al. (2022), CoCa: Contrastive Captioners are Image-Text Foundation Models, Figure 1",
+    url="https://arxiv.org/abs/2205.01917",
+    verified="2026-10-20",
+    notes="91.0 percent ImageNet top-1 with a fine-tuned encoder; cited by De et al. (2022), Figure 1, "
+          "as the best non-private ImageNet result.",
+)
+REGULATION_B_RECORD_RETENTION = _report(
+    "prov:regulation-b-record-retention",
+    "12 CFR 1002.12(b)(1), Regulation B (Equal Credit Opportunity Act), preservation of records",
+    "https://www.ecfr.gov/current/title-12/chapter-X/part-1002/section-1002.12",
+    notes="Creditors keep consumer credit application records for 25 months after notifying the "
+          "applicant of action taken.",
+)
+CODECARBON_LAPTOP_RUN_2026 = Provenance(
+    id="prov:codecarbon-laptop-run-2026",
+    kind=ProvenanceKind.DERIVED,
+    ref="CodeCarbon 3.3.1 OfflineEmissionsTracker (country_iso_code USA), 30 s of 2048 x 2048 float32 "
+        "matrix multiplies on an Apple M5 Max laptop, run 19 October 2026",
+    url="https://github.com/mlco2/codecarbon",
+    verified="2026-10-20",
+    notes=("Fields of the emissions.csv the run wrote, quoted exactly: energy_consumed "
+           "0.00018553642733992439 kWh, cpu_energy 0.00013543562574311828 kWh, emissions "
+           "6.855070041856389e-05 kg. The tracker found no power sensor and fell back on CPU load; "
+           "RAM is a fixed 6 W; PUE 1.0 is the tracker's default."),
+)
