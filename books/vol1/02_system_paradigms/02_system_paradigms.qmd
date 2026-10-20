@@ -338,10 +338,10 @@ A safety system with a 10 ms reaction budget cannot wait for a cross-country rou
 # │
 # │ Goal: Demonstrate the physical latency floor of cloud computing.
 # │ Show: Cross-country round-trip time exceeds tight real-time budgets.
-# │ How: Apply the mlsysim network latency formula for CA-to-VA distance.
+# │ How: Scenarios.CrossCountryFiberPath (the fiber propagation floor).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.physics import calc_network_latency_ms
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, check, fmt_time, fmt_length, fmt_text
 from mlsysim.core.units import km
 
@@ -353,12 +353,13 @@ class LightLatency:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    distance_km = 3600 * km  # California to Virginia (straight-line)
-    safety_budget_ms = 10
+    path = Scenarios.CrossCountryFiberPath
+    distance_km = path.distance  # California to Virginia (straight-line)
+    safety_budget_ms = path.budget.to("millisecond").magnitude
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Calculate Round-trip time (RTT) based on speed of light in fiber
-    min_latency_ms = calc_network_latency_ms(distance_km)
+    # Round-trip time (RTT) based on speed of light in fiber
+    min_latency_ms = path.round_trip.to("millisecond").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(min_latency_ms > safety_budget_ms, f"Physics forbids cloud ({min_latency_ms:.1f} ms) within {safety_budget_ms} ms budget!")
@@ -421,11 +422,12 @@ class MobileTdpPowerWall:
 # │ Show: ~190× more transistors from the mid-2000s to the early 2020s,
 # │       single-thread performance up only ~5× in that span (vs ~21× over the
 # │       decade before), and the top clock frequency held near 4.7 GHz.
-# │ How: Maxima of the Rupp trend series over the stated windows.
+# │ How: Scenarios.MicroprocessorTrendsAroundDennard (maxima of the Rupp
+# │      trend series over the stated windows).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature
-from mlsysim.core.units import Hz
+from mlsysim import Scenarios
+from mlsysim.core.units import Hz, MHz
 from mlsysim.fmt import check, fmt_frequency, fmt_multiple
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -433,16 +435,13 @@ class MicroprocessorTrendStats:
     """Transistor, single-thread, and frequency trends around the end of Dennard scaling."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    rows = Literature.Series.MicroprocessorTrends.entries
+    trends = Scenarios.MicroprocessorTrendsAroundDennard
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    def _max(series, lo, hi, rows=rows):
-        return max(r["value"] for r in rows if r["series"] == series and lo <= r["year"] < hi)
-
-    transistor_growth = _max("transistors", 2019, 2023) / _max("transistors", 2004, 2006)
-    single_thread_growth_after = _max("specint", 2019, 2023) / _max("specint", 2004, 2006)
-    single_thread_growth_before = _max("specint", 2004, 2006) / _max("specint", 1994, 1996)
-    peak_frequency_ghz = _max("frequency", 2005, 2023) / 1000
+    transistor_growth = trends.growth("transistors", "mid_2000s", "early_2020s")
+    single_thread_growth_after = trends.growth("specint", "mid_2000s", "early_2020s")
+    single_thread_growth_before = trends.growth("specint", "mid_1990s", "mid_2000s")
+    peak_frequency_ghz = (trends.peak("frequency", "after_2005") * MHz).to("GHz").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(100 <= transistor_growth <= 300, f"Expected ~190x transistor growth, got {transistor_growth:.0f}.")
@@ -534,9 +533,10 @@ In @eq-memory-wall, the numerator and denominator are dimensionless annual growt
 # │
 # │ Goal: Provide the two growth-rate numbers cited in Memory Wall narrative.
 # │ Show: Compute doubles every 18 months; memory BW grows ~20% annually.
-# │ How: Canonical industry trend constants formatted for prose.
+# │ How: Scenarios.IllustrativeMemoryWall (annual factors and decade gap).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_multiple, fmt_percent
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -544,15 +544,16 @@ class MemoryWallTrends:
     """Namespace for compute vs memory bandwidth growth rates."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    compute_doubling_months = 18
-    mem_bw_growth_pct = 20
+    trend = Scenarios.IllustrativeMemoryWall
+    compute_doubling_months = round(trend.compute_doubling_period.to("month").magnitude)
+    mem_bw_growth_pct = round(100 * trend.bandwidth_growth)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Convert the doubling period to an annual growth factor and compound
-    # the compute-to-bandwidth ratio over a decade.
-    compute_annual_factor = 2 ** (12 / compute_doubling_months)  # ~1.59x per year
-    mem_bw_annual_factor = 1 + mem_bw_growth_pct / 100  # 1.2x per year
-    decade_gap = (compute_annual_factor / mem_bw_annual_factor) ** 10
+    # The doubling period as an annual growth factor, and the
+    # compute-to-bandwidth ratio compounded over a decade.
+    compute_annual_factor = trend.compute_annual_factor  # ~1.59x per year
+    mem_bw_annual_factor = trend.bandwidth_annual_factor  # 1.2x per year
+    decade_gap = trend.gap
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(1.55 < compute_annual_factor < 1.65, f"18-month doubling should be ~1.6x/year, got {compute_annual_factor:.2f}")
@@ -740,12 +741,12 @@ Stepping down once more to microcontrollers puts power and kilobyte memory first
 # │ Goal: Show where the scorecard's flash and latency numbers come from.
 # │ Show: Weights use ~12% of flash; latency = compute + overhead ≈ 101 ms,
 # │       which passes the canonical 200 ms budget and fails a 50 ms one.
-# │ How: Evaluate the SmartDoorbell scenario (same tightening as the figure)
-# │      and decompose its latency with SingleNodeModel.
+# │ How: Evaluate Scenarios.SmartDoorbell and its responsive-chime variant
+# │      (same tightening as the figure); decompose the latency with
+# │      Scenarios.SmartDoorbellFrame.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import mlsysim
-from mlsysim.solvers import SingleNodeModel
 from mlsysim.fmt import check, fmt_flops, fmt_flop_rate, fmt_memory, fmt_memory_capacity, fmt_percent, fmt_time
 from mlsysim.core.units import MB, MFLOPs, GFLOPs, millisecond, second
 
@@ -755,12 +756,13 @@ class DoorbellScorecard:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     scenario = mlsysim.Scenarios.SmartDoorbell
-    strict_sla = mlsysim.Q_("50 ms")  # same tightening as @fig-doorbell-scorecard
+    strict_scenario = mlsysim.Scenarios.SmartDoorbellResponsiveChime  # same tightening as @fig-doorbell-scorecard
+    strict_sla = strict_scenario.sla_latency
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     canonical_eval = scenario.evaluate()
-    strict_eval = scenario.model_copy(update={"sla_latency": strict_sla}).evaluate()
-    perf = SingleNodeModel().solve(scenario.workload, scenario.system, batch_size=1, precision="fp16")
+    strict_eval = strict_scenario.evaluate()
+    perf = mlsysim.Scenarios.SmartDoorbellFrame.result
     weight_bytes = strict_eval.feasibility.metrics["weight_size"]
     flash_capacity = strict_eval.feasibility.metrics["capacity"]
     flash_util = (weight_bytes / flash_capacity).to("").magnitude
@@ -810,7 +812,7 @@ import matplotlib.pyplot as plt
 # │ Load the Doorbell scenario with a strict real-time interaction budget.
 # │ The canonical scenario uses a 200 ms SLA; this scorecard intentionally
 # │ tightens the target to show latency as the active deployment constraint.
-doorbell_strict = mlsysim.Scenarios.SmartDoorbell.model_copy(update={"sla_latency": mlsysim.Q_("50 ms")})
+doorbell_strict = mlsysim.Scenarios.SmartDoorbellResponsiveChime
 doorbell_eval = doorbell_strict.evaluate()
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
@@ -993,11 +995,10 @@ class ResnetSetup:
 # │
 # │ Goal: Identify the bottleneck for single-image cloud inference.
 # │ Show: A100 inference is memory-bound at batch=1.
-# │ How: SingleNodeModel for A100 roofline bounds at FP16.
+# │ How: Scenarios.ResNet50A100Batch1 (SingleNodeModel roofline bounds at FP16).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models, Hardware, Engine
-from mlsysim.solvers import SingleNodeModel
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_int, sci_latex, fmt_frac, MarkdownStr, fmt_flop_rate, fmt_bandwidth, fmt_multiple, check
 from mlsysim.core.units import flop, byte, TFLOPs, TB, millisecond, second
 
@@ -1006,21 +1007,22 @@ class ResnetCloud:
     """A100 roofline analysis for ResNet-50 cloud inference."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    m = Models.Vision.ResNet50
-    h = Hardware.Cloud.A100
+    run = Scenarios.ResNet50A100Batch1
+    m = run.workload
+    h = run.hardware
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    p = SingleNodeModel().solve(m, h, batch_size=1, precision="fp16", efficiency=1.0)
+    p = run.result
     cloud_compute_ms_value = p.latency_compute.to(millisecond).magnitude
-    cloud_traffic_bytes = (p.latency_memory * p.peak_bw_actual).to(byte)
+    cloud_traffic_bytes = run.traffic
     cloud_memory_ms_display = p.latency_memory.to(millisecond).magnitude
     cloud_ratio_x_value = cloud_memory_ms_display / cloud_compute_ms_value
-    cloud_ai_display = (m.inference_flops / cloud_traffic_bytes).to(flop / byte).magnitude
+    cloud_ai_display = run.intensity.to(flop / byte).magnitude
     resnet_flops_latex = sci_latex(m.inference_flops.to(flop))
     cloud_traffic_bytes_latex = sci_latex(cloud_traffic_bytes)
 
     # Ridge point (machine balance) from the same peak rate and bandwidth
-    cloud_ridge_value = (p.peak_flops_actual / p.peak_bw_actual).to(flop / byte).magnitude
+    cloud_ridge_value = run.ridge.to(flop / byte).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(p.bottleneck.lower() == "memory", "Cloud inference must be memory bound")
@@ -1059,11 +1061,10 @@ The analytical model assumes `{python} fmt_memory(ResnetCloud.cloud_traffic_byte
 # │
 # │ Goal: Identify the mobile bottleneck and compare against cloud memory time.
 # │ Show: Bandwidth gap drives cross-platform inference speedup.
-# │ How: SingleNodeModel for mobile NPU; duplicate cloud FP16 memory time locally.
+# │ How: Scenarios.ResNet50PhoneNpuBatch1 against Scenarios.ResNet50A100Batch1.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models, Hardware, Engine
-from mlsysim.solvers import SingleNodeModel
+from mlsysim import Scenarios
 from mlsysim.fmt import MarkdownStr, fmt, fmt_bandwidth, fmt_frac, fmt_multiple, fmt_ops_rate, sci_latex, check
 from mlsysim.core.units import flop, byte, TOPS, GB, millisecond, second
 
@@ -1072,16 +1073,18 @@ class ResnetMobile:
     """Mobile NPU roofline analysis and cross-platform comparison."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    m = Models.Vision.ResNet50
-    h = Hardware.Mobile.iPhone15Pro
-    h_cloud = Hardware.Cloud.A100
+    run = Scenarios.ResNet50PhoneNpuBatch1
+    run_cloud = Scenarios.ResNet50A100Batch1
+    m = run.workload
+    h = run.hardware
+    h_cloud = run_cloud.hardware
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    p = SingleNodeModel().solve(m, h, batch_size=1, precision="int8", efficiency=1.0)
-    p_cloud = SingleNodeModel().solve(m, h_cloud, batch_size=1, precision="fp16", efficiency=1.0)
+    p = run.result
+    p_cloud = run_cloud.result
     cloud_memory_ms_display = p_cloud.latency_memory.to(millisecond).magnitude
     mobile_compute_ms_display = (m.inference_flops / p.peak_flops_actual).to(millisecond).magnitude
-    mobile_traffic_bytes = (p.latency_memory * p.peak_bw_actual).to(byte)
+    mobile_traffic_bytes = run.traffic
     mobile_memory_ms_display = p.latency_memory.to(millisecond).magnitude
     mobile_ratio_x_value = mobile_memory_ms_display / mobile_compute_ms_display
     bw_advantage_x_value = h_cloud.memory.bandwidth / p.peak_bw_actual
@@ -1143,7 +1146,7 @@ ResNet-50 becomes compute bound when batching and data reuse raise computation p
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim import Hardware, ReferenceStats, Systems
+from mlsysim import Hardware, ReferenceStats, Scenarios, Systems
 from mlsysim.fmt import (
     check,
     fmt_memory_capacity,
@@ -1172,7 +1175,7 @@ class HardwareSpectrumSetup:
     """Namespace for Hardware Spectrum Setup."""
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    cloud_peak_flops = Systems.Pods.TPUv4_4096.chips * Hardware.Cloud.TPUv4.compute.peak_flops
+    cloud_peak_flops = Scenarios.TPUv4Pod4096.peak_flops
     # NVIDIA's marketed "1 petaflop" envelope is FP4 with sparsity; the registry
     # stores dense fp4 (500 TFLOPS) separately per its dense convention.
     edge_peak_ai_flops = Hardware.Workstation.DGX_Spark.compute.precision_flops["fp4_sparse"]
@@ -1535,12 +1538,13 @@ Pooling elastic accelerators and sharding models overcome local capacity ceiling
 # │       10 ms safety-critical response budget at 1,500 km distance.
 # │ Show: That speed-of-light RTT alone (15 ms) already exceeds the 10 ms
 # │       budget, leaving a −5 ms deficit before any computation begins.
-# │ How: Apply calc_network_latency_ms() using SPEED_OF_LIGHT_FIBER_KM_S;
-# │      subtract RTT from budget to get deficit.
+# │ How: Scenarios.RoboticArmRegionalCloud (fiber floor at
+# │      SPEED_OF_LIGHT_FIBER_KM_S; overrun = RTT minus budget).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.physics import calc_network_latency_ms, SPEED_OF_LIGHT_FIBER_KM_S
+from mlsysim import Scenarios
+from mlsysim.physics import SPEED_OF_LIGHT_FIBER_KM_S
 from mlsysim.fmt import check, fmt, fmt_length, fmt_time, fmt_velocity
 from mlsysim.core.units import kilometer, millisecond, second
 
@@ -1549,13 +1553,13 @@ class DistancePenalty:
     """Namespace for Distance Penalty."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    distance = 1500 * kilometer  # scenario assumption: cloud datacenter distance
-    safety_budget = 10 * millisecond  # scenario assumption: safety response budget
+    path = Scenarios.RoboticArmRegionalCloud
+    distance = path.distance  # scenario assumption: cloud datacenter distance
+    safety_budget = path.budget  # scenario assumption: safety response budget
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    round_trip = calc_network_latency_ms(distance) * millisecond
-    deficit = safety_budget - round_trip
-    overrun = -deficit
+    round_trip = path.round_trip
+    overrun = path.overrun
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(overrun.to(millisecond).magnitude - 5.0) < 0.1, f"Round trip should exceed the safety budget by ~5 ms; got {overrun}.")
@@ -1907,11 +1911,11 @@ Even when latency budgets are relaxed, the second binding constraint in @fig-edg
 # │       impossible over a 10 Gbps link and economically prohibitive via egress.
 # │ Show: That aggregate data rate (≈18.7 GB/s) exceeds the 10 Gbps line by ≈15×,
 # │       and 24/7 egress costs $M/month—making local edge processing mandatory.
-# │ How: Calculate bytes/frame × fps × cameras; compare to Ethernet_10G cap;
-# │      use calc_monthly_egress_cost() for the economic wall.
+# │ How: Scenarios.FactoryCameras1080p (bytes/frame × fps × cameras against
+# │      the Ethernet_10G link); calc_monthly_egress_cost() for the economic wall.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Systems
+from mlsysim import Scenarios, Systems
 from mlsysim.physics import calc_monthly_egress_cost
 from mlsysim.fmt import fmt_int, fmt_usd, fmt, check, fmt_rate, fmt_fps, fmt_bandwidth, fmt_memory
 from mlsysim.core.units import USD, GB, MB, KB, second
@@ -1924,26 +1928,22 @@ class BandwidthBottleneck:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    num_cameras = 100
-    fps = VIDEO_FPS_STANDARD
-    width = VIDEO_1080P_WIDTH
-    height = VIDEO_1080P_HEIGHT
-    bpp = VIDEO_BYTES_PER_PIXEL_RGB
+    cams = Scenarios.FactoryCameras1080p
+    num_cameras = cams.streams
+    fps = cams.frame_rate
+    width = cams.frame_width
+    height = cams.frame_height
+    bpp = cams.bytes_per_pixel
     network = Systems.Fabrics.Ethernet_10G
+    metadata_events_per_sec = round(cams.event_rate.to("1/second").magnitude)
+    metadata_kb_per_event = cams.event_size
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    bytes_per_frame = width * height * bpp
-    bytes_per_sec_single = bytes_per_frame * fps
-
-    total_bytes_per_sec = (num_cameras * bytes_per_sec_single).to("byte/second")
-    network_cap_bytes = network.bandwidth.to("byte/second")
-
-    shortfall_ratio = (total_bytes_per_sec / network_cap_bytes).to("").magnitude
-
-    metadata_events_per_sec = 20
-    metadata_kb_per_event = 1 * KB
-    metadata_bytes_per_sec = (metadata_events_per_sec * metadata_kb_per_event / second).to("byte/second")
-    metadata_reduction = (total_bytes_per_sec / metadata_bytes_per_sec).to("").magnitude
+    bytes_per_sec_single = cams.stream_rate
+    total_bytes_per_sec = cams.total_rate
+    network_cap_bytes = cams.link_bandwidth.to("byte/second")
+    shortfall_ratio = cams.link_shortfall
+    metadata_reduction = cams.event_reduction
 
     # Step 1: Cost (using helper formula)
     monthly_cost = calc_monthly_egress_cost(total_bytes_per_sec, Infrastructure.Pricing.Cloud.EgressPerGB.rate)
@@ -1998,14 +1998,13 @@ class BandwidthBottleneck:
 # │       table, and notebook in the chapter agrees.
 # │ Show: ~10 µJ KWS, ~2.6 mJ MobileNetV2 (phone), ~16 mJ ResNet-50 (Jetson),
 # │       ~76 mJ ResNet-50 (A100), ~1 kJ cloud LLM query: eight orders of magnitude.
-# │ How: SingleNodeModel energy (device TDP scaled by utilization over the
-# │      batch-1 latency window) for the three vision rows; scenario anchors
-# │      for the KWS and LLM-query endpoints.
+# │ How: Scenarios.EnergyPerInferenceTiers: SingleNodeModel energy (device
+# │      TDP scaled by utilization over the batch-1 latency window) for the
+# │      three vision rows; scenario anchors for the KWS and LLM-query endpoints.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import math
-from mlsysim import Models, Hardware
-from mlsysim.solvers import SingleNodeModel
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_energy, fmt_multiple
 from mlsysim.core.units import joule, kJ, mJ, uJ
 
@@ -2014,18 +2013,17 @@ class EnergyAnchors:
     """Energy per inference across deployment tiers (device accounting boundary)."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    e_kws_j = 10 * uJ  # scenario anchor: always-on KWS inference on dedicated low-power audio silicon;
+    tiers = Scenarios.EnergyPerInferenceTiers
+    e_kws_j = tiers.anchors["kws"]  # scenario anchor: always-on KWS inference on dedicated low-power audio silicon;
     # a general-purpose MCU running the same model costs orders of magnitude more
-    e_llm_query_j = 1000 * joule  # scenario anchor: cloud LLM query incl. system overhead (~1 kJ)
+    e_llm_query_j = tiers.anchors["llm_query"]  # scenario anchor: cloud LLM query incl. system overhead (~1 kJ)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    p_resnet_cloud = SingleNodeModel().solve(Models.Vision.ResNet50, Hardware.Cloud.A100, batch_size=1)
-    p_resnet_edge = SingleNodeModel().solve(Models.Vision.ResNet50, Hardware.Edge.JetsonOrinNX, batch_size=1)
-    p_mobilenet = SingleNodeModel().solve(Models.Vision.MobileNetV2, Hardware.Mobile.iPhone15Pro, batch_size=1)
-    e_resnet_cloud_j = p_resnet_cloud.energy.to(joule)
-    e_resnet_edge_j = p_resnet_edge.energy.to(joule)
-    e_mobilenet_j = p_mobilenet.energy.to(joule)
-    span = (e_llm_query_j / e_kws_j).to("").magnitude
+    p_resnet_cloud = tiers.runs["resnet_cloud"].result
+    e_resnet_cloud_j = tiers.energies["resnet_cloud"]
+    e_resnet_edge_j = tiers.energies["resnet_edge"]
+    e_mobilenet_j = tiers.energies["mobilenet_phone"]
+    span = tiers.span("kws", "llm_query")
     span_orders = math.log10(span)
     kws_vs_cloud_vision = (e_resnet_cloud_j / e_kws_j).to("").magnitude
 
@@ -2055,10 +2053,12 @@ class EnergyAnchors:
 # │ Goal: Compare energy costs of cloud offload vs. local compute.
 # │ Show: Transmission of 1 MB costs ~1000× the NPU compute energy of one
 # │       MobileNetV2 inference, and still ~40× the whole-phone estimate.
-# │ How: Calculate J for data transfer vs. NPU-only local inference (registry
-# │      anchor) and vs. the whole-device estimate in EnergyAnchors.
+# │ How: Scenarios.RadioUploadVsMobileNetV2: J for data transfer vs. NPU-only
+# │      local inference (registry anchor) and vs. the whole-device estimate
+# │      (the same run EnergyAnchors charts).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_energy, fmt_energy_per_byte, fmt_memory, fmt_multiple, fmt_percent
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2069,17 +2069,18 @@ class EnergyTransmission:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    data_size = 1.0 * MB  # scenario assumption: one raw sensor payload
-    tx_energy_per_mb = Systems.NetworkEnergy.Per5gMb
-    local_energy_op = Models.Vision.MobileNetV2.inference_energy  # NPU compute only
-    local_energy_device = EnergyAnchors.e_mobilenet_j  # whole phone over the latency window
+    upload = Scenarios.RadioUploadVsMobileNetV2
+    data_size = upload.payload  # scenario assumption: one raw sensor payload
+    tx_energy_per_mb = upload.transmit_energy_per_byte
+    local_energy_op = upload.accelerator_energy  # NPU compute only
+    local_energy_device = upload.device_energy  # whole phone over the latency window
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    cloud_energy_total = (data_size * tx_energy_per_mb).to(mJ)
+    cloud_energy_total = upload.transmit_energy
     local_energy_total = local_energy_op
 
-    ratio = (cloud_energy_total / local_energy_total).to("").magnitude
-    ratio_device = (cloud_energy_total / local_energy_device).to("").magnitude
+    ratio = upload.ratio_accelerator
+    ratio_device = upload.ratio_device
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(ratio >= 500, f"Transmission ({cloud_energy_total}) is not expensive enough vs Compute ({local_energy_total}). Ratio: {ratio:.1f}x")
@@ -2315,14 +2316,13 @@ The locality formulation also explains what every local tier gains, edge, mobile
 # │
 # │ Goal: Quantify when a high-rate vision workload must stay local.
 # │ Show: A 4K frame takes longer to transmit than the remote response budget.
-# │ How: Compare frame transmission time over 100 Mbps with cloud RTT + compute.
+# │ How: Scenarios.Drone4KObstacleOffload: frame transmission time over
+# │      100 Mbps against cloud RTT + compute and the frame interval.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, check, MarkdownStr, fmt_bandwidth, fmt_time, fmt_fps, fmt_memory
 from mlsysim.core.units import (
-    VIDEO_4K_WIDTH,
-    VIDEO_4K_HEIGHT,
-    VIDEO_BYTES_PER_PIXEL_RGB,
     MB,
     byte,
     bit,
@@ -2339,22 +2339,16 @@ class DataLocalityInvariant:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    width = VIDEO_4K_WIDTH  # 4K (2160p) frame, from registry
-    height = VIDEO_4K_HEIGHT
-    bpp = VIDEO_BYTES_PER_PIXEL_RGB  # RGB bytes/pixel, from registry
-    net_bw_mbps = 100  # scenario: cellular uplink
-    cloud_lat_ms = 100  # scenario: cloud round-trip latency
-    remote_compute_ms = 10  # scenario: remote inference time
-    fps = 60  # scenario: drone camera frame rate
+    drone = Scenarios.Drone4KObstacleOffload
+    frame_size = drone.payload  # 4K (2160p) RGB frame, from registry
+    net_bw = drone.uplink_bandwidth  # scenario: cellular uplink
+    fps = round(drone.frame_rate.to("Hz").magnitude)  # scenario: drone camera frame rate
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    frame_size = width * height * bpp
-    net_bw = net_bw_mbps * megabit / second
-    frame_bits = frame_size * (8 * bit / byte)
-    tx_time = frame_bits / net_bw
-    remote_compute_path = (cloud_lat_ms + remote_compute_ms) * millisecond
-    remote_total = tx_time + remote_compute_path
-    frame_budget = second / fps
+    tx_time = drone.transmit_time
+    remote_compute_path = drone.remote_response
+    remote_total = drone.remote_lower_bound
+    frame_budget = drone.deadline
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(remote_total > frame_budget, "The remote path should miss the per-frame deadline at 100 Mbps.")
@@ -2810,10 +2804,11 @@ above=0.5of $(B2.north east)!0.5!(B3.north west)$](B0){Mobile ML};
 # │
 # │ Goal: Quantify the energy cost of always-on mobile inference.
 # │ Show: That a 2 W detector depletes a standard phone battery in under 8 hours.
-# │ How: Calculate runtime from power draw and battery capacity (Wh).
+# │ How: Scenarios.AlwaysOnObjectDetectorPhone: runtime from power draw and
+# │      battery capacity (Wh), and a day's energy against the battery.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, ReferenceStats
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_energy, fmt_frac, fmt_percent, fmt_power, fmt_time
 from mlsysim.core.units import Wh, hour, watt
 
@@ -2825,14 +2820,15 @@ class BatteryTax:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    phone = Hardware.Mobile.iPhone15Pro
-    power_draw = ReferenceStats.MobilePower.ObjectDetector
+    budget = Scenarios.AlwaysOnObjectDetectorPhone
+    power_draw = budget.power_draw
+    day_hours = round(budget.required_runtime.to(hour).magnitude)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    battery_wh = phone.battery_capacity.to(Wh)
-    runtime_hours = (battery_wh / power_draw).to(hour)
-    full_day_energy = power_draw * HOURS_PER_DAY * hour
-    daily_budget_ratio = (full_day_energy / battery_wh).to("").magnitude
+    battery_wh = budget.battery_energy.to(Wh)
+    runtime_hours = budget.runtime
+    full_day_energy = budget.required_energy
+    daily_budget_ratio = budget.budget_ratio
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     runtime_h = runtime_hours.to(hour).magnitude
@@ -2845,7 +2841,7 @@ class BatteryTax:
     batt_wh_str = fmt_energy(battery_wh, unit=Wh, precision=0, commas=False)
     # a full-day always-on detector exceeds 100% of the battery budget (≈320%)
     budget_pct_str = fmt_percent(daily_budget_ratio, precision=0, commas=False, style='prose', max_ratio=4)
-    phone_day_hours_str = fmt_time(HOURS_PER_DAY, hour, precision=0, commas=False, style="word")
+    phone_day_hours_str = fmt_time(day_hours, hour, precision=0, commas=False, style="word")
 
     _runtime_hours_display = fmt(runtime_h, precision=1, commas=False)
     # Units are set upright inside the math fraction ("15\text{ Wh}"), not as italic variables.
@@ -2889,11 +2885,12 @@ The distinction matters for engineering decisions. The battery tax is a budget p
 # │
 # │ Goal: Demonstrate the limits of thermal dissipation on mobile devices.
 # │ Show: That even 4× lower active power cannot save heavy models from throttling.
-# │ How: Contrast optimized power draw against the 3 W mobile TDP limit.
+# │ How: Scenarios.UnoptimizedVisionModelPhone: optimized power draw against
+# │      the 3 W mobile TDP limit.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim import ReferenceStats
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt_percent, fmt, check, fmt_fps, fmt_multiple, fmt_time, fmt_temperature, fmt_temperature_rate, fmt_power
 from mlsysim.core.units import watt, second, ureg, degC, delta_degC
 
@@ -2902,17 +2899,18 @@ class ThermalQuantCalc:
     """Namespace for Thermal Quant Calc."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    baseline_power = 12 * watt  # scenario assumption: W, unoptimized vision model power
-    quant_reduction_factor = 4  # scenario assumption: active-power reduction after FP32→INT8 redesign
-    mobile_tdp = ReferenceStats.MobilePower.MobileNpuTypical
-    temp_rise = 1 * delta_degC / second
-    trip_time = 60 * second  # scenario assumption: time to thermal trip
-    trip_temp = ureg.Quantity(80, degC)
-    fps_before = 100  # dimensionless display rate for prose
-    fps_after = 30  # dimensionless display rate for prose
+    thermal = Scenarios.UnoptimizedVisionModelPhone
+    baseline_power = thermal.power  # scenario assumption: W, unoptimized vision model power
+    quant_reduction_factor = round(thermal.reduction_factor)  # scenario assumption: FP32→INT8 redesign
+    mobile_tdp = thermal.sustained_limit
+    temp_rise = thermal.heating_rate
+    trip_time = thermal.trip_time  # scenario assumption: time to thermal trip
+    trip_temp = thermal.trip_temperature
+    fps_before = round(thermal.burst_rate)  # dimensionless display rate for prose
+    fps_after = round(thermal.throttled_rate)  # dimensionless display rate for prose
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    quant_power = baseline_power / quant_reduction_factor  # 12 W / 4 = 3 W
+    quant_power = thermal.reduced_power  # 12 W / 4 = 3 W
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(
@@ -3382,26 +3380,31 @@ The flowchart carries a remaining candidate set through all four gates. If regul
 # │
 # │ Goal: Calculate the distance a car travels during a given latency.
 # │ Show: That at 100 km/h, a 100 ms latency equals 2.8 meters of travel.
-# │ How: Convert km/h to m/s; multiply by latency in seconds.
+# │ How: Scenarios.EmergencyBraking100kmh: speed times latency.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check, fmt, fmt_time, fmt_length, fmt_rate, fmt_fps
+from mlsysim import Scenarios
+from mlsysim.fmt import check, fmt, fmt_time, fmt_length, fmt_rate, fmt_fps, fmt_qty_range
 from mlsysim.core.units import ms, second, meter
 
 class BrakingDistance:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    speed_kmh = 100
-    latency_ms = 100
+    braking = Scenarios.EmergencyBraking100kmh
+    speed_kmh = round(braking.speed.to("km/hour").magnitude)
+    latency_ms = round(braking.latency.to(ms).magnitude)
+    remote_delay_low = braking.remote_delay_low  # scenario: cloud round trip, best case
+    remote_delay_high = braking.remote_delay_high  # scenario: cloud round trip, worst case
     detection_gflop = 10  # scenario: pedestrian-detection model cost per frame
     detection_fps = 30  # scenario: required detection frame rate
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    speed_ms = speed_kmh / 3.6  # km/h -> m/s
-    distance_m = speed_ms * (latency_ms * ms).to(second).magnitude
+    distance_m = braking.distance.to(meter).magnitude
     sustained_gflop_s = detection_gflop * detection_fps
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(round(distance_m, 1) == 2.8, f"Narrative claim: distance traveled at 100 km/h in 100 ms must be 2.8 m, got {distance_m:.2f}")
     check(sustained_gflop_s == 300, f"Expected 300 GFLOP/s sustained, got {sustained_gflop_s}")
+    check(abs((remote_delay_low / braking.latency).to("").magnitude - 0.5) < 1e-9 and remote_delay_high > braking.latency,
+          "Prose: the remote delay uses half the budget at best and more than all of it at worst.")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
     speed_kmh_str = fmt_rate(speed_kmh, "km/h", precision=0, commas=False)
@@ -3410,13 +3413,14 @@ class BrakingDistance:
     detection_gflop_str = fmt(detection_gflop, precision=0, commas=False)
     detection_fps_str = fmt_fps(detection_fps)
     sustained_gflops_str = fmt(sustained_gflop_s, precision=0, commas=False)
+    remote_delay_range_str = fmt_qty_range(remote_delay_low, remote_delay_high, ms, precision=0, commas=False)
 ```
 
 ::: {#exmp-ml-systems-autonomous-vehicle-emergency-braking .callout-example title="Autonomous vehicle emergency braking"}
 
 **Scenario**: An autonomous vehicle vision system performs real-time pedestrian detection for emergency braking under a strict `{python} BrakingDistance.latency_str` end-to-end latency budget.
 
-**Diagnosis**: At `{python} BrakingDistance.speed_kmh_str`, the vehicle covers `{python} BrakingDistance.distance_m_str` during the `{python} BrakingDistance.latency_str` budget, so every millisecond of delay is distance traveled before braking begins. The scenario assumes 50–150 ms of network round-trip delay for cloud offload, which consumes half the budget at best and more than all of it at worst before any detection runs. Local object detection on an automotive edge accelerator takes 10–30 ms; at `{python} BrakingDistance.detection_gflop_str` GFLOPs per frame and `{python} BrakingDistance.detection_fps_str`, that accelerator must sustain `{python} BrakingDistance.sustained_gflops_str` GFLOP/s.
+**Diagnosis**: At `{python} BrakingDistance.speed_kmh_str`, the vehicle covers `{python} BrakingDistance.distance_m_str` during the `{python} BrakingDistance.latency_str` budget, so every millisecond of delay is distance traveled before braking begins. The scenario assumes `{python} BrakingDistance.remote_delay_range_str` of network round-trip delay for cloud offload, which consumes half the budget at best and more than all of it at worst before any detection runs. Local object detection on an automotive edge accelerator takes 10–30 ms; at `{python} BrakingDistance.detection_gflop_str` GFLOPs per frame and `{python} BrakingDistance.detection_fps_str`, that accelerator must sustain `{python} BrakingDistance.sustained_gflops_str` GFLOP/s.
 
 **Systems lesson**: The stated network-delay range cannot guarantee the deadline, so the latency gate excludes that cloud path. The local candidates remain subject to the resource gate: the pedestrian detector must fit memory and sustain the stated frame rate within its power budget. An automotive edge accelerator remains a candidate under these assumptions; its complete sensing-to-braking path still needs validation. Cloud connections can support offline training and telemetry without reentering the emergency decision path.
 
@@ -3530,12 +3534,14 @@ A voice interface\index{Voice assistant!hybrid architecture} can use a microcont
 # │       detection; the ~860x cut in audio leaving each device once detection
 # │       is local; the residual post-wake load of 1 billion devices ×
 # │       20 queries/day at 200 ms/query (average and peak data centers).
-# │ How: Calculate always-on audio bandwidth, post-wake audio volume, GPU-hours
-# │       per day, and datacenter count (with 3× peak multiplier).
+# │ How: Scenarios.VoiceAssistantBillionDevices: always-on audio bandwidth,
+# │       post-wake audio volume, GPU-hours per day, and datacenter count
+# │       (with 3× peak multiplier).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt_percent, fmt_int, fmt_usd, fmt, fmt_count, fmt_time, check, fmt_qty_range, fmt_bandwidth
-from mlsysim.core.units import BILLION, SEC_PER_HOUR, HOURS_PER_DAY, BITS_PER_BYTE, MS_PER_SEC, byte, KB, TB, milliwatt, second
+from mlsysim.core.units import BILLION, byte, KB, TB, milliwatt, second
 
 # ┌── LEGO ───────────────────────────────────────────────
 class VoiceAssistantWall:
@@ -3545,46 +3551,39 @@ class VoiceAssistantWall:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    fleet = Scenarios.VoiceAssistantBillionDevices
     # Economics
-    ww_devices_b = 1
-    ww_cloud_cost_per_device = 0.50
-    ww_edge_power_min_mw = 0.1
-    ww_edge_power_max_mw = 1
-    ww_edge_cost_per_year = 0.01
+    ww_devices_b = round(fleet.devices / BILLION)
+    ww_cloud_cost_per_device = fleet.cloud_detection_cost.to("USD/year").magnitude
+    ww_edge_power_min_mw = fleet.local_power_low.to(milliwatt).magnitude
+    ww_edge_power_max_mw = fleet.local_power_high.to(milliwatt).magnitude
+    ww_edge_cost_per_year = fleet.local_detection_cost.to("USD/year").magnitude
 
     # Infrastructure
-    vi_devices_b = 1
-    vi_queries_per_day = 20
-    vi_gpu_ms_per_query = 200
-    vi_gpus_per_datacenter = 10_000
-    vi_audio_sample_rate = 16_000
-    vi_audio_bits = 16
-    vi_waking_hours = 16
-    vi_peak_multiplier = 3
-    vi_query_audio_s = 5  # scenario assumption: seconds of audio uploaded per post-wake query
+    vi_devices_b = ww_devices_b
+    vi_queries_per_day = round(fleet.queries_per_day)
+    vi_gpu_ms_per_query = round(fleet.accelerator_time_per_query.to("ms").magnitude)
+    vi_gpus_per_datacenter = fleet.accelerators_per_datacenter
+    vi_query_audio_s = round(fleet.query_audio.to(second).magnitude)  # scenario assumption: seconds of audio uploaded per post-wake query
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Economics
-    ww_total_cloud_cost = ww_devices_b * BILLION * ww_cloud_cost_per_device
+    ww_total_cloud_cost = fleet.cloud_detection_cost_per_year.to("USD/year").magnitude
 
     # Step 2: Infrastructure - Compute
-    vi_total_queries_day = vi_devices_b * BILLION * vi_queries_per_day
-    vi_gpu_seconds_day = vi_total_queries_day * vi_gpu_ms_per_query / MS_PER_SEC
-    vi_gpu_hours_day = vi_gpu_seconds_day / SEC_PER_HOUR
-    vi_gpu_hours_dc_value = vi_gpus_per_datacenter * HOURS_PER_DAY
-    vi_datacenters_avg = vi_gpu_hours_day / (vi_gpus_per_datacenter * HOURS_PER_DAY)
-    vi_peak_ratio = vi_peak_multiplier * (HOURS_PER_DAY / vi_waking_hours)
-    vi_datacenters_peak = vi_datacenters_avg * vi_peak_ratio
+    vi_total_queries_day = fleet.queries_per_fleet_day
+    vi_gpu_hours_day = fleet.accelerator_hours_per_day
+    vi_gpu_hours_dc_value = fleet.datacenter_hours_per_day
+    vi_datacenters_avg = fleet.datacenters_average
+    vi_peak_ratio = fleet.peak_ratio
+    vi_datacenters_peak = fleet.datacenters_peak
 
     # Step 3: Infrastructure - Bandwidth
-    vi_audio_bytes_per_sec = vi_audio_sample_rate * (vi_audio_bits / BITS_PER_BYTE)
-    vi_audio_rate = vi_audio_bytes_per_sec * byte / second
+    vi_audio_rate = fleet.stream_rate
     # Step 4: Total audio bandwidth across 1 billion devices
-    vi_total_audio_rate = vi_audio_bytes_per_sec * vi_devices_b * BILLION * byte / second
+    vi_total_audio_rate = fleet.fleet_stream_rate
     # Step 5: Audio that still leaves each device once detection is local
-    vi_stream_s_per_day = HOURS_PER_DAY * SEC_PER_HOUR
-    vi_query_audio_s_per_day = vi_queries_per_day * vi_query_audio_s
-    vi_audio_reduction = vi_stream_s_per_day / vi_query_audio_s_per_day
+    vi_audio_reduction = fleet.upload_reduction
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(vi_datacenters_peak >= 20, f"Residual post-wake load ({vi_datacenters_peak:.0f} DCs) unexpectedly low.")
@@ -4367,6 +4366,7 @@ Shaving dollars off per-inference compute in isolation often drives up operating
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt_int, fmt_multiple, fmt_multiple_range, fmt_percent, check, fmt_time
 from mlsysim.core.units import millisecond
 from mlsysim.physics import calc_amdahls_speedup
@@ -4376,23 +4376,24 @@ class AmdahlCameraCalc:
     """Namespace for Amdahl Camera Calc."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    cam_isp = 100 * millisecond  # scenario assumption: ISP + auto-exposure
-    cam_ml = 60 * millisecond  # scenario assumption: ML scene classification
-    cam_post = 40 * millisecond  # scenario assumption: tone mapping + HDR merge
-    cam_ml_speedup = 10  # dimensionless 10× faster ML model
+    pipeline = Scenarios.PhoneCameraPipeline
+    cam_isp = pipeline.stages["isp"]  # scenario assumption: ISP + auto-exposure
+    cam_ml = pipeline.stages["ml"]  # scenario assumption: ML scene classification
+    cam_post = pipeline.stages["post"]  # scenario assumption: tone mapping + HDR merge
+    cam_ml_speedup = round(pipeline.speedup)  # dimensionless 10× faster ML model
     general_ml_frac_low = 0.30  # dimensionless workload fraction
     general_ml_frac_high = 0.50  # dimensionless workload fraction
     general_model_speedup = 100  # dimensionless model speedup
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    cam_total = cam_isp + cam_ml + cam_post  # 200 ms
-    cam_ml_fraction = cam_ml / cam_total  # 0.30
+    cam_total = pipeline.total  # 200 ms
+    cam_ml_fraction = pipeline.fraction  # 0.30
     cam_non_ml_fraction = 1 - cam_ml_fraction  # 0.70
 
-    cam_speedup_10x = calc_amdahls_speedup(cam_ml_fraction, cam_ml_speedup)
-    cam_speedup_inf = calc_amdahls_speedup(cam_ml_fraction, float("inf"))  # theoretical max
-    cam_ml_optimized = cam_ml / cam_ml_speedup  # 6 ms
-    cam_total_optimized = cam_isp + cam_ml_optimized + cam_post  # 146 ms
+    cam_speedup_10x = pipeline.overall_speedup
+    cam_speedup_inf = pipeline.limit  # theoretical max
+    cam_ml_optimized = pipeline.accelerated_stage  # 6 ms
+    cam_total_optimized = pipeline.accelerated_total  # 146 ms
     range_speedup_low = calc_amdahls_speedup(general_ml_frac_low, general_model_speedup)
     range_speedup_high = calc_amdahls_speedup(general_ml_frac_high, general_model_speedup)
 
