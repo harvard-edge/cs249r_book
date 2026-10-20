@@ -4122,3 +4122,49 @@ LUCCIONI_BLOOM_2023 = _lit(
     notes=("Table 3: final BLOOM training on the French grid (57 gCO2eq/kWh); embodied 11.2 t of 50.5 t "
            "total, 22.2 percent. Table 5: project dynamic emissions by process."),
 )
+
+# --- Safety enforcement sources (added 2026-10-20) ---
+LEVESON_TURNER_THERAC_1993 = _lit(
+    "prov:leveson-turner-therac-1993",
+    "Leveson and Turner, 'An Investigation of the Therac-25 Accidents,' IEEE Computer 26(7), 1993",
+    url="https://doi.org/10.1109/MC.1993.274940",
+    verified="2026-10-20",
+    notes=(
+        "Six overdose accidents, 1985 to 1987; doses estimated at 4,000 to 20,000 rads against a "
+        "typical single therapeutic dose of about 200 rads (up to 100 times); three patients died "
+        "of the overdoses; the 25 MeV accelerator. Transcribed from the Volume IV chapter's War "
+        "Story; not re-read against the paper in this pass."
+    ),
+)
+KIRSCHNER_ISO_TS_15066_2022 = _lit(
+    "prov:kirschner-iso-ts-15066-2022",
+    "Kirschner, Mansfeld, Abdolshah, and Haddadin, 'ISO/TS 15066: How Different Interpretations "
+    "Affect Risk Assessment,' arXiv 2203.02706, 2022",
+    url="https://arxiv.org/abs/2203.02706",
+    verified="2026-10-20",
+    notes=(
+        "Table II, hand, interpretation B1: TS hand values, constrained hand, speeds set for a "
+        "280 N threshold; peak forces measured with a Pilz PRMS2 device at a central (C) and an "
+        "outer (N) position. Transcribed from the lecture deck's table; not re-read against the "
+        "paper in this pass."
+    ),
+)
+NHTSA_CRUISE_RECALL_23E086 = _lit(
+    "prov:nhtsa-cruise-recall-23e086",
+    "NHTSA recall 23E-086, Cruise LLC collision-detection subsystem (November 2023)",
+    url="https://www.nhtsa.gov/?nhtsaId=23E086",
+    verified="2026-10-20",
+    notes="Software recall covering 950 vehicles. Transcribed from the lecture deck; not re-read.",
+)
+SICK_NANOSCAN3_CORE = _ds(
+    "prov:sick-nanoscan3-nans3-caaz30aa1",
+    "SICK nanoScan3 Core safety laser scanner, NANS3-CAAZ30AA1, product data sheet (2024-12-17)",
+    "https://www.sick.com/us/en/catalog/products/safety/safety-laser-scanners/nanoscan3/c/g464152",
+    verified="2026-10-20",
+    notes=(
+        "Protective field range 3 m, warning field range 10 m, response time 85 ms, protective "
+        "field supplement 65 mm, SIL 2 (IEC 61508), PL d (EN ISO 13849), Type 3, scan angle "
+        "275 deg. Transcribed from the lecture deck's datasheet excerpt; scan angle from the "
+        "product family page; not re-read against the PDF in this pass."
+    ),
+)

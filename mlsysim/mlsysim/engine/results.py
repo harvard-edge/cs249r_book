@@ -1012,6 +1012,14 @@ class StoppingBudgetResult(SolverResult):
     added_delay_travel: Optional[Quantity] = None  # travel at ``speed`` during a stated delay step
     delay_ceiling: Optional[Quantity] = None  # longest constant-speed delay whose stop, with the overhead, fits
     delay_spare: Optional[Quantity] = None    # delay_ceiling - delay
+    # The finished budget (added 2026-10-20): S-curve stop, tracking inset, approaching person
+    jerk: Optional[Quantity] = None              # jerk bound of the resident S-curve stop
+    jerk_ramp_travel: Optional[Quantity] = None  # S-curve stop travel beyond v^2 / 2a
+    stop_time: Optional[Quantity] = None         # duration of the S-curve stop
+    jerk_plateau_speed: Optional[Quantity] = None  # a^2 / j: slower stops never reach a
+    ramp_delay: Optional[Quantity] = None        # a / (2 j): the ramps as added delay above a^2 / j
+    tracking_inset: Optional[Quantity] = None    # tracking bound subtracted from the clearance
+    approach_travel: Optional[Quantity] = None   # v_h (tau + T_stop): a person closing the gap
 
     def travel_over(self, duration: Quantity) -> Quantity:
         """Distance covered at ``speed`` over ``duration`` (the cost of one term of the delay)."""

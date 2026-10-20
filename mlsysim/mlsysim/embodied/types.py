@@ -848,3 +848,16 @@ class EmbodiedSiteScenario(BaseModel):
     def fixed_overhead(self):
         """Localization bound, protective clearance, and tracking bound."""
         return (self.delta_loc + self.delta_margin + self.eps_track).to(ureg.meter)
+
+    @property
+    def j_brake(self):
+        """Stop jerk bound: the peak jerk of the reference C2 polynomial stop from the drive limit.
+
+        Stipulated, not measured: the resident S-curve stop takes its jerk bound
+        from the reference polynomial at the machine's drive limit and the
+        credible deceleration (calc_c2_stop_suffix).
+        """
+        from ..physics.robotics import calc_c2_stop_suffix
+
+        return calc_c2_stop_suffix(self.machine.base.max_velocity,
+                                   self.a_brake)["peak_jerk"].to(ureg.meter / ureg.second**3)

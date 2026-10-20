@@ -1295,6 +1295,9 @@ class StoppingBudgetScenario(BaseScenario):
     scenario), the deceleration and clear distance default to the site's, and
     its localization bound and protective margin join the required distance.
     ``added_delay`` prices one more delay step as travel at ``speed``.
+    The finished budget adds three optional terms: ``jerk`` (the resident
+    S-curve stop's jerk bound), ``tracking_bound`` (the tracking inset), and
+    ``approach_speed`` (a person closing the gap through delay and stop).
     """
     speed: Quantity
     delay: Quantity
@@ -1303,6 +1306,9 @@ class StoppingBudgetScenario(BaseScenario):
     speed_at_delay_end: Optional[Quantity] = None
     site: Optional[Any] = None                  # EmbodiedSiteScenario
     added_delay: Optional[Quantity] = None
+    jerk: Optional[Quantity] = None             # S-curve stop jerk bound (added 2026-10-20)
+    tracking_bound: Optional[Quantity] = None   # tracking inset (added 2026-10-20)
+    approach_speed: Optional[Quantity] = None   # approaching person (added 2026-10-20)
 
     @property
     def a_brake(self) -> Quantity:
@@ -1320,7 +1326,8 @@ class StoppingBudgetScenario(BaseScenario):
         loc = None if self.site is None else self.site.delta_loc
         margin = None if self.site is None else self.site.delta_margin
         return StoppingBudgetModel().solve(self.speed, self.delay, self.a_brake, self.d_clear,
-                                           self.speed_at_delay_end, loc, margin, self.added_delay)
+                                           self.speed_at_delay_end, loc, margin, self.added_delay,
+                                           self.jerk, self.tracking_bound, self.approach_speed)
 # --- Physical-plant budgets of an embodied machine (added 2026-10-20) -------
 # Each scenario names one machine at one site (``Embodied.Scenario.*``) or one
 # actuator (``Actuators.*``) and states the inputs the site record does not
@@ -13992,3 +13999,210 @@ class CarbonPricedPlacementScenario(BaseScenario):
         from .solvers import CarbonPricedPlacementModel
         return CarbonPricedPlacementModel().solve(self.fleet, self.it_energy, self.regions,
                                                   self.carbon_price_per_ton, self.mfu, self.reference_grid)
+
+
+# --- Safety enforcement on the warehouse mobile manipulator (added 2026-10-20) ---
+# A gravity-loaded joint's braking authority and the kinetic barrier built on
+# it, the least-change projection of a torque proposal, the permission check's
+# stage budget, and the drift of a held command over one control period.
+
+class GravityBiasedJointStopScenario(BaseScenario):
+    """One loaded arm joint at ``joint_speed`` braking with ``machine``'s peak torque while gravity
+    holds ``bias_fraction`` of that peak along (descending) or against (ascending) the motion.
+
+    Braking deceleration is net torque over ``inertia``; the joint stops in
+    ``w^2 / (2 alpha)`` and the tool at ``lever`` travels that angle times the
+    lever. The kinetic barrier ``h = theta - w^2 / (2 alpha_net)`` (descending)
+    bounds the next torque by ``tau <= -tau_bias + I alpha_net (gamma h / w - 1)``;
+    its negative is the braking torque the barrier demands at a tool clearance.
+    With ``site``, the protective separation distance prices a person at the
+    site's approach speed over the site's pre-brake delay plus the descending
+    joint stop, the tool's reaction travel, and the tool's stop.
+    """
+    machine: Any                         # EmbodiedMachine: arm peak torque and TCP limit
+    inertia: Quantity                    # joint inertia with payload (kg m^2)
+    lever: Quantity                      # joint axis to tool point (m)
+    joint_speed: Quantity                # approach speed of the joint (rad/s, as 1/s)
+    bias_fraction: float                 # share of peak torque gravity holds
+    barrier_gain: Optional[Quantity] = None    # gamma (1/s)
+    barrier_clearances: List[Quantity] = []    # tool clearances at which to price the barrier
+    site: Optional[Any] = None                 # EmbodiedSiteScenario: approach speed and pre-brake delay
+
+    @property
+    def torque_limit(self) -> Quantity:
+        return self.machine.arm.max_torque.to("N*m")
+
+    @property
+    def bias(self) -> Quantity:
+        return (self.torque_limit * self.bias_fraction).to("N*m")
+
+    @property
+    def torque_descending(self) -> Quantity:
+        """Torque left for braking when gravity acts along the motion."""
+        return (self.torque_limit - self.bias).to("N*m")
+
+    @property
+    def torque_ascending(self) -> Quantity:
+        """Torque available for braking when gravity helps."""
+        return (self.torque_limit + self.bias).to("N*m")
+
+    def _alpha(self, torque) -> Quantity:
+        return (torque / self.inertia).to("1/s**2")
+
+    @property
+    def alpha_free(self) -> Quantity:
+        return self._alpha(self.torque_limit)
+
+    @property
+    def alpha_descending(self) -> Quantity:
+        return self._alpha(self.torque_descending)
+
+    @property
+    def alpha_ascending(self) -> Quantity:
+        return self._alpha(self.torque_ascending)
+
+    def stop_angle(self, alpha) -> float:
+        """Joint stop angle in radians at deceleration ``alpha``."""
+        return (self.joint_speed ** 2 / (2 * alpha)).to("").magnitude
+
+    def tool_stop(self, alpha) -> Quantity:
+        return (self.lever * self.stop_angle(alpha)).to("mm")
+
+    @property
+    def tool_stop_free(self) -> Quantity:
+        return self.tool_stop(self.alpha_free)
+
+    @property
+    def tool_stop_descending(self) -> Quantity:
+        return self.tool_stop(self.alpha_descending)
+
+    @property
+    def tool_stop_ascending(self) -> Quantity:
+        return self.tool_stop(self.alpha_ascending)
+
+    @property
+    def overrun(self) -> Quantity:
+        """Tool travel the descending stop adds over the unbiased one."""
+        return (self.tool_stop_descending - self.tool_stop_free).to("mm")
+
+    @property
+    def stop_time_descending(self) -> Quantity:
+        return (self.joint_speed / self.alpha_descending).to("ms")
+
+    @property
+    def tcp_speed(self) -> Quantity:
+        return (self.lever * self.joint_speed).to("m/s")
+
+    def barrier_margin(self, clearance) -> float:
+        """Kinetic barrier h = theta - w^2 / (2 alpha_net) at a tool clearance (radians)."""
+        return (clearance / self.lever).to("").magnitude - self.stop_angle(self.alpha_descending)
+
+    def barrier_torque_demand(self, clearance) -> Quantity:
+        """Braking torque the barrier demands at a tool clearance (the bound's negative)."""
+        h = self.barrier_margin(clearance)
+        bound = (-self.bias + self.inertia * self.alpha_descending
+                 * (self.barrier_gain * h / self.joint_speed - 1)).to("N*m")
+        return (-bound).to("N*m")
+
+    @property
+    def barrier_demands(self) -> List[Quantity]:
+        return [self.barrier_torque_demand(c) for c in self.barrier_clearances]
+
+    @property
+    def separation_person(self) -> Quantity:
+        """Person's travel over the reaction (pre-brake delay) and the descending joint stop."""
+        return (self.site.v_human_approach * (self.site.tau_delay + self.stop_time_descending)).to("mm")
+
+    @property
+    def separation_reaction(self) -> Quantity:
+        """Tool travel during the reaction time."""
+        return (self.tcp_speed * self.site.tau_delay).to("mm")
+
+    @property
+    def separation_total(self) -> Quantity:
+        """Protective separation before intrusion and position margins."""
+        return (self.separation_person + self.separation_reaction + self.tool_stop_descending).to("mm")
+
+    @property
+    def separation_person_share(self) -> float:
+        return (self.separation_person / self.separation_total).to("").magnitude
+
+
+class TorqueHalfSpaceProjectionScenario(BaseScenario):
+    """A torque proposal against one barrier half-space ``normal . u <= bound``: the least-change
+    projection (``calc_cbf_qp_orthogonal_projection``) against a per-axis ``clamp``.
+
+    Torques are in N m, stored as plain floats like the projection helper's inputs.
+    """
+    proposal: List[float]
+    normal: List[float]
+    bound: float
+    clamp: List[float]
+    actuator_limit: float
+
+    @property
+    def projection(self) -> dict:
+        from ..physics.robotics import calc_cbf_qp_orthogonal_projection
+        return calc_cbf_qp_orthogonal_projection(self.proposal, self.normal, self.bound)
+
+    @staticmethod
+    def _dot(a, b) -> float:
+        return sum(x * y for x, y in zip(a, b))
+
+    @property
+    def proposal_value(self) -> float:
+        return self._dot(self.normal, self.proposal)
+
+    @property
+    def breach(self) -> float:
+        return self.proposal_value - self.bound
+
+    @property
+    def clamp_value(self) -> float:
+        return self._dot(self.normal, self.clamp)
+
+    @property
+    def clamp_penetration(self) -> float:
+        return self.clamp_value - self.bound
+
+    @property
+    def projected_value(self) -> float:
+        return self._dot(self.normal, self.projection["u_projected"])
+
+    @staticmethod
+    def angle_deg(u) -> float:
+        import math
+        return math.degrees(math.atan2(u[1], u[0]))
+
+
+class CycleBudgetScenario(BaseScenario):
+    """Stage sub-budgets of one permission check against ``site``'s declared WCET and deadline."""
+    site: Any                                  # EmbodiedSiteScenario: WCET, deadline, unloaded cycle
+    stages: List[Tuple[str, Quantity]]
+
+    @property
+    def total(self) -> Quantity:
+        return sum((q for _, q in self.stages), 0 * self.stages[0][1]).to("us")
+
+    def stage(self, name: str) -> Quantity:
+        return dict(self.stages)[name].to("us")
+
+    @property
+    def headroom(self) -> Quantity:
+        """Deadline left after the declared worst case."""
+        return (self.site.enforcer_deadline - self.total).to("us")
+
+    def share(self, name: str) -> float:
+        return (self.stage(name) / self.total).to("").magnitude
+
+
+class HoldIntervalDriftScenario(BaseScenario):
+    """Drift while a drive holds the last command for one ``period``: travel at ``speed`` plus the
+    half ``acceleration`` ``period^2`` an independent acceleration bound allows."""
+    speed: Quantity
+    acceleration: Quantity
+    period: Quantity
+
+    @property
+    def drift(self) -> Quantity:
+        return (self.speed * self.period + 0.5 * self.acceleration * self.period ** 2).to("mm")
