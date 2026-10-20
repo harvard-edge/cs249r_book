@@ -1691,3 +1691,95 @@ def test_quantization_ensemble_confidence_and_mlperf():
     assert m.latest("gptj-99").to("s").magnitude == approx(4.17663)
     assert m.earliest("gptj-99").to("s").magnitude == approx(10.2045)
     assert m.span == approx(15566.8)
+
+
+# ── Fleet goodput (added 2026-10-20) ──────────────────────────────────────────
+
+def test_shared_pool_scheduling_snapshot():
+    s = Scenarios.SharedPoolSchedulingSnapshot
+    assert s.scheduling_goodput == approx(0.65)
+    assert s.executing_share == approx(0.60)
+    assert s.partial_hold_ceiling == approx(0.80)
+    assert s.input_wait_of_held == approx(0.0769231)
+
+
+def test_llama2_70b_runtime_goodput_128():
+    sc = Scenarios.Llama2_70BRuntimeGoodput128
+    r = sc.result
+    assert r.mtbf.to("hour").magnitude == approx(302.419)
+    assert r.write_time.to("s").magnitude == approx(9.8)
+    assert r.interval.to("minute").magnitude == approx(76.9897)
+    assert r.checkpoint_share == approx(0.00424299)
+    assert r.startup_time.to("minute").magnitude == approx(5.16333)
+    assert r.preemption_cost.to("minute").magnitude == approx(20.1633)
+    assert r.runtime_goodput == approx(0.903980)
+    assert r.interruption_checkpoint_interval.to("minute").magnitude == approx(20.8762)
+    assert r.startup_share + r.input_wait_share + r.checkpoint_share + r.recovery_share \
+        + r.preemption_share == approx(r.runtime_loss)
+    assert sc.crossover(100) == 12928
+    assert sc.at(16384).result.runtime_loss == approx(0.182919)
+
+
+def test_llama2_70b_fleet_mfu_128():
+    f = Scenarios.Llama2_70BFleetMfu128
+    assert f.node_mfu == approx(0.649983)
+    assert f.fleet_mfu == approx(0.480003)
+    assert f.scaling_efficiency == approx(0.738486)
+    assert f.fleet_useful_work.to("PFLOP").magnitude == approx(14.8873)
+    assert f.fleet_peak_work.to("PFLOP").magnitude == approx(31.0150)
+    assert f.extra_step_time.to("ms").magnitude == approx(65)
+
+
+def test_shared_pool_goodput_and_llama3():
+    g = Scenarios.Llama2_70BSharedPoolGoodput128.result
+    assert g.mpg == approx(0.282044)
+    assert g.scheduling_share + g.runtime_share + g.program_share + g.mpg == approx(1)
+    assert g.point_value["P"] > g.point_value["S"] > g.point_value["R"]
+    assert g.mpg_at_ceiling["P"] == approx(0.381922)
+    assert g.mpg_at_ceiling["S"] == approx(0.347131)
+    assert g.mpg_at_ceiling["R"] == approx(0.306044)
+    assert g.cost_multiple == approx(3.54555)
+    assert g.job_cost_multiple == approx(2.30461)
+    assert g.useful_rate.to("USD/hour").magnitude == approx(7.09110)
+    assert Scenarios.Llama2_70BSharedPoolGoodput128.trade_ratio(
+        Scenarios.Llama2_70BTenthTwelfthTrade) == approx(1.0083333)
+    l3 = Scenarios.Llama3_405BGoodput16K.result
+    assert l3.mpg == approx(0.369)
+    assert l3.runtime_share == approx(0.10)
+    assert l3.program_share == approx(0.531)
+    assert Scenarios.Llama3_405BOnSharedPool.result.mpg == approx(0.23985)
+
+
+def test_decode_floor_layernorm_and_tp_exchanges():
+    d = Scenarios.Llama2_70BDecodeFloorTp8.result
+    assert d.memory_time.to("ms").magnitude == approx(5.22388)
+    assert d.intensity.to("flop/byte").magnitude == approx(1.0)
+    assert d.peak_fraction == approx(0.00338726)
+    ln = Scenarios.LayerNormMeasuredH100
+    assert ln.point_intensity.to("flop/byte").magnitude == approx(1.785714)
+    assert ln.bandwidth_utilization == approx(0.835821)
+    assert ln.ridge.to("flop/byte").magnitude == approx(295.224)
+    t = Scenarios.Llama2_70BNodeTensorParallelStep.result
+    assert t.payload.to("MB").magnitude == approx(36.1103)
+    assert t.collectives_per_step == 320
+    assert t.communication_time.to("ms").magnitude == approx(44.9373)
+    m = Scenarios.Llama2_70BDecodeAllReduceTp8
+    assert m.message.to("KB").magnitude == approx(32.768)
+    assert m.startup_to_transfer == approx(68.6646)
+
+
+def test_compilation_payback_trace_volume_and_software_gains():
+    c = Scenarios.Decode13BCompilationPayback
+    assert c.step_fraction == approx(0.635)
+    assert c.compiled_step.to("ms").magnitude == approx(5.28955)
+    assert c.saved_per_token.to("ms").magnitude == approx(3.04045)
+    assert c.tokens_to_repay("autotune") == approx(296008.8)
+    assert c.time_to_repay("autotune").to("minute").magnitude == approx(26.0959)
+    assert c.shared_repay("autotune").to("s").magnitude == approx(12.2324)
+    assert c.rollout_cost("autotune").to("hour").magnitude == approx(32)
+    assert c.build_share("autotune") == approx(0.25)
+    assert Scenarios.NsightTraceVolume1K.total.to("GB").magnitude == approx(512)
+    sg = Scenarios.MlperfInferenceSoftwareGainsDgxH100
+    assert sg.gain("gptj-99") == approx(2.69091)
+    assert sg.gain("resnet50") == approx(0.999089, rel=1e-4)
+    assert sg.months() == 19

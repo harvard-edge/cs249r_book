@@ -2879,3 +2879,28 @@ LIN_AWQ_2024 = _lit(
     verified="2026-10-20",
     notes="Sec. 5.1: group size 128 for weight-only INT4 quantization.",
 )
+# Fleet efficiency (added 2026-10-20)
+WONGPANICH_ML_GOODPUT_2025 = _lit(
+    "prov:wongpanich-ml-goodput-2025",
+    "Wongpanich et al. (2025), Machine Learning Fleet Efficiency: Analyzing and Optimizing "
+    "Large-Scale Google TPU Systems with ML Productivity Goodput",
+    url="https://arxiv.org/abs/2502.06982",
+    verified="2026-10-20",
+    notes=("Defines ML productivity goodput as scheduling x runtime x program goodput; scheduling "
+           "goodput exceeds 95 percent for every job-size cohort of Google's TPU fleet."),
+)
+CLOUDFLARE_OUTAGE_2019 = _lit(
+    "prov:cloudflare-outage-2019",
+    "Cloudflare (2019), Details of the Cloudflare outage on July 2, 2019",
+    url="https://blog.cloudflare.com/details-of-the-cloudflare-outage-on-july-2-2019/",
+    verified="2026-10-20",
+    notes=("A WAF rule's regular expression backtracked and drove edge CPUs to nearly 100 percent; "
+           "a 27-minute outage in which traffic dropped by about 82 percent."),
+)
+NSIGHT_TRACE_VOLUME_SCENARIO = _est(
+    "prov:nsight-trace-volume-scenario",
+    "Reference Nsight Systems trace volume per GPU for a short profiling window",
+    notes=("Documented teaching assumption: a 5-second Nsight Systems trace of one training GPU, "
+           "with CUDA, NVTX, and NCCL ranges, is about 500 MB."),
+    verified="2026-10-20",
+)
