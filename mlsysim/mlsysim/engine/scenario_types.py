@@ -177,6 +177,193 @@ class FailureIntervalScenario(BaseScenario):
         return FailureIntervalModel().solve(self.component_mtbf, self.n_components, self.run_duration)
 
 
+class FailureIntervalSweepScenario(BaseScenario):
+    """Interval between failures of ``component_mtbf`` components, at each job size in ``sizes``."""
+    component_mtbf: Quantity
+    sizes: List[int]
+
+    @property
+    def intervals(self) -> Dict[int, Quantity]:
+        from ..physics.reliability import calc_mtbf_cluster
+        return {n: calc_mtbf_cluster(self.component_mtbf, n) for n in self.sizes}
+
+    @property
+    def failures_per_day(self) -> Dict[int, float]:
+        return {n: (Q_(1, "day") / t).to("").magnitude for n, t in self.intervals.items()}
+
+
+class SeriesFailureScenario(BaseScenario):
+    """A synchronous job on ``n_devices`` that stops when any one component fails.
+
+    ``component_mttf`` gives each component's MTTF and ``per_node`` its count in
+    one node of ``devices_per_node`` devices; a redundant part that cannot fail
+    the node singly is counted 0. Added 2026-10-20.
+    """
+    n_devices: int
+    devices_per_node: int
+    component_mttf: Dict[str, Quantity]
+    per_node: Dict[str, int]
+
+    @property
+    def result(self):
+        from .solvers import SeriesFailureModel
+        return SeriesFailureModel().solve(self.n_devices, self.devices_per_node,
+                                          self.component_mttf, self.per_node)
+
+
+class CheckpointIntervalScenario(BaseScenario):
+    """Checkpoints of ``workload`` written at ``write_bandwidth``, against failures every ``mtbf``.
+
+    ``write_time`` states the write directly when no workload is given.
+    Added 2026-10-20.
+    """
+    mtbf: Quantity
+    workload: Optional[Workload] = None
+    bytes_per_param: Optional[Quantity] = None
+    write_bandwidth: Optional[Quantity] = None
+    write_time: Optional[Quantity] = None
+
+    @property
+    def checkpoint_bytes(self) -> Quantity:
+        from ..physics.quantities import memory_from_params
+        return memory_from_params(self.workload.parameters, self.bytes_per_param).to("byte")
+
+    @property
+    def t_write(self) -> Quantity:
+        if self.write_time is not None:
+            return self.write_time.to("second")
+        return (self.checkpoint_bytes / self.write_bandwidth).to("second")
+
+    @property
+    def result(self):
+        from .solvers import CheckpointIntervalModel
+        return CheckpointIntervalModel().solve(self.t_write, self.mtbf)
+
+    def waste_at(self, interval: Quantity) -> float:
+        """Share of wall time lost when saving every ``interval`` instead."""
+        from ..physics.reliability import calc_checkpoint_waste
+        return calc_checkpoint_waste(self.t_write, interval, self.mtbf)
+
+
+class RecoveryBudgetScenario(BaseScenario):
+    """Cold restarts of ``workload`` after failures of ``n_devices`` components of ``component_mtbf``.
+
+    ``recovery`` is the four-term budget profile (Systems.Reliability.Recovery).
+    Added 2026-10-20.
+    """
+    workload: Workload
+    bytes_per_param: Quantity
+    recovery: Any
+    component_mtbf: Quantity
+    n_devices: int
+
+    @property
+    def checkpoint_bytes(self) -> Quantity:
+        from ..physics.quantities import memory_from_params
+        return memory_from_params(self.workload.parameters, self.bytes_per_param).to("byte")
+
+    @property
+    def result(self):
+        from ..physics.reliability import calc_mtbf_cluster
+        from .solvers import RecoveryBudgetModel
+        return RecoveryBudgetModel().solve(
+            self.checkpoint_bytes, self.recovery,
+            calc_mtbf_cluster(self.component_mtbf, self.n_devices), self.n_devices)
+
+
+class HotSpareScenario(BaseScenario):
+    """``spare_devices`` held idle beside the job in ``failures``, priced at ``device_hour_rate``.
+
+    The spare pays off when it shortens every recovery by more than
+    ``breakeven``. Added 2026-10-20.
+    """
+    failures: Any                           # SeriesFailureScenario
+    spare_devices: int
+    device_hour_rate: Quantity
+
+    @property
+    def spare_cost_per_day(self) -> Quantity:
+        return (self.spare_devices * self.device_hour_rate * Q_(1, "day")).to("USD")
+
+    @property
+    def value_per_minute(self) -> Quantity:
+        """Daily value of one minute removed from every recovery."""
+        r = self.failures.result
+        return (r.failures_per_day * self.failures.n_devices * self.device_hour_rate
+                * Q_(1, "minute")).to("USD")
+
+    @property
+    def breakeven(self) -> Quantity:
+        return (self.spare_cost_per_day / self.value_per_minute * Q_(1, "minute")).to("second")
+
+
+class StragglerCostScenario(BaseScenario):
+    """One of ``n_devices`` in a synchronous job runs at ``slow_speed`` of its normal rate."""
+    n_devices: int
+    step_time: Quantity
+    slow_speed: float
+    device_hour_rate: Quantity
+
+    @property
+    def slow_step(self) -> Quantity:
+        return (self.step_time / self.slow_speed).to("second")
+
+    @property
+    def throughput(self) -> float:
+        """Job throughput as a share of normal: the barrier waits for the slowest rank."""
+        return (self.step_time / self.slow_step).to("").magnitude
+
+    @property
+    def idle_cost(self) -> Quantity:
+        """Cost per hour of the capacity the barrier leaves idle."""
+        return (self.n_devices * self.device_hour_rate * (1 - self.throughput)
+                * Q_(1, "hour")).to("USD")
+
+
+class HealthProbeScenario(BaseScenario):
+    """A readiness probe every ``interval``, failing after ``timeout``, removing after ``failure_threshold`` misses."""
+    interval: Quantity
+    timeout: Quantity
+    failure_threshold: int
+    success_threshold: int
+
+    @property
+    def detection_window(self):
+        """Earliest and latest time from a crash to removal from rotation."""
+        from ..physics.reliability import calc_probe_detection_window
+        return calc_probe_detection_window(self.interval, self.timeout, self.failure_threshold)
+
+
+class SdcExposureScenario(BaseScenario):
+    """Silent-corruption exposure of ``n_devices``, each at ``event_rate`` per device-hour, per ``step_time`` step."""
+    n_devices: int
+    event_rate: float
+    step_time: Quantity
+    run_duration: Optional[Quantity] = None
+
+    @property
+    def exposure(self) -> float:
+        """Device-hours exposed in one step."""
+        return self.n_devices * self.step_time.to("hour").magnitude
+
+    @property
+    def p_step(self) -> float:
+        from ..physics.reliability import calc_step_event_probability
+        return calc_step_event_probability(self.event_rate, self.n_devices, self.step_time)
+
+    @property
+    def steps_between(self) -> float:
+        return 1 / self.p_step
+
+    @property
+    def interval(self) -> Quantity:
+        return (self.steps_between * self.step_time).to("hour")
+
+    @property
+    def run_events(self) -> float:
+        return (self.run_duration / self.interval).to("").magnitude
+
+
 class AcceleratorComparison(BaseScenario):
     """``candidate`` against ``baseline``: peak, power, and peak per watt.
 
@@ -310,6 +497,22 @@ class AvailabilityScenario(BaseScenario):
         """Expected time one component is down in a 365-day year."""
         from ..core.units import DAYS_PER_YEAR, Q_
         return self.downtime(Q_(DAYS_PER_YEAR, "day")).to("minute")
+
+    # Parallel composition (added 2026-10-20): a service up while any of
+    # ``replicas`` independent copies is up.
+    replicas: int = 1
+
+    @property
+    def any_up(self) -> float:
+        from ..physics.reliability import calc_availability_stacked
+        return calc_availability_stacked(self.availability, self.replicas)
+
+    @property
+    def replicated_downtime_per_year(self) -> Quantity:
+        """Expected time all ``replicas`` are down at once in a 365-day year."""
+        from ..physics.reliability import calc_downtime
+        from ..core.units import DAYS_PER_YEAR, Q_
+        return calc_downtime(self.any_up, Q_(DAYS_PER_YEAR, "day")).to("minute")
 
 
 class ComputeOptimalScenario(BaseScenario):

@@ -13,6 +13,11 @@ from .interconnect import (AlphaBetaModel, BisectionModel, CollectiveFitModel, C
                            GradientSyncModel, IncastModel, TensorParallelCommModel, TransferLadderModel)
 from .performance import DecodeBoundModel, EfficiencyModel, NetworkRooflineModel, SensitivitySolver, SingleNodeModel, SynthesisSolver
 from .reliability import FailureIntervalModel, ReliabilityModel
+from .reliability import (  # added 2026-10-20
+    SeriesFailureModel,
+    CheckpointIntervalModel,
+    RecoveryBudgetModel,
+)
 from .serving import (
     BatchingOptimizer,
     ContinuousBatchingModel,
@@ -68,6 +73,9 @@ __all__ = [
     "CoolantFlowModel",
     "OutageCostModel",
     "FailureIntervalModel",
+    "SeriesFailureModel",
+    "CheckpointIntervalModel",
+    "RecoveryBudgetModel",
     "GradientSyncModel",
     "CommunicationIntensityModel",
     "AlphaBetaModel",

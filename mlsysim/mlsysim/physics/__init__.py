@@ -157,6 +157,11 @@ from .robotics import (
 from .power import calc_rail_current_step, calc_inductive_droop
 from .scaling import calc_halving_multiple, calc_compute_optimal_allocation
 from .reliability import calc_all_up_availability, calc_downtime
+from .reliability import (  # added 2026-10-20
+    calc_checkpoint_waste,
+    calc_step_event_probability,
+    calc_probe_detection_window,
+)
 from .thermal import calc_coolant_mass_flow
 from .quantities import (
     transfer_time,
@@ -303,6 +308,9 @@ __all__ = [
     "calc_compute_optimal_allocation",
     "calc_all_up_availability",
     "calc_downtime",
+    "calc_checkpoint_waste",
+    "calc_step_event_probability",
+    "calc_probe_detection_window",
     "calc_rail_current_step",
     "calc_inductive_droop",
     "calc_coolant_mass_flow",
