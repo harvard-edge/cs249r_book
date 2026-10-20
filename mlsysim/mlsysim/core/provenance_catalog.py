@@ -3381,3 +3381,13 @@ GOOGLE_SRE_SLO_ALERTING = Provenance(
     notes=("For a 99.9 percent SLO over 30 days: page on burn rate 14.4 over 1 hour (2 percent of the budget) "
            "or 6 over 6 hours (5 percent); open a ticket on burn rate 1 over 3 days (10 percent)."),
 )
+GU_2025_PROMPT_CACHE_AUDIT = _lit(
+    "prov:gu-2025-prompt-cache-audit",
+    "Gu et al. (2025), Auditing Prompt Caching in Language Model APIs, ICML 2025, "
+    "Abstract, Section 4.2, and Table 1",
+    url="https://arxiv.org/abs/2502.07776",
+    verified="2026-10-20",
+    notes=("Audits run September to October 2024. Section 4.2: \"We detected prompt caching in 8 out "
+           "of 17 API providers, and we detected global cache sharing in 7 providers.\" Read from "
+           "arxiv.org/html/2502.07776v2. Added 2026-10-20."),
+)

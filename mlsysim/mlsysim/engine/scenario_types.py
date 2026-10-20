@@ -3007,7 +3007,7 @@ class ZeroFailureScenario(BaseScenario):
     @property
     def result(self):
         from .solvers import ZeroFailureModel
-        return ZeroFailureModel().solve(self.trials, self.confidence)
+        return ZeroFailureModel().solve(self.trials, self.confidence, self.target_rate)
 
 
 class ThrottledStageScenario(BaseScenario):
@@ -9401,3 +9401,65 @@ class PlatformBenefitScenario(BaseScenario):
     @property
     def benefit_cost_ratio(self) -> float:
         return (self.gross_benefit / self.platform_cost).to("").magnitude
+
+
+# --- Agent security: injection exposure and defense evaluation (added 2026-10-20) ---
+class InjectionExposureScenario(BaseScenario):
+    """Workloads reading ``reads`` untrusted items each, a fraction ``payload_fraction`` carrying
+    a payload, with and without a screen that misses ``miss_rate`` of payloads."""
+    payload_fraction: float
+    reads: Dict[str, int]            # untrusted items read per task, by workload
+    miss_rate: float                 # fraction of payloads the screen misses
+    cohort: int                      # tasks in the per-cohort count
+
+    @property
+    def result(self):
+        from .solvers import InjectionExposureModel
+        return InjectionExposureModel().solve(self.payload_fraction, self.reads, self.miss_rate,
+                                              self.cohort)
+
+
+class TurnExposureScenario(BaseScenario):
+    """``reads_per_turn`` untrusted items per turn over ``turns`` turns at ``payload_fraction``."""
+    payload_fraction: float
+    reads_per_turn: int
+    turns: int
+
+    @property
+    def result(self):
+        from .solvers import TurnExposureModel
+        return TurnExposureModel().solve(self.payload_fraction, self.reads_per_turn, self.turns)
+
+
+class PolicyComparisonScenario(BaseScenario):
+    """Two policies, each run on ``attacked`` attacked and ``benign`` separate benign episodes.
+
+    Each policy's counts: ``confirmed`` and ``unresolved`` harm and ``accepted_attacked`` among
+    attacked episodes; ``accepted_benign`` and ``false_block`` among benign ones.
+    """
+    attacked: int
+    benign: int
+    baseline: Dict[str, int]
+    candidate: Dict[str, int]
+    attempt_cost: Optional[float] = None    # USD per attempt, to price cost per accepted task
+
+    @property
+    def result(self):
+        from .solvers import PolicyComparisonModel
+        return PolicyComparisonModel().solve(self.attacked, self.benign, self.baseline,
+                                             self.candidate, self.attempt_cost)
+
+
+class TaskScopedGrantScenario(BaseScenario):
+    """A requester holding ``held`` resources delegates a task that needs ``needed`` of them."""
+    held: int
+    needed: int
+
+    @property
+    def refused(self) -> int:
+        """Resources the requester's own token reaches that the task-scoped grant refuses."""
+        return self.held - self.needed
+
+    @property
+    def scoped_share(self) -> float:
+        return self.needed / self.held

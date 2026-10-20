@@ -585,3 +585,8 @@ __all__ += [
     "calc_rent_crossover",
     "calc_ownership_breakeven_utilization",
 ]
+
+# --- Injection exposure (added 2026-10-20) ---
+from .agents import calc_injection_exposure, calc_injection_read_budget
+
+__all__ += ["calc_injection_exposure", "calc_injection_read_budget"]

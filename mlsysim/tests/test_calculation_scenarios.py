@@ -3032,3 +3032,54 @@ def test_lifecycle_tco_payback_and_platform_benefit():
     assert Scenarios.TrainingOptimizationPayback.payback.to("month").magnitude == approx(1.777778)
     assert Scenarios.SharedPlatformBenefit50.benefit_cost_ratio == approx(1.25)
     assert Scenarios.SharedPlatformBenefit20.benefit_cost_ratio == approx(0.5)
+
+
+# --- Agent security: injection exposure and defense evaluation (added 2026-10-20) ---
+def test_injection_exposure_by_read_volume():
+    r = Scenarios.InjectionExposureByReadVolume.result
+    assert r.exposure["repair"] == approx(0.18209306)
+    assert r.exposure["research"] == approx(0.63396766)
+    assert r.exposure["support"] == approx(0.05851985)
+    assert r.exposure["remediation"] == approx(0.09561792)
+    assert r.linear["repair"] == approx(0.2)
+    assert r.screened_rate == approx(0.0005)
+    assert r.screened["repair"] == approx(0.0099526422)
+    assert r.screened["research"] == approx(0.04878247)
+    assert r.screened_per_cohort["research"] == approx(48.78247)
+
+
+def test_repair_trajectory_turn_exposure():
+    r = Scenarios.RepairTrajectoryTurnExposure.result
+    assert r.per_turn == approx(0.0199) and r.reads == 60
+    assert r.trajectory == approx(0.45284336)
+    assert r.same_reads == approx(r.trajectory, rel=1e-12)
+
+
+def test_fixture_release_policy_comparison():
+    r = Scenarios.FixtureReleasePolicyComparison.result
+    assert (r.baseline_lower, r.candidate_lower) == (approx(0.20), approx(0.05))
+    assert (r.baseline_upper, r.candidate_upper) == (approx(0.25), approx(0.15))
+    assert r.reduction_observed == approx(0.75)
+    assert r.reduction_upper == approx(0.40)
+    assert r.reduction_least_favorable == approx(0.25)
+    assert r.cost_rise == approx(0.125)
+    assert r.lost_benign == r.extra_false_blocks == 10
+    assert r.baseline_cost_per_accepted == approx(2.3333333)
+    assert r.candidate_cost_per_accepted == approx(2.625)
+
+
+def test_clean_attack_suites():
+    r50 = Scenarios.CleanAttackSuite50.result
+    assert r50.rate_upper_exact == approx(0.058155079)
+    assert r50.rate_upper == approx(0.059914645)
+    assert r50.trials_for_target == 299
+    assert r50.trials_for_target_approx == approx(299.57323)
+    r100 = Scenarios.CleanAttackSuite100.result
+    assert r100.rate_upper_exact == approx(0.02951305)
+
+
+def test_prefix_cache_probe_and_delegated_grant():
+    probe = Scenarios.PrefixCacheProbe2K.result
+    assert probe.rebuild_time.to("ms").magnitude == approx(82.764621)
+    assert probe.weight_read_time.to("ms").magnitude == approx(5.2686567)
+    assert Scenarios.DelegatedRepositoryGrant.refused == 49

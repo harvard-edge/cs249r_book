@@ -46,7 +46,11 @@ from ...physics.motors import (
     calc_periodic_burst_peak_rise,
 )
 from ...physics.robotics.actuation import calc_kinetic_energy, calc_reflected_inertia, calc_voltage_droop
-from ...physics.robotics.assurance import calc_zero_failure_rate_upper_bound
+from ...physics.robotics.assurance import (
+    calc_clopper_pearson_zero_failure_bound,
+    calc_zero_failure_rate_upper_bound,
+    calc_zero_failure_sample_size,
+)
 from .base import ForwardModel
 
 _MM = ureg.millimeter
@@ -344,13 +348,32 @@ class DriveBusModel(ForwardModel):
 
 
 class ZeroFailureModel(ForwardModel):
-    """Upper bound on the per-trial failure rate after a failure-free campaign: -ln(1 - C) / n."""
+    """
+    Upper bound on the per-trial failure rate after a failure-free campaign.
+
+        Poisson (rule of three):  p_upper = -ln(1 - C) / n
+        exact binomial:           p_upper = 1 - (1 - C)^(1/n)
+
+    With ``target_rate``, also the clean trials that bound the rate at the
+    target: ceil(ln(1 - C) / ln(1 - target)), and its rule-of-three estimate
+    -ln(1 - C) / target (exact form and target added 2026-10-20).
+    """
     requires = ()
     produces = ZeroFailureResult
 
-    def solve(self, trials: int, confidence: float) -> ZeroFailureResult:
+    def solve(self, trials: int, confidence: float,
+              target_rate: Optional[float] = None) -> ZeroFailureResult:
         p = calc_zero_failure_rate_upper_bound(trials, confidence)
-        return ZeroFailureResult(coefficient=-math.log(1 - confidence), rate_upper=p, one_in=1 / p)
+        coefficient = -math.log(1 - confidence)
+        needed = needed_approx = None
+        if target_rate is not None:
+            needed = calc_zero_failure_sample_size(1 - target_rate, confidence)
+            needed_approx = coefficient / target_rate
+        return ZeroFailureResult(
+            coefficient=coefficient, rate_upper=p, one_in=1 / p,
+            rate_upper_exact=1 - calc_clopper_pearson_zero_failure_bound(trials, confidence),
+            trials_for_target=needed, trials_for_target_approx=needed_approx,
+        )
 
 
 class ThrottledStageModel(ForwardModel):
