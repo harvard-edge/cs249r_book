@@ -71,7 +71,7 @@ from .transformer import (
     calc_transformer_prefill_flops,
     calc_vla_inference_latency,
 )
-from .serving import calc_queue_latency_mmc
+from .serving import calc_queue_latency_mmc, calc_mg1_wait_ratio
 from .statistics import (
     calc_population_stability_index,
     calc_two_proportion_sample_size,
@@ -231,6 +231,7 @@ __all__ = [
     "calc_transformer_prefill_flops",
     "calc_vla_inference_latency",
     "calc_queue_latency_mmc",
+    "calc_mg1_wait_ratio",
     "calc_population_stability_index",
     "calc_monte_carlo_sample_size",
     "calc_importance_sampling_exponential",

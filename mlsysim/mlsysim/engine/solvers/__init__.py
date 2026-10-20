@@ -7,7 +7,7 @@ from .compression import CompressionModel
 from .data import DataModel, TransformationModel
 from .distributed import DistributedModel, MoERoutingModel, ParallelismOptimizer, TopologyModel
 from .economics import EconomicsModel, PlacementOptimizer, ResponsibleEngineeringModel, SustainabilityModel
-from .orchestration import OrchestrationModel
+from .orchestration import JobSizeMixModel, OrchestrationModel, PreemptionTaxModel
 from .facility import CoolantFlowModel, OutageCostModel, PowerTransientModel
 from .interconnect import (AlphaBetaModel, BisectionModel, CollectiveFitModel, CommunicationIntensityModel,
                            GradientSyncModel, IncastModel, TensorParallelCommModel, TransferLadderModel)
@@ -156,6 +156,8 @@ __all__ = [
     "DataModel",
     "TransformationModel",
     "OrchestrationModel",
+    "JobSizeMixModel",
+    "PreemptionTaxModel",
     "CompressionModel",
 ]
 
