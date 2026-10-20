@@ -3155,3 +3155,10 @@ NASA_MCO_PHASE1_1999 = _report(
     "https://llis.nasa.gov/llis_lib/pdf/1009464main1_0641-mr.pdf",
     notes="Planned orbit-insertion altitude 226 km; final estimate about 57 km.",
 )
+LECUN_ZIPCODE_1989 = _lit(
+    "prov:lecun-zipcode-1989",
+    "LeCun et al. (1989), Backpropagation Applied to Handwritten Zip Code Recognition, Neural Computation 1(4)",
+    url="https://doi.org/10.1162/neco.1989.1.4.541",
+    verified="2026-10-20",
+    notes="USPS test digits: 1 percent error on the accepted digits after rejecting 12.1 percent.",
+)

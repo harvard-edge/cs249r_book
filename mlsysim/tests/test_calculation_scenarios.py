@@ -2388,3 +2388,116 @@ def test_repair_and_support_residency():
     assert s.shared_fraction == approx(0.75) and s.residency_factor == approx(11)
     assert s.recompute.to("s").magnitude == approx(0.32488215)
     assert s.reload.to("ms").magnitude == approx(5.24288)
+
+
+# --- Neural computation: the running MNIST network (added 2026-10-20) ---
+
+def test_mnist_dense_network_counts():
+    r = Scenarios.MnistDenseNetwork.result
+    assert r.layer_widths == [784, 128, 64, 10] and r.layers == 3
+    assert r.weights_per_layer == [100352, 8192, 640] and r.biases == 202
+    assert r.macs_per_example == 109184 and r.flops_per_example == 218368
+    assert r.parameters == 109386
+    assert r.parameter_bytes.to("byte").magnitude == 437544
+    assert r.first_layer_share == approx(0.919119)
+    assert r.matmul_flops_per_layer == [6422528, 524288, 40960]
+    assert r.elementwise_flops == 12928 and r.forward_flops == 7000704
+    assert r.matmul_share == approx(0.998153)
+    assert r.traffic_bytes.to("byte").magnitude == 588328
+    assert r.intensity.to("flop/byte").magnitude == approx(11.89932)
+    assert r.input_gradient_flops == 565248 and r.training_step_flops == 14540800
+    assert r.training_flops_ratio == approx(2.080891)
+    assert r.saved_activation_bytes.to("KB").magnitude == approx(126.208)
+    assert r.inference_activation_bytes.to("KB").magnitude == approx(116.736)
+    assert r.training_memory.to("KB").magnitude == approx(1876.384)
+    assert r.inference_memory.to("KB").magnitude == approx(554.28)
+    assert r.training_memory_ratio == approx(3.385264)
+    assert r.steps_per_epoch == 1875
+
+
+def test_mnist_dense_network_variants():
+    b1 = Scenarios.MnistDenseNetwork.variant(batch_size=1).result
+    assert b1.traffic_bytes.to("byte").magnitude == 442256
+    assert b1.intensity.to("flop/byte").magnitude == approx(0.494673)
+    wide = Scenarios.MnistDenseNetworkWiderHidden.result
+    assert wide.layer_widths == [784, 256, 128, 10] and wide.forward_flops == 15049344
+    assert Scenarios.MnistDenseNetworkDoubledInputSide.result.weights_per_layer[0] == 401408
+
+
+def test_dense_width_depth_sweep():
+    s = Scenarios.DenseWidthDepthSweep
+    assert s.width_double_factor == approx(3.441239)
+    assert s.depth_double_factor == approx(1.966722)
+    assert s.saved_activations_double_factor == approx(1.911640)
+
+
+def test_mnist_epoch_cpu_versus_h100():
+    r = Scenarios.MnistEpochCpuVersusH100.result
+    assert r.steps == 1875 and r.ops_per_step == 12
+    assert r.step_flops.to("Mflop").magnitude == approx(14.5408)
+    assert r.ridge["host"].to("flop/byte").magnitude == approx(20.0)
+    assert r.rate["accelerator"].to("Tflop/s").magnitude == approx(39.86273)
+    assert r.rate_batch1["host"].to("Gflop/s").magnitude == approx(24.73364)
+    assert r.batching_speedup["host"] == approx(24.05487)
+    assert r.work_time["host"].to("ms").magnitude == approx(45.82446)
+    assert r.work_time["accelerator"].to("ms").magnitude == approx(0.683947)
+    assert r.overhead_time["host"].to("ms").magnitude == approx(225.0)
+    assert r.overhead_time["accelerator"].to("ms").magnitude == approx(337.5)
+    assert r.work_speedup == approx(67.0)
+    assert r.overhead_share_accelerator == approx(0.997978)
+    assert r.movement_to_arithmetic_energy == approx(5.846150)
+    assert r.movement_to_arithmetic_energy_batch1 == approx(140.6288)
+
+
+def test_digit_paradigms_and_activation_cost():
+    p = Scenarios.DigitRecognitionParadigms
+    assert p.network_to_rule_ratio == approx(1091.84) and p.feature_to_rule_ratio == approx(80)
+    assert p.feature_count == 441 and p.rule_memory.to("byte").magnitude == 784
+    assert Scenarios.ReluVersusSigmoidLogic.ratio == approx(50)
+
+
+def test_vanishing_gradient_and_formats():
+    g = Scenarios.TwentySigmoidLayers
+    assert g.peak_slope == approx(0.25) and g.surviving_fraction == approx(9.094947e-13)
+    f = Scenarios.VanishedGradientFormats
+    assert f.range("fp16") == (65504.0, approx(6.103516e-05), approx(5.960464e-08))
+    assert f.range("fp32")[0] == approx(3.402823e38) and f.range("fp32")[1] == approx(1.175494e-38)
+    assert f.stored("fp16") == 0.0 and f.stored("fp32") == approx(9.094947e-13)
+    assert f.integer_max == 32767
+
+
+def test_cross_entropy_and_backprop_trace():
+    c = Scenarios.DigitCrossEntropyExamples
+    assert c.loss("confident") == approx(0.1053605) and c.loss("correct") == approx(0.2231436)
+    assert c.uniform_loss == approx(2.302585) and c.misread_loss == approx(2.302585)
+    assert c.misread_gradient_true == approx(-0.9) and c.misread_gradient_wrong == approx(0.6)
+    t = Scenarios.TwoTwoOneBackpropTrace
+    assert t.y_hat == approx(0.54) and t.loss == approx(0.1058) and t.error == approx(-0.46)
+    assert t.w2_gradient[0] == approx(-0.414) and t.sent_back == [approx(-0.276), approx(0.184)]
+    assert t.delta[1] == 0.0 and t.w1_gradient[1][0] == approx(-0.138)
+    assert t.w1_updated(0, 0) == approx(0.5276)
+
+
+def test_training_state_fit():
+    g = Scenarios.Gpt2Fp32AdamOnH100
+    assert g.weights.to("GB").magnitude == approx(6.0) and g.total.to("GB").magnitude == approx(24.0)
+    assert g.copies == approx(4.0) and g.fits
+    r = Scenarios.ResNet50Fp32SgdMomentum  # follows the registry's ResNet-50 count
+    params = r.workload.parameters.to("param").magnitude
+    assert r.weights.to("byte").magnitude == approx(4 * params)
+    assert r.optimizer_state == r.weights and r.copies == approx(3.0)
+
+
+def test_notable_model_parameter_growth():
+    r = Scenarios.NotableModelParameterGrowth.result
+    assert r.model_count == 725 and r.split_year == 2010
+    assert r.early_doubling_months == approx(43.17425)
+    assert r.late_doubling_months == approx(10.47560)
+    assert r.largest_parameters >= 1e12
+
+
+def test_mnist_large_batch_saved_activations():
+    big = Scenarios.MnistDenseNetworkLargeBatch.result
+    small = Scenarios.MnistDenseNetwork.result
+    assert big.batch_size == 1024
+    assert big.saved_activation_values / small.saved_activation_values == approx(32)
