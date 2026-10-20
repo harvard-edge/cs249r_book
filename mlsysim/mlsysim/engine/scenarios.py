@@ -6853,3 +6853,84 @@ class Scenarios(Registry):
         keyframe_rate_low=Q_(1.0, "Hz"),  # scenario assumption: semantic keyframe rate, low end
         keyframe_rate_high=Q_(5.0, "Hz"),  # scenario assumption: semantic keyframe rate, high end
     )
+    # --- Grounded intent: the intent lease and its gates (added 2026-10-20) ---
+    ConveyorMugIntentCadence = _st.IntentCadenceScenario(
+        name="The conveyor mug proposed by the warehouse machine's intent model",
+        description="Untracked and tracked evidence horizons against the intent model's inference and "
+                    "period, the oldest evidence behind a model-only renewal, a 200 ms host stall, and "
+                    "the stop onset after expiry.",
+        site=_Embodied.Scenario.WarehouseAisle,
+        machine=_Embodied.MobileManipulator.WarehouseMobileManipulator,
+        stall=Q_(200.0, "ms"),  # scenario assumption: a stalled proposer holds the mug target
+    )
+    ConveyorMugSettlingDrift = ConveyorMugIntentCadence.variant(
+        name="The same mug sliding to rest at 20 mm/s",
+        description="The untracked evidence horizon of a slow settling drift.",
+        target_speed=Q_(20.0, "mm/s"),  # scenario assumption: settling drift
+    )
+    ConveyorMugSlowBelt = ConveyorMugIntentCadence.variant(
+        name="The same mug on a belt slowed to 50 mm/s",
+        description="Whether a model-only renewal fits the untracked horizon of a slower belt.",
+        target_speed=Q_(50.0, "mm/s"),  # scenario assumption: slowed belt
+    )
+    ConveyorMugDynamicReach = _st.DynamicReachScenario(
+        name="The mug handle 300 mm from the gripper at the arm's TCP speed ceiling",
+        description="The transit lower bound against the tracked evidence window, the reach inside each "
+                    "window, and the fresh captures a staged approach needs.",
+        cadence=ConveyorMugIntentCadence,
+        target_distance=Q_(300.0, "mm"),  # scenario assumption: gripper-to-handle distance at proposal
+    )
+    AisleCoworkerForwardOccupancy = _st.ForwardOccupancyScenario(
+        name="A coworker's forward occupancy set over the mug's windows and a 2 s forecast",
+        description="Growth of the speed-bound set at the ISO 13855 design speed, and the horizon past "
+                    "which one person's set spans the aisle.",
+        cadence=ConveyorMugIntentCadence,
+        forecast=Q_(2.0, "s"),  # scenario assumption: a multi-second planning horizon
+    )
+    ConveyorMugIntentLeaseExpiry = _st.IntentLeaseExpiryScenario(
+        name="The red-mug intent lease: evidence, host silence, and the stopping deadline",
+        description="The arm's credible deceleration, its stop from the TCP ceiling, the stopping "
+                    "deadline, and which term binds with and without a tracker.",
+        cadence=ConveyorMugIntentCadence,
+        administrative_lease=Q_(100.0, "ms"),  # scenario assumption: administrative lease (six wrist-camera frames)
+        clearance=Q_(300.0, "mm"),  # scenario assumption: verified clearance ahead of the gripper
+    )
+    MugJarReferentSet = _st.ReferentSetScenario(
+        name="A red mug and a red glass jar in the pick window",
+        description="Normalized detector scores, their entropy, and the conformal prediction set.",
+        labels=["mug", "jar"],
+        scores=[0.62, 0.48],  # scenario assumption: raw per-box scores
+        calibration_count=200,  # scenario assumption: labeled calibration scenes
+        alpha=0.10,  # scenario assumption: allowed miscoverage
+        threshold_score=0.60,  # scenario assumption: stands in for a measured calibration quantile
+    )
+    MugJarReferentSetLowJar = MugJarReferentSet.variant(
+        name="The same pick window with the jar scoring 0.10",
+        description="A low jar score leaves a singleton set.",
+        scores=[0.62, 0.10],  # scenario assumption: the jar's raw score in the contrast case
+    )
+    JarAloneReferentSet = MugJarReferentSet.variant(
+        name="The glass jar alone, in place of the mug",
+        description="One retained candidate normalizes to one and survives the score test.",
+        labels=["jar"],
+        scores=[0.48],  # scenario assumption: the jar's raw score
+    )
+    DistantHandleConfidenceRegion = _st.ConfidenceRegionScenario(
+        name="The mug handle seen from across the station by the wrist camera",
+        description="The 95 percent region of a single-view estimate against the 15 mm grasp tolerance.",
+        site=_Embodied.Scenario.WarehouseAisle,
+        sigmas=[Q_(4.0, "mm"), Q_(5.0, "mm"), Q_(12.0, "mm")],  # scenario assumption: lateral x, lateral y, depth
+        coverage=0.95,  # scenario assumption: confidence level
+    )
+    LatchUnbrakedStall = LatchContactDeadlines.variant(
+        name="The guarded latch approach with no local trip, stalled for 200 ms",
+        description="Plate travel and spring-model force when only the proposer or the lease ends the press.",
+        stall=Q_(200.0, "ms"),  # scenario assumption: unbraked contact interval
+    )
+    ConveyorMugGoalSetOffsets = _st.GoalSetMembershipScenario(
+        name="Terminal TCP offsets of 10 and 20 mm against the mug's 15 mm goal set",
+        description="Normalized ellipsoidal distance of a pure x offset, inside and outside the set.",
+        site=_Embodied.Scenario.WarehouseAisle,
+        offsets=[Q_(10.0, "mm"), Q_(20.0, "mm")],  # scenario assumption: terminal TCP offsets along x
+    )
+

@@ -8148,6 +8148,38 @@ class ContactDeadlineScenario(BaseScenario):
     def fast_margin_ratio(self) -> float:
         return (self.deadline_fast / self.brake_onset_fast).to("").magnitude
 
+    # Optional (added 2026-10-20): the force when the brake command issues, and
+    # a counterfactual stall of ``stall`` at the guarded approach with no local
+    # trip, priced by the plate's spring model k x.
+    stall: Optional[Quantity] = None
+
+    def force_rate(self, speed: Quantity) -> Quantity:
+        return (self.site.k_latch * speed).to("N/ms")
+
+    def force_at_brake_onset(self, speed: Quantity) -> Quantity:
+        return (self.force_rate(speed) * self.brake_onset(speed)).to("N")
+
+    @property
+    def force_at_brake_onset_guarded(self) -> Quantity:
+        return self.force_at_brake_onset(self.guarded_speed)
+
+    @property
+    def compression_left_guarded(self) -> Quantity:
+        return ((self.site.f_latch_limit - self.force_at_brake_onset_guarded) / self.site.k_latch).to("mm")
+
+    @property
+    def stall_travel(self) -> Quantity:
+        return (self.guarded_speed * self.stall).to("mm")
+
+    @property
+    def stall_force(self) -> Quantity:
+        from ..physics.robotics.actuation import calc_contact_force
+        return calc_contact_force(self.site.k_latch, self.stall_travel).to("N")
+
+    @property
+    def stall_over_limit(self) -> float:
+        return (self.stall_force / self.site.f_latch_limit).to("").magnitude
+
 
 class SoftContactExploitScenario(BaseScenario):
     """``machine``'s arm coasting into ``site``'s latch plate at the fast approach: the peak force a
@@ -12845,3 +12877,121 @@ class EncoderRateScenario(BaseScenario):
         rm = self.site.machine
         return EncoderRateModel().solve(self.flop_per_frame, rm.nav_camera.frame_rate,
                                         rm.brain_soc.compute.precision_flops["fp16"])
+# --- Grounded intent: the intent lease and its gates (added 2026-10-20) --------
+
+class IntentCadenceScenario(BaseScenario):
+    """``site``'s conveyor target proposed by ``machine``'s intent model: evidence horizons against
+    the model's cadence, a host stall of ``stall``, and the stop onset after expiry.
+
+    ``target_speed`` defaults to the conveyor's; set it for a slower drift.
+    """
+    site: Any                                    # EmbodiedSiteScenario (tolerance, error, belt, slip, tick, bus, onset)
+    machine: Any                                 # EmbodiedMobileManipulator (intent rate and latency)
+    stall: Quantity
+    target_speed: Optional[Quantity] = None
+
+    @property
+    def speed(self) -> Quantity:
+        return self.site.v_conveyor if self.target_speed is None else self.target_speed
+
+    @property
+    def result(self):
+        from .solvers import IntentCadenceModel
+        s, rm = self.site, self.machine
+        return IntentCadenceModel().solve(
+            s.grasp_tolerance, s.grasp_initial_error, self.speed, s.a_conveyor_slip,
+            rm.intent_rate, rm.intent_inference_latency, self.stall, s.t_tick, s.t_bus, s.t_brake_onset)
+
+
+class DynamicReachScenario(BaseScenario):
+    """A target ``target_distance`` from the gripper at ``cadence.machine``'s TCP speed ceiling,
+    against the cadence scenario's evidence windows."""
+    cadence: IntentCadenceScenario
+    target_distance: Quantity
+
+    @property
+    def speed_ceiling(self) -> Quantity:
+        return self.cadence.machine.tcp_speed_limit
+
+    @property
+    def result(self):
+        from .solvers import DynamicReachModel
+        c = self.cadence.result
+        return DynamicReachModel().solve(self.speed_ceiling, self.target_distance,
+                                         c.tracked_horizon, c.untracked_horizon)
+
+
+class ForwardOccupancyScenario(BaseScenario):
+    """A coworker's forward occupancy set at ``cadence.site``'s design approach speed, screened over
+    the cadence scenario's evidence windows and over a ``forecast`` horizon, against the aisle."""
+    cadence: IntentCadenceScenario
+    forecast: Quantity
+
+    @property
+    def result(self):
+        from .solvers import ForwardOccupancyModel
+        s, c = self.cadence.site, self.cadence.result
+        return ForwardOccupancyModel().solve(s.v_human_approach, s.aisle_width, c.untracked_horizon,
+                                             c.tracked_horizon, self.forecast)
+
+
+class IntentLeaseExpiryScenario(BaseScenario):
+    """The intent lease for the cadence scenario's target: its evidence horizons, an
+    ``administrative_lease``, and the stopping deadline from ``clearance`` at the TCP speed ceiling,
+    with the arm's credible deceleration from its handbook worst-case stop."""
+    cadence: IntentCadenceScenario
+    administrative_lease: Quantity
+    clearance: Quantity
+
+    @property
+    def result(self):
+        from .solvers import IntentLeaseExpiryModel
+        c, rm = self.cadence.result, self.cadence.machine
+        return IntentLeaseExpiryModel().solve(
+            c.untracked_horizon, c.tracked_horizon, self.administrative_lease, c.stop_onset,
+            rm.tcp_speed_limit, rm.arm.cartesian_velocity_limit, rm.arm.emergency_stop_time,
+            self.clearance)
+
+
+class ReferentSetScenario(BaseScenario):
+    """Raw per-box ``scores`` of retained candidates screened by a conformal threshold calibrated on
+    ``calibration_count`` scenes at miss rate ``alpha``, whose calibration score is ``threshold_score``."""
+    labels: List[str]
+    scores: List[float]
+    calibration_count: int
+    alpha: float
+    threshold_score: float                       # qhat
+
+    @property
+    def result(self):
+        from .solvers import ReferentSetModel
+        return ReferentSetModel().solve(self.scores, self.calibration_count, self.alpha, self.threshold_score)
+
+
+class ConfidenceRegionScenario(BaseScenario):
+    """A Gaussian position estimate with principal standard deviations ``sigmas``: its ``coverage``
+    region against ``site``'s grasp tolerance."""
+    site: Any                                    # EmbodiedSiteScenario (grasp tolerance)
+    sigmas: List[Quantity]
+    coverage: float
+
+    @property
+    def result(self):
+        from .solvers import ConfidenceRegionModel
+        return ConfidenceRegionModel().solve(self.sigmas, self.coverage, self.site.grasp_tolerance)
+
+
+class GoalSetMembershipScenario(BaseScenario):
+    """Terminal TCP ``offsets`` along one axis tested against a goal set whose semi-axes all equal
+    ``site``'s grasp tolerance: the normalized ellipsoidal distance, inside when at most one."""
+    site: Any                                    # EmbodiedSiteScenario (grasp tolerance)
+    offsets: List[Quantity]
+
+    @property
+    def norms(self) -> List[float]:
+        return [(d / self.site.grasp_tolerance).to("").magnitude for d in self.offsets]
+
+    @property
+    def inside(self) -> List[bool]:
+        return [n <= 1.0 for n in self.norms]
+

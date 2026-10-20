@@ -507,3 +507,22 @@ __all__ += [
     "RaymarchTrafficModel",
     "EncoderRateModel",
 ]
+
+# --- Grounded intent: cadence, reach, occupancy, lease expiry, referent sets (added 2026-10-20) ---
+from .grounding import (
+    IntentCadenceModel,
+    DynamicReachModel,
+    ForwardOccupancyModel,
+    IntentLeaseExpiryModel,
+    ReferentSetModel,
+    ConfidenceRegionModel,
+)
+
+__all__ += [
+    "IntentCadenceModel",
+    "DynamicReachModel",
+    "ForwardOccupancyModel",
+    "IntentLeaseExpiryModel",
+    "ReferentSetModel",
+    "ConfidenceRegionModel",
+]

@@ -652,3 +652,20 @@ def calc_noncentral_gate_detection(gate, dof, noncentrality):
     if gate <= 0 or dof < 1 or noncentrality < 0:
         raise ValueError("gate must be positive, dof >= 1, and noncentrality >= 0")
     return float(ncx2.sf(gate, dof, noncentrality))
+def calc_chi_square_quantile(degrees_of_freedom: int, coverage: float) -> float:
+    """Quantile of the chi-square distribution: the squared Mahalanobis radius of a Gaussian
+    confidence region holding probability ``coverage`` in ``degrees_of_freedom`` dimensions
+    (added 2026-10-20).
+
+    A point of a ``k``-dimensional Gaussian lies inside the region
+    ``(x - mu)^T Sigma^-1 (x - mu) <= r^2`` with probability ``coverage`` when
+    ``r^2`` is this quantile; the region's principal semi-axes are
+    ``r sigma_i``. For ``k = 3`` and 0.95 the quantile is about 7.815.
+
+    Source: the chi-square distribution of a sum of ``k`` squared standard
+    normals (NIST/SEMATECH e-Handbook of Statistical Methods, Sec. 1.3.6.6.6).
+    """
+    if degrees_of_freedom < 1 or not 0.0 < coverage < 1.0:
+        raise ValueError("degrees_of_freedom must be >= 1 and coverage in (0, 1)")
+    from scipy.stats import chi2
+    return float(chi2.ppf(coverage, degrees_of_freedom))

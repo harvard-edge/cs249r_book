@@ -79,6 +79,8 @@ EventDataRecorders = _load("event_data_recorders", "EventDataRecorders", "Pre-cr
 RobotLearning = _load("robot_learning", "RobotLearning", "Cited figures of published robot-learning runs (Dactyl, legged_gym, HIL-SERL, QT-Opt, a grasping farm, Diffusion Policy, OpenVLA pretraining).")
 RobotPerception = _load("robot_perception", "RobotPerception", "Cited figures of robot odometry, mapping, and tracking systems (UMBmark, nvblox Table II, SORT defaults).")  # added 2026-10-20
 # Road-vehicle safety demonstrated from driven exposure (added 2026-10-20)
+RobotGrounding = _load("robot_grounding", "RobotGrounding", "Cited results of grounding learned proposals on real robots (AutoRT task filter, OK-Robot failure analysis, KnowNo).")  # added 2026-10-20
+HumanMotion = _load("human_motion", "HumanMotion", "Cited measurements of how fast people walk (Bohannon 1997).")  # added 2026-10-20
 RoadVehicleSafety = _load("road_vehicle_safety", "RoadVehicleSafety", "Cited miles-to-demonstrate requirements (RAND RR-1478) and a dated driverless-fleet exposure total (Kusano et al. 2025).")
 # Network architectures (added 2026-10-20)
 NetflixPrize = _load("netflix_prize", "NetflixPrize", "Cited figures of the Netflix Prize and what Netflix shipped from it (Johnston 2012; Amatriain and Basilico 2012).")
@@ -390,6 +392,8 @@ class Literature(Registry):
     RobotLearning = RobotLearning  # added 2026-10-20
     RobotPerception = RobotPerception  # added 2026-10-20
     RoadVehicleSafety = RoadVehicleSafety  # added 2026-10-20
+    RobotGrounding = RobotGrounding  # added 2026-10-20
+    HumanMotion = HumanMotion  # added 2026-10-20
     NetflixPrize = NetflixPrize  # network architectures (added 2026-10-20)
     KerasApplications = KerasApplications  # network architectures (added 2026-10-20)
     ContextWindows = ContextWindows  # network architectures (added 2026-10-20)

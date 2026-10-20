@@ -3322,3 +3322,74 @@ class EncoderRateResult(SolverResult):
     required: Quantity
     peak: Quantity
     shortfall: float
+# ── Grounded intent: the intent lease and its gates (added 2026-10-20) ─────────
+
+class IntentCadenceResult(SolverResult):
+    """Result from IntentCadenceModel: a target's evidence horizons against a slow proposer's cadence."""
+    margin: Quantity                         # tolerance - initial error
+    untracked_horizon: Quantity              # margin / target speed
+    tracked_horizon: Quantity                # sqrt(2 margin / a_slip)
+    intent_period: Quantity                  # 1 / intent rate
+    error_at_period: Quantity                # initial error + speed x period
+    excess_at_period: Quantity               # error at period - tolerance
+    inference_overrun: Quantity              # inference - untracked horizon
+    inference_over_horizon: float            # inference / untracked horizon
+    renewal_age: Quantity                    # period + inference: oldest evidence behind a model-only target
+    renewal_speed_ceiling: Quantity          # margin / renewal age
+    renewal_share: float                     # ceiling / target speed
+    stall: Quantity
+    stall_error_untracked: Quantity          # initial error + speed x stall
+    stall_error_tracked: Quantity            # initial error + a_slip stall^2 / 2
+    stop_onset: Quantity                     # tick + bus + brake onset after expiry
+    untracked_expiry_to_onset: Quantity      # untracked horizon + stop onset
+    tracked_expiry_to_onset: Quantity        # tracked horizon + stop onset
+
+
+class DynamicReachResult(SolverResult):
+    """Result from DynamicReachModel: the transit lower bound against a target's evidence windows."""
+    transit_floor: Quantity                  # distance / speed ceiling
+    reach_tracked: Quantity                  # speed ceiling x tracked horizon
+    reach_untracked: Quantity                # speed ceiling x untracked horizon
+    shortfall: Quantity                      # transit floor - tracked horizon
+    fits: bool                               # transit floor <= tracked horizon
+    fresh_captures: int                      # ceil(transit floor / tracked horizon)
+
+
+class ForwardOccupancyResult(SolverResult):
+    """Result from ForwardOccupancyModel: growth of a person's speed-bound set against an aisle."""
+    growth_untracked: Quantity               # v_h x untracked horizon
+    growth_tracked: Quantity                 # v_h x tracked horizon
+    growth_forecast: Quantity                # v_h x forecast horizon
+    forecast_over_aisle: float               # growth over forecast / aisle width
+    aisle_span_horizon: Quantity             # aisle width / v_h
+
+
+class IntentLeaseExpiryResult(SolverResult):
+    """Result from IntentLeaseExpiryModel: the three terms of the intent lease's expiry bound."""
+    credible_deceleration: Quantity          # velocity limit / worst-case stop time
+    stop_distance: Quantity                  # v t_onset + v^2 / (2 a)
+    stopping_deadline: Quantity              # (clearance - stop distance) / v
+    expiry_untracked: Quantity               # min(untracked horizon, lease, deadline)
+    expiry_tracked: Quantity                 # min(tracked horizon, lease, deadline)
+    binding_untracked: str                   # "evidence", "administrative", or "stopping"
+    binding_tracked: str
+
+
+class ReferentSetResult(SolverResult):
+    """Result from ReferentSetModel: normalized candidate scores and the conformal prediction set."""
+    normalized: List[float]                  # raw scores over their sum
+    entropy: float                           # Shannon entropy of the normalized scores, nats
+    max_entropy: float                       # ln(number of candidates)
+    rank: int                                # calibration rank ceil((n + 1)(1 - alpha))
+    threshold: float                         # 1 - qhat: the normalized score a candidate needs
+    set_size: int                            # candidates at or above the threshold
+    refuse: bool                             # set size other than one
+
+
+class ConfidenceRegionResult(SolverResult):
+    """Result from ConfidenceRegionModel: a Gaussian estimate's confidence region against a tolerance."""
+    quantile: float                          # chi-square quantile r^2
+    radius: float                            # r, in standard deviations
+    semi_axes: List[Quantity]                # r sigma_i
+    axes_within: int                         # semi-axes at or under the tolerance
+    worst_over_tolerance: float              # largest semi-axis / tolerance
