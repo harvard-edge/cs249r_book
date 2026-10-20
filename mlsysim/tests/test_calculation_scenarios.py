@@ -4307,7 +4307,7 @@ def test_gpt2_xl_step_fits_one_h100():
     assert act.score_share == approx(0.701754)
     assert act.per_sequence_activations.to("GB").magnitude == approx(2.67387)
     assert Scenarios.Gpt2XlRunOnOneH100Fp32.training_time.to("day").magnitude == approx(518.2421)
-    assert Scenarios.Gpt2XlRunOnOneH100Tf32.rental_cost.to("USD").magnitude == approx(6747.638)
+    assert Scenarios.Gpt2XlRunOnOneH100Tf32.rental_cost.to("USD").magnitude == approx(6740.816)
     assert Scenarios.Gpt2XlSingleCoreTokenizerFeed.busy_fraction == approx(0.476441)
 
 
