@@ -83,30 +83,23 @@ Offers like this one recur, because the price of a fixed capability falls quickl
 # │ Context: @fig-vol3-price-at-fixed-capability and the paragraph after it.
 # │ Goal: Quantify how fast the token price of a fixed capability falls.
 # │ Show: Range and median of per-year decline across every threshold.
-# │ How:  Log-linear fit of lowest price on release date per threshold
-# │       series in Literature.LowestPriceAtCapability.
+# │ How:  Scenarios.PriceAtFixedCapabilityDecline: log-linear fit of lowest
+# │       price on release date per threshold series in
+# │       Literature.LowestPriceAtCapability.
 # └─────────────────────────────────────────────────────────────────────────────
-import datetime as dt
-import numpy as np
-from mlsysim import Literature
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_multiple
-
-def _decline_per_year(points):
-    """Factor by which the lowest price falls per year, from a log10-linear fit."""
-    t = np.array([dt.date.fromisoformat(p["release_date"]).toordinal() / 365.25 for p in points])
-    return 10 ** -np.polyfit(t, np.log10([p["usd_per_mtok"] for p in points]), 1)[0]
 
 class PriceAtCapability:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    rows = Literature.LowestPriceAtCapability.entries
+    scenario = Scenarios.PriceAtFixedCapabilityDecline
+    rows = scenario.rows
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    series = {}
-    for _r in rows:
-        series.setdefault((_r["benchmark"], _r["threshold_model"]), []).append(_r)
-    rates = sorted(_decline_per_year(v) for v in series.values())
-    rate_lo, rate_med, rate_hi = rates[0], float(np.median(rates)), rates[-1]
-    last_date = max(r["release_date"] for r in rows)
+    _r = scenario.result
+    series = _r.series_rates
+    rate_lo, rate_med, rate_hi = _r.rate_low, _r.rate_median, _r.rate_high
+    last_date = _r.last_date
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(rate_lo > 5 and rate_hi > 500, "Prose says every series fell at least ~10x per year, the fastest by hundreds")
@@ -253,39 +246,43 @@ The factor $(1-\AcceptanceFraction)/\AcceptanceFraction$ represents the rejectio
 # │ Goal: Compare total spend per accepted task, with and without human triage.
 # │ Show: Model and attempt costs, cohort costs, and accepted-task ratios.
 # │ How:  One bounded attempt per ticket; all outcomes and charges settled.
+# │ How:  Scenarios.RepairCohortTokenPriceComparison (FrontierModelRepairCohort
+# │       against LowTokenPriceRepairCohort).
 # │ Note: Hypothetical prices and counts, not a provider schedule or experiment.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_usd, fmt_int, fmt_multiple, fmt_percent
 
 class TokenPriceFallacy:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    tickets = 100
-    a_accepted, b_accepted = 75, 25
-    a_in, a_out = 3.00, 15.00  # scenario USD per million tokens
-    b_in, b_out = 0.30, 1.20
-    a_turns, b_turns = 4, 7
-    a_ctx, a_gen = 16_000, 800  # scenario tokens per turn
-    b_ctx, b_gen = 28_000, 1_200
-    c_env = 0.03  # scenario USD per turn, all tool/sandbox holding charges
-    c_verify = 0.05  # scenario USD per attempt, additional assessment
-    c_human = 10.00  # scenario USD per rejected attempt, triage only
+    comparison = Scenarios.RepairCohortTokenPriceComparison
+    _a, _b = comparison.baseline, comparison.alternative
+    tickets = _a.tasks
+    a_accepted, b_accepted = _a.accepted, _b.accepted
+    a_in, a_out = _a.input_price.to("USD / Mtoken").magnitude, _a.output_price.to("USD / Mtoken").magnitude
+    b_in, b_out = _b.input_price.to("USD / Mtoken").magnitude, _b.output_price.to("USD / Mtoken").magnitude
+    a_turns, b_turns = _a.turns, _b.turns
+    a_ctx, a_gen = _a.input_tokens_per_turn, _a.output_tokens_per_turn
+    b_ctx, b_gen = _b.input_tokens_per_turn, _b.output_tokens_per_turn
+    c_env = _a.environment_per_turn.to("USD").magnitude
+    c_verify = _a.assessment_per_attempt.to("USD").magnitude
+    c_human = _a.triage_per_rejected.to("USD").magnitude
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    a_model = a_turns * (a_ctx * a_in + a_gen * a_out) / 1e6
-    b_model = b_turns * (b_ctx * b_in + b_gen * b_out) / 1e6
-    a_attempt = a_model + a_turns * c_env + c_verify
-    b_attempt = b_model + b_turns * c_env + c_verify
-    a_total, b_total = tickets * a_attempt, tickets * b_attempt
-    a_rejected, b_rejected = tickets - a_accepted, tickets - b_accepted
-    a_total_h = a_total + a_rejected * c_human
-    b_total_h = b_total + b_rejected * c_human
-    a_eff, b_eff = a_total / a_accepted, b_total / b_accepted
-    a_eff_h, b_eff_h = a_total_h / a_accepted, b_total_h / b_accepted
-    eff_ratio, eff_h_ratio = b_eff / a_eff, b_eff_h / a_eff_h
-    a_fail_per_acc, b_fail_per_acc = a_rejected / a_accepted, b_rejected / b_accepted
-    model_cut = 1 - b_model / a_model  # token-charge reduction per attempt
-    attempt_cut = 1 - b_attempt / a_attempt  # all-in reduction per attempt
-    needed_cut = 1 - b_accepted / a_accepted  # attempt cut that would tie per accepted task
+    _r = comparison.result
+    _ra, _rb = _r.baseline, _r.alternative
+    a_model, b_model = _ra.model_cost, _rb.model_cost
+    a_attempt, b_attempt = _ra.attempt_cost, _rb.attempt_cost
+    a_total, b_total = _ra.cohort_cost, _rb.cohort_cost
+    a_rejected, b_rejected = _ra.rejected, _rb.rejected
+    a_total_h, b_total_h = _ra.cohort_cost_with_triage, _rb.cohort_cost_with_triage
+    a_eff, b_eff = _ra.cost_per_accepted, _rb.cost_per_accepted
+    a_eff_h, b_eff_h = _ra.cost_per_accepted_with_triage, _rb.cost_per_accepted_with_triage
+    eff_ratio, eff_h_ratio = _r.cost_ratio, _r.cost_ratio_with_triage
+    a_fail_per_acc, b_fail_per_acc = _ra.rejected_per_accepted, _rb.rejected_per_accepted
+    model_cut = _r.model_cut  # token-charge reduction per attempt
+    attempt_cut = _r.attempt_cut  # all-in reduction per attempt
+    needed_cut = _r.acceptance_cut  # attempt cut that would tie per accepted task
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(0 < b_accepted < a_accepted < tickets, "Both cohorts need accepted and rejected tasks")
@@ -394,48 +391,41 @@ Prefix hits require strict alignment between the incoming token sequence and the
 # │ Context: @nbk-18-prefix-cache-dollars and @nbk-vol3-compaction-crossing.
 # │ Goal: Price logical input and find the first paying compaction horizon.
 # │ Show: Cache bill, summary/rebuild cost, and adjacent integer horizons.
-# │ How: Declared ideal-reuse tariff; compaction causes a complete cache miss.
+# │ How: Scenarios.RepairResendCacheBill (declared ideal-reuse tariff) and
+# │      Scenarios.RepairCompactionPayback (a complete cache miss), with its
+# │      half-cached-rate variant.
 # └─────────────────────────────────────────────────────────────────────────────
-from math import ceil
-from mlsysim import USD
+from mlsysim import Scenarios, USD
 from mlsysim.fmt import check, fmt_int, fmt_usd, fmt_multiple, fmt_percent
 
 class PrefixCacheCost:
     # ┌── 1. LOAD (Hypothetical tariff and fixed trajectory) ────────────────
-    turns, s0, delta, k_turn = 30, 8_000, 1_500, 200
-    p_in, p_out = 3 * USD, 15 * USD  # per million tokens
-    cached_share = 0.10
-    compact_turn, compact_to, summary_out = 16, 12_000, 1_500
+    bill = Scenarios.RepairResendCacheBill
+    compaction = Scenarios.RepairCompactionPayback
+    compaction_half = Scenarios.RepairCompactionPaybackHalfCachedRate
+    _t = bill.trajectory
+    turns, s0, delta, k_turn = _t.turns, _t.first_prompt, _t.appended, _t.output_per_turn
+    p_in = bill.input_price.to("USD / Mtoken").magnitude * USD  # per million tokens
+    p_out = bill.output_price.to("USD / Mtoken").magnitude * USD
+    cached_share = bill.cached_fraction
+    compact_turn, compact_to, summary_out = compaction.compact_turn, compaction.compact_to, compaction.summary_tokens
 
     # ┌── 2. EXECUTE (Bills and incremental compaction cost) ────────────────
-    sent = turns * s0 + delta * turns * (turns - 1) // 2
-    fresh = s0 + delta * (turns - 1)
-    in_nocache = sent * p_in / 1_000_000
-    in_cache = (fresh + cached_share * (sent - fresh)) * p_in / 1_000_000
-    out_cost = turns * k_turn * p_out / 1_000_000
-    total_nocache, total_cache = in_nocache + out_cost, in_cache + out_cost
-    cache_ratio = (total_nocache / total_cache).magnitude
-    ctx_at = s0 + (compact_turn - 1) * delta
-    rest = turns - compact_turn + 1
-    first_keep = (delta + (ctx_at - delta) * cached_share) * p_in / 1_000_000
+    _b, _c = bill.result, compaction.result
+    sent, fresh = _b.sent_tokens, _b.fresh_tokens
+    in_nocache, in_cache, out_cost = _b.input_uncached, _b.input_cached, _b.output_cost
+    total_nocache, total_cache = _b.total_uncached, _b.total_cached
+    cache_ratio = _b.cache_ratio
+    ctx_at, rest = _c.context_at_compaction, _c.remaining_calls
+    summary_cost, upfront, per_turn_saving = _c.summary_cost, _c.upfront, _c.per_call_saving
+    breakeven_turns = _c.breakeven_calls
+    keep_cost, comp_cost, comp_total = _c.keep_cost, _c.compact_cost, _c.compact_total
     first_comp = compact_to * p_in / 1_000_000
-    summary_cost = first_keep + summary_out * p_out / 1_000_000
-    upfront = summary_cost + first_comp - first_keep
-    per_turn_saving = (ctx_at - compact_to) * cached_share * p_in / 1_000_000
-    breakeven_turns = 1 + ceil((upfront / per_turn_saving).magnitude)
-    keep_sum = rest * ctx_at + delta * rest * (rest - 1) // 2
-    keep_cost = (rest * delta + cached_share * (keep_sum - rest * delta)) * p_in / 1_000_000
-    comp_sum = rest * compact_to + delta * rest * (rest - 1) // 2
-    comp_fresh = compact_to + (rest - 1) * delta
-    comp_cost = (comp_fresh + cached_share * (comp_sum - comp_fresh)) * p_in / 1_000_000
-    comp_total = comp_cost + summary_cost
-    gap_before = upfront - (breakeven_turns - 2) * per_turn_saving
-    saving_at = (breakeven_turns - 1) * per_turn_saving - upfront
-    hit_drop = 0.10  # scenario: share of the eligible prefix that misses
-    miss_cost = hit_drop * (sent - fresh) * (1 - cached_share) * p_in / 1_000_000
-    miss_pct = (miss_cost / total_cache).magnitude
+    gap_before, saving_at = _c.gap_before, _c.saving_at
+    hit_drop = bill.miss_fraction  # share of the eligible prefix that misses
+    miss_cost, miss_pct = _b.miss_cost, _b.miss_share
     # upfront does not depend on the cached rate; the per-call saving scales with it
-    breakeven_half = 1 + ceil((upfront / (per_turn_saving / 2)).magnitude)
+    breakeven_half = compaction_half.result.breakeven_calls
 
     # ┌── 3. GUARD (Independent direct sums and integer crossing) ───────────
     direct_keep, direct_comp = 0 * USD, first_comp
@@ -542,25 +532,25 @@ In contrast, launching all $\IndependentAttemptCount$ attempts concurrently in a
 # │ Context: @nbk-vol3-economics-retry-policies.
 # │ Goal: Separate coverage, per-input spend, and cost per accepted task.
 # │ Show: Sequential early stop, fully paid batch, and one stronger attempt.
-# │ How: Homogeneous conditional iid acceptance and fixed all-in attempt cost.
+# │ How: Scenarios.CheapRetryAgainstStrongCall: homogeneous conditional iid
+# │      acceptance and fixed all-in attempt cost.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import USD
+from mlsysim import Scenarios, USD
 from mlsysim.fmt import check, fmt, fmt_int, fmt_usd, fmt_percent, fmt_multiple
 
 class RetryBudget:
     # ┌── 1. LOAD (Independent hypothetical policy comparison) ──────────────
-    p_small, p_big, k = 0.30, 0.70, 5
-    c_small, c_big = 0.10 * USD, 0.40 * USD
+    policy = Scenarios.CheapRetryAgainstStrongCall
+    p_small, p_big, k = policy.pass_probability, policy.strong_pass_probability, policy.max_attempts
+    c_small, c_big = policy.attempt_cost.to(USD), policy.strong_attempt_cost.to(USD)
 
     # ┌── 2. EXECUTE (Expected costs include rejected attempts) ─────────────
-    coverage = 1 - (1 - p_small) ** k
-    seq_attempts = 0.0
-    for j in range(k):
-        seq_attempts += (1 - p_small) ** j
-    seq_cost, par_cost = c_small * seq_attempts, k * c_small
-    seq_per_acc, par_per_acc = seq_cost / coverage, par_cost / coverage
-    big_per_acc = c_big / p_big
-    batch_premium = k / seq_attempts  # paid batch vs. early stop, same coverage
+    _r = policy.result
+    coverage, seq_attempts = _r.coverage, _r.expected_attempts
+    seq_cost, par_cost = _r.sequential_cost, _r.batch_cost
+    seq_per_acc, par_per_acc = _r.sequential_per_accepted, _r.batch_per_accepted
+    big_per_acc = _r.strong_per_accepted
+    batch_premium = _r.batch_premium  # paid batch vs. early stop, same coverage
 
     # ┌── 3. GUARD (Geometric identity and scenario ordering) ───────────────
     check(abs(seq_attempts - coverage / p_small) < 1e-12, "Expected attempts")
@@ -630,29 +620,32 @@ When sandbox setup and test execution take minutes while model calls take second
 # WHERE FASTER INFERENCE HELPS (LEGO)
 # Goal: Bound elapsed-time savings in one fixed, serial repair episode.
 # Scope: Hypothetical seconds, not measurements or a fleet workload model.
-from mlsysim import second
+# How: Scenarios.SerialRepairEpisode (Amdahl's law on disjoint intervals).
+from mlsysim import Scenarios, second
 from mlsysim.fmt import fmt_qty, fmt_percent, fmt_multiple, check
 
 class CriticalPath:
     # 1. LOAD: sequential intervals; all required work remains unchanged.
-    model_intervals_s = (1.20, 8.40, 1.85, 11.20, 2.10, 4.50)
-    tests_s = 245.60
-    lifecycle_intervals_s = (14.80, 22.55)
-    runtime_status_intervals_s = (0.12, 0.08)
-    model_speedup = 4.0
+    episode = Scenarios.SerialRepairEpisode
+    model_intervals_s = tuple(x.to(second).magnitude for x in episode.model_intervals)
+    tests_s = episode.tests.to(second).magnitude
+    lifecycle_intervals_s = tuple(x.to(second).magnitude for x in episode.lifecycle_intervals)
+    runtime_status_intervals_s = tuple(x.to(second).magnitude for x in episode.runtime_intervals)
+    model_speedup = episode.model_speedup
 
     # 2. EXECUTE: each interval belongs to exactly one category.
-    model_s = sum(model_intervals_s)
-    lifecycle_s = sum(lifecycle_intervals_s)
-    runtime_status_s = sum(runtime_status_intervals_s)
-    other_s = tests_s + lifecycle_s + runtime_status_s
-    total_s = model_s + other_s
-    model_fraction = model_s / total_s
-    changed_s = other_s + model_s / model_speedup
-    saving_s = total_s - changed_s
-    speedup = total_s / changed_s
-    limiting_speedup = total_s / other_s
-    tests_half_saving_s = tests_s / 2  # alternative: halve the required test interval
+    _r = episode.result
+    model_s = _r.model_time.to(second).magnitude
+    lifecycle_s = _r.lifecycle_time.to(second).magnitude
+    runtime_status_s = _r.runtime_time.to(second).magnitude
+    other_s = _r.other_time.to(second).magnitude
+    total_s = _r.total_time.to(second).magnitude
+    model_fraction = _r.model_fraction
+    changed_s = _r.changed_time.to(second).magnitude
+    saving_s = _r.saving.to(second).magnitude
+    speedup = _r.speedup
+    limiting_speedup = _r.limiting_speedup
+    tests_half_saving_s = _r.tests_half_saving.to(second).magnitude  # alternative: halve the required tests
 
     # 3. GUARD: disjoint accounting and independent Amdahl calculation.
     check(all(t >= 0 for t in model_intervals_s + lifecycle_intervals_s + runtime_status_intervals_s), "Nonnegative intervals")
@@ -754,27 +747,29 @@ This break-even condition describes arithmetic steps within an isolated model ca
 # │ How:  S = (m + 1) / (gamma * r + 1), then T' = T[(1 - f) + f / S].
 # │ Note: Optimistically treats CriticalPath model intervals as pure decode,
 # │       with negligible prefill, queueing, or other nondecode overhead.
-# │       Draft length, cost ratio, and acceptance are scenario inputs.
+# │       Draft length, cost ratio, and acceptance are scenario inputs of
+# │       Scenarios.SerialRepairEpisodeSpeculation.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import second
+from mlsysim import Scenarios, second
 from mlsysim.fmt import check, fmt, fmt_int, fmt_multiple, fmt_qty
 
 class SpecComposition:
     # ┌── 1. LOAD (Scenario inputs; episode from CriticalPath) ──────────────
-    gamma = 5  # scenario: draft tokens proposed per round
-    r = 0.08  # scenario: draft token cost as a fraction of a target step
-    m_high, m_low = 3.6, 0.3  # scenario: mean accepted draft tokens per round
+    spec = Scenarios.SerialRepairEpisodeSpeculation
+    gamma = spec.draft_length  # draft tokens proposed per round
+    r = spec.draft_cost_ratio  # draft token cost as a fraction of a target step
+    m_high, m_low = spec.accepted_high, spec.accepted_low  # mean accepted draft tokens per round
     decode_fraction = CriticalPath.model_fraction  # zero-nondecode approximation
     total_s = CriticalPath.total_s
 
     # ┌── 2. EXECUTE (Decode-stream speedup, then fixed-work composition) ─────
-    breakeven = gamma * r
-    s_high = (m_high + 1) / (gamma * r + 1)
-    s_low = (m_low + 1) / (gamma * r + 1)
-    t_high = total_s * ((1 - decode_fraction) + decode_fraction / s_high)
-    t_low = total_s * ((1 - decode_fraction) + decode_fraction / s_low)
-    traj_high = total_s / t_high
-    traj_bound = 1 / (1 - decode_fraction)
+    _r = spec.result
+    breakeven = _r.break_even_accepted
+    s_high, s_low = _r.speedup_high, _r.speedup_low
+    t_high = _r.episode_time_high.to(second).magnitude
+    t_low = _r.episode_time_low.to(second).magnitude
+    traj_high = _r.episode_speedup_high
+    traj_bound = _r.episode_speedup_bound
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(m_high > breakeven > m_low >= 0, "One case on each side of the break-even")
@@ -835,26 +830,23 @@ The price spread a router can exploit is wide, and it does not track capability 
 # │ Goal: Show how loosely per-trial cost tracks score.
 # │ Show: Cost and duration ranges; cost ratio and score gap between the top
 # │       configuration and the runner-up; median best-to-worst spread.
-# │ How:  Literature.FrontierSweTrials.
+# │ How:  Scenarios.FrontierSweCostVsScore (Literature.FrontierSweTrials).
 # └─────────────────────────────────────────────────────────────────────────────
-import numpy as np
-from mlsysim import Literature
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_usd
 
 class CostVsScore:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    rows = sorted(Literature.FrontierSweTrials.entries, key=lambda r: -r["mean5"])
-    trials, budget_h = 5, 20  # protocol published by the benchmark
+    scenario = Scenarios.FrontierSweCostVsScore
+    rows = scenario.rows
+    trials, budget_h = scenario.trials, scenario.budget_hours  # protocol published by the benchmark
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    top, runner_up = rows[0], rows[1]
-    cost_ratio = top["usd_per_trial"] / runner_up["usd_per_trial"]
-    score_gap = 100 * (top["mean5"] - runner_up["mean5"])
-    usd_lo = min(r["usd_per_trial"] for r in rows)
-    usd_hi = max(r["usd_per_trial"] for r in rows)
-    h_lo = min(r["hours_per_trial"] for r in rows)
-    h_hi = max(r["hours_per_trial"] for r in rows)
-    spread = float(np.median([r["best5"] - r["worst5"] for r in rows]))
+    _r = scenario.result
+    cost_ratio, score_gap = _r.cost_ratio, _r.score_gap
+    usd_lo, usd_hi = _r.cost_low, _r.cost_high
+    h_lo, h_hi = _r.hours_low, _r.hours_high
+    spread = _r.median_spread
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(cost_ratio > 5 and score_gap < 5, "Prose says the top score costs many times the runner-up for a few points")
@@ -967,43 +959,37 @@ The planning metric of cost per accepted task is $\mathbb{E}[\CascadeTaskCost]/\
 # │ Context: The routing comparison under one unchanged acceptance contract.
 # │ Goal: Price every reached tier, including its final assessment.
 # │ Show: Resolved counts, cost per accepted task, and fixed-scenario durations.
-# │ How: Reconcile a hypothetical completed cohort with conditional reach sums.
+# │ How: Scenarios.CodeEditThreeTierCascade: reconcile a hypothetical completed
+# │      cohort with conditional reach sums.
 # └─────────────────────────────────────────────────────────────────────────────
 import math
-from mlsysim import ureg
+from mlsysim import Scenarios, ureg
 from mlsysim.fmt import MarkdownStr, check, fmt_int, fmt_multiple, fmt_percent, fmt_time, fmt_usd
 from mlsysim.core.units import second
 
 class CascadeCost:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    tasks = 100_000  # hypothetical completed cohort per policy
-    calls = (0.0004, 0.0020, 0.0600)  # dollars per reached tier, gate excluded
-    gate_cost = 0.0010  # dollars per assessment, same contract at every tier
-    call_seconds = (0.25, 0.80, 4.50)
-    gate_seconds = 0.40
-    accepted_by_tier = (60_000, 28_000, 11_400)
-    direct_accepted = 97_000  # separate stipulated full-cohort baseline
+    cascade = Scenarios.CodeEditThreeTierCascade
+    tasks = cascade.tasks  # hypothetical completed cohort per policy
+    calls = tuple(c.to("USD").magnitude for c in cascade.call_costs)  # dollars per reached tier, gate excluded
+    gate_cost = cascade.gate_cost.to("USD").magnitude  # dollars per assessment, same contract at every tier
+    call_seconds = tuple(t.to(second).magnitude for t in cascade.call_times)
+    gate_seconds = cascade.gate_time.to(second).magnitude
+    accepted_by_tier = tuple(cascade.accepted_by_tier)
+    direct_accepted = cascade.direct_accepted  # separate stipulated full-cohort baseline
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    reached = (tasks, tasks - accepted_by_tier[0], tasks - accepted_by_tier[0] - accepted_by_tier[1])
-    spend, elapsed_sum = 0.0, 0.0
-    conditional, reaches = [], []
-    for j in range(3):
-        conditional.append(accepted_by_tier[j] / reached[j])
-        reaches.append(reached[j] / tasks)
-        spend += reached[j] * (calls[j] + gate_cost)
-        elapsed_sum += reached[j] * (call_seconds[j] + gate_seconds)
-    accepted = sum(accepted_by_tier)
-    unresolved = tasks - accepted
-    per_initiated = spend / tasks
-    per_accepted = spend / accepted
-    direct_spend = tasks * (calls[-1] + gate_cost)
-    direct_per_accepted = direct_spend / direct_accepted
-    mean_seconds = elapsed_sum / tasks
-    all_tiers_seconds = sum(call_seconds) + 3 * gate_seconds
-    direct_seconds = call_seconds[-1] + gate_seconds
-    direct_ratio = direct_per_accepted / per_accepted
-    lower_tier_toll = calls[0] + calls[1] + 2 * gate_cost  # paid by every task reaching tier 3
+    _r = cascade.result
+    reached = tuple(_r.reached)
+    conditional, reaches = _r.conditional_acceptance, _r.reach_shares
+    spend = _r.spend
+    accepted, unresolved = _r.accepted, _r.unresolved
+    per_initiated, per_accepted = _r.per_initiated, _r.per_accepted
+    direct_spend, direct_per_accepted = _r.direct_spend, _r.direct_per_accepted
+    mean_seconds = _r.mean_time
+    all_tiers_seconds, direct_seconds = _r.all_tiers_time, _r.direct_time
+    direct_ratio = _r.direct_ratio
+    lower_tier_toll = _r.lower_tier_toll  # paid by every task reaching tier 3
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(tasks > 0 and 0 < direct_accepted <= tasks, "baseline denominator")
@@ -1142,24 +1128,27 @@ from mlsysim import *
 from mlsysim.core.units import dimensionless
 
 class TrajectoryCapacity:
-    # 1. LOAD: hypothetical stationary admitted population; token counts
-    # include all input/output tokens charged against this scenario's quota.
-    arrival = 1 / minute
-    residence = 20 * minute
-    calls = 60
-    tokens_per_call = 30_000
-    quota = 2_000_000 / minute
+    # 1. LOAD: hypothetical stationary admitted population (Scenarios.
+    # RepairTrajectoryQuotaAdmission); token counts include all input/output
+    # tokens charged against this scenario's quota.
+    admission = Scenarios.RepairTrajectoryQuotaAdmission
+    arrival = admission.arrival
+    residence = admission.residence
+    calls = admission.calls
+    tokens_per_call = admission.tokens_per_call
+    quota = admission.quota
 
     # 2. EXECUTE: mean resource demand, not burst or deadline feasibility.
-    concurrent = (arrival * residence).to(dimensionless).magnitude
-    call_rate = arrival * calls
-    tokens_per_trajectory = calls * tokens_per_call
-    demand = arrival * tokens_per_trajectory
-    quota_share = (demand / quota).to(dimensionless).magnitude
-    arrival_ceiling = quota / tokens_per_trajectory
+    _r = admission.result
+    concurrent = _r.concurrent
+    call_rate = _r.call_rate
+    tokens_per_trajectory = _r.tokens_per_trajectory
+    demand = _r.demand
+    quota_share = _r.quota_share
+    arrival_ceiling = _r.arrival_ceiling
     # At fixed goodput, admissions scale as 1/alpha; this relative drop in
     # acceptance raises admissions to the quota ceiling.
-    acceptance_margin = 1 - quota_share
+    acceptance_margin = _r.acceptance_margin
 
     # 3. GUARD
     check(arrival > 0 / minute and residence > 0 * second, "Positive flow and residence")
@@ -1208,20 +1197,21 @@ from mlsysim import *
 from mlsysim.core.units import dimensionless
 
 class QueuePrice:
-    # 1. LOAD: illustrative single-server model just specified in the text.
-    service = 1 * second
-    ca2, cs2 = 2.0, 4.0
-    rho_low, rho_high = 0.70, 0.90
-    holding_dollars_per_second = 0.002
+    # 1. LOAD: illustrative single-server model just specified in the text
+    # (Scenarios.BurstyModelServerQueuePrice, Kingman's approximation).
+    queue = Scenarios.BurstyModelServerQueuePrice
+    service = queue.service
+    ca2, cs2 = queue.arrival_scv, queue.service_scv
+    rho_low, rho_high = queue.low_utilization, queue.high_utilization
+    holding_dollars_per_second = queue.holding_rate.to("USD / second").magnitude
 
     # 2. EXECUTE
-    variability = (ca2 + cs2) / 2
-    wait_low = variability * rho_low / (1 - rho_low) * service
-    wait_high = variability * rho_high / (1 - rho_high) * service
-    holding_low = wait_low.to(second).magnitude * holding_dollars_per_second
-    holding_high = wait_high.to(second).magnitude * holding_dollars_per_second
-    wait_ratio = (wait_high / wait_low).to(dimensionless).magnitude
-    throughput_gain = rho_high / rho_low - 1
+    _r = queue.result
+    variability = _r.variability
+    wait_low, wait_high = _r.wait_low, _r.wait_high
+    holding_low, holding_high = _r.holding_low, _r.holding_high
+    wait_ratio = _r.wait_ratio
+    throughput_gain = _r.throughput_gain
 
     # 3. GUARD
     check(service > 0 * second and ca2 >= 0 and cs2 >= 0, "Valid mean and variability")
@@ -1284,17 +1274,20 @@ The factor $\ServingUtilization/(1-\ServingUtilization)$ explains why queueing d
 # │ Goal: Show why good per-call tails still give routinely slow trajectories.
 # │ Show: Probability that at least one of n serial calls meets a p99 delay.
 # │ How:  1 - (1 - p)^n under independent per-call tail events.
-# │ Note: Scenario call count; p is the definition of a 99th percentile.
+# │ Note: Scenario call count; p is the definition of a 99th percentile
+# │       (Scenarios.ThirtyCallTailExposure).
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_int
 
 class TailCompounding:
     # ┌── 1. LOAD (Scenario inputs) ─────────────────────────────────────────
-    n_calls = 30  # scenario: serial model calls on the trajectory's path
-    p_tail = 0.01  # a call exceeds its own p99 latency with probability 0.01
+    exposure = Scenarios.ThirtyCallTailExposure
+    n_calls = exposure.calls  # serial model calls on the trajectory's path
+    p_tail = exposure.tail_probability  # a call exceeds its own p99 latency with probability 0.01
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    p_hit = 1 - (1 - p_tail) ** n_calls
+    p_hit = exposure.any_tail
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(0 < p_tail < 1 and n_calls >= 1, "Valid tail probability and call count")
@@ -1329,29 +1322,33 @@ from mlsysim import *
 from mlsysim.core.units import dimensionless
 
 class DedicatedBreakEven:
-    # 1. LOAD: hypothetical matched-capability comparison; dollars and
-    # token counts are scalar accounting units, time remains a quantity.
-    input_per_output = 5.0
-    cached_share = 0.80
-    input_per_million, cached_per_million, output_per_million = 3.0, 0.30, 15.0
-    fixed_per_hour = 28.0
-    variable_per_million = 2.0
-    reference_rate = 1_200 / second
-    load_fraction = 0.52
+    # 1. LOAD: hypothetical matched-capability comparison (Scenarios.
+    # DedicatedCapacityBreakEven); dollars and token counts are scalar
+    # accounting units, time remains a quantity.
+    owned = Scenarios.DedicatedCapacityBreakEven
+    _per_m = "USD / Mtoken"
+    input_per_output = owned.input_per_output
+    cached_share = owned.cached_fraction
+    input_per_million = owned.input_price.to(_per_m).magnitude
+    cached_per_million = owned.cached_price.to(_per_m).magnitude
+    output_per_million = owned.output_price.to(_per_m).magnitude
+    fixed_per_hour = owned.fixed_per_hour.to("USD / hour").magnitude
+    variable_per_million = owned.variable_price.to(_per_m).magnitude
+    reference_rate = owned.reference_rate
+    load_fraction = owned.load
 
     # 2. EXECUTE
-    weighted_input = (1 - cached_share) * input_per_million + cached_share * cached_per_million
-    api_per_million = output_per_million + input_per_output * weighted_input
-    reference_hour_tokens = (reference_rate * hour).to(dimensionless).magnitude
-    delivered_hour_tokens = load_fraction * reference_hour_tokens
-    api_hour = delivered_hour_tokens * api_per_million / 1_000_000
-    dedicated_hour = fixed_per_hour + delivered_hour_tokens * variable_per_million / 1_000_000
-    contribution_hour = reference_hour_tokens * (api_per_million - variable_per_million) / 1_000_000
-    crossing = fixed_per_hour / contribution_hour
-    saving_hour = api_hour - dedicated_hour
+    _r = owned.result
+    weighted_input = _r.weighted_input_price
+    api_per_million = _r.api_price
+    reference_hour_tokens = _r.reference_hour_tokens
+    delivered_hour_tokens = _r.delivered_hour_tokens
+    api_hour, dedicated_hour = _r.api_hour, _r.dedicated_hour
+    crossing = _r.crossing
+    saving_hour = _r.saving_hour
     # Sensitivity: the same workload with no cached input on the API side.
-    api_nocache_per_million = output_per_million + input_per_output * input_per_million
-    crossing_nocache = fixed_per_hour / (reference_hour_tokens * (api_nocache_per_million - variable_per_million) / 1_000_000)
+    api_nocache_per_million = _r.api_price_no_cache
+    crossing_nocache = _r.crossing_no_cache
 
     # 3. GUARD
     check(0 <= cached_share <= 1 and 0 < load_fraction <= 1, "Valid mix and load")
@@ -1490,50 +1487,37 @@ Cancellation is where conservation is most easily broken. The cancellation conte
 # │ Show: Root balances, child pending liability, late bill, and released funds.
 # │ How: Exact integer accounting in thousandths of a scenario dollar, followed
 # │      by the atomic transfers of @tbl-vol3-budget-transitions.
-# │ Note: Hypothetical charge records and enforceable bounds, not provider rates.
+# │ Note: Hypothetical charge records and enforceable bounds, not provider rates
+# │       (Scenarios.RepairBudgetLateBill; a redelivered bill settles once).
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_usd
 
 class BudgetAccount:
     # ┌── 1. LOAD (Hypothetical records; integer milli-dollars) ─────────────
-    units_per_dollar = 1000
-    b_root = 5000
-    c_plan = 42  # final planning charge already settled at the first row
-    b_trace, b_fuzz = 1200, 2500
-    e_trace, e_fuzz = 380, 850
-    pending_fuzz = 1000  # enforceable maximum remaining remote charge
-    late_charge = 700  # authenticated final bill received after local stop
+    account = Scenarios.RepairBudgetLateBill
+    _r = account.result
+    units_per_dollar = _r.units_per_dollar
+    b_root = _r.budget
+    c_plan = _r.planning  # final planning charge already settled at the first row
+    b_trace, b_fuzz = _r.allocations
+    e_trace, e_fuzz = _r.settled_children
+    pending_fuzz = _r.pending  # enforceable maximum remaining remote charge
+    late_charge = _r.late_charge  # authenticated final bill received after local stop
 
     # ┌── 2. EXECUTE (Conserved transitions) ───────────────────────────────
-    f_after_plan = b_root - c_plan
-    r_deleg = b_trace + b_fuzz
-    f_after_deleg = f_after_plan - r_deleg
-    refund_trace = b_trace - e_trace
-    e_after_trace = c_plan + e_trace
-    r_after_trace = r_deleg - b_trace
-    f_after_trace = f_after_deleg + refund_trace
-    fuzz_free_at_stop = b_fuzz - e_fuzz - pending_fuzz
-    fuzz_apparent_free = b_fuzz - e_fuzz  # what a release at local stop would return
-    settlement_records = (("fuzz_final_bill", late_charge), ("fuzz_final_bill", late_charge))  # duplicate delivery
-    applied_settlements = {}
-    fuzz_e_settled = e_fuzz
-    for settlement_id, reported_charge in settlement_records:
-        if settlement_id in applied_settlements:
-            check(applied_settlements[settlement_id] == reported_charge, "Conflicting payload for a settlement identity")
-        else:
-            applied_settlements[settlement_id] = reported_charge
-            fuzz_e_settled += reported_charge
-    fuzz_free_settled = fuzz_free_at_stop + pending_fuzz - late_charge
-    e_final = e_after_trace + fuzz_e_settled
-    r_final = r_after_trace - b_fuzz
-    f_final = f_after_trace + fuzz_free_settled
-    root_states = (
-        (c_plan, 0, f_after_plan),
-        (c_plan, r_deleg, f_after_deleg),
-        (e_after_trace, r_after_trace, f_after_trace),
-        (e_after_trace, r_after_trace, f_after_trace),
-        (e_final, r_final, f_final),
-    )
+    f_after_plan = _r.free_after_planning
+    r_deleg = _r.reserved_delegated
+    f_after_deleg = _r.free_after_delegation
+    refund_trace = _r.refund_first
+    e_after_trace = _r.settled_after_first
+    r_after_trace = _r.reserved_after_first
+    f_after_trace = _r.free_after_first
+    fuzz_free_at_stop = _r.child_free_at_stop
+    fuzz_apparent_free = _r.child_apparent_free  # what a release at local stop would return
+    fuzz_free_settled = _r.child_free_settled
+    e_final, r_final, f_final = _r.settled_final, _r.reserved_final, _r.free_final
+    root_states = tuple(_r.states)
 
     # ┌── 3. GUARD (Conservation and displayed claims) ──────────────────────
     for settled, reserved, free in root_states:
@@ -1676,48 +1660,41 @@ In contrast, the isolated metric $\MeanAttemptCost/\AttemptPassProbability$ capt
 # │ Goal: Compare automation alone with a policy including human completion.
 # │ Show: Conditional loop yield, all assessed costs, and resolved-ticket costs.
 # │ How: Weight reached turns; price one fallback; keep denominators separate.
-# │ Scope: Hypothetical population expectations, not observed benchmark data.
+# │ Scope: Hypothetical population expectations, not observed benchmark data
+# │        (Scenarios.DependencyUpgradeArchitectures).
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import USD
+from mlsysim import Scenarios, USD
 from mlsysim.fmt import check, fmt, fmt_int, fmt_usd, fmt_percent
 
 class ArchitectureChoice:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    tickets = 10_000  # illustrative monthly arrivals
-    c_rules = 0.001 * USD  # all automated charges except the common assessment
-    c_call = 0.045 * USD
-    c_turn = 0.006 * USD
-    c_ver = 0.002 * USD  # same acceptance assessment for every candidate
-    p_rules, p_call = 0.32, 0.68
-    r1, r2, r3 = 0.55, 0.42, 0.30
-    c_human = 35 * USD  # one fallback, including its final assessment
-    human_resolution = 0.90  # conditional on entering human fallback
-    resolution_floor = 0.95  # declared combined-policy requirement
+    designs = Scenarios.DependencyUpgradeArchitectures
+    _rules, _call, _loop = "Rule-based rewriter", "Single model call", designs.loop_name
+    tickets = designs.tickets  # illustrative monthly arrivals
+    c_rules = designs.single_costs[_rules].to(USD)  # all automated charges except the common assessment
+    c_call = designs.single_costs[_call].to(USD)
+    c_turn = designs.turn_cost.to(USD)
+    c_ver = designs.check_cost.to(USD)  # same acceptance assessment for every candidate
+    p_rules, p_call = designs.single_acceptance[_rules], designs.single_acceptance[_call]
+    r1, r2, r3 = designs.turn_acceptance
+    c_human = designs.human_cost.to(USD)  # one fallback, including its final assessment
+    human_resolution = designs.human_resolution  # conditional on entering human fallback
+    resolution_floor = designs.resolution_floor  # declared combined-policy requirement
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    reach2 = 1 - r1
-    reach3 = reach2 * (1 - r2)
-    p_loop = 1 - reach3 * (1 - r3)
-    turns = 1 + reach2 + reach3
-    auto_rules = c_rules + c_ver
-    auto_call = c_call + c_ver
-    auto_loop = turns * (c_turn + c_ver)
-    auto_per_rules = auto_rules / p_rules
-    auto_per_call = auto_call / p_call
-    auto_per_loop = auto_loop / p_loop
-    total_rules = auto_rules + (1 - p_rules) * c_human
-    total_call = auto_call + (1 - p_call) * c_human
-    total_loop = auto_loop + (1 - p_loop) * c_human
-    resolved_rules = p_rules + (1 - p_rules) * human_resolution
-    resolved_call = p_call + (1 - p_call) * human_resolution
-    resolved_loop = p_loop + (1 - p_loop) * human_resolution
-    per_rules = total_rules / resolved_rules
-    per_call = total_call / resolved_call
-    per_loop = total_loop / resolved_loop
-    month_loop = tickets * total_loop
-    month_resolved = tickets * resolved_loop
-    point = 0.01  # one point of automated acceptance
-    point_value = point * c_human  # fallback spend avoided per ticket
+    _r = designs.result
+    _1, reach2, reach3 = _r.reach
+    p_loop, turns = _r.loop_acceptance, _r.loop_turns
+    auto_rules, auto_call, auto_loop = _r.automated[_rules], _r.automated[_call], _r.automated[_loop]
+    auto_per_rules = _r.automated_per_accepted[_rules]
+    auto_per_call = _r.automated_per_accepted[_call]
+    auto_per_loop = _r.automated_per_accepted[_loop]
+    total_rules, total_call, total_loop = _r.combined[_rules], _r.combined[_call], _r.combined[_loop]
+    resolved_rules, resolved_call, resolved_loop = _r.resolved[_rules], _r.resolved[_call], _r.resolved[_loop]
+    per_rules, per_call, per_loop = _r.per_resolved[_rules], _r.per_resolved[_call], _r.per_resolved[_loop]
+    month_loop, month_resolved = _r.month_spend, _r.month_resolved
+    point = designs.point  # one point of automated acceptance
+    point_value = _r.point_value  # fallback spend avoided per ticket
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(
@@ -1815,45 +1792,42 @@ The relation is the payback horizon of context compaction (@sec-vol3-agent-econo
 # │ Context: A separate hypothetical design comparison, not incident_42.
 # │ Goal: Price changed model usage under equal acceptance/latency requirements.
 # │ Show: Incremental saving, continuous break-even, integer crossing, months.
-# │ How: Expected assigned-task tokens times rates; all other costs cancel.
+# │ How: Scenarios.CodeReviewAdaptationPayback: expected assigned-task tokens
+# │      times rates; all other costs cancel.
 # └─────────────────────────────────────────────────────────────────────────────
-import math
 from mlsysim import *
 from mlsysim.core.units import dimensionless
 
 class WeightBreakEven:
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    base_in = 12_000  # hypothetical mean billable input tokens per step
-    base_out = 800  # hypothetical mean billable output tokens per step
-    base_steps = 5  # hypothetical steps per assigned task
-    base_p_in = 3 * USD / 1_000_000  # hypothetical input price per token
-    base_p_out = 15 * USD / 1_000_000  # hypothetical output price per token
-    adapt_in = 1_500
-    adapt_out = 800
-    adapt_steps = 4
-    adapt_p_in = 1 * USD / 1_000_000
-    adapt_p_out = 4 * USD / 1_000_000
-    c_data = 4_000 * USD  # incremental data collection and curation
-    c_train = 500 * USD  # incremental training compute
-    c_eval = 8_000 * USD  # incremental evaluation and review
-    volume_month = 20_000  # hypothetical assigned reviews per month
-    volume_low = 5_000  # sensitivity case: a quarter of the planned volume
+    payback = Scenarios.CodeReviewAdaptationPayback
+    _base, _adapt = payback.base, payback.adapted
+    base_in = _base["input_tokens"]  # hypothetical mean billable input tokens per step
+    base_out = _base["output_tokens"]  # hypothetical mean billable output tokens per step
+    base_steps = _base["steps"]  # hypothetical steps per assigned task
+    base_p_in = _base["input_price"].to("USD / Mtoken").magnitude * USD / 1_000_000  # per token
+    base_p_out = _base["output_price"].to("USD / Mtoken").magnitude * USD / 1_000_000
+    adapt_in = _adapt["input_tokens"]
+    adapt_out = _adapt["output_tokens"]
+    adapt_steps = _adapt["steps"]
+    adapt_p_in = _adapt["input_price"].to("USD / Mtoken").magnitude * USD / 1_000_000
+    adapt_p_out = _adapt["output_price"].to("USD / Mtoken").magnitude * USD / 1_000_000
+    c_data = payback.data_cost.to(USD)  # incremental data collection and curation
+    c_train = payback.training_cost.to(USD)  # incremental training compute
+    c_eval = payback.evaluation_cost.to(USD)  # incremental evaluation and review
+    volume_month = payback.monthly_volume  # hypothetical assigned reviews per month
+    volume_low = payback.low_volume  # sensitivity case: a quarter of the planned volume
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    base_step = base_in * base_p_in + base_out * base_p_out
-    base_task = base_steps * base_step
-    adapt_step = adapt_in * adapt_p_in + adapt_out * adapt_p_out
-    adapt_task = adapt_steps * adapt_step
-    c_invest = c_data + c_train + c_eval
-    delta_task = base_task - adapt_task
-    n_star = (c_invest / delta_task).to(dimensionless).magnitude
-    n_whole = math.ceil(n_star)
-    payback_months = n_star / volume_month
-    payback_low_months = n_star / volume_low
-    input_saving = base_steps * base_in * base_p_in - adapt_steps * adapt_in * adapt_p_in
-    input_saving_share = (input_saving / delta_task).to(dimensionless).magnitude
-    eval_share = (c_eval / c_invest).to(dimensionless).magnitude
-    train_share = (c_train / c_invest).to(dimensionless).magnitude
+    _r = payback.result
+    base_step, base_task = _r.base_step, _r.base_task
+    adapt_step, adapt_task = _r.adapted_step, _r.adapted_task
+    c_invest = _r.investment
+    delta_task = _r.saving_per_task
+    n_star, n_whole = _r.breakeven_tasks, _r.breakeven_whole
+    payback_months, payback_low_months = _r.payback_months, _r.payback_months_low
+    input_saving_share = _r.input_saving_share
+    eval_share, train_share = _r.evaluation_share, _r.training_share
 
     # ┌── 3. GUARD (Assumptions & Integer Crossing) ────────────────────────
     check(delta_task > 0 * USD, "Positive incremental saving required")
@@ -1922,13 +1896,14 @@ The dependency-upgrade and code-review comparisons each priced candidate designs
 # │ Goal: Price one attempt for each of the four lighthouse workloads.
 # │ Show: C_eff per workload and its response to three levers.
 # │ How:  C_eff = C_attempt / p_acc; the support handoff scales with (1 - p_acc).
-# │ Note: Repair horizon from the registry harness and repair token bill from
-# │       PrefixCacheCost. Research, remediation, and support inputs come from
-# │       the Agents.Research/Remediation/Support workload profiles; only the
+# │ Note: Scenarios.LighthouseWorkloadLevers. Repair horizon from the registry
+# │       harness and repair token bill from PrefixCacheCost. Research,
+# │       remediation, and support inputs come from the
+# │       Agents.Research/Remediation/Support workload profiles; only the
 # │       research fan-out multiple is sourced (anthropic2025multiagent), and
 # │       every other input is a documented teaching value, not a measurement.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Agents, USD
+from mlsysim import Agents, Scenarios, USD
 from mlsysim.fmt import check, fmt, fmt_int, fmt_multiple, fmt_percent, fmt_usd
 
 def _usd(q):
@@ -1937,13 +1912,15 @@ def _usd(q):
 
 class LighthouseEconomics:
     # ┌── 1. LOAD (Registry, cross-cell, cited, and scenario inputs) ─────────
+    levers = Scenarios.LighthouseWorkloadLevers
+    _repair = levers.workloads["repair"]
     # Repair agent: horizon capped by the registry's reference coding harness;
     # its token bill is the append-only trajectory priced in PrefixCacheCost.
-    repair_turns = Agents.Coding.SWE_Bench_Runner.max_trajectory_steps
+    repair_turns = _repair["turns"]
     repair_model = PrefixCacheCost.total_cache.to(USD).magnitude
-    repair_env_per_turn = 0.03  # scenario USD: sandbox holding and tool use per turn
-    repair_assess = 0.10  # scenario USD: sealed regression suite per attempt
-    repair_p = 0.40  # scenario acceptance probability
+    repair_env_per_turn = _repair["environment_per_turn"]  # scenario USD: sandbox holding and tool use per turn
+    repair_assess = _repair["assessment"]  # scenario USD: sealed regression suite per attempt
+    repair_p = _repair["acceptance"]  # scenario acceptance probability
     # Research agent: orchestrator-worker fan-out over web sources.
     research = Agents.Research.OrchestratorWorker
     research_turns = research.horizon_turns
@@ -1968,34 +1945,28 @@ class LighthouseEconomics:
     support_assess = _usd(support.assessment_cost_per_attempt)  # policy-grounding check
     handoff = _usd(support.handoff_cost)  # human pick-up cost per rejected session
     support_p = support.acceptance_probability
-    dp = 0.10  # acceptance lever: absolute gain in acceptance probability
+    dp = levers.acceptance_gain  # acceptance lever: absolute gain in acceptance probability
 
     # ┌── 2. EXECUTE (Attempt cost, C_eff, and three levers) ────────────────
-    chat_cost = ((chat_in * PrefixCacheCost.p_in + chat_out * PrefixCacheCost.p_out) / 1_000_000).to(USD).magnitude
-    research_model = fanout_multiple * chat_cost
-    repair_env = repair_turns * repair_env_per_turn
-    remediation_human = _usd(remediation.approval_cost_per_attempt)  # reviewer time x hourly rate
-    support_human = (1 - support_p) * handoff
-    model = (repair_model, research_model, remediation_model, support_model)
-    env = (repair_env, research_env, remediation_env, support_env)
-    assess = (repair_assess, research_assess, remediation_assess, support_assess)
-    human = (0.0, 0.0, remediation_human, support_human)
-    p_acc = (repair_p, research_p, remediation_p, support_p)
+    # Support's handoff is charged per rejected session, so it falls with p.
+    _res = levers.result.rows
+    _rows = (_res["repair"], _res["research"], _res["remediation"], _res["support"])
+    research_model = _rows[1].model
+    repair_env = _rows[0].environment
+    remediation_human = _rows[2].human  # reviewer time x hourly rate
+    support_human = _rows[3].human
+    model, env, assess, human, p_acc = (), (), (), (), ()
     attempt, ceff, share, save_tok, save_big, save_acc = [], [], [], [], [], []
-    for j in range(4):
-        a_j = model[j] + env[j] + assess[j] + human[j]
-        c_j = a_j / p_acc[j]
-        big_j = max(model[j], env[j], assess[j], human[j])
-        p2_j = p_acc[j] + dp
-        # Support's handoff is charged per rejected session, so it falls with p.
-        h2_j = (1 - p2_j) * handoff if j == 3 else human[j]
-        attempt.append(a_j)
-        ceff.append(c_j)
-        share.append(model[j] / a_j)
-        save_tok.append(1 - (a_j - model[j] / 2) / p_acc[j] / c_j)
-        save_big.append(1 - (a_j - big_j / 2) / p_acc[j] / c_j)
-        save_acc.append(1 - (a_j - human[j] + h2_j) / p2_j / c_j)
-    repair_threshold = 2 * dp / (repair_p + dp)  # model share below which acceptance wins
+    for _x in _rows:
+        model, env, assess = model + (_x.model,), env + (_x.environment,), assess + (_x.assessment,)
+        human, p_acc = human + (_x.human,), p_acc + (_x.acceptance,)
+        attempt.append(_x.attempt)
+        ceff.append(_x.cost_per_accepted)
+        share.append(_x.model_share)
+        save_tok.append(_x.halve_tokens)
+        save_big.append(_x.halve_largest)
+        save_acc.append(_x.acceptance_gain)
+    repair_threshold = _rows[0].token_threshold  # model share below which acceptance wins
 
     # ┌── 3. GUARD (Invariants and the decision rule) ───────────────────────
     check(repair_turns == PrefixCacheCost.turns, "Repair token bill must span the registry horizon")
@@ -2082,26 +2053,25 @@ An economic evaluation can be mathematically precise yet misleading if it tracks
 # │ Goal: Price the cached-read share and the false-accept break-even of the cascade.
 # │ Show: Share of the cached bill still spent re-reading history; tier-1
 # │       false-accept rate at which remediation erases the cascade's saving.
-# │ How:  Reads PrefixCacheCost and CascadeCost; one scenario harm per false accept.
+# │ How:  Reads PrefixCacheCost and CascadeCost (Scenarios.RepairResendCacheBill
+# │       and CodeEditThreeTierCascade); one scenario harm per false accept.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import USD
 from mlsysim.fmt import check, fmt_percent, fmt_usd
 
 class EconomicsFallacies:
     # ┌── 1. LOAD (Earlier cells and one scenario harm) ─────────────────────
-    sent, fresh = PrefixCacheCost.sent, PrefixCacheCost.fresh
-    cached_share, p_in = PrefixCacheCost.cached_share, PrefixCacheCost.p_in
     total_cache = PrefixCacheCost.total_cache
     first_tier_exits = CascadeCost.accepted_by_tier[0]
     accepted, per_accepted = CascadeCost.accepted, CascadeCost.per_accepted
     direct_per_accepted = CascadeCost.direct_per_accepted
-    harm = 10.0  # scenario USD to find and remediate one falsely accepted edit
+    harm = CascadeCost.cascade.harm_per_false_accept.to("USD").magnitude  # to find and remediate one false accept
 
     # ┌── 2. EXECUTE (Cached re-read share; cascade harm break-even) ────────
-    cached_reads = cached_share * (sent - fresh) * p_in / 1_000_000
-    reread_share = (cached_reads / total_cache).to(USD / USD).magnitude
-    saving_per_accepted = direct_per_accepted - per_accepted
-    fa_breakeven = saving_per_accepted * accepted / (first_tier_exits * harm)
+    reread_share = PrefixCacheCost.bill.result.reread_share
+    _cascade = CascadeCost.cascade.result
+    saving_per_accepted = _cascade.saving_per_accepted
+    fa_breakeven = _cascade.false_accept_breakeven
 
     # ┌── 3. GUARD (Invariants) ─────────────────────────────────────────────
     check(0.4 < reread_share < 0.6, "Cached re-reads remain about half the cached bill")

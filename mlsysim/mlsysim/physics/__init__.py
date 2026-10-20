@@ -978,3 +978,7 @@ __all__ += [
     "calc_cycles_to_gate",
     "calc_gap_samples_per_group",
 ]
+# --- Agent serving economics: queue price and speculative rounds (added 2026-10-20) ---
+from .serving import calc_kingman_wait_ratio, calc_speculative_round_speedup
+
+__all__ += ["calc_kingman_wait_ratio", "calc_speculative_round_speedup"]

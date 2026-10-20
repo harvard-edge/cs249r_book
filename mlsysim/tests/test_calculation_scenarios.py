@@ -5506,3 +5506,69 @@ def test_fairness_gates_price_and_feedback():
     F = Literature.Fairness
     assert float(F.ObermeyerChronicConditionsBlackAt97th) / float(F.ObermeyerChronicConditionsWhiteAt97th) == pytest.approx(1.2631579, rel=1e-6)
     assert float(Literature.TrainingRuns.StrubellNasTransformerCo2eLb) / float(Literature.TrainingRuns.StrubellCarLifetimeCo2eLb) == pytest.approx(4.9694841, rel=1e-6)
+def test_agent_cost_accounting():
+    """Cohort cost per accepted task and the levers on it (added 2026-10-20)."""
+    from mlsysim.physics import calc_kingman_wait_ratio, calc_speculative_round_speedup
+    assert calc_kingman_wait_ratio(0.5, 1.0, 1.0) == pytest.approx(1.0)
+    assert calc_speculative_round_speedup(0.4, 5, 0.08) == pytest.approx(1.0)
+    p = Scenarios.PriceAtFixedCapabilityDecline.result
+    assert p.series_count == 21 and round(p.rate_low) == 9 and round(p.rate_median) == 46
+    assert round(p.rate_high, -1) == 860 and round(p.series_rates["MMLU / GPT-3"]) == 12
+    f = Scenarios.FrontierSweCostVsScore.result
+    assert f.configurations == 19 and round(f.cost_ratio) == 10 and round(f.score_gap) == 3
+    assert round(100 * f.median_spread) == 21
+    c = Scenarios.RepairCohortTokenPriceComparison.result
+    assert c.baseline.cost_per_accepted == approx(0.546667) and c.alternative.cost_per_accepted == approx(1.316)
+    assert c.cost_ratio == approx(2.4073) and c.cost_ratio_with_triage == approx(8.0687)
+    assert c.model_cut == approx(0.713) and c.attempt_cut == approx(0.197854) and c.acceptance_cut == approx(2 / 3)
+    b = Scenarios.RepairResendCacheBill.result
+    assert (b.sent_tokens, b.fresh_tokens) == (892_500, 51_500)
+    assert b.total_uncached.m_as("USD") == approx(2.7675) and b.total_cached.m_as("USD") == approx(0.4968)
+    assert b.reread_share == approx(0.50815) and b.miss_share == approx(0.45725)
+    assert sum(b.per_turn_cached) == approx(0.4968) and sum(b.per_turn_uncached) == approx(2.7675)
+    k = Scenarios.RepairCompactionPayback.result
+    assert k.breakeven_calls == 12 and k.upfront.m_as("USD") == approx(0.0585)
+    assert k.net_by_calls[15] == approx(-0.0192)
+    assert Scenarios.RepairCompactionPaybackHalfCachedRate.result.breakeven_calls == 23
+    r = Scenarios.CheapRetryAgainstStrongCall.result
+    assert r.coverage == approx(0.83193) and r.sequential_per_accepted.m_as("USD") == approx(1 / 3)
+    assert r.batch_per_accepted.m_as("USD") == approx(0.60101) and r.batch_premium == approx(1.80304)
+    e = Scenarios.SerialRepairEpisode.result
+    assert e.total_time.m_as("s") == approx(312.40) and e.saving.m_as("s") == approx(21.9375)
+    assert e.limiting_speedup == approx(1.10330)
+    s = Scenarios.SerialRepairEpisodeSpeculation.result
+    assert s.speedup_high == approx(3.28571) and s.episode_time_low.m_as("s") == approx(314.65)
+    q = Scenarios.CodeEditThreeTierCascade.result
+    assert q.spend == approx(992.0) and q.per_accepted == approx(0.0099799) and q.direct_ratio == approx(6.3013)
+    assert q.mean_time == approx(1.718) and q.all_tiers_time == approx(6.75)
+    assert q.harm_cost == approx(5400.0) and q.per_accepted_with_harm == approx(0.064306)
+    assert q.false_accept_breakeven == approx(0.0087649)
+    a = Scenarios.RepairTrajectoryQuotaAdmission.result
+    assert a.concurrent == approx(20) and a.quota_share == approx(0.9) and a.quota_share_after_drop == approx(1.0)
+    w = Scenarios.BurstyModelServerQueuePrice.result
+    assert w.wait_low.m_as("s") == approx(7.0) and w.wait_high.m_as("s") == approx(27.0)
+    assert w.wait_ratio == approx(3.857143) and w.unit_wait_utilization == approx(0.25)
+    assert Scenarios.ThirtyCallTailExposure.any_tail == approx(0.26030)
+    d = Scenarios.DedicatedCapacityBreakEven.result
+    assert d.api_price == approx(19.2) and d.crossing == approx(0.37683) and d.saving_hour == approx(10.63808)
+    assert d.crossing_no_cache == approx(0.231481)
+    g = Scenarios.RepairBudgetLateBill.result
+    assert (g.settled_final, g.reserved_final, g.free_final) == (1972, 0, 3028)
+    assert (g.child_free_at_stop, g.child_apparent_free, g.child_free_settled) == (650, 1650, 950)
+    h = Scenarios.DependencyUpgradeArchitectures.result
+    assert h.loop_acceptance == approx(0.8173) and h.loop_turns == approx(1.711)
+    assert h.per_resolved["Bounded 3-turn loop"].m_as("USD") == approx(6.5320, rel=1e-3)
+    assert h.per_resolved["Rule-based rewriter"].m_as("USD") == approx(25.538, rel=1e-3)
+    n = Scenarios.CodeReviewAdaptationPayback.result
+    assert n.breakeven_whole == 56_510 and n.base_task.m_as("USD") == approx(0.24)
+    l = Scenarios.LighthouseWorkloadLevers.result.rows
+    assert l["repair"].cost_per_accepted == approx(3.742) and l["research"].largest_term == "model"
+    assert l["support"].acceptance_gain == approx(0.65625, rel=1e-3) and l["repair"].token_threshold == approx(0.4)
+    sw = Scenarios.SweAgentClaude35SonnetCostCap.result
+    assert sw.cost_per_resolved == approx(5.10036) and sw.survivor_understatement == approx(4.40, rel=1e-2)
+    assert sw.over_limit_runs == 90 and sw.max_cost == approx(4.20, rel=1e-2)
+    v = Scenarios.SweBenchLiteCoverageIndependence.result
+    assert v.measured[16] == approx(0.3911) and v.independent[16] == approx(0.93704)
+    x = Scenarios.InferenceXH200SglangConcurrency.result
+    assert x.concurrency_multiple == 16 and x.throughput_multiple == approx(5.0538)
+    assert x.token_time_low.m_as("ms") == approx(9.8454) and x.token_time_high.m_as("ms") == approx(31.476)

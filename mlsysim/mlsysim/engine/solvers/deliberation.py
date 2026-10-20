@@ -495,6 +495,12 @@ class RecordedRunCostModel(ForwardModel):
                 r["rep_input_tokens_sum"] / r["rep_output_tokens_sum"]
                 for r in rows if r["rep_output_tokens_sum"]),
             output_token_share=out / (inp + out),
+            mean_resolved_cost=statistics.mean(r["rep_cost_usd"] for r in rows if r["resolved"]),
+            mean_unresolved_cost=statistics.mean(r["rep_cost_usd"] for r in rows if not r["resolved"]),
+            survivor_understatement=(total / resolved)
+            / statistics.mean(r["rep_cost_usd"] for r in rows if r["resolved"]),
+            mean_calls=statistics.mean(r["n_model_calls"] for r in rows),
+            max_cost=max(costs),
             **self._over_limit(costs, cost_limit),
         )
 
