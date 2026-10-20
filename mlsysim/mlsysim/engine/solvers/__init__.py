@@ -181,3 +181,22 @@ __all__ += [
     "ZeroFailureModel",
     "ThrottledStageModel",
 ]
+
+# --- The real-time permission path: phase, response time, fieldbus, lease (added 2026-10-20) ---
+from .realtime import (
+    PhaseLagBudgetModel,
+    ResponseTimeModel,
+    CanFdBusModel,
+    EtherCatCycleModel,
+    LeaseBudgetModel,
+    LatencyTailModel,
+)
+
+__all__ += [
+    "PhaseLagBudgetModel",
+    "ResponseTimeModel",
+    "CanFdBusModel",
+    "EtherCatCycleModel",
+    "LeaseBudgetModel",
+    "LatencyTailModel",
+]

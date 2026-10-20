@@ -154,7 +154,8 @@ class HubDriveElectricalModel(ForwardModel):
     winding); at stall the back-EMF is zero, so the full bus voltage ramps the
     current at V / L: t = L I / V. Shorted windings brake hardest where the
     winding reactance equals its resistance: omega_e = R / L, which is
-    omega_e / p at the wheel for p pole pairs.
+    omega_e / p at the wheel for p pole pairs. The same R / L, divided by
+    2 pi, is the winding's current pole in hertz.
     """
     requires = ()
     produces = HubDriveElectricalResult
@@ -168,6 +169,7 @@ class HubDriveElectricalModel(ForwardModel):
             time_constant=(l_ / r_).to(_MS), ramp_time=ramp, ramp_share=_ratio(ramp, brake_onset),
             full_step_current=full, step_over_peak=_ratio(full, hub.peak_current),
             short_peak_electrical=w_e, short_peak_wheel_speed=(w_e / hub.pole_pairs).to(ureg.revolution / ureg.minute),
+            pole_frequency=(r_ / (2 * math.pi * l_)).to(ureg.hertz),
         )
 
 

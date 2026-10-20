@@ -571,6 +571,43 @@ def calc_ethercat_cycle_time(
     }
 
 
+def calc_response_time_bound(wcet, blocking, interference, deadline=None):
+    """
+    Response-time bound of one periodic task: R = C + B + I.
+
+    ``wcet`` (C) is the task's worst-case execution time, ``blocking`` (B) the
+    longest section in which lower-priority code keeps it from running, and
+    ``interference`` (I) the higher-priority work that preempts it inside one
+    response window. The bound holds only as far as each term is itself a
+    bound: a measured execution time can refute a declared C but never
+    establish it. With a ``deadline`` D, the margin D - R and the largest
+    blocking that still meets D (D - C - I) are returned as well.
+
+    Source: Buttazzo, G., Hard Real-Time Computing Systems, 3rd ed., Springer,
+    2011 (response-time analysis with blocking); Sha, Rajkumar, and Lehoczky,
+    "Priority Inheritance Protocols," IEEE Trans. Computers 39(9), 1990.
+
+    Returns
+    -------
+    dict
+        response; with deadline, margin, meets_deadline, blocking_limit
+        (all times in microseconds).
+    """
+    us = ureg.microsecond
+    for q, name in ((wcet, "wcet"), (blocking, "blocking"), (interference, "interference")):
+        validate_nonnegative(q, name)
+    r = (wcet + blocking + interference).to(us)
+    out = {"response": r}
+    if deadline is not None:
+        validate_positive(deadline, "deadline")
+        out.update(
+            margin=(deadline - r).to(us),
+            meets_deadline=bool(r <= deadline),
+            blocking_limit=(deadline - wcet - interference).to(us),
+        )
+    return out
+
+
 def calc_cbf_qp_orthogonal_projection(u_nom, a_vec, b_scalar):
     """
     Project onto a supplied abstract half-space in Euclidean control coordinates.

@@ -43,6 +43,8 @@ GamePlaying = _load("game_playing", "GamePlaying", "Cited results of landmark ga
 DeviceMeasurements = _load("device_measurements", "DeviceMeasurements", "Cited measurements of deployed ML hardware (TPU v1 roofline, memory-wall growth, phone stress test, two-pass wake word).")
 # Spaceflight anomaly inquiries (added 2026-10-20)
 SpaceflightAnomalies = _load("spaceflight_anomalies", "SpaceflightAnomalies", "Cited results of spaceflight anomaly inquiries (ESA Schiaparelli 2017).")
+# Published vision-language-action and dual-system robot policies (added 2026-10-20)
+VlaSystems = _load("vla_systems", "VlaSystems", "Cited figures of published VLA and dual-system robot policies (OpenVLA, ACT, pi0, FAST, Helix, GR00T N1).")
 
 
 # ---------------------------------------------------------------------------
@@ -315,6 +317,7 @@ class Literature(Registry):
     GamePlaying = GamePlaying  # added 2026-10-20
     DeviceMeasurements = DeviceMeasurements  # added 2026-10-20
     SpaceflightAnomalies = SpaceflightAnomalies  # added 2026-10-20
+    VlaSystems = VlaSystems  # added 2026-10-20
     ComputeTrend = ComputeTrend
     AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks
