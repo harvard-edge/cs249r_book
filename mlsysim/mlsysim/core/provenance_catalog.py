@@ -4122,3 +4122,35 @@ LUCCIONI_BLOOM_2023 = _lit(
     notes=("Table 3: final BLOOM training on the French grid (57 gCO2eq/kWh); embodied 11.2 t of 50.5 t "
            "total, 22.2 percent. Table 5: project dynamic emissions by process."),
 )
+
+# --- Hardware acceleration: TPU energy update and H100 latency measurements (added 2026-10-20) ---
+JOUPPI_TPUV4I_ISCA_2021 = _lit(
+    "prov:jouppi-tpuv4i-isca-2021",
+    "Jouppi et al. (2021), Ten Lessons From Three Generations Shaped Google's TPUv4i, ISCA 2021",
+    url="https://doi.org/10.1109/ISCA52012.2021.00010",
+    verified="2026-10-20",
+    notes=("Table 2 updates Horowitz's 45 nm energy table to 7 nm: FP32 multiply 3.7 -> 1.31 pJ; "
+           "memory per 64-bit access, DDR3/4 DRAM (I/O only) 1,300 pJ at both nodes."),
+)
+CHIPS_AND_CHEESE_H100_2023 = _lit(
+    "prov:chips-and-cheese-h100-2023",
+    "Chips and Cheese (2023), Nvidia's H100: Funny L2, and Tons of Bandwidth",
+    url="https://chipsandcheese.com/p/nvidias-h100-funny-l2-and-tons-of-bandwidth",
+    verified="2026-10-19",
+    notes=("Pointer-chasing latency by test size on an H100 PCIe card; the plateaus are the chart's "
+           "data labels: L1 22.4 ns, L2 159.7 ns, far L2 294.0 ns, HBM 377.9 ns."),
+)
+BOEHM_SGEMM_WORKLOG_2022 = _lit(
+    "prov:boehm-sgemm-worklog-2022",
+    "Boehm (2022), How to Optimize a CUDA Matmul Kernel for cuBLAS-like Performance: a Worklog",
+    url="https://siboehm.com/articles/22/CUDA-MMM",
+    verified="2026-10-19",
+    notes="Results table, FP32 SGEMM on an A6000: naive 309.0 GFLOP/s through cuBLAS 23,249.6 GFLOP/s.",
+)
+NVIDIA_NSIGHT_COMPUTE_ROOFLINE_GUIDE = _ds(
+    "prov:nvidia-nsight-compute-roofline-guide",
+    "NVIDIA, Nsight Compute Profiling Guide, Roofline Charts (documentation v2026.3.1)",
+    "https://docs.nvidia.com/nsight-compute/ProfilingGuide/index.html#roofline-charts",
+    verified="2026-10-19",
+    notes="The example report lists DRAM throughput at 0.34 percent of peak.",
+)

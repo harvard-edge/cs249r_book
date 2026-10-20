@@ -32,6 +32,17 @@ class ComputeCore(BaseModel):
     # so a total can never disagree with sm_count.
     fp32_cores_per_sm: Optional[int] = None
     tensor_cores_per_sm: Optional[int] = None
+    # Matrix unit built as a square systolic array (added 2026-10-20): the
+    # array is systolic_array_dim x systolic_array_dim multiply-accumulate
+    # cells. None for devices whose matrix unit is not a published square array.
+    systolic_array_dim: Optional[int] = None
+
+    @property
+    def systolic_macs_per_cycle(self) -> Optional[int]:
+        """Multiply-accumulates one systolic array retires per cycle."""
+        if self.systolic_array_dim is None:
+            return None
+        return self.systolic_array_dim * self.systolic_array_dim
 
     @property
     def fp32_core_count(self) -> Optional[int]:
@@ -230,6 +241,8 @@ class HardwareNode(BaseModel):
     tdp_min: Optional[Quantity] = None
     tdp_max: Optional[Quantity] = None
     die_area: Optional[Quantity] = None
+    # Transistors on the die, as the vendor states it (added 2026-10-20).
+    transistor_count: Optional[float] = None
     # Package-internal link joining the compute dies of a multi-die (chiplet)
     # accelerator, stored as the vendor quotes it. None for monolithic dies.
     # Vendors do not state a per-direction convention for this figure, so it
