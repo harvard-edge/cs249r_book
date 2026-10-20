@@ -4844,3 +4844,46 @@ def test_tf32_timing_and_activation_round_trips():
     assert Scenarios.ResNet50Stage2MapInt8BoundaryHbm2Low.energy.to("uJ").magnitude == approx(12.544)
     assert Scenarios.ResNet50Stage2MapInt8BoundaryHbm2High.energy.to("uJ").magnitude == approx(22.5792)
     assert Scenarios.ResNet50Stage2MapInt8BoundaryDdr7nm.energy_per_byte.to("pJ/B").magnitude == approx(162.5)
+def test_quantization_grids_and_integer_layer():
+    """Affine and symmetric grids, the INT8 dot product, and FP8 E4M3's value grid (added 2026-10-20)."""
+    from mlsysim.core.units import FP8_FORMAT_BITS
+    from mlsysim.physics import calc_float_values, calc_block_bits_per_weight
+    g = Scenarios.Uint8RangeMinusOneToThree
+    assert g.scale == pytest.approx(4 / 255) and g.zero_point_exact == pytest.approx(63.75)
+    assert g.zero_point == 64 and g.codes == [0, 128, 64, 255]
+    assert g.readback[0] == pytest.approx(-1.003922, rel=1e-6)
+    t = Scenarios.ThreeBitGridMinusOneToTwoAndHalf
+    assert t.scale == pytest.approx(0.5) and t.zero_point == 2 and t.codes == [0, 1, 4, 5, 7, 6]
+    w = Scenarios.SymmetricInt8FourWeights
+    assert w.codes == [41, -27, 127, -66] and max(w.errors) < w.max_rounding_error
+    assert Scenarios.AsymmetricInt8RangeMinusHalfToOneAndHalf.zero_point == -64
+    assert Scenarios.Relu6SymmetricInt8.scale == pytest.approx(6 / 127)
+    assert Scenarios.Relu6AsymmetricUint8.scale == pytest.approx(6 / 255)
+    clip = Scenarios.ActivationsCoveredToTwoAndHalfUint8.scale / Scenarios.ActivationsClippedAtOnePointOneUint8.scale
+    assert clip == pytest.approx(2.5 / 1.1)
+    d = Scenarios.Int8DotProductThreeTerms
+    assert d.weight_codes == [85, -42, 127] and d.input_codes == [64, 127, 32]
+    assert d.accumulator == 4170 and d.output_code == 49 and d.accumulator_headroom == 133144
+    assert d.readback == pytest.approx(0.387811, rel=1e-5) and d.exact == pytest.approx(0.375)
+    e4m3 = calc_float_values(*FP8_FORMAT_BITS["e4m3"], ieee=False)
+    assert len(e4m3) == 127 and max(e4m3) == 448 and e4m3[1] == 2 ** -9
+    assert max(calc_float_values(*FP8_FORMAT_BITS["e5m2"])) == 57344
+    assert calc_block_bits_per_weight(32, 4, 16) == 4.5
+
+
+def test_quantized_decode_energy_and_deployment_profile():
+    """GPT-2 XL decode traffic, INT8 operation energy, and the ResNet-50 INT8 profile (added 2026-10-20)."""
+    f = Scenarios.Gpt2XlFp16DecodeFullContextPhone
+    q = Scenarios.Gpt2XlInt4DecodeFullContextPhone
+    assert f.kv_cache_bytes.m_as("GB") == pytest.approx(0.3145728)
+    assert f.token_bytes.m_as("GB") == pytest.approx(3.3145728)
+    assert f.token_time.m_as("ms") == pytest.approx(64.73775)
+    assert q.token_bytes.m_as("GB") == pytest.approx(1.0645728)
+    assert q.separate_unpack_bytes.m_as("GB") == pytest.approx(7.0645728)
+    assert (f.token_time / q.token_time).m_as("") == pytest.approx(3.113523, rel=1e-6)
+    e = Scenarios.Int8VsFp32OperationEnergy45nm
+    assert e.add_ratio == pytest.approx(30) and e.mul_ratio == pytest.approx(18.5)
+    assert e.mac_ratio == pytest.approx(46 / 3) and e.read_over_narrow_mac == pytest.approx(6400 / 3)
+    r = Scenarios.ResNet50Int8ProfileH100
+    assert r.top1_drop == pytest.approx(0.3) and r.passes_top1 and not r.passes_calibration
+    assert r.size_reduction == pytest.approx(4) and r.energy_improvement == pytest.approx(r.throughput_gain)

@@ -1,491 +1,467 @@
 #!/usr/bin/env python3
-"""Every derived number in Lecture 10b (Model Compression, Part 2), computed
-from sourced inputs.
+"""Every number on the Lecture 10b (Model Compression, Part 2) slides and notes, read from MLSysIM.
 
-One block per slide, in deck order. Inputs carry their source as a comment;
-each printed line is a value the slide or its note shows, under the label
-used there. make_figs.py imports from this file so figures and slides share
-one computation. "Chapter" means Model Compression in Volume I.
+MLSysIM holds the inputs (format layouts, Hardware.Tech energies, Models,
+Platforms, the quantization and compression Scenarios.*, and the cited
+results in Literature.CompressionResults and Literature.Series) and the
+calculations (physics.numerics for grids, scales, and block formats); the
+Model Compression chapter reads the same scenarios. This file only selects
+values, converts units, and formats them; it types no numbers. Each value is
+recorded with v() under the key the deck prints as \\val{key}; running this
+file writes images/numbers.tex. make_figs.py imports this module, so figures
+and slides share one computation.
+
+Two printed tool outputs are quoted on the slides as the tools printed them
+and are not regenerated here: the PyTorch observer run (torch_qparams.py) and
+the llama-bench excerpt; the values they print are recorded below from the
+same sources for the slide text around them.
 
 Run from this folder: python3 calcs.py
 """
 
 import math
-
-import numpy as np
-
-
-def show(label, value):
-    print(f"  {label}: {value}")
-
-
-def head(title):
-    print(f"\n[{title}]")
-
-
-def r(x, nd=2):
-    """Round half away from zero (Python's round() is half to even)."""
-    q = 10 ** nd
-    return math.floor(abs(x) * q + 0.5) / q * (1 if x >= 0 else -1)
-
-
-# ---------------------------------------------------------------------------
-# Shared inputs
-# ---------------------------------------------------------------------------
-# Krishnamoorthi 2018 (arXiv 1806.08342), Table 3 (post-training INT8), Table 4
-# (QAT), Table 5 (4-bit weights), Table 7 (Pixel 2, ms).
-MBV2_FLOAT, MBV2_PER_TENSOR, MBV2_PER_CHANNEL, MBV2_QAT = 71.9, 0.1, 69.8, 71.1
-RN50_FLOAT, RN50_PER_TENSOR, RN50_PER_CHANNEL = 75.2, 75.0, 75.1
-RN50_W4_QAT, MBV2_W4_QAT = 73.2, 62.0
-MBV1_SYM, MBV1_ASYM, MBV1_FLOAT = 59.1, 70.3, 70.9
-PX2_FP32_CPU, PX2_INT8_CPU, PX2_INT8_DSP = 105.0, 63.0, 15.5
-IMAGENET_CLASSES = 1000
-
-# GPT-2 XL decoding on the chapter's phone (Napkin Math 10.4, table 1):
-# 1.5B parameters; 48 layers, 25 heads of 64; 1,024-token context; 51.2 GB/s.
-GPT2_PARAMS = 1.5e9
-GPT2_LAYERS, GPT2_HEADS, GPT2_HEAD_DIM, CTX = 48, 25, 64, 1024
-PHONE_BW = 51.2e9            # bytes/s
-FP16_B, INT4_B, FP32_B, INT8_B = 2.0, 0.5, 4.0, 1.0   # bytes per value
-GB = 1e9
-
-# Llama 2 7B as llama-bench reports it (github.com/ggml-org/llama.cpp,
-# discussion 4167, "params 6.74 B"; sizes in GiB).
-LLAMA2_PARAMS = 6.74e9
-GIB = 2 ** 30
-
-
-# ---------------------------------------------------------------------------
-# Slide 2: hook
-# ---------------------------------------------------------------------------
-def hook():
-    head("Slide 2: the same INT8 recipe keeps ResNet-50, not MobileNetV2")
-    show("chance on 1,000 classes (%)", 100 / IMAGENET_CLASSES)
-    show("ResNet-50 loss under per-tensor INT8 (points)", r(RN50_FLOAT - RN50_PER_TENSOR, 1))
-
-
-# ---------------------------------------------------------------------------
-# Slide 3: recall (Part 1 budget terms)
-# ---------------------------------------------------------------------------
-def recall():
-    head("Slide 3: recall")
-    w = GPT2_PARAMS * FP16_B
-    show("GPT-2 XL FP16 weights (GB)", w / GB)
-    show("stream once at 51.2 GB/s (ms)", r(w / PHONE_BW * 1e3, 1))
-
-
-# ---------------------------------------------------------------------------
-# Slide 6: formats (bit fields)
-# ---------------------------------------------------------------------------
-def formats():
-    head("Slide 6: formats")
-    for name, bits in (("BF16/FP16", 16), ("FP8", 8), ("INT8", 8), ("INT4", 4)):
-        show(f"{name} smaller than FP32 (x)", 32 // bits)
-    show("INT8 levels", 2 ** 8)
-    show("INT4 levels", 2 ** 4)
-
-
-# ---------------------------------------------------------------------------
-# Slide 7: real 4-bit files (GGUF)
-# Inputs: TheBloke/Llama-2-7B-GGUF on Hugging Face (commit b4e04e1), README
-# "Provided files" table (Name, Bits, Size) and the byte sizes the Hub API
-# lists for each file (api/models/TheBloke/Llama-2-7B-GGUF/tree/main), read
-# 2026-10-18. F16 file: ggml-org/Llama-2-7B-GGUF, Llama-2-7B-F16.gguf.
-# Block layout: llama.cpp v0.7.0, ggml/src/ggml-common.h, block_q4_0 and
-# block_q8_0 (one ggml_half scale d plus QK = 32 quants).
-# ---------------------------------------------------------------------------
-GGUF_FILES = [  # name, nominal bits (README), bytes (Hub API)
-    ("llama-2-7b.Q2_K.gguf", 2, 2825940672),
-    ("llama-2-7b.Q3_K_M.gguf", 3, 3298004672),
-    ("llama-2-7b.Q4_0.gguf", 4, 3825807040),
-    ("llama-2-7b.Q4_K_M.gguf", 4, 4081004224),
-    ("llama-2-7b.Q6_K.gguf", 6, 5529194176),
-    ("llama-2-7b.Q8_0.gguf", 8, 7161089728),
-]
-F16_FILE_BYTES = 13478105600
-QK = 32                     # weights per block (QK4_0, QK8_0)
-HALF_BYTES = 2              # sizeof(ggml_half)
-
-
-def q4_0_bits():
-    block = HALF_BYTES + QK // 2
-    return block, block * 8 / QK
-
-
-def q8_0_bits():
-    block = HALF_BYTES + QK
-    return block, block * 8 / QK
-
-
-def gguf():
-    head("Slide 7: a real 4-bit file stores more than 4 bits per weight")
-    for name, bits, nbytes in GGUF_FILES:
-        show(f"{name} size (GB, 1e9)", r(nbytes / GB, 2))
-        show(f"{name} bits per weight (6.74B params)", r(nbytes * 8 / LLAMA2_PARAMS, 2))
-    show("F16 file (GB)", r(F16_FILE_BYTES / GB, 2))
-    show("F16 file bits per weight", r(F16_FILE_BYTES * 8 / LLAMA2_PARAMS, 2))
-    b, bpw = q4_0_bits()
-    show("block_q4_0 bytes (2 + 32/2)", b)
-    show("block_q4_0 bits per weight", bpw)
-    b8, bpw8 = q8_0_bits()
-    show("block_q8_0 bytes (2 + 32)", b8)
-    show("block_q8_0 bits per weight", bpw8)
-    show("Q4_0 file smaller than F16 (x)", r(F16_FILE_BYTES / GGUF_FILES[2][2], 2))
-    show("Q4_0 scale overhead over 4 bits (%)", r((bpw - 4) / 4 * 100, 1))
-
-
-# ---------------------------------------------------------------------------
-# Slide 8: float grid against integer grid (FP8 E4M3 definition,
-# Micikevicius et al. 2022, Table 1: max 448, min subnormal 2^-9)
-# ---------------------------------------------------------------------------
-def e4m3_values():
-    vals = []
-    for ef in range(16):
-        for mf in range(8):
-            if ef == 15 and mf == 7:
-                continue  # the single NaN pattern
-            vals.append((mf / 8) * 2.0 ** -6 if ef == 0 else (1 + mf / 8) * 2.0 ** (ef - 7))
-    return np.array(sorted(vals))
-
-
-def grids():
-    head("Slide 8: FP8 grid against INT8 grid")
-    v = e4m3_values()
-    pos = v[v > 0]
-    show("E4M3 positive values", len(pos))
-    show("E4M3 positive values below 1", int((pos < 1).sum()))
-    show("E4M3 values from 256 to 448", int((pos >= 256).sum()))
-    show("smallest positive", pos.min())
-    show("INT8 step to cover 448 (448/127)", r(448 / 127, 2))
-    show("everything below half a step rounds to 0", r(448 / 127 / 2, 2))
-
-
-# ---------------------------------------------------------------------------
-# Slide 9: energy (Horowitz 2014 via chapter table 8, pJ at 45 nm)
-# ---------------------------------------------------------------------------
-ENERGY = [("Add", 0.90, 0.03), ("Multiply", 3.70, 0.20), ("Multiply-accumulate", 4.60, 0.30)]
-DRAM_32 = 640.0
-KWS_FP32_KB, SRAM_KB = 800, 512   # Lighthouse 10.2
-
-
-def energy_ratio(f32, i8):
-    return f32 / i8
-
-
-def energy():
-    head("Slide 9: energy")
-    for name, f32, i8 in ENERGY:
-        show(f"{name} FP32/INT8", r(energy_ratio(f32, i8), 1))
-    show("DRAM read / INT8 MAC", r(DRAM_32 / ENERGY[2][2], 0))
-    show("keyword spotter INT8 (KB)", KWS_FP32_KB * INT8_B / FP32_B)
-
-
-# ---------------------------------------------------------------------------
-# Slide 12: 3-bit toy grid (alpha, beta, b chosen for the slide)
-# ---------------------------------------------------------------------------
-TOY_ALPHA, TOY_BETA, TOY_B = -1.0, 2.5, 3
-TOY_S = (TOY_BETA - TOY_ALPHA) / (2 ** TOY_B - 1)
-TOY_Z = round(-TOY_ALPHA / TOY_S)
-TOY_SAMPLES = [-1.4, -0.3, 0.8, 1.6, 2.9]
-
-
-def quant_toy(x):
-    q = int(np.clip(math.floor(x / TOY_S + TOY_Z + 0.5), 0, 2 ** TOY_B - 1))
-    return q, TOY_S * (q - TOY_Z)
-
-
-def affgrid():
-    head("Slide 12: 3-bit toy grid")
-    show("s", TOY_S)
-    show("z", TOY_Z)
-    for x in TOY_SAMPLES + [2.2]:
-        q, xr = quant_toy(x)
-        show(f"x = {x}: code, reads back, error", (q, xr, r(abs(xr - x), 2)))
-    show("max rounding error s/2", TOY_S / 2)
-
-
-# ---------------------------------------------------------------------------
-# Slide 13: Napkin Math 10.1 (range [-1, 3], UINT8)
-# ---------------------------------------------------------------------------
-NM_ALPHA, NM_BETA = -1.0, 3.0
-NM_S = (NM_BETA - NM_ALPHA) / 255
-NM_Z_EXACT = -NM_ALPHA / NM_S
-NM_Z = math.floor(NM_Z_EXACT + 0.5)
-NM_X = [-1.0, 1.0, 0.0, 3.0]
-
-
-def nm_codes():
-    return [int(np.clip(math.floor(x / NM_S + NM_Z + 0.5), 0, 255)) for x in NM_X]
-
-
-def napkin():
-    head("Slide 13: real zero lands on 64")
-    show("s = 4/255", r(NM_S, 4))
-    show("-alpha/s", r(NM_Z_EXACT, 2))
-    show("z", NM_Z)
-    show("codes for -1, 1, 0, 3", nm_codes())
-    show("-1 reads back as", r(NM_S * (0 - NM_Z), 3))
-
-
-# ---------------------------------------------------------------------------
-# Slide 14: PyTorch reproduces Napkin Math 10.1. The values on the slide are
-# printed by the tool itself (torch 2.13.0, CPU); this block only checks them.
-# Command: python -W ignore images/torch_qparams.py
-# ---------------------------------------------------------------------------
-def torch_check():
-    head("Slide 14: PyTorch check (expected from slide 13)")
-    show("scale (float32 of 4/255)", float(np.float32(NM_S)))
-    show("dequantized codes", [r(NM_S * (q - NM_Z), 4) for q in nm_codes()])
-
-
-# ---------------------------------------------------------------------------
-# Slide 15: listing 2, symmetric INT8 (chapter section 10.3.3)
-# ---------------------------------------------------------------------------
-L2_W = [0.127, -0.084, 0.392, -0.203]
-
-
-def listing2():
-    head("Slide 15: listing 2 round trip")
-    s = max(abs(w) for w in L2_W) / 127
-    show("s = 0.392/127", r(s, 5))
-    for w in L2_W:
-        q = int(math.copysign(math.floor(abs(w) / s + 0.5), w))
-        show(f"w = {w}: code, error", (q, r(abs(q * s - w), 5)))
-    show("s/2", r(s / 2, 5))
-    show("toy grid s/2", TOY_S / 2)
-
-
-# ---------------------------------------------------------------------------
-# Slide 16: symmetric against asymmetric (chapter figure 22; ReLU6 [0, 6])
-# ---------------------------------------------------------------------------
-ASYM_LO, ASYM_HI = -0.5, 1.5
-
-
-def zeropoint():
-    head("Slide 16: zero-point")
-    s = (ASYM_HI - ASYM_LO) / 255
-    show("asymmetric s = 2/255", r(s, 4))
-    show("real zero lands at code", -128 + math.floor(-ASYM_LO / s + 0.5))
-    show("ReLU6 symmetric step 6/127", r(6 / 127, 3))
-    show("ReLU6 asymmetric step 6/255", r(6 / 255, 3))
-    show("MobileNet-v1 symmetric cost (points)", r(MBV1_ASYM - MBV1_SYM, 1))
-
-
-ZP_ASYM = -128 + math.floor(-ASYM_LO / ((ASYM_HI - ASYM_LO) / 255) + 0.5)
-
-
-# ---------------------------------------------------------------------------
-# Slide 17: one INT8 output by hand (scales: largest magnitude / 127)
-# ---------------------------------------------------------------------------
-IL_W = [0.5, -0.25, 0.75]
-IL_X = [1.0, 2.0, 0.5]
-IL_SY = 1 / 127
-
-
-def intlayer():
-    head("Slide 17: integer layer")
-    sw, sx = max(map(abs, IL_W)) / 127, max(map(abs, IL_X)) / 127
-    rq = lambda v, s: int(math.copysign(math.floor(abs(v) / s + 0.5), v))  # noqa: E731
-    wq = [rq(w, sw) for w in IL_W]
-    xq = [rq(x, sx) for x in IL_X]
-    prods = [a * b for a, b in zip(wq, xq)]
-    acc = sum(prods)
-    show("0.5/(0.75/127)", r(0.5 / sw, 1))
-    show("1.0/(2/127)", r(1.0 / sx, 1))
-    show("w_q", wq)
-    show("x_q", xq)
-    show("products", prods)
-    show("INT32 sum", acc)
-    show("sum x s_w s_x", r(acc * sw * sx, 3))
-    show("exact", sum(a * b for a, b in zip(IL_W, IL_X)))
-    m = sw * sx / IL_SY
-    show("M = s_w s_x / s_y", r(m, 4))
-    show("y_q", math.floor(acc * m + 0.5))
-    show("worst-case products in INT32 (2^31/127^2)", 2 ** 31 // 127 ** 2)
-
-
-# ---------------------------------------------------------------------------
-# Slide 19: clipping (chapter figure 21, illustrative range 2.5, clip 1.1)
-# ---------------------------------------------------------------------------
-def clipping():
-    head("Slide 19: clipping")
-    a, b = 2.5 / 255, 1.1 / 255
-    show("step over [0, 2.5]", r(a, 4))
-    show("step over [0, 1.1]", r(b, 4))
-    show("finer (x)", r(a / b, 1))
-
-
-# ---------------------------------------------------------------------------
-# Slide 20: measured calibration (Wu et al. 2020, arXiv 2004.09602, Table 5:
-# weights per-channel max; activations calibrated as listed; top-1 or F1)
-# ---------------------------------------------------------------------------
-WU_T5 = {  # model: (fp32, max, entropy, 99.9%, 99.99%, 99.999%)
-    "ResNet50 v1.5": (76.16, 75.82, 76.05, 75.68, 75.98, 75.97),
-    "MobileNet v2": (71.88, 69.41, 70.28, 70.68, 71.14, 70.72),
-    "Inception v4": (79.71, 0.12, 79.60, 78.16, 79.63, 79.12),
-    "EfficientNet b0": (76.85, 22.3, 72.06, 70.87, 68.33, 51.88),
-    "BERT Large": (91.01, 85.92, 37.40, 26.18, 89.59, 90.20),
-}
-
-
-def wu():
-    head("Slide 20: measured calibration (Wu et al. 2020, Table 5)")
-    cols = ["max", "entropy", "99.9%", "99.99%", "99.999%"]
-    for m, v in WU_T5.items():
-        best = int(np.argmax(v[1:]))
-        show(f"{m}: best method, loss from fp32", (cols[best], r(v[0] - v[1 + best], 2)))
-
-
-# ---------------------------------------------------------------------------
-# Slide 21: per-channel scales (Nagel et al. 2019 section 3.1 example;
-# Krishnamoorthi Tables 3, 4)
-# ---------------------------------------------------------------------------
-def perchannel():
-    head("Slide 21: per-channel scales")
-    show("step for [-128, 128] at 8 bits (256/255)", r(256 / 255, 2))
-    show("QAT gain over per-channel PTQ (points)", r(MBV2_QAT - MBV2_PER_CHANNEL, 1))
-
-
-# ---------------------------------------------------------------------------
-# Slide 26: the cliff (Krishnamoorthi Tables 3 and 5)
-# ---------------------------------------------------------------------------
-def cliff():
-    head("Slide 26: the cliff")
-    show("MobileNetV2 8-bit per-channel gap (points)", r(MBV2_FLOAT - MBV2_PER_CHANNEL, 1))
-    show("ResNet-50 4-bit QAT gap (points)", r(RN50_FLOAT - RN50_W4_QAT, 1))
-    show("MobileNetV2 4-bit QAT gap (points)", r(MBV2_FLOAT - MBV2_W4_QAT, 1))
-
-
-# ---------------------------------------------------------------------------
-# Slide 31: two mechanisms on the roofline (Napkin Math 10.2 and 10.4;
-# Frantar et al. 2023, Table 6)
-# ---------------------------------------------------------------------------
-H100_INT8, H100_FP16 = 1979, 989
-GPTQ_FP16_MS, GPTQ_3BIT_MS = 230, 71
-
-
-def kv_bytes():
-    return 2 * GPT2_LAYERS * GPT2_HEADS * GPT2_HEAD_DIM * CTX * FP16_B
-
-
-def decode():
-    w16 = GPT2_PARAMS * FP16_B
-    w4 = GPT2_PARAMS * INT4_B
-    kv = kv_bytes()
-    t16, t4 = w16 + kv, w4 + kv
-    sep = w4 + w16 + w16 + kv     # read packed, write FP16, read FP16, read cache
-    return dict(w16=w16, w4=w4, kv=kv, t16=t16, t4=t4, sep=sep)
-
-
-def roofline():
-    head("Slide 31: roofline")
-    d = decode()
-    show("FP16 weights (GB)", d["w16"] / GB)
-    show("KV cache (GB)", r(d["kv"] / GB, 2))
-    show("FP16 bytes per token (GB)", r(d["t16"] / GB, 2))
-    show("FP16 ms per token", r(d["t16"] / PHONE_BW * 1e3, 0))
-    show("FP16 tokens/s", r(PHONE_BW / d["t16"], 0))
-    show("INT4 weights (GB)", d["w4"] / GB)
-    show("INT4 bytes per token (GB)", r(d["t4"] / GB, 2))
-    show("INT4 ms per token", r(d["t4"] / PHONE_BW * 1e3, 0))
-    show("INT4 tokens/s", r(PHONE_BW / d["t4"], 0))
-    show("speedup (x)", r(d["t16"] / d["t4"], 1))
-    show("H100 INT8/FP16 (x)", r(H100_INT8 / H100_FP16, 2))
-    show("GPTQ measured (x)", r(GPTQ_FP16_MS / GPTQ_3BIT_MS, 2))
-
-
-# ---------------------------------------------------------------------------
-# Slide 32: llama-bench on Apple Silicon (github.com/ggml-org/llama.cpp,
-# discussion 4167, summary table and the M2 Ultra post; build 8e672ef; Llama 2
-# 7B; PP = prompt processing, 512 tokens; TG = text generation, batch one;
-# tokens/s). Read 2026-10-18 via the GitHub API.
-# ---------------------------------------------------------------------------
-LLAMA_BENCH = {  # chip (BW GB/s, GPU cores): F16 PP, F16 TG, Q8_0 PP, Q8_0 TG, Q4_0 PP, Q4_0 TG
-    "M1 Pro (200, 16)": (302.14, 12.75, 270.37, 22.34, 266.25, 36.41),
-    "M2 Ultra (800, 76)": (1401.85, 41.02, 1248.59, 66.64, 1238.48, 94.27),
-    "M3 Max (400, 40)": (779.17, 25.09, 757.64, 42.75, 759.70, 66.31),
-    "M4 Max (546, 40)": (922.83, 31.64, 891.94, 54.05, 885.68, 83.06),
-}
-LB_SIZE_GIB = {"F16": 12.55, "Q8_0": 6.67, "Q4_0": 3.56}   # llama-bench "size" column
-
-
-def llama_ratios(chip):
-    f16pp, f16tg, q8pp, q8tg, q4pp, q4tg = LLAMA_BENCH[chip]
-    return dict(tg8=q8tg / f16tg, tg4=q4tg / f16tg, pp8=q8pp / f16pp, pp4=q4pp / f16pp)
-
-
-def llama():
-    head("Slide 32: llama-bench, bits help generation, not prompt processing")
-    for chip in LLAMA_BENCH:
-        rt = llama_ratios(chip)
-        show(f"{chip} TG Q8_0/F16, Q4_0/F16; PP Q8_0/F16, Q4_0/F16",
-             (r(rt["tg8"], 2), r(rt["tg4"], 2), r(rt["pp8"], 2), r(rt["pp4"], 2)))
-    show("file F16/Q8_0 (x)", r(LB_SIZE_GIB["F16"] / LB_SIZE_GIB["Q8_0"], 2))
-    show("file F16/Q4_0 (x)", r(LB_SIZE_GIB["F16"] / LB_SIZE_GIB["Q4_0"], 2))
-    for q in LB_SIZE_GIB:
-        show(f"{q} bits per weight", r(LB_SIZE_GIB[q] * GIB * 8 / LLAMA2_PARAMS, 2))
-    f16tg, q4tg = LLAMA_BENCH["M2 Ultra (800, 76)"][1], LLAMA_BENCH["M2 Ultra (800, 76)"][5]
-    show("M2 Ultra bytes streamed per s, F16 (GB/s)", r(f16tg * LB_SIZE_GIB["F16"] * GIB / GB, 0))
-    show("M2 Ultra bytes streamed per s, Q4_0 (GB/s)", r(q4tg * LB_SIZE_GIB["Q4_0"] * GIB / GB, 0))
-
-
-# ---------------------------------------------------------------------------
-# Slide 33: separate dequantize pass (Napkin Math 10.4; section 10.4.1)
-# ---------------------------------------------------------------------------
-def dequant():
-    head("Slide 33: separate dequantize pass")
-    d = decode()
-    show("separate pass (GB)", r(d["sep"] / GB, 2))
-    show("separate pass (ms)", r(d["sep"] / PHONE_BW * 1e3, 0))
-    show("against FP16 (x slower)", r(d["sep"] / d["t16"], 2))
-
-
-# ---------------------------------------------------------------------------
-# Slide 34: Pixel 2 (Krishnamoorthi Table 7; Napkin Math 10.3)
-# ---------------------------------------------------------------------------
-FRAME_MS = 1000 / 30
-
-
-def pixel2():
-    head("Slide 34: Pixel 2")
-    show("INT8 CPU speedup (x)", r(PX2_FP32_CPU / PX2_INT8_CPU, 1))
-    show("INT8 DSP speedup (x)", r(PX2_FP32_CPU / PX2_INT8_DSP, 1))
-    show("frame budget at 30 fps (ms)", r(FRAME_MS, 1))
-    show("512-bit register: FP32 lanes, INT8 lanes", (512 // 32, 512 // 8))
-
-
-# ---------------------------------------------------------------------------
-# Slide 37: back to MobileNetV2; Part 1's 7B model (7 billion parameters)
-# ---------------------------------------------------------------------------
-P7B = 7e9
-
-
-def close():
-    head("Slide 37: synthesis")
-    show("7B FP16 (GB)", P7B * FP16_B / GB)
-    show("7B INT4, 4 bits only (GB)", P7B * INT4_B / GB)
-    show("7B INT4 at Q4_0's 4.5 bits (GB)", r(P7B * q4_0_bits()[1] / 8 / GB, 1))
-
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
+
+from mlsysim.core.units import (  # noqa: E402
+    BYTES_FP16, BYTES_FP32, BYTES_INT4, BYTES_INT8, FLOAT_FORMAT_BITS, FP8_FORMAT_BITS, FP32_BITS, INT4_BITS,
+    INT8_BITS, SIMD_REGISTER_BITS)
+from mlsysim.physics import (  # noqa: E402
+    calc_affine_scale, calc_block_bits_per_weight, calc_float_range, calc_float_values, calc_int_levels,
+    calc_int_max)
+
+Models, Platforms, Datasets = mlsysim.Models, mlsysim.Platforms, mlsysim.Datasets
+Scenarios, Literature = mlsysim.Scenarios, mlsysim.Literature
+CR, SERIES = Literature.CompressionResults, Literature.Series
+
+KQ = SERIES.KrishnamoorthiQuantization.entries
+WU = SERIES.WuInt8Calibration.entries
+DET = SERIES.DettmersInt8Perplexity.entries
+GGUF = SERIES.Llama2_7BGgufFiles.entries
+BENCH = SERIES.LlamaBenchAppleSilicon.entries
+
+BLUR = Scenarios.MobileNetV2BlurPipelinePhone
+GPT2_READ = Scenarios.Gpt2XlFp16WeightReadPhone
+DEC16, DEC4 = Scenarios.Gpt2XlFp16DecodeFullContextPhone, Scenarios.Gpt2XlInt4DecodeFullContextPhone
+ENERGY = Scenarios.Int8VsFp32OperationEnergy45nm
+TOY = Scenarios.ThreeBitGridMinusOneToTwoAndHalf
+NAPKIN = Scenarios.Uint8RangeMinusOneToThree
+LISTING = Scenarios.SymmetricInt8FourWeights
+SYM_UNIT, ASYM = Scenarios.SymmetricInt8UnitRange, Scenarios.AsymmetricInt8RangeMinusHalfToOneAndHalf
+RELU_SYM, RELU_ASYM = Scenarios.Relu6SymmetricInt8, Scenarios.Relu6AsymmetricUint8
+CLIP_FULL, CLIP_CUT = Scenarios.ActivationsCoveredToTwoAndHalfUint8, Scenarios.ActivationsClippedAtOnePointOneUint8
+DOT = Scenarios.Int8DotProductThreeTerms
+PROFILE = Scenarios.ResNet50Int8ProfileH100
+H100 = mlsysim.Hardware.Cloud.H100
+
+
+def m(q, unit):
+    """Magnitude of a Pint quantity in ``unit``."""
+    return q.to(unit).magnitude
+
+
+def lit(entry):
+    """A Literature value as a plain number."""
+    return float(entry)
+
+
+def pct(x):
+    """A fraction as percent."""
+    return 100 * x
+
+
+def kq(model, method, weight_bits, granularity="", scheme=""):
+    """Krishnamoorthi 2018 top-1 (percent) for one row: float, or ptq/qat at ``weight_bits``."""
+    rows = [r for r in KQ if r["model"] == model and r["method"] == method and r["weight_bits"] == weight_bits
+            and r["granularity"] == granularity and r["scheme"] == scheme]
+    assert len(rows) == 1, (model, method, weight_bits, granularity, scheme)
+    return pct(rows[0]["top1"])
+
+
+MBV2, R50, MBV1 = "MobileNetV2 1.0 224", "ResNet-v1-50", "MobileNet-v1 1.0 224"
+MBV2_FLOAT, R50_FLOAT, MBV1_FLOAT = (kq(x, "float", FP32_BITS) for x in (MBV2, R50, MBV1))
+MBV2_TENSOR = kq(MBV2, "ptq", INT8_BITS, "per_tensor", "asymmetric")
+R50_TENSOR = kq(R50, "ptq", INT8_BITS, "per_tensor", "asymmetric")
+MBV2_CHANNEL = kq(MBV2, "ptq", INT8_BITS, "per_channel", "symmetric")
+R50_CHANNEL = kq(R50, "ptq", INT8_BITS, "per_channel", "symmetric")
+MBV1_SYM = kq(MBV1, "ptq", INT8_BITS, "per_channel", "symmetric")
+MBV1_ASYM = kq(MBV1, "ptq", INT8_BITS, "per_channel", "asymmetric")
+MBV2_QAT = kq(MBV2, "qat", INT8_BITS, "per_channel", "symmetric")
+R50_QAT = kq(R50, "qat", INT8_BITS, "per_channel", "symmetric")
+R50_W4 = {g: kq(R50, "ptq", INT4_BITS, g) for g in ("per_tensor", "per_channel")}
+MBV2_W4 = {g: kq(MBV2, "ptq", INT4_BITS, g) for g in ("per_tensor", "per_channel")}
+R50_W4_QAT, MBV2_W4_QAT = kq(R50, "qat", INT4_BITS, "per_channel"), kq(MBV2, "qat", INT4_BITS, "per_channel")
+PX2_FP32, PX2_CPU, PX2_DSP = (lit(CR.KrishnamoorthiPixel2Fp32CpuMs), lit(CR.KrishnamoorthiPixel2Int8CpuMs),
+                              lit(CR.KrishnamoorthiPixel2Int8DspMs))
+
+print("== Hook (Literature.Series.KrishnamoorthiQuantization, Table 3; Nagel et al. 2019)")
+classes = Datasets.ImageNet.num_classes
+v("r50_float", R50_FLOAT, "{:.1f}", "ResNet-50 float top-1, %")
+v("r50_tensor", R50_TENSOR, "{:.1f}", "ResNet-50 INT8 per-tensor top-1, %")
+v("r50_tensor_loss", R50_FLOAT - R50_TENSOR, "{:.1f}", "ResNet-50 INT8 per-tensor loss, points")
+v("mbv2_float", MBV2_FLOAT, "{:.1f}", "MobileNetV2 float top-1, %")
+v("mbv2_tensor", MBV2_TENSOR, "{:.1f}", "MobileNetV2 INT8 per-tensor top-1, %")
+v("chance_pct", 100 / classes, "{:.1f}", "chance on ImageNet, %")
+v("imagenet_classes", classes, "{:,.0f}", "ImageNet classes")
+v("nagel_float", lit(CR.NagelMobileNetV2FloatTop1Pct), "{:.2f}", "Nagel MobileNetV2 FP32 top-1, %")
+v("nagel_tensor", lit(CR.NagelMobileNetV2Int8PerTensorTop1Pct), "{:.2f}", "Nagel MobileNetV2 per-layer INT8 top-1, %")
+v("r50_chapter_top1", PROFILE.float_top1_pct, "{:.1f}", "the chapter's ResNet-50 FP32 top-1, %")
+
+print("== Recall (Scenarios.Gpt2XlFp16WeightReadPhone, MobileNetV2BlurPipelinePhone)")
+v("gpt2_fp16_gb", m(GPT2_READ.weight_bytes, "GB"), "{:.0f}", "GPT-2 XL FP16 weights, GB")
+v("gpt2_read_ms", m(GPT2_READ.read_time, "ms"), "{:.0f}", "read once at the phone bus, ms")
+v("phone_bw", m(GPT2_READ.hardware.memory.bandwidth, "GB/s"), "{:.1f}", "phone memory bandwidth, GB/s")
+v("blur_cpu_ms", m(BLUR.cpu_frame, "ms"), "{:.0f}", "blur FP32 frame on the CPU, ms")
+v("blur_pruned_ms", m(BLUR.pruned_cpu_frame, "ms"), "{:.0f}", "blur pruned frame on the CPU, ms")
+v("blur_int8_ms", m(BLUR.pruned_accelerator_frame, "ms"), "{:.0f}", "blur pruned INT8 frame on the accelerator, ms")
+v("frame_ms", m(BLUR.frame_budget, "ms"), "{:.0f}", "frame budget at the camera rate, ms")
+MNV2_READ, R50_READ = Scenarios.MobileNetV2Fp32WeightReadPhone, Scenarios.ResNet50Fp32WeightReadPhone
+v("mnv2_read_ms", m(MNV2_READ.read_time, "ms"), "{:.2f}", "MobileNetV2 FP32 weight read, ms")
+v("mnv2_read_share_pct", pct(m(MNV2_READ.read_time / BLUR.frame_budget, "")), "{:.0f}", "of the frame, %")
+v("r50_read_ms", m(R50_READ.read_time, "ms"), "{:.0f}", "ResNet-50 FP32 weight read, ms")
+v("blur_fp32_mb", m(BLUR.full_bytes, "MB"), "{:.1f}", "blur model in FP32, MB")
+v("blur_pruned_mb", m(BLUR.pruned_bytes, "MB"), "{:.1f}", "pruned model in FP32, MB")
+v("blur_int8_mb", m(BLUR.pruned_int_bytes, "MB"), "{:.1f}", "pruned model in INT8, MB")
+
+print("== Formats (core.units FLOAT_FORMAT_BITS, FP8_FORMAT_BITS; physics.numerics)")
+fp32_e, fp32_f = FLOAT_FORMAT_BITS["fp32"]
+bf16_e, _ = FLOAT_FORMAT_BITS["bf16"]
+e4m3_e, e4m3_f = FP8_FORMAT_BITS["e4m3"]
+e5m2_e, e5m2_f = FP8_FORMAT_BITS["e5m2"]
+E4M3 = calc_float_values(e4m3_e, e4m3_f, ieee=False)
+E4M3_POS = [x for x in E4M3 if x > 0]
+v("fp32_exp_bits", fp32_e, "{:.0f}", "FP32 exponent bits")
+v("fp32_frac_bits", fp32_f, "{:.0f}", "FP32 mantissa bits")
+v("bf16_exp_bits", bf16_e, "{:.0f}", "BF16 exponent bits")
+v("fp16_max", calc_float_range(*FLOAT_FORMAT_BITS["fp16"])[0], "{:,.0f}", "FP16 largest finite value")
+v("e4m3_exp_bits", e4m3_e, "{:.0f}", "E4M3 exponent bits")
+v("e4m3_frac_bits", e4m3_f, "{:.0f}", "E4M3 mantissa bits")
+v("e4m3_max", max(E4M3), "{:.0f}", "E4M3 largest value")
+v("e5m2_max", max(calc_float_values(e5m2_e, e5m2_f)), "{:,.0f}", "E5M2 largest value")
+v("int8_levels", calc_int_levels(INT8_BITS), "{:.0f}", "INT8 levels")
+v("int4_levels", calc_int_levels(INT4_BITS), "{:.0f}", "INT4 levels")
+v("int8_smaller", FP32_BITS / INT8_BITS, "{:.0f}", "INT8 smaller than FP32, times")
+v("int4_smaller", FP32_BITS / INT4_BITS, "{:.0f}", "INT4 smaller than FP32, times")
+
+print("== A real 4-bit file (Literature.Series.Llama2_7BGgufFiles; CompressionResults llama.cpp blocks)")
+LLAMA_PARAMS = lit(CR.LlamaBenchLlama2_7BParamsB) * 10 ** 9
+QK = lit(CR.LlamaCppQ4_0BlockWeights)
+SCALE_BITS = lit(CR.LlamaCppBlockScaleBits)
+Q4_0_BPW = calc_block_bits_per_weight(QK, INT4_BITS, SCALE_BITS)
+Q8_0_BPW = calc_block_bits_per_weight(QK, INT8_BITS, SCALE_BITS)
+
+
+def gguf(quant):
+    return next(r for r in GGUF if r["quant"] == quant)
+
+
+def bits_per_weight(nbytes):
+    return m(mlsysim.core.units.Q_(nbytes, "byte"), "bit") / LLAMA_PARAMS
+
+
+for q in ("Q2_K", "Q3_K_M", "Q4_0", "Q4_K_M", "Q6_K", "Q8_0"):
+    key = q.lower()
+    r = gguf(q)
+    v(f"gguf_{key}_bits", r["nominal_bits"], "{:.0f}", f"{q} nominal bits")
+    v(f"gguf_{key}_gb", r["bytes"] / 10 ** 9, "{:.2f}", f"{q} file, GB")
+    v(f"gguf_{key}_bpw", bits_per_weight(r["bytes"]), "{:.2f}", f"{q} bits per weight")
+v("llama_params_b", LLAMA_PARAMS / 10 ** 9, "{:.2f}", "Llama 2 7B weights, billions (llama-bench)")
+v("q4_block", QK, "{:.0f}", "weights per Q4_0 block")
+v("q4_scale_bytes", m(mlsysim.core.units.Q_(SCALE_BITS, "bit"), "byte"), "{:.0f}", "Q4_0 scale, bytes")
+v("q4_scale_bits", SCALE_BITS, "{:.0f}", "Q4_0 scale, bits")
+v("q4_code_bytes", m(QK * BYTES_INT4, "byte"), "{:.0f}", "Q4_0 codes per block, bytes")
+v("q4_block_bytes", m(mlsysim.core.units.Q_(Q4_0_BPW * QK, "bit"), "byte"), "{:.0f}", "Q4_0 block, bytes")
+v("q4_bpw", Q4_0_BPW, "{:.1f}", "Q4_0 block bits per weight")
+v("q4_overhead_pct", pct((Q4_0_BPW - INT4_BITS) / INT4_BITS), "{:.1f}", "scale overhead over 4 bits, %")
+v("q2k_block_bpw", lit(CR.GgufQ2KBlockBitsPerWeight), "{:.4f}", "Q2_K block bits per weight (model card)")
+
+print("== FP8 grid against INT8 grid (physics.numerics.calc_float_values)")
+int8_pos = calc_int_max(INT8_BITS)
+INT8_448 = Scenarios.SymmetricInt8UnitRange.variant(alpha=-max(E4M3), beta=max(E4M3))  # INT8 asked to reach 448
+int8_step = INT8_448.scale
+top_binade = calc_int_levels(math.floor(math.log2(max(E4M3))))
+v("e4m3_pos", len(E4M3_POS), "{:.0f}", "E4M3 positive values")
+v("e4m3_below1", sum(1 for x in E4M3_POS if x < 1), "{:.0f}", "of them below 1")
+v("e4m3_top", sum(1 for x in E4M3_POS if x >= top_binade), "{:.0f}", "of them in the top binade")
+v("e4m3_top_binade", top_binade, "{:.0f}", "the top binade starts at")
+v("e4m3_min", min(E4M3_POS), "{:.3f}", "E4M3 smallest positive value")
+v("e4m3_min_exp", math.log2(min(E4M3_POS)), "{:.0f}", "its power of two")
+v("e4m3_decades_word", math.floor(math.log10(max(E4M3) / min(E4M3_POS))), "words", "decades spanned, in prose")
+v("int8_pos", int8_pos, "{:.0f}", "INT8 positive levels")
+v("int8_step448", int8_step, "{:.2f}", "INT8 step to cover 448")
+v("int8_zero_below", INT8_448.max_rounding_error, "{:.2f}", "everything below half a step rounds to 0")
+
+print("== Energy (Scenarios.Int8VsFp32OperationEnergy45nm; Models.Tiny.DS_CNN; Platforms.Tiny)")
+dscnn = Models.Tiny.DS_CNN
+v("e_add_fp32", m(ENERGY.wide_add, "pJ/flop"), "{:.2f}", "FP32 add, pJ")
+v("e_add_int8", m(ENERGY.narrow_add, "pJ/flop"), "{:.2f}", "INT8 add, pJ")
+v("e_add_ratio", ENERGY.add_ratio, "{:.0f}", "add FP32/INT8")
+v("e_mul_ratio", ENERGY.mul_ratio, "{:.1f}", "multiply FP32/INT8")
+v("e_mac_ratio", ENERGY.mac_ratio, "{:.1f}", "MAC FP32/INT8")
+v("e_dram", m(ENERGY.memory_read, "pJ"), "{:.0f}", "32-bit DRAM read, pJ")
+v("e_dram_mac", round(ENERGY.read_over_narrow_mac, -2), "{:,.0f}", "DRAM read over INT8 MAC (to the hundred, as the chapter)")
+v("spotter_fp32_kb", m(dscnn.size_in_bytes(BYTES_FP32), "KB"), "{:.0f}", "keyword spotter FP32, KB")
+v("spotter_int8_kb", m(dscnn.size_in_bytes(BYTES_INT8), "KB"), "{:.0f}", "keyword spotter INT8, KB")
+v("mcu_sram_kb", m(Platforms.Tiny.ram, "KiB"), "{:.0f}", "microcontroller SRAM, KB (as labeled)")
+
+print("== The 3-bit toy grid (Scenarios.ThreeBitGridMinusOneToTwoAndHalf)")
+v("toy_alpha", TOY.lo, "{:.0f}", "alpha")
+v("toy_neg_alpha", -TOY.lo, "{:.0f}", "minus alpha")
+v("toy_beta", TOY.hi, "{:.1f}", "beta")
+v("toy_bits", TOY.bits, "{:.0f}", "bits")
+v("toy_bits_word", TOY.bits, "words", "bits, in prose")
+v("toy_outside_word", sum(1 for x in TOY.values if not TOY.lo <= x <= TOY.hi), "words", "values outside the range, in prose")
+v("toy_levels", calc_int_levels(TOY.bits), "{:.0f}", "codes")
+v("toy_steps", TOY.steps, "{:.0f}", "steps (also the top code)")
+v("toy_range", TOY.hi - TOY.lo, "{:.1f}", "range")
+v("toy_s", TOY.scale, "{:.1f}", "scale")
+v("toy_z", TOY.zero_point, "{:.0f}", "zero-point")
+v("toy_half", TOY.max_rounding_error, "{:.2f}", "half a step")
+for i, (x, q, xr) in enumerate(zip(TOY.values, TOY.codes, TOY.readback)):
+    v(f"toy_x{i}", x, "{:.1f}", f"value {i}")
+    v(f"toy_q{i}", q, "{:.0f}", f"its code")
+    v(f"toy_r{i}", xr, "{:.1f}" if xr != TOY.lo else "{:.0f}", f"it reads back as")
+v("toy_err5", TOY.errors[-1], "{:.1f}", "error of the last value")
+
+print("== Napkin Math 10.1 (Scenarios.Uint8RangeMinusOneToThree)")
+v("nm_alpha", NAPKIN.lo, "{:.0f}", "alpha")
+v("nm_neg_alpha", -NAPKIN.lo, "{:.0f}", "minus alpha")
+v("nm_beta", NAPKIN.hi, "{:.0f}", "beta")
+v("nm_bits", NAPKIN.bits, "{:.0f}", "bits")
+v("nm_range", NAPKIN.hi - NAPKIN.lo, "{:.0f}", "range")
+v("nm_steps", NAPKIN.steps, "{:.0f}", "steps (also the top code)")
+v("nm_s", NAPKIN.scale, "{:.4f}", "scale")
+v("nm_z_exact", NAPKIN.zero_point_exact, "{:.2f}", "minus alpha over s")
+v("nm_z", NAPKIN.zero_point, "{:.0f}", "zero-point")
+v("nm_nudge", NAPKIN.zero_point - NAPKIN.zero_point_exact, "{:.2f}", "the rounding nudge, in steps")
+for i, (x, q) in enumerate(zip(NAPKIN.values, NAPKIN.codes)):
+    v(f"nm_x{i}", x, "{:.0f}", f"matrix entry {i}")
+    v(f"nm_q{i}", q, "{:.0f}", "its code")
+v("nm_r0", NAPKIN.readback[0], "{:.3f}", "alpha reads back as")
+v("nm_r0_torch", NAPKIN.readback[0], "{:.4f}", "alpha reads back as, as PyTorch prints it")
+
+print("== Listing 2 (Scenarios.SymmetricInt8FourWeights)")
+v("l2_max", max(abs(x) for x in LISTING.values), "{:.3f}", "largest magnitude")
+v("l2_int_max", LISTING.qmax, "{:.0f}", "INT8 largest code")
+v("l2_s", LISTING.scale, "{:.5f}", "scale")
+v("l2_half", LISTING.max_rounding_error, "{:.5f}", "half a step")
+l2_max = max(abs(x) for x in LISTING.values)
+v("l2_outlier", l2_max + l2_max, "{:.3f}", "an outlier at twice the range")
+for i, (x, q, e) in enumerate(zip(LISTING.values, LISTING.codes, LISTING.errors)):
+    v(f"l2_w{i}", x, "{:.3f}", f"weight {i}")
+    v(f"l2_q{i}", q, "{:.0f}", "its code")
+    v(f"l2_e{i}", e, "{:.5f}" if e > LISTING.scale / 100 else "{:.0f}", "its error")
+
+print("== Zero-point (Scenarios.SymmetricInt8UnitRange, AsymmetricInt8..., Relu6*; Krishnamoorthi Table 3)")
+v("zp_sym_lo", SYM_UNIT.lo, "{:.0f}", "symmetric range low")
+v("zp_sym_hi", SYM_UNIT.hi, "{:.0f}", "symmetric range high")
+v("zp_sym_qmin", SYM_UNIT.qmin, "{:.0f}", "symmetric lowest code")
+v("zp_sym_qmax", SYM_UNIT.qmax, "{:.0f}", "symmetric highest code")
+v("zp_asym_lo", ASYM.lo, "{:.1f}", "asymmetric range low")
+v("zp_asym_hi", ASYM.hi, "{:.1f}", "asymmetric range high")
+v("zp_asym_qmin", ASYM.qmin, "{:.0f}", "asymmetric lowest code")
+v("zp_asym_qmax", ASYM.qmax, "{:.0f}", "asymmetric highest code")
+v("zp_asym_range", ASYM.hi - ASYM.lo, "{:.0f}", "asymmetric range width")
+v("zp_asym_steps", ASYM.steps, "{:.0f}", "asymmetric steps")
+v("zp_asym_z", ASYM.zero_point, "{:.0f}", "asymmetric zero-point")
+v("int8_shift", -ASYM.qmin, "{:.0f}", "signed INT8 codes sit this far below unsigned ones")
+v("relu_hi", RELU_SYM.hi, "{:.0f}", "ReLU6 top")
+v("relu_sym_div", RELU_SYM.qmax, "{:.0f}", "symmetric divisor")
+v("relu_asym_div", RELU_ASYM.steps, "{:.0f}", "asymmetric divisor")
+v("relu_sym_s", RELU_SYM.scale, "{:.3f}", "symmetric step")
+v("relu_asym_s", RELU_ASYM.scale, "{:.3f}", "asymmetric step")
+v("mbv1_float", MBV1_FLOAT, "{:.1f}", "MobileNet-v1 float, %")
+v("mbv1_sym", MBV1_SYM, "{:.1f}", "MobileNet-v1 symmetric per-channel, %")
+v("mbv1_asym", MBV1_ASYM, "{:.1f}", "MobileNet-v1 asymmetric per-channel, %")
+v("mbv1_sym_cost", MBV1_ASYM - MBV1_SYM, "{:.0f}", "symmetric cost, points")
+
+print("== One INT8 output (Scenarios.Int8DotProductThreeTerms)")
+v("il_w_max", max(abs(x) for x in DOT.weights), "{:.2f}", "largest weight")
+v("il_x_max", max(abs(x) for x in DOT.inputs), "{:.0f}", "largest input")
+v("il_int_max", calc_int_max(DOT.bits), "{:.0f}", "INT8 largest code")
+for i, (w, x, wq, xq, p) in enumerate(zip(DOT.weights, DOT.inputs, DOT.weight_codes, DOT.input_codes, DOT.products)):
+    v(f"il_w{i}", w, "{:.2f}" if i else "{:.1f}", f"weight {i}")
+    v(f"il_x{i}", x, "{:.1f}", f"input {i}")
+    v(f"il_wq{i}", wq, "{:.0f}", "weight code")
+    v(f"il_xq{i}", xq, "{:.0f}", "input code")
+    v(f"il_p{i}", p, "{:,.0f}", "product")
+v("il_w0_ratio", DOT.weights[0] / DOT.weight_scale, "{:.1f}", "first weight over its scale")
+v("il_x0_ratio", DOT.inputs[0] / DOT.input_scale, "{:.1f}", "first input over its scale")
+v("il_sum", DOT.accumulator, "{:,.0f}", "INT32 sum")
+v("il_readback", DOT.readback, "{:.3f}", "sum times both scales")
+v("il_exact", DOT.exact, "{:.3f}", "exact")
+v("il_m", DOT.requant_scale, "{:.4f}", "requantization scale M")
+v("il_y", DOT.output_code, "{:.0f}", "output code")
+v("il_sy_div", round(1 / DOT.output_scale), "{:.0f}", "output scale is one over this")
+v("il_headroom", round(DOT.accumulator_headroom, -3), "{:,.0f}", "worst-case products in INT32, about")
+v("il_acc_exp", DOT.accumulator_bits - 1, "{:.0f}", "accumulator power of two")
+
+print("== Clipping (Scenarios.ActivationsCoveredToTwoAndHalfUint8, ActivationsClippedAtOnePointOneUint8)")
+v("clip_full", CLIP_FULL.hi, "{:.1f}", "full range")
+v("clip_cut", CLIP_CUT.hi, "{:.1f}", "clip")
+v("clip_steps", CLIP_FULL.steps, "{:.0f}", "steps (also the top code)")
+v("clip_full_s", CLIP_FULL.scale, "{:.4f}", "step, full range")
+v("clip_cut_s", CLIP_CUT.scale, "{:.4f}", "step, clipped")
+v("clip_finer", CLIP_FULL.scale / CLIP_CUT.scale, "{:.1f}", "finer, times")
+
+print("== Measured calibration (Literature.Series.WuInt8Calibration)")
+WU_COLS = ("fp32", "max", "entropy", "pct_99_99")
+WU_ONE_DECIMAL = {("EfficientNet b0", "max")}  # printed to one decimal in the paper
+for r in WU:
+    key = r["model"].split()[0].lower()
+    for col in WU_COLS:
+        fmt = "{:.1f}" if (r["model"], col) in WU_ONE_DECIMAL else "{:.2f}"
+        v(f"wu_{key}_{col}", r[col], fmt, f"{r['model']} {col}")
+bert = next(r for r in WU if r["model"].startswith("BERT"))
+resnet = next(r for r in WU if r["model"].startswith("ResNet"))
+v("wu_bert_best", bert["pct_99_999"], "{:.2f}", "BERT Large at the 99.999th percentile")
+
+print("== Per-channel scales (Krishnamoorthi Tables 3, 4; Nagel et al. 2019)")
+nagel_wide, nagel_narrow = lit(CR.NagelExampleWideChannelMax), lit(CR.NagelExampleNarrowChannelMax)
+v("mbv2_channel", MBV2_CHANNEL, "{:.1f}", "MobileNetV2 per-channel PTQ, %")
+v("mbv2_qat", MBV2_QAT, "{:.1f}", "MobileNetV2 per-channel QAT, %")
+v("mbv2_qat_gain", MBV2_QAT - MBV2_CHANNEL, "{:.1f}", "QAT gain, points")
+v("r50_channel", R50_CHANNEL, "{:.1f}", "ResNet-50 per-channel PTQ, %")
+v("r50_qat", R50_QAT, "{:.1f}", "ResNet-50 QAT, %")
+v("nagel_wide", nagel_wide, "{:.0f}", "wide channel half-width")
+v("nagel_narrow", nagel_narrow, "{:.1f}", "narrow channel half-width")
+v("nagel_step", calc_affine_scale(-nagel_wide, nagel_wide, INT8_BITS), "{:.0f}", "one 8-bit step over the wide channel")
+v("nagel_channels", lit(CR.NagelFirstDepthwiseChannels), "{:.0f}", "channels in the figure")
+v("awq_group", lit(CR.LinAwqGroupSize), "{:.0f}", "AWQ group size")
+
+print("== Outliers (Literature.Series.DettmersInt8Perplexity; CompressionResults Dettmers)")
+
+
+def det(params_b):
+    return next(r for r in DET if r["params_b"] == params_b)
+
+
+sizes = [r["params_b"] for r in DET]
+v("det_small_m", sizes[0] * 10 ** 3, "{:.0f}", "smallest model, millions")
+v("det_mid_b", sizes[1], "{:.1f}", "second model, billions")
+v("det_large_b", sizes[-1], "{:.0f}", "largest model, billions")
+v("det_fourth_b", sizes[:-1][-1], "{:.1f}", "second-largest model, billions")
+v("det_absmax_small", DET[0]["absmax"], "{:.2f}", "125M under absmax")
+v("det_absmax_large", DET[-1]["absmax"], "{:.2f}", "13B under absmax")
+v("det_fp32_large", DET[-1]["fp32"], "{:.2f}", "13B in float")
+v("out_b", lit(CR.DettmersOutlierEmergenceParamsB), "{:.1f}", "outliers in every layer from, billions")
+v("out_floor_b", math.floor(lit(CR.DettmersOutlierEmergenceParamsB)), "{:.0f}", "below about this many billions they come and go")
+v("out_tokens_pct", lit(CR.DettmersOutlierTokenSharePct), "{:.0f}", "positions affected, %")
+v("out_mult", lit(CR.DettmersOutlierMagnitudeMult), "{:.0f}", "outlier magnitude, times the rest")
+v("out_dims", lit(CR.DettmersOutlierFeatureDims), "{:.0f}", "hidden dimensions holding them")
+v("out_threshold", lit(CR.DettmersOutlierThreshold), "{:.0f}", "outlier magnitude threshold")
+
+print("== The cliff (Krishnamoorthi Tables 3 and 5)")
+v("cliff_8bit_gap", max(MBV2_FLOAT - MBV2_CHANNEL, R50_FLOAT - R50_CHANNEL), "{:.0f}", "8-bit per-channel within, points")
+v("int4_bits", INT4_BITS, "{:.0f}", "INT4 bits")
+v("int8_bits", INT8_BITS, "{:.0f}", "INT8 bits")
+v("r50_w4_tensor", R50_W4["per_tensor"], "{:.1f}", "ResNet-50 4-bit per-tensor PTQ, %")
+v("mbv2_w4_tensor", MBV2_W4["per_tensor"], "{:.1f}", "MobileNetV2 4-bit per-tensor PTQ, %")
+v("r50_w4_channel", R50_W4["per_channel"], "{:.1f}", "ResNet-50 4-bit per-channel PTQ, %")
+v("mbv2_w4_channel", MBV2_W4["per_channel"], "{:.1f}", "MobileNetV2 4-bit per-channel PTQ, %")
+v("r50_w4_qat", R50_W4_QAT, "{:.1f}", "ResNet-50 4-bit QAT, %")
+v("mbv2_w4_qat", MBV2_W4_QAT, "{:.1f}", "MobileNetV2 4-bit QAT, %")
+v("r50_w4_qat_gap", R50_FLOAT - R50_W4_QAT, "{:.0f}", "ResNet-50 4-bit QAT gap, points")
+v("mbv2_w4_qat_gap", MBV2_FLOAT - MBV2_W4_QAT, "{:.0f}", "MobileNetV2 4-bit QAT gap, points")
+
+print("== GPTQ and AWQ (Literature.CompressionResults: Frantar et al. 2023; Lin et al. 2024)")
+v("gptq_fp16", lit(CR.FrantarOpt175BFp16Ppl), "{:.2f}", "OPT-175B FP16 perplexity")
+v("gptq_rtn4", lit(CR.FrantarOpt175BRtn4BitPpl), "{:.2f}", "4-bit RTN")
+v("gptq_4", lit(CR.FrantarOpt175BGptq4BitPpl), "{:.2f}", "4-bit GPTQ")
+v("gptq_rtn3_k", lit(CR.FrantarOpt175BRtn3BitPpl) / 10 ** 3, "{:.1f}", "3-bit RTN, thousands")
+v("gptq_3", lit(CR.FrantarOpt175BGptq3BitPpl), "{:.2f}", "3-bit GPTQ")
+v("awq_fp16", lit(CR.LinOpt6_7BFp16Ppl), "{:.2f}", "OPT-6.7B FP16 perplexity")
+v("awq_rtn", lit(CR.LinOpt6_7BRtnInt3Ppl), "{:.2f}", "INT3 RTN")
+v("awq_by_weight", lit(CR.LinOpt6_7BKeepByWeightPpl), "{:.2f}", "keep 1% by weight")
+v("awq_by_act", lit(CR.LinOpt6_7BKeepByActivationPpl), "{:.2f}", "keep 1% by activation")
+v("awq_kept_pct", lit(CR.LinAwqKeptPct), "{:.0f}", "share kept in FP16, %")
+
+print("== Roofline (Scenarios.Gpt2Xl*DecodeFullContextPhone; Hardware.Cloud.H100; Frantar Table 6)")
+rates = H100.compute.precision_flops
+v("dec_w16_gb", m(DEC16.weight_bytes, "GB"), "{:.0f}", "FP16 weights, GB")
+v("dec_w4_gb", m(DEC4.weight_bytes, "GB"), "{:.2f}", "INT4 weights, GB")
+v("dec_kv_gb", m(DEC16.kv_cache_bytes, "GB"), "{:.2f}", "KV cache, GB")
+v("dec_t16_gb", m(DEC16.token_bytes, "GB"), "{:.2f}", "FP16 bytes per token, GB")
+v("dec_t4_gb", m(DEC4.token_bytes, "GB"), "{:.2f}", "INT4 bytes per token, GB")
+v("dec_t16_ms", m(DEC16.token_time, "ms"), "{:.0f}", "FP16 ms per token")
+v("dec_t4_ms", m(DEC4.token_time, "ms"), "{:.0f}", "INT4 ms per token")
+v("dec_speedup", (DEC16.token_time / DEC4.token_time).to("").magnitude, "{:.1f}", "speedup, times")
+v("dec_byte_ratio", (BYTES_FP16 / BYTES_INT4).to("").magnitude, "{:.0f}", "FP16 over INT4 bytes per weight")
+v("h100_int8", m(rates["int8"], "TOPS"), "{:,.0f}", "H100 INT8 dense, tera-ops/s")
+v("h100_fp16", m(rates["fp16_dense"], "TFLOPs/s"), "{:,.0f}", "H100 FP16 dense, tera-ops/s")
+v("h100_int8_x", m(rates["int8"], "TOPS") / m(rates["fp16_dense"], "TFLOPs/s"), "{:.0f}", "INT8 over FP16, times")
+v("h100_int8_x_word", m(rates["int8"], "TOPS") / m(rates["fp16_dense"], "TFLOPs/s"), "words", "the same, in prose")
+gptq_x = lit(CR.FrantarOpt175BFp16TokenMs) / lit(CR.FrantarOpt175B3BitTokenMs)
+v("gptq_fp16_ms", lit(CR.FrantarOpt175BFp16TokenMs), "{:.0f}", "OPT-175B FP16, ms per token")
+v("gptq_3bit_ms", lit(CR.FrantarOpt175B3BitTokenMs), "{:.0f}", "OPT-175B 3-bit, ms per token")
+v("gptq_fp16_gpus_word", lit(CR.FrantarOpt175BFp16Gpus), "words", "A100s for FP16, in prose")
+v("gptq_3bit_gpus_word", lit(CR.FrantarOpt175B3BitGpus), "words", "A100s for 3-bit, in prose")
+v("gptq_x", gptq_x, "{:.2f}", "measured speedup, times")
+
+print("== llama-bench (Literature.Series.LlamaBenchAppleSilicon)")
+
+
+def bench(chip, quant):
+    return next(r for r in BENCH if r["chip"] == chip and r["quant"] == quant)
+
+
+ultra16, ultra8, ultra4 = (bench("M2 Ultra", q) for q in ("F16", "Q8_0", "Q4_0"))
+v("lb_ultra_bw", ultra16["bandwidth_gbs"], "{:.0f}", "M2 Ultra bandwidth, GB/s")
+v("lb_tg4_x", ultra4["tg128_tps"] / ultra16["tg128_tps"], "{:.2f}", "generation Q4_0 over F16")
+v("lb_tg8_x", ultra8["tg128_tps"] / ultra16["tg128_tps"], "{:.2f}", "generation Q8_0 over F16")
+v("lb_pp4_x", ultra4["pp512_tps"] / ultra16["pp512_tps"], "{:.2f}", "prompt Q4_0 over F16")
+v("lb_file_x", ultra16["size_gib"] / ultra4["size_gib"], "{:.2f}", "F16 file over Q4_0 file")
+others = [c for c in dict.fromkeys(r["chip"] for r in BENCH) if c != "M2 Ultra"]
+tg = [bench(c, "Q4_0")["tg128_tps"] / bench(c, "F16")["tg128_tps"] for c in others]
+pp = [bench(c, "Q4_0")["pp512_tps"] / bench(c, "F16")["pp512_tps"] for c in others]
+v("lb_other_tg_lo", min(tg), "{:.2f}", "other chips, generation, low")
+v("lb_other_tg_hi", max(tg), "{:.2f}", "other chips, generation, high")
+v("lb_other_pp_lo", min(pp), "{:.2f}", "other chips, prompt, low")
+v("lb_other_pp_hi", max(pp), "{:.2f}", "other chips, prompt, high")
+GIB = mlsysim.core.units.Q_(1, "GiB")
+v("lb_stream16", ultra16["tg128_tps"] * m(ultra16["size_gib"] * GIB, "GB"), "{:.0f}", "F16 weights streamed, GB/s")
+v("lb_stream4", ultra4["tg128_tps"] * m(ultra4["size_gib"] * GIB, "GB"), "{:.0f}", "Q4_0 weights streamed, GB/s")
+
+print("== Separate dequantize pass (Scenarios.Gpt2XlInt4DecodeFullContextPhone)")
+v("dq_sep_gb", m(DEC4.separate_unpack_bytes, "GB"), "{:.2f}", "separate pass, GB per token")
+v("dq_sep_ms", m(DEC4.separate_unpack_time, "ms"), "{:.0f}", "separate pass, ms per token")
+v("dq_sep_x", (DEC4.separate_unpack_time / DEC16.token_time).to("").magnitude, "{:.2f}", "against FP16, times")
+
+print("== Pixel 2 (Literature.CompressionResults: Krishnamoorthi Table 7; core.units SIMD)")
+v("px_fp32", PX2_FP32, "{:.0f}", "FP32 on the CPU, ms")
+v("px_cpu", PX2_CPU, "{:.0f}", "INT8 on the CPU, ms")
+v("px_dsp", PX2_DSP, "{:.1f}", "INT8 on the DSP, ms")
+v("px_cpu_x", PX2_FP32 / PX2_CPU, "{:.1f}", "CPU INT8 speedup")
+v("px_dsp_x", PX2_FP32 / PX2_DSP, "{:.1f}", "DSP INT8 speedup")
+v("simd_bits", SIMD_REGISTER_BITS, "{:.0f}", "register width, bits")
+v("simd_fp32", SIMD_REGISTER_BITS // FP32_BITS, "{:.0f}", "FP32 lanes")
+v("simd_int8", SIMD_REGISTER_BITS // INT8_BITS, "{:.0f}", "INT8 lanes")
+
+print("== The INT8 profile (Scenarios.ResNet50Int8ProfileH100)")
+v("pf_fp32_top1", PROFILE.float_top1_pct, "{:.1f}", "FP32 top-1, %")
+v("pf_int8_top1", PROFILE.int_top1_pct, "{:.1f}", "INT8 top-1, %")
+v("pf_top1_limit", PROFILE.top1_limit_pct, "{:.1f}", "top-1 limit, %")
+v("pf_top1_drop", PROFILE.top1_drop, "{:.1f}", "top-1 drop, points")
+v("pf_fp32_cal", PROFILE.float_calibration_error_pct, "{:.1f}", "FP32 calibration error, %")
+v("pf_int8_cal", PROFILE.int_calibration_error_pct, "{:.1f}", "INT8 calibration error, %")
+v("pf_cal_limit", PROFILE.calibration_error_limit_pct, "{:.1f}", "calibration error limit, %")
+v("pf_latency_x", PROFILE.latency_speedup, "{:.1f}", "batch-one speedup")
+v("pf_throughput_x", PROFILE.throughput_gain, "{:.1f}", "large-batch throughput gain")
+v("pf_energy_x", PROFILE.energy_improvement, "{:.1f}", "energy per image gain")
+v("pf_tdp_w", m(PROFILE.hardware.tdp, "W"), "{:.0f}", "H100 board power, W")
+
+print("== Synthesis (Models.Language.Llama2_7B; Platforms.Mobile)")
+llama = Models.Language.Llama2_7B
+v("p7b_b", m(llama.parameters, "param") / 10 ** 9, "{:.0f}", "7B model parameters, billions")
+v("p7b_fp16_gb", m(llama.size_in_bytes(BYTES_FP16), "GB"), "{:.0f}", "7B in FP16, GB")
+v("p7b_int4_gb", m(llama.size_in_bytes(BYTES_INT4), "GB"), "{:.1f}", "7B in 4-bit codes only, GB")
+v("p7b_q4_gb", m(llama.parameters, "param") * Q4_0_BPW / m(mlsysim.core.units.Q_(1, "GB"), "bit"), "{:.1f}",
+  "7B at Q4_0's bits per weight, GB")
+v("int4_bytes", m(BYTES_INT4, "byte"), "{:.1f}", "bytes per INT4 weight")
+v("phone_ram_gb", m(Platforms.Mobile.ram, "GiB"), "{:.0f}", "phone RAM, GB (as labeled)")
 
 if __name__ == "__main__":
-    hook()
-    recall()
-    formats()
-    gguf()
-    grids()
-    energy()
-    affgrid()
-    napkin()
-    torch_check()
-    listing2()
-    zeropoint()
-    intlayer()
-    clipping()
-    wu()
-    perchannel()
-    cliff()
-    roofline()
-    llama()
-    dequant()
-    pixel2()
-    close()
+    write(__file__)

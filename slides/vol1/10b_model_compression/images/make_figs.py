@@ -37,8 +37,10 @@ Outside papers were read on 2026-10-17.
     Horowitz energy (table 8); Napkin Math 10.1 and 10.4; listing 2 weights;
     blur waterfall (fig-compression-waterfall, illustrative); GPT-2 XL
     streaming times (table 1).
-  - Derived values (ratios, step sizes, bytes per token, the unfused
-    dequantization traffic, speedups) are computed in calcs.py and imported.
+  - Every value now comes from MLSysIM through calcs.py (imported; the
+    printed strings through deckvals.val and num), so figures, slides, and
+    the chapter share one computation. The citations above record where the
+    MLSysIM entries come from.
   - Published figures shown as images (not generated here): Wu et al. 2020
     Fig. 2, Nagel et al. 2019 Fig. 2, Dettmers et al. 2022 Fig. 3(a); see
     SOURCES.yml.
@@ -54,7 +56,10 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import slideplot as sp  # noqa: E402
-import calcs  # noqa: E402  every derived value below comes from calcs.py
+import calcs  # noqa: E402  every value below comes from calcs.py (MLSysIM)
+from deckvals import val, num  # noqa: E402
+from mlsysim.core.units import FLOAT_FORMAT_BITS, FP8_FORMAT_BITS, FP32_BITS, INT4_BITS, INT8_BITS  # noqa: E402
+from mlsysim.physics import calc_dequantize, calc_quantize  # noqa: E402
 
 plt = sp.plt
 C = sp.C
@@ -166,8 +171,8 @@ def vbars(ax, groups, series, shown, width=0.2, fmt="{:.1f}", ymax=85,
 for k in (1, 2, 3):
     fig, ax = plt.subplots(figsize=(4.4, 2.9))
     groups = ["ResNet-50", "MobileNetV2"]
-    flt = [75.2, 71.9]
-    i8 = [75.0, 0.1]
+    flt = [num("r50_float"), num("mbv2_float")]
+    i8 = [num("r50_tensor"), num("mbv2_tensor")]
     w = 0.36
     for gi in range(2):
         show_f = gi == 0 or k >= 2
@@ -203,19 +208,20 @@ for k in (1, 2, 3):
 # ---------------------------------------------------------------------------
 # 2. Bit fields to scale: what each format spends its bits on (3 steps)
 # ---------------------------------------------------------------------------
-def smaller(bits):
-    return f"{32 // bits}× smaller"
+def smaller(e, f):
+    return f"{FP32_BITS // (1 + e + f)}× smaller"
 
 
+F = {**FLOAT_FORMAT_BITS, **FP8_FORMAT_BITS}
 formats = [
     # name, sign, exponent, mantissa, integer bits, note, step
-    ("FP32", 1, 8, 23, 0, "baseline", 1),
-    ("BF16", 1, 8, 7, 0, f"FP32's range, {smaller(16)}", 1),
-    ("FP16", 1, 5, 10, 0, f"max 65,504, {smaller(16)}", 1),
-    ("FP8 E4M3", 1, 4, 3, 0, f"max 448, {smaller(8)}", 2),
-    ("FP8 E5M2", 1, 5, 2, 0, f"max 57,344, {smaller(8)}", 2),
-    ("INT8", 0, 0, 0, 8, f"{2 ** 8} levels, {smaller(8)}", 3),
-    ("INT4", 0, 0, 0, 4, f"{2 ** 4} levels, {smaller(4)}", 3),
+    ("FP32", 1, *F["fp32"], 0, "baseline", 1),
+    ("BF16", 1, *F["bf16"], 0, f"FP32's range, {smaller(*F['bf16'])}", 1),
+    ("FP16", 1, *F["fp16"], 0, f"max {val('fp16_max')}, {smaller(*F['fp16'])}", 1),
+    ("FP8 E4M3", 1, *F["e4m3"], 0, f"max {val('e4m3_max')}, {smaller(*F['e4m3'])}", 2),
+    ("FP8 E5M2", 1, *F["e5m2"], 0, f"max {val('e5m2_max')}, {smaller(*F['e5m2'])}", 2),
+    ("INT8", 0, 0, 0, INT8_BITS, f"{val('int8_levels')} levels, {val('int8_smaller')}× smaller", 3),
+    ("INT4", 0, 0, 0, INT4_BITS, f"{val('int4_levels')} levels, {val('int4_smaller')}× smaller", 3),
 ]
 BW = 15  # px per bit
 X0 = 150
@@ -256,23 +262,19 @@ for k in (1, 2, 3):
 # ---------------------------------------------------------------------------
 # 3. Float grid against integer grid on one log axis (derived)
 # ---------------------------------------------------------------------------
-e4m3 = calcs.e4m3_values()
-assert len(e4m3) == 127 and e4m3.max() == 448
-pos = e4m3[e4m3 > 0]
-below1 = int((e4m3 < 1).sum())          # 56, zero included
-top = int(((pos >= 256)).sum())         # 7
-s_int = 448 / 127
-int_levels = s_int * np.arange(1, 128)
+pos = np.array(calcs.E4M3_POS)
+s_int = calcs.INT8_448.scale
+int_levels = s_int * np.arange(1, calcs.int8_pos + 1)
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 2.3))
     ax.vlines(pos, 1.0, 1.6, color=C["memory"], lw=1.1)
-    ax.text(0.0013, 1.95, f"FP8 E4M3: {len(pos)} positive values, {below1 - 1} of them below 1",
+    ax.text(0.0013, 1.95, f"FP8 E4M3: {val('e4m3_pos')} positive values, {val('e4m3_below1')} of them below 1",
             fontsize=12, fontweight="bold", color=C["memory"])
     a = 1.0 if k == 2 else 0.0
     ax.vlines(int_levels, 0.0, 0.6, color=C["compute"], lw=1.1, alpha=a)
     ax.axvspan(0.001, s_int / 2, ymin=0.233, ymax=0.433, color=C["danger_l"], alpha=a)
-    ax.text(0.0013, -0.5, f"INT8 scaled to 448: one level every {s_int:.2f};"
-            f" all below {s_int / 2:.2f} round to 0", fontsize=12,
+    ax.text(0.0013, -0.5, f"INT8 scaled to {val('e4m3_max')}: one level every {val('int8_step448')};"
+            f" all below {val('int8_zero_below')} round to 0", fontsize=12,
             fontweight="bold", color=C["compute"], alpha=a)
     ax.set_xscale("log")
     ax.set_xlim(0.001, 1000)
@@ -288,8 +290,12 @@ for k in (1, 2):
 # ---------------------------------------------------------------------------
 # 4. Energy per operation (copied from Lecture 10; Horowitz 2014 via table 8)
 # ---------------------------------------------------------------------------
-ops = [(n, f32, i8, f"{calcs.r(calcs.energy_ratio(f32, i8), 1):g}×")
-       for n, f32, i8 in calcs.ENERGY]
+E = calcs.ENERGY
+ops = [(n, calcs.m(f32, "pJ/flop"), calcs.m(i8, "pJ/flop"), f"{val(k)}×")
+       for n, f32, i8, k in (("Add", E.wide_add, E.narrow_add, "e_add_ratio"),
+                             ("Multiply", E.wide_mul, E.narrow_mul, "e_mul_ratio"),
+                             ("Multiply-accumulate", E.wide_mac, E.narrow_mac, "e_mac_ratio"))]
+DRAM_32 = num("e_dram")
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 2.5))
     ylabels = []
@@ -303,8 +309,8 @@ for k in (1, 2):
                 fontsize=11, color=C["neutral"], fontweight="bold")
         ylabels.append((y, name))
     vis = 1.0 if k == 2 else 0.0
-    ax.barh(-0.05, calcs.DRAM_32, height=0.42, color=C["memory"], alpha=vis)
-    ax.text(calcs.DRAM_32 * 1.2, -0.05, f"{calcs.DRAM_32:g} pJ", va="center", fontsize=11, color=C["memory"],
+    ax.barh(-0.05, DRAM_32, height=0.42, color=C["memory"], alpha=vis)
+    ax.text(DRAM_32 * 1.2, -0.05, f"{val('e_dram')} pJ", va="center", fontsize=11, color=C["memory"],
             fontweight="bold", alpha=vis)
     ylabels.append((-0.05, "32-bit DRAM read"))
     for y, name in ylabels:
@@ -326,20 +332,25 @@ for k in (1, 2):
 # 5. The integer grid laid over a real range: a 3-bit toy (derived)
 #    [alpha, beta] = [-1, 2.5], b = 3: s = 3.5 / 7 = 0.5, z = round(1/0.5) = 2
 # ---------------------------------------------------------------------------
-ALPHA, BETA, B = calcs.TOY_ALPHA, calcs.TOY_BETA, calcs.TOY_B
-S_TOY, Z_TOY = calcs.TOY_S, calcs.TOY_Z
-levels = S_TOY * (np.arange(2 ** B) - Z_TOY)
-samples = calcs.TOY_SAMPLES
-quant_toy = calcs.quant_toy
+TOY = calcs.TOY
+ALPHA, BETA = TOY.lo, TOY.hi
+S_TOY, Z_TOY = TOY.scale, TOY.zero_point
+levels = S_TOY * (np.arange(TOY.qmin, TOY.qmax + 1) - Z_TOY)
+samples = TOY.values[:-1]  # the last value is the slide's question
+
+
+def quant_toy(x):
+    q = calc_quantize(x, S_TOY, Z_TOY, TOY.qmin, TOY.qmax)
+    return q, calc_dequantize(q, S_TOY, Z_TOY)
 
 
 for k in (1, 2, 3):
     fig, ax = plt.subplots(figsize=(5.8, 2.3))
     ax.plot([-1.75, 3.25], [1, 1], color=C["text"], lw=1.5)
     ax.axvspan(ALPHA, BETA, ymin=0.52, ymax=0.70, color=C["memory_l"])
-    ax.text(ALPHA, 1.58, "α = −1", ha="center", fontsize=13, fontweight="bold",
+    ax.text(ALPHA, 1.58, f"α = {val('toy_alpha')}".replace("-", "−"), ha="center", fontsize=13, fontweight="bold",
             color=C["memory"])
-    ax.text(BETA, 1.58, "β = 2.5", ha="center", fontsize=13, fontweight="bold",
+    ax.text(BETA, 1.58, f"β = {val('toy_beta')}", ha="center", fontsize=13, fontweight="bold",
             color=C["memory"])
     ax.text(-1.9, 1, "real", ha="right", va="center", fontsize=13, fontweight="bold")
     for x in samples:
@@ -359,9 +370,9 @@ for k in (1, 2, 3):
                 color=C["danger"] if hl else C["compute"], alpha=a2)
     ax.annotate("", (levels[5], -0.66), (levels[4], -0.66),
                 arrowprops=dict(arrowstyle="<->", color=C["text"], lw=1.3, alpha=a2))
-    ax.text(levels[4] + S_TOY / 2, -1.02, f"s = {S_TOY:g}", ha="center", fontsize=12,
+    ax.text(levels[4] + S_TOY / 2, -1.02, f"s = {val('toy_s')}", ha="center", fontsize=12,
             fontweight="bold", alpha=a2)
-    ax.text(levels[Z_TOY], -1.02, f"z = {Z_TOY}", ha="center", fontsize=12,
+    ax.text(levels[Z_TOY], -1.02, f"z = {val('toy_z')}", ha="center", fontsize=12,
             fontweight="bold", color=C["danger"], alpha=a2)
     a3 = 1.0 if k >= 3 else 0.0
     for x in samples:
@@ -387,8 +398,8 @@ for k in (1, 2):
     ax.text(-1.4, 1, "real", ha="right", va="center", fontsize=15, fontweight="bold")
     ax.text(-1.4, 0, "UINT8", ha="right", va="center", fontsize=15, fontweight="bold",
             color=C["neutral"])
-    for real, q in zip(calcs.NM_X, calcs.nm_codes()):
-        xq = calcs.NM_ALPHA + q * calcs.NM_S
+    for real, q in zip(calcs.NAPKIN.values, calcs.NAPKIN.codes):
+        xq = calcs.NAPKIN.lo + q * calcs.NAPKIN.scale
         ax.plot([real], [1], "o", ms=9, color=C["memory"])
         ax.text(real, 1.25, f"{real:g}", ha="center", fontsize=15, fontweight="bold",
                 color=C["memory"])
@@ -413,7 +424,7 @@ for k in (1, 2):
     fig, ax = plt.subplots(figsize=(4.6, 2.7))
     ax.axhspan(-S_TOY / 2, S_TOY / 2, color=C["data_l"], zorder=0)
     ax.plot(xs[inside], err[inside], color=C["data"], lw=2)
-    ax.text(1.0, 0.33, f"inside: at most s/2 = {S_TOY / 2:g}", ha="center", fontsize=12,
+    ax.text(1.0, 0.33, f"inside: at most s/2 = {val('toy_half')}", ha="center", fontsize=12,
             fontweight="bold", color=C["data"])
     a = 1.0 if k == 2 else 0.0
     ax.plot(xs[xs < ALPHA], err[xs < ALPHA], color=C["danger"], lw=2.4, alpha=a)
@@ -428,7 +439,7 @@ for k in (1, 2):
     ax.axhline(0, color=C["neutral"], lw=0.8)
     ax.set_xlim(-1.75, 3.25)
     ax.set_ylim(-0.85, 0.85)
-    ax.set_xlabel(f"Real value x (3-bit grid, s = {S_TOY:g})")
+    ax.set_xlabel(f"Real value x ({val('toy_bits')}-bit grid, s = {val('toy_s')})")
     ax.set_ylabel("Error after round trip")
     sp.save(fig, out / f"rounderr_step{k}.svg")
 
@@ -436,9 +447,9 @@ for k in (1, 2):
 # 8. Symmetric against asymmetric, MobileNet-v1 per-channel PTQ (Table 3)
 # ---------------------------------------------------------------------------
 zp_rows = [
-    dict(label="Symmetric weights (z = 0)", value=59.1, color="danger", text="59.1"),
-    dict(label="Asymmetric weights (z ≠ 0)", value=70.3, color="data", text="70.3"),
-    dict(label="Float", value=70.9, color="neutral", text="70.9"),
+    dict(label="Symmetric weights (z = 0)", value=num("mbv1_sym"), color="danger", text=val("mbv1_sym")),
+    dict(label="Asymmetric weights (z ≠ 0)", value=num("mbv1_asym"), color="data", text=val("mbv1_asym")),
+    dict(label="Float", value=num("mbv1_float"), color="neutral", text=val("mbv1_float")),
 ]
 bars_save(out / "zeropoint.svg", zp_rows, [1, 1, 1], xlim=(0, 82), size=(6.6, 1.25),
           label_size=15, text_size=15, axis_size=14,
@@ -452,9 +463,10 @@ bars_save(out / "zeropoint.svg", zp_rows, [1, 1, 1], xlim=(0, 82), size=(6.6, 1.
 # ---------------------------------------------------------------------------
 fig, axes = plt.subplots(1, 2, figsize=(5.9, 1.75))
 for ax, (lo, hi, qlo, qhi, zq, title, ck) in zip(axes, (
-        (-1.0, 1.0, -127, 127, 0, "Symmetric: z = 0", "memory"),
-        (calcs.ASYM_LO, calcs.ASYM_HI, -128, 127, calcs.ZP_ASYM,
-         f"Asymmetric: z = −{-calcs.ZP_ASYM}", "data"))):
+        (calcs.SYM_UNIT.lo, calcs.SYM_UNIT.hi, calcs.SYM_UNIT.qmin, calcs.SYM_UNIT.qmax,
+         calcs.SYM_UNIT.zero_point, f"Symmetric: z = {calcs.SYM_UNIT.zero_point}", "memory"),
+        (calcs.ASYM.lo, calcs.ASYM.hi, calcs.ASYM.qmin, calcs.ASYM.qmax, calcs.ASYM.zero_point,
+         f"Asymmetric: z = {val('zp_asym_z')}".replace("-", "−"), "data"))):
     # real line on top (y = 1), integer line below (y = 0), drawn on 0..1
     ax.plot([0, 1], [1, 1], color=C["text"], lw=1.5)
     ax.plot([0, 1], [0, 0], color=C["neutral"], lw=1.5)
@@ -495,29 +507,20 @@ hist = np.array(hist_px) / 240
 for k in (1,):  # the measured calibration ranges are Wu et al.'s own figure (next frame)
     fig, ax = plt.subplots(figsize=(5.8, 2.45))
     for i, h in enumerate(hist):
-        tail = i >= 11
+        tail = 0.1 * i >= num("clip_cut") - 1e-9
         ax.bar(0.1 * i + 0.05, h, width=0.092,
                color=C["danger_l"] if tail else C["memory_l"],
                edgecolor=C["danger"] if tail else C["memory"], lw=0.8)
     if k == 1:
-        ax.axvline(1.1, color=C["data"], lw=1.8, ls="--")
-        ax.text(1.13, 0.9, "clip at 1.1?", fontsize=12, fontweight="bold", color=C["data"])
-        ax.axvline(2.5, color=C["neutral"], lw=1.8, ls="--")
-        ax.text(2.47, 0.9, "cover all: 2.5", fontsize=12, fontweight="bold",
+        cut, full = num("clip_cut"), num("clip_full")
+        ax.axvline(cut, color=C["data"], lw=1.8, ls="--")
+        ax.text(cut + 0.03, 0.9, f"clip at {val('clip_cut')}?", fontsize=12, fontweight="bold", color=C["data"])
+        ax.axvline(full, color=C["neutral"], lw=1.8, ls="--")
+        ax.text(full - 0.03, 0.9, f"cover all: {val('clip_full')}", fontsize=12, fontweight="bold",
                 color=C["neutral"], ha="right")
         ax.annotate("rare tail", (1.65, 0.07), (1.75, 0.45), fontsize=12,
                     fontweight="bold", color=C["danger"],
                     arrowprops=dict(arrowstyle="-|>", color=C["danger"], lw=1.4))
-    else:
-        for x, lab, ck, ha in ((2.5, "max: up to the largest\nvalue, no clipping", "neutral", "right"),
-                               (1.5, "percentile:\ndrop the top\n0.1%", "compute", "left"),
-                               (1.1, "entropy (KL):\nclosest rounded\nhistogram", "data", "right")):
-            ax.axvline(x, color=C[ck], lw=1.8, ls="--")
-            dx = -0.04 if ha == "right" else 0.04
-            ax.text(x + dx, 0.55 if ck == "neutral" else 0.97, lab, fontsize=11, fontweight="bold", color=C[ck],
-                    ha=ha, va="top")
-        ax.text(2.5, -0.33, "Percentile and entropy positions illustrative",
-                fontsize=9.5, color=C["neutral"], ha="right")
     ax.set_xlim(0, 2.55)
     ax.set_ylim(0, 1.05)
     ax.set_yticks([])
@@ -535,10 +538,10 @@ for k in (1,):  # the measured calibration ranges are Wu et al.'s own figure (ne
 # 10. Per-channel scales restore MobileNetV2 (Krishnamoorthi 2018, Tables 3, 4)
 # ---------------------------------------------------------------------------
 pc_series = [
-    ("Float", "neutral", [71.9, 75.2]),
-    ("INT8 per-tensor", "danger", [0.1, 75.0]),
-    ("INT8 per-channel", "data", [69.8, 75.1]),
-    ("INT8 per-channel + QAT", "memory", [71.1, 75.0]),
+    ("Float", "neutral", [num("mbv2_float"), num("r50_float")]),
+    ("INT8 per-tensor", "danger", [num("mbv2_tensor"), num("r50_tensor")]),
+    ("INT8 per-channel", "data", [num("mbv2_channel"), num("r50_channel")]),
+    ("INT8 per-channel + QAT", "memory", [num("mbv2_qat"), num("r50_qat")]),
 ]
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 2.5))
@@ -554,10 +557,10 @@ for k in (1, 2):
 
 # Synthesis: MobileNetV2 alone, large enough to read in half a slide
 syn_rows = [
-    dict(label="Float", value=71.9, color="neutral", text="71.9"),
-    dict(label="INT8 per-tensor", value=0.1, color="danger", text="0.1"),
-    dict(label="INT8 per-channel", value=69.8, color="data", text="69.8"),
-    dict(label="+ QAT", value=71.1, color="memory", text="71.1"),
+    dict(label="Float", value=num("mbv2_float"), color="neutral", text=val("mbv2_float")),
+    dict(label="INT8 per-tensor", value=num("mbv2_tensor"), color="danger", text=val("mbv2_tensor")),
+    dict(label="INT8 per-channel", value=num("mbv2_channel"), color="data", text=val("mbv2_channel")),
+    dict(label="+ QAT", value=num("mbv2_qat"), color="memory", text=val("mbv2_qat")),
 ]
 bars_save(out / "synth_acc.svg", syn_rows, [1, 1, 1, 1], xlim=(0, 85), size=(4.0, 2.3),
           xlabel="MobileNetV2 top-1 (%)")
@@ -565,10 +568,10 @@ bars_save(out / "synth_acc.svg", syn_rows, [1, 1, 1, 1], xlim=(0, 85), size=(4.0
 # ---------------------------------------------------------------------------
 # 11. Outliers in large language models (Dettmers et al. 2022, Table 1)
 # ---------------------------------------------------------------------------
-size_b = [0.125, 1.3, 2.7, 6.7, 13]
-f32 = [25.65, 15.91, 14.43, 13.30, 12.45]
-absmax = [87.76, 16.55, 15.11, 14.59, 19.08]
-llmint8 = [25.83, 15.93, 14.44, 13.24, 12.45]
+size_b = [r["params_b"] for r in calcs.DET]
+f32 = [r["fp32"] for r in calcs.DET]
+absmax = [r["absmax"] for r in calcs.DET]
+llmint8 = [r["llm_int8"] for r in calcs.DET]
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 2.5))
     ax.axvspan(6.0, 15, color=C["danger_l"], alpha=0.6 if k == 2 else 0.0, zorder=0)
@@ -576,10 +579,10 @@ for k in (1, 2):
     ax.plot(size_b, absmax, "o-", color=C["danger"], lw=2.2, ms=7)
     a = 1.0 if k == 2 else 0.0
     ax.plot(size_b, llmint8, "s--", color=C["data"], lw=2.0, ms=6, alpha=a)
-    ax.text(19, 19.08, "INT8, one scale\nper tensor: 19.08", fontsize=11,
+    ax.text(19, absmax[-1], f"INT8, one scale\nper tensor: {val('det_absmax_large')}", fontsize=11,
             fontweight="bold", color=C["danger"], va="center")
-    ax.text(19, 12.2, "32-bit float: 12.45" if k == 1 else
-            "32-bit float and\nLLM.int8(): 12.45", fontsize=11, fontweight="bold",
+    ax.text(19, 12.2, f"32-bit float: {val('det_fp32_large')}" if k == 1 else
+            f"32-bit float and\nLLM.int8(): {val('det_fp32_large')}", fontsize=11, fontweight="bold",
             color=C["neutral"] if k == 1 else C["data"], va="center")
     ax.text(6.3, 60, "outlier features\nin every layer", fontsize=10.5,
             fontweight="bold", color=C["danger"], alpha=a)
@@ -588,7 +591,7 @@ for k in (1, 2):
     ax.set_xlim(0.09, 15)
     ax.set_ylim(10, 100)
     ax.set_xticks(size_b)
-    ax.set_xticklabels(["125M", "1.3B", "2.7B", "6.7B", "13B"])
+    ax.set_xticklabels([f"{x * 10 ** 3:g}M" if x < 1 else f"{x:g}B" for x in size_b])
     ax.set_yticks([10, 15, 20, 30, 50, 100])
     ax.set_yticklabels(["10", "15", "20", "30", "50", "100"])
     ax.minorticks_off()
@@ -602,11 +605,11 @@ for k in (1, 2):
 # 12. The cliff: 8-bit against 4-bit weights (Krishnamoorthi 2018, Tables 3-5)
 # ---------------------------------------------------------------------------
 cliff_series = [
-    ("Float", "neutral", [75.2, 71.9]),
-    ("INT8 per-channel PTQ", "data", [75.1, 69.8]),
-    ("INT4 per-tensor PTQ", "danger", [0.2, 0.1]),
-    ("INT4 per-channel PTQ", "compute", [54.0, 0.1]),
-    ("INT4 per-channel QAT", "memory", [73.2, 62.0]),
+    ("Float", "neutral", [num("r50_float"), num("mbv2_float")]),
+    ("INT8 per-channel PTQ", "data", [num("r50_channel"), num("mbv2_channel")]),
+    ("INT4 per-tensor PTQ", "danger", [num("r50_w4_tensor"), num("mbv2_w4_tensor")]),
+    ("INT4 per-channel PTQ", "compute", [num("r50_w4_channel"), num("mbv2_w4_channel")]),
+    ("INT4 per-channel QAT", "memory", [num("r50_w4_qat"), num("mbv2_w4_qat")]),
 ]
 for k in (1, 2, 3):
     fig, ax = plt.subplots(figsize=(5.8, 2.6))
@@ -624,26 +627,28 @@ for k in (1, 2, 3):
 # 13. GPTQ on OPT-175B and AWQ's salient channels on OPT-6.7B
 # ---------------------------------------------------------------------------
 gptq_rows = [
-    dict(label="FP16", value=8.34, color="neutral", text="8.34"),
-    dict(label="4-bit, round to nearest", value=10.54, color="danger", text="10.54"),
-    dict(label="4-bit, GPTQ", value=8.37, color="data", text="8.37"),
-    dict(label="3-bit, round to nearest", value=16, color="danger",
+    dict(label="FP16", value=num("gptq_fp16"), color="neutral", text=val("gptq_fp16")),
+    dict(label="4-bit, round to nearest", value=num("gptq_rtn4"), color="danger", text=val("gptq_rtn4")),
+    dict(label="4-bit, GPTQ", value=num("gptq_4"), color="data", text=val("gptq_4")),
+    dict(label="3-bit, round to nearest", value=16, color="danger",  # bar cut at the axis end
          text="", tx=10.6),
-    dict(label="3-bit, GPTQ", value=8.68, color="data", text="8.68"),
+    dict(label="3-bit, GPTQ", value=num("gptq_3"), color="data", text=val("gptq_3")),
 ]
 fig, ax = bars(None, gptq_rows, [1] * 5, xlim=(0, 16), size=(5.8, 2.5),
                xlabel="OPT-175B WikiText2 perplexity (lower is better)", boxed=True)
 for dx in (13.6, 14.0):  # break marks on the cut bar
     ax.plot([dx - 0.15, dx + 0.15], [0.69, 1.31], color="white", lw=3, zorder=5)
-ax.text(0.3, 1, "7.3 thousand: bar cut off", va="center", fontsize=12,
+ax.text(0.3, 1, f"{val('gptq_rtn3_k')} thousand: bar cut off", va="center", fontsize=12,
         fontweight="bold", color="white", zorder=6)
 sp.save(fig, out / "gptq.svg")
 
 awq_rows = [
-    dict(label="FP16", value=10.86, color="neutral", text="10.86"),
-    dict(label="INT3, round to nearest", value=23.54, color="danger", text="23.54"),
-    dict(label="Keep 1% by weight size", value=22.37, color="compute", text="22.37"),
-    dict(label="Keep 1% by activation size", value=11.39, color="data", text="11.39"),
+    dict(label="FP16", value=num("awq_fp16"), color="neutral", text=val("awq_fp16")),
+    dict(label="INT3, round to nearest", value=num("awq_rtn"), color="danger", text=val("awq_rtn")),
+    dict(label=f"Keep {val('awq_kept_pct')}% by weight size", value=num("awq_by_weight"), color="compute",
+         text=val("awq_by_weight")),
+    dict(label=f"Keep {val('awq_kept_pct')}% by activation size", value=num("awq_by_act"), color="data",
+         text=val("awq_by_act")),
 ]
 for k in (1, 2):
     bars_save(out / f"awq_step{k}.svg", awq_rows, [1, 1, k >= 2, k >= 2], xlim=(0, 30),
@@ -661,11 +666,9 @@ for k in (1, 2):
 # ---------------------------------------------------------------------------
 RIDGE, ROOF = 100.0, 1.0
 xs = np.logspace(-1.5, 4.5, 300)
-D = calcs.decode()
-MS16 = calcs.r(D["t16"] / calcs.PHONE_BW * 1e3, 0)
-MS4 = calcs.r(D["t4"] / calcs.PHONE_BW * 1e3, 0)
-SPEEDUP = calcs.r(D["t16"] / D["t4"], 1)
-INT8_X = calcs.r(calcs.H100_INT8 / calcs.H100_FP16, 0)
+MS16, MS4 = val("dec_t16_ms"), val("dec_t4_ms")
+SPEEDUP = num("dec_speedup")
+INT8_X = val("h100_int8_x")
 dec16, dec4 = 6.0, 6.0 * SPEEDUP   # position illustrative; the ratio is computed
 mlp16, mlp8 = 3000.0, 6000.0
 FS = 10.5
@@ -679,7 +682,7 @@ for k in (1, 2, 3):
     # decode points
     ax.plot([dec16], [dec16 / RIDGE], "o", ms=10, color=C["memory"], mec="white",
             mew=1.5, zorder=5, alpha=0.45 if k >= 2 else 1.0)
-    ax.annotate(f"Decode, FP16:\n{MS16:g} ms per token", (dec16, dec16 / RIDGE), (8, -6),
+    ax.annotate(f"Decode, FP16:\n{MS16} ms per token", (dec16, dec16 / RIDGE), (8, -6),
                 textcoords="offset points", ha="left", va="top", fontsize=FS,
                 fontweight="bold", color=C["memory"])
     a2 = 1.0 if k >= 2 else 0.0
@@ -688,13 +691,13 @@ for k in (1, 2, 3):
                     arrowprops=dict(arrowstyle="-|>", color=C["data"], lw=2.2, alpha=a2))
         ax.plot([dec4], [dec4 / RIDGE], "o", ms=10, color=C["data"], mec="white",
                 mew=1.5, zorder=5, alpha=a2)
-        ax.annotate(f"INT4 weights: {MS4:g} ms\n({SPEEDUP:g}× fewer bytes)", (dec4, dec4 / RIDGE),
+        ax.annotate(f"INT4 weights: {MS4} ms\n({val('dec_speedup')}× fewer bytes)", (dec4, dec4 / RIDGE),
                     (-8, 6), textcoords="offset points", ha="right", va="bottom",
                     fontsize=FS, fontweight="bold", color=C["data"], alpha=a2)
     # MLP points
     ax.plot([mlp16], [ROOF], "o", ms=10, color=C["compute"], mec="white", mew=1.5,
             zorder=5, alpha=0.45 if k >= 3 else 1.0)
-    ax.annotate(f"MLP, large batch:\nFP16 roof, {calcs.H100_FP16:,}", (mlp16, ROOF), (0, -12),
+    ax.annotate(f"MLP, large batch:\nFP16 roof, {val('h100_fp16')}", (mlp16, ROOF), (0, -12),
                 textcoords="offset points", ha="center", va="top", fontsize=FS,
                 fontweight="bold", color=C["compute"])
     a3 = 1.0 if k >= 3 else 0.0
@@ -703,7 +706,7 @@ for k in (1, 2, 3):
         ax.plot(xi, xi / RIDGE * ROOF, color=C["memory"], lw=2, ls="--", alpha=a3)
         xr = xs[xs >= 2 * RIDGE]
         ax.plot(xr, np.full_like(xr, 2 * ROOF), color=C["danger"], lw=2.4, ls="--", alpha=a3)
-        ax.text(230, 2 * ROOF * 1.25, f"INT8 roof: {calcs.H100_INT8:,} ({INT8_X:g}×)", color=C["danger"],
+        ax.text(230, 2 * ROOF * 1.25, f"INT8 roof: {val('h100_int8')} ({INT8_X}×)", color=C["danger"],
                 fontsize=FS, fontweight="bold", va="bottom", alpha=a3)
         ax.annotate("", (mlp8, 2 * ROOF * 0.95), (mlp16 * 1.06, ROOF * 1.04),
                     arrowprops=dict(arrowstyle="-|>", color=C["danger"], lw=2.0, alpha=a3))
@@ -729,21 +732,21 @@ for k in (1, 2, 3):
 # 15. Bytes per token for GPT-2 XL on the phone: fused against unfused
 #     dequantization (Napkin Math 10.4; unfused traffic derived from Sec. 10.4.1)
 # ---------------------------------------------------------------------------
-W16, W4, KV = D["w16"] / calcs.GB, D["w4"] / calcs.GB, calcs.r(D["kv"] / calcs.GB, 2)
+W16, W4, KV = num("dec_w16_gb"), num("dec_w4_gb"), num("dec_kv_gb")
 
 
-def tot(nbytes, approx=False):
-    gb = calcs.r(nbytes / calcs.GB, 2)
-    ms = calcs.r(nbytes / calcs.PHONE_BW * 1e3, 0)
-    return f"{gb:.2f} GB, {'≈' if approx else ''}{ms:g} ms"
+def tot(gb, ms, approx=False):
+    return f"{val(gb)} GB, {'≈' if approx else ''}{val(ms)} ms"
 
 
 segs = [
-    ("FP16", [(W16, "memory", f"FP16 weights, {W16:g} GB"), (KV, "neutral", "")], tot(D["t16"])),
-    ("INT4, fused", [(W4, "data", ""), (KV, "neutral", "")], tot(D["t4"])),
+    ("FP16", [(W16, "memory", f"FP16 weights, {val('dec_w16_gb')} GB"), (KV, "neutral", "")],
+     tot("dec_t16_gb", "dec_t16_ms")),
+    ("INT4, fused", [(W4, "data", ""), (KV, "neutral", "")], tot("dec_t4_gb", "dec_t4_ms")),
     ("INT4, separate\ndequantize pass",
-     [(W4, "data", ""), (W16, "danger", f"write FP16, {W16:g} GB"),
-      (W16, "memory", f"read FP16, {W16:g} GB"), (KV, "neutral", "")], tot(D["sep"], True)),
+     [(W4, "data", ""), (W16, "danger", f"write FP16, {val('dec_w16_gb')} GB"),
+      (W16, "memory", f"read FP16, {val('dec_w16_gb')} GB"), (KV, "neutral", "")],
+     tot("dq_sep_gb", "dq_sep_ms", True)),
 ]
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 2.3))
@@ -761,7 +764,7 @@ for k in (1, 2):
                 color=C["danger"] if i == 2 else C["text"], alpha=vis)
         ax.text(-0.01, y, name, transform=ax.get_yaxis_transform(), ha="right",
                 va="center", fontsize=12, fontweight="bold", color=C["text"], alpha=vis)
-    ax.text(0.0, -0.75, f"green: packed INT4 weights, {W4:g} GB;  gray: FP16 KV cache, {KV:g} GB",
+    ax.text(0.0, -0.75, f"green: packed INT4 weights, {val('dec_w4_gb')} GB;  gray: FP16 KV cache, {val('dec_kv_gb')} GB",
             fontsize=10, color=C["neutral"])
     ax.set_xlim(0, 10)
     ax.set_ylim(-1.0, 2.5)
@@ -769,45 +772,42 @@ for k in (1, 2):
     ax.spines["left"].set_visible(False)
     ax.grid(axis="x", color=C["grid"], linewidth=0.6)
     ax.set_axisbelow(True)
-    ax.set_xlabel("GB read and written per token at 51.2 GB/s")
+    ax.set_xlabel(f"GB read and written per token at {val('phone_bw')} GB/s")
     sp.save(fig, out / f"dequant_step{k}.svg")
 
 # ---------------------------------------------------------------------------
 # 16. MobileNetV2 on a Pixel 2 (Krishnamoorthi 2018, Table 7)
 # ---------------------------------------------------------------------------
-def px_text(ms):
-    if ms == calcs.PX2_FP32_CPU:
-        return f"{ms:g} ms"
-    return f"{ms:g} ms ({calcs.r(calcs.PX2_FP32_CPU / ms, 1):g}×)"
-
-
+FRAME_MS = calcs.m(calcs.BLUR.frame_budget, "ms")
+FRAME_LABEL = f"{val('frame_ms')} ms frame"
 px_rows = [
-    dict(label="FP32, CPU", value=calcs.PX2_FP32_CPU, color="neutral", text=px_text(calcs.PX2_FP32_CPU)),
-    dict(label="INT8, CPU", value=calcs.PX2_INT8_CPU, color="compute", text=px_text(calcs.PX2_INT8_CPU)),
-    dict(label="INT8, DSP", value=calcs.PX2_INT8_DSP, color="data", text=px_text(calcs.PX2_INT8_DSP)),
+    dict(label="FP32, CPU", value=num("px_fp32"), color="neutral", text=f"{val('px_fp32')} ms"),
+    dict(label="INT8, CPU", value=num("px_cpu"), color="compute", text=f"{val('px_cpu')} ms ({val('px_cpu_x')}×)"),
+    dict(label="INT8, DSP", value=num("px_dsp"), color="data", text=f"{val('px_dsp')} ms ({val('px_dsp_x')}×)"),
 ]
 bars_save(out / "pixel2.svg", px_rows, [1, 1, 1], xlim=(0, 150), size=(4.0, 1.5),
           label_size=15, text_size=15, axis_size=14,
-          vlines=[(calcs.FRAME_MS, "33 ms frame", "danger")], boxed=True,
+          vlines=[(FRAME_MS, FRAME_LABEL, "danger")], boxed=True,
           xlabel="MobileNetV2 on a Pixel 2, one image (ms)")
 
 # ---------------------------------------------------------------------------
 # 17. Part 1 recall: weight streaming and the blur waterfall (copied code)
 # ---------------------------------------------------------------------------
 stream_rows = [
-    dict(label="MobileNetV2, FP32", value=0.27, color="memory",
-         text="0.27 ms: 1% of a frame"),
-    dict(label="ResNet-50, FP32", value=2.0, color="memory", text="2 ms"),
-    dict(label="GPT-2 XL, FP16", value=59, color="danger", text="59 ms per token"),
+    dict(label="MobileNetV2, FP32", value=num("mnv2_read_ms"), color="memory",
+         text=f"{val('mnv2_read_ms')} ms: {val('mnv2_read_share_pct')}% of a frame"),
+    dict(label="ResNet-50, FP32", value=calcs.m(calcs.R50_READ.read_time, "ms"), color="memory",
+         text=f"{val('r50_read_ms')} ms"),
+    dict(label="GPT-2 XL, FP16", value=num("gpt2_read_ms"), color="danger", text=f"{val('gpt2_read_ms')} ms per token"),
 ]
 bars_save(out / "stream.svg", stream_rows, [1, 1, 1], xlim=(0, 80), size=(3.6, 1.6),
           label_size=15, text_size=15, axis_size=14,
-          vlines=[(calcs.FRAME_MS, "33 ms frame", "compute")], boxed=True,
-          xlabel="Read every weight once at 51.2 GB/s (ms)")
+          vlines=[(FRAME_MS, FRAME_LABEL, "compute")], boxed=True,
+          xlabel=f"Read every weight once at {val('phone_bw')} GB/s (ms)")
 
 stages = ["FP32, CPU", "Pruned, CPU", "Pruned INT8,\naccelerator"]
-memv = [14.0, 10.4, 2.6]
-timev = [125, 87, 20]
+memv = [num("blur_fp32_mb"), num("blur_pruned_mb"), num("blur_int8_mb")]
+timev = [num("blur_cpu_ms"), num("blur_pruned_ms"), num("blur_int8_ms")]
 # Drawn for a half-slide slot: stages are rows, shared by both panels, so
 # every label stays at slide-legible size.
 for k in (2, 3):
@@ -831,8 +831,8 @@ for k in (2, 3):
     a1.tick_params(axis="y", length=0)
     a2.tick_params(axis="y", length=0)
     a1.set_ylim(-0.5, 2.5)
-    a2.axvline(33, color=C["danger"], lw=1.5, ls="--")
-    a2.text(36, -0.45, "33 ms budget", color=C["danger"], fontsize=12.5,
+    a2.axvline(FRAME_MS, color=C["danger"], lw=1.5, ls="--")
+    a2.text(FRAME_MS + 3, -0.45, f"{val('frame_ms')} ms budget", color=C["danger"], fontsize=12.5,
             fontweight="bold", ha="left", va="bottom")
     fig.text(0.01, -0.08, "Illustrative scenario (Example 10.1)", fontsize=12.5,
              color=C["neutral"])

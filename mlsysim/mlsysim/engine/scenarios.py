@@ -33,6 +33,7 @@ from ..ops import Ops as _Ops
 from ..embodied.registry import Embodied as _Embodied  # embodied stopping scenarios (2026-10-20)
 from ..agents.registry import Agents as _Agents  # agent harness profiles (added 2026-10-20)
 from . import scenario_types as _st
+from .serving_profile import resnet50_h100_profile as _resnet50_h100_profile  # quantization (added 2026-10-20)
 from ..core.units import BYTES_ADAM_MOMENTS as _BYTES_ADAM_MOMENTS  # neural computation (added 2026-10-20)
 from ..core.units import FLOAT_FORMAT_BITS as _FLOAT_FORMAT_BITS, INT16_BITS as _INT16_BITS  # added 2026-10-20
 from ..core.units import COLOR_DEPTH_8BIT as _COLOR_DEPTH_8BIT  # added 2026-10-20
@@ -8871,4 +8872,108 @@ class Scenarios(Registry):
         candidate_sfa_renamed=0.81,  # scenario assumption
         baseline_pre_renamed=0.02,  # scenario assumption
         candidate_pre_renamed=0.12,  # scenario assumption
+    )
+
+    # --- Quantization (added 2026-10-20) --------------------------------------
+    Uint8RangeMinusOneToThree = _st.QuantizationGridScenario(
+        name="A 2 by 2 activation matrix with range [-1, 3] stored in UINT8",
+        description="Affine scale and zero-point by hand; real zero must land on an integer.",
+        values=[-1.0, 1.0, 0.0, 3.0],      # scenario assumption: the matrix, row-major; no entry sits on a rounding tie
+        bits=8,
+        alpha=-1.0,                        # scenario assumption: clipping range
+        beta=3.0,
+    )
+    ThreeBitGridMinusOneToTwoAndHalf = _st.QuantizationGridScenario(
+        name="Six values on a 3-bit grid over [-1, 2.5]",
+        description="A toy affine grid small enough to draw every level; two values fall outside the range.",
+        values=[-1.4, -0.3, 0.8, 1.6, 2.9, 2.2],  # scenario assumption: illustrative values
+        bits=3,
+        alpha=-1.0,                        # scenario assumption: clipping range
+        beta=2.5,
+    )
+    SymmetricInt8FourWeights = _st.QuantizationGridScenario(
+        name="Four weights quantized to symmetric INT8, scale set by the largest magnitude",
+        description="The worked symmetric-quantization listing: zero-point 0, s = max|w| / 127.",
+        values=[0.127, -0.084, 0.392, -0.203],    # scenario assumption: illustrative weights
+        bits=8,
+        symmetric=True,
+    )
+    SymmetricInt8UnitRange = _st.QuantizationGridScenario(
+        name="A symmetric INT8 grid over [-1, 1]",
+        description="Zero-point 0; codes -127 to 127.",
+        bits=8, alpha=-1.0, beta=1.0,      # scenario assumption: illustrative range
+        symmetric=True,
+    )
+    AsymmetricInt8RangeMinusHalfToOneAndHalf = _st.QuantizationGridScenario(
+        name="An asymmetric signed INT8 grid over [-0.5, 1.5]",
+        description="Codes -128 to 127; real zero lands at a negative code.",
+        bits=8, alpha=-0.5, beta=1.5,      # scenario assumption: illustrative range
+        signed=True,
+    )
+    Relu6SymmetricInt8 = _st.QuantizationGridScenario(
+        name="ReLU6 outputs [0, 6] on a symmetric INT8 grid",
+        description="Half the codes cover negative values that never occur.",
+        bits=8, alpha=0.0, beta=6.0,       # ReLU6 clips to [0, 6]
+        symmetric=True,
+    )
+    Relu6AsymmetricUint8 = Relu6SymmetricInt8.variant(
+        name="ReLU6 outputs [0, 6] on an asymmetric 8-bit grid",
+        description="Every one of the 255 steps covers the occupied range.",
+        symmetric=False,
+    )
+    ActivationsCoveredToTwoAndHalfUint8 = _st.QuantizationGridScenario(
+        name="One layer's activations in UINT8 over their full range [0, 2.5]",
+        description="Max calibration: the range reaches the largest value seen.",
+        bits=8, alpha=0.0, beta=2.5,       # scenario assumption: illustrative histogram's largest value
+    )
+    ActivationsClippedAtOnePointOneUint8 = ActivationsCoveredToTwoAndHalfUint8.variant(
+        name="One layer's activations in UINT8, clipped at 1.1",
+        description="The rare tail above 1.1 saturates at the top code.",
+        beta=1.1,                          # scenario assumption: illustrative clip at the end of the bulk
+    )
+    Int8DotProductThreeTerms = _st.IntegerDotProductScenario(
+        name="One INT8 output from three weight-input pairs, accumulated in INT32",
+        description="Symmetric scales from each tensor's largest magnitude; requantized to s_y = 1/127.",
+        weights=[0.5, -0.25, 0.75],        # scenario assumption: illustrative
+        inputs=[1.0, 2.0, 0.5],            # scenario assumption: illustrative
+        output_scale=1 / 127,              # scenario assumption: output range [-1, 1]
+    )
+    Gpt2XlFp16DecodeFullContextPhone = Gpt2XlFp16WeightReadPhone.variant(
+        name="GPT-2 XL decoding at a full context, FP16 weights and KV cache, on a flagship phone",
+        description="Each batch-one token reads every weight and the whole KV cache.",
+        context_tokens=_Models.Language.GPT2.context_length,
+        kv_bytes_per_value=_BYTES_FP16,
+    )
+    Gpt2XlInt4DecodeFullContextPhone = Gpt2XlInt4WeightReadPhone.variant(
+        name="GPT-2 XL decoding at a full context, INT4 weights and an FP16 KV cache, on a flagship phone",
+        description="Unpacked to FP16 inside the kernel, or in a separate pass that writes and rereads them.",
+        context_tokens=_Models.Language.GPT2.context_length,
+        kv_bytes_per_value=_BYTES_FP16,
+        unpacked_bytes_per_weight=_BYTES_FP16,
+    )
+    Int8VsFp32OperationEnergy45nm = _st.OperationEnergyComparisonScenario(
+        name="INT8 against FP32 energy per add, multiply, and multiply-accumulate at 45 nm",
+        description="The INT8 MAC accumulates in INT32; a 32-bit DRAM read against the INT8 MAC.",
+        wide_add=_Hardware.Tech.Op.AddFp32.energy,
+        wide_mul=_Hardware.Tech.Op.FlopFp32.energy,
+        narrow_add=_Hardware.Tech.Op.AddInt8.energy,
+        narrow_mul=_Hardware.Tech.Op.OpInt8.energy,
+        accumulate_add=_Hardware.Tech.Op.AddInt32.energy,
+        memory_read=_Hardware.Tech.Memory.DRAM.energy_per_access,
+    )
+    ResNet50Int8ProfileH100 = _st.QuantizedDeploymentProfileScenario(
+        name="ResNet-50 in FP32 and INT8 on an H100, against accuracy and calibration limits",
+        description="Accuracy and confidence calibration are stipulated; latency and throughput come from the "
+                    "shared H100 engine profile; energy per image assumes full board power in both.",
+        workload=_Models.Vision.ResNet50,
+        hardware=_Hardware.Cloud.H100,
+        profile=_resnet50_h100_profile(),
+        float_bytes=_BYTES_FP32,
+        int_bytes=_BYTES_INT8,
+        float_top1_pct=76.1,               # scenario assumption: FP32 top-1
+        int_top1_pct=75.8,                 # scenario assumption: INT8 top-1
+        float_calibration_error_pct=2.1,   # scenario assumption: FP32 confidence-calibration error
+        int_calibration_error_pct=3.4,     # scenario assumption: INT8 confidence-calibration error
+        top1_limit_pct=75.5,               # scenario assumption: acceptance limit
+        calibration_error_limit_pct=3.0,   # scenario assumption: acceptance limit
     )

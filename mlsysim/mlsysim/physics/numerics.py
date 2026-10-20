@@ -111,3 +111,94 @@ def calc_float_decimal_digits(fraction_bits: int) -> float:
     """
     validate_at_least(fraction_bits, 1, "fraction_bits")
     return (fraction_bits + 1) * math.log10(2)
+
+
+# --- Quantization: integer grids, scales, and stored-value grids (added 2026-10-20) ---
+
+def calc_float_values(exponent_bits: int, fraction_bits: int, ieee: bool = True):
+    """
+    Every non-negative finite value of a binary float format, sorted (zero included).
+
+    ``ieee=True`` reserves the top exponent for infinities and NaNs (IEEE 754,
+    and FP8 E5M2). ``ieee=False`` is the "finite" layout of FP8 E4M3
+    (Micikevicius et al. 2022): the top exponent holds normal values and only
+    its all-ones fraction is NaN, which lifts the largest value from 240 to 448.
+    """
+    validate_at_least(exponent_bits, 2, "exponent_bits")
+    validate_at_least(fraction_bits, 1, "fraction_bits")
+    bias = 2 ** (exponent_bits - 1) - 1
+    top = 2 ** exponent_bits - 1
+    values = []
+    for e in range(2 ** exponent_bits):
+        for f in range(2 ** fraction_bits):
+            if e == top and (ieee or f == 2 ** fraction_bits - 1):
+                continue
+            frac = f / 2 ** fraction_bits
+            values.append(frac * 2.0 ** (1 - bias) if e == 0 else (1 + frac) * 2.0 ** (e - bias))
+    return sorted(values)
+
+
+def calc_int_levels(bits: int) -> int:
+    """Distinct codes of a ``bits``-bit integer, ``2^b``."""
+    validate_at_least(bits, 1, "bits")
+    return 2 ** bits
+
+
+def calc_affine_scale(alpha: float, beta: float, bits: int) -> float:
+    """
+    Step of an asymmetric (affine) integer grid over the clipping range ``[alpha, beta]``:
+    ``s = (beta - alpha) / (2^b - 1)``.
+    """
+    validate_at_least(bits, 1, "bits")
+    if beta <= alpha:
+        raise ValueError("beta must exceed alpha.")
+    return (beta - alpha) / (2 ** bits - 1)
+
+
+def calc_symmetric_scale(max_abs: float, bits: int) -> float:
+    """
+    Step of a symmetric signed grid that reaches ``max_abs``: ``s = max_abs / (2^(b-1) - 1)``
+    (zero-point 0; the code ``-2^(b-1)`` goes unused).
+    """
+    return max_abs / calc_int_max(bits)
+
+
+def calc_zero_point(alpha: float, scale: float, qmin: int = 0):
+    """
+    Integer that stands for real zero on an affine grid: ``qmin + round(-alpha / s)``.
+
+    Returns ``(exact, zero_point)``: the unrounded ``-alpha / s`` and the stored
+    integer. Rounding is to nearest, ties to even, as Python and PyTorch round.
+    """
+    exact = -alpha / scale
+    return exact, qmin + round(exact)
+
+
+def calc_quantize(x: float, scale: float, zero_point: int, qmin: int, qmax: int) -> int:
+    """Code for ``x``: ``clamp(round(x / s + z), qmin, qmax)`` (ties to even)."""
+    return max(qmin, min(qmax, round(x / scale + zero_point)))
+
+
+def calc_dequantize(code: int, scale: float, zero_point: int) -> float:
+    """Real value a code reads back as: ``s (q - z)``."""
+    return scale * (code - zero_point)
+
+
+def calc_block_bits_per_weight(block_weights: int, code_bits: int, scale_bits: int) -> float:
+    """
+    Stored bits per weight of a block format: ``(scale_bits + n code_bits) / n``.
+
+    One shared scale per block of ``n`` codes (llama.cpp's Q4_0: 32 four-bit
+    codes and one 16-bit scale, 4.5 bits per weight).
+    """
+    validate_at_least(block_weights, 1, "block_weights")
+    return (scale_bits + block_weights * code_bits) / block_weights
+
+
+def calc_accumulator_headroom(operand_bits: int, accumulator_bits: int) -> int:
+    """
+    About how many worst-case products of two signed ``operand_bits`` codes fit in a
+    signed ``accumulator_bits`` register: ``2^(a-1) // (2^(b-1) - 1)^2`` (127 times 127
+    at INT8; about 133,000 in INT32).
+    """
+    return 2 ** (accumulator_bits - 1) // calc_int_max(operand_bits) ** 2

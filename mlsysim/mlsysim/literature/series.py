@@ -1327,6 +1327,75 @@ class Series:
         numeric=("k", "speedup"),
     )
 
+    # --- Quantization (added 2026-10-20) ---
+    KrishnamoorthiQuantization = TrendSeries(
+        "krishnamoorthi2018_quantization",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="Krishnamoorthi (2018), Quantizing deep convolutional networks for efficient "
+                       "inference: A whitepaper, Tables 3, 4, and 5",
+                   url="https://arxiv.org/abs/1806.08342",
+                   verified="2026-10-20",
+                   notes=("ImageNet top-1 as a fraction, TensorFlow-Slim checkpoints. Table 3: post-training "
+                          "INT8 weights and activations (per_tensor is the paper's per-layer); Table 4: "
+                          "quantization-aware training, symmetric per-channel weights; Table 5: 4-bit "
+                          "weights with 8-bit activations. Transcribed from the paper.")),
+        "ImageNet top-1 of float, post-training, and quantization-aware INT8 and INT4 models.",
+        numeric=("table", "weight_bits", "activation_bits", "top1"),
+    )
+    WuInt8Calibration = TrendSeries(
+        "wu2020_int8_calibration",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="Wu, Judd, Zhang, Isaev, and Micikevicius (2020), Integer Quantization for Deep "
+                       "Learning Inference: Principles and Empirical Evaluation, Table 5",
+                   url="https://arxiv.org/abs/2004.09602",
+                   verified="2026-10-20",
+                   notes=("INT8 post-training accuracy (top-1 percent; BERT Large: SQuAD F1) with per-channel "
+                          "max weights and activations calibrated by max, entropy, or the 99.9, 99.99, and "
+                          "99.999th percentile. The paper's 99.9999 column is not transcribed.")),
+        "INT8 post-training accuracy by activation calibration method.",
+        numeric=("fp32", "max", "entropy", "pct_99_9", "pct_99_99", "pct_99_999"),
+    )
+    DettmersInt8Perplexity = TrendSeries(
+        "dettmers2022_int8_perplexity",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="Dettmers, Lewis, Belkada, and Zettlemoyer (2022), LLM.int8(): 8-bit Matrix "
+                       "Multiplication for Transformers at Scale, NeurIPS 2022, Table 1",
+                   url="https://arxiv.org/abs/2208.07339",
+                   verified="2026-10-20",
+                   notes=("C4 validation perplexity of fairseq dense transformers (125M to 13B parameters): "
+                          "32-bit float, INT8 absmax (one scale per tensor), and absmax LLM.int8().")),
+        "Language-model perplexity in float, INT8 absmax, and LLM.int8() by model size.",
+        numeric=("params_b", "fp32", "absmax", "llm_int8"),
+    )
+    Llama2_7BGgufFiles = TrendSeries(
+        "thebloke_llama2_7b_gguf_files",
+        Provenance(kind=ProvenanceKind.DATASHEET,
+                   ref="TheBloke/Llama-2-7B-GGUF on Hugging Face (commit b4e04e1), README 'Provided files'; "
+                       "ggml-org/Llama-2-7B-GGUF, Llama-2-7B-F16.gguf",
+                   url="https://huggingface.co/TheBloke/Llama-2-7B-GGUF",
+                   verified="2026-10-18",
+                   notes=("Nominal bits from the README table; bytes are the file sizes the Hub API lists "
+                          "(api/models/<repo>/tree/main), read 2026-10-18. The F16 row is the ggml-org "
+                          "repository's unquantized file.")),
+        "Llama 2 7B GGUF files: quantization type, nominal bits per weight, and file size in bytes.",
+        numeric=("nominal_bits", "bytes"),
+    )
+    LlamaBenchAppleSilicon = TrendSeries(
+        "llamacpp_bench_apple_silicon",
+        Provenance(kind=ProvenanceKind.INDUSTRY_REPORT,
+                   ref="ggml-org/llama.cpp, discussion 4167, 'Performance of llama.cpp on Apple Silicon "
+                       "M-series' (summary table and the M2 Ultra post), build 8e672ef",
+                   url="https://github.com/ggml-org/llama.cpp/discussions/4167",
+                   verified="2026-10-18",
+                   notes=("llama-bench on Llama 2 7B (llama-bench reports 6.74 B parameters), Metal, all "
+                          "layers on the GPU: prompt processing of 512 tokens (pp512) and generation of 128 "
+                          "tokens at batch one (tg128), tokens per second; size is llama-bench's GiB column; "
+                          "bandwidth (GB/s) and GPU cores are the thread's chip labels. Read via the GitHub "
+                          "API.")),
+        "llama-bench prompt and generation throughput of Llama 2 7B in F16, Q8_0, and Q4_0 on Apple chips.",
+        numeric=("bandwidth_gbs", "gpu_cores", "size_gib", "pp512_tps", "tg128_tps"),
+    )
+
 # --- Context engineering (added 2026-10-20) ----------------------------------
 RulerEffectiveLength = _Series(
     "ruler_effective_length",

@@ -15456,6 +15456,42 @@ class WeightReadScenario(BaseScenario):
         """Average power of the reads alone, sustained over one pass."""
         return (self.read_energy / self.read_time).to("watt")
 
+    # Optional (added 2026-10-20): a decoder's KV cache read with the weights
+    # every token, and weights unpacked to a wider format in a separate pass.
+    context_tokens: Optional[int] = None
+    kv_bytes_per_value: Optional[Quantity] = None
+    unpacked_bytes_per_weight: Optional[Quantity] = None
+
+    @property
+    def kv_cache_bytes(self) -> Quantity:
+        """Keys and values of ``context_tokens`` tokens at batch one."""
+        return self.workload.get_kv_cache_size(seq_len=self.context_tokens, batch_size=1,
+                                               precision=self.kv_bytes_per_value).to("byte")
+
+    @property
+    def token_bytes(self) -> Quantity:
+        """Bytes read per generated token: every weight and the whole KV cache."""
+        return (self.weight_bytes + self.kv_cache_bytes).to("byte")
+
+    @property
+    def token_time(self) -> Quantity:
+        return (self.token_bytes / self.hardware.memory.bandwidth).to("millisecond")
+
+    @property
+    def token_rate(self) -> Quantity:
+        return (1 / self.token_time).to("1/second")
+
+    @property
+    def separate_unpack_bytes(self) -> Quantity:
+        """Bytes per token when a separate kernel unpacks the weights first: read the packed
+        weights, write them unpacked, read them back for the matrix multiply, read the cache."""
+        unpacked = self.workload.size_in_bytes(self.unpacked_bytes_per_weight)
+        return (self.weight_bytes + 2 * unpacked + self.kv_cache_bytes).to("byte")
+
+    @property
+    def separate_unpack_time(self) -> Quantity:
+        return (self.separate_unpack_bytes / self.hardware.memory.bandwidth).to("millisecond")
+
 
 class FrameCompressionScenario(BaseScenario):
     """A per-frame model against a camera frame rate: the full model and a channel-pruned
@@ -16919,3 +16955,263 @@ class MemoryRoundTripScenario(BaseScenario):
     def energy(self) -> Quantity:
         return (self.trips * self.tensor_bytes * self.energy_per_byte).to("microjoule")
 
+
+# --- Quantization (added 2026-10-20) ------------------------------------------
+class QuantizationGridScenario(BaseScenario):
+    """Values stored on a ``bits``-bit integer grid over a clipping range.
+
+    Affine (``symmetric=False``): ``s = (beta - alpha) / (2^b - 1)`` and a
+    zero-point ``z = qmin + round(-alpha / s)``; codes run 0 to 2^b - 1, or
+    -2^(b-1) to 2^(b-1) - 1 when ``signed``. Symmetric: ``s = max(|alpha|,
+    |beta|) / (2^(b-1) - 1)``, ``z = 0``, codes +-(2^(b-1) - 1). ``alpha`` and
+    ``beta`` default to the values' minimum and maximum (min-max calibration).
+    Rounding is to nearest, ties to even.
+    """
+    values: List[float] = []
+    bits: int
+    alpha: Optional[float] = None
+    beta: Optional[float] = None
+    symmetric: bool = False
+    signed: bool = False
+
+    @property
+    def lo(self) -> float:
+        return min(self.values) if self.alpha is None else self.alpha
+
+    @property
+    def hi(self) -> float:
+        return max(self.values) if self.beta is None else self.beta
+
+    @property
+    def steps(self) -> int:
+        """Steps across the range of an affine grid, ``2^b - 1``."""
+        from ..physics.numerics import calc_int_levels
+        return calc_int_levels(self.bits) - 1
+
+    @property
+    def qmin(self) -> int:
+        from ..physics.numerics import calc_int_max
+        if self.symmetric:
+            return -calc_int_max(self.bits)
+        return -(calc_int_max(self.bits) + 1) if self.signed else 0
+
+    @property
+    def qmax(self) -> int:
+        from ..physics.numerics import calc_int_max
+        return calc_int_max(self.bits) if (self.symmetric or self.signed) else self.steps
+
+    @property
+    def scale(self) -> float:
+        from ..physics.numerics import calc_affine_scale, calc_symmetric_scale
+        if self.symmetric:
+            return calc_symmetric_scale(max(abs(self.lo), abs(self.hi)), self.bits)
+        return calc_affine_scale(self.lo, self.hi, self.bits)
+
+    @property
+    def zero_point_exact(self) -> float:
+        """``-alpha / s``, before rounding (0 for a symmetric grid)."""
+        from ..physics.numerics import calc_zero_point
+        return 0.0 if self.symmetric else calc_zero_point(self.lo, self.scale)[0]
+
+    @property
+    def zero_point(self) -> int:
+        from ..physics.numerics import calc_zero_point
+        return 0 if self.symmetric else calc_zero_point(self.lo, self.scale, self.qmin)[1]
+
+    @property
+    def codes(self) -> List[int]:
+        from ..physics.numerics import calc_quantize
+        return [calc_quantize(x, self.scale, self.zero_point, self.qmin, self.qmax) for x in self.values]
+
+    @property
+    def readback(self) -> List[float]:
+        from ..physics.numerics import calc_dequantize
+        return [calc_dequantize(q, self.scale, self.zero_point) for q in self.codes]
+
+    @property
+    def errors(self) -> List[float]:
+        """Absolute error of each value after the round trip."""
+        return [abs(r - x) for r, x in zip(self.readback, self.values)]
+
+    @property
+    def max_rounding_error(self) -> float:
+        """Largest error inside the range: half a step."""
+        return self.scale / 2
+
+
+class IntegerDotProductScenario(BaseScenario):
+    """One output of an integer layer: symmetric codes for weights and inputs (scale set by
+    each tensor's largest magnitude), integer products summed in a wide accumulator, and one
+    requantization to the output scale ``s_y``."""
+    weights: List[float]
+    inputs: List[float]
+    output_scale: float
+    bits: int = 8
+    accumulator_bits: int = 32
+
+    def _grid(self, values):
+        return QuantizationGridScenario(name="", description="", values=values, bits=self.bits, symmetric=True)
+
+    @property
+    def weight_scale(self) -> float:
+        return self._grid(self.weights).scale
+
+    @property
+    def input_scale(self) -> float:
+        return self._grid(self.inputs).scale
+
+    @property
+    def weight_codes(self) -> List[int]:
+        return self._grid(self.weights).codes
+
+    @property
+    def input_codes(self) -> List[int]:
+        return self._grid(self.inputs).codes
+
+    @property
+    def products(self) -> List[int]:
+        return [a * b for a, b in zip(self.weight_codes, self.input_codes)]
+
+    @property
+    def accumulator(self) -> int:
+        return sum(self.products)
+
+    @property
+    def readback(self) -> float:
+        """The accumulator read as a real number: ``acc s_w s_x``."""
+        return self.accumulator * self.weight_scale * self.input_scale
+
+    @property
+    def exact(self) -> float:
+        return sum(w * x for w, x in zip(self.weights, self.inputs))
+
+    @property
+    def requant_scale(self) -> float:
+        """``M = s_w s_x / s_y``."""
+        return self.weight_scale * self.input_scale / self.output_scale
+
+    @property
+    def output_code(self) -> int:
+        return round(self.accumulator * self.requant_scale)
+
+    @property
+    def accumulator_headroom(self) -> int:
+        from ..physics.numerics import calc_accumulator_headroom
+        return calc_accumulator_headroom(self.bits, self.accumulator_bits)
+
+
+class OperationEnergyComparisonScenario(BaseScenario):
+    """A wide and a narrow format's energy per add, multiply, and multiply-accumulate, and one
+    memory read against the narrow multiply-accumulate. The narrow MAC accumulates in a wider
+    integer, so its add is ``accumulate_add``."""
+    wide_add: Quantity
+    wide_mul: Quantity
+    narrow_add: Quantity
+    narrow_mul: Quantity
+    accumulate_add: Quantity
+    memory_read: Quantity
+
+    @property
+    def wide_mac(self) -> Quantity:
+        return self.wide_mul + self.wide_add
+
+    @property
+    def narrow_mac(self) -> Quantity:
+        return self.narrow_mul + self.accumulate_add
+
+    @property
+    def add_ratio(self) -> float:
+        return (self.wide_add / self.narrow_add).to("").magnitude
+
+    @property
+    def mul_ratio(self) -> float:
+        return (self.wide_mul / self.narrow_mul).to("").magnitude
+
+    @property
+    def mac_ratio(self) -> float:
+        return (self.wide_mac / self.narrow_mac).to("").magnitude
+
+    @property
+    def read_over_narrow_mac(self) -> float:
+        """The memory read in narrow multiply-accumulates (per-operation energies, one op each)."""
+        return self.memory_read.to("pJ").magnitude / self.narrow_mac.to("pJ/flop").magnitude
+
+
+class QuantizedDeploymentProfileScenario(BaseScenario):
+    """A float model and its INT8 version on one accelerator, judged against acceptance limits.
+
+    Accuracy and confidence-calibration error are stated inputs (percent); latency and
+    throughput come from ``profile`` (an engine profile with ``tensorrt(precision, batch)``
+    and ``large_batch_throughput(precision)``); energy per image assumes full board power.
+    """
+    workload: Workload
+    hardware: HardwareNode
+    profile: Any
+    float_bytes: Quantity
+    int_bytes: Quantity
+    float_top1_pct: float
+    int_top1_pct: float
+    float_calibration_error_pct: float
+    int_calibration_error_pct: float
+    top1_limit_pct: float
+    calibration_error_limit_pct: float
+
+    @property
+    def top1_drop(self) -> float:
+        return self.float_top1_pct - self.int_top1_pct
+
+    @property
+    def float_latency(self) -> Quantity:
+        return self.profile.tensorrt("fp32", batch=1)
+
+    @property
+    def int_latency(self) -> Quantity:
+        return self.profile.tensorrt("int8", batch=1)
+
+    @property
+    def latency_speedup(self) -> float:
+        return (self.float_latency / self.int_latency).to("").magnitude
+
+    @property
+    def float_throughput(self) -> float:
+        return self.profile.large_batch_throughput("fp32")
+
+    @property
+    def int_throughput(self) -> float:
+        return self.profile.large_batch_throughput("int8")
+
+    @property
+    def throughput_gain(self) -> float:
+        return self.int_throughput / self.float_throughput
+
+    @property
+    def float_size(self) -> Quantity:
+        return self.workload.size_in_bytes(self.float_bytes)
+
+    @property
+    def int_size(self) -> Quantity:
+        return self.workload.size_in_bytes(self.int_bytes)
+
+    @property
+    def size_reduction(self) -> float:
+        return (self.float_size / self.int_size).to("").magnitude
+
+    @property
+    def float_energy(self) -> Quantity:
+        return (self.hardware.tdp / (self.float_throughput / Q_(1, "second"))).to("mJ")
+
+    @property
+    def int_energy(self) -> Quantity:
+        return (self.hardware.tdp / (self.int_throughput / Q_(1, "second"))).to("mJ")
+
+    @property
+    def energy_improvement(self) -> float:
+        return (self.float_energy / self.int_energy).to("").magnitude
+
+    @property
+    def passes_top1(self) -> bool:
+        return self.int_top1_pct >= self.top1_limit_pct
+
+    @property
+    def passes_calibration(self) -> bool:
+        return self.int_calibration_error_pct <= self.calibration_error_limit_pct
