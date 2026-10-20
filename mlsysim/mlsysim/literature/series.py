@@ -1254,6 +1254,59 @@ class Series:
         numeric=("percentile", "latency_ms"),
     )
 
+    # --- Model compression (added 2026-10-20) ---
+    MobileNetV3Table3 = TrendSeries(
+        "mobilenetv3_table3_pixel1",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="Howard et al. (2019), Searching for MobileNetV3, ICCV 2019, Table 3",
+                   url="https://arxiv.org/abs/1905.02244",
+                   verified="2026-10-20",
+                   notes=("ImageNet top-1 (percent), Pixel 1 latency in floating point (ms; TFLite "
+                          "benchmark tool, one large core, batch 1), multiply-adds and parameters "
+                          "(millions) of the classification models of Table 3.")),
+        "Accuracy and measured phone latency of efficient ImageNet models (MobileNetV3 Table 3).",
+        numeric=("top1", "pixel1_ms", "madds_m", "params_m"),
+    )
+    HanAlexNetPruning = TrendSeries(
+        "han2015_alexnet_pruning",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="Han, Pool, Tran, and Dally (2015), Learning both Weights and Connections for "
+                       "Efficient Neural Networks, NeurIPS 2015, figure 5",
+                   url="https://arxiv.org/abs/1506.02626",
+                   verified="2026-10-20",
+                   notes=("AlexNet, ImageNet top-5 change (points) against the share of parameters "
+                          "pruned (percent), L2-regularized runs: curve no_retrain, retrain (one prune "
+                          "then retraining), iterative (pruning and retraining repeated). Points taken "
+                          "from the vector paths of the published figure (arXiv v3, p. 7).")),
+        "Pruning without retraining, with one retraining, and iteratively (AlexNet, Han et al. 2015).",
+        numeric=("pruned_pct", "top5_change"),
+    )
+    DeepCompressionMethods = TrendSeries(
+        "han2016_compression_methods",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="Han, Mao, and Dally (2016), Deep Compression, ICLR 2016, figure 6",
+                   url="https://arxiv.org/abs/1510.00149",
+                   verified="2026-10-20",
+                   notes=("AlexNet on ImageNet: accuracy change (points) against model size kept "
+                          "(percent of original) for four methods, as transcribed in the Model "
+                          "Compression chapter's figure; extension=True marks a line's continuation "
+                          "off the plotted axis, not a reported point.")),
+        "Accuracy against model size for pruning, quantization, both, and SVD (Deep Compression).",
+        numeric=("size_pct", "accuracy_change"),
+    )
+    MishraInt8SparseGemm = TrendSeries(
+        "mishra2021_int8_sparse_gemm",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="Mishra et al. (2021), Accelerating Sparse Deep Neural Networks, figure 3",
+                   url="https://arxiv.org/abs/2104.08378",
+                   verified="2026-10-20",
+                   notes=("Measured INT8 2:4 sparse-over-dense GEMM speedup on an A100 at M = N = 10240 "
+                          "for three inner dimensions K; values read from the published plot "
+                          "(approximate).")),
+        "2:4 sparse INT8 GEMM speedup over dense by inner dimension (A100).",
+        numeric=("k", "speedup"),
+    )
+
 # --- Context engineering (added 2026-10-20) ----------------------------------
 RulerEffectiveLength = _Series(
     "ruler_effective_length",

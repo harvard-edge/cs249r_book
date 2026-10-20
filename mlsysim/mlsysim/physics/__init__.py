@@ -824,3 +824,13 @@ from .numerics import calc_float_decimal_digits
 from .transformer import calc_score_matrix_intensity
 
 __all__ += ["calc_float_decimal_digits", "calc_score_matrix_intensity"]
+# --- Model compression (added 2026-10-20) ---
+from .memory import calc_sparse_bytes_per_nonzero, calc_sparse_breakeven_zero_share, calc_csr_bytes
+from .performance import calc_pareto_frontier
+
+__all__ += [
+    "calc_sparse_bytes_per_nonzero",
+    "calc_sparse_breakeven_zero_share",
+    "calc_csr_bytes",
+    "calc_pareto_frontier",
+]

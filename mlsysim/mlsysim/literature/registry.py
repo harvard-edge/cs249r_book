@@ -82,6 +82,7 @@ EventDataRecorders = _load("event_data_recorders", "EventDataRecorders", "Pre-cr
 # Robot policy training: sim-to-real, parallel simulation, on-robot RL (added 2026-10-20)
 RobotLearning = _load("robot_learning", "RobotLearning", "Cited figures of published robot-learning runs (Dactyl, legged_gym, HIL-SERL, QT-Opt, a grasping farm, Diffusion Policy, OpenVLA pretraining).")
 RobotPerception = _load("robot_perception", "RobotPerception", "Cited figures of robot odometry, mapping, and tracking systems (UMBmark, nvblox Table II, SORT defaults).")  # added 2026-10-20
+CompressionResults = _load("compression_results", "CompressionResults", "Cited model-compression results (Gale 2019, DistilBERT, sparse GPU kernels, 2:4 sparse tensor cores, Krishnamoorthi 2018, Deep Compression).")  # added 2026-10-20
 # Road-vehicle safety demonstrated from driven exposure (added 2026-10-20)
 RobotGrounding = _load("robot_grounding", "RobotGrounding", "Cited results of grounding learned proposals on real robots (AutoRT task filter, OK-Robot failure analysis, KnowNo).")  # added 2026-10-20
 HumanMotion = _load("human_motion", "HumanMotion", "Cited measurements of how fast people walk (Bohannon 1997).")  # added 2026-10-20
@@ -399,6 +400,7 @@ class Literature(Registry):
     OnDeviceLearning = OnDeviceLearning  # added 2026-10-20
     RobotLearning = RobotLearning  # added 2026-10-20
     RobotPerception = RobotPerception  # added 2026-10-20
+    CompressionResults = CompressionResults  # added 2026-10-20
     RoadVehicleSafety = RoadVehicleSafety  # added 2026-10-20
     RobotGrounding = RobotGrounding  # added 2026-10-20
     HumanMotion = HumanMotion  # added 2026-10-20

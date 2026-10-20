@@ -7743,6 +7743,24 @@ class LowRankUpdateScenario(BaseScenario):
         """Share of the full layer's trainable parameters the update removes."""
         return 1 - self.update_params / self.full_params
 
+    # Optional (added 2026-10-20): the stored width of each value, so the same
+    # rank-r product prices a factorized layer (two thin factors replacing the
+    # dense matrix, r (d_in + d_out) values) as well as a LoRA update.
+    bytes_per_param: Optional[Quantity] = None
+
+    @property
+    def compression(self) -> float:
+        """Values of the dense matrix over values of the two factors."""
+        return self.full_params / self.update_params
+
+    @property
+    def full_bytes(self) -> Quantity:
+        return (self.full_params * self.bytes_per_param).to("MB")
+
+    @property
+    def update_bytes(self) -> Quantity:
+        return (self.update_params * self.bytes_per_param).to("MB")
+
 
 class ResidualAdapterScenario(BaseScenario):
     """Residual bottleneck adapters of ``width`` to ``bottleneck``, one at each of ``sites``."""
@@ -15047,3 +15065,424 @@ class TokenizedBatchFeedScenario(BaseScenario):
     def busy_fraction(self) -> float:
         """Share of time the device computes when preparation and compute run in sequence."""
         return (self.compute_time / (self.prep_time + self.compute_time)).to("").magnitude
+# --- Model compression (added 2026-10-20) -----------------------------------
+
+class WeightReadScenario(BaseScenario):
+    """Every weight of ``workload`` read once from ``hardware``'s memory at ``bytes_per_weight``.
+
+    The weight-streaming floor of one batch-one pass: per frame for a vision
+    model, per token for a decoder. Unlike ``DecodeScenario`` it assumes no FLOP
+    count, so it serves convolutional networks as well as decoders.
+    ``energy_per_byte`` (optional) prices the reads.
+    """
+    workload: Workload
+    hardware: HardwareNode
+    bytes_per_weight: Quantity
+    energy_per_byte: Optional[Quantity] = None
+
+    @property
+    def weight_bytes(self) -> Quantity:
+        return self.workload.size_in_bytes(self.bytes_per_weight)
+
+    @property
+    def read_time(self) -> Quantity:
+        return (self.weight_bytes / self.hardware.memory.bandwidth).to("millisecond")
+
+    @property
+    def read_energy(self) -> Quantity:
+        return (self.weight_bytes * self.energy_per_byte).to("joule")
+
+    @property
+    def read_power(self) -> Quantity:
+        """Average power of the reads alone, sustained over one pass."""
+        return (self.read_energy / self.read_time).to("watt")
+
+
+class FrameCompressionScenario(BaseScenario):
+    """A per-frame model against a camera frame rate: the full model and a channel-pruned
+    variant, run in floating point on the CPU and in integers on the accelerator.
+
+    ``cpu_rate`` and ``accelerator_rate`` are the full model's frame rates. The
+    pruned model's frame time scales with its share of the arithmetic, because
+    channel pruning leaves dense tensors that run the same kernels on fewer
+    channels (an upper bound on the saving; measurement decides).
+    """
+    full: Workload
+    pruned: Workload
+    frame_rate: Quantity
+    cpu_rate: Quantity
+    accelerator_rate: Quantity
+    float_bytes: Quantity
+    int_bytes: Quantity
+
+    @property
+    def frame_budget(self) -> Quantity:
+        return (1 / self.frame_rate).to("millisecond")
+
+    @property
+    def cpu_frame(self) -> Quantity:
+        return (1 / self.cpu_rate).to("millisecond")
+
+    @property
+    def accelerator_frame(self) -> Quantity:
+        return (1 / self.accelerator_rate).to("millisecond")
+
+    @property
+    def flop_fraction(self) -> float:
+        return (self.pruned.inference_flops / self.full.inference_flops).to("").magnitude
+
+    @property
+    def param_fraction(self) -> float:
+        return (self.pruned.parameters / self.full.parameters).to("").magnitude
+
+    @property
+    def full_bytes(self) -> Quantity:
+        return self.full.size_in_bytes(self.float_bytes).to("MB")
+
+    @property
+    def pruned_bytes(self) -> Quantity:
+        return self.pruned.size_in_bytes(self.float_bytes).to("MB")
+
+    @property
+    def pruned_int_bytes(self) -> Quantity:
+        return self.pruned.size_in_bytes(self.int_bytes).to("MB")
+
+    @property
+    def pruned_cpu_frame(self) -> Quantity:
+        return (self.cpu_frame * self.flop_fraction).to("millisecond")
+
+    @property
+    def pruned_accelerator_frame(self) -> Quantity:
+        return (self.accelerator_frame * self.flop_fraction).to("millisecond")
+
+
+class SmallestModelAtScoreScenario(BaseScenario):
+    """The smallest model at or above ``threshold`` on ``score`` released up to each date.
+
+    ``series`` names a ``Literature.Series`` table with ``date``, ``parameters``,
+    ``model``, and the ``score`` column; the frontier is the running minimum of
+    parameters among rows that clear the bar, in date order.
+    """
+    series: str
+    score: str
+    threshold: float
+
+    @property
+    def rows(self) -> list:
+        from ..literature.registry import Literature
+        return sorted(getattr(Literature.Series, self.series).entries, key=lambda r: r["date"])
+
+    @property
+    def frontier(self) -> list:
+        front = []
+        for r in self.rows:
+            if r[self.score] >= self.threshold and (not front or r["parameters"] < front[-1]["parameters"]):
+                front.append(r)
+        return front
+
+    @property
+    def first(self) -> dict:
+        return self.frontier[0]
+
+    @property
+    def last(self) -> dict:
+        return self.frontier[-1]
+
+    @property
+    def shrink(self) -> float:
+        return self.first["parameters"] / self.last["parameters"]
+
+    @property
+    def span_years(self) -> float:
+        import datetime as _dt
+        days = (_dt.date.fromisoformat(self.last["date"]) - _dt.date.fromisoformat(self.first["date"])).days
+        from ..core.units import SEC_PER_DAY, SEC_PER_YEAR_LEAP
+        return days / (SEC_PER_YEAR_LEAP / SEC_PER_DAY)
+
+
+class ConvBnReluFusionScenario(BaseScenario):
+    """A convolution, batch norm, and ReLU on one feature map, run as three kernels or one.
+
+    Unfused, each kernel reads its input from device memory and writes its
+    output back (six transfers), and the convolution and norm also read their
+    parameters; fused (the norm folded into the convolution's weights and bias,
+    the ReLU applied before the write), one read and one write remain. A lower
+    bound on time: traffic over ``hardware``'s memory bandwidth, compute ignored.
+    """
+    channels: int
+    height: int
+    width: int
+    kernel_size: int
+    bytes_per_value: Quantity
+    norm_params_per_channel: int
+    hardware: HardwareNode
+
+    @property
+    def feature_map(self) -> Quantity:
+        return (self.channels * self.height * self.width * self.bytes_per_value).to("KB")
+
+    @property
+    def conv_weights(self) -> Quantity:
+        return (self.channels * self.channels * self.kernel_size ** 2 * self.bytes_per_value).to("MB")
+
+    @property
+    def norm_params(self) -> Quantity:
+        return (self.channels * self.norm_params_per_channel * self.bytes_per_value).to("KB")
+
+    @property
+    def conv_traffic(self) -> Quantity:
+        return (2 * self.feature_map + self.conv_weights).to("MB")
+
+    @property
+    def norm_traffic(self) -> Quantity:
+        return (2 * self.feature_map + self.norm_params).to("MB")
+
+    @property
+    def relu_traffic(self) -> Quantity:
+        return (2 * self.feature_map).to("MB")
+
+    @property
+    def unfused_trips(self) -> int:
+        return 6
+
+    @property
+    def fused_trips(self) -> int:
+        return 2
+
+    @property
+    def unfused_traffic(self) -> Quantity:
+        return (self.conv_traffic + self.norm_traffic + self.relu_traffic).to("MB")
+
+    @property
+    def fused_traffic(self) -> Quantity:
+        return self.conv_traffic
+
+    @property
+    def eliminated_activation_traffic(self) -> Quantity:
+        """Activation transfers fusion removes (four feature-map trips)."""
+        return ((self.unfused_trips - self.fused_trips) * self.feature_map).to("MB")
+
+    @property
+    def traffic_cut(self) -> float:
+        return 1 - (self.fused_traffic / self.unfused_traffic).to("").magnitude
+
+    @property
+    def unfused_time(self) -> Quantity:
+        return (self.unfused_traffic / self.hardware.memory.bandwidth).to("microsecond")
+
+    @property
+    def fused_time(self) -> Quantity:
+        return (self.fused_traffic / self.hardware.memory.bandwidth).to("microsecond")
+
+    @property
+    def time_ratio(self) -> float:
+        return (self.unfused_time / self.fused_time).to("").magnitude
+
+
+class SparseMatrixScenario(BaseScenario):
+    """A small weight matrix, magnitude-pruned at ``threshold`` (0 keeps every nonzero),
+    counted as a dense product and stored dense or in CSR."""
+    matrix: List[List[float]]
+    value_bytes: Quantity
+    index_bytes: Quantity
+    threshold: float = 0.0
+
+    @property
+    def pruned(self) -> List[List[float]]:
+        return [[w if abs(w) >= self.threshold else 0 for w in row] for row in self.matrix]
+
+    @property
+    def survivors(self) -> list:
+        """Surviving nonzero weights, row by row."""
+        return [w for row in self.pruned for w in row if w != 0]
+
+    @property
+    def removed(self) -> list:
+        """Nonzero weights the threshold zeroed, row by row."""
+        return [w for row, kept in zip(self.matrix, self.pruned) for w, k in zip(row, kept) if w != 0 and k == 0]
+
+    @property
+    def rows(self) -> int:
+        return len(self.matrix)
+
+    @property
+    def entries(self) -> int:
+        return sum(len(row) for row in self.matrix)
+
+    @property
+    def nonzeros(self) -> int:
+        return len(self.survivors)
+
+    @property
+    def zeros(self) -> int:
+        return self.entries - self.nonzeros
+
+    @property
+    def zero_share(self) -> float:
+        return self.zeros / self.entries
+
+    @property
+    def dense_bytes(self) -> Quantity:
+        return (self.entries * self.value_bytes).to("byte")
+
+    @property
+    def csr_value_index_bytes(self) -> Quantity:
+        """Values and their column indices, one pair per nonzero."""
+        return (self.nonzeros * (self.value_bytes + self.index_bytes)).to("byte")
+
+    @property
+    def row_pointers(self) -> int:
+        return self.rows + 1
+
+    @property
+    def row_pointer_bytes(self) -> Quantity:
+        return (self.row_pointers * self.index_bytes).to("byte")
+
+    @property
+    def csr_bytes(self) -> Quantity:
+        from ..physics.memory import calc_csr_bytes
+        return calc_csr_bytes(self.nonzeros, self.rows, self.value_bytes, self.index_bytes).to("byte")
+
+
+class SparseFlashFitScenario(BaseScenario):
+    """``workload`` pruned until its surviving values total ``surviving_bytes``, stored with one
+    ``index_bytes`` position index per value, against a ``flash_budget``."""
+    workload: Workload
+    value_bytes: Quantity
+    index_bytes: Quantity
+    surviving_bytes: Quantity
+    flash_budget: Quantity
+
+    @property
+    def dense_bytes(self) -> Quantity:
+        return self.workload.size_in_bytes(self.value_bytes).to("MB")
+
+    @property
+    def pruned_share(self) -> float:
+        return 1 - (self.surviving_bytes / self.dense_bytes).to("").magnitude
+
+    @property
+    def bytes_per_nonzero(self) -> Quantity:
+        from ..physics.memory import calc_sparse_bytes_per_nonzero
+        return calc_sparse_bytes_per_nonzero(self.value_bytes, self.index_bytes)
+
+    @property
+    def stored_bytes(self) -> Quantity:
+        return (self.surviving_bytes * (self.bytes_per_nonzero / self.value_bytes)).to("MB")
+
+    @property
+    def fits(self) -> bool:
+        return self.stored_bytes <= self.flash_budget
+
+
+class ChannelTileScenario(BaseScenario):
+    """A layer of ``channels`` pruned to ``pruned_channels``, run on a matrix unit that
+    processes channels in tiles of ``tile`` lanes."""
+    channels: int
+    pruned_channels: int
+    tile: int
+
+    @property
+    def tiles(self) -> int:
+        return -(-self.pruned_channels // self.tile)
+
+    @property
+    def full_tiles(self) -> int:
+        return self.pruned_channels // self.tile
+
+    @property
+    def last_tile_lanes(self) -> int:
+        """Busy lanes in the last tile (a full tile when the count divides evenly)."""
+        return self.pruned_channels % self.tile or self.tile
+
+    @property
+    def remainder(self) -> int:
+        return self.pruned_channels % self.tile
+
+    @property
+    def work_removed(self) -> float:
+        return 1 - self.pruned_channels / self.channels
+
+
+class SoftTargetScenario(BaseScenario):
+    """A teacher's class probabilities softened at ``temperature``: softmax(log p / T)."""
+    labels: List[str]
+    probabilities: List[float]
+    temperature: float
+
+    @property
+    def softened(self) -> list:
+        from ..physics.agents import calc_tempered_softmax
+        return calc_tempered_softmax([_math.log(p) for p in self.probabilities], self.temperature)
+
+    @property
+    def uniform(self) -> float:
+        """The limit every class approaches as the temperature grows."""
+        return 1 / len(self.probabilities)
+
+
+class SpeedupCompositionScenario(BaseScenario):
+    """Independent paper speedups multiplied together, against the ``measured`` speedup."""
+    factors: Dict[str, float]
+    measured: float
+
+    @property
+    def paper(self) -> float:
+        out = 1.0
+        for f in self.factors.values():
+            out *= f
+        return out
+
+    @property
+    def realized_share(self) -> float:
+        return self.measured / self.paper
+
+
+class WorkLatencyGapScenario(BaseScenario):
+    """A cut in work (parameters or FLOPs) against the latency cut it delivered."""
+    work_reduction: float
+    latency_reduction: float
+
+    @property
+    def delivered_share(self) -> float:
+        """Share of the work cut that reached latency."""
+        return self.latency_reduction / self.work_reduction
+
+
+class StagedCompressionScenario(BaseScenario):
+    """A teacher pruned and distilled into a compact student, then quantized, with the
+    task accuracy after each stage and the loss when quantization comes first."""
+    teacher: Workload
+    student_params: Quantity
+    float_bytes: Quantity
+    int_bytes: Quantity
+    baseline_accuracy: float
+    pruned_accuracy: float
+    distilled_accuracy: float
+    final_accuracy: float
+    mobile_speedup: float
+    quantize_first_loss: float
+
+    @property
+    def full_bytes(self) -> Quantity:
+        return self.teacher.size_in_bytes(self.float_bytes).to("MB")
+
+    @property
+    def student_float_bytes(self) -> Quantity:
+        return (self.student_params.to("param").magnitude * self.float_bytes).to("MB")
+
+    @property
+    def compressed_bytes(self) -> Quantity:
+        return (self.student_params.to("param").magnitude * self.int_bytes).to("MB")
+
+    @property
+    def parameter_reduction(self) -> float:
+        return 1 - (self.student_params / self.teacher.parameters).to("").magnitude
+
+    @property
+    def compression_ratio(self) -> float:
+        return (self.full_bytes / self.compressed_bytes).to("").magnitude
+
+    @property
+    def final_loss(self) -> float:
+        return self.baseline_accuracy - self.final_accuracy

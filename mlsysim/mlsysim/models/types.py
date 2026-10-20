@@ -399,6 +399,9 @@ class CNNWorkload(Workload):
     parameters: Quantity
     inference_flops: Quantity
     layers: Optional[int] = None
+    # Optional (added 2026-10-20): the channel-width multiplier of a scalable
+    # family (MobileNet's alpha), relative to the family's base network.
+    width_multiplier: Optional[float] = None
 
     def lower(self, precision: Quantity | str = BYTES_FP16) -> ComputationGraph:
         weights = self.size_in_bytes(precision)

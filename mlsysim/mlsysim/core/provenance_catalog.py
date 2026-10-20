@@ -4286,3 +4286,65 @@ ACCELERATOR_ONCHIP_SRAM_RANGE = _est(
      "memory per SM across 132 SMs; Dao et al. (2022) label the A100's SRAM 20 MB at 19 TB/s."),
     verified="2026-10-20",
 )
+
+# --- Model compression results (Literature.CompressionResults, added 2026-10-20) ---
+GALE_STATE_OF_SPARSITY_2019 = _lit(
+    "prov:gale-state-of-sparsity-2019",
+    "Gale, Elsen, and Hooker (2019), The State of Sparsity in Deep Neural Networks",
+    url="https://arxiv.org/abs/1902.09574",
+    verified="2026-10-20",
+    notes="Magnitude pruning with gradual retraining removes about 80 percent of ResNet-50's weights for "
+          "roughly one point of ImageNet top-1 accuracy (section 5 and figure 3).",
+)
+SANH_DISTILBERT_2019 = _lit(
+    "prov:sanh-distilbert-2019",
+    "Sanh, Debut, Chaumond, and Wolf (2019), DistilBERT, a distilled version of BERT",
+    url="https://arxiv.org/abs/1910.01108",
+    verified="2026-10-20",
+    notes="Abstract: 40 percent smaller, 60 percent faster, 97 percent of BERT's language-understanding "
+          "capability; section 3: the student keeps one of every two teacher layers (6 of 12).",
+)
+GALE_SPARSE_GPU_KERNELS_2020 = _lit(
+    "prov:gale-sparse-gpu-kernels-2020",
+    "Gale, Zaharia, Young, and Elsen (2020), Sparse GPU Kernels for Deep Learning, SC20",
+    url="https://arxiv.org/abs/2006.10901",
+    verified="2026-10-20",
+    notes="Abstract: 1.2 to 2.1 times speedups over dense on sparse Transformer and MobileNet models on a "
+          "V100, reaching 27 percent of single-precision peak.",
+)
+MISHRA_SPARSE_TENSOR_CORES_2021 = _lit(
+    "prov:mishra-sparse-tensor-cores-2021",
+    "Mishra et al. (2021), Accelerating Sparse Deep Neural Networks",
+    url="https://arxiv.org/abs/2104.08378",
+    verified="2026-10-20",
+    notes="Table 1: 2x design-peak math throughput for 2:4 sparse tensor cores (A100); figure 3: INT8 "
+          "sparse-over-dense GEMM speedup at M = N = 10240 as K grows, values read from the plot "
+          "(approximate); Table 2: ResNet-50 76.1 percent dense, 76.2 percent 2:4 sparse.",
+)
+KRISHNAMOORTHI_QUANTIZATION_2018 = _lit(
+    "prov:krishnamoorthi-quantization-2018",
+    "Krishnamoorthi (2018), Quantizing deep convolutional networks for efficient inference: A whitepaper",
+    url="https://arxiv.org/abs/1806.08342",
+    verified="2026-10-20",
+    notes="Table 3: TensorFlow-Slim ResNet-v1-50 top-1 75.2 percent in float, 75.0 percent with 8-bit "
+          "per-channel weights and 8-bit activations after quantization-aware training.",
+)
+HAN_DEEP_COMPRESSION_2016 = _lit(
+    "prov:han-deep-compression-2016",
+    "Han, Mao, and Dally (2016), Deep Compression, ICLR 2016",
+    url="https://arxiv.org/abs/1510.00149",
+    verified="2026-10-20",
+    notes="Figure 6 (AlexNet on ImageNet): accuracy loss against compression rate for pruning, "
+          "quantization, both, and SVD; the points are the chapter's transcription of the figure, and "
+          "the cliffs (about 15, 6, and 3 percent of the original size) are read from it.",
+)
+HAN_LEARNING_WEIGHTS_2015 = _lit(
+    "prov:han-learning-weights-2015",
+    "Han, Pool, Tran, and Dally (2015), Learning both Weights and Connections for Efficient Neural "
+    "Networks, NeurIPS 2015",
+    url="https://arxiv.org/abs/1506.02626",
+    verified="2026-10-20",
+    notes="Figure 5 (AlexNet, ImageNet top-5, L2-regularized runs): accuracy change against the share "
+          "of parameters pruned, without retraining, with one retraining, and with iterative pruning "
+          "and retraining; points taken from the vector paths of the published figure (arXiv v3, p. 7).",
+)
