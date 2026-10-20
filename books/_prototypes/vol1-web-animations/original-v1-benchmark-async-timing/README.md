@@ -19,7 +19,7 @@ python3 binder/tools/scripts/build_original_figure_fixture.py \
   --art-index books/_build/animation-candidate-art/index.json
 ```
 
-The fixture uses the actual rendered benchmarking chapter from build `20261020-104811-83480`; it is a local review artifact. This entry does not enroll the figure in production or change the chapter, caption, TikZ, or static assets. PDF and EPUB continue using the existing figure.
+The fixture uses the actual rendered benchmarking chapter from build `20261020-104811-83480`; it is a local review artifact. The factory is explicitly selected for the production chapter. The fixture command does not alter enrollment, chapter prose, caption, TikZ, or static assets. PDF and EPUB continue using the existing figure.
 
 If the generated artwork index is unavailable, rebuild it from the successful
 four-volume HTML run before creating the fixture:

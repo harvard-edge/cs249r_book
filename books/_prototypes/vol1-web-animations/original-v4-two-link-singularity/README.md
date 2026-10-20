@@ -46,8 +46,9 @@ python3 binder/tools/scripts/build_original_figure_fixture.py \
   --art-index books/_build/animation-candidate-art/index.json
 ```
 
-This prototype does not enroll the figure or alter the chapter, caption, source
-artwork, registry, or static PDF/EPUB output. The shared player supplies playback,
+The factory is explicitly selected for the production chapter. Building this
+fixture does not alter enrollment, chapter prose, caption, source artwork, or
+static PDF/EPUB output. The shared player supplies playback,
 manual stepping, speed, keyboard controls, and the expanded view.
 
 If the generated artwork index is unavailable, rebuild it from the successful

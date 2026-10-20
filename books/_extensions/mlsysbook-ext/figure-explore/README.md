@@ -14,14 +14,22 @@ default and the complete print/no-JavaScript fallback.
 
 `mechanisms/implementations.json` selects the original-art factories for
 computation, memory, communication, coordination, and physical action across
-the four volumes. The current manifest contains 98 original-art implementations:
-84 newly authored modules and 14 retained implementations. The other 639
+the four volumes. The current manifest contains 100 original-art implementations:
+86 newly authored modules and 14 retained implementations. The other 637
 cataloged figures remain static. There is no animation quota. The convolution
 prototype retains its separate accepted-prototype label; the remaining reviewed
 implementations use hash-bound records in the original-art catalog.
 Enrollment alone is not acceptance. Source, artwork, module, shared-runtime,
 and timing changes invalidate the relevant current review evidence.
 Historical tests below apply only to their recorded snapshots.
+
+The selected set includes two native original-art factories: asynchronous
+host–accelerator timing and the two-link arm’s singularity comparison. These
+factories use their reviewed controller and calculation exports directly;
+unused generic mechanism scenes are not required. Native registration validates
+source, artwork, and runtime freshness. Independent calculation and rendered
+production reviews remain separate requirements. The arm’s generated data is
+packaged as its existing supported data bundle; shared browser code is unchanged.
 
 `original-player.js` provides shared stepping, playback, visible keyboard hints,
 and expanded inspection for the new factories. Convolution retains its reviewed
@@ -132,27 +140,33 @@ mapping must preserve the illustrated workload and spatial relationships.
 Alternative toy cases must remain explicit supporting examples.
 
 The current integrated HTML run is
-`books/_build/parallel/20261020-104811-83480`; all four full-volume HTML jobs
-passed. The controls update adds temporary playback rates and full-window
-inspection without changing chapter prose, canonical artwork, timing defaults,
-or modeled quantities. The 84 newer modules retain separate production
-technical and learner-view role records. Each update preserves the prior review
-basis and distinguishes inherited numerical evidence from fresh controls and
-layout checks. The original-art catalog binds acceptance to current source,
-artwork, runtime, and actual owning chapter HTML. Stale records return to
-awaiting review.
+`books/_build/parallel/20261020-141018-96957`; all four full-volume HTML jobs
+passed. All 100 selected figures are enrolled exactly once in their owning
+chapters, with matching packaged controller, data, source, and artwork hashes.
+The other 637 cataloged figures retain their static presentation.
 
-The controls review covers all 98 implementations in Chromium and WebKit on
-desktop and phone, in both themes. The final build retains 93 implementations
-and all their linked runtime bytes from the preceding controls build; their
-successful UI profiles are explicitly inherited through matching source,
-artwork, runtime, and packaged-asset hashes. Five controllers receive fresh
-packaged retakes: convolution, FSDP, tensor layout, block-sparse GEMM, and im2col.
-The focused fixes restore convolution after closing its expanded view, schedule
-FSDP resize work outside observer delivery, and remeasure moving HTML values
-when the three matrix layouts expand or return inline. Paused progress remains
-unchanged. Independent learner-view review checks these corrected spatial
-relationships separately from control behavior.
+The 86 newer modules have separate technical and learner-view role records.
+The asynchronous timing and arm comparison receive new production reviews;
+prior numerical evidence is retained only where source context, model, artwork,
+and runtime compatibility are established. Historical role records remain
+available rather than being relabeled as new inspections. Independent agent
+review is not student testing. The original-art catalog binds acceptance to
+source, artwork, runtime, and actual owning chapter HTML; stale records return
+to awaiting review.
+
+Fresh controls checks cover all 100 implementations in Chromium and WebKit,
+on desktop and phone, in both themes: 800 passing profiles against this build.
+They verify speed choices, paused diagram identity, scoped shortcuts, restart,
+full-window bounds, sticky controls, and Escape focus restoration. None of
+these UI profiles is inherited from the preceding build. Separate integration
+checks exercise initial mounting, the first step, and Diagram restoration for
+all 100 figures at desktop and phone widths. These checks do not replace
+mechanism-specific numerical or all-state review.
+
+The preceding controls work restored convolution after closing its expanded
+view, scheduled FSDP resize work outside observer delivery, and remeasured moving
+HTML values when tensor layout, block-sparse GEMM, and im2col expand or return
+inline. Those controller bytes remain unchanged in this integration.
 
 A separate WebKit phone orientation/repeated-expansion stress trace can still
 emit a ResizeObserver delivery warning. The warning also occurs with the prior
@@ -297,7 +311,7 @@ with 691 static entries and clean desktop-light/narrow-dark layouts.
 ## Historical selective rollout
 
 The counts, builds, and tests in this section describe the earlier selective
-rollout. They do not replace the current 98-implementation scope above.
+rollout. They do not replace the current 100-implementation scope above.
 
 All 674 highlight-only players have been withdrawn. Two of their figures now
 have substantive convolution and quantization lessons; the other 672 return to

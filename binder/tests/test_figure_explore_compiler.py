@@ -87,7 +87,8 @@ def test_build_binding_accepts_original_art_without_generic_lesson_bundle(tmp_pa
 
 
 @pytest.mark.parametrize('tamper',[None,'registry','summary','evidence'])
-def test_review_record_is_explicit_and_hash_bound(tmp_path,monkeypatch,tamper):
+@pytest.mark.parametrize('has_generic_lesson',[True,False])
+def test_review_record_is_explicit_and_hash_bound(tmp_path,monkeypatch,tamper,has_generic_lesson):
     import copy
     import hashlib
     import json
@@ -113,15 +114,16 @@ def test_review_record_is_explicit_and_hash_bound(tmp_path,monkeypatch,tamper):
     path=tmp_path/'review.json';path.write_text(json.dumps(record))
     data={'metadata':{},'figures':[dict(key=key,status='implemented-awaiting-review',actual_status='implemented-awaiting-review')]}
     outputs={ext/'figure-registry.json':registry_content}
+    lessons={key:{}} if has_generic_lesson else {}
     if tamper:
         with pytest.raises(ValueError,match='hash mismatch'):
-            compiler.apply_review_record(data,{key:{}},{key:{}},outputs,build,path)
+            compiler.apply_review_record(data,{key:{}},lessons,outputs,build,path)
         assert data['figures'][0]['actual_status']=='implemented-awaiting-review'
     else:
-        compiler.apply_review_record(data,{key:{}},{key:{}},outputs,build,path)
+        compiler.apply_review_record(data,{key:{}},lessons,outputs,build,path)
         assert data['figures'][0]['actual_status']=='implementation-review-passed'
         assert data['figures'][0]['review_scope']['coverage']['profiles']==['desktop-light']
-        compiler.apply_review_record(data,{key:{}},{key:{}},outputs,build,None)
+        compiler.apply_review_record(data,{key:{}},lessons,outputs,build,None)
         assert 'review_scope' not in data['figures'][0]
         assert 'review_record' not in data['metadata']
 
