@@ -3155,3 +3155,60 @@ NASA_MCO_PHASE1_1999 = _report(
     "https://llis.nasa.gov/llis_lib/pdf/1009464main1_0641-mr.pdf",
     notes="Planned orbit-insertion altitude 226 km; final estimate about 57 km.",
 )
+
+# --- ML operations at scale: platforms, data validation, outages, SLO alerting (added 2026-10-20) ---
+META_FBLEARNER_FLOW_2016 = Provenance(
+    id="prov:meta-fblearner-flow-2016",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="Dunn, J. (2016), Introducing FBLearner Flow: Facebook's AI backbone, Meta Engineering blog, 9 May 2016",
+    url="https://engineering.fb.com/2016/05/09/core-infra/introducing-fblearner-flow-facebook-s-ai-backbone/",
+    verified="2026-10-20",
+    notes=("More than 1 million models trained; more than 500,000 workflow runs in April; fewer than 150 "
+           "workflow authors; used by more than 25 percent of Facebook's engineering team; more than "
+           "6 million predictions per second."),
+)
+BRECK_DATA_VALIDATION_2019 = _lit(
+    "prov:breck-data-validation-2019",
+    "Breck, Polyzotis, Roy, Whang, Zinkevich (2019), Data Validation for Machine Learning (MLSys), Table 1",
+    url="https://mlsys.org/Conferences/2019/doc/2019/167.pdf",
+    verified="2026-10-20",
+    notes=("Over more than 700 Google pipelines and 30 days, the share of pipelines on which each anomaly "
+           "type fired: new feature column 10%, out-of-domain categorical value 6%, missing feature column 6%, "
+           "feature present in too few examples 3%, data completely missing 3%."),
+)
+BAYLOR_TFX_2017 = _lit(
+    "prov:baylor-tfx-2017",
+    "Baylor et al. (2017), TFX: A TensorFlow-Based Production-Scale Machine Learning Platform (KDD), Sec. 6.1 and 7",
+    url="https://dl.acm.org/doi/10.1145/3097983.3098021",
+    verified="2026-10-20",
+    notes=("Model loading raised 99.9th-percentile inference latency to 500 to 1,500 ms; a dedicated "
+           "loading threadpool cut it to 75 to 150 ms. Removing training-serving skew in Google Play raised "
+           "the app install rate on the main page by 2 percent in an online A/B test."),
+)
+NETFLIX_INTERLEAVING_2017 = Provenance(
+    id="prov:netflix-interleaving-2017",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="Netflix Technology Blog (2017), Innovating Faster on Personalization Algorithms at Netflix Using Interleaving",
+    url="https://netflixtechblog.com/interleaving-in-online-experiments-at-netflix-a04ee392ec55",
+    verified="2026-10-20",
+    notes="Interleaving detected ranking preferences with more than 100 times fewer subscribers than an A/B test.",
+)
+CLOUDFLARE_META_OUTAGE_2021 = Provenance(
+    id="prov:cloudflare-facebook-outage-2021",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="Cloudflare (2021), Understanding How Facebook Disappeared from the Internet, 4 October 2021",
+    url="https://blog.cloudflare.com/october-2021-facebook-outage/",
+    verified="2026-10-20",
+    notes=("Times UTC: BGP routing changes peaked about 15:40; facebook.com stopped resolving on 1.1.1.1 "
+           "about 15:50 and resolved again about 21:20; renewed BGP activity peaked at 21:17; resolvers saw "
+           "about 30 times the usual DNS query volume."),
+)
+GOOGLE_SRE_SLO_ALERTING = Provenance(
+    id="prov:google-sre-workbook-slo-alerting",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="Google, The Site Reliability Workbook (2018), ch. 5, Alerting on SLOs, multiwindow multi-burn-rate table",
+    url="https://sre.google/workbook/alerting-on-slos/",
+    verified="2026-10-20",
+    notes=("For a 99.9 percent SLO over 30 days: page on burn rate 14.4 over 1 hour (2 percent of the budget) "
+           "or 6 over 6 hours (5 percent); open a ticket on burn rate 1 over 3 days (10 percent)."),
+)

@@ -2388,3 +2388,94 @@ def test_repair_and_support_residency():
     assert s.shared_fraction == approx(0.75) and s.residency_factor == approx(11)
     assert s.recompute.to("s").magnitude == approx(0.32488215)
     assert s.reload.to("ms").magnitude == approx(5.24288)
+
+
+# ── ML operations at scale (added 2026-10-20) ────────────────────────────────
+
+def test_operational_load_sketch_crosses_capacity_near_fifty_models():
+    o = Scenarios.OperationalLoadSketch
+    assert o.crossing_models == 51
+    assert o.conflicts(100) == approx(5000) and o.alerts(100) == approx(2000)
+
+
+def test_feature_history_and_lookups():
+    h = Scenarios.RecommendationFeatureHistory
+    assert h.values == 876_000_000_000_000
+    assert h.row_bytes.to("byte").magnitude == approx(32)
+    assert h.total_bytes.to("PB").magnitude == approx(28.032)
+    assert h.metadata_share == approx(0.75)
+    assert Scenarios.ClicksBeforeNoonJoin.leakage_inflation == approx(2.5)
+    assert Scenarios.DailyBillionRecommendationLookups.reads_per_second == approx(1157407.4)
+
+
+def test_incident_costs():
+    r = Scenarios.AggregationWindowRevenueIncident
+    assert r.undetected_loss.to("USD").magnitude == approx(857142.86)
+    assert r.alerted_loss.to("USD").magnitude == approx(28571.43)
+    assert r.window_ratio == approx(30) and r.impact_reduction == approx(0.966667)
+    assert r.feature_shift == approx(-0.261905)
+    c = Scenarios.DelayedAlertClickLoss
+    assert c.requests == approx(432e6) and c.lost_clicks == approx(2.16e6)
+    assert c.loss.to("USD").magnitude == approx(1.08e6)
+    assert c.loss_rate.to("USD/hour").magnitude == approx(45000)
+
+
+def test_rollout_exposure_and_canary_schedule():
+    assert Scenarios.CanaryVersusCutoverExposure.exposure_ratio == approx(20)
+    k = Scenarios.CanaryGuardrailSchedule
+    assert k.stage_minimum(0.01).to("hour").magnitude == approx(1.0)
+    assert k.stage_minimum(0.05).to("minute").magnitude == approx(12.0)
+    assert k.total.to("hour").magnitude == approx(4.0) and k.first_stage_buffer == approx(2.0)
+
+
+def test_experiment_sizing():
+    e = Scenarios.CtrLiftExperiment
+    assert e.per_variant == approx(29792) and e.collection_time.to("hour").magnitude == approx(1.430016)
+    assert e.familywise_error == approx(0.641514)
+    s = Scenarios.SmallCtrLiftExperiment
+    assert s.per_variant == approx(620928) and s.collection_time.to("hour").magnitude == approx(29.804544)
+
+
+def test_monitor_fleet_alerts():
+    a, b = Scenarios.ThreeSigmaModelFleetAlerts, Scenarios.TwoSigmaModelFleetAlerts
+    assert a.monitors == 1000 and a.checks_per_day == approx(288)
+    assert a.daily_false_alerts == approx(864) and b.daily_false_alerts == approx(14400)
+    assert b.remaining_after_dedup == approx(144)
+    assert a.any_false_alert(1000) == approx(0.950437) and b.any_false_alert(100) == approx(0.994079)
+
+
+def test_slo_budget_vector_and_burn_rates():
+    v = Scenarios.RecommendationSloBudgetVector
+    assert v.mean == approx(0.70) and v.worst_dimension == "freshness" and not v.promote
+    sre = Scenarios.SreMultiwindowBurnAlerts
+    assert [sre.budget_spent(t) for t in ("page_fast", "page_slow", "ticket")] == [approx(0.02), approx(0.05), approx(0.10)]
+
+
+def test_own_versus_rent():
+    c = Scenarios.OwnVsRentH100Cluster1K
+    assert c.upfront.to("USD").magnitude == approx(59.8e6)
+    assert c.rent_per_month.to("USD").magnitude == approx(2392064)
+    assert c.crossover_months == approx(26.37773) and c.breakeven_utilization == approx(0.597346)
+    assert Scenarios.OwnVsRentH100Cluster1KHalfBusy.crossover_months == approx(43.64836)
+    assert Scenarios.OwnVsRentDgxH100Node.breakeven_utilization == approx(0.424751)
+    t = Scenarios.OwnVsRentH100Cluster10K
+    assert t.upfront.to("USD").magnitude == approx(537.5e6)
+    assert t.electricity_per_year_full.to("USD").magnitude == approx(4721640)
+    assert t.owned_total.to("USD").magnitude == approx(566664920)
+    assert t.rented_total.to("USD").magnitude == approx(840960000)
+    assert t.breakeven_utilization == approx(0.539065)
+    b = Scenarios.BurstyTrainingOn1KCluster
+    assert b.owned_cost_per_run.to("USD").magnitude == approx(3572222.2)
+    assert b.rented_cost_per_run(b.run_low).to("USD").magnitude == approx(1376256)
+
+
+def test_lifecycle_tco_payback_and_platform_benefit():
+    s, p = Scenarios.StartupOneModelTco, Scenarios.FiftyModelCompanyTco
+    assert s.total.to("USD/month").magnitude == approx(47500) and s.dominant == "iteration"
+    assert p.total.to("USD/month").magnitude == approx(980000) and p.dominant == "inference"
+    assert round(100 * s.shares["iteration"]) == 84 and round(100 * p.shares["inference"]) == 41
+    assert p.ratios_to(s)["total"] == approx(20.631579)
+    assert Scenarios.Int8InferencePayback.payback.to("month").magnitude == approx(0.5)
+    assert Scenarios.TrainingOptimizationPayback.payback.to("month").magnitude == approx(1.777778)
+    assert Scenarios.SharedPlatformBenefit50.benefit_cost_ratio == approx(1.25)
+    assert Scenarios.SharedPlatformBenefit20.benefit_cost_ratio == approx(0.5)

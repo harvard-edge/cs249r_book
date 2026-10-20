@@ -471,3 +471,15 @@ __all__ += [
     "calc_residency_factor",
     "calc_weight_only_step_time",
 ]
+
+# --- ML operations at scale: canary stages, error budgets, own against rent (added 2026-10-20) ---
+from .statistics import calc_sample_collection_time
+from .reliability import calc_error_budget_spent
+from .economics import calc_rent_crossover, calc_ownership_breakeven_utilization
+
+__all__ += [
+    "calc_sample_collection_time",
+    "calc_error_budget_spent",
+    "calc_rent_crossover",
+    "calc_ownership_breakeven_utilization",
+]

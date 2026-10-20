@@ -352,3 +352,12 @@ def calc_dagger_cost_bound(horizon_steps, per_step_error, recoverability=1.0):
     the recoverability constant ``u`` stays bounded.
     """
     return recoverability * horizon_steps * per_step_error
+
+
+def calc_sample_collection_time(samples, request_rate, traffic_share):
+    """Time for a traffic slice to collect ``samples`` observations (added 2026-10-20).
+
+    A canary stage that receives ``traffic_share`` of ``request_rate`` gathers
+    its planned guardrail sample in ``t = n / (r p)``.
+    """
+    return samples / (request_rate * traffic_share)
