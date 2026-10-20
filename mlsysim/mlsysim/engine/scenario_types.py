@@ -11630,3 +11630,474 @@ class ThermalExpansionScenario(BaseScenario):
     def result(self):
         from .solvers import ThermalExpansionModel
         return ThermalExpansionModel().solve(self.coefficient, self.length, self.temperature_rise)
+
+
+# --- Responsible AI (added 2026-10-20) -----------------------------------------
+# Group fairness criteria from confusion counts, the evidence a measured gap
+# carries, threshold policies, monitoring load, and the capacity each safeguard
+# spends on a named path.
+
+class GroupConfusionScenario(BaseScenario):
+    """Binary decisions for two or more groups as confusion counts ``{group: {tp, fp, fn, tn}}``.
+
+    A positive decision is an approval (or a flag); the positive label is the
+    outcome the decision should select. ``gap`` compares the first two groups,
+    first minus second.
+    """
+    groups: Dict[str, Dict[str, float]]
+
+    def _c(self, group: str) -> Dict[str, float]:
+        return self.groups[group]
+
+    @property
+    def first(self) -> str:
+        return list(self.groups)[0]
+
+    @property
+    def second(self) -> str:
+        return list(self.groups)[1]
+
+    def size(self, group: str) -> float:
+        c = self._c(group)
+        return c["tp"] + c["fp"] + c["fn"] + c["tn"]
+
+    def positives(self, group: str) -> float:
+        """Positive decisions (approved or flagged)."""
+        c = self._c(group)
+        return c["tp"] + c["fp"]
+
+    def positive_rate(self, group: str) -> float:
+        """Share of the group given a positive decision (the demographic-parity quantity)."""
+        return self.positives(group) / self.size(group)
+
+    def tpr(self, group: str) -> float:
+        c = self._c(group)
+        return c["tp"] / (c["tp"] + c["fn"])
+
+    def fpr(self, group: str) -> float:
+        c = self._c(group)
+        return c["fp"] / (c["fp"] + c["tn"])
+
+    def ppv(self, group: str) -> float:
+        c = self._c(group)
+        return c["tp"] / (c["tp"] + c["fp"])
+
+    def base_rate(self, group: str) -> float:
+        c = self._c(group)
+        return (c["tp"] + c["fn"]) / self.size(group)
+
+    def gap(self, metric: str) -> float:
+        """``metric`` (positive_rate, tpr, fpr, ppv, base_rate) of the first group minus the second's."""
+        f = getattr(self, metric)
+        return f(self.first) - f(self.second)
+
+    @property
+    def disparate_impact(self) -> float:
+        """Lower positive rate over higher positive rate across the first two groups."""
+        a, b = self.positive_rate(self.first), self.positive_rate(self.second)
+        return min(a, b) / max(a, b)
+
+    @property
+    def average_odds_difference(self) -> float:
+        """Mean of the absolute TPR and FPR gaps."""
+        return 0.5 * (abs(self.gap("tpr")) + abs(self.gap("fpr")))
+
+
+class ProportionGapTestScenario(BaseScenario):
+    """An observed gap between two rates, ``rate_a`` and ``rate_b``, on ``n_per_group`` decisions each.
+
+    Tested with the pooled two-proportion z statistic against the two-sided
+    normal critical value at ``significance``; the interval is the unpooled
+    normal-approximation interval at the same level.
+    """
+    rate_a: float
+    rate_b: float
+    n_per_group: int
+    significance: float = 0.05
+    small_n_per_group: Optional[int] = None   # a second, smaller sample for comparison
+
+    @property
+    def gap(self) -> float:
+        return self.rate_a - self.rate_b
+
+    @property
+    def pooled_rate(self) -> float:
+        return (self.rate_a + self.rate_b) / 2
+
+    @property
+    def z_critical(self) -> float:
+        from statistics import NormalDist
+        return NormalDist().inv_cdf(1 - self.significance / 2)
+
+    def z_at(self, n: float) -> float:
+        from ..physics import calc_two_proportion_z
+        return calc_two_proportion_z(self.rate_a, self.rate_b, n, n)
+
+    def interval_at(self, n: float):
+        from ..physics import calc_proportion_gap_interval
+        return calc_proportion_gap_interval(self.rate_a, self.rate_b, n, n, self.z_critical)
+
+    @property
+    def z(self) -> float:
+        return self.z_at(self.n_per_group)
+
+    @property
+    def interval(self):
+        return self.interval_at(self.n_per_group)
+
+    @property
+    def n_at_critical(self) -> float:
+        """Per-group sample size at which this gap first reaches the critical value."""
+        from ..physics import calc_equal_n_for_z
+        return calc_equal_n_for_z(self.rate_a, self.rate_b, self.z_critical)
+
+
+class ThresholdPolicyScenario(BaseScenario):
+    """Illustrative scores per group, ``{group: {"qualified": [...], "default": [...]}}``, under
+    one ``uniform_threshold`` or group-adapted ``group_thresholds`` (approve at or above)."""
+    scores: Dict[str, Dict[str, List[float]]]
+    uniform_threshold: float
+    group_thresholds: Dict[str, float]
+
+    def tpr(self, group: str, threshold: float) -> float:
+        q = self.scores[group]["qualified"]
+        return sum(s >= threshold for s in q) / len(q)
+
+    def fpr(self, group: str, threshold: float) -> float:
+        d = self.scores[group]["default"]
+        return sum(s >= threshold for s in d) / len(d)
+
+
+class ConstraintAccuracyCostScenario(BaseScenario):
+    """Accuracy before and after a fairness constraint (percent), with the policy's stated rates.
+
+    ``context`` holds the scenario's descriptive rates in percent (default
+    rates, approval rates, thresholds) so prose and slides quote one source.
+    """
+    baseline_accuracy: float      # percent
+    constrained_accuracy: float   # percent
+    context: Dict[str, float] = {}
+
+    @property
+    def accuracy_cost(self) -> float:
+        """Points of accuracy given up."""
+        return self.baseline_accuracy - self.constrained_accuracy
+
+    @property
+    def relative_cost(self) -> float:
+        """Accuracy given up as a fraction of the baseline."""
+        return self.accuracy_cost / self.baseline_accuracy
+
+
+class SampledDecisionMonitorScenario(BaseScenario):
+    """Per-group metric monitoring of a decision service at ``request_rate``.
+
+    ``sample_share`` of decisions are logged at ``record_size`` each; ``groups``
+    subgroups x ``metrics_per_group`` metrics are each tested at
+    ``false_alarm_rate`` per evaluation interval on a stable process.
+    """
+    request_rate: Quantity
+    sample_share: float
+    record_size: Quantity
+    groups: int
+    metrics_per_group: int
+    false_alarm_rate: float
+
+    @property
+    def decisions_per_day(self) -> float:
+        return (self.request_rate * Q_(1, "day")).to("").magnitude
+
+    @property
+    def records_per_day(self) -> float:
+        return self.decisions_per_day * self.sample_share
+
+    @property
+    def log_per_day(self) -> Quantity:
+        return (self.records_per_day * self.record_size).to("GB")
+
+    @property
+    def metrics(self) -> int:
+        return self.groups * self.metrics_per_group
+
+    @property
+    def false_alerts_per_interval(self) -> float:
+        """Expected false alerts per interval if nothing is wrong (no independence needed)."""
+        return self.metrics * self.false_alarm_rate
+
+    @property
+    def bonferroni_level(self) -> float:
+        return self.false_alarm_rate / self.metrics
+
+    @property
+    def false_alerts_bonferroni(self) -> float:
+        return self.metrics * self.bonferroni_level
+
+
+class ExactAttributionScenario(BaseScenario):
+    """Exact Shapley attribution by subset enumeration: 2^n subsets at ``time_per_subset`` each."""
+    feature_counts: List[int]
+    time_per_subset: Quantity
+    request_budget: Optional[Quantity] = None
+
+    def subsets(self, features: int) -> int:
+        return 2 ** features
+
+    def time(self, features: int) -> Quantity:
+        return (self.subsets(features) * self.time_per_subset).to("ms")
+
+
+class InlineOverheadScenario(BaseScenario):
+    """A safeguard added inline to a request path of ``base_latency``, costing
+    ``overhead_low`` to ``overhead_high`` (fractions of the base) per request.
+
+    Under the proportional assumption, holding throughput needs capacity in the
+    ratio of the new latency to the old.
+    """
+    base_latency: Quantity
+    overhead_low: float
+    overhead_high: float
+    request_rate: Optional[Quantity] = None
+
+    @property
+    def added_low(self) -> Quantity:
+        return (self.base_latency * self.overhead_low).to("ms")
+
+    @property
+    def added_high(self) -> Quantity:
+        return (self.base_latency * self.overhead_high).to("ms")
+
+    @property
+    def latency_low(self) -> Quantity:
+        return (self.base_latency + self.added_low).to("ms")
+
+    @property
+    def latency_high(self) -> Quantity:
+        return (self.base_latency + self.added_high).to("ms")
+
+    @property
+    def capacity_low(self) -> float:
+        return (self.latency_low / self.base_latency).to("").magnitude
+
+    @property
+    def capacity_high(self) -> float:
+        return (self.latency_high / self.base_latency).to("").magnitude
+
+
+class ExplanationLogScenario(BaseScenario):
+    """Logging an explanation with every prediction: ``predictions_per_day`` for ``days_per_month``,
+    each a ``map_size_low`` to ``map_size_high`` attribution map (or tabular attributions of
+    ``attribution_bytes_low`` to ``attribution_bytes_high`` per feature)."""
+    predictions_per_day: float
+    days_per_month: float
+    map_size_low: Quantity
+    map_size_high: Quantity
+    attribution_bytes_low: Quantity
+    attribution_bytes_high: Quantity
+
+    @property
+    def predictions_per_month(self) -> float:
+        return self.predictions_per_day * self.days_per_month
+
+    @property
+    def monthly_low(self) -> Quantity:
+        return (self.predictions_per_month * self.map_size_low).to("TB")
+
+    @property
+    def monthly_high(self) -> Quantity:
+        return (self.predictions_per_month * self.map_size_high).to("TB")
+
+
+class ShardedUnlearningScenario(BaseScenario):
+    """Exact unlearning by sharded retraining (SISA) against a full retrain of ``workload``.
+
+    The full retrain runs on ``n_accelerators`` of ``accelerator`` at ``mfu`` and
+    costs ``full_cost``. Planning rounds it to whole days; one request retrains
+    one of ``shards`` equal shards, at a proportional share of time and cost.
+    ``requests_per_day`` arrive uniformly at random over the shards.
+    """
+    workload: Workload
+    accelerator: HardwareNode
+    n_accelerators: int
+    mfu: float
+    full_cost: Quantity
+    shards: int
+    requests_per_day: int
+    accuracy_drop_low: Optional[float] = None    # fraction
+    accuracy_drop_high: Optional[float] = None   # fraction
+
+    @property
+    def full_retrain_time(self) -> Quantity:
+        rate = self.n_accelerators * self.accelerator.compute.peak_flops * self.mfu
+        return (self.workload.training_ops / rate).to("day")
+
+    @property
+    def planning_days(self) -> int:
+        """The full retrain rounded to whole days, the figure planning quotes."""
+        return round(self.full_retrain_time.to("day").magnitude)
+
+    @property
+    def shard_share(self) -> float:
+        return 1 / self.shards
+
+    @property
+    def shard_cost(self) -> Quantity:
+        return (self.full_cost * self.shard_share).to("USD")
+
+    @property
+    def shard_time(self) -> Quantity:
+        return (Q_(self.planning_days, "day") * self.shard_share).to("hour")
+
+    @property
+    def p_shard_untouched(self) -> float:
+        """Chance a given shard receives none of a day's requests."""
+        return (1 - self.shard_share) ** self.requests_per_day
+
+    @property
+    def shards_touched_per_day(self) -> float:
+        return self.shards * (1 - self.p_shard_untouched)
+
+    @property
+    def daily_batch_cost(self) -> Quantity:
+        """Cost if every touched shard retrains once a day."""
+        return (self.shards_touched_per_day * self.shard_cost).to("USD")
+
+
+class PreferenceLabelBudgetScenario(BaseScenario):
+    """Human preference labels for a reward model: ``comparisons_low`` to ``comparisons_high``
+    at ``price_low`` to ``price_high`` per comparison."""
+    comparisons_low: float
+    comparisons_high: float
+    price_low: Quantity
+    price_high: Quantity
+
+    @property
+    def budget_low(self) -> Quantity:
+        return (self.comparisons_low * self.price_low).to("USD")
+
+    @property
+    def budget_high(self) -> Quantity:
+        return (self.comparisons_high * self.price_high).to("USD")
+
+    @property
+    def spread(self) -> float:
+        return (self.budget_high / self.budget_low).to("").magnitude
+
+
+class AutomationBiasScenario(BaseScenario):
+    """A human reviews an AI's output; the human accepts ``miss_acceptance`` of the AI's misses.
+
+    The best case assumes the reviewer catches every other miss and never
+    overturns a correct detection, so team sensitivity is at most one minus the
+    accepted misses.
+    """
+    human_sensitivity: float
+    ai_sensitivity: float
+    miss_acceptance: float
+    acceptance_low: float
+    acceptance_high: float
+
+    @property
+    def ai_miss_rate(self) -> float:
+        return 1 - self.ai_sensitivity
+
+    def accepted_misses(self, acceptance: Optional[float] = None) -> float:
+        a = self.miss_acceptance if acceptance is None else acceptance
+        return self.ai_miss_rate * a
+
+    @property
+    def team_sensitivity_bound(self) -> float:
+        return 1 - self.accepted_misses()
+
+    @property
+    def gain_over_ai(self) -> float:
+        return self.team_sensitivity_bound - self.ai_sensitivity
+
+
+class PerRequestFailureVolumeScenario(BaseScenario):
+    """A per-request failure probability at a daily request volume: the expected failures a day."""
+    failure_probability: float
+    daily_requests: float
+
+    @property
+    def daily_failures(self) -> float:
+        return self.failure_probability * self.daily_requests
+
+
+class GradeStandardizationScenario(BaseScenario):
+    """A grade-standardization outcome from a published matrix of calculated against assessed grades.
+
+    ``matrix`` is a Literature series with one row per assessed grade: an
+    ``entries`` count and row percentages per calculated grade, columns in
+    ``grades`` order from highest to lowest. ``candidates`` counts candidates by
+    the number of their grades lowered.
+    """
+    matrix: Any
+    candidates: Any
+    grades: List[str]
+    stated_entries: Optional[float] = None      # the source's stated n for the matrix
+    stated_candidates: Optional[float] = None   # the source's stated n for the candidate table
+
+    def split(self, grade: str):
+        """Row percentages for one assessed grade: (higher, same, one lower, two or more lower)."""
+        row = next(r for r in self.matrix.entries if r["cag"] == grade)
+        i = self.grades.index(grade)
+        cells = [row[g] for g in self.grades]
+        one_lower = cells[i + 1] if i + 1 < len(cells) else 0
+        return (sum(cells[:i]), cells[i], one_lower, sum(cells[i + 2:]))
+
+    @property
+    def total_entries(self) -> float:
+        return sum(r["entries"] for r in self.matrix.entries)
+
+    @property
+    def entries_lowered_pct(self) -> float:
+        """Entry-weighted share lowered (percent), from the rounded row percentages and row counts."""
+        tot = sum(r["entries"] * sum(self.split(r["cag"])[2:]) for r in self.matrix.entries)
+        return tot / self.total_entries
+
+    @property
+    def row_entries_sum(self) -> float:
+        """Sum of the matrix rows' entry counts (may differ from the stated n)."""
+        return self.total_entries
+
+    @property
+    def candidate_rows_sum(self) -> float:
+        """Sum of the candidate table's rounded rows (may differ from the stated n)."""
+        return sum(r["candidates"] for r in self.candidates.entries)
+
+    @property
+    def total_candidates(self) -> float:
+        """The stated candidate count when given, else the sum of the rows."""
+        return self.stated_candidates if self.stated_candidates is not None else self.candidate_rows_sum
+
+    def candidates_with(self, lowered: int) -> float:
+        return next(r["candidates"] for r in self.candidates.entries if r["grades_lowered"] == lowered)
+
+    def candidate_share(self, lowered: int) -> float:
+        return self.candidates_with(lowered) / self.total_candidates
+
+    @property
+    def at_least_one_lowered_share(self) -> float:
+        return 1 - self.candidate_share(0)
+
+
+class DpTrainingPlanScenario(BaseScenario):
+    """An illustrative differential-privacy planning scenario for one training run of ``base_cost``.
+
+    Each privacy budget is an assumed accountant result; the stronger budget is
+    assumed to need ``cost_multiplier`` times the training, with the stated
+    accuracy drops and overheads (percent) as planning assumptions.
+    """
+    epsilon_strong: float
+    epsilon_moderate: float
+    epsilon_weak: float
+    base_cost: Quantity
+    cost_multiplier: float
+    accuracy_drop_strong: float      # percent
+    accuracy_drop_moderate: float    # percent
+    clipped_share: float             # percent of per-example gradients clipped
+    overhead_moderate: float         # percent
+
+    @property
+    def cost_strong(self) -> Quantity:
+        return (self.base_cost * self.cost_multiplier).to("USD")

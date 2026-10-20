@@ -3737,3 +3737,64 @@ NTSB_HAR_17_02 = _lit(
     notes=("The car's speed just before impact was 74 mph, with Traffic-Aware Cruise Control and "
            "Autosteer active (p. 2). Read for the Sensor Perception lecture plan, 2026-10-19."),
 )
+
+# --- Responsible AI sources (added 2026-10-20) -------------------------------
+OFQUAL_GRADING_GAPS_2021 = _report(
+    "prov:ofqual-grading-gaps-2021",
+    "Ofqual (2021), Grading gaps in summer 2020: who was affected by differences between centre "
+    "assessment grades and calculated grades? (July 2021), Crown Copyright, Open Government Licence v3.0",
+    "https://www.gov.uk/government/publications/grading-gaps-in-summer-2020",
+    notes=("A level, England. Table 1: row percentages of calculated grade against centre assessment "
+           "grade (CAG), with N per CAG grade; cells shown as '~' (under 0.5 percent) are entered as 0. "
+           "Table 2: candidates by the number of A levels whose CAG exceeded the calculated grade, "
+           "rounded to the nearest 10. Text: calculated grade lower in 39 percent of entries, equal in "
+           "59 percent, higher in just over 2 percent. Results were issued on 13 August 2020; on "
+           "17 August 2020 every student was awarded the higher of the CAG and the calculated grade."),
+)
+
+OFQUAL_INTERIM_2020 = _report(
+    "prov:ofqual-interim-2020",
+    "Ofqual (2020), Awarding GCSE, AS, A level, advanced extension awards and extended project "
+    "qualifications in summer 2020: interim report (August 2020)",
+    "https://www.gov.uk/government/publications/awarding-gcse-as-a-levels-in-summer-2020-interim-report",
+    notes="A level: the calculated grade was lower than the CAG in 39.1 percent of cases.",
+)
+
+PROPUBLICA_COMPAS_2016 = _lit(
+    "prov:propublica-compas-2016",
+    "Angwin, Larson, Mattu, and Kirchner (2016), Machine Bias, ProPublica; data and analysis "
+    "propublica/compas-analysis, compas-scores-two-years.csv",
+    url="https://github.com/propublica/compas-analysis",
+    verified="2026-10-18",
+    notes=("Confusion counts recomputed from compas-scores-two-years.csv (master) with ProPublica's "
+           "own filters: |days_b_screening_arrest| <= 30, is_recid != -1, c_charge_degree != 'O', "
+           "score_text != 'N/A'. Flagged = score_text Medium or High; outcome = two_year_recid. "
+           "ProPublica's article rounds the false positive rates to 45 and 23 percent."),
+)
+
+OBERMEYER_2019 = _lit(
+    "prov:obermeyer-2019",
+    "Obermeyer, Powers, Vogeli, and Mullainathan (2019), Dissecting racial bias in an algorithm "
+    "used to manage the health of populations, Science 366(6464), 447-453",
+    url="https://doi.org/10.1126/science.aax2342",
+    verified="2026-10-20",
+    notes=("Simulated correction at the automatic-enrollment threshold: the fraction of Black "
+           "patients among those auto-identified rises from 17.7 to 46.5 percent."),
+)
+
+NYDFS_APPLE_CARD_2021 = _report(
+    "prov:nydfs-apple-card-2021",
+    "New York State Department of Financial Services (2021), Report on Apple Card Investigation",
+    "https://www.dfs.ny.gov/system/files/documents/2021/03/rpt_202103_apple_card_investigation.pdf",
+    notes=("The complaint that opened the investigation (November 2019) reported a credit limit 20 "
+           "times that offered to the complainant's spouse; DFS found no violation of fair-lending law."),
+)
+
+EEOC_UNIFORM_GUIDELINES_1978 = _report(
+    "prov:eeoc-uniform-guidelines-1978",
+    "Uniform Guidelines on Employee Selection Procedures (1978), 29 CFR 1607.4(D)",
+    "https://www.ecfr.gov/current/title-29/subtitle-B/chapter-XIV/part-1607/section-1607.4",
+    notes=("A selection rate for any group below four-fifths (80 percent) of the rate for the group "
+           "with the highest rate is generally regarded as evidence of adverse impact (a U.S. "
+           "employment screen, not a lending standard)."),
+)

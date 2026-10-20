@@ -1117,6 +1117,47 @@ class Series:
         "Peak compute, DRAM bandwidth, and interconnect bandwidth of server hardware, normalized, by year.",
         numeric=("year", "normalized"),
     )
+    # --- Responsible AI (added 2026-10-20) ----------------------------------
+    OfqualGradeMatrix2020 = TrendSeries(
+        "ofqual_2020_grade_matrix",
+        _lit("Ofqual (2021), Grading gaps in summer 2020, Table 1 (A level, England), Crown Copyright, OGL v3.0",
+             "https://www.gov.uk/government/publications/grading-gaps-in-summer-2020",
+             "one row per centre assessment grade (CAG): entries is N for that CAG grade; columns A* to U "
+             "are the row percentages of entries by calculated grade as printed; cells printed as '~' "
+             "(under 0.5 percent) are entered as 0, so a row may not sum to exactly 100"),
+        "A level entries by teacher-assessed grade against the grade the 2020 standardization calculated.",
+        numeric=("entries", "A*", "A", "B", "C", "D", "E", "U"),
+    )
+    OfqualCandidatesLowered2020 = TrendSeries(
+        "ofqual_2020_candidates_lowered",
+        _lit("Ofqual (2021), Grading gaps in summer 2020, Table 2 (A level, England), Crown Copyright, OGL v3.0",
+             "https://www.gov.uk/government/publications/grading-gaps-in-summer-2020",
+             "candidates by the number of their A levels whose CAG exceeded the calculated grade, as "
+             "printed (rounded to the nearest 10)"),
+        "A level candidates by how many of their grades the 2020 standardization lowered.",
+        numeric=("grades_lowered", "candidates"),
+    )
+    CompasTwoYearConfusion = TrendSeries(
+        "compas_two_year_confusion",
+        _lit("ProPublica, compas-analysis, compas-scores-two-years.csv (Angwin et al. 2016), recomputed "
+             "2026-10-18", "https://github.com/propublica/compas-analysis",
+             "ProPublica's filters: |days_b_screening_arrest| <= 30, is_recid != -1, c_charge_degree != 'O', "
+             "score_text != 'N/A'; flagged = score_text Medium or High; outcome two_year_recid; "
+             "tp flagged and reoffended, fp flagged and did not, fn not flagged and reoffended, tn neither; "
+             "race as coded in the file"),
+        "COMPAS decile-score flags against two-year recidivism, by race, from ProPublica's released data.",
+        numeric=("tp", "fp", "fn", "tn"),
+    )
+    AbadiDpSgdAccuracy = TrendSeries(
+        "abadi_dpsgd_accuracy",
+        _lit("Abadi et al. (2016), Deep Learning with Differential Privacy, ACM CCS 2016, Sec. 5.2 and Fig. 6",
+             "https://arxiv.org/abs/1607.00133",
+             "test accuracy (%) of DP-SGD at each reported (epsilon, delta): MNIST 90, 95, 97 percent at "
+             "epsilon 0.5, 2, 8; CIFAR-10 67, 70, 73 percent at epsilon 2, 4, 8; nonprivate baselines in "
+             "Literature.DifferentialPrivacy"),
+        "Differentially private training accuracy by privacy budget on MNIST and CIFAR-10.",
+        numeric=("epsilon", "delta", "accuracy_pct"),
+    )
 
 # --- Context engineering (added 2026-10-20) ----------------------------------
 RulerEffectiveLength = _Series(
