@@ -206,7 +206,15 @@ v("run_clip_code", RUN.clip_norm, "{:.1f}", "clipping norm, as code")
 mnist = float(DP.MnistNonprivateAccuracyPct)
 cifar = float(DP.Cifar10NonprivateAccuracyPct)
 v("mnist_base_pct", mnist, "{:.1f}", "MNIST nonprivate baseline, %")
-v("cifar_base_pct", cifar, "{:.0f}", "CIFAR-10 nonprivate reference, %")
+# Same gap the chapter computes: the largest shortfall from the MNIST baseline
+# among the plotted MNIST points at single-digit epsilon (1 <= epsilon < 10),
+# Bu et al. 2020 (Table 1, CLT epsilon) and Abadi et al. 2016 (Section 5.2).
+mnist_points = [(r["clt_epsilon"], r["test_accuracy_pct"]) for r in Literature.Series.GaussianDpMnistNoisySgd.entries]
+mnist_points += [(r["epsilon"], r["accuracy_pct"]) for r in Literature.Series.AbadiDpSgdAccuracy.entries
+                 if r["dataset"] == "MNIST"]
+mnist_gap = mnist - min(acc for eps, acc in mnist_points if 1 <= eps < 10)
+v("mnist_gap_pts", mnist_gap, "{:.1f}", "largest MNIST gap at single-digit epsilon, points")
+v("cifar_base_pct", cifar, "{:.1f}", "CIFAR-10 nonprivate reference (WRN-16-4), %")
 v("cifar_gap_lo", cifar - float(DP.Cifar10DeAccuracyAtEps8Pct), "{:.0f}", "CIFAR-10 gap, De et al., points")
 v("cifar_gap_hi", cifar - float(DP.Cifar10AbadiAccuracyAtEps8Pct), "{:.0f}", "CIFAR-10 gap, Abadi et al., points")
 v("cifar_eps", float(DP.Cifar10ComparisonEpsilon), "{:.0f}", "CIFAR-10 comparison epsilon")
