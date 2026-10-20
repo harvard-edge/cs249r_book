@@ -2724,3 +2724,227 @@ class ThrottledStageScenario(BaseScenario):
     def result(self):
         from .solvers import ThrottledStageModel
         return ThrottledStageModel().solve(self.site.t_backbone, self.clock_ratio, self.speed)
+
+
+# --- Test-time deliberation (added 2026-10-20) --------------------------------
+# Spending more work on one decision with the weights fixed: one output
+# ceiling as depth, breadth, or feedback; pools of independent candidates; a
+# fallible check over a pool; argmax selection on a noisy score; search trees,
+# beams, and policies under one deadline. Times use the decode floor of a
+# DecodeScenario (memory_time, P b / BW per output token). Prices are Pint
+# quantities such as Q_(3.00, "USD / Mtoken").
+
+class ProbeVsAnswerScenario(BaseScenario):
+    """A generated explanation of ``answer_tokens`` against a prepared test of ``probe_time``."""
+    floors: DecodeScenario
+    answer_tokens: int
+    probe_time: Quantity
+    output_price: Quantity
+
+    @property
+    def result(self):
+        from .solvers import ProbeVsAnswerModel
+        return ProbeVsAnswerModel().solve(self.floors.result.memory_time, self.answer_tokens,
+                                          self.probe_time, self.output_price)
+
+
+class AllocationAxesScenario(BaseScenario):
+    """One output ``ceiling`` spent as one chain, ``candidates`` streams, or ``rounds`` of feedback."""
+    floors: DecodeScenario
+    prompt: int
+    ceiling: int
+    candidates: int                  # breadth: concurrent streams, each billed its own prompt
+    candidate_tokens: int            # generated tokens per breadth or feedback candidate
+    rounds: int                      # feedback rounds
+    report_tokens: int               # check report appended after each round
+    check_time: Quantity             # per feedback check
+    input_price: Quantity
+    output_price: Quantity
+    context_growth: Optional[int] = None   # a grown prompt, to price breadth's premium again
+
+    @property
+    def result(self):
+        from .solvers import AllocationAxesModel
+        return AllocationAxesModel().solve(self.floors.result.memory_time, self.prompt, self.ceiling,
+                                           self.candidates, self.candidate_tokens, self.rounds,
+                                           self.report_tokens, self.check_time, self.input_price,
+                                           self.output_price, self.context_growth)
+
+
+class BestOfNPoolScenario(BaseScenario):
+    """Pools of independent candidates at ``pass_rate``, and a mixed workload with the same average."""
+    pass_rate: float
+    pool_sizes: List[int]            # ascending; the last is the pool compared with retry
+    easy_pass_rate: float            # half the mixed workload
+    hard_pass_rate: float            # the other half
+
+    @property
+    def result(self):
+        from .solvers import BestOfNPoolModel
+        return BestOfNPoolModel().solve(self.pass_rate, self.pool_sizes, self.easy_pass_rate,
+                                        self.hard_pass_rate)
+
+
+class PassAtKEstimateScenario(BaseScenario):
+    """pass@``k`` estimated from ``samples`` draws of which ``passing`` pass."""
+    samples: int
+    passing: int
+    k: int
+
+    @property
+    def result(self):
+        from .solvers import PassAtKEstimateModel
+        return PassAtKEstimateModel().solve(self.samples, self.passing, self.k)
+
+
+class CoverageVsVoteScenario(BaseScenario):
+    """Coverage against majority vote in a repeated-sampling study (two ``Literature`` series)."""
+    majority_series: str
+    coverage_series: str
+    small_model: str
+    large_model: str
+    dataset: str
+    k_max: int                       # the largest pool
+    k_knee: int                      # where voting stops gaining
+    repair_system: str
+    repair_dataset: str
+    repair_k: int
+
+    @property
+    def result(self):
+        from ..literature.registry import Literature
+        from .solvers import CoverageVsVoteModel
+        return CoverageVsVoteModel().solve(
+            getattr(Literature, self.majority_series).entries,
+            getattr(Literature, self.coverage_series).entries,
+            self.small_model, self.large_model, self.dataset, self.k_max, self.k_knee,
+            self.repair_system, self.repair_dataset, self.repair_k)
+
+
+class VerifiedPoolScenario(BaseScenario):
+    """A pool of ``pool_size`` candidates, first passing one returned, under a fallible check."""
+    pool_size: int
+    valid_rate: float                # v
+    false_reject_rate: float         # eps_FR, P(FAIL | valid)
+    false_accept_rate: float         # eps_FA, P(PASS | invalid)
+    tokens_per_candidate: Quantity
+    output_price: Quantity
+    incident_loss: Quantity          # USD per defective selection
+
+    @property
+    def result(self):
+        from .solvers import VerifiedPoolModel
+        return VerifiedPoolModel().solve(self.pool_size, self.valid_rate, self.false_reject_rate,
+                                         self.false_accept_rate, self.tokens_per_candidate,
+                                         self.output_price, self.incident_loss)
+
+
+class ArgmaxNoiseScenario(BaseScenario):
+    """Argmax over equally good candidates with Gaussian score noise; a rare loophole in the pool."""
+    pool_sizes: List[int]
+    small_pool: int
+    large_pool: int
+    exploit_rate: float              # fraction of single samples that exploit a check gap
+
+    @property
+    def result(self):
+        from .solvers import ArgmaxNoiseModel
+        return ArgmaxNoiseModel().solve(self.pool_sizes, self.large_pool, self.exploit_rate)
+
+
+class ScopedRevisionScenario(BaseScenario):
+    """A candidate plan of equal nodes, ``replaced_nodes`` of which a refuted premise invalidates."""
+    total_nodes: int
+    replaced_nodes: int
+    tokens_per_node: int
+
+    @property
+    def result(self):
+        from .solvers import ScopedRevisionModel
+        return ScopedRevisionModel().solve(self.total_nodes, self.replaced_nodes, self.tokens_per_node)
+
+
+class PrunedSearchTreeScenario(BaseScenario):
+    """A search tree of ``branching`` children per node whose step check rejects ``rejection_rate``."""
+    branching: int
+    rejection_rate: float
+    depth: int
+    wide_branching: Optional[int] = None   # an unpruned tree to size by its leaves
+    wide_depth: Optional[int] = None
+
+    @property
+    def result(self):
+        from .solvers import PrunedSearchTreeModel
+        return PrunedSearchTreeModel().solve(self.branching, self.rejection_rate, self.depth,
+                                             self.wide_branching, self.wide_depth)
+
+
+class SearchAccountsScenario(BaseScenario):
+    """Flat best-of-N against beam search over the same task, kept as separate accounts."""
+    floors: DecodeScenario
+    segments: int                    # candidate length in equal segments
+    segment_tokens: int
+    prompt_tokens: int
+    flat_candidates: int
+    beam_width: int
+    extensions: int                  # extensions per retained prefix
+    generation_slots: int            # concurrent streams at an unchanged rate
+    test_slots: int                  # concurrent final tests
+    score_time: Quantity             # per full-prefix score
+    test_time: Quantity              # per final test
+    input_price: Quantity
+    output_price: Quantity
+    scorer_price: Quantity           # per scorer input token
+
+    @property
+    def result(self):
+        from .solvers import SearchAccountsModel
+        return SearchAccountsModel().solve(
+            self.floors.result.memory_time, self.segments, self.segment_tokens, self.prompt_tokens,
+            self.flat_candidates, self.beam_width, self.extensions, self.generation_slots,
+            self.test_slots, self.score_time, self.test_time, self.input_price, self.output_price,
+            self.scorer_price)
+
+
+class DeadlinePolicyScenario(BaseScenario):
+    """One candidate, ``breadth`` in parallel, or feedback, for one task under one ``deadline``."""
+    floors: DecodeScenario
+    prompt: int
+    output: int                      # generated tokens per candidate
+    diagnostic: int                  # failure-report tokens fed to a revision
+    breadth: int
+    max_rounds: int                  # requested feedback rounds, before the deadline
+    deadline: Quantity
+    check_time: Quantity
+    initial_pass: float
+    revision_pass: float             # conditional, after a failed first candidate
+    input_price: Quantity
+    output_price: Quantity
+    input_ceiling: Optional[int] = None    # per-decision ceilings the policies must respect
+    output_ceiling: Optional[int] = None
+    check_ceiling: Optional[int] = None
+    concurrency: Optional[int] = None      # generator and check capacity
+
+    @property
+    def result(self):
+        from .solvers import DeadlinePolicyModel
+        return DeadlinePolicyModel().solve(
+            self.floors.result.memory_time, self.prompt, self.output, self.diagnostic, self.breadth,
+            self.max_rounds, self.deadline, self.check_time, self.initial_pass, self.revision_pass,
+            self.input_price, self.output_price)
+
+
+class RecordedRunCostScenario(BaseScenario):
+    """One public submission in a per-trajectory ``Literature`` series, priced as it recorded."""
+    series_name: str
+    submission: str
+
+    @property
+    def rows(self):
+        from ..literature.registry import Literature
+        return [r for r in getattr(Literature, self.series_name).entries if r["submission"] == self.submission]
+
+    @property
+    def result(self):
+        from .solvers import RecordedRunCostModel
+        return RecordedRunCostModel().solve(self.rows)

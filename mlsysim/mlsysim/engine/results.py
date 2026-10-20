@@ -1522,3 +1522,190 @@ class ThrottledStageResult(SolverResult):
     throttled: Quantity
     added_age: Quantity
     added_travel: Quantity
+
+
+# ── Test-time deliberation: allocation, pools, checks, search (added 2026-10-20) ──
+
+class ProbeVsAnswerResult(SolverResult):
+    """Result from ProbeVsAnswerModel: a generated explanation against a prepared test."""
+    token_time: Quantity             # decode floor per output token
+    answer_time: Quantity            # answer_tokens * token_time
+    answer_cost: Quantity            # USD of output tokens
+    time_ratio: float                # answer_time / probe_time
+
+
+class AllocationAxesResult(SolverResult):
+    """Result from AllocationAxesModel: one output ceiling spent as depth, breadth, or feedback."""
+    token_time: Quantity
+    depth_input: int
+    depth_output: int
+    depth_time: Quantity
+    depth_cost: Quantity
+    breadth_input: int
+    breadth_output: int
+    breadth_time: Quantity           # concurrent streams: one candidate's generation time
+    breadth_cost: Quantity
+    feedback_input: int              # append-only: every round resends earlier candidates and reports
+    feedback_output: int
+    feedback_time: Quantity          # generation plus every check
+    feedback_cost: Quantity
+    path_ratio: float                # depth_time / breadth_time
+    bill_ratio: float                # breadth_cost / depth_cost
+    breadth_premium: int             # (N - 1) S re-read prompt tokens
+    serial_breadth_time: Quantity    # breadth when one stream runs at a time
+    grown_premium: Optional[int] = None          # premium at a grown prompt
+    grown_premium_cost: Optional[Quantity] = None
+
+
+class BestOfNPoolResult(SolverResult):
+    """Result from BestOfNPoolModel: pass@N, parallel pool against sequential retry, mixed workload."""
+    pass_at: Dict[int, float]        # pool size -> 1 - (1 - p)^N
+    last_gain: float                 # what the largest pool's last candidate adds
+    parallel_per_success: float      # candidates per success, parallel pool of the largest size
+    sequential_candidates: float     # expected candidates, stop at the first pass, same cap
+    sequential_per_success: float    # reduces to 1 / p
+    cost_ratio: float                # parallel / sequential candidates per success
+    mixed_average_rate: float        # the workload's average single-sample rate
+    mixed_plug_in: float             # pass@N at the averaged rate (wrong)
+    mixed_true: float                # pass@N per task, then averaged
+    easy_pass_at_max: float          # the easy half's pass@N
+
+
+class PassAtKEstimateResult(SolverResult):
+    """Result from PassAtKEstimateModel: unbiased subset estimate against the plug-in."""
+    subset_estimate: float
+    plug_in: float
+
+
+class CoverageVsVoteResult(SolverResult):
+    """Result from CoverageVsVoteModel: pool coverage against majority-vote accuracy."""
+    coverage_small: float            # at the largest pool
+    coverage_large: float
+    coverage_small_first: float      # at one sample
+    coverage_large_first: float
+    vote_small: float
+    vote_large: float
+    vote_gain_small: float           # vote gain from the knee to the largest pool, small model
+    vote_gain_after_knee: float      # the larger of the two models' vote gains
+    coverage_gain_small: float       # coverage gain over the same range
+    repair_first: float              # repository-repair coverage at one sample
+    repair_max: float                # at the repair pool size
+
+
+class VerifiedPoolResult(SolverResult):
+    """Result from VerifiedPoolModel: first-passing selection from a fixed pool under a fallible check."""
+    valid_pass: float                # v (1 - eps_FR)
+    invalid_pass: float              # (1 - v) eps_FA
+    pass_probability: float          # q, a candidate passes
+    precision: float                 # passing-set precision
+    defect_given_selection: float
+    any_selection: float             # 1 - (1 - q)^n
+    no_selection: float              # abstention
+    wrong_selection: float           # defective selection per attempt
+    any_false_pass: float            # the batch holds at least one false pass
+    expected_valid_passes: float
+    expected_invalid_passes: float
+    expected_passes: float
+    conditional_loss: Quantity       # loss per selection
+    task_loss: Quantity              # loss per attempt
+    output_bill: Quantity
+    loss_to_bill: float
+
+
+class ArgmaxNoiseResult(SolverResult):
+    """Result from ArgmaxNoiseModel: the winner's scoring error and a loophole's presence in a pool."""
+    expected_max: Dict[int, float]   # pool size -> E[max of N standard normals]
+    asymptote: Dict[int, float]      # pool size (N > 1) -> sqrt(2 ln N)
+    exploit_presence: float          # 1 - (1 - rate)^N at the large pool
+
+
+class ScopedRevisionResult(SolverResult):
+    """Result from ScopedRevisionModel: output of a full against a scoped regeneration."""
+    full_output: int
+    scoped_output: int
+    output_share: float
+    avoided_share: float
+
+
+class PrunedSearchTreeResult(SolverResult):
+    """Result from PrunedSearchTreeModel: tree size with and without a step check."""
+    effective_branching: float       # b (1 - r)
+    critical_rejection: float        # 1 - 1/b: the tree dies out above it
+    unpruned_nodes: int
+    pruned_nodes: float
+    unpruned_leaves: int
+    pruned_leaves: float
+    node_saving: float
+    flat_cut_nodes: float            # the unpruned count cut by r once (a reference)
+    wide_leaves: Optional[int] = None
+
+
+class SearchAccountsResult(SolverResult):
+    """Result from SearchAccountsModel: flat best-of-N against beam search, four accounts."""
+    token_time: Quantity
+    frontier_counts: List[int]       # extensions generated per beam stage
+    beam_segments: int
+    retained: int
+    flat_output_tokens: int
+    beam_output_tokens: int
+    flat_prompt_tokens: int
+    beam_prompt_tokens: int
+    beam_common_prompt_tokens: int   # the task prompt alone, once per extension
+    scorer_tokens: int
+    flat_waves: int
+    beam_waves: int
+    flat_test_waves: int
+    beam_test_waves: int
+    beam_scoring_time: Quantity
+    flat_elapsed: Quantity
+    beam_elapsed: Quantity
+    flat_token_cost: Quantity
+    beam_token_cost: Quantity
+    output_saving: float
+    output_saving_cost: Quantity
+    scorer_cost: Quantity
+    input_premium_cost: Quantity
+    breakeven_input_share: float     # input price fraction at which the bills match
+
+
+class DeadlinePolicyResult(SolverResult):
+    """Result from DeadlinePolicyModel: one candidate, a parallel pool, and feedback under one deadline."""
+    token_time: Quantity
+    round_time: Quantity
+    rounds: int                      # feedback rounds that fit the deadline (capped)
+    requested_time: Quantity         # the requested rounds, deadline ignored
+    revision_input: int
+    a_pass: float
+    b_pass: float
+    c_pass: float
+    c_rounds: float                  # expected rounds of the feedback policy
+    a_input: int
+    b_input: int
+    c_input: float
+    a_output: int
+    b_output: int
+    c_output: float
+    a_cost: Quantity
+    b_cost: Quantity
+    c_cost: Quantity
+    c_time: Quantity
+    max_c_time: Quantity
+    a_cost_per_pass: Quantity
+    b_cost_per_pass: Quantity
+    c_cost_per_pass: Quantity
+    a_output_per_pass: float
+    b_output_per_pass: float
+    c_output_per_pass: float
+    b_over_a: float
+
+
+class RecordedRunCostResult(SolverResult):
+    """Result from RecordedRunCostModel: one public agent run's recorded spend per resolved task."""
+    tasks: int
+    resolved: int
+    resolve_rate: float
+    cost_per_attempt: float          # dollars
+    cost_per_resolved: float
+    unresolved_share: float          # share of spend on attempts that failed
+    input_output_ratio: float
+    median_calls: float

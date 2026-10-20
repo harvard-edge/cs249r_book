@@ -1176,3 +1176,97 @@ def test_drive_bus_campaign_and_throttle():
     t = Scenarios.ThrottledNavigationBackbone.result
     assert t.added_age.to("ms").magnitude == approx(11)
     assert t.added_travel.to("mm").magnitude == approx(16.5)
+
+
+# --- Test-time deliberation (added 2026-10-20) --------------------------------
+
+def test_probe_and_allocation_axes():
+    h = Scenarios.ProbeVsGeneratedExplanation.result
+    assert h.token_time.to("ms").magnitude == approx(21.0746)
+    assert h.answer_time.to("s").magnitude == approx(21.5804)
+    assert h.answer_cost.to("USD").magnitude == approx(0.01536)
+    assert h.time_ratio == approx(539.51)
+    a = Scenarios.OutputCeilingThreeAllocations.result
+    assert (a.depth_input, a.breadth_input, a.feedback_input) == (4096, 16384, 16380)
+    assert (a.depth_output, a.breadth_output, a.feedback_output) == (4096, 4096, 3072)
+    assert a.depth_time.to("s").magnitude == approx(86.3217)
+    assert a.breadth_time.to("s").magnitude == approx(21.5804)
+    assert a.feedback_time.to("s").magnitude == approx(69.2413)
+    assert a.depth_cost.to("USD").magnitude == approx(0.073728)
+    assert a.breadth_cost.to("USD").magnitude == approx(0.110592)
+    assert a.feedback_cost.to("USD").magnitude == approx(0.09522)
+    assert a.path_ratio == approx(4.0) and a.bill_ratio == approx(1.5)
+    assert a.breadth_premium == 12288 and a.grown_premium == 98304
+    assert a.grown_premium_cost.to("USD").magnitude == approx(0.294912)
+    assert a.serial_breadth_time.to("s").magnitude == approx(86.3217)
+
+
+def test_pools_estimator_and_coverage():
+    p = Scenarios.IndependentCandidatePools.result
+    assert p.pass_at[8] == approx(0.942352)
+    assert p.last_gain == approx(0.0247063)
+    assert p.parallel_per_success == approx(8.4894)
+    assert p.sequential_candidates == approx(3.14117)
+    assert p.sequential_per_success == approx(1 / 0.30)
+    assert p.cost_ratio == approx(2.54682)
+    assert p.mixed_plug_in == approx(0.942352) and p.mixed_true == approx(0.499672)
+    e = Scenarios.PassAtKSubsetEstimate.result
+    assert e.subset_estimate == approx(0.718266) and e.plug_in == approx(0.67232)
+    c = Scenarios.RepeatedSamplingCoverageVsVote.result
+    assert c.coverage_small == approx(0.984375) and c.vote_small == approx(0.429688)
+    assert c.vote_large == approx(0.59375)
+    assert c.vote_gain_after_knee < 0.01 < 0.05 < c.coverage_gain_small
+    assert c.repair_first == approx(0.15872) and c.repair_max == approx(0.56)
+
+
+def test_verified_pool_and_argmax_noise():
+    v = Scenarios.SparseValidPoolFirstPass.result
+    assert v.pass_probability == approx(0.064)
+    assert v.precision == approx(0.703125)
+    assert v.any_selection == approx(0.985490)
+    assert v.wrong_selection == approx(0.292567)
+    assert v.any_false_pass == approx(0.707035)
+    assert v.task_loss.to("USD").magnitude == approx(146.284)
+    assert v.output_bill.to("USD").magnitude == approx(0.98304)
+    assert v.loss_to_bill == approx(148.808)
+    assert Scenarios.SparseValidPoolHalvedFalseAccept.result.precision == approx(0.825688)
+    assert Scenarios.SparseValidPoolDoubledValidRate.result.precision == approx(0.833333)
+    # Precision is one minus the checker posterior of a defect given a pass.
+    s = Scenarios.SparseValidPoolFirstPass
+    post = Scenarios.PatchCheckerPosterior.variant(
+        defect_rate=1 - s.valid_rate, false_accept_rate=s.false_accept_rate,
+        valid_accept_rate=1 - s.false_reject_rate).result.posterior
+    assert v.precision == approx(1 - post)
+    g = Scenarios.ArgmaxScoreNoise.result
+    assert abs(g.expected_max[1]) < 1e-6
+    assert g.expected_max[4] == approx(1.02938) and g.expected_max[64] == approx(2.34373)
+    assert g.asymptote[64] == approx(2.88405)
+    assert g.exploit_presence == approx(0.274434)
+
+
+def test_revision_tree_beam_policies_and_run_cost():
+    r = Scenarios.ScopedPlanRevision.result
+    assert (r.full_output, r.scoped_output, r.avoided_share) == (1800, 450, 0.75)
+    t = Scenarios.StepCheckedSearchTree.result
+    assert t.effective_branching == approx(1.6) and t.critical_rejection == approx(0.8)
+    assert t.unpruned_nodes == 155 and t.pruned_nodes == approx(25.8)
+    assert t.node_saving == approx(0.833548) and t.wide_leaves == 4 ** 10
+    b = Scenarios.FlatVsBeamSearch.result
+    assert b.frontier_counts == [3, 9, 12, 12] and (b.flat_waves, b.beam_waves) == (2, 7)
+    assert (b.beam_output_tokens, b.beam_prompt_tokens, b.scorer_tokens) == (4608, 156288, 13440)
+    assert b.flat_elapsed.to("s").magnitude == approx(22.5804)
+    assert b.beam_elapsed.to("s").magnitude == approx(19.9229)
+    assert b.flat_token_cost.to("USD").magnitude == approx(0.319488)
+    assert b.beam_token_cost.to("USD").magnitude == approx(0.544704)
+    assert b.breakeven_input_share == approx(0.172779)
+    d = Scenarios.DeadlineBoundRepairPolicies.result
+    assert d.rounds == 2
+    assert d.round_time.to("s").magnitude == approx(31.0746)
+    assert d.b_pass == approx(0.983204) and d.c_pass == approx(0.61)
+    assert d.a_cost_per_pass.to("USD").magnitude == approx(0.05286)
+    assert d.b_cost_per_pass.to("USD").magnitude == approx(0.172042)
+    assert d.c_cost_per_pass.to("USD").magnitude == approx(0.0594138)
+    assert d.c_time.to("s").magnitude == approx(49.7194)
+    w = Scenarios.SweAgentClaude35SonnetRunCost.result
+    assert (w.tasks, w.resolved) == (500, 168)
+    assert w.cost_per_resolved == approx(5.10036) and w.unresolved_share == approx(0.773173)

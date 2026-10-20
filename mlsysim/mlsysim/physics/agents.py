@@ -192,3 +192,63 @@ def calc_pass_posterior(defect_rate: float, false_accept_rate: float, valid_acce
 def calc_reused_prefix_prompt_tokens(turns: int, first_prompt: int, appended: int) -> int:
     """Fresh prefill over ``turns`` calls when each earlier prompt prefix is reused: ``S0 + (H - 1) D``."""
     return first_prompt + (turns - 1) * appended
+
+
+# --- Test-time deliberation: pools, checks, and search (added 2026-10-20) ----
+# The closed forms behind spending more work on one decision with the weights
+# fixed: the unbiased pass@k estimate, the expected winner's error under
+# argmax selection, and the size of a search tree that a step check prunes.
+# The solvers in engine/solvers/deliberation.py compose them; pass@k for a
+# known rate is calc_independent_success above, and passing-set precision is
+# one minus calc_pass_posterior.
+
+
+def calc_pass_at_k_unbiased(samples: int, passing: int, k: int) -> float:
+    """
+    Unbiased pass@k from ``samples`` draws of which ``passing`` pass (Chen et al. 2021).
+
+        pass@k = 1 - C(n - c, k) / C(n, k)
+
+    the share of all size-``k`` subsets that hold at least one pass; 1 when
+    ``n - c < k``.
+    """
+    if samples - passing < k:
+        return 1.0
+    return 1 - _math.comb(samples - passing, k) / _math.comb(samples, k)
+
+
+def calc_expected_max_std_normal(n: int, lo: float = -10.0, hi: float = 10.0, steps: int = 40_000) -> float:
+    """
+    Expected maximum of ``n`` independent standard normals (trapezoidal integral).
+
+        E[max] = integral of x * n * phi(x) * Phi(x)^(n - 1) dx
+
+    The winner of an argmax over ``n`` equally good candidates carries this
+    much scoring error, in units of the score noise's standard deviation.
+    """
+    dx = (hi - lo) / steps
+    total = 0.0
+    for i in range(steps + 1):
+        x = lo + i * dx
+        pdf = _math.exp(-0.5 * x * x) / _math.sqrt(2 * _math.pi)
+        cdf = 0.5 * (1 + _math.erf(x / _math.sqrt(2)))
+        weight = 0.5 if i in (0, steps) else 1.0
+        total += weight * x * n * pdf * cdf ** (n - 1)
+    return total * dx
+
+
+def calc_pruned_tree_nodes(branching: int, rejection_rate: float, depth: int):
+    """
+    Nodes a search generates through ``depth`` levels, unpruned and with a step check.
+
+    Every retained node proposes ``b`` children; the check rejects each child
+    independently with probability ``r``, so ``b_eff = b (1 - r)`` children
+    survive per node. Level ``d`` generates ``b^d`` nodes unpruned and
+    ``b * b_eff^(d - 1)`` pruned. Returns ``(unpruned, pruned)``.
+    """
+    surviving = branching * (1 - rejection_rate)
+    unpruned, pruned = 0, 0.0
+    for d in range(1, depth + 1):
+        unpruned += branching ** d
+        pruned += branching * surviving ** (d - 1)
+    return unpruned, pruned
