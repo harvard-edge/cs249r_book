@@ -4849,7 +4849,7 @@ YU_2025_DAPO = _lit(
 YUE_2025_RL_REASONING_BOUNDARY = _lit(
     "prov:yue-2025-rl-reasoning-boundary",
     "Yue et al. (2025), Does Reinforcement Learning Really Incentivize Reasoning Capacity in LLMs "
-    "Beyond the Base Model?, arXiv 2504.13837, pass@1 and pass@256 across GRPO training steps",
+    "Beyond the Base Model?, arXiv 2504.13837, pass@1 and pass@256 across GRPO training steps (Table 4, appendix)",
     url="https://arxiv.org/abs/2504.13837",
     verified="2026-10-20",
     notes=("Qwen2.5-7B on Omni-MATH-Train at the base model and after 150, 300, and 450 GRPO steps "
