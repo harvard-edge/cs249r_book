@@ -15,6 +15,8 @@ scenario rather than restating it.
 
 from __future__ import annotations
 
+import math as _math
+
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict
@@ -5685,6 +5687,28 @@ class TokenCostScenario(BaseScenario):
         return (self.cost_per_million(target) * output_tokens / 1e6).to("USD")
 
 
+
+
+# --- KV cache management: footprint, paging, prefix reuse, pauses, residency (added 2026-10-20) ---
+class RequestZonesScenario(BaseScenario):
+    """One serialized request laid out in zones, the leading ones an invariant shared prefix."""
+    zones: Dict[str, int]            # zone name -> tokens, in serialization order
+    shared_zones: int                # leading zones that form the invariant prefix
+
+    @property
+    def total_tokens(self) -> int:
+        return sum(self.zones.values())
+
+    @property
+    def shared_tokens(self) -> int:
+        return sum(list(self.zones.values())[:self.shared_zones])
+
+    @property
+    def shared_share(self) -> float:
+        return self.shared_tokens / self.total_tokens
+
+
+# KvAdmissionScenario: copied verbatim from the v2-10 inference branch.
 class KvAdmissionScenario(BaseScenario):
     """A replica's KV budget against one context length (``KvAdmissionModel``)."""
     workload: Workload
@@ -5779,16 +5803,85 @@ class PrecisionDividendScenario(BaseScenario):
         return PrecisionDividendModel().solve(self.workload, self.tp_size, self.hbm_per_accelerator,
                                               self.context_tokens, self.kv_heads, self.weight_bytes,
                                               self.weight_bytes_low, self.kv_bytes, self.kv_bytes_low)
+class KvAttentionDesignScenario(BaseScenario):
+    """Bytes per token across registry models, with one MHA, one GQA, and one MLA reference."""
+    models: List[Workload]           # display order
+    mha: Workload
+    gqa: Workload
+    mla: Workload
+    precision: str = "fp16"
+    session_tokens: int              # one long session, for the GQA and MLA references
+
+    @property
+    def result(self):
+        from .solvers import KvAttentionDesignModel
+        return KvAttentionDesignModel().solve(self.models, self.mha, self.gqa, self.mla, self.precision,
+                                              self.session_tokens)
+
+
+class PagedAllocationScenario(BaseScenario):
+    """Requests under a length cap in ``pool``'s KV pool: full-cap reservation against paged blocks."""
+    pool: KvAdmissionScenario
+    cap: int                         # admission cap, tokens
+    mean_final: int                  # mean final length, tokens
+    small_block: int                 # tokens per block
+    large_block: int
+
+    @property
+    def result(self):
+        from .solvers import PagedAllocationModel
+        p = self.pool.result
+        return PagedAllocationModel().solve(p.kv_per_token, p.kv_budget, self.cap, self.mean_final,
+                                            self.small_block, self.large_block)
+
+
+class KvForkCopyScenario(BaseScenario):
+    """Candidates forked from one prefix, each copying the prefix's KV state without block sharing."""
+    pool: KvAdmissionScenario
+    prefix_tokens: int
+    branches: int
+
+    @property
+    def copied(self) -> Quantity:
+        return self.branches * self.prefix_tokens * self.pool.result.kv_per_token
+
+
+class PrefixRebuildScenario(BaseScenario):
+    """A cached prefix on ``node``: the prefill a miss rebuilds against one short suffix pass on a hit."""
+    workload: Workload
+    node: Any
+    precision: str = "fp16"
+    prefix_tokens: int
+    suffix_tokens: int
+    utilization: float               # sustained share of the node's peak rate
+
+    @property
+    def result(self):
+        from .solvers import PrefixRebuildModel
+        return PrefixRebuildModel().solve(self.workload, self.node, self.precision, self.prefix_tokens,
+                                          self.suffix_tokens, self.utilization)
 
 
 class ChunkedPrefillScenario(BaseScenario):
     """A long prompt advanced ``chunk_tokens`` per iteration beside decode."""
+    # Same name and first fields as the v2-10 inference branch's type (prompt_tokens,
+    # chunk_tokens, iterations); the decode-gap inputs below are optional additions.
     prompt_tokens: int
     chunk_tokens: int
+    prefill: Optional[PrefixRebuildScenario] = None   # model, node, and sustained rate
+    decodes: Optional[int] = None                     # ongoing decode requests
 
     @property
     def iterations(self) -> int:
         return _math.ceil(self.prompt_tokens / self.chunk_tokens)
+
+    @property
+    def result(self):
+        from .solvers import ChunkedPrefillModel
+        p = self.prefill.result
+        return ChunkedPrefillModel().solve(self.prefill.workload.parameters, p.sustained_rate,
+                                           p.weight_read_time, self.decodes, self.prompt_tokens,
+                                           self.chunk_tokens)
 
 
 class TensorParallelSpeedupScenario(BaseScenario):
@@ -6891,3 +6984,75 @@ class GripperTransferScenario(BaseScenario):
     @property
     def target_clears(self) -> bool:
         return self.target_opening > self.part_width
+    @property
+    def result(self):
+        from .solvers import ChunkedPrefillModel
+        p = self.prefill.result
+        return ChunkedPrefillModel().solve(self.prefill.workload.parameters, p.sustained_rate,
+                                           p.weight_read_time, self.decodes, self.prompt_tokens,
+                                           self.chunk_tokens)
+
+
+class PausedKvStateScenario(BaseScenario):
+    """A request paused on a tool: keep, move over the host links, or drop and recompute its KV state."""
+    pool: KvAdmissionScenario
+    prefill: PrefixRebuildScenario   # node, links, and sustained prefill rate
+    context_tokens: int
+    block_tokens: int
+    wait: Quantity
+    link_fraction: float             # share of rated link bandwidth under contention
+    returns: int                     # paused requests whose waits end together
+
+    @property
+    def link(self) -> Quantity:
+        node = self.prefill.node
+        return node.accelerators_per_node * node.accelerator.interconnect.bandwidth
+
+    @property
+    def result(self):
+        from .solvers import PausedKvStateModel
+        return PausedKvStateModel().solve(self.pool.result.kv_per_token,
+                                          self.prefill.workload.parameters,
+                                          self.prefill.result.sustained_rate, self.link,
+                                          self.context_tokens, self.block_tokens, self.wait,
+                                          self.link_fraction, self.returns)
+
+
+class KvBlockSharingScenario(BaseScenario):
+    """Requests with an output allowance in whole blocks, with and without a shared prefix, as a turn rate."""
+    pool: KvAdmissionScenario
+    headroom: float                  # fraction of the pool withheld
+    context: int                     # input tokens per request
+    output: int                      # output allowance per request
+    common: int                      # shareable prefix tokens
+    block_tokens: int
+    generation: Quantity             # residence while generating
+    wait: Quantity                   # tool wait with the state kept
+
+    @property
+    def result(self):
+        from .solvers import KvBlockSharingModel
+        p = self.pool.result
+        return KvBlockSharingModel().solve(p.kv_per_token, p.kv_budget, self.headroom, self.context,
+                                           self.output, self.common, self.block_tokens,
+                                           self.generation, self.wait)
+
+
+class KvResidencyArchetypeScenario(BaseScenario):
+    """One agent workload's sharing gain, residency tax, and reload against recompute."""
+    paused: PausedKvStateScenario    # pool, link, and sustained prefill rate
+    context_tokens: int
+    shared_prefix: int
+    generation: Quantity
+    wait: Quantity
+
+    @property
+    def result(self):
+        from .solvers import KvResidencyArchetypeModel
+        p = self.paused
+        pool = p.pool.result
+        return KvResidencyArchetypeModel().solve(pool.kv_per_token, pool.kv_budget,
+                                                 p.prefill.workload.parameters,
+                                                 p.prefill.result.sustained_rate, p.link,
+                                                 self.context_tokens, self.shared_prefix,
+                                                 self.generation, self.wait)

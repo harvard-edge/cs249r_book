@@ -449,3 +449,25 @@ __all__ += [
     "calc_dagger_cost_bound",
     "AGE_OF_UNIVERSE",
 ]
+
+# --- KV cache residency and turn rate (added 2026-10-20) ---
+from .memory import (
+    calc_kv_attention_design,
+    calc_kv_resident_fit,
+    calc_kv_block_count,
+    calc_shared_prefix_fit,
+    calc_sharing_gain_limit,
+)
+from .serving import calc_littles_law_rate, calc_residency_factor
+from .transformer import calc_weight_only_step_time
+
+__all__ += [
+    "calc_kv_attention_design",
+    "calc_kv_resident_fit",
+    "calc_kv_block_count",
+    "calc_shared_prefix_fit",
+    "calc_sharing_gain_limit",
+    "calc_littles_law_rate",
+    "calc_residency_factor",
+    "calc_weight_only_step_time",
+]

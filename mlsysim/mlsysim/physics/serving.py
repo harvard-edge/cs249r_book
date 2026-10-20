@@ -184,3 +184,28 @@ def calc_speculative_expected_tokens(acceptance: float, draft_length: int) -> fl
     if not 0 <= a < 1:
         raise ValueError("acceptance must be in [0, 1)")
     return (1 - a ** (draft_length + 1)) / (1 - a)
+# --- Residence time and turn rate (added 2026-10-20) --------------------------
+
+def calc_littles_law_rate(occupied_slots, residence_time):
+    """
+    Turns per unit time that ``occupied_slots`` sustain, by Little's law.
+
+        L = lambda W   =>   lambda = L / W
+
+    ``residence_time`` is the time each turn holds its slot. The law assumes
+    only a stable system, so the rate is an average, not a peak.
+    """
+    return occupied_slots / residence_time
+
+
+def calc_residency_factor(generation_time, wait_time) -> float:
+    """
+    How much holding a slot through a wait divides the turn rate.
+
+        1 + T_wait / T_gen
+
+    Keeping state through a wait stretches each turn's residence from
+    ``generation_time`` to ``generation_time + wait_time``; for the same slots,
+    Little's law divides the rate by this factor (the residency tax).
+    """
+    return ((generation_time + wait_time) / generation_time).to("").magnitude

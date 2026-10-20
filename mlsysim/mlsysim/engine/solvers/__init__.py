@@ -305,3 +305,24 @@ __all__ += [
     "MaintainedPolicyCostModel",
     "WordOverlapModel",
 ]
+
+# --- KV cache management (added 2026-10-20) ---
+from .kv_cache import (
+    KvAttentionDesignModel,
+    PagedAllocationModel,
+    PrefixRebuildModel,
+    ChunkedPrefillModel,
+    PausedKvStateModel,
+    KvBlockSharingModel,
+    KvResidencyArchetypeModel,
+)
+
+__all__ += [
+    "KvAttentionDesignModel",
+    "PagedAllocationModel",
+    "PrefixRebuildModel",
+    "ChunkedPrefillModel",
+    "PausedKvStateModel",
+    "KvBlockSharingModel",
+    "KvResidencyArchetypeModel",
+]

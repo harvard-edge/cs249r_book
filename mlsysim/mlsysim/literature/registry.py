@@ -57,6 +57,7 @@ ContextUse = _load("context_use", "ContextUse", "Cited results on how models use
 AgentRetrieval = _load("agent_retrieval", "AgentRetrieval", "Cited results on how agents retrieve: SWE-agent against BM25 retrieval, PoisonedRAG's injection count.")  # added 2026-10-20
 SummarizationFaithfulness = _load("summarization_faithfulness", "SummarizationFaithfulness", "Cited summarization-faithfulness results (Maynez et al. 2020, XSum).")
 PrefixCaching = _load("prefix_caching", "PrefixCaching", "Cited prefix-cache results from a public serving deployment (SGLang 2024).")
+ToolInterception = _load("tool_interception", "ToolInterception", "Cited tool-interception results for augmented LLM serving (InferCept 2024).")  # added 2026-10-20
 # Published vision-language-action and dual-system robot policies (added 2026-10-20)
 VlaSystems = _load("vla_systems", "VlaSystems", "Cited figures of published VLA and dual-system robot policies (OpenVLA, ACT, pi0, FAST, Helix, GR00T N1).")
 # Robot demonstration data and event data recorders (added 2026-10-20)
@@ -342,6 +343,7 @@ class Literature(Registry):
     AgentRetrieval = AgentRetrieval  # added 2026-10-20
     SummarizationFaithfulness = SummarizationFaithfulness  # added 2026-10-20
     PrefixCaching = PrefixCaching  # added 2026-10-20
+    ToolInterception = ToolInterception  # added 2026-10-20
     VlaSystems = VlaSystems  # added 2026-10-20
     WakeWordBenchmarks = WakeWordBenchmarks  # added 2026-10-20
     AnnotationTimes = AnnotationTimes  # added 2026-10-20
@@ -363,6 +365,9 @@ class Literature(Registry):
     AnswerPositionAccuracy = _series.AnswerPositionAccuracy  # added 2026-10-20
     SweBenchBm25Context = _series.SweBenchBm25Context  # added 2026-10-20
     PoisonedRagBlackBox = _series.PoisonedRagBlackBox  # added 2026-10-20
+    PagedAttentionMemoryBreakdown = _series.PagedAttentionMemoryBreakdown  # added 2026-10-20
+    ToolInterceptionTimes = _series.ToolInterceptionTimes  # added 2026-10-20
+    AttentionSinkPerplexity = _series.AttentionSinkPerplexity  # added 2026-10-20
     SweBenchVerifiedRuns = _series.SweBenchVerifiedRuns
     CybenchSolveRate = _series.CybenchSolveRate
     OSWorldStepBudget = _series.OSWorldStepBudget

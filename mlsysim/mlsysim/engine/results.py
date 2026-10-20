@@ -2096,6 +2096,8 @@ class ServingFrontierResult(SolverResult):
     best_at: float                           # highest throughput among rows meeting the target
 
 
+# --- KV cache management: footprint, paging, prefix reuse, pauses, residency (added 2026-10-20) ---
+# KvAdmissionResult: copied verbatim from the v2-10 inference branch (same name and fields).
 class KvAdmissionResult(SolverResult):
     """Result from KvAdmissionModel: requests of one context length that fit a replica's KV budget."""
     head_dim: int
@@ -2253,3 +2255,113 @@ class WordOverlapResult(SolverResult):
     second_words: int
     jaccard: float                       # shared / union
 
+class KvAttentionDesignResult(SolverResult):
+    """Result from KvAttentionDesignModel: bytes per token by attention design."""
+    per_token: Dict[str, Quantity]           # model name -> KV bytes per token
+    design: Dict[str, str]                   # model name -> MHA, GQA, or MLA
+    mha_over_mla: float
+    gqa_over_mla: float
+    gqa_session: Quantity                    # one session of session_tokens, GQA model
+    mla_session: Quantity
+
+
+class PagedAllocationResult(SolverResult):
+    """Result from PagedAllocationModel: full-cap reservation against paged blocks."""
+    reservation: Quantity                    # cap x bytes per token
+    reservations: int                        # full-cap reservations in the pool
+    final_length_efficiency: float           # mean final length / cap
+    small_block: Quantity                    # bytes of one small block
+    large_block: Quantity
+    small_tail_tokens: int                   # worst-case unused slots, small blocks
+    large_tail_tokens: int
+    small_tail: Quantity
+    large_tail: Quantity
+    large_tail_share: float                  # worst large tail / cap
+    small_allocated_tokens: float            # expected tokens held per request
+    small_waste: float                       # expected internal fragmentation
+    large_allocated_tokens: float
+    large_waste: float
+    paged_fit: int                           # final-length snapshots, small blocks
+    paged_gain: float                        # paged fit / reservations
+
+
+class PrefixRebuildResult(SolverResult):
+    """Result from PrefixRebuildModel: the prefill a prefix hit avoids, against one suffix pass."""
+    n_params: float
+    state: Quantity                          # KV bytes of the prefix
+    linear_ops: Quantity                     # 2 P S
+    attention_ops: Quantity                  # 2 L d S^2 (causal)
+    sustained_rate: Quantity                 # accelerators x peak x utilization
+    rebuild_time: Quantity                   # (linear + attention) / rate
+    weight_read_time: Quantity               # weights / node bandwidth
+    suffix_ops_time: Quantity                # 2 P S_suffix / rate
+    rebuild_over_hit: float                  # rebuild time / max(weight read, suffix ops)
+
+
+class ChunkedPrefillResult(SolverResult):
+    """Result from ChunkedPrefillModel: decode gap with a monolithic prefill against chunks."""
+    decode_step: Quantity                    # decode-only iteration
+    monolithic_prefill: Quantity             # the whole prompt in one iteration
+    monolithic_gap: Quantity                 # decode step + monolithic prefill
+    chunks: int
+    chunked_iteration: Quantity              # one chunk beside the decodes
+    chunked_done: Quantity                   # chunks x iteration
+    gap_ratio: float                         # monolithic gap / chunked iteration
+
+
+class PausedKvStateResult(SolverResult):
+    """Result from PausedKvStateModel: keep, move, or drop a paused request's KV state."""
+    blocks: int
+    state: Quantity                          # uniquely reclaimable KV bytes
+    link: Quantity                           # accelerators x host link
+    copy_out: Quantity
+    copy_in: Quantity
+    round_trip: Quantity                     # copy out + copy in
+    recompute: Quantity                      # 2 P S / rate, weight work only
+    recompute_over_reload: float
+    recompute_over_reload_derated: float     # at the derated link fraction
+    held_occupancy: Quantity                 # state x wait (bytes x time)
+    released_on_demand: Quantity             # wait - copy out
+    released_prefetch: Quantity              # wait - copy out - copy in
+    burst: Quantity                          # returns x state
+    burst_time: Quantity                     # burst / link
+    burst_slowdown: float                    # burst time / one reload
+
+
+class KvBlockSharingResult(SolverResult):
+    """Result from KvBlockSharingModel: block-rounded resident fit, shared prefix, and turn rate."""
+    block_bytes: Quantity
+    usable_blocks: int                       # floor((1 - headroom) pool / block)
+    usable: Quantity
+    unshared_blocks: int                     # ceil((context + output) / block)
+    common_blocks: int
+    private_blocks: int
+    unshared_bytes: Quantity
+    common_bytes: Quantity
+    private_bytes: Quantity
+    fit_unshared: int
+    fit_shared: int
+    retained_time: Quantity                  # generation + wait
+    retained_rate: Quantity                  # fit unshared / retained time
+    released_rate: Quantity                  # fit unshared / generation
+    shared_retained_rate: Quantity           # fit shared / retained time
+    shared_released_rate: Quantity           # fit shared / generation
+    residency_factor: float                  # 1 + wait / generation
+    shared_fraction: float                   # common blocks / unshared blocks
+    share_gain: float                        # fit shared / fit unshared
+    share_bound: float                       # 1 / (1 - f)
+
+
+class KvResidencyArchetypeResult(SolverResult):
+    """Result from KvResidencyArchetypeModel: sharing, residency tax, and resume cost for one workload."""
+    shared_fraction: float                   # shared prefix / context
+    fit_unshared: int
+    fit_shared: int
+    share_gain: float
+    residency_factor: float
+    turn_cycle: Quantity                     # generation + wait
+    recompute: Quantity
+    reload: Quantity
+    recompute_share: float                   # recompute / turn cycle
+    shared_retained_rate: Quantity           # fit shared / turn cycle
+    shared_released_rate: Quantity           # fit shared / generation
