@@ -418,24 +418,28 @@ $$\Pr(\text{success}) = (1-\PerStepErrorRate)^{\TurnHorizon}$$ {#eq-vol3-horizon
 # │ Goal: Show task success falling with horizon at a fixed step accuracy.
 # │ Show: Success at two horizons; step error and eps*H needed for a target.
 # │ How:  (1 - eps)^H with independent, unchecked steps; ~exp(-eps*H).
+# │       Scenarios.UncheckedRepairHorizon (HorizonCompoundingModel).
 # │ Note: Hypothetical step accuracy, not a measured model property.
 # └─────────────────────────────────────────────────────────────────────────────
 import math
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_int, fmt_math, fmt_multiple, fmt_percent
 
 class HorizonCompounding:
     # ┌── 1. LOAD (Scenario inputs) ────────────────────────────────────────
-    step_ok = 0.99  # hypothetical per-step probability of a correct step
-    h_short, h_long = 10, 100  # horizons in turns
-    target = 0.90  # task success rate to hold at the long horizon
+    scenario = Scenarios.UncheckedRepairHorizon
+    step_ok = scenario.step_success  # hypothetical per-step probability of a correct step
+    h_short, h_long = scenario.short_horizon, scenario.long_horizon  # horizons in turns
+    target = scenario.target_success  # task success rate to hold at the long horizon
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    eps = 1 - step_ok
-    p_short = step_ok**h_short
-    p_long = step_ok**h_long
-    eps_needed = 1 - target ** (1 / h_long)
-    eps_ratio = eps / eps_needed
-    eps_h_needed = eps_needed * h_long  # the product that sets reliability
+    result = scenario.result
+    eps = result.step_error
+    p_short = result.success[h_short]
+    p_long = result.success[h_long]
+    eps_needed = result.required_step_error
+    eps_ratio = result.error_ratio
+    eps_h_needed = result.required_error_horizon  # the product that sets reliability
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(p_long < 0.5 < target <= p_short, "Long horizon must fail most tasks; short must meet target")
@@ -480,33 +484,25 @@ The horizon in @eq-vol3-horizon-compounding belongs to the delegated task, and t
 # │ Show: Frontier 50% horizon at the first and latest release; doubling
 # │       time since 2019 and since 2023.
 # │ How:  Log-linear fit of log2(horizon) on release date over frontier
-# │       models, excluding estimates above 16 h (the source's own rule).
+# │       models, excluding estimates above 16 h (the source's own rule):
+# │       Scenarios.FrontierTaskHorizonTrend (TaskHorizonTrendModel).
 # └─────────────────────────────────────────────────────────────────────────────
-import datetime as dt
-import numpy as np
-from mlsysim import Literature
+from mlsysim import Scenarios
+from mlsysim.core.units import Q_
 from mlsysim.fmt import check, fmt, fmt_int
-
-def _doubling_days(points):
-    """Days per doubling from a log2-linear fit of horizon on release date."""
-    t = np.array([dt.date.fromisoformat(r["release_date"]).toordinal() for r in points])
-    return 1 / np.polyfit(t, np.log2([r["p50_min"] for r in points]), 1)[0]
 
 class MeasuredHorizon:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    rows = Literature.AgentTimeHorizon.entries
-    fit_cap_min = 16 * 60  # the source fits only frontier points at or below 16 h
-    published_recent_days = 128.744  # the source's own 2023-on doubling time
+    scenario = Scenarios.FrontierTaskHorizonTrend  # Literature.AgentTimeHorizon, fit at or below 16 h
+    published_recent_days = scenario.published_recent_doubling.to("day").magnitude  # the source's own 2023-on doubling time
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    frontier = tuple(filter(lambda r: r["is_sota"], rows))
-    fit_pts = tuple(filter(lambda r, cap=fit_cap_min: r["p50_min"] <= cap, frontier))
-    recent_pts = tuple(filter(lambda r: r["release_date"] >= "2023-01-01", fit_pts))
-    all_days = _doubling_days(fit_pts)
-    recent_days = _doubling_days(recent_pts)
-    first_s = frontier[0]["p50_min"] * 60
-    last_h = frontier[-1]["p50_min"] / 60
-    growth = frontier[-1]["p50_min"] / frontier[0]["p50_min"]
+    result = scenario.result
+    all_days = result.doubling_all.to("day").magnitude
+    recent_days = result.doubling_recent.to("day").magnitude
+    first_s = Q_(result.first_frontier_minutes, "minute").to("second").magnitude
+    last_h = Q_(result.last_frontier_minutes, "minute").to("hour").magnitude
+    growth = result.growth
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(abs(recent_days - published_recent_days) < 1, f"Refit must reproduce the source's doubling time, got {recent_days:.1f} d")
@@ -514,8 +510,8 @@ class MeasuredHorizon:
     check(first_s < 10 and last_h > 8, "Prose spans seconds to more than a working day")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    all_months_str = fmt(all_days / 30.44, precision=1)
-    recent_months_str = fmt(recent_days / 30.44, precision=1)
+    all_months_str = fmt(result.doubling_all.to("month").magnitude, precision=1)
+    recent_months_str = fmt(result.doubling_recent.to("month").magnitude, precision=1)
     first_s_str = fmt_int(round(first_s))
     last_h_str = fmt_int(round(last_h))
     growth_str = fmt_int(round(growth, -3))
@@ -533,7 +529,9 @@ class MeasuredHorizon:
 # │ Goal: Show the delegated task length growing exponentially.
 # │ Show: Log-scale horizon vs. release date; frontier vs. other models;
 # │       95% CIs; the 2023-on log-linear fit.
-# │ How: Literature.AgentTimeHorizon (MLSysIM); book_style.setup_plot().
+# │ How: Literature.AgentTimeHorizon (MLSysIM); the fit line from
+# │      Scenarios.FrontierTaskHorizonTrend via MeasuredHorizon;
+# │      book_style.setup_plot().
 # └─────────────────────────────────────────────────────────────────────────────
 import datetime as dt
 import numpy as np
@@ -568,19 +566,16 @@ for is_frontier in (False, True):
             label="Other evaluated models",
         )
 
-# ┌── 2. FIT (same subset as MeasuredHorizon) ─────────────────────────────────
-fit = [r for r in rows if r["is_sota"] and r["release_date"] >= "2023-01-01" and r["p50_min"] <= 16 * 60]
-fx = mdates.date2num([date(r) for r in fit])
-slope, icpt = np.polyfit(fx, np.log2([r["p50_min"] for r in fit]), 1)
-xs = np.linspace(mdates.datestr2num("2023-01-01"), mdates.datestr2num("2026-07-01"), 50)
+# ┌── 2. FIT (MeasuredHorizon's scenario: same subset, same fit) ──────────────
+xs = mdates.num2date(np.linspace(mdates.datestr2num("2023-01-01"), mdates.datestr2num("2026-07-01"), 50))
 ax.plot(
-    mdates.num2date(xs),
-    2 ** (icpt + slope * xs),
+    xs,
+    [MeasuredHorizon.scenario.fitted_minutes(d) for d in xs],
     "--",
     color=COLORS["secondary"],
     lw=1.5,
     zorder=3,
-    label=f"Fit since 2023: doubles every {1 / slope / 30.44:.1f} months",
+    label=f"Fit since 2023: doubles every {MeasuredHorizon.recent_months_str} months",
 )
 
 # ┌── 3. LABELS ───────────────────────────────────────────────────────────────
@@ -653,34 +648,38 @@ Production runtimes bound the retry budget, so some tasks end without acceptance
 # │ Goal: Compare halving token prices with raising acceptance probability.
 # │ Show: Baseline, both interventions, the break-even acceptance, and the
 # │       understatement from charging only the accepted attempt.
-# │ How:  C_eff = E[C_attempt] / p_acc with retry until acceptance.
+# │ How:  C_eff = E[C_attempt] / p_acc with retry until acceptance:
+# │       Scenarios.RepairAttemptCostLevers (AcceptedTaskCostModel).
 # │ Note: Hypothetical prices and probabilities, not a provider schedule.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_math, fmt_multiple, fmt_percent, fmt_pp, fmt_usd
 
 class CostPerAccepted:
     # ┌── 1. LOAD (Scenario inputs) ────────────────────────────────────────
-    c_model = 1.30  # scenario USD of model tokens per attempt
-    c_other = 0.80  # scenario USD per attempt for sandbox, tests, and review
-    p_acc = 0.40  # probability an attempt is accepted
-    token_cut = 0.5  # fraction of token price removed by a cheaper tariff
-    p_acc_better = 0.60  # acceptance after a context or tool improvement
-    other_cut = 0.5  # checkpoint: fraction of sandbox/test/review cost removed
-    p_acc_step = 0.10  # checkpoint: acceptance gain from a tool change
+    scenario = Scenarios.RepairAttemptCostLevers
+    c_model = scenario.model_cost.to("USD").magnitude  # scenario USD of model tokens per attempt
+    c_other = scenario.other_cost.to("USD").magnitude  # scenario USD per attempt for sandbox, tests, and review
+    p_acc = scenario.acceptance  # probability an attempt is accepted
+    token_cut = scenario.token_price_cut  # fraction of token price removed by a cheaper tariff
+    p_acc_better = scenario.improved_acceptance  # acceptance after a context or tool improvement
+    other_cut = scenario.other_cost_cut  # checkpoint: fraction of sandbox/test/review cost removed
+    p_acc_step = scenario.acceptance_gain  # checkpoint: acceptance gain from a tool change
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    c_attempt = c_model + c_other
-    token_share = c_model / c_attempt
-    attempts = 1 / p_acc
-    c_eff = c_attempt / p_acc
-    c_attempt_cheap = c_model * (1 - token_cut) + c_other
-    c_eff_cheap = c_attempt_cheap / p_acc
-    c_eff_better = c_attempt / p_acc_better
-    p_breakeven = p_acc / (1 - token_cut * token_share)
+    result = scenario.result
+    c_attempt = result.attempt_cost
+    token_share = result.token_share
+    attempts = result.attempts_per_acceptance
+    c_eff = result.cost_per_accepted
+    c_attempt_cheap = result.cheaper_attempt_cost
+    c_eff_cheap = result.cost_per_accepted_cheaper_tokens
+    c_eff_better = result.cost_per_accepted_improved
+    p_breakeven = result.break_even_acceptance
     gain_pp = round((p_breakeven - p_acc) * 100)  # whole points, for prose
-    understate = c_eff / c_attempt  # accepted-attempt-only accounting error
-    c_eff_ck_other = (c_model + c_other * (1 - other_cut)) / p_acc
-    c_eff_ck_acc = c_attempt / (p_acc + p_acc_step)
+    understate = result.accepted_only_understatement  # accepted-attempt-only accounting error
+    c_eff_ck_other = result.cost_per_accepted_cheaper_other
+    c_eff_ck_acc = result.cost_per_accepted_acceptance_gain
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(c_eff_better < c_eff_cheap < c_eff, "Raising acceptance must beat the token cut here")
@@ -915,27 +914,30 @@ These three questions frame every mechanism in the book, and they also expose th
 # │       1 - (1 - p_acc)^k for k independent attempts.
 # │ Note: Turn budget and window from the registry repair harness; start and
 # │       per-turn tokens are scenario inputs shared with the foundation-model
-# │       chapter's call-price estimate; acceptance from CostPerAccepted.
+# │       chapter's call-price estimate (Scenarios.AppendOnlyRepairContext);
+# │       acceptance and retry budget from Scenarios.RepairAttemptCostLevers.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Agents
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_percent
 
 class IntroFallacies:
     # ┌── 1. LOAD (Registry and scenario inputs) ─────────────────────────────
-    agent = Agents.Coding.SWE_Bench_Runner
-    turns = agent.max_trajectory_steps
-    window = agent.context_window.to("token").magnitude
-    s0 = 8_000  # scenario: initial serialized prompt tokens
-    delta = 1_500  # scenario: tokens appended per turn (output plus observation)
+    scenario = Scenarios.AppendOnlyRepairContext  # Agents.Coding.SWE_Bench_Runner budget and window
+    retries = Scenarios.RepairAttemptCostLevers
+    turns = scenario.turns
+    window = scenario.context_window.to("token").magnitude
+    s0 = scenario.initial_tokens.to("token").magnitude  # scenario: initial serialized prompt tokens
+    delta = scenario.tokens_per_turn.to("token").magnitude  # scenario: tokens appended per turn (output plus observation)
     p_acc = CostPerAccepted.p_acc  # acceptance per independent attempt
-    k_retry = 5  # attempts allowed by the retry budget
+    k_retry = retries.independent_attempts  # attempts allowed by the retry budget
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    last_call = s0 + delta * (turns - 1)
-    window_share = last_call / window
-    cumulative = turns * s0 + delta * turns * (turns - 1) // 2
-    reread_ratio = cumulative / last_call
-    p_indep = 1 - (1 - p_acc) ** k_retry
+    result = scenario.result
+    last_call = result.last_call_tokens.to("token").magnitude
+    window_share = result.window_fraction
+    cumulative = result.cumulative_input_tokens.to("token").magnitude
+    reread_ratio = result.reread_ratio
+    p_indep = retries.result.independent_success
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(last_call < window, "The whole repair transcript must fit the window")
