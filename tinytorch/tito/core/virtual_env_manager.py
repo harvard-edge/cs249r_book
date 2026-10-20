@@ -1,4 +1,4 @@
-import os, sys, json
+import os, sys, json, shutil
 from pathlib import Path
 
 DEFAULT_VENV = ".venv"
@@ -17,12 +17,33 @@ def resolve_venv_tool(tool_name: str, venv_path: Path = None) -> str:
 
     A bare name like "jupyter" or "jupytext" is only found by subprocess if
     it's on PATH, which isn't true when tito runs outside an activated venv
-    shell even though the tool is correctly installed inside .venv. Checking
-    the venv's bin/Scripts dir first avoids that false "not installed" result.
+    shell even though the tool is correctly installed inside .venv.
+
+    Search order:
+      1. venv_path, when the caller names one explicitly.
+      2. The directory of the interpreter running tito. The tools are installed
+         beside tito itself, and this holds whatever the current directory is.
+         Do not .resolve() sys.executable: a venv's python is a symlink to the
+         base interpreter, and resolving it leaves the venv.
+      3. The configured venv (VENV_PATH, .tinyrc, or ./.venv). These are
+         relative to the current directory, so they only help from the
+         project root.
+      4. PATH, and finally the bare name so the caller's FileNotFoundError
+         message still fires.
     """
-    venv_bin_dir = get_venv_bin_dir(venv_path or get_venv_path())
-    exe = venv_bin_dir / (f"{tool_name}.exe" if sys.platform == "win32" else tool_name)
-    return str(exe) if exe.exists() else tool_name
+    exe_name = f"{tool_name}.exe" if sys.platform == "win32" else tool_name
+    candidates = []
+    if venv_path is not None:
+        candidates.append(get_venv_bin_dir(Path(venv_path)))
+    candidates.append(Path(sys.executable).parent)
+    if venv_path is None:
+        candidates.append(get_venv_bin_dir(get_venv_path()))
+
+    for bin_dir in candidates:
+        exe = bin_dir / exe_name
+        if exe.exists():
+            return str(exe)
+    return shutil.which(tool_name) or tool_name
 
 
 def get_venv_path() -> Path:
