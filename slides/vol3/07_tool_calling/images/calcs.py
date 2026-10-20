@@ -159,6 +159,9 @@ run = RUN.result
 assert len(OBS_ROWS) == run.observations and OBS_CUT == run.truncated_outputs, \
     "the per-command file matches the run's recorded counts"
 assert OBS_CUT == sum(1 for x in OBS_RAW if x >= STAGE_CAP), "staged exactly the outputs at the cap"
+assert len({r["instance_id"] for r in OBS_ROWS}) == run.tasks and \
+    len({r["instance_id"] for r in OBS_ROWS if r["truncated"] == "1"}) == run.truncated_tasks, \
+    "the per-command file matches the run's recorded task counts"
 big = max(OBS_ROWS, key=lambda r: int(r["raw_chars"]))
 v("so_n", run.tasks, "{:.0f}", "runs (tasks)")
 v("so_obs", run.observations, "{:,.0f}", "command outputs")
