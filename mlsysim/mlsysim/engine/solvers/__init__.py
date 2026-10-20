@@ -35,7 +35,9 @@ from .storage import (
     SyntheticFootprintModel,
     StorageBenchmarkDemandModel,
 )
-from .trends import TrainingGrowthModel
+from .trends import MemoryWallModel, ScalingSeriesModel, TrainingGrowthModel
+from .parallelism import (AlignmentMemoryModel, DataParallelScaleOutModel, ParallelLayoutModel,
+                          TensorParallelLayerModel, ZeroShardingModel)
 from .training import CheckpointModel, ScalingModel, TrainingMemoryModel, TrainingRunModel, TrainingStateModel
 
 __all__ = [
@@ -60,6 +62,13 @@ __all__ = [
     "IncastModel",
     "CollectiveFitModel",
     "TrainingGrowthModel",
+    "ScalingSeriesModel",
+    "MemoryWallModel",
+    "ParallelLayoutModel",
+    "ZeroShardingModel",
+    "DataParallelScaleOutModel",
+    "TensorParallelLayerModel",
+    "AlignmentMemoryModel",
     "StorageFootprintModel",
     "TieredCheckpointModel",
     "CheckpointStormModel",

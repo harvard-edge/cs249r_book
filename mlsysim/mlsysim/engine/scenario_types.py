@@ -995,3 +995,325 @@ class CompressedReadScenario(BaseScenario):
     def decode_cores(self, codec: str) -> float:
         """Cores needed to decode at that output rate."""
         return (self.output_bandwidth(codec) / self.decode_rates[codec]).to("").magnitude
+
+
+# --- Distributed training (added 2026-10-20) ----------------------------------
+
+class ParallelLayoutScenario(BaseScenario):
+    """``workload`` trained on a TP x PP x DP layout: step time, efficiency, and state per device."""
+    workload: Workload
+    tp_size: int = 1
+    pp_size: int = 1
+    dp_size: int
+    microbatches: int = 1
+    batch_tokens: float              # tokens per optimizer update
+    flops_per_param_token: float
+    accelerator: HardwareNode
+    precision: str = "fp8"           # the compute precision whose peak sets the window
+    local_efficiency: float          # share of peak before communication
+    link_bandwidth: Quantity         # per-device data-parallel link
+    overlap_fraction: float          # share of the AllReduce that may hide under compute
+    gradient_precision: str = "fp16"
+    window_resolution: Optional[Quantity] = None   # carry the compute window at this precision
+    device_memory: Optional[Quantity] = None       # for the fewest devices that hold the state
+
+    @property
+    def n_devices(self) -> int:
+        return self.tp_size * self.pp_size * self.dp_size
+
+    @property
+    def result(self):
+        from .solvers import ParallelLayoutModel
+        return ParallelLayoutModel().solve(
+            self.workload, self.tp_size, self.pp_size, self.dp_size, self.microbatches,
+            self.batch_tokens, self.flops_per_param_token,
+            self.accelerator.compute.precision_flops[self.precision], self.local_efficiency,
+            self.link_bandwidth, self.overlap_fraction, self.gradient_precision,
+            self.window_resolution, self.device_memory)
+
+
+class ActivationMemoryScenario(BaseScenario):
+    """Activation memory of ``workload`` at a microbatch, under each recomputation strategy."""
+    workload: Workload
+    micro_batch: int
+    seq_len: Optional[int] = None   # defaults to the model's context length
+
+    def activations(self, strategy: str) -> Quantity:
+        from ..physics.memory import calc_activation_memory
+        w = self.workload
+        seq = self.seq_len if self.seq_len is not None else w.context_length
+        return calc_activation_memory(w.layers, seq, self.micro_batch, w.hidden_dim,
+                                      n_heads=w.heads, strategy=strategy)
+
+    @property
+    def forward_equivalents(self) -> float:
+        """A training step in forward passes: 6PD over the forward pass's 2PD."""
+        from ..physics.transformer import calc_transformer_training_flops, calc_transformer_decode_flops
+        p = self.workload.parameters
+        return (calc_transformer_training_flops(p, 1) / calc_transformer_decode_flops(p, 1)).to("").magnitude
+
+    @property
+    def recompute_forward_equivalents(self) -> float:
+        """The same step with full recomputation: 8PD over 2PD."""
+        return self.forward_equivalents * (1 + self.recompute_overhead)
+
+    @property
+    def recompute_overhead(self) -> float:
+        """Extra training arithmetic of full recomputation: 8PD over 6PD, minus one."""
+        from ..physics.transformer import calc_transformer_training_flops
+        full = calc_transformer_training_flops(self.workload.parameters, 1, activation_checkpointing=True)
+        base = calc_transformer_training_flops(self.workload.parameters, 1)
+        return (full / base).to("").magnitude - 1
+
+
+class ZeroShardingScenario(BaseScenario):
+    """``workload``'s training state per device at each ZeRO stage over ``n_devices``."""
+    workload: Workload
+    n_devices: int
+    activations: Optional[ActivationMemoryScenario] = None
+    activation_strategy: str = "full"
+    link_bandwidth: Optional[Quantity] = None
+
+    @property
+    def result(self):
+        from .solvers import ZeroShardingModel
+        act = None if self.activations is None else self.activations.activations(self.activation_strategy)
+        return ZeroShardingModel().solve(self.workload, self.n_devices, act, self.link_bandwidth)
+
+
+class DataParallelScaleOutScenario(BaseScenario):
+    """A data-parallel job of ``workload`` on ``nodes`` nodes, from a one-device profile."""
+    workload: Workload
+    precision: str = "fp16"
+    step_time: Quantity              # one device, one local step
+    training_time: Quantity          # one device, whole run
+    per_device_batch: int
+    devices_per_node: int
+    nodes: int = 1
+    intra_bandwidth: Quantity
+    inter_bandwidth: Optional[Quantity] = None
+    accumulation_steps: int = 1
+    node_hour_rate: Optional[Quantity] = None
+
+    @property
+    def result(self):
+        from .solvers import DataParallelScaleOutModel
+        return DataParallelScaleOutModel().solve(
+            self.workload, self.precision, self.step_time, self.training_time, self.per_device_batch,
+            self.devices_per_node, self.nodes, self.intra_bandwidth, self.inter_bandwidth,
+            self.accumulation_steps, self.node_hour_rate)
+
+
+class PipelineScheduleScenario(BaseScenario):
+    """A synchronous pipeline of ``stages`` stages fed ``microbatches`` microbatches per step."""
+    stages: int
+    microbatches: int
+
+    @property
+    def bubble(self) -> float:
+        from ..physics.performance import calc_pipeline_bubble
+        return calc_pipeline_bubble(self.stages, self.microbatches)
+
+    @property
+    def slots(self) -> int:
+        """Equal time slots per step, forward and backward each ``m + p - 1``."""
+        return 2 * (self.microbatches + self.stages - 1)
+
+    @property
+    def idle_slots(self) -> int:
+        """Slots each stage idles per step: ``p - 1`` to fill and ``p - 1`` to drain."""
+        return 2 * (self.stages - 1)
+
+    @property
+    def fill_slots(self) -> int:
+        """The bubble's numerator, ``p - 1``."""
+        return self.stages - 1
+
+    @property
+    def phase_slots(self) -> int:
+        """The bubble's denominator, ``m + p - 1`` slots per phase."""
+        return self.microbatches + self.stages - 1
+
+    def microbatches_for_bubble(self, target: float) -> float:
+        """The microbatch count above which the bubble falls below ``target``."""
+        return (self.stages - 1) * (1 - target) / target
+
+
+class TensorParallelLayerScenario(BaseScenario):
+    """One layer of ``workload`` split ``tp_size`` ways: compute against the exchange on each link."""
+    workload: Workload
+    tp_size: int
+    tokens: int
+    accelerator: HardwareNode
+    precision: str = "fp16_dense"
+    local_efficiency: float
+    links: Dict[str, Quantity]
+    collectives_per_layer: int = 2
+
+    @property
+    def result(self):
+        from .solvers import TensorParallelLayerModel
+        return TensorParallelLayerModel().solve(
+            self.workload, self.tp_size, self.tokens, self.accelerator.compute.precision_flops[self.precision],
+            self.local_efficiency, self.links, self.collectives_per_layer)
+
+
+class RingAttentionScenario(BaseScenario):
+    """Ring attention on ``accelerator``: the smallest chunk that hides each K/V tile, per link."""
+    accelerator: HardwareNode
+    precision: str = "fp16_dense"
+    local_efficiency: float
+    element_bytes: Quantity
+    links: Dict[str, Quantity]
+
+    @property
+    def min_chunk_tokens(self) -> Dict[str, float]:
+        from ..physics.communication import calc_ring_attention_min_chunk
+        rate = self.accelerator.compute.precision_flops[self.precision] * self.local_efficiency
+        elem = self.element_bytes.to("byte").magnitude
+        return {k: calc_ring_attention_min_chunk(elem, rate, bw) for k, bw in self.links.items()}
+
+
+class SyncStrategyScenario(BaseScenario):
+    """Data-parallel training to a fixed target under one synchronization strategy.
+
+    Iterations to the target and the communication share are stated inputs:
+    each iteration costs the one-worker iteration time times ``1 + overhead``,
+    so speedup over one worker is ``base / (iterations x (1 + overhead))``.
+    """
+    workers: int
+    per_worker_batch: int
+    iterations: int
+    communication_overhead: float
+    base_iterations: int             # one worker, same target
+    base_iteration_time: Quantity
+    device_hour_rate: Quantity
+    staleness: int = 0               # SSP bound; 0 is BSP
+
+    @property
+    def global_batch(self) -> int:
+        return self.workers * self.per_worker_batch
+
+    @property
+    def ideal_iterations(self) -> float:
+        return self.base_iterations / self.workers
+
+    @property
+    def iteration_time(self) -> Quantity:
+        return self.base_iteration_time * (1 + self.communication_overhead)
+
+    @property
+    def speedup(self) -> float:
+        return self.base_iterations / (self.iterations * (1 + self.communication_overhead))
+
+    @property
+    def sample_efficiency(self) -> float:
+        return self.ideal_iterations / self.iterations
+
+    @property
+    def cost(self) -> float:
+        """Allocated device cost of the run, in dollars."""
+        hours = (self.iterations * self.iteration_time * self.workers).to("hour")
+        return (hours * self.device_hour_rate).to("USD").magnitude
+
+    @property
+    def stale_lr_factor(self) -> float:
+        """Learning-rate damping for stale updates, ``1 / sqrt(1 + s)``."""
+        return 1 / (1 + self.staleness) ** 0.5
+
+
+class CriticalBatchScenario(BaseScenario):
+    """A pilot gradient-noise trace and a proposed batch: where the critical batch falls."""
+    gradient_noise_trace: float      # tr(Sigma), per-sample gradient covariance
+    gradient_norm_sq: float          # squared norm of the true gradient
+    local_batch: int
+    accumulation_steps: int
+    devices: int
+
+    @property
+    def critical_batch(self) -> float:
+        return self.gradient_noise_trace / self.gradient_norm_sq
+
+    @property
+    def per_device_samples(self) -> int:
+        return self.local_batch * self.accumulation_steps
+
+    @property
+    def global_batch(self) -> int:
+        return self.devices * self.per_device_samples
+
+    @property
+    def batch_ratio(self) -> float:
+        return self.global_batch / self.critical_batch
+
+    @property
+    def crossover_devices(self) -> float:
+        return self.critical_batch / self.per_device_samples
+
+
+class AlignmentMemoryScenario(BaseScenario):
+    """PPO and DPO alignment of ``policy`` with ``critic``-sized reward and value models."""
+    policy: Workload
+    critic: Workload
+    tp_size: int
+    pp_size: int
+    dp_size: int = 1
+    rollout_sequences: int
+    rollout_tokens: int
+    device_memory: Optional[Quantity] = None
+
+    @property
+    def result(self):
+        from .solvers import AlignmentMemoryModel
+        return AlignmentMemoryModel().solve(self.policy, self.critic, self.tp_size, self.pp_size,
+                                            self.rollout_sequences, self.rollout_tokens, self.device_memory)
+
+
+class ScalingSeriesScenario(BaseScenario):
+    """Named same-round series of a benchmark table and their scaling efficiencies."""
+    series_name: str
+    specs: List  # (label, (round, submitter prefix, benchmark, accelerator substring))
+
+    @property
+    def result(self):
+        from ..literature.registry import Literature
+        from .solvers import ScalingSeriesModel
+        rows = getattr(Literature.Series, self.series_name).entries
+        return ScalingSeriesModel().solve(rows, self.specs)
+
+
+class ResidualShareScenario(BaseScenario):
+    """A residual equal to ``residual`` of the one-device step, on ``devices`` devices.
+
+    Compute divides by N and the residual does not, so the residual's share of
+    the distributed step, ``r / ((1 - r)/N + r)``, is far larger than ``r``:
+    an observed share must not be read as the serial fraction.
+    """
+    residual: float
+    devices: int
+
+    @property
+    def step_fraction(self) -> float:
+        """Distributed step time in units of the one-device step."""
+        return (1 - self.residual) / self.devices + self.residual
+
+    @property
+    def residual_share(self) -> float:
+        return self.residual / self.step_fraction
+
+    @property
+    def speedup(self) -> float:
+        from ..physics.performance import calc_strong_scaling_speedup
+        return calc_strong_scaling_speedup(self.devices, self.residual)
+
+
+class MemoryWallScenario(BaseScenario):
+    """Training-state demand of notable models against one accelerator's memory, by year."""
+    models: List                     # (label, name in Literature.Series.NotableModels)
+    accelerators: List[str]          # Hardware.Cloud keys
+    bytes_per_param: Quantity
+
+    @property
+    def result(self):
+        from .solvers import MemoryWallModel
+        return MemoryWallModel().solve(self.models, self.accelerators, self.bytes_per_param)

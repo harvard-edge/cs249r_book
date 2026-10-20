@@ -106,6 +106,22 @@ def calc_ring_allreduce_latency_time(n_gpus, latency_s):
     return (calc_ring_allreduce_latency_steps(n_gpus) * alpha).to(ureg.second)
 
 
+def calc_ring_attention_min_chunk(element_bytes, sustained_flops, link_bandwidth):
+    """Smallest per-device sequence chunk whose attention compute hides the next K/V tile.
+
+    In ring attention each device computes attention for its ``n``-token query
+    chunk against one arriving key/value tile while the next tile crosses the
+    link. Per tile, compute grows as ``n^2 d`` and transfer as ``n d s`` bytes
+    (keys and values at ``s`` bytes per element), so the transfer hides when
+    ``n >= s R / (2 B)`` for sustained rate ``R`` and link bandwidth ``B``
+    (Liu et al. 2023). Returns ``n`` in tokens. Added 2026-10-20.
+    """
+    rate = _ensure_unit(sustained_flops, ureg.flop / ureg.second, "sustained_flops")
+    bw = _ensure_unit(link_bandwidth, ureg.byte / ureg.second, "link_bandwidth")
+    validate_positive(bw, "link_bandwidth")
+    return (float(element_bytes) * rate / (2 * bw)).to(ureg.flop / ureg.byte).magnitude
+
+
 def calc_alpha_beta_crossover(alpha_s, bandwidth_bytes_s):
     """Crossover size for the α-β model where α = n/β."""
 

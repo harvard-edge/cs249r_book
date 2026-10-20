@@ -35,6 +35,7 @@ from .memory import (
 )
 from .communication import (
     calc_alpha_beta_crossover,
+    calc_ring_attention_min_chunk,
     calc_ring_collective_data_factor,
     calc_bisection_bandwidth,
     calc_ring_allreduce_data_factor,
@@ -187,6 +188,7 @@ __all__ = [
     "calc_ring_allreduce_latency_steps",
     "calc_ring_allreduce_latency_time",
     "calc_alpha_beta_crossover",
+    "calc_ring_attention_min_chunk",
     "calc_oversubscription_effect",
     "calc_bisection_bandwidth",
     "calc_hop_latency",
