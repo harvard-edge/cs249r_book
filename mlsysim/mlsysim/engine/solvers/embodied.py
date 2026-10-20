@@ -12,6 +12,7 @@ import math
 from typing import Optional
 
 from ..results import StoppingBudgetResult, TakeoverBudgetResult, TractionLossResult
+from ..results import OnsetTrialResult, RailHoldUpResult, StoppingBudgetResult, TractionLossResult
 from ...core.types import Quantity
 from ...core.units import ureg
 from ...physics.drivetrain import calc_required_friction, calc_traction_deceleration_limit
@@ -248,3 +249,58 @@ class TakeoverBudgetModel(ForwardModel):
             out.update(configured_timeout=configured_timeout.to(ms), timeout=t_cfg, timeout_ticks=ticks(t_cfg),
                        timeout_after_admission=t_cfg_da, timeout_ticks_after_admission=ticks(t_cfg_da))
         return TakeoverBudgetResult(**out)
+class OnsetTrialModel(ForwardModel):
+    """
+    One stopping trace scored against a precommitted oracle (added 2026-10-20).
+
+    The oracle bounds powered-deceleration onset at ``onset_bound`` after the
+    reference event and travel to rest at ``travel_bound`` (onset-bound travel,
+    the resident stop, and the tracking inset). A trace that begins braking
+    at ``onset`` travels ``speed * onset`` plus the same resident stop. Each
+    predicate keeps its own signed margin; a combined score needs scales fixed
+    in advance, here the bounds themselves. The trace passes only when both
+    margins are non-negative.
+    """
+    requires = ("onset",)
+    produces = OnsetTrialResult
+
+    def solve(self, onset_bound: Quantity, onset: Quantity, speed: Quantity, resident_stop: Quantity,
+              travel_bound: Quantity, stop_time: Quantity) -> OnsetTrialResult:
+        ms, mm = ureg.millisecond, ureg.millimeter
+        onset_margin = (onset_bound - onset).to(ms)
+        travel = (speed * onset + resident_stop).to(mm)
+        distance_margin = (travel_bound - travel).to(mm)
+        return OnsetTrialResult(
+            onset_bound=onset_bound.to(ms), onset=onset.to(ms), onset_margin=onset_margin,
+            extra_travel=(speed * (onset - onset_bound)).to(mm), travel=travel,
+            travel_bound=travel_bound.to(mm), distance_margin=distance_margin,
+            onset_margin_normalized=_ratio(onset_margin, onset_bound),
+            distance_margin_normalized=_ratio(distance_margin, travel_bound),
+            rest_time=(onset + stop_time).to(ms), rest_time_bound=(onset_bound + stop_time).to(ms),
+            passes=onset_margin.magnitude >= 0 and distance_margin.magnitude >= 0,
+        )
+
+
+class RailHoldUpModel(ForwardModel):
+    """
+    A capacitor-backed rail that must carry the protective response from the
+    loss-of-feed flag until the holding brakes are set (added 2026-10-20).
+
+    ``t_set = flag_path + (v/a + a/j) + t_engage``: the path from the flag to
+    powered-deceleration onset, the S-curve stop from the entry speed ``v``
+    (``calc_scurve_stop_time``), and the holding brake's engagement. The
+    margin is the hold-up time less ``t_set``.
+    """
+    requires = ("holdup",)
+    produces = RailHoldUpResult
+
+    def solve(self, flag_path: Quantity, speed: Quantity, deceleration: Quantity, jerk: Quantity,
+              engage: Quantity, holdup: Quantity) -> RailHoldUpResult:
+        ms = ureg.millisecond
+        stop = calc_scurve_stop_time(speed, deceleration, jerk).to(ms)
+        t_set = (flag_path + stop + engage).to(ms)
+        return RailHoldUpResult(
+            flag_path=flag_path.to(ms), speed=speed, velocity_term=(speed / deceleration).to(ms),
+            jerk_term=(deceleration / jerk).to(ms), stop_time=stop, engage=engage.to(ms),
+            flag_to_set=t_set, holdup=holdup, margin=(holdup - t_set).to(ms),
+        )

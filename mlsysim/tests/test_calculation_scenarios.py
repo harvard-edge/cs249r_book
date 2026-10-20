@@ -4968,3 +4968,67 @@ def test_supervisory_intervention_takeover_budgets():
     assert pct(50) == pytest.approx(site.t_takeover_driving_p50.m_as("s"))
     assert pct(90) == pytest.approx(site.t_takeover_driving_p90.m_as("s"))
     assert pct(99) == pytest.approx(site.t_takeover_driving_p99.m_as("s"))
+def test_rack_end_fault_injection_oracles():
+    """Renewal- and flag-referenced oracles, onset trials, drive bus, and rail hold-up (added 2026-10-20)."""
+    r = Scenarios.WarehouseRenewalReferencedStop.result
+    assert Scenarios.WarehouseRenewalReferencedStop.delay.m_as("ms") == pytest.approx(82.0)
+    assert r.required_distance.m_as("mm") == pytest.approx(751.9125)
+    assert r.delay_travel.m_as("mm") == pytest.approx(106.6)
+    assert r.stop_distance.m_as("mm") == pytest.approx(711.9125)
+    rr = Scenarios.WarehouseRenewalReferencedStopRestricted.result
+    assert rr.required_distance.m_as("mm") == pytest.approx(629.6253648, rel=1e-8)
+    assert Scenarios.WarehouseFinishedStopRestricted.result.required_distance.m_as("mm") == pytest.approx(831.2253648, rel=1e-8)
+    assert Scenarios.WarehouseFlagReferencedStop.result.required_distance.m_as("mm") == pytest.approx(673.9125)
+    late = Scenarios.WarehouseRenewalStopLateOnsetTrial
+    t = late.result
+    assert t.onset_margin.m_as("ms") == pytest.approx(-30.0) and t.extra_travel.m_as("mm") == pytest.approx(39.0)
+    assert t.travel.m_as("mm") == pytest.approx(750.9125) and t.distance_margin.m_as("mm") == pytest.approx(1.0)
+    assert t.onset_margin_normalized == pytest.approx(-30 / 82) and not t.passes
+    assert t.rest_time_bound.m_as("ms") == pytest.approx(1013.25)
+    assert late.probe_at.m_as("ms") == pytest.approx(65.0)
+    c = Scenarios.WarehouseRenewalStopNinetyMsOnsetTrial.result
+    assert c.onset_margin.m_as("ms") == pytest.approx(-8.0) and c.extra_travel.m_as("mm") == pytest.approx(10.4)
+    h = Scenarios.WarehousePermissionRailHoldUp.result
+    assert h.flag_path.m_as("ms") == pytest.approx(22.0)
+    assert h.stop_time.m_as("ms") == pytest.approx(1211.4328579, rel=1e-8)
+    assert h.flag_to_set.m_as("ms") == pytest.approx(1313.4328579, rel=1e-8)
+    assert h.margin.m_as("ms") == pytest.approx(686.5671421, rel=1e-8)
+    b = Scenarios.WarehouseDriveBusStop.result
+    assert b.crossing_resistance.m_as("mohm") == pytest.approx(128.5714286, rel=1e-8)
+
+
+def test_fault_campaign_statistics():
+    """Diagnostic-coverage injections and the queue-delay rare event (added 2026-10-20)."""
+    import math
+    c = Scenarios.WarehouseDiagnosticCoverageHundredFit.result
+    assert c.raw_rate == pytest.approx(9800) and c.coverage == pytest.approx(1 - 100 / 9800)
+    assert c.injections == 293 and c.injections_exact == pytest.approx(292.0813362, rel=1e-8)
+    assert c.rule_of_three == pytest.approx(294)
+    assert round(c.allocation["gate drivers"]) == 144 and round(c.allocation["compute"]) == 30
+    assert Scenarios.WarehouseDiagnosticCoverageTenFit.result.injections == 2935
+    q = Scenarios.WarehouseQueueDelaySpareExhaustion
+    assert q.failure_threshold.m_as("ms") == pytest.approx(100.775)
+    r = q.result
+    assert r.failure_probability == pytest.approx(1.7652032e-9, rel=1e-6)
+    assert r.n_levels == 4 and r.proposal_mean.m_as("ms") == pytest.approx(105.775)
+    assert math.ceil(r.importance_runs) == 2709 and round(r.effective_sample_size) == 250
+    assert r.zero_failure_runs == 1697103349 and r.monte_carlo_runs == pytest.approx(5.66507e10, rel=1e-5)
+    assert 0 <= r.proposal_penalty < 1e-3 and r.proposal_failure_share == pytest.approx(0.3856867, rel=1e-6)
+    p = Scenarios.WarehouseQueueDelayChargedSpareExhaustion.result.failure_probability
+    assert p == pytest.approx(math.exp(-37.46428 / 5), rel=1e-9)
+
+
+def test_verification_literature():
+    """DriveFI, patch, RoboPAIR, VNN-COMP 2025, O'Kelly, Wang, and Bookout entries (added 2026-10-20)."""
+    from mlsysim import Literature
+    s = Literature.VerificationStudies
+    assert s.DriveFiFaultListSize == 98400 and s.DriveFiExhaustiveDays == 615 and s.DriveFiCriticalFaults == 561
+    assert s.DriveFiHazardScenes == 68 and s.DriveFiScenes == 7200 and s.DriveFiGpuSdcPct == pytest.approx(1.93)
+    assert Literature.RobustnessStudies.RoboPairGo2DirectCompliant == 3
+    assert Literature.IncidentReports.ToyotaTinWhiskerShortOhm == 248
+    vnn = Literature.VnnComp2025ScoredBenchmarks
+    assert len(vnn) == 25 and max(e["params_high"] for e in vnn.entries) == 138e6
+    ok = Literature.OKelly2018RareEventTable1
+    assert len(ok) == 12 and ok.where(method="Cross-entropy", gamma=0.14)[0]["std_error"] == pytest.approx(8.88e-6)
+    w = Literature.Wang2025OpenVlaLiberoUntargeted
+    assert sum(e["benign_failure_pct"] for e in w.entries) / 4 == pytest.approx(23.5)

@@ -17348,3 +17348,89 @@ class DisengagementRecordScenario(BaseScenario):
     def miles_growth(self) -> float:
         """Autonomous miles in the swing's second year over its first."""
         return self.row(self.swing_to)["autonomous_miles"] / self.row(self.swing_from)["autonomous_miles"]
+# --- Fault-injection oracles and campaign statistics (added 2026-10-20) ------
+
+class OnsetTrialScenario(BaseScenario):
+    """A stopping trace that begins braking at ``onset`` after the reference event of ``oracle``.
+
+    ``oracle`` is a StoppingBudgetScenario whose delay is the onset bound (no
+    site allowances), with a jerk bound and a tracking inset: its required
+    distance is the travel bound, and its delay travel plus S-curve stop is
+    the travel of an on-time trace.
+    """
+    oracle: StoppingBudgetScenario
+    onset: Quantity
+    lease: Optional[Quantity] = None               # the lease the trial lets expire
+    probe_after_expiry: Optional[Quantity] = None  # a refused renewal replayed this long after expiry
+
+    @property
+    def probe_at(self) -> Optional[Quantity]:
+        """When the replayed renewal arrives, after the last valid renewal."""
+        if self.lease is None or self.probe_after_expiry is None:
+            return None
+        return (self.lease + self.probe_after_expiry).to("ms")
+
+    @property
+    def result(self):
+        from .solvers import OnsetTrialModel
+        o = self.oracle.result
+        return OnsetTrialModel().solve(self.oracle.delay, self.onset, self.oracle.speed,
+                                       (o.braking_travel + o.jerk_ramp_travel).to("mm"),
+                                       o.required_distance, o.stop_time)
+
+
+class RailHoldUpScenario(BaseScenario):
+    """``site.machine``'s backed permission rail, its feed lost during the longest admitted stop.
+
+    The longest stop starts at the speed ceiling of ``stop`` (a finished
+    StoppingBudgetScenario); the flag path is one tick, one bus cycle, and the
+    brake onset of ``site``; engagement and hold-up are the machine's.
+    """
+    site: Any                                    # EmbodiedSiteScenario
+    stop: StoppingBudgetScenario
+
+    @property
+    def flag_path(self) -> Quantity:
+        s = self.site
+        return (s.t_tick + s.t_bus + s.t_brake_onset).to("ms")
+
+    @property
+    def result(self):
+        from .solvers import RailHoldUpModel
+        rm = self.site.machine
+        return RailHoldUpModel().solve(self.flag_path, self.stop.result.speed_ceiling, self.stop.a_brake,
+                                       self.stop.jerk, rm.spring_brake_engage_max, rm.permission_rail_holdup)
+
+
+class ExponentialRareEventScenario(BaseScenario):
+    """An exponential delay of ``mean`` that fails past the delay spare of ``budget`` (or ``threshold``)."""
+    mean: Quantity
+    elite_share: float
+    relative_error: float
+    confidence: float
+    budget: Optional[StoppingBudgetScenario] = None   # threshold = its delay_spare
+    threshold: Optional[Quantity] = None
+
+    @property
+    def failure_threshold(self) -> Quantity:
+        if self.threshold is not None:
+            return self.threshold
+        return self.budget.result.delay_spare.to("ms")
+
+    @property
+    def result(self):
+        from .solvers import ExponentialRareEventModel
+        return ExponentialRareEventModel().solve(self.failure_threshold, self.mean, self.elite_share,
+                                                 self.relative_error, self.confidence)
+
+
+class DiagnosticCoverageScenario(BaseScenario):
+    """Fault-rate ``strata`` (FIT) to be left at most ``target`` FIT unmitigated, shown at ``confidence``."""
+    strata: Dict[str, float]
+    target: float
+    confidence: float
+
+    @property
+    def result(self):
+        from .solvers import DiagnosticCoverageModel
+        return DiagnosticCoverageModel().solve(self.strata, self.target, self.confidence)

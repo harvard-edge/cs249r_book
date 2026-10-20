@@ -1603,6 +1603,7 @@ class DriveBusResult(SolverResult):
     stop_time: Quantity
     peak_power: Quantity
     resistor_max: Quantity
+    crossing_resistance: Optional[Quantity] = None  # source resistance at which the step reaches lockout (added 2026-10-20)
 
 
 class ZeroFailureResult(SolverResult):
@@ -4272,3 +4273,65 @@ class CommandAuthenticationResult(SolverResult):
 __all__ += [
     "TakeoverBudgetResult", "TakeoverLadderResult", "BrakingBlendResult", "CommandAuthenticationResult",
 ]
+# --- Fault-injection oracles and campaign statistics (added 2026-10-20) -----
+
+class OnsetTrialResult(SolverResult):
+    """Result from OnsetTrialModel: one stopping trace scored against a precommitted onset and travel oracle."""
+    onset_bound: Quantity                # oracle: latest powered-deceleration onset after the reference event
+    onset: Quantity                      # measured onset after the same event
+    onset_margin: Quantity               # onset_bound - onset (negative fails)
+    extra_travel: Quantity               # speed * (onset - onset_bound): travel the late onset adds
+    travel: Quantity                     # speed * onset + resident stop
+    travel_bound: Quantity               # oracle: onset-bound travel + resident stop + tracking inset
+    distance_margin: Quantity            # travel_bound - travel (negative fails)
+    onset_margin_normalized: float       # onset_margin / onset_bound
+    distance_margin_normalized: float    # distance_margin / travel_bound
+    rest_time: Quantity                  # onset + stop time
+    rest_time_bound: Quantity            # onset_bound + stop time
+    passes: bool                         # both margins non-negative
+
+
+class RailHoldUpResult(SolverResult):
+    """Result from RailHoldUpModel: a backed rail's hold-up against flag-to-brakes-set at the longest stop."""
+    flag_path: Quantity                  # flag to powered-deceleration onset
+    speed: Quantity                      # entry speed of the longest admitted stop
+    velocity_term: Quantity              # v / a
+    jerk_term: Quantity                  # a / j
+    stop_time: Quantity                  # S-curve stop time, v / a + a / j
+    engage: Quantity                     # holding-brake engagement after rest
+    flag_to_set: Quantity                # flag path + stop time + engagement
+    holdup: Quantity
+    margin: Quantity                     # holdup - flag_to_set
+
+
+class ExponentialRareEventResult(SolverResult):
+    """Result from ExponentialRareEventModel: estimating one rare exponential tail by plain and weighted sampling."""
+    threshold: Quantity
+    failure_probability: float           # exp(-threshold / mean)
+    monte_carlo_runs: float              # (1 - p) / (p r^2)
+    zero_failure_runs: int               # clean runs that bound p at the stated confidence
+    levels: list                         # cross-entropy levels (Quantity each)
+    n_levels: int
+    proposal_mean: Quantity              # final cross-entropy proposal mean
+    proposal_failure_share: float        # share of proposal draws past the threshold
+    relative_variance: float             # per-draw relative variance of the weighted estimate
+    importance_runs: float               # relative_variance / r^2
+    ess_per_draw: float
+    effective_sample_size: float         # importance_runs * ess_per_draw
+    optimal_proposal_mean: Quantity
+    proposal_penalty: float              # relative variance over the optimal proposal's, less one
+    speedup: float                       # monte_carlo_runs / importance_runs
+
+
+class DiagnosticCoverageResult(SolverResult):
+    """Result from DiagnosticCoverageModel: the coverage a residual-rate target needs and the zero-miss injections that show it."""
+    raw_rate: float                      # FIT, sum of the strata
+    coverage: float                      # 1 - target / raw_rate
+    injections_exact: float              # ln(1 - C) / ln(coverage)
+    injections: int                      # the ceiling of injections_exact
+    rule_of_three: float                 # 3 / (1 - coverage)
+    shares: dict                         # stratum -> share of the raw rate
+    allocation: dict                     # stratum -> injections in proportion to its rate
+
+
+__all__ += ["OnsetTrialResult", "RailHoldUpResult", "ExponentialRareEventResult", "DiagnosticCoverageResult"]
