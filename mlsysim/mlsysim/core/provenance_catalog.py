@@ -2171,7 +2171,22 @@ HOPPER_MICROBENCHMARK_LATENCY = _lit(
     notes=(
         "Table IV (H800 PCIe, Hopper): shared memory 29.0 cycles, L1 40.7, L2 263.0, "
         "global 478.8 cycles; max clock 1,755 MHz (Table III). Nanosecond values are "
-        "derived as cycles / 1.755 GHz."
+        "derived as cycles / 1.755 GHz. Re-verified 2026-10-20 from the arXiv v1 PDF: "
+        "Table IV row 'Global 541.5 466.3 478.8' (RTX4090, A100, H800); Sec. III-A-4 "
+        "allocates 'a global memory that exceeds the L2 size' for the latency test. "
+        "The H800 PCIe uses HBM2e (Table III)."
+    ),
+)
+DEAN_NUMBERS_EVERYONE_SHOULD_KNOW = _lit(
+    "prov:dean-ladis-2009-numbers",
+    "Dean (2009), \"Designs, Lessons and Advice from Building Large Distributed Systems\", "
+    "LADIS 2009 keynote, slide \"Numbers Everyone Should Know\"",
+    url="https://www.cs.cornell.edu/projects/ladis2009/talks/dean-keynote-ladis2009.pdf",
+    verified="2026-10-20",
+    notes=(
+        "Quoted from the slide: 'Main memory reference 100 ns' (same slide: 'L1 cache "
+        "reference 0.5 ns', 'L2 cache reference 7 ns'). A CPU main-memory (host DRAM) "
+        "reference; an order-of-magnitude figure, not a per-part measurement."
     ),
 )
 LITHOGRAPHY_RETICLE_FIELD = _conv(

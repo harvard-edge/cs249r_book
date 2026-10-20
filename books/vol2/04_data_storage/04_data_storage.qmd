@@ -323,11 +323,14 @@ No single storage device can hold a petabyte-scale training corpus, absorb multi
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @tbl-storage-hierarchy-merged and bandwidth cliffs
 from mlsysim import Hardware
-from mlsysim.fmt import fmt_bandwidth, fmt_time
+from mlsysim.fmt import fmt_bandwidth, fmt_time, fmt_multiple, check
+from mlsysim.core.units import nanosecond
 
 class StorageHierarchyTable:
     # ┌── 1. LOAD ─────────────────────────────────────────
     nvme_latency = Hardware.Tech.Storage.NvmeGen4.latency
+    hbm_latency = Hardware.Tech.Memory.HopperGlobalMemory.latency  # measured Hopper HBM load latency
+    host_dram_latency = Hardware.Tech.Memory.HostDram_Latency2009.latency  # CPU main-memory reference
     host_dram_bw = Hardware.Tech.Storage.HostDram.bandwidth
     nvme_bw = Hardware.Tech.Storage.NvmeGen4.bandwidth
     pfs_bw = Systems.Storage.PfsOneTbPerSecond.bandwidth
@@ -337,6 +340,12 @@ class StorageHierarchyTable:
     pfs_cost = Infrastructure.Pricing.Storage.ParallelFileSystemPerTbMonth.rate
     object_cost = Infrastructure.Pricing.Storage.S3StandardLowPerTbMonth.rate
     archive_cost = Infrastructure.Pricing.Storage.GlacierStandardPerTbMonth.rate
+
+    # ┌── 2. EXECUTE ──────────────────────────────────────
+    dram_to_nvme_latency_ratio = (nvme_latency / host_dram_latency).to("").magnitude
+
+    # ┌── 3. GUARD ────────────────────────────────────────
+    check(host_dram_latency < hbm_latency < nvme_latency, "HBM is not faster to first byte than host DRAM; NVMe is slower than both.")
 
     # ┌── 4. OUTPUT ───────────────────────────────────────
     nvme_bw_low_gb_str = fmt_int(nvme_bw.to(GB / second).magnitude)  # lower bound of a "7--25 GB/s" range
@@ -350,12 +359,15 @@ class StorageHierarchyTable:
     h100_bw_tb_per_s_str = fmt_bandwidth(Hardware.Cloud.H100.memory.bandwidth, unit=TB / second, precision=2, commas=False)
     nvme_latency_us_str = fmt_time(nvme_latency, microsecond, precision=0, commas=False)
     host_dram_bw_gb_per_s_str = fmt_bandwidth(host_dram_bw, unit=GB / second, precision=0, commas=False)
+    hbm_latency_ns_str = fmt_time(round(hbm_latency.to(nanosecond).magnitude) * nanosecond, nanosecond, precision=0, commas=False)
+    host_dram_latency_ns_str = fmt_time(host_dram_latency, nanosecond, precision=0, commas=False)
+    dram_to_nvme_latency_ratio_str = fmt_multiple(dram_to_nvme_latency_ratio, precision=0, commas=True)
 ```
 
 | **Storage tier**         | **Typical capacity** |                         **Bandwidth**                          |                      **Latency**                      |                    **Illustrative cost basis**                    |
 |:-------------------------|:--------------------:|:--------------------------------------------------------------:|:-----------------------------------------------------:|:-----------------------------------------------------------------:|
-| **GPU HBM**              |        80 GB         |     `{python} StorageHierarchyTable.h100_bw_tb_per_s_str`      |                        ~100 ns                        |   `{python} StorageHierarchyTable.hbm_cost_str` acquisition cost  |
-| **Host DRAM**            |     512 GB--2 TB     |   `{python} StorageHierarchyTable.host_dram_bw_gb_per_s_str`   |                        ~100 ns                        |  `{python} StorageHierarchyTable.dram_cost_str` acquisition cost  |
+| **GPU HBM**              |        80 GB         |     `{python} StorageHierarchyTable.h100_bw_tb_per_s_str`      | ~`{python} StorageHierarchyTable.hbm_latency_ns_str` |   `{python} StorageHierarchyTable.hbm_cost_str` acquisition cost  |
+| **Host DRAM**            |     512 GB--2 TB     |   `{python} StorageHierarchyTable.host_dram_bw_gb_per_s_str`   | ~`{python} StorageHierarchyTable.host_dram_latency_ns_str` |  `{python} StorageHierarchyTable.dram_cost_str` acquisition cost  |
 | **Local NVMe SSD**       |       4--30 TB       |  `{python} StorageHierarchyTable.nvme_bw_low_gb_str`--25 GB/s  | ~`{python} StorageHierarchyTable.nvme_latency_us_str` |     `{python} StorageHierarchyTable.nvme_cost_str` provisioned    |
 | **Parallel File System** |       100+ PB        | `{python} StorageHierarchyTable.pfs_bw_tb_str`+ TB/s aggregate |                         ~1 ms                         | `{python} StorageHierarchyTable.pfs_cost_str` provisioned/service |
 | **Object Storage**       |   Very large pool    |                       100 GB/s aggregate                       |                         ~50 ms                        |      `{python} StorageHierarchyTable.object_cost_str` service     |
@@ -4356,7 +4368,7 @@ Graph-based retrieval therefore spends storage budget on index levels that keep 
 
 ## Storage Technologies That Move Tiers {#sec-storage-emerging}
 
-Today's six-tier hierarchy leaves a hundredfold latency cliff between host DRAM (~100 ns) and local NVMe (~`{python} StorageHierarchyTable.nvme_latency_us_str`), forces the host CPU to spend cycles decompressing bytes that GPUDirect Storage could otherwise DMA directly, and pauses training while synchronous checkpoints reach flash. Compute Express Link (CXL)\index{Compute Express Link!memory expansion}, the coherent capacity tier of @sec-compute-cxl, targets the DRAM-to-NVMe gap first. Seen from storage, CXL-attached memory is a "Tier 1.5," slower than host DRAM but byte-addressable, with access latencies of roughly 200 to 500 ns against the roughly `{python} StorageHierarchyTable.nvme_latency_us_str` of an NVMe read. It offers a capacity pool for the structures that the Tier 1 discussion showed competing for host DRAM. For the running example, CXL-attached memory could expand the effective host memory tier from `{python} DRAMInterconnect.node_dram_gb_str` to over 4 TB per node. That pool could hold deeper prefetch queues, embedding-table spillover, or a local shard cache as large as the `{python} StorageFuelLineContext.compressed_text_tb_str` compressed source corpus without paying NVMe access latency on every read, though it still falls short of the full `{python} StorageFuelLineContext.tokenized_text_tb_str` tokenized training copy on one node.
+Today's six-tier hierarchy leaves a `{python} StorageHierarchyTable.dram_to_nvme_latency_ratio_str` latency cliff between host DRAM (~`{python} StorageHierarchyTable.host_dram_latency_ns_str`) and local NVMe (~`{python} StorageHierarchyTable.nvme_latency_us_str`), forces the host CPU to spend cycles decompressing bytes that GPUDirect Storage could otherwise DMA directly, and pauses training while synchronous checkpoints reach flash. Compute Express Link (CXL)\index{Compute Express Link!memory expansion}, the coherent capacity tier of @sec-compute-cxl, targets the DRAM-to-NVMe gap first. Seen from storage, CXL-attached memory is a "Tier 1.5," slower than host DRAM but byte-addressable, with access latencies of roughly 200 to 500 ns against the roughly `{python} StorageHierarchyTable.nvme_latency_us_str` of an NVMe read. It offers a capacity pool for the structures that the Tier 1 discussion showed competing for host DRAM. For the running example, CXL-attached memory could expand the effective host memory tier from `{python} DRAMInterconnect.node_dram_gb_str` to over 4 TB per node. That pool could hold deeper prefetch queues, embedding-table spillover, or a local shard cache as large as the `{python} StorageFuelLineContext.compressed_text_tb_str` compressed source corpus without paying NVMe access latency on every read, though it still falls short of the full `{python} StorageFuelLineContext.tokenized_text_tb_str` tokenized training copy on one node.
 
 A different bottleneck appears when CPU-side decoding, not storage bandwidth, throttles the pipeline. The computational storage drive\index{Computational storage!SSD offload} closes that gap by embedding processing elements (field-programmable gate arrays (FPGAs)\index{FPGA!computational storage} or simple CPU cores) directly on the SSD controller, enabling decompression, filtering, or format conversion to happen at the storage device rather than consuming host CPU cycles. For ML pipelines where CPU-side decoding is the bottleneck, computational storage could eliminate the CPU from the data path entirely, complementing GDS by offloading work that direct DMA cannot address.
 
