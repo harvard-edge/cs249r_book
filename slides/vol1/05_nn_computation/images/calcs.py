@@ -265,6 +265,11 @@ v("fp16_sub_exp", s_exp, "{:.0f}", "FP16 smallest subnormal, power of ten")
 v("fp16_max", fp16_max, "{:,.0f}", "FP16 largest finite")
 v("fp32_range_exp", mantissa_exponent(fp32_max)[1], "{:.0f}", "FP32 range, power of ten (spoken)")
 v("int16_max", FORMATS.integer_max, "{:,.0f}", "INT16 largest")
+print("== Ariane 501 (Literature.IncidentReports, Lions inquiry report 1996)")
+v("ariane_irs_s", Literature.IncidentReports.Ariane501InertialReferenceFailureS, "{:.0f}",
+  "inertial reference systems fail, s after H0 (36.7 in the report)")
+v("ariane_breakup_s", Literature.IncidentReports.Ariane501BreakupS, "{:.0f}",
+  "break-up, s after the flight sequence began")
 v("grad_fp16", FORMATS.stored("fp16"), "{:.1f}", "the gradient stored in FP16")
 
 print("== Memory, training against inference (DenseNetworkModel, Adam)")
