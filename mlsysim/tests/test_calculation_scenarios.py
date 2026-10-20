@@ -3032,3 +3032,9 @@ def test_lifecycle_tco_payback_and_platform_benefit():
     assert Scenarios.TrainingOptimizationPayback.payback.to("month").magnitude == approx(1.777778)
     assert Scenarios.SharedPlatformBenefit50.benefit_cost_ratio == approx(1.25)
     assert Scenarios.SharedPlatformBenefit20.benefit_cost_ratio == approx(0.5)
+
+
+def test_llama2_70b_reference_replica_decode():
+    d = Scenarios.Llama2_70B_DecodeH100
+    assert d.workload.name == "Llama-2-70B"
+    assert d.result.memory_time.to("ms").magnitude == approx(41.79104, rel=1e-5)

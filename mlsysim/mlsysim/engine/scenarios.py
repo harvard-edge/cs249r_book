@@ -357,6 +357,12 @@ class Scenarios(Registry):
         hardware=_Hardware.Cloud.H100,
     )
 
+    Llama2_70B_DecodeH100 = Llama3_70B_DecodeH100.variant(
+        name="Llama-2 70B batch-1 decode on one H100",
+        description="The batch-1 decode scenario for the Llama-2 70B serving replica (FP16 weights).",
+        workload=_Models.Language.Llama2_70B,
+    )
+
     Llama3_70B_DecodeH100Batch64 = _st.DecodeScenario(
         name="Llama-3 70B decode at batch 64 on one H100",
         description="The batch-1 decode scenario with 64 requests sharing each weight read, "
