@@ -872,3 +872,87 @@ def test_memory_wall_residual_share_and_recompute():
     assert (n.slots, n.idle_slots, n.fill_slots, n.phase_slots) == (8, 6, 3, 4)
     a = Scenarios.Gpt3ActivationsMicrobatch4
     assert (a.forward_equivalents, a.recompute_forward_equivalents) == (approx(3), approx(4))
+# --- Single-machine iron law, Amdahl, and silent degradation (added 2026-10-20) ---
+
+def test_input_space_and_gpt3_cluster_time():
+    i = Scenarios.ImageNetInputSpace
+    assert i.elements == 150528
+    assert i.digits == 362508
+    assert i.test_examples == 50000
+    assert Scenarios.Gpt3TrainingTime1KA100.training_time.to("day").magnitude == approx(25.278)
+    assert Scenarios.Gpt3TrainingTime1KA100HigherUtilization.training_time.to("day").magnitude == approx(18.959)
+
+
+def test_iron_law_examples():
+    r = Scenarios.IronLawMemoryBoundExample.result
+    assert r.memory_time.to("ms").magnitude == approx(20)
+    assert r.compute_time.to("ms").magnitude == approx(10)
+    assert r.sequential_time.to("ms").magnitude == approx(35)
+    assert r.overlapped_time.to("ms").magnitude == approx(25)
+    assert r.upgraded_sequential_time.to("ms").magnitude == approx(25)
+    assert r.upgraded_overlapped_time.to("ms").magnitude == approx(15)
+    assert r.naive_upgraded_time.to("ms").magnitude == approx(17.5)
+    assert r.sequential_reduction == approx(0.28571)
+    c = Scenarios.IronLawComputeHeavyExample.result
+    assert c.sequential_time.to("s").magnitude == approx(11)
+    assert c.upgraded_compute_time.to("s").magnitude == approx(4)
+    assert c.upgraded_sequential_time.to("s").magnitude == approx(7)
+    assert c.naive_upgraded_time.to("s").magnitude == approx(5.5)
+
+
+def test_single_node_iron_law_terms():
+    r = Scenarios.ResNet50Batch64StepH100
+    assert r.result.latency_memory.to("ms").magnitude == approx(0.11310)
+    assert r.result.latency_compute.to("ms").magnitude == approx(1.0613)
+    assert r.result.latency_overhead.to("ms").magnitude == approx(0.51)
+    assert r.result.latency.to("ms").magnitude == approx(1.5713)
+    assert r.memory_traffic.to("GB").magnitude == approx(0.37888)
+    assert r.iron_law.sequential_reduction == approx(0.033573)
+    g = Scenarios.Gpt2XlDecodeStepH100
+    assert g.result.latency_memory.to("ms").magnitude == approx(0.98507)
+    assert g.result.latency_compute.to("ms").magnitude == approx(0.0060667)
+    assert g.memory_traffic.to("GB").magnitude == approx(3.3)
+    assert g.result.arithmetic_intensity.magnitude == approx(0.90909)
+    assert g.iron_law.upgraded_sequential_time.to("ms").magnitude == approx(0.98860)
+    assert g.iron_law.sequential_reduction == approx(0.33254)
+
+
+def test_amdahl_request_path():
+    a = Scenarios.ModelSpeedupRequestPath.result
+    assert a.total_time.to("ms").magnitude == approx(130)
+    assert a.upgraded_total_time.to("ms").magnitude == approx(100)
+    assert a.untouched_time.to("ms").magnitude == approx(85)
+    assert a.overall_speedup == approx(1.3)
+    assert a.end_to_end_reduction == approx(0.23077)
+    assert a.stage_reduction == approx(0.66667)
+    assert a.stage_fraction == approx(0.34615)
+    assert a.speedup_bound == approx(1.5294)
+
+
+def test_recall_shift_and_unit_skew():
+    p = Scenarios.PedestrianRecallWinterShift
+    assert p.miss_rate_before == approx(0.05)
+    assert p.miss_rate_after == approx(0.15)
+    assert p.miss_rate_ratio == approx(3.0)
+    k = Scenarios.AccountAgeUnitSkew
+    assert k.serving_value.to("s").magnitude == approx(35596800)
+    assert k.skew_ratio == approx(86400)
+
+
+def test_measured_silent_degradation():
+    r = Scenarios.ImageNetV2Shift.result
+    assert r.model_count == 67
+    assert r.baseline_count == 3
+    assert (r.gap_min, r.gap_max) == (approx(6.2), approx(13.6))
+    assert (r.network_gap_min, r.network_gap_max) == (approx(10.3), approx(13.6))
+    assert r.mean_gap == approx(11.824)
+    assert r.slope == approx(0.96763)
+    assert r.intercept == approx(-9.4523)
+    g = Scenarios.GoogleFluTrendsDrift.result
+    assert g.season_ratios["11-12"] == approx(1.2674)
+    assert g.season_ratios["12-13"] == approx(1.6572)
+    assert g.stable_max_deviation == approx(0.13247)
+    assert g.peak_proxy == approx(10.555)
+    assert g.peak_reference == approx(6.0608)
+    assert g.peak_ratio == approx(1.7415)
+    assert g.max_week_ratio == approx(2.3398)

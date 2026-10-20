@@ -47,6 +47,10 @@ from .model_call import (CheckerPosteriorModel, ContextAdmissionModel, ModelCall
 from .trends import DomainComputeGapModel, MemoryWallModel, ScalingSeriesModel, TrainingGrowthModel
 from .parallelism import (AlignmentMemoryModel, DataParallelScaleOutModel, ParallelLayoutModel,
                           TensorParallelLayerModel, ZeroShardingModel)
+from .trends import TrainingGrowthModel
+# Single-machine iron law, Amdahl, and silent-degradation solvers (added 2026-10-20)
+from .performance import AmdahlModel, IronLawModel
+from .quality import ProxyDriftModel, ShiftedTestSetModel
 from .training import CheckpointModel, ScalingModel, TrainingMemoryModel, TrainingRunModel, TrainingStateModel
 
 __all__ = [
@@ -88,6 +92,11 @@ __all__ = [
     "DataParallelScaleOutModel",
     "TensorParallelLayerModel",
     "AlignmentMemoryModel",
+    # Single-machine iron law, Amdahl, and silent-degradation solvers (added 2026-10-20)
+    "IronLawModel",
+    "AmdahlModel",
+    "ShiftedTestSetModel",
+    "ProxyDriftModel",
     "StorageFootprintModel",
     "TieredCheckpointModel",
     "CheckpointStormModel",

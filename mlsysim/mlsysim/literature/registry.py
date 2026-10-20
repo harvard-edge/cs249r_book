@@ -36,6 +36,9 @@ IncidentReports = _load("incident_reports", "IncidentReports", "Values reported 
 # Model calls and agent trajectories (added 2026-10-20)
 ServingIncidents = _load("serving_incidents", "ServingIncidents", "Reported production serving-incident figures (Anthropic 2025 postmortem).")
 SelfCorrection = _load("self_correction", "SelfCorrection", "Intrinsic self-correction results (Huang et al. 2024, GPT-4).")
+# Added 2026-10-20: benchmark error rates and documented accuracy failures.
+PredictionQuality = _load("prediction_quality", "PredictionQuality", "Cited prediction-quality results (ILSVRC-2012 errors, Google Flu Trends misses).")
+GamePlaying = _load("game_playing", "GamePlaying", "Cited results of landmark game-playing systems (Deep Blue, AlphaGo Zero).")
 
 
 # ---------------------------------------------------------------------------
@@ -304,6 +307,8 @@ class Literature(Registry):
     ServingIncidents = ServingIncidents
     SelfCorrection = SelfCorrection
     LlmInferenceTraceCode2023 = _series.LlmInferenceTraceCode2023
+    PredictionQuality = PredictionQuality  # added 2026-10-20
+    GamePlaying = GamePlaying  # added 2026-10-20
     ComputeTrend = ComputeTrend
     AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks

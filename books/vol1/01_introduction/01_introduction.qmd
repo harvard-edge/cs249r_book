@@ -180,12 +180,11 @@ Data-defined behavior is a property of machine learning; *data-centric* AI is a 
 # │
 # │ Goal: Quantify the impossibility of exhaustive testing in high-dimensional ML.
 # │ Show: The astronomical size of the image input space vs. test set coverage.
-# │ How: Calculate total possible pixel configurations for 224x224 RGB images.
+# │ How: Read the input-space scenario (Scenarios.ImageNetInputSpace).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-import math
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt_int, fmt, check, fmt_time, fmt_math
-from mlsysim.core.units import count
 
 # ┌── LEGO ───────────────────────────────────────────────
 class VerificationGap:
@@ -195,17 +194,14 @@ class VerificationGap:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    IMAGE_DIM_RESNET = Datasets.ImageNet.image_width
-    width = IMAGE_DIM_RESNET
-    height = IMAGE_DIM_RESNET
-    channels = IMAGE_CHANNELS_RGB
-    depth = COLOR_DEPTH_8BIT
-    validation_size = Datasets.ImageNet.validation_examples.to(count).magnitude
+    space = Scenarios.ImageNetInputSpace
+    depth = space.levels
+    validation_size = space.test_examples
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    total_pixels = width * height * channels
-    # Space size is depth^total_pixels. We want log10(depth^total_pixels).
-    digits = total_pixels * math.log10(depth)
+    total_pixels = space.elements
+    # Space size is depth^total_pixels; the scenario counts its decimal digits.
+    digits = space.digits
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(digits > 300_000, f"Verification gap ({digits:.0f} digits) unexpectedly small.")
@@ -542,9 +538,9 @@ Moving from faces to pedestrians or another domain meant redesigning the feature
 # │ How: Calculate top-5 error improvement over second place.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models
-from mlsysim.fmt import fmt, fmt_count, fmt_percent, fmt_memory, check
-from mlsysim.core.units import Mparam, param, GB
+from mlsysim import Models, Hardware, Literature
+from mlsysim.fmt import fmt, fmt_count, fmt_percent, fmt_memory, fmt_memory_capacity, check
+from mlsysim.core.units import Mparam, param, GB, GiB
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AlexNetBreakthrough:
@@ -555,8 +551,9 @@ class AlexNetBreakthrough:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     model = Models.Vision.AlexNet
-    alexnet_top5_error = 15.3
-    second_place_error = 26.2
+    alexnet_top5_error = float(Literature.PredictionQuality.AlexNetIlsvrc2012Top5ErrorPct)
+    second_place_error = float(Literature.PredictionQuality.Ilsvrc2012RunnerUpTop5ErrorPct)
+    vram_per_gpu = Hardware.Workstation.GTX580_3GB.memory.capacity
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     relative_improvement = (second_place_error - alexnet_top5_error) / second_place_error * 100
@@ -567,7 +564,7 @@ class AlexNetBreakthrough:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     alexnet_top5_error_pct_str = fmt_percent(alexnet_top5_error / 100, precision=1, style='prose')
-    vram_per_gpu_gb_str = fmt_memory(3 * GB, unit=GB, precision=0, commas=False)
+    vram_per_gpu_gb_str = fmt_memory_capacity(vram_per_gpu, unit=GiB, precision=0, commas=False)
     alexnet_relative_improvement_str = fmt_percent(relative_improvement / 100, precision=1, style='prose')
     alexnet_params_m_str = fmt_count(
         model.parameters,
@@ -1628,8 +1625,9 @@ Together, @eq-intro-dam-iron-law and @eq-intro-iron-law account for the physical
 # │ Context: @sec-introduction-iron-law-ml-systems-c32a, introductory example.
 # │ Goal: Show why doubling arithmetic speed does not halve total execution time.
 # │ Show: An eleven-second task becomes a seven-second task.
-# │ How: Sum hypothetical movement, computation, and overhead durations.
+# │ How: Read the iron-law scenario (Scenarios.IronLawComputeHeavyExample).
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.core.units import second
 from mlsysim.fmt import fmt_time, check
 
@@ -1637,15 +1635,15 @@ class IntroTimeBudget:
     """A sequential time budget with an isolated arithmetic speedup."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    movement = 2 * second  # hypothetical scenario
-    compute = 8 * second  # hypothetical scenario
-    overhead = 1 * second  # hypothetical scenario
-    speedup = 2  # hypothetical arithmetic-rate improvement
+    budget = Scenarios.IronLawComputeHeavyExample  # hypothetical scenario
+    speedup = budget.compute_speedup  # hypothetical arithmetic-rate improvement
 
     # ┌── 2. EXECUTE (The Compute) ──────────────────────────────────────────
-    total = movement + compute + overhead
-    improved_compute = compute / speedup
-    improved_total = movement + improved_compute + overhead
+    _r = budget.result
+    movement, compute, overhead = _r.memory_time, _r.compute_time, _r.overhead
+    total = _r.sequential_time
+    improved_compute = _r.upgraded_compute_time
+    improved_total = _r.upgraded_sequential_time
 
     # ┌── 3. GUARD (Invariants) ─────────────────────────────────────────────
     check(total == 11 * second, f"Expected 11 seconds, got {total}.")
@@ -1692,8 +1690,9 @@ Diagnosing the limiting term requires comparing the workload with the machine. A
 # │ Context: @sec-introduction-iron-law-ml-systems-c32a, local execution callout
 # │ Goal: Convert workload quantities and rates into all three iron-law terms.
 # │ Show: Sequential time, ideal overlap bound, and the effect of more bandwidth.
-# │ How: Divide hypothetical bytes and operations by supplied effective rates.
+# │ How: Read the iron-law scenario (Scenarios.IronLawMemoryBoundExample).
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.core.units import GB, GFLOP, second, ms
 from mlsysim.fmt import fmt_memory, fmt_bandwidth, fmt_flops, fmt_flop_rate, fmt_time, check
 
@@ -1701,22 +1700,23 @@ class LocalExecution:
     """Illustrative one-accelerator workload; no named hardware specification."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    data = 2 * GB  # scenario assumption: total traffic
-    bandwidth = 100 * (GB / second)  # scenario assumption: effective rate
-    operations = 1 * GFLOP  # scenario assumption: arithmetic work
-    effective_rate = 100 * (GFLOP / second)  # scenario assumption: peak times efficiency
-    overhead = 5 * ms  # scenario assumption: non-overlapped delay
-    bandwidth_gain = 2  # scenario assumption: comparison upgrade
+    task = Scenarios.IronLawMemoryBoundExample  # scenario assumptions live in the scenario
+    data = task.data_volume  # total traffic
+    bandwidth = task.bandwidth  # effective rate
+    operations = task.operations  # arithmetic work
+    effective_rate = task.effective_rate  # peak times efficiency
+    overhead = task.overhead  # non-overlapped delay
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    movement = (data / bandwidth).to(ms)
-    compute = (operations / effective_rate).to(ms)
-    sequential = movement + compute + overhead
-    overlapped_bound = max(movement, compute) + overhead
-    faster_bandwidth = bandwidth_gain * bandwidth
-    upgraded_movement = (data / faster_bandwidth).to(ms)
-    upgraded_sequential = upgraded_movement + compute + overhead
-    upgraded_bound = max(upgraded_movement, compute) + overhead
+    _r = task.result
+    movement = _r.memory_time.to(ms)
+    compute = _r.compute_time.to(ms)
+    sequential = _r.sequential_time
+    overlapped_bound = _r.overlapped_time
+    faster_bandwidth = task.upgraded_bandwidth
+    upgraded_movement = _r.upgraded_memory_time.to(ms)
+    upgraded_sequential = _r.upgraded_sequential_time
+    upgraded_bound = _r.upgraded_overlapped_time
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
     check(abs(sequential.to(ms).magnitude - 35) < 1e-9, "Sequential estimate must be 35 ms.")
@@ -1770,11 +1770,10 @@ A larger training estimate returns to @eq-intro-dam-iron-law under an explicit c
 # │
 # │ Goal: Apply the Iron Law to estimate large-scale training time.
 # │ Show: That improving efficiency from 45% to 60% saves significant accelerator days.
-# │ How: Calculate training duration using the dTime formula for GPT-3.
+# │ How: Read the cluster training-time scenarios (Scenarios.Gpt3TrainingTime1KA100*).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models, Hardware
-from mlsysim.physics import dTime
+from mlsysim import Models, Hardware, Scenarios
 from mlsysim.fmt import fmt_int, fmt, fmt_flop_rate, fmt_math, check, fmt_count, fmt_percent, fmt_time, MarkdownStr
 from mlsysim.core.units import flop, TFLOPs, day, second
 
@@ -1786,29 +1785,21 @@ class GPT3Training:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    m_gpt3 = Models.Language.GPT3
-    h_accelerator = Hardware.Cloud.A100
+    run_base = Scenarios.Gpt3TrainingTime1KA100
+    run_opt = Scenarios.Gpt3TrainingTime1KA100HigherUtilization
+    m_gpt3 = run_base.workload
+    h_accelerator = run_base.hardware
 
     ops_quantity = m_gpt3.training_ops
-    num_accelerators = Systems.Clusters.Training_1K.total_accelerators
+    num_accelerators = run_base.n_devices
     peak_flops_per_device = h_accelerator.compute.peak_flops
     peak_flops_rate = peak_flops_per_device.to(TFLOPs / second)
-    eta_base = 0.45
-    eta_opt = 0.60
+    eta_base = run_base.efficiency
+    eta_opt = run_opt.efficiency
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    days_base = dTime(
-        total_ops=ops_quantity,
-        num_devices=num_accelerators,
-        peak_flops_per_device=peak_flops_per_device,
-        efficiency_eta=eta_base,
-    ).to(day)
-    days_opt = dTime(
-        total_ops=ops_quantity,
-        num_devices=num_accelerators,
-        peak_flops_per_device=peak_flops_per_device,
-        efficiency_eta=eta_opt,
-    ).to(day)
+    days_base = run_base.training_time.to(day)
+    days_opt = run_opt.training_time.to(day)
     days_saved = days_base - days_opt
     _ops_mag = f"{ops_quantity.to(flop).magnitude:.2e}"
     ops_exp_value = int(_ops_mag.split("e+")[1])
@@ -2944,9 +2935,11 @@ A benchmark score describes performance on a stated dataset under an evaluation 
 # │
 # │ Goal: Demonstrate Amdahl's Law in a realistic inference pipeline.
 # │ Show: That a 3× component speedup yields only a marginal end-to-end gain.
-# │ How: Calculate total latency before and after local optimization.
+# │ How: Read the request-path scenario (Scenarios.ModelSpeedupRequestPath).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
+
 # ┌── LEGO ───────────────────────────────────────────────
 class AmdahlsPitfall:
     """
@@ -2955,23 +2948,23 @@ class AmdahlsPitfall:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    t_inference = 45  # ms
-    t_pre = 60  # ms
-    t_post = 25  # ms
-    s_inf = 3  # Component Speedup (3x)
+    path = Scenarios.ModelSpeedupRequestPath
+    t_inference = path.stages["model"].to("ms").magnitude
+    t_pre = path.stages["preprocess"].to("ms").magnitude
+    t_post = path.stages["postprocess"].to("ms").magnitude
+    s_inf = path.speedup  # Component Speedup (3x)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    from mlsysim.physics import calc_amdahls_speedup
+    _r = path.result
+    t_total = _r.total_time.to("ms").magnitude
+    t_inf_new = _r.upgraded_stage_time.to("ms").magnitude
+    t_total_new = _r.upgraded_total_time.to("ms").magnitude
 
-    t_total = t_pre + t_inference + t_post
-    t_inf_new = t_inference / s_inf
-    t_total_new = t_pre + t_inf_new + t_post
+    p_inf = _r.stage_fraction
+    overall_speedup = _r.overall_speedup
 
-    p_inf = t_inference / t_total
-    overall_speedup = calc_amdahls_speedup(p_inf, s_inf)
-
-    improvement_pct = (1 - (1 / overall_speedup)) * 100
-    naive_pct = (1 - (1 / s_inf)) * 100
+    improvement_pct = _r.end_to_end_reduction * 100
+    naive_pct = _r.stage_reduction * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     from mlsysim.fmt import fmt_int, check
@@ -3124,7 +3117,7 @@ class EfficiencyScaleSummary:
 # │ How: Recompute the 130 ms pipeline example from Fallacies and Pitfalls.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.physics import calc_amdahls_speedup
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt_int, fmt, check, fmt_percent
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -3132,17 +3125,19 @@ class AmdahlsPitfallRecap:
     """Summary recap of the Amdahl's Law pitfall inference pipeline."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    t_inference = 45  # ms
-    t_pre = 60  # ms
-    t_post = 25  # ms
-    s_inf = 3  # Component speedup (3x)
+    path = Scenarios.ModelSpeedupRequestPath
+    t_inference = path.stages["model"].to("ms").magnitude
+    t_pre = path.stages["preprocess"].to("ms").magnitude
+    t_post = path.stages["postprocess"].to("ms").magnitude
+    s_inf = path.speedup  # Component speedup (3x)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    t_total = t_pre + t_inference + t_post
-    t_inf_new = t_inference / s_inf
-    p_inf = t_inference / t_total
-    overall_speedup = calc_amdahls_speedup(p_inf, s_inf)
-    improvement_pct = (1 - (1 / overall_speedup)) * 100
+    _r = path.result
+    t_total = _r.total_time.to("ms").magnitude
+    t_inf_new = _r.upgraded_stage_time.to("ms").magnitude
+    p_inf = _r.stage_fraction
+    overall_speedup = _r.overall_speedup
+    improvement_pct = _r.end_to_end_reduction * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(overall_speedup <= 1.5, f"System speedup ({overall_speedup:.2f}x) is too high for a recap pitfall.")

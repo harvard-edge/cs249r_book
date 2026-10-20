@@ -2576,3 +2576,28 @@ TANG_ONEBIT_ADAM_2021 = _lit(
     notes="Abstract: communication volume reduced by up to 5x; up to 3.3x throughput for BERT-Large pretraining "
           "and 2.9x for SQuAD fine-tuning, in experiments on up to 256 GPUs.",
 )
+
+# --- Silent degradation evidence (added 2026-10-20) --------------------------
+LAZER_GOOGLE_FLU_2014 = _lit(
+    "prov:lazer-google-flu-2014",
+    "Lazer, Kennedy, King & Vespignani (2014), The Parable of Google Flu: Traps in Big Data Analysis, "
+    "Science 343(6176):1203-1205",
+    url="https://doi.org/10.1126/science.1248506",
+    verified="2026-10-20",
+    notes="GFT missed high for 100 out of 108 weeks starting with August 2011.",
+)
+CAMPBELL_DEEP_BLUE_2002 = _lit(
+    "prov:campbell-deep-blue-2002",
+    "Campbell, Hoane & Hsu (2002), Deep Blue, Artificial Intelligence 134(1-2):57-83",
+    url="https://doi.org/10.1016/S0004-3702(01)00129-1",
+    verified="2026-10-20",
+    notes="30 nodes with 16 chess chips each (480 chips); search speed 100 million positions per second "
+          "in tactical positions to about 200 million in quieter ones.",
+)
+SILVER_ALPHAGO_ZERO_2017 = _lit(
+    "prov:silver-alphago-zero-2017",
+    "Silver et al. (2017), Mastering the game of Go without human knowledge, Nature 550:354-359",
+    url="https://doi.org/10.1038/nature24270",
+    verified="2026-10-20",
+    notes="After 3 days of self-play training AlphaGo Zero defeated AlphaGo Lee by 100 games to 0.",
+)

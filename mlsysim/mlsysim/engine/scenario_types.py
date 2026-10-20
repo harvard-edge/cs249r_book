@@ -1835,3 +1835,211 @@ class MemoryWallScenario(BaseScenario):
     def result(self):
         from .solvers import MemoryWallModel
         return MemoryWallModel().solve(self.models, self.accelerators, self.bytes_per_param)
+# --- Single-machine iron law, Amdahl, and silent degradation (added 2026-10-20) ---
+
+from ..datasets.types import DatasetProfile  # noqa: E402
+
+
+class InputSpaceScenario(BaseScenario):
+    """Every possible input of ``dataset``'s image shape: ``levels`` values per channel element."""
+    dataset: DatasetProfile
+    levels: int                     # values one 8-bit channel element can take
+
+    @property
+    def elements(self) -> int:
+        """Channel elements (bytes at 8 bits) per input image."""
+        d = self.dataset
+        return d.image_width * d.image_height * d.image_channels
+
+    @property
+    def log10_inputs(self) -> float:
+        """log10 of the number of distinct inputs, levels ** elements."""
+        import math
+        return self.elements * math.log10(self.levels)
+
+    @property
+    def digits(self) -> int:
+        """Decimal digits in the number of distinct inputs."""
+        import math
+        return math.floor(self.log10_inputs) + 1
+
+    @property
+    def test_examples(self) -> int:
+        """Labeled examples the benchmark evaluates (the validation split)."""
+        return int(self.dataset.validation_examples.to("count").magnitude)
+
+
+class ClusterTrainingTimeScenario(BaseScenario):
+    """Training ``workload`` on ``n_devices`` x ``hardware`` at one end-to-end utilization (compute-bound)."""
+    workload: Workload
+    hardware: HardwareNode
+    n_devices: int
+    efficiency: float
+
+    @property
+    def training_time(self) -> Quantity:
+        from ..physics.performance import dTime
+        return dTime(total_ops=self.workload.training_ops, num_devices=self.n_devices,
+                     peak_flops_per_device=self.hardware.compute.peak_flops,
+                     efficiency_eta=self.efficiency).to("day")
+
+
+class IronLawScenario(BaseScenario):
+    """The iron law's three terms for one task, and an upgrade to the memory or compute term.
+
+    Give the memory term as ``memory_time`` or as ``data_volume`` over ``bandwidth``,
+    and the compute term as ``compute_time`` or as ``operations`` over ``effective_rate``
+    (peak times utilization).
+    """
+    overhead: Quantity
+    memory_time_stated: Optional[Quantity] = None
+    data_volume: Optional[Quantity] = None
+    bandwidth: Optional[Quantity] = None
+    compute_time_stated: Optional[Quantity] = None
+    operations: Optional[Quantity] = None
+    effective_rate: Optional[Quantity] = None
+    memory_speedup: float = 1.0
+    compute_speedup: float = 1.0
+
+    @property
+    def memory_time(self) -> Quantity:
+        if self.memory_time_stated is not None:
+            return self.memory_time_stated
+        return (self.data_volume / self.bandwidth).to(self.overhead.units)
+
+    @property
+    def compute_time(self) -> Quantity:
+        if self.compute_time_stated is not None:
+            return self.compute_time_stated
+        return (self.operations / self.effective_rate).to(self.overhead.units)
+
+    @property
+    def upgraded_bandwidth(self) -> Quantity:
+        return self.bandwidth * self.memory_speedup
+
+    @property
+    def result(self):
+        from .solvers import IronLawModel
+        return IronLawModel().solve(self.memory_time, self.compute_time, self.overhead,
+                                    self.memory_speedup, self.compute_speedup)
+
+
+class SingleNodeScenario(BaseScenario):
+    """One step of ``workload`` on one ``hardware`` (MLSysIM's roofline engine), read as iron-law terms."""
+    workload: Workload
+    hardware: HardwareNode
+    batch_size: int = 1
+    precision: str = "fp16"
+    efficiency: float = 0.5
+    memory_speedup: float = 1.0     # an upgrade applied to the memory term in ``iron_law``
+
+    @property
+    def result(self):
+        from .solvers import SingleNodeModel
+        return SingleNodeModel().solve(self.workload, self.hardware, batch_size=self.batch_size,
+                                       precision=self.precision, efficiency=self.efficiency)
+
+    @property
+    def memory_traffic(self) -> Quantity:
+        """Bytes the memory term moves: weights plus the engine's activation estimate."""
+        p = self.result
+        return (p.latency_memory * p.peak_bw_actual).to("GB")
+
+    @property
+    def iron_law(self):
+        """The engine's three terms summed (no overlap), before and after ``memory_speedup``."""
+        from .solvers import IronLawModel
+        p = self.result
+        return IronLawModel().solve(p.latency_memory, p.latency_compute, p.latency_overhead,
+                                    memory_speedup=self.memory_speedup)
+
+
+class AmdahlScenario(BaseScenario):
+    """A sequential request path whose ``stage`` is made ``speedup`` times faster."""
+    stages: Dict[str, Quantity]
+    stage: str
+    speedup: float
+
+    @property
+    def result(self):
+        from .solvers import AmdahlModel
+        return AmdahlModel().solve(self.stages, self.stage, self.speedup)
+
+
+class RecallShiftScenario(BaseScenario):
+    """A detector's recall before and after a shift in its inputs."""
+    recall_before: float
+    recall_after: float
+
+    @property
+    def miss_rate_before(self) -> float:
+        return 1 - self.recall_before
+
+    @property
+    def miss_rate_after(self) -> float:
+        return 1 - self.recall_after
+
+    @property
+    def miss_rate_ratio(self) -> float:
+        return self.miss_rate_after / self.miss_rate_before
+
+
+class FeatureUnitSkewScenario(BaseScenario):
+    """One feature value computed in one unit for training and in another for serving."""
+    value: Quantity
+    serving_unit: str
+
+    @property
+    def serving_value(self) -> Quantity:
+        return self.value.to(self.serving_unit)
+
+    @property
+    def skew_ratio(self) -> float:
+        """Serving number over training number for the same quantity."""
+        return self.serving_value.magnitude / self.value.magnitude
+
+
+class ShiftedTestSetScenario(BaseScenario):
+    """Published models scored on an original and a re-collected test set (``Literature.Series``)."""
+    series_name: str
+    original_key: str
+    new_key: str
+    gap_key: str
+    baseline_prefix: str
+
+    @property
+    def rows(self):
+        from ..literature.registry import Literature
+        return getattr(Literature.Series, self.series_name).entries
+
+    @property
+    def result(self):
+        from .solvers import ShiftedTestSetModel
+        return ShiftedTestSetModel().solve(self.rows, self.original_key, self.new_key,
+                                           self.gap_key, self.baseline_prefix)
+
+
+class ProxyDriftScenario(BaseScenario):
+    """A proxy estimate against its reference by season (``Literature.Series`` of weekly rows)."""
+    series_name: str
+    proxy_key: str
+    reference_key: str
+    first_year: int
+    last_year: int
+    start_week: int
+    end_week: int
+    first_drift_year: int
+    peak_year: int
+
+    @property
+    def rows(self):
+        from ..literature.registry import Literature
+        return getattr(Literature.Series, self.series_name).entries
+
+    @property
+    def result(self):
+        from .solvers import ProxyDriftModel
+        return ProxyDriftModel().solve(self.rows, self.proxy_key, self.reference_key, self.first_year,
+                                       self.last_year, self.start_week, self.end_week,
+                                       self.first_drift_year, self.peak_year)
+

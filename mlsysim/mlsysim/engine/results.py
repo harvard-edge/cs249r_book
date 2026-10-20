@@ -103,6 +103,11 @@ __all__ = [
     "AlignmentMemoryResult",
     "ScalingSeriesResult",
     "MemoryWallResult",
+    # Single-machine iron law, Amdahl, and silent-degradation results (added 2026-10-20)
+    "IronLawResult",
+    "AmdahlResult",
+    "ShiftedTestSetResult",
+    "ProxyDriftResult",
 ]
 
 
@@ -1291,3 +1296,56 @@ class MemoryWallResult(SolverResult):
     crossover_name: str
     crossover_year: int
     crossover_gap: float                 # crossover demand over that year's largest accelerator
+# ── Single-machine iron law, Amdahl, and silent-degradation results (added 2026-10-20) ──
+
+class IronLawResult(SolverResult):
+    """Result from IronLawModel: the three iron-law terms, summed and overlapped, before and after an upgrade."""
+    memory_time: Quantity
+    compute_time: Quantity
+    overhead: Quantity
+    sequential_time: Quantity          # memory + compute + overhead
+    overlapped_time: Quantity          # max(memory, compute) + overhead
+    upgraded_memory_time: Quantity
+    upgraded_compute_time: Quantity
+    upgraded_sequential_time: Quantity
+    upgraded_overlapped_time: Quantity
+    naive_upgraded_time: Quantity      # the sequential time divided by the whole upgrade
+    sequential_reduction: float        # fraction of the sequential time the upgrade removes
+
+
+class AmdahlResult(SolverResult):
+    """Result from AmdahlModel: one stage of a sequential pipeline made faster."""
+    total_time: Quantity
+    stage_time: Quantity
+    upgraded_stage_time: Quantity
+    upgraded_total_time: Quantity
+    untouched_time: Quantity
+    stage_fraction: float              # share of the original total spent in the stage
+    overall_speedup: float
+    end_to_end_reduction: float        # fraction of the total removed
+    stage_reduction: float             # fraction of the stage removed
+    speedup_bound: float               # overall speedup with an infinitely fast stage
+
+
+class ShiftedTestSetResult(SolverResult):
+    """Result from ShiftedTestSetModel: accuracy on an original and a re-collected test set."""
+    model_count: int
+    baseline_count: int                # models named with the baseline prefix (non-neural)
+    gap_min: float                     # percentage points, all models
+    gap_max: float
+    network_gap_min: float             # percentage points, models without the baseline prefix
+    network_gap_max: float
+    mean_gap: float
+    slope: float                       # least-squares fit: new = slope * original + intercept
+    intercept: float
+
+
+class ProxyDriftResult(SolverResult):
+    """Result from ProxyDriftModel: a proxy estimate against its reference, season by season."""
+    season_ratios: Dict[str, float]    # season label -> summed proxy / summed reference
+    stable_max_deviation: float        # largest |ratio - 1| before the first drift season
+    peak_season: str
+    peak_proxy: float                  # the season's highest weekly proxy value (reference units)
+    peak_reference: float
+    peak_ratio: float
+    max_week_ratio: float              # largest single-week proxy / reference in the peak season

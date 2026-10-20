@@ -931,3 +931,45 @@ class Series:
         "Emission factors, WUE, PUE, and per-prompt water and emissions reported for Gemini serving.",
         numeric=("value",),
     )
+
+    # --- Silent degradation and memory-bound decode evidence (added 2026-10-20) ---
+    GoogleFluTrendsVsCdc = TrendSeries(
+        "google_flu_trends_cdc_ilinet",
+        Provenance(
+            kind=ProvenanceKind.LITERATURE,
+            ref="Google Flu Trends US national estimate and CDC ILINet weighted ILI (US national), as archived "
+                "by the Delphi Epidata API (Carnegie Mellon); failure analysis in Lazer et al. (2014), "
+                "The Parable of Google Flu, Science 343:1203",
+            url="https://api.delphi.cmu.edu/epidata/gft/?locations=nat",
+            verified="2026-10-20",
+            notes=("weekly rows (epiweek = year*100 + MMWR week) where both series report, 2003-40 to 2015-32; "
+                   "gft_ili_pct is Google's estimate of influenza-like illness per 100,000 doctor visits "
+                   "divided by 1,000 (percent of visits); cdc_wili_pct is ILINet weighted percent of visits "
+                   "(https://api.delphi.cmu.edu/epidata/fluview/?regions=nat), retrieved 2026-10-16; the CDC "
+                   "series is the current revised one, not the 2013 real-time release"),
+        ),
+        "Weekly Google Flu Trends estimate against the CDC count of doctor visits for flu-like illness.",
+        numeric=("epiweek", "gft_ili_pct", "cdc_wili_pct"),
+    )
+    ImageNetV2MatchedFrequency = TrendSeries(
+        "imagenetv2_matched_frequency_top1",
+        _lit("Recht, Roelofs, Schmidt, and Shankar (2019), Do ImageNet Classifiers Generalize to ImageNet?, "
+             "ICML, appendix tables imagenetv2-b-33_top1_model_results_table.{1,2}.tex (arXiv 1902.10811 source)",
+             "https://arxiv.org/abs/1902.10811",
+             "top-1 accuracy (%) of 67 models on the original ImageNet validation set and on ImageNetV2 "
+             "MatchedFrequency, with the paper's rounded gap in points; models named fv_* are the Fisher-vector "
+             "baselines, the rest neural networks; extracted by pattern from the LaTeX rows, not typed"),
+        "Top-1 accuracy of 67 ImageNet models on the original test set and on a re-collected one.",
+        numeric=("original_rank", "original_top1", "imagenet_v2_top1", "gap"),
+    )
+    MLPerfInferenceV4Llama2Offline = TrendSeries(
+        "mlperf_inference_v4_llama2_70b_offline",
+        _lit("MLCommons, MLPerf Inference datacenter v4.0 (Apache-2.0), closed division, NVIDIA, "
+             "llama2-70b-99.9 Offline, closed/NVIDIA/results/<system>/llama2-70b-99.9/Offline/performance/"
+             "run_1/mlperf_log_summary.txt", "https://github.com/mlcommons/inference_results_v4.0",
+             "tokens per second for eight-GPU H100-SXM-80GB and H200-SXM-141GB systems; the CTS system is "
+             "NVIDIA's H200 with a custom thermal solution and a higher power limit; accelerator count from "
+             "each system name; all results VALID"),
+        "Llama 2 70B offline throughput on eight H100 and eight H200 GPUs (MLPerf Inference v4.0).",
+        numeric=("accelerators", "tokens_per_s"),
+    )

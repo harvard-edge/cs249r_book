@@ -27,6 +27,7 @@ from ..ops import Ops as _Ops
 from ..embodied.registry import Embodied as _Embodied  # embodied stopping scenarios (2026-10-20)
 from ..agents.registry import Agents as _Agents  # agent harness profiles (added 2026-10-20)
 from . import scenario_types as _st
+from ..core.units import COLOR_DEPTH_8BIT as _COLOR_DEPTH_8BIT  # added 2026-10-20
 
 class Scenario(BaseModel):
     """
@@ -1666,4 +1667,109 @@ class Scenarios(Registry):
                 ("PaLM", "PaLM (540B)"), ("Llama 3 (405B)", "Llama 3.1-405B")],
         accelerators=["K80", "V100", "A100", "H100", "B200"],
         bytes_per_param=_BYTES_TRAINING_STATE,
+    )
+
+    # --- Single-machine iron law, Amdahl, and silent degradation (added 2026-10-20) ---
+    ImageNetInputSpace = _st.InputSpaceScenario(
+        name="Every possible ImageNet-sized input",
+        description="224 x 224 RGB images at 8 bits per channel, against the 50,000 validation images.",
+        dataset=_Datasets.ImageNet,
+        levels=_COLOR_DEPTH_8BIT,
+    )
+
+    Gpt3TrainingTime1KA100 = _st.ClusterTrainingTimeScenario(
+        name="GPT-3's training work on 1,024 A100s",
+        description="GPT-3's 3.14e23 FLOPs at the A100's 16-bit peak, 45 percent end-to-end utilization.",
+        workload=_Models.Language.GPT3,
+        hardware=_Hardware.Cloud.A100,
+        n_devices=int(_Clusters.Training_1K.total_accelerators),
+        efficiency=0.45,  # scenario assumption: end-to-end utilization
+    )
+
+    Gpt3TrainingTime1KA100HigherUtilization = Gpt3TrainingTime1KA100.variant(
+        name="The same run at higher utilization",
+        description="The same work and hardware at 60 percent utilization.",
+        efficiency=0.60,  # scenario assumption: utilization after scheduling improvements
+    )
+
+    IronLawMemoryBoundExample = _st.IronLawScenario(
+        name="A memory-bound task on one accelerator",
+        description="Moves 2 GB at 100 GB/s and runs 1 GFLOP at an effective 100 GFLOP/s, plus 5 ms "
+                    "overhead; the upgrade doubles bandwidth.",
+        data_volume=Q_(2, "GB"),                # scenario assumption
+        bandwidth=Q_(100, "GB/s"),              # scenario assumption: effective rate
+        operations=Q_(1, "GFLOP"),              # scenario assumption
+        effective_rate=Q_(100, "GFLOP/s"),      # scenario assumption: peak times utilization
+        overhead=Q_(5, "ms"),                   # scenario assumption
+        memory_speedup=2.0,                     # scenario assumption: twice the bandwidth
+    )
+
+    IronLawComputeHeavyExample = _st.IronLawScenario(
+        name="A compute-heavy task with a faster arithmetic rate",
+        description="2 s of data movement, 8 s of computation, 1 s of overhead; the upgrade doubles "
+                    "the arithmetic rate.",
+        memory_time_stated=Q_(2, "second"),     # scenario assumption
+        compute_time_stated=Q_(8, "second"),    # scenario assumption
+        overhead=Q_(1, "second"),               # scenario assumption
+        compute_speedup=2.0,                    # scenario assumption
+    )
+
+    ResNet50Batch64StepH100 = _st.SingleNodeScenario(
+        name="ResNet-50 inference at batch 64 on one H100",
+        description="FP16, 50 percent of peak; the comparison doubles memory bandwidth.",
+        workload=_Models.Vision.ResNet50,
+        hardware=_Hardware.Cloud.H100,
+        batch_size=64,          # scenario assumption
+        precision="fp16",
+        efficiency=0.5,         # scenario assumption
+        memory_speedup=2.0,     # scenario assumption: twice the bandwidth
+    )
+
+    Gpt2XlDecodeStepH100 = ResNet50Batch64StepH100.variant(
+        name="GPT-2 XL decoding one token for one user on one H100",
+        description="The same H100, precision, and utilization; batch 1.",
+        workload=_Models.Language.GPT2,
+        batch_size=1,           # scenario assumption: one user
+    )
+
+    ModelSpeedupRequestPath = _st.AmdahlScenario(
+        name="A request path whose model gets 3x faster",
+        description="60 ms preprocessing, 45 ms model, 25 ms postprocessing; only the model speeds up.",
+        stages={"preprocess": Q_(60, "ms"), "model": Q_(45, "ms"), "postprocess": Q_(25, "ms")},  # scenario assumption
+        stage="model",
+        speedup=3.0,            # scenario assumption: better kernels and quantization
+    )
+
+    PedestrianRecallWinterShift = _st.RecallShiftScenario(
+        name="A pedestrian detector in winter conditions",
+        description="Recall falls from 95 to 85 percent under winter light and clothing rare in training.",
+        recall_before=0.95,     # scenario assumption
+        recall_after=0.85,      # scenario assumption
+    )
+
+    AccountAgeUnitSkew = _st.FeatureUnitSkewScenario(
+        name="Account age in days for training, seconds for serving",
+        description="A 412-day-old account as the serving pipeline computes it.",
+        value=Q_(412, "day"),   # scenario assumption
+        serving_unit="second",
+    )
+
+    ImageNetV2Shift = _st.ShiftedTestSetScenario(
+        name="ImageNet models on ImageNetV2",
+        description="67 published models on the original test set and on one re-collected by the "
+                    "same procedure (Recht et al. 2019); fv_* are Fisher-vector baselines.",
+        series_name="ImageNetV2MatchedFrequency",
+        original_key="original_top1", new_key="imagenet_v2_top1", gap_key="gap",
+        baseline_prefix="fv_",
+    )
+
+    GoogleFluTrendsDrift = _st.ProxyDriftScenario(
+        name="Google Flu Trends against the CDC count",
+        description="Seasons 2003-04 to 2012-13, weeks 40 to 20; drift from 2011-12; peak season 2012-13.",
+        series_name="GoogleFluTrendsVsCdc",
+        proxy_key="gft_ili_pct", reference_key="cdc_wili_pct",
+        first_year=2003, last_year=2012,        # seasons with both series throughout
+        start_week=40, end_week=20,             # the CDC influenza season
+        first_drift_year=2011,                  # Lazer et al.: misses from August 2011
+        peak_year=2012,
     )
