@@ -477,3 +477,51 @@ __all__ = [
     "SensitivitySolver",
     "SynthesisSolver",
 ]
+
+
+class DecodeBoundModel(ForwardModel):
+    """
+    Weight-streaming bound on one autoregressive decode step.
+
+    At small batch every new token multiplies every weight once and must read
+    every weight from memory, so a decode step needs ``2P`` FLOPs per request
+    and ``P x bytes_per_param`` of weight traffic. Comparing the two times on
+    one device (one accelerator-equivalent path, capacity assumed) shows which
+    resource binds; the weight-only arithmetic intensity places the step on the
+    roofline. KV-cache reads and launch overhead are excluded (see
+    ``ServingModel`` for those).
+
+    Literature Source:
+    1. Williams, Waterman, and Patterson (2009), "Roofline."
+    2. Kaplan et al. (2020), the 2P forward-FLOP rule.
+    """
+    requires = ("workload", "hardware")
+
+    def solve(self, model: Workload, hardware: HardwareNode, precision: str = "fp16",
+              batch_size: int = 1, peak_flops: Quantity = None):
+        from ..results import DecodeBoundResult
+        from ...physics.performance import calc_bottleneck
+        from ...physics.transformer import calc_transformer_decode_flops
+
+        precision, _ = resolve_precision(precision)
+        weights = model.size_in_bytes(precision)
+        flops = calc_transformer_decode_flops(model.parameters) * batch_size
+        peak = peak_flops if peak_flops is not None else hardware.compute.peak_flops
+        bw = hardware.memory.bandwidth
+        b = calc_bottleneck(flops, weights, peak, bw)
+        compute_time = Q_(b["compute_ms"], "millisecond")
+        memory_time = Q_(b["memory_ms"], "millisecond")
+        intensity = (flops / weights).to("flop/byte")
+        attainable = min(peak.to("flop/second"), (bw * intensity).to("flop/second"))
+        return DecodeBoundResult(
+            weight_bytes=weights,
+            flops_per_step=flops,
+            compute_time=compute_time,
+            memory_time=memory_time,
+            memory_share=(memory_time / (memory_time + compute_time)).to("").magnitude,
+            bound_ratio=(memory_time / compute_time).to("").magnitude,
+            intensity=intensity,
+            attainable_flops=attainable,
+            peak_fraction=(attainable / peak).to("").magnitude,
+            bottleneck=b["bottleneck"],
+        )

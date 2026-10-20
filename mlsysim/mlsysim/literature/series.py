@@ -425,6 +425,16 @@ class TrendSeries:
         """Return one column, in file order."""
         return [r[key] for r in self.entries]
 
+    def largest(self, key: str, date_key: str | None = None, on_or_before: str | None = None) -> dict:
+        """The row with the largest ``key``, optionally among rows dated on or before an ISO date."""
+        rows = [r for r in self.entries if r[key] is not None
+                and (on_or_before is None or r[date_key] <= on_or_before)]
+        return max(rows, key=lambda r: r[key])
+
+    def find(self, key: str, fragment: str) -> dict:
+        """The first row whose ``key`` contains ``fragment``."""
+        return next(r for r in self.entries if fragment in r[key])
+
     def __len__(self) -> int:
         return len(self.entries)
 

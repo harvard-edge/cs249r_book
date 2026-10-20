@@ -1599,6 +1599,15 @@ LPDDR5_6400_TIMINGS = _ds(
     ),
 )
 
+JEDEC_MEMORY_INTERFACE_WIDTHS = _conv(
+    "prov:jedec-memory-interface-widths",
+    "JEDEC JESD238 (HBM3) and JESD79-5 (DDR5) interface widths",
+    notes=(
+        "Added 2026-10-20. HBM3: 1,024 data bits per stack in 16 channels of 64 bits. "
+        "DDR5: 64 data bits per DIMM channel as two independent 32-bit subchannels."
+    ),
+)
+
 MEMORY_INTERFACE_BANDWIDTH_TIERS = _conv(
     "prov:memory-interface-bandwidth-tiers",
     "Representative memory-interface bandwidth tiers",
