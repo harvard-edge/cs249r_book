@@ -1502,3 +1502,86 @@ def test_revision_tree_beam_policies_and_run_cost():
     w = Scenarios.SweAgentClaude35SonnetRunCost.result
     assert (w.tasks, w.resolved) == (500, 168)
     assert w.cost_per_resolved == approx(5.10036) and w.unresolved_share == approx(0.773173)
+# --- Context engineering (added 2026-10-20) -----------------------------------
+
+def test_repair_context_budget():
+    r = Scenarios.RepairContextBudget.result
+    assert r.input_limit == 120000 and r.fixed_tokens == 39000
+    assert r.evidence_tokens == 105000 and r.evidence_share == approx(0.8203125)
+    assert r.observation_budget == 81000
+    assert r.turns_fit == 20 and r.overflow_turn == 21 and r.overflow_observations == 84000
+    assert r.digest_turns == 40 and r.max_observation_per_turn == 2700
+    assert r.selected_request == 47000
+    assert r.append_bill == 3030000 and r.select_bill == 1410000
+    assert r.bill_ratio == approx(2.148936)
+    assert r.append_cumulative[-1] == r.append_bill and r.select_cumulative[-1] == r.select_bill
+    assert r.final_append_request == 159000 and r.final_append_with_reserve == 167000
+
+
+def test_toy_head_attention_dilution():
+    r = Scenarios.ToyHeadAttentionDilution.result
+    assert r.short_weight == approx(0.9678567) and r.long_weight == approx(0.0289470)
+    assert r.weight_with_lookalikes is None
+    x = Scenarios.ToyHeadLookalikeExcerpt.result
+    assert x.weight_without_lookalikes == approx(0.0693553)
+    assert x.weight_with_lookalikes == approx(0.0333480)
+    assert x.lookalike_equivalent_keys == approx(46408.43)
+    assert x.weight_half_unrelated == approx(0.0429599)
+    assert x.weight_no_unrelated == approx(0.0603562)
+
+
+def test_fiction_livebench_through_60k():
+    r = Scenarios.FictionLiveBenchThrough60K.result
+    assert r.scored_models == 53 and r.held_count == 3
+    assert r.median["0"] == approx(1.0) and r.median["8k"] == approx(0.583) and r.median["60k"] == approx(0.556)
+    assert r.q25["60k"] == approx(0.417) and r.q75["60k"] == approx(0.694)
+    assert r.lowest_last == approx(0.222) and r.highest_last == approx(1.0)
+
+
+def test_repair_prefix_layout_bill():
+    r = Scenarios.RepairPrefixLayoutBill.result
+    assert r.request_tokens == 47000 and r.total_input == 1410000 and r.warm_calls == 27
+    assert r.uncached_tokens == 327000 and r.cached_tokens == 1083000
+    assert r.hit_rate == approx(0.7680851)
+    assert r.unstable_cost.to("USD").magnitude == approx(4.23)
+    assert r.stable_cost.to("USD").magnitude == approx(1.3059)
+    assert r.cost_ratio == approx(3.239145) and r.prefill_ratio == approx(4.311927)
+    assert r.rewrite_tokens == 32000 and r.rewrite_in_leaf_calls == approx(4.0)
+    e = Scenarios.RepairPrefixLayoutEveryFourthCall.result
+    assert Scenarios.RepairPrefixLayoutEveryFourthCall.trunk_rewrites == 7
+    assert e.uncached_tokens == 447000 and e.stable_cost.to("USD").magnitude == approx(1.6299)
+
+
+def test_repair_compaction_watermarks():
+    r = Scenarios.RepairCompactionWatermarks.result
+    assert r.cycle_turns == 12 and r.trigger_length == 95000 and r.overshoot == 3000
+    assert r.length_with_reserve == 103000 and r.fits_window
+    assert r.passes == 2 == sum(1 for x in r.lengths if x >= Scenarios.RepairCompactionWatermarks.trigger)
+    assert r.alternate_cycle_turns == 3 and r.alternate_passes == 10 and r.frequency_ratio == approx(4.0)
+
+
+def test_superseded_excerpt_invalidation():
+    r = Scenarios.SupersededExcerptInvalidation.result
+    assert r.removed_total == 46150 and r.removed_suffix == 31150
+    assert r.replaced_total == 46174 and r.replaced_suffix == 31174
+    assert r.appended_total == 47128 and r.appended_suffix == 128
+    assert r.suffix_ratio == approx(243.546875)
+
+
+def test_compaction_constraint_retention():
+    r = Scenarios.CompactionConstraintRetention.result
+    assert r.success[10] == approx(0.5987369) and r.success[40] == approx(0.1285121)
+    assert r.first_horizon_below_target == 14
+    assert Scenarios.UncheckedRepairHorizon.result.first_horizon_below_target == 11
+
+
+def test_protected_field_check_payback():
+    r = Scenarios.ProtectedFieldCheckPayback.result
+    assert r.exposures == 36
+    assert r.survival_unchecked == approx(0.3340277) and r.acceptance_unchecked == approx(0.2004166)
+    assert r.cost_per_accepted_unchecked == approx(9.979213)
+    assert r.undetected_loss == approx(0.003)
+    assert r.survival_checked == approx(0.8974819) and r.acceptance_checked == approx(0.5384891)
+    assert r.attempt_cost_checked == approx(2.15) and r.cost_per_accepted_checked == approx(3.992652)
+    assert r.max_loss_for_target == approx(0.0014238)
+    assert r.checked_rounds_below_floor == 20

@@ -3,7 +3,7 @@ Canonical physics and accounting formulas for ML systems.
 
 Domain modules:
   networking, performance, economics, memory, communication,
-  reliability, transformer, serving, statistics, agents, drivetrain, robotics
+  reliability, transformer, serving, statistics, agents, context, drivetrain, robotics
 """
 
 from ._units import _ensure_unit
@@ -86,6 +86,7 @@ from .agents import (
     calc_kv_cache_bytes_per_token,
     calc_unchecked_success,
     calc_step_error_for_target,
+    calc_first_horizon_below,
     calc_cost_per_accepted,
     calc_break_even_acceptance,
     calc_independent_success,
@@ -247,6 +248,7 @@ __all__ = [
     "calc_kv_cache_bytes_per_token",
     "calc_unchecked_success",
     "calc_step_error_for_target",
+    "calc_first_horizon_below",
     "calc_cost_per_accepted",
     "calc_break_even_acceptance",
     "calc_independent_success",
@@ -358,4 +360,24 @@ __all__ += [
     "calc_peak_normalized_response",
     "calc_contact_force_rate",
     "calc_zero_failure_rate_upper_bound",
+]
+
+
+# --- Context engineering (added 2026-10-20) ---
+from .context import (
+    calc_observation_budget,
+    calc_turns_that_fit,
+    calc_softmax_target_weight,
+    calc_equivalent_key_count,
+    calc_zoned_prefill_tokens,
+    calc_compaction_cycle,
+)
+
+__all__ += [
+    "calc_observation_budget",
+    "calc_turns_that_fit",
+    "calc_softmax_target_weight",
+    "calc_equivalent_key_count",
+    "calc_zoned_prefill_tokens",
+    "calc_compaction_cycle",
 ]

@@ -2745,3 +2745,52 @@ LIGHTMAN_2024_PRM800K = _lit(
         "of 40,000, total_time 278,270 ms."
     ),
 )
+
+# --- Context engineering: long-context use, summaries, prefix caching (added 2026-10-20) ---
+LIU_2024_LOST_IN_THE_MIDDLE = _lit(
+    "prov:liu-2024-lost-in-the-middle",
+    "Liu et al. (2024), Lost in the Middle: How Language Models Use Long Contexts, TACL 12, "
+    "Table 1 (closed-book) and Table 6 (20 total retrieved documents), GPT-3.5-Turbo rows",
+    url="https://arxiv.org/abs/2307.03172",
+    verified="2026-10-20",
+    notes=("Multi-document QA accuracy in percent with the answer document at positions 1, 5, 10, "
+           "15, and 20 of 20 (about 4K tokens); closed-book 56.1. Read from arxiv.org/html/2307.03172v3."),
+)
+HSIEH_2024_RULER = _lit(
+    "prov:hsieh-2024-ruler",
+    "Hsieh et al. (2024), RULER: What's the Real Context Size of Your Long-Context Language "
+    "Models?, COLM 2024, Table 3",
+    url="https://arxiv.org/abs/2404.06654",
+    verified="2026-10-20",
+    notes=("Claimed and effective context length per model; effective length is the longest tested "
+           "length scoring above the threshold, 85.6, Llama2 (7B) at 4K. 17 models evaluated. "
+           "Read from arxiv.org/html/2404.06654v3."),
+)
+MAYNEZ_2020_FAITHFULNESS = _lit(
+    "prov:maynez-2020-faithfulness",
+    "Maynez et al. (2020), On Faithfulness and Factuality in Abstractive Summarization, ACL 2020, Table 2",
+    url="https://arxiv.org/abs/2005.00661",
+    verified="2026-10-20",
+    notes=("Percent of XSum summaries with at least one hallucinated span, intrinsic or extrinsic "
+           "(I union E column); 500 test articles per system, three annotators per summary."),
+)
+ZHENG_2024_SGLANG = _lit(
+    "prov:zheng-2024-sglang",
+    "Zheng et al. (2024), SGLang: Efficient Execution of Structured Language Model Programs, "
+    "NeurIPS 2024, Section 6 (production deployment)",
+    url="https://arxiv.org/abs/2312.07104",
+    verified="2026-10-20",
+    notes=("After one month of public serving: RadixAttention cache hit rate 52.4 percent for "
+           "LLaVA-Next-34B and 74.1 percent for Vicuna-33B; first-token latency 1.7 times lower on "
+           "average for Vicuna-33B. Read from arxiv.org/html/2312.07104v2."),
+)
+SHI_2023_DISTRACTED = _lit(
+    "prov:shi-2023-distracted",
+    "Shi et al. (2023), Large Language Models Can Be Easily Distracted by Irrelevant Context, "
+    "ICML 2023, Tables 2 and 3 (code-davinci-002)",
+    url="https://arxiv.org/abs/2302.00093",
+    verified="2026-10-20",
+    notes=("Chain-of-thought accuracy in percent: 95.0 on the 100-problem base set (Table 2); "
+           "GSM-IC-4K micro accuracy 72.4, and 77.8 with an instruction to ignore irrelevant "
+           "information (Table 3, exemplars without irrelevant context)."),
+)

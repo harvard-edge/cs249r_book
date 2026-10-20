@@ -1032,3 +1032,38 @@ class Series:
         "Peak compute, DRAM bandwidth, and interconnect bandwidth of server hardware, normalized, by year.",
         numeric=("year", "normalized"),
     )
+
+# --- Context engineering (added 2026-10-20) ----------------------------------
+RulerEffectiveLength = _Series(
+    "ruler_effective_length",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Hsieh et al. (2024), RULER: What's the Real Context Size of Your Long-Context Language Models?, COLM 2024, Table 3",
+        url="https://arxiv.org/abs/2404.06654",
+        verified="2026-10-20",
+        notes=(
+            "Rows with a claimed length up to 128K, transcribed from Table 3 of arXiv 2404.06654v3: "
+            "claimed and effective length in thousands of tokens, model names as printed. LongChat "
+            "(7B) prints an effective length of <4K (empty effective_k). Effective length is the "
+            "longest tested length scoring above 85.6 (Literature.ContextUse.RulerEffectiveLengthThreshold)."
+        ),
+    ),
+    "Claimed and effective context length (thousand tokens) of long-context models on RULER.",
+)
+
+AnswerPositionAccuracy = _Series(
+    "lost_in_the_middle_gpt35_turbo_20docs",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Liu et al. (2024), Lost in the Middle: How Language Models Use Long Contexts, TACL 12, Table 6",
+        url="https://arxiv.org/abs/2307.03172",
+        verified="2026-10-20",
+        notes=(
+            "GPT-3.5-Turbo (gpt-3.5-turbo-0613) multi-document QA accuracy in percent with the answer "
+            "document at each reported position among 20 total retrieved documents (about 4K tokens), "
+            "transcribed from Table 6 of arXiv 2307.03172v3. Closed-book accuracy: "
+            "Literature.ContextUse.Gpt35TurboClosedBook."
+        ),
+    ),
+    "Multi-document QA accuracy by position of the answer document among 20 (GPT-3.5-Turbo).",
+)

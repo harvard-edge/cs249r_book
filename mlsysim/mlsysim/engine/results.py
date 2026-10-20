@@ -128,6 +128,14 @@ __all__ = [
     # Fleet orchestration (added 2026-10-20)
     "JobSizeMixResult",
     "PreemptionTaxResult",
+    # Context engineering (added 2026-10-20)
+    "ContextBudgetResult",
+    "AttentionDilutionResult",
+    "ComprehensionByLengthResult",
+    "PrefixLayoutBillResult",
+    "CompactionCadenceResult",
+    "ContextInvalidationResult",
+    "ProtectedFieldCheckResult",
 ]
 
 
@@ -1012,6 +1020,7 @@ class HorizonCompoundingResult(SolverResult):
     error_ratio: float                   # step_error / required_step_error
     required_error_horizon: float        # required_step_error x long horizon
     small_error_limit: float             # -ln(target): the same product as eps -> 0
+    first_horizon_below_target: int      # first horizon whose success falls below the target
 
 
 class AcceptedTaskCostResult(SolverResult):
@@ -1778,3 +1787,114 @@ class RecordedRunCostResult(SolverResult):
     unresolved_share: float          # share of spend on attempts that failed
     input_output_ratio: float
     median_calls: float
+# --- Context engineering (added 2026-10-20) ----------------------------------
+# What one agent request carries: a budget by role, the softmax cost of
+# admitted keys, measured comprehension by length, a zoned layout's input bill,
+# compaction watermarks, invalidation edits, and a protected-field check.
+
+class ContextBudgetResult(SolverResult):
+    """Result from ContextBudgetModel: a request budgeted by role, appended against selected."""
+    input_limit: int                     # window - output reserve
+    fixed_tokens: int                    # system + tools + task state
+    evidence_tokens: int                 # input limit - system - tools: state plus observations
+    evidence_share: float                # evidence tokens / window
+    observation_budget: int              # input limit - fixed tokens
+    turns_fit: int                       # appended turns that fit the observation budget
+    overflow_turn: int                   # first turn that does not fit
+    overflow_observations: int           # observations the overflow turn needs
+    digest_turns: int                    # appended turns that fit at the digest size
+    max_observation_per_turn: int        # largest per-turn observation that lasts every turn
+    selected_request: int                # fixed tokens + selected observations
+    append_requests: List[int]           # request of each turn when every result is appended
+    append_cumulative: List[int]         # running input sent by appending
+    select_cumulative: List[int]         # running input sent by selecting
+    append_bill: int                     # input tokens over the turns, appending
+    select_bill: int                     # input tokens over the turns, selecting
+    bill_ratio: float                    # append bill / select bill
+    final_append_request: int            # the appending policy's last request
+    final_append_with_reserve: int       # the same plus the output reserve
+
+
+class AttentionDilutionResult(SolverResult):
+    """Result from AttentionDilutionModel: one head's weight on a target among fixed-logit keys."""
+    short_weight: float                  # target weight among the short context's keys
+    long_weight: float                   # target weight among the long context's keys
+    weight_without_lookalikes: Optional[float] = None    # unrelated keys only
+    weight_with_lookalikes: Optional[float] = None       # unrelated keys plus look-alike keys
+    lookalike_equivalent_keys: Optional[float] = None    # unrelated keys that weigh as much as the look-alikes
+    weight_half_unrelated: Optional[float] = None        # half the unrelated keys dropped, look-alikes kept
+    weight_no_unrelated: Optional[float] = None          # every unrelated key dropped, look-alikes kept
+
+
+class ComprehensionByLengthResult(SolverResult):
+    """Result from ComprehensionByLengthModel: models scored at every length of a sweep."""
+    lengths: List[str]                   # length labels, shortest first
+    scored_models: int                   # models with a score at every length
+    median: Dict[str, float]             # length -> median score (fraction)
+    q25: Dict[str, float]                # length -> 25th percentile
+    q75: Dict[str, float]                # length -> 75th percentile
+    held_count: int                      # models at or above the bar at the longest length
+    lowest_last: float                   # lowest score at the longest length
+    highest_last: float                  # highest score at the longest length
+    lowest_model: str
+    highest_model: str
+
+
+class PrefixLayoutBillResult(SolverResult):
+    """Result from PrefixLayoutBillModel: input bill of a trajectory, volatile first against zoned."""
+    request_tokens: int                  # root + trunk + leaf, every call
+    total_input: int                     # request tokens x calls
+    warm_calls: int                      # calls that change only the leaf
+    uncached_tokens: int                 # zoned layout's prefill
+    cached_tokens: int                   # zoned layout's reused prefix tokens
+    hit_rate: float                      # cached / total input
+    unstable_cost: Quantity              # USD, no prefix reused
+    stable_cost: Quantity                # USD, zoned layout
+    cost_ratio: float                    # unstable / stable
+    prefill_ratio: float                 # total input / uncached tokens
+    unstable_cost_per_call: Quantity
+    stable_cost_per_call: Quantity
+    rewrite_tokens: int                  # trunk + leaf: the prefill of one trunk rewrite
+    rewrite_in_leaf_calls: float         # rewrite tokens / leaf tokens
+
+
+class CompactionCadenceResult(SolverResult):
+    """Result from CompactionCadenceModel: passes between two watermarks over a turn budget."""
+    input_limit: int                     # window - output reserve
+    cycle_turns: int                     # turns between passes
+    trigger_length: int                  # request length when a pass fires
+    overshoot: int                       # trigger length - trigger watermark
+    length_with_reserve: int             # trigger length + output reserve
+    fits_window: bool
+    passes: int                          # passes within the turn budget
+    lengths: List[int]                   # request length after each turn's append, before any pass
+    alternate_cycle_turns: Optional[int] = None    # the same at the alternate target
+    alternate_passes: Optional[int] = None
+    alternate_lengths: Optional[List[int]] = None
+    frequency_ratio: Optional[float] = None        # cycle / alternate cycle
+
+
+class ContextInvalidationResult(SolverResult):
+    """Result from ContextInvalidationModel: remove, replace, or append a notice for stale text."""
+    removed_total: int                   # resident tokens after removal
+    removed_suffix: int                  # tokens after the reused prefix
+    replaced_total: int                  # resident tokens after an in-place marker
+    replaced_suffix: int
+    appended_total: int                  # resident tokens after an appended notice
+    appended_suffix: int
+    suffix_ratio: float                  # replaced suffix / appended suffix
+
+
+class ProtectedFieldCheckResult(SolverResult):
+    """Result from ProtectedFieldCheckModel: cost per accepted task with and without a check."""
+    exposures: int                       # constraints x rounds
+    survival_unchecked: float            # every constraint survives every round
+    acceptance_unchecked: float
+    cost_per_accepted_unchecked: float   # USD
+    undetected_loss: float               # per-round loss the check misses
+    survival_checked: float
+    acceptance_checked: float
+    attempt_cost_checked: float          # USD: attempt plus one check per round
+    cost_per_accepted_checked: float     # USD
+    checked_rounds_below_floor: int      # first round count at which checked survival falls below the floor
+    max_loss_for_target: Optional[float] = None    # per-round loss that holds the target survival

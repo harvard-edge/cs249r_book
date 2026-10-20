@@ -47,6 +47,10 @@ SpaceflightAnomalies = _load("spaceflight_anomalies", "SpaceflightAnomalies", "C
 ScreeningStudies = _load("screening_studies", "ScreeningStudies", "Cited results of diabetic retinopathy screening systems (Gulshan 2016, Beede 2020, FDA DEN180001).")
 # Test-time compute results (added 2026-10-20)
 TestTimeCompute = _load("test_time_compute", "TestTimeCompute", "Cited test-time compute results (Snell et al. 2024; PRM800K, Lightman et al. 2024).")
+# Context engineering (added 2026-10-20)
+ContextUse = _load("context_use", "ContextUse", "Cited results on how models use a request: evidence position, an irrelevant sentence, the RULER bar.")
+SummarizationFaithfulness = _load("summarization_faithfulness", "SummarizationFaithfulness", "Cited summarization-faithfulness results (Maynez et al. 2020, XSum).")
+PrefixCaching = _load("prefix_caching", "PrefixCaching", "Cited prefix-cache results from a public serving deployment (SGLang 2024).")
 
 
 # ---------------------------------------------------------------------------
@@ -321,6 +325,9 @@ class Literature(Registry):
     SpaceflightAnomalies = SpaceflightAnomalies  # added 2026-10-20
     ScreeningStudies = ScreeningStudies  # added 2026-10-20
     TestTimeCompute = TestTimeCompute  # added 2026-10-20
+    ContextUse = ContextUse  # added 2026-10-20
+    SummarizationFaithfulness = SummarizationFaithfulness  # added 2026-10-20
+    PrefixCaching = PrefixCaching  # added 2026-10-20
     ComputeTrend = ComputeTrend
     AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks
@@ -330,6 +337,8 @@ class Literature(Registry):
     LowestPriceAtCapability = _series.LowestPriceAtCapability
     TerminalBenchHarness = _series.TerminalBenchHarness
     LongContextComprehension = _series.LongContextComprehension
+    RulerEffectiveLength = _series.RulerEffectiveLength  # added 2026-10-20
+    AnswerPositionAccuracy = _series.AnswerPositionAccuracy  # added 2026-10-20
     SweBenchVerifiedRuns = _series.SweBenchVerifiedRuns
     CybenchSolveRate = _series.CybenchSolveRate
     OSWorldStepBudget = _series.OSWorldStepBudget

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from mlsysim.core.units import ureg
 from mlsysim.core._validation import validate_at_least
 
@@ -97,6 +98,15 @@ def calc_step_error_for_target(target_success: float, horizon: float) -> float:
     For small eps, eps * H ~ -ln(target) at any horizon.
     """
     return 1 - target_success ** (1 / horizon)
+
+
+def calc_first_horizon_below(step_success: float, threshold: float) -> int:
+    """
+    First whole horizon ``n`` at which ``step_success ** n`` falls below ``threshold``.
+
+        n = floor(ln(threshold) / ln(step_success)) + 1
+    """
+    return math.floor(math.log(threshold) / math.log(step_success)) + 1
 
 
 def calc_cost_per_accepted(attempt_cost, acceptance_probability: float):
