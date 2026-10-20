@@ -52,3 +52,21 @@ def calc_int_max(bits: int) -> int:
     """Largest value of a signed two's-complement integer of ``bits`` bits, ``2^(n-1) - 1``."""
     validate_at_least(bits, 2, "bits")
     return 2 ** (bits - 1) - 1
+
+
+def calc_float32_bit_flip(value: float, bit: int):
+    """
+    ``value`` stored as an IEEE 754 binary32 word, read back after bit ``bit`` flips.
+
+    Bit 31 is the sign, bits 30 to 23 the exponent, bits 22 to 0 the fraction.
+    Returns ``(stored, corrupted)``: the value as stored, and the value after
+    the flip. Flipping bit 30 of a weight below 2 multiplies it by 2^128 and
+    leaves it finite (added 2026-10-20).
+    """
+    import struct
+    if not 0 <= bit < 32:
+        raise ValueError("bit must be in 0..31 for a binary32 word.")
+    word = struct.unpack(">I", struct.pack(">f", value))[0]
+    stored = struct.unpack(">f", struct.pack(">I", word))[0]
+    corrupted = struct.unpack(">f", struct.pack(">I", word ^ (1 << bit)))[0]
+    return stored, corrupted

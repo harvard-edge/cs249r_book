@@ -3381,3 +3381,60 @@ GOOGLE_SRE_SLO_ALERTING = Provenance(
     notes=("For a 99.9 percent SLO over 30 days: page on burn rate 14.4 over 1 hour (2 percent of the budget) "
            "or 6 over 6 hours (5 percent); open a ticket on burn rate 1 over 3 days (10 percent)."),
 )
+
+# --- Robustness studies: physical attacks, FGSM, calibration, jailbreaks, backdoors (added 2026-10-20) ---
+# Values transcribed from the cited tables as the Robust AI lecture quotes them.
+EYKHOLT_2018_PHYSICAL_ATTACKS = _lit(
+    "prov:eykholt-2018-physical-attacks",
+    "Eykholt et al. (2018), Robust Physical-World Attacks on Deep Learning Visual Classification, CVPR 2018",
+    url="https://arxiv.org/abs/1707.08945",
+    verified="2026-10-20",
+    notes=("LISA-CNN accuracy 91 percent on the LISA test set (Sec. 1); targeted Speed Limit 45 "
+           "misclassification in 100 percent of lab images (abstract); drive-by field test, camouflage "
+           "abstract art, 84.8 percent of frames (Table 3)."),
+)
+GOODFELLOW_2015_FGSM = _lit(
+    "prov:goodfellow-2015-fgsm",
+    "Goodfellow, Shlens, and Szegedy (2015), Explaining and Harnessing Adversarial Examples, ICLR 2015",
+    url="https://arxiv.org/abs/1412.6572",
+    verified="2026-10-20",
+    notes=("Figure 1, GoogLeNet on ImageNet: panda at 57.7 percent confidence; adding 0.007 times the sign "
+           "of the input gradient gives gibbon at 99.3 percent confidence."),
+)
+GUO_2017_CALIBRATION = _lit(
+    "prov:guo-2017-calibration",
+    "Guo, Pleiss, Sun, and Weinberger (2017), On Calibration of Modern Neural Networks, ICML 2017",
+    url="https://arxiv.org/abs/1706.04599",
+    verified="2026-10-20",
+    notes=("Table 1, expected calibration error (percent, 15 bins), uncalibrated and after temperature "
+           "scaling: CIFAR-100 LeNet 5 4.85 and 2.02; CIFAR-100 ResNet 110 16.53 and 1.26; ImageNet "
+           "ResNet 152 5.48 and 1.86."),
+)
+ZOU_2023_GCG = _lit(
+    "prov:zou-2023-gcg",
+    "Zou et al. (2023), Universal and Transferable Adversarial Attacks on Aligned Language Models",
+    url="https://arxiv.org/abs/2307.15043",
+    verified="2026-10-20",
+    notes=("Table 2, attack success rate (percent) over 388 harmful behaviors, GPT-3.5 and GPT-4: "
+           "behavior only 1.8 and 8.0; behavior plus 'Sure, here's' 5.7 and 13.1; plus a GCG suffix "
+           "optimized on Vicuna and Guanacos 47.4 and 29.1; plus an ensemble of GCG suffixes 86.6 and 46.9."),
+)
+GU_2017_BADNETS = _lit(
+    "prov:gu-2017-badnets",
+    "Gu, Dolan-Gavitt, and Garg (2017), BadNets: Identifying Vulnerabilities in the Machine Learning "
+    "Model Supply Chain",
+    url="https://arxiv.org/abs/1708.06733",
+    verified="2026-10-20",
+    notes=("Table 4, U.S. traffic signs, single-target attack with the yellow-square trigger on Faster "
+           "R-CNN: baseline average accuracy on clean images 90.0 percent; BadNet 89.3 percent; backdoored "
+           "stop signs classified as speed limits 90.3 percent. A Post-it note on a real stop sign was read "
+           "as a speed limit with 95 percent confidence."),
+)
+NTSB_HWY18MH010_PRELIMINARY = _lit(
+    "prov:ntsb-hwy18mh010-preliminary",
+    "NTSB (2018), Preliminary Report, Highway HWY18MH010, Tempe, Arizona, May 2018",
+    url="https://www.ntsb.gov/investigations/AccidentReports/Reports/HWY18MH010-prelim.pdf",
+    verified="2026-10-20",
+    notes=("Put the system's determination that emergency braking was needed at 1.3 seconds before "
+           "impact; the final report (HAR-19/03) gives 1.2 seconds."),
+)

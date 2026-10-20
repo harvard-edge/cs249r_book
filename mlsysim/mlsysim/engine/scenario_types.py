@@ -2427,13 +2427,20 @@ class ShiftedTestSetScenario(BaseScenario):
     series_name: str
     original_key: str
     new_key: str
-    gap_key: str
-    baseline_prefix: str
+    gap_key: Optional[str] = None     # None: the gap is original minus new (added 2026-10-20)
+    baseline_prefix: Optional[str] = None  # None: no non-neural baselines in the series
+    # Optional (added 2026-10-20): keep only models scored on the new set whose
+    # original accuracy reaches this floor (a testbed that includes partially
+    # trained and low-data checkpoints).
+    original_floor: Optional[float] = None
 
     @property
     def rows(self):
         from ..literature.registry import Literature
-        return getattr(Literature.Series, self.series_name).entries
+        rows = getattr(Literature.Series, self.series_name).entries
+        if self.original_floor is None:
+            return rows
+        return [r for r in rows if r[self.new_key] is not None and r[self.original_key] >= self.original_floor]
 
     @property
     def result(self):
@@ -5119,6 +5126,14 @@ class KsDriftScenario(BaseScenario):
     n_reference: int
     n_current: int
     observed_statistic: Optional[float] = None
+    # Optional (added 2026-10-20): the significance level the coefficient is
+    # for, when it is not the registry's 0.05 (calc_ks_coefficient(level)).
+    significance: Optional[float] = None
+
+    @property
+    def scale(self) -> float:
+        """The sample-size factor ``sqrt((n_0 + n_t) / (n_0 n_t))`` the coefficient multiplies."""
+        return self.critical_value / self.coefficient
 
     @property
     def critical_value(self) -> float:
@@ -5167,6 +5182,16 @@ class BinShareShiftScenario(BaseScenario):
     """A feature binned at the training quantiles: training shares against recent shares, scored by PSI."""
     baseline_shares: List[float]
     current_shares: List[float]
+    bins: Optional[List[str]] = None  # bin names, aligned with the shares (added 2026-10-20)
+
+    def term(self, name: str) -> float:
+        """PSI contribution of the bin called ``name``."""
+        return self.terms[self.bins.index(name)]
+
+    def shares(self, name: str):
+        """(training share, recent share) of the bin called ``name``."""
+        i = self.bins.index(name)
+        return self.baseline_shares[i], self.current_shares[i]
 
     @property
     def terms(self) -> List[float]:
@@ -9401,3 +9426,261 @@ class PlatformBenefitScenario(BaseScenario):
     @property
     def benefit_cost_ratio(self) -> float:
         return (self.gross_benefit / self.platform_cost).to("").magnitude
+
+
+# ── Robust AI: drift tests, per-request answering, attacks, and silent faults (added 2026-10-20) ──
+
+class MeanShiftTestScenario(BaseScenario):
+    """A feature mean that moves from ``reference_mean`` to ``observed_mean`` over ``n_samples`` requests.
+
+    The test assumes a known reference mean, independent requests, and the
+    stated spread ``feature_sd``: z is the move in standard errors of the mean.
+    """
+    reference_mean: float
+    observed_mean: float
+    feature_sd: float
+    n_samples: int
+    significance_bound: Optional[float] = None   # the bound prose compares the p-value with
+
+    @property
+    def mean_shift(self) -> float:
+        return self.observed_mean - self.reference_mean
+
+    @property
+    def standard_error(self) -> float:
+        from ..physics import calc_standard_error
+        return calc_standard_error(self.feature_sd, self.n_samples)
+
+    @property
+    def z_score(self) -> float:
+        return self.mean_shift / self.standard_error
+
+    @property
+    def p_value(self) -> float:
+        """Two-sided normal-tail probability of a move at least this large from noise alone."""
+        from statistics import NormalDist
+        return 2 * (1 - NormalDist().cdf(abs(self.z_score)))
+
+
+class GaussianDriftScenario(BaseScenario):
+    """A continuous feature fitted as a normal at reference and now: KL divergence of the reference from the current fit."""
+    reference_mean: float
+    reference_sd: float
+    current_mean: float
+    current_sd: float
+    kl_trigger: Optional[float] = None    # the service's investigate threshold on KL
+
+    @property
+    def triggers(self) -> bool:
+        return self.kl >= self.kl_trigger
+
+    @property
+    def kl_terms(self):
+        """(log term, ratio numerator, ratio denominator) of the closed form."""
+        from ..physics import calc_gaussian_kl_terms
+        return calc_gaussian_kl_terms(self.reference_mean, self.reference_sd, self.current_mean, self.current_sd)
+
+    @property
+    def kl_log_term(self) -> float:
+        return self.kl_terms[0]
+
+    @property
+    def kl_ratio_term(self) -> float:
+        _, num, den = self.kl_terms
+        return num / den
+
+    @property
+    def kl(self) -> float:
+        from ..physics import calc_gaussian_kl
+        return calc_gaussian_kl(self.reference_mean, self.reference_sd, self.current_mean, self.current_sd)
+
+
+class SelectiveAnsweringScenario(BaseScenario):
+    """A server that answers a ``coverage`` share of ``request_rate`` and routes the rest to a fallback.
+
+    The selective risk follows an illustrative curve,
+    ``risk(c) = risk_floor + risk_scale * c ** risk_exponent``, so answering
+    fewer requests lowers the error on those answered.
+    """
+    request_rate: Quantity
+    coverage: float
+    risk_floor: float
+    risk_scale: float
+    risk_exponent: float
+
+    def risk_at(self, coverage: float) -> float:
+        return self.risk_floor + self.risk_scale * coverage ** self.risk_exponent
+
+    @property
+    def risk(self) -> float:
+        """Error on the answered requests at the operating coverage."""
+        return self.risk_at(self.coverage)
+
+    @property
+    def full_risk(self) -> float:
+        """Error when every request is answered."""
+        return self.risk_at(1.0)
+
+    @property
+    def fallback_rate(self) -> Quantity:
+        return self.request_rate * (1 - self.coverage)
+
+
+class ConformalThresholdScenario(BaseScenario):
+    """Split conformal prediction with ``calibration_count`` held-out scores and target miscoverage ``alpha``."""
+    calibration_count: int
+    alpha: float
+
+    @property
+    def rank_bound(self) -> float:
+        """``(n + 1)(1 - alpha)`` before the ceiling."""
+        return (self.calibration_count + 1) * (1 - self.alpha)
+
+    @property
+    def rank(self) -> int:
+        from ..physics import calc_split_conformal_rank
+        return calc_split_conformal_rank(self.calibration_count, self.alpha)
+
+    @property
+    def target_coverage(self) -> float:
+        return 1 - self.alpha
+
+
+class AdversarialTrainingPassesScenario(BaseScenario):
+    """Work per batch of adversarial training, in standard forward-backward passes (equal cost, no reuse)."""
+    attack_passes: int                # passes spent finding the perturbation
+    update_passes: int                # passes spent on the update (2 for a doubled clean-plus-adversarial batch)
+    standard_passes: int = 1          # one pass per batch for standard training
+
+    @property
+    def passes(self) -> int:
+        return self.attack_passes + self.update_passes
+
+    @property
+    def slowdown(self) -> float:
+        """Work multiple over standard training."""
+        return self.passes / self.standard_passes
+
+
+class CrossConditionGapScenario(BaseScenario):
+    """A standard model's clean accuracy against a robust model's attacked accuracy: two of four cells.
+
+    The difference mixes a model change with a test change, so it is neither
+    the clean-accuracy penalty nor the robustness benefit.
+    """
+    standard_clean_accuracy: float    # percent
+    robust_attacked_accuracy: float   # percent
+
+    @property
+    def gap(self) -> float:
+        return self.standard_clean_accuracy - self.robust_attacked_accuracy
+
+
+class CertifiedRadiusScenario(BaseScenario):
+    """Binary randomized smoothing at noise ``noise_sd``, against an l-infinity budget on one input.
+
+    The l-infinity budget is ``linf_levels`` steps of an image whose pixels take
+    ``pixel_levels`` values; its box corner has Euclidean length
+    ``budget * sqrt(coordinates)``, the length the certificate must reach to
+    cover the whole box.
+    """
+    noise_sd: float
+    top_class_probability: float
+    linf_levels: int
+    pixel_levels: int                 # pixel values an 8-bit channel takes
+    coordinates: int                  # width * height * channels
+
+    @property
+    def radius(self) -> float:
+        from ..physics import calc_smoothing_radius
+        return calc_smoothing_radius(self.noise_sd, self.top_class_probability)
+
+    @property
+    def quantile(self) -> float:
+        """``Phi^-1(p_A)``."""
+        return self.radius / self.noise_sd
+
+    @property
+    def linf_budget(self) -> float:
+        return self.linf_levels / (self.pixel_levels - 1)
+
+    @property
+    def box_corner_l2(self) -> float:
+        from ..physics import calc_linf_corner_l2
+        return calc_linf_corner_l2(self.linf_budget, self.coordinates)
+
+    @property
+    def covers_box(self) -> bool:
+        return self.radius >= self.box_corner_l2
+
+
+class FloatBitFlipScenario(BaseScenario):
+    """One stored binary32 value with bit ``flipped_bit`` flipped (bit 30 is the top exponent bit)."""
+    value: float
+    flipped_bit: int
+    exponent_bits: int                # core.units.FLOAT_FORMAT_BITS["fp32"]
+    fraction_bits: int
+
+    @property
+    def _pair(self):
+        from ..physics import calc_float32_bit_flip
+        return calc_float32_bit_flip(self.value, self.flipped_bit)
+
+    @property
+    def stored(self) -> float:
+        return self._pair[0]
+
+    @property
+    def corrupted(self) -> float:
+        return self._pair[1]
+
+    @property
+    def scale_log2(self) -> int:
+        """The flip multiplies the value by 2 to this power."""
+        import math
+        return round(math.log2(self.corrupted / self.stored))
+
+    @property
+    def word_bits(self) -> int:
+        return 1 + self.exponent_bits + self.fraction_bits
+
+
+class StandardizedAttackScenario(BaseScenario):
+    """Published defenses under one standardized attack (``Literature.Series``): best by year and broken defenses.
+
+    Rows without a year and rows the benchmark flags unreliable are dropped. A
+    defense below ``broken_floor`` percent attacked accuracy provides no robustness.
+    """
+    series_name: str
+    first_year: int
+    last_year: int
+    broken_floor: float               # percent
+
+    @property
+    def rows(self):
+        from ..literature.registry import Literature
+        return [r for r in getattr(Literature.Series, self.series_name).entries
+                if r["year"] and r["unreliable"] != "True"]
+
+    @property
+    def years(self) -> List[int]:
+        return list(range(self.first_year, self.last_year + 1))
+
+    def best(self, year: int):
+        """The row with the highest attacked accuracy published in ``year``."""
+        return max((r for r in self.rows if int(r["year"]) == year), key=lambda r: r["autoattack_acc"])
+
+    @property
+    def best_first(self):
+        return self.best(self.first_year)
+
+    @property
+    def best_last(self):
+        return self.best(self.last_year)
+
+    @property
+    def broken(self):
+        return [r for r in self.rows if r["autoattack_acc"] < self.broken_floor]
+
+    def best_so_far(self, year: int) -> float:
+        return max(self.best(y)["autoattack_acc"] for y in self.years if y <= year)

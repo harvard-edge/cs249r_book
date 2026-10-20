@@ -585,3 +585,26 @@ __all__ += [
     "calc_rent_crossover",
     "calc_ownership_breakeven_utilization",
 ]
+
+# --- Robustness: drift tests, conformal ranks, certified radii, bit flips (added 2026-10-20) ---
+from .statistics import (
+    calc_ks_coefficient,
+    calc_standard_error,
+    calc_gaussian_kl_terms,
+    calc_gaussian_kl,
+    calc_split_conformal_rank,
+    calc_smoothing_radius,
+    calc_linf_corner_l2,
+)
+from .numerics import calc_float32_bit_flip
+
+__all__ += [
+    "calc_ks_coefficient",
+    "calc_standard_error",
+    "calc_gaussian_kl_terms",
+    "calc_gaussian_kl",
+    "calc_split_conformal_rank",
+    "calc_smoothing_radius",
+    "calc_linf_corner_l2",
+    "calc_float32_bit_flip",
+]

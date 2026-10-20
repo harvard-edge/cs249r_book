@@ -3032,3 +3032,43 @@ def test_lifecycle_tco_payback_and_platform_benefit():
     assert Scenarios.TrainingOptimizationPayback.payback.to("month").magnitude == approx(1.777778)
     assert Scenarios.SharedPlatformBenefit50.benefit_cost_ratio == approx(1.25)
     assert Scenarios.SharedPlatformBenefit20.benefit_cost_ratio == approx(0.5)
+
+
+def test_robust_ai_drift_and_silent_errors():
+    assert Scenarios.FleetSilentErrorHour1K.p_step == approx(0.0951671)
+    assert Scenarios.FleetSilentErrorHour10K.p_step == approx(0.6321390)
+    m = Scenarios.FeatureMeanShiftTest
+    assert m.standard_error == approx(0.0094868) and m.z_score == approx(5.270463)
+    assert m.p_value < m.significance_bound
+    p = Scenarios.FraudCountryPsi
+    assert p.psi == approx(0.0653018) and p.term("Other") == approx(0.0470229)
+    assert p.shares("Other") == (0.10, 0.18)
+    d = Scenarios.FraudAmountDrift
+    assert d.kl_log_term == approx(0.1670541) and d.kl_ratio_term == approx(0.3846154)
+    assert d.kl == approx(0.0516695) and d.triggers
+    k = Scenarios.FraudAmountKs
+    assert k.coefficient == approx(1.6276236) and k.critical_value == approx(0.0230181)
+    assert k.scale == approx(0.0141421) and k.flags
+
+
+def test_robust_ai_answering_attacks_and_faults():
+    s = Scenarios.SelectiveAnswering90
+    assert s.risk == approx(0.0651441) and s.full_risk == approx(0.112)
+    assert s.fallback_rate.to("1/s").magnitude == approx(1000)
+    c = Scenarios.ConformalThreshold1K
+    assert c.rank_bound == approx(900.9) and c.rank == 901
+    assert Scenarios.PgdSevenTraining.passes == 8 and Scenarios.PgdSevenTraining.slowdown == 8
+    assert Scenarios.FgsmCleanPlusAdversarialTraining.passes == 3
+    assert Scenarios.ResNet50CleanVersusRobustAttacked.gap == approx(26.13, rel=1e-4)
+    r = Scenarios.SmoothingRadiusCifar10
+    assert r.radius == approx(1.5451162) and r.quantile == approx(3.0902323)
+    assert r.coordinates == 3072 and r.box_corner_l2 == approx(1.7388432) and not r.covers_box
+    f = Scenarios.Fp32WeightExponentFlip
+    assert f.flipped_bit == 30 and f.word_bits == 32 and f.scale_log2 == 128
+    assert f.corrupted == approx(1.4291859e37)
+    t = Scenarios.ImageNetTestbedV2Shift.result
+    assert t.model_count == 212 and t.baseline_count == 0
+    assert (t.gap_min, t.gap_max, t.gap_median) == (approx(7.278), approx(13.572), approx(12.010))
+    b = Scenarios.RobustBenchCifar10LinfProgress
+    assert b.best_first["autoattack_acc"] == approx(44.04) and b.best_last["autoattack_acc"] == approx(75.28)
+    assert b.best_last["clean_acc"] == approx(93.6) and len(b.broken) == 4

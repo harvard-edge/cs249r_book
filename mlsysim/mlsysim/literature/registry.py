@@ -72,6 +72,7 @@ RobotLearning = _load("robot_learning", "RobotLearning", "Cited figures of publi
 # Network architectures (added 2026-10-20)
 NetflixPrize = _load("netflix_prize", "NetflixPrize", "Cited figures of the Netflix Prize and what Netflix shipped from it (Johnston 2012; Amatriain and Basilico 2012).")
 KerasApplications = _load("keras_applications", "KerasApplications", "Keras Applications model table: top-1 accuracy and time per inference step on a CPU and an A100.")
+RobustnessStudies = _load("robustness_studies", "RobustnessStudies", "Cited results of robustness studies (Eykholt 2018 stickers, Goodfellow 2015 FGSM, Guo 2017 calibration, Zou 2023 GCG, Gu 2017 BadNets).")  # added 2026-10-20
 
 
 # ---------------------------------------------------------------------------
@@ -367,6 +368,7 @@ class Literature(Registry):
     RobotLearning = RobotLearning  # added 2026-10-20
     NetflixPrize = NetflixPrize  # network architectures (added 2026-10-20)
     KerasApplications = KerasApplications  # network architectures (added 2026-10-20)
+    RobustnessStudies = RobustnessStudies  # added 2026-10-20
     ComputeTrend = ComputeTrend
     AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks

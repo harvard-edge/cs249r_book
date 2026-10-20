@@ -407,3 +407,69 @@ def calc_sample_collection_time(samples, request_rate, traffic_share):
     its planned guardrail sample in ``t = n / (r p)``.
     """
     return samples / (request_rate * traffic_share)
+
+
+# --- Drift tests, conformal ranks, and certified radii (added 2026-10-20) ------
+def calc_ks_coefficient(significance):
+    """Large-sample two-sample K-S coefficient ``c(alpha) = sqrt(-ln(alpha / 2) / 2)``.
+
+    About 1.36 at 0.05 (``Ops.Monitoring.KsTestCoefficient``) and 1.63 at 0.01;
+    ``calc_ks_critical_value`` scales it by the two sample sizes.
+    """
+    if not 0.0 < significance < 1.0:
+        raise ValueError("significance must be in (0, 1).")
+    return math.sqrt(-math.log(significance / 2) / 2)
+
+
+def calc_standard_error(sd, n_samples):
+    """Standard error of a mean of ``n_samples`` independent values with spread ``sd``: ``sd / sqrt(n)``."""
+    if n_samples <= 0:
+        raise ValueError("n_samples must be positive.")
+    return sd / math.sqrt(n_samples)
+
+
+def calc_gaussian_kl_terms(mean_p, sd_p, mean_q, sd_q):
+    """The two terms of ``KL(P || Q)`` for normals P and Q.
+
+    ``KL = ln(sd_q / sd_p) + (sd_p^2 + (mean_p - mean_q)^2) / (2 sd_q^2) - 1/2``.
+    Returns ``(log_term, ratio_numerator, ratio_denominator)`` so a worked
+    example can show each piece; ``calc_gaussian_kl`` adds them.
+    """
+    if sd_p <= 0 or sd_q <= 0:
+        raise ValueError("standard deviations must be positive.")
+    return math.log(sd_q / sd_p), sd_p ** 2 + (mean_p - mean_q) ** 2, 2 * sd_q ** 2
+
+
+def calc_gaussian_kl(mean_p, sd_p, mean_q, sd_q):
+    """KL divergence ``KL(P || Q)`` between two normal distributions, in nats."""
+    log_term, num, den = calc_gaussian_kl_terms(mean_p, sd_p, mean_q, sd_q)
+    return log_term + num / den - 0.5
+
+
+def calc_split_conformal_rank(calibration_count: int, alpha: float) -> int:
+    """Rank of the sorted calibration score that bounds new scores at level 1 - alpha (added 2026-10-20).
+
+    Split conformal prediction takes the ``ceil((n + 1)(1 - alpha))``-th
+    smallest of ``n`` exchangeable calibration scores; a new score exceeds it
+    with probability at most ``alpha``. A rank above ``n`` means the
+    calibration set is too small to state the bound.
+
+    Source: Angelopoulos and Bates, "Conformal Prediction: A Gentle
+    Introduction," Found. Trends Mach. Learn. 16(4), 2023, Sec. 1.
+    """
+    if calibration_count < 1 or not 0.0 < alpha < 1.0:
+        raise ValueError("calibration_count must be >= 1 and alpha in (0, 1)")
+    return math.ceil((calibration_count + 1) * (1 - alpha))
+
+
+def calc_smoothing_radius(noise_sd, top_class_probability):
+    """Binary randomized-smoothing certified l2 radius ``sigma * Phi^-1(p_A)`` (Cohen et al. 2019)."""
+    from statistics import NormalDist
+    if not 0.5 < top_class_probability < 1.0:
+        raise ValueError("top_class_probability must be in (0.5, 1).")
+    return noise_sd * NormalDist().inv_cdf(top_class_probability)
+
+
+def calc_linf_corner_l2(linf_budget, coordinates):
+    """Euclidean length of a corner of the l-infinity ball of radius ``linf_budget`` in ``coordinates`` dimensions."""
+    return linf_budget * math.sqrt(coordinates)
