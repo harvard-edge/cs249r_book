@@ -209,3 +209,13 @@ def calc_probe_detection_window(interval, timeout, failure_threshold):
     validate_at_least(failure_threshold, 1, "failure_threshold")
     earliest = (failure_threshold - 1) * period + wait
     return earliest.to(ureg.second), (earliest + period).to(ureg.second)
+
+
+def calc_error_budget_spent(burn_rate, window, budget_period):
+    """Share of an SLO's error budget spent by a sustained burn rate (added 2026-10-20).
+
+    A burn rate of 1 spends exactly the budget over ``budget_period``; a burn
+    rate ``b`` sustained for ``window`` spends ``b * window / budget_period``
+    (Google SRE Workbook, "Alerting on SLOs").
+    """
+    return float(burn_rate * (window / budget_period).to("").magnitude)

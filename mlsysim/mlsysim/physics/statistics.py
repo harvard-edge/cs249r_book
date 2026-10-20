@@ -400,3 +400,10 @@ def calc_cdf_quantile(values, cumulative, fraction):
         if c >= fraction:
             return v
     return values[-1]
+def calc_sample_collection_time(samples, request_rate, traffic_share):
+    """Time for a traffic slice to collect ``samples`` observations (added 2026-10-20).
+
+    A canary stage that receives ``traffic_share`` of ``request_rate`` gathers
+    its planned guardrail sample in ``t = n / (r p)``.
+    """
+    return samples / (request_rate * traffic_share)

@@ -5025,11 +5025,23 @@ class AcceleratorInputFeedScenario(BaseScenario):
 
 
 class FeatureLookupScenario(BaseScenario):
-    """An online service at ``request_rate`` that reads ``reads_per_request`` stored features per request."""
+    """An online service at ``request_rate`` that reads ``reads_per_request`` stored features per request.
+
+    Optional (added 2026-10-20): ``request_budget`` is the end-to-end latency
+    budget of one request and ``lookup_budget_low``/``lookup_budget_high`` the
+    share of it the feature store may take.
+    """
     request_rate: Quantity            # requests per second
     reads_per_request: int
     feature_bytes: Optional[Quantity] = None
     raw_sample_bytes: Optional[Quantity] = None   # the raw record a feature vector summarizes
+    request_budget: Optional[Quantity] = None
+    lookup_budget_low: Optional[Quantity] = None
+    lookup_budget_high: Optional[Quantity] = None
+
+    @property
+    def reads_per_day(self) -> float:
+        return (self.request_rate * self.reads_per_request).to("1/day").magnitude
 
     @property
     def reads_per_second(self) -> float:
@@ -8861,3 +8873,531 @@ class ParameterGrowthScenario(BaseScenario):
     def result(self):
         from .solvers import ParameterGrowthModel
         return ParameterGrowthModel().solve(self.rows, self.split_year)
+
+
+# ── ML operations at scale (added 2026-10-20) ────────────────────────────────
+# A portfolio of models sharing features, releases, alerts, and capacity: the
+# coupling sketch, feature history and lookups, incident costs, staged
+# exposure, experiment sizing, alert volume, SLO budgets, and the economics of
+# owning a fleet.
+
+
+class OperationalLoadScenario(BaseScenario):
+    """Assumed operational-load shapes for ``N`` models: alerts ``a N``, deployments ``N ln N``,
+    and pairwise conflicts ``c N^2`` against one team's ``team_capacity``.
+
+    The shapes are a sketch, not measurements; ``crossing_models`` is the first
+    model count whose total reaches the capacity.
+    """
+    alerts_per_model: float
+    conflict_coefficient: float       # N models form about N^2/2 pairs
+    team_capacity: float
+    max_models: int
+
+    def model_counts(self):
+        import numpy as _np
+        return _np.arange(1, self.max_models + 1)
+
+    def alerts(self, n):
+        return self.alerts_per_model * n
+
+    def deployments(self, n):
+        import numpy as _np
+        return n * _np.log(n)
+
+    def conflicts(self, n):
+        return self.conflict_coefficient * n ** 2
+
+    def total(self, n):
+        return self.alerts(n) + self.deployments(n) + self.conflicts(n)
+
+    @property
+    def crossing_models(self) -> int:
+        import numpy as _np
+        n = self.model_counts()
+        return int(n[int(_np.argmax(self.total(n) >= self.team_capacity))])
+
+
+class FeatureHistoryScenario(BaseScenario):
+    """Full-snapshot feature history: ``entities`` x ``features`` values every ``update_interval``,
+    kept for ``retention``, each row a value, an entity key, and ``timestamps`` timestamps."""
+    entities: float
+    features: int
+    retention: Quantity
+    update_interval: Quantity
+    value_bytes: Quantity
+    key_bytes: Quantity
+    timestamp_bytes: Quantity
+    timestamps: int = 2               # event time and availability time
+
+    @property
+    def versions_per_feature(self) -> float:
+        return (self.retention / self.update_interval).to("").magnitude
+
+    @property
+    def values(self) -> float:
+        return self.entities * self.features * self.versions_per_feature
+
+    @property
+    def row_bytes(self) -> Quantity:
+        return (self.value_bytes + self.key_bytes + self.timestamps * self.timestamp_bytes).to("byte")
+
+    @property
+    def total_bytes(self) -> Quantity:
+        return self.values * self.row_bytes
+
+    @property
+    def metadata_share(self) -> float:
+        return float(((self.row_bytes - self.value_bytes) / self.row_bytes).to("").magnitude)
+
+
+class PointInTimeJoinScenario(BaseScenario):
+    """A cumulative feature joined to a training example: ``events_before_prediction`` were
+    available at the prediction time, ``events_by_day_end`` by the end of the day."""
+    events_before_prediction: int
+    events_by_day_end: int
+
+    @property
+    def leakage_inflation(self) -> float:
+        """What a naive join to the end-of-day table feeds the model, against the true value."""
+        return self.events_by_day_end / self.events_before_prediction
+
+
+class FeatureIncidentScenario(BaseScenario):
+    """A silent shared-feature incident as reported: traffic, gates passed, share affected,
+    metric change, time unalerted, and the consumers and owners it reached."""
+    request_rate: Optional[Quantity] = None
+    latency_gate: Optional[Quantity] = None
+    affected_share: Optional[float] = None       # fraction of requests with the broken feature
+    metric_drop: Optional[float] = None          # relative fall of the business metric
+    undetected_time: Optional[Quantity] = None
+    consumer_models: Optional[int] = None
+    owning_teams: Optional[int] = None
+    accuracy_drop: Optional[float] = None
+    debug_time: Optional[Quantity] = None
+
+
+class RevenueRegressionScenario(BaseScenario):
+    """A metric regression that cuts revenue in proportion for ``undetected`` (or for ``alerted``
+    with an alert and containment); revenue is ``weekly_revenue`` per week."""
+    weekly_revenue: Quantity          # USD per week
+    relative_drop: float              # fraction of revenue lost while the regression lasts
+    metric_before: float
+    metric_after: float
+    undetected: Quantity
+    alerted: Quantity
+    feature_mean_before: Optional[float] = None
+    feature_mean_after: Optional[float] = None
+    freshness_slo: Optional[Quantity] = None
+    shift_threshold: Optional[float] = None
+
+    def loss(self, duration: Quantity) -> Quantity:
+        return (self.relative_drop * self.weekly_revenue * (duration / Q_(1, "week")).to("").magnitude).to("USD")
+
+    @property
+    def undetected_loss(self) -> Quantity:
+        return self.loss(self.undetected)
+
+    @property
+    def alerted_loss(self) -> Quantity:
+        return self.loss(self.alerted)
+
+    @property
+    def window_ratio(self) -> float:
+        return (self.undetected / self.alerted).to("").magnitude
+
+    @property
+    def impact_reduction(self) -> float:
+        return 1 - (self.alerted / self.undetected).to("").magnitude
+
+    @property
+    def metric_change(self) -> float:
+        return self.metric_after / self.metric_before - 1
+
+    @property
+    def feature_shift(self) -> float:
+        return (self.feature_mean_after - self.feature_mean_before) / self.feature_mean_before
+
+
+class ClickLossScenario(BaseScenario):
+    """A silent click-through regression from ``ctr_before`` to ``ctr_after`` at ``request_rate``,
+    caught after ``detection_time``; each click is worth ``value_per_click``."""
+    request_rate: Quantity
+    detection_time: Quantity
+    ctr_before: float
+    ctr_after: float
+    value_per_click: Quantity
+
+    @property
+    def requests(self) -> float:
+        return (self.request_rate * self.detection_time).to("").magnitude
+
+    @property
+    def ctr_drop(self) -> float:
+        return self.ctr_before - self.ctr_after
+
+    @property
+    def lost_clicks(self) -> float:
+        return self.requests * self.ctr_drop
+
+    @property
+    def loss(self) -> Quantity:
+        return (self.lost_clicks * self.value_per_click).to("USD")
+
+    @property
+    def loss_rate(self) -> Quantity:
+        return (self.loss / self.detection_time).to("USD/hour")
+
+
+class RolloutExposureScenario(BaseScenario):
+    """Users exposed until rollback under an all-at-once cutover against a canary share,
+    with the same request rate, harm, and time to rollback."""
+    full_share: float
+    canary_share: float
+    time_to_rollback: Optional[Quantity] = None
+
+    @property
+    def exposure_ratio(self) -> float:
+        return self.full_share / self.canary_share
+
+
+class CanaryScheduleScenario(BaseScenario):
+    """A staged rollout that needs ``samples_per_variant`` guardrail samples per stage at
+    ``request_rate``; ``stages`` is the configured ladder of (traffic share, duration)."""
+    samples_per_variant: float
+    request_rate: Quantity            # requests per hour
+    stages: List[Any]                 # [(share, Quantity duration), ...]
+
+    def stage_minimum(self, share: float) -> Quantity:
+        from ..physics.statistics import calc_sample_collection_time
+        return calc_sample_collection_time(self.samples_per_variant, self.request_rate, share).to("hour")
+
+    @property
+    def total(self) -> Quantity:
+        return sum((d for _, d in self.stages), Q_(0, "hour")).to("hour")
+
+    @property
+    def first_stage_buffer(self) -> float:
+        share, duration = self.stages[0]
+        return (duration / self.stage_minimum(share)).to("").magnitude
+
+
+class TwoProportionTestScenario(BaseScenario):
+    """A two-arm test sized to detect an absolute ``lift`` on a ``baseline_rate`` at the
+    normal quantiles ``z_alpha`` and ``z_beta``, on ``daily_requests`` split between arms.
+
+    ``family_size`` uncorrected tests at ``significance`` give the familywise error.
+    """
+    baseline_rate: float
+    lift: float
+    z_alpha: float
+    z_beta: float
+    daily_requests: Optional[Quantity] = None
+    significance: float = 0.05
+    family_size: int = 20
+
+    @property
+    def z_sum_squared(self) -> float:
+        return (self.z_alpha + self.z_beta) ** 2
+
+    @property
+    def two_variance(self) -> float:
+        return 2 * self.baseline_rate * (1 - self.baseline_rate)
+
+    @property
+    def lift_squared(self) -> float:
+        return self.lift ** 2
+
+    @property
+    def per_variant(self) -> float:
+        from ..physics.statistics import calc_two_proportion_sample_size
+        return calc_two_proportion_sample_size(self.baseline_rate, self.lift, self.z_alpha, self.z_beta)
+
+    @property
+    def total(self) -> float:
+        return 2 * self.per_variant
+
+    @property
+    def collection_time(self) -> Quantity:
+        return (self.total / self.daily_requests).to("hour")
+
+    @property
+    def familywise_error(self) -> float:
+        from ..physics.agents import calc_independent_success
+        return calc_independent_success(self.significance, self.family_size)
+
+
+class MonitorFleetAlertScenario(BaseScenario):
+    """``models`` x ``metrics_per_model`` monitors checked every ``check_interval`` at a per-check
+    ``false_positive_rate`` on a stable process; ``dedup_share`` of crossings are merged away."""
+    models: int
+    metrics_per_model: int
+    check_interval: Quantity
+    false_positive_rate: float
+    dedup_share: Optional[float] = None
+
+    @property
+    def monitors(self) -> int:
+        return self.models * self.metrics_per_model
+
+    @property
+    def checks_per_day(self) -> float:
+        return (Q_(1, "day") / self.check_interval).to("").magnitude
+
+    @property
+    def daily_false_alerts(self) -> float:
+        return self.monitors * self.checks_per_day * self.false_positive_rate
+
+    @property
+    def remaining_after_dedup(self) -> float:
+        return self.daily_false_alerts * (1 - self.dedup_share)
+
+    def any_false_alert(self, checks: int) -> float:
+        """Chance that at least one of ``checks`` independent checks crosses falsely."""
+        from ..physics.agents import calc_independent_success
+        return calc_independent_success(self.false_positive_rate, checks)
+
+
+class SloBudgetVectorScenario(BaseScenario):
+    """Budget consumed per SLO dimension (observed over allowed violating fraction); the
+    worst dimension, not the mean, decides promotion."""
+    consumption: Dict[str, float]
+    owners: Dict[str, str] = {}
+
+    @property
+    def mean(self) -> float:
+        return sum(self.consumption.values()) / len(self.consumption)
+
+    @property
+    def worst(self) -> float:
+        return max(self.consumption.values())
+
+    @property
+    def worst_dimension(self) -> str:
+        return max(self.consumption, key=self.consumption.get)
+
+    @property
+    def promote(self) -> bool:
+        return self.worst <= 1
+
+
+class ErrorBudgetBurnScenario(BaseScenario):
+    """Burn-rate alert tiers on an SLO of ``slo_target`` over ``budget_period``: each tier is
+    (burn rate, long window); a tier spends ``burn x window / period`` of the budget."""
+    slo_target: float
+    budget_period: Quantity
+    tiers: Dict[str, Any]             # name -> (burn rate, Quantity window)
+
+    @property
+    def error_budget(self) -> float:
+        return 1 - self.slo_target
+
+    def budget_spent(self, tier: str) -> float:
+        from ..physics.reliability import calc_error_budget_spent
+        burn, window = self.tiers[tier]
+        return calc_error_budget_spent(burn, window, self.budget_period)
+
+
+class OwnVsRentScenario(BaseScenario):
+    """Owning ``gpus`` accelerators against renting them at ``rent_rate`` per GPU-hour for
+    ``utilization`` of every hour, over ``years``.
+
+    Owning pays the nodes, network, and facility up front, then a running cost
+    per year: a fixed ``opex_per_year`` and ``staffing_per_year``, plus
+    electricity for ``power`` at ``pue`` and ``electricity_price``. Electricity
+    is charged every hour unless ``energy_scales_with_use``, when it is drawn
+    only while busy. A year is 8,760 hours and a month one twelfth of it, the
+    book's convention.
+    """
+    gpus: int
+    gpus_per_node: int
+    node_price: Quantity
+    rent_rate: Quantity               # USD per GPU-hour
+    utilization: float
+    years: int
+    network_capex: Quantity = Q_(0, "USD")
+    facility_capex: Quantity = Q_(0, "USD")
+    opex_per_year: Quantity = Q_(0, "USD")
+    staffing_per_year: Quantity = Q_(0, "USD")
+    power: Optional[Quantity] = None
+    pue: float = 1.0
+    electricity_price: Optional[Quantity] = None
+    energy_scales_with_use: bool = False
+
+    @property
+    def hours_per_year(self) -> Quantity:
+        from ..core.units import HOURS_PER_YEAR
+        return Q_(HOURS_PER_YEAR, "hour")
+
+    @property
+    def nodes(self) -> int:
+        return self.gpus // self.gpus_per_node
+
+    @property
+    def hardware_capex(self) -> Quantity:
+        return (self.nodes * self.node_price).to("USD")
+
+    @property
+    def upfront(self) -> Quantity:
+        return (self.hardware_capex + self.network_capex + self.facility_capex).to("USD")
+
+    @property
+    def electricity_per_year_full(self) -> Quantity:
+        """Electricity for one year of full use (PUE included)."""
+        if self.power is None:
+            return Q_(0, "USD")
+        energy = (self.power * self.hours_per_year * self.pue).to("kWh")
+        return (energy * self.electricity_price).to("USD")
+
+    @property
+    def fixed_cost_per_year(self) -> Quantity:
+        fixed = self.opex_per_year + self.staffing_per_year
+        if not self.energy_scales_with_use:
+            fixed = fixed + self.electricity_per_year_full
+        return fixed.to("USD")
+
+    @property
+    def use_cost_per_year_full(self) -> Quantity:
+        return self.electricity_per_year_full if self.energy_scales_with_use else Q_(0, "USD")
+
+    @property
+    def owned_cost_per_year(self) -> Quantity:
+        """Running cost of owning per year at this utilization."""
+        return (self.fixed_cost_per_year + self.utilization * self.use_cost_per_year_full).to("USD")
+
+    @property
+    def owned_cost_per_year_amortized(self) -> Quantity:
+        """Up-front cost spread evenly over the years, plus the running cost."""
+        return (self.upfront / self.years + self.owned_cost_per_year).to("USD")
+
+    @property
+    def rent_per_year_full(self) -> Quantity:
+        return (self.gpus * self.rent_rate * self.hours_per_year).to("USD")
+
+    @property
+    def rent_per_year(self) -> Quantity:
+        return (self.rent_per_year_full * self.utilization).to("USD")
+
+    @property
+    def rent_per_month(self) -> Quantity:
+        return self.rent_per_year / 12
+
+    @property
+    def owned_cost_per_month(self) -> Quantity:
+        return self.owned_cost_per_year / 12
+
+    @property
+    def crossover_months(self) -> Optional[float]:
+        """Months until cumulative rent overtakes owning; None if it never does."""
+        from ..physics.economics import calc_rent_crossover
+        t = calc_rent_crossover(self.upfront, self.owned_cost_per_month, self.rent_per_month)
+        return None if t is None else t.to("").magnitude
+
+    @property
+    def owned_total(self) -> Quantity:
+        return (self.upfront + self.years * self.owned_cost_per_year).to("USD")
+
+    @property
+    def rented_total(self) -> Quantity:
+        return (self.years * self.rent_per_year).to("USD")
+
+    @property
+    def savings(self) -> Quantity:
+        return (self.rented_total - self.owned_total).to("USD")
+
+    @property
+    def rent_lifetime_full(self) -> Quantity:
+        """Rent for every hour of the whole life."""
+        return (self.years * self.rent_per_year_full).to("USD")
+
+    @property
+    def lifetime_hours(self) -> Quantity:
+        return (self.years * self.hours_per_year).to("hour")
+
+    @property
+    def breakeven_utilization(self) -> float:
+        from ..physics.economics import calc_ownership_breakeven_utilization
+        return float(calc_ownership_breakeven_utilization(
+            self.upfront, self.fixed_cost_per_year, self.rent_per_year_full, self.years,
+            self.use_cost_per_year_full).to("").magnitude)
+
+
+class TrainingCampaignCostScenario(BaseScenario):
+    """``runs_per_year`` training runs of ``run_low`` to ``run_high`` on an owned cluster
+    (``ownership``) against renting the same GPUs only while each run lasts."""
+    ownership: OwnVsRentScenario
+    runs_per_year: int
+    run_low: Quantity
+    run_high: Quantity
+
+    @property
+    def runs(self) -> int:
+        return self.runs_per_year * self.ownership.years
+
+    @property
+    def owned_cost_per_run(self) -> Quantity:
+        return (self.ownership.owned_total / self.runs).to("USD")
+
+    def rented_cost_per_run(self, length: Quantity) -> Quantity:
+        o = self.ownership
+        return (o.gpus * length * o.rent_rate).to("USD")
+
+
+class LifecycleTcoScenario(BaseScenario):
+    """Monthly lifecycle cost in four terms (training, inference, data, iteration), each counted once."""
+    monthly: Dict[str, Quantity]      # term -> USD per month
+
+    @property
+    def total(self) -> Quantity:
+        return sum(self.monthly.values(), Q_(0, "USD/month")).to("USD/month")
+
+    @property
+    def shares(self) -> Dict[str, float]:
+        t = self.total
+        return {k: (v / t).to("").magnitude for k, v in self.monthly.items()}
+
+    @property
+    def dominant(self) -> str:
+        return max(self.monthly, key=lambda k: self.monthly[k].to("USD/month").magnitude)
+
+    def ratios_to(self, other: "LifecycleTcoScenario") -> Dict[str, float]:
+        """This budget's terms (and total) over another's."""
+        out = {k: (v / other.monthly[k]).to("").magnitude for k, v in self.monthly.items()}
+        out["total"] = (self.total / other.total).to("").magnitude
+        return out
+
+
+class OptimizationPaybackScenario(BaseScenario):
+    """An optimization costing ``implementation_cost`` that cuts a ``monthly_bill`` by ``reduction``."""
+    implementation_cost: Quantity
+    monthly_bill: Quantity            # USD per month
+    reduction: float
+
+    @property
+    def monthly_savings(self) -> Quantity:
+        return (self.monthly_bill * self.reduction).to("USD/month")
+
+    @property
+    def payback(self) -> Quantity:
+        return (self.implementation_cost / self.monthly_savings).to("month")
+
+
+class PlatformBenefitScenario(BaseScenario):
+    """A shared platform costing ``platform_cost`` per month that saves each of ``models`` model
+    teams ``hours_saved`` per month at ``engineer_rate``."""
+    models: int
+    hours_saved: Quantity             # hours per model per month
+    engineer_rate: Quantity           # USD per hour
+    platform_cost: Quantity           # USD per month
+
+    @property
+    def gross_benefit(self) -> Quantity:
+        return (self.models * self.hours_saved * self.engineer_rate).to("USD/month")
+
+    @property
+    def net_benefit(self) -> Quantity:
+        return (self.gross_benefit - self.platform_cost).to("USD/month")
+
+    @property
+    def benefit_cost_ratio(self) -> float:
+        return (self.gross_benefit / self.platform_cost).to("").magnitude
