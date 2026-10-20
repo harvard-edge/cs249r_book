@@ -19093,3 +19093,187 @@ class DisclosurePenaltyScenario(BaseScenario):
     @property
     def total(self) -> float:
         return self.per_day_penalty + sum(self.others.values())
+
+
+# --- Premises no sensor reports: a new machine, shield credit, latch compliance (added 2026-10-20) ---
+
+class PackagingCellScenario(BaseScenario):
+    """A packaging cell's carriage that must stop before a fixed stop line.
+
+    The pre-brake delay is a chain of four allocations (event to usable frame,
+    transfer through admission, command delivery, brake onset); the stop is the
+    elementary constant-deceleration budget (``StoppingBudgetModel``) with the
+    allocated reserve held back from the clearance, so the speed ceiling is the
+    positive root of ``v tau + v^2/(2a) = clearance - reserve``. The supervisory
+    settings (force limiter, thermistor trip, stall timeout, bus overvoltage trip,
+    kinematic-check rate) are selected thresholds, not measured limits.
+    """
+    mass: Quantity               # total moving mass, including the load
+    speed: Quantity
+    clearance: Quantity          # to the fixed stop line
+    reserve: Quantity            # allocated uncertainty and clearance reserve
+    deceleration: Quantity       # braking lower bound after the delay
+    exposure: Quantity           # event to usable frame
+    processing: Quantity         # transfer, inference, scheduling, and admission
+    bus: Quantity                # admitted command to brake-driver delivery
+    onset: Quantity              # delivery to full assumed deceleration
+    check_rate: Optional[Quantity] = None
+    force_limit: Optional[Quantity] = None
+    temperature_trip: Optional[Quantity] = None
+    stall_timeout: Optional[Quantity] = None
+    bus_trip: Optional[Quantity] = None
+
+    @property
+    def delay(self) -> Quantity:
+        return (self.exposure + self.processing + self.bus + self.onset).to("ms")
+
+    @property
+    def stop_budget(self) -> Quantity:
+        return (self.clearance - self.reserve).to("mm")
+
+    @property
+    def result(self):
+        from .solvers import StoppingBudgetModel
+        return StoppingBudgetModel().solve(self.speed, self.delay, self.deceleration, self.clearance,
+                                           physical_margin=self.reserve)
+
+    @property
+    def remaining(self) -> Quantity:
+        """Clearance left before the stop line (the reserve not subtracted)."""
+        return (self.clearance - self.result.stop_distance).to("mm")
+
+    @property
+    def deficit(self) -> Quantity:
+        return (self.result.stop_distance - self.clearance).to("mm")
+
+    @property
+    def kinetic_energy(self) -> Quantity:
+        from ..physics.robotics.actuation import calc_kinetic_energy
+        return calc_kinetic_energy(self.mass, self.speed).to("J")
+
+    @property
+    def root_terms(self):
+        """Operands of the positive root: (a tau, 2 a d, sqrt((a tau)^2 + 2 a d))."""
+        a_tau = (self.deceleration * self.delay).to("m/s")
+        two_a_d = (2 * self.deceleration * self.stop_budget).to("m**2/s**2")
+        return a_tau, two_a_d, ((a_tau ** 2 + two_a_d) ** 0.5).to("m/s")
+
+
+class ShieldCoverageBillScenario(BaseScenario):
+    """A fleet's zero-event proposal log and a shield's tested coverage against a hazard target."""
+    fleet_units: int
+    cycle_days: Quantity
+    hours_per_day: Quantity      # operating hours per unit per calendar day
+    coverage: float              # class-specific interception coverage
+    common_cause_rate: Quantity  # hardware and common-cause residual, per hour
+    target_rate: Quantity        # system hazard target, per hour
+    confidence: float
+    hazardous_proposals: int = 0
+
+    @property
+    def result(self):
+        from .solvers import ShieldCoverageBillModel
+        return ShieldCoverageBillModel().solve(self.fleet_units, self.cycle_days, self.hours_per_day,
+                                               self.coverage, self.common_cause_rate, self.target_rate,
+                                               self.confidence)
+
+
+class LatchSeriesSpringScenario(BaseScenario):
+    """A series spring sized so ``machine``'s arm stays under ``site``'s declared latch floor.
+
+    The arm's stop is held to what the guarded approach on the rigid plate needs
+    (``calc_latch_contact_stopping_profile``); at the fast approach the series
+    stiffness must keep tripwire force plus driven stroke under the floor
+    (``calc_passive_compliance_stiffness_bound``), and the spring element is the
+    stiffness that gives it in series with the plate. Coasting peaks price the
+    case where the response cuts torque at the tripwire instead
+    (``calc_coasting_contact_peak_force``).
+    """
+    site: Any                    # EmbodiedSiteScenario (latch stiffness, floor, tripwire, speeds)
+    machine: Any                 # EmbodiedMobileManipulator (arm effective contact mass)
+    preload: Quantity = Q_(0.0, "N")
+
+    def _profile(self, speed: Quantity, stiffness: Optional[Quantity] = None):
+        from ..physics.robotics.stopping import calc_latch_contact_stopping_profile
+        return calc_latch_contact_stopping_profile(approach_velocity=speed, latch_stiffness=stiffness,
+                                                   scenario=self.site)
+
+    @property
+    def arm_deceleration(self) -> Quantity:
+        return self._profile(self.site.v_latch_approach)["a_arm_needed"].to("m/s**2")
+
+    @property
+    def arm_deceleration_rigid_fast(self) -> Quantity:
+        return self._profile(self.site.v_latch_high)["a_arm_needed"].to("m/s**2")
+
+    def _bound(self):
+        from ..physics.robotics.actuation import calc_passive_compliance_stiffness_bound
+        s = self.site
+        return calc_passive_compliance_stiffness_bound(s.f_latch_limit, s.f_latch_tripwire, s.v_latch_high,
+                                                       s.t_contact_response, self.arm_deceleration)
+
+    @property
+    def driven_stroke(self) -> Quantity:
+        return self._bound()[1].to("mm")
+
+    @property
+    def series_stiffness_max(self) -> Quantity:
+        return self._bound()[0].to("N/m")
+
+    @property
+    def spring_stiffness_max(self) -> Quantity:
+        from ..physics.robotics.learning import calc_complementary_series_stiffness
+        return calc_complementary_series_stiffness(self.series_stiffness_max, self.site.k_latch).to("N/m")
+
+    @property
+    def spring_stroke(self) -> Quantity:
+        """Spring deflection at the floor force."""
+        return ((self.site.f_latch_limit - self.preload) / self.spring_stiffness_max).to("mm")
+
+    def coasting_peak(self, stiffness: Quantity, speed: Quantity) -> Quantity:
+        from ..physics.robotics.actuation import calc_coasting_contact_peak_force
+        return calc_coasting_contact_peak_force(speed, self.machine.arm_effective_contact_mass, stiffness,
+                                                self.site.f_latch_tripwire).to("N")
+
+    @property
+    def coasting_rigid_guarded(self) -> Quantity:
+        return self.coasting_peak(self.site.k_latch, self.site.v_latch_approach)
+
+    @property
+    def coasting_rigid_fast(self) -> Quantity:
+        return self.coasting_peak(self.site.k_latch, self.site.v_latch_high)
+
+    @property
+    def coasting_spring_fast(self) -> Quantity:
+        return self.coasting_peak(self.series_stiffness_max, self.site.v_latch_high)
+
+    @property
+    def spring_fast_profile(self):
+        """The latch profile at the fast approach with the series stiffness at its bound."""
+        return self._profile(self.site.v_latch_high, self.series_stiffness_max)
+
+
+class RestrictedTransitScenario(BaseScenario):
+    """``site``'s aisle leg at ``restricted_speed`` against its normal aisle speed."""
+    site: Any                    # EmbodiedSiteScenario (aisle speed, aisle length)
+    restricted_speed: Quantity
+
+    @property
+    def speed_cut(self) -> float:
+        return float((1 - self.restricted_speed / self.site.v_aisle).to("").magnitude)
+
+    @property
+    def leg_time_nominal(self) -> Quantity:
+        return (self.site.aisle_length / self.site.v_aisle).to("s")
+
+    @property
+    def leg_time_restricted(self) -> Quantity:
+        return (self.site.aisle_length / self.restricted_speed).to("s")
+
+    @property
+    def leg_time_added(self) -> Quantity:
+        return (self.leg_time_restricted - self.leg_time_nominal).to("s")
+
+    @property
+    def time_increase(self) -> float:
+        return float((self.leg_time_added / self.leg_time_nominal).to("").magnitude)

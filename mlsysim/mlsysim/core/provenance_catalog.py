@@ -4887,3 +4887,34 @@ LI_2025_BIAS_BEHIND_THE_WHEEL = _lit(
         "2026-10-20."
     ),
 )
+
+
+# --- Engineering Physical AI: premises no sensor reports (added 2026-10-20) ---
+SICK_DETEC4_SET_30_450 = _ds(
+    "prov:sick-detec4-set-30-450",
+    "SICK AG, deTec4 Set 30/450 safety light curtain, product data sheet (part no. 1103376, 2024-11-26)",
+    "https://www.motionworld.com/assets/SICK-deTec4_Set_30_450-Datasheet.pdf",
+    verified="2026-10-20",
+    notes=("Read 2026-10-20: resolution 30 mm, protective field height 450 mm, scanning range 30 m; response "
+           "time 10 ms (uncoded), 14 ms (code 1 or code 2); Type 4 (IEC 61496-1); SIL 3 (IEC 61508); "
+           "Category 4 and PL e (ISO 13849-1); PFHD single device 15.3 x 10^-9, cascade with one guest "
+           "30.5 x 10^-9. The set ships deTec4 Prime parts (C4P-EA04531C00, C4P-SA04531A00)."),
+)
+
+TRL_PPR073_2006 = _report(
+    "prov:trl-ppr073-2006",
+    "Lambourn, R. F. and Viner, H. E. (2006), Friction Tests on Contaminated Road Surfaces, TRL "
+    "Published Project Report PPR073, TRL Limited",
+    "https://www.trl.co.uk/uploads/trl/documents/PPR073.pdf",
+    notes=("Table 5.1, averaged locked-wheel coefficients of friction, read 2026-10-20. Skid cars "
+           "(Peugeot, Fiesta) on treaded tyres; PFT = pavement friction tester trailer with a smooth "
+           "ASTM test tyre. The concrete wet PFT value 0.52 is for pre-wetted tests only (0.48 "
+           "including self-wetted tests)."),
+)
+
+AGILITY_TOTES_2025 = _report(
+    "prov:agility-digit-100k-totes-2025",
+    "Agility Robotics (2025), Digit moves over 100,000 totes in commercial deployment, 20 November 2025",
+    "https://www.agilityrobotics.com/content/digit-moves-over-100k-totes",
+    notes="Vendor-reported count of totes moved by Digit at a first customer site (GXO, Flowery Branch).",
+)

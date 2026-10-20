@@ -93,6 +93,8 @@ RobotGrounding = _load("robot_grounding", "RobotGrounding", "Cited results of gr
 HumanMotion = _load("human_motion", "HumanMotion", "Cited measurements of how fast people walk (Bohannon 1997).")  # added 2026-10-20
 ContactForceMeasurements = _load("contact_force_measurements", "ContactForceMeasurements", "Measured transient contact forces of collaborative arms (Kirschner et al. 2022).")  # added 2026-10-20
 RoadVehicleSafety = _load("road_vehicle_safety", "RoadVehicleSafety", "Cited miles-to-demonstrate requirements (RAND RR-1478) and a dated driverless-fleet exposure total (Kusano et al. 2025).")
+ContaminatedSurfaceFriction = _load("contaminated_surface_friction", "ContaminatedSurfaceFriction", "Measured locked-wheel friction on contaminated surfaces (TRL PPR073, Lambourn and Viner 2006).")  # added 2026-10-20
+RobotDeployments = _load("robot_deployments", "RobotDeployments", "Vendor-reported figures of commercial robot deployments (Agility Digit totes).")  # added 2026-10-20
 # Network architectures (added 2026-10-20)
 NetflixPrize = _load("netflix_prize", "NetflixPrize", "Cited figures of the Netflix Prize and what Netflix shipped from it (Johnston 2012; Amatriain and Basilico 2012).")
 KerasApplications = _load("keras_applications", "KerasApplications", "Keras Applications model table: top-1 accuracy and time per inference step on a CPU and an A100.")
@@ -414,6 +416,8 @@ class Literature(Registry):
     RobotPerception = RobotPerception  # added 2026-10-20
     CompressionResults = CompressionResults  # added 2026-10-20
     RoadVehicleSafety = RoadVehicleSafety  # added 2026-10-20
+    ContaminatedSurfaceFriction = ContaminatedSurfaceFriction  # added 2026-10-20
+    RobotDeployments = RobotDeployments  # added 2026-10-20
     RobotGrounding = RobotGrounding  # added 2026-10-20
     HumanMotion = HumanMotion  # added 2026-10-20
     ContactForceMeasurements = ContactForceMeasurements  # added 2026-10-20

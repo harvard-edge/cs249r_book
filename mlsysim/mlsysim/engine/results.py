@@ -124,6 +124,7 @@ __all__ = [
     "ContinuousDeratingResult",
     "DriveBusResult",
     "ZeroFailureResult",
+    "ShieldCoverageBillResult",  # added 2026-10-20
     "ThrottledStageResult",
     # Fleet orchestration (added 2026-10-20)
     "JobSizeMixResult",
@@ -1035,6 +1036,27 @@ class StoppingBudgetResult(SolverResult):
     def travel_over(self, duration: Quantity) -> Quantity:
         """Distance covered at ``speed`` over ``duration`` (the cost of one term of the delay)."""
         return (self.speed * duration).to("meter")
+
+
+class ShieldCoverageBillResult(SolverResult):
+    """Result from ShieldCoverageBillModel: what a shield's tested coverage buys against a hazard target
+    (added 2026-10-20). Rates are per operating hour."""
+    exposure: Quantity                    # adjudicated proposal-log hours
+    ln_inv_alpha: float                   # -ln(1 - C)
+    proposal_rate_upper: Quantity         # zero-event bound on hazardous proposals
+    residual_rate: Quantity               # proposal bound x (1 - coverage) + common cause
+    meets_target: bool
+    required_coverage: float              # coverage that would meet the target at this proposal bound
+    proposal_rate_limit: Quantity         # proposal bound the target needs at the stated coverage
+    exposure_needed: Quantity             # failure-free proposal hours that bound it
+    days_needed: Quantity                 # the same exposure on the fleet, calendar days
+    days_beyond_cycle: Quantity
+    coverage_trials: int                  # seeded hazards, no miss, that bound coverage at C
+    joint_confidence: float               # each of two one-sided bounds at 1 - alpha/2 (Bonferroni)
+    coverage_trials_joint: int
+    ln_inv_half_alpha: float              # -ln(alpha / 2)
+    proposal_rate_upper_joint: Quantity
+    residual_rate_joint: Quantity
 
 
 class TractionLossResult(SolverResult):

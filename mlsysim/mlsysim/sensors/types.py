@@ -218,3 +218,36 @@ class SafetyLaserScanner(Sensor):
     @classmethod
     def _validate_response_standard(cls, v):
         return v if v is None else require_dimensionality(v, ureg.second, "response_time_standard_mode")
+
+
+class SafetyLightCurtain(Sensor):
+    """Certified safety light curtain (an AOPD type-tested under IEC 61496-2), added 2026-10-20.
+
+    Like a safety scanner, its output reports only that a beam is interrupted.
+    The response time is its contribution to the certified stopping chain, and
+    ``pfh_d`` is the stated mean probability of a dangerous failure per hour.
+    """
+
+    resolution: Quantity                 # smallest detected object diameter
+    protective_field_height: Quantity
+    response_time: Quantity              # uncoded response
+    response_time_coded: Optional[Quantity] = None
+    iec61496_type: str                   # e.g. "Type 4"
+    performance_level: str               # ISO 13849-1, e.g. "PL e, Category 4"
+    safety_integrity_level: str          # IEC 61508, e.g. "SIL 3"
+    pfh_d: Quantity                      # dangerous failures per hour, single device
+
+    @field_validator("resolution", "protective_field_height", mode="after")
+    @classmethod
+    def _validate_lengths(cls, v):
+        return require_dimensionality(v, ureg.meter, "length")
+
+    @field_validator("response_time", mode="after")
+    @classmethod
+    def _validate_curtain_response(cls, v):
+        return require_dimensionality(v, ureg.second, "response_time")
+
+    @field_validator("response_time_coded", mode="after")
+    @classmethod
+    def _validate_curtain_coded(cls, v):
+        return v if v is None else require_dimensionality(v, ureg.second, "response_time_coded")

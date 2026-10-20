@@ -5328,3 +5328,55 @@ def test_responsibility_groups_and_records():
     assert sum(e["miss_rate_child_pct"] for e in li) / 8 == pytest.approx(43.89, abs=0.005)
     w = Literature.PedestrianAp75BySkinType.entries
     assert round(sum(e["ap75_darker_pct"] for e in w) / 8, 1) == Literature.Fairness.WilsonAp75AverageDarkerPct
+
+
+def test_premises_no_sensor_reports():
+    """Oil-film budget, film detector, restricted transit, packaging cell, shield bill, latch spring (added 2026-10-20)."""
+    from mlsysim import Literature, Sensors
+    f = Scenarios.WarehouseFinishedStopOilFilm.result
+    assert f.deceleration.m_as("m/s**2") == pytest.approx(0.4903325)
+    assert f.required_distance.m_as("m") == pytest.approx(2.13182, rel=1e-5) and not f.fits
+    d = Scenarios.WarehouseFilmDetectorRange.result
+    assert (d.required_distance + d.added_delay_travel).m_as("mm") == pytest.approx(1098.9925)
+    z = Scenarios.WarehouseFilmDetectorClosure.result
+    assert z.trials_for_target == 2995 and z.rate_upper_exact == pytest.approx(0.00299124955, rel=1e-8)
+    r = Scenarios.WarehouseRestrictedTransit
+    assert r.speed_cut == pytest.approx(3 / 13) and r.time_increase == pytest.approx(0.3)
+    assert r.leg_time_restricted.m_as("s") == pytest.approx(30.0)
+    cell = Scenarios.PackagingCellTransit
+    assert cell.delay.m_as("ms") == pytest.approx(64.0)
+    assert cell.result.stop_distance.m_as("mm") == pytest.approx(171.0)
+    assert cell.result.speed_ceiling.m_as("m/s") == pytest.approx(0.5471828, rel=1e-6)
+    assert cell.kinetic_energy.m_as("J") == pytest.approx(13.5)
+    a_tau, two_a_d, root = cell.root_terms
+    assert (a_tau.m_as("m/s"), two_a_d.m_as("m**2/s**2")) == pytest.approx((0.96, 1.35))
+    assert (root - a_tau).m_as("m/s") == pytest.approx(cell.result.speed_ceiling.m_as("m/s"))
+    mode = Scenarios.PackagingCellRestrictedMode
+    assert mode.result.stop_distance.m_as("mm") == pytest.approx(121 / 3) and mode.remaining.m_as("mm") == pytest.approx(59 / 3)
+    assert Scenarios.PackagingCellHalfProcessing.result.speed_ceiling.m_as("m/s") == pytest.approx(0.6613327, rel=1e-6)
+    assert Scenarios.PackagingCellHalfBrake.result.speed_ceiling.m_as("m/s") == pytest.approx(0.4715251, rel=1e-6)
+    q = Scenarios.PackagingCellQualifiedBrake
+    assert q.result.speed_ceiling.m_as("m/s") == pytest.approx(0.5242167, rel=1e-6)
+    assert q.result.stop_distance.m_as("mm") == pytest.approx(42.416667, rel=1e-6)
+    curtain = Sensors.SafetyLightCurtain.SICK_deTec4_Set_30_450
+    assert curtain.response_time.m_as("ms") == 10.0 and curtain.pfh_d.m_as("1/hour") == pytest.approx(15.3e-9)
+    assert Scenarios.PackagingCellCurtainPath.result.speed_ceiling.m_as("m/s") == pytest.approx(0.8778493, rel=1e-6)
+    b = Scenarios.ShieldCoverageBill.result
+    assert b.exposure.m_as("hour") == pytest.approx(216000.0)
+    assert b.proposal_rate_upper.m_as("1/hour") == pytest.approx(1.386913e-5, rel=1e-6)
+    assert b.residual_rate.m_as("1/hour") == pytest.approx(1.386913e-9, rel=1e-6) and not b.meets_target
+    assert b.required_coverage == pytest.approx(0.9999278974, rel=1e-9)
+    assert b.days_needed.m_as("day") == pytest.approx(124.822178, rel=1e-6)
+    assert (b.coverage_trials, b.coverage_trials_joint) == (29956, 36887)
+    assert b.residual_rate_joint.m_as("1/hour") == pytest.approx(1.7078146e-9, rel=1e-6)
+    s = Scenarios.WarehouseLatchSeriesSpring
+    assert s.arm_deceleration.m_as("m/s**2") == pytest.approx(2.9508197, rel=1e-6)
+    assert s.driven_stroke.m_as("mm") == pytest.approx(1.8944444, rel=1e-6)
+    assert s.series_stiffness_max.m_as("N/m") == pytest.approx(44868.035, rel=1e-6)
+    assert s.spring_stiffness_max.m_as("N/m") == pytest.approx(50536.746, rel=1e-6)
+    assert s.spring_stroke.m_as("mm") == pytest.approx(1.9787582, rel=1e-6)
+    assert [p.m_as("N") for p in (s.coasting_rigid_guarded, s.coasting_rigid_fast, s.coasting_spring_fast)] == \
+        pytest.approx([67.416615, 219.601913, 74.894354], rel=1e-6)
+    t = Literature.ContaminatedSurfaceFriction
+    assert (t.AsphaltEngineOilPft, t.ConcreteDrySkidCars) == (0.01, 0.85)
+    assert Literature.RobotDeployments.AgilityDigitTotesMoved == 100000
