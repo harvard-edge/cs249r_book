@@ -398,6 +398,25 @@ LeRobotEpisodeHistogram = _Series(
     "Distribution of episodes per public LeRobot dataset.",
 )
 
+# Sim-to-real ablations of a dexterous hand (added 2026-10-20)
+DactylPhysicalTrials = _Series(
+    "dactyl_physical_trials",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="OpenAI: Andrychowicz et al. (2020), Learning Dexterous In-Hand Manipulation, IJRR 39(1), "
+            "Tables 4 and 5 (block, state), arXiv:1808.00177v5",
+        url="https://arxiv.org/abs/1808.00177",
+        verified="2026-10-18",
+        notes=(
+            "Consecutive rotations in each of 10 physical trials per condition, sorted values as "
+            "published; printed_median is the table's own median column. Table 4 holds randomization "
+            "groups out; Table 5 compares LSTM and feed-forward policy and value networks under all "
+            "randomizations (its LSTM row repeats Table 4's all-randomizations row)."
+        ),
+    ),
+    "Dactyl's physical-hand trials by training condition.",
+)
+
 EdgeInferenceOrin = _Series(
     "mlperf_inference_edge_orin",
     Provenance(

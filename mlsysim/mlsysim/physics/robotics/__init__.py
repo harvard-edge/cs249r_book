@@ -62,6 +62,21 @@ from .assurance import (
     calc_shielded_system_hazard_rate,
 )
 
+# Policy training (added 2026-10-20)
+from .learning import (
+    calc_discount_effective_horizon,
+    calc_discounted_weight,
+    calc_discount_for_retained_weight,
+    calc_trial_campaign_wall_time,
+    calc_iterative_decoder_latency,
+    calc_max_decoder_evaluations,
+    calc_series_stiffness,
+    calc_complementary_series_stiffness,
+    calc_impact_stiffness_for_force,
+    calc_penalty_stiffness_from_penetration,
+    calc_contact_timescale,
+)
+
 __all__ = [
     "CANFD_DATA_FIELD_SIZES",
     "_scurve_si_inputs",
@@ -114,5 +129,16 @@ __all__ = [
     "calc_clopper_pearson_zero_failure_bound",
     "calc_zero_failure_sample_size",
     "calc_shielded_system_hazard_rate",
+    "calc_discount_effective_horizon",
+    "calc_discounted_weight",
+    "calc_discount_for_retained_weight",
+    "calc_trial_campaign_wall_time",
+    "calc_iterative_decoder_latency",
+    "calc_max_decoder_evaluations",
+    "calc_series_stiffness",
+    "calc_complementary_series_stiffness",
+    "calc_impact_stiffness_for_force",
+    "calc_penalty_stiffness_from_penetration",
+    "calc_contact_timescale",
 ]
 

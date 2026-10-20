@@ -2388,3 +2388,84 @@ def test_repair_and_support_residency():
     assert s.shared_fraction == approx(0.75) and s.residency_factor == approx(11)
     assert s.recompute.to("s").magnitude == approx(0.32488215)
     assert s.reload.to("ms").magnitude == approx(5.24288)
+
+
+# --- Policy training (added 2026-10-20) ---
+
+def test_latch_opening_discount():
+    d = Scenarios.LatchOpeningDiscount
+    assert d.decisions == 320
+    assert d.terminal_weight == approx(0.0401109, rel=1e-5)
+    assert d.horizon_steps == approx(100.0)
+    assert d.horizon_time.to("s").magnitude == approx(2.5)
+    assert d.retaining_discount == approx(0.9978363, rel=1e-6)
+    fast = Scenarios.LatchOpeningDiscountDoubledRate
+    assert fast.decisions == 640
+    assert fast.horizon_time.to("s").magnitude == approx(1.25)
+
+
+def test_latch_decoder_budget():
+    b = Scenarios.LatchDecoderBudget
+    assert b.per_evaluation.to("ms").magnitude == approx(2.5)
+    assert b.flow_latency.to("ms").magnitude == approx(18.0)
+    assert b.one_pass_slack.to("ms").magnitude == approx(10.0)
+    assert b.denoising_slack.to("ms").magnitude == approx(2.0)
+    assert b.denoising_overrun_under_jitter.to("ms").magnitude == approx(3.0)
+    assert b.one_pass_end_under_jitter.to("ms").magnitude == approx(45.0)
+    assert (b.evaluations_within_step, b.evaluations_within_renewal) == (6, 14)
+    assert b.evaluation_room(b.setpoint_step) == approx(6.8)
+    assert b.evaluation_room(b.renewal_less_jitter) == approx(14.8)
+    assert b.latency_at(14).to("ms").magnitude == approx(43.0)
+
+
+def test_latch_trial_campaign_and_parallel_sim():
+    r = Scenarios.LeggedGymQuadrupedRun
+    assert (r.batch, r.samples) == (98_304, 147_456_000)
+    assert r.throughput.to("1/s").magnitude == approx(122_880)
+    assert r.simulated_experience.to("day").magnitude == approx(34.133333)
+    c = Scenarios.LatchTrialCampaign
+    assert c.execution_time.to("day").magnitude == approx(92.592593)
+    assert c.automated_time.to("day").magnitude == approx(138.888889)
+    assert c.manual_time.to("day").magnitude == approx(439.814815)
+    assert c.farm_manual_time.to("day").magnitude == approx(31.415344)
+    assert c.manual_reset_share == approx(30 / 38)
+    assert c.reversals == 4_000_000
+    assert (c.seeded_trials, c.seeded_reversals) == (750, 3000)
+    assert c.simulated_steps == 320_000_000
+    assert c.simulated_time.to("minute").magnitude == approx(43.402778)
+    assert c.simulation_speedup > 1000
+
+
+def test_latch_contact_deadlines_and_exploit():
+    x = Scenarios.LatchContactDeadlines
+    assert x.deadline_fast.to("ms").magnitude == approx(2.5)
+    assert x.deadline_guarded.to("ms").magnitude == approx(8.333333)
+    assert x.brake_onset_fast.to("ms").magnitude == approx(2.375)
+    assert x.time_left_fast.to("ms").magnitude == approx(0.125)
+    assert x.time_left_guarded.to("ms").magnitude == approx(5.083333)
+    e = Scenarios.LatchSoftSpringExploit
+    assert e.moving_mass.to("kg").magnitude == approx(9.0)
+    assert e.penalty_stiffness.to("N/m").magnitude == approx(15_625)
+    assert e.simulated_peak.to("N").magnitude == approx(37.5)
+    assert e.rigid_peak.to("N").magnitude == approx(189.736660)
+    assert e.guarded_rigid_peak.to("N").magnitude == approx(56.920998)
+    assert e.break_even_arm_stiffness.to("N/m").magnitude == approx(153_846.15)
+    assert e.chain_peak_force(e.break_even_arm_stiffness).to("N").magnitude == approx(100.0)
+    assert e.plate_over_penalty == approx(25.6)
+    assert e.penalty_timescale.to("ms").magnitude == approx(24.0)
+
+
+def test_linear_drive_gap_fine_tune_and_dactyl():
+    g = Scenarios.LinearDriveRealityGap
+    assert g.simulated_time_to_target.to("ms").magnitude == approx(20.0)
+    assert g.physical_time_to_target.to("ms").magnitude == approx(40.0)
+    assert g.unmodeled_travel.to("mm").magnitude == approx(9.9)
+    f = Scenarios.LatchResidualFineTune
+    assert f.setpoint_rate.to("Hz").magnitude == approx(40.0)
+    assert f.active_time.to("s").magnitude == approx(500.0)
+    assert f.exceed_samples == 300
+    a = Scenarios.DactylPhysicalAblation
+    for table in ("4", "5"):
+        for cond in a.conditions(table):
+            assert len(a.trials(cond, table)) == 10
+            assert a.median(cond) == approx(a.printed_median(cond))
