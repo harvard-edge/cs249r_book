@@ -434,3 +434,18 @@ __all__ += [
     "calc_interface_bandwidth",
     "calc_word_overlap",
 ]
+
+# --- Correlated samples and imitation-learning bounds (added 2026-10-20) ---
+from .statistics import (
+    calc_effective_sample_size,
+    calc_behavior_cloning_cost_bound,
+    calc_dagger_cost_bound,
+)
+from .constants import AGE_OF_UNIVERSE
+
+__all__ += [
+    "calc_effective_sample_size",
+    "calc_behavior_cloning_cost_bound",
+    "calc_dagger_cost_bound",
+    "AGE_OF_UNIVERSE",
+]
