@@ -1286,6 +1286,18 @@ class TokenMixScenario(BaseScenario):
     prompt_column: str
     output_column: str
     floors: DecodeScenario
+
+    @property
+    def result(self):
+        from ..literature.registry import Literature
+        from .solvers import TokenMixModel
+        rows = getattr(Literature, self.series_name).entries
+        f = self.floors.result
+        return TokenMixModel().solve([r[self.prompt_column] for r in rows],
+                                     [r[self.output_column] for r in rows],
+                                     f.compute_time, f.memory_time)
+
+
 # --- Distributed training (added 2026-10-20) ----------------------------------
 
 class ParallelLayoutScenario(BaseScenario):
@@ -1566,12 +1578,11 @@ class ScalingSeriesScenario(BaseScenario):
     @property
     def result(self):
         from ..literature.registry import Literature
-        from .solvers import TokenMixModel
-        rows = getattr(Literature, self.series_name).entries
-        f = self.floors.result
-        return TokenMixModel().solve([r[self.prompt_column] for r in rows],
-                                     [r[self.output_column] for r in rows],
-                                     f.compute_time, f.memory_time)
+        from .solvers import ScalingSeriesModel
+        rows = getattr(Literature.Series, self.series_name).entries
+        return ScalingSeriesModel().solve(rows, self.specs)
+
+
 # --- Collective communication (added 2026-10-20) ----------------------------
 
 class AllReduceScheduleScenario(BaseScenario):
@@ -1787,9 +1798,6 @@ class OverlapBudgetScenario(BaseScenario):
         from .solvers import OverlapBudgetModel
         return OverlapBudgetModel().solve(self.workload, self.bytes_per_value, self.backward_per_layer,
                                           self.bucket_size, self.time_per_bucket)
-        from .solvers import ScalingSeriesModel
-        rows = getattr(Literature.Series, self.series_name).entries
-        return ScalingSeriesModel().solve(rows, self.specs)
 
 
 class ResidualShareScenario(BaseScenario):
