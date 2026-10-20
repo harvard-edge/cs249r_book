@@ -385,3 +385,8 @@ from .neural import DenseNetworkModel, EpochOverheadModel  # neural computation 
 __all__ += ["DenseNetworkModel", "EpochOverheadModel"]
 from .trends import ParameterGrowthModel  # added 2026-10-20
 __all__ += ["ParameterGrowthModel"]
+
+# --- Agent security (added 2026-10-20) ---
+from .security import InjectionExposureModel, TurnExposureModel, PolicyComparisonModel
+
+__all__ += ["InjectionExposureModel", "TurnExposureModel", "PolicyComparisonModel"]

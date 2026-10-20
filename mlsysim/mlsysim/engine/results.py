@@ -1596,6 +1596,10 @@ class ZeroFailureResult(SolverResult):
     coefficient: float               # -ln(1 - C)
     rate_upper: float
     one_in: float
+    # Exact binomial bound and the campaign a target needs (added 2026-10-20).
+    rate_upper_exact: Optional[float] = None         # 1 - (1 - C)^(1/n)
+    trials_for_target: Optional[int] = None          # ceil(ln(1 - C) / ln(1 - target))
+    trials_for_target_approx: Optional[float] = None  # -ln(1 - C) / target (rule of three)
 
 
 class ThrottledStageResult(SolverResult):
@@ -2686,3 +2690,46 @@ class ParameterGrowthResult(SolverResult):
 
 
 __all__ += ["ParameterGrowthResult"]
+
+
+# --- Agent security: injection exposure and defense evaluation (added 2026-10-20) ---
+class InjectionExposureResult(SolverResult):
+    """Result from InjectionExposureModel: per-task payload exposure by read volume."""
+    exposure: Dict[str, float]        # 1 - (1 - q)^n per workload
+    linear: Dict[str, float]          # q n, the small-exposure estimate
+    screened_rate: float              # q m, payload rate behind the screen
+    screened: Dict[str, float]        # 1 - (1 - q m)^n per workload
+    screened_per_cohort: Dict[str, float]  # screened exposure x cohort tasks
+
+
+class TurnExposureResult(SolverResult):
+    """Result from TurnExposureModel: exposure counted in turns, and the same reads counted as items."""
+    per_turn: float                   # 1 - (1 - q)^r
+    trajectory: float                 # 1 - (1 - p_turn)^H
+    reads: int                        # r H
+    same_reads: float                 # 1 - (1 - q)^(r H); equals trajectory
+
+
+class PolicyComparisonResult(SolverResult):
+    """Result from PolicyComparisonModel: attack success and benign acceptance for two policies."""
+    baseline_lower: float             # confirmed harm / attacked
+    candidate_lower: float
+    baseline_upper: float             # (confirmed + unresolved) / attacked
+    candidate_upper: float
+    reduction_observed: float         # 1 - candidate_lower / baseline_lower
+    reduction_upper: float            # both arms at their upper rates
+    reduction_least_favorable: float  # candidate upper against baseline lower
+    baseline_acceptance: float        # accepted benign / benign
+    candidate_acceptance: float
+    lost_benign: int
+    extra_false_blocks: int
+    cost_rise: float                  # p_acc(baseline) / p_acc(candidate) - 1
+    baseline_cost_per_accepted: Optional[float] = None   # attempt cost / p_acc, when priced
+    candidate_cost_per_accepted: Optional[float] = None
+
+
+__all__ += [
+    "InjectionExposureResult",
+    "TurnExposureResult",
+    "PolicyComparisonResult",
+]

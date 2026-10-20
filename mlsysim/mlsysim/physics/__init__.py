@@ -631,3 +631,7 @@ __all__ += [
     "calc_linf_corner_l2",
     "calc_float32_bit_flip",
 ]
+# --- Injection exposure (added 2026-10-20) ---
+from .agents import calc_injection_exposure, calc_injection_read_budget
+
+__all__ += ["calc_injection_exposure", "calc_injection_read_budget"]

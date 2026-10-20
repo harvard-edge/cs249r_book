@@ -63,6 +63,7 @@ ExtractionAttacks = _load("extraction_attacks", "ExtractionAttacks", "Cited extr
 DataPoisoning = _load("data_poisoning", "DataPoisoning", "Cited training-data poisoning results (Nightshade doses; web-scale poisoning cost).")
 DifferentialPrivacy = _load("differential_privacy", "DifferentialPrivacy", "Cited differentially private training results (Abadi et al. 2016 accountant comparison; MNIST and CIFAR-10 utility).")
 SecurityIncidents = _load("security_incidents", "SecurityIncidents", "Cited figures of documented security incidents (Stuxnet, Mirai).")
+PromptCacheAudit = _load("prompt_cache_audit", "PromptCacheAudit", "Cited results of a timing audit of prompt caching in model APIs (Gu et al. 2025).")  # added 2026-10-20
 MlOperations = _load("ml_operations", "MlOperations", "Measured ML-operations results (data validation anomalies, model-load latency, interleaving).")  # added 2026-10-20
 ToolInterception = _load("tool_interception", "ToolInterception", "Cited tool-interception results for augmented LLM serving (InferCept 2024).")  # added 2026-10-20
 SandboxIsolation = _load("sandbox_isolation", "SandboxIsolation", "Cited results on containing agent code: Cybench task count, gVisor system-call latency.")  # added 2026-10-20
@@ -363,6 +364,7 @@ class Literature(Registry):
     AgentRetrieval = AgentRetrieval  # added 2026-10-20
     SummarizationFaithfulness = SummarizationFaithfulness  # added 2026-10-20
     PrefixCaching = PrefixCaching  # added 2026-10-20
+    PromptCacheAudit = PromptCacheAudit  # added 2026-10-20
     ToolInterception = ToolInterception  # added 2026-10-20
     SandboxIsolation = SandboxIsolation  # added 2026-10-20
     MlOperations = MlOperations  # added 2026-10-20

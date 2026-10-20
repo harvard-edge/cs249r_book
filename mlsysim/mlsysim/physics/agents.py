@@ -272,3 +272,30 @@ def calc_setup_share(setup, work):
 def calc_work_for_setup_cap(setup, cap: float):
     """Useful work per call that holds setup to a share ``phi``: ``W >= T_setup (1 - phi) / phi``."""
     return setup * (1 - cap) / cap
+
+
+# --- Injection exposure (added 2026-10-20) -----------------------------------
+# How often a task meets attacker text: the complement of every untrusted read
+# being clean. The same form counts turns when the per-turn chance is known.
+
+
+def calc_injection_exposure(payload_fraction: float, reads: float) -> float:
+    """
+    Chance that a task reading ``reads`` independent untrusted items meets a payload.
+
+        Pr(exp) = 1 - (1 - q)^n
+
+    ``q`` is the fraction of items carrying a payload. While q n is small,
+    Pr(exp) ~ q n; a screen that misses a fraction m of payloads replaces q
+    with q m. Counted in turns, q is the per-turn chance and n the horizon.
+    """
+    return 1 - (1 - payload_fraction) ** reads
+
+
+def calc_injection_read_budget(payload_fraction: float, target_exposure: float) -> int:
+    """
+    Most untrusted reads a task may make and keep exposure at or below ``target_exposure``.
+
+        n_max = floor(ln(1 - target) / ln(1 - q))
+    """
+    return _math.floor(_math.log(1 - target_exposure) / _math.log(1 - payload_fraction))

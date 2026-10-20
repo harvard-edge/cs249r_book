@@ -3634,3 +3634,14 @@ NTSB_HWY18MH010_PRELIMINARY = _lit(
     notes=("Put the system's determination that emergency braking was needed at 1.3 seconds before "
            "impact; the final report (HAR-19/03) gives 1.2 seconds."),
 )
+
+GU_2025_PROMPT_CACHE_AUDIT = _lit(
+    "prov:gu-2025-prompt-cache-audit",
+    "Gu et al. (2025), Auditing Prompt Caching in Language Model APIs, ICML 2025, "
+    "Abstract, Section 4.2, and Table 1",
+    url="https://arxiv.org/abs/2502.07776",
+    verified="2026-10-20",
+    notes=("Audits run September to October 2024. Section 4.2: \"We detected prompt caching in 8 out "
+           "of 17 API providers, and we detected global cache sharing in 7 providers.\" Read from "
+           "arxiv.org/html/2502.07776v2. Added 2026-10-20."),
+)
