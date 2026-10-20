@@ -3,7 +3,7 @@ Canonical physics and accounting formulas for ML systems.
 
 Domain modules:
   networking, performance, economics, memory, communication,
-  reliability, transformer, serving, statistics, agents, context, drivetrain, robotics
+  reliability, transformer, serving, statistics, agents, context, retrieval, drivetrain, robotics
 """
 
 from ._units import _ensure_unit
@@ -408,4 +408,29 @@ __all__ += [
     "calc_batch_throughput_share",
     "calc_padding_waste_fraction",
     "calc_speculative_expected_tokens",
+]
+
+# --- Retrieval from long-term memory (added 2026-10-20) ---
+from .retrieval import (
+    calc_records_that_fit,
+    calc_bm25_idf,
+    calc_bm25_length_normalizer,
+    calc_bm25_term_score,
+    calc_full_tree_nodes,
+    calc_vectors_in_budget,
+    calc_bandwidth_fit_through_origin,
+    calc_interface_bandwidth,
+    calc_word_overlap,
+)
+
+__all__ += [
+    "calc_records_that_fit",
+    "calc_bm25_idf",
+    "calc_bm25_length_normalizer",
+    "calc_bm25_term_score",
+    "calc_full_tree_nodes",
+    "calc_vectors_in_budget",
+    "calc_bandwidth_fit_through_origin",
+    "calc_interface_bandwidth",
+    "calc_word_overlap",
 ]

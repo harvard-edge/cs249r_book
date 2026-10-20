@@ -1,215 +1,230 @@
 #!/usr/bin/env python3
-"""Every derived number in Lecture 6 (Long-Term Memory), one block per slide.
+"""Every number on the Volume III Lecture 6 slides and notes, read from MLSysIM.
 
-Inputs carry their source as a comment. "LTM" is the rendered chapter,
-Volume III, Chapter 6, Long-Term Memory (dev text read 2026-10-18).
-Run from this folder: python3 calcs.py. make_figs.py imports these values.
+MLSysIM holds the inputs and the calculations: the chapter's Napkin Math 6.1
+to 6.5, Example 6.1, and Checkpoint 6.4 are Scenarios.* backed by the solvers
+in engine/solvers/retrieval.py (the chapter reads the same scenarios); the
+cited results are Literature entries (Moffatt v. Air Canada, SWE-bench,
+SWE-agent, PoisonedRAG, Lost in the Middle); the DDR5-4800 module is
+Hardware.Tech.Memory. The one other source is the deck's own measurement,
+scan_bench.csv (written by scan_bench.py), read as recorded and fitted with
+MLSysIM's bandwidth fit. This file only selects values, converts units, and
+formats them; it types no numbers. Each value is recorded with v() under the
+key the deck prints as \\val{key}; running this file writes images/numbers.tex.
+
+Run from this folder: python3 calcs.py
 """
 
 import csv
-import math
+import sys
 from pathlib import Path
 
-HERE = Path(__file__).parent
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
 
-# ------------------------------------------------------------------ hook
-# Moffatt v. Air Canada, 2024 BCCRT 149, paras 18, 40, 44 (decision text).
-PAID = 1630.36            # para 40: total paid for the two flights, CA$
-SHOULD_HAVE_PAID = 979.48  # para 40: bereavement fare total, CA$
-DAMAGES = 650.88          # para 44a
-INTEREST = 36.14          # para 44b, pre-judgment interest
-CRT_FEES = 125.00         # para 44c
-damages_check = PAID - SHOULD_HAVE_PAID
-award_total = DAMAGES + INTEREST + CRT_FEES
+from mlsysim.core.units import BYTES_FP32, Q_  # noqa: E402
+from mlsysim.physics import (  # noqa: E402
+    calc_bandwidth_fit_through_origin, calc_interface_bandwidth, calc_vectors_in_budget)
 
-# ------------------------------------------------- NM 6.1 records that fit
-WINDOW, OUTPUT_RESERVE, BASE_INPUT = 32_768, 2_048, 24_576  # LTM NM 6.1
-ENVELOPE, BODY, META = 128, 512, 64                          # LTM NM 6.1
-allowance = WINDOW - OUTPUT_RESERVE - BASE_INPUT
-per_record = BODY + META
-fit = (allowance - ENVELOPE) // per_record
-used = ENVELOPE + fit * per_record
-remainder = allowance - used
-body_only = allowance // BODY
-body_only_tokens = ENVELOPE + body_only * per_record
-overshoot = body_only_tokens - allowance
-meta_doubled_fit = (allowance - ENVELOPE) // (BODY + 2 * META)  # Checkpoint 6.1
+Hardware, Literature, Scenarios = mlsysim.Hardware, mlsysim.Literature, mlsysim.Scenarios
+HERE = Path(__file__).resolve().parent
 
-# ------------------------------------- SWE-bench BM25 context (Jimenez 2024)
-# Jimenez et al., ICLR 2024, Table 2 (Claude 2 % resolved) and Table 3
-# (BM25 recall of oracle files, "Avg." row), by maximum context.
-SWEB_CONTEXT = [13, 27, 50]          # thousand tokens
-SWEB_RECALL = [29.58, 44.41, 51.06]  # percent
-SWEB_RESOLVED = [1.96, 1.87, 1.22]   # percent
+CASE = Literature.IncidentReports
+RETR = Literature.AgentRetrieval
+SWEB = Literature.SweBenchBm25Context.entries
+POISON = Literature.PoisonedRagBlackBox.entries
+LIU = Literature.AnswerPositionAccuracy.entries
+PAY = Scenarios.RetrievalRecordsInAllowance
+BM25 = Scenarios.Bm25ShortAgainstLongFile
+DOCS = Scenarios.ConditionNotifyDocstrings
+SCAN = Scenarios.ExactScanTenMillionVectors
+ANN = Scenarios.AnnIndexesTenMillionVectors
+TREE = Scenarios.TypedTraversalDepthThree
+PREF = Scenarios.MeetingPreferenceRevision
+MAINT = Scenarios.RepairEditIndexMaintenance
+STORE = Scenarios.LexicalGraphAgainstDenseStore
+COST = Scenarios.MaintainedMemoryPolicyCost
+DIMM = Hardware.Tech.Memory.DDR5_4800
 
-# ----------------------------------------- SWE-agent vs RAG (Yang 2024)
-# Yang et al., NeurIPS 2024, Table 1, SWE-bench Lite, same model (GPT-4 Turbo).
-LITE_RAG, LITE_SHELL, LITE_AGENT = 2.67, 11.00, 18.00
-agent_over_rag = LITE_AGENT / LITE_RAG
-
-# ---------------------------------------- CPython Condition docstrings
-# CPython v3.14.4, Lib/threading.py lines 338, 409, 439 (first docstring lines).
-DOC = {
-    "wait": "Wait until notified or until a timeout occurs.",
-    "notify": "Wake up one or more threads waiting on this condition, if any.",
-    "notify_all": "Wake up all threads waiting on this condition.",
-}
+K, M = 10 ** 3, 10 ** 6
 
 
-def words(s):
-    return {w.strip(".,").lower() for w in s.split()}
+def mag(q, unit):
+    return q.to(unit).magnitude
 
 
-shared_notify_all = len(words(DOC["notify"]) & words(DOC["notify_all"]))
-union_notify_all = len(words(DOC["notify"]) | words(DOC["notify_all"]))
-jaccard_notify_all = shared_notify_all / union_notify_all
+print("== Hook: Moffatt v. Air Canada (Literature.IncidentReports)")
+v("mof_days", CASE.MoffattRefundWindowDays, "{:.0f}", "refund window the chatbot stated, days")
+v("mof_damages", CASE.MoffattDamagesCad, "{:.2f}", "damages, CA$")
+v("mof_interest", CASE.MoffattInterestCad, "{:.2f}", "pre-judgment interest, CA$")
+v("mof_fees", CASE.MoffattFeesCad, "{:.0f}", "tribunal fees, CA$")
+v("mof_total", CASE.MoffattAwardTotalCad, "{:.2f}", "total ordered, CA$ (para 44)")
+assert f"{CASE.MoffattDamagesCad + CASE.MoffattInterestCad + CASE.MoffattFeesCad:.2f}" == \
+    f"{CASE.MoffattAwardTotalCad:.2f}", "the three parts sum to the ordered total"
+assert f"{CASE.MoffattFarePaidCad - CASE.MoffattBereavementFareCad:.2f}" == \
+    f"{CASE.MoffattDamagesCad:.2f}", "damages are the fare difference (para 40)"
 
-# ----------------------------------------- NM 6.2 exact-scan floor
-N_VEC, DIM, B_FP16 = 10_000_000, 768, 2   # LTM NM 6.2
-PEAK_FLOPS, BW = 1e12, 50e9                # LTM NM 6.2 reference host
-BUDGET_S = 10e-3                            # LTM NM 6.2
-SEARCHES = 20                               # LTM NM 6.2
-scan_bytes = N_VEC * DIM * B_FP16
-scan_flops = 2 * N_VEC * DIM
-intensity = scan_flops / scan_bytes
-ridge = PEAK_FLOPS / BW
-t_stream = scan_bytes / BW
-t_math = scan_flops / PEAK_FLOPS
-t_traj = SEARCHES * t_stream
-t_10k = 10_000 * DIM * B_FP16 / BW
-ceiling = BUDGET_S * BW / (DIM * B_FP16)
+print("== Napkin Math 6.1 and Checkpoint 6.1 (Scenarios.RetrievalRecordsInAllowance)")
+p = PAY.result
+v("rp_window", PAY.window, "{:,.0f}", "call limit, tokens")
+v("rp_reserve", PAY.output_reserve, "{:,.0f}", "output reserve, tokens")
+v("rp_other", PAY.other_input, "{:,.0f}", "prompt, tools, history, tokens")
+v("rp_envelope", PAY.envelope, "{:,.0f}", "envelope, tokens")
+v("rp_body", PAY.body, "{:,.0f}", "body per record, tokens")
+v("rp_meta", PAY.metadata, "{:,.0f}", "metadata per record, tokens")
+v("rp_allowance", p.allowance, "{:,.0f}", "retrieval allowance, tokens")
+v("rp_record", p.record, "{:,.0f}", "serialized record, tokens")
+v("rp_records", p.records, "{:.0f}", "whole records that fit")
+v("rp_used", p.used, "{:,.0f}", "staged payload, tokens")
+v("rp_remaining", p.remaining, "{:,.0f}", "left over, tokens")
+v("rp_body_only", p.body_only, "{:.0f}", "records a body-only count admits")
+v("rp_body_only_used", p.body_only_used, "{:,.0f}", "those records serialized, tokens")
+v("rp_overshoot", p.overshoot, "{:,.0f}", "over the allowance, tokens")
+v("rp_meta2", p.scaled_metadata, "{:,.0f}", "metadata doubled, tokens")
+v("rp_meta2_records", p.scaled_metadata_records, "{:.0f}", "whole records at doubled metadata")
 
-# ----------------------------- measured scan on one laptop (scan_bench.py)
-rows = []
+print("== SWE-bench BM25 by context limit (Literature.SweBenchBm25Context)")
+for i, row in enumerate(SWEB, start=1):
+    v(f"swb_ctx{i}", row["max_context_k"] * K, "{:,.0f}", "maximum retrieved context, tokens")
+    v(f"swb_rec{i}", row["bm25_recall_avg"], "{:.2f}", "BM25 recall of edited files, %")
+    v(f"swb_res{i}", row["claude2_resolved"], "{:.2f}", "Claude 2 issues resolved, %")
+
+print("== SWE-agent against pre-staging (Literature.AgentRetrieval)")
+v("swa_rag", RETR.SweBenchLiteRagResolved, "{:.2f}", "Lite resolved, BM25 pre-staged, %")
+v("swa_shell", RETR.SweBenchLiteShellResolved, "{:.2f}", "Lite resolved, shell commands, %")
+v("swa_agent", RETR.SweBenchLiteSweAgentResolved, "{:.2f}", "Lite resolved, SWE-agent, %")
+v("swa_ratio", RETR.SweBenchLiteSweAgentResolved / RETR.SweBenchLiteRagResolved, "{:.1f}",
+  "SWE-agent / pre-staged")
+v("swa_cost_lo", RETR.SweAgentCostMultipleLow, "{:.0f}", "cost per resolved issue, low multiple")
+v("swa_cost_hi", RETR.SweAgentCostMultipleHigh, "{:.0f}", "cost per resolved issue, high multiple")
+
+print("== Example 6.1 (Scenarios.Bm25ShortAgainstLongFile)")
+v("bm_short", BM25.result.short_score, "{:.2f}", "short file, BM25 score")
+v("bm_long", BM25.result.long_score, "{:.2f}", "long file, BM25 score")
+v("bm_short_tf_words", BM25.short_frequency, "words", "matches in the short file")
+v("bm_long_tf_words", BM25.long_frequency, "words", "matches in the long file")
+
+print("== CPython Condition docstrings (Scenarios.ConditionNotifyDocstrings)")
+v("doc_shared", DOCS.result.shared, "{:.0f}", "distinct words shared")
+v("doc_union", DOCS.result.union, "{:.0f}", "distinct words in both")
+
+print("== Napkin Math 6.2 (Scenarios.ExactScanTenMillionVectors)")
+s = SCAN.result
+v("sc_n_m", SCAN.vectors / M, "{:.0f}", "vectors, millions")
+v("sc_dim", SCAN.dimension, "{:.0f}", "dimension")
+v("sc_bytes", mag(SCAN.bytes_per_value, "byte"), "{:.0f}", "bytes per value (FP16)")
+v("sc_bw", mag(SCAN.host.memory.bandwidth, "GB/s"), "{:.0f}", "host bandwidth, GB/s")
+v("sc_peak", mag(SCAN.host.compute.peak_flops, "TFLOP/s"), "{:.0f}", "host peak, TFLOP/s")
+v("sc_gb", mag(s.footprint, "GB"), "{:.2f}", "bytes per scan, GB")
+v("sc_gflop", mag(s.flops, "GFLOP"), "{:.2f}", "work per scan, GFLOP")
+v("sc_ms", mag(s.stream_time, "ms"), "{:.1f}", "bandwidth floor, ms")
+v("sc_math_ms", mag(s.math_time, "ms"), "{:.2f}", "arithmetic alone, ms")
+v("sc_intensity", mag(s.intensity, "flop/byte"), "{:.0f}", "intensity, FLOP per byte")
+v("sc_ridge", mag(s.ridge, "flop/byte"), "{:.0f}", "host ridge, FLOP per byte")
+v("sc_traj_s", mag(s.trajectory_time, "s"), "{:.1f}", "searches in one trajectory, s")
+v("sc_budget_ms", mag(SCAN.budget, "ms"), "{:.0f}", "per-search budget, ms")
+v("sc_budget_vec", s.budget_vectors, "{:,.0f}", "vectors the budget streams")
+v("sc_budget_vec_k", round(s.budget_vectors, -3), "{:,.0f}", "the same, to the thousand")
+v("sc_filtered", SCAN.filtered_vectors, "{:,.0f}", "vectors after a scope filter")
+v("sc_filtered_ms", mag(s.filtered_time, "ms"), "{:.2f}", "their floor, ms")
+
+print("== Measured scan on one laptop (scan_bench.csv, the deck's own run)")
 with open(HERE / "scan_bench.csv") as f:
-    r = csv.reader(f)
-    meta = next(r)
-    next(r)
-    for n, b, t in r:
-        rows.append((int(n), int(b), float(t)))
+    reader = csv.reader(f)
+    meta = next(reader)
+    next(reader)
+    rows = [(int(n), int(b), float(t)) for n, b, t in reader]
 MACHINE = meta[1]
-achieved = [b / t / 1e9 for n, b, t in rows]
-gflops = [2 * n * DIM / t / 1e9 for n, b, t in rows]
-# least-squares fit of t = bytes / BW through the origin
-bw_fit = sum(b * b for _, b, _ in rows) / sum(b * t for _, b, t in rows)
-B_FP32 = 4
-laptop_ceiling = BUDGET_S * bw_fit / (DIM * B_FP32)
+LAP_BYTES = mag(BYTES_FP32, "byte")
+FLOP_PER_VALUE = mag(s.flops, "flop") / (SCAN.vectors * SCAN.dimension)  # one multiply-add
+gflops = [FLOP_PER_VALUE * n * SCAN.dimension / t / K ** 3 for n, b, t in rows]
+bw_fit = calc_bandwidth_fit_through_origin([b for _, b, _ in rows], [t for _, _, t in rows])
+lap_budget = calc_vectors_in_budget(SCAN.budget, Q_(bw_fit, "byte/s"),
+                                    SCAN.dimension, BYTES_FP32)
+v("lap_bw", bw_fit / K ** 3, "{:.0f}", "fitted streamed bandwidth, GB/s")
+v("lap_gflops_lo", min(gflops), "{:.0f}", "lowest arithmetic rate, GFLOP/s")
+v("lap_gflops_hi", max(gflops), "{:.0f}", "highest arithmetic rate, GFLOP/s")
+v("lap_budget_k", round(lap_budget, -3), "{:,.0f}", "FP32 vectors in the budget, to the thousand")
+v("lap_bytes", LAP_BYTES, "{:.0f}", "bytes per FP32 value")
+v("lap_top_m", rows[-1][0] / M, "{:.0f}", "largest run, million vectors")
+v("lap_top_ms", rows[-1][2] * K, "{:.0f}", "largest run, ms")
+v("ddr_rate", mag(DIMM.pin_data_rate, "Mbit/s"), "{:,.0f}", "DDR5-4800, million transfers per second")
+v("ddr_bytes", mag(DIMM.interface_width, "byte"), "{:.0f}", "DIMM channel width, bytes")
+v("ddr_bw", mag(calc_interface_bandwidth(DIMM.interface_width, DIMM.pin_data_rate), "GB/s"),
+  "{:.1f}", "DDR5-4800 module peak, GB/s")
 
-# DDR5-4800 RDIMM in the photo (Commons description): 4,800 MT/s x 8 bytes
-dimm_bw = 4800e6 * 8
+print("== Approximate-index bytes (Scenarios.AnnIndexesTenMillionVectors)")
+a = ANN.result
+v("ann_links", ANN.links_per_node, "{:.0f}", "links per node")
+v("ann_link_bytes_words", mag(ANN.link_bytes, "byte"), "words", "bytes per link")
+v("ann_graph_gb", mag(a.graph, "GB"), "{:.2f}", "graph links, GB")
+v("ann_total_gb", mag(a.graph_total, "GB"), "{:.2f}", "vectors plus links, GB")
+v("ann_sub", ANN.subvectors, "{:.0f}", "PQ subvectors (codes per vector)")
+v("ann_code_bytes_words", mag(ANN.code_bytes, "byte"), "words", "bytes per code")
+v("ann_codes_gb", mag(a.codes, "GB"), "{:.2f}", "PQ codes, GB")
+v("ann_ratio", a.compression, "{:.0f}", "vectors / codes")
+v("ann_lut_kb", mag(a.lookup_table, "KB"), "{:.1f}", "lookup table, KB")
+v("ann_vec_bytes", mag(a.bytes_per_vector, "byte"), "{:,.0f}", "bytes per FP16 vector")
 
-# --------------------------------------- ANN memory (LTM section 6.6.2, Table 5)
-LINKS, LINK_B, PQ_M = 32, 8, 64   # LTM: 32 eight-byte links; 64 subvectors
-hnsw_links = N_VEC * LINKS * LINK_B
-hnsw_total = scan_bytes + hnsw_links
-pq_codes = N_VEC * PQ_M
-pq_ratio = scan_bytes / pq_codes
-lut_bytes = PQ_M * 256 * 4
-bytes_per_vec_exact = DIM * B_FP16
+print("== Napkin Math 6.3 (Scenarios.TypedTraversalDepthThree)")
+g = TREE.result
+v("gn_allowance", g.allowance, "{:,.0f}", "retrieval allowance, tokens")
+v("gn_depth", TREE.depth, "{:.0f}", "depth")
+v("gn_shallow_depth", TREE.depth - 1, "{:.0f}", "one level less")
+v("gn_children", TREE.children, "{:.0f}", "children per node")
+v("gn_node", TREE.node_tokens, "{:.0f}", "tokens per node")
+v("gn_env", TREE.envelope_tokens, "{:.0f}", "edges and envelope, tokens")
+for d, (n, t) in enumerate(zip(g.nodes_by_depth, g.tokens_by_depth)):
+    v(f"gn_nodes{d}", n, "{:.0f}", f"nodes through depth {d}")
+    v(f"gn_tok{d}", t, "{:,.0f}", f"tokens through depth {d}")
+    v(f"gn_level{d}", n - (g.nodes_by_depth[d - 1] if d else 0), "{:.0f}", f"nodes at depth {d}")
+v("gn_fit", g.fit, "{:.0f}", "most whole nodes in the allowance")
 
-# ----------------------------------------------- NM 6.3 depth budget
-CHILDREN, NODE_TOK, EDGE_ENV = 3, 180, 100  # LTM NM 6.3
-ALLOWANCE = 6_144
+print("== PoisonedRAG (Literature.PoisonedRagBlackBox, AgentRetrieval)")
+n_poison = RETR.PoisonedRagTextsPerQuestion
+v("pr_n", n_poison, "{:.0f}", "planted texts per target question")
+for i, row in enumerate(POISON, start=1):
+    v(f"pr_kb{i}", row["knowledge_base_texts"] / M, "{:.1f}", f"{row['dataset']} texts, millions")
+    v(f"pr_asr{i}", row["attack_success_rate"] * 100, "{:.0f}", f"{row['dataset']} attack success, %")
+per_million = n_poison / POISON[0]["knowledge_base_texts"] * M
+v("pr_per_m", per_million, "{:.2f}", "planted texts per million, smallest corpus")
+v("pr_per_m_round", per_million, "{:.0f}", "the same, whole")
 
+print("== Write path: the 10:00 and 11:00 directives (Scenarios.MeetingPreferenceRevision)")
+v("pf_shared", PREF.result.shared, "{:.0f}", "words shared")
+v("pf_words", PREF.result.first_words, "{:.0f}", "words in a directive")
 
-def nodes(depth, c=CHILDREN):
-    return (c ** (depth + 1) - 1) // (c - 1)
+print("== Napkin Math 6.4 (Scenarios.RepairEditIndexMaintenance)")
+x = MAINT.result
+v("ix_files", MAINT.files, "{:.0f}", "files changed")
+v("ix_chunks", x.chunks, "{:.0f}", "chunks changed")
+v("ix_cands", MAINT.candidates, "{:.0f}", "candidates checked per query")
+v("ix_local", mag(x.local_time, "ms"), "{:.0f}", "re-index, local encoder, ms")
+v("ix_remote", mag(x.remote_batch_time, "ms"), "{:.0f}", "re-index, one remote batch, ms")
+v("ix_serial", mag(x.remote_per_file_time, "s"), "{:.2f}", "re-index, remote per file, s")
+v("ix_write_us", mag(x.exclusion_write_time, "us"), "{:.1f}", "exclusion entries, us")
+v("ix_check_us", mag(x.exclusion_check_time, "us"), "{:.1f}", "exclusion checks per query, us")
+v("ix_ratio", x.write_path_ratio, "{:,.0f}", "local re-index / exclusion write")
 
+print("== Napkin Math 6.5 (Scenarios.LexicalGraphAgainstDenseStore)")
+v("st_ratio_a", STORE.result.ratio_lexical_graph, "{:.2f}", "lexical + graph, auxiliary / source")
+v("st_ratio_b", STORE.result.ratio_lexical_dense, "{:.2f}", "lexical + dense, auxiliary / source")
 
-depth_nodes = [nodes(d) for d in range(4)]
-depth_tokens = [n * NODE_TOK + EDGE_ENV for n in depth_nodes]
-max_nodes = (ALLOWANCE - EDGE_ENV) // NODE_TOK
+print("== Checkpoint 6.4 (Scenarios.MaintainedMemoryPolicyCost)")
+c = COST.result
+v("pc_pa_pct", COST.baseline_acceptance * 100, "{:.0f}", "policy A acceptance, %")
+v("pc_pb_pct", COST.maintained_acceptance * 100, "{:.0f}", "policy B acceptance, %")
+v("pc_pa", COST.baseline_acceptance, "{:.1f}", "policy A acceptance")
+v("pc_pb", COST.maintained_acceptance, "{:.1f}", "policy B acceptance")
+v("pc_maint", COST.maintenance_share, "{:.1f}", "maintenance, share of A's attempt")
+v("pc_attempt_b", 1 + COST.maintenance_share, "{:.1f}", "policy B attempt, units of A's")
+v("pc_ceff_a", c.baseline_cost, "{:.2f}", "policy A cost per accepted task")
+v("pc_ceff_b", c.maintained_cost, "{:.2f}", "policy B cost per accepted task")
+v("pc_change", -c.change * 100, "{:.1f}", "policy B lower by, %")
+v("pc_breakeven", c.break_even_acceptance, "{:.2f}", "break-even acceptance")
 
-# ---------------------------------------- 10:00 vs 11:00 (LTM section 6.2.2)
-PREF_A = "Schedule no meetings before 10:00 AM"
-PREF_B = "Schedule no meetings before 11:00 AM"
-pref_shared = len(words(PREF_A) & words(PREF_B))
-pref_total = len(words(PREF_A))
-
-# ----------------------------------------------- PoisonedRAG (Zou et al.)
-# Zou et al., USENIX Security 2025 (arXiv 2402.07867v3), Table 1, black-box,
-# PaLM 2 as the generator; 5 malicious texts per target question.
-POISON = [("NQ", 2_681_468, 0.97), ("HotpotQA", 5_233_329, 0.99),
-          ("MS-MARCO", 8_841_823, 0.91)]
-POISON_N = 5
-poison_per_million = [(name, POISON_N / size * 1e6) for name, size, _ in POISON]
-
-# ------------------------------------------ NM 6.4 who pays for freshness
-FILES, CHUNKS = 8, 16                                    # LTM NM 6.4
-PARSE, POSTING, LOCAL_EMB, REMOTE_EMB = 3.5e-3, 2e-3, 28e-3, 150e-3
-EXCL_W, EXCL_R, CANDS = 50e-9, 30e-9, 50
-sync_local = FILES * PARSE + CHUNKS * POSTING + LOCAL_EMB
-sync_remote_batch = FILES * PARSE + CHUNKS * POSTING + REMOTE_EMB
-sync_remote_serial = FILES * PARSE + CHUNKS * POSTING + FILES * REMOTE_EMB
-excl_write = FILES * EXCL_W
-excl_query = CANDS * EXCL_R
-excl_ratio = sync_local / excl_write
-
-# ------------------------------------------ NM 6.5 two stores (typed values)
-STORE_A_AUX, STORE_B_AUX = 0.36, 8.52      # LTM NM 6.5, auxiliary / source
-STORE_A_REIDX, STORE_B_REIDX = 34.1e-3, 612e-3
-store_byte_ratio = STORE_B_AUX / STORE_A_AUX
-store_time_ratio = STORE_B_REIDX / STORE_A_REIDX
-
-# --------------------------- Checkpoint 6.4: cost per accepted task, B vs A
-P_A, P_B, MAINT = 0.50, 0.60, 0.10   # LTM Checkpoint 6.4 (attempt cost of A = 1)
-ceff_a = 1.0 / P_A
-ceff_b = (1.0 + MAINT) / P_B
-ceff_change = ceff_b / ceff_a - 1
-breakeven_p = (1.0 + MAINT) / ceff_a
-
-# ------------------------------------------ Liu et al. 2024, Table 6 and 1
-# GPT-3.5-Turbo, 20 retrieved documents (~4K tokens), answer at index 0..19.
-LIU_POS = [1, 5, 10, 15, 20]
-LIU_ACC = [75.8, 57.2, 53.8, 55.4, 63.2]
-LIU_CLOSED, LIU_ORACLE = 56.1, 88.3
-liu_drop = LIU_ACC[0] - min(LIU_ACC)
-
-# ------------------------------------------- BM25 Example 6.1 (notes check)
-N_DOCS, AVGDL, DF, K1, BB = 100_000, 400, 5, 1.2, 0.75
-idf = math.log(1 + (N_DOCS - DF + 0.5) / (DF + 0.5))
-
-
-def bm25(tf, dl):
-    return idf * tf * (K1 + 1) / (tf + K1 * (1 - BB + BB * dl / AVGDL))
-
-
-bm25_short, bm25_long = bm25(1, 80), bm25(6, 4000)
-
+print("== Lost in the middle (Literature.AnswerPositionAccuracy)")
+v("liu_docs", LIU[0]["documents"], "{:.0f}", "documents per question")
 
 if __name__ == "__main__":
-    p = print
-    p("HOOK  damages check (paid - should have paid):", f"{damages_check:.2f}")
-    p("HOOK  award total CA$:", f"{award_total:.2f}")
-    p("NM6.1 allowance:", allowance, " per record:", per_record, " fit:", fit,
-      " used:", used, " remainder:", remainder)
-    p("NM6.1 body-only count:", body_only, " serialized:", body_only_tokens,
-      " overshoot:", overshoot, " metadata doubled fit:", meta_doubled_fit)
-    p("SWE-agent / RAG on Lite:", f"{agent_over_rag:.1f}x")
-    p("CPython notify vs notify_all shared words:", shared_notify_all, "of",
-      union_notify_all, f"Jaccard {jaccard_notify_all:.2f}")
-    p("NM6.2 bytes GB:", scan_bytes / 1e9, " GFLOP:", scan_flops / 1e9,
-      " intensity:", intensity, " ridge:", ridge)
-    p("NM6.2 stream ms:", f"{t_stream * 1e3:.1f}", " math ms:", f"{t_math * 1e3:.2f}",
-      " 20 searches s:", f"{t_traj:.1f}", " 10k ms:", f"{t_10k * 1e3:.2f}",
-      " ceiling:", f"{ceiling:,.0f}")
-    p("MEASURED", MACHINE, " achieved GB/s:", [f"{a:.0f}" for a in achieved],
-      " GFLOP/s:", [f"{g:.0f}" for g in gflops])
-    p("MEASURED fit BW GB/s:", f"{bw_fit / 1e9:.0f}", " 10 ms ceiling FP32:",
-      f"{laptop_ceiling:,.0f}")
-    p("DIMM DDR5-4800 peak GB/s:", f"{dimm_bw / 1e9:.1f}")
-    p("ANN HNSW links GB:", hnsw_links / 1e9, " total GB:", hnsw_total / 1e9,
-      " PQ codes GB:", pq_codes / 1e9, " ratio:", pq_ratio, " LUT KB:",
-      f"{lut_bytes / 1e3:.1f}", " bytes/vector exact:", bytes_per_vec_exact)
-    p("NM6.3 nodes:", depth_nodes, " tokens:", depth_tokens, " max nodes:", max_nodes)
-    p("PREF shared words:", pref_shared, "of", pref_total)
-    p("POISON per million:", [(n, f"{v:.2f}") for n, v in poison_per_million])
-    p("NM6.4 sync local ms:", f"{sync_local * 1e3:.0f}", " remote batch ms:",
-      f"{sync_remote_batch * 1e3:.0f}", " remote serial s:", f"{sync_remote_serial:.2f}")
-    p("NM6.4 exclusion write us:", f"{excl_write * 1e6:.1f}", " query us:",
-      f"{excl_query * 1e6:.1f}", " ratio:", f"{excl_ratio:,.0f}")
-    p("NM6.5 byte ratio:", f"{store_byte_ratio:.0f}", " time ratio:", f"{store_time_ratio:.0f}")
-    p("CP6.4 Ceff A:", f"{ceff_a:.2f}", " Ceff B:", f"{ceff_b:.2f}",
-      " change:", f"{ceff_change * 100:.1f}%", " break-even p:", f"{breakeven_p:.2f}")
-    p("LIU drop first to worst (points):", f"{liu_drop:.1f}")
-    p("BM25 idf:", f"{idf:.3f}", " short:", f"{bm25_short:.2f}", " long:", f"{bm25_long:.2f}")
+    write(__file__)

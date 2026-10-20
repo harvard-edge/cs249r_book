@@ -1604,7 +1604,8 @@ JEDEC_MEMORY_INTERFACE_WIDTHS = _conv(
     "JEDEC JESD238 (HBM3) and JESD79-5 (DDR5) interface widths",
     notes=(
         "Added 2026-10-20. HBM3: 1,024 data bits per stack in 16 channels of 64 bits. "
-        "DDR5: 64 data bits per DIMM channel as two independent 32-bit subchannels."
+        "DDR5: 64 data bits per DIMM channel as two independent 32-bit subchannels. "
+        "Added 2026-10-20: the DDR5-4800 speed grade transfers 4,800 MT/s per pin."
     ),
 )
 
@@ -3020,4 +3021,50 @@ NSIGHT_TRACE_VOLUME_SCENARIO = _est(
     notes=("Documented teaching assumption: a 5-second Nsight Systems trace of one training GPU, "
            "with CUDA, NVTX, and NCCL ranges, is about 500 MB."),
     verified="2026-10-20",
+)
+
+# --- Retrieval from long-term memory: agents, poisoning, a tribunal record (added 2026-10-20) ---
+JIMENEZ_2024_SWE_BENCH = _lit(
+    "prov:jimenez-2024-swe-bench",
+    "Jimenez et al. (2024), SWE-bench: Can Language Models Resolve Real-World GitHub Issues?, "
+    "ICLR 2024, Table 2 (Claude 2, BM25 retrieval) and Table 3 (BM25 recall, Avg. row)",
+    url="https://arxiv.org/abs/2310.06770",
+    verified="2026-10-20",
+    notes=("Claude 2 percent resolved and BM25 recall of the oracle (edited) files at maximum "
+           "retrieved contexts of 13K, 27K, and 50K tokens; the issue text is the query. "
+           "Read from arxiv.org/html/2310.06770v3."),
+)
+YANG_2024_SWE_AGENT = _lit(
+    "prov:yang-2024-swe-agent",
+    "Yang et al. (2024), SWE-agent: Agent-Computer Interfaces Enable Automated Software "
+    "Engineering, NeurIPS 2024, Table 1 (SWE-bench Lite, GPT-4 Turbo) and Section 5",
+    url="https://arxiv.org/abs/2405.15793",
+    verified="2026-10-20",
+    notes=("Percent resolved on SWE-bench Lite with GPT-4 Turbo: RAG (BM25) 2.67, shell-only "
+           "agent 11.00, SWE-agent 18.00. Section 5: 'compared to RAG on Lite, SWE-agent is "
+           "8-13x more costly but yields a 6.7-fold improved % Resolved rate.' Read from "
+           "arxiv.org/html/2405.15793v3."),
+)
+ZOU_2025_POISONEDRAG = _lit(
+    "prov:zou-2025-poisonedrag",
+    "Zou et al. (2025), PoisonedRAG: Knowledge Corruption Attacks to Retrieval-Augmented "
+    "Generation of Large Language Models, USENIX Security 2025, Section 5.1 and Table 1",
+    url="https://arxiv.org/abs/2402.07867",
+    verified="2026-10-20",
+    notes=("Knowledge bases of 2,681,468 (NQ), 5,233,329 (HotpotQA), and 8,841,823 (MS-MARCO) "
+           "texts; N = 5 malicious texts per target question; black-box attack success rate "
+           "with PaLM 2 as the generator. Read from arxiv.org/html/2402.07867v3."),
+)
+MOFFATT_V_AIR_CANADA_2024 = Provenance(
+    id="prov:moffatt-v-air-canada-2024",
+    kind=ProvenanceKind.INDUSTRY_REPORT,  # a published tribunal decision (public record)
+    ref=("Moffatt v. Air Canada, 2024 BCCRT 149 (British Columbia Civil Resolution Tribunal, "
+         "February 14, 2024), paras 15, 40, and 44"),
+    url="https://www.canlii.org/en/bc/bccrt/doc/2024/2024bccrt149/2024bccrt149.html",
+    verified="2026-10-20",
+    notes=("Amounts in Canadian dollars. Para 15: the chatbot's answer quotes a 90-day window "
+           "from ticket issue. Para 40: paid 1,630.36, should have paid 979.48, damages 650.88. "
+           "Para 44: total 812.02 (650.88 damages, 36.14 pre-judgment interest, 125 CRT fees). "
+           "Checked 2026-10-20 against a PDF copy of the CanLII decision (CanLII blocks scripted "
+           "access)."),
 )

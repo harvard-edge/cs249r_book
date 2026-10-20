@@ -1102,3 +1102,40 @@ AnswerPositionAccuracy = _Series(
     ),
     "Multi-document QA accuracy by position of the answer document among 20 (GPT-3.5-Turbo).",
 )
+
+
+# --- Retrieval from long-term memory (added 2026-10-20) ---
+SweBenchBm25Context = _Series(
+    "swe_bench_bm25_context",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=("Jimenez et al. (2024), SWE-bench: Can Language Models Resolve Real-World GitHub "
+             "Issues?, ICLR 2024, Table 2 (Claude 2) and Table 3 (Avg. row)"),
+        url="https://arxiv.org/abs/2310.06770",
+        verified="2026-10-20",
+        notes=(
+            "By maximum retrieved context in thousand tokens (BM25 over the repository, the issue "
+            "text as the query): recall of the files the reference fix edits, in percent, and "
+            "Claude 2's percent of issues resolved. Transcribed from arXiv 2310.06770v3."
+        ),
+    ),
+    "SWE-bench BM25 retrieval by context limit: oracle-file recall and Claude 2 resolve rate (percent).",
+)
+
+PoisonedRagBlackBox = _Series(
+    "poisonedrag_black_box_palm2",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=("Zou et al. (2025), PoisonedRAG: Knowledge Corruption Attacks to Retrieval-Augmented "
+             "Generation of Large Language Models, USENIX Security 2025, Section 5.1 and Table 1"),
+        url="https://arxiv.org/abs/2402.07867",
+        verified="2026-10-20",
+        notes=(
+            "Clean knowledge-base size in texts (Section 5.1) and black-box attack success rate "
+            "with PaLM 2 as the generator (Table 1), five malicious texts per target question "
+            "(Literature.AgentRetrieval.PoisonedRagTextsPerQuestion). Transcribed from arXiv "
+            "2402.07867v3."
+        ),
+    ),
+    "PoisonedRAG black-box attack: knowledge-base size and attack success rate per dataset (PaLM 2).",
+)
