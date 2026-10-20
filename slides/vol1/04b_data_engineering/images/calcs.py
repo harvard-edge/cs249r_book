@@ -117,6 +117,7 @@ v("reads_per_req", LOOKUPS.reads_per_request, "{:.0f}", "feature reads per reque
 v("reads_per_req_word", LOOKUPS.reads_per_request, "words", "the same, in prose")
 v("serve_iops", LOOKUPS.reads_per_second, "{:,.0f}", "random reads a second")
 v("nvme_lat_us", m(STORE.LocalNvmeGen4.latency, "microsecond"), "{:.0f}", "local NVMe access latency, us")
+v("dram_lat_ns", m(Hardware.Tech.Memory.HostDram_Latency2009.latency, "ns"), "{:.0f}", "host DRAM access latency, ns")
 v("obj_mbs", m(STORE.ObjectStoreSingleStream.bandwidth, "MB/s"), "{:.0f}", "object store, one connection, MB/s")
 v("nvme_lo", m(STORE.LocalNvmeTrainingTypical.bandwidth, "GB/s"), "{:.0f}", "local NVMe, low, GB/s")
 v("nvme_hi", m(STORE.LocalNvmeGen4.bandwidth, "GB/s"), "{:.0f}", "local NVMe, high, GB/s")

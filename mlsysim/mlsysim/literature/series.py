@@ -994,6 +994,22 @@ class Series:
         "Communication rounds to 99% MNIST CNN accuracy for FedSGD and FedAvg, IID and non-IID.",
         numeric=("local_epochs", "updates_per_round", "iid_rounds", "non_iid_rounds"),
     )
+    # Added 2026-10-20: MNIST accuracy against epsilon for @fig-privacy-utility-frontier.
+    GaussianDpMnistNoisySgd = TrendSeries(
+        "bu_gdp_mnist_noisysgd",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="Bu, Dong, Long, and Su (2020), Deep Learning with Gaussian Differential Privacy, Harvard "
+                       "Data Science Review 2(3), Table 1 (Experimental results for NoisySGD and their privacy "
+                       "analyses on MNIST)",
+                   url="https://pmc.ncbi.nlm.nih.gov/articles/PMC7695347/", verified="2026-10-20",
+                   notes="Columns transcribed exactly from Table 1: learning rate eta, clipping norm R, noise "
+                         "multiplier sigma, epochs, test accuracy (%), CLT mu, CLT epsilon, and moments-accountant "
+                         "epsilon; both epsilon columns are with respect to delta = 1e-5. The table has no "
+                         "nonprivate row."),
+        "MNIST NoisySGD test accuracy against privacy budget under the Gaussian DP central limit theorem.",
+        numeric=("learning_rate", "clip_norm", "noise_multiplier", "epochs", "test_accuracy_pct", "clt_mu",
+                 "clt_epsilon", "ma_epsilon"),
+    )
     GeminiPromptEnergy = TrendSeries(
         "gemini_prompt_energy",
         _lit("Elsworth et al. (2025), Measuring the environmental impact of delivering AI at Google Scale, "
@@ -1116,6 +1132,16 @@ class Series:
              "(interconnect bandwidth), each normalized to its first point"),
         "Peak compute, DRAM bandwidth, and interconnect bandwidth of server hardware, normalized, by year.",
         numeric=("year", "normalized"),
+    )
+    AbadiDpSgdAccuracy = TrendSeries(
+        "abadi_dpsgd_accuracy",
+        _lit("Abadi et al. (2016), Deep Learning with Differential Privacy, ACM CCS 2016, Sec. 5.2 and Fig. 6",
+             "https://arxiv.org/abs/1607.00133",
+             "test accuracy (%) of DP-SGD at each reported (epsilon, delta): MNIST 90, 95, 97 percent at "
+             "epsilon 0.5, 2, 8; CIFAR-10 67, 70, 73 percent at epsilon 2, 4, 8; nonprivate baselines in "
+             "Literature.DifferentialPrivacy"),
+        "Differentially private training accuracy by privacy budget on MNIST and CIFAR-10.",
+        numeric=("epsilon", "delta", "accuracy_pct"),
     )
 
 # --- Context engineering (added 2026-10-20) ----------------------------------

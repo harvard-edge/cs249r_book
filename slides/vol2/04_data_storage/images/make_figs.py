@@ -184,8 +184,8 @@ sp.save(fig, out / "mlperf_scatter.svg")
 # ---------------------------------------------------------------------------
 # 4. The six tiers with their scope, bandwidth, latency, and price
 # ---------------------------------------------------------------------------
-tiers = [("GPU HBM", "c1", f"{val('hbm_cap_gb')} GB", f"{val('hbm_tbs')} TB/s per GPU", "~100 ns"),
-         ("Host DRAM", "c1", "0.5 to 2 TB", f"{val('dram_gbs')} GB/s per node", "~100 ns"),
+tiers = [("GPU HBM", "c1", f"{val('hbm_cap_gb')} GB", f"{val('hbm_tbs')} TB/s per GPU", f"~{val('hbm_lat_ns')} ns"),
+         ("Host DRAM", "c1", "0.5 to 2 TB", f"{val('dram_gbs')} GB/s per node", f"~{val('dram_lat_ns')} ns"),
          ("Local NVMe", "st", "4 to 30 TB", f"{val('gen4_gbs')} to 25 GB/s", f"~{val('nvme_lat_us')} µs"),
          ("Parallel file system", "st", "100+ PB", f"{val('pfs_tbs')}+ TB/s shared", "~1 ms"),
          ("Object storage", "st", "very large", f"{val('obj_agg_gbs')} GB/s shared", "~50 ms"),

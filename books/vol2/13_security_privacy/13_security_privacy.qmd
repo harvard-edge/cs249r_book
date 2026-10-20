@@ -4193,11 +4193,70 @@ account for private-data-dependent selection; retuning does not erase prior rele
 
 ### Quantifying the privacy-utility trade-off {#sec-security-privacy-privacy-utility-tradeoff-b3e7}
 
-Tightening differential privacy to single-digit $\PrivacyBudget$ keeps MNIST within about 3.5 percentage points of its 98.3 percent nonprivate baseline, yet drops CIFAR-10 trained from scratch by 12 to 20 percentage points even at $\PrivacyBudget = 8$ [@abadi2016deep; @bu2020gaussian; @de2022dp]. That gap shows how strongly the utility cost of differential privacy depends on task complexity, architecture, privacy accountant, pretraining, and whether extra public data are allowed.
+```{python}
+#| echo: false
+#| label: privacy-utility-frontier-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PRIVACY-UTILITY GAPS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-privacy-utility-frontier and the two paragraphs that read it
+# │
+# │ Goal: Measure each published DP result against its nonprivate reference:
+# │       the largest MNIST gap at single-digit epsilon and the CIFAR-10 gaps
+# │       at epsilon 8.
+# │ How: Literature.Series.GaussianDpMnistNoisySgd (Bu 2020, Table 1),
+# │      Literature.Series.AbadiDpSgdAccuracy (Abadi 2016, Sec. 5.2), and
+# │      Literature.DifferentialPrivacy (baselines, De 2022, WRN-16-4).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
+from mlsysim.fmt import check, fmt, fmt_int
 
-@Fig-privacy-utility-frontier collects those published MNIST and CIFAR-10 results on a logarithmic axis [@abadi2016deep; @bu2020gaussian; @de2022dp]. These comparisons show setting-specific utility costs; differences in architectures and training procedures prevent isolating task complexity alone. The plotted MNIST results stay within about 3.5 percentage points of the 98.3 percent nonprivate baseline at budgets in the range $\PrivacyBudget\in [1, 2]$. For CIFAR-10 without extra data, the plotted results reach 73.0 percent in @abadi2016deep and 81.4 percent in @de2022dp at $\PrivacyBudget= 8$, roughly 12 to 20 points below the displayed 93.0 percent nonprivate reference. These CIFAR-10 settings therefore pay several times the MNIST accuracy cost at a budget four times looser. That reference is a comparison point, not a ceiling on achievable accuracy. Selecting a budget therefore requires the full training regime, adjacency relation, additive slack, accountant, and utility requirements rather than the horizontal coordinate alone.
+class PrivacyUtilityGaps:
+    """Accuracy gaps between published DP results and nonprivate references."""
 
-::: {#fig-privacy-utility-frontier fig-env="figure" fig-pos="htb" fig-cap="**Published Privacy-Utility Results**: Accuracy at selected privacy budgets from [@abadi2016deep; @bu2020gaussian; @de2022dp]. MNIST stays comparatively accurate under single-digit epsilon budgets in these experiments, while CIFAR-10 trained from scratch without extra data remains harder, with De et al. reporting 81.4 percent at $\PrivacyBudget = 8$. Comparisons require the full mechanism, accountant, adjacency relation, training regime, and data rather than epsilon alone." fig-alt="Test accuracy versus privacy budget epsilon on a log axis. A blue line of MNIST results from Bu 2020 rises from 95 to 98 percent, blue triangles mark MNIST results from Abadi 2016, and orange markers at epsilon 8 mark CIFAR-10 results from Abadi 2016 at 73.0 percent and De 2022 at 81.4 percent. Dashed lines mark the nonprivate baselines, 98.3 percent for MNIST and 93.0 percent for CIFAR-10, each labeled directly. A double arrow at epsilon 8 spans from the CIFAR-10 baseline down to the lower result and is labeled roughly 12 to 20 points below its baseline."}
+    # ┌── 1. LOAD (registry) ───────────────────────────────────────────────
+    dp = Literature.DifferentialPrivacy
+    bu = Literature.Series.GaussianDpMnistNoisySgd
+    abadi = Literature.Series.AbadiDpSgdAccuracy
+    mnist_points = [(r["clt_epsilon"], r["test_accuracy_pct"]) for r in bu.entries] + [
+        (r["epsilon"], r["accuracy_pct"]) for r in abadi.entries if r["dataset"] == "MNIST"
+    ]
+    mnist_base = float(dp.MnistNonprivateAccuracyPct)
+    cifar_base = float(dp.Cifar10NonprivateAccuracyPct)  # WRN-16-4, nonprivate
+    cifar_eps = float(dp.Cifar10ComparisonEpsilon)
+    cifar_abadi = float(dp.Cifar10AbadiAccuracyAtEps8Pct)
+    cifar_de = float(dp.Cifar10DeAccuracyAtEps8Pct)
+
+    # ┌── 2. EXECUTE (gaps) ────────────────────────────────────────────────
+    single_digit = [(e, a) for e, a in mnist_points if 1 <= e < 10]
+    mnist_gap_max = mnist_base - min(a for e, a in single_digit)  # largest gap = lowest accuracy
+    single_digit_eps_min = min(e for e, a in single_digit)
+    cifar_gap_lo = cifar_base - cifar_de
+    cifar_gap_hi = cifar_base - cifar_abadi
+    eps_ratio = cifar_eps / single_digit_eps_min
+
+    # ┌── 3. GUARD (prose claims) ──────────────────────────────────────────
+    check(len(single_digit) == 5, f"single-digit MNIST points {len(single_digit)}")
+    check(eps_ratio == 4, f"'a budget four times looser' needs ratio 4, got {eps_ratio}")
+    check(cifar_gap_lo / mnist_gap_max >= 3, "'several times the MNIST accuracy cost'")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    mnist_gap_max_str = fmt(mnist_gap_max, precision=1, commas=False)
+    mnist_base_str = fmt(mnist_base, precision=1, commas=False)
+    single_digit_eps_min_str = fmt(single_digit_eps_min, precision=0, commas=False)
+    cifar_base_str = fmt(cifar_base, precision=1, commas=False)
+    cifar_eps_str = fmt(cifar_eps, precision=0, commas=False)
+    cifar_abadi_str = fmt(cifar_abadi, precision=0, commas=False)
+    cifar_de_str = fmt(cifar_de, precision=1, commas=False)
+    cifar_gap_lo_str = fmt_int(cifar_gap_lo, commas=False)  # "roughly": nearest point
+    cifar_gap_hi_str = fmt_int(cifar_gap_hi, commas=False)
+```
+
+Tightening differential privacy to single-digit $\PrivacyBudget$ keeps MNIST within `{python} PrivacyUtilityGaps.mnist_gap_max_str` percentage points of its `{python} PrivacyUtilityGaps.mnist_base_str` percent nonprivate baseline, yet drops CIFAR-10 trained from scratch by roughly `{python} PrivacyUtilityGaps.cifar_gap_lo_str` to `{python} PrivacyUtilityGaps.cifar_gap_hi_str` percentage points even at $\PrivacyBudget =$ `{python} PrivacyUtilityGaps.cifar_eps_str` [@abadi2016deep; @bu2020gaussian; @de2022dp]. That gap shows how strongly the utility cost of differential privacy depends on task complexity, architecture, privacy accountant, pretraining, and whether extra public data are allowed.
+
+@Fig-privacy-utility-frontier collects those published MNIST and CIFAR-10 results on a logarithmic axis [@abadi2016deep; @bu2020gaussian; @de2022dp]. These comparisons show setting-specific utility costs; differences in architectures and training procedures prevent isolating task complexity alone. The plotted MNIST results stay within `{python} PrivacyUtilityGaps.mnist_gap_max_str` percentage points of the `{python} PrivacyUtilityGaps.mnist_base_str` percent nonprivate baseline at every plotted single-digit budget, the smallest of which is $\PrivacyBudget =$ `{python} PrivacyUtilityGaps.single_digit_eps_min_str`. For CIFAR-10 without extra data, the plotted results reach `{python} PrivacyUtilityGaps.cifar_abadi_str` percent in @abadi2016deep and `{python} PrivacyUtilityGaps.cifar_de_str` percent in @de2022dp at $\PrivacyBudget=$ `{python} PrivacyUtilityGaps.cifar_eps_str`, roughly `{python} PrivacyUtilityGaps.cifar_gap_lo_str` to `{python} PrivacyUtilityGaps.cifar_gap_hi_str` points below the displayed `{python} PrivacyUtilityGaps.cifar_base_str` percent nonprivate reference. These CIFAR-10 settings therefore pay several times the MNIST accuracy cost at a budget four times looser. That reference is a comparison point, not a ceiling on achievable accuracy. Selecting a budget therefore requires the full training regime, adjacency relation, additive slack, accountant, and utility requirements rather than the horizontal coordinate alone.
+
+::: {#fig-privacy-utility-frontier fig-env="figure" fig-pos="htb" fig-cap="**Published Privacy-Utility Results**: Accuracy at selected privacy budgets from [@abadi2016deep; @bu2020gaussian; @de2022dp]. MNIST stays comparatively accurate under single-digit epsilon budgets in these experiments, while CIFAR-10 trained from scratch without extra data remains harder, with De et al. reporting 81.4 percent at $\PrivacyBudget = 8$. Comparisons require the full mechanism, accountant, adjacency relation, training regime, and data rather than epsilon alone." fig-alt="Test accuracy versus privacy budget epsilon on a log axis. A blue line of MNIST results from Bu 2020 rises from 95 to 98 percent, blue triangles mark MNIST results from Abadi 2016, and orange markers at epsilon 8 mark CIFAR-10 results from Abadi 2016 at 73.0 percent and De 2022 at 81.4 percent. Dashed lines mark the nonprivate baselines, 98.3 percent for MNIST and 95.0 percent for CIFAR-10, each labeled directly. A double arrow at epsilon 8 spans from the CIFAR-10 baseline down to the lower result and is labeled roughly 14 to 22 points below its baseline."}
 
 ```{python}
 #| echo: false
@@ -4221,26 +4280,28 @@ from binder.tools.figures import style as book_style
 
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.0, 3.3))
 
-# -- MNIST data ---
-# Bu 2020 (Harvard Data Science Review, PMC7695347)
+# ┌── 2. ARRAYS (MLSysIM Literature) ───────────────────────────────────────────
+from mlsysim import Literature
 
-# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-bu_eps = np.array([0.83, 2.32, 5.07, 9.98, 14.98, 31.12])
-bu_acc = np.array([95.0, 96.6, 97.0, 97.6, 97.8, 98.0])
+dp = Literature.DifferentialPrivacy
+# MNIST: Bu 2020, Table 1 (CLT epsilon at delta = 1e-5)
+bu = Literature.Series.GaussianDpMnistNoisySgd
+bu_eps = np.array(bu.column('clt_epsilon'))
+bu_acc = np.array(bu.column('test_accuracy_pct'))
 
-# Abadi 2016 (CCS)
-abadi_mnist_eps = np.array([0.5, 2.0, 8.0])
-abadi_mnist_acc = np.array([90.0, 95.0, 97.0])
+# MNIST: Abadi 2016, Section 5.2 (sorted by epsilon)
+abadi_mnist = sorted((r for r in Literature.Series.AbadiDpSgdAccuracy.entries if r['dataset'] == 'MNIST'), key=lambda r: r['epsilon'])
+abadi_mnist_eps = np.array([r['epsilon'] for r in abadi_mnist])
+abadi_mnist_acc = np.array([r['accuracy_pct'] for r in abadi_mnist])
 
-# MNIST nonprivate baseline
-mnist_baseline = 98.3
+# MNIST nonprivate baseline (Abadi 2016)
+mnist_baseline = float(dp.MnistNonprivateAccuracyPct)
 
-# -- CIFAR-10 data ---
-# Abadi 2016: eps=8, acc=73%
-# De 2022 (arXiv:2204.13650): eps=8, acc=81.4%
-cifar_eps = np.array([8.0, 8.0])
-cifar_acc = np.array([73.0, 81.4])
-cifar_baseline = 93.0
+# CIFAR-10 at the comparison budget: Abadi 2016 and De 2022 (from scratch)
+cifar_eps = np.array([float(dp.Cifar10ComparisonEpsilon)] * 2)
+cifar_acc = np.array([float(dp.Cifar10AbadiAccuracyAtEps8Pct), float(dp.Cifar10DeAccuracyAtEps8Pct)])
+# CIFAR-10 nonprivate reference: WRN-16-4 (Zagoruyko and Komodakis 2016)
+cifar_baseline = float(dp.Cifar10NonprivateAccuracyPct)
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
 # MNIST: Bu line + Abadi triangles
@@ -4253,7 +4314,7 @@ ax.plot(cifar_eps[1], cifar_acc[1], color=COLORS['OrangeLine'], marker='D', mark
 
 # Nonprivate baselines
 ax.axhline(y=mnist_baseline, color=COLORS['BlueLine'], linestyle='--', alpha=0.5, linewidth=1.2, label=f'MNIST baseline ({mnist_baseline}%)')
-ax.axhline(y=cifar_baseline, color=COLORS['OrangeLine'], linestyle='--', alpha=0.5, linewidth=1.2, label=f'CIFAR-10 baseline ({cifar_baseline}%)')
+ax.axhline(y=cifar_baseline, color=COLORS['OrangeLine'], linestyle='--', alpha=0.5, linewidth=1.2, label=f'CIFAR-10 baseline ({cifar_baseline:.1f}%)')
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
 ax.set_xscale('log')
@@ -4272,7 +4333,7 @@ ax.text(0.56, 89.6, 'MNIST (Abadi 2016)', color=COLORS['BlueLine'], ha='left', v
 ax.text(7.0, cifar_acc[1], 'CIFAR-10 (De 2022)', color=COLORS['OrangeLine'], ha='right', va='center', **lab)
 ax.text(7.0, cifar_acc[0], 'CIFAR-10 (Abadi 2016)', color=COLORS['OrangeLine'], ha='right', va='center', **lab)
 ax.text(0.32, mnist_baseline + 0.35, f'MNIST nonprivate baseline ({mnist_baseline}%)', color=COLORS['BlueLine'], ha='left', va='bottom', **lab)
-ax.text(0.32, cifar_baseline - 0.35, f'CIFAR-10 nonprivate baseline ({cifar_baseline}%)', color=COLORS['OrangeLine'], ha='left', va='top', **lab)
+ax.text(0.32, cifar_baseline - 1.0, f'CIFAR-10 nonprivate baseline ({cifar_baseline:.1f}%)', color=COLORS['OrangeLine'], ha='left', va='top', **lab)
 
 # Focal gap: the CIFAR-10 accuracy cost at epsilon = 8, measured from its baseline
 gx = 9.6
@@ -4284,7 +4345,7 @@ for acc in cifar_acc:
 ax.text(
     gx * 1.12,
     (cifar_baseline + cifar_acc[0]) / 2,
-    'CIFAR-10 at $\\epsilon$ = 8:\nroughly 12 to 20 points\nbelow its baseline',
+    f'CIFAR-10 at $\\epsilon$ = {PrivacyUtilityGaps.cifar_eps_str}:\nroughly {PrivacyUtilityGaps.cifar_gap_lo_str} to {PrivacyUtilityGaps.cifar_gap_hi_str} points\nbelow its baseline',
     color=COLORS['primary'],
     ha='left',
     va='center',
