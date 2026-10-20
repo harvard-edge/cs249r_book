@@ -87,3 +87,28 @@ def calc_fleet_tco(unit_cost, power_w, quantity, years, kwh_price):
     total_energy = p_w * quantity * hours
     power_opex = total_energy * price
     return (fleet_capex + power_opex).m_as(ureg.dollar)
+
+
+def calc_payback_period(upfront_cost, annual_savings):
+    """Simple payback: the time for running-cost savings to repay an up-front cost.
+
+    ``t = C_upfront / (savings per year)``, undiscounted (added 2026-10-20).
+
+    Parameters
+    ----------
+    upfront_cost : Quantity
+        One-time capital cost (USD).
+    annual_savings : Quantity
+        Running cost avoided per year (USD/year); must be positive.
+
+    Returns
+    -------
+    Quantity
+        Payback period in years.
+    """
+    cost = _ensure_unit(upfront_cost, ureg.dollar, "upfront_cost")
+    validate_nonnegative(cost, "upfront_cost")
+    savings = _ensure_unit(annual_savings, ureg.dollar / ureg.year, "annual_savings")
+    if savings.magnitude <= 0:
+        raise ValueError("annual_savings must be positive for the cost to pay back")
+    return (cost / savings).to(ureg.year)

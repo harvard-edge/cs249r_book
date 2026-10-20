@@ -2724,3 +2724,318 @@ class ThrottledStageScenario(BaseScenario):
     def result(self):
         from .solvers import ThrottledStageModel
         return ThrottledStageModel().solve(self.site.t_backbone, self.clock_ratio, self.speed)
+
+
+# --- ML lifecycle: screening requirements, late limits, iteration, deployment (added 2026-10-20) ---
+
+class ScreeningCountsScenario(BaseScenario):
+    """A screener's decisions on ``sick`` and ``healthy`` patients: sensitivity, specificity, accuracy.
+
+    Sensitivity counts only sick patients and specificity only healthy ones, so a
+    mostly healthy population cannot inflate either; accuracy pools both.
+    """
+    sick: int
+    healthy: int
+    true_positives: int
+    true_negatives: int
+
+    @property
+    def population(self) -> int:
+        return self.sick + self.healthy
+
+    @property
+    def sensitivity(self) -> float:
+        return self.true_positives / self.sick
+
+    @property
+    def specificity(self) -> float:
+        return self.true_negatives / self.healthy
+
+    @property
+    def accuracy(self) -> float:
+        return (self.true_positives + self.true_negatives) / self.population
+
+    @property
+    def missed(self) -> int:
+        """Sick patients the screener cleared (false negatives)."""
+        return self.sick - self.true_positives
+
+
+class ImageYieldScenario(BaseScenario):
+    """``attempted`` captures, of which ``usable`` produced a result: the usable and rejected shares."""
+    attempted: int
+    usable: int
+
+    @property
+    def rejected(self) -> int:
+        return self.attempted - self.usable
+
+    @property
+    def usable_share(self) -> float:
+        return self.usable / self.attempted
+
+    @property
+    def rejected_share(self) -> float:
+        return self.rejected / self.attempted
+
+
+class ScreeningRequirementsScenario(BaseScenario):
+    """A screener's release floors and device budget, with measured slices checked against the floor.
+
+    ``device`` supplies the power envelope; ``slice_sensitivity`` maps a test slice
+    (all photos, one patient subgroup) to its measured sensitivity; a release passes
+    only if every slice meets the floor. ``field_operating_point`` is an optional
+    (specificity, sensitivity) pair for one threshold on field data.
+    """
+    sensitivity_floor: float
+    specificity_floor: float
+    memory_budget: Quantity
+    device: HardwareNode
+    slice_sensitivity: Dict[str, float] = {}
+    field_operating_point: Optional[Tuple[float, float]] = None
+
+    @property
+    def power_low(self) -> Quantity:
+        return self.device.tdp_min
+
+    @property
+    def power_high(self) -> Quantity:
+        return self.device.tdp_max
+
+    def passes(self, slice_name: str) -> bool:
+        return self.slice_sensitivity[slice_name] >= self.sensitivity_floor
+
+    @property
+    def failing_slices(self) -> List[str]:
+        return [k for k in self.slice_sensitivity if not self.passes(k)]
+
+
+class LateConstraintScenario(BaseScenario):
+    """A model built without its deployment limit, the day the limit surfaces, and the repair it forces.
+
+    ``validation_sensitivity`` maps a day to the sensitivity reached that day.
+    ``repair_tasks`` lists the redone artifacts in order; each waits for the one
+    before, so the repair takes their sum when staff and compute are free.
+    """
+    model_memory: Quantity
+    memory_budget: Quantity
+    device_memory_low: Quantity
+    device_memory_high: Quantity
+    request_day: int
+    validation_sensitivity: Dict[int, float]
+    handoff_day: int
+    discovery_day: int
+    check_day: int
+    discard_day: int
+    repair_tasks: Dict[str, Quantity]
+
+    @property
+    def overrun_ratio(self) -> float:
+        """Model memory over the budget it had to fit."""
+        return (self.model_memory / self.memory_budget).to("").magnitude
+
+    @property
+    def work_discarded(self) -> Quantity:
+        """Elapsed time from the request to the day the work is thrown away."""
+        return Q_(self.discard_day - self.request_day, "day")
+
+    @property
+    def repair_elapsed(self) -> Quantity:
+        total = Q_(0, "day")
+        for duration in self.repair_tasks.values():
+            total = total + duration
+        return total.to("day")
+
+
+class IterationBudgetScenario(BaseScenario):
+    """Two teams in one development window: a slow cycle against a fast one, with assumed gains per run.
+
+    Accuracies are in percent and gains in points per run. The slow team learns
+    from every run; the fast team can run far more than it can learn from, so
+    ``fast_effective_runs`` caps the runs that count. Both stop at ``ceiling``.
+    """
+    window: Quantity
+    slow_cycle: Quantity
+    slow_start: float
+    slow_gain: float
+    fast_cycle: Quantity
+    fast_start: float
+    fast_gain: float
+    fast_effective_runs: int
+    ceiling: float
+
+    @property
+    def slow_runs(self) -> float:
+        return (self.window / self.slow_cycle).to("").magnitude
+
+    @property
+    def slow_final(self) -> float:
+        return min(self.slow_start + self.slow_runs * self.slow_gain, self.ceiling)
+
+    @property
+    def fast_possible_runs(self) -> float:
+        return (self.window / self.fast_cycle).to("").magnitude
+
+    @property
+    def fast_uncapped(self) -> float:
+        return self.fast_start + self.fast_effective_runs * self.fast_gain
+
+    @property
+    def fast_final(self) -> float:
+        return min(self.fast_uncapped, self.ceiling)
+
+    @property
+    def ideas_ratio(self) -> float:
+        """Experiments the fast team learns from per experiment the slow team runs."""
+        return self.fast_effective_runs / self.slow_runs
+
+    @property
+    def final_gap(self) -> float:
+        """Points between the two final accuracies."""
+        return abs(self.fast_final - self.slow_final)
+
+
+class InputResizeScenario(BaseScenario):
+    """An image resized to a model's square input: every length scales by target over source height.
+
+    ``feature_sizes`` are widths, in source pixels, of the smallest features that
+    must survive (measured on the image).
+    """
+    source_width: int
+    source_height: int
+    target_size: int
+    feature_sizes: List[float]
+
+    @property
+    def scale(self) -> float:
+        return self.target_size / self.source_height
+
+    def resized(self, length_px: float) -> float:
+        return length_px * self.scale
+
+    @property
+    def feature_mid(self) -> float:
+        return (min(self.feature_sizes) + max(self.feature_sizes)) / 2
+
+    @property
+    def resized_features(self) -> List[float]:
+        return [self.resized(f) for f in self.feature_sizes]
+
+
+class DailyUploadScenario(BaseScenario):
+    """A site's daily captures sent over its uplink inside a working window, against compact summaries."""
+    cases_per_day: int
+    files_per_case: int
+    file_size: Quantity
+    uplink: Quantity
+    window: Quantity
+    summary_size: Quantity          # one summary per case
+
+    @property
+    def daily_volume(self) -> Quantity:
+        return self.cases_per_day * self.files_per_case * self.file_size
+
+    @property
+    def upload_time(self) -> Quantity:
+        from ..physics.quantities import transfer_time
+        return transfer_time(self.daily_volume, self.uplink)
+
+    @property
+    def window_share(self) -> float:
+        """Upload time as a share of the working window."""
+        return (self.upload_time / self.window).to("").magnitude
+
+    @property
+    def file_upload_time(self) -> Quantity:
+        from ..physics.quantities import transfer_time
+        return transfer_time(self.file_size, self.uplink)
+
+    @property
+    def summary_volume(self) -> Quantity:
+        return self.cases_per_day * self.summary_size
+
+    @property
+    def reduction(self) -> float:
+        """Raw daily volume over the summaries that replace it."""
+        return (self.daily_volume / self.summary_volume).to("").magnitude
+
+
+class CloudEdgeCostScenario(BaseScenario):
+    """Serving a network of sites from the cloud (pay per image) or from a device at each site (buy up front).
+
+    Undiscounted; ``payback`` is the up-front device cost over the yearly running
+    cost the devices save. ``image_size``, ``uplink``, and the two latencies are
+    optional, for comparing response times.
+    """
+    sites: int
+    cases_per_site_day: int
+    images_per_case: int
+    days_per_year: int
+    cloud_cost_per_image: Quantity
+    cloud_fixed_annual: Quantity
+    edge_device_cost: Quantity
+    edge_maintenance_annual: Quantity
+    edge_cost_per_image: Quantity
+    image_size: Optional[Quantity] = None
+    uplink: Optional[Quantity] = None
+    cloud_latency: Optional[Quantity] = None
+    edge_latency: Optional[Quantity] = None
+
+    @property
+    def annual_images(self) -> int:
+        return self.sites * self.cases_per_site_day * self.images_per_case * self.days_per_year
+
+    @property
+    def cloud_inference_annual(self) -> Quantity:
+        return self.annual_images * self.cloud_cost_per_image / Q_(1, "year")
+
+    @property
+    def cloud_annual(self) -> Quantity:
+        return self.cloud_inference_annual + self.cloud_fixed_annual
+
+    @property
+    def edge_capex(self) -> Quantity:
+        return self.sites * self.edge_device_cost
+
+    @property
+    def edge_inference_annual(self) -> Quantity:
+        return self.annual_images * self.edge_cost_per_image / Q_(1, "year")
+
+    @property
+    def edge_annual(self) -> Quantity:
+        return self.edge_maintenance_annual + self.edge_inference_annual
+
+    @property
+    def edge_first_year(self) -> Quantity:
+        return self.edge_capex + self.edge_annual * Q_(1, "year")
+
+    @property
+    def annual_savings(self) -> Quantity:
+        return self.cloud_annual - self.edge_annual
+
+    @property
+    def payback(self) -> Quantity:
+        from ..physics.economics import calc_payback_period
+        return calc_payback_period(self.edge_capex, self.annual_savings)
+
+    @property
+    def cloud_upload_time(self) -> Quantity:
+        """Time to send one image over the site uplink, before any remote processing."""
+        from ..physics.quantities import transfer_time
+        return transfer_time(self.image_size, self.uplink)
+
+
+class MonitoringCadenceScenario(BaseScenario):
+    """Production signals reviewed on different clocks, each as long as the signal takes to trust."""
+    cadences: Dict[str, Quantity]   # signal clock label -> review interval
+
+    @property
+    def minutes(self) -> Dict[str, float]:
+        return {k: q.to("minute").magnitude for k, q in self.cadences.items()}
+
+    @property
+    def span_orders(self) -> float:
+        """Orders of magnitude from the fastest to the slowest cadence."""
+        import math
+        m = self.minutes.values()
+        return math.log10(max(m) / min(m))

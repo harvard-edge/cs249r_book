@@ -1,6 +1,7 @@
 from pydantic import BaseModel, ConfigDict
 from typing import Optional, Union
 from ..core.units import Q_
+from ..core.units import DAYS_PER_YEAR as _DAYS_PER_YEAR  # added 2026-10-20
 from ..core.types import Quantity
 from ..models.types import Workload
 from ..hardware.types import HardwareNode
@@ -2150,4 +2151,148 @@ class Scenarios(Registry):
         site=_Embodied.Scenario.WarehouseAisle,
         clock_ratio=2 / 3,  # scenario assumption: DVFS clock as a fraction of full clock
         speed=_Embodied.MobileManipulator.WarehouseMobileManipulator.base.max_velocity,
+    )
+
+    # --- ML lifecycle: a diabetic retinopathy screener from request to monitoring (added 2026-10-20) ---
+    # One rural-clinic screener carries every stage: its release floors and device
+    # budget, a memory limit found after the work was done, two iteration speeds,
+    # the clinic uplink, cloud against edge cost, and the monitoring clocks. The
+    # cited studies (Gulshan 2016, Beede 2020, FDA DEN180001) are read from
+    # Literature.ScreeningStudies; everything else is a stated scenario assumption.
+
+    RetinopathyScreenerRequirements = _st.ScreeningRequirementsScenario(
+        name="A diabetic retinopathy screener's release floors and clinic-device budget",
+        description="Sensitivity and specificity floors that hold in every subgroup, a memory reservation on "
+                    "an Orin Nano-class clinic device, and two measured sensitivity slices at the release gate.",
+        sensitivity_floor=0.90,           # scenario assumption: few sick patients missed
+        specificity_floor=0.80,           # scenario assumption: specialists not flooded with false referrals
+        memory_budget=Q_(500, "MB"),      # scenario assumption: the clinic IT plan's reservation for the model
+        device=_Hardware.Edge.JetsonOrinNano,
+        slice_sensitivity={
+            "all clinic photos": 0.94,    # scenario assumption: overall sensitivity on clinic photos
+            "cataract patients": 0.76,    # scenario assumption: the subgroup slice that fails the floor
+        },
+        field_operating_point=(0.88, 0.80),  # scenario assumption: illustrative (specificity, sensitivity)
+                                             # of the lab threshold on clinic photos
+    )
+    RetinopathyScreenerLateMemoryLimit = _st.LateConstraintScenario(
+        name="A screener whose 500 MB memory limit surfaces on day 151",
+        description="A team runs the stages as a line; the model reaches its accuracy target, then needs 4 GB "
+                    "on a device that reserves 500 MB for it. Four dependent artifacts are redone in sequence.",
+        model_memory=Q_(4, "GB"),         # scenario assumption: memory the trained model needs
+        memory_budget=RetinopathyScreenerRequirements.memory_budget,
+        device_memory_low=Q_(4, "GB"),    # scenario assumption: shared memory of the clinic device, low
+        device_memory_high=Q_(8, "GB"),   # scenario assumption: shared memory of the clinic device, high
+        request_day=1,
+        validation_sensitivity={90: 0.92, 120: 0.94},   # scenario assumption: day -> validation sensitivity
+        handoff_day=150,                  # scenario assumption: model handed to deployment engineers
+        discovery_day=151,                # scenario assumption: memory need reported
+        check_day=152,                    # scenario assumption: device budget finally checked
+        discard_day=153,                  # scenario assumption: work discarded
+        repair_tasks={                    # scenario assumption: a supplied schedule, not a multiplier
+            "Revise preparation": Q_(1, "day"),
+            "Train new weights": Q_(2, "day"),
+            "Repeat validation": Q_(2, "day"),
+            "Package the release": Q_(1, "day"),
+        },
+    )
+    SlowVersusFastIteration = _st.IterationBudgetScenario(
+        name="A slow ensemble against a fast edge model over 26 weeks of development",
+        description="One-week runs from 95 percent at 0.15 points each, against one-hour runs from 90 percent at "
+                    "0.1 points each of which a team can learn from about 100; both capped at 99 percent.",
+        window=Q_(26, "week"),            # scenario assumption: six months of development
+        slow_cycle=Q_(1, "week"),         # scenario assumption: one large-ensemble run
+        slow_start=95.0,                  # scenario assumption: percent
+        slow_gain=0.15,                   # scenario assumption: points per run
+        fast_cycle=Q_(1, "hour"),         # scenario assumption: one small-model run
+        fast_start=90.0,                  # scenario assumption: percent
+        fast_gain=0.1,                    # scenario assumption: points per run
+        fast_effective_runs=100,          # scenario assumption: experiments a team can design and learn from
+        ceiling=99.0,                     # scenario assumption: accuracy ceiling, percent
+    )
+    AlwaysNormalScreener = _st.ScreeningCountsScenario(
+        name="A screener that answers normal for every patient, among 100 patients with 10 sick",
+        description="Right about every healthy patient and none of the sick ones: high accuracy, zero sensitivity.",
+        sick=10,                          # scenario assumption: illustrative population of 100
+        healthy=90,                       # scenario assumption
+        true_positives=0,
+        true_negatives=90,
+    )
+    IdxDrPivotalTrial = _st.ScreeningCountsScenario(
+        name="IDx-DR pivotal trial: observed detection counts",
+        description="Disease-positive patients detected and disease-negative patients cleared in the FDA De Novo "
+                    "pivotal trial (DEN180001).",
+        sick=int(_Literature.ScreeningStudies.IdxDrPivotalDiseasePositive),
+        healthy=int(_Literature.ScreeningStudies.IdxDrPivotalDiseaseNegative),
+        true_positives=int(_Literature.ScreeningStudies.IdxDrPivotalTruePositives),
+        true_negatives=int(_Literature.ScreeningStudies.IdxDrPivotalTrueNegatives),
+    )
+    IdxDrPivotalAnalyzable = _st.ImageYieldScenario(
+        name="IDx-DR pivotal trial: patients with a device result among those who completed",
+        description="Completed patients who entered the primary analysis.",
+        attempted=int(_Literature.ScreeningStudies.IdxDrPivotalCompleted),
+        usable=int(_Literature.ScreeningStudies.IdxDrPivotalAnalyzed),
+    )
+    IdxDrPivotalImageability = _st.ImageYieldScenario(
+        name="IDx-DR pivotal trial: imageability",
+        description="Patients with a device result among those the reading center graded.",
+        attempted=int(_Literature.ScreeningStudies.IdxDrPivotalGraded),
+        usable=int(_Literature.ScreeningStudies.IdxDrPivotalAnalyzed),
+    )
+    ThaiClinicRetinalPhotoYield = _st.ImageYieldScenario(
+        name="Retinal photos the deployed screener could grade in Thai clinics",
+        description="Submitted photos and the share rejected as ungradable (Beede et al. 2020).",
+        attempted=int(_Literature.ScreeningStudies.BeedeImagesSubmitted),
+        usable=int(_Literature.ScreeningStudies.BeedeImagesSubmitted
+                   - _Literature.ScreeningStudies.BeedeImagesUngradable),
+    )
+    FundusPhotoAt224 = _st.InputResizeScenario(
+        name="A fundus photograph resized to the 224-pixel ImageNet input",
+        description="A 1,009 x 857 pixel retina photo (Hao et al., CC BY 4.0) shrunk to 224 x 224; exudates "
+                    "measured 8 to 12 pixels wide on the source.",
+        source_width=1009,                # measured: width of the source photo, pixels
+        source_height=857,                # measured: height of the source photo, pixels
+        target_size=_Datasets.ImageNet.image_height,
+        feature_sizes=[8.0, 12.0],        # measured: exudate widths on the source, pixels
+    )
+    RuralClinicRetinalUpload = _st.DailyUploadScenario(
+        name="A rural screening clinic uploading a day of retinal photos over a 2 Mb/s uplink",
+        description="100 patients, four photos each, against an eight-hour shift, and the 10 KB summaries "
+                    "per patient that local inference sends instead.",
+        cases_per_day=100,                # scenario assumption: a busy rural screening clinic
+        files_per_case=4,                 # screening protocol: two fields per eye
+        file_size=_ReferenceStats.ClinicalImaging.RetinalPhotoSize,
+        uplink=Q_(2.0, "megabit/second"), # scenario assumption: clinic uplink
+        window=Q_(8.0, "hour"),           # scenario assumption: one clinic shift
+        summary_size=Q_(10.0, "KB"),      # scenario assumption: one result summary per patient
+    )
+    RetinopathyScreeningCloudVersusEdge = _st.CloudEdgeCostScenario(
+        name="500 screening clinics served from the cloud or from a device in each clinic",
+        description="50 patients a day per clinic and one billed image each, every day of the year; cloud per-image "
+                    "fees plus connectivity against a $500 device per clinic plus maintenance.",
+        sites=500,                        # scenario assumption: clinics in the network
+        cases_per_site_day=50,            # scenario assumption: patients per clinic per day
+        images_per_case=1,                # scenario assumption: one graded image billed per patient
+        days_per_year=_DAYS_PER_YEAR,     # scenario assumption: clinics operate every day
+        cloud_cost_per_image=Q_(0.01, "dollar"),             # scenario assumption
+        cloud_fixed_annual=Q_(45000, "dollar/year"),         # scenario assumption: connectivity and network operations
+        edge_device_cost=Q_(500, "dollar"),                  # scenario assumption: one device per clinic
+        edge_maintenance_annual=Q_(25000, "dollar/year"),    # scenario assumption
+        edge_cost_per_image=Q_(0.001, "dollar"),             # scenario assumption
+        image_size=_ReferenceStats.ClinicalImaging.RetinalPhotoSize,
+        uplink=RuralClinicRetinalUpload.uplink,
+        cloud_latency=Q_(200, "ms"),      # scenario assumption: remote processing after upload
+        edge_latency=Q_(50, "ms"),        # scenario assumption: on-device inference
+    )
+    RetinopathyMonitoringCadences = _st.MonitoringCadenceScenario(
+        name="Monitoring clocks for a deployed retinopathy screener",
+        description="Camera checks each minute, proxy signals daily, labeled accuracy weekly, population coverage "
+                    "monthly, architecture review quarterly (an illustrative plan).",
+        cadences={
+            "Minute": Q_(1, "minute"),
+            "Day": Q_(1, "day"),
+            "Week": Q_(1, "week"),
+            "Month": Q_(_DAYS_PER_YEAR / 12, "day"),     # a 365-day year's month
+            "Quarter": Q_(_DAYS_PER_YEAR / 4, "day"),    # a 365-day year's quarter
+        },
     )

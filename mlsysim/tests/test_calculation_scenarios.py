@@ -1176,3 +1176,72 @@ def test_drive_bus_campaign_and_throttle():
     t = Scenarios.ThrottledNavigationBackbone.result
     assert t.added_age.to("ms").magnitude == approx(11)
     assert t.added_travel.to("mm").magnitude == approx(16.5)
+
+
+# --- ML lifecycle: the retinopathy screener (added 2026-10-20) ---------------
+
+def test_screener_requirements_and_late_memory_limit():
+    r = Scenarios.RetinopathyScreenerRequirements
+    assert r.power_low.to("W").magnitude == approx(7)
+    assert r.power_high.to("W").magnitude == approx(15)
+    assert r.passes("all clinic photos")
+    assert r.failing_slices == ["cataract patients"]
+    late = Scenarios.RetinopathyScreenerLateMemoryLimit
+    assert late.overrun_ratio == approx(8)
+    assert late.work_discarded.to("day").magnitude == approx(152)
+    assert late.work_discarded.to("month").magnitude == approx(4.99384)
+    assert late.repair_elapsed.to("day").magnitude == approx(6)
+
+
+def test_slow_versus_fast_iteration():
+    s = Scenarios.SlowVersusFastIteration
+    assert s.slow_runs == approx(26)
+    assert s.slow_final == approx(98.9)
+    assert s.fast_possible_runs == approx(4368)
+    assert s.fast_uncapped == approx(100)
+    assert s.fast_final == approx(99)
+    assert s.ideas_ratio == approx(3.84615)
+    assert s.final_gap == approx(0.1)
+
+
+def test_screening_counts_and_image_yield():
+    a = Scenarios.AlwaysNormalScreener
+    assert a.accuracy == approx(0.9)
+    assert a.sensitivity == 0
+    assert a.missed == 10
+    f = Scenarios.IdxDrPivotalTrial
+    assert f.sensitivity == approx(0.873737)
+    assert f.specificity == approx(0.895330)
+    assert Scenarios.IdxDrPivotalAnalyzable.usable_share == approx(0.918161)
+    assert Scenarios.IdxDrPivotalImageability.usable_share == approx(0.961268)
+    assert Scenarios.ThaiClinicRetinalPhotoYield.rejected_share == approx(0.213819)
+
+
+def test_fundus_photo_resized_to_224():
+    z = Scenarios.FundusPhotoAt224
+    assert z.scale == approx(0.261377)
+    assert z.resized_features == [approx(2.09102), approx(3.13652)]
+    assert z.resized(z.feature_mid) == approx(2.61377)
+
+
+def test_clinic_upload_and_cloud_versus_edge():
+    u = Scenarios.RuralClinicRetinalUpload
+    assert u.daily_volume.to("MB").magnitude == approx(2000)
+    assert u.upload_time.to("s").magnitude == approx(8000)
+    assert u.window_share == approx(0.277778)
+    assert u.file_upload_time.to("s").magnitude == approx(20)
+    assert u.reduction == approx(2000)
+    c = Scenarios.RetinopathyScreeningCloudVersusEdge
+    assert c.annual_images == 9_125_000
+    assert c.cloud_annual.to("USD/year").magnitude == approx(136_250)
+    assert c.edge_capex.to("USD").magnitude == approx(250_000)
+    assert c.edge_annual.to("USD/year").magnitude == approx(34_125)
+    assert c.annual_savings.to("USD/year").magnitude == approx(102_125)
+    assert c.payback.to("year").magnitude == approx(2.44798)
+    assert c.cloud_upload_time.to("s").magnitude == approx(20)
+
+
+def test_monitoring_cadences():
+    m = Scenarios.RetinopathyMonitoringCadences
+    assert m.minutes["Quarter"] == approx(131_400)
+    assert m.span_orders == approx(5.11860)

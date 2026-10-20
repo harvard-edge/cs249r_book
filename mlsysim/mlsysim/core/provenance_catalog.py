@@ -2648,3 +2648,60 @@ ESA_SCHIAPARELLI_INQUIRY = _lit(
         "ended in an impact at about 540 km/h."
     ),
 )
+# --- Diabetic retinopathy screening and distribution shift (added 2026-10-20) ---
+GULSHAN_DR_JAMA_2016 = _lit(
+    "prov:gulshan-dr-jama-2016",
+    "Gulshan et al. (2016), Development and Validation of a Deep Learning Algorithm for Detection of "
+    "Diabetic Retinopathy in Retinal Fundus Photographs, JAMA 316(22)",
+    url="https://jamanetwork.com/journals/jama/fullarticle/2588763",
+    verified="2026-10-20",
+    notes=("Development set of 128,175 graded images. EyePACS-1 validation (8,788 fully gradable "
+           "images, Fig. 2A with eight ophthalmologists plotted): AUC 0.991; high-sensitivity "
+           "operating point 97.5 percent sensitivity at 93.4 percent specificity; high-specificity "
+           "point 90.3 and 98.1 percent."),
+)
+BEEDE_DR_CHI_2020 = _lit(
+    "prov:beede-dr-chi-2020",
+    "Beede et al. (2020), A Human-Centered Evaluation of a Deep Learning System Deployed in Clinics "
+    "for the Detection of Diabetic Retinopathy, CHI 2020",
+    url="https://doi.org/10.1145/3313831.3376718",
+    verified="2026-10-20",
+    notes=("Field study in 11 clinics in Thailand over eight months; 393 of 1,838 submitted images "
+           "were rejected as ungradable."),
+)
+FDA_DEN180001_IDX_DR = _report(
+    "prov:fda-den180001-idx-dr",
+    "U.S. FDA (2018), De Novo classification request DEN180001 (IDx-DR), decision summary",
+    "https://www.accessdata.fda.gov/cdrh_docs/reviews/DEN180001.pdf",
+    notes=("Pivotal trial of 900 patients at 10 primary care sites, pp. 6-7: 892 completed, 852 "
+           "graded by the reading center, 819 analyzable; 173 of 198 mtmDR-positive patients "
+           "detected and 556 of 621 mtmDR-negative patients cleared; prespecified endpoints of "
+           "85.0 percent sensitivity and 82.5 percent specificity."),
+)
+KOH_WILDS_ICML_2021 = _lit(
+    "prov:koh-wilds-icml-2021",
+    "Koh et al. (2021), WILDS: A Benchmark of in-the-Wild Distribution Shifts, ICML 2021",
+    url="https://arxiv.org/abs/2012.07421",
+    verified="2026-10-20",
+    notes=("Table 1, Camelyon17-WILDS, standard (ERM) training: average accuracy 93.2 percent "
+           "in distribution (held-out patches from the training hospitals) and 70.3 percent out "
+           "of distribution (hospital 5)."),
+)
+TORCHVISION_0_28_PARAMETER_COUNTS = Provenance(
+    id="prov:torchvision-0-28-parameter-counts",
+    kind=ProvenanceKind.DERIVED,
+    ref="Parameter counts of torchvision 0.28.0 model constructors (torch 2.13.0)",
+    url="https://github.com/pytorch/vision",
+    verified="2026-10-20",
+    notes=("Counted by building each architecture without weights and summing p.numel() over its "
+           "parameters (slides/vol1/03_ml_lifecycle/images/data/count_params.py); default "
+           "1000-class ImageNet heads."),
+)
+DASTIN_REUTERS_AMAZON_RECRUITING_2018 = _report(
+    "prov:dastin-reuters-amazon-recruiting-2018",
+    "Dastin (2018), Amazon scraps secret AI recruiting tool that showed bias against women, Reuters, "
+    "October 10, 2018",
+    "https://www.reuters.com/article/us-amazon-com-jobs-automation-insight-idUSKCN1MK08G",
+    notes=("The models were trained on resumes submitted to the company over a 10-year period; the "
+           "system downgraded graduates of two all-women's colleges."),
+)
