@@ -1229,6 +1229,30 @@ class Series:
         "Hourly EU electricity generation by source and load, one week of November 2023 (MW).",
         numeric=("nuclear", "hydro", "biomass_other", "wind", "solar", "gas", "coal_oil", "load"),
     )
+    # --- Fleet-scale measurements recalled by the Volume II conclusion (added 2026-10-20) ---
+    MegaScaleStrongScaling = TrendSeries(
+        "megascale_strong_scaling",
+        _lit("Jiang et al. (2024), MegaScale: Scaling Large Language Model Training to More Than 10,000 "
+             "GPUs, NSDI 2024, Table 2 (arXiv:2402.15627 v1)",
+             "https://arxiv.org/abs/2402.15627",
+             "Strong scaling of the 175B model at a fixed batch of 768 sequences (sequence 2,048) on "
+             "NVIDIA Ampere GPUs: MegaScale training throughput in tokens per second and MFU, with "
+             "Megatron-LM's MFU on the same configuration. Read from the paper's table."),
+        "MegaScale strong scaling of a 175B model at batch 768: throughput and MFU by GPU count.",
+        numeric=("gpus", "megascale_tokens_s", "megascale_mfu_pct", "megatron_mfu_pct"),
+    )
+    TailAtScaleLeafLatency = TrendSeries(
+        "tail_at_scale_leaf_latency",
+        _lit("Dean and Barroso (2013), The Tail at Scale, Communications of the ACM 56(2), Table 1",
+             "https://doi.org/10.1145/2408776.2408794",
+             "Latency measured at the root of a Google service whose requests fan out through "
+             "intermediate servers to many leaf servers, by how many leaves the root waits for. Only "
+             "the cells the books cite are transcribed (the 50th and 99th percentiles of one random "
+             "leaf and of all leaves, and the 99th percentile of 95 percent of the leaves). The paper "
+             "names neither the service nor its leaf count. Read from the paper."),
+        "Root-measured latency of a fan-out service by the share of leaves awaited and percentile.",
+        numeric=("percentile", "latency_ms"),
+    )
 
 # --- Context engineering (added 2026-10-20) ----------------------------------
 RulerEffectiveLength = _Series(

@@ -645,6 +645,18 @@ class PowerLawScenario(BaseScenario):
     # Optional (added 2026-10-20): a fractional reduction of the term; the
     # resource multiple that buys it is ``reduction_multiple``.
     loss_reduction: Optional[float] = None
+    # Optional (added 2026-10-20): a resource multiple; the term falls to
+    # ``multiple_factor`` of its value, a fractional reduction ``multiple_reduction``.
+    resource_multiple: Optional[float] = None
+
+    @property
+    def multiple_factor(self) -> float:
+        from ..physics.scaling import calc_power_law_factor
+        return calc_power_law_factor(self.resource_multiple, self.exponent)
+
+    @property
+    def multiple_reduction(self) -> float:
+        return 1 - self.multiple_factor
 
     @property
     def halving_multiple(self) -> float:
@@ -13992,3 +14004,133 @@ class CarbonPricedPlacementScenario(BaseScenario):
         from .solvers import CarbonPricedPlacementModel
         return CarbonPricedPlacementModel().solve(self.fleet, self.it_energy, self.regions,
                                                   self.carbon_price_per_ton, self.mfu, self.reference_grid)
+
+
+# --- Fleet expansion, expert weight traffic, and energy shares (added 2026-10-20) ---
+
+class ClusterExpansionScenario(BaseScenario):
+    """A synchronous job grown from ``n_devices`` to ``factor`` times as many on the same checkpoint tier.
+
+    ``checkpoint`` supplies the write path; at each size its MTBF is replaced by the
+    GPU-only interval ``component_mtbf / N`` and the overhead is the checkpoint-and-rework
+    waste at the Young-Daly optimum. For fixed work, run time is proportional to step
+    time over the retained fraction (one minus that overhead), so the larger job shortens
+    the run only when its step speedup exceeds ``breakeven_speedup``.
+    """
+    checkpoint: CheckpointIntervalScenario
+    component_mtbf: Quantity
+    n_devices: int
+    factor: float
+
+    @property
+    def expanded_devices(self) -> int:
+        return round(self.n_devices * self.factor)
+
+    def at(self, n_devices: int) -> CheckpointIntervalScenario:
+        """The checkpoint scenario against the GPU-only interval of ``n_devices``."""
+        from ..physics.reliability import calc_mtbf_cluster
+        return self.checkpoint.variant(mtbf=calc_mtbf_cluster(self.component_mtbf, n_devices).to("hour"))
+
+    @property
+    def mtbf(self) -> Quantity:
+        return self.at(self.n_devices).mtbf
+
+    @property
+    def expanded_mtbf(self) -> Quantity:
+        return self.at(self.expanded_devices).mtbf
+
+    @property
+    def interval(self) -> Quantity:
+        return self.at(self.n_devices).result.interval
+
+    @property
+    def expanded_interval(self) -> Quantity:
+        return self.at(self.expanded_devices).result.interval
+
+    @property
+    def overhead(self) -> float:
+        return self.at(self.n_devices).result.waste
+
+    @property
+    def expanded_overhead(self) -> float:
+        return self.at(self.expanded_devices).result.waste
+
+    @property
+    def overhead_growth(self) -> float:
+        return self.expanded_overhead / self.overhead
+
+    @property
+    def retained(self) -> float:
+        return 1 - self.overhead
+
+    @property
+    def expanded_retained(self) -> float:
+        return 1 - self.expanded_overhead
+
+    @property
+    def breakeven_speedup(self) -> float:
+        """Step speedup at which the larger job finishes the fixed work in the same time."""
+        return self.retained / self.expanded_retained
+
+    @property
+    def superlinear_threshold(self) -> float:
+        """Step speedup above which the larger job also uses fewer accelerator-hours."""
+        return self.factor * self.breakeven_speedup
+
+    def run_time_change(self, step_speedup: float) -> float:
+        """Fractional change in wall-clock run time at a measured step speedup."""
+        return self.breakeven_speedup / step_speedup - 1
+
+    def accelerator_hours_change(self, step_speedup: float) -> float:
+        """Fractional change in accelerator-hours (devices times run time) at a step speedup."""
+        return self.superlinear_threshold / step_speedup - 1
+
+
+class ExpertWeightTrafficScenario(BaseScenario):
+    """Weight bytes of the mixture-of-experts ``workload``, resident and read per token, against a
+    dense model of ``dense_parameters`` that reads every weight each step."""
+    workload: Workload
+    dense_parameters: Quantity
+    bytes_per_param: Quantity
+
+    @property
+    def resident_bytes(self) -> Quantity:
+        from ..physics.quantities import memory_from_params
+        return memory_from_params(self.workload.parameters, self.bytes_per_param).to("GB")
+
+    @property
+    def active_bytes(self) -> Quantity:
+        from ..physics.quantities import memory_from_params
+        return memory_from_params(self.workload.active_parameters, self.bytes_per_param).to("GB")
+
+    @property
+    def dense_bytes(self) -> Quantity:
+        from ..physics.quantities import memory_from_params
+        return memory_from_params(self.dense_parameters, self.bytes_per_param).to("GB")
+
+    @property
+    def resident_to_active(self) -> float:
+        return (self.resident_bytes / self.active_bytes).to("").magnitude
+
+    @property
+    def dense_to_active(self) -> float:
+        return (self.dense_bytes / self.active_bytes).to("").magnitude
+
+
+class EnergyShareSavingScenario(BaseScenario):
+    """A component drawing ``share`` of fleet energy whose energy per unit of work falls to
+    ``energy_ratio`` of its value at unchanged work (Amdahl's law applied to energy)."""
+    share: float
+    energy_ratio: float
+
+    @property
+    def saving(self) -> float:
+        """Fraction of fleet energy saved."""
+        from ..physics.performance import calc_amdahls_speedup
+        return 1 - 1 / calc_amdahls_speedup(self.share, 1 / self.energy_ratio)
+
+    @property
+    def ceiling(self) -> float:
+        """Saving if the component's energy fell to zero."""
+        from ..physics.performance import calc_amdahls_speedup
+        return 1 - 1 / calc_amdahls_speedup(self.share, float("inf"))

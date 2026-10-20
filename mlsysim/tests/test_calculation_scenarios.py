@@ -4047,3 +4047,42 @@ def test_carbon_priced_region_placement():
     assert r.best_region == "Quebec" and r.best_region_untaxed == "Quebec"
     assert r.objective_value == approx(25336888.4)
     assert r.objective["US_Avg"] - r.objective["Quebec"] == approx(531280.0)
+
+
+def test_cluster_expansion_doubling():
+    e = Scenarios.Gpt3ClusterDoubling1K
+    assert e.expanded_devices == 2048
+    assert e.mtbf.to("hour").magnitude == approx(48.828125)
+    assert e.expanded_mtbf.to("hour").magnitude == approx(24.4140625)
+    assert e.checkpoint.t_write.to("second").magnitude == approx(24.5)
+    assert e.overhead == approx(0.016696) and e.expanded_overhead == approx(0.023612)
+    assert e.overhead_growth == approx(2 ** 0.5)
+    assert e.breakeven_speedup == approx(1.007083)
+    assert e.accelerator_hours_change(e.factor) == approx(0.007083)
+    assert e.superlinear_threshold == approx(2.014166)
+    assert e.interval.to("minute").magnitude == approx(48.914) and e.expanded_interval.to("minute").magnitude == approx(34.587)
+    assert e.run_time_change(176900 / 95100) == approx(-0.45861, rel=1e-4)
+
+
+def test_fleet_scale_recall_scenarios():
+    s = Scenarios.SlowWorker8K
+    assert s.throughput == approx(0.8) and (s.slow_step / s.step_time).to("").magnitude == approx(1.25)
+    assert Scenarios.OneInAMillionAtMillionDaily.events_per_second * 86400 == approx(1.0)
+    k = Scenarios.KaplanComputeDoubling
+    assert k.multiple_factor == approx(0.965936) and k.multiple_reduction == approx(0.034064)
+    assert Scenarios.KaplanSixteenfoldCompute.multiple_reduction == approx(0.129449)
+    d = Scenarios.DeepSeekV3WeightTraffic
+    assert d.resident_bytes.to("GB").magnitude == approx(1342) and d.active_bytes.to("GB").magnitude == approx(74)
+    assert d.dense_bytes.to("GB").magnitude == approx(800) and d.resident_to_active == approx(18.135135)
+    assert Scenarios.OpticalLinkEnergyShare.saving == approx(0.05)
+    assert Scenarios.OpticalLinkEnergyShare.ceiling == approx(0.10)
+    assert Scenarios.OpticalLinkEnergyDoubleShare.saving == approx(0.10)
+
+
+def test_megascale_and_tail_at_scale_series():
+    from mlsysim import Literature
+    rows = {r["gpus"]: r for r in Literature.Series.MegaScaleStrongScaling.entries}
+    assert rows[1024]["megascale_tokens_s"] / rows[512]["megascale_tokens_s"] == approx(1.86015, rel=1e-4)
+    tail = {(r["leaves_awaited"], r["percentile"]): r["latency_ms"]
+            for r in Literature.Series.TailAtScaleLeafLatency.entries}
+    assert tail[("all leaves", 99.0)] / tail[("one random leaf", 99.0)] == approx(14.0)
