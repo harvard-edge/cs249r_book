@@ -4391,3 +4391,52 @@ NVIDIA_NSIGHT_COMPUTE_ROOFLINE_GUIDE = _ds(
     verified="2026-10-19",
     notes="The example report lists DRAM throughput at 0.34 percent of peak.",
 )
+
+# --- Shared-hardware interference and placement evidence (added 2026-10-20) --
+# Values as read from each source at the location named in the notes; the
+# section and figure locations follow the citations already carried by the
+# course material that quotes them.
+VALSAN_TAMING_NONBLOCKING_CACHES_2016 = _lit(
+    "prov:valsan-taming-nonblocking-caches-2016",
+    "Valsan, P. K., Yun, H., and Farshchi, F. (2016), Taming Non-blocking Caches to Improve "
+    "Isolation in Multicore Real-Time Systems, IEEE RTAS 2016",
+    url="https://doi.org/10.1109/RTAS.2016.7461361",
+    verified="2026-10-20",
+    notes=("Abstract: up to 21X execution-time increase with cache partitioning. Exp. 2, three "
+           "BwRead(DRAM) co-runners against a BwRead(LLC) victim: 2.1x Cortex-A9, 7.9x Nehalem "
+           "(text), 10.6x Cortex-A15 (Fig. 2(b) label); write co-runners 21.4x on Cortex-A15 "
+           "(Fig. 2(e) label)."),
+)
+BECHTEL_YUN_CACHE_DOS_2019 = _lit(
+    "prov:bechtel-yun-cache-dos-2019",
+    "Bechtel, M. and Yun, H. (2019), Denial-of-Service Attacks on Shared Cache in Multicore: "
+    "Analysis and Prevention, IEEE RTAS 2019",
+    url="https://doi.org/10.1109/RTAS.2019.00037",
+    verified="2026-10-20",
+    notes=("Sec. IV-C: up to 346X slowdown of a victim on a Raspberry Pi 3 (Cortex-A53). Sec. VI, "
+           "MemGuard extended to writebacks, three BwWrite attackers: unregulated 345X, writes "
+           "capped at 100 MB/s 1.34X, at 50 MB/s 1.2X."),
+)
+ICHNOWSKI_FOGROS2_2023 = _lit(
+    "prov:ichnowski-fogros2-2023",
+    "Ichnowski, J. et al. (2023), FogROS2: An Adaptive Platform for Cloud and Fog Robotics Using "
+    "ROS 2, IEEE ICRA 2023",
+    url="https://arxiv.org/abs/2205.09778",
+    verified="2026-10-20",
+    notes="Abstract: grasp planning takes 14 s on the robot and 1.2 s offloaded with FogROS2.",
+)
+BAO_DEMOS_LINUX_FREERTOS_ZCU104 = _ds(
+    "prov:bao-demos-linux-freertos-zcu104",
+    "Bao hypervisor demos, demos/linux+freertos/configs/zcu104.c (bao-project/bao-demos)",
+    "https://github.com/bao-project/bao-demos",
+    verified="2026-10-20",
+    notes=("Linux VM: cpu_num = 3, region size 0x40000000; FreeRTOS VM: cpu_num = 1, region size "
+           "0x8000000; shared IPC region size 0x00010000."),
+)
+LINUX_TEGRA234_P3701_DTS = _ds(
+    "prov:linux-tegra234-p3701-dts",
+    "Linux v6.12, arch/arm64/boot/dts/nvidia/tegra234-p3701-0000.dtsi (Jetson AGX Orin module)",
+    "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/arch/arm64/boot/dts/nvidia/tegra234-p3701-0000.dtsi?h=v6.12",
+    verified="2026-10-20",
+    notes="tj-thermal zone: polling-delay = <1000> (ms); active trips at 75000 and 95000 m-degC, hysteresis 4000.",
+)

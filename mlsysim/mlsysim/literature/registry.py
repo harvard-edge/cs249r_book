@@ -98,6 +98,9 @@ RobustnessStudies = _load("robustness_studies", "RobustnessStudies", "Cited resu
 InferenceDeterminism = _load("inference_determinism", "InferenceDeterminism", "Cited results on run-to-run nondeterminism of LLM inference (He and Thinking Machines Lab 2025).")  # added 2026-10-20
 DataSelectionResults = _load("data_selection_results", "DataSelectionResults", "Cited data-selection results (model collapse, scored pruning, selection via proxy, echoing, deduplication, FineWeb, FixMatch, augmentation, an input-bound profile).")  # added 2026-10-20
 TrajectoryGeneration = _load("trajectory_generation", "TrajectoryGeneration", "Cited figures of published online trajectory generators (Ruckig calculation times, Berscheid and Kroger 2021).")  # added 2026-10-20
+SharedHardwareInterference = _load("shared_hardware_interference", "SharedHardwareInterference", "Measured victim slowdowns from co-runners on shared multicore hardware (Valsan et al. 2016, Bechtel and Yun 2019).")  # added 2026-10-20
+PlatformConfigurations = _load("platform_configurations", "PlatformConfigurations", "Values read from published platform configurations (a Bao hypervisor demo, the Jetson AGX Orin device tree).")  # added 2026-10-20
+RobotOffload = _load("robot_offload", "RobotOffload", "Measured results of offloading robot computation (FogROS2, Ichnowski et al. 2023).")  # added 2026-10-20
 
 
 # ---------------------------------------------------------------------------
@@ -416,6 +419,9 @@ class Literature(Registry):
     RobustnessStudies = RobustnessStudies  # added 2026-10-20
     DataSelectionResults = DataSelectionResults  # added 2026-10-20
     TrajectoryGeneration = TrajectoryGeneration  # added 2026-10-20
+    SharedHardwareInterference = SharedHardwareInterference  # added 2026-10-20
+    PlatformConfigurations = PlatformConfigurations  # added 2026-10-20
+    RobotOffload = RobotOffload  # added 2026-10-20
     ComputeTrend = ComputeTrend
     AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks

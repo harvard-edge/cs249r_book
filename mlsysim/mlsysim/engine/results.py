@@ -2429,6 +2429,7 @@ class ResponseTimeResult(SolverResult):
     meets_deadline: bool
     blocking_limit: Quantity                 # largest blocking that still meets the deadline
     wcet_claim: Optional[Quantity] = None    # declared WCET above the observed unloaded run
+    execution_ceiling: Optional[Quantity] = None  # deadline - B - I: the longest execution that still meets the deadline (added 2026-10-20)
 
 
 class CanFdBusResult(SolverResult):
@@ -2478,6 +2479,49 @@ class LeaseBudgetResult(SolverResult):
     stall_lease_expiry: Quantity
     stall_brake_onset: Quantity
     renewal_lateness_limit: Optional[Quantity] = None  # lease - renewal period: a renewal this late lapses the lease (added 2026-10-20)
+
+
+class SharedDramReadResult(SolverResult):
+    """Result from SharedDramReadModel: a permission tick's snapshot read behind FIFO backlogs on a shared DRAM controller (added 2026-10-20)."""
+    queued_transactions: int                 # transactions in one backlog
+    tile_transactions: int                   # of them, the weight tile's
+    backlog_bytes: int                       # bytes in one backlog
+    backlog_wait: Quantity                   # one backlog: bytes / bandwidth + row conflicts
+    snapshot_read: Quantity                  # the tick's own snapshot read
+    loaded_read: Quantity                    # one backlog plus the snapshot read
+    sense_left: Quantity                     # sense allowance less the loaded read
+    bypass_read: Quantity                    # priority bypass: one in-flight transaction, then the read
+    read_ceiling_wcet: Quantity              # declared WCET less the compute after sensing
+    read_ceiling_deadline: Quantity          # execution ceiling less the compute after sensing
+    backlogs_sense: int                      # most backlogs whose wait still fits the sense allowance
+    backlogs_wcet: int                       # most backlogs inside the declared WCET
+    backlogs_deadline: int                   # most backlogs inside the execution ceiling
+    unloaded_end: Quantity                   # sense allowance + compute after sensing
+    end_sense: Quantity                      # tick end at backlogs_sense
+    end_wcet: Quantity                       # tick end at backlogs_wcet
+    end_deadline: Quantity                   # tick end at backlogs_deadline
+
+
+class ThermalThrottleResult(SolverResult):
+    """Result from ThermalThrottleModel: a governed clock halving a tick, and the hysteresis that holds it (added 2026-10-20)."""
+    cycles: float                            # tick cycles at the nominal clock (sized to the WCET)
+    execution: Quantity                      # at the nominal clock
+    execution_throttled: Quantity            # at the throttled clock
+    response: Quantity                       # execution + blocking + interference
+    response_throttled: Quantity
+    slack: Quantity                          # deadline - nominal response
+    overrun: Quantity                        # throttled response - deadline
+    overrun_ratio: float                     # overrun / deadline
+    junction_quiet: Quantity                 # ambient + quiet power x theta (degC)
+    junction_loaded: Quantity                # ambient + loaded power x theta (degC)
+    loaded_rise: Quantity                    # loaded power x theta (K)
+    time_to_trip: Quantity                   # from the quiet steady state, under load
+    recovery: Quantity                       # trip to clear, load stopped at the trip
+    recovery_from_loaded: Quantity           # loaded steady state to clear
+    ticks_exposed: int                       # whole ticks inside the recovery
+    ticks_exposed_from_loaded: int
+    heat_capacity: Quantity                  # tau / theta, the lumped capacitance
+    theta_never_trips: Quantity              # largest theta whose loaded steady state stays below the trip
 
 
 class LatencyTailResult(SolverResult):
