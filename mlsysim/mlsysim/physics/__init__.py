@@ -94,6 +94,9 @@ from .agents import (
     calc_nucleus,
     calc_pass_posterior,
     calc_reused_prefix_prompt_tokens,
+    calc_pass_at_k_unbiased,
+    calc_expected_max_std_normal,
+    calc_pruned_tree_nodes,
 )
 from .drivetrain import (
     calc_traction_deceleration_limit,
@@ -252,6 +255,9 @@ __all__ = [
     "calc_nucleus",
     "calc_pass_posterior",
     "calc_reused_prefix_prompt_tokens",
+    "calc_pass_at_k_unbiased",
+    "calc_expected_max_std_normal",
+    "calc_pruned_tree_nodes",
     "calc_safe_stopping_distance",
     "calc_max_permitted_velocity",
     "calc_c2_stop_suffix",

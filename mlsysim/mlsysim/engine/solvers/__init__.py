@@ -191,3 +191,34 @@ __all__ += [
     "ZeroFailureModel",
     "ThrottledStageModel",
 ]
+
+# --- Test-time deliberation: allocation, pools, checks, search (added 2026-10-20) ---
+from .deliberation import (
+    ProbeVsAnswerModel,
+    AllocationAxesModel,
+    BestOfNPoolModel,
+    PassAtKEstimateModel,
+    CoverageVsVoteModel,
+    VerifiedPoolModel,
+    ArgmaxNoiseModel,
+    ScopedRevisionModel,
+    PrunedSearchTreeModel,
+    SearchAccountsModel,
+    DeadlinePolicyModel,
+    RecordedRunCostModel,
+)
+
+__all__ += [
+    "ProbeVsAnswerModel",
+    "AllocationAxesModel",
+    "BestOfNPoolModel",
+    "PassAtKEstimateModel",
+    "CoverageVsVoteModel",
+    "VerifiedPoolModel",
+    "ArgmaxNoiseModel",
+    "ScopedRevisionModel",
+    "PrunedSearchTreeModel",
+    "SearchAccountsModel",
+    "DeadlinePolicyModel",
+    "RecordedRunCostModel",
+]

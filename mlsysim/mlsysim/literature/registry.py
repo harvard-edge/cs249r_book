@@ -45,6 +45,8 @@ DeviceMeasurements = _load("device_measurements", "DeviceMeasurements", "Cited m
 SpaceflightAnomalies = _load("spaceflight_anomalies", "SpaceflightAnomalies", "Cited results of spaceflight anomaly inquiries (ESA Schiaparelli 2017).")
 # Diabetic retinopathy screening studies (added 2026-10-20)
 ScreeningStudies = _load("screening_studies", "ScreeningStudies", "Cited results of diabetic retinopathy screening systems (Gulshan 2016, Beede 2020, FDA DEN180001).")
+# Test-time compute results (added 2026-10-20)
+TestTimeCompute = _load("test_time_compute", "TestTimeCompute", "Cited test-time compute results (Snell et al. 2024; PRM800K, Lightman et al. 2024).")
 
 
 # ---------------------------------------------------------------------------
@@ -318,6 +320,7 @@ class Literature(Registry):
     DeviceMeasurements = DeviceMeasurements  # added 2026-10-20
     SpaceflightAnomalies = SpaceflightAnomalies  # added 2026-10-20
     ScreeningStudies = ScreeningStudies  # added 2026-10-20
+    TestTimeCompute = TestTimeCompute  # added 2026-10-20
     ComputeTrend = ComputeTrend
     AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks

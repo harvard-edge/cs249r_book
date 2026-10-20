@@ -2716,3 +2716,32 @@ DASTIN_REUTERS_AMAZON_RECRUITING_2018 = _report(
     notes=("The models were trained on resumes submitted to the company over a 10-year period; the "
            "system downgraded graduates of two all-women's colleges."),
 )
+
+# --- Test-time compute results (added 2026-10-20) -----------------------------
+SNELL_2024_TEST_TIME_COMPUTE = _lit(
+    "prov:snell-2024-test-time-compute",
+    "Snell et al. (2024), Scaling LLM Test-Time Compute Optimally Can Be More Effective Than "
+    "Scaling Model Parameters, arXiv:2408.03314v1",
+    url="https://arxiv.org/abs/2408.03314v1",
+    verified="2026-10-18",
+    notes=(
+        "PaLM 2-S* on MATH. Section 3.2: questions binned into five difficulty levels by the base "
+        "model's pass@1 estimated from 2,048 samples. Section 5.3 and Figure 3: on the middle bins "
+        "beam search matches best-of-N with about 4x less compute (16 against 64 generations). "
+        "Sections 1 and 7, Figure 9: FLOPs-matched, test-time compute beats a 14x larger model "
+        "except on the hardest questions."
+    ),
+)
+
+LIGHTMAN_2024_PRM800K = _lit(
+    "prov:lightman-2024-prm800k",
+    "Lightman et al. (2024), Let's Verify Step by Step, ICLR 2024; PRM800K dataset README "
+    "(github.com/openai/prm800k @ 7ecc794)",
+    url="https://github.com/openai/prm800k/blob/7ecc794703b2877f63226f2477a49b34f9b25163/README.md",
+    verified="2026-10-18",
+    notes=(
+        "About 800,000 step-level human correctness labels. The README's annotated example line: "
+        "16 pre-generated steps, the third rated -1, final answer 320,000 against a ground truth "
+        "of 40,000, total_time 278,270 ms."
+    ),
+)
