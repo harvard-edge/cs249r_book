@@ -20,7 +20,7 @@ calcs.py, which names its source (DE = the chapter, Durable Execution):
   resume_step1-3    DE Sec. 11.5 (five stages), drawn for the slide
   fence_step1-3     DE Sec. 11.5.1 (fencing tokens), drawn for the slide
   prefill           measured: data/resume_prefill.json
-  feynman           Thinking Machines measurement (calcs.TM_*), drawn
+  feynman           Thinking Machines measurement (Literature.InferenceDeterminism), drawn
   replay_step1-2    DE Sec. 11.6, figure 3 (live vs replay), redrawn
   diverge_step1-2   DE Sec. 11.7 (first divergence, r18 example), drawn
   retention         DE NM 11.2 (illustrative)
@@ -40,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 sys.path.insert(0, str(HERE))
 import slideplot as sp  # noqa: E402
 import calcs  # noqa: E402
+from deckvals import val  # noqa: E402
 
 C = sp.C
 plt = sp.plt
@@ -189,7 +190,7 @@ def lost():
         s.rect(20, 20, 520, 300, "struct", rx=12, sw=2, dash=False)
         s.text(40, 56, "Worker process (memory)", 24, INK, anchor="start", weight="bold")
         items = [("test_r18 dispatched, no result", "tool"),
-                 ("$0.50 reserved for the test", "sys"),
+                 (f"${val('res_usd')} reserved for the test", "sys"),
                  ("grants and control_epoch", "sys"),
                  ("approval pending for r19", "sys")]
         for i, (lab, role) in enumerate(items):
@@ -250,7 +251,7 @@ def fold():
             s.rect(650, 30, 240, 200, "memory", rx=10, sw=2)
             s.text(770, 62, "Rebuilt record", 24, ROLE["memory"][2], weight="bold")
             s.text(770, 104, "admission held", 22, INK)
-            s.text(770, 140, "$0.50 still reserved", 22, INK)
+            s.text(770, 140, f"${val('res_usd')} still reserved", 22, INK)
             s.rect(664, 162, 212, 50, "fault", dash=True, rx=6)
             s.text(770, 195, "test_r18 unresolved", 22, ROLE["fault"][2], weight="bold")
             s.arrow(582, 100, 648, 100, "gray")
@@ -338,9 +339,9 @@ def crashrun():
 
 def acks():
     a = calcs.acks()
-    rows = [("write()", a["write"], "neutral", f"{a['write']:.3f} ms"),
-            ("fsync()", a["fsync"], "compute", f"{a['fsync']:.3f} ms"),
-            ("F_FULLFSYNC", a["full"], "danger", f"{a['full']:.1f} ms")]
+    rows = [("write()", a["write"], "neutral", f"{val('ack_write')} ms"),
+            ("fsync()", a["fsync"], "compute", f"{val('ack_fsync')} ms"),
+            ("F_FULLFSYNC", a["full"], "danger", f"{val('ack_full')} ms")]
     fig, ax = plt.subplots(figsize=(5.4, 2.3))
     n = len(rows)
     for i, (lab, v, ck, txt) in enumerate(rows):
@@ -409,7 +410,7 @@ def groupcommit():
     ax.tick_params(labelsize=12)
     ax.text(ks[-1], flush[-1] * 1.35, "every record waits the flush", ha="right",
             fontsize=12.5, fontweight="bold", color=C["danger"])
-    ax.text(ks[0], 0.075, f"storage work per record:\n{per[0]:.1f} ms to {per[-1]:.3f} ms",
+    ax.text(ks[0], 0.075, f"storage work per record:\n{val('gc_per_hi')} ms to {val('gc_per_lo')} ms",
             ha="left", va="center", fontsize=12.5, fontweight="bold", color=C["memory"])
     ax.set_xlabel("Records per flush (batch size)")
     ax.set_ylabel("ms")
@@ -465,9 +466,9 @@ def snapshots():
     fig, ax = plt.subplots(figsize=(5.8, 2.4))
     ax.plot(ks, full, color=C["danger"], lw=2.8)
     ax.plot(ks, delta, color=C["neutral"], lw=2.8)
-    ax.text(3, 3.2, f"full snapshots: {s['full_gb']:.1f} GB", ha="left",
+    ax.text(3, 3.2, f"full snapshots: {val('sn_full')} GB", ha="left",
             va="center", fontsize=13, fontweight="bold", color=C["danger"])
-    ax.text(ks[-1], delta[-1] + 0.15, f"deltas: {s['delta_mb']:.0f} MB", ha="right",
+    ax.text(ks[-1], delta[-1] + 0.15, f"deltas: {val('sn_delta')} MB", ha="right",
             va="bottom", fontsize=13, fontweight="bold", color=C["neutral"])
     ax.set_xlabel("Checkpoints taken (one every 5 turns)")
     ax.set_ylabel("Bytes written (GB)")
@@ -490,9 +491,9 @@ def cadence():
                              (k["s_log"], calcs.PER_TURN, "memory")):
         y = calcs.expected_overhead_curve(x, curve_per)
         ax.plot([x], [y], "o", ms=10, color=C[ck], mec="white", mew=1.5, zorder=5)
-    ax.text(0.03, 0.96, f"turns re-executed: optimum {k['s_unlog']:.1f}", transform=ax.transAxes,
+    ax.text(0.03, 0.96, f"turns re-executed: optimum {val('cd_k_unlog')}", transform=ax.transAxes,
             va="top", fontsize=13.5, fontweight="bold", color=C["danger"])
-    ax.annotate(f"turns logged: optimum {k['s_log']:.0f}", (k["s_log"],
+    ax.annotate(f"turns logged: optimum {val('cd_k_log')}", (k["s_log"],
                 calcs.expected_overhead_curve(k["s_log"], calcs.PER_TURN)),
                 xytext=(0, -32), textcoords="offset points", ha="center", fontsize=13.5,
                 fontweight="bold", color=C["memory"])
@@ -573,8 +574,8 @@ def fence():
 
 def prefill():
     p = calcs.prefill()
-    rows = [("Same server,\nprefix held", p["warm"], "memory", f"{p['warm']:.2f} s"),
-            ("Model reloaded,\nfull prefill", p["cold"], "danger", f"{p['cold']:.1f} s")]
+    rows = [("Same server,\nprefix held", p["warm"], "memory", f"{val('pf_warm')} s"),
+            ("Model reloaded,\nfull prefill", p["cold"], "danger", f"{val('pf_cold')} s")]
     fig, ax = plt.subplots(figsize=(5.8, 1.9))
     for i, (lab, v, ck, txt) in enumerate(rows):
         y = 1 - i
@@ -586,7 +587,7 @@ def prefill():
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
     ax.tick_params(labelsize=12)
-    ax.set_xlabel(f"Time to the first token of the next call, s ({p['tokens']:,} tokens)",
+    ax.set_xlabel(f"Time to the first token of the next call, s ({val('pf_tokens')} tokens)",
                   fontsize=12)
     sp.save(fig, OUT / "prefill.svg")
 
@@ -599,17 +600,17 @@ def feynman():
     Drawn for a column slot (about 7.7 by 3.4 cm)."""
     s = Svg(600, 270)
     s.rect(4, 82, 236, 106, "model", rx=8)
-    s.text(122, 116, "tokens 1 to 102", 24, ROLE["model"][2], weight="bold")
+    s.text(122, 116, f"tokens 1 to {val('tm_prefix')}", 24, ROLE["model"][2], weight="bold")
     s.text(122, 146, "identical", 24, ROLE["model"][2], weight="bold")
     s.text(122, 174, "\u201c...1918, in\u201d", 22, INK)
     s.arrow(242, 118, 318, 66, "gray", sw=3)
     s.arrow(242, 152, 318, 204, "gray", sw=3)
     s.rect(322, 10, 274, 104, "memory", rx=8)
     s.text(459, 50, "\u201cQueens, New York\u201d", 24, ROLE["memory"][2], weight="bold")
-    s.text(459, 88, "992 of 1,000", 24, INK)
+    s.text(459, 88, f"{val('tm_major')} of {val('tm_n')}", 24, INK)
     s.rect(322, 156, 274, 104, "fault", rx=8)
     s.text(459, 196, "\u201cNew York City\u201d", 24, ROLE["fault"][2], weight="bold")
-    s.text(459, 234, "8 of 1,000", 24, INK)
+    s.text(459, 234, f"{val('tm_minor')} of {val('tm_n')}", 24, INK)
     s.save("feynman")
 
 
@@ -697,8 +698,8 @@ def diverge():
 
 def retention():
     t = calcs.retention()
-    rows = [("Log (30 turns)", t["log_mb"], "network", f"{t['log_mb']:.2f} MB"),
-            ("Workspace snapshot", 50.0, "compute", "50 MB")]
+    rows = [(f"Log ({val('rt_turns')} turns)", t["log_mb"], "network", f"{val('rt_log')} MB"),
+            ("Workspace snapshot", t["snap_mb"], "compute", f"{val('rt_ws')} MB")]
     fig, ax = plt.subplots(figsize=(5.8, 1.8))
     for i, (lab, v, ck, txt) in enumerate(rows):
         y = 1 - i
