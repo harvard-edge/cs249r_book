@@ -4929,6 +4929,9 @@ class AnnotatorAgreementScenario(BaseScenario):
     and Cohen's kappa at an ``observed_agreement``."""
     class_shares: List[float]
     observed_agreement: Optional[float] = None
+    # Optional (added 2026-10-20): raters who label independently of the item,
+    # so their observed agreement is the chance agreement and kappa is zero.
+    independent_raters: bool = False
 
     @property
     def chance_agreement(self) -> float:
@@ -4936,9 +4939,14 @@ class AnnotatorAgreementScenario(BaseScenario):
         return calc_chance_agreement(self.class_shares)
 
     @property
+    def agreement(self) -> float:
+        """Observed agreement: the stated value, or chance agreement for independent raters."""
+        return self.chance_agreement if self.independent_raters else self.observed_agreement
+
+    @property
     def kappa(self) -> float:
         from ..physics import calc_cohens_kappa
-        return calc_cohens_kappa(self.observed_agreement, self.chance_agreement)
+        return calc_cohens_kappa(self.agreement, self.chance_agreement)
 
 
 class AgreementDriftScenario(BaseScenario):
@@ -12618,6 +12626,157 @@ class RetrySustainedOutagesScenario(BaseScenario):
         from .solvers import RetrySustainedOutagesModel
         return RetrySustainedOutagesModel().solve(self.rows, "incident", "retry_sustained",
                                                   "duration_h", self.threshold_hours)
+# --- Agent evaluation (added 2026-10-20) ---------------------------------------
+# What a set of graded trials supports about a configuration; the solvers live
+# in engine/solvers/acceptance.py. Repeated-run consistency over k recurrences
+# is a HorizonCompoundingScenario (recurrences compound as turns do).
+class UnresolvedVerdictScenario(BaseScenario):
+    """Trials that passed, failed, or ended pending or unknown at the cutoff."""
+    passed: int
+    failed: int
+    unresolved: int
+
+    @property
+    def result(self):
+        from .solvers import VerdictBoundsModel
+        return VerdictBoundsModel().solve(self.passed, self.failed, self.unresolved)
+
+
+class GraderCalibrationScenario(BaseScenario):
+    """A grader's verdicts on results an independent reference assessed."""
+    reference_failures: int
+    accepted_failures: int           # reference failures the grader accepted
+    reference_passes: int
+    accepted_passes: int             # reference passes the grader accepted
+    confidence: float = 0.95
+
+    @property
+    def result(self):
+        from .solvers import GraderCalibrationModel
+        return GraderCalibrationModel().solve(self.reference_failures, self.accepted_failures,
+                                              self.reference_passes, self.accepted_passes, self.confidence)
+
+
+class TaskRepeatAllocationScenario(BaseScenario):
+    """A run budget split between new tasks and repeated runs, with and without fixture cost."""
+    mean_rate: float                 # pilot mean task acceptance probability
+    between_task_variance: float     # sigma_task^2
+    budget_runs: int                 # graded runs (run-equivalents with fixture cost)
+    free_runs: List[int]             # runs per task compared when new tasks are free
+    fixture_cost_runs: int           # a new task's fixture, in graded-run equivalents
+    max_runs: int                    # largest runs per task searched
+
+    @property
+    def result(self):
+        from .solvers import TaskRepeatAllocationModel
+        return TaskRepeatAllocationModel().solve(self.mean_rate, self.between_task_variance, self.budget_runs,
+                                                 self.free_runs, self.fixture_cost_runs, self.max_runs)
+
+
+class BinomialIntervalsScenario(BaseScenario):
+    """Several success counts out of one number of independent tasks."""
+    trials: int
+    successes: List[int]
+    confidence: float = 0.95
+
+    @property
+    def result(self):
+        from .solvers import BinomialIntervalsModel
+        return BinomialIntervalsModel().solve(self.trials, self.successes, self.confidence)
+
+
+class ProportionPlanningScenario(BaseScenario):
+    """Planning targets for one acceptance rate and for two independent arms."""
+    rate: float                      # planning acceptance probability (0.5 is the worst case)
+    planning_tasks: int              # task count whose half-width is quoted
+    target_half_width: float
+    differences: List[float]         # detectable differences between two arms
+    significance: float              # two-sided alpha the detection quantile stands for
+    power: float                     # power the second quantile stands for
+    z_alpha: float                   # rounded quantile used in the planning formula
+    z_beta: float
+    confidence: float = 0.95
+
+    @property
+    def result(self):
+        from .solvers import ProportionPlanningModel
+        return ProportionPlanningModel().solve(self.rate, self.planning_tasks, self.target_half_width,
+                                               self.differences, self.z_alpha, self.z_beta, self.confidence)
+
+
+class PairedComparisonScenario(BaseScenario):
+    """One candidate and one baseline trial on each sampled task, outcomes kept in pairs."""
+    both: int                        # tasks both configurations accepted
+    candidate_only: int
+    baseline_only: int
+    neither: int
+    tolerance: float                 # noninferiority tolerance, as a fraction
+    confidence: float = 0.95
+
+    @property
+    def result(self):
+        from .solvers import PairedComparisonModel
+        return PairedComparisonModel().solve(self.both, self.candidate_only, self.baseline_only, self.neither,
+                                             self.tolerance, self.confidence)
+
+
+class ScaffoldSpreadScenario(BaseScenario):
+    """One leaderboard's models, each under several agent scaffolds (a ``Literature`` series)."""
+    series_name: str
+    min_scaffolds: int
+
+    @property
+    def rows(self):
+        from ..literature.registry import Literature
+        return getattr(Literature, self.series_name).entries
+
+    @property
+    def result(self):
+        from .solvers import ScaffoldSpreadModel
+        return ScaffoldSpreadModel().solve(self.rows, self.min_scaffolds)
+
+
+class LeaderboardTiesScenario(BaseScenario):
+    """The top of one evaluator's leaderboard with reported standard errors (a ``Literature`` series)."""
+    series_name: str
+    top: int
+    confidence: float = 0.95
+
+    @property
+    def rows(self):
+        from ..literature.registry import Literature
+        return getattr(Literature, self.series_name).entries
+
+    @property
+    def result(self):
+        from .solvers import LeaderboardTiesModel
+        return LeaderboardTiesModel().solve(self.rows, self.top, self.confidence)
+
+
+class TaskMixConsistencyScenario(BaseScenario):
+    """Equally weighted task types and a number of runs that must all pass."""
+    task_pass_rates: List[float]
+    repetitions: int
+
+    @property
+    def result(self):
+        from .solvers import TaskMixConsistencyModel
+        return TaskMixConsistencyModel().solve(self.task_pass_rates, self.repetitions)
+
+
+class CappedSelectionCostScenario(BaseScenario):
+    """Candidates for one fixed task, an exact checker, and a cap on candidates."""
+    pass_rate: float
+    cap: int
+    generation_cost: Quantity        # USD per candidate
+    check_cost: Quantity             # USD per candidate
+
+    @property
+    def result(self):
+        from .solvers import CappedSelectionCostModel
+        return CappedSelectionCostModel().solve(self.pass_rate, self.cap, self.generation_cost, self.check_cost)
+
+
 # --- Sustainability (added 2026-10-20) ---------------------------------------
 
 def _rack_it_ratio(rack) -> float:

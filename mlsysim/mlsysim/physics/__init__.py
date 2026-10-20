@@ -761,3 +761,30 @@ from .scaling import calc_power_law_factor  # added 2026-10-20
 __all__ += [
     "calc_power_law_factor",
 ]
+
+# --- Acceptance rates: intervals, paired comparison, pass^k (added 2026-10-20) ---
+from .statistics import (
+    calc_wald_interval,
+    calc_wilson_interval,
+    calc_proportion_half_width,
+    calc_samples_for_half_width,
+    calc_within_task_variance,
+    calc_task_averaged_variance,
+    calc_newcombe_paired_difference,
+    calc_mcnemar_exact_two_sided,
+    calc_paired_difference_variance,
+)
+from .agents import calc_pass_pow_k_unbiased
+
+__all__ += [
+    "calc_wald_interval",
+    "calc_wilson_interval",
+    "calc_proportion_half_width",
+    "calc_samples_for_half_width",
+    "calc_within_task_variance",
+    "calc_task_averaged_variance",
+    "calc_newcombe_paired_difference",
+    "calc_mcnemar_exact_two_sided",
+    "calc_paired_difference_variance",
+    "calc_pass_pow_k_unbiased",
+]

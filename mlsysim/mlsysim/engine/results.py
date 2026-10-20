@@ -3562,3 +3562,164 @@ __all__ += [
     "RollingWindowResult",
     "CarbonPricedPlacementResult",
 ]
+
+
+# --- Agent evaluation: verdicts, graders, intervals, paired comparison (added 2026-10-20) ---
+class VerdictBoundsResult(SolverResult):
+    """Result from VerdictBoundsModel: an acceptance rate with unresolved trials kept or dropped."""
+    trials: int
+    default_rate: float                  # unresolved counted as not accepted
+    upper_bound: float                   # every unresolved trial resolved as accepted
+    dropped_rate: float                  # unresolved trials removed from the denominator
+
+
+class GraderCalibrationResult(SolverResult):
+    """Result from GraderCalibrationModel: a grader's error rates against a reference assessment."""
+    false_accept_rate: float             # Pr(accept | reference failure)
+    false_accept_low: float              # Wilson interval of that rate
+    false_accept_high: float
+    accepted: int                        # all reports the grader accepted
+    failure_among_accepted: float        # Pr(reference failure | accept)
+    false_reject_rate: float             # Pr(reject | reference pass)
+
+
+class TaskRepeatAllocationResult(SolverResult):
+    """Result from TaskRepeatAllocationModel: standard error of task-by-run designs under one budget."""
+    within_variance: float               # sigma_run^2
+    variance_ratio: float                # sigma_run^2 / sigma_task^2, runs at which the run term stops dominating
+    free_tasks: Dict[int, int]           # runs per task -> tasks, new tasks free
+    free_se: Dict[int, float]            # runs per task -> standard error, new tasks free
+    paid_tasks: Dict[int, int]           # runs per task -> whole tasks the budget affords with fixture cost
+    paid_se: Dict[int, float]
+    best_runs: int                       # runs per task minimizing the variance with fixture cost
+    best_tasks: int
+    best_se: float
+
+
+class BinomialIntervalsResult(SolverResult):
+    """Result from BinomialIntervalsModel: Wald and Wilson intervals for several counts at one size."""
+    z_critical: float
+    wald: Dict[int, Tuple[float, float]]     # successes -> (low, high), unclipped
+    wilson: Dict[int, Tuple[float, float]]   # successes -> (low, high)
+
+
+class ProportionPlanningResult(SolverResult):
+    """Result from ProportionPlanningModel: one-rate precision and two-arm detection counts."""
+    z_critical: float
+    half_width: float                    # normal approximation at the planning size
+    wilson_half_width: float             # half the Wilson width at the same size and rate
+    samples_for_target: int              # draws for the target half-width
+    per_arm: Dict[float, float]          # detectable difference -> tasks per arm (unrounded)
+
+
+class PairedComparisonResult(SolverResult):
+    """Result from PairedComparisonModel: a candidate against a baseline on the same tasks."""
+    pairs: int
+    candidate_rate: float
+    baseline_rate: float
+    difference: float                    # candidate minus baseline
+    lower: float                         # Newcombe method-10 interval
+    upper: float
+    noninferior: bool                    # lower > -tolerance
+    superior: bool                       # lower > 0
+    exact_p: float                       # McNemar, two-sided
+    lower_width: float                   # difference - lower
+    clear_width: float                   # difference + tolerance, the half-width the gate needs
+    pairs_if_gain_holds: int             # pairs that center the expected lower limit on the margin
+    pairs_if_no_gain: int                # pairs that fit the lower half-width inside the tolerance
+    discordant_fraction: float
+    paired_variance: float               # per pair, d - delta^2
+    independent_variance: float          # per task, two independent arms
+    paired_share: float                  # paired / independent
+    paired_half_width: float             # normal approximation
+    independent_multiple: float          # independent / paired
+
+
+class ScaffoldSpreadResult(SolverResult):
+    """Result from ScaffoldSpreadModel: one model's score across agent scaffolds."""
+    models: int                          # models with at least the minimum scaffold count
+    spreads: Dict[str, float]            # model -> highest minus lowest score
+    widest: str
+    widest_low: float
+    widest_high: float
+    widest_count: int
+    median_spread: float
+    median_se: float                     # median reported standard error over all rows
+
+
+class LeaderboardTiesResult(SolverResult):
+    """Result from LeaderboardTiesModel: neighbors a leaderboard cannot separate."""
+    models: int
+    top: int
+    pairs: int                           # neighboring pairs among the top
+    tied: int                            # pairs closer than an independent-samples test resolves
+    typical_se: float                    # median standard error of the top
+    needed_gap: float                    # z sqrt(2) x typical standard error
+    top_model: str
+    top_score: float
+    last_score: float                    # score at the last shown rank
+
+
+class TaskMixConsistencyResult(SolverResult):
+    """Result from TaskMixConsistencyModel: repeating one task against drawing new tasks."""
+    mean_rate: float
+    same_task_all: float                 # E[p_i^k]
+    new_tasks_all: float                 # (E[p_i])^k
+
+
+class CappedSelectionCostResult(SolverResult):
+    """Result from CappedSelectionCostModel: batch and sequential selection under one candidate cap."""
+    availability: float                  # 1 - (1 - p)^k, either policy
+    expected_candidates: float           # sequential, availability / p
+    batch_trial_cost: Quantity
+    sequential_trial_cost: Quantity
+    batch_per_accepted: Quantity
+    sequential_per_accepted: Quantity
+    batch_premium: float                 # batch / sequential per accepted - 1
+    doubled_rate_per_accepted: Quantity  # sequential with the pass probability doubled
+
+
+class PairedRunEvaluationResult(SolverResult):
+    """Result from PairedRunEvaluationModel: two configurations, repeated runs of the same tasks."""
+    runs: int
+    tasks: int
+    trials: Dict[str, int]
+    accepted: Dict[str, int]
+    rate: Dict[str, float]
+    wilson: Dict[str, Tuple[float, float]]
+    unknown: Dict[str, int]
+    visible_pass: Dict[str, int]
+    visible_pass_sealed_reject: Dict[str, int]
+    calls: Dict[str, int]
+    tokens: Dict[str, int]
+    output_tokens: Dict[str, int]
+    seconds: Dict[str, float]
+    tokens_per_accepted: Dict[str, float]
+    seconds_per_accepted: Dict[str, float]
+    per_task_passes: Dict[str, Dict[str, int]]
+    pass_at: Dict[str, Dict[int, float]]     # k -> unbiased pass@k averaged over tasks
+    pass_pow: Dict[str, Dict[int, float]]    # k -> unbiased pass^k averaged over tasks
+    both: int                                # paired run by run: both accepted
+    candidate_only: int
+    baseline_only: int
+    neither: int
+    difference: float
+    lower: float
+    upper: float
+    exact_p: float
+    tokens_per_accepted_ratio: float         # candidate over baseline
+
+
+__all__ += [
+    "VerdictBoundsResult",
+    "GraderCalibrationResult",
+    "TaskRepeatAllocationResult",
+    "BinomialIntervalsResult",
+    "ProportionPlanningResult",
+    "PairedComparisonResult",
+    "ScaffoldSpreadResult",
+    "LeaderboardTiesResult",
+    "TaskMixConsistencyResult",
+    "CappedSelectionCostResult",
+    "PairedRunEvaluationResult",
+]

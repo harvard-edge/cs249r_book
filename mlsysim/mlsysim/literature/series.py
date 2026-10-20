@@ -1414,3 +1414,34 @@ MetastableFailures = _Series(
     ),
     "Metastable failures from public sources: duration and whether retries sustained them.",
 )
+
+
+# --- Agent evaluation results (added 2026-10-20) -------------------------------
+JudgePositionBias = _Series(
+    "judge_position_bias",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=("Zheng et al. (2023), Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena, "
+             "Table 2 (position bias, default prompt)"),
+        url="https://arxiv.org/abs/2306.05685",
+        verified="2026-10-20",
+        notes=("Three rows transcribed from Table 2 of the HTML version (arxiv.org/html/2306.05685) and "
+               "checked against it: percent of answer pairs, each judged twice with the order swapped, "
+               "that kept the verdict, favored the first or second position, or produced an error."),
+    ),
+    "Pairwise model judges: verdict consistency and position bias when two answers swap places.",
+)
+
+HumanEvalAgentCost = _Series(
+    "humaneval_agent_cost_accuracy",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Kapoor et al. (2024), AI Agents That Matter, Table A1 (HumanEval accuracy and total cost)",
+        url="https://arxiv.org/abs/2407.01502",
+        verified="2026-10-20",
+        notes=("Nine rows transcribed from Table A1 (arxiv.org/html/2407.01502): mean accuracy (percent) "
+               "and mean total API cost (US dollars, 2024 prices) over five runs on the 164 problems. "
+               "role: published agent, author baseline (Retry, Warming, Escalation), or single call."),
+    ),
+    "Code agents on HumanEval: accuracy against total cost, mean of five runs.",
+)

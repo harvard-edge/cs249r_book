@@ -4168,3 +4168,45 @@ SICK_NANOSCAN3_CORE = _ds(
         "product family page; not re-read against the PDF in this pass."
     ),
 )
+
+# --- Agent evaluation results (added 2026-10-20) --------------------------------
+YAO_2024_TAUBENCH = _lit(
+    "prov:yao-2024-taubench",
+    "Yao, Shinn, Razavi, and Narasimhan (2024), tau-bench: A Benchmark for Tool-Agent-User "
+    "Interaction in Real-World Domains, arXiv:2406.12045, abstract",
+    url="https://arxiv.org/abs/2406.12045",
+    verified="2026-10-20",
+    notes=("Abstract: state-of-the-art function-calling agents (like gpt-4o) succeed on <50% of the "
+           "tasks and are inconsistent (pass^8 <25% in retail). Upper bounds, not point values."),
+)
+
+METR_2025_REWARD_HACKING = _lit(
+    "prov:metr-2025-reward-hacking",
+    "von Arx, Chan, and Barnes (METR, 5 June 2025), Recent Frontier Models Are Reward Hacking, "
+    "o3 task table",
+    url="https://metr.org/blog/2025-06-05-recent-reward-hacking/",
+    verified="2026-10-20",
+    notes=("o3 runs judged reward hacking over runs: RE-Bench total 39/128 (30.4%), HCAST total "
+           "8/1087 (0.7%), Optimize LLM Foundry 21/21; the post states hacking was more than 43x "
+           "more common on RE-Bench than on HCAST."),
+)
+
+ZHENG_2023_LLM_JUDGE = _lit(
+    "prov:zheng-2023-llm-judge",
+    "Zheng et al. (2023), Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena, NeurIPS 2023 "
+    "Datasets and Benchmarks (arXiv:2306.05685), Table 2, default prompt",
+    url="https://arxiv.org/abs/2306.05685",
+    verified="2026-10-20",
+    notes="Position bias: each answer pair judged twice with the order swapped; percentages of pairs.",
+)
+
+KAPOOR_2024_AGENTS_THAT_MATTER = _lit(
+    "prov:kapoor-2024-agents-that-matter",
+    "Kapoor, Stroebl, Siegel, Nadgir, and Narayanan (2024), AI Agents That Matter, arXiv:2407.01502, "
+    "Table A1 (HumanEval)",
+    url="https://arxiv.org/abs/2407.01502",
+    verified="2026-10-20",
+    notes=("Mean accuracy and mean total API cost over five runs on the 164 HumanEval problems "
+           "(2024 prices). Retry, Warming, and Escalation are the authors' simple baselines; the LDB "
+           "(GPT-4) row carries the paper's asterisk for a specification its original authors did not evaluate."),
+)
