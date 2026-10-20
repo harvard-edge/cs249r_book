@@ -3059,12 +3059,13 @@ JIMENEZ_2024_SWE_BENCH = _lit(
 YANG_2024_SWE_AGENT = _lit(
     "prov:yang-2024-swe-agent",
     "Yang et al. (2024), SWE-agent: Agent-Computer Interfaces Enable Automated Software "
-    "Engineering, NeurIPS 2024, Table 1 (SWE-bench Lite, GPT-4 Turbo) and Section 5",
+    "Engineering, NeurIPS 2024, Tables 1 and 3 (SWE-bench Lite, GPT-4 Turbo) and Section 5",
     url="https://arxiv.org/abs/2405.15793",
     verified="2026-10-20",
     notes=("Percent resolved on SWE-bench Lite with GPT-4 Turbo: RAG (BM25) 2.67, shell-only "
            "agent 11.00, SWE-agent 18.00. Section 5: 'compared to RAG on Lite, SWE-agent is "
-           "8-13x more costly but yields a 6.7-fold improved % Resolved rate.' Read from "
+           "8-13x more costly but yields a 6.7-fold improved % Resolved rate.' Table 3 "
+           "ablations: whole-file viewer 12.7, no edit command 10.3. Read from "
            "arxiv.org/html/2405.15793v3."),
 )
 ZOU_2025_POISONEDRAG = _lit(

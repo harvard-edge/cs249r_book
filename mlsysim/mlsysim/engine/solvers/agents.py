@@ -216,6 +216,7 @@ class AgentRunSummaryModel(ForwardModel):
             observations=int(sum(r["observations"] for r in rows)),
             nonzero_exits=int(sum(r["nonzero_exit"] for r in rows)),
             truncated_outputs=int(sum(r["truncated"] for r in rows)),
+            truncated_tasks=sum(1 for r in rows if r["truncated"]),
             syntax_error_tasks=len(syntax), syntax_error_accepted=sum(1 for r in syntax if r["resolved"]),
             call_bins=bins,
         )

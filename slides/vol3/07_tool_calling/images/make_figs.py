@@ -36,6 +36,7 @@ sys.path.insert(0, str(HERE.parents[2] / "assets" / "kit"))
 sys.path.insert(0, str(HERE))
 import slideplot as sp  # noqa: E402
 import calcs  # noqa: E402
+from deckvals import num, val  # noqa: E402
 
 C = sp.C
 plt = sp.plt
@@ -205,12 +206,11 @@ def cas():
 
 # ------------------------------------------- 3. real GitHub descriptors
 def gh_bars():
-    g = calcs.github_tools()
-    rows = [("Tools listed", g["n"], "neutral"),
-            ("Mutating", g["mutating"], "compute"),
-            ("Repo is any string", g["repo_free"], "danger"),
-            ("Declared destructive", g["destructive"], "network"),
-            ("Declared idempotent", g["idempotent"], "data")]
+    rows = [("Tools listed", num("gh_n"), "neutral"),
+            ("Mutating", num("gh_mut"), "compute"),
+            ("Repo is any string", num("gh_repo"), "danger"),
+            ("Declared destructive", num("gh_destr"), "network"),
+            ("Declared idempotent", num("gh_idem"), "data")]
     sp.hbars(str(OUT / "gh_bars.svg"), rows, "", log=False, size=(3.6, 2.0),
              value_fmt="{:,.0f}", xlabel="Tools in the GitHub MCP server (measured)")
 
@@ -300,9 +300,11 @@ def worlds():
 
 # ------------------------------------------------ 6. duplicates measured
 def dup_plot():
-    rows = calcs.harness()
-    order = [rows[1], rows[0], rows[2], rows[3]]
-    labels = ["1%", "2%", "4%", "2% +\ndedup"]
+    rows = calcs.HARNESS
+    # blind retries by rising reply loss, then the deduplicated run
+    order = sorted((r for r in rows if not r["dedup"]), key=lambda r: r["p_rep"]) + \
+        [r for r in rows if r["dedup"]]
+    labels = [f"{r['p_rep']:.0%}" + (" +\ndedup" if r["dedup"] else "") for r in order]
     fig, ax = plt.subplots(figsize=(4.2, 2.0))
     x = np.arange(len(order))
     pred = [r["predicted"] for r in order]
@@ -316,8 +318,8 @@ def dup_plot():
                 color=C["data"] if m == 0 else C["danger"])
     ax.set_xticks(x)
     ax.set_xticklabels(labels, fontsize=12)
-    ax.set_xlabel("Reply loss (request loss 2%)")
-    ax.set_ylabel("Duplicate restarts\nper 20,000 ops")
+    ax.set_xlabel(f"Reply loss (request loss {val('hx_req')}%)")
+    ax.set_ylabel(f"Duplicate restarts\nper {val('hx_n')} ops")
     ax.set_ylim(0, 1100)
     ax.text(-0.45, 990, "gray = formula, red = measured", fontsize=11, color=C["text"])
     sp.save(fig, OUT / "dup_plot.svg")
@@ -427,8 +429,7 @@ def headtail():
 
 # ---------------------------------------- 10. real observation sizes
 def obs_hist():
-    d = calcs.swebench_obs()
-    raw = np.array([max(1, r) for r in d["raw"]])
+    raw = np.array([max(1, r) for r in calcs.OBS_RAW])
     bins = np.logspace(0, 6, 25)
     fig, ax = plt.subplots(figsize=(4.0, 2.05))
     cnt, edges = np.histogram(raw, bins=bins)
@@ -438,8 +439,8 @@ def obs_hist():
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.axvline(calcs.STAGE_CAP, color=C["danger"], ls="--", lw=1.5)
-    ax.text(calcs.STAGE_CAP * 1.3, 2.5e4, "cap:\n10,000", fontsize=10, color=C["danger"], va="top")
-    ax.annotate(f"{d['truncated']} cut\n({d['share']:.1%})", xy=(3e4, 40), xytext=(2e5, 300),
+    ax.text(calcs.STAGE_CAP * 1.3, 2.5e4, f"cap:\n{val('so_cap')}", fontsize=10, color=C["danger"], va="top")
+    ax.annotate(f"{val('so_cut')} cut\n({val('so_cut_pct')}%)", xy=(3e4, 40), xytext=(2e5, 300),
                 fontsize=10, color=C["danger"], fontweight="bold",
                 arrowprops=dict(arrowstyle="->", color=C["danger"]))
     ax.set_ylim(0.7, 6e4)
@@ -471,20 +472,21 @@ def job_states():
 # ------------------------------------------------- 12. polling cost
 def poll_plot():
     fig, ax = plt.subplots(figsize=(3.9, 2.0))
-    ivs = [5, 10, 20, 30, 60]
-    pts = [calcs.poll_cost(i) for i in ivs]
-    ax.plot(ivs, [p["cost"] for p in pts], "-o", color=C["compute"], lw=2.5, ms=7)
-    for i, p in zip(ivs, pts):
-        ax.text(i + 1.2, p["cost"] + 0.03, f"${p['cost']:.2f}", fontsize=11,
+    ivs = [s.poll_interval.to("s").magnitude for s in calcs.POLL_SWEEP]
+    costs = [calcs.usd(s.result.cost) for s in calcs.POLL_SWEEP]
+    ax.plot(ivs, costs, "-o", color=C["compute"], lw=2.5, ms=7)
+    for i, c_ in zip(ivs, costs):
+        ax.text(i + 1.2, c_ + 0.03, f"${c_:.2f}", fontsize=11,
                 color=C["compute"], fontweight="bold")
-    ax.plot([10], [0], "s", color=C["data"], ms=10, clip_on=False)
-    ax.annotate("runtime polls every 10 s: $0", xy=(10.5, 0.01), xytext=(24, 0.45),
+    runtime = calcs.RUNTIME_POLL.poll_interval.to("s").magnitude
+    ax.plot([runtime], [0], "s", color=C["data"], ms=10, clip_on=False)
+    ax.annotate(f"runtime polls every {runtime:.0f} s: $0", xy=(10.5, 0.01), xytext=(24, 0.45),
                 fontsize=11, color=C["data"], fontweight="bold",
                 arrowprops=dict(arrowstyle="->", color=C["data"]))
     ax.text(22, 0.80, "model polls: halving the delay\ndoubles the cost", fontsize=11,
             color=C["compute"])
     ax.set_xlabel("Poll interval = worst detection delay (s)")
-    ax.set_ylabel("Extra $ per 300 s job")
+    ax.set_ylabel(f"Extra $ per {val('pc_job')} s job")
     ax.set_xlim(0, 66)
     ax.set_ylim(0, 1.0)
     sp.save(fig, OUT / "poll_plot.svg")
@@ -492,11 +494,9 @@ def poll_plot():
 
 # ----------------------------------------------- 13. catalog tokens
 def catalog():
-    g = calcs.github_tools()
-    c = calcs.nm74()
-    rows = [("All 131 GitHub tools", g["total"], "danger", f"{g['total']:,} (measured)"),
-            ("50 tools × 300", c["full"], "neutral", f"{c['full']:,}"),
-            ("6 selected + 400", c["selected"], "data", f"{c['selected']:,}")]
+    rows = [(f"All {val('gh_n')} GitHub tools", num("gh_total"), "danger", f"{val('gh_total')} (measured)"),
+            (f"{val('cat_reg')} tools × {val('cat_desc')}", num("cat_full"), "neutral", val("cat_full")),
+            (f"{val('cat_sel')} selected + {val('cat_over')}", num("cat_selected"), "data", val("cat_selected"))]
     for k in range(1, 4):
         sp.hbars(str(OUT / f"catalog_step{k}.svg"), rows, "", log=False, step=k,
                  size=(5.8, 1.45), xlabel="Descriptor tokens on every model call")
