@@ -62,6 +62,9 @@ __all__ = [
     "CoolantFlowResult",
     "OutageCostResult",
     "FailureIntervalResult",
+    "SeriesFailureResult",
+    "CheckpointIntervalResult",
+    "RecoveryBudgetResult",
     "GradientSyncResult",
     "CommunicationIntensityResult",
     "TrainingGrowthResult",
@@ -714,6 +717,42 @@ class FailureIntervalResult(SolverResult):
     interval: Quantity
     expected_failures: float
     failures_per_day: float
+
+
+class SeriesFailureResult(SolverResult):
+    """Result from SeriesFailureModel: a job that stops when any one component fails.
+
+    Rates are per hour; ``component_rates`` is each component's share per device.
+    """
+    component_rates: Dict[str, float]
+    device_rate: float
+    system_rate: float
+    mtbf: Quantity
+    failures_per_day: float
+
+
+class CheckpointIntervalResult(SolverResult):
+    """Result from CheckpointIntervalModel: the Young-Daly interval and its waste."""
+    write_time: Quantity
+    mtbf: Quantity
+    interval: Quantity
+    write_share: float
+    rework_share: float
+    waste: float
+
+
+class RecoveryBudgetResult(SolverResult):
+    """Result from RecoveryBudgetModel: one cold restart, and its daily cost at a failure rate."""
+    detect: Quantity
+    restart: Quantity
+    reload: Quantity
+    warmup: Quantity
+    total: Quantity
+    failure_interval: Quantity
+    failures_per_day: float
+    lost_per_day: Quantity
+    day_share: float
+    gpu_hours_per_day: float
 
 
 class GradientSyncResult(SolverResult):

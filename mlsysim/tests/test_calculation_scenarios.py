@@ -1176,3 +1176,77 @@ def test_drive_bus_campaign_and_throttle():
     t = Scenarios.ThrottledNavigationBackbone.result
     assert t.added_age.to("ms").magnitude == approx(11)
     assert t.added_travel.to("mm").magnitude == approx(16.5)
+
+
+# --- Fault tolerance (added 2026-10-20) --------------------------------------
+def test_gpu_failure_ladder():
+    s = Scenarios.GpuFailureLadder
+    assert s.intervals[8].to("hour").magnitude == approx(6250)
+    assert s.intervals[10_000].to("hour").magnitude == approx(5)
+    assert s.failures_per_day[1000] == approx(0.48)
+    assert s.failures_per_day[25_000] == approx(12)
+
+
+def test_full_system_failure_cascade():
+    r = Scenarios.FullSystemFailures10K.result
+    assert r.component_rates["gpu"] == approx(2e-5)
+    assert r.component_rates["pcie"] == approx(5e-6)
+    assert r.component_rates["network"] == approx(8.3333e-7)
+    assert r.component_rates["power"] == 0
+    assert r.device_rate == approx(2.58333e-5)
+    assert r.system_rate == approx(0.258333)
+    assert r.mtbf.to("hour").magnitude == approx(3.87097)
+    assert r.failures_per_day == approx(6.2)
+    big = Scenarios.FullSystemFailures100K.result
+    assert big.mtbf.to("hour").magnitude == approx(0.387097)
+
+
+def test_young_daly_intervals():
+    s = Scenarios.Gpt3CheckpointInterval10K
+    r = s.result
+    assert s.checkpoint_bytes.to("TB").magnitude == approx(2.45)
+    assert r.write_time.to("s").magnitude == approx(24.5)
+    assert r.mtbf.to("hour").magnitude == approx(3.87)
+    assert r.interval.to("s").magnitude == approx(826.237)
+    assert r.write_share == approx(r.rework_share)
+    assert r.waste == approx(0.059305)
+    from mlsysim.core.units import Q_
+    assert s.waste_at(Q_(1, "hour")) == approx(0.136005)
+    assert Scenarios.Gpt3CheckpointInterval100K.result.waste == approx(0.187515)
+    assert Scenarios.FiveMinuteCheckpoint1K.result.interval.to("minute").magnitude == approx(173.205)
+    assert Scenarios.FifteenMinuteCheckpoint1K.result.interval.to("minute").magnitude == approx(300)
+
+
+def test_recovery_budget_and_hot_spare():
+    r1 = Scenarios.Gpt3RecoveryBudget1K.result
+    assert r1.total.to("s").magnitude == approx(384.5)
+    assert r1.reload.to("s").magnitude == approx(24.5)
+    assert r1.failures_per_day == approx(0.49152)
+    assert r1.lost_per_day.to("minute").magnitude == approx(3.14982)
+    r10 = Scenarios.Gpt3RecoveryBudget10K.result
+    assert r10.lost_per_day.to("minute").magnitude == approx(30.76)
+    assert r10.day_share == approx(0.0213611)
+    assert r10.gpu_hours_per_day == approx(5126.67)
+    h = Scenarios.HotSpareNode10K
+    assert h.spare_cost_per_day.to("USD").magnitude == approx(384)
+    assert h.value_per_minute.to("USD").magnitude == approx(2066.67)
+    assert h.breakeven.to("s").magnitude == approx(11.1484)
+
+
+def test_straggler_replicas_probe_sdc():
+    s = Scenarios.HalfSpeedStraggler1K
+    assert s.slow_step.to("s").magnitude == approx(2)
+    assert s.throughput == approx(0.5)
+    assert s.idle_cost.to("USD").magnitude == approx(1024)
+    assert Scenarios.ServingReplica99.replicated_downtime_per_year.to("day").magnitude == approx(3.65)
+    assert Scenarios.ServingReplicas99x2.replicated_downtime_per_year.to("minute").magnitude == approx(52.56)
+    assert Scenarios.ServingReplicas99x3.replicated_downtime_per_year.to("s").magnitude == approx(31.536)
+    assert Scenarios.GpuAvailability10K.all_up == approx(0.367861)
+    early, late = Scenarios.InferenceReadinessProbe.detection_window
+    assert (early.to("s").magnitude, late.to("s").magnitude) == (12, 17)
+    a = Scenarios.SdcExposure10K
+    assert a.interval.to("hour").magnitude == approx(100.0)
+    assert a.run_events == approx(21.6)
+    b = Scenarios.SdcExposure100K
+    assert b.exposure == approx(55.5556)
+    assert b.steps_between == approx(18000.5)
