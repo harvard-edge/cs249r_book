@@ -1,362 +1,314 @@
 #!/usr/bin/env python3
-"""Every derived number in Lecture 18 (Multi-Agent Coordination), one block per slide.
+"""Every number on the Volume III Lecture 18 slides and notes, read from MLSysIM.
 
-Inputs are typed with their source. Sources:
-  MA    = the rendered chapter, Multi-Agent Coordination (Volume III), dev text
-          2026-10-18. NM = a Napkin Math notebook there (scenario values the
-          chapter labels hypothetical; slides say "illustrative").
-  RL    = the rendered chapter Reinforcement Learning from Verifiable Rewards,
-          Napkin Math 17.1 (recall slide).
-  Hadfield 2025 = Hadfield et al., "How we built our multi-agent research
-          system," Anthropic Engineering, 13 June 2025 (read 2026-10-19).
-  Dean 2013 = Dean and Barroso, "The Tail at Scale," CACM 56(2), 2013,
-          Table 1 and the hedged-request paragraph.
-  Kim 2025 = Kim, Garg, Peng, Garg, "Correlated Errors in Large Language
-          Models," ICML 2025, arXiv 2506.07962v1, Introduction (Helm leaderboard).
-  MAST  = Cemri et al., "Why Do Multi-Agent LLM Systems Fail?", NeurIPS 2025
-          Datasets and Benchmarks, arXiv 2503.13657v3, Figure 1 (1,642 traces).
+MLSysIM holds the inputs and the calculations, and the chapter reads the same
+entries: the work-partition screen (RepairPartitionScreen, its halved-overhead
+variant, and the 90 percent checkpoint partition with its two variants), the
+universal scalability law for the repair partition and the research agent
+(RepairPartitionScalability, ResearchFanoutScalability), the token break-even
+(ResearchSystemTokenBreakEven), one round of messages (EightAgentMessageRound),
+the dependency schedule (InterfaceMigrationSchedule and its shorter-node
+variants), reference passing (SixChildReferencePassing), shared writes
+(ThousandFileSharedWrites, TwoThousandFileSharedWrites), correlated reviewers
+(FiveCorrelatedReviewers), the fan-out deadline (EightWorkerDeadlineFanout),
+the credit window (DiffReviewCreditWindow), split allowances
+(RemediationChildAllowances), and the matched cohort (MatchedDelegationCohort),
+backed by physics/coordination.py. The recall slide reads the reinforcement
+learning lecture's verifier batch (VerifierFalseAcceptsAtTenPercentPass).
+Published data are Literature entries: the research system's report
+(MultiAgentSystems; its token multiples are on Agents.Research.OrchestratorWorker),
+correlated model errors on Helm (CorrelatedModelErrors), fan-out tail latency
+and hedging (FanoutTailLatency), and the MAST failure taxonomy (MultiAgentFailures).
+This file only selects values, converts units, and formats them; it types no
+numbers. Each value is recorded with v() under the key the deck prints as
+\\val{key}; running this file writes images/numbers.tex.
 
-Run from this folder: python3 calcs.py   (prints "label: value")
-make_figs.py imports these functions so figures and slides agree.
+Run from this folder: python3 calcs.py
 """
 
-import math
+import sys
+from pathlib import Path
 
-from scipy.special import betainc, betaln, comb
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
 
+Scenarios = mlsysim.Scenarios
+Literature = mlsysim.Literature
+Agents = mlsysim.Agents
 
-def show(label, value):
-    print(f"  {label}: {value}")
+RESEARCH = Agents.Research.OrchestratorWorker
+REPORT = Literature.MultiAgentSystems
+HELM = Literature.CorrelatedModelErrors
+TAIL = Literature.FanoutTailLatency
+MAST = Literature.MultiAgentFailures
 
+BE = Scenarios.ResearchSystemTokenBreakEven
+RC_S = Scenarios.VerifierFalseAcceptsAtTenPercentPass
+RC = RC_S.result
+SCR = Scenarios.RepairPartitionScreen
+SCR_H = Scenarios.RepairPartitionScreenHalvedOverhead
+EST = Scenarios.NinetyPercentPartitionScreen
+EST_HC = Scenarios.NinetyPercentPartitionScreenHalvedOverhead
+EST_HS = Scenarios.NinetyPercentPartitionScreenHalvedSerial
+USL = Scenarios.RepairPartitionScalability
+USL_R = Scenarios.ResearchFanoutScalability
+MSG = Scenarios.EightAgentMessageRound
+DAG = Scenarios.InterfaceMigrationSchedule
+DAG_V5 = Scenarios.InterfaceMigrationScheduleShorterV5
+DAG_V6 = Scenarios.InterfaceMigrationScheduleShorterV6
+REF = Scenarios.SixChildReferencePassing
+WR = Scenarios.ThousandFileSharedWrites
+WR2 = Scenarios.TwoThousandFileSharedWrites
+RV = Scenarios.FiveCorrelatedReviewers
+FO = Scenarios.EightWorkerDeadlineFanout
+CW = Scenarios.DiffReviewCreditWindow
+AL = Scenarios.RemediationChildAllowances
+CO = Scenarios.MatchedDelegationCohort
 
-# ------------------------------------------------------------- hook / NM 18.6
-# Hadfield 2025: agents use about 4x the tokens of chat; multi-agent systems
-# about 15x; the multi-agent system beat a single agent by 90.2% on an
-# internal research evaluation. MA NM 18.6 builds the break-even on these.
-CHAT_MULT_AGENT = 4.0
-CHAT_MULT_MULTI = 15.0
-EVAL_GAIN = 0.902
-
-
-def hook():
-    m = CHAT_MULT_MULTI / CHAT_MULT_AGENT          # delegation token multiple
-    breakeven_ps = 1 / m                           # pM = m pS <= 1
-    acc_mult = 1 + EVAL_GAIN                        # if the gain were an acceptance multiple
-    cost_ratio = m / acc_mult                       # delegated / single cost per accepted task
-    return dict(token_multiple=m, breakeven_single_success=breakeven_ps,
-                acceptance_multiple=acc_mult, cost_ratio=cost_ratio)
-
-
-# ------------------------------------------------------- recall (RL NM 17.1)
-def recall():
-    n, p, fa = 8192, 0.10, 0.025                    # RL NM 17.1 inputs
-    true_acc = n * p * 1.0
-    false_acc = n * (1 - p) * fa
-    return dict(true_accepts=true_acc, false_accepts=false_acc,
-                false_share=false_acc / (true_acc + false_acc))
-
-
-# --------------------------------------------------- NM 18.1 (Amdahl screen)
-def elapsed(n, p, c):
-    """Equation 1 denominator with linear overhead c(N-1)."""
-    return (1 - p) + p / n + c * (n - 1)
-
-
-def screen(p=0.80, c=0.02, nmax=16):
-    t = {n: elapsed(n, p, c) for n in range(1, nmax + 1)}
-    best = min(t, key=t.get)
-    return dict(t=t, best=best, t_best=t[best], speedup=1 / t[best],
-                ceiling=1 / (1 - p), approx_best=math.sqrt(p / c))
-
-
-# ------------------------------------------------ USL (MA Theorem 18.1)
-def usl(n, sigma, kappa):
-    return n / (1 + sigma * (n - 1) + kappa * n * (n - 1))
-
-
-def usl_summary(sigma=0.20, kappa=0.02, nmax=60):
-    nstar = math.sqrt((1 - sigma) / kappa)
-    ints = {n: usl(n, sigma, kappa) for n in range(1, nmax + 1)}
-    best = max(ints, key=ints.get)
-    slower = min((n for n in range(2, nmax + 1) if ints[n] < 1), default=None)
-    return dict(nstar=nstar, best=best, peak=ints[best], first_slower=slower,
-                retro_threshold=(1 - sigma) / kappa)
-
-
-# ------------------------------------------------- mesh vs supervisor (§18.3)
-def deliveries(n):
-    return dict(mesh=n * (n - 1), supervisor=2 * n, ratio=(n - 1) / 2)
-
-
-# ------------------------------------------------------- NM 18.2 (DAG bound)
-DAG = {  # MA Table 3: duration (s), predecessors
-    "v1": (20.5, []), "v2": (42, ["v1"]), "v3": (42, ["v1"]), "v4": (42, ["v1"]),
-    "v5": (43, ["v2", "v3"]), "v6": (16.5, ["v4"]), "v7": (69, ["v5", "v6"]),
-}
-
-
-def dag(durations=None, slots=4):
-    d = {k: (durations or {}).get(k, v[0]) for k, v in DAG.items()}
-    start, finish = {}, {}
-    for k in DAG:  # dict order is topological
-        start[k] = max([finish[p] for p in DAG[k][1]], default=0.0)
-        finish[k] = start[k] + d[k]
-    work = sum(d.values())
-    span = finish["v7"]
-    return dict(start=start, finish=finish, work=work, work_bound=work / slots,
-                makespan=span, speedup=work / span,
-                slack_v6=start["v7"] - finish["v6"])
-
-
-# --------------------------------------------------- NM 18.3 (reference passing)
-def reference():
-    kids, slice_tok, env_tok, read_tok, price = 6, 48000, 350, 3600, 3e-6
-    paste = kids * slice_tok
-    ref = kids * (env_tok + read_tok)
-    return dict(paste_tokens=paste, paste_usd=paste * price, ref_tokens=ref,
-                ref_usd=ref * price, reduction=paste / ref,
-                read_fraction=read_tok / slice_tok,
-                breakeven_reads=slice_tok - env_tok)
-
-
-# ------------------------------------------------- equation 4 (shared writes)
-def no_shared_write(n, files=1000, w=10):
-    pr = 1.0
-    for k in range(1, n):
-        pr *= comb(files - k * w, w, exact=True) / comb(files, w, exact=True)
-    return pr
-
-
-def collisions(files=1000, w=10, nmax=16):
-    pc = {n: 1 - no_shared_write(n, files, w) for n in range(1, nmax + 1)}
-    even = min(n for n in pc if pc[n] > 0.5)
-    return dict(p=pc, even=even)
-
-
-# --------------------------------------------- NM 18.4 (correlated reviewers)
-def majority_indep(n, q):
-    return sum(comb(n, k) * q ** k * (1 - q) ** (n - k) for k in range((n + 1) // 2, n + 1))
-
-
-def betabin_pmf(k, n, a, b):
-    return comb(n, k) * math.exp(betaln(k + a, n - k + b) - betaln(a, b))
-
-
-def reviewers(q=0.20, rho=0.40, nmax=15):
-    s = 1 / rho - 1
-    a, b = q * s, (1 - q) * s
-    ind = {n: majority_indep(n, q) for n in range(1, nmax + 1, 2)}
-    mix = {n: sum(betabin_pmf(k, n, a, b) for k in range((n + 1) // 2, n + 1))
-           for n in range(1, nmax + 1, 2)}
-    floor = 1 - betainc(a, b, 0.5)
-    unan_ind = q ** 5
-    unan_mix = betabin_pmf(5, 5, a, b)
-    return dict(alpha=a, beta=b, ind=ind, mix=mix, floor=floor,
-                unan_ind=unan_ind, unan_mix=unan_mix, unan_ratio=unan_mix / unan_ind)
-
-
-# Kim 2025: on Helm (71 LLMs, 14,042 questions), model pairs agree about 60%
-# of the time when both are wrong; uniform choice among the three wrong
-# answers of a four-option question would agree 1/3 of the time.
-KIM_MEASURED = 0.60
-KIM_RANDOM = 1 / 3
-
-# ---------------------------------------------- NM 18.5 (barrier vs quorum)
-def barrier(f=0.90, n=8, k=6, nmax=16):
-    allp = {m: f ** m for m in range(1, nmax + 1)}
-    below = min(m for m in allp if allp[m] < 0.5)
-    quorum = sum(comb(n, j) * f ** j * (1 - f) ** (n - j) for j in range(k, n + 1))
-    return dict(all=allp, below_half=below, all_n=f ** n, quorum=quorum)
-
-
-# Dean 2013, Table 1 (a real Google fan-out service, measured at the root):
-DEAN = {"one random leaf": (1, 5, 10), "95% of all leaves": (12, 32, 70),
-        "all leaves": (40, 87, 140)}               # 50th, 95th, 99th pct, ms
-DEAN_HEDGE = dict(before_ms=1800, after_ms=74, extra=0.02)   # 1,000 keys, 100 servers
-
-
-def dean():
-    p99 = DEAN["all leaves"][2] / DEAN["one random leaf"][2]
-    return dict(p99_ratio=p99,
-                hedge_ratio=DEAN_HEDGE["before_ms"] / DEAN_HEDGE["after_ms"])
-
-
-# ----------------------------------------------------- §18.7.4 (credit window)
-def credit(lam=5.0, crit_tokens=500, decode=40.0, minutes=10, window=8, target_s=60):
-    mu = decode / crit_tokens
-    backlog = (lam - mu) * minutes * 60
-    wait_h = backlog / mu / 3600
-    residence = window / mu
-    w_target = math.floor(target_s * mu)
-    return dict(mu=mu, backlog=backlog, wait_h=wait_h, residence=residence,
-                window_for_target=w_target)
-
-
-# ------------------------------------- reservation estimate (MA Exercise 7a)
-def reservation(remaining=50, reserve=5, own=6, asks=(20, 20, 20)):
-    avail = remaining - reserve - own
-    copied = sum(asks)
-    admitted, left = [], avail
-    for a in asks:
-        if a <= left:
-            admitted.append(True)
-            left -= a
-        else:
-            admitted.append(False)
-    return dict(available=avail, copied_liability=copied, admitted=admitted,
-                left_after=left, equal_max=avail // len(asks))
-
-
-# --------------------------------------------- NM 18.7 (deadline coverage)
-PRICE_IN, PRICE_OUT, PRICE_SVC = 3e-6, 10e-6, 0.01   # MA NM 18.7, illustrative
-COHORT = {  # MA Table 9
-    "single": dict(acc=80, ontime=70, tin=2_000_000, tout=400_000, svc=200, failed=3),
-    "delegated": dict(acc=80, ontime=78, tin=3_000_000, tout=600_000, svc=300, failed=6),
-}
-
-
-def cohort():
-    out = {}
-    for k, v in COHORT.items():
-        spend = v["tin"] * PRICE_IN + v["tout"] * PRICE_OUT + v["svc"] * PRICE_SVC
-        out[k] = dict(spend=spend, per_acc=spend / v["acc"], failed_share=v["failed"] / spend)
-    d, s = COHORT["delegated"], COHORT["single"]
-    out["ratio"] = out["delegated"]["per_acc"] / out["single"]["per_acc"]
-    out["extra_spend"] = out["delegated"]["spend"] - out["single"]["spend"]
-    out["extra_ontime"] = d["ontime"] - s["ontime"]
-    out["marginal"] = out["extra_spend"] / out["extra_ontime"]
-    return out
-
-
-# MAST Figure 1 (prevalence over 1,642 traces), percent.
-MAST_CAT = {"System design": 44.2, "Inter-agent misalignment": 32.3, "Task verification": 23.5}
-MAST_MODES = [  # (label, percent, category)
-    ("Step repetition", 15.7, "design"),
-    ("Reasoning-action mismatch", 13.2, "align"),
-    ("Unaware of termination", 12.4, "design"),
-    ("Disobey task specification", 11.8, "design"),
-    ("Incorrect verification", 9.1, "verify"),
-    ("No or incomplete verification", 8.2, "verify"),
-    ("Task derailment", 7.4, "align"),
+# The seven most frequent MAST failure modes, as the retrieval slide draws them.
+MAST_MODES = [  # (label, share in percent, category)
+    ("Step repetition", MAST.MastStepRepetitionPct, "design"),
+    ("Reasoning-action mismatch", MAST.MastReasoningActionMismatchPct, "align"),
+    ("Unaware of termination", MAST.MastUnawareOfTerminationPct, "design"),
+    ("Disobey task specification", MAST.MastDisobeyTaskSpecificationPct, "design"),
+    ("Incorrect verification", MAST.MastIncorrectVerificationPct, "verify"),
+    ("No or incomplete verification", MAST.MastIncompleteVerificationPct, "verify"),
+    ("Task derailment", MAST.MastTaskDerailmentPct, "align"),
 ]
 
 
+def pct(x):
+    return x * 100
+
+
+def usd(q):
+    return q.to("USD").magnitude
+
+
+def s(q):
+    return q.to("s").magnitude
+
+
+print("== Hook and NM 18.6 (Scenarios.ResearchSystemTokenBreakEven; Literature.MultiAgentSystems)")
+v("hook_agent", BE.agent_tokens_vs_chat, "{:.0f}", "agent tokens over chat, x")
+v("hook_multi", BE.multi_agent_tokens_vs_chat, "{:.0f}", "multi-agent tokens over chat, x")
+v("hook_gain_pct", REPORT.ResearchSystemEvalGainPct, "{:.1f}", "reported evaluation gain, %")
+v("hook_m", BE.token_multiple, "{:.2f}", "token multiple per attempt, x")
+v("hook_breakeven_pct", pct(BE.max_single_acceptance), "{:.1f}", "break-even single-agent acceptance, %")
+v("hook_acc_mult", BE.acceptance_multiplier, "{:.3f}", "the gain as an acceptance multiple, x")
+v("hook_cost_ratio", BE.cost_ratio_if_gain_is_acceptance, "{:.2f}", "cost per accepted task then, x")
+v("be_single_pct", pct(BE.single_acceptance), "{:.0f}", "a single agent that accepts, %")
+v("be_need_pct", pct(BE.required_multi_acceptance), "{:.0f}", "delegated acceptance it would need, %")
+v("rs_early", REPORT.ResearchSystemEarlySubagents, "{:.0f}", "subagents early versions spawned")
+v("rs_var", REPORT.ResearchSystemTokenVariancePct, "{:.0f}", "variance explained by tokens, %")
+
+print("== Recall (Scenarios.VerifierFalseAcceptsAtTenPercentPass)")
+v("rc_rollouts", RC.rollouts, "{:,.0f}", "rollouts")
+v("rc_pass_pct", pct(RC_S.pass_rate), "{:.0f}", "true pass rate, %")
+v("rc_pass", RC_S.pass_rate, "{:.2f}", "the same, as a fraction")
+v("rc_fail", 1 - RC_S.pass_rate, "{:.2f}", "failing share")
+v("rc_fa_pct", pct(RC_S.false_accept_rate), "{:.1f}", "false-accept rate, %")
+v("rc_fa", RC_S.false_accept_rate, "{:.3f}", "the same, as a fraction")
+v("rc_true", RC.true_accepts, "{:.2f}", "true accepts")
+v("rc_true1", RC.true_accepts, "{:.1f}", "true accepts, one decimal")
+v("rc_false", RC.false_accepts, "{:.2f}", "false accepts")
+v("rc_accepts", RC.accepts, "{:,.2f}", "all accepts")
+v("rc_false_pct", pct(RC.false_share), "{:.1f}", "false share of rewards, %")
+
+print("== NM 18.1 screen (Scenarios.RepairPartitionScreen and its halved-overhead variant)")
+v("scr_p", SCR.parallel_fraction, "{:.2f}", "parallel fraction")
+v("scr_p1", SCR.parallel_fraction, "{:.1f}", "the same, one decimal")
+v("scr_c", SCR.overhead_per_extra_worker, "{:.2f}", "overhead per added worker")
+v("scr_t4", SCR.elapsed[4], "{:.3f}", "elapsed at four workers")
+v("scr_t8", SCR.elapsed[8], "{:.3f}", "elapsed at eight workers")
+v("scr_best", SCR.best_workers, "{:.0f}", "best worker count")
+v("scr_best_words", SCR.best_workers, "words", "the same, in words")
+v("scr_tbest", SCR.best_time, "{:.3f}", "elapsed at the best count")
+v("scr_speedup", SCR.best_speedup, "{:.1f}", "speedup at the best count, x")
+v("scr_cap", SCR.speedup_cap, "{:.0f}", "ceiling 1/(1-p), x")
+v("scr_sqrt", SCR.continuous_best, "{:.1f}", "sqrt(p/c)")
+v("scr_c_half", SCR_H.overhead_per_extra_worker, "{:.2f}", "halved overhead")
+v("scr_half_best", SCR_H.best_workers, "{:.0f}", "best count, halved overhead")
+v("scr_half_speedup", SCR_H.best_speedup, "{:.1f}", "speedup, halved overhead, x")
+
+print("== Checkpoint 18.1 estimate (Scenarios.NinetyPercentPartitionScreen and variants)")
+v("est_p", EST.parallel_fraction, "{:.1f}", "parallel fraction")
+v("est_ratio", EST.parallel_fraction / EST.overhead_per_extra_worker, "{:.0f}", "p/c")
+v("est_sqrt", EST.continuous_best, "{:.2f}", "sqrt(p/c)")
+v("est_best", EST.best_workers, "{:.0f}", "best count")
+v("est_speedup", EST.best_speedup, "{:.2f}", "speedup, x")
+v("est_cap", EST.speedup_cap, "{:.0f}", "ceiling, x")
+v("est_hc_best", EST_HC.best_workers, "{:.0f}", "halved overhead: best count")
+v("est_hc_speedup", EST_HC.best_speedup, "{:.2f}", "halved overhead: speedup, x")
+v("est_hs_p", EST_HS.parallel_fraction, "{:.2f}", "halved serial: parallel fraction")
+v("est_hs_best", EST_HS.best_workers, "{:.0f}", "halved serial: best count")
+v("est_hs_best_words", EST_HS.best_workers, "words", "the same, in words")
+v("est_hs_speedup", EST_HS.best_speedup, "{:.2f}", "halved serial: speedup, x")
+v("est_hs_cap", EST_HS.speedup_cap, "{:.0f}", "halved serial: ceiling, x")
+v("est_extra", EST_HC.best_workers - EST.best_workers, "{:.0f}", "added workers the overhead cut needs")
+v("est_extra_words", EST_HC.best_workers - EST.best_workers, "words", "the same, in words")
+
+print("== USL (Scenarios.RepairPartitionScalability, ResearchFanoutScalability)")
+v("usl_s", USL.contention, "{:.2f}", "repair sigma")
+v("usl_k", USL.coherency, "{:.2f}", "repair kappa")
+v("usl_rs", USL_R.contention, "{:.2f}", "research sigma")
+v("usl_rk", USL_R.coherency, "{:.3f}", "research kappa")
+v("usl_best", USL.best_workers, "{:.0f}", "repair peak count")
+v("usl_peak", USL.peak_capacity, "{:.1f}", "repair peak capacity, x")
+v("usl_slower", USL.first_slower, "{:.0f}", "first count slower than one worker")
+v("usl_cap_slower", USL.capacity[USL.first_slower], "{:.3f}", "capacity there")
+v("usl_rbest", USL_R.best_workers, "{:.0f}", "research peak count")
+v("usl_rpeak", USL_R.peak_capacity, "{:.1f}", "research peak capacity, x")
+v("usl_fan", USL_R.best_workers / USL.best_workers, "{:.1f}", "fan-out ratio, x")
+
+print("== One message round (Scenarios.EightAgentMessageRound)")
+v("msg_n_words", MSG.workers, "words", "agents")
+v("msg_mesh", MSG.mesh_deliveries, "{:.0f}", "full-mesh deliveries")
+v("msg_sup", MSG.supervisor_deliveries, "{:.0f}", "supervisor deliveries")
+
+print("== NM 18.2 schedule (Scenarios.InterfaceMigrationSchedule and variants)")
+v("dag_work", s(DAG.work), "{:.0f}", "aggregate slot work, s")
+v("dag_slots", DAG.slots, "{:.0f}", "slots")
+v("dag_bound", s(DAG.work_bound), "{:.2f}", "work bound, s")
+v("dag_span", s(DAG.makespan), "{:.1f}", "critical path, s")
+v("dag_peak", DAG.peak_slots, "{:.0f}", "most slots busy")
+v("dag_speedup", DAG.speedup, "{:.2f}", "speedup over sequence, x")
+v("dag_slack", s(DAG.free_float[6]), "{:.1f}", "slack on the v4-v6 branch, s")
+v("dag_cut", s(DAG.durations[5] - DAG_V5.durations[5]), "{:.0f}", "proposed cut, s")
+v("dag_span_v5", s(DAG_V5.makespan), "{:.1f}", "critical path with v5 cut, s")
+v("dag_span_v6", s(DAG_V6.makespan), "{:.1f}", "critical path with v6 cut, s")
+
+print("== NM 18.3 reference passing (Scenarios.SixChildReferencePassing)")
+v("ref_n_words", REF.workers, "words", "children")
+v("ref_slice", REF.slice_tokens, "{:,.0f}", "pasted slice, tokens")
+v("ref_env", REF.reference_tokens, "{:.0f}", "reference, tokens")
+v("ref_read", REF.read_tokens, "{:,.0f}", "reads, tokens")
+v("ref_tok", REF.reference_total_tokens, "{:,.0f}", "reference total, tokens")
+v("ref_paste", REF.pasted_tokens, "{:,.0f}", "pasted total, tokens")
+v("ref_red", REF.reduction, "{:.1f}", "reduction, x")
+v("ref_be", REF.break_even_read_tokens, "{:,.0f}", "reads at which the saving vanishes")
+
+print("== Equation 4, shared writes (Scenarios.ThousandFileSharedWrites, TwoThousandFileSharedWrites)")
+v("bd_files", WR.files, "{:,.0f}", "files")
+v("bd_w", WR.writes_per_worker, "{:.0f}", "writes per worker")
+v("bd_small_words", WR.small_fleet, "words", "small fleet")
+v("bd_large_words", WR.large_fleet, "words", "large fleet")
+v("bd_even_words", WR.even_odds_fleet, "words", "first fleet above even odds")
+v("bd_p2", pct(WR.collision[WR.small_fleet]), "{:.1f}", "shared write, small fleet, %")
+v("bd_p5", pct(WR.collision[WR.even_odds_fleet]), "{:.1f}", "shared write at even odds, %")
+v("bd_p8", pct(WR.collision[WR.large_fleet]), "{:.1f}", "shared write, large fleet, %")
+v("bd_d2", pct(WR.disjoint[WR.small_fleet]), "{:.1f}", "disjoint, small fleet, %")
+v("bd_files2", WR2.files, "{:,.0f}", "larger repository, files")
+v("bd_even2", WR2.even_odds_fleet, "{:.0f}", "its first fleet above even odds")
+
+print("== Correlated model errors (Literature.CorrelatedModelErrors)")
+v("kim_models", HELM.HelmModels, "{:.0f}", "models")
+v("kim_q", HELM.HelmQuestions, "{:,.0f}", "questions")
+v("kim_pct", HELM.HelmSameWrongAnswerPct, "{:.0f}", "same wrong answer, %")
+v("kim_wrong", HELM.HelmIncorrectChoices, "{:.0f}", "incorrect choices per question")
+v("kim_wrong_words", HELM.HelmIncorrectChoices, "words", "the same, in words")
+v("kim_random_pct", pct(1 / HELM.HelmIncorrectChoices), "{:.0f}", "uniform random agreement, %")
+
+print("== NM 18.4 reviewers (Scenarios.FiveCorrelatedReviewers)")
+v("rv_n_words", RV.reviewers, "words", "reviewers")
+v("rv_q", pct(RV.false_approval), "{:.0f}", "false approval, %")
+v("rv_q_dec", RV.false_approval, "{:.2f}", "the same, as a fraction")
+v("rv_rho", RV.correlation, "{:.2f}", "correlation")
+v("rv_maj_ind", pct(RV.independent_majority(RV.reviewers)), "{:.2f}", "majority, independent, %")
+v("rv_maj_mix", pct(RV.correlated_majority(RV.reviewers)), "{:.2f}", "majority, correlated, %")
+v("rv_large", RV.large_ensemble, "{:.0f}", "larger panel")
+v("rv_maj15_ind", pct(RV.independent_majority(RV.large_ensemble)), "{:.2f}", "larger panel, independent, %")
+v("rv_maj15_mix", pct(RV.correlated_majority(RV.large_ensemble)), "{:.1f}", "larger panel, correlated, %")
+v("rv_floor", pct(RV.floor), "{:.1f}", "floor, %")
+v("rv_unan_ind", pct(RV.independent_unanimous), "{:.3f}", "unanimous, independent, %")
+v("rv_unan_mix", pct(RV.correlated_unanimous), "{:.2f}", "unanimous, correlated, %")
+v("rv_ratio", RV.unanimous_ratio, "{:.0f}", "unanimous ratio, x")
+v("rv_more_words", RV.large_ensemble - RV.reviewers, "words", "reviewers added")
+v("rv_spend_words", RV.large_ensemble / RV.reviewers, "words", "review spend multiple")
+v("rv_drop_words", round(pct(RV.correlated_majority(RV.reviewers) - RV.correlated_majority(RV.large_ensemble))),
+  "words", "points the larger panel buys, about")
+
+print("== NM 18.5 fan-out deadline (Scenarios.EightWorkerDeadlineFanout)")
+v("fo_n", FO.workers, "{:.0f}", "workers")
+v("fo_n_words", FO.workers, "words", "the same, in words")
+v("fo_k", FO.required, "{:.0f}", "quorum")
+v("fo_p", FO.on_time_probability, "{:.1f}", "on-time probability")
+v("fo_p_pct", pct(FO.on_time_probability), "{:.0f}", "the same, %")
+v("fo_all", pct(FO.all_on_time), "{:.2f}", "all on time, %")
+v("fo_quorum", pct(FO.quorum_on_time), "{:.2f}", "quorum on time, %")
+v("fo_even", FO.even_odds_workers, "{:.0f}", "first fleet below even odds")
+
+print("== Fan-out tail latency (Literature.FanoutTailLatency)")
+v("dn_one_p50", TAIL.FanoutOneLeafP50Ms, "{:.0f}", "one leaf, median, ms")
+v("dn_one_p99", TAIL.FanoutOneLeafP99Ms, "{:.0f}", "one leaf, 99th, ms")
+v("dn_all_p50", TAIL.FanoutAllLeavesP50Ms, "{:.0f}", "all leaves, median, ms")
+v("dn_all_p99", TAIL.FanoutAllLeavesP99Ms, "{:.0f}", "all leaves, 99th, ms")
+v("dn_ratio", TAIL.FanoutAllLeavesP99Ms / TAIL.FanoutOneLeafP99Ms, "{:.0f}", "99th, all over one, x")
+v("dn_delay", TAIL.HedgeDelayMs, "{:.0f}", "hedge delay, ms")
+v("dn_keys", TAIL.HedgeKeys, "{:,.0f}", "keys read")
+v("dn_before", TAIL.HedgeBeforeP999Ms, "{:,.0f}", "99.9th without hedging, ms")
+v("dn_after", TAIL.HedgeAfterP999Ms, "{:.0f}", "99.9th with hedging, ms")
+v("dn_extra", TAIL.HedgeExtraRequestsPct, "{:.0f}", "added requests, %")
+
+print("== Credit window (Scenarios.DiffReviewCreditWindow)")
+v("cw_prod", CW.producer_rate.to("1/s").magnitude, "{:.0f}", "producer, items/s")
+v("cw_tok", CW.tokens_per_item.to("token").magnitude, "{:.0f}", "tokens per critique")
+v("cw_rate", CW.decode_rate.to("token/s").magnitude, "{:.0f}", "reviewer decode, tokens/s")
+v("cw_mu", CW.service_rate.to("1/s").magnitude, "{:.2f}", "service rate, items/s")
+v("cw_min", CW.horizon.to("minute").magnitude, "{:.0f}", "horizon, minutes")
+v("cw_backlog", CW.backlog, "{:,.0f}", "backlog")
+v("cw_wait", CW.backlog_wait.to("hour").magnitude, "{:.1f}", "newest wait, h")
+v("cw_w", CW.credits, "{:.0f}", "window")
+v("cw_res", s(CW.window_residence), "{:.0f}", "residence, s")
+v("cw_wt", CW.window_for_target, "{:.0f}", "largest window for the target")
+
+print("== Exercise 7(a) allowances (Scenarios.RemediationChildAllowances)")
+_admitted, _left = AL.admission
+v("al_rem", usd(AL.remaining), "{:.0f}", "remaining, $")
+v("al_res", usd(AL.finalization_reserve), "{:.0f}", "finalization reserve, $")
+v("al_own", usd(AL.own_reserved), "{:.0f}", "root's own work, $")
+v("al_n_words", len(AL.requests), "words", "children")
+v("al_ask", usd(AL.requests[0]), "{:.0f}", "each child asks, $")
+v("al_avail", usd(AL.available), "{:.0f}", "available to children, $")
+v("al_copied", usd(AL.copied_liability), "{:.0f}", "copied liability, $")
+v("al_left", usd(_left), "{:.0f}", "left after the first admission, $")
+v("al_equal", usd(AL.equal_allowance), "{:.0f}", "largest equal allowance, $")
+v("al_naive", usd(AL.naive_allowance), "{:.2f}", "split ignoring reserve and own work, $")
+v("al_nested", usd(AL.nested_request), "{:.0f}", "inspection grandchild, $")
+
+print("== NM 18.7 matched cohort (Scenarios.MatchedDelegationCohort)")
+_s, _d = CO.single, CO.delegated
+v("co_n", CO.attempted, "{:.0f}", "migrations")
+v("co_budget", usd(CO.budget), "{:.0f}", "ceiling, $")
+v("co_cutoff", s(CO.cutoff), "{:.0f}", "final cutoff, s")
+v("co_deadline", s(CO.deadline), "{:.0f}", "deadline, s")
+v("co_floor", CO.on_time_floor, "{:.0f}", "on-time floor")
+v("co_s_acc", _s.accepted, "{:.0f}", "single accepted")
+v("co_m_acc", _d.accepted, "{:.0f}", "delegated accepted")
+v("co_s_on", _s.on_time, "{:.0f}", "single on time")
+v("co_m_on", _d.on_time, "{:.0f}", "delegated on time")
+v("co_s_spend", usd(CO.spend(_s)), "{:.0f}", "single spend, $")
+v("co_m_spend", usd(CO.spend(_d)), "{:.0f}", "delegated spend, $")
+v("co_s_disc", usd(CO.discarded(_s)), "{:.0f}", "single failed and canceled, $")
+v("co_m_disc", usd(CO.discarded(_d)), "{:.0f}", "delegated failed and canceled, $")
+v("co_s_pa", usd(CO.cost_per_accepted(_s)), "{:.3f}", "single cost per accepted, $")
+v("co_m_pa", usd(CO.cost_per_accepted(_d)), "{:.3f}", "delegated cost per accepted, $")
+v("co_ratio", CO.cost_ratio, "{:.1f}", "cost per accepted ratio, x")
+v("co_extra", usd(CO.extra_spend), "{:.0f}", "added spend, $")
+v("co_extra_on", CO.extra_on_time, "{:.0f}", "added on-time acceptances")
+v("co_marg", usd(CO.marginal_on_time_cost), "{:.2f}", "per added on-time acceptance, $")
+
+print("== MAST (Literature.MultiAgentFailures)")
+v("mast_traces", MAST.MastTraces, "{:,.0f}", "annotated traces")
+v("mast_fw", MAST.MastFrameworks, "{:.0f}", "frameworks")
+v("mast_fw_words", MAST.MastFrameworks, "words", "the same, in words")
+v("mast_modes", MAST.MastFailureModes, "{:.0f}", "failure modes")
+v("mast_shown", len(MAST_MODES), "{:.0f}", "modes drawn")
+v("mast_shown_words", len(MAST_MODES), "words", "the same, in words")
+v("mast_design", MAST.MastSystemDesignPct, "{:.1f}", "system design, %")
+v("mast_align", MAST.MastInterAgentMisalignmentPct, "{:.1f}", "inter-agent misalignment, %")
+v("mast_verify", MAST.MastTaskVerificationPct, "{:.1f}", "task verification, %")
+v("mast_ver_gain", MAST.MastVerificationStepGainPct, "{:.1f}", "verification-step gain, %")
+
 if __name__ == "__main__":
-    print("hook / NM 18.6")
-    h = hook()
-    show("token multiple 15/4", f"{h['token_multiple']:.2f}")
-    show("break-even single-agent success", f"{100 * h['breakeven_single_success']:.1f}%")
-    show("acceptance multiple if 90.2% gain", f"{h['acceptance_multiple']:.3f}")
-    show("cost per accepted task ratio", f"{h['cost_ratio']:.2f}")
-    print("recall / RL NM 17.1")
-    r = recall()
-    show("true accepts", f"{r['true_accepts']:.2f}")
-    show("false accepts", f"{r['false_accepts']:.2f}")
-    show("false share", f"{100 * r['false_share']:.1f}%")
-    print("NM 18.1 screen p=0.80 c=0.02")
-    s = screen()
-    show("t(4)", f"{s['t'][4]:.3f}")
-    show("best N", s["best"])
-    show("t(best)", f"{s['t_best']:.3f}")
-    show("speedup", f"{s['speedup']:.2f}")
-    show("t(8)", f"{s['t'][8]:.3f}")
-    show("ceiling 1/(1-p)", f"{s['ceiling']:.1f}")
-    show("sqrt(p/c)", f"{s['approx_best']:.2f}")
-    s2 = screen(c=0.01)
-    show("c=0.01 best N", s2["best"])
-    show("c=0.01 speedup", f"{s2['speedup']:.2f}")
-    print("Checkpoint 18.1 estimate p=0.9 c=0.02")
-    e = screen(p=0.9, c=0.02, nmax=40)
-    show("sqrt(p/c)", f"{e['approx_best']:.2f}")
-    show("best N", e["best"])
-    show("speedup", f"{e['speedup']:.2f}")
-    show("ceiling", f"{e['ceiling']:.0f}")
-    e1 = screen(p=0.9, c=0.01, nmax=40)
-    show("halve c: best N", e1["best"])
-    show("halve c: speedup", f"{e1['speedup']:.2f}")
-    e2 = screen(p=0.95, c=0.02, nmax=40)
-    show("halve serial: best N", e2["best"])
-    show("halve serial: speedup", f"{e2['speedup']:.2f}")
-    show("halve serial: ceiling", f"{e2['ceiling']:.0f}")
-    print("USL repair (0.20, 0.02)")
-    u = usl_summary()
-    show("N* continuous", f"{u['nstar']:.2f}")
-    show("best integer", u["best"])
-    show("peak capacity", f"{u['peak']:.2f}")
-    show("first count slower than one worker", u["first_slower"])
-    show("capacity at 41", f"{usl(41, 0.2, 0.02):.3f}")
-    print("USL research (0.10, 0.002)")
-    ur = usl_summary(0.10, 0.002, nmax=600)
-    show("N* continuous", f"{ur['nstar']:.2f}")
-    show("best integer", ur["best"])
-    show("peak capacity", f"{ur['peak']:.2f}")
-    show("fan-out ratio 21/6", f"{ur['best'] / u['best']:.1f}")
-    print("mesh vs supervisor")
-    for n in (2, 4, 8):
-        d = deliveries(n)
-        show(f"N={n} mesh / supervisor / ratio", f"{d['mesh']} / {d['supervisor']} / {d['ratio']:.1f}")
-    print("NM 18.2 DAG")
-    g = dag()
-    show("aggregate slot-work", f"{g['work']:.1f} s")
-    show("work bound (4 slots)", f"{g['work_bound']:.2f} s")
-    show("makespan", f"{g['makespan']:.1f} s")
-    show("speedup vs serial", f"{g['speedup']:.2f}")
-    show("slack before v7 on v4-v6 branch", f"{g['slack_v6']:.1f} s")
-    show("v6 20 s shorter: makespan", f"{dag({'v6': max(0.0, 16.5 - 20)})['makespan']:.1f} s")
-    show("v5 20 s shorter: makespan", f"{dag({'v5': 23})['makespan']:.1f} s")
-    print("NM 18.3 reference passing")
-    rf = reference()
-    show("paste tokens / usd", f"{rf['paste_tokens']} / {rf['paste_usd']:.3f}")
-    show("reference tokens / usd", f"{rf['ref_tokens']} / {rf['ref_usd']:.3f}")
-    show("reduction", f"{rf['reduction']:.1f}")
-    show("read fraction", f"{100 * rf['read_fraction']:.1f}%")
-    print("equation 4 shared writes (1,000 files, 10 each)")
-    c = collisions()
-    for n in (2, 5, 8):
-        show(f"P(shared write) N={n}", f"{100 * c['p'][n]:.1f}%")
-    show("first N above even odds", c["even"])
-    show("P(disjoint) N=2", f"{100 * (1 - c['p'][2]):.1f}%")
-    c2 = collisions(files=2000)
-    show("2,000 files: first N above even odds", c2["even"])
-    print("NM 18.4 reviewers q=0.20 rho=0.40")
-    rv = reviewers()
-    show("alpha, beta", f"{rv['alpha']:.2f}, {rv['beta']:.2f}")
-    show("majority 5 independent", f"{100 * rv['ind'][5]:.2f}%")
-    show("majority 5 mixture", f"{100 * rv['mix'][5]:.2f}%")
-    show("unanimous 5 independent", f"{100 * rv['unan_ind']:.3f}%")
-    show("unanimous 5 mixture", f"{100 * rv['unan_mix']:.2f}%")
-    show("unanimous ratio", f"{rv['unan_ratio']:.0f}")
-    show("floor P(theta>1/2)", f"{100 * rv['floor']:.1f}%")
-    show("majority 15 independent", f"{100 * rv['ind'][15]:.2f}%")
-    show("majority 15 mixture", f"{100 * rv['mix'][15]:.1f}%")
-    show("Kim measured / random", f"{100 * KIM_MEASURED:.0f}% / {100 * KIM_RANDOM:.0f}%")
-    print("NM 18.5 barrier")
-    b = barrier()
-    show("all 8 on time", f"{100 * b['all_n']:.2f}%")
-    show("6 of 8 on time", f"{100 * b['quorum']:.2f}%")
-    show("first N below even odds", b["below_half"])
-    dn = dean()
-    show("Dean p99 all leaves / one leaf", f"{dn['p99_ratio']:.0f}")
-    show("Dean hedge p99.9 reduction", f"{dn['hedge_ratio']:.1f}")
-    print("credit window")
-    cr = credit()
-    show("service rate", f"{cr['mu']:.2f} items/s")
-    show("backlog after 10 min", f"{cr['backlog']:.0f}")
-    show("newest wait", f"{cr['wait_h']:.1f} h")
-    show("residence W=8", f"{cr['residence']:.0f} s")
-    show("largest window for 60 s residence", cr["window_for_target"])
-    print("reservation estimate")
-    rs = reservation()
-    show("available", rs["available"])
-    show("copied liability", rs["copied_liability"])
-    show("admitted in order", rs["admitted"])
-    show("left after", rs["left_after"])
-    show("largest equal allowance", rs["equal_max"])
-    print("NM 18.7 cohort")
-    co = cohort()
-    for k in ("single", "delegated"):
-        show(f"{k} spend / per accepted", f"{co[k]['spend']:.2f} / {co[k]['per_acc']:.3f}")
-    show("delegated failed share", f"{100 * co['delegated']['failed_share']:.1f}%")
-    show("cost ratio", f"{co['ratio']:.2f}")
-    show("marginal cost per extra on-time", f"{co['marginal']:.2f}")
-    show("MAST category sum", f"{sum(MAST_CAT.values()):.1f}")
+    write(__file__)
