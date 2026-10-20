@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Figures for Lecture 14 (Operating Agents), Volume III.
 
-Every value comes from calcs.py, which this script imports, so figures and
-slides agree. "OA" is the rendered chapter, Operating Agents. The book SVGs
+Every value comes from calcs.py, which reads MLSysIM; this script imports it
+and prints the recorded values (val, num), so figures and slides agree. The
+real OpenTelemetry run (run_step*) is read from trace_run.json, the spans
+images/trace_run.py recorded. "OA" is the rendered chapter, Operating Agents. The book SVGs
 (tail-sampling-pipeline, canary-deployment-pipeline, SPRT corridor) are
 page-sized and fall below the legibility floor on a slide, so they are
 redrawn here at slide size:
@@ -25,6 +27,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import slideplot as sp  # noqa: E402
 import calcs  # noqa: E402
+from deckvals import val, num  # noqa: E402
+import json  # noqa: E402
 
 C = sp.C
 plt = sp.plt
@@ -114,36 +118,43 @@ class Svg:
 
 # ===================================================== hook timeline (OpenAI)
 def hook_timeline(k):
-    h = calcs.HOOK
+    inc = calcs.INC
+    d0 = inc.OpenAiSycophancyRolloutStartDay
+    d1 = inc.OpenAiSycophancyRolloutCompleteDay
+    dp = inc.OpenAiSycophancyPromptMitigationDay
+    dr = inc.OpenAiSycophancyRollbackStartDay
+    mon = inc.OpenAiSycophancyMonitoringDays
+    rb = inc.OpenAiSycophancyRollbackHours / 24
     s = Svg(900, 232 if k < 4 else 304)
-    x0, day = 262, 105          # x of 24 Apr, pixels per day
+    x0, day = 262, 105          # x of the rollout's first day, pixels per day
 
     def X(d):
-        return x0 + (d - 24) * day
+        return x0 + (d - d0) * day
     s.box(10, 14, 215, 140, "Before launch", ("offline evals:", "looked good", "A/B test:", "looked good"),
           "ok", tsize=19, ssize=18)
-    s.line(X(24), 180, X(29.4), 180, "#334155", 2)
-    names = {24: "Thu 24", 25: "Fri 25", 26: "Sat 26", 27: "Sun 27", 28: "Mon 28", 29: "Tue 29"}
+    s.line(X(d0), 180, X(d0 + 5.4), 180, "#334155", 2)
+    names = {d0 + i: f"{wd} {d0 + i:.0f}" for i, wd in enumerate(("Thu", "Fri", "Sat", "Sun", "Mon", "Tue"))}
     for d, nm in names.items():
         s.line(X(d), 172, X(d), 188, "#334155", 2)
         s.text(X(d), 214, nm, 18, "#334155")
-    s.rect(X(h["rollout_start"]), 14, day * (h["rollout_done"] - h["rollout_start"]), 40,
+    s.rect(X(d0), 14, day * (d1 - d0), 40,
            P["tool"][0], P["tool"][1], rx=5, sw=2.4)
-    s.text(X(24.5), 41, "Rollout", 19, P["tool"][2], bold=True)
+    s.text(X((d0 + d1) / 2), 41, "Rollout", 19, P["tool"][2], bold=True)
     sh2 = k >= 2
-    s.rect(X(25), 64, day * 2, 40, P["think"][0], P["think"][1], rx=5, sw=2.4, show=sh2)
-    s.text(X(26), 91, "Live; monitored", 19, P["think"][2], bold=True, show=sh2)
+    s.rect(X(d1), 64, day * mon, 40, P["think"][0], P["think"][1], rx=5, sw=2.4, show=sh2)
+    s.text(X(d1 + mon / 2), 91, "Live; monitored", 19, P["think"][2], bold=True, show=sh2)
     sh3 = k >= 3
-    s.line(X(27.85), 10, X(27.85), 172, RED, 2.4, dash=True, show=sh3)
-    s.text(X(27.85) - 8, 140, "Prompt patch", 18, P["fault"][2], anchor="end", bold=True, show=sh3)
-    s.rect(X(h["rollback_start"]), 114, day * h["rollback_hours"] / 24, 40,
+    late = dp + 0.85            # "late Sunday night": a layout position within the day
+    s.line(X(late), 10, X(late), 172, RED, 2.4, dash=True, show=sh3)
+    s.text(X(late) - 8, 140, "Prompt patch", 18, P["fault"][2], anchor="end", bold=True, show=sh3)
+    s.rect(X(dr), 114, day * rb, 40,
            P["fault"][0], P["fault"][1], rx=5, sw=2.4, show=sh3)
-    s.text(X(28.5), 141, "Rollback", 19, P["fault"][2], bold=True, show=sh3)
-    s.text(X(29) + 8, 141, "about 24 h", 18, P["fault"][2], anchor="start", show=sh3)
+    s.text(X(dr + rb / 2), 141, "Rollback", 19, P["fault"][2], bold=True, show=sh3)
+    s.text(X(dr + rb) + 8, 141, f"about {val('hk_rollback_h')} h", 18, P["fault"][2], anchor="start", show=sh3)
     if k >= 4:
         s.rect(10, 230, 880, 68, P["band"][0], P["band"][1], rx=6)
-        for x, a, b in ((117, "No criterion", "for sycophancy"), (X(26), "Detected outside", "the declared gate"),
-                        (X(28.5) + 20, "Admission stop,", "then settlement")):
+        for x, a, b in ((117, "No criterion", "for sycophancy"), (X(d1 + mon / 2), "Detected outside", "the declared gate"),
+                        (X(dr + rb / 2) + 20, "Admission stop,", "then settlement")):
             s.text(x, 258, a, 18, "#0f172a", bold=True)
             s.text(x, 284, b, 18)
     s.save(f"hook_step{k}.svg")
@@ -194,7 +205,16 @@ def gantt(name, rows, xmax, notes=(), size=(5.4, 3.4), crit=(), ghost=(), qmark=
 
 
 # ============================================ real OpenTelemetry run (Gantt)
-run = calcs.run_spans()
+def run_spans():
+    """Times from the real OpenTelemetry run, seconds after the root span starts."""
+    recs = json.loads((out / "trace_run.json").read_text())
+    t0 = min(r["start_ns"] for r in recs)
+    spans = {r["name"]: ((r["start_ns"] - t0) / 10 ** 9, (r["end_ns"] - t0) / 10 ** 9) for r in recs}
+    gap = spans["chat synthesize_report"][0] - spans["execute_tool run_tests"][1]
+    return dict(spans=spans, gap=gap)
+
+
+run = run_spans()
 S = run["spans"]
 LBL = [("root span", "invoke_agent repair_agent", "neutral"),
        ("retrieve", "retrieve supporting_context", "data"),
@@ -211,23 +231,26 @@ gantt("run_step2.svg", rows, 12.6,
              (9.9, 2, f"{run['gap']:.1f} s gap", C["danger"], "left")])
 
 # ==================================== cut the tests: which span limits now?
-d = calcs.NM141
-t_ret, t_pro = d["retrieve"], d["retrieve"] + d["propose"]
+iv = {k: (a.to("s").magnitude, b.to("s").magnitude) for k, (a, b) in calcs.TRIAL_S.intervals.items()}
+t_ret, t_pro = iv["retrieve"][1], iv["propose"][1]
 t_chk = t_pro
-nm = calcs.nm141()
-base = [("retrieve", 0, t_ret, "data"), ("model: propose", t_ret, t_pro, "memory"),
-        ("run_tests", t_chk, t_chk + 1.0, "compute"), ("run_lint", t_chk, t_chk + d["lint"], "compute"),
+cut = num("tr_cut")
+was = f"was {num('tr_tests'):g} s"
+base = [("retrieve", iv["retrieve"][0], t_ret, "data"), ("model: propose", t_ret, t_pro, "memory"),
+        ("run_tests", t_chk, t_chk + cut, "compute"), ("run_lint", t_chk, iv["lint"][1], "compute"),
         ("model: report", None, None, "memory")]
-gantt("cut_step1.svg", base, 12.6, ghost=[("run_tests", t_chk + 1.0, t_chk + d["tests"])],
+gantt("cut_step1.svg", base, 12.6, ghost=[("run_tests", t_chk + cut, iv["tests"][1])],
       qmark=("model: report", 8.0),
-      notes=[(t_chk + 6.2, 2, "was 6 s", C["neutral"], "left")])
-end_l = t_chk + d["lint"] + d["gap"]
-done = [r if r[0] != "model: report" else ("model: report", end_l, end_l + d["synth"], "memory")
+      notes=[(t_chk + 6.2, 2, was, C["neutral"], "left")])
+end_l = num("tr_report_start")
+done = [r if r[0] != "model: report" else ("model: report", end_l, num("tr_changed"), "memory")
         for r in base]
-gantt("cut_step2.svg", done, 12.6, ghost=[("run_tests", t_chk + 1.0, t_chk + d["tests"])],
-      crit=("retrieve", "model: propose", "run_lint", "model: report"),
-      notes=[(end_l + d["synth"] + 0.25, 0, f"{nm['tests_cut_to_1']:.1f} s", C["text"], "left"),
-             (t_chk + 6.2, 2, "was 6 s", C["neutral"], "left")])
+LABEL = {"retrieve": "retrieve", "propose": "model: propose", "tests": "run_tests", "lint": "run_lint",
+         "synthesize": "model: report"}
+gantt("cut_step2.svg", done, 12.6, ghost=[("run_tests", t_chk + cut, iv["tests"][1])],
+      crit=tuple(LABEL[k] for k in calcs.TRIAL.changed_critical),
+      notes=[(num("tr_changed") + 0.25, 0, f"{val('tr_changed')} s", C["text"], "left"),
+             (t_chk + 6.2, 2, was, C["neutral"], "left")])
 
 
 # ====================================================== three records (SVG)
@@ -257,17 +280,19 @@ for k in range(1, 4):
 
 # ========================================================== Dapper Table 2
 fig, ax = plt.subplots(figsize=(5.8, 2.5))
-rows_d = calcs.DAPPER
+rows_d = [(r["sampling_frequency"], r["latency_change_pct"])
+          for r in sorted(calcs.DAPPER.values(), key=lambda r: r["sampled_per"])]
+err = num("dp_err")
 for i, (lab, v) in enumerate(rows_d):
     y = len(rows_d) - 1 - i
-    ck = "danger" if v > 5 else ("neutral" if v > 2.5 else "data")
+    ck = "danger" if v > 5 else ("neutral" if v > err else "data")
     ax.barh(y, v, height=0.62, color=C[ck])
     ax.text(-1.0, y, f"1 trace per {lab.split('/')[1]}" if lab != "1/1" else "every request",
             ha="right", va="center", fontsize=12, fontweight="bold", color=C["text"])
     ax.text(max(v, 0) + 0.3, y, f"{v:+.2f}%".replace("+", "+") if v < 0 else f"+{v:g}%",
             va="center", fontsize=12, fontweight="bold", color=C[ck])
-ax.axvspan(-2.5, 2.5, color=C["neutral_l"], alpha=0.6, zorder=0)
-ax.text(2.7, len(rows_d) - 0.35, "within error (±2.5%)", fontsize=11, color=C["neutral"],
+ax.axvspan(-err, err, color=C["neutral_l"], alpha=0.6, zorder=0)
+ax.text(err + 0.2, len(rows_d) - 0.35, f"within error (±{val('dp_err')}%)", fontsize=11, color=C["neutral"],
         va="bottom")
 ax.set_xlim(-3, 21)
 ax.set_ylim(-0.6, len(rows_d) - 0.1)
@@ -279,32 +304,39 @@ sp.save(fig, out / "dapper_bars.svg")
 
 
 # ============================================ head sampling miss probability
+def miss(sc, n):
+    """P(no trace kept) after n occurrences under scenario sc's sampling probability."""
+    return sc.variant(occurrences=n).miss
+
+
 def head_miss(k):
     fig, ax = plt.subplots(figsize=(5.4, 3.5))
     ns = list(range(1, 61))
-    curves = [(0.01, "p = 1%", "danger"), (0.10, "p = 10%", "memory"),
-              (0.05, "p = 5%", "compute")]
-    for idx, (p, lab, ck) in enumerate(curves):
+    one, ten, five = calcs.HEAD1_S, calcs.HEAD_S, calcs.HEAD5_S
+    curves = [(one, f"p = {val('hs1_p')}%", "danger"), (ten, f"p = {val('hs10_p')}%", "memory"),
+              (five, f"p = {val('hs5_p')}%", "compute")]
+    for idx, (sc, lab, ck) in enumerate(curves):
         if idx == 2 and k < 2:
             continue
-        ax.plot(ns, [100 * calcs.miss(p, n) for n in ns], color=C[ck], lw=3)
-    ax.text(42, 100 * calcs.miss(0.01, 42) + 4, "p = 1%", color=C["danger"],
+        ax.plot(ns, [100 * miss(sc, n) for n in ns], color=C[ck], lw=3)
+    ax.text(42, 100 * miss(one, 42) + 4, curves[0][1], color=C["danger"],
             fontsize=15, fontweight="bold", ha="center")
-    ax.text(1.5, 16, "p = 10%", color=C["memory"],
+    ax.text(1.5, 16, curves[1][1], color=C["memory"],
             fontsize=15, fontweight="bold", ha="left")
-    pts = [(0.01, 10, "danger", (8, 10)), (0.10, 5, "memory", (-40, -22))]
+    pts = [(one, "hs1_miss", "danger", (8, 10)), (ten, "hs10_miss", "memory", (-40, -22))]
     if k >= 2:
-        pts.append((0.05, 20, "compute", (10, 6)))
-        ax.text(42, 100 * calcs.miss(0.05, 42) + 5, "p = 5%", color=C["compute"],
+        pts.append((five, "hs5_miss", "compute", (10, 6)))
+        ax.text(42, 100 * miss(five, 42) + 5, curves[2][1], color=C["compute"],
                 fontsize=15, fontweight="bold", ha="left")
-    for p, n, ck, off in pts:
-        v = 100 * calcs.miss(p, n)
+    for sc, key, ck, off in pts:
+        n, v = sc.occurrences, 100 * sc.miss
         ax.plot([n], [v], "o", ms=10, color=C[ck], mec="white", mew=1.5, zorder=5)
-        ax.annotate(f"{v:.0f}%", (n, v), xytext=off, textcoords="offset points",
+        ax.annotate(f"{val(key)}%", (n, v), xytext=off, textcoords="offset points",
                     fontsize=15, fontweight="bold", color=C[ck])
     if k < 2:
-        ax.plot([20], [36], "o", ms=12, mfc="white", mec=C["compute"], mew=2.5)
-        ax.annotate("?", (20, 36), xytext=(10, 4), textcoords="offset points",
+        n, v = five.occurrences, 100 * five.miss
+        ax.plot([n], [v], "o", ms=12, mfc="white", mec=C["compute"], mew=2.5)
+        ax.annotate("?", (n, v), xytext=(10, 4), textcoords="offset points",
                     fontsize=18, fontweight="bold", color=C["compute"])
     ax.set_xlim(0, 60)
     ax.set_ylim(0, 105)
@@ -332,7 +364,7 @@ def tail_pipe(k):
     s.arrow([(170, 190), (236, 190)], GRY)
     sh = k >= 2
     cls = [("Failed or violation: keep", "fault"), ("Pending: keep, flag", "tool"),
-           ("Slow or costly: keep", "think"), ("Ordinary: 2% control", "gray")]
+           ("Slow or costly: keep", "think"), (f"Ordinary: {val('rt_control')}% control", "gray")]
     for i, (t_, role) in enumerate(cls):
         y = 104 + i * 56
         s.box(604, y, 286, 46, t_, (), role, show=sh, tsize=19)
@@ -348,13 +380,12 @@ for k in (1, 2):
     tail_pipe(k)
 
 # ======================================================= NM 14.2 retention
-r142 = calcs.nm142()
 sp.hbars(str(out / "retention.svg"), [
-    ("Keep all", r142["full_gb"], "neutral", f"{r142['full_gb']:.0f} GB"),
-    ("Head 5%", r142["head_gb"], "memory",
-     f"{r142['head_gb']:.1f} GB: {r142['head_failed']:.0f} of 400 failures/h"),
-    ("Tail", r142["tail_gb"], "data",
-     f"{r142['tail_gb']:.1f} GB: all 400 failures/h"),
+    ("Keep all", num("rt_full"), "neutral", f"{val('rt_full')} GB"),
+    (f"Head {val('rt_head_p')}%", num("rt_head_gb"), "memory",
+     f"{val('rt_head_gb')} GB: {val('rt_head_failed')} of {val('rt_failed')} failures/h"),
+    ("Tail", num("rt_tail_gb"), "data",
+     f"{val('rt_tail_gb1')} GB: all {val('rt_failed')} failures/h"),
 ], "GB", log=False, xlabel="Retained trace bodies per day (GB, decimal)", size=(5.8, 2.0))
 
 
@@ -400,14 +431,18 @@ s.save("replay.svg")
 # ========================================================= Example 14.1 bars
 def branches(k):
     fig, ax = plt.subplots(figsize=(5.8, 2.3))
-    rows_b = calcs.EX141
+    B = calcs.BRANCH_S
+    names = {"original": "Original interface", "warning": "Warning only", "paginated": "Paginated interface"}
+    rows_b = [(names[k], o.get("accepted", 0), o.get("forbidden", 0), o.get("budget_stop", 0))
+              for k, o in B.outcomes.items()]
+    runs = num("br_runs")
     for i, (name, acc, forb, bud) in enumerate(rows_b):
         y = len(rows_b) - 1 - i
         ax.text(-0.4, y, name, ha="right", va="center", fontsize=13, fontweight="bold",
                 color=C["text"])
         if k < 2:
-            ax.barh(y, 20, height=0.6, color="white", edgecolor=C["neutral"], lw=1.2)
-            ax.text(10, y, "? of 20 accepted", ha="center", va="center", fontsize=13,
+            ax.barh(y, runs, height=0.6, color="white", edgecolor=C["neutral"], lw=1.2)
+            ax.text(runs / 2, y, f"? of {val('br_runs')} accepted", ha="center", va="center", fontsize=13,
                     color=C["neutral"])
             continue
         left = 0
@@ -419,12 +454,12 @@ def branches(k):
                 ax.text(left + v / 2, y, txt, ha="center", va="center", fontsize=12,
                         color="white", fontweight="bold")
             left += v
-    ax.set_xlim(0, 20)
-    ax.set_xticks([0, 5, 10, 15, 20])
+    ax.set_xlim(0, runs)
+    ax.set_xticks([runs * q / 4 for q in range(5)])
     ax.set_ylim(-0.6, len(rows_b) - 0.4)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
-    ax.set_xlabel("20 continuations per branch from one saved prefix (illustrative)")
+    ax.set_xlabel(f"{val('br_runs')} continuations per branch from one saved prefix (illustrative)")
     sp.save(fig, out / f"branches_step{k}.svg")
 
 
@@ -432,17 +467,19 @@ for k in (1, 2):
     branches(k)
 
 # ================================================= Wilson bound, 0 failures
-ex = calcs.ex141()
+B = calcs.BRANCH_S
 fig, ax = plt.subplots(figsize=(5.4, 3.3))
 ns = list(range(5, 121))
-ax.plot(ns, [100 * v for v in calcs.wilson_curve(ns)], color=VIO, lw=3)
-for n, ck in ((20, "danger"), (ex["runs_for_5pct"], "data")):
-    v = 100 * calcs.wilson(0, n)[1]
+ax.plot(ns, [100 * B.clean_failure_upper(n) for n in ns], color=VIO, lw=3)
+for n, ck, lab in ((B.runs("paginated"), "danger",
+                    f"{val('br_runs')} of {val('br_runs')}: up to {val('br_upper')}%"),
+                   (B.clean_runs_for_target, "data",
+                    f"{val('br_need')} clean runs: under {val('br_target')}%")):
+    v = 100 * B.clean_failure_upper(n)
     ax.plot([n], [v], "o", ms=10, color=C[ck], mec="white", mew=1.5, zorder=5)
-    lab = f"20 of 20: up to {v:.0f}%" if n == 20 else f"{n} clean runs: under 5%"
     ax.annotate(lab, (n, v), xytext=(10, 8), textcoords="offset points", fontsize=15,
                 fontweight="bold", color=C[ck])
-ax.axhline(5, color=C["neutral"], lw=1.5, ls="--")
+ax.axhline(100 * B.target_bound, color=C["neutral"], lw=1.5, ls="--")
 ax.set_xlim(0, 122)
 ax.set_ylim(0, 45)
 ax.set_xlabel("Consecutive accepted runs, no failures", fontsize=14)
@@ -476,9 +513,10 @@ for k in range(1, 5):
     stages(k)
 
 # ======================================================= Jensen-Shannon bars
-jv = calcs.js(calcs.JS_BASE, calcs.JS_CAND)
+DR = calcs.DRIFT_S
 fig, ax = plt.subplots(figsize=(5.4, 2.4))
-for i, (name, dist) in enumerate((("Baseline", calcs.JS_BASE), ("Candidate", calcs.JS_CAND))):
+for i, (name, dist) in enumerate((("Baseline", (DR.baseline["tests"], DR.baseline["lint"])),
+                                  ("Candidate", (DR.candidate["tests"], DR.candidate["lint"])))):
     y = 1 - i
     ax.barh(y, dist[0] * 100, height=0.6, color=C["compute"])
     ax.barh(y, dist[1] * 100, left=dist[0] * 100, height=0.6, color=C["memory"])
@@ -494,14 +532,19 @@ ax.set_yticks([])
 ax.set_xticks([])
 for sname in ("left", "bottom"):
     ax.spines[sname].set_visible(False)
-ax.set_title(f"JS divergence = {jv:.3f} nats, {jv / math.log(2) * 100:.0f}% of ln 2",
+ax.set_title(f"JS divergence = {val('js_val')} nats, {val('js_share')}% of ln 2",
              fontsize=15, fontweight="bold", color=C["text"])
 sp.save(fig, out / "js_bars.svg")
 
 
 # ============================================================ SPRT corridor
+def _sprt():
+    r = calcs.MON
+    return dict(lower=r.lower, upper=r.upper, dn_success=r.success_step, up_fail=r.failure_step)
+
+
 def _first_cross_seed(p, lo_n, hi_n):
-    s3 = calcs.nm143()
+    s3 = _sprt()
     for seed in range(1, 500):
         rng = random.Random(seed)
         x, y = 0, 0.0
@@ -513,22 +556,22 @@ def _first_cross_seed(p, lo_n, hi_n):
     return 1
 
 
-RED_SEED = _first_cross_seed(0.75, 30, 50)
+RED_SEED = _first_cross_seed(calcs.MON_S.p_degraded, 30, 50)
 
 def sprt_fig(k):
-    s3 = calcs.nm143()
+    s3 = _sprt()
     fig, ax = plt.subplots(figsize=(5.4, 3.5))
     xs = [0, 70]
     ax.fill_between(xs, s3["lower"], s3["upper"], color=C["neutral_l"], alpha=0.5)
     ax.axhline(s3["upper"], color=C["danger"], lw=3)
     ax.axhline(s3["lower"], color=C["data"], lw=3)
-    ax.text(69, s3["upper"] + 0.25, f"hold: degraded ({s3['upper']:.2f})", ha="right",
+    ax.text(69, s3["upper"] + 0.25, f"hold: degraded ({val('sp_upper')})", ha="right",
             va="bottom", fontsize=14, fontweight="bold", color=C["danger"])
-    ax.text(69, s3["lower"] - 0.25, f"select p0 = 0.90 ({s3['lower']:.2f})", ha="right",
+    ax.text(69, s3["lower"] - 0.25, f"select p0 = {val('sp_p0')} ({val('sp_lower')})", ha="right",
             va="top", fontsize=14, fontweight="bold", color=C["data"])
     ax.text(3, 0.5, "keep sampling", fontsize=14, color=C["neutral"], fontweight="bold")
     if k >= 2:
-        for p, ck, seed in ((0.75, "danger", RED_SEED), (0.90, "data", 3)):
+        for p, ck, seed in ((calcs.MON_S.p_degraded, "danger", RED_SEED), (calcs.MON_S.p_base, "data", 3)):
             rng = random.Random(seed)
             x, y, xsw, ysw = 0, 0.0, [0], [0.0]
             while s3["lower"] < y < s3["upper"] and x < 70:
@@ -555,9 +598,15 @@ for k in (1, 2):
 # ===================================================== calendar time vs f
 fig, ax = plt.subplots(figsize=(5.4, 3.4))
 fs_ = [f / 100 for f in range(1, 101)]
-ax.plot([100 * f for f in fs_], [calcs.nm143(f)["decide_h"] for f in fs_], color=VIO, lw=3)
-for f, off in ((0.05, (10, 4)), (0.10, (10, 4)), (1.0, (-14, -16))):
-    v = calcs.nm143(f)["decide_h"]
+
+
+def decide_h(f):
+    return calcs.MON_S.variant(fraction=f).result.decision_time.to("hour").magnitude
+
+
+ax.plot([100 * f for f in fs_], [decide_h(f) for f in fs_], color=VIO, lw=3)
+for f, off in ((calcs.MON_S.fraction, (10, 4)), (calcs.MON2_S.fraction, (10, 4)), (calcs.MONF_S.fraction, (-14, -16))):
+    v = decide_h(f)
     ax.plot([100 * f], [v], "o", ms=10, color=C["compute"], mec="white", mew=1.5, zorder=5)
     ax.annotate(f"{100*f:.0f}%: {v:.1f} h", (100 * f, v), xytext=off,
                 textcoords="offset points", fontsize=15, fontweight="bold",
@@ -579,22 +628,23 @@ sp.save(fig, out / "calendar.svg")
 
 # ================================================= which harm the fraction sets
 fig, axes = plt.subplots(1, 2, figsize=(5.6, 2.9))
-e5, e100 = calcs.nm143(0.05)["excess"], calcs.nm143(1.0)["excess"]
+e5, e100 = calcs.MON.excess_failures, calcs.MON.full_excess_failures
 ax = axes[0]
 ax.bar([0, 1], [e5, e100], color=[C["compute"], C["neutral"]], width=0.6)
-for i, v in enumerate((e5, e100)):
-    ax.text(i, v + 0.4, f"{v:.0f}", ha="center", fontsize=15, fontweight="bold")
+for i, (v, key) in enumerate(((e5, "vt_canary"), (e100, "vt_full"))):
+    ax.text(i, v + 0.4, val(key), ha="center", fontsize=15, fontweight="bold")
 ax.set_title("Measured regression:\nexcess failures", fontsize=13, fontweight="bold")
 ax.set_ylim(0, 14)
 ax2 = axes[1]
-ax2.bar([0, 1], [5, 100], color=[C["compute"], C["neutral"]], width=0.6)
-for i, v in enumerate((5, 100)):
-    ax2.text(i, v + 4, f"{v}%", ha="center", fontsize=15, fontweight="bold")
+shares = (100 * calcs.MON_S.fraction, 100 * calcs.MONF_S.fraction)
+ax2.bar([0, 1], shares, color=[C["compute"], C["neutral"]], width=0.6)
+for i, v in enumerate(shares):
+    ax2.text(i, v + 4, f"{v:.0f}%", ha="center", fontsize=15, fontweight="bold")
 ax2.set_title("Unmeasured harm:\nexposure rate", fontsize=13, fontweight="bold")
 ax2.set_ylim(0, 125)
 for a in axes:
     a.set_xticks([0, 1])
-    a.set_xticklabels(["5% canary", "full"], fontsize=13)
+    a.set_xticklabels([f"{val('cn_frac')}% canary", "full"], fontsize=13)
     a.set_yticks([])
     a.spines["left"].set_visible(False)
 sp.save(fig, out / "harm_bars.svg")
@@ -617,26 +667,28 @@ s.text(450, 244, "in-flight candidate tasks keep their identities until settled"
 s.save("rollback.svg")
 
 # ============================================= paired interval (AE NM 13.1)
-pi = calcs.PAIRED
+PA = calcs.PAIR
+pi = dict(gain=100 * PA.difference, lo=100 * PA.lower, hi=100 * PA.upper, margin=100 * calcs.PAIR_S.tolerance,
+          pairs=PA.pairs, need=PA.pairs_if_gain_holds)
 half = (pi["gain"] - pi["lo"]) * math.sqrt(pi["pairs"] / pi["need"])
 
 
 def paired(name, show_217=True, size=(5.4, 2.4)):
     fig, ax = plt.subplots(figsize=size)
     ax.axvline(-pi["margin"], color=C["danger"], lw=2.5, ls="--")
-    ax.text(-pi["margin"] - 0.3, 1.55, "margin\n−2 points", ha="right", va="center",
+    ax.text(-pi["margin"] - 0.3, 1.55, f"margin\n−{val('pr_margin')} points", ha="right", va="center",
             fontsize=14, fontweight="bold", color=C["danger"])
     ax.plot([pi["lo"], pi["hi"]], [1, 1], color=VIO, lw=5)
     ax.plot([pi["gain"]], [1], "o", ms=11, color=VIO)
-    ax.text(pi["hi"] + 0.3, 1, "150 pairs", va="center", fontsize=14, fontweight="bold",
+    ax.text(pi["hi"] + 0.3, 1, f"{val('pr_pairs')} pairs", va="center", fontsize=14, fontweight="bold",
             color=VIO)
-    ax.text(pi["lo"] - 0.3, 0.72, f"{pi['lo']:.2f}", ha="right", fontsize=13,
+    ax.text(pi["lo"] - 0.3, 0.72, val("pr_lo"), ha="right", fontsize=13,
             fontweight="bold", color=VIO)
     if show_217:
         ax.plot([pi["gain"] - half, pi["gain"] + half], [0.25, 0.25], color=C["neutral"],
                 lw=5, alpha=0.6)
         ax.plot([pi["gain"]], [0.25], "o", ms=11, color=C["neutral"], alpha=0.6)
-        ax.text(pi["gain"] + half + 0.3, 0.25, f"{pi['need']} pairs (planned)", va="center",
+        ax.text(pi["gain"] + half + 0.3, 0.25, f"{val('pr_need')} pairs (planned)", va="center",
                 fontsize=14, color=C["neutral"], fontweight="bold")
     ax.set_xlim(-8, 21)
     ax.set_ylim(-0.2, 2.0)

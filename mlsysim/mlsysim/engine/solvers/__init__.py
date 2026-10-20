@@ -598,3 +598,25 @@ __all__ += [
     "CappedSelectionCostModel",
     "PairedRunEvaluationModel",
 ]
+
+# --- Agent operations: traces, retention, staged release (added 2026-10-20) ---
+from .operations import (
+    SpanCriticalPathModel,
+    TraceRetentionModel,
+    SequentialCanaryModel,
+)
+
+__all__ += [
+    "SpanCriticalPathModel",
+    "TraceRetentionModel",
+    "SequentialCanaryModel",
+]
+
+# --- Agent evaluation: verdicts, graders, intervals, paired comparison (added 2026-10-20) ---
+from .acceptance import (
+    PairedComparisonModel,
+)
+
+__all__ += [
+    "PairedComparisonModel",
+]

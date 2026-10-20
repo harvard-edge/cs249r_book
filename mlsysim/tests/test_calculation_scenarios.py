@@ -4213,3 +4213,78 @@ def test_pass_pow_k_and_paired_run_summary():
     assert r.accepted == {"base": 3, "cand": 4} and (r.both, r.candidate_only, r.baseline_only, r.neither) == (3, 1, 0, 0)
     assert r.pass_pow["base"][2] == approx(0.5) and r.pass_at["base"][2] == approx(1.0)
     assert r.visible_pass_sealed_reject["base"] == 1 and r.tokens_per_accepted_ratio == approx(0.75)
+# --- Agent operations: traces, retention, postmortems, staged release (added 2026-10-20) ---
+
+def test_repair_trial_span_timeline():
+    r = Scenarios.RepairTrialSpanTimeline.result
+    assert r.leaf_sum.to("s").magnitude == approx(13.2) and r.critical_path.to("s").magnitude == approx(11.2)
+    assert r.elapsed.to("s").magnitude == approx(11.7) and r.unexplained.to("s").magnitude == approx(0.5)
+    assert r.changed_elapsed.to("s").magnitude == approx(7.7) and r.saving.to("s").magnitude == approx(4.0)
+    assert r.changed_critical == ["retrieve", "propose", "lint", "synthesize"]
+    lint = Scenarios.RepairTrialSpanTimeline.variant(intervention={"lint": Scenarios.RepairTrialSpanTimeline.intervention["tests"]})
+    assert lint.result.saving.to("s").magnitude == pytest.approx(0.0, abs=1e-12)
+
+
+def test_head_sampling_miss():
+    assert Scenarios.RareFailureUnderHeadSampling.miss == approx(0.59049)
+    assert Scenarios.RecurringFailureUnderHeadSampling.miss == approx(0.0051538)
+    assert Scenarios.FailureUnderFivePercentHeadSample.miss == approx(0.35849)
+    assert Scenarios.FailureUnderOnePercentHeadSample.miss == approx(0.90438)
+
+
+def test_verdict_aware_trace_retention():
+    r = Scenarios.VerdictAwareTraceRetention.result
+    assert (r.head_count, r.head_failed, r.head_unresolved, r.tail_control, r.tail_count) == (500, 20, 5, 190, 690)
+    assert r.full_volume.to("GB").magnitude == approx(336.0) and r.head_volume.to("GB").magnitude == approx(16.8)
+    assert r.tail_volume.to("GB").magnitude == approx(23.184) and r.full_over_tail == approx(14.4928)
+    assert r.floor_volume.to("GB").magnitude == approx(16.8) and r.per_point_volume.to("GB").magnitude == approx(3.192)
+
+
+def test_interface_repair_branches_wilson():
+    b = Scenarios.InterfaceRepairBranches
+    assert b.failure_upper("paginated") == approx(0.16113) and b.clean_runs_for_target == 73
+    assert b.clean_failure_upper(72) >= 0.05 > b.clean_failure_upper(73)
+    lo, hi = b.acceptance_interval("original")
+    assert lo == approx(0.0088814) and hi == approx(0.23613)
+    lo, hi = b.acceptance_interval("warning")
+    assert lo == approx(0.21881) and hi == approx(0.61342)
+
+
+def test_repair_candidate_paired_comparison_as_read_by_operations():
+    """The Agent Evaluation comparison that the release decision record cites (shared with Agent Operations)."""
+    r = Scenarios.RepairCandidatePairedComparison.result
+    assert r.difference == approx(0.04) and r.lower == approx(-0.032062854, rel=1e-6)
+    assert r.upper == approx(0.111211210, rel=1e-6) and not r.noninferior
+    assert r.pairs_if_gain_holds == 217
+
+
+def test_tool_drift_and_familywise_error():
+    d = Scenarios.TestLintToolDrift
+    assert d.divergence == approx(0.021006) and d.share_of_maximum == approx(0.030305)
+    f = Scenarios.ReleaseGateFamilywiseError
+    assert f.union_bound == approx(0.20) and f.independent == approx(0.18549) and f.per_test == approx(0.0125)
+
+
+def test_acceptance_canary_monitor_and_ladder():
+    m = Scenarios.AcceptanceCanaryMonitor
+    r = m.result
+    assert r.upper == approx(4.553877) and r.lower == approx(-2.985682)
+    assert r.failure_step == approx(0.916291) and r.success_step == approx(-0.182322)
+    assert r.expected_samples == approx(45.23806) and r.failures_to_hold == 5
+    assert r.decision_time.to("hour").magnitude == approx(15.579354)
+    assert r.excess_failures == approx(7.01071) and r.full_excess_failures == approx(11.28571)
+    assert m.variant(fraction=0.10).result.decision_time.to("hour").magnitude == approx(8.03968)
+    assert m.variant(fraction=1.0).result.decision_time.to("hour").magnitude == approx(1.25397)
+    w = Scenarios.WebCanaryLadderOnAgentTasks
+    assert w.total.to("minute").magnitude == approx(40.0) and w.labeled_by_completion == approx(2.0)
+    assert w.admitted_by_completion == approx(20.0)
+
+
+def test_openai_sycophancy_timeline_and_dapper():
+    from mlsysim import Literature
+    inc = Literature.IncidentReports
+    assert (inc.OpenAiSycophancyRolloutStartDay, inc.OpenAiSycophancyRollbackStartDay) == (24, 28)
+    assert inc.OpenAiSycophancyRollbackHours == 24
+    rows = {r["sampling_frequency"]: r for r in Literature.DapperSamplingOverhead.entries}
+    assert rows["1/1"]["latency_change_pct"] == 16.3 and rows["1/1024"]["latency_change_pct"] == -0.20
+    assert Literature.DistributedTracing.DapperFirstProductionSamplingDenominator == 1024

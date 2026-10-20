@@ -1445,3 +1445,21 @@ HumanEvalAgentCost = _Series(
     ),
     "Code agents on HumanEval: accuracy against total cost, mean of five runs.",
 )
+
+DapperSamplingOverhead = _Series(
+    "dapper_sampling_overhead",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Sigelman et al. (2010), Dapper, a Large-Scale Distributed Systems Tracing Infrastructure, "
+            "Google Technical Report dapper-2010-1, Table 2",
+        url="https://research.google/pubs/dapper-a-large-scale-distributed-systems-tracing-infrastructure/",
+        verified="2026-10-20",
+        notes=(
+            "One row per non-adaptive sampling frequency of Table 2: the change in average latency and "
+            "in average throughput of a Web search cluster, percent as printed. The caption gives "
+            "experimental errors of 2.5 and 0.15 percent (Literature.DistributedTracing). Read from "
+            "the report PDF with pdftotext."
+        ),
+    ),
+    "Dapper tracing overhead on a Web search cluster at six sampling frequencies (added 2026-10-20).",
+)

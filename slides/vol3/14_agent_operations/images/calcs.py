@@ -1,318 +1,239 @@
 #!/usr/bin/env python3
-"""Every derived number in Lecture 14 (Operating Agents), one block per slide.
+"""Every number on the Volume III Lecture 14 slides and notes, read from MLSysIM.
 
-Inputs are typed with their source. Sources:
-  OA    = the rendered chapter, Operating Agents (Volume III), dev text 2026-10-18.
-  NM    = a Napkin Math notebook of that chapter (scenario values the chapter
-          labels hypothetical; slides say "illustrative").
-  Ex    = Example 14.1 of that chapter (hypothetical branch outcomes).
-  AE    = the rendered chapter Agent Evaluation, Napkin Math 13.1 (§13.5).
-  OpenAI 2025a = "Expanding on what we missed with sycophancy," 2 May 2025
-          (read from the Wayback Machine copy of 10 Oct 2026).
-  Dapper = Sigelman et al., "Dapper," Google Technical Report dapper-2010-1,
-          Table 2 (web search cluster; errors 2.5% latency, 0.15% throughput).
-  SWE-agent = Yang et al., "SWE-agent," NeurIPS 2024, arXiv 2405.15793v3,
-          Table 3 (GPT-4 Turbo, 300 SWE-bench Lite instances).
-  Argo  = Argo Rollouts docs, docs/features/analysis.md, commit 176a66f
-          (background-analysis example).
-  run   = trace_run.json, spans the OpenTelemetry Python SDK 1.27.0 recorded
-          when trace_run.py replayed NM 14.1's intervals with sleep().
+MLSysIM holds the inputs and the calculations, and the chapter reads the same
+entries: the timing trial's spans and the cut tests
+(Scenarios.RepairTrialSpanTimeline), head sampling
+(Scenarios.RareFailureUnderHeadSampling and its variants), verdict-aware
+retention (Scenarios.VerdictAwareTraceRetention), the controlled branches and
+their Wilson bounds (Scenarios.InterfaceRepairBranches), tool-call drift
+(Scenarios.TestLintToolDrift), the SPRT canary monitor and its allocations
+(Scenarios.AcceptanceCanaryMonitor, ...Doubled, ...Full), Argo's ladder on
+agent tasks (Scenarios.WebCanaryLadderOnAgentTasks), the release gate's
+family-wise error (Scenarios.ReleaseGateFamilywiseError), and the paired
+comparison owned by Agent Evaluation (Scenarios.RepairCandidatePairedComparison),
+backed by engine/solvers/operations.py and physics/statistics.py. Cited
+figures are Literature entries: OpenAI's sycophancy timeline
+(IncidentReports), Dapper's Table 2 and first production sampling rate
+(DapperSamplingOverhead, DistributedTracing), and SWE-agent's Table 3 viewer
+ablation (AgentRetrieval). This file only selects values, converts units, and
+formats them; it types no numbers. Each value is recorded with v() under the
+key the deck prints as \\val{key}; running this file writes images/numbers.tex.
 
-Run from this folder: python3 calcs.py   (prints "label: value")
-make_figs.py imports these values so figures and slides agree.
+Run from this folder: python3 calcs.py
 """
 
-import json
-import math
+import sys
 from pathlib import Path
 
-HERE = Path(__file__).parent
-Z95 = 1.959964  # two-sided 95 percent normal quantile
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
+
+Scenarios = mlsysim.Scenarios
+Literature = mlsysim.Literature
+
+TRIAL_S = Scenarios.RepairTrialSpanTimeline
+HEAD_S = Scenarios.RareFailureUnderHeadSampling
+HEAD50_S = Scenarios.RecurringFailureUnderHeadSampling
+HEAD5_S = Scenarios.FailureUnderFivePercentHeadSample
+HEAD1_S = Scenarios.FailureUnderOnePercentHeadSample
+KEEP_S = Scenarios.VerdictAwareTraceRetention
+BRANCH_S = Scenarios.InterfaceRepairBranches
+PAIR_S = Scenarios.RepairCandidatePairedComparison
+PAIR = PAIR_S.result
+DRIFT_S = Scenarios.TestLintToolDrift
+MON_S = Scenarios.AcceptanceCanaryMonitor
+MON2_S = Scenarios.AcceptanceCanaryMonitorDoubled
+MONF_S = Scenarios.AcceptanceCanaryMonitorFull
+LADDER_S = Scenarios.WebCanaryLadderOnAgentTasks
+FAMILY_S = Scenarios.ReleaseGateFamilywiseError
+
+TRIAL = TRIAL_S.result
+KEEP = KEEP_S.result
+MON = MON_S.result
+MON2 = MON2_S.result
+MONF = MONF_S.result
+INC = Literature.IncidentReports
+DAPPER = {r["sampling_frequency"]: r for r in Literature.DapperSamplingOverhead.entries}
+TRACING = Literature.DistributedTracing
+SWE = Literature.AgentRetrieval
 
 
-def show(label, value):
-    print(f"  {label}: {value}")
+def mag(q, unit):
+    return q.to(unit).magnitude
 
 
-def wilson(x, n, z=Z95):
-    """Wilson score interval for x successes in n trials (Lecture 13's method)."""
-    p = x / n
-    den = 1 + z * z / n
-    c = (p + z * z / (2 * n)) / den
-    h = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / den
-    return c - h, c + h
+def pct(x):
+    return x * 100
 
 
-# ------------------------------------------------------------ hook (OpenAI)
-# OpenAI 2025a: rollout started Thu 24 Apr and completed Fri 25 Apr 2025;
-# two days of monitoring; system-prompt mitigation late Sunday (27 Apr);
-# full rollback initiated Monday (28 Apr) and took around 24 hours.
-HOOK = dict(rollout_start=24, rollout_done=25, prompt_fix=27, rollback_start=28,
-            rollback_hours=24)
+print("== GPT-4o sycophancy timeline (Literature.IncidentReports, OpenAI 2025)")
+v("hk_start", INC.OpenAiSycophancyRolloutStartDay, "{:.0f}", "rollout started, day of April")
+v("hk_done", INC.OpenAiSycophancyRolloutCompleteDay, "{:.0f}", "rollout completed, day of April")
+v("hk_monitor_words", INC.OpenAiSycophancyMonitoringDays, "words", "days monitored")
+v("hk_rollback", INC.OpenAiSycophancyRollbackStartDay, "{:.0f}", "rollback initiated, day of April")
+v("hk_rollback_h", INC.OpenAiSycophancyRollbackHours, "{:.0f}", "rollback duration, hours")
 
+print("== Paired comparison (Scenarios.RepairCandidatePairedComparison; Agent Evaluation)")
+_d, _lo, _hi = PAIR.difference, PAIR.lower, PAIR.upper
+v("pr_pairs", PAIR.pairs, "{:.0f}", "task pairs")
+v("pr_cand_only", PAIR_S.candidate_only, "{:.0f}", "candidate-only acceptances")
+v("pr_base_only", PAIR_S.baseline_only, "{:.0f}", "baseline-only acceptances")
+v("pr_gain", pct(_d), "{:.0f}", "observed gain, points")
+v("pr_lo", pct(_lo), "{:.2f}", "interval lower limit, points")
+v("pr_hi", pct(_hi), "{:.2f}", "interval upper limit, points")
+v("pr_margin", pct(PAIR_S.tolerance), "{:.0f}", "noninferiority margin, points")
+v("pr_need", PAIR.pairs_if_gain_holds, "{:.0f}", "pairs that center the lower limit on the margin")
 
-def hook():
-    h = HOOK
-    return dict(days_live_before_rollback=h["rollback_start"] - h["rollout_done"],
-                days_first_exposure_to_rollback_start=h["rollback_start"] - h["rollout_start"],
-                rollback_done_day=h["rollback_start"] + h["rollback_hours"] / 24)
+print("== Timing trial (Scenarios.RepairTrialSpanTimeline)")
+_tests, _lint = TRIAL_S.duration("tests"), TRIAL_S.duration("lint")
+_cut = TRIAL_S.intervention["tests"]
+_synth = TRIAL_S.duration("synthesize")
+v("tr_leaf", mag(TRIAL.leaf_sum, "s"), "{:.1f}", "leaf spans summed, s")
+v("tr_path", mag(TRIAL.critical_path, "s"), "{:.1f}", "critical path, s")
+v("tr_wall", mag(TRIAL.elapsed, "s"), "{:.1f}", "segment, s")
+v("tr_gap", mag(TRIAL.unexplained, "s"), "{:.1f}", "unexplained gap, s")
+v("tr_tests", mag(_tests, "s"), "{:.1f}", "tests, s")
+v("tr_lint", mag(_lint, "s"), "{:.1f}", "lint, s")
+v("tr_lint_int", mag(_lint, "s"), "{:.0f}", "the same, whole seconds")
+v("tr_cut", mag(_cut, "s"), "{:.1f}", "tests after the cache, s")
+v("tr_cut_int", mag(_cut, "s"), "{:.0f}", "the same, whole seconds")
+v("tr_changed", mag(TRIAL.changed_elapsed, "s"), "{:.1f}", "segment after the cut, s")
+v("tr_report_start", mag(TRIAL.changed_elapsed - _synth, "s"), "{:.1f}", "report starts after the cut, s")
+v("tr_saving", mag(TRIAL.saving, "s"), "{:.1f}", "saving, s")
+v("tr_saving_int", mag(TRIAL.saving, "s"), "{:.0f}", "the same, whole seconds")
+v("tr_reduction", mag(_tests - _cut, "s"), "{:.1f}", "cut to the tests, s")
+v("tr_reduction_int", mag(_tests - _cut, "s"), "{:.0f}", "the same, whole seconds")
 
+print("== Dapper Table 2 and Section 4.4 (Literature.DapperSamplingOverhead, DistributedTracing)")
+_all = DAPPER["1/1"]
+v("dp_full", _all["latency_change_pct"], "{:.1f}", "tracing every request, latency %")
+v("dp_full_int", _all["latency_change_pct"], "{:.0f}", "the same, whole percent")
+v("dp_first", TRACING.DapperFirstProductionSamplingDenominator, "{:,.0f}", "candidates per sampled trace")
+v("dp_err", TRACING.DapperLatencyErrorPct, "{:.1f}", "latency measurement error, %")
+v("dp_tput_max", -min(r["throughput_change_pct"] for r in DAPPER.values()), "{:.2f}",
+  "largest throughput change, %")
+_rows = sorted(DAPPER.values(), key=lambda r: r["sampled_per"])
+_last_visible = _rows[:-1][-1]                     # the last row before one in 1,024
+v("dp_mid_den", _last_visible["sampled_per"], "{:.0f}", "one in this many")
+v("dp_mid", _last_visible["latency_change_pct"], "{:.2f}", "its latency change, %")
+v("dp_low", DAPPER["1/1024"]["latency_change_pct"], "{:.2f}", "one in 1,024, latency %")
 
-# --------------------------------------------- purpose number (OA Purpose)
-# A failure that recurs ten times under a one-percent sample.
-def purpose_miss():
-    return (1 - 0.01) ** 10
+print("== Head sampling (Scenarios.RareFailureUnderHeadSampling and variants)")
+v("hs1_p", pct(HEAD1_S.retention_probability), "{:.0f}", "Purpose: sample, %")
+v("hs1_n", HEAD1_S.occurrences, "{:.0f}", "Purpose: recurrences")
+v("hs1_miss", pct(HEAD1_S.miss), "{:.0f}", "Purpose: no detailed record, %")
+v("hs10_p", pct(HEAD_S.retention_probability), "{:.0f}", "sample, %")
+v("hs10_n", HEAD_S.occurrences, "{:.0f}", "occurrences")
+v("hs10_n_words", HEAD_S.occurrences, "words", "the same, in words")
+v("hs10_miss", pct(HEAD_S.miss), "{:.0f}", "no trace kept, %")
+v("hs50_n", HEAD50_S.occurrences, "{:.0f}", "occurrences")
+v("hs50_miss", pct(HEAD50_S.miss), "{:.1f}", "no trace kept, %")
+v("hs5_p", pct(HEAD5_S.retention_probability), "{:.0f}", "checkpoint: sample, %")
+v("hs5_keep", 1 - HEAD5_S.retention_probability, "{:.2f}", "checkpoint: chance one trial is not kept")
+v("hs5_n", HEAD5_S.occurrences, "{:.0f}", "checkpoint: occurrences")
+v("hs5_miss", pct(HEAD5_S.miss), "{:.0f}", "checkpoint: no trace kept, %")
+v("hs5_miss_dec", HEAD5_S.miss, "{:.2f}", "the same, probability")
 
+print("== Retention (Scenarios.VerdictAwareTraceRetention)")
+v("rt_trials", KEEP_S.trials, "{:,.0f}", "trials per hour")
+v("rt_mb", mag(KEEP_S.trace_size, "MB"), "{:.1f}", "trace body, MB")
+v("rt_failed", KEEP_S.failed, "{:.0f}", "failed per hour")
+v("rt_pending", KEEP_S.unresolved, "{:.0f}", "pending per hour")
+v("rt_ordinary", KEEP_S.ordinary, "{:,.0f}", "ordinary per hour")
+v("rt_hours", mag(KEEP_S.window, "hour"), "{:.0f}", "window, hours")
+v("rt_full", mag(KEEP.full_volume, "GB"), "{:.0f}", "keep everything, GB a day")
+v("rt_head_p", pct(KEEP_S.head_probability), "{:.0f}", "head sample, %")
+v("rt_head_n", KEEP.head_count, "{:.0f}", "head-sampled traces per hour")
+v("rt_head_gb", mag(KEEP.head_volume, "GB"), "{:.1f}", "head sampling, GB a day")
+v("rt_head_failed", KEEP.head_failed, "{:.0f}", "expected failures kept per hour")
+v("rt_head_pending", KEEP.head_unresolved, "{:.0f}", "expected pending kept per hour")
+v("rt_control", pct(KEEP_S.control_probability), "{:.0f}", "control sample, %")
+v("rt_tail_control", KEEP.tail_control, "{:.0f}", "control traces per hour")
+v("rt_tail_n", KEEP.tail_count, "{:.0f}", "tail-selected traces per hour")
+v("rt_tail_gb", mag(KEEP.tail_volume, "GB"), "{:.3f}", "tail selection, GB a day")
+v("rt_tail_gb1", mag(KEEP.tail_volume, "GB"), "{:.1f}", "the same, one decimal")
+v("rt_mult", KEEP.full_over_tail, "{:.1f}", "keep everything / tail selection, x")
+v("rt_floor", mag(KEEP.floor_volume, "GB"), "{:.1f}", "floor, GB a day")
+v("rt_point", mag(KEEP.per_point_volume, "GB"), "{:.1f}", "per point of control sampling, GB a day")
 
-# --------------------------------------------------- NM 14.1 critical path
-# OA Table 2 intervals (s): retrieve [0,0.2]; propose [0.2,3.2];
-# tests [3.2,9.2]; lint [3.2,5.2]; synthesize [9.7,11.7].
-NM141 = dict(retrieve=0.2, propose=3.0, tests=6.0, lint=2.0, gap=0.5, synth=2.0)
+print("== Controlled branches (Scenarios.InterfaceRepairBranches)")
+v("br_runs", BRANCH_S.runs("paginated"), "{:.0f}", "continuations per branch")
+v("br_orig_acc", BRANCH_S.accepted("original"), "{:.0f}", "original: accepted")
+v("br_orig_forb", BRANCH_S.outcomes["original"]["forbidden"], "{:.0f}", "original: forbidden rewrite")
+v("br_warn_acc", BRANCH_S.accepted("warning"), "{:.0f}", "warning: accepted")
+v("br_warn_budget", BRANCH_S.outcomes["warning"]["budget_stop"], "{:.0f}", "warning: budget stop")
+v("br_pag_acc", BRANCH_S.accepted("paginated"), "{:.0f}", "paginated: accepted")
+v("br_conf", pct(BRANCH_S.confidence), "{:.0f}", "Wilson confidence, %")
+v("br_upper", pct(BRANCH_S.failure_upper("paginated")), "{:.0f}", "Wilson upper failure limit, %")
+v("br_target", pct(BRANCH_S.target_bound), "{:.0f}", "target upper limit, %")
+v("br_need", BRANCH_S.clean_runs_for_target, "{:.0f}", "clean runs for the target")
+for _k, _key in (("original", "orig"), ("warning", "warn"), ("paginated", "pag")):
+    _a, _b = BRANCH_S.acceptance_interval(_k)
+    v(f"br_{_key}_lo", _a, "{:.3f}", f"{_k}: Wilson acceptance, low")
+    v(f"br_{_key}_hi", _b, "{:.3f}", f"{_k}: Wilson acceptance, high")
 
+print("== SWE-agent Table 3 (Literature.AgentRetrieval)")
+v("sw_100", SWE.SweBenchLiteSweAgentResolved, "{:.1f}", "100-line window, % resolved")
+v("sw_full", SWE.SweAgentFullFileViewerResolved, "{:.1f}", "whole files, % resolved")
+v("sw_n", SWE.SweBenchLiteInstances, "{:.0f}", "SWE-bench Lite instances")
 
-def critical_path(tests=None, lint=None, d=NM141):
-    t = d["tests"] if tests is None else tests
-    li = d["lint"] if lint is None else lint
-    return d["retrieve"] + d["propose"] + max(t, li) + d["gap"] + d["synth"]
+print("== Tool drift (Scenarios.TestLintToolDrift)")
+v("js_base_tests", pct(DRIFT_S.baseline["tests"]), "{:.0f}", "baseline tests share, %")
+v("js_base_lint", pct(DRIFT_S.baseline["lint"]), "{:.0f}", "baseline lint share, %")
+v("js_val", DRIFT_S.divergence, "{:.3f}", "JS divergence, nats")
+v("js_max", DRIFT_S.maximum, "{:.3f}", "maximum, ln 2")
+v("js_share", pct(DRIFT_S.share_of_maximum), "{:.0f}", "share of the maximum, %")
 
+print("== SPRT canary (Scenarios.AcceptanceCanaryMonitor)")
+v("sp_p0", MON_S.p_base, "{:.2f}", "baseline acceptance")
+v("sp_p1", MON_S.p_degraded, "{:.2f}", "degraded acceptance")
+v("sp_alpha", pct(MON_S.alpha), "{:.0f}", "false hold, %")
+v("sp_beta", pct(MON_S.beta), "{:.0f}", "missed degradation, %")
+v("sp_fail", MON.failure_step, "{:.2f}", "step per failure")
+v("sp_succ", -MON.success_step, "{:.2f}", "step per success (down)")
+v("sp_upper", MON.upper, "{:.2f}", "upper boundary")
+v("sp_lower", MON.lower, "{:.2f}", "lower boundary")
+v("sp_n", MON.expected_samples, "{:.0f}", "expected labeled tasks, whole")
+v("sp_n2", MON.expected_samples, "{:.2f}", "expected labeled tasks")
+v("sp_hold", MON.failures_to_hold, "{:.0f}", "failures in a row to hold")
+v("sp_hold_words", MON.failures_to_hold, "words", "the same, in words")
+v("sp_hold_less", MON.failures_to_hold - 1, "{:.0f}", "one fewer")
+v("sp_k_less", (MON.failures_to_hold - 1) * MON.failure_step, "{:.2f}", "score after one fewer")
+v("sp_k_hold", MON.failures_to_hold * MON.failure_step, "{:.2f}", "score at the hold")
+v("cn_rate", mag(MON_S.arrival_rate, "1/hour"), "{:.0f}", "eligible tasks an hour")
+v("cn_frac", pct(MON_S.fraction), "{:.0f}", "canary share, %")
+v("cn_frac_dec", MON_S.fraction, "{:.2f}", "canary share, fraction")
+v("cn_delay", mag(MON_S.label_delay, "hour"), "{:.1f}", "label delay, h")
+v("cn_delay_min", mag(MON_S.label_delay, "minute"), "{:.0f}", "label delay, min")
+v("cn_cand_rate", mag(MON.candidate_rate, "1/hour"), "{:.0f}", "candidate tasks an hour")
+v("cn_admit", mag(MON.admission_time, "hour"), "{:.2f}", "admission time, h")
+v("cn_decide", mag(MON.decision_time, "hour"), "{:.2f}", "time to a decision, h")
+v("cn_frac2", pct(MON2_S.fraction), "{:.0f}", "doubled share, %")
+v("cn_decide2", mag(MON2.decision_time, "hour"), "{:.1f}", "time to a decision at the doubled share, h")
+v("cn_decide_full", mag(MONF.decision_time, "hour"), "{:.2f}", "time to a decision at full allocation, h")
+v("vt_canary", MON.excess_failures, "{:.0f}", "excess failures at the canary share")
+v("vt_full", MON.full_excess_failures, "{:.0f}", "excess failures at full allocation")
+v("vt_pending", MON.pending, "{:.1f}", "tasks admitted while labels pend, canary")
+v("vt_full_pending", MON.full_pending, "{:.0f}", "the same, full allocation")
+v("vt_gap", MON_S.p_base - MON_S.p_degraded, "{:.2f}", "extra failure probability per task")
 
-def nm141():
-    d = NM141
-    leaf_sum = d["retrieve"] + d["propose"] + d["tests"] + d["lint"] + d["synth"]
-    explained = d["retrieve"] + d["propose"] + max(d["tests"], d["lint"]) + d["synth"]
-    total = critical_path()
-    tests1 = critical_path(tests=1.0)
-    lint1 = critical_path(lint=1.0)
-    return dict(leaf_sum=leaf_sum, explained=explained, total=total,
-                unattributed=total - explained,
-                tests_cut_to_1=tests1, tests_saving=total - tests1,
-                tests_cut=d["tests"] - 1.0,
-                lint_cut_to_1=lint1, lint_saving=total - lint1)
+print("== Argo ladder on agent tasks (Scenarios.WebCanaryLadderOnAgentTasks)")
+_first_share, _pause = LADDER_S.stages[0]
+v("ar_first", pct(_first_share), "{:.0f}", "first weight, %")
+for _i, (_share, _) in enumerate(LADDER_S.stages[1:]):
+    v(f"ar_w{_i + 1 + 1}", pct(_share), "{:.0f}", f"weight of step {_i + 1 + 1}, %")
+v("ar_pause", mag(_pause, "minute"), "{:.0f}", "pause per step, min")
+v("ar_total", mag(LADDER_S.total, "minute"), "{:.0f}", "fully promoted after, min")
+v("ar_labeled", LADDER_S.labeled_by_completion, "{:.0f}", "labeled tasks at promotion")
 
-
-def run_spans():
-    """Times from the real OpenTelemetry run, seconds after the root span starts."""
-    recs = json.loads((HERE / "trace_run.json").read_text())
-    t0 = min(r["start_ns"] for r in recs)
-    spans = {r["name"]: ((r["start_ns"] - t0) / 1e9, (r["end_ns"] - t0) / 1e9)
-             for r in recs}
-    leaves = [v for k, v in spans.items() if not k.startswith("invoke_agent")]
-    leaf_sum = sum(e - s for s, e in leaves)
-    root = spans["invoke_agent repair_agent"]
-    tests = spans["execute_tool run_tests"]
-    synth = spans["chat synthesize_report"]
-    gap = synth[0] - tests[1]
-    return dict(spans=spans, leaf_sum=leaf_sum, root=root[1] - root[0], gap=gap,
-                explained=(root[1] - root[0]) - gap)
-
-
-# --------------------------------------------------- head sampling (OA 14.3)
-def miss(p, n):
-    return (1 - p) ** n
-
-
-# --------------------------------------------------------- NM 14.2 retention
-NM142 = dict(per_hour=10_000, mb=1.4, failed=400, pending=100, ordinary=9_500,
-             hours=24, head_p=0.05, control_p=0.02)
-
-
-def nm142():
-    d = NM142
-    gb = d["mb"] * d["hours"] / 1000           # GB per (trace per hour) per day
-    full = d["per_hour"] * gb
-    head_n = d["per_hour"] * d["head_p"]
-    head = head_n * gb
-    tail_n = d["failed"] + d["pending"] + d["ordinary"] * d["control_p"]
-    tail = tail_n * gb
-    floor = (d["failed"] + d["pending"]) * gb
-    per_point = d["ordinary"] * 0.01 * gb
-    return dict(full_gb=full, head_per_hour=head_n, head_gb=head,
-                head_failed=d["failed"] * d["head_p"],
-                head_pending=d["pending"] * d["head_p"],
-                tail_per_hour=tail_n, tail_gb=tail, full_over_tail=full / tail,
-                floor_gb=floor, per_point_gb=per_point)
-
-
-# ------------------------------------------------------- Dapper (Table 2)
-DAPPER = [("1/1", 16.3), ("1/2", 9.40), ("1/4", 6.38), ("1/8", 4.12),
-          ("1/16", 2.12), ("1/1024", -0.20)]   # avg latency change, percent
-
-
-# ------------------------------------------------------ Example 14.1 branches
-EX141 = [("Original interface", 1, 19, 0), ("Warning only", 8, 0, 12),
-         ("Paginated interface", 20, 0, 0)]   # accepted, forbidden, budget stop
-
-
-def ex141():
-    out = {}
-    for name, acc, forb, bud in EX141:
-        n = acc + forb + bud
-        lo, hi = wilson(acc, n)
-        out[name] = dict(n=n, acc=acc, rate=acc / n, lo=lo, hi=hi)
-    # 20 of 20 accepted: upper limit on the failure rate
-    lo, hi = wilson(0, 20)
-    out["fail_upper_20of20"] = hi
-    # consecutive clean runs before the Wilson upper failure limit drops below 5%
-    n = 1
-    while wilson(0, n)[1] >= 0.05:
-        n += 1
-    out["runs_for_5pct"] = n
-    return out
-
-
-def wilson_curve(ns):
-    return [wilson(0, n)[1] for n in ns]
-
-
-# ------------------------------------------------------- SWE-agent Table 3
-SWE_N = 300
-SWE_VIEWER = [("30 lines", 14.3), ("100 lines", 18.0), ("Full file", 12.7)]
-SWE_SEARCH = [("Summarized", 18.0), ("Iterative", 12.0), ("No search", 15.7)]
-
-
-def swe():
-    out = {}
-    for name, pct in SWE_VIEWER + SWE_SEARCH:
-        x = round(pct / 100 * SWE_N)
-        lo, hi = wilson(x, SWE_N)
-        out[name] = dict(pct=pct, x=x, lo=100 * lo, hi=100 * hi)
-    return out
-
-
-# ----------------------------------------------- Jensen-Shannon (OA 14.5.1)
-def kl(p, q):
-    return sum(a * math.log(a / b) for a, b in zip(p, q) if a > 0)
-
-
-def js(p, q):
-    m = [(a + b) / 2 for a, b in zip(p, q)]
-    return 0.5 * kl(p, m) + 0.5 * kl(q, m)
-
-
-JS_BASE, JS_CAND = (0.70, 0.30), (0.50, 0.50)   # tests, lint
-
-
-# ---------------------------------------------------------------- NM 14.3
-NM143 = dict(p0=0.90, p1=0.75, alpha=0.01, beta=0.05, rate=60, frac=0.05,
-             delay=0.5)
-
-
-def sprt(p0, p1, alpha, beta):
-    a = math.log((1 - beta) / alpha)
-    b = math.log(beta / (1 - alpha))
-    mu1 = p1 * math.log(p1 / p0) + (1 - p1) * math.log((1 - p1) / (1 - p0))
-    num = (1 - beta) * a + beta * b
-    return dict(upper=a, lower=b, inc=mu1, terminal=num, n=num / mu1,
-                up_fail=math.log((1 - p1) / (1 - p0)), dn_success=math.log(p1 / p0))
-
-
-def nm143(frac=None):
-    d = NM143
-    f = d["frac"] if frac is None else frac
-    s = sprt(d["p0"], d["p1"], d["alpha"], d["beta"])
-    per_hour = d["rate"] * f
-    admit_h = s["n"] / per_hour
-    excess = (s["n"] + f * d["rate"] * d["delay"]) * (d["p0"] - d["p1"])
-    return dict(**s, per_hour=per_hour, admit_h=admit_h,
-                decide_h=admit_h + d["delay"], excess=excess)
-
-
-# ------------------------------------------------------------- Argo example
-# Argo: setWeight 20, 40, 60, 80, each followed by a 10 min pause; analysis
-# every 5 min, failureLimit 3, successCondition result[0] >= 0.95.
-# Applied to the chapter's canary scenario (NM 14.3): 60 eligible tasks/hour,
-# each task's label arrives 0.5 h after admission.
-ARGO = dict(weights=[0.20, 0.40, 0.60, 0.80], pause_min=10)
-
-
-def argo():
-    d, n = ARGO, NM143
-    full_min = len(d["weights"]) * d["pause_min"]
-    # candidate tasks admitted in each 10-minute step
-    admitted = [w * n["rate"] * d["pause_min"] / 60 for w in d["weights"]]
-    # labels available when the rollout reaches 100%: tasks admitted at least
-    # delay before that moment
-    cutoff = full_min - n["delay"] * 60
-    labeled = 0.0
-    t = 0
-    for w in d["weights"]:
-        seg_end = t + d["pause_min"]
-        overlap = max(0.0, min(seg_end, cutoff) - t)
-        labeled += w * n["rate"] * overlap / 60
-        t = seg_end
-    return dict(full_min=full_min, admitted=sum(admitted), labeled=labeled,
-                needed=nm143()["n"])
-
-
-# ------------------------------------------------- release decision (AE 13.1)
-PAIRED = dict(lo=-3.21, hi=11.12, gain=4.0, margin=2.0, pairs=150, need=217)
-
-
-def family(k=4, alpha=0.05):
-    return dict(bound=k * alpha, independent=1 - (1 - alpha) ** k,
-                per_test=alpha / k)
-
+print("== Release gate (Scenarios.ReleaseGateFamilywiseError)")
+v("fw_k", FAMILY_S.family_size, "{:.0f}", "gate terms")
+v("fw_k_words", FAMILY_S.family_size, "words", "the same, in words")
+v("fw_alpha", pct(FAMILY_S.significance), "{:.0f}", "error per term, %")
+v("fw_union", pct(FAMILY_S.union_bound), "{:.0f}", "union bound, %")
+v("fw_ind", pct(FAMILY_S.independent), "{:.1f}", "independent errors, %")
+v("fw_per", pct(FAMILY_S.per_test), "{:.2f}", "Bonferroni level per term, %")
 
 if __name__ == "__main__":
-    print("Hook (OpenAI 2025a timeline)")
-    for k, v in hook().items():
-        show(k, v)
-    print("Purpose: P(no detailed record), 10 recurrences at 1% =",
-          f"{purpose_miss():.3f}")
-    print("NM 14.1 critical path (s)")
-    for k, v in nm141().items():
-        show(k, f"{v:.1f}")
-    r = run_spans()
-    print("Real OpenTelemetry run (s)")
-    for k, (s, e) in sorted(r["spans"].items(), key=lambda kv: kv[1][0]):
-        show(k, f"[{s:.3f}, {e:.3f}]")
-    show("leaf_sum", f"{r['leaf_sum']:.2f}")
-    show("root duration", f"{r['root']:.2f}")
-    show("explained (root minus gap)", f"{r['explained']:.2f}")
-    show("gap", f"{r['gap']:.3f}")
-    print("Head sampling misses")
-    for p, n in [(0.10, 5), (0.10, 50), (0.05, 20), (0.01, 10)]:
-        show(f"p={p}, n={n}", f"{miss(p, n):.4f}")
-    print("NM 14.2 retention")
-    for k, v in nm142().items():
-        show(k, f"{v:.3f}")
-    print("Example 14.1 branches")
-    e = ex141()
-    for k, v in e.items():
-        if isinstance(v, dict):
-            show(k, f"{v['acc']}/{v['n']} = {v['rate']:.2f}, Wilson [{v['lo']:.3f}, {v['hi']:.3f}]")
-        else:
-            show(k, f"{v:.4f}" if isinstance(v, float) else v)
-    print("SWE-agent Table 3 with Wilson intervals (n=300)")
-    for k, v in swe().items():
-        show(k, f"{v['pct']}% = {v['x']}/300, [{v['lo']:.1f}, {v['hi']:.1f}]")
-    s_ = swe()
-    show("100 lines minus full file (points)", f"{s_['100 lines']['pct'] - s_['Full file']['pct']:.1f}")
-    print("SPRT failures in a row from the start")
-    st = nm143()
-    for k in (4, 5):
-        show(f"{k} failures", f"{k * st['up_fail']:.2f} (hold at {st['upper']:.2f})")
-    hw = (PAIRED["gain"] - PAIRED["lo"]) * math.sqrt(PAIRED["pairs"] / PAIRED["need"])
-    show("217-pair interval (points)", f"[{PAIRED['gain'] - hw:.2f}, {PAIRED['gain'] + hw:.2f}]")
-    print("Jensen-Shannon")
-    j = js(JS_BASE, JS_CAND)
-    show("JS (nats)", f"{j:.4f}")
-    show("share of ln 2", f"{j / math.log(2):.3f}")
-    show("ln 2", f"{math.log(2):.3f}")
-    print("NM 14.3 SPRT")
-    for f in (0.05, 0.10, 1.0):
-        s = nm143(f)
-        show(f"frac={f}", f"upper {s['upper']:.4f}, lower {s['lower']:.4f}, inc {s['inc']:.5f}, "
-             f"terminal {s['terminal']:.4f}, n {s['n']:.2f}, per_hour {s['per_hour']:.1f}, "
-             f"admit {s['admit_h']:.2f} h, decide {s['decide_h']:.2f} h, excess {s['excess']:.2f}")
-    s = nm143()
-    show("step per failure", f"{s['up_fail']:.4f}")
-    show("step per success", f"{s['dn_success']:.4f}")
-    print("Argo rule applied to the canary scenario")
-    for k, v in argo().items():
-        show(k, f"{v:.2f}" if isinstance(v, float) else v)
-    print("Family-wise error, 4 predicates at 0.05")
-    for k, v in family().items():
-        show(k, f"{v:.4f}")
-    print("Paired comparison (AE NM 13.1): interval",
-          PAIRED["lo"], "to", PAIRED["hi"], "against", -PAIRED["margin"])
+    write(__file__)

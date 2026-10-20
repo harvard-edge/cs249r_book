@@ -680,6 +680,7 @@ def calc_chi_square_quantile(degrees_of_freedom: int, coverage: float) -> float:
 # test). The solvers in engine/solvers/acceptance.py compose them.
 
 
+# --- Agent operations: score intervals, paired differences, drift, sequential samples (added 2026-10-20) ---
 def _check_count(successes, trials):
     if not isinstance(successes, int) or not isinstance(trials, int) or not 0 <= successes <= trials or trials <= 0:
         raise ValueError("Require integer counts 0 <= successes <= trials and trials > 0")
@@ -736,6 +737,15 @@ def calc_task_averaged_variance(between_task_variance, within_task_variance, tas
     more runs shrink only the second term, more tasks shrink both.
     """
     return between_task_variance / tasks + within_task_variance / (tasks * runs_per_task)
+def calc_wilson_clean_runs(target_upper: float, z: float) -> int:
+    """Fewest consecutive clean runs whose Wilson upper limit on the failure rate falls below ``target_upper``.
+
+    With zero failures in ``n`` runs the upper limit is ``z^2 / (n + z^2)``,
+    which is below ``t`` once ``n > z^2 (1 - t) / t``.
+    """
+    if not 0.0 < target_upper < 1.0:
+        raise ValueError("target_upper must be in (0, 1)")
+    return math.floor(z * z * (1 - target_upper) / target_upper) + 1
 
 
 def calc_newcombe_paired_difference(both, first_only, second_only, neither, z_critical):
@@ -781,3 +791,33 @@ def calc_mcnemar_exact_two_sided(first_only, second_only):
 def calc_paired_difference_variance(discordant_fraction, difference):
     """Per-pair variance of a paired candidate-minus-baseline outcome in {-1, 0, +1}: ``d - delta^2``."""
     return discordant_fraction - difference ** 2
+
+
+def calc_jensen_shannon_divergence(p, q) -> float:
+    """Jensen-Shannon divergence between two aligned distributions, in nats.
+
+    ``JS = KL(p || m) / 2 + KL(q || m) / 2`` with ``m = (p + q) / 2``. It is
+    symmetric and bounded by ``ln 2``, which two distributions with disjoint
+    support reach. Source: Lin, "Divergence Measures Based on the Shannon
+    Entropy," IEEE Trans. Inf. Theory 37(1), 1991.
+    """
+    if len(p) != len(q):
+        raise ValueError("p and q must have the same length")
+    m = [(a + b) / 2 for a, b in zip(p, q)]
+
+    def _kl(x, y):
+        return sum(a * math.log(a / b) for a, b in zip(x, y) if a > 0)
+
+    return 0.5 * _kl(p, m) + 0.5 * _kl(q, m)
+
+
+def calc_sprt_expected_samples(upper: float, lower: float, drift: float, upper_probability: float) -> float:
+    """Wald's expected stopping sample count, neglecting overshoot.
+
+    The walk ends at ``upper`` with probability ``upper_probability`` and at
+    ``lower`` otherwise; dividing the expected terminal log-likelihood by the
+    expected step ``drift`` gives ``E[N]`` (Wald 1945, average sample number).
+    """
+    if drift == 0:
+        raise ValueError("drift must be nonzero")
+    return (upper_probability * upper + (1 - upper_probability) * lower) / drift

@@ -3866,6 +3866,30 @@ SEC_2013_KNIGHT_CAPITAL = _lit(
            "million realized loss (para. 17); 97 'Power Peg disabled' e-mails (para. 19)."),
 )
 
+SIGELMAN_2010_DAPPER = _lit(
+    "prov:sigelman-2010-dapper",
+    "Sigelman et al. (2010), Dapper, a Large-Scale Distributed Systems Tracing Infrastructure, "
+    "Google Technical Report dapper-2010-1, Table 2 and Section 4.4",
+    url="https://research.google/pubs/dapper-a-large-scale-distributed-systems-tracing-infrastructure/",
+    verified="2026-10-20",
+    notes=("Table 2: effect of non-adaptive sampling frequencies on the average latency and throughput "
+           "of a Web search cluster (1/1: +16.3 percent latency, -1.48 percent throughput; 1/16: "
+           "+2.12, -0.08; 1/1024: -0.20, -0.06); experimental errors 2.5 and 0.15 percent. Section "
+           "4.4: the first production version averaged one sampled trace for every 1024 candidates. "
+           "Read from the report PDF with pdftotext."),
+)
+
+OPENAI_2025_EXPANDING_SYCOPHANCY = _lit(
+    "prov:openai-2025-expanding-sycophancy",
+    "OpenAI, Expanding on what we missed with sycophancy (2 May 2025), section 'What we did to "
+    "address the issue'",
+    url="https://openai.com/index/expanding-on-sycophancy/",
+    verified="2026-10-20",
+    notes=("Rollout started Thursday 24 April and completed Friday 25 April 2025; two days of "
+           "monitoring; system-prompt update late Sunday night; full rollback initiated Monday "
+           "(28 April) and took around 24 hours. Read from the Wayback Machine copy of 2026-10-10."),
+)
+
 CROWDSTRIKE_2024_PIR = _lit(
     "prov:crowdstrike-2024-pir",
     "CrowdStrike, Preliminary Post Incident Review (PIR): Content Configuration Update Impacting "

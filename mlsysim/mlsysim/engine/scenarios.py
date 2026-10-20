@@ -7653,3 +7653,120 @@ class Scenarios(Registry):
         acceleration=Q_(2.0, "m/s**2"),  # scenario assumption: approach-acceleration upper bound
         period=_Embodied.Scenario.WarehouseAisle.t_tick,
     )
+
+    # --- Agent operations: traces, retention, postmortems, staged release (added 2026-10-20) ---
+    # Types in scenario_types.py, solvers in engine/solvers/operations.py. Every
+    # input is a stated teaching assumption unless a source is named.
+    RepairTrialSpanTimeline = _st.SpanCriticalPathScenario(
+        name="A repair-agent timing trial on one host clock, with the tests cut to 1 s",
+        description="Retrieve supporting context, a model call proposing two checks, targeted tests and a "
+                    "static lint check in parallel, and a model call synthesizing the report after both; "
+                    "a 0.5 s gap before synthesis that no span covers. The intervention shortens the "
+                    "tests and keeps every other duration and wait.",
+        intervals={"retrieve": (Q_(0.0, "s"), Q_(0.2, "s")),  # scenario assumption: observed interval
+                   "propose": (Q_(0.2, "s"), Q_(3.2, "s")),  # scenario assumption
+                   "tests": (Q_(3.2, "s"), Q_(9.2, "s")),  # scenario assumption
+                   "lint": (Q_(3.2, "s"), Q_(5.2, "s")),  # scenario assumption
+                   "synthesize": (Q_(9.7, "s"), Q_(11.7, "s"))},  # scenario assumption
+        depends_on={"propose": ["retrieve"], "tests": ["propose"], "lint": ["propose"],
+                    "synthesize": ["tests", "lint"]},
+        intervention={"tests": Q_(1.0, "s")},  # scenario assumption: a cache shortens the tests
+    )
+
+    RareFailureUnderHeadSampling = _st.HeadSamplingMissScenario(
+        name="A failure mode seen five times under a 10 percent head sample",
+        description="Each trial kept independently before its outcome is known.",
+        retention_probability=0.10,  # scenario assumption: head-sampling probability
+        occurrences=5,  # scenario assumption: occurrences of the failure mode
+    )
+    RecurringFailureUnderHeadSampling = RareFailureUnderHeadSampling.variant(
+        name="The same failure mode seen fifty times under the 10 percent head sample",
+        occurrences=50,  # scenario assumption
+    )
+    FailureUnderFivePercentHeadSample = _st.HeadSamplingMissScenario(
+        name="A failure mode seen twenty times under a 5 percent head sample",
+        description="Each trial kept independently before its outcome is known.",
+        retention_probability=0.05,  # scenario assumption
+        occurrences=20,  # scenario assumption
+    )
+    FailureUnderOnePercentHeadSample = _st.HeadSamplingMissScenario(
+        name="A failure mode seen ten times under a 1 percent head sample",
+        description="Each trial kept independently before its outcome is known.",
+        retention_probability=0.01,  # scenario assumption
+        occurrences=10,  # scenario assumption
+    )
+
+    VerdictAwareTraceRetention = _st.TraceRetentionScenario(
+        name="10,000 trials an hour with 1.4 MB trace bodies, kept for 24 hours",
+        description="400 failed, 100 pending or unknown, and 9,500 ordinary accepted trials each hour; "
+                    "head sampling at 5 percent against verdict-aware selection with a 2 percent control "
+                    "sample; decimal megabytes, no capture loss.",
+        failed=400,  # scenario assumption: failed a criterion per hour
+        unresolved=100,  # scenario assumption: pending or unknown per hour
+        ordinary=9_500,  # scenario assumption: ordinary accepted per hour
+        cohort_period=Q_(1, "hour"),
+        trace_size=Q_(1.4, "MB"),  # scenario assumption: complete permitted body, decimal MB
+        window=Q_(24, "hour"),  # scenario assumption: retention window
+        head_probability=0.05,  # scenario assumption
+        control_probability=0.02,  # scenario assumption
+    )
+
+    InterfaceRepairBranches = _st.ControlledBranchScenario(
+        name="Twenty continuations per branch from one saved prefix of a truncated-search repair",
+        description="Original interface, a warning that results may be incomplete, and a paginated "
+                    "interface with typed partial-result metadata; same model, sampling, budget, checks, "
+                    "and admission gate. Hypothetical outcomes.",
+        outcomes={"original": {"accepted": 1, "forbidden": 19},  # scenario assumption
+                  "warning": {"accepted": 8, "budget_stop": 12},  # scenario assumption
+                  "paginated": {"accepted": 20}},  # scenario assumption
+        target_bound=0.05,  # scenario assumption: failure-rate bound to demonstrate
+    )
+
+
+    TestLintToolDrift = _st.ToolDriftScenario(
+        name="A candidate that splits its checks evenly against a baseline at 70 percent tests",
+        description="Two-tool call distributions from a shadow run; hypothetical shares.",
+        baseline={"tests": 0.70, "lint": 0.30},  # scenario assumption
+        candidate={"tests": 0.50, "lint": 0.50},  # scenario assumption
+    )
+
+    AcceptanceCanaryMonitor = _st.SequentialCanaryScenario(
+        name="An SPRT canary: acceptance 0.90 against 0.75 on 5 percent of 60 tasks an hour",
+        description="False-hold target 0.01 and missed-degradation target 0.05; stationary independent "
+                    "labels, regular admissions, each label 0.5 h after admission, no tripwire.",
+        p_base=0.90,  # scenario assumption: baseline acceptance
+        p_degraded=0.75,  # scenario assumption: specified degradation
+        alpha=0.01,  # scenario assumption
+        beta=0.05,  # scenario assumption
+        arrival_rate=Q_(60, "1/hour"),  # scenario assumption: eligible tasks
+        fraction=0.05,  # scenario assumption: canary allocation
+        label_delay=Q_(0.5, "hour"),  # scenario assumption
+    )
+    AcceptanceCanaryMonitorDoubled = AcceptanceCanaryMonitor.variant(
+        name="The same SPRT canary at twice the allocation",
+        fraction=AcceptanceCanaryMonitor.fraction * 2,  # scenario assumption: doubled allocation
+    )
+    AcceptanceCanaryMonitorFull = AcceptanceCanaryMonitor.variant(
+        name="The same SPRT monitor on every eligible task",
+        fraction=1.0,  # full allocation
+    )
+
+    WebCanaryLadderOnAgentTasks = _st.CanaryScheduleScenario(
+        name="Argo Rollouts' 20-40-60-80 percent ladder applied to the canary monitor's agent tasks",
+        description="The background-analysis example of the Argo Rollouts documentation (setWeight 20, 40, "
+                    "60, 80, each followed by a 10 min pause; docs/features/analysis.md, commit 176a66f), "
+                    "run on the canary monitor's 60 eligible tasks an hour with labels 0.5 h late, "
+                    "against the labeled tasks its sequential test expects.",
+        samples_per_variant=AcceptanceCanaryMonitor.result.expected_samples,
+        request_rate=AcceptanceCanaryMonitor.arrival_rate,
+        stages=[(0.20, Q_(10, "minute")), (0.40, Q_(10, "minute")),  # Argo Rollouts docs example
+                (0.60, Q_(10, "minute")), (0.80, Q_(10, "minute"))],  # Argo Rollouts docs example
+        label_delay=AcceptanceCanaryMonitor.label_delay,
+    )
+
+    ReleaseGateFamilywiseError = _st.FamilywiseErrorScenario(
+        name="Four statistical gate terms, each tested at 0.05",
+        description="Paired acceptance, goodput, tail latency, and violations as one conjunction.",
+        family_size=4,  # the release gate's four terms
+        significance=0.05,  # scenario assumption: per-term error
+    )

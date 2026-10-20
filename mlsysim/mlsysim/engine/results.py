@@ -3610,6 +3610,52 @@ class ProportionPlanningResult(SolverResult):
     wilson_half_width: float             # half the Wilson width at the same size and rate
     samples_for_target: int              # draws for the target half-width
     per_arm: Dict[float, float]          # detectable difference -> tasks per arm (unrounded)
+# --- Agent operations (added 2026-10-20) ------------------------------------
+
+class SpanCriticalPathResult(SolverResult):
+    """Result from SpanCriticalPathModel: what one trial's spans explain of its elapsed time."""
+    leaf_sum: Quantity                       # every span's duration added, overlap counted twice
+    critical_path: Quantity                  # longest chain of dependent span durations
+    elapsed: Quantity                        # the enclosing segment
+    unexplained: Quantity                    # elapsed time no span on the path covers
+    changed_elapsed: Quantity                # elapsed time after the intervention, waits kept
+    saving: Quantity
+    changed_critical: List[str]              # spans on the path after the intervention
+
+
+class TraceRetentionResult(SolverResult):
+    """Result from TraceRetentionModel: diagnostic trace bodies kept under three selections."""
+    head_count: float                        # traces kept per cohort period, head sampling
+    head_failed: float                       # expected failed traces among them
+    head_unresolved: float
+    tail_control: float                      # ordinary traces kept as the control sample
+    tail_count: float                        # verdict-aware selection
+    full_volume: Quantity                    # every body, over the window
+    head_volume: Quantity
+    tail_volume: Quantity
+    full_over_tail: float
+    floor_volume: Quantity                   # failed and unresolved bodies alone
+    per_point_volume: Quantity               # one percentage point of control sampling
+
+
+class SequentialCanaryResult(SolverResult):
+    """Result from SequentialCanaryModel: a Wald SPRT canary monitor in labels and calendar time."""
+    upper: float                             # log boundary: hold (select the degraded hypothesis)
+    lower: float                             # log boundary: select the baseline hypothesis
+    failure_step: float                      # log-likelihood added by one failure
+    success_step: float                      # log-likelihood added by one success
+    drift: float                             # expected step under the degraded hypothesis
+    terminal: float                          # expected terminal log-likelihood, no overshoot
+    expected_samples: float                  # labeled tasks, under the degraded hypothesis
+    failures_to_hold: int                    # consecutive failures from the start that cross the upper boundary
+    candidate_rate: Quantity                 # candidate tasks admitted per hour
+    admission_time: Quantity                 # to admit the expected samples
+    decision_time: Quantity                  # plus the label delay
+    pending: float                           # candidate tasks admitted while labels are pending
+    excess_failures: float                   # measured regression's cost at this fraction
+    full_pending: float
+    full_excess_failures: float              # the same at full allocation
+    exposure_share: float                    # unmeasured-harm exposure against full allocation
 
 
 class PairedComparisonResult(SolverResult):
@@ -3722,4 +3768,11 @@ __all__ += [
     "TaskMixConsistencyResult",
     "CappedSelectionCostResult",
     "PairedRunEvaluationResult",
+]
+
+__all__ += [
+    "PairedComparisonResult",
+    "SpanCriticalPathResult",
+    "TraceRetentionResult",
+    "SequentialCanaryResult",
 ]
