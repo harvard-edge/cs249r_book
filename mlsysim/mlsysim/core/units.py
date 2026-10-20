@@ -27,6 +27,7 @@ __all__ = [
     # Bit widths, precision map, encoding/format facts
     "FP32_BITS", "INT8_BITS", "SIMD_REGISTER_BITS", "PRECISION_MAP",
     "FLOAT_FORMAT_BITS", "INT16_BITS",  # number-format layouts (added 2026-10-20)
+    "FP8_FORMAT_BITS", "INT4_BITS",  # quantization formats (added 2026-10-20)
     "normalize_precision", "resolve_precision",
     "COLOR_DEPTH_8BIT", "IMAGE_CHANNELS_RGB", "VIDEO_BYTES_PER_PIXEL_RGB",
     "VIDEO_1080P_WIDTH", "VIDEO_1080P_HEIGHT",
@@ -149,6 +150,15 @@ FLOAT_FORMAT_BITS = {
     "bf16": (8, 7),
     "fp16": (5, 10),
 }
+# FP8 layouts (Micikevicius et al. 2022, Table 1). E5M2 follows IEEE 754
+# conventions; E4M3 keeps its top exponent for normal values (one NaN pattern,
+# no infinities), so its values come from
+# physics.numerics.calc_float_values(4, 3, ieee=False) (added 2026-10-20).
+FP8_FORMAT_BITS = {
+    "e4m3": (4, 3),
+    "e5m2": (5, 2),
+}
+INT4_BITS = 4  # (added 2026-10-20)
 
 # Precision string -> byte width. Shared by Engine, ServingModel, SynthesisSolver.
 PRECISION_MAP = {

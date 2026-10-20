@@ -834,3 +834,19 @@ __all__ += [
     "calc_csr_bytes",
     "calc_pareto_frontier",
 ]
+# --- Quantization grids and block formats (added 2026-10-20) ---
+from .numerics import (calc_float_values, calc_int_levels, calc_affine_scale, calc_symmetric_scale,
+                       calc_zero_point, calc_quantize, calc_dequantize, calc_block_bits_per_weight,
+                       calc_accumulator_headroom)
+
+__all__ += [
+    "calc_float_values",
+    "calc_int_levels",
+    "calc_affine_scale",
+    "calc_symmetric_scale",
+    "calc_zero_point",
+    "calc_quantize",
+    "calc_dequantize",
+    "calc_block_bits_per_weight",
+    "calc_accumulator_headroom",
+]

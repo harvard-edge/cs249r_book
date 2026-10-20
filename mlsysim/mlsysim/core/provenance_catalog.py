@@ -4391,3 +4391,58 @@ NVIDIA_NSIGHT_COMPUTE_ROOFLINE_GUIDE = _ds(
     verified="2026-10-19",
     notes="The example report lists DRAM throughput at 0.34 percent of peak.",
 )
+
+# --- Quantization (added 2026-10-20) ---
+NAGEL_DATA_FREE_QUANTIZATION_2019 = _lit(
+    "prov:nagel-data-free-quantization-2019",
+    "Nagel, van Baalen, Blankevoort, and Welling (2019), Data-Free Quantization Through Weight "
+    "Equalization and Bias Correction, ICCV 2019",
+    url="https://arxiv.org/abs/1906.04721",
+    verified="2026-10-20",
+    notes="Table 1: MobileNetV2 71.72 percent in FP32 and 0.12 percent with per-layer INT8; section 3.1: "
+          "the [-128, 128] and (-0.5, 0.5) channel example; figure 2: 32 output channels of the first "
+          "depthwise layer.",
+)
+DETTMERS_LLM_INT8_2022 = _lit(
+    "prov:dettmers-llm-int8-2022",
+    "Dettmers, Lewis, Belkada, and Zettlemoyer (2022), LLM.int8(): 8-bit Matrix Multiplication for "
+    "Transformers at Scale, NeurIPS 2022",
+    url="https://arxiv.org/abs/2208.07339",
+    verified="2026-10-20",
+    notes="Section 1: outlier features up to 20 times larger, in about 6 feature dimensions, affecting "
+          "75 percent of sequence positions from 6.7B parameters; section 4.1: magnitude threshold 6.",
+)
+FRANTAR_GPTQ_2023 = _lit(
+    "prov:frantar-gptq-2023",
+    "Frantar, Ashkboos, Hoefler, and Alistarh (2023), GPTQ: Accurate Post-Training Quantization for "
+    "Generative Pre-trained Transformers, ICLR 2023",
+    url="https://arxiv.org/abs/2210.17323",
+    verified="2026-10-20",
+    notes="Table 5: OPT-175B WikiText2 perplexity (FP16 8.34; 4-bit RTN 10.54, GPTQ 8.37; 3-bit RTN "
+          "7.3e3, GPTQ 8.68); Table 6: 230 ms per token in FP16 on five A100s, 71 ms with 3-bit "
+          "weights on one.",
+)
+LLAMA_CPP_GGML_BLOCKS = Provenance(
+    id="prov:llama-cpp-ggml-blocks",
+    kind=ProvenanceKind.DATASHEET,
+    ref="ggml-org/llama.cpp v0.7.0, ggml/src/ggml-common.h: block_q4_0 and block_q8_0 (MIT)",
+    url="https://github.com/ggml-org/llama.cpp/blob/master/ggml/src/ggml-common.h",
+    verified="2026-10-18",
+    notes="QK4_0 = QK8_0 = 32 quants per block and one ggml_half (16-bit) scale d.",
+)
+THEBLOKE_LLAMA2_GGUF = Provenance(
+    id="prov:thebloke-llama2-7b-gguf",
+    kind=ProvenanceKind.DATASHEET,
+    ref="TheBloke/Llama-2-7B-GGUF on Hugging Face, README (commit b4e04e1)",
+    url="https://huggingface.co/TheBloke/Llama-2-7B-GGUF",
+    verified="2026-10-18",
+    notes="Explanation of quantization methods: GGML_TYPE_Q2_K ends up using 2.5625 bits per weight.",
+)
+LLAMA_BENCH_APPLE_SILICON = Provenance(
+    id="prov:llama-bench-apple-silicon",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="ggml-org/llama.cpp, discussion 4167, Performance of llama.cpp on Apple Silicon M-series",
+    url="https://github.com/ggml-org/llama.cpp/discussions/4167",
+    verified="2026-10-18",
+    notes="llama-bench rows for Llama 2 7B report params 6.74 B.",
+)
