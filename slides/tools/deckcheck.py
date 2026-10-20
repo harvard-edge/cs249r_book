@@ -208,8 +208,23 @@ DROP_ENV_ARGS = ("column", "minipage", "columns", "tabular", "mlsyscard",
                  "tikzpicture", "scope", "frame", "itemize", "enumerate")
 
 
+# Values a deck prints with \val{key}, read from its images/numbers.tex by
+# Deck(); detex shows the value, so lengths and words count what students see
+# (2026-10-20: titles holding \val keys were measured by the key's name).
+_VALS = {}
+
+
+def _load_vals(deck_dir):
+    _VALS.clear()
+    f = Path(deck_dir) / "images" / "numbers.tex"
+    if f.exists():
+        for k, v in re.findall(r"\\defval\{([a-z0-9_]+)\}\{(.*)\}\s*$", f.read_text(), re.M):
+            _VALS[k] = v.replace("{,}", ",")
+
+
 def detex(s):
     """LaTeX to plain words, good enough for word matching and counting."""
+    s = re.sub(r"\\val\{([a-z0-9_]+)\}", lambda m: _VALS.get(m.group(1), m.group(1)), s)
     s = s.replace("~", " ")
     s = re.sub(r"\\(begin|end)\{[^}]*\}(\{[^}]*\})?", " ", s)
     # Arguments that are file names, sizes or styles, not words.
@@ -311,6 +326,7 @@ class Deck:
         texs = sorted(self.path.glob("*.tex"))
         self.tex_path = next((t for t in texs if t.stem == self.folder), texs[0] if texs else None)
         self.raw = self.tex_path.read_text(errors="replace") if self.tex_path else ""
+        _load_vals(self.path)
         self.src = strip_comments(self.raw)
         mp = self.path / "lecture_map.yml"
         try:
