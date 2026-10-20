@@ -471,3 +471,16 @@ __all__ += [
     "calc_residency_factor",
     "calc_weight_only_step_time",
 ]
+
+# --- On-device training (added 2026-10-20) ---
+from .memory import (
+    calc_update_step_traffic,
+    calc_low_rank_update_params,
+    calc_residual_adapter_params,
+)
+
+__all__ += [
+    "calc_update_step_traffic",
+    "calc_low_rank_update_params",
+    "calc_residual_adapter_params",
+]

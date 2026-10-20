@@ -802,6 +802,13 @@ class EdgeDeviceSpectrum(Registry):
         name="Flagship smartphone RAM endpoint",
         description="Upper mobile memory endpoint used for edge device-spectrum examples.",
     )
+    # Added 2026-10-20: the IoT rung of the device-class memory ladder.
+    IotDeviceRamHigh = sourced_qty(
+        1 * GiB,
+        pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
+        name="IoT-class device RAM upper endpoint",
+        description="Upper memory endpoint of an IoT-class edge device, between microcontroller and phone.",
+    )
     CortexMClock = sourced_qty(
         48 * ureg.megahertz,
         pc.EDGE_DEVICE_SPECTRUM_ANCHORS,

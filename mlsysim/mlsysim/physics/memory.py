@@ -520,3 +520,52 @@ def calc_sharing_gain_limit(shared_fraction: float) -> float:
     if not 0 <= shared_fraction < 1:
         raise ValueError("shared_fraction must be in [0, 1)")
     return 1 / (1 - shared_fraction)
+
+
+# --- On-device training: update traffic and parameter-efficient updates (added 2026-10-20) ---
+
+def calc_update_step_traffic(weights, gradients, optimizer_state, activations):
+    """
+    DRAM traffic of one full-update training step, one crossing per tensor use.
+
+    With no cache reuse, the forward pass reads the weights and writes the
+    saved activations; the backward pass reads the activations and the
+    weights and writes the gradients; an Adam-style optimizer reads the
+    weights, the gradients, and its state, then writes the weights and its
+    state back:
+
+        V_step = (W + A) + (A + W + G) + (W + G + S) + (W + S)
+
+    Returns ``(step_traffic, weight_reads)``: the total bytes moved and the
+    bytes of the three weight reads (forward, backward, optimizer).
+    """
+    forward = weights + activations
+    backward = activations + weights + gradients
+    optimizer = (weights + gradients + optimizer_state) + (weights + optimizer_state)
+    return forward + backward + optimizer, 3 * weights
+
+
+def calc_low_rank_update_params(in_dim: int, out_dim: int, rank: int) -> int:
+    """
+    Trainable parameters of a rank-``rank`` update to an ``out_dim`` by ``in_dim`` weight.
+
+        P_LoRA = r (d_in + d_out)
+
+    The update is the product of a down-projection (r by d_in) and an
+    up-projection (d_out by r); the frozen weight itself holds d_in d_out.
+    """
+    validate_at_least(rank, 1, "rank")
+    return rank * (in_dim + out_dim)
+
+
+def calc_residual_adapter_params(width: int, bottleneck: int) -> int:
+    """
+    Parameters of one residual bottleneck adapter, weights and biases.
+
+        P_adapter = 2 d r + r + d
+
+    A down-projection from width d to bottleneck r and an up-projection back
+    to d, each with a bias.
+    """
+    validate_at_least(bottleneck, 1, "bottleneck")
+    return 2 * width * bottleneck + bottleneck + width

@@ -4200,3 +4200,117 @@ class Scenarios(Registry):
         generation=_Agents.Support.CustomerOps.generation_residence,
         wait=_Agents.Support.CustomerOps.customer_reply_time,
     )
+
+    # --- On-device learning and federated rounds (added 2026-10-20) ---------
+    # A phone's full update, parameter-efficient updates, personalization
+    # storage, the uplink, the battery, and the mechanics of one federated round.
+    PhoneFullUpdateWorkingSet = _st.UpdateWorkingSetScenario(
+        name="Full fine-tune of a 10M-parameter FP32 model with Adam on a flagship phone",
+        description="Weights, gradients, two Adam moments, and saved activations at 5x the weight bytes; "
+                    "DRAM traffic of one step with one crossing per tensor use, at the A17 Pro's bandwidth.",
+        parameters=10 * 10 ** 6,          # scenario assumption: compact on-device model
+        bytes_per_param=_BYTES_FP32,
+        optimizer_moments=2,              # Adam keeps first and second moments
+        activation_factor=5,              # scenario assumption: saved activations = 5x weight bytes
+        activation_factor_high=8,         # scenario assumption: upper end of the quoted range
+        bandwidth=_Hardware.Mobile.iPhone15Pro.memory.bandwidth,
+    )
+    PhoneBackgroundFineTuneBattery = _st.BatteryBudgetScenario(
+        name="A 30-minute unthrottled fine-tune at 4.5 W against a flagship phone battery",
+        description="A background voice-assistant adaptation job drawing above the sustained envelope.",
+        battery_energy=_ReferenceStats.PhoneBattery.EnergyWh,
+        power_draw=Q_(4.5, "watt"),       # scenario assumption: unthrottled SoC draw during training
+        required_runtime=Q_(30, "minute"),  # scenario assumption: one adaptation job
+    )
+    TransformerLayerRank4Update = _st.LowRankUpdateScenario(
+        name="Rank-4 low-rank update to a 768 by 768 transformer weight",
+        description="Trainable parameters of the update against the full layer.",
+        in_dim=768,                       # scenario assumption: square weight of a generic transformer layer
+        out_dim=768,
+        rank=4,                           # scenario assumption
+    )
+    CompactEncoderResidualAdapters = _st.ResidualAdapterScenario(
+        name="Residual adapters of width 768 and bottleneck 16 after each of 12 blocks, FP16",
+        description="A compact transformer encoder personalized with one bottleneck adapter per block.",
+        width=768,                        # scenario assumption: hidden width
+        bottleneck=16,                    # scenario assumption: adapter bottleneck
+        sites=12,                         # scenario assumption: one adapter per block
+        bytes_per_param=_BYTES_FP16,
+    )
+    CameraModelTenContextPersonalization = _st.PersonalizationStorageScenario(
+        name="A 10M-parameter camera model personalized for 10 contexts: copies or adapters",
+        description="FP32 storage of ten fine-tuned copies against one backbone plus ten 50,000-parameter adapters.",
+        model_params=10 * 10 ** 6 * _param,   # scenario assumption
+        adapter_params=50_000 * _param,       # scenario assumption: one adapter per context
+        bytes_per_param=_BYTES_FP32 / _param,
+        contexts=10,                          # scenario assumption: home, office, car, ...
+    )
+    PhoneImagesVersusQuantizedUpdates = _st.FederatedUplinkScenario(
+        name="A week of phone photos against 4-bit updates of a 5M-parameter model",
+        description="1,000 compressed images of 200 KB a week against one 2.5 MB update per round, "
+                    "at a daily and an hourly round cadence.",
+        items_per_week=1_000,                 # scenario assumption
+        item_size=Q_(200, "kB"),              # scenario assumption: compressed JPEG
+        update_params=5 * 10 ** 6,            # scenario assumption
+        update_bits_per_param=4,              # scenario assumption: 4-bit quantized update
+        rounds_per_week={"daily": 7, "hourly": 24 * 7},
+    )
+    FederatedAdapterUploadMobileUplink = _st.TransferScenario(
+        name="The reference federated adapter update over a 1 to 10 Mb/s mobile uplink",
+        description="Communication term of one federated round for one phone.",
+        payload=_ReferenceStats.EdgeAdaptationTierProfile.FederatedLoraUpdate,
+        links={"low": Q_(1, "megabit/second"),    # scenario assumption: constrained uplink
+               "high": Q_(10, "megabit/second")},  # scenario assumption: upper end
+    )
+    TrainingSecondVersusWakeWordChecks = _st.TrainingSecondVersusInferenceScenario(
+        name="One second of phone training against measured keyword-spotting inferences",
+        description="2 to 3 W sustained against the Syntiant Core 2 and STM32N6 keyword-spotting energies "
+                    "(MLPerf Tiny and vendor data), and an always-on detector at 50 checks a second.",
+        training_power_low=_ReferenceStats.MobilePower.MobileMlSustainedLow,
+        training_power_high=_ReferenceStats.MobilePower.MobileMlSustainedHigh,
+        inference_energy_low=Q_(next(d["energy_uj"] for d in _Literature.EdgeInferenceBenchmarks.list
+                                     if d["name"].startswith("Syntiant Core 2\n(KWS, low-energy")), "microjoule"),
+        inference_energy_high=Q_(next(d["energy_uj"] for d in _Literature.EdgeInferenceBenchmarks.list
+                                      if d["name"].startswith("STM32N6 NPU\n(KWS")), "microjoule"),
+        check_rate=Q_(50, "1/second"),        # scenario assumption: always-on detector rate
+    )
+    ForegroundDeadlinesVersusRoundTrip = _st.DeadlineVersusRoundTripScenario(
+        name="Foreground deadlines of edge applications against a 50 to 200 ms network round trip",
+        description="Deadlines below the round trip force local inference.",
+        deadlines={"safety control": Q_(10, "ms"),          # scenario assumption: control loop
+                   "AR/VR motion to photon": Q_(20, "ms"),  # scenario assumption
+                   "camera frame": Q_(33, "ms"),            # scenario assumption: 30 frames a second
+                   "voice response": Q_(500, "ms")},        # scenario assumption
+        round_trip_low=Q_(50, "ms"),          # scenario assumption: typical mobile round trip
+        round_trip_high=Q_(200, "ms"),
+    )
+    KeyboardFleetParticipationCoverage = _st.ParticipationCoverageScenario(
+        name="Phones per 100 deployed through admission, selection, and the round deadline, by tier",
+        description="Illustrative cohort counts: admission favors flagships and the deadline drops slow phones.",
+        stages=["deployed", "admitted", "selected", "completed"],
+        counts={"flagship": [20, 16, 10, 8],   # scenario assumption (illustrative)
+                "mid-tier": [60, 21, 14, 11],  # scenario assumption (illustrative)
+                "budget": [20, 3, 2, 1]},      # scenario assumption (illustrative)
+    )
+    TwoClientPairwiseMask = _st.PairwiseMaskScenario(
+        name="Two four-value updates hidden by one shared mask",
+        description="Client A uploads its update plus s, client B its update minus s; the sum is exact.",
+        update_a=[0.2, -0.1, 0.4, 0.3],       # scenario assumption (illustrative)
+        update_b=[0.1, 0.3, -0.2, 0.1],       # scenario assumption (illustrative)
+        mask=[7.3, -4.6, 2.9, 9.1],           # scenario assumption (illustrative)
+    )
+    AdaptedModelShadowGate = _st.ShadowDisagreementScenario(
+        name="A frozen and an adapted model on eight inputs against a 10 percent disagreement tolerance",
+        description="Label-free shadow comparison that holds a candidate out of service.",
+        frozen="AABCABCA",                    # scenario assumption (illustrative labels)
+        adapted="AABBABAA",                   # scenario assumption (illustrative labels)
+        tolerance=0.10,                       # scenario assumption
+    )
+    PhoneSocAiScoreSpread = _st.SeriesSpreadScenario(
+        name="Measured AI Benchmark score spread among phone processors",
+        description="Processors released 2020 on, which a deployed fleet can still hold, and one generation (2024-2025).",
+        series_name="AIBenchmarkSoCs",
+        value_key="ai_score",
+        windows={"fleet": (2020, 2026),       # scenario assumption: phones from 2020 on remain in a fleet
+                 "generation": (2024, 2025)},
+    )
