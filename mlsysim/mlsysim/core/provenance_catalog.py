@@ -2648,3 +2648,49 @@ ESA_SCHIAPARELLI_INQUIRY = _lit(
         "ended in an impact at about 540 km/h."
     ),
 )
+# --- Data engineering: wake-word benchmarks, annotation times, Speech Commands (added 2026-10-20) ---
+PICOVOICE_WAKE_WORD_BENCHMARK = Provenance(
+    id="prov:picovoice-wake-word-benchmark",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="Picovoice, wake-word-benchmark (GitHub), README 'Accuracy' and doc/img/summary.png, commit 84919190fb18",
+    url="https://github.com/Picovoice/wake-word-benchmark",
+    verified="2026-10-17",
+    notes=("Miss rates at 1 false alarm per 10 hours (plot.py target_false_alarm_per_hour=0.1), averaged "
+           "over six wake words; more than 300 recordings per word from more than 50 speakers, mixed at "
+           "10 dB SNR with DEMAND noise from 18 environments, with LibriSpeech as background speech. "
+           "Run by the maker of Porcupine."),
+)
+PAPADOPOULOS_EXTREME_CLICKING_2017 = _lit(
+    "prov:papadopoulos-extreme-clicking-2017",
+    "Papadopoulos, Uijlings, Keller, and Ferrari (2017), Extreme Clicking for Efficient Object "
+    "Annotation, ICCV",
+    url="https://doi.org/10.1109/ICCV.2017.528",
+    verified="2026-10-20",
+    notes="About 35 s to draw one high-quality box in ImageNet's annotation campaign, as the paper reports it.",
+)
+CITYSCAPES_2016 = _lit(
+    "prov:cordts-cityscapes-2016",
+    "Cordts et al. (2016), The Cityscapes Dataset for Semantic Urban Scene Understanding, CVPR",
+    url="https://www.cityscapes-dataset.com/",
+    verified="2026-10-20",
+    notes="Fine pixel-level annotation and quality control took more than 1.5 h on average for one image.",
+)
+SPEECH_COMMANDS_V2_CARD = _report(
+    "prov:speech-commands-v002-hf-card",
+    "Hugging Face dataset card google/speech_commands, config v0.02 (rev. 57ba463); Warden (2018), "
+    "Speech Commands: A Dataset for Limited-Vocabulary Speech Recognition, arXiv:1804.03209",
+    "https://huggingface.co/datasets/google/speech_commands",
+    notes="Split sizes from the card's dataset_info: train 84,848, validation 9,982, test 4,890 clips.",
+)
+TENSORFLOW_SPEECH_COMMANDS_SPLIT = _conv(
+    "prov:tensorflow-speech-commands-which-set",
+    "TensorFlow v2.16.1, examples/speech_commands train.py flags --validation_percentage and "
+    "--testing_percentage (default 10 each), applied by input_data.which_set()",
+    notes="The reference loader assigns each hashed speaker key to a split by these default percentages.",
+)
+MICROSOFT_TAY_2016 = _report(
+    "prov:microsoft-tay-2016",
+    "Peter Lee (2016), Learning from Tay's Introduction, The Official Microsoft Blog, March 25, 2016",
+    "https://blogs.microsoft.com/blog/2016/03/25/learning-tays-introduction/",
+    notes="Tay was taken offline about 16 hours after launch, inside the 'first 24 hours' the post describes.",
+)

@@ -2303,19 +2303,38 @@ class GrowthGapScenario(BaseScenario):
 
 
 class TrendFitScenario(BaseScenario):
-    """Log-linear fit of one group of a Literature series; growth per ``period`` of the x column."""
+    """Log-linear fit of one group of a Literature series; growth per ``period`` of the x column.
+
+    ``group_key=None`` fits every row. ``x_is_date`` reads the x column as an ISO
+    date and converts it to a fractional year (added 2026-10-20).
+    """
     series_name: str
-    group_key: str
-    group: str
+    group_key: Optional[str] = None
+    group: Optional[str] = None
     x_key: str
     y_key: str
     period: float = 1.0
+    x_is_date: bool = False
+
+    def _x(self, value) -> float:
+        if not self.x_is_date:
+            return value
+        import datetime as dt
+        d = dt.date.fromisoformat(value)
+        return d.year + (d.timetuple().tm_yday - 1) / 365.25
 
     @property
     def points(self) -> List[tuple]:
         from ..literature.registry import Literature
         rows = getattr(Literature.Series, self.series_name).entries
-        return [(r[self.x_key], r[self.y_key]) for r in rows if r[self.group_key] == self.group]
+        return [(self._x(r[self.x_key]), r[self.y_key]) for r in rows
+                if self.group_key is None or r[self.group_key] == self.group]
+
+    def crossing(self, y: float) -> float:
+        """The x at which the fitted trend reaches ``y`` (added 2026-10-20)."""
+        import math
+        _, slope, intercept = self.fit
+        return (math.log10(y) - intercept) / slope
 
     @property
     def fit(self) -> tuple:
@@ -2724,3 +2743,366 @@ class ThrottledStageScenario(BaseScenario):
     def result(self):
         from .solvers import ThrottledStageModel
         return ThrottledStageModel().solve(self.site.t_backbone, self.clock_ratio, self.speed)
+
+
+# --- Data engineering: false-wake budgets, label budgets, agreement, ingest cost (added 2026-10-20) ---
+
+class AlwaysOnDetectorTargetsScenario(BaseScenario):
+    """An always-on detector's product contract: what it must catch, how rarely it may wake falsely,
+    what it may occupy on the device, and the data budget and schedule that must deliver it."""
+    detection_target: float           # fraction of spoken wake words caught
+    false_wake_budget: float          # expected false wakes per false_wake_horizon
+    false_wake_horizon: Quantity
+    response_limit: Quantity
+    model_memory: Quantity            # always-on model-size budget
+    preprocessing_memory: Quantity    # separate preprocessing-state budget
+    data_budget: Quantity             # USD
+    timeline: Quantity
+    base_detection_rate: float        # an illustrative starting detection rate
+
+
+class FalseAlarmBudgetScenario(BaseScenario):
+    """One detection window every ``window``, ``listening_per_day`` of each day, over ``horizon``.
+
+    ``budget`` is the expected false alarms allowed per horizon. Each window with
+    no keyword is a chance to fire, so a per-window rejection rate multiplies into
+    a count; ``rejection_levels`` lists rates to compare against the budget.
+    """
+    window: Quantity
+    listening_per_day: Quantity
+    horizon: Quantity
+    budget: float
+    rejection_levels: List[float] = []
+
+    @property
+    def listening_time(self) -> Quantity:
+        """Listening time in one horizon."""
+        return (self.horizon.to("day").magnitude * self.listening_per_day).to("hour")
+
+    @property
+    def windows(self) -> float:
+        """Detection windows in one horizon."""
+        return (self.listening_time / self.window).to("").magnitude
+
+    @property
+    def target_false_positive_rate(self) -> float:
+        """Per-window false-positive rate that meets the budget."""
+        return self.budget / self.windows
+
+    @property
+    def rejection_needed(self) -> float:
+        return 1 - self.target_false_positive_rate
+
+    def false_alarms(self, rejection: float) -> float:
+        """Expected false alarms per horizon at a per-window rejection rate."""
+        return self.windows * (1 - rejection)
+
+    def false_alarms_at_rate(self, rate: Quantity) -> float:
+        """Expected false alarms per horizon at an hourly false-alarm rate."""
+        return (rate * self.listening_time).to("").magnitude
+
+
+class ZeroEventExposureScenario(BaseScenario):
+    """Exposure needed, with zero events observed, to bound a rate of ``budget`` per ``horizon``
+    at one-sided ``confidence``, and the size of recording that exposure at ``sample_rate``."""
+    budget: float
+    horizon: Quantity
+    confidence: float
+    sample_rate: Quantity
+    sample_width: Quantity
+
+    @property
+    def target_rate(self) -> Quantity:
+        return (self.budget / self.horizon).to("1/hour")
+
+    @property
+    def events_bound(self) -> float:
+        """Upper confidence bound on the expected count when none is seen: -ln(1 - confidence)."""
+        import math
+        return -math.log(1 - self.confidence)
+
+    @property
+    def exposure_needed(self) -> Quantity:
+        from ..physics import calc_empirical_testing_exposure
+        return calc_empirical_testing_exposure(self.target_rate, self.confidence).to("hour")
+
+    @property
+    def horizons_needed(self) -> float:
+        return (self.exposure_needed / self.horizon).to("").magnitude
+
+    @property
+    def recording_size(self) -> Quantity:
+        return (self.exposure_needed * self.sample_rate * self.sample_width).to("byte")
+
+
+class DataBudgetScenario(BaseScenario):
+    """A data budget split into ``shares`` by category; the labeling share buys labels at
+    ``label_price`` plus ``review_overhead`` for quality review."""
+    total: Quantity                   # USD
+    shares: Dict[str, float]
+    label_price: Quantity             # USD per label
+    review_overhead: float
+    labeling_category: str = "labeling"
+
+    def allocation(self, category: str) -> Quantity:
+        return self.total * self.shares[category]
+
+    @property
+    def effective_label_cost(self) -> Quantity:
+        return self.label_price * (1 + self.review_overhead)
+
+    @property
+    def labels(self) -> float:
+        return (self.allocation(self.labeling_category) / self.effective_label_cost).to("").magnitude
+
+
+class LabelingVersusTrainingScenario(BaseScenario):
+    """A labeling budget against one training run: ``epochs`` over ``dataset_examples`` at
+    ``throughput_per_accelerator`` on ``accelerators``, priced at a low and a high hourly rate."""
+    labeling_budget: Quantity         # USD
+    dataset_examples: Quantity        # count
+    epochs: int
+    throughput_per_accelerator: Quantity   # count/second
+    accelerators: int
+    price_low: Quantity               # USD per accelerator-hour
+    price_high: Quantity
+    labeling_time_low: Optional[Quantity] = None    # calendar time the labeling takes, low
+    labeling_time_high: Optional[Quantity] = None   # and high
+
+    @property
+    def train_time(self) -> Quantity:
+        return (self.dataset_examples * self.epochs
+                / (self.accelerators * self.throughput_per_accelerator)).to("hour")
+
+    @property
+    def train_cost_low(self) -> Quantity:
+        return (self.accelerators * self.train_time * self.price_low).to("USD")
+
+    @property
+    def train_cost_high(self) -> Quantity:
+        return (self.accelerators * self.train_time * self.price_high).to("USD")
+
+    @property
+    def ratio_low(self) -> float:
+        """Labeling budget over the dearer training run."""
+        return (self.labeling_budget / self.train_cost_high).to("").magnitude
+
+    @property
+    def ratio_high(self) -> float:
+        """Labeling budget over the cheaper training run."""
+        return (self.labeling_budget / self.train_cost_low).to("").magnitude
+
+
+class LabelGranularityScenario(BaseScenario):
+    """Label entries for one image: a per-pixel mask against ``boxes`` boxes of ``coords_per_box``."""
+    image_width: int
+    image_height: int
+    boxes: int
+    coords_per_box: int
+
+    @property
+    def mask_entries(self) -> int:
+        return self.image_width * self.image_height
+
+    @property
+    def box_entries(self) -> int:
+        return self.boxes * self.coords_per_box
+
+    @property
+    def mask_to_box_ratio(self) -> float:
+        return self.mask_entries / self.box_entries
+
+
+class LaborEffortScenario(BaseScenario):
+    """``items`` labeled by hand at ``time_per_item`` each: total hours and full-time person-years."""
+    items: float
+    time_per_item: Quantity
+    work_year: Quantity               # working hours in one full-time person-year
+
+    @property
+    def total_time(self) -> Quantity:
+        return (self.items * self.time_per_item).to("hour")
+
+    @property
+    def person_years(self) -> float:
+        return (self.total_time / self.work_year).to("").magnitude
+
+
+class AnnotatorAgreementScenario(BaseScenario):
+    """Two independent annotators with the same label mix ``class_shares``: chance agreement,
+    and Cohen's kappa at an ``observed_agreement``."""
+    class_shares: List[float]
+    observed_agreement: Optional[float] = None
+
+    @property
+    def chance_agreement(self) -> float:
+        from ..physics import calc_chance_agreement
+        return calc_chance_agreement(self.class_shares)
+
+    @property
+    def kappa(self) -> float:
+        from ..physics import calc_cohens_kappa
+        return calc_cohens_kappa(self.observed_agreement, self.chance_agreement)
+
+
+class AgreementDriftScenario(BaseScenario):
+    """A labeling campaign's kappa at a baseline and again after ``elapsed``."""
+    baseline_kappa: float
+    later_kappa: float
+    elapsed: Quantity
+
+    @property
+    def drop(self) -> float:
+        return self.baseline_kappa - self.later_kappa
+
+
+class ActiveLearningBudgetScenario(BaseScenario):
+    """Active learning against a fixed label budget when scoring the pool is charged to the same budget.
+
+    Counts are examples; prices are USD. ``compute_share`` of the budget pays for
+    scoring a narrowed candidate pool, and the rest buys labels.
+    """
+    pool: float
+    label_budget: Quantity
+    label_price: Quantity
+    scoring_price: Quantity
+    random_labels_needed: float
+    active_labels_low: float
+    active_labels_high: float
+    compute_share: float
+    baseline_accuracy: float
+    target_accuracy: float
+
+    @property
+    def random_label_cost(self) -> Quantity:
+        return self.random_labels_needed * self.label_price
+
+    @property
+    def active_label_cost_low(self) -> Quantity:
+        return self.active_labels_low * self.label_price
+
+    @property
+    def active_label_cost_high(self) -> Quantity:
+        return self.active_labels_high * self.label_price
+
+    @property
+    def full_pool_scoring_cost(self) -> Quantity:
+        return self.pool * self.scoring_price
+
+    @property
+    def active_total_low(self) -> Quantity:
+        return self.full_pool_scoring_cost + self.active_label_cost_low
+
+    @property
+    def active_total_high(self) -> Quantity:
+        return self.full_pool_scoring_cost + self.active_label_cost_high
+
+    @property
+    def compute_budget(self) -> Quantity:
+        return self.label_budget * self.compute_share
+
+    @property
+    def candidate_pool(self) -> float:
+        """Candidates the compute budget can score."""
+        return (self.compute_budget / self.scoring_price).to("").magnitude
+
+    @property
+    def affordable_labels(self) -> float:
+        """Labels the rest of the budget buys after scoring."""
+        return ((self.label_budget - self.compute_budget) / self.label_price).to("").magnitude
+
+
+class HashSplitScenario(BaseScenario):
+    """A released dataset split by hashing a stable key, with the loader's default percentages."""
+    dataset: Any                      # DatasetProfile with training/validation/test counts
+    validation_percent: float
+    test_percent: float
+
+    @property
+    def train_percent(self) -> float:
+        return 100 - self.validation_percent - self.test_percent
+
+    @property
+    def released_total(self) -> float:
+        d = self.dataset
+        return sum(q.to("count").magnitude for q in
+                   (d.training_examples, d.validation_examples, d.test_examples))
+
+    @property
+    def released_test_share(self) -> float:
+        return self.dataset.test_examples.to("count").magnitude / self.released_total
+
+
+class BatchVersusStreamingIngestScenario(BaseScenario):
+    """One event stream ingested by always-on streaming cores or by a batch job each hour.
+
+    Streaming runs ``stream_cores`` (``redundancy_factor`` cores per primary) for
+    ``stream_hours_per_day``; batch runs ``batch_cores`` for ``batch_window`` of each
+    clock hour. Both pay ``core_hour_price``.
+    """
+    event_rate: Quantity              # events per second
+    event_size: Quantity
+    stream_cores: int
+    stream_hours_per_day: Quantity
+    batch_cores: int
+    batch_window: Quantity
+    core_hour_price: Quantity         # USD per core-hour
+    redundancy_factor: int = 1
+
+    @property
+    def throughput(self) -> Quantity:
+        return (self.event_rate * self.event_size).to("GB/s")
+
+    @property
+    def hourly_data(self) -> Quantity:
+        return (self.throughput * Q_(1, "hour")).to("TB")
+
+    @property
+    def stream_core_hours_per_day(self) -> float:
+        return self.stream_cores * self.stream_hours_per_day.to("hour").magnitude
+
+    @property
+    def stream_cost_per_day(self) -> Quantity:
+        return (self.stream_core_hours_per_day * Q_(1, "hour") * self.core_hour_price).to("USD")
+
+    @property
+    def batch_core_hours_per_day(self) -> float:
+        hours_per_day = Q_(1, "day").to("hour").magnitude
+        return self.batch_cores * self.batch_window.to("hour").magnitude * hours_per_day
+
+    @property
+    def batch_cost_per_day(self) -> Quantity:
+        return (self.batch_core_hours_per_day * Q_(1, "hour") * self.core_hour_price).to("USD")
+
+    @property
+    def cost_ratio(self) -> float:
+        return (self.stream_cost_per_day / self.batch_cost_per_day).to("").magnitude
+
+    @property
+    def stream_primary_cores(self) -> int:
+        return self.stream_cores // self.redundancy_factor
+
+    @property
+    def stream_per_core(self) -> Quantity:
+        return (self.throughput / self.stream_primary_cores).to("MB/s")
+
+    @property
+    def batch_aggregate(self) -> Quantity:
+        return (self.hourly_data / self.batch_window).to("GB/s")
+
+    @property
+    def batch_per_core(self) -> Quantity:
+        return (self.batch_aggregate / self.batch_cores).to("MB/s")
+
+
+class DesignTradeoffScenario(BaseScenario):
+    """One design-space move of a knob from ``baseline`` to ``alternative``, with an illustrative
+    quality gain from ``gain_low`` to ``gain_high`` (fractions); costs scale by ``ratio``."""
+    baseline: float
+    alternative: float
+    gain_low: float
+    gain_high: float
+
+    @property
+    def ratio(self) -> float:
+        return self.alternative / self.baseline

@@ -81,6 +81,8 @@ from .statistics import (
     calc_cross_entropy_exponential_proposal,
     calc_conjunctive_confidence,
     calc_multilegged_confidence,
+    calc_chance_agreement,
+    calc_cohens_kappa,
 )
 from .agents import (
     calc_kv_cache_bytes_per_token,
@@ -233,6 +235,8 @@ __all__ = [
     "calc_cross_entropy_exponential_proposal",
     "calc_conjunctive_confidence",
     "calc_multilegged_confidence",
+    "calc_chance_agreement",
+    "calc_cohens_kappa",
     "calc_two_proportion_sample_size",
     "calc_kv_cache_bytes_per_token",
     "calc_unchecked_success",

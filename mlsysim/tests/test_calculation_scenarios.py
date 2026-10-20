@@ -1176,3 +1176,72 @@ def test_drive_bus_campaign_and_throttle():
     t = Scenarios.ThrottledNavigationBackbone.result
     assert t.added_age.to("ms").magnitude == approx(11)
     assert t.added_travel.to("mm").magnitude == approx(16.5)
+
+
+# --- Data engineering: keyword-spotter data, labels, agreement, ingest (added 2026-10-20) ---
+
+def test_keyword_spotter_false_wake_budget_and_evidence():
+    f = Scenarios.KeywordSpotterFalseWakes
+    assert f.windows == approx(2_592_000)
+    assert f.target_false_positive_rate == approx(3.858e-7)
+    assert [f.false_alarms(r) for r in f.rejection_levels] == [approx(2592), approx(259.2), approx(25.92)]
+    assert f.listening_time.to("hour").magnitude == approx(720)
+    assert f.false_alarms_at_rate(0.1 / f.listening_time.units) == approx(72)
+    e = Scenarios.KeywordSpotterFalseWakeEvidence
+    assert e.events_bound == approx(2.99573)
+    assert e.exposure_needed.to("hour").magnitude == approx(2156.93)
+    assert e.recording_size.to("GB").magnitude == approx(248.478)
+
+
+def test_keyword_spotter_data_budget_and_design_space():
+    b = Scenarios.KeywordSpotterDataBudget
+    assert b.labels == approx(750_000)
+    assert b.allocation("storage and processing").to("USD").magnitude == approx(37_500)
+    assert b.effective_label_cost.to("USD").magnitude == approx(0.12)
+    assert Scenarios.KeywordSpotterMfccChoice.ratio == approx(3.0769)
+    assert Scenarios.KeywordSpotterExampleCountChoice.ratio == approx(10)
+    t = Scenarios.KeywordSpotterTargets
+    assert t.model_memory.to("KB").magnitude == approx(256)
+    assert t.preprocessing_memory.to("KB").magnitude == approx(16)
+
+
+def test_labeling_cost_granularity_and_effort():
+    r = Scenarios.ImageNetLabelingVersusResNetRun
+    assert r.train_time.to("hour").magnitude == approx(1.25114)
+    assert r.train_cost_low.to("USD").magnitude == approx(20.0182)
+    assert r.ratio_low == approx(2497.72)
+    assert r.ratio_high == approx(4995.45)
+    g = Scenarios.FullHdMaskVersusBoxes
+    assert g.mask_entries == 2_073_600
+    assert g.mask_to_box_ratio == approx(51_840)
+    assert Scenarios.CityscapesMasksForMillionFrames.person_years == approx(750)
+    h = Scenarios.MswcByHand
+    assert h.total_time.to("hour").magnitude == approx(65_000)
+    assert h.person_years == approx(32.5)
+
+
+def test_annotator_agreement_and_active_learning():
+    a = Scenarios.BinaryLabelChanceAgreement
+    assert a.chance_agreement == approx(0.82)
+    assert a.kappa == approx(0.16667)
+    assert Scenarios.WakeWordLabelQualityDrift.drop == approx(0.13)
+    p = Scenarios.ActiveLearningTenMillionPool
+    assert p.full_pool_scoring_cost.to("USD").magnitude == approx(100_000)
+    assert p.candidate_pool == approx(500_000)
+    assert p.affordable_labels == approx(90_000)
+    assert p.active_total_low.to("USD").magnitude == approx(150_000)
+
+
+def test_speech_commands_split_ingest_cost_and_corpus_growth():
+    s = Scenarios.SpeechCommandsHashSplit
+    assert s.train_percent == approx(80)
+    assert s.released_total == approx(99_720)
+    assert s.released_test_share == approx(0.049037)
+    i = Scenarios.MillionEventBatchVersusStreaming
+    assert i.throughput.to("GB/s").magnitude == approx(1)
+    assert i.cost_ratio == approx(3)
+    assert i.stream_per_core.to("MB/s").magnitude == approx(20)
+    assert i.batch_per_core.to("MB/s").magnitude == approx(30)
+    c = Scenarios.PretrainingCorpusGrowth
+    assert c.growth == approx(2.8954)
+    assert c.crossing(3e14) == approx(2027.65, rel=1e-4)

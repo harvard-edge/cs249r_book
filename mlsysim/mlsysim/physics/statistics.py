@@ -282,3 +282,23 @@ def fit_exponential_growth(xs, ys, period=1.0):
     slope = (sum((x - mx) * (l - my) for x, l in zip(xs, ls))
              / sum((x - mx) ** 2 for x in xs))
     return 10 ** (slope * period), slope, my - slope * mx
+
+
+# --- Inter-annotator agreement (added 2026-10-20) ----------------------------
+def calc_chance_agreement(class_shares):
+    """Agreement two independent annotators reach by chance: ``sum_k s_k ** 2``.
+
+    ``class_shares`` is each annotator's label mix (fractions summing to 1);
+    both annotators are assumed to share it.
+    """
+    shares = list(class_shares)
+    if not shares or abs(sum(shares) - 1.0) > 1e-9:
+        raise ValueError("class_shares must be fractions that sum to 1.")
+    return sum(s * s for s in shares)
+
+
+def calc_cohens_kappa(observed_agreement, chance_agreement):
+    """Cohen's kappa: agreement beyond chance, ``(p_o - p_e) / (1 - p_e)`` (Cohen 1960)."""
+    if not 0.0 <= chance_agreement < 1.0:
+        raise ValueError("chance_agreement must be in [0, 1).")
+    return (observed_agreement - chance_agreement) / (1.0 - chance_agreement)

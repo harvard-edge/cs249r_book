@@ -42,6 +42,8 @@ GamePlaying = _load("game_playing", "GamePlaying", "Cited results of landmark ga
 # Deployment-tier field figures (added 2026-10-20)
 DeviceMeasurements = _load("device_measurements", "DeviceMeasurements", "Cited measurements of deployed ML hardware (TPU v1 roofline, memory-wall growth, phone stress test, two-pass wake word).")
 # Spaceflight anomaly inquiries (added 2026-10-20)
+WakeWordBenchmarks = _load("wake_word_benchmarks", "WakeWordBenchmarks", "Published wake-word detector benchmark results (Picovoice wake-word benchmark).")  # added 2026-10-20
+AnnotationTimes = _load("annotation_times", "AnnotationTimes", "Measured human annotation times (ImageNet boxes, Cityscapes masks).")  # added 2026-10-20
 SpaceflightAnomalies = _load("spaceflight_anomalies", "SpaceflightAnomalies", "Cited results of spaceflight anomaly inquiries (ESA Schiaparelli 2017).")
 
 
@@ -315,6 +317,8 @@ class Literature(Registry):
     GamePlaying = GamePlaying  # added 2026-10-20
     DeviceMeasurements = DeviceMeasurements  # added 2026-10-20
     SpaceflightAnomalies = SpaceflightAnomalies  # added 2026-10-20
+    WakeWordBenchmarks = WakeWordBenchmarks  # added 2026-10-20
+    AnnotationTimes = AnnotationTimes  # added 2026-10-20
     ComputeTrend = ComputeTrend
     AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks
