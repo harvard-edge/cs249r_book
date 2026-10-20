@@ -69,6 +69,9 @@ from .transformer import (
     calc_transformer_training_flops,
     calc_transformer_decode_flops,
     calc_transformer_prefill_flops,
+    calc_transformer_block_weights,
+    calc_attention_score_macs,
+    calc_attention_crossover,
     calc_vla_inference_latency,
 )
 from .serving import calc_queue_latency_mmc, calc_mg1_wait_ratio
@@ -240,6 +243,9 @@ __all__ = [
     "calc_transformer_training_flops",
     "calc_transformer_decode_flops",
     "calc_transformer_prefill_flops",
+    "calc_transformer_block_weights",
+    "calc_attention_score_macs",
+    "calc_attention_crossover",
     "calc_vla_inference_latency",
     "calc_queue_latency_mmc",
     "calc_mg1_wait_ratio",

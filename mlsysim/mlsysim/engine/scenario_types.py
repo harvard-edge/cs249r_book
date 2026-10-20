@@ -9401,3 +9401,405 @@ class PlatformBenefitScenario(BaseScenario):
     @property
     def benefit_cost_ratio(self) -> float:
         return (self.gross_benefit / self.platform_cost).to("").magnitude
+
+
+# --- Network architectures: attention, transformer blocks, KV caches, and recommenders (added 2026-10-20) ---
+
+
+def _labeled_capacity(hardware: HardwareNode) -> Quantity:
+    """The capacity a vendor label prints: binary gigabytes read as "GB" (an
+    "80 GB" A100 holds 80 GiB). Shares of a labeled device divide decimal bytes
+    by this figure, as the chapters do."""
+    return Q_(hardware.memory.capacity.to("GiB").magnitude, "GB")
+
+
+class ToyAttentionHeadScenario(BaseScenario):
+    """One attention head computed by hand: one row of ``queries``, ``keys``, and ``values`` per token."""
+    queries: List[List[float]]
+    keys: List[List[float]]
+    values: List[List[float]]
+
+    @property
+    def tokens(self) -> int:
+        return len(self.queries)
+
+    @property
+    def width(self) -> int:
+        return len(self.queries[0])
+
+    @property
+    def scores(self) -> List[List[float]]:
+        """q_i . k_j / sqrt(d) for every pair."""
+        s = _math.sqrt(self.width)
+        return [[sum(a * b for a, b in zip(q, k)) / s for k in self.keys] for q in self.queries]
+
+    @property
+    def weights(self) -> List[List[float]]:
+        """Softmax of each score row."""
+        out = []
+        for row in self.scores:
+            e = [_math.exp(x) for x in row]
+            out.append([x / sum(e) for x in e])
+        return out
+
+    @property
+    def outputs(self) -> List[List[float]]:
+        """Each token's weighted mix of the value rows."""
+        return [[sum(w * v[c] for w, v in zip(row, self.values)) for c in range(len(self.values[0]))]
+                for row in self.weights]
+
+    @property
+    def macs_per_product(self) -> int:
+        """Multiply-adds of one of the two products (scores, or the mix): S^2 d."""
+        return self.tokens ** 2 * self.width
+
+
+class PackedQkvProjectionScenario(BaseScenario):
+    """``tokens`` rows through ``workload``'s packed query-key-value projection, one d x 3d matrix."""
+    workload: Workload
+    tokens: int
+    projections: int = 3             # query, key, value
+
+    @property
+    def width(self) -> int:
+        return self.workload.hidden_dim
+
+    @property
+    def packed_width(self) -> int:
+        return self.projections * self.width
+
+    @property
+    def macs(self) -> int:
+        return self.tokens * self.width * self.packed_width
+
+
+class TransformerBlockScenario(BaseScenario):
+    """``workload``'s decoder blocks at a context of ``context_tokens``: the classic block's weights
+    (4 d^2 attention projections, 2 x ``ffn_multiple`` d^2 MLP), its dense and attention multiply-adds,
+    and, with ``hardware``, the attention arithmetic of one prompt at peak."""
+    workload: Workload
+    context_tokens: int
+    ffn_multiple: int = 4            # feed-forward width over model width
+    attention_projections: int = 4   # query, key, value, output
+    hardware: Optional[HardwareNode] = None
+
+    def _w(self):
+        from ..physics.transformer import calc_transformer_block_weights
+        return calc_transformer_block_weights(self.width, self.ffn_multiple, self.attention_projections)
+
+    @property
+    def width(self) -> int:
+        return self.workload.hidden_dim
+
+    @property
+    def attention_weights_per_block(self) -> int:
+        return self._w()[0]
+
+    @property
+    def mlp_weights_per_block(self) -> int:
+        return self._w()[1]
+
+    @property
+    def weights_per_block(self) -> int:
+        return self._w()[2]
+
+    @property
+    def block_coefficient(self) -> int:
+        """Weights per block in units of d^2 (12 for the classic block)."""
+        return self.weights_per_block // self.width ** 2
+
+    @property
+    def mlp_share(self) -> float:
+        return self.mlp_weights_per_block / self.weights_per_block
+
+    @property
+    def block_weights(self) -> int:
+        """All blocks' weights."""
+        return self.weights_per_block * self.workload.layers
+
+    @property
+    def attention_weights(self) -> int:
+        return self.attention_weights_per_block * self.workload.layers
+
+    @property
+    def mlp_weights(self) -> int:
+        return self.mlp_weights_per_block * self.workload.layers
+
+    @property
+    def token_table(self) -> int:
+        """Token-embedding weights: one row of width d per vocabulary entry."""
+        return self.workload.vocab_size * self.width
+
+    @property
+    def block_rule_parameters(self) -> int:
+        return self.block_weights + self.token_table
+
+    @property
+    def exact_parameters(self) -> int:
+        """GPT-2 layout counted in full: projection and MLP biases, two LayerNorms per block,
+        the final LayerNorm, and a position table of ``context_length`` rows (nanoGPT, bias=True)."""
+        d, f = self.width, self.ffn_multiple
+        per_block = (d * 3 * d + 3 * d) + (d * d + d) + (d * f * d + f * d) + (f * d * d + d) + 2 * (2 * d)
+        return (self.workload.layers * per_block + self.workload.vocab_size * d
+                + self.workload.context_length * d + 2 * d)
+
+    @property
+    def flops_per_token(self) -> Quantity:
+        """Two FLOPs (a multiply and an add) per block weight per token."""
+        return Q_(2 * self.block_weights, "flop")
+
+    @property
+    def output_layer_flops(self) -> Quantity:
+        """The output projection onto the vocabulary, per token."""
+        return Q_(2 * self.token_table, "flop")
+
+    @property
+    def dense_macs(self) -> int:
+        """One block's projection and MLP multiply-adds over the context."""
+        return self.weights_per_block * self.context_tokens
+
+    @property
+    def attention_macs(self) -> int:
+        """One block's two attention products over the context."""
+        from ..physics.transformer import calc_attention_score_macs
+        return calc_attention_score_macs(self.context_tokens, self.width)
+
+    @property
+    def block_macs(self) -> int:
+        return self.dense_macs + self.attention_macs
+
+    @property
+    def attention_share(self) -> float:
+        return self.attention_macs / self.block_macs
+
+    @property
+    def dense_to_attention(self) -> float:
+        return self.dense_macs / self.attention_macs
+
+    @property
+    def attention_to_dense(self) -> float:
+        return self.attention_macs / self.dense_macs
+
+    @property
+    def crossover(self) -> float:
+        """Context length at which the attention products equal the dense products (6 d)."""
+        from ..physics.transformer import calc_attention_crossover
+        return calc_attention_crossover(self.width, self.ffn_multiple, self.attention_projections)
+
+    @property
+    def crossover_multiple(self) -> float:
+        """The crossover in units of the width (six for the classic block)."""
+        return self.crossover / self.width
+
+    @property
+    def prompt_dense_flops(self) -> Quantity:
+        return (self.flops_per_token * self.context_tokens).to("flop")
+
+    @property
+    def prompt_attention_flops(self) -> Quantity:
+        """Every block's attention products over the prompt, two FLOPs per multiply-add."""
+        return Q_(2 * self.attention_macs * self.workload.layers, "flop")
+
+    @property
+    def prompt_flops(self) -> Quantity:
+        return self.prompt_dense_flops + self.prompt_attention_flops
+
+    @property
+    def attention_time_at_peak(self) -> Quantity:
+        return (self.prompt_attention_flops / self.hardware.compute.peak_flops).to("minute")
+
+
+class MaterializedScoresScenario(BaseScenario):
+    """Attention scores stored in full: ``seq_len``^2 per head, ``heads`` per layer, ``layers`` layers."""
+    seq_len: int
+    heads: int
+    layers: int
+    bytes_per_score: Quantity
+    hardware: Optional[HardwareNode] = None
+
+    @property
+    def scores_per_layer(self) -> int:
+        return self.seq_len ** 2 * self.heads
+
+    @property
+    def layer_bytes(self) -> Quantity:
+        return (self.scores_per_layer * self.bytes_per_score).to("GB")
+
+    @property
+    def total_bytes(self) -> Quantity:
+        return (self.layer_bytes * self.layers).to("GB")
+
+    @property
+    def layer_device_multiple(self) -> float:
+        """One layer's scores in units of ``hardware``'s labeled capacity."""
+        return (self.layer_bytes / _labeled_capacity(self.hardware)).to("").magnitude
+
+
+class ContextGrowthScenario(BaseScenario):
+    """A context window grown from ``base_tokens`` to ``tokens``: a kept cache grows with the ratio,
+    attention's score work and stored scores with its square."""
+    base_tokens: int
+    tokens: int
+
+    @property
+    def ratio(self) -> float:
+        return self.tokens / self.base_tokens
+
+    @property
+    def score_ratio(self) -> float:
+        return self.ratio ** 2
+
+
+class KvFootprintScenario(BaseScenario):
+    """``workload``'s KV cache for ``tokens`` kept tokens; with ``hardware`` and ``kv_share``, how many
+    such requests the cache's share of the labeled device memory holds. ``kv_width_factor`` scales the
+    key-value width (one half: half the key-value heads)."""
+    workload: Workload
+    tokens: int
+    bytes_per_value: Quantity
+    hardware: Optional[HardwareNode] = None
+    kv_share: Optional[float] = None
+    kv_width_factor: float = 1.0
+
+    @property
+    def per_token(self) -> Quantity:
+        return (self.workload.get_kv_cache_size(1, 1, self.bytes_per_value) * self.kv_width_factor).to("byte")
+
+    @property
+    def total(self) -> Quantity:
+        return (self.per_token * self.tokens).to("GB")
+
+    @property
+    def weights(self) -> Quantity:
+        return self.workload.size_in_bytes(self.bytes_per_value).to("GB")
+
+    @property
+    def kv_budget(self) -> Quantity:
+        return (_labeled_capacity(self.hardware) * self.kv_share).to("GB")
+
+    @property
+    def tokens_in_budget(self) -> float:
+        return (self.kv_budget / self.per_token).to("").magnitude
+
+    @property
+    def requests(self) -> float:
+        return (self.kv_budget / self.total).to("").magnitude
+
+
+class ContextMemoryCrossingScenario(BaseScenario):
+    """Three memories of ``workload`` as context grows on ``hardware``: fixed weights, a KV cache linear
+    in tokens, and one layer's stored scores (all heads) quadratic in tokens."""
+    workload: Workload
+    hardware: HardwareNode
+    bytes_per_value: Quantity
+
+    @property
+    def weights(self) -> Quantity:
+        return self.workload.size_in_bytes(self.bytes_per_value).to("GB")
+
+    @property
+    def kv_per_token(self) -> Quantity:
+        return self.workload.get_kv_cache_size(1, 1, self.bytes_per_value).to("byte")
+
+    @property
+    def score_bytes_per_pair(self) -> Quantity:
+        """One layer's stored scores for one token pair, all heads."""
+        return (self.workload.heads * self.bytes_per_value).to("byte")
+
+    @property
+    def kv_crossing(self) -> float:
+        """Tokens at which the KV cache equals the weights."""
+        return (self.weights / self.kv_per_token).to("").magnitude
+
+    @property
+    def score_crossing(self) -> float:
+        """Tokens at which one layer's stored scores fill the device."""
+        return _math.sqrt((self.hardware.memory.capacity / self.score_bytes_per_pair).to("").magnitude)
+
+    @property
+    def kv_score_crossing(self) -> float:
+        """Tokens at which the KV cache and one layer's scores are equal."""
+        return (self.kv_per_token / self.score_bytes_per_pair).to("").magnitude
+
+
+class EmbeddingTableScenario(BaseScenario):
+    """``tables`` embedding tables of ``rows`` rows, each ``width`` values wide, against ``hardware``."""
+    rows: int
+    width: int
+    bytes_per_value: Quantity
+    hardware: HardwareNode
+    tables: int = 1
+
+    @property
+    def row_bytes(self) -> Quantity:
+        return (self.width * self.bytes_per_value).to("byte")
+
+    @property
+    def table_bytes(self) -> Quantity:
+        return (self.rows * self.row_bytes).to("GB")
+
+    @property
+    def total_bytes(self) -> Quantity:
+        return (self.table_bytes * self.tables).to("GB")
+
+    @property
+    def labeled_share(self) -> float:
+        """All tables over the device's labeled capacity."""
+        return (self.total_bytes / _labeled_capacity(self.hardware)).to("").magnitude
+
+    @property
+    def fits(self) -> bool:
+        return self.labeled_share <= 1
+
+
+class EmbeddingGatherScenario(BaseScenario):
+    """One recommender request on ``hardware``: one row of ``width`` values per categorical feature of
+    ``dataset`` is gathered, then the rows and the bottom MLP's output interact by pairwise dot products."""
+    dataset: DatasetProfile
+    width: int
+    bytes_per_value: Quantity
+    hardware: HardwareNode
+
+    @property
+    def features(self) -> int:
+        return self.dataset.categorical_features
+
+    @property
+    def row_bytes(self) -> Quantity:
+        return (self.width * self.bytes_per_value).to("byte")
+
+    @property
+    def request_bytes(self) -> Quantity:
+        return (self.features * self.row_bytes).to("byte")
+
+    @property
+    def vectors(self) -> int:
+        """The gathered rows and the bottom MLP's output."""
+        return self.features + 1
+
+    @property
+    def pairs(self) -> int:
+        return self.vectors * (self.vectors - 1) // 2
+
+    @property
+    def interaction_macs(self) -> int:
+        return self.pairs * self.width
+
+    @property
+    def intensity(self) -> Quantity:
+        """Interaction FLOPs (two per multiply-add) per gathered byte."""
+        return (Q_(2 * self.interaction_macs, "flop") / self.request_bytes).to("flop/byte")
+
+    @property
+    def device_rate(self) -> Quantity:
+        """Requests a second if every row streamed at device-memory bandwidth (an upper bound)."""
+        return (self.hardware.memory.bandwidth / self.request_bytes).to("1/s")
+
+    @property
+    def host_rate(self) -> Quantity:
+        """Requests a second if every row crossed the host link (an upper bound)."""
+        return (self.hardware.interconnect.bandwidth / self.request_bytes).to("1/s")
+
+    @property
+    def bandwidth_ratio(self) -> float:
+        return (self.device_rate / self.host_rate).to("").magnitude
