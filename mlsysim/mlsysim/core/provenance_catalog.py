@@ -3838,3 +3838,16 @@ EEOC_UNIFORM_GUIDELINES_1978 = _report(
            "with the highest rate is generally regarded as evidence of adverse impact (a U.S. "
            "employment screen, not a lending standard)."),
 )
+
+THINKING_MACHINES_2025_NONDETERMINISM = _report(
+    "prov:thinking-machines-2025-nondeterminism",
+    "Horace He and Thinking Machines Lab, Defeating Nondeterminism in LLM Inference, "
+    "Thinking Machines Lab: Connectionism, 10 September 2025",
+    "https://thinkingmachines.ai/blog/defeating-nondeterminism-in-llm-inference/",
+    notes=(
+        "Qwen/Qwen3-235B-A22B-Instruct-2507, 1,000 completions at temperature 0 of 'Tell me about "
+        "Richard Feynman', 1,000 tokens each: 80 unique completions, the most common 78 times; "
+        "identical for the first 102 tokens; 992 continue 'Queens, New York' and 8 'New York City'. "
+        "With batch-invariant kernels all 1,000 are identical. Read 2026-10-20."
+    ),
+)

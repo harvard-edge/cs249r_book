@@ -256,6 +256,9 @@ class CheckpointIntervalScenario(BaseScenario):
     bytes_per_param: Optional[Quantity] = None
     write_bandwidth: Optional[Quantity] = None
     write_time: Optional[Quantity] = None
+    # Optional (added 2026-10-20): factors by which a chosen interval misses the
+    # optimum, priced by ``miss_penalty``.
+    miss_factors: Optional[List[float]] = None
 
     @property
     def checkpoint_bytes(self) -> Quantity:
@@ -277,6 +280,12 @@ class CheckpointIntervalScenario(BaseScenario):
         """Share of wall time lost when saving every ``interval`` instead."""
         from ..physics.reliability import calc_checkpoint_waste
         return calc_checkpoint_waste(self.t_write, interval, self.mtbf)
+
+    def miss_penalty(self, factor: float) -> float:
+        """Extra waste, relative to the optimum, of an interval ``factor`` times the optimum
+        (added 2026-10-20); equals ``(x + 1/x) / 2 - 1``, so the minimum is flat."""
+        r = self.result
+        return self.waste_at(factor * r.interval) / r.waste - 1
 
 
 class RecoveryBudgetScenario(BaseScenario):
@@ -12334,3 +12343,70 @@ class DpTrainingPlanScenario(BaseScenario):
     @property
     def cost_strong(self) -> Quantity:
         return (self.base_cost * self.cost_multiplier).to("USD")
+# --- Durable execution (added 2026-10-20) ----------------------------------------
+# What a runtime pays to survive a crash: one group commit, full snapshots
+# against deltas, checkpoint strides on a fixed crash trace, and the cost of
+# keeping recovery and replay data. Solvers in engine/solvers/durability.py.
+
+class GroupCommitScenario(BaseScenario):
+    """``batch_size`` intents gathered for up to ``batch_timer`` and acknowledged by one ``flush_time``."""
+    batch_timer: Quantity
+    flush_time: Quantity
+    batch_size: int
+
+    @property
+    def result(self):
+        from .solvers import GroupCommitModel
+        return GroupCommitModel().solve(self.batch_timer, self.flush_time, self.batch_size)
+
+
+class SnapshotVolumeScenario(BaseScenario):
+    """A trajectory of ``turns`` turns growing ``state_growth`` per turn, checkpointed every ``stride``."""
+    turns: int
+    stride: int
+    state_growth: Quantity
+
+    @property
+    def result(self):
+        from .solvers import SnapshotVolumeModel
+        return SnapshotVolumeModel().solve(self.turns, self.stride, self.state_growth)
+
+
+class CheckpointTraceScenario(BaseScenario):
+    """Checkpoint ``strides`` priced on ``turns`` turns that crash after the turns in ``crashes``."""
+    turns: int
+    crashes: List[int]
+    strides: List[int]
+    pause: Quantity                 # per checkpoint, including durable publication
+    restore: Quantity               # per crash
+    rebuild_per_turn: Quantity      # read, validate, and fold one logged turn
+    reexecute_per_turn: Quantity    # re-run one unlogged turn's model call and tools
+
+    @property
+    def result(self):
+        from .solvers import CheckpointTraceModel
+        return CheckpointTraceModel().solve(self.turns, self.crashes, self.strides, self.pause,
+                                            self.restore, self.rebuild_per_turn,
+                                            self.reexecute_per_turn)
+
+    def stride_overhead(self, stride: float, lost_turn_cost: Quantity) -> Quantity:
+        """Expected overhead per turn at ``stride`` on this trace's crash rate (seconds)."""
+        from ..physics.reliability import calc_stride_overhead
+        return calc_stride_overhead(self.pause, stride, len(self.crashes) / self.turns, lost_turn_cost)
+
+
+class RetentionCostScenario(BaseScenario):
+    """One trajectory's log (``turns`` x envelope and payload) and workspace snapshot kept for ``period``."""
+    turns: int
+    envelope: Quantity              # event envelopes per turn
+    payload: Quantity               # delivered inputs and result bodies per turn
+    workspace: Quantity             # one immutable workspace snapshot
+    rate: Quantity                  # object storage, USD per byte-time
+    period: Quantity
+    attempt_cost: Quantity          # USD of one attempt
+
+    @property
+    def result(self):
+        from .solvers import RetentionCostModel
+        return RetentionCostModel().solve(self.turns, self.envelope, self.payload, self.workspace,
+                                          self.rate, self.period, self.attempt_cost)

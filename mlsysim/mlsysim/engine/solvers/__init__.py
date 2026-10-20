@@ -435,3 +435,8 @@ __all__ += [
     "VisibilityRangeModel",
     "ThermalExpansionModel",
 ]
+
+# --- Durable execution (added 2026-10-20) ---
+from .durability import GroupCommitModel, SnapshotVolumeModel, CheckpointTraceModel, RetentionCostModel
+
+__all__ += ["GroupCommitModel", "SnapshotVolumeModel", "CheckpointTraceModel", "RetentionCostModel"]

@@ -85,6 +85,7 @@ ContextWindows = _load("context_windows", "ContextWindows", "Announced context w
 RecommendationSystems = _load("recommendation_systems", "RecommendationSystems", "Cited figures of production recommendation systems (Gupta et al. 2020; Mudigere et al. 2022).")  # added 2026-10-20
 ServingMemoryLayout = _load("serving_memory_layout", "ServingMemoryLayout", "Memory layout of a 13B model served on one A100 40 GB (Kwon et al. 2023, Figure 1).")  # added 2026-10-20
 RobustnessStudies = _load("robustness_studies", "RobustnessStudies", "Cited results of robustness studies (Eykholt 2018 stickers, Goodfellow 2015 FGSM, Guo 2017 calibration, Zou 2023 GCG, Gu 2017 BadNets).")  # added 2026-10-20
+InferenceDeterminism = _load("inference_determinism", "InferenceDeterminism", "Cited results on run-to-run nondeterminism of LLM inference (He and Thinking Machines Lab 2025).")  # added 2026-10-20
 
 
 # ---------------------------------------------------------------------------
@@ -351,6 +352,7 @@ class Literature(Registry):
     StorageSystems = StorageSystems
     IncidentReports = IncidentReports
     ServingIncidents = ServingIncidents
+    InferenceDeterminism = InferenceDeterminism  # added 2026-10-20
     SelfCorrection = SelfCorrection
     LlmInferenceTraceCode2023 = _series.LlmInferenceTraceCode2023
     LlmInferenceTraceConversation2023 = _series.LlmInferenceTraceConversation2023  # added 2026-10-20

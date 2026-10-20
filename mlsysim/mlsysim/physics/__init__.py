@@ -678,3 +678,18 @@ __all__ += [
     "calc_arcsine_two_arm_sample_size",
     "calc_poisson_exact_interval",
 ]
+
+# --- Durable execution (added 2026-10-20) ---
+from .reliability import (
+    calc_group_commit_waits,
+    calc_snapshot_write_volume,
+    calc_checkpoint_stride,
+    calc_stride_overhead,
+)
+
+__all__ += [
+    "calc_group_commit_waits",
+    "calc_snapshot_write_volume",
+    "calc_checkpoint_stride",
+    "calc_stride_overhead",
+]
