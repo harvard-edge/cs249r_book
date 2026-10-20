@@ -69,3 +69,65 @@ def calc_kv_cache_bytes_per_token(
     total = 2 * layers * kv_heads * d_head * bpe
     return total.to(ureg.byte) if hasattr(total, "to") else total * ureg.byte
 
+
+
+# --- Model calls and agent trajectories (added 2026-10-20) -------------------
+# Equations behind one model call (admission, sampling, a fallible check) and
+# behind a trajectory of calls (horizon compounding, cost per accepted task,
+# resent history). Pure arithmetic on stated inputs; the solvers in
+# engine/solvers/model_call.py compose them.
+
+import math as _math
+
+
+def calc_horizon_success(step_success: float, horizon: int) -> float:
+    """Success of ``horizon`` independent, unchecked steps: ``(1 - eps)^H``."""
+    return step_success ** horizon
+
+
+def calc_cost_per_accepted(attempt_cost, acceptance: float):
+    """Expected cost per accepted task with retry until acceptance: ``E[C] / p_acc``."""
+    return attempt_cost / acceptance
+
+
+def calc_tempered_softmax(logits, temperature: float = 1.0) -> list:
+    """Softmax of ``logits / T``: the sampling distribution at temperature ``T``."""
+    exps = [_math.exp(z / temperature) for z in logits]
+    total = sum(exps)
+    return [e / total for e in exps]
+
+
+def calc_nucleus(probabilities, top_p: float):
+    """Top-p truncation: the shortest highest-probability prefix whose mass reaches ``top_p``.
+
+    Returns ``(kept, mass, renormalized)``: how many tokens stay, their total
+    probability, and their probabilities rescaled to sum to one.
+    """
+    ordered = sorted(probabilities, reverse=True)
+    mass, kept = 0.0, 0
+    for p in ordered:
+        mass += p
+        kept += 1
+        if mass >= top_p:
+            break
+    return kept, mass, [p / mass for p in ordered[:kept]]
+
+
+def calc_pass_posterior(defect_rate: float, false_accept_rate: float, valid_accept_rate: float) -> float:
+    """Bayes' rule: share of passing candidates that are defective, ``P(Def | PASS)``."""
+    defective_pass = false_accept_rate * defect_rate
+    return defective_pass / (defective_pass + valid_accept_rate * (1 - defect_rate))
+
+
+def calc_resent_prompt_tokens(turns: int, first_prompt: int, appended: int) -> int:
+    """Input tokens sent over ``turns`` calls that resend the whole history.
+
+    Turn ``t`` sends the first prompt plus ``t - 1`` appended blocks, so the
+    total is ``H * S0 + D * H (H - 1) / 2``: quadratic in the horizon.
+    """
+    return turns * first_prompt + appended * turns * (turns - 1) // 2
+
+
+def calc_reused_prefix_prompt_tokens(turns: int, first_prompt: int, appended: int) -> int:
+    """Fresh prefill over ``turns`` calls when each earlier prompt prefix is reused: ``S0 + (H - 1) D``."""
+    return first_prompt + (turns - 1) * appended

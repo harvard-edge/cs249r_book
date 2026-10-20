@@ -31,6 +31,9 @@ FleetOperations = _load("fleet_operations", "FleetOperations", "Measured fleet-o
 DatacenterElectricity = _load("datacenter_electricity", "DatacenterElectricity", "Datacenter electricity consumption and projections (LBNL, IEA).")
 AcceleratorLifecycle = _load("accelerator_lifecycle", "AcceleratorLifecycle", "Accelerator life-cycle emission trends (Schneider et al. 2025).")
 StorageSystems = _load("storage_systems", "StorageSystems", "Measured production storage-system results (3FS read stress test).")
+# Model calls and agent trajectories (added 2026-10-20)
+ServingIncidents = _load("serving_incidents", "ServingIncidents", "Reported production serving-incident figures (Anthropic 2025 postmortem).")
+SelfCorrection = _load("self_correction", "SelfCorrection", "Intrinsic self-correction results (Huang et al. 2024, GPT-4).")
 
 
 # ---------------------------------------------------------------------------
@@ -295,6 +298,9 @@ class Literature(Registry):
     DatacenterElectricity = DatacenterElectricity
     AcceleratorLifecycle = AcceleratorLifecycle
     StorageSystems = StorageSystems
+    ServingIncidents = ServingIncidents
+    SelfCorrection = SelfCorrection
+    LlmInferenceTraceCode2023 = _series.LlmInferenceTraceCode2023
     ComputeTrend = ComputeTrend
     AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks

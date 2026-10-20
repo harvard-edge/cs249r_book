@@ -82,6 +82,13 @@ __all__ = [
     "UtilizationLossResult",
     "SyntheticFootprintResult",
     "StorageBenchmarkResult",
+    # Model calls and agent trajectories (added 2026-10-20)
+    "ContextAdmissionResult",
+    "SamplingResult",
+    "CheckerPosteriorResult",
+    "ModelCallResult",
+    "TrajectoryResendResult",
+    "TokenMixResult",
 ]
 
 
@@ -871,3 +878,76 @@ class StorageBenchmarkResult(SolverResult):
     result_count: int
     medians: Dict[str, Dict[str, float]]   # workload -> accelerator -> GB/s per accelerator
     generation_ratios: Dict[str, float]    # workload -> newer / older accelerator
+
+
+# ── Model calls and agent trajectories (added 2026-10-20) ─────────
+
+class ContextAdmissionResult(SolverResult):
+    """Result from ContextAdmissionModel: token-measured admission, S <= S_max - K_max."""
+    input_ceiling: int               # window - reserved output
+    headroom: int                    # input ceiling - text prompt (negative: no room)
+    total_demand: int                # text + image + reserved output
+    excess: int                      # total demand - window (positive: rejected)
+    admitted: bool
+
+
+class SamplingResult(SolverResult):
+    """Result from SamplingModel: one logit vector at two temperatures, then top-p."""
+    partition_sum: float             # sum of exp(z / T) at the base temperature
+    base_probabilities: List[float]
+    sharp_probabilities: List[float]
+    base_tail: float                 # 1 - p(top token) at the base temperature
+    sharp_tail: float
+    tail_ratio: float                # base tail / sharp tail
+    nucleus_size: int
+    nucleus_mass: float
+    nucleus_probabilities: List[float]
+
+
+class CheckerPosteriorResult(SolverResult):
+    """Result from CheckerPosteriorModel: defects among candidates a fallible check passes."""
+    defective_pass: float            # joint P(Def and PASS)
+    pass_share: float                # P(PASS)
+    posterior: float                 # P(Def | PASS)
+    catch_rate: float                # P(FAIL | Def)
+    valid_reject_rate: float         # P(FAIL | Valid)
+
+
+class ModelCallResult(SolverResult):
+    """Result from ModelCallModel: prefill and decode work of one call at stated floors."""
+    prompt_tokens: int
+    output_tokens: int
+    prefill_time: Quantity
+    decode_time: Quantity
+    total_time: Quantity
+    output_token_share: float
+    output_time_share: float
+    fresh_prefill_time: Quantity     # prefill of the tokens past a reused shared prefix
+    decode_rate: Quantity            # output tokens per second at the decode floor
+    deadline_margin: Optional[float] = None   # deadline / total time
+    acceptance: Optional[float] = None        # product of the stated stage success rates
+
+
+class TrajectoryResendResult(SolverResult):
+    """Result from TrajectoryResendModel: input a trajectory resends, with and without prefix reuse."""
+    turns: int
+    first_prompt_term: int           # H * S0
+    appended_term: int               # D * H (H - 1) / 2
+    resent_tokens: int               # their sum: input sent without reuse
+    reused_prefix_tokens: int        # fresh prefill with prefix reuse
+    reuse_reduction: float           # resent / reused
+    output_tokens: int
+    input_share: float               # resent / (resent + output)
+    prefill_time: Quantity           # resent tokens at the prefill floor
+    reused_prefill_time: Quantity
+    decode_time: Quantity
+
+
+class TokenMixResult(SolverResult):
+    """Result from TokenMixModel: prompt and output tokens of a request trace."""
+    requests: int
+    median_prompt: float
+    median_output: float
+    median_ratio: float
+    input_share: float               # prompt tokens / all tokens
+    output_time_share: float         # decode time / all time at the stated floors

@@ -36,6 +36,9 @@ from .storage import (
     StorageBenchmarkDemandModel,
 )
 from .trends import TrainingGrowthModel
+# Model calls and agent trajectories (added 2026-10-20)
+from .model_call import (CheckerPosteriorModel, ContextAdmissionModel, ModelCallModel, SamplingModel,
+                         TokenMixModel, TrajectoryResendModel)
 from .training import CheckpointModel, ScalingModel, TrainingMemoryModel, TrainingRunModel, TrainingStateModel
 
 __all__ = [
@@ -73,6 +76,12 @@ __all__ = [
     "UtilizationLossModel",
     "SyntheticFootprintModel",
     "StorageBenchmarkDemandModel",
+    "ContextAdmissionModel",
+    "SamplingModel",
+    "CheckerPosteriorModel",
+    "ModelCallModel",
+    "TrajectoryResendModel",
+    "TokenMixModel",
     "NetworkRooflineModel",
     "EfficiencyModel",
     "SensitivitySolver",

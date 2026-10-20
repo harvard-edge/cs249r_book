@@ -443,3 +443,82 @@ def test_codec_decode_cores():
     assert c.output_bandwidth("light").to("GB/s").magnitude == approx(84)
     assert c.decode_cores("light") == approx(56)
     assert c.decode_cores("dense") == approx(224)
+
+
+# --- Model calls and agent trajectories (added 2026-10-20) -------------------
+
+def test_int8_call_floors():
+    f = Scenarios.Llama3_70B_Int8DecodeH100.result
+    assert f.weight_bytes.to("GB").magnitude == approx(70.6)
+    assert f.compute_time.to("us").magnitude == approx(71.349)
+    assert f.memory_time.to("ms").magnitude == approx(21.075)
+    assert f.bound_ratio == approx(295.37)
+
+
+def test_trajectory_resend():
+    r = Scenarios.CodingAgentResend30Turns.result
+    assert r.turns == 30
+    assert r.resent_tokens == 892500
+    assert r.first_prompt_term == 240000 and r.appended_term == 652500
+    assert r.reused_prefix_tokens == 51500
+    assert r.reuse_reduction == approx(17.330)
+    assert r.output_tokens == 6000
+    assert r.input_share == approx(0.99332)
+    assert r.prefill_time.to("s").magnitude == approx(63.679)
+    assert r.reused_prefill_time.to("s").magnitude == approx(3.6745)
+    assert r.decode_time.to("s").magnitude == approx(126.45)
+    r60 = Scenarios.CodingAgentResend60Turns.result
+    assert r60.resent_tokens == 3135000 and r60.reused_prefix_tokens == 96500
+    assert Scenarios.CodingAgentResend90Turns.result.resent_tokens == 6727500
+
+
+def test_model_calls():
+    c = Scenarios.CodingAgentFirstTurnCall.result
+    assert c.prefill_time.to("s").magnitude == approx(0.57079)
+    assert c.decode_time.to("s").magnitude == approx(4.2149)
+    assert c.output_time_share == approx(0.88073)
+    assert c.output_token_share == approx(0.024390)
+    w = Scenarios.CodingAgentWholeFileEdit.result
+    assert w.total_time.to("s").magnitude == approx(39.584)
+    assert w.output_time_share == approx(0.98495)
+    e = Scenarios.CodingAgentLocalizedEdit.result
+    assert e.total_time.to("s").magnitude == approx(2.2653)
+    assert e.deadline_margin == approx(6.6216)
+    assert e.acceptance == approx(0.57)
+    s = Scenarios.SupportAgentTurnCall.result
+    assert s.prefill_time.to("s").magnitude == approx(0.58449)
+    assert s.decode_time.to("s").magnitude == approx(3.1612)
+    assert s.fresh_prefill_time.to("s").magnitude == approx(0.14612)
+    assert s.decode_rate.to("1/s").magnitude == approx(47.450)
+    k = Scenarios.CanceledStreamDecodeSavings
+    assert k.skipped_steps == 4000
+    assert k.decode_time_avoided.to("s").magnitude == approx(84.299)
+
+
+def test_admission_sampling_checker():
+    a = Scenarios.MultimodalContextAdmission.result
+    assert (a.input_ceiling, a.headroom, a.total_demand, a.excess) == (7168, 1168, 9072, 880)
+    assert not a.admitted
+    h = Scenarios.MultimodalContextAdmissionHalfReserve.result
+    assert (h.total_demand, h.excess) == (8560, 368)
+    t = Scenarios.TemperatureNucleusExample.result
+    assert t.base_probabilities[0] == approx(0.78399)
+    assert t.sharp_probabilities[0] == approx(0.95032)
+    assert t.tail_ratio == approx(4.3483)
+    assert t.nucleus_size == 2 and t.nucleus_mass == approx(0.95893)
+    assert t.nucleus_probabilities[0] == approx(0.81757)
+    p = Scenarios.PatchCheckerPosterior.result
+    assert p.posterior == approx(0.14373)
+    assert p.defective_pass == approx(0.117)
+    assert p.pass_share == approx(0.814)
+    assert Scenarios.PatchCheckerHalvedFalseAccept.result.posterior == approx(0.077432)
+
+
+def test_horizon_cost_and_trace_mix():
+    assert Scenarios.HorizonCompounding30Steps.success == approx(0.73970)
+    assert Scenarios.CodingAgentCostPerAccepted.cost_per_accepted.to("USD").magnitude == approx(5.25)
+    m = Scenarios.LlmCodeTraceTokenMix.result
+    assert m.requests == 8819
+    assert (m.median_prompt, m.median_output) == (1469, 13)
+    assert m.input_share == approx(0.98657)
+    assert m.output_time_share == approx(0.80086)

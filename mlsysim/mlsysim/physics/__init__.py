@@ -82,6 +82,13 @@ from .statistics import (
 )
 from .agents import (
     calc_kv_cache_bytes_per_token,
+    calc_horizon_success,
+    calc_cost_per_accepted,
+    calc_tempered_softmax,
+    calc_nucleus,
+    calc_pass_posterior,
+    calc_resent_prompt_tokens,
+    calc_reused_prefix_prompt_tokens,
 )
 from .drivetrain import (
     calc_traction_deceleration_limit,
@@ -219,6 +226,13 @@ __all__ = [
     "calc_multilegged_confidence",
     "calc_two_proportion_sample_size",
     "calc_kv_cache_bytes_per_token",
+    "calc_horizon_success",
+    "calc_cost_per_accepted",
+    "calc_tempered_softmax",
+    "calc_nucleus",
+    "calc_pass_posterior",
+    "calc_resent_prompt_tokens",
+    "calc_reused_prefix_prompt_tokens",
     "calc_safe_stopping_distance",
     "calc_max_permitted_velocity",
     "calc_c2_stop_suffix",
