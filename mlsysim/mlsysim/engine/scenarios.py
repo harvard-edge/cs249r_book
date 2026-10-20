@@ -196,6 +196,10 @@ class Scenario(BaseModel):
             
         return True
 
+from ..physics.layers import calc_resnet_bottleneck_macs as _resnet_macs  # added 2026-10-21
+_RESNET50_MACS = _resnet_macs()
+
+
 class Scenarios(Registry):
     """
     Executable scenario registry.
@@ -4809,10 +4813,11 @@ class Scenarios(Registry):
     )
     ResNet50ConvKernelShare = _st.KernelShareScenario(
         name="ResNet-50's 3x3 convolutions as a share of its multiply-adds",
-        description="Per 224x224 image, as the architectures chapter states the breakdown.",
+        description="Per 224x224 image, derived from the architecture of He et al. (2016), Table 1 "
+                    "(original network: stride on the first 1x1 of a downsampling block).",
         workload=_Models.Vision.ResNet50,
-        kernel_macs=Q_(1.850, "GFLOP"),   # scenario assumption: chapter's 3x3 multiply-adds (source not stated)
-        total_macs=Q_(3.858, "GFLOP"),    # scenario assumption: chapter's total multiply-adds (source not stated)
+        kernel_macs=Q_(_RESNET50_MACS["3x3"] / 1e9, "GFLOP"),   # multiply-adds, 1.850 G
+        total_macs=Q_(_RESNET50_MACS["total"] / 1e9, "GFLOP"),  # multiply-adds, 3.858 G
     )
     ResNet50ThirtyFpsStream = _st.FrameRateHeadroomScenario(
         name="ResNet-50 on a 30 frame-per-second stream on a 10 TFLOP/s GPU",

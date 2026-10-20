@@ -3038,3 +3038,12 @@ def test_llama2_70b_reference_replica_decode():
     d = Scenarios.Llama2_70B_DecodeH100
     assert d.workload.name == "Llama-2-70B"
     assert d.result.memory_time.to("ms").magnitude == approx(41.79104, rel=1e-5)
+
+
+def test_resnet50_macs_from_architecture():
+    from mlsysim.physics.layers import calc_resnet_bottleneck_macs
+    v1 = calc_resnet_bottleneck_macs()
+    assert v1["3x3"] == 1_849_688_064
+    assert v1["total"] == 3_857_973_248
+    assert calc_resnet_bottleneck_macs(stride_on_3x3=True)["total"] == approx(4.0892e9, rel=1e-4)
+    assert Scenarios.ResNet50ConvKernelShare.share == approx(0.47945, rel=1e-4)

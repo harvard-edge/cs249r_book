@@ -37,3 +37,46 @@ def calc_separable_cost_fraction(kernel: int, out_channels: int) -> float:
 def calc_gradient_product(gain: float, depth: int) -> float:
     """Product of ``depth`` per-layer gradient factors of average ``gain`` (plain stack, no skips)."""
     return gain ** depth
+
+
+def calc_resnet_bottleneck_macs(stages=((64, 3), (128, 4), (256, 6), (512, 3)), input_size: int = 224,
+                                num_classes: int = 1000, stride_on_3x3: bool = False) -> dict:
+    """
+    Multiply-adds per image of a bottleneck ResNet, by kernel size (added 2026-10-21).
+
+    The architecture of He et al. (2016), Table 1: a 7x7/2 stem, a 3x3/2 max
+    pool, then stages of bottleneck blocks (1x1 to ``width``, 3x3, 1x1 to
+    4 x ``width``), a 1x1 projection on each stage's first block, global
+    pooling, and a fully connected classifier. The default ResNet-50 stages
+    give 1.850 G of 3x3 and 3.858 G of total multiply-adds at 224x224. The
+    original network strides the first 1x1 of a downsampling block
+    (``stride_on_3x3=False``); torchvision's v1.5 strides the 3x3 (about
+    4.09 G in total).
+
+    Returns ``{"7x7", "3x3", "1x1", "fc", "total"}`` in multiply-adds.
+    """
+    def conv(h, cin, cout, k, s):
+        ho = h // s
+        return ho, ho * ho * cout * cin * k * k
+
+    macs = {"7x7": 0, "3x3": 0, "1x1": 0, "fc": 0}
+    h, m = conv(input_size, 3, 64, 7, 2)
+    macs["7x7"] += m
+    h //= 2                                     # 3x3/2 max pool
+    cin = 64
+    for i, (width, blocks) in enumerate(stages):
+        for b in range(blocks):
+            s = 2 if (b == 0 and i > 0) else 1
+            h1, m = conv(h, cin, width, 1, 1 if stride_on_3x3 else s)
+            macs["1x1"] += m
+            h2, m = conv(h1, width, width, 3, s if stride_on_3x3 else 1)
+            macs["3x3"] += m
+            _, m = conv(h2, width, 4 * width, 1, 1)
+            macs["1x1"] += m
+            if b == 0:
+                _, m = conv(h, cin, 4 * width, 1, s)
+                macs["1x1"] += m
+            h, cin = h2, 4 * width
+    macs["fc"] = cin * num_classes
+    macs["total"] = sum(macs.values())
+    return macs
