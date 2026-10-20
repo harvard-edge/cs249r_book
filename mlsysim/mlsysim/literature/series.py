@@ -221,6 +221,24 @@ SweBenchMiniSonnet4Run = _Series(
     "Per-task cost, model calls, acceptance, and command classes of one public repair-agent run.",
 )
 
+# Model calls and agent trajectories (added 2026-10-20)
+LlmInferenceTraceCode2023 = _Series(
+    "azure_llm_inference_code_2023",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Azure LLM inference trace 2023, code (Patel et al., Splitwise, ISCA 2024)",
+        url="https://github.com/Azure/AzurePublicDataset/blob/master/AzureLLMInferenceDataset2023.md",
+        verified="2026-10-18",
+        notes=(
+            "The released file AzureLLMInferenceTrace_code.csv, unmodified: one row per request "
+            "(timestamp, context tokens, generated tokens), 8,819 requests on 2023-11-16 to a "
+            "production code-completion service. Raw: raw.githubusercontent.com/Azure/"
+            "AzurePublicDataset/master/data/AzureLLMInferenceTrace_code.csv. License CC BY 4.0."
+        ),
+    ),
+    "Prompt (context) and output (generated) tokens of production code-completion requests.",
+)
+
 _MONKEYS_NOTES = (
     "Brown et al. (2024), Large Language Monkeys. Recomputed from the released "
     "per-sample correctness labels: Hugging Face ScalingIntelligence/monkey_business "

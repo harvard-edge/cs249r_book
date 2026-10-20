@@ -88,6 +88,10 @@ from .agents import (
     calc_break_even_acceptance,
     calc_independent_success,
     calc_append_only_context,
+    calc_tempered_softmax,
+    calc_nucleus,
+    calc_pass_posterior,
+    calc_reused_prefix_prompt_tokens,
 )
 from .drivetrain import (
     calc_traction_deceleration_limit,
@@ -234,6 +238,10 @@ __all__ = [
     "calc_break_even_acceptance",
     "calc_independent_success",
     "calc_append_only_context",
+    "calc_tempered_softmax",
+    "calc_nucleus",
+    "calc_pass_posterior",
+    "calc_reused_prefix_prompt_tokens",
     "calc_safe_stopping_distance",
     "calc_max_permitted_velocity",
     "calc_c2_stop_suffix",

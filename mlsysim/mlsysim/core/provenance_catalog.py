@@ -2531,3 +2531,24 @@ METR_TIME_HORIZON_V1_1 = _lit(
         "fit on frontier models with p50 at or below 16 h."
     ),
 )
+
+# --- Model calls and agent trajectories (added 2026-10-20) -------------------
+ANTHROPIC_2025_SERVING_POSTMORTEM = _report(
+    "prov:anthropic-2025-serving-postmortem",
+    "Anthropic, A postmortem of three recent issues, September 2025",
+    "https://www.anthropic.com/engineering/a-postmortem-of-three-recent-issues",
+    notes=(
+        "Routing bug: 0.8 percent of one model's requests misrouted at first, 16 percent at the worst "
+        "hour (August 31); approximately 30 percent of the coding tool's active users had at "
+        "least one message misrouted. Approximate top-k reproduction: an array of 12,000 zeros "
+        "with a single one; the approximate result missed the maximum for every index from 10,240 on."
+    ),
+)
+HUANG_2024_SELF_CORRECTION = _lit(
+    "prov:huang-2024-self-correction",
+    "Huang et al. (2024), Large Language Models Cannot Self-Correct Reasoning Yet, ICLR 2024, "
+    "Table 2 (oracle labels) and Table 3 (intrinsic self-correction), GPT-4 rows",
+    url="https://arxiv.org/abs/2310.01798",
+    verified="2026-10-18",
+    notes="Accuracy in percent; read from the paper's HTML (arxiv.org/html/2310.01798v2).",
+)

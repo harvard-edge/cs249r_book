@@ -44,11 +44,18 @@ class DecodeScenario(BaseScenario):
     hardware: HardwareNode
     precision: str = "fp16"
     batch_size: int = 1
+    # Optional (added 2026-10-20): the precision whose peak rate prices the
+    # compute side, when it differs from the weight precision (8-bit weights
+    # on an FP8 tensor-core peak). None uses hardware.compute.peak_flops.
+    peak_precision: Optional[str] = None
 
     @property
     def result(self):
         from .solvers import DecodeBoundModel
-        return DecodeBoundModel().solve(self.workload, self.hardware, self.precision, self.batch_size)
+        peak = (self.hardware.compute.precision_flops[self.peak_precision]
+                if self.peak_precision else None)
+        return DecodeBoundModel().solve(self.workload, self.hardware, self.precision, self.batch_size,
+                                        peak_flops=peak)
 
 
 class TransferScenario(BaseScenario):
@@ -1175,3 +1182,117 @@ class BenchmarkTaskScenario(BaseScenario):
     @property
     def hidden_tests(self) -> int:
         return self.fail_to_pass_tests + self.pass_to_pass_tests
+# --- Model calls and agent trajectories (added 2026-10-20) -------------------
+# One model call (admission, sampling, a fallible check, prefill and decode
+# time at the weight-transfer floors) and a trajectory of calls (horizon
+# compounding, cost per accepted task, resent history). The per-token floors
+# come from a DecodeScenario: compute_time is 2P / R_peak, the prefill floor
+# per prompt token; memory_time is P b / BW, the decode floor per output token.
+
+class ContextAdmissionScenario(BaseScenario):
+    """A serialized request (text plus an image charge) against a window with a reserved reply."""
+    window: int
+    output_reserve: int
+    text_tokens: int
+    image_tokens: int = 0
+
+    @property
+    def result(self):
+        from .solvers import ContextAdmissionModel
+        return ContextAdmissionModel().solve(self.window, self.output_reserve, self.text_tokens,
+                                             self.image_tokens)
+
+
+class SamplingScenario(BaseScenario):
+    """One fixed logit vector at a base and a sharpened temperature, then top-p at the base."""
+    logits: List[float]
+    base_temperature: float
+    sharp_temperature: float
+    top_p: float
+
+    @property
+    def result(self):
+        from .solvers import SamplingModel
+        return SamplingModel().solve(self.logits, self.base_temperature, self.sharp_temperature,
+                                     self.top_p)
+
+
+class CheckerPosteriorScenario(BaseScenario):
+    """A fallible check over candidates, ``defect_rate`` of which violate the property."""
+    defect_rate: float
+    false_accept_rate: float         # P(PASS | defective)
+    valid_accept_rate: float         # P(PASS | valid)
+
+    @property
+    def result(self):
+        from .solvers import CheckerPosteriorModel
+        return CheckerPosteriorModel().solve(self.defect_rate, self.false_accept_rate,
+                                             self.valid_accept_rate)
+
+
+class ModelCallScenario(BaseScenario):
+    """One call of ``prompt_tokens`` (+ ``instruction_tokens``) in and ``output_tokens`` out at ``floors``."""
+    floors: DecodeScenario
+    prompt_tokens: int
+    output_tokens: int
+    instruction_tokens: int = 0      # format instructions added to the prompt
+    shared_prefix_tokens: int = 0    # prompt prefix served from cache
+    deadline: Optional[Quantity] = None
+    stage_success: Optional[Dict[str, float]] = None   # stages a reply must clear to be accepted
+
+    @property
+    def result(self):
+        from .solvers import ModelCallModel
+        f = self.floors.result
+        return ModelCallModel().solve(f.compute_time, f.memory_time,
+                                      self.prompt_tokens + self.instruction_tokens, self.output_tokens,
+                                      self.shared_prefix_tokens, self.deadline, self.stage_success)
+
+
+class StreamCancelScenario(BaseScenario):
+    """A streamed reply with ``output_allowance`` tokens, rejected and canceled at ``reject_step``."""
+    floors: DecodeScenario
+    output_allowance: int
+    reject_step: int
+
+    @property
+    def skipped_steps(self) -> int:
+        return self.output_allowance - self.reject_step
+
+    @property
+    def decode_time_avoided(self) -> Quantity:
+        return (self.skipped_steps * self.floors.result.memory_time).to("second")
+
+
+class TrajectoryResendScenario(BaseScenario):
+    """A trajectory of ``turns`` calls that each resend the whole history (``TrajectoryResendModel``)."""
+    floors: DecodeScenario
+    first_prompt: int
+    appended: int                    # model output plus tool observation added per turn
+    output_per_turn: int
+    turns: int
+
+    @property
+    def result(self):
+        from .solvers import TrajectoryResendModel
+        f = self.floors.result
+        return TrajectoryResendModel().solve(f.compute_time, f.memory_time, self.first_prompt,
+                                             self.appended, self.output_per_turn, self.turns)
+
+
+class TokenMixScenario(BaseScenario):
+    """Prompt and output tokens of a published request trace, priced at ``floors``."""
+    series_name: str
+    prompt_column: str
+    output_column: str
+    floors: DecodeScenario
+
+    @property
+    def result(self):
+        from ..literature.registry import Literature
+        from .solvers import TokenMixModel
+        rows = getattr(Literature, self.series_name).entries
+        f = self.floors.result
+        return TokenMixModel().solve([r[self.prompt_column] for r in rows],
+                                     [r[self.output_column] for r in rows],
+                                     f.compute_time, f.memory_time)

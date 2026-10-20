@@ -33,6 +33,9 @@ AcceleratorLifecycle = _load("accelerator_lifecycle", "AcceleratorLifecycle", "A
 StorageSystems = _load("storage_systems", "StorageSystems", "Measured production storage-system results (3FS read stress test).")
 # Incident investigation reports (added 2026-10-20)
 IncidentReports = _load("incident_reports", "IncidentReports", "Values reported by incident investigations (NTSB Tempe, Cruise pullover).")
+# Model calls and agent trajectories (added 2026-10-20)
+ServingIncidents = _load("serving_incidents", "ServingIncidents", "Reported production serving-incident figures (Anthropic 2025 postmortem).")
+SelfCorrection = _load("self_correction", "SelfCorrection", "Intrinsic self-correction results (Huang et al. 2024, GPT-4).")
 
 
 # ---------------------------------------------------------------------------
@@ -298,6 +301,9 @@ class Literature(Registry):
     AcceleratorLifecycle = AcceleratorLifecycle
     StorageSystems = StorageSystems
     IncidentReports = IncidentReports
+    ServingIncidents = ServingIncidents
+    SelfCorrection = SelfCorrection
+    LlmInferenceTraceCode2023 = _series.LlmInferenceTraceCode2023
     ComputeTrend = ComputeTrend
     AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks

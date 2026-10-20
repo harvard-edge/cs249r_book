@@ -40,6 +40,9 @@ from .embodied import StoppingBudgetModel, TractionLossModel  # added 2026-10-20
 # Agent trajectories (added 2026-10-20)
 from .agents import (AcceptedTaskCostModel, AgentRunSummaryModel, AppendOnlyContextModel,
                      HorizonCompoundingModel, TaskHorizonTrendModel)
+# Model calls and agent trajectories (added 2026-10-20)
+from .model_call import (CheckerPosteriorModel, ContextAdmissionModel, ModelCallModel, SamplingModel,
+                         TokenMixModel, TrajectoryResendModel)
 from .training import CheckpointModel, ScalingModel, TrainingMemoryModel, TrainingRunModel, TrainingStateModel
 
 __all__ = [
@@ -86,6 +89,12 @@ __all__ = [
     "AppendOnlyContextModel",
     "TaskHorizonTrendModel",
     "AgentRunSummaryModel",
+    "ContextAdmissionModel",
+    "SamplingModel",
+    "CheckerPosteriorModel",
+    "ModelCallModel",
+    "TrajectoryResendModel",
+    "TokenMixModel",
     "NetworkRooflineModel",
     "EfficiencyModel",
     "SensitivitySolver",
