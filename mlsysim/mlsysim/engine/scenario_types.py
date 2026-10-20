@@ -2724,3 +2724,134 @@ class ThrottledStageScenario(BaseScenario):
     def result(self):
         from .solvers import ThrottledStageModel
         return ThrottledStageModel().solve(self.site.t_backbone, self.clock_ratio, self.speed)
+
+
+# --- Context engineering (added 2026-10-20) -----------------------------------
+# What one agent request carries and what it costs: the solvers live in
+# engine/solvers/context.py. Token counts are serialized-request counts.
+
+class ContextBudgetScenario(BaseScenario):
+    """A request budgeted by role, appending each tool result against selecting a fixed share."""
+    window: int
+    output_reserve: int
+    system_tokens: int
+    tool_tokens: int
+    state_tokens: int
+    observation_per_turn: int        # tool result appended per turn
+    selected_observation: int        # observations a selecting policy keeps on every call
+    turns: int
+    digest_tokens: int               # a compacted per-turn result
+
+    @property
+    def result(self):
+        from .solvers import ContextBudgetModel
+        return ContextBudgetModel().solve(self.window, self.output_reserve, self.system_tokens,
+                                          self.tool_tokens, self.state_tokens, self.observation_per_turn,
+                                          self.selected_observation, self.turns, self.digest_tokens)
+
+
+class AttentionDilutionScenario(BaseScenario):
+    """One attention head with fixed logits: a target among background keys, optionally look-alikes."""
+    target_logit: float
+    background_logit: float
+    short_keys: int                  # total keys, target included
+    long_keys: int
+    unrelated_keys: Optional[int] = None     # competitors at the background logit
+    lookalike_keys: Optional[int] = None     # competitors that share the evidence's identifiers
+    lookalike_logit: Optional[float] = None
+
+    @property
+    def result(self):
+        from .solvers import AttentionDilutionModel
+        return AttentionDilutionModel().solve(self.target_logit, self.background_logit, self.short_keys,
+                                              self.long_keys, self.unrelated_keys, self.lookalike_keys,
+                                              self.lookalike_logit)
+
+
+class ComprehensionByLengthScenario(BaseScenario):
+    """Models of a Literature length sweep scored at every listed length."""
+    series_name: str
+    lengths: List[str]               # column suffixes, shortest first
+    hold_bar: float                  # score a model must hold at the longest length
+
+    @property
+    def rows(self):
+        from ..literature.registry import Literature
+        return getattr(Literature, self.series_name).entries
+
+    @property
+    def result(self):
+        from .solvers import ComprehensionByLengthModel
+        return ComprehensionByLengthModel().solve(self.rows, self.lengths, self.hold_bar)
+
+
+class PrefixLayoutBillScenario(BaseScenario):
+    """A trajectory of root, trunk, and leaf requests, billed volatile-first and zoned."""
+    turns: int
+    root_tokens: int
+    trunk_tokens: int
+    leaf_tokens: int
+    trunk_rewrites: int              # calls after the first that rewrite the trunk
+    input_price: Quantity            # USD per uncached input token
+    cached_fraction: float           # reused tokens billed at this fraction of the price
+
+    @property
+    def result(self):
+        from .solvers import PrefixLayoutBillModel
+        return PrefixLayoutBillModel().solve(self.turns, self.root_tokens, self.trunk_tokens,
+                                             self.leaf_tokens, self.trunk_rewrites, self.input_price,
+                                             self.cached_fraction)
+
+
+class CompactionCadenceScenario(BaseScenario):
+    """Compaction between a trigger and a target watermark over a turn budget."""
+    window: int
+    output_reserve: int
+    target: int                      # request length a pass resets to
+    trigger: int                     # request length that fires a pass
+    tokens_per_turn: int
+    turns: int
+    alternate_target: Optional[int] = None   # a narrower gap to compare
+
+    @property
+    def result(self):
+        from .solvers import CompactionCadenceModel
+        return CompactionCadenceModel().solve(self.window, self.output_reserve, self.target, self.trigger,
+                                              self.tokens_per_turn, self.turns, self.alternate_target)
+
+
+class ContextInvalidationScenario(BaseScenario):
+    """A superseded excerpt right after the reused prefix: remove, replace, or append a notice."""
+    request_tokens: int
+    prefix_tokens: int               # reused prefix before the excerpt
+    superseded_tokens: int
+    marker_tokens: int               # in-place replacement marker
+    notice_tokens: int               # appended notice, with its framing
+
+    @property
+    def result(self):
+        from .solvers import ContextInvalidationModel
+        return ContextInvalidationModel().solve(self.request_tokens, self.prefix_tokens,
+                                                self.superseded_tokens, self.marker_tokens,
+                                                self.notice_tokens)
+
+
+class ProtectedFieldCheckScenario(BaseScenario):
+    """Constraints lost independently across compaction rounds, with and without a host check."""
+    constraints: int
+    loss_per_round: float
+    rounds: int
+    acceptance_if_intact: float
+    attempt_cost: Quantity           # USD
+    detection: float                 # share of losses the check detects and repairs
+    check_cost_per_round: Quantity   # USD
+    survival_floor: float            # survival level whose first crossing is reported
+    target_survival: Optional[float] = None  # survival to hold without a check
+
+    @property
+    def result(self):
+        from .solvers import ProtectedFieldCheckModel
+        return ProtectedFieldCheckModel().solve(self.constraints, self.loss_per_round, self.rounds,
+                                                self.acceptance_if_intact, self.attempt_cost,
+                                                self.detection, self.check_cost_per_round,
+                                                self.survival_floor, self.target_survival)

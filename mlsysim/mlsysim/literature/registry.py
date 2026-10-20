@@ -43,6 +43,10 @@ GamePlaying = _load("game_playing", "GamePlaying", "Cited results of landmark ga
 DeviceMeasurements = _load("device_measurements", "DeviceMeasurements", "Cited measurements of deployed ML hardware (TPU v1 roofline, memory-wall growth, phone stress test, two-pass wake word).")
 # Spaceflight anomaly inquiries (added 2026-10-20)
 SpaceflightAnomalies = _load("spaceflight_anomalies", "SpaceflightAnomalies", "Cited results of spaceflight anomaly inquiries (ESA Schiaparelli 2017).")
+# Context engineering (added 2026-10-20)
+ContextUse = _load("context_use", "ContextUse", "Cited results on how models use a request: evidence position, an irrelevant sentence, the RULER bar.")
+SummarizationFaithfulness = _load("summarization_faithfulness", "SummarizationFaithfulness", "Cited summarization-faithfulness results (Maynez et al. 2020, XSum).")
+PrefixCaching = _load("prefix_caching", "PrefixCaching", "Cited prefix-cache results from a public serving deployment (SGLang 2024).")
 
 
 # ---------------------------------------------------------------------------
@@ -315,6 +319,9 @@ class Literature(Registry):
     GamePlaying = GamePlaying  # added 2026-10-20
     DeviceMeasurements = DeviceMeasurements  # added 2026-10-20
     SpaceflightAnomalies = SpaceflightAnomalies  # added 2026-10-20
+    ContextUse = ContextUse  # added 2026-10-20
+    SummarizationFaithfulness = SummarizationFaithfulness  # added 2026-10-20
+    PrefixCaching = PrefixCaching  # added 2026-10-20
     ComputeTrend = ComputeTrend
     AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks
@@ -324,6 +331,8 @@ class Literature(Registry):
     LowestPriceAtCapability = _series.LowestPriceAtCapability
     TerminalBenchHarness = _series.TerminalBenchHarness
     LongContextComprehension = _series.LongContextComprehension
+    RulerEffectiveLength = _series.RulerEffectiveLength  # added 2026-10-20
+    AnswerPositionAccuracy = _series.AnswerPositionAccuracy  # added 2026-10-20
     SweBenchVerifiedRuns = _series.SweBenchVerifiedRuns
     CybenchSolveRate = _series.CybenchSolveRate
     OSWorldStepBudget = _series.OSWorldStepBudget

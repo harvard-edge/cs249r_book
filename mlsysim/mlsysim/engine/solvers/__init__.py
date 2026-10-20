@@ -181,3 +181,24 @@ __all__ += [
     "ZeroFailureModel",
     "ThrottledStageModel",
 ]
+
+# --- Context engineering: budget, dilution, layout, compaction (added 2026-10-20) ---
+from .context import (
+    ContextBudgetModel,
+    AttentionDilutionModel,
+    ComprehensionByLengthModel,
+    PrefixLayoutBillModel,
+    CompactionCadenceModel,
+    ContextInvalidationModel,
+    ProtectedFieldCheckModel,
+)
+
+__all__ += [
+    "ContextBudgetModel",
+    "AttentionDilutionModel",
+    "ComprehensionByLengthModel",
+    "PrefixLayoutBillModel",
+    "CompactionCadenceModel",
+    "ContextInvalidationModel",
+    "ProtectedFieldCheckModel",
+]
