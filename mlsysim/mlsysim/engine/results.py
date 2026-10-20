@@ -2942,3 +2942,49 @@ class VisibilityRangeResult(SolverResult):
 class ThermalExpansionResult(SolverResult):
     """Result from ThermalExpansionModel: a heated member's length change."""
     expansion: Quantity
+
+
+# --- Durable execution (added 2026-10-20) ---------------------------------------
+
+class GroupCommitResult(SolverResult):
+    """Result from GroupCommitModel: storage work per record against the wait each record sees."""
+    work_per_record: Quantity                # flush / batch size
+    first_wait: Quantity                     # batch timer + flush
+    last_wait: Quantity                      # flush alone
+
+
+class SnapshotVolumeResult(SolverResult):
+    """Result from SnapshotVolumeModel: bytes written by full snapshots against deltas."""
+    checkpoints: int
+    full_bytes: Quantity
+    delta_bytes: Quantity
+    ratio: float                             # full / delta = (n + 1) / 2
+
+
+class CheckpointTraceResult(SolverResult):
+    """Result from CheckpointTraceModel: checkpoint strides priced on one crash trace."""
+    checkpoints: Dict[int, int]              # per stride
+    lost_turns: Dict[int, Tuple[int, ...]]   # per stride, turns since the last checkpoint at each crash
+    capture_time: Dict[int, Quantity]        # checkpoints x pause
+    recovery_time: Dict[int, Quantity]       # restores + lost turns rebuilt from the log
+    total_time: Dict[int, Quantity]
+    best_stride: int                         # least total on this trace
+    every_turn_time: Quantity                # checkpoint after every turn
+    crash_rate: float                        # crashes per turn
+    stride_logged: float                     # balance stride when lost turns are rebuilt from the log
+    stride_reexecuted: float                 # balance stride when lost turns are re-executed
+    stride_gain: float                       # logged / re-executed
+
+
+class RetentionCostResult(SolverResult):
+    """Result from RetentionCostModel: bytes kept for recovery and replay, and what keeping them costs."""
+    log_bytes: Quantity
+    total_bytes: Quantity
+    cost: Quantity                           # USD over the retention period
+    log_cost: Quantity
+    attempt_share: float                     # cost / attempt cost
+    log_share: float
+    workspace_share: float                   # workspace snapshot share of the bytes
+
+
+__all__ += ["GroupCommitResult", "SnapshotVolumeResult", "CheckpointTraceResult", "RetentionCostResult"]

@@ -3516,3 +3516,40 @@ def test_sensor_perception_error_scales():
     assert (k.min_count, k.rank, k.rank_from_top) == (99, 991, 10)
     assert Scenarios.DenseFogVisibility.result.visibility_range.to("m").magnitude == approx(59.915)
     assert Scenarios.AluminumLinkWarming.result.expansion.to("mm").magnitude == approx(0.231)
+
+
+def test_durable_execution_log_and_snapshots():
+    g = Scenarios.IntentQuorumGroupCommit.result
+    assert g.work_per_record.to("ms").magnitude == approx(0.25)
+    assert g.first_wait.to("ms").magnitude == approx(6.0) and g.last_wait.to("ms").magnitude == approx(4.0)
+    s = Scenarios.GrowingTrajectorySnapshots.result
+    assert s.checkpoints == 100 and s.ratio == approx(50.5)
+    assert s.full_bytes.to("GB").magnitude == approx(3.232) and s.delta_bytes.to("MB").magnitude == approx(64.0)
+
+
+def test_durable_execution_checkpoint_cadence():
+    t = Scenarios.TwoCrashCheckpointTrace.result
+    assert [t.total_time[k].to("s").magnitude for k in (10, 25, 50)] == [approx(8.0), approx(6.0), approx(10.0)]
+    assert t.lost_turns == {10: (7, 3), 25: (12, 8), 50: (37, 33)} and t.best_stride == 25
+    assert t.every_turn_time.to("s").magnitude == approx(52.0) and t.crash_rate == approx(0.02)
+    assert t.stride_logged == approx(22.361) and t.stride_reexecuted == approx(1.5811)
+    assert t.stride_gain == approx(14.142)
+    over = Scenarios.TwoCrashCheckpointTrace.stride_overhead(10, Scenarios.TwoCrashCheckpointTrace.rebuild_per_turn)
+    assert over.to("s").magnitude == approx(0.06)
+    y = Scenarios.ReexecutedWorkCheckpointInterval.result
+    assert y.interval.to("s").magnitude == approx(48.990) and y.waste == approx(0.081650)
+
+
+def test_durable_execution_resume_replay_retention():
+    assert Scenarios.ResumedContextColdPrefill.result.prefill_time.to("s").magnitude == approx(2.3380)
+    assert Scenarios.GreedyRerunReproduction.result.success[30] == approx(0.73970)
+    r = Scenarios.RepairTrajectoryRetention.result
+    assert r.log_bytes.to("MB").magnitude == approx(3.96) and r.total_bytes.to("MB").magnitude == approx(53.96)
+    assert r.cost.to("USD").magnitude == approx(0.014893) and r.attempt_share == approx(0.0070919)
+    assert r.log_share == approx(0.00052046) and r.workspace_share == approx(0.92661)
+
+
+def test_durable_execution_flat_optimum():
+    y = Scenarios.ReexecutedWorkCheckpointInterval
+    assert y.miss_factors == [2, 10]
+    assert y.miss_penalty(2) == approx(0.25) and y.miss_penalty(10) == approx(4.05)

@@ -3737,3 +3737,17 @@ NTSB_HAR_17_02 = _lit(
     notes=("The car's speed just before impact was 74 mph, with Traffic-Aware Cruise Control and "
            "Autosteer active (p. 2). Read for the Sensor Perception lecture plan, 2026-10-19."),
 )
+
+
+THINKING_MACHINES_2025_NONDETERMINISM = _report(
+    "prov:thinking-machines-2025-nondeterminism",
+    "Horace He and Thinking Machines Lab, Defeating Nondeterminism in LLM Inference, "
+    "Thinking Machines Lab: Connectionism, 10 September 2025",
+    "https://thinkingmachines.ai/blog/defeating-nondeterminism-in-llm-inference/",
+    notes=(
+        "Qwen/Qwen3-235B-A22B-Instruct-2507, 1,000 completions at temperature 0 of 'Tell me about "
+        "Richard Feynman', 1,000 tokens each: 80 unique completions, the most common 78 times; "
+        "identical for the first 102 tokens; 992 continue 'Queens, New York' and 8 'New York City'. "
+        "With batch-invariant kernels all 1,000 are identical. Read 2026-10-20."
+    ),
+)
