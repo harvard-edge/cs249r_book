@@ -932,3 +932,17 @@ __all__ += [
 from .statistics import calc_consecutive_detection_frames, calc_clopper_pearson_interval
 
 __all__ += ["calc_consecutive_detection_frames", "calc_clopper_pearson_interval"]
+# --- Fairness: error-rate identity, bias feedback, gap sample sizes (added 2026-10-20) ---
+from .fairness import (
+    calc_fpr_from_ppv,
+    calc_feedback_disparity,
+    calc_cycles_to_gate,
+    calc_gap_samples_per_group,
+)
+
+__all__ += [
+    "calc_fpr_from_ppv",
+    "calc_feedback_disparity",
+    "calc_cycles_to_gate",
+    "calc_gap_samples_per_group",
+]
