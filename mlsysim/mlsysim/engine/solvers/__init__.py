@@ -57,8 +57,11 @@ from .trends import TrainingGrowthModel
 from .performance import AmdahlModel, IronLawModel
 from .quality import ProxyDriftModel, ShiftedTestSetModel
 from .training import CheckpointModel, ScalingModel, TrainingMemoryModel, TrainingRunModel, TrainingStateModel
+from .goodput import GoodputModel, RuntimeGoodputModel  # fleet goodput (added 2026-10-20)
 
 __all__ = [
+    "GoodputModel",
+    "RuntimeGoodputModel",
     "BaseResolver",
     "ForwardModel",
     "BaseSolver",

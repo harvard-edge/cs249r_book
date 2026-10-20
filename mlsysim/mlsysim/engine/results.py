@@ -141,6 +141,9 @@ __all__ = [
     "DecoderFamiliesResult",
     "ProposerTrafficResult",
     "EvidenceHorizonResult",
+    # Fleet goodput (added 2026-10-20)
+    "GoodputResult",
+    "RuntimeGoodputResult",
 ]
 
 
@@ -1994,3 +1997,55 @@ class EvidenceHorizonResult(SolverResult):
     error_at_chunk_end: Quantity             # initial error + drift at chunk end
     outlast: Quantity                        # chunk span - horizon
     setpoints_within_horizon: float
+
+
+# ── Fleet goodput (added 2026-10-20) ──────────────────────────────────────────
+
+class GoodputResult(SolverResult):
+    """Result from GoodputModel: ML productivity goodput S x R x P and where the rest went.
+
+    Shares are of offered capacity-time; each lost interval is charged at the
+    first boundary it fails (scheduling, then runtime, then program).
+    """
+    mpg: float                               # S x R x P
+    job_product: float                       # R x P, the job's own share of held time
+    after_scheduling: float                  # S
+    after_runtime: float                     # S x R
+    scheduling_share: float                  # 1 - S
+    runtime_share: float                     # S (1 - R)
+    program_share: float                     # S R (1 - P)
+    point_value: Dict[str, float]            # one point of a factor = product of the other two
+    ceiling_ratio: Dict[str, float]          # ceiling / current, per factor with a ceiling
+    ceiling_gain: Dict[str, float]           # MPG gained at each factor's ceiling, the others held
+    mpg_at_ceiling: Dict[str, float]
+    full_scheduling_gain: float              # MPG gained by a perfect S
+    cost_multiple: float                     # 1 / MPG, price of a useful unit over the raw price
+    job_cost_multiple: float                 # 1 / (R x P), a chargeback on held hours only
+    runtime_headroom: float                  # 1 / R - 1, the largest relative gain left in R
+    useful_rate: Optional[Quantity] = None   # device-hour rate / MPG
+
+
+class RuntimeGoodputResult(SolverResult):
+    """Result from RuntimeGoodputModel: held time a job keeps as retained steps, term by term.
+
+    Every ``*_share`` is a share of held time; the five add to ``runtime_loss``
+    (first-order: each term small, so overlaps are neglected).
+    """
+    mtbf: Quantity                           # system failure interval
+    write_time: Quantity                     # one checkpoint write
+    interval: Quantity                       # Young-Daly checkpoint interval
+    write_share: float
+    rework_share: float
+    checkpoint_share: float                  # write + rework at the interval
+    recovery_time: Quantity                  # detect + restart + reload + warmup
+    recovery_share: float                    # recovery_time / MTBF (rework counted in checkpoints)
+    startup_time: Quantity                   # restart + reload + warmup, no detection
+    startup_share: float                     # startup_time / held window
+    input_wait_share: float
+    preemption_cost: Quantity                # lost work + startup, per forced preemption
+    preemption_share: float                  # rate x cost
+    failure_side: float                      # checkpoints + recovery
+    runtime_loss: float
+    runtime_goodput: float
+    interruption_interval: Quantity          # MTBF with forced preemptions counted as interruptions
+    interruption_checkpoint_interval: Quantity

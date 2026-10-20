@@ -48,6 +48,9 @@ class DecodeScenario(BaseScenario):
     # compute side, when it differs from the weight precision (8-bit weights
     # on an FP8 tensor-core peak). None uses hardware.compute.peak_flops.
     peak_precision: Optional[str] = None
+    # Optional (added 2026-10-20): tensor-parallel width; each device streams
+    # and multiplies only its 1/tp_size shard of the weights.
+    tp_size: int = 1
 
     @property
     def result(self):
@@ -55,7 +58,7 @@ class DecodeScenario(BaseScenario):
         peak = (self.hardware.compute.precision_flops[self.peak_precision]
                 if self.peak_precision else None)
         return DecodeBoundModel().solve(self.workload, self.hardware, self.precision, self.batch_size,
-                                        peak_flops=peak)
+                                        peak_flops=peak, tp_size=self.tp_size)
 
 
 class TransferScenario(BaseScenario):
@@ -104,12 +107,18 @@ class TensorParallelScenario(BaseScenario):
     microbatch: int
     link_bandwidth: Quantity
     compute_time: Quantity          # stated compute per step, not derived
+    # Optional (added 2026-10-20): tokens per sequence (default: the model's
+    # context length) and AllReduces per layer per step (default: one forward,
+    # one backward).
+    seq_len: Optional[int] = None
+    collectives_per_layer: int = 2
 
     @property
     def result(self):
         from .solvers import TensorParallelCommModel
         return TensorParallelCommModel().solve(
-            self.workload, self.tp_size, self.microbatch, self.link_bandwidth, self.compute_time)
+            self.workload, self.tp_size, self.microbatch, self.link_bandwidth, self.compute_time,
+            seq_len=self.seq_len, collectives_per_layer=self.collectives_per_layer)
 
 
 class TrainingRunScenario(BaseScenario):
@@ -1894,6 +1903,16 @@ class MessageFusionScenario(BaseScenario):
     def speedup(self) -> float:
         return (self.separate_time / self.fused_time).to_base_units().magnitude
 
+    @property
+    def transfer_time(self) -> Quantity:
+        """Byte time of one small message, message / bandwidth (added 2026-10-20)."""
+        return (self.message / self.bandwidth).to("nanosecond")
+
+    @property
+    def startup_to_transfer(self) -> float:
+        """How many times one message's startup exceeds its byte time (added 2026-10-20)."""
+        return (self.alpha / self.transfer_time).to("").magnitude
+
 
 class HierarchicalAllReduceScenario(BaseScenario):
     """A buffer AllReduced over ``n_nodes`` nodes of ``gpus_per_node`` GPUs, in three phases or one flat ring."""
@@ -2437,10 +2456,29 @@ class ProxyDriftScenario(BaseScenario):
 
 
 class RooflinePointScenario(BaseScenario):
-    """A workload of ``intensity`` on ``hardware``'s roofline: attainable rate and share of peak."""
+    """A workload of ``intensity`` on ``hardware``'s roofline: attainable rate and share of peak.
+
+    A measured kernel may be placed from its counter readings instead
+    (``achieved_rate`` and ``achieved_bandwidth``, added 2026-10-20): its
+    intensity is their ratio and ``bandwidth_utilization`` its share of peak
+    memory bandwidth.
+    """
     hardware: HardwareNode
-    intensity: Quantity
+    intensity: Optional[Quantity] = None
     precision: Optional[str] = None
+    achieved_rate: Optional[Quantity] = None
+    achieved_bandwidth: Optional[Quantity] = None
+
+    @property
+    def point_intensity(self) -> Quantity:
+        """The stated intensity, or achieved rate over achieved bandwidth for a measured kernel."""
+        if self.intensity is not None:
+            return self.intensity
+        return (self.achieved_rate / self.achieved_bandwidth).to("flop/byte")
+
+    @property
+    def bandwidth_utilization(self) -> float:
+        return (self.achieved_bandwidth / self.hardware.memory.bandwidth).to("").magnitude
 
     @property
     def peak(self) -> Quantity:
@@ -2454,7 +2492,8 @@ class RooflinePointScenario(BaseScenario):
 
     @property
     def attainable(self) -> Quantity:
-        return min(self.peak.to("flop/second"), (self.hardware.memory.bandwidth * self.intensity).to("flop/second"))
+        return min(self.peak.to("flop/second"),
+                   (self.hardware.memory.bandwidth * self.point_intensity).to("flop/second"))
 
     @property
     def peak_fraction(self) -> float:
@@ -5125,3 +5164,259 @@ class MetricRegressionScenario(BaseScenario):
     launch_value: float               # fraction
     drop: float                       # fraction (points / 100)
     elapsed: Quantity
+
+
+# ── Fleet goodput (added 2026-10-20) ──────────────────────────────────────────
+
+class SchedulingSnapshotScenario(BaseScenario):
+    """One snapshot of a shared pool's in-service capacity, read at the scheduling boundary.
+
+    Capacity assigned to jobs includes gangs still waiting for members; only
+    complete allocations can run a synchronous step, so scheduling goodput is
+    the assigned share less the incomplete-gang share. Capacity in complete
+    allocations waiting for input crosses this boundary and is a runtime loss.
+    """
+    assigned_share: float
+    incomplete_gang_share: float
+    input_wait_share: float
+
+    @property
+    def scheduling_goodput(self) -> float:
+        return self.assigned_share - self.incomplete_gang_share
+
+    @property
+    def scheduling_loss(self) -> float:
+        return 1 - self.scheduling_goodput
+
+    @property
+    def unassigned_share(self) -> float:
+        return 1 - self.assigned_share
+
+    @property
+    def executing_share(self) -> float:
+        return self.scheduling_goodput - self.input_wait_share
+
+    @property
+    def input_wait_of_held(self) -> float:
+        """The input-wait share as a share of held (complete-allocation) time."""
+        return self.input_wait_share / self.scheduling_goodput
+
+    @property
+    def partial_hold_ceiling(self) -> float:
+        """S if every device freed from a partial gang joins a complete allocation."""
+        return self.scheduling_goodput + self.incomplete_gang_share
+
+
+class RuntimeGoodputScenario(BaseScenario):
+    """Runtime goodput of a job on ``failures.n_devices`` devices over a held ``window``.
+
+    ``failures`` is the job's series failure model (SeriesFailureScenario);
+    the checkpoint is ``workload`` at ``bytes_per_param``; ``recovery`` is the
+    four-term budget profile (Systems.Reliability.Recovery).
+    """
+    failures: Any                            # SeriesFailureScenario
+    workload: Workload
+    bytes_per_param: Quantity
+    recovery: Any
+    input_wait: float                        # share of held time
+    window: Quantity                         # held time per launch
+    lost_work: Quantity                      # work since the last save, per forced preemption
+    preemption_rate: Quantity                # forced preemptions per unit time
+
+    @property
+    def checkpoint_bytes(self) -> Quantity:
+        from ..physics.quantities import memory_from_params
+        return memory_from_params(self.workload.parameters, self.bytes_per_param).to("byte")
+
+    @property
+    def result(self):
+        from .solvers import RuntimeGoodputModel
+        return RuntimeGoodputModel().solve(self.failures.result.mtbf, self.checkpoint_bytes, self.recovery,
+                                           self.input_wait, self.window, self.lost_work, self.preemption_rate)
+
+    def at(self, n_devices: int) -> "RuntimeGoodputScenario":
+        """The same job and inputs on ``n_devices`` devices."""
+        return self.variant(failures=self.failures.variant(n_devices=n_devices))
+
+    def sweep(self, sizes: List[int]) -> Dict[int, Any]:
+        """Results at each job size, every other input held."""
+        return {n: self.at(n).result for n in sizes}
+
+    def crossover(self, step: int) -> int:
+        """Smallest size, in ``step``-device increments from the current size, at which
+        checkpoint waste plus recovery exceed input waits."""
+        n = self.failures.n_devices
+        while self.at(n).result.failure_side <= self.input_wait:
+            n += step
+        return n
+
+
+class GoodputScenario(BaseScenario):
+    """ML productivity goodput of a job on a pool: scheduling, runtime, and program goodput.
+
+    ``ceilings`` gives, per factor ("S", "R", "P"), the value its owner's lever
+    can reach; ``device_hour_rate`` is the price of one offered device-hour.
+    """
+    scheduling: float
+    runtime: float
+    program: float
+    ceilings: Dict[str, float] = {}
+    device_hour_rate: Optional[Quantity] = None
+
+    @property
+    def result(self):
+        from .solvers import GoodputModel
+        return GoodputModel().solve(self.scheduling, self.runtime, self.program, self.ceilings,
+                                    self.device_hour_rate)
+
+    def trade_ratio(self, other: "GoodputScenario") -> float:
+        """MPG of ``other`` over this one: the product of the factor ratios."""
+        return other.result.mpg / self.result.mpg
+
+
+class FleetMfuScenario(BaseScenario):
+    """Program goodput (MFU) of a training step on one node and on a fleet of ``fleet_devices``.
+
+    Useful work per step is the model's training arithmetic for the tokens in
+    the step (6 x parameters x tokens); MFU divides it by every device's peak
+    over the measured step time. Their ratio is the scaling efficiency measured
+    from the node.
+    """
+    workload: Workload
+    hardware: HardwareNode
+    node_devices: int
+    fleet_devices: int
+    node_tokens: int                         # tokens per node step
+    fleet_tokens: int                        # tokens per fleet step
+    node_step_time: Quantity
+    fleet_step_time: Quantity
+
+    def _useful(self, tokens: int) -> Quantity:
+        from ..physics.transformer import calc_transformer_training_flops
+        return calc_transformer_training_flops(self.workload.parameters, tokens)
+
+    @property
+    def node_useful_work(self) -> Quantity:
+        return self._useful(self.node_tokens)
+
+    @property
+    def fleet_useful_work(self) -> Quantity:
+        return self._useful(self.fleet_tokens)
+
+    @property
+    def fleet_peak_work(self) -> Quantity:
+        """Every fleet device at peak for one fleet step: the MFU denominator."""
+        return self.fleet_devices * self.hardware.compute.peak_flops * self.fleet_step_time
+
+    @property
+    def node_mfu(self) -> float:
+        peak = self.node_devices * self.hardware.compute.peak_flops * self.node_step_time
+        return (self.node_useful_work / peak).to("").magnitude
+
+    @property
+    def fleet_mfu(self) -> float:
+        return (self.fleet_useful_work / self.fleet_peak_work).to("").magnitude
+
+    @property
+    def scaling_efficiency(self) -> float:
+        """Per-device throughput on the fleet relative to the node (fleet MFU / node MFU)."""
+        return self.fleet_mfu / self.node_mfu
+
+    @property
+    def extra_step_time(self) -> Quantity:
+        return (self.fleet_step_time - self.node_step_time).to("ms")
+
+    @property
+    def extra_share(self) -> float:
+        return (self.extra_step_time / self.fleet_step_time).to("").magnitude
+
+
+class CompilationPaybackScenario(BaseScenario):
+    """A compiled decode step and the executions that repay its build.
+
+    The eager step splits into ``shares`` (matrix multiplies, element-wise
+    kernels, launch overhead); compilation removes ``removed[k]`` of each
+    share. A build is repaid after ``build / saved_per_token`` tokens; shared
+    by ``replicas`` it is repaid in a fraction of that time, and rebuilt by
+    each it costs ``replicas x gpus_per_replica x build``.
+    """
+    token_rate: Quantity                     # eager tokens per second
+    step_time: Quantity                      # eager time per token, as the example carries it
+    shares: Dict[str, float]
+    removed: Dict[str, float]
+    builds: Dict[str, Quantity]
+    replicas: int
+    gpus_per_replica: int = 1
+    replica_life: Optional[Quantity] = None  # held time of a short-lived replica
+
+    @property
+    def step_fraction(self) -> float:
+        return sum(v * (1 - self.removed.get(k, 0)) for k, v in self.shares.items())
+
+    @property
+    def compiled_step(self) -> Quantity:
+        return (self.step_time * self.step_fraction).to("ms")
+
+    @property
+    def saved_per_token(self) -> Quantity:
+        return (self.step_time - self.compiled_step).to("ms")
+
+    @property
+    def compiled_rate(self) -> Quantity:
+        return (1 / self.compiled_step).to("1/second")
+
+    @property
+    def speedup(self) -> float:
+        return (self.compiled_rate / self.token_rate).to("").magnitude
+
+    def tokens_to_repay(self, build: str) -> float:
+        return (self.builds[build] / self.saved_per_token).to("").magnitude
+
+    def time_to_repay(self, build: str) -> Quantity:
+        """Compiled generation time on one replica that repays the build."""
+        return (self.tokens_to_repay(build) / self.compiled_rate).to("minute")
+
+    def shared_repay(self, build: str) -> Quantity:
+        """Pool time per replica when every replica reuses one build."""
+        return (self.time_to_repay(build) / self.replicas).to("second")
+
+    def rollout_cost(self, build: str) -> Quantity:
+        """Device time when every replica builds its own artifact."""
+        return (self.builds[build] * self.gpus_per_replica * self.replicas).to("hour")
+
+    def build_share(self, build: str) -> float:
+        """The build as a share of a short-lived replica's held time."""
+        return (self.builds[build] / self.replica_life).to("").magnitude
+
+
+class TraceVolumeScenario(BaseScenario):
+    """A profiler trace of ``window`` on every one of ``devices`` devices."""
+    per_device: Quantity                     # trace bytes per device for one window
+    devices: int
+    window: Quantity
+
+    @property
+    def total(self) -> Quantity:
+        return (self.per_device * self.devices).to("GB")
+
+
+class SoftwareGainsScenario(BaseScenario):
+    """Throughput of one fixed system across benchmark rounds, relative to each benchmark's first round."""
+    series: Any                              # a Literature series with .entries rows
+    benchmarks: List[Any]                    # (benchmark id, label)
+    scenario: str = "Offline"
+
+    def rows(self, bench: str) -> List[Any]:
+        """Every matching row for ``bench``, oldest publication first."""
+        hits = [r for r in self.series.entries if r["benchmark"] == bench and r["scenario"] == self.scenario]
+        return sorted(hits, key=lambda r: r["pub_month"])
+
+    def gain(self, bench: str) -> float:
+        pts = self.rows(bench)
+        return pts[-1]["value"] / pts[0]["value"]
+
+    def months(self) -> int:
+        """Months from the earliest to the latest publication in the scenario."""
+        stamps = sorted(r["pub_month"] for r in self.series.entries if r["scenario"] == self.scenario)
+        (y0, m0), (y1, m1) = (tuple(int(x) for x in stamps[i].split("-")) for i in (0, -1))
+        return (y1 - y0) * 12 + (m1 - m0)
