@@ -35,6 +35,7 @@ from ..core.units import FLOAT_FORMAT_BITS as _FLOAT_FORMAT_BITS, INT16_BITS as 
 from ..core.units import COLOR_DEPTH_8BIT as _COLOR_DEPTH_8BIT  # added 2026-10-20
 from ..core.units import DAYS_PER_MONTH as _DAYS_PER_MONTH  # added 2026-10-20
 from ..core.units import BITS_PER_BYTE as _BITS_PER_BYTE  # security and privacy (added 2026-10-20)
+from ..physics.statistics import calc_ks_coefficient as _calc_ks_coefficient  # robust AI (added 2026-10-20)
 # Deployment paradigms block (added 2026-10-20)
 from ..systems.registry import Pods as _Pods
 from ..systems.registry import Systems as _Systems  # own against rent (added 2026-10-20)
@@ -5683,4 +5684,118 @@ class Scenarios(Registry):
         dataset_size=float(_Literature.DataPoisoning.Laion400mImageTextPairs),
         poisoned_fraction=float(_Literature.DataPoisoning.WebScalePoisonableFraction),
         cost=Q_(float(_Literature.DataPoisoning.WebScalePoisoningCostUsd), "USD"),
+    )
+
+    # --- Robust AI: silent faults, drift tests, per-request answering, attacks (added 2026-10-20) ---
+    FleetSilentErrorHour1K = _st.SdcExposureScenario(
+        name="Silent errors in one hour across 1,000 accelerators",
+        description="Each device independently meets a silent (unreported) error with probability 1e-4 "
+                    "per device-hour; the chance of at least one in the job's hour.",
+        n_devices=1000,                   # scenario assumption
+        event_rate=1e-4,                  # scenario assumption: residual silent-error rate per device-hour
+        step_time=Q_(1, "hour"),
+    )
+    FleetSilentErrorHour10K = FleetSilentErrorHour1K.variant(
+        name="Silent errors in one hour across 10,000 accelerators",
+        n_devices=10_000,                 # scenario assumption
+    )
+    FeatureMeanShiftTest = _st.MeanShiftTestScenario(
+        name="One feature's mean moves from 0.50 to 0.55 over the last 1,000 requests",
+        description="Spread 0.3; is the move noise? Standard error, z, and the two-sided p-value.",
+        reference_mean=0.5,               # scenario assumption
+        observed_mean=0.55,               # scenario assumption
+        feature_sd=0.3,                   # scenario assumption
+        n_samples=1000,                   # scenario assumption
+        significance_bound=0.001,         # scenario assumption: the bound the alert reports
+    )
+    FraudCountryPsi = _st.BinShareShiftScenario(
+        name="User-country PSI of a fraud model after six months in production",
+        description="Baseline and current traffic shares by country bucket; the Other bucket grows.",
+        bins=["USA", "UK", "Germany", "France", "Other"],
+        baseline_shares=[0.45, 0.20, 0.15, 0.10, 0.10],   # scenario assumption
+        current_shares=[0.38, 0.18, 0.14, 0.12, 0.18],    # scenario assumption
+    )
+    FraudAmountDrift = _st.GaussianDriftScenario(
+        name="Transaction-amount drift of the same fraud model, log-dollars fitted as normals",
+        description="KL divergence of the reference fit from the current fit.",
+        reference_mean=4.2,               # scenario assumption
+        reference_sd=1.1,                 # scenario assumption
+        current_mean=4.5,                 # scenario assumption
+        current_sd=1.3,                   # scenario assumption
+        kl_trigger=0.05,                  # scenario assumption: the service's calibrated investigate threshold
+    )
+    FraudAmountKs = _st.KsDriftScenario(
+        name="K-S test on transaction amount, 10,000 against 10,000, Bonferroni level 0.01",
+        description="The observed largest CDF gap against the critical value at the corrected level.",
+        coefficient=_calc_ks_coefficient(0.01),
+        significance=0.01,                # scenario assumption: Bonferroni-corrected level of the Level 1 rule
+        n_reference=10_000,               # scenario assumption
+        n_current=10_000,                 # scenario assumption
+        observed_statistic=0.089,         # scenario assumption: observed largest CDF gap
+    )
+    SelectiveAnswering90 = _st.SelectiveAnsweringScenario(
+        name="Answer 90 percent of 10,000 requests/s and route the rest",
+        description="Illustrative risk-coverage curve; the unanswered share goes to a fallback.",
+        request_rate=Q_(10_000, "1/s"),   # scenario assumption
+        coverage=0.90,                    # scenario assumption
+        risk_floor=0.012,                 # scenario assumption: illustrative curve
+        risk_scale=0.10,                  # scenario assumption: illustrative curve
+        risk_exponent=6,                  # scenario assumption: illustrative curve
+    )
+    ConformalThreshold1K = _st.ConformalThresholdScenario(
+        name="Split conformal cutoff from 1,000 calibration scores at 90 percent target coverage",
+        description="Rank ceil((n + 1)(1 - alpha)) among the sorted scores.",
+        calibration_count=1000,           # scenario assumption
+        alpha=0.1,                        # scenario assumption
+    )
+    PgdSevenTraining = _st.AdversarialTrainingPassesScenario(
+        name="PGD-7 adversarial training: seven attack steps and one update per batch",
+        description="Equal-cost work model with no reuse across steps (Madry et al. 2018).",
+        attack_passes=7,                  # scenario assumption: PGD-7
+        update_passes=1,
+    )
+    FgsmCleanPlusAdversarialTraining = PgdSevenTraining.variant(
+        name="FGSM training: one attack pass, then an update on a doubled clean-plus-adversarial batch",
+        attack_passes=1,
+        update_passes=2,                  # the doubled batch costs two passes
+    )
+    ResNet50CleanVersusRobustAttacked = _st.CrossConditionGapScenario(
+        name="Standard ResNet-50 clean against an adversarially trained ResNet-50 under attack at 4/255",
+        description="Two of the four cells; the difference mixes a model change with a test change.",
+        standard_clean_accuracy=next(r["val"] for r in _Literature.Series.ImageNetTestbedShift.entries
+                                     if r["model"] == "resnet50"),
+        robust_attacked_accuracy=50.0,    # scenario assumption: an adversarially trained ImageNet model at 4/255
+    )
+    SmoothingRadiusCifar10 = _st.CertifiedRadiusScenario(
+        name="Randomized smoothing at sigma 0.5 and p_A 0.999 against the 8/255 box on a CIFAR-10 image",
+        description="Binary certified radius against the l2 length of the l-infinity box corner.",
+        noise_sd=0.5,                     # scenario assumption
+        top_class_probability=0.999,      # scenario assumption
+        linf_levels=8,                    # the RobustBench CIFAR-10 l-infinity budget, 8/255
+        pixel_levels=_COLOR_DEPTH_8BIT,
+        coordinates=(_Datasets.CIFAR10.image_width * _Datasets.CIFAR10.image_height
+                     * _Datasets.CIFAR10.image_channels),
+    )
+    Fp32WeightExponentFlip = _st.FloatBitFlipScenario(
+        name="The top exponent bit of an FP32 weight of 0.042 flips",
+        description="The value is multiplied by 2^128 and stays finite, so NaN and infinity checks pass.",
+        value=0.042,                      # scenario assumption: an illustrative weight
+        flipped_bit=sum(_FLOAT_FORMAT_BITS["fp32"]) - 1,   # bit 30, the top exponent bit
+        exponent_bits=_FLOAT_FORMAT_BITS["fp32"][0],
+        fraction_bits=_FLOAT_FORMAT_BITS["fp32"][1],
+    )
+    ImageNetTestbedV2Shift = _st.ShiftedTestSetScenario(
+        name="ImageNet models of the Taori et al. testbed on ImageNetV2",
+        description="Models scored on ImageNetV2 with at least 55 percent on the ImageNet validation set; "
+                    "the floor drops partially trained and low-data checkpoints.",
+        series_name="ImageNetTestbedShift",
+        original_key="val", new_key="imagenet_v2",
+        original_floor=55,                # scenario assumption: percent, ImageNet top-1
+    )
+    RobustBenchCifar10LinfProgress = _st.StandardizedAttackScenario(
+        name="CIFAR-10 defenses under AutoAttack at 8/255, 2018 to 2024",
+        description="Best attacked accuracy by publication year and defenses that fall to near zero.",
+        series_name="RobustBenchCIFAR10Linf",
+        first_year=2018, last_year=2024,
+        broken_floor=5.0,                 # scenario assumption: percent; below it a defense gives no robustness
     )

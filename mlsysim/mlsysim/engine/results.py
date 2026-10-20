@@ -1432,6 +1432,7 @@ class ShiftedTestSetResult(SolverResult):
     network_gap_min: float             # percentage points, models without the baseline prefix
     network_gap_max: float
     mean_gap: float
+    gap_median: Optional[float] = None  # percentage points, all models (added 2026-10-20)
     slope: float                       # least-squares fit: new = slope * original + intercept
     intercept: float
 

@@ -164,26 +164,26 @@ Commercial aviation shows the same inherited hazard. A 2015 FAA airworthiness di
 # │ Goal: Show that one flipped exponent bit turns a modest weight into a
 # │       finite outlier that NaN and infinity checks never see.
 # │ Show: w = 0.042 -> w' ~ 1.4e37 after flipping bit 30 (factor 2^128).
-# │ How: Flip bit 30 of the IEEE-754 FP32 encoding with struct; the weight
-# │      value is an illustrative scenario input.
+# │ How: Scenarios.Fp32WeightExponentFlip flips bit 30 of the IEEE-754 FP32
+# │      encoding; the weight value is an illustrative scenario input.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import math
-import struct
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_math, sci_latex
 
 class BitFlipWeight:
     """One exponent-bit flip in an FP32 weight."""
 
     # ┌── 1. LOAD (scenario input, illustrative) ───────────────────────────
-    weight = 0.042
-    flipped_bit = 30  # most significant exponent bit of the FP32 word
+    _s = Scenarios.Fp32WeightExponentFlip
+    weight = _s.value
+    flipped_bit = _s.flipped_bit  # most significant exponent bit of the FP32 word
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    _bits = struct.unpack(">I", struct.pack(">f", weight))[0]
-    stored = struct.unpack(">f", struct.pack(">I", _bits))[0]
-    corrupted = struct.unpack(">f", struct.pack(">I", _bits ^ (1 << flipped_bit)))[0]
-    scale_log2 = round(math.log2(corrupted / stored))
+    stored = _s.stored
+    corrupted = _s.corrupted
+    scale_log2 = _s.scale_log2
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(math.isfinite(corrupted), "Flipped weight must stay finite (evades NaN/inf checks)")
@@ -393,43 +393,38 @@ A vehicle perception model trained mostly on daytime images encounters unfamilia
 # │ Goal: Show that even a shift meant to be none at all costs every model.
 # │ Show: 212 ImageNet models (>= 55% val) all lose 7-14 points on
 # │       ImageNet-V2, median 12; the loss tracks accuracy linearly.
-# │ How: Gaps and a least-squares fit over Literature.Series.ImageNetTestbedShift.
+# │ How: Scenarios.ImageNetTestbedV2Shift: gaps and a least-squares fit over
+# │      Literature.Series.ImageNetTestbedShift, models above the val floor.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-import statistics
 import numpy as np
-from mlsysim import Literature
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_int
-
-def _evaluated(rows, floor):
-    return [r for r in rows if r["imagenet_v2"] is not None and r["val"] >= floor]
-
-def _gaps(rows):
-    return [r["val"] - r["imagenet_v2"] for r in rows]
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ImageNetV2Shift:
     """Accuracy on ImageNet against ImageNet-V2 across the Taori et al. testbed."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    val_floor = 55  # percent; excludes the testbed's partially trained and low-data checkpoints
-    rows = _evaluated(Literature.Series.ImageNetTestbedShift.entries, val_floor)
+    _s = Scenarios.ImageNetTestbedV2Shift
+    val_floor = _s.original_floor  # percent; excludes the testbed's partially trained and low-data checkpoints
+    rows = _s.rows
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    gaps = _gaps(rows)
-    fit_slope, fit_intercept = np.polyfit([r["val"] for r in rows], [r["imagenet_v2"] for r in rows], 1)
+    _r = _s.result
+    fit_slope, fit_intercept = _r.slope, _r.intercept
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(min(gaps) > 0, "Prose says every model scores lower on ImageNet-V2.")
-    check(6 <= min(gaps) and max(gaps) <= 15 and 11 <= statistics.median(gaps) <= 13, "Prose quotes 7 to 14 points, median 12.")
-    check(len(rows) >= 200, "Prose quotes about 200 models.")
+    check(_r.gap_min > 0, "Prose says every model scores lower on ImageNet-V2.")
+    check(6 <= _r.gap_min and _r.gap_max <= 15 and 11 <= _r.gap_median <= 13, "Prose quotes 7 to 14 points, median 12.")
+    check(_r.model_count >= 200, "Prose quotes about 200 models.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    model_count_str = fmt_int(len(rows))
+    model_count_str = fmt_int(_r.model_count)
     val_floor_str = fmt_int(val_floor)
-    gap_min_str = fmt_int(round(min(gaps)))
-    gap_max_str = fmt_int(round(max(gaps)))
-    gap_median_str = fmt_int(round(statistics.median(gaps)))
+    gap_min_str = fmt_int(round(_r.gap_min))
+    gap_max_str = fmt_int(round(_r.gap_max))
+    gap_median_str = fmt_int(round(_r.gap_median))
 ```
 
 Even a shift that was designed to be no shift at all costs accuracy. @recht2019imagenet rebuilt the ImageNet validation set a decade after the original by following the original collection and labeling protocol, then evaluated existing models on the new images. In the larger testbed of @taori2020measuring, every one of the `{python} ImageNetV2Shift.model_count_str` models that reach at least `{python} ImageNetV2Shift.val_floor_str` percent on the original set scores lower on the new one, by `{python} ImageNetV2Shift.gap_min_str` to `{python} ImageNetV2Shift.gap_max_str` points with a median of `{python} ImageNetV2Shift.gap_median_str` (@fig-imagenet-v2-shift). The loss follows a nearly straight line, so a model that is better on the original set is better on the new one, yet no architecture, training recipe, or amount of extra data closes the gap. Whatever separates the two sets is not an obvious visual change, yet it is costly to every model. For a fleet, accuracy measured on held-out data from the training distribution is therefore an optimistic estimate of accuracy on the next population of inputs, not a prediction of it.
@@ -702,25 +697,27 @@ PSI and KL divergence quantify how large a distributional change appears to be; 
 # │
 # │ Goal: Quantify the confidence of a distribution shift detection.
 # │ Show: p_value ≈ 0.001—inline in notebook result.
-# │ How: Z-score and two-sided normal-tail p-value for mean shift.
+# │ How: Scenarios.FeatureMeanShiftTest: z-score and two-sided normal-tail
+# │      p-value for the mean shift.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from statistics import NormalDist
+from mlsysim import Scenarios
 from mlsysim.fmt import MarkdownStr, check, fmt, fmt_math, fmt_percent
 
 class ShiftConfidence:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    n_samples = 1000
-    baseline_mean = 0.5
-    current_mean = 0.55  # A 5% shift in feature distribution
-    std_dev = 0.3
-    noise_prob_bound = 0.001  # significance bound reported in prose ("< 0.1 percent")
+    _s = Scenarios.FeatureMeanShiftTest
+    n_samples = _s.n_samples
+    baseline_mean = _s.reference_mean
+    current_mean = _s.observed_mean  # A 5% shift in feature distribution
+    std_dev = _s.feature_sd
+    noise_prob_bound = _s.significance_bound  # significance bound reported in prose ("< 0.1 percent")
     # ┌── 2. EXECUTE ───────────────────────────────────────
     # Z-score = (mean_diff) / (std/sqrt(n_samples))
-    mean_diff = current_mean - baseline_mean
-    std_error = std_dev / (n_samples**0.5)
-    z_score = mean_diff / std_error
-    p_value = 2 * (1 - NormalDist().cdf(abs(z_score)))
+    mean_diff = _s.mean_shift
+    std_error = _s.standard_error
+    z_score = _s.z_score
+    p_value = _s.p_value
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(z_score > 5, f"Z-score {z_score:.2f} too low for significant shift")
     check(p_value < noise_prob_bound, f"P-value {p_value:.2e} should be below {noise_prob_bound}")
@@ -798,33 +795,31 @@ Consider a fraud detection model serving an e-commerce platform with two key inp
 # │ Goal: Decompose the user-country PSI into per-bucket contributions.
 # │ Show: Per-country difference, log-ratio, and contribution columns, plus the
 # │       total PSI (0.065) and the "Other" bucket's share of it.
-# │ How: Scenario baseline/current shares are illustrative LOAD constants; the
-# │      difference (p-q), log-ratio ln(p/q), and contribution (p-q)*ln(p/q)
-# │      are derived per bucket and summed for the total PSI.
+# │ How: Scenarios.FraudCountryPsi holds the illustrative baseline/current
+# │      shares and the per-bucket contribution (p-q)*ln(p/q); the difference
+# │      (p-q) and log-ratio ln(p/q) are shown per bucket, summed for the total.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import math
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_math
-
-def _psi_contrib(p, q):
-    """PSI bucket contribution (p - q) * ln(p / q)."""
-    return (p - q) * math.log(p / q)
 
 class CountryPSIDecomposition:
     # ┌── 1. LOAD (scenario distributions — illustrative, not registry specs) ──
     # (baseline share p_i, current share q_i) per country bucket.
-    usa = (0.45, 0.38)
-    uk = (0.20, 0.18)
-    germany = (0.15, 0.14)
-    france = (0.10, 0.12)
-    other = (0.10, 0.18)
+    _s = Scenarios.FraudCountryPsi
+    usa = _s.shares("USA")
+    uk = _s.shares("UK")
+    germany = _s.shares("Germany")
+    france = _s.shares("France")
+    other = _s.shares("Other")
 
     # ┌── 2. EXECUTE (per-bucket decomposition + total) ───────────────────────
-    usa_contrib = _psi_contrib(*usa)
-    uk_contrib = _psi_contrib(*uk)
-    germany_contrib = _psi_contrib(*germany)
-    france_contrib = _psi_contrib(*france)
-    other_contrib = _psi_contrib(*other)
+    usa_contrib = _s.term("USA")
+    uk_contrib = _s.term("UK")
+    germany_contrib = _s.term("Germany")
+    france_contrib = _s.term("France")
+    other_contrib = _s.term("Other")
     psi_total = usa_contrib + uk_contrib + germany_contrib + france_contrib + other_contrib
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────────
@@ -913,37 +908,39 @@ Summing the per-country contributions gives `{python} CountryPSIDecomposition.ps
 # │ Show: KL terms (0.167, 0.385), the KL result (0.052), and the KS critical
 # │       value (0.023) at the Bonferroni-corrected alpha = 0.01 used by the
 # │       service's Level 1 rule and @tbl-retraining-decision-matrix.
-# │ How: Scenario means/std-devs, KS statistic, and sample sizes are illustrative
-# │      LOAD constants; the closed-form Gaussian KL, the asymptotic coefficient
-# │      c(alpha) = sqrt(-ln(alpha/2)/2), and the KS critical value
-# │      c(alpha)*sqrt((n+m)/(n*m)) are derived.
+# │ How: Scenarios.FraudAmountDrift (illustrative log-dollar normals) gives the
+# │      closed-form Gaussian KL; Scenarios.FraudAmountKs (illustrative KS
+# │      statistic and sample sizes) gives c(alpha) = sqrt(-ln(alpha/2)/2) and
+# │      the KS critical value c(alpha)*sqrt((n+m)/(n*m)).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import math
+from mlsysim import Scenarios
+from mlsysim.physics import calc_ks_coefficient
 from mlsysim.fmt import check, fmt, fmt_math
 
 class ContinuousDriftAnalysis:
     # ┌── 1. LOAD (scenario log-dollar distributions + KS setup — illustrative) ─
-    mu_base = 4.2
-    sigma_base = 1.1
-    mu_curr = 4.5
-    sigma_curr = 1.3
-    ks_statistic = 0.089  # observed two-sample KS statistic D
-    n_base = 10_000  # baseline sample size
-    n_curr = 10_000  # current sample size
+    _kl = Scenarios.FraudAmountDrift
+    _ks = Scenarios.FraudAmountKs
+    mu_base = _kl.reference_mean
+    sigma_base = _kl.reference_sd
+    mu_curr = _kl.current_mean
+    sigma_curr = _kl.current_sd
+    ks_statistic = _ks.observed_statistic  # observed two-sample KS statistic D
+    n_base = _ks.n_reference  # baseline sample size
+    n_curr = _ks.n_current  # current sample size
     c_alpha_05 = Ops.Monitoring.KsTestCoefficient  # registry KS coefficient at alpha = 0.05
-    alpha_bonf = 0.01  # scenario assumption: Bonferroni-corrected level from the Level 1 rule
+    alpha_bonf = _ks.significance  # scenario assumption: Bonferroni-corrected level from the Level 1 rule
 
     # ┌── 2. EXECUTE (Gaussian KL closed form + KS critical value) ─────────────
-    kl_term1 = math.log(sigma_curr / sigma_base)
-    kl_numerator = sigma_base**2 + (mu_base - mu_curr) ** 2
-    kl_denominator = 2 * sigma_curr**2
-    kl_term2 = kl_numerator / kl_denominator
-    kl = kl_term1 + kl_term2 - 0.5
-    c_alpha_05_formula = math.sqrt(-math.log(0.05 / 2) / 2)
-    c_alpha = math.sqrt(-math.log(alpha_bonf / 2) / 2)  # ~1.63 at alpha = 0.01
-    ks_scale = math.sqrt((n_base + n_curr) / (n_base * n_curr))
-    ks_crit = c_alpha * ks_scale
+    kl_term1, kl_numerator, kl_denominator = _kl.kl_terms
+    kl_term2 = _kl.kl_ratio_term
+    kl = _kl.kl
+    c_alpha_05_formula = calc_ks_coefficient(0.05)
+    c_alpha = _ks.coefficient  # ~1.63 at alpha = 0.01
+    ks_scale = _ks.scale
+    ks_crit = _ks.critical_value
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────────
     check(0.0 < kl < 0.1, "Scenario KL should land in the moderate-drift band")
@@ -1333,8 +1330,9 @@ Adversarial example generation increases training time because each training ste
 # │
 # │ Goal: Expose an invalid clean-versus-attacked accuracy subtraction.
 # │ Show: A 26-point cross-condition gap that is not a clean-accuracy penalty.
-# │ How: Standard ResNet-50 clean accuracy from Literature.Series.ImageNetTestbedShift
-# │      (76.1%) against an assumed robust-model attacked accuracy (~50%).
+# │ How: Scenarios.ResNet50CleanVersusRobustAttacked: standard ResNet-50 clean
+# │      accuracy from Literature.Series.ImageNetTestbedShift (76.1%) against
+# │      an assumed robust-model attacked accuracy (~50%).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt
@@ -1344,16 +1342,15 @@ class RobustnessTaxAnalysis:
     """Quantify the utility-robustness trade-off."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    from mlsysim import Models
+    from mlsysim import Models, Scenarios
 
     m = Models.Vision.ResNet50
-    from mlsysim import Literature
-
-    standard_clean_acc = next(r["val"] for r in Literature.Series.ImageNetTestbedShift.entries if r["model"] == "resnet50")
-    robust_model_attacked_acc = 50.0  # scenario assumption: an adversarially trained ImageNet model at 4/255
+    _s = Scenarios.ResNet50CleanVersusRobustAttacked
+    standard_clean_acc = _s.standard_clean_accuracy
+    robust_model_attacked_acc = _s.robust_attacked_accuracy  # scenario assumption: an adversarially trained ImageNet model at 4/255
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    cross_condition_gap = standard_clean_acc - robust_model_attacked_acc
+    cross_condition_gap = _s.gap
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     from mlsysim.fmt import check
@@ -1391,19 +1388,22 @@ The robustness compute penalty (principle \ref{pri-robustness-compute-penalty}) 
 # │
 # │ Goal: Quantify the compute overhead of adversarial training.
 # │ Show: training_slowdown ≈ 8x—inline in notebook result.
-# │ How: total time = standard time + PGD steps × standard time.
+# │ How: Scenarios.PgdSevenTraining: total time = standard time + PGD steps ×
+# │      standard time.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_count, fmt_multiple
 
 class AdversarialPayback:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    std_passes = 1
-    n_pgd_steps = 7  # Illustrative PGD-7 adversarial-training scenario
+    _s = Scenarios.PgdSevenTraining
+    std_passes = _s.update_passes
+    n_pgd_steps = _s.attack_passes  # Illustrative PGD-7 adversarial-training scenario
     # ┌── 2. EXECUTE ───────────────────────────────────────
     # Each training step requires generating an attack (7 forward/backward passes)
     # total steps per batch = 1 (std) + 7 (attack) = 8
-    slowdown = std_passes + n_pgd_steps
+    slowdown = _s.passes
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(slowdown == 8, f"Slowdown {slowdown} unexpected")
     # ┌── 4. OUTPUT ────────────────────────────────────────
@@ -1446,10 +1446,10 @@ Adversarial training provides empirical resistance that must be tested against t
 # │
 # │ Goal:    Compute the binary special-case certified radius.
 # │ Show:    p_A=0.999, sigma=0.5 gives R≈1.5.
-# │ How:     R = sigma * Phi^{-1}(p_A).
+# │ How:     Scenarios.SmoothingRadiusCifar10: R = sigma * Phi^{-1}(p_A).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from statistics import NormalDist
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -1457,13 +1457,12 @@ class RandomizedSmoothingRadius:
     """Compute a binary randomized-smoothing radius."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    p_top = 0.999
-    sigma = 0.5
+    _s = Scenarios.SmoothingRadiusCifar10
+    p_top = _s.top_class_probability
+    sigma = _s.noise_sd
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    from statistics import NormalDist
-
-    radius = sigma * NormalDist().inv_cdf(p_top)
+    radius = _s.radius
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     from mlsysim.fmt import check
@@ -1520,34 +1519,27 @@ Empirical attack evaluation must be adaptive to the defense\index{Adaptive evalu
 # │       under one standardized attack.
 # │ Show: Best AutoAttack accuracy 44% (2018) -> 75% (2024) at clean ~94%;
 # │       four published defenses fall to ~0% under the standardized attack.
-# │ How: Year maxima and filters over Literature.Series.RobustBenchCIFAR10Linf.
+# │ How: Scenarios.RobustBenchCifar10LinfProgress: year maxima and filters over
+# │      Literature.Series.RobustBenchCIFAR10Linf.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_percent
-
-def _dated(rows):
-    return [r for r in rows if r["year"] and r["unreliable"] != "True"]
-
-def _best(rows, year):
-    return max((r for r in rows if int(r["year"]) == year), key=lambda r: r["autoattack_acc"])
-
-def _broken(rows, floor):
-    return [r for r in rows if r["autoattack_acc"] < floor]
 
 # ┌── LEGO ───────────────────────────────────────────────
 class RobustBenchProgress:
     """Best robust accuracy by year and defenses broken by AutoAttack."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    rows = _dated(Literature.Series.RobustBenchCIFAR10Linf.entries)
-    first_year, last_year = 2018, 2024
-    broken_floor = 5.0  # percent AutoAttack accuracy; below this a defense provides no robustness
+    _s = Scenarios.RobustBenchCifar10LinfProgress
+    rows = _s.rows
+    first_year, last_year = _s.first_year, _s.last_year
+    broken_floor = _s.broken_floor  # percent AutoAttack accuracy; below this a defense provides no robustness
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    best_first = _best(rows, first_year)
-    best_last = _best(rows, last_year)
-    broken = _broken(rows, broken_floor)
+    best_first = _s.best_first
+    best_last = _s.best_last
+    broken = _s.broken
     entry_count = len(rows)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────

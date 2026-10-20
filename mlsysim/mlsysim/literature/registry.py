@@ -81,6 +81,7 @@ KerasApplications = _load("keras_applications", "KerasApplications", "Keras Appl
 ContextWindows = _load("context_windows", "ContextWindows", "Announced context windows of language models outside the Models registry (GPT-4 Turbo, Claude 2.1, Gemini 1.5 Pro).")  # added 2026-10-20
 RecommendationSystems = _load("recommendation_systems", "RecommendationSystems", "Cited figures of production recommendation systems (Gupta et al. 2020; Mudigere et al. 2022).")  # added 2026-10-20
 ServingMemoryLayout = _load("serving_memory_layout", "ServingMemoryLayout", "Memory layout of a 13B model served on one A100 40 GB (Kwon et al. 2023, Figure 1).")  # added 2026-10-20
+RobustnessStudies = _load("robustness_studies", "RobustnessStudies", "Cited results of robustness studies (Eykholt 2018 stickers, Goodfellow 2015 FGSM, Guo 2017 calibration, Zou 2023 GCG, Gu 2017 BadNets).")  # added 2026-10-20
 
 
 # ---------------------------------------------------------------------------
@@ -385,6 +386,7 @@ class Literature(Registry):
     RecommendationSystems = RecommendationSystems  # network architectures (added 2026-10-20)
     ServingMemoryLayout = ServingMemoryLayout  # network architectures (added 2026-10-20)
     FlashAttentionBenchmark = _series.FlashAttentionBenchmark  # network architectures (added 2026-10-20)
+    RobustnessStudies = RobustnessStudies  # added 2026-10-20
     ComputeTrend = ComputeTrend
     AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks

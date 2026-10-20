@@ -8,6 +8,8 @@ stays reviewable. Added 2026-10-20 for the silent-degradation examples
 
 from __future__ import annotations
 
+from typing import Optional
+
 import numpy as np
 
 from ..results import ProxyDriftResult, ShiftedTestSetResult
@@ -27,18 +29,22 @@ class ShiftedTestSetModel(ForwardModel):
     requires = ("rows",)
     produces = ShiftedTestSetResult
 
-    def solve(self, rows, original_key: str, new_key: str, gap_key: str,
-              baseline_prefix: str) -> ShiftedTestSetResult:
+    def solve(self, rows, original_key: str, new_key: str, gap_key: Optional[str],
+              baseline_prefix: Optional[str]) -> ShiftedTestSetResult:
         orig = np.array([r[original_key] for r in rows], dtype=float)
         new = np.array([r[new_key] for r in rows], dtype=float)
-        gaps = [r[gap_key] for r in rows]
-        nets = [r[gap_key] for r in rows if not str(r["model"]).startswith(baseline_prefix)]
+        # A series without a published gap column: gap = original - new (added 2026-10-20).
+        gap = (lambda r: r[gap_key]) if gap_key else (lambda r: r[original_key] - r[new_key])
+        gaps = [gap(r) for r in rows]
+        nets = [gap(r) for r in rows
+                if not (baseline_prefix and str(r["model"]).startswith(baseline_prefix))]
         slope, intercept = np.polyfit(orig, new, 1)
         return ShiftedTestSetResult(
             model_count=len(rows), baseline_count=len(rows) - len(nets),
             gap_min=min(gaps), gap_max=max(gaps),
             network_gap_min=min(nets), network_gap_max=max(nets),
             mean_gap=sum(gaps) / len(gaps),
+            gap_median=float(np.median(gaps)),
             slope=float(slope), intercept=float(intercept),
         )
 
