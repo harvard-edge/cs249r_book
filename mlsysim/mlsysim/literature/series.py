@@ -1229,6 +1229,83 @@ class Series:
         "Hourly EU electricity generation by source and load, one week of November 2023 (MW).",
         numeric=("nuclear", "hydro", "biomass_other", "wind", "solar", "gas", "coal_oil", "load"),
     )
+    # --- Fleet-scale measurements recalled by the Volume II conclusion (added 2026-10-20) ---
+    MegaScaleStrongScaling = TrendSeries(
+        "megascale_strong_scaling",
+        _lit("Jiang et al. (2024), MegaScale: Scaling Large Language Model Training to More Than 10,000 "
+             "GPUs, NSDI 2024, Table 2 (arXiv:2402.15627 v1)",
+             "https://arxiv.org/abs/2402.15627",
+             "Strong scaling of the 175B model at a fixed batch of 768 sequences (sequence 2,048) on "
+             "NVIDIA Ampere GPUs: MegaScale training throughput in tokens per second and MFU, with "
+             "Megatron-LM's MFU on the same configuration. Read from the paper's table."),
+        "MegaScale strong scaling of a 175B model at batch 768: throughput and MFU by GPU count.",
+        numeric=("gpus", "megascale_tokens_s", "megascale_mfu_pct", "megatron_mfu_pct"),
+    )
+    TailAtScaleLeafLatency = TrendSeries(
+        "tail_at_scale_leaf_latency",
+        _lit("Dean and Barroso (2013), The Tail at Scale, Communications of the ACM 56(2), Table 1",
+             "https://doi.org/10.1145/2408776.2408794",
+             "Latency measured at the root of a Google service whose requests fan out through "
+             "intermediate servers to many leaf servers, by how many leaves the root waits for. Only "
+             "the cells the books cite are transcribed (the 50th and 99th percentiles of one random "
+             "leaf and of all leaves, and the 99th percentile of 95 percent of the leaves). The paper "
+             "names neither the service nor its leaf count. Read from the paper."),
+        "Root-measured latency of a fan-out service by the share of leaves awaited and percentile.",
+        numeric=("percentile", "latency_ms"),
+    )
+
+    # --- Model compression (added 2026-10-20) ---
+    MobileNetV3Table3 = TrendSeries(
+        "mobilenetv3_table3_pixel1",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="Howard et al. (2019), Searching for MobileNetV3, ICCV 2019, Table 3",
+                   url="https://arxiv.org/abs/1905.02244",
+                   verified="2026-10-20",
+                   notes=("ImageNet top-1 (percent), Pixel 1 latency in floating point (ms; TFLite "
+                          "benchmark tool, one large core, batch 1), multiply-adds and parameters "
+                          "(millions) of the classification models of Table 3.")),
+        "Accuracy and measured phone latency of efficient ImageNet models (MobileNetV3 Table 3).",
+        numeric=("top1", "pixel1_ms", "madds_m", "params_m"),
+    )
+    HanAlexNetPruning = TrendSeries(
+        "han2015_alexnet_pruning",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="Han, Pool, Tran, and Dally (2015), Learning both Weights and Connections for "
+                       "Efficient Neural Networks, NeurIPS 2015, figure 5",
+                   url="https://arxiv.org/abs/1506.02626",
+                   verified="2026-10-20",
+                   notes=("AlexNet, ImageNet top-5 change (points) against the share of parameters "
+                          "pruned (percent), L2-regularized runs: curve no_retrain, retrain (one prune "
+                          "then retraining), iterative (pruning and retraining repeated). Points taken "
+                          "from the vector paths of the published figure (arXiv v3, p. 7).")),
+        "Pruning without retraining, with one retraining, and iteratively (AlexNet, Han et al. 2015).",
+        numeric=("pruned_pct", "top5_change"),
+    )
+    DeepCompressionMethods = TrendSeries(
+        "han2016_compression_methods",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="Han, Mao, and Dally (2016), Deep Compression, ICLR 2016, figure 6",
+                   url="https://arxiv.org/abs/1510.00149",
+                   verified="2026-10-20",
+                   notes=("AlexNet on ImageNet: accuracy change (points) against model size kept "
+                          "(percent of original) for four methods, as transcribed in the Model "
+                          "Compression chapter's figure; extension=True marks a line's continuation "
+                          "off the plotted axis, not a reported point.")),
+        "Accuracy against model size for pruning, quantization, both, and SVD (Deep Compression).",
+        numeric=("size_pct", "accuracy_change"),
+    )
+    MishraInt8SparseGemm = TrendSeries(
+        "mishra2021_int8_sparse_gemm",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="Mishra et al. (2021), Accelerating Sparse Deep Neural Networks, figure 3",
+                   url="https://arxiv.org/abs/2104.08378",
+                   verified="2026-10-20",
+                   notes=("Measured INT8 2:4 sparse-over-dense GEMM speedup on an A100 at M = N = 10240 "
+                          "for three inner dimensions K; values read from the published plot "
+                          "(approximate).")),
+        "2:4 sparse INT8 GEMM speedup over dense by inner dimension (A100).",
+        numeric=("k", "speedup"),
+    )
 
 # --- Context engineering (added 2026-10-20) ----------------------------------
 RulerEffectiveLength = _Series(
@@ -1339,6 +1416,25 @@ FlashAttentionBenchmark = _Series(
     "Attention runtime and memory against sequence length, standard PyTorch and FlashAttention (A100).",
 )
 
+# --- Fitting a training step on one accelerator (added 2026-10-20) -------------
+SsdGradientHistogram = _Series(
+    "micikevicius_ssd_gradient_histogram",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Micikevicius et al. (2018), Mixed Precision Training, ICLR 2018, Figure 3",
+        url="https://arxiv.org/abs/1710.03740",
+        verified="2026-10-18",
+        notes=(
+            "Activation-gradient magnitudes of the SSD detector in FP32 training, binned by log2 magnitude "
+            "[log2_low, log2_high). bar_top_px is the pixel row of each bar top, read from the figure "
+            "image (arXiv 1710.03740v3, page 4, 898 x 575 px; log-scale y axis, gridline rows 35 at 64 "
+            "percent and 504 at 1/512 percent). An empty cell marks an empty bin; the 67 percent of "
+            "exact zeros (caption) is not a bar."
+        ),
+    ),
+    "SSD activation-gradient histogram by log2 magnitude, read from Micikevicius et al. (2018), Figure 3.",
+)
+
 ToolInterceptionTimes = _Series(
     "infercept_interception_times",
     Provenance(
@@ -1389,4 +1485,53 @@ MetastableFailures = _Series(
         ),
     ),
     "Metastable failures from public sources: duration and whether retries sustained them.",
+)
+
+
+# --- Agent evaluation results (added 2026-10-20) -------------------------------
+JudgePositionBias = _Series(
+    "judge_position_bias",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=("Zheng et al. (2023), Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena, "
+             "Table 2 (position bias, default prompt)"),
+        url="https://arxiv.org/abs/2306.05685",
+        verified="2026-10-20",
+        notes=("Three rows transcribed from Table 2 of the HTML version (arxiv.org/html/2306.05685) and "
+               "checked against it: percent of answer pairs, each judged twice with the order swapped, "
+               "that kept the verdict, favored the first or second position, or produced an error."),
+    ),
+    "Pairwise model judges: verdict consistency and position bias when two answers swap places.",
+)
+
+HumanEvalAgentCost = _Series(
+    "humaneval_agent_cost_accuracy",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Kapoor et al. (2024), AI Agents That Matter, Table A1 (HumanEval accuracy and total cost)",
+        url="https://arxiv.org/abs/2407.01502",
+        verified="2026-10-20",
+        notes=("Nine rows transcribed from Table A1 (arxiv.org/html/2407.01502): mean accuracy (percent) "
+               "and mean total API cost (US dollars, 2024 prices) over five runs on the 164 problems. "
+               "role: published agent, author baseline (Retry, Warming, Escalation), or single call."),
+    ),
+    "Code agents on HumanEval: accuracy against total cost, mean of five runs.",
+)
+
+DapperSamplingOverhead = _Series(
+    "dapper_sampling_overhead",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Sigelman et al. (2010), Dapper, a Large-Scale Distributed Systems Tracing Infrastructure, "
+            "Google Technical Report dapper-2010-1, Table 2",
+        url="https://research.google/pubs/dapper-a-large-scale-distributed-systems-tracing-infrastructure/",
+        verified="2026-10-20",
+        notes=(
+            "One row per non-adaptive sampling frequency of Table 2: the change in average latency and "
+            "in average throughput of a Web search cluster, percent as printed. The caption gives "
+            "experimental errors of 2.5 and 0.15 percent (Literature.DistributedTracing). Read from "
+            "the report PDF with pdftotext."
+        ),
+    ),
+    "Dapper tracing overhead on a Web search cluster at six sampling frequencies (added 2026-10-20).",
 )

@@ -129,24 +129,26 @@ The six principles therefore work as a decision map rather than a glossary (@tbl
 # │ How: Direct probability and rate calculations from the stated assumptions.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import HOURS_PER_DAY, Literature, Models, Systems
+from mlsysim import HOURS_PER_DAY, Literature, Models, Scenarios, Systems
 from mlsysim.fmt import check, fmt_count, fmt_int, fmt_percent, fmt_time
 
 class ConclusionScaleFacts:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    tail_servers = 100
-    tail_percentile = 0.99
+    fanout = Scenarios.ServingFanout100Leaves  # each server fast at its p99, independent delays
+    straggler = Scenarios.SlowWorker8K  # equal-work, barrier-dominated step
+    tail_servers = fanout.n_components
+    tail_percentile = fanout.availability
     llama_failures = Literature.TrainingRuns.Llama3_405B_UnexpectedInterruptions
     llama_days = Literature.TrainingRuns.Llama3_405B_SnapshotDays
     llama_effective_fraction = Literature.TrainingRuns.Llama3_405B_EffectiveTrainingTimeFraction
     hours_per_day = HOURS_PER_DAY
-    straggler_speed = 0.80
+    straggler_speed = straggler.slow_speed
     llama_gpus = Models.Language.Llama3_405B.training_accelerators_ref.magnitude
     ref_gpus = Systems.Clusters.Training_1K.total_accelerators  # Archetype A reference cluster
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    tail_hit_probability = 1 - tail_percentile**tail_servers
+    tail_hit_probability = 1 - fanout.all_up
     llama_hours_per_failure = llama_days * hours_per_day / llama_failures
-    straggler_drop = 1 - straggler_speed
+    straggler_drop = 1 - straggler.throughput
     llama_ref_ratio = llama_gpus / ref_gpus  # Llama 3 cluster vs. reference
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(round(tail_hit_probability * 100) == 63, "Tail probability changed")
@@ -243,7 +245,7 @@ The sixth principle is that sustainability\index{Sustainable infrastructure!firs
 # │      intensities (equals the carbon ratio at fixed energy).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Infrastructure, Models, ReferenceStats
+from mlsysim import Models, ReferenceStats, Scenarios
 from mlsysim.core.units import MWh
 from mlsysim.fmt import check, fmt, fmt_energy, fmt_int, fmt_multiple
 
@@ -251,11 +253,11 @@ class ConclusionSustainabilityAnchors:
     # ┌── 1. LOAD ──────────────────────────────────────────
     gpt3_energy = Models.Language.GPT3.training_energy_mwh
     household_energy = ReferenceStats.EnergyAnchors.USHouseholdAnnualElectricity
-    quebec_g_kwh = float(Infrastructure.Grids.Quebec.carbon_intensity_g_kwh)
-    poland_g_kwh = float(Infrastructure.Grids.Poland.carbon_intensity_g_kwh)
+    placement = Scenarios.QuebecVersusPolandPlacement  # one run's energy on each grid
     # ┌── 2. EXECUTE ───────────────────────────────────────
     household_years = (gpt3_energy / household_energy).to("").magnitude
-    grid_ratio = poland_g_kwh / quebec_g_kwh
+    emissions = placement.result.emissions
+    grid_ratio = (emissions["Poland"] / emissions["Quebec"]).to("").magnitude  # equals the intensity ratio
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(119 <= household_years <= 121, "GPT-3 household-year anchor changed")
     check(40 < grid_ratio < 42, "Poland/Quebec grid ratio changed")
@@ -295,21 +297,22 @@ A team that doubles its training cluster to chase the next point on a scaling cu
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import math
-from mlsysim import Systems
+from mlsysim import Scenarios, Systems
 from mlsysim.fmt import check, fmt_count, fmt_multiple, fmt_time
 
 class ConclusionExpansion:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    gpu_mttf_h = float(Systems.Reliability.Gpu.mttf_hours)
-    ref_gpus = Systems.Clusters.Training_1K.total_accelerators  # Archetype A reference cluster
-    expansion_factor = 2  # scenario: double the reference cluster
+    expansion = Scenarios.Gpt3ClusterDoubling1K  # Archetype A reference cluster, doubled
+    gpu_mttf_h = expansion.component_mtbf.to("hour").magnitude
+    ref_gpus = expansion.n_devices
+    expansion_factor = expansion.factor
     ft_cluster_gpus = Systems.Clusters.Training_10K.total_accelerators  # cluster of the full-system failure analysis
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    exp_gpus = ref_gpus * expansion_factor
-    ref_job_mtbf_h = gpu_mttf_h / ref_gpus
-    exp_job_mtbf_h = gpu_mttf_h / exp_gpus
-    # Young-Daly optimum: overhead ≈ sqrt(2·delta/MTBF_job), independent of delta as a ratio
-    ckpt_overhead_growth = math.sqrt(ref_job_mtbf_h / exp_job_mtbf_h)
+    exp_gpus = expansion.expanded_devices
+    ref_job_mtbf_h = expansion.mtbf.to("hour").magnitude
+    exp_job_mtbf_h = expansion.expanded_mtbf.to("hour").magnitude
+    # Young-Daly optimum: overhead ≈ sqrt(2·delta/MTBF_job), so it grows as sqrt(N)
+    ckpt_overhead_growth = expansion.overhead_growth
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(ref_gpus == 1024, "Reference cluster changed")
     check(abs(ckpt_overhead_growth - math.sqrt(expansion_factor)) < 1e-9, "Young-Daly scaling changed")
@@ -355,26 +358,23 @@ Serving adds a separate acceptance boundary. The contract of the fourth principl
 # │      speedup > (1 − o_ref)/(1 − o_exp); accelerator-hours scale by
 # │      (2/speedup)·(1 − o_ref)/(1 − o_exp) ≥ that ratio.
 # └─────────────────────────────────────────────────────────────────────────────
-import math
-from mlsysim import Models, Systems
-from mlsysim.core.units import GB, TB, hour, second
-from mlsysim.physics import calc_checkpoint_size
+from mlsysim import Scenarios
+from mlsysim.core.units import TB, hour
 from mlsysim.fmt import check, fmt_memory, fmt_multiple, fmt_percent, fmt_time
 
 class ConclusionExpansionOverhead:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    ckpt_bytes = calc_checkpoint_size(Models.Language.GPT3.parameters)  # 14 B/param
-    write_bw = float(Systems.Reliability.Recovery.checkpoint_write_bw_gbs) * (GB / second)
-    gpu_mttf_h = float(Systems.Reliability.Gpu.mttf_hours)
-    ref_gpus = Systems.Clusters.Training_1K.total_accelerators  # Archetype A reference cluster
-    exp_gpus = 2 * ref_gpus  # scenario: double the reference cluster
+    expansion = Scenarios.Gpt3ClusterDoubling1K  # Archetype A reference cluster, doubled
+    ckpt_bytes = expansion.checkpoint.checkpoint_bytes  # 14 B/param
+    ref_gpus = expansion.n_devices
+    exp_gpus = expansion.expanded_devices
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    t_write_h = (ckpt_bytes / write_bw).to(hour).magnitude
-    overhead_ref = math.sqrt(2 * t_write_h / (gpu_mttf_h / ref_gpus))
-    overhead_exp = math.sqrt(2 * t_write_h / (gpu_mttf_h / exp_gpus))
-    breakeven_speedup = (1 - overhead_ref) / (1 - overhead_exp)
-    ideal_speedup = exp_gpus / ref_gpus  # ideal step speedup equals the GPU ratio
-    ideal_accel_hours_extra = (exp_gpus / ref_gpus) / ideal_speedup * breakeven_speedup - 1
+    t_write_h = expansion.checkpoint.t_write.to(hour).magnitude
+    overhead_ref = expansion.overhead
+    overhead_exp = expansion.expanded_overhead
+    breakeven_speedup = expansion.breakeven_speedup
+    ideal_speedup = expansion.factor  # ideal step speedup equals the GPU ratio
+    ideal_accel_hours_extra = expansion.accelerator_hours_change(ideal_speedup)
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(ref_gpus == 1024, "Reference cluster changed")
     check(22 < t_write_h * 3600 < 27, "175B checkpoint write should be ~24.5 s")
@@ -406,17 +406,17 @@ class ConclusionExpansionOverhead:
 # │ How: L = (C / C_c)^(-alpha_C), so doubling C multiplies L by 2^(-alpha_C).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_math, fmt_percent
 
 class ConclusionScalingGain:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    compute_law = next(e for e in Literature.KaplanScalingLaws.entries if e["axis"] == "compute")
-    alpha_compute = compute_law["alpha"]  # published fit, valid only over its studied range
-    compute_multiple = 2  # scenario: double the training compute
+    doubling = Scenarios.KaplanComputeDoubling  # published fit, valid only over its studied range
+    alpha_compute = doubling.exponent
+    compute_multiple = doubling.resource_multiple
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    loss_factor = compute_multiple ** (-alpha_compute)
-    loss_reduction = 1 - loss_factor
+    loss_factor = doubling.multiple_factor
+    loss_reduction = doubling.multiple_reduction
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(abs(alpha_compute - 0.050) < 1e-9, "Kaplan compute exponent changed")
     check(0.03 < loss_reduction < 0.04, "Doubling-compute loss reduction should be ~3.4 percent")

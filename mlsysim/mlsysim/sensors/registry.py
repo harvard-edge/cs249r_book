@@ -150,6 +150,20 @@ class SafetyScanners(Registry):
         ),
     )
 
+    SICK_nanoScan3 = SafetyLaserScanner(
+        name="SICK nanoScan3 Core (NANS3-CAAZ30AA1)",
+        protective_field_range=3.0 * ureg.meter,
+        response_time=85.0 * ureg.millisecond,
+        scan_angle=275.0 * ureg.degree,
+        iec61496_type="Type 3",
+        performance_level="PL d",
+        configuration="Data-sheet response time and protective-field range",
+        metadata=Metadata(
+            provenance=pc.SICK_NANOSCAN3_CORE,
+            description="SICK nanoScan3 Core Type 3 / PL d safety laser scanner (3 m protective field).",
+        ),
+    )
+
 
 class Sensors(Registry):
     """Authoritative registry of robotics perception sensors."""

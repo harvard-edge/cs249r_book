@@ -63,6 +63,20 @@ def model_memory(params, bytes_per_param, unit=MB):
     return total_bytes.to(unit).magnitude
 
 
+# Korthikanti et al. (2023), Table 2: bytes one transformer layer saves for the
+# backward pass, per token and per unit of width (s*b*h), in 16-bit storage.
+# The score term saves three copies of every attention entry: the softmax
+# probabilities (2 B), the dropout mask (1 B), and the probabilities after
+# dropout (2 B), 5 B per entry, so it is 5*a*s^2*b. Full recomputation keeps
+# only each layer's 16-bit input, 2 B per element. (Named 2026-10-20.)
+KORTHIKANTI_PER_TOKEN_BYTES = 34
+SCORE_SOFTMAX_BYTES = 2
+SCORE_DROPOUT_MASK_BYTES = 1
+SCORE_DROPPED_BYTES = 2
+KORTHIKANTI_SCORE_BYTES = SCORE_SOFTMAX_BYTES + SCORE_DROPOUT_MASK_BYTES + SCORE_DROPPED_BYTES
+KORTHIKANTI_LAYER_INPUT_BYTES = 2
+
+
 def calc_activation_memory(
     n_layers,
     seq_len,
@@ -123,9 +137,9 @@ def calc_activation_memory(
     s, b, h = seq_len, batch_size, hidden_dim
     precision_scale = precision_bytes / 2  # Korthikanti constants are FP16 bytes
     if strategy == "full":
-        bytes_per_layer = 2 * s * b * h * precision_scale
+        bytes_per_layer = KORTHIKANTI_LAYER_INPUT_BYTES * s * b * h * precision_scale
     elif strategy == "selective":
-        bytes_per_layer = 34 * s * b * h * precision_scale
+        bytes_per_layer = KORTHIKANTI_PER_TOKEN_BYTES * s * b * h * precision_scale
     elif strategy == "none":
         if n_heads is None:
             raise ValueError(
@@ -133,13 +147,28 @@ def calc_activation_memory(
                 "attention term scales with the head count (Korthikanti et al. "
                 "2023, Sec. 4.1)."
             )
-        bytes_per_layer = (34 * s * b * h + 5 * n_heads * s * s * b) * precision_scale
+        bytes_per_layer = (KORTHIKANTI_PER_TOKEN_BYTES * s * b * h
+                           + KORTHIKANTI_SCORE_BYTES * n_heads * s * s * b) * precision_scale
     else:
         raise ValueError(
             f"Unknown activation strategy {strategy!r}; expected 'none', "
             "'selective', or 'full'."
         )
     return (n_layers * bytes_per_layer) * ureg.byte
+
+
+def calc_checkpoint_memory_units(n_layers: int, checkpoints: int) -> float:
+    """
+    Activation memory of evenly spaced checkpointing, in units of one layer's activations.
+
+    With ``k`` checkpoints over ``L`` equal layers, the forward pass keeps the
+    ``k`` checkpoint activations and the backward pass rebuilds one segment of
+    ``L/k`` layers at a time: ``k + L/k``, smallest near ``k = sqrt(L)``
+    (Chen et al. 2016). (Added 2026-10-20.)
+    """
+    validate_at_least(n_layers, 1, "n_layers")
+    validate_at_least(checkpoints, 1, "checkpoints")
+    return checkpoints + n_layers / checkpoints
 
 
 def calc_checkpoint_size(n_params, bytes_per_param=14):
@@ -569,3 +598,43 @@ def calc_residual_adapter_params(width: int, bottleneck: int) -> int:
     """
     validate_at_least(bottleneck, 1, "bottleneck")
     return 2 * width * bottleneck + bottleneck + width
+
+
+# --- Sparse storage formats (added 2026-10-20) --------------------------------
+
+def calc_sparse_bytes_per_nonzero(value_bytes, index_bytes, indices: int = 1):
+    """
+    Bytes one stored nonzero costs in an index-based sparse format.
+
+        b_nz = b_value + k b_index
+
+    CSR keeps one column index per value (k = 1; its row pointers are one per
+    row, not per value); COO keeps a row and a column index (k = 2).
+    """
+    validate_at_least(indices, 0, "indices")
+    return value_bytes + indices * index_bytes
+
+
+def calc_sparse_breakeven_zero_share(dense_bytes_per_value, bytes_per_nonzero) -> float:
+    """
+    Share of zeros above which a sparse format stores fewer bytes than dense.
+
+        z* = 1 - b_dense / b_nz
+
+    A dense tensor pays b_dense per entry, zero or not; a sparse one pays b_nz
+    per survivor, so it wins only when fewer than b_dense / b_nz survive.
+    Per-row overheads (CSR row pointers) are excluded.
+    """
+    return 1 - float(dense_bytes_per_value / bytes_per_nonzero)
+
+
+def calc_csr_bytes(nonzeros: int, rows: int, value_bytes, index_bytes):
+    """
+    Bytes of a matrix in compressed sparse row (CSR) form.
+
+        B_CSR = nnz (b_value + b_index) + (rows + 1) b_index
+
+    Values and column indices are one each per nonzero; row pointers are one
+    per row boundary, rows + 1 in all.
+    """
+    return nonzeros * (value_bytes + index_bytes) + (rows + 1) * index_bytes

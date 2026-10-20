@@ -1,19 +1,14 @@
 #!/usr/bin/env python3
 """Figures for Lecture 12 (Safety Enforcement).
 
-Every value is sourced. "SE" is the rendered chapter, Safety Enforcement
-(Volume IV, Chapter 12). Derived values come from calcs.py (imported as K).
-Outside data:
-  - Franka Research 3 datasheet R02212 2.3: joint torque limits A1-A4 +/-87 Nm,
-    A5-A7 +/-12 Nm (shown on the slide as a datasheet excerpt).
-  - SICK nanoScan3 NANS3-CAAZ30AA1 product datasheet, 2024-12-17: response time
-    85 ms, protective field 3 m, PL d (shown on the slide as an excerpt).
-  - Kirschner, Mansfeld, Abdolshah, Haddadin, "ISO/TS 15066: How Different
-    Interpretations Affect Risk Assessment," arXiv 2203.02706 (2022), Table II:
-    hand, interpretation B1 (constrained hand, TS values, speeds set for 280 N),
-    measured forces at the C- and N-positions.
-  - Cruise, October 2, 2023 (SE War Story 12.2: Exponent 2024; Quinn Emanuel 2024).
-  - Therac-25 (SE War Story 12.1: Leveson and Turner 1993).
+Every value comes from calcs.py (imported as K), which reads MLSysIM: the
+running machine and its aisle record, the finished stopping budgets, the
+loaded arm joint and its kinetic barrier, the two-joint projection, the
+permission check's stage budget, Literature.ContactForceMeasurements
+(Kirschner et al. 2022, Table II, hand, B1), and Literature.IncidentReports
+(Cruise, Therac-25). Labels print the strings calcs.py recorded, through
+deckvals.val; geometry uses the full-precision values. "SE" is the rendered
+chapter, Safety Enforcement (Volume IV, Chapter 12).
 Diagram colors follow the Volume IV causal-boundary palette
 (rules/volumes/vol4/palette.md); red only for veto, hazard, and limits.
 
@@ -33,6 +28,7 @@ import slideplot as sp  # noqa: E402
 from slideplot import plt  # noqa: E402
 
 import calcs as K  # noqa: E402  (prints its table on import)
+from deckvals import val  # noqa: E402
 
 C = sp.C
 # Volume IV roles
@@ -133,7 +129,7 @@ def gatekeeper(step):
     b.append(text(20, 200, "boundary", 22, "#475569", anchor="start"))
     b.append(arrow(240, 80, 288, 80, BLUE, marker="ahb", dash="8,5"))
     b.append(box(290, 20, 300, 120, GREEN_F, GREEN))
-    b += lines(440, 58, ["Enforcer on the MCU", "every 1 ms tick"], 25, "#047857", weight="bold")
+    b += lines(440, 58, ["Enforcer on the MCU", f"every {val('t_tick')} ms tick"], 25, "#047857", weight="bold")
     b.append(text(440, 124, "admit, correct, fall back", 22, "#047857"))
     b.append(arrow(590, 80, 638, 80, GREEN, marker="ahg"))
     b.append(box(640, 20, 250, 120, SLATE_F, SLATE, rx=0))
@@ -181,7 +177,7 @@ save(fig, "recall_stop")
 # =============================================================================
 fig, ax = plt.subplots(figsize=(5.9, 2.7))
 vs = np.linspace(0.02, 1.7, 300)
-fixed = (K.LOC + K.PROT + K.TRACK) * 1e3
+fixed = K.FIXED * 1e3
 
 
 def need(v, a=K.A_BRAKE, walker=0.0):
@@ -193,12 +189,13 @@ ax.plot(vs, [need(x, K.A_INSP) for x in vs], color=AMBER, lw=3, ls="--")
 vw = vs[vs < 0.6]
 ax.plot(vw, [need(x, walker=K.V_WALK) for x in vw], color=RED, lw=3, ls=":")
 ax.axhline(K.D_CLEAR * 1e3, color=C["neutral"], lw=1.5, ls="--")
-ax.text(0.62, 1130, "clear distance 1,100 mm", ha="left", fontsize=10.5, color=C["neutral"])
-for vv, col, lab, y in [(K.ceiling(K.T_DELAY), SLATE, "dry floor", 440),
-                        (K.ceiling(K.T_DELAY, a=K.A_INSP), AMBER, "floor at friction 0.12", 300),
-                        (K.V_WALKER, RED, "person walking toward the base", 160)]:
+ax.text(0.62, 1130, f"clear distance {val('d_clear_mm')} mm", ha="left", fontsize=10.5, color=C["neutral"])
+for vv, key, col, lab, y in [(K.V_CEIL, "ceiling", SLATE, "dry floor", 440),
+                             (K.V_CEIL_INSP, "ceiling_inspected", AMBER,
+                              f"floor at friction {val('mu_inspected')}", 300),
+                             (K.V_WALKER, "v_walk", RED, "person walking toward the base", 160)]:
     ax.plot([vv], [K.D_CLEAR * 1e3], "o", ms=9, color=col, mec="white", mew=1.5, zorder=5)
-    ax.text(0.9, y, f"{lab}: {vv:.2f} m/s", color=col, fontsize=11, fontweight="bold")
+    ax.text(0.9, y, f"{lab}: {val(key)} m/s", color=col, fontsize=11, fontweight="bold")
 ax.set_xlim(0, 1.7)
 ax.set_ylim(0, 1600)
 ax.set_xlabel("Speed when the hazard is seen (m/s)", fontsize=11)
@@ -215,20 +212,20 @@ def portrait(step):
     ax.plot(D, np.sqrt(2 * K.A_BRAKE * D), color=C["neutral"], lw=2.5, ls="--")
     ax.text(0.33, 1.9, "braking only", color=C["neutral"], fontsize=12)
     if step >= 2:
-        inset = [K.ceiling(K.T_DELAY, avail=max(d - K.LOC - K.PROT - K.TRACK, 0)) for d in D]
+        inset = [K.ceiling_at(d) for d in D]
         ax.fill_between(D, 0, inset, color=GREEN_F)
         ax.plot(D, inset, color=GREEN, lw=3)
         ax.text(1.6, 0.35, "stopping\nenvelope", color="#047857", fontsize=13,
                 fontweight="bold", ha="center")
         ax.plot([K.D_CLEAR], [K.V_CEIL], "o", color=GREEN, ms=9, mec="white", mew=1.5, zorder=5)
-        ax.annotate(f"ceiling {K.V_CEIL:.2f} m/s", (K.D_CLEAR, K.V_CEIL), xytext=(1.22, 0.98),
+        ax.annotate(f"ceiling {val('ceiling')} m/s", (K.D_CLEAR, K.V_CEIL), xytext=(1.22, 0.98),
                     ha="left", fontsize=12, color="#047857",
                     fontweight="bold", arrowprops=dict(arrowstyle="-", color="#047857"))
     if step >= 3:
         ax.plot([K.D_CLEAR], [K.V_AISLE], "s", color=NAVY, ms=8, zorder=6)
-        ax.text(1.22, 1.2, "aisle 1.3 m/s", color=NAVY, fontsize=12, fontweight="bold")
-        ax.plot([0.6], [1.3], "X", color=RED, ms=11, zorder=6)
-        ax.annotate("outside:\nSTOP", (0.6, 1.3), xytext=(0.03, 1.66), color=RED, fontsize=12,
+        ax.text(1.22, 1.2, f"aisle {val('v_aisle')} m/s", color=NAVY, fontsize=12, fontweight="bold")
+        ax.plot([0.6], [K.V_AISLE], "X", color=RED, ms=11, zorder=6)
+        ax.annotate("outside:\nSTOP", (0.6, K.V_AISLE), xytext=(0.03, 1.66), color=RED, fontsize=12,
                     fontweight="bold", ha="left", arrowprops=dict(arrowstyle="->", color=RED, lw=1.5))
     ax.set_xlim(0, 2.0)
     ax.set_ylim(0, 2.0)
@@ -245,12 +242,12 @@ for s in (1, 2, 3):
 # Gravity braking tax (SE Napkin Math 12.2, figure 6b)
 # =============================================================================
 fig, ax = plt.subplots(figsize=(4.6, 2.4))
-data = [("Ascending", K.tool_stop_mm(K.A_UP), GREEN),
-        ("No bias", K.tool_stop_mm(K.A_FREE), SLATE),
-        ("Descending", K.tool_stop_mm(K.A_DOWN), RED)]
-for i, (lab, val, col) in enumerate(data):
-    ax.barh(i, val, color=col, height=0.6)
-    ax.text(val + 1.5, i, f"{val:.2f} mm", va="center", fontsize=13, color=col, fontweight="bold")
+data = [("Ascending", K.STOP_UP, "stop_up", GREEN),
+        ("No bias", K.STOP_FREE, "stop_free", SLATE),
+        ("Descending", K.STOP_DOWN, "stop_down", RED)]
+for i, (lab, w, key, col) in enumerate(data):
+    ax.barh(i, w, color=col, height=0.6)
+    ax.text(w + 1.5, i, f"{val(key)} mm", va="center", fontsize=13, color=col, fontweight="bold")
     ax.text(-1.5, i, lab, ha="right", va="center", fontsize=13, fontweight="bold", color=TXT)
 ax.set_xlim(0, 105)
 ax.set_yticks([])
@@ -293,19 +290,20 @@ for s in (1, 2):
 # =============================================================================
 fig, ax = plt.subplots(figsize=(5.9, 2.7))
 cl = np.linspace(0.060, 0.140, 200)
-dem = [K.barrier_brake_torque(c)[0] for c in cl]
+dem = [K.barrier_demand(c) for c in cl]
 ax.axhspan(K.TAU_MAX, 100, color=RED_F)
 ax.axhline(K.TAU_MAX, color=RED, ls="--", lw=2)
-ax.text(138, K.TAU_MAX + 1.6, "joint peak 87 N·m", color=RED, ha="right", fontsize=11.5, fontweight="bold")
+ax.text(138, K.TAU_MAX + 1.6, f"joint peak {val('tau_max')} N·m", color=RED, ha="right", fontsize=11.5,
+        fontweight="bold")
 ax.plot(cl * 1e3, dem, color=GREEN, lw=3)
-for c, col, dx, dy in [(0.110, GREEN, -10, 12), (K.tool_stop_mm(K.A_DOWN) / 1e3, NAVY, 20, -60),
-                       (0.070, RED, -6, 12)]:
-    tq = K.barrier_brake_torque(c)[0]
+for c, ck, tk, col, dx, dy in [(K.CLEAR_FAR, "clear_far", "brake_far", GREEN, -10, 12),
+                               (K.STOP_DOWN / 1e3, "stop_down", "brake_zero", NAVY, 20, -60),
+                               (K.CLEAR_NEAR, "clear_near", "brake_near", RED, -6, 12)]:
+    tq = K.barrier_demand(c)
     ax.plot([c * 1e3], [tq], "o", color=col, ms=9, mec="white", mew=1.5, zorder=5)
-    lab = f"{c * 1e3:.2f} mm: {tq:.1f} N·m" if abs(c - 0.0794) < 0.001 else f"{c * 1e3:.0f} mm: {tq:.1f} N·m"
-    ax.annotate(lab, (c * 1e3, tq), xytext=(dx, dy), textcoords="offset points", fontsize=11.5,
-                color=col, fontweight="bold")
-ax.text(64, 70, "gravity alone\nasks 65.25 N·m", fontsize=10.5, color=C["neutral"])
+    ax.annotate(f"{val(ck)} mm: {val(tk)} N·m", (c * 1e3, tq), xytext=(dx, dy), textcoords="offset points",
+                fontsize=11.5, color=col, fontweight="bold")
+ax.text(64, 70, f"gravity alone\nasks {val('bias')} N·m", fontsize=10.5, color=C["neutral"])
 ax.axhline(K.TAU_BIAS, color=C["neutral"], lw=1.2, ls=":")
 ax.set_xlim(60, 140)
 ax.set_ylim(60, 95)
@@ -324,21 +322,22 @@ def projection(step):
     ax.fill_between(x, yb, -1, color=GREEN_F)
     ax.plot(x, yb, color=GREEN, lw=2.5)
     ax.text(0.62, 0.05, "admissible", color="#047857", fontsize=12, fontweight="bold")
-    ax.text(0.95, 4.05, "2τ₁ + τ₂ = 5", color="#047857", fontsize=11.5)
+    ax.text(0.95, 4.05, f"{val('proj_a1')}τ₁ + τ₂ = {val('proj_b')}", color="#047857", fontsize=11.5)
     ax.plot([0, K.u[0]], [0, K.u[1]], color=BLUE, lw=2, ls="--")
     ax.plot([K.u[0]], [K.u[1]], "o", color=BLUE, ms=10, zorder=5)
-    ax.text(K.u[0] + 0.12, K.u[1] + 0.12, "proposal (3.5, 3)", color=BLUE, fontsize=12, fontweight="bold")
+    ax.text(K.u[0] + 0.12, K.u[1] + 0.12, f"proposal ({val('proj_u1')}, {val('proj_u2')})", color=BLUE, fontsize=12, fontweight="bold")
     if step >= 2:
         ax.plot([K.clamp[0]], [K.clamp[1]], "s", color=RED, ms=9, zorder=5)
         ax.annotate("", (K.clamp[0], K.clamp[1]), (K.u[0], K.u[1]),
                     arrowprops=dict(arrowstyle="->", color=RED, lw=2))
-        ax.text(K.clamp[0] - 0.15, K.clamp[1] + 0.35, "clamp (2, 3)\n2·2 + 3 = 7", color=RED,
+        ax.text(K.clamp[0] - 0.15, K.clamp[1] + 0.35, (f"clamp ({val('proj_clamp1')}, {val('proj_clamp2')})\n"
+                 f"{val('proj_a1')}·{val('proj_clamp1')} + {val('proj_clamp2')} = {val('proj_clamp_value')}"), color=RED,
                 fontsize=11.5, fontweight="bold", ha="center")
     if step >= 3:
         ax.plot([K.ustar[0]], [K.ustar[1]], "D", color=GREEN, ms=9, zorder=5)
         ax.annotate("", (K.ustar[0], K.ustar[1]), (K.u[0], K.u[1]),
                     arrowprops=dict(arrowstyle="->", color=GREEN, lw=2.5))
-        ax.text(0.1, 1.15, "projection\n(1.5, 2)", color="#047857",
+        ax.text(0.1, 1.15, f"projection\n({val('proj_us1')}, {val('proj_us2')})", color="#047857",
                 fontsize=12, fontweight="bold", ha="left")
     ax.set_xlim(-0.2, 4.6)
     ax.set_ylim(-0.2, 4.4)
@@ -357,8 +356,12 @@ for s in (1, 2, 3):
 # =============================================================================
 def latch(step):
     fig, ax = plt.subplots(figsize=(5.9, 2.7))
-    v = 0.03
-    rate, f_on, room, acc, tstop = K.latch(v)
+    v = K.V_LATCH
+    lo = K.LATCH_LO
+    rate = lo["df_dt"].to("N/s").magnitude
+    f_on = lo["f_at_brake_onset"].to("N").magnitude
+    acc = lo["a_arm_needed"].to("m/s**2").magnitude
+    tstop = lo["t_arm_stop"].to("s").magnitude
     t_trip = K.TRIP / rate
     t_b = t_trip + K.T_LOOP
     tt = np.linspace(0, t_b, 50)
@@ -373,20 +376,20 @@ def latch(step):
     ax.text((t_b + 6.2e-3) * 1e3, 104, "no brake", color=RED, fontsize=11, fontweight="bold")
     ax.axvspan(t_trip * 1e3, t_b * 1e3, color=AMBER, alpha=0.18)
     ax.axhline(K.TRIP, color=C["neutral"], ls=":", lw=1.5)
-    ax.text(29.5, K.TRIP + 3, "tripwire 15 N", ha="right", fontsize=10.5, color=C["neutral"])
+    ax.text(29.5, K.TRIP + 3, f"tripwire {val('f_trip')} N", ha="right", fontsize=10.5, color=C["neutral"])
     ax.axhline(K.F_LATCH, color=RED, ls="--", lw=2)
     ax.axhspan(K.F_LATCH, 150, color=RED_F, alpha=0.6)
-    ax.text(29.5, K.F_LATCH + 4, "latch limit 100 N", ha="right", fontsize=11, color=RED, fontweight="bold")
+    ax.text(29.5, K.F_LATCH + 4, f"latch limit {val('f_latch')} N", ha="right", fontsize=11, color=RED, fontweight="bold")
     ax.plot([t_b * 1e3], [f_on], "o", color=GREEN, ms=9, mec="white", mew=1.5, zorder=5)
-    ax.text(t_b * 1e3 + 0.6, f_on - 14, f"0.03 m/s: brake at {f_on:.0f} N", color="#047857",
+    ax.text(t_b * 1e3 + 0.6, f_on - 14, f"{val('v_latch')} m/s: brake at {val('f_cmd')} N", color="#047857",
             fontsize=11.5, fontweight="bold")
     if step >= 2:
-        v2 = 0.10
-        r2, fo2, _, acc2, _ = K.latch(v2)
+        r2 = K.LATCH_HI["df_dt"].to("N/s").magnitude
+        fo2 = K.LATCH_HI["f_at_brake_onset"].to("N").magnitude
         tt2 = np.linspace(0, (K.TRIP / r2 + K.T_LOOP), 30)
         ax.plot(tt2 * 1e3, r2 * tt2, color=BLUE, lw=3)
         ax.plot([tt2[-1] * 1e3], [fo2], "o", color=BLUE, ms=9, mec="white", mew=1.5, zorder=5)
-        ax.annotate(f"0.10 m/s: {fo2:.0f} N at brake,\nstop needs {acc2:.0f} m/s²", (tt2[-1] * 1e3, fo2),
+        ax.annotate(f"{val('v_latch_high')} m/s: {val('f_cmd_hi')} N at brake,\nstop needs {val('a_arm_hi')} m/s²", (tt2[-1] * 1e3, fo2),
                     xytext=(0.3, 132), color=BLUE, fontsize=11.5, fontweight="bold", va="center",
                     arrowprops=dict(arrowstyle="-", color=BLUE))
     ax.set_xlim(0, 30)
@@ -422,16 +425,16 @@ svg("tank", 640, 410, b)
 # Hand force (SE Napkin Math 12.3); drawn for a 2.6 cm by 9.5 cm slot
 # =============================================================================
 fig, ax = plt.subplots(figsize=(3.6, 1.3))
-for i, (lab, val, col) in enumerate([("Clamped", K.V_HAND * K.s_clamp, RED),
-                                     ("Free", K.V_HAND * K.s_free, GREEN)]):
-    ax.barh(i, val, color=col, height=0.62)
-    ax.text(val + 1.5, i, f"{val:.1f} N", va="center", fontsize=12, color=col, fontweight="bold")
+for i, (lab, w, key, col) in enumerate([("Clamped", K.F_CLAMP, "f_clamp", RED),
+                                        ("Free", K.F_FREE, "f_free", GREEN)]):
+    ax.barh(i, w, color=col, height=0.62)
+    ax.text(w + 1.5, i, f"{val(key)} N", va="center", fontsize=12, color=col, fontweight="bold")
     ax.text(-1.5, i, lab, ha="right", va="center", fontsize=12, fontweight="bold")
 ax.axvline(K.F_CRIT, color=RED, ls="--", lw=2)
-ax.text(K.F_CRIT + 1.5, 1.5, "50 N criterion", color=RED, fontsize=12, fontweight="bold")
+ax.text(K.F_CRIT + 1.5, 1.5, f"{val('f_crit')} N criterion", color=RED, fontsize=12, fontweight="bold")
 ax.set_xlim(0, 125); ax.set_ylim(-0.5, 1.95)
 ax.set_yticks([]); ax.spines["left"].set_visible(False)
-ax.set_xlabel("Peak force at 0.10 m/s (N)", fontsize=12)
+ax.set_xlabel(f"Peak force at {val('v_handover')} m/s (N)", fontsize=12)
 ax.tick_params(labelsize=11)
 save(fig, "hand_force")
 # =============================================================================
@@ -446,10 +449,10 @@ nvals = [K.KIRSCHNER[n][2] for n in names]
 ax.bar(xs - 0.2, cvals, width=0.38, color=NAVY)
 ax.bar(xs + 0.2, nvals, width=0.38, color="#93C5FD")
 for x, c, n in zip(xs, cvals, nvals):
-    ax.text(x - 0.2, c + 6, f"{c}", ha="center", fontsize=11, color=NAVY, fontweight="bold")
-    ax.text(x + 0.2, n + 6, f"{n}", ha="center", fontsize=11, color="#1D4ED8", fontweight="bold")
+    ax.text(x - 0.2, c + 6, f"{c:.0f}", ha="center", fontsize=11, color=NAVY, fontweight="bold")
+    ax.text(x + 0.2, n + 6, f"{n:.0f}", ha="center", fontsize=11, color="#1D4ED8", fontweight="bold")
 ax.axhline(K.F_TS, color=RED, ls="--", lw=2)
-ax.text(3.42, K.F_TS + 12, "set for\n280 N", color=RED, ha="left", va="bottom", fontsize=11, fontweight="bold")
+ax.text(3.42, K.F_TS + 12, f"set for\n{val('f_ts')} N", color=RED, ha="left", va="bottom", fontsize=11, fontweight="bold")
 ax.set_xticks(xs)
 ax.set_xticklabels([f"{short[n]}\n{K.KIRSCHNER[n][0]:.2f} m/s" for n in names], fontsize=10.5)
 ax.set_xlim(-0.5, 4.4)
@@ -462,7 +465,7 @@ save(fig, "kirschner")
 # Protective separation distance (SE 12.8.3)
 # =============================================================================
 fig, ax = plt.subplots(figsize=(5.9, 1.8))
-parts = [("person walks", K.s_h, RED), ("robot reacts", K.s_r, AMBER), ("robot stops", K.S_STOP, SLATE)]
+parts = [("person walks", K.S_H, RED), ("robot reacts", K.S_R, AMBER), ("robot stops", K.S_STOP, SLATE)]
 x = 0
 for lab, w, col in parts:
     ax.barh(0, w, left=x, color=col, height=0.6, edgecolor="white")
@@ -487,7 +490,7 @@ rows = [("Model fidelity", "observer: predicted vs measured"),
         ("Bounded push", "observer against the force bound"),
         ("Torque available", "current shunts, saturation flag"),
         ("Solver on time", "watchdog and cycle counter"),
-        ("Short tick", "bus timestamps; 1.501 mm drift")]
+        ("Short tick", f"bus timestamps; {val('hold_drift')} mm drift")]
 b.append(text(155, 30, "Premise", 25, "#047857", weight="bold"))
 b.append(text(615, 30, "Detector, every tick", 25, RED, weight="bold"))
 for i, (p, d) in enumerate(rows):
@@ -508,19 +511,22 @@ cols = [SLATE, "#64748B", "#94A3B8", AMBER, "#64748B", "#CBD5E1"]
 for (lab, w), col in zip(K.STAGES, cols):
     ax.barh(0, w, left=x, color=col, height=0.55, edgecolor="white")
     if w >= 100:
-        ax.text(x + w / 2, 0, f"{lab} {w}", ha="center", va="center", fontsize=11,
+        ax.text(x + w / 2, 0, f"{lab} {w:.0f}", ha="center", va="center", fontsize=11,
                 color="white", fontweight="bold")
     x += w
-ax.text(0, 0.36, "state in 30, lease 15, tracking 10", fontsize=10, color=SLATE, va="bottom")
-ax.text(205, 0.36, "output 15, reserve 30", fontsize=10, color=SLATE, va="bottom")
-ax.axvline(400, color=RED, ls="--", lw=2)
-ax.text(396, -0.42, "deadline 400 µs", color=RED, ha="right", fontsize=11, fontweight="bold", va="center")
-ax.plot([135], [-0.42], "^", color=NAVY, ms=8)
-ax.text(142, -0.42, "unloaded run 135", color=NAVY, fontsize=10, va="center")
-ax.text(256, 0, "declared WCET 250", fontsize=11, fontweight="bold", va="center")
+ax.text(0, 0.36, f"state in {val('cyc_state')}, lease {val('cyc_lease')}, tracking {val('cyc_tracking')}",
+        fontsize=10, color=SLATE, va="bottom")
+ax.text(205, 0.36, f"output {val('cyc_output')}, reserve {val('cyc_reserve')}", fontsize=10, color=SLATE,
+        va="bottom")
+ax.axvline(K.DEADLINE, color=RED, ls="--", lw=2)
+ax.text(K.DEADLINE - 4, -0.42, f"deadline {val('deadline')} µs", color=RED, ha="right", fontsize=11,
+        fontweight="bold", va="center")
+ax.plot([K.UNLOADED], [-0.42], "^", color=NAVY, ms=8)
+ax.text(K.UNLOADED + 7, -0.42, f"unloaded run {val('unloaded')}", color=NAVY, fontsize=10, va="center")
+ax.text(K.WCET + 6, 0, f"declared WCET {val('wcet')}", fontsize=11, fontweight="bold", va="center")
 ax.set_xlim(0, 420); ax.set_ylim(-0.65, 0.65)
 ax.set_yticks([]); ax.spines["left"].set_visible(False)
-ax.set_xlabel("Microseconds within one 1 ms tick", fontsize=11)
+ax.set_xlabel(f"Microseconds within one {val('t_tick')} ms tick", fontsize=11)
 ax.tick_params(labelsize=10)
 save(fig, "cycle")
 
@@ -573,13 +579,14 @@ for ti in tt:
     else:
         vel.append(0.5 * K.J * (T - ti) ** 2)
 ax.plot(tt * 1e3, vel, color=GREEN, lw=3.5)
-ax.text(560, 0.95, f"STOP: {T * 1e3:,.2f} ms, {K.stop_dist(K.V_AISLE) * 1e3:.2f} mm",
+ax.text(560, 0.95, f"STOP: {val('t_stop_aisle')} ms, {val('d_stop_aisle')} mm",
         color="#047857", fontsize=12, fontweight="bold")
 ax.plot([0, 1200], [K.V_AISLE, K.V_AISLE], color=RED, lw=2.5, ls="--")
 ax.text(1190, 1.38, "STO alone: no braking torque, the base coasts", color=RED,
         fontsize=11.5, fontweight="bold", ha="right")
-ax.axvspan(30, 80, color=AMBER, alpha=0.25)
-ax.text(88, 0.1, "spring brakes set\n30 to 80 ms after STO", fontsize=11.5, color="#92400E")
+ax.axvspan(*K.BRAKE_SET, color=AMBER, alpha=0.25)
+ax.text(K.BRAKE_SET[1] + 8, 0.1, f"spring brakes set\n{val('brake_set_min')} to {val('brake_set_max')} ms after STO",
+        fontsize=11.5, color="#92400E")
 ax.set_xlim(0, 1200); ax.set_ylim(0, 1.6)
 ax.set_xlabel("Time after the fault (ms)", fontsize=11)
 ax.set_ylabel("Base speed (m/s)", fontsize=11)
@@ -594,7 +601,7 @@ ev = [("Another car strikes a pedestrian", SLATE),
       ("Robotaxi hits her; emergency stop", SLATE),
       ("Classifier: side collision", AMBER),
       ("Pullover; lane read as clear", RED),
-      ("Dragged 6.1 m, up to 3.4 m/s", RED)]
+      (f"Dragged {val('cruise_drag_m')} m, up to {val('cruise_ms')} m/s", RED)]
 b.append(f'<line x1="30" y1="30" x2="30" y2="{30 + 4 * 66}" stroke="{SLATE}" stroke-width="3"/>')
 for i, (lab, col) in enumerate(ev):
     y = 30 + i * 66

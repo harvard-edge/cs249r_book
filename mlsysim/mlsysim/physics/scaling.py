@@ -29,6 +29,15 @@ def calc_allocation_growth(compute_multiple, exponent):
     compute grows by ``compute_multiple``: ``multiple^exponent - 1`` (added 2026-10-20)."""
     validate_positive(compute_multiple, "compute_multiple")
     return compute_multiple ** exponent - 1
+
+
+def calc_power_law_factor(multiple, exponent):
+    """Factor by which a power-law term ``A R^-alpha`` falls when ``R`` grows by ``multiple``:
+    ``multiple ** -alpha`` (added 2026-10-20)."""
+    validate_positive(multiple, "multiple")
+    return multiple ** (-exponent)
+
+
 def calc_loss_reduction_compute_multiple(exponent, loss_reduction):
     """Compute multiple that lowers a power-law loss ``L = A C^-alpha`` by the fraction ``loss_reduction``.
 

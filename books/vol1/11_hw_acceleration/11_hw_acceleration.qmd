@@ -92,13 +92,11 @@ class HwAccelSetup:
     """H100 peak FP16/BF16 throughput vs. the registry reference CPU for the opening callout."""
 
     # LOAD
-    h100_tflops_fp16 = Hardware.Cloud.H100.compute.peak_flops.to(TFLOPs / second).magnitude
-    cpu_tflops_low = Hardware.Cloud.ReferenceCPU.compute.peak_flops.to(TFLOPs / second).magnitude
-    cpu_tflops_high = 2
+    gap = Scenarios.H100OverReferenceCpu  # H100 FP16 peak against the 1-2 TFLOP/s reference-CPU range
 
     # EXECUTE
-    cpu_gap_min = h100_tflops_fp16 / cpu_tflops_high
-    cpu_gap_max = h100_tflops_fp16 / cpu_tflops_low
+    cpu_gap_min = gap.ratio_low
+    cpu_gap_max = gap.ratio_high
 
     # GUARD
     check(480 <= cpu_gap_min <= 510, f"Unexpected lower CPU gap: {cpu_gap_min:.1f}x")
@@ -491,7 +489,6 @@ The serial bottleneck becomes concrete on real hardware, where the same accelera
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, fmt, fmt_math, fmt_ops_rate, fmt_ratio, check
-from mlsysim.physics import calc_amdahls_speedup
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AmdahlH100:
@@ -501,31 +498,27 @@ class AmdahlH100:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    h100_int8 = Hardware.Cloud.H100.compute.precision_flops["int8"]
-    cpu_int8_tops = 8 * TOPS  # scenario assumption: baseline server-CPU INT8 throughput
-    h100_bw = Hardware.Cloud.H100.memory.bandwidth
-    cpu_bw = Hardware.Cloud.ReferenceCPU.memory.bandwidth
-
-    # Workload Parallel Fractions (p)
-    p_resnet = 0.95  # 95% parallel (Compute Bound)
-    p_gpt2 = 0.80  # 80% on the accelerated path (20% host overhead, sampling)
+    # H100 INT8 peak against an assumed 8 TOPS server CPU; 95% (ResNet-50) and
+    # 80% (GPT-2 decode) of baseline time on the accelerated path.
+    resnet = Scenarios.ResNet50InferenceH100OverServerCpu
+    gpt2 = Scenarios.Gpt2DecodeH100OverServerCpu
+    gpt2_bw = Scenarios.Gpt2DecodeH100OverServerCpuBandwidth  # path gain set by bandwidth
+    cpu_int8_tops = resnet.baseline_rate  # scenario assumption: baseline server-CPU INT8 throughput
+    p_resnet = resnet.fraction
+    p_gpt2 = gpt2.fraction
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Amdahl's Law: Speedup = 1 / ((1-p) + (p/G_accel))
-    # (2026-06-10 audit: the derived ~247x ratio was hardcoded in LOAD; if
-    # the registry INT8 figure changed, the displayed TOPS ref updated but
-    # the speedup silently did not.)
-    hw_speedup_factor = (h100_int8 / cpu_int8_tops).to("").magnitude
-
-    speedup_resnet = calc_amdahls_speedup(p_resnet, hw_speedup_factor)
-    speedup_gpt2 = calc_amdahls_speedup(p_gpt2, hw_speedup_factor)
+    hw_speedup_factor = resnet.gain
+    speedup_resnet = resnet.speedup
+    speedup_gpt2 = gpt2.speedup
 
     # Step 1: Theoretical ceiling (if accelerator gain tends to infinity)
-    ceiling_gpt2 = calc_amdahls_speedup(p_gpt2, float("inf"))
+    ceiling_gpt2 = gpt2.ceiling
 
     # Step 2: Decode is memory bound, so its path gain is the bandwidth ratio
-    bw_gain = (h100_bw / cpu_bw).to("").magnitude
-    speedup_gpt2_bw = calc_amdahls_speedup(p_gpt2, bw_gain)
+    bw_gain = gpt2_bw.gain
+    speedup_gpt2_bw = gpt2_bw.speedup
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(speedup_resnet >= speedup_gpt2 * 3, f"ResNet speedup ({speedup_resnet:.1f}x) should be much higher than GPT-2 ({speedup_gpt2:.1f}x).")
@@ -1535,28 +1528,23 @@ class SystolicEnergy:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    # Energy value sourced from the mlsysim registry (Hardware.Tech.Memory).
-    ENERGY_DRAM_ACCESS_PJ = Hardware.Tech.Memory.DRAM.energy_per_access
-    dram_pj = ENERGY_DRAM_ACCESS_PJ.to(pJ).magnitude
-    mac_pj = 1.0  # Compute cost
-
-    # Naive DRAM-streaming baseline: 3 loads (A, B, C) + 1 write (C) per MAC
-    vector_dram_accesses = 4.0
-
-    # Systolic Array: Amortizes loads across array width
-    SYSTOLIC_ARRAY_DIM = 128  # pedagogical systolic-array dimension example
-    array_dim = SYSTOLIC_ARRAY_DIM  # 128
+    # DRAM access energy (Horowitz 2014), about 1 pJ per MAC, 4 DRAM accesses
+    # per MAC streaming, and 2 edge loads per 128 MACs in the array.
+    reuse = Scenarios.SystolicArrayReuseEnergy
+    ENERGY_DRAM_ACCESS_PJ = reuse.access_energy
+    mac_pj = reuse.mac_energy.to(pJ).magnitude
+    vector_dram_accesses = reuse.naive_accesses
+    array_dim = reuse.array_dim
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Streaming-baseline energy = (4 * DRAM) + MAC
-    e_vector = (vector_dram_accesses * dram_pj) + mac_pj
+    e_vector = reuse.naive_energy.to(pJ).magnitude
 
-    # Systolic Energy = (2 loads / 128 ops * DRAM) + MAC
-    # Step 2: Note: Only 2 loads (A, B) are amortized; C stays in accumulator
-    systolic_dram_per_op = 2.0 / array_dim
-    e_systolic = (systolic_dram_per_op * dram_pj) + mac_pj
+    # Step 2: Systolic energy = (2 loads / 128 ops * DRAM) + MAC; C stays in accumulator
+    systolic_dram_per_op = reuse.systolic_accesses
+    e_systolic = reuse.systolic_energy.to(pJ).magnitude
 
-    efficiency_ratio = e_vector / e_systolic
+    efficiency_ratio = reuse.ratio
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(efficiency_ratio >= 100, f"Unexpected ratio for the stated DRAM-streaming scenario: {efficiency_ratio:.1f}×")
@@ -2321,8 +2309,8 @@ class ResnetArithmeticFloor:
     h100_fp16 = Hardware.Cloud.H100.compute.precision_flops["fp16_dense"]
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    floor_int8 = (resnet_flops / h100_int8).to(microsecond)
-    floor_fp16 = (resnet_flops / h100_fp16).to(microsecond)
+    floor_int8 = Scenarios.ResNet50Batch1H100Int8PeakRate.result.latency_compute.to(microsecond)
+    floor_fp16 = Scenarios.ResNet50Batch1H100Fp16PeakRate.result.latency_compute.to(microsecond)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(1 < floor_int8.magnitude < 10, f"ResNet-50 H100 INT8 floor should be a few microseconds, got {floor_int8}")
@@ -2400,51 +2388,37 @@ class MemoryWallTrend:
     """Dense model-size growth vs per-device memory-bandwidth growth since 2014."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    chips = [
-        ("NVIDIA K80 (one GPU)", Hardware.Cloud.K80),
-        ("Google TPU v2", Hardware.Cloud.TPUv2),
-        ("NVIDIA V100", Hardware.Cloud.V100),
-        ("NVIDIA A100", Hardware.Cloud.A100),
-        ("Google TPU v4", Hardware.Cloud.TPUv4),
-        ("NVIDIA H100", Hardware.Cloud.H100),
-        ("AMD MI300X", Hardware.Cloud.MI300X),
-        ("Google TPU v6e", Hardware.Cloud.TPUv6),
-        ("AMD MI325X", Hardware.Cloud.MI325X),
-        ("NVIDIA B200", Hardware.Cloud.B200),
-    ]
-    dense_models = [
-        ("AlexNet", Models.Vision.AlexNet),
-        ("VGG-16", Models.Vision.VGG16),
-        ("ResNet-50", Models.Vision.ResNet50),
-        ("BERT-Large", Models.Language.BERT_Large),
-        ("GPT-3", Models.Language.GPT3),
-        ("PaLM", Models.Language.PaLM_540B),
-        ("Llama 3.1 405B", Models.Language.Llama3_405B),
-    ]
-    moe_models = [("DeepSeek-V3", Models.Language.DeepSeek_V3)]
-    baseline_chip = Hardware.Cloud.K80
-    baseline_model = Models.Vision.VGG16
+    growth = Scenarios.DenseParametersVsBandwidthSince2014
+    # Figure labels, in the scenario's accelerator and model order.
+    chip_labels = ["NVIDIA K80 (one GPU)", "Google TPU v2", "NVIDIA V100", "NVIDIA A100", "Google TPU v4",
+                   "NVIDIA H100", "AMD MI300X", "Google TPU v6e", "AMD MI325X", "NVIDIA B200"]
+    dense_labels = ["AlexNet", "VGG-16", "ResNet-50", "BERT-Large", "GPT-3", "PaLM", "Llama 3.1 405B"]
+    moe_labels = ["DeepSeek-V3"]
+    chips = list(zip(chip_labels, growth.accelerators))
+    dense_models = list(zip(dense_labels, growth.dense_models))
+    moe_models = list(zip(moe_labels, growth.sparse_models))
+    baseline_chip = growth.baseline_accelerator
+    baseline_model = growth.baseline_model
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    _bw0 = baseline_chip.memory.bandwidth.to("GB/s").magnitude
-    _p0 = baseline_model.parameters.to("count").magnitude
     chip_names = [n for n, _ in chips]
     chip_years = [h.release_year for _, h in chips]
     chip_bw_gbs = [h.memory.bandwidth.to("GB/s").magnitude for _, h in chips]
-    chip_index = list(np.asarray(chip_bw_gbs) / _bw0)
+    chip_index = growth.bandwidth_index
     dense_names = [n for n, _ in dense_models]
     dense_years = [m.release_year for _, m in dense_models]
     dense_params = [m.parameters.to("count").magnitude for _, m in dense_models]
-    dense_index = list(np.asarray(dense_params) / _p0)
+    dense_index = growth.dense_index
     moe_names = [n for n, _ in moe_models]
     moe_years = [m.release_year for _, m in moe_models]
     moe_params = [m.parameters.to("count").magnitude for _, m in moe_models]
-    moe_index = list(np.asarray(moe_params) / _p0)
-    bandwidth_growth = max(chip_index)
-    model_growth = max(dense_index)
+    moe_index = growth.sparse_index
+    bandwidth_growth = growth.bandwidth_growth
+    model_growth = growth.parameter_growth
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(baseline_chip.release_year == 2014 and baseline_model.release_year == 2014, "Both growth indices are relative to 2014.")
+    check(len(chips) == len(growth.accelerators) and len(dense_models) == len(growth.dense_models), "One label per series entry.")
     check(25 <= bandwidth_growth <= 40, f"Expected ~33x per-device bandwidth growth, got {bandwidth_growth:.1f}.")
     check(3000 <= model_growth <= 4500, f"Expected ~3,900x dense-parameter growth, got {model_growth:.0f}.")
 
@@ -3147,7 +3121,9 @@ class RooflineGap:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     # Thresholds
-    legacy_ai = 200.0
+    legacy_a100 = Scenarios.KernelAt200FlopPerByteA100  # a kernel tuned for the A100
+    legacy_h100 = Scenarios.KernelAt200FlopPerByteH100  # the same kernel on the H100
+    legacy_ai = legacy_a100.point_intensity.to(flop / byte).magnitude
     relu_ai = 0.125
     dense_matmul_dim = 1024
     dense_matmul_bytes_per_val = 2
@@ -3182,8 +3158,8 @@ class RooflineGap:
     relu_gap = h100_ridge / relu_ai
     # Idealized roofline gain for the legacy kernel: compute roof on the A100,
     # bandwidth slope on the H100 (both rates in FLOP/s).
-    legacy_a100_rate = min(a100_fp16_flops, legacy_ai * (flop / byte) * a100_bandwidth)
-    legacy_h100_rate = min(h100_fp16_flops, legacy_ai * (flop / byte) * h100_bandwidth)
+    legacy_a100_rate = legacy_a100.attainable
+    legacy_h100_rate = legacy_h100.attainable
     legacy_gain = (legacy_h100_rate / legacy_a100_rate).to_base_units().magnitude
     dense_matmul_flops = 2 * dense_matmul_dim**3
     dense_matmul_bytes = 3 * dense_matmul_dim**2 * dense_matmul_bytes_per_val
@@ -3255,13 +3231,8 @@ class ComputeBandwidthDivergence:
     """Registry-sourced compute vs bandwidth growth, V100 through B200."""
 
     # +-- 1. LOAD (Constants) --------------------------------------------------
-    generations = [
-        Hardware.Cloud.V100,
-        Hardware.Cloud.A100,
-        Hardware.Cloud.H100,
-        Hardware.Cloud.H200,
-        Hardware.Cloud.B200,
-    ]
+    gens = Scenarios.NvidiaGenerationsV100ToB200
+    generations = gens.accelerators
 
     # +-- 2. EXECUTE (The Compute) ---------------------------------------------
     # A comprehension body cannot see class-scope names, so the baselines are
@@ -3269,9 +3240,9 @@ class ComputeBandwidthDivergence:
     years = [g.release_year for g in generations]
     compute = [g.compute.peak_flops.to(TFLOP / second).magnitude for g in generations]
     bandwidth = [g.memory.bandwidth.to(GB / second).magnitude for g in generations]
-    compute_growth = compute[-1] / compute[0]
-    bandwidth_growth = bandwidth[-1] / bandwidth[0]
-    gap_growth = compute_growth / bandwidth_growth
+    compute_growth = gens.compute_growth
+    bandwidth_growth = gens.bandwidth_growth
+    gap_growth = gens.gap_growth
 
     # +-- 3. GUARD (Invariants) ------------------------------------------------
     check(compute_growth > bandwidth_growth, "Compute must outgrow bandwidth for the divergence to exist.")
@@ -3468,25 +3439,18 @@ class BandwidthEnvelope:
     """Best-device bandwidth and FP16 tensor throughput over time, all vendors."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    rows = sorted(Literature.Series.AcceleratorBandwidthCompute.entries, key=lambda r: r["date"])
+    env = Scenarios.AcceleratorEnvelopeSinceTpuV2  # Literature.Series.AcceleratorBandwidthCompute
+    rows = env.rows
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    bw_env, fl_env = [], []
-    _bw = _fl = 0.0
-    for _r in rows:
-        _bw = max(_bw, _r["memory_bandwidth_bytes_per_s"])
-        _fl = max(_fl, _r["fp16_tensor_flops"])
-        bw_env.append((_r["date"], _bw))
-        fl_env.append((_r["date"], _fl))
-    baseline = rows[0]
-    compute_growth = fl_env[-1][1] / baseline["fp16_tensor_flops"]
-    bandwidth_growth = bw_env[-1][1] / baseline["memory_bandwidth_bytes_per_s"]
+    bw_env = env.bandwidth_envelope
+    fl_env = env.compute_envelope
+    baseline = env.baseline
+    compute_growth = env.compute_growth
+    bandwidth_growth = env.bandwidth_growth
     best_bandwidth_tbs = bw_env[-1][1] / 1e12
-    for _d, _v in bw_env:
-        if _v == bw_env[-1][1]:
-            bandwidth_plateau_since = _d
-            break
-    device_count = len(rows)
+    bandwidth_plateau_since = env.best_bandwidth_since
+    device_count = env.device_count
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(baseline["device"].startswith("Google TPU v2"), "Baseline is TPU v2, the earliest device with an FP16 tensor rate.")
@@ -3607,30 +3571,23 @@ class TransformerLayerCalc:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     # One GPT-2 XL layer at a prefill batch of 8 full-context sequences.
-    hidden_dim = Models.Language.GPT2.hidden_dim
-    batch_size = 8  # scenario assumption: prefill batch
-    seq_len = 1024  # GPT-2 XL context length (registry lacks the field)
+    qkv = Scenarios.Gpt2XlQkvProjectionPrefill
+    softmax = Scenarios.Gpt2XlSoftmaxPrefill
+    hidden_dim = qkv.in_features
+    seq_len = Models.Language.GPT2.context_length
+    batch_size = qkv.batch_size // seq_len  # scenario assumption: prefill batch of sequences
     num_heads = Models.Language.GPT2.heads
-    t_fp_bytes_value = BYTES_FP16.to(byte).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    # QKV Projection
-    qkv_flops_value = 2 * 3 * batch_size * seq_len * hidden_dim * hidden_dim
-    qkv_flops_b_value = (qkv_flops_value * flop).to(GFLOPs).magnitude
+    # QKV Projection: input, weights, and output moved once
+    qkv_flops_value = qkv.flops.to(flop).magnitude
+    qkv_memory = qkv.traffic_bytes
+    qkv_ai_value = qkv.traffic_intensity
 
-    qkv_input_value = batch_size * seq_len * hidden_dim
-    qkv_weights_value = 3 * hidden_dim * hidden_dim
-    qkv_output_value = batch_size * seq_len * hidden_dim * 3
-    qkv_bytes_value = (qkv_input_value + qkv_weights_value + qkv_output_value) * t_fp_bytes_value
-    qkv_memory = qkv_bytes_value * byte
-    qkv_ai_value = qkv_flops_value / qkv_bytes_value
-
-    # Softmax
-    softmax_flops_value = batch_size * num_heads * seq_len * seq_len * 3
-    softmax_flops_m_value = (softmax_flops_value * flop).to(MFLOPs).magnitude
-    softmax_bytes_value = batch_size * num_heads * seq_len * seq_len * 2 * t_fp_bytes_value
-    softmax_memory = softmax_bytes_value * byte
-    softmax_ai_value = softmax_flops_value / softmax_bytes_value
+    # Softmax: exp, sum, and divide per score; scores read and written once
+    softmax_flops_value = softmax.flops.to(flop).magnitude
+    softmax_memory = softmax.traffic_bytes
+    softmax_ai_value = softmax.intensity
 
     h100_ridge_value = Hardware.Cloud.H100.ridge_point().to(flop / byte).magnitude
 
@@ -3709,26 +3666,26 @@ class Conv2dAnalysisCalc:
     """Roofline analysis for ResNet-50's stage-3 3×3 convolution on an H100."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    conv_batch = 32  # scenario assumption: inference batch
-    conv_cin = 128  # ResNet-50 stage-3 bottleneck channels
-    conv_h = 28
-    conv_w = 28
-    conv_cout = 128
-    conv_k = 3
-    conv_fp_bytes = BYTES_FP16.to(byte).magnitude
+    conv = Scenarios.ResNet50Stage3ConvBatch32  # batch 32, FP16
+    conv_batch = conv.batch_size
+    conv_cin = conv.in_channels  # ResNet-50 stage-3 bottleneck channels
+    conv_h = conv.height
+    conv_w = conv.width
+    conv_cout = conv.out_channels
+    conv_k = conv.kernel
+    conv_fp_bytes = conv.bytes_per_value.to(byte).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    conv_out_elements = conv_batch * conv_cout * conv_h * conv_w
+    conv_out_elements = conv_batch * conv.outputs
     conv_out_m = conv_out_elements / MILLION
     conv_flops_per_out = conv_cin * conv_k * conv_k * 2
-    conv_total_flops = conv_out_elements * conv_flops_per_out * flop
+    conv_total_flops = conv.flops
 
-    conv_input_memory = conv_batch * conv_cin * conv_h * conv_w * conv_fp_bytes * byte
-    conv_weights_memory = conv_cout * conv_cin * conv_k * conv_k * conv_fp_bytes * byte
-    conv_output_memory = conv_batch * conv_cout * conv_h * conv_w * conv_fp_bytes * byte
-    conv_total_memory = conv_input_memory + conv_weights_memory + conv_output_memory
-
-    conv_ai = (conv_total_flops / conv_total_memory).to(flop / byte).magnitude
+    conv_input_memory = conv.batch_input_bytes
+    conv_weights_memory = conv.weight_bytes
+    conv_output_memory = conv.batch_output_bytes
+    conv_total_memory = conv.traffic_bytes
+    conv_ai = conv.traffic_intensity
 
     h100_ridge_value = Hardware.Cloud.H100.ridge_point().to(flop / byte).magnitude
     h100_fp16_flops = Hardware.Cloud.H100.compute.peak_flops
@@ -3819,30 +3776,22 @@ class ResNet50Int8Crossing:
     fp16_peak = h100.compute.precision_flops["fp16_dense"]
     int8_peak = h100.compute.precision_flops["int8"]
     bw = h100.memory.bandwidth
-    batch = 32  # scenario assumption: the batch of the FP16 convolution analysis
-    # ResNet-50 layer shapes (spatial size, input channels, output channels, kernel)
-    stage2_3x3 = (56, 64, 64, 3)
-    stage3_3x3 = (28, 128, 128, 3)
-    stage2_1x1 = (56, 64, 256, 1)
+    stage3 = Scenarios.ResNet50Stage3ConvBatch32  # the FP16 convolution analysis
+    batch = stage3.batch_size
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     ridge_fp16 = (fp16_peak / bw).to(flop / byte)
     ridge_int8 = (int8_peak / bw).to(flop / byte)
     ridge_ratio = (ridge_int8 / ridge_fp16).to("").magnitude
 
-    def _ai(shape, act_bytes, weight_bytes, batch=batch):
-        hw, cin, cout, k = shape
-        ops = 2 * batch * hw * hw * cin * cout * k * k
-        moved = act_bytes * batch * hw * hw * (cin + cout) + weight_bytes * cin * cout * k * k
-        return ops / moved
-
-    s3_fp16 = _ai(stage3_3x3, 2, 2)
-    s3_int8 = _ai(stage3_3x3, 1, 1)
-    s3_mixed = _ai(stage3_3x3, 2, 1)
-    s2_fp16 = _ai(stage2_3x3, 2, 2)
-    s2_int8 = _ai(stage2_3x3, 1, 1)
-    p2_fp16 = _ai(stage2_1x1, 2, 2)
-    p2_int8 = _ai(stage2_1x1, 1, 1)
+    # One read of input and weights, one write of output, at batch 32
+    s3_fp16 = stage3.traffic_intensity
+    s3_int8 = Scenarios.ResNet50Stage3ConvBatch32Int8.traffic_intensity
+    s3_mixed = Scenarios.ResNet50Stage3ConvBatch32Int8Weights.traffic_intensity
+    s2_fp16 = Scenarios.ResNet50Stage2ConvBatch32.traffic_intensity
+    s2_int8 = Scenarios.ResNet50Stage2ConvBatch32Int8.traffic_intensity
+    p2_fp16 = Scenarios.ResNet50Stage2ExpansionBatch32.traffic_intensity
+    p2_int8 = Scenarios.ResNet50Stage2ExpansionBatch32Int8.traffic_intensity
 
     r16 = ridge_fp16.magnitude
     r8 = ridge_int8.magnitude
@@ -3906,26 +3855,25 @@ class DenseLayerAnalysisCalc:
     """Roofline analysis for ResNet-50's classifier GEMM showing memory-bound behavior."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    dense_batch = 32
-    dense_in = 2048
-    dense_out = 1000  # ResNet-50 classifier: 2048 pooled features to 1000 classes
+    head = Scenarios.ResNet50ClassifierHeadBatch32  # 2048 pooled features to 1000 classes, FP16
+    roof = Scenarios.ResNet50ClassifierHeadH100Roofline
+    dense_batch = head.batch_size
+    dense_in = head.in_features
+    dense_out = head.out_features
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    dense_total_mflops = (2 * dense_batch * dense_in * dense_out * flop).to(MFLOPs).magnitude
-
-    dense_input_memory = dense_batch * dense_in * 2 * byte
-    dense_weights_memory = dense_in * dense_out * 2 * byte
-    dense_output_memory = dense_batch * dense_out * 2 * byte
-    dense_total_memory = dense_input_memory + dense_weights_memory + dense_output_memory
-
-    dense_total_flops = dense_total_mflops * MFLOPs
-    dense_ai_qty = (dense_total_flops / dense_total_memory).to(flop / byte)
+    dense_input_memory = head.input_bytes
+    dense_weights_memory = head.weight_bytes
+    dense_output_memory = head.output_bytes
+    dense_total_memory = head.traffic_bytes
+    dense_total_flops = head.flops
+    dense_ai_qty = roof.point_intensity.to(flop / byte)
     dense_ai = dense_ai_qty.magnitude
 
     h100_bandwidth = Hardware.Cloud.H100.memory.bandwidth
     h100_peak = Hardware.Cloud.H100.compute.peak_flops
-    dense_attainable = (h100_bandwidth * dense_ai_qty).to(TFLOP / second)
-    dense_util_pct = (dense_attainable / h100_peak).to_base_units().magnitude * 100
+    dense_attainable = roof.attainable.to(TFLOP / second)
+    dense_util_pct = roof.peak_fraction * 100
 
     h100_ridge_value = Hardware.Cloud.H100.ridge_point().to(flop / byte).magnitude
 
@@ -4009,31 +3957,31 @@ class LayernormAnalysisCalc:
     """Roofline analysis for LayerNorm showing severely memory-bound behavior."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    ln_batch = 8  # scenario assumption: decode-time prefill batch
-    ln_seq = 1024  # GPT-2 XL context length (registry lacks the field)
+    ln = Scenarios.Gpt2XlLayerNormPrefill  # batch 8 full-context sequences, FP16
+    roof = Scenarios.Gpt2XlLayerNormH100Roofline
+    ln_seq = Models.Language.GPT2.context_length
     ln_hidden = Models.Language.GPT2.hidden_dim  # GPT-2 XL hidden size
-    ln_fp_bytes = int(BYTES_FP16.to(byte).magnitude)
+    ln_batch = ln.elements // (ln_seq * ln_hidden)  # scenario assumption: prefill batch
+    ln_fp_bytes = int(ln.bytes_per_value.to(byte).magnitude)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    ln_elements = ln_batch * ln_seq * ln_hidden
+    ln_elements = ln.elements
     ln_elements_m = ln_elements / MILLION
-    ln_flops_per = 8
-    ln_total_mflops = ln_elements_m * ln_flops_per
+    ln_flops_per = ln.flops_per_element
 
-    ln_input_memory = ln_elements * ln_fp_bytes * byte
-    ln_params_memory = ln_hidden * 2 * ln_fp_bytes * byte
-    ln_output_memory = ln_elements * ln_fp_bytes * byte
-    ln_total_memory = ln_input_memory + ln_output_memory + ln_params_memory
-
-    ln_total_flops = ln_total_mflops * MFLOPs
-    ln_ai_qty = (ln_total_flops / ln_total_memory).to(flop / byte)
+    ln_input_memory = ln.input_bytes
+    ln_params_memory = ln.parameter_bytes
+    ln_output_memory = ln.output_bytes
+    ln_total_memory = ln.traffic_bytes
+    ln_total_flops = ln.flops
+    ln_ai_qty = roof.point_intensity.to(flop / byte)
     ln_ai = ln_ai_qty.magnitude
 
     h100_bandwidth = Hardware.Cloud.H100.memory.bandwidth
     h100_ridge_value = Hardware.Cloud.H100.ridge_point().to(flop / byte).magnitude
-    ln_attainable = (h100_bandwidth * ln_ai_qty).to(TFLOP / second)
+    ln_attainable = roof.attainable.to(TFLOP / second)
     ln_ridge_gap = h100_ridge_value / ln_ai
-    ln_util = (ln_attainable / Hardware.Cloud.H100.compute.peak_flops).to('').magnitude
+    ln_util = roof.peak_fraction
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(1.5 < ln_ai < 2.5, f"LayerNorm AI should be around 2 FLOP/byte, got {ln_ai:.2f}")
@@ -4118,21 +4066,19 @@ class BatchAiCalc:
     """Arithmetic intensity for a 2048x2048 dense layer as batch size grows."""
 
     # LOAD
-    M = 2048
-    N = 2048
-    batch_small = 1
-    batch_medium = 32
-    batch_large = 512
+    small = Scenarios.Dense2048Fp16Batch1
+    medium = Scenarios.Dense2048Fp16Batch32
+    large = Scenarios.Dense2048Fp16Batch512
+    M = small.in_features
+    N = small.out_features
+    batch_small = small.batch_size
+    batch_medium = medium.batch_size
+    batch_large = large.batch_size
 
     # EXECUTE
-    def dense_ai(batch, m=M, n=N):
-        flops = 2 * batch * m * n
-        bytes_moved = 2 * batch * m + 2 * m * n + 2 * batch * n
-        return flops / bytes_moved
-
-    batch1_ai = dense_ai(batch_small)
-    batch32_ai = dense_ai(batch_medium)
-    batch_large_ai = dense_ai(batch_large)
+    batch1_ai = small.traffic_intensity
+    batch32_ai = medium.traffic_intensity
+    batch_large_ai = large.traffic_intensity
     h100_ridge = Hardware.Cloud.H100.ridge_point().to(flop / byte).magnitude
 
     # GUARD
@@ -4209,7 +4155,8 @@ class Gpt2ThroughputCalc:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     gpt2_decode_flops = 2 * Models.Language.GPT2.parameters.to(param) * flop / param
-    gpt2_decode_ai_qty = (gpt2_decode_flops / gpt2_weight).to(flop / byte)
+    roof = Scenarios.Gpt2XlDecodeH100Roofline  # every FP16 weight read once per token
+    gpt2_decode_ai_qty = roof.point_intensity.to(flop / byte)
     gpt2_decode_ai = gpt2_decode_ai_qty.magnitude
 
     h100_bandwidth = Hardware.Cloud.H100.memory.bandwidth
@@ -4217,8 +4164,8 @@ class Gpt2ThroughputCalc:
     h100_fp32_flops = Hardware.Cloud.H100.compute.precision_flops["fp32"]
     h100_ridge_value = Hardware.Cloud.H100.ridge_point().to(flop / byte).magnitude
     h100_ridge_fp32_value = (Hardware.Cloud.H100.compute.precision_flops['fp32'] / Hardware.Cloud.H100.memory.bandwidth).to(flop / byte).magnitude
-    gpt2_max_flops = (gpt2_decode_ai_qty * h100_bandwidth).to(TFLOP / second)
-    gpt2_utilization = (gpt2_max_flops / h100_fp16_flops).to_base_units().magnitude * 100
+    gpt2_max_flops = roof.attainable.to(TFLOP / second)
+    gpt2_utilization = roof.peak_fraction * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(round(gpt2_decode_ai, 1) == 1.0, f"GPT-2 decode intensity mismatch: {gpt2_decode_ai}")

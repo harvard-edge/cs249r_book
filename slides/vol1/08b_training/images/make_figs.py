@@ -1,40 +1,18 @@
 #!/usr/bin/env python3
 """Data plots and diagrams for Lecture 8b (Model Training, Part 2).
 
-Every value is from the rendered chapter (Model Training) unless noted:
-  - Scoreboard: 598, 311, 109.6, 66.8 GB; static 24 GB; H100 85.9 GB
-    (80 GiB) (Napkin Math 8.6, 8.10). Checkpointing alternative 35.5 GB,
-    about one-third more arithmetic, 47 days instead of 35 (Napkin Math 8.8).
-  - Static state: 2 + 2 + 4 + 8 = 16 bytes per parameter (Sec. 8.3.2).
-  - Peak dense throughput by format, V100 to B200 (figure 10, NVIDIA
-    datasheets cited in Sec. 8.6.3); redrawn here at slide size.
-  - Formats: exponent bits 8, 5, 8; mantissa 23, 10, 7; FP16 smallest normal
-    6.1e-5, largest 65,504, subnormals to about 6e-8; FP32 and BF16 smallest
-    normal about 1e-38 (Sec. 8.6.3, table 9). Range ends of FP32 and BF16
-    (about 3.4e38) are from the IEEE 754 and bfloat16 formats.
-  - Swamping: derived from the formats and checked with numpy float16:
-    FP16 spacing near 0.5 is 2^-11 = 4.9e-4; 0.5 + 0.0001 rounds to 0.5;
-    10,000 such updates leave FP16 at 0.5 and take FP32 to 1.5.
-  - Loss-scaling histogram: Micikevicius et al. 2018, Figure 3 (SSD
-    activation gradients), bins read from the published figure in calcs.py;
-    FP16 normal floor 2^-14, subnormal floor 2^-24; scale of 8 (Sec. 3.2).
-  - Loss-scale trace: a real torch.amp.GradScaler run (scaler_run.py,
-    data/scaler_trace.csv).
-  - Selective recomputation: Korthikanti et al. 2023, Table 4.
-  - Run time by format: 518, 70, 35 days (Napkin Math 8.7).
-  - Per-layer activations at batch 32, 1,024 tokens: projections 419.4 MB,
-    feed-forward 419.4 MB, scores 4,194.3 MB, LayerNorm about 10 MB
-    (Napkin Math 8.3). The scores are three saved copies at 2 + 1 + 2 bytes
-    per entry (softmax output, dropout mask, output after dropout; Napkin Math 8.3);
-    the split of the bar follows those byte counts.
-  - Tiling: 4,096^2 x 4 B = 67.1 MB; 128^2 x 4 B = 65.5 KB (Sec. 8.6.4);
-    228 KB of shared memory per SM (Hardware Acceleration).
-  - Stored per head at 4,096 tokens: 138.4 MB against 4.2 MB (Sec. 8.6.4).
-  - Batch line: 24 GB + 2.67 GB per sequence (calcs.per_seq_gb);
-    batch 16 gives 66.8 GB, batch 32 109.6 GB (Napkin Math 8.10).
-  - Checkpointing: 8 segments of 6 layers, 0.84 GB of inputs plus 10.7 GB
-    (Napkin Math 8.8). Checkpoint count curve k + 48/k in layer units is
-    derived from table 13.
+Every number is read from MLSysIM through calcs.py (val() for a printed
+label, num() for a plotted value, or the scenario itself for a curve):
+the scoreboard and the batch line from the GPT-2 XL step scenarios; the
+precision ladder from the hardware registry; the number formats and the
+swamped update from FLOAT_FORMAT_BITS and Fp16WeightSmallUpdates; the
+loss-scaling histogram from SsdGradientLossScaling (Micikevicius et al. 2018,
+Figure 3); the per-layer bytes from Gpt2XlBatch32Activations; the tiles and
+stored tensors from AttentionScores4096TokensFp32; checkpointing from
+Gpt2XlBatch32SegmentCheckpointed; selective recomputation from
+Literature.TrainingMemory (Korthikanti et al. 2023, Table 4). The GradScaler
+trace is our run (scaler_run.py, data/scaler_trace.csv). Coordinates and
+axis limits are layout, not data.
 
 Run from this folder: python3 make_figs.py
 """
@@ -49,12 +27,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
 
 import calcs  # noqa: E402
+from deckvals import val, num  # noqa: E402
 
 plt = sp.plt
 C = sp.C
 out = Path(__file__).parent
 KIT = Path(__file__).resolve().parents[3] / "assets" / "kit" / "vol1"
-CAP = 85.9  # H100 HBM, 80 GiB in decimal GB, as the chapter compares
+CAP = num("h100_gb")  # H100 HBM, 80 GiB in decimal GB
+STATIC = num("static_gb")
+SUP = str.maketrans("0123456789-", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻")
+
+
+def sci_label(key):
+    """A value recorded as key_m, key_e, printed as m×10ᵉ for a plot label."""
+    return f"{val(key + '_m')}×10{val(key + '_e').translate(SUP)}"
+
+
+def pow2(key):
+    """2 raised to a recorded power, for an axis label: 2⁻²⁴."""
+    return "2" + val(key).translate(SUP)
 
 
 def label(ax, x, y, text, color, shown=True, **kw):
@@ -67,7 +58,8 @@ def label(ax, x, y, text, color, shown=True, **kw):
 
 # 1. Running scoreboard (copied from Part 1's generator) --------------------
 names = ["FP32", "Mixed\nprecision", "Flash-\nAttention", "2 micro-\nbatches"]
-totals = [598, 311, 109.6, 66.8]
+TOTAL_KEYS = ["fp32_step_gb", "mp_step_gb", "flash_step_gb", "accum_step_gb"]
+totals = [num(k) for k in TOTAL_KEYS]
 
 
 def scoreboard(path, k, costs=None, alt=False):
@@ -80,19 +72,19 @@ def scoreboard(path, k, costs=None, alt=False):
         a = 1.0 if shown else 0.0
         xpos = i - 0.17 if (alt and i == 3) else i
         width = 0.32 if (alt and i == 3) else 0.58
-        ax.bar(xpos, 24, width, color=C["neutral"], alpha=a)
-        ax.bar(xpos, t - 24, width, bottom=24, color=C["data"], alpha=a)
-        label(ax, xpos, max(t, CAP) + 18, f"{t:g} GB", C["data"] if t < CAP else C["danger"],
+        ax.bar(xpos, STATIC, width, color=C["neutral"], alpha=a)
+        ax.bar(xpos, t - STATIC, width, bottom=STATIC, color=C["data"], alpha=a)
+        label(ax, xpos, max(t, CAP) + 18, f"{val(TOTAL_KEYS[i])} GB", C["data"] if t < CAP else C["danger"],
               shown, ha="center", fontsize=15 if not (alt and i == 3) else 14)
         if costs:
             label(ax, i, 395, costs[i], C["compute"], i > 0,
                   ha="center", va="bottom", fontsize=11.5, linespacing=1.1)
     if alt:
-        ax.bar(3.19, 35.5, 0.32, color="white", edgecolor=C["compute"], lw=1.8, ls="--")
-        ax.text(3.19, 150, "B:\n35.5", color=C["compute"], fontsize=14,
+        ax.bar(3.19, num("ckpt_step_gb"), 0.32, color="white", edgecolor=C["compute"], lw=1.8, ls="--")
+        ax.text(3.19, 150, f"B:\n{val('ckpt_step_gb')}", color=C["compute"], fontsize=14,
                 fontweight="bold", ha="center", va="bottom", linespacing=1.0)
     ax.axhline(CAP, color=C["memory"], lw=2, ls="--", zorder=0)
-    ax.text(3.55, CAP, "H100\n85.9 GB\n(80 GiB)", color=C["memory"], fontsize=14,
+    ax.text(3.55, CAP, f"H100\n{val('h100_gb')} GB\n({val('h100_gib')} GiB)", color=C["memory"], fontsize=14,
             fontweight="bold", ha="left", va="center")
     if costs:
         ax.text(2.0, 540, "What each step cost", color=C["compute"], fontsize=13,
@@ -101,7 +93,7 @@ def scoreboard(path, k, costs=None, alt=False):
         if alt:
             ax.text(3.45, 425, "dashed: B, checkpoint", color=C["compute"], fontsize=14,
                     fontweight="bold", ha="right")
-        ax.text(3.45, 575, "gray: static 24 GB", color=C["neutral"], fontsize=14,
+        ax.text(3.45, 575, f"gray: static {val('static_gb')} GB", color=C["neutral"], fontsize=14,
                 fontweight="bold", ha="right")
         ax.text(3.45, 500, "green: activations", color=C["data"], fontsize=14,
                 fontweight="bold", ha="right")
@@ -118,18 +110,19 @@ for k in (1, 2):
 scoreboard(out / "scoreboard_step4.svg", 4, alt=True)
 scoreboard(out / "scoreboard_costs.svg", 4,
            costs=["", "FP32 master,\nloss scaling", "recomputed\ntiles",
-                  "update every\ntwo passes"])
+                  f"update every\n{val('accum_k_word')} passes"])
 
 # 2. Bytes per parameter (copied from Part 1's generator) ---------------------
 fig, ax = plt.subplots(figsize=(5.8, 1.5))
 x = 0
-for w, text, ck in [(2, "W", "memory"), (2, "G", "network"), (4, "master", "neutral"),
-                    (8, "Adam m, v (FP32)", "compute")]:
+for w, text, ck in [(num("mp_w_b"), "W", "memory"), (num("mp_w_b"), "G", "network"),
+                    (num("mp_master_b"), "master", "neutral"),
+                    (num("mp_moments_b"), "Adam m, v (FP32)", "compute")]:
     ax.barh(0, w, left=x, color=C[ck], height=0.6, edgecolor="white")
     ax.text(x + w / 2, 0, text, ha="center", va="center", color="white",
             fontsize=12, fontweight="bold")
     x += w
-ax.text(x + 0.3, 0, "16 B per parameter", va="center", fontsize=13, fontweight="bold",
+ax.text(x + 0.3, 0, f"{val('mp_total_b')} B per parameter", va="center", fontsize=13, fontweight="bold",
         color=C["danger"])
 ax.set_xlim(0, 24)
 ax.set_ylim(-0.5, 0.5)
@@ -139,10 +132,8 @@ sp.save(fig, out / "static_bytes.svg")
 # 3. Peak dense throughput by format, four generations (book figure 10) -------
 fmts = [("FP32", "#333333"), ("TF32", C["memory"]), ("FP16/BF16", C["data"]),
         ("FP8", C["compute"]), ("FP4", C["danger"])]
-gens = [("V100\n(2017)", [15.7, None, 125, None, None]),
-        ("A100\n(2020)", [19.5, 156, 312, None, None]),
-        ("H100\n(2022)", [67, 494, 989, 1979, None]),
-        ("B200\n(2024)", [75, 1125, 2250, 4500, 9000])]
+gens = [(f"{hw.name.replace('NVIDIA ', '')}\n({hw.release_year})", rates)
+        for hw, rates in zip(calcs.LADDER, calcs.LADDER_RATES)]
 show_label = {(0, 0), (0, 2), (1, 0), (1, 2), (2, 0), (2, 2), (3, 0), (3, 2), (3, 4)}
 for k in (1, 2, 3):
     fig, ax = plt.subplots(figsize=(5.8, 2.7))
@@ -162,7 +153,7 @@ for k in (1, 2, 3):
                       ha="center", va="bottom", fontsize=10)
     for (fname, col), xk in zip(fmts, [-0.45, 0.15, 0.8, 1.9, 2.45]):
         ax.text(xk, 3.2e4, fname, color=col, fontsize=11, fontweight="bold", va="bottom")
-    label(ax, 2.0, 5000, "67 against 989: 15×", C["danger"], k == 3, ha="center",
+    label(ax, 2.0, 5000, f"{val('h100_fp32')} against {val('h100_peak')}: {val('fp16_over_fp32')}×", C["danger"], k == 3, ha="center",
           fontsize=13)
     ax.set_yscale("log")
     ax.set_ylim(5, 6e4)
@@ -176,9 +167,17 @@ for k in (1, 2, 3):
     sp.save(fig, out / f"precision_ladder_step{k}.svg")
 
 # 4. Number formats: bits to scale, and the range each one covers ------------
-rows = [("FP32", 8, 23, "about 7 digits", (1.2e-38, 3.4e38), None),
-        ("FP16", 5, 10, "about 3 digits", (6.1e-5, 65504), (6e-8, 6.1e-5)),
-        ("BF16", 8, 7, "2 to 3 digits", (1.2e-38, 3.4e38), None)]
+def float_range(fmt):
+    return mlsysim_physics.calc_float_range(*calcs.BITS[fmt])
+
+
+mlsysim_physics = calcs.mlsysim.physics
+f32, f16, b16 = (float_range(f) for f in ("fp32", "fp16", "bf16"))
+digits = {f: calcs.digits(f) for f in ("fp32", "fp16", "bf16")}
+rows = [("FP32", *calcs.BITS["fp32"], f"about {round(digits['fp32'])} digits", (f32[1], f32[0]), None),
+        ("FP16", *calcs.BITS["fp16"], f"about {round(digits['fp16'])} digits", (f16[1], f16[0]), (f16[2], f16[1])),
+        ("BF16", *calcs.BITS["bf16"], f"{np.floor(digits['bf16']):.0f} to {np.ceil(digits['bf16']):.0f} digits",
+         (b16[1], b16[0]), None)]
 for k in range(1, 5):
     fig = plt.figure(figsize=(5.8, 2.75))
     axb = fig.add_axes([0.13, 0.12, 0.36, 0.72])
@@ -201,13 +200,14 @@ for k in range(1, 5):
         if sub:
             axr.barh(y, np.log10(sub[1]) - np.log10(sub[0]), left=np.log10(sub[0]),
                      color=C["data_l"], height=0.45, alpha=a)
-    label(axr, 3, 1.38, "6.1×10⁻⁵ to 65,504", C["data"], k >= 2, ha="left",
+    label(axr, 3, 1.38, f"{sci_label('fp16_min')} to {val('fp16_max')}", C["data"], k >= 2, ha="left",
           va="bottom", fontsize=11)
-    label(axr, 3, 2.38, "about 10⁻³⁸ to 10³⁸", C["data"], k >= 1, ha="left",
+    e38 = val("fp32_min_e").translate(SUP)
+    label(axr, 3, 2.38, f"about 10{e38} to 10{e38.replace('⁻', '')}", C["data"], k >= 1, ha="left",
           va="bottom", fontsize=11)
     show_grad = k == 4
-    axr.axvline(-6, color=C["danger"], lw=2, ls="--", alpha=1.0 if show_grad else 0.0)
-    label(axr, -7.5, 0.5, "gradient 10⁻⁶", C["danger"], show_grad, ha="right",
+    axr.axvline(num("grad_e"), color=C["danger"], lw=2, ls="--", alpha=1.0 if show_grad else 0.0)
+    label(axr, -7.5, 0.5, f"gradient 10{val('grad_e').translate(SUP)}", C["danger"], show_grad, ha="right",
           va="center", fontsize=11)
     axb.text(0, 2.62, "sign", color=C["neutral"], fontsize=10, fontweight="bold")
     axb.text(5.5, 2.62, "exponent", color=C["memory"], fontsize=10, fontweight="bold")
@@ -224,15 +224,10 @@ for k in range(1, 5):
     sp.save(fig, out / f"fp_formats_step{k}.svg")
 
 # 5. Swamping: an update below half the FP16 spacing rounds away -------------
-spacing = float(np.spacing(np.float16(0.5)))  # 2^-11
-w16, w32 = np.float16(0.5), np.float32(0.5)
-hist16, hist32 = [float(w16)], [float(w32)]
-for _ in range(10000):
-    w16 = np.float16(w16 + np.float16(1e-4))
-    w32 = np.float32(w32 + np.float32(1e-4))
-    hist16.append(float(w16))
-    hist32.append(float(w32))
-assert hist16[-1] == 0.5 and abs(hist32[-1] - 1.5) < 1e-3
+SW = calcs.SWAMP
+W0, UPD, N_UPD = SW.weight, SW.update, SW.repeats
+spacing = SW.spacing("fp16")
+hist16, hist32 = SW.trace("fp16"), SW.trace("fp32")
 for k in (1, 2):
     fig = plt.figure(figsize=(5.8, 2.5))
     axg = fig.add_axes([0.02, 0.2, 0.44, 0.62])
@@ -240,24 +235,24 @@ for k in (1, 2):
     # left: the FP16 grid near 0.5
     axg.axhline(0, color=C["neutral"], lw=1.5)
     for j in range(-1, 3):
-        xv = 0.5 + j * spacing
+        xv = W0 + j * spacing
         axg.plot([xv, xv], [-0.18, 0.18], color=C["memory"], lw=2.5)
-    axg.text(0.5, -0.3, "0.5", ha="center", va="top", fontsize=12, fontweight="bold",
+    axg.text(W0, -0.3, val("sw_weight"), ha="center", va="top", fontsize=12, fontweight="bold",
              color=C["text"])
-    axg.text(0.5 + spacing, -0.3, "0.50049", ha="center", va="top", fontsize=11,
+    axg.text(W0 + spacing, -0.3, val("sw_next"), ha="center", va="top", fontsize=11,
              color=C["memory"])
-    axg.text(0.5, -0.78, "0.5 + 0.0001 is stored as 0.5", ha="left", va="top",
+    axg.text(W0, -0.78, f"{val('sw_weight')} + {val('sw_update')} is stored as {val('sw_fp16')}", ha="left", va="top",
              fontsize=11, color=C["danger"], fontweight="bold")
-    axg.annotate("", xy=(0.5 + 1e-4, 0.42), xytext=(0.5, 0.42),
+    axg.annotate("", xy=(W0 + UPD, 0.42), xytext=(W0, 0.42),
                  arrowprops=dict(arrowstyle="-|>", color=C["compute"], lw=2.2))
-    axg.text(0.5 + 0.5e-4, 0.55, "+0.0001", ha="center", va="bottom", fontsize=12,
+    axg.text(W0 + UPD / 2, 0.55, f"+{val('sw_update')}", ha="center", va="bottom", fontsize=12,
              fontweight="bold", color=C["compute"])
-    axg.plot([0.5 + 1e-4], [0], "o", ms=8, mfc="white", mec=C["compute"], mew=2)
-    axg.annotate("", xy=(0.5, 1.0), xytext=(0.5 + spacing, 1.0),
+    axg.plot([W0 + UPD], [0], "o", ms=8, mfc="white", mec=C["compute"], mew=2)
+    axg.annotate("", xy=(W0, 1.0), xytext=(W0 + spacing, 1.0),
                  arrowprops=dict(arrowstyle="<->", color=C["memory"], lw=1.5))
-    axg.text(0.5 + spacing / 2, 1.12, "FP16 spacing 4.9×10⁻⁴", ha="center", va="bottom",
+    axg.text(W0 + spacing / 2, 1.12, f"FP16 spacing {sci_label('sw_fp16_sp')}", ha="center", va="bottom",
              fontsize=11, fontweight="bold", color=C["memory"])
-    axg.set_xlim(0.5 - 1.3 * spacing, 0.5 + 2.4 * spacing)
+    axg.set_xlim(W0 - 1.3 * spacing, W0 + 2.4 * spacing)
     axg.set_ylim(-1.2, 1.45)
     axg.axis("off")
     # right: 10,000 updates
@@ -265,13 +260,13 @@ for k in (1, 2):
     steps = np.arange(len(hist16))
     axl.plot(steps, hist32, color=C["memory"], lw=2.5, alpha=a)
     axl.plot(steps, hist16, color=C["danger"], lw=2.5, alpha=a)
-    label(axl, 5000, 1.12, "FP32: 1.5", C["memory"], k == 2, ha="right", fontsize=12)
-    label(axl, 9800, 0.58, "FP16: 0.5", C["danger"], k == 2, ha="right", fontsize=12)
-    axl.set_xlim(0, 10000)
+    label(axl, N_UPD / 2, 1.12, f"FP32: {val('sw_fp32')}", C["memory"], k == 2, ha="right", fontsize=12)
+    label(axl, 0.98 * N_UPD, 0.58, f"FP16: {val('sw_fp16')}", C["danger"], k == 2, ha="right", fontsize=12)
+    axl.set_xlim(0, N_UPD)
     axl.set_ylim(0.4, 1.6)
-    axl.set_xticks([0, 5000, 10000], ["0", "5,000", "10,000"])
+    axl.set_xticks([0, N_UPD / 2, N_UPD], ["0", f"{N_UPD / 2:,.0f}", val("sw_repeats")])
     axl.set_yticks([0.5, 1.0, 1.5])
-    axl.set_xlabel("Updates of +0.0001", fontsize=11)
+    axl.set_xlabel(f"Updates of +{val('sw_update')}", fontsize=11)
     axl.set_ylabel("Stored weight", fontsize=11)
     for sname in ("bottom", "left"):
         axl.spines[sname].set_alpha(a)
@@ -284,20 +279,22 @@ for k in (1, 2):
 # (SSD activation gradients, FP32 training), bins read from the figure in
 # calcs.py; the zero bin (67 percent, caption) is a label, not a bar. Step 2
 # adds the same histogram scaled by 8, the factor the paper found sufficient.
-bins = [(lo, hi, p) for lo, hi, p in calcs.fig3_pct() if p]
-SHIFT = calcs.math.log2(calcs.SSD_SCALE)
+bins = [(b["low"], b["high"], b["percent"]) for b in calcs.LS.bins if b["percent"]]
+SHIFT = calcs.LS.shift
+SUBF, NORMF = calcs.LS.subnormal_floor_log2, calcs.LS.normal_floor_log2
+OVF = np.log2(calcs.LS.largest)
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.6, 2.25))
-    ax.axvspan(-24, -14, color=C["data_l"], alpha=0.6, lw=0)
-    ax.axvspan(-14, 16, color=C["data_l"], alpha=1.0, lw=0)
-    ax.axvspan(-62, -24, color=C["danger_l"], alpha=0.6, lw=0)
+    ax.axvspan(SUBF, NORMF, color=C["data_l"], alpha=0.6, lw=0)
+    ax.axvspan(NORMF, OVF, color=C["data_l"], alpha=1.0, lw=0)
+    ax.axvspan(-62, SUBF, color=C["danger_l"], alpha=0.6, lw=0)
     for lo, hi, p in bins:
         ax.bar(lo, p, hi - lo, align="edge", color=C["neutral"], edgecolor="white", lw=0.6,
                alpha=1.0 if k == 1 else 0.3, bottom=0)
         ax.bar(lo + SHIFT, p, hi - lo, align="edge", color="none", edgecolor=C["compute"],
                lw=1.8, alpha=1.0 if k == 2 else 0.0)
-    ax.axvline(16, color=C["danger"], lw=2.5)
-    ax.text(15.3, 4.5, "overflow\n65,504", color=C["danger"], fontsize=11,
+    ax.axvline(OVF, color=C["danger"], lw=2.5)
+    ax.text(15.3, 4.5, f"overflow\n{val('fp16_max')}", color=C["danger"], fontsize=11,
             fontweight="bold", ha="right", va="top", linespacing=1.0)
     ax.text(-2, 250, "FP16 normal", color=C["data"], fontsize=12, fontweight="bold",
             ha="center", va="top")
@@ -309,23 +306,23 @@ for k in (1, 2):
             linespacing=1.0)
     ax.text(-43, 250, "becomes zero in FP16", color=C["danger"], fontsize=12,
             fontweight="bold", ha="center", va="top")
-    ax.text(-60.5, 1.6, "+ 67% exactly\nzero (own bin)", color=C["neutral"], fontsize=10.5,
+    ax.text(-60.5, 1.6, f"+ {val('ls_zero_pct')}% exactly\nzero (own bin)", color=C["neutral"], fontsize=10.5,
             ha="left", va="center", linespacing=1.0)
-    label(ax, -7.5, 0.045, "orange: × 8, shift by 3:\nSSD then matched FP32", C["compute"],
+    label(ax, -7.5, 0.045, f"orange: × {val('ls_scale')}, shift by {val('ls_shift')}:\nSSD then matched FP32", C["compute"],
           k == 2, ha="left", va="bottom", fontsize=11, linespacing=1.05)
     ax.set_yscale("log")
     ax.set_ylim(0.005, 300)
     ax.set_yticks([0.01, 0.1, 1, 10], ["0.01%", "0.1%", "1%", "10%"])
     ax.minorticks_off()
     ax.set_xlim(-62, 18)
-    ax.set_xticks([-60, -45, -24, -14, 0, 16],
-                  ["2⁻⁶⁰", "2⁻⁴⁵", "2⁻²⁴", "2⁻¹⁴", "1", "2¹⁶"], fontsize=11)
+    ax.set_xticks([-60, -45, SUBF, NORMF, 0, OVF],
+                  ["2⁻⁶⁰", "2⁻⁴⁵", pow2("fp16_sub_log2"), pow2("fp16_min_log2"), "1", "2¹⁶"], fontsize=11)
     ax.set_xlabel("Activation-gradient magnitude, SSD (log scale)", fontsize=11)
     ax.set_ylabel("Share of values", fontsize=11)
     sp.save(fig, out / f"loss_scale_step{k}.svg")
 
 # 6b. A real GradScaler trace (scaler_run.py, data/scaler_trace.csv) ---------
-rows = calcs.scaler_trace()
+rows = calcs.TRACE
 steps = np.array([r[0] for r in rows])
 logs = np.log2([r[1] for r in rows])
 skips = [(r[0], np.log2(r[1])) for r in rows if r[2]]
@@ -333,7 +330,7 @@ fig, ax = plt.subplots(figsize=(3.4, 2.55))
 ax.step(steps / 1000, logs, where="post", color=C["memory"], lw=2.2)
 ax.plot([s / 1000 for s, _ in skips], [v + 1 for _, v in skips], "o", ms=6,
         color=C["danger"], mec="white", mew=1)
-ax.text(1, 23.2, "× 2 every\n2,000 clean\nsteps", color=C["memory"], fontsize=11,
+ax.text(1, 23.2, f"× 2 every\n{val('gs_interval')} clean\nsteps", color=C["memory"], fontsize=11,
         fontweight="bold", va="center", linespacing=1.05)
 ax.text(27.5, 26.1, "overflow: skip, ÷ 2", color=C["danger"], fontsize=11,
         fontweight="bold", ha="right", va="bottom")
@@ -349,16 +346,24 @@ sp.save(fig, out / "scaler_trace.svg")
 
 # 7. Run time by format (after Part 1's precision_days, narrowed for a column)
 sp.hbars(out / "precision_days_col.svg", [
-    ("FP32", 518, "neutral", "518 days"),
-    ("TF32", 70, "memory", "70 days"),
-    ("BF16", 35, "compute", "35 days, $3,370"),
+    ("FP32", num("fp32_days"), "neutral", f"{val('fp32_days')} days"),
+    ("TF32", num("tf32_days"), "memory", f"{val('tf32_days')} days"),
+    ("BF16", num("run_days"), "compute", f"{val('run_days')} days, ${val('run_usd')}"),
 ], "days", log=False, size=(3.9, 2.2),
-    xlabel="Days on one H100, 50% utilization")
+    xlabel=f"Days on one H100, {val('eta_pct')}% utilization")
 
 # 8. One layer's activation bytes at batch 32 (recall from Part 1), then the
 # three saved copies of the scores that FlashAttention stops storing --------
-parts = [(419.4, "memory"), (419.4, "compute"), (4194.3, "danger"), (10, "neutral")]
-copies = [(2, "P\n2 B"), (1, "mask\n1 B"), (2, "dropped P\n2 B")]
+ACT = calcs.ACT
+mem = calcs.mlsysim.physics.memory
+PROJ = ACT.projection_activations_per_layer.to("MB").magnitude
+FFN = ACT.ffn_activations_per_layer.to("MB").magnitude
+SCORES = ACT.score_activations_per_layer.to("MB").magnitude
+NORM = ACT.normalization_per_layer.to("MB").magnitude
+parts = [(PROJ, "memory"), (FFN, "compute"), (SCORES, "danger"), (NORM, "neutral")]
+copies = [(mem.SCORE_SOFTMAX_BYTES, f"P\n{mem.SCORE_SOFTMAX_BYTES} B"),
+          (mem.SCORE_DROPOUT_MASK_BYTES, f"mask\n{mem.SCORE_DROPOUT_MASK_BYTES} B"),
+          (mem.SCORE_DROPPED_BYTES, f"dropped P\n{mem.SCORE_DROPPED_BYTES} B")]
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 2.3))
     x = 0
@@ -367,22 +372,23 @@ for k in (1, 2):
         x += w
     ax.text(x + 150, 1.45, f"{x:,.0f} MB", va="center", fontsize=13,
             fontweight="bold", color=C["text"])
-    for xt, t, ck in [(0, "proj. 419", "memory"), (2300, "scores 4,194: 83%", "danger")]:
+    for xt, t, ck in [(0, f"proj. {val('layer_proj_mb')}", "memory"),
+                      (2300, f"scores {val('layer_scores_mb')}: {val('layer_scores_pct')}%", "danger")]:
         ax.text(xt, 1.0, t, color=C[ck], fontsize=12, fontweight="bold", va="center")
-    ax.text(8100, 2.05, "× 48 layers: scores are 201 of 287 GB", color=C["danger"],
+    ax.text(8100, 2.05, f"× {val('gpt2_layers')} layers: scores are {val('scores_gb')} of {val('act_gb')} GB", color=C["danger"],
             fontsize=12, fontweight="bold", va="center", ha="right")
     shown = k == 2
     a = 1.0 if shown else 0.0
-    x0 = 838.8
+    x0 = PROJ + FFN
     for nbytes, t in copies:
-        w = 4194.3 * nbytes / 5
+        w = SCORES * nbytes / mem.KORTHIKANTI_SCORE_BYTES
         ax.barh(0, w, left=x0, color=C["danger_l"], height=0.62, edgecolor=C["danger"],
                 lw=1.5, hatch="//", alpha=a)
         label(ax, x0 + w / 2, 0, t, C["danger"], shown, ha="center", va="center",
               fontsize=12, linespacing=1.0,
               bbox=dict(fc="white", ec="none", pad=1.5, alpha=a))
         x0 += w
-    for xe in (838.8, 838.8 + 4194.3):
+    for xe in (PROJ + FFN, PROJ + FFN + SCORES):
         ax.plot([xe, xe], [1.2, 0.31], color=C["danger"], lw=1.2, ls=":", alpha=a)
     label(ax, 5250, 0, "FlashAttention\nstores none; it keeps\na max and a sum per row", C["memory"],
           shown, va="center", fontsize=12, linespacing=1.05)
@@ -391,7 +397,7 @@ for k in (1, 2):
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
     ax.set_xticks([0, 2000, 4000], ["0", "2,000", "4,000"])
-    ax.set_xlabel("MB saved per layer for backward, batch 32, FP16", fontsize=12)
+    ax.set_xlabel(f"MB saved per layer for backward, batch {val('batch')}, FP16", fontsize=12)
     sp.save(fig, out / f"layer_bytes_step{k}.svg")
 
 # 9. Standard attention on the kit's accelerator node -----------------------
@@ -422,13 +428,13 @@ for k in (1, 2, 3):
     extra = []
     blue, red, gray = C["memory"], "#A51C30", "#888888"
     extra.append(text(575, 368, "HBM", blue, 27))
-    extra.append(text(575, 402, "80 GB, 3.35 TB/s", blue, 25, 400))
+    extra.append(text(575, 402, f"{val('h100_gib')} GB, {val('h100_bw')} TB/s", blue, 25, 400))
     if k >= 2:
         side = blue if k == 2 else gray
         extra.append(text(575, 50, "On-chip SRAM", side, 27))
-        extra.append(text(575, 84, "30 to 50 MB,", side, 25, 400))
-        extra.append(text(575, 116, "15 to 20 TB/s", side, 25, 400))
-        extra.append(text(575, 148, "228 KB per SM", side, 25, 400))
+        extra.append(text(575, 84, f"{val('sram_lo_mb')} to {val('sram_hi_mb')} MB,", side, 25, 400))
+        extra.append(text(575, 116, f"{val('sram_bw_lo')} to {val('sram_bw_hi')} TB/s", side, 25, 400))
+        extra.append(text(575, 148, f"{val('h100_smem_kb')} KB per SM", side, 25, 400))
     if k == 3:
         # SRAM bypassed: gray it out
         extra.append('<rect x="76" y="106" width="138" height="218" rx="10" fill="white" '
@@ -449,7 +455,7 @@ for k in (1, 2, 3):
         extra.append(text(575, 200, "Standard attention:", red, 25))
         extra.append(text(575, 234, "1 write S,  2 read S,", red, 25, 400))
         extra.append(text(575, 268, "3 write P,  4 read P", red, 25, 400))
-        extra.append(text(10, 485, "Scores only: d_head / 2 = 64 / 2 = 32 FLOP per byte; ridge 295",
+        extra.append(text(10, 485, f"Scores only: d_head / 2 = {val('dhead')} / 2 = {val('attn_intensity')} FLOP per byte; ridge {val('h100_ridge')}",
                           red, 23))
     svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="900" height="500" '
            'viewBox="0 0 900 500">\n<rect width="900" height="500" fill="white"/>\n'
@@ -461,7 +467,7 @@ for k in (1, 2):
     fig = plt.figure(figsize=(5.8, 2.7))
     axm = fig.add_axes([0.0, 0.06, 0.38, 0.86])
     axb = fig.add_axes([0.52, 0.24, 0.46, 0.56])
-    n = 32
+    n = calcs.TILE.tiles_per_side
     axm.add_patch(plt.Rectangle((0, 0), n, n, fc=C["danger_l"], ec=C["danger"], lw=2))
     for t in range(1, n):
         axm.plot([t, t], [0, n], color="white", lw=0.5)
@@ -472,22 +478,24 @@ for k in (1, 2):
                  arrowprops=dict(arrowstyle="-|>", color=C["memory"], lw=2))
     axm.text(6.5, n - 3.6, "K, V blocks stream by", color=C["memory"], fontsize=11,
              fontweight="bold", va="top")
-    axm.text(n / 2, n / 2 - 3, "4,096 × 4,096 scores\n= 32 × 32 tiles of 128",
+    axm.text(n / 2, n / 2 - 3, f"{val('tile_seq')} × {val('tile_seq')} scores\n= {val('tiles_per_side')} × {val('tiles_per_side')} tiles of {val('tile_side')}",
              ha="center", va="center", fontsize=11.5, fontweight="bold", color=C["danger"])
-    axm.text(n / 2, n + 0.6, "one query block (128 rows)", ha="center", va="bottom",
+    axm.text(n / 2, n + 0.6, f"one query block ({val('tile_side')} rows)", ha="center", va="bottom",
              fontsize=11, fontweight="bold", color=C["memory"])
     axm.set_xlim(-0.5, n + 0.5)
     axm.set_ylim(-0.5, n + 3)
     axm.set_aspect("equal")
     axm.axis("off")
     shown = k == 2
-    vals = [(67.1e6, "danger", "Full matrix 67.1 MB"), (65.5e3, "memory", "One tile 65.5 KB")]
+    vals = [(calcs.TILE.score_matrix.to("byte").magnitude, "danger", f"Full matrix {val('tile_full_mb')} MB"),
+            (calcs.TILE.tile_bytes.to("byte").magnitude, "memory", f"One tile {val('tile_kb')} KB")]
     for i, (v, ck, t) in enumerate(vals):
         axb.barh(1 - i, v, color=C[ck], height=0.55, alpha=1.0 if shown else 0.0)
         label(axb, v * 1.4 if i == 0 else 3.2e5, 1 - i, t, C[ck], shown, va="center",
               fontsize=12)
-    axb.axvline(228e3, color=C["data"], lw=2, ls="--", alpha=1.0 if shown else 0.0)
-    label(axb, 228e3, 1.55, "228 KB shared\nmemory per SM", C["data"], shown,
+    SMEM = num("h100_smem_kb") * 1e3
+    axb.axvline(SMEM, color=C["data"], lw=2, ls="--", alpha=1.0 if shown else 0.0)
+    label(axb, SMEM, 1.55, f"{val('h100_smem_kb')} KB shared\nmemory per SM", C["data"], shown,
           ha="center", va="bottom", fontsize=10.5)
     axb.set_xscale("log")
     axb.set_xlim(1e4, 3e10)
@@ -505,39 +513,39 @@ for k in (1, 2):
 
 # 11. What each kernel keeps for backward, per head at 4,096 tokens ----------
 sp.hbars(out / "flash_store.svg", [
-    ("Standard attention", 138.4, "danger", "138.4 MB"),
-    ("FlashAttention", 4.2, "memory", "4.2 MB: Q, K, V, O, and m, l per row"),
-], "MB", xlabel="Stored for backward, per head, 4,096 tokens (MB, log scale)",
+    ("Standard attention", num("store_std_mb"), "danger", f"{val('store_std_mb')} MB"),
+    ("FlashAttention", num("store_fa_mb"), "memory", f"{val('store_fa_mb')} MB: Q, K, V, O, and m, l per row"),
+], "MB", xlabel=f"Stored for backward, per head, {val('tile_seq')} tokens (MB, log scale)",
     size=sp.SHORT)
 
 # 12. Step memory against batch size with FlashAttention ----------------------
 bs = np.arange(0, 41)
-PER_SEQ = calcs.per_seq_gb()
-STATIC = calcs.static_gb()
-FIT = (CAP - STATIC) / PER_SEQ
+PER_SEQ = calcs.ACT.per_sequence_activations.to("GB").magnitude
+FIT = calcs.FLASH.resident_batch_limit
 mem = STATIC + PER_SEQ * bs
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 2.5))
     ax.plot(bs, mem, color=C["data"], lw=2.8)
     ax.axhline(CAP, color=C["memory"], lw=2, ls="--")
-    ax.text(0.5, CAP + 4, "H100: 85.9 GB (80 GiB)", color=C["memory"], fontsize=11,
+    ax.text(0.5, CAP + 4, f"H100: {val('h100_gb')} GB ({val('h100_gib')} GiB)", color=C["memory"], fontsize=11,
             fontweight="bold")
-    ax.text(39.5, 8, f"{STATIC:.0f} GB + {PER_SEQ:.2f} GB per sequence", ha="right",
+    ax.text(39.5, 8, f"{val('static_gb')} GB + {val('per_seq_gb')} GB per sequence", ha="right",
             va="bottom", color=C["data"], fontsize=11, fontweight="bold")
     shown = k == 2
-    for b, col in [(16, C["data"]), (32, C["danger"])]:
+    for b, key, col in [(int(num("micro")), "accum_step_gb", C["data"]),
+                        (int(num("batch")), "flash_step_gb", C["danger"])]:
         m = STATIC + PER_SEQ * b
         ax.plot([b], [m], "o", ms=10, color=col, mec="white", mew=1.5,
                 alpha=1.0 if shown else 0.0)
-        label(ax, b - 0.8, m + 5, f"batch {b}: {m:.1f} GB", col, shown, ha="right",
+        label(ax, b - 0.8, m + 5, f"batch {b}: {val(key)} GB", col, shown, ha="right",
               fontsize=11.5)
     ax.plot([FIT], [CAP], "o", ms=9, color=C["memory"], mec="white", mew=1.5)
-    ax.annotate("about 23 fit", xy=(FIT, CAP), xytext=(26.5, 52), fontsize=11.5,
+    ax.annotate(f"about {val('fit_batch')} fit", xy=(FIT, CAP), xytext=(26.5, 52), fontsize=11.5,
                 fontweight="bold", color=C["memory"],
                 arrowprops=dict(arrowstyle="-|>", color=C["memory"], lw=1.5))
     ax.set_xlim(0, 40)
     ax.set_ylim(0, 135)
-    ax.set_xlabel("Sequences resident at once (1,024 tokens each)", fontsize=11)
+    ax.set_xlabel(f"Sequences resident at once ({val('seq')} tokens each)", fontsize=11)
     ax.set_ylabel("GB per step")
     ax.grid(color=C["grid"], lw=0.5)
     ax.set_axisbelow(True)
@@ -546,7 +554,7 @@ for k in (1, 2):
 # 13. Segment checkpointing (copied from Part 1's generator) -----------------
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 2.3))
-    for s in range(8):
+    for s in range(calcs.SEG.checkpoint_segments):
         x0 = s * 1.0
         ax.add_patch(plt.Rectangle((x0 + 0.02, 0.0), 0.12, 1.0, fc=C["data"], ec=C["data"]))
         rebuilt = k == 2 and s == 5
@@ -554,13 +562,13 @@ for k in (1, 2):
                                    fc=C["compute_l"] if rebuilt else "white",
                                    ec=C["compute"] if rebuilt else C["neutral_l"],
                                    lw=2 if rebuilt else 1.2, ls="-" if rebuilt else "--"))
-    label(ax, 0.0, 1.12, "kept: 8 segment inputs, 0.84 GB", C["data"], True,
+    label(ax, 0.0, 1.12, f"kept: {val('segments')} segment inputs, {val('seg_inputs_gb')} GB", C["data"], True,
           fontsize=15, va="bottom")
-    label(ax, 5.56, -0.12, "rebuilt in backward,\none at a time: 10.7 GB", C["compute"],
+    label(ax, 5.56, -0.12, f"rebuilt in backward,\none at a time: {val('live_seg_gb')} GB", C["compute"],
           k == 2, fontsize=15, va="top", ha="center", linespacing=1.05)
     label(ax, 8.05, 1.12, "dropped", C["neutral"], True, fontsize=15, va="bottom",
           ha="right")
-    label(ax, 0.56, -0.12, "6 layers", C["neutral"], True, fontsize=15, va="top",
+    label(ax, 0.56, -0.12, f"{val('segment_layers')} layers", C["neutral"], True, fontsize=15, va="top",
           ha="center")
     ax.set_xlim(-0.05, 8.1)
     ax.set_ylim(-1.05, 1.55)
@@ -568,24 +576,26 @@ for k in (1, 2):
     sp.save(fig, out / f"ckpt_segments_step{k}.svg")
 
 # 15. Activation memory against checkpoint count, 48 layers (table 13) -------
-ks = np.arange(1, 49)
-units = ks + 48 / ks
+L_ = calcs.GPT2.layers
+ks = np.arange(1, L_ + 1)
+units = np.array([calcs.SEG.checkpoint_memory_units(int(k)) for k in ks])
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 2.5))
     ax.plot(ks, units, color=C["compute"], lw=2.8)
-    ax.axhline(48, color=C["neutral"], lw=1.5, ls=":")
-    ax.text(25, 51.5, "no checkpoints: 48", ha="center", color=C["neutral"], fontsize=11,
+    ax.axhline(L_, color=C["neutral"], lw=1.5, ls=":")
+    ax.text(25, 51.5, f"no checkpoints: {val('gpt2_layers')}", ha="center", color=C["neutral"], fontsize=11,
             fontweight="bold")
-    for kk, txt, xt, yt, ha in [(1, "k = 1: 49", 2.5, 53, "left"),
-                                (7, "k = 7: about 14", 9, 9.5, "left"),
-                                (48, "k = 48: 49", 47.5, 53, "right")]:
-        u = kk + 48 / kk
+    kb = int(num("k_best"))
+    for kk, txt, xt, yt, ha in [(1, f"k = 1: {val('k_one_units')}", 2.5, 53, "left"),
+                                (kb, f"k = {val('k_best')}: about {val('k_best_units')}", 9, 9.5, "left"),
+                                (L_, f"k = {val('gpt2_layers')}: {val('k_one_units')}", 47.5, 53, "right")]:
+        u = calcs.SEG.checkpoint_memory_units(kk)
         ax.plot([kk], [u], "o", ms=9, color=C["compute"], mec="white", mew=1.5)
         ax.text(xt, yt, txt, ha=ha, va="center", fontsize=11.5, fontweight="bold",
                 color=C["compute"])
-    ax.text(40, 24, "memory ≈ k + 48/k\n(L = 48 layers)", ha="center", va="top",
+    ax.text(40, 24, f"memory ≈ k + {val('gpt2_layers')}/k\n(L = {val('gpt2_layers')} layers)", ha="center", va="top",
             fontsize=12, fontweight="bold", color=C["compute"], linespacing=1.05)
-    label(ax, 9, 3.8, "71% less memory, about 33% more arithmetic", C["data"], k == 2,
+    label(ax, 9, 3.8, f"{val('sqrt_saving_pct')}% less memory, about {val('recompute_pct')}% more arithmetic", C["data"], k == 2,
           va="center", fontsize=11.5)
     ax.set_xlim(0, 50)
     ax.set_ylim(0, 58)
@@ -596,12 +606,10 @@ for k in (1, 2):
     sp.save(fig, out / f"sqrt_ckpt_step{k}.svg")
 
 # 16. Selective recomputation, measured (Korthikanti et al. 2023, Table 4) ---
-base = calcs.K_TABLE4["No recompute"]
-krows = []
-for (name, ms), ck in zip(calcs.K_TABLE4.items(), ["neutral", "danger", "data"]):
-    extra = "" if ms == base else f" (+{100 * (ms / base - 1):.0f}%)"
-    krows.append((name, ms, ck, f"{ms} ms{extra}"))
+krows = [("No recompute", num("k_none_ms"), "neutral", f"{val('k_none_ms')} ms"),
+         ("Full recompute", num("k_full_ms"), "danger", f"{val('k_full_ms')} ms (+{val('k_full_pct')}%)"),
+         ("Selective recompute", num("k_sel_ms"), "data", f"{val('k_sel_ms')} ms (+{val('k_sel_pct')}%)")]
 sp.hbars(out / "selective_recompute.svg", krows, "ms", log=False, size=(5.8, 1.9),
-         xlabel="One layer of a 22B GPT, forward + backward, A100 (ms)")
+         xlabel=f"One layer of a {val('k_model_b')}B GPT, forward + backward, A100 (ms)")
 
 print("figures written")

@@ -70,3 +70,44 @@ def calc_float32_bit_flip(value: float, bit: int):
     stored = struct.unpack(">f", struct.pack(">I", word))[0]
     corrupted = struct.unpack(">f", struct.pack(">I", word ^ (1 << bit)))[0]
     return stored, corrupted
+
+
+def calc_float_spacing(value: float, exponent_bits: int, fraction_bits: int) -> float:
+    """
+    Gap between ``value`` and the next larger number of a binary float format (one ulp).
+
+    A number in the binade ``[2^E, 2^(E+1))`` has neighbors ``2^(E - f)`` apart;
+    below the smallest normal the spacing stays at the subnormal step. An
+    update smaller than half this spacing rounds away when added to ``value``
+    (added 2026-10-20).
+    """
+    _, smallest_normal, _ = calc_float_range(exponent_bits, fraction_bits)
+    exponent = max(math.floor(math.log2(abs(value))), math.floor(math.log2(smallest_normal)))
+    return 2.0 ** (exponent - fraction_bits)
+
+
+def calc_repeated_add(start: float, update: float, repeats: int, exponent_bits: int, fraction_bits: int):
+    """
+    ``start`` after adding ``update`` ``repeats`` times, rounding to the format after every add.
+
+    Returns the stored value after each add, starting with ``start`` itself
+    (``repeats + 1`` values). This is how a weight kept in a narrow format
+    accumulates small optimizer updates (added 2026-10-20).
+    """
+    validate_at_least(repeats, 0, "repeats")
+    stored = calc_float_round(start, exponent_bits, fraction_bits)
+    step = calc_float_round(update, exponent_bits, fraction_bits)
+    trace = [stored]
+    for _ in range(repeats):
+        stored = calc_float_round(stored + step, exponent_bits, fraction_bits)
+        trace.append(stored)
+    return trace
+
+
+def calc_float_decimal_digits(fraction_bits: int) -> float:
+    """
+    Decimal digits a binary float keeps: ``(f + 1) log10 2`` for ``f`` stored fraction bits
+    plus the implicit leading bit (about 7.2 for FP32, 3.3 for FP16, 2.4 for BF16; added 2026-10-20).
+    """
+    validate_at_least(fraction_bits, 1, "fraction_bits")
+    return (fraction_bits + 1) * math.log10(2)

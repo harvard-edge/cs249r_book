@@ -569,3 +569,81 @@ __all__ += [
     "RollingWindowModel",
     "CarbonPricedPlacementModel",
 ]
+
+# --- Agent evaluation: verdicts, graders, intervals, paired comparison (added 2026-10-20) ---
+from .acceptance import (
+    VerdictBoundsModel,
+    GraderCalibrationModel,
+    TaskRepeatAllocationModel,
+    BinomialIntervalsModel,
+    ProportionPlanningModel,
+    PairedComparisonModel,
+    ScaffoldSpreadModel,
+    LeaderboardTiesModel,
+    TaskMixConsistencyModel,
+    CappedSelectionCostModel,
+    PairedRunEvaluationModel,
+)
+
+__all__ += [
+    "VerdictBoundsModel",
+    "GraderCalibrationModel",
+    "TaskRepeatAllocationModel",
+    "BinomialIntervalsModel",
+    "ProportionPlanningModel",
+    "PairedComparisonModel",
+    "ScaffoldSpreadModel",
+    "LeaderboardTiesModel",
+    "TaskMixConsistencyModel",
+    "CappedSelectionCostModel",
+    "PairedRunEvaluationModel",
+]
+
+# --- Agent operations: traces, retention, staged release (added 2026-10-20) ---
+from .operations import (
+    SpanCriticalPathModel,
+    TraceRetentionModel,
+    SequentialCanaryModel,
+)
+
+__all__ += [
+    "SpanCriticalPathModel",
+    "TraceRetentionModel",
+    "SequentialCanaryModel",
+]
+
+# --- Agent evaluation: verdicts, graders, intervals, paired comparison (added 2026-10-20) ---
+from .acceptance import (
+    PairedComparisonModel,
+)
+
+__all__ += [
+    "PairedComparisonModel",
+]
+
+# --- Trajectory planning: joint rates, handoffs, seams, swings, jerk-limited stops (added 2026-10-20) ---
+from .trajectory import (
+    TwoLinkJointRateModel,
+    HandoffExposureModel,
+    ChunkReplacementModel,
+    JerkLimitedStopModel,
+    SpillLimitedStopModel,
+    TrajectoryDeadlinesModel,
+    SeamBridgeModel,
+    ShoulderSwingModel,
+    DynamicWindowModel,
+    StaleAnchorModel,
+)
+
+__all__ += [
+    "TwoLinkJointRateModel",
+    "HandoffExposureModel",
+    "ChunkReplacementModel",
+    "JerkLimitedStopModel",
+    "SpillLimitedStopModel",
+    "TrajectoryDeadlinesModel",
+    "SeamBridgeModel",
+    "ShoulderSwingModel",
+    "DynamicWindowModel",
+    "StaleAnchorModel",
+]

@@ -669,3 +669,155 @@ def calc_chi_square_quantile(degrees_of_freedom: int, coverage: float) -> float:
         raise ValueError("degrees_of_freedom must be >= 1 and coverage in (0, 1)")
     from scipy.stats import chi2
     return float(chi2.ppf(coverage, degrees_of_freedom))
+
+
+# --- Acceptance rates: binomial intervals and paired comparison (added 2026-10-20) ---
+# A benchmark score is a binomial proportion of accepted tasks. These are the
+# closed forms an evaluation reports with it: the Wald and Wilson intervals,
+# the normal half-width and the task count it implies, the two-level variance
+# of a task-averaged estimate, and the paired comparison of two
+# configurations on the same tasks (Newcombe's method 10 and McNemar's exact
+# test). The solvers in engine/solvers/acceptance.py compose them.
+
+
+# --- Agent operations: score intervals, paired differences, drift, sequential samples (added 2026-10-20) ---
+def _check_count(successes, trials):
+    if not isinstance(successes, int) or not isinstance(trials, int) or not 0 <= successes <= trials or trials <= 0:
+        raise ValueError("Require integer counts 0 <= successes <= trials and trials > 0")
+
+
+def calc_wald_interval(successes, trials, z_critical):
+    """Wald interval for a binomial proportion: ``p_hat +/- z sqrt(p_hat (1 - p_hat) / n)``.
+
+    Not clipped to [0, 1], so near the boundaries it shows the impossible
+    endpoints and the zero width at ``x = 0`` or ``x = n`` that disqualify it
+    (Brown, Cai, and DasGupta 2001).
+    """
+    _check_count(successes, trials)
+    p = successes / trials
+    half = z_critical * math.sqrt(p * (1 - p) / trials)
+    return p - half, p + half
+
+
+def calc_wilson_interval(successes, trials, z_critical):
+    """Wilson score interval for a binomial proportion (Wilson 1927), clipped to [0, 1].
+
+        center = (x + z^2/2) / (n + z^2)
+        half   = z / (n + z^2) * sqrt(x (n - x) / n + z^2 / 4)
+
+    The variance uses the hypothesized rate, so the interval keeps a nonzero
+    width at ``x = 0`` and ``x = n`` and never leaves [0, 1].
+    """
+    _check_count(successes, trials)
+    x, n, z = successes, trials, z_critical
+    center = (x + z * z / 2) / (n + z * z)
+    spread = z * math.sqrt(x * (n - x) / n + z * z / 4) / (n + z * z)
+    return max(0.0, center - spread), min(1.0, center + spread)
+
+
+def calc_proportion_half_width(rate, n_samples, z_critical):
+    """Normal-approximation half-width of a proportion from ``n_samples`` independent draws: ``z sqrt(p (1 - p) / n)``."""
+    return z_critical * math.sqrt(rate * (1 - rate) / n_samples)
+
+
+def calc_samples_for_half_width(rate, half_width, z_critical):
+    """Independent draws for a normal-approximation half-width at ``rate``: ``ceil(z^2 p (1 - p) / h^2)``."""
+    return math.ceil(z_critical ** 2 * rate * (1 - rate) / half_width ** 2)
+
+
+def calc_within_task_variance(mean_rate, between_task_variance):
+    """Mean within-task run variance ``E[p_i (1 - p_i)] = mean (1 - mean) - Var(p_i)``."""
+    return mean_rate * (1 - mean_rate) - between_task_variance
+
+
+def calc_task_averaged_variance(between_task_variance, within_task_variance, tasks, runs_per_task):
+    """Variance of a task-averaged acceptance estimate: ``sigma_task^2 / N + sigma_run^2 / (N r)``.
+
+    Tasks are sampled independently and runs are independent given the task;
+    more runs shrink only the second term, more tasks shrink both.
+    """
+    return between_task_variance / tasks + within_task_variance / (tasks * runs_per_task)
+def calc_wilson_clean_runs(target_upper: float, z: float) -> int:
+    """Fewest consecutive clean runs whose Wilson upper limit on the failure rate falls below ``target_upper``.
+
+    With zero failures in ``n`` runs the upper limit is ``z^2 / (n + z^2)``,
+    which is below ``t`` once ``n > z^2 (1 - t) / t``.
+    """
+    if not 0.0 < target_upper < 1.0:
+        raise ValueError("target_upper must be in (0, 1)")
+    return math.floor(z * z * (1 - target_upper) / target_upper) + 1
+
+
+def calc_newcombe_paired_difference(both, first_only, second_only, neither, z_critical):
+    """Paired difference of two acceptance rates with Newcombe's method-10 interval (Newcombe 1998).
+
+    The four cells count the tasks both configurations accept, only the first,
+    only the second, and neither. Returns ``(delta, low, high)`` for the first
+    configuration's rate minus the second's. Each marginal Wilson interval is
+    combined through the continuity-corrected phi of the 2x2 table, so
+    positive within-pair dependence narrows the interval.
+    """
+    cells = (both, first_only, second_only, neither)
+    if any(not isinstance(v, int) or v < 0 for v in cells) or sum(cells) <= 0:
+        raise ValueError("Require nonnegative integer cells and positive total")
+    n = sum(cells)
+    p1, p2 = (both + first_only) / n, (both + second_only) / n
+    l1, u1 = calc_wilson_interval(both + first_only, n, z_critical)
+    l2, u2 = calc_wilson_interval(both + second_only, n, z_critical)
+    denominator = math.sqrt((both + first_only) * (second_only + neither) * (both + second_only) * (first_only + neither))
+    numerator = both * neither - second_only * first_only
+    if numerator > 0:
+        numerator = max(numerator - n / 2, 0)
+    rho = numerator / denominator if denominator else 0.0
+    lower_width = math.sqrt(max(0.0, (p1 - l1) ** 2 + (u2 - p2) ** 2 - 2 * rho * (p1 - l1) * (u2 - p2)))
+    upper_width = math.sqrt(max(0.0, (u1 - p1) ** 2 + (p2 - l2) ** 2 - 2 * rho * (u1 - p1) * (p2 - l2)))
+    return p1 - p2, p1 - p2 - lower_width, p1 - p2 + upper_width
+
+
+def calc_mcnemar_exact_two_sided(first_only, second_only):
+    """Exact two-sided McNemar p from the discordant counts (McNemar 1947).
+
+    Conditional on ``d = first_only + second_only`` discordant pairs, wins are
+    Binomial(d, 1/2) under equal marginals:
+    ``p = min(1, 2 sum_{j <= min(b, c)} C(d, j) 2^-d)``; 1 when ``d = 0``.
+    """
+    discordant = first_only + second_only
+    if not discordant:
+        return 1.0
+    tail = sum(math.comb(discordant, j) for j in range(min(first_only, second_only) + 1))
+    return min(1.0, 2 * tail / 2 ** discordant)
+
+
+def calc_paired_difference_variance(discordant_fraction, difference):
+    """Per-pair variance of a paired candidate-minus-baseline outcome in {-1, 0, +1}: ``d - delta^2``."""
+    return discordant_fraction - difference ** 2
+
+
+def calc_jensen_shannon_divergence(p, q) -> float:
+    """Jensen-Shannon divergence between two aligned distributions, in nats.
+
+    ``JS = KL(p || m) / 2 + KL(q || m) / 2`` with ``m = (p + q) / 2``. It is
+    symmetric and bounded by ``ln 2``, which two distributions with disjoint
+    support reach. Source: Lin, "Divergence Measures Based on the Shannon
+    Entropy," IEEE Trans. Inf. Theory 37(1), 1991.
+    """
+    if len(p) != len(q):
+        raise ValueError("p and q must have the same length")
+    m = [(a + b) / 2 for a, b in zip(p, q)]
+
+    def _kl(x, y):
+        return sum(a * math.log(a / b) for a, b in zip(x, y) if a > 0)
+
+    return 0.5 * _kl(p, m) + 0.5 * _kl(q, m)
+
+
+def calc_sprt_expected_samples(upper: float, lower: float, drift: float, upper_probability: float) -> float:
+    """Wald's expected stopping sample count, neglecting overshoot.
+
+    The walk ends at ``upper`` with probability ``upper_probability`` and at
+    ``lower`` otherwise; dividing the expected terminal log-likelihood by the
+    expected step ``drift`` gives ``E[N]`` (Wald 1945, average sample number).
+    """
+    if drift == 0:
+        raise ValueError("drift must be nonzero")
+    return (upper_probability * upper + (1 - upper_probability) * lower) / drift

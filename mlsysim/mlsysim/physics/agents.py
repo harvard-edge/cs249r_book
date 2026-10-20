@@ -397,3 +397,18 @@ def calc_cleanup_critical_path(durations, depends_on):
         return finish[op]
 
     return max(_finish(op) for op in durations)
+
+
+def calc_pass_pow_k_unbiased(samples: int, passing: int, k: int) -> float:
+    """
+    Unbiased pass^k from ``samples`` graded runs of one task of which ``passing`` pass (Yao et al. 2024).
+
+        pass^k = C(c, k) / C(n, k)
+
+    the share of all size-``k`` subsets in which every run passes; 0 when
+    ``c < k``. Its expectation is ``p^k``, the mirror of the pass@k estimate
+    ``calc_pass_at_k_unbiased`` (added 2026-10-20).
+    """
+    if passing < k:
+        return 0.0
+    return _math.comb(passing, k) / _math.comb(samples, k)

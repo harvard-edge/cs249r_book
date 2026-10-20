@@ -2896,7 +2896,8 @@ CHI_DIFFUSION_POLICY_2024 = _lit(
     "Chi, C. et al. (2024), Diffusion Policy: Visuomotor Policy Learning via Action Diffusion, IJRR",
     url="https://arxiv.org/abs/2303.04137",
     verified="2026-09-29",
-    notes="Prediction horizon T_p = 16, action execution horizon T_a = 8.",
+    notes=("Prediction horizon T_p = 16, action execution horizon T_a = 8 (simulation tasks); "
+           "real-world Push-T executes T_a = 6 of T_p = 16 (App. A.4, Tables 7 and 8, checked 2026-10-20)."),
 )
 BLACK_PI0_2024 = _lit(
     "prov:black-pi0-2024",
@@ -2905,7 +2906,17 @@ BLACK_PI0_2024 = _lit(
     url="https://arxiv.org/abs/2410.24164",
     verified="2026-09-29",
     notes=("Sec. IV and App. A-D: 3.3B parameters in total, a 300M action expert, H = 50, 10 flow "
-           "integration steps, up to 50 Hz control, 73 ms on-board latency (RTX 4090)."),
+           "integration steps, up to 50 Hz control, 73 ms on-board latency (RTX 4090). App. A-D: "
+           "robots at 50 Hz run inference every 0.5 s, after executing 25 actions (checked 2026-10-20)."),
+)
+BERSCHEID_RUCKIG_2021 = _lit(
+    "prov:berscheid-ruckig-2021",
+    "Berscheid, L. and Kroger, T. (2021), Jerk-limited Real-time Trajectory Generation with Arbitrary "
+    "Target States, Robotics: Science and Systems XVII",
+    url="https://arxiv.org/abs/2105.04830",
+    verified="2026-10-20",
+    notes=("Sec. V-B, Table III (7 degrees of freedom, Intel i7-8700K, single thread, PREEMPT Linux): "
+           "Ruckig mean 19.8 +/- 0.2 us, worst case 123 +/- 13 us."),
 )
 KIM_OPENVLA_OFT_2025 = _lit(
     "prov:kim-openvla-oft-2025",
@@ -3517,7 +3528,10 @@ DAO_2022_FLASHATTENTION = _lit(
     url="https://arxiv.org/abs/2205.14135",
     verified="2026-10-20",
     notes=("Figure 2 (left), GPT-2 medium on an A100: HBM reads and writes 40.3 GB for standard "
-           "attention against 4.4 GB for FlashAttention; Sec. 1: up to 9x fewer HBM accesses."),
+           "attention against 4.4 GB for FlashAttention; Sec. 1: up to 9x fewer HBM accesses. "
+           "Figure 2 (left) also gives 66.6 against 75.2 GFLOPs and 41.7 against 7.3 ms (forward and "
+           "backward). Figure 1, left panel labels (A100): SRAM 19 TB/s (20 MB), HBM 1.5 TB/s (40 GB); "
+           "right panel caption: 7.6x speedup on the attention computation of GPT-2 (added 2026-10-20)."),
 )
 
 # Attacks on and defenses of learned systems (added 2026-10-20).
@@ -3866,6 +3880,30 @@ SEC_2013_KNIGHT_CAPITAL = _lit(
            "million realized loss (para. 17); 97 'Power Peg disabled' e-mails (para. 19)."),
 )
 
+SIGELMAN_2010_DAPPER = _lit(
+    "prov:sigelman-2010-dapper",
+    "Sigelman et al. (2010), Dapper, a Large-Scale Distributed Systems Tracing Infrastructure, "
+    "Google Technical Report dapper-2010-1, Table 2 and Section 4.4",
+    url="https://research.google/pubs/dapper-a-large-scale-distributed-systems-tracing-infrastructure/",
+    verified="2026-10-20",
+    notes=("Table 2: effect of non-adaptive sampling frequencies on the average latency and throughput "
+           "of a Web search cluster (1/1: +16.3 percent latency, -1.48 percent throughput; 1/16: "
+           "+2.12, -0.08; 1/1024: -0.20, -0.06); experimental errors 2.5 and 0.15 percent. Section "
+           "4.4: the first production version averaged one sampled trace for every 1024 candidates. "
+           "Read from the report PDF with pdftotext."),
+)
+
+OPENAI_2025_EXPANDING_SYCOPHANCY = _lit(
+    "prov:openai-2025-expanding-sycophancy",
+    "OpenAI, Expanding on what we missed with sycophancy (2 May 2025), section 'What we did to "
+    "address the issue'",
+    url="https://openai.com/index/expanding-on-sycophancy/",
+    verified="2026-10-20",
+    notes=("Rollout started Thursday 24 April and completed Friday 25 April 2025; two days of "
+           "monitoring; system-prompt update late Sunday night; full rollback initiated Monday "
+           "(28 April) and took around 24 hours. Read from the Wayback Machine copy of 2026-10-10."),
+)
+
 CROWDSTRIKE_2024_PIR = _lit(
     "prov:crowdstrike-2024-pir",
     "CrowdStrike, Preliminary Post Incident Review (PIR): Content Configuration Update Impacting "
@@ -4121,4 +4159,235 @@ LUCCIONI_BLOOM_2023 = _lit(
     verified="2026-10-20",
     notes=("Table 3: final BLOOM training on the French grid (57 gCO2eq/kWh); embodied 11.2 t of 50.5 t "
            "total, 22.2 percent. Table 5: project dynamic emissions by process."),
+)
+
+# --- Safety enforcement sources (added 2026-10-20) ---
+LEVESON_TURNER_THERAC_1993 = _lit(
+    "prov:leveson-turner-therac-1993",
+    "Leveson and Turner, 'An Investigation of the Therac-25 Accidents,' IEEE Computer 26(7), 1993",
+    url="https://doi.org/10.1109/MC.1993.274940",
+    verified="2026-10-20",
+    notes=(
+        "Six overdose accidents, 1985 to 1987; doses estimated at 4,000 to 20,000 rads against a "
+        "typical single therapeutic dose of about 200 rads (up to 100 times); three patients died "
+        "of the overdoses; the 25 MeV accelerator. Transcribed from the Volume IV chapter's War "
+        "Story; not re-read against the paper in this pass."
+    ),
+)
+KIRSCHNER_ISO_TS_15066_2022 = _lit(
+    "prov:kirschner-iso-ts-15066-2022",
+    "Kirschner, Mansfeld, Abdolshah, and Haddadin, 'ISO/TS 15066: How Different Interpretations "
+    "Affect Risk Assessment,' arXiv 2203.02706, 2022",
+    url="https://arxiv.org/abs/2203.02706",
+    verified="2026-10-20",
+    notes=(
+        "Table II, hand, interpretation B1: TS hand values, constrained hand, speeds set for a "
+        "280 N threshold; peak forces measured with a Pilz PRMS2 device at a central (C) and an "
+        "outer (N) position. Transcribed from the lecture deck's table; not re-read against the "
+        "paper in this pass."
+    ),
+)
+NHTSA_CRUISE_RECALL_23E086 = _lit(
+    "prov:nhtsa-cruise-recall-23e086",
+    "NHTSA recall 23E-086, Cruise LLC collision-detection subsystem (November 2023)",
+    url="https://www.nhtsa.gov/?nhtsaId=23E086",
+    verified="2026-10-20",
+    notes="Software recall covering 950 vehicles. Transcribed from the lecture deck; not re-read.",
+)
+SICK_NANOSCAN3_CORE = _ds(
+    "prov:sick-nanoscan3-nans3-caaz30aa1",
+    "SICK nanoScan3 Core safety laser scanner, NANS3-CAAZ30AA1, product data sheet (2024-12-17)",
+    "https://www.sick.com/us/en/catalog/products/safety/safety-laser-scanners/nanoscan3/c/g464152",
+    verified="2026-10-20",
+    notes=(
+        "Protective field range 3 m, warning field range 10 m, response time 85 ms, protective "
+        "field supplement 65 mm, SIL 2 (IEC 61508), PL d (EN ISO 13849), Type 3, scan angle "
+        "275 deg. Transcribed from the lecture deck's datasheet excerpt; scan angle from the "
+        "product family page; not re-read against the PDF in this pass."
+    ),
+)
+
+# --- Agent evaluation results (added 2026-10-20) --------------------------------
+YAO_2024_TAUBENCH = _lit(
+    "prov:yao-2024-taubench",
+    "Yao, Shinn, Razavi, and Narasimhan (2024), tau-bench: A Benchmark for Tool-Agent-User "
+    "Interaction in Real-World Domains, arXiv:2406.12045, abstract",
+    url="https://arxiv.org/abs/2406.12045",
+    verified="2026-10-20",
+    notes=("Abstract: state-of-the-art function-calling agents (like gpt-4o) succeed on <50% of the "
+           "tasks and are inconsistent (pass^8 <25% in retail). Upper bounds, not point values."),
+)
+
+METR_2025_REWARD_HACKING = _lit(
+    "prov:metr-2025-reward-hacking",
+    "von Arx, Chan, and Barnes (METR, 5 June 2025), Recent Frontier Models Are Reward Hacking, "
+    "o3 task table",
+    url="https://metr.org/blog/2025-06-05-recent-reward-hacking/",
+    verified="2026-10-20",
+    notes=("o3 runs judged reward hacking over runs: RE-Bench total 39/128 (30.4%), HCAST total "
+           "8/1087 (0.7%), Optimize LLM Foundry 21/21; the post states hacking was more than 43x "
+           "more common on RE-Bench than on HCAST."),
+)
+
+ZHENG_2023_LLM_JUDGE = _lit(
+    "prov:zheng-2023-llm-judge",
+    "Zheng et al. (2023), Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena, NeurIPS 2023 "
+    "Datasets and Benchmarks (arXiv:2306.05685), Table 2, default prompt",
+    url="https://arxiv.org/abs/2306.05685",
+    verified="2026-10-20",
+    notes="Position bias: each answer pair judged twice with the order swapped; percentages of pairs.",
+)
+
+KAPOOR_2024_AGENTS_THAT_MATTER = _lit(
+    "prov:kapoor-2024-agents-that-matter",
+    "Kapoor, Stroebl, Siegel, Nadgir, and Narayanan (2024), AI Agents That Matter, arXiv:2407.01502, "
+    "Table A1 (HumanEval)",
+    url="https://arxiv.org/abs/2407.01502",
+    verified="2026-10-20",
+    notes=("Mean accuracy and mean total API cost over five runs on the 164 HumanEval problems "
+           "(2024 prices). Retry, Warming, and Escalation are the authors' simple baselines; the LDB "
+           "(GPT-4) row carries the paper's asterisk for a specification its original authors did not evaluate."),
+)
+
+# Fitting a training step on one accelerator (added 2026-10-20)
+MICIKEVICIUS_MIXED_PRECISION_2018 = _lit(
+    "prov:micikevicius-mixed-precision-2018",
+    "Micikevicius et al. (2018), Mixed Precision Training, ICLR 2018",
+    url="https://arxiv.org/abs/1710.03740",
+    verified="2026-10-18",
+    notes=("arXiv 1710.03740v3, page 4, Figure 3: histogram of activation-gradient magnitudes of the "
+           "SSD detector during FP32 training, log2 bins; the caption gives 67 percent of the values as "
+           "zero. Sec. 3.2: SSD diverges in FP16 without scaling; scaling the loss by 8 matches FP32. "
+           "The bar heights in the series micikevicius_ssd_gradient_histogram are pixel rows read from "
+           "the figure image (898 x 575 px)."),
+)
+CHEN_SUBLINEAR_MEMORY_2016 = _lit(
+    "prov:chen-sublinear-memory-2016",
+    "Chen et al. (2016), Training Deep Nets with Sublinear Memory Cost",
+    url="https://arxiv.org/abs/1604.06174",
+    verified="2026-10-18",
+    notes=("Abstract: the memory of a 1,000-layer deep residual network falls from 48 GB to 7 GB at "
+           "about 30 percent more running time."),
+)
+KORTHIKANTI_RECOMPUTATION_2023 = _lit(
+    "prov:korthikanti-recomputation-2023",
+    "Korthikanti et al. (2023), Reducing Activation Recomputation in Large Transformer Models, MLSys 2023",
+    url="https://arxiv.org/abs/2205.05198",
+    verified="2026-10-18",
+    notes=("arXiv 2205.05198v1. Table 2: activation bytes per layer sbh(34 + 5as/h) storing "
+           "everything, 34sbh with selective recomputation, 2sbh with full recomputation. Table 4: one "
+           "layer of the 22B GPT on A100s, forward plus backward, 19.6 ms without recomputation, 27.2 ms "
+           "with full recomputation, 20.9 ms with selective recomputation. Abstract: the 530B model on "
+           "2,240 A100s reaches 54.2 percent MFU, against 42.1 percent with full recomputation."),
+)
+HUGGINGFACE_PERF_TRAIN_GPU_ONE_V5 = _lit(
+    "prov:huggingface-perf-train-gpu-one-v5",
+    "Hugging Face Transformers v5.0.0 documentation, Efficient training on a single GPU "
+    "(docs/source/en/perf_train_gpu_one.md)",
+    url="https://huggingface.co/docs/transformers/perf_train_gpu_one",
+    verified="2026-10-18",
+    notes=("Gradient checkpointing: \"slower training speed (~20%)\". The accumulation example sets "
+           "per_device_train_batch_size=4 and gradient_accumulation_steps=16 (Apache-2.0)."),
+)
+ACCELERATOR_ONCHIP_SRAM_RANGE = _est(
+    "prov:accelerator-onchip-sram-range",
+    "MLSysBook, Model Training: on-chip SRAM of a modern accelerator",
+    ("The book's rounded range for one accelerator chip's on-chip SRAM (registers, shared memory, L1 and "
+     "L2 together): 30 to 50 MB at roughly 15 to 20 TB/s. The H100 has 50 MiB of L2 and 228 KiB of shared "
+     "memory per SM across 132 SMs; Dao et al. (2022) label the A100's SRAM 20 MB at 19 TB/s."),
+    verified="2026-10-20",
+)
+
+# --- Model compression results (Literature.CompressionResults, added 2026-10-20) ---
+GALE_STATE_OF_SPARSITY_2019 = _lit(
+    "prov:gale-state-of-sparsity-2019",
+    "Gale, Elsen, and Hooker (2019), The State of Sparsity in Deep Neural Networks",
+    url="https://arxiv.org/abs/1902.09574",
+    verified="2026-10-20",
+    notes="Magnitude pruning with gradual retraining removes about 80 percent of ResNet-50's weights for "
+          "roughly one point of ImageNet top-1 accuracy (section 5 and figure 3).",
+)
+SANH_DISTILBERT_2019 = _lit(
+    "prov:sanh-distilbert-2019",
+    "Sanh, Debut, Chaumond, and Wolf (2019), DistilBERT, a distilled version of BERT",
+    url="https://arxiv.org/abs/1910.01108",
+    verified="2026-10-20",
+    notes="Abstract: 40 percent smaller, 60 percent faster, 97 percent of BERT's language-understanding "
+          "capability; section 3: the student keeps one of every two teacher layers (6 of 12).",
+)
+GALE_SPARSE_GPU_KERNELS_2020 = _lit(
+    "prov:gale-sparse-gpu-kernels-2020",
+    "Gale, Zaharia, Young, and Elsen (2020), Sparse GPU Kernels for Deep Learning, SC20",
+    url="https://arxiv.org/abs/2006.10901",
+    verified="2026-10-20",
+    notes="Abstract: 1.2 to 2.1 times speedups over dense on sparse Transformer and MobileNet models on a "
+          "V100, reaching 27 percent of single-precision peak.",
+)
+MISHRA_SPARSE_TENSOR_CORES_2021 = _lit(
+    "prov:mishra-sparse-tensor-cores-2021",
+    "Mishra et al. (2021), Accelerating Sparse Deep Neural Networks",
+    url="https://arxiv.org/abs/2104.08378",
+    verified="2026-10-20",
+    notes="Table 1: 2x design-peak math throughput for 2:4 sparse tensor cores (A100); figure 3: INT8 "
+          "sparse-over-dense GEMM speedup at M = N = 10240 as K grows, values read from the plot "
+          "(approximate); Table 2: ResNet-50 76.1 percent dense, 76.2 percent 2:4 sparse.",
+)
+KRISHNAMOORTHI_QUANTIZATION_2018 = _lit(
+    "prov:krishnamoorthi-quantization-2018",
+    "Krishnamoorthi (2018), Quantizing deep convolutional networks for efficient inference: A whitepaper",
+    url="https://arxiv.org/abs/1806.08342",
+    verified="2026-10-20",
+    notes="Table 3: TensorFlow-Slim ResNet-v1-50 top-1 75.2 percent in float, 75.0 percent with 8-bit "
+          "per-channel weights and 8-bit activations after quantization-aware training.",
+)
+HAN_DEEP_COMPRESSION_2016 = _lit(
+    "prov:han-deep-compression-2016",
+    "Han, Mao, and Dally (2016), Deep Compression, ICLR 2016",
+    url="https://arxiv.org/abs/1510.00149",
+    verified="2026-10-20",
+    notes="Figure 6 (AlexNet on ImageNet): accuracy loss against compression rate for pruning, "
+          "quantization, both, and SVD; the points are the chapter's transcription of the figure, and "
+          "the cliffs (about 15, 6, and 3 percent of the original size) are read from it.",
+)
+HAN_LEARNING_WEIGHTS_2015 = _lit(
+    "prov:han-learning-weights-2015",
+    "Han, Pool, Tran, and Dally (2015), Learning both Weights and Connections for Efficient Neural "
+    "Networks, NeurIPS 2015",
+    url="https://arxiv.org/abs/1506.02626",
+    verified="2026-10-20",
+    notes="Figure 5 (AlexNet, ImageNet top-5, L2-regularized runs): accuracy change against the share "
+          "of parameters pruned, without retraining, with one retraining, and with iterative pruning "
+          "and retraining; points taken from the vector paths of the published figure (arXiv v3, p. 7).",
+)
+
+# --- Hardware acceleration: TPU energy update and H100 latency measurements (added 2026-10-20) ---
+JOUPPI_TPUV4I_ISCA_2021 = _lit(
+    "prov:jouppi-tpuv4i-isca-2021",
+    "Jouppi et al. (2021), Ten Lessons From Three Generations Shaped Google's TPUv4i, ISCA 2021",
+    url="https://doi.org/10.1109/ISCA52012.2021.00010",
+    verified="2026-10-20",
+    notes=("Table 2 updates Horowitz's 45 nm energy table to 7 nm: FP32 multiply 3.7 -> 1.31 pJ; "
+           "memory per 64-bit access, DDR3/4 DRAM (I/O only) 1,300 pJ at both nodes."),
+)
+CHIPS_AND_CHEESE_H100_2023 = _lit(
+    "prov:chips-and-cheese-h100-2023",
+    "Chips and Cheese (2023), Nvidia's H100: Funny L2, and Tons of Bandwidth",
+    url="https://chipsandcheese.com/p/nvidias-h100-funny-l2-and-tons-of-bandwidth",
+    verified="2026-10-19",
+    notes=("Pointer-chasing latency by test size on an H100 PCIe card; the plateaus are the chart's "
+           "data labels: L1 22.4 ns, L2 159.7 ns, far L2 294.0 ns, HBM 377.9 ns."),
+)
+BOEHM_SGEMM_WORKLOG_2022 = _lit(
+    "prov:boehm-sgemm-worklog-2022",
+    "Boehm (2022), How to Optimize a CUDA Matmul Kernel for cuBLAS-like Performance: a Worklog",
+    url="https://siboehm.com/articles/22/CUDA-MMM",
+    verified="2026-10-19",
+    notes="Results table, FP32 SGEMM on an A6000: naive 309.0 GFLOP/s through cuBLAS 23,249.6 GFLOP/s.",
+)
+NVIDIA_NSIGHT_COMPUTE_ROOFLINE_GUIDE = _ds(
+    "prov:nvidia-nsight-compute-roofline-guide",
+    "NVIDIA, Nsight Compute Profiling Guide, Roofline Charts (documentation v2026.3.1)",
+    "https://docs.nvidia.com/nsight-compute/ProfilingGuide/index.html#roofline-charts",
+    verified="2026-10-19",
+    notes="The example report lists DRAM throughput at 0.34 percent of peak.",
 )

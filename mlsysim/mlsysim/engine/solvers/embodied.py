@@ -18,6 +18,9 @@ from ...physics.robotics.control import calc_watchdog_lease_bound
 from ...physics.robotics.stopping import (
     calc_braking_time,
     calc_max_permitted_velocity,
+    calc_scurve_max_permitted_velocity,
+    calc_scurve_stop_distance,
+    calc_scurve_stop_time,
     calc_stopping_crossover_speed,
     calc_travel_between_speeds,
 )
@@ -40,11 +43,21 @@ class StoppingBudgetModel(ForwardModel):
     two terms are equal; the speed ceiling is the fastest speed whose stop
     fits ``clear_distance``. A localization bound and a protective margin, when
     stated, add to the required distance and lower the ceiling
-    (``calc_safe_stopping_distance``); jerk-limited braking is left out
-    (``calc_scurve_stop_distance`` adds it). ``added_delay`` prices one more
+    (``calc_safe_stopping_distance``). ``added_delay`` prices one more
     delay step as travel at ``speed``. The delay ceiling is the longest
     constant-speed pre-brake delay whose stop, with the overhead, still fits
     (``calc_watchdog_lease_bound``): ``(D_clear - overhead - v^2/2a) / v``.
+
+    The finished budget (added 2026-10-20) takes three optional terms. A
+    ``jerk`` bound replaces constant-deceleration braking with the resident
+    S-curve stop (``calc_scurve_stop_distance``); its extra travel over
+    ``v^2/2a`` is the jerk-ramp travel, and above ``a^2/j`` it equals
+    ``v a / (2 j)``, a delay of ``a / (2 j)``. A ``tracking_bound`` (the
+    tracking inset) joins the required distance after the two allowances. An
+    ``approach_speed`` charges a person who keeps closing the gap for the
+    whole delay and stop (``v_h (tau + T_stop)``). With a jerk bound the
+    speed ceiling is the S-curve root (``calc_scurve_max_permitted_velocity``)
+    and the delay ceiling is ``(D_clear - overhead - inset - d_S(v)) / v``.
     """
     requires = ("speed", "delay", "deceleration")
     produces = StoppingBudgetResult
@@ -54,16 +67,28 @@ class StoppingBudgetModel(ForwardModel):
               speed_at_delay_end: Optional[Quantity] = None,
               loc_margin: Optional[Quantity] = None,
               physical_margin: Optional[Quantity] = None,
-              added_delay: Optional[Quantity] = None) -> StoppingBudgetResult:
+              added_delay: Optional[Quantity] = None,
+              jerk: Optional[Quantity] = None,
+              tracking_bound: Optional[Quantity] = None,
+              approach_speed: Optional[Quantity] = None) -> StoppingBudgetResult:
         m = ureg.meter
         end = speed if speed_at_delay_end is None else speed_at_delay_end
         delay_travel = calc_travel_between_speeds(speed, end, delay).to(m)
         braking = (speed ** 2 / (2 * deceleration)).to(m)
-        stop = (delay_travel + braking).to(m)
+        if jerk is None:
+            ramp = 0 * m
+            stop_time = calc_braking_time(speed, deceleration)
+        else:
+            ramp = (calc_scurve_stop_distance(speed, deceleration, jerk) - braking).to(m)
+            stop_time = calc_scurve_stop_time(speed, deceleration, jerk).to(ureg.millisecond)
+        stop = (delay_travel + braking + ramp).to(m)
         loc = 0 * m if loc_margin is None else loc_margin.to(m)
         margin = 0 * m if physical_margin is None else physical_margin.to(m)
+        inset = 0 * m if tracking_bound is None else tracking_bound.to(m)
         overhead = (loc + margin).to(m)
-        required = (stop + overhead).to(m)
+        approach = (0 * m if approach_speed is None
+                    else (approach_speed * (delay + stop_time)).to(m))
+        required = (stop + overhead + inset + approach).to(m)
         delay_positive = delay.to(ureg.second).magnitude > 0
         out = dict(
             speed=speed, delay=delay, deceleration=deceleration,
@@ -72,6 +97,14 @@ class StoppingBudgetModel(ForwardModel):
             braking_time=calc_braking_time(speed, deceleration),
             crossover_speed=calc_stopping_crossover_speed(delay, deceleration),
         )
+        if jerk is not None:
+            out.update(jerk=jerk, jerk_ramp_travel=ramp, stop_time=stop_time,
+                       jerk_plateau_speed=(deceleration ** 2 / jerk).to(m / ureg.second),
+                       ramp_delay=(deceleration / (2 * jerk)).to(ureg.millisecond))
+        if tracking_bound is not None:
+            out["tracking_inset"] = inset
+        if approach_speed is not None:
+            out["approach_travel"] = approach
         if delay_positive:
             out["braking_over_delay"] = _ratio(braking, delay_travel)
             out["delay_share_of_braking"] = _ratio(delay_travel, braking)
@@ -79,11 +112,20 @@ class StoppingBudgetModel(ForwardModel):
             spare = (clear_distance - required).to(m)
             out.update(clear_distance=clear_distance, spare=spare,
                        fits=spare.magnitude >= 0, clear_over_stop=_ratio(clear_distance, required))
-            if delay_positive:
+            if jerk is not None:
+                out["speed_ceiling"] = calc_scurve_max_permitted_velocity(
+                    clear_distance, delay, deceleration, jerk, loc_margin=loc,
+                    physical_margin=margin + inset, approach_velocity=approach_speed,
+                ).to(m / ureg.second)
+            elif delay_positive and approach_speed is None:
                 out["speed_ceiling"] = calc_max_permitted_velocity(clear_distance, delay, deceleration,
-                                                                   loc_margin=loc, physical_margin=margin)
-            room = (clear_distance - overhead).to(m)
-            if speed_at_delay_end is None and room > braking:
+                                                                   loc_margin=loc,
+                                                                   physical_margin=margin + inset)
+            room = (clear_distance - overhead - inset).to(m)
+            if jerk is not None and approach_speed is None and speed_at_delay_end is None:
+                ceiling = ((room - braking - ramp) / speed).to(ureg.millisecond)
+                out.update(delay_ceiling=ceiling, delay_spare=(ceiling - delay).to(ureg.millisecond))
+            elif jerk is None and approach_speed is None and speed_at_delay_end is None and room > braking:
                 ceiling = calc_watchdog_lease_bound(room, speed, deceleration)["t_total_delay_max"]
                 out.update(delay_ceiling=ceiling.to(ureg.millisecond),
                            delay_spare=(ceiling - delay).to(ureg.millisecond))

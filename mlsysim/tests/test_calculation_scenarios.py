@@ -4047,3 +4047,520 @@ def test_carbon_priced_region_placement():
     assert r.best_region == "Quebec" and r.best_region_untaxed == "Quebec"
     assert r.objective_value == approx(25336888.4)
     assert r.objective["US_Avg"] - r.objective["Quebec"] == approx(531280.0)
+
+
+def test_cluster_expansion_doubling():
+    e = Scenarios.Gpt3ClusterDoubling1K
+    assert e.expanded_devices == 2048
+    assert e.mtbf.to("hour").magnitude == approx(48.828125)
+    assert e.expanded_mtbf.to("hour").magnitude == approx(24.4140625)
+    assert e.checkpoint.t_write.to("second").magnitude == approx(24.5)
+    assert e.overhead == approx(0.016696) and e.expanded_overhead == approx(0.023612)
+    assert e.overhead_growth == approx(2 ** 0.5)
+    assert e.breakeven_speedup == approx(1.007083)
+    assert e.accelerator_hours_change(e.factor) == approx(0.007083)
+    assert e.superlinear_threshold == approx(2.014166)
+    assert e.interval.to("minute").magnitude == approx(48.914) and e.expanded_interval.to("minute").magnitude == approx(34.587)
+    assert e.run_time_change(176900 / 95100) == approx(-0.45861, rel=1e-4)
+
+
+def test_fleet_scale_recall_scenarios():
+    s = Scenarios.SlowWorker8K
+    assert s.throughput == approx(0.8) and (s.slow_step / s.step_time).to("").magnitude == approx(1.25)
+    assert Scenarios.OneInAMillionAtMillionDaily.events_per_second * 86400 == approx(1.0)
+    k = Scenarios.KaplanComputeDoubling
+    assert k.multiple_factor == approx(0.965936) and k.multiple_reduction == approx(0.034064)
+    assert Scenarios.KaplanSixteenfoldCompute.multiple_reduction == approx(0.129449)
+    d = Scenarios.DeepSeekV3WeightTraffic
+    assert d.resident_bytes.to("GB").magnitude == approx(1342) and d.active_bytes.to("GB").magnitude == approx(74)
+    assert d.dense_bytes.to("GB").magnitude == approx(800) and d.resident_to_active == approx(18.135135)
+    assert Scenarios.OpticalLinkEnergyShare.saving == approx(0.05)
+    assert Scenarios.OpticalLinkEnergyShare.ceiling == approx(0.10)
+    assert Scenarios.OpticalLinkEnergyDoubleShare.saving == approx(0.10)
+
+
+def test_megascale_and_tail_at_scale_series():
+    from mlsysim import Literature
+    rows = {r["gpus"]: r for r in Literature.Series.MegaScaleStrongScaling.entries}
+    assert rows[1024]["megascale_tokens_s"] / rows[512]["megascale_tokens_s"] == approx(1.86015, rel=1e-4)
+    tail = {(r["leaves_awaited"], r["percentile"]): r["latency_ms"]
+            for r in Literature.Series.TailAtScaleLeafLatency.entries}
+    assert tail[("all leaves", 99.0)] / tail[("one random leaf", 99.0)] == approx(14.0)
+def test_warehouse_finished_stopping_budget():
+    d = Scenarios.WarehouseFinishedStopAtDriveLimit.result
+    assert d.jerk.to("m/s**3").magnitude == approx(64.0 / 9.0)
+    assert d.jerk_ramp_travel.to("mm").magnitude == approx(210.9375)
+    assert d.required_distance.to("mm").magnitude == approx(1163.8375)
+    assert d.spare.to("mm").magnitude == approx(-63.8375)
+    assert d.stop_time.to("ms").magnitude == approx(1031.25)
+    assert d.speed_ceiling.to("m/s").magnitude == approx(1.43669, rel=1e-5)
+    assert d.ramp_delay.to("ms").magnitude == approx(140.625)
+    a = Scenarios.WarehouseFinishedStopAtAisleSpeed.result
+    assert a.required_distance.to("mm").magnitude == approx(968.9925)
+    assert a.spare.to("mm").magnitude == approx(131.0075)
+    assert a.delay_spare.to("ms").magnitude == approx(100.775)
+    assert a.stop_time.to("ms").magnitude == approx(931.25)
+    w = Scenarios.WarehouseFinishedStopWithDispatch.result
+    assert w.spare.to("mm").magnitude == approx(48.7036)
+    assert w.speed_ceiling.to("m/s").magnitude == approx(1.34872, rel=1e-5)
+    assert Scenarios.WarehouseFinishedStopInspectedFloor.result.speed_ceiling.to("m/s").magnitude == approx(1.23087, rel=1e-5)
+    assert Scenarios.WarehouseFinishedStopWalkingPerson.result.speed_ceiling.to("m/s").magnitude == approx(0.25994, rel=1e-5)
+    assert (Scenarios.WarehouseFinishedStopWalkingPersonWithDispatch.result.speed_ceiling.to("m/s").magnitude
+            == approx(0.19188, rel=1e-4))
+    assert (Scenarios.WarehouseFinishedStopInspectedFloorWithDispatch.result.speed_ceiling.to("m/s").magnitude
+            == approx(1.17093, rel=1e-5))
+    assert Scenarios.WarehouseFinishedStopTenMsSlower.result.speed_ceiling.to("m/s").magnitude == approx(1.42231, rel=1e-5)
+    assert Scenarios.WarehouseHostLeaseStall.result.added_delay_travel.to("mm").magnitude == approx(182.0)
+    assert Scenarios.WarehouseIntegratorUnwind.result.added_delay_travel.to("mm").magnitude == approx(195.0)
+
+
+def test_loaded_joint_barrier_projection_and_cycle():
+    g = Scenarios.LoadedArmJointGravityStop
+    assert g.bias.to("N*m").magnitude == approx(65.25)
+    assert g.alpha_descending.to("1/s**2").magnitude == approx(7.25)
+    assert g.tool_stop_free.to("mm").magnitude == approx(19.8621)
+    assert g.tool_stop_descending.to("mm").magnitude == approx(79.4483)
+    assert g.tool_stop_ascending.to("mm").magnitude == approx(11.3498)
+    assert g.stop_time_descending.to("ms").magnitude == approx(165.517)
+    far, near = g.barrier_demands
+    assert far.to("N*m").magnitude == approx(80.078125) and near.to("N*m").magnitude == approx(89.140625)
+    assert g.barrier_torque_demand(g.tool_stop_descending).to("N*m").magnitude == approx(87.0)
+    assert g.separation_total.to("mm").magnitude == approx(686.292) and g.separation_person_share == approx(0.69735)
+    p = Scenarios.TwoJointTorqueProjection
+    assert p.projection["u_projected"] == [1.5, 2.0] and p.projection["lambda_star"] == approx(1.0)
+    assert p.breach == approx(5.0) and p.clamp_value == approx(7.0)
+    c = Scenarios.WarehouseEnforcerCycleBudget
+    assert c.total.to("us").magnitude == approx(250.0) and c.headroom.to("us").magnitude == approx(150.0)
+    assert Scenarios.WarehouseBaseHoldDrift.drift.to("mm").magnitude == approx(1.501)
+# --- Agent evaluation (added 2026-10-20) ---------------------------------------
+def test_recurring_task_consistency():
+    r = Scenarios.RecurringTaskConsistency.result
+    assert r.success[8] == approx(0.43047) and 1 - r.required_step_error == approx(0.98692)
+    assert r.error_ratio == approx(7.6431)
+    assert Scenarios.RecurringTaskConsistencyLowerRate.result.success[8] == approx(0.16777)
+    assert Scenarios.RecurringTaskConsistencyHalvedFailure.result.success[8] == approx(0.66342)
+    assert Scenarios.RefundAnswerFiveSessions.result.success[5] == approx(0.77378)
+
+
+def test_verdicts_grader_and_agreement():
+    v = Scenarios.UnresolvedTrialsOfHundred.result
+    assert (v.default_rate, v.upper_bound) == (0.6, 0.75) and v.dropped_rate == approx(0.70588)
+    g = Scenarios.ResearchReportJudgeCalibration.result
+    assert g.false_accept_rate == approx(0.2) and g.false_accept_low == approx(0.12703)
+    assert g.false_accept_high == approx(0.30046) and g.failure_among_accepted == approx(0.12308)
+    assert g.false_reject_rate == approx(0.05)
+    j = Scenarios.IndependentJudgesNinetyPercent
+    assert j.agreement == approx(0.82) and abs(j.kappa) < 1e-12
+    assert Scenarios.IndependentJudgesEightyPercent.agreement == approx(0.68)
+
+
+def test_task_repeat_budget_and_intervals():
+    t = Scenarios.RepairSuiteTaskRepeatBudget.result
+    assert t.within_variance == approx(0.16) and t.variance_ratio == approx(2.0)
+    assert t.free_se[1] == approx(0.02) and t.free_se[3] == approx(0.025820) and t.free_se[6] == approx(0.032660)
+    assert (t.best_runs, t.best_tasks) == (5, 40) and t.best_se == approx(0.052915)
+    assert t.paid_tasks[1] == 54 and t.paid_se[1] == approx(0.066667)
+    w = Scenarios.FiftyTaskIntervals.result
+    assert w.wald[0] == (0.0, 0.0) and w.wilson[0][1] == approx(0.071348)
+    assert w.wald[2][0] == approx(-0.014316) and w.wilson[2][0] == approx(0.011039) and w.wilson[2][1] == approx(0.13460)
+    p = Scenarios.AcceptanceRatePlanning.result
+    assert p.half_width == approx(0.097998) and p.wilson_half_width == approx(0.096168)
+    assert p.samples_for_target == 2401 and p.per_arm[0.04] == approx(2450) and p.per_arm[0.02] == approx(9800)
+
+
+def test_paired_comparison_and_published_newcombe_examples():
+    from mlsysim.physics import calc_newcombe_paired_difference, calc_mcnemar_exact_two_sided
+    r = Scenarios.RepairCandidatePairedComparison.result
+    assert r.difference == approx(0.04) and r.lower == approx(-0.032063) and r.upper == approx(0.11121)
+    assert not r.noninferior and r.exact_p == approx(0.36159)
+    assert (r.pairs_if_gain_holds, r.pairs_if_no_gain) == (217, 1948)
+    assert r.paired_share == approx(0.40464) and r.independent_multiple == approx(2.4713)
+    assert r.paired_half_width == approx(0.071281)
+    # Newcombe (1998), Table III: (a, b, c, d) = (20, 2, 12, 16) and (27, 0, 0, 27), method 10.
+    z = 1.959963984540054
+    _, lo, hi = calc_newcombe_paired_difference(20, 12, 2, 16, z)
+    assert lo == pytest.approx(0.0562, abs=5e-5) and hi == pytest.approx(0.3292, abs=5e-5)
+    _, lo, hi = calc_newcombe_paired_difference(27, 0, 0, 27, z)
+    assert lo == pytest.approx(-0.0351, abs=5e-5) and hi == pytest.approx(0.0351, abs=5e-5)
+    assert calc_mcnemar_exact_two_sided(0, 0) == 1.0
+
+
+def test_leaderboards_and_selection_cost():
+    s = Scenarios.TerminalBenchScaffoldSpread.result
+    assert s.models == 16 and s.widest == "claude-opus-4-6" and s.widest_count == 11
+    assert s.median_spread == approx(0.13589) and s.median_se == approx(0.027)
+    t = Scenarios.SweBenchVerifiedRankTies.result
+    assert (t.models, t.pairs, t.tied) == (33, 24, 24) and t.needed_gap == approx(0.054308)
+    m = Scenarios.TwoTaskTypeConsistency.result
+    assert m.same_task_all == approx(0.53) and m.new_tasks_all == approx(0.49)
+    c = Scenarios.CappedCandidateSelection.result
+    assert c.availability == approx(0.784) and c.expected_candidates == approx(1.96)
+    assert c.batch_per_accepted.to("USD").magnitude == approx(0.15306)
+    assert c.sequential_per_accepted.to("USD").magnitude == approx(0.1) and c.batch_premium == approx(0.53061)
+
+
+def test_pass_pow_k_and_paired_run_summary():
+    from mlsysim.physics import calc_pass_pow_k_unbiased
+    from mlsysim.solvers import PairedRunEvaluationModel
+    assert calc_pass_pow_k_unbiased(8, 6, 2) == approx(15 / 28) and calc_pass_pow_k_unbiased(8, 1, 2) == 0.0
+    rows = []
+    for task, base, cand in (("a", (1, 1), (1, 1)), ("b", (0, 1), (1, 1))):
+        for run in range(2):
+            for cfg, ok in (("base", base[run]), ("cand", cand[run])):
+                rows.append(dict(task=task, run=run, config=cfg, verdict="pass" if ok else "fail",
+                                 visible="pass", calls=1, input_tokens=10, output_tokens=5, seconds=1.0))
+    r = PairedRunEvaluationModel().solve(rows, ["a", "b"], 2, "base", "cand")
+    assert r.accepted == {"base": 3, "cand": 4} and (r.both, r.candidate_only, r.baseline_only, r.neither) == (3, 1, 0, 0)
+    assert r.pass_pow["base"][2] == approx(0.5) and r.pass_at["base"][2] == approx(1.0)
+    assert r.visible_pass_sealed_reject["base"] == 1 and r.tokens_per_accepted_ratio == approx(0.75)
+# --- Agent operations: traces, retention, postmortems, staged release (added 2026-10-20) ---
+
+def test_repair_trial_span_timeline():
+    r = Scenarios.RepairTrialSpanTimeline.result
+    assert r.leaf_sum.to("s").magnitude == approx(13.2) and r.critical_path.to("s").magnitude == approx(11.2)
+    assert r.elapsed.to("s").magnitude == approx(11.7) and r.unexplained.to("s").magnitude == approx(0.5)
+    assert r.changed_elapsed.to("s").magnitude == approx(7.7) and r.saving.to("s").magnitude == approx(4.0)
+    assert r.changed_critical == ["retrieve", "propose", "lint", "synthesize"]
+    lint = Scenarios.RepairTrialSpanTimeline.variant(intervention={"lint": Scenarios.RepairTrialSpanTimeline.intervention["tests"]})
+    assert lint.result.saving.to("s").magnitude == pytest.approx(0.0, abs=1e-12)
+
+
+def test_head_sampling_miss():
+    assert Scenarios.RareFailureUnderHeadSampling.miss == approx(0.59049)
+    assert Scenarios.RecurringFailureUnderHeadSampling.miss == approx(0.0051538)
+    assert Scenarios.FailureUnderFivePercentHeadSample.miss == approx(0.35849)
+    assert Scenarios.FailureUnderOnePercentHeadSample.miss == approx(0.90438)
+
+
+def test_verdict_aware_trace_retention():
+    r = Scenarios.VerdictAwareTraceRetention.result
+    assert (r.head_count, r.head_failed, r.head_unresolved, r.tail_control, r.tail_count) == (500, 20, 5, 190, 690)
+    assert r.full_volume.to("GB").magnitude == approx(336.0) and r.head_volume.to("GB").magnitude == approx(16.8)
+    assert r.tail_volume.to("GB").magnitude == approx(23.184) and r.full_over_tail == approx(14.4928)
+    assert r.floor_volume.to("GB").magnitude == approx(16.8) and r.per_point_volume.to("GB").magnitude == approx(3.192)
+
+
+def test_interface_repair_branches_wilson():
+    b = Scenarios.InterfaceRepairBranches
+    assert b.failure_upper("paginated") == approx(0.16113) and b.clean_runs_for_target == 73
+    assert b.clean_failure_upper(72) >= 0.05 > b.clean_failure_upper(73)
+    lo, hi = b.acceptance_interval("original")
+    assert lo == approx(0.0088814) and hi == approx(0.23613)
+    lo, hi = b.acceptance_interval("warning")
+    assert lo == approx(0.21881) and hi == approx(0.61342)
+
+
+def test_repair_candidate_paired_comparison_as_read_by_operations():
+    """The Agent Evaluation comparison that the release decision record cites (shared with Agent Operations)."""
+    r = Scenarios.RepairCandidatePairedComparison.result
+    assert r.difference == approx(0.04) and r.lower == approx(-0.032062854, rel=1e-6)
+    assert r.upper == approx(0.111211210, rel=1e-6) and not r.noninferior
+    assert r.pairs_if_gain_holds == 217
+
+
+def test_tool_drift_and_familywise_error():
+    d = Scenarios.TestLintToolDrift
+    assert d.divergence == approx(0.021006) and d.share_of_maximum == approx(0.030305)
+    f = Scenarios.ReleaseGateFamilywiseError
+    assert f.union_bound == approx(0.20) and f.independent == approx(0.18549) and f.per_test == approx(0.0125)
+
+
+def test_acceptance_canary_monitor_and_ladder():
+    m = Scenarios.AcceptanceCanaryMonitor
+    r = m.result
+    assert r.upper == approx(4.553877) and r.lower == approx(-2.985682)
+    assert r.failure_step == approx(0.916291) and r.success_step == approx(-0.182322)
+    assert r.expected_samples == approx(45.23806) and r.failures_to_hold == 5
+    assert r.decision_time.to("hour").magnitude == approx(15.579354)
+    assert r.excess_failures == approx(7.01071) and r.full_excess_failures == approx(11.28571)
+    assert m.variant(fraction=0.10).result.decision_time.to("hour").magnitude == approx(8.03968)
+    assert m.variant(fraction=1.0).result.decision_time.to("hour").magnitude == approx(1.25397)
+    w = Scenarios.WebCanaryLadderOnAgentTasks
+    assert w.total.to("minute").magnitude == approx(40.0) and w.labeled_by_completion == approx(2.0)
+    assert w.admitted_by_completion == approx(20.0)
+
+
+def test_openai_sycophancy_timeline_and_dapper():
+    from mlsysim import Literature
+    inc = Literature.IncidentReports
+    assert (inc.OpenAiSycophancyRolloutStartDay, inc.OpenAiSycophancyRollbackStartDay) == (24, 28)
+    assert inc.OpenAiSycophancyRollbackHours == 24
+    rows = {r["sampling_frequency"]: r for r in Literature.DapperSamplingOverhead.entries}
+    assert rows["1/1"]["latency_change_pct"] == 16.3 and rows["1/1024"]["latency_change_pct"] == -0.20
+    assert Literature.DistributedTracing.DapperFirstProductionSamplingDenominator == 1024
+def test_gpt2_xl_step_fits_one_h100():
+    flash = Scenarios.Gpt2MixedPrecisionFlashAttentionOnH100
+    assert flash.training_total.to("GB").magnitude == approx(109.5638)
+    assert flash.resident_batch_limit == approx(23.1497)
+    assert flash.max_resident_batch == 23
+    assert Scenarios.Gpt2MixedPrecisionTwoMicroBatchesOnH100.training_total.to("GB").magnitude == approx(66.7819)
+    assert Scenarios.Gpt2MixedPrecisionSegmentCheckpointedOnH100.training_total.to("GB").magnitude == approx(35.5343)
+    ckpt = Scenarios.Gpt2XlBatch32SegmentCheckpointed
+    assert ckpt.segment_layers == 6
+    assert ckpt.segment_input.to("MB").magnitude == approx(104.8576)
+    assert ckpt.segment_inputs.to("GB").magnitude == approx(0.83886)
+    assert ckpt.live_segment.to("GB").magnitude == approx(10.69548)
+    assert ckpt.checkpoint_memory_units(7) == approx(13.857143)
+    act = Scenarios.Gpt2XlBatch32Activations
+    assert act.per_token_bytes_coefficient == approx(34)
+    assert act.score_bytes_coefficient == approx(80)
+    assert act.score_share == approx(0.701754)
+    assert act.per_sequence_activations.to("GB").magnitude == approx(2.67387)
+    assert Scenarios.Gpt2XlRunOnOneH100Fp32.training_time.to("day").magnitude == approx(518.2421)
+    assert Scenarios.Gpt2XlRunOnOneH100Tf32.rental_cost.to("USD").magnitude == approx(6747.638)
+    assert Scenarios.Gpt2XlSingleCoreTokenizerFeed.busy_fraction == approx(0.476441)
+
+
+def test_number_formats_and_loss_scaling():
+    f = Scenarios.Fp16WeightSmallUpdates
+    assert f.spacing("fp16") == 2 ** -11
+    assert f.spacing("bf16") == 2 ** -8
+    assert f.stored_after_one("fp16") == 0.5
+    assert f.final("fp16") == 0.5
+    assert f.final("fp32") == approx(1.50017)
+    assert f.vanishing_ratio("fp16") == 2048
+    s = Scenarios.SsdGradientLossScaling
+    assert s.below_subnormal_pct == approx(26.2213)
+    assert s.below_share_of_nonzero == approx(0.815987)
+    assert s.subnormal_pct == approx(5.85519)
+    assert s.nonzero_pct == approx(32.1344)
+    assert s.shift == 3
+    assert s.rescued_pct == approx(5.83949)
+    assert s.headroom_doublings == approx(25.9993)
+    assert s.dynamic_overflow_threshold == approx(63.96875)
+
+
+def test_online_softmax_and_attention_tiles():
+    o = Scenarios.OnlineSoftmaxFourScores
+    assert o.blocks[0]["sum"] == approx(1.135335)
+    assert o.blocks[1]["rescale"] == approx(0.135335)
+    assert o.blocks[1]["sum"] == approx(o.whole_row["sum"])
+    assert o.blocks[1]["output"] == approx(44.38347)
+    assert o.weighted_average == approx(36.8810)
+    a = Scenarios.AttentionScores4096TokensFp32
+    assert a.score_matrix.to("MB").magnitude == approx(67.108864)
+    assert a.tile_bytes.to("KB").magnitude == approx(65.536)
+    assert a.tile_count == 1024
+    assert a.stored_standard.to("MB").magnitude == approx(138.412)
+    assert a.stored_flash.to("MB").magnitude == approx(4.22707)
+    assert a.stored_ratio == approx(32.7442)
+def test_model_compression_scenarios():
+    from mlsysim import Literature
+    from mlsysim.physics import (calc_csr_bytes, calc_pareto_frontier, calc_sparse_breakeven_zero_share,
+                                 calc_sparse_bytes_per_nonzero)
+    from mlsysim.core.units import BYTES_FP32, BYTES_INT32
+    t = Scenarios.Llama2_7BTokenOnFlagshipPhone
+    assert t.weight_bytes.to("GB").magnitude == approx(14.0) and t.read_time.to("ms").magnitude == approx(273.4375)
+    assert t.read_energy.to("J").magnitude == approx(2.24) and t.read_power.to("W").magnitude == approx(8.192)
+    assert Scenarios.MobileNetV2Fp32WeightReadPhone.read_time.to("ms").magnitude == approx(0.27382, rel=1e-4)
+    assert Scenarios.ResNet50Fp32WeightReadPhone.weight_bytes.to("MB").magnitude == approx(102.228128)
+    assert Scenarios.Gpt2XlFp16WeightReadPhone.read_time.to("ms").magnitude == approx(58.59375)
+    assert Scenarios.Gpt2XlInt4WeightReadPhone.read_time.to("ms").magnitude == approx(14.6484375)
+    b = Scenarios.MobileNetV2BlurPipelinePhone
+    assert b.cpu_frame.to("ms").magnitude == approx(125.0) and b.flop_fraction == approx(418 / 600)
+    assert b.pruned_cpu_frame.to("ms").magnitude == approx(87.0833, rel=1e-5)
+    assert b.pruned_bytes.to("MB").magnitude == approx(10.44) and b.pruned_int_bytes.to("MB").magnitude == approx(2.61)
+    m = Scenarios.SmallestModelAtSixtyPercentMmlu
+    assert m.first["model"] == "Gopher 280B" and m.last["model"] == "Qwen2.5-Coder-3B"
+    assert m.shrink == approx(93.333, rel=1e-4) and m.span_years == approx(2.7789, rel=1e-4)
+    r = Scenarios.Rank128Factorization4096
+    assert r.full_bytes.to("MB").magnitude == approx(67.108864) and r.compression == approx(16.0)
+    f = Scenarios.ResNet50Conv256FusionH100
+    assert f.unfused_traffic.to("MB").magnitude == approx(7.17824) and f.fused_traffic.to("MB").magnitude == approx(3.964928)
+    assert f.traffic_cut == approx(0.447646, rel=1e-5) and f.time_ratio == approx(1.810434, rel=1e-5)
+    s = Scenarios.SparseMatVec4x4
+    assert s.nonzeros == 6 and s.csr_bytes.to("byte").magnitude == 68 and s.dense_bytes.to("byte").magnitude == 64
+    p = Scenarios.MagnitudePruned3x3
+    assert p.survivors == [0.8, -0.7, -0.9, -0.6] and p.csr_bytes.to("byte").magnitude == 80
+    w = Scenarios.WearableMobileNetV2SparseFlash
+    assert w.stored_bytes.to("MB").magnitude == approx(3.0) and not w.fits
+    assert Scenarios.Channels256To250Tile8.last_tile_lanes == 2 and Scenarios.Channels256To248Tile8.remainder == 0
+    assert [round(100 * x) for x in Scenarios.TeacherSoftTargetsT4.softened] == [48, 28, 24]
+    assert Scenarios.PrunedInt8PaperVsMeasured.paper == approx(8.0)
+    assert Scenarios.PrunedInt8PaperVsMeasured.realized_share == approx(0.1875)
+    assert Scenarios.BertBaseMobileCompression.compression_ratio == approx(16.0)
+    assert Scenarios.ModelFifthOfRequestLatency.result.overall_speedup == approx(1.25)
+    assert Scenarios.ModelThreeFifthsFourTimesFaster.result.overall_speedup == approx(1 / 0.55)
+    csr = calc_sparse_bytes_per_nonzero(BYTES_FP32, BYTES_INT32)
+    coo = calc_sparse_bytes_per_nonzero(BYTES_FP32, BYTES_INT32, indices=2)
+    assert calc_sparse_breakeven_zero_share(BYTES_FP32, csr) == approx(0.5)
+    assert calc_sparse_breakeven_zero_share(BYTES_FP32, coo) == approx(2 / 3)
+    assert calc_csr_bytes(6, 4, BYTES_FP32, BYTES_INT32).to("byte").magnitude == 68
+    t3 = Literature.Series.MobileNetV3Table3.entries
+    front = [t3[i]["model"] for i in calc_pareto_frontier([(r["pixel1_ms"], r["top1"]) for r in t3])]
+    assert "V2 1.0" not in front and "V3-Large 0.75" in front
+    assert Literature.CompressionResults.SanhDistilBertRetainedPct == 97
+# --- Hardware acceleration on one accelerator (added 2026-10-20) ---
+
+
+def test_h100_over_reference_cpu_and_systolic_reuse():
+    g = Scenarios.H100OverReferenceCpu
+    assert g.ratio_low == approx(494.5) and g.ratio_high == approx(989.0)
+    e = Scenarios.SystolicArrayReuseEnergy
+    assert e.naive_energy.to("pJ").magnitude == approx(2561.0)
+    assert e.systolic_accesses == approx(0.015625)
+    assert e.systolic_energy.to("pJ").magnitude == approx(11.0)
+    assert e.ratio == approx(232.818)
+
+
+def test_amdahl_on_h100_against_a_server_cpu():
+    rn, gpt, bw = (Scenarios.ResNet50InferenceH100OverServerCpu, Scenarios.Gpt2DecodeH100OverServerCpu,
+                   Scenarios.Gpt2DecodeH100OverServerCpuBandwidth)
+    assert rn.gain == approx(247.375) and rn.speedup == approx(18.5734)
+    assert gpt.speedup == approx(4.92044) and gpt.ceiling == approx(5.0)
+    assert bw.gain == approx(67.0) and bw.speedup == approx(4.71831)
+
+
+def test_resnet50_layers_against_the_h100_ridges():
+    assert Scenarios.ResNet50Stage3ConvBatch32.flops.to("GFLOP").magnitude == approx(7.39875)
+    assert Scenarios.ResNet50Stage3ConvBatch32.traffic_bytes.to("MB").magnitude == approx(13.13997)
+    assert Scenarios.ResNet50Stage3ConvBatch32.traffic_intensity == approx(563.072)
+    assert Scenarios.ResNet50Stage3ConvBatch32Int8.traffic_intensity == approx(1126.14)
+    assert Scenarios.ResNet50Stage3ConvBatch32Int8Weights.traffic_intensity == approx(569.463)
+    assert Scenarios.ResNet50Stage2ConvBatch32.traffic_intensity == approx(287.176)
+    assert Scenarios.ResNet50Stage2ConvBatch32Int8.traffic_intensity == approx(574.352)
+    assert Scenarios.ResNet50Stage2ExpansionBatch32.traffic_intensity == approx(51.1739)
+    assert Scenarios.ResNet50Stage2ExpansionBatch32Int8.traffic_intensity == approx(102.348)
+    assert Scenarios.ResNet50Batch1H100Int8PeakRate.result.latency_compute.to("us").magnitude == approx(4.14351)
+    assert Scenarios.ResNet50Batch1H100Fp16PeakRate.result.latency_compute.to("us").magnitude == approx(8.29120)
+
+
+def test_five_layers_on_the_h100_roofline():
+    qkv, head = Scenarios.Gpt2XlQkvProjectionPrefill, Scenarios.ResNet50ClassifierHeadBatch32
+    assert qkv.flops.to("GFLOP").magnitude == approx(125.829) and qkv.traffic_intensity == approx(1046.68)
+    assert head.traffic_bytes.to("MB").magnitude == approx(4.29107) and head.traffic_intensity == approx(30.5453)
+    assert Scenarios.Gpt2XlLayerNormPrefill.intensity == approx(1.99976)
+    assert Scenarios.Gpt2XlSoftmaxPrefill.intensity == approx(0.75)
+    assert Scenarios.Gpt2XlDecodeH100Roofline.peak_fraction == approx(0.0033873)
+    assert Scenarios.Gpt2XlLayerNormH100Roofline.attainable.to("TFLOP/s").magnitude == approx(6.69918)
+    assert Scenarios.ResNet50ClassifierHeadH100Roofline.peak_fraction == approx(0.103465)
+    assert Scenarios.ResNet50Stage3ConvH100Roofline.peak_fraction == approx(1.0)
+    a, h = Scenarios.KernelAt200FlopPerByteA100, Scenarios.KernelAt200FlopPerByteH100
+    assert a.attainable.to("TFLOP/s").magnitude == approx(312.0) and h.attainable.to("TFLOP/s").magnitude == approx(670.0)
+
+
+def test_batch_raises_dense_layer_intensity():
+    b1, b32, b512 = Scenarios.Dense2048Fp16Batch1, Scenarios.Dense2048Fp16Batch32, Scenarios.Dense2048Fp16Batch512
+    assert b1.traffic_intensity == approx(0.999024) and b32.traffic_intensity == approx(31.0303)
+    assert b512.traffic_intensity == approx(341.333)
+    assert b1.batch_for_traffic_intensity(295.2238806) == approx(414.818)
+    assert b1.variant(batch_size=415).traffic_intensity == approx(295.2238806, rel=1e-3)
+
+
+def test_accelerator_trends_and_latency_in_cycles():
+    w = Scenarios.DenseParametersVsBandwidthSince2014
+    assert w.parameter_growth == approx(3902.93) and w.bandwidth_growth == approx(33.3333)
+    e = Scenarios.AcceleratorEnvelopeSinceTpuV2
+    assert e.device_count == 52 and e.compute_growth == approx(54.7087) and e.bandwidth_growth == approx(13.3333)
+    assert e.best_bandwidth_since == "2025-02-15"
+    g = Scenarios.NvidiaGenerationsV100ToB200
+    assert g.compute_growth == approx(18.0) and g.bandwidth_growth == approx(8.88889) and g.gap_growth == approx(2.025)
+    c = Scenarios.HbmAccessAt2Ghz
+    assert c.cycle_time.to("ps").magnitude == approx(500.0) and c.cycles == approx(545.64)
+    t = Scenarios.TensorCoreMmaM16n8k16
+    assert t.macs == 2048 and t.macs_per_thread == approx(64.0)
+def test_trajectory_planning_joint_rates_handoffs_and_replacement():
+    good = Scenarios.WarehouseArmRightAngleElbow.result
+    assert good.reach.to("m").magnitude == approx(0.700)
+    assert good.joint_rate_norm.to("rad/s").magnitude == approx(4.896751, rel=1e-6)
+    assert good.joint_rate_one_joint.to("rad/s").magnitude == approx(3.462526, rel=1e-6)
+    assert good.exceeds_joint_limit
+    assert good.damped_joint_rate.to("rad/s").magnitude == approx(4.619815, rel=1e-6)
+    assert good.realized_fraction == approx(0.943445, rel=1e-5)
+    assert good.damped_ceiling.to("rad/s").magnitude == approx(10.0)
+    bad = Scenarios.WarehouseArmNearStraightElbow.result
+    assert bad.joint_rate_norm.to("rad/s").magnitude == approx(37.760396, rel=1e-6)
+    assert bad.damped_joint_rate.to("rad/s").magnitude == approx(8.272410, rel=1e-6)
+    assert bad.realized_fraction == approx(0.219076, rel=1e-5) and bad.damped_exceeds_joint_limit
+    m = Scenarios.GenericReplannerMissionExposure.result
+    assert m.handoffs == 3000 and m.expected_late == approx(30.0)
+    assert m.all_on_time == approx(8.046070e-14, rel=1e-5)
+    assert m.per_handoff_budget == approx(1e-3 / 3000)
+    assert m.orders_deeper == approx(4.477121, rel=1e-6) and m.handoffs_per_expected_late == approx(100.0)
+    r = Scenarios.WarehouseArmChunkReplacement.result
+    assert r.latency.to("ms").magnitude == approx(114.91072)
+    assert r.other_stages.to("ms").magnitude == approx(5.31072)
+    assert r.requests_in_flight == 3 and r.latency_beyond_lease.to("ms").magnitude == approx(54.91072)
+    assert r.tail_over_inference == approx(3.75)
+    s = Scenarios.WarehouseArmStaleAnchor.result
+    assert s.gap.to("rad").magnitude == approx(0.040) and s.tool_displacement.to("mm").magnitude == approx(28.0)
+    w = Scenarios.WarehouseBaseDynamicWindow.result
+    assert w.half_width.to("m/s").magnitude == approx(0.1)
+    assert w.admissible_speed.to("m/s").magnitude == approx(2.097618, rel=1e-6) and w.admits_drive_limit
+
+
+def test_trajectory_planning_jerk_limited_stops_and_deadlines():
+    arm = Scenarios.WarehouseArmStallStop.result
+    assert arm.jerk.to("m/s**3").magnitude == approx(200 / 3)
+    assert arm.delay.to("ms").magnitude == approx(82.0) and arm.delay_travel.to("mm").magnitude == approx(82.0)
+    assert arm.scurve_travel.to("mm").magnitude == approx(137.5) and arm.stop_time.to("ms").magnitude == approx(275.0)
+    assert arm.braking_travel.to("mm").magnitude == approx(100.0) and arm.jerk_ramp_travel.to("mm").magnitude == approx(37.5)
+    assert arm.polynomial_distance.to("mm").magnitude == approx(150.0)
+    assert arm.required_distance.to("mm").magnitude == approx(219.5) and arm.spare.to("mm").magnitude == approx(80.5)
+    assert arm.rest_time.to("ms").magnitude == approx(357.0) and arm.fits
+    assert arm.stop_distance.to("mm").magnitude == approx(219.5) and arm.ramp_delay.to("ms").magnitude == approx(37.5)
+    mug = Scenarios.WarehouseArmOpenMugStop.result
+    assert mug.spill_deceleration.to("m/s**2").magnitude == approx(2.4516625)
+    assert mug.rise_at_free_deceleration.to("mm").magnitude == approx(20.394324, rel=1e-6)
+    assert mug.stop.jerk.to("m/s**3").magnitude == approx(16.028397, rel=1e-6)
+    assert mug.stop.scurve_travel.to("mm").magnitude == approx(280.421959, rel=1e-6)
+    assert mug.stop.required_distance.to("mm").magnitude == approx(362.421959, rel=1e-6)
+    assert mug.reused_jerk_stop_distance.to("mm").magnitude == approx(222.330711, rel=1e-6)
+    assert mug.carry_speed.to("m/s").magnitude == approx(0.885025, rel=1e-5)
+    base = Scenarios.WarehouseBaseJerkLimitedStop.result
+    assert base.jerk.to("m/s**3").magnitude == approx(64 / 9)
+    assert base.scurve_travel.to("mm").magnitude == approx(773.4375) and base.stop_time.to("ms").magnitude == approx(1031.25)
+    assert base.polynomial_distance.to("mm").magnitude == approx(843.75)
+    assert base.jerk_ramp_travel.to("mm").magnitude == approx(210.9375)
+    assert base.ramp_delay.to("ms").magnitude == approx(140.625)
+    assert base.constant_required.to("mm").magnitude == approx(912.9)
+    assert base.required_distance.to("mm").magnitude == approx(1123.8375)
+    assert base.polynomial_required.to("mm").magnitude == approx(1194.15)
+    assert base.spare.to("mm").magnitude == approx(-23.8375) and not base.fits
+    d = Scenarios.WarehouseArmCommitmentSchedule.result
+    assert d.preferred_admission.to("ms").magnitude == approx(240.0) and d.reserve.to("ms").magnitude == approx(42.0)
+    assert d.minimum_onset.to("ms").magnitude == approx(262.0) and d.admission_cutoff.to("ms").magnitude == approx(278.0)
+    assert d.rest.to("ms").magnitude == approx(575.0) and d.nominal_end.to("ms").magnitude == approx(400.0)
+    assert d.window_periods == approx(23.0) and d.used.to("mm").magnitude == approx(197.5)
+    assert d.margin.to("mm").magnitude == approx(102.5) and d.late_breach.to("mm").magnitude == approx(97.5)
+
+
+def test_trajectory_planning_seam_bridge_and_shoulder_swing():
+    sh = Scenarios.WarehouseArmShoulderSwing.result
+    assert sh.holding_torque.to("N*m").magnitude == approx(20.593965, rel=1e-6)
+    assert sh.holding_share == approx(0.236712, rel=1e-5)
+    assert sh.effective_inertia.to("kg*m**2").magnitude == approx(1.6535)
+    assert sh.accel_up.to("rad/s**2").magnitude == approx(40.160892, rel=1e-6)
+    assert sh.accel_down.to("rad/s**2").magnitude == approx(65.070435, rel=1e-6)
+    assert sh.binding_acceleration.to("rad/s**2").magnitude == approx(7.5)
+    assert sh.bang_bang_time.to("ms").magnitude == approx(516.397779, rel=1e-6)
+    assert sh.switch_torque_step.to("N*m").magnitude == approx(24.8025)
+    assert sh.jerk_bound.to("rad/s**3").magnitude == approx(604.777744, rel=1e-6)
+    assert sh.jerk_limited_time.to("ms").magnitude == approx(528.947916, rel=1e-6)
+    assert sh.penalty.to("ms").magnitude == approx(12.550136, rel=1e-5) and sh.reaches_plateau
+    b = Scenarios.PandaClassJointSeamBridge.result
+    assert b.step_torque.to("N*m").magnitude == approx(36.7)
+    assert b.step_torque_rate.to("N*m/s").magnitude == approx(36700.0) and b.step_over_rate_limit == approx(36.7)
+    assert b.peak_torque.to("N*m").magnitude == approx(1.101) and b.peak_reduction == approx(100 / 3)
+    assert b.peak_jerk.to("rad/s**3").magnitude == approx(480.0)
+    assert b.torque_rate.to("N*m/s").magnitude == approx(88.08) and b.within_rate_limit
+    a3, a4, a5 = b.coefficients
+    assert a3 == approx(80.0) and a4 == approx(-800.0) and abs(a5) < 1e-6
+    assert b.loaded_step_torque.to("N*m").magnitude == approx(330.7)
+    assert b.shortest_bridge.to("ms").magnitude == approx(14.839137, rel=1e-6)
+    assert b.velocity_ceiling.to("rad/s").magnitude == approx(0.692098, rel=1e-5)
+    h = Scenarios.PandaClassJointSeamBridgeHalved.result
+    assert h.peak_torque.to("N*m").magnitude == approx(2.202) and h.torque_rate.to("N*m/s").magnitude == approx(352.32)
+    c = Scenarios.PandaClassJointSeamBridgeCompressed.result
+    assert c.peak_acceleration.to("rad/s**2").magnitude == approx(30.0)
+    assert c.peak_torque.to("N*m").magnitude == approx(5.505) and c.torque_rate.to("N*m/s").magnitude == approx(2202.0)
+    assert not c.within_rate_limit and c.torque_rate_share == approx(2.202)
+
+
+def test_warehouse_jerk_limited_stop_matches_finished_budget():
+    """The trajectory chapter's S-curve stop and the enforcement chapter's finished budget share one jerk bound and one stop."""
+    base = Scenarios.WarehouseBaseJerkLimitedStop.result
+    budget = Scenarios.WarehouseFinishedStopAtDriveLimit.result
+    assert base.jerk.m_as("m/s**3") == pytest.approx(budget.jerk.m_as("m/s**3"))
+    assert base.stop_distance.m_as("mm") == pytest.approx(budget.stop_distance.m_as("mm"))
+    assert base.jerk_ramp_travel.m_as("mm") == pytest.approx(budget.jerk_ramp_travel.m_as("mm"))

@@ -1012,6 +1012,14 @@ class StoppingBudgetResult(SolverResult):
     added_delay_travel: Optional[Quantity] = None  # travel at ``speed`` during a stated delay step
     delay_ceiling: Optional[Quantity] = None  # longest constant-speed delay whose stop, with the overhead, fits
     delay_spare: Optional[Quantity] = None    # delay_ceiling - delay
+    # The finished budget (added 2026-10-20): S-curve stop, tracking inset, approaching person
+    jerk: Optional[Quantity] = None              # jerk bound of the resident S-curve stop
+    jerk_ramp_travel: Optional[Quantity] = None  # S-curve stop travel beyond v^2 / 2a
+    stop_time: Optional[Quantity] = None         # duration of the S-curve stop
+    jerk_plateau_speed: Optional[Quantity] = None  # a^2 / j: slower stops never reach a
+    ramp_delay: Optional[Quantity] = None        # a / (2 j): the ramps as added delay above a^2 / j
+    tracking_inset: Optional[Quantity] = None    # tracking bound subtracted from the clearance
+    approach_travel: Optional[Quantity] = None   # v_h (tau + T_stop): a person closing the gap
 
     def travel_over(self, duration: Quantity) -> Quantity:
         """Distance covered at ``speed`` over ``duration`` (the cost of one term of the delay)."""
@@ -3553,4 +3561,384 @@ __all__ += [
     "DevelopmentSweepResult",
     "RollingWindowResult",
     "CarbonPricedPlacementResult",
+]
+
+
+# --- Agent evaluation: verdicts, graders, intervals, paired comparison (added 2026-10-20) ---
+class VerdictBoundsResult(SolverResult):
+    """Result from VerdictBoundsModel: an acceptance rate with unresolved trials kept or dropped."""
+    trials: int
+    default_rate: float                  # unresolved counted as not accepted
+    upper_bound: float                   # every unresolved trial resolved as accepted
+    dropped_rate: float                  # unresolved trials removed from the denominator
+
+
+class GraderCalibrationResult(SolverResult):
+    """Result from GraderCalibrationModel: a grader's error rates against a reference assessment."""
+    false_accept_rate: float             # Pr(accept | reference failure)
+    false_accept_low: float              # Wilson interval of that rate
+    false_accept_high: float
+    accepted: int                        # all reports the grader accepted
+    failure_among_accepted: float        # Pr(reference failure | accept)
+    false_reject_rate: float             # Pr(reject | reference pass)
+
+
+class TaskRepeatAllocationResult(SolverResult):
+    """Result from TaskRepeatAllocationModel: standard error of task-by-run designs under one budget."""
+    within_variance: float               # sigma_run^2
+    variance_ratio: float                # sigma_run^2 / sigma_task^2, runs at which the run term stops dominating
+    free_tasks: Dict[int, int]           # runs per task -> tasks, new tasks free
+    free_se: Dict[int, float]            # runs per task -> standard error, new tasks free
+    paid_tasks: Dict[int, int]           # runs per task -> whole tasks the budget affords with fixture cost
+    paid_se: Dict[int, float]
+    best_runs: int                       # runs per task minimizing the variance with fixture cost
+    best_tasks: int
+    best_se: float
+
+
+class BinomialIntervalsResult(SolverResult):
+    """Result from BinomialIntervalsModel: Wald and Wilson intervals for several counts at one size."""
+    z_critical: float
+    wald: Dict[int, Tuple[float, float]]     # successes -> (low, high), unclipped
+    wilson: Dict[int, Tuple[float, float]]   # successes -> (low, high)
+
+
+class ProportionPlanningResult(SolverResult):
+    """Result from ProportionPlanningModel: one-rate precision and two-arm detection counts."""
+    z_critical: float
+    half_width: float                    # normal approximation at the planning size
+    wilson_half_width: float             # half the Wilson width at the same size and rate
+    samples_for_target: int              # draws for the target half-width
+    per_arm: Dict[float, float]          # detectable difference -> tasks per arm (unrounded)
+# --- Agent operations (added 2026-10-20) ------------------------------------
+
+class SpanCriticalPathResult(SolverResult):
+    """Result from SpanCriticalPathModel: what one trial's spans explain of its elapsed time."""
+    leaf_sum: Quantity                       # every span's duration added, overlap counted twice
+    critical_path: Quantity                  # longest chain of dependent span durations
+    elapsed: Quantity                        # the enclosing segment
+    unexplained: Quantity                    # elapsed time no span on the path covers
+    changed_elapsed: Quantity                # elapsed time after the intervention, waits kept
+    saving: Quantity
+    changed_critical: List[str]              # spans on the path after the intervention
+
+
+class TraceRetentionResult(SolverResult):
+    """Result from TraceRetentionModel: diagnostic trace bodies kept under three selections."""
+    head_count: float                        # traces kept per cohort period, head sampling
+    head_failed: float                       # expected failed traces among them
+    head_unresolved: float
+    tail_control: float                      # ordinary traces kept as the control sample
+    tail_count: float                        # verdict-aware selection
+    full_volume: Quantity                    # every body, over the window
+    head_volume: Quantity
+    tail_volume: Quantity
+    full_over_tail: float
+    floor_volume: Quantity                   # failed and unresolved bodies alone
+    per_point_volume: Quantity               # one percentage point of control sampling
+
+
+class SequentialCanaryResult(SolverResult):
+    """Result from SequentialCanaryModel: a Wald SPRT canary monitor in labels and calendar time."""
+    upper: float                             # log boundary: hold (select the degraded hypothesis)
+    lower: float                             # log boundary: select the baseline hypothesis
+    failure_step: float                      # log-likelihood added by one failure
+    success_step: float                      # log-likelihood added by one success
+    drift: float                             # expected step under the degraded hypothesis
+    terminal: float                          # expected terminal log-likelihood, no overshoot
+    expected_samples: float                  # labeled tasks, under the degraded hypothesis
+    failures_to_hold: int                    # consecutive failures from the start that cross the upper boundary
+    candidate_rate: Quantity                 # candidate tasks admitted per hour
+    admission_time: Quantity                 # to admit the expected samples
+    decision_time: Quantity                  # plus the label delay
+    pending: float                           # candidate tasks admitted while labels are pending
+    excess_failures: float                   # measured regression's cost at this fraction
+    full_pending: float
+    full_excess_failures: float              # the same at full allocation
+    exposure_share: float                    # unmeasured-harm exposure against full allocation
+
+
+class PairedComparisonResult(SolverResult):
+    """Result from PairedComparisonModel: a candidate against a baseline on the same tasks."""
+    pairs: int
+    candidate_rate: float
+    baseline_rate: float
+    difference: float                    # candidate minus baseline
+    lower: float                         # Newcombe method-10 interval
+    upper: float
+    noninferior: bool                    # lower > -tolerance
+    superior: bool                       # lower > 0
+    exact_p: float                       # McNemar, two-sided
+    lower_width: float                   # difference - lower
+    clear_width: float                   # difference + tolerance, the half-width the gate needs
+    pairs_if_gain_holds: int             # pairs that center the expected lower limit on the margin
+    pairs_if_no_gain: int                # pairs that fit the lower half-width inside the tolerance
+    discordant_fraction: float
+    paired_variance: float               # per pair, d - delta^2
+    independent_variance: float          # per task, two independent arms
+    paired_share: float                  # paired / independent
+    paired_half_width: float             # normal approximation
+    independent_multiple: float          # independent / paired
+
+
+class ScaffoldSpreadResult(SolverResult):
+    """Result from ScaffoldSpreadModel: one model's score across agent scaffolds."""
+    models: int                          # models with at least the minimum scaffold count
+    spreads: Dict[str, float]            # model -> highest minus lowest score
+    widest: str
+    widest_low: float
+    widest_high: float
+    widest_count: int
+    median_spread: float
+    median_se: float                     # median reported standard error over all rows
+
+
+class LeaderboardTiesResult(SolverResult):
+    """Result from LeaderboardTiesModel: neighbors a leaderboard cannot separate."""
+    models: int
+    top: int
+    pairs: int                           # neighboring pairs among the top
+    tied: int                            # pairs closer than an independent-samples test resolves
+    typical_se: float                    # median standard error of the top
+    needed_gap: float                    # z sqrt(2) x typical standard error
+    top_model: str
+    top_score: float
+    last_score: float                    # score at the last shown rank
+
+
+class TaskMixConsistencyResult(SolverResult):
+    """Result from TaskMixConsistencyModel: repeating one task against drawing new tasks."""
+    mean_rate: float
+    same_task_all: float                 # E[p_i^k]
+    new_tasks_all: float                 # (E[p_i])^k
+
+
+class CappedSelectionCostResult(SolverResult):
+    """Result from CappedSelectionCostModel: batch and sequential selection under one candidate cap."""
+    availability: float                  # 1 - (1 - p)^k, either policy
+    expected_candidates: float           # sequential, availability / p
+    batch_trial_cost: Quantity
+    sequential_trial_cost: Quantity
+    batch_per_accepted: Quantity
+    sequential_per_accepted: Quantity
+    batch_premium: float                 # batch / sequential per accepted - 1
+    doubled_rate_per_accepted: Quantity  # sequential with the pass probability doubled
+
+
+class PairedRunEvaluationResult(SolverResult):
+    """Result from PairedRunEvaluationModel: two configurations, repeated runs of the same tasks."""
+    runs: int
+    tasks: int
+    trials: Dict[str, int]
+    accepted: Dict[str, int]
+    rate: Dict[str, float]
+    wilson: Dict[str, Tuple[float, float]]
+    unknown: Dict[str, int]
+    visible_pass: Dict[str, int]
+    visible_pass_sealed_reject: Dict[str, int]
+    calls: Dict[str, int]
+    tokens: Dict[str, int]
+    output_tokens: Dict[str, int]
+    seconds: Dict[str, float]
+    tokens_per_accepted: Dict[str, float]
+    seconds_per_accepted: Dict[str, float]
+    per_task_passes: Dict[str, Dict[str, int]]
+    pass_at: Dict[str, Dict[int, float]]     # k -> unbiased pass@k averaged over tasks
+    pass_pow: Dict[str, Dict[int, float]]    # k -> unbiased pass^k averaged over tasks
+    both: int                                # paired run by run: both accepted
+    candidate_only: int
+    baseline_only: int
+    neither: int
+    difference: float
+    lower: float
+    upper: float
+    exact_p: float
+    tokens_per_accepted_ratio: float         # candidate over baseline
+
+
+__all__ += [
+    "VerdictBoundsResult",
+    "GraderCalibrationResult",
+    "TaskRepeatAllocationResult",
+    "BinomialIntervalsResult",
+    "ProportionPlanningResult",
+    "PairedComparisonResult",
+    "ScaffoldSpreadResult",
+    "LeaderboardTiesResult",
+    "TaskMixConsistencyResult",
+    "CappedSelectionCostResult",
+    "PairedRunEvaluationResult",
+]
+
+__all__ += [
+    "PairedComparisonResult",
+    "SpanCriticalPathResult",
+    "TraceRetentionResult",
+    "SequentialCanaryResult",
+]
+
+# ── Trajectory planning: joint rates, handoffs, seams, swings, and jerk-limited stops (added 2026-10-20) ──
+
+class TwoLinkJointRateResult(SolverResult):
+    """Result from TwoLinkJointRateModel: the joint rates one tool speed asks of a planar two-link arm."""
+    reach: Quantity                          # l1 + l2
+    sigma_max: Quantity                      # Jacobian singular values, m per rad
+    sigma_min: Quantity
+    joint_rate_norm: Quantity                # exact inverse in the weakest direction, v / sigma_min
+    joint_rate_one_joint: Quantity           # some joint reaches at least the norm / sqrt(2)
+    exceeds_joint_limit: bool                # joint_rate_one_joint > the joint velocity limit
+    damped_joint_rate: Quantity              # damped least squares in the weakest direction
+    realized_fraction: float                 # share of the requested tool motion damping delivers
+    damped_ceiling: Quantity                 # v / (2 lambda), at any configuration
+    damped_exceeds_joint_limit: bool
+
+
+class HandoffExposureResult(SolverResult):
+    """Result from HandoffExposureModel: a per-handoff deadline budget across a mission."""
+    handoffs: int                            # mission time x replanning rate
+    expected_late: float                     # handoffs x late probability
+    all_on_time: float                       # (1 - p)^K, independent misses
+    per_handoff_budget: float                # mission budget / K (union bound)
+    design_quantile: float                   # 1 - per-handoff budget
+    depth_ratio: float                       # late probability / per-handoff budget
+    orders_deeper: float                     # log10 of depth_ratio
+    handoffs_per_expected_late: float        # 1 / p: the count at which one late handoff is expected
+
+
+class ChunkReplacementResult(SolverResult):
+    """Result from ChunkReplacementModel: capture-to-admission latency against the renewal period."""
+    latency: Quantity                        # observation age + dispatch-to-admission
+    other_stages: Quantity                   # dispatch-to-admission - inference - validation
+    latency_over_renewal: float
+    requests_in_flight: int                  # ceil(latency / renewal period)
+    latency_beyond_lease: Quantity
+    tail_over_inference: float               # interference tail / p99 inference pass
+
+
+class JerkLimitedStopResult(SolverResult):
+    """Result from JerkLimitedStopModel: a delayed S-curve stop beside its constant and polynomial forms."""
+    speed: Quantity
+    deceleration: Quantity
+    jerk: Quantity                           # jerk bound
+    jerk_plateau_speed: Quantity             # a^2 / j: above it the stop reaches the deceleration bound
+    reaches_deceleration_bound: bool
+    braking_travel: Quantity                 # v^2 / (2 a), constant deceleration
+    braking_time: Quantity                   # v / a
+    jerk_ramp_travel: Quantity               # S-curve travel - braking travel (v a / (2 j) above the plateau speed)
+    ramp_time: Quantity                      # a / j, one jerk ramp
+    ramp_delay: Quantity                     # a / (2 j): the jerk ramps as extra delay at speed
+    scurve_travel: Quantity                  # the S-curve stop alone, braking + jerk-ramp travel
+    stop_time: Quantity                      # the S-curve stop's duration
+    polynomial_distance: Quantity            # reference C2 polynomial with the same peak deceleration
+    polynomial_time: Quantity
+    delay: Quantity
+    delay_travel: Quantity                   # v x delay
+    stop_distance: Quantity                  # delay travel + S-curve travel (as in StoppingBudgetResult)
+    overhead: Quantity                       # localization bound + protective margin
+    constant_required: Quantity              # delay travel + braking travel + overhead
+    required_distance: Quantity              # delay travel + S-curve stop + overhead
+    polynomial_required: Quantity            # delay travel + polynomial stop + overhead
+    rest_time: Quantity                      # delay + stop time
+    delay_share_of_stop: float               # delay travel / S-curve travel
+    clear_distance: Optional[Quantity] = None
+    spare: Optional[Quantity] = None         # clear distance - required distance (negative: overrun)
+    spare_time: Optional[Quantity] = None    # spare / speed
+    fits: Optional[bool] = None
+    speed_ceiling: Optional[Quantity] = None # fastest speed whose delayed S-curve stop fits
+
+
+class SpillLimitedStopResult(SolverResult):
+    """Result from SpillLimitedStopModel: an open container caps the stop's deceleration."""
+    spill_deceleration: Quantity             # g h_f / R
+    rise_at_free_deceleration: Quantity      # R a / g at the free-space stop's deceleration
+    spills_at_free_deceleration: bool
+    stop: JerkLimitedStopResult              # at the spill bound, jerk rescaled with it
+    reused_jerk_stop_distance: Quantity      # the same stop if the free-space jerk were kept
+    overrun: Quantity                        # required distance - clear distance
+    carry_speed: Quantity                    # fastest speed whose spill-limited stop fits
+
+
+class TrajectoryDeadlinesResult(SolverResult):
+    """Result from TrajectoryDeadlinesModel: a trajectory record's deadlines and the cruise it charges."""
+    nominal_end: Quantity                    # setpoints x setpoint period
+    setpoint_rate: Quantity
+    executed_setpoints: float                # renewal period / setpoint period
+    request_slack: Quantity                  # request delay - renewal period
+    preferred_admission: Quantity            # request + latency target + scheduling slack
+    reserve: Quantity                        # scheduling slack + decision-to-onset response
+    minimum_onset: Quantity                  # request + latency target + reserve
+    admission_cutoff: Quantity               # commitment - response
+    commit_slack: Quantity                   # commitment - preferred admission
+    rest: Quantity                           # commitment + stop time
+    window_periods: float                    # rest / setpoint period
+    blend_cruise: Quantity                   # travel from the blend deadline to commitment
+    used: Quantity                           # blend cruise + stop distance
+    margin: Quantity                         # clear distance - used
+    late_cruise: Quantity                    # travel during a late wait past commitment
+    late_breach: Quantity                    # late cruise - margin
+
+
+class SeamBridgeResult(SolverResult):
+    """Result from SeamBridgeModel: a one-tick seam step against a quintic bridge on one joint."""
+    reflected_inertia: Quantity
+    step_torque: Quantity                    # J_refl x gap / tick
+    step_torque_rate: Quantity               # step torque / tick
+    step_over_rate_limit: float
+    step_within_rating: bool                 # step torque below the rated torque
+    loaded_step_torque: Optional[Quantity] = None  # with the payload's inertia added
+    mean_torque: Quantity                    # J_refl x gap / T
+    peak_acceleration: Quantity              # 1.5 gap / T
+    peak_torque: Quantity
+    peak_reduction: float                    # step torque / bridge peak torque
+    peak_jerk: Quantity                      # 6 gap / T^2
+    torque_rate: Quantity                    # J_refl x peak jerk
+    torque_rate_share: float                 # of the torque-rate limit
+    within_rate_limit: bool
+    coefficients: Tuple[float, float, float] # a3, a4, a5 of the bridge's quintic, SI
+    position_residual: Quantity              # gap T / 2
+    shortest_bridge: Quantity                # sqrt(6 gap J_refl / torque-rate limit)
+    velocity_ceiling: Quantity               # repeated peak torque x tick / J_refl
+
+
+class ShoulderSwingResult(SolverResult):
+    """Result from ShoulderSwingModel: the loaded shoulder's holding torque and its fastest swing."""
+    holding_torque: Quantity                 # m g r
+    holding_share: float                     # of the joint torque limit
+    effective_inertia: Quantity              # m r^2 + J_refl
+    accel_up: Quantity                       # (tau_max - tau_g) / J
+    accel_down: Quantity                     # (tau_max + tau_g) / J
+    binding_acceleration: Quantity
+    bang_bang_time: Quantity
+    peak_speed: Quantity
+    switch_torque_step: Quantity             # 2 J a at the switch point
+    switch_step_time: Quantity               # the step at the torque-rate limit
+    jerk_bound: Quantity                     # torque-rate limit / J
+    jerk_limited_time: Quantity
+    jerk_limited_peak_speed: Quantity
+    reaches_plateau: bool
+    penalty: Quantity                        # jerk-limited - bang-bang
+    penalty_share: float
+    ramp_time: Quantity                      # a / j
+    hold_time: Quantity                      # constant-acceleration hold in each half
+    within_velocity_limit: bool
+
+
+class DynamicWindowResult(SolverResult):
+    """Result from DynamicWindowModel: a base's reachable speeds and the classical admissibility test."""
+    half_width: Quantity                     # max acceleration x window
+    admissible_speed: Quantity               # sqrt(2 d a_b)
+    admits_drive_limit: bool
+
+
+class StaleAnchorResult(SolverResult):
+    """Result from StaleAnchorModel: how far a moving reference runs past a pose sampled at the request."""
+    gap: Quantity                            # joint speed x delay
+    gap_degrees: Quantity
+    tool_displacement: Quantity              # gap x lever arm
+
+
+__all__ += [
+    "TwoLinkJointRateResult", "HandoffExposureResult", "ChunkReplacementResult", "JerkLimitedStopResult",
+    "SpillLimitedStopResult", "TrajectoryDeadlinesResult", "SeamBridgeResult", "ShoulderSwingResult",
+    "DynamicWindowResult", "StaleAnchorResult",
 ]

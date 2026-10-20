@@ -188,3 +188,8 @@ __all__ += [
     "calc_belief_error_bound",
     "calc_quadratic_invalidation_horizon",
 ]
+
+# Manipulator kinematics: Jacobian conditioning and damped inverse kinematics (added 2026-10-20)
+from .kinematics import calc_two_link_singular_values, calc_dls_joint_rate
+
+__all__ += ["calc_two_link_singular_values", "calc_dls_joint_rate"]
