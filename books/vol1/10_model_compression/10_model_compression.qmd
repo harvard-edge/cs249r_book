@@ -87,7 +87,7 @@ A trained model arrives with demands on memory capacity, latency, and energy tha
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
-from mlsysim import Models, Platforms, Hardware
+from mlsysim import Models, Platforms, Hardware, Scenarios
 from mlsysim.physics import memory_from_params
 from mlsysim.physics.quantities import token_throughput
 from mlsysim.fmt import fmt, fmt_int, fmt_qty_int, fmt_memory_capacity, check, fmt_memory, fmt_time, fmt_energy, fmt_bandwidth, fmt_power, fmt_range
@@ -96,21 +96,23 @@ class CompressionDeploymentScale:
     """A 7B FP16 model against a phone's capacity, bandwidth, and energy envelope."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    llm_7b_params = Models.Language.Llama2_7B.parameters.to(Bparam).magnitude
+    # Scenarios.Llama2_7BTokenOnFlagshipPhone: Llama 2 7B's FP16 weights read once
+    # per token over the flagship phone's LPDDR5 bus, priced at DRAM energy per byte.
+    token = Scenarios.Llama2_7BTokenOnFlagshipPhone
+    llm_7b_params = token.workload.parameters.to(Bparam).magnitude
     llm_175b_params = Models.Language.GPT3.parameters.to(Bparam).magnitude
     bytes_fp16 = BYTES_FP16.to(byte).magnitude
     smartphone_ram = Platforms.Mobile.ram
-    phone_bw = Hardware.Mobile.iPhone15Pro.memory.bandwidth  # flagship phone LPDDR5 bus
-    dram_energy_per_byte = Hardware.Tech.Memory.DRAM.energy_per_byte
+    phone_bw = token.hardware.memory.bandwidth  # flagship phone LPDDR5 bus
     phone_tdp_min_w, phone_tdp_max_w = [int(v) for v in Platforms.Mobile.tdp_range_w.split("-")]
     mcu_ram_kb = Platforms.Tiny.ram.to(KB).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    llm_7b_mem_fp16 = memory_from_params(llm_7b_params * Bparam, bytes_fp16 * byte / param)
+    llm_7b_mem_fp16 = token.weight_bytes
     llm_175b_mem_fp16 = memory_from_params(llm_175b_params * Bparam, bytes_fp16 * byte / param)
-    token_stream_time = (llm_7b_mem_fp16 / phone_bw).to(millisecond)
-    token_stream_energy = (llm_7b_mem_fp16 * dram_energy_per_byte).to(joule)
-    token_stream_power = (token_stream_energy / token_stream_time).to(watt)
+    token_stream_time = token.read_time
+    token_stream_energy = token.read_energy
+    token_stream_power = token.read_power
     mcu_ram = mcu_ram_kb * KB
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -172,7 +174,7 @@ Across deployment targets, the disparity in weight memory spans about six orders
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import datetime as dt
-from mlsysim import Literature
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_count, fmt_multiple, fmt_percent
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -180,17 +182,17 @@ class SmallestCapableModel:
     """Smallest dense model clearing a fixed MMLU score over time."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    threshold = 0.60
-    rows = sorted(Literature.Series.MMLUDenseModels.entries, key=lambda r: r["date"])
+    # Scenarios.SmallestModelAtSixtyPercentMmlu: Epoch AI's dense-model MMLU
+    # results against a fixed 60 percent bar.
+    smallest = Scenarios.SmallestModelAtSixtyPercentMmlu
+    threshold = smallest.threshold
+    rows = smallest.rows
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    frontier = []
-    for _r in rows:
-        if _r["mmlu"] >= threshold and (not frontier or _r["parameters"] < frontier[-1]["parameters"]):
-            frontier.append(_r)
-    first, last = frontier[0], frontier[-1]
-    shrink = first["parameters"] / last["parameters"]
-    span_years = (dt.date.fromisoformat(last["date"]) - dt.date.fromisoformat(first["date"])).days / 365.25
+    frontier = smallest.frontier
+    first, last = smallest.first, smallest.last
+    shrink = smallest.shrink
+    span_years = smallest.span_years
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(first["model"].startswith("Gopher") and "Qwen2.5" in last["model"], "Prose names Gopher and Qwen2.5-Coder-3B.")
@@ -356,7 +358,7 @@ Which tier of the optimization stack yields the highest return depends entirely 
 # │          phone RAM from the Mobile envelope; phone LPDDR5 bandwidth from
 # │          the flagship phone entry.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models, Platforms, Hardware
+from mlsysim import Models, Platforms, Hardware, Scenarios
 from mlsysim.fmt import (
     check,
     fmt,
@@ -382,29 +384,37 @@ class ModelDeviceComparison:
     cloud_mem = Platforms.Cloud.ram
     mobile_mem = Platforms.Mobile.ram
     tiny_mem = Platforms.Tiny.ram
-    phone_bw = Hardware.Mobile.iPhone15Pro.memory.bandwidth
-    frame_rate = 30  # scenario: camera frames per second
+    # Scenarios.*WeightReadPhone: each case's weights read once over the flagship
+    # phone's LPDDR5 bus; Scenarios.MobileNetV2BlurPipelinePhone: the 30 FPS camera.
+    mobilenet_read = Scenarios.MobileNetV2Fp32WeightReadPhone
+    mobilenet_int8_read = Scenarios.MobileNetV2Int8WeightReadPhone
+    resnet_read = Scenarios.ResNet50Fp32WeightReadPhone
+    gpt2_read = Scenarios.Gpt2XlFp16WeightReadPhone
+    gpt2_int4_read = Scenarios.Gpt2XlInt4WeightReadPhone
+    camera = Scenarios.MobileNetV2BlurPipelinePhone
+    phone_bw = mobilenet_read.hardware.memory.bandwidth
+    frame_rate = camera.frame_rate.to("1/second").magnitude  # camera frames per second
 
-    mobilenet = Models.Vision.MobileNetV2
-    resnet = Models.Vision.ResNet50
-    gpt2 = Models.Language.GPT2
+    mobilenet = mobilenet_read.workload
+    resnet = resnet_read.workload
+    gpt2 = gpt2_read.workload
     dscnn = Models.Tiny.DS_CNN
     dlrm_mem = Models.Recommendation.DLRM.model_size
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    mobilenet_mem = mobilenet.size_in_bytes(BYTES_FP32)
-    mobilenet_int8_mem = mobilenet.size_in_bytes(BYTES_INT8)
-    resnet_mem = resnet.size_in_bytes(BYTES_FP32)
-    gpt2_mem = gpt2.size_in_bytes(BYTES_FP16)
-    gpt2_int4_mem = gpt2.size_in_bytes(BYTES_INT4)
+    mobilenet_mem = mobilenet_read.weight_bytes
+    mobilenet_int8_mem = mobilenet_int8_read.weight_bytes
+    resnet_mem = resnet_read.weight_bytes
+    gpt2_mem = gpt2_read.weight_bytes
+    gpt2_int4_mem = gpt2_int4_read.weight_bytes
     dscnn_mem = dscnn.size_in_bytes(BYTES_INT8)
-    frame_budget = (1 / (frame_rate / second)).to(millisecond)
+    frame_budget = camera.frame_budget
 
-    mobilenet_stream = (mobilenet_mem / phone_bw).to(millisecond)
-    mobilenet_int8_stream = (mobilenet_int8_mem / phone_bw).to(millisecond)
-    resnet_stream = (resnet_mem / phone_bw).to(millisecond)
-    gpt2_stream = (gpt2_mem / phone_bw).to(millisecond)
-    gpt2_int4_stream = (gpt2_int4_mem / phone_bw).to(millisecond)
+    mobilenet_stream = mobilenet_read.read_time
+    mobilenet_int8_stream = mobilenet_int8_read.read_time
+    resnet_stream = resnet_read.read_time
+    gpt2_stream = gpt2_read.read_time
+    gpt2_int4_stream = gpt2_int4_read.read_time
 
     dlrm_mobile_overflow = _overflow_ratio(dlrm_mem, mobile_mem)
     dlrm_tiny_overflow = _overflow_ratio(dlrm_mem, tiny_mem)
@@ -484,6 +494,7 @@ Meeting real-time deadlines on commodity mobile hardware depends as much on the 
 # │ How:     Scenario frame rates from the labeled composite; frame time is
 # │          the reciprocal of frame rate.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.core.units import millisecond, second
 from mlsysim.fmt import check, fmt_int, fmt_time
 
@@ -491,13 +502,16 @@ class CameraRunningCase:
     """Illustrative frame rates of the camera running case, FP32 on CPU and INT8 on the integer accelerator."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    fp32_cpu_fps = 8  # scenario: labeled composite, FP32 MobileNetV2 on the phone CPU
-    int8_npu_fps = 35  # scenario: labeled composite, INT8 MobileNetV2 on the phone's integer accelerator
+    # Scenarios.MobileNetV2BlurPipelinePhone: the labeled composite's frame rates,
+    # FP32 MobileNetV2 on the phone CPU and INT8 on its integer accelerator.
+    camera = Scenarios.MobileNetV2BlurPipelinePhone
+    fp32_cpu_fps = camera.cpu_rate.to("1/second").magnitude
+    int8_npu_fps = camera.accelerator_rate.to("1/second").magnitude
     frame_budget = ModelDeviceComparison.frame_budget
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    fp32_cpu_frame = (1 / (fp32_cpu_fps / second)).to(millisecond)
-    int8_npu_frame = (1 / (int8_npu_fps / second)).to(millisecond)
+    fp32_cpu_frame = camera.cpu_frame
+    int8_npu_frame = camera.accelerator_frame
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(fp32_cpu_frame.magnitude - 125) < 0.5, f"Prose says about 125 ms per FP32 frame, got {fp32_cpu_frame}.")
@@ -1941,6 +1955,7 @@ When a layer's weights concentrate their variation along a small number of direc
 # │ How: Contrast weight counts for full vs. factored matrix representations.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, check, fmt_memory
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -1951,20 +1966,21 @@ class LowRankFactorization:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    mat_dim = 4096
-    rank_k = 128
-    bytes_per_param = 4  # FP32
+    # Scenarios.Rank128Factorization4096: a 4,096 by 4,096 FP32 layer at rank 128.
+    lowrank = Scenarios.Rank128Factorization4096
+    mat_dim = lowrank.in_dim
+    rank_k = lowrank.rank
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Full Matrix: N * N
-    full_params = mat_dim * mat_dim
-    full = memory_from_params(full_params * param, bytes_per_param * byte / param)
+    full_params = lowrank.full_params
+    full = lowrank.full_bytes
 
     # Step 2: Factored: 2 * N * K
-    factored_params = 2 * mat_dim * rank_k
-    factored = memory_from_params(factored_params * param, bytes_per_param * byte / param)
+    factored_params = lowrank.update_params
+    factored = lowrank.update_bytes
 
-    data_reduction = (full / factored).to("").magnitude
+    data_reduction = lowrank.compression
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(data_reduction > 10, f"Low-rank reduction ({data_reduction:.1f}x) is too low for K=128.")
@@ -2542,19 +2558,21 @@ where $\LayerCount$ is depth (number of layers), $\WidthMultiplier$ is the width
 # │          the fraction of arithmetic the narrower model keeps.
 # │ How:     Registry entries for both widths.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models
+from mlsysim import Models, Scenarios
 from mlsysim.fmt import check, fmt_params, fmt_flops, fmt_percent
 
 class MobileNetWidthMultiplier:
     """MobileNetV2 at width 1.0 versus 0.75: the case's width multiplier."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    full = Models.Vision.MobileNetV2
-    narrow = Models.Vision.MobileNetV2_Alpha0_75
+    # Scenarios.MobileNetV2BlurPipelinePhone: the camera model at width 1.0 and 0.75.
+    camera = Scenarios.MobileNetV2BlurPipelinePhone
+    full = camera.full
+    narrow = camera.pruned
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    flop_fraction = (narrow.inference_flops / full.inference_flops).to("").magnitude
-    param_fraction = (narrow.parameters / full.parameters).to("").magnitude
+    flop_fraction = camera.flop_fraction
+    param_fraction = camera.param_fraction
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(0.65 < flop_fraction < 0.75, f"Prose says width 0.75 keeps about 70 percent of the arithmetic, got {flop_fraction:.2f}.")
@@ -5308,17 +5326,21 @@ These speedups are bounds computed from bytes and peak rates. Whether a deployed
 # │          them with the hypothetical outcome.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_multiple, fmt_percent
 
 class TheoryPracticeSpeedup:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    pruning_speedup = 2.0  # 50% structured pruning ideal
-    quant_speedup = 4.0  # theoretical INT8 memory-width reduction from FP32
-    measured_speedup = 1.5  # hypothetical realized outcome
+    # Scenarios.PrunedInt8PaperVsMeasured: 50% structured pruning and FP32-to-INT8
+    # storage on paper against a hypothetical realized outcome.
+    paper = Scenarios.PrunedInt8PaperVsMeasured
+    pruning_speedup = paper.factors["pruning"]
+    quant_speedup = paper.factors["quantization"]
+    measured_speedup = paper.measured
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    theoretical_speedup = pruning_speedup * quant_speedup
-    realized_fraction_pct = measured_speedup / theoretical_speedup * 100
+    theoretical_speedup = paper.paper
+    realized_fraction_pct = paper.realized_share * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(theoretical_speedup == 8.0, "Expected paper speedup anchor should be 8x.")
@@ -5387,25 +5409,26 @@ def conv_bn_relu_fused(input, weight, gamma, beta, mean, var):
 # │ How: Calculate memory read/write counts for fused vs. unfused execution.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, check, fmt_math
 
 class ConvFusionCalc:
     """Demonstrate 3x memory traffic reduction from Conv-BN-ReLU fusion (6 transfers → 2)."""
 
-    unfused_transfers = 6
-    fused_transfers = 2
-    conv_channels = 256
-    conv_spatial = 28
-    bytes_per_element = 4
+    # Scenarios.ResNet50Conv256FusionH100: 256 channels at 28 by 28 in FP32.
+    fusion = Scenarios.ResNet50Conv256FusionH100
+    unfused_transfers = fusion.unfused_trips
+    fused_transfers = fusion.fused_trips
 
     transfer_reduction = unfused_transfers / fused_transfers
-    eliminated_traffic_mb = 4 * conv_channels * conv_spatial * conv_spatial * bytes_per_element / MILLION
+    eliminated_traffic_mb = fusion.eliminated_activation_traffic.to(MB).magnitude
 
     check(transfer_reduction == 3, "Conv-BN-ReLU fusion must yield exactly 3x transfer reduction.")
 
     transfer_reduction_mult_str = fmt_multiple(round(transfer_reduction), precision=0, commas=False)
     conv_bn_relu_mem_math = fmt_math(
-        f"4 \\times 256 \\times 28 \\times 28 \\times 4 \\text{{ bytes}} \\approx \\text{{{eliminated_traffic_mb:.1f} MB}}"
+        f"{unfused_transfers - fused_transfers} \\times {fusion.channels} \\times {fusion.height} \\times {fusion.width} "
+        f"\\times {fusion.bytes_per_value.to(byte).magnitude:.0f} \\text{{ bytes}} \\approx \\text{{{eliminated_traffic_mb:.1f} MB}}"
     )
 ```
 
@@ -5426,42 +5449,38 @@ The intended function is preserved, although batch-normalization folding changes
 #| label: fusion-calc
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Goal: Conv-BN-ReLU bandwidth and kernel-launch savings for fusion prose.
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_int, fmt_qty_int, check, fmt_time, fmt_memory
 from mlsysim.core.units import microsecond
 
 class FusionCalc:
-    conv_channels = 256
-    conv_spatial = 28
-    bytes_per_element = 4
-    kernel_size = 3  # 3x3 convolution, channels in = channels out
-    weights_mb = conv_channels * conv_channels * kernel_size * kernel_size * bytes_per_element / MILLION
-    bn_params_mb = 0.002
+    # Scenarios.ResNet50Conv256FusionH100: one 3x3 layer, 256 channels at 28 by 28
+    # in FP32 (channels in = channels out), batch norm's scale and shift per
+    # channel, traffic over the H100's HBM bandwidth.
+    fusion = Scenarios.ResNet50Conv256FusionH100
+    conv_channels = fusion.channels
+    conv_spatial = fusion.height
+    kernel_size = fusion.kernel_size
     kernels_unfused = 150
     kernels_fused = 50
     latency_per_kernel_us = 10
-    h100_bw = Hardware.Cloud.H100.memory.bandwidth
+    h100_bw = fusion.hardware.memory.bandwidth
 
-    feat_map_mb = conv_channels * conv_spatial * conv_spatial * bytes_per_element / MILLION
-    feat_map = feat_map_mb * MB
-    weights = weights_mb * MB
-    bn_params = bn_params_mb * MB
-    unfused_conv_mb = feat_map_mb * 2 + weights_mb
-    unfused_conv = unfused_conv_mb * MB
-    unfused_conv_display = round(unfused_conv_mb) * MB
-    unfused_bn_mb = feat_map_mb * 2 + bn_params_mb
-    unfused_bn = unfused_bn_mb * MB
-    unfused_relu_mb = feat_map_mb * 2
-    unfused_relu = unfused_relu_mb * MB
-    total_unfused_mb = unfused_conv_mb + unfused_bn_mb + unfused_relu_mb
-    total_unfused = total_unfused_mb * MB
-    total_fused_mb = feat_map_mb * 2 + weights_mb
-    total_fused = total_fused_mb * MB
-    total_fused_display = round(total_fused_mb) * MB
-    bandwidth_reduction_pct = (1 - total_fused_mb / total_unfused_mb) * 100
+    feat_map = fusion.feature_map
+    weights = fusion.conv_weights
+    bn_params = fusion.norm_params
+    unfused_conv = fusion.conv_traffic
+    unfused_conv_display = round(unfused_conv.to(MB).magnitude) * MB
+    unfused_bn = fusion.norm_traffic
+    unfused_relu = fusion.relu_traffic
+    total_unfused = fusion.unfused_traffic
+    total_fused = fusion.fused_traffic
+    total_fused_display = round(total_fused.to(MB).magnitude) * MB
+    bandwidth_reduction_pct = fusion.traffic_cut * 100
     saved_latency_ms = (kernels_unfused - kernels_fused) * latency_per_kernel_us / THOUSAND
-    unfused_time = total_unfused / h100_bw
-    fused_time = total_fused / h100_bw
-    fusion_speedup = (unfused_time / fused_time).to("").magnitude
+    unfused_time = fusion.unfused_time
+    fused_time = fusion.fused_time
+    fusion_speedup = fusion.time_ratio
 
     check(bandwidth_reduction_pct > 40, "Fusion should reduce bandwidth by more than 40%.")
     check(fusion_speedup > 1, "Fused execution must be faster than unfused.")
@@ -5469,7 +5488,7 @@ class FusionCalc:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     feat_map_kb_str = fmt_memory(feat_map, unit=KB, precision=1, commas=False)
     weights_mb_str = fmt_memory(weights, unit=MB, precision=1, commas=False)
-    bn_params_kb_str = fmt_memory(bn_params, unit=KB, precision=0, commas=False)
+    bn_params_kb_str = fmt_memory(round(bn_params.to(KB).magnitude) * KB, unit=KB, precision=0, commas=False)
     unfused_conv_mb_str = fmt_qty_int(unfused_conv_display, MB, commas=False)
     unfused_bn_mb_str = fmt_memory(unfused_bn, unit=MB, precision=1, commas=False)
     unfused_relu_mb_str = fmt_memory(unfused_relu, unit=MB, precision=1, commas=False)
@@ -5562,7 +5581,7 @@ The runtime benefit depends entirely on whether the latency eliminated by skippi
 # │ How: Registry FP32 weight bytes; scenario flash budget and pruned size.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models
+from mlsysim import Models, Scenarios
 from mlsysim.fmt import fmt, check, fmt_memory, fmt_percent
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -5570,12 +5589,15 @@ class MobileNetCompressionAnchor:
     """Wearable variant of the camera case: unstructured pruning against a 2 MB flash budget."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    original_size = Models.Vision.MobileNetV2.size_in_bytes(BYTES_FP32)
-    flash_budget = 2 * MB  # scenario: wearable microcontroller flash
-    pruned_size = 2 * MB  # scenario: surviving FP32 values after pruning
+    # Scenarios.WearableMobileNetV2SparseFlash: pruned to 2 MB of surviving FP32
+    # values against the wearable's 2 MB of flash.
+    wearable = Scenarios.WearableMobileNetV2SparseFlash
+    original_size = wearable.workload.size_in_bytes(wearable.value_bytes)
+    flash_budget = wearable.flash_budget
+    pruned_size = wearable.surviving_bytes
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    pruning_pct = (1 - (pruned_size / original_size).to("").magnitude) * 100
+    pruning_pct = wearable.pruned_share * 100
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(80 <= pruning_pct <= 90, "MobileNet pruning anchor should be near 85%.")
@@ -6343,7 +6365,7 @@ Choosing an individual technique addresses a single binding bottleneck, but prod
 # │ Scope: chapter-anchor — BERT compression is the chapter's running
 # │        optimization-strategy example and is recalled in the summary.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models
+from mlsysim import Models, Scenarios
 from mlsysim.fmt import check, fmt_multiple, fmt_percent, fmt_qty_int, fmt_params, fmt_memory
 from mlsysim.core.units import MB, param, BYTES_FP32, BYTES_INT8
 from mlsysim.physics import memory_from_params
@@ -6352,23 +6374,27 @@ class BertCompression:
     """Modeled BERT-Base pipeline with a stipulated compact student."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    teacher_params = Models.Language.BERT_Base.parameters
-    student_params = 27_500_000 * param  # scenario: final pruned graph, also the distillation student
-    baseline_accuracy = 0.762  # scenario: task accuracy before compression
-    pruned_accuracy = 0.751  # scenario: post-pruning accuracy
-    distilled_accuracy = 0.759  # scenario: post-distillation recovery
-    final_accuracy = 0.756  # scenario: final INT8 accuracy
-    mobile_speedup = 12  # scenario: mobile CPU speedup
-    wrong_order_loss = 0.021  # scenario: loss if quantization precedes pruning
+    # Scenarios.BertBaseMobileCompression: the stipulated student (the final pruned
+    # graph, also the distillation student), its accuracy after each stage, the
+    # mobile CPU speedup, and the loss when quantization precedes pruning.
+    bert = Scenarios.BertBaseMobileCompression
+    teacher_params = bert.teacher.parameters
+    student_params = bert.student_params
+    baseline_accuracy = bert.baseline_accuracy
+    pruned_accuracy = bert.pruned_accuracy
+    distilled_accuracy = bert.distilled_accuracy
+    final_accuracy = bert.final_accuracy
+    mobile_speedup = bert.mobile_speedup
+    wrong_order_loss = bert.quantize_first_loss
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    full_size = memory_from_params(teacher_params, BYTES_FP32 / param)
-    student_fp32_size = memory_from_params(student_params, BYTES_FP32 / param)
-    compressed_size = memory_from_params(student_params, BYTES_INT8 / param)
-    parameter_reduction = 1 - (student_params / teacher_params).magnitude
-    quant_memory_reduction = (BYTES_FP32 / BYTES_INT8).magnitude
-    compression_ratio = (full_size / compressed_size).magnitude
-    final_accuracy_loss = baseline_accuracy - final_accuracy
+    full_size = bert.full_bytes
+    student_fp32_size = bert.student_float_bytes
+    compressed_size = bert.compressed_bytes
+    parameter_reduction = bert.parameter_reduction
+    quant_memory_reduction = (bert.float_bytes / bert.int_bytes).magnitude
+    compression_ratio = bert.compression_ratio
+    final_accuracy_loss = bert.final_loss
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(full_size > compressed_size, "Compressed model must be smaller than the original.")
@@ -6412,7 +6438,7 @@ Quantizing a network to fixed 8-bit integer ranges before pruning its channels s
 # │ How:     Registry weight bytes for width 1.0 and width 0.75; the running
 # │          case's frame times scaled by the pruned network's arithmetic share.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models
+from mlsysim import Models, Scenarios
 from mlsysim.core.units import BYTES_FP32, BYTES_INT8, MB, millisecond
 from mlsysim.fmt import check, fmt_memory, fmt_multiple, fmt_percent, fmt_time
 
@@ -6420,23 +6446,24 @@ class CameraCompressionWaterfall:
     """Weight memory and frame time after each model change in the camera sequence."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    full = Models.Vision.MobileNetV2
-    # scenario: channel pruning keeps 75 percent of every layer's channels,
-    # which yields the width-0.75 network of MobileNetWidthMultiplier
-    pruned = Models.Vision.MobileNetV2_Alpha0_75
-    flop_fraction = MobileNetWidthMultiplier.flop_fraction
-    fp32_cpu_frame = CameraRunningCase.fp32_cpu_frame  # running case, unpruned FP32 on the CPU
-    int8_npu_frame = CameraRunningCase.int8_npu_frame  # running case, unpruned INT8 on the accelerator
-    frame_budget = ModelDeviceComparison.frame_budget
-    # scenario: on a given processor, frame time scales with arithmetic, because
-    # channel pruning leaves dense tensors that run the same kernels on fewer channels
+    # Scenarios.MobileNetV2BlurPipelinePhone: channel pruning keeps 75 percent of
+    # every layer's channels, which yields the width-0.75 network; on a given
+    # processor, frame time scales with arithmetic, because channel pruning leaves
+    # dense tensors that run the same kernels on fewer channels.
+    camera = Scenarios.MobileNetV2BlurPipelinePhone
+    full = camera.full
+    pruned = camera.pruned
+    flop_fraction = camera.flop_fraction
+    fp32_cpu_frame = camera.cpu_frame  # running case, unpruned FP32 on the CPU
+    int8_npu_frame = camera.accelerator_frame  # running case, unpruned INT8 on the accelerator
+    frame_budget = camera.frame_budget
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    fp32_mem = full.size_in_bytes(BYTES_FP32).to(MB)
-    pruned_mem = pruned.size_in_bytes(BYTES_FP32).to(MB)
-    pruned_int8_mem = pruned.size_in_bytes(BYTES_INT8).to(MB)
-    pruned_cpu_frame = (fp32_cpu_frame * flop_fraction).to(millisecond)
-    pruned_int8_frame = (int8_npu_frame * flop_fraction).to(millisecond)
+    fp32_mem = camera.full_bytes
+    pruned_mem = camera.pruned_bytes
+    pruned_int8_mem = camera.pruned_int_bytes
+    pruned_cpu_frame = camera.pruned_cpu_frame
+    pruned_int8_frame = camera.pruned_accelerator_frame
     int8_byte_cut = (pruned_mem / pruned_int8_mem).to("").magnitude
     pruning_saving = fp32_cpu_frame - pruned_cpu_frame
     int8_saving = pruned_cpu_frame - pruned_int8_frame
@@ -6830,17 +6857,19 @@ A profile of a Vision Transformer (ViT) on an edge accelerator illustrates this 
 # │ How:     Apply Amdahl's Law with model_fraction as the accelerable share.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, check
-from mlsysim.physics import calc_amdahls_speedup
 
 class AmdahlCompression:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     flops_reduction = 0.50
-    model_fraction = 0.20
+    # Scenarios.ModelFifthOfRequestLatency: the model is 20 percent of latency.
+    request = Scenarios.ModelFifthOfRequestLatency.result
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    model_fraction = request.stage_fraction
     non_model_fraction = 1 - model_fraction
-    max_speedup = calc_amdahls_speedup(model_fraction, float("inf"))
+    max_speedup = request.speedup_bound
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(0 < flops_reduction < 1, "FLOPs-reduction comparison should be a fractional optimization target.")
@@ -7611,6 +7640,7 @@ A team deploying GPT-2 XL on a phone might find that an uncalibrated 4-bit quant
 # │ How: Pre-compute stats for bit-width degradation and dequantization overhead.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.core.units import MB
 from mlsysim.fmt import check, fmt, fmt_memory, fmt_multiple, fmt_percent
 
@@ -7627,9 +7657,14 @@ class FallaciesAnalysis:
     target_bits = 8
     overhead_pct = 15  # hypothetical conversion overhead
 
-    # Combined pruning + quantization scenario (Pitfall 5)
-    prune_speedup = 2  # 50% structured sparsity = 2× theoretical
-    measured_speedup = 1.5  # the chapter's realized outcome, as in TheoryPracticeSpeedup
+    # Combined pruning + quantization scenario (Pitfall 5): 50% structured sparsity
+    # and the chapter's realized outcome, as in TheoryPracticeSpeedup
+    # (Scenarios.PrunedInt8PaperVsMeasured).
+    paper = Scenarios.PrunedInt8PaperVsMeasured
+    prune_speedup = paper.factors["pruning"]
+    measured_speedup = paper.measured
+    # Scenarios.IrregularSparsityLatencyTrace: the representative pruned-model trace.
+    trace = Scenarios.IrregularSparsityLatencyTrace
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     quant_speedup = expected_bits / target_bits  # 4× from INT8
@@ -7650,7 +7685,8 @@ class FallaciesAnalysis:
     bert_fp32_mb_str = fmt_memory(440 * MB, unit=MB, precision=0, commas=False)
     bert_int8_mb_str = fmt_memory(110 * MB, unit=MB, precision=0, commas=False)
     pruning_target_str = fmt_percent(0.70, precision=0, commas=False, style='prose')
-    param_removal_str = fmt(40, precision=0, commas=False)
+    param_removal_str = fmt(trace.work_reduction * 100, precision=0, commas=False)
+    latency_reduction_str = fmt(trace.latency_reduction * 100, precision=0, commas=False)
 ```
 
 ::: {.fallacy-pitfall}
@@ -7665,7 +7701,7 @@ Engineers assume optimization strategies compose additively: 50 percent pruning 
 
 **Pitfall**: *Assuming theoretical metrics or compression ratios translate directly into proportional deployment speedup.*
 
-Teams frequently reduce FLOPs or parameter counts substantially without realizing proportional latency gains on physical hardware. In one representative trace, a pruned model with `{python} FallaciesAnalysis.param_removal_str` percent fewer parameters achieves only a 12 percent latency reduction because irregular sparsity prevents efficient execution. Similarly, reducing a transformer from `{python} FallaciesAnalysis.bert_fp32_mb_str` to `{python} FallaciesAnalysis.bert_int8_mb_str` through INT8 quantization yields a `{python} FallaciesAnalysis.int8_size_reduction_mult_str` raw weight-payload reduction, yet format conversion and scalar fallback on hardware without a native low-precision datapath erode the latency gain. In the chapter's illustrative composed pipeline combining 50 percent structured pruning and INT8 quantization, the realized speedup reaches only `{python} TheoryPracticeSpeedup.measured_speedup_mult_str` against an `{python} FallaciesAnalysis.expected_speedup_mult_str` paper target. Measure wall-clock latency on the target execution units rather than extrapolating from nominal compression ratios.
+Teams frequently reduce FLOPs or parameter counts substantially without realizing proportional latency gains on physical hardware. In one representative trace, a pruned model with `{python} FallaciesAnalysis.param_removal_str` percent fewer parameters achieves only a `{python} FallaciesAnalysis.latency_reduction_str` percent latency reduction because irregular sparsity prevents efficient execution. Similarly, reducing a transformer from `{python} FallaciesAnalysis.bert_fp32_mb_str` to `{python} FallaciesAnalysis.bert_int8_mb_str` through INT8 quantization yields a `{python} FallaciesAnalysis.int8_size_reduction_mult_str` raw weight-payload reduction, yet format conversion and scalar fallback on hardware without a native low-precision datapath erode the latency gain. In the chapter's illustrative composed pipeline combining 50 percent structured pruning and INT8 quantization, the realized speedup reaches only `{python} TheoryPracticeSpeedup.measured_speedup_mult_str` against an `{python} FallaciesAnalysis.expected_speedup_mult_str` paper target. Measure wall-clock latency on the target execution units rather than extrapolating from nominal compression ratios.
 
 :::
 
