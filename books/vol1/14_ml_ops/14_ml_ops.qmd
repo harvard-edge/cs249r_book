@@ -1850,6 +1850,7 @@ The **drift detection delay**\index{Drift detection delay!statistical monitoring
 # │ How: Calculate the time needed to collect an illustrative evidence budget.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -1857,18 +1858,20 @@ class DriftDetectionDelay:
     """Illustrative labeled-example evidence budget for a five-point drop."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    baseline_acc = 0.95  # original accuracy
-    drop = 0.05  # 5-percentage-point drop to detect
-    confidence = 0.95  # 95% statistical confidence
-    qps_high = 1  # 1 labeled outcome per second
+    confirm = Scenarios.LabeledOutcomeDriftConfirmation
+    baseline_acc = confirm.baseline_accuracy  # original accuracy
+    drop = confirm.drop  # 5-percentage-point drop to detect
+    confidence = confirm.confidence  # 95% statistical confidence
+    qps_high = confirm.label_rates["high"].to("1/s").magnitude  # 1 labeled outcome per second
+    requests_per_day_low = confirm.label_rates["low"].to("1/day").magnitude  # 100 labeled outcomes per day
     # Illustrative evidence budget for this scenario
-    samples_needed = 1000
+    samples_needed = confirm.evidence_budget
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     target_acc = baseline_acc - drop
-    seconds_needed_high = samples_needed / qps_high
+    seconds_needed_high = confirm.collection_time("high").to("s").magnitude
     minutes_needed_high = seconds_needed_high / SECONDS_PER_MINUTE
-    days_needed_low = samples_needed / 100  # 100 labeled outcomes per day
+    days_needed_low = confirm.collection_time("low").to("day").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(round(minutes_needed_high) == 17, f"1 QPS detection latency should be about 17 minutes, got {minutes_needed_high:.1f}.")
@@ -1881,7 +1884,7 @@ class DriftDetectionDelay:
     samples_needed_str = fmt(samples_needed, precision=0, commas=True)
     seconds_needed_high_str = fmt_time(seconds_needed_high, "second", precision=0, commas=True, style="word")
     minutes_needed_high_str = fmt_time(minutes_needed_high, "minute", precision=1, commas=False, style="word")
-    requests_per_day_low_str = fmt(100, precision=0, commas=False)
+    requests_per_day_low_str = fmt(requests_per_day_low, precision=0, commas=False)
     days_needed_low_str = fmt_time(days_needed_low, "day", precision=0, commas=False, style="word")
 ```
 
@@ -1924,6 +1927,7 @@ Detection delay has a direct cost. When a silent failure persists until the next
 # │ How: Calculate lost revenue for incidents detected in 30 days vs. 1 day.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt_int, fmt_rate, fmt_usd, fmt, check, MarkdownStr, fmt_percent, fmt_time
 
 class SilentFailureCost:
@@ -1933,19 +1937,20 @@ class SilentFailureCost:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    annual_revenue = 50_000_000  # $50M/year recommendation engine
-    quality_drop = 0.05  # 5% conversion rate degradation
-    days_manual = 28  # monthly review cycle (~4 weeks)
-    days_auto = 1  # daily automated monitoring
-    incidents_per_year = 4  # scenario assumption for a high-drift domain
+    delay = Scenarios.RecommenderDetectionDelayLoss
+    annual_revenue = delay.annual_value.to("USD").magnitude  # $50M/year recommendation engine
+    quality_drop = delay.quality_drop  # 5% conversion rate degradation
+    days_manual = delay.slow_detection.to("day").magnitude  # monthly review cycle (~4 weeks)
+    days_auto = delay.fast_detection.to("day").magnitude  # daily automated monitoring
+    incidents_per_year = delay.incidents_per_year  # scenario assumption for a high-drift domain
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Per-incident loss = Revenue × Quality Drop × (Detection Days / 365)
-    loss_manual = annual_revenue * quality_drop * (days_manual / DAYS_PER_YEAR)
-    loss_auto = annual_revenue * quality_drop * (days_auto / DAYS_PER_YEAR)
+    loss_manual = delay.slow_loss.to("USD").magnitude
+    loss_auto = delay.fast_loss.to("USD").magnitude
 
-    savings_per_incident = loss_manual - loss_auto
-    annual_savings = savings_per_incident * incidents_per_year
+    savings_per_incident = delay.savings_per_incident.to("USD").magnitude
+    annual_savings = delay.annual_savings.to("USD").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(annual_savings >= 500_000, f"Annual savings (${annual_savings:,.0f}) too low to justify MLOps investment.")
@@ -2053,8 +2058,7 @@ The ranking service monitors user age as an input feature, and a shift toward ol
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 import math
-from mlsysim import Ops
-from mlsysim.physics import calc_population_stability_index
+from mlsysim import Ops, Scenarios
 from mlsysim.fmt import fmt, fmt_count, fmt_percent, check, MarkdownStr
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2062,16 +2066,17 @@ class PSIAgeExample:
     """Population Stability Index for a six-bin user-age distribution."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    age_bins = ["18-25", "26-35", "36-45", "46-55", "56-65", "66+"]
-    training = [0.15, 0.25, 0.20, 0.18, 0.12, 0.10]
-    serving = [0.12, 0.22, 0.18, 0.20, 0.15, 0.13]
+    age = Scenarios.RankingUserAgePsi
+    age_bins = age.bins
+    training = age.baseline_shares
+    serving = age.current_shares
     warning_threshold = Ops.Monitoring.PsiWarnThreshold
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     differences = [actual - expected for expected, actual in zip(training, serving)]
     log_ratios = [math.log(actual / expected) for expected, actual in zip(training, serving)]
-    contributions = [diff * log_ratio for diff, log_ratio in zip(differences, log_ratios)]
-    total_psi = calc_population_stability_index(training, serving)
+    contributions = age.terms
+    total_psi = age.psi
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(sum(training) - 1.0) < 1e-12, "Training proportions must sum to 1.")
@@ -2250,7 +2255,7 @@ The four $\MonitoringCostComponent$ terms are cost components over the same acco
 # │ How: Sum ingestion, storage, and dashboard query costs for one ML node.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Infrastructure, GB, USD, ureg
+from mlsysim import Infrastructure, Scenarios, GB, USD, ureg
 from mlsysim.fmt import fmt_int, fmt_usd, fmt, check, fmt_count, fmt_memory, fmt_rate, fmt_time
 from mlsysim.core.units import month
 
@@ -2259,8 +2264,9 @@ class MonitoringBudget:
     """Monthly ingestion, storage, and query-cost subtotal for one ML node."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    n_variants = 3  # prod, canary, staging
-    metrics_per_variant = 50  # metrics per deployment
+    monitors = Scenarios.OneModelDailyMetricTests
+    n_variants = monitors.models  # prod, canary, staging
+    metrics_per_variant = monitors.metrics_per_model  # metrics per deployment
     samples_per_min = 4  # 15-second intervals
     sample_interval_s = SECONDS_PER_MINUTE / samples_per_min
     days = DAYS_PER_MONTH  # monthly retention
@@ -2503,7 +2509,7 @@ To turn the trigger gate of @lst-ops-triggered-retraining into a concrete schedu
 # │ How: Apply the square-root law using retraining costs and accuracy decay rates.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-import math
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_int, fmt_percent, fmt_usd, check, MarkdownStr
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2511,23 +2517,24 @@ class RetrainingInterval:
     """Optimal retraining interval via square-root law for the ranking service."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    retrain_cost = 5000  # $5,000 per retraining run
-    Q = 1_000_000  # ranking requests per day
-    V = 0.50  # dollars/query for a unit change in accuracy fraction
+    interval = Scenarios.RankingRetrainingInterval
+    retrain_cost = interval.run_cost.to("USD").magnitude  # $5,000 per retraining run
+    Q = interval.query_rate.to("1/day").magnitude  # ranking requests per day
+    V = interval.value_per_query.to("USD").magnitude  # dollars/query for a unit change in accuracy fraction
     A0 = RankingDriftScenario.acc_initial  # the ranking service's launch accuracy
     gamma = RankingDriftScenario.gamma  # decay rate implied by its observed four-week slide
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     numerator = 2 * retrain_cost
-    denominator = Q * V * A0 * gamma
+    denominator = interval.staleness_slope.to("USD/day**2").magnitude
     ratio = numerator / denominator
-    T_star = math.sqrt(ratio)
+    T_star = interval.optimal_interval.to("day").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(2.5 <= T_star <= 3.5, f"Prose says the ranking service lands at about three days, got {T_star:.2f} days.")
     # images/svg/vol1_ml_ops_margin_002.svg ("T* ≈ 3 d", aria-label) and its
     # fig-alt hand-type the rounded T*; the check above guards them.
-    T_star_4q = math.sqrt(numerator / (4 * Q * V * A0 * gamma))
+    T_star_4q = Scenarios.RankingRetrainingIntervalFourfoldTraffic.optimal_interval.to("day").magnitude
     check(1.0 <= T_star_4q <= 2.0, f"Fourfold traffic should land near daily, got {T_star_4q:.2f} days.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
@@ -2669,7 +2676,6 @@ Under the square-root approximation, $\RetrainingInterval^*$ scales with the squ
 # │ How:     Scenario run size times the registry training price; node
 # │          accelerators minus the serving copy and the run.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Infrastructure
 from mlsysim.core.units import hour, USD
 from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_time, fmt_usd
 
@@ -2681,14 +2687,14 @@ class RetrainContention:
     node_accels = ReleaseControlFootprint.ranking.node_accelerators  # one eight-accelerator H100 node
     retrain_accels = ReleaseControlFootprint.ranking.retrain_accelerators  # accelerators a run occupies
     retrain_time = ReleaseControlFootprint.ranking.retrain_time  # duration of a retraining run
-    price = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate
-    run_cost = RetrainingInterval.retrain_cost * USD  # total run cost of the interval example
+    price = RetrainingInterval.interval.accelerator_price  # cloud training rate per accelerator-hour
+    run_cost = RetrainingInterval.interval.run_cost.to(USD)  # total run cost of the interval example
     serving_accels = ReleaseControlFootprint.accels_per_copy
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     accel_hours = retrain_accels * retrain_time
-    compute_cost = (accel_hours * price).to(USD)
-    compute_share = (compute_cost / run_cost).to("").magnitude
+    compute_cost = RetrainingInterval.interval.compute_cost.to(USD)
+    compute_share = RetrainingInterval.interval.compute_share
     free_accels = node_accels - serving_accels - retrain_accels
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -2839,7 +2845,7 @@ days = np.arange(0, 365, 1)  # 1-year simulation
 baseline_acc = RankingDriftScenario.acc_initial  # the ranking service at launch
 decay_rate = RankingDriftScenario.gamma  # fitted daily decay from its week-four reading
 threshold = RankingDriftScenario.acc_week4  # drift alert threshold at the week-four value
-retrain_interval = 90  # scheduled: every 90 days
+retrain_interval = round(RetrainingInterval.interval.scheduled_interval.to("day").magnitude)  # scheduled: every 90 days
 
 # —Compute decay curves ---
 decay = np.exp(-decay_rate * days) * baseline_acc
@@ -2957,14 +2963,16 @@ Slice analysis can guide pipeline and serving-skew investigations by testing whe
 # │ How: Sum traffic percentages; compute weighted average of accuracy values.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt_percent, check
 
 class SliceAnalysisCalc:
     """Compute overall row from slice analysis segments."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    traffic_pcts = [45, 30, 20, 5]  # Desktop, iOS, Android, Tablet
-    accuracies = [94, 92, 88, 62]  # percent accuracy per segment
+    slices = Scenarios.RecommendationAccuracyByDevice
+    traffic_pcts = [round(100 * share) for share in slices.traffic_shares.values()]  # Desktop, iOS, Android, Tablet
+    accuracies = [round(100 * acc) for acc in slices.accuracies.values()]  # percent accuracy per segment
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     total_traffic = sum(traffic_pcts)
