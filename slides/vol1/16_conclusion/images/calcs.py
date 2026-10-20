@@ -306,5 +306,12 @@ v("dc_growth", lit(DCE.Global2030Twh) / lit(DCE.Global2024Twh), "{:.1f}", "2030 
 v("token_ms", round(m(TOKEN.read_time, "ms"), -1), "{:.0f}", "7B token on a phone, ms, to the ten (L10)")
 v("token_w", round(m(TOKEN.read_power, "W")), "{:.0f}", "7B DRAM power while decoding, W (L10)")
 
+# L15 recall: the same object Lecture 15's feedback slide reads (Napkin Math 15.3)
+LOOP15 = Scenarios.CreditServiceBiasFeedback
+v("fb_gap0", LOOP15.launch_gap, "{:.1f}", "L15: gap at launch, points")
+v("fb_alpha", LOOP15.factor, "{:.2f}", "L15: fitted feedback factor")
+v("fb_gate", LOOP15.gate, "{:.0f}", "L15: release gate, points")
+v("fb_fail_q", LOOP15.breach_cycle, "{:.0f}", "L15: quarter the gate fails")
+
 if __name__ == "__main__":
     write(__file__)
