@@ -734,6 +734,16 @@ class Series:
         "Outages of one large ML pipeline by how characteristic of ML their cause was, 0 to 4.",
         numeric=("mlness", "outages"),
     )  # added 2026-10-20
+    LabelFreeShiftDetection = TrendSeries(
+        "rabanser2019_label_free_detection",
+        _lit("Rabanser, Guennemann, and Lipton (2019), Failing Loudly: An Empirical Study of Methods for "
+             "Detecting Dataset Shift, NeurIPS 2019, Table 2a",
+             "https://arxiv.org/abs/1810.11953",
+             "best label-free detector (univariate tests on softmax outputs, BBSDs), MNIST and CIFAR-10, "
+             "simulated shifts; detection accuracy by number of new samples and shift size"),
+        "Detection accuracy of a label-free shift test against the number of new samples, by shift size.",
+        numeric=("samples", "large", "medium", "small"),
+    )  # added 2026-10-20
     PyTorchOperatorSchemas = TrendSeries(
         "pytorch_operator_schemas",
         _lit("PyTorch aten/src/ATen/native/native_functions.yaml at each release tag (mined 2026-10-12)",

@@ -942,3 +942,16 @@ __all__ += [
     "calc_two_proportion_detectable_lift",
     "calc_exponential_decay_rate",
 ]
+
+# --- ML operations: confirming a drop, detection-delay loss, retraining interval (added 2026-10-20) ---
+from .statistics import calc_one_proportion_sample_size
+from .economics import (calc_detection_delay_loss, calc_staleness_slope, calc_retraining_cost_rate,
+                        calc_optimal_retraining_interval)
+
+__all__ += [
+    "calc_one_proportion_sample_size",
+    "calc_detection_delay_loss",
+    "calc_staleness_slope",
+    "calc_retraining_cost_rate",
+    "calc_optimal_retraining_interval",
+]

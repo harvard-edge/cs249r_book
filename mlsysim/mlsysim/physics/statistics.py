@@ -895,3 +895,21 @@ def calc_exponential_decay_rate(initial, later, elapsed):
     if initial <= 0 or later <= 0:
         raise ValueError("initial and later must be positive.")
     return math.log(initial / later) / elapsed
+
+
+# --- Confirming an accuracy drop (added 2026-10-20) ---------------------------
+def calc_one_proportion_sample_size(null_rate, alternative_rate, z_alpha, z_beta):
+    """Outcomes a one-sample binomial test needs to tell ``alternative_rate`` from ``null_rate``.
+
+    Normal approximation with the variance of each hypothesis on its own side:
+    ``n = ((z_alpha sqrt(p0 (1 - p0)) + z_beta sqrt(p1 (1 - p1))) / (p0 - p1))^2``.
+    The count grows as one over the squared gap, so halving the gap needs about
+    four times the outcomes.
+    """
+    if not (0 < null_rate < 1 and 0 < alternative_rate < 1):
+        raise ValueError("rates must be in (0, 1).")
+    if null_rate == alternative_rate:
+        raise ValueError("the rates must differ.")
+    spread = (z_alpha * math.sqrt(null_rate * (1 - null_rate))
+              + z_beta * math.sqrt(alternative_rate * (1 - alternative_rate)))
+    return (spread / (null_rate - alternative_rate)) ** 2
