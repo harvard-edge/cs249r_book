@@ -115,15 +115,16 @@ class DistTrainReliabilityFacts:
     # node MTBF) contradicted the canonical per-GPU MTBF used everywhere else in
     # the volume; the example now uses the 1,024-GPU reference cluster and
     # Systems.Reliability.Gpu, counting GPU failures only.
-    reliability_gpu_count = Systems.Clusters.Training_1K.total_accelerators  # 1,024-GPU reference cluster
-    gpu_mtbf_hours = float(Systems.Reliability.Gpu.mttf_hours)
+    _failures = Scenarios.GpuFailuresTraining1K  # GPU failures on the 1,024-GPU reference cluster
+    reliability_gpu_count = _failures.n_components
+    gpu_mtbf_hours = _failures.component_mtbf.to(hour).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────
     nvlink_hdr_ratio_low = (nvlink_a100_bw / ib_hdr_bw).to_base_units().magnitude
     nvlink_hdr_ratio_high = (nvlink_h100_bw / ib_hdr_bw).to_base_units().magnitude
-    cluster_failure_rate_per_hour = reliability_gpu_count / gpu_mtbf_hours
+    cluster_mtbf_hours = _failures.result.interval.to(hour).magnitude
+    cluster_failure_rate_per_hour = 1 / cluster_mtbf_hours
     cluster_hourly_failure_prob = 1 - math.exp(-cluster_failure_rate_per_hour)
-    cluster_mtbf_hours = 1 / cluster_failure_rate_per_hour
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────
     check(a100_mem == 80 * GiB, f"Expected 80 GiB A100 memory, got {a100_mem}")
@@ -177,13 +178,14 @@ class DenseLLMReferenceFacts:
     # Budget against the published "80 GB" label, the convention the chapter's
     # other capacity budgets (DistTrainA100Memory, DistTrainH100Capacity) use.
     h100_mem_budget = h100_mem.to(GiB) * (GB / GiB)
+    _layout = Scenarios.Gpt3DataParallel1K.result  # the same model and cluster, fully replicated
 
     # ┌── 2. EXECUTE ──────────────────────────────────────
     weights = model.size_in_bytes(BYTES_FP16)
-    training_state = memory_from_params(model.parameters, training_bytes_per_param)
+    training_state = _layout.state_total
     weights_over_h100 = (weights / h100_mem_budget).to_base_units().magnitude
     min_h100_weights = math.ceil(weights_over_h100)
-    min_h100_state = math.ceil((training_state / h100_mem_budget).to_base_units().magnitude)
+    min_h100_state = _layout.min_devices_for_state
     crossover_params = (h100_mem_budget / training_bytes_per_param).to(Bparam)
 
     # ┌── 3. GUARD ────────────────────────────────────────
@@ -237,61 +239,28 @@ Input demand at dataset scale\index{Dataset scale!storage limit} adds a third pr
 # │       the 10-04 precision pass removed, now computed instead of hand-typed).
 # │ Show: single-GPU memory ~15x (K80 to B200); plotted training-memory demand
 # │       ~4 orders of magnitude; first model above that year's GPU in 2020.
-# │ How: parameters from Literature.Series.NotableModels x 16 B/param
-# │      (BYTES_TRAINING_STATE_MIXED_PRECISION); capacities from Hardware.Cloud.
+# │ How: Scenarios.NotableModelMemoryWall (MemoryWallModel): parameters from
+# │      Literature.Series.NotableModels x 16 B/param; capacities from Hardware.Cloud.
 # └─────────────────────────────────────────────────────────────────────────────
-import math
 import pandas as pd
-from mlsysim import Hardware, Literature
-from mlsysim.core.units import BYTES_TRAINING_STATE_MIXED_PRECISION, GB, GiB, byte
 from mlsysim.fmt import MarkdownStr, check, fmt, fmt_int, fmt_multiple
-
-# Plotted models: (label on the figure, name in the Epoch notable-models series).
-_WALL_MODELS = (
-    ("AlexNet", "AlexNet"),
-    ("VGG-16", "VGG16"),
-    ("ResNet-152", "ResNet-152 (ImageNet)"),
-    ("BERT-Large", "BERT-Large"),
-    ("GPT-2", "GPT-2 (1.5B)"),
-    ("GPT-3", "GPT-3 175B (davinci)"),
-    ("PaLM", "PaLM (540B)"),
-    ("Llama 3 (405B)", "Llama 3.1-405B"),
-)
-_WALL_GPUS = ("K80", "V100", "A100", "H100", "B200")
-
-def _wall_table():
-    """Training-state demand (params x 16 B) and single-accelerator capacity, one row per point."""
-    rows = []
-    for label, name in _WALL_MODELS:
-        r = next(m for m in Literature.Series.NotableModels.entries if m["model"] == name)
-        demand_gb = (r["parameters"] * BYTES_TRAINING_STATE_MIXED_PRECISION).to(GB).magnitude
-        rows.append({"Year": int(r["date"][:4]), "Name": label, "Type": "Model", "Memory_GB": demand_gb})
-    for key in _WALL_GPUS:
-        h = getattr(Hardware.Cloud, key)
-        # Branded capacity: vendors label 80 GiB as "80 GB" (qmd-patterns branded-hardware carve-out).
-        rows.append({"Year": int(h.release_year), "Name": key, "Type": "GPU", "Memory_GB": h.memory.capacity.to(GiB).magnitude})
-    return pd.DataFrame(rows)
 
 class MemoryWallTrend:
     # ┌── 1. LOAD ─────────────────────────────────────────
-    _data = _wall_table()
+    scenario = Scenarios.NotableModelMemoryWall  # eight plotted models, K80 to B200
+    _data = pd.DataFrame(scenario.result.rows).drop(columns="Date")
     table = _data
     _gpus = _data[_data['Type'] == 'GPU'].sort_values('Year')
-    _models = _data[_data['Type'] == 'Model'].sort_values('Year')
 
     # ┌── 2. EXECUTE ──────────────────────────────────────
-    gpu_growth = _gpus['Memory_GB'].max() / _gpus['Memory_GB'].min()
-    demand_orders = math.log10(_models['Memory_GB'].max() / _models['Memory_GB'].min())
+    _r = scenario.result
+    gpu_growth = _r.capacity_growth
+    demand_orders = _r.demand_orders
     # First plotted model whose training memory exceeds the largest GPU available that year.
-    _crossover_row = None
-    for _row in _models.itertuples():
-        if _row.Memory_GB > _gpus[_gpus['Year'] <= _row.Year]['Memory_GB'].max():
-            _crossover_row = _row
-            break
-    crossover_year = int(_crossover_row.Year)
-    _crossover_name = _crossover_row.Name
+    crossover_year = _r.crossover_year
+    _crossover_name = _r.crossover_name
     # How far the crossover model's training state overshot that year's largest GPU.
-    crossover_gap = _crossover_row.Memory_GB / _gpus[_gpus['Year'] <= _crossover_row.Year]['Memory_GB'].max()
+    crossover_gap = _r.crossover_gap
 
     # ┌── 3. GUARD ────────────────────────────────────────
     check(10 < gpu_growth < 20, f"Single-GPU memory growth K80 to B200 should be ~15x, got {gpu_growth:.1f}")
@@ -732,21 +701,17 @@ from mlsysim.physics import calc_ring_allreduce_data_factor
 
 class BandwidthFeasibilityNapkin:
     # ┌── 1. LOAD ─────────────────────────────────────────
-    model = Models.Language.GPT3
-    tp = 8  # scenario assumption: tensor parallelism within one 8-GPU node
-    tokens = model.context_length  # scenario assumption: one sequence per microbatch
-    peak = Hardware.Cloud.H100.compute.precision_flops['fp16_dense']
-    local_efficiency = 0.5  # scenario assumption: same local efficiency as the 175B scaling notebook
-    nvlink = Hardware.Cloud.H100.nvlink.bandwidth_per_direction
-    ib = Systems.Fabrics.InfiniBand_NDR.bandwidth
-    allreduces_per_layer = 2  # Megatron: one after attention, one after the MLP
+    scenario = Scenarios.Gpt3TensorParallelLayerTp8  # one GPT-3 layer, TP-8, one sequence, half of dense FP16 peak
+    model = scenario.workload
+    tp = scenario.tp_size  # tensor parallelism within one 8-GPU node
+    tokens = scenario.tokens  # one sequence per microbatch
+    allreduces_per_layer = scenario.collectives_per_layer  # Megatron: one after attention, one after the MLP
 
     # ┌── 2. EXECUTE ──────────────────────────────────────
-    _layer_flops = 2 * (model.parameters.to(param).magnitude / model.layers) * tokens * flop
-    compute_time = (_layer_flops / tp / (peak * local_efficiency)).to(ms)
-    _layer_bytes = allreduces_per_layer * tokens * model.hidden_dim * BYTES_FP16 * calc_ring_allreduce_data_factor(tp)
-    nvlink_time = (_layer_bytes / nvlink).to(ms)
-    ib_time = (_layer_bytes / ib).to(ms)
+    _r = scenario.result
+    compute_time = _r.compute_time
+    nvlink_time = _r.transfer_times["NVLink"]
+    ib_time = _r.transfer_times["InfiniBand NDR"]
 
     # ┌── 3. GUARD ────────────────────────────────────────
     check(nvlink_time < compute_time < ib_time, "NVLink transfer should fit the layer's compute time and InfiniBand should not")
@@ -1143,15 +1108,13 @@ from mlsysim.fmt import check, fmt_memory
 
 class Gpt3ActivationBudget:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    layers = Models.Language.GPT3.layers
-    seq_len = Models.Language.GPT3.context_length
-    micro_batch = 4  # scenario assumption: per-GPU micro-batch
-    hidden = Models.Language.GPT3.hidden_dim
-    heads = Models.Language.GPT3.heads
+    scenario = Scenarios.Gpt3ActivationsMicrobatch4  # GPT-3 at four full-length sequences per GPU
+    seq_len = scenario.workload.context_length
+    micro_batch = scenario.micro_batch  # per-GPU micro-batch
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    act_unchecked = calc_activation_memory(layers, seq_len, micro_batch, hidden, n_heads=heads, strategy="none")
-    act_checkpointed = calc_activation_memory(layers, seq_len, micro_batch, hidden, n_heads=heads, strategy="full")
+    act_unchecked = scenario.activations("none")
+    act_checkpointed = scenario.activations("full")
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(act_unchecked > 1000 * GB, "Unoptimized GPT-3 activations at b=4, s=2048 should exceed 1 TB")
@@ -1554,12 +1517,13 @@ from mlsysim.fmt import check, fmt, fmt_percent
 
 class StragglerOdds:
     # ┌── 1. LOAD ─────────────────────────────────────────
-    workers = 1000  # scenario assumption
-    p_straggle = 0.01  # scenario assumption: per-GPU straggler probability per step
+    scenario = Scenarios.StragglerFreeStep1K  # 1,000 workers, each late on 1 percent of steps
+    workers = scenario.n_components
+    p_straggle = 1 - scenario.availability  # per-GPU straggler probability per step
 
     # ┌── 2. EXECUTE ──────────────────────────────────────
     expected = workers * p_straggle
-    p_clean = (1 - p_straggle) ** workers
+    p_clean = scenario.all_up
 
     # ┌── 3. GUARD ────────────────────────────────────────
     check(p_clean < 1e-4, "A straggler-free step should be rarer than 1 in 10,000")
@@ -1629,35 +1593,26 @@ class Scaling8GPU:
     """Scenario: 8-GPU scaling within a single node."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    from mlsysim.physics import calc_ring_allreduce_time, calc_ring_allreduce_data_factor
-
-    profile = ReferenceStats.DataParallelScalingProfile  # GPT-2 on one node
-    single_gpu_step_s = profile.SingleGpuStepTime.to(second).magnitude
-    batch_per_gpu_val = int(profile.PerGpuBatch)
+    scenario = Scenarios.Gpt2DataParallelOneNode  # GPT-2 on one DGX H100 node, NVLink AllReduce
+    single_gpu_step_s = scenario.step_time.to(second).magnitude
+    batch_per_gpu_val = scenario.per_device_batch
     fits_mem = 32 * GB  # scenario assumption: single-GPU fit threshold
-    compute_8gpu_ms = profile.SingleGpuStepTime.to(ms).magnitude  # per-GPU compute unchanged at fixed local batch
-    params_b = Models.Language.GPT2.parameters.to(Bparam).magnitude  # GPT-2
-    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth  # datasheet bidirectional total (for display)
-    nvlink_bw_beta = Hardware.Cloud.H100.nvlink.bandwidth_per_direction  # one-way rate for collective math
-    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
+    compute_8gpu_ms = scenario.step_time.to(ms).magnitude  # per-GPU compute unchanged at fixed local batch
+    nvlink_bw_beta = scenario.intra_bandwidth  # one-way NVLink rate for collective math
+    gpus_per_node = scenario.devices_per_node
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Ring All-Reduce using library formula (beta = per-direction NVLink rate)
-    gradient_tensor = Models.Language.GPT2.size_in_bytes(BYTES_FP16)
-    t_comm = calc_ring_allreduce_time(gradient_tensor, gpus_per_node, nvlink_bw_beta, 0 * ms)
-    comm_8gpu_ms_val = t_comm.to(ms).magnitude
-
-    sync_size = gradient_tensor * calc_ring_allreduce_data_factor(gpus_per_node)
-
-    total_8gpu_ms_val = compute_8gpu_ms + comm_8gpu_ms_val
+    _r = scenario.result  # ring AllReduce of FP16 gradients at the per-direction NVLink rate
+    comm_8gpu_ms_val = _r.communication_time.to(ms).magnitude
+    sync_size = _r.intra_bytes
+    total_8gpu_ms_val = _r.update_time.to(ms).magnitude
     # Speedup = (N * b/T_N) / (b/T_1) = N * (T_1 / T_N)
-    total_8gpu_s_val = (total_8gpu_ms_val * ms).to(second).magnitude
-    speedup_8gpu_val = gpus_per_node * (single_gpu_step_s / total_8gpu_s_val)
-    efficiency_8gpu_val = speedup_8gpu_val / gpus_per_node * 100
-    training_hours_1gpu = profile.SingleGpuTrainingTime.to(hour).magnitude
-    single_gpu_steps = (profile.SingleGpuTrainingTime / profile.SingleGpuStepTime).to_base_units().magnitude
-    training_hours_8gpu_val = training_hours_1gpu / speedup_8gpu_val
-    global_batch_val = batch_per_gpu_val * gpus_per_node
+    speedup_8gpu_val = _r.speedup
+    efficiency_8gpu_val = _r.efficiency * 100
+    training_hours_1gpu = scenario.training_time.to(hour).magnitude
+    single_gpu_steps = (scenario.training_time / scenario.step_time).to_base_units().magnitude
+    training_hours_8gpu_val = _r.training_time.to(hour).magnitude
+    global_batch_val = _r.global_batch
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(efficiency_8gpu_val > 90, f"Intra-node efficiency ({efficiency_8gpu_val:.1f}%) should be high")
@@ -1722,43 +1677,32 @@ from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_memory, fmt_time
 # │ Scope: chapter-anchor — the gradient-accumulation comparison reuses this
 # │ 32-GPU scale-out baseline so its cost remains tied to the same scenario.
 class Scaling32GPU:
-    from mlsysim.physics import calc_ring_allreduce_data_factor, calc_ring_allreduce_time
-
-    NETWORK_10G_BW = Systems.Fabrics.Ethernet_10G.bandwidth
-    single_gpu_step_s = Scaling8GPU.single_gpu_step_s
+    # ┌── 1. LOAD ─────────────────────────────────────────
+    scenario =Scenarios.Gpt2DataParallelFourNodes10GbE  # four DGX H100 nodes joined by 10 GbE
     compute_32gpu_ms = Scaling8GPU.compute_8gpu_ms  # same per-GPU local batch
-    params_b = Models.Language.GPT2.parameters.to(Bparam).magnitude
-    net_bw = NETWORK_10G_BW
-    # Per-direction NVLink rate: the one-way beta for ring-collective math
-    # (the datasheet 900 GB/s is the bidirectional total).
-    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth_per_direction
-    gpus_per_node_val = Systems.Nodes.DGX_H100.accelerators_per_node
-    training_hours_1gpu = Scaling8GPU.training_hours_1gpu
-    gpus = 32  # scenario assumption: four-node scale-out
+    net_bw = scenario.inter_bandwidth
+    gpus_per_node_val = scenario.devices_per_node
+    gpus = scenario.result.n_devices  # four-node scale-out
     batch_per_gpu_val = Scaling8GPU.batch_per_gpu_val
-    global_batch_val = batch_per_gpu_val * gpus
-    ring_factor = calc_ring_allreduce_data_factor(gpus)
-    gradient_tensor = Models.Language.GPT2.size_in_bytes(BYTES_FP16)
-    # Intra-node phase moves the same gradient volume over the same NVLink as
-    # the 8-GPU scenario. 2026-06-07: was a hardcoded 0.35 ms, contradicting
-    # the value computed two scenarios earlier. 2026-06-10: now uses the
-    # per-direction NVLink rate (the prior bidirectional total understated it ~2x).
-    intra_node_ms_val = (gradient_tensor * calc_ring_allreduce_data_factor(gpus_per_node_val) / nvlink_bw).to(ms).magnitude
+    global_batch_val = scenario.result.global_batch
 
-    sync_size = gradient_tensor * ring_factor
-    # The helper applies the 2(N-1)/N ring factor itself, so it takes the raw
-    # gradient size; sync_size (gradient x ring factor) is kept for display.
-    inter_node_ms_val = (
-        calc_ring_allreduce_time(message_bytes=gradient_tensor, n_gpus=gpus, bandwidth_bytes_s=net_bw, latency_s=0 * ms).to(ms).magnitude
-    )
-    comm_32gpu_ms_val = inter_node_ms_val + intra_node_ms_val
-    total_32gpu_ms_val = compute_32gpu_ms + comm_32gpu_ms_val
-    compute_pct_val = compute_32gpu_ms / total_32gpu_ms_val * 100
-    comm_pct_val = comm_32gpu_ms_val / total_32gpu_ms_val * 100
-    total_32gpu_s_val = (total_32gpu_ms_val * ms).to(second).magnitude
-    speedup_32gpu_val = 32 * (single_gpu_step_s / total_32gpu_s_val)
-    efficiency_32gpu_val = speedup_32gpu_val / 32 * 100
-    training_32gpu_hours_val = training_hours_1gpu / speedup_32gpu_val
+    # ┌── 2. EXECUTE ──────────────────────────────────────
+    # The intra-node phase moves the same gradient volume over the same
+    # per-direction NVLink as the 8-GPU scenario; the cross-node ring applies
+    # the 2(N-1)/N factor over all 32 GPUs at 10 GbE.
+    _r = scenario.result
+    intra_node_ms_val = _r.intra_time.to(ms).magnitude
+    sync_size = _r.inter_bytes
+    inter_node_ms_val = _r.inter_time.to(ms).magnitude
+    comm_32gpu_ms_val = _r.communication_time.to(ms).magnitude
+    total_32gpu_ms_val = _r.update_time.to(ms).magnitude
+    compute_pct_val = _r.compute_share * 100
+    comm_pct_val = _r.communication_share * 100
+    speedup_32gpu_val = _r.speedup
+    efficiency_32gpu_val = _r.efficiency * 100
+    training_32gpu_hours_val = _r.training_time.to(hour).magnitude
+
+    # ┌── 3. GUARD ────────────────────────────────────────
     check(comm_pct_val > 50, f"Communication should dominate ({comm_pct_val:.1f}%)")
 
     # ┌── 4. OUTPUT ───────────────────────────────────────
@@ -1806,34 +1750,25 @@ from mlsysim.fmt import MarkdownStr, check, fmt, fmt_int, fmt_math, fmt_time, fm
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GradAccumScenario:
-    n_gpus_ga = Systems.Nodes.DGX_H100.accelerators_per_node
-    batch_per_gpu = Scaling8GPU.batch_per_gpu_val
-    accum_steps = 4  # scenario assumption
+    # ┌── 1. LOAD ─────────────────────────────────────────
+    scenario = Scenarios.Gpt2GradientAccumulationOneNode  # one node, four local steps per update
+    n_gpus_ga = scenario.devices_per_node
+    batch_per_gpu = scenario.per_device_batch
+    accum_steps = scenario.accumulation_steps
     compute_8gpu_ms = Scaling8GPU.compute_8gpu_ms
-    from mlsysim.physics import calc_ring_allreduce_time
-
-    # Same one-way NVLink beta and AllReduce as the 8-GPU scaling scenario.
-    nvlink_bw_beta = Hardware.Cloud.H100.nvlink.bandwidth_per_direction
-    comm_8gpu_ms = (
-        calc_ring_allreduce_time(
-            message_bytes=Models.Language.GPT2.size_in_bytes(BYTES_FP16),
-            n_gpus=n_gpus_ga,
-            bandwidth_bytes_s=nvlink_bw_beta,
-            latency_s=0 * ms,
-        )
-        .to(ms)
-        .magnitude
-    )
-    training_hours_1gpu = Scaling8GPU.training_hours_1gpu
     # Node-hour price = GPUs per node x registry cloud training rate per GPU-hour.
-    hourly_rate = Systems.Nodes.DGX_H100.accelerators_per_node * Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate.to(USD / hour).magnitude
-    baseline_nodes = Scaling32GPU.gpus // n_gpus_ga
-    baseline_cost_val = Scaling32GPU.training_32gpu_hours_val * baseline_nodes * hourly_rate
-    effective_batch_val = n_gpus_ga * batch_per_gpu * accum_steps
-    overhead_val = comm_8gpu_ms / (accum_steps * compute_8gpu_ms) * 100
-    effective_speedup = n_gpus_ga * (1 - overhead_val / 100)
-    ga_training_hours_val = training_hours_1gpu / effective_speedup
-    ga_cost_val = ga_training_hours_val * hourly_rate
+    hourly_rate = scenario.node_hour_rate.to(USD / hour).magnitude
+    _baseline = Scaling32GPU.scenario  # the four-node, 32-GPU run at the same global batch
+
+    # ┌── 2. EXECUTE ──────────────────────────────────────
+    _r = scenario.result  # same one-way NVLink AllReduce as the 8-GPU scenario, once per four steps
+    comm_8gpu_ms = _r.communication_time.to(ms).magnitude
+    baseline_nodes = _baseline.nodes
+    baseline_cost_val = _baseline.result.cost
+    effective_batch_val = _r.global_batch
+    overhead_val = _r.communication_overhead * 100
+    ga_training_hours_val = _r.training_time.to(hour).magnitude
+    ga_cost_val = _r.cost
     ga_savings_val = baseline_cost_val - ga_cost_val
     ga_savings_pct_val = ga_savings_val / baseline_cost_val * 100
     check(effective_batch_val == 512, f"Effective batch should be 512, got {effective_batch_val}")
@@ -1887,21 +1822,23 @@ from mlsysim.fmt import check, fmt, fmt_display_math, fmt_int, fmt_memory, fmt_m
 from mlsysim.physics import memory_from_params
 
 class DistTrainA100Memory:
-    model = Models.Language.Llama2_7B
+    scenario = Scenarios.Llama2_7B_ZeroStages64  # 7B mixed-precision Adam state over a 64-GPU ZeRO group
+    model = scenario.workload
     bytes_per_param = ReferenceStats.MixedPrecisionAdam.TrainingStateBytesPerParameter
     bytes_per_param_val = bytes_per_param.to(byte / param).magnitude
     bytes_optimizer_val = ReferenceStats.MixedPrecisionAdam.OptimizerStateBytesPerParameter.to(byte / param).magnitude
     bytes_fp16_val = BYTES_FP16.to(byte).magnitude
     bytes_fp32_val = BYTES_FP32.to(byte).magnitude
-    n_gpus_zero = 64  # scenario assumption: ZeRO-3 data-parallel group
+    n_gpus_zero = scenario.n_devices  # ZeRO-3 data-parallel group
     params_b = model.parameters.to(Bparam).magnitude
     a100_mem = Hardware.Cloud.A100.memory.capacity
     a100_mem_budget = a100_mem.to(GiB) * (GB / GiB)
-    total_state = memory_from_params(model.parameters, bytes_per_param)
-    zero3_per_gpu = total_state / n_gpus_zero
+    _r = scenario.result
+    total_state = _r.stage_state["DDP"]
+    zero3_per_gpu = _r.stage_state["ZeRO-3"]
     activation_headroom = a100_mem_budget - zero3_per_gpu
-    weights_mem = model.size_in_bytes(BYTES_FP16)  # also the FP16 gradient buffer
-    optimizer_mem = memory_from_params(model.parameters, bytes_optimizer_val * (byte / param))
+    weights_mem = _r.weights  # also the FP16 gradient buffer
+    optimizer_mem = _r.optimizer_state
     check(bytes_fp16_val + bytes_fp16_val + bytes_optimizer_val == bytes_per_param_val, "2 + 2 + 12 must equal 16 B/param")
     check(3 * bytes_fp32_val == bytes_optimizer_val, "Optimizer state is three FP32 words per parameter")
     check(total_state == 112 * GB, f"7B ZeRO state ({total_state})")
@@ -2343,29 +2280,27 @@ class CommScalingMath:
     """Formatted math strings for scaling efficiency and communication overhead analysis."""
 
     # ┌── 1. LOAD ─────────────────────────────────────────
-    _scenario = Scenarios.DenseLLMPretrainingReference  # GPT-3 on the 1,024-GPU cluster
-    _params = _scenario.workload.parameters
-    _ib_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth
-    _overlap_fraction = 0.75  # scenario assumption: optimistic overlap schedule
-    _gradient_size = _scenario.workload.size_in_bytes(BYTES_FP16)
-    flops_per_token = float(Literature.Chinchilla.ComputeConstant)  # 6 FLOPs per parameter per token
-    batch_tokens_m = 2  # scenario assumption: 2M tokens per optimizer step
-    n_gpus = _scenario.system.total_accelerators
-    _peak = Hardware.Cloud.H100.compute.precision_flops['fp8']  # the FP8 peak the setup names
-    local_efficiency_pct = 50  # scenario assumption before exposed communication
+    _scenario = Scenarios.Gpt3DataParallel1K  # GPT-3 on the 1,024-GPU cluster, pure data parallelism
+    _ib_bw = _scenario.link_bandwidth  # one NDR port per GPU
+    _overlap_fraction = _scenario.overlap_fraction  # optimistic overlap schedule
+    flops_per_token = _scenario.flops_per_param_token  # 6 FLOPs per parameter per token
+    batch_tokens_m = _scenario.batch_tokens / MILLION  # 2M tokens per optimizer step
+    n_gpus = _scenario.n_devices
+    _peak = _scenario.accelerator.compute.precision_flops[_scenario.precision]  # the FP8 peak the setup names
+    local_efficiency_pct = _scenario.local_efficiency * 100  # before exposed communication
 
     # ┌── 2. EXECUTE ──────────────────────────────────────
-    # 2026-09-28: the per-step compute window was a hand-typed 2.1 s; it is now
-    # derived. At the FP8 peak and 50 percent local efficiency it still renders 2.1 s;
-    # at the dense BF16 peak it would be about 4.1 s (surfaced for the author).
-    _step_flops = flops_per_token * _params.to(param).magnitude * batch_tokens_m * MILLION * flop
-    # Napkin math carries the window at the 0.1 s the prose displays, so every
-    # downstream ratio (exposed step, 15 percent, Configuration B's efficiency)
-    # recomputes from the printed "2.1 s" (unrounded 2.07 s gave 54.2 vs 54.5).
-    _compute_window = round((_step_flops / (n_gpus * _peak * local_efficiency_pct / 100)).to(second).magnitude, 1) * second
-    _raw_time = (2 * _gradient_size / _ib_bw).to(second)
-    _hidden_time = min(_raw_time * _overlap_fraction, _compute_window)
-    _effective_time = _raw_time - _hidden_time
+    # The scenario carries the compute window at the 0.1 s the prose displays,
+    # so every downstream ratio (exposed step, 15 percent, Configuration B's
+    # efficiency) recomputes from the printed "2.1 s" (unrounded 2.07 s gave
+    # 54.2 vs 54.5). At the dense BF16 peak the window would be about 4.1 s.
+    _r = _scenario.result
+    _gradient_size = _r.gradient_bytes
+    _step_flops = _r.step_flops
+    _compute_window = _r.compute_time
+    _raw_time = _r.allreduce_time
+    _hidden_time = _r.hidden_time
+    _effective_time = _r.exposed_time
 
     _ib_gb_per_s_value_str = fmt(_ib_bw.to(GB / second).magnitude, precision=0, commas=False)
     _gradient_size_gb_value_str = fmt(_gradient_size.to(GB).magnitude, precision=0, commas=False)
@@ -2381,9 +2316,9 @@ class CommScalingMath:
     _t_compute_value = fmt(t_compute_s, precision=1, commas=False)
     t_compute_math = fmt_math(f"\\IronLawComputeTime/\\DeviceCount \\approx {_t_compute_value}")
     t_comm_math = fmt_math(f"\\ExposedCommunicationTime(\\DeviceCount) \\approx {_effective_time.to(second).magnitude:.1f}")
-    exposed_step = t_compute_s * second + _effective_time
-    scaling_efficiency = (t_compute_s * second / exposed_step).to_base_units().magnitude
-    overlap_pct = (_hidden_time / _raw_time).to_base_units().magnitude * 100
+    exposed_step = _r.step_time
+    scaling_efficiency = _r.efficiency
+    overlap_pct = _r.overlap_share * 100
     raw_comm_s = _raw_time
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -2522,12 +2457,13 @@ class AmdahlObservedShare:
     """Baseline residual fraction versus its share of a distributed step."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    r = 0.01  # scenario assumption: residual fraction, the 1 percent curve of @fig-scaling-tax
-    n = 512  # scenario assumption: largest GPU count plotted in @fig-scaling-tax
+    scenario = Scenarios.ResidualOnePercent512  # the 1 percent curve of @fig-scaling-tax at its largest GPU count
+    r = scenario.residual
+    n = scenario.devices
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
-    step = (1 - r) / n + r  # distributed step time in units of the single-device step
-    share = r / step
+    step = scenario.step_fraction  # distributed step time in units of the single-device step
+    share = scenario.residual_share
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(0.8 < share < 0.9, f"1 percent residual at 512 GPUs should be ~84 percent of the step, got {share:.3f}")
@@ -2657,44 +2593,19 @@ plt.close()
 # │      Literature.Series.MLPerfTrainingLLMScaling.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature
 from mlsysim.fmt import check, fmt, fmt_count, fmt_int, fmt_multiple, fmt_percent, fmt_percent_range
-
-def _series(rows, rnd, submitter, benchmark, accel):
-    """One submitter's same-round configurations of one benchmark, by size."""
-    pts = [
-        r for r in rows if r["round"] == rnd and r["submitter"].startswith(submitter) and r["benchmark"] == benchmark and accel in r["accelerator"]
-    ]
-    return sorted(pts, key=lambda r: r["accelerators"])
-
-def _efficiency(pts):
-    """Scaling efficiency of the largest configuration relative to the smallest."""
-    a, z = pts[0], pts[-1]
-    return (a["score_minutes"] * a["accelerators"]) / (z["score_minutes"] * z["accelerators"])
-
-def _build(rows, specs):
-    return [(label, _series(rows, *key)) for label, key in specs]
-
-def _effs(series):
-    return [_efficiency(p) for _, p in series]
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MLPerfScaling:
     """Relative scaling efficiency of same-round MLPerf Training LLM series."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    rows = Literature.Series.MLPerfTrainingLLMScaling.entries
-    specs = (
-        ("GPT-3, NVIDIA H100 (v3.1)", ("v3.1", "NVIDIA", "gpt3", "H100-SXM5")),
-        ("GPT-3, Google TPU v5p (v4.1)", ("v4.1", "Google", "gpt3", "TPU-v5p")),
-        ("GPT-3, Google Trillium (v4.1)", ("v4.1", "Google", "gpt3", "TPU-trillium")),
-        ("Llama 3.1 405B, NVIDIA H100 (v5.0)", ("v5.0", "NVIDIA", "llama31_405b", "H100-SXM5")),
-        ("Llama 3.1 405B, GB200 (v5.0)", ("v5.0", "IBM+CoreWeave", "llama31_405b", "Blackwell")),
-    )
+    scenario = Scenarios.MLPerfLlmScalingSeries  # five same-round series of MLPerfTrainingLLMScaling
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    series = _build(rows, specs)
-    effs = _effs(series)
+    _r = scenario.result
+    series = list(zip(_r.labels, _r.series))
+    effs = _r.efficiencies
     eos = series[0][1]
     eos_n_mult = eos[-1]["accelerators"] / eos[0]["accelerators"]
     eos_t_mult = eos[0]["score_minutes"] / eos[-1]["score_minutes"]
@@ -3094,41 +3005,44 @@ class ScalingWorkers:
     """Convergence comparison: 8 vs. 64 workers, BSP vs. SSP."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    n8 = 8
-    n64 = 64
-    b = 32
-    base_iters = 100_000
     # Hypothetical iteration counts to the same target, not measured model results.
-    actual_8bsp = 12_800
-    comm_8bsp = 0.15
-    actual_64bsp = 1_720
-    comm_64bsp = 0.45
-    staleness = 4
-    actual_ssp = 2_100
-    comm_ssp = 0.25
+    _bsp8 = Scenarios.TransformerBsp8Workers
+    _bsp64 = Scenarios.TransformerBsp64Workers
+    _ssp64 = Scenarios.TransformerSsp64Workers
+    n8 = _bsp8.workers
+    n64 = _bsp64.workers
+    b = _bsp8.per_worker_batch
+    base_iters = _bsp8.base_iterations
+    actual_8bsp = _bsp8.iterations
+    comm_8bsp = _bsp8.communication_overhead
+    actual_64bsp = _bsp64.iterations
+    comm_64bsp = _bsp64.communication_overhead
+    staleness = _ssp64.staleness
+    actual_ssp = _ssp64.iterations
+    comm_ssp = _ssp64.communication_overhead
     critical_batch_size = 4_000
     n_nodes_64 = 8
-    gpu_hour_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
-    base_iter_s = 0.4  # illustrative local-compute time, shared by all configurations
-    iter_s_8 = base_iter_s * (1 + comm_8bsp)
-    iter_s_64bsp = base_iter_s * (1 + comm_64bsp)
-    iter_s_64ssp = base_iter_s * (1 + comm_ssp)
+    gpu_hour_rate = _bsp8.device_hour_rate.to(USD / hour).magnitude
+    base_iter_s = _bsp8.base_iteration_time.to(second).magnitude  # illustrative local-compute time, shared by all configurations
+    iter_s_8 = _bsp8.iteration_time.to(second).magnitude
+    iter_s_64bsp = _bsp64.iteration_time.to(second).magnitude
+    iter_s_64ssp = _ssp64.iteration_time.to(second).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    batch_8 = n8 * b
-    batch_64 = n64 * b
-    exp_iter_8 = base_iters / n8
-    exp_iter_64 = base_iters / n64
-    speedup_8 = base_iters / (actual_8bsp * (1 + comm_8bsp))
-    speedup_64 = base_iters / (actual_64bsp * (1 + comm_64bsp))
-    speedup_ssp = base_iters / (actual_ssp * (1 + comm_ssp))
-    lr_factor_ssp = 1 / math.sqrt(1 + staleness)
-    sample_eff_8 = exp_iter_8 / actual_8bsp * 100
-    sample_eff_64 = exp_iter_64 / actual_64bsp * 100
-    sample_eff_ssp = exp_iter_64 / actual_ssp * 100
-    cost_8 = actual_8bsp * iter_s_8 * n8 / 3600 * gpu_hour_rate
-    cost_64bsp = actual_64bsp * iter_s_64bsp * n64 / 3600 * gpu_hour_rate
-    cost_64ssp = actual_ssp * iter_s_64ssp * n64 / 3600 * gpu_hour_rate
+    batch_8 = _bsp8.global_batch
+    batch_64 = _bsp64.global_batch
+    exp_iter_8 = _bsp8.ideal_iterations
+    exp_iter_64 = _bsp64.ideal_iterations
+    speedup_8 = _bsp8.speedup
+    speedup_64 = _bsp64.speedup
+    speedup_ssp = _ssp64.speedup
+    lr_factor_ssp = _ssp64.stale_lr_factor
+    sample_eff_8 = _bsp8.sample_efficiency * 100
+    sample_eff_64 = _bsp64.sample_efficiency * 100
+    sample_eff_ssp = _ssp64.sample_efficiency * 100
+    cost_8 = _bsp8.cost
+    cost_64bsp = _bsp64.cost
+    cost_64ssp = _ssp64.cost
     # Useful-worker bound B*/b at fixed local batch (2026-09-29).
     useful_workers = critical_batch_size / b
 
@@ -3411,20 +3325,18 @@ from mlsysim.physics import memory_from_params
 
 class ModelParallelMemoryFacts:
     # ┌── 1. LOAD ─────────────────────────────────────────
-    params = Models.Language.GPT3.parameters
-    n_gpus = 64  # scenario assumption: model-parallel group size
-    bytes_weights = BYTES_FP16 / param
-    bytes_gradients = BYTES_FP16 / param
-    bytes_adam_state = ReferenceStats.MixedPrecisionAdam.OptimizerStateBytesPerParameter
+    scenario = Scenarios.Gpt3Zero3On64  # GPT-3 state sharded over a 64-GPU group
+    n_gpus = scenario.n_devices  # model-parallel group size
 
     # ┌── 2. EXECUTE ──────────────────────────────────────
+    _r = scenario.result
     cluster_fraction_denominator = DenseLLMReferenceFacts.cluster_gpus // n_gpus
-    weight_mem = memory_from_params(params, bytes_weights)
-    gradient_mem = memory_from_params(params, bytes_gradients)
-    optimizer_mem = memory_from_params(params, bytes_adam_state)
-    full_state_mem = weight_mem + gradient_mem + optimizer_mem
+    weight_mem = _r.weights
+    gradient_mem = _r.gradients
+    optimizer_mem = _r.optimizer_state
+    full_state_mem = _r.stage_state["DDP"]
     weight_per_gpu_mem = weight_mem / n_gpus
-    full_state_per_gpu_mem = full_state_mem / n_gpus
+    full_state_per_gpu_mem = _r.stage_state["ZeRO-3"]
 
     # ┌── 3. GUARD ────────────────────────────────────────
     check(weight_mem == 350 * GB, "175B FP16 weights should be 350 GB")
@@ -3458,14 +3370,13 @@ from mlsysim.fmt import check, fmt_memory, fmt_multiple, fmt_time
 
 class Zero3GatherCost:
     # ┌── 1. LOAD ─────────────────────────────────────────
-    param_bytes = Models.Language.GPT3.size_in_bytes(BYTES_FP16)
-    ib_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth
+    scenario = Scenarios.Gpt3Zero3On64  # full sharding, every layer regathered over one NDR port
     t_compute = CommScalingMath.t_compute_s * second  # same per-step compute window
-    collectives_per_step = 3  # forward gather, backward regather, gradient ReduceScatter
 
     # ┌── 2. EXECUTE ──────────────────────────────────────
-    traffic = collectives_per_step * param_bytes
-    transfer_time = (traffic / ib_bw).to(second)
+    # Forward gather, backward regather, gradient ReduceScatter: about 3x the parameter bytes.
+    traffic = scenario.result.gather_traffic
+    transfer_time = scenario.result.gather_time
     ratio = (transfer_time / t_compute).to_base_units().magnitude
 
     # ┌── 3. GUARD ────────────────────────────────────────
@@ -3535,33 +3446,22 @@ class MemoryWallAnalysis:
     """ZeRO-3 memory wall analysis for 175B model on A100s."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    params = Models.Language.GPT3.parameters  # GPT-3 175B
-    bytes_weights = BYTES_FP16 / param
-    bytes_gradients = BYTES_FP16 / param
+    scenario = ModelParallelMemoryFacts.scenario  # same 64-GPU group, fully sharded
     bytes_adam_state = ReferenceStats.MixedPrecisionAdam.OptimizerStateBytesPerParameter
-    n_gpus = ModelParallelMemoryFacts.n_gpus  # same 64-GPU group
-    layers = Models.Language.GPT3.layers
-    seq_len = Models.Language.GPT3.context_length
-    micro_batch = 1  # scenario assumption: single-sequence micro-batch
-    hidden = Models.Language.GPT3.hidden_dim
-    heads = Models.Language.GPT3.heads
-    activation_strategy = "full"
+    n_gpus = scenario.n_devices
+    seq_len = scenario.activations.workload.context_length
+    micro_batch = scenario.activations.micro_batch  # single-sequence micro-batch
+    activation_strategy = scenario.activation_strategy  # full recomputation
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    param_mem = memory_from_params(params, bytes_weights)
-    gradient_mem = memory_from_params(params, bytes_gradients)
-    optim_mem = memory_from_params(params, bytes_adam_state)
-    total_static_mem = param_mem + gradient_mem + optim_mem
-    per_gpu_static = total_static_mem / n_gpus
-    activation_mem = calc_activation_memory(
-        layers,
-        seq_len,
-        micro_batch,
-        hidden,
-        n_heads=heads,
-        strategy=activation_strategy,
-    )
-    total_per_gpu = per_gpu_static + activation_mem
+    _r = scenario.result
+    param_mem = _r.weights
+    gradient_mem = _r.gradients
+    optim_mem = _r.optimizer_state
+    total_static_mem = _r.stage_state["DDP"]
+    per_gpu_static = _r.stage_state["ZeRO-3"]
+    activation_mem = _r.activations
+    total_per_gpu = _r.zero3_total_per_device
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(param_mem == 350 * GB, f"param storage ({param_mem})")
@@ -4013,12 +3913,13 @@ from mlsysim.fmt import check, fmt, fmt_count
 
 class PipelineBubble:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    p_stages = 8  # Number of nodes/stages
-    m_microbatches = 32  # Microbatches per global batch
+    scenario = Scenarios.Pipeline8Stage32Micro  # eight stages, 32 microbatches per global batch
+    p_stages = scenario.stages  # Number of nodes/stages
+    m_microbatches = scenario.microbatches  # Microbatches per global batch
     # ┌── 2. EXECUTE ───────────────────────────────────────
     # Bubble overhead is the time GPUs spend waiting for the first/last samples
     p_minus_1 = p_stages - 1
-    bubble_fraction = p_minus_1 / (p_minus_1 + m_microbatches)
+    bubble_fraction = scenario.bubble
     bubble_pct = bubble_fraction * 100
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(17 < bubble_pct < 19, f"Bubble {bubble_pct:.1f}% unexpected")
@@ -4258,13 +4159,14 @@ from mlsysim.fmt import check, fmt, fmt_percent
 
 class FourStagePipelineWalkthrough:
     # ┌── 1. LOAD ─────────────────────────────────────────
-    stages = 4  # scenario assumption: matches the figure
-    microbatches = 4  # scenario assumption: matches the figure
+    scenario = Scenarios.GPipeFourStageWalkthrough  # matches the figure: four stages, four microbatches
+    stages = scenario.stages
+    microbatches = scenario.microbatches
 
     # ┌── 2. EXECUTE ──────────────────────────────────────
-    slots = 2 * (microbatches + stages - 1)
-    idle_slots = 2 * (stages - 1)
-    bubble = (stages - 1) / (microbatches + stages - 1)
+    slots = scenario.slots
+    idle_slots = scenario.idle_slots
+    bubble = scenario.bubble
 
     # ┌── 3. GUARD ────────────────────────────────────────
     check(abs(idle_slots / slots - bubble) < 1e-12, "Idle share of the slot grid must equal (p-1)/(m+p-1)")
@@ -4810,14 +4712,12 @@ from mlsysim.fmt import check, fmt_count
 
 class RingAttentionThreshold:
     # ┌── 1. LOAD ─────────────────────────────────────────
-    elem_bytes = BYTES_FP16.to(byte).magnitude
-    sustained = Hardware.Cloud.H100.compute.precision_flops['fp16_dense'] * 0.5  # scenario assumption: 50 percent of dense peak
-    nvlink = Hardware.Cloud.H100.nvlink.bandwidth_per_direction
-    ib = Systems.Fabrics.InfiniBand_NDR.bandwidth
+    scenario = Scenarios.H100RingAttentionChunk  # FP16 K/V, 50 percent of dense peak, NVLink or one NDR port
 
     # ┌── 2. EXECUTE ──────────────────────────────────────
-    n_nvlink = (elem_bytes * sustained / (2 * nvlink)).to(flop / byte).magnitude
-    n_ib = (elem_bytes * sustained / (2 * ib)).to(flop / byte).magnitude
+    _chunk = scenario.min_chunk_tokens  # n >= s R eta / (2 B_link)
+    n_nvlink = _chunk["NVLink"]
+    n_ib = _chunk["InfiniBand NDR"]
 
     # ┌── 3. GUARD ────────────────────────────────────────
     check(500 < n_nvlink < 2000 and n_ib > 5 * n_nvlink, "NVLink threshold should be ~1K tokens and NDR several times larger")
@@ -5202,46 +5102,45 @@ from mlsysim.physics import memory_from_params
 
 class HybridConfigFeasibility:
     # ┌── 1. LOAD ─────────────────────────────────────────
-    params = Models.Language.GPT3.parameters
-    training_bytes_per_param = ReferenceStats.MixedPrecisionAdam.TrainingStateBytesPerParameter  # BF16 weights + grads, FP32 master + 2 moments
+    # Configurations A, B, and C share one step model (CommScalingMath's overlap
+    # and compute window): 2M tokens, FP8 at 50 percent, FP16 gradients over NDR.
+    _a = Scenarios.Gpt3DataParallel1K  # A: pure data parallelism
+    _b = Scenarios.Gpt3TensorDataParallel1K  # B: TP 8 inside each node, DP 128
+    _c = Scenarios.Gpt3ThreeDParallel1K  # C: TP 8, PP 4 across nodes, DP 32
     hbm = Hardware.Cloud.H100.memory.capacity
-    gradient_bytes = Models.Language.GPT3.size_in_bytes(BYTES_FP16)
-    ib_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth
+    ib_bw = _a.link_bandwidth
     t_compute = CommScalingMath.t_compute_s * second  # same derived per-step compute window
-    n_gpus = DenseLLMReferenceFacts.cluster_gpus  # 1,024-GPU reference cluster
-    tp_b = DenseLLMReferenceFacts.gpus_per_node  # tensor parallelism within one node
-    tp_c, pp_c = tp_b, 4  # scenario assumption: four pipeline stages
-    m_c = 32  # scenario assumption: microbatches per step in configuration C
+    n_gpus = _a.n_devices  # 1,024-GPU reference cluster
+    tp_b = _b.tp_size  # tensor parallelism within one node
+    tp_c, pp_c = _c.tp_size, _c.pp_size  # four pipeline stages
+    m_c = _c.microbatches  # microbatches per step in configuration C
 
     # ┌── 2. EXECUTE ──────────────────────────────────────
-    state = memory_from_params(params, training_bytes_per_param)
-    config_b_per_gpu = state / tp_b
-    config_c_per_gpu = state / (tp_c * pp_c)
-    config_a_comm = (2 * gradient_bytes / ib_bw).to(second)  # ring AllReduce ~2x payload
-    config_b_shard = gradient_bytes / tp_b
-    config_b_comm = (2 * config_b_shard / ib_bw).to(second)
-    config_b_efficiency = (t_compute / (t_compute + config_b_comm)).to_base_units().magnitude
-    # Same overlap model as CommScalingMath: hide up to the scenario overlap
-    # fraction of the transfer, capped by the compute window (2026-09-29:
-    # replaces a hand-typed 75--85 percent).
-    _overlap = CommScalingMath._overlap_fraction
-    config_b_exposed = config_b_comm - min(config_b_comm * _overlap, t_compute)
-    config_b_overlap_efficiency = (t_compute / (t_compute + config_b_exposed)).to_base_units().magnitude
-    dp_b = n_gpus // tp_b
-    dp_c = n_gpus // (tp_c * pp_c)
-    config_c_shard = gradient_bytes / (tp_c * pp_c)
-    bubble_c = (pp_c - 1) / (m_c + pp_c - 1)
+    _ra, _rb, _rc = _a.result, _b.result, _c.result
+    state = _ra.state_total
+    gradient_bytes = _ra.gradient_bytes
+    config_b_per_gpu = _rb.state_per_device
+    config_c_per_gpu = _rc.state_per_device
+    config_a_comm = _ra.allreduce_time  # ring AllReduce ~2x payload
+    config_b_shard = _rb.dp_shard
+    config_b_comm = _rb.allreduce_time
+    config_b_efficiency = _rb.efficiency_no_overlap
+    # Hide up to the scenario overlap fraction of the transfer, capped by the
+    # compute window (2026-09-29: replaces a hand-typed 75--85 percent).
+    _overlap = _b.overlap_fraction
+    config_b_overlap_efficiency = _rb.efficiency
+    dp_b = _b.dp_size
+    dp_c = _c.dp_size
+    config_c_shard = _rc.dp_shard
+    bubble_c = _rc.bubble
     # 2026-10-07: finish the comparison. Same overlap model as configuration B;
     # the bubble stretches the compute window by 1 / (1 - bubble).
-    config_c_comm = (2 * config_c_shard / ib_bw).to(second)
-    config_c_exposed = config_c_comm - min(config_c_comm * _overlap, t_compute)
-    config_c_efficiency = (t_compute / (t_compute / (1 - bubble_c) + config_c_exposed)).to_base_units().magnitude
+    config_c_comm = _rc.allreduce_time
+    config_c_efficiency = _rc.efficiency
     # Feasible reference-cluster layout: configuration C plus ZeRO-1 across its
     # data-parallel group (weights and gradients split by TP x PP; the 12 B/param
     # optimizer state also split across the DP group).
-    _wg_bytes = 2 * BYTES_FP16 / param  # FP16 weights + FP16 gradients
-    _opt_bytes = ReferenceStats.MixedPrecisionAdam.OptimizerStateBytesPerParameter
-    config_c_zero1_per_gpu = memory_from_params(params, _wg_bytes) / (tp_c * pp_c) + memory_from_params(params, _opt_bytes) / (tp_c * pp_c * dp_c)
+    config_c_zero1_per_gpu = _rc.zero1_state_per_device
 
     # ┌── 3. GUARD ────────────────────────────────────────
     check(state == 2800 * GB, "175B training state at 16 B/param should be 2.8 TB")
@@ -5425,10 +5324,11 @@ class HybridMemoryAccounting:
     """Static memory for TP-8, PP-16 hybrid parallelism."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    params = Models.Language.GPT3.parameters
-    tensor_parallel = 8
-    pipeline_parallel = 16
-    microbatches = HybridConfigFeasibility.m_c  # same microbatch count as configuration C
+    scenario = Scenarios.Gpt3ThreeDParallel16K  # TP 8 x PP 16 x DP 128, configuration C's microbatch count
+    params = scenario.workload.parameters
+    tensor_parallel = scenario.tp_size
+    pipeline_parallel = scenario.pp_size
+    microbatches = scenario.microbatches  # same microbatch count as configuration C
     simplified_optimizer_bytes_per_param = 2 * (BYTES_FP32 / param)
     full_adam_bytes_per_param = ReferenceStats.MixedPrecisionAdam.OptimizerStateBytesPerParameter  # FP32 master + 2 moments
 
@@ -5438,9 +5338,9 @@ class HybridMemoryAccounting:
     optimizer_full_adam = memory_from_params(params, full_adam_bytes_per_param)
     tp_only_static = (weights + optimizer_simplified) / tensor_parallel
     hybrid_static = (weights + optimizer_simplified) / (tensor_parallel * pipeline_parallel)
-    full_adam_hybrid_static = (2 * weights + optimizer_full_adam) / (tensor_parallel * pipeline_parallel)  # weights + FP16 gradients + master/moments
+    full_adam_hybrid_static = scenario.result.state_per_device  # weights + FP16 gradients + master/moments
     full_adam_tp_static = full_adam_hybrid_static * pipeline_parallel
-    bubble = (pipeline_parallel - 1) / (microbatches + pipeline_parallel - 1)
+    bubble = scenario.result.bubble
     replica_gpus_c = HybridConfigFeasibility.tp_c * HybridConfigFeasibility.pp_c
     depth_ratio = pipeline_parallel // HybridConfigFeasibility.pp_c
 
@@ -5608,11 +5508,11 @@ import math
 
 class DistTrainH100Capacity:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    policy_params = Models.Language.Llama2_70B.parameters
-    critic_params = Models.Language.Llama2_13B.parameters  # 13B reward and value models
+    scenario = Scenarios.Llama2_70B_PpoAlignment  # 70B policy and reference, 13B reward and value models
+    policy_params = scenario.policy.parameters
+    critic_params = scenario.critic.parameters  # 13B reward and value models
     bytes_train = ReferenceStats.MixedPrecisionAdam.TrainingStateBytesPerParameter
     bytes_infer = BYTES_FP16 / param
-    h100_mem_budget = Hardware.Cloud.H100.memory.capacity.to(GiB) * (GB / GiB)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     reward_b = critic_params.to(Bparam).magnitude
@@ -5621,15 +5521,16 @@ class DistTrainH100Capacity:
     bytes_weights_b = BYTES_FP16.to(byte).magnitude
     bytes_grad_b = BYTES_FP16.to(byte).magnitude
     bytes_adam_b = ReferenceStats.MixedPrecisionAdam.OptimizerStateBytesPerParameter.to(byte / param).magnitude
-    policy_train_mem = memory_from_params(policy_params, bytes_train)
-    ref_mem = memory_from_params(policy_params, bytes_infer)
-    reward_mem = memory_from_params(critic_params, bytes_infer)
-    value_mem = memory_from_params(critic_params, bytes_train)
-    ppo_total_mem = policy_train_mem + ref_mem + reward_mem + value_mem
-    dpo_total_mem = policy_train_mem + ref_mem
+    _r = scenario.result
+    policy_train_mem = _r.policy_state
+    ref_mem = _r.reference_weights
+    reward_mem = _r.reward_weights
+    value_mem = _r.value_state
+    ppo_total_mem = _r.ppo_total
+    dpo_total_mem = _r.dpo_total
     ppo_policy_sized_value_mem = policy_train_mem + ref_mem + reward_mem + policy_train_mem
     train_to_infer_ratio = (policy_train_mem / ref_mem).to_base_units().magnitude
-    min_gpus_mem = math.ceil((ppo_total_mem / h100_mem_budget).to_base_units().magnitude)
+    min_gpus_mem = _r.min_devices_for_ppo  # against the published 80 GB label
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(bytes_weights_b + bytes_grad_b + bytes_adam_b == bytes_train.to(byte / param).magnitude, "2 + 2 + 12 must equal 16 B/param")
@@ -5702,18 +5603,19 @@ class RLHFKVCache:
     """Generation-phase FP16 KV-cache footprint for a 70B GQA policy."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    layers = Models.Language.Llama2_70B.layers
-    hidden_dim = Models.Language.Llama2_70B.hidden_dim
-    attention_heads = Models.Language.Llama2_70B.heads
-    kv_heads = Models.Language.Llama2_70B.kv_heads
-    seq_len = 1024
-    batch_size = 256
+    scenario = DistTrainH100Capacity.scenario  # rollouts of the 70B GQA policy
+    layers = scenario.policy.layers
+    hidden_dim = scenario.policy.hidden_dim
+    attention_heads = scenario.policy.heads
+    kv_heads = scenario.policy.kv_heads
+    seq_len = scenario.rollout_tokens
+    batch_size = scenario.rollout_sequences
     bytes_per_element = BYTES_FP16
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     head_dim = hidden_dim // attention_heads
     kv_width = kv_heads * head_dim
-    kv_total = Models.Language.Llama2_70B.get_kv_cache_size(seq_len, batch_size, BYTES_FP16)
+    kv_total = scenario.result.kv_cache
     dense_total = 2 * layers * hidden_dim * seq_len * batch_size * bytes_per_element
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -5777,44 +5679,36 @@ class RLHFBudget:
     """PPO vs. DPO resource requirements for 70B alignment."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    policy_params = Models.Language.Llama2_70B.parameters  # Llama-2 70B
-    ref_params = Models.Language.Llama2_70B.parameters  # Llama-2 70B
-    policy_b = policy_params.to(Bparam).magnitude
-    ref_b = ref_params.to(Bparam).magnitude
+    scenario = DistTrainH100Capacity.scenario  # 70B policy under TP 8 x PP 4, 8 replicas
+    policy_params = scenario.policy.parameters  # Llama-2 70B
     reward_b = DistTrainH100Capacity.reward_b  # Llama-2 13B
     value_b = DistTrainH100Capacity.value_b
     bytes_train = ReferenceStats.MixedPrecisionAdam.TrainingStateBytesPerParameter
-    bytes_infer = BYTES_FP16 / param
-    tp = 8  # scenario assumption
-    pp = 4  # scenario assumption
-    dp = 8  # scenario assumption: data-parallel replicas of the policy
+    tp = scenario.tp_size
+    pp = scenario.pp_size
+    dp = scenario.dp_size  # data-parallel replicas of the policy
     h100_mem = Hardware.Cloud.H100.memory.capacity.to(GB)  # preserve the registry byte count
-    layers = Models.Language.Llama2_70B.layers
-    kv_heads = Models.Language.Llama2_70B.kv_heads
-    hidden_dim = Models.Language.Llama2_70B.hidden_dim
-    attention_heads = Models.Language.Llama2_70B.heads
-    seq_len = 1024
-    batch_size = 256
-    head_dim = hidden_dim // attention_heads
-    kv_width = kv_heads * head_dim
-    kv_total = Models.Language.Llama2_70B.get_kv_cache_size(seq_len, batch_size, BYTES_FP16)
+    seq_len = scenario.rollout_tokens
+    batch_size = scenario.rollout_sequences
+    _r = scenario.result
+    kv_total = _r.kv_cache
     kv_total_gb_str = fmt_memory(kv_total, unit=GB, precision=1, commas=False)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    policy_mem = memory_from_params(policy_params, bytes_train)
-    ref_mem = memory_from_params(ref_params, bytes_infer)
-    n_gpus = tp * pp
-    policy_per_gpu = policy_mem / n_gpus
-    ref_per_gpu = ref_mem / n_gpus
+    policy_mem = _r.policy_state
+    ref_mem = _r.reference_weights
+    n_gpus = _r.model_parallel_devices
+    policy_per_gpu = _r.policy_per_device
+    ref_per_gpu = _r.reference_per_device
     ref_per_gpu_sep = ref_mem / tp
-    reward_mem = memory_from_params(reward_b * Bparam, bytes_infer)
-    value_mem = memory_from_params(value_b * Bparam, bytes_train)
-    ppo_total_mem = policy_mem + ref_mem + reward_mem + value_mem
-    dpo_total_mem = policy_mem + ref_mem
-    dpo_reduction_pct = ((ppo_total_mem - dpo_total_mem) / ppo_total_mem).to_base_units().magnitude
+    reward_mem = _r.reward_weights
+    value_mem = _r.value_state
+    ppo_total_mem = _r.ppo_total
+    dpo_total_mem = _r.dpo_total
+    dpo_reduction_pct = _r.dpo_reduction
     static_per_gpu = policy_per_gpu + ref_per_gpu
     remaining = h100_mem - static_per_gpu
-    kv_per_gpu = kv_total / n_gpus
+    kv_per_gpu = _r.kv_per_device
     remaining_after_kv = remaining - kv_per_gpu
     gen_phase_pct = 60
     train_phase_pct = 100 - gen_phase_pct
@@ -6207,12 +6101,13 @@ from mlsysim.fmt import check, fmt_percent
 
 class MfuScalingPitfall:
     # ┌── 1. LOAD ─────────────────────────────────────────
-    local_mfu = CommScalingMath.local_efficiency_pct / 100  # single-node MFU before communication
-    eta = HybridConfigFeasibility.config_b_overlap_efficiency
+    _layout = Scenarios.Gpt3TensorDataParallel1K  # configuration B, overlapped
+    local_mfu = _layout.local_efficiency  # single-node MFU before communication
+    eta = _layout.result.efficiency
 
     # ┌── 2. EXECUTE ──────────────────────────────────────
-    fleet_mfu = local_mfu * eta
-    double_counted = fleet_mfu * eta
+    fleet_mfu = _layout.result.fleet_mfu
+    double_counted = _layout.result.double_counted_mfu
 
     # ┌── 3. GUARD ────────────────────────────────────────
     check(double_counted < fleet_mfu < local_mfu, "Each multiplication by eta must lower the estimate")
