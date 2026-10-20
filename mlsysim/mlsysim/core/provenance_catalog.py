@@ -3737,3 +3737,72 @@ NTSB_HAR_17_02 = _lit(
     notes=("The car's speed just before impact was 74 mph, with Traffic-Aware Cruise Control and "
            "Autosteer active (p. 2). Read for the Sensor Perception lecture plan, 2026-10-19."),
 )
+
+# --- Grounded intent sources (added 2026-10-20) ------------------------------
+BROHAN_RT1_2023 = _lit(
+    "prov:brohan-rt1-2023",
+    "Brohan, A. et al. (2023), RT-1: Robotics Transformer for Real-World Control at Scale, RSS 2023, "
+    "arXiv:2212.06817",
+    url="https://arxiv.org/abs/2212.06817",
+    verified="2026-10-20",
+    notes=("Fig. 1(a) caption: the model outputs tokenized actions 'at 3 Hz'; Sec. 5.1: 'each action "
+           "dimension in RT-1 is discretized into 256 bins'."),
+)
+BROHAN_RT2_2023 = _lit(
+    "prov:brohan-rt2-2023",
+    "Brohan, A. et al. (2023), RT-2: Vision-Language-Action Models Transfer Web Knowledge to Robotic "
+    "Control, arXiv:2307.15818",
+    url="https://arxiv.org/abs/2307.15818",
+    verified="2026-10-20",
+    notes=("Sec. 3.3: RT-2-PaLI-X-55B 'can run at a frequency of 1-3 Hz', the 5B version 'at a "
+           "frequency of around 5 Hz', in a multi-TPU cloud service."),
+)
+OPENVLA_ACTION_BINS_2024 = _lit(
+    "prov:kim-openvla-action-bins-2024",
+    "Kim, M. J. et al. (2024), OpenVLA: An Open-Source Vision-Language-Action Model, arXiv:2406.09246",
+    url="https://arxiv.org/abs/2406.09246",
+    verified="2026-10-20",
+    notes="Sec. 3.2: each action dimension is discretized separately 'into one of 256 bins'.",
+)
+AHN_AUTORT_2024 = _lit(
+    "prov:ahn-autort-2024",
+    "Ahn, M. et al. (2024), AutoRT: Embodied Foundation Models for Large Scale Orchestration of "
+    "Robotic Agents, arXiv:2401.12963",
+    url="https://arxiv.org/abs/2401.12963",
+    verified="2026-10-20",
+    notes=("Sec. 5.3: 259 tasks from 64 scenes, a base rate of 228/259 acceptable, 200/214 after the "
+           "LLM filter, which rejected 17 of the 31 unsuitable tasks; all 14 errors arose in teleop "
+           "task sampling. The 228, 214, 200, and 17 were read from a fetched summary of the HTML, "
+           "not verbatim."),
+)
+LIU_OKROBOT_2024 = _lit(
+    "prov:liu-okrobot-2024",
+    "Liu, P. et al. (2024), OK-Robot: What Really Matters in Integrating Open-Knowledge Models for "
+    "Robotics, arXiv:2401.12202",
+    url="https://arxiv.org/abs/2401.12202",
+    verified="2026-10-20",
+    notes=("Fig. 1 caption: 58.5% success across 10 unseen cluttered homes and 82.4% in decluttered "
+           "ones (verified). The failure-analysis counts are read from Fig. 4 (an image, three "
+           "cleanup levels pooled to 375 trials) as transcribed by the lecture authors on "
+           "2026-10-19; the text states 171 trials for the as-found homes, so the counts were not "
+           "re-verified against the text."),
+)
+REN_KNOWNO_2023 = _lit(
+    "prov:ren-knowno-2023",
+    "Ren, A. Z. et al. (2023), Robots That Ask for Help: Uncertainty Alignment for Large Language "
+    "Model Planners (KnowNo), CoRL 2023, arXiv:2307.01928",
+    url="https://arxiv.org/abs/2307.01928",
+    verified="2026-10-20",
+    notes=("Table 2, hardware mobile manipulation: KnowNo success 0.76 and help 0.67, Simple Set 0.75 "
+           "and 0.81, No Help 0.51 (read from a fetched summary). The 0.85 target success and the "
+           "Fig. 1 threshold 0.21 are as transcribed by the lecture authors; Fig. 1 is an image."),
+)
+BOHANNON_WALKING_1997 = _lit(
+    "prov:bohannon-walking-1997",
+    "Bohannon, R. W. (1997), Comfortable and maximum walking speed of adults aged 20-79 years: "
+    "reference values and determinants, Age and Ageing 26(1):15-19",
+    url="https://academic.oup.com/ageing/article/26/1/15/39390",
+    verified="2026-10-20",
+    notes=("Reference table (cm/s) as reproduced by Shirley Ryan AbilityLab's 10 Meter Walk Test page; "
+           "the abstract confirms 253.3 cm/s maximum for men in their twenties."),
+)

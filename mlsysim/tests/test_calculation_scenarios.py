@@ -3516,3 +3516,64 @@ def test_sensor_perception_error_scales():
     assert (k.min_count, k.rank, k.rank_from_top) == (99, 991, 10)
     assert Scenarios.DenseFogVisibility.result.visibility_range.to("m").magnitude == approx(59.915)
     assert Scenarios.AluminumLinkWarming.result.expansion.to("mm").magnitude == approx(0.231)
+
+
+# --- Grounded intent: the intent lease and its gates (added 2026-10-20) -------
+
+def test_conveyor_mug_intent_cadence():
+    c = Scenarios.ConveyorMugIntentCadence.result
+    assert c.margin.to("mm").magnitude == approx(12.0)
+    assert c.untracked_horizon.to("ms").magnitude == approx(60.0)
+    assert c.tracked_horizon.to("ms").magnitude == approx(219.089023)
+    assert c.intent_period.to("ms").magnitude == approx(500.0)
+    assert c.error_at_period.to("mm").magnitude == approx(103.0)
+    assert c.excess_at_period.to("mm").magnitude == approx(88.0)
+    assert c.renewal_age == c.intent_period + Scenarios.ConveyorMugIntentCadence.machine.intent_inference_latency
+    assert c.renewal_speed_ceiling.to("mm/s").magnitude == approx(c.margin.magnitude / c.renewal_age.to("s").magnitude)
+    assert c.stall_error_untracked.to("mm").magnitude == approx(43.0)
+    assert c.stall_error_tracked.to("mm").magnitude == approx(13.0)
+    assert c.stop_onset.to("ms").magnitude == approx(22.0)
+    assert Scenarios.ConveyorMugSettlingDrift.result.untracked_horizon.to("ms").magnitude == approx(600.0)
+    assert Scenarios.ConveyorMugSlowBelt.result.untracked_horizon.to("ms").magnitude == approx(240.0)
+
+
+def test_conveyor_mug_reach_occupancy_and_lease_expiry():
+    r = Scenarios.ConveyorMugDynamicReach.result
+    assert r.transit_floor.to("ms").magnitude == approx(300.0)
+    assert r.reach_untracked.to("mm").magnitude == approx(60.0)
+    assert not r.fits and r.fresh_captures == 2
+    o = Scenarios.AisleCoworkerForwardOccupancy.result
+    assert o.growth_untracked.to("mm").magnitude == approx(96.0)
+    assert o.growth_tracked.to("mm").magnitude == approx(350.542437)
+    assert o.growth_forecast.to("m").magnitude == approx(3.2)
+    assert o.aisle_span_horizon.to("ms").magnitude == approx(812.5)
+    e = Scenarios.ConveyorMugIntentLeaseExpiry.result
+    assert e.credible_deceleration.to("m/s**2").magnitude == approx(3.079710)
+    assert e.stop_distance.to("mm").magnitude == approx(184.352941)
+    assert e.stopping_deadline.to("ms").magnitude == approx(115.647059)
+    assert (e.binding_untracked, e.binding_tracked) == ("evidence", "administrative")
+    assert e.expiry_tracked.to("ms").magnitude == approx(100.0)
+
+
+def test_referent_sets_confidence_region_and_latch_stall():
+    s = Scenarios.MugJarReferentSet.result
+    assert s.normalized == approx([0.563636, 0.436364], rel=1e-5)
+    assert s.entropy == approx(0.685026, rel=1e-5) and s.rank == 181
+    assert s.set_size == 2 and s.refuse
+    low = Scenarios.MugJarReferentSetLowJar.result
+    assert low.set_size == 1 and low.normalized[1] == approx(0.138889, rel=1e-5)
+    alone = Scenarios.JarAloneReferentSet.result
+    assert alone.normalized == [1.0] and alone.set_size == 1 and alone.entropy == 0.0
+    g = Scenarios.DistantHandleConfidenceRegion.result
+    assert g.quantile == approx(7.814728, rel=1e-6)
+    assert [a.to("mm").magnitude for a in g.semi_axes] == approx([11.181934, 13.977417, 33.545802], rel=1e-6)
+    assert g.axes_within == 2
+    x = Scenarios.LatchUnbrakedStall
+    assert x.force_at_brake_onset_guarded.to("N").magnitude == approx(39.0)
+    assert x.compression_left_guarded.to("mm").magnitude == approx(0.1525)
+    assert x.stall_travel.to("mm").magnitude == approx(6.0)
+    assert x.stall_force.to("N").magnitude == approx(2400.0)
+    assert x.stall_over_limit == approx(24.0)
+    gs = Scenarios.ConveyorMugGoalSetOffsets
+    assert gs.norms == approx([0.666667, 1.333333], rel=1e-5) and gs.inside == [True, False]
+
