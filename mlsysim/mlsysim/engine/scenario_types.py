@@ -1296,3 +1296,218 @@ class TokenMixScenario(BaseScenario):
         return TokenMixModel().solve([r[self.prompt_column] for r in rows],
                                      [r[self.output_column] for r in rows],
                                      f.compute_time, f.memory_time)
+# --- Collective communication (added 2026-10-20) ----------------------------
+
+class AllReduceScheduleScenario(BaseScenario):
+    """One buffer reduced by ring, simple tree, and parameter server at each of ``group_sizes``.
+
+    ``run_steps`` and ``time_saved_fraction`` price a what-if: removing that
+    share of the ring time on every step of a run.
+    """
+    message: Quantity
+    group_sizes: List[int]
+    alpha: Quantity
+    bandwidth: Quantity
+    run_steps: int = 1
+    time_saved_fraction: float = 0.0
+
+    @property
+    def result(self):
+        from .solvers import AllReduceAlgorithmModel
+        return AllReduceAlgorithmModel().solve(self.message, self.group_sizes, self.alpha, self.bandwidth)
+
+    def saved_time(self, n: int) -> Quantity:
+        """Ring time removed per step at group size ``n``."""
+        return (self.result.ring_time[n] * self.time_saved_fraction).to("second")
+
+    def saved_device_hours(self, n: int) -> float:
+        """Device-hours the what-if saves over the run at group size ``n``."""
+        return (self.saved_time(n) * self.run_steps * n).to("hour").magnitude
+
+
+class MessageFusionScenario(BaseScenario):
+    """``count`` small messages sent one by one against one fused message on the same path.
+
+    Each small message is far below ``n* = alpha beta``, so separately each
+    costs its startup alone (the byte term is dropped); fused, the batch pays
+    one startup plus its bytes.
+    """
+    alpha: Quantity
+    bandwidth: Quantity
+    message: Quantity
+    count: int
+
+    @property
+    def crossover(self) -> Quantity:
+        return self.alpha * self.bandwidth
+
+    @property
+    def fused_message(self) -> Quantity:
+        return self.count * self.message
+
+    @property
+    def separate_time(self) -> Quantity:
+        return self.count * self.alpha
+
+    @property
+    def fused_time(self) -> Quantity:
+        return self.alpha + self.fused_message / self.bandwidth
+
+    @property
+    def speedup(self) -> float:
+        return (self.separate_time / self.fused_time).to_base_units().magnitude
+
+
+class HierarchicalAllReduceScenario(BaseScenario):
+    """A buffer AllReduced over ``n_nodes`` nodes of ``gpus_per_node`` GPUs, in three phases or one flat ring."""
+    message: Quantity
+    n_nodes: int
+    gpus_per_node: int
+    intra_bandwidth: Quantity      # per direction, inside the node
+    inter_bandwidth: Quantity      # one port per GPU, across nodes
+    inter_alpha: Quantity
+
+    @property
+    def n_devices(self) -> int:
+        return self.n_nodes * self.gpus_per_node
+
+    @property
+    def result(self):
+        from .solvers import HierarchicalAllReduceModel
+        return HierarchicalAllReduceModel().solve(self.message, self.n_nodes, self.gpus_per_node,
+                                                  self.intra_bandwidth, self.inter_bandwidth, self.inter_alpha)
+
+
+class AllToAllDispatchScenario(BaseScenario):
+    """One expert-parallel dispatch: ``total_tokens`` of ``hidden_dim`` values over ``n_devices`` holding ``n_experts``."""
+    total_tokens: int
+    n_devices: int
+    n_experts: int
+    hidden_dim: int
+    bytes_per_element: Quantity
+    alpha: Quantity
+    bandwidth: Quantity
+    receive_skew: float = 1.0      # remote tokens at the hottest receiver over the uniform load
+
+    @property
+    def result(self):
+        from .solvers import AllToAllDispatchModel
+        return AllToAllDispatchModel().solve(self.total_tokens, self.n_devices, self.n_experts, self.hidden_dim,
+                                             self.bytes_per_element, self.alpha, self.bandwidth, self.receive_skew)
+
+
+class RingTraceScenario(BaseScenario):
+    """A ring AllReduce traced step by step on one short integer vector per GPU."""
+    vectors: List[List[int]]
+
+    @property
+    def n_devices(self) -> int:
+        return len(self.vectors)
+
+    @property
+    def result(self):
+        from .solvers import RingTraceModel
+        return RingTraceModel().solve(self.vectors)
+
+
+class ErrorFeedbackScenario(BaseScenario):
+    """A rounding compressor applied to a gradient sequence, with and without error feedback."""
+    gradients: List[float]
+
+    @property
+    def result(self):
+        from .solvers import ErrorFeedbackModel
+        return ErrorFeedbackModel().solve(self.gradients)
+
+
+class CompressionPaybackScenario(BaseScenario):
+    """One synchronization compressed by ``compression_ratio`` at a codec cost of ``codec_time``.
+
+    Compression pays when the codec costs less than the transfer it removes,
+    ``codec_time < T_comm (1 - 1/r)``; ``fast_communication_time`` is the same
+    reduction on a fast link, where it does not.
+    """
+    communication_time: Quantity
+    compression_ratio: float
+    codec_time: Quantity
+    fast_communication_time: Quantity
+
+    @property
+    def compressed_time(self) -> Quantity:
+        return self.communication_time / self.compression_ratio
+
+    @property
+    def total_time(self) -> Quantity:
+        return self.compressed_time + self.codec_time
+
+    @property
+    def speedup(self) -> float:
+        return (self.communication_time / self.total_time).to_base_units().magnitude
+
+    @property
+    def saved_time(self) -> Quantity:
+        return self.communication_time - self.compressed_time
+
+    def pays(self, communication_time: Quantity) -> bool:
+        return self.codec_time < communication_time * (1 - 1 / self.compression_ratio)
+
+
+class CompressionRunScenario(BaseScenario):
+    """A run to a quality target with and without gradient compression on several networks."""
+    steps: int
+    compute_time: Quantity
+    communication_times: Dict[str, Quantity]
+    compression_ratio: float
+    step_penalty: float            # extra steps compression noise costs, as a fraction
+
+    @property
+    def result(self):
+        from .solvers import CompressionRunModel
+        return CompressionRunModel().solve(self.steps, self.compute_time, self.communication_times,
+                                           self.compression_ratio, self.step_penalty)
+
+
+class GradientEncodingScenario(BaseScenario):
+    """Encoded gradient payloads against full-width baselines: bits sent per original value.
+
+    A sparsifying encoding sends ``kept_fractions[k]`` of the values, each with
+    an index of ``index_bits[k]``. The ratios are upper bounds: scales and
+    other metadata are left out.
+    """
+    baseline_bits: Dict[str, Quantity]
+    value_bits: Dict[str, Quantity]
+    kept_fractions: Dict[str, float] = {}
+    index_bits: Dict[str, Quantity] = {}
+
+    def bits_per_value(self, encoding: str) -> Quantity:
+        kept = self.kept_fractions.get(encoding, 1.0)
+        index = self.index_bits.get(encoding, 0 * self.value_bits[encoding])
+        return kept * (self.value_bits[encoding] + index)
+
+    def ratio(self, encoding: str, baseline: str) -> float:
+        return (self.baseline_bits[baseline] / self.bits_per_value(encoding)).to("").magnitude
+
+
+class CollectiveCallsScenario(BaseScenario):
+    """Collective calls per training step of ``workload``, ``calls_per_layer`` per layer for each scheme."""
+    workload: Workload
+    calls_per_layer: Dict[str, int]
+
+    def calls(self, scheme: str) -> int:
+        return self.workload.layers * self.calls_per_layer[scheme]
+
+
+class OverlapBudgetScenario(BaseScenario):
+    """Layer-by-layer gradient AllReduce of ``workload``: sequential against overlapped with backward."""
+    workload: Workload
+    bytes_per_value: Quantity
+    backward_per_layer: Quantity   # stated, not derived
+    bucket_size: Quantity
+    time_per_bucket: Quantity
+    n_devices: int
+
+    @property
+    def result(self):
+        from .solvers import OverlapBudgetModel
+        return OverlapBudgetModel().solve(self.workload, self.bytes_per_value, self.backward_per_layer,
+                                          self.bucket_size, self.time_per_bucket)

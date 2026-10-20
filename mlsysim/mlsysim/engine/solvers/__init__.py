@@ -1,6 +1,8 @@
 """Domain-oriented MLSysIM solver implementations."""
 
 from .base import BaseOptimizer, BaseResolver, BaseSolver, ForwardModel
+from .collective import (AllReduceAlgorithmModel, AllToAllDispatchModel, CompressionRunModel, ErrorFeedbackModel,
+                         HierarchicalAllReduceModel, OverlapBudgetModel, RingTraceModel)
 from .compression import CompressionModel
 from .data import DataModel, TransformationModel
 from .distributed import DistributedModel, MoERoutingModel, ParallelismOptimizer, TopologyModel
@@ -66,6 +68,13 @@ __all__ = [
     "BisectionModel",
     "IncastModel",
     "CollectiveFitModel",
+    "AllReduceAlgorithmModel",
+    "HierarchicalAllReduceModel",
+    "AllToAllDispatchModel",
+    "RingTraceModel",
+    "ErrorFeedbackModel",
+    "CompressionRunModel",
+    "OverlapBudgetModel",
     "TrainingGrowthModel",
     "DomainComputeGapModel",
     "StoppingBudgetModel",

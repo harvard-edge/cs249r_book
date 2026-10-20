@@ -2552,3 +2552,27 @@ HUANG_2024_SELF_CORRECTION = _lit(
     verified="2026-10-18",
     notes="Accuracy in percent; read from the paper's HTML (arxiv.org/html/2310.01798v2).",
 )
+
+# --- Collective communication (added 2026-10-20) ------------------------------
+SERGEEV_HOROVOD_2018 = _lit(
+    "prov:sergeev-2018-horovod",
+    "Sergeev and Del Balso (2018), Horovod: fast and easy distributed deep learning in TensorFlow, arXiv:1802.05799",
+    url="https://arxiv.org/abs/1802.05799",
+    verified="2026-10-20",
+    notes=(
+        "Checked against arXiv v3 (HTML). Section 2: 128 NVIDIA Pascal GPUs, about half the resources lost to "
+        "communication. Section 7: Tensor Fusion up to 65 percent on many-layer models over TCP; default fusion "
+        "buffer 64 MB. Section 8: 88 percent efficiency; RDMA three to four percent (Inception V3, ResNet-101) "
+        "and 30 percent (VGG-16). In v3 the scaling bars are Figure 7 and the Timeline is Figure 6. Bar heights "
+        "and Timeline phase edges are readings of those figures (about +/-250 images/s and +/-2 ms); the "
+        "ALLREDUCE start and span are printed in the Timeline's detail pane."
+    ),
+)
+TANG_ONEBIT_ADAM_2021 = _lit(
+    "prov:tang-2021-onebit-adam",
+    "Tang et al. (2021), 1-bit Adam: communication efficient large-scale training with Adam's convergence speed, ICML",
+    url="https://arxiv.org/abs/2102.02888",
+    verified="2026-10-20",
+    notes="Abstract: communication volume reduced by up to 5x; up to 3.3x throughput for BERT-Large pretraining "
+          "and 2.9x for SQuAD fine-tuning, in experiments on up to 256 GPUs.",
+)
