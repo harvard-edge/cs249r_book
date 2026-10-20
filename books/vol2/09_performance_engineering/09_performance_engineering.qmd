@@ -100,10 +100,11 @@ from mlsysim.physics import calc_bottleneck, model_memory
 # │       41 percent BF16 MFU; ~37 percent of held capacity became progress;
 # │       128-GPU (16-node) running example, 8-way tensor parallelism per node.
 # │ How: Literature.TrainingRuns (Dubey 2024) for the Llama 3 record;
-# │      product of the two fractions; scenario constant for the example.
+# │      Scenarios.Llama3_405BGoodput16K for the product of the two
+# │      fractions; Scenarios.Llama2_70BJobFailures128 for the example's size.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature, Models, Systems
+from mlsysim import Literature, Models, Scenarios, Systems
 from mlsysim.fmt import check, fmt_count, fmt_percent, fmt_time
 
 class FleetCapacityOpening:
@@ -115,12 +116,13 @@ class FleetCapacityOpening:
     effective_time = float(Literature.TrainingRuns.Llama3_405B_EffectiveTrainingTimeFraction)  # stated lower bound
     mfu_16k = float(Literature.TrainingRuns.Llama3_405B_Mfu16K)  # BF16 MFU, Table 4
     replica_gpus = Systems.Nodes.DGX_H100.accelerators_per_node  # serving twin: one node
-    example_gpus = 128  # scenario: running training job (single home; FleetEfficiencyCalc should read this)
+    example_gpus = Scenarios.Llama2_70BJobFailures128.n_devices  # running training job (single home)
+    llama3 = Scenarios.Llama3_405BGoodput16K.result  # S = 1, R = effective time, P = MFU
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    held_to_progress = effective_time * mfu_16k  # runtime share x program share
-    runtime_loss_share = 1 - effective_time  # held time that kept no progress
-    program_loss_share = effective_time * (1 - mfu_16k)  # kept time spent below peak rate
+    held_to_progress = llama3.mpg  # runtime share x program share
+    runtime_loss_share = llama3.runtime_share  # held time that kept no progress
+    program_loss_share = llama3.program_share  # kept time spent below peak rate
     tp_width = replica_gpus  # tensor parallelism spans one node
     example_nodes = example_gpus // tp_width  # data parallelism spans the nodes
 
@@ -235,9 +237,9 @@ The three right-hand terms sum to the total gap, reflecting the rule that every 
 # │
 # │ Note: The two inputs come from different measurement windows (54-day
 # │       snapshot vs. Table 4 configuration); S1 labels the product an
-# │       estimate. Replace with GoodputDecomposition when it is registered.
+# │       estimate. Shares from Scenarios.Llama3_405BGoodput16K (GoodputModel).
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature, Models
+from mlsysim import Literature, Models, Scenarios
 from mlsysim.core.units import count
 from mlsysim.fmt import check, fmt, fmt_count, fmt_percent
 
@@ -245,15 +247,16 @@ class GoodputLossShares:
     """Capacity shares charged to the runtime and program boundaries for Llama 3 405B."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    runtime_goodput = float(Literature.TrainingRuns.Llama3_405B_EffectiveTrainingTimeFraction)  # stated lower bound
-    program_goodput = float(Literature.TrainingRuns.Llama3_405B_Mfu16K)  # BF16 MFU at 16K GPUs
+    llama3 = Scenarios.Llama3_405BGoodput16K
+    runtime_goodput = llama3.runtime  # effective training time, stated lower bound
+    program_goodput = llama3.program  # BF16 MFU at 16K GPUs
     llama_gpus = Models.Language.Llama3_405B.training_accelerators_ref.to(count).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    runtime_share = 1 - runtime_goodput  # held time that kept no progress
+    runtime_share = llama3.result.runtime_share  # held time that kept no progress
     program_gap = 1 - program_goodput  # retained time below the ideal rate, per unit retained
-    program_share = runtime_goodput * program_gap  # kept time spent below the ideal rate
-    useful_share = runtime_goodput * program_goodput  # ideal-rate progress
+    program_share = llama3.result.program_share  # kept time spent below the ideal rate
+    useful_share = llama3.result.mpg  # ideal-rate progress
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(abs(runtime_share + program_share + useful_share - 1) < 1e-9, "Loss shares and useful share must account for all held capacity")
@@ -499,49 +502,41 @@ Choosing a named ideal also determines what can be aggregated across a multi-wor
 # │      (t_node / t_fleet) x (tokens per GPU, fleet / node).
 # │
 # │ Note: Moved from S6 in pass 2 (PRUNE_PASS_FIXES) so S2 can quote the
-# │       fleet MFU. Step times and token counts are constructed scenario
-# │       assumptions. The GPU count is read from FleetCapacityOpening (S1),
-# │       the single home of the running example's size.
+# │       fleet MFU. Step times and token counts are the constructed inputs of
+# │       Scenarios.Llama2_70BFleetMfu128, which computes both MFUs.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Models, Systems
+from mlsysim import Hardware, Models, Scenarios, Systems
 from mlsysim.core.units import PFLOP, TFLOP, millisecond, ms, second
-from mlsysim.physics import calc_transformer_training_flops
 from mlsysim.fmt import MarkdownStr, check, fmt, fmt_count, fmt_flop_rate, fmt_flops, fmt_percent, fmt_time
 
 class FleetEfficiencyCalc:
     """Program goodput of the running example and its node-to-fleet split."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    n_gpus = FleetCapacityOpening.example_gpus  # running example: 128 GPUs (S1 cell)
-    node_gpus = Systems.Nodes.DGX_H100.accelerators_per_node  # one 8-GPU node
-    r_peak_per_gpu = Hardware.Cloud.H100.compute.peak_flops
-    local_tokens_per_step = 2204  # scenario assumption: node baseline tokens per step
-    fleet_tokens_per_step = 35446  # scenario assumption: 128-GPU tokens per step
-
-    # Constructed scenario times
-    t_local_step = 180.0 * ms  # scenario assumption: 8-GPU node baseline (optimizer state offloaded to host)
-    t_fleet_step = 245.0 * ms  # scenario assumption: 128-GPU job on the shared fleet
+    mfu = Scenarios.Llama2_70BFleetMfu128  # Llama 2 70B: one DGX H100 node against 128 H100s
+    n_gpus = mfu.fleet_devices  # running example: 128 GPUs (S1 cell reads the same scenario)
+    node_gpus = mfu.node_devices  # one 8-GPU node
+    r_peak_per_gpu = mfu.hardware.compute.peak_flops
+    local_tokens_per_step = mfu.node_tokens  # scenario assumption: node baseline tokens per step
+    fleet_tokens_per_step = mfu.fleet_tokens  # scenario assumption: 128-GPU tokens per step
+    t_local_step = mfu.node_step_time  # scenario assumption: node baseline (optimizer state offloaded to host)
+    t_fleet_step = mfu.fleet_step_time  # scenario assumption: 128-GPU job on the shared fleet
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    # Step 1: Useful FLOPs per step from parameters and tokens processed
-    local_flops_per_step = calc_transformer_training_flops(Models.Language.Llama2_70B.parameters, local_tokens_per_step)
-    fleet_flops_per_step = calc_transformer_training_flops(Models.Language.Llama2_70B.parameters, fleet_tokens_per_step)
-
-    # Step 2: MFU is useful FLOPs divided by peak cluster FLOPs over wall time
-    fleet_peak_flops_per_step = n_gpus * r_peak_per_gpu * t_fleet_step  # the fleet MFU denominator, surfaced in the callout
-    local_mfu = (local_flops_per_step / (node_gpus * r_peak_per_gpu * t_local_step)).to("").magnitude
-    global_mfu = (fleet_flops_per_step / (n_gpus * r_peak_per_gpu * t_fleet_step)).to("").magnitude
-
-    # Step 3: Scaling efficiency measured from the node, and the time beyond the node baseline
-    scaling_eff = global_mfu / local_mfu  # per-device throughput at N relative to the node
+    fleet_flops_per_step = mfu.fleet_useful_work  # 6 x parameters x tokens
+    fleet_peak_flops_per_step = mfu.fleet_peak_work  # the fleet MFU denominator, surfaced in the callout
+    local_mfu = mfu.node_mfu
+    global_mfu = mfu.fleet_mfu
+    scaling_eff = mfu.scaling_efficiency  # per-device throughput at N relative to the node
     relative_loss = 1 - scaling_eff  # relative MFU loss from node to fleet
     tokens_per_gpu_local = local_tokens_per_step / node_gpus
     tokens_per_gpu_fleet = fleet_tokens_per_step / n_gpus
-    extra_step = (t_fleet_step - t_local_step).to(ms)  # time per step the node never spent
-    extra_share = (extra_step / t_fleet_step).to("").magnitude
+    extra_step = mfu.extra_step_time  # time per step the node never spent
+    extra_share = mfu.extra_share
     program_loss = 1 - global_mfu  # share of retained step time below the arithmetic ideal
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(n_gpus == FleetCapacityOpening.example_gpus, "Running example size has one home (S1)")
     check(global_mfu < local_mfu, "Fleet MFU must be lower than local node MFU due to scaling overhead.")
     check(abs(tokens_per_gpu_fleet / tokens_per_gpu_local - 1) < 0.02, "Prose treats the scenario as constant work per GPU (weak scaling)")
     check(
@@ -709,39 +704,26 @@ Industry benchmark suites illustrate how a strict measurement contract operates 
 # │ Goal: Measure how much delivered performance comes from software alone.
 # │ Show: Same 8x H100 system, four MLPerf Inference rounds: GPT-J 2.7×,
 # │       Llama 2 70B 1.4×, SDXL 1.2×; ResNet-50 and BERT unchanged.
-# │ How: Offline throughput relative to each benchmark's first round in
-# │      Literature.Series.MLPerfInferenceDGXH100.
+# │ How: Offline throughput relative to each benchmark's first round, from
+# │      Scenarios.MlperfInferenceSoftwareGainsDgxH100 (the MLPerf series).
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_multiple
-
-def _offline(rows, benchmark):
-    return sorted([r for r in rows if r["benchmark"] == benchmark and r["scenario"] == "Offline"], key=lambda r: r["pub_month"])
-
-def _gain(rows, benchmark):
-    pts = _offline(rows, benchmark)
-    return pts[-1]["value"] / pts[0]["value"]
 
 class SoftwareGains:
     """Offline throughput gains of one fixed DGX H100 across MLPerf Inference rounds."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    rows = Literature.Series.MLPerfInferenceDGXH100.entries
-    benchmarks = (
-        ("gptj-99", "GPT-J 6B"),
-        ("llama2-70b-99.9", "Llama 2 70B"),
-        ("stable-diffusion-xl", "Stable Diffusion XL"),
-        ("bert-99", "BERT-Large"),
-        ("resnet50", "ResNet-50"),
-    )
+    gains = Scenarios.MlperfInferenceSoftwareGainsDgxH100
+    benchmarks = tuple(gains.benchmarks)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    gptj_gain = _gain(rows, "gptj-99")
-    llama_gain = _gain(rows, "llama2-70b-99.9")
-    sdxl_gain = _gain(rows, "stable-diffusion-xl")
-    resnet_gain = _gain(rows, "resnet50")
-    bert_gain = _gain(rows, "bert-99")
+    gptj_gain = gains.gain("gptj-99")
+    llama_gain = gains.gain("llama2-70b-99.9")
+    sdxl_gain = gains.gain("stable-diffusion-xl")
+    resnet_gain = gains.gain("resnet50")
+    bert_gain = gains.gain("bert-99")
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(2.4 <= gptj_gain <= 3.0, f"Prose says GPT-J rose ~2.7x, got {gptj_gain:.2f}.")
@@ -782,7 +764,7 @@ _months = {"v3.1": "Sep 2023", "v4.0": "Mar 2024", "v4.1": "Aug 2024", "v5.0": "
 _cols = [COLORS["RedLine"], COLORS["BlueLine"], COLORS["VioletLine"], COLORS["GreenLine"], COLORS["OrangeLine"]]
 _dy = {"bert-99": -10, "resnet50": -24}
 for (_b, _lab), _c in zip(_C.benchmarks, _cols):
-    _p = _offline(_C.rows, _b)
+    _p = _C.gains.rows(_b)
     _x = [_rounds.index(r["round"]) for r in _p]
     _y = [r["value"] / _p[0]["value"] for r in _p]
     ax.plot(_x, _y, "-o", ms=5, lw=1.8, color=_c, zorder=3)
@@ -857,7 +839,8 @@ Diagnosing the eight-GPU serving replica follows the exact same three-rung progr
 # │ Show: 8 GPUs (one DGX H100 node) to 1,024 GPUs (the reference cluster);
 # │       ~512 GB of trace data for one 5-second window across the cluster.
 # │ How: Systems.Nodes.DGX_H100.accelerators_per_node and
-# │      Scenarios.DenseLLMPretrainingReference.system.total_accelerators.
+# │      Scenarios.NsightTraceVolume1K (the reference cluster's GPUs, each
+# │      traced for one window).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt_count, fmt_memory
 
@@ -866,15 +849,17 @@ class MeasurementScaleBoundary:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     node_gpus = Systems.Nodes.DGX_H100.accelerators_per_node
-    cluster_gpus = Scenarios.DenseLLMPretrainingReference.system.total_accelerators
-    trace_per_gpu = 500 * MB  # scenario assumption: 5-second Nsight Systems trace of one GPU
+    trace = Scenarios.NsightTraceVolume1K
+    cluster_gpus = trace.devices  # the reference pretraining cluster
+    trace_per_gpu = trace.per_device  # 5-second Nsight Systems trace of one GPU (ReferenceStats)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     nodes_in_cluster = cluster_gpus // node_gpus
-    trace_fleet = (trace_per_gpu * cluster_gpus).to(GB)
+    trace_fleet = trace.total
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(nodes_in_cluster >= 100, "Cluster should span over a hundred nodes, so node-local traces miss fabric effects")
+    check(cluster_gpus == Scenarios.DenseLLMPretrainingReference.system.total_accelerators, "Trace covers the reference cluster")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     node_gpus_str = fmt_count(node_gpus, label="GPU")
@@ -1064,30 +1049,31 @@ Enforcing the complete-allocation boundary in production hinges on a single time
 # │      @sec-performance-engineering-scheduling-goodput-counts).
 # │
 # │ Note: The three snapshot shares are ReferenceStats.FleetUtilizationSnapshot,
-# │       the source ch08's GPU-hours pitfall also reads (2026-10-15).
+# │       the source ch08's GPU-hours pitfall also reads (2026-10-15); the
+# │       boundary arithmetic is Scenarios.SharedPoolSchedulingSnapshot.
 # │       GoodputDecomposition reads this cell. ch08's tier example
 # │       (500/350/280) lives in ResourceTiersExample (S2) and is not repeated.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature, ReferenceStats
+from mlsysim import Literature, Scenarios
 from mlsysim.fmt import check, fmt, fmt_percent
 
 class SchedulingGoodputSnapshot:
     """Scheduling goodput of the shared fleet in the orchestration chapter's utilization snapshot."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    snapshot = ReferenceStats.FleetUtilizationSnapshot
-    allocated_share = float(snapshot.AssignedShare)  # in-service capacity assigned to jobs
-    incomplete_gang_share = float(snapshot.IncompleteGangShare)  # capacity held by groups still waiting for members
-    input_wait_share = float(snapshot.InputWaitShare)  # capacity in complete allocations waiting for input
+    snapshot = Scenarios.SharedPoolSchedulingSnapshot
+    allocated_share = snapshot.assigned_share  # in-service capacity assigned to jobs
+    incomplete_gang_share = snapshot.incomplete_gang_share  # capacity held by groups still waiting for members
+    input_wait_share = snapshot.input_wait_share  # capacity in complete allocations waiting for input
     llama3_effective_time = float(Literature.TrainingRuns.Llama3_405B_EffectiveTrainingTimeFraction)  # stated lower bound
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    unallocated_share = 1 - allocated_share
-    scheduling_goodput = allocated_share - incomplete_gang_share  # complete allocations only
-    scheduling_loss = 1 - scheduling_goodput  # unassigned + incomplete groups
-    executing_share = scheduling_goodput - input_wait_share  # ch08's "at most" executing share
-    input_wait_of_held = input_wait_share / scheduling_goodput  # runtime-side share, read by S5
-    partial_hold_ceiling = scheduling_goodput + incomplete_gang_share  # S if every freed partial-gang device became a complete allocation
+    unallocated_share = snapshot.unassigned_share
+    scheduling_goodput = snapshot.scheduling_goodput  # complete allocations only
+    scheduling_loss = snapshot.scheduling_loss  # unassigned + incomplete groups
+    executing_share = snapshot.executing_share  # ch08's "at most" executing share
+    input_wait_of_held = snapshot.input_wait_of_held  # runtime-side share, read by S5
+    partial_hold_ceiling = snapshot.partial_hold_ceiling  # S if every freed partial-gang device became a complete allocation
     llama3_runtime_loss = 1 - llama3_effective_time  # upper bound on Llama 3's runtime loss (S = 1)
     s_loss_vs_llama3 = scheduling_loss / llama3_runtime_loss
 
@@ -1222,15 +1208,15 @@ Summing the five terms is valid only when no lost minute is counted in two terms
 # │      of held time; preemption = rate x (lost work + startup), the tax ch08
 # │      PreemptionTax computes from the same two sources.
 # │
-# │ Note: Shared sources (2026-10-15 number pass): Systems.Reliability.Recovery
-# │       (ch07 RecoveryBudget, ch08 PreemptionTax) and
-# │       ReferenceStats.ForcedPreemptionProfile (ch08 PreemptionTax). The
+# │ Note: The five terms are Scenarios.Llama2_70BRuntimeGoodput128
+# │       (RuntimeGoodputModel over Systems.Reliability.Recovery,
+# │       ReferenceStats.ForcedPreemptionProfile, and the series failure rate
+# │       of GPU + PCIe + shared NIC, Scenarios.Llama2_70BJobFailures128). The
 # │       checkpoint bandwidth is the per-job share of ch04's 1 TB/s reference
-# │       file system shared by ten jobs (guarded). The 10K references put both
-# │       terms on the full component failure rate; ch07's recovery notebook
-# │       uses the GPU-only rate (2.1 percent). Still mirrored by hand: ch07
-# │       CheckpointTradeoffInputs' series-rate composition (registry inputs,
-# │       agrees by construction). The serving twin reads
+# │       file system shared by ten jobs (guarded). The 10K references are the
+# │       same scenario with the 175B checkpoint on the 10,000-GPU cluster,
+# │       both terms on the full component failure rate; ch07's recovery
+# │       notebook uses the GPU-only rate (2.1 percent). The serving twin reads
 # │       ReferenceStats.ReplicaColdStartProfile, the same source as ch10
 # │       ColdStartTimeline (ready time = its cold start without provisioning;
 # │       ~5.7 min guarded). Requires FleetCapacityOpening
@@ -1238,37 +1224,34 @@ Summing the five terms is valid only when no lost minute is counted in two terms
 # │       Read later by S6, S8, S9, S10 (runtime_goodput, input_wait, window,
 # │       replica_*, preempt_*, startup_*, tau_*, mtbf_days_str).
 # └─────────────────────────────────────────────────────────────────────────────
-import math
-from mlsysim import Literature, Models, ReferenceStats, Systems
-from mlsysim.physics import calc_checkpoint_size, calc_young_daly_interval
+from mlsysim import Literature, Models, ReferenceStats, Scenarios, Systems
 from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_int, fmt_multiple, fmt_percent, fmt_time
 
 class RuntimeGoodputComposition:
     """Runtime loss of the running example, composed from the owners' terms on one boundary."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    n_gpus = FleetCapacityOpening.example_gpus  # running example (S1 cell)
-    gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
-    ckpt_bytes = calc_checkpoint_size(Models.Language.Llama2_70B.parameters)  # 14 B/param resumable checkpoint
-    recovery = Systems.Reliability.Recovery
+    job = Scenarios.Llama2_70BRuntimeGoodput128  # the five terms' inputs and RuntimeGoodputModel
+    n_gpus = job.failures.n_devices  # running example (S1 cell reads the same scenario)
+    gpus_per_node = job.failures.devices_per_node
+    ckpt_bytes = job.checkpoint_bytes  # 14 B/param resumable checkpoint
+    recovery = job.recovery
     ckpt_bw = float(recovery.checkpoint_write_bw_gbs) * (GB / second)  # ch07 aggregate write (and read) rate
     shared_pfs_bw = Systems.Storage.PfsOneTbPerSecond.bandwidth  # ch04 reference PFS, shared by ten jobs
     t_detect = float(recovery.detection_time_s) * second
     t_restart = float(recovery.restart_time_s) * second
     t_warmup = float(recovery.warmup_time_s) * second
-    gpu_mttf_h = float(Systems.Reliability.Gpu.mttf_hours)
-    pcie_mttf_h = float(Systems.Reliability.PcieSwitch.mttf_hours)
-    nic_mttf_h = float(Systems.Reliability.Nic.mttf_hours)
-    input_wait = SchedulingGoodputSnapshot.input_wait_of_held  # ch04 data-stall term, via ch08 snapshot (S4 cell)
-    window = 7 * day  # scenario: one week of held time (the S3 localization window)
+    input_wait = job.input_wait  # ch04 data-stall term, via ch08 snapshot (S4 cell reads the same scenario)
+    window = job.window  # scenario: one week of held time (the S3 localization window)
     short_job = 1 * hour  # scenario: a short evaluation or debugging job, held time
     # Forced preemption: same scenario and restart steps as ch08 PreemptionTax.
-    preempt_lost = ReferenceStats.ForcedPreemptionProfile.LostWork  # work since the last checkpoint
-    preempt_rate_budget = 1 / day  # scenario: running example protected by a per-job preemption budget
+    preempt_lost = job.lost_work  # work since the last checkpoint
+    preempt_rate_budget = job.preemption_rate  # scenario: running example protected by a per-job preemption budget
     preempt_rate_unbudgeted = ReferenceStats.ForcedPreemptionProfile.UnbudgetedRate  # low-priority run, no budget
     # Owner reference sizes (ch07): 175B checkpoint on the 10,000-GPU cluster.
-    ref_ckpt_bytes = calc_checkpoint_size(Models.Language.GPT3.parameters)
     ref_n_gpus = Systems.Clusters.Training_10K.total_accelerators
+    ref_job = job.at(ref_n_gpus).variant(workload=Models.Language.GPT3)
+    ref_ckpt_bytes = ref_job.checkpoint_bytes
     # Calibration (Dubey 2024): Llama 3 405B effective training time (lower bound) and scale.
     llama_gpus = Models.Language.Llama3_405B.training_accelerators_ref.to(count).magnitude
     llama_effective = float(Literature.TrainingRuns.Llama3_405B_EffectiveTrainingTimeFraction)  # lower bound
@@ -1281,40 +1264,37 @@ class RuntimeGoodputComposition:
     replica_life_short = 1 * hour  # scenario: replica added for one burst hour
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    # Same series-rate composition as ch07's CheckpointTradeoffInputs (GPU + PCIe + shared NIC).
-    rate_per_gpu = (1 / gpu_mttf_h + 1 / pcie_mttf_h + (1 / gpus_per_node) / nic_mttf_h) / hour
-    mtbf = (1 / (n_gpus * rate_per_gpu)).to(hour)
-    t_write = (ckpt_bytes / ckpt_bw).to(second)
-    tau = calc_young_daly_interval(t_write, mtbf).to(minute)
-    ckpt_write_share = (t_write / tau).to("").magnitude  # synchronous writes
-    ckpt_rework_share = (tau / (2 * mtbf)).to("").magnitude  # expected rework
-    ckpt_waste = ckpt_write_share + ckpt_rework_share  # eq-ft-checkpoint-waste
+    r = job.result  # RuntimeGoodputModel: the five terms on held time
+    mtbf = r.mtbf
+    t_write = r.write_time
+    tau = r.interval
+    ckpt_write_share = r.write_share  # synchronous writes
+    ckpt_rework_share = r.rework_share  # expected rework
+    ckpt_waste = r.checkpoint_share  # eq-ft-checkpoint-waste
     t_load = (ckpt_bytes / ckpt_bw).to(second)
-    t_recovery = recovery.cold_restart_time(ckpt_bytes).to(minute)  # ch07 four-term budget
-    failure_term = (t_recovery / mtbf).to("").magnitude
-    t_startup = recovery.cold_restart_time(ckpt_bytes, include_detection=False).to(minute)  # launch, load, warm up
-    startup_term = (t_startup / window).to("").magnitude
+    t_recovery = r.recovery_time  # ch07 four-term budget
+    failure_term = r.recovery_share
+    t_startup = r.startup_time  # launch, load, warm up
+    startup_term = r.startup_share
     startup_short = (t_startup / short_job).to("").magnitude
-    preempt_tax = (preempt_lost + t_startup).to(minute)  # lost work + one startup (ch08)
-    preempt_term = (preempt_rate_budget * preempt_tax).to("").magnitude
+    preempt_tax = r.preemption_cost  # lost work + one startup (ch08)
+    preempt_term = r.preemption_share
     preempt_term_unbudgeted = (preempt_rate_unbudgeted * preempt_tax).to("").magnitude
-    runtime_loss = startup_term + input_wait + ckpt_waste + failure_term + preempt_term
-    runtime_goodput = 1 - runtime_loss
-    failure_side = ckpt_waste + failure_term
+    runtime_loss = r.runtime_loss
+    runtime_goodput = r.runtime_goodput
+    failure_side = r.failure_side
     input_preempt = input_wait + preempt_term
     input_vs_failure = input_wait / failure_side  # input lever vs checkpoint + recovery levers
     # Coupling: forced preemptions also discard work since the last checkpoint.
-    mtbf_interrupt = (1 / (1 / mtbf + preempt_rate_budget)).to(hour)
-    tau_interrupt = calc_young_daly_interval(t_write, mtbf_interrupt).to(minute)
-    # Owner reference sizes at 10,000 GPUs, recomputed from ch07's inputs.
-    ref_mtbf = (1 / (ref_n_gpus * rate_per_gpu)).to(hour)
-    ref_t_write = (ref_ckpt_bytes / ckpt_bw).to(second)
-    ref_tau = calc_young_daly_interval(ref_t_write, ref_mtbf)
-    ref_ckpt_waste = (ref_t_write / ref_tau + ref_tau / (2 * ref_mtbf)).to("").magnitude
-    ref_t_recovery = recovery.cold_restart_time(ref_ckpt_bytes).to(minute)
+    mtbf_interrupt = r.interruption_interval
+    tau_interrupt = r.interruption_checkpoint_interval
+    # Owner reference sizes at 10,000 GPUs: the same model on ch07's 175B checkpoint.
+    rr = ref_job.result
+    ref_ckpt_waste = rr.checkpoint_share
+    ref_t_recovery = rr.recovery_time
     # Same failure basis as ref_ckpt_waste (full component series rate), so the two add.
-    ref_failure_term = (ref_t_recovery / ref_mtbf).to("").magnitude
-    ref_failure_side = ref_ckpt_waste + ref_failure_term
+    ref_failure_term = rr.recovery_share
+    ref_failure_side = rr.failure_side
     llama_scale = llama_gpus / n_gpus
     # Serving twin: load and warmup share of a replica's held time.
     replica_fetch = (replica_artifact / replica_fetch_bw).to(minute)
@@ -1323,7 +1303,8 @@ class RuntimeGoodputComposition:
     replica_share_short = (replica_ready / replica_life_short).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(n_gpus == 128, "Running example is 128 GPUs (S1)")
+    check(n_gpus == FleetCapacityOpening.example_gpus == 128, "Running example is 128 GPUs (S1)")
+    check(input_wait == SchedulingGoodputSnapshot.input_wait_of_held, "Input waits come from the S4 snapshot")
     check(
         abs((shared_pfs_bw / 10 - ckpt_bw).to(GB / second).magnitude) < 1e-9,
         "Notebook: the job's checkpoint bandwidth is a tenth of ch04's shared 1 TB/s file system",
@@ -1445,7 +1426,7 @@ At the `{python} RuntimeGoodputComposition.ref_n_gpus_str`-GPU scale analyzed in
 # │       percent (R ~ 0.82), nearly twice the Llama 3 bound of 10 percent.
 # │       Checkpoint waste and recovery together pass input waits near
 # │       13,000 GPUs.
-# │ How: RuntimeGoodputComposition's EXECUTE block re-run per size: system
+# │ How: Scenarios.Llama2_70BRuntimeGoodput128 swept over N (.sweep): system
 # │      MTBF = 1 / (N x per-GPU series rate), Young-Daly interval recomputed
 # │      at each N with the 70B checkpoint write held fixed, recovery budget
 # │      fixed; startup, input wait, and preemption held at the example's.
@@ -1459,7 +1440,6 @@ At the `{python} RuntimeGoodputComposition.ref_n_gpus_str`-GPU scale analyzed in
 # │          crossover_gpus, llama_loss_bound,
 # │          *_str for the caption and prose.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.physics import calc_young_daly_interval
 from mlsysim.fmt import check, fmt, fmt_int, fmt_percent
 
 class RuntimeLossScaling:
@@ -1467,39 +1447,27 @@ class RuntimeLossScaling:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     RG = RuntimeGoodputComposition
+    job = RG.job  # Scenarios.Llama2_70BRuntimeGoodput128: 70B checkpoint and recovery held fixed
     n_min = RG.n_gpus  # running example (S1)
     n_max = RG.llama_gpus  # Llama 3 405B scale (Dubey 2024)
-    rate_per_gpu = RG.rate_per_gpu  # ch07 series rate: GPU + PCIe + shared NIC
-    t_write = RG.t_write  # 70B checkpoint write, held fixed
-    t_recovery = RG.t_recovery  # ch07 four-term budget, 70B checkpoint, held fixed
     llama_loss_bound = 1 - RG.llama_effective  # Llama 3: R >= 0.90, so loss <= 0.10
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    def _terms(n, rate=rate_per_gpu, t_write=t_write, t_recovery=t_recovery):
-        """Checkpoint waste at the Young-Daly interval and recovery share for n devices."""
-        mtbf = (1 / (n * rate)).to(hour)
-        tau = calc_young_daly_interval(t_write, mtbf)
-        ckpt = (t_write / tau + tau / (2 * mtbf)).to("").magnitude
-        fail = (t_recovery / mtbf).to("").magnitude
-        return ckpt, fail
-
-    sizes, ckpt_waste, failure_term = [], [], []
+    sizes = []
     n = n_min
     while n <= n_max:  # each doubling from 128 to 16,384
-        c, f = _terms(n)
         sizes.append(int(n))
-        ckpt_waste.append(c)
-        failure_term.append(f)
         n *= 2
-    input_wait = [RG.input_wait] * len(sizes)  # held at the example's (S4 snapshot)
-    preempt_term = [RG.preempt_term] * len(sizes)  # held at the example's budget
-    startup_term = [RG.startup_term] * len(sizes)  # one launch per week, held
-    failure_side = [c + f for c, f in zip(ckpt_waste, failure_term)]
-    runtime_loss = [i + p + s + fs for i, p, s, fs in zip(input_wait, preempt_term, startup_term, failure_side)]
+    sweep = job.sweep(sizes)
+    ckpt_waste = [r.checkpoint_share for r in sweep.values()]
+    failure_term = [r.recovery_share for r in sweep.values()]
+    input_wait = [r.input_wait_share for r in sweep.values()]  # held at the example's (S4 snapshot)
+    preempt_term = [r.preemption_share for r in sweep.values()]  # held at the example's budget
+    startup_term = [r.startup_share for r in sweep.values()]  # one launch per week, held
+    failure_side = [r.failure_side for r in sweep.values()]
+    runtime_loss = [r.runtime_loss for r in sweep.values()]
     # Smallest size (to the nearest 100 GPUs) at which checkpoint + recovery pass input waits.
-    crossover_gpus = n_min
-    while sum(_terms(crossover_gpus)) <= RG.input_wait:
-        crossover_gpus += 100
+    crossover_gpus = job.crossover(100)
     loss_min, loss_max = runtime_loss[0], runtime_loss[-1]
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
@@ -2115,9 +2083,11 @@ Whereas the roofline narrows the set of candidate levers for an individual kerne
 # │ Show: ~5.2 ms per token floor; ~0.3 percent of FP16 peak at the floor
 # │       (backs S2's "well under one percent"); FP16 ridge ~295 FLOP/byte;
 # │       3.35 TB/s HBM bandwidth.
-# │ How: Per-GPU weight shard (TP = one node) streamed once per token;
+# │ How: Scenarios.Llama2_70BDecodeFloorTp8 (DecodeBoundModel with tp_size):
+# │      per-GPU weight shard (TP = one node) streamed once per token;
 # │      floor = shard bytes / HBM bandwidth; achieved FLOP rate at the
-# │      floor / peak. The floor arithmetic itself is ch02's
+# │      floor / peak. Ridge from the H100 roofline (Scenarios.
+# │      LayerNormMeasuredH100). The floor arithmetic itself is ch02's
 # │      (@sec-compute-infrastructure-memory-bandwidth-token-latency-1b38);
 # │      prose quotes only the floor and the utilization.
 # │
@@ -2126,7 +2096,7 @@ Whereas the roofline narrows the set of candidate levers for an individual kerne
 # │       a lower bound on step time. Pass 2 removed the unused intensity,
 # │       shard-size, tokens/s, and equation-display outputs.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Models, Systems
+from mlsysim import Hardware, Models, Scenarios, Systems
 from mlsysim.core.units import BYTES_FP16, GB, TB, TFLOP, byte, flop, ms, millisecond, param, second
 from mlsysim.fmt import check, fmt_arithmetic_intensity, fmt_bandwidth, fmt_percent, fmt_time
 
@@ -2134,21 +2104,23 @@ class RooflineDiagnostic:
     """Bandwidth floor of a batch-one decode step on the 70B 8x H100 replica."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────
-    tensor_parallel_degree = Systems.Nodes.DGX_H100.accelerators_per_node  # one replica = one 8-GPU node
-    params_per_gpu = Models.Language.Llama2_70B.parameters / tensor_parallel_degree
-    h100_bw = Hardware.Cloud.H100.memory.bandwidth
-    h100_fp16_peak = Hardware.Cloud.H100.compute.peak_flops  # FP16 tensor peak (989 TFLOP/s)
+    decode = Scenarios.Llama2_70BDecodeFloorTp8  # Llama 2 70B, FP16, batch one, TP = one 8-GPU node
+    tensor_parallel_degree = decode.tp_size  # one replica = one 8-GPU node
+    h100_bw = decode.hardware.memory.bandwidth
+    h100_fp16_peak = decode.hardware.compute.peak_flops  # FP16 tensor peak (989 TFLOP/s)
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    flops = 2 * params_per_gpu * (flop / param)
-    weight_qty = params_per_gpu * (BYTES_FP16 / param)
-    arith_intensity = (flops / weight_qty).to(flop / byte)
-    decode_time = (weight_qty / h100_bw).to(ms)
-    achieved_flop_rate = (flops / decode_time).to(TFLOP / second)
+    d = decode.result  # DecodeBoundModel on one GPU's shard
+    arith_intensity = d.intensity.to(flop / byte)
+    decode_time = d.memory_time.to(ms)
+    achieved_flop_rate = (d.flops_per_step / decode_time).to(TFLOP / second)
     achieved_fp16_util = (achieved_flop_rate / h100_fp16_peak).to("").magnitude
-    h100_ridge = (h100_fp16_peak / h100_bw).to(flop / byte)
+    h100_ridge = Scenarios.LayerNormMeasuredH100.ridge.to(flop / byte)  # H100 FP16 roofline ridge
 
     # ┌── 3. GUARD ─────────────────────────────────────────
+    check(tensor_parallel_degree == Systems.Nodes.DGX_H100.accelerators_per_node, "One replica spans one 8-GPU node")
+    check(d.bottleneck == "Memory", f"Batch-one decode should be bandwidth-bound, got {d.bottleneck}")
+    check(abs(d.peak_fraction - achieved_fp16_util) < 1e-9, "At the floor, attainable rate over peak equals the achieved share")
     check(abs(arith_intensity - 1.0 * flop / byte) < 0.01 * flop / byte, f"AI should be 1.0 FLOP/byte, got {arith_intensity:~P}")
     check(5 * ms < decode_time < 6 * ms, f"Decode time should be ~5.2 ms, got {fmt_time(decode_time, millisecond, precision=1, commas=False)}")
     check(achieved_fp16_util < 0.004, f"Decode should use less than 0.4 percent of H100 FP16 peak, got {achieved_fp16_util:.4f}")
@@ -2174,8 +2146,9 @@ class RooflineDiagnostic:
 # │       from its counter readings.
 # │ Show: 5 TFLOP/s and 2.8 TB/s achieved -> ~1.8 FLOP/byte, far below the
 # │       ~295 FLOP/byte ridge; ~84% of peak HBM bandwidth.
-# │ How: measured intensity = achieved FLOP rate / achieved bandwidth;
-# │      bandwidth utilization = achieved / H100 peak bandwidth.
+# │ How: Scenarios.LayerNormMeasuredH100: measured intensity = achieved FLOP
+# │      rate / achieved bandwidth; bandwidth utilization = achieved / H100
+# │      peak bandwidth.
 # │
 # │ Note: The two readings are scenario assumptions (an illustrative counter
 # │       reading), labeled so in the prose. Ridge and peak bandwidth come
@@ -2194,14 +2167,15 @@ class LayerNormRoofline:
     """Measured placement of an illustrative LayerNorm kernel."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    achieved_flops = 5 * (TFLOPs / second)  # scenario assumption: counter reading for the kernel
-    achieved_bw = 2.8 * (TB / second)  # scenario assumption: achieved bandwidth reading
+    kernel = Scenarios.LayerNormMeasuredH100
+    achieved_flops = kernel.achieved_rate  # scenario assumption: counter reading for the kernel
+    achieved_bw = kernel.achieved_bandwidth  # scenario assumption: achieved bandwidth reading
     peak_bw = RooflineDiagnostic.h100_bw
     ridge = RooflineDiagnostic.h100_ridge
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    arithmetic_intensity_q = (achieved_flops / achieved_bw).to(flop / byte)
-    bandwidth_utilization = (achieved_bw / peak_bw).to("").magnitude
+    arithmetic_intensity_q = kernel.point_intensity.to(flop / byte)
+    bandwidth_utilization = kernel.bandwidth_utilization
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
     check(1.7 < arithmetic_intensity_q.magnitude < 1.9, f"AI: expected ~1.8, got {arithmetic_intensity_q}")
@@ -2315,40 +2289,36 @@ By contrast, intra-node collectives along the `model` axis have strict serial de
 # │      in the forward pass and two in the backward pass (Megatron-style
 # │      layout); bandwidth term only, at NVLink per-direction bandwidth.
 # │
-# │ Note: Tokens per step and step time come from FleetEfficiencyCalc (S2),
-# │       which must precede this cell. Launch and protocol latency and
+# │ Note: Scenarios.Llama2_70BNodeTensorParallelStep (TensorParallelCommModel)
+# │       reads the node step's tokens and time from the same scenario as
+# │       FleetEfficiencyCalc (S2), which must precede this cell (guarded).
+# │       Launch and protocol latency and
 # │       activation recomputation are excluded, so the total is a
 # │       bandwidth-only estimate, not a measurement.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.physics import calc_ring_allreduce_data_factor
 from mlsysim.fmt import check, fmt_count, fmt_int, fmt_memory, fmt_percent, fmt_time
 
 class TensorParallelStepBudget:
     """Model-axis AllReduce time per step of the running example's node baseline."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    model = Models.Language.Llama2_70B
-    d_model = model.hidden_dim
-    n_layers = model.layers
-    tp_degree = FleetCapacityOpening.tp_width  # model axis = one node (S1 layout)
-    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth_per_direction
-    tokens_per_step = FleetEfficiencyCalc.local_tokens_per_step  # S2 scenario: node baseline tokens per step
-    t_node_step = FleetEfficiencyCalc.t_local_step  # S2 scenario: 180 ms
+    tp = Scenarios.Llama2_70BNodeTensorParallelStep  # 2 forward + 2 backward AllReduces per layer, NVLink
+    tp_degree = tp.tp_size  # model axis = one node (S1 layout)
+    tokens_per_step = tp.seq_len  # S2 scenario: node baseline tokens per step
+    t_node_step = tp.compute_time  # S2 scenario: 180 ms
     node_mfu = FleetEfficiencyCalc.local_mfu
-    allreduces_fwd_per_layer = 2  # after attention and after the feed-forward block
-    allreduces_bwd_per_layer = 2  # the conjugate exchanges of the backward pass
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    payload = tokens_per_step * d_model * BYTES_FP16  # one activation tensor, 2-byte values
-    per_gpu_bytes = payload * calc_ring_allreduce_data_factor(tp_degree)
-    t_one = (per_gpu_bytes / nvlink_bw).to(microsecond)
-    allreduces_per_step = (allreduces_fwd_per_layer + allreduces_bwd_per_layer) * n_layers
-    t_step_total = (t_one * allreduces_per_step).to(ms)
+    r = tp.result  # TensorParallelCommModel, bandwidth term only
+    payload = r.payload  # one activation tensor, 2-byte values
+    allreduces_per_step = r.collectives_per_step
+    t_step_total = r.communication_time.to(ms)
     share_of_node_step = (t_step_total / t_node_step).to("").magnitude
     non_ideal_share = 1 - node_mfu  # node step time beyond its arithmetic ideal
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(tp_degree == Systems.Nodes.DGX_H100.accelerators_per_node, "Prose says the model axis spans exactly one node")
+    check(tp_degree == FleetCapacityOpening.tp_width == Systems.Nodes.DGX_H100.accelerators_per_node, "Prose says the model axis spans exactly one node")
+    check(tokens_per_step == FleetEfficiencyCalc.local_tokens_per_step and t_node_step == FleetEfficiencyCalc.t_local_step, "Same node step as S2")
     check(30 * MB < payload < 40 * MB, f"Expected ~36 MB per AllReduce, got {payload.to(MB).magnitude:.1f} MB")
     check(0.20 <= share_of_node_step <= 0.30, f"Prose says about a quarter of the node step, got {share_of_node_step:.3f}")
     check(share_of_node_step < non_ideal_share, "Prose says even fully exposed exchanges fit inside the node step's non-ideal time")
@@ -2413,8 +2383,9 @@ When a program manages multi-stream overlap manually rather than relying on a te
 # │       batch one and compare its transfer time with a launch cost.
 # │ Show: ~32.8 KB per AllReduce; ~73 ns at ~450 GB/s per-direction NVLink;
 # │       an assumed 5 us launch cost ~70x the transfer.
-# │ How: AllReduce volume = 2 * d_model * B * 2 bytes (FP16); transfer time =
-# │      volume / per-direction NVLink bandwidth.
+# │ How: Scenarios.Llama2_70BDecodeAllReduceTp8: AllReduce volume =
+# │      2 * d_model * B * 2 bytes (FP16); transfer time = volume /
+# │      per-direction NVLink bandwidth; launch = Ops.RuntimeOverheads.KernelLaunch.
 # │
 # │ Note: Pass 2 trimmed the batch-64 outputs (the decode-batch overlap window
 # │       is ch10's); tensor_parallel_degree reads the S1 layout.
@@ -2425,18 +2396,16 @@ class NvlinkH100:
     """Batch-one tensor-parallel AllReduce of the serving replica: bytes and launch cost."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    bw = Hardware.Cloud.H100.nvlink.bandwidth_per_direction  # one-way rate
-    d_model = Models.Language.Llama2_70B.hidden_dim
+    exchange = Scenarios.Llama2_70BDecodeAllReduceTp8
+    bw = exchange.bandwidth  # one-way NVLink rate
     tensor_parallel_degree = FleetCapacityOpening.replica_gpus  # one replica = one node
-    bytes_per_elem = BYTES_FP16
-    batch_small = 1
-    launch_overhead = 5 * microsecond  # scenario assumption: collective launch latency
+    launch_overhead = exchange.alpha  # collective launch latency (kernel-launch reference)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Each AllReduce moves 2 * d_model * B activations, 2 bytes each (FP16).
-    b1_vol = 2 * d_model * batch_small * bytes_per_elem
-    b1_time = (b1_vol / bw).to(nanosecond)
-    launch_to_b1_transfer_ratio = (launch_overhead / b1_time).to("").magnitude
+    b1_vol = exchange.message
+    b1_time = exchange.transfer_time
+    launch_to_b1_transfer_ratio = exchange.startup_to_transfer
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(400 * GB / second < bw < 500 * GB / second, "H100 NVLink per-direction bandwidth should be ~450 GB/s")
@@ -2657,7 +2626,8 @@ Evaluated solely by its runtime and program goodput inside its own allocation, t
 # │       per-point value P > S > R; gains at the owners' ceilings
 # │       P > S > R; Llama 3 R x P ~ 0.37 (dedicated), ~0.24 on the shared
 # │       pool; useful accelerator-hour ~3.6x the capacity price.
-# │ How: Reads every factor from the cell that sized it (no re-typed values).
+# │ How: Scenarios.Llama2_70BSharedPoolGoodput128 (GoodputModel), whose
+# │      factors are the scenarios the earlier cells read (guarded equal):
 # │      R x P = RuntimeGoodputComposition.runtime_goodput x
 # │      FleetEfficiencyCalc.global_mfu. MPG = S x R x P
 # │      (eq-perf-ml-productivity-goodput); loss shares by
@@ -2676,7 +2646,7 @@ Evaluated solely by its runtime and program goodput inside its own allocation, t
 # │       in-service (offered) accelerator-hour, so dividing it by S counts the
 # │       scheduling loss once; the registry entry's metadata should say so.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Infrastructure
+from mlsysim import Infrastructure, Scenarios
 from mlsysim.core.units import USD, hour
 from mlsysim.fmt import check, fmt, fmt_multiple, fmt_percent, fmt_usd
 
@@ -2684,51 +2654,58 @@ class GoodputDecomposition:
     """Running example composed across all three goodput factors, with the Llama 3 layer and the price of useful work."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    sched = SchedulingGoodputSnapshot.scheduling_goodput  # S: pool's, inherited by the job (illustrative)
-    runtime = RuntimeGoodputComposition.runtime_goodput  # R: five-term composition (S5)
-    program = FleetEfficiencyCalc.global_mfu  # P: fleet MFU of retained steps (S2 cell, S6 notebook)
-    sched_ceiling = SchedulingGoodputSnapshot.partial_hold_ceiling  # S if every freed partial-gang device is filled
+    pool = Scenarios.Llama2_70BSharedPoolGoodput128  # S, R, P and each owner's ceiling, priced at the fleet rate
+    sched = pool.scheduling  # S: pool's, inherited by the job (illustrative)
+    runtime = pool.runtime  # R: five-term composition (S5)
+    program = pool.program  # P: fleet MFU of retained steps (S2 cell, S6 notebook)
+    sched_ceiling = pool.ceilings["S"]  # S if every freed partial-gang device is filled
+    runtime_ceiling = pool.ceilings["R"]  # R with every input wait removed
+    program_ceiling = pool.ceilings["P"]  # P with every loss beyond the node baseline removed
     input_wait = RuntimeGoodputComposition.input_wait  # largest runtime term (S5)
-    program_ceiling = FleetEfficiencyCalc.local_mfu  # P with every loss beyond the node baseline removed
     llama_runtime = GoodputLossShares.runtime_goodput  # Llama 3 R (lower bound, Dubey 2024)
     llama_program = GoodputLossShares.program_goodput  # Llama 3 P (BF16 MFU at 16K GPUs)
     replica_runtime_day = 1 - RuntimeGoodputComposition.replica_share_long  # replica released once a day
     replica_runtime_hour = 1 - RuntimeGoodputComposition.replica_share_short  # replica added for one burst hour
-    price = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude  # internal fleet rate, per in-service accelerator-hour
+    price = pool.device_hour_rate.to(USD / hour).magnitude  # internal fleet rate, per in-service accelerator-hour
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    g = pool.result  # GoodputModel
     # Products: the job's own R x P and the pool-level MPG.
-    job_rp = runtime * program
-    mpg = sched * runtime * program
-    after_r = sched * runtime  # waterfall level 2 (level 1 = sched, level 3 = mpg)
+    job_rp = g.job_product
+    mpg = g.mpg
+    after_r = g.after_runtime  # waterfall level 2 (level 1 = sched, level 3 = mpg)
     # Loss shares of fleet capacity (eq-perf-goodput-loss-shares).
-    s_share = 1 - sched
-    r_share = sched * (1 - runtime)
-    p_share = sched * runtime * (1 - program)
+    s_share = g.scheduling_share
+    r_share = g.runtime_share
+    p_share = g.program_share
     # Value of one point of each factor = product of the other two.
-    s_point = runtime * program
-    r_point = sched * program
-    p_point = sched * runtime
+    s_point = g.point_value["S"]
+    r_point = g.point_value["R"]
+    p_point = g.point_value["P"]
     # Gain at the ceilings the owning sections gave.
-    runtime_ceiling = runtime + input_wait
-    s_ceiling_gain = (sched_ceiling - sched) * s_point
-    r_ceiling_gain = (runtime_ceiling - runtime) * r_point
-    p_ceiling_gain = (program_ceiling - program) * p_point
-    s_full_gain = (1 - sched) * s_point  # gain from perfect S (read by the S10 fallacy on fixing the largest loss first)
-    s_ceiling_rel = sched_ceiling / sched - 1
-    r_ceiling_rel = runtime_ceiling / runtime - 1
-    p_ceiling_rel = program_ceiling / program - 1
-    p_ceiling_cost_cut = 1 - program / program_ceiling  # cost per useful unit falls by this share at the P ceiling
+    s_ceiling_gain = g.ceiling_gain["S"]
+    r_ceiling_gain = g.ceiling_gain["R"]
+    p_ceiling_gain = g.ceiling_gain["P"]
+    s_full_gain = g.full_scheduling_gain  # gain from perfect S (read by the S10 fallacy on fixing the largest loss first)
+    s_ceiling_rel = g.ceiling_ratio["S"] - 1
+    r_ceiling_rel = g.ceiling_ratio["R"] - 1
+    p_ceiling_rel = g.ceiling_ratio["P"] - 1
+    p_ceiling_cost_cut = 1 - 1 / g.ceiling_ratio["P"]  # cost per useful unit falls by this share at the P ceiling
     # Llama 3 calibration layer: dedicated (S = 1) and on the shared pool.
-    llama_rp = llama_runtime * llama_program
-    llama_shared = sched * llama_rp
+    llama_rp = Scenarios.Llama3_405BGoodput16K.result.mpg
+    llama_shared = Scenarios.Llama3_405BOnSharedPool.result.mpg
     # Price of useful work.
-    cost_mult = 1 / mpg
-    job_cost_mult = 1 / job_rp
-    useful_price = price / mpg
+    cost_mult = g.cost_multiple
+    job_cost_mult = g.job_cost_multiple
+    useful_price = g.useful_rate.to(USD / hour).magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     r2 = lambda x: round(x, 2)
+    check(sched == SchedulingGoodputSnapshot.scheduling_goodput and runtime == RuntimeGoodputComposition.runtime_goodput
+          and program == FleetEfficiencyCalc.global_mfu, "Factors are the ones S4, S5, and S2 sized")
+    check(sched_ceiling == SchedulingGoodputSnapshot.partial_hold_ceiling and program_ceiling == FleetEfficiencyCalc.local_mfu
+          and abs(runtime_ceiling - (runtime + input_wait)) < 1e-12, "Ceilings are the bounds the owning sections gave")
+    check(abs(price - Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude) < 1e-12, "Priced at the fleet rate")
     check(abs(s_share + r_share + p_share + mpg - 1) < 1e-9, "Loss shares and MPG must account for all fleet capacity")
     check(abs(GoodputLossShares.useful_share - llama_rp) < 1e-9, "Llama 3 R x P must agree with S2's GoodputLossShares")
     check(abs(FleetCapacityOpening.held_to_progress - llama_rp) < 1e-9, "Llama 3 R x P must agree with S1's lighthouse")
@@ -3119,7 +3096,9 @@ Even so, every factor's ratio must be re-measured after the same change, because
 # │      one. Break-even when q_R x q_P = 1, so the affordable runtime loss
 # │      is 1 - 1/q_P.
 # │
-# │ Note: Reads every factor from GoodputDecomposition (S8). No new inputs.
+# │ Note: Reads every factor from GoodputDecomposition (S8) and the ratios
+# │       from Scenarios.Llama2_70BSharedPoolGoodput128 (GoodputModel). No new
+# │       inputs.
 # │       runtime_floor stays in EXECUTE for the planned iso-goodput figure;
 # │       the prose does not display it.
 # └─────────────────────────────────────────────────────────────────────────────
@@ -3134,10 +3113,11 @@ class TradeProductRule:
     program_ceiling = GoodputDecomposition.program_ceiling  # P with every loss beyond the node baseline removed
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    q_program = program_ceiling / program  # program ratio of a lever that reaches the ceiling
+    g = GoodputDecomposition.g
+    q_program = g.ceiling_ratio["P"]  # program ratio of a lever that reaches the ceiling
     runtime_affordable = 1 - 1 / q_program  # runtime loss share at which q_R x q_P = 1
     runtime_floor = runtime * (1 - runtime_affordable)
-    runtime_headroom = 1 / runtime - 1  # largest relative gain left in R
+    runtime_headroom = g.runtime_headroom  # largest relative gain left in R
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(
@@ -3417,8 +3397,10 @@ The boundary rule determines where a recompilation is charged. A build that runs
 # │ Show: 8.33 ms per token eager; step fraction 0.635 after compilation;
 # │       ~5.3 ms per token; ~1.58x speedup.
 # │ How: GEMM time unchanged; element-wise time cut by fusion; most exposed
-# │      launch overhead removed. All shares are scenario inputs.
+# │      launch overhead removed. All shares are scenario inputs of
+# │      Scenarios.Decode13BCompilationPayback, which computes the step.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.core.units import ms
 from mlsysim.fmt import check, fmt, fmt_multiple, fmt_percent, fmt_rate, fmt_time
 
@@ -3426,28 +3408,27 @@ class CompilationDividend:
     """Constructed compilation speedup for a 13B single-GPU decode budget (input to CompilationBreakEven)."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    base_tps = 120  # scenario: eager tokens/second, 13B INT4 weights, one H100
-    elementwise_share = 0.35  # scenario: share of step time in element-wise kernels
-    launch_share = 0.15  # scenario: share of step time in launch overhead
-    gemm_share = 0.50  # scenario: share of step time in GEMM
-    fusion_reduction = 0.70  # scenario: element-wise time removed by fusion
-    launch_reduction = 0.80  # scenario: launch overhead removed by compilation
+    payback = Scenarios.Decode13BCompilationPayback  # 13B INT4 weights, one H100
+    base_tps = payback.token_rate.to("1/second").magnitude  # scenario: eager tokens/second
+    elementwise_share = payback.shares["elementwise"]  # scenario: share of step time in element-wise kernels
+    launch_share = payback.shares["launch"]  # scenario: share of step time in launch overhead
+    gemm_share = payback.shares["matmul"]  # scenario: share of step time in GEMM
+    fusion_reduction = payback.removed["elementwise"]  # scenario: element-wise time removed by fusion
+    launch_reduction = payback.removed["launch"]  # scenario: launch overhead removed by compilation
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    _tpt = round(1000.0 / base_tps, 2)  # ms per token, rounded as the retired notebook displayed it
+    _tpt = payback.step_time.to(ms).magnitude  # ms per token, carried at the two decimals displayed
     elem_keep = 1 - fusion_reduction
     launch_keep = 1 - launch_reduction
-    step_fraction = gemm_share + elementwise_share * elem_keep + launch_share * launch_keep
-    gemm_ms = _tpt * gemm_share
-    elem_ms = _tpt * elementwise_share * elem_keep
-    launch_ms = _tpt * launch_share * launch_keep
-    new_time_ms = gemm_ms + elem_ms + launch_ms
-    new_tps = 1000.0 / new_time_ms
-    speedup = new_tps / base_tps
+    step_fraction = payback.step_fraction
+    new_time_ms = payback.compiled_step.to(ms).magnitude
+    new_tps = payback.compiled_rate.to("1/second").magnitude
+    speedup = payback.speedup
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(abs(elementwise_share + launch_share + gemm_share - 1) < 1e-9, "Budget shares must cover the step")
     check(abs(new_time_ms - _tpt * step_fraction) < 1e-9, "Notebook: compiled step = eager step x step fraction")
+    check(round(1000.0 / base_tps, 2) == _tpt, "The eager step is the token rate's inverse at two decimals")
     check(1.5 < speedup < 1.7, f"Speedup should be ~1.58, got {speedup:.2f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
@@ -3482,9 +3463,10 @@ class CompilationDividend:
 # │       build on one replica; ~12 s of pool time when 128 replicas share it;
 # │       32 GPU-hours per rollout when each replica rebuilds; a per-replica
 # │       build is a quarter of a burst-hour replica's held time.
-# │ How: break-even tokens = build time / per-token saving; minutes at the
-# │      compiled token rate; shared repayment divides by the replica count;
-# │      per-replica builds multiply by it. Build times are scenario inputs.
+# │ How: Scenarios.Decode13BCompilationPayback: break-even tokens = build
+# │      time / per-token saving; minutes at the compiled token rate; shared
+# │      repayment divides by the replica count; per-replica builds multiply
+# │      by it. Build times are scenario inputs.
 # │
 # │ Note: The 13B budget runs on one GPU, so a replica is one GPU here.
 # │       The replica count reads the running example's allocation (S1) and
@@ -3496,23 +3478,25 @@ class CompilationBreakEven:
     """Executions that repay a compilation build, per replica and across a pool."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    build_default = 1 * minute  # scenario assumption: default-mode warmup for the 13B graph
-    build_autotune = 15 * minute  # scenario assumption: autotuning search for the same graph
-    saved_per_token = (CompilationDividend._tpt - CompilationDividend.new_time_ms) * ms
-    compiled_rate = CompilationDividend.new_tps / second
-    gpus_per_replica = 1  # the constructed 13B budget runs on one GPU
-    replicas = FleetCapacityOpening.example_gpus // gpus_per_replica  # scenario: replicas filling an allocation the size of the running example
-    replica_life_hour = RuntimeGoodputComposition.replica_life_short  # replica added for one burst hour (S5)
+    payback = CompilationDividend.payback
+    build_default = payback.builds["default"]  # scenario assumption: default-mode warmup for the 13B graph
+    build_autotune = payback.builds["autotune"]  # scenario assumption: autotuning search for the same graph
+    saved_per_token = payback.saved_per_token
+    gpus_per_replica = payback.gpus_per_replica  # the constructed 13B budget runs on one GPU
+    replicas = payback.replicas  # scenario: replicas filling an allocation the size of the running example
+    replica_life_hour = payback.replica_life  # replica added for one burst hour
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    tokens_default = (build_default / saved_per_token).to("").magnitude
-    tokens_autotune = (build_autotune / saved_per_token).to("").magnitude
-    minutes_autotune = (tokens_autotune / compiled_rate).to(minute)
-    shared_repay = (minutes_autotune / replicas).to(second)  # one build, savings on every replica
-    rollout_build_gpu_h = (build_autotune * gpus_per_replica * replicas).to(hour).magnitude  # every replica rebuilds
-    build_share_hour = (build_autotune / replica_life_hour).to("").magnitude
+    tokens_default = payback.tokens_to_repay("default")
+    tokens_autotune = payback.tokens_to_repay("autotune")
+    minutes_autotune = payback.time_to_repay("autotune")
+    shared_repay = payback.shared_repay("autotune")  # one build, savings on every replica
+    rollout_build_gpu_h = payback.rollout_cost("autotune").to(hour).magnitude  # every replica rebuilds
+    build_share_hour = payback.build_share("autotune")
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(replicas == FleetCapacityOpening.example_gpus // gpus_per_replica, "Replicas fill an allocation the size of the running example")
+    check(replica_life_hour == RuntimeGoodputComposition.replica_life_short, "Same burst-hour replica as S5")
     check(tokens_autotune > 10 * tokens_default, "A longer search needs proportionally more replays to repay")
     check(10 * minute < minutes_autotune < 60 * minute, "Autotune build should repay within an hour of single-stream generation")
     check(shared_repay < 1 * minute, "Prose: a shared artifact repays within a minute of pool time")
