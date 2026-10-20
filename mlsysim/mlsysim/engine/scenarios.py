@@ -1,10 +1,12 @@
 from pydantic import BaseModel, ConfigDict
 from typing import Optional, Union
+from statistics import NormalDist as _NormalDist  # ML operations A/B sizing (added 2026-10-20)
 from ..core.units import Q_
 from ..core.units import DAYS_PER_YEAR as _DAYS_PER_YEAR  # added 2026-10-20
 from ..core.units import HOURS_PER_YEAR as _HOURS_PER_YEAR  # sustainability (added 2026-10-20)
 from ..core.types import Quantity
 from ..models.types import Workload
+from ..models.types import TransformerWorkload as _TransformerWorkload  # fine-tuning (added 2026-10-20)
 from ..hardware.types import HardwareNode
 from ..systems.types import Fleet
 from ..core.exceptions import OOMError, SLAViolation
@@ -32,10 +34,14 @@ from ..ops import Ops as _Ops
 from ..embodied.registry import Embodied as _Embodied  # embodied stopping scenarios (2026-10-20)
 from ..agents.registry import Agents as _Agents  # agent harness profiles (added 2026-10-20)
 from . import scenario_types as _st
+from .serving_profile import resnet50_h100_profile as _resnet50_h100_profile  # quantization (added 2026-10-20)
 from ..core.units import BYTES_ADAM_MOMENTS as _BYTES_ADAM_MOMENTS  # neural computation (added 2026-10-20)
 from ..core.units import FLOAT_FORMAT_BITS as _FLOAT_FORMAT_BITS, INT16_BITS as _INT16_BITS  # added 2026-10-20
 from ..core.units import COLOR_DEPTH_8BIT as _COLOR_DEPTH_8BIT  # added 2026-10-20
 from ..core.units import DAYS_PER_MONTH as _DAYS_PER_MONTH  # added 2026-10-20
+# iPhone XS GPU drift on a warming phone (Lee et al. 2019, Figure 8; added 2026-10-20)
+_LEE_XS_GPU = next(r for r in _Literature.Series.LeeSustainedLatency.entries
+                   if r["device"] == "iPhone XS" and r["processor"] == "GPU")
 from ..core.units import BITS_PER_BYTE as _BITS_PER_BYTE  # security and privacy (added 2026-10-20)
 from ..physics.statistics import calc_ks_coefficient as _calc_ks_coefficient  # robust AI (added 2026-10-20)
 # Deployment paradigms block (added 2026-10-20)
@@ -1091,11 +1097,11 @@ class Scenarios(Registry):
 
     HydraulicFluidSlickTraction = _st.TractionLossScenario(
         name="Hydraulic fluid on a dry concrete floor under the warehouse base",
-        description="Illustrative tire-floor pair, about 0.8 dry and 0.2 with hydraulic fluid, "
-                    "against the running machine's credible deceleration with all weight on the "
-                    "driven wheels.",
-        mu_before=0.8,  # scenario assumption: tire on dry concrete (illustrative)
-        mu_after=0.2,  # scenario assumption: tire on spilled hydraulic fluid (illustrative)
+        description="The warehouse aisle's illustrative floor friction, dry (0.60) and under a "
+                    "clear oil film (0.05), against the running machine's credible deceleration "
+                    "with all weight on the driven wheels.",
+        mu_before=_Embodied.Scenario.WarehouseAisle.mu_dry,  # the aisle's dry floor (illustrative)
+        mu_after=_Embodied.Scenario.WarehouseAisle.mu_oil_film,  # the aisle's oil film (illustrative)
         deceleration=_Embodied.Scenario.WarehouseAisle.a_brake,
     )
 
@@ -6496,6 +6502,107 @@ class Scenarios(Registry):
         overhead_moderate=30.0,           # scenario assumption
     )
 
+    # --- Fairness gates on a credit service and a ranking service (added 2026-10-20) -----
+    # A constructed credit service whose two confusion matrices make every
+    # fairness criterion computable, the price and stability of closing its
+    # TPR gap, the data a per-group gate needs, published COMPAS rates against
+    # Chouldechova's identity, and a ranking service's exploration slice.
+    CreditServiceTwoGroups = _st.GroupConfusionScenario(
+        name="A credit service scored on 10,000 Group A and 2,000 Group B applicants",
+        description="Constructed confusion counts; half of each group would repay. Group A: TP 4,500, "
+                    "FN 500, FP 1,000, TN 4,000; Group B: TP 600, FN 400, FP 200, TN 800.",
+        groups={  # scenario assumption: per-group confusion counts
+            "A": {"tp": 4500, "fp": 1000, "fn": 500, "tn": 4000},
+            "B": {"tp": 600, "fp": 200, "fn": 400, "tn": 800},
+        },
+    )
+    CreditServiceEqualOpportunityPrice = _st.EqualOpportunityPriceScenario(
+        name="Raising Group B's TPR to Group A's by moving its threshold",
+        description="A repaid loan earns $1,500 and a default loses $3,000; the move raises Group B's "
+                    "FPR by 20 points.",
+        confusion=CreditServiceTwoGroups,
+        group="B",
+        reference_group="A",
+        repay_margin=Q_(1_500, "dollar"),  # scenario assumption: lifetime margin on a repaid loan
+        default_loss=Q_(3_000, "dollar"),  # scenario assumption: loss on a defaulted loan
+        fpr_increase=0.20,                # scenario assumption: FPR rise that closes the TPR gap
+    )
+    CreditServiceBiasFeedback = _st.BiasFeedbackScenario(
+        name="The credit service's mitigated TPR gap under quarterly retraining",
+        description="A 3.0-point gap at launch and 3.3 points at the next audit against a 5-point gate; "
+                    "sampling marginal denials refits the factor to 0.90.",
+        launch_gap=3.0,                   # scenario assumption: residual gap after mitigation, points
+        next_audit_gap=3.3,               # scenario assumption: gap at the next quarterly audit, points
+        gate=5.0,                         # scenario assumption: release gate on the TPR gap, points
+        sampled_factor=0.90,              # scenario assumption: refit factor with outcome sampling
+        unmitigated_gap=100 * CreditServiceTwoGroups.tpr("A") - 100 * CreditServiceTwoGroups.tpr("B"),
+        horizon_cycles=4,                 # one year of quarterly retraining
+    )
+    OnePercentGroupEvaluationBudget = _st.SubgroupEvaluationBudgetScenario(
+        name="Test data for a group that is 1 percent of users, error rate within one point at 95 percent",
+        description="Worst-case rate 0.5; the rounded target of 10,000 examples from the group; a gap "
+                    "between two equal groups pinned to 3.5 points.",
+        rate=0.5,                         # worst case for the binomial standard error
+        half_width=0.01,                  # scenario assumption: one percentage point
+        confidence=0.95,                  # scenario assumption
+        group_share=0.01,                 # scenario assumption: the group's share of users
+        target_per_group=10_000,          # scenario assumption: per-group target, rounded
+        gap_half_width=0.035,             # scenario assumption: an illustrative slice's interval
+    )
+    CompasPublishedRateIdentity = _st.PpvErrorRateIdentityScenario(
+        name="ProPublica's published COMPAS rates for Black and White defendants",
+        description="Base rates from the contingency tables; precision and false negative rates as "
+                    "published; the false positive rate implied by Chouldechova's identity.",
+        groups={
+            "Black": {"positives": float(_Literature.Fairness.CompasRecidivatedBlack),
+                      "total": float(_Literature.Fairness.CompasDefendantsBlack),
+                      "ppv": float(_Literature.Fairness.CompasPpvBlack),
+                      "fnr": float(_Literature.Fairness.CompasFnrBlackPct) / 100,
+                      "fpr": float(_Literature.Fairness.CompasFprBlackPct) / 100},
+            "White": {"positives": float(_Literature.Fairness.CompasRecidivatedWhite),
+                      "total": float(_Literature.Fairness.CompasDefendantsWhite),
+                      "ppv": float(_Literature.Fairness.CompasPpvWhite),
+                      "fnr": float(_Literature.Fairness.CompasFnrWhitePct) / 100,
+                      "fpr": float(_Literature.Fairness.CompasFprWhitePct) / 100},
+        },
+    )
+    SharedThresholdSixteenApplicants = _st.ThresholdPolicyScenario(
+        name="Sixteen applicants in two subgroups under two shared thresholds",
+        description="Positions along a score axis, approved below the line, as score = 1 - position; "
+                    "lines at 0.30 and 0.63 of the axis.",
+        scores={  # scenario assumption: illustrative positions, score = 1 - position
+            "A": {"qualified": [1 - x for x in (0.25, 0.35, 0.42, 0.49)],
+                  "default": [1 - x for x in (0.68, 0.75, 0.82, 0.89)]},
+            "B": {"qualified": [1 - x for x in (0.05, 0.12, 0.19, 0.42)],
+                  "default": [1 - x for x in (0.35, 0.49, 0.56, 0.75)]},
+        },
+        uniform_threshold=1 - 0.30,       # scenario assumption: the first shared line
+        alternative_threshold=1 - 0.63,   # scenario assumption: the higher-accuracy shared line
+    )
+    FairnessAccuracyFrontierSketch = _st.AccuracyFrontierScenario(
+        name="A hypothetical fairness-accuracy frontier with three candidate models",
+        description="accuracy = 0.85 + 0.10 (1 - exp(-20 x)); A unconstrained at disparity 0.18, B at "
+                    "0.05, C at strict equality.",
+        floor=0.85,                       # scenario assumption: accuracy at zero disparity
+        span=0.10,                        # scenario assumption
+        rate=20.0,                        # scenario assumption
+        candidates={"A": 0.18, "B": 0.05, "C": 0.0},  # scenario assumption
+    )
+    ClicksAgainstSatisfaction = _st.ProxyGoalGapScenario(
+        name="A ranking change that raises clicks 20 percent and lowers satisfaction 5 percent",
+        description="Both metrics normalized to a common start.",
+        proxy_change=0.20,                # scenario assumption
+        goal_change=-0.05,                # scenario assumption
+    )
+    RecommenderExplorationExposure = _st.ExplorationExposureScenario(
+        name="A ranking service: 10 million daily users, 20 items each, a 1 million item catalog",
+        description="1 percent of slots served by randomized exploration.",
+        daily_users=10_000_000,           # scenario assumption
+        slots_per_user=20,                # scenario assumption
+        catalog_items=1_000_000,          # scenario assumption
+        explore_share=0.01,               # scenario assumption
+    )
+
     # --- Durable execution (added 2026-10-20) ---------------------------------
     # One trajectory's crash-recovery costs: a group commit, full snapshots
     # against deltas, checkpoint strides on a fixed crash trace, Young's interval
@@ -7655,6 +7762,123 @@ class Scenarios(Registry):
         period=_Embodied.Scenario.WarehouseAisle.t_tick,
     )
 
+    # --- Workload placement: the permission tick against what it shares (added 2026-10-20) ---
+    # The warehouse machine's 1 kHz permission tick (site WarehouseAisle), its
+    # unloaded sub-costs, and the rejected shared-die placements that price
+    # memory queueing, miss-handling stalls, rail droop, and thermal throttling.
+    # Inputs are illustrative teaching assumptions unless a source is named.
+    WarehouseEnforcerUnloadedTick = _st.CycleBudgetScenario(
+        name="Unloaded run of the warehouse machine's 1 kHz permission check",
+        description="Sense, check, and stage sub-costs of the 135 microsecond unloaded tick on the "
+                    "discrete safety MCU.",
+        site=_Embodied.Scenario.WarehouseAisle,
+        stages=[  # scenario assumption: illustrative sub-costs
+            ("sense", Q_(40.0, "us")),               # encoders, IMU over SPI, evidence epoch
+            ("constraint check", Q_(80.0, "us")),    # kinematic and dynamic envelope
+            ("drive-frame staging", Q_(15.0, "us")),
+        ],
+    )
+    WarehouseSharedDieLoadedRead = _st.SharedDramReadScenario(
+        name="The permission tick's snapshot read behind proposer backlogs on the application SoC",
+        description="A FIFO LPDDR5 controller serves whole backlogs (a 256 KiB weight tile, a camera "
+                    "transfer, a telemetry record) before the tick's 4 KiB snapshot; addresses "
+                    "interleave across every channel.",
+        site=_Embodied.Scenario.WarehouseAisle,
+        memory_tech=_Hardware.Tech.Memory.LPDDR5_6400,
+        sense=WarehouseEnforcerUnloadedTick.stage("sense"),
+        compute_after_sense=(WarehouseEnforcerUnloadedTick.stage("constraint check")
+                             + WarehouseEnforcerUnloadedTick.stage("drive-frame staging")),
+        tile_bytes=256 * 1024,      # scenario assumption: one weight tile
+        camera_bytes=64 * 1024,     # scenario assumption
+        telemetry_bytes=32 * 1024,  # scenario assumption
+        snapshot_bytes=4 * 1024,    # scenario assumption: encoder, IMU, evidence-epoch snapshot
+        transaction_bytes=4 * 1024,  # AXI4 4 KiB burst boundary
+        bank_switches=3,            # scenario assumption: same-bank row conflicts per backlog
+    )
+    WarehouseSharedDieLoadedReadOneChannel = WarehouseSharedDieLoadedRead.variant(
+        name="The same snapshot read with backlog and read confined to one LPDDR5 channel",
+        description="Contrast case: the address mapping puts both on the snapshot's channel.",
+        one_channel=True,
+    )
+    WarehouseTickMshrStallShare = _st.StallShareScenario(
+        name="Miss-stall share of the permission tick that a 21x MSHR slowdown allows",
+        description="Measured shared-cache contention with partitioning (Valsan et al. 2016) as the "
+                    "slowdown of the tick's stalled share, against the declared WCET.",
+        site=_Embodied.Scenario.WarehouseAisle,
+        slowdown=float(_Literature.SharedHardwareInterference.ValsanCacheSlowdownMax),
+    )
+    WarehouseTickMshrStallShareAtDeadline = WarehouseTickMshrStallShare.variant(
+        name="The same 21x slowdown against the deadline less blocking and interference",
+        description="Bound = execution ceiling of the full response budget.",
+        bound=(_Embodied.Scenario.WarehouseAisle.enforcer_deadline
+               - _Embodied.Scenario.WarehouseAisle.enforcer_blocking
+               - _Embodied.Scenario.WarehouseAisle.enforcer_interference).to("us"),
+    )
+    WarehouseTickWritebackStallShare = WarehouseTickMshrStallShare.variant(
+        name="Miss-stall share of the permission tick that a 300x writeback-buffer slowdown allows",
+        description="A round floor under the writeback-buffer attack slowdowns Bechtel and Yun (2019) "
+                    "measured (up to 346x).",
+        slowdown=300.0,  # scenario assumption: round floor below the measured maximum
+    )
+    WarehouseTickWritebackMaxStallShare = WarehouseTickMshrStallShare.variant(
+        name="Miss-stall share at the largest measured writeback-buffer slowdown",
+        description="Bechtel and Yun (2019), Sec. IV-C, Raspberry Pi 3.",
+        slowdown=float(_Literature.SharedHardwareInterference.BechtelWritebackSlowdownMax),
+    )
+    WarehouseTickTenfoldStallShare = WarehouseTickMshrStallShare.variant(
+        name="Miss-stall share of the permission tick that a 10x slowdown allows",
+        description="A self-check estimate between the measured slowdowns.",
+        slowdown=10.0,  # scenario assumption: illustrative slowdown
+    )
+    PackageRailDroop = _st.RailDroopScenario(
+        name="A 6 A accelerator current step on a shared 0.85 V core rail",
+        description="L dI/dt plus I R through an illustrative package, and the gate-delay stretch of "
+                    "the alpha-power model (Sakurai and Newton 1990) at the drooped rail.",
+        rail_voltage=Q_(0.850, "V"),        # scenario assumption
+        inductance=Q_(30.0, "pH"),          # scenario assumption: package loop inductance
+        resistance=Q_(8.0, "milliohm"),     # scenario assumption
+        delta_i=Q_(6.0, "A"),               # scenario assumption: accelerator current step
+        rise_time=Q_(2.0, "ns"),            # scenario assumption
+        threshold_voltage=Q_(0.420, "V"),   # scenario assumption
+        alpha=1.3,                          # scenario assumption: velocity-saturation index
+    )
+    WarehouseSharedDieThermalThrottle = _st.ThermalThrottleScenario(
+        name="The permission tick on a shared-die real-time cluster whose governor halves its clock",
+        description="Rejected placement: the tick sized to its WCET at 1.2 GHz; continuous proposal "
+                    "inference heats the junction past a 95 degC trip, and the clock stays at 600 MHz "
+                    "until the junction clears 85 degC.",
+        site=_Embodied.Scenario.WarehouseAisle,
+        nominal_clock=Q_(1.2, "GHz"),       # scenario assumption
+        throttled_clock=Q_(600.0, "MHz"),   # scenario assumption: the governor halves the clock
+        time_constant=Q_(8.0, "s"),         # scenario assumption
+        ambient=Q_(45.0, "degC"),           # scenario assumption: electronics bay
+        theta=Q_(2.0, "K/W"),               # scenario assumption: junction to ambient
+        quiet_power=Q_(4.0, "W"),           # scenario assumption: enforcer, idle, memory
+        loaded_power=Q_(26.0, "W"),         # scenario assumption: with continuous inference
+        trip=Q_(95.0, "degC"),              # scenario assumption
+        clear=Q_(85.0, "degC"),             # scenario assumption
+    )
+    WarehouseLoadedCycleCheckpoint = WarehousePermissionTickResponse.variant(
+        name="A 300 microsecond loaded cycle of the permission check on a shared die",
+        description="Self-check: past the declared WCET, still inside the deadline.",
+        wcet=Q_(300.0, "us"),  # scenario assumption: one measured loaded cycle
+    )
+    WarehouseLoadedTickExample = WarehousePermissionTickResponse.variant(
+        name="A 260 microsecond loaded tick of the permission check",
+        description="A loaded tick past the declared WCET that ends well before the deadline.",
+        wcet=Q_(260.0, "us"),  # scenario assumption
+    )
+    WarehouseRejectedPlacementTrace = _st.TickTraceScenario(
+        name="Illustrative ten-million-tick trace of the permission check on the shared die",
+        description="Cold with an idle proposer, warm under contention; percentiles are illustrative, "
+                    "not a measurement.",
+        site=_Embodied.Scenario.WarehouseAisle,
+        ticks=10_000_000,  # scenario assumption: trace length
+        cold={"p50": Q_(95.0, "us"), "p99": Q_(128.0, "us"), "max": Q_(152.0, "us")},  # scenario assumption
+        warm={"p50": Q_(210.0, "us"), "p99": Q_(330.0, "us"), "p99.9": Q_(395.0, "us"),
+              "max": Q_(468.0, "us")},  # scenario assumption
+    )
+
     # --- Agent operations: traces, retention, postmortems, staged release (added 2026-10-20) ---
     # Types in scenario_types.py, solvers in engine/solvers/operations.py. Every
     # input is a stated teaching assumption unless a source is named.
@@ -8210,6 +8434,185 @@ class Scenarios(Registry):
         clock=Q_(2, "GHz"),                   # scenario assumption: illustrative accelerator clock
     )
 
+    # --- Mapping a computation onto an accelerator (added 2026-10-20) ---
+    SystolicArray2x2TwoRows = _st.SystolicFillDrainScenario(
+        name="Two input rows through a 2 x 2 weight-stationary systolic array",
+        description="The smallest trace of skewed inputs: four cycles from first entry to last result.",
+        array_dim=2, rows=2,                  # scenario assumption: the smallest traceable array
+    )
+    SystolicArray4x4EightRows = SystolicArray2x2TwoRows.variant(
+        name="Eight input rows through a 4 x 4 weight-stationary systolic array",
+        description="Long enough to fill the array completely for two cycles before it drains.",
+        array_dim=4, rows=8,                  # scenario assumption
+    )
+    TpuV4MxuOneRow = SystolicArray2x2TwoRows.variant(
+        name="One input row through a TPU v4 MXU (128 x 128) per weight load",
+        description="Fill and drain dominate: the array is busy well under one percent of the time.",
+        array_dim=_Hardware.Cloud.TPUv4.compute.systolic_array_dim, rows=1,
+    )
+    TpuV4Mxu128Rows = TpuV4MxuOneRow.variant(
+        name="128 input rows through a TPU v4 MXU per weight load",
+        rows=_Hardware.Cloud.TPUv4.compute.systolic_array_dim,  # one row per array row
+    )
+    TpuV4Mxu1024Rows = TpuV4MxuOneRow.variant(
+        name="1,024 input rows through a TPU v4 MXU per weight load",
+        rows=1024,                            # scenario assumption
+    )
+    TpuV4Mxu4096Rows = TpuV4MxuOneRow.variant(
+        name="4,096 input rows through a TPU v4 MXU per weight load",
+        rows=4096,                            # scenario assumption
+    )
+    Dense256To512Batch32WeightTiles = _st.MatmulTileScenario(
+        name="A 256-to-512 dense layer at batch 32 in four 128-row weight tiles",
+        description="W (512 x 256, FP16) times X (256 x 32, FP16) into FP32 outputs; each tile holds 128 "
+                    "weight rows, the whole input, and a 128 x 32 output block.",
+        m=512, k=256, n=32,                   # scenario assumption: weights 512 x 256, batch 32
+        tile_m=128,                           # scenario assumption: 128-row weight tiles
+        tile_k=256, tile_n=32,                # the whole reduction and the whole batch
+        operand_bytes=_BYTES_FP16,
+        accumulator_bytes=_BYTES_FP32,
+    )
+    Matmul4096Fp16Tile128 = _st.MatmulTileScenario(
+        name="A 4,096-square FP16 matrix multiply in 128 x 128 x 128 tiles, single buffered",
+        description="FP16 operands, FP32 accumulator; 1,024 output tiles, each summing 32 tile products.",
+        m=4096, n=4096, k=4096,               # scenario assumption: a transformer-width layer
+        tile_m=_Hardware.Cloud.TPUv4.compute.systolic_array_dim,  # tiles the width of a 128-wide array
+        tile_n=_Hardware.Cloud.TPUv4.compute.systolic_array_dim,
+        tile_k=_Hardware.Cloud.TPUv4.compute.systolic_array_dim,
+        operand_bytes=_BYTES_FP16,
+        accumulator_bytes=_BYTES_FP32,
+    )
+    Matmul4096Fp16Tile128Double = Matmul4096Fp16Tile128.variant(
+        name="The 4,096-square FP16 multiply in 128-cubed tiles, double buffered",
+        description="The next pair of operand tiles loads while the current pair computes.",
+        double_buffered=True,
+    )
+    Matmul4096Fp16Tile128K256Double = Matmul4096Fp16Tile128Double.variant(
+        name="The 4,096-square FP16 multiply in 128 x 128 tiles with a 256-deep reduction step, double buffered",
+        tile_k=2 * _Hardware.Cloud.TPUv4.compute.systolic_array_dim,  # scenario assumption: doubled T_K
+    )
+    Matmul4096Fp16Tile256x128 = Matmul4096Fp16Tile128.variant(
+        name="The 4,096-square FP16 multiply in 256 x 128 tiles",
+        description="cuBLAS's largest listed tile (NVIDIA Matrix Multiplication Background guide).",
+        tile_m=int(_Literature.CompilerResults.NvidiaGemmLargestTileM),
+        tile_n=int(_Literature.CompilerResults.NvidiaGemmLargestTileN),
+    )
+    BoehmSgemmNaiveKernel = _st.MatmulTileScenario(
+        name="Boehm's naive SGEMM kernel: one thread per output element",
+        description="No tile: every multiply-add loads one A and one B element from global memory.",
+        m=int(_Literature.CompilerResults.BoehmSgemmMatrixDim),
+        n=int(_Literature.CompilerResults.BoehmSgemmMatrixDim),
+        k=int(_Literature.CompilerResults.BoehmSgemmMatrixDim),
+        tile_m=1, tile_n=1, tile_k=1,
+        operand_bytes=_BYTES_FP32,
+        accumulator_bytes=_BYTES_FP32,
+    )
+    BoehmSgemmSharedMemKernel = BoehmSgemmNaiveKernel.variant(
+        name="Boehm's shared-memory SGEMM kernel: 32 x 32 tiles of A and B in shared memory",
+        description="Each thread copies one A and one B element per step, then does 32 multiply-adds "
+                    "from shared memory.",
+        tile_m=int(_Literature.CompilerResults.BoehmSgemmSharedMemBlockSize),
+        tile_n=int(_Literature.CompilerResults.BoehmSgemmSharedMemBlockSize),
+        tile_k=int(_Literature.CompilerResults.BoehmSgemmSharedMemBlockSize),
+    )
+    Conv3x3Filters16On8x8 = _st.ConvLayerScenario(
+        name="Sixteen 3 x 3 filters over an 8 x 8 single-channel map, no padding",
+        description="36 output positions; holding all 144 filter weights against reloading them per position.",
+        height=8, width=8, kernel=3,          # scenario assumption: a small loop-ordering example
+        in_channels=1, out_channels=16,       # scenario assumption
+        bytes_per_value=_BYTES_FP32,
+        same_padding=False,
+    )
+    Width129On128Array = Channels256To250Tile8.variant(
+        name="A layer 129 wide on a 128-wide matrix unit",
+        description="One column past the tile: a second tile runs with one busy lane of 128.",
+        channels=129, pruned_channels=129,    # scenario assumption: one past the array width
+        tile=_Hardware.Cloud.TPUv4.compute.systolic_array_dim,
+    )
+    Width1000OnA100Fp16Multiple = Channels256To250Tile8.variant(
+        name="A layer 1,000 wide against the A100's FP16 dimension multiple of 64",
+        description="15 whole blocks of 64 and 40 left over; padding to 1,024 makes 16 whole blocks.",
+        channels=1000, pruned_channels=1000,  # scenario assumption: illustrative width
+        tile=int(_Literature.CompilerResults.NvidiaGemmA100Fp16DimMultiple),
+    )
+    A100GemmOneWave = _st.WaveQuantizationScenario(
+        name="A 2,304 x 1,536 output in 256 x 128 tiles on an A100: exactly one wave",
+        description="NVIDIA's wave-quantization example: 108 tiles on 108 SMs.",
+        m=int(_Literature.CompilerResults.NvidiaGemmWaveQuantizationM),
+        n=int(_Literature.CompilerResults.NvidiaGemmWaveQuantizationOneWaveN),
+        tile_m=int(_Literature.CompilerResults.NvidiaGemmLargestTileM),
+        tile_n=int(_Literature.CompilerResults.NvidiaGemmLargestTileN),
+        hardware=_Hardware.Cloud.A100,
+    )
+    A100GemmTailWave = A100GemmOneWave.variant(
+        name="The same output widened to 1,544: a full wave plus a tail",
+        n=int(_Literature.CompilerResults.NvidiaGemmWaveQuantizationTailN),
+    )
+    MappingChoicesOneLevel = _st.MappingSpaceScenario(
+        name="Unconstrained mapping choices at one memory level (toy counts)",
+        description="Five tensors in four placements, a seven-deep loop nest in any order, and three of six "
+                    "loops parallelized in order.",
+        tensors=5, tiers=4,                   # scenario assumption: placement toy example
+        loop_depth=7,                         # scenario assumption: loop-order toy example
+        parallel_candidates=6, parallel_loops=3,  # scenario assumption: parallelization toy example
+    )
+    H100Registers32PerThread = _st.RegisterOccupancyScenario(
+        name="An H100 kernel using 32 registers per thread",
+        description="Register use per thread sets how many threads stay resident on one SM.",
+        hardware=_Hardware.Cloud.H100,
+        registers_per_thread=32,              # scenario assumption
+    )
+    H100Registers64PerThread = H100Registers32PerThread.variant(
+        name="An H100 kernel using 64 registers per thread", registers_per_thread=64)  # scenario assumption
+    H100Registers128PerThread = H100Registers32PerThread.variant(
+        name="An H100 kernel using 128 registers per thread (a fused kernel)",
+        registers_per_thread=128)             # scenario assumption
+    H100RegistersMaxPerThread = H100Registers32PerThread.variant(
+        name="An H100 kernel at the 255-register-per-thread limit",
+        registers_per_thread=_Hardware.Cloud.H100.compute.max_registers_per_thread)
+    PytorchTf32MatmulGa100 = _st.TimedMatmulScenario(
+        name="A 10,240-square matrix multiply on GA100 with TF32 allowed (PyTorch notes)",
+        description="Tensor Cores run the FP32 multiply in TF32.",
+        dim=int(_Literature.CompilerResults.PytorchTf32ExampleMatrixDim),
+        time=Q_(float(_Literature.CompilerResults.PytorchTf32ExampleTf32Seconds), "second"),
+    )
+    PytorchFp32MatmulGa100 = PytorchTf32MatmulGa100.variant(
+        name="The same multiply with TF32 off (CUDA cores, FP32)",
+        time=Q_(float(_Literature.CompilerResults.PytorchTf32ExampleFp32Seconds), "second"),
+    )
+    ResNet50Stage2ConvBatch32Fp32 = ResNet50Stage2ConvBatch32.variant(
+        name="ResNet-50 stage-2 3x3 convolution, batch 32, FP32", bytes_per_value=_BYTES_FP32)
+    ResNet50Stage2MapInt8ReadOnce = _st.MemoryRoundTripScenario(
+        name="One ResNet-50 stage-2 output map (INT8, one image) read once from DRAM at 160 pJ/byte",
+        description="45 nm off-chip DRAM energy per byte (Horowitz).",
+        tensor_bytes=ResNet50Stage2ConvBatch32Int8.activation_bytes,
+        energy_per_byte=_Hardware.Tech.Memory.DRAM.energy_per_byte,
+        trips=1,
+    )
+    ResNet50Stage2MapInt8Boundary = ResNet50Stage2MapInt8ReadOnce.variant(
+        name="The INT8 stage-2 map crossing one unfused layer boundary (write, then read)",
+        trips=2,
+    )
+    ResNet50Stage2MapFp16Boundary = ResNet50Stage2MapInt8Boundary.variant(
+        name="The FP16 stage-2 map crossing one unfused layer boundary",
+        tensor_bytes=ResNet50Stage2ConvBatch32.activation_bytes,
+    )
+    ResNet50Stage2MapInt8BoundaryHbm2Low = ResNet50Stage2MapInt8Boundary.variant(
+        name="The INT8 stage-2 map crossing one boundary at 7 nm HBM2 I/O energy, low end",
+        energy_per_byte=(_Hardware.Tech.Memory.Hbm2_Access64b_7nm_Low.energy_per_access
+                         / Q_(8, "byte")).to("pJ/byte"),  # one 64-bit access is 8 bytes
+    )
+    ResNet50Stage2MapInt8BoundaryHbm2High = ResNet50Stage2MapInt8Boundary.variant(
+        name="The INT8 stage-2 map crossing one boundary at 7 nm HBM2 I/O energy, high end",
+        energy_per_byte=(_Hardware.Tech.Memory.Hbm2_Access64b_7nm_High.energy_per_access
+                         / Q_(8, "byte")).to("pJ/byte"),
+    )
+    ResNet50Stage2MapInt8BoundaryDdr7nm = ResNet50Stage2MapInt8Boundary.variant(
+        name="The INT8 stage-2 map crossing one boundary at 7 nm DDR3/4 I/O energy",
+        energy_per_byte=(_Hardware.Tech.Memory.DdrDram_Access64b_7nm.energy_per_access
+                         / Q_(8, "byte")).to("pJ/byte"),
+    )
+
     # --- Trajectory planning on the warehouse mobile manipulator (added 2026-10-20) ---
     # Joint rates through the arm's Jacobian, a replanner's mission exposure, chunk
     # replacement, the jerk-limited stops of the arm and the base, a trajectory
@@ -8331,4 +8734,2462 @@ class Scenarios(Registry):
         machine=_Embodied.MobileManipulator.WarehouseMobileManipulator,
         joint_speed=Q_(0.50, "rad/s"),  # scenario assumption: constant joint speed
         delay=Q_(80.0, "ms"),  # scenario assumption: compute and transport of the replacement
+    )
+
+    # --- Trajectory curation: triage, splits, admission, denominators, staging (added 2026-10-20) ---
+    RepairAgentFailureTriage = _st.FailureTriageScenario(
+        name="A maintenance agent's month of failures, triaged by counterfactual probes",
+        description="50,000 trajectories at 6 percent failing; probes attribute 70 percent to a tool schema that "
+                    "omits a required field and 20 percent to sandbox startup timeouts. Fine-tuning on every "
+                    "failure: Llama 3 70B, 4,096-token sequences, 3 epochs, one node of eight H100s.",
+        runs=50_000,                      # scenario assumption: trajectories per month
+        failure_rate=0.06,                # scenario assumption: failing share
+        probe_shares={"interface": 0.70,  # scenario assumption: schema probe removes the failure
+                      "runtime": 0.20},   # scenario assumption: runtime probe removes the failure
+        workload=_Models.Language.Llama3_70B,
+        hardware=_Hardware.Cloud.H100,
+        devices=8,                        # scenario assumption: one node
+        utilization=float(_Literature.Training.MfuLow),
+        hourly_price=_Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate,
+        sequence_tokens=4_096,            # scenario assumption: tokens per training sequence
+        epochs=3,                         # scenario assumption
+    )
+    EightAttemptRunSplit = _st.RunSplitLeakageScenario(
+        name="Eight attempts per task, each run sent to training with probability 0.8",
+        description="A random 80/20 split of runs rather than of tasks.",
+        attempts=8,                       # scenario assumption: attempts per task
+        train_fraction=0.8,               # scenario assumption
+    )
+    FiveAttemptRunSplitOfTwoThousand = _st.RunSplitLeakageScenario(
+        name="Five attempts on each of 2,000 repair tasks, each run sent to training with probability 0.9",
+        description="A random 90/10 split of runs rather than of tasks.",
+        attempts=5,                       # scenario assumption
+        train_fraction=0.9,               # scenario assumption
+        tasks=2_000,                      # scenario assumption
+    )
+    TrajectoryMinHashScreen = _st.MinHashBandingScenario(
+        name="A 128-hash MinHash screen in 32 bands of 4 rows over 100,000 trajectory records",
+        description="Command n-grams and code-tree features per record; 32-bit hash values stored raw.",
+        bands=32,                         # scenario assumption
+        rows=4,                           # scenario assumption
+        probe_similarities=[0.5, 0.8],    # scenario assumption: a loose and a near-duplicate pair
+        hash_bytes=Q_(4, "byte"),         # 32-bit hash values
+        records=100_000,                  # scenario assumption
+    )
+    DemonstrationAdmissionOrder = _st.AdmissionOrderScenario(
+        name="A demonstration route's five admission checks, process audit before tests and after",
+        description="Record, use, process, outcome, and target checks, independent, on 100,000 candidates; "
+                    "the two orders swap the process audit and the test run.",
+        checks={"record": (0.95, Q_(0.01, "second")),   # scenario assumption: pass rate, slot time
+                "use": (0.90, Q_(0.04, "second")),      # scenario assumption
+                "process": (0.80, Q_(0.20, "second")),  # scenario assumption
+                "outcome": (0.40, Q_(8.0, "second")),   # scenario assumption
+                "target": (0.75, Q_(2.0, "second"))},   # scenario assumption
+        orders=[["record", "use", "process", "outcome", "target"],
+                ["record", "use", "outcome", "process", "target"]],
+        candidates=100_000,               # scenario assumption
+    )
+    DemonstrationAdmissionOrderSlowAudit = DemonstrationAdmissionOrder.variant(
+        name="The same route with a slower, less selective process audit",
+        description="The process audit takes 2 s and passes 95 percent, so the tests should run first.",
+        checks={**DemonstrationAdmissionOrder.checks,
+                "process": (0.95, Q_(2.0, "second"))},  # scenario assumption
+    )
+    RecoveryPoolDenominators = _st.CorpusDenominatorsScenario(
+        name="A retained pool of 50,000 direct, recovery, and negative records",
+        description="Recovery records are longer and only their corrections are targets; the demonstration "
+                    "route admits direct and recovery records.",
+        classes={"direct": (32_500, Q_(7_200, "token"), Q_(1_200, "token")),      # scenario assumption
+                 "recovery": (12_500, Q_(18_500, "token"), Q_(2_000, "token")),   # scenario assumption
+                 "negative": (5_000, Q_(9_800, "token"), Q_(0, "token"))},        # scenario assumption
+        focus="recovery",
+        admitted=["direct", "recovery"],
+    )
+    EightAttemptGroupContrast = _st.AttemptGroupContrastScenario(
+        name="Eight attempts per fixture at pass rates of 5, 50, and 95 percent",
+        description="How often a group of attempts holds a success, and a success beside a failure.",
+        attempts=8,                       # scenario assumption
+        pass_rates=[0.05, 0.50, 0.95],    # scenario assumption
+    )
+    VerifierTimeoutStagingBurst = _st.StagingBurstScenario(
+        name="A collector's staging store during a verifier timeout burst",
+        description="1,024 rollouts of 45 s feed 512 verifier slots; a defective fixture drives every test to "
+                    "its 120 s timeout; 8 MB record ceiling, 32 GB store, 30 s controller delay.",
+        rollouts=1_024,                   # scenario assumption
+        rollout_time=Q_(45, "second"),    # scenario assumption
+        slots=512,                        # scenario assumption
+        mean_service=Q_(16.875, "second"),  # scenario assumption
+        timeout=Q_(120, "second"),        # scenario assumption
+        record_ceiling=Q_(8, "MB"),       # scenario assumption
+        store=Q_(32, "GB"),               # scenario assumption
+        reaction=Q_(30, "second"),        # scenario assumption
+    )
+    CurationCohortDispositions = _st.CohortDispositionScenario(
+        name="A cohort of 500 collection attempts by disposition at the cutoff",
+        description="Fifteen selected and emitted; the rest assessed but not selected, ineligible, pending, "
+                    "or unknown. Environments, generation, tools, checks, storage, and review cost $300.",
+        dispositions={"selected_emitted": 15,        # scenario assumption
+                      "assessed_not_selected": 470,  # scenario assumption
+                      "ineligible": 10,              # scenario assumption
+                      "pending": 3,                  # scenario assumption
+                      "unknown": 2},                 # scenario assumption
+        emitted="selected_emitted",
+        cohort_cost=Q_(300, "USD"),       # scenario assumption
+        yield_multiple=2.0,               # scenario assumption: the same cohort at double the yield
+    )
+
+    # --- Fine-tuning on trajectories (added 2026-10-20) ------------------------
+    # The repair agent's recovery record turned into training examples, a weight
+    # update, and a release decision. Token counts, log-probabilities, prices,
+    # and trial outcomes are hypothetical stipulations, not measurements.
+    RepairTrajectoryPerCallExamples = _st.PerInvocationSerializationScenario(
+        name="A repair trajectory stored as one training example per model call",
+        description="The repair harness's step budget in turns, each turn adding about the same tokens; "
+                    "every call's delivered prefix stored separately against one transcript.",
+        turns=_Agents.Coding.SWE_Bench_Runner.max_trajectory_steps,
+        tokens_per_turn=CodingAgentResend30Turns.appended,
+    )
+    RecoveryRecordTargetMask = _st.TargetMaskScenario(
+        name="One serialized repair recovery record and its selected targets",
+        description="16,384 stored tokens: 1,200 of prompt, 184 of task, 1,400 of reviewed rationale, 960 "
+                    "of policy response, and 12,640 of observation; the refused proposal's 160 response "
+                    "tokens stay context.",
+        prompt=1_200,  # scenario assumption: includes the initial boundary position
+        task=184,  # scenario assumption
+        rationale=1_400,  # scenario assumption: available, authorized, reviewed text
+        response=960,  # scenario assumption: response content and authentic stop tokens
+        observation=12_640,  # scenario assumption
+        unselected_response=160,  # scenario assumption: the refused proposal, kept as context
+    )
+    RecoveryRecordTargetMaskDoubledObservations = RecoveryRecordTargetMask.variant(
+        name="The same recovery record with its observations doubled",
+        description="Every other segment unchanged.",
+        observation=2 * RecoveryRecordTargetMask.observation,  # scenario assumption: doubled observations
+    )
+    RecoveryRecordTargetMaskLongObservations = RecoveryRecordTargetMask.variant(
+        name="The same recovery record with 30,000 observation tokens",
+        description="Every other segment unchanged.",
+        observation=30_000,  # scenario assumption: longer observations
+    )
+    SweBenchVerifiedRoleShares = _st.TrajectoryRoleShareScenario(
+        name="Transcript characters by role in five public SWE-bench Verified configurations",
+        description="Prompt, observation, and model-output shares pooled per configuration over "
+                    "Literature.SweBenchTrajectories; each message counted once.",
+        series_name="SweBenchTrajectories",
+    )
+    RepairTraceWithLookupWeighting = _st.LossNormalizationScenario(
+        name="A long repair trace and a one-turn file lookup in one batch",
+        description="8,192 selected targets against 256: token averaging against example averaging.",
+        focus_targets=8_192,  # scenario assumption
+        other_examples=1,  # scenario assumption
+        other_targets=256,  # scenario assumption
+    )
+    RepairTraceWithFifteenLookups = _st.LossNormalizationScenario(
+        name="One repair trajectory of 6,000 targets with 15 file lookups of 200",
+        description="The trajectory's share of the batch objective, token against example averaging.",
+        focus_targets=6_000,  # scenario assumption
+        other_examples=15,  # scenario assumption
+        other_targets=200,  # scenario assumption
+    )
+    RepairTraceSplitIntoTwentyRecords = RepairTraceWithFifteenLookups.variant(
+        name="The same batch with the repair trajectory split into 20 per-call records",
+        description="Each record selects only its own turn's response.",
+        focus_pieces=20,  # scenario assumption: per-invocation records
+    )
+    EightExamplePackingBatch = _st.SequencePackingScenario(
+        name="Eight independent examples, 512 to 32,768 tokens, against 32,768-token buffers",
+        description="Padding every row to the longest against first-fit decreasing packing.",
+        lengths=[32_768, 8_192, 4_096, 2_048, 1_024, 1_024, 512, 512],  # scenario assumption
+        capacity=32_768,  # scenario assumption: buffer positions
+    )
+    RepairPolicyImitationBounds = _st.ImitationBoundScenario(
+        name="Imitation cost bounds over the repair harness's 30-turn horizon",
+        description="A 2 percent disagreement rate on reference states against the same rate on learner "
+                    "states with deviation disadvantage u = 1.",
+        horizon=RepairTrajectoryPerCallExamples.turns,
+        per_step_error=0.02,  # scenario assumption
+        recoverability=1.0,  # scenario assumption: one slip costs at most one unit
+    )
+    RepairPreferencePair = _st.PreferencePairScenario(
+        name="Two passing repair continuations scored against a frozen reference",
+        description="Natural-log probability sums over the selected tokens: preferred -8 against a "
+                    "reference -10, dispreferred -11 against -10, beta 0.2.",
+        policy_preferred=-8.0,  # scenario assumption
+        reference_preferred=-10.0,  # scenario assumption
+        policy_dispreferred=-11.0,  # scenario assumption
+        reference_dispreferred=-10.0,  # scenario assumption
+        beta=0.2,  # scenario assumption
+    )
+    RepairPreferencePairDoubledBeta = RepairPreferencePair.variant(
+        name="The same preference pair at twice the beta",
+        description="Identical log-probabilities; only the preference scale changes.",
+        beta=2 * RepairPreferencePair.beta,  # scenario assumption: doubled preference scale
+    )
+    SupportChecklistDistillation = _st.ContextDistillationScenario(
+        name="A 3,000-token support checklist read every turn, against distilling it",
+        description="Four turns per session, 2 million sessions a month, a hypothetical $2 per million "
+                    "input tokens, cached reads at one tenth, and a $15,000 redistillation per monthly "
+                    "revision.",
+        prefix_tokens=3_000,  # scenario assumption
+        turns_per_session=4,  # scenario assumption
+        sessions_per_month=2e6,  # scenario assumption
+        input_price=Q_(2.00, "USD / Mtoken"),  # scenario assumption: hypothetical input price
+        cached_fraction=RepairPrefixLayoutBill.cached_fraction,
+        redistill_cost=Q_(15_000, "USD"),  # scenario assumption: training run plus release evaluation
+        revisions_per_month=1,  # scenario assumption
+    )
+    Rank16AdaptersOnHypothetical8B = _st.TrainingStateFitScenario(
+        name="Rank-16 low-rank adapters on a hypothetical 8B-parameter transformer, mixed-precision Adam",
+        description="Two 4,096-by-4,096 matrices adapted in each of 32 layers; 2 B per frozen parameter, "
+                    "16 B per trained parameter, before activations.",
+        workload=_TransformerWorkload(
+            name="Hypothetical 8B-parameter transformer",
+            architecture="Transformer",
+            parameters=Q_(8e9, "param"),  # scenario assumption: exact illustrative size
+            layers=32,  # scenario assumption
+            hidden_dim=4_096,  # scenario assumption
+        ),
+        bytes_per_value=_BYTES_FP16,
+        optimizer_bytes_per_parameter=_BYTES_ADAM_MOMENTS,
+        master_bytes_per_parameter=_BYTES_FP32,
+        adapter_rank=16,  # scenario assumption
+        adapted_matrices=2,  # scenario assumption: matrices adapted per layer
+        adapter_in_dim=4_096,  # scenario assumption
+        adapter_out_dim=4_096,  # scenario assumption
+    )
+    Rank32AdaptersOnHypothetical8B = Rank16AdaptersOnHypothetical8B.variant(
+        name="The same adapters at rank 32",
+        description="Adapter state is linear in the rank; the frozen base is unchanged.",
+        adapter_rank=2 * Rank16AdaptersOnHypothetical8B.adapter_rank,  # scenario assumption: doubled rank
+    )
+    RepairCandidateRelease = _st.CandidateReleaseScenario(
+        name="A fine-tuned repair candidate against the baseline on 500 trials each",
+        description="Acceptance 60 percent at $1.20 per attempt against 66 percent at $1.50; schema-"
+                    "following accuracy and parametric recall error on familiar and renamed schemas.",
+        trials=500,  # scenario assumption: per arm
+        baseline_acceptance=0.60,  # scenario assumption
+        baseline_attempt_cost=Q_(1.20, "USD"),  # scenario assumption
+        candidate_acceptance=0.66,  # scenario assumption
+        candidate_attempt_cost=Q_(1.50, "USD"),  # scenario assumption
+        baseline_sfa_familiar=0.92,  # scenario assumption
+        candidate_sfa_familiar=0.95,  # scenario assumption
+        baseline_sfa_renamed=0.90,  # scenario assumption
+        candidate_sfa_renamed=0.81,  # scenario assumption
+        baseline_pre_renamed=0.02,  # scenario assumption
+        candidate_pre_renamed=0.12,  # scenario assumption
+    )
+
+    # --- Quantization (added 2026-10-20) --------------------------------------
+    Uint8RangeMinusOneToThree = _st.QuantizationGridScenario(
+        name="A 2 by 2 activation matrix with range [-1, 3] stored in UINT8",
+        description="Affine scale and zero-point by hand; real zero must land on an integer.",
+        values=[-1.0, 1.0, 0.0, 3.0],      # scenario assumption: the matrix, row-major; no entry sits on a rounding tie
+        bits=8,
+        alpha=-1.0,                        # scenario assumption: clipping range
+        beta=3.0,
+    )
+    ThreeBitGridMinusOneToTwoAndHalf = _st.QuantizationGridScenario(
+        name="Six values on a 3-bit grid over [-1, 2.5]",
+        description="A toy affine grid small enough to draw every level; two values fall outside the range.",
+        values=[-1.4, -0.3, 0.8, 1.6, 2.9, 2.2],  # scenario assumption: illustrative values
+        bits=3,
+        alpha=-1.0,                        # scenario assumption: clipping range
+        beta=2.5,
+    )
+    SymmetricInt8FourWeights = _st.QuantizationGridScenario(
+        name="Four weights quantized to symmetric INT8, scale set by the largest magnitude",
+        description="The worked symmetric-quantization listing: zero-point 0, s = max|w| / 127.",
+        values=[0.127, -0.084, 0.392, -0.203],    # scenario assumption: illustrative weights
+        bits=8,
+        symmetric=True,
+    )
+    SymmetricInt8UnitRange = _st.QuantizationGridScenario(
+        name="A symmetric INT8 grid over [-1, 1]",
+        description="Zero-point 0; codes -127 to 127.",
+        bits=8, alpha=-1.0, beta=1.0,      # scenario assumption: illustrative range
+        symmetric=True,
+    )
+    AsymmetricInt8RangeMinusHalfToOneAndHalf = _st.QuantizationGridScenario(
+        name="An asymmetric signed INT8 grid over [-0.5, 1.5]",
+        description="Codes -128 to 127; real zero lands at a negative code.",
+        bits=8, alpha=-0.5, beta=1.5,      # scenario assumption: illustrative range
+        signed=True,
+    )
+    Relu6SymmetricInt8 = _st.QuantizationGridScenario(
+        name="ReLU6 outputs [0, 6] on a symmetric INT8 grid",
+        description="Half the codes cover negative values that never occur.",
+        bits=8, alpha=0.0, beta=6.0,       # ReLU6 clips to [0, 6]
+        symmetric=True,
+    )
+    Relu6AsymmetricUint8 = Relu6SymmetricInt8.variant(
+        name="ReLU6 outputs [0, 6] on an asymmetric 8-bit grid",
+        description="Every one of the 255 steps covers the occupied range.",
+        symmetric=False,
+    )
+    ActivationsCoveredToTwoAndHalfUint8 = _st.QuantizationGridScenario(
+        name="One layer's activations in UINT8 over their full range [0, 2.5]",
+        description="Max calibration: the range reaches the largest value seen.",
+        bits=8, alpha=0.0, beta=2.5,       # scenario assumption: illustrative histogram's largest value
+    )
+    ActivationsClippedAtOnePointOneUint8 = ActivationsCoveredToTwoAndHalfUint8.variant(
+        name="One layer's activations in UINT8, clipped at 1.1",
+        description="The rare tail above 1.1 saturates at the top code.",
+        beta=1.1,                          # scenario assumption: illustrative clip at the end of the bulk
+    )
+    Int8DotProductThreeTerms = _st.IntegerDotProductScenario(
+        name="One INT8 output from three weight-input pairs, accumulated in INT32",
+        description="Symmetric scales from each tensor's largest magnitude; requantized to s_y = 1/127.",
+        weights=[0.5, -0.25, 0.75],        # scenario assumption: illustrative
+        inputs=[1.0, 2.0, 0.5],            # scenario assumption: illustrative
+        output_scale=1 / 127,              # scenario assumption: output range [-1, 1]
+    )
+    Gpt2XlFp16DecodeFullContextPhone = Gpt2XlFp16WeightReadPhone.variant(
+        name="GPT-2 XL decoding at a full context, FP16 weights and KV cache, on a flagship phone",
+        description="Each batch-one token reads every weight and the whole KV cache.",
+        context_tokens=_Models.Language.GPT2.context_length,
+        kv_bytes_per_value=_BYTES_FP16,
+    )
+    Gpt2XlInt4DecodeFullContextPhone = Gpt2XlInt4WeightReadPhone.variant(
+        name="GPT-2 XL decoding at a full context, INT4 weights and an FP16 KV cache, on a flagship phone",
+        description="Unpacked to FP16 inside the kernel, or in a separate pass that writes and rereads them.",
+        context_tokens=_Models.Language.GPT2.context_length,
+        kv_bytes_per_value=_BYTES_FP16,
+        unpacked_bytes_per_weight=_BYTES_FP16,
+    )
+    Int8VsFp32OperationEnergy45nm = _st.OperationEnergyComparisonScenario(
+        name="INT8 against FP32 energy per add, multiply, and multiply-accumulate at 45 nm",
+        description="The INT8 MAC accumulates in INT32; a 32-bit DRAM read against the INT8 MAC.",
+        wide_add=_Hardware.Tech.Op.AddFp32.energy,
+        wide_mul=_Hardware.Tech.Op.FlopFp32.energy,
+        narrow_add=_Hardware.Tech.Op.AddInt8.energy,
+        narrow_mul=_Hardware.Tech.Op.OpInt8.energy,
+        accumulate_add=_Hardware.Tech.Op.AddInt32.energy,
+        memory_read=_Hardware.Tech.Memory.DRAM.energy_per_access,
+    )
+    ResNet50Int8ProfileH100 = _st.QuantizedDeploymentProfileScenario(
+        name="ResNet-50 in FP32 and INT8 on an H100, against accuracy and calibration limits",
+        description="Accuracy and confidence calibration are stipulated; latency and throughput come from the "
+                    "shared H100 engine profile; energy per image assumes full board power in both.",
+        workload=_Models.Vision.ResNet50,
+        hardware=_Hardware.Cloud.H100,
+        profile=_resnet50_h100_profile(),
+        float_bytes=_BYTES_FP32,
+        int_bytes=_BYTES_INT8,
+        float_top1_pct=76.1,               # scenario assumption: FP32 top-1
+        int_top1_pct=75.8,                 # scenario assumption: INT8 top-1
+        float_calibration_error_pct=2.1,   # scenario assumption: FP32 confidence-calibration error
+        int_calibration_error_pct=3.4,     # scenario assumption: INT8 confidence-calibration error
+        top1_limit_pct=75.5,               # scenario assumption: acceptance limit
+        calibration_error_limit_pct=3.0,   # scenario assumption: acceptance limit
+    )
+
+    # --- Supervisory intervention on the warehouse base (added 2026-10-20) ---
+    # Site record Embodied.Scenario.WarehouseAisle: the finished stopping budget
+    # (S-curve jerk bound, tracking inset), the sourced takeover terms, the
+    # dispatch-to-admission allocation, the permission tick, and the chunk lease.
+    WarehouseInLoopTakeoverAtAisleSpeed = _st.TakeoverBudgetScenario(
+        name="An in-loop takeover requested at the warehouse aisle speed",
+        description="Slow-bound Model Human Processor response plus video and the four-phase handshake, "
+                    "waited out before braking at the candidate aisle speed; the handover timer is clipped "
+                    "to the fallback deadline.",
+        site=_Embodied.Scenario.WarehouseAisle,
+        speed=_Embodied.Scenario.WarehouseAisle.v_aisle,
+        takeover=_Embodied.Scenario.WarehouseAisle.t_takeover_in_loop,
+        configured_timeout=Q_(500.0, "ms"),  # scenario assumption: configured protocol ceiling on the handover timer
+        manual_lease=Q_(100.0, "ms"),        # scenario assumption: the operator's loss-of-engagement lease
+    )
+    WarehouseOutOfLoopTakeoverAtAisleSpeed = WarehouseInLoopTakeoverAtAisleSpeed.variant(
+        name="An out-of-loop takeover requested at the warehouse aisle speed",
+        description="The 90th-percentile condition-mean take-over time plus the same console transport.",
+        takeover=_Embodied.Scenario.WarehouseAisle.t_takeover_out_of_loop,
+    )
+    WarehouseInLoopTakeoverAtRequestSpeed = WarehouseInLoopTakeoverAtAisleSpeed.variant(
+        name="An in-loop takeover requested after slowing to the in-loop request speed",
+        description="The dispatch-charged in-loop ceiling rounded down to the speed resolution.",
+        speed=_Embodied.Scenario.WarehouseAisle.v_takeover_in_loop,
+    )
+    WarehouseInLoopTakeoverAtRetiredSlowdown = WarehouseInLoopTakeoverAtAisleSpeed.variant(
+        name="An in-loop takeover requested at 0.8 m/s, the partial ceiling rounded down",
+        description="A slow-down that fits the partial budget and misses once dispatch to admission is charged.",
+        speed=Q_(0.8, "m/s"),  # scenario assumption: the partial in-loop ceiling rounded down to 0.05 m/s
+    )
+    WarehouseInLoopTakeoverAtFastSlowdown = WarehouseInLoopTakeoverAtAisleSpeed.variant(
+        name="An in-loop takeover requested at 1.2 m/s",
+        description="A slow-down that would fit only a much faster human response.",
+        speed=Q_(1.2, "m/s"),  # scenario assumption: illustrative slow-down
+    )
+    WarehouseOutOfLoopTakeoverAtCrawl = WarehouseOutOfLoopTakeoverAtAisleSpeed.variant(
+        name="An out-of-loop takeover requested at the crawl speed",
+        description="The chosen crawl under the out-of-loop ceiling.",
+        speed=_Embodied.Scenario.WarehouseAisle.v_takeover_out_of_loop,
+    )
+    WarehouseOutOfLoopTakeoverAtCrawlP99 = WarehouseOutOfLoopTakeoverAtCrawl.variant(
+        name="A 99th-percentile out-of-loop takeover at the crawl speed",
+        description="The 99th-percentile condition-mean take-over time plus the console transport.",
+        takeover=(_Embodied.Scenario.WarehouseAisle.t_takeover_driving_p99
+                  + _Embodied.Scenario.WarehouseAisle.t_takeover_transport).to("ms"),
+    )
+    WarehouseFixedWindowAtAisleSpeed = WarehouseInLoopTakeoverAtAisleSpeed.variant(
+        name="The configured 500 ms handover window waited out at the aisle speed",
+        description="One fixed acknowledgment window judged against the finished budget.",
+        takeover=WarehouseInLoopTakeoverAtAisleSpeed.configured_timeout,
+    )
+    WarehouseFixedWindowAtCrawl = WarehouseFixedWindowAtAisleSpeed.variant(
+        name="The configured 500 ms handover window waited out at the crawl speed",
+        description="The same window at the out-of-loop crawl.",
+        speed=_Embodied.Scenario.WarehouseAisle.v_takeover_out_of_loop,
+    )
+    WarehouseTakeoverCeilingLadder = _st.TakeoverCeilingLadderScenario(
+        name="Speed ceilings of the warehouse base against sourced human responses",
+        description="Model Human Processor simple reaction (nominal, slow bound), perception-brake times "
+                    "(expected, unexpected, surprise), and percentiles of condition-mean take-over time, "
+                    "each plus video and the four-phase handshake; partial budget.",
+        base=WarehouseInLoopTakeoverAtAisleSpeed,
+        transport=_Embodied.Scenario.WarehouseAisle.t_takeover_transport,
+        responses={
+            "mhp": _Embodied.Scenario.WarehouseAisle.t_human_simple_reaction,
+            "mhp_slow": _Embodied.Scenario.WarehouseAisle.t_human_simple_reaction_slow,
+            "expected": _Embodied.Scenario.WarehouseAisle.t_brake_response_expected,
+            "unexpected": _Embodied.Scenario.WarehouseAisle.t_brake_response_unexpected,
+            "surprise": _Embodied.Scenario.WarehouseAisle.t_brake_response_surprise,
+            "p50": _Embodied.Scenario.WarehouseAisle.t_takeover_driving_p50,
+            "mean": _Embodied.Scenario.WarehouseAisle.t_takeover_driving_mean,
+            "p90": _Embodied.Scenario.WarehouseAisle.t_takeover_driving_p90,
+            "p99": _Embodied.Scenario.WarehouseAisle.t_takeover_driving_p99,
+        },
+    )
+    WarehouseTakeoverBrakingBlend = _st.BrakingBlendScenario(
+        name="A bumpless transfer into braking at the in-loop request speed, and an arm-joint blend",
+        description="Smoothstep from cruise to the credible deceleration under the resident stop's jerk "
+                    "bound, against a step and the resident S-curve stop; an arm-joint torque change under "
+                    "a torque-rate ceiling.",
+        site=_Embodied.Scenario.WarehouseAisle,
+        speed=_Embodied.Scenario.WarehouseAisle.v_takeover_in_loop,
+        torque_change=Q_(15.0, "N*m"),         # scenario assumption: an arm-joint command change (illustrative)
+        torque_rate_limit=Q_(750.0, "N*m/s"),  # scenario assumption: torque-command rate ceiling (chosen)
+    )
+    WarehouseRemoteCommandAuthentication = _st.CommandAuthenticationScenario(
+        name="Remote takeover commands authenticated on the warehouse machine's safety MCU",
+        description="Published Cortex-M4 cycle counts (Ed25519 verification, AES-128 block) at the permission "
+                    "MCU's clock, against the aisle-speed spare and fallback deadline.",
+        budget=WarehouseInLoopTakeoverAtAisleSpeed,
+        clock=_Embodied.MobileManipulator.WarehouseMobileManipulator.permission_mcu.compute.clock_rate,
+        verify_cycles=float(_Literature.Crypto.Ed25519VerifyCyclesCortexM4),
+        mac_block_cycles=float(_Literature.Crypto.Aes128BlockCyclesCortexM4),
+        mac_blocks=3,                     # scenario assumption: a 48-byte frame (counter, timestamp, role, mask, command)
+        freshness_window=Q_(100.0, "ms"),  # scenario assumption: freshness window (illustrative)
+    )
+    WaymoCaliforniaDisengagementRecord = _st.DisengagementRecordScenario(
+        name="Waymo's California disengagement filings, 2015 to 2025",
+        description="Miles per disengagement in the first and latest years, the latest driverless-testing "
+                    "rate, and the 2020-to-2021 swing in rate and miles.",
+        entries=_Literature.CaliforniaDisengagements.entries,
+        company="Waymo",
+        first_year=2015,
+        latest_year=2025,
+        swing_from=2020,
+        swing_to=2021,
+    )
+
+    # --- Fault injection at the warehouse rack end: oracles, supply, and campaign statistics (added 2026-10-20) ---
+    # The renewal-referenced oracle scores a proposer stall from the last valid
+    # lease renewal: onset after the lease path and brake onset (the chunk
+    # lease's admission-to-brake-onset), the resident S-curve stop, and the
+    # tracking inset; it carries no evidence age and no localization or
+    # protective allowance, because a stalled proposer has no detected target.
+    WarehouseRenewalReferencedStop = _st.StoppingBudgetScenario(
+        name="Warehouse base's renewal-referenced stopping oracle at the candidate aisle speed",
+        description="Onset bound after the last valid renewal, the resident S-curve stop, and the tracking "
+                    "inset: the travel bound of a proposer-stall trial.",
+        speed=_Embodied.Scenario.WarehouseAisle.v_aisle,
+        delay=WarehouseChunkLease.result.admission_to_brake_onset,
+        deceleration=_Embodied.Scenario.WarehouseAisle.a_brake,
+        clear_distance=_Embodied.Scenario.WarehouseAisle.d_clear,
+        jerk=_Embodied.Scenario.WarehouseAisle.j_brake,
+        tracking_bound=_Embodied.Scenario.WarehouseAisle.eps_track,
+    )
+    WarehouseRenewalReferencedStopRestricted = WarehouseRenewalReferencedStop.variant(
+        name="Renewal-referenced stopping oracle at the restricted point on the inspected floor",
+        description="1.0 m/s, below the inspected floor's ceiling, with deceleration capped by its friction "
+                    "(optimistic all-weight screen); the jerk bound belongs to the load and is unchanged.",
+        speed=Q_(1.0, "m/s"),  # scenario assumption: candidate restricted speed on inspected floors
+        deceleration=_traction_limit(_Embodied.Scenario.WarehouseAisle.mu_inspected_floor),
+    )
+    WarehouseFinishedStopRestricted = WarehouseFinishedStopInspectedFloor.variant(
+        name="Capture-referenced finished budget at the restricted point on the inspected floor",
+        description="The design subtotal from capture at the restricted speed and the inspected floor's "
+                    "deceleration.",
+        speed=WarehouseRenewalReferencedStopRestricted.speed,
+    )
+    WarehouseFlagReferencedStop = WarehouseRenewalReferencedStop.variant(
+        name="Stop at the candidate aisle speed scored from an undervoltage or feed-loss flag",
+        description="One permission tick, one bus cycle, and the brake onset from the flag, the resident "
+                    "S-curve stop, and the tracking inset, when the drives keep their authority.",
+        delay=(_Embodied.Scenario.WarehouseAisle.t_tick + _Embodied.Scenario.WarehouseAisle.t_bus
+               + _Embodied.Scenario.WarehouseAisle.t_brake_onset).to("ms"),
+    )
+    WarehouseRenewalStopLateOnsetTrial = _st.OnsetTrialScenario(
+        name="A proposer-stall trace whose onset is 30 ms late at the candidate aisle speed",
+        description="Signed margins against the renewal-referenced oracle: the onset predicate fails while "
+                    "the travel predicate passes.",
+        oracle=WarehouseRenewalReferencedStop,
+        onset=(WarehouseChunkLease.result.admission_to_brake_onset
+               + Q_(30.0, "ms")).to("ms"),  # scenario assumption: illustrative late onset (a memory stall)
+        lease=_Embodied.Scenario.WarehouseAisle.t_lease,
+        probe_after_expiry=Q_(5.0, "ms"),  # scenario assumption: chosen replay of a refused renewal
+    )
+    WarehouseRenewalStopNinetyMsOnsetTrial = WarehouseRenewalStopLateOnsetTrial.variant(
+        name="A proposer-stall trace with deceleration onset measured at 90 ms",
+        description="A checkpoint given: the onset margin and the travel the late onset adds.",
+        onset=Q_(90.0, "ms"),  # scenario assumption: checkpoint given, a measured onset
+    )
+    WarehousePermissionRailHoldUp = _st.RailHoldUpScenario(
+        name="The warehouse machine's permission-rail hold-up during the longest inspected-floor stop",
+        description="Feed lost while the base stops from the inspected floor's optimistic ceiling: flag to "
+                    "onset, the S-curve stop, and spring-brake engagement against the rail's hold-up.",
+        site=_Embodied.Scenario.WarehouseAisle,
+        stop=WarehouseFinishedStopInspectedFloor,
+    )
+    WarehouseQueueDelaySpareExhaustion = _st.ExponentialRareEventScenario(
+        name="An unbudgeted queue delay that spends the rack-end spare at the candidate aisle speed",
+        description="Exponential delay per stop; failure past the spare's delay at the aisle speed; plain "
+                    "Monte Carlo, zero-failure testing, and a cross-entropy importance-sampling proposal.",
+        budget=WarehouseFinishedStopAtAisleSpeed,
+        mean=Q_(5.0, "ms"),   # scenario assumption: illustrative mean queue delay per stop
+        elite_share=0.1,      # scenario assumption: chosen cross-entropy elite fraction
+        relative_error=0.1,   # scenario assumption: chosen target relative standard error
+        confidence=0.95,      # scenario assumption: chosen
+    )
+    WarehouseQueueDelayChargedSpareExhaustion = WarehouseQueueDelaySpareExhaustion.variant(
+        name="The same queue delay against the spare left after the dispatch-to-admission allocation",
+        description="The failure threshold after the dispatch-to-admission allocation is charged.",
+        budget=WarehouseFinishedStopWithDispatch,
+    )
+    WarehouseDiagnosticCoverageHundredFit = _st.DiagnosticCoverageScenario(
+        name="Diagnostic coverage and zero-miss injections that leave 100 FIT unmitigated",
+        description="Four component strata of the running machine's raw fault rate, a residual-rate target, "
+                    "and 95 percent confidence.",
+        strata={  # scenario assumption: illustrative component fault rates, FIT
+            "sensors": 1500.0,
+            "compute": 1000.0,
+            "transceivers and power": 2500.0,
+            "gate drivers": 4800.0,
+        },
+        target=100.0,     # scenario assumption: chosen unmitigated-rate target, FIT
+        confidence=0.95,  # scenario assumption: chosen
+    )
+    WarehouseDiagnosticCoverageTenFit = WarehouseDiagnosticCoverageHundredFit.variant(
+        name="Diagnostic coverage and zero-miss injections that leave 10 FIT unmitigated",
+        description="A tenfold tighter residual-rate target on the same strata.",
+        target=10.0,      # scenario assumption: chosen tighter target, FIT
+    )
+
+    # --- Benchmarking (added 2026-10-20) ------------------------------------
+    DatasheetVersusSustainedEdgeChip = _st.EfficiencyClaimGapScenario(
+        name="A \"10 TOPS at 0.5 W\" datasheet line against sustained load",
+        description="An edge accelerator's datasheet operating point against the same chip under sustained "
+                    "inference load, after thermal throttling (illustrative, no named device).",
+        claimed_rate=Q_(10, "TOPS"),  # scenario assumption: datasheet peak
+        claimed_power=Q_(0.5, "W"),  # scenario assumption: datasheet power
+        sustained_rate=Q_(3, "TOPS"),  # scenario assumption: throughput under sustained load
+        sustained_power=Q_(2, "W"),  # scenario assumption: power under sustained load
+    )
+    MobileNetV2CameraTrapBoard = _st.HostAcceleratorBoardScenario(
+        name="MobileNetV2 on a camera trap's host CPU and attached INT8 accelerator",
+        description="A labeled composite edge board: FP32 and INT8 on the low-power host CPU, INT8 on the "
+                    "attached accelerator; end to end adds host preprocessing and the link copy.",
+        host_fp32_latency=Q_(50, "ms"),  # scenario assumption: FP32 on the host CPU
+        host_int8_latency=Q_(15, "ms"),  # scenario assumption: INT8 on the host CPU
+        accelerator_latency=Q_(2, "ms"),  # scenario assumption: INT8 on the accelerator
+        host_end_to_end=Q_(18, "ms"),  # scenario assumption: host CPU, full request path
+        accelerator_end_to_end=Q_(6, "ms"),  # scenario assumption: accelerator, full request path
+        host_power=Q_(120, "mW"),  # scenario assumption: host CPU active power
+        accelerator_power=Q_(500, "mW"),  # scenario assumption: accelerator active power
+        frame_rate=Q_(30, "1/second"),  # scenario assumption: 30-frame-per-second camera stream
+    )
+    PreprocessBoundVisionPipeline = _st.PipelineSpeedupScenario(
+        name="A vision pipeline whose inference stage is made 5x faster",
+        description="8 ms of JPEG decode, resize, and normalize on the host, then 10 ms of inference.",
+        stages={"preprocess": Q_(8, "ms"),  # scenario assumption
+                "inference": Q_(10, "ms")},  # scenario assumption
+        accelerated="inference",
+        speedup=5,  # scenario assumption: inference-only optimization
+    )
+    ModelStageInFiftyMsRequest = _st.PipelineSpeedupScenario(
+        name="A 10 ms model stage inside a 50 ms request, made 3x faster",
+        description="End-to-end dilution of a component speedup: the rest of the request is untouched.",
+        stages={"other": Q_(50, "ms") - Q_(10, "ms"),  # scenario assumption: 50 ms request
+                "model": Q_(10, "ms")},  # scenario assumption: model stage
+        accelerated="model",
+        speedup=3,  # scenario assumption
+    )
+    ResNet50H100TrainingCeiling = _st.AcceleratorInputFeedScenario(
+        name="ResNet-50 training on one H100: arithmetic ceiling against the MLPerf rate",
+        description="Peak dense FP16 over three forward passes of work per image, against the per-accelerator "
+                    "rate of NVIDIA's 64-H100 MLPerf Training v3.1 submission.",
+        workload=_Models.Vision.ResNet50,
+        hardware=_Hardware.Cloud.H100,
+        sustained_rate=Q_(float(_Literature.Benchmarks.ResNet50H100TrainThroughput), "count/second"),
+        accelerators=int(_Literature.Benchmarks.ResNet50H100TrainThroughputAccelerators),
+        training_flops_factor=3,  # convention: the backward pass costs about twice the forward pass
+    )
+    KeywordSpottingOnEsp32S3 = _st.PeriodicInferencePowerScenario(
+        name="DS-CNN keyword spotting once a second on an ESP32-S3-class board",
+        description="One inference per one-second audio window at the board's peak INT8 rate; active at TDP, "
+                    "idle at its minimum power between inferences.",
+        workload=_Models.Tiny.DS_CNN,
+        hardware=_Hardware.Tiny.ESP32_S3,
+        period=Q_(1, "second"),  # scenario assumption: one inference per one-second window
+        precision="int8",
+        energy_cut=2.0,  # scenario assumption: a model that halves inference energy
+    )
+    GeminiMedianPromptEnergyBoundary = _st.MeasurementBoundaryEnergyScenario(
+        name="The median Gemini text prompt under two measurement boundaries",
+        description="Active accelerators only (most efficient data centers) against everything the service "
+                    "draws (Elsworth et al. 2025, Table 1).",
+        series_name="GeminiPromptEnergy",
+    )
+    FasterStepsMoreSteps = _st.StepsToQualityScenario(
+        name="A change that speeds each step 1.8x but needs 2.5x the steps",
+        description="Step throughput rises while time to the quality target grows.",
+        step_speedup=1.8,  # scenario assumption
+        steps_multiplier=2.5,  # scenario assumption
+    )
+    ModelOnlyMeanVersusProductionP99 = _st.MeanVersusTailScenario(
+        name="A model-only mean latency against a production p99",
+        description="Mean latency on evenly spaced synthetic inputs against the p99 under production traffic "
+                    "(illustrative).",
+        mean=Q_(15, "ms"),  # scenario assumption: model-only mean
+        tail_low=Q_(150, "ms"),  # scenario assumption: production p99, low
+        tail_high=Q_(200, "ms"),  # scenario assumption: production p99, high
+    )
+    EosEightH100ResNetMLPerfV40 = _st.MLPerfTrainingResultScenario(
+        name="NVIDIA Eos, 8x H100, ResNet-50, MLPerf Training v4.0",
+        description="Five runs of one 8-GPU node; published score and per-accelerator rate.",
+        series_name="MLPerfTrainingV40ResNetRuns",
+        system="eos_ngc24.04_mxnet",
+        accelerators=8,
+        dataset=_Datasets.ImageNet,
+        global_batch=int(_Literature.Benchmarks.MLPerfTrainingV40EosResNetGlobalBatch),
+        scaling_factor=float(_Literature.Benchmarks.MLPerfTrainingV40ResNetScalingFactor),
+    )
+    EosSixtyFourH100ResNetMLPerfV40 = EosEightH100ResNetMLPerfV40.variant(
+        name="NVIDIA Eos_n8, 64x H100, ResNet-50, MLPerf Training v4.0",
+        description="Five runs of eight nodes, one of which missed the quality target.",
+        system="eos_n8_ngc24.04_mxnet",
+        accelerators=64,
+    )
+    EosResNetStrongScalingMLPerfV40 = _st.StrongScalingPairScenario(
+        name="ResNet-50 on 8 and on 64 H100s, same global batch and epochs (MLPerf Training v4.0)",
+        description="Strong scaling from one Eos node to eight.",
+        base_devices=EosEightH100ResNetMLPerfV40.accelerators,
+        base_time=EosEightH100ResNetMLPerfV40.published_score,
+        scaled_devices=EosSixtyFourH100ResNetMLPerfV40.accelerators,
+        scaled_time=EosSixtyFourH100ResNetMLPerfV40.published_score,
+    )
+    ImageClassifierEightGpuScaling = _st.StrongScalingPairScenario(
+        name="An image classifier trained on one GPU and on eight",
+        description="A fixed dataset: 24 hours on one GPU, 4 hours on eight (illustrative).",
+        base_devices=1,
+        base_time=Q_(24, "hour"),  # scenario assumption: single-GPU training time
+        scaled_devices=8,
+        scaled_time=Q_(4, "hour"),  # scenario assumption: eight-GPU training time
+    )
+    # --- Benchmarking: deciding from measurements (added 2026-10-20) --------
+    DellEightH100ResNetMLPerfV40 = EosEightH100ResNetMLPerfV40.variant(
+        name="Dell XE9680, 8x H100, ResNet-50, MLPerf Training v4.0",
+        description="Five runs of one 8-GPU server, one of which missed the quality target.",
+        system="XE9680x8H100-SXM-80GB",
+    )
+    NvidiaEightH200ResNetMLPerfV40 = EosEightH100ResNetMLPerfV40.variant(
+        name="NVIDIA, 8x H200, ResNet-50, MLPerf Training v4.0",
+        description="Five runs of one 8-GPU H200 server with Eos's host and software.",
+        system="h200_ngc24.04_mxnet",
+    )
+    EosAgainstDellResNetMLPerfV40 = _st.RunTimeComparisonScenario(
+        name="Eos against Dell, 8x H100 each, converged runs (MLPerf Training v4.0 ResNet-50)",
+        description="Welch 95 percent interval on the difference in mean run time; Dell's missed run excluded.",
+        base=EosEightH100ResNetMLPerfV40,
+        other=DellEightH100ResNetMLPerfV40,
+        confidence=0.95,        # scenario assumption: interval confidence
+        minimum_useful=0.02,    # scenario assumption: a 2 percent speedup set before the test (illustrative)
+    )
+    EosAgainstDellAllRunsResNetMLPerfV40 = EosAgainstDellResNetMLPerfV40.variant(
+        name="Eos against Dell, every run timed as a run (MLPerf Training v4.0 ResNet-50)",
+        description="The same interval with Dell's run that missed the target counted at its stop time.",
+        include_failed=True,
+    )
+    EosAgainstH200ResNetMLPerfV40 = EosAgainstDellResNetMLPerfV40.variant(
+        name="Eos (8x H100) against 8x H200, same host and software (MLPerf Training v4.0 ResNet-50)",
+        description="Welch 95 percent interval on the difference in mean run time.",
+        other=NvidiaEightH200ResNetMLPerfV40,
+    )
+    EosResNetRunCountPlanning = _st.RunCountPlanningScenario(
+        name="Runs a ResNet-50 time-to-train mean needs at Eos's run-to-run spread",
+        description="Half-width of a mean of 5, 10, and 20 runs; runs per system to detect 0.5 and 1 percent.",
+        reference=EosEightH100ResNetMLPerfV40,
+        confidence=0.95,          # scenario assumption
+        power=0.80,               # scenario assumption: standard 80 percent power
+        run_counts=[5, 10, 20],   # scenario assumption: run counts compared (MLPerf's minimum is five)
+        differences=[0.005, 0.01],  # scenario assumption: differences to resolve, fraction of the mean
+    )
+    ImageNetValidationSamplingNoise = _st.ProportionPrecisionScenario(
+        name="A 76 percent top-1 measured on a fresh draw of 50,000 validation images",
+        description="Binomial 95 percent half-width at the mean top-1 of the 20 MLPerf Training v4.0 ResNet-50 runs.",
+        rate=(sum(r["top1"] for r in _Literature.Series.MLPerfTrainingV40ResNetRuns.entries)
+              / len(_Literature.Series.MLPerfTrainingV40ResNetRuns.entries) / 100),
+        n_samples=int(_Datasets.ImageNet.validation_examples.to("count").magnitude),
+        confidence=0.95,          # scenario assumption
+    )
+    AccuracyWithinOnePointSampleSize = _st.ProportionSampleSizeScenario(
+        name="Test images that pin a 95 percent accuracy to within one point",
+        description="n = z^2 p (1 - p) / m^2 at 95 percent confidence.",
+        rate=0.95,         # scenario assumption: accuracy being estimated
+        half_width=0.01,   # scenario assumption: one point
+        confidence=0.95,   # scenario assumption
+    )
+    MLPerfP90QuerySampleSize = _st.ProportionSampleSizeScenario(
+        name="Queries that pin a 90th-percentile latency (MLPerf Inference rule)",
+        description="The 90th percentile's rank to within 0.5 percent at 99 percent confidence.",
+        rate=0.90,
+        half_width=float(_Literature.Benchmarks.MLPerfInferenceP90QueryMargin),
+        confidence=float(_Literature.Benchmarks.MLPerfInferenceQueryConfidence),
+        published_minimum=int(_Literature.Benchmarks.MLPerfInferenceP90MinQueries),
+    )
+    MLPerfP99QuerySampleSize = MLPerfP90QuerySampleSize.variant(
+        name="Queries that pin a 99th-percentile latency (MLPerf Inference rule)",
+        description="The 99th percentile's rank to within 0.05 percent at 99 percent confidence.",
+        rate=0.99,
+        half_width=float(_Literature.Benchmarks.MLPerfInferenceP99QueryMargin),
+        published_minimum=int(_Literature.Benchmarks.MLPerfInferenceP99MinQueries),
+    )
+    NinetyFiveAgainstNinetyFourOnSameImages = _st.SameTestSetAccuracyComparisonScenario(
+        name="A 95 percent baseline against a 94 percent compressed model on the same 1,000 images",
+        description="Independent-set interval on the one-point drop, and McNemar's disagreement limit.",
+        n_samples=1000,               # scenario assumption: test images
+        baseline_accuracy=0.95,       # scenario assumption
+        candidate_accuracy=0.94,      # scenario assumption
+        confidence=0.95,              # scenario assumption
+    )
+    EosResNetTwoSeedsSameValidationSet = _st.SameTestSetAccuracyComparisonScenario(
+        name="Two seeds of one ResNet-50 recipe on the same 50,000 ImageNet validation images",
+        description="Eos's most and least accurate MLPerf Training v4.0 runs: the net gap and McNemar's limit.",
+        n_samples=int(_Datasets.ImageNet.validation_examples.to("count").magnitude),
+        baseline_accuracy=max(EosEightH100ResNetMLPerfV40.top1) / 100,
+        candidate_accuracy=min(EosEightH100ResNetMLPerfV40.top1) / 100,
+        confidence=0.95,              # scenario assumption
+    )
+    WarmingPhoneRunOrder = _st.WarmingDeviceRunOrderScenario(
+        name="Two arms of the same code timed in blocked or interleaved order on a warming phone GPU",
+        description="Latency drifts from the iPhone XS GPU's start toward its value after 200 s of sustained "
+                    "inference (Lee et al. 2019, Figure 8); ten runs, ten seconds in and 18 s apart.",
+        start=Q_(_LEE_XS_GPU["start_ms"], "ms"),
+        end=Q_(_LEE_XS_GPU["end_ms"], "ms"),
+        time_constant=Q_(70, "second"),  # scenario assumption: smooth warming curve, not fitted
+        first_time=Q_(10, "second"),     # scenario assumption
+        spacing=Q_(18, "second"),        # scenario assumption
+        runs_per_arm=5,                  # scenario assumption
+    )
+    WiderBeamSearchTranslation = _st.ProxyMetricLatencyScenario(
+        name="Beam search widened from 1 to 10 candidates for half a BLEU point",
+        description="An offline metric gain that breaks a 100 ms serving deadline (illustrative).",
+        original_metric=28.0,            # scenario assumption: BLEU
+        optimized_metric=28.5,           # scenario assumption: BLEU
+        original_width=1,                # scenario assumption: beam size
+        optimized_width=10,              # scenario assumption: beam size
+        original_latency=Q_(50, "ms"),   # scenario assumption
+        optimized_latency=Q_(200, "ms"),  # scenario assumption
+        latency_budget=Q_(100, "ms"),    # scenario assumption: serving deadline
+    )
+    ThreeBinReliabilityDiagram = _st.ReliabilityBinsScenario(
+        name="100 overconfident predictions in three confidence bins",
+        description="Constructed bins for computing expected calibration error by hand (illustrative).",
+        bins=[(20, 0.65, 0.60), (30, 0.85, 0.80), (50, 0.97, 0.84)],  # scenario assumption
+    )
+    MobileNetV2Int8CameraTrapGates = _st.QuantizedAcceptanceGatesScenario(
+        name="MobileNetV2 FP32 against INT8 for a camera trap, against gates set before compression",
+        description="Assumed top-1, top-5, ECE, and edge-case accuracy; edge cases are about 5 percent of inputs.",
+        workload=_Models.Vision.MobileNetV2,
+        float_top1=71.8,             # scenario assumption: FP32 top-1, percent
+        int_top1=70.9,               # scenario assumption: INT8 top-1, percent
+        float_top5=91.0,             # scenario assumption
+        int_top5=90.4,               # scenario assumption
+        float_ece=0.031,             # scenario assumption
+        int_ece=0.089,               # scenario assumption
+        float_edge=68.2,             # scenario assumption: edge-case accuracy, percent
+        int_edge=61.4,               # scenario assumption
+        accuracy_loss_limit=1.0,     # scenario assumption: gate, percentage points
+        edge_share=0.05,             # scenario assumption: edge cases among real inputs
+        edge_occlusion=0.50,         # scenario assumption: edge-case definition
+        edge_illuminance=Q_(100, "lux"),  # scenario assumption: edge-case definition
+        edge_rotation_deg=30,        # scenario assumption: edge-case definition
+        confidence_threshold=0.85,   # scenario assumption: the trap acts above this confidence
+        test_images=1000,            # scenario assumption: lab test set
+        confidence=0.95,             # scenario assumption
+    )
+
+    # --- Model serving on one machine (added 2026-10-20) ----------------------
+    # The reference service is ResNet-50 in eager FP16 on one H100, from the
+    # shared profile (engine.serving_profile): a fixed cost per pass plus device
+    # work per image. Host phases, traffic, budgets, and prices are stated.
+    ResNet50EagerFp16BatchingH100 = _st.BatchingKneeScenario(
+        name="ResNet-50 eager FP16 batches on one H100",
+        description="Fixed cost per pass (kernel issue, per-kernel floor, one weight read) plus device "
+                    "work per image, from the shared ResNet-50 H100 profile.",
+        fixed_time=_resnet50_h100_profile().eager_fp16(0),
+        per_request_time=_resnet50_h100_profile().per_image_fp16,
+        batch_sizes=[1, 8, 32, 128],  # scenario assumption: batch sizes compared
+    )
+    ResNet50BatchOneVersusEightCostH100 = _st.BatchServingCostScenario(
+        name="ResNet-50 on one rented H100 at batch 1 and batch 8",
+        description="Cost per million requests when the accelerator serves one image per pass or eight.",
+        service=ResNet50EagerFp16BatchingH100,
+        price=_Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate,
+        batch_sizes=[1, 8],  # scenario assumption: the two batch sizes compared
+    )
+    PhotoLibraryPrecomputeH100 = _st.PrecomputeVersusOnDemandScenario(
+        name="A 10,000-photo library classified on demand or overnight on one H100",
+        description="Batch-one eager FP16 per photo against the MLPerf INT8 Offline rate per H100; the "
+                    "on-demand alternative is a moderation service with a 100 ms deadline.",
+        items=10_000,  # scenario assumption: photos in one user's library
+        on_demand_time=_resnet50_h100_profile().eager_fp16(1),
+        offline_rate=Q_(_resnet50_h100_profile().int8_offline_img_s, "1/second"),
+        latency_budget=Q_(100, "ms"),  # scenario assumption: moderation deadline
+    )
+    ResNet50RequestPathH100 = _st.PipelineSpeedupScenario(
+        name="One ResNet-50 image request on an idle H100 server",
+        description="Host decode, resize, and normalize; copy over PCIe; the eager FP16 forward pass; "
+                    "top-5 on the host. The comparison makes the model 10x faster.",
+        stages={
+            "JPEG decode": Q_(3.0, "ms"),  # scenario assumption
+            "resize": Q_(1.0, "ms"),  # scenario assumption: to 224 x 224
+            "normalize": Q_(0.5, "ms"),  # scenario assumption
+            "copy to GPU": Q_(0.5, "ms"),  # scenario assumption
+            "forward pass": _resnet50_h100_profile().eager_fp16(1),
+            "top-5": Q_(0.1, "ms"),  # scenario assumption: softmax and top five
+        },
+        accelerated="forward pass",
+        speedup=10,  # scenario assumption: a 10x faster model
+    )
+    ResNet50RequestPathTensorRtH100 = ResNet50RequestPathH100.variant(
+        name="The same request with a TensorRT FP16 engine",
+        description="Only the forward pass changes, to the profile's TensorRT FP16 batch-one time.",
+        stages={**ResNet50RequestPathH100.stages, "forward pass": _resnet50_h100_profile().tensorrt("fp16", 1)},
+    )
+    DlrmRequestPath = _st.PipelineSpeedupScenario(
+        name="One DLRM recommendation request",
+        description="Parse the request, fetch 100+ embedding vectors, run the MLP, rank and filter.",
+        stages={
+            "parse": Q_(0.5, "ms"),  # scenario assumption
+            "embedding lookup": Q_(6.0, "ms"),  # scenario assumption
+            "MLP forward": Q_(1.5, "ms"),  # scenario assumption
+            "rank and filter": Q_(1.0, "ms"),  # scenario assumption
+        },
+        accelerated="MLP forward",
+    )
+    ImageServiceLittlesLaw = _st.LittlesLawScenario(
+        name="An image service at 1,000 requests per second, 50 ms mean time inside",
+        description="The accelerator runs batches of up to 32; requests beyond those wait in host memory.",
+        arrival_rate=Q_(1000, "1/second"),  # scenario assumption
+        time_in_system=Q_(50, "ms"),  # scenario assumption: mean time in system
+        batch_size=32,  # scenario assumption: largest batch the accelerator runs
+    )
+    ImageServiceLittlesLaw10ms = ImageServiceLittlesLaw.variant(
+        name="The same population at 10 ms mean time inside",
+        description="Little's law read the other way: the rate 50 requests in flight sustain.",
+        time_in_system=Q_(10, "ms"),  # scenario assumption
+    )
+    ResNet50FleetPlanH100 = _st.MM1CapacityPlanScenario(
+        name="H100s for 5,000 ResNet-50 requests per second under a 50 ms p99",
+        description="Batch-one eager FP16 service; each H100 an M/M/1 server whose p99 is 4.6 times "
+                    "its mean time in system; 30 percent headroom; re-planned at the batch-32 rate.",
+        service_time=_resnet50_h100_profile().eager_fp16(1),
+        tail_factor=4.6,  # scenario assumption: ln(100) = 4.605 rounded, as the p99 rule of thumb prints it
+        tail_budget=Q_(50, "ms"),  # scenario assumption: queue-plus-GPU p99 budget
+        peak_rate=Q_(5000, "1/second"),  # scenario assumption: peak traffic
+        headroom=1.3,  # scenario assumption: 30 percent for spikes
+        utilization_points=[0.5, 0.7, 0.8, 0.9, 0.95],  # scenario assumption: loads compared
+        example_utilization=0.7,  # scenario assumption: the load where mean and p99 are compared
+        batched_rate=ResNet50EagerFp16BatchingH100.throughput(32),
+        accelerator_price=_Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate,
+    )
+    ResNet50FasterModelAt80PctH100 = _st.MM1ServiceSpeedupScenario(
+        name="The batch-one ResNet-50 service at 80 percent load, before and after graph execution",
+        description="Eager FP16 against TorchScript (no per-operation Python dispatch) on the same traffic.",
+        slow_service=_resnet50_h100_profile().eager_fp16(1),
+        fast_service=_resnet50_h100_profile().torchscript_fp16(1),
+        utilization=0.8,  # scenario assumption
+    )
+    ServingFanout10Leaves = ServingFanout100Leaves.variant(
+        name="A request that waits for 10 independent leaves",
+        description="Each leaf meets its own p99; 1 - all_up is the share of slow requests.",
+        n_components=10,  # scenario assumption
+    )
+    BatchWindow10ms = _st.BatchWindowScenario(
+        name="A 10 ms batching window at 50 to 1,000 requests per second",
+        description="Poisson arrivals; the count per window, the share of empty windows, and the batch "
+                    "a request finds itself in.",
+        window=Q_(10, "ms"),  # scenario assumption
+        arrival_rates=[Q_(r, "1/second") for r in (50, 200, 500, 1000)],  # scenario assumption
+    )
+    BatchWindow20msIn50msBudget = BatchWindow10ms.variant(
+        name="A 20 ms batching window inside a 50 ms latency budget",
+        description="The mean wait for the window to close, as a share of the budget.",
+        window=Q_(20, "ms"),  # scenario assumption
+        arrival_rates=[],
+        latency_budget=Q_(50, "ms"),  # scenario assumption
+    )
+    DualTriggerBatchFourRequests = _st.BatchDispatchScenario(
+        name="Four requests under a 12 ms batch timeout behind a busy worker",
+        description="Arrivals at 0, 2, 5, and 9 ms never reach the cap; the worker is busy until 18 ms; "
+                    "4 ms of response path follow; the deadline is 50 ms.",
+        arrivals=[Q_(t, "ms") for t in (0, 2, 5, 9)],  # scenario assumption: hypothetical trace
+        timeout=Q_(12, "ms"),  # scenario assumption: tuned batching window
+        worker_free=Q_(18, "ms"),  # scenario assumption
+        response_path=Q_(4, "ms"),  # scenario assumption
+        deadline=Q_(50, "ms"),  # scenario assumption
+        service=ResNet50EagerFp16BatchingH100,
+    )
+    BatchCap16Or32At500Qps = _st.BatchCapChoiceScenario(
+        name="Batch cap 16 or 32 at 500 requests per second",
+        description="Batches wait until full; saturated throughput from the eager FP16 profile.",
+        service=ResNet50EagerFp16BatchingH100,
+        arrival_rate=Q_(500, "1/second"),  # scenario assumption
+        small_cap=16,  # scenario assumption
+        large_cap=32,  # scenario assumption
+    )
+    ResNet50ReplicaStartup = _st.ReplicaStartupScenario(
+        name="Startup of a ResNet-50 serving replica",
+        description="Representative phases: weights from a local SSD or object storage, CUDA context, "
+                    "TensorRT engine build on a first deploy, warmup, runtime start.",
+        phases={
+            "weights from local SSD": Q_(0.5, "second"),  # scenario assumption
+            "weights from object storage": Q_(4.0, "second"),  # scenario assumption
+            "CUDA context": Q_(0.4, "second"),  # scenario assumption
+            "TensorRT engine build": Q_(30.0, "second"),  # scenario assumption
+            "warmup": Q_(0.2, "second"),  # scenario assumption
+            "runtime": Q_(0.4, "second"),  # scenario assumption
+        },
+        ranges={
+            "weights from object storage": [Q_(3, "second"), Q_(5, "second")],  # scenario assumption
+            "CUDA context": [Q_(0.3, "second"), Q_(0.5, "second")],  # scenario assumption
+            "TensorRT engine build": [Q_(15, "second"), Q_(30, "second")],  # scenario assumption
+        },
+        warm_path=["weights from local SSD", "CUDA context", "warmup", "runtime"],
+        cold_path=["weights from object storage", "CUDA context", "TensorRT engine build", "warmup", "runtime"],
+    )
+    ModelSwapPcieGen4 = _st.TransferScenario(
+        name="A 10 GB model swapped into an accelerator over PCIe Gen4 x16",
+        description="Host memory to device at the link's theoretical bandwidth; bandwidth term only.",
+        payload=_ReferenceStats.ModelLoading.PcieSwapReferenceModelSize,
+        links={"PCIe Gen4 x16": _Hardware.Cloud.A100.interconnect.bandwidth},
+    )
+    RecommenderTrafficSurge = _st.TrafficSurgeScenario(
+        name="A recommender sized for 1,000 requests per second receives ten times more",
+        description="Utilization pins at 100 percent and the queue grows for as long as the surge lasts.",
+        normal_rate=Q_(1000, "1/second"),  # scenario assumption
+        surge_rate=Q_(10000, "1/second"),  # scenario assumption
+        normal_latency=Q_(50, "ms"),  # scenario assumption
+        surge_latency=Q_(10, "second"),  # scenario assumption: latency once the queue has grown
+    )
+    ResNet50BatchEnergyPerImage = _st.BatchEnergyPerImageScenario(
+        name="ResNet-50 bytes and energy per image at batch 1, 8, and 32",
+        description="FP32 weights read once per batch; 12.5 MB of activations written and read per image; "
+                    "DRAM energy per byte and the mean of an FP32 multiply and add per FLOP (45 nm).",
+        workload=_Models.Vision.ResNet50,
+        weight_bytes_per_param=_BYTES_FP32,
+        activation_bytes=Q_(12.5, "MB"),  # scenario assumption: 224 x 224 activation footprint
+        activation_passes=2,  # scenario assumption: written once, read once
+        byte_energy=_Hardware.Tech.Memory.DRAM.energy_per_byte,
+        flop_energy=(_Hardware.Tech.Op.FlopFp32.energy + _Hardware.Tech.Op.AddFp32.energy) / 2,
+    )
+    ResNet50CloudInstanceCost = _st.ServingInstanceCostScenario(
+        name="ResNet-50 on a CPU instance, a T4 instance, and an H100",
+        description="Hourly prices and saturated image rates; the H100 runs batch 32 of the eager FP16 profile.",
+        prices={
+            "CPU": _Infrastructure.Pricing.Cloud.CpuInstanceC5XlargePerHour.rate,
+            "T4": _Infrastructure.Pricing.Cloud.T4InstanceG4dnXlargePerHour.rate,
+            "H100": _Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate,
+        },
+        rates={
+            "CPU": Q_(50, "1/second"),  # scenario assumption: c5.xlarge ResNet-50 rate
+            "T4": Q_(400, "1/second"),  # scenario assumption: T4 ResNet-50 rate
+            "H100": ResNet50EagerFp16BatchingH100.throughput(32),
+        },
+        small="T4",
+        large="H100",
+    )
+
+    # --- Reinforcement learning from verifiable rewards (added 2026-10-20) ---
+    VerifierFalseAcceptsAtTenPercentPass = _st.RewardCompositionScenario(
+        name="One update of 8 rollouts on each of 1,024 tasks, scored by a verifier that accepts 2.5% of failures",
+        description="Ten percent of rollouts truly pass; the verifier accepts every pass and wrongly accepts "
+                    "2.5 percent of failures. Expected counts, no false rejections.",
+        tasks=1024,                  # scenario assumption
+        group=8,                     # scenario assumption
+        pass_rate=0.10,              # scenario assumption
+        false_accept_rate=0.025,     # scenario assumption
+        valid_accept_rate=1.0,       # scenario assumption: no false rejections
+    )
+    VerifierFalseAcceptsAtFivePercentPass = VerifierFalseAcceptsAtTenPercentPass.variant(
+        name="The same verifier on a policy that passes 5 percent",
+        description="Only the pass rate changes.",
+        pass_rate=0.05,              # scenario assumption: a harder task mix
+    )
+    VerifierFalseAcceptsAtFortyPercentPass = VerifierFalseAcceptsAtTenPercentPass.variant(
+        name="The same verifier on a policy that passes 40 percent",
+        description="Only the pass rate changes.",
+        pass_rate=0.40,              # scenario assumption: an easier task mix
+    )
+    BinaryRewardFixedBaseline = _st.CenteredRewardScenario(
+        name="Binary terminal reward centered on a fixed baseline of 0.25",
+        description="Reward 1 for a pass and 0 for a failure.",
+        baseline=0.25,               # scenario assumption
+        passing_reward=1.0,
+        failing_reward=0.0,
+    )
+    BinaryRewardAveragePassBaseline = BinaryRewardFixedBaseline.variant(
+        name="Binary terminal reward centered on the average pass rate, 0.4",
+        description="A positive baseline gives every turn of a failed rollout the same negative coefficient.",
+        baseline=0.4,                # scenario assumption: average pass rate
+    )
+    ShapedRewardOverlappingWeights = _st.RewardShapingScenario(
+        name="A shaped terminal score with format weight 0.4 and length weight 0.7 under an 8,000-token cap",
+        description="The weights sum past 1, so a short, well-formatted failure can outrank a long working "
+                    "pass: a 7,200-token pass at format 0.5 against a 400-token failure at format 1.",
+        format_weight=0.4,           # scenario assumption
+        length_weight=0.7,           # scenario assumption
+        length_cap=8_000,            # scenario assumption: enforced generated-token cap
+        pass_format=0.5,             # scenario assumption
+        pass_tokens=7_200,           # scenario assumption
+        failure_format=1.0,          # scenario assumption
+        failure_tokens=400,          # scenario assumption
+    )
+    ShapedRewardOrderedWeights = ShapedRewardOverlappingWeights.variant(
+        name="The same shaped score with format weight 0.2 and length weight 0.3",
+        description="The weights sum below 1, so every pass outranks every failure.",
+        format_weight=0.2,           # scenario assumption
+        length_weight=0.3,           # scenario assumption
+    )
+    DebuggerTurnForkValue = _st.ForkValueScenario(
+        name="Twenty continuations forked before and after a repair's debugger turn",
+        description="One of 20 continuations passes from the bug report; 12 of 20 pass after the debugger turn.",
+        continuations=20,            # scenario assumption
+        passes_before=1,             # scenario assumption
+        passes_after=12,             # scenario assumption
+    )
+    ThirtyTurnForksAtEveryBoundary = _st.ContinuationForkCostScenario(
+        name="A 30-turn trajectory of 512 tokens per turn with 8 continuations forked at every boundary",
+        description="Every one of the 29 intermediate boundaries reruns the remaining turns 8 times.",
+        turns=30,                    # scenario assumption
+        tokens_per_turn=512,         # scenario assumption
+        branches=8,                  # scenario assumption
+    )
+    ThirtyTurnForksAfterTurnsTenAndTwenty = ThirtyTurnForksAtEveryBoundary.variant(
+        name="The same trajectory with forks only after turns 10 and 20",
+        description="Two chosen boundaries instead of all 29.",
+        boundaries=[10, 20],         # scenario assumption
+    )
+    RepairGroupOnePassOfThree = _st.GroupCoefficientsScenario(
+        name="Three repair rollouts, the middle one passing, under population dispersion",
+        description="Rewards [0, 1, 0]; the dispersion divides by G and a 1e-8 stabilizer is added.",
+        rewards=[0.0, 1.0, 0.0],     # scenario assumption
+        stabilizer=1e-8,             # scenario assumption
+    )
+    RepairGroupOnePassOfThreeTrlConvention = RepairGroupOnePassOfThree.variant(
+        name="The same three rewards under TRL GRPOTrainer's convention",
+        description="TRL (huggingface/trl at commit 88365e5, grpo_trainer.py and utils.nanstd) divides the "
+                    "variance by G - 1 (Bessel's correction) and adds 1e-4 to the dispersion.",
+        stabilizer=1e-4,             # TRL GRPOTrainer, commit 88365e5
+        bessel=True,                 # TRL utils.nanstd, commit 88365e5
+    )
+    LonePassInGroupOfSixteen = _st.GroupCoefficientsScenario(
+        name="One pass among 16 rollouts of a hard task",
+        description="Population dispersion with no stabilizer; the lone pass gets sqrt(15).",
+        rewards=[1.0] + [0.0] * 15,  # scenario assumption
+        stabilizer=0.0,
+    )
+    LoneFailureInGroupOfSixteen = LonePassInGroupOfSixteen.variant(
+        name="One failure among 16 rollouts of an easy task",
+        description="The mirror image of the lone pass.",
+        rewards=[0.0] + [1.0] * 15,  # scenario assumption
+    )
+    ShortAndLongFailureLengths = _st.LengthNormalizationScenario(
+        name="A 128-token and a 4,096-token failure with the same group coefficient",
+        description="Per-rollout averaging divides each by its own length.",
+        short_tokens=128,            # scenario assumption
+        long_tokens=4_096,           # scenario assumption
+    )
+    HardTaskRolloutStep = _st.RolloutStepBudgetScenario(
+        name="One update of 512 tasks with groups of 8 on a mix the policy passes 5 percent",
+        description="Each rollout is the 30-turn, 512-token trajectory of the fork inventory.",
+        tasks=512,                   # scenario assumption
+        group=8,                     # scenario assumption
+        turns=ThirtyTurnForksAtEveryBoundary.turns,
+        tokens_per_turn=ThirtyTurnForksAtEveryBoundary.tokens_per_turn,
+        pass_rate=0.05,              # scenario assumption: untargeted hard-task mix
+    )
+    HardTaskRolloutStepDoubledGroup = HardTaskRolloutStep.variant(
+        name="The same update with groups of 16",
+        description="Only the group size changes.",
+        group=16,                    # scenario assumption: double the group
+    )
+    TargetedTaskRolloutStep = HardTaskRolloutStep.variant(
+        name="The same update on tasks the policy passes about half the time",
+        description="Difficulty-targeted selection; only the pass rate changes.",
+        pass_rate=0.50,              # scenario assumption
+    )
+    ModerateTaskRolloutStep = HardTaskRolloutStep.variant(
+        name="The same update on a mix the policy passes 20 percent",
+        description="Only the pass rate changes.",
+        pass_rate=0.20,              # scenario assumption
+    )
+    PairGroupsAtTenPercentPass = HardTaskRolloutStep.variant(
+        name="Groups of 2 rollouts on a task the policy passes 10 percent",
+        description="The smallest group that can carry contrast.",
+        group=2,                     # scenario assumption
+        pass_rate=0.10,              # scenario assumption
+    )
+    FlakyRaceTestAllPassRule = _st.RepeatedVerificationScenario(
+        name="A timing-sensitive race test repeated three times on a candidate patch",
+        description="An incorrect patch passes one trial with probability 0.20 and a correct one with 0.98; "
+                    "a group of 16 incorrect patches graded once each.",
+        incorrect_pass=0.20,         # scenario assumption
+        correct_pass=0.98,           # scenario assumption
+        trials=3,                    # scenario assumption
+        group=16,                    # scenario assumption
+    )
+    DominantTokenRatioClip = _st.RatioClipScenario(
+        name="A token at probability 0.9 under a ratio clip of 0.2",
+        description="The ceiling (1 + epsilon) p exceeds 1, so the clip does not bind.",
+        epsilon=0.2,                 # scenario assumption: PPO's common clip width
+        probability=0.9,             # scenario assumption
+    )
+    RareTokenRatioClip = DominantTokenRatioClip.variant(
+        name="A token at probability 0.01 under a ratio clip of 0.2",
+        description="The token may rise only epsilon p in one update.",
+        probability=0.01,            # scenario assumption
+    )
+    RepairRolloutSlotResets = _st.RolloutSlotCycleScenario(
+        name="256 sandbox slots running 20-decision repair episodes, cold container reset against snapshot",
+        description="120 ms of model service and 80 ms of tool execution per decision, 0.5 s of assessment, "
+                    "then a 3.5 s cold reset or a 15 ms snapshot restore. Constant times, no contention.",
+        slots=256,                   # scenario assumption
+        decisions=20,                # scenario assumption
+        model_time=Q_(120, "ms"),    # scenario assumption
+        tool_time=Q_(80, "ms"),      # scenario assumption
+        assessment_time=Q_(0.5, "s"),   # scenario assumption
+        cold_reset=Q_(3.5, "s"),     # scenario assumption
+        snapshot_reset=Q_(15, "ms"),    # scenario assumption
+    )
+    RolloutGroupOfFourBarrier = _st.GroupBarrierScenario(
+        name="A group of four rollouts finishing between 0.2 s and 16.8 s",
+        description="The group-relative update waits for the slowest member.",
+        latencies=[Q_(0.2, "s"), Q_(2.1, "s"), Q_(4.2, "s"), Q_(16.8, "s")],   # scenario assumption
+    )
+    RepairVerifierPool = _st.VerifierPoolScenario(
+        name="512 completed trajectories every 16 s, three 8 s verification trials each, 80 percent target",
+        description="Stationary arrivals; every trial executes in this sizing case.",
+        trajectories=512,            # scenario assumption
+        interval=Q_(16, "s"),        # scenario assumption
+        trials=3,                    # scenario assumption
+        trial_time=Q_(8, "s"),       # scenario assumption
+        target_utilization=0.8,      # scenario assumption: illustrative planning target
+    )
+
+    # --- Release of the warehouse machine: lighting, argument confidence (added 2026-10-20) ---
+    WarehouseNavCameraAgeAtAisleSpeed = WarehouseNavCameraAge.variant(
+        name="The warehouse machine's navigation-camera observation age at the candidate aisle speed",
+        description="Exposure midpoint to dispatch, priced as travel at the aisle speed; one frame.",
+        speed=_Embodied.Scenario.WarehouseAisle.v_aisle,
+        batch_frames=1,
+    )
+    WarehouseNavCameraAgeDimAisle = WarehouseNavCameraAgeAtAisleSpeed.variant(
+        name="The same observation age in a dim aisle that doubles the camera's exposure",
+        description="Auto-exposure lengthens the exposure; the capture epoch is its midpoint, so the age "
+                    "grows by half the added exposure.",
+        exposure=(2.0  # scenario assumption: a dim aisle doubles the exposure (illustrative)
+                  * _Embodied.MobileManipulator.WarehouseMobileManipulator.nav_camera.exposure_time).to("ms"),
+    )
+    SafetyArgumentConfidence = _st.ArgumentConfidenceScenario(
+        name="A stipulated safety argument: ten required premises and two independent legs",
+        description="Confidence in a conjunction of required premises, and in a claim either of two "
+                    "independent legs suffices for (a teaching model, not a machine value).",
+        premise_confidence=0.99,  # scenario assumption: stipulated confidence in each required premise
+        premises=10,              # scenario assumption: stipulated number of required premises
+        leg_confidence=0.90,      # scenario assumption: stipulated confidence in each leg
+        legs=2,
+    )
+
+    # --- Coordinating several agents (added 2026-10-20) -------------------------
+    RepairPartitionScreen = _st.PartitionScreenScenario(
+        name="A repair partition with 80 percent divisible work and 0.02 overhead per added worker",
+        description="Elapsed time over the serial reference for one to sixteen workers.",
+        parallel_fraction=0.80,  # scenario assumption
+        overhead_per_extra_worker=0.02,  # scenario assumption: normalized by the serial time
+        max_workers=16,  # scenario assumption: resource ceiling
+    )
+    RepairPartitionScreenHalvedOverhead = RepairPartitionScreen.variant(
+        name="The same partition with the per-worker overhead halved",
+        overhead_per_extra_worker=RepairPartitionScreen.overhead_per_extra_worker / 2,
+    )
+    NinetyPercentPartitionScreen = RepairPartitionScreen.variant(
+        name="A partition with 90 percent divisible work at the same per-worker overhead",
+        description="The checkpoint estimate: fund a halved overhead or a halved serial share.",
+        parallel_fraction=0.90,  # scenario assumption
+    )
+    NinetyPercentPartitionScreenHalvedOverhead = NinetyPercentPartitionScreen.variant(
+        name="The 90 percent partition with the per-worker overhead halved",
+        overhead_per_extra_worker=NinetyPercentPartitionScreen.overhead_per_extra_worker / 2,
+    )
+    NinetyPercentPartitionScreenHalvedSerial = NinetyPercentPartitionScreen.variant(
+        name="The 90 percent partition with its serial share halved",
+        parallel_fraction=1 - (1 - NinetyPercentPartitionScreen.parallel_fraction) / 2,
+    )
+    RepairPartitionScalability = _st.ScalabilityLawScenario(
+        name="The repair partition as a universal scalability law: sigma 0.20, kappa 0.02",
+        description="sigma = 1 - p and kappa = c reproduce the screen's elapsed times as capacities.",
+        contention=1 - RepairPartitionScreen.parallel_fraction,
+        coherency=RepairPartitionScreen.overhead_per_extra_worker,
+        search_limit=64,  # scenario assumption: counts searched
+    )
+    ResearchFanoutScalability = RepairPartitionScalability.variant(
+        name="The orchestrator-worker research agent: sigma 0.10, kappa 0.002",
+        description="Independent search paths reconcile rarely, so coherency is a tenth of the repair partition's.",
+        contention=_Agents.Research.OrchestratorWorker.serial_fraction,
+        coherency=_Agents.Research.OrchestratorWorker.coherency_coefficient,
+    )
+    ResearchSystemTokenBreakEven = _st.DelegationTokenBreakEvenScenario(
+        name="Delegation at the research system's 15x against 4x token multiples over chat",
+        description="Break-even acceptance at a 3.75x token multiple, and the reported 90.2 percent gain "
+                    "read as an acceptance multiple; a single agent that already accepts 60 percent.",
+        agent_tokens_vs_chat=_Agents.Research.OrchestratorWorker.agent_token_multiple,
+        multi_agent_tokens_vs_chat=_Agents.Research.OrchestratorWorker.fanout_token_multiple,
+        reported_gain=float(_Literature.MultiAgentSystems.ResearchSystemEvalGainPct) / 100,
+        single_acceptance=0.60,  # scenario assumption: a task one agent usually completes
+    )
+    InterfaceMigrationSchedule = _st.DependencyScheduleScenario(
+        name="A seven-node interface migration on four slots",
+        description="Specification, three module changes, an integration step, a test step, and the "
+                    "final check; v2 and v3 tie on the critical path.",
+        durations={1: Q_(20.5, "s"), 2: Q_(42, "s"), 3: Q_(42, "s"), 4: Q_(42, "s"),
+                   5: Q_(43, "s"), 6: Q_(16.5, "s"), 7: Q_(69, "s")},  # scenario assumption: node durations
+        predecessors={1: [], 2: [1], 3: [1], 4: [1], 5: [2, 3], 6: [4], 7: [5, 6]},
+        slots=4,  # scenario assumption
+    )
+    InterfaceMigrationScheduleShorterV5 = InterfaceMigrationSchedule.variant(
+        name="The migration with v5 20 s shorter",
+        durations={**InterfaceMigrationSchedule.durations,
+                   5: InterfaceMigrationSchedule.durations[5] - Q_(20, "s")},  # scenario assumption: 20 s cut
+    )
+    InterfaceMigrationScheduleShorterV6 = InterfaceMigrationSchedule.variant(
+        name="The migration with v6 20 s shorter, which removes it (it lasts 16.5 s)",
+        durations={**InterfaceMigrationSchedule.durations,
+                   6: max(Q_(0, "s"), InterfaceMigrationSchedule.durations[6]
+                          - (InterfaceMigrationSchedule.durations[5] - InterfaceMigrationScheduleShorterV5.durations[5]))},
+    )
+    SixChildReferencePassing = _st.ReferencePassingScenario(
+        name="Six children: a pasted 48,000-token slice or a 350-token reference and 3,600 tokens of reads",
+        description="Each supplied input token is charged once at a hypothetical $3 per million.",
+        workers=6,  # scenario assumption
+        slice_tokens=48_000,  # scenario assumption
+        reference_tokens=350,  # scenario assumption
+        read_tokens=3_600,  # scenario assumption
+        input_price=Q_(3.00, "USD / Mtoken"),  # scenario assumption: hypothetical input price
+    )
+    ThousandFileSharedWrites = _st.SharedWriteScenario(
+        name="Workers each writing 10 of 1,000 files in one shared workspace",
+        description="Uniform, independent write sets; the exact disjoint product and its birthday approximation.",
+        files=1_000,  # scenario assumption
+        writes_per_worker=10,  # scenario assumption
+        max_fleet=16,  # scenario assumption: fleet sizes evaluated
+        small_fleet=2,  # scenario assumption
+        large_fleet=8,  # scenario assumption
+    )
+    TwoThousandFileSharedWrites = ThousandFileSharedWrites.variant(
+        name="The same writes in a 2,000-file repository",
+        files=2 * ThousandFileSharedWrites.files,
+    )
+    FiveCorrelatedReviewers = _st.CorrelatedReviewersScenario(
+        name="Five reviewers, each falsely approving 20 percent, with mixture correlation 0.40",
+        description="Majority and unanimous false approval, independent against beta-binomial, and the "
+                    "floor under the majority as the panel grows to fifteen.",
+        reviewers=5,  # scenario assumption
+        false_approval=0.20,  # scenario assumption: marginal false-approval rate
+        correlation=0.40,  # scenario assumption: pairwise correlation of the propensity
+        large_ensemble=15,  # scenario assumption
+    )
+    EightWorkerDeadlineFanout = _st.FanoutDeadlineScenario(
+        name="Eight workers, each on time 90 percent of the time, against a 10 s deadline",
+        description="All eight results against any six of eight interchangeable ones.",
+        workers=8,  # scenario assumption
+        required=6,  # scenario assumption: the contract's quorum
+        on_time_probability=0.90,  # scenario assumption
+        deadline=Q_(10, "s"),  # scenario assumption
+        max_fleet=16,  # scenario assumption: fleet sizes tabulated
+    )
+    DiffReviewCreditWindow = _st.CreditWindowScenario(
+        name="A diff producer at 5 items/s feeding a reviewer of 500-token critiques at 40 tokens/s",
+        description="Ten minutes unbounded against a window of eight credits; the window for a one-minute residence.",
+        producer_rate=Q_(5, "1/s"),  # scenario assumption
+        decode_rate=Q_(40, "token/s"),  # scenario assumption
+        tokens_per_item=Q_(500, "token"),  # scenario assumption
+        horizon=Q_(600, "s"),  # scenario assumption
+        credits=8,  # scenario assumption
+        residence_target=Q_(60, "s"),  # scenario assumption
+    )
+    RemediationChildAllowances = _st.SplitAllowanceScenario(
+        name="Three remediation children asking $20 each from $50 remaining",
+        description="A $5 finalization reserve and $6 of the root's own outstanding work come first.",
+        remaining=Q_(50, "USD"),  # scenario assumption
+        finalization_reserve=Q_(5, "USD"),  # scenario assumption
+        own_reserved=Q_(6, "USD"),  # scenario assumption
+        requests=[Q_(20, "USD")] * 3,  # scenario assumption: three children, in dispatch order
+        nested_request=Q_(5, "USD"),  # scenario assumption: an inspection grandchild under one child
+    )
+    MatchedDelegationCohort = _st.DelegationCohortScenario(
+        name="100 migrations, single controller against delegation, under a $20 ceiling",
+        description="Both accept 80 by the 600 s cutoff; only delegation meets 75 by the 300 s deadline.",
+        attempted=100,  # scenario assumption
+        accepted_floor=80,  # scenario assumption
+        on_time_floor=75,  # scenario assumption
+        deadline=Q_(300, "s"),  # scenario assumption
+        cutoff=Q_(600, "s"),  # scenario assumption
+        budget=Q_(20, "USD"),  # scenario assumption
+        input_price=SixChildReferencePassing.input_price,
+        output_price=Q_(10.00, "USD / Mtoken"),  # scenario assumption: hypothetical output price
+        service_price=Q_(0.01, "USD / s"),  # scenario assumption: metered tool and assessment time
+        single=_st.CohortArmRecord(
+            accepted=80, on_time=70, median_accepted_time=Q_(240, "s"),  # scenario assumption
+            input_tokens=Q_(2_000_000, "token"), output_tokens=Q_(400_000, "token"),  # scenario assumption
+            service_time=Q_(200, "s"),  # scenario assumption
+            discard_input_tokens=Q_(500_000, "token"), discard_output_tokens=Q_(100_000, "token"),  # scenario assumption
+            discard_service_time=Q_(50, "s"),  # scenario assumption
+        ),
+        delegated=_st.CohortArmRecord(
+            accepted=80, on_time=78, median_accepted_time=Q_(180, "s"),  # scenario assumption
+            input_tokens=Q_(3_000_000, "token"), output_tokens=Q_(600_000, "token"),  # scenario assumption
+            service_time=Q_(300, "s"),  # scenario assumption
+            discard_input_tokens=Q_(1_000_000, "token"), discard_output_tokens=Q_(200_000, "token"),  # scenario assumption
+            discard_service_time=Q_(100, "s"),  # scenario assumption
+        ),
+    )
+    EightAgentMessageRound = _st.MessageRoundScenario(
+        name="One round in which each of eight agents speaks once",
+        description="A group chat's full mesh against a supervisor's envelope and receipt per worker.",
+        workers=8,  # scenario assumption
+    )
+
+    # --- Responsible physical AI: decisions, oversight, stages, groups, records (added 2026-10-20) ---
+    AdmittedCommandDecisionChain = _st.DecisionChainScenario(
+        name="Six separately kept decisions behind one admitted aisle command",
+        description="Chain completeness p^6 at three per-link retrieval probabilities.",
+        links=6,                                  # scenario assumption: policy, enforcer, authority, envelope, crossing rule, staffing
+        link_probabilities=(0.99, 0.95, 0.90),    # scenario assumption: illustrative retrieval probabilities
+    )
+    WarehouseRackEndOversightTime = _st.OversightTimeScenario(
+        name="The out-of-loop takeover against the time a person stepping out at the rack end leaves",
+        description="Clear distance at the aisle speed, the design out-of-loop takeover, and its travel.",
+        budget=WarehouseOutOfLoopTakeoverAtAisleSpeed,
+    )
+    WarehouseRemoteAssistantQueue = _st.SupervisorQueueScenario(
+        name="One remote assistant serving twenty warehouse machines",
+        description="M/M/1 utilization, mean wait, and 99th-percentile wait; the fleet a one-half cap allows.",
+        request_rate=Q_(0.5, "1/hour"),           # scenario assumption: illustrative help requests per machine-hour
+        service_time=Q_(3.0, "minute"),           # scenario assumption: illustrative mean time per request
+        machines=20,                              # scenario assumption: illustrative fleet
+        utilization_cap=0.5,                      # scenario assumption: chosen staffing ceiling
+    )
+    WarehouseRemoteAssistantQueueTenMachines = WarehouseRemoteAssistantQueue.variant(
+        name="One remote assistant serving ten warehouse machines",
+        description="The same requests from half the fleet.",
+        machines=10,                              # scenario assumption: illustrative fleet
+    )
+    WarehouseRemoteAssistantQueueThirtyTwoMachines = WarehouseRemoteAssistantQueue.variant(
+        name="One remote assistant serving thirty-two warehouse machines",
+        description="The same requests from a larger fleet.",
+        machines=32,                              # scenario assumption: illustrative fleet
+    )
+    WarehouseRemoteAssistantQueueTwentyFourMachines = WarehouseRemoteAssistantQueue.variant(
+        name="One remote assistant serving twenty-four machines with shorter, more frequent requests",
+        description="A self-check load: more requests per machine-hour, each shorter.",
+        machines=24,                              # scenario assumption: self-check fleet
+        request_rate=Q_(0.8, "1/hour"),           # scenario assumption: self-check request rate
+        service_time=Q_(75.0, "s"),               # scenario assumption: self-check service time
+    )
+    WarehouseRemoteAssistantLabor = _st.SupervisionLaborScenario(
+        name="Person-hours a twenty-machine warehouse fleet moves into rescue, watching, and sweeps",
+        description="An assistant staffed through two shifts at the queue's utilization, plus corridor sweeps.",
+        queue=WarehouseRemoteAssistantQueue,
+        operating_day=Q_(16.0, "hour"),           # scenario assumption: two shifts of operation
+        sweeps=4,                                 # scenario assumption: inspections of the restricted corridors
+        sweep_time=Q_(20.0, "minute"),            # scenario assumption: one corridor sweep
+        shift=Q_(8.0, "hour"),                    # scenario assumption: one full-time shift
+    )
+    WarehouseSupervisedStageExit = _st.HazardExposureScenario(
+        name="Failure-free hours ten supervised warehouse machines need to leave their stage",
+        description="Zero-failure exposure bounding one safety-relevant intervention per 1,000 h at 95 percent.",
+        rates=[Q_(1.0e-3, "1/hour")],             # scenario assumption: chosen target rate
+        confidence=0.95,                          # scenario assumption: chosen, one-sided
+        rigs=10,                                  # scenario assumption: machines in the supervised stage
+        hours_per_day=Q_(16.0, "hour/day"),       # scenario assumption: two shifts
+    )
+    WarehouseGroupDetectionShortfall = _st.DetectionShortfallScenario(
+        name="A stop sized for the best-detected group, met by three groups seen less often",
+        description="Frames to a reliable detection, distance lost, impact speed and energy at the aisle speed.",
+        site=_Embodied.Scenario.WarehouseAisle,
+        speed=_Embodied.Scenario.WarehouseAisle.v_aisle,
+        all_miss_probability=1.0e-3,              # scenario assumption: chosen all-frames miss probability
+        reference=0.95,                           # scenario assumption: illustrative best-detected group
+        groups=(0.85, 0.75, 0.60),                # scenario assumption: illustrative lower-detection groups
+    )
+    PedestrianGroupEvaluationSample = _st.SubgroupSampleScenario(
+        name="A 10,000-person detection test set with a 2 percent group",
+        description="Exact 95 percent intervals per group and the per-group sample that tells 0.95 from 0.92.",
+        total=10_000,                             # scenario assumption: illustrative test set
+        small_share=0.02,                         # scenario assumption: illustrative group share
+        recall=0.95,                              # scenario assumption: illustrative detection rate in both groups
+        rate_a=0.95,                              # scenario assumption: chosen gap to resolve
+        rate_b=0.92,                              # scenario assumption: chosen gap to resolve
+        significance=0.05,                        # scenario assumption: chosen two-sided level
+        power=0.80,                               # scenario assumption: chosen
+    )
+    WarehouseCrossingExposure = _st.ExposureConcentrationScenario(
+        name="Machine-person encounters concentrated at three warehouse crossings",
+        description="Per-person exposure of the crossing users and of everyone else against the site average.",
+        encounter_share=0.80,                     # scenario assumption: illustrative share of encounters
+        user_share=0.10,                          # scenario assumption: illustrative share of workers
+    )
+    WarehouseEventTriggeredRetention = _st.EventRetentionScenario(
+        name="Event-triggered camera retention on the warehouse machine",
+        description="The pre-trigger window plus a post-event capture per event, against keeping the whole day.",
+        pre_trigger=_Embodied.Scenario.WarehouseAisle.pre_trigger_window,
+        post_trigger=Q_(25.0, "s"),               # scenario assumption: chosen capture after the event
+        events_per_day=20,                        # scenario assumption: illustrative events per machine-day
+        operating_day=Q_(16.0, "hour"),           # scenario assumption: two shifts
+    )
+    CruiseDisclosurePenalties = _st.DisclosurePenaltyScenario(
+        name="Penalties Cruise paid for its account of the October 2, 2023 collision",
+        description="CPUC days at the daily maximum, the NHTSA consent-order penalty, and the DOJ fine.",
+        days_withheld=_Literature.IncidentReports.CruiseCpucDaysWithheld,
+        daily_maximum=_Literature.IncidentReports.CruiseCpucDailyMaximumUsd,
+        others={
+            "NHTSA": _Literature.IncidentReports.CruiseNhtsaCivilPenaltyUsd,
+            "DOJ": _Literature.IncidentReports.CruiseDojCriminalFineUsd,
+        },
+    )
+
+    # --- ML operations, part 1 (added 2026-10-20) ------------------------------
+    # The ranking service (DLRM tables on H100s) and the keyword spotter
+    # (DS-CNN on an ESP32-S3) as release, rebuild, and parity scenarios.
+    RankingServiceAccuracyDrift = _st.AccuracyDecayScenario(
+        name="The ranking service's click-prediction accuracy, launch against four weeks later",
+        description="94 percent at launch and 88 percent four weeks later after a competitor's promotion "
+                    "shifted clicks; a product manager noticed in week eight. Illustrative.",
+        initial_accuracy=0.94,  # scenario assumption: accuracy at launch
+        later_accuracy=0.88,  # scenario assumption: accuracy four weeks later
+        elapsed=Q_(28, "day"),  # scenario assumption: four weeks
+        noticed=Q_(8, "week"),  # scenario assumption: when a product manager noticed
+    )
+    DlrmReleaseFootprintH100 = _st.ReleaseFootprintScenario(
+        name="Release controls for the DLRM ranking service on an eight-H100 node",
+        description="Each control holds a second copy of the 100 GB tables; a retraining run takes four "
+                    "H100s for six hours; a 5 percent canary ramps through 25 and 50 percent to all traffic.",
+        model=_Models.Recommendation.DLRM,
+        device=_Hardware.Cloud.H100,
+        node_accelerators=8,  # scenario assumption: one eight-accelerator node
+        retrain_accelerators=4,  # scenario assumption: accelerators a retraining run occupies
+        retrain_time=Q_(6, "hour"),  # scenario assumption: duration of a retraining run
+        canary_share=0.05,  # scenario assumption: the canary's share of live queries
+        ramp=[0.05, 0.25, 0.50, 1.0],  # scenario assumption: staged exposure after the canary
+    )
+    ResNet50Fp16ReleaseFootprintH100 = DlrmReleaseFootprintH100.variant(
+        name="Release controls for an FP16 ResNet-50 service on an H100",
+        description="The same controls; a copy is the FP16 weights.",
+        model=_Models.Vision.ResNet50,
+        bytes_per_param=_BYTES_FP16,
+    )
+    KeywordSpotterDualBankEsp32S3 = _st.DualBankUpdateScenario(
+        name="Dual-bank over-the-air update of the INT8 keyword spotter on an ESP32-S3",
+        description="The device runs from bank A while bank B receives the new model; two INT8 DS-CNN "
+                    "copies in the microcontroller's flash.",
+        model=_Models.Tiny.DS_CNN,
+        device=_Hardware.Tiny.ESP32_S3,
+        bytes_per_param=_BYTES_INT8,
+    )
+    RetrainingPipelineAutomation = _st.AutomationBreakevenScenario(
+        name="An 80-hour retraining pipeline against 4 hours a week of manual retraining",
+        description="Simplified break-even with no pipeline upkeep.",
+        build_time=Q_(80, "hour"),  # scenario assumption: one-time pipeline build
+        manual_rate=Q_(4, "hour/week"),  # scenario assumption: manual retraining effort
+    )
+    RetrainingPipelineAutomationWithUpkeep = RetrainingPipelineAutomation.variant(
+        name="The same pipeline with 1 hour a week of upkeep",
+        upkeep_rate=Q_(1, "hour/week"),  # scenario assumption: pipeline maintenance
+    )
+    ChurnPipelineAutomation = _st.AutomationBreakevenScenario(
+        name="A 120-hour retraining pipeline against 6 hours a week of manual work",
+        description="A churn model's manual feature extraction, training, and validation; no upkeep.",
+        build_time=Q_(120, "hour"),  # scenario assumption: one-time pipeline build
+        manual_rate=Q_(6, "hour/week"),  # scenario assumption: manual effort
+    )
+    ChurnPipelineAutomationWithUpkeep = ChurnPipelineAutomation.variant(
+        name="The same churn pipeline with 2 hours a week of upkeep",
+        upkeep_rate=Q_(2, "hour/week"),  # scenario assumption: pipeline maintenance
+    )
+    RankingSkewOnePercent = _st.SkewCostScenario(
+        name="One percent skew-induced errors on 1 million queries a day at $0.10 each",
+        description="The yearly cost of training-serving skew that persists until consistency is restored.",
+        skew_rate=0.01,  # scenario assumption: fraction of queries skew makes wrong
+        query_rate=Q_(1e6, "1/day"),  # scenario assumption: daily query volume
+        cost_per_error=Q_(0.10, "USD"),  # scenario assumption: business cost per wrong prediction
+    )
+    ConversionRelativeLiftExperiment = _st.TwoProportionTestScenario(
+        name="Two-arm test for a 2 percent relative lift on a 5 percent conversion rate",
+        description="Two-sided 95 percent confidence and 80 percent power at exact normal quantiles; "
+                    "25,000 users per variant are what the traffic allows.",
+        baseline_rate=0.05,  # scenario assumption
+        lift=0.05 * (1 + 0.02) - 0.05,  # scenario assumption: 2 percent relative, 5.0 to 5.1 percent
+        z_alpha=_NormalDist().inv_cdf(1 - (1 - 0.95) / 2),
+        z_beta=_NormalDist().inv_cdf(0.80),
+        confidence=0.95,  # scenario assumption
+        power=0.80,  # scenario assumption
+        relative_lift=0.02,  # scenario assumption
+        available_per_variant=25_000,  # scenario assumption: users per variant traffic allows
+    )
+    ArgoRolloutsSuccessRateGate = _st.AnalysisGateScenario(
+        name="The success-rate analysis of the Argo Rollouts documentation",
+        description="successCondition result[0] >= 0.95, interval 5m, failureLimit 3 "
+                    "(argoproj/argo-rollouts docs/features/analysis.md, commit 176a66f).",
+        success_threshold=0.95,  # Argo Rollouts docs example
+        interval=Q_(5, "minute"),  # Argo Rollouts docs example
+        failure_limit=3,  # Argo Rollouts docs example
+    )
+
+    # --- Serving a stream of tokens on one machine (added 2026-10-20) ---------
+    # GPT-2 XL is the bandwidth-bound chat decoder, Llama 3 8B the case-study
+    # service, and a 70B-class model (Llama 3 70B geometry) the larger model.
+    Gpt2XlChatDecodeBatchesH100 = _st.KvDecodeBatchScenario(
+        name="GPT-2 XL chat decode batches on one H100 with full 1,024-token contexts",
+        description="FP16 weights read once per step; every sequence reads its own FP16 cache (no grouped-query "
+                    "sharing); a 512-token prompt prefilled at 40 percent of the dense FP16 peak.",
+        workload=_Models.Language.GPT2,
+        hardware=_Hardware.Cloud.H100,
+        weight_bytes_per_param=_BYTES_FP16,
+        kv_bytes_per_value=_BYTES_FP16,
+        context_tokens=_Models.Language.GPT2.context_length,
+        batch_sizes=[1, 8, 32, 64, 128],  # scenario assumption: batch sizes compared
+        prompt_tokens=512,  # scenario assumption: chat prompt length
+        prefill_efficiency=0.4,  # scenario assumption: share of the FP16 peak sustained in prefill
+    )
+    Gpt2XlSpeculativeGpt2SmallH100 = _st.SpeculativeRoundScenario(
+        name="Speculative decoding of GPT-2 XL with a GPT-2 Small draft on one H100",
+        description="Batch one, both models bandwidth bound: each draft step reads GPT-2 Small's FP16 weights, "
+                    "the verification pass GPT-2 XL's once.",
+        acceptance=0.7,  # scenario assumption: per-token acceptance probability
+        draft_length=4,  # scenario assumption: tokens proposed per round
+        draft_step=(_Models.Language.GPT2_Small.size_in_bytes(_BYTES_FP16)
+                    / _Hardware.Cloud.H100.memory.bandwidth).to("ms"),
+        verify_time=Gpt2XlFp16DecodeOnH100.result.memory_time,
+    )
+    Llama3_8BFp16ConversationsH100 = _st.KvAdmissionScenario(
+        name="Llama 3 8B conversations of 8,192 tokens on one H100, 16-bit weights and cache",
+        description="The H100's memory after the weights, over each conversation's cache; no runtime reserve.",
+        workload=_Models.Language.Llama3_8B,
+        accelerators=1,
+        hbm_per_accelerator=_Hardware.Cloud.H100.memory.capacity,
+        weight_bytes_per_param=_BYTES_FP16,
+        reserve=Q_(0, "GB"),  # scenario assumption: before runtime workspace
+        context_tokens=8192,  # scenario assumption: one long conversation
+        kv_bytes_per_elem=_BYTES_FP16,
+    )
+    Llama3_70BInt4KvBudgetH100 = Llama3_8BFp16ConversationsH100.variant(
+        name="A 70B-class model with 4-bit weights on one H100: the 16-bit cache budget",
+        description="Llama 3 70B geometry (80 layers, 8 key-value heads of 128); 4-bit weights.",
+        workload=_Models.Language.Llama3_70B,
+        weight_bytes_per_param=_BYTES_INT4,
+        requests=32,  # scenario assumption: concurrent conversations for the scale-up
+    )
+    Llama3_8BInt4ChatServiceH100 = _st.SingleAcceleratorLlmServiceScenario(
+        name="An 8-billion-parameter Llama 3 chat service on one H100 with 4-bit weights",
+        description="1,000-token prompts and 256-token answers; AWQ 4-bit weights and a 16-bit cache; a 72 GiB "
+                    "cache reserve; prefill admits 10,000 prompt tokens per second; $3 per H100-hour.",
+        workload=_Models.Language.Llama3_8B,
+        hardware=_Hardware.Cloud.H100,
+        precision="int4",
+        kv_bytes_per_value=_BYTES_FP16,
+        prompt_tokens=1000,  # scenario assumption
+        decode_tokens=256,  # scenario assumption
+        prefill_efficiency=0.4,  # scenario assumption: share of peak in prefill
+        kv_reserve=Q_(72, "GiB"),  # scenario assumption: memory set aside for the cache
+        prefill_rate=Q_(10_000, "1/second"),  # scenario assumption: isolated prefill rate, prompt tokens
+        price=Q_(3.00, "dollar/hour"),  # scenario assumption: H100 SXM5 rental
+        ttft_target=Q_(200, "ms"),  # scenario assumption
+        tpot_target=Q_(20, "ms"),  # scenario assumption
+    )
+    Llama3_8BInt4PrefillStallH100 = _st.PrefillStallScenario(
+        name="A 1,000-token prompt arriving among 32 Llama 3 8B conversations on one H100",
+        description="Each of 32 streams holds a full 1,256-token conversation; the prompt's prefill runs "
+                    "whole in one step or in four chunks; the case study's 20 ms TPOT target.",
+        weights=Llama3_8BInt4ChatServiceH100.weights,
+        kv_per_token=Llama3_8BInt4ChatServiceH100.kv_per_token,
+        bandwidth=_Hardware.Cloud.H100.memory.bandwidth,
+        decodes=32,  # scenario assumption: streams decoding
+        context_tokens=Llama3_8BInt4ChatServiceH100.total_tokens,
+        prefill_time=Llama3_8BInt4ChatServiceH100.ttft,
+        prefill_tokens=Llama3_8BInt4ChatServiceH100.prompt_tokens,
+        prompt_tokens=Llama3_8BInt4ChatServiceH100.prompt_tokens,
+        chunks=4,  # scenario assumption
+        tpot_target=Llama3_8BInt4ChatServiceH100.tpot_target,
+    )
+    RequestLevelVersusContinuousBatching = _st.FixedBatchScheduleScenario(
+        name="Four decode slots: requests of 10, 100, 40, and 60 tokens with four more waiting",
+        description="Illustrative lengths, one token per step, prefill omitted; request-level batching keeps "
+                    "the batch until its longest member ends, continuous batching refills a freed slot at once.",
+        output_lengths=[10, 100, 40, 60],  # scenario assumption: illustrative
+        waiting_lengths=[30, 50, 20, 40],  # scenario assumption: illustrative
+    )
+    Llama3_8BSharedSystemPrompt = _st.PrefixSharingScenario(
+        name="100 Llama 3 8B conversations that begin with one 2,000-token system prompt",
+        description="The prefix's 16-bit cache stored per conversation or once.",
+        workload=_Models.Language.Llama3_8B,
+        prefix_tokens=2000,  # scenario assumption
+        users=100,  # scenario assumption
+        unique_tokens_per_user=0,
+        kv_width=_Models.Language.Llama3_8B.kv_heads
+        * (_Models.Language.Llama3_8B.hidden_dim // _Models.Language.Llama3_8B.heads),
+        bytes_per_elem=_BYTES_FP16,
+    )
+    Llama3_8BConversationReloadPcieGen4 = ModelSwapPcieGen4.variant(
+        name="One 8,192-token Llama 3 8B cache reloaded from host memory over PCIe Gen4 x16",
+        description="Bandwidth term only; the cache of Llama3_8BFp16ConversationsH100's conversation.",
+        payload=Llama3_8BFp16ConversationsH100.result.kv_per_request,
+    )
+    VllmKvPoolLlama3_8BH100 = _st.KvPoolAccountingScenario(
+        name="vLLM's startup KV pool for Llama 3 8B on one H100 against the free-memory estimate",
+        description="vLLM v0.9.1 defaults: 0.9 of the GPU claimed, 16-token blocks; pool from its startup log.",
+        capacity=_Hardware.Cloud.H100.memory.capacity,
+        memory_utilization=float(_Literature.ServingResults.VllmGpuMemoryUtilizationDefault),
+        weights=Q_(float(_Literature.ServingResults.VllmStartupLlama3_8bWeightsGiB), "GiB"),
+        kv_pool=Q_(float(_Literature.ServingResults.VllmStartupLlama3_8bKvCacheGiB), "GiB"),
+        kv_pool_tokens=int(_Literature.ServingResults.VllmStartupLlama3_8bKvCacheTokens),
+        kv_per_token=Llama3_8BFp16ConversationsH100.result.kv_per_token,
+        block_tokens=int(_Literature.ServingResults.VllmBlockSizeDefault),
+        context_tokens=int(_Literature.ServingResults.VllmStartupMaxSeqLen),
+        request_tokens=Llama3_8BInt4ChatServiceH100.total_tokens,
+    )
+    DistServe13BPoolsA100 = _st.DisaggregatedPoolScenario(
+        name="Prefill and decode pools for DistServe's 13B model on A100s",
+        description="Measured per-GPU goodput of each phase alone and of both together (512 tokens in, 64 out, "
+                    "90 percent SLO attainment); one decode GPU; the cache transfer of a 512-token OPT-66B "
+                    "request at 10 requests per second.",
+        prefill_rate=Q_(float(_Literature.ServingResults.DistServePrefillOnlyGoodputRps), "1/second"),
+        decode_rate=Q_(float(_Literature.ServingResults.DistServeDecodeOnlyGoodputRps), "1/second"),
+        colocated_rate=Q_(float(_Literature.ServingResults.DistServeColocatedGoodputRps), "1/second"),
+        decode_accelerators=1,  # scenario assumption: one decode GPU
+        kv_per_request=Q_(float(_Literature.ServingResults.DistServeOpt66bKvPerRequestGb), "GB"),
+        kv_arrival_rate=Q_(float(_Literature.ServingResults.DistServeTransferArrivalRps), "1/second"),
+        link_bandwidth=Q_(float(_Literature.ServingResults.DistServeA100LinkGBps), "GB/second"),
+    )
+    H100ChatEnergyPerToken = _st.TokenEnergyScenario(
+        name="Energy per generated token of an H100 chat service, well used and poorly used",
+        description="The H100 at its TDP plus a 300 W host share, 114 requests at 8 tokens per second each; "
+                    "at 10 percent of that rate the GPU still draws 300 W.",
+        accelerator_power=_Hardware.Cloud.H100.tdp,
+        host_power=Q_(300, "watt"),  # scenario assumption: host server share
+        low_use_accelerator_power=Q_(300, "watt"),  # scenario assumption: GPU near idle
+        concurrent_requests=114,  # scenario assumption: concurrent requests per H100
+        per_request_rate=Q_(8, "1/second"),  # scenario assumption: decode tokens/s per request
+        response_tokens=500,  # scenario assumption: typical response length
+        low_use_fraction=0.1,  # scenario assumption: poorly batched
+    )
+    ChatGptDayAtGeminiMedianPrompt = _st.ChatServiceDayScenario(  # added 2026-10-20
+        name="One day of ChatGPT prompts at Google's measured median prompt energy, served by H100s",
+        description="2.5 billion prompts a day (OpenAI to Axios, 2025) at the median Gemini Apps text "
+                    "prompt's full-boundary energy (Elsworth et al. 2025), against one GPT-3 training run; "
+                    "tokens per answer and per H100 from the H100 chat energy scenario. An estimate: "
+                    "one service's per-prompt energy applied to another's traffic.",
+        prompts_per_day=_ReferenceStats.Workloads.ChatGptPromptsPerDay,
+        energy_per_prompt=Q_(sum(r["comprehensive_wh"] for r in _Literature.Series.GeminiPromptEnergy.entries
+                                 if r["comprehensive_counted"] == 1), "Wh"),
+        tokens_per_prompt=H100ChatEnergyPerToken.response_tokens,
+        accelerator_token_rate=H100ChatEnergyPerToken.token_rate,
+        reference_energy=_Models.Language.GPT3.training_energy_mwh,
+    )
+    Llama2_70BConversationalDecodeStreams = _st.LittlesLawScenario(
+        name="Streams decoding at once on the MLPerf Llama 2 70B server under the 200 ms TPOT bound",
+        description="Little's law: measured Server tokens per second times the TPOT bound.",
+        arrival_rate=Q_([r["tokens_per_s"] for r in _Literature.Series.MLPerfInferenceV50Llama2_70B.entries
+                         if r["benchmark"] == "llama2-70b-99" and r["scenario"] == "Server"][0], "1/second"),
+        time_in_system=Q_([r["tpot_bound_ms"] for r in _Literature.Series.MLPerfInferenceV50Llama2_70B.entries
+                           if r["benchmark"] == "llama2-70b-99" and r["scenario"] == "Server"][0], "ms"),
+    )
+    Llama2_70BInteractiveDecodeStreams = Llama2_70BConversationalDecodeStreams.variant(
+        name="Streams decoding at once on the same server under the 40 ms interactive TPOT bound",
+        arrival_rate=Q_([r["tokens_per_s"] for r in _Literature.Series.MLPerfInferenceV50Llama2_70B.entries
+                         if r["benchmark"] == "llama2-70b-interactive-99" and r["scenario"] == "Server"][0],
+                        "1/second"),
+        time_in_system=Q_([r["tpot_bound_ms"] for r in _Literature.Series.MLPerfInferenceV50Llama2_70B.entries
+                           if r["benchmark"] == "llama2-70b-interactive-99" and r["scenario"] == "Server"][0],
+                          "ms"),
+    )
+    Llama2_70BFp16ConversationsEightH100 = Llama3_8BFp16ConversationsH100.variant(
+        name="Llama 2 70B conversations of 1,256 tokens on eight H100s, 16-bit weights and cache",
+        description="The MLPerf server's model; the case study's conversation length; no runtime reserve.",
+        workload=_Models.Language.Llama2_70B,
+        accelerators=8,  # one eight-GPU server
+        context_tokens=Llama3_8BInt4ChatServiceH100.total_tokens,
+    )
+    Llama2_70BInt8ConversationsEightH100 = Llama2_70BFp16ConversationsEightH100.variant(
+        name="The same conversations with 8-bit weights and cache",
+        weight_bytes_per_param=_BYTES_INT8,
+        kv_bytes_per_elem=_BYTES_INT8,
+    )
+    InteractiveChatTargetsLlama3_8B = Llama3_8BInt4ChatServiceH100.variant(
+        name="The same chat service under illustrative interactive targets",
+        description="Time to first token under 500 ms for a 1,000-token prompt and time per output token under "
+                    "50 ms, about 20 tokens per second, faster than people read.",
+        ttft_target=Q_(500, "ms"),  # scenario assumption: illustrative target
+        tpot_target=Q_(50, "ms"),  # scenario assumption: illustrative target
+    )
+
+    # --- Agent cost accounting (added 2026-10-20) ------------------------------
+    # Types in scenario_types.py, solvers in engine/solvers/cost_accounting.py.
+    # Prices are hypothetical tariffs, not a provider schedule, unless a source
+    # is named; every other input is a stated teaching assumption.
+    PriceAtFixedCapabilityDecline = _st.PriceDeclineScenario(
+        name="Lowest price at a fixed capability, fitted decline per year (Epoch AI 2025)",
+        description="Every benchmark-threshold series in Literature.LowestPriceAtCapability, log-linear "
+                    "fit of the lowest qualifying price on release date.",
+        series_name="LowestPriceAtCapability",
+    )
+    FrontierSweCostVsScore = _st.CostVsScoreScenario(
+        name="FrontierSWE V2: cost per trial against mean score over five trials",
+        description="Every configuration in Literature.FrontierSweTrials; the top score against the "
+                    "runner-up, and the median best-to-worst spread.",
+        series_name="FrontierSweTrials",
+        trials=5,  # the benchmark's published protocol: five trials per task
+        budget_hours=20,  # the benchmark's published protocol: 20 hours per trial
+    )
+    FrontierModelRepairCohort = _st.CohortAttemptCostScenario(
+        name="100 repair tickets on a frontier-priced model, one attempt each",
+        description="Four turns of 16,000 input and 800 output tokens at $3 and $15 per million; $0.03 of "
+                    "environment per turn, $0.05 of assessment per attempt, 75 accepted; $10 of triage per "
+                    "rejected attempt.",
+        tasks=100,  # scenario assumption
+        accepted=75,  # scenario assumption
+        input_price=OutputCeilingThreeAllocations.input_price,
+        output_price=ProbeVsGeneratedExplanation.output_price,
+        turns=4,  # scenario assumption
+        input_tokens_per_turn=16_000,  # scenario assumption
+        output_tokens_per_turn=800,  # scenario assumption
+        environment_per_turn=Q_(0.03, "USD"),  # scenario assumption: tools, sandbox holding, cleanup
+        assessment_per_attempt=Q_(0.05, "USD"),  # scenario assumption
+        triage_per_rejected=Q_(10.00, "USD"),  # scenario assumption: engineer triage only
+    )
+    LowTokenPriceRepairCohort = FrontierModelRepairCohort.variant(
+        name="The same 100 tickets on a model whose tokens cost a tenth as much",
+        description="Seven turns of 28,000 input and 1,200 output tokens at $0.30 and $1.20 per million; "
+                    "25 accepted; the same environment, assessment, and triage charges.",
+        accepted=25,  # scenario assumption
+        input_price=Q_(0.30, "USD / Mtoken"),  # scenario assumption: hypothetical low tariff
+        output_price=Q_(1.20, "USD / Mtoken"),  # scenario assumption: hypothetical low tariff
+        turns=7,  # scenario assumption
+        input_tokens_per_turn=28_000,  # scenario assumption
+        output_tokens_per_turn=1_200,  # scenario assumption
+    )
+    RepairCohortTokenPriceComparison = _st.TokenPriceComparisonScenario(
+        name="Frontier against low-token-price repair cohorts under one acceptance contract",
+        description="Cost per accepted repair with and without triage, and the token, attempt, and "
+                    "acceptance cuts.",
+        baseline=FrontierModelRepairCohort,
+        alternative=LowTokenPriceRepairCohort,
+    )
+    RepairResendCacheBill = _st.ResendCacheBillScenario(
+        name="The 30-turn resend trajectory billed fresh and with ideal prefix reuse",
+        description="Hypothetical $3 fresh input, cached reads at 10 percent, $15 output per million "
+                    "tokens; a 10 percent miss on the eligible prefix for sensitivity.",
+        trajectory=CodingAgentResend30Turns,
+        input_price=RepairTrajectoryBudgetMeter.input_price,
+        cached_fraction=RepairTrajectoryBudgetMeter.cached_fraction,
+        output_price=RepairTrajectoryBudgetMeter.output_price,
+        miss_fraction=0.10,  # scenario assumption: share of the eligible prefix that misses
+    )
+    RepairCompactionPayback = _st.CompactionPaybackScenario(
+        name="Compacting the repair trajectory at call 16 to a 12,000-token summary",
+        description="The summary costs 1,500 output tokens and is resent fresh; every later call reads "
+                    "18,500 fewer cached tokens.",
+        bill=RepairResendCacheBill,
+        compact_turn=16,  # scenario assumption
+        compact_to=12_000,  # scenario assumption: compacted context, tokens
+        summary_tokens=1_500,  # scenario assumption: summary output, tokens
+    )
+    RepairCompactionPaybackHalfCachedRate = RepairCompactionPayback.variant(
+        name="The same compaction with cached reads at half the rate",
+        description="Cached reads at 5 percent of the input price, as a newer published tariff charges.",
+        bill=RepairResendCacheBill.variant(cached_fraction=RepairResendCacheBill.cached_fraction / 2),
+    )
+    CheapRetryAgainstStrongCall = _st.RetryPolicyScenario(
+        name="A cheap attempt retried up to five times against one strong attempt",
+        description="Cheap: passes 30 percent at $0.10; strong: 70 percent at $0.40; attempts independent.",
+        pass_probability=0.30,  # scenario assumption
+        attempt_cost=Q_(0.10, "USD"),  # scenario assumption: all-in
+        max_attempts=5,  # scenario assumption
+        strong_pass_probability=0.70,  # scenario assumption
+        strong_attempt_cost=Q_(0.40, "USD"),  # scenario assumption
+    )
+    SerialRepairEpisode = _st.SerialEpisodeScenario(
+        name="A short serial repair episode as disjoint intervals, model calls 4x faster",
+        description="Six model calls, 245.60 s of required tests, sandbox creation and snapshot export, "
+                    "and runtime setup and status.",
+        model_intervals=[Q_(x, "second") for x in (1.20, 8.40, 1.85, 11.20, 2.10, 4.50)],  # scenario assumption
+        tests=Q_(245.60, "second"),  # scenario assumption
+        lifecycle_intervals=[Q_(x, "second") for x in (14.80, 22.55)],  # scenario assumption
+        runtime_intervals=[Q_(x, "second") for x in (0.12, 0.08)],  # scenario assumption
+        model_speedup=4.0,  # scenario assumption
+    )
+    SerialRepairEpisodeSpeculation = _st.SpeculativeEpisodeScenario(
+        name="Speculative decoding on the serial repair episode's model time",
+        description="Five drafted tokens per round at 0.08 of a target step each; 3.6 or 0.3 kept per "
+                    "round. Treats the model time as pure decode, an optimistic bound.",
+        episode=SerialRepairEpisode,
+        draft_length=5,  # scenario assumption
+        draft_cost_ratio=0.08,  # scenario assumption
+        accepted_high=3.6,  # scenario assumption: drafts align
+        accepted_low=0.3,  # scenario assumption: a hard reasoning task
+    )
+    CodeEditThreeTierCascade = _st.ModelCascadeScenario(
+        name="A three-tier cascade over 100,000 code-editing tasks, one gate at every exit",
+        description="Tier calls of $0.0004, $0.0020, and $0.0600 and 0.25, 0.80, and 4.50 s; a $0.0010, "
+                    "0.40 s gate; 60,000, 28,000, and 11,400 accepted; the frontier tier alone accepts "
+                    "97,000. A relaxed first-tier gate that falsely accepts 0.9 percent of its exits, at "
+                    "$10 of remediation each.",
+        tasks=100_000,  # scenario assumption: completed cohort
+        call_costs=[Q_(x, "USD") for x in (0.0004, 0.0020, 0.0600)],  # scenario assumption
+        gate_cost=Q_(0.0010, "USD"),  # scenario assumption: same contract at every tier
+        call_times=[Q_(x, "second") for x in (0.25, 0.80, 4.50)],  # scenario assumption
+        gate_time=Q_(0.40, "second"),  # scenario assumption
+        accepted_by_tier=[60_000, 28_000, 11_400],  # scenario assumption
+        direct_accepted=97_000,  # scenario assumption: separate full-cohort baseline
+        false_accept_rate=0.009,  # scenario assumption: a relaxed first-tier gate
+        harm_per_false_accept=Q_(10.0, "USD"),  # scenario assumption: find and remediate one false accept
+    )
+    RepairTrajectoryQuotaAdmission = _st.TrajectoryAdmissionScenario(
+        name="Repair trajectories admitted once a minute against a 2 million token-per-minute quota",
+        description="20 minutes present, 60 model calls of 30,000 quota-counted tokens each; acceptance "
+                    "falling by a tenth of itself at fixed goodput.",
+        arrival=Q_(1, "1 / minute"),  # scenario assumption
+        residence=Q_(20, "minute"),  # scenario assumption
+        calls=60,  # scenario assumption
+        tokens_per_call=30_000,  # scenario assumption: every token the quota counts
+        quota=Q_(2_000_000, "1 / minute"),  # scenario assumption
+        acceptance_drop=0.10,  # scenario assumption
+    )
+    BurstyModelServerQueuePrice = _st.KingmanQueueScenario(
+        name="One bursty model server at 70 and 90 percent utilization",
+        description="1 s mean service, c_a^2 = 2 and c_s^2 = 4, held resources at $0.002 per second.",
+        service=Q_(1, "second"),  # scenario assumption
+        arrival_scv=2.0,  # scenario assumption
+        service_scv=4.0,  # scenario assumption
+        low_utilization=0.70,  # scenario assumption
+        high_utilization=0.90,  # scenario assumption
+        holding_rate=Q_(0.002, "USD / second"),  # scenario assumption
+    )
+    ThirtyCallTailExposure = _st.SerialTailExposureScenario(
+        name="Thirty serial model calls, each past its own 99th percentile with probability 0.01",
+        description="Independent per-call tail events along one trajectory.",
+        calls=30,  # scenario assumption: serial calls on the path
+        tail_probability=0.01,  # the definition of a 99th percentile
+    )
+    DedicatedCapacityBreakEven = _st.DedicatedBreakEvenScenario(
+        name="Renting a matched-capability API against owning capacity at $28 an hour",
+        description="Five input tokens per output token, 80 percent of input cached at $3, $0.30, and $15 "
+                    "per million; owned capacity at $28 an hour plus $2 per million output, 1,200 output "
+                    "tokens per second at full load, run at 52 percent.",
+        input_per_output=5.0,  # scenario assumption
+        cached_fraction=0.80,  # scenario assumption
+        input_price=OutputCeilingThreeAllocations.input_price,
+        cached_price=OutputCeilingThreeAllocations.input_price * RepairPrefixLayoutBill.cached_fraction,
+        output_price=ProbeVsGeneratedExplanation.output_price,
+        fixed_per_hour=Q_(28.0, "USD / hour"),  # scenario assumption: dedicated commitment
+        variable_price=Q_(2.0, "USD / Mtoken"),  # scenario assumption: marginal cost per output token
+        reference_rate=Q_(1_200, "1 / second"),  # scenario assumption: output tokens per second at full load
+        load=0.52,  # scenario assumption: operating load
+    )
+    RepairBudgetLateBill = _st.ConservedBudgetScenario(
+        name="A $5 repair budget across two children, one stopped with a remote job billed late",
+        description="Planning settles $0.042; a trace child gets $1.20 and closes at $0.38; a fuzzing "
+                    "child gets $2.50, settles $0.85, and stops with $1 reserved for a remote job that "
+                    "bills $0.70 late, delivered twice.",
+        budget=Q_(5.0, "USD"),  # scenario assumption
+        planning=Q_(0.042, "USD"),  # scenario assumption
+        allocations=[Q_(1.20, "USD"), Q_(2.50, "USD")],  # scenario assumption
+        settled_children=[Q_(0.38, "USD"), Q_(0.85, "USD")],  # scenario assumption
+        pending=Q_(1.0, "USD"),  # scenario assumption: enforceable maximum remaining remote charge
+        late_charge=Q_(0.70, "USD"),  # scenario assumption: authenticated final bill
+        deliveries=2,  # scenario assumption: the final bill is redelivered once
+    )
+    DependencyUpgradeArchitectures = _st.ArchitectureChoiceScenario(
+        name="Dependency upgrades: a rule-based rewriter, one frontier call, or a bounded three-turn loop",
+        description="10,000 upgrades a month; a $0.002 check per candidate; rejects go to a $35 engineer "
+                    "who resolves 90 percent; a 95 percent combined resolution floor.",
+        tickets=10_000,  # scenario assumption: monthly arrivals
+        single_costs={"Rule-based rewriter": Q_(0.001, "USD"),  # scenario assumption
+                      "Single model call": Q_(0.045, "USD")},  # scenario assumption
+        single_acceptance={"Rule-based rewriter": 0.32,  # scenario assumption
+                           "Single model call": 0.68},  # scenario assumption
+        loop_name="Bounded 3-turn loop",
+        turn_cost=Q_(0.006, "USD"),  # scenario assumption
+        turn_acceptance=[0.55, 0.42, 0.30],  # scenario assumption: conditional on reaching the turn
+        check_cost=Q_(0.002, "USD"),  # scenario assumption
+        human_cost=Q_(35, "USD"),  # scenario assumption: one fallback with its final check
+        human_resolution=0.90,  # scenario assumption
+        resolution_floor=0.95,  # scenario assumption
+    )
+    CodeReviewAdaptationPayback = _st.AdaptationPaybackScenario(
+        name="Adapting a smaller model for code review, repaid by cheaper tasks",
+        description="Five steps of 12,000 input and 800 output tokens at $3 and $15 per million, against "
+                    "four steps of 1,500 and 800 at $1 and $4; $4,000 of data, $500 of training, $8,000 of "
+                    "evaluation; 20,000 reviews a month, or a quarter of that.",
+        base={"input_tokens": 12_000, "output_tokens": 800, "steps": 5,  # scenario assumption
+              "input_price": OutputCeilingThreeAllocations.input_price,
+              "output_price": ProbeVsGeneratedExplanation.output_price},
+        adapted={"input_tokens": 1_500, "output_tokens": 800, "steps": 4,  # scenario assumption
+                 "input_price": Q_(1, "USD / Mtoken"),  # scenario assumption
+                 "output_price": Q_(4, "USD / Mtoken")},  # scenario assumption
+        data_cost=Q_(4_000, "USD"),  # scenario assumption: collection and curation
+        training_cost=Q_(500, "USD"),  # scenario assumption: training compute
+        evaluation_cost=Q_(8_000, "USD"),  # scenario assumption: evaluation and review
+        monthly_volume=20_000,  # scenario assumption
+        low_volume=5_000,  # scenario assumption: a quarter of the planned volume
+    )
+    LighthouseWorkloadLevers = _st.WorkloadLeverScenario(
+        name="Cost per accepted task for repair, research, remediation, and support, and three levers",
+        description="Repair's tokens are the cached 30-turn bill with $0.03 of sandbox and tools per turn; "
+                    "research is the orchestrator-worker fan-out of a chat; remediation and support read "
+                    "their workload profiles. Levers: halve the token price, halve the largest term, or "
+                    "add 10 points of acceptance.",
+        workloads={
+            "repair": {"bill": RepairResendCacheBill,
+                       "turns": _Agents.Coding.SWE_Bench_Runner.max_trajectory_steps,
+                       "environment_per_turn": 0.03,  # scenario assumption: sandbox holding and tools, USD
+                       "assessment": 0.10,  # scenario assumption: sealed regression suite, USD
+                       "human": 0.0,
+                       "acceptance": 0.40},  # scenario assumption
+            "research": {"chat_input": _Agents.Research.OrchestratorWorker.chat_input_tokens.to("token").magnitude,
+                         "chat_output": _Agents.Research.OrchestratorWorker.chat_output_tokens.to("token").magnitude,
+                         "token_multiple": _Agents.Research.OrchestratorWorker.fanout_token_multiple,
+                         "environment": _Agents.Research.OrchestratorWorker.environment_cost_per_attempt.to("USD").magnitude,
+                         "assessment": _Agents.Research.OrchestratorWorker.assessment_cost_per_attempt.to("USD").magnitude,
+                         "human": 0.0,
+                         "acceptance": _Agents.Research.OrchestratorWorker.acceptance_probability},
+            "remediation": {"model": _Agents.Remediation.OnCall.model_cost_per_attempt.to("USD").magnitude,
+                            "environment": _Agents.Remediation.OnCall.environment_cost_per_attempt.to("USD").magnitude,
+                            "assessment": _Agents.Remediation.OnCall.assessment_cost_per_attempt.to("USD").magnitude,
+                            "human": _Agents.Remediation.OnCall.approval_cost_per_attempt.to("USD").magnitude,
+                            "acceptance": _Agents.Remediation.OnCall.acceptance_probability},
+            "support": {"model": _Agents.Support.CustomerOps.model_cost_per_attempt.to("USD").magnitude,
+                        "environment": _Agents.Support.CustomerOps.environment_cost_per_attempt.to("USD").magnitude,
+                        "assessment": _Agents.Support.CustomerOps.assessment_cost_per_attempt.to("USD").magnitude,
+                        "handoff": _Agents.Support.CustomerOps.handoff_cost.to("USD").magnitude,
+                        "acceptance": _Agents.Support.CustomerOps.acceptance_probability},
+        },
+        input_price=RepairResendCacheBill.input_price,
+        output_price=RepairResendCacheBill.output_price,
+        acceptance_gain=0.10,  # scenario assumption: ten points of acceptance
+    )
+    SweAgentClaude4SonnetRunCost = SweAgentClaude35SonnetRunCost.variant(
+        name="SWE-agent 1.1 with Claude 4 Sonnet on SWE-bench Verified (2025), recorded cost",
+        description="A seed-0 random sample of 100 of the run's 500 trajectories; model-token cost as the "
+                    "agent recorded it.",
+        submission="20250522_sweagent_claude-4-sonnet-20250514",
+    )
+    MiniSweAgentGpt52CodexRunCost = SweAgentClaude35SonnetRunCost.variant(
+        name="mini-SWE-agent 2.x with GPT-5.2 Codex on SWE-bench Verified (2026), recorded cost",
+        description="500 trajectories, one per task; model-token cost as the agent recorded it.",
+        submission="20260219_mini-v2.0.0_gpt-5-2-codex",
+    )
+    SweAgentClaude35SonnetCostCap = SweAgentClaude35SonnetRunCost.variant(
+        name="The 2024 SWE-agent run against its $4 per-task cost cap",
+        description="Runs that ended above the cap the harness enforced after each call.",
+        cost_limit=Q_(4.0, "USD"),  # Kapoor et al. (2024), AI Agents That Matter, p. 1: the run's $4 cap
+    )
+    SweBenchLiteCoverageIndependence = _st.CoverageIndependenceScenario(
+        name="Repeated-sampling coverage on SWE-bench Lite against independent trials (Brown et al. 2024)",
+        description="DeepSeek-Coder-V2 with Moatless Tools on all 300 tasks; measured coverage at k "
+                    "against 1 - (1 - p1)^k.",
+        series_name="RepeatedSamplingCoverage",
+        system=RepeatedSamplingCoverageVsVote.repair_system,
+        dataset=RepeatedSamplingCoverageVsVote.repair_dataset,
+    )
+    InferenceXH200SglangConcurrency = _st.ConcurrencySweepScenario(
+        name="InferenceX: DeepSeek-R1 FP8 on 8x H200 with SGLang, swept from 4 to 64 users",
+        description="The run of 2026-05-20, aggregated serving (no disaggregation).",
+        frontier=InferenceXServingFrontier,
+        hardware="h200",
+        match={"framework": "sglang", "disagg": 0, "date": "2026-05-20"},  # the measured run
+    )
+
+    # --- Premises no sensor reports (added 2026-10-20) ---
+    # The aisle budget on a clear oil film, the film detector's range and closure test,
+    # the restricted transit's cost, a hypothetical packaging cell, the coverage bill of
+    # a shielded hazard claim, and the series spring at the door latch.
+    WarehouseFinishedStopOilFilm = WarehouseFinishedStopAtAisleSpeed.variant(
+        name="Warehouse base's finished stopping budget on a clear oil film",
+        description="Deceleration capped by the film's friction, all weight on the driven wheels; the jerk "
+                    "bound belongs to the load and is unchanged.",
+        deceleration=_traction_limit(_Embodied.Scenario.WarehouseAisle.mu_oil_film),
+    )
+    WarehouseFilmDetectorRange = WarehouseFinishedStopAtAisleSpeed.variant(
+        name="Range a film detector needs at the aisle speed",
+        description="The dry-floor finished budget plus the travel during the detector's sensing and "
+                    "inference (added_delay): the stop then ends before the film's leading edge.",
+        added_delay=Q_(100.0, "ms"),  # scenario assumption: chosen film-detector latency
+    )
+    WarehouseFilmDetectorClosure = _st.ZeroFailureScenario(
+        name="Seeded-film closure test for the friction register entry",
+        description="Clean trials that bound the detector's miss rate at the target, and the bound a "
+                    "smaller 1,000-trial campaign supports.",
+        trials=1000,           # scenario assumption: a smaller zero-miss campaign, for contrast
+        confidence=0.95,       # scenario assumption: chosen one-sided level
+        target_rate=0.001,     # scenario assumption: chosen miss-rate bound for closure
+    )
+    WarehouseRestrictedTransit = _st.RestrictedTransitScenario(
+        name="The aisle leg at the restricted speed on inspected floors",
+        description="Speed cut and leg time when the register holds the base to the restricted mode.",
+        site=_Embodied.Scenario.WarehouseAisle,
+        restricted_speed=WarehouseFinishedStopRestricted.speed,
+    )
+    PackagingCellTransit = _st.PackagingCellScenario(
+        name="A hypothetical packaging cell's carriage at its nominal speed",
+        description="Camera-triggered stop before a fixed stop line: four delay allocations, a braking "
+                    "lower bound, and a reserve held back from the clearance. Not measurements.",
+        mass=Q_(12.0, "kg"),                      # scenario assumption: total moving mass, including load
+        speed=Q_(1.5, "m/s"),                     # scenario assumption: nominal speed
+        clearance=Q_(60.0, "mm"),                 # scenario assumption: clearance to the stop line
+        reserve=Q_(15.0, "mm"),                   # scenario assumption: allocated reserve
+        deceleration=Q_(15.0, "m/s**2"),          # scenario assumption: braking lower bound after delay
+        exposure=Q_(16.0, "ms"),                  # scenario assumption: event to usable frame
+        processing=Q_(36.0, "ms"),                # scenario assumption: transfer, inference, scheduling, admission
+        bus=Q_(2.0, "ms"),                        # scenario assumption: command to brake-driver delivery
+        onset=Q_(10.0, "ms"),                     # scenario assumption: delivery to full deceleration
+        check_rate=Q_(1.0, "kHz"),                # scenario assumption: independent kinematic-check rate
+        force_limit=Q_(220.0, "N"),               # scenario assumption: limiter setting, not material strength
+        temperature_trip=Q_(105.0, "degC"),       # scenario assumption: selected sensor threshold
+        stall_timeout=Q_(400.0, "ms"),            # scenario assumption: selected stall-detection timeout
+        bus_trip=Q_(60.0, "V"),                   # scenario assumption: inverter overvoltage threshold
+    )
+    PackagingCellRestrictedMode = PackagingCellTransit.variant(
+        name="The packaging cell's carriage in the candidate restricted mode",
+        description="The same chain and brake at a speed chosen below the ceiling.",
+        speed=Q_(0.5, "m/s"),                     # scenario assumption: restricted speed
+    )
+    PackagingCellHalfProcessing = PackagingCellTransit.variant(
+        name="The packaging cell with its processing allocation halved",
+        description="Sensitivity of the ceiling to the transfer-through-admission allocation.",
+        processing=(PackagingCellTransit.processing / 2).to("ms"),
+    )
+    PackagingCellHalfBrake = PackagingCellTransit.variant(
+        name="The packaging cell with its braking bound halved",
+        description="Sensitivity of the ceiling to the qualified deceleration.",
+        deceleration=(PackagingCellTransit.deceleration / 2).to("m/s**2"),
+    )
+    PackagingCellQualifiedBrake = PackagingCellRestrictedMode.variant(
+        name="The restricted mode with the brake qualified at a lower bound",
+        description="Load testing qualifies a weaker brake; the ceiling and the restricted stop against it.",
+        deceleration=Q_(12.0, "m/s**2"),          # scenario assumption: lower qualified braking bound
+    )
+    PackagingCellCurtainPath = PackagingCellTransit.variant(
+        name="The packaging cell stopped by a certified light curtain",
+        description="The curtain's data-sheet response replaces the camera frame and the processing "
+                    "allocation; delivery and brake onset are unchanged. The drive's own reaction is not charged.",
+        exposure=_Sensors.SafetyLightCurtain.SICK_deTec4_Set_30_450.response_time,
+        processing=Q_(0.0, "ms"),                 # the curtain's output feeds the safe-stop input directly
+    )
+    ShieldCoverageBill = _st.ShieldCoverageBillScenario(
+        name="A shielded hazard claim against a borrowed 1e-9 per hour target",
+        description="Zero hazardous proposals in one release cycle of a 100-unit fleet, a shield of 0.9999 "
+                    "class coverage, common cause set to zero; the evidence the claim still lacks.",
+        fleet_units=100,                          # scenario assumption: fleet size
+        cycle_days=Q_(90.0, "day"),               # scenario assumption: release cycle
+        hours_per_day=Q_(24.0, "hour/day"),       # scenario assumption: continuous operation
+        coverage=0.9999,                          # scenario assumption: class-specific interception coverage
+        common_cause_rate=Q_(0.0, "1/hour"),      # scenario assumption: hardware and common cause set to zero
+        target_rate=Q_(1.0e-9, "1/hour"),         # scenario assumption: borrowed civil-aviation band, not statutory
+        confidence=0.95,                          # scenario assumption: chosen one-sided level
+    )
+    WarehouseLatchSeriesSpring = _st.LatchSeriesSpringScenario(
+        name="A series spring at the door latch under the declared force floor",
+        description="Spring sized for the fast approach; coasting peaks with torque cut at the tripwire.",
+        site=_Embodied.Scenario.WarehouseAisle,
+        machine=_Embodied.MobileManipulator.WarehouseMobileManipulator,
+    )
+
+    # --- Closing an agent course (added 2026-10-20) ---------------------------
+    # One on-call remediation attempt priced on its workload profile, a lost
+    # reply settled by status rather than retried, and the closing arithmetic:
+    # residual violations, a passing set's invalid share, a shortened health
+    # window, blame search over a horizon, the specification boundary, a
+    # passing-patch audit, and METR's 50 against 80 percent horizons.
+    RemediationIncidentAttempt = _st.AcceptedTaskCostScenario(
+        name="One on-call remediation attempt, priced on its workload profile",
+        description="Model calls against the environment, health-check, and approver charges of the "
+                    "on-call remediation profile, at its acceptance; then twice the model calls.",
+        model_cost=_Agents.Remediation.OnCall.model_cost_per_attempt,
+        other_cost=(_Agents.Remediation.OnCall.environment_cost_per_attempt
+                    + _Agents.Remediation.OnCall.assessment_cost_per_attempt
+                    + _Agents.Remediation.OnCall.approval_cost_per_attempt),
+        acceptance=_Agents.Remediation.OnCall.acceptance_probability,
+        model_cost_growth=1.0,  # scenario assumption: double the model calls for more diagnosis
+    )
+    BlindRetryAgainstStatusLookup = _st.BlindRetryScenario(
+        name="A lost reply on 25,000 mutating calls a day: blind retry against a status lookup",
+        description="Requests lost with probability 0.001 and replies with 0.004; a duplicated change "
+                    "costs $2,000 and a read-only status query $0.01.",
+        request_loss=0.001,  # scenario assumption: hypothetical, not a measured rate
+        reply_loss=0.004,  # scenario assumption: hypothetical, not a measured rate
+        workers=1,  # one fleet counted as a whole
+        calls_per_worker=25_000,  # scenario assumption: mutating calls per day
+        duplicate_cost=Q_(2_000, "USD"),  # scenario assumption: cost of one duplicated change
+        status_lookup_cost=Q_(0.01, "USD"),  # scenario assumption: cost of one status query
+    )
+    ResidualViolationsFiftyTurns = _st.ResidualViolationScenario(
+        name="A 0.1 percent residual violation rate per step over 50-turn trajectories, 10,000 a day",
+        description="Training lowers the rate of violating proposals without driving it to zero.",
+        step_violation=0.001,  # scenario assumption: residual per-step rate after training
+        horizon=50,  # scenario assumption: turns per trajectory
+        trajectories_per_day=10_000,  # scenario assumption
+    )
+    ThirtyPercentValidPassingSet = _st.CheckerPosteriorScenario(
+        name="A check over candidates of which 30 percent are valid",
+        description="The check misses 10 percent of valid candidates and passes 5 percent of invalid ones.",
+        defect_rate=0.70,  # scenario assumption: 30 percent of candidates valid
+        false_accept_rate=0.05,  # scenario assumption: P(PASS | invalid)
+        valid_accept_rate=0.90,  # scenario assumption: P(PASS | valid), 10 percent missed
+    )
+    HalvedHealthWindow = _st.ShortenedWindowScenario(
+        name="A health window shortened to half its adopted length",
+        description="Half the samples; the latency interval widens by the square root of two.",
+        window_share=0.5,  # scenario assumption
+    )
+    CheckedWindowBlameSearch = _st.CounterfactualSearchScenario(
+        name="Blame for a failure found only at the end of a 50-step task, or within one checked window",
+        description="Four candidate actions per step; intermediate checks every five steps; 1.2 s per "
+                    "replayed check.",
+        branching=4,  # scenario assumption: candidate actions per step
+        horizon=50,  # scenario assumption: steps in the task
+        window=5,  # scenario assumption: steps between intermediate checks
+        replay_time=Q_(1.2, "s"),  # scenario assumption: time per replayed check
+    )
+    SpecificationReviewHalfOfEffort = _st.AmdahlScenario(
+        name="A task whose specification and review are half the effort, the rest made infinitely fast",
+        description="The human share is Amdahl's serial fraction with one human and one model.",
+        stages={"model-aided work": Q_(0.5, ""), "specification and review": Q_(0.5, "")},  # scenario assumption
+        stage="model-aided work",
+        speedup=float("inf"),
+    )
+    SweAgentGpt4PassingPatchAudit = _st.PassingPatchAuditScenario(
+        name="SWE-bench+ review of the 251 patches SWE-Agent + GPT-4 resolved",
+        description="Aleithan et al. 2024, Table 1 (Literature.AgentEvaluation).",
+        solution_leak=_Literature.AgentEvaluation.SweBenchPlusSolutionLeakPatches,
+        incorrect_fix=_Literature.AgentEvaluation.SweBenchPlusIncorrectFixPatches,
+        different_files=_Literature.AgentEvaluation.SweBenchPlusDifferentFilesPatches,
+        incomplete_fix=_Literature.AgentEvaluation.SweBenchPlusIncompleteFixPatches,
+        different_correct=_Literature.AgentEvaluation.SweBenchPlusDifferentCorrectPatches,
+        more_comprehensive=_Literature.AgentEvaluation.SweBenchPlusMoreComprehensivePatches,
+    )
+    FrontierHorizonReliabilityGap = _st.TaskHorizonReliabilityScenario(
+        name="METR frontier models since 2024: 50 against 80 percent task horizons",
+        description="Models METR marks state of the art at release, released 2024 or later "
+                    "(Literature.AgentTimeHorizon).",
+        series_name="AgentTimeHorizon",
+        released_from="2024-01-01",  # scenario assumption: the window the comparison covers
+    )
+
+    # --- Volume I synthesis: recalled calculations (added 2026-10-20) -------
+    # The conclusion of a course recalls earlier calculations; each entry
+    # below varies an existing scenario or reuses an existing type.
+    Conv3x3At256Channels = ImageNet64ChannelConv.variant(
+        name="A 3x3 convolution from 256 to 256 channels, FP32",
+        description="A representative later layer; the standard-over-separable ratio depends only on the "
+                    "kernel and the output channels.",
+        in_channels=256,                  # scenario assumption: representative channel count
+        out_channels=256,                 # scenario assumption
+    )
+    ChatEndpointTtftMeanVersusP99 = _st.MeanVersusTailScenario(
+        name="An LLM chat endpoint: mean time to first token against its p99",
+        description="Illustrative; the p99 is driven by long prompts and queueing behind long generations.",
+        mean=Q_(50, "ms"),                # scenario assumption: mean time to first token
+        tail_low=Q_(2000, "ms"),          # scenario assumption: p99 time to first token
+        tail_high=Q_(2000, "ms"),         # scenario assumption: one stated value
+    )
+    HostPreprocessingRequestPath = _st.AmdahlScenario(
+        name="A request that is 90 percent host preprocessing, with inference made 10x faster",
+        description="Shares of the original request time; only the accelerator inference speeds up.",
+        stages={"preprocess": Q_(90, "percent"),  # scenario assumption: CPU-bound preprocessing share
+                "inference": Q_(10, "percent")},  # scenario assumption
+        stage="inference",
+        speedup=10.0,                     # scenario assumption: rewritten inference kernel
+    )
+    ComposedAssistantRequestPath = _st.DependencyScheduleScenario(
+        name="A composed assistant request: retrieval, two tools in parallel, generation, a verifier",
+        description="Node 1 retrieval, 2 and 3 the two tools, 4 generation, 5 the verifier; negligible "
+                    "orchestration overhead.",
+        durations={1: Q_(50, "ms"), 2: Q_(110, "ms"), 3: Q_(70, "ms"),
+                   4: Q_(180, "ms"), 5: Q_(30, "ms")},  # scenario assumption: stage latencies
+        predecessors={1: [], 2: [1], 3: [1], 4: [2, 3], 5: [4]},
+        slots=2,                          # scenario assumption: the two tools run at once
+    )
+    GpuFailuresTraining1KThreeWeeks = GpuFailuresTraining1K.variant(
+        name="GPU failures across the 1,024-GPU reference cluster over a three-week run",
+        description="Independent GPU failures at the per-GPU MTTF; any failure halts the job.",
+        run_duration=Q_(21, "day"),       # scenario assumption: three-week training run
+    )
+
+    # --- ML operations, part 2: watching and acting (added 2026-10-20) -------
+    # Monitoring, alerting, and retraining on the same ranking service.
+    LabeledOutcomeDriftConfirmation = _st.DriftConfirmationScenario(
+        name="Confirming a 5-point drop from 95 percent accuracy with 1,000 labeled outcomes",
+        description="The policy's evidence budget above the one-sample binomial floor, collected at one "
+                    "labeled outcome a second or 100 a day. Illustrative.",
+        baseline_accuracy=0.95,  # scenario assumption: original accuracy
+        drop=0.05,  # scenario assumption: a 5-percentage-point drop to confirm
+        confidence=0.95,  # scenario assumption: two-sided confidence
+        power=0.80,  # scenario assumption: chance of catching a real drop of that size
+        evidence_budget=1000,  # scenario assumption: the monitoring policy's budget
+        label_rates={"high": Q_(1, "1/s"),  # scenario assumption: one labeled outcome a second
+                     "low": Q_(100, "1/day")},  # scenario assumption: 100 labeled outcomes a day
+        compared_drops=[0.02, 0.01, 0.005],  # scenario assumption: smaller drops to size
+    )
+    RecommenderDetectionDelayLoss = _st.DetectionDelayLossScenario(
+        name="A 5 percent conversion drop on a $50M-a-year recommender, found monthly or daily",
+        description="Revenue lost per incident at a 28-day review and at a daily check, four incidents a year.",
+        annual_value=Q_(50e6, "USD"),  # scenario assumption: a year's recommendation revenue
+        quality_drop=0.05,  # scenario assumption: conversion-rate degradation
+        slow_detection=Q_(28, "day"),  # scenario assumption: monthly review cycle (about four weeks)
+        fast_detection=Q_(1, "day"),  # scenario assumption: daily automated monitoring
+        incidents_per_year=4,  # scenario assumption: a high-drift domain
+    )
+    RankingRetrainingInterval = _st.RetrainingIntervalScenario(
+        name="Retraining interval of the ranking service: 1 million queries a day at $5,000 a run",
+        description="Square-root optimum of run cost against staleness on the service's fitted decay; the "
+                    "run's compute is four H100s for six hours at the cloud training rate. Illustrative.",
+        drift=RankingServiceAccuracyDrift,
+        query_rate=Q_(1e6, "1/day"),  # scenario assumption: ranking requests per day
+        value_per_query=Q_(0.50, "USD"),  # scenario assumption: value per query of a unit accuracy change
+        run_cost=Q_(5000, "USD"),  # scenario assumption: total cost of one retraining run
+        footprint=DlrmReleaseFootprintH100,
+        accelerator_price=_Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate,
+        compared_intervals=[Q_(1, "day"), Q_(3, "day"), Q_(7, "day"), Q_(30, "day")],  # scenario assumption
+        scheduled_interval=Q_(90, "day"),  # scenario assumption: a quarterly schedule
+    )
+    RankingRetrainingIntervalFourfoldTraffic = RankingRetrainingInterval.variant(
+        name="The same retraining interval at four times the traffic",
+        query_rate=Q_(1e6, "1/day") * 4,  # scenario assumption: a fourfold change in query volume
+    )
+    RankingRetrainingIntervalQuarterRunCost = RankingRetrainingInterval.variant(
+        name="The same retraining interval with a run a quarter as costly",
+        run_cost=Q_(5000, "USD") / 4,  # scenario assumption: a fourfold cheaper validation path
+    )
+    RankingUserAgePsi = _st.BinShareShiftScenario(
+        name="User-age PSI of the ranking service as its audience ages",
+        description="Six age bins; four move by 3 points and two by 2. Illustrative.",
+        bins=["18-25", "26-35", "36-45", "46-55", "56-65", "66+"],
+        baseline_shares=[0.15, 0.25, 0.20, 0.18, 0.12, 0.10],  # scenario assumption: training
+        current_shares=[0.12, 0.22, 0.18, 0.20, 0.15, 0.13],  # scenario assumption: serving
+    )
+    ServingDayKsAgainstTraining = _st.KsDriftScenario(
+        name="K-S test of a day of serving traffic against the training set, 1,000,000 per side",
+        description="The critical value at the 0.05 level against a 0.1 promotion gate on the statistic.",
+        coefficient=_Ops.Monitoring.KsTestCoefficient,
+        n_reference=1_000_000,  # scenario assumption
+        n_current=1_000_000,  # scenario assumption
+        alert_gate=0.1,  # scenario assumption: the release policy's skew gate on the K-S statistic
+    )
+    OneModelDailyMetricTests = _st.MonitorFleetAlertScenario(
+        name="One model in 3 deployment variants x 50 metrics, each tested once a day at 0.05",
+        description="False alerts a day from a monitor with nothing to find; the variants are production, "
+                    "canary, and staging.",
+        models=3,  # scenario assumption: deployment variants of one model
+        metrics_per_model=50,  # scenario assumption: metrics per deployment
+        check_interval=Q_(1, "day"),  # scenario assumption: one test per series a day
+        false_positive_rate=0.05,  # scenario assumption: per-test false-positive rate
+    )
+    OneModelDailyMetricTestsAtOnePercent = OneModelDailyMetricTests.variant(
+        name="The same 150 series at a 0.01 false-positive rate",
+        false_positive_rate=0.01,  # scenario assumption
+    )
+    OneModelDailyMetricTestsAtOnePerThousand = OneModelDailyMetricTests.variant(
+        name="The same 150 series at a 0.001 false-positive rate",
+        false_positive_rate=0.001,  # scenario assumption
+    )
+    RecommendationAccuracyByDevice = _st.SegmentAccuracyScenario(
+        name="Recommendation accuracy by device: tablets fail behind a healthy aggregate",
+        description="Traffic share and accuracy of four device segments. Illustrative.",
+        traffic_shares={"Desktop": 0.45, "iOS": 0.30, "Android": 0.20, "Tablet": 0.05},  # scenario assumption
+        accuracies={"Desktop": 0.94, "iOS": 0.92, "Android": 0.88, "Tablet": 0.62},  # scenario assumption
+    )
+    MlTestScoreMonitoringGapAudit = _st.RubricAuditScenario(
+        name="An ML Test Score audit with a monitoring gap, and a plan to add model tests",
+        description="Section scores data 6, model 7, infrastructure 5, monitoring 1; leadership proposes two "
+                    "more model tests. Illustrative.",
+        section_scores={"Data": 6, "Model": 7, "Infrastructure": 5, "Monitoring": 1},  # scenario assumption
+        tests_per_section=int(_Literature.MlOperations.MlTestScoreTestsPerSection),
+        proposal={"Model": 2},  # scenario assumption: two more model tests
+    )
+    RecommendationIncidentSeverityPolicy = _st.SeverityPolicyScenario(
+        name="Response deadlines of one recommendation service's incident severity policy",
+        description="P0 service unavailable; P1 broad harm needing containment; P2 bounded impact with a "
+                    "validated fallback; P3 no observed impact. Illustrative.",
+        response_deadlines={"P0": Q_(15, "minute"), "P1": Q_(1, "hour"),  # scenario assumption
+                            "P2": Q_(4, "hour"), "P3": Q_(24, "hour")},
+    )
+
+    # --- Responsible engineering: lifecycle cost, carbon accounting, and duties (added 2026-10-20) ---
+    RankingServiceLifecycleCost = _st.ServiceLifecycleCostScenario(
+        name="Three years of the ranking service: twelve training cycles, unbatched inference, operations",
+        description="The exploration-exposure ranking service's traffic at 10 ms of dedicated GPU time per "
+                    "request, reserved inference and on-demand training prices, and the fleet GPU-hour "
+                    "carbon factor (GPU only: no host, PUE, or embodied term).",
+        daily_users=RecommenderExplorationExposure.daily_users,
+        items_per_user=RecommenderExplorationExposure.slots_per_user,
+        service_time=Q_(10, "ms"),  # scenario assumption: unbatched, non-overlapped GPU time per request
+        inference_rate=_Infrastructure.Pricing.Cloud.GpuInferencePerHour.rate,
+        training_rate=_Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate,
+        data_prep_time=Q_(100, "hour"),  # scenario assumption: data preparation GPU-hours per cycle
+        search_experiments=50,  # scenario assumption: hyperparameter configurations per cycle
+        search_cost_per_experiment=Q_(40, "USD"),  # scenario assumption
+        final_run_time=Q_(200, "hour"),  # scenario assumption: final training GPU-hours per cycle
+        cycles=12,  # scenario assumption: quarterly retraining, initial cycle included
+        years=3,  # scenario assumption: operational period
+        operations_annual={"monitoring": Q_(50_000, "USD"),  # scenario assumption
+                           "on-call": Q_(100_000, "USD"),  # scenario assumption: 0.5 FTE
+                           "incident response": Q_(20_000, "USD")},  # scenario assumption
+        carbon_per_gpu_hour=_Infrastructure.Pricing.Fleet.CarbonPerGpuHr.rate,
+        serving_cut=0.20,  # scenario assumption: per-query accelerator demand reduction
+        training_cut=0.50,  # scenario assumption: halving all training
+    )
+    Gpt3TrainingCarbon = _st.OperationalCarbonScenario(
+        name="GPT-3 training energy on the US average grid",
+        description="1,287 MWh, already at the facility boundary (PUE 1.1 included), against passenger-car years.",
+        it_energy=_Models.Language.GPT3.training_energy_mwh,
+        pue=1.0,  # the training energy already includes the datacenter's PUE
+        intensity=Q_(_Infrastructure.Grids.US_Avg.carbon_intensity_g_kwh, "g/kWh"),
+        comparison=Q_(4.6, "metric_ton"),  # scenario assumption: one passenger car's annual emissions
+    )
+    BloomTrainingCarbon = _st.OperationalCarbonScenario(
+        name="BLOOM final training: GPU energy times the Jean Zay PUE on the French grid",
+        description="Luccioni et al. 2023, Sec. 4.2.",
+        it_energy=Q_(float(_Literature.TrainingRuns.BloomDynamicGpuKwh), "kWh"),
+        pue=float(_Literature.TrainingRuns.BloomPue),
+        intensity=Q_(float(_Literature.TrainingRuns.BloomGridGPerKwh), "g/kWh"),
+    )
+    EvolvedTransformerSearchCarbon = _st.OperationalCarbonScenario(
+        name="The Evolved Transformer architecture search, measured",
+        description="Patterson et al. 2021, Appendix D: chips x days x measured power x PUE x grid.",
+        devices=float(_Literature.TrainingRuns.EvolvedTransformerNasChips),
+        device_power=Q_(float(_Literature.TrainingRuns.TpuV2MeasuredPowerW), "W"),
+        duration=Q_(float(_Literature.TrainingRuns.EvolvedTransformerNasDays), "day"),
+        pue=float(_Literature.TrainingRuns.EvolvedTransformerNasPue),
+        intensity=Q_(float(_Literature.TrainingRuns.EvolvedTransformerNasGridKgPerKwh), "kg/kWh"),
+    )
+    GpuHourEmbodiedShare = _st.EmbodiedShareScenario(
+        name="Embodied against operational carbon of one 400 W GPU-hour, dirty and French grids",
+        description="BLOOM's embodied factors (Luccioni et al. 2023, Sec. 4.1) amortized over six years at "
+                    "85 percent use; the fleet GPU-hour factor's grid and the French grid.",
+        server_embodied=Q_(float(_Literature.TrainingRuns.ServerEmbodiedKg), "kg"),
+        gpu_embodied=Q_(float(_Literature.TrainingRuns.GpuEmbodiedKg), "kg"),
+        lifetime=Q_(float(_Literature.TrainingRuns.HardwareLifetimeYears) * _HOURS_PER_YEAR, "hour"),
+        utilization=float(_Literature.TrainingRuns.HardwareUtilizationPct) / 100,
+        gpus_per_server=8,  # scenario assumption: GPUs sharing one server's embodied carbon
+        gpu_power=_Hardware.Cloud.A100.tdp,
+        intensities={"fleet": (_Infrastructure.Pricing.Fleet.CarbonPerGpuHr.rate
+                               / (_Hardware.Cloud.A100.tdp * Q_(1, "hour"))).to("kg/kWh"),
+                     "France": Q_(float(_Literature.TrainingRuns.BloomGridGPerKwh), "g/kWh")},
+    )
+    CreditDenialExplanationLoad = _st.ExplanationLoadScenario(
+        name="Reasons for every denial of a credit service making 1 million decisions a day",
+        description="Denial share from the two-group credit service; a 1,000-sample attributor against "
+                    "exact Shapley over 20 features.",
+        decisions_per_day=1_000_000,  # scenario assumption
+        denial_share=1 - CreditServiceTwoGroups.pooled_positive_rate,
+        samples=1_000,  # scenario assumption: model evaluations per sampled explanation
+        features=20,  # scenario assumption: input features of the credit service
+    )
+    CreditAppealReview = _st.ReviewStaffingScenario(
+        name="Substantive review of appeals against the credit service, against Cigna's reported pace",
+        description="0.1 percent of 1 million daily decisions appealed, 6 minutes each, 8-hour shifts; "
+                    "ProPublica's Cigna denials for comparison.",
+        decisions_per_day=CreditDenialExplanationLoad.decisions_per_day,
+        appeal_rate=0.001,  # scenario assumption: share of decisions appealed
+        time_per_case=Q_(6, "minute"),  # scenario assumption
+        shift=Q_(8, "hour"),  # scenario assumption
+        compare_cases=float(_Literature.GovernanceEnforcement.CignaDenials),
+        compare_time_per_case=Q_(float(_Literature.GovernanceEnforcement.CignaSecondsPerCase), "s"),
+    )
+    CreditDecisionAuditLog = _st.AuditLogVolumeScenario(
+        name="Decision manifests of the credit service kept for Regulation B's 25 months",
+        description="One compact record per decision.",
+        events_per_day=CreditDenialExplanationLoad.decisions_per_day,
+        record_size=Q_(256, "byte"),  # scenario assumption: one manifest record
+        retention=Q_(float(_Literature.GovernanceEnforcement.RegulationBRetentionMonths), "month"),
+    )
+    RankingServiceAuditLog = CreditDecisionAuditLog.variant(
+        name="A year of ranking-service manifests against logging every full input",
+        description="Full input as in MLPerf DLRM: 13 dense and 26 categorical features, 128-dimensional "
+                    "FP32 embeddings (constructed).",
+        events_per_day=RankingServiceLifecycleCost.inferences_per_day,
+        retention=Q_(_DAYS_PER_YEAR, "day"),
+        payload_size=((_Datasets.CriteoKaggle.dense_features
+                       + _Datasets.CriteoKaggle.categorical_features * 128)  # scenario assumption: embedding width
+                      * _BYTES_FP32.to("byte").magnitude * Q_(1, "byte")),
+    )
+    DpSgdPerExampleGradients = _st.PerExampleGradientScenario(
+        name="Per-example FP32 gradients for the KWS DS-CNN and GPT-2 at batch 256",
+        description="Naive DP-SGD clipping keeps every example's gradient before the batch sum.",
+        models={"KWS": _Models.Tiny.DS_CNN, "GPT-2": _Models.Language.GPT2},
+        batch_size=256,  # scenario assumption: DP-SGD batch size
+        bytes_per_param=_BYTES_FP32,
+    )
+    FrontierTrainingCostTrend = _st.FrontierCostTrendScenario(
+        name="Growth of frontier training cost since 2016 (Epoch AI notable models)",
+        description="Least-squares fit of log10 cost on date over frontier-flagged runs.",
+        from_year=2016,  # scenario assumption: start of the fitted window
+    )
+
+    # --- Course-overview anchors (added 2026-10-20) ------------------------------
+    BloomTrainingAllocation = _st.TrainingAllocationScenario(
+        name="BLOOM-176B as launched on Jean Zay",
+        description="BigScience tr11-176B-ml README and Slurm script (Literature.TrainingRuns.Bloom*).",
+        nodes_allocated=int(_Literature.TrainingRuns.BloomAllocatedNodes),
+        nodes_used=int(_Literature.TrainingRuns.BloomTrainingNodes),
+        accelerators_per_node=int(_Literature.TrainingRuns.BloomGpusPerNode),
+        start="2022-03-11",  # README: 'The training started on March 11, 2022'
+        end="2022-06-28",    # README: 'Epoch one finished on June 28, 2022'
+        tensor_parallel=int(_Literature.TrainingRuns.BloomTensorParallel),
+        pipeline_parallel=int(_Literature.TrainingRuns.BloomPipelineParallel),
+        launch_time_limit=Q_(float(_Literature.TrainingRuns.BloomLaunchTimeLimitHours), "hour"),
+    )
+
+    LandmarkClusterGrowth2012to2024 = _st.TrendFitScenario(
+        name="Accelerators used by landmark training runs, 2012 to 2024",
+        description="Log-linear fit through the published counts (filled points of the cluster-size "
+                    "figure); the GPT-3 machine-size estimate is excluded.",
+        stated_points=[  # (publication year, accelerators)
+            (2012, float(_Literature.TrainingRuns.AlexNetGpus)),
+            (2019, float(_Literature.TrainingRuns.MegatronLm2019Gpus)),
+            (2022, _Models.Language.PaLM_540B.training_accelerators_ref.to("count").magnitude),
+            (2023, float(_Literature.TrainingRuns.Llama1_65B_Gpus)),
+            (2024, float(_Literature.TrainingRuns.DeepSeekV3Gpus)),
+            (2024, _Models.Language.Llama3_405B.training_accelerators_ref.to("count").magnitude),
+        ],
+    )
+
+    # --- SWE-bench Verified leaderboard (added 2026-10-20) ------------------------
+    SweBenchVerifiedLeaderboardOneAttempt = _st.BenchmarkLeaderboardScenario(
+        name="SWE-bench Verified submissions with one attempt per task",
+        description="Every submission folder with a results file (Literature.SweBenchVerifiedLeaderboard); "
+                    "the one-attempt submissions and their best score so far.",
+        series_name="SweBenchVerifiedLeaderboard",
+        tasks=int(_Literature.AgentEvaluation.SweBenchVerifiedTasks),
     )

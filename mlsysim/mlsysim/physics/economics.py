@@ -144,3 +144,60 @@ def calc_ownership_breakeven_utilization(upfront_cost, fixed_cost_per_year, rent
         u* = (C_up + Y F) / (Y (R - E)).
     """
     return (upfront_cost + years * fixed_cost_per_year) / (years * (rent_per_year_full - use_cost_per_year_full))
+
+
+# ── Training-serving skew cost (added 2026-10-20) ───────────────────────────
+
+
+def calc_skew_cost(skew_rate, query_rate, cost_per_error):
+    """Cost rate of training-serving skew: ``Rate_skew * Q * C_error``.
+
+    ``skew_rate`` is the fraction of queries whose prediction skew makes wrong,
+    ``query_rate`` the query volume per unit time, and ``cost_per_error`` the
+    business cost of one wrong prediction. Returns cost per unit time.
+    """
+    if not 0 <= skew_rate <= 1:
+        raise ValueError("skew_rate must be a fraction in [0, 1].")
+    return skew_rate * query_rate * cost_per_error
+
+
+# ── Detection delay and the retraining interval (added 2026-10-20) ───────────
+
+
+def calc_detection_delay_loss(annual_value, quality_drop, delay, year_length=None):
+    """Value lost while a quality drop goes undetected: ``V_year * drop * (delay / year)``.
+
+    ``annual_value`` is one year's value, ``quality_drop`` the fractional loss while
+    the fault persists, ``delay`` the time to detection, and ``year_length`` the
+    year it is measured against (default ``DAYS_PER_YEAR`` days).
+    """
+    if not 0 <= quality_drop <= 1:
+        raise ValueError("quality_drop must be a fraction in [0, 1].")
+    year = ureg.Quantity(DAYS_PER_YEAR, "day") if year_length is None else year_length
+    return annual_value * quality_drop * (delay / year).to("").magnitude
+
+
+def calc_staleness_slope(query_rate, value_per_query, initial_accuracy, decay_rate):
+    """Growth of value lost per unit time since the last retraining run: ``Q V A0 gamma``.
+
+    For ``A(t) = A0 exp(-gamma t)`` and small ``gamma t``, the value lost per day at
+    age ``t`` is about ``Q V A0 gamma t``; the slope is in value per time squared.
+    """
+    return query_rate * value_per_query * initial_accuracy * decay_rate
+
+
+def calc_retraining_cost_rate(interval, run_cost, staleness_slope):
+    """Cost per unit time of retraining every ``interval``: ``C / T + (1/2) s T``.
+
+    The first term spreads one run over the cycle; the second is the average of
+    the linearly growing staleness loss, the triangle ``(1/2) s T^2`` per cycle.
+    """
+    return run_cost / interval + 0.5 * staleness_slope * interval
+
+
+def calc_optimal_retraining_interval(run_cost, staleness_slope):
+    """Interval that minimizes ``calc_retraining_cost_rate``: ``T* = sqrt(2 C / s)``.
+
+    At ``T*`` one cycle's staleness triangle ``(1/2) s T*^2`` equals one run's cost.
+    """
+    return (2 * run_cost / staleness_slope) ** 0.5

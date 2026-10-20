@@ -17,15 +17,20 @@ import numpy as np
 
 from ..results import (
     CanFdBusResult,
+    CommandAuthenticationResult,
     EtherCatCycleResult,
     LatencyTailResult,
     LeaseBudgetResult,
     PhaseLagBudgetResult,
     ResponseTimeResult,
+    SharedDramReadResult,
+    ThermalThrottleResult,
 )
 from ...core.types import Quantity
 from ...core.units import ureg
+from ...physics.motors import calc_first_order_time_to_temperature
 from ...physics.robotics.control import (
+    calc_axi_fifo_contention,
     calc_canfd_bus_utilization,
     calc_ethercat_cycle_time,
     calc_phase_lag_total,
@@ -96,6 +101,7 @@ class ResponseTimeModel(ForwardModel):
             deadline=deadline.to(_US), response=r["response"], margin=r["margin"],
             meets_deadline=r["meets_deadline"], blocking_limit=r["blocking_limit"],
             wcet_claim=None if unloaded is None else (wcet - unloaded).to(_US),
+            execution_ceiling=(deadline - blocking - interference).to(_US),
         )
 
 
@@ -226,4 +232,136 @@ class LatencyTailModel(ForwardModel):
         return LatencyTailResult(
             count=int(a.size), p50=float(pct[0]) * u, p99=float(pct[1]) * u,
             p999=float(pct[2]) * u, maximum=float(a.max()) * u, over_threshold=over,
+        )
+
+
+class SharedDramReadModel(ForwardModel):
+    """
+    A permission tick's snapshot read behind FIFO backlogs on a shared DRAM controller.
+
+    One backlog (a weight tile, a camera transfer, and a telemetry record, at
+    AXI transaction granularity) waits ``bytes / bandwidth`` plus its row
+    conflicts (``calc_axi_fifo_contention``); the tick's snapshot read follows.
+    Against the sense allowance, the declared WCET, and the execution ceiling
+    (deadline less blocking and interference), each less the compute after
+    sensing, the model counts the most whole backlogs that still fit and the
+    tick's end time at each count. A FIFO controller is optimistic: a
+    row-hit-first controller can keep passing the read.
+    """
+    requires = ("bandwidth", "sense", "compute_after_sense")
+    produces = SharedDramReadResult
+
+    def solve(self, *, tile_bytes: int, camera_bytes: int, telemetry_bytes: int, snapshot_bytes: int,
+              transaction_bytes: int, bandwidth: Quantity, bank_switches: int,
+              bank_switch_time: Quantity, sense: Quantity, compute_after_sense: Quantity,
+              wcet: Quantity, execution_ceiling: Quantity) -> SharedDramReadResult:
+        r = calc_axi_fifo_contention(
+            tile_bytes=tile_bytes, camera_bytes=camera_bytes, telemetry_bytes=telemetry_bytes,
+            safety_read_bytes=snapshot_bytes, transaction_bytes=transaction_bytes,
+            bandwidth=bandwidth, bank_switches=bank_switches, bank_switch_time=bank_switch_time,
+            compute_time=compute_after_sense)
+        wait, own = r["queue_fifo"].to(_US), r["own_read"].to(_US)
+        compute = compute_after_sense.to(_US)
+        ceil_wcet = (wcet - compute).to(_US)
+        ceil_dead = (execution_ceiling - compute).to(_US)
+
+        def count(room):
+            return int(math.floor(((room - own) / wait).to("").magnitude))
+
+        def end(n):
+            return (own + n * wait + compute).to(_US)
+
+        n_sense, n_wcet, n_dead = count(sense), count(ceil_wcet), count(ceil_dead)
+        return SharedDramReadResult(
+            queued_transactions=r["queued_transactions"], tile_transactions=r["tile_transactions"],
+            backlog_bytes=tile_bytes + camera_bytes + telemetry_bytes,
+            backlog_wait=wait, snapshot_read=own, loaded_read=(wait + own).to(_US),
+            sense_left=(sense - wait - own).to(_US),
+            bypass_read=(r["queue_priority_bypass"] + own).to(_US),
+            read_ceiling_wcet=ceil_wcet, read_ceiling_deadline=ceil_dead,
+            backlogs_sense=n_sense, backlogs_wcet=n_wcet, backlogs_deadline=n_dead,
+            unloaded_end=(sense + compute).to(_US),
+            end_sense=end(n_sense), end_wcet=end(n_wcet), end_deadline=end(n_dead),
+        )
+
+
+class ThermalThrottleModel(ForwardModel):
+    """
+    A tick on a governed clock: a thermal trip halves the clock until the junction clears.
+
+    The tick is sized to its declared WCET at the nominal clock; the throttled
+    clock stretches the same cycles. The junction is a first-order lumped
+    model, ``T(t) = T_inf - (T_inf - T_0) exp(-t / tau)`` with steady state
+    ``T_amb + P theta``; the clock returns only at the clear threshold, so the
+    hysteresis lasts ``tau ln((T_trip - T_quiet) / (T_clear - T_quiet))`` after
+    the load stops (``calc_first_order_time_to_temperature``).
+    """
+    requires = ("wcet", "nominal_clock", "throttled_clock", "time_constant")
+    produces = ThermalThrottleResult
+
+    def solve(self, *, wcet: Quantity, blocking_and_interference: Quantity, deadline: Quantity,
+              tick: Quantity, nominal_clock: Quantity, throttled_clock: Quantity,
+              time_constant: Quantity, ambient: Quantity, theta: Quantity, quiet_power: Quantity,
+              loaded_power: Quantity, trip: Quantity, clear: Quantity) -> ThermalThrottleResult:
+        k = ureg.kelvin
+        cycles = float((wcet * nominal_clock).to("").magnitude)
+        ex = (cycles / nominal_clock).to(_US)
+        ex_thr = (cycles / throttled_clock).to(_US)
+        resp = (ex + blocking_and_interference).to(_US)
+        resp_thr = (ex_thr + blocking_and_interference).to(_US)
+        rise = (loaded_power * theta).to(k)
+        quiet = (ambient.to(k) + (quiet_power * theta).to(k))
+        loaded = (ambient.to(k) + rise)
+        t_trip = calc_first_order_time_to_temperature(quiet, trip, loaded, time_constant)
+        rec = calc_first_order_time_to_temperature(trip, clear, quiet, time_constant)
+        rec_loaded = calc_first_order_time_to_temperature(loaded, clear, quiet, time_constant)
+        overrun = (resp_thr - deadline).to(_US)
+        return ThermalThrottleResult(
+            cycles=cycles, execution=ex, execution_throttled=ex_thr, response=resp,
+            response_throttled=resp_thr, slack=(deadline - resp).to(_US), overrun=overrun,
+            overrun_ratio=float((overrun / deadline).to("").magnitude),
+            junction_quiet=quiet.to(ureg.degC), junction_loaded=loaded.to(ureg.degC), loaded_rise=rise,
+            time_to_trip=t_trip, recovery=rec, recovery_from_loaded=rec_loaded,
+            ticks_exposed=int(math.floor((rec / tick).to("").magnitude)),
+            ticks_exposed_from_loaded=int(math.floor((rec_loaded / tick).to("").magnitude)),
+            heat_capacity=(time_constant / theta).to(ureg.joule / k),
+            theta_never_trips=((trip.to(k) - ambient.to(k)) / loaded_power).to(k / ureg.watt),
+        )
+
+
+class CommandAuthenticationModel(ForwardModel):
+    """
+    Authentication of a remote command as one more pre-brake delay, and a flood of forgeries.
+
+    A published cycle count divided by the permission processor's clock gives
+    the time of one signature verification and of a MAC over a frame of
+    ``mac_blocks`` cipher blocks. Verification adds to the delay before a
+    remote stop can act, so each millisecond is travel at ``speed`` against
+    the finished budget's spare; a replay at the edge of the freshness window
+    carries the machine v x tau_fresh. Verified serially, n forged signed
+    packets queued ahead of a genuine veto finish it at (n + 1) t_verify; the
+    fewest that push it past the deadline is n = floor(T_latest / t_verify),
+    sustained at n / ((n + 1) t_verify) packets per second (added 2026-10-20).
+    """
+    requires = ("clock", "verify_cycles", "speed", "spare", "deadline")
+    produces = CommandAuthenticationResult
+
+    def solve(self, clock: Quantity, verify_cycles: float, mac_block_cycles: float, mac_blocks: int,
+              speed: Quantity, spare: Quantity, deadline: Quantity, deadline_after_admission: Quantity,
+              freshness_window: Quantity) -> CommandAuthenticationResult:
+        t_sig = (verify_cycles / clock).to(_MS)
+        t_mac = (mac_blocks * mac_block_cycles / clock).to(_US)
+        n = math.floor((deadline / t_sig).to("").magnitude)
+        admit = ((n + 1) * t_sig).to(_MS)
+        fresh = (speed * freshness_window).to(_MM)
+        return CommandAuthenticationResult(
+            verify_time=t_sig, mac_time=t_mac, verify_travel=(speed * t_sig).to(_MM),
+            spare_after_verify=(spare - speed * t_sig).to(_MM), mac_travel=(speed * t_mac).to(_MM),
+            freshness_window=freshness_window.to(_MS), freshness_travel=fresh,
+            spare_after_freshness=(spare - fresh).to(_MM),
+            deadline=deadline.to(_MS), deadline_after_admission=deadline_after_admission.to(_MS),
+            forged_to_miss=n, veto_verified_at=admit,
+            forged_rate=math.ceil((n / admit).to(1 / ureg.second).magnitude),
+            forged_mac_to_miss=math.floor((deadline / t_mac).to("").magnitude),
+            forged_to_miss_after_admission=math.floor((deadline_after_admission / t_sig).to("").magnitude),
         )

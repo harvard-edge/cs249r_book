@@ -1,306 +1,261 @@
 #!/usr/bin/env python3
-"""Every derived number in Lecture 17 (Responsible Physical AI), Volume IV.
+"""Every number on the Lecture 17 slides and notes (Responsible Physical AI), read from MLSysIM.
 
-One block per slide, in deck order. Inputs carry their source as a comment
-("ch" is the rendered chapter, Responsible Physical AI; "RM" and "AISLE" are
-the running machine and its aisle scenario in the MLSysIM registry, which the
-chapter's LEGO cells print from). Each printed line is a value the slide or
-its note shows, under the label used there. make_figs.py imports from this
-file so figures and slides share one computation.
+MLSysIM holds the inputs (the Embodied.* running machine and its aisle record;
+Literature.IncidentReports for the Cruise pullover and the three penalties;
+Literature.Fairness, PedestrianAp75BySkinType, and PedestrianMissRateByAge for
+the published per-group detection tables of Wilson et al. 2019 and Li et al.
+2025) and the calculations: the decision chain (AdmittedCommandDecisionChain),
+the rack-end oversight time (WarehouseRackEndOversightTime over the out-of-loop
+takeover budget), the assistant's queue and the labor it creates
+(WarehouseRemoteAssistantQueue*, WarehouseRemoteAssistantLabor), the stage exit
+(WarehouseSupervisedStageExit), the detection shortfall
+(WarehouseGroupDetectionShortfall, DetectionShortfallModel), the group sample
+(PedestrianGroupEvaluationSample), the crossing exposure, event-triggered
+retention, and the Cruise penalties (CruiseDisclosurePenalties). The chapter
+reads the same scenarios. This file only selects values, converts units, and
+formats them; it types no numbers. Each value is recorded with v() under the
+key the deck prints as \\val{key}; running this file writes images/numbers.tex.
+make_figs.py imports it for the scenario objects and plot inputs.
 
 Run from this folder: python3 calcs.py
 """
+
 import math
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "mlsysim"))
-from mlsysim import Embodied  # noqa: E402
-from mlsysim.physics import calc_queue_latency_mmc  # noqa: E402
-from scipy.stats import beta, norm  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
+
+Embodied, Scenarios, Literature = mlsysim.Embodied, mlsysim.Scenarios, mlsysim.Literature
+Q = mlsysim.core.units.Q_
+from mlsysim.physics import calc_kinetic_energy  # noqa: E402
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
-VALUES = {}
+IR, FAIR = Literature.IncidentReports, Literature.Fairness
+
+PENALTIES = Scenarios.CruiseDisclosurePenalties
+CHAIN = Scenarios.AdmittedCommandDecisionChain
+OVERSIGHT = Scenarios.WarehouseRackEndOversightTime
+IN_AISLE = Scenarios.WarehouseInLoopTakeoverAtAisleSpeed
+QUEUE = Scenarios.WarehouseRemoteAssistantQueue
+QUEUES = {q.machines: q for q in (Scenarios.WarehouseRemoteAssistantQueueTenMachines, QUEUE,
+                                   Scenarios.WarehouseRemoteAssistantQueueThirtyTwoMachines)}
+CHECK = Scenarios.WarehouseRemoteAssistantQueueTwentyFourMachines
+STAGE = Scenarios.WarehouseSupervisedStageExit
+SHORTFALL = Scenarios.WarehouseGroupDetectionShortfall
+SAMPLE = Scenarios.PedestrianGroupEvaluationSample
+CROSSINGS = Scenarios.WarehouseCrossingExposure
+RETENTION = Scenarios.WarehouseEventTriggeredRetention
+LABOR = Scenarios.WarehouseRemoteAssistantLabor
+LI = Literature.PedestrianMissRateByAge
+WILSON = Literature.PedestrianAp75BySkinType
 
 
-def show(label, value):
-    print(f"  {label}: {value}")
-
-
-def head(title):
-    print(f"\n[{title}]")
-
-
-def mag(q, unit):
+def m(q, unit):
+    """Magnitude of a Pint quantity in ``unit``."""
     return q.to(unit).magnitude
 
 
-# ---------------------------------------------------------------------------
-# Inputs (sources in comments)
-# ---------------------------------------------------------------------------
-V_AISLE = mag(AISLE.v_aisle, "m/s")              # 1.3 m/s, chosen aisle speed
-D_CLEAR = mag(AISLE.d_clear, "m")                # 1.10 m clear distance (illustrative)
-T_OOL = mag(AISLE.t_takeover_out_of_loop, "s")   # 4.465 s out-of-loop takeover (derived in the registry)
-T_INL = mag(AISLE.t_takeover_in_loop, "s")       # 0.605 s in-loop takeover (derived in the registry)
-A_BRAKE = mag(AISLE.a_brake, "m/s**2")           # 2 m/s^2 credible deceleration (illustrative)
-TAU_DELAY = mag(AISLE.tau_delay, "s")            # 133.6 ms pre-brake delay
-M_LOADED = mag(RM.loaded_mass, "kg")             # 368 kg loaded mass (derived)
-F_CAM = mag(RM.nav_camera.frame_rate, "Hz")      # 60 Hz navigation camera (datasheet)
-T_PRE = mag(AISLE.pre_trigger_window, "s")       # 5 s pre-trigger window (derived)
+print("== Hook and timeline: the Cruise pullover and the record (ch 17.1, 17.4.2)")
+v("drag_m", m(Q(IR.CruisePulloverDistanceFt, "ft"), "m"), "{:.1f}", "pullover distance, m")
+v("cpuc_days", PENALTIES.days_withheld, "{:.0f}", "days without a full account")
+v("cpuc_daily", PENALTIES.daily_maximum, "{:,.0f}", "CPUC daily maximum, USD")
+v("cpuc_fine", PENALTIES.per_day_penalty, "{:,.0f}", "CPUC penalty, USD")
+v("nhtsa_m", m(Q(PENALTIES.others["NHTSA"], "USD"), "MUSD"), "{:.1f}", "NHTSA penalty, million USD")
+v("doj_fine", PENALTIES.others["DOJ"], "{:,.0f}", "DOJ criminal fine, USD")
+v("pen_total", PENALTIES.total, "{:,.0f}", "penalties for the record, total, USD")
+v("pen_total_m", m(Q(PENALTIES.total, "USD"), "MUSD"), "{:.1f}", "the same, million USD")
+CRUISE = dict(drag_m=m(Q(IR.CruisePulloverDistanceFt, "ft"), "m"), cpuc=PENALTIES.per_day_penalty,
+              nhtsa=PENALTIES.others["NHTSA"], doj=PENALTIES.others["DOJ"])
 
-# Cruise, 2 October 2023 (ch Sec. 17.1 and 17.4.2, from the sources the chapter cites)
-DRAG_FT = 20.0             # ft, pullover distance (Quinn Emanuel 2024)
-DRAG_MPH = 7.7             # mph, peak pullover speed (same source)
-DAYS_WITHHELD = 15         # days, 3 to 18 October (CPUC D.24-07-004)
-CPUC_DAILY = 7_500         # USD per day (CPUC D.24-07-004)
-NHTSA_PENALTY = 1_500_000  # USD, consent order, September 2024
-DOJ_FINE = 500_000         # USD, deferred prosecution agreement, November 2024
+print("== Running machine: one admitted aisle command (ch 17.2)")
+V_AISLE, A_BRAKE = m(AISLE.v_aisle, "m/s"), m(AISLE.a_brake, "m/s**2")
+v("v_aisle", V_AISLE, "{:.1f}", "aisle speed, m/s")
+v("d_clear", m(AISLE.d_clear, "m"), "{:.2f}", "rack-end clear distance, m")
+v("mass", m(RM.loaded_mass, "kg"), "{:.0f}", "loaded mass, kg")
+v("ke_aisle", m(calc_kinetic_energy(RM.loaded_mass, AISLE.v_aisle), "J"), "{:.0f}", "kinetic energy at the aisle speed, J")
+v("a_brake", A_BRAKE, "{:.0f}", "credible deceleration, m/s^2")
 
-# ---------------------------------------------------------------------------
-head("Hook and timeline: the Cruise pullover and the record (Sec. 17.1, 17.4.2)")
-drag_m = DRAG_FT * 0.3048
-drag_ms = DRAG_MPH * 0.44704
-cpuc_fine = DAYS_WITHHELD * CPUC_DAILY
-show("pullover distance", f"{drag_m:.1f} m")
-show("peak pullover speed", f"{drag_ms:.1f} m/s")
-show("CPUC fine = 15 days x $7,500", f"${cpuc_fine:,}")
-VALUES["cruise"] = dict(drag_m=drag_m, cpuc=cpuc_fine, nhtsa=NHTSA_PENALTY, doj=DOJ_FINE)
+print("== Estimate: a six-link chain of decisions (ch 17.2.1)")
+CHAIN_C = CHAIN.completeness_by_link
+p_good, p_mid, p_poor = CHAIN.link_probabilities
+v("links", CHAIN.links, "{:.0f}", "decisions behind the command")
+for key, p in (("good", p_good), ("mid", p_mid), ("poor", p_poor)):
+    v(f"p_{key}", p, "{:.2f}", f"per-link retrieval, {key}")
+    v(f"c_{key}", CHAIN_C[p], "{:.2f}", f"chain resolves, {key}")
+v("c_poor_pct", 100 * CHAIN_C[p_poor], "{:.0f}", "the same, percent")
 
-# ---------------------------------------------------------------------------
-head("Running machine: one admitted aisle command (Sec. 17.2)")
-d_brake = V_AISLE**2 / (2 * A_BRAKE)
-show("aisle speed", f"{V_AISLE:.1f} m/s")
-show("clear distance", f"{D_CLEAR:.2f} m")
-show("loaded mass", f"{M_LOADED:.0f} kg")
-show("braking distance v^2/(2a)", f"{d_brake:.2f} m")
-show("kinetic energy at aisle speed 1/2 m v^2", f"{0.5 * M_LOADED * V_AISLE**2:.0f} J")
-VALUES["ke_aisle"] = 0.5 * M_LOADED * V_AISLE**2
+print("== Time to act at the rack end (ch 17.3.1)")
+T_WINDOW, T_OOL = m(OVERSIGHT.hazard_window, "s"), m(OVERSIGHT.budget.takeover, "s")
+TRAVEL, RATIO = m(OVERSIGHT.takeover_travel, "m"), OVERSIGHT.takeover_over_window
+v("t_window", T_WINDOW, "{:.2f}", "time the hazard leaves, s")
+v("t_ool", T_OOL, "{:.3f}", "out-of-loop takeover, s")
+v("t_ool1", T_OOL, "{:.1f}", "the same, one decimal")
+v("travel_ool", TRAVEL, "{:.1f}", "travel during the takeover, m")
+v("ool_ratio", RATIO, "{:.1f}", "takeover over window")
+v("ool_ratio_words", round(RATIO), "words", "about, in words")
+v("ool_ratio_int", round(RATIO), "{:.0f}", "about, x")
+v("t_in", m(IN_AISLE.takeover, "s"), "{:.3f}", "in-loop takeover, s")
 
-# ---------------------------------------------------------------------------
-head("Estimate: a six-link chain of decisions (Sec. 17.2.1)")
-K_LINKS = 6                       # ch: six decisions behind the aisle command
-P_LINKS = (0.99, 0.95, 0.90)      # ch: retrievability per link (illustrative)
-chain = {p: p**K_LINKS for p in P_LINKS}
-for p, c in chain.items():
-    show(f"chain resolves at p = {p:.2f} per link", f"{c:.2f}")
-VALUES["chain"] = chain
+print("== One assistant, many machines (ch Napkin Math 17.1, Checkpoint 17.1)")
+REQ_H, SERVICE_S = m(QUEUE.request_rate, "1/hour"), m(QUEUE.service_time, "s")
+v("req_rate", REQ_H, "{:.1f}", "requests per machine-hour")
+v("service_min", m(QUEUE.service_time, "minute"), "{:.0f}", "service time, min")
+v("service_s", SERVICE_S, "{:.0f}", "service time, s")
+QROWS = {}
+for n, q in QUEUES.items():
+    r = q.result
+    QROWS[n] = (r.utilization, m(r.mean_wait, "s"), m(r.p99_wait, "s"))
+    v(f"n{n}", n, "{:.0f}", "machines")
+    v(f"rho{n}", r.utilization, "{:.2f}", "utilization")
+    v(f"wq{n}", m(r.mean_wait, "s"), "{:.0f}", "mean wait, s")
+    v(f"wq{n}_min", m(r.mean_wait, "minute"), "{:.0f}", "mean wait, min")
+r20 = QUEUE.result
+v("n20_words", QUEUE.machines, "words", "machines, in words")
+v("n10_req_h", m(QUEUES[10].result.arrival_rate, "1/hour"), "{:.0f}", "fleet requests per hour, 10 machines")
+v("rho20_pct", 100 * r20.utilization, "{:.0f}", "utilization at 20, percent")
+v("p99_20_s", m(r20.p99_wait, "s"), "{:,.0f}", "99th-percentile wait at 20, s")
+v("p99_20_min", m(r20.p99_wait, "minute"), "{:.1f}", "the same, min")
+v("p99_20_min0", m(r20.p99_wait, "minute"), "{:.0f}", "the same, whole min")
+v("rho_cap", QUEUE.utilization_cap, "{:.1f}", "utilization cap")
+v("n_max", QUEUE.max_machines, "{:.0f}", "machines at the cap")
+v("chk_n", CHECK.machines, "{:.0f}", "Checkpoint 17.1 machines")
+v("chk_rate", m(CHECK.request_rate, "1/hour"), "{:.1f}", "requests per machine-hour")
+v("chk_s", m(CHECK.service_time, "s"), "{:.0f}", "service time, s")
+v("chk_rho", CHECK.result.utilization, "{:.2f}", "utilization")
+v("chk_wq", m(CHECK.result.mean_wait, "s"), "{:.0f}", "mean wait, s")
 
-# ---------------------------------------------------------------------------
-head("Time to act at the rack end (Sec. 17.3.1)")
-t_window = D_CLEAR / V_AISLE
-travel = V_AISLE * T_OOL
-ratio = T_OOL / t_window
-show("time the hazard leaves = d_clear / v", f"{t_window:.2f} s")
-show("out-of-loop takeover", f"{T_OOL:.1f} s ({T_OOL:.3f} s)")
-show("travel during the takeover", f"{travel:.1f} m")
-show("takeover / window", f"{ratio:.1f}, about {round(ratio)}x")
-show("in-loop takeover (Lecture 14)", f"{T_INL:.3f} s")
-VALUES.update(t_window=t_window, t_ool=T_OOL, travel=travel, ratio=ratio)
+print("== Leaving a stage on evidence (ch 17.4.1)")
+RATE = STAGE.rates[0]
+T_REQ, DAYS_REQ = m(STAGE.exposure(RATE), "hour"), m(STAGE.calendar_days(RATE), "day")
+FLEET_H_DAY = STAGE.rigs * m(STAGE.hours_per_day, "hour/day")
+v("stage_per_h", 1 / m(RATE, "1/hour"), "{:,.0f}", "one intervention per this many hours")
+v("stage_conf_pct", 100 * STAGE.confidence, "{:.0f}", "confidence, percent")
+v("stage_alpha", 1 - STAGE.confidence, "{:.2f}", "alpha")
+v("stage_inv_alpha", 1 / (1 - STAGE.confidence), "{:.0f}", "1 / alpha")
+v("stage_rate_exp_mag", -math.log10(m(RATE, "1/hour")), "{:.0f}", "rate exponent magnitude, per hour (spoken: 10 to the minus)")
+v("t_req", T_REQ, "{:,.0f}", "failure-free hours")
+v("stage_n", STAGE.rigs, "{:.0f}", "machines")
+v("stage_n_words", STAGE.rigs, "words", "machines, in words")
+v("stage_h_day", m(STAGE.hours_per_day, "hour/day"), "{:.0f}", "hours per machine-day")
+v("fleet_h_day", FLEET_H_DAY, "{:.0f}", "fleet hours per day")
+v("days_req", DAYS_REQ, "{:.1f}", "days to reach them")
+v("days_req_ceil", math.ceil(DAYS_REQ), "{:.0f}", "whole days")
 
-# ---------------------------------------------------------------------------
-head("One assistant, many machines (Napkin Math 17.1)")
-RATE_PER_MACHINE_H = 0.5   # requests per machine per operating hour (illustrative)
-T_SERVICE_S = 180.0        # s per request (illustrative)
+print("== Published per-group detection (ch 17.5; Li Table 7, Wilson Table 4)")
+LI_AVG = (FAIR.LiMissRateAverageAdultPct, FAIR.LiMissRateAverageChildPct)
+WILSON_AVG = (FAIR.WilsonAp75AverageLighterPct, FAIR.WilsonAp75AverageDarkerPct)
+v("li_child", LI_AVG[1], "{:.2f}", "children missed, average, %")
+v("li_adult", LI_AVG[0], "{:.2f}", "adults missed, average, %")
+v("li_gap", LI_AVG[1] - LI_AVG[0], "{:.2f}", "child minus adult, points")
+v("w_ds", WILSON_AVG[1], "{:.1f}", "AP75 darker, average, %")
+v("w_ls", WILSON_AVG[0], "{:.1f}", "AP75 lighter, average, %")
+v("w_hold_ls", FAIR.WilsonHoldoutLighter, "{:.0f}", "holdout lighter")
+v("w_hold_ds", FAIR.WilsonHoldoutDarker, "{:.0f}", "holdout darker")
+v("w_need_ls", FAIR.WilsonNeededLighter, "{:,.0f}", "needed lighter")
+v("w_need_ds", FAIR.WilsonNeededDarker, "{:,.0f}", "needed darker")
+v("w_gap", FAIR.WilsonApGapToVerify, "{:.2f}", "true AP gap those counts verify")
+v("n_detectors_words", len(LI), "words", "detectors in Li Table 7")
+v("w_models_words", len(WILSON), "words", "models in Wilson Table 4")
 
+print("== Two frames late (ch Napkin Math 17.2, Table 1, figure 2)")
+DS = SHORTFALL.result
+ROWS = DS.rows
+T_FRAME_MS = m(DS.frame_period, "ms")
+v("cam_hz", m(RM.nav_camera.frame_rate, "Hz"), "{:.0f}", "navigation camera, Hz")
+v("t_frame", T_FRAME_MS, "{:.1f}", "frame period, ms")
+v("p_miss_exp", math.log10(SHORTFALL.all_miss_probability), "{:.0f}", "all-frames miss exponent")
+v("p_miss_inv", 1 / SHORTFALL.all_miss_probability, "{:,.0f}", "1 in this many")
+v("p_ref", SHORTFALL.reference, "{:.2f}", "reference per-frame detection")
+v("p_ref_pct", 100 * SHORTFALL.reference, "{:.0f}", "the same, percent")
+v("n_ref", DS.reference_frames, "{:.0f}", "reference frames")
+v("d_brake", m(DS.braking_travel, "m"), "{:.2f}", "braking distance at the aisle speed, m")
+v("tau", m(AISLE.tau_delay, "ms"), "{:.1f}", "pre-brake delay, ms")
+for i, r in enumerate(ROWS):
+    v(f"g{i}_p", r.per_frame_detection, "{:.2f}", "per-frame detection")
+    v(f"g{i}_pct", 100 * r.per_frame_detection, "{:.0f}", "the same, percent")
+    v(f"g{i}_n", r.frames, "{:.0f}", "frames")
+    v(f"g{i}_dn", r.extra_frames, "{:.0f}", "extra frames")
+    v(f"g{i}_dt", m(r.extra_time, "ms"), "{:.1f}", "extra time, ms")
+    v(f"g{i}_dr", m(r.distance_lost, "mm"), "{:.0f}", "distance lost, mm")
+    v(f"g{i}_dr_m", m(r.distance_lost, "m"), "{:.3f}", "distance lost, m")
+    v(f"g{i}_vi", m(r.impact_speed, "m/s"), "{:.2f}", "impact speed, m/s")
+    v(f"g{i}_e", m(r.impact_energy, "J"), "{:.0f}", "impact energy, J")
+v("gap_pts", 100 * (SHORTFALL.reference - ROWS[1].per_frame_detection), "{:.0f}", "per-frame gap, points")
+v("g1_dn_words", ROWS[1].extra_frames, "words", "extra frames, in words")
 
-def queue(n, rate_h=RATE_PER_MACHINE_H, s=T_SERVICE_S):
-    lam = n * rate_h / 3600.0
-    rho = lam * s
-    wq = rho * s / (1 - rho)
-    _, _, p99 = calc_queue_latency_mmc(lam, 1 / s, 1)
-    return rho, wq, p99
-
-
-Q = {}
-for n in (10, 20, 32):
-    rho, wq, p99 = queue(n)
-    Q[n] = (rho, wq, p99)
-    show(f"{n} machines: utilization, mean wait", f"{rho:.2f}, {wq:.0f} s ({wq / 60:.0f} min)")
-p99_20 = Q[20][2]
-p99_20_s = p99_20.to("s").magnitude if hasattr(p99_20, "to") else float(p99_20)
-show("20 machines: 99th-percentile wait", f"{p99_20_s:.0f} s ({p99_20_s / 60:.1f} min)")
-n_max = math.floor(0.5 / (RATE_PER_MACHINE_H / 3600.0 * T_SERVICE_S))
-show("machines at a 0.5 utilization cap", n_max)
-VALUES.update(queue=Q, p99_20=p99_20_s)
-
-# Checkpoint 17.1 load question (ch): 24 machines, 0.8 per machine-hour, 75 s
-rho_c, wq_c, _ = queue(24, 0.8, 75.0)
-show("Checkpoint 17.1: 24 machines, 0.8/h, 75 s -> utilization, mean wait", f"{rho_c:.2f}, {wq_c:.0f} s")
-VALUES.update(rho_c=rho_c, wq_c=wq_c)
-
-# ---------------------------------------------------------------------------
-head("Leaving a stage on evidence (Sec. 17.4.1)")
-RATE_TARGET = 1.0e-3       # safety-relevant interventions per operating hour (chosen)
-ALPHA = 0.05               # one-sided, 95 percent confidence (chosen)
-N_STAGE = 10               # machines in the supervised stage (illustrative)
-H_PER_DAY = 16.0           # operating hours per machine-day (illustrative)
-t_req = math.log(1 / ALPHA) / RATE_TARGET
-days_req = t_req / (N_STAGE * H_PER_DAY)
-show("failure-free hours = ln(1/0.05) / 1e-3 per h", f"{t_req:,.0f} h")
-show("fleet hours per day", f"{N_STAGE * H_PER_DAY:.0f} h")
-show("days to reach them", f"{days_req:.1f}, so {math.ceil(days_req)} days")
-VALUES.update(t_req=t_req, days_req=days_req, fleet_h_day=N_STAGE * H_PER_DAY)
-
-# ---------------------------------------------------------------------------
-head("Withdrawal and disclosure: penalties for the record (Sec. 17.4.2)")
-total_pen = cpuc_fine + NHTSA_PENALTY + DOJ_FINE
-show("penalties for the record, total", f"${total_pen:,}")
-
-# ---------------------------------------------------------------------------
-head("Published per-group detection (Sec. 17.5)")
-# Wilson, Hoffman, Morgenstern 2019, arXiv 1902.11097, Table 4 (COCO-trained
-# Detectron models on BDD100K validation people), AP75 in percent, LS then DS.
-WILSON_AP75 = {
-    "Faster R-CNN R-50-C4": (64.5, 53.6),
-    "Faster R-CNN R-50-FPN": (63.1, 53.6),
-    "Faster R-CNN R-101-FPN": (70.0, 57.3),
-    "Faster R-CNN X-101-FPN": (69.8, 62.1),
-    "Mask R-CNN R-50-C4": (66.9, 51.5),
-    "Mask R-CNN R-50-FPN": (67.6, 51.2),
-    "Mask R-CNN R-101-FPN": (65.6, 55.2),
-    "Mask R-CNN X-101-FPN": (69.2, 62.9),
-}
-WILSON_AVG = (67.1, 55.9)          # Table 4, "Average" row
-WILSON_HOLDOUT = (387, 100)        # Sec. 4.2: holdout people, LS and DS
-WILSON_NEEDED = (12_000, 4_000)    # Sec. 4.2: to verify a 0.05 AP gap
-avg = sum(v[0] for v in WILSON_AP75.values()) / 8, sum(v[1] for v in WILSON_AP75.values()) / 8
-show("Wilson Table 4 AP75 average recomputed (LS, DS)", f"{avg[0]:.1f}, {avg[1]:.1f}")
-show("Wilson gap in points", f"{WILSON_AVG[0] - WILSON_AVG[1]:.1f}")
-# Li et al. 2025 (TOSEM 34(3); arXiv 2308.02935v4), Table 7: miss rate (%) adult, child
-LI_MR = {
-    "YOLOX": (12.64, 42.47),
-    "RetinaNet": (14.36, 44.33),
-    "Faster RCNN": (5.24, 26.06),
-    "Cascade RCNN": (5.12, 26.57),
-    "ALFNet": (36.62, 53.47),
-    "CSP": (37.74, 50.42),
-    "MGAN": (33.58, 46.53),
-    "PRNet": (44.69, 61.25),
-}
-LI_AVG = (23.75, 43.89)            # Table 7, "Average" row
-show("Li Table 7 child minus adult miss rate (points)", f"{LI_AVG[1] - LI_AVG[0]:.2f}")
-VALUES.update(wilson=WILSON_AP75, wilson_avg=WILSON_AVG, li=LI_MR, li_avg=LI_AVG)
-
-# ---------------------------------------------------------------------------
-head("Two frames late (Napkin Math 17.2, Table 1)")
-P_MISS = 1.0e-3                     # chosen all-frames miss probability
-T_FRAME = 1.0 / F_CAM               # s, 16.7 ms
-P_REF = 0.95                        # illustrative, best-detected group
-P_LOWS = (0.85, 0.75, 0.60)         # illustrative, lower-detection groups
-
-
-def frames(p, p_miss=P_MISS):
-    return math.ceil(math.log(p_miss) / math.log(1.0 - p) - 1e-12)
-
-
-def shortfall(dn, v=V_AISLE):
-    dr = v * T_FRAME * dn
-    v_imp = math.sqrt(2 * A_BRAKE * dr)
-    e_imp = M_LOADED * A_BRAKE * dr
-    return dr, v_imp, e_imp
-
-
-n_ref = frames(P_REF)
-show("frame period", f"{T_FRAME * 1e3:.1f} ms")
-show("reference group frames", n_ref)
-ROWS = []
-for p in P_LOWS:
-    n = frames(p)
-    dr, vi, ei = shortfall(n - n_ref)
-    ROWS.append((p, n, n - n_ref, dr, vi, ei))
-    show(f"p = {p:.2f}: frames, extra, mm lost, impact m/s, J",
-         f"{n}, {n - n_ref}, {dr * 1e3:.0f} mm, {vi:.2f} m/s, {ei:.0f} J")
-show("two extra frames in ms", f"{2 * T_FRAME * 1e3:.1f} ms")
-show("braking distance at aisle speed", f"{d_brake:.2f} m")
-# miss probability in every one of n frames, for the figure
-for p in (P_REF, 0.75):
-    show(f"(1-p)^n for p = {p}", ", ".join(f"n={n}: {(1 - p) ** n:.1e}" for n in range(1, 7)))
-VALUES.update(n_ref=n_ref, rows=ROWS, t_frame=T_FRAME, d_brake=d_brake, p_miss=P_MISS)
-
-# ---------------------------------------------------------------------------
-head("Published miss rates in meters and joules (derived, Li et al. Table 7)")
-# Treat each detector's per-image miss rate as a per-frame miss probability,
-# independent across frames (the chapter's best-case assumption), at the
-# running machine's aisle speed, camera, mass, and deceleration.
+print("== Published miss rates in meters and joules (derived from Li Table 7)")
+# Each detector's per-image miss rate is treated as an independent per-frame
+# miss probability at the running machine's speed, camera, mass, and deceleration.
 LI_CONV = {}
-for name, (ma, mc) in LI_MR.items():
-    na, nc = frames(1 - ma / 100), frames(1 - mc / 100)
-    dr, vi, ei = shortfall(nc - na)
-    LI_CONV[name] = (na, nc, dr, vi, ei)
-    show(f"{name}: adult frames, child frames, mm, m/s, J",
-         f"{na}, {nc}, {dr * 1e3:.0f} mm, {vi:.2f} m/s, {ei:.0f} J")
-na, nc = frames(1 - LI_AVG[0] / 100), frames(1 - LI_AVG[1] / 100)
-dr, vi, ei = shortfall(nc - na)
-show("Li average: adult frames, child frames, mm, m/s, J", f"{na}, {nc}, {dr * 1e3:.0f} mm, {vi:.2f} m/s, {ei:.0f} J")
-VALUES.update(li_conv=LI_CONV, li_avg_conv=(na, nc, dr, vi, ei))
+for e in LI.entries:
+    r = SHORTFALL.variant(reference=1 - e["miss_rate_adult_pct"] / 100,
+                          groups=(1 - e["miss_rate_child_pct"] / 100,)).result
+    LI_CONV[e["detector"]] = (r.reference_frames, r.rows[0])
+avg = SHORTFALL.variant(reference=1 - LI_AVG[0] / 100, groups=(1 - LI_AVG[1] / 100,)).result.rows[0]
+li_rows = [row for _, row in LI_CONV.values()]
+for key, fn in (("dr", lambda r: m(r.distance_lost, "mm")), ("vi", lambda r: m(r.impact_speed, "m/s")),
+                ("e", lambda r: m(r.impact_energy, "J"))):
+    fmt = "{:.2f}" if key == "vi" else "{:.0f}"
+    v(f"li_{key}_lo", min(fn(r) for r in li_rows), fmt, f"Li conversion, {key}, smallest")
+    v(f"li_{key}_hi", max(fn(r) for r in li_rows), fmt, f"Li conversion, {key}, largest")
+v("li_avg_dn", avg.extra_frames, "{:.0f}", "Li average, extra frames")
+v("li_avg_dr", m(avg.distance_lost, "mm"), "{:.0f}", "Li average, mm")
+v("li_avg_vi", m(avg.impact_speed, "m/s"), "{:.2f}", "Li average, m/s")
+v("li_avg_e", m(avg.impact_energy, "J"), "{:.0f}", "Li average, J")
 
-# ---------------------------------------------------------------------------
-head("Sample sizes for each group (Sec. 17.5.2)")
-N_TOTAL, SHARE_SMALL, RECALL = 10_000, 0.02, 0.95   # illustrative
-P_A, P_B, ALPHA2, POWER = 0.95, 0.92, 0.05, 0.80    # chosen
+print("== Sample sizes for each group (ch 17.5.2)")
+CI_S, CI_L = SAMPLE.small_interval, SAMPLE.large_interval
+v("s_total", SAMPLE.total, "{:,.0f}", "test set")
+v("s_share_pct", 100 * SAMPLE.small_share, "{:.0f}", "small group share, percent")
+v("s_small", SAMPLE.small, "{:.0f}", "small group")
+v("s_large", SAMPLE.large, "{:,.0f}", "large group")
+v("s_recall", SAMPLE.recall, "{:.2f}", "detection rate in both")
+v("s_pa", SAMPLE.rate_a, "{:.2f}", "rate a")
+v("s_pb", SAMPLE.rate_b, "{:.2f}", "rate b")
+v("s_power_pct", 100 * SAMPLE.power, "{:.0f}", "power, percent")
+v("s_conf_pct", 100 * SAMPLE.confidence, "{:.0f}", "interval confidence, percent")
+v("ci_l_lo", CI_L[0], "{:.3f}", "large group interval, low")
+v("ci_l_hi", CI_L[1], "{:.3f}", "large group interval, high")
+v("ci_s_lo", CI_S[0], "{:.3f}", "small group interval, low")
+v("ci_s_hi", CI_S[1], "{:.3f}", "small group interval, high")
+v("w_ratio", round(SAMPLE.width_ratio), "{:.0f}", "width ratio, about")
+v("n_needed", SAMPLE.per_group_needed, "{:,.0f}", "people per group")
+v("share_needed_pct", 100 * SAMPLE.share_needed, "{:.0f}", "share of the set per group, percent")
 
+print("== Who bears the risk (ch 17.6)")
+v("enc_pct", 100 * CROSSINGS.encounter_share, "{:.0f}", "encounters at three crossings, percent")
+v("users_pct", 100 * CROSSINGS.user_share, "{:.0f}", "workers who use them, percent")
+v("enc_share", CROSSINGS.encounter_share, "{:.2f}", "encounter share")
+v("users_share", CROSSINGS.user_share, "{:.2f}", "user share")
+v("rest_enc", 1 - CROSSINGS.encounter_share, "{:.2f}", "everyone else's encounter share")
+v("rest_users", 1 - CROSSINGS.user_share, "{:.2f}", "everyone else's share of workers")
+v("exp_ratio", CROSSINGS.concentration, "{:.0f}", "crossing users' exposure over the average")
+v("rest_ratio_pct", 100 * CROSSINGS.rest_ratio, "{:.0f}", "everyone else, percent of the average")
 
-def cp(k, n, conf=0.95):
-    a = 1.0 - conf
-    lo = 0.0 if k == 0 else beta.ppf(a / 2, k, n - k + 1)
-    hi = 1.0 if k == n else beta.ppf(1 - a / 2, k + 1, n - k)
-    return lo, hi
+print("== Keeping less (ch 17.7.2)")
+v("ret_pre", m(RETENTION.pre_trigger, "s"), "{:.0f}", "pre-trigger window, s")
+v("ret_post", m(RETENTION.post_trigger, "s"), "{:.0f}", "after the trigger, s")
+v("ret_window", m(RETENTION.window, "s"), "{:.0f}", "window per event, s")
+v("ret_events", RETENTION.events_per_day, "{:.0f}", "events per machine-day")
+v("ret_day_h", m(RETENTION.operating_day, "hour"), "{:.0f}", "operating day, h")
+v("ret_kept_min", m(RETENTION.kept_per_day, "minute"), "{:.0f}", "kept per machine-day, min")
+v("ret_day_min", m(RETENTION.operating_day, "minute"), "{:.0f}", "operating day, min")
+v("ret_kept_pct", 100 * RETENTION.kept_share, "{:.0f}", "share kept, percent")
+v("ret_reduction", RETENTION.reduction, "{:.0f}", "reduction, x")
 
-
-n_small = round(N_TOTAL * SHARE_SMALL)
-n_large = N_TOTAL - n_small
-ci_s = cp(round(RECALL * n_small), n_small)
-ci_l = cp(round(RECALL * n_large), n_large)
-w_ratio = (ci_s[1] - ci_s[0]) / (ci_l[1] - ci_l[0])
-z_a, z_b = norm.ppf(1 - ALPHA2 / 2), norm.ppf(POWER)
-pbar = (P_A + P_B) / 2
-n_needed = math.ceil((z_a * math.sqrt(2 * pbar * (1 - pbar))
-                      + z_b * math.sqrt(P_A * (1 - P_A) + P_B * (1 - P_B))) ** 2 / (P_A - P_B) ** 2)
-show("group sizes", f"{n_small} and {n_large}")
-show("95% exact interval, 9,800 people", f"{ci_l[0]:.3f} to {ci_l[1]:.3f}")
-show("95% exact interval, 200 people", f"{ci_s[0]:.3f} to {ci_s[1]:.3f}")
-show("width ratio", f"{w_ratio:.1f}, about {round(w_ratio)}x")
-show("people per group to tell 0.95 from 0.92 at 80% power", f"{n_needed:,}")
-show("share of a 10,000-person set per group", f"{n_needed / N_TOTAL:.1%}")
-VALUES.update(ci_s=ci_s, ci_l=ci_l, n_needed=n_needed, n_small=n_small, n_large=n_large)
-
-# ---------------------------------------------------------------------------
-head("Who bears the risk (Sec. 17.6)")
-ENC_SHARE, WORKER_SHARE = 0.80, 0.10   # illustrative
-exp_ratio = ENC_SHARE / WORKER_SHARE
-rest_ratio = (1 - ENC_SHARE) / (1 - WORKER_SHARE)
-show("crossing users' exposure / site average", f"{exp_ratio:.0f}x")
-show("everyone else / site average", f"{rest_ratio:.0%}")
-VALUES.update(exp_ratio=exp_ratio, rest_ratio=rest_ratio)
-
-# ---------------------------------------------------------------------------
-head("Keeping less (Sec. 17.7.2)")
-T_POST = 25.0          # s after the trigger (chosen)
-EVENTS = 20            # per machine-day (illustrative)
-DAY_H = 16.0           # h (illustrative)
-window = T_PRE + T_POST
-kept = EVENTS * window / (DAY_H * 3600)
-show("window per event", f"{window:.0f} s")
-show("share of the day kept", f"{kept:.2%}")
-show("reduction", f"{1 / kept:.0f}x")
-show("footage kept per machine-day", f"{EVENTS * window / 60:.0f} min of {DAY_H * 60:.0f} min")
-VALUES.update(window=window, kept=kept, events=EVENTS, day_h=DAY_H, t_pre=T_PRE)
-
-# ---------------------------------------------------------------------------
-head("Where the labor went (Napkin Math 17.3)")
-SWEEPS, T_SWEEP_H, SHIFT_H = 4, 20 / 60, 8.0   # illustrative
-rho20 = Q[20][0]
-assist_h = rho20 * DAY_H
-idle_h = DAY_H - assist_h
-sweep_h = SWEEPS * T_SWEEP_H
-total_h = DAY_H + sweep_h
-show("request hours", f"{assist_h:.0f} h")
-show("watching and waiting hours", f"{idle_h:.0f} h")
-show("sweep hours", f"{sweep_h:.1f} h")
-show("person-hours per day", f"{total_h:.1f} h")
-show("full-time shifts", f"{total_h / SHIFT_H:.1f}")
-VALUES.update(assist_h=assist_h, idle_h=idle_h, sweep_h=sweep_h, total_h=total_h)
+print("== Where the labor went (ch Napkin Math 17.3)")
+v("lab_req_h", m(LABOR.request_time, "hour"), "{:.0f}", "request hours")
+v("lab_watch_h", m(LABOR.watch_time, "hour"), "{:.0f}", "watching and waiting hours")
+v("lab_day_h", m(LABOR.operating_day, "hour"), "{:.0f}", "assistant staffed, h")
+v("lab_sweeps_words", LABOR.sweeps, "words", "sweeps, in words")
+v("lab_sweep_min", m(LABOR.sweep_time, "minute"), "{:.0f}", "one sweep, min")
+v("lab_sweep_h", m(LABOR.sweep_total, "hour"), "{:.1f}", "sweep hours")
+v("lab_total_h", m(LABOR.total, "hour"), "{:.1f}", "person-hours per day")
+v("lab_shifts", LABOR.shifts, "{:.1f}", "full-time shifts")
 
 if __name__ == "__main__":
-    pass
+    write(__file__)

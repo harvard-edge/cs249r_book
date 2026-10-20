@@ -53,12 +53,25 @@ class Workloads(Registry):
         13.7e9, pc.GOOGLE_SEARCH_VOLUME_2025,  # 5e12 / 365, rounded
         name="Google searches per day",
         description="Lower bound from Google's disclosure of more than 5 trillion searches a year (2025).")
+    ChatGptPromptsPerDay = sourced(  # added 2026-10-20
+        2.5e9, pc.CHATGPT_DAILY_PROMPTS_2025,
+        name="ChatGPT prompts per day",
+        description="Prompts ChatGPT receives from users worldwide each day, July 2025 (OpenAI to Axios).")
     WaymoDataPerHourLow = sourced_qty(
         1 * TB / _hour, pc.REFERENCE_WORKLOAD_SCALE,
         name="Waymo sensor data rate (low)", description="Lower-bound AV sensor data generation rate.")
     WaymoDataPerHourHigh = sourced_qty(
         19 * TB / _hour, pc.REFERENCE_WORKLOAD_SCALE,
         name="Waymo sensor data rate (high)", description="Upper-bound AV sensor data generation rate.")
+
+
+class TextTokenization(Registry):
+    """Rules of thumb that convert tokens to words of English text (added 2026-10-20)."""
+
+    WordsPerToken = sourced(
+        0.75, pc.OPENAI_TOKENIZER_GUIDE,
+        name="English words per token",
+        description="OpenAI's rule of thumb: one token is roughly 3/4 of an English word (100 tokens ~ 75 words).")
 
 
 class AnomalyModel(Registry):
@@ -1198,6 +1211,7 @@ class ReferenceStats(Registry):
     """Registry namespace for non-executable real-world scenario statistics."""
 
     Workloads = Workloads
+    TextTokenization = TextTokenization  # added 2026-10-20
     AnomalyModel = AnomalyModel
     OuraSleepStudy = OuraSleepStudy
     ClinicalImaging = ClinicalImaging

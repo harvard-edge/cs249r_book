@@ -1,71 +1,17 @@
 #!/usr/bin/env python3
-"""Figures for Lecture 13 (Model Serving).
+"""Figures for Lecture 13 (Model Serving, Part 1).
 
-Every value is sourced. "MS" is the rendered chapter, Model Serving.
-The chapter's ResNet-50 numbers are its modeled reference profile on the
-H100 (not measurements); its host phases are stated assumptions.
-
-  - Cost of latency: batch 1 3.5 ms, 283 req/s, $3.92 per million;
-    batch 8 3.8 ms, 2,129 req/s, $0.52; GPU at $4/hour (MS Example 13.1).
-    The ratio 3.92 / 0.52 = 7.5 is derived here (the book rounds to 8x).
-  - Request budget: JPEG decode 3, resize 1, normalize 0.5, copy 0.5,
-    forward pass 3.5, softmax and top-5 0.1 ms, total 8.6 ms (MS table 3).
-    10x faster model: 8.6 -> 5.5 ms, 1.6x (MS Systems Perspective 13.2).
-  - Pipelining: serial duty cycle 41 percent, pipelined 78 percent
-    (MS Sec. 13.3.5).
-  - Measured frame latency, edge face recognition (Richins et al., "AI Tax",
-    arXiv 2007.10571, Fig. 6) is shown as the paper's own figure,
-    aitax_fig6.png (page 14 of the arXiv PDF at 400 dpi, cropped).
-  - Derived values come from calcs.py (imported as c); thumbnails at the end
-    are text-free pictograms for the goals and takeaways slots.
-  - Queueing: W = S / (1 - rho), p99 ~ 4.6 S / (1 - rho) (MS eqs. 4, 5);
-    table 7 values for a 3.53 ms service (printed as 3.5 ms in the book):
-    50% 7.1, 70% 11.8, 80% 17.6, 90% 35.3, 95% 70.6 ms; p99 at 70%
-    54.1 ms. Faster-model fallacy: 80% load, 3.5 -> 1.8 ms service,
-    17.6 -> 3.0 ms (MS Sec. 13.11).
-  - MLPerf Inference v5.0, closed, datacenter, ResNet-50 on 8x H100-SXM:
-    Cisco UCS C885A M8 (5.0-0010) Offline 715,761 samples/s, Server
-    652,002 queries/s; QuantaGrid D74H-7U (5.0-0065) Offline 712,859,
-    Server 584,161 (summary_results.json, mlcommons/inference_results_v5.0).
-    Server bound for ResNet-50: 15 ms at the 99th percentile (v5.0 rules).
-  - Batching: affine service time 3.50 ms + 0.033 ms per image (MS
-    Sec. 13.5.4); table 8 (batch 1, 8, 32: 3.53, 3.76, 4.55 ms; 280,
-    2,130, 7,040 img/s; fixed share 99, 93, 77 percent); batch 128 cap
-    gives about 16,600 img/s (MS Sec. 13.5.4).
-  - MLPerf Inference v5.0, edge, ResNet-50 on NVIDIA L4 (HPE ProLiant
-    DL145 Gen11, 3x L4, 5.0-0047): SingleStream 0.414 ms (90th percentile),
-    MultiStream 0.770 ms per 8-sample query (99th percentile), Offline
-    38,566 samples/s on three GPUs. Rates per GPU derived here: 1 / 0.414 ms
-    = 2,415/s; 8 / 0.770 ms = 10,390/s; 38,566 / 3 = 12,855/s.
-  - Batching window: E[wait] = window / 2; Poisson count per 10 ms window
-    at 50, 200, 1,000 QPS (MS eqs. 8, 9; 61 percent empty at 50 QPS).
-  - Cold start phases (MS table 17, representative): SSD 0.5 s, S3 3-5 s,
-    CUDA context 0.3-0.5 s, TensorRT build 15-30 s, warmup 0.2 s, runtime
-    0.4 s; totals about 1.5 s and about 35 s.
-  - Measured loading (Fu et al., ServerlessLLM, OSDI 2024, Sec. 2.3):
-    OPT-30B into 4 GPUs 34 s, Llama 2 70B into 8 GPUs 84 s with PyTorch;
-    a 130 GB checkpoint at 5 GB/s takes at least 26 s.
-  - Model swap: 10 GB over PCIe Gen4 x16 at 32 GB/s = 312.5 ms against a
-    50 ms SLO (MS Sec. 13.8.4).
-  - Splitwise (Patel et al., ISCA 2024, Table IV): Llama 2 70B, one
-    DGX-H100, no batching, conversation trace, P50: TTFT 84 ms, time
-    between tokens 28 ms, end to end 3,387 ms. Ticks are drawn every 28 ms.
-  - GPT-2 XL decode with a 1,024-token context: weights 3.0 GB, cache
-    0.31 GB per sequence; batch 1 3.3 GB in 1.0 ms (1,010 tokens/s);
-    batch 32 13.1 GB in 3.9 ms (8,200 tokens/s) (MS Sec. 13.9.2).
-  - vLLM (Kwon et al., SOSP 2023): share of KV memory holding token states,
-    Orca (Max) 20.4, (Pow2) 26.8, (Oracle) 38.2, vLLM 96.3 percent (Fig. 2);
-    average batched requests, OPT-13B, ShareGPT: 7.00, 9.81, 13.62, 30.42
-    (Fig. 13a). The Orca baselines are the vLLM authors' reimplementations.
-  - Joules per token, derived: a 1,000 W node (MS Napkin Math 13.5)
-    divided by the token rates above: 0.99 J and 0.12 J.
-  - Synthesis: 36 H100s at batch 1, 3 batched (MS Napkin Math 13.3,
-    Sec. 13.10.2). MLPerf v5.0 Llama 2 70B on Dell PowerEdge XE9680, 8x
-    H100-SXM (5.0-0020): Server 30,903.6 tokens/s under 2,000/200 ms
-    TTFT/TPOT; 12,979.4 tokens/s under 450/40 ms (interactive).
-  - Recall from Lecture 12: RTX 4090 ResNet-50 SingleStream 0.282 ms
-    (about 3,550/s, derived) and Offline 44,411 samples/s (MLPerf v5.0,
-    5.0-0032).
+Every value comes from calcs.py (imported as c), which reads MLSysIM: the
+ResNet-50 H100 serving profile and the model-serving Scenarios.* the Model
+Serving chapter also reads, the cited results in Literature.ServingResults,
+and the MLPerf Inference v5.0 rows in Literature.Series. Figure code takes
+plotted values from those objects and printed labels from deckvals.val(), so
+a label shows exactly the digits the slide text shows. The ResNet-50 numbers
+are the chapter's modeled reference profile on the H100 (not measurements);
+its host phases are stated assumptions. The AI Tax pie (Richins et al.,
+arXiv 2007.10571, Fig. 6) is the paper's own figure, aitax_fig6.png.
+Arrival marks in the batching-window figure are illustrative; thumbnails at
+the end are text-free pictograms for the goals and takeaways slots.
 
 Run from this folder: python3 make_figs.py
 """
@@ -81,10 +27,12 @@ import slideplot as sp  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import calcs as c  # noqa: E402
+from deckvals import val, num  # noqa: E402
 
 C = sp.C
 plt = sp.plt
 out = Path(__file__).parent
+m = c.m
 
 
 def tag(ax, text, x=0.0, y=-0.30):
@@ -95,23 +43,25 @@ def tag(ax, text, x=0.0, y=-0.30):
 
 # --------------------------------------------------------------- hook cost
 sp.hbars_steps(out / "hook_cost", [
-    ("Batch 1  (3.5 ms)", 3.92, "danger", "\\$3.92"),
-    ("Batch 8  (3.8 ms)", 0.52, "compute", "\\$0.52"),
-], "", log=False, xlabel="Cost per million requests (dollars; modeled, \\$4 per GPU-hour)",
+    (f"Batch {c.B1}  ({val('b1_ms')} ms)", num("b1_usd"), "danger", f"\\${val('b1_usd')}"),
+    (f"Batch {c.B8}  ({val('b8_ms')} ms)", num("b8_usd"), "compute", f"\\${val('b8_usd')}"),
+], "", log=False, xlabel=f"Cost per million requests (dollars; modeled, \\${val('price_h100')} per GPU-hour)",
     size=sp.SHORT)
 
 # ------------------------------------------------- recall: Lecture 12 bars
 sp.hbars(out / "recall_l12.svg", [
-    ("One at a time", c.ss_rate / 1000, "neutral", f"about {c.sig(c.ss_rate, 3):,.0f}/s"),
-    ("All at once", 44.411, "compute", "44,411/s"),
+    ("One at a time", num("rtx_ss_rate") / 1000, "neutral", f"about {val('rtx_ss_rate')}/s"),
+    ("All at once", num("rtx_off") / 1000, "compute", f"{val('rtx_off')}/s"),
 ], "", log=False, xlabel="ResNet-50, thousand images per second, one RTX 4090",
     size=(5.0, 1.5))
 
 # ------------------------------------------------ request budget (Amdahl)
-stages_now = [("Preprocess", 4.5, "data"), ("Copy", 0.5, "network"),
-              ("Model", 3.5, "compute"), ("Post", 0.1, "neutral")]
-stages_fast = [("Preprocess", 4.5, "data"), ("Copy", 0.5, "network"),
-               ("Model", 0.35, "compute"), ("Post", 0.1, "neutral")]
+ST = {k: m(t, "ms") for k, t in c.PATH.stages.items()}
+PRE, COPY, FWD, POST = m(c.PATH.subtotal(*c.HOST), "ms"), ST["copy to GPU"], ST["forward pass"], ST["top-5"]
+stages_now = [("Preprocess", PRE, "data"), ("Copy", COPY, "network"),
+              ("Model", FWD, "compute"), ("Post", POST, "neutral")]
+stages_fast = [("Preprocess", PRE, "data"), ("Copy", COPY, "network"),
+               ("Model", m(c.PATH.accelerated_stage, "ms"), "compute"), ("Post", POST, "neutral")]
 
 
 def stacked_row(ax, y, parts, show=True, labels=True, fs=11):
@@ -129,14 +79,14 @@ def stacked_row(ax, y, parts, show=True, labels=True, fs=11):
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 1.9))
     total = stacked_row(ax, 1, stages_now)
-    ax.text(total + 0.12, 1, f"{c.f(c.budget_total)} ms", va="center", fontsize=13,
+    ax.text(total + 0.12, 1, f"{val('budget_total')} ms", va="center", fontsize=13,
             fontweight="bold", color=C["text"])
     t2 = stacked_row(ax, 0, stages_fast, labels=True)
     ax.text(t2 + 0.12, 0, "???" if k == 1 else
-            f"{c.f(c.fast_total)} ms: {c.f(c.fast_speedup)}× faster", va="center",
+            f"{val('fast_total')} ms: {val('fast_speedup')}× faster", va="center",
             fontsize=13, fontweight="bold", color=C["danger"])
     ax.set_yticks([1, 0])
-    ax.set_yticklabels(["Today", "Model 10× faster"], fontsize=12, fontweight="bold")
+    ax.set_yticklabels(["Today", f"Model {val('model_speedup')}× faster"], fontsize=12, fontweight="bold")
     ax.set_xlim(0, 11.5)
     ax.set_ylim(-0.5, 1.5)
     ax.set_xlabel("One ResNet-50 request (ms; modeled model, assumed host phases)",
@@ -153,27 +103,28 @@ for k in (1, 2, 3):
     lanes = {"Host CPU": 2, "PCIe": 1, "GPU": 0}
     for name, y in lanes.items():
         ax.axhspan(y - 0.38, y + 0.38, color="#F2F2F2", lw=0, zorder=0)
-    host = [("decode 3 ms", 0, 3.0), ("", 3.0, 1.0), ("", 4.0, 0.5)]
+    DEC, RSZ, NRM = ST["JPEG decode"], ST["resize"], ST["normalize"]
+    host = [(f"decode {val('st_decode')} ms", 0, DEC), ("", DEC, RSZ), ("", DEC + RSZ, NRM)]
     for lab, x0, w in host:
         ax.barh(2, w, left=x0, color=C["data_l"], edgecolor=C["data"], lw=1.5, height=0.56)
         if lab:
             ax.text(x0 + w / 2, 2, lab, ha="center", va="center", fontsize=11)
-    ax.text(3.5, 2.36, "resize 1", ha="center", va="bottom", fontsize=11)
-    ax.text(4.25, 2.78, "normalize 0.5", ha="center", va="bottom", fontsize=11)
+    ax.text(DEC + RSZ / 2, 2.36, f"resize {val('st_resize')}", ha="center", va="bottom", fontsize=11)
+    ax.text(DEC + RSZ + NRM / 2, 2.78, f"normalize {val('st_norm')}", ha="center", va="bottom", fontsize=11)
     if k >= 2:
-        ax.barh(1, 0.5, left=4.5, color=C["network_l"], edgecolor=C["network"], lw=1.5,
+        ax.barh(1, COPY, left=PRE, color=C["network_l"], edgecolor=C["network"], lw=1.5,
                 height=0.56)
-        ax.text(5.1, 1, "copy 0.5 ms", va="center", fontsize=11)
-        ax.barh(0, 3.5, left=5.0, color=C["compute_l"], edgecolor=C["compute"], lw=1.5,
+        ax.text(PRE + COPY + 0.1, 1, f"copy {val('st_copy')} ms", va="center", fontsize=11)
+        ax.barh(0, FWD, left=PRE + COPY, color=C["compute_l"], edgecolor=C["compute"], lw=1.5,
                 height=0.56)
-        ax.text(6.75, 0, "forward\n3.5 ms", ha="center", va="center", fontsize=11)
-        ax.barh(2, 0.1, left=8.5, color=C["data_l"], edgecolor=C["data"], lw=1.5,
+        ax.text(PRE + COPY + FWD / 2, 0, f"forward\n{val('b1_ms')} ms", ha="center", va="center", fontsize=11)
+        ax.barh(2, POST, left=PRE + COPY + FWD, color=C["data_l"], edgecolor=C["data"], lw=1.5,
                 height=0.56)
-        ax.text(8.55, 2.5, "top-5 0.1", ha="center", va="bottom", fontsize=11)
+        ax.text(PRE + COPY + FWD + POST / 2, 2.5, f"top-5 {val('st_post')}", ha="center", va="bottom", fontsize=11)
     if k >= 3:
-        ax.barh(0, 5.0, left=0, color="white", edgecolor=C["danger"], hatch="//",
+        ax.barh(0, PRE + COPY, left=0, color="white", edgecolor=C["danger"], hatch="//",
                 lw=1.5, height=0.56)
-        ax.text(2.5, 0, f"GPU idle {c.f(c.gpu_idle_ms, 0)} ms", ha="center", va="center", fontsize=12,
+        ax.text((PRE + COPY) / 2, 0, f"GPU idle {val('gpu_idle')} ms", ha="center", va="center", fontsize=12,
                 color=C["danger"], fontweight="bold",
                 bbox=dict(facecolor="white", edgecolor="none", pad=1))
     ax.set_yticks([2, 1, 0])
@@ -184,7 +135,7 @@ for k in (1, 2, 3):
     ax.set_xticks(range(10))
     ax.spines["left"].set_visible(False)
     ax.set_xticks(range(0, 10, 2))
-    ax.set_xlabel(f"ms since the request arrived ({c.f(c.budget_total)} ms total)", fontsize=11)
+    ax.set_xlabel(f"ms since the request arrived ({val('budget_total')} ms total)", fontsize=11)
     tag(ax, "After Model Serving, fig. 3: forward pass modeled, host assumed", y=-0.34)
     sp.save(fig, out / f"timeline_step{k}.svg")
 
@@ -193,25 +144,26 @@ for k in (1, 2):
     fig, axes = plt.subplots(2, 1, figsize=(5.8, 2.9), gridspec_kw={"hspace": 0.9})
     # serial: each request runs 8.6 ms end to end before the next starts
     ax = axes[0]
+    TOT = PRE + COPY + FWD + POST
     for i in range(3):
-        t0 = i * 8.6
-        ax.barh(1, 4.5, left=t0, color=C["data"], height=0.6, edgecolor="white")
-        ax.barh(1, 0.5, left=t0 + 4.5, color=C["network"], height=0.6, edgecolor="white")
-        ax.barh(0, 3.5, left=t0 + 5.0, color=C["compute"], height=0.6, edgecolor="white")
-        ax.barh(1, 0.1, left=t0 + 8.5, color=C["neutral"], height=0.6)
-    ax.text(26.2, 0, f"GPU busy {c.f(c.serial_duty, 0)}%", va="center", fontsize=12, fontweight="bold",
+        t0 = i * TOT
+        ax.barh(1, PRE, left=t0, color=C["data"], height=0.6, edgecolor="white")
+        ax.barh(1, COPY, left=t0 + PRE, color=C["network"], height=0.6, edgecolor="white")
+        ax.barh(0, FWD, left=t0 + PRE + COPY, color=C["compute"], height=0.6, edgecolor="white")
+        ax.barh(1, POST, left=t0 + PRE + COPY + FWD, color=C["neutral"], height=0.6)
+    ax.text(26.2, 0, f"GPU busy {val('model_share')}%", va="center", fontsize=12, fontweight="bold",
             color=C["compute"])
     ax.set_title("Serial: one request at a time", fontsize=12, loc="left",
                  color=C["text"], fontweight="bold")
     ax2 = axes[1]
     show = k == 2
     for i in range(6):
-        ax2.barh(1, 4.5, left=i * 4.5, color=C["data"], height=0.6,
+        ax2.barh(1, PRE, left=i * PRE, color=C["data"], height=0.6,
                  edgecolor="white", alpha=1.0 if show else 0.0)
-        if 5.0 + i * 4.5 + 3.5 <= 26.0:
-            ax2.barh(0, 3.5, left=5.0 + i * 4.5, color=C["compute"], height=0.6,
+        if PRE + COPY + i * PRE + FWD <= 26.0:
+            ax2.barh(0, FWD, left=PRE + COPY + i * PRE, color=C["compute"], height=0.6,
                      edgecolor="white", alpha=1.0 if show else 0.0)
-    ax2.text(26.2, 0, f"GPU busy {c.f(c.pipe_duty, 0)}%", va="center", fontsize=12, fontweight="bold",
+    ax2.text(26.2, 0, f"GPU busy {val('pipe_duty')}%", va="center", fontsize=12, fontweight="bold",
              color=C["compute"], alpha=1.0 if show else 0.0)
     ax2.set_title("Pipelined: host prepares the next request", fontsize=12,
                   loc="left", color=C["text"], fontweight="bold",
@@ -232,12 +184,15 @@ for k in (1, 2):
 # ------------------------------------------------------- knee (variant)
 # Five steps: the table 7 points one at a time, a predict pause before 90
 # percent, then the p99 curve and the 70 percent point.
-S = c.S_MS  # the book's reference service time, printed as 3.5 ms
-points = [(rho, c.knee[rho]) for rho in (0.5, 0.8, 0.9, 0.95)]
-reach = {1: 0.5, 2: 0.8, 3: 0.8, 4: 0.97, 5: 0.97}
+S = m(c.PLAN.service_time, "ms")  # the book's reference service time, printed as 3.5 ms
+U = c.PLAN.utilization_points  # 0.5, 0.7, 0.8, 0.9, 0.95
+U_EX = c.PLAN.example_utilization
+KNEE = {u: num(f"knee_{100 * u:.0f}") for u in U}
+points = [(u, KNEE[u]) for u in U if u != U_EX]
+reach = {1: points[0][0], 2: points[1][0], 3: points[1][0], 4: 0.97, 5: 0.97}
 for k in (1, 2, 3, 4, 5):
     fig, ax = plt.subplots(figsize=(5.8, 2.75))
-    ax.axvspan(70, 100, color=C["danger_l"], alpha=0.6, lw=0)
+    ax.axvspan(100 * U_EX, 100, color=C["danger_l"], alpha=0.6, lw=0)
     rho = np.linspace(0.0, reach[k], 400)
     ax.plot(rho * 100, S / (1 - rho), color=C["memory"], lw=3)
     shown = {1: 1, 2: 2, 3: 2, 4: 4, 5: 4}[k]
@@ -247,16 +202,18 @@ for k in (1, 2, 3, 4, 5):
                     textcoords="offset points", ha="right", fontsize=11,
                     color=C["memory"], fontweight="bold")
     if k == 3:
-        ax.plot([90], [c.knee[0.9]], "o", ms=9, mfc="white", mec=C["danger"], mew=2, zorder=5)
-        ax.annotate("90%: ???", (90, c.knee[0.9]), xytext=(-10, 4), textcoords="offset points",
+        u9, w9 = points[2]
+        ax.plot([100 * u9], [w9], "o", ms=9, mfc="white", mec=C["danger"], mew=2, zorder=5)
+        ax.annotate(f"{100 * u9:.0f}%: ???", (100 * u9, w9), xytext=(-10, 4), textcoords="offset points",
                     ha="right", fontsize=12, color=C["danger"], fontweight="bold")
     ax.text(8, 8, "Mean", color=C["memory"], fontsize=12, fontweight="bold")
     if k >= 5:
         rr = np.linspace(0.0, 0.97, 400)
-        ax.plot(rr * 100, c.P99_K * S / (1 - rr), color=C["danger"], lw=3)
+        ax.plot(rr * 100, c.PLAN.tail_factor * S / (1 - rr), color=C["danger"], lw=3)
         ax.text(30, 30, "p99", color=C["danger"], fontsize=12, fontweight="bold")
-        ax.plot([70], [c.knee_p99_70], "o", ms=9, color=C["danger"], mec="white", mew=1.5, zorder=6)
-        ax.annotate(f"70%: p99 {c.knee_p99_70:.1f} ms,\nmean {c.knee[0.7]:.1f} ms", (70, c.knee_p99_70), xytext=(-10, 6),
+        ax.plot([100 * U_EX], [num("knee_p99_ex")], "o", ms=9, color=C["danger"], mec="white", mew=1.5, zorder=6)
+        ax.annotate(f"{val('util_70')}%: p99 {val('knee_p99_ex')} ms,\nmean {val('knee_70')} ms",
+                    (100 * U_EX, num("knee_p99_ex")), xytext=(-10, 6),
                     textcoords="offset points", ha="right", fontsize=11,
                     color=C["danger"], fontweight="bold")
     ax.text(99, 2, "planning danger zone", fontsize=10, color=C["danger"], ha="right")
@@ -264,27 +221,27 @@ for k in (1, 2, 3, 4, 5):
     ax.set_ylim(0, 100)
     ax.set_xlabel("Utilization (percent of time the GPU is busy)")
     ax.set_ylabel("Time in system (ms)")
-    tag(ax, "M/M/1 model, 3.5 ms service time (Model Serving, table 7)", y=-0.27)
+    tag(ax, f"M/M/1 model, {val('b1_ms')} ms service time (Model Serving, table 7)", y=-0.27)
     sp.save(fig, out / f"knee_step{k}.svg")
 
 # ------------------------------------------- faster-model vote thumbnail
 lam = np.linspace(0, 270, 400)
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(4.2, 2.7))
-    s_old, s_new = c.S_MS, c.S_NEW
+    s_old, s_new = m(c.VOTE.slow_service, "ms"), m(c.VOTE.fast_service, "ms")
     w_old = s_old / (1 - lam * s_old / 1000)
     ax.plot(lam, w_old, color=C["memory"], lw=3)
-    ax.text(145, 30, "3.5 ms model", color=C["memory"], fontsize=11, fontweight="bold")
-    lam80 = 0.8 / s_old * 1000
-    ax.plot([lam80], [c.vote_old], "o", ms=10, color=C["danger"], mec="white", mew=1.5, zorder=5)
-    ax.annotate(f"80% busy: {c.f(c.vote_old)} ms", (lam80, c.vote_old), xytext=(15, 22),
+    ax.text(145, 30, f"{val('b1_ms')} ms model", color=C["memory"], fontsize=11, fontweight="bold")
+    lam80 = m(c.VOTE.arrival_rate, "1/s")
+    ax.plot([lam80], [num("vote_old")], "o", ms=10, color=C["danger"], mec="white", mew=1.5, zorder=5)
+    ax.annotate(f"{val('vote_util')}% busy: {val('vote_old')} ms", (lam80, num("vote_old")), xytext=(15, 22),
                 ha="left", fontsize=11, color=C["danger"], fontweight="bold",
                 arrowprops=dict(arrowstyle="-", color=C["danger"]))
     if k == 2:
         w_new = s_new / (1 - lam * s_new / 1000)
         ax.plot(lam, w_new, color=C["data"], lw=3)
-        ax.plot([lam80], [c.vote_new], "o", ms=10, color=C["data"], mec="white", mew=1.5, zorder=5)
-        ax.text(lam80 + 8, -4.5, f"1.8 ms model, {c.f(c.vote_rho_new * 100, 0)}% busy: {c.f(c.vote_new)} ms", ha="right",
+        ax.plot([lam80], [num("vote_new")], "o", ms=10, color=C["data"], mec="white", mew=1.5, zorder=5)
+        ax.text(lam80 + 8, -4.5, f"{val('fast_service_ms')} ms model, {val('vote_util_new')}% busy: {val('vote_new')} ms", ha="right",
                 va="center", fontsize=11, color=C["data"], fontweight="bold")
     ax.set_xlim(0, 270)
     ax.set_ylim(-8, 40)
@@ -297,15 +254,15 @@ for k in (1, 2):
 # ------------------------------------------ MLPerf Server against Offline
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 2.3))
-    rows = [("System A", 715761, 652002), ("System B", 712859, 584161)]
+    rows = [("System A", c.A_OFF, c.A_SRV), ("System B", c.B_OFF, c.B_SRV)]
     for i, (name, off, srv) in enumerate(rows):
         y = 1 - i
         ax.barh(y + 0.18, off / 1000, height=0.34, color=C["neutral"])
-        ax.text(off / 1000 + 8, y + 0.18, f"Offline {off:,}", va="center", fontsize=11,
+        ax.text(off / 1000 + 8, y + 0.18, f"Offline {off:,.0f}", va="center", fontsize=11,
                 color=C["neutral"], fontweight="bold")
         ax.barh(y - 0.18, srv / 1000, height=0.34, color=C["compute"],
                 alpha=1.0 if k == 2 else 0.0)
-        ax.text(srv / 1000 + 8, y - 0.18, f"Server {srv:,}  ({srv / off:.0%} kept)",
+        ax.text(srv / 1000 + 8, y - 0.18, f"Server {srv:,.0f}  ({srv / off:.0%} kept)",
                 va="center", fontsize=11, color=C["compute"], fontweight="bold",
                 alpha=1.0 if k == 2 else 0.0)
         ax.text(-10, y, name, ha="right", va="center", fontsize=12, fontweight="bold")
@@ -319,21 +276,22 @@ for k in (1, 2):
 # --------------------------------------------- fixed cost per image (table 8)
 # Time per image against batch size on log axes: the fixed cost divided by the
 # batch, falling toward the per-image work (the chapter's profile, calcs.py).
-bb = np.unique(np.round(np.logspace(0, np.log10(128), 80)).astype(int))
+bb = np.unique(np.round(np.logspace(0, np.log10(c.B128), 80)).astype(int))
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 2.5))
-    ax.axhline(c.PER_IMG_MS, color=C["compute"], lw=2, ls="--")
-    ax.text(1.05, c.PER_IMG_MS * 1.25, f"work on the image itself: {c.AFF_PER} ms",
+    PER = m(c.SVC.per_request_time, "ms")
+    ax.axhline(PER, color=C["compute"], lw=2, ls="--")
+    ax.text(1.05, PER * 1.25, f"work on the image itself: {val('per_img_ms')} ms",
             fontsize=11, color=C["compute"], fontweight="bold", va="bottom")
     if k == 2:
-        ax.plot(bb, [c.batch_ms(b) / b for b in bb], color=C["neutral"], lw=3)
-    pts = (1,) if k == 1 else (1, 8, 32)
-    offs = {1: (10, -4), 8: (10, 2), 32: (10, 2)}
+        ax.plot(bb, [m(c.SVC.time_per_request(int(b)), "ms") for b in bb], color=C["neutral"], lw=3)
+    pts = (c.B1,) if k == 1 else (c.B1, c.B8, c.B32)
+    offs = {c.B1: (10, -4), c.B8: (10, 2), c.B32: (10, 2)}
     for b in pts:
-        v = c.per_image[b]
+        v = num(f"per_image_{b}")
         ax.plot([b], [v], "o", ms=9, color=C["danger"] if b == 1 else C["text"],
                 mec="white", mew=1.5, zorder=5)
-        ax.annotate(f"batch {b}: {c.f(v, 2)} ms ({c.f(c.fixed_share[b], 0)}% fixed)", (b, v),
+        ax.annotate(f"batch {b}: {val(f'per_image_{b}')} ms ({val(f'fixed_share_{b}')}% fixed)", (b, v),
                     xytext=offs[b], textcoords="offset points", fontsize=11,
                     fontweight="bold", color=C["danger"] if b == 1 else C["text"])
     ax.set_xscale("log", base=2)
@@ -347,22 +305,22 @@ for k in (1, 2):
     ax.minorticks_off()
     ax.set_xlabel("Batch size")
     ax.set_ylabel("ms per image")
-    tag(ax, "Modeled: 3.50 ms fixed per pass + 0.033 ms per image (Model Serving, table 8)",
+    tag(ax, f"Modeled: {val('fixed_ms')} ms fixed per pass + {val('per_img_ms')} ms per image (Model Serving, table 8)",
         y=-0.36)
     sp.save(fig, out / f"fixed_cost_step{k}.svg")
 
 # ------------------------------------- modeled throughput and measured L4
-bs = np.unique(np.round(np.logspace(0, np.log10(128), 60)).astype(int))
+bs = np.unique(np.round(np.logspace(0, np.log10(c.B128), 60)).astype(int))
 for k in (1, 2):
     fig, (ax, bx) = plt.subplots(1, 2, figsize=(5.9, 2.6),
                                  gridspec_kw={"width_ratios": [1.1, 1], "wspace": 0.55})
-    tput = np.array([b / c.batch_ms(b) for b in bs]) * 1000
+    tput = np.array([m(c.SVC.throughput(int(b)), "1/s") for b in bs])
     ax.plot(bs, tput / 1000, color=C["compute"], lw=3)
-    for b in (1, 32, 128):
-        lab = f"{b}: {c.f(c.aff[b], 2 if b < 100 else 1)} ms\n{c.sig(c.aff_tput[b], 3):,.0f}/s"
-        v = b / c.batch_ms(b)
+    for b in (c.B1, c.B32, c.B128):
+        lab = f"{b}: {val(f'curve_ms_{b}')} ms\n{val(f'curve_rate_{b}')}/s"
+        v = m(c.SVC.throughput(b), "1/s") / 1000
         ax.plot([b], [v], "o", ms=7, color=C["compute"], mec="white", zorder=5)
-        ax.annotate(lab, (b, v), xytext={1: (12, 32), 32: (-8, 14), 128: (-8, 4)}[b],
+        ax.annotate(lab, (b, v), xytext={c.B1: (12, 32), c.B32: (-8, 14), c.B128: (-8, 4)}[b],
                     textcoords="offset points", ha="right" if b > 1 else "left",
                     fontsize=10, color=C["text"])
     ax.set_xscale("log", base=2)
@@ -374,9 +332,9 @@ for k in (1, 2):
     ax.set_title("H100, modeled", fontsize=12, loc="left", fontweight="bold")
     show = k == 2
     a = 1.0 if show else 0.0
-    rows = [("1 at a time", c.l4_one / 1000, "neutral", f"{c.f(c.l4_one, 0, True)}/s"),
-            ("8 at a time", c.l4_eight / 1000, "compute", f"{c.sig(c.l4_eight, 4):,.0f}/s"),
-            ("All at once", c.l4_all / 1000, "compute", f"{c.f(c.l4_all, 0, True)}/s")]
+    rows = [("1 at a time", num("l4_one") / 1000, "neutral", f"{val('l4_one')}/s"),
+            (f"{val('l4_per_query')} at a time", num("l4_multi") / 1000, "compute", f"{val('l4_multi')}/s"),
+            ("All at once", num("l4_each") / 1000, "compute", f"{val('l4_each')}/s")]
     for i, (lab, v, ck, txt) in enumerate(rows):
         y = 2 - i
         bx.barh(y, v, color=C[ck], height=0.6, alpha=a)
@@ -408,14 +366,15 @@ def poisson(m, n):
 for k in (1, 2, 3):
     fig = plt.figure(figsize=(5.9, 3.0))
     ax = fig.add_axes([0.06, 0.62, 0.9, 0.30])
-    for w in (0, 10, 20):
-        ax.axvspan(w + 0.15, w + 9.85, color=C["memory_l"], alpha=0.7, lw=0)
-        ax.annotate("", (w + 10, -0.55), xytext=(w + 10, 0.55),
+    W = num("win_ms")
+    for w in (0, W, 2 * W):
+        ax.axvspan(w + 0.15, w + W - 0.15, color=C["memory_l"], alpha=0.7, lw=0)
+        ax.annotate("", (w + W, -0.55), xytext=(w + W, 0.55),
                     arrowprops=dict(arrowstyle="-|>", color=C["compute"], lw=2))
-    ax.text(10.4, 0.75, "dispatch", ha="left", fontsize=12, color=C["compute"])
+    ax.text(W + 0.4, 0.75, "dispatch", ha="left", fontsize=12, color=C["compute"])
     for t in rng_arrivals:
         ax.plot([t, t], [-0.35, 0.35], color=C["text"], lw=2)
-    ax.annotate("", (10, -0.95), xytext=(0.8, -0.95),
+    ax.annotate("", (W, -0.95), xytext=(rng_arrivals[0], -0.95),
                 arrowprops=dict(arrowstyle="<->", color=C["danger"], lw=1.5))
     if k == 3:
         ax.annotate("cap reached: dispatch early", (26.1, 0.4), xytext=(29.8, 1.15),
@@ -428,12 +387,14 @@ for k in (1, 2, 3):
         ax.spines[s].set_visible(False)
     ax.set_xticks([0, 10, 20, 30])
     ax.tick_params(axis="x", labelsize=11)
-    ax.set_xlabel("ms; 10 ms windows, arrivals illustrative", fontsize=10,
+    ax.set_xlabel(f"ms; {val('win_ms')} ms windows, arrivals illustrative", fontsize=10,
                   color=C["neutral"], labelpad=1)
     show = k >= 2
-    for j, (q, m) in enumerate(((50, 0.5), (200, 2.0), (1000, 10.0))):
+    rates = [r for r in c.WIN.arrival_rates if r is not c.R500]
+    for j, r in enumerate(rates):
+        q, mean = m(r, "1/s"), c.WIN.mean_arrivals(r)
         hx = fig.add_axes([0.06 + j * 0.32, 0.08, 0.26, 0.24])
-        pr = poisson(m, 21)
+        pr = poisson(mean, 21)
         hx.bar(range(21), pr, color=C["memory"], width=0.8, alpha=1.0 if show else 0.0)
         hx.set_xlim(-0.8, 20.8)
         hx.set_ylim(0, 0.65)
@@ -442,30 +403,32 @@ for k in (1, 2, 3):
         hx.set_xticks([0, 10, 20])
         hx.tick_params(axis="x", labelsize=11, colors=C["text"] if show else "white")
         hx.spines["bottom"].set_alpha(1.0 if show else 0.0)
-        extra = f": {c.f(c.empty_50, 0)}% empty" if q == 50 else ""
-        hx.set_title(f"{q:,} QPS{extra}", fontsize=12, fontweight="bold",
+        extra = f": {val('empty_50')}% empty" if r is c.R50 else ""
+        hx.set_title(f"{val(f'qps_{q:.0f}')} QPS{extra}", fontsize=12, fontweight="bold",
                      color=C["text"], alpha=1.0 if show else 0.0)
-    fig.text(0.06, -0.05, "Requests per 10 ms window (Poisson)", fontsize=11,
+    fig.text(0.06, -0.05, f"Requests per {val('win_ms')} ms window (Poisson)", fontsize=11,
              color=C["neutral"] if show else "white")
     sp.save(fig, out / f"window_step{k}.svg")
 
 # ------------------------------------------------------------ cold start
-phases = [("Weights from local SSD", 0.5, "memory", "0.5 s"),
-          ("Weights from S3", 5, "memory", "3–5 s"),
-          ("CUDA context", 0.5, "neutral", "0.3–0.5 s"),
-          ("Warmup + runtime", 0.6, "neutral", "0.6 s"),
-          ("TensorRT engine build", 30, "compute", "15–30 s")]
+phases = [("Weights from local SSD", num("cs_ssd"), "memory", f"{val('cs_ssd')} s"),
+          ("Weights from S3", num("cs_s3_hi"), "memory", f"{val('cs_s3_lo')}–{val('cs_s3_hi')} s"),
+          ("CUDA context", num("cs_cuda_hi"), "neutral", f"{val('cs_cuda_lo')}–{val('cs_cuda_hi')} s"),
+          ("Warmup + runtime", num("cs_warm_rt"), "neutral", f"{val('cs_warm_rt')} s"),
+          ("TensorRT engine build", num("cs_trt_hi"), "compute", f"{val('cs_trt_lo')}–{val('cs_trt_hi')} s")]
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(4.6, 2.6))
     for i, (lab, v, ck, txt) in enumerate(phases):
         y = len(phases) - 1 - i
         a = 1.0 if (k == 2 or i < 4) else 0.0
         if lab.startswith("Weights from S3"):
-            ax.barh(y, 5 - 3, left=3, color=C[ck], height=0.6, alpha=a * 0.45)
-            ax.barh(y, 3, color=C[ck], height=0.6, alpha=a)
+            lo, hi = num("cs_s3_lo"), num("cs_s3_hi")
+            ax.barh(y, hi - lo, left=lo, color=C[ck], height=0.6, alpha=a * 0.45)
+            ax.barh(y, lo, color=C[ck], height=0.6, alpha=a)
         elif lab.startswith("TensorRT"):
-            ax.barh(y, 15, color=C[ck], height=0.6, alpha=a)
-            ax.barh(y, 15, left=15, color=C[ck], height=0.6, alpha=a * 0.45)
+            lo, hi = num("cs_trt_lo"), num("cs_trt_hi")
+            ax.barh(y, lo, color=C[ck], height=0.6, alpha=a)
+            ax.barh(y, hi - lo, left=lo, color=C[ck], height=0.6, alpha=a * 0.45)
         else:
             ax.barh(y, v, color=C[ck], height=0.6, alpha=a)
         ax.text(v * 1.15, y, txt, va="center", fontsize=13, fontweight="bold",
@@ -484,15 +447,16 @@ for k in (1, 2):
 
 # ------------------------------------------------------------- model swap
 fig, ax = plt.subplots(figsize=(4.3, 2.2))
-ax.axvspan(50, 360, color=C["danger_l"], alpha=0.6, lw=0)
-ax.axvline(50, color=C["danger"], lw=2.5, ls="--")
-ax.text(56, 1.25, "50 ms deadline", color=C["danger"], fontsize=12, fontweight="bold")
-ax.barh(0.5, c.S_PRINT, color=C["compute"], height=0.35)
-ax.annotate(f"forward pass: {c.S_PRINT} ms", (4, 0.5), xytext=(62, 0.5), va="center",
+DL = num("p99_budget_ms")
+ax.axvspan(DL, 360, color=C["danger_l"], alpha=0.6, lw=0)
+ax.axvline(DL, color=C["danger"], lw=2.5, ls="--")
+ax.text(DL + 6, 1.25, f"{val('p99_budget_ms')} ms deadline", color=C["danger"], fontsize=12, fontweight="bold")
+ax.barh(0.5, num("b1_ms"), color=C["compute"], height=0.35)
+ax.annotate(f"forward pass: {val('b1_ms')} ms", (4, 0.5), xytext=(62, 0.5), va="center",
             fontsize=12, color=C["compute"], fontweight="bold",
             arrowprops=dict(arrowstyle="-", color=C["compute"]))
-ax.barh(-0.2, c.swap_ms, color=C["memory"], height=0.35)
-ax.text(c.swap_ms - 6, -0.2, f"load 10 GB: {c.f(c.swap_ms)} ms", va="center", ha="right",
+ax.barh(-0.2, num("swap_ms"), color=C["memory"], height=0.35)
+ax.text(num("swap_ms") - 6, -0.2, f"load {val('swap_gb')} GB: {val('swap_ms')} ms", va="center", ha="right",
         fontsize=12, color="white", fontweight="bold")
 ax.set_xlim(0, 360)
 ax.set_ylim(-0.6, 1.6)
@@ -504,17 +468,18 @@ sp.save(fig, out / "model_swap.svg")
 
 # ------------------------------------------- static against dynamic (13.1.1)
 sp.hbars(out / "static_dynamic.svg", [
-    ("On demand, batch 1", c.static_b1_s, "danger", f"{c.f(c.static_b1_s, 0)} s"),
-    ("Overnight, large batch", c.static_int8_s, "data",
-     f"{c.f(c.static_int8_s, 2)} s: {c.f(c.static_ratio, 0)}× faster"),
+    ("On demand, batch 1", m(c.PHOTOS.on_demand_total, "s"), "danger", f"{val('static_b1_s')} s"),
+    ("Overnight, large batch", m(c.PHOTOS.offline_total, "s"), "data",
+     f"{val('static_int8_s')} s: {val('static_ratio')}× faster"),
 ], "", log=False, size=sp.SHORT,
-    xlabel="Seconds to classify 10,000 photos on one H100")
+    xlabel=f"Seconds to classify {val('photos')} photos on one H100")
 
 # --------------------------------------------- second budget: DLRM (Lighthouse 13.1)
-resnet = [("Prep 4.5", 4.5, "data"), ("", 0.5, "network"),
-          ("Model 3.5", 3.5, "compute"), ("", 0.1, "neutral")]
-dlrm = [("", 0.5, "neutral"), ("Embeddings 6", 6.0, "memory"),
-        ("MLP", 1.5, "compute"), ("", 1.0, "neutral")]
+resnet = [(f"Prep {val('host_stage')}", PRE, "data"), ("", COPY, "network"),
+          (f"Model {val('b1_ms')}", FWD, "compute"), ("", POST, "neutral")]
+DS = {k: m(t, "ms") for k, t in c.DLRM.stages.items()}
+dlrm = [("", DS["parse"], "neutral"), (f"Embeddings {val('dl_emb')}", DS["embedding lookup"], "memory"),
+        ("MLP", DS["MLP forward"], "compute"), ("", DS["rank and filter"], "neutral")]
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(4.4, 2.1))
     for y, parts, show in ((1, resnet, True), (0, dlrm, k >= 2)):
@@ -526,8 +491,8 @@ for k in (1, 2):
                 ax.text(left + v / 2, y, name, ha="center", va="center", color="white",
                         fontsize=11, fontweight="bold", alpha=1.0 if show else 0.0)
             left += v
-        txt = (f"{c.f(c.budget_total)} ms\nmodel {c.f(c.model_share, 0)}%" if y == 1 else
-               f"{c.f(c.dlrm_total, 0)} ms\nMLP {c.f(c.dlrm_mlp_share, 0)}%")
+        txt = (f"{val('budget_total')} ms\nmodel {val('model_share')}%" if y == 1 else
+               f"{val('dl_total')} ms\nMLP {val('dl_mlp_share')}%")
         ax.text(left + 0.15, y, txt, va="center", fontsize=12, fontweight="bold",
                 alpha=1.0 if show else 0.0)
     ax.set_yticks([1, 0])
@@ -542,37 +507,38 @@ for k in (1, 2):
     sp.save(fig, out / f"dlrm_step{k}.svg")
 
 # ------------------------------------------------- fan-out tail (Sec. 13.4.5)
-nn = np.arange(1, 101)
+nn = np.arange(1, c.FAN100.n_components + 1)
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(3.9, 2.0))
-    ax.plot(nn, 100 * 0.99 ** nn, color=C["memory"], lw=3)
-    f10, f100 = c.r(c.fan10, 1), c.r(c.fan100, 1)
-    ax.plot([1], [99], "o", ms=8, color=C["memory"], mec="white", zorder=5)
-    ax.plot([10], [f10], "o", ms=8, color=C["memory"], mec="white", zorder=5)
-    ax.annotate(f"10 servers: {f10}%", (10, f10), xytext=(10, -4), textcoords="offset points",
+    A, N10, N100 = c.FAN100.availability, c.FAN10.n_components, c.FAN100.n_components
+    ax.plot(nn, 100 * A ** nn, color=C["memory"], lw=3)
+    f10, f100 = num("fan10"), num("fan100")
+    ax.plot([1], [100 * A], "o", ms=8, color=C["memory"], mec="white", zorder=5)
+    ax.plot([N10], [f10], "o", ms=8, color=C["memory"], mec="white", zorder=5)
+    ax.annotate(f"{val('fan_n10')} servers: {val('fan10')}%", (N10, f10), xytext=(10, -4), textcoords="offset points",
                 fontsize=11, fontweight="bold", color=C["memory"])
     if k == 1:
-        ax.annotate("100: ???", (100, f100), xytext=(-12, -24), textcoords="offset points",
+        ax.annotate(f"{val('fan_n100')}: ???", (N100, f100), xytext=(-12, -24), textcoords="offset points",
                     ha="right", fontsize=12, fontweight="bold", color=C["danger"])
     else:
-        ax.plot([100], [f100], "o", ms=9, color=C["danger"], mec="white", zorder=5)
-        ax.annotate(f"100: {f100}%", (100, f100), xytext=(-12, -24), textcoords="offset points",
+        ax.plot([N100], [f100], "o", ms=9, color=C["danger"], mec="white", zorder=5)
+        ax.annotate(f"{val('fan_n100')}: {val('fan100')}%", (N100, f100), xytext=(-12, -24), textcoords="offset points",
                     ha="right", fontsize=12, fontweight="bold", color=C["danger"])
     ax.set_xlim(0, 105)
     ax.set_ylim(0, 105)
     ax.set_xlabel("Servers each request fans out to")
     ax.set_ylabel("Requests on time (%)")
-    tag(ax, "Each server on time 99%, independent", y=-0.40)
+    tag(ax, f"Each server on time {val('fan_avail_pct')}%, independent", y=-0.40)
     sp.save(fig, out / f"fanout_step{k}.svg")
 
 # ------------------------------------------------ runtime table (Example 13.6)
-rt = [("PyTorch eager", c.S_MS, "neutral", f"{c.f(c.S_MS, 2)} ms")]
-for _n, _ck in (("TorchScript", "compute"), ("ONNX Runtime", "compute"),
-                ("TensorRT FP32", "compute"), ("TensorRT FP16", "data"),
-                ("TensorRT INT8", "data")):
-    _x = c.rt_speedup[_n]
-    rt.append((_n, c.RT[_n], _ck,
-               f"{c.f(c.RT[_n], 2)} ms ({c.f(_x, 0) if abs(_x - round(_x)) < 0.05 else c.f(_x)}×)"))
+rt = [("PyTorch eager", m(c.SVC.service_time(c.B1), "ms"), "neutral", f"{val('b1_ms_2')} ms")]
+for _n, _k, _ck in (("TorchScript", "ts", "compute"), ("ONNX Runtime", "onnx", "compute"),
+                    ("TensorRT FP32", "fp32", "compute"), ("TensorRT FP16", "fp16", "data"),
+                    ("TensorRT INT8", "int8", "data")):
+    _x = num(f"rt_{_k}_x")
+    _xs = f"{_x:.0f}" if abs(_x - round(_x)) < 0.05 else val(f"rt_{_k}_x")
+    rt.append((_n, m(c.RT[_k], "ms"), _ck, f"{val(f'rt_{_k}')} ms ({_xs}×)"))
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 2.6))
     for i, (lab, v, ck, txt) in enumerate(rt):
@@ -583,9 +549,9 @@ for k in (1, 2):
                 color=C[ck], alpha=1.0 if show else 0.0)
         ax.text(-0.05, y, lab, ha="right", va="center", fontsize=11, fontweight="bold",
                 alpha=1.0 if show else 0.0)
-    ax.text(2.6, 3.0, f"less dispatch:\n{c.f(c.rt_speedup['TensorRT FP32'])}×", fontsize=11, color=C["compute"],
+    ax.text(2.6, 3.0, f"less dispatch:\n{val('rt_fp32_x')}×", fontsize=11, color=C["compute"],
             fontweight="bold", ha="center", va="center")
-    ax.text(2.6, 0.5, f"lower precision:\n{c.f(c.rt_prec_gain)}× more", fontsize=11, color=C["data"],
+    ax.text(2.6, 0.5, f"lower precision:\n{val('rt_prec_gain')}× more", fontsize=11, color=C["data"],
             fontweight="bold", ha="center", va="center", alpha=1.0 if k == 2 else 0.0)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
@@ -595,33 +561,37 @@ for k in (1, 2):
     sp.save(fig, out / f"runtime_step{k}.svg")
 
 # --------------------------------------- dual-trigger trace (Example 13.4)
+ARR = [m(t, "ms") for t in c.TRACE.arrivals]
+TO, FREE, B4, RESP = (m(c.TRACE.timeout, "ms"), m(c.TRACE.worker_free, "ms"), m(c.TRACE.batch_time, "ms"),
+                      m(c.TRACE.response_path, "ms"))
+DLN, DONE = m(c.TRACE.deadline, "ms"), m(c.TRACE.oldest_latency, "ms")
 for k in (1, 2, 3):
     fig, ax = plt.subplots(figsize=(5.8, 2.4))
-    for t in (0, 2, 5, 9):
+    for t in ARR:
         ax.plot([t, t], [1.65, 2.35], color=C["text"], lw=2.5)
-    ax.text(4.5, 2.55, "arrivals at 0, 2, 5, 9 ms", ha="center", fontsize=11,
-            fontweight="bold")
-    ax.barh(1.0, 12, color=C["memory_l"], edgecolor=C["memory"], height=0.5)
-    ax.text(6, 1.0, "timer 12 ms", ha="center", va="center", fontsize=11,
+    ax.text(ARR[-1] / 2, 2.55, "arrivals at " + ", ".join(val(f"arrive_{i}") for i in range(len(ARR))) + " ms",
+            ha="center", fontsize=11, fontweight="bold")
+    ax.barh(1.0, TO, color=C["memory_l"], edgecolor=C["memory"], height=0.5)
+    ax.text(TO / 2, 1.0, f"timer {val('timeout_ms')} ms", ha="center", va="center", fontsize=11,
             color=C["memory"], fontweight="bold")
     a2 = 1.0 if k >= 2 else 0.0
-    ax.barh(1.0, 6, left=12, color=C["danger_l"], edgecolor=C["danger"], height=0.5,
+    ax.barh(1.0, FREE - TO, left=TO, color=C["danger_l"], edgecolor=C["danger"], height=0.5,
             hatch="//", alpha=a2)
-    ax.text(15, 0.62, "worker busy 6 ms", ha="center", va="top", fontsize=10.5,
+    ax.text((TO + FREE) / 2, 0.62, f"worker busy {val('backlog_ms')} ms", ha="center", va="top", fontsize=10.5,
             color=C["danger"], fontweight="bold", alpha=a2)
-    ax.barh(1.0, 3.6, left=18, color=C["compute"], height=0.5, alpha=a2)
-    ax.text(19.8, 1.35, "batch of 4: 3.6 ms", ha="center", va="bottom", fontsize=10.5,
-            color=C["compute"], fontweight="bold", alpha=a2)
+    ax.barh(1.0, B4, left=FREE, color=C["compute"], height=0.5, alpha=a2)
+    ax.text(FREE + B4 / 2, 1.35, f"batch of {len(ARR)}: {val('batch4_ms')} ms", ha="center", va="bottom",
+            fontsize=10.5, color=C["compute"], fontweight="bold", alpha=a2)
     a3 = 1.0 if k >= 3 else 0.0
-    ax.barh(1.0, 4, left=21.6, color=C["network"], height=0.5, alpha=a3)
-    ax.text(25.0, 0.62, "response 4 ms", ha="left", va="top", fontsize=10.5,
+    ax.barh(1.0, RESP, left=FREE + B4, color=C["network"], height=0.5, alpha=a3)
+    ax.text(FREE + B4 + 3.4, 0.62, f"response {val('response_ms')} ms", ha="left", va="top", fontsize=10.5,
             color=C["network"], fontweight="bold", alpha=a3)
-    ax.annotate("", (50, -0.05), xytext=(c.dt_done, -0.05),
+    ax.annotate("", (DLN, -0.05), xytext=(DONE, -0.05),
                 arrowprops=dict(arrowstyle="<->", color=C["data"], lw=1.8, alpha=a3))
-    ax.text(49.0, -0.2, f"done at {c.f(c.dt_done)} ms: {c.f(c.dt_slack)} ms of slack", ha="right", va="top",
-            fontsize=11, color=C["data"], fontweight="bold", alpha=a3)
-    ax.axvline(50, color=C["danger"], lw=2, ls="--")
-    ax.text(49.5, 2.55, "deadline 50 ms", ha="right", fontsize=11, color=C["danger"],
+    ax.text(DLN - 1.0, -0.2, f"done at {val('trace_done_ms')} ms: {val('trace_slack_ms')} ms of slack", ha="right",
+            va="top", fontsize=11, color=C["data"], fontweight="bold", alpha=a3)
+    ax.axvline(DLN, color=C["danger"], lw=2, ls="--")
+    ax.text(DLN - 0.5, 2.55, f"deadline {val('deadline_ms')} ms", ha="right", fontsize=11, color=C["danger"],
             fontweight="bold")
     ax.set_xlim(-1, 52)
     ax.set_ylim(-0.9, 2.9)
@@ -631,17 +601,19 @@ for k in (1, 2, 3):
     sp.save(fig, out / f"dual_trigger_step{k}.svg")
 
 # ----------------------------------- cost per image across hardware (Ex. 13.13)
-inst = [("c5.xlarge (CPU)", 0.17, 50), ("g4dn.xlarge (T4)", 0.53, 400), ("H100", 4.0, 7040)]
-load = np.arange(50, 7041, 10)
+inst = [("c5.xlarge (CPU)", "CPU"), ("g4dn.xlarge (T4)", "T4"), ("H100", "H100")]
+T4_USD, T4_RATE = m(c.INST.prices["T4"], "dollar/hour"), m(c.INST.rates["T4"], "1/s")
+H100_USD = m(c.INST.prices["H100"], "dollar/hour")
+load = np.arange(50, num("b32_rate") + 1, 10)
 for k in (1, 2):
     fig, (ax, bx) = plt.subplots(1, 2, figsize=(5.4, 2.5),
                                  gridspec_kw={"width_ratios": [1, 1.3], "wspace": 0.55})
-    for i, (lab, usd, rate) in enumerate(inst):
+    for i, (lab, key) in enumerate(inst):
         y = 2 - i
-        cpm = usd / (rate * 3600) * 1e6
+        cpm = m(c.INST.cost_per_million(key), "dollar")
         ck = "data" if lab == "H100" else "neutral"
         ax.barh(y, cpm, color=C[ck], height=0.6)
-        ax.text(cpm + 0.03, y, f"\\${c.f(cpm, 2)}", va="center", fontsize=12, fontweight="bold",
+        ax.text(cpm + 0.03, y, f"\\${val(f'cpm_{key.lower()}')}", va="center", fontsize=12, fontweight="bold",
                 color=C[ck])
         ax.text(-0.03, y, {"c5.xlarge (CPU)": "CPU (c5)", "g4dn.xlarge (T4)": "T4"}.get(lab, lab), ha="right",
                 va="center", fontsize=12, fontweight="bold")
@@ -652,12 +624,12 @@ for k in (1, 2):
     ax.set_title("Fully busy", fontsize=12, loc="left", fontweight="bold")
     ax.set_xlabel("\\$ per million images", fontsize=11)
     a = 1.0 if k >= 2 else 0.0
-    t4 = np.ceil(load / 400) * 0.53 / (load * 3600) * 1e6
-    h1 = 4.0 / (load * 3600) * 1e6
+    t4 = np.ceil(load / T4_RATE) * T4_USD / (load * 3600) * 1e6
+    h1 = H100_USD / (load * 3600) * 1e6
     bx.plot(load / 1000, h1, color=C["data"], lw=2.5, alpha=a)
     bx.plot(load / 1000, t4, color=C["neutral"], lw=2, alpha=a)
-    bx.axvline(c.t4_cross / 1000 + 0.1, color=C["danger"], lw=1.5, ls="--", alpha=a)
-    bx.text(3.1, 1.2, "crossover\nnear 3,000/s", fontsize=12, color=C["danger"],
+    bx.axvline(num("t4_n_rate") / 1000 + 0.1, color=C["danger"], lw=1.5, ls="--", alpha=a)
+    bx.text(3.1, 1.2, f"crossover\nnear {val('crossover')}/s", fontsize=12, color=C["danger"],
             fontweight="bold", alpha=a)
     bx.text(3.15, 1.75, "one H100", ha="left", fontsize=12, color=C["data"],
             fontweight="bold", alpha=a)
@@ -675,9 +647,10 @@ for k in (1, 2):
     sp.save(fig, out / f"cost_hw_step{k}.svg")
 
 # ------------------------------------- next lecture: Part 2's hook, third bar hidden
-HOOK = [("No deadline\n(Offline)", 31216.8, "neutral", "31,217"),
-        ("TTFT 2 s,\nTPOT 200 ms", 30903.6, "compute", "30,904"),
-        ("TTFT 450 ms,\nTPOT 40 ms", 12979.4, "danger", "")]
+HOOK = [("No deadline\n(Offline)", c.LL_OFF["tokens_per_s"], "neutral", val("llama_off")),
+        (f"TTFT {val('llama_conv_ttft_s')} s,\nTPOT {val('llama_conv_tpot')} ms", c.LL_CONV["tokens_per_s"], "compute",
+         val("llama_conv")),
+        (f"TTFT {val('llama_int_ttft')} ms,\nTPOT {val('llama_int_tpot')} ms", c.LL_INT["tokens_per_s"], "danger", "")]
 fig, ax = plt.subplots(figsize=(2.6, 2.3))
 for i, (lab, v, ck, txt) in enumerate(HOOK):
     y = 2 - i
@@ -694,19 +667,19 @@ ax.set_xlabel("Thousand tokens/s,\nLlama 2 70B, 8× H100", fontsize=11)
 sp.save(fig, out / "next_hook.svg")
 
 sp.hbars(out / "synth_hook.svg", [
-    ("Batch 1", 3.92, "danger", "\\$3.92 per million"),
-    ("Batch 8", 0.52, "compute", "\\$0.52"),
+    (f"Batch {c.B1}", num("b1_usd"), "danger", f"\\${val('b1_usd')} per million"),
+    (f"Batch {c.B8}", num("b8_usd"), "compute", f"\\${val('b8_usd')}"),
 ], "", log=False, size=(3.4, 1.3), xlabel="Cost per million requests")
 
 # --------------------------------------------------------------- synthesis
 sp.hbars(out / "synth_gpus.svg", [
-    ("Batch 1", c.est_final, "danger", f"{c.est_final} H100s"),
-    ("Batched", c.syn_batched, "data", f"{c.syn_batched} H100s"),
+    ("Batch 1", c.PLAN.accelerators_planned, "danger", f"{val('plan_gpus')} H100s"),
+    ("Batched", c.PLAN.batched_accelerators_planned, "data", f"{val('syn_batched')} H100s"),
 ], "", log=False, size=(3.4, 1.5),
-    xlabel="5,000 req/s, 50 ms p99 (plan)")
+    xlabel=f"{val('peak_rate')} req/s, {val('p99_budget_ms')} ms p99 (plan)")
 sp.hbars(out / "synth_cost.svg", [
-    ("Batch 1", c.syn_cost_b1, "danger", f"\\${c.f(c.syn_cost_b1, 2)} per million"),
-    ("Batched", c.syn_cost_bt, "data", f"\\${c.f(c.syn_cost_bt, 2)}"),
+    ("Batch 1", num("syn_cost_b1"), "danger", f"\\${val('syn_cost_b1')} per million"),
+    ("Batched", num("syn_cost_bt"), "data", f"\\${val('syn_cost_bt')}"),
 ], "", log=False, size=(3.4, 1.5),
     xlabel="Fleet cost at 5,000 req/s (derived)")
 
@@ -724,17 +697,17 @@ def thumb(name, draw, size=(1.0, 0.4)):
 
 
 def _t_timeline(ax):    # three lanes, a long host bar, a short GPU bar
-    ax.barh(2, 4.5, color=C["data"], height=0.6)
-    ax.barh(1, 0.5, left=4.5, color=C["network"], height=0.6)
-    ax.barh(0, 3.5, left=5.0, color=C["compute"], height=0.6)
+    ax.barh(2, PRE, color=C["data"], height=0.6)
+    ax.barh(1, COPY, left=PRE, color=C["network"], height=0.6)
+    ax.barh(0, FWD, left=PRE + COPY, color=C["compute"], height=0.6)
     ax.set_xlim(0, 9); ax.set_ylim(-0.6, 2.6)
 
 
 def _t_knee(ax):        # the mean and p99 curves rising toward 100 percent
     rr = np.linspace(0, 0.93, 200)
-    ax.axvspan(0.7, 1.0, color=C["danger_l"], lw=0)
+    ax.axvspan(U_EX, 1.0, color=C["danger_l"], lw=0)
     ax.plot(rr, 1 / (1 - rr), color=C["memory"], lw=1.6)
-    ax.plot(rr, 4.6 / (1 - rr), color=C["danger"], lw=1.6)
+    ax.plot(rr, c.PLAN.tail_factor / (1 - rr), color=C["danger"], lw=1.6)
     ax.set_xlim(0, 1); ax.set_ylim(0, 30)
 
 
@@ -748,8 +721,8 @@ def _t_window(ax):      # arrivals in windows, a dispatch arrow at each end
 
 def _t_cost(ax):        # a falling cost curve and a sawtooth crossing it
     ld = np.linspace(0.3, 7, 300)
-    ax.plot(ld, 4.0 / ld, color=C["data"], lw=1.6)
-    ax.plot(ld, np.ceil(ld / 0.4) * 0.53 / ld, color=C["neutral"], lw=1.2)
+    ax.plot(ld, H100_USD / ld, color=C["data"], lw=1.6)
+    ax.plot(ld, np.ceil(ld / (T4_RATE / 1000)) * T4_USD / ld, color=C["neutral"], lw=1.2)
     ax.set_xlim(0, 7.1); ax.set_ylim(0, 3)
 
 

@@ -1735,12 +1735,12 @@ class SystolicOpsCalc:
     """Peak MAC throughput of the canonical 128×128 systolic array."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    SYSTOLIC_ARRAY_DIM = 128  # pedagogical systolic-array dimension example
-    systolic_dim_value = SYSTOLIC_ARRAY_DIM
-    tpuv4_bw = Hardware.Cloud.TPUv4.memory.bandwidth
+    tpuv4 = Hardware.Cloud.TPUv4  # each matrix unit is a 128 x 128 systolic array
+    systolic_dim_value = tpuv4.compute.systolic_array_dim
+    tpuv4_bw = tpuv4.memory.bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    systolic_ops_value = systolic_dim_value * systolic_dim_value
+    systolic_ops_value = tpuv4.compute.systolic_macs_per_cycle
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(systolic_ops_value == 16384, f"Systolic ops mismatch: {systolic_ops_value}")
@@ -2643,21 +2643,24 @@ class TensorLifecycleCalc:
     """Memory-hierarchy costs for one ResNet-50 stage-2 activation map on an H100."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    map_h = 56  # ResNet-50 stage-2 spatial size
-    map_c = 64  # ResNet-50 stage-2 bottleneck channels
-    batch = 32  # scenario assumption: same batch as the roofline analysis
+    stage2 = Scenarios.ResNet50Stage2ConvBatch32  # 56 x 56 x 64 output map, batch 32, FP16
+    stage2_int8 = Scenarios.ResNet50Stage2ConvBatch32Int8
+    map_read = Scenarios.ResNet50Stage2MapInt8ReadOnce  # one INT8 map read once from DRAM
+    map_h = stage2.height  # ResNet-50 stage-2 spatial size
+    map_c = stage2.out_channels  # ResNet-50 stage-2 bottleneck channels
+    batch = stage2.batch_size  # same batch as the roofline analysis
     h100 = Hardware.Cloud.H100
-    dram_energy_per_byte = Hardware.Tech.Memory.DRAM.energy_per_byte
+    dram_energy_per_byte = map_read.energy_per_byte
     reg_energy_per_access = Hardware.Tech.Memory.Register.energy_per_access
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    map_int8 = map_h * map_h * map_c * BYTES_INT8
-    map_fp16 = map_h * map_h * map_c * BYTES_FP16
-    batch_map_int8 = batch * map_int8
+    map_int8 = stage2_int8.activation_bytes
+    map_fp16 = stage2.activation_bytes
+    batch_map_int8 = stage2_int8.batch_output_bytes
     smem = h100.memory.shared_memory_per_sm
     l2 = h100.memory.l2_cache
     stream_time = (map_int8 / h100.memory.bandwidth).to(nanosecond)
-    map_dram_energy = (map_int8 * dram_energy_per_byte).to(microjoule)
+    map_dram_energy = map_read.energy.to(microjoule)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(map_int8 < smem < map_fp16, "One INT8 stage-2 map must fit one SM's shared memory; the FP16 map must not.")
@@ -4609,15 +4612,15 @@ class TilingPrinciple:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    SYSTOLIC_ARRAY_DIM = 128  # pedagogical systolic-array dimension example
-    layer_dim = 4096  # Standard Transformer layer width
-    array_dim = SYSTOLIC_ARRAY_DIM  # 128
+    tiling = Scenarios.Matmul4096Fp16Tile128  # a 4,096-square multiply on a 128-wide array's tiles
+    layer_dim = tiling.m  # Standard Transformer layer width
+    array_dim = tiling.tile_m  # 128
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Number of tiles per dimension
-    tiles_per_dim = layer_dim / array_dim
-    output_tiles = tiles_per_dim**2
-    tile_products = tiles_per_dim**3
+    tiles_per_dim = tiling.tiles_m
+    output_tiles = tiling.output_tiles
+    tile_products = tiling.tile_products
 
     # Step 2: Each tile of weights is loaded once and used for 'layer_dim' MACs
     reuse_factor = array_dim

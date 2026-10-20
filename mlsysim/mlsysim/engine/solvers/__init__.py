@@ -43,6 +43,11 @@ from .storage import (
     StorageBenchmarkDemandModel,
 )
 from .embodied import StoppingBudgetModel, TractionLossModel  # added 2026-10-20
+from .embodied import TakeoverBudgetModel  # supervisory intervention (added 2026-10-20)
+from .embodied import ShieldCoverageBillModel  # shield credit against a hazard target (added 2026-10-20)
+from .trajectory import BrakingBlendModel  # added 2026-10-20
+from .realtime import CommandAuthenticationModel  # added 2026-10-20
+from .embodied import OnsetTrialModel, RailHoldUpModel  # added 2026-10-20
 # Agent trajectories (added 2026-10-20)
 from .agents import (AcceptedTaskCostModel, AgentRunSummaryModel, AppendOnlyContextModel,
                      HorizonCompoundingModel, TaskHorizonTrendModel)
@@ -95,6 +100,10 @@ __all__ = [
     "TrainingGrowthModel",
     "DomainComputeGapModel",
     "StoppingBudgetModel",
+    "TakeoverBudgetModel",
+    "ShieldCoverageBillModel",
+    "BrakingBlendModel",
+    "CommandAuthenticationModel",
     "TractionLossModel",
     "ScalingSeriesModel",
     "MemoryWallModel",
@@ -177,6 +186,8 @@ from .plant import (
     ContinuousDeratingModel,
     DriveBusModel,
     ZeroFailureModel,
+    ExponentialRareEventModel,
+    DiagnosticCoverageModel,
     ThrottledStageModel,
 )
 
@@ -192,6 +203,8 @@ __all__ += [
     "ContinuousDeratingModel",
     "DriveBusModel",
     "ZeroFailureModel",
+    "ExponentialRareEventModel",
+    "DiagnosticCoverageModel",
     "ThrottledStageModel",
 ]
 
@@ -354,6 +367,8 @@ from .realtime import (
     EtherCatCycleModel,
     LeaseBudgetModel,
     LatencyTailModel,
+    SharedDramReadModel,
+    ThermalThrottleModel,
 )
 
 __all__ += [
@@ -363,6 +378,8 @@ __all__ += [
     "EtherCatCycleModel",
     "LeaseBudgetModel",
     "LatencyTailModel",
+    "SharedDramReadModel",
+    "ThermalThrottleModel",
 ]
 
 # --- Agent sandboxes (added 2026-10-20) ---
@@ -646,4 +663,126 @@ __all__ += [
     "ShoulderSwingModel",
     "DynamicWindowModel",
     "StaleAnchorModel",
+]
+
+# --- Trajectory curation: triage, split leakage, admission order, denominators, staging (added 2026-10-20) ---
+from .curation import (
+    FailureTriageModel,
+    RunSplitLeakageModel,
+    AdmissionOrderModel,
+    CorpusDenominatorsModel,
+    StagingBurstModel,
+)
+
+__all__ += [
+    "FailureTriageModel",
+    "RunSplitLeakageModel",
+    "AdmissionOrderModel",
+    "CorpusDenominatorsModel",
+    "StagingBurstModel",
+]
+
+# --- Fine-tuning on trajectories: masks, weighting, packing, preference, release (added 2026-10-20) ---
+from .fine_tuning import (
+    TargetMaskModel,
+    PerInvocationSerializationModel,
+    TrajectoryRoleShareModel,
+    LossNormalizationModel,
+    SequencePackingModel,
+    PreferencePairModel,
+    ContextDistillationModel,
+    CandidateReleaseModel,
+)
+
+__all__ += [
+    "TargetMaskModel",
+    "PerInvocationSerializationModel",
+    "TrajectoryRoleShareModel",
+    "LossNormalizationModel",
+    "SequencePackingModel",
+    "PreferencePairModel",
+    "ContextDistillationModel",
+    "CandidateReleaseModel",
+]
+
+__all__ += ["OnsetTrialModel", "RailHoldUpModel"]  # added 2026-10-20
+# --- Reinforcement learning from verifiable rewards (added 2026-10-20) ---
+from .reinforcement import (
+    RewardCompositionModel,
+    CenteredRewardModel,
+    RewardShapingModel,
+    ForkValueModel,
+    ContinuationForkCostModel,
+    GroupCoefficientsModel,
+    LengthNormalizationModel,
+    RolloutStepBudgetModel,
+    RepeatedVerificationModel,
+    RatioClipModel,
+    RolloutSlotCycleModel,
+    GroupBarrierModel,
+    VerifierPoolModel,
+)
+
+__all__ += [
+    "RewardCompositionModel",
+    "CenteredRewardModel",
+    "RewardShapingModel",
+    "ForkValueModel",
+    "ContinuationForkCostModel",
+    "GroupCoefficientsModel",
+    "LengthNormalizationModel",
+    "RolloutStepBudgetModel",
+    "RepeatedVerificationModel",
+    "RatioClipModel",
+    "RolloutSlotCycleModel",
+    "GroupBarrierModel",
+    "VerifierPoolModel",
+]
+
+# --- Responsible physical AI: detection shortfall, one assistant's queue (added 2026-10-20) ---
+from .supervision import DetectionShortfallModel, SupervisorQueueModel
+
+__all__ += ["DetectionShortfallModel", "SupervisorQueueModel"]
+
+# --- Agent cost accounting (added 2026-10-20) ---
+from .cost_accounting import (
+    PriceDeclineModel,
+    CostVsScoreModel,
+    CohortAttemptCostModel,
+    PrefixCacheBillModel,
+    CompactionPaybackModel,
+    RetryPolicyModel,
+    SerialEpisodeModel,
+    SpeculativeEpisodeModel,
+    ModelCascadeModel,
+    TrajectoryAdmissionModel,
+    KingmanQueueModel,
+    DedicatedBreakEvenModel,
+    ConservedBudgetModel,
+    ArchitectureChoiceModel,
+    AdaptationPaybackModel,
+    WorkloadLeverModel,
+    CoverageIndependenceModel,
+    ConcurrencySweepModel,
+)
+
+__all__ += [
+    "PriceDeclineModel",
+    "CostVsScoreModel",
+    "CohortAttemptCostModel",
+    "PrefixCacheBillModel",
+    "CompactionPaybackModel",
+    "RetryPolicyModel",
+    "SerialEpisodeModel",
+    "SpeculativeEpisodeModel",
+    "ModelCascadeModel",
+    "TrajectoryAdmissionModel",
+    "KingmanQueueModel",
+    "DedicatedBreakEvenModel",
+    "ConservedBudgetModel",
+    "ArchitectureChoiceModel",
+    "AdaptationPaybackModel",
+    "WorkloadLeverModel",
+    "CoverageIndependenceModel",
+    "ConcurrencySweepModel",
 ]

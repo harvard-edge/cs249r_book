@@ -3,7 +3,10 @@
 Run: python3 make_figs.py   (writes SVGs here; `make deck V=3 D=20_conclusion`
 converts them to PDF). Plots use the shared slideplot helper at the size of
 their slot; diagrams are SVG drawn at the size of their slot. Derived values
-come from calcs.py. Text-free thumbnails come from tools/greek_thumbs.py.
+come from MLSysIM through calcs.py (its scenarios and the values it records,
+read here with val and num); layout coordinates are typed. The one exception
+is recall_bars, whose Lecture 19 inputs wait for that lecture's Agent
+Economics scenario. Text-free thumbnails come from tools/greek_thumbs.py.
 """
 
 import shutil
@@ -18,6 +21,8 @@ sys.path.insert(0, str(HERE))
 
 import calcs  # noqa: E402
 import slideplot as sp  # noqa: E402
+from deckvals import val, num  # noqa: E402
+from mlsysim.physics.agents import calc_unchecked_success  # noqa: E402
 from slideplot import plt  # noqa: E402
 
 # Volume III roles (volumes/vol3/palette.md)
@@ -212,16 +217,21 @@ def measured():
     ax.set_xticks([0, 50, 100])
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
-    ax.set_xlabel("Bad outcomes in 25,000 incidents (measured)")
+    ax.set_xlabel(f"Bad outcomes in {val('ms_n')} incidents (measured)")
     ax.grid(axis="x", color=sp.C["grid"], lw=0.6)
     ax.set_axisbelow(True)
     axis_type(ax, 8.5)
     sp.save(fig, HERE / "measured.svg")
 
 
+def recall_l19():
+    """NM 19.1, Ch 19 table 1, read from calcs.py (Scenarios.RepairCohortTokenPriceComparison)."""
+    return dict(rej_per_acc_frontier=num("rc_rej_fr"), rej_per_acc_cheap=num("rc_rej_lp"))
+
+
 def recall_bars():
     """L19 recall: rejected attempts carried by each accepted repair (NM 19.1)."""
-    r = calcs.recall_l19()
+    r = recall_l19()
     fig, ax = plt.subplots(figsize=(3.0, 1.4))
     ax.barh(1, r["rej_per_acc_frontier"], color=BLUE, height=0.55)
     ax.barh(0, r["rej_per_acc_cheap"], color=RED, height=0.55)
@@ -233,13 +243,11 @@ def recall_bars():
 
 def bill():
     """incident_42: where one attempt's money goes, and the unchecked loss (§20.3.2)."""
-    b = calcs.incident_bill()
-    p = b["parts"]
-    rows = [("Model calls", p["model"], BLUE, f"${p['model']:.2f}"),
-            ("Telemetry and change tools", p["tools"], AMBER, f"${p['tools']:.2f}"),
-            ("Health-window check", p["health"], GREEN, f"${p['health']:.2f}"),
-            ("On-call approval", p["approval"], PURPLE, f"${p['approval']:.2f}"),
-            ("Wrong change, no check", b["loss"], RED, f"${b['loss']:.0f} expected loss")]
+    rows = [("Model calls", num("bill_model"), BLUE, f"${val('bill_model')}"),
+            ("Telemetry and change tools", num("bill_tools"), AMBER, f"${val('bill_tools')}"),
+            ("Health-window check", num("bill_health"), GREEN, f"${val('bill_health')}"),
+            ("On-call approval", num("bill_approval2"), PURPLE, f"${val('bill_approval2')}"),
+            ("Wrong change, no check", num("bill_loss"), RED, f"${val('bill_loss')} expected loss")]
     fig, ax = plt.subplots(figsize=(3.9, 1.15))
     for i, (lab, v, c, s) in enumerate(rows):
         y = len(rows) - 1 - i
@@ -262,8 +270,13 @@ def bill():
 
 def swe_agent():
     """SWE-agent ablations, SWE-bench Lite (Yang et al. 2024, Tables 1 and 3)."""
-    s = calcs.swe_agent()
-    rows = s["rows"][:1] + [s["swap"]] + s["rows"][1:]
+    swe = calcs.SWE
+    rows = [("SWE-agent interface", swe.SweBenchLiteSweAgentResolved),
+            ("Same interface, Claude 3 Opus", swe.SweAgentClaude3OpusLiteResolved),
+            ("Viewer shows whole file", swe.SweAgentFullFileViewerResolved),
+            ("Iterative search", swe.SweAgentIterativeSearchResolved),
+            ("Shell only", swe.SweBenchLiteShellResolved),
+            ("No edit command", swe.SweAgentNoEditCommandResolved)]
     fig, ax = plt.subplots(figsize=(1.9, 1.35))
     for i, (lab, v) in enumerate(rows):
         y = len(rows) - 1 - i
@@ -284,16 +297,15 @@ def swe_agent():
 
 def passing():
     """Stacked bars: candidates against the passing set (§20.10, eq. 3.3)."""
-    ps = calcs.passing_set()
-    inv0 = 100 * ps["invalid_before"]
-    inv1 = 100 * ps["invalid_after"]
+    inv0 = num("ps_invalid")
+    inv1 = num("ps_after")
     for step in (1, 2):
         fig, ax = plt.subplots(figsize=(3.3, 2.5))
         ax.bar(0, 100 - inv0, color=GREEN, width=0.55)
         ax.bar(0, inv0, bottom=100 - inv0, color=RED, width=0.55)
-        ax.text(0, 100 - inv0 / 2, f"{inv0:.0f}%\ninvalid", ha="center", va="center", color="white",
+        ax.text(0, 100 - inv0 / 2, f"{val('ps_invalid')}%\ninvalid", ha="center", va="center", color="white",
                 fontsize=10, fontweight="bold")
-        ax.text(0, (100 - inv0) / 2, "30%\nvalid", ha="center", va="center", color="white",
+        ax.text(0, (100 - inv0) / 2, f"{val('ps_valid')}%\nvalid", ha="center", va="center", color="white",
                 fontsize=10, fontweight="bold")
         ax.annotate("", xy=(0.62, 55), xytext=(0.38, 55),
                     arrowprops=dict(arrowstyle="-|>", color=INK, lw=1.5))
@@ -304,7 +316,7 @@ def passing():
         else:
             ax.bar(1, 100 - inv1, color=GREEN, width=0.55)
             ax.bar(1, inv1, bottom=100 - inv1, color=RED, width=0.55)
-            ax.text(1.32, 100 - inv1 / 2, f"{inv1:.1f}%\ninvalid", va="center", fontsize=10,
+            ax.text(1.32, 100 - inv1 / 2, f"{val('ps_after')}%\ninvalid", va="center", fontsize=10,
                     color=RED, fontweight="bold")
             ax.text(1, 45, "valid", ha="center", va="center", color="white", fontsize=10,
                     fontweight="bold")
@@ -319,20 +331,20 @@ def passing():
 
 def swebp():
     """SWE-bench+ Table 1: what the 251 passing patches were (Aleithan et al. 2024)."""
-    s = calcs.swebench_plus()
-    parts = [("Correct fix", s["correct"], GREEN), ("Weak tests passed it", s["weak"], AMBER),
-             ("Answer was in the issue", s["leak"], RED)]
+    a = calcs.AUDIT
+    parts = [("Correct fix", a.correct, GREEN), ("Weak tests passed it", a.weak_tests, AMBER),
+             ("Answer was in the issue", a.solution_leak, RED)]
     fig, ax = plt.subplots(figsize=(3.3, 2.5))
     bottom = 0
     for lab, v, c in parts:
         ax.bar(0, v, bottom=bottom, color=c, width=0.5)
-        ax.text(0.32, bottom + v / 2, f"{lab}: {v}", va="center", fontsize=9.5, color=c,
+        ax.text(0.32, bottom + v / 2, f"{lab}: {v:.0f}", va="center", fontsize=9.5, color=c,
                 fontweight="bold")
         bottom += v
     ax.set_xlim(-0.35, 1.9)
     ax.set_ylim(0, 260)
     ax.set_xticks([0])
-    ax.set_xticklabels([f"{s['total']} passing patches"])
+    ax.set_xticklabels([f"{val('sbp_total')} passing patches"])
     ax.set_ylabel("Patches")
     axis_type(ax, 9.5)
     sp.save(fig, HERE / "swebp.svg")
@@ -340,14 +352,14 @@ def swebp():
 
 def metr_hack():
     """Part V evidence: reward hacking with the scorer in reach (Ch 17 WS 17.1)."""
-    rows = [("RE-Bench", 39, 128, RED), ("HCAST", 8, 1087, GRAY)]
+    rows = [("RE-Bench", "metr_rebench", RED), ("HCAST", "metr_hcast", GRAY)]
     fig, ax = plt.subplots(figsize=(1.3, 0.48))
-    for i, (lab, h, n, c) in enumerate(rows):
+    for i, (lab, k, c) in enumerate(rows):
         y = 1 - i
-        v = 100 * h / n
+        v = num(f"{k}_pct")
         ax.barh(y, v, color=c, height=0.6)
-        ax.text(v + 1, y, f"{h} of {n:,} runs, {v:.0f}%" if v >= 1 else f"{h} of {n:,} runs, {v:.1f}%", va="center", fontsize=8.5, color=c,
-                fontweight="bold")
+        ax.text(v + 1, y, f"{val(k + '_hacks')} of {val(k + '_runs')} runs, {val(k + '_pct')}%", va="center",
+                fontsize=8.5, color=c, fontweight="bold")
         ax.text(-1, y, lab, ha="right", va="center", fontsize=8.5, color=INK)
     ax.set_xlim(0, 75)
     ax.set_yticks([])
@@ -360,10 +372,12 @@ def metr_hack():
 
 def attribution():
     """Counterfactual search: 4^50 paths against one checked 5-step window (§20.8)."""
-    a = calcs.attribution()
+    a = calcs.BLAME
     fig, ax = plt.subplots(figsize=(2.1, 0.8))
-    rows = [("No checks, 50 steps", float(a["full"]), RED, f"4$^{{50}}$ ≈ 10$^{{{a['full_exp']:.0f}}}$ paths"),
-            ("Checked every 5 steps", float(a["window"]), GREEN, f"4$^5$ = {a['window']:,} paths")]
+    rows = [(f"No checks, {val('at_h')} steps", float(a.full_paths), RED,
+             f"{val('at_b')}$^{{{val('at_h')}}}$ ≈ 10$^{{{val('at_exp')}}}$ paths"),
+            (f"Checked every {val('at_w')} steps", float(a.window_paths), GREEN,
+             f"{val('at_b')}$^{val('at_w')}$ = {val('at_window')} paths")]
     for i, (lab, v, c, s) in enumerate(rows):
         y = 1 - i
         ax.barh(y, v, color=c, height=0.6)
@@ -385,17 +399,18 @@ def attribution():
 
 def horizon():
     """eq. 1.1 at 99% per step (§20.11 figure)."""
-    h = calcs.horizon()
-    xs = [c[0] for c in h["curve"]]
-    ys = [100 * c[1] for c in h["curve"]]
+    sc = calcs.HORIZON
+    short, long_ = sc.short_horizon, sc.long_horizon
+    xs = list(range(0, long_ + 1))
+    ys = [100 * calc_unchecked_success(sc.step_success, x) for x in xs]
     fig, ax = plt.subplots(figsize=(2.3, 1.45))
     ax.plot(xs, ys, color=PURPLE, lw=2.5)
-    ax.plot([10], [100 * h["p10"]], "o", color=GREEN, ms=8)
-    ax.plot([100], [100 * h["p100"]], "o", color=RED, ms=8)
-    ax.text(14, 100 * h["p10"] + 2, f"{100*h['p10']:.1f}% at 10 turns", fontsize=8.5, color=GREEN,
-            fontweight="bold")
-    ax.text(97, 100 * h["p100"] - 16, f"{100*h['p100']:.1f}% at 100 turns", fontsize=8.5, color=RED,
-            fontweight="bold", ha="right")
+    ax.plot([short], [num("hz_p_short")], "o", color=GREEN, ms=8)
+    ax.plot([long_], [num("hz_p_long")], "o", color=RED, ms=8)
+    ax.text(14, num("hz_p_short") + 2, f"{val('hz_p_short')}% at {val('hz_short')} turns", fontsize=8.5,
+            color=GREEN, fontweight="bold")
+    ax.text(97, num("hz_p_long") - 16, f"{val('hz_p_long')}% at {val('hz_long')} turns", fontsize=8.5,
+            color=RED, fontweight="bold", ha="right")
     ax.set_xlim(0, 104)
     ax.set_ylim(0, 105)
     ax.set_xlabel("Horizon (turns)")
@@ -407,8 +422,7 @@ def horizon():
 
 def metr_p80():
     """METR Time Horizon 1.1: p50 against p80 horizon, frontier models since 2024."""
-    me = calcs.metr()
-    rows = me["rows"]
+    rows = [(str(r["release_date"]), r["model_key"], r["p50_min"], r["p80_min"]) for r in calcs.GAP.rows]
     fig, ax = plt.subplots(figsize=(2.2, 1.45))
     for i, (date, name, p50, p80) in enumerate(rows):
         ax.plot([i, i], [p80, p50], color=GRAY_L, lw=3, zorder=1)
@@ -433,16 +447,15 @@ def metr_p80():
 
 def cost():
     """NM 1.2: cost per accepted task, three bars (§20.11 figure)."""
-    c = calcs.cost_bars()
-    rows = [("Baseline, 40% accepted", c["base"], GRAY),
-            ("Half the token price", c["half_price"], AMBER),
-            ("60% accepted", c["better_acc"], PURPLE)]
+    rows = [(f"Baseline, {val('c_acc')}% accepted", "c_eff", GRAY),
+            ("Half the token price", "c_cheap", AMBER),
+            (f"{val('c_better_acc')}% accepted", "c_better", PURPLE)]
     fig, ax = plt.subplots(figsize=(2.6, 1.0))
-    for i, (lab, v, col) in enumerate(rows):
+    for i, (lab, k, col) in enumerate(rows):
         y = 2 - i
+        v = num(k)
         ax.barh(y, v, color=col, height=0.6)
-        shown = round(v + 1e-9, 2)
-        ax.text(v + 0.08, y, f"${shown:.2f}", va="center", fontsize=8.5, color=col, fontweight="bold")
+        ax.text(v + 0.08, y, f"${val(k)}", va="center", fontsize=8.5, color=col, fontweight="bold")
         ax.text(-0.08, y, lab, ha="right", va="center", fontsize=8.5, color=INK)
     ax.set_xlim(0, 6.2)
     ax.set_yticks([])

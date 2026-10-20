@@ -1,276 +1,295 @@
 #!/usr/bin/env python3
-"""Every derived number in Lecture 13 (Workload Placement), Volume IV.
+"""Every number on the Lecture 13 slides and notes (Workload Placement), read from MLSysIM.
 
-One block per slide, in deck order. Inputs carry their source as a comment:
-"ch" is the rendered chapter, Workload Placement (dev text, 2026-10-18), with
-its section, Napkin Math, or table; outside sources name their paper and the
-table, figure, or section the value was read from. Each printed line is a value
-the slide or its note shows, under the label used there. make_figs.py imports
-VALUES from this file, so figures and slides share one computation.
+MLSysIM holds the inputs (the Embodied.* running machine and its aisle record,
+the LPDDR5-6400 timing record, Literature.* for the Valsan et al., Bechtel and
+Yun, RT-2, and FogROS2 results and the Bao and Jetson AGX Orin configuration
+values) and the calculations: the unloaded tick's sub-costs
+(Scenarios.WarehouseEnforcerUnloadedTick), its response budget
+(WarehousePermissionTickResponse and the loaded-cycle variants), the shared
+DRAM read behind proposer backlogs (WarehouseSharedDieLoadedRead*), the
+break-even miss-stall shares (WarehouseTick*StallShare), the package rail
+droop (PackageRailDroop), the thermal throttle and its hysteresis
+(WarehouseSharedDieThermalThrottle), the finished stopping budgets with and
+without dispatch to admission (WarehouseFinishedStop*), the chunk lease
+(WarehouseChunkLease), and the illustrative stress trace
+(WarehouseRejectedPlacementTrace). The chapter reads the same scenarios. This
+file only selects values, converts units, and formats them; it types no
+numbers. Each value is recorded with v() under the key the deck prints as
+\\val{key}; running this file writes images/numbers.tex. make_figs.py imports
+it for the scenario objects and plot inputs.
 
 Run from this folder: python3 calcs.py
 """
+
 import math
+import sys
+from pathlib import Path
 
-VALUES = {}
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
 
+Embodied, Scenarios, Literature, Hardware = mlsysim.Embodied, mlsysim.Scenarios, mlsysim.Literature, mlsysim.Hardware
+Q_ = mlsysim.core.units.Q_
 
-def show(key, label, value):
-    VALUES[key] = value
-    print(f"  {label}: {value}")
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+LPDDR5 = Hardware.Tech.Memory.LPDDR5_6400
+INTERF = Literature.SharedHardwareInterference
+PLATFORM = Literature.PlatformConfigurations
+VLA = Literature.VlaSystems
+OFFLOAD = Literature.RobotOffload
 
-
-def head(title):
-    print(f"\n[{title}]")
-
-
-# ---------------------------------------------------------------------------
-# Inputs (sources in comments)
-# ---------------------------------------------------------------------------
-# Permission tick on the safety MCU (ch 13.2, illustrative sub-costs)
-SENSE_US = 40.0            # sample encoders, IMU over SPI, check evidence epoch
-CHECK_US = 80.0            # kinematic and dynamic envelope constraints
-STAGE_US = 15.0            # stage setpoints into the outbound drive frame
-MCU_HZ = 400e6             # safety MCU clock (ch 13.2)
-WCET_US = 250.0            # declared WCET (chosen; ch 13.2, from the enforcement record)
-DEADLINE_US = 400.0        # chosen enforcer deadline (ch 13.2)
-PERIOD_US = 1000.0         # 1 kHz permission tick
-BLOCK_US = 50.0            # blocking by lower-priority MCU tasks (ch 13.2, eq 4.3)
-INTERF_US = 40.0           # interference by higher-priority MCU tasks (ch 13.2)
-# Proposal path (ch 13.2, illustrative)
-INFER_MS = 40.0            # chunk policy p99 inference incl. vision
-CHUNK_MS = 50.0            # chunk period (20 Hz)
-
-# Memory (ch Napkin Math 13.1, eq 1)
-BW_PEAK = 204e9            # B/s, datasheet
-BACKLOG_BYTES = 360_448    # one backlog: tile (64 tx) + camera + telemetry, 88 tx
-ROW_CONFLICTS = 3
-T_RP_NS = 18.0             # LPDDR5 minimum precharge (ch 13.3.1)
-T_RCD_NS = 18.0            # LPDDR5 minimum activation
-CMD_CLK_NS = 1.25          # command clock at 6,400 MT/s
-SNAPSHOT_BYTES = 4096
-LATER_WORK_US = 95.0       # constraint evaluation and drive-frame write
-CHANNELS = 16              # LPDDR5 interface channels (ch Systems insight 13.1)
-
-# Published interference (outside sources, read from the papers)
-VALSAN_A9 = 2.1      # Valsan et al. RTAS 2016, Exp. 2 text (BwRead(LLC) vs BwRead(DRAM))
-VALSAN_A15 = 10.6    # same, Fig. 2(b) label
-VALSAN_NEH = 7.9     # same, text
-VALSAN_A15_W = 21.4  # Fig. 2(e) label, write co-runners (the 21x of the abstract)
-BECHTEL_RPI3 = 346.0          # Bechtel and Yun RTAS 2019, Sec. IV-C text ("up to 346X")
-BECHTEL_FIG13_UNREG = 345.0   # Sec. VI text: "reduced from 345X"
-BECHTEL_W100 = 1.34           # write threshold 100 MB/s
-BECHTEL_W50 = 1.2             # write threshold 50 MB/s
-
-# Rail droop (ch 13.3.3, illustrative package parameters)
-L_PKG = 30e-12
-DI_A = 6.0
-DT_S = 2e-9
-R_PKG = 8e-3
-V_NOM = 0.850
-V_TH = 0.420
-ALPHA = 1.3
-
-# Thermal hangover (ch Napkin Math 13.2, illustrative)
-T_AMB = 45.0
-R_JA = 2.0
-TAU_S = 8.0
-P_QUIET = 4.0
-P_LOAD = 26.0
-T_TRIP = 95.0
-T_CLEAR = 85.0
-F_NOM = 1.2e9
-F_THR = 600e6
-# Jetson AGX Orin upstream thermal zone (Linux v6.12 tegra234-p3701-0000.dtsi)
-ORIN_POLL_MS = 1000
-
-# Watchdog (ch 13.5.2)
-WD_TIMEOUT_MS = 5.0
-V_AISLE = 1.3              # m/s, chosen aisle speed (ch 13.6.2, from Lecture 12's budget)
-
-# Lease (ch 13.6.1, from the Nervous System chapter)
-LEASE_MS = 60.0
-RENEW_WINDOW_MS = 55.0     # lease less renewal jitter
-JITTER_MS = 5.0
-STRETCH = 0.125            # illustrative 12.5 percent inference stretch
-
-# Offload (ch 13.6.3, Brohan et al. 2023 as quoted)
-RT2_5B_HZ = 5.0
-RT2_55B_HZ_MAX = 3.0
-RT2_55B_HZ_MIN = 1.0
-FOGROS_LOCAL_S = 14.0      # Ichnowski et al. 2023, as quoted
-FOGROS_CLOUD_S = 1.2
-
-# Board link (ch Napkin Math 13.3)
-CHUNK_BYTES = 4096
-SPI_HZ = 25e6
-DESER_MS = 2.0
-VALID_MS = 18.0
-ACT_MS = 1.0
-TICK_WAIT_MS = 1.0
-SPARE_MM = 131.0           # derived in Lecture 12 (ch Napkin Math 12.1), quoted in ch
-
-# Falsification (ch 13.7)
-LOADED_EXAMPLE_US = 260.0
-CHECKPOINT_US = 300.0      # ch Checkpoint 13.3
-TRACE_TICKS = 1e7
-COLD = {"p50": 95, "p99": 128, "max": 152}          # illustrative trace (ch 13.7.3)
-HOT = {"p50": 210, "p99": 330, "p99.9": 395, "max": 468}
-ONSET_MS = 82.0            # renewal-to-onset budget (ch 13.7.3)
+TICK = Scenarios.WarehouseEnforcerUnloadedTick
+RESPONSE = Scenarios.WarehousePermissionTickResponse
+READ = Scenarios.WarehouseSharedDieLoadedRead
+READ_1CH = Scenarios.WarehouseSharedDieLoadedReadOneChannel
+MSHR = Scenarios.WarehouseTickMshrStallShare
+MSHR_DEAD = Scenarios.WarehouseTickMshrStallShareAtDeadline
+WRITEBACK = Scenarios.WarehouseTickWritebackStallShare
+TENFOLD = Scenarios.WarehouseTickTenfoldStallShare
+DROOP = Scenarios.PackageRailDroop
+THROTTLE = Scenarios.WarehouseSharedDieThermalThrottle
+AISLE_STOP = Scenarios.WarehouseFinishedStopAtAisleSpeed
+DISPATCH = Scenarios.WarehouseFinishedStopWithDispatch
+LEASE = Scenarios.WarehouseChunkLease
+CHECKPOINT = Scenarios.WarehouseLoadedCycleCheckpoint
+EXAMPLE = Scenarios.WarehouseLoadedTickExample
+TRACE = Scenarios.WarehouseRejectedPlacementTrace
 
 
-def main():
-    head("Two paths: budget bar (slide 'The permission tick has 60 us to spare')")
-    unloaded = SENSE_US + CHECK_US + STAGE_US
-    show("unloaded_us", "unloaded tick (us)", f"{unloaded:.0f}")
-    show("cycles", "cycles at 400 MHz", f"{unloaded * 1e-6 * MCU_HZ:,.0f}")
-    show("slack_deadline", "slack to deadline (us)", f"{DEADLINE_US - unloaded:.0f}")
-    show("headroom_wcet", "WCET headroom over deadline (us)", f"{DEADLINE_US - WCET_US:.0f}")
-    overhead = BLOCK_US + INTERF_US
-    show("overhead_us", "blocking + interference (us)", f"{overhead:.0f}")
-    ceiling = DEADLINE_US - overhead
-    show("ceiling_us", "execution ceiling (us)", f"{ceiling:.0f}")
-    show("allowance_us", "shared-hardware allowance (us)", f"{ceiling - WCET_US:.0f}")
-    show("proposer_margin_ms", "proposer margin in 50 ms period (ms)", f"{CHUNK_MS - INFER_MS:.0f}")
-    show("tick_share", "deadline as share of period", f"{DEADLINE_US / PERIOD_US:.1f}")
+def m(q, unit):
+    """Magnitude of a Pint quantity in ``unit``."""
+    return q.to(unit).magnitude
 
-    head("Memory: row conflict and backlog budget (Napkin Math 13.1)")
-    step_cycles = math.ceil(T_RP_NS / CMD_CLK_NS)
-    show("step_cycles", "cycles per precharge or activation", step_cycles)
-    conflict_ns = step_cycles * CMD_CLK_NS + math.ceil(T_RCD_NS / CMD_CLK_NS) * CMD_CLK_NS
-    show("conflict_ns", "row conflict (ns)", f"{conflict_ns:.1f}")
-    wait_us = BACKLOG_BYTES / BW_PEAK * 1e6 + ROW_CONFLICTS * conflict_ns * 1e-3
-    show("backlog_us", "one backlog wait (us)", f"{wait_us:.3f}")
-    snap_us = SNAPSHOT_BYTES / BW_PEAK * 1e6
-    show("snap_us", "snapshot read (us)", f"{snap_us:.3f}")
-    n_sense = math.floor((SENSE_US - snap_us) / wait_us)
-    n_wcet = math.floor((WCET_US - LATER_WORK_US - snap_us) / wait_us)
-    n_dead = math.floor((ceiling - LATER_WORK_US - snap_us) / wait_us)
-    show("n_sense", "backlogs within sense allowance", n_sense)
-    show("read_room_wcet", "read room under WCET (us)", f"{WCET_US - LATER_WORK_US:.0f}")
-    show("n_wcet", "backlogs within declared WCET", n_wcet)
-    show("read_room_dead", "read room under deadline less 90 (us)", f"{ceiling - LATER_WORK_US:.0f}")
-    show("n_dead", "backlogs within deadline", n_dead)
-    bw_ch = BW_PEAK / CHANNELS
-    wait1_us = BACKLOG_BYTES / bw_ch * 1e6 + ROW_CONFLICTS * conflict_ns * 1e-3
-    snap1_us = SNAPSHOT_BYTES / bw_ch * 1e6
-    show("backlog1_us", "one backlog, one channel (us)", f"{wait1_us:.1f}")
-    show("n1_sense", "one channel: backlogs within sense", math.floor((SENSE_US - snap1_us) / wait1_us))
-    show("n1_wcet", "one channel: backlogs within WCET", math.floor((WCET_US - LATER_WORK_US - snap1_us) / wait1_us))
-    for k, n in (("end_sense", n_sense), ("end_wcet", n_wcet), ("end_dead", n_dead)):
-        show(k, f"tick end with {n} backlogs (us)", f"{snap_us + n * wait_us + LATER_WORK_US:.0f}")
-    n1 = VALUES["n1_wcet"]
-    show("end_one", f"tick end with {n1} backlogs, one channel (us)",
-         f"{snap1_us + n1 * wait1_us + LATER_WORK_US:.0f}")
-    show("bypass_us", "read with priority bypass (us)", f"{2 * snap_us:.2f}")
 
-    head("Memory: stretch factors and tolerable miss-stall share (eq 2)")
-    show("stretch_wcet", "stretch to WCET", f"{WCET_US / unloaded:.2f}")
-    show("stretch_dead", "stretch to deadline", f"{ceiling / unloaded:.2f}")
+resp, read, read1 = RESPONSE.result, READ.result, READ_1CH.result
+thr, aisle, dispatch = THROTTLE.result, AISLE_STOP.result, DISPATCH.result
 
-    def phi(slow, bound):
-        return (bound / unloaded - 1) / (slow - 1) * 100
-    show("phi21", "phi at 21x, WCET (%)", f"{phi(21, WCET_US):.1f}")
-    show("phi21_dead", "phi at 21x, deadline (%)", f"{phi(21, ceiling):.1f}")
-    show("phi300", "phi at 300x, WCET (%)", f"{phi(300, WCET_US):.2f}")
-    show("phi346", "phi at 346x, WCET (%)", f"{phi(BECHTEL_RPI3, WCET_US):.2f}")
-    show("phi10", "phi at 10x, WCET (%) [Estimate]", f"{phi(10, WCET_US):.1f}")
-    show("phi10_us", "  as microseconds of the 135 us tick", f"{phi(10, WCET_US) / 100 * unloaded:.1f}")
+print("== The permission tick and its two paths (SE 13.2)")
+v("tick_khz", m(1 / AISLE.t_tick, "kHz"), "{:.0f}", "permission tick rate, kHz")
+v("t_tick_ms", m(AISLE.t_tick, "ms"), "{:.0f}", "permission tick, ms")
+v("mcu_mhz", m(RM.permission_mcu.compute.clock_rate, "MHz"), "{:.0f}", "safety MCU clock, MHz")
+v("chunk_infer_ms", m(RM.chunk_inference_latency, "ms"), "{:.0f}", "chunk inference, p99, ms")
+v("chunk_period_ms", m(RM.chunk_period, "ms"), "{:.0f}", "chunk period, ms")
+v("sense_us", m(TICK.stage("sense"), "us"), "{:.0f}", "sense, us")
+v("check_us", m(TICK.stage("constraint check"), "us"), "{:.0f}", "constraint check, us")
+v("stage_us", m(TICK.stage("drive-frame staging"), "us"), "{:.0f}", "drive-frame staging, us")
+v("unloaded_us", m(TICK.total, "us"), "{:.0f}", "unloaded tick, us")
+v("unloaded_cycles", m(TICK.total * RM.permission_mcu.compute.clock_rate, ""), "{:,.0f}", "unloaded cycles at the MCU clock")
+v("wcet", m(AISLE.enforcer_wcet, "us"), "{:.0f}", "declared WCET, us")
+v("deadline", m(AISLE.enforcer_deadline, "us"), "{:.0f}", "deadline, us")
+v("blocking", m(resp.blocking, "us"), "{:.0f}", "blocking, us")
+v("interference", m(resp.interference, "us"), "{:.0f}", "interference, us")
+v("b_plus_i", m(resp.blocking + resp.interference, "us"), "{:.0f}", "blocking plus interference, us")
+v("exec_ceiling", m(resp.execution_ceiling, "us"), "{:.0f}", "execution ceiling, us")
+v("allowance_us", m(resp.margin, "us"), "{:.0f}", "shared-hardware allowance, us")
+v("deadline_share", m(AISLE.enforcer_deadline / AISLE.t_tick, ""), "{:.1f}", "deadline as share of the period")
+v("rail_holdup_s", m(RM.permission_rail_holdup, "s"), "{:.0f}", "isolated rail hold-up, s")
 
-    head("Rail droop (eq 3, alpha-power)")
-    ind_mv = L_PKG * DI_A / DT_S * 1e3
-    res_mv = DI_A * R_PKG * 1e3
-    show("droop_l_mv", "inductive droop (mV)", f"{ind_mv:.0f}")
-    show("droop_r_mv", "resistive droop (mV)", f"{res_mv:.0f}")
-    show("droop_mv", "total droop (mV)", f"{ind_mv + res_mv:.0f}")
-    vd = V_NOM - (ind_mv + res_mv) / 1e3
-    show("v_drooped", "drooped rail (V)", f"{vd:.3f}")
-    ratio = (vd / V_NOM) * ((V_NOM - V_TH) / (vd - V_TH)) ** ALPHA
-    show("delay_pct", "gate delay increase (%)", f"{(ratio - 1) * 100:.0f}")
+print("== Memory: row conflict and backlog budget (SE Napkin Math 13.1)")
+v("backlog_bytes", read.backlog_bytes, "{:,.0f}", "bytes in one backlog")
+v("backlog_tx", read.queued_transactions, "{:.0f}", "transactions in one backlog")
+v("tile_tx", read.tile_transactions, "{:.0f}", "transactions of the weight tile")
+v("tile_kib", m(Q_(READ.tile_bytes, "B"), "KiB"), "{:.0f}", "weight tile, KiB")
+v("snapshot_kib", m(Q_(READ.snapshot_bytes, "B"), "KiB"), "{:.0f}", "snapshot read, KiB")
+v("bw_gbs", m(READ.bandwidth, "GB/s"), "{:.0f}", "application SoC peak DRAM bandwidth, GB/s")
+v("bank_switches", READ.bank_switches, "{:.0f}", "row conflicts per backlog")
+v("conflict_ns", m(READ.bank_switch_time, "ns"), "{:.1f}", "row conflict, t_RP + t_RCD, ns")
+v("t_rcd_min_ns", m(LPDDR5.t_rcd_min, "ns"), "{:.0f}", "JESD209-5 minimum t_RCD, ns")
+v("t_ck_ns", m(LPDDR5.t_ck, "ns"), "{:.2f}", "command clock, ns")
+v("rcd_cycles", m(LPDDR5.t_rcd / LPDDR5.t_ck, ""), "{:.0f}", "t_RCD in command-clock cycles")
+v("data_rate", m(RM.brain_soc.memory.pin_data_rate, "Mbit/s"), "{:,.0f}", "LPDDR5 data rate, MT/s")
+v("backlog_us", m(read.backlog_wait, "us"), "{:.3f}", "one backlog wait, us")
+v("ladder_backlog_us", m(read.backlog_wait, "us"), "{:.2f}", "the same, two decimals")
+v("compute_after_us", m(READ.compute_after_sense, "us"), "{:.0f}", "check and staging after the read, us")
+v("n_sense", read.backlogs_sense, "{:.0f}", "backlogs within the sense allowance")
+v("read_room_wcet", m(read.read_ceiling_wcet, "us"), "{:.0f}", "read room under the WCET, us")
+v("n_wcet", read.backlogs_wcet, "{:.0f}", "backlogs within the declared WCET")
+v("read_room_dead", m(read.read_ceiling_deadline, "us"), "{:.0f}", "read room under the execution ceiling, us")
+v("n_dead", read.backlogs_deadline, "{:.0f}", "backlogs within the execution ceiling")
+v("end_dead", m(read.end_deadline, "us"), "{:.0f}", "tick end at that count, us")
+v("channels", READ_1CH.channels, "{:.0f}", "LPDDR5 channels on the interface")
+v("backlog1_us", m(read1.backlog_wait, "us"), "{:.1f}", "one backlog on one channel, us")
+v("n1_wcet", read1.backlogs_wcet, "{:.0f}", "one channel: backlogs within the WCET")
 
-    head("Thermal hangover (Napkin Math 13.2)")
-    tq = T_AMB + P_QUIET * R_JA
-    tl = T_AMB + P_LOAD * R_JA
-    show("t_quiet", "quiescent junction (C)", f"{tq:.0f}")
-    show("t_loaded", "loaded junction (C)", f"{tl:.0f}")
-    t_trip = TAU_S * math.log((tl - tq) / (tl - T_TRIP))
-    show("t_trip_s", "time to trip (s)", f"{t_trip:.1f}")
-    cycles = WCET_US * 1e-6 * F_NOM
-    show("tick_cycles", "tick cycles at 1.2 GHz", f"{cycles:,.0f}")
-    thr_us = cycles / F_THR * 1e6
-    show("thr_us", "tick at 600 MHz (us)", f"{thr_us:.0f}")
-    show("resp_nom", "nominal response (us)", f"{WCET_US + overhead:.0f}")
-    show("resp_thr", "throttled response (us)", f"{thr_us + overhead:.0f}")
-    past = thr_us + overhead - DEADLINE_US
-    show("past_us", "past deadline (us)", f"{past:.0f}")
-    show("overrun_pct", "overrun of deadline (%)", f"{past / DEADLINE_US * 100:.1f}")
-    show("nominal_slack", "nominal slack to deadline (us)", f"{DEADLINE_US - WCET_US - overhead:.0f}")
-    rec = TAU_S * math.log((T_TRIP - tq) / (T_CLEAR - tq))
-    show("recover_s", "recovery time (s)", f"{rec:.2f}")
-    show("recover_ticks", "recovery in 1 ms ticks", f"{rec * 1000:,.0f}")
-    show("trip_margin", "trip needs R_ja below (K/W)", f"{(T_TRIP - T_AMB) / P_LOAD:.2f}")
-    show("orin_poll_ticks", "Orin thermal poll period in 1 ms ticks", f"{ORIN_POLL_MS / 1:,.0f}")
-    show("cap_jk", "lumped thermal capacitance (J/K)", f"{TAU_S / R_JA:.0f}")
+print("== Measured shared-cache interference (Valsan et al. 2016; Bechtel and Yun 2019)")
+v("valsan_a9", INTERF.ValsanCortexA9ReadSlowdown, "{:.1f}", "Cortex-A9, read co-runners, x")
+v("valsan_neh", INTERF.ValsanNehalemReadSlowdown, "{:.1f}", "Nehalem, read co-runners, x")
+v("valsan_a15", INTERF.ValsanCortexA15ReadSlowdown, "{:.1f}", "Cortex-A15, read co-runners, x")
+v("valsan_a15_w", INTERF.ValsanCortexA15WriteSlowdown, "{:.1f}", "Cortex-A15, write co-runners, x")
+v("bechtel_max", INTERF.BechtelWritebackSlowdownMax, "{:.0f}", "Cortex-A53, writeback attackers, x")
 
-    head("Coupling-timescale ladder (ch 13.4)")
-    show("ladder_backlog_us", "DRAM backlog (us)", f"{wait_us:.2f}")
-    show("ladder_span", "droop rise to thermal recovery (orders of magnitude)",
-         f"{math.log10(rec / DT_S):.1f}")
+print("== Tolerable miss-stall share (SE eq 2, Checkpoint 13.1)")
+v("stretch_wcet", MSHR.allowed_stretch, "{:.2f}", "stretch to the WCET")
+v("stretch_wcet_less1", MSHR.allowed_stretch - 1, "{:.2f}", "the same less 1")
+v("stretch_dead", MSHR_DEAD.allowed_stretch, "{:.2f}", "stretch to the execution ceiling")
+v("s_mshr", MSHR.slowdown, "{:.0f}", "MSHR slowdown, x")
+v("phi21", 100 * MSHR.breakeven_share, "{:.1f}", "break-even share at 21x, WCET, %")
+v("phi21_dead", 100 * MSHR_DEAD.breakeven_share, "{:.1f}", "break-even share at 21x, deadline, %")
+v("s_wb", WRITEBACK.slowdown, "{:.0f}", "writeback slowdown, x")
+v("phi300", 100 * WRITEBACK.breakeven_share, "{:.2f}", "break-even share at 300x, %")
+v("s_ten", TENFOLD.slowdown, "{:.0f}", "checkpoint slowdown, x")
+v("s_ten_less1", TENFOLD.slowdown - 1, "{:.0f}", "the same less 1")
+v("phi10", 100 * TENFOLD.breakeven_share, "{:.1f}", "break-even share at 10x, %")
+v("phi10_us", m(TENFOLD.breakeven_stall, "us"), "{:.1f}", "the same as time of the unloaded tick, us")
 
-    head("Watchdog (ch 13.5.2)")
-    show("wd_mm", "5 ms timeout as base travel at 1.3 m/s (mm)", f"{WD_TIMEOUT_MS * V_AISLE:.1f}")
-    show("wd_ticks", "5 ms timeout in ticks", f"{WD_TIMEOUT_MS / (PERIOD_US / 1000):.0f}")
+print("== Thermal hangover (SE Napkin Math 13.2) and the Orin thermal zone")
+v("orin_poll_ms", PLATFORM.JetsonAgxOrinTjPollingDelayMs, "{:,.0f}", "tj zone polling delay, ms")
+v("t_amb", m(THROTTLE.ambient, "degC"), "{:.0f}", "bay ambient, degC")
+v("theta", m(THROTTLE.theta, "K/W"), "{:.0f}", "junction to ambient, K/W")
+v("tau_s", m(THROTTLE.time_constant, "s"), "{:.0f}", "thermal time constant, s")
+v("p_quiet", m(THROTTLE.quiet_power, "W"), "{:.0f}", "quiet power, W")
+v("p_load", m(THROTTLE.loaded_power, "W"), "{:.0f}", "loaded power, W")
+v("t_quiet", m(thr.junction_quiet, "degC"), "{:.0f}", "quiet junction, degC")
+v("t_loaded", m(thr.junction_loaded, "degC"), "{:.0f}", "loaded junction, degC")
+v("t_trip_c", m(THROTTLE.trip, "degC"), "{:.0f}", "trip, degC")
+v("t_clear_c", m(THROTTLE.clear, "degC"), "{:.0f}", "clear, degC")
+v("t_trip_s", m(thr.time_to_trip, "s"), "{:.1f}", "time to trip under load, s")
+v("trip_head", m(THROTTLE.trip.to("K") - thr.junction_quiet.to("K"), "K"), "{:.0f}", "trip above the quiet junction, K")
+v("clear_head", m(THROTTLE.clear.to("K") - thr.junction_quiet.to("K"), "K"), "{:.0f}", "clear above the quiet junction, K")
+v("recover_s", m(thr.recovery, "s"), "{:.2f}", "recovery after the load stops, s")
+v("recover_ticks", thr.ticks_exposed, "{:,.0f}", "ticks inside the recovery")
+v("recover_loaded_s", m(thr.recovery_from_loaded, "s"), "{:.2f}", "recovery from the loaded steady state, s")
+v("f_nom_ghz", m(THROTTLE.nominal_clock, "GHz"), "{:.1f}", "nominal cluster clock, GHz")
+v("f_thr_mhz", m(THROTTLE.throttled_clock, "MHz"), "{:.0f}", "throttled clock, MHz")
+v("tick_cycles", thr.cycles, "{:,.0f}", "tick cycles at the nominal clock")
+v("thr_us", m(thr.execution_throttled, "us"), "{:.0f}", "tick at the throttled clock, us")
+v("resp_nom", m(thr.response, "us"), "{:.0f}", "nominal response, us")
+v("resp_thr", m(thr.response_throttled, "us"), "{:.0f}", "throttled response, us")
+v("past_us", m(thr.overrun, "us"), "{:.0f}", "past the deadline, us")
+v("overrun_pct", 100 * thr.overrun_ratio, "{:.1f}", "overrun of the deadline, %")
+v("theta_max", m(thr.theta_never_trips, "K/W"), "{:.2f}", "theta that never trips, K/W")
 
-    head("Bao config excerpt (bao-demos linux+freertos zcu104.c)")
-    show("bao_linux_gib", "Linux VM memory 0x40000000 (GiB)", f"{0x40000000 / 2**30:.0f}")
-    show("bao_rtos_mib", "FreeRTOS VM memory 0x8000000 (MiB)", f"{0x8000000 / 2**20:.0f}")
-    show("bao_shmem_kib", "shared IPC region 0x00010000 (KiB)", f"{0x00010000 / 2**10:.0f}")
+print("== Rail droop (SE 13.3.3, eq 3)")
+v("di_a", m(DROOP.delta_i, "A"), "{:.0f}", "current step, A")
+v("rise_ns", m(DROOP.rise_time, "ns"), "{:.0f}", "rise time, ns")
+v("l_ph", m(DROOP.inductance, "pH"), "{:.0f}", "package inductance, pH")
+v("r_mohm", m(DROOP.resistance, "milliohm"), "{:.0f}", "package resistance, milliohm")
+v("v_nom", m(DROOP.rail_voltage, "V"), "{:.2f}", "core rail, V")
+v("droop_l_mv", m(DROOP.inductive_droop, "mV"), "{:.0f}", "inductive droop, mV")
+v("droop_r_mv", m(DROOP.resistive_droop, "mV"), "{:.0f}", "resistive droop, mV")
+v("droop_mv", m(DROOP.droop, "mV"), "{:.0f}", "total droop, mV")
+v("delay_pct", DROOP.delay_expansion_percent, "{:.0f}", "gate delay increase, %")
 
-    head("Thermal: hangover if the proposer keeps running to the loaded steady state")
-    show("recover_from_loaded_s", "recovery from 97 C (s)",
-         f"{TAU_S * math.log((T_AMB + P_LOAD * R_JA - (T_AMB + P_QUIET * R_JA)) / (T_CLEAR - (T_AMB + P_QUIET * R_JA))):.2f}")
+print("== Remedies (SE 13.6, Bechtel and Yun 2019 Sec. VI, Bao demo)")
+v("lease_ms", m(AISLE.t_lease, "ms"), "{:.0f}", "chunk lease, ms")
+v("min_rate_hz", m(1 / AISLE.t_lease, "Hz"), "{:.1f}", "admissions needed above, Hz")
+v("bechtel_unreg", INTERF.BechtelUnregulatedSlowdown, "{:.0f}", "unregulated, x")
+v("bechtel_w100", INTERF.BechtelRegulated100MBpsSlowdown, "{:.2f}", "writes capped at 100 MB/s, x")
+v("bechtel_w100_1", INTERF.BechtelRegulated100MBpsSlowdown, "{:.1f}", "the same, one decimal")
+v("bechtel_w50", INTERF.BechtelRegulated50MBpsSlowdown, "{:.1f}", "writes capped at 50 MB/s, x")
+v("bao_linux_cpus", PLATFORM.BaoZcu104LinuxVmCpus, "{:.0f}", "Linux VM cores")
+v("bao_linux_gib", m(Q_(float(PLATFORM.BaoZcu104LinuxVmMemoryBytes), "B"), "GiB"), "{:.0f}", "Linux VM memory, GiB")
+v("bao_rtos_cpus", PLATFORM.BaoZcu104FreeRtosVmCpus, "{:.0f}", "FreeRTOS VM cores")
+v("bao_rtos_mib", m(Q_(float(PLATFORM.BaoZcu104FreeRtosVmMemoryBytes), "B"), "MiB"), "{:.0f}", "FreeRTOS VM memory, MiB")
+v("bao_shmem_kib", m(Q_(float(PLATFORM.BaoZcu104SharedRegionBytes), "B"), "KiB"), "{:.0f}", "shared IPC region, KiB")
 
-    head("Remedies: workload reduction and regulation")
-    show("min_rate_hz", "admissions needed above (Hz)", f"{1000 / LEASE_MS:.1f}")
-    show("stretch_ms", "12.5 percent inference stretch (ms)", f"{INFER_MS * STRETCH:.1f}")
-    show("bechtel_gain_100", "regulation gain at 100 MB/s (x)", f"{BECHTEL_FIG13_UNREG / BECHTEL_W100:.0f}")
+print("== Board link and dispatch to admission (SE Napkin Math 13.3, 13.6.3)")
+d2a = AISLE.t_dispatch_to_admission
+v("chunk_bytes", m(AISLE.chunk_wire_bytes, "B"), "{:,.0f}", "serialized chunk, B")
+v("spi_mhz", m(AISLE.board_link_clock, "MHz"), "{:.0f}", "board link clock, MHz")
+v("link_ms", m(AISLE.t_board_link, "ms"), "{:.2f}", "serialization, ms")
+v("deser_ms", m(AISLE.t_chunk_deserialize, "ms"), "{:.0f}", "deserialization, ms")
+v("valid_ms", m(AISLE.t_plan_validate, "ms"), "{:.0f}", "validation, ms")
+v("activate_ms", m(AISLE.t_plan_activate, "ms"), "{:.0f}", "activation, ms")
+v("d2a_ms", m(d2a, "ms"), "{:.1f}", "dispatch-to-admission allocation, ms")
+v("d2a_mm", m(aisle.travel_over(d2a), "mm"), "{:.1f}", "travel during the allocation, mm")
+v("v_aisle", m(AISLE.v_aisle, "m/s"), "{:.1f}", "aisle speed, m/s")
+v("spare_mm", m(aisle.spare, "mm"), "{:.1f}", "spare at the aisle speed, mm")
+v("ceil_ms", m(aisle.delay_spare, "ms"), "{:.1f}", "spare as time, ms")
+v("reserve_ms", m(dispatch.delay_spare, "ms"), "{:.1f}", "reserve after dispatch to admission, ms")
+v("reserve_mm", m(dispatch.spare, "mm"), "{:.1f}", "reserve, mm")
+v("link_share", 100 * m(AISLE.t_board_link / d2a, ""), "{:.0f}", "link share of the allocation, %")
+v("plus_infer_ms", m(d2a + RM.chunk_inference_latency, "ms"), "{:.1f}", "with one more inference, ms")
+v("small_ms", m(AISLE.t_chunk_deserialize + AISLE.t_plan_activate + AISLE.t_tick, "ms"), "{:.0f}",
+  "deserialize + activate + tick wait, ms")
+renew_window = AISLE.t_lease - LEASE.renewal_jitter
+rt2_5b_step = 1 / Q_(float(VLA.Rt2SmallRateHz), "Hz")
+v("jitter_ms", m(LEASE.renewal_jitter, "ms"), "{:.0f}", "renewal jitter allowance, ms")
+v("stretch_pct", 100 * m(LEASE.renewal_jitter / RM.chunk_inference_latency, ""), "{:.1f}",
+  "inference stretch the jitter allows, %")
+v("renew_window_ms", m(renew_window, "ms"), "{:.0f}", "renewal window, ms")
+v("rt2_5b_hz", VLA.Rt2SmallRateHz, "{:.0f}", "RT-2 5B rate, Hz")
+v("rt2_5b_ms", m(rt2_5b_step, "ms"), "{:.0f}", "RT-2 5B result interval, ms")
+v("rt2_ratio", m(rt2_5b_step / renew_window, ""), "{:.1f}", "as a multiple of the renewal window")
+v("rt2_55b_low", VLA.Rt2LargeRateLowHz, "{:.0f}", "RT-2 55B rate, low, Hz")
+v("rt2_55b_high", VLA.Rt2LargeRateHighHz, "{:.0f}", "RT-2 55B rate, high, Hz")
+v("fogros_local_s", OFFLOAD.FogRos2GraspPlanningLocalS, "{:.0f}", "FogROS2 grasp planning on the robot, s")
+v("fogros_off_s", OFFLOAD.FogRos2GraspPlanningOffloadedS, "{:.1f}", "offloaded, s")
 
-    head("Offload screen (ch 13.6.3)")
-    p5 = 1000 / RT2_5B_HZ
-    show("rt2_5b_ms", "RT-2 5B plan interval (ms)", f"{p5:.0f}")
-    show("rt2_5b_ratio", "  as multiple of the 55 ms window", f"{p5 / RENEW_WINDOW_MS:.1f}")
-    show("rt2_55b_ms", "RT-2 55B best interval (ms)", f"{1000 / RT2_55B_HZ_MAX:.1f}")
-    show("rt2_55b_worst_ms", "RT-2 55B worst interval (ms)", f"{1000 / RT2_55B_HZ_MIN:.0f}")
-    show("fogros_x", "FogROS2 grasp-planning speedup (x)", f"{FOGROS_LOCAL_S / FOGROS_CLOUD_S:.1f}")
+print("== Watchdog (SE 13.5.2)")
+v("wd_ms", m(AISLE.mcu_self_watchdog, "ms"), "{:.0f}", "late trip, ms")
+v("wd_mm", m(AISLE.v_aisle * AISLE.mcu_self_watchdog, "mm"), "{:.1f}", "travel before the trip, mm")
 
-    head("Board-link toll (Napkin Math 13.3)")
-    link_ms = 8 * CHUNK_BYTES / SPI_HZ * 1e3
-    show("link_ms", "serialization (ms)", f"{link_ms:.2f}")
-    total = INFER_MS + link_ms + DESER_MS + VALID_MS + ACT_MS + TICK_WAIT_MS
-    show("d2a_ms", "dispatch-to-admission allocation (ms)", f"{total:.1f}")
-    show("d2a_mm", "travel during allocation (mm)", f"{total * V_AISLE:.1f}")
-    ceil_ms = SPARE_MM / V_AISLE
-    show("ceil_ms", "ceiling from 131.0 mm spare (ms)", f"{ceil_ms:.1f}")
-    show("reserve_ms", "reserve (ms)", f"{ceil_ms - total:.1f}")
-    show("reserve_mm", "reserve (mm)", f"{(ceil_ms - total) * V_AISLE:.1f}")
-    show("link_share", "link share of allocation (%)", f"{link_ms / total * 100:.1f}")
-    show("small_ms", "deserialize + activate + tick wait (ms)", f"{DESER_MS + ACT_MS + TICK_WAIT_MS:.0f}")
-    show("plus_infer_ms", "with one more inference (ms)", f"{total + INFER_MS:.1f}")
+print("== Falsification threshold, checkpoint, trace, record (SE 13.7, 13.8)")
+v("ex_tick", m(EXAMPLE.wcet, "us"), "{:.0f}", "loaded tick example, us")
+v("ex_before_deadline", m(AISLE.enforcer_deadline - EXAMPLE.wcet, "us"), "{:.0f}", "before the deadline, us")
+v("tick_mm", m(AISLE.v_aisle * AISLE.t_tick, "mm"), "{:.1f}", "one tick at the aisle speed, mm")
+cp = CHECKPOINT.result
+v("cp_us", m(CHECKPOINT.wcet, "us"), "{:.0f}", "checkpoint loaded cycle, us")
+v("cp_over", m(CHECKPOINT.wcet - AISLE.enforcer_wcet, "us"), "{:.0f}", "past the WCET, us")
+v("cp_resp", m(cp.response, "us"), "{:.0f}", "response with blocking and interference, us")
+v("cp_left", m(cp.margin, "us"), "{:.0f}", "deadline left, us")
+h, mins, secs = TRACE.hours_minutes_seconds
+v("trace_exp", math.log10(TRACE.ticks), "{:.0f}", "trace length, power of ten")
+v("trace_millions", TRACE.ticks / 10 ** 6, "{:.0f}", "trace length, millions of ticks")
+v("trace_h", h, "{:.0f}", "trace hours")
+v("trace_min", mins, "{:.0f}", "trace minutes")
+v("trace_sec", secs, "{:.0f}", "trace seconds")
+for label in ("p50", "p99", "max"):
+    v(f"cold_{label}", m(TRACE.cold[label], "us"), "{:.0f}", f"cold {label}, us")
+for label, key in (("p50", "p50"), ("p99", "p99"), ("p99.9", "p999"), ("max", "max")):
+    v(f"hot_{key}", m(TRACE.warm[label], "us"), "{:.0f}", f"warm {label}, us")
+v("tick_ns", m(AISLE.t_tick, "ns"), "{:,.0f}", "nominal_period_ns")
+v("deadline_ns", m(AISLE.enforcer_deadline, "ns"), "{:,.0f}", "hard_deadline_ns")
+v("renewal_onset_ms", m(LEASE.result.admission_to_brake_onset, "ms"), "{:.0f}", "renewal to brake onset, ms")
 
-    head("Falsification threshold (ch 13.7)")
-    show("ex_over", "260 us example exceeds WCET by (us)", f"{LOADED_EXAMPLE_US - WCET_US:.0f}")
-    show("tick_mm", "one tick at 1.3 m/s (mm)", f"{V_AISLE * PERIOD_US / 1000:.1f}")
-    show("cp_over", "300 us cycle exceeds WCET by (us)", f"{CHECKPOINT_US - WCET_US:.0f}")
-    show("cp_resp", "300 us cycle response with 90 us (us)", f"{CHECKPOINT_US + overhead:.0f}")
-    show("cp_left", "  deadline left (us)", f"{DEADLINE_US - CHECKPOINT_US - overhead:.0f}")
-    secs = TRACE_TICKS * PERIOD_US * 1e-6
-    h, rem = divmod(int(secs), 3600)
-    m, s = divmod(rem, 60)
-    show("trace_s", "1e7 ticks (s)", f"{secs:,.0f}")
-    show("trace_hms", "  as h min s", f"{h} h {m} min {s} s")
-    show("hot_p99_resp", "hot p99 + 90 us (us)", f"{HOT['p99'] + overhead:.0f}")
-    show("hot_max_over", "hot max past WCET (us)", f"{HOT['max'] - WCET_US:.0f}")
-
+# Plot inputs for make_figs.py, magnitudes at full precision.
+SENSE, CHECK, STAGE = (m(TICK.stage(n), "us") for n in ("sense", "constraint check", "drive-frame staging"))
+WCET, DEADLINE, PERIOD = m(AISLE.enforcer_wcet, "us"), m(AISLE.enforcer_deadline, "us"), m(AISLE.t_tick, "us")
+CEILING, B_PLUS_I = m(resp.execution_ceiling, "us"), m(resp.blocking + resp.interference, "us")
+COMPUTE_AFTER = m(READ.compute_after_sense, "us")
+BACKLOG_ROWS = [  # (label count, queued wait, snapshot read) per row, us
+    (0, 0.0, SENSE),
+    (read.backlogs_sense, read.backlogs_sense * m(read.backlog_wait, "us"), m(read.snapshot_read, "us")),
+    (read.backlogs_wcet, read.backlogs_wcet * m(read.backlog_wait, "us"), m(read.snapshot_read, "us")),
+    (read.backlogs_deadline, read.backlogs_deadline * m(read.backlog_wait, "us"), m(read.snapshot_read, "us")),
+    (read1.backlogs_wcet, read1.backlogs_wcet * m(read1.backlog_wait, "us"), m(read1.snapshot_read, "us")),
+]
+MEASURED = [
+    ("Cortex-A9, read co-runners", float(INTERF.ValsanCortexA9ReadSlowdown), "valsan_a9"),
+    ("Nehalem, read co-runners", float(INTERF.ValsanNehalemReadSlowdown), "valsan_neh"),
+    ("Cortex-A15, read co-runners", float(INTERF.ValsanCortexA15ReadSlowdown), "valsan_a15"),
+    ("Cortex-A15, write co-runners", float(INTERF.ValsanCortexA15WriteSlowdown), "valsan_a15_w"),
+    ("Cortex-A53, write attackers", float(INTERF.BechtelWritebackSlowdownMax), "bechtel_max"),
+]
+REGULATION = [
+    ("no regulation", float(INTERF.BechtelUnregulatedSlowdown), "bechtel_unreg"),
+    ("writes capped 100 MB/s", float(INTERF.BechtelRegulated100MBpsSlowdown), "bechtel_w100"),
+    ("writes capped 50 MB/s", float(INTERF.BechtelRegulated50MBpsSlowdown), "bechtel_w50"),
+]
+UNLOADED = m(TICK.total, "us")
+S_MSHR, S_WB = MSHR.slowdown, WRITEBACK.slowdown
+PHI_MSHR, PHI_WB = 100 * MSHR.breakeven_share, 100 * WRITEBACK.breakeven_share
+TAU = m(THROTTLE.time_constant, "s")
+T_QUIET, T_LOADED = m(thr.junction_quiet, "degC"), m(thr.junction_loaded, "degC")
+T_TRIP, T_CLEAR = m(THROTTLE.trip, "degC"), m(THROTTLE.clear, "degC")
+T_TO_TRIP, RECOVERY = m(thr.time_to_trip, "s"), m(thr.recovery, "s")
+EXEC_NOM, EXEC_THR = m(thr.execution, "us"), m(thr.execution_throttled, "us")
+LADDER = [  # (label, seconds)
+    ("thermal recovery", m(thr.recovery, "s")),
+    ("permission tick", m(AISLE.t_tick, "s")),
+    ("DRAM backlog", m(read.backlog_wait, "s")),
+    ("bank conflict", m(READ.bank_switch_time, "s")),
+    ("droop rise", m(DROOP.rise_time, "s")),
+]
+INFER, LINK = m(RM.chunk_inference_latency, "ms"), m(AISLE.t_board_link, "ms")
+VALID = m(AISLE.t_plan_validate, "ms")
+SMALL = m(AISLE.t_chunk_deserialize + AISLE.t_plan_activate + AISLE.t_tick, "ms")
+CEIL_MS = m(aisle.delay_spare, "ms")
+COLD = {k: m(q, "us") for k, q in TRACE.cold.items()}
+HOT = {k: m(q, "us") for k, q in TRACE.warm.items()}
 
 if __name__ == "__main__":
-    main()
+    write(__file__)

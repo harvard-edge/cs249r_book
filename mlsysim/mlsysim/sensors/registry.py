@@ -4,7 +4,7 @@ from ..core.registry import Registry
 from ..core.types import Metadata
 from ..core.units import ureg
 from ..core import provenance_catalog as pc
-from .types import CameraSensor, LiDARSensor, IMUSensor, SafetyLaserScanner
+from .types import CameraSensor, LiDARSensor, IMUSensor, SafetyLaserScanner, SafetyLightCurtain
 
 
 class Cameras(Registry):
@@ -144,6 +144,7 @@ class SafetyScanners(Registry):
         iec61496_type="Type 3",
         performance_level="PL d, Category 3",
         configuration="High-speed mode, 70/150 mm objects, 2 scans",
+        response_time_standard_mode=160.0 * ureg.millisecond,  # standard mode, 2 scans (added 2026-10-20)
         metadata=Metadata(
             provenance=pc.KEYENCE_SZ_V32,
             description="Keyence SZ-V32 Type 3 / PL d optical safety laser scanner (5.7 m protection zone).",
@@ -165,6 +166,26 @@ class SafetyScanners(Registry):
     )
 
 
+class SafetyLightCurtains(Registry):
+    """Certified safety light curtains (IEC 61496-2 AOPD), added 2026-10-20."""
+
+    SICK_deTec4_Set_30_450 = SafetyLightCurtain(
+        name="SICK deTec4 Set 30/450",
+        resolution=30.0 * ureg.millimeter,
+        protective_field_height=450.0 * ureg.millimeter,
+        response_time=10.0 * ureg.millisecond,
+        response_time_coded=14.0 * ureg.millisecond,
+        iec61496_type="Type 4",
+        performance_level="PL e, Category 4",
+        safety_integrity_level="SIL 3",
+        pfh_d=15.3e-9 / ureg.hour,
+        metadata=Metadata(
+            provenance=pc.SICK_DETEC4_SET_30_450,
+            description="SICK deTec4 Set 30/450 Type 4 / PL e safety light curtain (30 mm resolution, 450 mm field).",
+        ),
+    )
+
+
 class Sensors(Registry):
     """Authoritative registry of robotics perception sensors."""
 
@@ -172,3 +193,4 @@ class Sensors(Registry):
     LiDAR = LiDARs
     IMU = IMUs
     SafetyScanner = SafetyScanners
+    SafetyLightCurtain = SafetyLightCurtains

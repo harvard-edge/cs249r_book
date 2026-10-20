@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Data plots and diagrams for Lecture 17 (Responsible Physical AI), Volume IV.
 
-Every derived value comes from calcs.py (inputs from the rendered chapter,
-Responsible Physical AI, the MLSysIM registry the chapter prints from, and
-two published per-group detection tables, each named beside its data). Each
+Every value comes from MLSysIM through calcs.py (imported as K); printed
+numbers use the formatted strings calcs.py records (deckvals.val), and plots
+read the scenario objects (Scenarios.*, Literature.* for the two published
+per-group detection tables, each named beside its data). Each
 figure is drawn at the size of its slot (full width about 5.8 in wide; a
 column about 5.4 by 3.6 in with 15 pt labels) so its type stays legible on
 the slide. A figure revealed in steps is written as name_step1.svg ...
@@ -23,16 +24,18 @@ from pathlib import Path
 
 import numpy as np
 
+HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+sys.path.insert(0, str(HERE))
 import slideplot as sp  # noqa: E402,F401  (sets the shared rcParams)
 
-import calcs  # noqa: E402
+import calcs as K  # noqa: E402  (prints its table on import)
+from deckvals import val, num  # noqa: E402
 
 plt = sp.plt
 from matplotlib.patches import FancyArrowPatch, FancyBboxPatch, Rectangle  # noqa: E402
 
-V = calcs.VALUES
-OUT = Path(__file__).parent
+OUT = HERE
 
 P = {
     "navy": "#1F407A", "navy_l": "#EFF6FF",
@@ -83,20 +86,19 @@ def canvas(w, h, xlim, ylim):
 # Hook: the Cruise collision, the motion and the record (ch Sec. 17.1, 17.4.2)
 # ---------------------------------------------------------------------------
 def cruise_timeline():
-    c = V["cruise"]
     for step in (1, 2):
         fig, ax = canvas(6.0, 2.5, (0, 30), (0, 10))
         s2 = step >= 2
         # Row 1: the motion (2 October 2023)
         ax.text(0.2, 8.6, "The motion", fontsize=12.5, fontweight="bold", color=P["red_d"], va="center")
         box(ax, 7.0, 7.3, 22.6, 2.6,
-            f"2 Oct 2023: ran over a pedestrian thrown into its path,\nthen pulled over {c['drag_m']:.1f} m with her beneath it",
+            f"2 Oct 2023: ran over a pedestrian thrown into its path,\nthen pulled over {val('drag_m')} m with her beneath it",
             P["red_l"], P["red"], fs=11.5, bold=False)
         # Row 2: the record (3 to 24 October)
         ax.text(0.2, 5.0, "The record", fontsize=12.5, fontweight="bold", color=P["slate"], va="center")
         ax.plot([7.0, 29.6], [5.0, 5.0], color=P["gray"], lw=2)
         events = [(8.0, "3 Oct", "regulator told\nit stopped"),
-                  (14.3, "3 to 18 Oct", "15 days without\na full account"),
+                  (14.3, "3 to 18 Oct", f"{val('cpuc_days')} days without\na full account"),
                   (20.4, "19 Oct", "full video\nto the CPUC"),
                   (26.6, "24 Oct", "DMV suspends\ndriverless permits")]
         for x, d, t in events:
@@ -105,8 +107,8 @@ def cruise_timeline():
             ax.text(x, 4.3, t, ha="center", va="top", fontsize=11, color=P["text"], linespacing=1.05)
         # Row 3 (step 2): penalties for the record, 2024
         ax.text(0.2, 0.9, "2024", fontsize=12.5, fontweight="bold", color=P["amber_d"], va="center", alpha=a(s2))
-        pens = [(f"CPUC  ${c['cpuc']:,}", 7.0), (f"NHTSA  ${c['nhtsa']:,}", 14.6),
-                (f"DOJ fine  ${c['doj']:,}", 22.2)]
+        pens = [(f"CPUC  ${val('cpuc_fine')}", 7.0), (f"NHTSA  ${K.PENALTIES.others['NHTSA']:,.0f}", 14.6),
+                (f"DOJ fine  ${val('doj_fine')}", 22.2)]
         for t, x in pens:
             box(ax, x, 0.05, 7.3, 1.7, t, P["amber_l"], P["amber"], fs=11.5, shown=s2)
         save(fig, f"cruise_timeline_step{step}")
@@ -128,7 +130,7 @@ DECISIONS = [
 def decision_chain():
     for step in (1, 2, 3):
         fig, ax = canvas(6.4, 3.0, (0, 70), (-4.5, 29.5))
-        box(ax, 0.2, 9.0, 9.6, 10.0, "Admitted\ncommand\n1.3 m/s,\none tick",
+        box(ax, 0.2, 9.0, 9.6, 10.0, f"Admitted\ncommand\n{val('v_aisle')} m/s,\none tick",
             P["green_l"], P["green"], fs=11.5)
         ax.text(21.8, 27.4, "Decision", ha="center", fontsize=11.5, color=P["gray"], fontweight="bold")
         ax.text(41.0, 27.4, "Made by", ha="center", fontsize=11.5, color=P["gray"], fontweight="bold")
@@ -162,12 +164,12 @@ def chain_prob():
         ax.plot(p, p, color=P["gray"], lw=2.2)
         ax.text(0.862, 0.905, "one link", fontsize=15, color=P["gray"])
         s2 = step >= 2
-        ax.plot(p, p**6, color=P["red"], lw=3, alpha=a(s2))
+        ax.plot(p, [K.CHAIN.completeness(x) for x in p], color=P["red"], lw=3, alpha=a(s2))
         ax.text(0.952, 0.48, "six links", fontsize=15, color=P["red"], fontweight="bold", alpha=a(s2))
-        for pk, ck in V["chain"].items():
+        for pk, ck in K.CHAIN_C.items():
             ax.plot([pk], [ck], "o", color=P["red"], ms=9, alpha=a(s2))
             if pk > 0.98:
-                ax.annotate(f"{ck:.2f}", xy=(pk, ck), xytext=(0.995, 0.79), ha="right", fontsize=15,
+                ax.annotate(val("c_good"), xy=(pk, ck), xytext=(0.995, 0.79), ha="right", fontsize=15,
                             color=P["red_d"], fontweight="bold", alpha=a(s2),
                             arrowprops=dict(arrowstyle="-", color=P["red"], lw=1.0, alpha=a(s2)))
             else:
@@ -188,8 +190,9 @@ def chain_prob():
 def time_test():
     fig, ax = plt.subplots(figsize=(5.8, 1.9))
     fig.subplots_adjust(left=0.33, right=0.97, bottom=0.3, top=0.95)
-    rows = [("Time the hazard leaves", V["t_window"], P["green"], f"{V['t_window']:.2f} s (1.10 m at 1.3 m/s)"),
-            ("Out-of-loop takeover", V["t_ool"], P["red"], f"{V['t_ool']:.1f} s: travels {V['travel']:.1f} m")]
+    rows = [("Time the hazard leaves", K.T_WINDOW, P["green"],
+             f"{val('t_window')} s ({val('d_clear')} m at {val('v_aisle')} m/s)"),
+            ("Out-of-loop takeover", K.T_OOL, P["red"], f"{val('t_ool1')} s: travels {val('travel_ool')} m")]
     for i, (lab, v, col, txt) in enumerate(rows):
         y = 1 - i
         ax.barh(y, v, color=col, height=0.55)
@@ -208,11 +211,8 @@ def time_test():
 # ---------------------------------------------------------------------------
 def queue():
     n = np.arange(1, 35)
-    lam = n * calcs.RATE_PER_MACHINE_H / 3600.0
-    s = calcs.T_SERVICE_S
-    rho = lam * s
-    wq = rho * s / (1 - rho) / 60.0
-    Q = V["queue"]
+    wq = [K.m(K.QUEUE.variant(machines=int(k)).result.mean_wait, "minute") for k in n]
+    Q = K.QROWS
     for step in (1, 2):
         fig, ax = plt.subplots(figsize=(5.4, 3.6))
         fig.subplots_adjust(left=0.17, right=0.96, bottom=0.2, top=0.95)
@@ -223,7 +223,7 @@ def queue():
             sh = k in pts
             ax.plot([k], [w / 60], "o", color=P["red"], ms=9, alpha=a(sh))
             tx, ty = {10: (3.0, 4.0), 20: (12.0, 7.4), 32: (17.5, 12.2)}[k]
-            ax.annotate(f"{k} machines\n{r:.2f} busy, {w / 60:.0f} min", xy=(k, w / 60), xytext=(tx, ty),
+            ax.annotate(f"{val(f'n{k}')} machines\n{val(f'rho{k}')} busy, {val(f'wq{k}_min')} min", xy=(k, w / 60), xytext=(tx, ty),
                         ha="left", va="bottom", fontsize=14, color=P["red_d"], alpha=a(sh), linespacing=1.0,
                         arrowprops=dict(arrowstyle="-", color=P["red"], lw=1.0, alpha=a(sh)))
         ax.set_xlim(0, 34)
@@ -265,16 +265,16 @@ def ladder():
 # ---------------------------------------------------------------------------
 def stage_hours():
     days = np.linspace(0, 24, 300)
-    hrs = days * V["fleet_h_day"]
+    hrs = days * K.FLEET_H_DAY
     fig, ax = plt.subplots(figsize=(5.4, 3.6))
     fig.subplots_adjust(left=0.2, right=0.95, bottom=0.2, top=0.95)
     ax.plot(days, hrs, color=P["green"], lw=3)
-    ax.axhline(V["t_req"], color=P["red"], lw=1.8, ls="--")
-    ax.text(0.5, V["t_req"] + 90, f"{V['t_req']:,.0f} failure-free hours", fontsize=15, color=P["red_d"])
-    ax.plot([V["days_req"]], [V["t_req"]], "o", color=P["red"], ms=9)
-    ax.text(V["days_req"] + 0.6, V["t_req"] - 380, f"day {V['days_req']:.0f}", fontsize=15,
+    ax.axhline(K.T_REQ, color=P["red"], lw=1.8, ls="--")
+    ax.text(0.5, K.T_REQ + 90, f"{val('t_req')} failure-free hours", fontsize=15, color=P["red_d"])
+    ax.plot([K.DAYS_REQ], [K.T_REQ], "o", color=P["red"], ms=9)
+    ax.text(K.DAYS_REQ + 0.6, K.T_REQ - 380, f"day {val('days_req_ceil')}", fontsize=15,
             color=P["red_d"], fontweight="bold")
-    ax.text(11, 600, "10 machines,\n16 h a day", fontsize=15, color=P["green_d"], ha="left")
+    ax.text(11, 600, f"{val('stage_n')} machines,\n{val('stage_h_day')} h a day", fontsize=15, color=P["green_d"], ha="left")
     ax.set_xlim(0, 24)
     ax.set_ylim(0, 3800)
     ax.tick_params(labelsize=14)
@@ -287,8 +287,9 @@ def stage_hours():
 # Penalties for the record (ch Sec. 17.4.2)
 # ---------------------------------------------------------------------------
 def fines():
-    c = V["cruise"]
-    rows = [("CPUC", c["cpuc"], "15 days x $7,500"), ("NHTSA", c["nhtsa"], "reports omitted the drag"),
+    c = K.CRUISE
+    rows = [("CPUC", c["cpuc"], f"{val('cpuc_days')} days x ${val('cpuc_daily')}"),
+            ("NHTSA", c["nhtsa"], "reports omitted the drag"),
             ("DOJ", c["doj"], "false report, criminal fine")]
     fig, ax = plt.subplots(figsize=(5.4, 3.0))
     fig.subplots_adjust(left=0.2, right=0.97, bottom=0.22, top=0.95)
@@ -297,7 +298,7 @@ def fines():
         ax.barh(y, v / 1e6, color=P["amber"], height=0.6)
         ax.text(-0.03, y, lab, ha="right", va="center", fontsize=15, fontweight="bold",
                 transform=ax.get_yaxis_transform())
-        ax.text(v / 1e6 + 0.04, y + 0.05, f"${v:,}", ha="left", va="bottom", fontsize=14,
+        ax.text(v / 1e6 + 0.04, y + 0.05, f"${v:,.0f}", ha="left", va="bottom", fontsize=14,
                 fontweight="bold", color=P["amber_d"])
         ax.text(v / 1e6 + 0.04, y - 0.05, why, ha="left", va="top", fontsize=13, color=P["text"])
     ax.set_xlim(0, 3.0)
@@ -315,7 +316,7 @@ def detect_data():
     fig = plt.figure(figsize=(6.0, 2.8))
     ax1 = fig.add_axes([0.2, 0.2, 0.3, 0.68])
     ax2 = fig.add_axes([0.69, 0.2, 0.3, 0.68])
-    li = V["li"]
+    li = {e["detector"]: (e["miss_rate_adult_pct"], e["miss_rate_child_pct"]) for e in K.LI.entries}
     names = list(li)
     for i, k in enumerate(names):
         y = len(names) - 1 - i
@@ -332,7 +333,8 @@ def detect_data():
     ax1.text(38, 8.15, "children", color=P["red"], fontsize=11, fontweight="bold")
     ax1.set_ylim(-0.6, 8.9)
     ax1.set_title("Li et al. 2025, Table 7", fontsize=11.5, loc="left", x=-0.55, pad=14)
-    w = V["wilson"]
+    w = {f"{e['model']} {e['backbone'].replace('-32x8d', '')}": (e["ap75_lighter_pct"], e["ap75_darker_pct"])
+         for e in K.WILSON.entries}
     wn = list(w)
     short = [s.replace("Faster R-CNN ", "Faster ").replace("Mask R-CNN ", "Mask ") for s in wn]
     for i, k in enumerate(wn):
@@ -360,18 +362,20 @@ def miss_frames():
     n = np.arange(1, 7)
     fig, ax = plt.subplots(figsize=(5.4, 3.6))
     fig.subplots_adjust(left=0.2, right=0.96, bottom=0.2, top=0.95)
-    for p, col, lab, dy in ((0.95, P["slate"], "seen in 95% of frames", 0.0),
-                            (0.75, P["red"], "seen in 75%", 0.0)):
+    p_ref, p_low = K.SHORTFALL.reference, K.ROWS[1].per_frame_detection
+    n_ref, n_low = K.DS.reference_frames, K.ROWS[1].frames
+    p_miss = K.SHORTFALL.all_miss_probability
+    for p, col in ((p_ref, P["slate"]), (p_low, P["red"])):
         ax.semilogy(n, (1 - p) ** n, "o-", color=col, lw=2.6, ms=7)
-    ax.axhline(V["p_miss"], color=P["green"], lw=1.8, ls="--")
-    ax.text(3.75, V["p_miss"] * 0.45, "1 in 1,000", fontsize=14, ha="left",
+    ax.axhline(p_miss, color=P["green"], lw=1.8, ls="--")
+    ax.text(3.75, p_miss * 0.45, f"1 in {val('p_miss_inv')}", fontsize=14, ha="left",
             color=P["green_d"], va="top", fontweight="bold")
-    ax.annotate("3 frames", xy=(3, 0.05**3), xytext=(1.5, 1.2e-5), fontsize=15, color=P["slate"],
-                fontweight="bold", arrowprops=dict(arrowstyle="-", color=P["slate"]))
-    ax.annotate("5 frames", xy=(5, 0.25**5), xytext=(5.15, 0.02), fontsize=15, color=P["red"],
-                fontweight="bold", arrowprops=dict(arrowstyle="-", color=P["red"]))
-    ax.text(1.1, 3e-7, "95% per frame", fontsize=14, color=P["slate"])
-    ax.text(1.4, 0.3, "75% per frame", fontsize=14, color=P["red"])
+    ax.annotate(f"{val('n_ref')} frames", xy=(n_ref, (1 - p_ref) ** n_ref), xytext=(1.5, 1.2e-5), fontsize=15,
+                color=P["slate"], fontweight="bold", arrowprops=dict(arrowstyle="-", color=P["slate"]))
+    ax.annotate(f"{val('g1_n')} frames", xy=(n_low, (1 - p_low) ** n_low), xytext=(5.15, 0.02), fontsize=15,
+                color=P["red"], fontweight="bold", arrowprops=dict(arrowstyle="-", color=P["red"]))
+    ax.text(1.1, 3e-7, f"{val('p_ref_pct')}% per frame", fontsize=14, color=P["slate"])
+    ax.text(1.4, 0.3, f"{val('g1_pct')}% per frame", fontsize=14, color=P["red"])
     ax.set_xlim(0.8, 6.4)
     ax.set_ylim(1e-8, 1.5)
     ax.set_xticks(n)
@@ -385,10 +389,11 @@ def miss_frames():
 # One stop, two groups (ch figure 2, Table 1)
 # ---------------------------------------------------------------------------
 def shortfall():
-    v0, acc, tau, tf = calcs.V_AISLE, calcs.A_BRAKE, calcs.TAU_DELAY, calcs.T_FRAME
-    x_ref = v0 * (V["n_ref"] * tf + tau)
-    x_person = x_ref + v0**2 / (2 * acc)
-    rows = V["rows"]
+    v0, acc = K.V_AISLE, K.A_BRAKE
+    x_ref = K.m(K.DS.reference_brake_onset, "m")
+    x_person = K.m(K.DS.reference_stop, "m")
+    rows = [(r.per_frame_detection, r.frames, r.extra_frames, K.m(r.distance_lost, "m"),
+             K.m(r.impact_speed, "m/s"), K.m(r.impact_energy, "J")) for r in K.ROWS]
 
     def prof(xb):
         x = np.linspace(0, x_person, 600)
@@ -406,11 +411,12 @@ def shortfall():
             ax.plot(x, v, color=col, lw=3, alpha=a(sh))
             if row is not None:
                 ax.plot([x_person], [row[4]], "o", color=col, ms=10, alpha=a(sh), zorder=5)
-                ax.annotate(f"seen in {row[0]:.0%}: {row[4]:.2f} m/s, {row[5]:.0f} J",
+                g = rows.index(row)
+                ax.annotate(f"seen in {val(f'g{g}_pct')}%: {val(f'g{g}_vi')} m/s, {val(f'g{g}_e')} J",
                             xy=(x_person, row[4]), xytext=(0.52, 0.44 if k == 1 else 0.68),
                             ha="right", va="center", fontsize=14, color=col, fontweight="bold", alpha=a(sh),
                             arrowprops=dict(arrowstyle="-", color=col, lw=1.0, alpha=a(sh)))
-        ax.text(0.03, 0.06, "seen in 95%:\nstops short", fontsize=14, color=P["slate"], fontweight="bold")
+        ax.text(0.03, 0.06, f"seen in {val('p_ref_pct')}%:\nstops short", fontsize=14, color=P["slate"], fontweight="bold")
         ax.axvline(x_person, color=P["text"], lw=1.4, ls="--")
         ax.text(x_person - 0.02, 1.45, "person", ha="right", fontsize=14)
         ax.set_xlim(0, x_person * 1.04)
@@ -425,21 +431,22 @@ def shortfall():
 # Published miss rates in meters and joules (derived from Li et al. Table 7)
 # ---------------------------------------------------------------------------
 def li_conv():
-    conv = V["li_conv"]
+    conv = K.LI_CONV
     names = list(conv)
     fig, ax = plt.subplots(figsize=(6.0, 2.6))
     fig.subplots_adjust(left=0.22, right=0.96, bottom=0.22, top=0.97)
     for i, k in enumerate(names):
         y = len(names) - 1 - i
-        na, nc, dr, vi, ei = conv[k]
-        ax.barh(y, dr * 1e3, color=P["red"], height=0.62)
-        ax.text(dr * 1e3 + 2, y, f"{nc - na} frames later: {vi:.2f} m/s, {ei:.0f} J", va="center",
+        _, row = conv[k]
+        dr, vi, ei = K.m(row.distance_lost, "mm"), K.m(row.impact_speed, "m/s"), K.m(row.impact_energy, "J")
+        ax.barh(y, dr, color=P["red"], height=0.62)
+        ax.text(dr + 2, y, f"{row.extra_frames} frames later: {vi:.2f} m/s, {ei:.0f} J", va="center",
                 fontsize=11, color=P["red_d"])
     ax.set_yticks(range(len(names)))
     ax.set_yticklabels(names[::-1], fontsize=11)
     ax.set_xlim(0, 260)
     ax.tick_params(axis="x", labelsize=11)
-    ax.set_xlabel("Clearance lost for children (mm), aisle speed 1.3 m/s", fontsize=11.5)
+    ax.set_xlabel(f"Clearance lost for children (mm), aisle speed {val('v_aisle')} m/s", fontsize=11.5)
     save(fig, "li_conv")
 
 
@@ -449,20 +456,20 @@ def li_conv():
 def intervals():
     fig, ax = plt.subplots(figsize=(5.4, 3.4))
     fig.subplots_adjust(left=0.3, right=0.96, bottom=0.22, top=0.95)
-    rows = [(f"{V['n_large']:,}\npeople", V["ci_l"], P["slate"]), (f"{V['n_small']}\npeople", V["ci_s"], P["red"])]
+    rows = [(f"{val('s_large')}\npeople", K.CI_L, P["slate"]), (f"{val('s_small')}\npeople", K.CI_S, P["red"])]
     for i, (lab, (lo, hi), col) in enumerate(rows):
         y = 1 - i
         ax.plot([lo, hi], [y, y], color=col, lw=6, solid_capstyle="butt")
-        ax.plot([0.95], [y], "o", color="white", mec=col, mew=2.5, ms=11)
+        ax.plot([K.SAMPLE.recall], [y], "o", color="white", mec=col, mew=2.5, ms=11)
         ax.text(0.9035, y, lab, ha="right", va="center", fontsize=15, fontweight="bold", color=col)
-        ax.text(0.95, y - 0.22, f"{lo:.3f} to {hi:.3f}", fontsize=14, color=col, ha="center", va="top")
-    ax.axvline(0.92, color=P["amber"], lw=1.8, ls="--")
-    ax.text(0.9215, -0.62, "0.92", fontsize=14, color=P["amber_d"])
+        ax.text(K.SAMPLE.recall, y - 0.22, f"{lo:.3f} to {hi:.3f}", fontsize=14, color=col, ha="center", va="top")
+    ax.axvline(K.SAMPLE.rate_b, color=P["amber"], lw=1.8, ls="--")
+    ax.text(K.SAMPLE.rate_b + 0.0015, -0.62, val("s_pb"), fontsize=14, color=P["amber_d"])
     ax.set_xlim(0.905, 0.99)
     ax.set_ylim(-0.75, 1.6)
     ax.set_yticks([])
     ax.tick_params(labelsize=13)
-    ax.set_xlabel("Detection rate, exact 95% interval", fontsize=15)
+    ax.set_xlabel(f"Detection rate, exact {val('s_conf_pct')}% interval", fontsize=15)
     save(fig, "intervals")
 
 
@@ -472,9 +479,9 @@ def intervals():
 def exposure():
     fig, ax = plt.subplots(figsize=(5.4, 3.2))
     fig.subplots_adjust(left=0.36, right=0.96, bottom=0.24, top=0.95)
-    rows = [("10% who use\nthree crossings", V["exp_ratio"], P["red"]),
+    rows = [(f"{val('users_pct')}% who use\nthree crossings", K.CROSSINGS.concentration, P["red"]),
             ("Site average", 1.0, P["gray"]),
-            ("Everyone else", V["rest_ratio"], P["slate"])]
+            ("Everyone else", K.CROSSINGS.rest_ratio, P["slate"])]
     for i, (lab, v, col) in enumerate(rows):
         y = 2 - i
         ax.barh(y, v, color=col, height=0.6)
@@ -493,24 +500,26 @@ def exposure():
 # Keeping less (ch Sec. 17.7.2)
 # ---------------------------------------------------------------------------
 def retention():
-    day_s = V["day_h"] * 3600
+    day_h = K.m(K.RETENTION.operating_day, "hour")
+    window_s = K.m(K.RETENTION.window, "s")
+    day_s = K.m(K.RETENTION.operating_day, "s")
     fig, ax = plt.subplots(figsize=(5.4, 2.7))
     fig.subplots_adjust(left=0.27, right=0.97, bottom=0.3, top=0.97)
-    ax.barh(1, V["day_h"], color=P["red_l"], ec=P["red"], height=0.6)
-    ax.text(V["day_h"] / 2, 1, "every frame, all day", ha="center", va="center",
+    ax.barh(1, day_h, color=P["red_l"], ec=P["red"], height=0.6)
+    ax.text(day_h / 2, 1, "every frame, all day", ha="center", va="center",
             fontsize=15, color=P["red_d"], fontweight="bold")
     rng = np.random.default_rng(17)
-    starts = np.sort(rng.uniform(0, day_s - V["window"], V["events"]))
+    starts = np.sort(rng.uniform(0, day_s - window_s, K.RETENTION.events_per_day))
     for s0 in starts:
-        ax.barh(0, V["window"] / 3600 * 6, left=s0 / 3600, color=P["green"], height=0.6)
+        ax.barh(0, window_s / 3600 * 6, left=s0 / 3600, color=P["green"], height=0.6)
     ax.text(-0.4, 1, "Continuous", ha="right", va="center", fontsize=15, fontweight="bold")
     ax.text(-0.4, 0, "Triggered", ha="right", va="center", fontsize=15, fontweight="bold")
-    ax.set_xlim(0, V["day_h"])
+    ax.set_xlim(0, day_h)
     ax.set_xticks([0, 4, 8, 12, 16])
     ax.set_ylim(-0.5, 1.5)
     ax.set_yticks([])
     ax.tick_params(labelsize=14)
-    ax.set_xlabel("Hour of a 16 h day (marks 6x wide)", fontsize=14)
+    ax.set_xlabel(f"Hour of a {val('ret_day_h')} h day (marks 6x wide)", fontsize=14)
     save(fig, "retention")
 
 
@@ -520,8 +529,9 @@ def retention():
 def labor():
     fig, ax = plt.subplots(figsize=(5.4, 3.4))
     fig.subplots_adjust(left=0.08, right=0.97, bottom=0.2, top=0.95)
-    parts = [("requests", V["assist_h"], P["red"]), ("watching", V["idle_h"], P["amber"]),
-             ("sweeps", V["sweep_h"], P["slate"])]
+    parts = [("requests", K.m(K.LABOR.request_time, "hour"), P["red"]),
+             ("watching", K.m(K.LABOR.watch_time, "hour"), P["amber"]),
+             ("sweeps", K.m(K.LABOR.sweep_total, "hour"), P["slate"])]
     left = 0
     for lab, v, col in parts:
         ax.barh(0, v, left=left, color=col, height=0.7)
@@ -532,16 +542,17 @@ def labor():
             ax.text(left + 0.4, -0.6, f"{lab} {v:.1f} h", ha="left", va="center",
                     fontsize=14, color=col, fontweight="bold")
         left += v
+    shift = K.m(K.LABOR.shift, "hour")
     for k in (1, 2):
-        ax.plot([8 * k, 8 * k], [-0.8, 0.36], color=P["text"], lw=1.5, ls="--")
-        ax.text(8 * k - 0.2, -0.6, f"{k} shift" + ("s" if k > 1 else ""), ha="right", va="center", fontsize=14)
-    ax.text(left, 0.5, f"{V['total_h']:.1f} person-hours a day", ha="right", fontsize=15,
+        ax.plot([shift * k, shift * k], [-0.8, 0.36], color=P["text"], lw=1.5, ls="--")
+        ax.text(shift * k - 0.2, -0.6, f"{k} shift" + ("s" if k > 1 else ""), ha="right", va="center", fontsize=14)
+    ax.text(left, 0.5, f"{val('lab_total_h')} person-hours a day", ha="right", fontsize=15,
             fontweight="bold", color=P["text"])
     ax.set_xlim(0, 21.5)
     ax.set_ylim(-0.85, 0.85)
     ax.set_yticks([])
     ax.tick_params(labelsize=14)
-    ax.set_xlabel("Hours per operating day, 20 machines", fontsize=15)
+    ax.set_xlabel(f"Hours per operating day, {val('n20')} machines", fontsize=15)
     save(fig, "labor")
 
 

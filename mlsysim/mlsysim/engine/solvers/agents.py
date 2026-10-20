@@ -79,6 +79,9 @@ class AcceptedTaskCostModel(ForwardModel):
     fraction of one component; an acceptance gain divides the whole attempt.
     The break-even acceptance is the acceptance the price cut is worth.
     Charging only the accepted attempt understates cost by ``1 / p_acc``.
+    Growing the model cost by a fraction ``g`` raises the attempt to
+    ``C' = (1 + g) C_model + C_other``; cost per accepted task holds only if
+    acceptance rises to ``p_acc C' / C``.
     """
     requires = ()
     produces = AcceptedTaskCostResult
@@ -86,7 +89,8 @@ class AcceptedTaskCostModel(ForwardModel):
     def solve(self, model_cost: Quantity, other_cost: Quantity, acceptance: float,
               token_price_cut: Optional[float] = None, improved_acceptance: Optional[float] = None,
               other_cost_cut: Optional[float] = None, acceptance_gain: Optional[float] = None,
-              independent_attempts: Optional[int] = None) -> AcceptedTaskCostResult:
+              independent_attempts: Optional[int] = None,
+              model_cost_growth: Optional[float] = None) -> AcceptedTaskCostResult:
         tokens, other = _usd(model_cost), _usd(other_cost)
         attempt = tokens + other
         share = tokens / attempt
@@ -107,6 +111,12 @@ class AcceptedTaskCostModel(ForwardModel):
             out.update(cost_per_accepted_acceptance_gain=calc_cost_per_accepted(attempt, acceptance + acceptance_gain))
         if independent_attempts is not None:
             out.update(independent_success=calc_independent_success(acceptance, independent_attempts))
+        if model_cost_growth is not None:
+            # Added 2026-10-20: the same cost per accepted task at a costlier
+            # attempt needs acceptance raised in proportion to the attempt cost.
+            grown = tokens * (1 + model_cost_growth) + other
+            out.update(grown_attempt_cost=grown, grown_attempt_rise=grown / attempt - 1,
+                       grown_break_even_acceptance=acceptance * grown / attempt)
         return AcceptedTaskCostResult(**out)
 
 

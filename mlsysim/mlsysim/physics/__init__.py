@@ -154,6 +154,8 @@ from .robotics import (
     calc_zero_failure_sample_size,
     calc_reduced_mass,
     calc_transient_impact_force,
+    calc_coasting_contact_peak_force,
+    calc_passive_compliance_stiffness_bound,
     calc_transient_contact_speed_limit,
     calc_tripwire_contact_force_accumulation,
     calc_shielded_system_hazard_rate,
@@ -324,6 +326,8 @@ __all__ = [
     "calc_zero_failure_sample_size",
     "calc_reduced_mass",
     "calc_transient_impact_force",
+    "calc_coasting_contact_peak_force",
+    "calc_passive_compliance_stiffness_bound",
     "calc_transient_contact_speed_limit",
     "calc_tripwire_contact_force_accumulation",
     "calc_shielded_system_hazard_rate",
@@ -833,4 +837,164 @@ __all__ += [
     "calc_sparse_breakeven_zero_share",
     "calc_csr_bytes",
     "calc_pareto_frontier",
+]
+
+# --- Trajectory curation: split leakage, attempt-group contrast, ordered checks (added 2026-10-20) ---
+from .agents import (
+    calc_split_straddle,
+    calc_mixed_outcome_fraction,
+    calc_cost_per_rejection,
+    calc_short_circuit_cost,
+)
+from .retrieval import calc_minhash_standard_error
+
+__all__ += [
+    "calc_split_straddle",
+    "calc_mixed_outcome_fraction",
+    "calc_cost_per_rejection",
+    "calc_short_circuit_cost",
+    "calc_minhash_standard_error",
+]
+
+# --- Fine-tuning on trajectories: weighting, packing, preference pairs (added 2026-10-20) ---
+from .fine_tuning import (
+    calc_token_average_shares,
+    calc_example_average_share,
+    calc_first_fit_decreasing,
+    calc_preference_pair,
+)
+from .statistics import calc_proportion_gap_se
+
+__all__ += [
+    "calc_token_average_shares",
+    "calc_example_average_share",
+    "calc_first_fit_decreasing",
+    "calc_preference_pair",
+    "calc_proportion_gap_se",
+]
+
+# --- Quantization grids and block formats (added 2026-10-20) ---
+from .numerics import (calc_float_values, calc_int_levels, calc_affine_scale, calc_symmetric_scale,
+                       calc_zero_point, calc_quantize, calc_dequantize, calc_block_bits_per_weight,
+                       calc_accumulator_headroom)
+
+__all__ += [
+    "calc_float_values",
+    "calc_int_levels",
+    "calc_affine_scale",
+    "calc_symmetric_scale",
+    "calc_zero_point",
+    "calc_quantize",
+    "calc_dequantize",
+    "calc_block_bits_per_weight",
+    "calc_accumulator_headroom",
+]
+
+
+# --- One-server queueing and batch formation (added 2026-10-20) ---
+from .serving import (
+    calc_mm1_time_in_system,
+    calc_exponential_quantile_factor,
+    calc_mm1_max_utilization,
+    calc_batch_formation_wait,
+)
+
+__all__ += [
+    "calc_mm1_time_in_system",
+    "calc_exponential_quantile_factor",
+    "calc_mm1_max_utilization",
+    "calc_batch_formation_wait",
+]
+
+# --- Coordinating several agents: partitions, schedules, shared writes, correlated votes (added 2026-10-20) ---
+from .coordination import (
+    calc_partition_elapsed,
+    calc_full_mesh_deliveries,
+    calc_supervisor_deliveries,
+    calc_earliest_schedule,
+    calc_disjoint_writes,
+    calc_disjoint_writes_approx,
+    calc_binomial_tail,
+    calc_beta_mixture_shape,
+    calc_beta_binomial_pmf,
+    calc_beta_tail,
+)
+
+__all__ += [
+    "calc_partition_elapsed",
+    "calc_full_mesh_deliveries",
+    "calc_supervisor_deliveries",
+    "calc_earliest_schedule",
+    "calc_disjoint_writes",
+    "calc_disjoint_writes_approx",
+    "calc_binomial_tail",
+    "calc_beta_mixture_shape",
+    "calc_beta_binomial_pmf",
+    "calc_beta_tail",
+]
+# --- Per-group detection: frames to a reliable detection, exact intervals (added 2026-10-20) ---
+from .statistics import calc_consecutive_detection_frames, calc_clopper_pearson_interval
+
+__all__ += ["calc_consecutive_detection_frames", "calc_clopper_pearson_interval"]
+
+# --- ML operations: skew cost, detectable lift, decay rate (added 2026-10-20) ---
+from .economics import calc_skew_cost
+from .statistics import calc_two_proportion_detectable_lift, calc_exponential_decay_rate
+
+__all__ += [
+    "calc_skew_cost",
+    "calc_two_proportion_detectable_lift",
+    "calc_exponential_decay_rate",
+]
+
+# --- Benchmark run statistics (added 2026-10-20) ---
+from .statistics import (
+    calc_t_critical,
+    calc_welch_interval,
+    calc_mean_half_width,
+    calc_samples_per_arm_for_difference,
+    calc_mcnemar_max_discordant,
+    calc_expected_calibration_error,
+    calc_spearman_rank_correlation,
+)
+
+__all__ += [
+    "calc_t_critical",
+    "calc_welch_interval",
+    "calc_mean_half_width",
+    "calc_samples_per_arm_for_difference",
+    "calc_mcnemar_max_discordant",
+    "calc_expected_calibration_error",
+    "calc_spearman_rank_correlation",
+]
+
+# --- Fairness: error-rate identity, bias feedback, gap sample sizes (added 2026-10-20) ---
+from .fairness import (
+    calc_fpr_from_ppv,
+    calc_feedback_disparity,
+    calc_cycles_to_gate,
+    calc_gap_samples_per_group,
+)
+
+__all__ += [
+    "calc_fpr_from_ppv",
+    "calc_feedback_disparity",
+    "calc_cycles_to_gate",
+    "calc_gap_samples_per_group",
+]
+# --- Agent serving economics: queue price and speculative rounds (added 2026-10-20) ---
+from .serving import calc_kingman_wait_ratio, calc_speculative_round_speedup
+
+__all__ += ["calc_kingman_wait_ratio", "calc_speculative_round_speedup"]
+# --- ML operations: confirming a drop, detection-delay loss, retraining interval (added 2026-10-20) ---
+from .statistics import calc_one_proportion_sample_size
+from .economics import (calc_detection_delay_loss, calc_staleness_slope, calc_retraining_cost_rate,
+                        calc_optimal_retraining_interval)
+
+__all__ += [
+    "calc_one_proportion_sample_size",
+    "calc_detection_delay_loss",
+    "calc_staleness_slope",
+    "calc_retraining_cost_rate",
+    "calc_optimal_retraining_interval",
 ]

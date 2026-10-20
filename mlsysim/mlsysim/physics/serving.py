@@ -209,3 +209,96 @@ def calc_residency_factor(generation_time, wait_time) -> float:
     Little's law divides the rate by this factor (the residency tax).
     """
     return ((generation_time + wait_time) / generation_time).to("").magnitude
+
+
+# --- One-server queueing and batch formation (added 2026-10-20) ---------------
+
+def calc_mm1_time_in_system(service_time, utilization):
+    """
+    Mean time a request spends in an M/M/1 server, waiting plus service.
+
+        W = S / (1 - rho)
+
+    ``service_time`` (S) is the mean service time and ``utilization`` (rho)
+    the fraction of time the server is busy. W grows without bound as rho
+    approaches 1: the queueing knee.
+    """
+    rho = float(utilization)
+    if not 0 <= rho < 1:
+        raise ValueError("utilization must be in [0, 1)")
+    return service_time / (1 - rho)
+
+
+def calc_exponential_quantile_factor(quantile: float) -> float:
+    """
+    A quantile of an exponential distribution as a multiple of its mean.
+
+        k_q = ln(1 / (1 - q))
+
+    Time in an M/M/1 system is exponential, so its p99 is ln(100) = 4.605
+    times its mean at every load.
+    """
+    q = float(quantile)
+    if not 0 <= q < 1:
+        raise ValueError("quantile must be in [0, 1)")
+    return math.log(1 / (1 - q))
+
+
+def calc_mm1_max_utilization(service_time, tail_budget, tail_factor: float) -> float:
+    """
+    Highest utilization at which an M/M/1 tail stays within ``tail_budget``.
+
+        k S / (1 - rho) <= T   =>   rho <= 1 - k S / T
+
+    ``tail_factor`` (k) is the tail as a multiple of the mean time in system
+    (``calc_exponential_quantile_factor``).
+    """
+    return 1 - (tail_factor * service_time / tail_budget).to("").magnitude
+
+
+def calc_batch_formation_wait(batch_size: int, arrival_rate):
+    """
+    Mean time a request waits for a batch of ``batch_size`` to fill.
+
+        W_form = (B - 1) / (2 lambda)
+
+    With arrivals at a steady ``arrival_rate`` (lambda), the first request of
+    a batch waits for B - 1 more and the last for none; the mean is half.
+    """
+    return (batch_size - 1) / (2 * arrival_rate)
+
+
+# --- Agent serving economics: queue price and speculative rounds (added 2026-10-20) ---
+
+def calc_kingman_wait_ratio(utilization: float, arrival_scv: float, service_scv: float) -> float:
+    """Mean queue wait of one server as a multiple of the mean service time (Kingman 1961).
+
+        E[W] / E[S] ~ (c_a^2 + c_s^2) / 2 * rho / (1 - rho)
+
+    A heavy-traffic approximation for a G/G/1 queue: ``arrival_scv`` and
+    ``service_scv`` are the squared coefficients of variation of interarrival
+    and service times. Exact for M/M/1 (both 1); a mean, not a tail.
+    """
+    rho = float(utilization)
+    if not 0 <= rho < 1:
+        raise ValueError("utilization must be in [0, 1)")
+    if arrival_scv < 0 or service_scv < 0:
+        raise ValueError("squared coefficients of variation must be nonnegative")
+    variability = (arrival_scv + service_scv) / 2
+    return variability * rho / (1 - rho)
+
+
+def calc_speculative_round_speedup(accepted_per_round: float, draft_length: int,
+                                   draft_cost_ratio: float) -> float:
+    """Decode-stream speedup of speculative decoding (Leviathan et al. 2023).
+
+        S = (m + 1) / (gamma r + 1)
+
+    Each round drafts ``draft_length`` (gamma) tokens at ``draft_cost_ratio``
+    (r) of a target step each, and the target's one verification step keeps
+    ``accepted_per_round`` (m) drafted tokens plus one of its own. Faster only
+    while m > gamma r.
+    """
+    if accepted_per_round < 0 or draft_length < 0 or draft_cost_ratio < 0:
+        raise ValueError("inputs must be nonnegative")
+    return (accepted_per_round + 1) / (draft_length * draft_cost_ratio + 1)

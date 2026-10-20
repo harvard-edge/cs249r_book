@@ -145,7 +145,8 @@ class Svg:
             (out / name).write_text(svg)
 
 
-import calcs as K  # noqa: E402  (every derived value drawn below)
+import calcs as K  # noqa: E402  (every value drawn below; calcs reads MLSysIM)
+from deckvals import val, num  # noqa: E402
 from matplotlib.ticker import FixedLocator, NullLocator  # noqa: E402
 
 
@@ -194,20 +195,23 @@ def bars(path, rows, size, log=False, ticks=None, xlabel=None, xlim=None, fs=11,
 # =============================================================================
 g = Svg(900, 366)
 layers = [
-    ("Applications", "Black share enrolled: 17.7% by cost, 46.5% by need", "L15", 0.12),
-    ("Operations", "$304M write-down, every server up", "L14", 0.17),
-    ("Serving", f"Batch 1 costs {K.BATCH_COST_RATIO:.1f}× batch 8", "L13", 0.22),
-    ("Training", "16 bytes per parameter: PaLM ≈ 100 H100s", "L8", 0.12),
-    ("Models", f"7B model in FP16 = {K.MODEL_7B_GB:.0f} GB; phone has 8 GB", "L10", 0.17),
-    ("Frameworks", "Host 8.6 ms against 0.9 ms of weight reads", "L7", 0.22),
-    ("Hardware", "TPU 30 to 80× perf/W; 20 TOPS/W rated, 1.5 sustained", "L11, L12", 0.12),
+    ("Applications", f"Black share enrolled: {val('ober_before')}% by cost, {val('ober_after')}% by need",
+     "L15", 0.12),
+    ("Operations", f"${val('z_writedown_m')}M write-down, every server up", "L14", 0.17),
+    ("Serving", f"Batch 1 costs {val('hook_ratio')}× batch {val('batch_eight')}", "L13", 0.22),
+    ("Training", f"{val('mp_total_b')} bytes per parameter: PaLM ≈ {val('palm_h100s')} H100s", "L8", 0.12),
+    ("Models", f"{val('p7b_b')}B model in FP16 = {val('mem7b_gb')} GB; phone has {val('phone_ram_gb')} GB",
+     "L10", 0.17),
+    ("Frameworks", f"Host {val('gpt2_host_ms')} ms against {val('gpt2_read_ms')} ms of weight reads", "L7", 0.22),
+    ("Hardware", f"TPU {val('tpu_ppw_lo')} to {val('tpu_ppw_hi')}× perf/W; {val('hook_eff')} TOPS/W rated, "
+     f"{val('hook_sus_eff')} sustained", "L11, L12", 0.12),
 ]
-for i, (name, num, lec, op) in enumerate(layers):
+for i, (name, fact, lec, op) in enumerate(layers):
     y = 6 + i * 46
     g.add(1, f'<rect x="10" y="{y}" width="786" height="40" rx="7" fill="{CRIMSON}" '
              f'fill-opacity="{op}"/>')
     g.text(24, y + 21, name, 22, CRIMSON, "bold", "start")
-    g.text(190, y + 21, num, 20, C["text"], "normal", "start")
+    g.text(190, y + 21, fact, 20, C["text"], "normal", "start")
     g.text(786, y + 21, lec, 18, CRIMSON, "bold", "end")
 g.add(1, f'<rect x="806" y="6" width="56" height="316" rx="7" fill="{CRIMSON}" '
          f'fill-opacity="0.18"/>')
@@ -215,8 +219,8 @@ g.add(1, f'<text {FONT} x="834" y="164" font-size="22" font-weight="700" fill="{
          f'text-anchor="middle" dominant-baseline="middle" letter-spacing="3" '
          f'transform="rotate(-90 834 164)">DATA</text>')
 g.line(834, 322, 834, 334, CRIMSON, arrow=False, sw=2)
-g.text(862, 348, "Data: Tay suspended after 16 hours (L4); each WebText token "
-       f"seen about {K.WEBTEXT_PASSES:.0f} times (L9)", 19, C["text"], "normal", "end")
+g.text(862, 348, f"Data: Tay suspended after {val('tay_hours')} hours (L4); each WebText token "
+       f"seen about {val('gpt2_passes')} times (L9)", 19, C["text"], "normal", "end")
 g.write("stack_numbers", 1)
 
 # =============================================================================
@@ -254,23 +258,23 @@ g.write("chain", 3)
 g = Svg(900, 362)
 phases = [
     ("Envelope", "Watt-scale power,\nheat, battery", "L2"),
-    ("Architecture", f"Depthwise separable, 256 ch.:\n{K.DW_RATIO:.1f}× fewer FLOPs", "L6"),
+    ("Architecture", f"Depthwise separable, {val('dw_channels')} ch.:\n{val('dw_ratio')}× fewer FLOPs", "L6"),
     ("Training", "Large batches to train;\nserves one image", "L8"),
     ("Data selection", "Milder augmentation\nfor a small model", "L9"),
-    ("Compression", f"INT8: {K.INT8_OF_FP32 * 100:.0f}% of\nFP32's bytes", "L10b"),
+    ("Compression", f"INT8: {val('int8_of_fp32_pct')}% of\nFP32's bytes", "L10b"),
     ("Acceleration", "Do the phone's NPU\nkernels run INT8?", "L11"),
     ("Benchmarking", "Gain must survive\npreprocessing", "L12"),
     ("Serving", "p99 under 50 ms", "L13"),
     ("Operations", "Accuracy tracked\nper device cohort", "L14b"),
 ]
-for i, (name, num, lec) in enumerate(phases):
+for i, (name, fact, lec) in enumerate(phases):
     row, col = divmod(i, 3)
     x, y = 10 + col * 300, 4 + row * 112
     first = row + 1
     g.rect(x, y, 264, 94, "white", C["neutral"], first=first, sw=2)
     g.text(x + 12, y + 20, name, 21, CRIMSON, "bold", "start", first=first)
     g.text(x + 254, y + 20, lec, 18, C["neutral"], "bold", "end", first=first)
-    g.text(x + 132, y + 63, num, 18, C["text"], first=first)
+    g.text(x + 132, y + 63, fact, 18, C["text"], first=first)
     if col < 2:
         g.line(x + 266, y + 47, x + 298, y + 47, C["neutral"], first=first, sw=2.5)
 for row in (0, 1):
@@ -289,7 +293,8 @@ g.write("journey", 3)
 # =============================================================================
 import numpy as np  # noqa: E402
 
-BW, P16, P8 = K.H100_BW / 1e12, K.H100_FP16 / 1e12, K.H100_INT8 / 1e12
+BW, P16, P8 = num("h100_bw"), num("h100_fp16"), num("h100_int8")
+PREFILL_I, RESNET_INT8_I = K.QKV.traffic_intensity, K.S3_MIXED.traffic_intensity
 xs = np.logspace(np.log10(0.4), np.log10(30000), 400)
 for k in (1, 2, 3):
     fig, ax = plt.subplots(figsize=(5.8, 2.6))
@@ -297,7 +302,7 @@ for k in (1, 2, 3):
     ax.plot(xs[xs >= P16 / BW], np.full((xs >= P16 / BW).sum(), P16),
             color=C["compute"], lw=3, zorder=3)
     ax.axvline(P16 / BW, color=C["neutral"], lw=1, ls="--")
-    ax.text(P16 / BW / 1.08, 1.4, f"ridge {K.RIDGE16:.0f}", color=C["neutral"], fontsize=10,
+    ax.text(P16 / BW / 1.08, 1.4, f"ridge {val('ridge16')}", color=C["neutral"], fontsize=10,
             ha="right")
     on3 = 1.0 if k >= 3 else 0.0
     m = xs >= P8 / BW
@@ -306,27 +311,27 @@ for k in (1, 2, 3):
             BW * xs[(xs >= P16 / BW) & (xs <= P8 / BW)], color=C["danger"], lw=2.5,
             ls="--", alpha=on3)
     ax.axvline(P8 / BW, color=C["danger"], lw=1, ls=":", alpha=on3)
-    ax.text(P8 / BW * 1.08, 1.4, f"INT8 ridge {K.RIDGE8:.0f}", color=C["danger"], fontsize=10,
+    ax.text(P8 / BW * 1.08, 1.4, f"INT8 ridge {val('ridge8')}", color=C["danger"], fontsize=10,
             alpha=on3)
-    ax.text(28000, P8 * 1.1, "INT8 peak 1,979", color=C["danger"], fontsize=10, ha="right",
+    ax.text(28000, P8 * 1.1, f"INT8 peak {val('h100_int8')}", color=C["danger"], fontsize=10, ha="right",
             va="bottom", fontweight="bold", alpha=on3)
-    ax.text(28000, P16 / 1.1, "FP16 peak 989", color=C["compute"], fontsize=10, ha="right",
+    ax.text(28000, P16 / 1.1, f"FP16 peak {val('h100_fp16')}", color=C["compute"], fontsize=10, ha="right",
             va="top", fontweight="bold")
     # step 1: decode
-    ax.plot([1], [BW], "o", ms=11, color=C["memory"], mec="white", mew=1.5, zorder=5)
-    ax.annotate("GPT-2 XL decode,\nbatch 1: 1", (1, BW), xytext=(14, 0),
+    ax.plot([num("dec_ai")], [BW], "o", ms=11, color=C["memory"], mec="white", mew=1.5, zorder=5)
+    ax.annotate(f"GPT-2 XL decode,\nbatch 1: {val('dec_ai')}", (num("dec_ai"), BW), xytext=(14, 0),
                 textcoords="offset points", va="center", fontsize=11, fontweight="bold",
                 color=C["memory"])
     a2 = 1.0 if k >= 2 else 0.0
-    ax.plot([K.PREFILL_I], [P16], "o", ms=11, color=C["compute"], mec="white", mew=1.5,
+    ax.plot([PREFILL_I], [P16], "o", ms=11, color=C["compute"], mec="white", mew=1.5,
             zorder=5, alpha=a2)
-    ax.annotate(f"Same model,\nbatched prefill: {K.PREFILL_I:,.0f}", (K.PREFILL_I, P16),
+    ax.annotate(f"Same model,\nbatched prefill: {val('qkv_ai')}", (PREFILL_I, P16),
                 xytext=(6, -36), textcoords="offset points", ha="left", va="top", fontsize=11,
                 fontweight="bold", color=C["compute"], alpha=a2)
-    ax.plot([K.RESNET_INT8_I], [BW * K.RESNET_INT8_I], "o", ms=11, color=C["danger"],
+    ax.plot([RESNET_INT8_I], [BW * RESNET_INT8_I], "o", ms=11, color=C["danger"],
             mec="white", mew=1.5, zorder=6, alpha=on3)
-    ax.annotate(f"ResNet-50 conv, INT8\nweights: {K.RESNET_INT8_I}, below {K.RIDGE8:.0f}",
-                (K.RESNET_INT8_I, BW * K.RESNET_INT8_I), xytext=(-30, 14),
+    ax.annotate(f"ResNet-50 conv, INT8\nweights: {val('s3_mixed')}, below {val('ridge8')}",
+                (RESNET_INT8_I, BW * RESNET_INT8_I), xytext=(-30, 14),
                 textcoords="offset points", ha="right", va="bottom", fontsize=11,
                 fontweight="bold", color=C["danger"], alpha=on3)
     ax.set_xscale("log")
@@ -377,13 +382,13 @@ def cycle(stem, steps=1, kinds_from=None, lit=None, trace=None):
         g.rect(x, y, 420, h, "#FBEFF1" if on else "white",
                CRIMSON if on else "#BBBBBB", sw=3 if on else 2, opacity=op)
         g.text(x + 16, y + 24, title, 23, CRIMSON, "bold", "start", opacity=op)
-        for j, (num, name, kind) in enumerate(items):
+        for j, (pnum, name, kind) in enumerate(items):
             ly = y + 62 + j * 34
             for pr, f in (trace or []):
-                if pr == num:
+                if pr == pnum:
                     g.rect(x + 6, ly - 16, 408, 32, C["compute_l"], C["compute"],
                            sw=1.5, rx=5, first=f)
-            g.text(x + 42, ly, str(num), 22, C["neutral"], "bold", "end", opacity=op)
+            g.text(x + 42, ly, str(pnum), 22, C["neutral"], "bold", "end", opacity=op)
             g.text(x + 52, ly, name, 22, C["text"], "normal", "start", opacity=op)
             if kinds_from:
                 g.text(x + 410, ly, kind, 20, C["neutral"], "normal", "end",
@@ -406,19 +411,20 @@ cycle("cycle_trace", steps=2, trace=[(5, 1), (4, 1), (6, 1), (7, 1),
 # Amdahl: a 10x faster kernel inside a request that is 90 percent host.
 # Slot 0.85 textwidth x 3.0 cm; drawn near that size.
 # =============================================================================
-host_pct = K.SERIAL * 100
-inf_pct = (1 - K.SERIAL) * 100
+host_pct = num("amdahl_host_pct")
+inf_pct = num("amdahl_inf_pct")
+SPEEDUP = num("amdahl_speedup")
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(3.7, 1.05))
     rows = [("Before", host_pct, inf_pct, f"+ inference {inf_pct:.0f}% = 100%"),
-            ("After 10× kernel", host_pct, inf_pct / K.SPEEDUP,
-             f"+ {inf_pct / K.SPEEDUP:.0f}% = {K.NEW_TIME * 100:.0f}%: {K.AMDAHL:.1f}× faster")]
+            (f"After {val('amdahl_speedup')}× kernel", host_pct, inf_pct / SPEEDUP,
+             f"+ {inf_pct / SPEEDUP:.0f}% = {val('amdahl_new_pct')}%: {val('amdahl_gain')}× faster")]
     for i, (lab, host, inf, tot) in enumerate(rows):
         y = 1 - i
         on = 1.0 if (i == 0 or k == 2) else 0.0
         ax.barh(y, host, color=C["neutral"], height=0.62, alpha=on)
         ax.barh(y, inf, left=host, color=C["compute"], height=0.62, alpha=on)
-        ax.text(45, y, f"Host preprocessing {host_pct:.0f}%", ha="center", va="center",
+        ax.text(host_pct / 2, y, f"Host preprocessing {val('amdahl_host_pct')}%", ha="center", va="center",
                 color="white", fontsize=11, fontweight="bold", alpha=on)
         ax.text(-1, y, lab, ha="right", va="center", fontsize=11, fontweight="bold",
                 color=C["text"], alpha=on)
@@ -437,42 +443,42 @@ for k in (1, 2):
 # Tails: illustrative scenario, then a measured Google service
 # =============================================================================
 sp.hbars(str(out / "tail_illus.svg"), [
-    ("Mean TTFT", K.TTFT_MEAN, "neutral", f"{K.TTFT_MEAN} ms"),
-    ("p99 TTFT", K.TTFT_P99, "danger", f"{K.TTFT_P99:,} ms ({K.TTFT_P99 / K.TTFT_MEAN:.0f}×)"),
+    ("Mean TTFT", num("ttft_mean"), "neutral", f"{val('ttft_mean')} ms"),
+    ("p99 TTFT", num("ttft_p99"), "danger", f"{val('ttft_p99')} ms ({val('ttft_gap')}×)"),
 ], "ms", log=False, xlabel="Time to first token (ms)", size=(3.4, 1.6))
 sp.hbars(str(out / "tail_measured.svg"), [
-    ("One leaf, median", 1, "memory", "1 ms"),
-    ("One leaf, p99", K.LEAF_P99, "memory", f"{K.LEAF_P99} ms"),
-    ("All leaves, median", 40, "danger", "40 ms"),
-    ("All leaves, p99", K.ALL_P99, "danger", f"{K.ALL_P99} ms ({K.ALL_P99 / K.LEAF_P99:.0f}×)"),
+    ("One leaf, median", num("leaf_p50"), "memory", f"{val('leaf_p50')} ms"),
+    ("One leaf, p99", num("leaf_p99"), "memory", f"{val('leaf_p99')} ms"),
+    ("All leaves, median", num("all_p50"), "danger", f"{val('all_p50')} ms"),
+    ("All leaves, p99", num("all_p99"), "danger", f"{val('all_p99')} ms ({val('tail_ratio')}×)"),
 ], "ms", log=False, xlabel="Latency (ms)", size=(3.4, 2.1))
 
 # =============================================================================
 # From one GPU to a pool (frame 23). Slot 0.62 textwidth x 3.2 cm.
 # =============================================================================
 bars(out / "mtbf.svg", [
-    ("One GPU (MTTF)", K.MTTF_H, "neutral", f"{K.MTTF_H:,} h ({K.MTTF_YEARS} years)"),
-    ("A three-week run", K.RUN_H, "memory", f"{K.RUN_H} h"),
-    (f"{K.N_GPU:,} GPUs (MTBF)", K.MTBF_H, "danger",
-     f"{K.MTBF_H:.1f} h ({K.MTBF_H / 24:.0f} days)"),
+    ("One GPU (MTTF)", num("mttf_h"), "neutral", f"{val('mttf_h')} h ({val('mttf_years')} years)"),
+    ("A three-week run", num("run_h"), "memory", f"{val('run_h')} h"),
+    (f"{val('n_gpu')} GPUs (MTBF)", num("mtbf_h"), "danger",
+     f"{val('mtbf_h')} h ({K.FAIL.result.interval.to('day').magnitude:.0f} days)"),
 ], size=(2.4, 1.05), log=True, xlim=(10, 3e6),
     ticks=[(10, "10"), (1000, "1,000"), (100000, "100,000")],
     xlabel="Hours (log scale)", fs=10)
 
 # Llama 3 against the model (frame 28). Slot about 0.45 textwidth x 1.9 cm.
 bars(out / "llama_mtbf.svg", [
-    (f"Model, {K.LLAMA_GPUS:,} GPUs", K.MODEL_16K_H, "neutral", f"{K.MODEL_16K_H:.2f} h"),
-    ("Llama 3, measured", K.LLAMA_GAP_H, "danger", f"{K.LLAMA_GAP_H:.1f} h"),
+    (f"Model, {val('l3_gpus')} GPUs", num("model_16k_h"), "neutral", f"{val('model_16k_h')} h"),
+    ("Llama 3, measured", num("l3_gap_h"), "danger", f"{val('l3_gap_h')} h"),
 ], size=(1.5, 0.62), xlim=(0, 4.5), ticks=[(0, "0"), (1, "1"), (2, "2"), (3, "3"), (4, "4")],
     xlabel="Hours between interruptions", fs=10)
 
 # Power ladder by deployment tier (frame 25; System Paradigms Sec. 2.1, as in
 # Lecture 0). Slot 0.52 textwidth x 4.0 cm.
 bars(out / "power_tiers.svg", [
-    ("Cloud", 3e6, "neutral", "3 MW"),
-    ("Edge", 200, "neutral", "200 W"),
-    ("Mobile", 5, "neutral", "5 W"),
-    ("TinyML", 1e-3, "neutral", "1 mW"),
+    ("Cloud", num("cloud_mw") * 1e6, "neutral", f"{val('cloud_mw')} MW"),
+    ("Edge", num("edge_w"), "neutral", f"{val('edge_w')} W"),
+    ("Mobile", num("mobile_w"), "neutral", f"{val('mobile_w')} W"),
+    ("TinyML", num("tiny_mw") * 1e-3, "neutral", f"{val('tiny_mw')} mW"),
 ], size=(1.85, 1.45), log=True, xlim=(1e-4, 1e9),
     ticks=[(1e-3, "1 mW"), (1, "1 W"), (1e6, "1 MW")],
     xlabel="Power (log scale)", fs=10)
@@ -482,9 +488,11 @@ bars(out / "power_tiers.svg", [
 # Slot 0.88 textwidth x 4.2 cm: canvas 900 x 290, 19 px renders near 7.8 pt.
 # =============================================================================
 g = Svg(900, 290)
-nodes = {"ret": (10, 96, "Retrieval", f"{K.RET} ms"), "ta": (245, 6, "Tool A", f"{K.TOOL_A} ms"),
-         "tb": (245, 186, "Tool B", f"{K.TOOL_B} ms"), "gen": (480, 96, "Generation", f"{K.GEN} ms"),
-         "ver": (715, 96, "Verifier", f"{K.VER} ms")}
+nodes = {"ret": (10, 96, "Retrieval", f"{val('dag_ret')} ms"),
+         "ta": (245, 6, "Tool A", f"{val('dag_tool_a')} ms"),
+         "tb": (245, 186, "Tool B", f"{val('dag_tool_b')} ms"),
+         "gen": (480, 96, "Generation", f"{val('dag_gen')} ms"),
+         "ver": (715, 96, "Verifier", f"{val('dag_ver')} ms")}
 crit = {"ret", "ta", "gen", "ver"}
 for key, (x, y, name, ms) in nodes.items():
     g.rect(x, y, 175, 92, "white", C["neutral"], sw=2)
@@ -500,7 +508,8 @@ for x1, y1, x2, y2, c in edges:
     if c:
         g.line(x1, y1, x2, y2, C["danger"], sw=3.5, first=2)
 g.text(890, 222, "Critical path", 20, C["danger"], "bold", "end", first=2)
-g.text(890, 252, f"{K.RET} + {K.TOOL_A} + {K.GEN} + {K.VER} = {K.CRIT} ms", 20, C["danger"],
+g.text(890, 252, f"{val('dag_ret')} + {val('dag_tool_a')} + {val('dag_gen')} + {val('dag_ver')} = "
+       f"{val('dag_crit')} ms", 20, C["danger"],
        "bold", "end", first=2)
 # step 3: what can go wrong at each interface
 for x, y in ((214, 101), (449, 88), (449, 196)):
@@ -557,15 +566,17 @@ g.write("fleet", 2)
 # The slide places one photo above each column (x = 2 + 228 i, width 215).
 # =============================================================================
 g = Svg(900, 248)
-stages = [("Wake word", "KWS, microcontroller", ["200 KB INT8 in 1 MB", "20 MFLOP",
-                                                 "milliwatts"], "Power", C["danger"]),
-          ("Front end", "MobileNetV2-size, phone", ["600 MFLOP", "3.5 MB INT8", "5 W"],
+stages = [("Wake word", "KWS, microcontroller", [f"{val('kws_kb')} KB INT8 in {val('mcu_flash_mb')} MB",
+                                                 f"{val('kws_mflop')} MFLOP", "milliwatts"],
+           "Power", C["danger"]),
+          ("Front end", "MobileNetV2-size, phone", [f"{val('mnv2_mflop')} MFLOP",
+                                                    f"{val('mnv2_int8_mb')} MB INT8", f"{val('phone_w')} W"],
            "Compute", C["compute"]),
-          ("Ranking", "DLRM, cloud", ["100 GB of tables", "one H100: 80 GB"],
+          ("Ranking", "DLRM, cloud", [f"{val('dlrm_gb')} GB of tables", f"one H100: {val('h100_gib')} GB"],
            "Capacity", C["network"]),
-          ("Reply", "GPT-2, cloud H100", [f"{K.GPT2_BYTES / 1e9:.0f} GB per token",
-                                             f"{K.GPT2_MEM_MS:.1f} ms floor",
-                                             f"{K.GPT2_MEM_MS / K.GPT2_COMP_MS:.0f}× compute floor"],
+          ("Reply", "GPT-2, cloud H100", [f"{val('gpt2_gb')} GB per token",
+                                             f"{val('gpt2_mem_ms')} ms floor",
+                                             f"{val('gpt2_ratio')}× compute floor"],
            "Bandwidth", C["memory"])]
 for i, (name, sub, nums, bind, col) in enumerate(stages):
     x = 2 + i * 228
@@ -589,7 +600,7 @@ g.write("voice", 5)
 import subprocess  # noqa: E402
 
 THUMBS = ["chain_step2.svg", "chain_step3.svg", "roofline_step3.svg", "cycle_step2.svg",
-          "mtbf.svg", "data_wall_step2.svg"] + \
+          "mtbf.svg"] + \
          [f"cycle_part{p}.svg" for p in range(1, 5)]
 subprocess.run([sys.executable, str(Path(__file__).resolve().parents[3] / "tools" /
                                     "greek_thumbs.py")] + [str(out / t) for t in THUMBS],

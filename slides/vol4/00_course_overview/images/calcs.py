@@ -1,88 +1,84 @@
-"""Every derived number on the Lecture 0 slides (Volume IV, Physical AI).
+#!/usr/bin/env python3
+"""Every number on the Volume IV Lecture 0 slides and notes, read from MLSysIM.
 
-Run:  /Users/.../MLSysBook/.venv/bin/python calcs.py   (needs numpy for MLSysIM)
-Each block names the slide it serves, lists its inputs with their sources,
-and prints each result with the label the slide uses. Inputs typed from a
-source carry that source; only derived values are computed here.
+Lecture 0 previews the course, so each number it shares with a later lecture is
+read from the same entry that lecture's deck reads: the latch campaign's clean
+runs (Lecture 7, Scenarios.LatchEvaluationCampaign) and the Challenger flight
+record (Lecture 16, Literature.SpaceflightAnomalies).
 
-The last block keeps the running machine's elementary stopping budget for the
-stopping-budget bar generator in make_figs.py (a kit candidate). Lecture 0 no
-longer shows that budget; Lecture 1 owns it.
+Sources behind the values
+  Waymo miles       Literature.Series.WaymoRiderOnlyMiles (Safety Impact Data Hub)
+  Robot fleets      Literature.RobotDeployments (IFR World Robotics 2025; Amazon, July 2025)
+  ER-FLEX body      Literature.PlatformConfigurations (UR16e datasheet; MiR250 Specifications)
+
+This file only selects values, converts units, and formats them; it types no
+numbers. Run from this folder: python3 calcs.py (writes images/numbers.tex).
 """
 
 import sys
+from datetime import date
 from pathlib import Path
 
-MLSYSIM = Path(__file__).resolve().parents[4] / "mlsysim"
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
 
-# --- Inputs: the running machine's card (The Causal Boundary, sec. 1.4.2, table 2)
-V_DRIVE = 1.5        # m/s, drive limit (illustrative)
-A_BRAKE = 2.0        # m/s^2, credible deceleration (illustrative)
-D_CLEAR = 1.10       # m, rack-end clear distance (illustrative)
-# Pre-brake delay terms (Napkin Math 1.1), ms: observation age, lease, tick, bus, brake onset
-DELAY_TERMS = [51.6, 60.0, 1.0, 1.0, 20.0]
-
-# --- Inputs: IFR World Robotics 2025 press release, Frankfurt, 25 Sep 2025
-IFR_INSTALLED_2024 = 542_000        # "542,000 robots installed in 2024"
-IFR_STOCK_2024 = 4_664_000          # "4,664,000 units in 2024" in operational use
-
-# --- Inputs: UR16e datasheet (Universal Robots) and MiR250 specifications (MiR, 2023-06-28)
-UR16E = {"payload kg": 16, "reach mm": 900, "joints": 6, "mass kg (with cable)": 33.1}
-MIR250 = {"payload kg": 250, "mass kg": 97, "safety laser scanners": 2, "3D cameras": 2}
-
-
-def tau_delay_ms():
-    return sum(DELAY_TERMS)
-
-
-def stop_mm(v, tau_ms=None, a=A_BRAKE):
-    tau = (tau_delay_ms() if tau_ms is None else tau_ms) / 1000
-    return v * tau * 1000, v ** 2 / (2 * a) * 1000
+Literature, Scenarios = mlsysim.Literature, mlsysim.Scenarios
+WAYMO = Literature.Series.WaymoRiderOnlyMiles.entries
+FLEETS, BODY = Literature.RobotDeployments, Literature.PlatformConfigurations
+CAMPAIGN = Scenarios.LatchEvaluationCampaign
+YEAR_START, YEAR_END = "2025-06", "2026-06"   # the twelve months the vote asks about
 
 
 def waymo_rows():
-    sys.path.insert(0, str(MLSYSIM))
-    from mlsysim import Literature
-    return [(r["data_through"], r["cumulative_ro_miles_millions"])
-            for r in Literature.Series.WaymoRiderOnlyMiles.entries]
+    """(data-through month, cumulative rider-only miles in millions), in release order."""
+    return [(r["data_through"], r["cumulative_ro_miles_millions"]) for r in WAYMO]
 
 
-def waymo_last_year():
-    rows = dict(waymo_rows())
-    return rows["2026-06"] - rows["2025-06"]
+def month(ym):
+    return date.fromisoformat(ym + "-01")
 
 
-def main():
-    print("== Hook and plot: Waymo rider-only miles (Waymo Safety Impact Data Hub via MLSysIM)")
-    rows = waymo_rows()
-    for d, m in rows:
-        print(f"   {d}: {m:.3f} million cumulative")
-    first, last = rows[0], rows[-1]
-    yr = waymo_last_year()
-    print(f"miles July 2025 to June 2026: {yr:.3f} million (slide: about {yr:.0f} million)")
-    print(f"hook choices (factor-ten ladder): {yr / 100:.2f} M, {yr / 10:.1f} M, {yr:.0f} M, {yr * 10 / 1000:.2f} B")
-    print(f"per day over that year: {yr * 1e6 / 365:,.0f} miles")
-    print(f"growth {first[0]} to {last[0]}: {last[1] / first[1]:.1f} times")
-    print(f"first: {first[1]:.1f} million ; last: {last[1]:.1f} million")
+miles = dict(waymo_rows())
+first_ym, last_ym = waymo_rows()[0][0], waymo_rows()[-1][0]
+year = miles[YEAR_END] - miles[YEAR_START]
+year_days = (month(YEAR_END) - month(YEAR_START)).days
 
-    print("\n== Industrial robots (IFR World Robotics 2025)")
-    print(f"installed 2024: {IFR_INSTALLED_2024:,} ; in operation: {IFR_STOCK_2024:,}")
-    print(f"in operation, millions: {IFR_STOCK_2024 / 1e6:.2f}")
-    print(f"stock per 2024 installation: {IFR_STOCK_2024 / IFR_INSTALLED_2024:.1f}")
+print("== Waymo rider-only miles")
+v("wm_year", year, "{:.0f}", "miles in the twelve months, millions")
+v("wm_year_1d", year, "{:.1f}", "the same, one decimal")
+v("wm_ch_a", year / 100, "{:.2f}", "vote choice A, millions (a hundredth)")
+v("wm_ch_b", year / 10, "{:.1f}", "vote choice B, millions (a tenth)")
+v("wm_ch_d", year * 10 / 10 ** 3, "{:.2f}", "vote choice D, billions (ten times)")
+v("wm_per_day", round(year * 10 ** 6 / year_days, -4), "{:,.0f}", "miles a day over the year, nearest 10,000")
+v("wm_first", miles[first_ym], "{:.1f}", "June 2024 cumulative, millions")
+v("wm_start", miles[YEAR_START], "{:.1f}", "June 2025 cumulative, millions")
+v("wm_dec25", miles["2025-12"], "{:.1f}", "December 2025 cumulative, millions")
+v("wm_last", miles[last_ym], "{:.1f}", "June 2026 cumulative, millions")
+v("wm_growth", miles[last_ym] / miles[first_ym], "{:.1f}", "growth over two years, x")
 
-    print("\n== Anatomy slide: datasheet values (typed, none derived)")
-    print(f"UR16e: {UR16E}")
-    print(f"MiR250: {MIR250}")
+print("== Robot fleets")
+stock, installed = FLEETS.IfrRobotsInOperation2024, FLEETS.IfrRobotsInstalled2024
+v("ifr_stock_m", stock / 10 ** 6, "{:.2f}", "industrial robots in operation, millions")
+v("ifr_installed", installed, "{:,.0f}", "installed in 2024")
+v("amazon_robots", FLEETS.AmazonRobotsDeployed2025, "{:,.0f}", "Amazon robots deployed")
+v("amazon_gain_pct", FLEETS.AmazonDeepFleetTravelGainPct, "{:.0f}", "DeepFleet travel gain Amazon expects, %")
 
-    print("\n== Course map")
-    lectures = list(range(1, 19))
-    print(f"lectures after this one: {len(lectures)} ; parts: 4 ; records: 16 (sec. 1.11 figure)")
+print("== The ER-FLEX body (datasheets)")
+v("mir_mass_kg", BODY.Mir250MassKg, "{:.0f}", "MiR250 weight, kg")
+v("mir_payload_kg", BODY.Mir250PayloadKg, "{:.0f}", "MiR250 payload, kg")
+v("mir_scanners_words", BODY.Mir250SafetyLaserScanners, "words", "safety laser scanners, spelled")
+v("mir_cameras_words", BODY.Mir250DepthCameras, "words", "3D cameras, spelled")
+v("ur_joints", BODY.Ur16eJoints, "{:.0f}", "UR16e joints")
+v("ur_joints_words", BODY.Ur16eJoints, "words", "the same, spelled")
+v("ur_payload_kg", BODY.Ur16ePayloadKg, "{:.0f}", "UR16e payload, kg")
+v("ur_reach_mm", BODY.Ur16eReachMm, "{:.0f}", "UR16e reach, mm")
 
-    print("\n== Kit candidate only (stopping-budget bar; not shown in Lecture 0)")
-    d1, d2 = stop_mm(V_DRIVE)
-    print(f"pre-brake delay {tau_delay_ms():.1f} ms ; delay {d1:.1f} mm ; braking {d2:.1f} mm ; "
-          f"stop {d1 + d2:.1f} of {D_CLEAR * 1000:.0f} mm")
-
+print("== Previews of later lectures")
+v("latch_clean", CAMPAIGN.clean_runs, "{:.0f}", "clean door runs (Lecture 7)")
+v("latch_clean_words", CAMPAIGN.clean_runs, "words", "the same, spelled")
+v("latch_next", CAMPAIGN.clean_runs + 1, "{:.0f}", "the next run")
+v("challenger_prior", Literature.SpaceflightAnomalies.ChallengerPriorJointFlights, "{:.0f}",
+  "flights before Challenger (Lecture 16)")
 
 if __name__ == "__main__":
-    main()
+    write(__file__)

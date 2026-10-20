@@ -407,6 +407,7 @@ The Training and Monitoring rows mix release prerequisites with later refinement
 # │ How: Calculate total dataset size needed to capture a 1% minority subgroup.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_count, fmt_int, fmt_multiple, fmt_percent, fmt_pp
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -417,14 +418,15 @@ class RepresentationStats:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    target_imgs = 10_000
-    minority_fraction = 0.01
-    target_margin_pp = 1
-    confidence = 0.95
+    budget = Scenarios.OnePercentGroupEvaluationBudget
+    target_imgs = budget.target_per_group
+    minority_fraction = budget.group_share
+    target_margin_pp = budget.half_width * 100
+    confidence = budget.confidence
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    random_total = target_imgs / minority_fraction
-    multiplier = random_total / target_imgs
+    random_total = budget.random_collection
+    multiplier = budget.random_multiple
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(multiplier == 100, "Multiplier should be 100.")
@@ -631,6 +633,7 @@ An operational release gate must distinguish absence of evidence from evidence o
 # │ How: Compute metrics from confusion matrices for two demographic groups.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, check, fmt_math, fmt_percent, fmt_pp
 
 def _math_int(n):
@@ -645,33 +648,35 @@ class LoanFairness:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    a_tp, a_fn = 4500, 500
-    a_fp, a_tn = 1000, 4000
-    b_tp, b_fn = 600, 400
-    b_fp, b_tn = 200, 800
+    credit = Scenarios.CreditServiceTwoGroups
+    group_a, group_b = credit.groups["A"], credit.groups["B"]
+    a_tp, a_fn = int(group_a["tp"]), int(group_a["fn"])
+    a_fp, a_tn = int(group_a["fp"]), int(group_a["tn"])
+    b_tp, b_fn = int(group_b["tp"]), int(group_b["fn"])
+    b_fp, b_tn = int(group_b["fp"]), int(group_b["tn"])
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     a_total = a_tp + a_fn + a_fp + a_tn
     b_total = b_tp + b_fn + b_fp + b_tn
 
-    a_app_pct = (a_tp + a_fp) / a_total * 100
-    b_app_pct = (b_tp + b_fp) / b_total * 100
+    a_app_pct = credit.positive_rate("A") * 100
+    b_app_pct = credit.positive_rate("B") * 100
     dp_disparity = a_app_pct - b_app_pct
 
-    a_tpr_pct = a_tp / (a_tp + a_fn) * 100
-    b_tpr_pct = b_tp / (b_tp + b_fn) * 100
+    a_tpr_pct = credit.tpr("A") * 100
+    b_tpr_pct = credit.tpr("B") * 100
     tpr_disparity = a_tpr_pct - b_tpr_pct
 
-    a_fpr_pct = a_fp / (a_fp + a_tn) * 100
-    b_fpr_pct = b_fp / (b_fp + b_tn) * 100
-    a_fnr_pct = a_fn / (a_tp + a_fn) * 100
-    b_fnr_pct = b_fn / (b_tp + b_fn) * 100
+    a_fpr_pct = credit.fpr("A") * 100
+    b_fpr_pct = credit.fpr("B") * 100
+    a_fnr_pct = credit.fnr("A") * 100
+    b_fnr_pct = credit.fnr("B") * 100
 
     fpr_disparity = a_fpr_pct - b_fpr_pct
     a_qualified = a_tp + a_fn
     b_qualified = b_tp + b_fn
-    majority_acc_pct = (a_tp + a_tn) / a_total * 100
-    overall_acc_pct = (a_tp + a_tn + b_tp + b_tn) / (a_total + b_total) * 100
+    majority_acc_pct = credit.accuracy("A") * 100
+    overall_acc_pct = credit.overall_accuracy * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(tpr_disparity >= 25, f"TPR Disparity ({tpr_disparity:.1f}%) is too low.")
@@ -912,25 +917,27 @@ Each mitigation on the credit service, whether sample reweighting, adversarial d
 # │ Visualize Pareto frontier: accuracy vs demographic disparity; show
 import numpy as np
 from binder.tools.figures import style as book_style
+from mlsysim import Scenarios
 
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 4))
+frontier = Scenarios.FairnessAccuracyFrontierSketch
 
 # =============================================================================
 # PLOT: The Fairness-Accuracy Pareto Frontier
 # =============================================================================
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-disparity = np.linspace(0.0, 0.18, 100)
-accuracy = 0.85 + 0.10 * (1 - np.exp(-20 * disparity))
+disparity = np.linspace(0.0, frontier.candidates["A"], 100)
+accuracy = frontier.accuracy(disparity)
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
 ax.plot(disparity, accuracy, color=COLORS['primary'], linewidth=2, linestyle='--')
 
-# Assumed candidate coordinates from the original illustrative example.
-_a_gap, _a_accuracy = 0.18, 0.947
-_b_gap, _b_accuracy = 0.05, 0.913
-_c_gap, _c_accuracy = 0.0, 0.85
-_gap_ratio = _a_gap / _b_gap
+# Candidate models on the hypothetical frontier.
+_a_gap, _a_accuracy = frontier.point("A")
+_b_gap, _b_accuracy = frontier.point("B")
+_c_gap, _c_accuracy = frontier.point("C")
+_gap_ratio = frontier.disparity_ratio("A", "B")
 ax.plot(_a_gap, _a_accuracy, 'o', color=COLORS['primary'], markersize=8)
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
@@ -999,6 +1006,7 @@ A real deployment locates its own candidate configurations on the plane of @fig-
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_usd, check, fmt_math, fmt_percent, fmt_pp
 from mlsysim.core.units import USD
 
@@ -1006,26 +1014,27 @@ class FairnessPrice:
     """Utility cost of closing the credit service's TPR gap via threshold adjustment."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    repay_margin = 1_500 * USD  # scenario assumption: lifetime margin on a repaid loan
-    default_loss = 3_000 * USD  # scenario assumption: loss on a loan that defaults
-    fp_increase_pp = 20  # scenario assumption: Group B FPR increase to close the TPR gap (pp)
-    group_a_tpr = LoanFairness.a_tpr_pct / 100  # credit service worked example
-    group_b_tpr = LoanFairness.b_tpr_pct / 100
-    group_b_fpr = LoanFairness.b_fpr_pct / 100
-    positive_base_rate = LoanFairness.b_qualified / LoanFairness.b_total  # Group B applicants who would repay
-    minority_group_share = LoanFairness.b_total / (LoanFairness.a_total + LoanFairness.b_total)
+    price = Scenarios.CreditServiceEqualOpportunityPrice  # the credit service worked example
+    repay_margin = price.repay_margin  # scenario assumption: lifetime margin on a repaid loan
+    default_loss = price.default_loss  # scenario assumption: loss on a loan that defaults
+    fp_increase_pp = price.fpr_increase * 100  # scenario assumption: Group B FPR increase to close the TPR gap (pp)
+    group_a_tpr = price.tpr_after
+    group_b_tpr = price.tpr_before
+    group_b_fpr = price.fpr_before
+    positive_base_rate = price.base_rate  # Group B applicants who would repay
+    minority_group_share = price.group_share
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Two-sided accounting: raising Group B's TPR adds repaid loans among
     # applicants who would repay (+margin), and the matching FPR rise adds
     # defaults among those who would not (-loss).
-    tpr_gap_pp = (group_a_tpr - group_b_tpr) * 100
-    extra_tp_value = (tpr_gap_pp / 100.0) * positive_base_rate * repay_margin
-    extra_fp_cost = (fp_increase_pp / 100.0) * (1 - positive_base_rate) * default_loss
-    net_change_per_applicant = extra_tp_value - extra_fp_cost
-    baseline_utility_per_applicant = group_b_tpr * positive_base_rate * repay_margin - group_b_fpr * (1 - positive_base_rate) * default_loss
-    loss_fraction_within_group = (-net_change_per_applicant / baseline_utility_per_applicant).to("").magnitude
-    population_average_loss = -net_change_per_applicant * minority_group_share
+    tpr_gap_pp = price.tpr_gap * 100
+    extra_tp_value = price.added_repaid_value
+    extra_fp_cost = price.added_default_cost
+    net_change_per_applicant = price.net_change
+    baseline_utility_per_applicant = price.baseline_utility
+    loss_fraction_within_group = price.loss_fraction
+    population_average_loss = price.population_average_loss
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(baseline_utility_per_applicant.to(USD).magnitude - 150.0) < 1e-6, "Baseline lending utility per Group B applicant should be $150.")
@@ -1469,17 +1478,19 @@ Selecting an explainability strategy along this spectrum requires balancing expl
 # │ How:     Exact cost = 2^F feature subsets; sampled cost = sample count.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_count, fmt_int
 
 class AttributionCost:
     """Model evaluations needed to explain one credit-service decision."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    credit_features = 20  # scenario assumption: input features of the credit service
-    sampled_coalitions = 1_000  # scenario assumption: feature subsets a sampling explainer evaluates
+    load = Scenarios.CreditDenialExplanationLoad
+    credit_features = load.features
+    sampled_coalitions = load.samples
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    exact_evaluations = 2**credit_features
+    exact_evaluations = load.exact_per_explanation
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(exact_evaluations > 1_000_000, "Exact attribution over 20 features should need over a million evaluations.")
@@ -1635,27 +1646,28 @@ Where service-health monitoring catches crashes and timeouts, the technical debt
 # │
 # │ Note:    Reads LoanFairness.tpr_disparity from fairness-metrics-calc.
 # └─────────────────────────────────────────────────────────────────────────────
-import math
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_pp, fmt_count, check
 
 class BiasFeedbackLoop:
     """Loan-model disparity iterated over quarterly retraining cycles."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    gate_pp = 5.0  # release threshold used in the loan example
-    launch_gap_pp = 3.0  # scenario assumption: residual TPR gap after mitigation
-    next_audit_gap_pp = 3.3  # scenario assumption: gap at the next quarterly audit
-    alpha_sampled = 0.90  # scenario assumption: fitted factor once outcomes of marginal denials are sampled
-    unmitigated_gap_pp = LoanFairness.tpr_disparity  # pre-mitigation TPR gap from the worked example
-    horizon_cycles = 4  # one year of quarterly retraining
+    loop = Scenarios.CreditServiceBiasFeedback
+    gate_pp = loop.gate  # release threshold used in the loan example
+    launch_gap_pp = loop.launch_gap  # scenario assumption: residual TPR gap after mitigation
+    next_audit_gap_pp = loop.next_audit_gap  # scenario assumption: gap at the next quarterly audit
+    alpha_sampled = loop.sampled_factor  # scenario assumption: fitted factor once outcomes of marginal denials are sampled
+    unmitigated_gap_pp = loop.unmitigated_gap  # pre-mitigation TPR gap from the worked example
+    horizon_cycles = loop.horizon_cycles  # one year of quarterly retraining
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    alpha_fb = next_audit_gap_pp / launch_gap_pp
-    breach_cycles = math.ceil(math.log(gate_pp / launch_gap_pp) / math.log(alpha_fb))
-    gap_at_breach_pp = launch_gap_pp * alpha_fb**breach_cycles
-    gap_before_breach_pp = launch_gap_pp * alpha_fb ** (breach_cycles - 1)
-    unmitigated_horizon_pp = unmitigated_gap_pp * alpha_fb**horizon_cycles
-    sampled_gap_pp = launch_gap_pp * alpha_sampled**breach_cycles
+    alpha_fb = loop.factor
+    breach_cycles = loop.breach_cycle
+    gap_at_breach_pp = loop.gap_at_breach
+    gap_before_breach_pp = loop.gap_at(breach_cycles - 1)
+    unmitigated_horizon_pp = loop.unmitigated_at_horizon
+    sampled_gap_pp = loop.sampled_gap_at_breach
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(alpha_fb - 1.10) < 1e-9, f"Fitted feedback factor should be 1.10, got {alpha_fb:.3f}.")
@@ -1710,21 +1722,23 @@ class BiasFeedbackLoop:
 # │ How:     impressions = users x slots; coverage = slots / catalog.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_count, fmt_percent
 
 class DLRMExposure:
     """Exposure feedback in the DLRM ranking service."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    users_daily = 10_000_000  # scenario assumption: daily active users of the ranking service
-    slots_per_user = 20  # scenario assumption: ranked items shown to each user per day
-    catalog_items = 1_000_000  # scenario assumption: items eligible for ranking
-    explore_fraction = 0.01  # scenario assumption: share of slots served by randomized exploration
+    exposure = Scenarios.RecommenderExplorationExposure
+    users_daily = exposure.daily_users  # scenario assumption: daily active users of the ranking service
+    slots_per_user = exposure.slots_per_user  # scenario assumption: ranked items shown to each user per day
+    catalog_items = exposure.catalog_items  # scenario assumption: items eligible for ranking
+    explore_fraction = exposure.explore_share  # scenario assumption: share of slots served by randomized exploration
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    impressions_daily = users_daily * slots_per_user
-    catalog_coverage = slots_per_user / catalog_items
-    explore_impressions_daily = impressions_daily * explore_fraction
+    impressions_daily = exposure.impressions
+    catalog_coverage = exposure.catalog_coverage
+    explore_impressions_daily = exposure.explore_impressions
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(catalog_coverage < 1e-4, "Each user should see a tiny fraction of the catalog.")
@@ -1792,28 +1806,23 @@ Training a single large language model\index{LLM} consumes thousands of GPU\inde
 # │      rows of Literature.Series.NotableModels.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-import datetime as dt
-import numpy as np
-from mlsysim import Literature
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_text, fmt_usd
-
-def _decimal_year(s):
-    d = dt.date.fromisoformat(s)
-    return d.year + (d.timetuple().tm_yday - 1) / 365.25
 
 # ┌── LEGO ───────────────────────────────────────────────
 class FrontierTrainingCost:
     """Training compute cost of notable and frontier models over time."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    start_year = 2016
-    rows = [r for r in Literature.Series.NotableModels.entries if r["training_cost_2023usd"] and r["date"][:4] >= "2016"]
+    trend = Scenarios.FrontierTrainingCostTrend
+    start_year = trend.from_year
+    rows = trend.rows
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    frontier = [r for r in rows if r["frontier"] == 1]
-    fit_slope, fit_intercept = np.polyfit([_decimal_year(r["date"]) for r in frontier], np.log10([r["training_cost_2023usd"] for r in frontier]), 1)
-    growth_per_year = 10**fit_slope
-    priciest = max(frontier, key=lambda r: r["training_cost_2023usd"])
+    frontier = trend.frontier
+    fit_slope, fit_intercept = trend.fit
+    growth_per_year = trend.growth_per_year
+    priciest = trend.priciest
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(2 <= growth_per_year <= 4, f"Expected ~2.9x per year, got {growth_per_year:.2f}.")
@@ -1842,11 +1851,12 @@ The growth in training compute carries a price, and the price decides who can ta
 # │ How: FrontierTrainingCost (above); book_style.setup_plot().
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+import numpy as np
 from binder.tools.figures import style as book_style
 
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 4.4))
 _C = FrontierTrainingCost
-_yr = _decimal_year
+_yr = _C.trend.decimal_year
 _oth = [r for r in _C.rows if r["frontier"] != 1]
 ax.scatter([_yr(r["date"]) for r in _oth], [r["training_cost_2023usd"] for r in _oth], s=14, color=COLORS["grid"], label="Notable model", zorder=2)
 ax.scatter(
@@ -1983,44 +1993,35 @@ Edge deployment\index{Edge deployment!power constraints} makes these limits imme
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim.fmt import fmt, fmt_count, fmt_usd, fmt_time, fmt_int, fmt_ratio, check
-from mlsysim import Infrastructure
-from mlsysim.core.units import (
-    MILLION,
-    SEC_PER_HOUR,
-    hour,
-    ms,
-    second,
-    USD,
-)
+from mlsysim import Scenarios
+from mlsysim.core.units import hour, USD
 
 class InferenceCostCalc:
     """Training vs. inference TCO comparison for the DLRM ranking service."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    gpu_rate = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate
-    data_prep_hours = 100 * hour  # scenario assumption: data preparation GPU-hours
-    hyperparam_hours = 500 * hour  # scenario assumption: hyperparameter search GPU-hours
-    train_hours = 200 * hour  # scenario assumption: final training GPU-hours
-    retrain_cycles = 12  # dimensionless quarterly retraining cycles over 3 years
-
-    users_daily_value = DLRMExposure.users_daily  # traffic from dlrm-exposure-calc
-    recs_per_user_count = DLRMExposure.slots_per_user  # ranked items per user per day
-    inference_latency = 10 * ms  # scenario assumption: unbatched, non-overlapped accelerator service demand
-    gpu_inf_rate = Infrastructure.Pricing.Cloud.GpuInferencePerHour.rate
+    tco = Scenarios.RankingServiceLifecycleCost
+    gpu_rate = tco.training_rate
+    data_prep_hours = tco.data_prep_time
+    hyperparam_hours = tco.search_time
+    train_hours = tco.final_run_time
+    users_daily_value = tco.daily_users  # traffic from dlrm-exposure-calc's scenario
+    recs_per_user_count = tco.items_per_user
+    inference_latency = tco.service_time
+    gpu_inf_rate = tco.inference_rate
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    data_prep_cost = data_prep_hours * gpu_rate
-    hyperparam_cost = hyperparam_hours * gpu_rate
-    train_cost = train_hours * gpu_rate
-    total_train_cost = data_prep_cost + hyperparam_cost + train_cost
+    data_prep_cost = tco.data_prep_cost
+    hyperparam_cost = tco.search_cost
+    train_cost = tco.final_run_cost
+    total_train_cost = tco.cycle_cost
 
-    inferences_daily_value = users_daily_value * recs_per_user_count
-    gpu_time_daily = inferences_daily_value * inference_latency
-    gpus_needed = gpu_time_daily.to(hour) / (24 * hour)
-    annual_inf_cost = gpus_needed * 24 * 365 * hour * gpu_inf_rate
+    inferences_daily_value = tco.inferences_per_day
+    gpus_needed = tco.gpus_busy
+    annual_inf_cost = tco.inference_cost_per_year
 
-    lifecycle_inf_cost = annual_inf_cost * 3
-    lifecycle_train_cost = total_train_cost * retrain_cycles
+    lifecycle_inf_cost = tco.inference_cost
+    lifecycle_train_cost = tco.training_cost
     inf_train_ratio = lifecycle_inf_cost / lifecycle_train_cost
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -2164,12 +2165,11 @@ Applying the baseline assumptions:
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_count, fmt_emissions, fmt_int, fmt_text, fmt_usd, check, fmt_percent
-from mlsysim import Infrastructure
+from mlsysim import Scenarios
 from mlsysim.core.units import (
     THOUSAND,
     DAYS_PER_YEAR,
     hour,
-    ms,
     USD,
     kg,
 )
@@ -2177,41 +2177,25 @@ from mlsysim.core.units import metric_ton
 
 class TCOCalc:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    train_gpu_rate = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate
-    inf_gpu_rate = Infrastructure.Pricing.Cloud.GpuInferencePerHour.rate
-    carbon_per_gpu_hour = Infrastructure.Pricing.Fleet.CarbonPerGpuHr.rate / hour
-    t_data_prep_time = 100 * hour  # scenario assumption
-    t_hparam_exps = 50
-    t_hparam_cost_exp = 40.0 * USD  # scenario assumption
-    t_final_time = 200 * hour  # scenario assumption
-    t_cycles_3yr = 12
-    i_users = DLRMExposure.users_daily  # traffic from dlrm-exposure-calc
-    i_recs_per_user = DLRMExposure.slots_per_user
-    i_latency = 10 * ms  # dedicated accelerator service demand; illustrative unbatched, non-overlapped scenario
-    o_monitor_yr = 50000.0 * USD  # scenario assumption
-    o_oncall_yr = 100000.0 * USD  # scenario assumption
-    o_incident_yr = 20000.0 * USD  # scenario assumption
+    tco = Scenarios.RankingServiceLifecycleCost
+    train_gpu_rate = tco.training_rate
+    inf_gpu_rate = tco.inference_rate
+    carbon_per_gpu_hour = tco.carbon_per_gpu_hour / hour
+    t_cycles_3yr = tco.cycles
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    train_cost_cycle = (t_data_prep_time * train_gpu_rate) + (t_hparam_exps * t_hparam_cost_exp) + (t_final_time * train_gpu_rate)
-    train_tco_3yr = train_cost_cycle * t_cycles_3yr
-
-    hparam_gpu_time = (t_hparam_exps * t_hparam_cost_exp / train_gpu_rate).to(hour)
-    train_gpu_time_cycle = t_data_prep_time + t_final_time + hparam_gpu_time
-    train_carbon_cycle = (train_gpu_time_cycle * carbon_per_gpu_hour).to(kg)
-    train_carbon_3yr = train_carbon_cycle * t_cycles_3yr
+    train_cost_cycle = tco.cycle_cost
+    train_tco_3yr = tco.training_cost
+    train_carbon_3yr = tco.training_carbon
 
     # B. Inference
-    inf_daily_total = i_users * i_recs_per_user
-    inf_gpu_time_day = (inf_daily_total * i_latency).to(hour)
-    inf_cost_day = (inf_gpu_time_day * inf_gpu_rate).to(USD)
-    inf_tco_3yr = inf_cost_day * DAYS_PER_YEAR * 3
-    inf_carbon_day = (inf_gpu_time_day * carbon_per_gpu_hour).to(kg)
-    inf_carbon_3yr = inf_carbon_day * DAYS_PER_YEAR * 3
+    inf_gpu_time_day = tco.gpu_hours_per_day
+    inf_tco_3yr = tco.inference_cost
+    inf_carbon_3yr = tco.inference_carbon
 
     # C. Operations
-    o_annual = o_monitor_yr + o_oncall_yr + o_incident_yr
-    o_total_3yr = o_annual * 3
+    o_annual = tco.operations_per_year
+    o_total_3yr = tco.operations_cost
 
     # D. Totals
     total_tco = train_tco_3yr + inf_tco_3yr + o_total_3yr
@@ -2298,8 +2282,8 @@ class TCOSummary:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    quant_reduction_pct = 0.20  # 20%
-    training_time_reduction_pct = 0.50
+    quant_reduction_pct = Scenarios.RankingServiceLifecycleCost.serving_cut
+    training_time_reduction_pct = Scenarios.RankingServiceLifecycleCost.training_cut
 
     # Load from module-level variables computed in the previous cell
     inf_tco_3yr = inf_tco_3yr
@@ -2386,21 +2370,21 @@ The same physical quantities that govern performance also affect responsibility.
 from mlsysim.fmt import fmt, fmt_carbon_intensity, fmt_count, fmt_emissions, fmt_energy, fmt_int, check, fmt_qty_int
 from mlsysim.core.units import THOUSAND
 from mlsysim.core.units import MWh, kWh, gram, kg, metric_ton
-from mlsysim import Models, Infrastructure
-from mlsysim.physics import carbon_from_energy
+from mlsysim import Scenarios
 
 class CarbonScaleCalc:
     """GPT-3 scale training carbon footprint in tonnes CO2e and passenger-car equivalents."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    train_energy = Models.Language.GPT3.training_energy_mwh
-    carbon_intensity = Infrastructure.Grids.US_Avg.carbon_intensity_g_kwh * (gram / kWh)
-    car_annual_emissions = 4.6 * metric_ton  # scenario assumption: passenger car annual emissions
+    run = Scenarios.Gpt3TrainingCarbon
+    train_energy = run.it_energy
+    carbon_intensity = run.intensity
+    car_annual_emissions = run.comparison
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    train_energy_kwh_q = train_energy.to(kWh)
-    total_emissions = carbon_from_energy(train_energy_kwh_q, carbon_intensity)
-    cars_equivalent = (total_emissions / car_annual_emissions).to("").magnitude
+    train_energy_kwh_q = run.energy
+    total_emissions = run.carbon.to(kg)
+    cars_equivalent = run.comparisons
     one_pct_cars_equivalent = cars_equivalent * 0.01
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -2829,23 +2813,23 @@ Even when role-based access control works as designed, a data scientist querying
 # │ How:     Per-sample storage = FP32 gradient bytes x batch size.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Models
-from mlsysim.core.units import BYTES_FP32
+from mlsysim import Hardware, Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_memory, fmt_params
 
 class DPSGDMemory:
     """Per-sample gradient storage under naive DP-SGD clipping."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    kws_model = Models.Tiny.DS_CNN
-    gpt2_model = Models.Language.GPT2
+    grads = Scenarios.DpSgdPerExampleGradients
+    kws_model = grads.models["KWS"]
+    gpt2_model = grads.models["GPT-2"]
     h100_capacity = Hardware.Cloud.H100.memory.capacity
-    batch_size = 256  # scenario assumption: DP-SGD batch size
+    batch_size = grads.batch_size
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    kws_grad = kws_model.size_in_bytes(BYTES_FP32)
-    kws_per_sample = kws_grad * batch_size
-    gpt2_per_sample = gpt2_model.size_in_bytes(BYTES_FP32) * batch_size
+    kws_grad = grads.per_example("KWS")
+    kws_per_sample = grads.per_batch("KWS")
+    gpt2_per_sample = grads.per_batch("GPT-2")
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(kws_per_sample < h100_capacity, "KWS per-sample gradients should fit easily.")
@@ -2905,18 +2889,19 @@ For systems engineers, compliance hinges on architectural capabilities rather th
 # │ How:     Multiply daily decision volume by the review-rate fraction.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.units import MILLION
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_count, fmt_rate, check, fmt_percent
 
 class GDPRReviewLoad:
     """Operational load from substantive review of automated decisions."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    daily_decisions = 1 * MILLION
-    review_rate_pct = 0.1
+    review = Scenarios.CreditAppealReview
+    daily_decisions = review.decisions_per_day
+    review_rate_pct = review.appeal_rate * 100
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    review_cases = daily_decisions * (review_rate_pct / 100.0)
+    review_cases = review.appeals_per_day
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(review_cases == 1_000, f"Review load expected 1,000 cases/day, got {review_cases:.0f}.")
@@ -3203,6 +3188,7 @@ Teams assume fairness constraints can be retrofitted once models demonstrate str
 # │ How: Recompute from the confusion matrices in the worked example.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, check, fmt_pp
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -3210,15 +3196,14 @@ class FairnessPitfallAnchor:
     """Local fairness metric recap for the aggregate-metrics pitfall."""
 
     # ┌── 1. LOAD (Confusion Matrices) ───────────────────────────────────────
-    a_tp, a_fn = 4500, 500
-    b_tp, b_fn = 600, 400
+    credit = Scenarios.CreditServiceTwoGroups
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    a_tpr_pct = a_tp / (a_tp + a_fn) * 100
-    b_tpr_pct = b_tp / (b_tp + b_fn) * 100
+    a_tpr_pct = credit.tpr("A") * 100
+    b_tpr_pct = credit.tpr("B") * 100
     tpr_disparity = a_tpr_pct - b_tpr_pct
-    a_fnr_pct = a_fn / (a_tp + a_fn) * 100
-    b_fnr_pct = b_fn / (b_tp + b_fn) * 100
+    a_fnr_pct = credit.fnr("A") * 100
+    b_fnr_pct = credit.fnr("B") * 100
     fnr_ratio = b_fnr_pct / a_fnr_pct
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -3266,48 +3251,28 @@ Teams treat responsibility as external oversight rather than engineering practic
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Fallacy/pitfall recap and chapter summary TCO prose.
-from mlsysim import Infrastructure
-from mlsysim.core.units import DAYS_PER_YEAR, MILLION, THOUSAND, hour, ms, USD
+from mlsysim import Scenarios
+from mlsysim.core.units import THOUSAND, USD
 from mlsysim.core.units import metric_ton
 from mlsysim.fmt import fmt_ratio, fmt_usd, check, fmt_percent, fmt_qty_int
 
 class ResponsibleTcoRecap:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    train_gpu_rate = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate
-    inf_gpu_rate = Infrastructure.Pricing.Cloud.GpuInferencePerHour.rate
-    carbon_per_gpu_hour = Infrastructure.Pricing.Fleet.CarbonPerGpuHr.rate / hour
-    t_data_prep_time = 100 * hour  # scenario assumption
-    t_hparam_exps = 50
-    t_hparam_cost_exp = 40.0 * USD  # scenario assumption
-    t_final_time = 200 * hour  # scenario assumption
-    t_cycles_3yr = 12
-    i_users = 10_000_000
-    i_recs_per_user = 20
-    i_latency = 10 * ms  # dedicated accelerator service demand; illustrative unbatched, non-overlapped scenario
-    o_monitor_yr = 50000.0 * USD  # scenario assumption
-    o_oncall_yr = 100000.0 * USD  # scenario assumption
-    o_incident_yr = 20000.0 * USD  # scenario assumption
-    quant_reduction_pct = 0.20
+    tco = Scenarios.RankingServiceLifecycleCost
+    quant_reduction_pct = tco.serving_cut
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    train_cost_cycle = (t_data_prep_time * train_gpu_rate) + (t_hparam_exps * t_hparam_cost_exp) + (t_final_time * train_gpu_rate)
-    train_tco_3yr = train_cost_cycle * t_cycles_3yr
-    hparam_gpu_time = (t_hparam_exps * t_hparam_cost_exp / train_gpu_rate).to(hour)
-    train_gpu_time_cycle = t_data_prep_time + t_final_time + hparam_gpu_time
-    train_carbon_3yr = train_gpu_time_cycle * carbon_per_gpu_hour * t_cycles_3yr
+    train_tco_3yr = tco.training_cost
+    train_carbon_3yr = tco.training_carbon
+    inf_tco_3yr = tco.inference_cost
+    inf_carbon_3yr = tco.inference_carbon
+    total_tco = tco.total_cost
 
-    inf_daily_total = i_users * i_recs_per_user
-    inf_gpu_time_day = (inf_daily_total * i_latency).to(hour)
-    inf_tco_3yr = inf_gpu_time_day * inf_gpu_rate * DAYS_PER_YEAR * 3
-    inf_carbon_3yr = inf_gpu_time_day * carbon_per_gpu_hour * DAYS_PER_YEAR * 3
-    o_total_3yr = (o_monitor_yr + o_oncall_yr + o_incident_yr) * 3
-    total_tco = train_tco_3yr + inf_tco_3yr + o_total_3yr
-
-    p_train = (train_tco_3yr / total_tco).to("").magnitude * 100
-    p_inf = (inf_tco_3yr / total_tco).to("").magnitude * 100
-    carbon_train_ratio = (inf_carbon_3yr / train_carbon_3yr).to("").magnitude
-    savings_dollars = inf_tco_3yr * quant_reduction_pct
-    savings_carbon = inf_carbon_3yr * quant_reduction_pct
+    p_train = tco.shares["training"] * 100
+    p_inf = tco.shares["inference"] * 100
+    carbon_train_ratio = tco.carbon_ratio
+    savings_dollars = tco.serving_saving
+    savings_carbon = tco.serving_saving_carbon
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(round((inf_tco_3yr / train_tco_3yr).to("").magnitude) >= 40, "Inference should round to at least 40x training TCO in this scenario.")

@@ -117,7 +117,7 @@ v("fsdp_calls", FSDP.calls("FSDP, reshard after forward"), "{:.0f}", "calls per 
 
 print("== Critical size n* = alpha beta")
 x = NSTAR.result.crossovers
-v("nstar_nvlink_kb", round(m(x["NVLink"], "KB"), -2), "{:.0f}", "NVLink n*, to the hundred KB")
+v("nstar_nvlink_kb", m(x["NVLink"], "KB"), "{:.0f}", "NVLink n*, KB")
 v("nstar_nvlink_mb", m(x["NVLink"], "MB"), "{:.1f}", "NVLink n*, MB")
 v("nstar_pcie_kb", m(x["PCIe Gen5"], "KB"), "{:.0f}", "PCIe Gen5 n*, KB")
 v("nstar_roce_kb", m(x["RoCE"], "KB"), "{:.1f}", "RoCE n*, KB")

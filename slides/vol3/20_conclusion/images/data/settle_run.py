@@ -3,10 +3,10 @@
 Conclusion §20.2 asks what a runtime does when the configuration endpoint
 drops the connection before acknowledging a change. This script runs four
 runtimes against a real HTTP server (Python http.server) that injects the two
-faults of Exercise 3 (§20.13): the request is lost before the endpoint applies
+faults of the lost-reply estimate (§20.6): the request is lost before the endpoint applies
 it (probability 0.001), or the endpoint applies it and the reply is lost
 (probability 0.004). Each runtime handles 25,000 incidents, one mutating
-change each, the daily volume of Exercise 3.
+change each, the daily volume of that estimate.
 
   retry   : on a lost reply, send the change again (a fresh request; the
             endpoint keeps no operation identity)
@@ -28,6 +28,7 @@ Run: python3 settle_run.py   (writes settle_run.json beside this file)
 
 import json
 import random
+import sys
 import threading
 import time
 import urllib.error
@@ -36,9 +37,14 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-P_REQ = 0.001   # request lost before the endpoint applies it (Exercise 3)
-P_REP = 0.004   # endpoint applies, then the reply is lost (Exercise 3)
-N = 25_000      # incidents per runtime (Exercise 3: 25,000 calls a day)
+sys.path.insert(0, str(Path(__file__).resolve().parents[5] / "mlsysim"))
+from mlsysim import Scenarios  # noqa: E402
+
+# The fault rates and daily volume are MLSysIM's (Scenarios.BlindRetryAgainstStatusLookup).
+LOST = Scenarios.BlindRetryAgainstStatusLookup
+P_REQ = LOST.request_loss   # request lost before the endpoint applies it
+P_REP = LOST.reply_loss     # endpoint applies, then the reply is lost
+N = LOST.calls              # incidents per runtime: one day's mutating calls
 SEED = 20261019
 
 STATE = {"applied": {}, "ops": {}}

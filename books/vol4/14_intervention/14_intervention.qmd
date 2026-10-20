@@ -80,27 +80,20 @@ How often that exchange happens on a mature fleet is a matter of public record i
 # │       and that its reported rate is not a monotone capability curve.
 # │ Show: Miles per disengagement in the first and latest report years; the
 # │       2020-to-2021 swing; the latest driverless-testing rate.
-# │ How:  Literature.CaliforniaDisengagements, Waymo's annual rows.
+# │ How:  Scenarios.WaymoCaliforniaDisengagementRecord (MLSysIM), Waymo's annual
+# │       rows of Literature.CaliforniaDisengagements.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_multiple
-
-def _rate(rows, year, permit):
-    return next(r for r in rows if r["report_year"] == year and r["permit_type"] == permit)
 
 class DisengagementRecord:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    rows = tuple(
-        filter(lambda r: r["company"] == "Waymo" and r["filer_type"] in ("annual", "first_report"), Literature.CaliforniaDisengagements.entries)
-    )
-    driver, driverless = "drivered_AVT", "driverless_AVDT"
+    record = Scenarios.WaymoCaliforniaDisengagementRecord
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    first, latest = _rate(rows, 2015, driver), _rate(rows, 2025, driver)
-    y2020, y2021 = _rate(rows, 2020, driver), _rate(rows, 2021, driver)
-    dl = _rate(rows, 2025, driverless)
-    drop = y2020["miles_per_disengagement"] / y2021["miles_per_disengagement"]
-    miles_growth = y2021["autonomous_miles"] / y2020["autonomous_miles"]
+    first, latest, dl = record.first, record.latest, record.latest_driverless
+    drop = record.rate_drop
+    miles_growth = record.miles_growth
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(drop > 3 and miles_growth > 3, "Prose: the rate fell over threefold while miles grew over threefold")
@@ -190,9 +183,9 @@ The central engineering problem of supervisory intervention is how authority can
 # │
 # │ Goal:    Show that an out-of-loop pause outruns the rack-end clear distance.
 # │ Show:    Aisle speed, design out-of-loop takeover delay, travel, clear distance.
-# │ How:     WarehouseAisle scenario fields; the design takeover is the 90th
-# │          percentile condition-mean take-over time plus transport
-# │          (AISLE.t_takeover_out_of_loop); travel = v * T_takeover.
+# │ How:     Scenarios.WarehouseOutOfLoopTakeoverAtAisleSpeed: the design takeover
+# │          is the 90th percentile condition-mean take-over time plus transport
+# │          (AISLE.t_takeover_out_of_loop); takeover_travel = v * T_takeover.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import meter, second, millisecond
@@ -205,14 +198,15 @@ class InterventionSharedAuthorityScene:
     """Travel during an out-of-loop takeover pause at the aisle speed."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    v = AISLE.v_aisle  # category: chosen
-    t_pause = AISLE.t_takeover_out_of_loop  # category: derived (sourced p90 take-over time + transport)
+    pause = Scenarios.WarehouseOutOfLoopTakeoverAtAisleSpeed  # out-of-loop takeover at the aisle speed
+    v = pause.speed  # category: chosen (AISLE.v_aisle)
+    t_pause = pause.takeover  # category: derived (sourced p90 take-over time + transport)
     d_clear = AISLE.d_clear  # category: illustrative
     permission_rate = RM.permission_rate  # category: chosen
     tick = AISLE.t_tick  # category: chosen (from RM.permission_rate)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    travel = (v * t_pause).to(meter)
+    travel = pause.result.takeover_travel.to(meter)
     travel_ratio = (travel / d_clear).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -402,17 +396,12 @@ Waiting consumes distance before the selected stop begins. The finished stopping
 # │          calc-placement-transport-budget imports (@sec-placement-dispatch-admission,
 # │          nbk-placement-transport-budget). The slow-down is
 # │          AISLE.v_takeover_in_loop: the charged ceiling rounded down to
-# │          AISLE.v_takeover_resolution. Ceilings by
-# │          calc_scurve_max_permitted_velocity with T_Sigma + Delta_da in
-# │          tau_delay.
+# │          AISLE.v_takeover_resolution. Deadlines, remainders, and ceilings
+# │          from the Scenarios.Warehouse*Takeover* budgets (TakeoverBudgetModel:
+# │          the finished stop with T_Sigma, and Delta_da, before braking).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.core.units import ureg, meter, second, millimeter, millisecond
-from mlsysim.physics.robotics import (
-    calc_c2_stop_suffix,
-    calc_scurve_stop_distance,
-    calc_scurve_max_permitted_velocity,
-)
+from mlsysim.core.units import meter, second, millimeter, millisecond
 from mlsysim.fmt import fmt_length, fmt_latency, fmt_velocity, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
@@ -422,39 +411,28 @@ class InterventionAdmissionAllocation:
     """The allocated dispatch-to-admission interval charged to the takeover budgets."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    v = AISLE.v_aisle  # category: chosen
-    v_in = AISLE.v_takeover_in_loop  # category: derived (charged ceiling rounded down to the resolution)
+    at_aisle = Scenarios.WarehouseInLoopTakeoverAtAisleSpeed  # in-loop takeover at the aisle speed
+    at_request = Scenarios.WarehouseInLoopTakeoverAtRequestSpeed  # the same after the derived slow-down
+    at_retired = Scenarios.WarehouseInLoopTakeoverAtRetiredSlowdown  # the same at the retired 0.8 m/s slow-down
+    ool_at_aisle = Scenarios.WarehouseOutOfLoopTakeoverAtAisleSpeed
+    v = at_aisle.speed  # category: chosen
+    v_in = at_request.speed  # category: derived (charged ceiling rounded down to the resolution)
     v_step = AISLE.v_takeover_resolution  # category: chosen
-    v_in_old = 0.8 * meter / second  # category: chosen (the retired slow-down, shown to explain the change)
+    v_in_old = at_retired.speed  # category: chosen (the retired slow-down, shown to explain the change)
     v_ool = AISLE.v_takeover_out_of_loop  # category: chosen
-    d_clear = AISLE.d_clear  # category: illustrative
-    tau_delay = AISLE.tau_delay  # category: derived
-    a_brake = AISLE.a_brake  # category: illustrative
-    j_brake = calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"]  # category: derived (stipulated jerk bound)
-    overhead = AISLE.fixed_overhead  # category: illustrative / chosen
-    t_in = AISLE.t_takeover_in_loop  # category: derived (sourced human + transport)
-    t_ool = AISLE.t_takeover_out_of_loop  # category: derived (sourced human + transport)
     # The @sec-placement-dispatch-admission allocation (calc-placement-transport-budget), from MLSysIM
     delta_da = AISLE.t_dispatch_to_admission  # category: illustrative (allocation, not a measurement)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-
-    def _t_latest(speed, *, _d=d_clear, _tau=tau_delay, _a=a_brake, _j=j_brake, _o=overhead):
-        budget = speed * _tau + calc_scurve_stop_distance(speed, _a, _j) + _o
-        return ((_d - budget) / speed).to(millisecond)
-
-    def _ceiling(t, *, _d=d_clear, _tau=tau_delay, _a=a_brake, _j=j_brake):
-        return calc_scurve_max_permitted_velocity(_d, _tau + t, _a, _j, AISLE.delta_loc + AISLE.eps_track, AISLE.delta_margin).to(meter / second)
-
-    t_ceiling = _t_latest(v)  # the most Delta_da the aisle-speed spare can pay for
-    left_aisle = (t_ceiling - delta_da).to(millisecond)
-    left_old = (_t_latest(v_in_old) - t_in).to(millisecond)
-    short_old = (delta_da - left_old).to(millisecond)
-    left_in = (_t_latest(v_in) - t_in).to(millisecond)
-    left_in_da = (left_in - delta_da).to(millisecond)
-    travel_da_in = (v_in * delta_da).to(millimeter)
-    ceil_in_da = _ceiling(t_in + delta_da)
-    ceil_ool_da = _ceiling(t_ool + delta_da)
+    t_ceiling = at_aisle.result.deadline.to(millisecond)  # the most Delta_da the aisle-speed spare can pay for
+    left_aisle = at_aisle.result.deadline_after_admission.to(millisecond)
+    left_old = at_retired.result.time_left.to(millisecond)
+    short_old = (-at_retired.result.time_left_after_admission).to(millisecond)
+    left_in = at_request.result.time_left.to(millisecond)
+    left_in_da = at_request.result.time_left_after_admission.to(millisecond)
+    travel_da_in = at_request.result.admission_travel.to(millimeter)
+    ceil_in_da = at_aisle.result.with_takeover_and_dispatch.speed_ceiling.to(meter / second)
+    ceil_ool_da = ool_at_aisle.result.with_takeover_and_dispatch.speed_ceiling.to(meter / second)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(delta_da.to(millisecond).magnitude - 63.31072) < 1e-6, f"allocation must match @sec-placement: {delta_da}")
@@ -508,22 +486,19 @@ The budgets that follow are illustrative design comparisons, not measured takeov
 # │          (90th-percentile condition-mean take-over time plus the same
 # │          transport); travel during each; the stop with each delay added;
 # │          the speed ceilings.
-# │ How:     Finished stopping budget from the WarehouseAisle scenario
-# │          (jerk-limited resident stop, all overheads); the jerk bound is the
-# │          peak jerk of the reference C2 polynomial at the drive limit
-# │          (@sec-planning-c2-stopping-suffix); T_Sigma adds to tau_delay;
+# │ How:     Scenarios.WarehouseInLoopTakeoverAtAisleSpeed and
+# │          WarehouseOutOfLoopTakeoverAtAisleSpeed (TakeoverBudgetModel): the
+# │          finished stopping budget from the WarehouseAisle scenario
+# │          (jerk-limited resident stop, all overheads; the jerk bound is the
+# │          peak jerk of the reference C2 polynomial at the drive limit,
+# │          @sec-planning-c2-stopping-suffix); T_Sigma adds to tau_delay;
 # │          the stops and overruns also charge Delta_da (AISLE.t_dispatch_to_admission),
 # │          the complete budget of @sec-enforcement-composite-budget; ceil_in
-# │          and ceil_ool are the partial-budget ceilings by
-# │          calc_scurve_max_permitted_velocity.
+# │          and ceil_ool are the partial-budget ceilings.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import meter, second, millimeter, millisecond
-from mlsysim.physics.robotics import (
-    calc_c2_stop_suffix,
-    calc_scurve_stop_distance,
-    calc_scurve_max_permitted_velocity,
-)
+from mlsysim.physics.robotics import calc_scurve_stop_distance
 from mlsysim.fmt import (
     fmt_velocity,
     fmt_length,
@@ -543,63 +518,60 @@ class InterventionTakeoverBudget:
     """Operator takeover delay spent against the finished stopping budget."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    v = AISLE.v_aisle  # category: chosen
+    in_loop = Scenarios.WarehouseInLoopTakeoverAtAisleSpeed  # in-loop takeover at the aisle speed
+    out_of_loop = Scenarios.WarehouseOutOfLoopTakeoverAtAisleSpeed  # out-of-loop takeover at the aisle speed
+    v = in_loop.speed  # category: chosen
     d_clear = AISLE.d_clear  # category: illustrative
     tau_delay = AISLE.tau_delay  # category: derived
     a_brake = AISLE.a_brake  # category: illustrative
-    j_brake = calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"]  # category: derived (stipulated jerk bound)
-    near_overhead = AISLE.delta_loc + AISLE.eps_track  # category: illustrative
-    margin = AISLE.delta_margin  # category: chosen
+    j_brake = AISLE.j_brake  # category: derived (stipulated jerk bound: C2 polynomial peak jerk at the drive limit)
     overhead = AISLE.fixed_overhead  # category: illustrative / chosen
     t_sensory = AISLE.t_human_perceptual_slow  # category: sourced (Card, Moran, Newell 1983)
     t_cognitive = AISLE.t_human_cognitive_slow  # category: sourced
     t_motor = AISLE.t_human_motor_slow  # category: sourced
     t_video = AISLE.t_video_glass_to_glass  # category: sourced (wired best case)
     t_handshake = AISLE.t_handshake  # category: chosen (four-phase budgets)
+    t_comm = AISLE.t_takeover_transport  # category: derived (video + four-phase exchange)
     t_expected = AISLE.t_brake_response_expected  # category: sourced (Green 2000)
     t_surprise = AISLE.t_brake_response_surprise  # category: sourced (Green 2000)
     t_tot_mean = AISLE.t_takeover_driving_mean  # category: sourced (Zhang et al. 2019)
     t_tot_p90 = AISLE.t_takeover_driving_p90  # category: sourced (computed from its data)
-    t_in = AISLE.t_takeover_in_loop  # category: derived
-    t_ool = AISLE.t_takeover_out_of_loop  # category: derived
+    t_in = in_loop.takeover  # category: derived
+    t_ool = out_of_loop.takeover  # category: derived
     delta_da = AISLE.t_dispatch_to_admission  # category: illustrative (allocation of @sec-placement-dispatch-admission)
-    # Source: UN Regulation No. 157 (ALKS), para. 5.4.4.1: a minimum risk
-    # manoeuvre starts at the earliest 10 s after the transition demand.
-    # Promotion candidate: literature registry.
-    t_r157 = 10 * second  # category: sourced
+    # UN Regulation No. 157 (ALKS), para. 5.4.4.1: a minimum risk manoeuvre
+    # starts at the earliest 10 s after the transition demand.
+    t_r157 = Literature.HumanTakeover.R157MinimumRiskManoeuvreDelayS * second  # category: sourced
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    reaction = (v * tau_delay).to(millimeter)
+    ib, ob = in_loop.result, out_of_loop.result
+    reaction = ib.machine.delay_travel.to(millimeter)
     r157_over_ool = (t_r157 / t_ool).to("").magnitude
-    travel_r157 = (v * t_r157).to(meter)
-    stop = calc_scurve_stop_distance(v, a_brake, j_brake).to(millimeter)
-    budget = (reaction + stop + overhead).to(millimeter)
-    spare = (d_clear - budget).to(millimeter)  # partial: before dispatch-to-admission travel
-    travel_da = (v * delta_da).to(millimeter)
-    budget_da = (budget + travel_da).to(millimeter)  # complete budget, the one a design must meet
-    spare_da = (d_clear - budget_da).to(millimeter)
-    t_comm = (t_video + t_handshake).to(millisecond)
+    travel_r157 = ib.machine.travel_over(t_r157).to(meter)
+    stop = ib.machine.scurve_travel.to(millimeter)
+    budget = ib.machine.required_distance.to(millimeter)
+    spare = ib.machine.spare.to(millimeter)  # partial: before dispatch-to-admission travel
+    travel_da = ib.admission_travel.to(millimeter)
+    budget_da = ib.machine_with_dispatch.required_distance.to(millimeter)  # complete budget, the one a design must meet
+    spare_da = ib.machine_with_dispatch.spare.to(millimeter)
     t_sum = (t_sensory + t_cognitive + t_motor + t_comm).to(millisecond)
-    travel_in = (v * t_in).to(millimeter)
-    travel_ool = (v * t_ool).to(millimeter)
-    travel_prebrake_ool = (v * (tau_delay + delta_da + t_ool)).to(millimeter)  # all coasting before the brake command
-    d_stop_in = (budget_da + travel_in).to(millimeter)
-    d_stop_ool = (budget_da + travel_ool).to(millimeter)
+    travel_in = ib.takeover_travel.to(millimeter)
+    travel_ool = ob.takeover_travel.to(millimeter)
+    travel_prebrake_ool = ob.with_takeover_and_dispatch.delay_travel.to(millimeter)  # all coasting before the brake command
+    d_stop_in = ib.with_takeover_and_dispatch.required_distance.to(millimeter)
+    d_stop_ool = ob.with_takeover_and_dispatch.required_distance.to(millimeter)
     stop_ratio = (d_stop_ool / d_stop_in).to("").magnitude
     # Napkin-math box "The takeover tax": the overruns and the waiting-to-spare ratio.
-    overrun_in = (d_stop_in - d_clear).to(millimeter)
-    overrun_ool = (d_stop_ool - d_clear).to(millimeter)
-    travel_over_spare = (travel_in / spare_da).to("").magnitude
-
-    def _ceiling(t, *, _d=d_clear, _tau=tau_delay, _a=a_brake, _j=j_brake, _n=near_overhead, _m=margin):
-        return calc_scurve_max_permitted_velocity(_d, _tau + t, _a, _j, _n, _m).to(meter / second)
-
-    ceil_in = _ceiling(t_in)
-    ceil_ool = _ceiling(t_ool)
+    overrun_in = (-ib.with_takeover_and_dispatch.spare).to(millimeter)
+    overrun_ool = (-ob.with_takeover_and_dispatch.spare).to(millimeter)
+    travel_over_spare = ib.takeover_over_spare_after_admission
+    ceil_in = ib.with_takeover.speed_ceiling.to(meter / second)
+    ceil_ool = ob.with_takeover.speed_ceiling.to(meter / second)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(spare.magnitude - 131.01) < 5e-3, f"spare margin at the aisle speed: {spare}")
     check(abs(t_sum.magnitude - t_in.to(millisecond).magnitude) < 1e-9, "The four stages must sum to the in-loop takeover.")
+    check(abs((t_video + t_handshake - t_comm).to(millisecond).magnitude) < 1e-9, "Transport is video plus the four-phase exchange.")
     check(abs((t_tot_p90 + t_comm - t_ool).to(millisecond).magnitude) < 1e-9, "The out-of-loop takeover is the p90 time plus transport.")
     check(travel_in > 5 * spare, "The in-loop takeover must overrun the spare margin several times at the aisle speed.")
     check(travel_ool > 5 * d_clear, "The out-of-loop travel must exceed five times the clear distance.")
@@ -615,6 +587,7 @@ class InterventionTakeoverBudget:
     check(abs(overrun_in.magnitude - 737.80) < 5e-3, f"in-loop overrun: {overrun_in}")
     check(abs(overrun_ool.magnitude - 5755.80) < 5e-3, f"out-of-loop overrun: {overrun_ool}")
     check(abs((travel_prebrake_ool - (d_stop_ool - stop - overhead)).magnitude) < 1e-6, "Pre-brake travel is the out-of-loop stop less the resident stop and allowances.")
+    check(abs((stop - calc_scurve_stop_distance(v, a_brake, j_brake)).to(millimeter).magnitude) < 1e-9, "Resident stop matches MLSysIM.")
     check(abs(travel_over_spare - 16.15) < 0.01, f"in-loop travel over the complete spare: {travel_over_spare}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
@@ -924,54 +897,33 @@ plt.show()
 # │          (nominal and slow bound); perception-brake times for an expected,
 # │          an unexpected, and a surprise signal; percentiles of condition-mean
 # │          take-over time.
-# │ How:     Each total adds to tau_delay (WarehouseAisle scenario); ceilings
-# │          by calc_scurve_max_permitted_velocity with the stipulated jerk bound.
+# │ How:     Scenarios.WarehouseTakeoverCeilingLadder: each total adds to
+# │          tau_delay of the WarehouseAisle finished budget; the ceiling is the
+# │          partial-budget S-curve root with the stipulated jerk bound.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import meter, second, millimeter, millisecond
-from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_scurve_max_permitted_velocity
 from mlsysim.fmt import fmt_length, fmt_latency, fmt_velocity, check
 
-RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
-
-def _ceiling(t):
-    """Largest speed whose finished budget, with t added to tau_delay, fits d_clear."""
-    j_brake = calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"]
-    return calc_scurve_max_permitted_velocity(
-        AISLE.d_clear,
-        AISLE.tau_delay + t,
-        AISLE.a_brake,
-        j_brake,
-        AISLE.delta_loc + AISLE.eps_track,
-        AISLE.delta_margin,
-    ).to(meter / second)
 
 class InterventionTakeoverLadder:
     """Speed ceiling for each sourced human response time."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    v = AISLE.v_aisle  # category: chosen
-    t_comm = AISLE.t_takeover_transport  # category: sourced video + chosen exchange
-    human = {
-        "mhp": AISLE.t_human_simple_reaction,  # category: sourced (Card, Moran, Newell 1983)
-        "mhp_slow": AISLE.t_human_simple_reaction_slow,  # category: sourced
-        "expected": AISLE.t_brake_response_expected,  # category: sourced (Green 2000)
-        "unexpected": AISLE.t_brake_response_unexpected,  # category: sourced
-        "surprise": AISLE.t_brake_response_surprise,  # category: sourced
-        "p50": AISLE.t_takeover_driving_p50,  # category: sourced (Zhang et al. 2019 data)
-        "mean": AISLE.t_takeover_driving_mean,  # category: sourced
-        "p90": AISLE.t_takeover_driving_p90,  # category: sourced
-        "p99": AISLE.t_takeover_driving_p99,  # category: sourced
-    }
+    ladder = Scenarios.WarehouseTakeoverCeilingLadder  # one takeover budget per sourced response
+    v = ladder.base.speed  # category: chosen (AISLE.v_aisle)
+    t_comm = ladder.transport  # category: sourced video + chosen exchange
+    human = ladder.responses  # category: sourced (Card, Moran, Newell 1983; Green 2000; Zhang et al. 2019 data)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     # Plain loops: class-body comprehensions cannot see class-level names.
+    rows = ladder.result.rows
     total, travel, ceiling = {}, {}, {}
-    for _k, _t in human.items():
-        total[_k] = (_t + t_comm).to(millisecond)
-        travel[_k] = (v * total[_k]).to(millimeter)
-        ceiling[_k] = _ceiling(total[_k])
+    for _k, _r in rows.items():
+        total[_k] = _r.takeover.to(millisecond)
+        travel[_k] = _r.takeover_travel.to(millimeter)
+        ceiling[_k] = _r.with_takeover.speed_ceiling.to(meter / second)
     order = list(human)
     ceiling_list = list(ceiling.values())  # insertion order follows human
 
@@ -985,7 +937,7 @@ class InterventionTakeoverLadder:
     check(all(hi > lo for hi, lo in zip(ceiling_list, ceiling_list[1:])), "Ceilings must fall as the response grows.")
     check(max(ceiling.values()) < v, "No operator state fits at the aisle speed.")
     # Expectation costs more speed than the console term does.
-    console_cost = (_ceiling(human["mhp_slow"]) - ceiling["mhp_slow"]).magnitude
+    console_cost = (ladder.base.variant(takeover=human["mhp_slow"]).result.with_takeover.speed_ceiling - ceiling["mhp_slow"]).magnitude
     check((ceiling["expected"] - ceiling["surprise"]).magnitude > console_cost, "Expectation must outweigh the console term.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
@@ -1051,41 +1003,47 @@ The term $\FullSpeedTravelTime$ collects every interval during which the machine
 # │ Show:    b, D_clear - delta, the root, the branch threshold a^2/j, the
 # │          limiting ceiling as braking becomes instantaneous, and the root
 # │          with the allocated Delta_da added to T_Sigma.
-# │ How:     Closed-form root of v^2/(2a) + b v - (D - delta) = 0, guarded
+# │ How:     Closed-form root of v^2/(2a) + b v - (D - delta) = 0: the terms
+# │          b, the root, a^2/j, and the rigid bound from the in-loop takeover
+# │          budget (Scenarios.WarehouseInLoopTakeoverAtAisleSpeed), guarded
 # │          against calc_scurve_max_permitted_velocity (the table's solver).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import meter, second, millisecond
-from mlsysim.physics.robotics import calc_c2_stop_suffix
 from mlsysim.fmt import fmt, fmt_velocity, fmt_latency, fmt_length, check
 
-RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
 
 class InterventionCeilingRoot:
     """Closed-form takeover speed ceiling for the design in-loop response."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    in_loop = Scenarios.WarehouseInLoopTakeoverAtAisleSpeed  # in-loop takeover at the aisle speed
     a = AISLE.a_brake  # category: illustrative
-    j = calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"]  # category: derived (stipulated jerk bound)
+    j = AISLE.j_brake  # category: derived (stipulated jerk bound)
     tau = AISLE.tau_delay  # category: derived
-    t_in = AISLE.t_takeover_in_loop  # category: derived (sourced human + transport)
+    t_in = in_loop.takeover  # category: derived (sourced human + transport)
     d_avail = AISLE.d_clear - AISLE.fixed_overhead  # category: derived (D_clear - delta)
     delta_da = AISLE.t_dispatch_to_admission  # category: illustrative (allocation of @sec-placement-dispatch-admission)
-    v_aisle = AISLE.v_aisle  # category: chosen
+    v_aisle = in_loop.speed  # category: chosen
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    half_ramp = (a / (2 * j)).to(second)
-    b = (tau + t_in + half_ramp).to(second)
-    radicand = (b**2 + 2 * d_avail / a).to(second**2)
-    v_max = (a * (radicand**0.5 - b)).to(meter / second)
-    v_knee = (a**2 / j).to(meter / second)
-    v_rigid = (d_avail / (tau + t_in)).to(meter / second)  # ideal zero-distance braking bound
-    b_da = (b + delta_da).to(second)
-    v_max_da = (a * ((b_da**2 + 2 * d_avail / a) ** 0.5 - b_da)).to(meter / second)
+    partial = in_loop.result.with_takeover  # the budget with T_Sigma in tau_delay
+    complete = in_loop.result.with_takeover_and_dispatch  # the same with Delta_da charged
+    half_ramp = partial.ramp_delay.to(second)
+    b = partial.ceiling_lead_time.to(second)
+    radicand = (partial.ceiling_root**2).to(second**2)
+    v_max = partial.speed_ceiling.to(meter / second)
+    v_knee = partial.jerk_plateau_speed.to(meter / second)
+    v_rigid = partial.rigid_speed_ceiling.to(meter / second)  # ideal zero-distance braking bound
+    b_da = complete.ceiling_lead_time.to(second)
+    v_max_da = complete.speed_ceiling.to(meter / second)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(v_max.magnitude - InterventionTakeoverBudget.ceil_in.magnitude) < 1e-9, "Root must equal the solver's in-loop ceiling.")
+    check(abs((a * (partial.ceiling_root - b)).to(meter / second).magnitude - v_max.magnitude) < 1e-9, "Root must equal the solver's in-loop ceiling.")
+    check(abs(v_max.magnitude - InterventionTakeoverBudget.ceil_in.magnitude) < 1e-9, "Root must equal the takeover cell's in-loop ceiling.")
+    check(abs((b - tau - t_in - half_ramp).to(second).magnitude) < 1e-12, "b is the delay, the takeover, and half a jerk ramp.")
+    check(abs((b_da - b - delta_da).to(second).magnitude) < 1e-12, "Charging Delta_da adds it to b.")
     check(
         abs(v_max_da.magnitude - AISLE.v_takeover_in_loop_ceiling.magnitude) < 1e-9, "Root with Delta_da must equal the registry's charged ceiling."
     )
@@ -1179,80 +1137,65 @@ For a live check, the safety microcontroller dispatches fallback **no later than
 # │          T_latest at each and the time left after the takeover; the crawl
 # │          against the 99th-percentile response.
 # │ How:     @eq-intervention-latest-fallback with the jerk-limited resident
-# │          stop (calc_scurve_stop_distance, jerk bound = peak jerk of the
-# │          reference C2 polynomial at the drive limit) and all three
-# │          overheads, from the WarehouseAisle scenario; ceilings by
-# │          calc_scurve_max_permitted_velocity with T_Sigma in tau_delay.
+# │          stop (jerk bound = peak jerk of the reference C2 polynomial at the
+# │          drive limit) and all three overheads: the deadline (delay spare),
+# │          the clipped timeout, and the partial ceilings of the
+# │          Scenarios.Warehouse*Takeover* budgets (TakeoverBudgetModel).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import meter, second, millimeter, millisecond
-from mlsysim.physics.robotics import (
-    calc_c2_stop_suffix,
-    calc_scurve_stop_distance,
-    calc_scurve_max_permitted_velocity,
-)
 from mlsysim.fmt import fmt_length, fmt_latency, fmt_velocity, check
 
-RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
 
 class InterventionTimeoutBudget:
     """Latest fallback dispatch after a handover request, and the speeds it forces."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    v = AISLE.v_aisle  # category: chosen
-    d_clear = AISLE.d_clear  # category: illustrative
-    tau_delay = AISLE.tau_delay  # category: derived
-    a_brake = AISLE.a_brake  # category: illustrative
-    j_brake = calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"]  # category: derived (stipulated jerk bound)
-    near_overhead = AISLE.delta_loc + AISLE.eps_track  # category: illustrative
-    margin = AISLE.delta_margin  # category: chosen
+    at_aisle = Scenarios.WarehouseInLoopTakeoverAtAisleSpeed  # in-loop request at the aisle speed
+    ool_at_aisle = Scenarios.WarehouseOutOfLoopTakeoverAtAisleSpeed
+    at_fast = Scenarios.WarehouseInLoopTakeoverAtFastSlowdown  # a slow-down sized for a much faster response
+    at_request = Scenarios.WarehouseInLoopTakeoverAtRequestSpeed  # the redesigned in-loop slow-down
+    at_crawl = Scenarios.WarehouseOutOfLoopTakeoverAtCrawl  # the redesigned out-of-loop crawl
+    at_crawl_p99 = Scenarios.WarehouseOutOfLoopTakeoverAtCrawlP99  # the crawl against the 99th percentile
+    v = at_aisle.speed  # category: chosen
     tick = AISLE.t_tick  # category: chosen
-    t_in = AISLE.t_takeover_in_loop  # category: derived (sourced human + transport)
-    t_ool = AISLE.t_takeover_out_of_loop  # category: derived (sourced human + transport)
-    t_ool_p99 = AISLE.t_takeover_driving_p99 + AISLE.t_takeover_transport  # category: derived
-    v_in = AISLE.v_takeover_in_loop  # category: derived (Delta_da-charged in-loop ceiling, rounded down)
-    v_ool = AISLE.v_takeover_out_of_loop  # category: chosen (under the sourced out-of-loop ceiling)
+    t_in = at_aisle.takeover  # category: derived (sourced human + transport)
+    t_ool = ool_at_aisle.takeover  # category: derived (sourced human + transport)
+    t_ool_p99 = at_crawl_p99.takeover  # category: derived
+    v_in = at_request.speed  # category: derived (Delta_da-charged in-loop ceiling, rounded down)
+    v_ool = at_crawl.speed  # category: chosen (under the sourced out-of-loop ceiling)
     t_request = AISLE.t_handshake_request  # category: chosen
     t_acknowledge = AISLE.t_handshake_acknowledge  # category: chosen
     t_confirm = AISLE.t_handshake_confirm  # category: chosen
     t_handshake = AISLE.t_handshake  # category: derived (four-phase sum)
-    # Scenario assumptions (this chapter only)
-    v_fast_slowdown = 1.2 * meter / second  # category: illustrative (a slow-down that fits only a much faster human response)
-    config = 500 * millisecond  # category: chosen (configured protocol ceiling)
-    manual_lease = 100 * millisecond  # category: chosen (loss-of-engagement lease)
+    v_fast_slowdown = at_fast.speed  # category: illustrative (a slow-down that fits only a much faster human response)
+    config = at_aisle.configured_timeout  # category: chosen (configured protocol ceiling)
+    manual_lease = at_aisle.manual_lease  # category: chosen (loss-of-engagement lease)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    def _t_latest(speed, *, _d=d_clear, _n=near_overhead, _m=margin, _tau=tau_delay, _a=a_brake, _j=j_brake):
-        stop = calc_scurve_stop_distance(speed, _a, _j)
-        return ((_d - _n - _m - stop) / speed - _tau).to(millisecond)
-
-    def _ceiling(t, *, _d=d_clear, _tau=tau_delay, _a=a_brake, _j=j_brake, _n=near_overhead, _m=margin):
-        return calc_scurve_max_permitted_velocity(_d, _tau + t, _a, _j, _n, _m).to(meter / second)
-
-    t_latest = _t_latest(v)
-    spare = (v * t_latest).to(millimeter)
-    # A slow-down sized for a much faster human response.
-    t_latest_fast = _t_latest(v_fast_slowdown)
-    short_fast = (t_in - t_latest_fast).to(millisecond)
-    # The redesigned in-loop slow-down.
-    t_latest_in = _t_latest(v_in)
-    spare_in = (v_in * t_latest_in).to(millimeter)
-    left_in = (t_latest_in - t_in).to(millisecond)
-    # The redesigned out-of-loop crawl, at the design and the 99th-percentile response.
-    t_latest_ool = _t_latest(v_ool)
-    left_ool = (t_latest_ool - t_ool).to(millisecond)
-    short_ool_p99 = (t_ool_p99 - t_latest_ool).to(millisecond)
-    timeout = min(config.to(millisecond), t_latest)
-    timeout_ticks = int(timeout.magnitude // tick.to(millisecond).magnitude)
+    aisle = at_aisle.result
+    t_latest = aisle.deadline.to(millisecond)
+    spare = aisle.machine.spare.to(millimeter)
+    t_latest_fast = at_fast.result.deadline.to(millisecond)
+    short_fast = (-at_fast.result.time_left).to(millisecond)
+    t_latest_in = at_request.result.deadline.to(millisecond)
+    spare_in = at_request.result.machine.spare.to(millimeter)
+    left_in = at_request.result.time_left.to(millisecond)
+    t_latest_ool = at_crawl.result.deadline.to(millisecond)
+    left_ool = at_crawl.result.time_left.to(millisecond)
+    short_ool_p99 = (-at_crawl_p99.result.time_left).to(millisecond)
+    timeout = aisle.timeout.to(millisecond)
+    timeout_ticks = aisle.timeout_ticks
     admitted = (timeout_ticks * tick).to(millisecond)
-    ceil_in = _ceiling(t_in)
-    ceil_ool = _ceiling(t_ool)
-    ceil_ool_p99 = _ceiling(t_ool_p99)
+    ceil_in = aisle.with_takeover.speed_ceiling.to(meter / second)
+    ceil_ool = ool_at_aisle.result.with_takeover.speed_ceiling.to(meter / second)
+    ceil_ool_p99 = at_crawl_p99.result.with_takeover.speed_ceiling.to(meter / second)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(t_latest.magnitude - 100.775) < 5e-3, f"T_latest at the aisle speed: {t_latest}")
     check(abs(spare.magnitude - 131.01) < 5e-3, f"spare margin at the aisle speed: {spare}")
+    check(abs((spare - v * t_latest).to(millimeter).magnitude) < 1e-9, "The spare is T_latest at the aisle speed.")
     check(abs(t_latest_fast.magnitude - 184.11) < 5e-3, f"T_latest at 1.2 m/s: {t_latest_fast}")
     check(t_in > t_latest_fast, "The sourced in-loop response must overrun the allowance at 1.2 m/s.")
     check(abs(t_latest_in.magnitude - 751.608) < 5e-3, f"T_latest at the in-loop slow-down: {t_latest_in}")
@@ -1320,44 +1263,49 @@ class InterventionTimeoutBudget:
 # │ Show:    D_clear - delta, tau_delay, the resident stop at each speed, the
 # │          two T_latest values, the remainder after the in-loop takeover at
 # │          the slow-down, and that remainder less the allocated Delta_da.
-# │ How:     d_suffix = v^2/(2a) + v a/(2j) (both speeds lie above a^2/j),
-# │          guarded against calc_scurve_stop_distance and against
-# │          InterventionTimeoutBudget and InterventionAdmissionAllocation.
+# │ How:     The resident stop (scurve_travel) and T_latest (deadline) of the
+# │          in-loop takeover budgets at both speeds; guarded against
+# │          d_suffix = v^2/(2a) + v a/(2j) (both speeds lie above a^2/j), the
+# │          equation by hand, InterventionTimeoutBudget, and
+# │          InterventionAdmissionAllocation.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import meter, second, millisecond
-from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_scurve_stop_distance
 from mlsysim.fmt import fmt, fmt_latency, fmt_velocity, fmt_multiple, check
 
-RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
 
 class InterventionWaitingAllowance:
     """T_latest at two speeds with every operand visible."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    v_hi = AISLE.v_aisle  # category: chosen
-    v_lo = AISLE.v_takeover_in_loop  # category: derived (Delta_da-charged ceiling, rounded down)
+    at_aisle = Scenarios.WarehouseInLoopTakeoverAtAisleSpeed
+    at_request = Scenarios.WarehouseInLoopTakeoverAtRequestSpeed
+    v_hi = at_aisle.speed  # category: chosen
+    v_lo = at_request.speed  # category: derived (Delta_da-charged ceiling, rounded down)
     a = AISLE.a_brake  # category: illustrative
-    j = calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"]  # category: derived (stipulated jerk bound)
+    j = AISLE.j_brake  # category: derived (stipulated jerk bound)
     tau = AISLE.tau_delay  # category: derived
     d_avail = AISLE.d_clear - AISLE.fixed_overhead  # category: derived (D_clear - delta)
-    t_in = AISLE.t_takeover_in_loop  # category: derived (sourced human + transport)
+    t_in = at_aisle.takeover  # category: derived (sourced human + transport)
     delta_da = AISLE.t_dispatch_to_admission  # category: illustrative (allocation of @sec-placement-dispatch-admission)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    d_hi = (v_hi**2 / (2 * a) + v_hi * a / (2 * j)).to(meter)
-    d_lo = (v_lo**2 / (2 * a) + v_lo * a / (2 * j)).to(meter)
-    t_hi = ((d_avail - d_hi) / v_hi - tau).to(millisecond)
-    t_lo = ((d_avail - d_lo) / v_lo - tau).to(millisecond)
-    left_lo = (t_lo - t_in).to(millisecond)
-    left_lo_da = (left_lo - delta_da).to(millisecond)
+    hi, lo = at_aisle.result, at_request.result
+    d_hi = hi.machine.scurve_travel.to(meter)
+    d_lo = lo.machine.scurve_travel.to(meter)
+    t_hi = hi.deadline.to(millisecond)
+    t_lo = lo.deadline.to(millisecond)
+    left_lo = lo.time_left.to(millisecond)
+    left_lo_da = lo.time_left_after_admission.to(millisecond)
     ratio = (t_lo / t_hi).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(v_lo >= a**2 / j, "Both speeds must lie on the quadratic branch of the resident stop.")
-    check(abs((d_hi - calc_scurve_stop_distance(v_hi, a, j)).to(meter).magnitude) < 1e-12, "Resident stop at the aisle speed matches MLSysIM.")
-    check(abs((d_lo - calc_scurve_stop_distance(v_lo, a, j)).to(meter).magnitude) < 1e-12, "Resident stop at the slow-down matches MLSysIM.")
+    check(abs((d_hi - (v_hi**2 / (2 * a) + v_hi * a / (2 * j))).to(meter).magnitude) < 1e-12, "Resident stop at the aisle speed is v^2/2a + v a/2j.")
+    check(abs((d_lo - (v_lo**2 / (2 * a) + v_lo * a / (2 * j))).to(meter).magnitude) < 1e-12, "Resident stop at the slow-down is v^2/2a + v a/2j.")
+    check(abs((t_hi - ((d_avail - d_hi) / v_hi - tau)).to(millisecond).magnitude) < 1e-9, "T_latest at the aisle speed by @eq-intervention-latest-fallback.")
+    check(abs((t_lo - ((d_avail - d_lo) / v_lo - tau)).to(millisecond).magnitude) < 1e-9, "T_latest at the slow-down by @eq-intervention-latest-fallback.")
     check(abs((t_hi - InterventionTimeoutBudget.t_latest).magnitude) < 1e-9, "T_latest at the aisle speed matches the timeout cell.")
     check(abs((t_lo - InterventionTimeoutBudget.t_latest_in).magnitude) < 1e-9, "T_latest at the slow-down matches the timeout cell.")
     check(abs((left_lo_da - InterventionAdmissionAllocation.left_in_da).magnitude) < 1e-9, "Charged remainder matches the allocation cell.")
@@ -1612,18 +1560,14 @@ Smoothing an acceleration command from cruising speed to emergency braking delay
 # │          bound the resident S-curve stop uses (@sec-planning-c2-stopping-suffix);
 # │          resident stop by calc_scurve_stop_distance; arm window by
 # │          calc_quintic_blend_duration; windows rounded up to whole
-# │          permission ticks (RM.permission_rate via AISLE.t_tick).
+# │          permission ticks (RM.permission_rate via AISLE.t_tick); all in
+# │          Scenarios.WarehouseTakeoverBrakingBlend (BrakingBlendModel).
 # │          InterventionAssistantSession compares the reserve use with the
 # │          remainder left after the in-loop takeover.
 # └─────────────────────────────────────────────────────────────────────────────
-import math
 from mlsysim import *
 from mlsysim.core.units import meter, second, millimeter, millisecond, newton
-from mlsysim.physics.robotics import (
-    calc_c2_stop_suffix,
-    calc_scurve_stop_distance,
-    calc_quintic_blend_duration,
-)
+from mlsysim.physics.robotics import calc_scurve_stop_distance, calc_quintic_blend_duration
 from mlsysim.fmt import (
     fmt_velocity,
     fmt_acceleration,
@@ -1638,60 +1582,41 @@ from mlsysim.fmt import (
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
 
-def blend_reserve_use(v_start, a, j, window, tick):
-    """Largest growth, over a smoothstep blend's ticks, of travel plus the resident stop.
-
-    The resident stop from each blended speed is charged from zero acceleration,
-    which overstates it while the blend is already decelerating (conservative).
-    """
-    d_start = calc_scurve_stop_distance(v_start, a, j)
-    n = math.ceil((window / tick).to("").magnitude - 1e-9)
-    worst = 0.0
-    for i in range(n + 1):
-        u = min((i * tick / window).to("").magnitude, 1.0)
-        # Integrals of alpha = 10 u^3 - 15 u^4 + 6 u^5 from 0 to u, once and twice.
-        a1 = u**6 - 3 * u**5 + 2.5 * u**4
-        a2 = u**7 / 7 - u**6 / 2 + u**5 / 2
-        v = (v_start - a * window * a1).to(meter / second)
-        x = v_start * window * u - a * window**2 * a2
-        grow = x + calc_scurve_stop_distance(v, a, j) - d_start
-        worst = max(worst, grow.to(millimeter).magnitude)
-    return worst * millimeter
-
 class InterventionBlendBudget:
     """Fixed-endpoint smoothstep blends on the machine's base and arm."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    v0 = AISLE.v_takeover_in_loop  # category: chosen (speed at which the in-loop takeover commits)
+    blend = Scenarios.WarehouseTakeoverBrakingBlend  # base blend at the in-loop request speed, and an arm joint
+    v0 = blend.speed  # category: chosen (speed at which the in-loop takeover commits)
     a_target = AISLE.a_brake  # category: illustrative (canon a_brake; the base's blended step)
-    j_allowable = calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"]  # category: derived (stipulated jerk bound)
+    j_allowable = AISLE.j_brake  # category: derived (stipulated jerk bound)
     tick = AISLE.t_tick  # category: chosen (from RM.permission_rate)
     arm_torque_max = RM.arm.max_torque  # category: datasheet
-    # Scenario assumptions (this chapter only): an arm-joint command change
-    arm_delta = 15.0 * newton * meter  # category: illustrative
-    arm_rate = 750.0 * newton * meter / second  # category: chosen (torque-command rate ceiling)
+    arm_delta = blend.torque_change  # category: illustrative (an arm-joint command change)
+    arm_rate = blend.torque_rate_limit  # category: chosen (torque-command rate ceiling)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    d_res = calc_scurve_stop_distance(v0, a_target, j_allowable).to(meter)
-    t_ramp = (a_target / j_allowable).to(millisecond)  # the resident stop's own jerk ramp
+    r = blend.result
+    d_res = r.scurve_travel.to(meter)
+    t_ramp = r.ramp_time.to(millisecond)  # the resident stop's own jerk ramp
     # Peak smoothstep slope 1.875 for fixed endpoints (@sec-appendix-control-splines).
-    T = (1.875 * a_target / j_allowable).to(second)
+    T = r.window.to(second)
     # The enforcer blends in whole permission ticks, so the window rounds up.
-    T_ticks = math.ceil((T / tick).to("").magnitude - 1e-9)
-    T_budget = (T_ticks * tick).to(millisecond)
-    step_jerk = (a_target / tick).to(meter / second**3)
+    T_ticks = r.window_ticks
+    T_budget = r.window_budget.to(millisecond)
+    step_jerk = r.step_jerk.to(meter / second**3)
     # Integral alpha ds = 1/2; integral (1-s) alpha ds = 1/7.
-    v1 = (v0 - a_target * T / 2).to(meter / second)
-    d_blend = (v0 * T - a_target * T**2 / 7).to(meter)
-    d_after = (v1**2 / (2 * a_target)).to(meter)
-    d_total = d_blend + d_after
-    d_ideal = (v0**2 / (2 * a_target)).to(meter)
-    d_penalty = d_total - d_ideal
-    d_over_res = d_total - d_res
-    excess_in = blend_reserve_use(v0, a_target, j_allowable, T, tick)
-    arm_blend = calc_quintic_blend_duration(arm_delta, arm_rate).to(millisecond)
-    arm_ticks = math.ceil((arm_blend / tick).to("").magnitude - 1e-9)
-    arm_budget = (arm_ticks * tick).to(millisecond)
+    v1 = r.exit_speed.to(meter / second)
+    d_blend = r.blend_travel.to(meter)
+    d_after = r.after_travel.to(meter)
+    d_total = r.blended_stop.to(meter)
+    d_ideal = r.step_stop.to(meter)
+    d_penalty = r.penalty_over_step.to(meter)
+    d_over_res = r.excess_over_scurve.to(meter)
+    excess_in = r.reserve_use.to(millimeter)
+    arm_blend = r.arm_window.to(millisecond)
+    arm_ticks = r.arm_window_ticks
+    arm_budget = r.arm_window_budget.to(millisecond)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(j_allowable.to(meter / second**3).magnitude - 64 / 9) < 1e-9, f"stipulated jerk bound: {j_allowable}")
@@ -1704,6 +1629,8 @@ class InterventionBlendBudget:
     check(abs(d_penalty.to(millimeter).magnitude - 187.82) < 5e-3, f"penalty against a step: {d_penalty}")
     check(abs(d_over_res.to(millimeter).magnitude - 82.35) < 5e-3, f"blended stop beyond the resident stop: {d_over_res}")
     check(d_over_res.magnitude > 0, "A stop through the blend must be longer than the resident stop.")
+    check(abs((d_res - calc_scurve_stop_distance(v0, a_target, j_allowable)).to(meter).magnitude) < 1e-12, "Resident stop matches MLSysIM.")
+    check(abs((arm_blend - calc_quintic_blend_duration(arm_delta, arm_rate)).to(millisecond).magnitude) < 1e-9, "Arm window matches the quintic blend bound.")
     # margin_blended_stop_distance_envelope.svg fig-alt hand-types 140.6, 246.1, 328.4 mm
     check(
         round(d_ideal.to(millimeter).magnitude, 1) == 140.6 and round(d_res.to(millimeter).magnitude, 1) == 246.1,
@@ -1826,32 +1753,28 @@ Every interval priced so far in this chapter now draws from the same finite stop
 # │ How:     Finished stopping budget from the WarehouseAisle scenario
 # │          (jerk-limited resident stop, all overheads). In MAN the manual
 # │          lease takes the chunk lease's place in tau_delay, so it adds
-# │          v * (lease - chunk lease). Handshake, manual lease, and T_latest
-# │          come from InterventionTimeoutBudget.
+# │          v * (lease - chunk lease). The waterfall is the session budget of
+# │          Scenarios.WarehouseInLoopTakeoverAtRequestSpeed (TakeoverBudgetModel).
+# │          Handshake, manual lease, and T_latest come from InterventionTimeoutBudget.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import meter, second, millimeter, millisecond
-from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_scurve_stop_distance
 from mlsysim.fmt import fmt_length, fmt_latency, fmt_velocity, check
 
-RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
 
 class InterventionAssistantSession:
     """In-loop remote-assistant takeover on the machine after it slows down."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    v_in = AISLE.v_takeover_in_loop  # category: derived (Delta_da-charged ceiling, rounded down)
+    at_request = Scenarios.WarehouseInLoopTakeoverAtRequestSpeed  # in-loop session after the slow-down
+    at_crawl = Scenarios.WarehouseOutOfLoopTakeoverAtCrawl  # out-of-loop takeover at the crawl
+    v_in = at_request.speed  # category: derived (Delta_da-charged ceiling, rounded down)
     v_aisle = AISLE.v_aisle  # category: chosen
-    d_clear = AISLE.d_clear  # category: illustrative
-    tau_delay = AISLE.tau_delay  # category: derived
-    a_brake = AISLE.a_brake  # category: illustrative
-    j_brake = calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"]  # category: derived (stipulated jerk bound)
-    overhead = AISLE.fixed_overhead  # category: illustrative / chosen
-    t_react = AISLE.t_takeover_in_loop  # category: derived (sourced human + transport)
+    t_react = at_request.takeover  # category: derived (sourced human + transport)
     delta_da = AISLE.t_dispatch_to_admission  # category: illustrative (allocation of @sec-placement-dispatch-admission)
-    v_crawl = AISLE.v_takeover_out_of_loop  # category: chosen
-    t_ool = AISLE.t_takeover_out_of_loop  # category: derived (sourced human + transport)
+    v_crawl = at_crawl.speed  # category: chosen
+    t_ool = at_crawl.takeover  # category: derived (sourced human + transport)
     chunk_lease = AISLE.t_lease  # category: chosen
     # Chapter values set once in InterventionTimeoutBudget
     t_handshake = InterventionTimeoutBudget.t_handshake  # category: derived
@@ -1860,26 +1783,26 @@ class InterventionAssistantSession:
     t_latest_in = InterventionTimeoutBudget.t_latest_in  # category: derived
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    def _budget(speed, *, _tau=tau_delay, _a=a_brake, _j=j_brake, _o=overhead):
-        return (speed * _tau + calc_scurve_stop_distance(speed, _a, _j) + _o).to(millimeter)
-
-    spare_in = (d_clear - _budget(v_in)).to(millimeter)
-    travel_react = (v_in * t_react).to(millimeter)
-    remainder = (spare_in - travel_react).to(millimeter)
-    remainder_time = (remainder / v_in).to(millisecond)
-    remainder_crawl = (d_clear - _budget(v_crawl) - v_crawl * t_ool).to(millimeter)
-    lease_excess = (manual_lease - chunk_lease).to(millisecond)
-    lease_travel = (v_in * lease_excess).to(millimeter)
-    travel_da = (v_in * delta_da).to(millimeter)
-    left_da = (remainder - travel_da).to(millimeter)
-    left_da_lease = (left_da - lease_travel).to(millimeter)
-    t_latest_check = ((d_clear - _budget(v_aisle)) / v_aisle).to(millisecond)
+    s = at_request.result
+    spare_in = s.machine.spare.to(millimeter)
+    travel_react = s.takeover_travel.to(millimeter)
+    remainder = s.spare_after_takeover.to(millimeter)
+    remainder_time = s.time_left.to(millisecond)
+    remainder_crawl = at_crawl.result.spare_after_takeover.to(millimeter)
+    lease_excess = s.lease_extension.to(millisecond)
+    lease_travel = s.lease_extension_travel.to(millimeter)
+    travel_da = s.admission_travel.to(millimeter)
+    left_da = s.spare_after_admission.to(millimeter)
+    left_da_lease = s.spare_after_lease.to(millimeter)
+    t_latest_check = (Scenarios.WarehouseInLoopTakeoverAtAisleSpeed.result.machine.spare / v_aisle).to(millisecond)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(spare_in.magnitude - 563.706) < 5e-3, f"spare margin at the in-loop request speed: {spare_in}")
     check(abs(travel_react.magnitude - 453.75) < 1e-9, f"in-loop takeover travel: {travel_react}")
     check(abs(remainder.magnitude - 109.956) < 5e-3, f"remainder after takeover: {remainder}")
     check(abs(remainder_time.magnitude - 146.608) < 5e-3, f"remainder as time: {remainder_time}")
+    check(abs((remainder - v_in * remainder_time).to(millimeter).magnitude) < 1e-9, "The remainder in mm is the remainder in time at the slowed speed.")
+    check(abs((manual_lease - at_request.manual_lease).magnitude) < 1e-12, "One manual lease for the chapter.")
     check(abs(lease_travel.magnitude - 30.0) < 1e-9, f"travel the manual lease adds in MAN: {lease_travel}")
     check(lease_travel < remainder, "In MAN the manual lease must fit the remainder at the in-loop request speed.")
     check(abs(travel_da.magnitude - 47.483) < 5e-3, f"travel during the allocated Delta_da: {travel_da}")
@@ -1958,8 +1881,10 @@ On a shared wireless link, a legitimate `veto_path` intervention packet and an u
 # │          an AES-128 CMAC over one frame and of one Ed25519 verification on
 # │          the safety microcontroller; the displacement a replay at the edge
 # │          of the freshness window carries.
-# │ How:     Published Cortex-M4 cycle counts divided by the permission MCU's
-# │          clock (RM.permission_mcu); verification adds to tau_delay, so each
+# │ How:     Scenarios.WarehouseRemoteCommandAuthentication
+# │          (CommandAuthenticationModel): published Cortex-M4 cycle counts
+# │          (Literature.Crypto) divided by the permission MCU's clock
+# │          (RM.permission_mcu); verification adds to tau_delay, so each
 # │          millisecond is travel at the aisle speed against the spare of
 # │          InterventionTimeoutBudget.
 # └─────────────────────────────────────────────────────────────────────────────
@@ -1967,35 +1892,35 @@ from mlsysim import *
 from mlsysim.core.units import meter, second, millimeter, millisecond, microsecond
 from mlsysim.fmt import fmt, fmt_int, fmt_frequency, fmt_length, fmt_latency, fmt_velocity, check
 
-RM = Embodied.MobileManipulator.WarehouseMobileManipulator
-AISLE = Embodied.Scenario.WarehouseAisle
-
 class InterventionAuthBudget:
     """Takeover authentication as one more pre-brake delay on the machine."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    v = AISLE.v_aisle  # category: chosen
+    auth = Scenarios.WarehouseRemoteCommandAuthentication  # Ed25519 and AES-128 cycle counts at the MCU clock
+    v = auth.budget.speed  # category: chosen
     spare = InterventionTimeoutBudget.spare  # category: derived
     t_auth_max = InterventionTimeoutBudget.t_latest  # category: derived
-    mcu_clock = RM.permission_mcu.compute.clock_rate  # category: illustrative (reference class)
-    # Published cycle counts on an ARM Cortex-M4 (this chapter only); the
+    mcu_clock = auth.clock  # category: illustrative (reference class, RM.permission_mcu)
+    # Published cycle counts on an ARM Cortex-M4 (Literature.Crypto); the
     # reference core is assumed to retire them in the same number of cycles.
-    ed25519_verify_cycles = 720_000  # category: sourced (Owens et al. 2024, optimized assembly)
-    aes_block_cycles = 661.7  # category: sourced (Schwabe and Stoffelen, AES-128 single block)
-    # Scenario assumptions (this chapter only)
-    mac_blocks = 3  # category: illustrative (48-byte frame: counter, timestamp, role, channel mask, command)
-    tau_fresh = 100 * millisecond  # category: illustrative (freshness window)
+    ed25519_verify_cycles = auth.verify_cycles  # category: sourced (Owens et al. 2024, optimized assembly)
+    aes_block_cycles = auth.mac_block_cycles  # category: sourced (Schwabe and Stoffelen, AES-128 single block)
+    mac_blocks = auth.mac_blocks  # category: illustrative (48-byte frame: counter, timestamp, role, channel mask, command)
+    tau_fresh = auth.freshness_window  # category: illustrative (freshness window)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    t_sig = (ed25519_verify_cycles / mcu_clock).to(millisecond)
-    t_mac = (mac_blocks * aes_block_cycles / mcu_clock).to(microsecond)
-    travel_sig = (v * t_sig).to(millimeter)
-    left_sig = (spare - travel_sig).to(millimeter)
-    travel_mac = (v * t_mac).to(millimeter)
-    dx_fresh = (v * tau_fresh).to(millimeter)
-    left_fresh = (spare - dx_fresh).to(millimeter)
+    r = auth.result
+    t_sig = r.verify_time.to(millisecond)
+    t_mac = r.mac_time.to(microsecond)
+    travel_sig = r.verify_travel.to(millimeter)
+    left_sig = r.spare_after_verify.to(millimeter)
+    travel_mac = r.mac_travel.to(millimeter)
+    dx_fresh = r.freshness_travel.to(millimeter)
+    left_fresh = r.spare_after_freshness.to(millimeter)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs((r.deadline - t_auth_max).to(millisecond).magnitude) < 1e-9, "The verification deadline is T_latest of the timeout cell.")
+    check(abs((spare - auth.budget.result.machine.spare).to(millimeter).magnitude) < 1e-9, "One spare for the chapter.")
     check(abs(t_auth_max.magnitude - 100.775) < 5e-3, f"verification deadline: {t_auth_max}")
     check(abs(t_sig.magnitude - 1.8) < 1e-9, f"one Ed25519 verification: {t_sig}")
     check(abs(t_mac.magnitude - 4.96275) < 1e-6, f"one AES-128 CMAC frame: {t_mac}")
@@ -2091,14 +2016,15 @@ Authority ambiguity also corrupts downstream imitation learning\index{Behavioral
 # └─────────────────────────────────────────────────────────────────────────────
 import os as _os
 import re as _re
+from mlsysim import Literature
 from mlsysim.fmt import check
 
 class InterventionFlight2904Strip:
     """Timing values drawn in ws_flight2904_authority_lockout.svg."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────
-    t_left_gear_s = 9  # category: sourced (bfu1994warsaw)
-    t_brake_after_left_s = 4  # category: sourced (bfu1994warsaw, "about 4 seconds")
+    t_left_gear_s = int(Literature.IncidentReports.Dlh2904LeftGearContactAfterRightS)  # category: sourced (bfu1994warsaw)
+    t_brake_after_left_s = int(Literature.IncidentReports.Dlh2904WheelBrakesAfterLeftGearS)  # category: sourced (bfu1994warsaw, "about 4 seconds")
     x0_px, px_per_s = 190, 30  # category: chosen (drawing scale)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
@@ -2150,7 +2076,7 @@ Consider a robotic arm striking a warehouse racking upright during a supervisory
 # │          the machine's permission tick.
 # │ Show:    Part 563 pre-crash window and rate before and after the 2024 rule;
 # │          the new sample period in permission ticks.
-# │ How:     Window and rate from NHTSA's 2024 final rule (89 FR 102810);
+# │ How:     Window and rate from 49 CFR Part 563 (Literature.EventDataRecorders);
 # │          period = 1 / rate; ticks = period / AISLE.t_tick.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
@@ -2163,15 +2089,14 @@ class InterventionRecordBaselines:
     """Regulated vehicle pre-crash recording against the permission tick."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    # Source: NHTSA, 49 CFR Part 563 final rule, 89 FR 102810 (2024-12-18).
-    # Promotion candidate: literature registry (regulatory recorder baseline).
-    edr_old_window = 5 * second  # category: sourced
-    edr_old_rate = 2 * hertz  # category: sourced
-    edr_new_window = 20 * second  # category: sourced
-    edr_new_rate = 10 * hertz  # category: sourced
-    # Source: UN Regulation No. 157 (ALKS), para. 8.3.1(d): DSSAD timestamp
-    # accuracy +/- 1.0 s. Promotion candidate: literature registry.
-    dssad_accuracy = 1.0 * second  # category: sourced
+    # NHTSA, 49 CFR Part 563 (Sec. 563.7 Table I and footnote 4), via Literature.EventDataRecorders.
+    edr = Literature.EventDataRecorders
+    edr_old_window = edr.LegacyPreCrashWindowS * second  # category: sourced
+    edr_old_rate = edr.LegacyPreCrashRateHz * hertz  # category: sourced
+    edr_new_window = edr.PreCrashWindowS * second  # category: sourced
+    edr_new_rate = edr.PreCrashRateHz * hertz  # category: sourced
+    # UN Regulation No. 157 (ALKS), para. 8.3.1(d)(ii): DSSAD timestamp accuracy +/- 1.0 s.
+    dssad_accuracy = Literature.HumanTakeover.R157DssadTimestampAccuracyS * second  # category: sourced
     tick = AISLE.t_tick  # category: chosen
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
@@ -2201,7 +2126,7 @@ A trustworthy record must capture state on both sides of the causal boundary, pa
 ↩ A record of what was proposed, evaluated, dispatched, and measured is the third demand on the permission path established in @sec-boundary-safety-convergence.
 :::
 
-[^fn-std-edr-baseline]: **Event Data Recorder Baseline**\index{Event data recorder!sampling baseline}: A passenger-vehicle event data recorder captures `{python} InterventionRecordBaselines.edr_old_window_str` of pre-crash data at `{python} InterventionRecordBaselines.edr_old_rate_str` (expanding from September 2027 to `{python} InterventionRecordBaselines.edr_new_window_str` at `{python} InterventionRecordBaselines.edr_new_rate_str`), which even under the modernized rule yields only one sample per `{python} InterventionRecordBaselines.edr_new_period_str` across `{python} InterventionRecordBaselines.edr_ticks_str` permission ticks [@nhtsa2024edr]. Similarly, the data storage system mandated for automated lane-keeping systems under UN Regulation No. 157 logs system activations, overrides, and transition demands to establish driver attribution, but its timestamps require accuracy only within `{python} InterventionRecordBaselines.dssad_accuracy_str`, or `{python} InterventionRecordBaselines.dssad_ticks_str` permission ticks [@unece2021r157]. Because neither regulatory standard provides the time resolution needed to order an intervention against physical contact within a single control cycle, the autonomous machine must maintain its own deterministic, per-tick operational record.
+[^fn-std-edr-baseline]: **Event Data Recorder Baseline**\index{Event data recorder!sampling baseline}: A passenger-vehicle event data recorder captures `{python} InterventionRecordBaselines.edr_old_window_str` of pre-crash data at `{python} InterventionRecordBaselines.edr_old_rate_str` (phasing in from September 2028 to `{python} InterventionRecordBaselines.edr_new_window_str` at `{python} InterventionRecordBaselines.edr_new_rate_str`), which even under the modernized rule yields only one sample per `{python} InterventionRecordBaselines.edr_new_period_str` across `{python} InterventionRecordBaselines.edr_ticks_str` permission ticks [@nhtsa2024edr]. Similarly, the data storage system mandated for automated lane-keeping systems under UN Regulation No. 157 logs system activations, overrides, and transition demands to establish driver attribution, but its timestamps require accuracy only within `{python} InterventionRecordBaselines.dssad_accuracy_str`, or `{python} InterventionRecordBaselines.dssad_ticks_str` permission ticks [@unece2021r157]. Because neither regulatory standard provides the time resolution needed to order an intervention against physical contact within a single control cycle, the autonomous machine must maintain its own deterministic, per-tick operational record.
 
 At every cycle, the `{python} InterventionSharedAuthorityScene.permission_rate_str` deterministic control loop records a structured authority and action tuple under declared loss handling. The minimal **evidence tuple**\index{Evidence tuple} takes the form:
 $$\langle \MicrocontrollerClockTime, \RecordedAuthorityState, \MechanicalPlantState, \NominalControlCommand, \CertifiedControlAction, \JointTorque, \text{ID}_{\text{operator}}, \RemainingExecutionLease\rangle$$
@@ -2347,15 +2272,15 @@ class InterventionLearningEvidence:
     """Published interval lengths against the machine's takeover and window."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    # Source: Liu et al., RSS 2023 (Sirius), Sec. IV: pre-intervention class of
+    # Liu et al., RSS 2023 (Sirius), Sec. IV-D: pre-intervention class of
     # l = 15 robot actions, matching an observed operator reaction time of 2 s.
-    # Promotion candidate: literature registry.
-    sirius_actions = 15  # category: sourced
-    sirius_window = 2 * second  # category: sourced
-    # Source: Merat et al., TR Part F 27 (2014), abstract: 35-40 s to stabilize
-    # lateral control after resuming manual driving. Promotion candidate.
-    merat_lo = 35 * second  # category: sourced
-    merat_hi = 40 * second  # category: sourced
+    takeover = Literature.HumanTakeover
+    sirius_actions = int(takeover.SiriusPreInterventionActions)  # category: sourced
+    sirius_window = takeover.SiriusPreInterventionWindowS * second  # category: sourced
+    # Merat et al., TR Part F 27 (2014), abstract: 35-40 s to stabilize
+    # lateral control after resuming manual driving.
+    merat_lo = takeover.MeratLateralStabilizationLowS * second  # category: sourced
+    merat_hi = takeover.MeratLateralStabilizationHighS * second  # category: sourced
     t_ool = AISLE.t_takeover_out_of_loop  # category: derived (sourced)
     t_pre = AISLE.pre_trigger_window  # category: derived
 
@@ -2454,40 +2379,36 @@ Flipping a bit in an authority register does not complete a safe supervisory han
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import meter, second, millimeter, millisecond
-from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_scurve_stop_distance
 from mlsysim.fmt import fmt_length, fmt_latency, fmt_velocity, check
 
-RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
 
 class InterventionFixedWindowPitfall:
     """A configured acknowledgment window judged against the budget at two speeds."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    v = AISLE.v_aisle  # category: chosen
-    v_crawl = AISLE.v_takeover_out_of_loop  # category: chosen
+    at_aisle = Scenarios.WarehouseFixedWindowAtAisleSpeed  # the 500 ms window waited out at the aisle speed
+    at_crawl = Scenarios.WarehouseFixedWindowAtCrawl  # the same window at the crawl
+    v = at_aisle.speed  # category: chosen
+    v_crawl = at_crawl.speed  # category: chosen
     d_clear = AISLE.d_clear  # category: illustrative
-    tau_delay = AISLE.tau_delay  # category: derived
-    a_brake = AISLE.a_brake  # category: illustrative
-    j_brake = calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"]  # category: derived (stipulated jerk bound)
-    overhead = AISLE.fixed_overhead  # category: illustrative / chosen
     window = InterventionTimeoutBudget.config  # category: chosen
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    def _budget(speed, tau, a, j, ovh):
-        return (speed * tau + calc_scurve_stop_distance(speed, a, j) + ovh).to(millimeter)
-
-    budget = _budget(v, tau_delay, a_brake, j_brake, overhead)
-    travel = (v * window).to(millimeter)
-    overrun = (budget + travel - d_clear).to(millimeter)
-    spare_crawl = (d_clear - _budget(v_crawl, tau_delay, a_brake, j_brake, overhead)).to(millimeter)
+    fast, slow = at_aisle.result, at_crawl.result
+    budget = fast.machine.required_distance.to(millimeter)
+    travel = fast.takeover_travel.to(millimeter)
+    overrun = (-fast.with_takeover.spare).to(millimeter)
+    spare_crawl = slow.machine.spare.to(millimeter)
     t_latest_crawl = (spare_crawl / v_crawl).to(millisecond)
     # Stop with the window waited out, at each speed (margin figure).
-    d_stop = (budget + travel).to(millimeter)
-    d_stop_crawl = (d_clear - spare_crawl + v_crawl * window).to(millimeter)
+    d_stop = fast.with_takeover.required_distance.to(millimeter)
+    d_stop_crawl = slow.with_takeover.required_distance.to(millimeter)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(budget.magnitude - 968.99) < 5e-3, f"finished budget at the aisle speed: {budget}")
+    check(abs((at_aisle.takeover - window).to(millisecond).magnitude) < 1e-12, "The waited window is the configured ceiling.")
+    check(abs((t_latest_crawl - slow.deadline).to(millisecond).magnitude) < 1e-6, "The crawl's spare as time is its fallback deadline.")
     # margin_fixed_window_stop_envelope.svg fig-alt hand-types 500 ms, 1619 mm, 307 mm, 1100 mm
     check(round(d_stop.magnitude) == 1619 and round(d_stop_crawl.magnitude) == 307, f"window stops: {d_stop}, {d_stop_crawl}")
     check(
@@ -2560,9 +2481,8 @@ Furthermore, manual intervention must operate under strictly bounded, perishable
 # │ How:     Serial verification on the permission processor, each signed
 # │          packet taking t_sig of InterventionAuthBudget; the genuine veto
 # │          finishes after (n + 1) verifications; the forgeries must arrive
-# │          within that interval.
+# │          within that interval (Scenarios.WarehouseRemoteCommandAuthentication).
 # └─────────────────────────────────────────────────────────────────────────────
-import math
 from mlsysim import *
 from mlsysim.core.units import millisecond, second, hertz
 from mlsysim.fmt import fmt_int, fmt_latency, fmt_count, check
@@ -2576,14 +2496,15 @@ class InterventionVerifierFloodPitfall:
     t_latest = InterventionTimeoutBudget.t_latest  # category: derived
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    flood = Scenarios.WarehouseRemoteCommandAuthentication.result
     # Fewest forged packets n with (n + 1) * t_verify > t_latest.
-    n_forged = math.floor((t_latest / t_verify).to("").magnitude)
-    t_admit = ((n_forged + 1) * t_verify).to(millisecond)
+    n_forged = flood.forged_to_miss
+    t_admit = flood.veto_verified_at.to(millisecond)
     # Whole packets per second the forger must sustain, rounded up.
-    arrival_rate = math.ceil((n_forged / t_admit).to(1 / second).magnitude)
-    n_forged_mac = math.floor((t_latest / t_mac).to("").magnitude)
+    arrival_rate = flood.forged_rate
+    n_forged_mac = flood.forged_mac_to_miss
     # The same count once the allocated Delta_da of @sec-placement-dispatch-admission is charged.
-    n_forged_da = math.floor((InterventionAdmissionAllocation.left_aisle / t_verify).to("").magnitude)
+    n_forged_da = flood.forged_to_miss_after_admission
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(n_forged == 55, f"forged packets that push the veto past T_latest: {n_forged}")
@@ -2591,6 +2512,7 @@ class InterventionVerifierFloodPitfall:
     check(n_forged * t_verify <= t_latest, "One fewer forgery must still let the veto fit.")
     check(n_forged_mac > 100 * n_forged, "A MAC-only flood needs far more frames than a signature flood.")
     check(n_forged_da == 20, f"forged packets once Delta_da is charged: {n_forged_da}")
+    check(abs((flood.verify_time - t_verify).to(millisecond).magnitude) < 1e-12, "The flood prices the same verification as the authentication cell.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     t_verify_str = fmt_latency(t_verify, unit=millisecond, precision=1)
@@ -2654,57 +2576,33 @@ The methods in @tbl-14-intervention-learning require attribution of who generate
 # │          ceilings guard the chosen speeds; the prose quotes the complete
 # │          (Delta_da-charged) ceilings from InterventionAdmissionAllocation.
 # │ How:     Finished stopping budget (jerk-limited resident stop, all
-# │          overheads) from the WarehouseAisle scenario; ceilings by
-# │          calc_scurve_max_permitted_velocity.
+# │          overheads) from the WarehouseAisle scenario; the in-loop and
+# │          out-of-loop takeover budgets at the aisle speed (TakeoverBudgetModel).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import meter, second, millimeter, millisecond
-from mlsysim.physics.robotics import (
-    calc_c2_stop_suffix,
-    calc_scurve_stop_distance,
-    calc_scurve_max_permitted_velocity,
-)
 from mlsysim.fmt import fmt_length, fmt_latency, fmt_velocity, check
 
-RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
 
 class InterventionSummaryWaiting:
     """Spare stopping margin spent as waiting time, and the takeover speeds it forces."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    v = AISLE.v_aisle  # category: chosen
-    d_clear = AISLE.d_clear  # category: illustrative
-    tau_delay = AISLE.tau_delay  # category: derived
-    a_brake = AISLE.a_brake  # category: illustrative
-    j_brake = calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"]  # category: derived (stipulated jerk bound)
-    overhead = AISLE.fixed_overhead  # category: illustrative / chosen
-    t_in = AISLE.t_takeover_in_loop  # category: derived (sourced human + transport)
-    t_ool = AISLE.t_takeover_out_of_loop  # category: derived (sourced human + transport)
+    in_loop = Scenarios.WarehouseInLoopTakeoverAtAisleSpeed
+    out_of_loop = Scenarios.WarehouseOutOfLoopTakeoverAtAisleSpeed
+    v = in_loop.speed  # category: chosen
+    t_in = in_loop.takeover  # category: derived (sourced human + transport)
+    t_ool = out_of_loop.takeover  # category: derived (sourced human + transport)
     v_in = AISLE.v_takeover_in_loop  # category: chosen
     v_ool = AISLE.v_takeover_out_of_loop  # category: chosen
     t_latest_in = InterventionTimeoutBudget.t_latest_in  # category: derived
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    budget = (v * tau_delay + calc_scurve_stop_distance(v, a_brake, j_brake) + overhead).to(millimeter)
-    spare = (d_clear - budget).to(millimeter)
-    t_latest = (spare / v).to(millisecond)
-    ceil_in = calc_scurve_max_permitted_velocity(
-        d_clear,
-        tau_delay + t_in,
-        a_brake,
-        j_brake,
-        AISLE.delta_loc + AISLE.eps_track,
-        AISLE.delta_margin,
-    ).to(meter / second)
-    ceil_ool = calc_scurve_max_permitted_velocity(
-        d_clear,
-        tau_delay + t_ool,
-        a_brake,
-        j_brake,
-        AISLE.delta_loc + AISLE.eps_track,
-        AISLE.delta_margin,
-    ).to(meter / second)
+    spare = in_loop.result.machine.spare.to(millimeter)
+    t_latest = in_loop.result.deadline.to(millisecond)
+    ceil_in = in_loop.result.with_takeover.speed_ceiling.to(meter / second)
+    ceil_ool = out_of_loop.result.with_takeover.speed_ceiling.to(meter / second)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(spare.magnitude - 131.01) < 5e-3, f"spare margin at the aisle speed: {spare}")

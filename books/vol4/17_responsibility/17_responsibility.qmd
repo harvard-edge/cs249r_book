@@ -85,20 +85,22 @@ from mlsysim import *
 from mlsysim.core.units import foot, mph, meter, second
 from mlsysim.fmt import fmt_length, fmt_velocity, fmt_int, fmt_usd, check
 
+PENALTIES = Scenarios.CruiseDisclosurePenalties
+
 class CruiseRecord:
     """The pullover the record captured and the account regulators received."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    d_drag = 20 * foot  # category: measured (approximate pullover distance; Quinn Emanuel review, Exponent appendix)
-    v_drag = 7.7 * mph  # category: measured (peak pullover speed; same source)
-    days_withheld = 15  # category: sourced (CPUC Decision 24-07-004: 3 to 18 October 2023)
-    cpuc_daily_max = 7_500  # category: sourced (USD per day, Pub. Util. Code 5378(b), as the decision applies it)
-    cpuc_penalty_reported = 112_500  # category: sourced (USD, the penalty the decision states)
+    d_drag = Literature.IncidentReports.CruisePulloverDistanceFt * foot  # category: measured (approximate pullover distance; Quinn Emanuel review, Exponent appendix)
+    v_drag = Literature.IncidentReports.CruisePulloverMaxSpeedMph * mph  # category: measured (peak pullover speed; same source)
+    days_withheld = PENALTIES.days_withheld  # category: sourced (CPUC Decision 24-07-004: 3 to 18 October 2023)
+    cpuc_daily_max = PENALTIES.daily_maximum  # category: sourced (USD per day, Pub. Util. Code 5378(b), as the decision applies it)
+    cpuc_penalty_reported = Literature.IncidentReports.CruiseCpucPenaltyUsd  # category: sourced (USD, the penalty the decision states)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     d_drag_m = d_drag.to(meter)
     v_drag_ms = v_drag.to(meter / second)
-    cpuc_penalty = days_withheld * cpuc_daily_max
+    cpuc_penalty = PENALTIES.per_day_penalty
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(d_drag_m.magnitude - 6.096) < 1e-3, "20 ft is 6.1 m")
@@ -153,21 +155,20 @@ from mlsysim.core.units import meter, second
 from mlsysim.fmt import fmt, fmt_int, fmt_velocity, fmt_percent, fmt_math, check
 
 AISLE = Embodied.Scenario.WarehouseAisle
+CHAIN = Scenarios.AdmittedCommandDecisionChain
 
 class DecisionChain:
     """Completeness of a chain of independently kept decision records."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
     v_aisle = AISLE.v_aisle  # category: chosen (signed aisle speed)
-    k_links = 6  # category: illustrative (decisions behind one admitted aisle command)
-    p_good = 0.99  # category: illustrative (each link recorded and retrievable)
-    p_mid = 0.95  # category: illustrative
-    p_poor = 0.90  # category: illustrative (links left to memory and email)
+    k_links = CHAIN.links  # category: illustrative (decisions behind one admitted aisle command)
+    p_good, p_mid, p_poor = CHAIN.link_probabilities  # category: illustrative (retrievable per link; 0.90 is a link left to memory and email)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    c_good = p_good**k_links
-    c_mid = p_mid**k_links
-    c_poor = p_poor**k_links
+    c_good = CHAIN.completeness(p_good)
+    c_mid = CHAIN.completeness(p_mid)
+    c_poor = CHAIN.completeness(p_poor)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(c_good - 0.9415) < 5e-4, "six links at 0.99 resolve 94 percent of the time")
@@ -250,19 +251,20 @@ from mlsysim.core.units import meter, second
 from mlsysim.fmt import fmt_length, fmt_velocity, fmt_latency, fmt_multiple, check
 
 AISLE = Embodied.Scenario.WarehouseAisle
+OVERSIGHT = Scenarios.WarehouseRackEndOversightTime
 
 class OversightTime:
     """Hazard window at aisle speed against the out-of-loop takeover."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    v = AISLE.v_aisle  # category: chosen
+    v = OVERSIGHT.budget.speed  # category: chosen (the aisle speed)
     d_clear = AISLE.d_clear  # category: illustrative
-    t_ool = AISLE.t_takeover_out_of_loop  # category: derived (sourced p90 take-over time plus transport)
+    t_ool = OVERSIGHT.budget.takeover  # category: derived (sourced p90 take-over time plus transport)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    t_window = (d_clear / v).to(second)
-    travel = (v * t_ool).to(meter)
-    shortfall_ratio = (t_ool / t_window).to("").magnitude
+    t_window = OVERSIGHT.hazard_window
+    travel = OVERSIGHT.takeover_travel
+    shortfall_ratio = OVERSIGHT.takeover_over_window
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(t_window.magnitude - 0.8462) < 5e-4, "the rack end arrives in 0.85 s at aisle speed")
@@ -302,38 +304,34 @@ The engineering consequence is already in the book's design. The machine stops i
 # │          request sees, grow with the number of machines served.
 # │ Show:    Utilization and mean wait for 10, 20, and 32 machines; the p99 wait
 # │          at 20; the largest fleet that keeps utilization at one half.
-# │ How:     rho = lambda * s with lambda = N * per-machine assist rate;
-# │          M/M/1 mean wait rho * s / (1 - rho); p99 from
-# │          calc_queue_latency_mmc with one server.
+# │ How:     Scenarios.WarehouseRemoteAssistantQueue (SupervisorQueueModel):
+# │          rho = lambda * s with lambda = N * per-machine assist rate;
+# │          M/M/1 mean wait rho * s / (1 - rho); p99 from the Erlang C tail
+# │          with one server.
 # └─────────────────────────────────────────────────────────────────────────────
-import math
 from mlsysim import *
 from mlsysim.core.units import second, minute, hour
-from mlsysim.physics import calc_queue_latency_mmc
 from mlsysim.fmt import fmt, fmt_int, fmt_latency, fmt_percent, check
+
+QUEUE = Scenarios.WarehouseRemoteAssistantQueue
+QUEUE_SMALL = Scenarios.WarehouseRemoteAssistantQueueTenMachines
+QUEUE_LARGE = Scenarios.WarehouseRemoteAssistantQueueThirtyTwoMachines
 
 class SupervisorLoad:
     """Utilization and waiting time for one remote assistant."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    assist_rate = 0.5 / hour  # category: illustrative (help requests per machine per operating hour)
-    t_service = 3.0 * minute  # category: illustrative (mean time one request holds the assistant)
-    n_small, n_mid, n_large = 10, 20, 32  # category: illustrative (machines served by one assistant)
-    rho_target = 0.5  # category: chosen (utilization ceiling a staffing plan may adopt)
+    assist_rate = QUEUE.request_rate  # category: illustrative (help requests per machine per operating hour)
+    t_service = QUEUE.service_time  # category: illustrative (mean time one request holds the assistant)
+    n_small, n_mid, n_large = QUEUE_SMALL.machines, QUEUE.machines, QUEUE_LARGE.machines  # category: illustrative (machines served by one assistant)
+    rho_target = QUEUE.utilization_cap  # category: chosen (utilization ceiling a staffing plan may adopt)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    def _load(n, rate=assist_rate, s=t_service):
-        lam = (n * rate).to(1 / second)
-        rho = (lam * s).to("").magnitude
-        wq = (rho * s / (1 - rho)).to(second)
-        _, _, p99 = calc_queue_latency_mmc(lam.magnitude, (1 / s).to(1 / second).magnitude, 1)
-        return rho, wq, p99
-
-    rho_small, wq_small, _ = _load(n_small)
-    rho_mid, wq_mid, p99_mid = _load(n_mid)
-    rho_large, wq_large, _ = _load(n_large)
-    n_max = math.floor(rho_target / (assist_rate * t_service).to("").magnitude)
-    assist_min_per_hour_mid = (n_mid * assist_rate * t_service).to(minute / hour)
+    rho_small, wq_small = QUEUE_SMALL.result.utilization, QUEUE_SMALL.result.mean_wait
+    rho_mid, wq_mid, p99_mid = QUEUE.result.utilization, QUEUE.result.mean_wait, QUEUE.result.p99_wait
+    rho_large, wq_large = QUEUE_LARGE.result.utilization, QUEUE_LARGE.result.mean_wait
+    n_max = QUEUE.max_machines
+    assist_min_per_hour_mid = QUEUE.result.busy_per_hour
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(rho_small - 0.25) < 1e-9 and abs(rho_mid - 0.50) < 1e-9 and abs(rho_large - 0.80) < 1e-9, "utilization 0.25, 0.50, 0.80")
@@ -451,18 +449,20 @@ from mlsysim import *
 from mlsysim.core.units import hour, day
 from mlsysim.fmt import fmt, fmt_int, check
 
+STAGE = Scenarios.WarehouseSupervisedStageExit
+
 class StageExit:
     """Failure-free exposure needed to leave the supervised stage."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    rate_target = 1.0e-3 / hour  # category: chosen (safety-relevant interventions per operating hour to demonstrate)
-    alpha = 0.05  # category: chosen (one-sided, 95 percent confidence)
-    n_machines = 10  # category: illustrative (machines in the supervised stage)
-    hours_per_day = 16 * hour / day  # category: illustrative (two shifts)
+    rate_target = STAGE.rates[0]  # category: chosen (safety-relevant interventions per operating hour to demonstrate)
+    confidence = STAGE.confidence  # category: chosen (one-sided, 95 percent)
+    n_machines = STAGE.rigs  # category: illustrative (machines in the supervised stage)
+    hours_per_day = STAGE.hours_per_day  # category: illustrative (two shifts)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    t_required = (math.log(1 / alpha) / rate_target).to(hour)
-    days_required = (t_required / (n_machines * hours_per_day)).to(day)
+    t_required = STAGE.exposure(rate_target)
+    days_required = STAGE.calendar_days(rate_target)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(t_required.magnitude - 2995.7) < 0.1, "about 3,000 failure-free hours at 95 percent")
@@ -544,42 +544,37 @@ from mlsysim.fmt import (
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
+SHORTFALL = Scenarios.WarehouseGroupDetectionShortfall
 
 def _whole(q, unit):
     """Round a quantity to whole display units on purpose, for prose."""
     return round(q.to(unit).magnitude) * unit
 
-def _frames(p_frame, p_miss):
-    """Consecutive frames before the all-miss probability falls to p_miss."""
-    return math.ceil(math.log(p_miss) / math.log(1.0 - p_frame) - 1e-12)
-
 class DetectionShortfall:
     """Stopping consequences of a per-group detection gap."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    v = AISLE.v_aisle  # category: chosen
+    v = SHORTFALL.speed  # category: chosen (the aisle speed)
     a_brake = AISLE.a_brake  # category: illustrative (credible loaded deceleration)
     m = RM.loaded_mass  # category: derived (registry loaded mass)
-    t_frame = (1 / RM.nav_camera.frame_rate).to(millisecond)  # category: datasheet (navigation camera frame rate)
-    p_miss = 1.0e-3  # category: chosen (allowed probability of missing a person in every frame)
-    p_ref = 0.95  # category: illustrative (per-frame detection, best-detected group)
-    p_lows = (0.85, 0.75, 0.60)  # category: illustrative (per-frame detection, three lower-detection groups)
+    t_frame = SHORTFALL.frame_period  # category: datasheet (navigation camera frame rate)
+    p_miss = SHORTFALL.all_miss_probability  # category: chosen (allowed probability of missing a person in every frame)
+    p_ref = SHORTFALL.reference  # category: illustrative (per-frame detection, best-detected group)
+    p_lows = SHORTFALL.groups  # category: illustrative (per-frame detection, three lower-detection groups)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    n_ref = _frames(p_ref, p_miss)
-    d_brake = (v**2 / (2 * a_brake)).to(meter)
-    rows = []
-    all_within_brake = True
+    result = SHORTFALL.result
+    n_ref = result.reference_frames
+    d_brake = result.braking_travel
+    x_brake_ref = result.reference_brake_onset
+    x_person = result.reference_stop
+    rows = [(r.per_frame_detection, r.frames, r.extra_frames, r.distance_lost, r.impact_speed, r.impact_energy)
+            for r in result.rows]
+    all_within_brake = result.within_braking
     energy_forms_agree = True
-    for p in p_lows:
-        n_low = _frames(p, p_miss)
-        dn = n_low - n_ref
-        dr = (v * t_frame * dn).to(meter)
-        v_imp = ((2 * a_brake * dr) ** 0.5).to(meter / second)
-        e_imp = (m * a_brake * dr).to(joule)
-        rows.append((p, n_low, dn, dr, v_imp, e_imp))
-        all_within_brake = all_within_brake and dr < d_brake
-        energy_forms_agree = energy_forms_agree and abs((0.5 * m * v_imp**2).to(joule).magnitude - e_imp.magnitude) < 1e-6
+    for row in result.rows:
+        half_m_v2 = (0.5 * m * row.impact_speed**2).to(joule).magnitude
+        energy_forms_agree = energy_forms_agree and abs(half_m_v2 - row.impact_energy.to(joule).magnitude) < 1e-6
     # The notebook works the middle row.
     p_low, n_low, dn, dr, v_imp, e_imp = rows[1]
 
@@ -598,7 +593,7 @@ class DetectionShortfall:
     a_brake_str = fmt_acceleration(a_brake, precision=0)
     m_str = fmt_mass(m, unit=kilogram, precision=0)
     t_frame_str = fmt_latency(t_frame, unit=millisecond, precision=1)
-    p_miss_math = fmt_math(r"10^{-3}")
+    p_miss_math = fmt_math(f"10^{{{round(math.log10(p_miss))}}}")
     p_ref_str = fmt(p_ref, precision=2)
     p_low_str = fmt(p_low, precision=2)
     p_ref_pct_str = fmt_percent(p_ref, precision=0, style="prose")
@@ -682,12 +677,10 @@ from binder.tools.figures import style as book_style
 DS = DetectionShortfall
 v0 = DS.v.to(meter / second).magnitude
 a = DS.a_brake.to(meter / second**2).magnitude
-tau = AISLE.tau_delay.to(second).magnitude
-t_f = DS.t_frame.to(second).magnitude
 p_w, n_w, dn_w, dr_w, vimp_w, e_w = DS.rows[2]
 dr_w = dr_w.to(meter).magnitude
-x_ref_brake = v0 * (DS.n_ref * t_f + tau)
-x_person = x_ref_brake + v0**2 / (2 * a)
+x_ref_brake = DS.x_brake_ref.to(meter).magnitude
+x_person = DS.x_person.to(meter).magnitude
 
 def profile(x_brake, x_end):
     x = np.linspace(0, x_end, 600)
@@ -742,38 +735,29 @@ plt.close()
 # │ How:     Clopper-Pearson intervals from beta quantiles (scipy.stats); the
 # │          normal-approximation two-proportion sample size, two-sided 0.05.
 # └─────────────────────────────────────────────────────────────────────────────
-import math
-from scipy.stats import beta, norm
+from mlsysim import *
 from mlsysim.fmt import fmt, fmt_int, fmt_percent, fmt_multiple, check
 
-def _cp_interval(k, n, conf=0.95):
-    """Exact two-sided Clopper-Pearson interval for k successes in n trials."""
-    a = 1.0 - conf
-    lo = 0.0 if k == 0 else beta.ppf(a / 2, k, n - k + 1)
-    hi = 1.0 if k == n else beta.ppf(1 - a / 2, k + 1, n - k)
-    return lo, hi
+SAMPLE = Scenarios.PedestrianGroupEvaluationSample
 
 class SubgroupIntervals:
     """Interval width for a small group and the sample that resolves a gap."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    n_total = 10_000  # category: illustrative (people in the evaluation set)
-    share_small = 0.02  # category: illustrative (share of the set from the smaller group)
-    recall = 0.95  # category: illustrative (observed detection rate in both groups)
-    p_a, p_b = 0.95, 0.92  # category: chosen (the gap the evaluation must resolve)
-    alpha, power = 0.05, 0.80  # category: chosen (two-sided test level and power)
+    n_total = SAMPLE.total  # category: illustrative (people in the evaluation set)
+    share_small = SAMPLE.small_share  # category: illustrative (share of the set from the smaller group)
+    recall = SAMPLE.recall  # category: illustrative (observed detection rate in both groups)
+    p_a, p_b = SAMPLE.rate_a, SAMPLE.rate_b  # category: chosen (the gap the evaluation must resolve)
+    alpha, power = SAMPLE.significance, SAMPLE.power  # category: chosen (two-sided test level and power)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    n_small = round(n_total * share_small)
-    n_large = n_total - n_small
-    lo_s, hi_s = _cp_interval(round(recall * n_small), n_small)
-    lo_l, hi_l = _cp_interval(round(recall * n_large), n_large)
-    width_s, width_l = hi_s - lo_s, hi_l - lo_l
-    width_ratio = width_s / width_l
-    z_a, z_b = norm.ppf(1 - alpha / 2), norm.ppf(power)
-    p_bar = (p_a + p_b) / 2
-    n_needed = math.ceil((z_a * math.sqrt(2 * p_bar * (1 - p_bar)) + z_b * math.sqrt(p_a * (1 - p_a) + p_b * (1 - p_b))) ** 2 / (p_a - p_b) ** 2)
-    share_needed = n_needed / n_total
+    n_small = SAMPLE.small
+    n_large = SAMPLE.large
+    lo_s, hi_s = SAMPLE.small_interval
+    lo_l, hi_l = SAMPLE.large_interval
+    width_ratio = SAMPLE.width_ratio
+    n_needed = SAMPLE.per_group_needed
+    share_needed = SAMPLE.share_needed
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(n_small == 200 and n_large == 9_800, "a 2 percent group of 10,000 is 200 people")
@@ -837,18 +821,21 @@ If per-group detection rates live only in a research benchmark report, the relea
 # │          them, and the ratio of their per-person exposure to the average.
 # │ How:     ratio = encounter share / worker share.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
 from mlsysim.fmt import fmt_percent, fmt_multiple, check
+
+CROSSINGS = Scenarios.WarehouseCrossingExposure
 
 class ExposureConcentration:
     """Per-person exposure at the busiest crossings against the site average."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    encounter_share = 0.80  # category: illustrative (machine-person encounters at three crossings)
-    worker_share = 0.10  # category: illustrative (workers whose routes use those crossings)
+    encounter_share = CROSSINGS.encounter_share  # category: illustrative (machine-person encounters at three crossings)
+    worker_share = CROSSINGS.user_share  # category: illustrative (workers whose routes use those crossings)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    ratio = encounter_share / worker_share
-    rest_ratio = (1 - encounter_share) / (1 - worker_share)
+    ratio = CROSSINGS.concentration
+    rest_ratio = CROSSINGS.rest_ratio
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(ratio - 8.0) < 1e-9, "the crossing users carry eight times the average exposure")
@@ -920,20 +907,21 @@ from mlsysim.core.units import second, hour
 from mlsysim.fmt import fmt_int, fmt_latency, fmt_percent, fmt_multiple, check
 
 AISLE = Embodied.Scenario.WarehouseAisle
+RETENTION = Scenarios.WarehouseEventTriggeredRetention
 
 class Retention:
     """Share of camera footage kept under event-triggered retention."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    t_pre = AISLE.pre_trigger_window  # category: derived (out-of-loop takeover rounded up)
-    t_post = 25 * second  # category: chosen (capture after the event, through the physical response)
-    events_per_day = 20  # category: illustrative (interventions and boundary excursions per machine-day)
-    day_hours = 16 * hour  # category: illustrative (two shifts)
+    t_pre = RETENTION.pre_trigger  # category: derived (out-of-loop takeover rounded up)
+    t_post = RETENTION.post_trigger  # category: chosen (capture after the event, through the physical response)
+    events_per_day = RETENTION.events_per_day  # category: illustrative (interventions and boundary excursions per machine-day)
+    day_hours = RETENTION.operating_day  # category: illustrative (two shifts)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    window = (t_pre + t_post).to(second)
-    kept = (events_per_day * window / day_hours).to("").magnitude
-    reduction = 1 / kept
+    window = RETENTION.window
+    kept = RETENTION.kept_share
+    reduction = RETENTION.reduction
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(window.magnitude - 30.0) < 1e-9, "30 s kept per event")
@@ -991,27 +979,30 @@ The declarations of @sec-release-recorded-people are where the line is drawn. A 
 # │          hours; sweeps = count * duration; monitoring = a staffed assistant
 # │          for every operating hour; shifts = total / shift length.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
 from mlsysim.core.units import hour, minute, day
 from mlsysim.fmt import fmt, fmt_int, fmt_latency, fmt_percent, check
+
+LABOR = Scenarios.WarehouseRemoteAssistantLabor
 
 class ShiftedLabor:
     """Human hours a 20-machine fleet moves into rescue, sweeping, and monitoring."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    rho = SupervisorLoad.rho_mid  # category: derived (assistant utilization at 20 machines)
-    n_machines = SupervisorLoad.n_mid  # category: illustrative
-    day_hours = 16 * hour  # category: illustrative (two shifts of operation)
-    sweeps_per_day = 4  # category: illustrative (inspections of the restricted corridors)
-    t_sweep = 20 * minute  # category: illustrative (one corridor sweep)
-    shift = 8 * hour  # category: illustrative (one full-time shift)
+    rho = LABOR.queue.result.utilization  # category: derived (assistant utilization at 20 machines)
+    n_machines = LABOR.queue.machines  # category: illustrative
+    day_hours = LABOR.operating_day  # category: illustrative (two shifts of operation)
+    sweeps_per_day = LABOR.sweeps  # category: illustrative (inspections of the restricted corridors)
+    t_sweep = LABOR.sweep_time  # category: illustrative (one corridor sweep)
+    shift = LABOR.shift  # category: illustrative (one full-time shift)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    assist_h = (rho * day_hours).to(hour)
-    sweep_h = (sweeps_per_day * t_sweep).to(hour)
+    assist_h = LABOR.request_time
+    sweep_h = LABOR.sweep_total
     monitor_h = day_hours.to(hour)
-    idle_monitor_h = (monitor_h - assist_h).to(hour)
-    total_h = (monitor_h + sweep_h).to(hour)
-    shifts = (total_h / shift).to("").magnitude
+    idle_monitor_h = LABOR.watch_time
+    total_h = LABOR.total
+    shifts = LABOR.shifts
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(assist_h.magnitude - 8.0) < 1e-9, "8 h of the assistant's day are spent on requests")

@@ -118,3 +118,13 @@ def calc_lsh_candidate_probability(similarity: float, bands: int, rows: int) -> 
 def calc_lsh_threshold(bands: int, rows: int) -> float:
     """Similarity where the banding S-curve is steepest, approximately ``(1/b)^(1/r)``."""
     return (1 / bands) ** (1 / rows)
+
+
+def calc_minhash_standard_error(similarity: float, hashes: int) -> float:
+    """Standard error of the MinHash estimate of Jaccard ``similarity`` from ``hashes`` independent hashes.
+
+    Each hash agrees with probability ``J``, so the agreeing fraction has
+    standard error ``sqrt(J (1 - J) / k)``; the largest, at ``J = 0.5``, is
+    ``0.5 / sqrt(k)`` (added 2026-10-20).
+    """
+    return (similarity * (1 - similarity) / hashes) ** 0.5

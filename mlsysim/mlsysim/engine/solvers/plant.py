@@ -27,6 +27,8 @@ from ..results import (
     ThermalBurstResult,
     ThrottledStageResult,
     ZeroFailureResult,
+    ExponentialRareEventResult,
+    DiagnosticCoverageResult,
 )
 from ...core.types import Quantity
 from ...core.units import ureg
@@ -50,6 +52,12 @@ from ...physics.robotics.assurance import (
     calc_clopper_pearson_zero_failure_bound,
     calc_zero_failure_rate_upper_bound,
     calc_zero_failure_sample_size,
+)
+from ...physics.statistics import (
+    calc_cross_entropy_exponential_proposal,
+    calc_importance_sampling_exponential,
+    calc_monte_carlo_sample_size,
+    calc_optimal_exponential_proposal_mean,
 )
 from .base import ForwardModel
 
@@ -344,6 +352,7 @@ class DriveBusModel(ForwardModel):
             capacitor_only_endpoint=((full ** 2 + 2 * e_regen / capacitance) ** 0.5).to(ureg.volt),
             capacitor_to_clamp=(0.5 * capacitance * (clamp ** 2 - full ** 2)).to(ureg.joule),
             stop_time=t_stop, peak_power=p_peak, resistor_max=(clamp ** 2 / p_peak).to(ureg.ohm),
+            crossing_resistance=((depleted - lockout) / step_current).to(ureg.ohm),
         )
 
 
@@ -373,6 +382,72 @@ class ZeroFailureModel(ForwardModel):
             coefficient=coefficient, rate_upper=p, one_in=1 / p,
             rate_upper_exact=1 - calc_clopper_pearson_zero_failure_bound(trials, confidence),
             trials_for_target=needed, trials_for_target_approx=needed_approx,
+        )
+
+
+class ExponentialRareEventModel(ForwardModel):
+    """
+    One rare exponential tail estimated by plain Monte Carlo, a zero-failure
+    campaign, and cross-entropy importance sampling (added 2026-10-20).
+
+    The operational variable is exponential with ``mean``; failure is a draw
+    past ``threshold``, so p = exp(-threshold / mean). Plain Monte Carlo needs
+    (1 - p) / (p r^2) runs for relative error r; a zero-failure campaign needs
+    ceil(ln(1 - C) / ln(1 - p)) clean runs to bound p. The cross-entropy method
+    with ``elite_share`` reaches the threshold in a few levels; its exponential
+    proposal gives the per-draw relative variance, the weighted runs for r,
+    the share of proposal draws that fail, and the effective sample size.
+    """
+    requires = ()
+    produces = ExponentialRareEventResult
+
+    def solve(self, threshold: Quantity, mean: Quantity, elite_share: float, relative_error: float,
+              confidence: float) -> ExponentialRareEventResult:
+        ce = calc_cross_entropy_exponential_proposal(threshold, mean, elite_share)
+        weighted = calc_importance_sampling_exponential(threshold, mean, ce["proposal_mean"])
+        p = weighted["failure_probability"]
+        n_mc = calc_monte_carlo_sample_size(p, relative_error)
+        n_is = weighted["relative_variance"] / relative_error ** 2
+        m_opt = calc_optimal_exponential_proposal_mean(threshold, mean)
+        best = calc_importance_sampling_exponential(threshold, mean, m_opt)["relative_variance"]
+        return ExponentialRareEventResult(
+            threshold=threshold, failure_probability=p, monte_carlo_runs=n_mc,
+            zero_failure_runs=calc_zero_failure_sample_size(1.0 - p, confidence),
+            levels=ce["levels"], n_levels=ce["n_levels"], proposal_mean=ce["proposal_mean"],
+            proposal_failure_share=weighted["proposal_failure_share"],
+            relative_variance=weighted["relative_variance"], importance_runs=n_is,
+            ess_per_draw=weighted["ess_per_draw"], effective_sample_size=n_is * weighted["ess_per_draw"],
+            optimal_proposal_mean=m_opt, proposal_penalty=weighted["relative_variance"] / best - 1.0,
+            speedup=n_mc / n_is,
+        )
+
+
+class DiagnosticCoverageModel(ForwardModel):
+    """
+    Diagnostic coverage that leaves at most ``target`` of a raw fault rate
+    unmitigated, and the zero-miss injection campaign that demonstrates it
+    (added 2026-10-20).
+
+    Rates are in FIT (faults per 10^9 hours). The raw rate is the sum of the
+    strata; coverage C_diag = 1 - target / raw. Each injection misses with
+    probability 1 - C_diag, so n zero-miss injections bound it at confidence
+    C when n >= ln(1 - C) / ln(C_diag); the rule of three approximates n by
+    3 / (1 - C_diag). Drawn in proportion to the rates, each stratum receives
+    its share of the n injections.
+    """
+    requires = ()
+    produces = DiagnosticCoverageResult
+
+    def solve(self, strata: Dict[str, float], target: float, confidence: float) -> DiagnosticCoverageResult:
+        raw = sum(strata.values())
+        coverage = 1.0 - target / raw
+        n = calc_zero_failure_sample_size(coverage, confidence=confidence)
+        shares = {k: v / raw for k, v in strata.items()}
+        return DiagnosticCoverageResult(
+            raw_rate=raw, coverage=coverage,
+            injections_exact=math.log(1.0 - confidence) / math.log(coverage), injections=n,
+            rule_of_three=3.0 / (1.0 - coverage),  # the rule of three's coefficient (Hanley and Lippman-Hand 1983)
+            shares=shares, allocation={k: n * f for k, f in shares.items()},
         )
 
 

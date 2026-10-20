@@ -1008,10 +1008,27 @@ MLPERF_TRAINING_V31_RESNET50_H100 = Provenance(
     ),
 )
 
+MLPERF_TRAINING_V40_RESNET = Provenance(  # added 2026-10-20
+    id="prov:mlperf-training-v40-resnet",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref=(
+        "MLPerf Training v4.0 (June 2024), closed division, ResNet-50: NVIDIA eos_ngc24.04_mxnet "
+        "(8x H100) and eos_n8_ngc24.04_mxnet (64x H100) result logs and scaling.json; MLPerf Training "
+        "rules, ResNet-50 quality target"
+    ),
+    url="https://github.com/mlcommons/training_results_v4.0/tree/main/NVIDIA/results",
+    verified="2026-10-17",
+    notes=(
+        "The published score is the mean of the middle three of five run times (a run that misses the "
+        "quality target counts as the slowest) times the scaling.json factor; every ResNet folder carries "
+        "the same factor. Global batch from the global_batch_size MLLOG line of both submissions."
+    ),
+)
+
 MLPERF_INFERENCE_V50_RESNET50_H100 = Provenance(
     id="prov:mlperf-inference-v50-resnet50-h100",
     kind=ProvenanceKind.INDUSTRY_REPORT,
-    ref="MLPerf Inference v5.0 Datacenter, closed division, ResNet-50: Cisco UCS C885A M8 (8x H100-SXM-80GB, TensorRT, INT8), result 5.0-0005; Offline 715,761 samples/s, Server 652,002 samples/s at p99 10.86 ms under a 15 ms bound",
+    ref="MLPerf Inference v5.0 Datacenter, closed division, ResNet-50: Cisco UCS C885A M8 (8x H100-SXM-80GB, TensorRT, INT8), result 5.0-0010; Offline 715,761 samples/s, Server 652,002 samples/s at p99 10.86 ms under a 15 ms bound",
     url="https://github.com/mlcommons/inference_results_v5.0/tree/main/closed/Cisco/results/C885A_H100_SXMx8_TRT/resnet50",
     verified="2026-10-12",
     notes="Per-accelerator figures divide the eight-GPU system result by eight, as MLCommons and NVIDIA do; MLPerf itself reports system throughput.",
@@ -3836,6 +3853,56 @@ OBERMEYER_2019 = _lit(
            "patients among those auto-identified rises from 17.7 to 46.5 percent."),
 )
 
+PROPUBLICA_COMPAS_METHOD_2016 = _lit(
+    "prov:propublica-compas-method-2016",
+    "Larson, Mattu, Kirchner, and Angwin (2016), How We Analyzed the COMPAS Recidivism Algorithm, "
+    "ProPublica",
+    url="https://www.propublica.org/article/how-we-analyzed-the-compas-recidivism-algorithm",
+    verified="2026-10-20",
+    notes=("Contingency tables for Black and White defendants (survived or recidivated against low "
+           "or high score): false positive rate 44.85 and 23.45 percent, false negative rate 27.99 "
+           "and 47.72 percent; 1,901 of 3,696 Black and 966 of 2,454 White defendants recidivated; "
+           "positive predictive value 0.63 and 0.59; 7,214 defendants in the Broward County data."),
+)
+
+LUM_ISAAC_2016 = _lit(
+    "prov:lum-isaac-2016",
+    "Lum and Isaac (2016), To predict and serve?, Significance 13(5), 14-19",
+    url="https://doi.org/10.1111/j.1740-9713.2016.00960.x",
+    verified="2026-10-20",
+    notes="PredPol run on Oakland drug-crime records; the feedback simulation adds 20 percent "
+          "more recorded crime in flagged locations each day (Fig. 3).",
+)
+
+RAJI_BUOLAMWINI_2019 = _lit(
+    "prov:raji-buolamwini-2019",
+    "Raji and Buolamwini (2019), Actionable Auditing: Investigating the Impact of Publicly Naming "
+    "Biased Performance Results of Commercial AI Products, AIES 2019",
+    url="https://doi.org/10.1145/3306618.3314244",
+    verified="2026-10-20",
+    notes="The three audited companies released new API versions 66 to 190 days after the "
+          "original audit results were sent to them.",
+)
+
+CHEN_TOPK_OFF_POLICY_2019 = _lit(
+    "prov:chen-topk-off-policy-2019",
+    "Chen, Beutel, Covington, Jain, Belletti, and Chi (2019), Top-K Off-Policy Correction for a "
+    "REINFORCE Recommender System, WSDM 2019, Sec. 6.2",
+    url="https://doi.org/10.1145/3289600.3290999",
+    verified="2026-10-20",
+    notes="Exploration data from 5 percent of users raised watch time 0.07 percent.",
+)
+
+STRUBELL_2019 = _lit(
+    "prov:strubell-2019",
+    "Strubell, Ganesh, and McCallum (2019), Energy and Policy Considerations for Deep Learning in "
+    "NLP, ACL 2019, Table 1",
+    url="https://aclanthology.org/P19-1355/",
+    verified="2026-10-20",
+    notes="Table 1 in pounds of CO2e: Transformer (big) with neural architecture search 626,155; "
+          "one car over its lifetime, including fuel, 126,000.",
+)
+
 NYDFS_APPLE_CARD_2021 = _report(
     "prov:nydfs-apple-card-2021",
     "New York State Department of Financial Services (2021), Report on Apple Card Investigation",
@@ -3928,7 +3995,46 @@ CEMRI_2025_MAST = _lit(
     url="https://arxiv.org/abs/2503.13657",
     verified="2026-10-20",
     notes=("Read from the HTML version: 1642 annotated execution traces (Figure 1 caption, Section 1) "
-           "from 7 MAS frameworks (Section 1); step repetition FM-1.3 at 15.7 percent (Section 4)."),
+           "from 7 MAS frameworks (Section 1); step repetition FM-1.3 at 15.7 percent (Section 4). "
+           "Added 2026-10-20: the other mode shares of Section 4 (FM-1.1 11.8, FM-1.5 12.4, FM-2.3 "
+           "7.40, FM-2.6 13.2, FM-3.2 8.20, FM-3.3 9.10 percent); the category shares printed in "
+           "Figure 1 (system design 44.2, inter-agent misalignment 32.3, task verification 23.5 "
+           "percent); and Section 4's '+15.6% improvement in task success on ProgramDev' from a "
+           "verification step added to ChatDev."),
+)
+
+# --- Coordinating several agents (added 2026-10-20) ---
+HADFIELD_2025_RESEARCH_SYSTEM = _lit(
+    "prov:hadfield-2025-research-system",
+    "Hadfield et al. (2025), How we built our multi-agent research system, Anthropic Engineering, 13 June 2025",
+    url="https://www.anthropic.com/engineering/built-multi-agent-research-system",
+    verified="2026-10-20",
+    notes=("Benefits section: 'a multi-agent system with Claude Opus 4 as the lead agent and Claude "
+           "Sonnet 4 subagents outperformed single-agent Claude Opus 4 by 90.2% on our internal "
+           "research eval'; 'token usage by itself explains 80% of the variance' (BrowseComp). Prompt "
+           "engineering section: 'Early agents made errors like spawning 50 subagents for simple queries'."),
+)
+
+KIM_2025_CORRELATED_ERRORS = _lit(
+    "prov:kim-2025-correlated-errors",
+    "Kim, Garg, Peng, and Garg (2025), Correlated Errors in Large Language Models, ICML 2025, arXiv:2506.07962v1",
+    url="https://arxiv.org/abs/2506.07962",
+    verified="2026-10-20",
+    notes=("Introduction: '71 LLMs on 14,042 multiple choice questions on the Helm leaderboard'; 'on Helm, "
+           "pairs of models agree on average about 60% of the time when both models are incorrect'; "
+           "uniform choice among incorrect answers agrees 1/3 of the time. Section 3.2: 'each question "
+           "has 3 incorrect answer choices'."),
+)
+
+DEAN_BARROSO_2013_TAIL = _lit(
+    "prov:dean-barroso-2013-tail",
+    "Dean, J. and Barroso, L. A. (2013), The Tail at Scale, Communications of the ACM 56(2)",
+    url="https://doi.org/10.1145/2408776.2408794",
+    verified="2026-10-20",
+    notes=("Table 1, a real Google service measured at the root: one random leaf finishes in 1 ms "
+           "(50th percentile) and 10 ms (99th); all leaves in 40 ms and 140 ms. Hedged requests: reading "
+           "1,000 keys from 100 servers, a hedge after a 10 ms delay cut the 99.9th-percentile time from "
+           "1,800 ms to 74 ms while sending 2% more requests."),
 )
 
 # --- Robot odometry, mapping, and tracking results (added 2026-10-20) ---
@@ -4390,4 +4496,937 @@ NVIDIA_NSIGHT_COMPUTE_ROOFLINE_GUIDE = _ds(
     "https://docs.nvidia.com/nsight-compute/ProfilingGuide/index.html#roofline-charts",
     verified="2026-10-19",
     notes="The example report lists DRAM throughput at 0.34 percent of peak.",
+)
+
+# --- Shared-hardware interference and placement evidence (added 2026-10-20) --
+# Values as read from each source at the location named in the notes; the
+# section and figure locations follow the citations already carried by the
+# course material that quotes them.
+VALSAN_TAMING_NONBLOCKING_CACHES_2016 = _lit(
+    "prov:valsan-taming-nonblocking-caches-2016",
+    "Valsan, P. K., Yun, H., and Farshchi, F. (2016), Taming Non-blocking Caches to Improve "
+    "Isolation in Multicore Real-Time Systems, IEEE RTAS 2016",
+    url="https://doi.org/10.1109/RTAS.2016.7461361",
+    verified="2026-10-20",
+    notes=("Abstract: up to 21X execution-time increase with cache partitioning. Exp. 2, three "
+           "BwRead(DRAM) co-runners against a BwRead(LLC) victim: 2.1x Cortex-A9, 7.9x Nehalem "
+           "(text), 10.6x Cortex-A15 (Fig. 2(b) label); write co-runners 21.4x on Cortex-A15 "
+           "(Fig. 2(e) label)."),
+)
+BECHTEL_YUN_CACHE_DOS_2019 = _lit(
+    "prov:bechtel-yun-cache-dos-2019",
+    "Bechtel, M. and Yun, H. (2019), Denial-of-Service Attacks on Shared Cache in Multicore: "
+    "Analysis and Prevention, IEEE RTAS 2019",
+    url="https://doi.org/10.1109/RTAS.2019.00037",
+    verified="2026-10-20",
+    notes=("Sec. IV-C: up to 346X slowdown of a victim on a Raspberry Pi 3 (Cortex-A53). Sec. VI, "
+           "MemGuard extended to writebacks, three BwWrite attackers: unregulated 345X, writes "
+           "capped at 100 MB/s 1.34X, at 50 MB/s 1.2X."),
+)
+ICHNOWSKI_FOGROS2_2023 = _lit(
+    "prov:ichnowski-fogros2-2023",
+    "Ichnowski, J. et al. (2023), FogROS2: An Adaptive Platform for Cloud and Fog Robotics Using "
+    "ROS 2, IEEE ICRA 2023",
+    url="https://arxiv.org/abs/2205.09778",
+    verified="2026-10-20",
+    notes="Abstract: grasp planning takes 14 s on the robot and 1.2 s offloaded with FogROS2.",
+)
+BAO_DEMOS_LINUX_FREERTOS_ZCU104 = _ds(
+    "prov:bao-demos-linux-freertos-zcu104",
+    "Bao hypervisor demos, demos/linux+freertos/configs/zcu104.c (bao-project/bao-demos)",
+    "https://github.com/bao-project/bao-demos",
+    verified="2026-10-20",
+    notes=("Linux VM: cpu_num = 3, region size 0x40000000; FreeRTOS VM: cpu_num = 1, region size "
+           "0x8000000; shared IPC region size 0x00010000."),
+)
+LINUX_TEGRA234_P3701_DTS = _ds(
+    "prov:linux-tegra234-p3701-dts",
+    "Linux v6.12, arch/arm64/boot/dts/nvidia/tegra234-p3701-0000.dtsi (Jetson AGX Orin module)",
+    "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/arch/arm64/boot/dts/nvidia/tegra234-p3701-0000.dtsi?h=v6.12",
+    verified="2026-10-20",
+    notes="tj-thermal zone: polling-delay = <1000> (ms); active trips at 75000 and 95000 m-degC, hysteresis 4000.",
+)
+
+# --- Mapping a computation onto an accelerator (added 2026-10-20) ---
+NVIDIA_MATMUL_BACKGROUND_GUIDE = _ds(
+    "prov:nvidia-matmul-background-guide",
+    "NVIDIA, Matrix Multiplication Background User's Guide (Deep Learning Performance documentation)",
+    "https://docs.nvidia.com/deeplearning/performance/dl-performance-matrix-multiplication/index.html",
+    verified="2026-10-17",
+    notes=("Sec. 2.3 lists cuBLAS tiles from 256x128 (most efficient) to 64x64; Sec. 3.1 and figure 7 "
+           "measure tile quantization on an A100-SXM4-80GB (cuBLAS 11.4, M = 27,648, K = 4,096, "
+           "256x128 tiles forced; values read from the published SVG plot); Sec. 3.2 measures wave "
+           "quantization (M = 2,304, N = 1,536 and 1,544, one 256x128 tile per SM); Table 1 gives the "
+           "dimension multiples (FP16 multiples of 8, on A100 multiples of 64)."),
+)
+NVIDIA_CUDA_PROGRAMMING_GUIDE_CC90 = _ds(
+    "prov:nvidia-cuda-programming-guide-cc90",
+    "NVIDIA, CUDA C++ Programming Guide, compute capabilities, Tables 30 and 31 (compute capability 9.0)",
+    "https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#compute-capabilities",
+    verified="2026-10-18",
+    notes=("64 K 32-bit registers per SM, at most 2,048 resident threads per SM, at most 255 "
+           "registers per thread, warps of 32 threads."),
+)
+CHEN_EYERISS_ISCA_2016 = _lit(
+    "prov:chen-eyeriss-isca-2016",
+    "Chen, Emer, Sze (2016), Eyeriss: A Spatial Architecture for Energy-Efficient Dataflow for "
+    "Convolutional Neural Networks, ISCA 2016",
+    url="https://dspace.mit.edu/handle/1721.1/102369",
+    verified="2026-10-17",
+    notes=("Abstract: on AlexNet, row stationary is 1.4x to 2.5x more energy efficient than other "
+           "dataflows in convolutional layers and at least 1.3x in fully connected layers for batch "
+           "sizes larger than 16. The ISSCC 2016 test chip has 168 PEs in a 12 x 14 array."),
+)
+CHEN_TVM_OSDI_2018 = _lit(
+    "prov:chen-tvm-osdi-2018",
+    "Chen et al. (2018), TVM: An Automated End-to-End Optimizing Compiler for Deep Learning, OSDI 2018",
+    url="https://arxiv.org/abs/1802.04799",
+    verified="2026-10-17",
+    notes="Figure 4: fused operators run 1.2x to 2x faster than unfused on an NVIDIA Titan X.",
+)
+ZHENG_ANSOR_OSDI_2020 = _lit(
+    "prov:zheng-ansor-osdi-2020",
+    "Zheng et al. (2020), Ansor: Generating High-Performance Tensor Programs for Deep Learning, OSDI 2020",
+    url="https://arxiv.org/abs/2006.06762",
+    verified="2026-10-17",
+    notes="Abstract: up to 3.8x on Intel CPU, 2.6x on ARM CPU, and 1.7x on NVIDIA GPU over the prior best.",
+)
+PYTORCH_TF32_NOTE_V290 = _ds(
+    "prov:pytorch-tf32-note-v290",
+    "PyTorch documentation, CUDA semantics, TensorFloat-32 (TF32) on Ampere (and later) devices (v2.9.0)",
+    "https://github.com/pytorch/pytorch/blob/v2.9.0/docs/source/notes/cuda.rst",
+    verified="2026-10-19",
+    notes=("Example: one 10,240-square matrix multiply on GA100 takes 0.016 s with TF32 allowed and "
+           "0.11 s without."),
+)
+
+# --- Quantization (added 2026-10-20) ---
+NAGEL_DATA_FREE_QUANTIZATION_2019 = _lit(
+    "prov:nagel-data-free-quantization-2019",
+    "Nagel, van Baalen, Blankevoort, and Welling (2019), Data-Free Quantization Through Weight "
+    "Equalization and Bias Correction, ICCV 2019",
+    url="https://arxiv.org/abs/1906.04721",
+    verified="2026-10-20",
+    notes="Table 1: MobileNetV2 71.72 percent in FP32 and 0.12 percent with per-layer INT8; section 3.1: "
+          "the [-128, 128] and (-0.5, 0.5) channel example; figure 2: 32 output channels of the first "
+          "depthwise layer.",
+)
+DETTMERS_LLM_INT8_2022 = _lit(
+    "prov:dettmers-llm-int8-2022",
+    "Dettmers, Lewis, Belkada, and Zettlemoyer (2022), LLM.int8(): 8-bit Matrix Multiplication for "
+    "Transformers at Scale, NeurIPS 2022",
+    url="https://arxiv.org/abs/2208.07339",
+    verified="2026-10-20",
+    notes="Section 1: outlier features up to 20 times larger, in about 6 feature dimensions, affecting "
+          "75 percent of sequence positions from 6.7B parameters; section 4.1: magnitude threshold 6.",
+)
+FRANTAR_GPTQ_2023 = _lit(
+    "prov:frantar-gptq-2023",
+    "Frantar, Ashkboos, Hoefler, and Alistarh (2023), GPTQ: Accurate Post-Training Quantization for "
+    "Generative Pre-trained Transformers, ICLR 2023",
+    url="https://arxiv.org/abs/2210.17323",
+    verified="2026-10-20",
+    notes="Table 5: OPT-175B WikiText2 perplexity (FP16 8.34; 4-bit RTN 10.54, GPTQ 8.37; 3-bit RTN "
+          "7.3e3, GPTQ 8.68); Table 6: 230 ms per token in FP16 on five A100s, 71 ms with 3-bit "
+          "weights on one.",
+)
+LLAMA_CPP_GGML_BLOCKS = Provenance(
+    id="prov:llama-cpp-ggml-blocks",
+    kind=ProvenanceKind.DATASHEET,
+    ref="ggml-org/llama.cpp v0.7.0, ggml/src/ggml-common.h: block_q4_0 and block_q8_0 (MIT)",
+    url="https://github.com/ggml-org/llama.cpp/blob/master/ggml/src/ggml-common.h",
+    verified="2026-10-18",
+    notes="QK4_0 = QK8_0 = 32 quants per block and one ggml_half (16-bit) scale d.",
+)
+THEBLOKE_LLAMA2_GGUF = Provenance(
+    id="prov:thebloke-llama2-7b-gguf",
+    kind=ProvenanceKind.DATASHEET,
+    ref="TheBloke/Llama-2-7B-GGUF on Hugging Face, README (commit b4e04e1)",
+    url="https://huggingface.co/TheBloke/Llama-2-7B-GGUF",
+    verified="2026-10-18",
+    notes="Explanation of quantization methods: GGML_TYPE_Q2_K ends up using 2.5625 bits per weight.",
+)
+LLAMA_BENCH_APPLE_SILICON = Provenance(
+    id="prov:llama-bench-apple-silicon",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="ggml-org/llama.cpp, discussion 4167, Performance of llama.cpp on Apple Silicon M-series",
+    url="https://github.com/ggml-org/llama.cpp/discussions/4167",
+    verified="2026-10-18",
+    notes="llama-bench rows for Llama 2 7B report params 6.74 B.",
+)
+
+# --- Supervisory intervention: takeover studies, regulations, embedded crypto (added 2026-10-20) ---
+OWENS_2024_ED25519_M4 = _lit(
+    "prov:owens-2024-ed25519-cortex-m4",
+    "Owens, D., et al. (2024), Efficient and Side-Channel Resistant Ed25519 on ARM Cortex-M4",
+    url="https://par.nsf.gov/servlets/purl/10507285",
+    verified="2026-10-20",
+    notes=("Abstract: 'Verify in 720,000 cycles on the ARM Cortex-M4' (optimized assembly). Table II "
+           "(kilo-cycles) prints 722 at 24 MHz and 760 at 168 MHz; the abstract's 720,000 is stored."),
+)
+SCHWABE_STOFFELEN_2016_AES_M4 = _lit(
+    "prov:schwabe-stoffelen-2016-aes-cortex-m",
+    "Schwabe, P., and Stoffelen, K. (2016), All the AES You Need on Cortex-M3 and M4, SAC 2016",
+    url="https://cryptojedi.org/papers/aesarm-20161019.pdf",
+    verified="2026-10-20",
+    notes=("Table 1 (Performance of unprotected AES), p. 6: AES-128 single block encryption, 661.7 "
+           "cycles on Cortex-M4 (659.4 on M3); unprotected table-based implementation."),
+)
+LIU_2023_SIRIUS = _lit(
+    "prov:liu-2023-sirius",
+    "Liu, H., Nasiriany, S., Zhang, L., Bao, Z., and Zhu, Y. (2023), Robot Learning on the Job: "
+    "Human-in-the-Loop Autonomy and Learning During Deployment (Sirius), RSS 2023, arXiv:2211.08416",
+    url="https://arxiv.org/abs/2211.08416",
+    verified="2026-10-20",
+    notes=("Sec. IV-D: 'average reaction time of 2 seconds, roughly corresponding to the time of 15 "
+           "robot actions. We thus set l = 15.'"),
+)
+MERAT_2014_TRANSITION = _lit(
+    "prov:merat-2014-transition-to-manual",
+    "Merat, N., Jamson, A. H., Lai, F. C. H., Daly, M., and Carsten, O. M. J. (2014), Transition to "
+    "manual: Driver behaviour when resuming control from a highly automated vehicle, "
+    "Transportation Research Part F 27:274-282",
+    url="https://eprints.whiterose.ac.uk/84460",
+    verified="2026-10-20",
+    notes="Abstract: 'it took drivers around 35-40 s to stabilise their lateral control of the vehicle.'",
+)
+UNECE_R157_ALKS = _report(
+    "prov:unece-r157-alks-2021",
+    "UN Regulation No. 157, Automated Lane Keeping Systems (ALKS), OJ L 82, 9.3.2021",
+    "https://op.europa.eu/o/opportal-service/download-handler?identifier=36fd3041-807a-11eb-9ac9-01aa75ed71a1&format=pdf&language=en&productionSystem=cellar",
+    notes=("Para 5.4.4.1: a minimum risk manoeuvre 'shall be started, earliest 10 s after the start of "
+           "the transition demand'. Para 8.3.1(d)(ii): DSSAD timestamp accuracy +/- 1,0 s. Read 2026-10-20."),
+)
+ISO_10218_1_MANUAL_REDUCED_SPEED = _report(
+    "prov:iso-10218-1-reduced-speed",
+    "ISO 10218-1, Robotics - Safety requirements - Part 1: Industrial robots, reduced speed in manual mode",
+    "https://www.iso.org/standard/73933.html",
+    notes=("Reduced speed in manual mode: tool centre point speed not exceeding 250 mm/s (2011 edition, "
+           "clause 5.6.2, as quoted by vendor training material). The standard text is paywalled and was "
+           "not re-read for the 2025 edition; needs check against ISO 10218-1:2025."),
+)
+CA_DMV_2024_DISENGAGEMENT_CSV = _report(
+    "prov:ca-dmv-2024-disengagement-csv",
+    "California DMV, 2024 Autonomous Vehicle Disengagement Reports (CSV), report year Dec 2023 to Nov 2024",
+    "https://web.archive.org/web/20250213101223/https://www.dmv.ca.gov/portal/file/2024-autonomous-vehicle-disengagement-reports-csv/",
+    notes=("Waymo LLC rows: 244, of which 230 initiated by Test Driver and 14 by AV System (counted from "
+           "the file, retrieved 2026-10-19)."),
+)
+WARSAW_DLH2904_REPORT = _report(
+    "prov:warsaw-dlh2904-report-1994",
+    "Main Commission for Aircraft Accident Investigation (Poland), Report on the Accident to Airbus A320-211 "
+    "D-AIPN at Warsaw Okecie Airport on 14 September 1993 (English translation)",
+    "http://www.rvs.uni-bielefeld.de/publications/Incidents/DOCS/ComAndRep/Warsaw/warsaw-report.html",
+    notes=("Sec. 1.1: the left gear touched the runway 9 seconds after the right; the wheel brakes 'began to "
+           "operate after about 4 seconds'; the aircraft rolled over the end of the runway at GS = 72 kts. "
+           "Sec. 1.2: fatal injuries 1 crew, 1 passenger. Read 2026-10-20."),
+)
+
+# --- Fault injection and attacks on robot proposers (added 2026-10-20) ---
+JHA_2019_DRIVEFI = _lit(
+    "prov:jha-2019-drivefi",
+    "Jha, S. et al. (2019), ML-based Fault Injection for Autonomous Vehicles: A Case for Bayesian Fault "
+    "Injection (DriveFI), DSN 2019",
+    url="https://arxiv.org/abs/1907.01051",
+    verified="2026-10-20",
+    notes=("Read in the arXiv HTML of v1. Sec. I, Results: 98,400 faults; exhaustive evaluation 615 days; "
+           "561 safety-critical faults in less than 4 hours; 3690x acceleration; 460 of the 561 manifested "
+           "as hazards, in 68 of 7,200 scenes; several weeks of 5,000 random FI experiments found no hazard; "
+           "1.93 percent of single-bit GPU injections led to SDC and 7.35 percent to kernel panics and hangs. "
+           "Sec. VI-A: 2,400 GPU FI experiments into DriveAV."),
+)
+BROWN_2017_ADVERSARIAL_PATCH = _lit(
+    "prov:brown-2017-adversarial-patch",
+    "Brown, T. B., Mane, D., Roy, A., Abadi, M., Gilmer, J. (2017), Adversarial Patch, arXiv:1712.09665",
+    url="https://arxiv.org/abs/1712.09665",
+    verified="2026-10-20",
+    notes="Figure 1 caption: VGG16 reports banana at 97 percent confidence; with the patch, toaster at 99 percent.",
+)
+ROBEY_2025_ROBOPAIR = _lit(
+    "prov:robey-2025-robopair",
+    "Robey, A. et al. (2025), Jailbreaking LLM-Controlled Robots, ICRA 2025, arXiv:2410.13691",
+    url="https://arxiv.org/abs/2410.13691",
+    verified="2026-10-20",
+    notes=("Aggregate rows of 35 harmful tasks. Table 2 (Clearpath Jackal UGV, GPT-4o planner): direct prompt "
+           "1/35, RoboPAIR 35/35. Table 3 (Unitree Go2): direct prompt 3/35, RoboPAIR 35/35."),
+)
+SRS_2013_TOYOTA_BOOKOUT = _lit(
+    "prov:srs-2013-toyota-bookout",
+    "Safety Research & Strategies (2013), Toyota Unintended Acceleration and the Big Bowl of 'Spaghetti' Code",
+    url="https://www.safetyresearch.net/toyota-unintended-acceleration-and-the-big-bowl-of-spaghetti-code/",
+    verified="2026-10-20",
+    notes=("Opening paragraph: the Oklahoma jury found reckless disregard and delivered a $3 million verdict "
+           "before it could determine punitive damages (Bookout v. Toyota, 2013)."),
+)
+LEIDECKER_2011_TIN_WHISKER = _lit(
+    "prov:leidecker-2011-tin-whisker",
+    "Leidecker, H., Panashchenko, L., Brusse, J. (2011), Electrical Failure of an Accelerator Pedal Position "
+    "Sensor Caused by a Tin Whisker, 5th International Tin Whisker Symposium",
+    url="https://nepp.nasa.gov/whisker/reference/tech_papers/2011-NASA-GSFC-whisker-failure-app-sensor.pdf",
+    verified="2026-10-20",
+    notes="Extract from NASA findings: a tin whisker formed a 248 ohm resistive short in a 2003 Camry APP sensor.",
+)
+OKELLY_2018_RARE_EVENT = _lit(
+    "prov:okelly-2018-rare-event",
+    "O'Kelly, M., Sinha, A., Namkoong, H., Duchi, J., Tedrake, R. (2018), Scalable End-to-End Autonomous "
+    "Vehicle Testing via Rare-event Simulation, NeurIPS 2018",
+    url="https://arxiv.org/abs/1811.00145",
+    verified="2026-10-20",
+    notes=("Sec. 4: the cross-entropy method 'achieves 2-16 times variance reduction depending on the threshold "
+           "level' (Figure 2). Table 1 is Literature.OKelly2018RareEventTable1."),
+)
+
+# --- Model serving on one machine (added 2026-10-20) --------------------------
+FU_SERVERLESSLLM_2024 = _lit(
+    "prov:fu-serverlessllm-2024",
+    "Fu, Xue, Huang, Brabete, Ustiugov, Patel, and Mai (2024), ServerlessLLM: Low-Latency Serverless "
+    "Inference for Large Language Models, OSDI 2024, section 2.3",
+    url="https://arxiv.org/abs/2401.14351",
+    verified="2026-10-20",
+    notes="Loading OPT-30B into 4 GPUs takes 34 s with PyTorch and LLaMA-2-70B into 8 GPUs 84 s; a 130 GB "
+          "checkpoint takes at least 26 s to download at 5 GB/s. Read from the arXiv v2 PDF with pdftotext.",
+)
+RICHINS_AI_TAX_2020 = _lit(
+    "prov:richins-ai-tax-2020",
+    "Richins, Doshi, Blackmore, Nair, Pathapati, Patel, Ponnusamy, Reddi, and others (2020), AI Tax: The "
+    "Hidden Cost of AI Data Center Applications, arXiv 2007.10571, figure 6",
+    url="https://arxiv.org/abs/2007.10571",
+    verified="2026-10-20",
+    notes="Mean latency of one video frame through an edge-datacenter face-recognition pipeline, by stage, "
+          "as printed on the pie chart (ingestion, face detection, message brokers, identification).",
+)
+TRITON_PERF_ANALYZER_QUICK_START = Provenance(
+    id="prov:triton-perf-analyzer-quick-start",
+    kind=ProvenanceKind.DATASHEET,
+    ref="triton-inference-server/perf_analyzer, docs/quick_start.md (commit 93ba37f), sample output of "
+        "perf_analyzer -m simple",
+    url="https://github.com/triton-inference-server/perf_analyzer/blob/93ba37f/docs/quick_start.md",
+    verified="2026-10-20",
+    notes="Request concurrency 1 against Triton's example model 'simple' (adds and subtracts two vectors of "
+          "16 integers). Client and server lines as printed.",
+)
+TRITON_DYNAMIC_BATCHER_GUIDE = Provenance(
+    id="prov:triton-dynamic-batcher-guide",
+    kind=ProvenanceKind.DATASHEET,
+    ref="triton-inference-server/server, docs/user_guide/batcher.md and model_configuration.md (commit 57b3eba)",
+    url="https://github.com/triton-inference-server/server/blob/57b3eba/docs/user_guide/batcher.md",
+    verified="2026-10-20",
+    notes="The guide's delayed-batching example sets max_queue_delay_microseconds: 100 and its preferred-size "
+          "example preferred_batch_size: [ 4, 8 ]; the example model configuration sets max_batch_size: 8.",
+)
+MLPERF_INFERENCE_RULES_V50 = Provenance(
+    id="prov:mlperf-inference-rules-v50",
+    kind=ProvenanceKind.DATASHEET,
+    ref="MLCommons, MLPerf Inference rules, inference_rules.adoc (mlcommons/inference_policies commit 61ca74a, "
+        "March 2025), datacenter benchmark table",
+    url="https://github.com/mlcommons/inference_policies/blob/61ca74a/inference_rules.adoc",
+    verified="2026-10-20",
+    notes="Server latency constraint for Resnet50-v1.5: 15 ms at the 99th percentile; Llama2-70b "
+          "conversational TTFT/TPOT 2000 ms/200 ms, interactive 450 ms/40 ms.",
+)
+
+# --- Reinforcement learning from verifiable rewards (added 2026-10-20) ---
+DEEPSEEK_2025_R1 = _lit(
+    "prov:deepseek-2025-r1",
+    "DeepSeek-AI et al. (2025), DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via "
+    "Reinforcement Learning, arXiv 2501.12948, Figure 3",
+    url="https://arxiv.org/abs/2501.12948",
+    verified="2026-10-20",
+    notes=("Figure 3 plots DeepSeek-R1-Zero's average length per response against RL steps (0 to "
+           "about 8,400). Values are read from the plot by eye: the smoothed curve starts near 500 "
+           "tokens and ends near 9,500, so 'under 1,000' and 'about 10,000' over about 8,000 steps."),
+)
+YU_2025_DAPO = _lit(
+    "prov:yu-2025-dapo",
+    "Yu et al. (2025), DAPO: An Open-Source LLM Reinforcement Learning System at Scale, "
+    "arXiv 2503.14476, Figure 2(b)",
+    url="https://arxiv.org/abs/2503.14476",
+    verified="2026-10-20",
+    notes=("Figure 2(b), generation entropy of the actor (Qwen2.5-32B, AIME training) with and without "
+           "Clip-Higher. Read from the plot by eye: without Clip-Higher entropy starts near 0.67 and is "
+           "below 0.02 by step 1,000; with Clip-Higher it settles between about 0.35 and 0.46."),
+)
+YUE_2025_RL_REASONING_BOUNDARY = _lit(
+    "prov:yue-2025-rl-reasoning-boundary",
+    "Yue et al. (2025), Does Reinforcement Learning Really Incentivize Reasoning Capacity in LLMs "
+    "Beyond the Base Model?, arXiv 2504.13837, pass@1 and pass@256 across GRPO training steps (Table 4, appendix)",
+    url="https://arxiv.org/abs/2504.13837",
+    verified="2026-10-20",
+    notes=("Qwen2.5-7B on Omni-MATH-Train at the base model and after 150, 300, and 450 GRPO steps "
+           "(Figure 1, right, and its appendix table of detailed values). Section 4.4 states pass@1 "
+           "'consistently improves from 26.1 to 42.5'."),
+)
+
+ROGERS_COMMISSION_1986 = _lit(
+    "prov:rogers-commission-1986",
+    "Presidential Commission on the Space Shuttle Challenger Accident (1986), Report to the President, vol. 1",
+    url="https://sma.nasa.gov/SignificantIncidents/assets/rogers_commission_report.pdf",
+    verified="2026-10-20",
+    notes=("Ch. IV finding 6: launch-pad air temperature 36 F, 15 degrees colder than any previous launch; "
+           "the right aft field joint estimated at 28 F, plus or minus 5 F. Ch. III: breakup about 73 s after "
+           "liftoff. Ch. V: the joint had flown 24 previous times; Thiokol's 27 January chart recommended O-ring "
+           "temperature at least 53 F at launch, the coldest prior flight (SRM 15). Transcribed from the lecture "
+           "deck's cited passages; added 2026-10-20."),
+)
+NHTSA_WAYMO_RECALLS_2024_2025 = _lit(
+    "prov:nhtsa-waymo-recalls-24e013-24e049-25e034",
+    "NHTSA recall campaigns 24E-013, 24E-049, and 25E-034, Waymo LLC automated driving system software",
+    url="https://api.nhtsa.gov/recalls/campaignNumber?campaignNumber=25E034",
+    verified="2026-10-20",
+    notes=("Read from api.nhtsa.gov/recalls/campaignNumber for each campaign (2026-10-20): report received "
+           "13/02/2024, 444 units; 10/06/2024, 672 units; 12/05/2025, 1212 units. 25E-034 remedy: 'All "
+           "affected vehicles were repaired by December 26, 2024.' Dates stored as YYYYMMDD."),
+)
+
+# --- Responsible physical AI: penalties, per-group detection (added 2026-10-20) ---
+CPUC_D24_07_004_CRUISE = _lit(
+    "prov:cpuc-d24-07-004-cruise",
+    "California Public Utilities Commission, Decision 24-07-004, Presiding Officer's Decision "
+    "Approving Offered Settlement Terms and Granting Deferral of the Order to Show Cause "
+    "Proceedings (Cruise LLC, 2024)",
+    url="https://docs.cpuc.ca.gov/PublishedDocs/Published/G000/M536/K690/536690391.PDF",
+    verified="2026-10-20",
+    notes=(
+        "'the daily maximum fine of $7,500 per Pub. Util. Code 5378(b) will be applied for each of "
+        "the 15 days for a total penalty of $112,500'; the 15 days run October 3 to October 18, "
+        "2023. Read from the decision PDF on 2026-10-20."
+    ),
+)
+NHTSA_CRUISE_CONSENT_ORDER_2024 = _lit(
+    "prov:nhtsa-cruise-consent-order-2024",
+    "NHTSA, 'NHTSA Announces Consent Order with Cruise After Company Failed to Fully Report Crash "
+    "Involving Pedestrian', press release, 30 September 2024",
+    url="https://www.nhtsa.gov/press-releases/consent-order-cruise-crash-reporting",
+    verified="2026-10-20",
+    notes=("A $1.5 million civil penalty for crash reports that omitted the dragging. Transcribed from "
+           "the Volume IV chapter's citation; the page refused automated fetches (HTTP 403)."),
+)
+DOJ_CRUISE_DPA_2024 = _lit(
+    "prov:doj-cruise-dpa-2024",
+    "U.S. Attorney's Office, Northern District of California, 'Cruise Admits to Submitting a False "
+    "Report to Influence a Federal Investigation and Agrees to Pay $500,000', press release, "
+    "November 2024",
+    url="https://www.justice.gov/usao-ndca/pr/cruise-admits-submitting-false-report-influence-federal-investigation-and-agrees-pay",
+    verified="2026-10-20",
+    notes=("A $500,000 criminal fine under a deferred prosecution agreement. Transcribed from the "
+           "release title as the Volume IV bibliography records it; the page body was not readable."),
+)
+WILSON_2019_PREDICTIVE_INEQUITY = _lit(
+    "prov:wilson-2019-predictive-inequity",
+    "Wilson, B., Hoffman, J., Morgenstern, J. (2019), Predictive Inequity in Object Detection, "
+    "arXiv:1902.11097 (v1)",
+    url="https://arxiv.org/abs/1902.11097",
+    verified="2026-10-20",
+    notes=(
+        "Table 4: person class on the BDD100K validation set for Detectron models trained on MS "
+        "COCO, AP75 by lighter (LS) and darker (DS) Fitzpatrick skin type; Average row 67.1 and "
+        "55.9. Sec. 4.2: holdout sizes nLS = 387, nDS = 100 (boxes of at least 10,000 pixels), and "
+        "nLS = 12,000, nDS = 4,000 needed to verify a true AP gap of 0.05. Read from the arXiv HTML "
+        "rendering on 2026-10-20."
+    ),
+)
+LI_2025_BIAS_BEHIND_THE_WHEEL = _lit(
+    "prov:li-2025-bias-behind-the-wheel",
+    "Li, X., Chen, Z., Zhang, J. M., Sarro, F., Zhang, Y., Liu, X. (2025), Bias behind the Wheel: "
+    "Fairness Testing of Autonomous Driving Systems, ACM TOSEM 34(3); arXiv:2308.02935v4",
+    url="https://arxiv.org/abs/2308.02935v4",
+    verified="2026-10-20",
+    notes=(
+        "Table 7 (RQ1), miss rate (%) of eight pedestrian detectors for adults and children; "
+        "Average row 23.75 and 43.89 (EOD -20.14). Read from the arXiv v4 HTML rendering on "
+        "2026-10-20."
+    ),
+)
+
+# --- ML operations, part 1: Zillow Offers, ML outages, change-driven outages (added 2026-10-20) ---
+ZILLOW_2021_Q2_LETTER = _report(
+    "prov:zillow-2021-q2-letter",
+    "Zillow Group, Q2 2021 Shareholder Letter, SEC Form 8-K exhibit 99.3 (August 2021)",
+    "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001617640&type=8-K",
+    notes="Zillow Offers in Q2 2021: 3,805 homes purchased, 2,086 sold, 3,142 in inventory at quarter end.",
+)
+ZILLOW_2021_Q3_LETTER = _report(
+    "prov:zillow-2021-q3-letter",
+    "Zillow Group, Q3 2021 Shareholder Letter, p. 8, Homes Segment Results, SEC Form 8-K exhibit 99.3 "
+    "(2 November 2021)",
+    "https://www.sec.gov/Archives/edgar/data/1617640/000161764021000085/exhibit993.htm",
+    notes=("Purchase of 9,680 homes; 3,032 homes sold in Q3; a $304 million write-down on inventory; "
+           "9,790 homes in inventory and 8,172 under contract at quarter end."),
+)
+ZILLOW_2021_Q3_PRESS = _report(
+    "prov:zillow-2021-q3-press",
+    "Zillow Group, Q3 2021 results press release, SEC Form 8-K exhibit 99.1 (2 November 2021)",
+    "https://www.sec.gov/Archives/edgar/data/1617640/000161764021000085/",
+    notes=("Wind-down of Zillow Offers; additional write-downs of $240 million to $265 million expected in "
+           "Q4 2021; a workforce reduction of approximately 25 percent."),
+)
+PAPASIAN_HOW_ML_BREAKS_2020 = Provenance(
+    id="prov:papasian-how-ml-breaks-2020",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="Papasian and Underwood (2020), How ML Breaks: A Decade of Outages for One Large ML Pipeline, "
+        "USENIX OpML 2020, slide 21 (Finding #1)",
+    url="https://www.usenix.org/conference/opml20/presentation/papasian",
+    verified="2026-10-20",
+    notes=("Bar chart of matching outages by the 'MLness' of their cause, 0 (not at all ML) to 4 (entirely "
+           "ML); the slides give no table, so counts are read from the chart: about 61, 0, 9, 2, 24 of 96 "
+           "postmortems."),
+)
+GOOGLE_SRE_2016 = _report(
+    "prov:google-sre-2016",
+    "Beyer, Jones, Petoff, and Murphy (eds.) (2016), Site Reliability Engineering: How Google Runs "
+    "Production Systems, ch. 1, Introduction",
+    "https://sre.google/sre-book/introduction/",
+    notes="'SRE has found that roughly 70% of outages are due to changes in a live system.'",
+)
+
+# --- Benchmarking, deciding from measurements (added 2026-10-20) ---
+MLPERF_INFERENCE_RULES_QUERY_COUNTS = Provenance(
+    id="prov:mlperf-inference-rules-query-counts",
+    kind=ProvenanceKind.DATASHEET,
+    ref="MLCommons, MLPerf Inference rules, inference_rules.adoc, table of tail-latency percentile, confidence, "
+        "margin of error, and minimum inferences",
+    url="https://github.com/mlcommons/inference_policies/blob/master/inference_rules.adoc",
+    verified="2026-10-17",
+    notes="The rules size a latency run by n = z^2 p (1 - p) / m^2 and round up to a multiple of 2^13: the 90th "
+          "percentile at 99 percent confidence and a 0.50 percent margin needs 23,886 inferences, rounded to "
+          "24,576; the 99th percentile at 99 percent confidence and a 0.05 percent margin needs 262,742, "
+          "rounded to 270,336.",
+)
+ANANDTECH_GALAXY_S4_2013 = Provenance(
+    id="prov:anandtech-galaxy-s4-2013",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="Klug and Lal Shimpi, Looking at CPU/GPU Benchmark Optimizations in Galaxy S 4, AnandTech, July 30, 2013",
+    url="https://web.archive.org/web/2013/http://www.anandtech.com/show/7187/looking-at-cpugpu-benchmark-optimizations-galaxy-s-4",
+    verified="2026-10-17",
+    notes="International Galaxy S 4 (Exynos 5410): the GPU ran at 480 MHz in games and in GFXBench 2.7.0 and at "
+          "532 MHz in GLBenchmark 2.5.1, AnTuTu, and Quadrant. The identical low-level triangle test scored "
+          "37.9 million triangles/s in GFXBench 2.7.0 and 43.2 million in GLBenchmark 2.5.1 (mean of 5 runs). "
+          "Samsung's statement, as reported: 533 MHz is the maximum GPU frequency. Read through the Internet "
+          "Archive.",
+)
+ZHANG_2024_GSM1K = _lit(
+    "prov:zhang-2024-gsm1k",
+    "Zhang et al. (2024), A Careful Examination of Large Language Model Performance on Grade School "
+    "Arithmetic, NeurIPS 2024 Datasets and Benchmarks",
+    url="https://arxiv.org/abs/2405.00332",
+    verified="2026-10-17",
+    notes="Abstract: on GSM1k, new problems matched to GSM8k, leading models show accuracy drops of up to 8 percent.",
+)
+GUO_2017_CALIBRATION_FIGURE1 = _lit(
+    "prov:guo-2017-calibration-figure1",
+    "Guo, Pleiss, Sun, and Weinberger (2017), On Calibration of Modern Neural Networks, ICML 2017, Figure 1",
+    url="https://arxiv.org/abs/1706.04599",
+    verified="2026-10-17",
+    notes="Reliability diagrams on CIFAR-100: LeNet 5 (1998) error 44.9 percent, ResNet 110 (2016) error 30.6 "
+          "percent, as printed in the figure panels.",
+)
+KOH_WILDS_IWILDCAM_TABLE4 = _lit(
+    "prov:koh-wilds-iwildcam-table4",
+    "Koh et al. (2021), WILDS: A Benchmark of in-the-Wild Distribution Shifts, ICML 2021, Table 4",
+    url="https://arxiv.org/abs/2012.07421",
+    verified="2026-10-17",
+    notes="iWildCam2020-WILDS, ResNet-50, standard (ERM) training, 3 replicates: in-distribution macro F1 47.0 "
+          "(standard deviation 1.4) and average accuracy 75.7 (0.3); out-of-distribution (camera traps unseen "
+          "in training) macro F1 31.0 (1.3) and average accuracy 71.6 (2.5).",
+)
+TUMMALAPALLI_2026_RTX4050 = _lit(
+    "prov:tummalapalli-2026-rtx4050",
+    "Tummalapalli, Arayakandy, Pal, and Kundan (2026), LLM Inference at the Edge: Mobile, NPU, and GPU "
+    "Performance Efficiency Trade-offs Under Sustained Load, arXiv 2603.23640v2 (preprint), Section 4.1 and Table 5",
+    url="https://arxiv.org/abs/2603.23640",
+    verified="2026-10-20",
+    notes="NVIDIA RTX 4050, runs 2 to 20: mean decode throughput 131.70 tok/s, standard deviation 2.87 tok/s; the "
+          "text states CV = 2.2 percent.",
+)
+
+# --- Serving a stream of tokens (added 2026-10-20) ----------------------------
+PATEL_SPLITWISE_2024 = _lit(
+    "prov:patel-splitwise-2024",
+    "Patel, Choukse, Zhang, Shah, Goiri, Maleki, and Bianchini (2024), Splitwise: Efficient Generative "
+    "LLM Inference Using Phase Splitting, ISCA 2024, arXiv 2311.18677v2",
+    url="https://arxiv.org/abs/2311.18677",
+    verified="2026-10-20",
+    notes="Table IV: P50 request metrics without batching on Llama-70B, conversation trace (TTFT, TBT, E2E "
+          "on DGX-A100 and DGX-H100). Section III-C: for BLOOM-176B a 1500-token prompt phase takes the "
+          "same time as a token phase with 6 output tokens; a batch of 64 has only 2x impact on TBT. "
+          "Section III-F: power capping by over 50% (700 to 350 W) has almost no latency impact on the "
+          "token phase. Section VI-A: the KV-cache transfer is 0.8% of E2E, about 5 ms on H100. Abstract: "
+          "1.4x higher throughput at 20% lower cost. Read from the arXiv HTML; the 0.8% and 5 ms values "
+          "from a summary of Section VI-A.",
+)
+ZHONG_DISTSERVE_2024 = _lit(
+    "prov:zhong-distserve-2024",
+    "Zhong, Liu, Chen, Hu, Zhu, Liu, Jin, and Zhang (2024), DistServe: Disaggregating Prefill and Decoding "
+    "for Goodput-optimized Large Language Model Serving, OSDI 2024, arXiv 2401.09670v3",
+    url="https://arxiv.org/abs/2401.09670",
+    verified="2026-10-20",
+    notes="Section 1 and Figure 1: a 13B model, input 512 and output 64 tokens, one 80 GB A100, 90% SLO "
+          "attainment: about 1.6 requests/s with both phases on the GPU, 5.6 per GPU for prefill alone, 10 "
+          "for decoding alone. Section 3.3: the KV cache of one 512-token OPT-66B request is about 1.13 GB; "
+          "at 10 requests/s, 11.3 GB/s; 600 GB/s between A100 GPUs. Section 6.3: KV transfer is under 0.1% "
+          "of total latency. Abstract: 7.4x more requests or 12.6x tighter SLO than state-of-the-art "
+          "systems. Sections 3.3 and 6.3 read from a summary of the arXiv HTML.",
+)
+YU_ORCA_2022 = _lit(
+    "prov:yu-orca-2022",
+    "Yu, Jeong, Kim, Kim, and Chun (2022), Orca: A Distributed Serving System for Transformer-Based "
+    "Generative Models, OSDI 2022, abstract",
+    url="https://www.usenix.org/conference/osdi22/presentation/yu",
+    verified="2026-10-20",
+    notes="GPT-3 175B: 36.9x throughput improvement over NVIDIA FasterTransformer at the same level of latency.",
+)
+AGRAWAL_SARATHI_SERVE_2024 = _lit(
+    "prov:agrawal-sarathi-serve-2024",
+    "Agrawal, Kedia, Panwar, Mohan, Kwatra, Gulavani, Tumanov, and Ramjee (2024), Taming Throughput-Latency "
+    "Tradeoff in LLM Inference with Sarathi-Serve, OSDI 2024, arXiv 2403.02310, abstract",
+    url="https://arxiv.org/abs/2403.02310",
+    verified="2026-10-20",
+    notes="Against vLLM: 2.6x higher serving capacity for Mistral-7B on single A100 GPUs and up to 3.7x for "
+          "Yi-34B on two A100 GPUs. Section 1 names the prefill-caused pauses generation stalls.",
+)
+KWON_PAGEDATTENTION_EVAL_2023 = _lit(
+    "prov:kwon-pagedattention-eval-2023",
+    "Kwon, Li, Zhuang, Sheng, Zheng, Yu, Gonzalez, Zhang, and Stoica (2023), Efficient Memory Management "
+    "for Large Language Model Serving with PagedAttention, SOSP 2023, arXiv 2309.06180, Sections 6.2-6.3",
+    url="https://arxiv.org/abs/2309.06180",
+    verified="2026-10-20",
+    notes="Section 6.2 (ShareGPT): 1.7x-2.7x higher request rates than Orca (Oracle) and up to 22x than "
+          "FasterTransformer at similar latency; OPT-13B batches 2.2x more requests than Orca (Oracle). "
+          "Figure 13(a) bar labels (OPT-13B, ShareGPT, 2 requests/s): average batched requests 13.62 for "
+          "Orca (Oracle) and 30.42 for vLLM; these two values were read from the figure, not the text. "
+          "Section 6.3: 6.1%-9.8% memory saving on parallel sampling and 37.6%-55.2% on beam search.",
+)
+LEVIATHAN_SPECULATIVE_2023 = _lit(
+    "prov:leviathan-speculative-2023",
+    "Leviathan, Kalman, and Matias (2023), Fast Inference from Transformers via Speculative Decoding, ICML "
+    "2023, arXiv 2211.17192, abstract",
+    url="https://arxiv.org/abs/2211.17192",
+    verified="2026-10-20",
+    notes="T5-XXL: a 2X-3X acceleration compared to the standard T5X implementation, with identical outputs.",
+)
+ELSWORTH_GOOGLE_AI_FOOTPRINT_2025 = _lit(
+    "prov:elsworth-google-ai-footprint-2025",
+    "Elsworth et al. (2025), Measuring the environmental impact of delivering AI at Google Scale, arXiv "
+    "2508.15734, Section 4.3",
+    url="https://arxiv.org/abs/2508.15734",
+    verified="2026-10-20",
+    notes="May 2024 to May 2025: a 33x reduction in per-prompt energy for the median Gemini Apps text "
+          "prompt, including a 23x reduction from model improvements and a 1.4x reduction from improved "
+          "machine utilization.",
+)
+VLLM_ISSUE_24684 = Provenance(
+    id="prov:vllm-issue-24684",
+    kind=ProvenanceKind.DATASHEET,
+    ref="vllm-project/vllm issue 24684 (opened 2025-09-11), two printed outputs of vLLM's serving benchmark",
+    url="https://github.com/vllm-project/vllm/issues/24684",
+    verified="2026-10-20",
+    notes="Llama-3.1-8B-Instruct, vLLM 0.10.1.1, NVIDIA H100 80GB HBM3, 640 requests at maximum request "
+          "concurrency 64. The first run used the ShareGPT prompts (benchmark_serving.py before PR 24411), "
+          "the second random prompts (vllm bench serve after the default dataset changed). Values as printed.",
+)
+VLLM_ISSUE_21266 = Provenance(
+    id="prov:vllm-issue-21266",
+    kind=ProvenanceKind.DATASHEET,
+    ref="vllm-project/vllm issue 21266 (opened 2025-07-20), startup log of the unquantized Meta-Llama-3-8B run",
+    url="https://github.com/vllm-project/vllm/issues/21266",
+    verified="2026-10-20",
+    notes="V1 engine v0.9.1 on one SM90 H100, bfloat16, max_seq_len 8192, default settings. Log lines as "
+          "printed: model loading took 14.9596 GiB; available KV cache memory 51.39 GiB; GPU KV cache size "
+          "420,976 tokens; maximum concurrency for 8,192 tokens per request 51.39x.",
+)
+VLLM_V091_SOURCE = Provenance(
+    id="prov:vllm-v091-source",
+    kind=ProvenanceKind.DATASHEET,
+    ref="vllm-project/vllm v0.9.1 (b6553be), vllm/config.py CacheConfig defaults",
+    url="https://github.com/vllm-project/vllm/blob/b6553be/vllm/config.py",
+    verified="2026-10-20",
+    notes="gpu_memory_utilization: float = 0.9 (line 1464); the default KV block size is 16 tokens.",
+)
+
+# --- Engineering Physical AI: premises no sensor reports (added 2026-10-20) ---
+SICK_DETEC4_SET_30_450 = _ds(
+    "prov:sick-detec4-set-30-450",
+    "SICK AG, deTec4 Set 30/450 safety light curtain, product data sheet (part no. 1103376, 2024-11-26)",
+    "https://www.motionworld.com/assets/SICK-deTec4_Set_30_450-Datasheet.pdf",
+    verified="2026-10-20",
+    notes=("Read 2026-10-20: resolution 30 mm, protective field height 450 mm, scanning range 30 m; response "
+           "time 10 ms (uncoded), 14 ms (code 1 or code 2); Type 4 (IEC 61496-1); SIL 3 (IEC 61508); "
+           "Category 4 and PL e (ISO 13849-1); PFHD single device 15.3 x 10^-9, cascade with one guest "
+           "30.5 x 10^-9. The set ships deTec4 Prime parts (C4P-EA04531C00, C4P-SA04531A00)."),
+)
+
+TRL_PPR073_2006 = _report(
+    "prov:trl-ppr073-2006",
+    "Lambourn, R. F. and Viner, H. E. (2006), Friction Tests on Contaminated Road Surfaces, TRL "
+    "Published Project Report PPR073, TRL Limited",
+    "https://www.trl.co.uk/uploads/trl/documents/PPR073.pdf",
+    notes=("Table 5.1, averaged locked-wheel coefficients of friction, read 2026-10-20. Skid cars "
+           "(Peugeot, Fiesta) on treaded tyres; PFT = pavement friction tester trailer with a smooth "
+           "ASTM test tyre. The concrete wet PFT value 0.52 is for pre-wetted tests only (0.48 "
+           "including self-wetted tests)."),
+)
+
+AGILITY_TOTES_2025 = _report(
+    "prov:agility-digit-100k-totes-2025",
+    "Agility Robotics (2025), Digit moves over 100,000 totes in commercial deployment, 20 November 2025",
+    "https://www.agilityrobotics.com/content/digit-moves-over-100k-totes",
+    notes="Vendor-reported count of totes moved by Digit at a first customer site (GXO, Flowery Branch).",
+)
+
+ALEITHAN_2024_SWE_BENCH_PLUS = _lit(
+    "prov:aleithan-2024-swe-bench-plus",
+    "Aleithan et al. (2024), SWE-Bench+: Enhanced Coding Benchmark for LLMs; arXiv:2410.06992v2",
+    url="https://arxiv.org/abs/2410.06992v2",
+    verified="2026-10-20",
+    notes=(
+        "Table 1, 'Patterns found among the 251 successful patches generated by SWE-Agent + GPT-4': "
+        "solution leak 82, incorrect fixes 32, different files/functions changed 9, incomplete "
+        "fixes 37 (suspicious, 160, 63.75% per the text); different fixes from gold patches 76, "
+        "more comprehensive fixes than gold patches 15 (correct). Read from the arXiv v2 HTML "
+        "rendering on 2026-10-20."
+    ),
+)
+
+# --- ML operations, part 2: monitoring, alerting, retraining (added 2026-10-20) ---
+UNITY_Q1_2022_EARNINGS_CALL = _report(
+    "prov:unity-q1-2022-earnings-call",
+    "Unity Software, Q1 2022 earnings call, 10 May 2022, transcript (The Motley Fool), remarks of "
+    "J. Riccitiello and L. Visoso",
+    "https://www.fool.com/earnings/call-transcripts/2022/05/10/unity-software-inc-u-q1-2022-earnings-call-transcript/",
+    notes=("A fault reduced the accuracy of the Audience Pinpointer tool, and bad data from a large customer "
+           "was ingested. 'We quantified this headwind at $110 million with roughly 60% impacting the second "
+           "quarter, 30% impacting the third quarter.' No detection date is stated."),
+)
+VISA_CORE_RULES_APRIL_2026 = _report(
+    "prov:visa-core-rules-2026-04",
+    "Visa Core Rules and Visa Product and Service Rules, 18 April 2026, table 11-29 (dispute time limits)",
+    "https://usa.visa.com/dam/VCOM/download/about-visa/visa-rules-public.pdf",
+    notes="A card-absent fraud dispute may be raised up to 120 calendar days from the transaction processing date.",
+)
+RABANSER_FAILING_LOUDLY_2019 = _lit(
+    "prov:rabanser-failing-loudly-2019",
+    "Rabanser, Guennemann, and Lipton (2019), Failing Loudly: An Empirical Study of Methods for Detecting "
+    "Dataset Shift, NeurIPS 2019, Table 2a",
+    url="https://arxiv.org/abs/1810.11953",
+    verified="2026-10-20",
+    notes=("Detection accuracy of the best label-free detector (univariate tests on the softmax outputs, "
+           "BBSDs) against the number of new samples, for large, medium, and small simulated shifts on "
+           "MNIST and CIFAR-10."),
+)
+DREW_ALARM_FATIGUE_2014 = _lit(
+    "prov:drew-alarm-fatigue-2014",
+    "Drew, Harris, Zegre-Hemsey, et al. (2014), Insights into the Problem of Alarm Fatigue with "
+    "Physiologic Monitor Devices: A Comprehensive Observational Study of Consecutive Intensive Care Unit "
+    "Patients, PLOS ONE 9(10): e110274",
+    url="https://doi.org/10.1371/journal.pone.0110274",
+    verified="2026-10-20",
+    notes=("2,558,760 unique alarms from 461 adult ICU patients in 31 days; of 12,671 annotated arrhythmia "
+           "alarms, 88.8 percent were false."),
+)
+BRECK_ML_TEST_SCORE_2017 = _lit(
+    "prov:breck-ml-test-score-2017",
+    "Breck, Cai, Nielsen, Salib, and Sculley (2017), The ML Test Score: A Rubric for ML Production "
+    "Readiness and Technical Debt Reduction, IEEE Big Data 2017",
+    url="https://research.google/pubs/the-ml-test-score-a-rubric-for-ml-production-readiness-and-technical-debt-reduction/",
+    verified="2026-10-20",
+    notes=("28 tests in four sections of seven; half a point for a documented manual test, one point for an "
+           "automated test; the final score is the minimum of the section scores."),
+)
+HE_ADS_CLICK_PREDICTION_2014 = _lit(
+    "prov:he-facebook-ads-2014",
+    "He, Pan, Jin, et al. (2014), Practical Lessons from Predicting Clicks on Ads at Facebook, ADKDD 2014, "
+    "Sec. 5 and Figure 2",
+    url="https://doi.org/10.1145/2648584.2648589",
+    verified="2026-10-20",
+    notes="Training daily rather than weekly reduced normalized entropy by about 1 percent.",
+)
+
+# --- Responsible engineering: carbon accounting and duties (added 2026-10-20) ---
+PATTERSON_CARBON_2021_APPENDICES = _lit(
+    "prov:patterson-carbon-2021-appendices",
+    "Patterson et al. (2021), Carbon Emissions and Large Neural Network Training, arXiv:2104.10350v3, "
+    "Table 1, Figure 1, Sections 2.3, 2.4, and 4.1, Table 4, and Appendices C and D",
+    url="https://arxiv.org/abs/2104.10350",
+    verified="2026-10-20",
+    notes=("Evolved Transformer architecture search, measured: 6.8 days on 200 TPU v2 chips at a "
+           "measured 208 W, PUE 1.10, 0.431 kg CO2e/kWh, printed as 3.2 tCO2e (Appendix D, p. 22). "
+           "Appendix C: the proxy task makes the 2019 estimate 18.7x too high for an average "
+           "organization; Appendix D: 117,780 P100 hours at 189 W against 32,633 TPU v2 hours at "
+           "208 W, US average PUE 1.58 and grid 0.423 kg/kWh. Table 1: Transformer (Big) on P100 in an "
+           "average US datacenter 316 kWh and 0.1357 t; Evolved Transformer (Medium) on TPU v2 in "
+           "Iowa 30 kWh and 0.0024 t net. Figure 1 cumulative gains as printed. Transcribed from the "
+           "Lecture 15b slide record, whose credits name these locations."),
+)
+PATTERSON_PLATEAU_2022 = _lit(
+    "prov:patterson-plateau-2022",
+    "Patterson et al. (2022), The Carbon Footprint of Machine Learning Training Will Plateau, Then "
+    "Shrink, IEEE Computer 55(7)",
+    url="https://arxiv.org/abs/2204.05149",
+    verified="2026-10-20",
+    notes="Inference was about three fifths of Google's ML energy, 2019 to 2021; ML was 10 to 15 "
+          "percent of Google's total energy use.",
+)
+WU_SUSTAINABLE_AI_2022 = _lit(
+    "prov:wu-sustainable-ai-2022",
+    "Wu et al. (2022), Sustainable AI: Environmental Implications, Challenges and Opportunities, "
+    "MLSys 2022, Figure 3",
+    url="https://arxiv.org/abs/2111.00364",
+    verified="2026-10-20",
+    notes="Meta's AI power capacity split about 10:20:70 across experimentation, training, and "
+          "inference; embodied carbon about 30 percent of the footprint of large-scale ML tasks.",
+)
+ELSWORTH_GOOGLE_AI_FOOTPRINT_2025_EMISSIONS = _lit(
+    "prov:elsworth-google-ai-footprint-2025-emissions",
+    "Elsworth et al. (2025), Measuring the environmental impact of delivering AI at Google Scale, arXiv "
+    "2508.15734, Section 4.3",
+    url="https://arxiv.org/abs/2508.15734",
+    verified="2026-10-20",
+    notes="May 2024 to May 2025: a 44x reduction in total emissions per median Gemini Apps text prompt.",
+)
+HF_BLOOM_MODEL_CARD = _report(
+    "prov:hf-bloom-model-card",
+    "Hugging Face, bigscience/bloom model card, README.md metadata co2_eq_emissions (commit 7f10a99)",
+    "https://huggingface.co/bigscience/bloom",
+    notes="co2_eq_emissions.emissions: 24700000 (grams); retrieved 19 October 2026.",
+)
+BOURTOULE_SISA_2021 = _lit(
+    "prov:bourtoule-sisa-2021",
+    "Bourtoule et al. (2021), Machine Unlearning, IEEE S&P 2021, abstract",
+    url="https://arxiv.org/abs/1912.03817",
+    verified="2026-10-20",
+    notes="SISA training speeds unlearning 4.63x on Purchase, 2.45x on SVHN, and 1.36x on ImageNet "
+          "over retraining from scratch.",
+)
+DPC_META_IRELAND_2023 = _report(
+    "prov:dpc-meta-ireland-2023",
+    "Data Protection Commission (Ireland), Data Protection Commission announces conclusion of two "
+    "inquiries into Meta Ireland, press release, 4 January 2023",
+    "https://www.dataprotection.ie/en/news-media/data-protection-commission-announces-conclusion-two-inquiries-meta-ireland",
+    notes="Fines of EUR 210 million (Facebook) and EUR 180 million (Instagram).",
+)
+PROPUBLICA_CIGNA_2023 = _report(
+    "prov:propublica-cigna-2023",
+    "Rucker, Miller, and Armstrong, How Cigna Saves Millions by Having Its Doctors Reject Claims "
+    "Without Reading Them, ProPublica and The Capitol Forum, 25 March 2023",
+    "https://www.propublica.org/article/cigna-pxdx-medical-health-insurance-rejection-claims",
+    notes="Over two months, Cigna medical directors denied more than 300,000 requests for payment, "
+          "spending on average 1.2 seconds on each.",
+)
+YU_COCA_2022 = _lit(
+    "prov:yu-coca-2022",
+    "Yu et al. (2022), CoCa: Contrastive Captioners are Image-Text Foundation Models, Figure 1",
+    url="https://arxiv.org/abs/2205.01917",
+    verified="2026-10-20",
+    notes="91.0 percent ImageNet top-1 with a fine-tuned encoder; cited by De et al. (2022), Figure 1, "
+          "as the best non-private ImageNet result.",
+)
+REGULATION_B_RECORD_RETENTION = _report(
+    "prov:regulation-b-record-retention",
+    "12 CFR 1002.12(b)(1), Regulation B (Equal Credit Opportunity Act), preservation of records",
+    "https://www.ecfr.gov/current/title-12/chapter-X/part-1002/section-1002.12",
+    notes="Creditors keep consumer credit application records for 25 months after notifying the "
+          "applicant of action taken.",
+)
+CODECARBON_LAPTOP_RUN_2026 = Provenance(
+    id="prov:codecarbon-laptop-run-2026",
+    kind=ProvenanceKind.DERIVED,
+    ref="CodeCarbon 3.3.1 OfflineEmissionsTracker (country_iso_code USA), 30 s of 2048 x 2048 float32 "
+        "matrix multiplies on an Apple M5 Max laptop, run 19 October 2026",
+    url="https://github.com/mlco2/codecarbon",
+    verified="2026-10-20",
+    notes=("Fields of the emissions.csv the run wrote, quoted exactly: energy_consumed "
+           "0.00018553642733992439 kWh, cpu_energy 0.00013543562574311828 kWh, emissions "
+           "6.855070041856389e-05 kg. The tracker found no power sensor and fell back on CPU load; "
+           "RAM is a fixed 6 W; PUE 1.0 is the tracker's default."),
+)
+
+# --- Course-overview anchors: BLOOM's published run files, Alps, ChatGPT traffic (added 2026-10-20) ---
+BIGSCIENCE_TR11_2022 = _report(
+    "prov:bigscience-tr11-176b-ml-2022",
+    "BigScience Workshop (2022), tr11-176B-ml README and tr11-176B-ml.slurm, "
+    "github.com/bigscience-workshop/bigscience, train/tr11-176B-ml",
+    "https://github.com/bigscience-workshop/bigscience/tree/master/train/tr11-176B-ml",
+    notes=("README, Hardware: '416 A100 80GB GPUs (52 nodes) - using 384 gpus (48 nodes) and keeping 32 gpus "
+           "(4 nodes) in reserve'; '8 GPUs per node'. README, top: training started March 11, 2022; epoch one "
+           "finished June 28, 2022. README, Checkpoints: 'At full GBS=2048 we have about 2min/iteration so 250 "
+           "iterations is about ~8h' and 'Probably every 4h is sane enough of a compromise.' Slurm script at "
+           "commit ed196cd (19 June 2022): --nodes=48, --gres=gpu:8, --time 100:00:00, TP_SIZE=4, PP_SIZE=12, "
+           "GLOBAL_BATCH_SIZE=2048, SAVE_INTERVAL=100. Read 2026-10-20."),
+)
+ETH_ALPS_2024 = _report(
+    "prov:eth-alps-inauguration-2024",
+    "ETH Zurich (2024), press release, Alps supercomputer inaugurated, Zurich, 14 September 2024",
+    "https://www.cscs.ch/fileadmin/user_upload/contents_publications/news/news_2024/"
+    "press-release-alps-supercomputer-inaugurated.pdf",
+    notes=("'has 10,752 of the world's coveted NVIDIA Grace Hopper superchips'; 'In the Top500 list of "
+           "supercomputers from June 2024, it was ranked 6th in the first expansion stage.' Read 2026-10-20."),
+)
+TECHCRUNCH_ALTMAN_DEVDAY_2025 = _report(
+    "prov:techcrunch-altman-devday-2025",
+    "TechCrunch (2025), Sam Altman says ChatGPT has hit 800M weekly active users, 6 October 2025 "
+    "(OpenAI DevDay keynote)",
+    "https://techcrunch.com/2025/10/06/sam-altman-says-chatgpt-has-hit-800m-weekly-active-users/",
+    notes=("Altman: 'More than 800 million people use ChatGPT every week, and we process over 6 billion "
+           "tokens per minute on the API.' A company statement, not audited. Read 2026-10-20."),
+)
+
+# --- SWE-bench Verified: task count and the public leaderboard (added 2026-10-20) ---
+OPENAI_SWE_BENCH_VERIFIED_2024 = _report(
+    "prov:openai-swe-bench-verified-2024",
+    "Chowdhury et al. (OpenAI, 2024), Introducing SWE-bench Verified, 13 August 2024",
+    "https://openai.com/index/introducing-swe-bench-verified/",
+    notes="A human-validated subset of 500 SWE-bench tasks.",
+)
+
+# --- Course-overview anchors: robot fleets and one mobile manipulator's datasheets (added 2026-10-20) ---
+IFR_WORLD_ROBOTICS_2025 = _report(
+    "prov:ifr-world-robotics-2025",
+    "International Federation of Robotics (2025), World Robotics 2025 press release, Global Robot Demand in "
+    "Factories Doubles Over 10 Years, Frankfurt, 25 September 2025",
+    "https://ifr.org/ifr-press-releases/global-robot-demand-in-factories-doubles-over-10-years",
+    notes=("'542,000 robots installed in 2024' (542,076 in the release text); 'The total number of industrial "
+           "robots in operational use worldwide was 4,664,000 units in 2024.' A 24 September 2026 release "
+           "reports the 2025 figures (about 5 million in operation). Read 2026-10-20."),
+)
+AMAZON_MILLIONTH_ROBOT_2025 = _report(
+    "prov:amazon-millionth-robot-deepfleet-2025",
+    "Amazon (2025), Amazon launches a new AI foundation model to power its robotic fleet and deploys its "
+    "1 millionth robot, aboutamazon.com, July 2025",
+    "https://www.aboutamazon.com/news/operations/amazon-million-robots-ai-foundation-model",
+    notes=("'Amazon has deployed its one millionth robot in its operations.' 'A new generative AI foundation "
+           "model will improve robot fleet travel efficiency by 10%.' A company projection. Read 2026-10-20."),
+)
+UR16E_DATASHEET = _ds(
+    "prov:universal-robots-ur16e-datasheet",
+    "Universal Robots, UR16e datasheet",
+    "https://www.universal-robots.com/manuals/latest/en/datasheets/ur16e/",
+    verified="2026-10-20",
+    notes="Payload 16 kg, reach 900 mm, 6 rotating joints.",
+)
+
+# --- Course-overview anchors: chat traffic, tokens per word, a restarted reactor (added 2026-10-20) ---
+CHATGPT_DAILY_PROMPTS_2025 = _report(
+    "prov:openai-axios-chatgpt-prompts-2025",
+    "OpenAI to Axios (2025), ChatGPT users send 2.5 billion prompts a day, reported by TechCrunch, 21 July 2025",
+    "https://techcrunch.com/2025/07/21/chatgpt-users-send-2-5-billion-prompts-a-day/",
+    notes=("'ChatGPT receives 2.5 billion prompts from global users every day, OpenAI told Axios'; about "
+           "330 million of them from US users. A company statement, not audited. Read 2026-10-20."),
+)
+OPENAI_TOKENIZER_GUIDE = _conv(
+    "prov:openai-tokenizer-guide",
+    "OpenAI, What are tokens and how to count them? (help center) and the Tokenizer page, "
+    "https://platform.openai.com/tokenizer",
+    notes=("'A helpful rule of thumb is that one token generally corresponds to ~4 characters of text for "
+           "common English text. This translates to roughly 3/4 of a word (so 100 tokens ~= 75 words).' "
+           "A rule of thumb for English with OpenAI's tokenizers. Read 2026-10-20."),
+)
+CONSTELLATION_CRANE_2024 = _report(
+    "prov:constellation-crane-clean-energy-center-2024",
+    "Constellation Energy (2024), Constellation to Launch Crane Clean Energy Center, Restoring Jobs and "
+    "Carbon-Free Power to The Grid, press release, Londonderry, PA, 20 September 2024",
+    "https://www.constellationenergy.com/news/2024/Constellation-to-Launch-Crane-Clean-Energy-Center-"
+    "Restoring-Jobs-and-Carbon-Free-Power-to-The-Grid.html",
+    notes=("Three Mile Island Unit 1 'had a generating capacity of 837 megawatts'; 'retired prematurely for "
+           "economic reasons in 2019'; 'a 20-year power purchase agreement with Microsoft'; 'The CCEC is "
+           "expected to be online in 2028.' Read 2026-10-20."),
 )

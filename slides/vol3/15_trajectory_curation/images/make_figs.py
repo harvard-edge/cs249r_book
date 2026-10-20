@@ -2,8 +2,10 @@
 
 Run: python3 make_figs.py   (writes SVGs here; `make deck V=3 D=15_trajectory_curation`
 converts them to PDF). Plots use the shared slideplot helper and are drawn at
-the size of their slot; diagrams are SVG at 900 units wide. Derived values
-come from calcs.py; measured values from data/corpus_stats.json.
+the size of their slot; diagrams are SVG at 900 units wide. Every value comes
+from calcs.py, which reads MLSysIM and data/corpus_stats.json; this script
+imports it and prints the recorded values (val, num), so figures and slides
+agree.
 """
 
 import json
@@ -17,6 +19,7 @@ sys.path.insert(0, str(HERE))
 import slideplot as sp  # noqa: E402
 from slideplot import plt  # noqa: E402
 import calcs  # noqa: E402
+from deckvals import val, num  # noqa: E402
 
 STATS = json.loads((HERE / "data" / "corpus_stats.json").read_text())
 
@@ -79,36 +82,36 @@ def card(x, y, w, h, title, sub, fill, stroke, ts=21, ss=18, dash=False, tcolor=
 # ---------------------------------------------------------------- hook (NM 15.1)
 def hook():
     """3,000 failures a month, split by the probe that removed them."""
-    h = calcs.hook()
+    t = calcs.TRI
     W, H = 900, 300
     x0, x1 = 40, 860
-    scale = (x1 - x0) / h["failures"]
-    parts = [("schema field missing", h["schema"], AMBER, AMBER_L),
-             ("sandbox timeout", h["sandbox"], PURPLE, PURPLE_L),
-             ("residual", h["residual"], RED, RED_L)]
+    scale = (x1 - x0) / t.failures
+    parts = [("schema field missing", t.removed["interface"], val("tri_iface"), AMBER, AMBER_L),
+             ("sandbox timeout", t.removed["runtime"], val("tri_rt"), PURPLE, PURPLE_L),
+             ("residual", t.residual, val("tri_residual"), RED, RED_L)]
     for step in (1, 2, 3):
-        b = text(450, 40, f"{h['failures']:,.0f} failed trajectories a month (illustrative, NM 15.1)", 22,
+        b = text(450, 40, f"{val('tri_fail')} failed trajectories a month (illustrative, NM 15.1)", 22,
                  INK, weight="bold")
         if step == 1:
             b += box(x0, 70, x1 - x0, 80, "#e2e8f0", LINE, rx=6)
             b += text(450, 120, "?   what fixes them   ?", 24, GRAY, weight="bold")
         else:
             x = x0
-            for label, n, s, f in parts:
+            for label, n, shown, s, f in parts:
                 w = n * scale
                 b += box(x, 70, w, 80, f, s, rx=6)
-                b += text(x + w / 2, 105, f"{n:,.0f}", 24, s, weight="bold")
+                b += text(x + w / 2, 105, shown, 24, s, weight="bold")
                 lab_x = x + w / 2 if n > 400 else x1 - 4
                 anchor = "middle" if n > 400 else "end"
                 b += text(lab_x, 135 if n > 400 else 185, label, 18, s, anchor=anchor)
                 x += w
         if step == 3:
-            sx = x0 + (h["schema"] + h["sandbox"]) * scale
+            sx = x0 + t.system_failures * scale
             b += f'<path d="M{x0},210 L{x0},225 L{sx - 6},225 L{sx - 6},210" fill="none" stroke="{GREEN}" stroke-width="3"/>'
-            b += text((x0 + sx) / 2, 258, f"repair below the weights: {h['schema'] + h['sandbox']:,.0f} gone for every model",
+            b += text((x0 + sx) / 2, 258, f"repair below the weights: {val('tri_system')} gone for every model",
                       20, GREEN, weight="bold")
             b += f'<path d="M{sx},210 L{sx},225 L{x1},225 L{x1},210" fill="none" stroke="{BLUE}" stroke-width="3"/>'
-            b += text(x1, 285, f"weights: at most {h['residual']:,.0f}", 20, BLUE, anchor="end", weight="bold")
+            b += text(x1, 285, f"weights: at most {val('tri_residual')}", 20, BLUE, anchor="end", weight="bold")
         svg(f"hook_step{step}.svg", W, H, b)
 
 
@@ -168,23 +171,24 @@ def artifacts():
 
 # ---------------------------------------------------------------- splits (§15.4)
 def straddle():
-    ks = list(range(1, 9))
-    vals = [100 * calcs.straddle(0.8, k) for k in ks]
+    k_max = int(num("sp_k"))
+    ks = list(range(1, k_max + 1))
+    vals = [100 * calcs.straddle(k) for k in ks]
     for step in (1, 2):
         fig, ax = plt.subplots(figsize=(5.8, 2.7))
         shown = ks if step == 2 else ks[:2]
         ax.plot(shown, vals[:len(shown)], color=PURPLE, lw=3, marker="o", ms=6)
         if step == 1:
-            ax.text(8, 50, "8 attempts:\n?", fontsize=15, color=PURPLE, ha="center", fontweight="bold")
+            ax.text(k_max, 50, f"{val('sp_k')} attempts:\n?", fontsize=15, color=PURPLE, ha="center", fontweight="bold")
         else:
-            ax.plot([8], [vals[-1]], "o", color=RED, ms=11, zorder=5)
-            ax.annotate(f"{vals[-1]:.1f}% of tasks\non both sides", (8, vals[-1]), xytext=(5.0, 20),
+            ax.plot([k_max], [vals[-1]], "o", color=RED, ms=11, zorder=5)
+            ax.annotate(f"{val('sp_straddle')}% of tasks\non both sides", (k_max, vals[-1]), xytext=(5.0, 20),
                         fontsize=14, color=RED, fontweight="bold",
                         arrowprops=dict(arrowstyle="-", color=RED, lw=1.2))
         ax.set_xlim(0.6, 8.6)
         ax.set_ylim(0, 100)
         ax.set_xticks(ks)
-        ax.set_xlabel("Attempts per task (random 80/20 split of traces)", fontsize=13)
+        ax.set_xlabel(f"Attempts per task (random {val('sp_f_pct')}/{val('sp_q_pct')} split of traces)", fontsize=13)
         ax.set_ylabel("Tasks straddling (%)", fontsize=13)
         ax.tick_params(labelsize=12)
         ax.grid(axis="y", color=sp.C["grid"], lw=0.6)
@@ -197,7 +201,7 @@ def corpus_runs():
     fig, ax = plt.subplots(figsize=(5.4, 2.5))
     xs = sorted(hist)
     ax.bar(xs, [hist[x] for x in xs], color=BLUE, width=0.85)
-    ax.set_xlabel("Runs per issue (last bar: 40 or more)", fontsize=13)
+    ax.set_xlabel(f"Runs per issue (last bar: {val('c_cap_bar')} or more)", fontsize=13)
     ax.set_ylabel("Issues", fontsize=13)
     ax.tick_params(labelsize=12)
     med = STATS["runs_per_task"]["median"]
@@ -206,18 +210,18 @@ def corpus_runs():
     ax.grid(axis="y", color=sp.C["grid"], lw=0.6)
     sp.save(fig, HERE / "corpus_runs.svg")
 
-    st = STATS["straddle"]["measured"] * 100
-    gs = STATS["group_split"]
-    rep = 100 * gs["test_repo_shared"] / gs["test_tasks"]
     fig, ax = plt.subplots(figsize=(5.8, 2.3))
-    rows = [("random split of runs", st, RED, "issues on both sides"),
-            ("split by issue", 0.0, GREEN, "issues on both sides"),
-            ("same split, by repo", rep, AMBER, "test issues whose repo is in training")]
-    for i, (lab, v, c, what) in enumerate(rows):
+    gs = STATS["group_split"]
+    rows = [("random split of runs", 100 * STATS["straddle"]["measured"], val("c_straddle_pct"), RED,
+             "issues on both sides"),
+            ("split by issue", 0.0, f"{0.0:.1f}", GREEN, "issues on both sides"),
+            ("same split, by repo", 100 * gs["test_repo_shared"] / gs["test_tasks"], val("c_test_repo_pct"), AMBER,
+             "test issues whose repo is in training")]
+    for i, (lab, v, shown, c, what) in enumerate(rows):
         y = 2 - i
         ax.barh(y, max(v, 0.4), color=c, height=0.62)
         ax.text(-2, y, lab, ha="right", va="center", fontsize=13, fontweight="bold", color=INK)
-        ax.text(max(v, 0.4) + 1.5, y, f"{v:.1f}%  {what}", va="center", fontsize=12.5, color=c,
+        ax.text(max(v, 0.4) + 1.5, y, f"{shown}%  {what}", va="center", fontsize=12.5, color=c,
                 fontweight="bold")
     ax.set_xlim(0, 175)
     ax.set_ylim(-0.6, 2.6)
@@ -225,7 +229,7 @@ def corpus_runs():
     ax.set_xticks([0, 50, 100])
     ax.tick_params(labelsize=12)
     ax.spines["left"].set_visible(False)
-    ax.set_xlabel("Percent of 3,591 issues (or of 743 test issues)", fontsize=12)
+    ax.set_xlabel(f"Percent of {val('c_tasks')} issues (or of {val('c_test_tasks')} test issues)", fontsize=12)
     sp.save(fig, HERE / "corpus_split.svg")
 
 
@@ -254,16 +258,16 @@ def lsh():
     js = np.linspace(0, 1, 201)
     fig, ax = plt.subplots(figsize=(5.4, 2.7))
     ax.plot(js, [calcs.lsh_p(j) for j in js], color=PURPLE, lw=3)
-    for j, tx, ty in ((0.5, 0.56, 0.62), (0.8, 0.66, 0.80)):
-        p = calcs.lsh_p(j)
-        ax.plot([j], [p], "o", color=RED, ms=9, zorder=5)
-        ax.text(tx, ty, f"J = {j}: {100 * p:.0f}%", fontsize=13, color=RED, fontweight="bold")
+    for jk, pk, tx, ty in (("mh_j_lo", "mh_p_lo", 0.56, 0.62), ("mh_j_hi", "mh_p_hi", 0.66, 0.80)):
+        j = num(jk)
+        ax.plot([j], [calcs.lsh_p(j)], "o", color=RED, ms=9, zorder=5)
+        ax.text(tx, ty, f"J = {val(jk)}: {val(pk)}%", fontsize=13, color=RED, fontweight="bold")
     ax.set_xlabel("Jaccard similarity of two records", fontsize=13)
     ax.set_ylabel("Sent to review", fontsize=13)
     ax.set_yticks([0, 0.5, 1])
     ax.set_yticklabels(["0", "50%", "100%"])
     ax.tick_params(labelsize=12)
-    ax.text(0.02, 0.9, "32 bands of 4 rows", fontsize=13, color=PURPLE)
+    ax.text(0.02, 0.9, f"{val('mh_bands')} bands of {val('mh_rows')} rows", fontsize=13, color=PURPLE)
     ax.grid(color=sp.C["grid"], lw=0.6)
     sp.save(fig, HERE / "lsh.svg")
 
@@ -305,9 +309,11 @@ def cascade():
 
 
 def order():
-    rows = [("process audit first", calcs.expected_time(["record", "use", "proc", "out", "target"])[0], "data"),
-            ("tests first", calcs.expected_time(["record", "use", "out", "proc", "target"])[0], "danger")]
-    sp.hbars(str(HERE / "order.svg"), [(a, v, c, f"{v:.2f} s") for a, v, c in rows], "s", log=False,
+    t_best, t_worst = (calcs.AD.time_per_attempted[i].to("second").magnitude
+                       for i in (calcs.AD.best_order, 1 - calcs.AD.best_order))
+    rows = [("process audit first", t_best, "data", val("ad_t_best")),
+            ("tests first", t_worst, "danger", val("ad_t_worst"))]
+    sp.hbars(str(HERE / "order.svg"), [(a, v, c, f"{shown} s") for a, v, c, shown in rows], "s", log=False,
              xlabel="Slot time per attempted record (s)", size=(3.6, 1.1))
 
 
@@ -347,12 +353,8 @@ def typology():
 
 def denominators():
     """NM 15.3 (illustrative) beside the same split measured in the corpus."""
-    pool = calcs.POOL
-    recs = sum(v[0] for v in pool.values())
-    st = {k: v[0] * v[1] for k, v in pool.items()}
-    tg = {k: v[0] * v[2] for k, v in pool.items()}
-    ill = [100 * pool["recovery"][0] / recs, 100 * st["recovery"] / sum(st.values()),
-           100 * tg["recovery"] / sum(tg.values())]
+    dn = calcs.DN
+    ill = [100 * dn.record_share, 100 * dn.stored_share, 100 * dn.target_share]
     rc = STATS["recovery"]
     mea = [100 * rc["recovery"] / (rc["recovery"] + rc["direct"]),
            100 * rc["recovery_chars"] / (rc["recovery_chars"] + rc["direct_chars"]),
@@ -386,11 +388,12 @@ def plateau():
     ax.plot(ps, [calcs.mixed(p) for p in ps], color=PURPLE, lw=3.5)
     ax.text(0.30, 1.03, "a success", fontsize=13, color=BLUE)
     ax.text(0.33, 0.62, "mixed group", fontsize=13, color=PURPLE, fontweight="bold")
-    for p in (0.05, 0.95):
+    p_lo, _, p_hi = calcs.GC_S.pass_rates
+    for p in (p_lo, p_hi):
         ax.plot([p], [calcs.mixed(p)], "o", color=RED, ms=8, zorder=5)
-    ax.text(0.09, 0.22, f"{calcs.mixed(0.05):.2f}", fontsize=13, color=RED, fontweight="bold")
-    ax.text(0.73, 0.22, f"{calcs.mixed(0.95):.2f}", fontsize=13, color=RED, fontweight="bold")
-    ax.set_xlabel("Per-attempt pass rate (8 attempts)", fontsize=13)
+    ax.text(0.09, 0.22, val("gc_mixed_lo"), fontsize=13, color=RED, fontweight="bold")
+    ax.text(0.73, 0.22, val("gc_mixed_hi"), fontsize=13, color=RED, fontweight="bold")
+    ax.set_xlabel(f"Per-attempt pass rate ({val('gc_k')} attempts)", fontsize=13)
     ax.set_ylabel("Probability", fontsize=13)
     ax.set_ylim(0, 1.15)
     ax.set_yticks([0, 0.5, 1])
@@ -420,26 +423,25 @@ def plateau():
 
 # ---------------------------------------------------------------- collection (§15.8)
 def staging():
-    s = calcs.staging()
-    gbps = s["mbps"] / 1000
-    t_full = s["t_full"]
-    wm = calcs.STORE_GB - s["inflight"] - s["react"]
+    store = num("st_store_gb")
+    t_full = calcs.ST.time_to_full.to("second").magnitude
+    wm = calcs.ST.high_watermark * store
     for step in (1, 2):
         fig, ax = plt.subplots(figsize=(5.8, 2.6))
-        ax.plot([0, t_full], [0, calcs.STORE_GB], color=RED, lw=3)
-        ax.axhline(calcs.STORE_GB, color=INK, lw=1.5)
-        ax.text(5, calcs.STORE_GB + 1.0, f"store full: {calcs.STORE_GB:.0f} GB", fontsize=13, color=INK)
-        ax.plot([t_full], [calcs.STORE_GB], "o", color=RED, ms=9)
-        ax.text(t_full + 6, calcs.STORE_GB + 1.0, f"{t_full:.0f} s", fontsize=14, color=RED,
+        ax.plot([0, t_full], [0, store], color=RED, lw=3)
+        ax.axhline(store, color=INK, lw=1.5)
+        ax.text(5, store + 1.0, f"store full: {val('st_store_gb')} GB", fontsize=13, color=INK)
+        ax.plot([t_full], [store], "o", color=RED, ms=9)
+        ax.text(t_full + 6, store + 1.0, f"{val('st_tfull')} s", fontsize=14, color=RED,
                 fontweight="bold", ha="left")
-        ax.text(110, 6, f"verifiers stall: +{gbps * 1000:.0f} MB/s", fontsize=13, color=RED)
+        ax.text(110, 6, f"verifiers stall: +{val('st_growth_r')} MB/s", fontsize=13, color=RED)
         if step == 2:
-            ax.axhspan(wm, calcs.STORE_GB, color=AMBER_L)
+            ax.axhspan(wm, store, color=AMBER_L)
             ax.axhline(wm, color=AMBER, lw=2, ls="--")
-            ax.text(4, wm + 1.0, f"stop at {wm:.1f} GB ({int(100 * wm / calcs.STORE_GB)}%)",
+            ax.text(4, wm + 1.0, f"stop at {val('st_mark_gb')} GB ({val('st_mark_pct')}%)",
                     fontsize=12.5, color=AMBER, fontweight="bold")
-            ax.text(222, wm + 6.2, f"{s['inflight']:.1f} GB in flight", fontsize=12, color=AMBER)
-            ax.text(222, wm + 2.2, f"+{s['react']:.1f} GB in 30 s", fontsize=12, color=AMBER)
+            ax.text(222, wm + 6.2, f"{val('st_inflight')} GB in flight", fontsize=12, color=AMBER)
+            ax.text(222, wm + 2.2, f"+{val('st_react_gb')} GB in {val('st_react_s')} s", fontsize=12, color=AMBER)
         ax.set_xlim(0, 310)
         ax.set_ylim(0, 37)
         ax.set_xlabel("Seconds after the fixture breaks (illustrative, NM 15.4)", fontsize=12)
@@ -484,14 +486,15 @@ def lineage():
 
 def dispositions():
     from matplotlib.ticker import FixedLocator, FixedFormatter
-    rows = [("selected, emitted", 15, GREEN), ("assessed, not selected", 470, GRAY),
-            ("ineligible for this use", 10, RED), ("pending at cutoff", 3, PURPLE),
-            ("unknown at cutoff", 2, PURPLE)]
+    rows = [("selected, emitted", "co_emitted", GREEN), ("assessed, not selected", "co_other", GRAY),
+            ("ineligible for this use", "co_inelig", RED), ("pending at cutoff", "co_pending", PURPLE),
+            ("unknown at cutoff", "co_unknown", PURPLE)]
     fig, ax = plt.subplots(figsize=(3.9, 2.4))
-    for i, (lab, v, c) in enumerate(rows):
+    for i, (lab, key, c) in enumerate(rows):
         y = 4 - i
+        v = num(key)
         ax.barh(y, v, color=c, height=0.6)
-        ax.text(v * 1.15, y, f"{v}", va="center", fontsize=12, color=c, fontweight="bold")
+        ax.text(v * 1.15, y, val(key), va="center", fontsize=12, color=c, fontweight="bold")
         ax.text(0.9, y, lab + " ", va="center", ha="right", fontsize=11.5, color=INK)
     ax.set_xscale("log")
     ax.set_xlim(1, 2000)
@@ -508,8 +511,8 @@ def dispositions():
 def synthesis():
     """Drawn 900 x 200 for a full-width strip about 13 cm wide."""
     W, H = 900, 200
-    steps = [("3,000", "failures", RED_L, RED), ("2,700", "fixed below", GREEN_L, GREEN),
-             ("300", "residual", BLUE_L, BLUE), ("split", "group fixed", PURPLE_L, PURPLE),
+    steps = [(val("tri_fail"), "failures", RED_L, RED), (val("tri_system"), "fixed below", GREEN_L, GREEN),
+             (val("tri_residual"), "residual", BLUE_L, BLUE), ("split", "group fixed", PURPLE_L, PURPLE),
              ("R U P O T", "all pass", PURPLE_L, PURPLE), ("e3 e4 e6", "targets", BLUE_L, BLUE),
              ("redacted", "re-admitted", PURPLE_L, PURPLE)]
     b = ""

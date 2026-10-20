@@ -124,6 +124,7 @@ __all__ = [
     "ContinuousDeratingResult",
     "DriveBusResult",
     "ZeroFailureResult",
+    "ShieldCoverageBillResult",  # added 2026-10-20
     "ThrottledStageResult",
     # Fleet orchestration (added 2026-10-20)
     "JobSizeMixResult",
@@ -1020,10 +1021,42 @@ class StoppingBudgetResult(SolverResult):
     ramp_delay: Optional[Quantity] = None        # a / (2 j): the ramps as added delay above a^2 / j
     tracking_inset: Optional[Quantity] = None    # tracking bound subtracted from the clearance
     approach_travel: Optional[Quantity] = None   # v_h (tau + T_stop): a person closing the gap
+    # The ceiling solved by hand (added 2026-10-20): the S-curve stop alone and
+    # the terms of the quadratic root, set with a jerk bound and a clear distance.
+    scurve_travel: Optional[Quantity] = None     # braking + jerk-ramp travel: the resident stop alone
+    rigid_speed_ceiling: Optional[Quantity] = None  # (D_clear - overhead - inset) / delay: instantaneous braking
+    ceiling_lead_time: Optional[Quantity] = None  # b = delay + a / (2 j), on the quadratic branch only
+    ceiling_root: Optional[Quantity] = None      # sqrt(b^2 + 2 (D_clear - overhead - inset) / a), same branch
+    # The deceleration premise (added 2026-10-20): with a jerk bound and a clear distance,
+    # the weakest deceleration whose S-curve stop still fits, on the trapezoidal branch.
+    braking_room: Optional[Quantity] = None      # D_clear - overhead - inset - delay travel
+    min_deceleration: Optional[Quantity] = None  # deceleration at which the stop fills braking_room exactly
+    deceleration_shortfall: Optional[float] = None  # 1 - min_deceleration / deceleration
 
     def travel_over(self, duration: Quantity) -> Quantity:
         """Distance covered at ``speed`` over ``duration`` (the cost of one term of the delay)."""
         return (self.speed * duration).to("meter")
+
+
+class ShieldCoverageBillResult(SolverResult):
+    """Result from ShieldCoverageBillModel: what a shield's tested coverage buys against a hazard target
+    (added 2026-10-20). Rates are per operating hour."""
+    exposure: Quantity                    # adjudicated proposal-log hours
+    ln_inv_alpha: float                   # -ln(1 - C)
+    proposal_rate_upper: Quantity         # zero-event bound on hazardous proposals
+    residual_rate: Quantity               # proposal bound x (1 - coverage) + common cause
+    meets_target: bool
+    required_coverage: float              # coverage that would meet the target at this proposal bound
+    proposal_rate_limit: Quantity         # proposal bound the target needs at the stated coverage
+    exposure_needed: Quantity             # failure-free proposal hours that bound it
+    days_needed: Quantity                 # the same exposure on the fleet, calendar days
+    days_beyond_cycle: Quantity
+    coverage_trials: int                  # seeded hazards, no miss, that bound coverage at C
+    joint_confidence: float               # each of two one-sided bounds at 1 - alpha/2 (Bonferroni)
+    coverage_trials_joint: int
+    ln_inv_half_alpha: float              # -ln(alpha / 2)
+    proposal_rate_upper_joint: Quantity
+    residual_rate_joint: Quantity
 
 
 class TractionLossResult(SolverResult):
@@ -1072,6 +1105,9 @@ class AcceptedTaskCostResult(SolverResult):
     cost_per_accepted_cheaper_other: Optional[float] = None
     cost_per_accepted_acceptance_gain: Optional[float] = None
     independent_success: Optional[float] = None
+    grown_attempt_cost: Optional[float] = None           # model cost grown by model_cost_growth (added 2026-10-20)
+    grown_attempt_rise: Optional[float] = None           # grown attempt / attempt - 1
+    grown_break_even_acceptance: Optional[float] = None  # acceptance that holds cost per accepted task
 
 
 class AppendOnlyContextResult(SolverResult):
@@ -1443,6 +1479,7 @@ class ShiftedTestSetResult(SolverResult):
     gap_median: Optional[float] = None  # percentage points, all models (added 2026-10-20)
     slope: float                       # least-squares fit: new = slope * original + intercept
     intercept: float
+    network_rank_correlation: Optional[float] = None  # Spearman, original against new, non-baseline models (added 2026-10-20)
 
 
 class ProxyDriftResult(SolverResult):
@@ -1597,6 +1634,7 @@ class DriveBusResult(SolverResult):
     stop_time: Quantity
     peak_power: Quantity
     resistor_max: Quantity
+    crossing_resistance: Optional[Quantity] = None  # source resistance at which the step reaches lockout (added 2026-10-20)
 
 
 class ZeroFailureResult(SolverResult):
@@ -1834,6 +1872,20 @@ class RecordedRunCostResult(SolverResult):
     over_limit_runs: Optional[int] = None
     mean_overshoot: Optional[float] = None   # dollars above the limit, over those runs
     max_overshoot: Optional[float] = None
+    # Optional (added 2026-10-20): per-run token medians as the agent recorded them,
+    # and output tokens as a share of all recorded tokens, pooled over the runs.
+    median_input_tokens: Optional[float] = None    # input tokens summed over a run's calls
+    median_output_tokens: Optional[float] = None
+    median_input_output_ratio: Optional[float] = None   # median of per-run input / output
+    output_token_share: Optional[float] = None     # pooled output / (input + output)
+    # Optional (added 2026-10-20): mean recorded cost of resolved and of
+    # unresolved runs, and how far the resolved-run mean understates the
+    # cohort cost per resolved task (cost_per_resolved / mean_resolved_cost).
+    mean_resolved_cost: Optional[float] = None     # dollars
+    mean_unresolved_cost: Optional[float] = None
+    survivor_understatement: Optional[float] = None
+    mean_calls: Optional[float] = None
+    max_cost: Optional[float] = None               # dollars, the costliest run
 # --- Context engineering (added 2026-10-20) ----------------------------------
 # What one agent request carries: a budget by role, the softmax cost of
 # admitted keys, measured comprehension by length, a zoned layout's input bill,
@@ -2423,6 +2475,7 @@ class ResponseTimeResult(SolverResult):
     meets_deadline: bool
     blocking_limit: Quantity                 # largest blocking that still meets the deadline
     wcet_claim: Optional[Quantity] = None    # declared WCET above the observed unloaded run
+    execution_ceiling: Optional[Quantity] = None  # deadline - B - I: the longest execution that still meets the deadline (added 2026-10-20)
 
 
 class CanFdBusResult(SolverResult):
@@ -2472,6 +2525,49 @@ class LeaseBudgetResult(SolverResult):
     stall_lease_expiry: Quantity
     stall_brake_onset: Quantity
     renewal_lateness_limit: Optional[Quantity] = None  # lease - renewal period: a renewal this late lapses the lease (added 2026-10-20)
+
+
+class SharedDramReadResult(SolverResult):
+    """Result from SharedDramReadModel: a permission tick's snapshot read behind FIFO backlogs on a shared DRAM controller (added 2026-10-20)."""
+    queued_transactions: int                 # transactions in one backlog
+    tile_transactions: int                   # of them, the weight tile's
+    backlog_bytes: int                       # bytes in one backlog
+    backlog_wait: Quantity                   # one backlog: bytes / bandwidth + row conflicts
+    snapshot_read: Quantity                  # the tick's own snapshot read
+    loaded_read: Quantity                    # one backlog plus the snapshot read
+    sense_left: Quantity                     # sense allowance less the loaded read
+    bypass_read: Quantity                    # priority bypass: one in-flight transaction, then the read
+    read_ceiling_wcet: Quantity              # declared WCET less the compute after sensing
+    read_ceiling_deadline: Quantity          # execution ceiling less the compute after sensing
+    backlogs_sense: int                      # most backlogs whose wait still fits the sense allowance
+    backlogs_wcet: int                       # most backlogs inside the declared WCET
+    backlogs_deadline: int                   # most backlogs inside the execution ceiling
+    unloaded_end: Quantity                   # sense allowance + compute after sensing
+    end_sense: Quantity                      # tick end at backlogs_sense
+    end_wcet: Quantity                       # tick end at backlogs_wcet
+    end_deadline: Quantity                   # tick end at backlogs_deadline
+
+
+class ThermalThrottleResult(SolverResult):
+    """Result from ThermalThrottleModel: a governed clock halving a tick, and the hysteresis that holds it (added 2026-10-20)."""
+    cycles: float                            # tick cycles at the nominal clock (sized to the WCET)
+    execution: Quantity                      # at the nominal clock
+    execution_throttled: Quantity            # at the throttled clock
+    response: Quantity                       # execution + blocking + interference
+    response_throttled: Quantity
+    slack: Quantity                          # deadline - nominal response
+    overrun: Quantity                        # throttled response - deadline
+    overrun_ratio: float                     # overrun / deadline
+    junction_quiet: Quantity                 # ambient + quiet power x theta (degC)
+    junction_loaded: Quantity                # ambient + loaded power x theta (degC)
+    loaded_rise: Quantity                    # loaded power x theta (K)
+    time_to_trip: Quantity                   # from the quiet steady state, under load
+    recovery: Quantity                       # trip to clear, load stopped at the trip
+    recovery_from_loaded: Quantity           # loaded steady state to clear
+    ticks_exposed: int                       # whole ticks inside the recovery
+    ticks_exposed_from_loaded: int
+    heat_capacity: Quantity                  # tau / theta, the lumped capacitance
+    theta_never_trips: Quantity              # largest theta whose loaded steady state stays below the trip
 
 
 class LatencyTailResult(SolverResult):
@@ -3941,4 +4037,798 @@ __all__ += [
     "TwoLinkJointRateResult", "HandoffExposureResult", "ChunkReplacementResult", "JerkLimitedStopResult",
     "SpillLimitedStopResult", "TrajectoryDeadlinesResult", "SeamBridgeResult", "ShoulderSwingResult",
     "DynamicWindowResult", "StaleAnchorResult",
+]
+
+
+# ── Trajectory curation: triage, split leakage, admission order, denominators, staging (added 2026-10-20) ──
+
+class FailureTriageResult(SolverResult):
+    """Result from FailureTriageModel: failures repaired below the weights and the price of training on them."""
+    failures: int
+    removed: Dict[str, int]                  # failures each probe attributes to its rung
+    system_failures: int                     # removed by every probe together
+    residual: int                            # survive every probe
+    system_share: float
+    training_tokens: Quantity                # every failure, all epochs
+    residual_tokens: Quantity
+    training_flops: Quantity
+    residual_flops: Quantity
+    sustained_rate: Quantity                 # devices x peak x utilization
+    wall_time: Quantity                      # training on every failure
+    device_hours: Quantity
+    cost: Quantity                           # training on every failure
+    residual_cost: Quantity                  # training on the residual alone
+
+
+class RunSplitLeakageResult(SolverResult):
+    """Result from RunSplitLeakageModel: tasks a random split of runs places on both sides."""
+    whole: float                             # f^k + (1 - f)^k
+    straddle: float
+    straddling_tasks: Optional[float]        # straddle x tasks, when tasks are given
+    sibling_in_training: float               # a test run has a sibling run in training: 1 - (1 - f)^(k-1)
+    majority_attempts: int                   # smallest attempt count at which most tasks straddle
+    majority_straddle: float                 # straddle share at that count
+    curve: Dict[int, float]                  # attempts -> straddle share, 1 to max_attempts
+
+
+class AdmissionOrderResult(SolverResult):
+    """Result from AdmissionOrderModel: one admission route's checks run in several orders."""
+    cost_per_rejection: Dict[str, Quantity]  # t / (1 - p) per check
+    time_per_attempted: List[Quantity]       # expected slot time per attempted record, per order
+    time_per_admitted: List[Quantity]
+    route_yield: float                       # the same for every order
+    admitted: Optional[float]                # route yield x candidates, when candidates are given
+    best_order: int                          # index of the cheapest order
+    saving: float                            # 1 - cheapest / dearest time per attempted record
+    saving_per_attempted: Quantity           # dearest - cheapest
+
+
+class CorpusDenominatorsResult(SolverResult):
+    """Result from CorpusDenominatorsModel: one record class's share of a pool under three denominators."""
+    records: int
+    stored_tokens: Quantity
+    admitted_stored_tokens: Quantity          # stored tokens of the admitted classes
+    target_tokens: Quantity
+    record_share: float
+    stored_share: float
+    admitted_stored_share: float
+    target_share: float
+    context_per_target: Dict[str, float]      # stored tokens per target token, per class with targets
+
+
+class StagingBurstResult(SolverResult):
+    """Result from StagingBurstModel: how fast a verifier timeout burst fills reserved staging."""
+    arrival_rate: Quantity                    # records per second from the rollouts
+    capacity: Quantity                        # nominal verifier service rate
+    utilization: float
+    burst_capacity: Quantity                  # slots / timeout
+    net_growth: Quantity                      # unassessed records added per second
+    growth: Quantity                          # bytes reserved per second at the ceiling
+    time_to_full: Quantity
+    in_flight: Quantity                       # rollouts already running, at the ceiling
+    reaction_growth: Quantity                 # growth during the controller's delay
+    high_watermark: float                     # largest share of the store at which dispatch may stop
+
+
+__all__ += [
+    "FailureTriageResult", "RunSplitLeakageResult", "AdmissionOrderResult", "CorpusDenominatorsResult",
+    "StagingBurstResult",
+]
+
+# --- Fine-tuning on trajectories (added 2026-10-20) ---------------------------
+# Serialized training examples, loss masks and weighting, packing, preference
+# pairs, distillation economics, and a release comparison; solvers in
+# engine/solvers/fine_tuning.py.
+
+class TargetMaskResult(SolverResult):
+    """Result from TargetMaskModel: one serialized example's positions under two target masks."""
+    stored: int                          # every stored token
+    predicted: int                       # stored - 1: the first position has no prediction
+    selected_response: int               # responses minus the unselected ones
+    targets_with_rationale: int          # selected responses plus the rationale
+    targets_without_rationale: int       # selected responses only
+    observation_share: float             # observations / stored
+    share_with_rationale: float          # targets / stored, rationale selected
+    share_without_rationale: float
+    context_with_rationale: int          # stored positions that are context only
+    context_without_rationale: int
+    other_context_share: float           # non-observation context / stored, rationale as context
+    dilution_without_rationale: float    # predicted / targets: weight lost by an unmasked token average
+    dilution_with_rationale: float
+    unselected_vs_selected: float        # unselected responses / selected responses
+    unselected_share_of_responses: float # unselected responses / all responses
+
+
+class PerInvocationSerializationResult(SolverResult):
+    """Result from PerInvocationSerializationModel: one example per call against one transcript."""
+    per_invocation_tokens: int           # sum over calls of each call's delivered prefix
+    transcript_tokens: int               # the whole trajectory once
+    expansion: float                     # per-invocation / transcript = (H + 1) / 2
+
+
+class TrajectoryRoleShareResult(SolverResult):
+    """Result from TrajectoryRoleShareModel: transcript characters by role, per configuration."""
+    runs: int
+    configurations: List[Dict[str, Any]]  # scaffold, model, runs, prompt/observation/model shares
+    observation_low: float
+    observation_high: float
+    model_low: float
+    model_high: float
+
+
+class LossNormalizationResult(SolverResult):
+    """Result from LossNormalizationModel: one long trajectory's weight in a batch, two averages."""
+    examples: int                        # records in the batch, the trajectory's pieces included
+    total_targets: int
+    focus_token_share: float             # token averaging
+    other_token_share: float             # one other example, token averaging
+    focus_example_share: float           # example averaging, all of the trajectory's pieces
+    other_example_share: float           # one other example, example averaging
+    focus_over_other: float              # target-count ratio: the token-averaging weight ratio
+
+
+class SequencePackingResult(SolverResult):
+    """Result from SequencePackingModel: padding every example to the longest against packing."""
+    examples: int
+    stored: int
+    longest: int
+    mean_length: float
+    padded_positions: int                # examples x longest
+    buffers: int                         # fixed-capacity buffers after first-fit decreasing
+    buffer_loads: List[int]              # stored tokens per buffer
+    packed_positions: int                # buffers x capacity
+    padded_occupancy: float              # stored / padded positions
+    packed_occupancy: float              # stored / packed positions
+    position_ratio: float                # padded / packed positions
+
+
+class PreferencePairResult(SolverResult):
+    """Result from PreferencePairModel: one preference pair under the DPO loss."""
+    score_preferred: float               # z_w: policy minus reference log-probability sum
+    score_dispreferred: float            # z_l
+    margin: float                        # beta (z_w - z_l)
+    preference_score: float              # sigma(margin)
+    loss: float                          # -log sigma(margin)
+    initial_loss: float                  # ln 2, at a zero margin
+    saturation_factor: float             # sigma(-margin)
+    initial_saturation_factor: float     # 1/2
+    gradient_coefficient: float          # beta sigma(-margin)
+    initial_gradient_coefficient: float  # beta / 2
+
+
+class ContextDistillationResult(SolverResult):
+    """Result from ContextDistillationModel: a per-turn prefix read every turn against distilling it."""
+    monthly_prefix_tokens: float
+    uncached_spend: Quantity             # USD per month the prefix costs at the full input price
+    cached_spend: Quantity               # USD per month with the prefix billed as cached reads
+    net_uncached: Quantity               # uncached spend minus redistillation per month
+    net_cached: Quantity
+    break_even_revisions: float          # redistillations per month that cancel the uncached saving
+
+
+class CandidateReleaseResult(SolverResult):
+    """Result from CandidateReleaseModel: a candidate policy against the baseline on separate trials."""
+    baseline_cost_per_accepted: Quantity
+    candidate_cost_per_accepted: Quantity
+    break_even_attempt_cost: Quantity    # candidate attempt cost that matches the baseline's C_eff
+    cost_rise: float                     # candidate / baseline C_eff - 1
+    gap: float                           # candidate - baseline acceptance
+    gap_se: float                        # unpooled, trials treated as independent
+    gap_z: float                         # gap / gap_se
+    recall_error_ratio: float            # candidate / baseline PRE on renamed schemas
+
+
+__all__ += [
+    "TargetMaskResult", "PerInvocationSerializationResult", "TrajectoryRoleShareResult",
+    "LossNormalizationResult", "SequencePackingResult", "PreferencePairResult",
+    "ContextDistillationResult", "CandidateReleaseResult",
+]
+
+
+# --- Supervisory intervention: takeover deadlines, blends, authentication (added 2026-10-20) ---
+
+class TakeoverBudgetResult(SolverResult):
+    """Result from TakeoverBudgetModel: a takeover request priced against the finished stopping budget."""
+    speed: Quantity                          # speed at the request
+    takeover: Quantity                       # T_Sigma: human response plus console transport
+    dispatch_to_admission: Quantity          # allocation charged in the complete budget (zero if unstated)
+    machine: StoppingBudgetResult            # the machine alone, partial budget (pre-brake delay only)
+    machine_with_dispatch: StoppingBudgetResult   # the machine alone, dispatch-to-admission charged
+    with_takeover: StoppingBudgetResult      # the takeover waited out before braking, partial budget
+    with_takeover_and_dispatch: StoppingBudgetResult  # the same with dispatch to admission: the complete budget
+    deadline: Quantity                       # T_latest: the longest wait the partial budget allows
+    deadline_after_admission: Quantity       # T_latest less the dispatch-to-admission allocation
+    takeover_travel: Quantity                # v T_Sigma
+    admission_travel: Quantity               # v Delta_da
+    time_left: Quantity                      # deadline - takeover (negative: the takeover does not fit)
+    time_left_after_admission: Quantity      # the same after the allocation
+    spare_after_takeover: Quantity           # partial spare - takeover travel
+    spare_after_admission: Quantity          # less the dispatch-to-admission travel
+    takeover_over_spare: float               # takeover travel / partial spare
+    takeover_over_spare_after_admission: float  # takeover travel / complete spare
+    lease_extension: Optional[Quantity] = None         # manual lease - chunk lease, once the operator holds the channel
+    lease_extension_travel: Optional[Quantity] = None  # v x lease extension
+    spare_after_lease: Optional[Quantity] = None       # spare after admission, less the lease extension travel
+    configured_timeout: Optional[Quantity] = None      # protocol ceiling on the handover timer
+    timeout: Optional[Quantity] = None                 # max(0, min(configured, deadline))
+    timeout_ticks: Optional[int] = None                # whole permission ticks inside the timeout
+    timeout_after_admission: Optional[Quantity] = None  # max(0, min(configured, deadline after admission))
+    timeout_ticks_after_admission: Optional[int] = None
+
+
+class TakeoverLadderResult(SolverResult):
+    """Result from TakeoverCeilingLadderScenario: one takeover budget per sourced human response."""
+    transport: Quantity                      # console term added to every human response
+    human: Dict[str, Quantity]               # key -> human response
+    rows: Dict[str, TakeoverBudgetResult]    # key -> budget with T_Sigma = human + transport
+
+
+class BrakingBlendResult(SolverResult):
+    """Result from BrakingBlendModel: a bumpless transfer from cruise into braking, and an arm blend."""
+    speed: Quantity
+    deceleration: Quantity                   # the blended step, cruise to braking
+    jerk: Quantity                           # the resident stop's jerk bound
+    tick: Quantity
+    window: Quantity                         # 1.875 a / j
+    window_ticks: int                        # the window rounded up to whole permission ticks
+    window_budget: Quantity                  # window_ticks x tick
+    step_jerk: Quantity                      # a / tick: the same change taken in one tick
+    ramp_time: Quantity                      # a / j: the resident stop's linear jerk ramp
+    exit_speed: Quantity                     # v0 - a T / 2
+    blend_travel: Quantity                   # v0 T - a T^2 / 7
+    after_travel: Quantity                   # v_exit^2 / (2 a)
+    blended_stop: Quantity                   # blend travel + after travel
+    step_stop: Quantity                      # v0^2 / (2 a): an ideal step to braking
+    scurve_travel: Quantity                  # the resident jerk-limited stop
+    penalty_over_step: Quantity              # blended stop - step stop
+    excess_over_scurve: Quantity             # blended stop - resident stop
+    reserve_use: Quantity                    # largest growth of travel + resident stop over the blend's ticks
+    torque_change: Optional[Quantity] = None
+    torque_rate_limit: Optional[Quantity] = None
+    arm_window: Optional[Quantity] = None    # 1.875 |Delta tau| / torque-rate ceiling
+    arm_window_ticks: Optional[int] = None
+    arm_window_budget: Optional[Quantity] = None
+
+
+class CommandAuthenticationResult(SolverResult):
+    """Result from CommandAuthenticationModel: authentication as pre-brake delay, and a verifier flood."""
+    verify_time: Quantity                    # signature verification on the permission processor
+    mac_time: Quantity                       # MAC over one frame
+    verify_travel: Quantity                  # v x verify time
+    spare_after_verify: Quantity
+    mac_travel: Quantity
+    freshness_window: Quantity
+    freshness_travel: Quantity               # v x freshness window: a replay at the edge
+    spare_after_freshness: Quantity
+    deadline: Quantity                       # the verification deadline (T_latest)
+    deadline_after_admission: Quantity
+    forged_to_miss: int                      # fewest forged signed packets queued ahead that push a veto past the deadline
+    veto_verified_at: Quantity               # (n + 1) x verify time
+    forged_rate: int                         # whole packets per second the flood must sustain (rounded up)
+    forged_mac_to_miss: int                  # the same count for MAC-only frames
+    forged_to_miss_after_admission: int      # the count against the deadline after admission
+
+
+__all__ += [
+    "TakeoverBudgetResult", "TakeoverLadderResult", "BrakingBlendResult", "CommandAuthenticationResult",
+]
+# --- Fault-injection oracles and campaign statistics (added 2026-10-20) -----
+
+class OnsetTrialResult(SolverResult):
+    """Result from OnsetTrialModel: one stopping trace scored against a precommitted onset and travel oracle."""
+    onset_bound: Quantity                # oracle: latest powered-deceleration onset after the reference event
+    onset: Quantity                      # measured onset after the same event
+    onset_margin: Quantity               # onset_bound - onset (negative fails)
+    extra_travel: Quantity               # speed * (onset - onset_bound): travel the late onset adds
+    travel: Quantity                     # speed * onset + resident stop
+    travel_bound: Quantity               # oracle: onset-bound travel + resident stop + tracking inset
+    distance_margin: Quantity            # travel_bound - travel (negative fails)
+    onset_margin_normalized: float       # onset_margin / onset_bound
+    distance_margin_normalized: float    # distance_margin / travel_bound
+    rest_time: Quantity                  # onset + stop time
+    rest_time_bound: Quantity            # onset_bound + stop time
+    passes: bool                         # both margins non-negative
+
+
+class RailHoldUpResult(SolverResult):
+    """Result from RailHoldUpModel: a backed rail's hold-up against flag-to-brakes-set at the longest stop."""
+    flag_path: Quantity                  # flag to powered-deceleration onset
+    speed: Quantity                      # entry speed of the longest admitted stop
+    velocity_term: Quantity              # v / a
+    jerk_term: Quantity                  # a / j
+    stop_time: Quantity                  # S-curve stop time, v / a + a / j
+    engage: Quantity                     # holding-brake engagement after rest
+    flag_to_set: Quantity                # flag path + stop time + engagement
+    holdup: Quantity
+    margin: Quantity                     # holdup - flag_to_set
+
+
+class ExponentialRareEventResult(SolverResult):
+    """Result from ExponentialRareEventModel: estimating one rare exponential tail by plain and weighted sampling."""
+    threshold: Quantity
+    failure_probability: float           # exp(-threshold / mean)
+    monte_carlo_runs: float              # (1 - p) / (p r^2)
+    zero_failure_runs: int               # clean runs that bound p at the stated confidence
+    levels: list                         # cross-entropy levels (Quantity each)
+    n_levels: int
+    proposal_mean: Quantity              # final cross-entropy proposal mean
+    proposal_failure_share: float        # share of proposal draws past the threshold
+    relative_variance: float             # per-draw relative variance of the weighted estimate
+    importance_runs: float               # relative_variance / r^2
+    ess_per_draw: float
+    effective_sample_size: float         # importance_runs * ess_per_draw
+    optimal_proposal_mean: Quantity
+    proposal_penalty: float              # relative variance over the optimal proposal's, less one
+    speedup: float                       # monte_carlo_runs / importance_runs
+
+
+class DiagnosticCoverageResult(SolverResult):
+    """Result from DiagnosticCoverageModel: the coverage a residual-rate target needs and the zero-miss injections that show it."""
+    raw_rate: float                      # FIT, sum of the strata
+    coverage: float                      # 1 - target / raw_rate
+    injections_exact: float              # ln(1 - C) / ln(coverage)
+    injections: int                      # the ceiling of injections_exact
+    rule_of_three: float                 # 3 / (1 - coverage)
+    shares: dict                         # stratum -> share of the raw rate
+    allocation: dict                     # stratum -> injections in proportion to its rate
+
+
+__all__ += ["OnsetTrialResult", "RailHoldUpResult", "ExponentialRareEventResult", "DiagnosticCoverageResult"]
+# ── Reinforcement learning from verifiable rewards (added 2026-10-20) ──
+
+class RewardCompositionResult(SolverResult):
+    """Result from RewardCompositionModel: true and false accepts among one update's rollouts."""
+    rollouts: int
+    true_accepts: float                  # expected passing rollouts the verifier accepts
+    false_accepts: float                 # expected failing rollouts the verifier accepts
+    accepts: float
+    false_share: float                   # false accepts / all accepts
+
+
+class CenteredRewardResult(SolverResult):
+    """Result from CenteredRewardModel: binary rewards centered on a fixed baseline."""
+    passing_score: float                 # passing reward - baseline
+    failing_score: float                 # failing reward - baseline
+
+
+class RewardShapingResult(SolverResult):
+    """Result from RewardShapingModel: R = c + alpha f - lambda len, and whether passes stay above failures."""
+    weight_sum: float                    # alpha + lambda
+    lowest_pass: float                   # 1 - lambda, a pass at zero format and the length cap
+    highest_failure: float               # alpha, a failure with perfect format and zero length
+    order_holds: bool                    # alpha + lambda < 1
+    example_pass: float                  # the stated pass's score
+    example_failure: float               # the stated failure's score
+
+
+class ForkValueResult(SolverResult):
+    """Result from ForkValueModel: a turn valued by forking continuations before and after it."""
+    value_before: float
+    value_after: float
+    difference: float
+    se_bound: float                      # 1 / (2 sqrt k), the largest standard error of one fork's mean
+    difference_se_bound: float           # sqrt 2 times it, for two independent means
+    resolution_threshold: float          # two difference bounds
+    resolved: bool
+
+
+class ContinuationForkCostResult(SolverResult):
+    """Result from ContinuationForkCostModel: tokens generated when continuations are forked."""
+    base_tokens: int
+    branches: int
+    total_tokens: int
+    multiple: float                      # total / base
+
+
+class GroupCoefficientsResult(SolverResult):
+    """Result from GroupCoefficientsModel: group-relative (GRPO) coefficients of one group."""
+    group: int
+    mean: float
+    std: float
+    coefficients: List[float]
+    coefficient_sum: float
+
+
+class LengthNormalizationResult(SolverResult):
+    """Result from LengthNormalizationModel: per-token push of two rollouts sharing one coefficient."""
+    per_token_ratio: float               # short rollout's per-token push over the long one's
+
+
+class RolloutStepBudgetResult(SolverResult):
+    """Result from RolloutStepBudgetModel: one update's rollout bill and the cost of reward contrast."""
+    rollouts: int
+    rollout_tokens: int
+    step_tokens: int
+    contrast: float                      # P(at least one pass and one failure in a group)
+    silent_share: float                  # groups whose rewards all tie
+    rollouts_per_informative_group: float
+
+
+class RepeatedVerificationResult(SolverResult):
+    """Result from RepeatedVerificationModel: an all-pass rule over repeated trials of one candidate."""
+    group_false_pass: float              # one trial each: P(at least one incorrect candidate passes)
+    incorrect_accepted: float            # p_bad^n
+    correct_rejected: float              # 1 - p_good^n
+    expected_trials_incorrect: float     # stop at the first failed trial
+    expected_trials_correct: float
+
+
+class RatioClipResult(SolverResult):
+    """Result from RatioClipModel: how far one update may raise a token's probability."""
+    ceiling: float                       # (1 + epsilon) p
+    rise: float                          # epsilon p
+    binds: bool                          # the ceiling is below 1
+
+
+class RolloutSlotCycleResult(SolverResult):
+    """Result from RolloutSlotCycleModel: one sandbox slot's episode cycle under two reset times."""
+    work: Quantity                       # decisions, tools, and assessment per episode
+    cold_cycle: Quantity
+    snapshot_cycle: Quantity
+    cold_work_share: float
+    snapshot_work_share: float
+    cold_episodes_per_hour: float        # across all slots
+    snapshot_episodes_per_hour: float
+    capacity_ratio: float                # snapshot over cold capacity
+    reset_ratio: float                   # cold reset over snapshot reset
+
+
+class GroupBarrierResult(SolverResult):
+    """Result from GroupBarrierModel: a synchronous group that waits for its slowest member."""
+    group: int
+    fastest: Quantity
+    barrier: Quantity                    # the slowest member's latency
+    mean: Quantity
+    idle_share: float                    # 1 - mean / barrier, of the slots reserved to the barrier
+
+
+class VerifierPoolResult(SolverResult):
+    """Result from VerifierPoolModel: verification workers by Little's law."""
+    arrival_rate: Quantity               # trajectories per second
+    one_trial_busy: float                # workers busy with a single trial each
+    busy: float                          # workers busy with every trial
+    slots: int                           # provisioned at the target utilization
+    utilization: float
+
+
+__all__ += [
+    "RewardCompositionResult", "CenteredRewardResult", "RewardShapingResult", "ForkValueResult",
+    "ContinuationForkCostResult", "GroupCoefficientsResult", "LengthNormalizationResult",
+    "RolloutStepBudgetResult", "RepeatedVerificationResult", "RatioClipResult",
+    "RolloutSlotCycleResult", "GroupBarrierResult", "VerifierPoolResult",
+]
+
+
+# --- Responsible physical AI: per-group detection shortfall, one assistant's queue (added 2026-10-20) ---
+
+class DetectionShortfallRow(SolverResult):
+    """One group's detection gap, priced in distance, impact speed, and impact energy."""
+    per_frame_detection: float
+    frames: int                          # consecutive frames before detection counts
+    extra_frames: int                    # frames beyond the reference group's
+    extra_time: Quantity                 # extra frames x frame period
+    distance_lost: Quantity              # v x frame period x extra frames
+    impact_speed: Quantity               # sqrt(2 a distance_lost), while distance_lost < braking travel
+    impact_energy: Quantity              # m a distance_lost = 1/2 m v_impact^2
+
+
+class DetectionShortfallResult(SolverResult):
+    """Result from DetectionShortfallModel: a stop sized for the reference group, met by groups seen less often."""
+    frame_period: Quantity
+    reference_frames: int
+    braking_travel: Quantity             # v^2 / (2 a)
+    reference_brake_onset: Optional[Quantity] = None   # v (N_ref T_frame + delay): travel before the reference stop brakes
+    reference_stop: Optional[Quantity] = None          # where the reference stop ends: the person's position
+    rows: List[DetectionShortfallRow]
+    within_braking: bool                 # every distance lost is shorter than the braking travel
+
+
+class SupervisorQueueResult(SolverResult):
+    """Result from SupervisorQueueModel: one remote assistant serving ``machines`` as an M/M/1 queue."""
+    machines: int
+    arrival_rate: Quantity               # fleet help requests per hour
+    utilization: float                   # rho = lambda s
+    mean_wait: Quantity                  # W_q = rho s / (1 - rho)
+    p99_wait: Quantity                   # 99th-percentile queueing wait
+    busy_per_hour: Quantity              # assistant minutes per operating hour
+
+
+__all__ += ["DetectionShortfallRow", "DetectionShortfallResult", "SupervisorQueueResult"]
+
+
+# --- Agent cost accounting (added 2026-10-20) ---------------------------------
+# Cohort cost per accepted task and the levers on it: token price against
+# acceptance, prefix-cache bills and compaction payback, retry policies, the
+# serial critical path, model cascades, admission against a token quota, queue
+# price, owning capacity, conserved budgets, architectures with human
+# fallback, adaptation payback, and per-workload levers. Dollars are floats
+# unless a field is a Quantity.
+
+class PriceDeclineResult(SolverResult):
+    """Result from PriceDeclineModel: fitted yearly decline of the lowest price at each fixed capability."""
+    series_count: int
+    series_rates: Dict[str, float]   # "benchmark / threshold model" -> factor per year
+    rate_low: float
+    rate_median: float
+    rate_high: float
+    last_date: str
+
+
+class CostVsScoreResult(SolverResult):
+    """Result from CostVsScoreModel: how loosely per-trial cost tracks score."""
+    configurations: int
+    cost_ratio: float                # top configuration over the runner-up, per trial
+    score_gap: float                 # points between their mean scores
+    cost_low: float                  # dollars per trial
+    cost_high: float
+    hours_low: float
+    hours_high: float
+    median_spread: float             # median best-minus-worst trial score, as a fraction
+
+
+class CohortAttemptCostResult(SolverResult):
+    """Result from CohortAttemptCostModel: one configuration's cohort, one attempt per task (dollars)."""
+    model_cost: float                # per attempt
+    environment_cost: float          # per attempt
+    attempt_cost: float
+    cohort_cost: float
+    rejected: int
+    cost_per_accepted: float
+    rejected_per_accepted: float
+    cohort_cost_with_triage: float
+    cost_per_accepted_with_triage: float
+
+
+class TokenPriceComparisonResult(SolverResult):
+    """Result from comparing two cohort configurations under one acceptance contract."""
+    baseline: CohortAttemptCostResult
+    alternative: CohortAttemptCostResult
+    cost_ratio: float                # alternative over baseline, per accepted task
+    cost_ratio_with_triage: float
+    model_cut: float                 # fraction of the token charge removed per attempt
+    attempt_cut: float               # fraction of the all-in attempt cost removed
+    acceptance_cut: float            # fraction of accepted tasks lost: the attempt cut that would tie
+
+
+class PrefixCacheBillResult(SolverResult):
+    """Result from PrefixCacheBillModel: an append-only trajectory billed with and without prefix reuse."""
+    sent_tokens: int                 # logical input over the trajectory
+    fresh_tokens: int                # billed at the input rate under ideal reuse
+    input_uncached: Quantity         # USD
+    input_cached: Quantity
+    output_cost: Quantity
+    total_uncached: Quantity
+    total_cached: Quantity
+    cache_ratio: float               # total_uncached / total_cached
+    cached_reread_cost: Quantity     # cached re-reads of earlier history
+    reread_share: float              # their share of the cached bill
+    miss_cost: Quantity              # added when miss_fraction of the eligible prefix misses
+    miss_share: float                # miss_cost / total_cached
+    per_turn_uncached: List[float]   # dollars per call
+    per_turn_cached: List[float]
+
+
+class CompactionPaybackResult(SolverResult):
+    """Result from CompactionPaybackModel: whether one compaction repays its summary and cache miss."""
+    context_at_compaction: int       # tokens before the compacting call
+    remaining_calls: int             # calls from the compacting call on
+    summary_cost: Quantity           # USD: the compacting call kept plus the summary's output
+    upfront: Quantity                # incremental cost of the first compacted call
+    per_call_saving: Quantity        # on every later call
+    breakeven_calls: int             # first call count at which compaction has paid
+    keep_cost: Quantity              # input bill of the remaining calls without compaction
+    compact_cost: Quantity           # with compaction, before the summary
+    compact_total: Quantity
+    gap_before: Quantity             # still owed one call before the crossing
+    saving_at: Quantity              # ahead at the crossing
+    net_by_calls: Dict[int, float]   # compact minus keep, dollars, by calls remaining
+
+
+class RetryPolicyResult(SolverResult):
+    """Result from RetryPolicyModel: sequential early stop, a paid batch, and one stronger attempt."""
+    coverage: float                  # 1 - (1 - p)^k
+    expected_attempts: float         # sum of (1 - p)^j, j < k
+    sequential_cost: Quantity        # USD per submitted task
+    batch_cost: Quantity
+    sequential_per_accepted: Quantity
+    batch_per_accepted: Quantity
+    strong_per_accepted: Quantity
+    batch_premium: float             # k / expected attempts
+
+
+class SerialEpisodeResult(SolverResult):
+    """Result from SerialEpisodeModel: one serial episode and what a faster model buys (Amdahl)."""
+    model_time: Quantity
+    tests_time: Quantity
+    lifecycle_time: Quantity
+    runtime_time: Quantity
+    other_time: Quantity
+    total_time: Quantity
+    model_fraction: float
+    changed_time: Quantity           # with the model intervals sped up
+    saving: Quantity
+    speedup: float
+    limiting_speedup: float          # instant model calls: 1 / (1 - f)
+    tests_half_saving: Quantity      # alternative: halve the required tests
+
+
+class SpeculativeEpisodeResult(SolverResult):
+    """Result from SpeculativeEpisodeModel: a decode-stream speedup composed with a serial episode."""
+    break_even_accepted: float       # gamma r
+    speedup_high: float
+    speedup_low: float
+    episode_time_high: Quantity
+    episode_time_low: Quantity
+    episode_speedup_high: float
+    episode_speedup_bound: float     # 1 / (1 - f)
+
+
+class ModelCascadeResult(SolverResult):
+    """Result from ModelCascadeModel: a tiered cascade under one gate, against the top tier alone (dollars)."""
+    reached: List[int]
+    conditional_acceptance: List[float]
+    reach_shares: List[float]
+    accepted: int
+    unresolved: int
+    spend: float
+    per_initiated: float
+    per_accepted: float
+    direct_spend: float
+    direct_per_accepted: float
+    mean_time: float                 # seconds
+    all_tiers_time: float
+    direct_time: float
+    direct_ratio: float
+    lower_tier_toll: float           # paid by every task reaching the top tier
+    saving_per_accepted: float
+    # Optional: a harm charged per false accept at the first tier.
+    false_accept_breakeven: Optional[float] = None   # first-tier false-accept rate that erases the saving
+    harm_cost: Optional[float] = None                # at the stated false-accept rate
+    per_accepted_with_harm: Optional[float] = None
+
+
+class TrajectoryAdmissionResult(SolverResult):
+    """Result from TrajectoryAdmissionModel: admitted trajectories against a token quota (mean demand)."""
+    concurrent: float                # Little's law, trajectories present
+    call_rate: Quantity              # model calls per unit time
+    tokens_per_trajectory: int
+    demand: Quantity                 # quota-counted tokens per unit time
+    quota_share: float
+    arrival_ceiling: Quantity        # admissions the quota allows
+    acceptance_margin: float         # relative acceptance drop that fills the quota at fixed goodput
+    quota_share_after_drop: Optional[float] = None
+
+
+class KingmanQueueResult(SolverResult):
+    """Result from KingmanQueueModel: mean wait at two utilizations and its holding price."""
+    variability: float               # (c_a^2 + c_s^2) / 2
+    wait_low: Quantity
+    wait_high: Quantity
+    holding_low: float               # dollars per call
+    holding_high: float
+    wait_ratio: float
+    throughput_gain: float           # rho_high / rho_low - 1
+    unit_wait_utilization: float     # utilization at which the wait equals one service time
+
+
+class DedicatedBreakEvenResult(SolverResult):
+    """Result from DedicatedBreakEvenModel: renting tokens against owning capacity (dollars)."""
+    weighted_input_price: float      # per million input tokens
+    api_price: float                 # per million output tokens, input included
+    reference_hour_tokens: float
+    delivered_hour_tokens: float
+    api_hour: float
+    dedicated_hour: float
+    crossing: float                  # load fraction at which the costs tie
+    saving_hour: float
+    api_price_no_cache: float
+    crossing_no_cache: float
+
+
+class ConservedBudgetResult(SolverResult):
+    """Result from ConservedBudgetModel: a root budget across two children, a stop, and a late bill.
+
+    Integer thousandths of a dollar, so conservation is exact.
+    """
+    units_per_dollar: int
+    budget: int
+    planning: int
+    allocations: Tuple[int, int]
+    settled_children: Tuple[int, int]
+    pending: int
+    late_charge: int
+    free_after_planning: int
+    reserved_delegated: int
+    free_after_delegation: int
+    refund_first: int
+    settled_after_first: int
+    reserved_after_first: int
+    free_after_first: int
+    child_free_at_stop: int          # what the stopped child may release
+    child_apparent_free: int         # what a release at local stop would return
+    child_free_settled: int          # released at settlement
+    settled_final: int
+    reserved_final: int
+    free_final: int
+    states: List[Tuple[int, int, int]]   # (settled, reserved, free) after each step
+
+
+class ArchitectureChoiceResult(SolverResult):
+    """Result from ArchitectureChoiceModel: three designs priced with and without human fallback."""
+    loop_acceptance: float
+    loop_turns: float
+    reach: List[float]               # share of tickets reaching each loop turn
+    automated: Dict[str, Quantity]   # automated spend per ticket
+    automated_per_accepted: Dict[str, Quantity]
+    combined: Dict[str, Quantity]    # automated spend plus fallback, per ticket
+    resolved: Dict[str, float]       # combined resolution
+    per_resolved: Dict[str, Quantity]
+    month_spend: Quantity            # for the loop
+    month_resolved: float
+    point_value: Quantity            # fallback avoided per ticket by one point of acceptance
+
+
+class AdaptationPaybackResult(SolverResult):
+    """Result from AdaptationPaybackModel: tasks until a one-time adaptation repays itself."""
+    base_step: Quantity
+    base_task: Quantity
+    adapted_step: Quantity
+    adapted_task: Quantity
+    investment: Quantity
+    saving_per_task: Quantity
+    breakeven_tasks: float
+    breakeven_whole: int
+    payback_months: float
+    payback_months_low: float
+    input_saving_share: float
+    evaluation_share: float
+    training_share: float
+
+
+class WorkloadLeverRow(SolverResult):
+    """One workload in WorkloadLeverResult (dollars)."""
+    model: float
+    environment: float
+    assessment: float
+    human: float
+    acceptance: float
+    attempt: float
+    cost_per_accepted: float
+    model_share: float
+    largest_term: str
+    halve_tokens: float              # fractional saving in cost per accepted task
+    halve_largest: float
+    acceptance_gain: float
+    token_threshold: float           # model share below which the acceptance gain beats halving tokens
+
+
+class WorkloadLeverResult(SolverResult):
+    """Result from WorkloadLeverModel: cost per accepted task by workload and three levers on it."""
+    rows: Dict[str, WorkloadLeverRow]
+
+
+class CoverageIndependenceResult(SolverResult):
+    """Result from CoverageIndependenceModel: measured coverage against independent trials."""
+    first: float                     # coverage at one sample
+    measured: Dict[int, float]
+    independent: Dict[int, float]    # 1 - (1 - first)^k
+
+
+class ConcurrencySweepResult(SolverResult):
+    """Result from ConcurrencySweepModel: one server swept across concurrency."""
+    points: List[Tuple[float, float, float]]   # (concurrency, tokens/s per user, tokens/s per GPU)
+    concurrency_multiple: float
+    throughput_multiple: float
+    per_user_slowdown: float
+    token_time_low: Quantity         # per-user time per output token at the lowest concurrency
+    token_time_high: Quantity
+
+
+__all__ += [
+    "PriceDeclineResult", "CostVsScoreResult", "CohortAttemptCostResult", "TokenPriceComparisonResult",
+    "PrefixCacheBillResult", "CompactionPaybackResult", "RetryPolicyResult", "SerialEpisodeResult",
+    "SpeculativeEpisodeResult", "ModelCascadeResult", "TrajectoryAdmissionResult", "KingmanQueueResult",
+    "DedicatedBreakEvenResult", "ConservedBudgetResult", "ArchitectureChoiceResult",
+    "AdaptationPaybackResult", "WorkloadLeverRow", "WorkloadLeverResult", "CoverageIndependenceResult",
+    "ConcurrencySweepResult",
 ]
