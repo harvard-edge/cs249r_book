@@ -12410,3 +12410,152 @@ class RetentionCostScenario(BaseScenario):
         from .solvers import RetentionCostModel
         return RetentionCostModel().solve(self.turns, self.envelope, self.payload, self.workspace,
                                           self.rate, self.period, self.attempt_cost)
+# --- Failure recovery (added 2026-10-20) --------------------------------------
+# What the runtime does once an effect has failed: one repair against unwind,
+# checks ahead of a pivot, a loop stopped late, retries through nested layers,
+# a capped dependency, a jittered retry cohort, a cleanup graph, a breaker
+# window, and published retry-sustained outages. Solvers in
+# engine/solvers/recovery.py.
+
+class RepairBreakEvenScenario(BaseScenario):
+    """One bounded repair attempt against compensating and rebuilding to the same endpoint."""
+    unwind_time: Quantity            # compensation
+    rebuild_time: Quantity           # rebuild to the same readiness endpoint
+    rebuild_input: int               # rebuild model tokens
+    rebuild_output: int
+    repair_input: int                # the whole isolated repair request
+    repair_output: int
+    startup_time: Quantity           # pre-output processing, not a measured time to first token
+    output_rate: Quantity            # tokens per second
+    validation_time: Quantity        # local validation, charged on success and failure
+    input_price: Quantity            # USD per token
+    output_price: Quantity
+    assumed_success: float           # a policy comparison, not a measurement
+
+    @property
+    def result(self):
+        from .solvers import RepairBreakEvenModel
+        return RepairBreakEvenModel().solve(
+            self.unwind_time, self.rebuild_time, self.rebuild_input, self.rebuild_output,
+            self.repair_input, self.repair_output, self.startup_time, self.output_rate,
+            self.validation_time, self.input_price, self.output_price, self.assumed_success)
+
+
+class IrreversibleLossScenario(BaseScenario):
+    """A workload's wrong-change risk priced with its pre-pivot check, from its agent profile."""
+    workload: Any                    # a RemediationWorkload (Agents.*)
+    catch_step: float                # catch-rate increment for the sensitivity
+
+    @property
+    def attempt_cost(self) -> Quantity:
+        w = self.workload
+        return (w.model_cost_per_attempt + w.environment_cost_per_attempt
+                + w.assessment_cost_per_attempt + w.approval_cost_per_attempt).to("USD")
+
+    @property
+    def result(self):
+        from .solvers import IrreversibleLossModel
+        w = self.workload
+        return IrreversibleLossModel().solve(
+            w.wrong_change_probability, w.wrong_change_impact, w.canary_catch_rate,
+            w.canary_recovery_fraction, self.attempt_cost, self.catch_step)
+
+
+class UndetectedLoopScenario(BaseScenario):
+    """An append-only loop that resends its history, run to a turn ceiling or stopped early."""
+    first_input: int                 # tokens
+    output_per_turn: int
+    observation_per_turn: int        # appended error observation
+    turn_time: Quantity              # complete serial turn
+    ceiling: int                     # turns, counted from the loop's start
+    stop_after: int                  # intervention after this completed turn
+    context_window: int              # combined input and output capacity, tokens
+    input_price: Quantity            # USD per token
+    output_price: Quantity
+
+    @property
+    def result(self):
+        from .solvers import UndetectedLoopModel
+        return UndetectedLoopModel().solve(
+            self.first_input, self.output_per_turn, self.observation_per_turn, self.turn_time,
+            self.ceiling, self.stop_after, self.context_window, self.input_price, self.output_price)
+
+
+class RetryAmplificationScenario(BaseScenario):
+    """Nested retry layers, each with its own allowance, under one failing logical operation."""
+    layer_names: List[str]           # from the caller down to the dependency
+    attempts_per_layer: int          # one try plus retries
+
+    @property
+    def result(self):
+        from .solvers import RetryAmplificationModel
+        return RetryAmplificationModel().solve(self.attempts_per_layer, len(self.layer_names))
+
+
+class BulkheadAdmissionScenario(BaseScenario):
+    """One burst of blocking calls to a stalled dependency, uncapped and with a bulkhead."""
+    arrivals: int                    # blocking calls in the burst
+    workers: int                     # shared pool
+    worker_cap: int                  # occupied workers the dependency may hold
+    queue_cap: int                   # waiting requests, which hold no worker
+
+    @property
+    def result(self):
+        from .solvers import BulkheadAdmissionModel
+        return BulkheadAdmissionModel().solve(self.arrivals, self.workers, self.worker_cap, self.queue_cap)
+
+
+class RetryJitterScenario(BaseScenario):
+    """A cohort of eligible retries released together, synchronized or with full jitter."""
+    retries: int
+    burst_window: Quantity           # stipulated window if all arrive together
+    jitter_span: Quantity            # each retry's arrival drawn uniformly over this span
+
+    @property
+    def result(self):
+        from .solvers import RetryJitterModel
+        return RetryJitterModel().solve(self.retries, self.burst_window, self.jitter_span)
+
+
+class CleanupGraphScenario(BaseScenario):
+    """Registered cleanup operations with durations and dependencies, one outcome unresolved."""
+    durations: Dict[str, Quantity]   # time once admitted
+    depends_on: Dict[str, List[str]]
+    unresolved: str                  # the operation whose reply is lost
+
+    @property
+    def result(self):
+        from .solvers import CleanupGraphModel
+        return CleanupGraphModel().solve(self.durations, self.depends_on, self.unresolved)
+
+
+class BreakerWindowScenario(BaseScenario):
+    """One circuit-breaker window of classified outcomes and its trip rule."""
+    outcomes: Dict[str, int]         # outcome class -> count in the window
+    failure_classes: List[str]       # classes that show the dependency cannot do work
+    success_class: str
+    threshold: float                 # trip at failure fraction >= threshold
+    min_outcomes: int
+
+    @property
+    def result(self):
+        from .solvers import BreakerWindowModel
+        return BreakerWindowModel().solve(self.outcomes, self.failure_classes, self.success_class,
+                                          self.threshold, self.min_outcomes)
+
+
+class RetrySustainedOutagesScenario(BaseScenario):
+    """Published incidents (``Literature.Series``) counted by whether retries sustained them."""
+    series_name: str
+    threshold_hours: float           # count retry-sustained outages longer than this
+
+    @property
+    def rows(self):
+        from ..literature.registry import Literature
+        return getattr(Literature, self.series_name).entries
+
+    @property
+    def result(self):
+        from .solvers import RetrySustainedOutagesModel
+        return RetrySustainedOutagesModel().solve(self.rows, "incident", "retry_sustained",
+                                                  "duration_h", self.threshold_hours)

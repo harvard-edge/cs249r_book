@@ -1317,3 +1317,21 @@ AttentionSinkPerplexity = _Series(
     ),
     "Sliding-window perplexity with and without the first four tokens kept (PG19).",
 )
+
+MetastableFailures = _Series(
+    "metastable_failures_in_the_wild",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Huang et al. (2022), Metastable Failures in the Wild, OSDI 2022, Table 1",
+        url="https://www.usenix.org/conference/osdi22/presentation/huang-lexiang",
+        verified="2026-10-20",
+        notes=(
+            "One row per incident of Table 1 (21 rows): date and duration in hours as printed "
+            "(empty where the table prints NA), and whether 'retry' is listed among its sustaining "
+            "effects (12 rows). The text names 11 of them (GGL2, GGL3, AWS1, AWS2, AWS3, AZR2, AZR4, "
+            "IBM1, SPF1, SPF2, CAS2) and omits AWS4, whose row lists retry; it describes the share as "
+            "'more than 50% of the studied incidents'. Read from the paper PDF."
+        ),
+    ),
+    "Metastable failures from public sources: duration and whether retries sustained them.",
+)

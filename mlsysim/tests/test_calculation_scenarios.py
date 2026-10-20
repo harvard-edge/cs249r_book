@@ -3696,3 +3696,44 @@ def test_durable_execution_flat_optimum():
     y = Scenarios.ReexecutedWorkCheckpointInterval
     assert y.miss_factors == [2, 10]
     assert y.miss_penalty(2) == approx(0.25) and y.miss_penalty(10) == approx(4.05)
+def test_failure_recovery_repair_and_pivot():
+    r = Scenarios.TestConfigRepairVsRebuild.result
+    assert r.fallback_time.to("s").magnitude == approx(86.6) and r.fallback_cost.to("USD").magnitude == approx(0.162)
+    assert r.repair_time.to("s").magnitude == approx(4.09) and r.repair_cost.to("USD").magnitude == approx(0.00987)
+    assert r.break_even_time == approx(4.09 / 86.6) and r.break_even_cost == approx(0.00987 / 0.162)
+    assert r.expected_time.to("s").magnitude == approx(47.39) and r.time_saved_fraction == approx(0.452771, rel=1e-5)
+    assert r.one_in == 16
+    p = Scenarios.RemediationCanaryPivotLoss.result
+    assert p.loss_without_check.to("USD").magnitude == approx(480) and p.loss_with_check.to("USD").magnitude == approx(134.4)
+    assert p.loss_caught.to("USD").magnitude == approx(38.4) and p.loss_missed.to("USD").magnitude == approx(96)
+    assert p.reduction == approx(480 / 134.4) and p.missed_share == approx(96 / 134.4)
+    assert p.loss_per_catch_step.to("USD").magnitude == approx(43.2)
+    assert p.loss_with_check_raised.to("USD").magnitude == approx(91.2)
+    assert p.attempt_cost.to("USD").magnitude == approx(20.45) and p.loss_vs_attempt == approx(134.4 / 20.45)
+
+
+def test_failure_recovery_loop_and_containment():
+    from mlsysim.physics import calc_cleanup_critical_path, calc_layered_retry_attempts
+    lp = Scenarios.RepairLoopToTurnCeiling.result
+    assert (lp.ceiling_input, lp.stop_input, lp.peak_request) == (1_397_500, 10_600, 55_200)
+    assert lp.ceiling_cost.to("USD").magnitude == approx(4.4175) and lp.stop_cost.to("USD").magnitude == approx(0.0498)
+    assert lp.cost_ratio == approx(88.7048, rel=1e-5) and lp.fits_context
+    assert lp.input_by_turn[50] == lp.ceiling_input and lp.input_by_turn[4] == lp.stop_input
+    assert lp.half_ratio == approx(1_397_500 / 355_000)
+    t = Scenarios.ThreeLayerRetryAmplification.result
+    assert t.by_layer == [1, 3, 9, 27] and t.coordinated == 3 and calc_layered_retry_attempts(2, 3) == 8
+    b = Scenarios.BlockingCallBulkhead.result
+    assert (b.uncapped_free, b.queued, b.rejected, b.protected_workers) == (44, 32, 160, 236)
+    j = Scenarios.RetryCohortJitter.result
+    assert j.synchronized_rate.to("1/s").magnitude == approx(64_000) and j.jittered_mean_rate.to("1/s").magnitude == approx(64)
+    assert j.spread_ratio == approx(1000) and j.expected_in_window == approx(0.128)
+    c = Scenarios.TestEnvironmentCleanupGraph.result
+    assert c.stack_time.to("s").magnitude == 105 and c.graph_time.to("s").magnitude == 75
+    assert c.blocked == ["release", "revoke"] and c.settleable == ["preserve", "scratch"]
+    assert calc_cleanup_critical_path({"a": 1, "b": 2, "c": 3}, {"c": ["a", "b"]}) == 5
+    w = Scenarios.TestServiceBreakerWindow.result
+    assert (w.outcomes, w.classified_failures, w.naive_failures) == (50, 20, 35)
+    assert not w.classified_trips and w.naive_trips
+    m = Scenarios.RetrySustainedMetastableOutages.result
+    assert (m.incidents, m.retry_sustained, m.over_hours) == (21, 12, 3) and m.without_duration == ["SPF1"]
+    assert m.with_duration[0] == ("IBM1", 73.53)

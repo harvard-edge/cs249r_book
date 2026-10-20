@@ -456,9 +456,15 @@ from .tool_calls import (
     calc_pending_polls,
     calc_selection_break_even,
     calc_integration_adapters,
+    calc_layered_retry_attempts,
+    calc_jitter_expected_arrivals,
+    calc_bulkhead_admission,
 )
 
 __all__ += [
+    "calc_layered_retry_attempts",
+    "calc_jitter_expected_arrivals",
+    "calc_bulkhead_admission",
     "calc_timeout_probability",
     "calc_blind_retry_duplicate_probability",
     "calc_pending_polls",
@@ -643,6 +649,21 @@ from .agents import calc_injection_exposure, calc_injection_read_budget
 __all__ += ["calc_injection_exposure", "calc_injection_read_budget"]
 # --- The agent harness: admission, fair share, and the budget meter (added 2026-10-20) ---
 from .agents import calc_bounded_liability, calc_drr_calls_per_round, calc_used_fraction
+
+# --- Failure recovery (added 2026-10-20) ---
+from .agents import (
+    calc_repair_break_even,
+    calc_repair_first_expected_cost,
+    calc_expected_irreversible_loss,
+    calc_cleanup_critical_path,
+)
+
+__all__ += [
+    "calc_repair_break_even",
+    "calc_repair_first_expected_cost",
+    "calc_expected_irreversible_loss",
+    "calc_cleanup_critical_path",
+]
 
 __all__ += [
     "calc_bounded_liability",

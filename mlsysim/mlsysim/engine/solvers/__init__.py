@@ -440,3 +440,27 @@ __all__ += [
 from .durability import GroupCommitModel, SnapshotVolumeModel, CheckpointTraceModel, RetentionCostModel
 
 __all__ += ["GroupCommitModel", "SnapshotVolumeModel", "CheckpointTraceModel", "RetentionCostModel"]
+# --- Failure recovery (added 2026-10-20) ---
+from .recovery import (
+    RepairBreakEvenModel,
+    IrreversibleLossModel,
+    UndetectedLoopModel,
+    RetryAmplificationModel,
+    BulkheadAdmissionModel,
+    RetryJitterModel,
+    CleanupGraphModel,
+    BreakerWindowModel,
+    RetrySustainedOutagesModel,
+)
+
+__all__ += [
+    "RepairBreakEvenModel",
+    "IrreversibleLossModel",
+    "UndetectedLoopModel",
+    "RetryAmplificationModel",
+    "BulkheadAdmissionModel",
+    "RetryJitterModel",
+    "CleanupGraphModel",
+    "BreakerWindowModel",
+    "RetrySustainedOutagesModel",
+]

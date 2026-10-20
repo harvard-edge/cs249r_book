@@ -62,3 +62,45 @@ def calc_integration_adapters(hosts: int, services: int):
     needs one client per host and one server per service (N + M).
     """
     return hosts * services, hosts + services
+
+
+# --- Containing shared failures: retries, jitter, bulkheads (added 2026-10-20) ---
+
+
+def calc_layered_retry_attempts(attempts_per_layer: int, layers: int) -> int:
+    """
+    Requests one failing logical operation sends when each layer retries on its own allowance.
+
+        N = a^L
+
+    Every attempt of a layer drives a full set of attempts in the layer below,
+    so independent allowances multiply; one owner with the same allowance sends ``a``.
+    """
+    return attempts_per_layer ** layers
+
+
+def calc_jitter_expected_arrivals(retries: float, window, jitter_span) -> float:
+    """
+    Expected retries inside a fixed window when each draws its arrival uniformly over the jitter span.
+
+        E[n] = N w / J
+
+    An expectation only: the realized count in any one window can reach ``N``.
+    """
+    ratio = retries * window / jitter_span
+    return float(ratio.to("").magnitude) if hasattr(ratio, "to") else float(ratio)
+
+
+def calc_bulkhead_admission(arrivals: int, workers: int, worker_cap: int, queue_cap: int):
+    """
+    One burst of blocking calls against a capped dependency, before any completes.
+
+    Up to ``worker_cap`` calls occupy workers, up to ``queue_cap`` wait without
+    occupying one, and the rest are rejected at admission. Returns
+    ``(occupied, queued, rejected, free_workers)``; without a cap, pass
+    ``worker_cap = workers`` and ``queue_cap = 0``.
+    """
+    occupied = min(arrivals, worker_cap, workers)
+    queued = min(arrivals - occupied, queue_cap)
+    rejected = arrivals - occupied - queued
+    return occupied, queued, rejected, workers - occupied
