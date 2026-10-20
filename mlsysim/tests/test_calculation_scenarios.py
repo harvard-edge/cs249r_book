@@ -5769,3 +5769,15 @@ def test_frontier_training_cost_trend():
     t = Scenarios.FrontierTrainingCostTrend
     assert 2.5 < t.growth_per_year < 3.5
     assert t.priciest["model"] == "Grok 4" and t.priciest["training_cost_2023usd"] > 1e8
+
+
+def test_course_overview_bloom_allocation_and_cluster_growth():
+    """BLOOM-176B as launched (BigScience tr11 README and Slurm script) and the log-linear
+    growth of landmark training-run accelerator counts (added 2026-10-20)."""
+    b = Scenarios.BloomTrainingAllocation
+    assert (b.accelerators_used, b.accelerators_allocated, b.reserve_accelerators, b.reserve_nodes) == (384, 416, 32, 4)
+    assert b.reserve_fraction == pytest.approx(32 / 416)
+    assert b.duration.m_as("day") == 109 and b.accelerator_hours.m_as("hour") == pytest.approx(384 * 109 * 24)
+    assert b.min_launches == 27 and b.accelerators_per_replica == 48
+    g = Scenarios.LandmarkClusterGrowth2012to2024
+    assert len(g.points) == 6 and g.growth == pytest.approx(1.9337027, rel=1e-6)

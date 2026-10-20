@@ -5339,3 +5339,33 @@ CODECARBON_LAPTOP_RUN_2026 = Provenance(
            "6.855070041856389e-05 kg. The tracker found no power sensor and fell back on CPU load; "
            "RAM is a fixed 6 W; PUE 1.0 is the tracker's default."),
 )
+
+# --- Course-overview anchors: BLOOM's published run files, Alps, ChatGPT traffic (added 2026-10-20) ---
+BIGSCIENCE_TR11_2022 = _report(
+    "prov:bigscience-tr11-176b-ml-2022",
+    "BigScience Workshop (2022), tr11-176B-ml README and tr11-176B-ml.slurm, "
+    "github.com/bigscience-workshop/bigscience, train/tr11-176B-ml",
+    "https://github.com/bigscience-workshop/bigscience/tree/master/train/tr11-176B-ml",
+    notes=("README, Hardware: '416 A100 80GB GPUs (52 nodes) - using 384 gpus (48 nodes) and keeping 32 gpus "
+           "(4 nodes) in reserve'; '8 GPUs per node'. README, top: training started March 11, 2022; epoch one "
+           "finished June 28, 2022. README, Checkpoints: 'At full GBS=2048 we have about 2min/iteration so 250 "
+           "iterations is about ~8h' and 'Probably every 4h is sane enough of a compromise.' Slurm script at "
+           "commit ed196cd (19 June 2022): --nodes=48, --gres=gpu:8, --time 100:00:00, TP_SIZE=4, PP_SIZE=12, "
+           "GLOBAL_BATCH_SIZE=2048, SAVE_INTERVAL=100. Read 2026-10-20."),
+)
+ETH_ALPS_2024 = _report(
+    "prov:eth-alps-inauguration-2024",
+    "ETH Zurich (2024), press release, Alps supercomputer inaugurated, Zurich, 14 September 2024",
+    "https://www.cscs.ch/fileadmin/user_upload/contents_publications/news/news_2024/"
+    "press-release-alps-supercomputer-inaugurated.pdf",
+    notes=("'has 10,752 of the world's coveted NVIDIA Grace Hopper superchips'; 'In the Top500 list of "
+           "supercomputers from June 2024, it was ranked 6th in the first expansion stage.' Read 2026-10-20."),
+)
+TECHCRUNCH_ALTMAN_DEVDAY_2025 = _report(
+    "prov:techcrunch-altman-devday-2025",
+    "TechCrunch (2025), Sam Altman says ChatGPT has hit 800M weekly active users, 6 October 2025 "
+    "(OpenAI DevDay keynote)",
+    "https://techcrunch.com/2025/10/06/sam-altman-says-chatgpt-has-hit-800m-weekly-active-users/",
+    notes=("Altman: 'More than 800 million people use ChatGPT every week, and we process over 6 billion "
+           "tokens per minute on the API.' A company statement, not audited. Read 2026-10-20."),
+)

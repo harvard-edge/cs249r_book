@@ -2827,12 +2827,15 @@ class TrendFitScenario(BaseScenario):
 
     ``group_key=None`` fits every row. ``x_is_date`` reads the x column as an ISO
     date and converts it to a fractional year (added 2026-10-20).
+    ``stated_points`` fits (x, y) pairs given directly, each y read from a
+    registry, in place of a series (added 2026-10-20).
     """
-    series_name: str
+    series_name: Optional[str] = None
     group_key: Optional[str] = None
     group: Optional[str] = None
-    x_key: str
-    y_key: str
+    x_key: Optional[str] = None
+    y_key: Optional[str] = None
+    stated_points: Optional[List[tuple]] = None
     period: float = 1.0
     x_is_date: bool = False
 
@@ -2845,6 +2848,8 @@ class TrendFitScenario(BaseScenario):
 
     @property
     def points(self) -> List[tuple]:
+        if self.stated_points is not None:
+            return [(float(x), float(y)) for x, y in self.stated_points]
         from ..literature.registry import Literature
         rows = getattr(Literature.Series, self.series_name).entries
         return [(self._x(r[self.x_key]), r[self.y_key]) for r in rows
@@ -21712,3 +21717,62 @@ class FrontierCostTrendScenario(BaseScenario):
     @property
     def priciest(self) -> Dict[str, Any]:
         return max(self.frontier, key=lambda r: r["training_cost_2023usd"])
+
+
+class TrainingAllocationScenario(BaseScenario):
+    """A training job as launched: nodes allocated and used, its model split, its dates, and the
+    scheduler's per-launch time limit (added 2026-10-20).
+
+    ``start`` and ``end`` are ISO dates; the duration counts whole days between them.
+    """
+    nodes_allocated: int
+    nodes_used: int
+    accelerators_per_node: int
+    start: str
+    end: str
+    tensor_parallel: int = 1
+    pipeline_parallel: int = 1
+    launch_time_limit: Optional[Quantity] = None
+
+    @property
+    def accelerators_allocated(self) -> int:
+        return self.nodes_allocated * self.accelerators_per_node
+
+    @property
+    def accelerators_used(self) -> int:
+        return self.nodes_used * self.accelerators_per_node
+
+    @property
+    def reserve_nodes(self) -> int:
+        return self.nodes_allocated - self.nodes_used
+
+    @property
+    def reserve_accelerators(self) -> int:
+        return self.accelerators_allocated - self.accelerators_used
+
+    @property
+    def reserve_fraction(self) -> float:
+        """Share of the allocated accelerators held idle in reserve."""
+        return self.reserve_accelerators / self.accelerators_allocated
+
+    @property
+    def duration(self) -> Quantity:
+        import datetime as dt
+        days = (dt.date.fromisoformat(self.end) - dt.date.fromisoformat(self.start)).days
+        return Q_(days, "day")
+
+    @property
+    def accelerator_hours(self) -> Quantity:
+        """Every used accelerator busy every hour of the duration."""
+        return (self.accelerators_used * self.duration).to("hour")
+
+    @property
+    def accelerators_per_replica(self) -> int:
+        """Accelerators holding one copy of the model: tensor times pipeline degree."""
+        return self.tensor_parallel * self.pipeline_parallel
+
+    @property
+    def min_launches(self) -> int:
+        """Fewest launches that cover the duration under the per-launch time limit."""
+        import math
+        return math.ceil((self.duration / self.launch_time_limit).to("").magnitude)

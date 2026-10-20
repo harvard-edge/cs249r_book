@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Figures for Volume II, Lecture 0 (course overview).
 
-Every value is sourced. "Derived" marks arithmetic done here from sourced
-inputs; the slide note shows the same arithmetic (images/calcs.py).
+Every value comes from calcs.py, which reads MLSysIM; this file types only
+years, layout, and label offsets.
 
-  - GPT-3: 3.14e23 FLOPs (Brown et al. 2020); one A100 at its 312 TFLOP/s
-    peak needs about 32 years; the run used about 10,000 V100s for about
-    15 days (Patterson et al. 2021). Introduction Sec. 1.1 and footnote 6.
-  - Landmark accelerator counts: MLSysIM Literature.TrainingRuns and the
-    model registry, as plotted in the Introduction's cluster-size figure
-    (Sec. 1.1, figure 2). GPT-3's point is an estimate (Langston 2020).
+  - GPT-3: training work over one A100's peak, against the published run's
+    days (Models.Language.GPT3; Patterson et al. 2021). Introduction Sec. 1.1.
+  - Landmark accelerator counts: Literature.TrainingRuns and the model
+    registry, as plotted in the Introduction's cluster-size figure (Sec. 1.1,
+    figure 2); the fit is Scenarios.LandmarkClusterGrowth2012to2024. GPT-3's
+    point is an estimate (Langston 2020).
   - The stack with each lecture on its row (kit stack_build8 canvas).
 
 Run from this folder: python3 make_figs.py
@@ -21,7 +21,10 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import slideplot as sp  # noqa: E402
+import calcs  # noqa: E402
+from deckvals import num, val  # noqa: E402
 
 out = Path(__file__).parent
 FONT = "Helvetica, Arial, sans-serif"
@@ -31,14 +34,9 @@ FONT = "Helvetica, Arial, sans-serif"
 # -----------------------------------------------------------------------------
 # 1. GPT-3: one accelerator against the fleet (training time, days, log)
 # -----------------------------------------------------------------------------
-GPT3_FLOPS, A100_PEAK = 3.14e23, 312e12          # Introduction Sec. 1.1, footnote 6
-V100_COUNT, V100_DELIVERED = 10_000, 24.6e12     # Patterson et al. 2021, via Sec. 1.1
-DAY = 86400
-one_a100_days = GPT3_FLOPS / A100_PEAK / DAY                          # derived
-fleet_days = GPT3_FLOPS / (V100_COUNT * V100_DELIVERED) / DAY         # derived
 sp.hbars_steps(out / "gpt3_days", [
-    ("One A100", one_a100_days, "neutral", f"{one_a100_days / 365:.0f} years"),
-    ("10,000 V100s", fleet_days, "memory", f"{fleet_days:.0f} days"),
+    ("One A100", num("one_a100_days"), "neutral", f"{val('one_a100_years')} years"),
+    (f"{val('gpt3_gpus')} V100s", num("gpt3_days_1d"), "memory", f"{val('gpt3_days')} days"),
 ], "days", xlabel="GPT-3 training time (days, log)", size=(3.8, 2.2))
 
 
@@ -46,20 +44,19 @@ sp.hbars_steps(out / "gpt3_days", [
 # 2. Landmark accelerator counts, 2012 to 2024
 # -----------------------------------------------------------------------------
 def cluster_counts():
-    rows = [("AlexNet", 2012, 2, False, (8, -3, "left")),
-            ("Megatron-LM", 2019, 512, False, (-8, 4, "right")),
-            ("GPT-3 (estimate)", 2020, 10000, True, (-10, 0, "right")),
-            ("PaLM", 2022, 6144, False, (-8, -13, "right")),
-            ("LLaMA 1", 2023, 2048, False, (-4, -17, "right")),
-            ("DeepSeek-V3", 2024, 2048, False, (4, -17, "left")),
-            ("Llama 3", 2024, 16384, False, (-9, 6, "right"))]
+    rows = [("AlexNet", 2012, num("alexnet_gpus"), False, (8, -3, "left")),
+            ("Megatron-LM", 2019, num("megatron_gpus"), False, (-8, 4, "right")),
+            ("GPT-3 (estimate)", 2020, num("msft_gpus"), True, (-10, 0, "right")),
+            ("PaLM", 2022, num("palm_chips"), False, (-8, -13, "right")),
+            ("LLaMA 1", 2023, num("llama1_gpus"), False, (-4, -17, "right")),
+            ("DeepSeek-V3", 2024, num("deepseek_gpus"), False, (4, -17, "left")),
+            ("Llama 3", 2024, num("llama3_gpus"), False, (-9, 6, "right"))]
     fig, ax = sp.plt.subplots(figsize=(5.7, 2.4))
-    ver = [r for r in rows if not r[3]]
-    coeffs = np.polyfit([r[1] for r in ver], np.log10([r[2] for r in ver]), 1)
+    _, slope, intercept = calcs.GROW.fit   # the filled points only
     xs = np.linspace(2011.5, 2024.5, 100)
-    ax.plot(xs, 10 ** np.polyval(coeffs, xs), "--", color=sp.C["neutral"], lw=1.5)
+    ax.plot(xs, 10 ** (intercept + slope * xs), "--", color=sp.C["neutral"], lw=1.5)
     ax.text(2021.0, 40,
-            f"fit: about {10 ** coeffs[0]:.0f}× per year", color=sp.C["neutral"],
+            f"fit: about {val('cluster_growth_round')}× per year", color=sp.C["neutral"],
             fontsize=12, fontweight="bold", rotation=0, ha="center")
     for name, yr, n, est, (dx, dy, ha) in rows:
         ax.plot([yr], [n], "o", ms=10, mfc="white" if est else sp.C["memory"],
