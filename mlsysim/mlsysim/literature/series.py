@@ -239,6 +239,41 @@ LlmInferenceTraceCode2023 = _Series(
     "Prompt (context) and output (generated) tokens of production code-completion requests.",
 )
 
+# Serving at scale: request traces (added 2026-10-20)
+LlmInferenceTraceConversation2023 = _Series(
+    "azure_llm_inference_conv_2023",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Azure LLM inference trace 2023, conversation (Patel et al., Splitwise, ISCA 2024)",
+        url="https://github.com/Azure/AzurePublicDataset/blob/master/AzureLLMInferenceDataset2023.md",
+        verified="2026-10-18",
+        notes=(
+            "The released file AzureLLMInferenceTrace_conv.csv, unmodified: one row per request "
+            "(timestamp, context tokens, generated tokens), 19,366 requests in one hour on "
+            "2023-11-16 to a production conversation service. Raw: raw.githubusercontent.com/"
+            "Azure/AzurePublicDataset/master/data/AzureLLMInferenceTrace_conv.csv. License CC BY 4.0."
+        ),
+    ),
+    "Arrival time, prompt (context) tokens, and output (generated) tokens of production chat requests.",
+)
+
+LlmInferenceTraceConversation2024TenMinute = _Series(
+    "azure_llm_inference_conv_2024_10min",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Azure LLM inference trace 2024, conversation, one week (Stojkovic et al., DynamoLLM, HPCA 2025)",
+        url="https://github.com/Azure/AzurePublicDataset/blob/master/AzureLLMInferenceDataset2024.md",
+        verified="2026-10-18",
+        notes=(
+            "Requests and tokens per 10-minute bin, 2024-05-12 00:00 to 2024-05-18 23:50, counted "
+            "from the released AzureLLMInferenceTrace_conv_1week.csv by aggregate_azure_2024.py "
+            "(slides tree, images/data of the serving lecture): a bin is the timestamp truncated "
+            "to its ten-minute digit. License CC BY 4.0."
+        ),
+    ),
+    "Requests, prompt tokens, and output tokens per 10-minute bin over one week of a chat service.",
+)
+
 _MONKEYS_NOTES = (
     "Brown et al. (2024), Large Language Monkeys. Recomputed from the released "
     "per-sample correctness labels: Hugging Face ScalingIntelligence/monkey_business "

@@ -258,3 +258,22 @@ __all__ += [
     "ProposerTrafficModel",
     "EvidenceHorizonModel",
 ]
+
+# --- Serving at scale: traces, frontiers, admission, routing (added 2026-10-20) ---
+from .serving_scale import (
+    BallsIntoBinsModel,
+    KvAdmissionModel,
+    PrecisionDividendModel,
+    RequestTraceModel,
+    ServingFrontierModel,
+    TrafficProfileModel,
+)
+
+__all__ += [
+    "BallsIntoBinsModel",
+    "KvAdmissionModel",
+    "PrecisionDividendModel",
+    "RequestTraceModel",
+    "ServingFrontierModel",
+    "TrafficProfileModel",
+]

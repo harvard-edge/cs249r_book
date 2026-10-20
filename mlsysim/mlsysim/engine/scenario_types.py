@@ -487,6 +487,10 @@ class AvailabilityScenario(BaseScenario):
         from ..physics.reliability import calc_all_up_availability
         return calc_all_up_availability(self.availability, self.n_components)
 
+    def required_availability(self, all_up_target: float) -> float:
+        """Per-component availability that keeps ``all_up`` at ``all_up_target`` (added 2026-10-20)."""
+        return all_up_target ** (1 / self.n_components)
+
     def downtime(self, interval: Quantity) -> Quantity:
         """Expected time one component is down in ``interval``."""
         from ..physics.reliability import calc_downtime
@@ -4475,3 +4479,659 @@ class SingleStreamLatencyScenario(BaseScenario):
     def span(self) -> float:
         lat = self.latencies
         return (max(lat) / min(lat)).to("").magnitude
+
+
+# --- Serving at scale (added 2026-10-20) ---------------------------------------
+# Traces, measured frontiers, replica admission, and fleet routing for serving
+# a model to users: what counts as a served request, how many fit, and what
+# each one costs.
+
+import math as _math  # noqa: E402
+
+
+class ServingCostScenario(BaseScenario):
+    """One model version's training spend against its first year of serving."""
+    training_cost: float                 # USD, one-time
+    daily_users: int
+    requests_per_user_per_day: int
+    cost_per_request: float              # USD per served request
+    efficiency_gain: float               # fractional cut in cost per request
+    days_per_year: int
+
+    @property
+    def daily_requests(self) -> float:
+        return self.daily_users * self.requests_per_user_per_day
+
+    @property
+    def annual_requests(self) -> float:
+        return self.daily_requests * self.days_per_year
+
+    @property
+    def annual_serving_cost(self) -> float:
+        return self.annual_requests * self.cost_per_request
+
+    @property
+    def serving_to_training(self) -> float:
+        return self.annual_serving_cost / self.training_cost
+
+    @property
+    def efficiency_savings(self) -> float:
+        return self.annual_serving_cost * self.efficiency_gain
+
+    @property
+    def monthly_serving_cost(self) -> float:
+        return self.annual_serving_cost / 12
+
+    @property
+    def crossover_months(self) -> float:
+        """Months of serving that cost as much as the training run."""
+        return self.training_cost / self.monthly_serving_cost
+
+    @property
+    def crossover_weeks(self) -> float:
+        return self.crossover_months * self.days_per_year / 12 / 7
+
+
+class SloGoodputScenario(BaseScenario):
+    """Completed-request rate and the share that meet their latency targets, per configuration."""
+    completed: Dict[str, Quantity]       # requests per second completed
+    met_share: Dict[str, float]          # share meeting every latency target
+
+    def goodput(self, name: str) -> Quantity:
+        return (self.completed[name] * self.met_share[name]).to("1/second")
+
+    @property
+    def best(self) -> str:
+        return max(self.completed, key=lambda k: self.goodput(k).magnitude)
+
+
+class ServingTaxScenario(BaseScenario):
+    """A request's latency target split between model execution and everything outside it."""
+    latency_target: Quantity
+    model_time: Quantity                 # model execution on an idle replica
+    exchanges: int                       # sequential network exchanges on the request path
+    exchange_low: Quantity
+    exchange_high: Quantity
+
+    @property
+    def outside_model(self) -> Quantity:
+        return (self.latency_target - self.model_time).to("ms")
+
+    @property
+    def exchanges_low(self) -> Quantity:
+        return (self.exchanges * self.exchange_low).to("ms")
+
+    @property
+    def exchanges_high(self) -> Quantity:
+        return (self.exchanges * self.exchange_high).to("ms")
+
+
+class BatchingKneeScenario(BaseScenario):
+    """Batch service time S(B) = t_0 + B t_req: where throughput turns over."""
+    fixed_time: Quantity                 # paid once per batch
+    per_request_time: Quantity           # added per request
+
+    @property
+    def knee(self) -> float:
+        from ..physics.serving import calc_batch_knee
+        return calc_batch_knee(self.fixed_time, self.per_request_time)
+
+    def throughput_share(self, batch_size) -> float:
+        from ..physics.serving import calc_batch_throughput_share
+        return calc_batch_throughput_share(batch_size, self.fixed_time, self.per_request_time)
+
+
+class LittlesLawScenario(BaseScenario):
+    """Requests in flight at ``arrival_rate``, and replicas sized from a batch service time."""
+    arrival_rate: Quantity
+    time_in_system: Quantity
+    batch_size: Optional[int] = None
+    batch_service_time: Optional[Quantity] = None
+    utilization_target: Optional[float] = None
+
+    @property
+    def in_flight(self) -> float:
+        from ..physics.serving import calc_littles_law_occupancy
+        return calc_littles_law_occupancy(self.arrival_rate, self.time_in_system).to("").magnitude
+
+    @property
+    def replica_throughput(self) -> Quantity:
+        return (self.batch_size / self.batch_service_time).to("1/second")
+
+    @property
+    def throughput_floor(self) -> int:
+        return _math.ceil((self.arrival_rate / self.replica_throughput).to("").magnitude)
+
+    @property
+    def replicas_needed(self) -> int:
+        return _math.ceil((self.arrival_rate / (self.utilization_target * self.replica_throughput))
+                          .to("").magnitude)
+
+    @property
+    def executing_positions(self) -> int:
+        return self.replicas_needed * self.batch_size
+
+    @property
+    def mean_executing(self) -> float:
+        return (self.arrival_rate * self.batch_service_time).to("").magnitude
+
+    @property
+    def service_utilization(self) -> float:
+        return (self.arrival_rate / (self.replicas_needed * self.replica_throughput)).to("").magnitude
+
+
+class RequestTraceScenario(BaseScenario):
+    """A published request trace: arrival rate, token lengths, and fixed-batch waste (``RequestTraceModel``)."""
+    series: Any                          # a Literature request-trace series
+    timestamp_column: str = "TIMESTAMP"
+    prompt_column: str = "ContextTokens"
+    output_column: str = "GeneratedTokens"
+    batch_size: int = 8
+
+    @property
+    def result(self):
+        from .solvers import RequestTraceModel
+        rows = self.series.entries
+        return RequestTraceModel().solve([r[self.timestamp_column] for r in rows],
+                                         [r[self.prompt_column] for r in rows],
+                                         [r[self.output_column] for r in rows], self.batch_size)
+
+    @property
+    def output_tokens(self) -> List[float]:
+        return [r[self.output_column] for r in self.series.entries]
+
+    @property
+    def prompt_tokens(self) -> List[float]:
+        return [r[self.prompt_column] for r in self.series.entries]
+
+    # Token summaries without parsing arrival times (cheap enough for scenario inputs).
+    @property
+    def median_request_tokens(self) -> int:
+        """Median prompt plus median output, whole tokens."""
+        import statistics
+        return int(statistics.median(self.prompt_tokens) + statistics.median(self.output_tokens))
+
+    @property
+    def mean_output_tokens(self) -> float:
+        out = self.output_tokens
+        return sum(out) / len(out)
+
+    @property
+    def mean_resident_tokens(self) -> float:
+        """Mean tokens a request holds mid-generation: its prompt plus half its answer."""
+        p = self.prompt_tokens
+        return sum(p) / len(p) + self.mean_output_tokens / 2
+
+
+class TrafficProfileScenario(BaseScenario):
+    """A binned request series: peak, trough, and weekday swing (``TrafficProfileModel``)."""
+    series: Any
+    bin_column: str
+    count_column: str
+    bin_width: Quantity
+
+    @property
+    def result(self):
+        from .solvers import TrafficProfileModel
+        rows = self.series.entries
+        return TrafficProfileModel().solve([r[self.bin_column] for r in rows],
+                                           [r[self.count_column] for r in rows], self.bin_width)
+
+
+class ServingFrontierScenario(BaseScenario):
+    """Measured serving configurations: per-accelerator frontier and best rate at a per-user target."""
+    series: Any                          # rows with hardware, interactivity, and throughput columns
+    x_column: str = "interactivity_tok_s_user"
+    y_column: str = "output_tok_s_gpu"
+    targets: Optional[List[float]] = None    # per-user rates at which configurations are compared
+
+    def rows(self, hardware: Optional[str] = None, **match) -> List[dict]:
+        out = [r for r in self.series.entries if hardware is None or r["hardware"] == hardware]
+        return [r for r in out if all(r.get(k) == v for k, v in match.items())]
+
+    def solve(self, hardware: str, minimum: float, **match):
+        from .solvers import ServingFrontierModel
+        return ServingFrontierModel().solve(self.rows(hardware, **match), self.x_column, self.y_column, minimum)
+
+    def frontier(self, hardware: str):
+        from .solvers import ServingFrontierModel
+        return ServingFrontierModel.frontier(self.rows(hardware), self.x_column, self.y_column)
+
+    def best_at(self, hardware: str, minimum: float, **match) -> float:
+        from .solvers import ServingFrontierModel
+        return ServingFrontierModel.best_at(self.rows(hardware, **match), self.x_column, self.y_column, minimum)
+
+    def split_gain(self, hardware: str, minimum: float) -> float:
+        """Best split-pool (disaggregated) rate over best colocated rate at ``minimum``."""
+        return self.best_at(hardware, minimum, disagg=1.0) / self.best_at(hardware, minimum, disagg=0.0)
+
+    def sweep(self, hardware: str, **match) -> List[dict]:
+        """Matching rows in order of concurrency."""
+        return sorted(self.rows(hardware, **match), key=lambda r: r["conc"])
+
+    def max_concurrency_at(self, hardware: str, minimum: float, **match) -> float:
+        return max(r["conc"] for r in self.rows(hardware, **match) if r[self.x_column] >= minimum)
+
+    @property
+    def config_count(self) -> int:
+        return len(self.series.entries)
+
+
+class TokenCostScenario(BaseScenario):
+    """Cost per output token on the best measured configuration at each per-user target."""
+    frontier: ServingFrontierScenario
+    hardware: str
+    targets: List[float]                 # per-user output tokens per second
+    gpu_hour_price: Quantity
+
+    def throughput(self, target: float) -> float:
+        return self.frontier.best_at(self.hardware, target)
+
+    def cost_per_million(self, target: float) -> Quantity:
+        rate = Q_(self.throughput(target), "1/second")
+        return (self.gpu_hour_price / rate * 1e6).to("USD")
+
+    @property
+    def spread(self) -> float:
+        costs = [self.cost_per_million(t) for t in self.targets]
+        return (costs[-1] / costs[0]).to("").magnitude
+
+    def answer_cost(self, output_tokens: float, target: float) -> Quantity:
+        return (self.cost_per_million(target) * output_tokens / 1e6).to("USD")
+
+
+class KvAdmissionScenario(BaseScenario):
+    """A replica's KV budget against one context length (``KvAdmissionModel``)."""
+    workload: Workload
+    accelerators: int
+    hbm_per_accelerator: Quantity
+    weight_bytes_per_param: Quantity
+    reserve: Quantity
+    context_tokens: int
+    kv_bytes_per_elem: Quantity
+
+    @property
+    def result(self):
+        from .solvers import KvAdmissionModel
+        return KvAdmissionModel().solve(self.workload, self.accelerators, self.hbm_per_accelerator,
+                                        self.weight_bytes_per_param, self.reserve, self.context_tokens,
+                                        self.kv_bytes_per_elem)
+
+
+class KvInFlightScenario(BaseScenario):
+    """KV state held by every request in flight, against one replica's KV budget."""
+    occupancy: LittlesLawScenario
+    resident_tokens: float               # mean tokens each request holds while in flight
+    admission: KvAdmissionScenario
+
+    @property
+    def kv_in_flight(self) -> Quantity:
+        r = self.admission.result
+        return (self.occupancy.in_flight * self.resident_tokens * r.kv_per_token).to("TB")
+
+    @property
+    def replicas_by_kv(self) -> float:
+        return (self.kv_in_flight / self.admission.result.kv_budget).to("").magnitude
+
+
+class PrefixSharingScenario(BaseScenario):
+    """KV cache for users who share one prompt prefix, stored per user or once."""
+    workload: Workload
+    prefix_tokens: int
+    users: int
+    unique_tokens_per_user: int
+    kv_width: int                        # key-value heads x head width cached per layer
+    bytes_per_elem: Quantity
+
+    @property
+    def tokens_per_user(self) -> int:
+        return self.prefix_tokens + self.unique_tokens_per_user
+
+    @property
+    def tokens_unshared(self) -> int:
+        return self.tokens_per_user * self.users
+
+    @property
+    def tokens_shared(self) -> int:
+        return self.prefix_tokens + self.unique_tokens_per_user * self.users
+
+    def _kv(self, tokens: int) -> Quantity:
+        from ..physics.memory import calc_kv_cache_size
+        return calc_kv_cache_size(self.workload.layers, 1, self.kv_width, tokens, 1, self.bytes_per_elem)
+
+    @property
+    def kv_unshared(self) -> Quantity:
+        return self._kv(self.tokens_unshared)
+
+    @property
+    def kv_shared(self) -> Quantity:
+        return self._kv(self.tokens_shared)
+
+    @property
+    def reduction(self) -> float:
+        return 1 - (self.kv_shared / self.kv_unshared).to("").magnitude
+
+    @property
+    def capacity_ratio(self) -> float:
+        return (self.kv_unshared / self.kv_shared).to("").magnitude
+
+
+class PrecisionDividendScenario(BaseScenario):
+    """Maximum batch before and after lower-precision weights and KV (``PrecisionDividendModel``)."""
+    workload: Workload
+    tp_size: int
+    hbm_per_accelerator: Quantity
+    context_tokens: int
+    kv_heads: int
+    weight_bytes: Quantity
+    weight_bytes_low: Quantity
+    kv_bytes: Quantity
+    kv_bytes_low: Quantity
+
+    @property
+    def result(self):
+        from .solvers import PrecisionDividendModel
+        return PrecisionDividendModel().solve(self.workload, self.tp_size, self.hbm_per_accelerator,
+                                              self.context_tokens, self.kv_heads, self.weight_bytes,
+                                              self.weight_bytes_low, self.kv_bytes, self.kv_bytes_low)
+
+
+class ChunkedPrefillScenario(BaseScenario):
+    """A long prompt advanced ``chunk_tokens`` per iteration beside decode."""
+    prompt_tokens: int
+    chunk_tokens: int
+
+    @property
+    def iterations(self) -> int:
+        return _math.ceil(self.prompt_tokens / self.chunk_tokens)
+
+
+class TensorParallelSpeedupScenario(BaseScenario):
+    """Stated per-layer compute split ``tp_size`` ways, plus the AllReduces each layer adds."""
+    serial_layer_times: Dict[str, Quantity]  # compute per layer on one device, by phase
+    tp_size: int
+    allreduce_time: Quantity             # per collective
+    collectives_per_layer: int = 2
+    layers: int
+
+    def sharded(self, phase: str) -> Quantity:
+        return (self.serial_layer_times[phase] / self.tp_size).to("ms")
+
+    @property
+    def serial_layer_time(self) -> Quantity:
+        return sum(self.serial_layer_times.values(), Q_(0, "ms")).to("ms")
+
+    @property
+    def sharded_compute_time(self) -> Quantity:
+        return (self.serial_layer_time / self.tp_size).to("ms")
+
+    @property
+    def parallel_layer_time(self) -> Quantity:
+        return (sum((self.sharded(p) for p in self.serial_layer_times), Q_(0, "ms"))
+                + self.collectives_per_layer * self.allreduce_time).to("ms")
+
+    @property
+    def speedup(self) -> float:
+        return (self.serial_layer_time / self.parallel_layer_time).to("").magnitude
+
+    @property
+    def serial_total(self) -> Quantity:
+        return (self.serial_layer_time * self.layers).to("ms")
+
+    @property
+    def parallel_total(self) -> Quantity:
+        return (self.parallel_layer_time * self.layers).to("ms")
+
+
+class DecodeBudgetScenario(BaseScenario):
+    """A constructed decode-step budget, cut interval by interval, against a TPOT target."""
+    workload: Workload
+    tp_size: int
+    accelerator: HardwareNode
+    weight_bytes_per_param: Quantity
+    tpot_target: Quantity
+    baseline_step: Quantity
+    intervals: List[str]                 # GEMM, attention, element-wise, AllReduce, launch
+    baseline_shares: List[float]
+    gemm_cut: float                      # after precision: share of GEMM time removed
+    attention_cut: float                 # after fusion: share of attention time removed
+    fused_elementwise: Quantity
+    replay_overhead: Quantity
+    collective_launch: Quantity
+    allreduces_per_layer: int = 2
+
+    @property
+    def baseline(self) -> List[float]:
+        """Baseline intervals in ms."""
+        total = self.baseline_step.to("ms").magnitude
+        return [total * s for s in self.baseline_shares]
+
+    @property
+    def after_precision(self) -> List[float]:
+        r = self.baseline.copy()
+        r[0] *= 1 - self.gemm_cut
+        return r
+
+    @property
+    def after_fusion(self) -> List[float]:
+        r = self.after_precision.copy()
+        r[1] *= 1 - self.attention_cut
+        r[2] = self.fused_elementwise.to("ms").magnitude
+        r[4] = self.replay_overhead.to("ms").magnitude
+        return r
+
+    @property
+    def totals(self) -> List[float]:
+        return [sum(self.baseline), sum(self.after_precision), sum(self.after_fusion)]
+
+    @property
+    def weight_shard(self) -> Quantity:
+        return (self.workload.size_in_bytes(self.weight_bytes_per_param) / self.tp_size).to("GB")
+
+    @property
+    def floor(self) -> Quantity:
+        """Time to stream one weight shard at full HBM bandwidth."""
+        return (self.weight_shard / self.accelerator.memory.bandwidth).to("ms")
+
+    @property
+    def allreduces_per_step(self) -> int:
+        return self.allreduces_per_layer * self.workload.layers
+
+    @property
+    def allreduce_per_collective(self) -> Quantity:
+        return Q_(self.baseline[3] / self.allreduces_per_step, "ms").to("microsecond")
+
+    @property
+    def collective_estimate(self) -> Quantity:
+        """Launch plus transfer of one batch-one activation AllReduce over NVLink."""
+        from ..core.units import BYTES_FP16
+        payload = 2 * self.workload.hidden_dim * BYTES_FP16
+        return (self.collective_launch + payload / self.accelerator.nvlink.bandwidth_per_direction
+                ).to("microsecond")
+
+
+class SpeculativeRoundScenario(BaseScenario):
+    """A draft proposes ``draft_length`` tokens; the target verifies them in one step."""
+    acceptance: float
+    draft_length: int
+    draft_time: Quantity
+    verify_time: Quantity
+
+    @property
+    def expected_tokens(self) -> float:
+        from ..physics.serving import calc_speculative_expected_tokens
+        return calc_speculative_expected_tokens(self.acceptance, self.draft_length)
+
+    @property
+    def round_time(self) -> Quantity:
+        return (self.draft_time + self.verify_time).to("ms")
+
+    @property
+    def per_token_time(self) -> Quantity:
+        return (self.round_time / self.expected_tokens).to("ms")
+
+    @property
+    def tpot_gain(self) -> float:
+        return (self.verify_time / self.per_token_time).to("").magnitude
+
+
+class WeightedRoutingScenario(BaseScenario):
+    """Traffic split over server pools in proportion to each pool's per-server capacity."""
+    servers: Dict[str, int]
+    capacity: Dict[str, float]           # requests per second one server sustains
+    offered: float                       # requests per second offered to the fleet
+
+    @property
+    def total_capacity(self) -> float:
+        return sum(self.servers[k] * self.capacity[k] for k in self.servers)
+
+    def weight(self, pool: str) -> float:
+        return self.capacity[pool] / self.total_capacity
+
+    def utilization(self, pool: str) -> float:
+        return self.offered * self.weight(pool) / self.capacity[pool]
+
+    @property
+    def equal_split_load(self) -> float:
+        return self.offered / sum(self.servers.values())
+
+    def equal_split_utilization(self, pool: str) -> float:
+        return self.equal_split_load / self.capacity[pool]
+
+
+class TailEventRateScenario(BaseScenario):
+    """How often an event of probability ``event_probability`` per request occurs at ``request_rate``."""
+    request_rate: Quantity
+    event_probability: float
+
+    @property
+    def events_per_second(self) -> float:
+        return (self.request_rate * self.event_probability).to("1/second").magnitude
+
+
+class ColdStartScenario(BaseScenario):
+    """A new replica: provision, fetch the weight artifact, load and warm up."""
+    workload: Workload
+    weight_bytes_per_param: Quantity
+    fetch_bandwidth: Quantity
+    provisioning_time: Quantity
+    load_warmup_time: Quantity
+    reactive_peak_replicas: int          # peak fleet when scaling only reacts
+    predictive_peak_replicas: int        # peak fleet when replicas start ahead of the ramp
+    prewarm_lead: Quantity
+
+    @property
+    def artifact(self) -> Quantity:
+        return self.workload.size_in_bytes(self.weight_bytes_per_param).to("GB")
+
+    @property
+    def fetch_time(self) -> Quantity:
+        return (self.artifact / self.fetch_bandwidth).to("second")
+
+    @property
+    def cold_start_time(self) -> Quantity:
+        return (self.provisioning_time + self.fetch_time + self.load_warmup_time).to("second")
+
+    @property
+    def peak_saving(self) -> float:
+        return 1 - self.predictive_peak_replicas / self.reactive_peak_replicas
+
+
+class NoisyNeighborScenario(BaseScenario):
+    """Tenants sharing a KV pool and a replica, one of them bursting, with and without quotas."""
+    kv_pool: Quantity
+    pool_tenants: int
+    swollen_share: Quantity              # long-context tenant's allocation without limits
+    base_sequences: int                  # sequences per equal share
+    base_rate: float                     # requests per second per tenant
+    burst_rate: float
+    slo: Quantity                        # p99 target
+    unprotected_p99_low: Quantity
+    unprotected_p99_high: Quantity
+    quota_rate: float
+    protected_p99: Quantity
+
+    @property
+    def base_share(self) -> Quantity:
+        return self.kv_pool / self.pool_tenants
+
+    @property
+    def other_share(self) -> Quantity:
+        return (self.kv_pool - self.swollen_share) / (self.pool_tenants - 1)
+
+    @property
+    def other_sequences(self) -> int:
+        per_seq = self.base_share / self.base_sequences
+        return int((self.other_share / per_seq).to("").magnitude)
+
+    @property
+    def batch_reduction(self) -> float:
+        return 1 - self.other_sequences / self.base_sequences
+
+    @property
+    def burst_multiple(self) -> float:
+        return self.burst_rate / self.base_rate
+
+
+class ReasoningLatencyScenario(BaseScenario):
+    """Serial reasoning tokens before the answer, at a fixed time per token."""
+    per_token_time: Quantity
+    reasoning_tokens: int
+
+    @property
+    def reasoning_time(self) -> Quantity:
+        return (self.per_token_time * self.reasoning_tokens).to("second")
+
+    @property
+    def expansion(self) -> int:
+        return self.reasoning_tokens
+
+
+class FixedBatchScheduleScenario(BaseScenario):
+    """Requests in one batch of fixed membership, one token per iteration."""
+    output_lengths: List[int]
+    prompt_lengths: Optional[List[int]] = None
+    iteration_time: Quantity
+
+    @property
+    def total_tokens(self) -> List[int]:
+        return [p + o for p, o in zip(self.prompt_lengths, self.output_lengths)]
+
+    @property
+    def max_output(self) -> int:
+        return max(self.output_lengths)
+
+    @property
+    def mean_output(self) -> float:
+        return sum(self.output_lengths) / len(self.output_lengths)
+
+    @property
+    def slot_iterations(self) -> int:
+        return len(self.output_lengths) * self.max_output
+
+    @property
+    def useful_iterations(self) -> int:
+        return sum(self.output_lengths)
+
+    @property
+    def idle_share(self) -> float:
+        from ..physics.serving import calc_padding_waste_fraction
+        return calc_padding_waste_fraction(self.output_lengths)
+
+    @property
+    def requests_advanced(self) -> int:
+        """Requests served in the same iterations when each freed slot is refilled once."""
+        return len(self.output_lengths) + sum(1 for x in self.output_lengths if x < self.max_output)
+
+
+class BallsIntoBinsScenario(BaseScenario):
+    """n equal jobs placed into n empty replicas, random or best of two (``BallsIntoBinsModel``)."""
+    bins: List[int]
+    choices: List[int]
+    trials: Dict[int, int]
+    seed: int
+
+    @property
+    def result(self):
+        from .solvers import BallsIntoBinsModel
+        return BallsIntoBinsModel().solve(self.bins, self.choices, self.trials, self.seed)

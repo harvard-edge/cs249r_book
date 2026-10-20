@@ -321,6 +321,8 @@ class Literature(Registry):
     ServingIncidents = ServingIncidents
     SelfCorrection = SelfCorrection
     LlmInferenceTraceCode2023 = _series.LlmInferenceTraceCode2023
+    LlmInferenceTraceConversation2023 = _series.LlmInferenceTraceConversation2023  # added 2026-10-20
+    LlmInferenceTraceConversation2024TenMinute = _series.LlmInferenceTraceConversation2024TenMinute  # added 2026-10-20
     PredictionQuality = PredictionQuality  # added 2026-10-20
     GamePlaying = GamePlaying  # added 2026-10-20
     DeviceMeasurements = DeviceMeasurements  # added 2026-10-20
