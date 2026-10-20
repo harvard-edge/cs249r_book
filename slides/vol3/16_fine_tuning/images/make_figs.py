@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Figures for Lecture 16 (Trajectory Fine-Tuning), Volume III.
 
-Every value comes from calcs.py, which this script imports, so figures and
-slides agree. "TF" is the rendered chapter, Trajectory Fine-Tuning. The book's
+Every value comes from calcs.py, which this script imports and which reads
+MLSysIM, so figures and slides agree; labels print the recorded strings
+(deckvals.val). "TF" is the rendered chapter, Trajectory Fine-Tuning. The book's
 SVGs (loss masking, block-diagonal mask, exposure bias and DAgger) are
 page-sized and are redrawn here at slide size, split into build steps.
 Full-width diagrams are 900 px wide with type of 18 px or more; column plots
@@ -19,6 +20,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import slideplot as sp  # noqa: E402
 import calcs  # noqa: E402
+from deckvals import val, num  # noqa: E402
+from mlsysim.physics import calc_behavior_cloning_cost_bound, calc_dagger_cost_bound  # noqa: E402
 
 C = sp.C
 plt = sp.plt
@@ -115,7 +118,9 @@ SHORT_SCAF = {"mini-SWE-agent 2.x": "mini-SWE", "SWE-agent 1.1": "SWE-agent 1.1"
 
 
 def roles(step, name="roles", size=(5.9, 2.5), fs=13, legend=True):
-    rows = calcs.role_shares()
+    rows = [dict(scaffold=c["scaffold"], model=c["model"], prompt=100 * c["prompt_share"],
+                 obs=100 * c["observation_share"], model_out=100 * c["model_share"])
+            for c in calcs.ROLE.configurations]
     rows.sort(key=lambda r: r["model_out"])
     fig, ax = plt.subplots(figsize=size)
     for i, r in enumerate(rows):
@@ -195,30 +200,30 @@ def triangle():
             st = P["think"][1] if j < t - 1 else VIO
             s.rect(70 + j * 66, y + 6, 62, 28, fill, st, rx=3, sw=1.6)
     s.text(270, 318, "stored tokens grow as H(H+1)/2", 19, INK)
-    e = calcs.serialization()["expansion"]
-    s.text(270, 346, f"30 turns: {e:.1f}× one transcript", 19, VIO, bold=True)
+    s.text(270, 346, f"{val('ser_turns')} turns: {val('ser_exp')}× one transcript", 19, VIO, bold=True)
     s.save("triangle.svg")
 
 
 def swe_tokens():
-    t = calcs.swe_tokens()
+    t = calcs.TOK
     fig, ax = plt.subplots(figsize=(5.4, 3.6))
-    vals = [t["input_med"], t["output_med"]]
+    vals = [t.median_input_tokens, t.median_output_tokens]
+    texts = [val("tok_in"), val("tok_out")]
     labels = ["input, summed\nover calls", "output"]
     cols = [C["data"], "#334155"]
     ax.bar([0, 1], vals, color=cols, width=0.6)
     for i, v in enumerate(vals):
-        ax.text(i, v * 1.03, f"{v:,.0f}", ha="center", va="bottom", fontsize=15,
+        ax.text(i, v * 1.03, texts[i], ha="center", va="bottom", fontsize=15,
                 fontweight="bold", color=cols[i])
     ax.set_xticks([0, 1])
     ax.set_xticklabels(labels, fontsize=14)
     ax.set_ylabel("Tokens per run (median)", fontsize=14)
-    ax.set_ylim(0, t["input_med"] * 1.25)
+    ax.set_ylim(0, t.median_input_tokens * 1.25)
     ax.tick_params(axis="y", labelsize=13)
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v/1000:.0f}k"))
-    ax.text(0.5, t["input_med"] * 0.62, f"{t['ratio_med']:.0f}×", ha="center",
+    ax.text(0.5, t.median_input_tokens * 0.62, f"{val('tok_ratio')}×", ha="center",
             fontsize=22, fontweight="bold", color=C["danger"])
-    ax.set_title(f"{t['runs']} SWE-agent runs, median {t['calls']:.0f} calls", fontsize=14)
+    ax.set_title(f"{val('tok_runs')} SWE-agent runs, median {val('tok_calls')} calls", fontsize=14)
     sp.save(fig, out / "swe_tokens.svg")
 
 
@@ -267,25 +272,26 @@ for k in (1, 2, 3):
 
 # ============================================== NM 16.1 inventory (illustr.)
 def inventory():
-    n = calcs.nm161()
+    n = calcs.MASK
     fig, ax = plt.subplots(figsize=(5.9, 1.6))
-    rows = [("rationale selected", n["tgt_rat_pct"]), ("rationale as context", n["tgt_pct"])]
-    for i, (lab, tg) in enumerate(rows):
+    rows = [("rationale selected", 100 * n.share_with_rationale, val("mask_tgt_rat_pct")),
+            ("rationale as context", 100 * n.share_without_rationale, val("mask_tgt_pct"))]
+    for i, (lab, tg, tg_text) in enumerate(rows):
         y = 1 - i
-        obs = n["obs_pct"]
+        obs = 100 * n.observation_share
         ctx = 100 - obs - tg
         ax.barh(y, obs, color=C["data"], height=0.6)
         ax.barh(y, ctx, left=obs, color=C["neutral_l"], height=0.6)
         ax.barh(y, tg, left=obs + ctx, color="#334155", height=0.6)
         ax.text(-1.5, y, lab, ha="right", va="center", fontsize=13, fontweight="bold")
-        ax.text(obs / 2, y, f"observations {obs:.1f}%", ha="center", va="center",
+        ax.text(obs / 2, y, f"observations {val('mask_obs_pct')}%", ha="center", va="center",
                 fontsize=12, color="white", fontweight="bold")
-        ax.text(101.5, y, f"targets {tg:.1f}%", ha="left", va="center", fontsize=12,
+        ax.text(101.5, y, f"targets {tg_text}%", ha="left", va="center", fontsize=12,
                 color="#334155", fontweight="bold")
     ax.set_xlim(0, 100)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
-    ax.set_xlabel(f"Share of {n['total']:,} stored tokens (%), illustrative", fontsize=13)
+    ax.set_xlabel(f"Share of {val('mask_stored')} stored tokens (%), illustrative", fontsize=13)
     ax.tick_params(axis="x", labelsize=13)
     sp.save(fig, out / "inventory.svg")
 
@@ -295,20 +301,23 @@ inventory()
 
 # ============================================ normalization: two weightings
 def norm():
-    w = calcs.nm162_weights()
+    w = calcs.NORM
     fig, ax = plt.subplots(figsize=(5.4, 3.6))
     x = [0, 1]
-    ax.bar([v - 0.19 for v in x], [w["w_short"], w["w_long"]], width=0.36,
+    tok = [100 * w.other_token_share, 100 * w.focus_token_share]
+    ex = [100 * w.other_example_share, 100 * w.focus_example_share]
+    ax.bar([v - 0.19 for v in x], tok, width=0.36,
            color=C["memory"], label="token averaging")
-    ax.bar([v + 0.19 for v in x], [50, 50], width=0.36, color=C["compute"],
+    ax.bar([v + 0.19 for v in x], ex, width=0.36, color=C["compute"],
            label="example averaging")
-    for xi, v in zip(x, [w["w_short"], w["w_long"]]):
+    for xi, v, e in zip(x, tok, ex):
         ax.text(xi - 0.19, v + 2, f"{v:.1f}%", ha="center", fontsize=14,
                 color=C["memory"], fontweight="bold")
-        ax.text(xi + 0.19, 52, "50%", ha="center", fontsize=14, color=C["compute"],
+        ax.text(xi + 0.19, e + 2, f"{e:.0f}%", ha="center", fontsize=14, color=C["compute"],
                 fontweight="bold")
     ax.set_xticks(x)
-    ax.set_xticklabels(["lookup\n256 targets", "repair trace\n8,192 targets"], fontsize=14)
+    ax.set_xticklabels([f"lookup\n{val('norm_short')} targets", f"repair trace\n{val('norm_long')} targets"],
+                       fontsize=14)
     ax.set_ylabel("Weight in batch loss (%)", fontsize=14)
     ax.set_ylim(0, 125)
     ax.set_yticks([0, 25, 50, 75, 100])
@@ -322,10 +331,10 @@ norm()
 
 
 def occupancy():
-    p = calcs.nm162_pack()
+    p = calcs.PACK
     sp.hbars(out / "occupancy.svg",
-             [("padded", p["pad_occ"], "neutral", f"{p['pad_occ']:.1f}%"),
-              ("packed", p["pack_occ"], "data", f"{p['pack_occ']:.1f}%")],
+             [("padded", 100 * p.padded_occupancy, "neutral", f"{val('pack_pad_occ')}%"),
+              ("packed", 100 * p.packed_occupancy, "data", f"{val('pack_occ')}%")],
              "%", log=False, xlabel="Occupied share of positions (%)",
              size=(3.3, 1.7))
 
@@ -404,25 +413,25 @@ offcorpus()
 
 
 def bounds(step):
-    x = calcs.nm163()
-    H = calcs.H_EB
+    b = calcs.BOUND_S
+    H = b.horizon_steps
     hs = [h / 10 for h in range(0, 10 * H + 1)]
     fig, ax = plt.subplots(figsize=(5.4, 3.6))
-    ax.plot(hs, [min(h, h * h * calcs.EPS) for h in hs], color=C["danger"], lw=3,
-            alpha=1 if step >= 2 else 0)
-    ax.plot(hs, [min(h, calcs.U * h * calcs.EPS) for h in hs], color=C["memory"], lw=3,
-            alpha=1 if step >= 2 else 0)
+    ax.plot(hs, [min(h, calc_behavior_cloning_cost_bound(h, b.per_step_error)) for h in hs],
+            color=C["danger"], lw=3, alpha=1 if step >= 2 else 0)
+    ax.plot(hs, [min(h, calc_dagger_cost_bound(h, b.per_step_error, b.recoverability)) for h in hs],
+            color=C["memory"], lw=3, alpha=1 if step >= 2 else 0)
     ax.plot(hs, hs, color=C["neutral"], lw=1.5, ls="--")
     ax.text(3, 10, "cap: H", color=C["neutral"], fontsize=13)
     if step >= 2:
-        ax.plot([H], [x["ref"]], "o", color=C["danger"], ms=9)
-        ax.plot([H], [x["lrn"]], "o", color=C["memory"], ms=9)
-        ax.text(H - 0.6, x["ref"] + 1.6, f"H²ε = {x['ref']:.0f}", ha="right",
+        ax.plot([H], [b.cloning_capped], "o", color=C["danger"], ms=9)
+        ax.plot([H], [b.aggregation_capped], "o", color=C["memory"], ms=9)
+        ax.text(H - 0.6, b.cloning_capped + 1.6, f"H²ε = {val('eb_ref')}", ha="right",
                 color=C["danger"], fontsize=15, fontweight="bold")
-        ax.text(H - 0.6, x["lrn"] + 1.4, f"uHε = {x['lrn']:.1f}", ha="right",
+        ax.text(H - 0.6, b.aggregation_capped + 1.4, f"uHε = {val('eb_lrn')}", ha="right",
                 color=C["memory"], fontsize=15, fontweight="bold")
         ax.text(1, 27, "reference states", color=C["danger"], fontsize=14, fontweight="bold")
-        ax.text(1, 24.4, "learner states, u = 1", color=C["memory"], fontsize=14,
+        ax.text(1, 24.4, f"learner states, u = {val('eb_u')}", color=C["memory"], fontsize=14,
                 fontweight="bold")
     else:
         ax.text(15, 9, "?", fontsize=40, color=C["danger"], fontweight="bold", ha="center")
@@ -477,8 +486,10 @@ for k in (1, 2, 3):
 def stk():
     fig, ax = plt.subplots(figsize=(5.4, 3.6))
     cols = {"Supervised": C["neutral"], "SMILe": C["compute"], "DAgger": C["memory"]}
-    for name, ys in calcs.STK.items():
-        ax.plot(calcs.STK_X, ys, "-o", color=cols[name], lw=3, ms=7)
+    for name in cols:
+        pts = sorted(calcs.STK.where(method=name), key=lambda r: r["iteration"])
+        ax.plot([r["iteration"] for r in pts], [r["falls_per_lap"] for r in pts], "-o",
+                color=cols[name], lw=3, ms=7)
     ax.text(20.4, 4.0, "supervised", color=cols["Supervised"], fontsize=14, fontweight="bold",
             va="center")
     ax.text(20.4, 1.95, "SMILe", color=cols["SMILe"], fontsize=14, fontweight="bold",
@@ -487,8 +498,8 @@ def stk():
             va="center")
     ax.set_xlim(0, 26)
     ax.set_ylim(-0.1, 4.5)
-    ax.set_xticks([1, 5, 10, 15, 20])
-    ax.set_xlabel("Training iterations (about 1,000 states each)", fontsize=13)
+    ax.set_xticks(sorted({r["iteration"] for r in calcs.STK.entries}))
+    ax.set_xlabel(f"Training iterations (about {val('stk_states')} states each)", fontsize=13)
     ax.set_ylabel("Falls off the track per lap", fontsize=14)
     ax.tick_params(labelsize=13)
     sp.save(fig, out / "stk.svg")
@@ -520,9 +531,10 @@ prefpair()
 
 # ===================================================== distillation (Ex 8)
 def distill():
-    d = calcs.ex8()
+    d = calcs.DIST
     fig, ax = plt.subplots(figsize=(5.4, 3.6))
-    vals = [d["uncached"] / 1000, d["cached"] / 1000, calcs.EX8["redistill"] / 1000]
+    vals = [calcs.usd(d.uncached_spend) / 1000, calcs.usd(d.cached_spend) / 1000,
+            calcs.usd(calcs.DIST_S.redistill_cost) / 1000]
     labs = ["saved,\nno caching", "saved,\ncached prefix", "redistill\nonce a month"]
     cols = [C["data"], C["memory"], C["danger"]]
     ax.bar(range(3), vals, color=cols, width=0.6)
@@ -542,21 +554,22 @@ distill()
 
 # ===================================================== LoRA memory (NM 16.5)
 def loramem():
-    l = calcs.nm165()
+    l = calcs.LORA_S
+    full, frozen, total = calcs.gb(l.full_state), calcs.gb(l.weights), calcs.gb(l.total)
     fig, ax = plt.subplots(figsize=(5.4, 3.6))
-    ax.bar(0, l["full_gb"], color=C["compute"], width=0.55)
-    ax.bar(1, l["frozen_gb"], color=C["neutral"], width=0.55)
-    ax.bar(1, l["ad_mb"] / 1000, bottom=l["frozen_gb"], color=C["compute"], width=0.55)
-    ax.text(0, l["full_gb"] + 3, f"{l['full_gb']:.0f} GB", ha="center", fontsize=15,
+    ax.bar(0, full, color=C["compute"], width=0.55)
+    ax.bar(1, frozen, color=C["neutral"], width=0.55)
+    ax.bar(1, calcs.gb(l.adapter_state), bottom=frozen, color=C["compute"], width=0.55)
+    ax.text(0, full + 3, f"{val('lora_full_gb')} GB", ha="center", fontsize=15,
             fontweight="bold", color=C["compute"])
-    ax.text(1, l["lora_gb"] + 3, f"{l['lora_gb']:.2f} GB", ha="center", fontsize=15,
+    ax.text(1, total + 3, f"{val('lora_gb')} GB", ha="center", fontsize=15,
             fontweight="bold", color=C["text"])
-    ax.text(1.35, l["frozen_gb"] / 2, "frozen base\n2 B/param", fontsize=13,
+    ax.text(1.35, frozen / 2, f"frozen base\n{val('lora_b_frozen')} B/param", fontsize=13,
             color=C["neutral"], va="center", fontweight="bold")
-    ax.text(0.35, 95, "16 B per\ntrained param", fontsize=13, color=C["compute"],
+    ax.text(0.35, 95, f"{val('lora_b_trained')} B per\ntrained param", fontsize=13, color=C["compute"],
             fontweight="bold")
     ax.set_xticks([0, 1])
-    ax.set_xticklabels(["full\nfine-tuning", "LoRA run\n(0.10% trained)"], fontsize=14)
+    ax.set_xticklabels(["full\nfine-tuning", f"LoRA run\n({val('lora_frac_pct')}% trained)"], fontsize=14)
     ax.set_xlim(-0.5, 2.1)
     ax.set_ylim(0, 145)
     ax.set_ylabel("Parameter state (GB)", fontsize=14)
