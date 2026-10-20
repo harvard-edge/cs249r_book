@@ -88,6 +88,19 @@
     }
     const scanButton=node('button','Complete the scan');scanButton.type='button';scanButton.dataset.control='scan';
     controls.append(scanButton);
+    const expandButton=node('button','Expand');expandButton.type='button';expandButton.setAttribute('aria-haspopup','dialog');controls.append(expandButton);
+    const dialog=node('dialog','','life-expanded'),closeButton=node('button','Close expanded animation','life-expanded-close');closeButton.type='button';
+    dialog.setAttribute('aria-label','Expanded convolution animation');dialog.append(closeButton);outer.append(dialog);
+    const placeholder=document.createComment('Convolution inline position');
+    function restoreInline(){pause();if(placeholder.parentNode)placeholder.after(panel);else dialog.before(panel);expandButton.hidden=false;expandButton.focus();requestAnimationFrame(()=>{if(!dialog.open&&expandButton.isConnected)expandButton.focus();});}
+    expandButton.addEventListener('click',()=>{pause();panel.before(placeholder);expandButton.hidden=true;dialog.append(panel);dialog.showModal();closeButton.focus();},{signal});
+    closeButton.addEventListener('click',()=>dialog.close(),{signal});
+    dialog.addEventListener('close',restoreInline,{signal});
+    const speedLabel=node('label','Speed ','life-speed'),speedMenu=node('select');
+    speedMenu.id=outer.id+'-convolution-speed';speedLabel.htmlFor=speedMenu.id;
+    const rates=[.5,1,1.5,2];let speed=1;
+    rates.forEach(rate=>{const option=node('option',`${rate}×`);option.value=rate;speedMenu.append(option);});speedMenu.value='1';
+    speedMenu.setAttribute('aria-label','Playback speed');speedLabel.append(speedMenu);controls.append(speedLabel);
     const scope=node('p','Single input channel · stride 1 · no padding or bias · output before activation. The filter is used without flipping.','life-scope');
     const label=node('label','Step ','life-sequence'), menu=node('select');
     menu.setAttribute('aria-label','Animation sequence'); label.append(menu);
@@ -114,7 +127,7 @@
     const equation=node('p','','life-row-equation'), total=node('p','','life-calculation-total');
     calculation.append(calculationLabel,rowControls,equation,total);
     workspace.append(canvas,calculation,sourceLink,inset);
-    const keys=node('p','Keyboard: N Next · P Back · K Play/Pause · R Restart. Focus the animation to use shortcuts.','life-keys');
+    const keys=node('p','Keyboard: N Next · P Back · K Play/Pause · R Restart · −/+ Speed. Expand opens a full-window view. Focus the animation to use shortcuts.','life-keys');
     const legend=node('div','','life-legend');
     for (const [text,color] of [['Input window','#ff8000'],['Input contributions','#2455d6'],['Output activations','#a64ca6']]) {
       const chip=node('span',text); chip.style.setProperty('--chip',color); legend.append(chip);
@@ -133,7 +146,7 @@
       states.push({row,col,phase:'write',title:`Position (${row}, ${col}): store the output`,text:'One activation is now stored in the corresponding output cell. The other input values remain available for overlapping windows.'});
     }
     states.forEach((s,i) => {const o=node('option',`${i+1}. ${s.title}`);o.value=i;menu.append(o);});
-    let index=0, completed=0, running=false, moving=false, scanning=false, timer=null, effects=[], finishAction=null, motionFrame=null, motionTick=null;
+    let index=0, completed=0, running=false, moving=false, scanning=false, timer=null, effects=[], finishAction=null, motionFrame=null, motionTick=null, holdRemaining=null, holdStarted=null;
     const coordinates=s => {
       if(s.pose) return {window:[orangeOrigin,add(orangeOrigin,scale(lower.x,3)),add(orangeOrigin,scale(add(lower.x,lower.y),3)),add(orangeOrigin,scale(lower.y,3))],output:originalOutput,shift:{x:0,y:0}};
       const {row,col}=s, window=corners(lower,col,row,3);
@@ -269,21 +282,38 @@
       inset.dataset.output=String(value.output);
     }
     function cancel() {
-      clearTimeout(timer); timer=null;
+      clearTimeout(timer); timer=null;holdRemaining=null;holdStarted=null;
       if(motionFrame!==null)cancelAnimationFrame(motionFrame);motionFrame=null;motionTick=null;
       effects.forEach(e=>e.cancel()); effects=[]; particles.replaceChildren(); finishAction=null;
     }
     function pause() {
-      clearTimeout(timer);timer=null;running=false;effects.forEach(e=>e.pause());
+      settleHold();running=false;effects.forEach(e=>{const time=e.currentTime;e.pause();if(time!==null)e.currentTime=time;});
       if(motionFrame!==null)cancelAnimationFrame(motionFrame);motionFrame=null;paint();
     }
     function seek(i) {cancel();running=false;moving=false;scanning=false;index=completed=i;paint();}
-    function schedule() {if(running&&index<states.length-1) timer=setTimeout(()=>advance(true),scanning?0:hold);}
+    // Reading time is tracked in unscaled milliseconds so changing speed keeps progress.
+    function settleHold() {
+      if(holdStarted!==null&&holdRemaining!==null)holdRemaining=Math.max(0,holdRemaining-(performance.now()-holdStarted)*speed);
+      clearTimeout(timer);timer=null;holdStarted=null;
+    }
+    function schedule(resume=false) {
+      if(!running||index===states.length-1)return;
+      if(!resume||holdRemaining===null)holdRemaining=scanning?0:hold;
+      holdStarted=performance.now();timer=setTimeout(()=>{holdRemaining=null;holdStarted=null;timer=null;advance(true);},holdRemaining/speed);
+    }
+    function setSpeed(value) {
+      if(!rates.includes(value))return;
+      const waiting=holdStarted!==null;settleHold();speed=value;
+      effects.forEach(effect=>{const time=effect.currentTime;effect.updatePlaybackRate(speed);if(!running){effect.pause();if(time!==null)effect.currentTime=time;}});
+      speedMenu.value=String(speed);panel.dataset.speed=String(speed);
+      if(waiting&&running)schedule(true);
+    }
+    speedMenu.addEventListener('change',()=>setSpeed(Number(speedMenu.value)),{signal});
     function advance(autoplay=false) {
       if(!autoplay)scanning=false;
       if(moving){running=false;finishAction?.();return;}
       if(index===states.length-1)return;
-      clearTimeout(timer);timer=null;
+      clearTimeout(timer);timer=null;holdRemaining=null;holdStarted=null;
       const before=states[index];index++;running=autoplay;moving=true;
       const s=states[index];applyPose(s);drawOutputs(s);paint();
       const duration=media.matches?0:movement;
@@ -298,7 +328,7 @@
       finishAction=finish;
       if(!duration){finish();return;}
       const animate=(el,frames)=>{
-        const animation=el.animate(frames,{duration,easing:'ease-in-out',fill:'forwards'});effects.push(animation);return animation;
+        const animation=el.animate(frames,{duration,easing:'ease-in-out',fill:'forwards'});animation.updatePlaybackRate(speed);effects.push(animation);return animation;
       };
       if(s.phase==='move') {
         applyCoordinates(coordinates(before));
@@ -332,7 +362,8 @@
       if(running){pause();return;}
       running=true;
       if(moving){effects.forEach(e=>e.play());motionTick?.();paint();return;}
-      if(index===states.length-1)seek(0);
+      if(index===states.length-1){seek(0);running=true;}
+      if(holdRemaining!==null){paint();schedule(true);return;}
       advance(true);
     }
     buttons.next.addEventListener('click',()=>advance()); buttons.back.addEventListener('click',()=>seek(Math.max(0,index-1)));
@@ -343,13 +374,15 @@
     });
     menu.addEventListener('change',()=>seek(Number(menu.value)));
     outer.addEventListener('keydown',event=>{
-      if(figure.dataset.figureView!=='explore'||event.repeat||event.altKey||event.ctrlKey||event.metaKey||event.shiftKey||event.target.closest('input,select,textarea,[contenteditable]'))return;
-      const key=event.key.toLowerCase();if(!['n','p','k','r'].includes(key))return;
+      if(figure.dataset.figureView!=='explore'||event.repeat||event.altKey||event.ctrlKey||event.metaKey||event.target.closest('input,select,textarea,[contenteditable]'))return;
+      const key=event.key.toLowerCase(),faster=key==='+'||key==='=',slower=key==='-'||key==='−';
+      if(faster||slower){event.preventDefault();setSpeed(rates[Math.max(0,Math.min(rates.length-1,rates.indexOf(speed)+(faster?1:-1)))]);return;}
+      if(event.shiftKey||!['n','p','k','r'].includes(key))return;
       event.preventDefault();if(key==='n')advance();else if(key==='p')seek(Math.max(0,index-1));else if(key==='r')seek(0);else play();
     },{signal});
-    figure.addEventListener('mlsys-view-change',e=>{if(e.detail.view!=='explore')pause();else requestAnimationFrame(()=>{position();outer.scrollIntoView({block:'start'});});},{signal});
+    figure.addEventListener('mlsys-view-change',e=>{if(e.detail.view!=='explore'){pause();if(dialog.open)dialog.close();}else requestAnimationFrame(()=>{position();outer.scrollIntoView({block:'start'});});},{signal});
     document.addEventListener('visibilitychange',()=>{if(document.hidden)pause();},{signal});
-    const visibilityObserver=new IntersectionObserver(entries=>{if(!entries[0].isIntersecting)pause();});visibilityObserver.observe(outer);
+    const visibilityObserver=new IntersectionObserver(entries=>{if(!dialog.open&&!entries[0].isIntersecting)pause();});visibilityObserver.observe(outer);
     media.addEventListener('change',()=>{if(media.matches&&moving){running=false;finishAction?.();}},{signal});
     const position=()=>{
       const header=document.querySelector('#quarto-header');
@@ -360,6 +393,6 @@
     const land=()=>{if(location.hash==='#fig-cnn')outer.scrollIntoView({block:'start'});};
     if(document.readyState==='complete')land();else window.addEventListener('load',land,{once:true,signal});
     paint();
-    return {pause,destroy(){running=false;cancel();lifecycle.abort();visibilityObserver.disconnect();headerObserver.disconnect();}};
+    return {pause,destroy(){running=false;cancel();if(dialog.open)dialog.close();if(placeholder.parentNode)placeholder.after(panel);else dialog.before(panel);dialog.remove();placeholder.remove();lifecycle.abort();visibilityObserver.disconnect();headerObserver.disconnect();}};
   };
 })();

@@ -77,6 +77,8 @@
     }
     const movementMs = timing('mlsysMovementMs');
     const readingMs = timing('mlsysReadingPauseMs');
+    const speeds = [0.5, 1, 1.5, 2];
+    let speed = 1;
     const id = 'mlsys-original-' + (++serial);
     root.classList.add('mlsys-original-player');
     root.tabIndex = 0;
@@ -115,6 +117,18 @@
       short.setAttribute('aria-hidden', 'true');
       control.replaceChildren(full, short);
     }
+    const speedLabel = make('label', 'mlsys-original-speed', 'Speed ');
+    const speedSelect = make('select');
+    speedSelect.id = id + '-speed';
+    speedSelect.setAttribute('aria-label', 'Playback speed');
+    speedSelect.title = 'Playback speed (− / +); affects movement and reading pauses';
+    speedLabel.htmlFor = speedSelect.id;
+    speeds.forEach(rate => {
+      const option = make('option', '', rate + '×');
+      option.value = String(rate); speedSelect.append(option);
+    });
+    speedSelect.value = String(speed);
+    speedLabel.append(speedSelect); controls.append(speedLabel);
     const currentCue = make('div', 'mlsys-original-current-cue');
     currentCue.setAttribute('aria-hidden', 'true');
     const cueStep = make('span', 'mlsys-original-cue-step');
@@ -132,7 +146,7 @@
       sequence.append(option);
     });
     sequenceLabel.append(sequence);
-    const hints = make('p', 'mlsys-original-shortcuts', 'Keyboard: N next · P back · K play/pause · R restart.');
+    const hints = make('p', 'mlsys-original-shortcuts', 'Keyboard: N next · P back · K play/pause · R restart · −/+ speed.');
     const narration = make('div', 'mlsys-original-narration');
     narration.setAttribute('aria-live', 'polite');
     narration.setAttribute('aria-atomic', 'true');
@@ -201,7 +215,7 @@
       frame = 0;
       if (!clock || !clock.running || destroyed) return;
       const current = clock;
-      if (current.last != null) current.elapsed = Math.min(current.duration, current.elapsed + now - current.last);
+      if (current.last != null) current.elapsed = Math.min(current.duration, current.elapsed + (now - current.last) * speed);
       current.last = now;
       const progress = current.duration ? current.elapsed / current.duration : 1;
       try {
@@ -229,6 +243,24 @@
       clock.running = true;
       clock.last = null;
       if (!frame) frame = requestAnimationFrame(advanceClock);
+    }
+    function setSpeed(value) {
+      const rate = Number(value);
+      if (!speeds.includes(rate)) throw new RangeError('Unsupported playback speed.');
+      if (destroyed) return;
+      // Charge time before this change at the old rate; retain the same
+      // timeline position, pending endpoint, and paused state.
+      if (clock?.running && clock.last != null) {
+        const now = performance.now();
+        clock.elapsed = Math.min(clock.duration, clock.elapsed + (now - clock.last) * speed);
+        clock.last = now;
+      }
+      speed = rate;
+      speedSelect.value = String(speed);
+      root.dataset.speed = String(speed);
+    }
+    function changeSpeed(direction) {
+      setSpeed(speeds[Math.max(0, Math.min(speeds.length - 1, speeds.indexOf(speed) + direction))]);
     }
     function pause() {
       playing = false;
@@ -372,10 +404,14 @@
     listen(backButton, 'click', back);
     listen(nextButton, 'click', next);
     listen(restartButton, 'click', restart);
+    listen(speedSelect, 'change', () => setSpeed(speedSelect.value));
     listen(sequence, 'change', () => go(Number(sequence.value)));
     listen(root, 'keydown', event => {
       if (event.defaultPrevented || event.repeat || event.ctrlKey || event.altKey || event.metaKey ||
           event.target.closest('input, textarea, select, a, [contenteditable]:not([contenteditable="false"])')) return;
+      if (['-', '_', '+', '='].includes(event.key)) {
+        event.preventDefault(); changeSpeed(event.key === '-' || event.key === '_' ? -1 : 1); return;
+      }
       const action = { n: next, p: back, k: toggle, r: restart }[event.key.toLowerCase()];
       if (action) { event.preventDefault(); action(); }
     });
@@ -411,11 +447,12 @@
       root.removeAttribute('aria-busy');
       root.removeAttribute('tabindex');
     }
+    setSpeed(1);
     endpoint(0);
     owningFigure?.classList.add('mlsys-original-sticky-frame');
     stopHeaderWatch = watchHeader(root);
-    return { go, next, back, play, pause, restart, expand, closeExpanded, destroy,
-      get state() { return { index, target, playing, phase, paused: !!clock && !clock.running, destroyed }; } };
+    return { go, next, back, play, pause, restart, expand, closeExpanded, destroy, setSpeed,
+      get state() { return { index, target, playing, phase, paused: !!clock && !clock.running, speed, destroyed }; } };
   }
   window.MLSysOriginalPlayer = Object.freeze({ create });
 }());

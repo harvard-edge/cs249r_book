@@ -84,7 +84,7 @@
     const cue = document.createElement('p'); cue.className = 'original-fsdp-resident';
     const optional = document.createElement('p'); optional.className = 'original-fsdp-note';
     optional.textContent = 'Dashed “optional” cells show where another unit could be prefetched. This walkthrough does not execute prefetch. Past cells record the earlier phase; pale future cells are a preview.';
-    let stageNode = null, mounted = false, currentIndex=0, resizeObserver=null;
+    let stageNode = null, mounted = false, currentIndex=0, resizeObserver=null, resizeFrame=0;
     function keepLabels() {
       if (!stageNode) return;
       const scale = art.getBoundingClientRect().width / 680;
@@ -97,6 +97,15 @@
       const labelWidth = 163 * scale;
       stageNode.scrollLeft = Math.max(0, (205 + 80 * phaseFor(index)) * scale - (stageNode.clientWidth + labelWidth) / 2);
       keepLabels();
+    }
+    // Resize delivery only schedules work: writing the sibling's scaled height
+    // during ResizeObserver delivery can trigger WebKit's undelivered-loop error.
+    function scheduleCenterPhase() {
+      if (resizeFrame) return;
+      resizeFrame = requestAnimationFrame(() => {
+        resizeFrame = 0;
+        centerPhase(currentIndex);
+      });
     }
     function appearance(index, column, row) {
       if (row < 2) return {opacity: 1, state: 'present'};
@@ -124,7 +133,7 @@
           stageNode.setAttribute('aria-label','Original FSDP phase history; scroll horizontally to inspect phases');
           stageNode.append(art);stage.append(stageNode,livePanel);details.append(cue,optional);
           stageNode.addEventListener('scroll',keepLabels,{passive:true});
-          resizeObserver=new ResizeObserver(()=>centerPhase(currentIndex));resizeObserver.observe(stageNode);mounted=true;
+          resizeObserver=new ResizeObserver(scheduleCenterPhase);resizeObserver.observe(stageNode);mounted=true;
         }
         for (let column = 0; column < 6; column++) for (let row = 0; row < 6; row++) applyCell(index, column, row);
         updateLive(index);
@@ -158,6 +167,6 @@
         });
       },
     });
-    return {pause: () => controller.pause(), destroy: () => {stageNode?.removeEventListener('scroll', keepLabels); resizeObserver?.disconnect(); controller.destroy();}};
+    return {pause: () => controller.pause(), destroy: () => {stageNode?.removeEventListener('scroll', keepLabels); resizeObserver?.disconnect(); cancelAnimationFrame(resizeFrame); controller.destroy();}};
   };
 })();

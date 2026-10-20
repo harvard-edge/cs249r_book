@@ -33,6 +33,19 @@ Reduced-motion navigation commits the next state immediately, without an
 intermediate animation clock that a visibility pause could interrupt.
 Invalid or missing settings leave the static figure available.
 
+Readers can temporarily choose **0.5×, 1×, 1.5×, or 2×** in the visible Speed
+control, or use **− / +** while the figure has focus. The initial rate is 1×;
+the YAML durations remain the defaults. This per-figure override scales movement
+and automatic reading pauses, preserves position when changed, and does not
+resume a paused action. Restart preserves the chosen rate; reloading starts at
+1×. N/P still advances or reverses one step. Speed never changes the modeled
+quantities or the ordered endpoints.
+
+**Expand** opens the same live component in a full-window dialog. Opening and
+closing pause playback, retain the current step and speed, and preserve the
+explanation and controls. Close remains visible while scrolling; Escape returns
+to the chapter and restores focus. Print and EPUB continue to use Diagram.
+
 The shared layout keeps the sequence menu and current explanation above the
 playback controls, with the controls and visible N/P/K/R hints beside the
 changing diagram. Only the compact toolbar and step cue remain sticky. The
@@ -118,24 +131,34 @@ learner readability; this does not constitute student testing. A source-art
 mapping must preserve the illustrated workload and spatial relationships.
 Alternative toy cases must remain explicit supporting examples.
 
-The final integrated HTML run is
-`books/_build/parallel/20261020-004205-11342`; all four full-volume HTML jobs
-passed. The 84 new modules have separate current production technical and
-learner-view role records. The retained implementations combine their historical review basis with
-recorded engine evidence and current packaging verification when their own
-module bytes are unchanged. Quantization is an explicit changed-baseline
-exception: its previous review remains historical, and fresh independent
-technical and learner production proof replaces unchanged-module acceptance.
-Current emitted assets are verified separately. The
-original-art catalog binds these records to current source, artwork, runtime,
-and actual owning chapter HTML. Stale records return to awaiting review.
+The current integrated HTML run is
+`books/_build/parallel/20261020-104811-83480`; all four full-volume HTML jobs
+passed. The controls update adds temporary playback rates and full-window
+inspection without changing chapter prose, canonical artwork, timing defaults,
+or modeled quantities. The 84 newer modules retain separate production
+technical and learner-view role records. Each update preserves the prior review
+basis and distinguishes inherited numerical evidence from fresh controls and
+layout checks. The original-art catalog binds acceptance to current source,
+artwork, runtime, and actual owning chapter HTML. Stale records return to
+awaiting review.
 
-The final packaging preserves source, artwork, shared runtime, and the other
-91 controller implementations byte for byte. Their earlier Chromium/WebKit
-checks are explicitly inherited through matching old/new audit hashes and fresh
-packaging verification. The seven focused controller fixes receive
-fresh focused production retakes in both engines; inherited reports are not
-presented as newly run against the later build.
+The controls review covers all 98 implementations in Chromium and WebKit on
+desktop and phone, in both themes. The final build retains 93 implementations
+and all their linked runtime bytes from the preceding controls build; their
+successful UI profiles are explicitly inherited through matching source,
+artwork, runtime, and packaged-asset hashes. Five controllers receive fresh
+packaged retakes: convolution, FSDP, tensor layout, block-sparse GEMM, and im2col.
+The focused fixes restore convolution after closing its expanded view, schedule
+FSDP resize work outside observer delivery, and remeasure moving HTML values
+when the three matrix layouts expand or return inline. Paused progress remains
+unchanged. Independent learner-view review checks these corrected spatial
+relationships separately from control behavior.
+
+A separate WebKit phone orientation/repeated-expansion stress trace can still
+emit a ResizeObserver delivery warning. The warning also occurs with the prior
+tensor and im2col controllers; equivalent prior-controller reproduction was not
+established for block-sparse GEMM. This stress limitation remains recorded.
+The ordinary packaged controls profiles pass without page errors.
 
 Chromium and WebKit reports record endpoint traversal, local SVG references,
 keyboard navigation, and static print fallback in desktop/narrow light/dark
@@ -157,6 +180,7 @@ Recheck the shared controller and packaged chapter endpoints with:
 
 ```sh
 python3 binder/tools/scripts/check_original_player.py
+python3 binder/tools/scripts/check_original_player_speed.py
 python3 binder/tools/scripts/check_original_figures.py --build-root books/_build/parallel/RUN
 python3 binder/tools/scripts/check_original_convolution.py --url CHAPTER_URL --engine webkit
 ```

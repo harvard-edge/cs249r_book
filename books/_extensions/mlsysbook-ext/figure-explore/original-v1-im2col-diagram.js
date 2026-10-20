@@ -8,7 +8,7 @@ window.MLSysFigureLessons["original-v1-im2col-diagram"]=async(root,{outer,verifi
  root.classList.add('mlsys-v1c');const diagram=el('div','v1c-diagram'),status=el('p','v1c-status'),inspection=el('details','v1c-original');inspection.append(el('summary','','Inspect the unchanged source drawing'));const art=verifiedArtwork.cloneNode(true);art.removeAttribute('width');art.removeAttribute('height');art.setAttribute('aria-label','Verified original chapter artwork');inspection.append(art);
  const region=(title,columns=1)=>{const box=el('section','v1c-region');box.append(el('strong','',title));const grid=el('div','v1c-grid');grid.style.setProperty('--columns',columns);box.append(grid);diagram.append(box);return grid;};
  const detail=el('details');detail.append(el('summary','','Inspect the operation'));const equation=el('p');detail.append(equation);
- let steps=[],tracks=[],current=0;
+ let steps=[],tracks=[],current=0,clearFlightResize=()=>{};
  
  const input=region('Input channel 0 · original 3 × 3',3),input2=region('Input channel 1 · original 3 × 3',3),dest=region('Materialized patch matrix · 4 × 8',8),weights=region('W · 8×1',1),result=region('Output positions · supporting calculation',4); diagram.classList.add('v1c-im2col');const gemm=el('div','v1c-gemm');diagram.insertBefore(gemm,dest.parentElement);gemm.append(dest.parentElement,weights.parentElement);
  const ins=Array.from({length:18},(_,k)=>{const n=cell(String(k+1),k<9?'':'orange');(k<9?input:input2).append(n);return n;}),ds=Array.from({length:32},()=>{const n=cell('—','empty');dest.append(n);return n;}),ws=Array.from({length:8},(_,k)=>{const n=cell(String(k+1),'green');weights.append(n);return n;}),os=Array.from({length:4},()=>{const n=cell('—','empty');result.append(n);return n;});
@@ -18,8 +18,20 @@ window.MLSysFigureLessons["original-v1-im2col-diagram"]=async(root,{outer,verifi
  function prepare(i){ins.forEach(n=>n.classList.remove('active'));if(i>0&&i<5){const r=i-1;patch(r).forEach(k=>ins[k].classList.add('active'));tracks=patch(r).map((k,j)=>({source:ins[k],dest:ds[r*8+j],text:String(k+1)}));}else if(i>=5){const r=i-5;tracks=values[r].map((v,k)=>({source:ds[r*8+k],dest:os[r],text:`${v}×${k+1}`}));}}
 
  steps=steps.map((s,i)=>({...s,description:(i?'On completion: ':'Initial state: ')+s.description}));
- function render(i,{stage,details}){current=i;tracks=[];if(!stage.contains(diagram))stage.append(diagram,status);if(!details.contains(detail))details.append(detail,inspection);draw(i);root.dataset.lessonState=String(i);root.dataset.stateEvidence=JSON.stringify(steps[i].evidence||{});}
- const controller=window.MLSysOriginalPlayer.create({root,outer,title:"Which input values are copied into each unfolded row?",scope:"Exact source values: channels 1\u20139 and 10\u201318; two 2 \u00d7 2 kernels stack into weights 1\u20138. Valid stride-one lowering creates four rows of eight values. This version materializes the buffer; implicit GEMM need not.",steps,render,transition:({to,onFrame})=>{
-  const old=current;tracks=[];prepare(to);const flight=tracks.map(({source,dest,text,kind})=>{const a=source.getBoundingClientRect(),b=dest.getBoundingClientRect(),r=diagram.getBoundingClientRect(),n=cell(text,kind||'moving');n.classList.add('v1c-flight');n.style.left=(a.left-r.left)+'px';n.style.top=(a.top-r.top)+'px';n.style.width=Math.min(a.width,86)+'px';n.style.height=Math.min(a.height,38)+'px';diagram.append(n);return{n,dx:b.left-a.left,dy:b.top-a.top,release:kind==='release'};});status.textContent='Pending: '+steps[to].label+'. Displayed storage and completed results remain at the preceding endpoint until this operation finishes.';onFrame(t=>flight.forEach(({n,dx,dy,release})=>{n.style.transform=`translate(${dx*t}px,${dy*t}px)`;if(release)n.style.opacity=String(1-t);}));
- }});return controller;
+ function render(i,{stage,details}){clearFlightResize();current=i;tracks=[];if(!stage.contains(diagram))stage.append(diagram,status);if(!details.contains(detail))details.append(detail,inspection);draw(i);root.dataset.lessonState=String(i);root.dataset.stateEvidence=JSON.stringify(steps[i].evidence||{});}
+ const controller=window.MLSysOriginalPlayer.create({root,outer,title:"Which input values are copied into each unfolded row?",scope:"Exact source values: channels 1\u20139 and 10\u201318; two 2 \u00d7 2 kernels stack into weights 1\u20138. Valid stride-one lowering creates four rows of eight values. This version materializes the buffer; implicit GEMM need not.",steps,render,transition:({to,onFrame,signal})=>{
+  clearFlightResize();tracks=[];prepare(to);
+  const flight=tracks.map(({source,dest,text,kind})=>{const n=cell(text,kind||'moving');n.classList.add('v1c-flight');diagram.append(n);return{n,source,dest,release:kind==='release'};});
+  let progress=0,disposed=false,resizeFrame=0;
+  // Layout changes redraw the frozen visual fraction; only the player advances it.
+  function paint(){if(disposed)return;const r=diagram.getBoundingClientRect(),routes=flight.map(f=>({...f,a:f.source.getBoundingClientRect(),b:f.dest.getBoundingClientRect()}));routes.forEach(({n,a,b,release})=>{n.style.left=(a.left-r.left)+'px';n.style.top=(a.top-r.top)+'px';n.style.width=Math.min(a.width,86)+'px';n.style.height=Math.min(a.height,38)+'px';n.style.transform=`translate(${(b.left-a.left)*progress}px,${(b.top-a.top)*progress}px)`;if(release)n.style.opacity=String(1-progress);});}
+  function schedulePaint(){if(!disposed&&!resizeFrame)resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;paint();});}
+  const observer=typeof ResizeObserver==='function'?new ResizeObserver(schedulePaint):null;
+  const relocation=new MutationObserver(schedulePaint);relocation.observe(outer,{childList:true,subtree:true});
+  function cleanup(){if(disposed)return;disposed=true;observer?.disconnect();relocation.disconnect();cancelAnimationFrame(resizeFrame);resizeFrame=0;window.removeEventListener('resize',schedulePaint);signal.removeEventListener('abort',cleanup);if(clearFlightResize===cleanup)clearFlightResize=()=>{};}
+  clearFlightResize=cleanup;signal.addEventListener('abort',cleanup,{once:true});window.addEventListener('resize',schedulePaint);
+  new Set([diagram,...flight.flatMap(({source,dest})=>[source,dest])]).forEach(n=>observer?.observe(n));
+  status.textContent='Pending: '+steps[to].label+'. Displayed storage and completed results remain at the preceding endpoint until this operation finishes.';
+  onFrame(t=>{progress=t;paint();});
+ }});const destroy=controller.destroy;controller.destroy=()=>{clearFlightResize();destroy();};return controller;
 };})();
