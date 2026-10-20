@@ -154,6 +154,13 @@ __all__ = [
     "StorageAmplificationResult",
     "MaintainedPolicyCostResult",
     "WordOverlapResult",
+    # Tool calling (added 2026-10-20)
+    "BlindRetryResult",
+    "ObservationCarryResult",
+    "ModelPollingResult",
+    "ToolCatalogSelectionResult",
+    "ToolkitGranularityResult",
+    "IntegrationAdaptersResult",
 ]
 
 
@@ -1098,6 +1105,7 @@ class AgentRunSummaryResult(SolverResult):
     observations: int
     nonzero_exits: int
     truncated_outputs: int
+    truncated_tasks: int = 0             # tasks with at least one truncated output (added 2026-10-20)
     syntax_error_tasks: int
     syntax_error_accepted: int
     call_bins: List[Dict[str, Any]]      # {"low", "high", "tasks", "accepted"} per bin
@@ -2365,3 +2373,66 @@ class KvResidencyArchetypeResult(SolverResult):
     recompute_share: float                   # recompute / turn cycle
     shared_retained_rate: Quantity           # fit shared / turn cycle
     shared_released_rate: Quantity           # fit shared / generation
+
+
+# --- Tool calling (added 2026-10-20) ------------------------------------------
+
+class BlindRetryResult(SolverResult):
+    """Result from BlindRetryModel: timeouts and duplicate effects under one blind retry."""
+    timeout_probability: float           # 1 - (1 - q)(1 - r)
+    duplicate_probability: float         # (1 - q) r (1 - q)
+    calls: int                           # calls in the period
+    timeouts: float                      # expected timeouts in the period
+    duplicates: float                    # expected duplicate effects in the period
+
+
+class ObservationCarryResult(SolverResult):
+    """Result from ObservationCarryModel: a raw log against the shaped view later calls carry."""
+    raw_tokens: Quantity                 # raw bytes / bytes per token
+    raw_windows: float                   # raw tokens / window
+    shaped_share: float                  # shaped tokens / window
+    carried_tokens: Quantity             # shaped tokens x later calls
+    carried_cost_uncached: Quantity      # USD
+    carried_cost_cached: Quantity        # USD, at the cached share of the price
+
+
+class ModelPollingResult(SolverResult):
+    """Result from ModelPollingModel: status calls a model makes while a job is pending."""
+    polls: int                           # ceil(T / dt) - 1
+    input_tokens: int
+    output_tokens: int
+    cached_price: Quantity               # USD per cached input token
+    blended_input_price: Quantity        # USD per input token at the cache hit share
+    input_cost: Quantity                 # USD
+    output_cost: Quantity                # USD
+    cost: Quantity                       # USD, input + output
+    worst_delay: Quantity                # one poll interval
+
+
+class ToolCatalogSelectionResult(SolverResult):
+    """Result from ToolCatalogSelectionModel: descriptor tokens staged per call, full against selected."""
+    full_tokens: int                     # registered x per descriptor
+    selected_descriptor_tokens: int      # selected x per descriptor
+    selected_tokens: int                 # selected descriptors + overhead
+    released_tokens: int                 # full - selected
+    unused_descriptor_tokens: int        # descriptors selection leaves out
+    break_even_unused: float             # overhead / per descriptor
+
+
+class ToolkitGranularityResult(SolverResult):
+    """Result from ToolkitGranularityModel: structured tools against one shell tool, per accepted task."""
+    structured_descriptor_tokens: int    # tools x tokens, per call
+    saved_tokens: int                    # per trajectory
+    saved_cost: Quantity                 # USD per trajectory
+    shell_attempt_cost: Quantity         # structured attempt - savings
+    structured_cost_per_accepted: Quantity
+    shell_cost_per_accepted: Quantity
+    structured_cost_per_accepted_with_loss: Quantity
+    shell_cost_per_accepted_with_loss: Quantity
+    break_even_change_probability: float  # shell change probability matching structured
+
+
+class IntegrationAdaptersResult(SolverResult):
+    """Result from IntegrationAdaptersModel: pairwise adapters against one shared protocol."""
+    pairwise: int                        # hosts x services
+    shared: int                          # hosts + services

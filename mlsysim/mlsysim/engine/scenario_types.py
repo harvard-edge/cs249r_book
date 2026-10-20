@@ -1402,6 +1402,12 @@ class AgentRunScenario(BaseScenario):
     """One recorded agent run over a benchmark (a per-task ``Literature`` series)."""
     series_name: str
     call_bin_edges: List[int]                  # model-call bin edges for the acceptance-by-length table
+    # Optional (added 2026-10-20): the harness's observation staging policy. An
+    # output at or above ``truncation_chars`` characters reaches the model as its
+    # first ``head_chars``, a count of elided characters, and its last ``tail_chars``.
+    truncation_chars: Optional[int] = None
+    head_chars: Optional[int] = None
+    tail_chars: Optional[int] = None
 
     @property
     def rows(self):
@@ -7056,3 +7062,107 @@ class KvResidencyArchetypeScenario(BaseScenario):
                                                  p.prefill.result.sustained_rate, p.link,
                                                  self.context_tokens, self.shared_prefix,
                                                  self.generation, self.wait)
+
+
+# --- Tool calling (added 2026-10-20) ------------------------------------------
+
+class BlindRetryScenario(BaseScenario):
+    """Mutating calls retried once after any timeout, with independent request and reply loss."""
+    request_loss: float              # probability a request is lost
+    reply_loss: float                # probability a reply is lost
+    workers: int
+    calls_per_worker: int            # mutating calls per worker per day
+
+    @property
+    def calls(self) -> int:
+        return self.workers * self.calls_per_worker
+
+    @property
+    def result(self):
+        from .solvers import BlindRetryModel
+        return BlindRetryModel().solve(self.request_loss, self.reply_loss, self.calls)
+
+
+class ObservationCarryScenario(BaseScenario):
+    """A raw tool output sized in windows, and its shaped view carried by later calls."""
+    raw_bytes: Quantity
+    bytes_per_token: Quantity        # assumed serialization ratio, byte/token
+    window: int                      # context window, tokens
+    shaped_tokens: int               # staged observation, tokens
+    carry_calls: int                 # later calls that carry it
+    input_price: Quantity            # USD per uncached input token
+    cached_fraction: float           # cached input billed at this share of the price
+
+    @property
+    def result(self):
+        from .solvers import ObservationCarryModel
+        return ObservationCarryModel().solve(self.raw_bytes, self.bytes_per_token, self.window,
+                                             self.shaped_tokens, self.carry_calls, self.input_price,
+                                             self.cached_fraction)
+
+
+class ModelPollingScenario(BaseScenario):
+    """A model that checks a pending job at a fixed interval until it completes."""
+    job_duration: Quantity
+    poll_interval: Quantity
+    context_tokens: int              # selected input per status call
+    output_tokens: int               # generated tokens per status call
+    cache_hit: float                 # share of input billed as cached
+    input_price: Quantity            # USD per uncached input token
+    cached_fraction: float           # cached input billed at this share of the price
+    output_price: Quantity           # USD per output token
+
+    @property
+    def result(self):
+        from .solvers import ModelPollingModel
+        return ModelPollingModel().solve(self.job_duration, self.poll_interval, self.context_tokens,
+                                         self.output_tokens, self.cache_hit, self.input_price,
+                                         self.cached_fraction, self.output_price)
+
+
+class ToolCatalogSelectionScenario(BaseScenario):
+    """A registered tool catalog staged whole or as a selected subset with overhead."""
+    registered: int                  # tools registered
+    selected: int                    # tools staged by selection
+    descriptor_tokens: int           # per descriptor, final serialization
+    selection_overhead: int          # selection interface and metadata, tokens
+
+    @property
+    def result(self):
+        from .solvers import ToolCatalogSelectionModel
+        return ToolCatalogSelectionModel().solve(self.registered, self.selected, self.descriptor_tokens,
+                                                 self.selection_overhead)
+
+
+class ToolkitGranularityScenario(BaseScenario):
+    """Structured tools against one shell tool, judged by cost per accepted task."""
+    tools: int                       # structured tools
+    tool_tokens: int                 # per structured descriptor
+    shell_tokens: int                # the one shell descriptor
+    calls: int                       # model calls per trajectory
+    input_price: Quantity            # USD per uncached input token
+    structured_attempt: Quantity     # USD per structured attempt
+    structured_acceptance: float
+    structured_change: float         # probability of an unconfined change
+    shell_acceptance: float
+    shell_change: float
+    change_cost: Quantity            # USD to detect and repair one unconfined change
+
+    @property
+    def result(self):
+        from .solvers import ToolkitGranularityModel
+        return ToolkitGranularityModel().solve(self.tools, self.tool_tokens, self.shell_tokens, self.calls,
+                                               self.input_price, self.structured_attempt,
+                                               self.structured_acceptance, self.structured_change,
+                                               self.shell_acceptance, self.shell_change, self.change_cost)
+
+
+class IntegrationAdaptersScenario(BaseScenario):
+    """Hosts connected to tool services, pairwise or through one shared protocol."""
+    hosts: int
+    services: int
+
+    @property
+    def result(self):
+        from .solvers import IntegrationAdaptersModel
+        return IntegrationAdaptersModel().solve(self.hosts, self.services)

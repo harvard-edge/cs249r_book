@@ -306,6 +306,25 @@ __all__ += [
     "WordOverlapModel",
 ]
 
+# --- Tool calling (added 2026-10-20) ---
+from .tool_calls import (
+    BlindRetryModel,
+    ObservationCarryModel,
+    ModelPollingModel,
+    ToolCatalogSelectionModel,
+    ToolkitGranularityModel,
+    IntegrationAdaptersModel,
+)
+
+__all__ += [
+    "BlindRetryModel",
+    "ObservationCarryModel",
+    "ModelPollingModel",
+    "ToolCatalogSelectionModel",
+    "ToolkitGranularityModel",
+    "IntegrationAdaptersModel",
+]
+
 # --- KV cache management (added 2026-10-20) ---
 from .kv_cache import (
     KvAttentionDesignModel,

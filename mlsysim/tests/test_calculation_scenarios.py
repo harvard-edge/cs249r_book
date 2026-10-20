@@ -2388,3 +2388,64 @@ def test_repair_and_support_residency():
     assert s.shared_fraction == approx(0.75) and s.residency_factor == approx(11)
     assert s.recompute.to("s").magnitude == approx(0.32488215)
     assert s.reload.to("ms").magnitude == approx(5.24288)
+
+
+# --- Tool calling (added 2026-10-20) -------------------------------------------
+
+def test_blind_retry_two_percent_loss():
+    r = Scenarios.BlindRetryTwoPercentLoss.result
+    assert r.timeout_probability == approx(0.0396)
+    assert r.duplicate_probability == approx(0.019208)
+    assert r.calls == 200_000 and r.duplicates == approx(3841.6)
+    assert r.timeouts == approx(7920)
+
+
+def test_twenty_four_megabyte_log_observation():
+    r = Scenarios.TwentyFourMegabyteLogObservation.result
+    assert r.raw_tokens.to("token").magnitude == approx(8_000_000)
+    assert r.raw_windows == approx(62.5) and r.shaped_share == approx(0.03125)
+    assert r.carried_tokens.to("token").magnitude == 120_000
+    assert r.carried_cost_uncached.to("USD").magnitude == approx(0.36)
+    assert r.carried_cost_cached.to("USD").magnitude == approx(0.036)
+
+
+def test_model_polling_intervals():
+    r = Scenarios.ModelPollingEveryFiveSeconds.result
+    assert r.polls == 59 and r.input_tokens == 1_933_312 and r.output_tokens == 2_360
+    assert r.input_cost.to("USD").magnitude == approx(0.84099072)
+    assert r.output_cost.to("USD").magnitude == approx(0.0354)
+    assert r.cost.to("USD").magnitude == approx(0.87639072)
+    assert r.worst_delay.to("s").magnitude == approx(5)
+    costs = [s.result.cost.to("USD").magnitude for s in (
+        Scenarios.ModelPollingEveryTenSeconds, Scenarios.ModelPollingEveryTwentySeconds,
+        Scenarios.ModelPollingEveryThirtySeconds, Scenarios.ModelPollingEverySixtySeconds)]
+    assert costs == approx([0.43076832, 0.20795712, 0.13368672, 0.05941632])
+
+
+def test_fifty_tool_catalog_six_selected():
+    r = Scenarios.FiftyToolCatalogSixSelected.result
+    assert (r.full_tokens, r.selected_tokens, r.released_tokens) == (15_000, 2_200, 12_800)
+    assert r.unused_descriptor_tokens == 13_200 and r.break_even_unused == approx(4 / 3)
+
+
+def test_shell_against_twelve_structured_tools():
+    r = Scenarios.ShellAgainstTwelveStructuredTools.result
+    assert r.saved_tokens == 111_000 and r.saved_cost.to("USD").magnitude == approx(0.333)
+    assert r.shell_attempt_cost.to("USD").magnitude == approx(0.867)
+    assert r.structured_cost_per_accepted.to("USD").magnitude == approx(1.5)
+    assert r.shell_cost_per_accepted.to("USD").magnitude == approx(1.1115385)
+    assert r.structured_cost_per_accepted_with_loss.to("USD").magnitude == approx(4.0)
+    assert r.shell_cost_per_accepted_with_loss.to("USD").magnitude == approx(11.367949)
+    assert r.break_even_change_probability == approx(0.0011265)
+
+
+def test_three_hosts_four_tool_services():
+    r = Scenarios.ThreeHostsFourToolServices.result
+    assert (r.pairwise, r.shared) == (12, 7)
+
+
+def test_mini_swe_agent_run_truncation():
+    s = Scenarios.MiniSweAgentSonnet4Run
+    r = s.result
+    assert (r.observations, r.truncated_outputs, r.truncated_tasks) == (18_076, 298, 253)
+    assert s.head_chars + s.tail_chars == s.truncation_chars == 10_000
