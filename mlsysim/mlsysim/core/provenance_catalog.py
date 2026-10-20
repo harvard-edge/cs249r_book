@@ -4735,3 +4735,35 @@ MLPERF_INFERENCE_RULES_V50 = Provenance(
     notes="Server latency constraint for Resnet50-v1.5: 15 ms at the 99th percentile; Llama2-70b "
           "conversational TTFT/TPOT 2000 ms/200 ms, interactive 450 ms/40 ms.",
 )
+
+# --- Reinforcement learning from verifiable rewards (added 2026-10-20) ---
+DEEPSEEK_2025_R1 = _lit(
+    "prov:deepseek-2025-r1",
+    "DeepSeek-AI et al. (2025), DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via "
+    "Reinforcement Learning, arXiv 2501.12948, Figure 3",
+    url="https://arxiv.org/abs/2501.12948",
+    verified="2026-10-20",
+    notes=("Figure 3 plots DeepSeek-R1-Zero's average length per response against RL steps (0 to "
+           "about 8,400). Values are read from the plot by eye: the smoothed curve starts near 500 "
+           "tokens and ends near 9,500, so 'under 1,000' and 'about 10,000' over about 8,000 steps."),
+)
+YU_2025_DAPO = _lit(
+    "prov:yu-2025-dapo",
+    "Yu et al. (2025), DAPO: An Open-Source LLM Reinforcement Learning System at Scale, "
+    "arXiv 2503.14476, Figure 2(b)",
+    url="https://arxiv.org/abs/2503.14476",
+    verified="2026-10-20",
+    notes=("Figure 2(b), generation entropy of the actor (Qwen2.5-32B, AIME training) with and without "
+           "Clip-Higher. Read from the plot by eye: without Clip-Higher entropy starts near 0.67 and is "
+           "below 0.02 by step 1,000; with Clip-Higher it settles between about 0.35 and 0.46."),
+)
+YUE_2025_RL_REASONING_BOUNDARY = _lit(
+    "prov:yue-2025-rl-reasoning-boundary",
+    "Yue et al. (2025), Does Reinforcement Learning Really Incentivize Reasoning Capacity in LLMs "
+    "Beyond the Base Model?, arXiv 2504.13837, pass@1 and pass@256 across GRPO training steps",
+    url="https://arxiv.org/abs/2504.13837",
+    verified="2026-10-20",
+    notes=("Qwen2.5-7B on Omni-MATH-Train at the base model and after 150, 300, and 450 GRPO steps "
+           "(Figure 1, right, and its appendix table of detailed values). Section 4.4 states pass@1 "
+           "'consistently improves from 26.1 to 42.5'."),
+)

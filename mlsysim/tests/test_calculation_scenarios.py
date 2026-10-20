@@ -5116,3 +5116,61 @@ def test_single_machine_serving_scenarios():
     assert Scenarios.ServingFanout10Leaves.all_up == pytest.approx(0.99 ** 10)
     assert Scenarios.RecommenderTrafficSurge.surge_factor == pytest.approx(10)
     assert Scenarios.ImageServiceLittlesLaw.in_flight == pytest.approx(50)
+def test_verifiable_reward_composition_coefficients_and_contrast():
+    """RL from verifiable rewards: false accepts, baselines, shaping, forks, GRPO, contrast (added 2026-10-20)."""
+    r = Scenarios.VerifierFalseAcceptsAtTenPercentPass.result
+    assert r.rollouts == 8192 and r.true_accepts == approx(819.2) and r.false_accepts == approx(184.32)
+    assert r.false_share == approx(184.32 / 1003.52)
+    assert Scenarios.VerifierFalseAcceptsAtFivePercentPass.result.false_share == approx(0.3220339, rel=1e-6)
+    assert Scenarios.VerifierFalseAcceptsAtFortyPercentPass.result.false_share == approx(0.0361446, rel=1e-5)
+    b = Scenarios.BinaryRewardFixedBaseline.result
+    assert b.passing_score == approx(0.75) and b.failing_score == approx(-0.25)
+    assert Scenarios.BinaryRewardAveragePassBaseline.result.failing_score == approx(-0.4)
+    s = Scenarios.ShapedRewardOverlappingWeights.result
+    assert not s.order_holds and s.lowest_pass == approx(0.3) and s.highest_failure == approx(0.4)
+    assert s.example_pass == approx(0.57) and s.example_failure == approx(0.365)
+    assert Scenarios.ShapedRewardOrderedWeights.result.order_holds
+    f = Scenarios.DebuggerTurnForkValue.result
+    assert f.difference == approx(0.55) and f.se_bound == approx(0.1118034, rel=1e-6)
+    assert f.resolution_threshold == approx(0.3162278, rel=1e-6) and f.resolved
+    every = Scenarios.ThirtyTurnForksAtEveryBoundary.result
+    assert every.base_tokens == 15_360 and every.branches == 232 and every.total_tokens == 1_797_120
+    assert every.multiple == approx(117)
+    two = Scenarios.ThirtyTurnForksAfterTurnsTenAndTwenty.result
+    assert two.branches == 16 and two.total_tokens == 138_240 and two.multiple == approx(9)
+    g = Scenarios.RepairGroupOnePassOfThree.result
+    assert g.mean == approx(1 / 3) and g.std == approx(0.4714045, rel=1e-6)
+    assert g.coefficients[1] == approx(1.4142135, rel=1e-6) and abs(g.coefficient_sum) < 1e-12
+    t = Scenarios.RepairGroupOnePassOfThreeTrlConvention.result
+    assert t.std == approx(0.5773503, rel=1e-6) and t.coefficients[1] == approx(1.1545006, rel=1e-6)
+    lone = Scenarios.LonePassInGroupOfSixteen.result
+    assert lone.coefficients[0] == approx(15 ** 0.5) and lone.coefficients[1] == approx(-0.2581989, rel=1e-6)
+    assert Scenarios.LoneFailureInGroupOfSixteen.result.coefficients[0] == approx(-(15 ** 0.5))
+    assert Scenarios.ShortAndLongFailureLengths.result.per_token_ratio == approx(32)
+    h = Scenarios.HardTaskRolloutStep.result
+    assert h.step_tokens == 62_914_560 and h.contrast == approx(0.3365796, rel=1e-6)
+    assert h.rollouts_per_informative_group == approx(23.768525, rel=1e-6)
+    assert Scenarios.HardTaskRolloutStepDoubledGroup.result.rollouts_per_informative_group == approx(28.577893, rel=1e-6)
+    assert Scenarios.TargetedTaskRolloutStep.result.rollouts_per_informative_group == approx(8.062992, rel=1e-6)
+    assert Scenarios.ModerateTaskRolloutStep.result.contrast == approx(0.83222528)
+    assert Scenarios.PairGroupsAtTenPercentPass.result.contrast == approx(0.18)
+
+
+def test_verifiable_reward_verification_clip_and_loop_capacity():
+    """RL from verifiable rewards: all-pass rule, ratio clip, slot cycle, barrier, verifier pool (added 2026-10-20)."""
+    v = Scenarios.FlakyRaceTestAllPassRule.result
+    assert v.group_false_pass == approx(0.9718525, rel=1e-6) and v.incorrect_accepted == approx(0.008)
+    assert v.correct_rejected == approx(0.058808) and v.expected_trials_incorrect == approx(1.24)
+    assert v.expected_trials_correct == approx(2.9404)
+    hi, lo = Scenarios.DominantTokenRatioClip.result, Scenarios.RareTokenRatioClip.result
+    assert hi.ceiling == approx(1.08) and not hi.binds and lo.rise == approx(0.002) and lo.binds
+    c = Scenarios.RepairRolloutSlotResets.result
+    assert c.work.m_as("s") == approx(4.5) and c.cold_cycle.m_as("s") == approx(8.0)
+    assert c.snapshot_cycle.m_as("s") == approx(4.515) and c.cold_episodes_per_hour == approx(115_200)
+    assert c.snapshot_episodes_per_hour == approx(204_119.6, rel=1e-6) and c.capacity_ratio == approx(8 / 4.515)
+    assert c.reset_ratio == approx(3.5 / 0.015) and c.cold_work_share == approx(0.5625)
+    bar = Scenarios.RolloutGroupOfFourBarrier.result
+    assert bar.barrier.m_as("s") == approx(16.8) and bar.idle_share == approx(1 - 5.825 / 16.8)
+    p = Scenarios.RepairVerifierPool.result
+    assert p.arrival_rate.m_as("1/s") == approx(32) and p.one_trial_busy == approx(256)
+    assert p.busy == approx(768) and p.slots == 960 and p.utilization == approx(0.8)

@@ -4335,3 +4335,126 @@ class DiagnosticCoverageResult(SolverResult):
 
 
 __all__ += ["OnsetTrialResult", "RailHoldUpResult", "ExponentialRareEventResult", "DiagnosticCoverageResult"]
+# ── Reinforcement learning from verifiable rewards (added 2026-10-20) ──
+
+class RewardCompositionResult(SolverResult):
+    """Result from RewardCompositionModel: true and false accepts among one update's rollouts."""
+    rollouts: int
+    true_accepts: float                  # expected passing rollouts the verifier accepts
+    false_accepts: float                 # expected failing rollouts the verifier accepts
+    accepts: float
+    false_share: float                   # false accepts / all accepts
+
+
+class CenteredRewardResult(SolverResult):
+    """Result from CenteredRewardModel: binary rewards centered on a fixed baseline."""
+    passing_score: float                 # passing reward - baseline
+    failing_score: float                 # failing reward - baseline
+
+
+class RewardShapingResult(SolverResult):
+    """Result from RewardShapingModel: R = c + alpha f - lambda len, and whether passes stay above failures."""
+    weight_sum: float                    # alpha + lambda
+    lowest_pass: float                   # 1 - lambda, a pass at zero format and the length cap
+    highest_failure: float               # alpha, a failure with perfect format and zero length
+    order_holds: bool                    # alpha + lambda < 1
+    example_pass: float                  # the stated pass's score
+    example_failure: float               # the stated failure's score
+
+
+class ForkValueResult(SolverResult):
+    """Result from ForkValueModel: a turn valued by forking continuations before and after it."""
+    value_before: float
+    value_after: float
+    difference: float
+    se_bound: float                      # 1 / (2 sqrt k), the largest standard error of one fork's mean
+    difference_se_bound: float           # sqrt 2 times it, for two independent means
+    resolution_threshold: float          # two difference bounds
+    resolved: bool
+
+
+class ContinuationForkCostResult(SolverResult):
+    """Result from ContinuationForkCostModel: tokens generated when continuations are forked."""
+    base_tokens: int
+    branches: int
+    total_tokens: int
+    multiple: float                      # total / base
+
+
+class GroupCoefficientsResult(SolverResult):
+    """Result from GroupCoefficientsModel: group-relative (GRPO) coefficients of one group."""
+    group: int
+    mean: float
+    std: float
+    coefficients: List[float]
+    coefficient_sum: float
+
+
+class LengthNormalizationResult(SolverResult):
+    """Result from LengthNormalizationModel: per-token push of two rollouts sharing one coefficient."""
+    per_token_ratio: float               # short rollout's per-token push over the long one's
+
+
+class RolloutStepBudgetResult(SolverResult):
+    """Result from RolloutStepBudgetModel: one update's rollout bill and the cost of reward contrast."""
+    rollouts: int
+    rollout_tokens: int
+    step_tokens: int
+    contrast: float                      # P(at least one pass and one failure in a group)
+    silent_share: float                  # groups whose rewards all tie
+    rollouts_per_informative_group: float
+
+
+class RepeatedVerificationResult(SolverResult):
+    """Result from RepeatedVerificationModel: an all-pass rule over repeated trials of one candidate."""
+    group_false_pass: float              # one trial each: P(at least one incorrect candidate passes)
+    incorrect_accepted: float            # p_bad^n
+    correct_rejected: float              # 1 - p_good^n
+    expected_trials_incorrect: float     # stop at the first failed trial
+    expected_trials_correct: float
+
+
+class RatioClipResult(SolverResult):
+    """Result from RatioClipModel: how far one update may raise a token's probability."""
+    ceiling: float                       # (1 + epsilon) p
+    rise: float                          # epsilon p
+    binds: bool                          # the ceiling is below 1
+
+
+class RolloutSlotCycleResult(SolverResult):
+    """Result from RolloutSlotCycleModel: one sandbox slot's episode cycle under two reset times."""
+    work: Quantity                       # decisions, tools, and assessment per episode
+    cold_cycle: Quantity
+    snapshot_cycle: Quantity
+    cold_work_share: float
+    snapshot_work_share: float
+    cold_episodes_per_hour: float        # across all slots
+    snapshot_episodes_per_hour: float
+    capacity_ratio: float                # snapshot over cold capacity
+    reset_ratio: float                   # cold reset over snapshot reset
+
+
+class GroupBarrierResult(SolverResult):
+    """Result from GroupBarrierModel: a synchronous group that waits for its slowest member."""
+    group: int
+    fastest: Quantity
+    barrier: Quantity                    # the slowest member's latency
+    mean: Quantity
+    idle_share: float                    # 1 - mean / barrier, of the slots reserved to the barrier
+
+
+class VerifierPoolResult(SolverResult):
+    """Result from VerifierPoolModel: verification workers by Little's law."""
+    arrival_rate: Quantity               # trajectories per second
+    one_trial_busy: float                # workers busy with a single trial each
+    busy: float                          # workers busy with every trial
+    slots: int                           # provisioned at the target utilization
+    utilization: float
+
+
+__all__ += [
+    "RewardCompositionResult", "CenteredRewardResult", "RewardShapingResult", "ForkValueResult",
+    "ContinuationForkCostResult", "GroupCoefficientsResult", "LengthNormalizationResult",
+    "RolloutStepBudgetResult", "RepeatedVerificationResult", "RatioClipResult",
+    "RolloutSlotCycleResult", "GroupBarrierResult", "VerifierPoolResult",
+]

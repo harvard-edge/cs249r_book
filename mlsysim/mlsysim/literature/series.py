@@ -17,6 +17,7 @@ import csv
 from pathlib import Path
 
 from ..core.provenance import Provenance, ProvenanceKind
+from ..core import provenance_catalog as _catalog  # added 2026-10-20
 
 _SERIES = Path(__file__).parent / "data" / "series"
 
@@ -230,6 +231,13 @@ ImitationSuperTuxKart = _Series(
         ),
     ),
     "Falls per lap against training iterations for three imitation methods on one racing track.",
+)
+
+# --- pass@1 and pass@256 across GRPO steps (added 2026-10-20) ----------------
+GrpoPassAtKSteps = _Series(
+    "yue_grpo_pass_at_k",
+    _catalog.YUE_2025_RL_REASONING_BOUNDARY,
+    "Qwen2.5-7B pass@1 and pass@256 (percent) on Omni-MATH-Train at the base model and after GRPO steps.",
 )
 
 # --- One mini-SWE-agent run, per task (added 2026-10-20) ---------------------
