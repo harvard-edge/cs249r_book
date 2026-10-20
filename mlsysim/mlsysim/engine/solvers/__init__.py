@@ -704,3 +704,8 @@ __all__ += [
 ]
 
 __all__ += ["OnsetTrialModel", "RailHoldUpModel"]  # added 2026-10-20
+
+# --- Responsible physical AI: detection shortfall, one assistant's queue (added 2026-10-20) ---
+from .supervision import DetectionShortfallModel, SupervisorQueueModel
+
+__all__ += ["DetectionShortfallModel", "SupervisorQueueModel"]

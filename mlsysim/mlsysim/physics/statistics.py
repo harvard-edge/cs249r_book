@@ -829,3 +829,47 @@ def calc_sprt_expected_samples(upper: float, lower: float, drift: float, upper_p
     if drift == 0:
         raise ValueError("drift must be nonzero")
     return (upper_probability * upper + (1 - upper_probability) * lower) / drift
+
+
+# ── Per-group detection: frames to a reliable detection, exact intervals (added 2026-10-20) ──
+def calc_consecutive_detection_frames(per_frame_detection: float, all_miss_probability: float) -> int:
+    """Consecutive frames a person must be in view before detection may be counted on.
+
+    Equation:
+        N = ceil( ln p_miss / ln(1 - p_frame) )
+
+    the fewest frames for which the chance of missing the person in every one,
+    (1 - p_frame)^N, is at most ``all_miss_probability``, with misses
+    independent from frame to frame (the best case; correlated misses need
+    more frames). A tolerance of 1e-12 keeps an exact ratio from rounding up.
+    """
+    p = float(per_frame_detection)
+    q = float(all_miss_probability)
+    if not 0.0 < p < 1.0:
+        raise ValueError(f"per_frame_detection must be in (0, 1), got {p}")
+    if not 0.0 < q < 1.0:
+        raise ValueError(f"all_miss_probability must be in (0, 1), got {q}")
+    return math.ceil(math.log(q) / math.log(1.0 - p) - 1e-12)
+
+
+def calc_clopper_pearson_interval(successes: int, trials: int, confidence: float = 0.95):
+    """Exact two-sided Clopper-Pearson interval for ``successes`` out of ``trials``.
+
+    Equation (beta quantiles, alpha = 1 - confidence):
+        lower = B^{-1}(alpha/2; k, n - k + 1)       (0 when k = 0)
+        upper = B^{-1}(1 - alpha/2; k + 1, n - k)   (1 when k = n)
+
+    Source: Clopper and Pearson, "The Use of Confidence or Fiducial Limits
+    Illustrated in the Case of the Binomial," Biometrika 26(4), 1934.
+    """
+    from scipy.stats import beta
+
+    k, n = int(successes), int(trials)
+    if n < 1 or not 0 <= k <= n:
+        raise ValueError("need 0 <= successes <= trials and trials >= 1")
+    if not 0.0 < confidence < 1.0:
+        raise ValueError(f"confidence must be in (0, 1), got {confidence}")
+    a = 1.0 - confidence
+    lo = 0.0 if k == 0 else float(beta.ppf(a / 2, k, n - k + 1))
+    hi = 1.0 if k == n else float(beta.ppf(1 - a / 2, k + 1, n - k))
+    return lo, hi

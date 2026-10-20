@@ -11852,7 +11852,10 @@ class HazardExposureScenario(BaseScenario):
     rates: List[Quantity]
     confidence: float
     rigs: int
-    rig_time: Quantity
+    rig_time: Optional[Quantity] = None        # optional (2026-10-20): needed only for rig_rate
+    # Optional (added 2026-10-20): operating hours each rig runs per calendar day,
+    # so a fleet's failure-free exposure converts to the days a stage must run.
+    hours_per_day: Optional[Quantity] = None
 
     @property
     def ln_inv_alpha(self) -> float:
@@ -11872,6 +11875,10 @@ class HazardExposureScenario(BaseScenario):
 
     def shortfall(self, rate: Quantity) -> float:
         return (self.rig_rate / rate).to("").magnitude
+
+    def calendar_days(self, rate: Quantity) -> Quantity:
+        """Days the ``rigs`` need, at ``hours_per_day`` each, to accumulate the exposure (added 2026-10-20)."""
+        return (self.fleet_time(rate) / self.hours_per_day).to("day")
 
 
 class MissionExposureScenario(BaseScenario):
@@ -17434,3 +17441,218 @@ class DiagnosticCoverageScenario(BaseScenario):
     def result(self):
         from .solvers import DiagnosticCoverageModel
         return DiagnosticCoverageModel().solve(self.strata, self.target, self.confidence)
+
+
+# --- Responsible physical AI: decisions, oversight, stages, groups, records, labor (added 2026-10-20) ---
+
+class DecisionChainScenario(BaseScenario):
+    """``links`` independently kept decision records behind one admitted action, each retrievable
+    with probability p; the whole chain resolves with p^links for each p in ``link_probabilities``."""
+    links: int
+    link_probabilities: Tuple[float, ...]
+
+    def completeness(self, p: float) -> float:
+        from ..physics.statistics import calc_conjunctive_confidence
+        return calc_conjunctive_confidence([p] * self.links)
+
+    @property
+    def completeness_by_link(self) -> Dict[float, float]:
+        return {p: self.completeness(p) for p in self.link_probabilities}
+
+
+class OversightTimeScenario(BaseScenario):
+    """A person asked to act through ``budget`` (a TakeoverBudgetScenario) against the time the
+    hazard at its site leaves: the clear distance at the request speed."""
+    budget: Any                                  # TakeoverBudgetScenario
+
+    @property
+    def hazard_window(self) -> Quantity:
+        return (self.budget.site.d_clear / self.budget.speed).to("s")
+
+    @property
+    def takeover_travel(self) -> Quantity:
+        return self.budget.result.takeover_travel.to("m")
+
+    @property
+    def takeover_over_window(self) -> float:
+        return (self.budget.takeover / self.hazard_window).to("").magnitude
+
+
+class SupervisorQueueScenario(BaseScenario):
+    """One remote assistant serving ``machines``, each asking for help at ``request_rate``, each
+    request holding the assistant for ``service_time``; ``utilization_cap`` sizes the largest fleet."""
+    request_rate: Quantity                       # requests per machine per operating hour
+    service_time: Quantity
+    machines: int
+    utilization_cap: Optional[float] = None
+
+    @property
+    def result(self):
+        from .solvers import SupervisorQueueModel
+        return SupervisorQueueModel().solve(self.request_rate, self.service_time, self.machines)
+
+    @property
+    def max_machines(self) -> int:
+        """The largest fleet whose utilization stays at or below the cap."""
+        return _math.floor(self.utilization_cap / (self.request_rate * self.service_time).to("").magnitude)
+
+
+class SupervisionLaborScenario(BaseScenario):
+    """The person-hours a supervised fleet creates in one ``operating_day``: an assistant staffed the
+    whole day (busy at ``queue``'s utilization, watching otherwise) plus ``sweeps`` corridor sweeps."""
+    queue: SupervisorQueueScenario
+    operating_day: Quantity
+    sweeps: int
+    sweep_time: Quantity
+    shift: Quantity                              # one full-time shift
+
+    @property
+    def request_time(self) -> Quantity:
+        return (self.queue.result.utilization * self.operating_day).to("hour")
+
+    @property
+    def watch_time(self) -> Quantity:
+        return (self.operating_day - self.request_time).to("hour")
+
+    @property
+    def sweep_total(self) -> Quantity:
+        return (self.sweeps * self.sweep_time).to("hour")
+
+    @property
+    def total(self) -> Quantity:
+        return (self.operating_day + self.sweep_total).to("hour")
+
+    @property
+    def shifts(self) -> float:
+        return (self.total / self.shift).to("").magnitude
+
+
+class DetectionShortfallScenario(BaseScenario):
+    """``site.machine`` at ``speed`` with a stop sized for a group detected in ``reference`` of
+    frames, met by ``groups`` detected less often; misses allowed in every frame with probability
+    ``all_miss_probability``, frames independent."""
+    site: Any                                    # EmbodiedSiteScenario
+    speed: Quantity
+    all_miss_probability: float
+    reference: float
+    groups: Tuple[float, ...]
+
+    @property
+    def frame_period(self) -> Quantity:
+        return (1 / self.site.machine.nav_camera.frame_rate).to("ms")
+
+    @property
+    def result(self):
+        from .solvers import DetectionShortfallModel
+        s = self.site
+        return DetectionShortfallModel().solve(
+            self.speed, self.frame_period, s.a_brake, s.machine.loaded_mass, self.all_miss_probability,
+            self.reference, self.groups, delay=s.tau_delay)
+
+
+class SubgroupSampleScenario(BaseScenario):
+    """An evaluation set of ``total`` people with a group of ``small_share``, both detected at
+    ``recall``: exact intervals for each group, and the people per group a two-sided test at
+    ``significance`` with ``power`` needs to tell ``rate_a`` from ``rate_b``."""
+    total: int
+    small_share: float
+    recall: float
+    rate_a: float
+    rate_b: float
+    significance: float
+    power: float
+    confidence: float = 0.95
+
+    @property
+    def small(self) -> int:
+        return round(self.total * self.small_share)
+
+    @property
+    def large(self) -> int:
+        return self.total - self.small
+
+    def interval(self, n: int):
+        from ..physics.statistics import calc_clopper_pearson_interval
+        return calc_clopper_pearson_interval(round(self.recall * n), n, self.confidence)
+
+    @property
+    def small_interval(self):
+        return self.interval(self.small)
+
+    @property
+    def large_interval(self):
+        return self.interval(self.large)
+
+    @property
+    def width_ratio(self) -> float:
+        (a, b), (c, d) = self.small_interval, self.large_interval
+        return (b - a) / (d - c)
+
+    @property
+    def per_group_needed(self) -> int:
+        from scipy.stats import norm
+        from ..physics.statistics import calc_two_proportion_sample_size
+        lo, hi = sorted((self.rate_a, self.rate_b))
+        return _math.ceil(calc_two_proportion_sample_size(
+            lo, hi - lo, float(norm.ppf(1 - self.significance / 2)), float(norm.ppf(self.power)),
+            pooled=True))
+
+    @property
+    def share_needed(self) -> float:
+        return self.per_group_needed / self.total
+
+
+class ExposureConcentrationScenario(BaseScenario):
+    """``encounter_share`` of a site's machine-person encounters fall on ``user_share`` of its people:
+    their per-person exposure against the site average, and everyone else's."""
+    encounter_share: float
+    user_share: float
+
+    @property
+    def concentration(self) -> float:
+        return self.encounter_share / self.user_share
+
+    @property
+    def rest_ratio(self) -> float:
+        return (1 - self.encounter_share) / (1 - self.user_share)
+
+
+class EventRetentionScenario(BaseScenario):
+    """Event-triggered retention: ``pre_trigger`` before and ``post_trigger`` after each of
+    ``events_per_day`` events, against keeping the whole ``operating_day``."""
+    pre_trigger: Quantity
+    post_trigger: Quantity
+    events_per_day: int
+    operating_day: Quantity
+
+    @property
+    def window(self) -> Quantity:
+        return (self.pre_trigger + self.post_trigger).to("s")
+
+    @property
+    def kept_per_day(self) -> Quantity:
+        return (self.events_per_day * self.window).to("minute")
+
+    @property
+    def kept_share(self) -> float:
+        return (self.kept_per_day / self.operating_day).to("").magnitude
+
+    @property
+    def reduction(self) -> float:
+        return 1 / self.kept_share
+
+
+class DisclosurePenaltyScenario(BaseScenario):
+    """Penalties for an incomplete account: ``days_withheld`` at ``daily_maximum`` each, plus
+    ``others`` (name -> amount), all in USD."""
+    days_withheld: float
+    daily_maximum: float
+    others: Dict[str, float]
+
+    @property
+    def per_day_penalty(self) -> float:
+        return self.days_withheld * self.daily_maximum
+
+    @property
+    def total(self) -> float:
+        return self.per_day_penalty + sum(self.others.values())

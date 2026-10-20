@@ -472,4 +472,6 @@ class Literature(Registry):
     KittiOdometry = _series.KittiOdometry
     CaliforniaDisengagements = _series.CaliforniaDisengagements
     TakeoverTimeMeta = _series.TakeoverTimeMeta  # added 2026-10-20
+    PedestrianAp75BySkinType = _series.PedestrianAp75BySkinType  # added 2026-10-20
+    PedestrianMissRateByAge = _series.PedestrianMissRateByAge  # added 2026-10-20
     WaymoSafetyImpact = _series.WaymoSafetyImpact

@@ -4669,3 +4669,63 @@ OKELLY_2018_RARE_EVENT = _lit(
     notes=("Sec. 4: the cross-entropy method 'achieves 2-16 times variance reduction depending on the threshold "
            "level' (Figure 2). Table 1 is Literature.OKelly2018RareEventTable1."),
 )
+
+# --- Responsible physical AI: penalties, per-group detection (added 2026-10-20) ---
+CPUC_D24_07_004_CRUISE = _lit(
+    "prov:cpuc-d24-07-004-cruise",
+    "California Public Utilities Commission, Decision 24-07-004, Presiding Officer's Decision "
+    "Approving Offered Settlement Terms and Granting Deferral of the Order to Show Cause "
+    "Proceedings (Cruise LLC, 2024)",
+    url="https://docs.cpuc.ca.gov/PublishedDocs/Published/G000/M536/K690/536690391.PDF",
+    verified="2026-10-20",
+    notes=(
+        "'the daily maximum fine of $7,500 per Pub. Util. Code 5378(b) will be applied for each of "
+        "the 15 days for a total penalty of $112,500'; the 15 days run October 3 to October 18, "
+        "2023. Read from the decision PDF on 2026-10-20."
+    ),
+)
+NHTSA_CRUISE_CONSENT_ORDER_2024 = _lit(
+    "prov:nhtsa-cruise-consent-order-2024",
+    "NHTSA, 'NHTSA Announces Consent Order with Cruise After Company Failed to Fully Report Crash "
+    "Involving Pedestrian', press release, 30 September 2024",
+    url="https://www.nhtsa.gov/press-releases/consent-order-cruise-crash-reporting",
+    verified="2026-10-20",
+    notes=("A $1.5 million civil penalty for crash reports that omitted the dragging. Transcribed from "
+           "the Volume IV chapter's citation; the page refused automated fetches (HTTP 403)."),
+)
+DOJ_CRUISE_DPA_2024 = _lit(
+    "prov:doj-cruise-dpa-2024",
+    "U.S. Attorney's Office, Northern District of California, 'Cruise Admits to Submitting a False "
+    "Report to Influence a Federal Investigation and Agrees to Pay $500,000', press release, "
+    "November 2024",
+    url="https://www.justice.gov/usao-ndca/pr/cruise-admits-submitting-false-report-influence-federal-investigation-and-agrees-pay",
+    verified="2026-10-20",
+    notes=("A $500,000 criminal fine under a deferred prosecution agreement. Transcribed from the "
+           "release title as the Volume IV bibliography records it; the page body was not readable."),
+)
+WILSON_2019_PREDICTIVE_INEQUITY = _lit(
+    "prov:wilson-2019-predictive-inequity",
+    "Wilson, B., Hoffman, J., Morgenstern, J. (2019), Predictive Inequity in Object Detection, "
+    "arXiv:1902.11097 (v1)",
+    url="https://arxiv.org/abs/1902.11097",
+    verified="2026-10-20",
+    notes=(
+        "Table 4: person class on the BDD100K validation set for Detectron models trained on MS "
+        "COCO, AP75 by lighter (LS) and darker (DS) Fitzpatrick skin type; Average row 67.1 and "
+        "55.9. Sec. 4.2: holdout sizes nLS = 387, nDS = 100 (boxes of at least 10,000 pixels), and "
+        "nLS = 12,000, nDS = 4,000 needed to verify a true AP gap of 0.05. Read from the arXiv HTML "
+        "rendering on 2026-10-20."
+    ),
+)
+LI_2025_BIAS_BEHIND_THE_WHEEL = _lit(
+    "prov:li-2025-bias-behind-the-wheel",
+    "Li, X., Chen, Z., Zhang, J. M., Sarro, F., Zhang, Y., Liu, X. (2025), Bias behind the Wheel: "
+    "Fairness Testing of Autonomous Driving Systems, ACM TOSEM 34(3); arXiv:2308.02935v4",
+    url="https://arxiv.org/abs/2308.02935v4",
+    verified="2026-10-20",
+    notes=(
+        "Table 7 (RQ1), miss rate (%) of eight pedestrian detectors for adults and children; "
+        "Average row 23.75 and 43.89 (EOD -20.14). Read from the arXiv v4 HTML rendering on "
+        "2026-10-20."
+    ),
+)
