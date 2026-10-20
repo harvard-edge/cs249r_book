@@ -211,7 +211,11 @@ def chunk(k):
         ax.barh(y, v, color=C["c2"], height=0.6)
         ax.text(-0.02, y, nm, transform=ax.get_yaxis_transform(), ha="right",
                 va="center", fontsize=12, fontweight="bold", color=C["text"])
-        ax.text(v * 0.93, y, f"{val(key)} KB", va="center", ha="right", fontsize=11,
+        xl = v * 0.93  # right edge of the label; keep it clear of the chunk lines
+        for line_x in (num("bkt_chunk_small_kb"), num("bkt_chunk_large_kb")):
+            if xl / 2.2 < line_x < xl:
+                xl = line_x * 0.93
+        ax.text(xl, y, f"{val(key)} KB", va="center", ha="right", fontsize=11,
                 fontweight="bold", color="white")
     a = 1.0 if k >= 2 else 0.0
     for x, txt, ck in [(num("bkt_chunk_small_kb"),
