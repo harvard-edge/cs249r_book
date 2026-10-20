@@ -13789,8 +13789,26 @@ class MinHashBandingScenario(BaseScenario):
     """A MinHash signature cut into ``bands`` bands of ``rows`` hashes over ``shingle_words``-word shingles."""
     bands: int
     rows: int
-    shingle_words: int
+    shingle_words: Optional[int] = None    # None when the features are not word shingles (added 2026-10-20)
     probe_similarities: List[float] = []   # Jaccard similarities at which to read the candidate chance
+    # Optional (added 2026-10-20): stored width of one hash value and the records
+    # indexed, for the raw signature matrix.
+    hash_bytes: Optional[Quantity] = None
+    records: Optional[int] = None
+
+    @property
+    def max_standard_error(self) -> float:
+        """Largest standard error of the Jaccard estimate (at J = 0.5) from the full signature."""
+        from ..physics.retrieval import calc_minhash_standard_error
+        return calc_minhash_standard_error(0.5, self.hashes)
+
+    @property
+    def signature_bytes(self) -> Quantity:
+        return (self.hashes * self.hash_bytes).to("byte")
+
+    @property
+    def index_bytes(self) -> Quantity:
+        return (self.records * self.signature_bytes).to("byte")
 
     @property
     def hashes(self) -> int:
@@ -16025,3 +16043,131 @@ class StaleAnchorScenario(BaseScenario):
         from .solvers import StaleAnchorModel
         arm = self.machine.arm
         return StaleAnchorModel().solve(self.joint_speed, self.delay, arm.upper_arm_length + arm.forearm_length)
+
+
+# --- Trajectory curation: triage, split leakage, admission order, denominators, staging (added 2026-10-20) ---
+
+class FailureTriageScenario(BaseScenario):
+    """``runs`` trajectories a month failing at ``failure_rate``, each probe's attributed share, and a
+    fine-tuning run on every failure of ``workload`` on ``devices`` x ``hardware``."""
+    runs: int
+    failure_rate: float
+    probe_shares: Dict[str, float]      # failures each counterfactual probe attributes to its rung
+    workload: Workload
+    hardware: HardwareNode
+    devices: int
+    utilization: float                  # model FLOPs utilization
+    hourly_price: Quantity              # USD per device-hour
+    sequence_tokens: int
+    epochs: int
+
+    @property
+    def result(self):
+        from .solvers import FailureTriageModel
+        return FailureTriageModel().solve(self.runs, self.failure_rate, self.probe_shares,
+                                          self.workload.parameters, self.sequence_tokens, self.epochs,
+                                          self.devices, self.hardware.compute.peak_flops, self.utilization,
+                                          self.hourly_price)
+
+
+class RunSplitLeakageScenario(BaseScenario):
+    """``attempts`` runs per task, each assigned to training with probability ``train_fraction``."""
+    attempts: int
+    train_fraction: float
+    tasks: Optional[int] = None
+
+    @property
+    def result(self):
+        from .solvers import RunSplitLeakageModel
+        return RunSplitLeakageModel().solve(self.attempts, self.train_fraction, self.tasks)
+
+
+class AdmissionOrderScenario(BaseScenario):
+    """Independent admission checks (pass probability, slot time) run in each of ``orders``."""
+    checks: Dict[str, Tuple[float, Quantity]]
+    orders: List[List[str]]
+    candidates: Optional[int] = None
+
+    @property
+    def result(self):
+        from .solvers import AdmissionOrderModel
+        return AdmissionOrderModel().solve(self.checks, self.orders, self.candidates)
+
+
+class CorpusDenominatorsScenario(BaseScenario):
+    """A retained pool of record classes (records, stored tokens per record, selected target tokens per
+    record); ``focus`` is the class whose shares are read, ``admitted`` the classes a route admits."""
+    classes: Dict[str, Tuple[int, Quantity, Quantity]]
+    focus: str
+    admitted: List[str]
+
+    @property
+    def result(self):
+        from .solvers import CorpusDenominatorsModel
+        return CorpusDenominatorsModel().solve(self.classes, self.focus, self.admitted)
+
+
+class AttemptGroupContrastScenario(BaseScenario):
+    """``attempts`` independent attempts per fixture at each of ``pass_rates``."""
+    attempts: int
+    pass_rates: List[float]
+
+    def success_yield(self, pass_rate: float) -> float:
+        """Chance of at least one success."""
+        from ..physics.agents import calc_independent_success
+        return calc_independent_success(pass_rate, self.attempts)
+
+    def mixed_fraction(self, pass_rate: float) -> float:
+        """Chance of at least one success and one failure."""
+        from ..physics.agents import calc_mixed_outcome_fraction
+        return calc_mixed_outcome_fraction(pass_rate, self.attempts)
+
+    def attempts_per_success(self, pass_rate: float) -> float:
+        """Attempts spent per fixture that yields a success."""
+        return self.attempts / self.success_yield(pass_rate)
+
+
+class StagingBurstScenario(BaseScenario):
+    """A collector of ``rollouts`` concurrent rollouts feeding ``slots`` verifiers, whose checks
+    stall at ``timeout``, with records charged at ``record_ceiling`` against ``store``."""
+    rollouts: int
+    rollout_time: Quantity
+    slots: int
+    mean_service: Quantity
+    timeout: Quantity
+    record_ceiling: Quantity
+    store: Quantity
+    reaction: Quantity
+
+    @property
+    def result(self):
+        from .solvers import StagingBurstModel
+        return StagingBurstModel().solve(self.rollouts, self.rollout_time, self.slots, self.mean_service,
+                                         self.timeout, self.record_ceiling, self.store, self.reaction)
+
+
+class CohortDispositionScenario(BaseScenario):
+    """A finite cohort of attempts by disposition at a cutoff, its total cost, and the disposition
+    that emits a learning artifact."""
+    dispositions: Dict[str, int]
+    emitted: str
+    cohort_cost: Quantity
+    yield_multiple: Optional[float] = None   # a raised emission yield to compare, as a multiple
+
+    @property
+    def attempts(self) -> int:
+        return sum(self.dispositions.values())
+
+    @property
+    def emission_yield(self) -> float:
+        return self.dispositions[self.emitted] / self.attempts
+
+    @property
+    def cost_per_attempt(self) -> Quantity:
+        return (self.cohort_cost / self.attempts).to("USD")
+
+    def cost_per_artifact(self, emission_yield: Optional[float] = None) -> Quantity:
+        """Attempt cost over emission yield; another yield prices the same attempts at that yield."""
+        from ..physics.agents import calc_cost_per_accepted
+        y = self.emission_yield if emission_yield is None else emission_yield
+        return calc_cost_per_accepted(self.cost_per_attempt, y).to("USD")

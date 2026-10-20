@@ -3942,3 +3942,79 @@ __all__ += [
     "SpillLimitedStopResult", "TrajectoryDeadlinesResult", "SeamBridgeResult", "ShoulderSwingResult",
     "DynamicWindowResult", "StaleAnchorResult",
 ]
+
+
+# ── Trajectory curation: triage, split leakage, admission order, denominators, staging (added 2026-10-20) ──
+
+class FailureTriageResult(SolverResult):
+    """Result from FailureTriageModel: failures repaired below the weights and the price of training on them."""
+    failures: int
+    removed: Dict[str, int]                  # failures each probe attributes to its rung
+    system_failures: int                     # removed by every probe together
+    residual: int                            # survive every probe
+    system_share: float
+    training_tokens: Quantity                # every failure, all epochs
+    residual_tokens: Quantity
+    training_flops: Quantity
+    residual_flops: Quantity
+    sustained_rate: Quantity                 # devices x peak x utilization
+    wall_time: Quantity                      # training on every failure
+    device_hours: Quantity
+    cost: Quantity                           # training on every failure
+    residual_cost: Quantity                  # training on the residual alone
+
+
+class RunSplitLeakageResult(SolverResult):
+    """Result from RunSplitLeakageModel: tasks a random split of runs places on both sides."""
+    whole: float                             # f^k + (1 - f)^k
+    straddle: float
+    straddling_tasks: Optional[float]        # straddle x tasks, when tasks are given
+    sibling_in_training: float               # a test run has a sibling run in training: 1 - (1 - f)^(k-1)
+    majority_attempts: int                   # smallest attempt count at which most tasks straddle
+    majority_straddle: float                 # straddle share at that count
+    curve: Dict[int, float]                  # attempts -> straddle share, 1 to max_attempts
+
+
+class AdmissionOrderResult(SolverResult):
+    """Result from AdmissionOrderModel: one admission route's checks run in several orders."""
+    cost_per_rejection: Dict[str, Quantity]  # t / (1 - p) per check
+    time_per_attempted: List[Quantity]       # expected slot time per attempted record, per order
+    time_per_admitted: List[Quantity]
+    route_yield: float                       # the same for every order
+    admitted: Optional[float]                # route yield x candidates, when candidates are given
+    best_order: int                          # index of the cheapest order
+    saving: float                            # 1 - cheapest / dearest time per attempted record
+    saving_per_attempted: Quantity           # dearest - cheapest
+
+
+class CorpusDenominatorsResult(SolverResult):
+    """Result from CorpusDenominatorsModel: one record class's share of a pool under three denominators."""
+    records: int
+    stored_tokens: Quantity
+    admitted_stored_tokens: Quantity          # stored tokens of the admitted classes
+    target_tokens: Quantity
+    record_share: float
+    stored_share: float
+    admitted_stored_share: float
+    target_share: float
+    context_per_target: Dict[str, float]      # stored tokens per target token, per class with targets
+
+
+class StagingBurstResult(SolverResult):
+    """Result from StagingBurstModel: how fast a verifier timeout burst fills reserved staging."""
+    arrival_rate: Quantity                    # records per second from the rollouts
+    capacity: Quantity                        # nominal verifier service rate
+    utilization: float
+    burst_capacity: Quantity                  # slots / timeout
+    net_growth: Quantity                      # unassessed records added per second
+    growth: Quantity                          # bytes reserved per second at the ceiling
+    time_to_full: Quantity
+    in_flight: Quantity                       # rollouts already running, at the ceiling
+    reaction_growth: Quantity                 # growth during the controller's delay
+    high_watermark: float                     # largest share of the store at which dispatch may stop
+
+
+__all__ += [
+    "FailureTriageResult", "RunSplitLeakageResult", "AdmissionOrderResult", "CorpusDenominatorsResult",
+    "StagingBurstResult",
+]

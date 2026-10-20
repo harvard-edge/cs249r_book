@@ -4564,3 +4564,85 @@ def test_warehouse_jerk_limited_stop_matches_finished_budget():
     assert base.jerk.m_as("m/s**3") == pytest.approx(budget.jerk.m_as("m/s**3"))
     assert base.stop_distance.m_as("mm") == pytest.approx(budget.stop_distance.m_as("mm"))
     assert base.jerk_ramp_travel.m_as("mm") == pytest.approx(budget.jerk_ramp_travel.m_as("mm"))
+
+
+# --- Trajectory curation (added 2026-10-20) ---
+
+def test_repair_agent_failure_triage():
+    r = Scenarios.RepairAgentFailureTriage.result
+    assert r.failures == 3_000 and r.removed == {"interface": 2_100, "runtime": 600}
+    assert r.system_failures == 2_700 and r.residual == 300 and r.system_share == approx(0.9)
+    assert r.training_tokens.to("token").magnitude == 36_864_000
+    assert r.training_flops.to("flop").magnitude == approx(1.56156e19)
+    assert r.sustained_rate.to("flop/s").magnitude == approx(2.3736e15)
+    assert r.wall_time.to("hour").magnitude == approx(1.82746)
+    assert r.device_hours.to("hour").magnitude == approx(14.6197)
+    assert r.cost.to("USD").magnitude == approx(58.4788)
+    assert r.residual_cost.to("USD").magnitude == approx(5.84788)
+
+
+def test_run_split_leakage():
+    r = Scenarios.EightAttemptRunSplit.result
+    assert r.straddle == approx(0.83222528) and r.curve[2] == approx(0.32)
+    e = Scenarios.FiveAttemptRunSplitOfTwoThousand.result
+    assert e.whole == approx(0.5905) and e.straddle == approx(0.4095)
+    assert e.straddling_tasks == approx(819.0) and e.sibling_in_training == approx(0.9999)
+    assert e.majority_attempts == 7 and e.majority_straddle == approx(0.521703)
+
+
+def test_trajectory_minhash_screen():
+    m = Scenarios.TrajectoryMinHashScreen
+    assert m.hashes == 128 and m.max_standard_error == approx(0.0441942)
+    assert m.signature_bytes.to("byte").magnitude == 512
+    assert m.index_bytes.to("MB").magnitude == approx(51.2)
+    assert m.candidate_probability(0.5) == approx(0.873211) and m.candidate_probability(0.8) > 0.9999999
+    assert m.threshold == approx(0.420448)
+
+
+def test_demonstration_admission_order():
+    r = Scenarios.DemonstrationAdmissionOrder.result
+    assert r.cost_per_rejection["process"].to("second").magnitude == approx(1.0)
+    assert r.cost_per_rejection["outcome"].to("second").magnitude == approx(13.3333)
+    assert [t.to("second").magnitude for t in r.time_per_attempted] == [approx(6.2382), approx(7.5036)]
+    assert [t.to("second").magnitude for t in r.time_per_admitted] == [approx(30.4006), approx(36.5673)]
+    assert r.route_yield == approx(0.2052) and r.admitted == approx(20_520)
+    assert r.best_order == 0 and r.saving == approx(0.168639)
+    v = Scenarios.DemonstrationAdmissionOrderSlowAudit.result
+    assert v.cost_per_rejection["process"].to("second").magnitude == approx(40.0)
+    assert v.best_order == 1 and v.saving == approx(0.0768039)
+
+
+def test_recovery_pool_denominators():
+    r = Scenarios.RecoveryPoolDenominators.result
+    assert r.records == 50_000 and r.record_share == approx(0.25)
+    assert r.stored_tokens.to("token").magnitude == 514_250_000
+    assert r.admitted_stored_tokens.to("token").magnitude == 465_250_000
+    assert r.target_tokens.to("token").magnitude == 64_000_000
+    assert r.stored_share == approx(0.449684) and r.admitted_stored_share == approx(0.497045)
+    assert r.target_share == approx(0.390625)
+    assert r.context_per_target == {"direct": approx(6.0), "recovery": approx(9.25)}
+
+
+def test_eight_attempt_group_contrast():
+    c = Scenarios.EightAttemptGroupContrast
+    assert c.mixed_fraction(0.05) == approx(0.336580) and c.mixed_fraction(0.95) == approx(0.336580)
+    assert c.mixed_fraction(0.5) == approx(0.9921875) and c.success_yield(0.05) == approx(0.336580)
+    assert c.attempts_per_success(0.05) == approx(23.7685)
+
+
+def test_verifier_timeout_staging_burst():
+    r = Scenarios.VerifierTimeoutStagingBurst.result
+    assert r.arrival_rate.to("1/s").magnitude == approx(22.7556) and r.capacity.to("1/s").magnitude == approx(30.3407)
+    assert r.utilization == approx(0.75) and r.burst_capacity.to("1/s").magnitude == approx(4.26667)
+    assert r.growth.to("MB/s").magnitude == approx(147.911)
+    assert r.time_to_full.to("s").magnitude == approx(216.346)
+    assert r.in_flight.to("GB").magnitude == approx(8.192) and r.reaction_growth.to("GB").magnitude == approx(4.43733)
+    assert r.high_watermark == approx(0.605333)
+
+
+def test_curation_cohort_dispositions():
+    d = Scenarios.CurationCohortDispositions
+    assert d.attempts == 500 and d.emission_yield == approx(0.03)
+    assert d.cost_per_attempt.to("USD").magnitude == approx(0.6)
+    assert d.cost_per_artifact().to("USD").magnitude == approx(20.0)
+    assert d.cost_per_artifact(0.06).to("USD").magnitude == approx(10.0)
