@@ -12,6 +12,7 @@ import math
 from typing import Optional
 
 from ..results import StoppingBudgetResult, TakeoverBudgetResult, TractionLossResult
+from ..results import ShieldCoverageBillResult  # added 2026-10-20
 from ..results import OnsetTrialResult, RailHoldUpResult, StoppingBudgetResult, TractionLossResult
 from ...core.types import Quantity
 from ...core.units import ureg
@@ -319,4 +320,57 @@ class RailHoldUpModel(ForwardModel):
             flag_path=flag_path.to(ms), speed=speed, velocity_term=(speed / deceleration).to(ms),
             jerk_term=(deceleration / jerk).to(ms), stop_time=stop, engage=engage.to(ms),
             flag_to_set=t_set, holdup=holdup, margin=(holdup - t_set).to(ms),
+        )
+
+
+class ShieldCoverageBillModel(ForwardModel):
+    """
+    The evidence a shielded hazard-rate claim needs (added 2026-10-20).
+
+    A fleet of ``fleet_units`` logs ``hours_per_day`` for one release cycle of
+    ``cycle_days`` with zero hazardous proposals; the one-sided Poisson bound
+    is ``-ln(1 - C) / T``. The shield passes ``1 - coverage`` of hazardous
+    proposals (``calc_shielded_system_hazard_rate``), plus the common-cause
+    rate. Against ``target_rate`` the model reports the coverage the bound
+    would need, the proposal bound the stated coverage would need, the
+    failure-free exposure and fleet days that bound it
+    (``calc_empirical_testing_exposure``), and the seeded-hazard campaign
+    that bounds the coverage itself (``calc_zero_failure_sample_size``), alone
+    and with both bounds held jointly at ``1 - alpha/2`` each.
+    """
+    requires = ("fleet_units", "cycle_days", "coverage", "target_rate")
+    produces = ShieldCoverageBillResult
+
+    def solve(self, fleet_units: int, cycle_days: Quantity, hours_per_day: Quantity, coverage: float,
+              common_cause_rate: Quantity, target_rate: Quantity, confidence: float) -> ShieldCoverageBillResult:
+        from ...physics.robotics.assurance import (
+            calc_empirical_testing_exposure,
+            calc_shielded_system_hazard_rate,
+            calc_zero_failure_sample_size,
+        )
+        per_hour = 1 / ureg.hour
+        alpha = 1.0 - confidence
+        exposure = (fleet_units * cycle_days * hours_per_day).to(ureg.hour)
+        ln_inv = -math.log(alpha)
+        upper = (ln_inv / exposure).to(per_hour)
+        cc = common_cause_rate.to(per_hour)
+        target = target_rate.to(per_hour)
+        residual = calc_shielded_system_hazard_rate(upper, coverage, cc)
+        limit = ((target - cc) / (1.0 - coverage)).to(per_hour)
+        needed = calc_empirical_testing_exposure(limit, confidence=confidence).to(ureg.hour)
+        fleet_rate = (fleet_units * hours_per_day).to(ureg.hour / ureg.day)
+        days = (needed / fleet_rate).to(ureg.day)
+        joint = 1.0 - alpha / 2.0
+        ln_inv_half = -math.log(alpha / 2.0)
+        upper_joint = (ln_inv_half / exposure).to(per_hour)
+        return ShieldCoverageBillResult(
+            exposure=exposure, ln_inv_alpha=ln_inv, proposal_rate_upper=upper, residual_rate=residual,
+            meets_target=residual <= target, required_coverage=float(1.0 - ((target - cc) / upper).to("").magnitude),
+            proposal_rate_limit=limit, exposure_needed=needed, days_needed=days,
+            days_beyond_cycle=(days - cycle_days).to(ureg.day),
+            coverage_trials=calc_zero_failure_sample_size(coverage, confidence=confidence),
+            joint_confidence=joint,
+            coverage_trials_joint=calc_zero_failure_sample_size(coverage, confidence=joint),
+            ln_inv_half_alpha=ln_inv_half, proposal_rate_upper_joint=upper_joint,
+            residual_rate_joint=calc_shielded_system_hazard_rate(upper_joint, coverage, cc),
         )

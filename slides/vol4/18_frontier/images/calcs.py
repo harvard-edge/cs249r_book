@@ -1,242 +1,285 @@
-"""Every derived number on the Lecture 18 slides (Volume IV, Engineering Physical AI).
+#!/usr/bin/env python3
+"""Every number on the Lecture 18 slides and notes (Engineering Physical AI), read from MLSysIM.
 
-Run:  python3 calcs.py
-Each block names the slide it serves, lists its inputs with their sources, and
-prints each result with the label the slide uses. Warehouse-aisle inputs come
-from the MLSysIM registry (Embodied.Scenario.WarehouseAisle), as the chapter's
-own cells do; other inputs are typed from the rendered chapter or a cited
-source. Only derived values are computed here.
+The closing lecture recalls the course's running machine, so its numbers are
+the same MLSysIM objects the earlier decks read: the site record
+Embodied.Scenario.WarehouseAisle and the machine
+Embodied.MobileManipulator.WarehouseMobileManipulator; the finished stopping
+budgets (Scenarios.WarehouseFinishedStop*, StoppingBudgetModel) dry, on the
+inspected floor, on a clear oil film, with the dispatch-to-admission allocation,
+and in the restricted mode; the film detector's range and closure test
+(WarehouseFilmDetector*); the restricted transit (WarehouseRestrictedTransit);
+the hypothetical packaging cell (Scenarios.PackagingCell*); the coverage bill
+of a shielded hazard claim (ShieldCoverageBill); the series spring at the latch
+(WarehouseLatchSeriesSpring); the SICK deTec4 light curtain
+(Sensors.SafetyLightCurtain); and the cited records in Literature (TRL PPR073
+friction, Waymo's Safety Impact data, Open X-Embodiment, Agility's tote count).
+The chapter reads the same scenarios. This file only selects values, converts
+units, and formats them; it types no numbers. Each value is recorded with v()
+under the key the deck prints as \\val{key}; running this file writes
+images/numbers.tex. make_figs.py imports it for the figure inputs.
+
+Run from this folder: python3 calcs.py
 """
 
 import math
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "mlsysim"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
 
-from mlsysim import Embodied  # noqa: E402
-from mlsysim.physics import (  # noqa: E402
-    calc_c2_stop_suffix,
-    calc_scurve_max_permitted_velocity,
-    calc_scurve_stop_distance,
-    calc_scurve_stop_time,
-)
-from mlsysim.core.units import meter, millimeter, ms, second  # noqa: E402
+from mlsysim.physics.drivetrain import calc_required_friction  # noqa: E402
 
-AISLE = Embodied.Scenario.WarehouseAisle
+Embodied, Scenarios, Literature, Sensors = mlsysim.Embodied, mlsysim.Scenarios, mlsysim.Literature, mlsysim.Sensors
+Q_ = mlsysim.core.units.Q_
+
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
-G = 9.80665  # m/s^2, standard gravity (defined constant; the chapter prints 9.81)
+AISLE = Embodied.Scenario.WarehouseAisle
+STOP = Scenarios.WarehouseFinishedStopAtAisleSpeed
+INSPECTED = Scenarios.WarehouseFinishedStopInspectedFloor
+FILM = Scenarios.WarehouseFinishedStopOilFilm
+DISPATCH = Scenarios.WarehouseFinishedStopWithDispatch
+RESTRICTED = Scenarios.WarehouseFinishedStopRestricted
+DETECT = Scenarios.WarehouseFilmDetectorRange
+CLOSURE = Scenarios.WarehouseFilmDetectorClosure
+TRANSIT = Scenarios.WarehouseRestrictedTransit
+CELL = Scenarios.PackagingCellTransit
+MODE = Scenarios.PackagingCellRestrictedMode
+FASTPROC = Scenarios.PackagingCellHalfProcessing
+HALFBRAKE = Scenarios.PackagingCellHalfBrake
+QUALIFIED = Scenarios.PackagingCellQualifiedBrake
+CURTAIN_PATH = Scenarios.PackagingCellCurtainPath
+CURTAIN = Sensors.SafetyLightCurtain.SICK_deTec4_Set_30_450
+BILL = Scenarios.ShieldCoverageBill
+SPRING = Scenarios.WarehouseLatchSeriesSpring
+TRL = Literature.ContaminatedSurfaceFriction
+OXE = Scenarios.OpenXEmbodimentPoolComposition
 
 
-def mag(q, unit):
+def m(q, unit):
+    """Magnitude of a Pint quantity in ``unit``."""
     return q.to(unit).magnitude
 
 
-# --- Warehouse aisle inputs (registry; categories as the chapter labels them)
-A_BRAKE = mag(AISLE.a_brake, meter / second**2)    # 2 m/s^2, illustrative
-MU_DRY = AISLE.mu_dry                              # 0.60, illustrative
-MU_INSP = AISLE.mu_inspected_floor                 # 0.12, illustrative
-MU_OIL = AISLE.mu_oil_film                         # 0.05, illustrative
-V_AISLE = mag(AISLE.v_aisle, meter / second)       # 1.3 m/s, chosen
-D_CLEAR = mag(AISLE.d_clear, meter)                # 1.10 m, illustrative
-TAU = mag(AISLE.tau_delay, second)                 # 133.6 ms, derived (known components)
-DELTA_DA = mag(AISLE.t_dispatch_to_admission, second)  # 63.3 ms allocation, illustrative
-OVERHEAD = mag(AISLE.fixed_overhead, meter)        # 190 mm, derived
-DELTA_LOC = mag(AISLE.delta_loc, meter)            # 50 mm
-DELTA_MARGIN = mag(AISLE.delta_margin, meter)      # 100 mm
-EPS_TRACK = mag(AISLE.eps_track, meter)            # 40 mm
-V_RESTRICTED = 1.0                                 # m/s, chosen (register's restricted mode, sec. 18.3.3)
-AISLE_LEG = mag(AISLE.aisle_length, meter)         # 30 m aisle segment (sec. 18.4.2)
-T_DETECT = 0.100                                   # s, chosen film-detector latency (sec. 18.3.4)
+def sci(key, value, fmt, label):
+    """Record a positive value as mantissa (key_mant), power of ten (key_exp), and |power| in words."""
+    exp = math.floor(math.log10(value))
+    mant = value / 10 ** exp
+    if float(fmt.format(mant)) >= 10:  # the mantissa rounds up to the next decade
+        exp, mant = exp + 1, mant / 10
+    v(f"{key}_mant", mant, fmt, f"{label}, mantissa")
+    v(f"{key}_exp", exp, "{:.0f}", f"{label}, power of ten")
+    v(f"{key}_exp_words", abs(exp), "words", f"{label}, power of ten spoken")
 
 
-def a_avail(mu):
-    """Equation 1: available deceleration = min(brake, mu g)."""
-    return min(A_BRAKE, mu * G)
+dry, insp, film, disp = STOP.result, INSPECTED.result, FILM.result, DISPATCH.result
+cell, mode, qual = CELL.result, MODE.result, QUALIFIED.result
+bill = BILL.result
+G = m(Q_(1, "standard_gravity"), "m/s**2")
 
-
-J_BRAKE = mag(calc_c2_stop_suffix(RM.base.max_velocity, AISLE.a_brake)["peak_jerk"], meter / second**3)
-
-
-def budget_terms(v, mu):
-    """Known-component budget (Napkin Math 18.2): delay, braking, jerk ramp, overheads, in m."""
-    a = a_avail(mu)
-    return dict(delay=v * TAU, braking=v**2 / (2 * a), ramp=v * a / (2 * J_BRAKE), overhead=OVERHEAD)
-
-
-def scurve_total(v, mu):
-    a = a_avail(mu) * meter / second**2
-    vv = v * meter / second
-    return v * TAU + mag(calc_scurve_stop_distance(vv, a, J_BRAKE * meter / second**3), meter) + OVERHEAD
-
-
-# --- Packaging cell inputs (Napkin Math 18.1; all illustrative)
-CELL_M = 12.0          # kg
-CELL_V = 1.50          # m/s
-CELL_CLEAR = 0.060     # m
-CELL_RESERVE = 0.015   # m
-CELL_A = 15.0          # m/s^2
-CELL_CHAIN = [("image", 16.0), ("transfer, inference, admission", 36.0), ("bus", 2.0), ("brake onset", 10.0)]  # ms
-CELL_V_MODE = 0.50     # m/s candidate mode
-CURTAIN_MS = 10.0      # ms, SICK deTec4 Set 30/450 response time, uncoded (product data sheet)
-
-
-def cell_tau(chain=None):
-    return sum(v for _, v in (chain or CELL_CHAIN)) / 1000
-
-
-def cell_stop(v, tau, a=CELL_A):
-    return v * tau, v**2 / (2 * a)
-
-
-def ceiling(tau, a, d):
-    """Positive root of v tau + v^2/(2a) = d (equation 2.3)."""
-    return -a * tau + math.sqrt((a * tau) ** 2 + 2 * a * d)
-
-
-# --- Coverage bill inputs (Napkin Math 18.3; illustrative)
-P_TARGET = 1e-9
-ALPHA = 0.05
-FLEET, DAYS, HPD = 100, 90.0, 24.0
-C_SHIELD = 0.9999
-
-# --- Latch inputs (registry; sec. 18.3.4)
-K_PLATE = mag(AISLE.k_latch, AISLE.k_latch.units)  # N/m
-V_GUARD = mag(AISLE.v_latch_approach, meter / second)
-V_FAST = mag(AISLE.v_latch_high, meter / second)
-F_TRIP = 15.0     # N, chosen tripwire (AISLE.f_latch_tripwire)
-F_FLOOR = 100.0   # N, declared strength floor (AISLE.f_latch_limit)
-T_RESP = mag(AISLE.t_contact_response, second)
-M_EFF = 12.0      # kg, RM.arm_effective_contact_mass
-
-
-def zero_failure_n(p_fail, conf=0.95):
-    return math.ceil(math.log(1 - conf) / math.log(1 - p_fail))
-
-
-def main():
-    print("== Hook and Napkin Math 18.2: the friction floor")
-    mu_min = A_BRAKE / G
-    print(f"friction floor mu = a_brake/g: {mu_min:.3f}")
-    print(f"film deceleration mu g: {a_avail(MU_OIL):.2f} m/s^2; inspected floor: {a_avail(MU_INSP):.2f} m/s^2")
-    for name, mu in (("dry", MU_DRY), ("film", MU_OIL)):
-        t = budget_terms(V_AISLE, mu)
-        tot = sum(t.values())
-        print(f"{name}: delay {t['delay']*1000:.1f} mm, braking {t['braking']*1000:.1f} mm, "
-              f"ramp {t['ramp']*1000:.1f} mm, overheads {t['overhead']*1000:.1f} mm, total {tot*1000:.1f} mm")
-        print(f"   S-curve check total: {scurve_total(V_AISLE, mu)*1000:.1f} mm")
-    ratio = budget_terms(V_AISLE, MU_OIL)["braking"] / budget_terms(V_AISLE, MU_DRY)["braking"]
-    print(f"braking term grows by: {ratio:.2f}x (= {A_BRAKE:.0f} / {a_avail(MU_OIL):.3f})")
-    print(f"jerk bound: {J_BRAKE:.2f} m/s^3")
-
-    print("\n== Synthesis: the finished aisle budget at 1.3 m/s (dry)")
-    t = budget_terms(V_AISLE, MU_DRY)
-    tot = sum(t.values())
-    spare = D_CLEAR - tot
-    print(f"overheads: localization {DELTA_LOC*1000:.0f} + margin {DELTA_MARGIN*1000:.0f} + tracking {EPS_TRACK*1000:.0f} mm")
-    print(f"known-component budget {tot*1000:.1f} mm; spare {spare*1000:.1f} mm = {spare/V_AISLE*1000:.1f} ms")
-    da_mm = V_AISLE * DELTA_DA * 1000
-    print(f"dispatch-to-admission {DELTA_DA*1000:.1f} ms = {da_mm:.1f} mm; spare after it {spare*1000 - da_mm:.1f} mm")
-    print(f"timing reserve after allocation: {spare/V_AISLE*1000 - DELTA_DA*1000:.1f} ms")
-    v_ceil_dry = mag(calc_scurve_max_permitted_velocity(AISLE.d_clear, AISLE.tau_delay, AISLE.a_brake,
-                                                        J_BRAKE * meter / second**3, AISLE.delta_loc + AISLE.eps_track,
-                                                        AISLE.delta_margin), meter / second)
-    v_ceil_insp = mag(calc_scurve_max_permitted_velocity(AISLE.d_clear, AISLE.tau_delay, a_avail(MU_INSP) * meter / second**2,
-                                                         J_BRAKE * meter / second**3, AISLE.delta_loc + AISLE.eps_track,
-                                                         AISLE.delta_margin), meter / second)
-    print(f"known-component ceiling dry {v_ceil_dry:.2f} m/s; inspected floor {v_ceil_insp:.2f} m/s")
-    print(f"film-detector range at 100 ms: {(V_AISLE * T_DETECT + tot):.2f} m")
-
-    print("\n== Time form against distance form (pitfall, sec. 18.3.4)")
-    vv = V_AISLE * meter / second
-    a = A_BRAKE * meter / second**2
-    jj = J_BRAKE * meter / second**3
-    t_stop = mag(calc_scurve_stop_time(vv, a, jj), ms)
-    d_stop = mag(calc_scurve_stop_distance(vv, a, jj), millimeter)
-    t_eq = d_stop / V_AISLE
-    print(f"S-curve stop time {t_stop:.1f} ms; distance {d_stop:.1f} mm; distance/v {t_eq:.1f} ms")
-    print(f"over-reserve {t_stop - t_eq:.1f} ms = {(t_stop - t_eq) * V_AISLE:.1f} mm; spare {spare/V_AISLE*1000:.1f} ms")
-
-    print("\n== Napkin Math 18.1: the delay wall (packaging cell)")
-    tau = cell_tau()
-    d1, d2 = cell_stop(CELL_V, tau)
-    budget = CELL_CLEAR - CELL_RESERVE
-    print(f"chain total {tau*1000:.0f} ms; stop at {CELL_V} m/s: {d1*1000:.0f} + {d2*1000:.0f} = {(d1+d2)*1000:.0f} mm; "
-          f"deficit {(d1+d2-CELL_CLEAR)*1000:.0f} mm against {CELL_CLEAR*1000:.0f} mm")
-    print(f"a tau = {CELL_A*tau:.2f} m/s; 2 a d = {2*CELL_A*budget:.2f} m^2/s^2; root {math.sqrt((CELL_A*tau)**2 + 2*CELL_A*budget):.2f}")
-    v_max = ceiling(tau, CELL_A, budget)
-    print(f"speed ceiling: {v_max:.2f} m/s")
-    e1, e2 = cell_stop(CELL_V_MODE, tau)
-    print(f"0.50 m/s: {e1*1000:.0f} + {e2*1000:.1f} = {(e1+e2)*1000:.1f} mm; left {(CELL_CLEAR-e1-e2)*1000:.1f} mm")
-    ke1, ke2 = 0.5 * CELL_M * CELL_V**2, 0.5 * CELL_M * CELL_V_MODE**2
-    print(f"kinetic energy {ke1:.1f} J -> {ke2:.1f} J, reduction {100*(1-ke2/ke1):.1f} percent")
-    print(f"delay travel falls {d1/e1:.0f}x, braking {d2/e2:.0f}x")
-    print("-- sensitivity")
-    half_proc = [(n, v / 2 if n.startswith("transfer") else v) for n, v in CELL_CHAIN]
-    print(f"processing halved to 18 ms: tau {cell_tau(half_proc)*1000:.0f} ms, ceiling {ceiling(cell_tau(half_proc), CELL_A, budget):.2f} m/s")
-    print(f"braking halved to 7.5: ceiling {ceiling(tau, CELL_A / 2, budget):.2f} m/s")
-    curtain = [("light curtain (datasheet)", CURTAIN_MS), ("bus", 2.0), ("brake onset", 10.0)]
-    print(f"certified curtain path: tau {cell_tau(curtain)*1000:.0f} ms, ceiling {ceiling(cell_tau(curtain), CELL_A, budget):.2f} m/s (derived)")
-    print("-- Checkpoint 18.1: brake qualified at 12 m/s^2")
-    v12 = ceiling(tau, 12.0, budget)
-    f1, f2 = cell_stop(CELL_V_MODE, tau, 12.0)
-    print(f"ceiling {v12:.2f} m/s; 0.50 m/s stop {f1*1000:.0f} + {f2*1000:.1f} = {(f1+f2)*1000:.1f} mm against 45 mm budget, "
-          f"{(budget - f1 - f2)*1000:.1f} mm left")
-
-    print("\n== Napkin Math 18.3: the coverage bill")
-    hours = FLEET * DAYS * HPD
-    p_up = -math.log(ALPHA) / hours
-    resid = p_up * (1 - C_SHIELD)
-    c_req = 1 - P_TARGET / p_up
-    p_lim = P_TARGET / (1 - C_SHIELD)
-    hours_need = -math.log(ALPHA) / p_lim
-    days_need = hours_need / (FLEET * HPD)
-    n_cov = math.ceil(math.log(ALPHA) / math.log(C_SHIELD))
-    n_cov_j = math.ceil(math.log(ALPHA / 2) / math.log(C_SHIELD))
-    p_up_j = -math.log(ALPHA / 2) / hours
-    print(f"proposal-hours {hours:.3g}; -ln alpha {-math.log(ALPHA):.3f}; bound {p_up:.4g} per h")
-    print(f"residual {resid:.4g} per h against target {P_TARGET:g}; ratio {resid/P_TARGET:.2f}")
-    print(f"coverage needed at this bound {c_req:.7f}")
-    print(f"proposal bound needed {p_lim:.0e}; hours {hours_need:.3g} = {days_need:.1f} days, {days_need-DAYS:.1f} beyond the cycle")
-    print(f"coverage campaign {n_cov:,} trials; joint (97.5 percent) {n_cov_j:,}; joint residual {p_up_j*(1-C_SHIELD):.4g}")
-
-    print("\n== Residual-claims register closure tests")
-    n_film = zero_failure_n(0.001)
-    p_1000 = 1 - ALPHA ** (1 / 1000)
-    print(f"zero-failure trials for 0.1 percent at 95 percent: {n_film:,}; 1,000 trials bound {p_1000:.6f}")
-
-    print("\n== What a restriction costs (sec. 18.4.2)")
-    cut = 1 - V_RESTRICTED / V_AISLE
-    t13, t10 = AISLE_LEG / V_AISLE, AISLE_LEG / V_RESTRICTED
-    print(f"speed cut {100*cut:.1f} percent; 30 m leg {t13:.1f} s -> {t10:.0f} s, +{100*(t10/t13-1):.0f} percent")
-
-    print("\n== Latch compliance (sec. 18.3.4)")
-    a_guard = V_GUARD**2 / (2 * ((F_FLOOR - F_TRIP) / K_PLATE - V_GUARD * T_RESP))
-    print(f"guarded stop deceleration on the rigid plate: {a_guard:.2f} m/s^2")
-    stroke = V_FAST * T_RESP + V_FAST**2 / (2 * a_guard)
-    k_eq = (F_FLOOR - F_TRIP) / stroke
-    k_spring = 1 / (1 / k_eq - 1 / K_PLATE)
-    print(f"driven stroke {stroke*1000:.2f} mm; k_eq {k_eq/1000:.1f} kN/m; spring {k_spring/1000:.1f} kN/m; "
-          f"stroke needed {F_FLOOR/k_spring*1000:.1f} mm")
-    coast = lambda k, v: math.sqrt(F_TRIP**2 + k * M_EFF * v**2)  # noqa: E731
-    print(f"coasting peaks: rigid 0.03 {coast(K_PLATE, V_GUARD):.1f} N; rigid 0.10 {coast(K_PLATE, V_FAST):.1f} N; "
-          f"spring 0.10 {coast(k_eq, V_FAST):.1f} N")
-
-    print("\n== Measured friction (TRL PPR073, Lambourn and Viner 2006, table 5.1)")
-    for lab, mu in TRL_ROWS:
-        print(f"   {lab}: {mu}  binds={'floor' if mu < mu_min else 'brake'}")
-
-
-# TRL PPR073 table 5.1, averaged locked-wheel coefficients (typed from the report)
-TRL_ROWS = [
-    ("Concrete, dry, skid cars", 0.85),
-    ("Concrete, wet, smooth tyre", 0.52),
-    ("Concrete, diesel, skid cars", 0.44),
-    ("Concrete, diesel, smooth tyre", 0.24),
-    ("Asphalt, engine oil, skid cars", 0.41),
-    ("Asphalt, engine oil, smooth tyre", 0.01),
+# Inputs for make_figs.py, at full precision.
+A_BRAKE = m(AISLE.a_brake, "m/s**2")
+MU_DRY, MU_INSP, MU_OIL = AISLE.mu_dry, AISLE.mu_inspected_floor, AISLE.mu_oil_film
+MU_MIN = calc_required_friction(AISLE.a_brake)
+D_CLEAR_MM = m(AISLE.d_clear, "mm")
+TERMS = {  # finished-budget rows, mm: (delay, braking, jerk ramp, overheads)
+    name: (m(r.delay_travel, "mm"), m(r.braking_travel, "mm"), m(r.jerk_ramp_travel, "mm"),
+           m(r.overhead + r.tracking_inset, "mm"))
+    for name, r in (("dry", dry), ("film", film))
+}
+CELL_ROWS = [(m(s.speed, "m/s"), m(s.result.delay_travel, "mm"), m(s.result.braking_travel, "mm"))
+             for s in (CELL, MODE)]
+CELL_CLEAR_MM, CELL_RESERVE_MM = m(CELL.clearance, "mm"), m(CELL.reserve, "mm")
+CEILINGS = [(s, m(s.result.speed_ceiling, "m/s")) for s in (CURTAIN_PATH, FASTPROC, CELL, HALFBRAKE)]
+V_MODE = m(MODE.speed, "m/s")
+T_STOP_MS, T_EQ_MS = m(dry.stop_time, "ms"), m(dry.scurve_travel / dry.speed, "ms")
+SPARE_MS = m(dry.delay_spare, "ms")
+TRL_ROWS = [  # (surface, contaminant, tire, coefficient), in the slide's order
+    ("Concrete, dry, skid cars", TRL.ConcreteDrySkidCars),
+    ("Concrete, wet, smooth tyre", TRL.ConcreteWetPft),
+    ("Concrete, diesel, skid cars", TRL.ConcreteDieselSkidCars),
+    ("Concrete, diesel, smooth tyre", TRL.ConcreteDieselPft),
+    ("Asphalt, engine oil, skid cars", TRL.AsphaltEngineOilSkidCars),
+    ("Asphalt, engine oil, smooth tyre", TRL.AsphaltEngineOilPft),
 ]
+LATCH_BARS = [(m(AISLE.v_latch_approach, "m/s"), m(SPRING.coasting_rigid_guarded, "N")),
+              (m(AISLE.v_latch_high, "m/s"), m(SPRING.coasting_rigid_fast, "N")),
+              (m(AISLE.v_latch_high, "m/s"), m(SPRING.coasting_spring_fast, "N"))]
+F_FLOOR, F_TRIP = m(AISLE.f_latch_limit, "N"), m(AISLE.f_latch_tripwire, "N")
+A_AVAIL = {"dry": m(dry.deceleration, "m/s**2"), "insp": m(insp.deceleration, "m/s**2"),
+           "film": m(film.deceleration, "m/s**2")}
 
+
+print("== Hook and the finished aisle budget (Napkin Math 18.2; Scenarios.WarehouseFinishedStop*)")
+v("v_aisle", m(AISLE.v_aisle, "m/s"), "{:.1f}", "aisle speed, m/s")
+v("d_clear_m", m(AISLE.d_clear, "m"), "{:.2f}", "clear distance, m")
+v("d_clear_mm", D_CLEAR_MM, "{:,.0f}", "clear distance, mm")
+v("budget", m(dry.required_distance, "mm"), "{:.1f}", "dry budget, known components, mm")
+v("film_m", m(film.required_distance, "m"), "{:.2f}", "film budget, m")
+v("film_m1", m(film.required_distance, "m"), "{:.1f}", "film budget, m, one place (vote choice)")
+v("film_brake", m(film.braking_travel, "mm"), "{:,.1f}", "film braking, mm")
+v("film_brake_words", round(m(film.braking_travel / dry.braking_travel, "")), "words", "film braking over dry, nearest whole times")
+v("overrun_m", m(film.required_distance - AISLE.d_clear, "m"), "{:.0f}", "film overrun of the clear distance, m")
+v("reaction", m(dry.delay_travel, "mm"), "{:.1f}", "delay travel, mm")
+v("braking", m(dry.braking_travel, "mm"), "{:.1f}", "dry braking, mm")
+v("ramp", m(dry.jerk_ramp_travel, "mm"), "{:.1f}", "jerk ramp, mm")
+v("allowances", m(dry.overhead + dry.tracking_inset, "mm"), "{:.0f}", "fixed overheads, mm")
+v("t_da", m(AISLE.t_dispatch_to_admission, "ms"), "{:.1f}", "dispatch-to-admission allocation, ms")
+v("travel_da", m(dry.travel_over(AISLE.t_dispatch_to_admission), "mm"), "{:.1f}", "its travel, mm")
+v("reserve", m(disp.spare, "mm"), "{:.1f}", "spare after the allocation, mm")
+
+print("== The closed loop at three rates (registry machine)")
+v("intent_hz", m(RM.intent_rate, "Hz"), "{:.0f}", "intent rate, Hz")
+v("renewal_ms", m(1 / RM.chunk_rate, "ms"), "{:.0f}", "chunk renewal, ms")
+v("permission_khz", m(RM.permission_rate, "kHz"), "{:.0f}", "permission tick, kHz")
+v("current_khz", m(RM.current_loop_rate, "kHz"), "{:.0f}", "drive current loop, kHz")
+v("loop_orders_words", math.log10(m(RM.current_loop_rate / RM.intent_rate, "")), "words",
+  "orders of magnitude between the fastest and slowest loop")
+
+print("== History: Open X-Embodiment (Lecture 5; Scenarios.OpenXEmbodimentPoolComposition)")
+v("oxe_total_m", OXE.total / 10 ** 6, "{:.2f}", "episodes, millions")
+v("oxe_robots", len({r["robot"] for r in OXE.rows}), "{:.0f}", "distinct robots in the pool")
+
+print("== Vote and restriction cost (Scenarios.WarehouseRestrictedTransit)")
+v("v_restricted", m(TRANSIT.restricted_speed, "m/s"), "{:.0f}", "restricted speed, m/s")
+v("leg_m", m(AISLE.aisle_length, "m"), "{:.0f}", "aisle leg, m")
+v("t_leg_nom", m(TRANSIT.leg_time_nominal, "s"), "{:.1f}", "leg at the aisle speed, s")
+v("t_leg_restr", m(TRANSIT.leg_time_restricted, "s"), "{:.0f}", "leg at the restricted speed, s")
+v("time_increase_pct", 100 * TRANSIT.time_increase, "{:.0f}", "leg time increase, %")
+v("speed_cut_pct", 100 * TRANSIT.speed_cut, "{:.1f}", "speed cut, %")
+v("speed_cut_pct0", 100 * TRANSIT.speed_cut, "{:.0f}", "speed cut, %, whole")
+v("totes", Literature.RobotDeployments.AgilityDigitTotesMoved, "{:,.0f}", "totes moved, Agility Digit")
+
+print("== Napkin Math 18.1: the delay wall (Scenarios.PackagingCell*)")
+v("cell_v", m(CELL.speed, "m/s"), "{:.2f}", "carriage nominal speed, m/s")
+v("cell_clear", m(CELL.clearance, "mm"), "{:.0f}", "clearance to the stop line, mm")
+v("cell_reserve", m(CELL.reserve, "mm"), "{:.0f}", "reserve, mm")
+v("cell_a", m(CELL.deceleration, "m/s**2"), "{:.0f}", "braking bound, m/s^2")
+v("cell_two_a", m(CELL.speed ** 2 / cell.braking_travel, "m/s**2"), "{:.0f}", "2a: speed squared over braking travel, m/s^2")
+v("cell_tau", m(CELL.delay, "ms"), "{:.0f}", "delay chain, ms")
+v("cell_tau_s", m(CELL.delay, "s"), "{:.3f}", "delay chain, s")
+v("cell_exposure", m(CELL.exposure, "ms"), "{:.0f}", "event to usable image, ms")
+v("cell_processing", m(CELL.processing, "ms"), "{:.0f}", "transfer through admission, ms")
+v("cell_bus", m(CELL.bus, "ms"), "{:.0f}", "bus, ms")
+v("cell_onset", m(CELL.onset, "ms"), "{:.0f}", "brake onset, ms")
+v("cell_delay_nom", m(cell.delay_travel, "mm"), "{:.0f}", "delay travel at nominal speed, mm")
+v("cell_brake_nom", m(cell.braking_travel, "mm"), "{:.0f}", "braking at nominal speed, mm")
+v("cell_stop_nom", m(cell.stop_distance, "mm"), "{:.0f}", "stop at nominal speed, mm")
+v("cell_deficit", m(CELL.deficit, "mm"), "{:.0f}", "deficit against the stop line, mm")
+v("cell_budget", m(CELL.stop_budget, "mm"), "{:.0f}", "stop budget, mm")
+a_tau, two_a_d, root = CELL.root_terms
+v("cell_a_tau", m(a_tau, "m/s"), "{:.2f}", "a tau, m/s")
+v("cell_two_a_d", m(two_a_d, "m**2/s**2"), "{:.2f}", "2ad, m^2/s^2")
+v("cell_root", m(root, "m/s"), "{:.2f}", "root, m/s")
+v("cell_ceiling", m(cell.speed_ceiling, "m/s"), "{:.2f}", "speed ceiling, m/s")
+v("cell_v_mode", m(MODE.speed, "m/s"), "{:.2f}", "candidate mode speed, m/s")
+v("cell_delay_mode", m(mode.delay_travel, "mm"), "{:.0f}", "delay travel in the mode, mm")
+v("cell_brake_mode", m(mode.braking_travel, "mm"), "{:.1f}", "braking in the mode, mm")
+v("cell_stop_mode", m(mode.stop_distance, "mm"), "{:.1f}", "stop in the mode, mm")
+v("cell_left_mode", m(MODE.remaining, "mm"), "{:.1f}", "left before the stop line, mm")
+v("cell_mass", m(CELL.mass, "kg"), "{:.0f}", "moving mass, kg")
+v("cell_ke_nom", m(CELL.kinetic_energy, "J"), "{:.1f}", "kinetic energy at nominal speed, J")
+v("cell_ke_mode", m(MODE.kinetic_energy, "J"), "{:.1f}", "kinetic energy in the mode, J")
+v("cell_ke_cut_pct", 100 * m(1 - MODE.kinetic_energy / CELL.kinetic_energy, ""), "{:.1f}", "energy reduction, %")
+v("cell_delay_ratio", m(cell.delay_travel / mode.delay_travel, ""), "{:.0f}", "delay travel falls, times")
+v("cell_brake_ratio", m(cell.braking_travel / mode.braking_travel, ""), "{:.0f}", "braking falls, times")
+v("cell_delay_ratio_words", m(cell.delay_travel / mode.delay_travel, ""), "words", "delay travel falls, spoken")
+v("cell_brake_ratio_words", m(cell.braking_travel / mode.braking_travel, ""), "words", "braking falls, spoken")
+
+print("== Sensitivity and the certified curtain (deTec4 data sheet)")
+v("cell_processing_half", m(FASTPROC.processing, "ms"), "{:.0f}", "processing halved, ms")
+v("cell_tau_fastproc", m(FASTPROC.delay, "ms"), "{:.0f}", "chain with processing halved, ms")
+v("cell_ceiling_fastproc", m(FASTPROC.result.speed_ceiling, "m/s"), "{:.2f}", "ceiling, processing halved, m/s")
+v("cell_a_half", m(HALFBRAKE.deceleration, "m/s**2"), "{:.1f}", "braking bound halved, m/s^2")
+v("cell_ceiling_halfbrake", m(HALFBRAKE.result.speed_ceiling, "m/s"), "{:.2f}", "ceiling, brake halved, m/s")
+v("curtain_ms", m(CURTAIN.response_time, "ms"), "{:.0f}", "deTec4 response, uncoded, ms")
+v("curtain_pfh_e9", m(CURTAIN.pfh_d, "1/hour") * 10 ** 9, "{:.1f}", "deTec4 PFHD, single device, per 10^9 hours")
+v("cell_tau_curtain", m(CURTAIN_PATH.delay, "ms"), "{:.0f}", "curtain chain, ms")
+v("cell_ceiling_curtain", m(CURTAIN_PATH.result.speed_ceiling, "m/s"), "{:.2f}", "ceiling, curtain path, m/s")
+v("cell_check_khz", m(CELL.check_rate, "kHz"), "{:.0f}", "kinematic-check rate, kHz")
+v("cell_force_cap", m(CELL.force_limit, "N"), "{:.0f}", "force limiter, N")
+v("cell_temp_trip", m(CELL.temperature_trip, "degC"), "{:.0f}", "thermistor trip, degrees C")
+
+print("== Checkpoint 18.1: the brake qualified lower (Scenarios.PackagingCellQualifiedBrake)")
+q_a_tau, q_two_a_d, _ = QUALIFIED.root_terms
+v("q_a", m(QUALIFIED.deceleration, "m/s**2"), "{:.0f}", "qualified brake, m/s^2")
+v("q_a_tau", m(q_a_tau, "m/s"), "{:.2f}", "a tau, m/s")
+v("q_two_a_d", m(q_two_a_d, "m**2/s**2"), "{:.2f}", "2ad, m^2/s^2")
+v("q_ceiling", m(qual.speed_ceiling, "m/s"), "{:.2f}", "ceiling, m/s")
+v("q_brake_mode", m(qual.braking_travel, "mm"), "{:.1f}", "braking in the mode, mm")
+v("q_stop_mode", m(qual.stop_distance, "mm"), "{:.1f}", "stop in the mode, mm")
+v("q_left", m(QUALIFIED.stop_budget - qual.stop_distance, "mm"), "{:.1f}", "budget left, mm")
+
+print("== Friction floor (equation 1; site record)")
+v("a_brake", A_BRAKE, "{:.0f}", "credible deceleration, m/s^2")
+v("g", G, "{:.2f}", "standard gravity, m/s^2")
+v("mu_min", MU_MIN, "{:.3f}", "friction floor")
+v("mu_dry", MU_DRY, "{:.2f}", "dry concrete")
+v("mu_insp", MU_INSP, "{:.2f}", "inspected floor")
+v("mu_oil", MU_OIL, "{:.2f}", "clear oil film")
+v("a_insp", m(insp.deceleration, "m/s**2"), "{:.2f}", "inspected-floor deceleration, m/s^2")
+v("a_oil", m(film.deceleration, "m/s**2"), "{:.2f}", "film deceleration, m/s^2")
+v("ceiling_insp", m(insp.speed_ceiling, "m/s"), "{:.2f}", "inspected-floor ceiling, m/s")
+
+print("== Measured friction (Literature.ContaminatedSurfaceFriction, TRL PPR073 table 5.1)")
+for key, (_, mu) in zip(("trl_dry", "trl_wet_smooth", "trl_diesel", "trl_diesel_smooth", "trl_oil", "trl_oil_smooth"),
+                        TRL_ROWS):
+    v(key, mu, "{:.2f}", "locked-wheel coefficient")
+
+print("== Time form against distance form (sec. 18.3.4 pitfall)")
+v("t_stop", T_STOP_MS, "{:.1f}", "S-curve stop duration, ms")
+v("t_eq", T_EQ_MS, "{:.1f}", "stop distance over speed, ms")
+v("t_over", T_STOP_MS - T_EQ_MS, "{:.1f}", "over-reserve, ms")
+v("d_stop", m(dry.scurve_travel, "mm"), "{:.1f}", "S-curve stop distance, mm")
+v("t_spare", SPARE_MS, "{:.1f}", "spare as delay, ms")
+v("over_words", math.floor((T_STOP_MS - T_EQ_MS) / SPARE_MS), "words", "over-reserve, whole multiples of the spare")
+
+print("== Latch compliance (Scenarios.WarehouseLatchSeriesSpring)")
+v("f_floor", F_FLOOR, "{:.0f}", "declared floor, N")
+v("f_trip", F_TRIP, "{:.0f}", "tripwire, N")
+v("m_eff", m(RM.arm_effective_contact_mass, "kg"), "{:.0f}", "arm effective mass, kg")
+sci("k_plate", m(AISLE.k_latch, "N/m"), "{:.1f}", "strike-plate stiffness, N/m")
+v("v_guard", m(AISLE.v_latch_approach, "m/s"), "{:.2f}", "guarded approach, m/s")
+v("v_fast", m(AISLE.v_latch_high, "m/s"), "{:.2f}", "fast approach, m/s")
+v("f_rigid_guard", m(SPRING.coasting_rigid_guarded, "N"), "{:.1f}", "rigid plate, guarded, N")
+v("f_rigid_fast", m(SPRING.coasting_rigid_fast, "N"), "{:.1f}", "rigid plate, fast, N")
+v("f_spring_fast", m(SPRING.coasting_spring_fast, "N"), "{:.1f}", "series spring, fast, N")
+v("k_spring", m(SPRING.spring_stiffness_max, "kN/m"), "{:.1f}", "spring stiffness bound, kN/m")
+v("spring_stroke", m(SPRING.spring_stroke, "mm"), "{:.1f}", "spring stroke at the floor, mm")
+
+print("== Register: the film entry's closure test (Scenarios.WarehouseFilmDetectorClosure)")
+v("n_closure", CLOSURE.result.trials_for_target, "{:,.0f}", "seeded-film trials, no miss")
+v("p_miss_pct", 100 * CLOSURE.target_rate, "{:.1f}", "miss bound, %")
+v("conf_pct", 100 * CLOSURE.confidence, "{:.0f}", "confidence, %")
+
+print("== Napkin Math 18.3: the coverage bill (Scenarios.ShieldCoverageBill)")
+v("fleet", BILL.fleet_units, "{:.0f}", "machines")
+v("cycle_days", m(BILL.cycle_days, "day"), "{:.0f}", "release cycle, days")
+v("hours_per_day", m(BILL.hours_per_day, "hour/day"), "{:.0f}", "hours per day")
+v("coverage", BILL.coverage, "{:.4f}", "shield coverage")
+v("lambda_cc", m(BILL.common_cause_rate, "1/hour"), "{:.0f}", "common-cause rate, per hour")
+sci("target", m(BILL.target_rate, "1/hour"), "{:.0f}", "target, per hour")
+v("target_exp_abs", -math.log10(m(BILL.target_rate, "1/hour")), "{:.0f}", "target, power of ten, magnitude")
+v("conf_alpha", 1 - BILL.confidence, "{:.2f}", "alpha")
+v("ln_inv_alpha", bill.ln_inv_alpha, "{:.3f}", "-ln alpha")
+v("exposure_h", m(bill.exposure, "hour"), "{:,.0f}", "proposal-hours")
+sci("exposure_h", m(bill.exposure, "hour"), "{:.2f}", "proposal-hours")
+sci("p_upper", m(bill.proposal_rate_upper, "1/hour"), "{:.3f}", "proposal bound, per hour")
+sci("residual", m(bill.residual_rate, "1/hour"), "{:.3f}", "residual, per hour")
+sci("p_limit", m(bill.proposal_rate_limit, "1/hour"), "{:.0f}", "proposal bound the target needs, per hour")
+v("n_coverage", bill.coverage_trials, "{:,.0f}", "seeded hazards for coverage")
+v("days_needed", m(bill.days_needed, "day"), "{:.1f}", "days of log to meet the bound")
+v("days_beyond", m(bill.days_beyond_cycle, "day"), "{:.1f}", "beyond the cycle, days")
+
+print("== Waymo: rider-only injury crashes (Literature.WaymoSafetyImpact, as in Lecture 16)")
+rows = Literature.WaymoSafetyImpact.entries
+last = max(r["data_cut"] for r in rows)
+inj = next(r for r in rows if r["data_cut"] == last and r["outcome"] == "Any-injury-reported")
+v("waymo_n", inj["waymo_count"], "{:.0f}", "injury crashes")
+v("waymo_miles", inj["ro_miles_millions"], "{:.1f}", "rider-only miles, millions")
+v("waymo_rate", inj["waymo_ipmm"], "{:.2f}", "per million miles")
+v("waymo_bench", inj["benchmark_ipmm"], "{:.2f}", "benchmark per million miles")
 
 if __name__ == "__main__":
-    main()
+    write(__file__)

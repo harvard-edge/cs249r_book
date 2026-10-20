@@ -185,59 +185,60 @@ The first law asks what the machine cannot undo, so the audit begins by catalogi
 # │ Goal:    Test nominal speed against a fixed stop line, solve the speed
 # │          ceiling the stop budget admits, and check a restricted speed below it.
 # │ Show:    Delay, stopping distances, the ceiling, reserve, and translational energy.
-# │ How:     One-off hypothetical scenario inputs; MLSysIM constant-deceleration
-# │          stopping (calc_safe_stopping_distance), its positive root
-# │          (calc_max_permitted_velocity), and kinetic-energy models. These are
-# │          not measurements.
+# │ How:     Hypothetical scenario inputs (Scenarios.PackagingCell*); MLSysIM's
+# │          elementary stopping budget (StoppingBudgetModel), its positive root,
+# │          and kinetic energy. These are not measurements.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.core.units import degC, dimensionless, kHz, kg, meter, mm, ms, newton, second, volt
+from mlsysim.core.units import dimensionless, kHz, kg, meter, mm, ms, second
 
 class PackagingCell:
-    # ┌── 1. LOAD (Scenario assumptions) ───────────────────────────────────────
-    mass = 12 * kg  # scenario assumption: total moving mass, including load
-    v_nom = 1.5 * meter / second  # scenario assumption: nominal speed
-    v_clamp = 0.5 * meter / second  # scenario assumption: restricted speed
-    clearance = 60 * mm  # scenario assumption: clearance to a fixed stop line
-    reserve = 15 * mm  # scenario assumption: allocated uncertainty and clearance reserve
-    deceleration = 15 * meter / second**2  # scenario assumption: braking lower bound after delay
-    exposure = 16 * ms  # scenario assumption: worst-case event-to-usable-frame interval
-    processing = 36 * ms  # scenario assumption: transfer, inference, scheduling, and admission
-    bus = 2 * ms  # scenario assumption: admitted command to brake-driver delivery
-    onset = 10 * ms  # scenario assumption: delivery to full assumed deceleration
-    check_rate = 1 * kHz  # scenario assumption: independent kinematic-check rate
-    force_cap = 220 * newton  # scenario assumption: selected limiter setting, not material strength
-    temperature_trip = Q_(105, degC)  # scenario assumption: selected sensor threshold
-    stall_timeout = 400 * ms  # scenario assumption: selected stall-detection timeout
-    bus_trip = 60 * volt  # scenario assumption: selected inverter overvoltage threshold
-    deceleration_check = 12 * meter / second**2  # scenario assumption: a lower qualified braking bound (checkpoint estimate)
+    # ┌── 1. LOAD (Scenario assumptions, Scenarios.PackagingCell*) ─────────────
+    _NOM = Scenarios.PackagingCellTransit  # nominal speed, chain, brake, clearance
+    _MODE = Scenarios.PackagingCellRestrictedMode  # the candidate restricted speed
+    _FAST = Scenarios.PackagingCellHalfProcessing  # processing allocation halved
+    _HALF = Scenarios.PackagingCellHalfBrake  # braking bound halved
+    _CHECK = Scenarios.PackagingCellQualifiedBrake  # a lower qualified braking bound (checkpoint estimate)
+    mass = _NOM.mass  # scenario assumption: total moving mass, including load
+    v_nom = _NOM.speed  # scenario assumption: nominal speed
+    v_clamp = _MODE.speed  # scenario assumption: restricted speed
+    clearance = _NOM.clearance  # scenario assumption: clearance to a fixed stop line
+    reserve = _NOM.reserve  # scenario assumption: allocated uncertainty and clearance reserve
+    deceleration = _NOM.deceleration  # scenario assumption: braking lower bound after delay
+    exposure = _NOM.exposure  # scenario assumption: worst-case event-to-usable-frame interval
+    processing = _NOM.processing  # scenario assumption: transfer, inference, scheduling, and admission
+    bus = _NOM.bus  # scenario assumption: admitted command to brake-driver delivery
+    onset = _NOM.onset  # scenario assumption: delivery to full assumed deceleration
+    check_rate = _NOM.check_rate  # scenario assumption: independent kinematic-check rate
+    force_cap = _NOM.force_limit  # scenario assumption: selected limiter setting, not material strength
+    temperature_trip = _NOM.temperature_trip  # scenario assumption: selected sensor threshold
+    stall_timeout = _NOM.stall_timeout  # scenario assumption: selected stall-detection timeout
+    bus_trip = _NOM.bus_trip  # scenario assumption: selected inverter overvoltage threshold
+    deceleration_check = _CHECK.deceleration  # scenario assumption: a lower qualified braking bound (checkpoint estimate)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
-    delay = exposure + processing + bus + onset
-    stop_budget = clearance - reserve
-    blind_nom = v_nom * delay
-    brake_nom = v_nom**2 / (2 * deceleration)
-    stop_nom = calc_safe_stopping_distance(v_nom, delay, deceleration)
-    deficit = stop_nom - clearance
+    nom, mode = _NOM.result, _MODE.result
+    delay = _NOM.delay
+    stop_budget = _NOM.stop_budget
+    blind_nom = nom.delay_travel
+    brake_nom = nom.braking_travel
+    stop_nom = nom.stop_distance
+    deficit = _NOM.deficit
     # Speed ceiling: positive root of v tau + v^2/(2a) = clearance - reserve
-    v_ceiling = calc_max_permitted_velocity(clearance, delay, deceleration, physical_margin=reserve).to(meter / second)
+    v_ceiling = nom.speed_ceiling.to(meter / second)
     # What changes if: halve the processing allocation, or halve the braking bound
-    v_ceiling_fast_proc = calc_max_permitted_velocity(clearance, exposure + processing / 2 + bus + onset, deceleration, physical_margin=reserve).to(
-        meter / second
-    )
-    v_ceiling_half_decel = calc_max_permitted_velocity(clearance, delay, deceleration / 2, physical_margin=reserve).to(meter / second)
-    blind_clamp = v_clamp * delay
-    brake_clamp = v_clamp**2 / (2 * deceleration)
-    stop_clamp = calc_safe_stopping_distance(v_clamp, delay, deceleration)
-    remaining = clearance - stop_clamp
-    energy_nom = calc_kinetic_energy(mass, v_nom)
-    energy_clamp = calc_kinetic_energy(mass, v_clamp)
+    v_ceiling_fast_proc = _FAST.result.speed_ceiling.to(meter / second)
+    v_ceiling_half_decel = _HALF.result.speed_ceiling.to(meter / second)
+    blind_clamp = mode.delay_travel
+    brake_clamp = mode.braking_travel
+    stop_clamp = mode.stop_distance
+    remaining = _MODE.remaining
+    energy_nom = _NOM.kinetic_energy
+    energy_clamp = _MODE.kinetic_energy
     energy_reduction = (1 - energy_clamp / energy_nom).to(dimensionless).magnitude
     # Operands of the positive root, shown in the notebook
-    a_tau = (deceleration * delay).to(meter / second)
-    two_a_d = (2 * deceleration * stop_budget).to(meter**2 / second**2)
-    root_term = ((a_tau**2 + two_a_d) ** 0.5).to(meter / second)
-    v_ceiling_check = calc_max_permitted_velocity(clearance, delay, deceleration_check, physical_margin=reserve).to(meter / second)
+    a_tau, two_a_d, root_term = _NOM.root_terms
+    v_ceiling_check = _CHECK.result.speed_ceiling.to(meter / second)
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     # 2026-09-28: pin the complete hypothetical budget and the claimed reserve.
@@ -449,13 +450,14 @@ Consider an aisle where a pallet jack with a leaking hydraulic line has just cro
 # │          a time-form action deadline over-reserves against the distance form. The walking-person ceiling is Ch12's
 # │          (@sec-enforcement-composite-budget) and is cited, not recomputed.
 # │ How:     credible deceleration a = min(a_brake, mu g); the finished budget
-# │          (jerk-limited S-curve stop, all three overheads) at the aisle speed,
-# │          jerk bound = the reference C2 polynomial's peak jerk at the drive
-# │          limit (@sec-planning-base-stopping-budget); its ceiling from
-# │          calc_scurve_max_permitted_velocity; zero-failure sample size.
+# │          (jerk-limited S-curve stop, all three overheads) at the aisle speed
+# │          from Scenarios.WarehouseFinishedStop* (dry, inspected floor, oil
+# │          film), jerk bound = the reference C2 polynomial's peak jerk at the
+# │          drive limit (@sec-planning-base-stopping-budget); the film-detector
+# │          range and closure test from Scenarios.WarehouseFilmDetector*.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.physics import calc_scurve_stop_time
+from mlsysim.physics.drivetrain import calc_required_friction
 from mlsysim.core.units import dimensionless, meter, millimeter, second, standard_gravity
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
@@ -474,52 +476,57 @@ class OilFilm:
     delta_da = AISLE.t_dispatch_to_admission  # category: illustrative (allocation of @sec-placement-dispatch-admission, not yet measured)
     overhead = AISLE.fixed_overhead  # category: derived (delta_loc + delta_margin + eps_track)
     v_h = AISLE.v_human_approach  # category: datasheet (ISO 13855 walking speed)
-    v_restricted = 1.0 * meter / second  # category: chosen (scenario assumption: restricted mode on inspected floors)
-    p_miss_target = 0.001  # category: chosen (detector miss-rate bound for closure)
-    n_contrast = 1000  # category: illustrative (a smaller zero-miss campaign, for contrast)
-    confidence = 0.95  # category: chosen (one-sided confidence level)
-    t_detect = 100 * ms  # category: chosen (film-detector sensing and inference latency, for the range condition)
+    _STOP = Scenarios.WarehouseFinishedStopAtAisleSpeed  # finished budget, dry floor
+    _INSP = Scenarios.WarehouseFinishedStopInspectedFloor  # finished budget, inspected floor
+    _FILM = Scenarios.WarehouseFinishedStopOilFilm  # finished budget, clear oil film
+    _DETECT = Scenarios.WarehouseFilmDetectorRange  # dry budget plus the detector's latency
+    _CLOSURE = Scenarios.WarehouseFilmDetectorClosure  # zero-miss closure campaign
+    v_restricted = Scenarios.WarehouseFinishedStopRestricted.speed  # category: chosen (restricted mode on inspected floors)
+    p_miss_target = _CLOSURE.target_rate  # category: chosen (detector miss-rate bound for closure)
+    n_contrast = _CLOSURE.trials  # category: illustrative (a smaller zero-miss campaign, for contrast)
+    confidence = _CLOSURE.confidence  # category: chosen (one-sided confidence level)
+    t_detect = _DETECT.added_delay  # category: chosen (film-detector sensing and inference latency, for the range condition)
     mu_check = 0.15  # category: illustrative (a measured floor, for the checkpoint estimate)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
-    mu_min = (a_brake / g).to(dimensionless).magnitude
+    mu_min = calc_required_friction(a_brake)
     a_dry = min(a_brake, mu_dry * g)
     a_insp = min(a_brake, mu_insp * g)
     a_oil = min(a_brake, mu_oil * g)
     # Jerk bound: the reference C2 polynomial's peak jerk at the drive limit; the
     # floor caps the deceleration, while the jerk bound belongs to the load.
-    j_brake = calc_c2_stop_suffix(RM.base.max_velocity, a_brake)["peak_jerk"].to(meter / second**3)
+    dry, insp, film = _STOP.result, _INSP.result, _FILM.result
+    j_brake = dry.jerk.to(meter / second**3)
 
     # finished budget at the aisle speed: v tau + S-curve stop + overhead
-    budget_aisle = (v_aisle * tau_delay + calc_scurve_stop_distance(v_aisle, a_dry, j_brake) + overhead).to(meter)
-    spare_aisle = (d_clear - budget_aisle).to(millimeter)
-    t_latest = (spare_aisle / v_aisle).to(ms)
+    budget_aisle = dry.required_distance.to(meter)
+    spare_aisle = dry.spare.to(millimeter)
+    t_latest = dry.delay_spare.to(ms)
     reserve_da = (t_latest - delta_da).to(ms)  # timing allowance left after the Delta_da allocation
-    stop_oil = (v_aisle * tau_delay + calc_scurve_stop_distance(v_aisle, a_oil, j_brake) + overhead).to(meter)
+    stop_oil = film.required_distance.to(meter)
     # Visible terms of the finished budget (trapezoidal regime: v^2/2a + v a/2j, @sec-enforcement-composite-budget)
-    v_tau = (v_aisle * tau_delay).to(millimeter)
-    brake_dry = (v_aisle**2 / (2 * a_dry)).to(millimeter)
-    ramp_dry = (v_aisle * a_dry / (2 * j_brake)).to(millimeter)
-    brake_oil = (v_aisle**2 / (2 * a_oil)).to(millimeter)
-    ramp_oil = (v_aisle * a_oil / (2 * j_brake)).to(millimeter)
+    v_tau = dry.delay_travel.to(millimeter)
+    brake_dry = dry.braking_travel.to(millimeter)
+    ramp_dry = dry.jerk_ramp_travel.to(millimeter)
+    brake_oil = film.braking_travel.to(millimeter)
+    ramp_oil = film.jerk_ramp_travel.to(millimeter)
 
     # ceilings: the largest speed whose finished budget fits the clear distance
-    margin_loc = AISLE.delta_loc + AISLE.eps_track
-    ceiling_dry = calc_scurve_max_permitted_velocity(d_clear, tau_delay, a_dry, j_brake, margin_loc, AISLE.delta_margin)
-    ceiling_insp = calc_scurve_max_permitted_velocity(d_clear, tau_delay, a_insp, j_brake, margin_loc, AISLE.delta_margin)
+    ceiling_dry = dry.speed_ceiling
+    ceiling_insp = insp.speed_ceiling
 
     # film detector: range needed so the dry-floor stop ends before the film's leading edge
-    d_detect_min = (v_aisle * t_detect + budget_aisle).to(meter)
+    d_detect_min = (_DETECT.result.required_distance + _DETECT.result.added_delay_travel).to(meter)
 
     # action deadline, time form vs distance form, for the S-curve stop at the aisle speed
-    t_brake_aisle = calc_scurve_stop_time(v_aisle, a_dry, j_brake).to(ms)
-    d_brake_aisle = calc_scurve_stop_distance(v_aisle, a_dry, j_brake).to(millimeter)
+    t_brake_aisle = dry.stop_time.to(ms)
+    d_brake_aisle = dry.scurve_travel.to(millimeter)
     t_brake_equiv = (d_brake_aisle / v_aisle).to(ms)  # time at the unchanged speed that the stop's distance represents
     t_overreserve = (t_brake_aisle - t_brake_equiv).to(ms)
     d_overreserve = (v_aisle * t_overreserve).to(millimeter)
 
-    n_closure = calc_zero_failure_sample_size(1.0 - p_miss_target, confidence=confidence)
-    p_miss_contrast = 1.0 - calc_clopper_pearson_zero_failure_bound(n_contrast, confidence=confidence)
+    n_closure = _CLOSURE.result.trials_for_target
+    p_miss_contrast = _CLOSURE.result.rate_upper_exact
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     check(abs(mu_min - 0.204) < 5e-4, f"Friction floor should be 0.204, got {mu_min}.")
@@ -539,6 +546,7 @@ class OilFilm:
         "Restricted mode must sit under the inspected ceiling, and the aisle speed under the dry ceiling.",
     )
     check(abs(stop_oil.to(meter).magnitude - 2.13) < 5e-3, f"Finished budget on the film should be 2.13 m, got {stop_oil}.")
+    check(film.deceleration == a_oil and insp.deceleration == a_insp, "The scenarios' floor-limited decelerations must match equation 1.")
     check(abs(a_oil.to(meter / second**2).magnitude - 0.49) < 5e-3, f"Film deceleration should be 0.49 m/s², got {a_oil}.")
     check(stop_oil > d_clear, f"On the film the incomplete budget from the aisle speed must already exceed the clear distance, got {stop_oil}.")
     check(n_closure == 2995, f"Zero-failure closure test should need 2,995 trials, got {n_closure}.")
@@ -675,51 +683,47 @@ Treating an independent permission path as a substitute for a missing floor-fric
 import math
 from mlsysim import *
 from mlsysim.core.units import hour
+from mlsysim.core.units import day
 from mlsysim.fmt import fmt_sci, fmt, fmt_int, check
-from mlsysim.physics.robotics import (
-    calc_empirical_testing_exposure,
-    calc_shielded_system_hazard_rate,
-    calc_zero_failure_sample_size,
-)
 
 class ArchitecturalShieldDilution:
     # ┌── 1. INPUT (Illustrative target and distinct evidence records) ────
-    p_target = 1.0e-9  # category: illustrative (system incidents/hour target, not a statutory rate)
-    confidence = 0.95  # category: chosen (one-sided confidence level)
+    _BILL = Scenarios.ShieldCoverageBill  # the fleet's proposal log, the shield, and the target
+    p_target = _BILL.target_rate.to(1 / hour).magnitude  # category: illustrative (system incidents/hour target, not a statutory rate)
+    confidence = _BILL.confidence  # category: chosen (one-sided confidence level)
     alpha = 1.0 - confidence  # category: derived (significance level)
 
-    fleet_units = 100  # category: illustrative (fleet size)
-    t_cycle_days = 90.0  # category: illustrative (release cycle length)
-    hours_per_day = 24.0  # category: illustrative (continuous operation)
+    fleet_units = _BILL.fleet_units  # category: illustrative (fleet size)
+    t_cycle_days = _BILL.cycle_days.to(day).magnitude  # category: illustrative (release cycle length)
+    hours_per_day = _BILL.hours_per_day.to(hour / day).magnitude  # category: illustrative (continuous operation)
 
-    c_shield_assumed = 0.9999  # category: illustrative (class-specific interception coverage)
-    p_hw_assumed = 0.0  # category: illustrative (hardware and common-cause residual set to zero)
-    proposal_events_hypothetical = 0  # category: illustrative (adjudicated counterfactual-oracle proposal log)
+    c_shield_assumed = _BILL.coverage  # category: illustrative (class-specific interception coverage)
+    p_hw_assumed = _BILL.common_cause_rate.to(1 / hour).magnitude  # category: illustrative (hardware and common-cause residual set to zero)
+    proposal_events_hypothetical = _BILL.hazardous_proposals  # category: illustrative (adjudicated counterfactual-oracle proposal log)
 
     # ┌── 2. COMPUTE (Proposal-log bound and shield decomposition) ────────
-    # The adjudicated proposal log covers one full cycle of the fleet.
-    t_cycle_hours = t_cycle_days * hours_per_day
-    proposal_exposure_hours_hypothetical = fleet_units * t_cycle_hours
-    # Zero hazardous proposals bound the proposal rate (one-sided Poisson).
-    p_proposal_upper_hypothetical = -math.log(alpha) / proposal_exposure_hours_hypothetical
-
-    # Conditional design arithmetic: the proposal-rate bound the target would require
-    # at the assumed class-specific interception coverage, and the exposure to show it.
-    p_proposal_limit = (p_target - p_hw_assumed) / (1.0 - c_shield_assumed)
-    n_brain_hours = calc_empirical_testing_exposure(p_proposal_limit, confidence=confidence)
-    t_test_days = n_brain_hours.magnitude / (fleet_units * hours_per_day)
-    p_system_conditional = calc_shielded_system_hazard_rate(p_proposal_upper_hypothetical / hour, c_shield_assumed, p_hw_assumed / hour).magnitude
-    c_required_cycle = 1.0 - (p_target - p_hw_assumed) / p_proposal_upper_hypothetical
-    test_overrun_days = t_test_days - t_cycle_days
+    # The adjudicated proposal log covers one full cycle of the fleet; zero
+    # hazardous proposals bound the proposal rate (one-sided Poisson). The
+    # conditional design arithmetic gives the proposal-rate bound the target
+    # would require at the assumed coverage, and the exposure to show it.
+    bill = _BILL.result
+    proposal_exposure_hours_hypothetical = bill.exposure.to(hour).magnitude
+    p_proposal_upper_hypothetical = bill.proposal_rate_upper.to(1 / hour).magnitude
+    p_proposal_limit = bill.proposal_rate_limit.to(1 / hour).magnitude
+    n_brain_hours = bill.exposure_needed.to(hour)
+    t_test_days = bill.days_needed.to(day).magnitude
+    p_system_conditional = bill.residual_rate.to(1 / hour).magnitude
+    c_required_cycle = bill.required_coverage
+    test_overrun_days = bill.days_beyond_cycle.to(day).magnitude
 
     # Coverage is itself a claim: zero misses in n seeded hazardous proposals of
     # the class bound c_h from below. A joint statement from two one-sided bounds
     # needs each at 1 - alpha/2 (Bonferroni), which moves both numbers.
-    n_coverage = calc_zero_failure_sample_size(c_shield_assumed, confidence=confidence)
-    confidence_split = 1.0 - alpha / 2.0
-    n_coverage_joint = calc_zero_failure_sample_size(c_shield_assumed, confidence=confidence_split)
-    p_proposal_upper_joint = -math.log(alpha / 2.0) / proposal_exposure_hours_hypothetical
-    p_system_joint = calc_shielded_system_hazard_rate(p_proposal_upper_joint / hour, c_shield_assumed, p_hw_assumed / hour).magnitude
+    n_coverage = bill.coverage_trials
+    confidence_split = bill.joint_confidence
+    n_coverage_joint = bill.coverage_trials_joint
+    p_proposal_upper_joint = bill.proposal_rate_upper_joint.to(1 / hour).magnitude
+    p_system_joint = bill.residual_rate_joint.to(1 / hour).magnitude
 
     # ┌── 3. GUARD (Statistical bounds & invariance checks) ──────────────
     check(abs(proposal_exposure_hours_hypothetical - 216000.0) < 1.0, f"Unexpected proposal-log hours: {proposal_exposure_hours_hypothetical}")
@@ -754,8 +758,8 @@ class ArchitecturalShieldDilution:
     fleet_units_str = fmt_int(fleet_units)
     t_cycle_days_str = fmt(t_cycle_days, precision=0)
     hours_per_day_str = fmt(hours_per_day, precision=0)
-    neg_ln_alpha_str = fmt(-math.log(alpha), precision=3)
-    neg_ln_alpha_half_str = fmt(-math.log(alpha / 2.0), precision=3)
+    neg_ln_alpha_str = fmt(bill.ln_inv_alpha, precision=3)
+    neg_ln_alpha_half_str = fmt(bill.ln_inv_half_alpha, precision=3)
     c_shield_str = fmt(c_shield_assumed, precision=4)
     one_minus_c_sci_str = fmt_sci(1.0 - c_shield_assumed, precision=0)
     p_target_sci_str = fmt_sci(p_target, precision=0)
@@ -972,7 +976,6 @@ A weakened door latch poses the same observability barrier on a millisecond time
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim import *
-from mlsysim.physics import calc_latch_contact_stopping_profile
 from mlsysim.core.units import kg, kilonewton, meter, millimeter, ms, newton, second
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
@@ -987,27 +990,23 @@ class LatchCompliance:
     t_resp = AISLE.t_contact_response  # category: illustrative (tripwire to brake onset)
     f_floor = AISLE.f_latch_limit  # category: illustrative (declared force floor, a judgment, not a measured strength)
     m_eff = RM.arm_effective_contact_mass  # category: derived (robot-side effective mass at the TCP)
-    f_pre = 0.0 * newton  # category: chosen (series spring without preload)
+    _SPRING = Scenarios.WarehouseLatchSeriesSpring  # the spring sized for the fast approach
+    f_pre = _SPRING.preload  # category: chosen (series spring without preload)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────
-    rigid_guarded = calc_latch_contact_stopping_profile(scenario=AISLE)
-    rigid_fast = calc_latch_contact_stopping_profile(approach_velocity=v_fast, scenario=AISLE)
-    a_arm = rigid_guarded["a_arm_needed"].to(meter / second**2)  # hold the arm to the guarded approach's stop
-    a_arm_fast_rigid = rigid_fast["a_arm_needed"].to(meter / second**2)
+    a_arm = _SPRING.arm_deceleration  # hold the arm to the guarded approach's stop
+    a_arm_fast_rigid = _SPRING.arm_deceleration_rigid_fast
 
-    stroke_fast = (v_fast * t_resp + v_fast**2 / (2 * a_arm)).to(millimeter)  # driven stroke after the tripwire
-    k_eq_max = ((f_floor - f_trip) / stroke_fast).to(newton / meter)
-    k_spring_max = (1 / (1 / k_eq_max - 1 / k_plate)).to(newton / meter)
-    stroke_needed = ((f_floor - f_pre) / k_spring_max).to(millimeter)  # element deflection at the floor force
+    stroke_fast = _SPRING.driven_stroke  # driven stroke after the tripwire
+    k_eq_max = _SPRING.series_stiffness_max
+    k_spring_max = _SPRING.spring_stiffness_max
+    stroke_needed = _SPRING.spring_stroke  # element deflection at the floor force
 
-    def coast_peak(k, v, m, f0):
-        # Peak force if drive torque is removed at the tripwire: f0^2/(2k) + m v^2/2 = F^2/(2k)
-        return (f0**2 + k * m * v**2) ** 0.5
-
-    f_coast_rigid_guarded = coast_peak(k_plate, v_guarded, m_eff, f_trip).to(newton)
-    f_coast_rigid_fast = coast_peak(k_plate, v_fast, m_eff, f_trip).to(newton)
-    f_coast_compliant_fast = coast_peak(k_eq_max, v_fast, m_eff, f_trip).to(newton)
-    check_profile = calc_latch_contact_stopping_profile(approach_velocity=v_fast, latch_stiffness=k_eq_max, scenario=AISLE)
+    # Peak force if drive torque is removed at the tripwire: f0^2/(2k) + m v^2/2 = F^2/(2k)
+    f_coast_rigid_guarded = _SPRING.coasting_rigid_guarded
+    f_coast_rigid_fast = _SPRING.coasting_rigid_fast
+    f_coast_compliant_fast = _SPRING.coasting_spring_fast
+    check_profile = _SPRING.spring_fast_profile
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────
     check(abs(a_arm.magnitude - 2.9508) < 5e-4, f"Guarded-approach arm stop should be 2.95 m/s^2, got {a_arm}.")
@@ -1128,17 +1127,18 @@ AISLE = Embodied.Scenario.WarehouseAisle
 
 class RestrictionCost:
     # ┌── 1. LOAD ─────────────────────────────────────────────────────────────
+    _TRANSIT = Scenarios.WarehouseRestrictedTransit  # the aisle leg at the restricted speed
     v_nominal = AISLE.v_aisle  # category: chosen (normal-mode aisle speed)
-    v_restricted = OilFilm.v_restricted  # category: chosen (restricted mode on inspected floors)
+    v_restricted = _TRANSIT.restricted_speed  # category: chosen (restricted mode on inspected floors)
     leg = AISLE.aisle_length  # category: illustrative (aisle length)
-    totes_reported = 100_000  # category: measured, vendor-reported (Agility Robotics, 20 Nov 2025: Digit at GXO Flowery Branch)
+    totes_reported = Literature.RobotDeployments.AgilityDigitTotesMoved  # category: measured, vendor-reported (Agility Robotics, 20 Nov 2025: Digit at GXO Flowery Branch)
 
     # ┌── 2. EXECUTE ──────────────────────────────────────────────────────────
-    speed_cut = (1 - v_restricted / v_nominal).to(dimensionless).magnitude
-    t_leg_nominal = (leg / v_nominal).to(second)
-    t_leg_restricted = (leg / v_restricted).to(second)
-    t_leg_added = (t_leg_restricted - t_leg_nominal).to(second)
-    time_increase = (t_leg_added / t_leg_nominal).to(dimensionless).magnitude
+    speed_cut = _TRANSIT.speed_cut
+    t_leg_nominal = _TRANSIT.leg_time_nominal
+    t_leg_restricted = _TRANSIT.leg_time_restricted
+    t_leg_added = _TRANSIT.leg_time_added
+    time_increase = _TRANSIT.time_increase
 
     # ┌── 3. GUARD ────────────────────────────────────────────────────────────
     check(abs(speed_cut - 0.2308) < 5e-4, f"Speed cut should be 23.1 percent, got {speed_cut}.")

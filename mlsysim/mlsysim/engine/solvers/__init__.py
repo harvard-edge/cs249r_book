@@ -44,6 +44,7 @@ from .storage import (
 )
 from .embodied import StoppingBudgetModel, TractionLossModel  # added 2026-10-20
 from .embodied import TakeoverBudgetModel  # supervisory intervention (added 2026-10-20)
+from .embodied import ShieldCoverageBillModel  # shield credit against a hazard target (added 2026-10-20)
 from .trajectory import BrakingBlendModel  # added 2026-10-20
 from .realtime import CommandAuthenticationModel  # added 2026-10-20
 from .embodied import OnsetTrialModel, RailHoldUpModel  # added 2026-10-20
@@ -100,6 +101,7 @@ __all__ = [
     "DomainComputeGapModel",
     "StoppingBudgetModel",
     "TakeoverBudgetModel",
+    "ShieldCoverageBillModel",
     "BrakingBlendModel",
     "CommandAuthenticationModel",
     "TractionLossModel",
