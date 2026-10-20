@@ -107,7 +107,7 @@
       root, outer: context.outer,
       title: 'How does a partial chunk become a sum on every GPU?',
       scope: 'Four GPUs, chunks A–D. Each step completes one logical round. Subscripts identify contributing GPUs, not numeric values. Motion does not represent hardware timing.',
-      steps: names.map((label, index) => ({label, description: explanations[index]})),
+      steps: names.map((label, index) => ({label, get description() { return currentIndex === index ? explanations[index] : 'On completion: ' + explanations[index]; }})),
       render(index, {stage, details}) {
         currentIndex=index;
         if (!mounted) { mountedStage=stage; stage.classList.add('original-ring-stage'); stage.tabIndex=0; stage.setAttribute('aria-label','Ring diagram; horizontal scrolling is available on narrow screens'); stage.append(art); details.append(cue, reading); mounted = true; }

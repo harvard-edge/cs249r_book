@@ -45,11 +45,12 @@
       {label:'Record the occupied return',description:'The hit cell becomes occupied with evidence epoch t₁. The update stops here: cells behind it are occluded, not newly observed free space.'},
       {label:'Publish without renewing untouched cells',description:'The updated map can now be published. Only the crossed cells and hit carry t₁; publication does not refresh the old t₀ evidence behind the return or any off-ray cell.'}
     ];
+    steps.forEach((step,i)=>{const description=step.description;Object.defineProperty(step,'description',{get(){return root.dataset.lessonCommittedIndex===String(i)?description:'On completion: '+description;}});});
     function epoch(label,value,color) {
       label.replaceChildren(document.createTextNode('t'));
       const sub=document.createElementNS(ns,'tspan');sub.setAttribute('baseline-shift','sub');sub.setAttribute('font-size','7');sub.textContent=String(value);label.append(sub);label.setAttribute('fill',color);
     }
-    function render(index,{stage,details:drawer}) {
+    function render(index,{stage,details:drawer}) {root.dataset.lessonCommittedIndex=String(index);
       if(!canvas.isConnected)stage.append(canvas,note);if(!details.isConnected)drawer.append(details);
       const updated=Math.max(0,Math.min(9,index-1)), hit=index>=11;
       cells.forEach(c=>{c.dataset.evidenceEpoch=c.getAttribute('y')==='102'?'0':'unchanged';c.dataset.occupancy='unchanged';c.classList.remove('ore-current');});

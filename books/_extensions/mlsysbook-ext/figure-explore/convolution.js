@@ -146,7 +146,7 @@
       states.push({row,col,phase:'write',title:`Position (${row}, ${col}): store the output`,text:'One activation is now stored in the corresponding output cell. The other input values remain available for overlapping windows.'});
     }
     states.forEach((s,i) => {const o=node('option',`${i+1}. ${s.title}`);o.value=i;menu.append(o);});
-    let index=0, completed=0, running=false, moving=false, scanning=false, timer=null, effects=[], finishAction=null, motionFrame=null, motionTick=null, holdRemaining=null, holdStarted=null;
+    let index=0, completed=0, running=false, moving=false, motionPaused=false, resumeAutoplay=false, scanning=false, timer=null, effects=[], finishAction=null, motionFrame=null, motionTick=null, holdRemaining=null, holdStarted=null;
     const coordinates=s => {
       if(s.pose) return {window:[orangeOrigin,add(orangeOrigin,scale(lower.x,3)),add(orangeOrigin,scale(add(lower.x,lower.y),3)),add(orangeOrigin,scale(lower.y,3))],output:originalOutput,shift:{x:0,y:0}};
       const {row,col}=s, window=corners(lower,col,row,3);
@@ -185,7 +185,7 @@
       scanButton.title=index<6?'Available after the first two output values are stored.':'Apply the shared filter at the remaining positions.';
       buttons.back.disabled=index===0; buttons.restart.disabled=index===0&&!moving;
       buttons.next.disabled=index===states.length-1&&!moving;
-      buttons.next.textContent=moving?'Finish':'Next'; buttons.play.textContent=running?'Pause':index===states.length-1?'Replay':'Play';
+      buttons.next.textContent=moving?'Finish':'Next'; buttons.play.textContent=running||(moving&&!motionPaused)?'Pause':index===states.length-1?'Replay':'Play';
       Object.assign(panel.dataset,{step:String(index),committed:String(completed),moving:String(moving),running:String(running)});
     }
     function paintDiagramValues(s) {
@@ -287,7 +287,7 @@
       effects.forEach(e=>e.cancel()); effects=[]; particles.replaceChildren(); finishAction=null;
     }
     function pause() {
-      settleHold();running=false;effects.forEach(e=>{const time=e.currentTime;e.pause();if(time!==null)e.currentTime=time;});
+      settleHold();if(moving&&!motionPaused)resumeAutoplay=running;running=false;motionPaused=moving;effects.forEach(e=>{const time=e.currentTime;e.pause();if(time!==null)e.currentTime=time;});
       if(motionFrame!==null)cancelAnimationFrame(motionFrame);motionFrame=null;paint();
     }
     function seek(i) {cancel();running=false;moving=false;scanning=false;index=completed=i;paint();}
@@ -304,7 +304,7 @@
     function setSpeed(value) {
       if(!rates.includes(value))return;
       const waiting=holdStarted!==null;settleHold();speed=value;
-      effects.forEach(effect=>{const time=effect.currentTime;effect.updatePlaybackRate(speed);if(!running){effect.pause();if(time!==null)effect.currentTime=time;}});
+      effects.forEach(effect=>{const time=effect.currentTime;effect.updatePlaybackRate(speed);if(motionPaused){effect.pause();if(time!==null)effect.currentTime=time;}});
       speedMenu.value=String(speed);panel.dataset.speed=String(speed);
       if(waiting&&running)schedule(true);
     }
@@ -314,7 +314,7 @@
       if(moving){running=false;finishAction?.();return;}
       if(index===states.length-1)return;
       clearTimeout(timer);timer=null;holdRemaining=null;holdStarted=null;
-      const before=states[index];index++;running=autoplay;moving=true;
+      const before=states[index];index++;running=autoplay;moving=true;motionPaused=false;resumeAutoplay=autoplay;
       const s=states[index];applyPose(s);drawOutputs(s);paint();
       const duration=media.matches?0:movement;
       const finish=()=>{
@@ -359,9 +359,9 @@
       clock.finished.then(finish).catch(()=>{});
     }
     function play() {
-      if(running){pause();return;}
+      if(running||(moving&&!motionPaused)){pause();return;}
+      if(moving){running=resumeAutoplay;motionPaused=false;effects.forEach(e=>e.play());motionTick?.();paint();return;}
       running=true;
-      if(moving){effects.forEach(e=>e.play());motionTick?.();paint();return;}
       if(index===states.length-1){seek(0);running=true;}
       if(holdRemaining!==null){paint();schedule(true);return;}
       advance(true);

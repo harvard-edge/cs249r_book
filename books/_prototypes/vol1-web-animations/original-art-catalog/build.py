@@ -121,11 +121,37 @@ def implementation_review_current(key, record, registry, implementation, art, bu
     return rendered_source_chapter(reviewed_build, entry, implementation) is not None
 
 
+def catalog_review_state(registry, manifest, reviews, art, build_root=None, build_root_map=None):
+    """Validate each volume against its explicitly assigned run, without fallback."""
+    volumes = {f"vol{entry['volume']}" for key, entry in registry.items() if key in manifest}
+    if build_root_map is not None:
+        if (not isinstance(build_root_map, dict) or set(build_root_map) != volumes
+                or any(not isinstance(value, str) or not value for value in build_root_map.values())):
+            raise ValueError("Build-root map must assign exactly the enrolled volumes to nonempty paths")
+        roots = {volume: (ROOT / value).resolve() for volume, value in build_root_map.items()}
+    elif build_root is not None:
+        roots = {volume: (ROOT / build_root).resolve() for volume in volumes}
+    else:
+        roots = {}
+    reviewed = {key for key, implementation in manifest.items()
+                if key in registry and implementation_review_current(
+                    key, reviews.get(key), registry, implementation, art,
+                    roots.get(f"vol{registry[key]['volume']}"))}
+    ready = {}
+    for volume, root in roots.items():
+        implementations = {key: implementation for key, implementation in manifest.items()
+                           if key in registry and f"vol{registry[key]['volume']}" == volume}
+        ready.update(verified_chapter_links(root, registry, implementations))
+    return reviewed, ready
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--art-index", type=Path, default=Path("/tmp/figures-animation-art-current/index.json"))
     parser.add_argument("--manifest", type=Path, default=BOOKS / "_extensions/mlsysbook-ext/figure-explore/mechanisms/implementations.json")
-    parser.add_argument("--build-root", type=Path, help="Optional successful chapter or full-volume run used only by the disposable preview")
+    builds = parser.add_mutually_exclusive_group()
+    builds.add_argument("--build-root", type=Path, help="Optional successful chapter or full-volume run used only by the disposable preview")
+    builds.add_argument("--build-root-map", type=Path, help="JSON mapping each enrolled volN to an explicit build root for the disposable preview")
     args = parser.parse_args()
     catalog = json.loads((HERE.parent / "animation-catalog/catalog.json").read_text())
     selected = {x["key"]: x for x in json.loads((BOOKS / "_extensions/mlsysbook-ext/figure-explore/mechanisms/selection.json").read_text())}
@@ -139,12 +165,12 @@ def main():
     art = json.loads(args.art_index.read_text()) if args.art_index.exists() else {}
     registry = json.loads((BOOKS / "_extensions/mlsysbook-ext/figure-explore/figure-registry.json").read_text())
     reviews = review.get("implementation_reviews", {})
-    reviewed = {key for key in current if key in manifest and implementation_review_current(key, reviews.get(key), registry, manifest[key], art, args.build_root)}
+    build_root_map = json.loads(args.build_root_map.read_text()) if args.build_root_map else None
+    reviewed, ready = catalog_review_state(registry, manifest, reviews, art, args.build_root, build_root_map)
     output = BOOKS / "_build/original-art-catalog"
     assets = output / "assets"
     assets.mkdir(parents=True, exist_ok=True)
     figures = []
-    ready = verified_chapter_links(args.build_root, registry, manifest) if args.build_root else {}
     for original in catalog["figures"]:
         key = original["key"]
         status = "accepted" if key == "vol1:fig-cnn" else "reviewed" if key in reviewed else "implementing" if key in current else "adapt" if key in selected else "static"
@@ -175,7 +201,7 @@ def main():
     data = json.dumps(payload, ensure_ascii=False).replace("<", "\\u003c")
     template = (HERE / "template.html").read_text()
     page = template.replace("__CATALOG_DATA__", data)
-    if not args.build_root:
+    if not args.build_root and not args.build_root_map:
         (HERE / "index.html").write_text(page)
     (output / "index.html").write_text(page)
     print(json.dumps({"figures": len(figures), "status_counts": counts, "volumes": payload["volumes"], "thumbnails": payload["images"], "verified_chapter_links": len(ready), "output": str(output / "index.html")}, indent=2))

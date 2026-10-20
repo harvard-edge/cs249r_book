@@ -3,6 +3,7 @@ from hashlib import sha1
 import importlib.util
 import json
 from pathlib import Path
+import shutil
 from types import SimpleNamespace
 
 import pytest
@@ -152,3 +153,64 @@ def test_job_cannot_escape_the_declared_build(project):
     p.summary.write_text(json.dumps({'jobs': [p.job]}))
     assert not current(p)
     assert links(p) == {}
+
+
+@pytest.fixture
+def mixed_volumes(project):
+    p = project
+    followup = p.books / '_build/parallel/followup'
+    shutil.copytree(p.run, followup)
+    first = {**p.record, 'build_root': 'books/_build/parallel/followup'}
+    source = 'books/vol2/01_source/01_source.qmd'
+    qmd = p.root / source
+    qmd.parent.mkdir(parents=True)
+    qmd.write_bytes(p.qmd.read_bytes())
+    second = {**p.entry, 'source': source, 'volume': 2}
+    job = {**p.job, 'job': 'second-volume', 'volume': 'vol2', 'chapter': None}
+    output = p.run / job['job'] / 'output'
+    chapter = output / Path(source).relative_to('books').with_suffix('.html')
+    chapter.parent.mkdir(parents=True)
+    chapter.write_text(p.chapter.read_text().replace('vol1:fig-test', 'vol2:fig-test'))
+    emitted = output / 'site_libs/original-test.js'
+    emitted.parent.mkdir()
+    emitted.write_bytes(p.emitted.read_bytes())
+    p.summary.write_text(json.dumps({'jobs': [p.job, job]}))
+    registry = {p.key: p.entry, 'vol2:fig-test': second}
+    manifest = {key: p.impl for key in registry}
+    records = {p.key: first, 'vol2:fig-test': p.record}
+    art = {key: {'asset': str(p.art)} for key in registry}
+    roots = {'vol1': 'books/_build/parallel/followup', 'vol2': 'books/_build/parallel/final'}
+    return p, followup, registry, manifest, records, art, roots
+
+
+def test_volume_map_uses_current_review_and_exact_route_for_each_run(mixed_volumes):
+    p, followup, registry, manifest, records, art, roots = mixed_volumes
+    reviewed, ready = catalog.catalog_review_state(registry, manifest, records, art, build_root_map=roots)
+    assert reviewed == set(manifest)
+    assert '/parallel/followup/' in ready[p.key]
+    assert '/parallel/final/second-volume/' in ready['vol2:fig-test']
+    wrong = {**roots, 'vol1': roots['vol2']}
+    reviewed, _ = catalog.catalog_review_state(registry, manifest, records, art, build_root_map=wrong)
+    assert reviewed == {'vol2:fig-test'}
+
+
+def test_volume_map_does_not_fall_back_to_an_older_available_chapter(mixed_volumes):
+    p, followup, registry, manifest, records, art, roots = mixed_volumes
+    (followup / p.chapter.relative_to(p.run)).unlink()
+    reviewed, ready = catalog.catalog_review_state(registry, manifest, records, art, build_root_map=roots)
+    assert reviewed == {'vol2:fig-test'}
+    assert set(ready) == {'vol2:fig-test'}
+
+
+def test_volume_map_does_not_refresh_a_stale_source_fingerprint(mixed_volumes):
+    p, _, registry, manifest, records, art, roots = mixed_volumes
+    p.qmd.write_text(p.qmd.read_text() + '\nChanged source context')
+    reviewed, _ = catalog.catalog_review_state(registry, manifest, records, art, build_root_map=roots)
+    assert reviewed == {'vol2:fig-test'}
+
+
+@pytest.mark.parametrize('roots', [{'vol1': 'run'}, {'vol1': 'run', 'vol2': ''}, {'vol1': 'run', 'vol2': 'run', 'vol3': 'run'}])
+def test_volume_map_requires_an_explicit_complete_assignment(mixed_volumes, roots):
+    _, _, registry, manifest, records, art, _ = mixed_volumes
+    with pytest.raises(ValueError, match='exactly the enrolled volumes'):
+        catalog.catalog_review_state(registry, manifest, records, art, build_root_map=roots)

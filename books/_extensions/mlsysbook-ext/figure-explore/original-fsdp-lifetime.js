@@ -125,7 +125,7 @@
       root, outer: context.outer,
       title: 'Why can gathered weights disappear while activations remain?',
       scope: 'One rank, one sharding unit, with resharding after forward. Columns are execution phases, not memory locations or equal time intervals. Cells show logical lifetimes, not bytes; buffers may be shared or reused.',
-      steps,
+      steps: steps.map((step, index) => ({label: step.label, get description() { return currentIndex === index ? step.description : 'On completion: ' + step.description; }})),
       render(index, {stage, details}) {
         currentIndex=index;
         if (!mounted) {
