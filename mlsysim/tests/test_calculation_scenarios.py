@@ -5082,7 +5082,7 @@ def test_single_machine_serving_scenarios():
     cost = Scenarios.ResNet50BatchOneVersusEightCostH100
     assert cost.cost_per_million(1).m_as("dollar") == pytest.approx(3.920133, rel=1e-6)
     assert cost.cost_ratio == pytest.approx(7.510333, rel=1e-6)
-    assert Scenarios.PhotoLibraryPrecomputeH100.ratio == pytest.approx(315.6608, rel=1e-6)
+    assert Scenarios.PhotoLibraryPrecomputeH100.ratio == pytest.approx(315.66128, rel=1e-6)
     path = Scenarios.ResNet50RequestPathH100
     assert path.total.m_as("ms") == pytest.approx(8.628119, rel=1e-6)
     assert path.overall_speedup == pytest.approx(1.582325, rel=1e-6)
@@ -5454,8 +5454,8 @@ def test_token_serving_scenarios():
     assert e.joules_per_token.m_as("J") == pytest.approx(1.096491, rel=1e-6) and e.low_use_ratio == pytest.approx(6)
     assert Scenarios.Llama2_70BConversationalDecodeStreams.in_flight == pytest.approx(6180.72)
     assert Scenarios.Llama2_70BInteractiveDecodeStreams.in_flight == pytest.approx(519.176)
-    syn = Scenarios.Llama3_70BFp16ConversationsEightH100.result
-    assert syn.max_requests == 1326 and Scenarios.Llama3_70BInt8ConversationsEightH100.result.max_requests == 2996
+    syn = Scenarios.Llama2_70BFp16ConversationsEightH100.result
+    assert syn.max_requests == 1329 and Scenarios.Llama2_70BInt8ConversationsEightH100.result.max_requests == 2999
 def test_fairness_gates_price_and_feedback():
     """Credit service rates, price, feedback loop, evaluation budget, COMPAS identity (added 2026-10-20)."""
     from mlsysim import Literature

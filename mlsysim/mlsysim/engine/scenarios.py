@@ -10433,14 +10433,14 @@ class Scenarios(Registry):
                            if r["benchmark"] == "llama2-70b-interactive-99" and r["scenario"] == "Server"][0],
                           "ms"),
     )
-    Llama3_70BFp16ConversationsEightH100 = Llama3_8BFp16ConversationsH100.variant(
-        name="70B-class conversations of 1,256 tokens on eight H100s, 16-bit weights and cache",
-        description="Llama 3 70B geometry; the case study's conversation length; no runtime reserve.",
-        workload=_Models.Language.Llama3_70B,
+    Llama2_70BFp16ConversationsEightH100 = Llama3_8BFp16ConversationsH100.variant(
+        name="Llama 2 70B conversations of 1,256 tokens on eight H100s, 16-bit weights and cache",
+        description="The MLPerf server's model; the case study's conversation length; no runtime reserve.",
+        workload=_Models.Language.Llama2_70B,
         accelerators=8,  # one eight-GPU server
         context_tokens=Llama3_8BInt4ChatServiceH100.total_tokens,
     )
-    Llama3_70BInt8ConversationsEightH100 = Llama3_70BFp16ConversationsEightH100.variant(
+    Llama2_70BInt8ConversationsEightH100 = Llama2_70BFp16ConversationsEightH100.variant(
         name="The same conversations with 8-bit weights and cache",
         weight_bytes_per_param=_BYTES_INT8,
         kv_bytes_per_elem=_BYTES_INT8,
