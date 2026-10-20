@@ -1008,6 +1008,23 @@ MLPERF_TRAINING_V31_RESNET50_H100 = Provenance(
     ),
 )
 
+MLPERF_TRAINING_V40_RESNET = Provenance(  # added 2026-10-20
+    id="prov:mlperf-training-v40-resnet",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref=(
+        "MLPerf Training v4.0 (June 2024), closed division, ResNet-50: NVIDIA eos_ngc24.04_mxnet "
+        "(8x H100) and eos_n8_ngc24.04_mxnet (64x H100) result logs and scaling.json; MLPerf Training "
+        "rules, ResNet-50 quality target"
+    ),
+    url="https://github.com/mlcommons/training_results_v4.0/tree/main/NVIDIA/results",
+    verified="2026-10-17",
+    notes=(
+        "The published score is the mean of the middle three of five run times (a run that misses the "
+        "quality target counts as the slowest) times the scaling.json factor; every ResNet folder carries "
+        "the same factor. Global batch from the global_batch_size MLLOG line of both submissions."
+    ),
+)
+
 MLPERF_INFERENCE_V50_RESNET50_H100 = Provenance(
     id="prov:mlperf-inference-v50-resnet50-h100",
     kind=ProvenanceKind.INDUSTRY_REPORT,

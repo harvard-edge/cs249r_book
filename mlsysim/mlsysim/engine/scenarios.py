@@ -8332,3 +8332,114 @@ class Scenarios(Registry):
         joint_speed=Q_(0.50, "rad/s"),  # scenario assumption: constant joint speed
         delay=Q_(80.0, "ms"),  # scenario assumption: compute and transport of the replacement
     )
+    # --- Benchmarking (added 2026-10-20) ------------------------------------
+    DatasheetVersusSustainedEdgeChip = _st.EfficiencyClaimGapScenario(
+        name="A \"10 TOPS at 0.5 W\" datasheet line against sustained load",
+        description="An edge accelerator's datasheet operating point against the same chip under sustained "
+                    "inference load, after thermal throttling (illustrative, no named device).",
+        claimed_rate=Q_(10, "TOPS"),  # scenario assumption: datasheet peak
+        claimed_power=Q_(0.5, "W"),  # scenario assumption: datasheet power
+        sustained_rate=Q_(3, "TOPS"),  # scenario assumption: throughput under sustained load
+        sustained_power=Q_(2, "W"),  # scenario assumption: power under sustained load
+    )
+    MobileNetV2CameraTrapBoard = _st.HostAcceleratorBoardScenario(
+        name="MobileNetV2 on a camera trap's host CPU and attached INT8 accelerator",
+        description="A labeled composite edge board: FP32 and INT8 on the low-power host CPU, INT8 on the "
+                    "attached accelerator; end to end adds host preprocessing and the link copy.",
+        host_fp32_latency=Q_(50, "ms"),  # scenario assumption: FP32 on the host CPU
+        host_int8_latency=Q_(15, "ms"),  # scenario assumption: INT8 on the host CPU
+        accelerator_latency=Q_(2, "ms"),  # scenario assumption: INT8 on the accelerator
+        host_end_to_end=Q_(18, "ms"),  # scenario assumption: host CPU, full request path
+        accelerator_end_to_end=Q_(6, "ms"),  # scenario assumption: accelerator, full request path
+        host_power=Q_(120, "mW"),  # scenario assumption: host CPU active power
+        accelerator_power=Q_(500, "mW"),  # scenario assumption: accelerator active power
+        frame_rate=Q_(30, "1/second"),  # scenario assumption: 30-frame-per-second camera stream
+    )
+    PreprocessBoundVisionPipeline = _st.PipelineSpeedupScenario(
+        name="A vision pipeline whose inference stage is made 5x faster",
+        description="8 ms of JPEG decode, resize, and normalize on the host, then 10 ms of inference.",
+        stages={"preprocess": Q_(8, "ms"),  # scenario assumption
+                "inference": Q_(10, "ms")},  # scenario assumption
+        accelerated="inference",
+        speedup=5,  # scenario assumption: inference-only optimization
+    )
+    ModelStageInFiftyMsRequest = _st.PipelineSpeedupScenario(
+        name="A 10 ms model stage inside a 50 ms request, made 3x faster",
+        description="End-to-end dilution of a component speedup: the rest of the request is untouched.",
+        stages={"other": Q_(50, "ms") - Q_(10, "ms"),  # scenario assumption: 50 ms request
+                "model": Q_(10, "ms")},  # scenario assumption: model stage
+        accelerated="model",
+        speedup=3,  # scenario assumption
+    )
+    ResNet50H100TrainingCeiling = _st.AcceleratorInputFeedScenario(
+        name="ResNet-50 training on one H100: arithmetic ceiling against the MLPerf rate",
+        description="Peak dense FP16 over three forward passes of work per image, against the per-accelerator "
+                    "rate of NVIDIA's 64-H100 MLPerf Training v3.1 submission.",
+        workload=_Models.Vision.ResNet50,
+        hardware=_Hardware.Cloud.H100,
+        sustained_rate=Q_(float(_Literature.Benchmarks.ResNet50H100TrainThroughput), "count/second"),
+        accelerators=int(_Literature.Benchmarks.ResNet50H100TrainThroughputAccelerators),
+        training_flops_factor=3,  # convention: the backward pass costs about twice the forward pass
+    )
+    KeywordSpottingOnEsp32S3 = _st.PeriodicInferencePowerScenario(
+        name="DS-CNN keyword spotting once a second on an ESP32-S3-class board",
+        description="One inference per one-second audio window at the board's peak INT8 rate; active at TDP, "
+                    "idle at its minimum power between inferences.",
+        workload=_Models.Tiny.DS_CNN,
+        hardware=_Hardware.Tiny.ESP32_S3,
+        period=Q_(1, "second"),  # scenario assumption: one inference per one-second window
+        precision="int8",
+        energy_cut=2.0,  # scenario assumption: a model that halves inference energy
+    )
+    GeminiMedianPromptEnergyBoundary = _st.MeasurementBoundaryEnergyScenario(
+        name="The median Gemini text prompt under two measurement boundaries",
+        description="Active accelerators only (most efficient data centers) against everything the service "
+                    "draws (Elsworth et al. 2025, Table 1).",
+        series_name="GeminiPromptEnergy",
+    )
+    FasterStepsMoreSteps = _st.StepsToQualityScenario(
+        name="A change that speeds each step 1.8x but needs 2.5x the steps",
+        description="Step throughput rises while time to the quality target grows.",
+        step_speedup=1.8,  # scenario assumption
+        steps_multiplier=2.5,  # scenario assumption
+    )
+    ModelOnlyMeanVersusProductionP99 = _st.MeanVersusTailScenario(
+        name="A model-only mean latency against a production p99",
+        description="Mean latency on evenly spaced synthetic inputs against the p99 under production traffic "
+                    "(illustrative).",
+        mean=Q_(15, "ms"),  # scenario assumption: model-only mean
+        tail_low=Q_(150, "ms"),  # scenario assumption: production p99, low
+        tail_high=Q_(200, "ms"),  # scenario assumption: production p99, high
+    )
+    EosEightH100ResNetMLPerfV40 = _st.MLPerfTrainingResultScenario(
+        name="NVIDIA Eos, 8x H100, ResNet-50, MLPerf Training v4.0",
+        description="Five runs of one 8-GPU node; published score and per-accelerator rate.",
+        series_name="MLPerfTrainingV40ResNetRuns",
+        system="eos_ngc24.04_mxnet",
+        accelerators=8,
+        dataset=_Datasets.ImageNet,
+        global_batch=int(_Literature.Benchmarks.MLPerfTrainingV40EosResNetGlobalBatch),
+        scaling_factor=float(_Literature.Benchmarks.MLPerfTrainingV40ResNetScalingFactor),
+    )
+    EosSixtyFourH100ResNetMLPerfV40 = EosEightH100ResNetMLPerfV40.variant(
+        name="NVIDIA Eos_n8, 64x H100, ResNet-50, MLPerf Training v4.0",
+        description="Five runs of eight nodes, one of which missed the quality target.",
+        system="eos_n8_ngc24.04_mxnet",
+        accelerators=64,
+    )
+    EosResNetStrongScalingMLPerfV40 = _st.StrongScalingPairScenario(
+        name="ResNet-50 on 8 and on 64 H100s, same global batch and epochs (MLPerf Training v4.0)",
+        description="Strong scaling from one Eos node to eight.",
+        base_devices=EosEightH100ResNetMLPerfV40.accelerators,
+        base_time=EosEightH100ResNetMLPerfV40.published_score,
+        scaled_devices=EosSixtyFourH100ResNetMLPerfV40.accelerators,
+        scaled_time=EosSixtyFourH100ResNetMLPerfV40.published_score,
+    )
+    ImageClassifierEightGpuScaling = _st.StrongScalingPairScenario(
+        name="An image classifier trained on one GPU and on eight",
+        description="A fixed dataset: 24 hours on one GPU, 4 hours on eight (illustrative).",
+        base_devices=1,
+        base_time=Q_(24, "hour"),  # scenario assumption: single-GPU training time
+        scaled_devices=8,
+        scaled_time=Q_(4, "hour"),  # scenario assumption: eight-GPU training time
+    )
