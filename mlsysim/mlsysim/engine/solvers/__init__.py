@@ -19,6 +19,21 @@ from .serving import (
     TailLatencyModel,
     WeightStreamingModel,
 )
+from .storage import (
+    StorageFootprintModel,
+    TieredCheckpointModel,
+    CheckpointStormModel,
+    InputDemandModel,
+    DataStallModel,
+    PrefetchDepthModel,
+    TieredCacheModel,
+    HostIoCpuModel,
+    ObjectStorageBillModel,
+    StreamVsStageModel,
+    UtilizationLossModel,
+    SyntheticFootprintModel,
+    StorageBenchmarkDemandModel,
+)
 from .trends import TrainingGrowthModel
 from .training import CheckpointModel, ScalingModel, TrainingMemoryModel, TrainingRunModel, TrainingStateModel
 
@@ -40,6 +55,19 @@ __all__ = [
     "GradientSyncModel",
     "CommunicationIntensityModel",
     "TrainingGrowthModel",
+    "StorageFootprintModel",
+    "TieredCheckpointModel",
+    "CheckpointStormModel",
+    "InputDemandModel",
+    "DataStallModel",
+    "PrefetchDepthModel",
+    "TieredCacheModel",
+    "HostIoCpuModel",
+    "ObjectStorageBillModel",
+    "StreamVsStageModel",
+    "UtilizationLossModel",
+    "SyntheticFootprintModel",
+    "StorageBenchmarkDemandModel",
     "NetworkRooflineModel",
     "EfficiencyModel",
     "SensitivitySolver",

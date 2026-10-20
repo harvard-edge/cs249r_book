@@ -189,3 +189,122 @@ def test_growth_and_runs():
     assert g.fleet_share == approx(0.51151)
     assert Scenarios.GpuFailuresLlama3Run.result.interval.to("hour").magnitude == approx(3.0518)
     assert Scenarios.Gpt3PublishedRun.peak_fraction == approx(0.2, rel=0.05)
+
+
+# --- Feeding and saving a training fleet (added 2026-10-20) -----------------
+
+def test_storage_footprint_of_the_175b_run():
+    r = Scenarios.Gpt3StorageFootprint.result
+    assert r.checkpoint_bytes.to("GB").magnitude == approx(2450)
+    assert r.saves == 4320
+    assert r.checkpoint_bytes_written.to("PB").magnitude == approx(10.584)
+    assert r.write_read_ratio == approx(1764)
+    assert r.average_read_rate.to("MB/s").magnitude == approx(2.3148)
+    assert r.shard_count == 2000
+    assert r.archived_checkpoints == 44
+    assert r.archive_bytes.to("TB").magnitude == approx(116.8)
+
+
+def test_tiered_checkpoint_and_storm():
+    r = Scenarios.Gpt3TieredCheckpoint2K.result
+    assert r.per_node_shard.to("GB").magnitude == approx(9.5703)
+    assert r.local_write_time.to("s").magnitude == approx(0.34180)
+    assert r.drain_time.to("s").magnitude == approx(2.45)
+    assert r.durable_share_per_node.to("GB/s").magnitude == approx(3.90625)
+    assert r.pause_fraction == approx(5.6966e-4)
+    s = Scenarios.Llama2_70BCheckpointStorm1K.result
+    assert s.state_bytes.to("GB").magnitude == approx(980)
+    assert s.storm_bytes.to("TB").magnitude == approx(1003.52)
+    assert s.storm_time.to("s").magnitude == approx(10035.2)
+    assert s.single_copy_time.to("s").magnitude == approx(9.8)
+    assert s.slowdown == approx(1024)
+
+
+def test_input_demand_stall_and_prefetch():
+    assert Scenarios.TextInputDemand2K.result.bandwidth.to("MB/s").magnitude == approx(167.77)
+    assert Scenarios.ImageInputDemand2K.result.bandwidth.to("GB/s").magnitude == approx(303.19)
+    assert Scenarios.VideoInputDemand2K.result.bandwidth.to("GB/s").magnitude == approx(2621.44)
+    st = Scenarios.OverlappedInputStall.result
+    assert st.sequential_step.to("ms").magnitude == approx(450)
+    assert st.sequential_stall == approx(0.55556)
+    assert st.overlapped_step.to("ms").magnitude == approx(250)
+    assert st.overlapped_stall == approx(0.2)
+    wall = Scenarios.QuarterDeliveryIoWall
+    assert [wall.relative_throughput(s) for s in (1, 2, 4, 16)] == [approx(1), approx(2), approx(4), approx(4)]
+    assert wall.plateau == approx(4)
+    p = Scenarios.PrefetchDepthByTier.result
+    assert p.spans["object"] == approx(2.5)
+    assert p.depths == {"nvme": 1, "pfs": 1, "object": 3}
+    assert p.buffer_per_node.to("GB").magnitude == approx(1.6)
+
+
+def test_tiered_cache():
+    h = Scenarios.HotTierCacheExample.result
+    assert h.mean_service == approx(5.95)
+    assert h.delivered_fraction == approx(0.16807)
+    m = Scenarios.MultimodalCorpusNodeCache.result
+    assert m.hit_rate == approx(0.87771)
+    assert m.miss_penalty == approx(7)
+    assert m.delivered_rate.to("GB/s").magnitude == approx(16.150)
+    assert m.delivered_fraction == approx(0.57680)
+
+
+def test_host_cpu_tail_and_metadata():
+    c = Scenarios.GpuDirectStorageNodeCpu.result.cpu_seconds_per_second
+    assert c["host"] == approx(7.68)
+    assert c["gds"] == approx(1.92)
+    assert Scenarios.StorageTailFanout100.all_up == approx(0.36603)
+    assert Scenarios.ImageFileMetadataMeltdown.files_per_shard == approx(4000)
+    assert Scenarios.ParallelFileSystem1TBps.servers == 100
+
+
+def test_storage_economics():
+    b = Scenarios.ObjectStorage100TB.result
+    assert b.storage_cost == approx(24000)
+    assert b.egress_per_read == approx(9000)
+    assert b.egress_cost == approx(90000)
+    assert b.request_cost == approx(40)
+    assert b.archive_retrieval_cost == approx(2000)
+    assert b.archive_restore_cost == approx(11000)
+    v = Scenarios.VisionCorpusStreamVsStage.result
+    assert v.stream_cost == approx(372000)
+    assert v.stage_cost == approx(90000)
+    assert v.savings == approx(282000)
+    assert v.break_even_epochs == approx(4.3333)
+    u = Scenarios.InputStallIdleCost1K.result
+    assert u.fleet_cost_per_day == approx(49152)
+    assert u.loss_per_day == approx(9830.4)
+    assert u.loss_total == approx(294912)
+    s = Scenarios.SyntheticDataProvenance.result
+    assert s.stored_bytes.to("TB").magnitude == approx(1.4)
+    assert s.pipeline_bytes.to("TB").magnitude == approx(4.4)
+
+
+def test_measured_storage_demand():
+    r = Scenarios.MLPerfStorageV1Demand.result
+    assert r.result_count == 124
+    assert r.medians["unet3d"]["H100"] == approx(2.7530)
+    assert r.medians["resnet50"]["A100"] == approx(0.091586)
+    assert min(r.generation_ratios.values()) == approx(1.5877)
+    assert max(r.generation_ratios.values()) == approx(1.9795)
+
+
+def test_weight_loads_and_rollout():
+    t = Scenarios.Gpt3WeightsColdStart.result.times
+    assert t["object store"].to("s").magnitude == approx(350)
+    assert t["file system share"].to("s").magnitude == approx(87.5)
+    assert t["one Gen5 NVMe"].to("s").magnitude == approx(25)
+    assert t["eight Gen4 NVMe"].to("s").magnitude == approx(6.25)
+    assert t["eight PCIe links"].to("s").magnitude == approx(0.68359)
+    assert t["host DRAM"].to("s").magnitude == approx(1.75)
+    r = Scenarios.Gpt3RolloutFanout100
+    assert r.total_bytes.to("TB").magnitude == approx(35)
+    assert r.result.times["file system"].to("s").magnitude == approx(35)
+    assert r.result.times["object store"].to("s").magnitude == approx(350)
+
+
+def test_codec_decode_cores():
+    c = Scenarios.NodeStripeCodecs
+    assert c.output_bandwidth("light").to("GB/s").magnitude == approx(84)
+    assert c.decode_cores("light") == approx(56)
+    assert c.decode_cores("dense") == approx(224)
