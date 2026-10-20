@@ -834,3 +834,20 @@ __all__ += [
     "calc_csr_bytes",
     "calc_pareto_frontier",
 ]
+
+# --- Trajectory curation: split leakage, attempt-group contrast, ordered checks (added 2026-10-20) ---
+from .agents import (
+    calc_split_straddle,
+    calc_mixed_outcome_fraction,
+    calc_cost_per_rejection,
+    calc_short_circuit_cost,
+)
+from .retrieval import calc_minhash_standard_error
+
+__all__ += [
+    "calc_split_straddle",
+    "calc_mixed_outcome_fraction",
+    "calc_cost_per_rejection",
+    "calc_short_circuit_cost",
+    "calc_minhash_standard_error",
+]

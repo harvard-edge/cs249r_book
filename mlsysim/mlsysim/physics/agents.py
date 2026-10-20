@@ -412,3 +412,54 @@ def calc_pass_pow_k_unbiased(samples: int, passing: int, k: int) -> float:
     if passing < k:
         return 0.0
     return _math.comb(passing, k) / _math.comb(samples, k)
+
+
+# --- Trajectory curation: split leakage, attempt-group contrast, ordered checks (added 2026-10-20) ---
+
+def calc_split_straddle(train_fraction: float, attempts: int) -> float:
+    """
+    Chance that a task's ``attempts`` land on both sides of a random split of runs.
+
+    Each run goes to training independently with probability ``f``; the task
+    stays on one side only if every run goes the same way:
+
+        1 - f^k - (1 - f)^k
+    """
+    f = train_fraction
+    return 1 - f ** attempts - (1 - f) ** attempts
+
+
+def calc_mixed_outcome_fraction(pass_probability: float, attempts: int) -> float:
+    """
+    Chance that ``attempts`` independent attempts hold at least one success and one failure.
+
+        1 - (1 - p)^k - p^k
+    """
+    p = pass_probability
+    return 1 - (1 - p) ** attempts - p ** attempts
+
+
+def calc_cost_per_rejection(check_cost, pass_probability: float):
+    """
+    Checking cost spent per record a check rejects: ``t / (1 - p)``.
+
+    For two adjacent independent checks, running A first is cheaper when A's
+    cost per rejection is lower (the rank ordering of expensive predicates).
+    """
+    return check_cost / (1 - pass_probability)
+
+
+def calc_short_circuit_cost(pass_probabilities, check_costs):
+    """
+    Expected checking cost and pass-through share of checks run in order, stopping at the first failure.
+
+    Check ``i`` runs only when every earlier check passed, so the expected cost
+    is ``sum_i t_i prod_{j<i} p_j`` and the share that passes them all is
+    ``prod_i p_i``. Returns ``(expected_cost, passing_share)``.
+    """
+    reach = 1.0
+    cost = 0 * check_costs[0]
+    for p, t in zip(pass_probabilities, check_costs):
+        cost = cost + reach * t
+        reach *= p
+    return cost, reach

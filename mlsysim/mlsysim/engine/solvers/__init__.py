@@ -647,3 +647,20 @@ __all__ += [
     "DynamicWindowModel",
     "StaleAnchorModel",
 ]
+
+# --- Trajectory curation: triage, split leakage, admission order, denominators, staging (added 2026-10-20) ---
+from .curation import (
+    FailureTriageModel,
+    RunSplitLeakageModel,
+    AdmissionOrderModel,
+    CorpusDenominatorsModel,
+    StagingBurstModel,
+)
+
+__all__ += [
+    "FailureTriageModel",
+    "RunSplitLeakageModel",
+    "AdmissionOrderModel",
+    "CorpusDenominatorsModel",
+    "StagingBurstModel",
+]
