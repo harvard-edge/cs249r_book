@@ -10892,3 +10892,31 @@ class Scenarios(Registry):
         series_name="AgentTimeHorizon",
         released_from="2024-01-01",  # scenario assumption: the window the comparison covers
     )
+
+    # --- Course-overview anchors (added 2026-10-20) ------------------------------
+    BloomTrainingAllocation = _st.TrainingAllocationScenario(
+        name="BLOOM-176B as launched on Jean Zay",
+        description="BigScience tr11-176B-ml README and Slurm script (Literature.TrainingRuns.Bloom*).",
+        nodes_allocated=int(_Literature.TrainingRuns.BloomAllocatedNodes),
+        nodes_used=int(_Literature.TrainingRuns.BloomTrainingNodes),
+        accelerators_per_node=int(_Literature.TrainingRuns.BloomGpusPerNode),
+        start="2022-03-11",  # README: 'The training started on March 11, 2022'
+        end="2022-06-28",    # README: 'Epoch one finished on June 28, 2022'
+        tensor_parallel=int(_Literature.TrainingRuns.BloomTensorParallel),
+        pipeline_parallel=int(_Literature.TrainingRuns.BloomPipelineParallel),
+        launch_time_limit=Q_(float(_Literature.TrainingRuns.BloomLaunchTimeLimitHours), "hour"),
+    )
+
+    LandmarkClusterGrowth2012to2024 = _st.TrendFitScenario(
+        name="Accelerators used by landmark training runs, 2012 to 2024",
+        description="Log-linear fit through the published counts (filled points of the cluster-size "
+                    "figure); the GPT-3 machine-size estimate is excluded.",
+        stated_points=[  # (publication year, accelerators)
+            (2012, float(_Literature.TrainingRuns.AlexNetGpus)),
+            (2019, float(_Literature.TrainingRuns.MegatronLm2019Gpus)),
+            (2022, _Models.Language.PaLM_540B.training_accelerators_ref.to("count").magnitude),
+            (2023, float(_Literature.TrainingRuns.Llama1_65B_Gpus)),
+            (2024, float(_Literature.TrainingRuns.DeepSeekV3Gpus)),
+            (2024, _Models.Language.Llama3_405B.training_accelerators_ref.to("count").magnitude),
+        ],
+    )

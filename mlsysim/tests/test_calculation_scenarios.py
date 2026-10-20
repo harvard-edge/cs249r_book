@@ -5654,3 +5654,15 @@ def test_closing_an_agent_course():
     assert len(g.rows) == 13 and g.rows[0]["model_key"] == "gpt_4o_inspect"
     assert g.ratio_median == pytest.approx(5.4768583, rel=1e-6)
     assert g.ratio_min == pytest.approx(3.9935368, rel=1e-6) and g.ratio_max == pytest.approx(10.2870995, rel=1e-6)
+
+
+def test_course_overview_bloom_allocation_and_cluster_growth():
+    """BLOOM-176B as launched (BigScience tr11 README and Slurm script) and the log-linear
+    growth of landmark training-run accelerator counts (added 2026-10-20)."""
+    b = Scenarios.BloomTrainingAllocation
+    assert (b.accelerators_used, b.accelerators_allocated, b.reserve_accelerators, b.reserve_nodes) == (384, 416, 32, 4)
+    assert b.reserve_fraction == pytest.approx(32 / 416)
+    assert b.duration.m_as("day") == 109 and b.accelerator_hours.m_as("hour") == pytest.approx(384 * 109 * 24)
+    assert b.min_launches == 27 and b.accelerators_per_replica == 48
+    g = Scenarios.LandmarkClusterGrowth2012to2024
+    assert len(g.points) == 6 and g.growth == pytest.approx(1.9337027, rel=1e-6)
