@@ -3381,3 +3381,24 @@ GOOGLE_SRE_SLO_ALERTING = Provenance(
     notes=("For a 99.9 percent SLO over 30 days: page on burn rate 14.4 over 1 hour (2 percent of the budget) "
            "or 6 over 6 hours (5 percent); open a ticket on burn rate 1 over 3 days (10 percent)."),
 )
+
+# ML compilers and fused kernels (added 2026-10-20)
+ANSEL_2024_PYTORCH2 = _lit(
+    "prov:ansel-2024-pytorch2",
+    "Ansel et al. (2024), PyTorch 2: Faster Machine Learning Through Dynamic Python Bytecode "
+    "Transformation and Graph Compilation, ASPLOS '24",
+    url="https://docs.pytorch.org/assets/pytorch2-2.pdf",
+    verified="2026-10-20",
+    notes=("Table 3: geometric-mean speedups over eager on an NVIDIA A100, float32, TorchInductor "
+           "(inference/training): TorchBench 2.73/1.38, Hugging Face 1.47/1.24, TIMM 2.48/1.38. "
+           "Table 4: Hugging Face float16 inference, all optimizations 1.91, without cudagraphs 1.81, "
+           "without fusion and inlining 0.80."),
+)
+DAO_2022_FLASHATTENTION = _lit(
+    "prov:dao-2022-flashattention",
+    "Dao et al. (2022), FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness, NeurIPS 2022",
+    url="https://arxiv.org/abs/2205.14135",
+    verified="2026-10-20",
+    notes=("Figure 2 (left), GPT-2 medium on an A100: HBM reads and writes 40.3 GB for standard "
+           "attention against 4.4 GB for FlashAttention; Sec. 1: up to 9x fewer HBM accesses."),
+)
