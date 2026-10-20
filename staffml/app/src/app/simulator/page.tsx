@@ -284,7 +284,7 @@ export default function SimulatorPage() {
                   <p className="flex items-start gap-2">
                     <span className="text-accentRed font-bold shrink-0">!!</span>
                     TP={config.tpDegree} exceeds GPUs/node={config.gpusPerNode}. Tensor parallelism across nodes
-                    requires inter-node AllReduce for every matmul — expect severe performance degradation. Keep TP within one node.
+                    requires inter-node AllReduce for every matmul, which severely degrades performance. Keep TP within one node.
                   </p>
                 )}
                 {config.numGpus % (config.tpDegree * config.ppDegree) !== 0 && (

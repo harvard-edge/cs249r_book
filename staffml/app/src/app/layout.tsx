@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     canonical: "https://mlsysbook.ai/staffml/",
   },
   title: {
-    default: "StaffML — ML Systems Interview Prep",
+    default: "StaffML: ML Systems Interview Prep",
     template: "%s | StaffML",
   },
   description: `Physics-grounded system design prep for ML Engineers. ${QUESTION_COUNT_DISPLAY} questions across cloud, edge, mobile, and TinyML. 100% client-side.`,
@@ -28,15 +28,15 @@ export const metadata: Metadata = {
     apple: `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/icons/apple-touch-icon.png`,
   },
   openGraph: {
-    title: "StaffML — ML Systems Interview Prep",
+    title: "StaffML: ML Systems Interview Prep",
     description: `${QUESTION_COUNT_DISPLAY} physics-grounded ML systems questions with napkin math verification. Free, open source, no accounts, runs entirely in your browser.`,
     type: "website",
     siteName: "StaffML",
-    images: [{ url: `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/og-image.png`, width: 1200, height: 630, type: "image/png", alt: `StaffML — ${QUESTION_COUNT_DISPLAY} ML systems interview questions` }],
+    images: [{ url: `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/og-image.png`, width: 1200, height: 630, type: "image/png", alt: `StaffML: ${QUESTION_COUNT_DISPLAY} ML systems interview questions` }],
   },
   twitter: {
     card: "summary_large_image",
-    title: "StaffML — ML Systems Interview Prep",
+    title: "StaffML: ML Systems Interview Prep",
     description: `${QUESTION_COUNT_DISPLAY} physics-grounded ML systems questions with napkin math. Free, open source, no accounts.`,
     images: [`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/og-image.png`],
   },

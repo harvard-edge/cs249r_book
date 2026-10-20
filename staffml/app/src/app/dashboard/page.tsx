@@ -44,7 +44,7 @@ export default function DashboardPage() {
             <Activity className="w-8 h-8 text-accentBlue" />
             <div>
               <h1 className="text-3xl font-extrabold text-textPrimary tracking-tight">Dashboard</h1>
-              <p className="text-sm text-textSecondary">Anonymous usage analytics — all data stays in your browser</p>
+              <p className="text-sm text-textSecondary">Anonymous usage analytics. All data stays in your browser.</p>
             </div>
           </div>
           <button

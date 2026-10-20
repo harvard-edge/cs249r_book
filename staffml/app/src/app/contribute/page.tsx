@@ -137,7 +137,7 @@ export default function ContributePage() {
       showToast({
         type: 'info',
         title: "Couldn't save locally",
-        description: 'Your browser blocks localStorage. Use "Copy as Markdown" now — the draft won\'t survive a page reload.',
+        description: 'Your browser blocks localStorage. Use "Copy as Markdown" now. The draft will not survive a page reload.',
       });
     }
   };
@@ -239,7 +239,7 @@ export default function ContributePage() {
           </div>
           <p className="text-sm text-textSecondary mb-2">
             Help expand the ML systems interview question vault. Good questions are
-            physics-grounded, quantitative, and test systems reasoning — not trivia.
+            physics-grounded, quantitative, and test systems reasoning rather than trivia.
           </p>
           <p className="text-[12px] text-textTertiary mb-8">
             Every submission goes through a math-verification pass before it lands in
@@ -271,7 +271,7 @@ export default function ContributePage() {
                 className="w-full bg-surface border border-border rounded-lg px-3 py-2 text-sm text-textPrimary focus:outline-none focus:border-accentBlue/50"
               >
                 {LEVELS.map(l => (
-                  <option key={l.id} value={l.id}>{l.id} — {l.name}</option>
+                  <option key={l.id} value={l.id}>{l.id}: {l.name}</option>
                 ))}
               </select>
             </div>
@@ -285,7 +285,7 @@ export default function ContributePage() {
                 className="w-full bg-surface border border-border rounded-lg px-3 py-2 text-sm text-textPrimary focus:outline-none focus:border-accentBlue/50"
               >
                 {ZONES.map(z => (
-                  <option key={z.id} value={z.id}>{z.id} — {z.desc}</option>
+                  <option key={z.id} value={z.id}>{z.id}: {z.desc}</option>
                 ))}
               </select>
             </div>
@@ -332,7 +332,7 @@ export default function ContributePage() {
             <textarea
               value={answer}
               onChange={(e) => setAnswer(e.target.value)}
-              placeholder="The model answer with reasoning and real numbers. Explain WHY, not just WHAT."
+              placeholder="The model answer with reasoning and real numbers. Explain why, not just what."
               className="w-full min-h-[150px] bg-surface border border-border rounded-lg px-4 py-3 text-sm text-textPrimary font-mono resize-y focus:outline-none focus:border-accentBlue/50 placeholder:text-textTertiary/40 leading-relaxed"
               spellCheck="false"
             />
