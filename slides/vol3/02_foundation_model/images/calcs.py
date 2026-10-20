@@ -1,212 +1,260 @@
 #!/usr/bin/env python3
-"""Every derived number in Lecture 2 (The Foundation Model), computed from sourced inputs.
+"""Every number on the Volume III Lecture 2 slides and notes, read from MLSysIM.
+
+MLSysIM holds the inputs (registry, Literature, the coding and support agent
+profiles) and the calculations (Scenarios.*, each backed by a solver in
+engine/solvers/model_call.py); the chapter reads the same scenarios. The one
+other source is the deck's own measurement, data/model_runs.json, written by
+run_model.py (Qwen2.5-Coder-0.5B-Instruct on a laptop CPU); this file reads it
+as recorded. This file only selects values, converts units, and formats them;
+it types no numbers. Each value is recorded with v() under the key the deck
+prints as \\val{key}; running this file writes images/numbers.tex.
 
 Run from this folder: python3 calcs.py
-Each line prints a slide label and the value the deck shows. Inputs carry their source.
-"Ch." is the rendered chapter, The Foundation Model (Volume III, Chapter 2).
-"run" is data/model_runs.json, written by run_model.py (Qwen2.5-Coder-0.5B-Instruct on a
-laptop CPU). "Azure" is data/azure_llm_code_2023.csv (Azure LLM inference trace 2023, code).
 """
 
-import csv
 import json
 import math
-import statistics
+import sys
 from pathlib import Path
 
-HERE = Path(__file__).parent
-RUN = json.loads((HERE / "data" / "model_runs.json").read_text())
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
+
+Literature, Scenarios = mlsysim.Literature, mlsysim.Scenarios
+RUN = json.loads((Path(__file__).resolve().parent / "data" / "model_runs.json").read_text())
+
+FLOORS = Scenarios.Llama3_70B_Int8DecodeH100
+R30, R60 = Scenarios.CodingAgentResend30Turns, Scenarios.CodingAgentResend60Turns
+CALL1 = Scenarios.CodingAgentFirstTurnCall
+FULL, DIFF = Scenarios.CodingAgentWholeFileEdit, Scenarios.CodingAgentLocalizedEdit
+CANCEL = Scenarios.CanceledStreamDecodeSavings
+ADMIT, HALF = Scenarios.MultimodalContextAdmission, Scenarios.MultimodalContextAdmissionHalfReserve
+SAMPLE = Scenarios.TemperatureNucleusExample
+CHECK, CHECK_HALF = Scenarios.PatchCheckerPosterior, Scenarios.PatchCheckerHalvedFalseAccept
+HORIZON, COST = Scenarios.HorizonCompounding30Steps, Scenarios.RepairAttemptCostLevers
+TRACE = Scenarios.LlmCodeTraceTokenMix
+INCIDENT, SELF = Literature.ServingIncidents, Literature.SelfCorrection
 
 
-def show(label, value):
-    print(f"{label:<62} {value}")
+def m(q, unit):
+    """Magnitude of a Pint quantity in ``unit``."""
+    return q.to(unit).magnitude
 
 
-def pct(x, d=1):
-    return f"{100 * x:.{d}f}%"
+print("== Hook and synthesis (Anthropic 2025 postmortem)")
+v("pm_initial_pct", 100 * INCIDENT.Anthropic2025MisroutedShareInitial, "{:.1f}", "misrouted at first, %")
+v("pm_worst_pct", 100 * INCIDENT.Anthropic2025MisroutedShareWorstHour, "{:.0f}", "misrouted at the worst hour, %")
+v("pm_users_pct", 100 * INCIDENT.Anthropic2025AffectedUserShare, "{:.0f}", "coding-tool users affected, %")
+v("pm_topk_n", INCIDENT.Anthropic2025TopKProbeLength, "{:,.0f}", "top-k reproduction array length")
+v("pm_topk_fail", INCIDENT.Anthropic2025TopKFirstFailingIndex, "{:,.0f}", "first failing index")
 
+print("== Recall: horizon compounding and cost per accepted task")
+v("rec_h", HORIZON.short_horizon, "{:.0f}", "repair horizon, steps (harness step budget)")
+v("rec_step", HORIZON.step_success, "{:.2f}", "per-step success")
+v("rec_step_pct", 100 * HORIZON.step_success, "{:.0f}", "per-step success, %")
+v("rec_success_pct", 100 * HORIZON.result.success[HORIZON.short_horizon], "{:.1f}", "task success, %")
+v("rec_attempt", COST.result.attempt_cost, "{:.2f}", "cost per attempt, $")
+v("rec_acc", COST.acceptance, "{:.2f}", "acceptance probability")
+v("rec_acc_pct", 100 * COST.acceptance, "{:.0f}", "acceptance probability, %")
+v("rec_ceff", COST.result.cost_per_accepted, "{:.2f}", "cost per accepted task, $")
 
-# ------------------------------------------------------------- hook (Ch. War Story 2.1)
-# Inputs typed from Anthropic 2025 postmortem and Ch. WS 2.1: 0.8% initial, 16% peak, ~30% of
-# coding-agent users. No derived numbers on the hook slide.
+print("== The real call (run_model.py)")
+vis_sys, vis_user = RUN["visible_tokens"]["system"], RUN["visible_tokens"]["user"]
+vis, wire = vis_sys + vis_user, RUN["wire_tokens"]
+v("run_done_tokens", RUN["completed_call"]["new_tokens"], "{:.0f}", "completed call, new tokens")
+v("run_done_max", RUN["completed_call"]["max_new_tokens"], "{:.0f}", "completed call, max_new_tokens")
+v("run_cut_tokens", RUN["truncated_call"]["new_tokens"], "{:.0f}", "truncated call, new tokens")
+v("run_cut_max", RUN["truncated_call"]["max_new_tokens"], "{:.0f}", "truncated call, max_new_tokens")
+v("wire_tokens", wire, "{:.0f}", "serialized request tokens")
+v("visible_tokens", vis, "{:.0f}", "visible message tokens")
+v("visible_sys", vis_sys, "{:.0f}", "system message tokens")
+v("visible_user", vis_user, "{:.0f}", "user message tokens")
+v("framing_tokens", wire - vis, "{:.0f}", "framing tokens")
+v("wire_ratio", wire / vis, "{:.1f}", "wire / visible")
+v("vocab", RUN["vocab_size"], "{:,.0f}", "vocabulary size")
 
-# ------------------------------------------------------------- recall (Ch. 1 NM 1.1, NM 1.2)
-eps, H = 0.01, 30                 # Lighthouse 1.1: 30-step budget; 99% per step (NM 1.1)
-show("recall: (1-eps)^30 at 99% per step", pct((1 - eps) ** H))
-show("recall: (1-eps)^10", pct((1 - eps) ** 10))
-show("recall: (1-eps)^100", pct((1 - eps) ** 100))
-attempt, p_acc = 2.10, 0.40       # NM 1.2
-show("recall: C_eff = 2.10 / 0.40 ($)", f"{attempt / p_acc:.2f}")
+print("== Tokenizer (cl100k_base, run_model.py)")
+flat, ind, path = RUN["cl100k_flat"]["ids"], RUN["cl100k_indented"]["ids"], RUN["cl100k_path"]["ids"]
+v("tok_flat_n", len(flat), "{:.0f}", "flush line tokens")
+v("tok_flat_id0", flat[0], "{:.0f}", "id of 'def'")
+v("tok_ind_n", len(ind), "{:.0f}", "indented line tokens")
+v("tok_ind_id0", ind[0], "{:.0f}", "id of three spaces")
+v("tok_ind_id1", ind[1], "{:.0f}", "id of ' def'")
+v("tok_path_n", len(path), "{:.0f}", "src/pool.py tokens")
 
-# ------------------------------------------------------------- wire request (run)
-vis = RUN["visible_tokens"]["system"] + RUN["visible_tokens"]["user"]
-wire = RUN["wire_tokens"]
-show("wire: visible message tokens", vis)
-show("wire: serialized request tokens", wire)
-show("wire: framing tokens (wire - visible)", wire - vis)
-show("wire: wire / visible", f"{wire / vis:.1f}x")
-show("wire: vocab size / context positions", f"{RUN['vocab_size']:,} / {RUN['max_position_embeddings']:,}")
+print("== Admission (multimodal admission scenario)")
+a, h = ADMIT.result, HALF.result
+v("adm_window", ADMIT.window, "{:,.0f}", "context window, tokens")
+v("adm_reserve", ADMIT.output_reserve, "{:,.0f}", "reserved output, tokens")
+v("adm_text", ADMIT.text_tokens, "{:,.0f}", "text prompt, tokens")
+v("adm_image", ADMIT.image_tokens, "{:,.0f}", "image charge, tokens")
+v("adm_ceiling", a.input_ceiling, "{:,.0f}", "input ceiling")
+v("adm_headroom", a.headroom, "{:,.0f}", "room left")
+v("adm_total", a.total_demand, "{:,.0f}", "demand with image")
+v("adm_excess", a.excess, "{:,.0f}", "excess with image")
+v("adm_half_reserve", HALF.output_reserve, "{:,.0f}", "halved reserve")
+v("adm_half_total", h.total_demand, "{:,.0f}", "demand with image, reserve halved")
+v("adm_half_excess", h.excess, "{:,.0f}", "excess with image, reserve halved")
 
-# ------------------------------------------------------------- tokenizer (run, cl100k_base)
-show("tok: flat line tokens", len(RUN["cl100k_flat"]["ids"]))
-show("tok: indented line tokens", len(RUN["cl100k_indented"]["ids"]))
-shared = len(set(RUN["cl100k_flat"]["ids"]) & set(RUN["cl100k_indented"]["ids"]))
-show("tok: ids shared by both lines", shared)
-show("tok: src/pool.py tokens", len(RUN["cl100k_path"]["ids"]))
-
-# ------------------------------------------------------------- admission (Ch. 2.3.2, 2.3.3)
-S_max, K_max, S = 8192, 1024, 6000   # Ch. 2.3.2 (scenario values)
-img = 2048                            # Ch. 2.3.3
-show("admit: input ceiling S_max - K_max", f"{S_max - K_max:,}")
-show("admit: room left at S = 6,000", f"{S_max - K_max - S:,}")
-show("admit: demand with image", f"{S + img + K_max:,}")
-show("admit: excess with image", f"{S + img + K_max - S_max:,}")
-show("admit: excess with image, K_max halved", f"{S + img + K_max // 2 - S_max:,}")
-
-# ------------------------------------------------------------- real next-token distribution (run)
+print("== Real next-token distribution (run_model.py)")
 pl = RUN["path_logits"]
-for t, p1, p5 in zip(pl["tokens"], pl["p_T1"], pl["p_T05"]):
-    show(f"logits: '{t}' at T=1 / T=0.5", f"{pct(p1)} / {pct(p5)}")
-show("logits: top-8 mass at T=1", pct(sum(pl["p_T1"])))
-show("logits: nucleus 0.90 size (tokens)", pl["nucleus_090_size"])
-i_src = pl["tokens"].index("src")
-show("logits: rank of 'src' (the file the prompt names)", i_src + 1)
+i_path, i_c, i_src = pl["tokens"].index("path"), pl["tokens"].index("C"), pl["tokens"].index("src")
+v("p_path_t1", 100 * pl["p_T1"][i_path], "{:.1f}", "'path' at T = 1, %")
+v("p_c_t1", 100 * pl["p_T1"][i_c], "{:.1f}", "'C' at T = 1, %")
+v("p_src_t1", 100 * pl["p_T1"][i_src], "{:.1f}", "'src' at T = 1, %")
+v("p_path_t05", 100 * pl["p_T05"][i_path], "{:.1f}", "'path' at T = 0.5, %")
+v("p_src_t05", 100 * pl["p_T05"][i_src], "{:.1f}", "'src' at T = 0.5, %")
+v("run_nucleus", pl["nucleus_090_size"], "{:.0f}", "top-p 0.90 nucleus size at T = 1, tokens")
+v("run_top_n", len(pl["tokens"]), "{:.0f}", "candidates shown")
 
-# ------------------------------------------------------------- NM 2.1 (Ch. 2.4.2)
-z = [12, 10.5, 9, 6, 3]
+print("== Napkin Math 2.1 (temperature and nucleus scenario)")
+s = SAMPLE.result
+for i, z in enumerate(SAMPLE.logits):
+    v(f"nm_z{i + 1}", z, "{:g}", f"logit v{i + 1}")
+v("nm_t_base", SAMPLE.base_temperature, "{:g}", "base temperature")
+v("nm_t_sharp", SAMPLE.sharp_temperature, "{:g}", "sharpened temperature")
+v("nm_top_p", SAMPLE.top_p, "{:.2f}", "top-p")
+v("nm_p1_pct", 100 * s.base_probabilities[0], "{:.1f}", "p(v1) at T = 1, %")
+v("nm_p1", s.base_probabilities[0], "{:.4f}", "p(v1) at T = 1")
+v("nm_sharp_pct", 100 * s.sharp_probabilities[0], "{:.1f}", "p(v1) at T = 0.5, %")
+v("nm_sharp_round", 100 * s.sharp_probabilities[0], "{:.0f}", "the same, whole percent (vote answer)")
+v("nm_tail1_pct", 100 * s.base_tail, "{:.1f}", "tail at T = 1, %")
+v("nm_tail05_pct", 100 * s.sharp_tail, "{:.1f}", "tail at T = 0.5, %")
+v("nm_tail_ratio", s.tail_ratio, "{:.1f}", "tail reduction")
+v("nm_nuc_mass", s.nucleus_mass, "{:.4f}", "top-2 cumulative")
+v("nm_nuc1_pct", 100 * s.nucleus_probabilities[0], "{:.1f}", "renormalized v1, %")
+v("nm_nuc2_pct", 100 * s.nucleus_probabilities[1], "{:.1f}", "renormalized v2, %")
+v("nm_nuc1", s.nucleus_probabilities[0], "{:.4f}", "renormalized v1")
+v("nm_nuc2", s.nucleus_probabilities[1], "{:.4f}", "renormalized v2")
 
+print("== Batch-dependent logits (run_model.py)")
+bl, vocab = RUN["batch_logits"], RUN["vocab_size"]
+d32 = bl["float32"]["max_abs_diff"]
+e32 = math.floor(math.log10(d32))
+v("batch_other", RUN["batch_other_tokens"], "{:.0f}", "other request tokens")
+v("batch_pad", bl["float32"]["pad_tokens_added"], "{:.0f}", "padding tokens added")
+v("batch_fp32_changed", bl["float32"]["n_logits_changed"], "{:,.0f}", "fp32 logits changed")
+v("batch_bf16_changed", bl["bfloat16"]["n_logits_changed"], "{:,.0f}", "bf16 logits changed")
+v("batch_fp32_pct", 100 * bl["float32"]["n_logits_changed"] / vocab, "{:.1f}", "fp32 share changed, %")
+v("batch_fp32_mant", d32 / 10 ** e32, "{:.1f}", "fp32 max change, mantissa")
+v("batch_fp32_exp", e32, "{:.0f}", "fp32 max change, power of ten")
+v("batch_bf16_max", bl["bfloat16"]["max_abs_diff"], "{:.2f}", "bf16 max change")
 
-def softmax(v, T=1.0):
-    e = [math.exp(x / T) for x in v]
-    s = sum(e)
-    return [x / s for x in e]
+print("== Streaming cancel (canceled-stream scenario)")
+v("cancel_cap", CANCEL.output_allowance, "{:,.0f}", "output allowance")
+v("cancel_step", CANCEL.reject_step, "{:.0f}", "reject step")
+v("cancel_skipped", CANCEL.skipped_steps, "{:,.0f}", "decode steps skipped")
+v("cancel_s", m(CANCEL.decode_time_avoided, "s"), "{:.1f}", "decode time avoided, s")
 
+print("== Self-review (Huang et al. 2024, GPT-4)")
+for key, name in (("gsm", "Gsm8k"), ("csqa", "CommonSenseQa"), ("hotpot", "HotpotQa")):
+    v(f"huang_{key}_std", getattr(SELF, f"Gpt4{name}Standard"), "{:.1f}", f"{name} one answer, %")
+    v(f"huang_{key}_sc", getattr(SELF, f"Gpt4{name}SelfCorrectRound2"), "{:.1f}", f"{name} two rounds, %")
+    v(f"huang_{key}_orc", getattr(SELF, f"Gpt4{name}Oracle"), "{:.1f}", f"{name} oracle-stopped, %")
 
-p1, p05 = softmax(z), softmax(z, 0.5)
-show("NM2.1: partition sum at T=1", f"{sum(math.exp(x) for x in z):.1f}")
-show("NM2.1: p at T=1", [round(x, 4) for x in p1])
-show("NM2.1: top token at T=0.5", pct(p05[0]))
-show("NM2.1: tail at T=1 / T=0.5", f"{pct(1 - p1[0])} / {pct(1 - p05[0])}")
-show("NM2.1: tail reduction", f"{(1 - p1[0]) / (1 - p05[0]):.1f}x")
-show("NM2.1: top-2 cumulative", f"{p1[0] + p1[1]:.4f}")
-show("NM2.1: renormalized v1 / v2", f"{p1[0] / (p1[0] + p1[1]):.4f} / {p1[1] / (p1[0] + p1[1]):.4f}")
+print("== Residual defects (patch-checker scenario)")
+c, ch = CHECK.result, CHECK_HALF.result
+v("chk_defect_pct", 100 * CHECK.defect_rate, "{:.0f}", "defective share, %")
+v("chk_defect", CHECK.defect_rate, "{:.2f}", "defective share")
+v("chk_valid_share", 1 - CHECK.defect_rate, "{:.2f}", "valid share")
+v("chk_fa", CHECK.false_accept_rate, "{:.2f}", "P(PASS | defective)")
+v("chk_va", CHECK.valid_accept_rate, "{:.2f}", "P(PASS | valid)")
+v("chk_post_pct2", 100 * c.posterior, "{:.2f}", "residual defect among passes, %")
+v("chk_post_pct", 100 * c.posterior, "{:.1f}", "the same, one decimal")
+v("chk_catch_pct", 100 * c.catch_rate, "{:.0f}", "defective patches rejected, %")
+v("chk_vreject_pct", 100 * c.valid_reject_rate, "{:.0f}", "valid patches rejected, %")
+v("chk_fa_half", CHECK_HALF.false_accept_rate, "{:.3f}", "halved false-accept rate")
+v("chk_half_pct", 100 * ch.posterior, "{:.1f}", "residual with false accepts halved, %")
+v("chk_joint_pct", 100 * c.defective_pass, "{:.1f}", "joint defective-and-pass, %")
 
-# ------------------------------------------------------------- batch logits (run)
-bl = RUN["batch_logits"]
-show("batch: other request tokens / pad tokens added",
-     f"{RUN['batch_other_tokens']} / {bl['float32']['pad_tokens_added']}")
-show("batch: fp32 logits changed / vocab", f"{bl['float32']['n_logits_changed']:,} / {RUN['vocab_size']:,}")
-show("batch: fp32 share changed", pct(bl['float32']['n_logits_changed'] / RUN['vocab_size']))
-show("batch: fp32 max abs diff", f"{bl['float32']['max_abs_diff']:.1e}")
-show("batch: bf16 max abs diff", bl['bfloat16']['max_abs_diff'])
+print("== Per-token floors (8-bit floors scenario)")
+f = FLOORS.result
+v("fl_params_b", m(FLOORS.workload.parameters, "Gparam"), "{:.1f}", "parameters, billions")
+v("fl_weights_gb", m(f.weight_bytes, "GB"), "{:.1f}", "weight bytes, GB")
+v("fl_bytes_per_param", m(f.weight_bytes, "byte") / m(FLOORS.workload.parameters, "param"), "{:.0f}",
+  "bytes per parameter")
+v("fl_peak_tflops", m(FLOORS.hardware.compute.precision_flops[FLOORS.peak_precision], "TFLOP/s"), "{:,.0f}",
+  "FP8 peak, TFLOP/s")
+v("fl_bw_tbs", m(FLOORS.hardware.memory.bandwidth, "TB/s"), "{:.2f}", "HBM bandwidth, TB/s")
+v("fl_prefill_us", m(f.compute_time, "us"), "{:.2f}", "prefill floor, us/token")
+v("fl_decode_ms", m(f.memory_time, "ms"), "{:.3f}", "decode floor, ms/token")
+v("fl_ratio", f.bound_ratio, "{:.0f}", "decode / prefill")
+t1 = CALL1.result
+v("t1_prompt", CALL1.prompt_tokens, "{:,.0f}", "first turn, prompt tokens")
+v("t1_output", CALL1.output_tokens, "{:.0f}", "first turn, output tokens")
+v("t1_prefill_s", m(t1.prefill_time, "s"), "{:.3f}", "first turn prefill, s")
+v("t1_decode_s", m(t1.decode_time, "s"), "{:.3f}", "first turn decode, s")
+v("t1_tok_pct", 100 * t1.output_token_share, "{:.1f}", "output share of tokens, %")
+v("t1_time_pct", 100 * t1.output_time_share, "{:.1f}", "output share of time, %")
 
-# ------------------------------------------------------------- truncated call (run)
-show("trunc: completed call tokens / stop", f"{RUN['completed_call']['new_tokens']} / {RUN['completed_call']['stop']}")
-show("trunc: truncated call tokens / stop", f"{RUN['truncated_call']['new_tokens']} / {RUN['truncated_call']['stop']}")
-
-# ------------------------------------------------------------- streaming (Ch. 2.5.3)
-K_stream, step_rej = 4096, 96
-tau_d = 0.021075                     # Ch. 2.8.2 reference decode floor (s/token)
-show("stream: skipped decode steps", f"{K_stream - step_rej:,}")
-show("stream: decode work avoided (s)", f"{(K_stream - step_rej) * tau_d:.1f}")
-
-# ------------------------------------------------------------- self-review (Huang et al. 2024, Table 3)
-huang = {"GSM8K": (95.5, 89.0, 97.5), "CommonSenseQA": (82.0, 80.0, 85.5), "HotpotQA": (49.0, 43.0, 59.0)}
-for k, (std, sc2, orc) in huang.items():
-    show(f"huang GPT-4 {k}: self-correct r2 - standard (points)", f"{sc2 - std:+.1f}")
-    show(f"huang GPT-4 {k}: oracle-stopped - standard (points)", f"{orc - std:+.1f}")
-
-# ------------------------------------------------------------- Bayes (Ch. Systems Perspective 2.1)
-d, fa, pv = 0.18, 0.65, 0.85
-
-
-def resid(d, fa, pv):
-    return fa * d / (fa * d + pv * (1 - d))
-
-
-show("bayes: residual defect among passes", pct(resid(d, fa, pv), 2))
-show("bayes: residual with FA halved (0.325)", pct(resid(d, fa / 2, pv), 1))
-show("bayes: share of candidates that pass", pct(fa * d + pv * (1 - d), 1))
-
-# ------------------------------------------------------------- per-token floors (Ch. 2.8.2)
-P, b, R, BW = 70.6e9, 1, 1979e12, 3.35e12     # Ch. 2.8.2 reference deployment
-tp, td = 2 * P / R, P * b / BW
-show("floors: GFLOP per token", f"{2 * P / 1e9:.1f}")
-show("floors: prefill floor (us/token)", f"{tp * 1e6:.2f}")
-show("floors: decode floor (ms/token)", f"{td * 1e3:.3f}")
-show("floors: decode / prefill", f"{td / tp:.0f}")
-S0, K0 = 8000, 200                            # Ch. 2.8.2 first repair turn
-pre, dec = S0 * tp, K0 * td
-show("turn1: prefill (s) / decode (s) / total", f"{pre:.3f} / {dec:.3f} / {pre + dec:.3f}")
-show("turn1: output share of tokens", pct(K0 / (S0 + K0)))
-show("turn1: output share of time", pct(dec / (pre + dec)))
-
-# ------------------------------------------------------------- measured on a laptop (run)
+print("== Measured on a laptop (run_model.py)")
 tm = RUN["timing"]
 pre_tok = tm["prefill_s_median"] / tm["prompt_tokens"]
-show("laptop: prompt tokens / prefill median (s)", f"{tm['prompt_tokens']} / {tm['prefill_s_median']:.2f}")
-show("laptop: prefill per token (ms)", f"{pre_tok * 1e3:.2f}")
-show("laptop: decode per token (ms)", f"{tm['decode_s_per_token_median'] * 1e3:.1f}")
-show("laptop: decode / prefill per token", f"{tm['decode_s_per_token_median'] / pre_tok:.0f}")
-show("laptop: decode / prefill, min and max over runs",
-     f"{min(tm['decode_s_per_token_runs']) / (max(tm['prefill_s_runs']) / tm['prompt_tokens']):.0f}"
-     f" to {max(tm['decode_s_per_token_runs']) / (min(tm['prefill_s_runs']) / tm['prompt_tokens']):.0f}")
+v("lap_prompt", tm["prompt_tokens"], "{:,.0f}", "prompt tokens")
+v("lap_prefill_s", tm["prefill_s_median"], "{:.2f}", "prefill median, s")
+v("lap_prefill_ms", pre_tok * 10 ** 3, "{:.1f}", "prefill per token, ms")
+v("lap_prefill_ms2", pre_tok * 10 ** 3, "{:.2f}", "the same, two decimals (figure)")
+v("lap_decode_ms", tm["decode_s_per_token_median"] * 10 ** 3, "{:.1f}", "decode per token, ms")
+v("lap_ratio", tm["decode_s_per_token_median"] / pre_tok, "{:.0f}", "decode / prefill")
+v("lap_ratio_lo", min(tm["decode_s_per_token_runs"]) / (max(tm["prefill_s_runs"]) / tm["prompt_tokens"]),
+  "{:.0f}", "decode / prefill, lowest over runs")
+v("lap_ratio_hi", max(tm["decode_s_per_token_runs"]) / (min(tm["prefill_s_runs"]) / tm["prompt_tokens"]),
+  "{:.0f}", "decode / prefill, highest over runs")
+v("lap_prefill_runs", len(tm["prefill_s_runs"]), "{:.0f}", "prefill runs")
+v("lap_decode_runs", len(tm["decode_s_per_token_runs"]), "{:.0f}", "decode runs")
 
-# ------------------------------------------------------------- Azure code trace (2023)
-rows = list(csv.DictReader(open(HERE / "data" / "azure_llm_code_2023.csv")))
-ctx = [int(r["ContextTokens"]) for r in rows]
-gen = [int(r["GeneratedTokens"]) for r in rows]
-show("azure: requests", f"{len(rows):,}")
-show("azure: median prompt / median output", f"{statistics.median(ctx):,.0f} / {statistics.median(gen):,.0f}")
-show("azure: input share of all tokens", pct(sum(ctx) / (sum(ctx) + sum(gen))))
-show("azure: median prompt / median output ratio", f"{statistics.median(ctx) / statistics.median(gen):.0f}")
-# time share if each request ran at the reference floors (derived, illustrative)
-t_in = sum(ctx) * tp
-t_out = sum(gen) * td
-show("azure: output share of floor time (reference floors)", pct(t_out / (t_in + t_out)))
+print("== Code-completion trace (Azure 2023, token-mix scenario)")
+tr = TRACE.result
+v("az_requests", tr.requests, "{:,.0f}", "requests")
+v("az_med_prompt", tr.median_prompt, "{:,.0f}", "median prompt tokens")
+v("az_med_output", tr.median_output, "{:,.0f}", "median output tokens")
+v("az_input_pct", 100 * tr.input_share, "{:.1f}", "input share of all tokens, %")
+v("az_time_pct", 100 * tr.output_time_share, "{:.0f}", "output share of floor time, %")
 
-# ------------------------------------------------------------- NM 2.2 (Ch. 2.8.3)
-H, S0r, D, K = 30, 8000, 1500, 200
+print("== Napkin Math 2.2 (coding-agent resend scenarios)")
+r30, r60 = R30.result, R60.result
+v("rs_s0", R30.first_prompt, "{:,.0f}", "first prompt, tokens")
+v("rs_delta", R30.appended, "{:,.0f}", "appended per turn, tokens")
+v("rs_k", R30.output_per_turn, "{:.0f}", "output per call, tokens")
+v("rs_turns", R30.turns, "{:.0f}", "turns")
+v("rs_turns2", R60.turns, "{:.0f}", "doubled turns")
+v("rs_resent", r30.resent_tokens, "{:,.0f}", "re-sent input, 30 turns")
+v("rs_resent2", r60.resent_tokens, "{:,.0f}", "re-sent input, 60 turns")
+v("rs_growth", r60.resent_tokens / r30.resent_tokens, "{:.1f}", "re-sent growth, 30 to 60 turns")
+v("rs_app_growth", r60.appended_term / r30.appended_term, "{:.2f}", "appended-term growth")
+v("rs_first_growth", r60.first_prompt_term / r30.first_prompt_term, "{:.1f}", "first-prompt-term growth")
+v("rs_fresh", r30.reused_prefix_tokens, "{:,.0f}", "fresh prefill with reuse, 30 turns")
+v("rs_fresh2", r60.reused_prefix_tokens, "{:,.0f}", "fresh prefill with reuse, 60 turns")
+v("rs_fresh_growth", r60.reused_prefix_tokens / r30.reused_prefix_tokens, "{:.1f}", "fresh growth")
+v("rs_reduction", r30.reuse_reduction, "{:.1f}", "reuse reduction, 30 turns")
+v("rs_pre_s", m(r30.prefill_time, "s"), "{:.2f}", "prefill without reuse, s")
+v("rs_pre_reuse_s", m(r30.reused_prefill_time, "s"), "{:.2f}", "prefill with reuse, s")
+v("rs_dec_s", m(r30.decode_time, "s"), "{:.2f}", "decode, s")
+v("rs_resent_k", r30.resent_tokens / 10 ** 3, "{:,.1f}", "figure: 30-turn resend, thousands")
+v("rs_resent2_k", r60.resent_tokens / 10 ** 3, "{:,.0f}", "figure: 60-turn resend, thousands")
+v("rs_fresh2_k", r60.reused_prefix_tokens / 10 ** 3, "{:,.1f}", "figure: 60-turn fresh prefill, thousands")
 
+print("== Napkin Math 2.3 (whole-file and localized-edit calls)")
+w, e = FULL.result, DIFF.result
+v("ed_deadline_s", m(FULL.deadline, "s"), "{:.0f}", "call deadline, s")
+v("ed_full_dm", FULL.instruction_tokens, "{:.0f}", "whole-file instruction tokens")
+v("ed_full_k", FULL.output_tokens, "{:,.0f}", "whole-file output tokens")
+v("ed_diff_dm", DIFF.instruction_tokens, "{:.0f}", "localized-edit instruction tokens")
+v("ed_diff_k", DIFF.output_tokens, "{:.0f}", "localized-edit output tokens")
+v("ed_full_s", m(w.total_time, "s"), "{:.2f}", "whole file, s")
+v("ed_full_s1", m(w.total_time, "s"), "{:.1f}", "the same, one decimal (figure)")
+v("ed_diff_s", m(e.total_time, "s"), "{:.2f}", "local edit, s")
+v("ed_diff_s1", m(e.total_time, "s"), "{:.1f}", "the same, one decimal (figure)")
+v("ed_speedup", (w.total_time / e.total_time).to("").magnitude, "{:.1f}", "ratio")
+v("ed_full_dec_pct", 100 * w.output_time_share, "{:.1f}", "decode share of whole-file time, %")
+v("ed_over_s", m(w.total_time - FULL.deadline, "s"), "{:.1f}", "whole file over the deadline, s")
+v("ed_margin", e.deadline_margin, "{:.1f}", "local-edit margin under the deadline")
+v("ed_apply", DIFF.stage_success["applies"], "{:.2f}", "edits that apply")
+v("ed_pass", DIFF.stage_success["passes tests"], "{:.2f}", "pass rate given applied")
+v("ed_apply_pct", 100 * DIFF.stage_success["applies"], "{:.0f}", "edits that apply, %")
+v("ed_pass_pct", 100 * DIFF.stage_success["passes tests"], "{:.0f}", "pass rate given applied, %")
+v("ed_yield_pct", 100 * e.acceptance, "{:.0f}", "trials ending accepted, %")
 
-def resent(H):
-    return H * S0r + D * H * (H - 1) // 2
-
-
-def fresh(H):
-    return S0r + (H - 1) * D
-
-
-show("NM2.2: re-sent input tokens", f"{resent(H):,}")
-show("NM2.2: fresh prefill with reuse", f"{fresh(H):,}")
-show("NM2.2: reduction", f"{resent(H) / fresh(H):.1f}x")
-show("NM2.2: output tokens", f"{H * K:,}")
-show("NM2.2: input share of tokens", pct(resent(H) / (resent(H) + H * K)))
-show("NM2.2: prefill work no reuse / reuse (s)", f"{resent(H) * tp:.2f} / {fresh(H) * tp:.2f}")
-show("NM2.2: decode work (s)", f"{H * K * td:.2f}")
-show("NM2.2: 60 turns: re-sent growth / fresh growth",
-     f"{resent(60) / resent(30):.1f}x / {fresh(60) / fresh(30):.1f}x")
-show("NM2.2: 60 turns: re-sent input tokens / fresh prefill", f"{resent(60):,} / {fresh(60):,}")
-# the two terms of equation 9 separately: first prompt grows with H, appends with H(H-1)/2
-show("NM2.2: 60 turns: first-prompt term growth / appended term growth",
-     f"{(60 * S0r) / (30 * S0r):.1f}x / {(60 * 59) / (30 * 29):.2f}x")
-show("NM2.2: 90 turns: re-sent growth / fresh growth",
-     f"{resent(90) / resent(30):.1f}x / {fresh(90) / fresh(30):.1f}x")
-
-# ------------------------------------------------------------- NM 2.3 (Ch. 2.9.3)
-whole = (8000 + 350) * tp + 1850 * td
-local = (8000 + 120) * tp + 80 * td
-show("NM2.3: whole file (s)", f"{whole:.2f}")
-show("NM2.3: local edit (s)", f"{local:.2f}")
-show("NM2.3: ratio", f"{whole / local:.1f}x")
-show("NM2.3: decode share of whole-file time", pct(1850 * td / whole))
-show("NM2.3: local edit margin under 15 s", f"{15 / local:.1f}x")
-show("NM2.3: yield 0.95 x 0.60", f"{0.95 * 0.60:.2f}")
-show("NM2.3: whole file over deadline by (s)", f"{whole - 15:.1f}")
-
-# ------------------------------------------------------------- Lighthouse 2.1 support agent (Ch.)
-show("LH2.1: prefill 8,192 tokens (s)", f"{8192 * tp:.2f}")
-show("LH2.1: 150-token reply (s)", f"{150 * td:.2f}")
-show("LH2.1: tokens per second", f"{1 / td:.0f}")
-show("LH2.1: fresh prefill 2,048 tokens (s)", f"{2048 * tp:.2f}")
-show("bayes: joint defective-and-pass (common wrong answer)", pct(0.65 * 0.18, 1))
+if __name__ == "__main__":
+    write(__file__)

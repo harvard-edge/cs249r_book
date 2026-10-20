@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """Figures for Lecture 2 (The Foundation Model). Run from this folder: python3 make_figs.py
 
-Every plotted value is either an input with its source (comment) or comes from calcs.py's
-inputs and data/model_runs.json (the real model run). Diagrams use the Volume III stack
-palette (rules/volumes/vol3/palette.md): sky blue = model and generation, green = context,
-amber = tools and actions, violet = runtime records, red = faults.
+Every number drawn here comes from calcs.py, which reads MLSysIM (registry,
+Literature, and the Scenarios.* the chapter also reads), or from
+data/model_runs.json, the deck's own model run, which calcs.py also reads:
+plotted geometry uses the scenario values, labels use the formatted strings
+the slides print (deckvals val/num). The incident dates on the hook timeline
+are the postmortem's, typed with their source. Diagram coordinates, axis
+ranges, and tick positions are layout. Diagrams use the Volume III stack
+palette (rules/volumes/vol3/palette.md): sky blue = model and generation,
+green = context, amber = tools and actions, violet = runtime records, red = faults.
 """
 
-import csv
 import json
-import statistics
 import sys
 from pathlib import Path
 
@@ -18,6 +21,11 @@ import matplotlib.patches as mp
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[2] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
+
+sys.path.insert(0, str(HERE))
+import calcs as K  # noqa: E402  (records every value; figures read them)
+from deckvals import val, num  # noqa: E402
+from mlsysim.physics.agents import calc_append_only_context, calc_reused_prefix_prompt_tokens  # noqa: E402
 
 plt = sp.plt
 C = sp.C
@@ -33,10 +41,6 @@ V = {
     "bad": "#dc2626", "bad_l": "#fee2e2", "bad_t": "#b91c1c",
     "st": "#94a3b8", "st_l": "#f8fafc", "ink": "#0f172a", "gray": "#64748b",
 }
-
-# Reference floors, Ch. 2.8.2: 70.6B params, 8-bit, 1,979 TFLOP/s, 3.35 TB/s
-P, B, R, BW = 70.6e9, 1, 1979e12, 3.35e12
-TP, TD = 2 * P / R, P * B / BW
 
 
 def canvas(w=9.0, h=4.6, phys=None):
@@ -138,12 +142,17 @@ save(fig, "tokens.svg")
 # =============================================================================
 def admit(k):
     fig, ax = plt.subplots(figsize=(5.8, 2.2))
-    rows = [("Text only", [(6000, "6,000", C["memory"]), (1024, "1,024", C["neutral"])]),
-            ("+ image", [(6000, "", C["memory"]), (2048, "2,048", C["compute"]),
-                         (1024, "1,024", C["neutral"])]),
-            ("+ image,\nhalf reserve", [(6000, "", C["memory"]), (2048, "2,048", C["compute"]),
-                                        (512, "512", C["neutral"])])]
-    for i, (lab, segs) in enumerate(rows):
+    text, image = num("adm_text"), num("adm_image")
+    reserve, half = num("adm_reserve"), num("adm_half_reserve")
+    window = num("adm_window")
+    rows = [("Text only", [(text, val("adm_text"), C["memory"]), (reserve, val("adm_reserve"), C["neutral"])],
+             f"{val('adm_headroom')} to spare", False),
+            ("+ image", [(text, "", C["memory"]), (image, val("adm_image"), C["compute"]),
+                         (reserve, val("adm_reserve"), C["neutral"])], f"{val('adm_excess')} over", True),
+            ("+ image,\nhalf reserve", [(text, "", C["memory"]), (image, val("adm_image"), C["compute"]),
+                                        (half, val("adm_half_reserve"), C["neutral"])],
+             f"{val('adm_half_excess')} over", True)]
+    for i, (lab, segs, msg, over) in enumerate(rows):
         y = 2 - i
         vis = i < k
         x = 0
@@ -155,12 +164,11 @@ def admit(k):
             x += w
         ax.text(-150, y, lab, ha="right", va="center", fontsize=12, fontweight="bold",
                 color=C["text"], alpha=1)
-        over = x - 8192
-        msg = f"{-over:,} to spare" if over < 0 else f"{over:,} over"
-        ax.text(max(x, 8192) + 150, y, msg, va="center", fontsize=12, fontweight="bold",
-                color=C["data"] if over < 0 else C["danger"], alpha=1 if vis else 0)
-    ax.axvline(8192, color=C["danger"], lw=2, ls="--")
-    ax.text(8192, 2.55, "window 8,192", ha="center", fontsize=11, color=C["danger"], fontweight="bold")
+        ax.text(max(x, window) + 150, y, msg, va="center", fontsize=12, fontweight="bold",
+                color=C["danger"] if over else C["data"], alpha=1 if vis else 0)
+    ax.axvline(window, color=C["danger"], lw=2, ls="--")
+    ax.text(window, 2.55, f"window {val('adm_window')}", ha="center", fontsize=11, color=C["danger"],
+            fontweight="bold")
     ax.text(0, 2.55, "prompt", fontsize=11, color=C["memory"], fontweight="bold")
     ax.text(1500, 2.55, "image", fontsize=11, color=C["compute"], fontweight="bold")
     ax.text(2900, 2.55, "output reserve", fontsize=11, color=C["neutral"], fontweight="bold")
@@ -207,7 +215,7 @@ def probs(k):
             color=C["memory"], fontweight="bold")
     ax.text(0.99, 0.82, "T = 0.5 (orange)", transform=ax.transAxes, ha="right", fontsize=12,
             color=C["compute"], fontweight="bold", alpha=1 if k >= 2 else 0)
-    ax.text(0.99, 0.69, f"top-p 0.90 at T = 1 keeps {pl['nucleus_090_size']} tokens",
+    ax.text(0.99, 0.69, f"top-p 0.90 at T = 1 keeps {val('run_nucleus')} tokens",
             transform=ax.transAxes, ha="right", fontsize=12, color=C["text"], fontweight="bold",
             alpha=1 if k >= 3 else 0)
     ax.annotate("the file the\nprompt names", (toks.index("src") - 0.2, pl["p_T1"][2] + 0.06),
@@ -224,31 +232,23 @@ for k in (1, 2, 3):
 # =============================================================================
 # 5. Napkin Math 2.1 (Ch. 2.4.2): logits [12, 10.5, 9, 6, 3], two steps
 # =============================================================================
-import math  # noqa: E402
-
-z = [12, 10.5, 9, 6, 3]
-
-
-def sm(v, T):
-    e = [math.exp(x / T) for x in v]
-    return [x / sum(e) for x in e]
-
-
 def nm21(k):
     fig, ax = plt.subplots(figsize=(4.0, 3.0))
-    p1, p5 = sm(z, 1), sm(z, 0.5)
+    s = K.SAMPLE.result
+    p1, p5 = s.base_probabilities, s.sharp_probabilities
     w = 0.38
     for i in range(5):
         ax.bar(i - w / 2, p1[i], width=w, color=C["memory"])
         ax.bar(i + w / 2, p5[i] if k >= 2 else 0, width=w, color=C["compute"], alpha=1 if k >= 2 else 0)
     ax.set_xticks(range(5))
-    ax.set_xticklabels([f"v{i + 1}\n{z[i]:g}" for i in range(5)], fontsize=13)
+    ax.set_xticklabels([f"v{i + 1}\n{val(f'nm_z{i + 1}')}" for i in range(5)], fontsize=13)
     ax.set_ylim(0, 1.12)
     ax.set_yticks([0, 0.5, 1.0])
     ax.set_yticklabels(["0", "50", "100"], fontsize=12)
-    ax.text(4.5, 1.0, f"T = 1: v1 {100 * p1[0]:.1f}%", ha="right", fontsize=14, color=C["memory"],
-            fontweight="bold")
-    ax.text(4.5, 0.84, f"T = 0.5: v1 {100 * p5[0]:.1f}%", ha="right", fontsize=14, color=C["compute"],
+    ax.text(4.5, 1.0, f"T = {val('nm_t_base')}: v1 {val('nm_p1_pct')}%", ha="right", fontsize=14,
+            color=C["memory"], fontweight="bold")
+    ax.text(4.5, 0.84, f"T = {val('nm_t_sharp')}: v1 {val('nm_sharp_pct')}%", ha="right", fontsize=14,
+            color=C["compute"],
             fontweight="bold", alpha=1 if k >= 2 else 0)
     ax.set_ylabel("Probability (%)", fontsize=13)
     sp.save(fig, out / f"nm21_step{k}.svg")
@@ -284,18 +284,18 @@ save(fig, "rmrf.svg")
 # 7. Streaming rejection and cancel (Ch. 2.5.3): reject at step 96 of 4,096
 # =============================================================================
 fig, ax = plt.subplots(figsize=(5.8, 1.9))
-K, rej = 4096, 96
+cap, rej = K.CANCEL.output_allowance, K.CANCEL.reject_step
 ax.barh(0, rej, color=C["danger"], height=0.5)
-ax.barh(0, K - rej, left=rej, color=C["neutral_l"], height=0.5, hatch="//", edgecolor=C["neutral"])
-ax.text(rej + 60, 0.45, f"rejected at step {rej}", fontsize=11, color=C["danger"], fontweight="bold")
-ax.text(rej + (K - rej) / 2 + 60, 0, f"{K - rej:,} steps ({(K - rej) * TD:.1f} s at 21.075 ms) "
-        "skipped if the cancel is honored", ha="center", va="center", fontsize=10,
+ax.barh(0, cap - rej, left=rej, color=C["neutral_l"], height=0.5, hatch="//", edgecolor=C["neutral"])
+ax.text(rej + 60, 0.45, f"rejected at step {val('cancel_step')}", fontsize=11, color=C["danger"], fontweight="bold")
+ax.text(rej + (cap - rej) / 2 + 60, 0, f"{val('cancel_skipped')} steps ({val('cancel_s')} s at "
+        f"{val('fl_decode_ms')} ms) skipped if the cancel is honored", ha="center", va="center", fontsize=10,
         color=C["text"], fontweight="bold", bbox=dict(fc="white", ec="none", pad=2))
-ax.set_xlim(0, K)
+ax.set_xlim(0, cap)
 ax.set_ylim(-0.5, 0.8)
 ax.set_yticks([])
 ax.spines["left"].set_visible(False)
-ax.set_xlabel("Decode step (output allowance 4,096)")
+ax.set_xlabel(f"Decode step (output allowance {val('cancel_cap')})")
 sp.save(fig, out / "stream.svg")
 
 
@@ -337,7 +337,8 @@ for k in (1, 2, 3, 4):
 # =============================================================================
 # 9. Self-review without new evidence (Huang et al. 2024, Tables 2 and 3, GPT-4)
 # =============================================================================
-huang = [("GSM8K", 95.5, 89.0, 97.5), ("CommonSenseQA", 82.0, 80.0, 85.5), ("HotpotQA", 49.0, 43.0, 59.0)]
+huang = [(name, num(f"huang_{key}_std"), num(f"huang_{key}_sc"), num(f"huang_{key}_orc"))
+         for name, key in (("GSM8K", "gsm"), ("CommonSenseQA", "csqa"), ("HotpotQA", "hotpot"))]
 
 
 def huang_fig(k):
@@ -370,20 +371,17 @@ for k in (1, 2):
 # =============================================================================
 # 10. Residual defects after a fallible check (Ch. Systems Perspective 2.1), three steps
 # =============================================================================
-def resid(d, fa, pv):
-    return fa * d / (fa * d + pv * (1 - d))
-
-
 def bayes(k):
     fig, ax = plt.subplots(figsize=(5.8, 2.3))
-    rows = [("Generated", 0.18), ("Passed the check", resid(0.18, 0.65, 0.85)),
-            ("Passed, FA halved", resid(0.18, 0.325, 0.85))]
-    for i, (lab, d) in enumerate(rows):
+    rows = [("Generated", K.CHECK.defect_rate, val("chk_defect_pct")),
+            ("Passed the check", K.CHECK.result.posterior, val("chk_post_pct")),
+            ("Passed, FA halved", K.CHECK_HALF.result.posterior, val("chk_half_pct"))]
+    for i, (lab, d, pct) in enumerate(rows):
         y = 2 - i
         a = 1 if i < k else 0
         ax.barh(y, d, color=C["danger"], height=0.55, alpha=a)
         ax.barh(y, 1 - d, left=d, color=C["data_l"], height=0.55, alpha=a)
-        ax.text(d + 0.01, y, f"{100 * d:.1f}% defective" if i else "18% defective",
+        ax.text(d + 0.01, y, f"{pct}% defective",
                 va="center", fontsize=12, color=C["danger"], fontweight="bold", alpha=a)
         ax.text(-0.01, y, lab, ha="right", va="center", fontsize=12, fontweight="bold", color=C["text"])
     ax.set_xlim(0, 1)
@@ -436,18 +434,13 @@ def _plain_ticks_save(fig, path):
 
 
 sp.save = _plain_ticks_save
-tm = RUN["timing"]
-pre_ms = tm["prefill_s_median"] / tm["prompt_tokens"] * 1e3
-dec_ms = tm["decode_s_per_token_median"] * 1e3
-sp.hbars(out / "laptop.svg", [("prompt", pre_ms, "memory", f"{pre_ms:.2f} ms"),
-                              ("output", dec_ms, "compute", f"{dec_ms:.1f} ms")],
+sp.hbars(out / "laptop.svg", [("prompt", K.pre_tok * 1e3, "memory", f"{val('lap_prefill_ms2')} ms"),
+                              ("output", K.tm["decode_s_per_token_median"] * 1e3, "compute", f"{val('lap_decode_ms')} ms")],
          "ms", log=True, size=(3.6, 1.9), xlabel="ms per token (log scale)")
 
-rows = list(csv.DictReader(open(HERE / "data" / "azure_llm_code_2023.csv")))
-ctx = [int(r["ContextTokens"]) for r in rows]
-gen = [int(r["GeneratedTokens"]) for r in rows]
-sp.hbars(out / "azure.svg", [("prompt", statistics.median(ctx), "memory", f"{statistics.median(ctx):,.0f}"),
-                             ("output", statistics.median(gen), "compute", f"{statistics.median(gen):,.0f}")],
+tr = K.TRACE.result
+sp.hbars(out / "azure.svg", [("prompt", tr.median_prompt, "memory", val("az_med_prompt")),
+                             ("output", tr.median_output, "compute", val("az_med_output"))],
          "tokens", log=True, size=(3.6, 1.9), xlabel="median tokens per request (log)")
 sp.save = _sp_save
 
@@ -459,28 +452,24 @@ sp.save = _sp_save
 # three steps: the recalled 30-turn resend, the 60-turn resend, then fresh prefill.
 def resend60(k):
     fig, ax = plt.subplots(figsize=(5.8, 2.6))
-    S0, D = 8000, 1500
-    t = list(range(1, 61))
-    cum_resent, cum_fresh, a, b = [], [], 0, 0
-    for j in range(60):
-        a += S0 + j * D
-        b += S0 if j == 0 else D
-        cum_resent.append(a / 1e6)
-        cum_fresh.append(b / 1e6)
-    ax.plot(t[:30], cum_resent[:30], color=C["danger"], lw=3)
-    ax.plot(t[29:], cum_resent[29:], color=C["danger"], lw=3, alpha=1 if k >= 2 else 0)
+    S0, D = K.R30.first_prompt, K.R30.appended
+    h1, h2 = K.R30.turns, K.R60.turns
+    t = list(range(1, h2 + 1))
+    cum_resent = [calc_append_only_context(S0, D, n)[1] / 1e6 for n in t]
+    cum_fresh = [calc_reused_prefix_prompt_tokens(n, S0, D) / 1e6 for n in t]
+    ax.plot(t[:h1], cum_resent[:h1], color=C["danger"], lw=3)
+    ax.plot(t[h1 - 1:], cum_resent[h1 - 1:], color=C["danger"], lw=3, alpha=1 if k >= 2 else 0)
     ax.plot(t, cum_fresh, color=C["data"], lw=3, alpha=1 if k >= 3 else 0)
-    ax.plot([30], [cum_resent[29]], "o", color=C["danger"], ms=7)
-    ax.text(31.5, cum_resent[29], f"30 turns: {cum_resent[29] * 1e3:,.1f}k", ha="left", va="top",
+    ax.plot([h1], [cum_resent[h1 - 1]], "o", color=C["danger"], ms=7)
+    ax.text(h1 + 1.5, cum_resent[h1 - 1], f"{val('rs_turns')} turns: {val('rs_resent_k')}k", ha="left", va="top",
             fontsize=12, color=C["danger"], fontweight="bold")
-    g_r = cum_resent[59] / cum_resent[29]
-    g_f = cum_fresh[59] / cum_fresh[29]
-    ax.text(58.5, cum_resent[59], f"60 turns: {cum_resent[59] * 1e3:,.0f}k ({g_r:.1f}\u00d7)", ha="right", va="bottom",
+    ax.text(h2 - 1.5, cum_resent[-1], f"{val('rs_turns2')} turns: {val('rs_resent2_k')}k ({val('rs_growth')}\u00d7)",
+            ha="right", va="bottom",
             fontsize=12, color=C["danger"], fontweight="bold", alpha=1 if k >= 2 else 0)
-    ax.text(58.5, cum_fresh[59] + 0.12, f"fresh prefill {cum_fresh[59] * 1e3:,.1f}k ({g_f:.1f}\u00d7)",
+    ax.text(h2 - 1.5, cum_fresh[-1] + 0.12, f"fresh prefill {val('rs_fresh2_k')}k ({val('rs_fresh_growth')}\u00d7)",
             ha="right", va="bottom", fontsize=12, color=C["data"], fontweight="bold",
             alpha=1 if k >= 3 else 0)
-    ax.set_xlim(1, 60)
+    ax.set_xlim(1, h2)
     ax.set_ylim(0, 3.6)
     ax.set_xlabel("Turn")
     ax.set_ylabel("Cumulative input\n(million tokens)", fontsize=11)
@@ -497,18 +486,22 @@ for k in (1, 2, 3):
 # =============================================================================
 def deadline(k):
     fig, ax = plt.subplots(figsize=(4.6, 2.3))
-    rows = [("Whole file", (8000 + 350) * TP, 1850 * TD), ("Local edit", (8000 + 120) * TP, 80 * TD)]
-    for i, (lab, a, b) in enumerate(rows):
+    w, e = K.FULL.result, K.DIFF.result
+    rows = [("Whole file", w.prefill_time.to("s").magnitude, w.decode_time.to("s").magnitude, val("ed_full_s1")),
+            ("Local edit", e.prefill_time.to("s").magnitude, e.decode_time.to("s").magnitude, val("ed_diff_s1"))]
+    deadline = num("ed_deadline_s")
+    for i, (lab, a, b, total) in enumerate(rows):
         y = 1 - i
         al = 1 if i < k else 0
         ax.barh(y, a, color=C["memory_l"], height=0.55, alpha=al, edgecolor=C["memory"])
         ax.barh(y, b, left=a, color=C["memory"], height=0.55, alpha=al)
-        ax.text(a + b + 0.6, y, f"{a + b:.1f} s", va="center", fontsize=13, color=C["memory"],
+        ax.text(a + b + 0.6, y, f"{total} s", va="center", fontsize=13, color=C["memory"],
                 fontweight="bold", alpha=al)
         ax.text(-0.5, y, lab, ha="right", va="center", fontsize=13, fontweight="bold", color=C["text"])
-    ax.axvline(15, color=C["danger"], lw=2, ls="--")
-    ax.axvspan(15, 46, color=C["danger_l"], alpha=0.5, zorder=0)
-    ax.text(15.4, 1.55, "15 s deadline", fontsize=11, color=C["danger"], fontweight="bold")
+    ax.axvline(deadline, color=C["danger"], lw=2, ls="--")
+    ax.axvspan(deadline, 46, color=C["danger_l"], alpha=0.5, zorder=0)
+    ax.text(deadline + 0.4, 1.55, f"{val('ed_deadline_s')} s deadline", fontsize=11, color=C["danger"],
+            fontweight="bold")
     ax.text(45, -0.42, "light: prompt   dark: output", ha="right", fontsize=10, color=C["memory"])
     ax.set_xlim(0, 46)
     ax.set_ylim(-0.5, 1.85)
@@ -551,9 +544,11 @@ def hook_timeline(k, size=(6.0, 2.4), fs=13.5, labels=True):
                     fontweight="bold", alpha=1)
     ax.plot([day(8, 31)], [2], "o", ms=12, color=C["danger"], alpha=1 if k >= 1 else 0)
     if labels:
-        ax.annotate("16% of requests\nat the worst hour", (day(8, 31), 2), xytext=(day(8, 31), 2.55),
+        ax.annotate(f"{val('pm_worst_pct')}% of requests\nat the worst hour", (day(8, 31), 2),
+                    xytext=(day(8, 31), 2.55),
                     ha="center", fontsize=fs - 1, color=C["danger"], fontweight="bold")
-        ax.text(day(8, 5), 2.3, "0.8% at first", ha="left", fontsize=fs - 1, color=C["memory"])
+        ax.text(day(8, 5), 2.3, f"{val('pm_initial_pct')}% at first", ha="left", fontsize=fs - 1,
+                color=C["memory"])
     ticks = [(8, 5), (8, 25), (9, 2), (9, 12)]
     ax.set_xticks([day(m, d) for m, d in ticks])
     ax.set_xticklabels(["Aug 5", "Aug 25", "Sep 2", "Sep 12"], fontsize=fs - 1)

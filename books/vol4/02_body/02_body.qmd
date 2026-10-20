@@ -168,34 +168,29 @@ class GraspLatencyProfile:
     """Freshness deadline for the conveyor mug and an illustrative capture-to-onset profile."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    GRASP = Scenarios.WristCameraGraspAgeProfile
     v_conv = AISLE.v_conveyor  # category: illustrative (pick-station conveyor speed)
     r_tol = AISLE.grasp_tolerance  # category: chosen (grasp tolerance)
     e_0 = AISLE.grasp_initial_error  # category: illustrative (initial estimate error)
     # (name, P50, P99, max) in ms; category: illustrative (not a measured profile)
-    stages = [
-        ("1–2. Exposure and readout", 11.2, 16.6, 16.7),
-        ("3–4. Transport and DMA", 1.4, 3.2, 6.8),
-        ("5. Backbone and policy", 18.5, 24.1, 38.4),
-        ("6. Scheduling and IPC", 0.6, 2.1, 12.3),
-        ("7. Fieldbus", 1.0, 1.0, 2.0),
-        ("8. Current rise", 2.3, 3.0, 4.5),
-    ]
-    sys_p99 = 46.2 * millisecond  # category: illustrative (system-level profile)
-    sys_p999 = 68.4 * millisecond  # category: illustrative (system-level tail)
+    stages = [(name, *(t.to(millisecond).magnitude for t in ts)) for name, *ts in GRASP.stages]
+    sys_p99 = GRASP.system_p99  # category: illustrative (system-level profile)
+    sys_p999 = GRASP.system_p999  # category: illustrative (system-level tail)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    e_max = (r_tol - e_0).to(millimeter)  # the tolerance the mug's motion may spend
-    t_fresh = (e_max / v_conv).to(millisecond)
-    t_backbone = stages[2][1] * millisecond
-    sum_p50 = sum(s[1] for s in stages) * millisecond
-    sum_p99 = sum(s[2] for s in stages) * millisecond
-    sum_max = sum(s[3] for s in stages) * millisecond
-    travel_p50 = (v_conv * sum_p50).to(millimeter)
-    travel_p999 = (v_conv * sys_p999).to(millimeter)
-    margin_p50 = (e_max - travel_p50).to(millimeter)
-    excess_p999 = (travel_p999 - e_max).to(millimeter)
-    t_rest_p50 = sum_p50 - t_backbone  # every stage but the backbone
-    f_backbone = (1 / t_backbone).to(hertz)  # the loop rate a backbone benchmark suggests
+    R = GRASP.result
+    e_max = R.allowed_error  # the tolerance the mug's motion may spend
+    t_fresh = R.deadline
+    t_backbone = R.focus_stage
+    sum_p50 = R.stage_sum_p50
+    sum_p99 = R.stage_sum_p99
+    sum_max = R.stage_sum_max
+    travel_p50 = R.travel_p50
+    travel_p999 = R.travel_tail
+    margin_p50 = R.slack_p50
+    excess_p999 = R.overrun_tail
+    t_rest_p50 = R.rest_of_chain  # every stage but the backbone
+    f_backbone = R.focus_rate  # the loop rate a backbone benchmark suggests
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(v_conv.to(meter / second).magnitude - 0.20) < 1e-9, f"Unexpected conveyor speed: {v_conv}")
@@ -408,37 +403,40 @@ class BodyStoppingBudget:
     """Rows 1-3 of the running machine's stopping budget: the terms the body owns."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    v = RM.base.max_velocity  # category: illustrative (drive limit)
-    a_brake = AISLE.a_brake  # category: illustrative (loaded, dry floor)
+    BODY = Scenarios.WarehouseBaseStopBodyTerms
+    FULL = Scenarios.WarehouseBaseStopFullDelay
+    FAST = Scenarios.WarehouseBaseStopFastSetpoint
+    v = BODY.speed  # category: illustrative (drive limit)
+    a_brake = BODY.a_brake  # category: illustrative (loaded, dry floor)
     delta_loc = AISLE.delta_loc  # category: illustrative
     delta_margin = AISLE.delta_margin  # category: chosen
-    t_act = AISLE.t_brake_onset  # category: illustrative (brake onset)
-    d_clear = AISLE.d_clear  # category: illustrative (rack-end clear distance)
-    tau_full = AISLE.tau_delay  # category: derived (full pre-brake delay; figure only)
-    v_fast = 2.0 * meter / second  # category: illustrative (speed-scaling case above the drive limit)
-    dt_extra = 100 * millisecond  # category: illustrative (added pre-brake delay step)
+    t_act = BODY.delay  # category: illustrative (brake onset)
+    d_clear = BODY.d_clear  # category: illustrative (rack-end clear distance)
+    tau_full = FULL.delay  # category: derived (full pre-brake delay; figure only)
+    v_fast = FAST.speed  # category: illustrative (speed-scaling case above the drive limit)
+    dt_extra = BODY.added_delay  # category: illustrative (added pre-brake delay step)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    d_brake = (v**2 / (2 * a_brake)).to(millimeter)  # row 1
+    d_brake = BODY.result.braking_travel.to(millimeter)  # row 1
     total_1 = d_brake
-    overhead = (delta_loc + delta_margin).to(millimeter)  # row 2
+    overhead = BODY.result.overhead.to(millimeter)  # row 2
     total_2 = (total_1 + overhead).to(millimeter)
-    d_onset = (v * t_act).to(millimeter)  # row 3
+    d_onset = BODY.result.delay_travel.to(millimeter)  # row 3
     total_3 = (total_2 + d_onset).to(millimeter)
-    remaining = (d_clear - total_3).to(millimeter)
-    v_ceiling = calc_max_permitted_velocity(d_clear, t_act, a_brake, loc_margin=delta_loc, physical_margin=delta_margin)
-    d_brake_fast = (v_fast**2 / (2 * a_brake)).to(millimeter)
-    brake_growth = (d_brake_fast / d_brake - 1).to("dimensionless")
-    d_per_extra = (v * dt_extra).to(millimeter)
-    brake_extra = (d_brake_fast - d_brake).to(millimeter)  # braking travel added by the speed step
-    dt_equiv = (brake_extra / v).to(millisecond)  # delay at the drive limit that costs the same distance
-    case_body = calc_safe_stopping_distance(v, t_act, a_brake, loc_margin=delta_loc, physical_margin=delta_margin).to(millimeter)
-    case_full = calc_safe_stopping_distance(v, tau_full, a_brake, loc_margin=delta_loc, physical_margin=delta_margin).to(millimeter)
-    case_fast = calc_safe_stopping_distance(v_fast, tau_full, a_brake, loc_margin=delta_loc, physical_margin=delta_margin).to(millimeter)
-    case_full_blind = (v * tau_full).to(millimeter)
-    case_full_margin = (d_clear - case_full).to(millimeter)
-    case_fast_blind = (v_fast * tau_full).to(millimeter)
-    case_fast_breach = (case_fast - d_clear).to(millimeter)
+    remaining = BODY.result.spare.to(millimeter)
+    v_ceiling = BODY.result.speed_ceiling
+    d_brake_fast = FAST.result.braking_travel.to(millimeter)
+    brake_growth = Scenarios.WarehouseBaseSpeedStep.result.braking_growth
+    d_per_extra = BODY.result.added_delay_travel.to(millimeter)
+    brake_extra = Scenarios.WarehouseBaseSpeedStep.result.braking_added  # braking travel added by the speed step
+    dt_equiv = Scenarios.WarehouseBaseSpeedStep.result.equivalent_delay  # delay at the drive limit that costs the same distance
+    case_body = BODY.result.required_distance.to(millimeter)
+    case_full = FULL.result.required_distance.to(millimeter)
+    case_fast = FAST.result.required_distance.to(millimeter)
+    case_full_blind = FULL.result.delay_travel.to(millimeter)
+    case_full_margin = FULL.result.spare.to(millimeter)
+    case_fast_blind = FAST.result.delay_travel.to(millimeter)
+    case_fast_breach = (-FAST.result.spare).to(millimeter)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(v == MachineMomentum.v_drive, "Stopping budget and momentum must use the same drive limit.")
@@ -481,7 +479,7 @@ class BodyStoppingBudget:
     remaining_str = fmt_length(remaining, unit=millimeter, precision=1)
     v_ceiling_str = fmt_velocity(v_ceiling, unit=meter / second, precision=2)
     d_brake_fast_str = fmt_length(d_brake_fast, unit=millimeter, precision=0, commas=True)
-    brake_growth_pct_str = fmt_percent(brake_growth.magnitude, precision=1, style="prose")
+    brake_growth_pct_str = fmt_percent(brake_growth, precision=1, style="prose")
     d_per_extra_str = fmt_length(d_per_extra, unit=millimeter, precision=0)
     brake_extra_str = fmt_length(brake_extra, unit=millimeter, precision=1)
     dt_equiv_str = fmt_latency(dt_equiv, unit=millisecond, precision=1)
@@ -592,37 +590,27 @@ class BrakingLimits:
     mu_insp = AISLE.mu_inspected_floor  # category: illustrative
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    tau_wheel = (k_t * i_max).to(newton * meter)
-    m_rot = (n_wheels * m_rot_wheel).to(kilogram)
-    rot_share = (m_rot / m).to("dimensionless").magnitude
-    phi_max = RM.drive_wheel_load_share_max
-    limits = calc_braking_limits(
-        m,
-        a_req,
-        wheel_torque_max=tau_wheel,
-        wheel_radius=r_wheel,
-        n_driven_wheels=n_wheels,
-        friction_coefficient=mu_dry,
-        drive_load_share=phi_max,
-        rotating_equivalent_mass=m_rot,
-    )
-    force = limits["force"]
-    m_eff = limits["m_eff"]
-    a_torque = limits["a_torque"]
-    a_trac_dry = limits["a_traction"]  # dry floor at the rated load share (margin figure)
-    torque_margin = (a_torque / a_req - 1).to("dimensionless").magnitude
-    a_torque_rated = calc_drive_torque_deceleration_limit(tau_rated, r_wheel, n_wheels, m, m_rot)["a_max"]
-    mu_min = calc_required_friction(a_req)
-    mu_min_rated = limits["mu_required"]
-    phi_min_dry = (a_req / (mu_dry * standard_gravity)).to("dimensionless").magnitude
-    a_insp = calc_traction_deceleration_limit(mu_insp)
-    cg_ratio_max = limits["cg_ratio_max"]
-    volts = calc_drive_voltage_headroom(k_e, v, r_wheel, v_bus_low, i_max, r_line)
-    omega = volts["omega"]
-    e_bemf = volts["e_bemf"]
-    v_brake = volts["v_brake"]
-    v_drive = volts["v_drive"]
-    headroom = volts["headroom"]
+    limits = Scenarios.WarehouseBaseBrakingCeilings.result
+    tau_wheel = limits.wheel_torque
+    m_rot = limits.rotating_mass
+    rot_share = limits.rotating_share
+    phi_max = limits.drive_load_share
+    force = limits.force
+    m_eff = limits.m_eff
+    a_torque = limits.a_torque
+    a_trac_dry = limits.a_traction_dry  # dry floor at the rated load share (margin figure)
+    torque_margin = limits.torque_margin
+    a_torque_rated = limits.a_torque_rated
+    mu_min = limits.mu_required
+    mu_min_rated = limits.mu_required_rated
+    phi_min_dry = limits.min_load_share_dry
+    a_insp = limits.a_traction_inspected
+    cg_ratio_max = limits.cg_ratio_max
+    omega = limits.wheel_speed
+    e_bemf = limits.back_emf
+    v_brake = limits.v_brake
+    v_drive = limits.v_drive
+    headroom = limits.headroom
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(n_wheels == 2, f"Prose says two driven wheels: {n_wheels}")
@@ -636,7 +624,7 @@ class BrakingLimits:
     check(abs(phi_max - 300.0 / 368.0) < 1e-12, f"Unexpected load-share bound: {phi_max}")
     check(abs(mu_min_rated - 0.2502) < 1e-4, f"Unexpected rated-share friction premise: {mu_min_rated}")
     check(mu_dry > mu_min_rated and a_insp < a_req, "Dry floor must pass and the inspected floor must fail.")
-    check(limits["a_tip"] is None and limits["passes"] is False, "Tip-over must stay unverified until the CoG is sourced.")
+    check(limits.a_tip is None and limits.passes is False, "Tip-over must stay unverified until the CoG is sourced.")
     check(abs(cg_ratio_max - 4.9033) < 1e-4, f"Unexpected CoG ratio bound: {cg_ratio_max}")
     # margin_braking_ceilings_envelope.svg fig-alt hand-types 4.80, 2.33, 1.18, 0.78, and 2.0
     check(f"{a_trac_dry.to(meter / second**2).magnitude:.2f}" == "4.80", f"Unexpected dry traction ceiling: {a_trac_dry}")
@@ -780,20 +768,19 @@ from mlsysim.core.units import meter, millimeter, mm
 
 # ┌── 1. LOAD (from the stopping-budget cell) ──────────────────────────────────
 S = BodyStoppingBudget  # category: derived (values keep their budget-cell categories)
-A_BRAKE = S.a_brake  # category: illustrative (loaded, dry floor)
 OVERHEAD = S.overhead.to(mm).magnitude  # category: derived (illustrative delta_loc plus chosen delta_margin)
 D_CLEAR = S.d_clear.to(mm).magnitude  # category: illustrative (rack-end clear distance)
 CASES = [  # category: illustrative and derived (drive-limit and speed-scaling cases from the budget cell)
-    ("Case 1", "Partial budget:\nbody terms only", S.v, S.t_act),
-    ("Case 2", "Full delay", S.v, S.tau_full),
-    ("Case 3", "Full delay, faster", S.v_fast, S.tau_full),
+    ("Case 1", "Partial budget:\nbody terms only", S.BODY.result),
+    ("Case 2", "Full delay", S.FULL.result),
+    ("Case 3", "Full delay, faster", S.FAST.result),
 ]
 
 # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────────
 rows = []
-for name, sub, v, tau in CASES:
-    react = (v * tau).to(mm).magnitude
-    brake = (v**2 / (2 * A_BRAKE)).to(mm).magnitude
+for name, sub, r in CASES:
+    react = r.delay_travel.to(mm).magnitude
+    brake = r.braking_travel.to(mm).magnitude
     rows.append((name, sub, react, brake, react + brake + OVERHEAD))
 
 # ┌── 3. GUARD ─────────────────────────────────────────────────────────────────
@@ -992,11 +979,12 @@ class CurrentRise:
     t_act = AISLE.t_brake_onset  # category: illustrative (brake onset)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    tau_e = (l_line / r_line).to(millisecond)
-    t_ramp = (l_line * i_max / v_low).to(millisecond)  # stall, e_bemf = 0, full depleted-bus voltage
-    ramp_share = (t_ramp / t_act).to("dimensionless").magnitude
-    i_full_step = (v_low / r_line).to(ampere)  # steady current of a full-bus step
-    step_over_peak = (i_full_step / i_peak).to("dimensionless").magnitude
+    E = Scenarios.WarehouseBaseHubDriveElectrical.result
+    tau_e = E.time_constant
+    t_ramp = E.ramp_time  # stall, e_bemf = 0, full depleted-bus voltage
+    ramp_share = E.ramp_share
+    i_full_step = E.full_step_current  # steady current of a full-bus step
+    step_over_peak = E.step_over_peak
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(tau_e.magnitude - 2.693) < 1e-3, f"Unexpected electrical time constant: {tau_e}")
@@ -1087,19 +1075,19 @@ class ReflectedInertia:
     """Reflected rotor inertia through a 100:1 transmission, sized as a flywheel."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    n_gear = 100  # category: illustrative (joint reduction)
-    m_rotor = 50.0 * gram  # category: illustrative (rotor mass)
-    j_rotor = 5.6e-6 * kilogram * meter**2  # category: illustrative (rotor inertia of that rotor)
-    r_fly = 0.10 * meter  # category: illustrative (comparison flywheel radius)
-    j_load = 8.5e-3 * kilogram * meter**2  # category: illustrative (link inertia at the joint)
+    ROTOR = Scenarios.GearedRotorFlywheel
+    n_gear = ROTOR.gear_ratio  # category: illustrative (joint reduction)
+    m_rotor = ROTOR.rotor_mass  # category: illustrative (rotor mass)
+    j_rotor = ROTOR.rotor_inertia  # category: illustrative (rotor inertia of that rotor)
+    r_fly = ROTOR.flywheel_radius  # category: illustrative (comparison flywheel radius)
+    j_load = ROTOR.load_inertia  # category: illustrative (link inertia at the joint)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    j_ref = (n_gear**2 * j_rotor).to(kilogram * meter**2)
-    m_fly = (2 * j_ref / r_fly**2).to(kilogram)
-    k_gyr = ((j_rotor / m_rotor) ** 0.5).to(millimeter)  # radius of gyration ties J_rotor to the quoted mass
-    n_star = ((j_load / j_rotor).to("dimensionless").magnitude) ** 0.5
-    x_ratio = n_gear / n_star
-    accel_share = 2 * x_ratio / (1 + x_ratio**2)  # qdd at n_gear relative to qdd at N*, same motor torque
+    j_ref = ROTOR.result.reflected_inertia
+    m_fly = ROTOR.result.flywheel_mass
+    k_gyr = ROTOR.result.radius_of_gyration  # radius of gyration ties J_rotor to the quoted mass
+    n_star = ROTOR.result.matched_ratio
+    accel_share = ROTOR.result.acceleration_share  # qdd at n_gear relative to qdd at N*, same motor torque
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(j_ref.magnitude - 0.056) < 1e-9, f"Reflected inertia must be 0.056 kg m^2: {j_ref}")
@@ -1210,8 +1198,8 @@ class LatchContactRate:
     f_limit = AISLE.f_latch_limit  # category: illustrative (latch force limit)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    rate_guarded = (k_latch * v_guarded).to(newton / millisecond)
-    rate_high = (k_latch * v_high).to(newton / millisecond)
+    rate_guarded = calc_contact_force_rate(k_latch, v_guarded)
+    rate_high = calc_contact_force_rate(k_latch, v_high)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(k_latch.to(newton / meter).magnitude - 4.0e5) < 1e-6, f"Unexpected plate stiffness: {k_latch}")
@@ -1301,30 +1289,30 @@ class GearRatioCost:
     """Copper loss and reflected inertia against gear ratio for the arm's stand-in joint."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    joint = Actuators.PandaClassJoint.CSG_25_50_ILM70x18  # category: sourced (CSG-25-50 gear with TQ ILM 70x18 motor)
-    motor = Actuators.FramelessMotor.TQ_ILM70x18  # category: sourced (TQ-RoboDrive data sheet)
-    tau_out = Embodied.Manipulator.Panda.max_torque  # category: sourced (Panda axes 1-4 maximum joint torque, Franka control limits)
+    GEARS = Scenarios.PandaClassJointGearRatios
+    joint = GEARS.joint  # category: sourced (CSG-25-50 gear with TQ ILM 70x18 motor)
+    motor = GEARS.motor  # category: sourced (TQ-RoboDrive data sheet)
+    tau_out = GEARS.output_torque  # category: sourced (Panda axes 1-4 maximum joint torque, Franka control limits)
     k_t = motor.torque_constant  # category: sourced (amplitude-invariant i_q, i_d = 0)
     r_loss = joint.internal_resistance  # category: sourced (0.75 R_TT at 20 C)
     j_in = joint.rotor_inertia  # category: sourced (motor rotor plus CSG-25 input inertia)
-    n_joint = joint.gear_ratio  # category: sourced (CSG-25-50)
-    n_high = 100  # category: chosen (a catalog CSG-25 ratio)
-    n_qdd = 10  # category: illustrative (quasi-direct-drive class ratio)
-    eta = 0.85  # category: illustrative (gear efficiency; the catalog's varies with load, speed, and temperature)
+    n_joint, n_high, n_qdd = GEARS.ratios  # category: sourced (CSG-25-50), chosen (a catalog CSG-25 ratio), illustrative (QDD class)
+    eta = GEARS.gear_efficiency  # category: illustrative (gear efficiency; the catalog's varies with load, speed, and temperature)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    k_m = (k_t / r_loss**0.5).to(newton * meter / watt**0.5)
-    tau_m_joint = (tau_out / (eta * n_joint)).to(newton * meter)
-    tau_m_high = (tau_out / (eta * n_high)).to(newton * meter)
-    tau_m_qdd = (tau_out / (eta * n_qdd)).to(newton * meter)
-    p_joint = ((tau_m_joint / k_m) ** 2).to(watt)
-    p_high = ((tau_m_high / k_m) ** 2).to(watt)
-    j_ref_joint = (n_joint**2 * j_in).to(kilogram * meter**2)
-    j_ref_high = (n_high**2 * j_in).to(kilogram * meter**2)
-    product_joint = (p_joint * j_ref_joint).to(watt * kilogram * meter**2)
-    product_high = (p_high * j_ref_high).to(watt * kilogram * meter**2)
-    qdd_over_peak = (tau_m_qdd / motor.peak_torque).to("dimensionless").magnitude
-    peak_over_rated = (motor.peak_torque / motor.rated_torque).to("dimensionless").magnitude
+    G = GEARS.result
+    k_m = G.motor_constant
+    tau_m_joint = G.motor_torque[n_joint]
+    tau_m_high = G.motor_torque[n_high]
+    tau_m_qdd = G.motor_torque[n_qdd]
+    p_joint = G.copper_loss[n_joint]
+    p_high = G.copper_loss[n_high]
+    j_ref_joint = G.reflected_inertia[n_joint]
+    j_ref_high = G.reflected_inertia[n_high]
+    product_joint = G.loss_inertia_product[n_joint]
+    product_high = G.loss_inertia_product[n_high]
+    qdd_over_peak = G.over_peak[n_qdd]
+    peak_over_rated = G.peak_over_rated
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(k_m.magnitude - motor.motor_constant.magnitude) < 1e-3, "K_t / sqrt(R) must match the data sheet's motor constant.")
@@ -1509,12 +1497,12 @@ class CopperResistanceRise:
     """Fractional rise of winding resistance from 20 C to the 140 C engineering ceiling."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    alpha_cu = 0.00393 / K  # category: sourced (annealed copper, 100 percent IACS, at 20 C; NBS Handbook 100, Copper Wire Tables)
-    t_0 = ureg.Quantity(20.0, degC).to(K)  # category: illustrative (resistance reference)
-    t_ceiling = ureg.Quantity(140.0, degC).to(K)  # category: chosen (engineering ceiling)
+    alpha_cu = COPPER_TEMPERATURE_COEFFICIENT  # category: sourced (annealed copper, 100 percent IACS, at 20 C; NBS Handbook 100, Copper Wire Tables)
+    t_0 = COPPER_COEFFICIENT_REFERENCE_TEMPERATURE.to(K)  # category: sourced (the coefficient's reference temperature)
+    t_ceiling = Scenarios.PandaClassJointBurst.ceiling.to(K)  # category: chosen (engineering ceiling)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    rise = (alpha_cu * (t_ceiling - t_0)).to("dimensionless").magnitude
+    rise = calc_copper_resistance_factor(t_ceiling, alpha_cu, t_0) - 1
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(rise - 0.4716) < 1e-4, f"Resistance rise must be 47.2 percent: {rise}")
@@ -1582,40 +1570,35 @@ class ThermalBurst:
     """Burst horizons, duty-cycle screen, and periodic peak for the arm's Panda-class joint."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    joint = Actuators.PandaClassJoint.CSG_25_50_ILM70x18  # category: sourced (CSG-25-50 gear with TQ ILM 70x18 motor)
-    motor = Actuators.FramelessMotor.TQ_ILM70x18  # category: sourced (TQ-RoboDrive data sheet)
+    BURST = Scenarios.PandaClassJointBurst
+    joint = BURST.joint  # category: sourced (CSG-25-50 gear with TQ ILM 70x18 motor)
+    motor = BURST.motor  # category: sourced (TQ-RoboDrive data sheet)
     r_wind = joint.internal_resistance  # category: sourced (0.75 R_TT at 20 C, amplitude-invariant i_q, i_d=0; held fixed)
-    c_th = 120.0 * joule / K  # category: illustrative (lumped thermal capacitance)
-    theta_ja = 2.5 * K / watt  # category: illustrative (installed thermal resistance)
-    t_amb = ureg.Quantity(40.0, degC).to(K)  # category: illustrative (enclosed ambient)
-    t_limit = INSULATION_CLASS_F_LIMIT.to(K)  # category: sourced (IEC 60085 Class F hotspot)
-    t_ceiling = CopperResistanceRise.t_ceiling  # category: chosen (engineering ceiling, declared once in CopperResistanceRise)
+    c_th = BURST.thermal_capacitance  # category: illustrative (lumped thermal capacitance)
+    theta_ja = BURST.thermal_resistance  # category: illustrative (installed thermal resistance)
+    t_amb = BURST.ambient.to(K)  # category: illustrative (enclosed ambient)
+    t_limit = BURST.limit.to(K)  # category: sourced (IEC 60085 Class F hotspot)
+    t_ceiling = CopperResistanceRise.t_ceiling  # category: chosen (engineering ceiling, declared once in the scenario)
     i_cont = motor.rated_current  # category: sourced (rated amplitude-invariant i_q, i_d=0)
-    burst_factor = 3  # category: chosen (threefold rated-current burst, below the motor's peak torque)
-    i_peak = burst_factor * i_cont  # category: derived
-    t_on = 3.0 * second  # category: illustrative (burst length)
+    burst_factor = BURST.burst_factor  # category: chosen (threefold rated-current burst, below the motor's peak torque)
+    t_on = BURST.burst_on  # category: illustrative (burst length)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    tau = (theta_ja * c_th).to(second)
-    p_cont = (i_cont**2 * r_wind).to(watt)
-    t_equil = (t_amb + p_cont * theta_ja).to(K)
-    p_peak = (i_peak**2 * r_wind).to(watt)
-    t_inf = (t_amb + p_peak * theta_ja).to(K)
-    t_cold = (tau * math.log(((t_inf - t_amb) / (t_inf - t_limit)).to("dimensionless").magnitude)).to(second)
-    t_hot = (tau * math.log(((t_inf - t_equil) / (t_inf - t_limit)).to("dimensionless").magnitude)).to(second)
-    hot_cut = (1 - t_hot / t_cold).to("dimensionless").magnitude
-    p_avg_max = ((t_ceiling - t_amb) / theta_ja).to(watt)
-    duty = (p_avg_max / p_peak).to("dimensionless").magnitude
-    t_off = (t_on * (1 - duty) / duty).to(second)
-    t_off_sched = math.ceil(t_off.magnitude * 10) / 10 * second  # screening value rounded up to 0.1 s
-    t_cycle = t_on + t_off_sched
-    rise_peak = (
-        p_peak
-        * theta_ja
-        * (1 - math.exp(-(t_on / tau).to("dimensionless").magnitude))
-        / (1 - math.exp(-(t_cycle / tau).to("dimensionless").magnitude))
-    )
-    t_peak = (t_amb + rise_peak).to(K)
+    B = BURST.result
+    i_peak = B.burst_current
+    tau = B.time_constant
+    p_cont = B.rated_loss
+    t_equil = B.rated_equilibrium
+    p_peak = B.burst_loss
+    t_inf = B.asymptote
+    t_cold = B.horizon_cold
+    t_hot = B.horizon_hot
+    hot_cut = B.hot_cut
+    p_avg_max = B.average_loss_max
+    duty = B.duty
+    t_off = B.off_time
+    t_off_sched = B.off_time_scheduled  # screening value rounded up to 0.1 s
+    t_peak = B.periodic_peak
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(tau.magnitude - 300.0) < 1e-9, f"Unexpected time constant: {tau}")
@@ -1700,9 +1683,8 @@ which here is `{python} ThermalBurst.duty_pct_str`, so a `{python} ThermalBurst.
 # │          (amplitude-invariant current, so the line drop is sqrt(3) i R_TT/2);
 # │          inductance neglected. Panel (b) is ThermalBurst's first-order
 # │          T(t) = T_inf - (T_inf - T_0) exp(-t/tau).
-# │ Note:    The no-load speed is read here from the data sheet; promote it to
-# │          Actuators.FramelessMotor.TQ_ILM70x18 (no_load_speed) when the
-# │          registry next changes.
+# │ Note:    The no-load speed is Actuators.FramelessMotor.TQ_ILM70x18.no_load_speed;
+# │          the speed limit is calc_voltage_limited_speed.
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 import numpy as np
@@ -1722,16 +1704,14 @@ class TorqueSpeedEnvelope:
     k_t = motor.torque_constant  # category: sourced
     r_tt = motor.terminal_resistance  # category: sourced (at 20 C)
     v_bus = motor.rated_voltage  # category: sourced
-    n0 = 2110.0 * rpm  # category: sourced (data sheet Rev. 0414, star-serial no-load speed at U_r; theoretical)
+    n0 = motor.no_load_speed.to(rpm)  # category: sourced (data sheet Rev. 0414, star-serial no-load speed at U_r; theoretical)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     w0 = n0.to(radian / second)
     k_e = (v_bus / w0).to(volt * second / radian)  # line-to-line peak back-EMF constant
 
-    def n_limit(tau, k_t=k_t, r_tt=r_tt, v_bus=v_bus, k_e=k_e):
-        i = (tau / k_t).to(ampere)
-        drop = (math.sqrt(3) / 2 * r_tt * i).to(volt)
-        return ((v_bus - drop) / k_e).to(rpm)
+    def n_limit(tau, k_t=k_t, r_tt=r_tt, v_bus=v_bus, n0=n0):
+        return calc_voltage_limited_speed(tau, k_t, r_tt, v_bus, n0).to(rpm)
 
     n_rated = n_limit(tau_rated)
     n_peak = n_limit(tau_peak)
@@ -1898,33 +1878,34 @@ class StallDerating:
     """Steady stall temperature under copper's resistance feedback, and the sustainable hold."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    joint = Actuators.PandaClassJoint.CSG_25_50_ILM70x18  # category: sourced (CSG-25-50 gear with TQ ILM 70x18 motor)
-    motor = Actuators.FramelessMotor.TQ_ILM70x18  # category: sourced (TQ-RoboDrive data sheet)
-    tau_hold = Embodied.Manipulator.Panda.max_torque  # category: sourced (Panda axes 1-4 maximum joint torque, held statically)
+    STALL = Scenarios.PandaClassElbowStall
+    joint = STALL.joint  # category: sourced (CSG-25-50 gear with TQ ILM 70x18 motor)
+    motor = STALL.motor  # category: sourced (TQ-RoboDrive data sheet)
+    tau_hold = STALL.hold_torque  # category: sourced (Panda axes 1-4 maximum joint torque, held statically)
     k_t = motor.torque_constant  # category: sourced (torque per amplitude-invariant i_q, i_d=0)
     r_0 = joint.internal_resistance  # category: sourced (0.75 R_TT at T_0 = 20 C, not per-phase resistance)
-    t_0 = ureg.Quantity(20.0, degC).to(K)  # category: illustrative (resistance reference)
-    theta_ja = 1.80 * K / watt  # category: illustrative (unventilated limb)
-    t_amb = ureg.Quantity(40.0, degC).to(K)  # category: illustrative (limb ambient)
-    t_limit = INSULATION_CLASS_F_LIMIT.to(K)  # category: sourced (IEC 60085 Class F hotspot)
+    t_0 = COPPER_COEFFICIENT_REFERENCE_TEMPERATURE.to(K)  # category: sourced (resistance reference)
+    theta_ja = STALL.thermal_resistance  # category: illustrative (unventilated limb)
+    t_amb = STALL.ambient.to(K)  # category: illustrative (limb ambient)
+    t_limit = STALL.limit.to(K)  # category: sourced (IEC 60085 Class F hotspot)
     n_gear = joint.gear_ratio  # category: sourced (CSG-25-50 strain-wave reduction)
-    eta = GearRatioCost.eta  # category: illustrative (gear efficiency, declared once in GearRatioCost)
-    alpha_cu = 0.00393 / K  # category: sourced (annealed copper, 100 percent IACS, at 20 C; NBS Handbook 100, Copper Wire Tables)
+    eta = STALL.gear_efficiency  # category: illustrative (gear efficiency, declared once in the gear-ratio scenario)
+    alpha_cu = COPPER_TEMPERATURE_COEFFICIENT  # category: sourced (annealed copper, 100 percent IACS, at 20 C; NBS Handbook 100, Copper Wire Tables)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    tau_motor = (tau_hold / (eta * n_gear)).to(newton * meter)
-    i_stall = (tau_motor / k_t).to(ampere)
-    p_cold = (i_stall**2 * r_0).to(watt)
-    gain = (i_stall**2 * r_0 * theta_ja).to(K)  # rise per unit of resistance factor
-    const = (gain * (1 + alpha_cu * (t_amb - t_0))).to(K)
-    slope = (gain * alpha_cu).to("dimensionless").magnitude
-    dt_ss = (const / (1 - slope)).to(K)
-    t_wind = (t_amb + dt_ss).to(K)
-    p_max = ((t_limit - t_amb) / theta_ja).to(watt)
-    r_hot = (r_0 * (1 + alpha_cu * (t_limit - t_0))).to(ohm)
-    i_max = ((p_max / r_hot) ** 0.5).to(ampere)
-    tau_hold_max = (eta * n_gear * k_t * i_max).to(newton * meter)
-    derate = (1 - tau_hold_max / tau_hold).to("dimensionless").magnitude
+    D = STALL.result
+    tau_motor = D.motor_torque
+    i_stall = D.stall_current
+    p_cold = D.cold_loss
+    const = D.feedback_constant
+    slope = D.feedback_gain
+    dt_ss = D.steady_rise
+    t_wind = D.winding_temperature
+    p_max = D.sustainable_loss
+    r_hot = D.hot_resistance
+    i_max = D.sustainable_current
+    tau_hold_max = D.sustainable_hold
+    derate = D.derating
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(tau_motor.magnitude - 2.0471) < 1e-4 and abs(i_stall.magnitude - 10.947) < 1e-3, "Unexpected stall current.")
@@ -2080,8 +2061,8 @@ class PhaseShortPeak:
     omega_drive = BrakingLimits.omega  # category: derived (wheel speed at the drive limit)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    omega_e_peak = (hub.line_resistance / hub.line_inductance).to(radian / second)
-    omega_m_peak = (omega_e_peak / hub.pole_pairs).to(rpm)
+    omega_e_peak = Scenarios.WarehouseBaseHubDriveElectrical.result.short_peak_electrical
+    omega_m_peak = Scenarios.WarehouseBaseHubDriveElectrical.result.short_peak_wheel_speed.to(rpm)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(omega_e_peak.magnitude - 371.35) < 0.01, f"Unexpected electrical peak speed: {omega_e_peak}")
@@ -2185,30 +2166,32 @@ class DriveBusIntegrity:
     v_conv_max = RM.drive_bus_converter_max  # category: sourced (converter continuous input maximum)
     eff_conv = RM.drive_bus_converter_efficiency  # category: sourced (converter typical efficiency)
     p_soc = RM.brain_soc.tdp  # category: sourced (application processor TDP)
+    BUS = Scenarios.WarehouseDriveBusStop
     di = AISLE.i_rail_transient  # category: illustrative (inference burst plus drive)
-    c_bus = 22000.0 * microfarad  # category: illustrative (bulk link capacitance)
+    c_bus = BUS.link_capacitance  # category: illustrative (bulk link capacitance)
     v_breakdown = RM.drive_bus_switch_rating  # category: chosen (100 V switch class)
     v_clamp = RM.drive_bus_clamp  # category: chosen (chopper clamp threshold)
-    regen_fraction = 0.75  # category: illustrative (share of E_k returned to the bus)
-    r_candidate = 3.9 * ohm  # category: chosen (candidate chopper resistor)
-    p_candidate = 1.0 * kilowatt  # category: chosen (candidate resistor pulse rating)
+    regen_fraction = BUS.regen_fraction  # category: illustrative (share of E_k returned to the bus)
+    r_candidate = BUS.candidate_resistor  # category: chosen (candidate chopper resistor)
+    p_candidate = BUS.candidate_power  # category: chosen (candidate resistor pulse rating)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    i_compute = (p_soc / (eff_conv * v_bus_nom)).to(ampere)
-    i_drive = (di - i_compute).to(ampere)
-    dv = calc_voltage_droop(di, r_bus).to(volt)  # sustained resistive drop, not a transient minimum
-    v_sustained = (v_full - dv).to(volt)
-    v_sag_low = (v_battery_low - dv).to(volt)
-    margin_low = (v_sag_low - v_uvlo).to(volt)
-    headroom_low = (v_battery_low - v_uvlo).to(volt)
-    i_cross = ((v_battery_low - v_uvlo) / r_bus).to(ampere)
+    U = BUS.result
+    i_compute = U.compute_current
+    i_drive = U.drive_current
+    dv = U.sag  # sustained resistive drop, not a transient minimum
+    v_sustained = U.sustained_full
+    v_sag_low = U.sustained_depleted
+    margin_low = U.margin_depleted
+    headroom_low = U.headroom_depleted
+    i_cross = U.crossing_current
 
-    e_regen = (regen_fraction * e_k).to(joule)
-    v_final = ((v_full**2 + 2 * e_regen / c_bus) ** 0.5).to(volt)
-    e_cap_to_clamp = (0.5 * c_bus * (v_clamp**2 - v_full**2)).to(joule)
-    t_stop = (v / a_brake).to(millisecond)
-    p_peak = (2 * e_regen / t_stop).to(watt)
-    r_max = (v_clamp**2 / p_peak).to(ohm)
+    e_regen = U.regenerated
+    v_final = U.capacitor_only_endpoint
+    e_cap_to_clamp = U.capacitor_to_clamp
+    t_stop = U.stop_time
+    p_peak = U.peak_power
+    r_max = U.resistor_max
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(dv.magnitude - 4.2) < 1e-9, f"Resistive drop must be 4.2 V: {dv}")
@@ -2394,21 +2377,22 @@ A limit means nothing without the context of its test. Every recorded limit stat
 # │          9.99e-4, about one stop in 1,000.
 # │ How:     One-sided zero-failure bound p_upper = -ln(1 - c) / n.
 # └─────────────────────────────────────────────────────────────────────────────
-import math
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt_int, fmt_percent, check
 
 class ZeroFailureBound:
     """Upper bound on the per-stop failure rate after n failure-free trials."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    n_stops = 3000  # category: illustrative (failure-free loaded stops)
-    conf = 0.95  # category: chosen (one-sided confidence level)
+    CAMPAIGN = Scenarios.CleanLoadedStopCampaign
+    n_stops = CAMPAIGN.trials  # category: illustrative (failure-free loaded stops)
+    conf = CAMPAIGN.confidence  # category: chosen (one-sided confidence level)
+    p_target = CAMPAIGN.target_rate  # category: illustrative (target per-stop failure rate for the checkpoint)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    coef = -math.log(1 - conf)
-    p_upper = coef / n_stops
-    one_in = round(1 / p_upper, -2)
-    p_target = 1e-4  # category: illustrative (target per-stop failure rate for the checkpoint)
+    coef = CAMPAIGN.result.coefficient
+    p_upper = CAMPAIGN.result.rate_upper
+    one_in = round(CAMPAIGN.result.one_in, -2)
     target_one_in = round(1 / p_target)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -2500,8 +2484,8 @@ class LimitRecords:
     margin_low = DriveBusIntegrity.margin_low  # category: derived (depleted-pack margin under the sustained 70 A load)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    mu_min = (a_brake / standard_gravity).to("dimensionless").magnitude
-    e_store = (p_rail * holdup).to(joule)
+    mu_min = BrakingLimits.mu_min
+    e_store = RM.permission_rail_holdup_energy
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(a_brake.to(meter / second**2).magnitude - 2.0) < 1e-9, f"Unexpected a_brake: {a_brake}")
@@ -2630,14 +2614,15 @@ class ThrottledPerception:
     """Travel cost of a DVFS-stretched perception stage on the running machine."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    v = RM.base.max_velocity  # category: illustrative (drive limit)
+    THROTTLE = Scenarios.ThrottledNavigationBackbone
+    v = THROTTLE.speed  # category: illustrative (drive limit)
     t_nominal = AISLE.t_backbone  # category: illustrative (vision backbone at full clock)
-    clock_ratio = 2 / 3  # category: illustrative (DVFS clock as a fraction of full clock)
+    clock_ratio = THROTTLE.clock_ratio  # category: illustrative (DVFS clock as a fraction of full clock)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    t_throttled = (t_nominal / clock_ratio).to(millisecond)
-    dt = (t_throttled - t_nominal).to(millisecond)
-    d_extra = (v * dt).to(millimeter)
+    t_throttled = THROTTLE.result.throttled
+    dt = THROTTLE.result.added_age
+    d_extra = THROTTLE.result.added_travel
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(v.to(meter / second).magnitude - 1.5) < 1e-9, f"Unexpected drive limit: {v}")
@@ -2726,14 +2711,15 @@ class CatalogDerating:
     """Continuous-torque ceiling at installed ambient and thermal resistance, relative to the catalog."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    DERATE = Scenarios.SealedJointCatalogDerating
     t_max = CopperResistanceRise.t_ceiling  # category: chosen (engineering ceiling, declared once)
-    t_amb_catalog = ureg.Quantity(25.0, degC).to(kelvin)  # category: illustrative (catalog test ambient)
+    t_amb_catalog = DERATE.catalog_ambient.to(kelvin)  # category: illustrative (catalog test ambient)
     t_amb_installed = ThermalBurst.t_amb  # category: illustrative (enclosed ambient of the thermal notebooks)
-    theta_factor = 2.0  # category: illustrative (installed theta_JA relative to the catalog heat sink)
+    theta_factor = DERATE.thermal_resistance_factor  # category: illustrative (installed theta_JA relative to the catalog heat sink)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    ambient_share = (((t_max - t_amb_installed) / (t_max - t_amb_catalog)).to("dimensionless").magnitude) ** 0.5
-    both_share = ambient_share / theta_factor**0.5
+    ambient_share = DERATE.result.ambient_share
+    both_share = DERATE.result.combined_share
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(ambient_share - 0.9325) < 1e-4, f"Unexpected ambient-only share: {ambient_share}")

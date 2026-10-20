@@ -486,3 +486,80 @@ def calc_latch_contact_stopping_profile(
         "t_arm_stop": t_stop,
         "df_dt": df_dt,
     }
+
+
+# --- Elementary stopping budget terms (added 2026-10-20) --------------------
+
+def calc_stopping_crossover_speed(total_latency, max_deceleration):
+    """
+    Speed at which travel during the pre-brake delay equals braking travel.
+
+    Equation:
+        v * tau = v^2 / (2 * a)  =>  v* = 2 * a * tau
+
+    Below v*, delay travel is the larger term of the elementary stopping
+    budget; above it, braking travel is.
+
+    Source: equates the two terms of calc_safe_stopping_distance (OpenStax,
+    University Physics Volume 1, Sec. 3.4, Eq. 3.14 and Example 3.10).
+
+    Parameters
+    ----------
+    total_latency : Quantity
+        Pre-brake delay tau (e.g. ms or s); zero gives v* = 0.
+    max_deceleration : Quantity
+        Braking deceleration a (e.g. m/s^2).
+
+    Returns
+    -------
+    Quantity
+        Crossover speed in m/s.
+    """
+    validate_nonnegative(total_latency, "total_latency")
+    validate_positive(max_deceleration, "max_deceleration")
+    return (2 * max_deceleration * total_latency).to(ureg.meter / ureg.second)
+
+
+def calc_braking_time(velocity, max_deceleration):
+    """
+    Time to brake from ``velocity`` to rest at constant deceleration.
+
+    Equation:
+        t_brake = v / a
+
+    Source: v = v0 + a * t with v = 0 (OpenStax, University Physics Volume 1,
+    Sec. 3.4, Eq. 3.12).
+
+    Returns
+    -------
+    Quantity
+        Braking time in seconds.
+    """
+    validate_nonnegative(velocity, "velocity")
+    validate_positive(max_deceleration, "max_deceleration")
+    return (velocity / max_deceleration).to(ureg.second)
+
+
+def calc_travel_between_speeds(start_velocity, end_velocity, duration):
+    """
+    Distance covered while speed changes uniformly between two recorded values.
+
+    Equation:
+        x = (v_start + v_end) / 2 * t
+
+    With equal speeds this is the delay travel v * tau of the stopping budget;
+    with two recorded speeds it is the trapezoid estimate of the distance
+    covered between them.
+
+    Source: x = (v0 + v) / 2 * t for constant acceleration (OpenStax,
+    University Physics Volume 1, Sec. 3.4, Eq. 3.11 with Eq. 3.12).
+
+    Returns
+    -------
+    Quantity
+        Distance in meters.
+    """
+    validate_nonnegative(start_velocity, "start_velocity")
+    validate_nonnegative(end_velocity, "end_velocity")
+    validate_nonnegative(duration, "duration")
+    return (0.5 * (start_velocity + end_velocity) * duration).to(ureg.meter)

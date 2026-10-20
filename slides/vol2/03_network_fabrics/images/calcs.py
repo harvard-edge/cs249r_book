@@ -1,164 +1,304 @@
 #!/usr/bin/env python3
-"""Every derived number in Lecture 3 (Network Fabrics), computed from sourced
-inputs. Run: python3 calcs.py. Each line prints the value as the slide or
-note shows it, with its slide label. Inputs cite the rendered chapter
-(Network Fabrics, Vol. II Ch. 3), Compute Infrastructure (Ch. 2), or MLSysIM.
+"""Every number on the Lecture 3 slides and notes, read from MLSysIM.
+
+MLSysIM holds the inputs (registry) and the calculations (Scenarios.*, each
+backed by a solver or a scenario type); the chapter reads the same scenarios.
+This file only selects values, converts units, and formats them; it types no
+numbers. Each value is recorded with v() under the key the deck prints as
+\\val{key}; running this file writes images/numbers.tex.
+
+Run from this folder: python3 calcs.py
 """
 
-import statistics
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "mlsysim"))
-from mlsysim import Literature  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
 
-GB = 1e9
-MB = 1e6
-KB = 1e3
-
-
-def show(slide, label, value):
-    print(f"[{slide}] {label}: {value}")
-
-
-# --- Recall: staircase (Compute Infrastructure, Napkin Math 2.3) -------------
-payload = 10 * GB                       # 10 GB buffer
-for name, bw in (("HBM", 3350), ("NVLink", 450), ("InfiniBand", 50)):  # GB/s per direction
-    show("Recall", f"10 GB over {name}", f"{payload / (bw * GB) * 1e3:.1f} ms")
-
-# --- Node cliff (MLSysIM interconnect series; Network Fabrics Sec. 3.1) -----
-nvlink_h100_gbps = 3600                 # MLSysIM: NVLink 4 (H100), per direction, Gb/s
-ndr_gbps = 400                          # MLSysIM: NDR (4x), per direction, Gb/s
-show("Node cliff", "H100 NVLink per direction", f"{nvlink_h100_gbps / 8:.0f} GB/s")
-show("Node cliff", "NDR port per direction", f"{ndr_gbps / 8:.0f} GB/s")
-show("Node cliff", "ratio", f"{nvlink_h100_gbps / ndr_gbps:.0f}x")
-
-# --- Exposed AllReduce (figure 2, illustrative inputs) -----------------------
-step_ms = 100 + 100 + 30
-show("Timeline", "exposed share", f"30 of {step_ms} ms = {30 / step_ms:.0%}")
-show("Timeline", "compute share, inter-node", f"{200 / step_ms:.0%}")
-
-# --- ECMP (Sec. 3.6.4: 4 paths, 8 flows; hashed 4/2/2/0) ---------------------
-show("ECMP", "worst over even drain time", f"{4 / 2:.0f}x")
-
-# --- Running case: per-rank shard (Sec. 3.1) ---------------------------------
-grad_bytes = 175e9 * 2                  # 175B parameters, 2 bytes per 16-bit gradient
-show("Goals/Napkin", "gradient state", f"{grad_bytes / GB:.0f} GB")
-show("Napkin", "1/1,024 share", f"{grad_bytes / 1024 / MB:.0f} MB (chapter rounds the shard to 350 MB)")
-
-# --- Optics cost (Systems Perspective 3.2: assumptions) ----------------------
-links = 10_000 * 2                      # two spine links per GPU, assumed
-show("Optics", "spine links", f"{links:,}")
-show("Optics", "cabling", f"${links * 500 / 1e6:.0f}M")       # $500 per link, assumed
-show("Optics", "module power", f"{links * 20 / 1e3:.0f} kW")  # 20 W per module, assumed
-
-# --- Go-Back-N window (Sec. 3.4.3) -------------------------------------------
-show("IB/RoCE", "resend window", f"{50 * GB * 5e-6 / KB:.0f} KB")   # 50 GB/s x 5 us round trip
+Hardware, Systems, Infrastructure, Scenarios = (mlsysim.Hardware, mlsysim.Systems,
+                                                mlsysim.Infrastructure, mlsysim.Scenarios)
+H100 = Hardware.Cloud.H100
+NDR, HDR = Systems.Fabrics.InfiniBand_NDR, Systems.Fabrics.InfiniBand_HDR
+SWITCH = Systems.SwitchFabric
+REF = Scenarios.DenseLLMPretrainingReference          # 175B on the 1,024-GPU reference cluster
+LADDER = Scenarios.BufferTransfer10GB                 # Lecture 2's staircase
+STEP_INTRA, STEP_INTER = Scenarios.ExposedAllReduceIntraNode, Scenarios.ExposedAllReduceInterNode
+ECMP = Scenarios.EcmpHashCollision
+OPTICS = Scenarios.SpineOpticsTraining10K
+GBN = Scenarios.GoBackNResendNdr
+AB = Scenarios.AlphaBetaNdrRoce
+AB_SMALL = Scenarios.AlphaBetaHdrNdrSmallMessage
+NCCL = Scenarios.NcclAllReduceH100NodeFit
+CUT4, CUT2 = Scenarios.RingAllReduceAcross4to1Spine, Scenarios.RingAllReduceAcross2to1Spine
+K64, K256 = Scenarios.FatTreeNdrSwitch, Scenarios.FatTree102T4Switch
+TORUS = Scenarios.TorusVsFatTree4K
+RAIL = Scenarios.RailVsLeafSpineHops
+INCAST = Scenarios.IncastSuperPodUnit
+XCVR = Scenarios.TransceiverDegradationRoce4K
+LINKS = Scenarios.DegradedLinksReferenceFabric
+SILENT = Scenarios.DegradedTransceiverRun1K
+SRIOV = Scenarios.SriovNdrNic
+DIAG = Scenarios.HalfRateLinkDiagnosis
+SU, META = Systems.Clusters.DgxH100SuperPodSU, Systems.Clusters.Meta_GenAI_H100_24K_RoCE
 
 
-# --- Alpha-beta (Napkin Math 3.1) --------------------------------------------
-def t_us(alpha_us, beta_gbs, n_bytes):
-    return alpha_us + n_bytes / (beta_gbs * GB) * 1e6
+def m(q, unit):
+    """Magnitude of a Pint quantity in ``unit``."""
+    return q.to(unit).magnitude
 
 
-ndr = (1.5, 50.0)                        # alpha us, beta GB/s (modeled NDR path)
-roce100 = (5.0, 12.5)                    # modeled RoCE path, 100 Gb/s
-roce400 = (5.0, 50.0)                    # RoCE alpha at 400 Gb/s
-small, large = 4 * KB, 350 * MB
-a, b = t_us(*ndr, small), t_us(*roce100, small)
-show("Napkin", "4 KB NDR / RoCE", f"{a:.2f} us / {b:.2f} us, {b / a:.1f}x")
-show("Napkin", "4 KB bandwidth share on NDR", f"{(a - 1.5) / a:.1%}")
-a, b = t_us(*ndr, large), t_us(*roce100, large)
-show("Napkin", "350 MB NDR / RoCE", f"{a / 1e3:.1f} ms / {b / 1e3:.2f} ms, {b / a:.0f}x")
-show("Napkin", "RoCE 400G", f"{t_us(*roce400, small):.2f} us; {t_us(*roce400, large) / 1e3:.1f} ms")
-show("Napkin", "crossover NDR", f"{1.5e-6 * 50 * GB / KB:.0f} KB")
-show("Crossover", "crossover RoCE 100G", f"{5e-6 * 12.5 * GB / KB:.1f} KB")
+def ratio(a, b):
+    """Dimensionless ratio of two quantities."""
+    return (a / b).to("").magnitude
 
-# --- 10 KB estimate (Sec. 3.11) ----------------------------------------------
-hdr, ndr10 = t_us(1.5, 25.0, 10 * KB), t_us(1.5, 50.0, 10 * KB)
-show("Estimate", "10 KB HDR / NDR", f"{hdr:.2f} / {ndr10:.2f} us, {(hdr - ndr10) / hdr:.1%} faster")
 
-# --- NCCL measured (MLSysIM NCCLAllReduceH100Node) ----------------------------
-rows = Literature.Series.NCCLAllReduceH100Node.entries
-floor = statistics.median(r["oop_time_us"] for r in rows if r["size_bytes"] <= 64 * 1024)
-bw = rows[-1]["oop_algbw_GBps"]
-knee = floor * 1e-6 * bw * GB
-ratio = max(r["oop_time_us"] / (floor + r["size_bytes"] / (bw * GB) * 1e6)
-            for r in rows if 8 * 2**20 <= r["size_bytes"] <= 128 * 2**20)
-mid = [r["oop_busbw_GBps"] for r in rows if 8 * 2**20 <= r["size_bytes"] <= 128 * 2**20]
-show("NCCL", "floor", f"{floor:.0f} us")
-show("NCCL", "beta (algbw at 16 GB)", f"{bw:.0f} GB/s")
-show("NCCL", "model knee", f"{knee / MB:.1f} MB")
-show("NCCL", "worst ratio 8-128 MB", f"{ratio:.1f}x")
-show("NCCL", "busbw factor 2(N-1)/N, N=8", f"{2 * 7 / 8:.2f}")
-show("Busbw", "8-128 MB busbw", f"{min(mid):.0f} to {max(mid):.0f} GB/s")
-show("Busbw", "peak busbw", f"{max(r['oop_busbw_GBps'] for r in rows):.0f} GB/s")
+print("== Running case and link rates")
+cluster = REF.system
+v("params_b", m(REF.workload.parameters, "Gparam"), "{:.0f}", "running model, billions of parameters")
+v("grad_gb", m(REF.workload.size_in_bytes(mlsysim.BYTES_FP16), "GB"), "{:.0f}", "16-bit gradients, GB")
+v("grad_bytes", m(mlsysim.BYTES_FP16, "byte"), "{:.0f}", "bytes per 16-bit gradient")
+v("ref_gpus", cluster.total_accelerators, "{:,.0f}", "reference cluster GPUs")
+v("ref_nodes", cluster.count, "{:.0f}", "reference cluster nodes")
+v("gpus_per_node", cluster.node.accelerators_per_node, "{:.0f}", "GPUs per DGX H100 node")
+v("gpus_per_node_word", cluster.node.accelerators_per_node, "words", "the same, in prose")
+v("ndr_gbps", m(NDR.bandwidth, "Gbps"), "{:.0f}", "NDR port, Gb/s per direction")
+v("hdr_gbps", m(HDR.bandwidth, "Gbps"), "{:.0f}", "HDR port, Gb/s per direction")
+v("ib_gbs", m(NDR.bandwidth, "GB/s"), "{:.0f}", "NDR port, GB/s per direction")
+v("hdr_gbs", m(HDR.bandwidth, "GB/s"), "{:.0f}", "HDR port, GB/s per direction")
 
-# --- Bisection (Def. 3.4) ----------------------------------------------------
-cut = 512 * 50                           # 512 links x 50 GB/s
-show("Bisection", "1:1 cut", f"{cut / 1e3:.1f} TB/s")
-show("Bisection", "4:1 cut", f"{cut / 4 / 1e3:.1f} TB/s")
+print("== Recall: the staircase (Lecture 2 transfer scenario)")
+t = LADDER.result.times
+v("buffer_gb", m(LADDER.payload, "GB"), "{:.0f}", "buffer moved one hop, GB")
+v("hbm_gbs", m(LADDER.links["HBM"], "GB/s"), "{:,.0f}", "H100 HBM, GB/s")
+v("nvlink_gbs", m(LADDER.links["NVLink"], "GB/s"), "{:.0f}", "NVLink 4 per direction, GB/s")
+v("stair_hbm_ms", m(t["HBM"], "ms"), "{:.1f}", "10 GB over HBM, ms")
+v("stair_nvlink_ms", m(t["NVLink"], "ms"), "{:.1f}", "10 GB over NVLink, ms")
+v("stair_ib_ms", m(t["InfiniBand"], "ms"), "{:.0f}", "10 GB over InfiniBand, ms")
 
-# --- Fat-tree (Def. 3.6, Sec. 3.5.2, 3.10.1) ----------------------------------
-for k in (64, 256):
-    show("Fat-tree", f"k={k} two tiers / three tiers", f"{k**2 // 2:,} / {k**3 // 4:,}")
-show("Fat-tree", "k=64 three-tier switches", f"{5 * 64**2 // 4:,}")
-show("Fat-tree", "102.4 Tb/s as 400G ports", f"{102.4e3 / 400:.0f}")
+print("== Node cliff")
+v("nvlink_bidir_gbs", m(H100.nvlink.bandwidth, "GB/s"), "{:.0f}", "H100 NVLink, both directions, GB/s")
+v("nvlink_ib_ratio", ratio(LADDER.links["NVLink"], LADDER.links["InfiniBand"]), "{:.0f}", "NVLink / NDR per direction")
 
-# --- Oversubscription (Napkin Math 3.2; 30% is a scenario input) -------------
-n = 1024
-factor = 2 * (n - 1) / n
-crossing = 5 * factor * (n / 2)          # GB, 5 GB payload per GPU
-t11, t41 = crossing / 25_600, crossing / 6_400
-rel = 1 / (0.70 + 0.30 * 4)
-rel2 = 1 / (0.70 + 0.30 * 2)
-show("Oversub", "traffic factor", f"{factor:.3f}")
-show("Oversub", "crossing bytes", f"{crossing:,.0f} GB")
-show("Oversub", "1:1 / 4:1 time", f"{t11:.3f} s / {t41:.3f} s")
-show("Oversub", "relative throughput", f"{rel:.2f}; loss {1 - rel:.1%}")
-show("Oversub", "idle capacity", f"${(1 - rel) * 300:.1f}M of $300M")
-show("Read", "2:1 loss", f"{1 - rel2:.1%}")
+print("== Exposed AllReduce (illustrative step scenarios)")
+v("step_fwd_ms", m(STEP_INTER.compute_phases["forward"], "ms"), "{:.0f}", "forward, ms")
+v("step_bwd_ms", m(STEP_INTER.compute_phases["backward"], "ms"), "{:.0f}", "backward, ms")
+v("ar_intra_ms", m(STEP_INTRA.communication_time, "ms"), "{:.0f}", "AllReduce over NVLink, ms")
+v("ar_inter_ms", m(STEP_INTER.communication_time, "ms"), "{:.0f}", "AllReduce across nodes, ms")
+v("step_inter_ms", m(STEP_INTER.step_time, "ms"), "{:.0f}", "inter-node step, ms")
+v("exposed_pct", 100 * STEP_INTER.exposed_communication_fraction, "{:.0f}", "exposed share, %")
+v("step_compute_pct", 100 * STEP_INTER.compute_fraction, "{:.0f}", "compute share of the schedule, %")
 
-# --- Rails (Sec. 3.5.3, Napkin Math 3.3) --------------------------------------
-show("Rails", "GPUs per rail", f"{1024 // 8}")
-show("Rails", "3 vs 1 traversals at 0.6 us", f"{3 * 0.6:.1f} / {1 * 0.6:.1f} us")
+print("== ECMP (hash-collision scenario)")
+v("ecmp_flows", ECMP.flows, "{:.0f}", "elephant flows")
+v("ecmp_paths", ECMP.paths, "{:.0f}", "equal-cost paths")
+v("ecmp_even", ECMP.even_load, "{:.0f}", "even split, flows per path (drain units)")
+v("ecmp_worst", ECMP.worst_load, "{:.0f}", "worst path, flows (drain units)")
+for i, n in enumerate(ECMP.path_loads):
+    v(f"ecmp_load_{i}", n, "{:.0f}", f"hashed load on path {i}")
 
-# --- Torus against fat-tree at 4,096 (Sec. 3.5.4) -----------------------------
-show("Torus", "endpoints", f"{16**3:,}")
-show("Torus", "cut links / capacity", f"{2 * 16 * 16} / {2 * 16 * 16 * 50 / 1e3:.1f} TB/s")
-show("Torus", "fat-tree cut", f"{4096 // 2:,} links / {4096 // 2 * 50 / 1e3:.1f} TB/s")
-show("Torus", "worst path hops", f"{3 * (16 // 2)}")
+print("== Wire: copper and optics (buildout scenario)")
+v("dac_usd", m(Infrastructure.Pricing.Network.DacCableUsd.rate, "USD"), "{:.0f}", "copper DAC, $")
+v("aoc_usd", m(Infrastructure.Pricing.Network.AocCableUsd.rate, "USD"), "{:.0f}", "active optical cable, $")
+v("aoc_dac_word", ratio(Infrastructure.Pricing.Network.AocCableUsd.rate,
+                        Infrastructure.Pricing.Network.DacCableUsd.rate), "words", "optical / copper price, in prose")
+v("fec_ns", m(SWITCH.FecLatencyLow, "ns"), "{:.0f}", "FEC per switch, ns")
+v("rack_low_kw", Infrastructure.Racks.AI_Standard.power_kw, "{:.0f}", "dense AI rack, low, kW")
+v("rack_high_kw", Infrastructure.Racks.AI_High.power_kw, "{:.0f}", "dense AI rack, high, kW")
+v("optics_gpus", OPTICS.fleet.total_accelerators, "{:,.0f}", "cluster GPUs")
+v("optics_per_gpu", OPTICS.links_per_device, "{:.0f}", "spine links per GPU")
+v("optics_per_gpu_word", OPTICS.links_per_device, "words", "the same, in prose")
+v("optics_links", OPTICS.n_links, "{:,.0f}", "spine links")
+v("optics_link_usd", m(OPTICS.cost_per_link, "USD"), "{:.0f}", "per link, $")
+v("optics_link_w", m(OPTICS.power_per_link, "W"), "{:.0f}", "per module, W")
+v("optics_musd", m(OPTICS.total_cost, "USD") / 10 ** 6, "{:.0f}", "optics, $M")
+v("optics_kw", m(OPTICS.total_power, "kW"), "{:.0f}", "optics module power, kW")
 
-# --- Transceivers (Napkin Math 3.4; 0.001%/day assumed) -----------------------
-xcvr = 4096 * 3 * 2
-show("PFC", "transceivers", f"{xcvr:,}")
-show("PFC", "daily P(at least one)", f"{1 - (1 - 1e-5) ** xcvr:.1%}")
+print("== Go-Back-N window")
+v("gbn_rtt_us", m(GBN.delay, "microsecond"), "{:.0f}", "loss-detection round trip, us")
+v("gbn_kb", m(GBN.product, "KB"), "{:.0f}", "resent window, KB")
 
-# --- Incast (Def. 3.10, deliberate worst case) --------------------------------
-offered = 256 * 50                       # GB/s
-show("Incast", "offered load", f"{offered / 1e3:.1f} TB/s, {offered / 50:.0f}x the egress")
-show("Incast", "fill time", f"{32 * MB / ((offered - 50) * GB) * 1e6:.1f} us")
-show("Incast", "drain time", f"{32 * MB / (50 * GB) * 1e6:.0f} us")
+print("== Alpha-beta (NDR and RoCE scenario)")
+ab = AB.result
+v("ndr_alpha_us", m(AB.alphas["NDR"], "microsecond"), "{:.1f}", "NDR alpha, us")
+v("roce_alpha_us", m(AB.alphas["RoCE 100G"], "microsecond"), "{:.0f}", "RoCE alpha, us")
+v("roce_gbps", m(AB.bandwidths["RoCE 100G"], "Gbps"), "{:.0f}", "RoCE link, Gb/s")
+v("roce_beta_gbs", m(AB.bandwidths["RoCE 100G"], "GB/s"), "{:.1f}", "RoCE beta, GB/s")
+v("roce400_gbps", m(AB.bandwidths["RoCE 400G"], "Gbps"), "{:.0f}", "faster RoCE link, Gb/s")
+v("ctrl_kb", m(AB.messages["control"], "KB"), "{:.0f}", "control message, KB")
+v("ctrl_bytes", m(AB.messages["control"], "byte"), "{:,.0f}", "control message, bytes")
+v("shard_mb", m(AB.messages["shard"], "MB"), "{:.0f}", "gradient shard, MB")
+v("shard_exact_mb", m(REF.workload.size_in_bytes(mlsysim.BYTES_FP16) / cluster.total_accelerators, "MB"),
+  "{:.0f}", "one rank's 1/1,024 share, MB")
+v("ctrl_ndr_wire_us", m(ab.transmission_times["NDR"]["control"], "microsecond"), "{:.2f}", "4 KB on NDR, n/beta, us")
+v("ctrl_roce_wire_us", m(ab.transmission_times["RoCE 100G"]["control"], "microsecond"), "{:.2f}",
+  "4 KB on RoCE, n/beta, us")
+v("ctrl_ndr_us", m(ab.times["NDR"]["control"], "microsecond"), "{:.2f}", "4 KB on NDR, us")
+v("ctrl_roce_us", m(ab.times["RoCE 100G"]["control"], "microsecond"), "{:.2f}", "4 KB on RoCE, us")
+v("ctrl_ratio", ratio(ab.times["RoCE 100G"]["control"], ab.times["NDR"]["control"]), "{:.1f}", "RoCE / NDR, 4 KB")
+v("ctrl_roce400_us", m(ab.times["RoCE 400G"]["control"], "microsecond"), "{:.2f}", "4 KB on 400G RoCE, us")
+v("shard_ndr_ms", m(ab.times["NDR"]["shard"], "ms"), "{:.1f}", "350 MB on NDR, ms")
+v("shard_roce_ms", m(ab.times["RoCE 100G"]["shard"], "ms"), "{:.1f}", "350 MB on RoCE, ms")
+v("shard_ratio", ratio(ab.times["RoCE 100G"]["shard"], ab.times["NDR"]["shard"]), "{:.0f}", "RoCE / NDR, 350 MB")
+v("shard_roce400_ms", m(ab.times["RoCE 400G"]["shard"], "ms"), "{:.1f}", "350 MB on 400G RoCE, ms")
+v("cross_ndr_kb", m(ab.crossovers["NDR"], "KB"), "{:.0f}", "NDR crossover, KB")
+v("cross_roce_kb", m(ab.crossovers["RoCE 100G"], "KB"), "{:.1f}", "RoCE crossover, KB")
 
-# --- Silent waste (Sec. 3.9; scenario) ----------------------------------------
-gpu_h = 1024 * 24 * 30
-show("Silent", "GPU-hours in 30 days", f"{gpu_h:,}")
-for f in (0.02, 0.03):
-    show("Silent", f"{f:.0%} slower", f"{gpu_h * f:,.0f} GPU-h, ${gpu_h * f * 2:,.0f} at $2")
-show("Silent", "no-overlap slowdown, 10% loss, 30% comm",
-     f"{(0.70 + 0.30 / 0.9) - 1:.1%} (upper bound; chapter says 2-3% after overlap)")
-show("Silent", "expected degraded links of 3,000", f"{3000 * 0.001:.0f}")
-show("Silent", "P(at least one)", f"{1 - 0.999 ** 3000:.0%}")
+print("== Does 2x bandwidth help a 10 KB message? (HDR and NDR scenario)")
+s = AB_SMALL.result
+t_hdr, t_ndr = s.times["HDR"]["small"], s.times["NDR"]["small"]
+v("bw_doubling", ratio(AB_SMALL.bandwidths["NDR"], AB_SMALL.bandwidths["HDR"]), "{:.0f}", "NDR / HDR line rate")
+v("small_kb", m(AB_SMALL.messages["small"], "KB"), "{:.0f}", "message, KB")
+v("small_bytes", m(AB_SMALL.messages["small"], "byte"), "{:,.0f}", "message, bytes")
+v("small_hdr_wire_us", m(s.transmission_times["HDR"]["small"], "microsecond"), "{:.2f}", "HDR n/beta, us")
+v("small_ndr_wire_us", m(s.transmission_times["NDR"]["small"], "microsecond"), "{:.2f}", "NDR n/beta, us")
+v("small_hdr_us", m(t_hdr, "microsecond"), "{:.2f}", "HDR, us")
+v("small_ndr_us", m(t_ndr, "microsecond"), "{:.2f}", "NDR, us")
+v("small_gain_pct", 100 * (1 - ratio(t_ndr, t_hdr)), "{:.1f}", "NDR faster than HDR, %")
 
-# --- Sharing (Sec. 3.8) -------------------------------------------------------
-show("SR-IOV", "VFs at 50 Gb/s on 400 Gb/s", f"{400 // 50}")
-show("SR-IOV", "100 GB at 400 Gb/s", f"{100 / 50:.0f} s")
+print("== Measured NCCL AllReduce (fit scenario)")
+fit = NCCL.result
+rows = NCCL.rows
+excerpt = (rows[0], rows[13], rows[20], rows[24], rows[27], rows[31])  # 8 B, 64 KiB, 8 and 128 MiB, 1 and 16 GiB
+for i, r in enumerate(excerpt):
+    v(f"nccl_size_{i}", r["size_bytes"], "{:.0f}", f"row {i} size, B")
+    v(f"nccl_time_{i}", r["oop_time_us"], "{:.5g}", f"row {i} time, us")
+    v(f"nccl_algbw_{i}", r["oop_algbw_GBps"], "{:.2f}", f"row {i} algbw, GB/s")
+    v(f"nccl_busbw_{i}", r["oop_busbw_GBps"], "{:.2f}", f"row {i} busbw, GB/s")
+v("nccl_rows", fit.row_count, "{:.0f}", "rows in the sweep")
+v("nccl_floor_us", m(fit.floor_time, "microsecond"), "{:.0f}", "floor, us")
+v("nccl_floor_cut_kb", m(NCCL.floor_cutoff, "KiB"), "{:.0f}", "floor taken up to, KiB")
+v("nccl_top_gb", m(rows[-1]["size_bytes"] * mlsysim.core.units.byte, "GiB"), "{:.0f}", "largest message, GiB")
+v("nccl_bw_gbs", m(fit.bandwidth, "GB/s"), "{:.0f}", "algbw at the largest message, GB/s")
+v("nccl_knee_mb", m(fit.knee, "MB"), "{:.1f}", "model knee, MB")
+v("nccl_knee_round_mb", m(fit.knee, "MB"), "{:.0f}", "the chapter's rounding, MB")
+v("nccl_mid_lo_mb", m(NCCL.mid_low, "MiB"), "{:.0f}", "middle range from, MiB")
+v("nccl_mid_hi_mb", m(NCCL.mid_high, "MiB"), "{:.0f}", "middle range to, MiB")
+v("nccl_mid_ratio", fit.worst_mid_ratio, "{:.1f}", "worst measured / model in the middle")
+v("nccl_peak_busbw", m(fit.peak_bus_bandwidth, "GB/s"), "{:.0f}", "peak bus bandwidth, GB/s")
+v("nccl_mid_busbw_lo", m(fit.mid_bus_bandwidth_low, "GB/s"), "{:.0f}", "middle-range busbw, low, GB/s")
+v("nccl_mid_busbw_hi", m(fit.mid_bus_bandwidth_high, "GB/s"), "{:.0f}", "middle-range busbw, high, GB/s")
+v("nccl_top_busbw", rows[-1]["oop_busbw_GBps"], "{:.0f}", "busbw at the largest message, GB/s")
 
-# --- SuperPOD (Sec. 3.7.2) ----------------------------------------------------
-show("SuperPOD", "GPUs per unit", f"{32 * 8}")
-show("SuperPOD", "injection per unit", f"{256 * 50 / 1e3:.1f} TB/s")
-show("SuperPOD", "four units", f"{4 * 256:,} GPUs")
+print("== Bisection and the 4:1 spine (ring AllReduce scenario)")
+b = CUT4.result
+f = CUT4.communication_fraction
+v("cut_half", b.devices_per_side, "{:.0f}", "GPUs (links) per side")
+v("cut_full_tbs", m(b.bisection_full, "TB/s"), "{:.1f}", "1:1 cut, TB/s")
+v("cut_over_tbs", m(b.bisection_oversubscribed, "TB/s"), "{:.1f}", "4:1 cut, TB/s")
+v("cut_full_gbs", m(b.bisection_full, "GB/s"), "{:,.0f}", "1:1 cut, GB/s")
+v("cut_over_gbs", m(b.bisection_oversubscribed, "GB/s"), "{:,.0f}", "4:1 cut, GB/s")
+v("oversub", CUT4.oversubscription_ratio, "{:.0f}", "spine oversubscription")
+v("cut_slowdown", b.slowdown, "{:.0f}", "crossing-time ratio")
+v("os_cost_musd", m(CUT4.cluster_cost, "USD") / 10 ** 6, "{:.0f}", "cluster cost, $M")
+v("os_payload_gb", m(CUT4.payload_per_device, "GB"), "{:.0f}", "gradient payload per GPU, GB")
+v("os_comm_pct", 100 * f, "{:.0f}", "communicating share of the step, %")
+v("os_ring_factor", b.ring_factor, "{:.3f}", "ring factor 2(N-1)/N")
+v("os_crossing_gb", m(b.crossing_bytes, "GB"), "{:,.0f}", "bytes crossing the cut, GB")
+v("os_t_full_s", m(b.time_full, "second"), "{:.3f}", "crossing time at 1:1, s")
+v("os_t_over_s", m(b.time_oversubscribed, "second"), "{:.3f}", "crossing time at 4:1, s")
+v("os_noncomm", 1 - f, "{:.2f}", "non-communicating share")
+v("os_comm", f, "{:.2f}", "communicating share")
+v("os_stretched", f * CUT4.oversubscription_ratio, "{:.2f}", "communicating share x ratio")
+v("os_rel", b.relative_throughput, "{:.2f}", "relative throughput")
+v("os_loss_pct", 100 * b.throughput_loss, "{:.1f}", "throughput lost, %")
+v("os_idle_musd", m(b.idle_cost, "USD") / 10 ** 6, "{:.1f}", "equivalent idle capacity, $M")
+v("os2_ratio", CUT2.oversubscription_ratio, "{:.0f}", "milder spine")
+v("os2_loss_pct", 100 * CUT2.result.throughput_loss, "{:.1f}", "throughput lost at 2:1, %")
 
-# --- Diagnose (Checkpoint 3.5) -------------------------------------------------
-show("Diagnose", "step slowdown", f"{4.8 / 4.2 - 1:.0%}")
-show("Diagnose", "pair bandwidth", f"{24 / 48:.0%} of expected")
+print("== Fat-tree reach")
+v("k64", K64.radix, "{:.0f}", "Quantum-2 class radix")
+v("k64_two", K64.two_tier_hosts, "{:,.0f}", "two tiers, hosts")
+v("k64_three", K64.three_tier_hosts, "{:,.0f}", "three tiers, hosts")
+v("k64_switches", K64.three_tier_switches, "{:,.0f}", "three tiers, switches")
+v("k256", K256.radix, "{:.0f}", "102.4 Tb/s switch as 400G ports")
+v("k256_two", K256.two_tier_hosts, "{:,.0f}", "two tiers, hosts")
+v("k256_three", K256.three_tier_hosts, "{:,.0f}", "three tiers, hosts")
+v("asic_tbps", m(SWITCH.SwitchAsic102T4, "Tbps"), "{:.1f}", "switch ASIC, Tb/s")
+v("hops_pod", RAIL.hops["leaf-spine-leaf"], "{:.0f}", "switch traversals inside a pod")
+v("hops_core", TORUS.fat_tree_path_switches, "{:.0f}", "switch traversals between pods")
+
+print("== Rails")
+v("rail_gpus", cluster.total_accelerators / cluster.node.accelerators_per_node, "{:.0f}", "GPUs per rail")
+v("rail_hops", RAIL.hops["rail"], "{:.0f}", "switch traversals on a rail")
+v("hop_us", m(RAIL.hop_latency, "microsecond"), "{:.1f}", "per traversal, us")
+v("hops_pod_us", m(RAIL.latencies["leaf-spine-leaf"], "microsecond"), "{:.1f}", "leaf-spine-leaf, us")
+v("hops_rail_us", m(RAIL.latencies["rail"], "microsecond"), "{:.1f}", "one rail switch, us")
+
+print("== Torus against fat-tree")
+v("torus_n", TORUS.n_endpoints, "{:,.0f}", "endpoints")
+v("torus_side", TORUS.side, "{:.0f}", "torus side")
+v("torus_cut", TORUS.torus_cut_links, "{:.0f}", "torus cut links")
+v("torus_cut_tbs", m(TORUS.torus_bisection, "TB/s"), "{:.1f}", "torus cut, TB/s")
+v("ft_cut", TORUS.fat_tree_cut_links, "{:,.0f}", "fat-tree cut links")
+v("ft_cut_tbs", m(TORUS.fat_tree_bisection, "TB/s"), "{:.1f}", "fat-tree cut, TB/s")
+v("torus_hops", TORUS.torus_diameter, "{:.0f}", "torus worst path, hops")
+
+print("== Incast (SuperPOD scalable-unit scenario)")
+inc = INCAST.result
+v("incast_senders", INCAST.n_senders, "{:.0f}", "senders")
+v("incast_egress_gbs", m(INCAST.egress_bandwidth, "GB/s"), "{:.0f}", "egress, GB/s")
+v("incast_offered_tbs", m(inc.offered_load, "TB/s"), "{:.1f}", "offered load, TB/s")
+v("incast_offered_gbs", m(inc.offered_load, "GB/s"), "{:.0f}", "offered load, GB/s")
+v("incast_ratio", inc.oversubscription, "{:.0f}", "offered / egress")
+v("incast_net_tbs", m(inc.net_fill_rate, "TB/s"), "{:.2f}", "net fill rate, TB/s")
+v("incast_buffer_mb", m(INCAST.buffer, "MB"), "{:.0f}", "egress buffer, MB")
+v("incast_fill_us", m(inc.overflow_time, "microsecond"), "{:.1f}", "buffer fills in, us")
+v("incast_drain_us", m(inc.drain_time, "microsecond"), "{:.0f}", "full buffer drains in, us")
+
+print("== Transceivers (exposure scenario)")
+v("xcvr_gpus", XCVR.counts["devices"], "{:,.0f}", "RoCE cluster GPUs")
+v("xcvr_count", XCVR.n_components, "{:,.0f}", "transceivers")
+v("xcvr_p_pct", 100 * XCVR.probability, "{:.3f}", "daily degradation rate per module, %")
+v("xcvr_any_pct", 100 * XCVR.p_any, "{:.1f}", "daily chance of at least one, %")
+
+print("== SuperPOD and Grand Teton")
+v("su_nodes", SU.count, "{:.0f}", "nodes per scalable unit")
+v("su_gpus", SU.total_accelerators, "{:.0f}", "GPUs per scalable unit")
+v("su_count", cluster.total_accelerators / SU.total_accelerators, "{:.0f}", "units in the reference cluster")
+v("su_count_word", cluster.total_accelerators / SU.total_accelerators, "words", "the same, in prose")
+v("meta_gpus", META.total_accelerators, "{:,.0f}", "GPUs per Grand Teton cluster")
+v("meta_gbps", m(META.fabric.bandwidth, "Gbps"), "{:.0f}", "endpoint rate, Gb/s")
+
+print("== Silent waste (degraded-transceiver run scenario)")
+lost = SILENT.lost_device_hours
+cost = {k: m(q, "USD") for k, q in SILENT.lost_cost.items()}
+rate = m(SILENT.device_hour_rate, "USD/hour")
+v("sw_bw_loss_pct", 100 * SILENT.bandwidth_loss, "{:.0f}", "bandwidth lost, %")
+v("sw_low_pct", 100 * SILENT.slowdowns["low"], "{:.0f}", "step slowdown, low, %")
+v("sw_high_pct", 100 * SILENT.slowdowns["high"], "{:.0f}", "step slowdown, high, %")
+v("sw_days", m(SILENT.run_duration, "day"), "{:.0f}", "run, days")
+v("sw_gpuh", SILENT.device_hours, "{:,.0f}", "GPU-hours in the run")
+v("sw_lost_low", lost["low"], "{:,.0f}", "GPU-hours lost, low")
+v("sw_lost_high", lost["high"], "{:,.0f}", "GPU-hours lost, high")
+v("sw_lost_high_round", round(lost["high"], -3), "{:,.0f}", "the same, to the thousand")
+v("sw_rate_usd", rate, "{:.0f}", "fleet GPU-hour, $")
+v("sw_cost_low", cost["low"], "{:,.0f}", "lost, low, $")
+v("sw_cost_high", cost["high"], "{:,.0f}", "lost, high, $")
+v("sw_cost_low_book", round(round(lost["low"], -3) * rate, -3), "{:,.0f}", "chapter's rounding, low, $")
+v("sw_cost_high_book", round(round(lost["high"], -3) * rate, -3), "{:,.0f}", "chapter's rounding, high, $")
+v("sw_no_overlap_pct", 100 * SILENT.no_overlap_slowdown, "{:.1f}", "no-overlap slowdown, %")
+v("links_n", LINKS.n_components, "{:,.0f}", "fabric links")
+v("links_p_pct", 100 * LINKS.probability, "{:.1f}", "chance one link is degraded, %")
+v("links_expected", LINKS.expected_events, "{:.0f}", "degraded links expected")
+v("links_any_pct", 100 * LINKS.p_any, "{:.0f}", "chance of at least one, %")
+
+print("== Diagnosis (half-rate link scenario)")
+v("diag_slow_pct", 100 * DIAG.slowdown, "{:.0f}", "step slowdown, %")
+v("diag_day", DIAG.days_since_launch, "{:.0f}", "day of the run")
+v("diag_before_s", m(DIAG.step_before, "second"), "{:.1f}", "step before, s")
+v("diag_after_s", m(DIAG.step_after, "second"), "{:.1f}", "step after, s")
+v("diag_util_before", 100 * DIAG.utilization_before, "{:.0f}", "utilization before, %")
+v("diag_util_after", 100 * DIAG.utilization_after, "{:.0f}", "utilization after, %")
+v("diag_expected_gbs", m(DIAG.expected_bandwidth, "GB/s"), "{:.0f}", "healthy pair, GB/s")
+v("diag_measured_gbs", m(DIAG.measured_bandwidth, "GB/s"), "{:.0f}", "degraded pair, GB/s")
+
+print("== Sharing a NIC (SR-IOV scenario)")
+v("vf_count", SRIOV.n_virtual_functions, "{:.0f}", "virtual functions")
+v("vf_gbps", m(SRIOV.slice_rate, "Gbps"), "{:.0f}", "rate cap per function, Gb/s")
+v("nic_gbps", m(SRIOV.nic_bandwidth, "Gbps"), "{:.0f}", "NIC line rate, Gb/s")
+v("burst_gb", m(SRIOV.burst_size, "GB"), "{:.0f}", "neighbor's checkpoint, GB")
+v("burst_s", m(SRIOV.burst_time, "second"), "{:.0f}", "port full for, s")
+
+if __name__ == "__main__":
+    write(__file__)

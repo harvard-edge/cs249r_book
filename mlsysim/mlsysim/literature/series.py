@@ -194,6 +194,51 @@ SweBenchTrajectories = _Series(
     "Per-trajectory model calls, role-split characters, tokens, and cost for public repair-agent runs.",
 )
 
+# --- One mini-SWE-agent run, per task (added 2026-10-20) ---------------------
+SweBenchMiniSonnet4Run = _Series(
+    "swe_bench_verified_mini_v1_sonnet4_run",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=(
+            "SWE-bench Verified submission 20250726_mini-v1.0.0_claude-sonnet-4-20250514 "
+            "(mini-swe-agent 1.0.0 with Claude 4 Sonnet, bash only, one attempt per task), per task"
+        ),
+        url=(
+            "https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/"
+            "20250726_mini-v1.0.0_claude-sonnet-4-20250514"
+        ),
+        verified="2026-10-17",
+        notes=(
+            "500 tasks. Cost, model calls, and resolved flag from the submission's "
+            "per_instance_details.json; exit status, observations, nonzero exit codes, "
+            "truncation warnings, syntax errors seen, command classes (read, write, run, "
+            "net, by command pattern), and files in the submitted diff from the public "
+            "trajectories (swe-bench-submissions S3 bucket, bash-only/<submission>/trajs). "
+            "Reduced by extract_run.py (slides tree, images/ of the deck that plots it); command "
+            "classes are pattern matches and so approximate."
+        ),
+    ),
+    "Per-task cost, model calls, acceptance, and command classes of one public repair-agent run.",
+)
+
+# Model calls and agent trajectories (added 2026-10-20)
+LlmInferenceTraceCode2023 = _Series(
+    "azure_llm_inference_code_2023",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Azure LLM inference trace 2023, code (Patel et al., Splitwise, ISCA 2024)",
+        url="https://github.com/Azure/AzurePublicDataset/blob/master/AzureLLMInferenceDataset2023.md",
+        verified="2026-10-18",
+        notes=(
+            "The released file AzureLLMInferenceTrace_code.csv, unmodified: one row per request "
+            "(timestamp, context tokens, generated tokens), 8,819 requests on 2023-11-16 to a "
+            "production code-completion service. Raw: raw.githubusercontent.com/Azure/"
+            "AzurePublicDataset/master/data/AzureLLMInferenceTrace_code.csv. License CC BY 4.0."
+        ),
+    ),
+    "Prompt (context) and output (generated) tokens of production code-completion requests.",
+)
+
 _MONKEYS_NOTES = (
     "Brown et al. (2024), Large Language Monkeys. Recomputed from the released "
     "per-sample correctness labels: Hugging Face ScalingIntelligence/monkey_business "
@@ -676,6 +721,32 @@ class Series:
         "Time-to-train of MLPerf Training LLM benchmarks by accelerator count and system.",
         numeric=("accelerators", "runs", "min_minutes", "mean_minutes", "score_minutes", "global_batch_size", "trained_samples_median"),
     )
+    # Added 2026-10-20 (verified against the arXiv HTML on 2026-10-20).
+    GoyalLargeMinibatchResNet50 = TrendSeries(
+        "goyal_resnet50_large_minibatch",
+        _lit("Goyal et al. (2017), Accurate, Large Minibatch SGD: Training ImageNet in 1 Hour, "
+             "arXiv:1706.02677, Table 1 and Figure 3",
+             "https://arxiv.org/abs/1706.02677",
+             "ResNet-50 ImageNet top-1 validation error, mean of 5 runs. source=table1: the 256 baseline "
+             "and the three 8k warmup variants of Table 1 (text). source=figure3: the validation errors in "
+             "the legends of Figure 3 (linear scaling rule with gradual warmup), read from the figure; "
+             "256 to 16k match Table 3(a) in the text, while 128, 32k and 64k appear only in the figure"),
+        "ResNet-50 ImageNet validation error by global minibatch and warmup schedule.",
+        numeric=("global_batch", "top1_error_pct"),
+    )
+    MegatronLmWeakScaling = TrendSeries(
+        "megatron_lm_weak_scaling",
+        _lit("Shoeybi et al. (2019), Megatron-LM, arXiv:1909.08053, Figure 5 and Section 5.1.1",
+             "https://arxiv.org/abs/1909.08053",
+             "weak-scaling efficiency against the 1.2B-parameter one-GPU baseline on DGX-2H V100 servers "
+             "(NVSwitch, 300 GB/s inside a server); mode=model is tensor parallelism inside one server, "
+             "model+data adds data parallelism across servers. Bar values read from Figure 5; the 8-GPU "
+             "77 percent and 512-GPU 74 percent are also stated in Section 5.1.1. The abstract's 76 percent "
+             "(Literature.TrainingRuns.MegatronLm2019ScalingEfficiency) is sustained FLOP/s against the "
+             "39 TFLOP/s single-GPU baseline, a different measure"),
+        "Megatron-LM weak-scaling efficiency by GPU count, model and model-plus-data parallel.",
+        numeric=("gpus", "efficiency_pct"),
+    )
     Llama3Interruptions = TrendSeries(
         "llama3_interruptions",
         _lit("Llama Team, AI @ Meta (2024), The Llama 3 Herd of Models, arXiv:2407.21783 v3, Table 5 "
@@ -794,6 +865,26 @@ class Series:
         "Measured NCCL all-reduce time and bandwidth by message size on one eight-H100 node.",
         numeric=("size_bytes", "count", "oop_time_us", "oop_algbw_GBps", "oop_busbw_GBps", "ip_time_us", "ip_algbw_GBps", "ip_busbw_GBps"),
     )
+    HorovodScaling128Gpu = TrendSeries(
+        "horovod_scaling_128gpu",
+        _lit("Sergeev and Del Balso (2018), Horovod, arXiv:1802.05799, scaling bar chart (Figure 7 in v3)",
+             "https://arxiv.org/abs/1802.05799",
+             "images per second at 128 NVIDIA Pascal GPUs over 25GbE TCP: ideal (one-GPU rate times 128), "
+             "standard distributed TensorFlow, and Horovod; bar heights read from the figure to about "
+             "+/-250 images/s, added 2026-10-20"),
+        "Training throughput of two image models at 128 GPUs: ideal, distributed TensorFlow, and Horovod.",
+        numeric=("ideal_images_per_s", "tensorflow_images_per_s", "horovod_images_per_s"),
+    )
+    HorovodTimelineTrace = TrendSeries(
+        "horovod_timeline_trace",
+        _lit("Sergeev and Del Balso (2018), Horovod, arXiv:1802.05799, Horovod Timeline screenshot (Figure 6 in v3)",
+             "https://arxiv.org/abs/1802.05799",
+             "phase edges of five gradient tensors' AllReduces, read against the screenshot's 100 ms ticks to "
+             "about +/-2 ms, in ms after its first tick (Literature.Communication.HorovodTimelineOriginMs); "
+             "tensors 0-1 and 2-4 share their rows' phases; added 2026-10-20"),
+        "Phase edges (negotiate, wait, schedule, NCCL, copy) of AllReduces in a Horovod Timeline trace.",
+        numeric=("start_ms", "end_ms"),
+    )
     InterconnectGenerations = TrendSeries(
         "interconnect_generations",
         _lit("Interconnect generation rates and dates from IEEE 802.3, IBTA, PCI-SIG, and NVIDIA primary "
@@ -839,4 +930,105 @@ class Series:
              "text prompt under the Comprehensive Approach; transcribed exactly"),
         "Emission factors, WUE, PUE, and per-prompt water and emissions reported for Gemini serving.",
         numeric=("value",),
+    )
+
+    # --- Silent degradation and memory-bound decode evidence (added 2026-10-20) ---
+    GoogleFluTrendsVsCdc = TrendSeries(
+        "google_flu_trends_cdc_ilinet",
+        Provenance(
+            kind=ProvenanceKind.LITERATURE,
+            ref="Google Flu Trends US national estimate and CDC ILINet weighted ILI (US national), as archived "
+                "by the Delphi Epidata API (Carnegie Mellon); failure analysis in Lazer et al. (2014), "
+                "The Parable of Google Flu, Science 343:1203",
+            url="https://api.delphi.cmu.edu/epidata/gft/?locations=nat",
+            verified="2026-10-20",
+            notes=("weekly rows (epiweek = year*100 + MMWR week) where both series report, 2003-40 to 2015-32; "
+                   "gft_ili_pct is Google's estimate of influenza-like illness per 100,000 doctor visits "
+                   "divided by 1,000 (percent of visits); cdc_wili_pct is ILINet weighted percent of visits "
+                   "(https://api.delphi.cmu.edu/epidata/fluview/?regions=nat), retrieved 2026-10-16; the CDC "
+                   "series is the current revised one, not the 2013 real-time release"),
+        ),
+        "Weekly Google Flu Trends estimate against the CDC count of doctor visits for flu-like illness.",
+        numeric=("epiweek", "gft_ili_pct", "cdc_wili_pct"),
+    )
+    ImageNetV2MatchedFrequency = TrendSeries(
+        "imagenetv2_matched_frequency_top1",
+        _lit("Recht, Roelofs, Schmidt, and Shankar (2019), Do ImageNet Classifiers Generalize to ImageNet?, "
+             "ICML, appendix tables imagenetv2-b-33_top1_model_results_table.{1,2}.tex (arXiv 1902.10811 source)",
+             "https://arxiv.org/abs/1902.10811",
+             "top-1 accuracy (%) of 67 models on the original ImageNet validation set and on ImageNetV2 "
+             "MatchedFrequency, with the paper's rounded gap in points; models named fv_* are the Fisher-vector "
+             "baselines, the rest neural networks; extracted by pattern from the LaTeX rows, not typed"),
+        "Top-1 accuracy of 67 ImageNet models on the original test set and on a re-collected one.",
+        numeric=("original_rank", "original_top1", "imagenet_v2_top1", "gap"),
+    )
+    MLPerfInferenceV4Llama2Offline = TrendSeries(
+        "mlperf_inference_v4_llama2_70b_offline",
+        _lit("MLCommons, MLPerf Inference datacenter v4.0 (Apache-2.0), closed division, NVIDIA, "
+             "llama2-70b-99.9 Offline, closed/NVIDIA/results/<system>/llama2-70b-99.9/Offline/performance/"
+             "run_1/mlperf_log_summary.txt", "https://github.com/mlcommons/inference_results_v4.0",
+             "tokens per second for eight-GPU H100-SXM-80GB and H200-SXM-141GB systems; the CTS system is "
+             "NVIDIA's H200 with a custom thermal solution and a higher power limit; accelerator count from "
+             "each system name; all results VALID"),
+        "Llama 2 70B offline throughput on eight H100 and eight H200 GPUs (MLPerf Inference v4.0).",
+        numeric=("accelerators", "tokens_per_s"),
+    )
+
+    # --- Deployment-tier measurements (added 2026-10-20) --------------------
+    # Measured field data behind the light-barrier, memory-wall, TPU roofline,
+    # and TinyML energy comparisons; each row transcribed from the cited source.
+    AwsInterRegionRtt = TrendSeries(
+        "aws_interregion_rtt_p50",
+        Provenance(
+            kind=ProvenanceKind.INDUSTRY_REPORT,
+            ref="cloudping.co AWS inter-region latency, /api/latencies?percentile=p_50&timeframe=1W, "
+                "retrieved 2026-10-18",
+            url="https://www.cloudping.co/",
+            verified="2026-10-18",
+            notes=("p50_rtt_ms is the one-week median round trip measured from us-east-1 (N. Virginia) "
+                   "to each region, as the API returned it. Coordinates are those of the metro area AWS "
+                   "names for each region (Wikipedia city coordinates); AWS does not publish building "
+                   "locations, so great-circle distances from them are approximate."),
+        ),
+        "Measured median round trips from AWS us-east-1 to four regions, with metro coordinates.",
+        numeric=("source_lat", "source_lon", "dest_lat", "dest_lon", "p50_rtt_ms"),
+    )
+    TpuV1ProductionApps = TrendSeries(
+        "tpu_v1_production_apps",
+        _lit("Jouppi et al. (2017), In-Datacenter Performance Analysis of a Tensor Processing Unit, "
+             "ISCA 2017 (arXiv:1704.04760), Table 1 and Table 3",
+             "https://arxiv.org/abs/1704.04760",
+             "ops_per_weight_byte: Table 1, TPU Ops / Weight Byte; measured_tops: Table 3, row 9, "
+             "TeraOps/sec measured with hardware counters (92 peak); six applications that were 95% "
+             "of the TPU datacenter workload in July 2016"),
+        "Arithmetic intensity and measured throughput of the six production applications on TPU v1.",
+        numeric=("ops_per_weight_byte", "measured_tops"),
+    )
+    TpuV1DeploymentMix = TrendSeries(
+        "tpu_v1_deployment_mix",
+        _lit("Jouppi et al. (2017), In-Datacenter Performance Analysis of a Tensor Processing Unit, "
+             "ISCA 2017 (arXiv:1704.04760), Table 1, percent of deployed TPUs in July 2016",
+             "https://arxiv.org/abs/1704.04760"),
+        "Share of deployed TPU v1s by application family, July 2016.",
+        numeric=("deployed_share_pct",),
+    )
+    MLPerfTinyV12KwsEnergy = TrendSeries(
+        "mlperf_tiny_v1_2_kws_energy",
+        _lit("MLCommons, MLPerf Tiny v1.2 results (Apache-2.0), summary.csv, retrieved 2026-10-18",
+             "https://github.com/mlcommons/tiny_results_v1.2",
+             "keyword spotting (kws), closed division, rows with an energy measurement (HasPower); "
+             "energy_uj is the reported Power column, microjoules per inference"),
+        "Measured energy per keyword-spotting inference in MLPerf Tiny v1.2, closed division.",
+        numeric=("energy_uj",),
+    )
+    MemoryWallHardwareScaling = TrendSeries(
+        "memory_wall_hardware_scaling",
+        _lit("Gholami et al. (2024), AI and Memory Wall, IEEE Micro 44(3) (arXiv:2403.14123), Fig. 1",
+             "https://arxiv.org/abs/2403.14123",
+             "markers digitized from the vector figure in the arXiv source (figs/hw_scaling.pdf): each "
+             "filled marker's center read back to (year, value) through the figure's own axis ticks; "
+             "series: flops (server chips' peak FLOP/s), dram (DRAM bandwidth), interconnect "
+             "(interconnect bandwidth), each normalized to its first point"),
+        "Peak compute, DRAM bandwidth, and interconnect bandwidth of server hardware, normalized, by year.",
+        numeric=("year", "normalized"),
     )

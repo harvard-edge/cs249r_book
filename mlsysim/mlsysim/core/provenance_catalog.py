@@ -2476,3 +2476,175 @@ FLEET_UTILIZATION_SNAPSHOT_SCENARIO = _est(
     ),
     verified="2026-10-15",
 )
+DEEPSEEK_3FS_README = _lit(
+    "prov:deepseek-3fs-readme",
+    "DeepSeek, Fire-Flyer File System (3FS), README, peak read throughput stress test",
+    url="https://github.com/deepseek-ai/3FS",
+    verified="2026-10-20",
+    notes=(
+        "Read stress test: 180 storage nodes, each with 2x200 Gb/s InfiniBand NICs and sixteen "
+        "14 TiB NVMe SSDs; about 500+ client nodes with one 200 Gb/s NIC each; aggregate read "
+        "throughput about 6.6 TiB/s with background traffic from training jobs."
+    ),
+)
+
+# --- Incident investigation reports (added 2026-10-20) ----------------------
+NTSB_HAR_19_03 = _lit(
+    "prov:ntsb-har-19-03",
+    "NTSB, Collision Between Vehicle Controlled by Developmental Automated Driving System and "
+    "Pedestrian, Tempe, Arizona, March 18, 2018, Highway Accident Report NTSB/HAR-19/03 (2019)",
+    url="https://www.ntsb.gov/investigations/AccidentReports/Reports/HAR1903.pdf",
+    verified="2026-10-20",
+    notes=(
+        "Read from the report PDF: emergency threshold and braking cap 7 m/s2 (0.71 g) and the "
+        "1-second action suppression (p. 13); TPD average deceleration capability 0.92 g "
+        "(footnote 33, p. 13; footnote 91, p. 43); table of selected ADS parameters "
+        "(pp. 15-16): first radar detection at -5.6 s, emergency and suppression at -1.2 s and "
+        "43.2 mph, suppression end at -0.2 s and 40.5 mph, operator takes the wheel at -0.02 s; "
+        "impact at 39 mph (p. v and p. 2); about 350 ft from the pedestrian at first detection (2.1.2); "
+        "footnote 91 states 2.1 s to stop from an initial 44 mph at 0.92 g."
+    ),
+)
+QUINN_EMANUEL_CRUISE_2024 = _lit(
+    "prov:quinn-emanuel-cruise-2024",
+    "Quinn Emanuel Urquhart & Sullivan, Report to the Boards of Directors of Cruise LLC, GM "
+    "Cruise Holdings LLC, and General Motors Holdings LLC regarding the October 2, 2023 "
+    "accident in San Francisco (2024)",
+    url="https://assets.ctfassets.net/95kuvdv8zn1v/1mb55pLYkkXVn0nXxEXz7w/9fb0e4938a89dc5cc09bf39e86ce5b9c/2024.01.24_Quinn_Emanuel_Report_re_Cruise.pdf",
+    verified="2026-10-20",
+    notes=(
+        "Pullover after the collision: the vehicle moved about 20 ft at up to 7.7 mph with the "
+        "pedestrian beneath it (p. 10). Transcribed from the Volume IV chapter's citation; "
+        "not re-read against the report in this pass."
+    ),
+)
+
+# --- Agent task horizon (added 2026-10-20) -----------------------------------
+METR_TIME_HORIZON_V1_1 = _lit(
+    "prov:metr-time-horizon-v1-1",
+    "METR, Time Horizon v1.1 benchmark results; Kwa et al. (2025), Measuring AI Ability to "
+    "Complete Long Software Tasks, arXiv:2503.14499",
+    url="https://metr.org/assets/benchmark_results_1_1.yaml",
+    verified="2026-10-12",
+    notes=(
+        "Stated 2023-on doubling time of the 50% time horizon: 128.744 days (CI 104.4-158.0), "
+        "fit on frontier models with p50 at or below 16 h."
+    ),
+)
+
+# --- Model calls and agent trajectories (added 2026-10-20) -------------------
+ANTHROPIC_2025_SERVING_POSTMORTEM = _report(
+    "prov:anthropic-2025-serving-postmortem",
+    "Anthropic, A postmortem of three recent issues, September 2025",
+    "https://www.anthropic.com/engineering/a-postmortem-of-three-recent-issues",
+    notes=(
+        "Routing bug: 0.8 percent of one model's requests misrouted at first, 16 percent at the worst "
+        "hour (August 31); approximately 30 percent of the coding tool's active users had at "
+        "least one message misrouted. Approximate top-k reproduction: an array of 12,000 zeros "
+        "with a single one; the approximate result missed the maximum for every index from 10,240 on."
+    ),
+)
+HUANG_2024_SELF_CORRECTION = _lit(
+    "prov:huang-2024-self-correction",
+    "Huang et al. (2024), Large Language Models Cannot Self-Correct Reasoning Yet, ICLR 2024, "
+    "Table 2 (oracle labels) and Table 3 (intrinsic self-correction), GPT-4 rows",
+    url="https://arxiv.org/abs/2310.01798",
+    verified="2026-10-18",
+    notes="Accuracy in percent; read from the paper's HTML (arxiv.org/html/2310.01798v2).",
+)
+
+# --- Collective communication (added 2026-10-20) ------------------------------
+SERGEEV_HOROVOD_2018 = _lit(
+    "prov:sergeev-2018-horovod",
+    "Sergeev and Del Balso (2018), Horovod: fast and easy distributed deep learning in TensorFlow, arXiv:1802.05799",
+    url="https://arxiv.org/abs/1802.05799",
+    verified="2026-10-20",
+    notes=(
+        "Checked against arXiv v3 (HTML). Section 2: 128 NVIDIA Pascal GPUs, about half the resources lost to "
+        "communication. Section 7: Tensor Fusion up to 65 percent on many-layer models over TCP; default fusion "
+        "buffer 64 MB. Section 8: 88 percent efficiency; RDMA three to four percent (Inception V3, ResNet-101) "
+        "and 30 percent (VGG-16). In v3 the scaling bars are Figure 7 and the Timeline is Figure 6. Bar heights "
+        "and Timeline phase edges are readings of those figures (about +/-250 images/s and +/-2 ms); the "
+        "ALLREDUCE start and span are printed in the Timeline's detail pane."
+    ),
+)
+TANG_ONEBIT_ADAM_2021 = _lit(
+    "prov:tang-2021-onebit-adam",
+    "Tang et al. (2021), 1-bit Adam: communication efficient large-scale training with Adam's convergence speed, ICML",
+    url="https://arxiv.org/abs/2102.02888",
+    verified="2026-10-20",
+    notes="Abstract: communication volume reduced by up to 5x; up to 3.3x throughput for BERT-Large pretraining "
+          "and 2.9x for SQuAD fine-tuning, in experiments on up to 256 GPUs.",
+)
+
+# --- Silent degradation evidence (added 2026-10-20) --------------------------
+LAZER_GOOGLE_FLU_2014 = _lit(
+    "prov:lazer-google-flu-2014",
+    "Lazer, Kennedy, King & Vespignani (2014), The Parable of Google Flu: Traps in Big Data Analysis, "
+    "Science 343(6176):1203-1205",
+    url="https://doi.org/10.1126/science.1248506",
+    verified="2026-10-20",
+    notes="GFT missed high for 100 out of 108 weeks starting with August 2011.",
+)
+CAMPBELL_DEEP_BLUE_2002 = _lit(
+    "prov:campbell-deep-blue-2002",
+    "Campbell, Hoane & Hsu (2002), Deep Blue, Artificial Intelligence 134(1-2):57-83",
+    url="https://doi.org/10.1016/S0004-3702(01)00129-1",
+    verified="2026-10-20",
+    notes="30 nodes with 16 chess chips each (480 chips); search speed 100 million positions per second "
+          "in tactical positions to about 200 million in quieter ones.",
+)
+SILVER_ALPHAGO_ZERO_2017 = _lit(
+    "prov:silver-alphago-zero-2017",
+    "Silver et al. (2017), Mastering the game of Go without human knowledge, Nature 550:354-359",
+    url="https://doi.org/10.1038/nature24270",
+    verified="2026-10-20",
+    notes="After 3 days of self-play training AlphaGo Zero defeated AlphaGo Lee by 100 games to 0.",
+)
+
+# --- Deployment-tier field figures (added 2026-10-20) ------------------------
+JOUPPI_TPU_V1_ISCA_2017 = _lit(
+    "prov:jouppi-tpu-v1-isca-2017",
+    "Jouppi et al. (2017), In-Datacenter Performance Analysis of a Tensor Processing Unit, ISCA 2017",
+    url="https://arxiv.org/abs/1704.04760",
+    verified="2026-10-18",
+    notes=("Fig. 5 caption: the TPU roofline's slanted part meets the 92 TOPS ceiling at 1,350 "
+           "operations per weight byte (Table 1 counts one op per multiply-add in the intensity)."),
+)
+GHOLAMI_MEMORY_WALL_2024 = _lit(
+    "prov:gholami-memory-wall-2024",
+    "Gholami et al. (2024), AI and Memory Wall, IEEE Micro 44(3), Fig. 1",
+    url="https://arxiv.org/abs/2403.14123",
+    verified="2026-10-18",
+    notes=("Growth factors printed on Fig. 1 for server hardware over 20 years: peak FLOP/s 60,000x "
+           "(3.0x every two years), DRAM bandwidth 100x (1.6x), interconnect bandwidth 30x (1.4x)."),
+)
+GSMARENA_IPHONE15PROMAX_3DMARK = _report(
+    "prov:gsmarena-iphone15promax-3dmark",
+    "GSMArena, Apple iPhone 15 Pro Max review (2023): 3DMark Wild Life Stress Test result screen (UL)",
+    "https://m.gsmarena.com/apple_iphone_15_pro_max-review-2618p5.php",
+    notes=("Twenty loops of the Wild Life scene, run 2023-09-22; best loop 10,012 and lowest loop "
+           "7,045 as the app's result screen reports them."),
+)
+APPLE_HEY_SIRI_2017 = _report(
+    "prov:apple-hey-siri-2017",
+    "Apple Machine Learning Research (2017), Hey Siri: An On-device DNN-powered Voice Trigger for "
+    "Apple's Personal Assistant",
+    "https://machinelearning.apple.com/research/hey-siri",
+    notes=("The always-on processor runs a DNN of 5 layers of 32 hidden units; the main-processor "
+           "detector uses 5 layers of 192 hidden units (two-pass detection, fig. 5)."),
+)
+# --- Spaceflight anomaly inquiries (added 2026-10-20) -----------------------
+ESA_SCHIAPARELLI_INQUIRY = _lit(
+    "prov:esa-schiaparelli-inquiry-2017",
+    "ESA Investigation Board, ExoMars 2016 - Schiaparelli Anomaly Inquiry (2017)",
+    url="https://exploration.esa.int/web/mars/-/59176-exomars-2016-schiaparelli-anomaly-inquiry",
+    verified="2026-10-20",
+    notes=(
+        "Descent of 19 October 2016: the IMU saturation flag persisted longer than the 15 ms "
+        "assumed at acceptance; the attitude estimate drifted by about 165 degrees and the "
+        "computed altitude went negative; the parachute and backshell were released and the "
+        "thrusters fired for 3 s instead of the planned 30 s at about 3.7 km altitude; free fall "
+        "ended in an impact at about 540 km/h."
+    ),
+)

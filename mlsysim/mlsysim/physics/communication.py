@@ -106,6 +106,22 @@ def calc_ring_allreduce_latency_time(n_gpus, latency_s):
     return (calc_ring_allreduce_latency_steps(n_gpus) * alpha).to(ureg.second)
 
 
+def calc_ring_attention_min_chunk(element_bytes, sustained_flops, link_bandwidth):
+    """Smallest per-device sequence chunk whose attention compute hides the next K/V tile.
+
+    In ring attention each device computes attention for its ``n``-token query
+    chunk against one arriving key/value tile while the next tile crosses the
+    link. Per tile, compute grows as ``n^2 d`` and transfer as ``n d s`` bytes
+    (keys and values at ``s`` bytes per element), so the transfer hides when
+    ``n >= s R / (2 B)`` for sustained rate ``R`` and link bandwidth ``B``
+    (Liu et al. 2023). Returns ``n`` in tokens. Added 2026-10-20.
+    """
+    rate = _ensure_unit(sustained_flops, ureg.flop / ureg.second, "sustained_flops")
+    bw = _ensure_unit(link_bandwidth, ureg.byte / ureg.second, "link_bandwidth")
+    validate_positive(bw, "link_bandwidth")
+    return (float(element_bytes) * rate / (2 * bw)).to(ureg.flop / ureg.byte).magnitude
+
+
 def calc_alpha_beta_crossover(alpha_s, bandwidth_bytes_s):
     """Crossover size for the α-β model where α = n/β."""
 
@@ -184,6 +200,64 @@ def calc_hop_latency(hops, hop_latency_s):
     latency = _ensure_unit(hop_latency_s, ureg.second, "hop_latency_s")
     validate_nonnegative(latency, "hop_latency_s")
     return (hops * latency).to(ureg.second)
+
+
+def calc_fat_tree_hosts(radix, tiers):
+    """Hosts a non-blocking fat-tree of radix-``k`` switches reaches in ``tiers`` tiers.
+
+    Every switch below the top splits its ports half down and half up, so each
+    tier multiplies reach by ``k/2`` and the top tier uses all ``k`` ports:
+    ``2 (k/2)^L``, which is ``k^2/2`` for two tiers and ``k^3/4`` for three
+    (Al-Fares et al. 2008). Added 2026-10-20.
+    """
+    validate_at_least(radix, 2, "radix")
+    validate_at_least(tiers, 1, "tiers")
+    half = radix // 2
+    return 2 * half**tiers
+
+
+def calc_fat_tree_switches(radix, tiers):
+    """Switches in a non-blocking ``tiers``-tier fat-tree of radix-``k`` switches.
+
+    ``(2L - 1) (k/2)^(L-1)``: ``3k/2`` for two tiers, ``5k^2/4`` for three
+    (Al-Fares et al. 2008). Added 2026-10-20.
+    """
+    validate_at_least(radix, 2, "radix")
+    validate_at_least(tiers, 1, "tiers")
+    half = radix // 2
+    return (2 * tiers - 1) * half ** (tiers - 1)
+
+
+def calc_fat_tree_path_switches(tiers):
+    """Switch traversals on the longest path of a ``tiers``-tier fat-tree: ``2L - 1``.
+
+    Up from the source leaf to the top tier and down to the destination leaf;
+    three tiers give leaf-spine-core-spine-leaf, five. Added 2026-10-20.
+    """
+    validate_at_least(tiers, 1, "tiers")
+    return 2 * tiers - 1
+
+
+def calc_torus_bisection_links(side, dims=3):
+    """Links crossing a bisection of a ``dims``-dimensional torus of ``side`` nodes per dimension.
+
+    A planar cut across one dimension crosses ``side^(dims-1)`` rings, and each
+    ring crosses it twice because of the wraparound link: ``2 side^(dims-1)``.
+    Added 2026-10-20.
+    """
+    validate_at_least(side, 2, "side")
+    validate_at_least(dims, 1, "dims")
+    return 2 * side ** (dims - 1)
+
+
+def calc_torus_diameter(side, dims=3):
+    """Hops on the longest shortest path of a ``dims``-dimensional torus: ``dims * floor(side/2)``.
+
+    Added 2026-10-20.
+    """
+    validate_at_least(side, 1, "side")
+    validate_at_least(dims, 1, "dims")
+    return dims * (side // 2)
 
 
 def calc_tree_allreduce_time(message_bytes, n_gpus, bandwidth_bytes_s, latency_s):

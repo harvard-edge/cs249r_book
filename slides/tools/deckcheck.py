@@ -208,6 +208,26 @@ DROP_ENV_ARGS = ("column", "minipage", "columns", "tabular", "mlsyscard",
                  "tikzpicture", "scope", "frame", "itemize", "enumerate")
 
 
+# A deck prints values with \val{key} from its images/numbers.tex. Deck()
+# substitutes them into the source as it loads (no newlines change, so line
+# numbers hold), so lengths and words count what students see (2026-10-20:
+# titles holding \val keys were measured by the key's name).
+def _cap(value, m):
+    """A \\val or \\Val match as printed (\\Val capitalizes the first letter)."""
+    if value is None:
+        return m.group(0)
+    return value[:1].upper() + value[1:] if m.group(1) == "V" else value
+
+
+def _with_values(text, deck_dir):
+    f = Path(deck_dir) / "images" / "numbers.tex"
+    if not f.exists() or "\\val{" not in text:
+        return text
+    vals = {k: v.replace("{,}", ",") for k, v in
+            re.findall(r"\\defval\{([a-z0-9_]+)\}\{(.*)\}\s*$", f.read_text(), re.M)}
+    return re.sub(r"\\([vV])al\{([a-z0-9_]+)\}", lambda m: _cap(vals.get(m.group(2)), m), text)
+
+
 def detex(s):
     """LaTeX to plain words, good enough for word matching and counting."""
     s = s.replace("~", " ")
@@ -311,6 +331,7 @@ class Deck:
         texs = sorted(self.path.glob("*.tex"))
         self.tex_path = next((t for t in texs if t.stem == self.folder), texs[0] if texs else None)
         self.raw = self.tex_path.read_text(errors="replace") if self.tex_path else ""
+        self.raw = _with_values(self.raw, self.path)
         self.src = strip_comments(self.raw)
         mp = self.path / "lecture_map.yml"
         try:

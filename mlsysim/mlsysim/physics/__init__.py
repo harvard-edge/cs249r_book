@@ -33,8 +33,10 @@ from .memory import (
     calc_capped_exponential_scale,
     calc_expected_paged_kv_tokens,
 )
+from .memory import calc_decoder_matmul_weights  # added 2026-10-20
 from .communication import (
     calc_alpha_beta_crossover,
+    calc_ring_attention_min_chunk,
     calc_ring_collective_data_factor,
     calc_bisection_bandwidth,
     calc_ring_allreduce_data_factor,
@@ -42,6 +44,11 @@ from .communication import (
     calc_ring_allreduce_latency_steps,
     calc_ring_allreduce_latency_time,
     calc_hop_latency,
+    calc_fat_tree_hosts,
+    calc_fat_tree_switches,
+    calc_fat_tree_path_switches,
+    calc_torus_bisection_links,
+    calc_torus_diameter,
     calc_oversubscription_effect,
     calc_point_to_point_time,
     calc_double_binary_tree_allreduce_time,
@@ -77,6 +84,16 @@ from .statistics import (
 )
 from .agents import (
     calc_kv_cache_bytes_per_token,
+    calc_unchecked_success,
+    calc_step_error_for_target,
+    calc_cost_per_accepted,
+    calc_break_even_acceptance,
+    calc_independent_success,
+    calc_append_only_context,
+    calc_tempered_softmax,
+    calc_nucleus,
+    calc_pass_posterior,
+    calc_reused_prefix_prompt_tokens,
 )
 from .drivetrain import (
     calc_traction_deceleration_limit,
@@ -95,6 +112,9 @@ from .robotics import (
     calc_scurve_stop_time,
     calc_scurve_max_permitted_velocity,
     calc_latch_contact_stopping_profile,
+    calc_stopping_crossover_speed,
+    calc_braking_time,
+    calc_travel_between_speeds,
     calc_kinetic_energy,
     calc_seam_acceleration_torque_jump,
     calc_inverted_pendulum_fall_time,
@@ -182,9 +202,15 @@ __all__ = [
     "calc_ring_allreduce_latency_steps",
     "calc_ring_allreduce_latency_time",
     "calc_alpha_beta_crossover",
+    "calc_ring_attention_min_chunk",
     "calc_oversubscription_effect",
     "calc_bisection_bandwidth",
     "calc_hop_latency",
+    "calc_fat_tree_hosts",
+    "calc_fat_tree_switches",
+    "calc_fat_tree_path_switches",
+    "calc_torus_bisection_links",
+    "calc_torus_diameter",
     "calc_tree_allreduce_time",
     "calc_double_binary_tree_allreduce_time",
     "calc_ring_tree_crossover_size",
@@ -209,6 +235,16 @@ __all__ = [
     "calc_multilegged_confidence",
     "calc_two_proportion_sample_size",
     "calc_kv_cache_bytes_per_token",
+    "calc_unchecked_success",
+    "calc_step_error_for_target",
+    "calc_cost_per_accepted",
+    "calc_break_even_acceptance",
+    "calc_independent_success",
+    "calc_append_only_context",
+    "calc_tempered_softmax",
+    "calc_nucleus",
+    "calc_pass_posterior",
+    "calc_reused_prefix_prompt_tokens",
     "calc_safe_stopping_distance",
     "calc_max_permitted_velocity",
     "calc_c2_stop_suffix",
@@ -216,6 +252,9 @@ __all__ = [
     "calc_scurve_stop_time",
     "calc_scurve_max_permitted_velocity",
     "calc_latch_contact_stopping_profile",
+    "calc_stopping_crossover_speed",
+    "calc_braking_time",
+    "calc_travel_between_speeds",
     "calc_kinetic_energy",
     "calc_seam_acceleration_torque_jump",
     "calc_inverted_pendulum_fall_time",
@@ -273,5 +312,34 @@ __all__ = [
     "carbon_from_energy",
     "memory_from_params",
     "token_throughput",
+    "calc_decoder_matmul_weights",  # added 2026-10-20
 ]
 
+
+# --- Motors, winding heat, and the zero-failure rate bound (added 2026-10-20) ---
+from .constants import COPPER_TEMPERATURE_COEFFICIENT, COPPER_COEFFICIENT_REFERENCE_TEMPERATURE
+from .motors import (
+    calc_copper_resistance_factor,
+    calc_first_order_temperature,
+    calc_first_order_time_to_temperature,
+    calc_periodic_burst_peak_rise,
+    calc_voltage_limited_speed,
+    calc_inertia_matched_ratio,
+    calc_peak_normalized_response,
+    calc_contact_force_rate,
+)
+from .robotics.assurance import calc_zero_failure_rate_upper_bound
+
+__all__ += [
+    "COPPER_TEMPERATURE_COEFFICIENT",
+    "COPPER_COEFFICIENT_REFERENCE_TEMPERATURE",
+    "calc_copper_resistance_factor",
+    "calc_first_order_temperature",
+    "calc_first_order_time_to_temperature",
+    "calc_periodic_burst_peak_rise",
+    "calc_voltage_limited_speed",
+    "calc_inertia_matched_ratio",
+    "calc_peak_normalized_response",
+    "calc_contact_force_rate",
+    "calc_zero_failure_rate_upper_bound",
+]

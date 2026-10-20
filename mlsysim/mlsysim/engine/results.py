@@ -8,7 +8,7 @@ models and analysis solvers.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Optional, List, Set, Tuple
 from pydantic import BaseModel, ConfigDict, Field
 from ..core.types import Quantity
 
@@ -65,6 +65,63 @@ __all__ = [
     "GradientSyncResult",
     "CommunicationIntensityResult",
     "TrainingGrowthResult",
+    "AlphaBetaResult",
+    "BisectionResult",
+    "IncastResult",
+    "CollectiveFitResult",
+    "StorageFootprintResult",
+    "TieredCheckpointResult",
+    "CheckpointStormResult",
+    "InputDemandResult",
+    "DataStallResult",
+    "PrefetchDepthResult",
+    "TieredCacheResult",
+    "HostIoCpuResult",
+    "ObjectStorageBillResult",
+    "StreamVsStageResult",
+    "UtilizationLossResult",
+    "SyntheticFootprintResult",
+    "StorageBenchmarkResult",
+    # Agent trajectories (added 2026-10-20)
+    "HorizonCompoundingResult",
+    "AcceptedTaskCostResult",
+    "AppendOnlyContextResult",
+    "TaskHorizonTrendResult",
+    "AgentRunSummaryResult",
+    # Model calls and agent trajectories (added 2026-10-20)
+    "ContextAdmissionResult",
+    "SamplingResult",
+    "CheckerPosteriorResult",
+    "ModelCallResult",
+    "TrajectoryResendResult",
+    "TokenMixResult",
+    # Distributed training (added 2026-10-20)
+    "ParallelLayoutResult",
+    "ZeroShardingResult",
+    "DataParallelScaleOutResult",
+    "TensorParallelLayerResult",
+    "AlignmentMemoryResult",
+    "ScalingSeriesResult",
+    "MemoryWallResult",
+    # Single-machine iron law, Amdahl, and silent-degradation results (added 2026-10-20)
+    "IronLawResult",
+    "AmdahlResult",
+    "ShiftedTestSetResult",
+    "ProxyDriftResult",
+    # physical-plant budgets (added 2026-10-20)
+    "StoppingBudgetResult",
+    "SpeedStepResult",
+    "FreshnessProfileResult",
+    "BrakingCeilingsResult",
+    "HubDriveElectricalResult",
+    "GearedRotorResult",
+    "GearRatioCostResult",
+    "ThermalBurstResult",
+    "StallDeratingResult",
+    "ContinuousDeratingResult",
+    "DriveBusResult",
+    "ZeroFailureResult",
+    "ThrottledStageResult",
 ]
 
 
@@ -689,3 +746,779 @@ class TrainingGrowthResult(SolverResult):
     rate_factor: float
     fleet_share: float             # share of the compute exponent from count and duration
     span_orders: float             # orders of magnitude from AlexNet to the largest run
+
+
+class AlphaBetaResult(SolverResult):
+    """Result from AlphaBetaModel: alpha + n/beta for each message on each path."""
+    alphas: Dict[str, Quantity]
+    bandwidths: Dict[str, Quantity]
+    messages: Dict[str, Quantity]
+    times: Dict[str, Dict[str, Quantity]]               # times[path][message]
+    transmission_times: Dict[str, Dict[str, Quantity]]  # the n/beta term alone
+    crossovers: Dict[str, Quantity]                     # n* = alpha * beta, per path
+
+
+class BisectionResult(SolverResult):
+    """Result from BisectionModel: a ring AllReduce across a full and an oversubscribed cut."""
+    devices_per_side: int
+    bisection_full: Quantity
+    bisection_oversubscribed: Quantity
+    ring_factor: float
+    crossing_bytes: Quantity
+    time_full: Quantity
+    time_oversubscribed: Quantity
+    slowdown: float
+    relative_throughput: float
+    throughput_loss: float
+    idle_cost: Quantity
+
+
+class IncastResult(SolverResult):
+    """Result from IncastModel: many senders into one egress port with a finite buffer."""
+    offered_load: Quantity
+    oversubscription: float
+    net_fill_rate: Quantity
+    overflow_time: Quantity          # buffer fills from empty
+    drain_time: Quantity             # a full buffer drained by the egress port alone
+    bandwidth_delay_product: Quantity
+
+
+class CollectiveFitResult(SolverResult):
+    """Result from CollectiveFitModel: a floor-plus-bandwidth fit to a measured collective sweep."""
+    row_count: int
+    floor_time: Quantity
+    bandwidth: Quantity
+    knee: Quantity
+    worst_mid_ratio: float
+    peak_bus_bandwidth: Quantity
+    mid_bus_bandwidth_low: Quantity
+    mid_bus_bandwidth_high: Quantity
+
+    def model_time(self, size: Quantity) -> Quantity:
+        """Modeled time for a message of ``size``: floor + size / bandwidth."""
+        return (self.floor_time + size / self.bandwidth).to("microsecond")
+# ── Storage calculation results (added 2026-10-20) ────────────────
+
+class StorageFootprintResult(SolverResult):
+    """Result from StorageFootprintModel: what a training run reads, saves, and keeps."""
+    checkpoint_bytes: Quantity
+    saves: int
+    checkpoint_bytes_written: Quantity
+    write_read_ratio: float          # checkpoint bytes written / corpus bytes read
+    average_read_rate: Quantity      # corpus bytes / run duration
+    shard_count: int
+    archived_checkpoints: int
+    archive_bytes: Quantity          # retained checkpoints + source + corpus
+
+
+class TieredCheckpointResult(SolverResult):
+    """Result from TieredCheckpointModel: a save staged on local storage, then drained."""
+    checkpoint_bytes: Quantity
+    per_node_shard: Quantity
+    local_write_time: Quantity       # the training pause
+    drain_time: Quantity             # background copy to the durable tier
+    durable_share_per_node: Quantity
+    pause_fraction: float            # pause / save interval
+
+
+class CheckpointStormResult(SolverResult):
+    """Result from CheckpointStormModel: every replica writes against one logical copy."""
+    state_bytes: Quantity
+    storm_bytes: Quantity
+    storm_time: Quantity
+    single_copy_time: Quantity
+    slowdown: float
+
+
+class InputDemandResult(SolverResult):
+    """Result from InputDemandModel: bandwidth a fleet of consumers draws from storage."""
+    batch_bytes: Quantity            # one consumer's batch
+    bandwidth: Quantity
+
+
+class DataStallResult(SolverResult):
+    """Result from DataStallModel: input wait with and without overlap."""
+    sequential_step: Quantity
+    sequential_stall: float
+    overlapped_step: Quantity
+    overlapped_stall: float
+
+
+class PrefetchDepthResult(SolverResult):
+    """Result from PrefetchDepthModel: ready batches needed to cover each tier's tail."""
+    spans: Dict[str, float]          # tail latency / compute window
+    depths: Dict[str, int]           # ceil(span)
+    buffer_per_consumer: Quantity    # at the stated safety depth
+    buffer_per_node: Quantity
+
+
+class TieredCacheResult(SolverResult):
+    """Result from TieredCacheModel: mean service of a two-tier cache."""
+    hit_rate: float
+    miss_penalty: float              # miss service time / hit service time
+    mean_service: float              # in hit service times
+    delivered_fraction: float        # of the all-hit rate
+    delivered_rate: Optional[Quantity] = None
+
+
+class HostIoCpuResult(SolverResult):
+    """Result from HostIoCpuModel: CPU time per second spent issuing I/O."""
+    request_rate: float              # requests per second
+    cpu_seconds_per_second: Dict[str, float]
+
+
+class ObjectStorageBillResult(SolverResult):
+    """Result from ObjectStorageBillModel: storing and reading a dataset in object storage."""
+    storage_cost: float              # dollars over the billing period
+    egress_per_read: float           # dollars
+    egress_cost: float               # dollars, all reads
+    request_cost: float              # dollars, one GET per file
+    archive_retrieval_cost: float    # dollars, retrieval fee only
+    archive_restore_cost: float      # dollars, retrieval plus one egress
+
+
+class StreamVsStageResult(SolverResult):
+    """Result from StreamVsStageModel: reading every epoch remotely against staging per run."""
+    source_storage_cost: float       # dollars a year, both options
+    stream_egress_per_run: float
+    stream_egress_cost: float
+    stream_cost: float
+    local_storage_cost: float
+    stage_egress_cost: float
+    stage_cost: float
+    savings: float
+    break_even_epochs: float
+
+
+class UtilizationLossResult(SolverResult):
+    """Result from UtilizationLossModel: the cost of devices idled by a utilization drop."""
+    fleet_cost_per_day: float        # dollars
+    loss_per_day: float
+    loss_total: float
+
+
+class SyntheticFootprintResult(SolverResult):
+    """Result from SyntheticFootprintModel: generated data at rest and in motion."""
+    stored_bytes: Quantity
+    verification_bytes: Quantity
+    pipeline_bytes: Quantity
+    capacity_amplification: float
+    traffic_amplification: float
+
+
+class StorageBenchmarkResult(SolverResult):
+    """Result from StorageBenchmarkDemandModel: measured storage demand per accelerator."""
+    result_count: int
+    medians: Dict[str, Dict[str, float]]   # workload -> accelerator -> GB/s per accelerator
+    generation_ratios: Dict[str, float]    # workload -> newer / older accelerator
+
+
+# --- Embodied stopping, traction, and domain compute (added 2026-10-20) -----
+
+class StoppingBudgetResult(SolverResult):
+    """Result from StoppingBudgetModel: the elementary stop against a clear distance."""
+    speed: Quantity                          # speed when the hazard appears; braking starts from it
+    delay: Quantity
+    deceleration: Quantity
+    delay_travel: Quantity
+    braking_travel: Quantity
+    stop_distance: Quantity                  # delay travel + braking travel: travel to rest
+    overhead: Quantity                       # localization bound + protective margin (zero if unstated)
+    required_distance: Quantity              # stop_distance + overhead: what the clear distance must hold
+    braking_time: Quantity
+    crossover_speed: Quantity                # 2 a tau: delay travel equals braking travel there
+    braking_over_delay: Optional[float] = None
+    delay_share_of_braking: Optional[float] = None
+    clear_distance: Optional[Quantity] = None
+    spare: Optional[Quantity] = None
+    fits: Optional[bool] = None
+    clear_over_stop: Optional[float] = None
+    speed_ceiling: Optional[Quantity] = None  # fastest speed whose stop, with the overhead, fits
+    added_delay_travel: Optional[Quantity] = None  # travel at ``speed`` during a stated delay step
+
+    def travel_over(self, duration: Quantity) -> Quantity:
+        """Distance covered at ``speed`` over ``duration`` (the cost of one term of the delay)."""
+        return (self.speed * duration).to("meter")
+
+
+class TractionLossResult(SolverResult):
+    """Result from TractionLossModel: what a drop in floor friction does to braking."""
+    braking_distance_ratio: float            # braking distance at the traction limit, after / before
+    traction_ceiling: Quantity               # deceleration the lower friction can support
+    required_friction: float                 # friction the stated deceleration needs
+    premise_holds: bool                      # the lower friction still supports it
+
+
+class DomainComputeGapResult(SolverResult):
+    """Result from DomainComputeGapModel: one model against the largest of another domain that year."""
+    model: str
+    year: str
+    model_flop: float
+    reference_model: str
+    reference_flop: float
+    gap: float                               # reference_flop / model_flop
+    domain_models_with_compute: int          # rows of the model's domain that carry a compute estimate
+
+
+# --- Agent trajectories: reliability, cost, context, measured runs (added 2026-10-20) ---
+
+class HorizonCompoundingResult(SolverResult):
+    """Result from HorizonCompoundingModel: unchecked task success across horizons."""
+    step_error: float                    # 1 - per-step success
+    success: Dict[int, float]            # horizon (turns) -> unchecked task success
+    required_step_error: float           # per-step error that holds the target at the long horizon
+    error_ratio: float                   # step_error / required_step_error
+    required_error_horizon: float        # required_step_error x long horizon
+    small_error_limit: float             # -ln(target): the same product as eps -> 0
+
+
+class AcceptedTaskCostResult(SolverResult):
+    """Result from AcceptedTaskCostModel: cost per accepted task and two levers on it (dollars)."""
+    attempt_cost: float
+    token_share: float                   # model-token share of the attempt cost
+    attempts_per_acceptance: float       # 1 / p_acc
+    cost_per_accepted: float
+    accepted_only_understatement: float  # cost_per_accepted / attempt_cost
+    cheaper_attempt_cost: Optional[float] = None
+    cost_per_accepted_cheaper_tokens: Optional[float] = None
+    cost_per_accepted_improved: Optional[float] = None
+    break_even_acceptance: Optional[float] = None
+    cost_per_accepted_cheaper_other: Optional[float] = None
+    cost_per_accepted_acceptance_gain: Optional[float] = None
+    independent_success: Optional[float] = None
+
+
+class AppendOnlyContextResult(SolverResult):
+    """Result from AppendOnlyContextModel: what an append-only trajectory reads and resends."""
+    last_call_tokens: Quantity
+    window_fraction: float               # last call / context window
+    cumulative_input_tokens: Quantity
+    reread_ratio: float                  # cumulative input / last call
+
+
+class TaskHorizonTrendResult(SolverResult):
+    """Result from TaskHorizonTrendModel: growth of the measured 50% task horizon."""
+    first_frontier_minutes: float
+    last_frontier_minutes: float
+    first_date: str
+    last_date: str
+    growth: float                        # last / first frontier horizon
+    doubling_all: Quantity               # whole-period fit
+    doubling_recent: Quantity            # fit from the recent start date
+    recent_slope_per_day: float          # log2(minutes) per day, recent fit
+    recent_intercept: float              # log2(minutes) at date ordinal 0, recent fit
+
+
+class AgentRunSummaryResult(SolverResult):
+    """Result from AgentRunSummaryModel: one recorded agent run over a benchmark, one attempt per task."""
+    tasks: int
+    accepted: int
+    rejected: int
+    acceptance: float
+    submitted: int                       # tasks whose loop ended by the agent's own submission
+    total_cost: float                    # dollars
+    mean_attempt_cost: float
+    cost_per_accepted: float
+    accepted_mean_cost: float            # mean over accepted attempts only
+    accepted_only_understatement: float  # cost_per_accepted / accepted_mean_cost
+    calls_median: float
+    calls_min: int
+    calls_max: int
+    commands: Dict[str, int]             # command class -> count
+    command_total: int
+    observations: int
+    nonzero_exits: int
+    truncated_outputs: int
+    syntax_error_tasks: int
+    syntax_error_accepted: int
+    call_bins: List[Dict[str, Any]]      # {"low", "high", "tasks", "accepted"} per bin
+# ── Model calls and agent trajectories (added 2026-10-20) ─────────
+
+class ContextAdmissionResult(SolverResult):
+    """Result from ContextAdmissionModel: token-measured admission, S <= S_max - K_max."""
+    input_ceiling: int               # window - reserved output
+    headroom: int                    # input ceiling - text prompt (negative: no room)
+    total_demand: int                # text + image + reserved output
+    excess: int                      # total demand - window (positive: rejected)
+    admitted: bool
+
+
+class SamplingResult(SolverResult):
+    """Result from SamplingModel: one logit vector at two temperatures, then top-p."""
+    partition_sum: float             # sum of exp(z / T) at the base temperature
+    base_probabilities: List[float]
+    sharp_probabilities: List[float]
+    base_tail: float                 # 1 - p(top token) at the base temperature
+    sharp_tail: float
+    tail_ratio: float                # base tail / sharp tail
+    nucleus_size: int
+    nucleus_mass: float
+    nucleus_probabilities: List[float]
+
+
+class CheckerPosteriorResult(SolverResult):
+    """Result from CheckerPosteriorModel: defects among candidates a fallible check passes."""
+    defective_pass: float            # joint P(Def and PASS)
+    pass_share: float                # P(PASS)
+    posterior: float                 # P(Def | PASS)
+    catch_rate: float                # P(FAIL | Def)
+    valid_reject_rate: float         # P(FAIL | Valid)
+
+
+class ModelCallResult(SolverResult):
+    """Result from ModelCallModel: prefill and decode work of one call at stated floors."""
+    prompt_tokens: int
+    output_tokens: int
+    prefill_time: Quantity
+    decode_time: Quantity
+    total_time: Quantity
+    output_token_share: float
+    output_time_share: float
+    fresh_prefill_time: Quantity     # prefill of the tokens past a reused shared prefix
+    decode_rate: Quantity            # output tokens per second at the decode floor
+    deadline_margin: Optional[float] = None   # deadline / total time
+    acceptance: Optional[float] = None        # product of the stated stage success rates
+
+
+class TrajectoryResendResult(SolverResult):
+    """Result from TrajectoryResendModel: input a trajectory resends, with and without prefix reuse."""
+    turns: int
+    first_prompt_term: int           # H * S0
+    appended_term: int               # D * H (H - 1) / 2
+    resent_tokens: int               # their sum: input sent without reuse
+    reused_prefix_tokens: int        # fresh prefill with prefix reuse
+    reuse_reduction: float           # resent / reused
+    output_tokens: int
+    input_share: float               # resent / (resent + output)
+    prefill_time: Quantity           # resent tokens at the prefill floor
+    reused_prefill_time: Quantity
+    decode_time: Quantity
+
+
+class TokenMixResult(SolverResult):
+    """Result from TokenMixModel: prompt and output tokens of a request trace."""
+    requests: int
+    median_prompt: float
+    median_output: float
+    median_ratio: float
+    input_share: float               # prompt tokens / all tokens
+    output_time_share: float         # decode time / all time at the stated floors
+# --- Collective communication (added 2026-10-20) ---------------------------
+
+class AllReduceAlgorithmResult(SolverResult):
+    """Result from AllReduceAlgorithmModel: ring, simple tree, and star schedules per group size.
+
+    Every dict is keyed by the group size N. Byte times exclude startup; startup
+    times are the round count times alpha, kept in alpha's own unit.
+    """
+    message: Quantity
+    alpha: Quantity
+    bandwidth: Quantity
+    chunk: Dict[int, Quantity]                  # M / N, the bytes one ring round moves
+    ring_factor: Dict[int, float]               # 2(N-1)/N
+    ring_rounds: Dict[int, int]                 # 2(N-1)
+    tree_rounds: Dict[int, int]                 # 2 ceil(log2 N)
+    ring_byte_time: Dict[int, Quantity]
+    ring_startup_time: Dict[int, Quantity]
+    ring_time: Dict[int, Quantity]
+    tree_byte_time: Dict[int, Quantity]
+    tree_startup_time: Dict[int, Quantity]
+    tree_time: Dict[int, Quantity]
+    star_byte_time: Dict[int, Quantity]         # one server port carries N x M each way
+    star_ring_limit: Dict[int, float]           # N/2, the large-N limit of star over ring byte time
+    crossover_estimate: Dict[int, Quantity]     # N alpha beta / log2 N
+    crossover_exact: Dict[int, Quantity]        # where the two models are equal
+
+
+class HierarchicalAllReduceResult(SolverResult):
+    """Result from HierarchicalAllReduceModel: three phases against one flat ring."""
+    intra_bytes: Quantity          # bytes each GPU sends in the in-node ReduceScatter
+    reduce_scatter_time: Quantity
+    shard: Quantity                # M / G, the payload of each cross-node ring
+    inter_byte_time: Quantity
+    inter_startup_time: Quantity
+    inter_time: Quantity
+    all_gather_time: Quantity
+    total_time: Quantity
+    flat_ring_time: Quantity       # one ring over every GPU at the inter-node rate, with startup
+    flat_bound_time: Quantity      # the large-N byte bound 2M / beta of that ring
+    speedup_vs_flat_ring: float
+    speedup_vs_flat_bound: float
+
+
+class AllToAllDispatchResult(SolverResult):
+    """Result from AllToAllDispatchModel: one expert-parallel dispatch under uniform routing."""
+    tokens_per_device: int
+    experts_per_device: int
+    tokens_per_expert: int
+    tokens_per_pair: int           # tokens one device sends one peer
+    remote_peers: int
+    bytes_per_token: Quantity
+    pair_bytes: Quantity
+    sent_bytes: Quantity           # per device, to all remote peers
+    injection_bound: Quantity      # alpha + sent / beta, the peers sharing one port
+    uniform_remote_tokens: int
+    hot_remote_tokens: int
+    uniform_receive_bytes: Quantity
+    hot_receive_bytes: Quantity
+    uniform_receive_bound: Quantity
+    hot_receive_bound: Quantity
+
+
+class RingTraceResult(SolverResult):
+    """Result from RingTraceModel: every cell of a ring AllReduce on small integer vectors.
+
+    ``scatter_reduce[s][g]`` and ``all_gather[s][g]`` are (chunk index, value)
+    received by GPU g in step s.
+    """
+    scatter_reduce: List[List[Tuple[int, int]]]
+    owned: List[Tuple[int, int]]     # the fully reduced chunk each GPU holds after ReduceScatter
+    totals: List[int]
+    all_gather: List[List[Tuple[int, int]]]
+    held: List[Set[int]]             # chunks each GPU holds after AllGather
+    steps: int
+
+
+class ErrorFeedbackResult(SolverResult):
+    """Result from ErrorFeedbackModel: a rounding compressor with and without a carried residual."""
+    errors: List[float]              # e_1 .. e_{T+1}; errors[t] enters step t + 1
+    corrected: List[float]           # g_t + e_t
+    sent: List[int]                  # v_t
+    cumulative_true: List[float]
+    cumulative_sent: List[int]
+    total_sent: int
+    final_error: float
+    true_total: float
+    naive_total_sent: int            # every value rounded alone, no residual
+
+
+class CompressionRunResult(SolverResult):
+    """Result from CompressionRunModel: time to a quality target with and without compression."""
+    steps_compressed: int
+    step_times: Dict[str, Quantity]
+    compressed_step_times: Dict[str, Quantity]
+    totals: Dict[str, Quantity]
+    compressed_totals: Dict[str, Quantity]
+    changes: Dict[str, float]        # compressed / baseline - 1 (negative is faster)
+
+
+class OverlapBudgetResult(SolverResult):
+    """Result from OverlapBudgetModel: layer-by-layer AllReduce, sequential against overlapped."""
+    layers: int
+    gradient_per_layer: Quantity
+    buckets_per_layer: int
+    communication_per_layer: Quantity
+    total_backward: Quantity
+    sequential_time: Quantity
+    exposed_per_layer: Quantity
+    overlapped_time: Quantity
+    savings_fraction: float
+# --- Distributed training (added 2026-10-20) ---------------------------------
+
+class ParallelLayoutResult(SolverResult):
+    """Result from ParallelLayoutModel: one TP x PP x DP layout's step and state."""
+    n_devices: int
+    step_flops: Quantity
+    compute_time: Quantity           # per device per step (T_compute / N)
+    gradient_bytes: Quantity         # full gradient at the communication precision
+    dp_shard: Quantity               # gradient bytes each data-parallel rank reduces
+    ring_bytes: Quantity             # 2(DP-1)/DP x shard, exact ring volume per device
+    allreduce_time: Quantity         # 2 x shard / link bandwidth (large-N ring bound)
+    hidden_time: Quantity
+    exposed_time: Quantity
+    bubble: float                    # pipeline idle fraction
+    efficiency: float                # with overlap and bubble
+    efficiency_no_overlap: float
+    overlap_share: float             # hidden / allreduce
+    step_time: Quantity              # compute / (1 - bubble) + exposed
+    state_total: Quantity            # persistent mixed-precision Adam state
+    state_per_device: Quantity       # split by TP x PP
+    zero1_state_per_device: Quantity # plus optimizer state sharded across DP
+    fleet_mfu: float                 # local efficiency x scaling efficiency
+    double_counted_mfu: float        # the pitfall: scaling efficiency applied twice
+    min_devices_for_state: Optional[int] = None
+
+
+class ZeroShardingResult(SolverResult):
+    """Result from ZeroShardingModel: per-device state at each ZeRO stage."""
+    weights: Quantity
+    gradients: Quantity
+    optimizer_state: Quantity
+    stage_state: Dict[str, Quantity]       # "DDP", "ZeRO-1", "ZeRO-2", "ZeRO-3" per device
+    traffic_multiple: Dict[str, float]     # per-device bytes relative to DDP's AllReduce
+    activations: Quantity
+    zero3_total_per_device: Quantity       # ZeRO-3 state plus activations
+    gather_traffic: Quantity               # ZeRO-3 per-device bytes per step
+    gather_time: Optional[Quantity] = None
+
+
+class DataParallelScaleOutResult(SolverResult):
+    """Result from DataParallelScaleOutModel: a data-parallel job inside and across nodes."""
+    n_devices: int
+    gradient_bytes: Quantity
+    intra_bytes: Quantity
+    inter_bytes: Quantity
+    intra_time: Quantity
+    inter_time: Quantity
+    communication_time: Quantity
+    compute_time: Quantity           # per optimizer update (accumulation x step)
+    update_time: Quantity
+    communication_overhead: float    # communication / compute per update
+    compute_share: float
+    communication_share: float
+    speedup: float
+    efficiency: float
+    global_batch: int
+    training_time: Quantity
+    cost: Optional[float] = None     # dollars
+
+
+class TensorParallelLayerResult(SolverResult):
+    """Result from TensorParallelLayerModel: one layer's compute against its TP exchange."""
+    layer_flops: Quantity
+    compute_time: Quantity
+    layer_bytes: Quantity
+    transfer_times: Dict[str, Quantity]
+
+
+class AlignmentMemoryResult(SolverResult):
+    """Result from AlignmentMemoryModel: PPO and DPO model state for RLHF."""
+    policy_state: Quantity
+    reference_weights: Quantity
+    reward_weights: Quantity
+    value_state: Quantity
+    ppo_total: Quantity
+    dpo_total: Quantity
+    dpo_reduction: float
+    model_parallel_devices: int
+    policy_per_device: Quantity
+    reference_per_device: Quantity
+    kv_cache: Quantity
+    kv_per_device: Quantity
+    min_devices_for_ppo: Optional[int] = None
+
+
+class ScalingSeriesResult(SolverResult):
+    """Result from ScalingSeriesModel: same-round benchmark series and their efficiencies."""
+    labels: List[str]
+    series: List[List[Dict[str, Any]]]   # each series' rows, smallest configuration first
+    efficiencies: List[float]            # largest configuration relative to the smallest
+
+
+class MemoryWallResult(SolverResult):
+    """Result from MemoryWallModel: demand and capacity rows and the crossover."""
+    rows: List[Dict[str, Any]]           # Year, Date, Name, Type ("Model" or "GPU"), Memory_GB
+    capacity_growth: float               # largest over smallest accelerator memory
+    demand_orders: float                 # log10 of largest over smallest demand
+    crossover_name: str
+    crossover_year: int
+    crossover_gap: float                 # crossover demand over that year's largest accelerator
+# ── Single-machine iron law, Amdahl, and silent-degradation results (added 2026-10-20) ──
+
+class IronLawResult(SolverResult):
+    """Result from IronLawModel: the three iron-law terms, summed and overlapped, before and after an upgrade."""
+    memory_time: Quantity
+    compute_time: Quantity
+    overhead: Quantity
+    sequential_time: Quantity          # memory + compute + overhead
+    overlapped_time: Quantity          # max(memory, compute) + overhead
+    upgraded_memory_time: Quantity
+    upgraded_compute_time: Quantity
+    upgraded_sequential_time: Quantity
+    upgraded_overlapped_time: Quantity
+    naive_upgraded_time: Quantity      # the sequential time divided by the whole upgrade
+    sequential_reduction: float        # fraction of the sequential time the upgrade removes
+
+
+class AmdahlResult(SolverResult):
+    """Result from AmdahlModel: one stage of a sequential pipeline made faster."""
+    total_time: Quantity
+    stage_time: Quantity
+    upgraded_stage_time: Quantity
+    upgraded_total_time: Quantity
+    untouched_time: Quantity
+    stage_fraction: float              # share of the original total spent in the stage
+    overall_speedup: float
+    end_to_end_reduction: float        # fraction of the total removed
+    stage_reduction: float             # fraction of the stage removed
+    speedup_bound: float               # overall speedup with an infinitely fast stage
+
+
+class ShiftedTestSetResult(SolverResult):
+    """Result from ShiftedTestSetModel: accuracy on an original and a re-collected test set."""
+    model_count: int
+    baseline_count: int                # models named with the baseline prefix (non-neural)
+    gap_min: float                     # percentage points, all models
+    gap_max: float
+    network_gap_min: float             # percentage points, models without the baseline prefix
+    network_gap_max: float
+    mean_gap: float
+    slope: float                       # least-squares fit: new = slope * original + intercept
+    intercept: float
+
+
+class ProxyDriftResult(SolverResult):
+    """Result from ProxyDriftModel: a proxy estimate against its reference, season by season."""
+    season_ratios: Dict[str, float]    # season label -> summed proxy / summed reference
+    stable_max_deviation: float        # largest |ratio - 1| before the first drift season
+    peak_season: str
+    peak_proxy: float                  # the season's highest weekly proxy value (reference units)
+    peak_reference: float
+    peak_ratio: float
+    max_week_ratio: float              # largest single-week proxy / reference in the peak season
+# ── Physical-plant budget results: stopping, actuation, heat, power (added 2026-10-20) ──
+
+
+
+class SpeedStepResult(SolverResult):
+    """Result from SpeedStepModel: what raising a speed setpoint costs in braking travel."""
+    braking_growth: float            # raised braking / base braking - 1
+    braking_added: Quantity
+    equivalent_delay: Quantity       # added braking expressed as delay at the base speed
+
+
+class FreshnessProfileResult(SolverResult):
+    """Result from FreshnessProfileModel: a target's freshness deadline against an age profile."""
+    allowed_error: Quantity
+    deadline: Quantity
+    stage_sum_p50: Quantity
+    stage_sum_p99: Quantity
+    stage_sum_max: Quantity
+    focus_stage: Quantity            # the stage a benchmark reports, at the median
+    rest_of_chain: Quantity          # median chain minus that stage
+    focus_share: float               # of the median chain
+    focus_rate: Quantity             # loop rate the benchmark alone suggests
+    travel_p50: Quantity
+    travel_tail: Quantity
+    slack_p50: Quantity
+    overrun_tail: Quantity
+
+
+class BrakingCeilingsResult(SolverResult):
+    """Result from BrakingCeilingsModel: traction, tip-over, drive-torque, and back-EMF checks."""
+    wheel_torque: Quantity
+    force: Quantity
+    rotating_mass: Quantity
+    rotating_share: float
+    m_eff: Quantity
+    a_torque: Quantity
+    torque_margin: float
+    a_torque_rated: Quantity
+    mu_required: float               # all weight on the driven wheels
+    drive_load_share: float          # upper bound from the load rating
+    mu_required_rated: float         # at that load share
+    min_load_share_dry: float
+    a_traction_dry: Quantity
+    a_traction_inspected: Quantity
+    cg_ratio_max: float
+    a_tip: Optional[Quantity] = None
+    passes: bool
+    wheel_speed: Quantity
+    back_emf: Quantity
+    v_brake: Quantity
+    v_drive: Quantity
+    headroom: Quantity
+
+
+class HubDriveElectricalResult(SolverResult):
+    """Result from HubDriveElectricalModel: current rise and phase-short braking of a hub drive."""
+    time_constant: Quantity
+    ramp_time: Quantity
+    ramp_share: float                # of the brake onset
+    full_step_current: Quantity
+    step_over_peak: float
+    short_peak_electrical: Quantity  # rad/s
+    short_peak_wheel_speed: Quantity # rpm
+
+
+class GearedRotorResult(SolverResult):
+    """Result from GearedRotorModel: reflected rotor inertia and the inertia match."""
+    reflected_inertia: Quantity
+    flywheel_mass: Quantity
+    radius_of_gyration: Quantity
+    matched_ratio: float
+    acceleration_share: float        # at the stated ratio, of the matched-ratio acceleration
+
+
+class GearRatioCostResult(SolverResult):
+    """Result from GearRatioCostModel: holding heat and reflected inertia per gear ratio."""
+    motor_constant: Quantity
+    motor_torque: Dict[int, Quantity]
+    copper_loss: Dict[int, Quantity]
+    reflected_inertia: Dict[int, Quantity]
+    loss_inertia_product: Dict[int, Quantity]
+    over_peak: Dict[int, float]      # motor torque / motor peak torque
+    peak_over_rated: float
+
+
+class ThermalBurstResult(SolverResult):
+    """Result from ThermalBurstModel: burst horizons, duty screen, and periodic peak."""
+    time_constant: Quantity
+    rated_loss: Quantity
+    rated_equilibrium: Quantity
+    burst_current: Quantity
+    burst_loss: Quantity
+    asymptote: Quantity
+    horizon_cold: Quantity
+    horizon_hot: Quantity
+    hot_cut: float
+    average_loss_max: Quantity
+    duty: float
+    off_time: Quantity
+    off_time_scheduled: Quantity
+    periodic_peak: Quantity
+
+
+class StallDeratingResult(SolverResult):
+    """Result from StallDeratingModel: stall equilibrium with copper feedback, and the sustainable hold."""
+    motor_torque: Quantity
+    stall_current: Quantity
+    cold_loss: Quantity
+    feedback_constant: Quantity
+    feedback_gain: float
+    steady_rise: Quantity
+    winding_temperature: Quantity
+    sustainable_loss: Quantity
+    hot_resistance: Quantity
+    sustainable_current: Quantity
+    sustainable_hold: Quantity
+    derating: float
+
+
+class ContinuousDeratingResult(SolverResult):
+    """Result from ContinuousDeratingModel: installed continuous torque against the catalog rating."""
+    ambient_share: float
+    combined_share: float
+
+
+class DriveBusResult(SolverResult):
+    """Result from DriveBusModel: sustained sag, regenerative surge, and chopper sizing."""
+    compute_current: Quantity
+    drive_current: Quantity
+    sag: Quantity
+    sustained_full: Quantity
+    sustained_depleted: Quantity
+    margin_depleted: Quantity
+    headroom_depleted: Quantity
+    crossing_current: Quantity
+    kinetic_energy: Quantity
+    regenerated: Quantity
+    capacitor_only_endpoint: Quantity
+    capacitor_to_clamp: Quantity
+    stop_time: Quantity
+    peak_power: Quantity
+    resistor_max: Quantity
+
+
+class ZeroFailureResult(SolverResult):
+    """Result from ZeroFailureModel: the failure rate a clean campaign supports."""
+    coefficient: float               # -ln(1 - C)
+    rate_upper: float
+    one_in: float
+
+
+class ThrottledStageResult(SolverResult):
+    """Result from ThrottledStageModel: a compute-bound stage slowed by a lower clock."""
+    throttled: Quantity
+    added_age: Quantity
+    added_travel: Quantity

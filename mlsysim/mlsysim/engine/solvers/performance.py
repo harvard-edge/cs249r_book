@@ -525,3 +525,64 @@ class DecodeBoundModel(ForwardModel):
             peak_fraction=(attainable / peak).to("").magnitude,
             bottleneck=b["bottleneck"],
         )
+
+
+# ── Single-machine iron law and Amdahl (added 2026-10-20) ─────────────────────
+
+from ..results import AmdahlResult, IronLawResult  # noqa: E402
+from ...physics.performance import calc_amdahls_speedup  # noqa: E402
+
+
+class IronLawModel(ForwardModel):
+    """
+    The iron law of ML systems on one machine, in its two forms.
+
+    Sequential: T = memory + compute + overhead, the safe estimate when the
+    stages run one after another. Overlapped: T >= max(memory, compute) +
+    overhead, the best case when loading and computing overlap perfectly. An
+    upgrade divides the memory term by ``memory_speedup`` (more bandwidth or
+    fewer bytes) and the compute term by ``compute_speedup``; the overhead
+    stays, which is why the sum falls by less than the upgrade.
+    """
+    requires = ("memory_time", "compute_time", "overhead")
+    produces = IronLawResult
+
+    def solve(self, memory_time: Quantity, compute_time: Quantity, overhead: Quantity,
+              memory_speedup: float = 1.0, compute_speedup: float = 1.0) -> IronLawResult:
+        unit = overhead.units
+        m, c, o = memory_time.to(unit), compute_time.to(unit), overhead.to(unit)
+        m2, c2 = m / memory_speedup, c / compute_speedup
+        seq, seq2 = m + c + o, m2 + c2 + o
+        return IronLawResult(
+            memory_time=m, compute_time=c, overhead=o,
+            sequential_time=seq, overlapped_time=max(m, c) + o,
+            upgraded_memory_time=m2, upgraded_compute_time=c2,
+            upgraded_sequential_time=seq2, upgraded_overlapped_time=max(m2, c2) + o,
+            naive_upgraded_time=seq / (memory_speedup * compute_speedup),
+            sequential_reduction=(1 - seq2 / seq).to("").magnitude,
+        )
+
+
+class AmdahlModel(ForwardModel):
+    """
+    Amdahl's law for a sequential request path: one stage made ``speedup``
+    times faster, the others untouched. The untouched time caps the overall
+    speedup at total / untouched, however fast the stage becomes.
+    """
+    requires = ("stages", "stage", "speedup")
+    produces = AmdahlResult
+
+    def solve(self, stages: dict, stage: str, speedup: float) -> AmdahlResult:
+        unit = stages[stage].units
+        total = sum((t.to(unit) for t in stages.values()), Q_(0, unit))
+        part = stages[stage].to(unit)
+        rest = total - part
+        p = (part / total).to("").magnitude
+        overall = calc_amdahls_speedup(p, speedup)
+        return AmdahlResult(
+            total_time=total, stage_time=part, upgraded_stage_time=part / speedup,
+            upgraded_total_time=rest + part / speedup, untouched_time=rest,
+            stage_fraction=p, overall_speedup=overall,
+            end_to_end_reduction=1 - 1 / overall, stage_reduction=1 - 1 / speedup,
+            speedup_bound=(total / rest).to("").magnitude,
+        )

@@ -30,6 +30,19 @@ TrainingRuns = _load("training_runs", "TrainingRuns", "Cited training-run field 
 FleetOperations = _load("fleet_operations", "FleetOperations", "Measured fleet-operations results (job MTTF, utilization, cluster scale).")
 DatacenterElectricity = _load("datacenter_electricity", "DatacenterElectricity", "Datacenter electricity consumption and projections (LBNL, IEA).")
 AcceleratorLifecycle = _load("accelerator_lifecycle", "AcceleratorLifecycle", "Accelerator life-cycle emission trends (Schneider et al. 2025).")
+StorageSystems = _load("storage_systems", "StorageSystems", "Measured production storage-system results (3FS read stress test).")
+# Incident investigation reports (added 2026-10-20)
+IncidentReports = _load("incident_reports", "IncidentReports", "Values reported by incident investigations (NTSB Tempe, Cruise pullover).")
+# Model calls and agent trajectories (added 2026-10-20)
+ServingIncidents = _load("serving_incidents", "ServingIncidents", "Reported production serving-incident figures (Anthropic 2025 postmortem).")
+SelfCorrection = _load("self_correction", "SelfCorrection", "Intrinsic self-correction results (Huang et al. 2024, GPT-4).")
+# Added 2026-10-20: benchmark error rates and documented accuracy failures.
+PredictionQuality = _load("prediction_quality", "PredictionQuality", "Cited prediction-quality results (ILSVRC-2012 errors, Google Flu Trends misses).")
+GamePlaying = _load("game_playing", "GamePlaying", "Cited results of landmark game-playing systems (Deep Blue, AlphaGo Zero).")
+# Deployment-tier field figures (added 2026-10-20)
+DeviceMeasurements = _load("device_measurements", "DeviceMeasurements", "Cited measurements of deployed ML hardware (TPU v1 roofline, memory-wall growth, phone stress test, two-pass wake word).")
+# Spaceflight anomaly inquiries (added 2026-10-20)
+SpaceflightAnomalies = _load("spaceflight_anomalies", "SpaceflightAnomalies", "Cited results of spaceflight anomaly inquiries (ESA Schiaparelli 2017).")
 
 
 # ---------------------------------------------------------------------------
@@ -293,6 +306,15 @@ class Literature(Registry):
     FleetOperations = FleetOperations
     DatacenterElectricity = DatacenterElectricity
     AcceleratorLifecycle = AcceleratorLifecycle
+    StorageSystems = StorageSystems
+    IncidentReports = IncidentReports
+    ServingIncidents = ServingIncidents
+    SelfCorrection = SelfCorrection
+    LlmInferenceTraceCode2023 = _series.LlmInferenceTraceCode2023
+    PredictionQuality = PredictionQuality  # added 2026-10-20
+    GamePlaying = GamePlaying  # added 2026-10-20
+    DeviceMeasurements = DeviceMeasurements  # added 2026-10-20
+    SpaceflightAnomalies = SpaceflightAnomalies  # added 2026-10-20
     ComputeTrend = ComputeTrend
     AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks
@@ -307,6 +329,7 @@ class Literature(Registry):
     OSWorldStepBudget = _series.OSWorldStepBudget
     FrontierSweTrials = _series.FrontierSweTrials
     SweBenchTrajectories = _series.SweBenchTrajectories
+    SweBenchMiniSonnet4Run = _series.SweBenchMiniSonnet4Run  # added 2026-10-20
     RepeatedSamplingCoverage = _series.RepeatedSamplingCoverage
     RepeatedSamplingMajority = _series.RepeatedSamplingMajority
     InjectionDefenseResults = _series.InjectionDefenseResults
