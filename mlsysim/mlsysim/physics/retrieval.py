@@ -101,3 +101,20 @@ def calc_word_overlap(first: str, second: str):
     """
     a, b = _words(first), _words(second)
     return len(a & b), len(a | b), len(a), len(b)
+
+
+# --- MinHash banding for near-duplicate search (added 2026-10-20) ---
+
+def calc_lsh_candidate_probability(similarity: float, bands: int, rows: int) -> float:
+    """Chance that two documents of Jaccard ``similarity`` share at least one band bucket.
+
+    A MinHash signature cut into ``bands`` bands of ``rows`` hashes each makes a
+    pair a candidate when every hash of some band agrees: ``1 - (1 - s^r)^b``
+    (Leskovec, Rajaraman, and Ullman, Mining of Massive Datasets, Sec. 3.4).
+    """
+    return 1 - (1 - similarity ** rows) ** bands
+
+
+def calc_lsh_threshold(bands: int, rows: int) -> float:
+    """Similarity where the banding S-curve is steepest, approximately ``(1/b)^(1/r)``."""
+    return (1 / bands) ** (1 / rows)

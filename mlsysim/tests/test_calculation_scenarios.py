@@ -3861,3 +3861,87 @@ def test_referent_sets_confidence_region_and_latch_stall():
     gs = Scenarios.ConveyorMugGoalSetOffsets
     assert gs.norms == approx([0.666667, 1.333333], rel=1e-5) and gs.inside == [True, False]
 
+# --- Data selection (added 2026-10-20) ---
+
+def test_gpt2_webtext_data_wall():
+    g = Scenarios.Gpt2XlWebTextCorpus
+    assert g.unique_tokens.magnitude == approx(10e9) and g.optimal_tokens.magnitude == approx(30e9)
+    assert g.shortfall == approx(3.0) and g.unique_tokens_per_param == approx(6.6667)
+    assert g.tokens_processed.magnitude == approx(166.67e9) and g.passes == approx(16.667)
+    assert g.trained_tokens_per_param == approx(111.11)
+    assert g.run_time.to("day").magnitude == approx(4.3886) and g.run_energy.to("kWh").magnitude == approx(589.82)
+    n, d = g.compute_optimal
+    assert n == approx(3.5355e9) and d == approx(70.711e9)
+    assert Scenarios.Gpt2XlRunOnOneH100.training_time.to("day").magnitude == approx(35.108)
+    assert Scenarios.ChinchillaComputeDoubling.growth == approx(0.41421)
+
+
+def test_gpt2_deduplication_and_minhash_banding():
+    d = Scenarios.Gpt2WebTextNearDuplicates
+    assert d.time_saved("C4").to("hour").magnitude == approx(3.2020)
+    assert d.time_saved("RealNews").to("hour").magnitude == approx(14.356)
+    assert d.energy_saved("C4").to("kWh").magnitude == approx(17.931)
+    assert d.energy_saved("RealNews").to("kWh").magnitude == approx(80.394)
+    assert d.signature_bytes.to("GB").magnitude == approx(4.096) and d.read_time.to("s").magnitude == approx(5.7143)
+    assert d.all_pairs == approx(3.2e13)
+    b = Scenarios.FineWebMinHashBanding
+    assert b.hashes == 112 and b.threshold == approx(0.71901)
+    assert b.candidate_probability(0.5) == approx(0.053320) and b.candidate_probability(0.8) == approx(0.92355)
+
+
+def test_resnet50_coreset_selection_and_data_path():
+    i = Scenarios.ResNet50HalfImageNetIcr
+    assert i.epoch_flops.to("flop").magnitude == approx(3.1517e16) and i.icr_ratio == approx(1.8)
+    c = Scenarios.ResNet50TenPercentCoresetH100
+    assert c.utilization == approx(0.25231) and c.full_time.to("minute").magnitude == approx(210.51)
+    assert c.score_time().to("s").magnitude == approx(42.101) and c.score_time(c.proxy).to("s").magnitude == approx(18.483)
+    assert c.saving_fraction() == approx(0.89667) and c.saving_fraction(c.proxy) == approx(0.89854)
+    assert c.rescoring_time.to("minute").magnitude == approx(70.168)
+    assert c.rescoring_saving_fraction == approx(0.56667) and c.rescoring_over_training == approx(3.3333)
+    assert c.run_time.to("hour").magnitude == approx(3.5084)
+    e = Scenarios.ResNet50HalfCoresetEpochH100
+    assert e.epoch_time.to("s").magnitude == approx(126.30) and e.epoch_energy.to("kJ").magnitude == approx(88.412)
+    assert e.sample_rate == approx(10144) and e.storage_time.to("s").magnitude == approx(21.168)
+    assert e.link_bytes.to("GB").magnitude == approx(192.85) and e.link_time.to("s").magnitude == approx(3.0133)
+    assert e.host_rate.to("count/second").magnitude == approx(5250) and e.host_epoch_time.to("s").magnitude == approx(244.03)
+    assert e.run_saving_time.to("hour").magnitude == approx(1.5788) and e.run_saving_energy.to("MJ").magnitude == approx(3.9785)
+    assert e.saving_over_score_energy == approx(135.0) and e.materialized_bytes.to("GB").magnitude == approx(74.088)
+    h = Scenarios.ResNet50EchoingH100
+    assert h.ratio == approx(1.9238) and h.utilization == approx(0.51980)
+    assert h.run_time.to("hour").magnitude == approx(6.1008) and h.echoed_run_time.to("hour").magnitude == approx(3.1712)
+
+
+def test_selection_budgets_coverage_and_curriculum():
+    p = Scenarios.ProductionModelScoringCheck
+    assert not p.pays and p.total_time.to("hour").magnitude == approx(13) and p.breakeven_selection.to("hour").magnitude == approx(9)
+    b = Scenarios.ExpensiveSelectionPitfall
+    assert not b.pays and b.overhead_ratio == approx(5.0)
+    assert Scenarios.ProxySelectionPitfall.selection_share == approx(0.0625)
+    v = Scenarios.RareClassTenPercentCoreset
+    assert v.rare == approx(1000) and v.expected_kept == approx(100) and v.shortfall == approx(50)
+    k = Scenarios.Cifar10LinearCurriculum
+    assert k.epoch_reduction == approx(0.23333) and k.warmup_samples == approx(5.5) and k.warmup_share == approx(0.55)
+    assert Scenarios.MentorNetCurriculum.epoch_reduction == approx(0.22222)
+
+
+def test_labeling_and_data_cost():
+    a = Scenarios.ActiveLearningTenRounds
+    assert a.active_labels == 2000 and a.random_cost.magnitude == approx(50_000)
+    assert a.active_cost.magnitude == approx(20_500) and a.roi == approx(1.4390)
+    m = Scenarios.MedicalScanActiveLearning
+    assert m.full_cost.magnitude == approx(5e6) and m.random_labels.magnitude == approx(100_000)
+    assert m.label_ratio == approx(2.0) and m.saving.magnitude == approx(250_000) and m.over_budget_ratio == approx(10)
+    s = Scenarios.FixMatchCifar10Cost
+    assert s.supervised_total.magnitude == approx(4050) and s.ssl_total.magnitude == approx(500)
+    assert s.cost_reduction == approx(8.1) and s.compute_multiple == approx(5) and s.label_reduction == approx(16)
+    f = Scenarios.FoundationModelTenTasks
+    assert f.crossover_tasks == approx(10.526) and f.marginal_compute_reduction == approx(20)
+    assert f.foundation_total.to("hour").magnitude == approx(10_500)
+    c = Scenarios.ImageNetDataCostBreakdown
+    assert c.label_cost.to("USD").magnitude == approx(64_058.35) and c.storage_cost.to("USD").magnitude == approx(35.562)
+    assert c.accelerator_hours.to("hour").magnitude == approx(105.25) and c.compute_cost.to("USD").magnitude == approx(421.01)
+    assert c.total.to("USD").magnitude == approx(114_514.9) and c.compute_share.to("").magnitude == approx(0.0036765)
+    r = Scenarios.MinHashPipelineAmortization
+    assert r.investment.magnitude == approx(55_000) and r.breakeven_runs == approx(5.5)
+    assert r.net_return(1) == approx(-0.81818) and r.savings_multiple(50) == approx(9.0909)
+    assert Scenarios.TenfoldDataFourPoints.scale == approx(10)

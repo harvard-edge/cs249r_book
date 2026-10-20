@@ -739,3 +739,13 @@ __all__ += [
     "calc_chi2_mean_band",
     "calc_noncentral_gate_detection",
 ]
+
+# --- Data selection (added 2026-10-20) ---
+from .retrieval import calc_lsh_candidate_probability, calc_lsh_threshold
+from .scaling import calc_allocation_growth
+
+__all__ += [
+    "calc_lsh_candidate_probability",
+    "calc_lsh_threshold",
+    "calc_allocation_growth",
+]

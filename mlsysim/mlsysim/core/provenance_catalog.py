@@ -3996,3 +3996,108 @@ BOHANNON_WALKING_1997 = _lit(
     notes=("Reference table (cm/s) as reproduced by Shirley Ryan AbilityLab's 10 Meter Walk Test page; "
            "the abstract confirms 253.3 cm/s maximum for men in their twenties."),
 )
+
+# --- Data selection: pruning, deduplication, echoing, and labels (added 2026-10-20) ---
+SHUMAILOV_COLLAPSE_2024 = _lit(
+    "prov:shumailov-model-collapse-2024",
+    "Shumailov, Shumaylov, Zhao, Papernot, Anderson, and Gal (2024), AI models collapse when trained on "
+    "recursively generated data, Nature 631, 755-759",
+    url="https://www.nature.com/articles/s41586-024-07566-y",
+    verified="2026-10-18",
+    notes="OPT-125m fine-tuned on wikitext2, five runs per setting: the real-data model reaches a mean perplexity "
+          "of 34; generations trained only on generated text lose 20 to 28 points; keeping 10 percent of the "
+          "original data gives only minor degradation (figure 1b and 1c).",
+)
+PAUL_DATA_DIET_2021 = _lit(
+    "prov:paul-data-diet-2021",
+    "Paul, Ganguli, and Dziugaite (2021), Deep Learning on a Data Diet: Finding Important Examples Early in "
+    "Training, NeurIPS 2021",
+    url="https://arxiv.org/abs/2107.07075",
+    verified="2026-10-18",
+    notes="Abstract: half of CIFAR-10's training set can be pruned while slightly improving test accuracy; "
+          "figure 1 scores EL2N at epoch 20.",
+)
+SORSCHER_PRUNING_2022 = _lit(
+    "prov:sorscher-beyond-scaling-2022",
+    "Sorscher, Geirhos, Shekhar, Ganguli, and Morcos (2022), Beyond neural scaling laws: beating power law "
+    "scaling via data pruning, NeurIPS 2022",
+    url="https://arxiv.org/abs/2206.14486",
+    verified="2026-10-18",
+    notes="Figure 5C caption: training on 80 percent of ImageNet approximates training on 100 percent; Sec. 6: "
+          "20 percent of ImageNet can be discarded without sacrificing performance (ResNet-50).",
+)
+COLEMAN_SVP_2020 = _lit(
+    "prov:coleman-selection-via-proxy-2020",
+    "Coleman, Yeh, Mussmann, Mirzasoleiman, Bailis, Liang, Leskovec, and Zaharia (2020), Selection via Proxy: "
+    "Efficient Data Selection for Deep Learning, ICLR 2020",
+    url="https://arxiv.org/abs/1906.11829",
+    verified="2026-10-18",
+    notes="Abstract: proxies an order of magnitude faster to compute; active-learning selection runtime cut by "
+          "about that factor with final error often within 0.1 percent; on CIFAR10, proxies over 10x faster to "
+          "train remove up to 50 percent of the data without harming final accuracy, a 1.6x end-to-end gain. "
+          "Five datasets.",
+)
+CHOI_DATA_ECHOING_2019 = _lit(
+    "prov:choi-data-echoing-2019",
+    "Choi, Passos, Shallue, and Dahl (2019), Faster Neural Network Training with Data Echoing, arXiv:1907.05550",
+    url="https://arxiv.org/abs/1907.05550",
+    verified="2026-10-18",
+    notes="Sec. 3.2 and figure 4: ResNet-50 on ImageNet with upstream stages about 6 times slower than the "
+          "accelerator; echo factors 2 to 5; fresh examples and wall time to 75 percent accuracy, five runs; up "
+          "to 3.25x less wall time at echo factor 5.",
+)
+LEE_DEDUP_2022 = _lit(
+    "prov:lee-deduplicating-training-data-2022",
+    "Lee, Ippolito, Nystrom, Zhang, Eck, Callison-Burch, and Carlini (2022), Deduplicating Training Data Makes "
+    "Language Models Better, ACL 2022",
+    url="https://arxiv.org/abs/2107.06499",
+    verified="2026-10-18",
+    notes="Near-duplicate removal affected 3.04 percent of C4 and 13.63 percent of RealNews; footnote 1: a "
+          "61-word sentence repeated 61,036 times in C4; over 4 percent of validation examples overlap training "
+          "data; deduplicated models emit memorized text ten times less often.",
+)
+FINEWEB_2024 = Provenance(
+    id="prov:fineweb-dataset-card-2024",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="Hugging Face (Penedo et al.), HuggingFaceFW/fineweb dataset card, revision 9bb295d; "
+        "huggingface/datatrove examples/fineweb.py at commit acd431b",
+    url="https://huggingface.co/datasets/HuggingFaceFW/fineweb/blob/9bb295ddab0e05d785b879661af7260fed5140fc/README.md",
+    verified="2026-10-18",
+    notes="About 15 trillion tokens from 96 Common Crawl snapshots; MinhashConfig(num_buckets=14, "
+          "hashes_per_bucket=8, n_grams=5) in the datatrove pipeline that built it.",
+)
+SOHN_FIXMATCH_2020 = _lit(
+    "prov:sohn-fixmatch-2020",
+    "Sohn, Berthelot, Li, Zhang, Carlini, Cubuk, Kurakin, Zhang, and Raffel (2020), FixMatch: Simplifying "
+    "Semi-Supervised Learning with Consistency and Confidence, NeurIPS 2020",
+    url="https://arxiv.org/abs/2001.07685",
+    verified="2026-10-20",
+    notes="Table 2, CIFAR-10 error rates over 5 folds: FixMatch (RA) 13.81, 5.07, 4.26 and FixMatch (CTA) 11.39, "
+          "5.07, 4.31 percent at 40, 250, and 4000 labels.",
+)
+CUBUK_AUTOAUGMENT_2019 = _lit(
+    "prov:cubuk-autoaugment-2019",
+    "Cubuk, Zoph, Mane, Vasudevan, and Le (2019), AutoAugment: Learning Augmentation Strategies from Data, "
+    "CVPR 2019",
+    url="https://arxiv.org/abs/1805.09501",
+    verified="2026-10-18",
+    notes="The ImageNet policy search used about 15,000 GPU-hours.",
+)
+YUN_CUTMIX_2019 = _lit(
+    "prov:yun-cutmix-2019",
+    "Yun, Han, Oh, Chun, Choe, and Yoo (2019), CutMix: Regularization Strategy to Train Strong Classifiers "
+    "with Localizable Features, ICCV 2019",
+    url="https://arxiv.org/abs/1905.04899",
+    verified="2026-10-18",
+    notes="ImageNet top-1 improvement of 2.28 percentage points for ResNet-50.",
+)
+TF_PROFILER_GUIDE = Provenance(
+    id="prov:tensorflow-profiler-guide",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="TensorFlow guide, Optimize TensorFlow performance using the Profiler, input-pipeline analyzer screenshot "
+        "(guide/images/tf_profiler/input_pipeline_analyzer.png)",
+    url="https://www.tensorflow.org/guide/profiler",
+    verified="2026-10-18",
+    notes="Summary line: 81.4 percent of the total step time sampled is waiting for input. The step-time chart "
+          "shows steps of about 1.1 s with about 0.2 s of device compute (read from the chart).",
+)

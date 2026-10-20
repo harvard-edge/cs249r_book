@@ -6205,6 +6205,16 @@ class Scenarios(Registry):
     # GPT-2 XL trained on one H100: the run's time, energy, and rent; one step's
     # arithmetic and memory; and the input, checkpoint, and fine-tuning cases
     # beside it.
+    # --- Data selection: corpus repetition, deduplication, coresets, echoing, labels, and cost (added 2026-10-20) ---
+    # GPT-2 XL on WebText carries the data wall and deduplication; ResNet-50 on
+    # ImageNet on one H100 carries coresets, the selection inequality, the data
+    # path, and echoing. Cited figures come from Models, Hardware, Datasets,
+    # Systems, Infrastructure, and Literature; the rest are stated scenario
+    # assumptions of the data-selection examples.
+
+    # Gpt2XlRunOnOneH100 and Gpt2XlRunOnOneDgxH100 carry the same names and
+    # inputs as the training lecture's entries (feat/numbers-v1-08), which add
+    # optional step and price fields to ClusterTrainingTimeScenario.
     Gpt2XlRunOnOneH100 = _st.ClusterTrainingTimeScenario(
         name="GPT-2 XL's training run on one H100",
         description="1.5e21 FLOPs at the H100's dense 16-bit peak and 50 percent utilization, in steps of "
@@ -6934,3 +6944,203 @@ class Scenarios(Registry):
         offsets=[Q_(10.0, "mm"), Q_(20.0, "mm")],  # scenario assumption: terminal TCP offsets along x
     )
 
+    Gpt2XlWebTextCorpus = _st.CorpusRepetitionScenario(
+        name="GPT-2 XL's published training compute on one eight-H100 machine, against WebText",
+        description="WebText at about 4 bytes per token and the run's 1.5e21 FLOPs at six FLOPs per parameter "
+                    "per token.",
+        run=Gpt2XlRunOnOneDgxH100,
+        bytes_per_token=Q_(4, "byte/count"),  # scenario assumption: English text averages about 4 bytes per BPE token
+        tokens_per_param=float(_Literature.Chinchilla.TokensPerParam),
+        flops_per_param_token=float(_Literature.Chinchilla.ComputeConstant),
+    )
+    ChinchillaComputeDoubling = _st.AllocationGrowthScenario(
+        name="Compute-optimal tokens when the compute budget doubles",
+        description="Chinchilla approach 1: D_opt grows as C^0.50.",
+        compute_multiple=2.0,             # scenario assumption: double the budget
+        exponent=float(_Literature.Chinchilla.Approach1TokensExponent),
+    )
+    Gpt2WebTextNearDuplicates = _st.DuplicateRemovalScenario(
+        name="Near-duplicate removal on GPT-2's WebText run, at the C4 and RealNews shares",
+        description="Lee et al. (2022) near-duplicate shares applied to the eight-H100 run; one read of WebText "
+                    "from the node's NVMe; 128 32-bit MinHash values per document.",
+        run=Gpt2XlWebTextCorpus,
+        duplicate_shares={"C4": float(_Literature.DataSelectionResults.LeeC4NearDuplicatePct) / 100,
+                          "RealNews": float(_Literature.DataSelectionResults.LeeRealNewsNearDuplicatePct) / 100},
+        documents=8_000_000,              # scenario assumption: WebText holds slightly over 8 million documents (Radford et al. 2019)
+        signature_hashes=128,             # scenario assumption: signature length per document
+        hash_bytes=Q_(4, "byte"),         # 32-bit hash values
+        read_bandwidth=_Hardware.Cloud.H100.storage.bandwidth,
+    )
+    FineWebMinHashBanding = _st.MinHashBandingScenario(
+        name="FineWeb's MinHash deduplication: 14 bands of 8 hashes over 5-word shingles",
+        description="The datatrove configuration that built FineWeb.",
+        bands=int(_Literature.DataSelectionResults.FineWebMinhashBuckets),
+        rows=int(_Literature.DataSelectionResults.FineWebMinhashHashesPerBucket),
+        shingle_words=int(_Literature.DataSelectionResults.FineWebShingleWords),
+        probe_similarities=[0.5, 0.8],    # scenario assumption: a dissimilar and a near-duplicate pair
+    )
+    ResNet50HalfImageNetIcr = _st.InformationComputeRatioScenario(
+        name="Learning per FLOP of one ResNet-50 epoch on all of ImageNet and on a half-size coreset",
+        description="An assumed 5-point gain on all the data against 4.5 points on the half an EL2N score keeps.",
+        workload=_Models.Vision.ResNet50,
+        dataset=_Datasets.ImageNet,
+        gain_full=5.0,                    # scenario assumption: percentage-point gain in epoch 1, all data
+        gain_subset=4.5,                  # scenario assumption: the same with the 50% coreset
+        keep_fraction=0.5,                # scenario assumption: keep half
+    )
+    ResNet50TenPercentCoresetH100 = _st.CoresetRunScenario(
+        name="ResNet-50 on ImageNet for 100 epochs on one H100, against a 10% coreset scored by ResNet-50 or ResNet-18",
+        description="The A100 ResNet-50 sustained fraction of peak carried to the H100; one forward pass scores "
+                    "the pool.",
+        workload=_Models.Vision.ResNet50,
+        proxy=_Models.Vision.ResNet18,
+        dataset=_Datasets.ImageNet,
+        hardware=_Hardware.Cloud.H100,
+        utilization=ResNet50A100InputFeed.sustained_fraction,
+        keep_fraction=0.10,               # scenario assumption: 10% coreset
+        epochs=100,                       # scenario assumption: training epochs
+    )
+    ResNet50ProxyTrainedCoreset = ResNet50TenPercentCoresetH100.variant(
+        name="A 10% ImageNet coreset for ResNet-50 chosen by a proxy trained from scratch for 5 epochs",
+        description="No pretrained checkpoint: the proxy trains briefly, then EL2N scores rank the pool.",
+        proxy_epochs=5,                   # scenario assumption: proxy training epochs
+    )
+    ResNet50HalfCoresetEpochH100 = ResNet50TenPercentCoresetH100.variant(
+        name="One ResNet-50 ImageNet epoch on one H100, full and with a half-size coreset, through the data path",
+        description="Archive read from the node's NVMe, 8-bit RGB tensors over PCIe, and a host of 14 cores per "
+                    "accelerator at the loader-worker rate, over the standard 90-epoch schedule.",
+        keep_fraction=ResNet50HalfImageNetIcr.keep_fraction,
+        epochs=90,                        # scenario assumption: standard ImageNet schedule
+        host_rate=(_Nodes.DGX_H100.host_cpu_cores // _Nodes.DGX_H100.accelerators_per_node)
+                  * ResNet50A100InputFeed.worker_rate,
+        decoded_sample=Q_(_Datasets.ImageNet.image_width * _Datasets.ImageNet.image_height
+                          * _Datasets.ImageNet.image_channels, "byte"),  # 8-bit RGB tensor
+    )
+    ResNet50EchoingH100 = _st.DataEchoingScenario(
+        name="Data echoing for ResNet-50 on one H100 fed by a 14-core host",
+        description="The H100's demand, stated to the hundred images a second, against the host's preparation "
+                    "rate, over 90 epochs, each prepared image used twice.",
+        accelerator_rate=Q_(round(ResNet50HalfCoresetEpochH100.sample_rate, -2), "count/second"),  # stated as about 10,100 images/s
+        host_rate=ResNet50HalfCoresetEpochH100.host_rate,
+        examples=_Datasets.ImageNet.training_examples,
+        epochs=ResNet50HalfCoresetEpochH100.epochs,
+        echo_factor=2,                    # scenario assumption: repeat each prepared batch twice
+    )
+    ProductionModelScoringCheck = _st.SelectionBudgetScenario(
+        name="A 1M-image pool cut to 100K, scored by the production model in 12 hours",
+        description="Full training 10 hours, subset training 1 hour.",
+        pool=1_000_000,                   # scenario assumption
+        kept=100_000,                     # scenario assumption
+        selection_time=Q_(12, "hour"),    # scenario assumption: production-model scoring
+        subset_time=Q_(1, "hour"),        # scenario assumption
+        full_time=Q_(10, "hour"),         # scenario assumption
+    )
+    ExpensiveSelectionPitfall = _st.SelectionBudgetScenario(
+        name="Ten hours of selection for a subset that trains in two, against an eight-hour baseline",
+        description="Selection overhead that erases the saving.",
+        selection_time=Q_(10, "hour"),    # scenario assumption: expensive selection
+        subset_time=Q_(2, "hour"),        # scenario assumption: subset training run
+        full_time=Q_(8, "hour"),          # scenario assumption: full training run
+    )
+    ProxySelectionPitfall = ExpensiveSelectionPitfall.variant(
+        name="Half an hour of proxy scoring against the same eight-hour baseline",
+        description="A cheap proxy keeps selection a small share of full training.",
+        selection_time=Q_(0.5, "hour"),   # scenario assumption: proxy scoring
+    )
+    RareClassTenPercentCoreset = _st.CoverageFloorScenario(
+        name="A rare class of 0.1 percent in a 1M-example pool under an unstratified 10% coreset",
+        description="Expected rare examples kept against a coverage floor of 150.",
+        pool=1_000_000,                   # scenario assumption
+        rare_share=0.001,                 # scenario assumption: 0.1 percent rare
+        keep_fraction=0.10,               # scenario assumption: 10% coreset
+        floor=150,                        # scenario assumption: illustrative coverage floor
+    )
+    Cifar10LinearCurriculum = _st.CurriculumScheduleScenario(
+        name="A linear-warmup curriculum on CIFAR-10: 115 epochs to target against 150",
+        description="Illustrative epoch counts, with an illustrative 10-epoch linear warmup.",
+        baseline_epochs=150,              # scenario assumption
+        curriculum_epochs=115,            # scenario assumption
+        warmup_epochs=10,                 # scenario assumption: illustrative warmup W
+    )
+    Cifar100Curriculum = Cifar10LinearCurriculum.variant(
+        name="An illustrative CIFAR-100 curriculum: 180 epochs against 220",
+        description="Illustrative epoch counts.",
+        baseline_epochs=220, curriculum_epochs=180, warmup_epochs=None)  # scenario assumption
+    ImageNetCurriculum = Cifar10LinearCurriculum.variant(
+        name="An illustrative ImageNet curriculum: 80 epochs against 90",
+        description="Illustrative epoch counts.",
+        baseline_epochs=90, curriculum_epochs=80, warmup_epochs=None)  # scenario assumption
+    MentorNetCurriculum = Cifar10LinearCurriculum.variant(
+        name="An illustrative MentorNet-style curriculum: 70 epochs against 90",
+        description="Illustrative epoch counts.",
+        baseline_epochs=90, curriculum_epochs=70, warmup_epochs=None)  # scenario assumption
+    ActiveLearningTenRounds = _st.ActiveLearningRoundsScenario(
+        name="Active learning from 1,000 labels in ten rounds of 100, against 5,000 random labels",
+        description="Labels at $10, $50 of pool scoring per round.",
+        label_price=Q_(10, "USD"),        # scenario assumption: per label
+        initial_labels=1000,              # scenario assumption
+        labels_per_round=100,             # scenario assumption
+        rounds=10,                        # scenario assumption
+        round_scoring_cost=Q_(50, "USD"),  # scenario assumption: scoring the pool once
+        random_labels=5000,               # scenario assumption: random sampling to the same quality
+        label_turnaround=Q_(14, "day"),   # scenario assumption: annotation turnaround per round
+    )
+    MedicalScanActiveLearning = _st.BudgetMatchedLabelingScenario(
+        name="A million medical scans at $5 a label under a $500K budget",
+        description="Random labeling spends the budget; active learning reaches the same quality with 50,000 labels.",
+        pool=Q_(1_000_000, "count"),      # scenario assumption: scans in the pool
+        label_price=Q_(5.00, "USD/count"),  # scenario assumption: specialist label
+        budget=Q_(500_000, "USD"),        # scenario assumption
+        active_labels=Q_(50_000, "count"),  # scenario assumption: labels needed with active learning
+        deadline=Q_(1, "month"),          # scenario assumption
+    )
+    FixMatchCifar10Cost = _st.SemiSupervisedCostScenario(
+        name="Supervised training on 4,000 CIFAR-10 labels against FixMatch on 250 with five times the compute",
+        description="Illustrative label and compute dollars.",
+        label_price=Q_(1, "USD"),         # scenario assumption: per label
+        supervised_labels=int(_Literature.DataSelectionResults.FixMatchCifar10LabelsLarge),
+        supervised_compute=Q_(50, "USD"),  # scenario assumption
+        ssl_labels=int(_Literature.DataSelectionResults.FixMatchCifar10LabelsMedium),
+        ssl_compute=Q_(250, "USD"),       # scenario assumption: five times more training
+    )
+    FoundationModelTenTasks = _st.PretrainingAmortizationScenario(
+        name="Ten tasks trained from scratch against one pretrained foundation model fine-tuned ten times",
+        description="GPU-hours and labels per task under illustrative assumptions.",
+        pretrain_compute=Q_(10_000, "hour"),   # scenario assumption: one-time GPU-hours
+        scratch_compute=Q_(1000, "hour"),      # scenario assumption: GPU-hours per task
+        finetune_compute=Q_(50, "hour"),       # scenario assumption: GPU-hours per task
+        tasks=10,                              # scenario assumption
+        scratch_labels=Q_(100_000, "count"),   # scenario assumption
+        finetune_labels=Q_(1_000, "count"),    # scenario assumption
+        label_price=Q_(1, "USD/count"),        # scenario assumption
+    )
+    ImageNetDataCostBreakdown = _st.DataCostBreakdownScenario(
+        name="An ImageNet-scale supervised bill: license, crowd labels, a year of storage, and 30 ResNet-50 runs",
+        description="Every training image labeled at the crowd rate, the archive kept a year in object storage, "
+                    "and a 30-run campaign of 100-epoch runs on one H100 at the cloud GPU rate.",
+        acquisition=Q_(50_000, "USD"),    # scenario assumption: licensed dataset
+        labels=_Datasets.ImageNet.training_examples,
+        label_price=_Infrastructure.Pricing.Labeling.CrowdHigh.rate / Q_(1, "count"),
+        storage_bytes=_Datasets.ImageNet.training_archive_size.to("GB"),
+        storage_rate=_Infrastructure.Pricing.Storage.S3StandardLowPerTbMonth.rate,
+        storage_duration=Q_(12, "month"),  # scenario assumption: retention
+        run_time=ResNet50TenPercentCoresetH100.run_time,
+        runs=30,                          # scenario assumption: runs in the training campaign
+        accelerators=1,
+        accelerator_rate=_Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate,
+    )
+    MinHashPipelineAmortization = _st.RunAmortizationScenario(
+        name="A MinHash deduplication pipeline: $50K to build, $5K to run once, $10K saved per training run",
+        description="Illustrative engineering, compute, and per-run savings.",
+        build_cost=Q_(50_000, "USD"),     # scenario assumption: engineering time
+        operating_cost=Q_(5000, "USD"),   # scenario assumption: one-time MinHash compute
+        saving_per_run=Q_(10_000, "USD"),  # scenario assumption
+        run_counts=[1, 5, 10, 50],        # campaign sizes the amortization table reads
+    )
+    TenfoldDataFourPoints = _st.DataScalingReturnScenario(
+        name="Ten times the data for about four points of accuracy",
+        description="An illustrative power-law return on more data.",
+        base_examples=Q_(1_000_000, "count"),   # scenario assumption
+        scaled_examples=Q_(10_000_000, "count"),  # scenario assumption
+        accuracy_gain=4.0,                      # scenario assumption: percentage points
+    )

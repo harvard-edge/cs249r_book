@@ -22,3 +22,10 @@ def calc_compute_optimal_allocation(budget_flops, tokens_per_param, flops_per_pa
     validate_positive(budget_flops, "budget_flops")
     n = math.sqrt(budget_flops / (flops_per_param_token * tokens_per_param))
     return n, tokens_per_param * n
+
+
+def calc_allocation_growth(compute_multiple, exponent):
+    """Fractional growth of a compute-optimal allocation ``X_opt ~ C^exponent`` when
+    compute grows by ``compute_multiple``: ``multiple^exponent - 1`` (added 2026-10-20)."""
+    validate_positive(compute_multiple, "compute_multiple")
+    return compute_multiple ** exponent - 1
