@@ -3316,3 +3316,11 @@ HE_RESNET_CIFAR10_TABLE6 = _lit(
     verified="2026-10-18",
     notes="Classification error on the CIFAR-10 test set; ResNet-20 8.75 percent, ResNet-56 6.97 percent.",
 )
+
+LECUN_ZIPCODE_1989 = _lit(
+    "prov:lecun-zipcode-1989",
+    "LeCun et al. (1989), Backpropagation Applied to Handwritten Zip Code Recognition, Neural Computation 1(4)",
+    url="https://doi.org/10.1162/neco.1989.1.4.541",
+    verified="2026-10-20",
+    notes="USPS test digits: 1 percent error on the accepted digits after rejecting 12.1 percent.",
+)

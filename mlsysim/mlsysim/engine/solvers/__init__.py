@@ -381,3 +381,7 @@ __all__ += [
     "SandboxPoolReserveModel",
     "BootTimeCdfModel",
 ]
+from .neural import DenseNetworkModel, EpochOverheadModel  # neural computation (added 2026-10-20)
+__all__ += ["DenseNetworkModel", "EpochOverheadModel"]
+from .trends import ParameterGrowthModel  # added 2026-10-20
+__all__ += ["ParameterGrowthModel"]

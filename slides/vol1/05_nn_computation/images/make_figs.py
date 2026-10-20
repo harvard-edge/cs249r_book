@@ -51,19 +51,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import slideplot as sp  # noqa: E402
 import calcs as cx  # noqa: E402
+from deckvals import val, num  # noqa: E402
 
 out = Path(__file__).parent
 plt = sp.plt
 
 # ---------------------------------------------------------------------------
 # One digit, three methods: operations per digit on a log ladder
-LAD = cx.slide_ladder()
+PD = cx.PARADIGMS
 sp.hbars_steps(out / "ops_ladder", [
-    ("Hand-written rules", LAD["rules"], "neutral", f"{LAD['rules']:,} comparisons"),
-    ("HOG features + SVM", LAD["hog"], "neutral", f"{LAD['hog']:,} operations"),
-    ("Neural network", LAD["net"], "compute",
-     f"{LAD['net']:,} MACs  = {round(LAD['net_over_rules'], -2):,.0f}× rules"),
-], "ops", xlabel="Work to classify one 28×28 digit (log scale)")
+    ("Hand-written rules", PD.rule_comparisons, "neutral", f"{val('rules')} comparisons"),
+    ("HOG features + SVM", PD.feature_operations, "neutral", f"{val('hog_ops')} operations"),
+    ("Neural network", cx.R.macs_per_example, "compute",
+     f"{val('macs')} MACs  = {val('net_over_rules')}× rules"),
+], "ops", xlabel=f"Work to classify one {val('img_side')}×{val('img_side')} digit (log scale)")
 
 # ---------------------------------------------------------------------------
 # Activation slopes: how much gradient each activation passes back
@@ -74,7 +75,7 @@ drelu = (z > 0).astype(float)
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(3.3, 1.75))
     ax.plot(z, dsig, color=sp.C["memory"], lw=3.5)
-    ax.annotate("Sigmoid slope:\nat most 0.25", (0, 0.25), xytext=(-5.8, 0.5),
+    ax.annotate(f"Sigmoid slope:\nat most {val('sig_peak')}", (0, cx.CHAIN.peak_slope), xytext=(-5.8, 0.5),
                 fontsize=12, fontweight="bold", color=sp.C["memory"],
                 arrowprops=dict(arrowstyle="-", color=sp.C["memory"], lw=1))
     if k == 2:
@@ -92,22 +93,22 @@ for k in (1, 2):
 
 # ---------------------------------------------------------------------------
 # The transistor tax (illustrative ratio from the chapter)
-TT = cx.slide_transistor()
+TT = cx.LOGIC
 sp.hbars_steps(out / "transistor_tax", [
-    ("ReLU: compare and select", TT["relu"], "compute", f"{TT['relu']:,}"),
-    ("Sigmoid: exponential", TT["sigmoid"], "danger",
-     f"{TT['sigmoid']:,}  = {TT['ratio']:.0f}× ReLU"),
+    ("ReLU: compare and select", TT.cheap_transistors, "compute", val("relu_tr")),
+    ("Sigmoid: exponential", TT.costly_transistors, "danger",
+     f"{val('sig_tr')}  = {val('tr_ratio')}× ReLU"),
 ], "", xlabel="Transistor equivalents per activation unit (illustrative ratio; log scale)",
     size=sp.SHORT)
 
 # ---------------------------------------------------------------------------
 # Forward pass at batch 32: where the operations go (linear axis)
-FW = cx.slide_fwd_ops()
-fwd = [(f"Layer {i + 1} MatMul", v / 1e6, "compute", f"{v:,}") for i, v in enumerate(FW["mm"])]
-fwd.append(("Bias + activation, all layers", FW["other_total"] / 1e6, "neutral",
-            f"{FW['other_total']:,}  ({100 * FW['other_share']:.1f}% of the total)"))
+fwd = [(f"Layer {i + 1} MatMul", v / 1e6, "compute", val(f"mm{i + 1}"))
+       for i, v in enumerate(cx.R.matmul_flops_per_layer)]
+fwd.append(("Bias + activation, all layers", cx.R.elementwise_flops / 1e6, "neutral",
+            f"{val('other_ops')}  ({val('other_share')}% of the total)"))
 sp.hbars_steps(out / "fwd_ops", fwd, "", log=False,
-               xlabel="Million operations for one batch of 32 digits (total about 7 million)")
+               xlabel=f"Million operations for one batch of {val('batch')} digits (total about {val('fwd_m')} million)")
 
 # ---------------------------------------------------------------------------
 # A training step: forward plus two backward products per layer
@@ -115,10 +116,10 @@ sp.hbars_steps(out / "fwd_ops", fwd, "", log=False,
 
 def training_flops(path, step):
     fig, ax = plt.subplots(figsize=(5.8, 2.1))
-    T = cx.slide_train_flops()
-    parts = [("Forward", T["fwd"] / 1e6, sp.C["compute"]),
-             ("Weight gradients", T["wgrad"] / 1e6, sp.C["danger"]),
-             ("Input gradients", T["igrad"] / 1e6, sp.C["network"])]
+    T = cx.R
+    parts = [("Forward", T.matmul_flops / 1e6, sp.C["compute"]),
+             ("Weight gradients", T.weight_gradient_flops / 1e6, sp.C["danger"]),
+             ("Input gradients", T.input_gradient_flops / 1e6, sp.C["network"])]
     left = 0.0
     shown = parts[:step]
     for name, v, col in shown:
@@ -128,17 +129,17 @@ def training_flops(path, step):
                     fontsize=11, color="white", fontweight="bold")
         left += v
     if step == 3:
-        ax.annotate(f"Input gradients\n{T['igrad'] / 1e6:.2f} M (layer 1 skips it)", (left - 0.28, 0.28),
+        ax.annotate(f"Input gradients\n{val('train_igrad_m')} M (layer 1 skips it)", (left - 0.28, 0.28),
                     xytext=(left + 0.3, 0.62), fontsize=11, color=sp.C["network"],
                     fontweight="bold", ha="left",
                     arrowprops=dict(arrowstyle="-", color=sp.C["network"], lw=1))
-        ax.text(left + 0.3, -0.05, f"{T['total'] / 1e6:.1f} M = {T['ratio']:.2f}× forward", fontsize=13,
+        ax.text(left + 0.3, -0.05, f"{val('train_step_m')} M = {val('train_ratio')}× forward", fontsize=13,
                 fontweight="bold", color=sp.C["text"], va="center")
     ax.set_xlim(0, 21.5)
     ax.set_ylim(-0.5, 0.95)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
-    ax.set_xlabel("Million FLOPs per training step (batch 32)")
+    ax.set_xlabel(f"Million FLOPs per training step (batch {val('batch')})")
     ax.grid(axis="x", color=sp.C["grid"], linewidth=0.6)
     ax.set_axisbelow(True)
     sp.save(fig, path)
@@ -153,9 +154,10 @@ for k in (1, 2, 3):
 
 def epoch_plot(path, step):
     fig, ax = plt.subplots(figsize=(5.8, 2.3))
-    E = cx.slide_epoch()
-    rows = [("CPU", E["work_ms"]["cpu"], E["ovh_ms"]["cpu"]),
-            ("Accelerator", E["work_ms"]["acc"], E["ovh_ms"]["acc"])]
+    E = cx.E
+    ms = lambda q: q.to("ms").magnitude
+    rows = [("CPU", ms(E.work_time["host"]), ms(E.overhead_time["host"])),
+            ("Accelerator", ms(E.work_time["accelerator"]), ms(E.overhead_time["accelerator"]))]
     for i, (name, work, over) in enumerate(rows):
         y = 1.3 * (1 - i)
         ax.barh(y, work, color=sp.C["compute"], height=0.5)
@@ -171,10 +173,10 @@ def epoch_plot(path, step):
             ax.text(work + over + 4, y, f"{work + over:.0f} ms", va="center",
                     fontsize=13, fontweight="bold", color=sp.C["text"])
     if step == 1:
-        ax.text(80, 0.65, f"Work alone: the accelerator is {E['work_speedup']:.0f}× faster",
+        ax.text(80, 0.65, f"Work alone: the accelerator is {val('work_speedup')}× faster",
                 fontsize=13, color=sp.C["compute"], fontweight="bold")
     else:
-        ax.text(338, 0.65, f"fixed overhead: {100 * E['ovh_share_acc']:.1f}% of the accelerator's epoch",
+        ax.text(338, 0.65, f"fixed overhead: {val('ovh_share')}% of the accelerator's epoch",
                 fontsize=13, fontweight="bold", color=sp.C["neutral"],
                 ha="right", va="center")
     # two-entry legend, drawn in both steps so the axes do not move
@@ -191,7 +193,7 @@ def epoch_plot(path, step):
     ax.set_ylim(-0.5, 2.5)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
-    ax.set_xlabel("Time for one epoch of MNIST at batch 32 (ms); estimate, Napkin Math 5.3")
+    ax.set_xlabel(f"Time for one epoch of MNIST at batch {val('batch')} (ms); estimate, Napkin Math 5.3")
     ax.grid(axis="x", color=sp.C["grid"], linewidth=0.6)
     ax.set_axisbelow(True)
     sp.save(fig, path)
@@ -206,7 +208,10 @@ for k in (1, 2):
 
 def memory_plot(path, step):
     fig, ax = plt.subplots(figsize=(5.8, 2.3))
-    M = cx.slide_memory()
+    r = cx.R
+    M = {"params_kb": cx.kb(r.parameter_bytes), "act_train_kb": cx.kb(r.saved_activation_bytes),
+         "act_inf_kb": cx.kb(r.inference_activation_bytes), "grads_kb": cx.kb(r.gradient_bytes),
+         "adam_kb": cx.kb(r.optimizer_bytes)}
     train = [("Weights", M["params_kb"], sp.C["memory"]),
              ("Activations", M["act_train_kb"], sp.C["data"]),
              ("Gradients", M["grads_kb"], sp.C["danger"]),
@@ -218,7 +223,7 @@ def memory_plot(path, step):
     for name, v, col in infer:
         ax.barh(0, v, left=left, color=col, height=0.55, edgecolor="white", lw=1.5)
         left += v
-    ax.text(left + 25, 0, f"{M['infer_kb']:.0f} KB", va="center", fontsize=13,
+    ax.text(left + 25, 0, f"{val('mem_infer_kb')} KB", va="center", fontsize=13,
             fontweight="bold", color=sp.C["text"])
     # training row, revealed term by term
     left = 0
@@ -230,7 +235,7 @@ def memory_plot(path, step):
                         fontsize=11, color="white", fontweight="bold")
             left += v
     total = left
-    label = (f"{M['train_kb'] / 1000:.1f} MB  = {M['ratio']:.1f}×" if step >= 3
+    label = (f"{val('mem_train_mb')} MB  = {val('mem_ratio')}×" if step >= 3
              else f"{total:,.0f} KB")
     ax.text(total + 25, 1, label, va="center", fontsize=13,
             fontweight="bold", color=sp.C["text"])
@@ -246,7 +251,7 @@ def memory_plot(path, step):
     ax.set_ylim(-0.5, 2.0)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
-    ax.set_xlabel("Memory for the MNIST network, batch 32, FP32 (KB)")
+    ax.set_xlabel(f"Memory for the MNIST network, batch {val('batch')}, FP32 (KB)")
     ax.grid(axis="x", color=sp.C["grid"], linewidth=0.6)
     ax.set_axisbelow(True)
     sp.save(fig, path)
@@ -268,11 +273,14 @@ def usci(v):
 
 def ranges_plot(path, step):
     fig, ax = plt.subplots(figsize=(5.8, 2.0))
-    G = cx.slide_ranges()
-    rows = [("FP32", G["fp32_min_normal"], G["fp32_max"], sp.C["memory"]),
-            ("BF16", G["fp32_min_normal"], G["fp32_max"], sp.C["memory"]),
-            ("FP16", G["fp16_min_normal"], G["fp16_max"], sp.C["compute"]),
-            ("INT16", 1, G["int16_max"], sp.C["neutral"])]
+    F = cx.FORMATS
+    (f32_max, f32_norm, _), (b16_max, b16_norm, _), (f16_max, f16_norm, f16_sub) = (
+        F.range("fp32"), F.range("bf16"), F.range("fp16"))
+    G = {"fp16_min_normal": f16_norm, "fp16_min_sub": f16_sub, "fp16_max": f16_max, "int16_max": F.integer_max}
+    rows = [("FP32", f32_norm, f32_max, sp.C["memory"]),
+            ("BF16", b16_norm, b16_max, sp.C["memory"]),
+            ("FP16", f16_norm, f16_max, sp.C["compute"]),
+            ("INT16", 1, F.integer_max, sp.C["neutral"])]
     for i, (name, lo, hi, col) in enumerate(rows):
         y = len(rows) - 1 - i
         ax.barh(y, np.log10(hi) - np.log10(lo), left=np.log10(lo), color=col,
@@ -284,17 +292,17 @@ def ranges_plot(path, step):
     ax.barh(1, lo_n - lo_s, left=lo_s, color=sp.C["compute_l"], height=0.55,
             edgecolor=sp.C["compute"], lw=0.8, hatch="///")
     ax.text(np.log10(G["fp16_max"]) + 1, 1,
-            f"{usci(G['fp16_min_normal'])} to {G['fp16_max']:,.0f}\n"
+            f"{usci(G['fp16_min_normal'])} to {val('fp16_max')}\n"
             f"subnormals to {usci(G['fp16_min_sub'])}",
             va="center", fontsize=11, color=sp.C["compute"], fontweight="bold",
             linespacing=1.1)
-    ax.text(np.log10(G["int16_max"]) + 1, 0, f"max {G['int16_max']:,} (Ariane 501)", va="center",
+    ax.text(np.log10(G["int16_max"]) + 1, 0, f"max {val('int16_max')} (Ariane 501)", va="center",
             fontsize=11, color=sp.C["neutral"], fontweight="bold")
     if step >= 2:
-        g = cx.slide_slopes()["survive_20"]
+        g = cx.CHAIN.surviving_fraction
         x = np.log10(g)
         ax.axvline(x, color=sp.C["danger"], lw=2, ls="--")
-        ax.text(x - 1.2, 3.55, f"20 sigmoid layers: {usci(g)}",
+        ax.text(x - 1.2, 3.55, f"{val('sig_depth')} sigmoid layers: {usci(g)}",
                 ha="right", fontsize=13, color=sp.C["danger"], fontweight="bold")
     ticks = [-40, -30, -20, -10, 0, 10, 20, 30, 40]
     ax.set_xticks(ticks)
@@ -314,37 +322,38 @@ for k in (1, 2):
 
 
 # ===========================================================================
-# Slide-size redraws of five chapter figures. The values come from running
-# the chapter's own calculation cells (the same classes the book's figures
-# plot: ParameterGrowth, DepthWidthCost, MnistFlopsCalc, the MNIST layer
-# sizes, and the MLSysIM hardware and model registry), so the slide and the
+# Slide-size redraws of five chapter figures. The values come from the same
+# MLSysIM scenarios the chapter's figures plot (NotableModelParameterGrowth,
+# DenseWidthDepthSweep, MnistDenseNetwork, MnistEpochCpuVersusH100, and the
+# hardware and model registry), read through calcs.py, so the slide and the
 # book cannot disagree. Only the size, type, and labeling change: direct
 # labels replace legends and every label is drawn at slide scale.
-# Needs the repo's mlsysim folder and the MLSysBook venv.
 # ===========================================================================
-CH = cx.chapter()
 K = sp.C
+ARCH = "-".join(str(w) for w in cx.NET.layer_widths)
 
 
 def param_growth():
-    G = CH["ParameterGrowth"]
+    G = cx.GROWTH
+    rows = [{"model": n, "parameters": p} for n, p in zip(G.models, G.parameters)]
+    years, log_params = np.array(G.years), np.array(G.log_parameters)
     dom = {"Language": K["danger"], "Vision": K["memory"], "Games": K["data"]}
-    d = np.array([r["domain"] if r["domain"] in dom else "Other" for r in G.rows])
+    d = np.array([x if x in dom else "Other" for x in G.domains])
     fig, ax = plt.subplots(figsize=(5.3, 2.0))
     for k, col in list(dom.items()) + [("Other", "#BBBBBB")]:
         m = d == k
-        ax.scatter(G.years[m], 10 ** G.log_params[m], s=12, color=col,
+        ax.scatter(years[m], 10 ** log_params[m], s=12, color=col,
                    alpha=0.75, edgecolors="none", zorder=3 if k != "Other" else 2)
     for lo, hi, sl, ic, txt, xm, lift in (
-            (1950, G.split_year, G.early_slope, G.early_intercept, G.early_doubling_str, 1975, 60),
-            (G.split_year, 2026.8, G.late_slope, G.late_intercept, G.late_doubling_str, 1998, 1)):
+            (1950, G.split_year, G.early_slope, G.early_intercept, val("growth_early_mo"), 1975, 60),
+            (G.split_year, 2026.8, G.late_slope, G.late_intercept, val("growth_late_mo"), 1998, 1)):
         xx = np.linspace(lo, hi, 50)
         ax.plot(xx, 10 ** (sl * xx + ic), "--", color=K["text"], lw=1.6, zorder=4)
     yr = lambda x, sl, ic: 10 ** (sl * x + ic)
     ax.text(1972, yr(1972, G.early_slope, G.early_intercept) * 150,
-            f"{G.early_doubling_str}-month doubling", fontsize=11, fontweight="bold",
+            f"{val('growth_early_mo')}-month doubling", fontsize=11, fontweight="bold",
             ha="center", color=K["text"], zorder=6)
-    ax.annotate(f"{G.late_doubling_str}-month doubling", (2014, yr(2014, G.late_slope, G.late_intercept)),
+    ax.annotate(f"{val('growth_late_mo')}-month doubling", (2014, yr(2014, G.late_slope, G.late_intercept)),
                 xytext=(1978, 3e11), fontsize=11, fontweight="bold", ha="center", va="center",
                 color=K["text"], zorder=6,
                 arrowprops=dict(arrowstyle="-", color=K["text"], lw=1))
@@ -352,14 +361,14 @@ def param_growth():
             "AlexNet": (-6, 6, "right"), "GPT-3 175B (davinci)": (-30, 2, "right"),
             "PaLM (540B)": (-8, 4, "right")}
     for n, (dx, dy, ha) in offs.items():
-        for x, r in zip(G.years, G.rows):
+        for x, r in zip(years, rows):
             if r["model"] == n:
                 ax.annotate(n.replace(" (davinci)", "").replace(" (540B)", ""), (x, r["parameters"]),
                             xytext=(dx, dy), textcoords="offset points", ha=ha, fontsize=10.5,
                             color=K["text"], zorder=7,
                             bbox=dict(facecolor="white", alpha=0.85, edgecolor="none", pad=0.5))
                 break
-    mn = CH["MnistModelSizeLocal"].total_params
+    mn = cx.R.parameters
     ax.axhline(mn, color=K["compute"], lw=1.4, ls=":", zorder=1)
     ax.text(2027, mn, " running\n network", fontsize=10.5, color=K["compute"],
             fontweight="bold", va="center", ha="left")
@@ -378,20 +387,21 @@ def param_growth():
 
 
 def depth_width():
-    D = CH["DepthWidthCost"]
+    D = cx.SWEEP
+    h1, mnist_macs = cx.NET.layer_widths[1], cx.R.macs_per_example
     fig, (aw, ad) = plt.subplots(1, 2, figsize=(5.6, 1.9), gridspec_kw={"wspace": 0.75})
-    w = D.sweep_widths
+    w = D.widths
     mw = D.width_sweep_macs
     guide = [mw[-1] * (x / w[-1]) ** 2 for x in w]
     aw.plot(w, guide, color=K["neutral"], lw=1.4, ls="--")
     aw.plot(w, mw, color=K["memory"], lw=2.5, marker="o", ms=5)
-    aw.plot([CH["MNISTInference"].h1_dim], [D.mnist_macs], marker="D", ms=9,
+    aw.plot([h1], [mnist_macs], marker="D", ms=9,
             color=K["danger"], ls="none", zorder=5)
     aw.text(w[0] * 0.95, mw[3] * 4, "two hidden\nlayers", color=K["memory"], fontsize=10.5,
             fontweight="bold", ha="left", va="bottom")
     aw.text(w[4] * 1.25, guide[4] / 5, "slope two", color=K["neutral"], fontsize=10.5,
             ha="left", va="top")
-    aw.annotate("MNIST\n784-128-64-10", (CH["MNISTInference"].h1_dim, D.mnist_macs),
+    aw.annotate(f"MNIST\n{ARCH}", (h1, mnist_macs),
                 xytext=(300, 1.3e4), textcoords="data", fontsize=10.5,
                 color=K["danger"], fontweight="bold", va="center", ha="left",
                 arrowprops=dict(arrowstyle="-", color=K["danger"], lw=1))
@@ -403,13 +413,13 @@ def depth_width():
     aw.set_xlabel("Hidden width")
     aw.set_ylabel("MACs per example")
     aw.set_title("Width: quadratic", fontsize=12, fontweight="bold")
-    dp = D.sweep_depths
+    dp = D.depths
     md = [m / 1e6 for m in D.depth_sweep_macs]
-    act = [a / 1e3 for a in D.depth_sweep_retained]
+    act = [a / 1e3 for a in D.depth_sweep_saved_activations]
     ad.plot(dp, md, color=K["memory"], lw=2.5)
     ad.set_xlim(0, dp[-1] + 1)
     ad.set_ylim(0, None)
-    ad.set_xlabel(f"Hidden layers (width {D.sweep_fixed_width})")
+    ad.set_xlabel(f"Hidden layers (width {val('fixed_width')})")
     ad.set_ylabel("MACs (millions)", color=K["memory"])
     ad.set_title("Depth: linear", fontsize=12, fontweight="bold")
     aa = ad.twinx()
@@ -424,35 +434,32 @@ def depth_width():
 
 
 def mnist_roofline():
-    H = CH["Hardware"]
-    TF = CH["TFLOPs"] / CH["second"]
-    TBs = CH["TB"] / CH["second"]
-    M = CH["MnistFlopsCalc"]
+    E = cx.E
+    tf = lambda q: q.to("Tflop/s").magnitude
     ai = np.logspace(-1.8, 3, 400)  # room left of batch 1 for its label
     fig, ax = plt.subplots(figsize=(5.5, 1.95))
-    machines = [("Desktop CPU", H.Cloud.ReferenceCPU, "#8B5A2B", "--", (12, -8)),
-                ("Data-center accelerator", H.Cloud.H100, K["memory"], "-", (10, -10))]
-    ridges = []
-    for name, hw, col, ls, off in machines:
-        peak = hw.compute.precision_flops["fp32"].to(TF).magnitude
-        bw = hw.memory.bandwidth.to(TBs).magnitude
+    machines = [("Desktop CPU", "host", "#8B5A2B", "--", (12, -8)),
+                ("Data-center accelerator", "accelerator", K["memory"], "-", (10, -10))]
+    i1, i32 = cx.R1.intensity.to("flop/byte").magnitude, cx.R.intensity.to("flop/byte").magnitude
+    for name, key, col, ls, off in machines:
+        peak = tf(E.peak[key])
+        bw = E.bandwidth[key].to("TB/s").magnitude
         ax.plot(ai, np.minimum(peak, bw * ai), color=col, lw=2.5, ls=ls)
         ax.text(900, peak * 1.4, name, color=col, fontsize=11, fontweight="bold",
                 ha="right", va="bottom")
-        ridges.append(peak / bw)
-        for lab, x in (("batch 1", M.single_image_arith_intensity), ("batch 32", M.batch_arith_intensity)):
-            y = min(peak, bw * x)
+        for lab, x, y in (("batch 1", i1, tf(E.rate_batch1[key])), (f"batch {val('batch')}", i32, tf(E.rate[key]))):
             ax.plot(x, y, "o", color=K["danger"], ms=8, zorder=4)
-            val = (f"{y * 1000:,.0f} GFLOP/s" if y < 1 else
+            rate_lbl = (f"{y * 1000:,.0f} GFLOP/s" if y < 1 else
                    f"{y:.1f} TFLOP/s" if y < 10 else f"{y:,.0f} TFLOP/s")
-            up = hw is H.Cloud.H100  # up-left keeps the accelerator labels off the CPU line
+            up = key == "accelerator"  # up-left keeps the accelerator labels off the CPU line
             # accelerator labels up-left; CPU labels down-right of their points
             left = up
-            ax.annotate(f"{lab}:\n{val}" if lab == "batch 1" else f"{lab}: {val}", (x, y),
+            ax.annotate(f"{lab}:\n{rate_lbl}" if lab == "batch 1" else f"{lab}: {rate_lbl}", (x, y),
                         xytext=(-10, 6) if left else off, textcoords="offset points",
                         ha="right" if left else "left", va="bottom" if left else "top",
                         fontsize=12, color=K["text"])
-    ax.text(max(ridges) * 2.5, 4e-4, f"ridge ≈ {np.mean(ridges):.0f} FLOP/byte\non both machines",
+    ax.text(max(r.to("flop/byte").magnitude for r in E.ridge.values()) * 2.5, 4e-4,
+            f"ridge ≈ {val('ridge')} FLOP/byte\non both machines",
             fontsize=10.5, color=K["text"], ha="left", va="bottom")
     ax.set_xscale("log")
     ax.set_yscale("log")
@@ -467,20 +474,17 @@ def mnist_roofline():
 
 
 def model_bytes():
-    Mo, H = CH["Models"], CH["Hardware"]
-    dims = CH["_MNIST_LAYERS_DIMS"]
-    bpp = CH["BYTES_FP32"].to(CH["byte"]).magnitude
-    models = [("MNIST", sum(dims[i] * dims[i + 1] + dims[i + 1] for i in range(len(dims) - 1))),
-              ("ResNet-50", Mo.Vision.ResNet50.parameters.to(CH["param"]).magnitude),
-              ("GPT-2", Mo.Language.GPT2.parameters.to(CH["param"]).magnitude)]
-    by = CH["byte"]
-    tiers = [("MCU SRAM", H.Tiny.ESP32_S3.memory.sram_capacity.to(by).magnitude),
-             ("H100 L2", H.Cloud.H100.memory.l2_cache.to(by).magnitude),
-             ("H100 HBM", H.Cloud.H100.memory.capacity.to(by).magnitude)]
+    H = cx.mlsysim.Hardware
+    by = lambda q: q.to("byte").magnitude
+    models = [("MNIST", by(cx.R.parameter_bytes)), ("ResNet-50", by(cx.RESNET.weights)),
+              ("GPT-2", by(cx.GPT2.weights))]
+    tiers = [("MCU SRAM", by(H.Tiny.ESP32_S3.memory.sram_capacity)),
+             ("H100 L2", by(H.Cloud.H100.memory.l2_cache)),
+             ("H100 HBM", by(H.Cloud.H100.memory.capacity))]
     y = np.arange(len(models))
-    wts = np.array([n * bpp for _, n in models])
+    wts = np.array([b for _, b in models])
     fig, ax = plt.subplots(figsize=(3.8, 1.45))
-    ax.barh(y + 0.19, wts * 4, height=0.36, color=K["compute_l"], edgecolor=K["compute"])
+    ax.barh(y + 0.19, wts * cx.GPT2.copies, height=0.36, color=K["compute_l"], edgecolor=K["compute"])
     ax.barh(y - 0.19, wts, height=0.36, color=K["memory_l"], edgecolor=K["memory"])
     ax.set_xscale("log")
     ax.set_xlim(1e4, 1e13)
@@ -494,7 +498,7 @@ def model_bytes():
                 color=K["danger"], ha=ha, va="bottom", fontweight="bold")
     # legend in its own row above the tier labels
     for j, (txt, fc, ec) in enumerate((("weights", K["memory_l"], K["memory"]),
-                                       ("training state (×4)", K["compute_l"], K["compute"]))):
+                                       (f"training state (×{val('train_copies')})", K["compute_l"], K["compute"]))):
         x0 = 0.0 + j * 0.38
         ax.add_patch(plt.Rectangle((x0, 1.27), 0.05, 0.1, transform=ax.transAxes,
                                    facecolor=fc, edgecolor=ec, clip_on=False))
@@ -524,12 +528,14 @@ model_bytes()
 
 def mnist_digit():
     d = json.loads((out / "data" / "mnist_test0.json").read_text())
-    return np.array(d["pixels"], dtype=float).reshape(28, 28) / 255.0
+    side = cx.Datasets.MNIST.image_width
+    return np.array(d["pixels"], dtype=float).reshape(side, side) / (cx.units.COLOR_DEPTH_8BIT - 1)
 
 
 def mnist_net(path, step):
     fig, ax = plt.subplots(figsize=(5.8, 1.9))
-    cols = [(1.9, 784, 7), (3.25, 128, 6), (4.45, 64, 5), (5.5, 10, 4)]
+    # (x position, layer width, units drawn)
+    cols = list(zip((1.9, 3.25, 4.45, 5.5), cx.NET.layer_widths, (7, 6, 5, 4)))
     ys = {}
     for x, n, k in cols:
         yy = np.linspace(0.15, 1.45, k) if k > 4 else np.linspace(0.35, 1.25, k)
@@ -547,7 +553,7 @@ def mnist_net(path, step):
               interpolation="nearest")
     ax.annotate("", (1.75, 0.8), xytext=(1.1, 0.8),
                 arrowprops=dict(arrowstyle="-|>", color=K["text"], lw=1.4))
-    ax.text(0.52, 1.62, "28×28 MNIST digit", ha="center", va="bottom", fontsize=12,
+    ax.text(0.52, 1.62, f"{val('img_side')}×{val('img_side')} MNIST digit", ha="center", va="bottom", fontsize=12,
             color=K["neutral"])
     if step >= 2:
         for (x0, n0, _), (x1, n1, _) in zip(cols[:-1], cols[1:]):
@@ -604,9 +610,12 @@ def cross_entropy():
     fig, ax = plt.subplots(figsize=(5.6, 2.3))
     p = np.linspace(0.02, 1.0, 400)
     ax.plot(p, -np.log(p), color=K["memory"], lw=3)
-    for pv, txt, dx, dy, ha in ((0.1, "p = 0.1: 2.30\n(uniform guess, or a\nconfident mistake)", 0.05, 0.25, "left"),
-                                (0.8, "p = 0.8: 0.22", 0.0, 0.75, "center"),
-                                (0.9, "p = 0.9: 0.11", 0.06, 0.45, "left")):
+    CE = cx.CE
+    for pv, txt, dx, dy, ha in (
+            (CE.misread["true"], f"p = {val('ce_p_miss')}: {val('ce_miss')}\n(uniform guess, or a\nconfident mistake)",
+             0.05, 0.25, "left"),
+            (CE.probabilities["correct"], f"p = {val('ce_p')}: {val('ce_loss')}", 0.0, 0.75, "center"),
+            (CE.probabilities["confident"], f"p = {val('ce_p_conf')}: {val('ce_conf')}", 0.06, 0.45, "left")):
         lv = -np.log(pv)
         ax.plot(pv, lv, "o", color=K["danger"], ms=9, zorder=4)
         ax.annotate(txt, (pv, lv), xytext=(pv + dx, lv + dy), fontsize=13,
@@ -633,14 +642,15 @@ cross_entropy()
 def risk_coverage():
     fig, ax = plt.subplots(figsize=(3.7, 2.3))
     c = np.linspace(0.55, 1.0, 200)
-    risk = 1.0 * np.exp(9.0 * (c - 0.879))   # schematic: through the point
+    acc, err = num("lecun_acc"), num("lecun_err")
+    risk = err * np.exp(9.0 * (c - acc / 100))   # schematic: through the point
     ax.plot(c * 100, risk, color=K["memory"], lw=3)
-    ax.plot(87.9, 1.0, "o", color=K["danger"], ms=10, zorder=4)
-    ax.annotate("1989 ZIP-code\nreader: 1% error,\n12.1% rejected", (87.9, 1.0),
+    ax.plot(acc, err, "o", color=K["danger"], ms=10, zorder=4)
+    ax.annotate(f"1989 ZIP-code\nreader: {val('lecun_err')}% error,\n{val('lecun_rej')}% rejected", (acc, err),
                 xytext=(57, 1.6), fontsize=12, fontweight="bold", color=K["danger"],
                 arrowprops=dict(arrowstyle="-", color=K["danger"], lw=1))
-    ax.axvline(87.9, color=K["neutral"], ls=":", lw=1.5)
-    ax.text(88.6, 3.5, "threshold", fontsize=12, color=K["neutral"], ha="left",
+    ax.axvline(acc, color=K["neutral"], ls=":", lw=1.5)
+    ax.text(acc + 0.7, 3.5, "threshold", fontsize=12, color=K["neutral"], ha="left",
             va="top")
     ax.set_xlim(55, 101)
     ax.set_ylim(0, 3.6)
@@ -728,18 +738,17 @@ def memory_timeline():
 
 def overfit_curves():
     d = json.loads((out / "data" / "overfit.json").read_text())
-    O = cx.slide_overfit()
-    small, full = d["runs"]["1000"], d["runs"]["60000"]
+    small, full = d["runs"][cx.small], d["runs"][cx.full]
     ep = np.arange(1, len(small["train_acc"]) + 1)
     fig, ax = plt.subplots(figsize=(3.2, 2.35))
     ax.plot(ep, np.array(small["train_acc"]) * 100, color=K["compute"], lw=2.5)
     ax.plot(ep, np.array(small["test_acc"]) * 100, color=K["compute"], lw=2.5, ls="--")
     ax.plot(ep, np.array(full["test_acc"]) * 100, color=K["memory"], lw=2.5, ls="--")
-    ax.text(40, 100.6, f"training, 1,000 images: {O['1000']['train']:.0f}%", fontsize=11,
+    ax.text(40, 100.6, f"training, {val('ov_small')} images: {val('ov_train_small')}%", fontsize=11,
             color=K["compute"], fontweight="bold", ha="right", va="bottom")
-    ax.text(40, O["1000"]["test"] - 0.8, f"held-out: {O['1000']['test']:.1f}%", fontsize=11,
+    ax.text(40, num("ov_test_small") - 0.8, f"held-out: {val('ov_test_small')}%", fontsize=11,
             color=K["compute"], fontweight="bold", ha="right", va="top")
-    ax.text(40, O["60000"]["test"] - 0.8, f"held-out, trained on\n60,000 images: {O['60000']['test']:.1f}%",
+    ax.text(40, num("ov_test_full") - 0.8, f"held-out, trained on\n{val('ov_full')} images: {val('ov_test_full')}%",
             fontsize=11, color=K["memory"], fontweight="bold", ha="right", va="top",
             linespacing=1.0)
     ax.set_xlim(0, 41)

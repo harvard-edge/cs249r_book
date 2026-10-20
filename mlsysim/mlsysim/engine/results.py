@@ -2585,3 +2585,103 @@ class BootTimeCdfResult(SolverResult):
     booting: int                             # instances booting at once
     median: Quantity
     tail: Quantity
+
+
+# --- Neural computation: a dense network's counts, and one training epoch (added 2026-10-20) ---
+
+class DenseNetworkResult(SolverResult):
+    """Result from DenseNetworkModel: what one dense network costs at one batch size.
+
+    Counts are plain integers; byte totals and intensity carry units. Per-layer
+    lists run from the first layer to the output layer.
+    """
+    layer_widths: List[int]
+    batch_size: int
+    layers: int
+    weights_per_layer: List[int]
+    biases_per_layer: List[int]
+    params_per_layer: List[int]
+    weights: int
+    biases: int
+    parameters: int
+    macs_per_example: int                    # one MAC per weight
+    flops_per_example: int                   # 2 FLOPs per MAC
+    first_layer_share: float                 # first layer's weights / all weights (= its share of the MACs)
+    matmul_flops_per_layer: List[int]        # 2 B n_in n_out, at the batch
+    elementwise_flops_per_layer: List[int]   # bias add + activation, 2 B n_out
+    matmul_flops: int
+    elementwise_flops: int
+    forward_flops: int                       # matmul + elementwise, at the batch
+    forward_flops_per_example: float
+    matmul_share: float
+    elementwise_share: float
+    parameter_bytes: Quantity
+    traffic_values: int                      # activation values crossing memory, at the batch
+    traffic_bytes: Quantity                  # weights once + activation traffic
+    intensity: Quantity                      # forward FLOPs / traffic bytes
+    weight_gradient_flops: int
+    input_gradient_flops: int
+    training_step_flops: int                 # forward matmul + both gradient products
+    training_flops_ratio: float              # training step / forward matmul
+    activation_values_per_layer: List[int]   # B n_l for the input and every layer output
+    activation_values_per_example: int       # sum of widths
+    saved_activation_values: int             # training keeps all of them, at the batch
+    saved_activation_bytes: Quantity
+    inference_activation_values: int         # largest adjacent pair, at the batch
+    inference_activation_bytes: Quantity
+    gradient_bytes: Quantity
+    optimizer_bytes: Quantity
+    training_memory: Quantity                # weights + saved activations + gradients + optimizer
+    inference_memory: Quantity               # weights + the rolling activation pair
+    training_memory_ratio: float
+    steps_per_epoch: Optional[int] = None    # training examples // batch, when a dataset is given
+
+
+class EpochOverheadResult(SolverResult):
+    """Result from EpochOverheadModel: one training epoch's work and fixed overhead on a host and an accelerator.
+
+    Dictionaries are keyed ``"host"`` and ``"accelerator"``.
+    """
+    steps: int
+    step_flops: Quantity
+    ops_per_step: int
+    peak: Dict[str, Quantity]
+    bandwidth: Dict[str, Quantity]
+    ridge: Dict[str, Quantity]
+    rate_batch1: Dict[str, Quantity]         # attainable rate at the batch-1 intensity
+    rate: Dict[str, Quantity]                # attainable rate at the network's batch
+    batching_speedup: Dict[str, float]       # rate / rate_batch1
+    work_time: Dict[str, Quantity]
+    overhead_time: Dict[str, Quantity]
+    total_time: Dict[str, Quantity]
+    work_speedup: float                      # host work / accelerator work
+    overhead_share_accelerator: float
+    movement_to_arithmetic_energy: float     # DRAM energy per FLOP's bytes / FLOP energy, at the batch
+    movement_to_arithmetic_energy_batch1: float
+
+
+__all__ += [
+    "DenseNetworkResult",
+    "EpochOverheadResult",
+]
+
+
+class ParameterGrowthResult(SolverResult):
+    """Result from ParameterGrowthModel: parameter-count fits before and after a split year (added 2026-10-20)."""
+    models: List[str]
+    domains: List[str]
+    parameters: List[float]
+    years: List[float]                 # decimal publication years
+    log_parameters: List[float]
+    split_year: int
+    early_slope: float                 # decades of parameters per year, before the split
+    early_intercept: float
+    late_slope: float
+    late_intercept: float
+    early_doubling_months: float
+    late_doubling_months: float
+    largest_parameters: float
+    model_count: int
+
+
+__all__ += ["ParameterGrowthResult"]

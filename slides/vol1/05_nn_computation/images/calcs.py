@@ -1,625 +1,332 @@
 #!/usr/bin/env python3
-"""Every derived number in Lecture 5 (Neural Computation), computed from sourced inputs.
+"""Every number on the Volume I Lecture 5 (Neural Computation) slides and notes, read from MLSysIM.
 
-One block per slide, in deck order. Inputs carry their source as a comment;
-each printed line is a value the slide or its note shows, under the label
-used there. make_figs.py imports these functions, so the figures and the
-slides share one computation.
+MLSysIM holds the inputs and the calculations: the running 784-128-64-10
+network (Scenarios.MnistDenseNetwork and its variants, DenseNetworkModel), the
+width and depth sweep, the CPU-against-accelerator epoch (EpochOverheadModel),
+the paradigm, activation, loss, and backpropagation examples, the number-format
+ranges (physics.numerics), the parameter-growth fit, and the cited figures in
+Literature. The chapter reads the same scenarios. This file only selects values,
+converts units, and formats them; it types no numbers. Each value is recorded
+with v() under the key the deck prints as \\val{key}; running this file writes
+images/numbers.tex. make_figs.py imports this module, so figures and slides
+share one computation.
 
-The chapter's own calculation cells are executed as well (chapter()), for
-two jobs only: they supply the MLSysIM hardware specs the roofline and the
-epoch estimate need, and they give the chapter's published values, which
-check() compares against this file's independent arithmetic. Any
-disagreement prints a line starting with DISAGREES.
+Two inputs are measured here, not in MLSysIM, and read as the tools printed
+them: data/torch_runs.txt (torch_runs.py: autograd saved tensors and the
+torch.profiler table) and data/overfit.json (overfit_run.py: MNIST training
+against held-out accuracy).
 
-Measured values come from the real runs in this folder:
-  data/torch_runs.txt   (torch_runs.py: autograd saved tensors; profiler)
-  data/overfit.json     (overfit_run.py: MNIST training against held-out)
-
-Run from this folder with the MLSysBook venv (it imports mlsysim):
-  ../../../../.venv/bin/python calcs.py
+Run from this folder: python3 calcs.py
 """
 
 import json
-import math
-import os
 import re
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-DATA = HERE / "data"
-ROOT = HERE.parents[3]                     # repository root (holds books/ and mlsysim/)
-
-_CH = None
-PROBLEMS = []
-
-
-def chapter():
-    """Execute the chapter's calculation cells once; return their namespace."""
-    global _CH
-    if _CH is not None:
-        return _CH
-    import matplotlib
-    import matplotlib.pyplot as plt
-    for d in (ROOT, ROOT / "mlsysim"):
-        if str(d) not in sys.path:
-            sys.path.insert(0, str(d))
-    qmd = next((ROOT / "books" / "vol1" / "05_nn_computation").glob("*.qmd"))
-    cells = re.findall(r"```\{python\}\n(.*?)```", qmd.read_text(), re.S)
-    saved = dict(matplotlib.rcParams)
-    here = os.getcwd()
-    os.chdir(ROOT)
-    ns = {}
-    try:
-        for cell in cells:
-            if "plt.show(" in cell or "setup_plot(" in cell:
-                continue  # figure cells; only the calculations are needed
-            exec(cell, ns)
-    finally:
-        os.chdir(here)
-        plt.close("all")
-        matplotlib.rcParams.update(saved)
-    _CH = ns
-    return ns
-
-
-def show(label, value):
-    print(f"  {label}: {value}")
-
-
-def check(label, ours, book, tol=1e-6):
-    """Compare this file's value with the chapter's published one."""
-    ok = math.isclose(float(ours), float(book), rel_tol=tol, abs_tol=tol)
-    if not ok:
-        PROBLEMS.append(f"{label}: calcs {ours} vs chapter {book}")
-        print(f"  DISAGREES {label}: calcs {ours} vs chapter {book}")
-
-
-# ---------------------------------------------------------------------------
-# Inputs: the running network (chapter Sec. 5.1 and Table 5)
-WIDTHS = [784, 128, 64, 10]     # 28x28 input, two hidden layers, 10 classes
-BATCH = 32                      # chapter Napkin Math 5.1
-BYTES_FP32 = 4                  # IEEE 754 single precision
-TRAIN_IMAGES = 60_000           # MNIST training set (chapter Sec. 5.4.3)
-
-
-def network():
-    w = [a * b for a, b in zip(WIDTHS[:-1], WIDTHS[1:])]
-    b = WIDTHS[1:]
-    return {"weights": w, "biases": b, "W": sum(w), "B": sum(b), "P": sum(w) + sum(b)}
-
-
-TEST_IMAGES = 10_000            # MNIST test set (LeCun, Cortes, Burges)
-
-
-def slide_hook():
-    """Slide 'Reading one handwritten digit takes 109,184 multiply-adds'."""
-    n = network()
-    macs = n["W"]                       # one MAC per weight per example
-    return {"macs": macs, "flops": 2 * macs, "mnist_total": TRAIN_IMAGES + TEST_IMAGES}
-
-
-def slide_ladder():
-    """Slide 'Learned features cost 1,100 times the work of rules'.
-    Inputs: about 100 comparisons (rules) and about 8,000 operations
-    (HOG + linear SVM), chapter Sec. 5.2, illustrative implementations."""
-    rules, hog = 100, 8000
-    macs = slide_hook()["macs"]
-    return {"rules": rules, "hog": hog, "net": macs, "net_over_rules": macs / rules,
-            "hog_over_rules": hog / rules}
-
-
-def slide_neuron():
-    """Slide 'One neuron is a dot product...': a first-layer unit sees 784 pixels."""
-    return {"unit_macs": WIDTHS[0], "layer1_macs": WIDTHS[0] * WIDTHS[1]}
-
-
-def slide_xor():
-    """Slide 'Two ReLU units compute XOR' (chapter Example 5.2)."""
-    relu = lambda v: max(0.0, v)
-    rows = []
-    for x1, x2 in ((0, 0), (0, 1), (1, 0), (1, 1)):
-        h1, h2 = relu(x1 + x2), relu(x1 + x2 - 1)
-        rows.append((x1, x2, h1, h2, h1 - 2 * h2))
-    return {"rows": rows}
-
-
-def slide_slopes():
-    """Slide 'Predict: how much gradient survives 20 sigmoid layers?'.
-    Input: the sigmoid's slope peaks at 0.25 (chapter Sec. 5.3.2)."""
-    return {"survive_20": 0.25 ** 20}
-
-
-def slide_alexnet():
-    """Slide 'Predict: how much gradient survives...', step 3. Inputs read off
-    Krizhevsky et al. 2012, Figure 1: the ReLU curve reaches 25 percent
-    training error at epoch 6, the tanh curve at epoch 36."""
-    relu_ep, tanh_ep = 6, 36
-    return {"relu_ep": relu_ep, "tanh_ep": tanh_ep, "ratio": tanh_ep / relu_ep}
-
-
-def slide_transistor():
-    """Slide on activation cost. Inputs: ReLU about 50 and an exponential
-    datapath about 2,500 transistor equivalents, chapter Sec. 5.3.2, a
-    stylized teaching ratio (illustrative)."""
-    relu, sig = 50, 2500
-    return {"relu": relu, "sigmoid": sig, "ratio": sig / relu}
-
-
-def slide_layer():
-    """Slide 'A layer is one matrix multiply; a batch reuses each weight'."""
-    return {"layer1_b32_macs": BATCH * WIDTHS[0] * WIDTHS[1]}
-
-
-def slide_count():
-    """Slide 'Your turn: what does the MNIST network weigh?'."""
-    n = network()
-    bytes_ = n["P"] * BYTES_FP32
-    side2 = 56 * 56                     # chapter self-check: a 56x56 input
-    return {**n, "bytes": bytes_, "kb": bytes_ / 1000,
-            "layer1_share": n["weights"][0] / n["W"],
-            "w1_56": side2 * WIDTHS[1]}
-
-
-def macs_of(widths):
-    return sum(a * b for a, b in zip(widths[:-1], widths[1:]))
-
-
-def slide_depth_width():
-    """Slide 'Width costs quadratically, depth costs linearly' (chapter
-    Sec. 5.3.5, Figure 12): two hidden layers swept in width; width 512 swept
-    in depth; saved activations = input + every layer output."""
-    inp, out = WIDTHS[0], WIDTHS[-1]
-    net = lambda L, w: [inp] + [w] * L + [out]
-    wid = macs_of(net(2, 4096)) / macs_of(net(2, 2048))
-    dep = macs_of(net(32, 512)) / macs_of(net(16, 512))
-    ret = sum(net(32, 512)) / sum(net(16, 512))
-    return {"width_double": wid, "depth_double": dep, "retained_double": ret}
-
-
-def fwd_flops(widths, batch=BATCH):
-    """Chapter Napkin Math 5.1: 2*B*n_in*n_out per matrix multiply, and two
-    operations per output value for the bias add and the activation."""
-    mm = [2 * batch * a * b for a, b in zip(widths[:-1], widths[1:])]
-    other = [2 * batch * b for b in widths[1:]]
-    return mm, other
-
-
-def slide_fwd_ops():
-    """Slide 'Matrix multiply is over 99 percent of the forward pass'."""
-    mm, other = fwd_flops(WIDTHS)
-    total = sum(mm) + sum(other)
-    dmm, doth = fwd_flops([784, 256, 128, 10])
-    dtotal = sum(dmm) + sum(doth)
-    return {"mm": mm, "other": other, "other_total": sum(other), "total": total,
-            "per_digit": total / BATCH, "mm_share": sum(mm) / total,
-            "other_share": sum(other) / total, "layer1_share_of_mm": mm[0] / sum(mm),
-            "double_total": dtotal, "double_ratio": dtotal / total}
-
-
-def load_profile():
-    """Parse data/torch_runs.txt (the profiler table from torch_runs.py)."""
-    txt = (DATA / "torch_runs.txt").read_text()
-    rows = {}
-    for m in re.finditer(r"^\s*(aten::\w+)\s+([\d.]+)%\s+([\d.]+)(ms|us)\s+([\d.]+)%"
-                         r"\s+([\d.]+)(ms|us)\s+([\d.]+)(ms|us)\s+(\d+)", txt, re.M):
-        name = m.group(1)
-        to_us = lambda v, u: float(v) * (1000 if u == "ms" else 1)
-        rows[name] = {"self_pct": float(m.group(2)), "self_us": to_us(m.group(3), m.group(4)),
-                      "avg_us": to_us(m.group(8), m.group(9)), "calls": int(m.group(10))}
-    tot = re.search(r"Self CPU time total: ([\d.]+)(ms|us)", txt)
-    total_us = float(tot.group(1)) * (1000 if tot.group(2) == "ms" else 1)
-    passes = 200                                  # torch_runs.py: 200 profiled forward passes
-    head = txt.splitlines()[0]
-    return rows, total_us, passes, head
-
-
-def slide_profile():
-    """New slide: the profiler on the running network at batch 32."""
-    rows, total_us, passes, head = load_profile()
-    mm, _ = fwd_flops(WIDTHS)
-    per_pass_us = total_us / passes
-    addmm = rows["aten::addmm"]
-    # aten::addmm, aten::clamp_min (the ReLU's arithmetic): the kernels that compute
-    compute_pct = addmm["self_pct"] + rows["aten::clamp_min"]["self_pct"]
-    return {"versions": head, "per_pass_us": per_pass_us, "addmm_pct": addmm["self_pct"],
-            "addmm_calls_per_pass": addmm["calls"] / passes, "addmm_avg_us": addmm["avg_us"],
-            "relu_kernel_pct": rows["aten::clamp_min"]["self_pct"],
-            "bookkeeping_pct": 100 - compute_pct,
-            "addmm_rate_gflops": sum(mm) / (addmm["self_us"] / passes) / 1e3}
-
-
-def traffic_bytes(widths, batch):
-    """Chapter Napkin Math 5.1 traffic model: every weight and bias once;
-    input and output once; each hidden activation written and read back."""
-    n = network()
-    hidden = sum(widths[1:-1])
-    return n["P"] * BYTES_FP32 + batch * (widths[0] + 2 * hidden + widths[-1]) * BYTES_FP32
-
-
-def slide_intensity():
-    """Slide on arithmetic intensity, and the predict slide after it."""
-    f = slide_fwd_ops()
-    b1 = traffic_bytes(WIDTHS, 1)
-    b32 = traffic_bytes(WIDTHS, BATCH)
-    i1 = f["per_digit"] / b1
-    i32 = f["total"] / b32
-    return {"bytes_b1": b1, "bytes_b32": b32, "i1": i1, "i32": i32, "ratio": i32 / i1}
-
-
-def machines():
-    """MLSysIM registry via the chapter: the reference desktop CPU and the H100."""
-    CH = chapter()
-    H = CH["Hardware"]
-    TF = CH["TFLOPs"] / CH["second"]
-    TBs = CH["TB"] / CH["second"]
-    out = {}
-    for key, hw in (("cpu", H.Cloud.ReferenceCPU), ("acc", H.Cloud.H100)):
-        out[key] = {"peak_tflops": hw.compute.precision_flops["fp32"].to(TF).magnitude,
-                    "bw_tbs": hw.memory.bandwidth.to(TBs).magnitude}
-    return out
-
-
-def slide_roofline():
-    """Slides 'Predict: how much faster per image at batch 32?' and the roofline."""
-    I = slide_intensity()
-    out = {}
-    for k, m in machines().items():
-        r1 = min(m["peak_tflops"], m["bw_tbs"] * I["i1"])
-        r32 = min(m["peak_tflops"], m["bw_tbs"] * I["i32"])
-        out[k] = {"ridge": m["peak_tflops"] / m["bw_tbs"], "rate_b1": r1, "rate_b32": r32,
-                  "speedup": r32 / r1, **m}
-    out["mean_ridge"] = (out["cpu"]["ridge"] + out["acc"]["ridge"]) / 2
-    return out
-
-
-def slide_epoch_steps():
-    """Slide 'Training repeats one loop'."""
-    return {"steps": TRAIN_IMAGES // BATCH}
-
-
-def slide_cross_entropy():
-    """Slide 'Cross-entropy punishes confident mistakes hardest'."""
-    return {p: -math.log(p) for p in (0.9, 0.8, 0.1)} | {"uniform": math.log(10)}
-
-
-# Napkin Math 5.2 inputs: x = (1.0, 0.5); W1 columns feed h1 and h2;
-# W2 = (0.6, -0.4); biases zero; squared-error loss; target 1.0; lr 0.1.
-X = (1.0, 0.5)
-W1 = ((0.5, -0.3), (0.8, 0.2))     # W1[i][j]: input i to hidden unit j
-W2 = (0.6, -0.4)
-TARGET, LR = 1.0, 0.1
-
-
-def slide_backprop():
-    """Slides 'Forward pass: compute each value' and 'Backward pass'."""
-    z = [X[0] * W1[0][j] + X[1] * W1[1][j] for j in range(2)]
-    a = [max(0.0, v) for v in z]
-    yhat = a[0] * W2[0] + a[1] * W2[1]
-    loss = 0.5 * (yhat - TARGET) ** 2
-    err = yhat - TARGET
-    gW2 = [a[j] * err for j in range(2)]
-    back = [err * W2[j] for j in range(2)]
-    delta = [back[j] if z[j] > 0 else 0.0 for j in range(2)]
-    gW1 = [[X[i] * delta[j] for j in range(2)] for i in range(2)]
-    w11_new = W1[0][0] - LR * gW1[0][0]
-    return {"z": z, "a": a, "yhat": yhat, "loss": loss, "err": err, "gW2": gW2,
-            "back": back, "delta": delta, "gW1": gW1, "w11_new": w11_new}
-
-
-def slide_train_flops():
-    """Slide 'A training step here costs 2.08 forward passes, not 3'
-    (chapter Sec. 5.4.5, Napkin Math 5.3): forward matrix multiplies, the same
-    again for weight gradients, and input gradients for layers 2 and 3 only."""
-    mm, _ = fwd_flops(WIDTHS)
-    fwd = sum(mm)
-    wgrad = fwd
-    igrad = sum(mm[1:])
-    total = fwd + wgrad + igrad
-    return {"fwd": fwd, "wgrad": wgrad, "igrad": igrad, "total": total, "ratio": total / fwd}
-
-
-def slide_epoch():
-    """Slide 'Predict: CPU or accelerator, which finishes first?' (Napkin Math 5.3).
-    Inputs: 12 launched operations per step (chapter: 3 forward layers, loss,
-    5 backward products, 2 ReLU masks, 1 fused update); Python dispatch 10 us
-    and kernel launch 5 us (MLSysIM Ops.RuntimeOverheads); rates from the
-    roofline at batch-32 intensity."""
-    CH = chapter()
-    us = CH["microsecond"]
-    dispatch = CH["Ops"].RuntimeOverheads.PythonDispatch.to(us).magnitude
-    launch = CH["Ops"].RuntimeOverheads.KernelLaunch.to(us).magnitude
-    ops = 3 + 1 + 5 + 2 + 1
-    steps = slide_epoch_steps()["steps"]
-    # The chapter scales the forward FLOPs per image (2 x 109,184) by the 2.08 ratio.
-    T = slide_train_flops()
-    step_flops = T["ratio"] * slide_hook()["flops"] * BATCH
-    R = slide_roofline()
-    work = {k: steps * step_flops / (R[k]["rate_b32"] * 1e12) * 1e3 for k in ("cpu", "acc")}
-    ovh = {"cpu": steps * ops * dispatch / 1e3, "acc": steps * ops * (dispatch + launch) / 1e3}
-    tot = {k: work[k] + ovh[k] for k in work}
-    return {"dispatch_us": dispatch, "launch_us": launch, "ops": ops, "step_mflop": step_flops / 1e6,
-            "work_ms": work, "ovh_ms": ovh, "total_ms": tot,
-            "work_speedup": work["cpu"] / work["acc"], "ovh_share_acc": ovh["acc"] / tot["acc"]}
-
-
-def slide_ranges():
-    """Slide 'Vote: a gradient of 9.1e-13 is stored in FP16': IEEE 754 limits."""
-    import numpy as np
-    f16 = np.finfo(np.float16)
-    f32 = np.finfo(np.float32)
-    g = slide_slopes()["survive_20"]
-    return {"fp16_min_normal": float(f16.tiny), "fp16_min_sub": float(f16.smallest_subnormal),
-            "fp16_max": float(f16.max), "fp32_min_normal": float(f32.tiny),
-            "fp32_max": float(f32.max), "int16_max": int(np.iinfo(np.int16).max),
-            "grad_in_fp16": float(np.float16(g)), "grad_in_fp32": float(np.float32(g))}
-
-
-def slide_memory():
-    """Slide 'Training holds 3.4 times the memory of inference' (chapter Table 9).
-    Inputs: training keeps input and every layer output for the batch;
-    inference keeps the largest adjacent pair (rolling buffers); Adam keeps
-    2 values per parameter (chapter Sec. 5.4.5)."""
-    n = network()
-    params = n["P"] * BYTES_FP32
-    act_train = BATCH * sum(WIDTHS) * BYTES_FP32
-    pairs = [a + b for a, b in zip(WIDTHS[:-1], WIDTHS[1:])]
-    act_inf = BATCH * max(pairs) * BYTES_FP32
-    grads = params
-    adam = 2 * params
-    train = params + act_train + grads + adam
-    infer = params + act_inf
-    return {"params_kb": params / 1000, "act_train_kb": act_train / 1000,
-            "act_inf_kb": act_inf / 1000, "grads_kb": grads / 1000, "adam_kb": adam / 1000,
-            "train_kb": train / 1000, "infer_kb": infer / 1000, "ratio": train / infer}
-
-
-def slide_memory_trace():
-    """New slide: the PyTorch memory-profiler timeline (ResNet-50, batch 1,
-    SGD with momentum; DeVito and Shi, PyTorch blog, 2023). Input: ResNet-50
-    has 25.6 million parameters (MLSysIM, chapter Lighthouse 5.1)."""
-    p = 25.6e6
-    weights = p * BYTES_FP32
-    return {"weights_mb": weights / 1e6, "weights_gib": weights / 2 ** 30,
-            "momentum_gib": weights / 2 ** 30}   # SGD momentum: one value per parameter
-
-
-def slide_gpt2():
-    """Slide 'Estimate: does GPT-2 training fit in 80 GB?' (Lighthouse 5.1).
-    Inputs: GPT-2 1.5 billion parameters; ResNet-50 25.6 million (MLSysIM)."""
-    p = 1.5e9
-    w = p * BYTES_FP32
-    return {"weights_gb": w / 1e9, "train_gb": 4 * w / 1e9,
-            "resnet_mb": 25.6e6 * BYTES_FP32 / 1e6, "jump": p / network()["P"]}
-
-
-def slide_reject():
-    """Slide 'A threshold sends uncertain digits to people' (LeCun et al. 1989,
-    chapter Table 11): 12.1 percent rejected."""
-    return {"accepted_pct": 100 - 12.1}
-
-
-def slide_overfit():
-    """Open-questions slide: the real training run (data/overfit.json)."""
-    d = json.loads((DATA / "overfit.json").read_text())
-    out = {"setup": d["setup"], "versions": d["versions"]}
-    for n, h in d["runs"].items():
-        out[n] = {"train": h["train_acc"][-1] * 100, "test": h["test_acc"][-1] * 100,
-                  "gap": (h["train_acc"][-1] - h["test_acc"][-1]) * 100,
-                  "epochs": len(h["train_acc"]),
-                  "first_100": next((i + 1 for i, v in enumerate(h["train_acc"]) if v >= 1.0), None)}
-    return out
-
-
-# ---------------------------------------------------------------------------
-def main():
-    CH = chapter()
-    print("Lecture 5 derived numbers\n")
-
-    h = slide_hook()
-    print("Reading one handwritten digit takes 109,184 multiply-adds")
-    show("MACs per digit", f"{h['macs']:,}")
-    show("FLOPs per digit (1 MAC = 2 FLOPs)", f"{h['flops']:,}")
-    show("MNIST images, training + test", f"{h['mnist_total']:,}")
-    check("MACs", h["macs"], CH["MNISTInference"].total_macs)
-
-    L = slide_ladder()
-    print("Learned features cost 1,100 times the work of rules")
-    show("network / rules", f"{L['net_over_rules']:,.0f}x (slide rounds to 1,100x)")
-    show("HOG / rules", f"{L['hog_over_rules']:.0f}x")
-    check("ladder ratio", L["net_over_rules"], CH["ParadigmSystemsCost"].dl_ops_ratio)
-
-    N = slide_neuron()
-    print("One neuron is a dot product followed by an activation")
-    show("MACs, one first-layer unit", N["unit_macs"])
-    show("MACs, all 128 first-layer units", f"{N['layer1_macs']:,}")
-
-    print("Two ReLU units compute XOR (h1, h2, y)")
-    for r in slide_xor()["rows"]:
-        show(f"x = ({r[0]}, {r[1]})", f"h1 {r[2]:g}, h2 {r[3]:g}, y {r[4]:g}")
-
-    S = slide_slopes()
-    print("Predict: how much gradient survives 20 sigmoid layers?")
-    show("0.25^20", f"{S['survive_20']:.2e}")
-    check("0.25^20", S["survive_20"], CH["EarlySystemsClaims"].gradient_scale)
-
-    A = slide_alexnet()
-    show("AlexNet Figure 1: tanh epochs / ReLU epochs to 25% error", f"{A['ratio']:.0f}x")
-
-    T = slide_transistor()
-    print("A sigmoid needs an exponential; a ReLU needs a comparison")
-    show("sigmoid / ReLU transistor equivalents (illustrative)", f"{T['ratio']:.0f}x")
-
-    print("A layer is one matrix multiply; a batch reuses each weight")
-    show("layer 1 MACs at batch 32", f"{slide_layer()['layer1_b32_macs']:,} (about 3.2 million)")
-
-    C = slide_count()
-    print("Your turn: what does the MNIST network weigh?")
-    show("weights per layer", ", ".join(f"{w:,}" for w in C["weights"]))
-    show("weights", f"{C['W']:,}")
-    show("biases", C["B"])
-    show("parameters", f"{C['P']:,}")
-    show("bytes (FP32)", f"{C['bytes']:,} = {C['kb']:.1f} KB")
-    show("layer 1 share of weights", f"{100 * C['layer1_share']:.1f}%")
-    show("first-layer weights for a 56x56 input", f"{C['w1_56']:,}")
-    check("parameters", C["P"], CH["MNISTInference"].total_params)
-    check("layer 1 share", C["layer1_share"], CH["DamMnistDataAxis"].w1_share)
-
-    D = slide_depth_width()
-    print("Width costs quadratically, depth costs linearly")
-    show("width 2,048 -> 4,096, MACs", f"{D['width_double']:.1f}x")
-    show("depth 16 -> 32, MACs", f"{D['depth_double']:.1f}x")
-    show("depth 16 -> 32, saved activations", f"{D['retained_double']:.1f}x")
-    check("width double", D["width_double"], CH["DepthWidthCost"].width_double_factor)
-    check("depth double", D["depth_double"], CH["DepthWidthCost"].depth_double_factor)
-    check("retained double", D["retained_double"], CH["DepthWidthCost"].retained_double_factor)
-
-    F = slide_fwd_ops()
-    print("Matrix multiply is over 99 percent of the forward pass (batch 32)")
-    show("layer MatMul FLOPs", ", ".join(f"{v:,}" for v in F["mm"]))
-    show("bias + activation, all layers", f"{F['other_total']:,}")
-    show("total operations", f"{F['total']:,} (about 7 million)")
-    show("per digit", f"{F['per_digit']:,.0f} (about 219 thousand)")
-    show("MatMul share", f"{100 * F['mm_share']:.1f}%")
-    show("bias + activation share", f"{100 * F['other_share']:.1f}%")
-    show("layer 1 share of the MatMul work", f"{100 * F['layer1_share_of_mm']:.1f}%")
-    show("doubled hidden widths (784-256-128-10): total", f"{F['double_total']:,} (about 15 million)")
-    show("doubled hidden widths: ratio", f"{F['double_ratio']:.2f}x (about 2.1)")
-    check("forward total", F["total"], CH["MnistFlopsCalc"].total_flops_value)
-    check("double ratio", F["double_ratio"], CH["MnistFlopsCalc"].double_ratio_value)
-
-    P = slide_profile()
-    print("New: the profiler on the running network (data/torch_runs.txt)")
-    show("run", P["versions"])
-    show("time per forward pass", f"{P['per_pass_us']:.1f} us")
-    show("aten::addmm share of self CPU time", f"{P['addmm_pct']:.1f}%")
-    show("addmm calls per forward pass", f"{P['addmm_calls_per_pass']:.0f}")
-    show("addmm average per call", f"{P['addmm_avg_us']:.1f} us")
-    show("ReLU kernel (clamp_min) share", f"{P['relu_kernel_pct']:.1f}%")
-    show("everything else (dispatch and bookkeeping)", f"{P['bookkeeping_pct']:.0f}%")
-    show("addmm achieved rate", f"{P['addmm_rate_gflops']:.0f} GFLOP/s")
-
-    I = slide_intensity()
-    print("Batching raises a dense layer's arithmetic intensity")
-    show("bytes moved, batch 1", f"{I['bytes_b1']:,} B = {I['bytes_b1'] / 1000:.0f} KB")
-    show("bytes moved, batch 32", f"{I['bytes_b32']:,} B = {I['bytes_b32'] / 1000:.0f} KB")
-    show("intensity, batch 1", f"{I['i1']:.2f} FLOP/byte (about 0.5)")
-    show("intensity, batch 32", f"{I['i32']:.1f} FLOP/byte")
-    show("intensity ratio", f"{I['ratio']:.0f}x")
-    check("intensity b1", I["i1"], CH["MnistFlopsCalc"].single_image_arith_intensity)
-    check("intensity b32", I["i32"], CH["MnistFlopsCalc"].batch_arith_intensity)
-
-    R = slide_roofline()
-    print("Predict / roofline: attainable FP32 rate on the bandwidth slope")
-    for k, name in (("cpu", "desktop CPU"), ("acc", "H100")):
-        r = R[k]
-        show(f"{name}: peak, bandwidth", f"{r['peak_tflops']:.1f} TFLOP/s, {r['bw_tbs']:.3f} TB/s")
-        show(f"{name}: ridge", f"{r['ridge']:.1f} FLOP/byte")
-        show(f"{name}: batch 1 rate", f"{r['rate_b1'] * 1000:,.0f} GFLOP/s = {r['rate_b1']:.1f} TFLOP/s")
-        show(f"{name}: batch 32 rate", f"{r['rate_b32'] * 1000:,.0f} GFLOP/s = {r['rate_b32']:.1f} TFLOP/s")
-        show(f"{name}: speedup per image", f"{r['speedup']:.0f}x")
-    show("mean ridge", f"{R['mean_ridge']:.0f} FLOP/byte")
-
-    print("Training repeats one loop")
-    show("steps per epoch", f"{slide_epoch_steps()['steps']:,}")
-
-    X_ = slide_cross_entropy()
-    print("Cross-entropy punishes confident mistakes hardest")
-    for p in (0.9, 0.8, 0.1):
-        show(f"-ln {p}", f"{X_[p]:.2f}")
-    show("ln 10 (uniform guess)", f"{X_['uniform']:.2f}")
-
-    B = slide_backprop()
-    print("Forward and backward pass, Napkin Math 5.2")
-    show("z", [round(v, 4) for v in B["z"]])
-    show("a", [round(v, 4) for v in B["a"]])
-    show("y-hat", f"{B['yhat']:.2f}")
-    show("loss", f"{B['loss']:.4f}")
-    show("output error", f"{B['err']:.2f}")
-    show("dL/dW2", [round(v, 4) for v in B["gW2"]])
-    show("error sent back", [round(v, 4) for v in B["back"]])
-    show("deltas after ReLU mask", [round(v, 4) for v in B["delta"]])
-    show("dL/dW1", [[round(v, 4) for v in r] for r in B["gW1"]])
-    show("w11 after one step", f"{B['w11_new']:.4f}")
-
-    Tf = slide_train_flops()
-    print("A training step here costs 2.08 forward passes, not 3")
-    show("forward", f"{Tf['fwd']:,} = {Tf['fwd'] / 1e6:.2f} M")
-    show("weight gradients", f"{Tf['wgrad']:,} = {Tf['wgrad'] / 1e6:.2f} M")
-    show("input gradients", f"{Tf['igrad']:,} = {Tf['igrad'] / 1e6:.2f} M")
-    show("total", f"{Tf['total']:,} = {Tf['total'] / 1e6:.1f} M")
-    show("ratio", f"{Tf['ratio']:.2f}x")
-    check("training ratio", Tf["ratio"], CH["MnistTrainingArithmetic"].training_ratio)
-
-    E = slide_epoch()
-    print("Predict: CPU or accelerator, which finishes first? (one epoch)")
-    show("FLOPs per step", f"{E['step_mflop']:.1f} MFLOP")
-    show("work, CPU", f"{E['work_ms']['cpu']:.0f} ms")
-    show("work, accelerator", f"{E['work_ms']['acc']:.1f} ms")
-    show("work speedup", f"{E['work_speedup']:.0f}x")
-    show("overhead, CPU", f"{E['ovh_ms']['cpu']:.1f} ms")
-    show("overhead, accelerator", f"{E['ovh_ms']['acc']:.1f} ms")
-    show("total, CPU", f"{E['total_ms']['cpu']:.0f} ms")
-    show("total, accelerator", f"{E['total_ms']['acc']:.0f} ms")
-    show("overhead share, accelerator", f"{100 * E['ovh_share_acc']:.1f}%")
-    check("overhead share", E["ovh_share_acc"], CH["EpochTimeEnergy"].ovh_share_acc)
-    check("work speedup", round(E["work_speedup"]), CH["EpochTimeEnergy"].acc_work_speedup)
-
-    G = slide_ranges()
-    print("Vote: a gradient of 9.1e-13 is stored in FP16")
-    show("FP16 smallest normal", f"{G['fp16_min_normal']:.2e}")
-    show("FP16 smallest subnormal", f"{G['fp16_min_sub']:.2e}")
-    show("FP16 max", f"{G['fp16_max']:,.0f}")
-    show("FP32 smallest normal", f"{G['fp32_min_normal']:.2e}")
-    show("FP32 max", f"{G['fp32_max']:.2e}")
-    show("INT16 max", f"{G['int16_max']:,}")
-    show("9.1e-13 stored in FP16", G["grad_in_fp16"])
-    show("9.1e-13 stored in FP32", f"{G['grad_in_fp32']:.2e}")
-
-    M = slide_memory()
-    print("Training holds 3.4 times the memory of inference")
-    for k in ("params_kb", "act_train_kb", "act_inf_kb", "grads_kb", "adam_kb", "train_kb", "infer_kb"):
-        show(k, f"{M[k]:.1f} KB")
-    show("training total", f"{M['train_kb'] / 1000:.1f} MB")
-    show("ratio", f"{M['ratio']:.1f}x")
-    check("memory ratio", M["ratio"], CH["MnistTrainingMemoryCalc"].training_ratio)
-    check("training KB", M["train_kb"], CH["MnistTrainingMemoryCalc"].training_total_kb)
-    check("inference KB", M["infer_kb"], CH["MnistTrainingMemoryCalc"].inference_total_kb)
-
-    Mt = slide_memory_trace()
-    print("New: the memory-profiler timeline (ResNet-50, batch 1, SGD momentum)")
-    show("ResNet-50 weights", f"{Mt['weights_mb']:.1f} MB = {Mt['weights_gib']:.3f} GiB")
-    show("momentum buffer", f"{Mt['momentum_gib']:.3f} GiB")
-
-    Gp = slide_gpt2()
-    print("Estimate: does GPT-2 training fit in 80 GB?")
-    show("weights", f"{Gp['weights_gb']:.0f} GB")
-    show("weights, gradients, 2 Adam values", f"{Gp['train_gb']:.0f} GB")
-    show("ResNet-50 weights", f"{Gp['resnet_mb']:.1f} MB")
-    show("GPT-2 / MNIST parameters", f"{Gp['jump']:,.0f}x (about 14,000)")
-
-    print("A threshold sends uncertain digits to people")
-    show("accepted", f"{slide_reject()['accepted_pct']:.1f}%")
-
-    O = slide_overfit()
-    print("Open questions: MNIST training against held-out (data/overfit.json)")
-    show("setup", O["setup"])
-    show("run", O["versions"])
-    for n in ("1000", "60000"):
-        o = O[n]
-        show(f"{int(n):,} training images, after {o['epochs']} epochs",
-             f"training {o['train']:.1f}%, held-out {o['test']:.1f}%, gap {o['gap']:.1f} points")
-    show("1,000 images: first epoch at 100% training accuracy", O["1000"]["first_100"])
-
-    print()
-    if PROBLEMS:
-        print(f"{len(PROBLEMS)} value(s) disagree with the chapter:")
-        for p in PROBLEMS:
-            print("  " + p)
-    else:
-        print("All checked values agree with the chapter's own calculation cells.")
-
+sys.path.insert(0, str(HERE.parents[2] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
+
+Scenarios, Literature, Datasets = mlsysim.Scenarios, mlsysim.Literature, mlsysim.Datasets
+units = mlsysim.core.units
+
+NET = Scenarios.MnistDenseNetwork
+R = NET.result                                         # batch 32
+R1 = NET.variant(batch_size=1).result                  # batch 1
+WIDE = Scenarios.MnistDenseNetworkWiderHidden.result
+BIG_INPUT = Scenarios.MnistDenseNetworkDoubledInputSide.result
+SWEEP = Scenarios.DenseWidthDepthSweep
+EPOCH = Scenarios.MnistEpochCpuVersusH100
+E = EPOCH.result
+PARADIGMS = Scenarios.DigitRecognitionParadigms
+LOGIC = Scenarios.ReluVersusSigmoidLogic
+CHAIN = Scenarios.TwentySigmoidLayers
+FORMATS = Scenarios.VanishedGradientFormats
+CE = Scenarios.DigitCrossEntropyExamples
+TRACE = Scenarios.TwoTwoOneBackpropTrace
+GPT2 = Scenarios.Gpt2Fp32AdamOnH100
+RESNET = Scenarios.ResNet50Fp32SgdMomentum
+GROWTH = Scenarios.NotableModelParameterGrowth.result
+FEED = Scenarios.ResNet50A100InputFeed                 # Lecture 4b's recall question
+H100 = EPOCH.accelerator
+
+
+def m(q, unit):
+    """Magnitude of a Pint quantity in ``unit``."""
+    return q.to(unit).magnitude
+
+
+def kb(q):
+    return m(q, "KB")
+
+
+def mantissa_exponent(x):
+    """(mantissa, power of ten) of x, for spoken and typeset scientific notation."""
+    mant, exp = f"{x:.1e}".split("e")
+    return float(mant), int(exp)
+
+
+print("== The running network (Scenarios.MnistDenseNetwork)")
+w_in, w_h1, w_h2, w_out = NET.layer_widths
+v("w_in", w_in, "{:.0f}", "input width (28 x 28 pixels)")
+v("w_h1", w_h1, "{:.0f}", "first hidden width")
+v("w_h2", w_h2, "{:.0f}", "second hidden width")
+v("w_out", w_out, "{:.0f}", "output width (classes)")
+v("w_h1_wide", WIDE.layer_widths[1], "{:.0f}", "first hidden width, doubled")
+v("w_h2_wide", WIDE.layer_widths[2], "{:.0f}", "second hidden width, doubled")
+v("img_side", Datasets.MNIST.image_width, "{:.0f}", "MNIST image side, pixels")
+v("img_side_big", BIG_INPUT.layer_widths[0] ** 0.5, "{:.0f}", "doubled image side, pixels")
+v("mnist_total", m(Datasets.MNIST.training_examples + Datasets.MNIST.test_examples, "count"), "{:,.0f}",
+  "MNIST images, training plus test")
+v("mnist_train", m(Datasets.MNIST.training_examples, "count"), "{:,.0f}", "MNIST training images")
+v("mnist_test", m(Datasets.MNIST.test_examples, "count"), "{:,.0f}", "MNIST test images")
+v("batch", NET.batch_size, "{:.0f}", "batch size")
+v("macs", R.macs_per_example, "{:,.0f}", "MACs per digit")
+v("flops", R.flops_per_example, "{:,.0f}", "FLOPs per digit (2 per MAC)")
+for i, (wt, b) in enumerate(zip(R.weights_per_layer, R.biases_per_layer), start=1):
+    v(f"wt{i}", wt, "{:,.0f}", f"layer {i} weights")
+v("biases", R.biases, "{:.0f}", "biases")
+v("params", R.parameters, "{:,.0f}", "parameters")
+fp32_bytes = m(NET.bytes_per_value, "byte")
+v("fp32_bytes", fp32_bytes, "{:.0f}", "bytes per FP32 value")
+v("weights_kb", kb(R.parameter_bytes), "{:.1f}", "FP32 weights, KB")
+v("weights_kb_int", kb(R.parameter_bytes), "{:.0f}", "FP32 weights, KB, rounded")
+v("l1_share", 100 * R.first_layer_share, "{:.1f}", "layer 1 share of weights and work, %")
+v("l1_share_int", 100 * R.first_layer_share, "{:.0f}", "the same, rounded, %")
+v("w1_big", BIG_INPUT.weights_per_layer[0], "{:,.0f}", "first-layer weights for the doubled input side")
+
+print("== Ladder (Scenarios.DigitRecognitionParadigms)")
+v("rules", PARADIGMS.rule_comparisons, "{:.0f}", "rule comparisons per digit")
+v("hog_ops", PARADIGMS.feature_operations, "{:,.0f}", "HOG + classifier operations")
+v("hog_kb", kb(PARADIGMS.feature_memory), "{:.0f}", "HOG working memory, KB")
+v("net_over_rules", round(PARADIGMS.network_to_rule_ratio, -2), "{:,.0f}", "network over rules, to the hundred")
+
+print("== Parameter growth (Scenarios.NotableModelParameterGrowth)")
+v("growth_split", GROWTH.split_year, "{:.0f}", "split year")
+v("growth_early_mo", round(GROWTH.early_doubling_months), "{:.0f}", "doubling before the split, months")
+v("growth_late_mo", round(GROWTH.late_doubling_months), "{:.0f}", "doubling after the split, months")
+v("growth_models", GROWTH.model_count, "{:,.0f}", "models with parameter counts")
+
+print("== Neuron, layer, and XOR")
+v("layer1_b_macs_m", NET.batch_size * R.weights_per_layer[0] / 10 ** 6, "{:.1f}", "layer 1 MACs at batch 32, millions")
+
+print("== Vanishing gradient (Scenarios.TwentySigmoidLayers; Literature.TrainingRuns)")
+v("sig_peak", CHAIN.peak_slope, "{:.2f}", "sigmoid's peak slope")
+v("sig_depth", CHAIN.depth, "{:.0f}", "sigmoid layers")
+g_mant, g_exp = mantissa_exponent(CHAIN.surviving_fraction)
+v("grad_mant", g_mant, "{:.1f}", "surviving fraction, mantissa")
+v("grad_exp", g_exp, "{:.0f}", "surviving fraction, power of ten")
+v("grad_exp_mag", -g_exp, "{:.0f}", "the same power, magnitude (spoken)")
+relu_ep = Literature.TrainingRuns.AlexNetCifar10ReluEpochsTo25PctError
+tanh_ep = Literature.TrainingRuns.AlexNetCifar10TanhEpochsTo25PctError
+v("relu_ep", relu_ep, "{:.0f}", "AlexNet Fig. 1: ReLU epochs to 25% error")
+v("tanh_ep", tanh_ep, "{:.0f}", "AlexNet Fig. 1: tanh epochs to 25% error")
+v("relu_speedup", tanh_ep / relu_ep, "{:.0f}", "tanh epochs over ReLU epochs")
+v("relu_speedup_word", tanh_ep / relu_ep, "words", "the same, in prose")
+
+print("== Transistor tax (Scenarios.ReluVersusSigmoidLogic)")
+v("relu_tr", LOGIC.cheap_transistors, "{:.0f}", "ReLU transistor equivalents")
+v("sig_tr", LOGIC.costly_transistors, "{:,.0f}", "sigmoid transistor equivalents")
+v("tr_ratio_word", LOGIC.ratio, "words", "sigmoid over ReLU, in prose")
+v("tr_ratio", LOGIC.ratio, "{:.0f}", "sigmoid over ReLU")
+
+print("== Width and depth (Scenarios.DenseWidthDepthSweep)")
+v("width_lo", SWEEP.width_doubled_from, "{:,.0f}", "width before doubling")
+v("width_hi", SWEEP.widths[-1], "{:,.0f}", "width after doubling")
+v("width_double", SWEEP.width_double_factor, "{:.1f}", "MACs factor, width doubled")
+v("fixed_width", SWEEP.fixed_width, "{:.0f}", "fixed width of the depth sweep")
+v("depth_lo", SWEEP.depth_doubled_from, "{:.0f}", "depth before doubling")
+v("depth_hi", SWEEP.max_depth, "{:.0f}", "depth after doubling")
+v("depth_double", SWEEP.depth_double_factor, "{:.1f}", "MACs factor, depth doubled")
+v("retained_double", SWEEP.saved_activations_double_factor, "{:.1f}", "saved activations factor, depth doubled")
+
+print("== Forward pass at batch 32 (DenseNetworkModel)")
+for i, f in enumerate(R.matmul_flops_per_layer, start=1):
+    v(f"mm{i}", f, "{:,.0f}", f"layer {i} matrix-multiply FLOPs")
+v("other_ops", R.elementwise_flops, "{:,.0f}", "bias and activation operations, all layers")
+v("other_share", 100 * R.elementwise_share, "{:.1f}", "their share, %")
+v("mm_share", 100 * R.matmul_share, "{:.1f}", "matrix-multiply share, %")
+v("fwd_m", R.forward_flops / 10 ** 6, "{:.0f}", "forward operations per batch, millions")
+v("per_digit_k", R.forward_flops_per_example / 10 ** 3, "{:.0f}", "operations per digit, thousands")
+v("wide_m", WIDE.forward_flops / 10 ** 6, "{:.0f}", "forward operations, hidden widths doubled, millions")
+v("wide_ratio", WIDE.forward_flops / R.forward_flops, "{:.1f}", "doubled-hidden total over the running one")
+
+print("== Measured profile (data/torch_runs.txt)")
+prof = (HERE / "data" / "torch_runs.txt").read_text()
+
+
+def us(value, unit):
+    return float(value) * (10 ** 3 if unit == "ms" else 1)
+
+
+def row(op):
+    """(self %, CPU time avg in us, calls) of one profiler row, as torch.profiler printed it."""
+    r = re.search(rf"^\s*{re.escape(op)}\s+(?P<pct>[\d.]+)%\s+\S+\s+\S+\s+\S+\s+"
+                  rf"(?P<t>[\d.]+)(?P<u>ms|us)\s+(?P<n>\d+)\s*$", prof, re.M)
+    return float(r["pct"]), us(r["t"], r["u"]), int(r["n"])
+
+
+addmm_pct, addmm_avg, addmm_calls = row("aten::addmm")
+relu_pct = row("aten::clamp_min")[0]
+total = re.search(r"Self CPU time total: (?P<t>[\d.]+)(?P<u>ms|us)", prof)
+passes = addmm_calls / R.layers                          # one addmm per layer per pass
+v("prof_passes", passes, "{:.0f}", "profiled forward passes")
+v("addmm_pct", addmm_pct, "{:.0f}", "addmm share of self CPU time, %")
+v("addmm_calls", addmm_calls, "{:.0f}", "addmm calls")
+v("addmm_avg_us", addmm_avg, "{:.1f}", "addmm average per call (CPU time avg), us")
+v("pass_us", us(total["t"], total["u"]) / passes, "{:.1f}", "time per forward pass, us")
+v("bookkeeping_pct", 100 - addmm_pct - relu_pct, "{:.0f}", "everything else, %")
+
+print("== Arithmetic intensity (DenseNetworkModel at batch 1 and 32)")
+v("traffic1_kb", kb(R1.traffic_bytes), "{:.0f}", "bytes moved at batch 1, KB")
+v("traffic32_kb", kb(R.traffic_bytes), "{:.0f}", "bytes moved at batch 32, KB")
+i1, i32 = m(R1.intensity, "flop/byte"), m(R.intensity, "flop/byte")
+v("i1", i1, "{:.1f}", "intensity at batch 1, FLOP/byte")
+v("i1_2", i1, "{:.2f}", "the same, two decimals")
+v("i32", i32, "{:.1f}", "intensity at batch 32, FLOP/byte")
+v("i_ratio", i32 / i1, "{:.0f}", "intensity ratio")
+
+print("== Roofline (Scenarios.MnistEpochCpuVersusH100, FP32)")
+v("ridge", m(E.ridge["accelerator"], "flop/byte"), "{:.0f}", "ridge point, both machines, FLOP/byte")
+v("acc_b1_tf", m(E.rate_batch1["accelerator"], "Tflop/s"), "{:.1f}", "accelerator at batch 1, TFLOP/s")
+v("acc_b32_tf", m(E.rate["accelerator"], "Tflop/s"), "{:.0f}", "accelerator at batch 32, TFLOP/s")
+v("cpu_b1_gf", m(E.rate_batch1["host"], "Gflop/s"), "{:.0f}", "CPU at batch 1, GFLOP/s")
+v("cpu_b32_gf", m(E.rate["host"], "Gflop/s"), "{:.0f}", "CPU at batch 32, GFLOP/s")
+v("batch_speedup", E.batching_speedup["accelerator"], "{:.0f}", "per-image speedup from batching")
+
+print("== Training loop and loss (Scenarios.DigitCrossEntropyExamples)")
+v("steps", R.steps_per_epoch, "{:,.0f}", "steps per epoch")
+v("ce_p_conf", CE.probabilities["confident"], "{:.1f}", "confident probability")
+v("ce_p", CE.probabilities["correct"], "{:.1f}", "correct-class probability")
+v("ce_p_miss", CE.misread["true"], "{:.1f}", "probability on the true digit, misread")
+v("ce_conf", CE.loss("confident"), "{:.2f}", "loss at the confident probability")
+v("ce_loss", CE.loss("correct"), "{:.2f}", "loss at the correct-class probability")
+v("ce_uniform", CE.uniform_loss, "{:.2f}", "loss of a uniform guess")
+v("ce_miss", CE.misread_loss, "{:.2f}", "loss of the misread digit")
+
+print("== Backpropagation by hand (Scenarios.TwoTwoOneBackpropTrace)")
+v("bp_x1", TRACE.x[0], "{:.1f}", "input 1")
+v("bp_x2", TRACE.x[1], "{:.1f}", "input 2")
+v("bp_w11", TRACE.w1[0][0], "{:.1f}", "W1, input 1 to hidden 1")
+v("bp_w12", TRACE.w1[0][1], "{:.1f}", "W1, input 1 to hidden 2")
+v("bp_w21", TRACE.w1[1][0], "{:.1f}", "W1, input 2 to hidden 1")
+v("bp_w22", TRACE.w1[1][1], "{:.1f}", "W1, input 2 to hidden 2")
+v("bp_v1", TRACE.w2[0], "{:.1f}", "W2, hidden 1")
+v("bp_v2", TRACE.w2[1], "{:.1f}", "W2, hidden 2")
+v("bp_z1", TRACE.z[0], "{:.1f}", "pre-activation, hidden 1")
+v("bp_z2", TRACE.z[1], "{:.1f}", "pre-activation, hidden 2")
+v("bp_a1", TRACE.a[0], "{:.1f}", "activation, hidden 1")
+v("bp_target", TRACE.target, "{:.1f}", "target")
+v("bp_yhat", TRACE.y_hat, "{:.2f}", "output")
+v("bp_loss", TRACE.loss, "{:.4f}", "squared-error loss")
+v("bp_err", TRACE.error, "{:.2f}", "output error")
+v("bp_gv1", TRACE.w2_gradient[0], "{:.3f}", "gradient of W2, hidden 1")
+v("bp_back2", TRACE.sent_back[1], "{:.3f}", "error sent back, hidden 2")
+v("bp_lr", TRACE.learning_rate, "{:.1f}", "learning rate")
+v("bp_w11_new", TRACE.w1_updated(0, 0), "{:.4f}", "W1, input 1 to hidden 1, after one step")
+v("bp_d1", TRACE.delta[0], "{:.3f}", "hidden 1 error after the ReLU mask")
+# Magnitudes of the negative values, for the spoken notes ("minus 0.3")
+for key, value in (("bp_w12_mag", TRACE.w1[0][1]), ("bp_z2_mag", TRACE.z[1]),
+                   ("bp_err_mag", TRACE.error), ("bp_gv1_mag", TRACE.w2_gradient[0]),
+                   ("bp_back1_mag", TRACE.sent_back[0]), ("bp_gw21_mag", TRACE.w1_gradient[1][0])):
+    v(key, abs(value), "{:.4g}", "magnitude, spoken")
+
+print("== Training FLOPs at batch 32 (DenseNetworkModel)")
+v("train_fwd_m", R.matmul_flops / 10 ** 6, "{:.1f}", "forward matrix work, MFLOP")
+v("train_igrad_m", R.input_gradient_flops / 10 ** 6, "{:.2f}", "input gradients, MFLOP")
+v("train_step_m", R.training_step_flops / 10 ** 6, "{:.1f}", "training step, MFLOP")
+v("train_ratio", R.training_flops_ratio, "{:.2f}", "training step over forward")
+
+print("== One epoch on two machines (Scenarios.MnistEpochCpuVersusH100)")
+v("dispatch_us", m(EPOCH.dispatch, "us"), "{:.0f}", "Python dispatch per operation, us")
+v("dispatch_launch_us", m(EPOCH.dispatch + EPOCH.launch, "us"), "{:.0f}", "dispatch plus kernel launch, us")
+v("launch_us", m(EPOCH.launch, "us"), "{:.0f}", "kernel launch per operation, us")
+v("ops_step", E.ops_per_step, "{:.0f}", "operations launched per step")
+v("work_cpu_ms", round(m(E.work_time["host"], "ms")), "{:.0f}", "CPU work, ms")
+v("work_acc_ms", m(E.work_time["accelerator"], "ms"), "{:.1f}", "accelerator work, ms")
+v("work_speedup", round(E.work_speedup), "{:.0f}", "accelerator work speedup")
+v("ovh_cpu_ms", m(E.overhead_time["host"], "ms"), "{:.0f}", "CPU overhead, ms")
+v("ovh_acc_ms", m(E.overhead_time["accelerator"], "ms"), "{:.1f}", "accelerator overhead, ms")
+v("tot_cpu_ms", round(m(E.total_time["host"], "ms")), "{:.0f}", "CPU total, ms")
+v("tot_acc_ms", round(m(E.total_time["accelerator"], "ms")), "{:.0f}", "accelerator total, ms")
+v("ovh_share", 100 * E.overhead_share_accelerator, "{:.1f}", "overhead share of the accelerator epoch, %")
+
+print("== Number formats (Scenarios.VanishedGradientFormats)")
+fp16_max, fp16_norm, fp16_sub = FORMATS.range("fp16")
+fp32_max, fp32_norm, _ = FORMATS.range("fp32")
+n_mant, n_exp = mantissa_exponent(fp16_norm)
+s_mant, s_exp = mantissa_exponent(fp16_sub)
+v("fp16_norm_mant", n_mant, "{:.1f}", "FP16 smallest normal, mantissa")
+v("fp16_norm_exp", n_exp, "{:.0f}", "FP16 smallest normal, power of ten")
+v("fp16_sub_mant", s_mant, "{:.1f}", "FP16 smallest subnormal, mantissa")
+v("fp16_sub_exp", s_exp, "{:.0f}", "FP16 smallest subnormal, power of ten")
+v("fp16_max", fp16_max, "{:,.0f}", "FP16 largest finite")
+v("fp32_range_exp", mantissa_exponent(fp32_max)[1], "{:.0f}", "FP32 range, power of ten (spoken)")
+v("int16_max", FORMATS.integer_max, "{:,.0f}", "INT16 largest")
+v("grad_fp16", FORMATS.stored("fp16"), "{:.1f}", "the gradient stored in FP16")
+
+print("== Memory, training against inference (DenseNetworkModel, Adam)")
+v("mem_infer_act_kb", kb(R.inference_activation_bytes), "{:.0f}", "inference activation pair, KB")
+v("mem_infer_kb", kb(R.inference_memory), "{:.0f}", "inference total, KB")
+v("mem_act_kb", kb(R.saved_activation_bytes), "{:.0f}", "saved activations, KB")
+v("mem_opt_kb", kb(R.optimizer_bytes), "{:.1f}", "Adam state, KB")
+v("mem_train_mb", m(R.training_memory, "MB"), "{:.1f}", "training total, MB")
+v("mem_ratio", R.training_memory_ratio, "{:.1f}", "training over inference")
+LARGE = Scenarios.MnistDenseNetworkLargeBatch
+v("big_batch", LARGE.batch_size, "{:,.0f}", "the larger batch")
+v("act_growth", LARGE.result.saved_activation_values / R.saved_activation_values, "{:.0f}",
+  "saved-activation growth at the larger batch")
+
+print("== Memory trace (Scenarios.ResNet50Fp32SgdMomentum)")
+v("resnet_params_m", m(RESNET.workload.parameters, "Mparam"), "{:.1f}", "ResNet-50 parameters, millions")
+v("resnet_weights_mb", m(RESNET.weights, "MB"), "{:.1f}", "ResNet-50 FP32 weights, MB")
+v("resnet_weights_gb", m(RESNET.weights, "GB"), "{:.1f}", "the same, GB (rounded)")
+v("resnet_weights_mb_int", m(RESNET.weights, "MB"), "{:.0f}", "the same, MB, whole")
+
+print("== GPT-2 fit (Scenarios.Gpt2Fp32AdamOnH100)")
+v("gpt2_b", m(GPT2.workload.parameters, "Bparam"), "{:.1f}", "GPT-2 parameters, billions")
+v("gpt2_weights_gb", m(GPT2.weights, "GB"), "{:.0f}", "GPT-2 FP32 weights, GB")
+v("gpt2_train_gb", m(GPT2.total, "GB"), "{:.0f}", "weights, gradients, Adam, GB")
+v("adam_values", GPT2.optimizer_values_per_parameter, "{:.0f}", "Adam values per parameter")
+v("train_copies", GPT2.copies, "{:.0f}", "copies of the weights training holds")
+v("h100_gb", m(H100.memory.capacity, "GiB"), "{:.0f}", "H100 memory, GB (branded)")
+v("gpt2_jump", round(m(GPT2.workload.parameters, "param") / R.parameters, -3), "{:,.0f}",
+  "GPT-2 over MNIST parameters, to the thousand")
+
+print("== Rejection (Literature.PredictionQuality, LeCun et al. 1989)")
+rej = Literature.PredictionQuality.LeCun1989ZipCodeRejectPct
+v("lecun_rej", rej, "{:.1f}", "digits rejected, %")
+v("lecun_acc", 100 - rej, "{:.1f}", "digits accepted, %")
+v("lecun_err", Literature.PredictionQuality.LeCun1989ZipCodeAcceptedErrorPct, "{:.0f}", "error on accepted digits, %")
+v("lecun_params", m(mlsysim.Models.Vision.LeNet1.parameters, "param"), "{:,.0f}", "1989 network parameters (about)")
+
+print("== Lecture 4b recall (Scenarios.ResNet50A100InputFeed)")
+v("resnet_train_gflop", m(FEED.training_flops_per_sample, "GFLOP"), "{:.1f}", "ResNet-50 training FLOPs per image")
+
+print("== Overfitting run (data/overfit.json)")
+OVERFIT = json.loads((HERE / "data" / "overfit.json").read_text())
+
+
+def final(n):
+    h = OVERFIT["runs"][n]
+    return 100 * h["train_acc"][-1], 100 * h["test_acc"][-1]
+
+
+small, full = sorted(OVERFIT["runs"], key=int)
+tr_s, te_s = final(small)
+tr_f, te_f = final(full)
+first_100 = next(i for i, a in enumerate(OVERFIT["runs"][small]["train_acc"], start=1) if a >= 1)
+v("ov_small", int(small), "{:,.0f}", "training images, small run")
+v("ov_full", int(full), "{:,.0f}", "training images, full run")
+v("ov_train_small", tr_s, "{:.0f}", "final training accuracy, small run, %")
+v("ov_first100", first_100, "{:.0f}", "first epoch at 100% training accuracy, small run")
+v("ov_test_small", te_s, "{:.1f}", "held-out accuracy, small run, %")
+v("ov_test_small_int", te_s, "{:.0f}", "the same, rounded, %")
+v("ov_gap_small", tr_s - te_s, "{:.1f}", "gap, small run, points")
+v("ov_test_full", te_f, "{:.1f}", "held-out accuracy, full run, %")
+v("ov_gap_full", tr_f - te_f, "{:.1f}", "gap, full run, points")
 
 if __name__ == "__main__":
-    main()
+    write(__file__)

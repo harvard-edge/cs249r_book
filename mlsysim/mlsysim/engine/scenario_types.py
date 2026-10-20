@@ -8508,3 +8508,356 @@ class KernelShareScenario(BaseScenario):
     @property
     def share(self) -> float:
         return (self.kernel_macs / self.total_macs).to("").magnitude
+
+
+# --- Neural computation: dense networks, activations, losses, and number formats (added 2026-10-20) ---
+
+
+class DenseNetworkScenario(BaseScenario):
+    """A dense network of ``layer_widths`` at ``batch_size``: parameters, FLOPs, traffic, memory.
+
+    ``bytes_per_value`` is the storage width of every weight, gradient, and
+    activation; ``optimizer_bytes_per_parameter`` the optimizer's state per
+    parameter (two FP32 values for Adam). With a ``dataset``, the result also
+    gives the steps in one epoch over its training split.
+    """
+    layer_widths: List[int]
+    batch_size: int = 1
+    bytes_per_value: Quantity
+    optimizer_bytes_per_parameter: Quantity
+    dataset: Optional[DatasetProfile] = None
+
+    @property
+    def result(self):
+        from .solvers import DenseNetworkModel
+        examples = None
+        if self.dataset is not None and self.dataset.training_examples is not None:
+            examples = int(self.dataset.training_examples.to("count").magnitude)
+        return DenseNetworkModel().solve(self.layer_widths, self.batch_size, self.bytes_per_value,
+                                         self.optimizer_bytes_per_parameter, examples)
+
+    @property
+    def architecture(self) -> str:
+        """The widths joined by arrows, ``784 → 128 → 64 → 10``."""
+        return " → ".join(str(w) for w in self.layer_widths)
+
+
+class DenseScalingSweepScenario(BaseScenario):
+    """Dense networks between a fixed input and output, swept in hidden width and in depth.
+
+    Width sweep: ``hidden_layers`` hidden layers, each of every width in
+    ``widths``. Depth sweep: 1 to ``max_depth`` hidden layers of
+    ``fixed_width``. Each doubling factor compares the last setting with the
+    one half its size.
+    """
+    input_dim: int
+    output_dim: int
+    hidden_layers: int
+    widths: List[int]
+    fixed_width: int
+    max_depth: int
+
+    def net(self, hidden_layers: int, width: int) -> List[int]:
+        return [self.input_dim] + [width] * hidden_layers + [self.output_dim]
+
+    @property
+    def depths(self) -> List[int]:
+        return list(range(1, self.max_depth + 1))
+
+    @property
+    def width_sweep_macs(self) -> List[int]:
+        from ..physics.neural import calc_dense_macs
+        return [calc_dense_macs(self.net(self.hidden_layers, w)) for w in self.widths]
+
+    @property
+    def depth_sweep_macs(self) -> List[int]:
+        from ..physics.neural import calc_dense_macs
+        return [calc_dense_macs(self.net(d, self.fixed_width)) for d in self.depths]
+
+    @property
+    def depth_sweep_saved_activations(self) -> List[int]:
+        """Values saved per example: the input and every layer output."""
+        from ..physics.neural import calc_dense_saved_activations
+        return [calc_dense_saved_activations(self.net(d, self.fixed_width)) for d in self.depths]
+
+    @property
+    def width_doubled_from(self) -> int:
+        return self.widths[-1] // 2
+
+    @property
+    def depth_doubled_from(self) -> int:
+        return self.max_depth // 2
+
+    @property
+    def width_double_factor(self) -> float:
+        m = self.width_sweep_macs
+        return m[-1] / m[self.widths.index(self.width_doubled_from)]
+
+    @property
+    def depth_double_factor(self) -> float:
+        m = self.depth_sweep_macs
+        return m[-1] / m[self.depth_doubled_from - 1]
+
+    @property
+    def saved_activations_double_factor(self) -> float:
+        a = self.depth_sweep_saved_activations
+        return a[-1] / a[self.depth_doubled_from - 1]
+
+
+class EpochOverheadScenario(BaseScenario):
+    """One training epoch of ``network`` on a host CPU and an accelerator: work against fixed overhead.
+
+    Every launched operation pays ``dispatch`` (the framework's Python-side
+    cost); on the accelerator it also pays ``launch``. ``flop_energy`` and
+    ``dram_energy_per_byte`` price arithmetic against data movement.
+    """
+    network: DenseNetworkScenario
+    host: HardwareNode
+    accelerator: HardwareNode
+    precision: str = "fp32"
+    dispatch: Quantity
+    launch: Quantity
+    dram_energy_per_byte: Quantity
+    flop_energy: Quantity
+
+    @property
+    def result(self):
+        from .solvers import EpochOverheadModel
+        net = self.network.result
+        return EpochOverheadModel().solve(
+            net, self.network.variant(batch_size=1).result, self.host, self.accelerator, self.precision,
+            self.dispatch, self.launch, net.steps_per_epoch, self.dram_energy_per_byte, self.flop_energy)
+
+
+class ParadigmCostScenario(BaseScenario):
+    """One input classified three ways: hand-written rules, engineered features, and a learned network.
+
+    Rules: ``rule_comparisons`` comparisons over the raw pixels. Features: a
+    ``feature_grid`` by ``feature_grid`` grid of cells, ``feature_bins``
+    orientation bins each, ``feature_operations`` operations in
+    ``feature_memory`` of working state. Network: ``network``'s MACs.
+    """
+    image_pixels: int
+    bytes_per_pixel: Quantity
+    rule_comparisons: int
+    feature_grid: int
+    feature_bins: int
+    feature_operations: int
+    feature_memory: Quantity
+    network: DenseNetworkScenario
+
+    @property
+    def rule_memory(self) -> Quantity:
+        return (self.image_pixels * self.bytes_per_pixel).to("byte")
+
+    @property
+    def feature_count(self) -> int:
+        return self.feature_grid ** 2 * self.feature_bins
+
+    @property
+    def feature_to_rule_ratio(self) -> float:
+        return self.feature_operations / self.rule_comparisons
+
+    @property
+    def network_to_rule_ratio(self) -> float:
+        return self.network.result.macs_per_example / self.rule_comparisons
+
+
+class ActivationLogicCostScenario(BaseScenario):
+    """Logic cost of two activation datapaths, in transistor equivalents (an illustrative budget)."""
+    cheap_label: str
+    cheap_transistors: int
+    costly_label: str
+    costly_transistors: int
+
+    @property
+    def ratio(self) -> float:
+        return self.costly_transistors / self.cheap_transistors
+
+
+class GradientChainScenario(BaseScenario):
+    """The activation-slope factor a gradient keeps after ``depth`` layers, at each slope's peak."""
+    depth: int
+    activation: str = "sigmoid"
+
+    @property
+    def peak_slope(self) -> float:
+        from ..physics.neural import calc_sigmoid_slope
+        if self.activation != "sigmoid":
+            raise ValueError(f"unsupported activation {self.activation!r}")
+        return calc_sigmoid_slope(0.0)
+
+    @property
+    def surviving_fraction(self) -> float:
+        return self.peak_slope ** self.depth
+
+
+class CrossEntropyScenario(BaseScenario):
+    """Cross-entropy losses for named predicted probabilities of the correct class, among ``classes``.
+
+    ``misread`` gives the probabilities of a confident mistake, keyed
+    ``"true"`` (the correct class) and ``"wrong"`` (the class predicted);
+    the gradient on each score is its probability minus its target.
+    """
+    classes: int
+    probabilities: Dict[str, float]
+    misread: Dict[str, float]
+
+    def loss(self, key: str) -> float:
+        from ..physics.neural import calc_cross_entropy
+        return calc_cross_entropy(self.probabilities[key])
+
+    @property
+    def uniform_loss(self) -> float:
+        from ..physics.neural import calc_cross_entropy
+        return calc_cross_entropy(1 / self.classes)
+
+    @property
+    def misread_loss(self) -> float:
+        from ..physics.neural import calc_cross_entropy
+        return calc_cross_entropy(self.misread["true"])
+
+    @property
+    def misread_gradient_true(self) -> float:
+        return self.misread["true"] - 1.0
+
+    @property
+    def misread_gradient_wrong(self) -> float:
+        return self.misread["wrong"] - 0.0
+
+
+class BackpropTraceScenario(BaseScenario):
+    """One forward and backward pass by hand: two inputs, two ReLU hidden units, one linear output.
+
+    Squared-error loss ``(y_hat - target)^2 / 2``, biases zero; one
+    gradient-descent step at ``learning_rate``. ``w1[i][j]`` connects input
+    ``i`` to hidden unit ``j``.
+    """
+    x: List[float]
+    w1: List[List[float]]
+    w2: List[float]
+    target: float
+    learning_rate: float
+
+    @property
+    def z(self) -> List[float]:
+        return [sum(self.x[i] * self.w1[i][j] for i in range(len(self.x))) for j in range(len(self.w2))]
+
+    @property
+    def a(self) -> List[float]:
+        from ..physics.neural import calc_relu
+        return [calc_relu(v) for v in self.z]
+
+    @property
+    def y_hat(self) -> float:
+        return sum(a * w for a, w in zip(self.a, self.w2))
+
+    @property
+    def loss(self) -> float:
+        return (self.y_hat - self.target) ** 2 / 2
+
+    @property
+    def error(self) -> float:
+        return self.y_hat - self.target
+
+    @property
+    def w2_gradient(self) -> List[float]:
+        return [a * self.error for a in self.a]
+
+    @property
+    def sent_back(self) -> List[float]:
+        return [self.error * w for w in self.w2]
+
+    @property
+    def delta(self) -> List[float]:
+        return [s if z > 0 else 0.0 for s, z in zip(self.sent_back, self.z)]
+
+    @property
+    def w1_gradient(self) -> List[List[float]]:
+        return [[xi * d for d in self.delta] for xi in self.x]
+
+    def w1_updated(self, i: int, j: int) -> float:
+        return self.w1[i][j] - self.learning_rate * self.w1_gradient[i][j]
+
+
+class NumberFormatRangeScenario(BaseScenario):
+    """What range each number format holds, and what one ``value`` becomes when stored in it.
+
+    ``formats`` maps a name to (exponent bits, fraction bits);
+    ``integer_bits`` is a signed integer width for comparison.
+    """
+    value: float
+    formats: Dict[str, Tuple[int, int]]
+    integer_bits: int
+
+    def range(self, fmt: str):
+        """``(largest, smallest_normal, smallest_subnormal)`` of ``fmt``."""
+        from ..physics.numerics import calc_float_range
+        return calc_float_range(*self.formats[fmt])
+
+    def stored(self, fmt: str) -> float:
+        from ..physics.numerics import calc_float_round
+        return calc_float_round(self.value, *self.formats[fmt])
+
+    @property
+    def integer_max(self) -> int:
+        from ..physics.numerics import calc_int_max
+        return calc_int_max(self.integer_bits)
+
+
+class TrainingStateFitScenario(BaseScenario):
+    """Weights, gradients, and optimizer state of ``workload`` at one precision, against ``hardware``'s memory.
+
+    ``bytes_per_value`` stores each weight and gradient; the optimizer keeps
+    ``optimizer_bytes_per_parameter`` (two FP32 values for Adam, one for SGD
+    with momentum). Activations are not included.
+    """
+    workload: Workload
+    hardware: Optional[HardwareNode] = None
+    bytes_per_value: Quantity
+    optimizer_bytes_per_parameter: Quantity
+
+    def _state(self):
+        from ..physics.neural import calc_training_state
+        p = self.workload.parameters.to("count").magnitude
+        return [q.to("byte") for q in calc_training_state(p, self.bytes_per_value, self.optimizer_bytes_per_parameter)]
+
+    @property
+    def weights(self) -> Quantity:
+        return self._state()[0]
+
+    @property
+    def gradients(self) -> Quantity:
+        return self._state()[1]
+
+    @property
+    def optimizer_state(self) -> Quantity:
+        return self._state()[2]
+
+    @property
+    def optimizer_values_per_parameter(self) -> float:
+        return (self.optimizer_bytes_per_parameter / self.bytes_per_value).to("").magnitude
+
+    @property
+    def total(self) -> Quantity:
+        return sum(self._state()[1:], self._state()[0])
+
+    @property
+    def copies(self) -> float:
+        """Total state in units of the weights."""
+        return (self.total / self.weights).to("").magnitude
+
+    @property
+    def fits(self) -> bool:
+        return self.hardware is not None and self.total <= self.hardware.memory.capacity
+
+
+class ParameterGrowthScenario(BaseScenario):
+    """Parameter counts of a model series over time, fit separately before and after ``split_year``."""
+    rows: List[Dict[str, Any]]
+    split_year: int
+
+    @property
+    def result(self):
+        from .solvers import ParameterGrowthModel
+        return ParameterGrowthModel().solve(self.rows, self.split_year)

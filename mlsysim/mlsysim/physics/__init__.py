@@ -532,3 +532,44 @@ __all__ += [
     "calc_separable_cost_fraction",
     "calc_gradient_product",
 ]
+
+# --- Neural computation and number formats (added 2026-10-20) ---
+from .neural import (
+    calc_dense_weights,
+    calc_dense_biases,
+    calc_dense_params,
+    calc_dense_macs,
+    calc_dense_forward_flops,
+    calc_dense_backward_flops,
+    calc_dense_traffic_values,
+    calc_dense_saved_activations,
+    calc_dense_inference_activations,
+    calc_training_step_ops,
+    calc_training_state,
+    calc_sigmoid,
+    calc_sigmoid_slope,
+    calc_cross_entropy,
+    calc_relu,
+)
+from .numerics import calc_float_range, calc_float_round, calc_int_max
+
+__all__ += [
+    "calc_dense_weights",
+    "calc_dense_biases",
+    "calc_dense_params",
+    "calc_dense_macs",
+    "calc_dense_forward_flops",
+    "calc_dense_backward_flops",
+    "calc_dense_traffic_values",
+    "calc_dense_saved_activations",
+    "calc_dense_inference_activations",
+    "calc_training_step_ops",
+    "calc_training_state",
+    "calc_sigmoid",
+    "calc_sigmoid_slope",
+    "calc_cross_entropy",
+    "calc_relu",
+    "calc_float_range",
+    "calc_float_round",
+    "calc_int_max",
+]
