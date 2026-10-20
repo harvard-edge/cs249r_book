@@ -39,6 +39,8 @@ SelfCorrection = _load("self_correction", "SelfCorrection", "Intrinsic self-corr
 # Added 2026-10-20: benchmark error rates and documented accuracy failures.
 PredictionQuality = _load("prediction_quality", "PredictionQuality", "Cited prediction-quality results (ILSVRC-2012 errors, Google Flu Trends misses).")
 GamePlaying = _load("game_playing", "GamePlaying", "Cited results of landmark game-playing systems (Deep Blue, AlphaGo Zero).")
+# Deployment-tier field figures (added 2026-10-20)
+DeviceMeasurements = _load("device_measurements", "DeviceMeasurements", "Cited measurements of deployed ML hardware (TPU v1 roofline, memory-wall growth, phone stress test, two-pass wake word).")
 
 
 # ---------------------------------------------------------------------------
@@ -309,6 +311,7 @@ class Literature(Registry):
     LlmInferenceTraceCode2023 = _series.LlmInferenceTraceCode2023
     PredictionQuality = PredictionQuality  # added 2026-10-20
     GamePlaying = GamePlaying  # added 2026-10-20
+    DeviceMeasurements = DeviceMeasurements  # added 2026-10-20
     ComputeTrend = ComputeTrend
     AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks

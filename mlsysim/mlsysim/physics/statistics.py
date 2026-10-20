@@ -264,3 +264,21 @@ def calc_multilegged_confidence(leg_confidences):
     if not ps or any(not (0.0 <= p <= 1.0) for p in ps):
         raise ValueError("leg_confidences must be a non-empty sequence of values in [0, 1].")
     return 1.0 - math.prod(1.0 - p for p in ps)
+
+
+# --- Exponential growth fit (added 2026-10-20) -------------------------------
+def fit_exponential_growth(xs, ys, period=1.0):
+    """Least-squares fit of ``log10(y)`` on ``x``; growth factor per ``period`` of x.
+
+    Returns ``(factor, slope, intercept)`` where ``log10(y) = intercept + slope * x``
+    and ``factor = 10 ** (slope * period)``. Trend lines on log-scale technology
+    plots (compute, memory bandwidth, interconnect against year) are this fit.
+    """
+    n = len(xs)
+    if n < 2 or n != len(ys):
+        raise ValueError("fit_exponential_growth needs two or more (x, y) pairs.")
+    ls = [math.log10(y) for y in ys]
+    mx, my = sum(xs) / n, sum(ls) / n
+    slope = (sum((x - mx) * (l - my) for x, l in zip(xs, ls))
+             / sum((x - mx) ** 2 for x in xs))
+    return 10 ** (slope * period), slope, my - slope * mx

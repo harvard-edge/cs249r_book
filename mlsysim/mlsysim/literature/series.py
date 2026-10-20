@@ -973,3 +973,62 @@ class Series:
         "Llama 2 70B offline throughput on eight H100 and eight H200 GPUs (MLPerf Inference v4.0).",
         numeric=("accelerators", "tokens_per_s"),
     )
+
+    # --- Deployment-tier measurements (added 2026-10-20) --------------------
+    # Measured field data behind the light-barrier, memory-wall, TPU roofline,
+    # and TinyML energy comparisons; each row transcribed from the cited source.
+    AwsInterRegionRtt = TrendSeries(
+        "aws_interregion_rtt_p50",
+        Provenance(
+            kind=ProvenanceKind.INDUSTRY_REPORT,
+            ref="cloudping.co AWS inter-region latency, /api/latencies?percentile=p_50&timeframe=1W, "
+                "retrieved 2026-10-18",
+            url="https://www.cloudping.co/",
+            verified="2026-10-18",
+            notes=("p50_rtt_ms is the one-week median round trip measured from us-east-1 (N. Virginia) "
+                   "to each region, as the API returned it. Coordinates are those of the metro area AWS "
+                   "names for each region (Wikipedia city coordinates); AWS does not publish building "
+                   "locations, so great-circle distances from them are approximate."),
+        ),
+        "Measured median round trips from AWS us-east-1 to four regions, with metro coordinates.",
+        numeric=("source_lat", "source_lon", "dest_lat", "dest_lon", "p50_rtt_ms"),
+    )
+    TpuV1ProductionApps = TrendSeries(
+        "tpu_v1_production_apps",
+        _lit("Jouppi et al. (2017), In-Datacenter Performance Analysis of a Tensor Processing Unit, "
+             "ISCA 2017 (arXiv:1704.04760), Table 1 and Table 3",
+             "https://arxiv.org/abs/1704.04760",
+             "ops_per_weight_byte: Table 1, TPU Ops / Weight Byte; measured_tops: Table 3, row 9, "
+             "TeraOps/sec measured with hardware counters (92 peak); six applications that were 95% "
+             "of the TPU datacenter workload in July 2016"),
+        "Arithmetic intensity and measured throughput of the six production applications on TPU v1.",
+        numeric=("ops_per_weight_byte", "measured_tops"),
+    )
+    TpuV1DeploymentMix = TrendSeries(
+        "tpu_v1_deployment_mix",
+        _lit("Jouppi et al. (2017), In-Datacenter Performance Analysis of a Tensor Processing Unit, "
+             "ISCA 2017 (arXiv:1704.04760), Table 1, percent of deployed TPUs in July 2016",
+             "https://arxiv.org/abs/1704.04760"),
+        "Share of deployed TPU v1s by application family, July 2016.",
+        numeric=("deployed_share_pct",),
+    )
+    MLPerfTinyV12KwsEnergy = TrendSeries(
+        "mlperf_tiny_v1_2_kws_energy",
+        _lit("MLCommons, MLPerf Tiny v1.2 results (Apache-2.0), summary.csv, retrieved 2026-10-18",
+             "https://github.com/mlcommons/tiny_results_v1.2",
+             "keyword spotting (kws), closed division, rows with an energy measurement (HasPower); "
+             "energy_uj is the reported Power column, microjoules per inference"),
+        "Measured energy per keyword-spotting inference in MLPerf Tiny v1.2, closed division.",
+        numeric=("energy_uj",),
+    )
+    MemoryWallHardwareScaling = TrendSeries(
+        "memory_wall_hardware_scaling",
+        _lit("Gholami et al. (2024), AI and Memory Wall, IEEE Micro 44(3) (arXiv:2403.14123), Fig. 1",
+             "https://arxiv.org/abs/2403.14123",
+             "markers digitized from the vector figure in the arXiv source (figs/hw_scaling.pdf): each "
+             "filled marker's center read back to (year, value) through the figure's own axis ticks; "
+             "series: flops (server chips' peak FLOP/s), dram (DRAM bandwidth), interconnect "
+             "(interconnect bandwidth), each normalized to its first point"),
+        "Peak compute, DRAM bandwidth, and interconnect bandwidth of server hardware, normalized, by year.",
+        numeric=("year", "normalized"),
+    )

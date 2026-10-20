@@ -2601,3 +2601,36 @@ SILVER_ALPHAGO_ZERO_2017 = _lit(
     verified="2026-10-20",
     notes="After 3 days of self-play training AlphaGo Zero defeated AlphaGo Lee by 100 games to 0.",
 )
+
+# --- Deployment-tier field figures (added 2026-10-20) ------------------------
+JOUPPI_TPU_V1_ISCA_2017 = _lit(
+    "prov:jouppi-tpu-v1-isca-2017",
+    "Jouppi et al. (2017), In-Datacenter Performance Analysis of a Tensor Processing Unit, ISCA 2017",
+    url="https://arxiv.org/abs/1704.04760",
+    verified="2026-10-18",
+    notes=("Fig. 5 caption: the TPU roofline's slanted part meets the 92 TOPS ceiling at 1,350 "
+           "operations per weight byte (Table 1 counts one op per multiply-add in the intensity)."),
+)
+GHOLAMI_MEMORY_WALL_2024 = _lit(
+    "prov:gholami-memory-wall-2024",
+    "Gholami et al. (2024), AI and Memory Wall, IEEE Micro 44(3), Fig. 1",
+    url="https://arxiv.org/abs/2403.14123",
+    verified="2026-10-18",
+    notes=("Growth factors printed on Fig. 1 for server hardware over 20 years: peak FLOP/s 60,000x "
+           "(3.0x every two years), DRAM bandwidth 100x (1.6x), interconnect bandwidth 30x (1.4x)."),
+)
+GSMARENA_IPHONE15PROMAX_3DMARK = _report(
+    "prov:gsmarena-iphone15promax-3dmark",
+    "GSMArena, Apple iPhone 15 Pro Max review (2023): 3DMark Wild Life Stress Test result screen (UL)",
+    "https://m.gsmarena.com/apple_iphone_15_pro_max-review-2618p5.php",
+    notes=("Twenty loops of the Wild Life scene, run 2023-09-22; best loop 10,012 and lowest loop "
+           "7,045 as the app's result screen reports them."),
+)
+APPLE_HEY_SIRI_2017 = _report(
+    "prov:apple-hey-siri-2017",
+    "Apple Machine Learning Research (2017), Hey Siri: An On-device DNN-powered Voice Trigger for "
+    "Apple's Personal Assistant",
+    "https://machinelearning.apple.com/research/hey-siri",
+    notes=("The always-on processor runs a DNN of 5 layers of 32 hidden units; the main-processor "
+           "detector uses 5 layers of 192 hidden units (two-pass detection, fig. 5)."),
+)

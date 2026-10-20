@@ -956,3 +956,106 @@ def test_measured_silent_degradation():
     assert g.peak_reference == approx(6.0608)
     assert g.peak_ratio == approx(1.7415)
     assert g.max_week_ratio == approx(2.3398)
+# --- Deployment paradigms: where a model can run (added 2026-10-20) ---------
+
+def test_fiber_propagation_floors():
+    arm = Scenarios.RoboticArmRegionalCloud
+    assert arm.round_trip.to("ms").magnitude == approx(15.0)
+    assert arm.overrun.to("ms").magnitude == approx(5.0)
+    assert Scenarios.CrossCountryFiberPath.round_trip.to("ms").magnitude == approx(36.0)
+    r = Scenarios.AwsUsEast1Routes.routes
+    assert r["Ohio"].distance.to("km").magnitude == approx(483.9, rel=1e-2)
+    assert r["Ohio"].round_trip.to("ms").magnitude == approx(4.84, rel=1e-2)
+    assert r["Ohio"].measured_over_floor == approx(2.78, rel=1e-2)
+    assert r["Oregon"].round_trip.to("ms").magnitude == approx(35.03, rel=1e-2)
+    assert r["Tokyo"].measured_round_trip.to("ms").magnitude == approx(148.291)
+
+
+def test_factory_cameras_and_drone_offload():
+    c = Scenarios.FactoryCameras1080p
+    assert c.stream_rate.to("MB/s").magnitude == approx(186.624)
+    assert c.total_rate.to("GB/s").magnitude == approx(18.6624)
+    assert c.link_shortfall == approx(14.92992)
+    assert c.event_reduction == approx(933120)
+    d = Scenarios.Drone4KObstacleOffload
+    assert d.payload.to("MB").magnitude == approx(24.8832)
+    assert d.transmit_time.to("ms").magnitude == approx(1990.656)
+    assert d.remote_lower_bound.to("ms").magnitude == approx(2100.656)
+    assert d.deadline.to("ms").magnitude == approx(16.6667)
+    assert d.deadline_ratio == approx(126.04)
+    assert Scenarios.Drone4KObstacleOffloadCompressed.transmit_time.to("ms").magnitude == approx(19.90656)
+
+
+def test_single_node_rooflines():
+    a = Scenarios.ResNet50A100Batch1
+    assert a.result.latency_compute.to("ms").magnitude == approx(0.026282)
+    assert a.result.latency_memory.to("ms").magnitude == approx(0.027621, rel=2e-3)
+    assert a.traffic.to("MB").magnitude == approx(56.32)
+    assert a.intensity.to("flop/byte").magnitude == approx(145.60)
+    assert a.ridge.to("flop/byte").magnitude == approx(153.02)
+    m = Scenarios.ResNet50PhoneNpuBatch1
+    assert m.traffic.to("MB").magnitude == approx(28.16)
+    assert m.result.latency_memory.to("ms").magnitude == approx(0.55, rel=1e-2)
+    p = Scenarios.A100AtTenFlopPerByte
+    assert p.attainable.to("TFLOP/s").magnitude == approx(20.39)
+    assert p.peak_fraction == approx(0.065353)
+    apps = {x["app"]: x for x in Scenarios.TpuV1ProductionRoofline.apps}
+    assert apps["MLP0"]["roof_tops"] == approx(13.630)
+    assert apps["CNN0"]["roof_tops"] == approx(92.0)
+    assert apps["CNN0"]["bound"] == "compute" and apps["LSTM1"]["bound"] == "memory"
+    assert Scenarios.TPUv4Pod4096.peak_flops.to("EFLOP/s").magnitude == approx(1.1264)
+
+
+def test_trends_and_clock_power():
+    assert Scenarios.DoubledClockPower.power_ratio == approx(8.0)
+    g = Scenarios.IllustrativeMemoryWall
+    assert g.compute_annual_factor == approx(1.5874)
+    assert g.gap == approx(16.408)
+    assert Scenarios.MemoryWallFlopsTrend.growth == approx(3.0235)
+    assert Scenarios.MemoryWallDramTrend.growth == approx(1.5910)
+    assert Scenarios.MemoryWallInterconnectTrend.growth == approx(1.41, rel=1e-2)
+    t = Scenarios.MicroprocessorTrendsAroundDennard
+    assert t.growth("transistors", "mid_2000s", "early_2020s") == approx(190.79)
+    assert t.peak("frequency", "after_2005") == approx(4655.5)
+
+
+def test_battery_heat_and_energy():
+    b = Scenarios.AlwaysOnObjectDetectorPhone
+    assert b.runtime.to("hour").magnitude == approx(7.5)
+    assert b.required_energy.to("Wh").magnitude == approx(48)
+    assert b.budget_ratio == approx(3.2)
+    t = Scenarios.UnoptimizedVisionModelPhone
+    assert t.reduced_power.to("W").magnitude == approx(3.0)
+    assert t.headroom.to("W").magnitude == pytest.approx(0.0, abs=1e-9)
+    e = Scenarios.EnergyPerInferenceTiers
+    assert e.span("kws", "llm_query") == approx(1e8)
+    assert e.energies["mobilenet_phone"].to("mJ").magnitude == approx(2.5959)
+    assert e.energies["resnet_edge"].to("mJ").magnitude == approx(15.91)
+    assert e.energies["resnet_cloud"].to("mJ").magnitude == approx(75.467)
+    o = Scenarios.RadioUploadVsMobileNetV2
+    assert o.transmit_energy.to("mJ").magnitude == approx(100)
+    assert o.ratio_accelerator == approx(1000)
+    assert o.ratio_device == approx(38.522)
+
+
+def test_doorbell_braking_voice_and_pipeline():
+    f = Scenarios.SmartDoorbellFrame.result
+    assert f.latency.to("ms").magnitude == approx(101.01)
+    assert Scenarios.SmartDoorbell.evaluate().performance.status == "PASS"
+    assert Scenarios.SmartDoorbellResponsiveChime.evaluate().performance.status == "FAIL"
+    assert Scenarios.EmergencyBraking100kmh.distance.to("m").magnitude == approx(2.7778)
+    v = Scenarios.VoiceAssistantBillionDevices
+    assert v.stream_rate.to("KB/s").magnitude == approx(32)
+    assert v.fleet_stream_rate.to("TB/s").magnitude == approx(32)
+    assert v.upload_reduction == approx(864)
+    assert v.fleet_query_rate.to("GB/s").magnitude == approx(37.037)
+    assert v.cloud_detection_cost_per_year.to("USD/year").magnitude == approx(5e8)
+    assert v.accelerator_hours_per_day == approx(1.1111e6)
+    assert v.datacenters_average == approx(4.6296)
+    assert v.peak_ratio == approx(4.5)
+    assert v.datacenters_peak == approx(20.833)
+    p = Scenarios.PhoneCameraPipeline
+    assert p.total.to("ms").magnitude == approx(200)
+    assert p.accelerated_total.to("ms").magnitude == approx(146)
+    assert p.overall_speedup == approx(1.3699)
+    assert p.limit == approx(1.4286)
