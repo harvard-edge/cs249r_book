@@ -1,252 +1,350 @@
-"""Every derived number in Lecture 16 (Responsible AI), computed once.
+#!/usr/bin/env python3
+"""Every number on the Lecture 16 slides and notes, read from MLSysIM.
 
-Run:  python3 calcs.py
-Each line prints  <slide label> = <value>; the slides and notes copy these
-values. Inputs carry their source as a comment. Chapter = Volume II,
-Chapter 16, rendered dev text (18 October 2026). make_figs.py imports V.
+MLSysIM holds the inputs (Literature, ReferenceStats, the hardware and model
+registries) and the calculations (Scenarios.*, each a scenario type); the
+chapter, Responsible AI, reads the same scenarios. This file only selects
+values, converts units, and formats them; it types no numbers. Each value is
+recorded with v() under the key the deck prints as \\val{key}; running this
+file writes images/numbers.tex.
+
+Sources by slide:
+  - Hook, flows, close: Scenarios.OfqualStandardization2020 over
+    Literature.Series.OfqualGradeMatrix2020 and OfqualCandidatesLowered2020;
+    report-text shares and dates in Literature.Fairness (Ofqual 2021).
+  - Loan model and z-test: Scenarios.LoanScreeningTwoGroups and
+    Scenarios.LoanApprovalGapTest (Napkin Math 16.1, 16.2; chapter 16.5.2).
+  - COMPAS: Scenarios.CompasTwoYearRecidivism over
+    Literature.Series.CompasTwoYearConfusion (ProPublica data, recomputed).
+  - Dual thresholds: Scenarios.GroupThresholdSketch; fairness cost:
+    Scenarios.CreditParityAccuracyCost (Napkin Math 16.4).
+  - Obermeyer, Apple Card, four-fifths rule: Literature.Fairness.
+  - Gender Shades: Literature.Series.GenderShadesAudit.
+  - Monitoring: Scenarios.FairnessMonitor10K (chapter 16.5.5).
+  - Overheads: Literature.ResponsibleAIOverhead (chapter table 5).
+  - SHAP: Scenarios.ExactShapEnumeration, Scenarios.InlineShapRetrofit,
+    Scenarios.ImageExplanationLog.
+  - DP-SGD: Literature.Series.AbadiDpSgdAccuracy and
+    Literature.DifferentialPrivacy; the cost scenario Scenarios.Gpt3PrivacyPlan.
+  - Unlearning: Scenarios.Gpt3ShardedUnlearning (Napkin Math 16.6).
+  - RLHF labels: Scenarios.RewardModelLabelBudget.
+  - Automation bias: Scenarios.RadiologyAutomationBias (Napkin Math 16.7).
+  - Waymo: Literature.Series.WaymoRiderOnlyMiles and WaymoVsHumanBenchmark;
+    fleet failures: Scenarios.SafetyComplianceAtBillionRequests.
+  - Tempe recall: Literature.IncidentReports.
+
+Run from this folder: python3 calcs.py
 """
 
-V = {}
-
-
-def put(label, value, fmt="{:,.3f}"):
-    V[label] = value
-    print(f"{label} = {fmt.format(value)}")
-
-
-# ---------------------------------------------------------------------------
-# Hook: Ofqual 2020 (Ofqual, Grading gaps in summer 2020, July 2021)
-# ---------------------------------------------------------------------------
-# Table 2: candidates with 0 A levels where the CAG exceeded the calculated
-# grade: 78,470 of 246,110 (32%).
-ofq_zero, ofq_cands = 78_470, 246_110
-put("hook: candidates with no grade lowered (%)", 100 * ofq_zero / ofq_cands, "{:.1f}")
-put("hook: candidates with at least one grade lowered (%)",
-    100 * (ofq_cands - ofq_zero) / ofq_cands, "{:.1f}")
-
-# Table 2, all columns: candidates by the number of A levels whose CAG
-# exceeded the calculated grade (0, 1, 2, 3, 4), rounded to the nearest 10.
-OFQ_T2 = [78_470, 95_580, 55_730, 16_100, 220]
-for k, n in enumerate(OFQ_T2):
-    put(f"flows: candidates with {k} lowered (%)", 100 * n / ofq_cands, "{:.1f}")
-put("flows: Table 2 counts sum (check, 246,110)", sum(OFQ_T2), "{:,.0f}")
-
-# Table 1: row percentages, CAG (rows) against calculated grade (columns
-# A*, A, B, C, D, E, U); "~" (under 0.5%) entered as 0. N per CAG grade.
-OFQ_GRADES = ["A*", "A", "B", "C", "D", "E", "U"]
-OFQ_N = [91_950, 156_920, 179_700, 145_530, 61_240, 20_260, 1_810]
-OFQ_T1 = [[61, 36, 3, 0, 0, 0, 0],
-          [1, 56, 39, 3, 0, 0, 0],
-          [0, 1, 59, 37, 3, 0, 0],
-          [0, 0, 2, 59, 34, 4, 0],
-          [0, 0, 0, 5, 59, 31, 4],
-          [0, 0, 0, 1, 11, 60, 28],
-          [0, 0, 0, 0, 3, 17, 79]]
-OFQ_SPLIT = []   # per CAG grade: higher, same, one lower, two or more lower (%)
-for i, row in enumerate(OFQ_T1):
-    split = (sum(row[:i]), row[i], row[i + 1] if i + 1 < 7 else 0, sum(row[i + 2:]))
-    OFQ_SPLIT.append(split)
-    put(f"flows: CAG {OFQ_GRADES[i]} higher/same/one lower/two+ lower (%)", 0, "")
-    print("   ", split)
-lower = sum(n * (s[2] + s[3]) for n, s in zip(OFQ_N, OFQ_SPLIT)) / sum(OFQ_N)
-put("flows: entries lowered, from Table 1 (%; report text: 39)", lower, "{:.1f}")
-put("flows: Table 1 N sum (check, 457,420)", sum(OFQ_N), "{:,.0f}")
-
-# ---------------------------------------------------------------------------
-# Segment 2: the running loan model (Napkin Math 16.1, 16.2, chapter 16.5.1)
-# ---------------------------------------------------------------------------
-# Group A: 70 approved (40 repaid, 30 defaulted), 30 rejected (5 would
-# repay, 25 would default). Group B: 40 approved (30 repaid, 10 defaulted),
-# 60 rejected (20 would repay, 40 would default). 100 applicants each.
-A = dict(tp=40, fp=30, fn=5, tn=25)
-B = dict(tp=30, fp=10, fn=20, tn=40)
-for g, d in (("A", A), ("B", B)):
-    n = sum(d.values())
-    put(f"loan {g}: approval rate", (d["tp"] + d["fp"]) / n, "{:.2f}")
-    put(f"loan {g}: TPR", d["tp"] / (d["tp"] + d["fn"]), "{:.3f}")
-    put(f"loan {g}: FPR", d["fp"] / (d["fp"] + d["tn"]), "{:.3f}")
-    put(f"loan {g}: PPV", d["tp"] / (d["tp"] + d["fp"]), "{:.3f}")
-    put(f"loan {g}: base rate (would repay)", (d["tp"] + d["fn"]) / n, "{:.2f}")
-put("loan: parity gap", V["loan A: approval rate"] - V["loan B: approval rate"], "{:.2f}")
-put("loan: TPR gap", V["loan A: TPR"] - V["loan B: TPR"], "{:.3f}")
-put("loan: FPR gap", V["loan A: FPR"] - V["loan B: FPR"], "{:.3f}")
-put("loan: PPV gap (B - A)", V["loan B: PPV"] - V["loan A: PPV"], "{:.3f}")
-put("loan: disparate impact ratio", V["loan B: approval rate"] / V["loan A: approval rate"], "{:.2f}")
-put("loan: average absolute odds difference",
-    0.5 * (abs(V["loan: TPR gap"]) + abs(V["loan: FPR gap"])), "{:.3f}")
-
-# ---------------------------------------------------------------------------
-# Segment 2: COMPAS, recomputed from ProPublica's released data
-# ---------------------------------------------------------------------------
-# propublica/compas-analysis, compas-scores-two-years.csv (master), with
-# ProPublica's filters: |days_b_screening_arrest| <= 30, is_recid != -1,
-# c_charge_degree != 'O', score_text != 'N/A'. "High risk" = Medium or High.
-# Counts printed by the scratch script compas_counts.py (2026-10-18):
-compas = {
-    "Black": dict(tp=1188, fp=641, fn=473, tn=873),
-    "White": dict(tp=414, fp=282, fn=408, tn=999),
-}
-for g, d in compas.items():
-    n = sum(d.values())
-    put(f"COMPAS {g}: defendants", n, "{:,.0f}")
-    put(f"COMPAS {g}: FPR (%)", 100 * d["fp"] / (d["fp"] + d["tn"]), "{:.1f}")
-    put(f"COMPAS {g}: PPV (%)", 100 * d["tp"] / (d["tp"] + d["fp"]), "{:.1f}")
-    put(f"COMPAS {g}: base rate, reoffended in 2 years (%)", 100 * (d["tp"] + d["fn"]) / n, "{:.1f}")
-
-# ---------------------------------------------------------------------------
-# Segment 2: dual thresholds (illustrative scores drawn on the slide)
-# ---------------------------------------------------------------------------
-# Qualified (would repay) and default scores per group; scenario values
-# chosen to reproduce the chapter's figure 5 rates (TPR 75 and 25 percent at
-# a single 0.75 cutoff; 75 percent for B at 0.45).
-DUAL = {
-    "A": dict(qual=[0.93, 0.85, 0.79, 0.60], dflt=[0.70, 0.55, 0.38, 0.22]),
-    "B": dict(qual=[0.80, 0.60, 0.50, 0.33], dflt=[0.52, 0.40, 0.28, 0.15]),
-}
-
-
-def tpr_at(g, t):
-    q = DUAL[g]["qual"]
-    return sum(s >= t for s in q) / len(q)
-
-
-def fpr_at(g, t):
-    q = DUAL[g]["dflt"]
-    return sum(s >= t for s in q) / len(q)
-
-
-put("dual: TPR A at 0.75 (%)", 100 * tpr_at("A", 0.75), "{:.0f}")
-put("dual: TPR B at 0.75 (%)", 100 * tpr_at("B", 0.75), "{:.0f}")
-put("dual: TPR B at 0.45 (%)", 100 * tpr_at("B", 0.45), "{:.0f}")
-put("dual: FPR A at 0.75 (%)", 100 * fpr_at("A", 0.75), "{:.0f}")
-put("dual: FPR B at 0.75 (%)", 100 * fpr_at("B", 0.75), "{:.0f}")
-put("dual: FPR B at 0.45 (%)", 100 * fpr_at("B", 0.45), "{:.0f}")
-# Fairness cost (Napkin Math 16.4): accuracy 85 -> 81 percent.
-put("fairness cost: accuracy points", 85 - 81, "{:.0f}")
-put("fairness cost: relative drop (%)", 100 * (85 - 81) / 85, "{:.1f}")
-
-# ---------------------------------------------------------------------------
-# Segment 2: Obermeyer et al. 2019 (chapter footnote 7): share of Black
-# patients among those auto-identified, 17.7 -> 46.5 percent (simulated fix)
-# ---------------------------------------------------------------------------
-put("Obermeyer: ratio after/before", 46.5 / 17.7, "{:.1f}")
-
-# ---------------------------------------------------------------------------
-# Segment 3: two-proportion z-test (chapter 16.5.2), 0.70 vs 0.40
-# ---------------------------------------------------------------------------
 import math
+import sys
+from pathlib import Path
 
-p1, p2 = 0.70, 0.40
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
+
+Literature, Scenarios = mlsysim.Literature, mlsysim.Scenarios
+FAIR = Literature.Fairness
+SERIES = Literature.Series
+
+OFQ = Scenarios.OfqualStandardization2020
+LOAN = Scenarios.LoanScreeningTwoGroups
+ZT = Scenarios.LoanApprovalGapTest
+COMPAS = Scenarios.CompasTwoYearRecidivism
+DUAL = Scenarios.GroupThresholdSketch
+TAX = Scenarios.CreditParityAccuracyCost
+MON = Scenarios.FairnessMonitor10K
+SHAP = Scenarios.ExactShapEnumeration
+RETRO = Scenarios.InlineShapRetrofit
+XLOG = Scenarios.ImageExplanationLog
+DPPLAN = Scenarios.Gpt3PrivacyPlan
+SISA = Scenarios.Gpt3ShardedUnlearning
+RLHF = Scenarios.RewardModelLabelBudget
+AB = Scenarios.RadiologyAutomationBias
+FLEET = Scenarios.SafetyComplianceAtBillionRequests
+RAI = Literature.ResponsibleAIOverhead
+DP = Literature.DifferentialPrivacy
+
+# Figure inputs (make_figs.py imports these)
+OFQ_GRADES = OFQ.grades
+OFQ_SPLIT = [OFQ.split(g) for g in OFQ_GRADES]
+OFQ_T2 = [OFQ.candidates_with(k) for k in range(len(OFQ.candidates.entries))]
+BLACK, WHITE = COMPAS.first, COMPAS.second
+GS = SERIES.GenderShadesAudit.entries
+DPSGD = SERIES.AbadiDpSgdAccuracy.entries
+MILES = SERIES.WaymoRiderOnlyMiles.entries
+RATES = SERIES.WaymoVsHumanBenchmark.entries
+
+
+def pct(x):
+    return 100 * x
+
+
+def f(x):
+    """A Literature scalar as a float."""
+    return float(x)
+
+
+def gs_err(company, subgroup, when):
+    return next(r[f"error_{when}_pct"] for r in GS if r["company"] == company and r["subgroup"] == subgroup)
+
+
+def bench(name):
+    return next(r for r in RATES if r["benchmark"] == name)
 
 
 def z_for(n):
-    pp = (n * p1 + n * p2) / (2 * n)
-    return (p1 - p2) / math.sqrt(pp * (1 - pp) * (2 / n))
+    """z of the loan gap at n applicants per group (figure curve)."""
+    return ZT.z_at(n)
 
 
-put("z: n = 100 per group", z_for(100), "{:.2f}")
-put("z: n = 10 per group (20 applications)", z_for(10), "{:.2f}")
-pp = (p1 + p2) / 2
-n_star = pp * (1 - pp) * 2 * (1.96 / (p1 - p2)) ** 2
-put("z: n per group where z = 1.96", n_star, "{:.1f}")
-# 95% CI of the gap (unpooled), n = 100 and n = 10
-for n in (100, 10):
-    se = math.sqrt(p1 * (1 - p1) / n + p2 * (1 - p2) / n)
-    put(f"gap 95% CI low, n = {n}", (p1 - p2) - 1.96 * se, "{:.2f}")
-    put(f"gap 95% CI high, n = {n}", (p1 - p2) + 1.96 * se, "{:.2f}")
+print("== Hook and close: Ofqual 2020 (Grading gaps in summer 2020)")
+v("ofq_lower_pct", f(FAIR.OfqualEntriesLowerPct), "{:.0f}", "entries lowered, report text, %")
+v("ofq_same_pct", f(FAIR.OfqualEntriesSamePct), "{:.0f}", "entries unchanged, report text, %")
+v("ofq_higher_pct", f(FAIR.OfqualEntriesHigherPct), "{:.0f}", "entries raised, report text (just over), %")
+v("ofq_interim_lower_pct", f(FAIR.OfqualInterimEntriesLowerPct), "{:.1f}", "interim report, entries lowered, %")
+v("ofq_entries", OFQ.stated_entries, "{:,.0f}", "A level entries (stated n)")
+v("ofq_cands", OFQ.total_candidates, "{:,.0f}", "candidates (stated n)")
+v("ofq_zero", OFQ.candidates_with(0), "{:,.0f}", "candidates with no grade lowered")
+v("ofq_zero_pct", pct(OFQ.candidate_share(0)), "{:.0f}", "the same, %")
+v("ofq_any_pct", pct(OFQ.at_least_one_lowered_share), "{:.0f}", "candidates with at least one lowered, %")
+v("ofq_any_pct_1", pct(OFQ.at_least_one_lowered_share), "{:.1f}", "the same, one decimal")
+v("ofq_table_lower_pct", OFQ.entries_lowered_pct, "{:.1f}", "entries lowered, weighted from Table 1, %")
+one_lower = [OFQ.split(g)[2] for g in OFQ_GRADES[:-1]]   # A* to E: U cannot go lower
+v("ofq_one_lower_min", min(one_lower), "{:.0f}", "smallest one-grade-lower share, CAG A* to E, %")
+v("ofq_one_lower_max", max(one_lower), "{:.0f}", "largest one-grade-lower share, CAG A* to E, %")
+v("ofq_results_day", f(FAIR.OfqualResultsDayAugust2020), "{:.0f}", "results day, August")
+v("ofq_reversal_day", f(FAIR.OfqualReversalDayAugust2020), "{:.0f}", "reversal day, August")
+v("ofq_days_word", f(FAIR.OfqualReversalDayAugust2020) - f(FAIR.OfqualResultsDayAugust2020), "words",
+  "days from results to reversal")
 
-# ---------------------------------------------------------------------------
-# Segment 3: Gender Shades (mlsysim literature series gender_shades_audit:
-# Buolamwini and Gebru 2018 Table 4; Raji and Buolamwini 2019 Table 1)
-# ---------------------------------------------------------------------------
-ibm_err = {"lighter male": 0.3, "lighter female": 7.1, "darker male": 12.0, "darker female": 34.7}
-for k, e in ibm_err.items():
-    put(f"IBM 2017 accuracy, {k} (%)", 100 - e, "{:.1f}")
-put("IBM darker-female error ratio to lighter male", 34.7 / 0.3, "{:.0f}")
+print("== Loan model (Napkin Math 16.1, 16.2)")
+for g in ("A", "B"):
+    k = g.lower()
+    c = LOAN.groups[g]
+    v(f"loan_{k}_approved", LOAN.positives(g), "{:.0f}", f"group {g} approved")
+    v(f"loan_{k}_repaid", c["tp"], "{:.0f}", f"group {g} approved and repaid")
+    v(f"loan_{k}_fn", c["fn"], "{:.0f}", f"group {g} rejected who would repay")
+    v(f"loan_{k}_fp", c["fp"], "{:.0f}", f"group {g} approved who default")
+    v(f"loan_{k}_repayers", c["tp"] + c["fn"], "{:.0f}", f"group {g} who would repay")
+    v(f"loan_{k}_defaulters", c["fp"] + c["tn"], "{:.0f}", f"group {g} who would default")
+    v(f"loan_{k}_approval", LOAN.positive_rate(g), "{:.2f}", f"group {g} approval rate")
+    v(f"loan_{k}_tpr", LOAN.tpr(g), "{:.3f}", f"group {g} TPR")
+    v(f"loan_{k}_fpr", LOAN.fpr(g), "{:.3f}", f"group {g} FPR")
+    v(f"loan_{k}_ppv", LOAN.ppv(g), "{:.3f}", f"group {g} PPV")
+v("loan_n", LOAN.size("A"), "{:.0f}", "applicants per group")
+v("loan_parity_gap", LOAN.gap("positive_rate"), "{:.2f}", "parity gap")
+v("loan_tpr_gap", LOAN.gap("tpr"), "{:.3f}", "TPR gap")
+v("loan_di", LOAN.disparate_impact, "{:.2f}", "disparate impact ratio")
+v("four_fifths", f(FAIR.FourFifthsRuleRatio), "{:.1f}", "four-fifths screen")
 
-# ---------------------------------------------------------------------------
-# Segment 3: fleet monitoring scenario (chapter 16.5.5)
-# ---------------------------------------------------------------------------
-qps, groups, per_group_metrics, sample, rec_bytes, alpha = 10_000, 50, 3, 0.01, 200, 0.05
-day = qps * 86_400
-put("monitor: inferences per day", day, "{:,.0f}")
-put("monitor: sampled events per day", day * sample, "{:,.0f}")
-put("monitor: GB per day", day * sample * rec_bytes / 1e9, "{:.2f}")
-metrics = groups * per_group_metrics
-put("monitor: active metrics", metrics, "{:.0f}")
-put("monitor: expected false alerts per interval", metrics * alpha, "{:.1f}")
-put("monitor: expected false alerts at Bonferroni alpha/150", metrics * alpha / metrics, "{:.2f}")
+print("== COMPAS, recomputed from ProPublica's data")
+for g, k in ((BLACK, "black"), (WHITE, "white")):
+    c = COMPAS.groups[g]
+    v(f"compas_{k}_fpr", pct(COMPAS.fpr(g)), "{:.1f}", f"{g} FPR, %")
+    v(f"compas_{k}_ppv", pct(COMPAS.ppv(g)), "{:.1f}", f"{g} PPV, %")
+    v(f"compas_{k}_base", pct(COMPAS.base_rate(g)), "{:.1f}", f"{g} base rate, %")
+    for q in ("tp", "fp", "fn", "tn"):
+        v(f"compas_{k}_{q}", c[q], "{:.0f}", f"{g} {q.upper()}")
 
-# ---------------------------------------------------------------------------
-# Segment 4: explanation placement (chapter 16.7.2, 16.7.3, 16.11)
-# ---------------------------------------------------------------------------
-for f in (3, 10, 20):
-    put(f"SHAP subsets, {f} features", 2 ** f, "{:,.0f}")
-    put(f"SHAP time at 1 us per subset, {f} features (ms)", 2 ** f * 1e-3, "{:,.3f}")
-put("retrofit: latency low (ms)", 100 + 50, "{:.0f}")
-put("retrofit: latency high (ms)", 100 + 200, "{:.0f}")
-put("retrofit: capacity low (x)", (100 + 50) / 100, "{:.1f}")
-put("retrofit: capacity high (x)", (100 + 200) / 100, "{:.1f}")
-put("storage: TB per month low (1 MB maps)", 1e6 * 30 * 1e6 / 1e12, "{:.0f}")
-put("storage: TB per month high (10 MB maps)", 1e6 * 30 * 10e6 / 1e12, "{:.0f}")
+print("== Dual thresholds (illustrative) and the fairness cost (Napkin Math 16.4)")
+t_one, t_b = DUAL.uniform_threshold, DUAL.group_thresholds["B"]
+v("dual_t", t_one, "{:.2f}", "single cutoff")
+v("dual_tb", t_b, "{:.2f}", "Group B cutoff")
+v("dual_tpr_a", pct(DUAL.tpr("A", t_one)), "{:.0f}", "TPR A at the single cutoff, %")
+v("dual_tpr_b", pct(DUAL.tpr("B", t_one)), "{:.0f}", "TPR B at the single cutoff, %")
+v("dual_tpr_b2", pct(DUAL.tpr("B", t_b)), "{:.0f}", "TPR B at its own cutoff, %")
+v("dual_fpr_b", pct(DUAL.fpr("B", t_one)), "{:.0f}", "FPR B at the single cutoff, %")
+v("dual_fpr_b2", pct(DUAL.fpr("B", t_b)), "{:.0f}", "FPR B at its own cutoff, %")
+v("dual_gap_word", DUAL.tpr("A", t_one) / DUAL.tpr("B", t_one), "words", "opportunity gap, times")
+same = sorted(set(DUAL.scores["A"]["qualified"]) & set(DUAL.scores["B"]["qualified"]))[0]
+v("dual_same_score", same, "{:.2f}", "a score both groups hold")
+v("tax_base", TAX.baseline_accuracy, "{:.0f}", "accuracy before, %")
+v("tax_after", TAX.constrained_accuracy, "{:.0f}", "accuracy under parity, %")
+v("tax_pts", TAX.accuracy_cost, "{:.0f}", "accuracy points")
+v("tax_rel", pct(TAX.relative_cost), "{:.1f}", "relative drop, %")
+v("tax_a_appr", TAX.context["group_a_approval"], "{:.0f}", "Group A approval, %")
+v("tax_b_appr", TAX.context["group_b_approval_unconstrained"], "{:.0f}", "Group B approval before, %")
 
-# ---------------------------------------------------------------------------
-# Segment 4: DP-SGD accuracy (Abadi et al., CCS 2016, sec. 5.2 and Fig. 6)
-# ---------------------------------------------------------------------------
-mnist = {"none": 98.30, 8: 97, 2: 95, 0.5: 90}        # delta = 1e-5
-cifar = {"none": 80, 8: 73, 4: 70, 2: 67}             # delta = 1e-5; "approximately 80%"
-for eps in (8, 2, 0.5):
-    put(f"MNIST accuracy loss at eps = {eps} (points)", mnist["none"] - mnist[eps], "{:.1f}")
-for eps in (8, 4, 2):
-    put(f"CIFAR-10 accuracy loss at eps = {eps} (points)", cifar["none"] - cifar[eps], "{:.0f}")
+print("== Obermeyer et al. 2019")
+ob0, ob1 = f(FAIR.ObermeyerBlackShareBeforePct), f(FAIR.ObermeyerBlackShareAfterPct)
+v("ober_before", ob0, "{:.1f}", "Black share auto-identified, cost label, %")
+v("ober_after", ob1, "{:.1f}", "after the simulated fix, %")
+v("ober_ratio", ob1 / ob0, "{:.1f}", "ratio")
 
-# ---------------------------------------------------------------------------
-# Segment 4: unlearning (Napkin Math 16.6)
-# ---------------------------------------------------------------------------
-full_cost, full_days, shards, req_per_day = 4.6e6, 36, 100, 1000
-put("SISA: one-shard cost ($)", full_cost / shards, "{:,.0f}")
-put("SISA: one-shard hours", full_days * 24 / shards, "{:.2f}")
-put("SISA: full-to-shard cost ratio", full_cost / (full_cost / shards), "{:.0f}")
-p_untouched = (1 - 1 / shards) ** req_per_day
-put("SISA: P(a shard untouched by a day's 1,000 requests)", p_untouched, "{:.1e}")
-put("SISA: expected shards touched per day", shards * (1 - p_untouched), "{:.3f}")
-put("SISA: daily batch cost if every touched shard retrains ($)",
-    shards * (1 - p_untouched) * full_cost / shards, "{:,.0f}")
-# RLHF labeling budget (chapter 16.8.2)
-put("RLHF labels: low budget ($)", 50_000 * 0.50, "{:,.0f}")
-put("RLHF labels: high budget ($)", 500_000 * 5, "{:,.0f}")
-put("RLHF labels: spread (x)", (500_000 * 5) / (50_000 * 0.50), "{:.0f}")
+print("== Gender Shades (Buolamwini and Gebru 2018; Raji and Buolamwini 2019)")
+IBM_ACC = {}
+for sg in ("lighter male", "lighter female", "darker male", "darker female"):
+    IBM_ACC[sg] = 100 - gs_err("IBM", sg, "may2017")
+v("gs_ibm_lm_acc", IBM_ACC["lighter male"], "{:.1f}", "IBM accuracy, lighter men, %")
+v("gs_ibm_df_acc", IBM_ACC["darker female"], "{:.1f}", "IBM accuracy, darker women, %")
+for co, k in (("IBM", "ibm"), ("Face++", "facepp"), ("Microsoft", "msft")):
+    v(f"gs_{k}_17", gs_err(co, "darker female", "may2017"), "{:.1f}", f"{co} darker-female error 2017, %")
+    v(f"gs_{k}_18", gs_err(co, "darker female", "aug2018"), "{:.1f}", f"{co} darker-female error 2018, %")
+v("gs_amazon_18", gs_err("Amazon", "darker female", "aug2018"), "{:.1f}", "Amazon 2018, %")
+v("gs_kairos_18", gs_err("Kairos", "darker female", "aug2018"), "{:.1f}", "Kairos 2018, %")
 
-# ---------------------------------------------------------------------------
-# Segment 5: automation bias (Napkin Math 16.7)
-# ---------------------------------------------------------------------------
-ai_sens, human_sens, accept = 0.95, 0.92, 0.7
-put("automation bias: accepted misses", (1 - ai_sens) * accept, "{:.3f}")
-put("automation bias: best-case team sensitivity (%)", 100 * (1 - (1 - ai_sens) * accept), "{:.1f}")
-put("automation bias: accepted misses at 0.6 acceptance", (1 - ai_sens) * 0.6, "{:.3f}")
-put("automation bias: accepted misses at 0.8 acceptance", (1 - ai_sens) * 0.8, "{:.3f}")
+print("== Two-proportion z-test (chapter 16.5.2)")
+lo, hi = ZT.interval
+slo, shi = ZT.interval_at(ZT.small_n_per_group)
+v("z_rate_a", ZT.rate_a, "{:.2f}", "approval rate A")
+v("z_rate_b", ZT.rate_b, "{:.2f}", "approval rate B")
+v("z_pooled", ZT.pooled_rate, "{:.2f}", "pooled rate")
+v("z_n", ZT.n_per_group, "{:.0f}", "applicants per group")
+v("z_n_total", ZT.n_per_group + ZT.n_per_group, "{:.0f}", "applicants in all")
+v("z_small_n", ZT.small_n_per_group, "{:.0f}", "small sample per group")
+v("z_small_total", ZT.small_n_per_group + ZT.small_n_per_group, "{:.0f}", "small sample in all")
+v("z_big", ZT.z, "{:.2f}", "z at 100 per group")
+v("z_small", ZT.z_at(ZT.small_n_per_group), "{:.2f}", "z at 10 per group")
+v("z_crit", ZT.z_critical, "{:.2f}", "two-sided 5 percent critical value")
+v("z_nstar", ZT.n_at_critical, "{:.0f}", "per-group n where z reaches the critical value")
+v("z_gap_pts", pct(ZT.gap), "{:.0f}", "gap, points")
+v("z_ci_lo", lo, "{:.2f}", "95% interval low, 100 per group")
+v("z_ci_hi", hi, "{:.2f}", "95% interval high, 100 per group")
+v("z_ci_lo_small", -slo, "{:.2f}", "95% interval low, 10 per group (magnitude; printed with a minus)")
+v("z_ci_hi_small", shi, "{:.2f}", "95% interval high, 10 per group")
 
-# ---------------------------------------------------------------------------
-# Segment 5: Waymo (mlsysim series waymo_rider_only_miles and
-# waymo_vs_human_benchmark; Waymo Safety Impact Data Hub, through June 2026)
-# ---------------------------------------------------------------------------
-m0, m1 = 22.199, 271.329          # million rider-only miles, 2024-06 and 2026-06
-put("Waymo: exposure growth (x)", m1 / m0, "{:.1f}")
-inj_rate, inj_bench = 0.6744570049043109, 3.7723613124942825   # per million miles
-put("Waymo: injury rate", inj_rate, "{:.2f}")
-put("Waymo: human benchmark injury rate", inj_bench, "{:.2f}")
-put("Waymo: benchmark / Waymo injury rate", inj_bench / inj_rate, "{:.1f}")
-put("Waymo: rate x miles (injury crashes)", inj_rate * m1, "{:.0f}")
-put("Waymo: benchmark rate x same miles (expected injury crashes)", inj_bench * m1, "{:.0f}")
-# Chapter 16.8.5: 0.1 percent per-request failure at an assumed 1 billion requests/day
-put("fleet safety: failures per day at 1e9 requests", 1e9 * 0.001, "{:,.0f}")
+print("== Monitoring (chapter 16.5.5)")
+v("mon_qps", MON.request_rate.to("1/s").magnitude, "{:,.0f}", "decisions per second")
+v("mon_sample_pct", pct(MON.sample_share), "{:.0f}", "sampled, %")
+v("mon_rec_b", MON.record_size.to("byte").magnitude, "{:.0f}", "bytes per record")
+v("mon_groups", MON.groups, "{:.0f}", "groups")
+v("mon_mpg", MON.metrics_per_group, "{:.0f}", "metrics per group")
+v("mon_far_pct", pct(MON.false_alarm_rate), "{:.0f}", "false-alarm rate, %")
+v("mon_far", MON.false_alarm_rate, "{:.2f}", "false-alarm rate")
+v("mon_day_m", MON.decisions_per_day / 10 ** 6, "{:.0f}", "decisions per day, millions")
+v("mon_rec_m", MON.records_per_day / 10 ** 6, "{:.2f}", "records per day, millions")
+v("mon_gb", MON.log_per_day.to("GB").magnitude, "{:.2f}", "log per day, GB")
+v("mon_metrics", MON.metrics, "{:.0f}", "metrics")
+v("mon_alerts", MON.false_alerts_per_interval, "{:.1f}", "expected false alerts per interval")
 
-# Values quoted in notes
-put("hook: days from results (13 Aug) to reversal (17 Aug)", 17 - 13, "{:.0f}")
-put("dual: opportunity gap at one cutoff (x)", V["dual: TPR A at 0.75 (%)"] / V["dual: TPR B at 0.75 (%)"], "{:.0f}")
-put("z: pooled approval rate", (p1 + p2) / 2, "{:.2f}")
-put("automation bias: team gain over AI alone (points)",
-    V["automation bias: best-case team sensitivity (%)"] - 100 * ai_sens, "{:.1f}")
+print("== Safeguard overheads (chapter table 5)")
+OVERHEAD = [
+    ("Fairness-aware training", f(RAI.FairnessTrainingLowPct), f(RAI.FairnessTrainingHighPct), "train"),
+    ("DP-SGD", f(RAI.DpTrainingLowPct), f(RAI.DpTrainingHighPct), "train"),
+    ("Federated learning", f(RAI.FederatedTrainingLowPct), f(RAI.FederatedTrainingHighPct), "train"),
+    ("Adversarial training", f(RAI.AdversarialTrainingLowPct), f(RAI.AdversarialTrainingHighPct), "train"),
+    ("Sampled KernelSHAP", f(RAI.ApproxShapInferenceLowPct), f(RAI.ApproxShapInferenceHighPct), "serve"),
+    ("Exhaustive SHAP", pct(f(RAI.ExactShapInferenceLowX)), pct(f(RAI.ExactShapInferenceHighX)), "serve"),
+]
+v("oh_fair_lo", f(RAI.FairnessTrainingLowPct), "{:.0f}", "fairness-aware training low, %")
+v("oh_fair_hi", f(RAI.FairnessTrainingHighPct), "{:.0f}", "high, %")
+v("oh_dp_lo", f(RAI.DpTrainingLowPct), "{:.0f}", "DP-SGD low, %")
+v("oh_dp_hi", f(RAI.DpTrainingHighPct), "{:.0f}", "high, %")
+v("oh_fed_lo", f(RAI.FederatedTrainingLowPct), "{:.0f}", "federated low, %")
+v("oh_fed_hi", f(RAI.FederatedTrainingHighPct), "{:.0f}", "high, %")
+v("oh_adv_lo", 1 + f(RAI.AdversarialTrainingLowPct) / 100, "{:.0f}", "adversarial training low, times")
+v("oh_adv_hi", 1 + f(RAI.AdversarialTrainingHighPct) / 100, "{:.0f}", "high, times")
+v("oh_shap_lo", f(RAI.ApproxShapInferenceLowPct), "{:.0f}", "sampled KernelSHAP low, %")
+v("oh_shap_hi", f(RAI.ApproxShapInferenceHighPct), "{:.0f}", "high, %")
+v("oh_exact_lo", f(RAI.ExactShapInferenceLowX), "{:.0f}", "exhaustive SHAP low, times")
+v("oh_exact_hi", f(RAI.ExactShapInferenceHighX), "{:,.0f}", "high, times")
+v("oh_exact_lo_pct", OVERHEAD[-1][1], "{:,.0f}", "exhaustive SHAP low as drawn, %")
+v("oh_exact_hi_pct", OVERHEAD[-1][2], "{:,.0f}", "high as drawn, %")
+
+print("== Exact SHAP and the inline retrofit (chapter 16.7.2, 16.11)")
+n_small, n_large = SHAP.feature_counts[0], SHAP.feature_counts[-1]
+v("shap_n_small", n_small, "{:.0f}", "features, small")
+v("shap_n_large", n_large, "{:.0f}", "features, large")
+v("shap_sub_small", SHAP.subsets(n_small), "{:,.0f}", "subsets, small")
+v("shap_sub_large", SHAP.subsets(n_large), "{:,.0f}", "subsets, large")
+v("shap_t_large_s", SHAP.time(n_large).to("s").magnitude, "{:.2f}", "time, large, s")
+v("shap_us", SHAP.time_per_subset.to("us").magnitude, "{:.0f}", "time per subset, us")
+v("shap_us_word", SHAP.time_per_subset.to("us").magnitude, "words", "the same, in words")
+v("shap_budget_ms", SHAP.request_budget.to("ms").magnitude, "{:.0f}", "request budget, ms")
+v("retro_base", RETRO.base_latency.to("ms").magnitude, "{:.0f}", "base latency, ms")
+v("retro_add_lo", RETRO.added_low.to("ms").magnitude, "{:.0f}", "added low, ms")
+v("retro_add_hi", RETRO.added_high.to("ms").magnitude, "{:.0f}", "added high, ms")
+v("retro_lo", RETRO.latency_low.to("ms").magnitude, "{:.0f}", "latency low, ms")
+v("retro_hi", RETRO.latency_high.to("ms").magnitude, "{:.0f}", "latency high, ms")
+v("retro_cap_lo", RETRO.capacity_low, "{:.1f}", "capacity low, times")
+v("retro_cap_hi", RETRO.capacity_high, "{:.0f}", "capacity high, times")
+v("xlog_mb_lo", XLOG.map_size_low.to("MB").magnitude, "{:.0f}", "map size low, MB")
+v("xlog_mb_hi", XLOG.map_size_high.to("MB").magnitude, "{:.0f}", "map size high, MB")
+v("xlog_tb_lo", XLOG.monthly_low.to("TB").magnitude, "{:.0f}", "TB per month low")
+v("xlog_tb_hi", XLOG.monthly_high.to("TB").magnitude, "{:.0f}", "TB per month high")
+
+print("== DP-SGD accuracy (Abadi et al. 2016)")
+MNIST = [r for r in DPSGD if r["dataset"] == "MNIST"]
+CIFAR = [r for r in DPSGD if r["dataset"] == "CIFAR-10"]
+mnist0, cifar0 = f(DP.MnistNonprivateAccuracyPct), f(DP.AbadiCifar10NonprivateAccuracyPct)
+v("dp_mnist0", mnist0, "{:.1f}", "MNIST nonprivate, %")
+v("dp_cifar0", cifar0, "{:.0f}", "CIFAR-10 nonprivate, about, %")
+for i, r in enumerate(MNIST):
+    v(f"dp_mnist_eps{i}", r["epsilon"], "{:g}", "MNIST epsilon")
+    v(f"dp_mnist_acc{i}", r["accuracy_pct"], "{:.0f}", "MNIST accuracy, %")
+    v(f"dp_mnist_loss{i}", mnist0 - r["accuracy_pct"], "{:.1f}", "MNIST loss, points")
+for i, r in enumerate(CIFAR):
+    v(f"dp_cifar_eps{i}", r["epsilon"], "{:g}", "CIFAR-10 epsilon")
+    v(f"dp_cifar_acc{i}", r["accuracy_pct"], "{:.0f}", "CIFAR-10 accuracy, %")
+v("dp_delta_exp", -round(math.log10(MNIST[0]["delta"])), "{:.0f}", "delta, 10 to the minus this")
+v("dpplan_eps", DPPLAN.epsilon_strong, "{:.0f}", "strong budget")
+v("dpplan_base_m", DPPLAN.base_cost.to("USD").magnitude / 10 ** 6, "{:.1f}", "base cost, $M")
+v("dpplan_strong_m", DPPLAN.cost_strong.to("USD").magnitude / 10 ** 6, "{:.1f}", "cost at the strong budget, $M")
+
+print("== Unlearning (Napkin Math 16.6)")
+v("sisa_params_b", SISA.workload.parameters.to("count").magnitude / 10 ** 9, "{:.0f}", "model parameters, billions")
+v("sisa_gpus", SISA.n_accelerators, "{:,.0f}", "accelerators")
+v("sisa_mfu_pct", pct(SISA.mfu), "{:.0f}", "MFU, %")
+v("sisa_days", SISA.planning_days, "{:.0f}", "full retrain, days")
+v("sisa_full_m", SISA.full_cost.to("USD").magnitude / 10 ** 6, "{:.1f}", "full retrain cost, $M")
+v("sisa_shards", SISA.shards, "{:.0f}", "shards")
+v("sisa_req", SISA.requests_per_day, "{:,.0f}", "requests per day")
+v("sisa_shard_cost", SISA.shard_cost.to("USD").magnitude, "{:,.0f}", "one-shard cost, $")
+v("sisa_shard_h", SISA.shard_time.to("hour").magnitude, "{:.2f}", "one-shard time, h")
+v("sisa_shard_h1", SISA.shard_time.to("hour").magnitude, "{:.1f}", "the same, one decimal")
+v("sisa_keep", 1 - SISA.shard_share, "{:.2f}", "per-request chance a shard is untouched")
+p_un = SISA.p_shard_untouched
+exp10 = math.floor(math.log10(p_un))
+v("sisa_p_mant", p_un / 10 ** exp10, "{:.1f}", "P(untouched) mantissa")
+v("sisa_p_exp", -exp10, "{:.0f}", "P(untouched), 10 to the minus this")
+v("sisa_touched", SISA.shards_touched_per_day, "{:.0f}", "shards touched per day (about)")
+v("sisa_batch_m", SISA.daily_batch_cost.to("USD").magnitude / 10 ** 6, "{:.1f}", "daily batch cost, $M")
+v("sisa_drop_lo", pct(SISA.accuracy_drop_low), "{:.0f}", "accuracy drop low, %")
+v("sisa_drop_hi", pct(SISA.accuracy_drop_high), "{:.0f}", "accuracy drop high, %")
+
+print("== RLHF labels (chapter 16.8.2)")
+v("rlhf_n_lo", RLHF.comparisons_low, "{:,.0f}", "comparisons low")
+v("rlhf_n_hi", RLHF.comparisons_high, "{:,.0f}", "comparisons high")
+v("rlhf_p_lo", RLHF.price_low.to("USD").magnitude, "{:.2f}", "price low, $")
+v("rlhf_p_hi", RLHF.price_high.to("USD").magnitude, "{:.0f}", "price high, $")
+v("rlhf_b_lo", RLHF.budget_low.to("USD").magnitude, "{:,.0f}", "budget low, $")
+v("rlhf_b_hi_m", RLHF.budget_high.to("USD").magnitude / 10 ** 6, "{:.1f}", "budget high, $M")
+v("rlhf_spread", RLHF.spread, "{:.0f}", "spread, times")
+
+print("== Automation bias (Napkin Math 16.7)")
+v("ab_human", pct(AB.human_sensitivity), "{:.0f}", "radiologist alone, %")
+v("ab_ai", pct(AB.ai_sensitivity), "{:.0f}", "AI alone, %")
+v("ab_accept_pct", pct(AB.miss_acceptance), "{:.0f}", "acceptance of AI misses, %")
+v("ab_accept", AB.miss_acceptance, "{:.1f}", "acceptance, as a fraction")
+v("ab_miss", AB.ai_miss_rate, "{:.2f}", "AI miss rate")
+v("ab_miss_pct", pct(AB.ai_miss_rate), "{:.0f}", "AI miss rate, %")
+v("ab_accepted", AB.accepted_misses(), "{:.3f}", "accepted misses")
+v("ab_accepted_pct", pct(AB.accepted_misses()), "{:.1f}", "accepted misses, %")
+v("ab_team", pct(AB.team_sensitivity_bound), "{:.1f}", "team sensitivity at most, %")
+v("ab_gain", pct(AB.gain_over_ai), "{:.1f}", "gain over the AI alone, points")
+v("ab_lo_pct", pct(AB.acceptance_low), "{:.0f}", "acceptance range low, %")
+v("ab_hi_pct", pct(AB.acceptance_high), "{:.0f}", "acceptance range high, %")
+v("ab_miss_lo", pct(AB.accepted_misses(AB.acceptance_low)), "{:.1f}", "accepted misses at the low, %")
+v("ab_miss_hi", pct(AB.accepted_misses(AB.acceptance_high)), "{:.1f}", "accepted misses at the high, %")
+
+print("== Waymo (Safety Impact Data Hub through June 2026)")
+m0, m1 = MILES[0]["cumulative_ro_miles_millions"], MILES[-1]["cumulative_ro_miles_millions"]
+inj, fatal = bench("Any-injury-reported"), bench("Any Fatal")
+v("waymo_m0", m0, "{:.0f}", "rider-only miles, first release, millions")
+v("waymo_m1", m1, "{:.0f}", "rider-only miles, last release, millions")
+v("waymo_growth", m1 / m0, "{:.1f}", "growth, times")
+v("waymo_growth0", m1 / m0, "{:.0f}", "growth, times, whole")
+v("waymo_inj", inj["waymo_ipmm"], "{:.2f}", "injury crashes per million miles")
+v("waymo_bench", inj["bench_ipmm"], "{:.2f}", "human benchmark, per million miles")
+v("waymo_inj_n", inj["waymo_ipmm"] * m1, "{:.0f}", "rate times miles, injury crashes")
+v("waymo_fatal_n", fatal["waymo_count"], "{:.0f}", "fatal crashes")
+v("fleet_fail_pct", pct(FLEET.failure_probability), "{:.1f}", "unsafe responses, %")
+v("fleet_fail_day", FLEET.daily_failures, "{:,.0f}", "unsafe responses per day")
+
+print("== Apple Card and the Tempe recall")
+v("apple_ratio", f(FAIR.AppleCardReportedLimitRatio), "{:.0f}", "reported credit-limit ratio")
+v("tempe_detect_s", f(Literature.IncidentReports.TempeFirstDetectionS), "{:.1f}", "first detection before impact, s")
 
 if __name__ == "__main__":
-    pass
+    write(__file__)

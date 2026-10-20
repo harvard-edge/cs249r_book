@@ -1,51 +1,16 @@
 #!/usr/bin/env python3
 """Data plots for Lecture 6b (Network Architectures, Part 2).
 
-Every value is sourced from the rendered chapter (Network Architectures),
-from MLSysIM, or from a cited outside source. Values marked "derived" are
-computed here from a chapter formula and an MLSysIM shape or spec, and the
-slide that shows them says so.
+Every plotted value and every number in a label comes from calcs.py, which
+reads MLSysIM: the model registry (GPT-2 XL, Llama 2 and 3.1, PaLM, OPT-13B),
+the H100 and A100, the attention, KV-cache, decode, and recommender scenarios,
+and the cited series in Literature (published context windows,
+FlashAttention's Tables 20 and 21, Fiction.LiveBench). Positions, axis
+limits, and label offsets are layout and stay here.
 
-  - Context windows (published): BERT 512 positions (Devlin et al. 2019);
-    GPT-2 1,024 (Radford et al. 2019); GPT-3 2,048 (Brown et al. 2020);
-    GPT-4 Turbo 128K (OpenAI DevDay post, 6 Nov 2023); Claude 2.1 200K
-    (Anthropic, 21 Nov 2023); Gemini 1.5 Pro up to 1M in limited preview,
-    standard 128K (Google, 15 Feb 2024).
-  - RNN state 2 KB for a 512-wide FP32 state (Sec. 6.5.5); GPT-2 XL KV cache
-    307.2 KB per token in FP16 (Sec. 6.7.4).
-  - GPT-2 XL shape: 48 blocks, width 1,600, 25 heads (MLSysIM GPT2);
-    vocabulary 50,257 (Radford et al. 2019; MLSysIM GPT3 vocab_size).
-    Block weights 12 d^2 and block MACs 12 S d^2 + 2 S^2 d (Sec. 6.7.3,
-    Table 7); crossover at S = 6 d = 9,600 (Sec. 6.7.4).
-  - Materialized scores: S^2 per head at 2 bytes, 12 heads (Napkin Math 6.1).
-  - Decode intensity 1.0 FLOP/byte in FP16 (Sec. 6.7.4); H100 989 TFLOP/s
-    dense FP16 and 3.35 TB/s HBM, PCIe Gen5 x16 64 GB/s (MLSysIM H100).
-  - Context memory: Part 1's redraw of the chapter's figure 13 (GPT-2 XL,
-    FP16 weights 3 GB, KV 307.2 KB per token, one layer's scores with 25
-    heads, one 80 GB accelerator, decimal as labeled).
-  - KV cache per token, FP16, 2 x layers x key-value width x 2 bytes:
-    GPT-2 XL 48 x 1,600; Llama 2 7B 32 x 4,096 (32 key-value heads);
-    Llama 3.1 8B 32 x 1,024 (8 key-value heads of 128); Llama 2 70B
-    80 x 1,024 (8 of 128; 80 x 8,192 without sharing); PaLM 540B 118 x 256
-    (one key-value head of 256). MLSysIM Llama2_7B, Llama3_8B, Llama2_70B,
-    PaLM_540B; Ainslie et al. 2023; Shazeer 2019; Chowdhery et al. 2022.
-  - Recommender request (illustrative): 26 categorical features as in
-    Criteo (Naumov et al. 2019), one 128-wide FP32 row each, 512 B per row
-    (Sec. 6.8.3).
-  - Capacity wall: Napkin Math 6.2.
-  - One 1M-token request on a model of Llama 3.1 8B's shape (illustrative;
-    its card states a 128K window): BF16 weights 2 x 8.03B; KV cache
-    131,072 B per token; scores 2 B x S^2 per head per layer.
-  - FlashAttention measured runtime and memory (Dao et al., NeurIPS 2022,
-    arXiv 2205.14135v2, Tables 20 and 21; A100 40 GB, batch 16, 8 heads of
-    64, FP16), from calcs.py.
-  - Fiction.LiveBench, DeepSeek-R1-0528 (MLSysIM literature series
-    fiction_livebench_by_length; Epoch AI, CC BY 4.0).
-
-Run from this folder: python3 make_figs.py (derived values: calcs.py)
+Run from this folder: python3 make_figs.py (values: calcs.py)
 """
 
-import csv
 import sys
 from pathlib import Path
 
@@ -55,11 +20,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import calcs  # noqa: E402  (shared inputs: FlashAttention tables)
+import calcs as cc  # noqa: E402  (records every value)
+from deckvals import val, num  # noqa: E402
 
 out = Path(__file__).parent
 C = sp.C
-MLSYSIM = Path(__file__).resolve().parents[4] / "mlsysim"
 plt = sp.plt
 
 
@@ -70,29 +35,40 @@ def save(fig, path, margins):
     plt.close(fig)
 
 
-# --- Shapes and specs -------------------------------------------------------
-D_XL, L_XL, VOCAB = 1600, 48, 50257          # GPT-2 XL (MLSysIM GPT2)
-H100_FLOPS, H100_BW, PCIE_BW = 989e12, 3.35e12, 64e9   # MLSysIM H100
-KV_XL = 2 * L_XL * D_XL * 2                  # 307,200 B per token
+# --- Shapes and specs (calcs.py, from MLSysIM) ------------------------------
+KV_XL = cc.m(cc.KV_XL.per_token, "byte")     # bytes per kept token, FP16
+KI = cc.m(cc.units.Q_(1, "KiB"), "byte")     # tokens per "K" in a power-of-two length
+
+
+def k_label(tokens):
+    """1,000,000 -> 1M, 128,000 -> 128K: the short form the plots print."""
+    return f"{tokens / 1e6:.0f}M" if tokens >= 1e6 else f"{tokens / 1e3:.0f}K"
+
+
+def ki_label(tokens):
+    """4,096 -> 4K: a power-of-two length in binary thousands."""
+    return f"{tokens / KI:.0f}K"
 
 
 # --- Hook: published context windows ---------------------------------------
 def context_windows():
     fig, ax = plt.subplots(figsize=(5.8, 1.95))
-    pts = [  # (year, tokens, label, label offset in points, ha, va)
-        (2018.8, 512, "BERT 512", (0, -9), "center", "top"),
-        (2019.15, 1024, "GPT-2 1,024", (0, 9), "center", "bottom"),
-        (2020.4, 2048, "GPT-3 2,048", (9, 0), "left", "center"),
-        (2023.85, 128e3, "GPT-4 Turbo 128K", (-9, -5), "right", "center"),
-        (2023.89, 200e3, "Claude 2.1 200K", (-9, 7), "right", "center"),
-        (2024.12, 1e6, "Gemini 1.5 Pro 1M (preview)", (-9, 2), "right", "center"),
+    gpt4t, claude = num("gpt4t_window"), num("claude21_window")
+    gemini = cc.WINDOWS.Gemini15ProPreviewTokens
+    pts = [  # (year as a layout position, tokens, label, label offset in points, ha, va)
+        (2018.8, num("bert_window"), f"BERT {val('bert_window')}", (0, -9), "center", "top"),
+        (2019.15, num("gpt2_window"), f"GPT-2 {val('gpt2_window')}", (0, 9), "center", "bottom"),
+        (2020.4, num("gpt3_window"), f"GPT-3 {val('gpt3_window')}", (9, 0), "left", "center"),
+        (2023.85, gpt4t, f"GPT-4 Turbo {k_label(gpt4t)}", (-9, -5), "right", "center"),
+        (2023.89, claude, f"Claude 2.1 {k_label(claude)}", (-9, 7), "right", "center"),
+        (2024.12, gemini, f"Gemini 1.5 Pro {k_label(gemini)} (preview)", (-9, 2), "right", "center"),
     ]
     for x, y, label, off, ha, va in pts:
-        col = C["danger"] if y >= 1e5 else C["memory"]
+        col = C["danger"] if y > num("gpt3_window") else C["memory"]
         ax.plot([x], [y], "o", ms=10, color=col, mec="white", mew=1.5, zorder=5)
         ax.annotate(label, (x, y), xytext=off, textcoords="offset points",
                     ha=ha, va=va, fontsize=10.5, fontweight="bold", color=col)
-    ax.text(2021.75, 8e3, "GPT-3 to Gemini 1.5:\nabout 500× in four years",
+    ax.text(2021.75, 8e3, f"GPT-3 to Gemini 1.5:\nabout {val('window_growth_round')}× in four years",
             color=C["text"], fontsize=11.5, fontweight="bold", ha="center")
     ax.set_yscale("log")
     ax.set_xlim(2018.3, 2024.5)
@@ -112,13 +88,14 @@ def context_windows():
 def state_memory():
     fig, ax = plt.subplots(figsize=(5.8, 2.3))
     s = np.logspace(1, 4, 50)
-    ax.plot(s, np.full_like(s, 2e3), color=C["memory"], lw=3.5)
-    ax.text(12, 2e3 * 1.9, "RNN state: 2 KB at any length", color=C["memory"],
+    rnn = cc.m(cc.Scenarios.RecurrentState512Fp32.state_bytes, "byte")
+    ax.plot(s, np.full_like(s, rnn), color=C["memory"], lw=3.5)
+    ax.text(12, rnn * 1.9, f"RNN state: {val('rnn_state_kb')} KB at any length", color=C["memory"],
             fontsize=12, fontweight="bold")
     ax.plot(s, KV_XL * s, color=C["danger"], lw=3.5)
-    ax.text(10500, 3.07e9, "3.1 GB", color=C["danger"], fontsize=12,
+    ax.text(10500, cc.m(cc.KV_XL_10K.total, "byte"), f"{val('kv_10k_gb')} GB", color=C["danger"], fontsize=12,
             fontweight="bold", va="center")
-    ax.text(1500, 1e5, "Transformer: 307.2 KB\nkept per token (GPT-2 XL)",
+    ax.text(1500, 1e5, f"Transformer: {val('kv_xl_kb')} KB\nkept per token (GPT-2 XL)",
             color=C["danger"], fontsize=12, fontweight="bold", ha="center",
             va="center")
     ax.set_xscale("log")
@@ -139,12 +116,13 @@ def state_memory():
 
 # --- Segment 1: GPT-2 XL's weights from the block rule (derived) -----------
 def gpt2xl_params():
-    attn = 4 * D_XL ** 2 * L_XL / 1e9          # 0.49B
-    mlp = 8 * D_XL ** 2 * L_XL / 1e9           # 0.98B
-    table = VOCAB * D_XL / 1e9                 # 0.08B
+    attn = cc.BLOCK.attention_weights / 1e9
+    mlp = cc.BLOCK.mlp_weights / 1e9
+    table = cc.BLOCK.token_table / 1e9
+    published = num("xl_params_b")
     fig, ax = plt.subplots(figsize=(5.8, 1.3))
-    segs = [(attn, "compute", f"Attention\nprojections {attn:.2f}B"),
-            (mlp, "memory", f"MLP {mlp:.2f}B"),
+    segs = [(attn, "compute", f"Attention\nprojections {val('attn_proj_b')}B"),
+            (mlp, "memory", f"MLP {val('mlp_b')}B"),
             (table, "network", "")]
     left = 0
     for w, ck, txt in segs:
@@ -153,14 +131,14 @@ def gpt2xl_params():
             ax.text(left + w / 2, 0, txt, ha="center", va="center", color="white",
                     fontsize=11.5, fontweight="bold", linespacing=1.0)
         left += w
-    ax.annotate(f"Token table {table:.2f}B", (left - table / 2, -0.28),
+    ax.annotate(f"Token table {val('table_b')}B", (left - table / 2, -0.28),
                 xytext=(left - 0.02, -0.72), ha="right", va="center",
                 fontsize=11, fontweight="bold", color=C["network"],
                 arrowprops=dict(arrowstyle="-", color=C["network"], lw=1.2))
-    ax.text(left + 0.03, 0, f"= {left:.2f}B", va="center", fontsize=13,
+    ax.text(left + 0.03, 0, f"= {val('rule_b')}B", va="center", fontsize=13,
             fontweight="bold", color=C["text"])
-    ax.plot([1.5, 1.5], [-0.42, 0.42], color=C["danger"], lw=2.5)
-    ax.text(1.5, 0.5, "published 1.5B", ha="center", va="bottom", fontsize=11,
+    ax.plot([published, published], [-0.42, 0.42], color=C["danger"], lw=2.5)
+    ax.text(published, 0.5, f"published {val('xl_params_b')}B", ha="center", va="bottom", fontsize=11,
             fontweight="bold", color=C["danger"])
     ax.set_xlim(0, 1.9)
     ax.set_ylim(-0.95, 0.85)
@@ -176,23 +154,25 @@ def gpt2xl_params():
 def block_macs(step):
     fig, ax = plt.subplots(figsize=(5.8, 2.45))
     s = np.logspace(np.log10(128), np.log10(2e5), 200)
-    ax.plot(s, 12 * s * D_XL ** 2, color=C["compute"], lw=3.2)
-    ax.plot(s, 2 * s ** 2 * D_XL, color=C["memory"], lw=3.2)
+    blocks = [cc.BLOCK.variant(context_tokens=x) for x in s]
+    ax.plot(s, [b.dense_macs for b in blocks], color=C["compute"], lw=3.2)
+    ax.plot(s, [b.attention_macs for b in blocks], color=C["memory"], lw=3.2)
     ax.text(140, 3e11, "Projections + MLP: 12 S d²", color=C["compute"],
             fontsize=11.5, fontweight="bold")
     ax.text(1.4e4, 3e10, "Attention\nproducts: 2 S² d", color=C["memory"],
             fontsize=11.5, fontweight="bold", va="top", linespacing=1.05)
-    notes = [  # shown from step k: (x, label, color, text position, ha, va)
-        (2, 1024, "1,024 tokens:\nattention is about 10%", C["text"],
+    notes = [  # shown from step k: (block, label, color, text position, ha, va)
+        (2, cc.BLOCK, f"{val('gpt2_window')} tokens:\nattention is about {val('attn_share_pct')}%", C["text"],
          (1150, 1.2e9), "left", "top"),
-        (3, 6 * D_XL, "6d = 9,600:\nequal", C["danger"],
+        (3, cc.BLOCK.variant(context_tokens=round(cc.BLOCK.crossover)), f"6d = {val('crossover')}:\nequal", C["danger"],
          (7500, 1.5e12), "right", "bottom"),
-        (4, 1e5, "100K tokens: attention\nis 10× the rest", C["memory"],
+        (4, cc.BLOCK_LONG, f"{val('long_tokens_k')}K tokens: attention\nis {val('long_ratio')}× the rest", C["memory"],
          (5.5e4, 1.8e14), "center", "bottom"),
     ]
-    for k, x, label, col, pos, ha, va in notes:
+    for k, b, label, col, pos, ha, va in notes:
         alpha = 1.0 if step >= k else 0.0
-        lo, hi = sorted((2 * x * x * D_XL, 12 * x * D_XL ** 2))
+        x = b.context_tokens
+        lo, hi = sorted((b.attention_macs, b.dense_macs))
         if k == 3:
             ax.plot([x], [hi], "o", ms=10, color=col, mec="white", zorder=5,
                     alpha=alpha)
@@ -207,8 +187,8 @@ def block_macs(step):
     ax.set_yscale("log")
     ax.set_xlim(128, 2e5)
     ax.set_ylim(1e7, 1e17)
-    ax.set_xticks([128, 1024, 9600, 1e5])
-    ax.set_xticklabels(["128", "1,024", "9,600", "100K"])
+    ax.set_xticks([128, num("gpt2_window"), num("crossover"), num("long_tokens")])
+    ax.set_xticklabels(["128", val("gpt2_window"), val("crossover"), f"{val('long_tokens_k')}K"])
     ax.set_yticks([1e9, 1e12, 1e15])
     ax.set_yticklabels(["10⁹", "10¹²", "10¹⁵"])
     ax.minorticks_off()
@@ -223,21 +203,24 @@ def block_macs(step):
 def quadratic():
     fig, ax = plt.subplots(figsize=(3.3, 2.5))
     s = np.linspace(0, 8800, 200)
-    ax.plot(s, s ** 2 * 24 / 1e9, color=C["compute"], lw=3.5)
-    for x, label, col in [(4096, "4K: 0.40 GB", C["data"]),
-                          (8192, "8K: 1.61 GB\n= 4×", C["danger"])]:
-        y = x ** 2 * 24 / 1e9
+    per_pair = cc.m(cc.SCORES.heads * cc.SCORES.bytes_per_score, "GB")
+    ax.plot(s, s ** 2 * per_pair, color=C["compute"], lw=3.5)
+    four, eight = cc.SCORES_4K, cc.SCORES_8K
+    growth = cc.m(eight.layer_bytes / four.layer_bytes, "")
+    for sc, label, col in [(four, f"{ki_label(four.seq_len)}: {val('sc4k_gb')} GB", C["data"]),
+                           (eight, f"{ki_label(eight.seq_len)}: {val('sc8k_gb')} GB\n= {growth:.0f}×", C["danger"])]:
+        x, y = sc.seq_len, cc.m(sc.layer_bytes, "GB")
         ax.plot([x, x], [0, y], ls="--", color=col, lw=1.2)
         ax.plot([x], [y], "o", ms=10, color=col, mec="white", mew=1.5, zorder=5)
         ax.text(x - 400, y + 0.05, label, ha="right", va="bottom", color=col,
                 fontsize=12, fontweight="bold")
     ax.set_xlim(0, 8800)
     ax.set_ylim(0, 2.1)
-    ax.set_xticks([0, 4096, 8192])
-    ax.set_xticklabels(["0", "4K", "8K"])
+    ax.set_xticks([0, four.seq_len, eight.seq_len])
+    ax.set_xticklabels(["0", ki_label(four.seq_len), ki_label(eight.seq_len)])
     ax.set_xlabel("Context (tokens)")
     ax.set_ylabel("Scores, one layer (GB)")
-    ax.text(0.03, 0.97, "12 heads, FP16", transform=ax.transAxes,
+    ax.text(0.03, 0.97, f"{val('sc_heads')} heads, FP16", transform=ax.transAxes,
             fontsize=10, color=C["neutral"], va="top")
     ax.grid(color=C["grid"], lw=0.6)
     save(fig, out / "quadratic.svg",
@@ -246,10 +229,10 @@ def quadratic():
 
 # --- Segment 3: decode intensity against the H100 ridge --------------------
 def decode_ridge():
-    ridge = calcs.H100_FLOPS / calcs.H100_BW
+    ridge = cc.m(cc.ROOF.ridge, "flop/byte")
     fig, ax = plt.subplots(figsize=(3.4, 1.1))
-    rows = [("Decode,\nbatch 1", 1.0, "memory", "1 FLOP/byte"),
-            ("H100\nridge", ridge, "compute", f"{ridge:.0f} FLOP/byte")]
+    rows = [("Decode,\nbatch 1", cc.m(cc.ROOF.point_intensity, "flop/byte"), "memory", f"{val('decode_i')} FLOP/byte"),
+            ("H100\nridge", ridge, "compute", f"{val('ridge')} FLOP/byte")]
     for i, (label, v, ck, txt) in enumerate(rows):
         y = 1 - i
         ax.barh(y, v - 0.3, left=0.3, color=C[ck], height=0.6)
@@ -278,24 +261,26 @@ def decode_ridge():
 def context_memory(step):
     fig, ax = plt.subplots(figsize=(5.8, 2.35))
     s = np.logspace(np.log10(512), np.log10(131072), 200)
-    dev = calcs.DEV_GB                     # 80 GB, decimal, as labeled
+    ctx = cc.CTX
+    dev = cc.m(ctx.hardware.memory.capacity, "GB")   # the device's bytes, in decimal GB
+    weights = cc.m(ctx.weights, "GB")
     ax.axhline(dev, color=C["danger"], lw=1.3, ls=":")
-    ax.text(600, dev / 1.5, "One 80 GB accelerator", color=C["danger"], fontsize=11,
+    ax.text(600, dev / 1.5, f"One {val('dev_gb')} GB accelerator", color=C["danger"], fontsize=11,
             va="top")
-    ax.plot(s, np.full_like(s, 3.0), color=C["memory"], lw=3.2)
-    ax.text(600, 3.0 * 1.4, "Weights, 3 GB (fixed)", color=C["memory"],
+    ax.plot(s, np.full_like(s, weights), color=C["memory"], lw=3.2)
+    ax.text(600, weights * 1.4, f"Weights, {val('ctx_weights_gb')} GB (fixed)", color=C["memory"],
             fontsize=12, fontweight="bold")
     if step >= 2:
-        ax.plot(s, KV_XL * s / 1e9, color=C["compute"], lw=3.2)
-        x = 3.0e9 / KV_XL
-        ax.plot([x], [3.0], "o", ms=9, color=C["compute"], mec="white", zorder=5)
-        ax.text(x * 1.25, 0.06, "KV cache passes\nthe weights near 10K",
+        ax.plot(s, cc.m(ctx.kv_per_token, "GB") * s, color=C["compute"], lw=3.2)
+        x = ctx.kv_crossing
+        ax.plot([x], [weights], "o", ms=9, color=C["compute"], mec="white", zorder=5)
+        ax.text(x * 1.25, 0.06, f"KV cache passes\nthe weights near {val('ctx_kv_cross_k')}K",
                 color=C["compute"], fontsize=11, fontweight="bold")
     if step >= 3:
-        ax.plot(s, 25 * s ** 2 * 2 / 1e9, color=C["danger"], lw=3.2, ls="--")
-        x = np.sqrt(calcs.DEV_GB * 1e9 / (calcs.H_XL * calcs.FP16))
+        ax.plot(s, cc.m(ctx.score_bytes_per_pair, "GB") * s ** 2, color=C["danger"], lw=3.2, ls="--")
+        x = ctx.score_crossing
         ax.plot([x], [dev], "o", ms=9, color=C["danger"], mec="white", zorder=5)
-        ax.text(x / 1.9, dev * 2.2, "One layer's scores\nfill it near 40K",
+        ax.text(x / 1.9, dev * 2.2, f"One layer's scores\nfill it near {val('ctx_score_cross_k')}K",
                 color=C["danger"], fontsize=11, fontweight="bold", ha="right")
     ax.set_xscale("log")
     ax.set_yscale("log")
@@ -315,15 +300,15 @@ def context_memory(step):
 
 # --- Segment 3: KV cache per token across decoders (derived) ---------------
 def kv_per_token():
-    def kv(layers, width):
-        return 2 * layers * width * 2 / 1e3          # KB, FP16
-
+    unshared = cc.L70.model_copy(update={"kv_heads": cc.L70.heads})
     rows = [  # label, KB, color, value text, ghost KB or None
-        ("GPT-2 XL (1.5B)", kv(48, 1600), "neutral", "307 KB: 25 own heads", None),
-        ("Llama 2 7B", kv(32, 4096), "danger", "524 KB: 32 own heads", None),
-        ("Llama 3.1 8B", kv(32, 1024), "memory", "131 KB: 8 shared", None),
-        ("Llama 2 70B", kv(80, 1024), "memory", "328 KB: 8 shared", kv(80, 8192)),
-        ("PaLM 540B", kv(118, 256), "memory", "121 KB: 1 shared", None),
+        (f"GPT-2 XL ({val('xl_params_b')}B)", cc.kv_kb(cc.XL), "neutral",
+         f"{val('kv_xl_kb_round')} KB: {val('xl_heads')} own heads", None),
+        ("Llama 2 7B", cc.kv_kb(cc.L7), "danger", f"{val('kv_l7_kb')} KB: {val('l7_heads')} own heads", None),
+        ("Llama 3.1 8B", cc.kv_kb(cc.L8), "memory", f"{val('kv_l8_kb')} KB: {val('l8_kv_heads')} shared", None),
+        ("Llama 2 70B", cc.kv_kb(cc.L70), "memory", f"{val('kv_l70_kb')} KB: {val('l70_kv_heads')} shared",
+         cc.kv_kb(unshared)),
+        ("PaLM 540B", cc.kv_kb(cc.PALM), "memory", f"{val('kv_palm_kb')} KB: {cc.PALM.kv_heads} shared", None),
     ]
     fig, ax = plt.subplots(figsize=(5.8, 2.45))
     n = len(rows)
@@ -332,7 +317,7 @@ def kv_per_token():
         if ghost:
             ax.barh(y, ghost - 30, left=30, color="white", edgecolor=C["danger"],
                     ls="--", lw=1.4, height=0.62)
-            ax.text(ghost * 1.1, y, "2.6 MB\nunshared", va="center", fontsize=10.5,
+            ax.text(ghost * 1.1, y, f"{val('kv_l70_unshared_mb')} MB\nunshared", va="center", fontsize=10.5,
                     color=C["danger"], fontweight="bold", linespacing=1.0)
         ax.barh(y, v - 30, left=30, color=C[ck], height=0.62)
         ax.text(27, y, label, ha="right", va="center", fontsize=12,
@@ -360,21 +345,20 @@ def kv_per_token():
 
 # --- Segment 4: request rate each memory path could feed (derived) ---------
 def recsys_rate():
-    req_bytes = 26 * 128 * 4                      # 13,312 B per request
-    hbm, pcie = H100_BW / req_bytes, PCIE_BW / req_bytes
+    hbm, pcie = cc.m(cc.GATHER.device_rate, "1/s"), cc.m(cc.GATHER.host_rate, "1/s")
     fig, ax = plt.subplots(figsize=(2.6, 2.55))
-    for x, v, ck, txt in [(0, hbm, "memory", f"{hbm / 1e6:.0f}M"),
-                          (1, pcie, "network", f"{pcie / 1e6:.1f}M")]:
+    for x, v, ck, txt in [(0, hbm, "memory", f"{val('rec_hbm_m')}M"),
+                          (1, pcie, "network", f"{val('rec_pcie_m')}M")]:
         ax.bar(x, v, color=C[ck], width=0.62)
         ax.text(x, v * 1.4, txt, ha="center", va="bottom", fontsize=12.5,
                 fontweight="bold", color=C[ck])
-    ax.text(1, 3.2e7, f"{hbm / pcie:.0f}× fewer", ha="center", fontsize=12.5,
+    ax.text(1, 3.2e7, f"{val('rec_ratio')}× fewer", ha="center", fontsize=12.5,
             fontweight="bold", color=C["danger"])
     ax.set_yscale("log")
     ax.set_ylim(1e6, 3e9)
     ax.set_xlim(-0.55, 1.55)
     ax.set_xticks([0, 1])
-    ax.set_xticklabels(["HBM\n3.35 TB/s", "PCIe Gen5\n64 GB/s"])
+    ax.set_xticklabels([f"HBM\n{val('h100_tbs')} TB/s", f"PCIe Gen5\n{val('pcie_gbs')} GB/s"])
     ax.set_yticks([1e6, 1e7, 1e8, 1e9])
     ax.set_yticklabels(["1M", "10M", "100M", "1B"])
     ax.minorticks_off()
@@ -388,28 +372,29 @@ def recsys_rate():
 # --- Segment 4: the capacity wall (Part 1's plot, column size) -------------
 def capacity():
     fig, ax = plt.subplots(figsize=(3.6, 1.85))
-    rows = [("One table", 51.2, "memory", "51.2 GB"),
-            ("Two tables", 102.4, "danger", "102.4 GB")]
+    dev = num("a100_gb")                   # the labeled capacity the estimate divides by
+    rows = [("One table", num("tbl_gb"), "memory", f"{val('tbl_gb')} GB"),
+            ("Two tables", num("tbl2_gb"), "danger", f"{val('tbl2_gb')} GB")]
     for i, (label, v, ck, txt) in enumerate(rows):
         y = 1 - i
         ax.barh(y, v, color=C[ck], height=0.6)
         ax.text(-2, y, label, ha="right", va="center", fontsize=12,
                 fontweight="bold", color=C["text"])
-        if v < 80:
+        if v < dev:
             ax.text(v - 2, y, txt, va="center", ha="right", fontsize=12,
                     fontweight="bold", color="white")
         else:
             ax.text(v + 3, y, txt, va="center", fontsize=12, fontweight="bold",
                     color=C[ck])
-    ax.axvline(80, color=C["danger"], lw=2, ls="--")
-    ax.text(78, 1.62, "80 GB A100", ha="right", fontsize=11, color=C["danger"],
+    ax.axvline(dev, color=C["danger"], lw=2, ls="--")
+    ax.text(dev - 2, 1.62, f"{val('a100_gb')} GB A100", ha="right", fontsize=11, color=C["danger"],
             fontweight="bold")
     ax.set_xlim(0, 150)
     ax.set_ylim(-0.5, 1.9)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
     ax.set_xticks([0, 50, 100, 150])
-    ax.set_xlabel("GB (100M rows, 128-wide, FP32)")
+    ax.set_xlabel(f"GB ({val('tbl_rows_m')}M rows, {val('rec_width')}-wide, FP32)")
     ax.grid(axis="x", color=C["grid"], lw=0.6)
     ax.set_axisbelow(True)
     save(fig, out / "capacity.svg",
@@ -418,13 +403,12 @@ def capacity():
 
 # --- Synthesis: one 1M-token request (derived, illustrative shape) ---------
 def million_request(step):
-    s = 1e6
-    weights = 2 * 8.03e9 / 1e9                     # 16.1 GB, BF16
-    kv = s * 2 * 32 * 1024 * 2 / 1e9               # 131 GB
-    scores = 2 * s ** 2 / 1e9                      # 2,000 GB per head per layer
-    rows = [("Weights, BF16", weights, "memory", f"{weights:.1f} GB"),
-            ("KV cache, 1M tokens", kv, "compute", f"{kv:.0f} GB"),
-            ("Scores if stored", scores, "danger", "2 TB per head, per layer")]
+    weights = cc.m(cc.KV_L8_1M.weights, "GB")
+    kv = cc.m(cc.KV_L8_1M.total, "GB")
+    scores = cc.m(cc.SCORES_1M.layer_bytes, "GB")   # per head per layer
+    rows = [("Weights, BF16", weights, "memory", f"{val('mil_weights_gb')} GB"),
+            (f"KV cache, {k_label(cc.KV_L8_1M.tokens)} tokens", kv, "compute", f"{val('mil_kv_gb')} GB"),
+            ("Scores if stored", scores, "danger", f"{val('mil_scores_tb')} TB per head, per layer")]
     fig, ax = plt.subplots(figsize=(5.8, 1.95))
     n = len(rows)
     for i, (label, v, ck, txt) in enumerate(rows):
@@ -441,7 +425,7 @@ def million_request(step):
                 ax.text(1.12, y, txt, va="center", ha="left", fontsize=11,
                         fontweight="bold", color=C["danger"], zorder=6,
                         bbox=dict(facecolor="white", edgecolor="none", pad=1.5))
-            elif v < 80:
+            elif v < num("dev_gb"):
                 ax.text(v / 1.12, y, txt, va="center", ha="right", fontsize=12,
                         fontweight="bold", color="white")
             else:
@@ -449,8 +433,8 @@ def million_request(step):
                         fontweight="bold", color=C[ck])
         ax.text(0.92, y, label, ha="right", va="center", fontsize=12,
                 fontweight="bold", color=C["text"] if shown else "white")
-    ax.axvline(80, color=C["danger"], lw=2, ls=":")
-    ax.text(88, n - 0.42, "80 GB device", ha="left", va="bottom", fontsize=10.5,
+    ax.axvline(num("dev_gb"), color=C["danger"], lw=2, ls=":")
+    ax.text(num("dev_gb") * 1.1, n - 0.42, f"{val('dev_gb')} GB device", ha="left", va="bottom", fontsize=10.5,
             color=C["danger"], fontweight="bold")
     ax.set_xscale("log")
     ax.set_xlim(1, 8000)
@@ -469,21 +453,16 @@ def million_request(step):
 
 # --- Open questions: comprehension against context (published) -------------
 def fiction_livebench():
-    path = MLSYSIM / "mlsysim" / "literature" / "data" / "series" / \
-        "fiction_livebench_by_length.csv"
-    cols = [("score_400", 400), ("score_1k", 1e3), ("score_2k", 2e3),
-            ("score_4k", 4e3), ("score_8k", 8e3), ("score_16k", 16e3),
-            ("score_32k", 32e3), ("score_60k", 60e3)]
-    with open(path, newline="") as fh:
-        row = next(r for r in csv.DictReader(fh)
-                   if r["model"] == "chutes/DeepSeek-R1-0528")
-    xs = [x for _, x in cols]
-    ys = [float(row[k]) for k, _ in cols]
+    row = cc.row                              # DeepSeek-R1-0528, Literature.LongContextComprehension
+    cols = [c for c in cc.Literature.LongContextComprehension.columns if c.startswith("score_")
+            and row[c] is not None and cc.col_tokens(cc.short_col) <= cc.col_tokens(c) <= cc.col_tokens(cc.long_col)]
+    xs = [cc.col_tokens(c) for c in cols]
+    ys = [row[c] for c in cols]
     fig, ax = plt.subplots(figsize=(2.9, 2.2))
     ax.plot(xs, ys, color=C["memory"], lw=3, marker="o", ms=6)
-    ax.text(xs[0], ys[0] + 0.04, f"{ys[0]:.3f}", ha="left", va="bottom",
+    ax.text(xs[0], ys[0] + 0.04, val("fl_short"), ha="left", va="bottom",
             fontsize=11, fontweight="bold", color=C["memory"])
-    ax.text(xs[-1], ys[-1] - 0.05, f"{ys[-1]:.3f}", ha="right", va="top",
+    ax.text(xs[-1], ys[-1] - 0.05, val("fl_long"), ha="right", va="top",
             fontsize=11, fontweight="bold", color=C["danger"])
     ax.set_xscale("log")
     ax.set_xlim(300, 8e4)
@@ -501,13 +480,21 @@ def fiction_livebench():
 
 # --- Quadratic: FlashAttention measured (Dao et al. 2022, Tables 20 and 21) --
 def flash_measured():
-    seq = calcs.FA_SEQ
+    rows = cc.FLASH.entries
+    seq = [r["seq_len"] for r in rows]
+
+    def col(name, scale=1):
+        return [r[name] / scale for r in rows if r[name] is not None]
+
+    def per_doubling(name):
+        last, prev = rows[-1][name], rows[-2][name]
+        return f"×{last / prev:.0f}"
+
     fig, axs = plt.subplots(1, 2, figsize=(5.6, 1.4))
-    panels = [(axs[0], calcs.FA_TIME_PT, calcs.FA_TIME_FA, "Runtime (ms)",
-               "FlashAttention:\n×4 per doubling", (0.1, 3e4), 0.45),
-              (axs[1], [m / 1e3 for m in calcs.FA_MEM_PT],
-               [m / 1e3 for m in calcs.FA_MEM_FA], "Memory (GB)",
-               "FlashAttention:\n×2 per doubling", (0.01, 3000), 0.045)]
+    panels = [(axs[0], col("pytorch_runtime_ms"), col("flashattention_runtime_ms"), "Runtime (ms)",
+               f"FlashAttention:\n{per_doubling('flashattention_runtime_ms')} per doubling", (0.1, 3e4), 0.45),
+              (axs[1], col("pytorch_memory_mb", 1e3), col("flashattention_memory_mb", 1e3), "Memory (GB)",
+               f"FlashAttention:\n{per_doubling('flashattention_memory_mb')} per doubling", (0.01, 3000), 0.045)]
     for ax, pt, fa, ylab, lab, ylim, ylab_y in panels:
         ax.plot(seq[:len(pt)], pt, color=C["danger"], lw=2.8, marker="o", ms=4.5)
         ax.plot(seq, fa, color=C["memory"], lw=2.8, marker="o", ms=4.5)
@@ -528,7 +515,7 @@ def flash_measured():
     axs[1].set_yticklabels(["0.01", "1", "100"])
     axs[0].text(140, 2.5e3, "PyTorch:\nstores scores", color=C["danger"],
                 fontsize=10.5, fontweight="bold", va="center", linespacing=1.0)
-    axs[1].text(140, 300, "PyTorch: out of\nmemory after 4K", color=C["danger"],
+    axs[1].text(140, 300, f"PyTorch: out of\nmemory after {ki_label(seq[len(col('pytorch_memory_mb')) - 1])}", color=C["danger"],
                 fontsize=10.5, fontweight="bold", va="center", linespacing=1.0)
     save(fig, out / "flash_measured.svg",
          dict(left=0.12, right=0.985, bottom=0.17, top=0.97, wspace=0.42))

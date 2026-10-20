@@ -247,6 +247,10 @@ SPECS: tuple[DataSheetSpec, ...] = (
     _S("t_ipc", SENSING, "Hand-off to the proposer", "AISLE.t_ipc", ILLUSTRATIVE, "ms", 1),
     _S("t_age", SENSING, "Observation age at dispatch $t_{\\text{age}}$", "AISLE.perception_age",
        DERIVED, "ms", 1, "Exposure midpoint to dispatch"),
+    _S("yaw_rate_turn", SENSING, "Yaw rate turning into the aisle $\\YawRate$", "AISLE.yaw_rate_turn", ILLUSTRATIVE,
+       "rad/s", 1, "Sets rolling-shutter and sweep skew"),
+    _S("eps_sync", SENSING, "Clock-conversion bound $\\ClockConversionBound$", "AISLE.clock_conversion_bound",
+       ILLUSTRATIVE, "ms", 1, "Capture clock to the safety MCU's clock"),
     # ── Stopping budget at the rack end ─────────────────────────────────────
     _S("tau_delay", STOP, "Total pre-brake delay $\\tau_{\\text{delay}}$", "AISLE.tau_delay", DERIVED,
        "ms", 1, "$t_{\\text{age}} + T_{\\text{lease}} + T_{\\text{tick}} + T_{\\text{bus}} + T_{\\text{act}}$"),

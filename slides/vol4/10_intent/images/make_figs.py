@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Data plots and diagrams for Lecture 10 (Grounded Intent), Volume IV.
 
-Every derived value comes from calcs.py (inputs from the rendered chapter,
-Grounded Intent, and the MLSysIM registry the chapter prints from). Values
-read from papers carry their table or figure in the comment beside them.
+Every value comes from calcs.py, which reads MLSysIM (the running machine,
+the Scenarios.* the chapter prints from, and Literature.* for the published
+results); labels print the strings calcs.py recorded, through deckvals.val.
 Each figure is drawn at the size of its slot (full width about 5.8 in wide;
 a column about 5.4 by 3.6 in) so its type stays legible on the slide.
 A figure revealed in steps is written as name_step1.svg ... name_stepN.svg
@@ -27,12 +27,34 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402,F401  (sets the shared rcParams)
 
 import calcs  # noqa: E402
+from deckvals import val, num  # noqa: E402
 
 plt = sp.plt
 from matplotlib.patches import (Circle, Ellipse, FancyArrowPatch,  # noqa: E402
                                 FancyBboxPatch, Rectangle, Wedge)
 
-V = calcs.VALUES
+m = calcs.m
+cad, reach, occ = calcs.cad, calcs.reach, calcs.occ
+# Geometry in the units each figure draws, at full precision (labels use val()).
+V = dict(
+    tau_u=m(cad.untracked_horizon, "ms"), tau_t=m(cad.tracked_horizon, "ms"),
+    t_infer=m(calcs.RM.intent_inference_latency, "ms"), t_period=m(cad.intent_period, "ms"),
+    onset=m(cad.stop_onset, "ms"), r_tol=m(calcs.AISLE.grasp_tolerance, "mm"),
+    e0=m(calcs.AISLE.grasp_initial_error, "mm"), v_belt=m(calcs.AISLE.v_conveyor, "mm/s"),
+    a_slip=m(calcs.AISLE.a_conveyor_slip, "mm/s**2"),
+    f_brake=m(calcs.LATCH.force_at_brake_onset_guarded, "N"), f_stall=m(calcs.LATCH.stall_force, "N"),
+    f_trip=m(calcs.AISLE.f_latch_tripwire, "N"), f_limit=m(calcs.AISLE.f_latch_limit, "N"),
+    semi=[m(x, "mm") for x in calcs.region.semi_axes],
+    d_u=m(occ.growth_untracked, "mm"), d_t=m(occ.growth_tracked, "mm"),
+    aisle_w=m(calcs.AISLE.aisle_width, "m"), t_transit=m(reach.transit_floor, "ms"),
+    v_human=m(calcs.AISLE.v_human_approach, "m/s"),
+    norm_in=calcs.GOAL_SET.norms[0], norm_out=calcs.GOAL_SET.norms[1],
+    p_mug=calcs.beside.normalized[0], p_jar=calcs.beside.normalized[1], thresh=calcs.beside.threshold,
+    p_mug_low=calcs.low_jar.normalized[0], p_jar_low=calcs.low_jar.normalized[1],
+    t_admin=m(calcs.EXPIRY.administrative_lease, "ms"), t_stop=m(calcs.exp.stopping_deadline, "ms"),
+    t_expiry=m(calcs.exp.expiry_tracked, "ms"),
+    okr=calcs.OKR_ROWS, vla=calcs.VLA_ROWS, walk=calcs.WALK_ROWS,
+)
 OUT = Path(__file__).parent
 
 P = {
@@ -90,29 +112,29 @@ def autort():
         fig = plt.figure(figsize=(5.8, 2.4))
         ax1 = fig.add_axes([0.2, 0.62, 0.77, 0.3])
         ax2 = fig.add_axes([0.2, 0.2, 0.77, 0.3])
-        acc = calcs.AUTORT_ACCEPTABLE
-        uns = calcs.AUTORT_PROPOSED - acc
+        acc = num("autort_acceptable")
+        uns = num("autort_unsuitable")
         ax1.barh(0, acc, color=P["gray"], height=0.7)
         ax1.barh(0, uns, left=acc, color=P["amber"], height=0.7)
-        ax1.text(acc / 2, 0, f"{acc} acceptable", ha="center", va="center", fontsize=12.5,
+        ax1.text(acc / 2, 0, f"{val('autort_acceptable')} acceptable", ha="center", va="center", fontsize=12.5,
                  color="white", fontweight="bold")
-        ax1.text(acc + uns / 2, 0.62, f"{uns} unsuitable", ha="center", va="bottom",
+        ax1.text(acc + uns / 2, 0.62, f"{val('autort_unsuitable')} unsuitable", ha="center", va="bottom",
                  fontsize=12.5, color=P["amber"], fontweight="bold")
         ax1.set_xlim(0, 270)
-        ax1.set_xticks([0, 100, 200, 259])
-        ax1.text(-6, 0, f"{calcs.AUTORT_PROPOSED}\nproposed", ha="right", va="center",
+        ax1.set_xticks([0, 100, 200, num("autort_sampled")])
+        ax1.text(-6, 0, f"{val('autort_sampled')}\nproposed", ha="right", va="center",
                  fontsize=12.5, fontweight="bold", color=P["text"])
         s2 = step >= 2
-        rej = calcs.AUTORT_REJECTED_UNSUITABLE
+        rej = num("autort_rejected")
         ax2.barh(0, rej, color=P["green"], height=0.7, alpha=a(s2))
         ax2.barh(0, uns - rej, left=rej, color=P["red"], height=0.7, alpha=a(s2))
-        ax2.text(rej / 2, 0, f"{rej} rejected", ha="center", va="center", fontsize=12.5,
+        ax2.text(rej / 2, 0, f"{val('autort_rejected')} rejected", ha="center", va="center", fontsize=12.5,
                  color="white", fontweight="bold", alpha=a(s2))
-        ax2.text(rej + (uns - rej) / 2, 0, f"{uns - rej} passed", ha="center", va="center",
+        ax2.text(rej + (uns - rej) / 2, 0, f"{val('autort_passed')} passed", ha="center", va="center",
                  fontsize=12.5, color="white", fontweight="bold", alpha=a(s2))
         ax2.set_xlim(0, uns)
         ax2.set_xticks([0, rej, uns])
-        ax2.text(-0.7, 0, f"{uns}\nunsuitable", ha="right", va="center", fontsize=12.5,
+        ax2.text(-0.7, 0, f"{val('autort_unsuitable')}\nunsuitable", ha="right", va="center", fontsize=12.5,
                  fontweight="bold", color=P["text"], alpha=a(s2))
         ax2.set_xlabel("Tasks in the AutoRT sample (human-judged)", fontsize=11.5)
         for ax in (ax1, ax2):
@@ -173,16 +195,16 @@ def goalset():
         ax.set_ylim(-19, 19)
         ax.axis("off")
         ax.add_patch(Circle((0, 0), r, fc=P["green_l"], ec=P["green"], lw=2.5))
-        ax.text(0, r + 1.0, "goal set: 15 mm (task profile)", ha="center", va="bottom",
+        ax.text(0, r + 1.0, f"goal set: {val('r_tol')} mm (task profile)", ha="center", va="bottom",
                 fontsize=14, color=P["green_d"], fontweight="bold")
         ax.plot([0], [0], "+", color=P["slate"], ms=16, mew=2.5)
         ax.text(-1, -2.4, "target", ha="right", va="top", fontsize=13, color=P["slate"])
         ax.plot([V["norm_in"] * r], [0], "o", ms=12, color=P["navy"])
-        ax.text(V["norm_in"] * r, -2.6, f"10 mm\n{V['norm_in']:.2f}", ha="center",
+        ax.text(V["norm_in"] * r, -2.6, f"{val('d_goal_in')} mm\n{val('norm_in')}", ha="center",
                 va="top", fontsize=13, color=P["navy"], fontweight="bold")
         s2 = step >= 2
         ax.plot([V["norm_out"] * r], [0], "o", ms=12, color=P["red"], alpha=a(s2))
-        ax.text(V["norm_out"] * r, 2.0, f"20 mm\n{V['norm_out']:.2f}", ha="center",
+        ax.text(V["norm_out"] * r, 2.0, f"{val('d_goal_out')} mm\n{val('norm_out')}", ha="center",
                 va="bottom", fontsize=13, color=P["red_d"], fontweight="bold", alpha=a(s2))
         ax.text(V["norm_out"] * r + 2.5, -1.5, "outside:\nrefuse", ha="left", va="top",
                 fontsize=13, color=P["red_d"], alpha=a(s2))
@@ -201,7 +223,7 @@ def ap_mcu():
         ax.text(9.2, 5.45, "Safety MCU: commands", ha="center", fontsize=11.5,
                 color=P["green_d"], fontweight="bold")
         ax.plot([6.15, 6.15], [0.2, 5.2], color=P["slate"], lw=1.6, ls=(0, (6, 4)))
-        box(ax, 0.2, 3.3, 2.4, 1.3, "intent model\n336 ms, 2 Hz", P["navy_l"], P["navy"],
+        box(ax, 0.2, 3.3, 2.4, 1.3, f"intent model\n{val('t_infer')} ms, {val('f_intent')} Hz", P["navy_l"], P["navy"],
             fs=11.5)
         box(ax, 3.0, 3.3, 2.7, 1.3, "unique\nreferent?", P["navy_l"], P["navy"], fs=11.5)
         arrow(ax, 2.6, 3.95, 3.0, 3.95, P["navy"])
@@ -217,7 +239,7 @@ def ap_mcu():
             shown=s2, fs=11.5, dashed=True)
         # step 3: permission path, lease timer, drives
         s3 = step >= 3
-        box(ax, 9.0, 3.3, 2.6, 1.3, "permission\npath, 1 kHz", P["green_l"], P["green"],
+        box(ax, 9.0, 3.3, 2.6, 1.3, f"permission\npath, {val('f_tick_khz')} kHz", P["green_l"], P["green"],
             shown=s3, fs=11.5)
         arrow(ax, 8.6, 3.95, 9.0, 3.95, P["green"], shown=s3)
         box(ax, 9.0, 0.5, 2.6, 1.2, "joint drives", "white", P["slate"], shown=s3,
@@ -233,9 +255,10 @@ def ap_mcu():
 # Conformal refusal (Sec. 10.3.1): normalized scores against 1 - qhat
 # ---------------------------------------------------------------------------
 def conformal():
-    cases = [("Jar beside mug\n(raw 0.62, 0.48)", V["p_mug"], V["p_jar"], "set size 2: refuse"),
-             ("Jar scores 0.10\n(raw 0.62, 0.10)", V["p_mug_low"], V["p_jar_low"],
-              "set size 1: proceed")]
+    cases = [(f"Jar beside mug\n(raw {val('score_mug')}, {val('score_jar')})", V["p_mug"], V["p_jar"],
+              f"set size {val('set_size')}: refuse"),
+             (f"Jar scores {val('score_jar_low')}\n(raw {val('score_mug')}, {val('score_jar_low')})",
+              V["p_mug_low"], V["p_jar_low"], f"set size {val('set_size_low')}: proceed")]
     for step in (1, 2):
         fig, axes = plt.subplots(1, 2, figsize=(5.8, 2.6), sharey=True)
         fig.subplots_adjust(left=0.12, right=0.98, bottom=0.3, top=0.8, wspace=0.18)
@@ -259,7 +282,7 @@ def conformal():
             for t in ax.get_xticklabels():
                 t.set_alpha(a(shown))
         axes[0].set_ylabel("normalized score", fontsize=12)
-        axes[0].text(0.5, V["thresh"] + 0.03, "0.40", color=P["red"], fontsize=11,
+        axes[0].text(0.5, V["thresh"] + 0.03, val("thresh"), color=P["red"], fontsize=11,
                      fontweight="bold", ha="center")
         save(fig, f"conformal_step{step}")
 
@@ -282,13 +305,13 @@ def imprecise():
     ax.plot([0], [0], "o", color=P["navy"], ms=7)
     ax.annotate("", xy=(sx + 9, sz), xytext=(sx + 9, 0),
                 arrowprops=dict(arrowstyle="<|-|>", color=P["red"], lw=2))
-    ax.text(sx + 11, sz / 2, f"{sz:.1f}\nmm", fontsize=14, color=P["red_d"],
+    ax.text(sx + 11, sz / 2, f"{val('semi_z')}\nmm", fontsize=14, color=P["red_d"],
             fontweight="bold", va="center")
     ax.annotate("", xy=(-sx, -r - 7), xytext=(sx * 0, -r - 7),
                 arrowprops=dict(arrowstyle="<|-|>", color=P["navy"], lw=1.6))
-    ax.text(-sx - 2, -r - 7, f"{sx:.1f} mm", fontsize=13, color=P["navy"], ha="right",
+    ax.text(-sx - 2, -r - 7, f"{val('semi_x')} mm", fontsize=13, color=P["navy"], ha="right",
             va="center", fontweight="bold")
-    ax.text(r + 2, -r + 1, "15 mm\ntolerance", fontsize=12.5, color=P["green_d"],
+    ax.text(r + 2, -r + 1, f"{val('r_tol')} mm\ntolerance", fontsize=12.5, color=P["green_d"],
             fontweight="bold", ha="left", va="bottom")
     save(fig, "imprecise")
 
@@ -312,7 +335,7 @@ def wrong_object():
 # ---------------------------------------------------------------------------
 def latch():
     rows = [("tripwire", V["f_trip"], P["amber"]), ("at brake", V["f_brake"], P["amber"]),
-            ("200 ms stall,\nno local trip", V["f_stall"], P["red"])]
+            (f"{val('t_stall_arm')} ms stall,\nno local trip", V["f_stall"], P["red"])]
     for step in (1, 2, 3):
         fig = plt.figure(figsize=(5.8, 2.4))
         ax = fig.add_axes([0.25, 0.22, 0.72, 0.72])
@@ -326,7 +349,7 @@ def latch():
             ax.text(8.5, y, lab, ha="right", va="center", fontsize=13,
                     fontweight="bold", color=P["text"], alpha=a(shown))
         ax.axvline(V["f_limit"], color=P["red"], ls="--", lw=1.8)
-        ax.text(V["f_limit"] * 1.06, n - 0.42, "100 N latch limit", color=P["red_d"],
+        ax.text(V["f_limit"] * 1.06, n - 0.42, f"{val('f_limit')} N latch limit", color=P["red_d"],
                 fontsize=11.5, fontweight="bold", va="bottom")
         ax.set_xscale("log")
         ax.set_xlim(10, 2e4)
@@ -352,11 +375,11 @@ def cadence():
         ax1.plot(t, e_u, color=P["amber"], lw=2.5, ls="--")
         ax1.plot(t, e_t, color=P["petrol"], lw=2.5, alpha=a(step >= 3))
         ax1.axhline(V["r_tol"], color=P["red"], lw=1.6, ls="--")
-        ax1.text(565, V["r_tol"] + 1, "15 mm", color=P["red_d"], fontsize=11.5,
+        ax1.text(565, V["r_tol"] + 1, f"{val('r_tol')} mm", color=P["red_d"], fontsize=11.5,
                  ha="right", va="bottom", fontweight="bold")
-        ax1.text(5, 22, f"untracked\n{V['tau_u']:.0f} ms", color=P["amber"],
+        ax1.text(5, 22, f"untracked\n{val('tau_u')} ms", color=P["amber"],
                  fontsize=12, fontweight="bold")
-        ax1.text(V["tau_t"] + 12, 6.5, f"tracked: {V['tau_t']:.0f} ms", color=P["petrol"],
+        ax1.text(V["tau_t"] + 12, 6.5, f"tracked: {val('tau_t')} ms", color=P["petrol"],
                  fontsize=12, fontweight="bold", alpha=a(step >= 3))
         ax1.set_ylim(0, 32)
         ax1.set_ylabel("target error\n(mm)", fontsize=11)
@@ -365,7 +388,7 @@ def cadence():
         # lanes
         s2, s3 = step >= 2, step >= 3
         ax2.barh(2, V["t_infer"], color=P["navy"], height=0.6, alpha=a(s2))
-        ax2.text(V["t_infer"] / 2, 2, f"inference {V['t_infer']:.0f} ms", va="center",
+        ax2.text(V["t_infer"] / 2, 2, f"inference {val('t_infer')} ms", va="center",
                  ha="center", fontsize=11.5, color="white", fontweight="bold", alpha=a(s2))
         ax2.plot([V["t_period"]], [2], "v", color=P["navy"], ms=10, alpha=a(s2))
         ax2.text(V["t_period"] + 14, 2, "next\nproposal", fontsize=10.5, color=P["navy"],
@@ -374,7 +397,7 @@ def cadence():
             ax2.barh(y, tau, color=c, height=0.6, alpha=a(s3))
             ax2.barh(y, V["onset"], left=tau, color="white", edgecolor=P["red"],
                      hatch="///", height=0.6, alpha=a(s3))
-            ax2.text(tau + V["onset"] + 8, y, "+22 ms stop onset", va="center",
+            ax2.text(tau + V["onset"] + 8, y, f"+{val('t_onset')} ms stop onset", va="center",
                      fontsize=10.5, color=P["red_d"], alpha=a(s3))
         ax2.set_yticks([2, 1, 0])
         ax2.set_yticklabels(["model", "lease,\nuntracked", "lease,\ntracked"], fontsize=10.5)
@@ -396,14 +419,15 @@ def transit():
         fig = plt.figure(figsize=(5.8, 2.0))
         ax = fig.add_axes([0.22, 0.3, 0.75, 0.66])
         ax.barh(1, V["t_transit"], color=P["navy"], height=0.55)
-        ax.text(V["t_transit"] + 6, 1, f"{V['t_transit']:.0f} ms at 1 m/s", va="center",
+        ax.text(V["t_transit"] + 6, 1, f"{val('t_transit')} ms at {val('v_tcp')} m/s", va="center",
                 fontsize=12.5, color=P["navy"], fontweight="bold")
         ax.axvline(V["tau_t"], color=P["red"], ls="--", lw=1.8)
-        ax.text(V["tau_t"] - 5, 1.55, f"evidence {V['tau_t']:.0f} ms", color=P["red_d"],
+        ax.text(V["tau_t"] - 5, 1.55, f"evidence {val('tau_t')} ms", color=P["red_d"],
                 fontsize=11.5, ha="right", va="center", fontweight="bold")
         s2 = step >= 2
-        half = V["t_transit"] / 2
-        for k in range(2):
+        n_cap = calcs.reach.fresh_captures
+        half = V["t_transit"] / n_cap
+        for k in range(n_cap):
             ax.barh(0, half - 6, left=k * half, color=P["green"], height=0.55, alpha=a(s2))
             ax.text(k * half + half / 2, 0, f"capture {k + 1}", ha="center", va="center",
                     fontsize=12, color="white", fontweight="bold", alpha=a(s2))
@@ -436,7 +460,7 @@ def aisle():
                 color=P["slate"])
         s3 = step >= 3
         ax.add_patch(Rectangle((-200, 0), 6400, w, fc=P["red_l"], ec="none", alpha=0.6 * a(s3)))
-        ax.text(3000, w + 210, f"2 s set: {V['d_long']:.1f} m spans the {V['aisle_w']:.2f} m aisle",
+        ax.text(3000, w + 210, f"{val('forecast_s')} s set: {val('d_occ_long')} m spans the {val('aisle_w')} m aisle",
                 ha="center", va="center", fontsize=11.5, color=P["red_d"], fontweight="bold",
                 alpha=a(s3))
         # robot path
@@ -457,22 +481,22 @@ def aisle():
                             alpha=a(s2)))
         dx = np.sqrt(max(V["d_t"] ** 2 - (y0 - cy) ** 2, 0))
         ax.plot([cx - dx, cx + dx], [y0, y0], color=P["red"], lw=5, alpha=a(s2))
-        ax.text(4650, -210, f"{V['d_u']:.0f} mm at {V['tau_u']:.0f} ms\n"
-                f"{V['d_t']:.0f} mm at {V['tau_t']:.0f} ms",
+        ax.text(4650, -210, f"{val('d_occ_u')} mm at {val('tau_u')} ms\n"
+                f"{val('d_occ_t')} mm at {val('tau_t')} ms",
                 ha="center", va="center", fontsize=10.5, color=P["red_d"], fontweight="bold",
                 alpha=a(s2))
         save(fig, f"aisle_step{step}")
 
 
 # ---------------------------------------------------------------------------
-# Lease expiry: three countdowns on the MCU clock (equation 9). Evidence
-# terms are the chapter's 60 and 219 ms; the administrative and stopping
-# terms are drawn at illustrative positions (the chapter gives no value).
+# Lease expiry: three countdowns on the MCU clock (equation 9), started
+# together, for the red-mug lease under a tracker (Scenarios.
+# ConveyorMugIntentLeaseExpiry): evidence, administrative lease, stopping deadline.
 # ---------------------------------------------------------------------------
 def lease_terms():
-    rows = [("evidence\nt0 + horizon", V["tau_t"], P["petrol"], f"{V['tau_t']:.0f} ms tracked"),
-            ("host silence\nadmission + lease", 300, P["navy"], "requested, clamped"),
-            ("stopping\ndeadline", 170, P["red"], "from clearance left")]
+    rows = [("evidence\nt0 + horizon", V["tau_t"], P["petrol"], f"{val('tau_t')} ms tracked"),
+            ("host silence\nadmission + lease", V["t_admin"], P["navy"], f"{val('t_admin')} ms, clamped"),
+            ("stopping\ndeadline", V["t_stop"], P["red"], f"{val('t_stop_deadline')} ms, from clearance")]
     for step in (1, 2, 3, 4):
         fig = plt.figure(figsize=(5.8, 2.5))
         ax = fig.add_axes([0.27, 0.22, 0.7, 0.74])
@@ -486,15 +510,15 @@ def lease_terms():
             ax.text(-8, y, lab, ha="right", va="center", fontsize=11.5, color=P["text"],
                     fontweight="bold", alpha=a(shown))
         s4 = step >= 4
-        ax.axvline(170, color=P["red"], lw=2.2, alpha=a(s4))
-        ax.text(176, n - 0.45, "expiry = earliest", ha="left", va="center", fontsize=11.5,
+        ax.axvline(V["t_expiry"], color=P["red"], lw=2.2, alpha=a(s4))
+        ax.text(V["t_expiry"] + 6, n - 0.45, "expiry = earliest", ha="left", va="center", fontsize=11.5,
                 color=P["red_d"], fontweight="bold", alpha=a(s4))
         ax.set_xlim(0, 480)
         ax.set_ylim(-0.6, n - 0.2)
         ax.set_yticks([])
         ax.set_xticks([])
         ax.spines["left"].set_visible(False)
-        ax.set_xlabel("MCU monotonic clock (illustrative positions)", fontsize=11)
+        ax.set_xlabel("MCU monotonic clock (all three started together)", fontsize=11)
         save(fig, f"lease_terms_step{step}")
 
 
@@ -556,14 +580,14 @@ def okrobot_fail():
     for i, (lab, v, c) in enumerate(rows):
         y = n - 1 - i
         ax.barh(y, v, color=c, height=0.62)
-        ax.text(v + 5, y, f"{v}", va="center", fontsize=15, color=c, fontweight="bold")
+        ax.text(v + 5, y, f"{v:.0f}", va="center", fontsize=15, color=c, fontweight="bold")
         ax.text(-8, y, lab, ha="right", va="center", fontsize=14, color=P["text"])
     ax.set_xlim(0, 300)
     ax.set_ylim(-0.6, n - 0.4)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
     ax.tick_params(labelsize=13)
-    ax.set_xlabel(f"Trials of {o['trials']} in real homes", fontsize=14)
+    ax.set_xlabel(f"Trials of {val('okr_trials')} in real homes", fontsize=14)
     save(fig, "okrobot_fail")
 
 
@@ -575,15 +599,15 @@ def vla_rates():
     fig = plt.figure(figsize=(5.8, 2.6))
     ax = fig.add_axes([0.2, 0.2, 0.77, 0.66])
     n = len(rows)
-    for i, (lab, lo, hi, _) in enumerate(rows):
+    for i, (lab, lo, hi) in enumerate(rows):
         y = n - 1 - i
         if hi > lo:
             ax.plot([lo, hi], [y, y], color=P["navy"], lw=7, solid_capstyle="butt")
         ax.plot([lo], [y], "o", ms=10, color=P["navy"])
         ax.text(-0.01, y, lab, transform=ax.get_yaxis_transform(), ha="right", va="center",
                 fontsize=12, fontweight="bold", color=P["text"])
-    for x, lab, c in ((V["tau_u"], "60 ms\nuntracked", P["amber"]),
-                      (V["tau_t"], "219 ms\ntracked", P["petrol"])):
+    for x, lab, c in ((V["tau_u"], f"{val('tau_u')} ms\nuntracked", P["amber"]),
+                      (V["tau_t"], f"{val('tau_t')} ms\ntracked", P["petrol"])):
         ax.axvline(x, color=c, ls="--", lw=1.8)
         ax.text(x, n - 0.35, lab, color=c, fontsize=11, fontweight="bold", ha="center",
                 va="bottom")
@@ -607,14 +631,14 @@ def walking():
     fig = plt.figure(figsize=(5.4, 3.6))
     ax = fig.add_axes([0.14, 0.24, 0.84, 0.72])
     x = np.arange(len(rows))
-    ax.bar(x - 0.2, [c / 100 for _, c, _ in rows], width=0.38, color=P["gray"])
-    ax.bar(x + 0.2, [m / 100 for _, _, m in rows], width=0.38, color=P["navy"])
+    ax.bar(x - 0.2, [c for _, c, _ in rows], width=0.38, color=P["gray"])
+    ax.bar(x + 0.2, [f for _, _, f in rows], width=0.38, color=P["navy"])
     ax.axhline(V["v_human"], color=P["red"], ls="--", lw=2)
-    ax.text(-0.45, 2.78, "dashed: ISO 13855 design value, 1.6 m/s", ha="left",
+    ax.text(-0.45, 2.78, f"dashed: ISO 13855 design value, {val('v_human')} m/s", ha="left",
             va="center", fontsize=14, color=P["red_d"], fontweight="bold")
-    ax.text(-0.2, 1.39 / 2, "usual", rotation=90, ha="center", va="center", fontsize=13,
+    ax.text(-0.2, rows[0][1] / 2, "usual", rotation=90, ha="center", va="center", fontsize=13,
             color="white", fontweight="bold")
-    ax.text(0.2, 2.53 / 2, "fastest", rotation=90, ha="center", va="center", fontsize=13,
+    ax.text(0.2, rows[0][2] / 2, "fastest", rotation=90, ha="center", va="center", fontsize=13,
             color="white", fontweight="bold")
     ax.set_xticks(x)
     ax.set_xticklabels([g.replace(" ", "\n") for g, _, _ in rows], fontsize=15)

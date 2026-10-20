@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Figures for Lecture 12 (Failure Recovery), Volume III.
 
-Every value is sourced in calcs.py, which this script imports, so figures
-and slides agree. "FR" is the rendered chapter, Failure Recovery. Diagrams
+Every value comes from calcs.py, which reads MLSysIM; this script imports it
+and prints the recorded values (val, num), so figures and slides agree. "FR" is the rendered chapter, Failure Recovery. Diagrams
 redraw the chapter's figures at slide size (the book SVGs are page-sized and
 fall below the legibility floor on a slide):
   - saga_step*: FR figure 1 (vol3-saga-flow.svg), split into three builds.
@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import slideplot as sp  # noqa: E402
 import calcs  # noqa: E402
+from deckvals import val, num  # noqa: E402
 
 C = sp.C
 plt = sp.plt
@@ -166,7 +167,7 @@ for k in (1, 2, 3):
 
 # ================================================ cleanup graph (Ex 1)
 def cleanup(k):
-    c = calcs.CLEAN
+    c = {k: val(f"cl_{k}") for k in calcs.CLEAN_S.durations}
     s = Svg(900, 290)
     blocked = k >= 2
     s.box(30, 34, 240, 64, "End the test", f"{c['end_test']} s",
@@ -354,8 +355,7 @@ def retry_tree():
         for d in (-9, 0, 9):
             s.raw(f'<line x1="{xs[2]}" y1="{y}" x2="{xs[3]}" y2="{y + d}" stroke="#ddd6fe" stroke-width="1.2"/>')
             s.raw(f'<circle cx="{xs[3]}" cy="{y + d}" r="4.5" fill="#7c3aed"/>')
-    r = calcs.retries()
-    for x, n in zip(xs, [1, 3, 9, r["layered"]]):
+    for x, n in zip(xs, calcs.RETRY.by_layer):
         s.text(x, 385, str(n), 26, "#0f172a", bold=True)
     for x, lab in zip(xs[1:], layers):
         s.text(x, 40, lab, 22, "#6d28d9", bold=True)
@@ -405,7 +405,9 @@ def tag(ax, text, x=0.0, y=-0.32):
 
 
 # ---- repair break-even (NM 12.1)
-r = calcs.repair()
+R = calcs.REPAIR
+rt, rd = R.break_even_time, R.break_even_cost
+p0 = num("rp_p")
 import numpy as np  # noqa: E402
 
 fig, ax = plt.subplots(figsize=(5.8, 2.7))
@@ -413,14 +415,14 @@ ps = np.linspace(0, 1, 200)
 ax.axhline(1.0, color=C["danger"], lw=2.2, ls="--")
 ax.text(0.99, 1.03, "unwind and rebuild now", color=C["danger"], fontsize=12,
         ha="right", va="bottom", fontweight="bold")
-ax.plot(ps, r["cr_t"] / r["cf_t"] + (1 - ps), color=C["memory"], lw=2.6)
-ax.plot(ps, r["cr_d"] / r["cf_d"] + (1 - ps), color=C["compute"], lw=2.6)
-ax.plot([0.5], [r["e_t"] / r["cf_t"]], "o", ms=9, color=C["memory"])
-ax.annotate(f"p = 0.5: {r['e_t']:.2f} s, {100 * r['cut_t']:.1f}% less",
-            (0.5, r["e_t"] / r["cf_t"]), xytext=(0.56, 0.72),
+ax.plot(ps, rt + (1 - ps), color=C["memory"], lw=2.6)
+ax.plot(ps, rd + (1 - ps), color=C["compute"], lw=2.6)
+ax.plot([p0], [1 - R.time_saved_fraction], "o", ms=9, color=C["memory"])
+ax.annotate(f"p = {val('rp_p')}: {val('rp_exp_s')} s, {val('rp_save')}% less",
+            (p0, 1 - R.time_saved_fraction), xytext=(0.56, 0.72),
             fontsize=12, color=C["memory"], fontweight="bold")
-ax.annotate(f"break-even: p* = {100 * r['pstar_t']:.1f}% (s), "
-            f"{100 * r['pstar_d']:.1f}% ($)", (0.06, 1.0), xytext=(0.12, 0.25),
+ax.annotate(f"break-even: p* = {val('rp_pstar_s')}% (s), "
+            f"{val('rp_pstar_usd')}% ($)", (0.06, 1.0), xytext=(0.12, 0.25),
             fontsize=12, color=C["text"],
             arrowprops=dict(arrowstyle="->", color=C["neutral"]))
 ax.text(0.12, 0.66, "seconds", color=C["memory"], fontsize=12, fontweight="bold")
@@ -434,17 +436,17 @@ sp.save(fig, out / "repair_curve.svg")
 
 
 # ---- CrowdStrike exposure window
-cs = calcs.crowdstrike()
 fig, ax = plt.subplots(figsize=(4.6, 1.7))
-t0, t1 = 4 * 60 + 9, 5 * 60 + 27
+t0 = num("cs_t0_h") * 60 + num("cs_t0_m")  # minutes after midnight, UTC
+t1 = num("cs_t1_h") * 60 + num("cs_t1_m")
 ax.axvspan(t0, t1, color=C["danger_l"])
 ax.axvline(t0, color=C["danger"], lw=2.2)
 ax.axvline(t1, color=C["data"], lw=2.2)
-ax.text(t0 + 2, 0.78, "04:09 published\nfleet-wide", fontsize=14,
+ax.text(t0 + 2, 0.78, f"{val('cs_t0_h')}:{val('cs_t0_m')} published\nfleet-wide", fontsize=14,
         color=C["danger"], va="top", fontweight="bold")
-ax.text(t1 + 2, 0.78, "05:27\nreverted", fontsize=14, color=C["data"],
+ax.text(t1 + 2, 0.78, f"{val('cs_t1_h')}:{val('cs_t1_m')}\nreverted", fontsize=14, color=C["data"],
         va="top", fontweight="bold")
-ax.text((t0 + t1) / 2 + 12, 0.08, f"{cs['window_min']} min", fontsize=16,
+ax.text((t0 + t1) / 2 + 12, 0.08, f"{val('cs_window')} min", fontsize=16,
         color=C["danger"], ha="center", fontweight="bold")
 ax.set_xlim(4 * 60 - 5, 6 * 60)
 ax.set_ylim(0, 1)
@@ -457,20 +459,23 @@ sp.save(fig, out / "cs_window.svg")
 
 
 # ---- expected irreversible loss (NM 12.2), three steps
-L = calcs.pivot_loss()
-L90 = calcs.pivot_loss(catch=0.90)
+P = calcs.PIVOT
+L = dict(rollout_first=calcs.usd(P.loss_without_check), caught=calcs.usd(P.loss_caught),
+         missed=calcs.usd(P.loss_missed), total=calcs.usd(P.loss_with_check))
+L90 = dict(caught=calcs.usd(P.loss_caught_raised), missed=calcs.usd(P.loss_missed_raised),
+           total=calcs.usd(P.loss_with_check_raised))
 for k in (1, 2, 3):
     fig, ax = plt.subplots(figsize=(5.8, 2.3))
-    rows = [("Rollout first", 2), ("Canary first", 1), ("Catch 90%", 0)]
+    rows = [("Rollout first", 2), ("Canary first", 1), (f"Catch {val('pl_raised_pct')}%", 0)]
     ax.barh(2, L["rollout_first"], color=C["danger"], height=0.6)
-    ax.text(L["rollout_first"] + 6, 2, f"\\${L['rollout_first']:.0f}", va="center",
+    ax.text(L["rollout_first"] + 6, 2, f"\\${val('pl_first')}", va="center",
             fontsize=13, color=C["danger"], fontweight="bold")
     a = 1.0 if k >= 2 else 0.0
     ax.barh(1, L["caught"], color=C["neutral"], height=0.6, alpha=a)
     ax.barh(1, L["missed"], left=L["caught"], color=C["danger"], height=0.6,
             alpha=a)
-    ax.text(L["total"] + 6, 1, f"\\${L['total']:.2f}: {L['ratio']:.1f}× less; "
-            f"missed {100 * L['missed_share']:.1f}%", va="center", fontsize=12,
+    ax.text(L["total"] + 6, 1, f"\\${val('pl_total')}: {val('pl_ratio')}× less; "
+            f"missed {val('pl_missed_share')}%", va="center", fontsize=12,
             color=C["text"], fontweight="bold", alpha=a)
     ax.text(L["caught"] / 2, 1.36, "caught", ha="center", fontsize=10.5,
             color=C["neutral"], alpha=a)
@@ -480,7 +485,7 @@ for k in (1, 2, 3):
     ax.barh(0, L90["caught"], color=C["neutral"], height=0.6, alpha=b)
     ax.barh(0, L90["missed"], left=L90["caught"], color=C["danger"], height=0.6,
             alpha=b)
-    ax.text(L90["total"] + 6, 0, f"\\${L90['total']:.2f}: \\${L['per_10pp']:.2f} "
+    ax.text(L90["total"] + 6, 0, f"\\${val('pl_raised_total')}: \\${val('pl_per_step')} "
             f"less per task", va="center", fontsize=12, color=C["data"],
             fontweight="bold", alpha=b)
     ax.set_yticks([2, 1, 0])
@@ -494,24 +499,25 @@ for k in (1, 2, 3):
 
 
 # ---- loop cost (NM 12.3)
-lp = calcs.loop()
+LP = calcs.LOOP
+cap, stop = int(num("lp_cap")), int(num("lp_stop"))
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 2.6))
-    hs = np.arange(0, 51)
-    cum = [calcs.prompt_tokens(int(x)) / 1e6 for x in hs]
+    hs = np.arange(0, cap + 1)
+    cum = [x / 1e6 for x in LP.input_by_turn]
     ax.plot(hs, cum, color=C["network"], lw=2.8)
-    ax.plot([4], [lp["stop_in"] / 1e6], "o", ms=10, color=C["data"], zorder=5)
-    ax.plot([50], [lp["ceiling_in"] / 1e6], "o", ms=10, color=C["danger"], zorder=5)
-    ax.text(2, 0.62, f"stop after turn 4\n{lp['stop_in']:,} tokens, "
-            f"${lp['stop_usd']:.3f}", color=C["data"], fontsize=12,
+    ax.plot([stop], [LP.stop_input / 1e6], "o", ms=10, color=C["data"], zorder=5)
+    ax.plot([cap], [LP.ceiling_input / 1e6], "o", ms=10, color=C["danger"], zorder=5)
+    ax.text(2, 0.62, f"stop after turn {val('lp_stop')}\n{val('lp_stop_in')} tokens, "
+            f"${val('lp_stop_usd')}", color=C["data"], fontsize=12,
             fontweight="bold", va="bottom")
-    ax.text(43, 1.52, f"50-turn ceiling\n"
-            f"{lp['ceiling_in']:,} tokens\n${lp['ceiling_usd']:.2f}",
+    ax.text(43, 1.52, f"{val('lp_cap')}-turn ceiling\n"
+            f"{val('lp_cap_in')} tokens\n${val('lp_cap_usd')}",
             color=C["danger"], fontsize=12, fontweight="bold", ha="right",
             va="top")
     if k >= 2:
-        ax.fill_between(hs[4:], 0, cum[4:], color=C["danger_l"], alpha=0.8)
-        ax.text(36, 0.22, f"{lp['ratio']:.1f}× the dollars", color=C["danger"],
+        ax.fill_between(hs[stop:], 0, cum[stop:], color=C["danger_l"], alpha=0.8)
+        ax.text(36, 0.22, f"{val('lp_ratio')}× the dollars", color=C["danger"],
                 fontsize=15, fontweight="bold", ha="center")
     ax.set_xlim(0, 52)
     ax.set_ylim(0, 1.55)
@@ -522,15 +528,15 @@ for k in (1, 2):
 
 
 # ---- jitter (NM 12.4)
-j = calcs.jitter()
+j = dict(burst_rate=num("jt_sync"), mean_rate=num("jt_mean"))
 fig, ax = plt.subplots(figsize=(5.8, 1.9))
 ax.barh(2, j["burst_rate"], color=C["danger"], height=0.55)
 ax.barh(1, j["mean_rate"], color=C["data"], height=0.55)
 ax.barh(0, j["burst_rate"], color="none", edgecolor=C["data"], ls="--", lw=2,
         height=0.55)
-labels = [f"Synchronized: {j['burst_rate']:,.0f}/s",
-          f"Jittered mean: {j['mean_rate']:.0f}/s",
-          f"Jittered peak: up to {j['burst_rate']:,.0f}/s"]
+labels = [f"Synchronized: {val('jt_sync')}/s",
+          f"Jittered mean: {val('jt_mean')}/s",
+          f"Jittered peak: up to {val('jt_sync')}/s"]
 cols = [C["danger"], C["data"], C["data"]]
 xs = [j["burst_rate"] * 1.3, j["mean_rate"] * 1.3, j["burst_rate"] * 1.3]
 for y, lab, col, x in zip([2, 1, 0], labels, cols, xs):
@@ -539,7 +545,7 @@ ax.set_xscale("log")
 ax.set_xlim(1, 3e7)
 ax.set_yticks([])
 ax.spines["left"].set_visible(False)
-ax.set_xlabel("Retry arrivals per second, 128 retries (log)")
+ax.set_xlabel(f"Retry arrivals per second, {val('jt_retries')} retries (log)")
 ax.minorticks_off()
 ax.set_xticks([1, 1e2, 1e4, 1e6])
 ax.set_xticklabels(["1", "100", "10,000", "1,000,000"], fontsize=12)
@@ -547,9 +553,8 @@ sp.save(fig, out / "jitter_bars.svg")
 
 
 # ---- metastable incidents (OSDI 2022)
-m = calcs.metastable()
 fig, ax = plt.subplots(figsize=(5.0, 3.2))
-rows = calcs.RETRY_SUSTAINED
+rows = calcs.OUTAGES.with_duration
 for i, (n, v) in enumerate(rows):
     y = len(rows) - 1 - i
     ax.barh(y, v, color=C["danger"], height=0.62)
@@ -569,11 +574,12 @@ sp.save(fig, out / "metastable_bars.svg")
 
 
 # ---- breaker window (Ex 4)
-b = calcs.breaker()
+o = calcs.BREAKER_S.outcomes
+n_out, trip = num("br_n"), num("br_threshold") * num("br_n")
 fig, ax = plt.subplots(figsize=(5.0, 1.9))
-segs = [(14, "timeouts", C["danger"]), (6, "5xx", C["danger"]),
-        (12, "validation", C["neutral_l"]), (3, "denied", C["neutral_l"]),
-        (15, "success", C["data_l"])]
+segs = [(o["timeout"], "timeouts", C["danger"]), (o["server_error"], "5xx", C["danger"]),
+        (o["validation"], "validation", C["neutral_l"]), (o["denied"], "denied", C["neutral_l"]),
+        (o["success"], "success", C["data_l"])]
 for row, counted in ((1, {"timeouts", "5xx"}),
                      (0, {"timeouts", "5xx", "validation", "denied"})):
     left = 0
@@ -585,20 +591,20 @@ for row, counted in ((1, {"timeouts", "5xx"}),
                 fontsize=13, color="white" if lab in counted else C["text"],
                 fontweight="bold")
         left += n
-ax.axvline(25, color=C["text"], lw=1.6, ls="--")
-ax.text(25, 1.5, "trip at 0.50", ha="center", fontsize=13, color=C["text"])
-ax.text(51, 1, f"{b['classified']:.2f}: closed", va="center",
+ax.axvline(trip, color=C["text"], lw=1.6, ls="--")
+ax.text(trip, 1.5, f"trip at {val('br_threshold')}", ha="center", fontsize=13, color=C["text"])
+ax.text(n_out + 1, 1, f"{val('br_classified_f')}: closed", va="center",
         fontsize=14, color=C["data"], fontweight="bold")
-ax.text(51, 0, f"{b['naive']:.2f}: opens", va="center", fontsize=14,
+ax.text(n_out + 1, 0, f"{val('br_naive_f')}: opens", va="center", fontsize=14,
         color=C["danger"], fontweight="bold")
 ax.set_yticks([1, 0])
 ax.set_yticklabels(["Classified", "Count all"], fontsize=14,
                    fontweight="bold")
 ax.set_xlim(0, 68)
 ax.set_ylim(-0.5, 1.7)
-ax.set_xticks([0, 25, 50])
+ax.set_xticks([0, trip, n_out])
 ax.tick_params(labelsize=13)
-ax.set_xlabel("Last 50 outcomes; red counts as failure", fontsize=13)
+ax.set_xlabel(f"Last {val('br_n')} outcomes; red counts as failure", fontsize=13)
 for sname in ("left",):
     ax.spines[sname].set_visible(False)
 sp.save(fig, out / "breaker_window.svg")

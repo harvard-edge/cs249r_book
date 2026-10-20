@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Figures for Lecture 14 (Volume II): Robust AI.
 
-Every value is sourced. "RA" is the rendered chapter, Robust AI. Values
-computed here are labeled "derived" on the figure or its slide; scenario
-values are labeled "illustrative".
+Every number is read from MLSysIM through calcs.py (the same Scenarios.* and
+Literature entries the chapter reads); the list below records each source.
+"RA" is the rendered chapter, Robust AI. Derived values are labeled "derived"
+on the figure or its slide; scenario values are labeled "illustrative".
+Typed here: layout coordinates, the illustrative shift points (RA figure 3),
+and the illustrative conformal score draw.
 
   - Hook (Eykholt et al., CVPR 2018, arXiv 1707.08945): LISA-CNN 91 percent
     accuracy on the LISA test set (Sec. 1); targeted success in 100 percent
@@ -47,17 +50,12 @@ values are labeled "illustrative".
     trigger, single target): baseline F-RCNN average clean 90.0 percent;
     BadNet average clean 89.3 percent; backdoored stop signs classified as
     speed limit 90.3 percent.
-  - Llama 3 405B interruptions (Dubey et al. 2024, arXiv 2407.21783,
-    Table 5, 54 days, 419 unexpected): faulty GPU 148, GPU HBM3 memory 72,
-    software bug 54, network switch or cable 35, silent data corruption 6.
   - Bit flip (RA figure 14): 0.042 in FP32, bit 30 flips, x 2^128,
     about 1.4e37.
 
 Run from this folder: python3 make_figs.py (derived slide numbers: calcs.py)
 """
 
-import math
-import statistics
 import struct
 import sys
 from pathlib import Path
@@ -65,10 +63,10 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import slideplot as sp  # noqa: E402
-
-MLSYSIM = Path(__file__).resolve().parents[4] / "mlsysim"
-sys.path.insert(0, str(MLSYSIM))
+import calcs as K  # noqa: E402  (records every value; figures read them)
+from deckvals import val, num  # noqa: E402
 
 C = sp.C
 plt = sp.plt
@@ -122,10 +120,13 @@ def tag(ax, s, x=0.0, y=-0.28):
 
 
 # =========================================================== HOOK (Eykholt)
+HOOK_ROWS = [("Clean test set", num("lisa_clean_pct"), "neutral", f"{val('lisa_clean_pct')}% correct"),
+             ("Lab photos", num("sticker_lab_pct"), "compute", f"{val('sticker_lab_pct')}% Speed Limit 45"),
+             ("Drive-by frames", num("sticker_drive_pct"), "danger", f"{val('sticker_drive_pct')}% Speed Limit 45")]
+
+
 def hook(path, k, size=(4.0, 1.85), fs=12.5):
-    rows = [("Clean test set", 91, "neutral", "91% correct"),
-            ("Lab photos", 100, "compute", "100% Speed Limit 45"),
-            ("Drive-by frames", 84.8, "danger", "84.8% Speed Limit 45")]
+    rows = HOOK_ROWS
     fig, ax = plt.subplots(figsize=size)
     for i, (lab, v, ck, txt) in enumerate(rows):
         y = 2 - i
@@ -152,9 +153,7 @@ for k in (1, 2, 3):
 def hook_synth(path, size=(3.4, 2.7), fs=15):
     """The hook's final step at the size of the closing slide's narrow column:
     each row's name sits above its bar, and the values print inside the bars."""
-    rows = [("Clean test set", 91, "neutral", "91% correct"),
-            ("Lab photos", 100, "compute", "100% Speed Limit 45"),
-            ("Drive-by frames", 84.8, "danger", "84.8% Speed Limit 45")]
+    rows = HOOK_ROWS
     fig, ax = plt.subplots(figsize=size)
     for i, (lab, v, ck, txt) in enumerate(rows):
         y = 2 - i
@@ -184,21 +183,23 @@ def tempe(path, k):
     for t in (-6, -4, -2, 0):
         ax.plot([t, t], [-0.08, 0.08], color=C["neutral"], lw=1.5)
         ax.text(t, -0.3, f"{t} s" if t else "impact", ha="center", va="top", fontsize=11.5)
-    ax.plot([-5.6], [0], "o", ms=12, color=C["memory"], zorder=5)
-    ax.text(-5.6, -0.72, "first\ndetected\n5.6 s out", ha="center", va="top", fontsize=11.5,
+    detect, recog, hold, alert = (num("tempe_detect_s"), num("tempe_recog_s"),
+                                  num("tempe_hold_s"), num("tempe_alert_s"))
+    ax.plot([-detect], [0], "o", ms=12, color=C["memory"], zorder=5)
+    ax.text(-detect, -0.72, f"first\ndetected\n{val('tempe_detect_s')} s out", ha="center", va="top", fontsize=11.5,
             fontweight="bold", color=C["memory"])
     ax.add_patch(sp.plt.Rectangle((-5.4, -0.18), 4.2, 0.36, color=C["memory_l"], zorder=1))
     ax.text(-3.4, 0.32, "label flips: vehicle,\nother, bicycle", ha="center", va="bottom",
             fontsize=11.5, color=C["memory"])
     a = 1.0 if k >= 2 else 0.0
-    ax.plot([-1.2], [0], "o", ms=12, color=C["danger"], zorder=5, alpha=a)
-    ax.add_patch(sp.plt.Rectangle((-1.2, -0.18), 1.0, 0.36, color=C["danger_l"], zorder=2, alpha=a))
-    ax.text(-1.5, -0.72, "collision\nrecognized\n1.2 s out", ha="center", va="top", fontsize=11.5,
+    ax.plot([-recog], [0], "o", ms=12, color=C["danger"], zorder=5, alpha=a)
+    ax.add_patch(sp.plt.Rectangle((-recog, -0.18), hold, 0.36, color=C["danger_l"], zorder=2, alpha=a))
+    ax.text(-1.5, -0.72, f"collision\nrecognized\n{val('tempe_recog_s')} s out", ha="center", va="top", fontsize=11.5,
             fontweight="bold", color=C["danger"], alpha=a)
-    ax.text(-0.5, 0.32, "held 1 s,\nno alert", ha="center", va="bottom", fontsize=11.5,
+    ax.text(-0.5, 0.32, f"held {val('tempe_hold_s')} s,\nno alert", ha="center", va="bottom", fontsize=11.5,
             fontweight="bold", color=C["danger"], alpha=a)
-    ax.plot([-0.2], [0], "v", ms=10, color=C["danger"], zorder=5, alpha=a)
-    ax.text(0.35, -0.72, "alert\n0.2 s out", ha="center", va="top", fontsize=11.5,
+    ax.plot([-alert], [0], "v", ms=10, color=C["danger"], zorder=5, alpha=a)
+    ax.text(0.35, -0.72, f"alert\n{val('tempe_alert_s')} s out", ha="center", va="top", fontsize=11.5,
             color=C["danger"], alpha=a)
     ax.axis("off")
     sp.save(fig, path)
@@ -240,7 +241,7 @@ for k in (1, 2, 3, 4):
 
 # ================================================== FLEET SDC PROBABILITY
 def sdc(path, k):
-    p = 1e-4
+    p = K.SDC1K.event_rate
     n = np.logspace(1, 5, 200)
     fig, ax = plt.subplots(figsize=(3.4, 2.1))
     ax.plot(n, 1 - (1 - p) ** n, color=C["danger"], lw=3)
@@ -250,7 +251,8 @@ def sdc(path, k):
     ax.set_xlabel("Accelerators in the job, N")
     ax.set_ylabel("P(silent error\nin an hour)")
     ax.grid(color=C["grid"], lw=0.6)
-    pts = [(1000, "1,000: 0.095"), (10000, "10,000: 0.63")]
+    pts = [(K.SDC1K.n_devices, f"{val('sdc_n_lo')}: {val('sdc_p_lo')}"),
+           (K.SDC10K.n_devices, f"{val('sdc_n_hi')}: {val('sdc_p_hi')}")]
     for i, (x, lab) in enumerate(pts):
         if k >= 2 or i == 0:
             y = 1 - (1 - p) ** x
@@ -323,21 +325,8 @@ for k in (1, 2, 3):
 
 
 # ======================================================== IMAGENET-V2
-def load_imagenet():
-    from mlsysim import Literature
-    rows = [r for r in Literature.Series.ImageNetTestbedShift.entries
-            if r["imagenet_v2"] is not None and r["val"] >= 55]
-    return rows
-
-
-try:
-    IV2 = load_imagenet()
-except Exception as exc:  # the figure needs MLSysIM; fail loudly
-    raise SystemExit(f"MLSysIM not importable from {MLSYSIM}: {exc}")
-gaps = [r["val"] - r["imagenet_v2"] for r in IV2]
-assert len(IV2) == 212 and round(min(gaps)) == 7 and round(max(gaps)) == 14
-assert round(statistics.median(gaps)) == 12
-slope, icpt = np.polyfit([r["val"] for r in IV2], [r["imagenet_v2"] for r in IV2], 1)
+IV2 = K.IV2.rows
+slope, icpt = K.IV2.result.slope, K.IV2.result.intercept
 
 
 def imagenet(path, k, size=(5.2, 2.15)):
@@ -358,7 +347,8 @@ def imagenet(path, k, size=(5.2, 2.15)):
                         mec=C["text"], mew=1.5, zorder=5)
                 ax.annotate(t, (r["val"], r["imagenet_v2"]), xytext=o, textcoords="offset points",
                             ha="left" if o[0] > 0 else "right", fontsize=12, fontweight="bold")
-        ax.text(91.5, 41, "212 models all lose\n7 to 14 points, median 12", ha="right", va="bottom",
+        ax.text(91.5, 41, f"{val('iv2_models')} models all lose\n{val('iv2_gap_min')} to {val('iv2_gap_max')} "
+                f"points, median {val('iv2_gap_median')}", ha="right", va="bottom",
                 fontsize=12, fontweight="bold", color=C["danger"])
     ax.set_xlim(54, 92)
     ax.set_ylim(38, 90)
@@ -374,30 +364,28 @@ for k in (1, 2):
 
 
 # ===================================================== MEAN-SHIFT TEST
-SE = 0.3 / math.sqrt(1000)
-Z = 0.05 / SE
-assert abs(SE - 0.0095) < 0.0001 and abs(Z - 5.3) < 0.05
+SE, BASE, OBS = K.MEAN.standard_error, K.MEAN.reference_mean, K.MEAN.observed_mean
 
 
 def meantest(path):
     fig, ax = plt.subplots(figsize=(3.4, 2.2))
     xs = np.linspace(0.465, 0.535, 400)
-    ys = np.exp(-0.5 * ((xs - 0.5) / SE) ** 2)
+    ys = np.exp(-0.5 * ((xs - BASE) / SE) ** 2)
     ax.fill_between(xs, 0, ys, color=C["memory_l"])
     ax.plot(xs, ys, color=C["memory"], lw=2.5)
-    ax.axvline(0.55, color=C["danger"], lw=3)
-    ax.text(0.548, 0.75, "observed\n0.55", ha="right", fontsize=12, fontweight="bold",
+    ax.axvline(OBS, color=C["danger"], lw=3)
+    ax.text(0.548, 0.75, f"observed\n{val('ms_obs')}", ha="right", fontsize=12, fontweight="bold",
             color=C["danger"])
-    ax.annotate("", xy=(0.55, 1.1), xytext=(0.5, 1.1),
+    ax.annotate("", xy=(OBS, 1.1), xytext=(BASE, 1.1),
                 arrowprops=dict(arrowstyle="<->", color=C["text"], lw=1.8))
-    ax.text(0.525, 1.16, "5.3 standard\nerrors", ha="center", fontsize=12, fontweight="bold")
-    ax.text(0.466, 0.95, "baseline\n0.50", fontsize=11.5, color=C["memory"], va="top")
+    ax.text((BASE + OBS) / 2, 1.16, f"{val('ms_z')} standard\nerrors", ha="center", fontsize=12, fontweight="bold")
+    ax.text(0.466, 0.95, f"baseline\n{val('ms_base')}", fontsize=11.5, color=C["memory"], va="top")
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
     ax.set_ylim(0, 1.5)
     ax.set_xlim(0.46, 0.56)
     ax.set_xticks([0.47, 0.50, 0.53, 0.56])
-    ax.set_xlabel("Mean over 1,000 requests")
+    ax.set_xlabel(f"Mean over {val('ms_n')} requests")
     sp.save(fig, path)
 
 
@@ -406,13 +394,13 @@ meantest(out / "meantest.svg")
 
 # ========================================================== FRAUD PSI
 sp.hbars(out / "psi_country.svg", [
-    ("Other", 0.0470, "danger", "0.047 (72%)"),
-    ("USA", 0.0118, "memory", "0.012"),
-    ("France", 0.0036, "memory", "0.004"),
-    ("UK", 0.0021, "memory", "0.002"),
-    ("Germany", 0.0007, "memory", "0.001"),
+    ("Other", K.PSI.term("Other"), "danger", f"{val('psi_other')} ({val('psi_other_pct')}%)"),
+    ("USA", K.PSI.term("USA"), "memory", val("psi_usa")),
+    ("France", K.PSI.term("France"), "memory", val("psi_france")),
+    ("UK", K.PSI.term("UK"), "memory", val("psi_uk")),
+    ("Germany", K.PSI.term("Germany"), "memory", val("psi_germany")),
 ], "", log=False, size=(3.3, 2.2),
-    xlabel="PSI contribution (total 0.065)")
+    xlabel=f"PSI contribution (total {val('psi_total')})")
 
 
 # ================================================ DRIFT x ERROR GRID (SVG)
@@ -442,16 +430,18 @@ grid(out / "drift_grid.svg")
 
 # ========================================================== CALIBRATION
 def calib(path):
-    rows = [("CIFAR-100, LeNet 5", 4.85, 2.02), ("CIFAR-100, ResNet 110", 16.53, 1.26),
-            ("ImageNet, ResNet 152", 5.48, 1.86)]
+    rows = [("CIFAR-100, LeNet 5", "ece_lenet", "ece_lenet_ts"),
+            ("CIFAR-100, ResNet 110", "ece_r110", "ece_r110_ts"),
+            ("ImageNet, ResNet 152", "ece_r152", "ece_r152_ts")]
     fig, ax = plt.subplots(figsize=(4.8, 1.75))
     y = np.arange(len(rows))[::-1]
-    for yi, (lab, u, t) in zip(y, rows):
+    for yi, (lab, uk, tk) in zip(y, rows):
+        u, t = num(uk), num(tk)
         ax.barh(yi + 0.19, u, height=0.36, color=C["danger"])
         ax.barh(yi - 0.19, t, height=0.36, color=C["data"])
-        ax.text(u + 0.3, yi + 0.19, f"{u:.2f}", va="center", fontsize=12, fontweight="bold",
+        ax.text(u + 0.3, yi + 0.19, val(uk), va="center", fontsize=12, fontweight="bold",
                 color=C["danger"])
-        ax.text(t + 0.3, yi - 0.19, f"{t:.2f}", va="center", fontsize=12, fontweight="bold",
+        ax.text(t + 0.3, yi - 0.19, val(tk), va="center", fontsize=12, fontweight="bold",
                 color=C["data"])
         ax.text(-0.4, yi, lab, ha="right", va="center", fontsize=12, fontweight="bold")
     ax.text(19.5, 0.25, "as trained", color=C["danger"], fontsize=12, fontweight="bold", ha="right")
@@ -470,7 +460,7 @@ calib(out / "calib.svg")
 # ====================================================== RISK-COVERAGE
 def riskcov(path, k):
     cov = np.linspace(0.3, 1.0, 200)
-    risk = 0.012 + 0.10 * cov ** 6       # illustrative shape
+    risk = K.SEL.risk_at(cov)            # illustrative shape (Scenarios.SelectiveAnswering90)
     fig, ax = plt.subplots(figsize=(3.5, 2.35))
     ax.plot(cov * 100, risk * 100, color=C["memory"], lw=3)
     ax.set_xlim(30, 102)
@@ -478,13 +468,13 @@ def riskcov(path, k):
     ax.set_xlabel("Coverage: % answered")
     ax.set_ylabel("Error on answered (%)")
     ax.grid(color=C["grid"], lw=0.5)
-    ax.plot([100], [11.2], "o", ms=10, color=C["neutral"])
-    ax.annotate("answer all", (100, 11.2), xytext=(-8, -3), textcoords="offset points",
+    ax.plot([100], [num("sel_full_pct")], "o", ms=10, color=C["neutral"])
+    ax.annotate("answer all", (100, num("sel_full_pct")), xytext=(-8, -3), textcoords="offset points",
                 ha="right", fontsize=11.5, fontweight="bold", color=C["neutral"])
     if k >= 2:
-        r = 0.012 + 0.10 * 0.9 ** 6
-        ax.plot([90], [r * 100], "o", ms=11, color=C["danger"], zorder=5)
-        ax.annotate(f"90% answered,\n{r*100:.1f}% error", (90, r * 100), xytext=(-14, 4),
+        x, y = num("sel_cov_pct"), num("sel_risk_pct")
+        ax.plot([x], [y], "o", ms=11, color=C["danger"], zorder=5)
+        ax.annotate(f"{val('sel_cov_pct')}% answered,\n{val('sel_risk_pct')}% error", (x, y), xytext=(-14, 4),
                     textcoords="offset points", ha="right", fontsize=11.5, fontweight="bold",
                     color=C["danger"])
     ax.text(32, 12.3, "illustrative", fontsize=10.5, color=C["neutral"], va="top")
@@ -497,9 +487,7 @@ for k in (1, 2):
 
 # ============================================================ CONFORMAL
 def conformal(path):
-    n, alpha = 1000, 0.1
-    rank = math.ceil((n + 1) * (1 - alpha))
-    assert rank == 901
+    n, rank = K.CONF.calibration_count, K.CONF.rank
     rng = np.random.default_rng(3)
     scores = np.sort(rng.gamma(2.0, 0.15, n))
     q = scores[rank - 1]
@@ -507,10 +495,10 @@ def conformal(path):
     ax.plot(np.arange(1, n + 1), scores, color=C["memory"], lw=3)
     ax.axvline(rank, color=C["danger"], lw=2.5, ls="--")
     ax.axhline(q, color=C["danger"], lw=1.5, ls=":")
-    ax.text(rank - 20, scores[-1] * 0.95, "rank 901\nsets the cutoff", ha="right",
+    ax.text(rank - 20, scores[-1] * 0.95, f"rank {val('conf_rank')}\nsets the cutoff", ha="right",
             fontsize=12, fontweight="bold", color=C["danger"], va="top")
     ax.text(30, q + 0.04, "keep labels scoring below", fontsize=12, color=C["danger"])
-    ax.set_xlabel("Calibration examples sorted by score (n = 1,000)")
+    ax.set_xlabel(f"Calibration examples sorted by score (n = {val('conf_n')})")
     ax.set_ylabel("Score")
     ax.set_yticks([])
     ax.text(30, scores[-1] * 0.98, "illustrative scores", fontsize=10.5, color=C["neutral"], va="top")
@@ -523,17 +511,18 @@ conformal(out / "conformal.svg")
 # ======================================================== JAILBREAK (Zou)
 def zou(path, k):
     rows = ["Request only", "+ \u201cSure, here\u2019s\u201d", "+ GCG suffix", "+ GCG ensemble"]
-    g35 = [1.8, 5.7, 47.4, 86.6]
-    g4 = [8.0, 13.1, 29.1, 46.9]
+    keys = ("only", "sure", "gcg", "ens")
+    g35 = [num(f"gpt35_{k_}") for k_ in keys]
+    g4 = [num(f"gpt4_{k_}") for k_ in keys]
     fig, ax = plt.subplots(figsize=(5.3, 1.95))
     y = np.arange(4)[::-1]
     for i, yi in enumerate(y):
         a = 1.0 if (i < 2 or k >= 2) else 0.0
         ax.barh(yi + 0.2, g35[i], height=0.38, color=C["danger"], alpha=a)
         ax.barh(yi - 0.2, g4[i], height=0.38, color=C["compute"], alpha=a)
-        ax.text(g35[i] + 1, yi + 0.2, f"{g35[i]}", va="center", fontsize=11.5, fontweight="bold",
+        ax.text(g35[i] + 1, yi + 0.2, val(f"gpt35_{keys[i]}"), va="center", fontsize=11.5, fontweight="bold",
                 color=C["danger"], alpha=a)
-        ax.text(g4[i] + 1, yi - 0.2, f"{g4[i]}", va="center", fontsize=11.5, fontweight="bold",
+        ax.text(g4[i] + 1, yi - 0.2, val(f"gpt4_{keys[i]}"), va="center", fontsize=11.5, fontweight="bold",
                 color=C["compute"], alpha=a)
         ax.text(-1.5, yi, rows[i], ha="right", va="center", fontsize=12, fontweight="bold")
     ax.text(99, 3.3, "GPT-3.5", color=C["danger"], fontsize=12.5, fontweight="bold", ha="right")
@@ -542,7 +531,7 @@ def zou(path, k):
     ax.set_ylim(-0.6, 3.6)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
-    ax.set_xlabel("Attack success, % of 388 harmful requests")
+    ax.set_xlabel(f"Attack success, % of {val('gcg_behaviors')} harmful requests")
     sp.save(fig, path)
 
 
@@ -580,9 +569,10 @@ for k in (1, 2, 3, 4):
 
 # ============================================================ PGD PASSES
 def pgd(path, k):
-    rows = [("Standard step", [1], ["update"]),
-            ("FGSM, clean + adv.", [1, 2], ["attack", "2\u00d7 batch"]),
-            ("PGD-7 training", [7, 1], ["7 attack steps", "update"])]
+    F, P = K.FGSM, K.PGD
+    rows = [("Standard step", [P.standard_passes], ["update"]),
+            ("FGSM, clean + adv.", [F.attack_passes, F.update_passes], ["attack", f"{F.update_passes}\u00d7 batch"]),
+            ("PGD-7 training", [P.attack_passes, P.update_passes], [f"{P.attack_passes} attack steps", "update"])]
     fig, ax = plt.subplots(figsize=(5.4, 1.55))
     for i, (lab, parts, names) in enumerate(rows):
         y = 2 - i
@@ -615,19 +605,9 @@ for k in (1, 2):
 
 
 # ========================================================== ROBUSTBENCH
-def load_rb():
-    from mlsysim import Literature
-    return [r for r in Literature.Series.RobustBenchCIFAR10Linf.entries
-            if r["year"] and r["unreliable"] != "True"]
-
-
-RB = load_rb()
-YEARS = list(range(2018, 2025))
-best = {y: max(r["autoattack_acc"] for r in RB if int(r["year"]) == y) for y in YEARS}
-broken = [r for r in RB if r["autoattack_acc"] < 5]
-assert len(broken) == 4 and round(best[2018]) == 44 and round(best[2024]) == 75
-top = max((r for r in RB if int(r["year"]) == 2024), key=lambda r: r["autoattack_acc"])
-assert round(top["clean_acc"]) == 94
+RB = K.RB.rows
+YEARS = K.RB.years
+BROKEN = {id(r) for r in K.RB.broken}
 
 
 def robustbench(path, k):
@@ -639,21 +619,21 @@ def robustbench(path, k):
     ax.text(2017.45, 90, "clean", color=C["neutral"], fontsize=12.5, fontweight="bold", ha="left")
     if k >= 2:
         ax.scatter(xs, [r["autoattack_acc"] for r in RB], s=22, color=C["danger"], zorder=3)
-        run, bx, by = 0, [], []
+        bx, by = [], []
         for y in YEARS:
-            run = max(run, best[y])
+            run = K.RB.best_so_far(y)
             bx.append(y - 0.5)
             by.append(run)
         bx.append(YEARS[-1] + 0.5)
         by.append(run)
         ax.step(bx, by, where="post", color=C["danger"], lw=2.2, zorder=4)
         ax.text(2017.45, 14, "under attack", color=C["danger"], fontsize=12.5, fontweight="bold")
-        ax.text(2024.65, 75, "top\n75%", ha="left", va="center", color=C["danger"], fontsize=12.5, fontweight="bold")
+        ax.text(YEARS[-1] + 0.65, num("rb_last_pct"), f"top\n{val('rb_last_pct')}%", ha="left", va="center", color=C["danger"], fontsize=12.5, fontweight="bold")
     if k >= 3:
         for r, x in zip(RB, xs):
-            if r["autoattack_acc"] < 5:
+            if id(r) in BROKEN:
                 ax.plot([x], [r["autoattack_acc"]], "o", ms=13, mfc="none", mec=C["text"], mew=1.8, zorder=5)
-        ax.text(2020.9, 10, "4 published defenses\nbelow 5% under AutoAttack", fontsize=12,
+        ax.text(2020.9, 10, f"{val('rb_broken')} published defenses\nbelow {val('rb_floor_pct')}% under AutoAttack", fontsize=12,
                 fontweight="bold", color=C["text"], va="bottom")
     ax.set_xticks(YEARS)
     ax.set_xlim(2017.4, 2025.4)
@@ -669,21 +649,17 @@ for k in (1, 2, 3):
 
 
 # ======================================================== CERTIFIED RADIUS
-from statistics import NormalDist  # noqa: E402
-R_CERT = 0.5 * NormalDist().inv_cdf(0.999)
-L2_OF_LINF = 8 / 255 * math.sqrt(32 * 32 * 3)
-assert abs(R_CERT - 1.545) < 0.01 and abs(L2_OF_LINF - 1.74) < 0.01
 sp.hbars(out / "certified.svg", [
-    ("Certified radius", R_CERT, "data", "1.5"),
-    ("8/255 box corner", L2_OF_LINF, "danger", "1.74"),
+    ("Certified radius", K.CERT.radius, "data", val("cert_r")),
+    (f"{val('eps_levels')}/{val('eps_scale')} box corner", K.CERT.box_corner_l2, "danger", val("cert_corner")),
 ], "", log=False, size=(3.4, 1.25), xlabel="Euclidean length")
 
 
 # ============================================================== BADNETS
 sp.hbars(out / "badnets.svg", [
-    ("Honest model, clean signs", 90.0, "neutral", "90.0% correct"),
-    ("Backdoored, clean signs", 89.3, "memory", "89.3% correct"),
-    ("Backdoored, sticker on stop", 90.3, "danger", "90.3% speed limit"),
+    ("Honest model, clean signs", num("bn_clean"), "neutral", f"{val('bn_clean')}% correct"),
+    ("Backdoored, clean signs", num("bn_back_clean"), "memory", f"{val('bn_back_clean')}% correct"),
+    ("Backdoored, sticker on stop", num("bn_attack"), "danger", f"{val('bn_attack')}% speed limit"),
 ], "", log=False, size=(5.4, 1.6), xlabel="Percent (BadNets, Table 4)")
 
 
@@ -718,52 +694,39 @@ for k in (1, 2, 3, 4, 5):
     layers(out / f"layers_step{k}.svg", k)
 
 
-# ====================================================== LLAMA 3 TABLE 5
-sp.hbars(out / "llama_stops.svg", [
-    ("Faulty GPU", 148, "danger", "148"),
-    ("GPU HBM3 memory", 72, "danger", "72"),
-    ("Software bug", 54, "network", "54"),
-    ("Network switch, cable", 35, "compute", "35"),
-    ("Silent data corruption", 6, "danger", "6 detected"),
-], "", log=False, size=(3.6, 2.1),
-    xlabel="Interruptions in 54 days")
-
-
 # ============================================================ BIT FLIP (SVG)
-w = 0.042
-bits = struct.unpack(">I", struct.pack(">f", w))[0]
-bad = struct.unpack(">f", struct.pack(">I", bits ^ (1 << 30)))[0]
-assert math.isfinite(bad) and 1.3e37 < bad < 1.5e37
+FLIP = K.FLIP
+bits = struct.unpack(">I", struct.pack(">f", FLIP.value))[0]   # the stored word, for its bit pattern
 
 
 def bitflip(path, k):
     b = []
     word = format(bits, "032b")
-    flipped = format(bits ^ (1 << 30), "032b")
+    flipped = format(bits ^ (1 << FLIP.flipped_bit), "032b")
 
     def row(y, s, hl, op=1.0):
         out_ = []
-        cells = [("sign", s[0])] + [("exp", c) for c in s[1:9]] + [("man", "")]
+        cells = [("sign", s[0])] + [("exp", c) for c in s[1:1 + FLIP.exponent_bits]] + [("man", "")]
         x = 10
         for j, (kind, ch) in enumerate(cells):
             wd = 290 if kind == "man" else 56
             f = V["red_l"] if (hl and j == 1) else (V["blue_l"] if kind == "exp" else V["frame_l"])
             st = V["red"] if (hl and j == 1) else V["frame"]
             out_.append(rect(x, y, wd, 52, f, st, 3 if (hl and j == 1) else 1.5, 3, op))
-            t = ch if kind != "man" else "mantissa, 23 bits"
+            t = ch if kind != "man" else f"mantissa, {val('flip_frac_bits')} bits"
             out_.append(text(x + wd / 2, y + 35, t, V["red"] if (hl and j == 1) else V["ink"],
                              25 if kind != "man" else 20, 700 if kind != "man" else 400, op=op))
             x += wd + 4
         return out_
 
-    b.append(text(10, 30, "w = 0.042", V["ink"], 24, 700, "start"))
-    b.append(text(160, 30, "sign | exponent, 8 bits | mantissa", V["gray"], 20, 400, "start"))
+    b.append(text(10, 30, f"w = {val('flip_w')}", V["ink"], 24, 700, "start"))
+    b.append(text(160, 30, f"sign | exponent, {val('flip_exp_bits')} bits | mantissa", V["gray"], 20, 400, "start"))
     b += row(45, word, False)
     op = 1.0 if k >= 2 else 0.0
     b.append(arrow(98, 102, 98, 160, "red", 3.5, op))
-    b.append(text(125, 140, 'bit 30 flips: value \u00d7 2<tspan baseline-shift="super" font-size="15">128</tspan>', V["red"], 23, 700, "start", op))
+    b.append(text(125, 140, f'bit {val("flip_bit")} flips: value \u00d7 2<tspan baseline-shift="super" font-size="15">{val("flip_scale")}</tspan>', V["red"], 23, 700, "start", op))
     b += row(165, flipped, True, op)
-    b.append(text(10, 248, 'w\u2032 \u2248 1.4 \u00d7 10<tspan baseline-shift="super" font-size="15">37</tspan>: finite, so every NaN check passes', V["red"], 23, 700, "start", op))
+    b.append(text(10, 248, f'w\u2032 \u2248 {val("flip_mant")} \u00d7 10<tspan baseline-shift="super" font-size="15">{val("flip_exp")}</tspan>: finite, so every NaN check passes', V["red"], 23, 700, "start", op))
     op = 1.0 if k >= 3 else 0.0
     checks = [("Range check", "|w| \u2264 bound, one compare per value", "compute"),
               ("Golden canary", "replay fixed inputs, compare outputs", "+ communication"),

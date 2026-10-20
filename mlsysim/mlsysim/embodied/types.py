@@ -510,6 +510,10 @@ class EmbodiedSiteScenario(BaseModel):
     t_isp: Quantity
     t_backbone: Quantity
     t_ipc: Quantity
+    # Added 2026-10-20: the base's yaw rate turning into the aisle, and the bound
+    # on converting a capture time into the safety MCU's clock.
+    yaw_rate_turn: Quantity
+    clock_conversion_bound: Quantity
     # permission-path liveness and enforcer timing
     heartbeat_rate: Quantity
     heartbeat_timeout: Quantity
@@ -599,7 +603,7 @@ class EmbodiedSiteScenario(BaseModel):
         "t_takeover_driving_p50", "t_takeover_driving_mean", "t_takeover_driving_p90",
         "t_takeover_driving_p99", "t_video_glass_to_glass", "t_handshake_request",
         "t_handshake_acknowledge", "t_handshake_confirm",
-        "t_chunk_deserialize", "t_plan_validate", "t_plan_activate",
+        "t_chunk_deserialize", "t_plan_validate", "t_plan_activate", "clock_conversion_bound",
         mode="after",
     )
     @classmethod
@@ -678,6 +682,16 @@ class EmbodiedSiteScenario(BaseModel):
         cam = self.machine.nav_camera
         return (cam.exposure_time / 2 + cam.readout_time + self.t_transport + self.t_dma
                 + self.t_isp + self.t_backbone + self.t_ipc).to(ureg.millisecond)
+
+    @property
+    def dispatch_age_limit(self):
+        """Oldest observation the producer may dispatch: observation age plus the clock-conversion bound (added 2026-10-20)."""
+        return (self.perception_age + self.clock_conversion_bound).to(ureg.millisecond)
+
+    @field_validator("yaw_rate_turn", mode="after")
+    @classmethod
+    def _validate_yaw_rate(cls, v, info):
+        return require_dimensionality(v, ureg.radian / ureg.second, info.field_name)
 
     @property
     def tau_delay(self):

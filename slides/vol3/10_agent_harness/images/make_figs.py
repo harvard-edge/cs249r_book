@@ -38,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 sys.path.insert(0, str(HERE))
 import slideplot as sp  # noqa: E402
 import calcs  # noqa: E402
+from deckvals import val, num  # noqa: E402
 
 C = sp.C
 plt = sp.plt
@@ -150,35 +151,34 @@ class Svg:
 # =====================================================================
 def compound():
     hs = np.arange(0, 121)
-    curve = 100 * calcs.P_TURN ** hs
-    hor = calcs.real_horizons()
-    meds = sorted(v["median"] for v in hor.values())
-    lo, hi = meds[0], meds[-1]
+    p_turn, h_run = calcs.RULE.step_success, calcs.RULE.short_horizon
+    curve = 100 * p_turn ** hs
+    lo, hi = calcs.CEIL.median_calls_low, calcs.CEIL.median_calls_high
     for k in (1, 2):
         fig, ax = plt.subplots(figsize=(5.8, 2.5))
         a2 = 1.0 if k >= 2 else 0.0
         ax.axvspan(lo, hi, color=C["network_l"], alpha=0.8 * a2, lw=0)
-        ax.text((lo + hi) / 2, 8, f"median model calls,\nfive public repair agents:\n"
-                f"{lo:.0f} to {hi:.0f}", ha="center", va="bottom", fontsize=10.5,
+        ax.text((lo + hi) / 2, 8, f"median model calls,\n{val('swe_configs_words')} public repair agents:\n"
+                f"{val('med_lo')} to {val('med_hi')}", ha="center", va="bottom", fontsize=10.5,
                 color=C["network"], fontweight="bold", alpha=a2)
         ax.plot(hs, curve, color=C["memory"], lw=2.6)
-        p30 = 100 * calcs.compounding()
-        ax.plot([calcs.H_RUN], [p30], "o", ms=10, color=C["danger"], mec="white", mew=1.5,
+        p30 = 100 * calcs.RULE.result.success[h_run]
+        ax.plot([h_run], [p30], "o", ms=10, color=C["danger"], mec="white", mew=1.5,
                 zorder=5)
-        ax.annotate(f"{calcs.H_RUN} turns: {p30:.0f}%", (calcs.H_RUN, p30), xytext=(10, 8),
+        ax.annotate(f"{val('fr_turns')} turns: {p30:.0f}%", (h_run, p30), xytext=(10, 8),
                     textcoords="offset points", fontsize=12, fontweight="bold",
                     color=C["danger"])
-        p64 = 100 * calcs.P_TURN ** hi
+        p64 = 100 * p_turn ** hi
         ax.plot([hi], [p64], "o", ms=8, color=C["network"], mec="white", mew=1.2, zorder=5,
                 alpha=a2)
-        ax.annotate(f"{hi:.0f} calls: {p64:.0f}%", (hi, p64), xytext=(10, 6),
+        ax.annotate(f"{val('med_hi')} calls: {val('fr_hold_hi_pct')}%", (hi, p64), xytext=(10, 6),
                     textcoords="offset points", fontsize=11.5, fontweight="bold",
                     color=C["network"], alpha=a2)
         ax.set_xlim(0, 120)
         ax.set_ylim(0, 105)
         ax.set_xlabel("Turns in the trajectory")
         ax.set_ylabel("Rule held on\nevery turn (%)")
-        ax.text(118, 96, "rule kept on 99% of turns", ha="right", fontsize=11,
+        ax.text(118, 96, f"rule kept on {val('fr_step_pct')}% of turns", ha="right", fontsize=11,
                 color=C["memory"], fontweight="bold")
         ax.grid(axis="y", color=C["grid"], lw=0.6)
         sp.save(fig, OUT / f"compound_step{k}.svg")
@@ -384,36 +384,38 @@ def late():
 # Segment 3: control
 # =====================================================================
 def pause_plot():
-    m = calcs.measured_pause()
+    m = calcs.PAUSE
     ks = np.array(m["k"], dtype=float)
     mean = np.array([m["end"][k][1] for k in m["k"]])
     lo = mean - np.array([m["end"][k][0] for k in m["k"]])
     hi = np.array([m["end"][k][2] for k in m["k"]]) - mean
     canc = np.array([m["cancel"][k][2] for k in m["k"]])
     xs = np.linspace(0, 4300, 50)
-    ref = xs * calcs.T_DEC_MS / 1000
+    t_dec_s = calcs.mag(calcs.CALL.floors.result.memory_time, "s")
+    k_max, wait = calcs.CALL.output_allowance, calcs.mag(calcs.CALL.allowance_decode_time, "s")
+    ref = xs * t_dec_s
     for k in (1, 2, 3):
         fig, ax = plt.subplots(figsize=(5.8, 2.55))
         a2 = 1.0 if k >= 2 else 0.0
         a3 = 1.0 if k >= 3 else 0.0
         ax.plot(xs, ref, color=C["neutral"], lw=1.8, ls="--", alpha=a2)
-        ax.text(250, 88, "chapter reference,\n21.075 ms per token",
+        ax.text(250, 88, f"chapter reference,\n{val('bw_tdec')} ms per token",
                 fontsize=10.5, color=C["neutral"], ha="left", va="top", alpha=a2)
-        ax.annotate(f"{calcs.boundary_delay_s():.1f} s", (4096, calcs.boundary_delay_s()),
+        ax.annotate(f"{val('bw_wait')} s", (k_max, wait),
                     xytext=(-4, 6), textcoords="offset points", ha="right", va="bottom",
                     fontsize=11, fontweight="bold", color=C["neutral"], alpha=a2)
         ax.errorbar(ks, mean, yerr=[lo, hi], fmt="o", ms=8, color=C["danger"], lw=1.6,
                     capsize=3)
-        ax.annotate(f"wait for the\nreply: {mean[-1]:.0f} s", (ks[-1], mean[-1]),
+        ax.annotate(f"wait for the\nreply: {val('ps_wait_hi_round')} s", (ks[-1], mean[-1]),
                     xytext=(4150, 50), textcoords="data", ha="right", va="center", fontsize=11.5,
                     fontweight="bold", color=C["danger"])
         ax.plot(ks, canc, "s", ms=8, color=C["data"], alpha=a3)
-        ax.annotate(f"cancel the stream: at most {np.ceil(1000 * max(canc)):.0f} ms", (ks[-1], canc[-1]),
+        ax.annotate(f"cancel the stream: at most {val('ps_cancel_ms')} ms", (ks[-1], canc[-1]),
                     xytext=(-12, 10), textcoords="offset points", ha="right", fontsize=11.5,
                     fontweight="bold", color=C["data"], alpha=a3)
         ax.set_xlim(0, 4400)
         ax.set_ylim(-4, 100)
-        ax.set_xticks([256, 1024, 2048, 4096])
+        ax.set_xticks(m["k"])
         ax.set_xlabel("Output allowance of the call in flight (tokens)")
         ax.set_ylabel("Seconds until\nthe pause holds")
         ax.grid(axis="y", color=C["grid"], lw=0.6)
@@ -464,8 +466,8 @@ def escrow():
 # Segment 4: sharing and budgets
 # =====================================================================
 def drr():
-    sim = calcs.drr_simulate()
-    rows = [("Token charge", sim["charge_share"]), ("Calls admitted", sim["call_share"])]
+    sim = calcs.DRR
+    rows = [("Token charge", sim.simulated_charge_share), ("Calls admitted", sim.simulated_call_share)]
     for k in (1, 2):
         fig, ax = plt.subplots(figsize=(5.8, 1.75))
         for i, (lab, sh) in enumerate(rows):
@@ -512,7 +514,7 @@ def runaway():
             s.rect(420, 30, 470, 280, "sys", rx=12, fill="#faf5ff")
             s.text(436, 62, "Budget vector (outside context)", 24, ROLE["sys"][2],
                    anchor="start", weight="bold")
-            used = calcs.meter()["used_reuse"]
+            used = calcs.METER.used_with_reuse
             for i, (lab, key) in enumerate((("turns", "turns"), ("tokens", "tokens"),
                                             ("wall time", "time"), ("dollars", "dollars"))):
                 y = 80 + i * 46
@@ -540,12 +542,14 @@ def runaway():
 
 def admit():
     """Drawn for a 0.6-width column (about 3.6 in on the slide)."""
-    a = calcs.admission()
+    a = calcs.ADMIT
+    settled, reserved = calcs.mag(calcs.ADMIT_S.settled, "USD"), calcs.mag(calcs.ADMIT_S.reserved, "USD")
+    final, allow = calcs.mag(calcs.ADMIT_S.finalization_reserve, "USD"), calcs.mag(calcs.ADMIT_S.allowance, "USD")
     for k in (1, 2):
         fig, ax = plt.subplots(figsize=(4.0, 2.6))
-        rows = [("Spend\ncheck", [(calcs.SETTLED, "neutral_l"), (a["spend_headroom"], "memory_l")]),
-                ("Admission\ntest", [(calcs.SETTLED, "neutral_l"), (calcs.RESERVED, "compute_l"),
-                                      (calcs.FINAL_RESERVE, "network_l"), (a["true_headroom"], "memory_l")])]
+        rows = [("Spend\ncheck", [(settled, "neutral_l"), (a.spend_headroom, "memory_l")]),
+                ("Admission\ntest", [(settled, "neutral_l"), (reserved, "compute_l"),
+                                      (final, "network_l"), (a.headroom, "memory_l")])]
         for i, (lab, parts) in enumerate(rows):
             y = 1 - i
             al = 1.0 if i < k else 0.0
@@ -553,26 +557,26 @@ def admit():
             for v, ck in parts:
                 ax.barh(y, v, left=left, color=C[ck], height=0.5, alpha=al, edgecolor="white", lw=1)
                 left += v
-            start = calcs.SETTLED + (0 if i == 0 else calcs.RESERVED + calcs.FINAL_RESERVE)
-            fits = start + a["liab"] <= calcs.ALLOW + 1e-9
-            ax.barh(y, a["liab"], left=start, color="none", height=0.26, alpha=al,
+            start = settled + (0 if i == 0 else reserved + final)
+            fits = a.spend_check_admits if i == 0 else a.admitted
+            ax.barh(y, a.liability, left=start, color="none", height=0.26, alpha=al,
                     edgecolor=C["data"] if fits else C["danger"], lw=2.2,
                     hatch=None if fits else "////")
             ax.text(-0.06, y, lab, ha="right", va="center", fontsize=11, fontweight="bold",
                     color=C["text"])
-            free = a["spend_headroom"] if i == 0 else a["true_headroom"]
-            ax.text(calcs.ALLOW + 0.12, y, f"free ${free:.2f}\n" + ("call fits" if fits else
+            free = val("ad_spend_head") if i == 0 else val("ad_head")
+            ax.text(allow + 0.12, y, f"free ${free}\n" + ("call fits" if fits else
                     "call does\nnot fit"), ha="left", va="center", fontsize=10.5,
                     fontweight="bold", color=C["data"] if fits else C["danger"], alpha=al)
-        ax.text(calcs.SETTLED / 2, 1, "settled\n$2.58", ha="center", va="center", fontsize=10.5)
-        ax.text(calcs.SETTLED / 2, 0, "settled\n$2.58", ha="center", va="center", fontsize=10.5,
+        ax.text(settled / 2, 1, f"settled\n${val('ad_settled')}", ha="center", va="center", fontsize=10.5)
+        ax.text(settled / 2, 0, f"settled\n${val('ad_settled')}", ha="center", va="center", fontsize=10.5,
                 alpha=1.0 if k >= 2 else 0.0)
-        ax.text(calcs.SETTLED + calcs.RESERVED / 2, 0.42, "test $0.50", ha="center", fontsize=10,
+        ax.text(settled + reserved / 2, 0.42, f"test ${val('ad_reserved')}", ha="center", fontsize=10,
                 alpha=1.0 if k >= 2 else 0.0)
-        ax.text(calcs.ALLOW, -0.5, "final $0.30", ha="right", fontsize=10,
+        ax.text(allow, -0.5, f"final ${val('ad_final')}", ha="right", fontsize=10,
                 alpha=1.0 if k >= 2 else 0.0)
-        ax.axvline(calcs.ALLOW, color=C["text"], lw=1.6)
-        ax.text(calcs.ALLOW, 1.45, f"allowance ${calcs.ALLOW:.2f}", ha="right", fontsize=10.5,
+        ax.axvline(allow, color=C["text"], lw=1.6)
+        ax.text(allow, 1.45, f"allowance ${val('ad_allow')}", ha="right", fontsize=10.5,
                 color=C["text"])
         ax.set_xlim(0, 4.6)
         ax.set_ylim(-0.65, 1.6)
@@ -584,21 +588,22 @@ def admit():
 
 
 def overshoot():
-    o = calcs.overshoot()
-    cum = np.array(o["cumulative"])
+    t = calcs.TRAJ
+    cum = np.array(t["cumulative_cost"])
+    o = dict(limit=t["limits"]["cost_limit"], calls=len(cum), before_last=cum[-2], final=cum[-1])
     n = np.arange(1, len(cum) + 1)
     fig, ax = plt.subplots(figsize=(5.8, 2.5))
     ax.step(n, cum, where="post", color=C["memory"], lw=2.2)
     ax.axhline(o["limit"], color=C["danger"], lw=1.6, ls="--")
-    ax.text(3, o["limit"] + 0.07, f"cost_limit = {o['limit']:.1f}", color=C["danger"],
+    ax.text(3, o["limit"] + 0.07, f"cost_limit = {val('tj_limit_cfg')}", color=C["danger"],
             fontsize=11, fontweight="bold")
     ax.plot([o["calls"] - 1], [o["before_last"]], "o", ms=7, color=C["neutral"])
-    ax.annotate(f"before call {o['calls']}: ${o['before_last']:.3f},\nunder the limit, so admitted",
+    ax.annotate(f"before call {val('tj_calls')}: ${val('tj_before')},\nunder the limit, so admitted",
                 (o["calls"] - 1, o["before_last"]), xytext=(18, 2.2), textcoords="data",
                 ha="left", va="center", fontsize=11, color=C["text"],
                 arrowprops=dict(arrowstyle="->", color=C["neutral"], lw=1.2))
     ax.plot([o["calls"]], [o["final"]], "o", ms=9, color=C["danger"])
-    ax.annotate(f"stopped at ${o['final']:.2f}", (o["calls"], o["final"]), xytext=(-10, 6),
+    ax.annotate(f"stopped at ${val('tj_final')}", (o["calls"], o["final"]), xytext=(-10, 6),
                 textcoords="offset points", ha="right", fontsize=11.5, fontweight="bold",
                 color=C["danger"])
     ax.set_xlim(0, o["calls"] + 3)
@@ -610,17 +615,17 @@ def overshoot():
 
 
 def meter():
-    mt = calcs.meter()
+    mt = calcs.METER
     labels = [("Turns", "turns"), ("Tokens", "tokens"), ("Time", "time"), ("Dollars", "dollars")]
     for k in (1, 2):
         fig, ax = plt.subplots(figsize=(5.8, 2.3))
         for i, (lab, key) in enumerate(labels):
             y = 3 - i
-            v = 100 * mt["used_reuse"][key]
+            v = 100 * mt.used_with_reuse[key]
             ax.barh(y + 0.17, v, height=0.32, color=C["memory"])
             ax.text(v + 1.2, y + 0.17, f"{v:.1f}%" if key != "turns" else f"{v:.0f}%",
                     va="center", fontsize=11, color=C["memory"], fontweight="bold")
-            w = 100 * mt["used_none"][key]
+            w = 100 * mt.used_without_reuse[key]
             a = 1.0 if k >= 2 else 0.0
             ax.barh(y - 0.17, w, height=0.32, color=C["compute"], alpha=a)
             ax.text(w + 1.2, y - 0.17, f"{w:.1f}%" if key != "turns" else f"{w:.0f}%",
@@ -634,17 +639,17 @@ def meter():
         ax.set_xlim(0, 100)
         ax.set_ylim(-0.6, 3.5)
         ax.set_yticks([])
-        ax.set_xlabel("Share of the allowance used after 30 turns (%)")
+        ax.set_xlabel(f"Share of the allowance used after {val('mt_turns')} turns (%)")
         ax.spines["left"].set_visible(False)
         ax.grid(axis="x", color=C["grid"], lw=0.6)
         sp.save(fig, OUT / f"meter_step{k}.svg")
 
 
 def ceiling():
-    rows = calcs.ceiling_evidence()
-    pick = [r for r in rows if r["sub"] == "20260217_mini-v2.0.0_claude-4-6-opus"][0]
+    rows = calcs.CONFIGS
+    pick = calcs.PICK
     fig, ax = plt.subplots(figsize=(3.2, 2.6))
-    ok, bad = pick["ok_calls"], pick["bad_calls"]
+    ok, bad = pick["accepted_calls"], pick["failed_calls"]
     ax.plot(ok, np.arange(1, len(ok) + 1) / len(ok), color=C["memory"], lw=2.2)
     ax.plot(bad, np.arange(1, len(bad) + 1) / len(bad), color=C["danger"], lw=2.2, ls="--")
     ax.axvline(pick["cap"], color=C["neutral"], lw=1.4)
@@ -652,7 +657,7 @@ def ceiling():
             color=C["neutral"])
     ax.text(2, 0.97, f"accepted ({pick['accepted']})", fontsize=11, color=C["memory"],
             fontweight="bold", va="center")
-    ax.text(70, 0.52, f"failed ({pick['n'] - pick['accepted']})", fontsize=11,
+    ax.text(70, 0.52, f"failed ({pick['runs'] - pick['accepted']})", fontsize=11,
             color=C["danger"], fontweight="bold")
     ax.set_xlim(0, 145)
     ax.set_ylim(0, 1.02)
@@ -666,14 +671,14 @@ def ceiling():
              "OpenHands": "OpenHands", "mini-SWE-agent 2.x": "mini-SWE-agent"}
     model = {"Claude 3.5 Sonnet": "Sonnet 3.5", "Claude Sonnet 4": "Sonnet 4",
              "Claude Opus 4.6": "Opus 4.6", "GPT-5.2-Codex": "GPT-5.2-Codex"}
-    rows = sorted(rows, key=lambda r: r["fail_halt"])
+    rows = sorted(rows, key=lambda r: r["failed_halted"])
     for i, r in enumerate(rows):
         y = i
-        ax.barh(y + 0.18, 100 * r["fail_halt"], height=0.34, color=C["danger"])
-        ax.barh(y - 0.18, 100 * r["ok_halt"], height=0.34, color=C["memory"])
-        ax.text(100 * r["fail_halt"] + 1, y + 0.18, f"{100 * r['fail_halt']:.0f}%",
+        ax.barh(y + 0.18, 100 * r["failed_halted"], height=0.34, color=C["danger"])
+        ax.barh(y - 0.18, 100 * r["accepted_halted"], height=0.34, color=C["memory"])
+        ax.text(100 * r["failed_halted"] + 1, y + 0.18, f"{100 * r['failed_halted']:.0f}%",
                 va="center", fontsize=8.5, color=C["danger"], fontweight="bold")
-        ax.text(100 * r["ok_halt"] + 1, y - 0.18, f"{100 * r['ok_halt']:.0f}%",
+        ax.text(100 * r["accepted_halted"] + 1, y - 0.18, f"{100 * r['accepted_halted']:.0f}%",
                 va="center", fontsize=8.5, color=C["memory"], fontweight="bold")
         ax.text(-1, y, f"{short[r['scaffold']]}\n{model[r['model']]}, cap {r['cap']:.0f}",
                 ha="right", va="center", fontsize=8.5, color=C["text"])
@@ -686,7 +691,8 @@ def ceiling():
 
 
 def osworld():
-    ow = calcs.osworld()
+    steps = calcs.STEPS.steps
+    hi = max(steps)
     names = {"claude-sonnet-4-5-20250929": "Claude Sonnet 4.5",
              "claude-sonnet-4-20250514": "Claude Sonnet 4",
              "claude-3-7-sonnet-20250219": "Claude 3.7 Sonnet",
@@ -694,15 +700,15 @@ def osworld():
              "o3-2025-04-16_medium": "o3"}
     cols = ["danger", "memory", "network", "compute", "data"]
     fig, ax = plt.subplots(figsize=(5.8, 2.5))
-    order = sorted(ow["by"].items(), key=lambda kv: -kv[1][100])
+    order = sorted(calcs.STEPS.scores.items(), key=lambda kv: -kv[1][hi])
     offs = {"Claude Sonnet 4": 1.6, "Claude 3.7 Sonnet": 1.6, "computer-use-preview": -1.8}
     for (m, v), ck in zip(order, cols):
-        xs = [15, 50, 100]
+        xs = steps
         ax.plot(xs, [v[x] for x in xs], "-o", color=C[ck], lw=2.2, ms=6)
         nm = names.get(m, m)
-        ax.text(104, v[100] + offs.get(nm, 0), f"{nm}  {v[100]:.0f}%", va="center",
+        ax.text(104, v[hi] + offs.get(nm, 0), f"{nm}  {v[hi]:.0f}%", va="center",
                 fontsize=10.5, color=C[ck], fontweight="bold")
-    ax.set_xticks([15, 50, 100])
+    ax.set_xticks(steps)
     ax.set_xlim(8, 165)
     ax.set_ylim(0, 70)
     ax.set_xlabel("Step ceiling enforced on the agent")
@@ -721,11 +727,12 @@ def thumbs():
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 100" width="260" '
             'height="100"><rect width="260" height="100" fill="white"/>' + body + "</svg>")
     # horizon compounding: a decaying curve, the 30-turn point
-    pts = " ".join(f"{10 + 2 * h:.1f},{90 - 80 * calcs.P_TURN ** h:.1f}" for h in range(0, 121))
+    p_turn, h_run = calcs.RULE.step_success, calcs.RULE.short_horizon
+    pts = " ".join(f"{10 + 2 * h:.1f},{90 - 80 * p_turn ** h:.1f}" for h in range(0, 121))
     svg("thumb_compound", f'<line x1="10" y1="92" x2="250" y2="92" stroke="#94a3b8" stroke-width="3"/>'
         f'<line x1="10" y1="8" x2="10" y2="92" stroke="#94a3b8" stroke-width="3"/>'
         f'<polyline points="{pts}" fill="none" stroke="{BLUE}" stroke-width="5"/>'
-        f'<circle cx="{10 + 2 * 30}" cy="{90 - 80 * calcs.compounding():.1f}" r="9" fill="{RED}"/>')
+        f'<circle cx="{10 + 2 * h_run}" cy="{90 - 80 * p_turn ** h_run:.1f}" r="9" fill="{RED}"/>')
     # state machine: READY -> CALLING -> WAITING loop and FINALIZING
     b = ""
     for x, y, f, st in ((12, 8, "#ffffff", "#0f172a"), (100, 8, ROLE["model"][0], BLUE),

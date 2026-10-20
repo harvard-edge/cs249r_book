@@ -256,6 +256,9 @@ class CheckpointIntervalScenario(BaseScenario):
     bytes_per_param: Optional[Quantity] = None
     write_bandwidth: Optional[Quantity] = None
     write_time: Optional[Quantity] = None
+    # Optional (added 2026-10-20): factors by which a chosen interval misses the
+    # optimum, priced by ``miss_penalty``.
+    miss_factors: Optional[List[float]] = None
 
     @property
     def checkpoint_bytes(self) -> Quantity:
@@ -277,6 +280,12 @@ class CheckpointIntervalScenario(BaseScenario):
         """Share of wall time lost when saving every ``interval`` instead."""
         from ..physics.reliability import calc_checkpoint_waste
         return calc_checkpoint_waste(self.t_write, interval, self.mtbf)
+
+    def miss_penalty(self, factor: float) -> float:
+        """Extra waste, relative to the optimum, of an interval ``factor`` times the optimum
+        (added 2026-10-20); equals ``(x + 1/x) / 2 - 1``, so the minimum is flat."""
+        r = self.result
+        return self.waste_at(factor * r.interval) / r.waste - 1
 
 
 class RecoveryBudgetScenario(BaseScenario):
@@ -633,11 +642,19 @@ class ScalingOverheadScenario(BaseScenario):
 class PowerLawScenario(BaseScenario):
     """A power-law term ``A R^-alpha`` and the resource multiple that halves it."""
     exponent: float
+    # Optional (added 2026-10-20): a fractional reduction of the term; the
+    # resource multiple that buys it is ``reduction_multiple``.
+    loss_reduction: Optional[float] = None
 
     @property
     def halving_multiple(self) -> float:
         from ..physics.scaling import calc_halving_multiple
         return calc_halving_multiple(self.exponent)
+
+    @property
+    def reduction_multiple(self) -> float:
+        from ..physics.scaling import calc_loss_reduction_compute_multiple
+        return calc_loss_reduction_compute_multiple(self.exponent, self.loss_reduction)
 
 
 class TrainingGrowthScenario(BaseScenario):
@@ -655,16 +672,38 @@ class TrainingGrowthScenario(BaseScenario):
 
 
 class PublishedRunScenario(BaseScenario):
-    """A published training run: its total compute spread over its accelerators and days."""
+    """A published training run: its total compute spread over its accelerators and days.
+
+    Optional (added 2026-10-20): a run reported as ``accelerator_hours`` (a
+    model card's GPU hours) at ``device_power`` per accelerator. Its compute is
+    the workload's ``training_ops`` or, when unset, 6PD from its training tokens.
+    """
     workload: Workload
     accelerator: HardwareNode       # the part the run used, for its peak rate
+    accelerator_hours: Optional[Quantity] = None
+    device_power: Optional[Quantity] = None
+
+    @property
+    def training_operations(self) -> Quantity:
+        w = self.workload
+        if w.training_ops is not None:
+            return w.training_ops
+        from ..physics.transformer import calc_transformer_training_flops
+        return calc_transformer_training_flops(w.parameters, w.training_tokens).to("flop")
 
     @property
     def achieved_rate(self) -> Quantity:
         """Average delivered FLOP/s per accelerator over the whole run, idle time included."""
         w = self.workload
+        if self.accelerator_hours is not None:
+            return (self.training_operations / self.accelerator_hours).to("TFLOP/s")
         n = w.training_accelerators_ref.to("count").magnitude
         return (w.training_ops / (n * w.training_days_ref)).to("TFLOP/s")
+
+    @property
+    def energy(self) -> Quantity:
+        """Every accelerator hour at ``device_power``."""
+        return (self.accelerator_hours * self.device_power).to("GWh")
 
     @property
     def peak_fraction(self) -> float:
@@ -1534,6 +1573,12 @@ class StreamCancelScenario(BaseScenario):
     def decode_time_avoided(self) -> Quantity:
         return (self.skipped_steps * self.floors.result.memory_time).to("second")
 
+    @property
+    def allowance_decode_time(self) -> Quantity:
+        """Decode time of the whole allowance (added 2026-10-20): ``K_max t_dec``, the longest
+        one admitted call postpones the next turn boundary when control waits for its reply."""
+        return (self.output_allowance * self.floors.result.memory_time).to("second")
+
 
 class TrajectoryResendScenario(BaseScenario):
     """A trajectory of ``turns`` calls that each resend the whole history (``TrajectoryResendModel``)."""
@@ -1609,13 +1654,60 @@ class ActivationMemoryScenario(BaseScenario):
     workload: Workload
     micro_batch: int
     seq_len: Optional[int] = None   # defaults to the model's context length
+    # Optional (added 2026-10-20): bytes per stored activation (2 for 16-bit),
+    # and a stated normalization buffer per layer for the per-layer line items.
+    precision_bytes: float = 2
+    normalization_per_layer: Optional[Quantity] = None
+    ffn_multiple: int = 4
+
+    @property
+    def sequence(self) -> int:
+        return self.seq_len if self.seq_len is not None else self.workload.context_length
 
     def activations(self, strategy: str) -> Quantity:
         from ..physics.memory import calc_activation_memory
         w = self.workload
-        seq = self.seq_len if self.seq_len is not None else w.context_length
-        return calc_activation_memory(w.layers, seq, self.micro_batch, w.hidden_dim,
-                                      n_heads=w.heads, strategy=strategy)
+        return calc_activation_memory(w.layers, self.sequence, self.micro_batch, w.hidden_dim,
+                                      n_heads=w.heads, precision_bytes=self.precision_bytes, strategy=strategy)
+
+    @property
+    def per_token_activations(self) -> Quantity:
+        """Activations that grow in proportion to sequence length (everything but the attention scores)."""
+        return self.activations("selective").to("GB")
+
+    @property
+    def score_activations(self) -> Quantity:
+        """Saved attention scores, which grow with the square of sequence length."""
+        return (self.activations("none") - self.activations("selective")).to("GB")
+
+    # Per-layer line items (added 2026-10-20): the tensors a reader can name.
+    def _elements(self, width) -> float:
+        return self.micro_batch * self.sequence * width
+
+    @property
+    def projection_activations_per_layer(self) -> Quantity:
+        """Query, key, value, and output projections: four tensors of the model width."""
+        return Q_(4 * self._elements(self.workload.hidden_dim) * self.precision_bytes, "byte").to("MB")
+
+    @property
+    def ffn_activations_per_layer(self) -> Quantity:
+        """The feed-forward expansion, ``ffn_multiple`` times the model width."""
+        return Q_(self._elements(self.ffn_multiple * self.workload.hidden_dim) * self.precision_bytes,
+                  "byte").to("MB")
+
+    @property
+    def score_activations_per_layer(self) -> Quantity:
+        return (self.score_activations / self.workload.layers).to("MB")
+
+    @property
+    def line_items_per_layer(self) -> Quantity:
+        norm = self.normalization_per_layer if self.normalization_per_layer is not None else Q_(0, "MB")
+        return (self.projection_activations_per_layer + self.ffn_activations_per_layer
+                + self.score_activations_per_layer + norm).to("MB")
+
+    @property
+    def line_items_total(self) -> Quantity:
+        return (self.line_items_per_layer * self.workload.layers).to("GB")
 
     @property
     def forward_equivalents(self) -> float:
@@ -2151,18 +2243,70 @@ class InputSpaceScenario(BaseScenario):
 
 
 class ClusterTrainingTimeScenario(BaseScenario):
-    """Training ``workload`` on ``n_devices`` x ``hardware`` at one end-to-end utilization (compute-bound)."""
+    """Training ``workload`` on ``n_devices`` x ``hardware`` at one end-to-end utilization (compute-bound).
+
+    Optional (added 2026-10-20): ``tokens_per_step`` turns the run into steps
+    (a step costs 6P FLOPs per token); ``hourly_price`` is the rental price of
+    one device for an hour. Energy is every device at its TDP for the whole run.
+    """
     workload: Workload
     hardware: HardwareNode
     n_devices: int
     efficiency: float
+    tokens_per_step: Optional[int] = None
+    hourly_price: Optional[Quantity] = None
+
+    def _time(self, ops) -> Quantity:
+        from ..physics.performance import dTime
+        return dTime(total_ops=ops, num_devices=self.n_devices,
+                     peak_flops_per_device=self.hardware.compute.peak_flops,
+                     efficiency_eta=self.efficiency)
 
     @property
     def training_time(self) -> Quantity:
-        from ..physics.performance import dTime
-        return dTime(total_ops=self.workload.training_ops, num_devices=self.n_devices,
-                     peak_flops_per_device=self.hardware.compute.peak_flops,
-                     efficiency_eta=self.efficiency).to("day")
+        return self._time(self.workload.training_ops).to("day")
+
+    @property
+    def delivered_rate(self) -> Quantity:
+        """FLOP/s the devices deliver together: peak times utilization."""
+        return (self.n_devices * self.hardware.compute.peak_flops * self.efficiency).to("TFLOP/s")
+
+    @property
+    def training_tokens(self) -> Quantity:
+        """Tokens the run's FLOPs cover at 6P FLOPs per token."""
+        from ..physics.transformer import calc_transformer_training_flops
+        per_token = calc_transformer_training_flops(self.workload.parameters, 1)
+        return Q_((self.workload.training_ops / per_token).to("").magnitude, "count")
+
+    @property
+    def step_operations(self) -> Quantity:
+        from ..physics.transformer import calc_transformer_training_flops
+        return calc_transformer_training_flops(self.workload.parameters, self.tokens_per_step).to("TFLOP")
+
+    @property
+    def step_time(self) -> Quantity:
+        return self._time(self.step_operations).to("second")
+
+    @property
+    def steps(self) -> float:
+        return (self.workload.training_ops / self.step_operations).to("").magnitude
+
+    @property
+    def energy(self) -> Quantity:
+        """Every device at its TDP for the whole run."""
+        return (self.n_devices * self.hardware.tdp * self.training_time).to("kWh")
+
+    @property
+    def step_energy(self) -> Quantity:
+        return (self.n_devices * self.hardware.tdp * self.step_time).to("joule")
+
+    @property
+    def device_hours(self) -> Quantity:
+        return (self.n_devices * self.training_time).to("hour")
+
+    @property
+    def rental_cost(self) -> Quantity:
+        return (self.device_hours * self.hourly_price).to("USD")
 
 
 class IronLawScenario(BaseScenario):
@@ -2427,13 +2571,20 @@ class ShiftedTestSetScenario(BaseScenario):
     series_name: str
     original_key: str
     new_key: str
-    gap_key: str
-    baseline_prefix: str
+    gap_key: Optional[str] = None     # None: the gap is original minus new (added 2026-10-20)
+    baseline_prefix: Optional[str] = None  # None: no non-neural baselines in the series
+    # Optional (added 2026-10-20): keep only models scored on the new set whose
+    # original accuracy reaches this floor (a testbed that includes partially
+    # trained and low-data checkpoints).
+    original_floor: Optional[float] = None
 
     @property
     def rows(self):
         from ..literature.registry import Literature
-        return getattr(Literature.Series, self.series_name).entries
+        rows = getattr(Literature.Series, self.series_name).entries
+        if self.original_floor is None:
+            return rows
+        return [r for r in rows if r[self.new_key] is not None and r[self.original_key] >= self.original_floor]
 
     @property
     def result(self):
@@ -3007,7 +3158,7 @@ class ZeroFailureScenario(BaseScenario):
     @property
     def result(self):
         from .solvers import ZeroFailureModel
-        return ZeroFailureModel().solve(self.trials, self.confidence)
+        return ZeroFailureModel().solve(self.trials, self.confidence, self.target_rate)
 
 
 class ThrottledStageScenario(BaseScenario):
@@ -4110,6 +4261,8 @@ class RecordedRunCostScenario(BaseScenario):
     """One public submission in a per-trajectory ``Literature`` series, priced as it recorded."""
     series_name: str
     submission: str
+    # Optional (added 2026-10-20): the cost limit the run's harness enforced.
+    cost_limit: Optional[Quantity] = None
 
     @property
     def rows(self):
@@ -4119,7 +4272,8 @@ class RecordedRunCostScenario(BaseScenario):
     @property
     def result(self):
         from .solvers import RecordedRunCostModel
-        return RecordedRunCostModel().solve(self.rows)
+        limit = None if self.cost_limit is None else float(self.cost_limit.to("USD").magnitude)
+        return RecordedRunCostModel().solve(self.rows, limit)
 # --- Context engineering (added 2026-10-20) -----------------------------------
 # What one agent request carries and what it costs: the solvers live in
 # engine/solvers/context.py. Token counts are serialized-request counts.
@@ -4954,6 +5108,18 @@ class AcceleratorInputFeedScenario(BaseScenario):
     accelerators: int = 1
     worker_rate: Optional[Quantity] = None   # samples per second per loader worker
     host_decode_cap: Optional[Quantity] = None   # samples per second the whole host can decode
+    # Optional (added 2026-10-20): loader workers the host gives each accelerator.
+    host_workers: Optional[int] = None
+
+    @property
+    def host_supply(self) -> Quantity:
+        """Samples a second the host's workers for one accelerator decode and augment."""
+        return (self.host_workers * self.worker_rate).to("count/second")
+
+    @property
+    def busy_fraction(self) -> float:
+        """Share of the time the accelerator computes when the host supply is the slower stage."""
+        return min(1.0, (self.host_supply / self.sustained_rate).to("").magnitude)
 
     @property
     def training_flops_per_sample(self) -> Quantity:
@@ -5119,6 +5285,14 @@ class KsDriftScenario(BaseScenario):
     n_reference: int
     n_current: int
     observed_statistic: Optional[float] = None
+    # Optional (added 2026-10-20): the significance level the coefficient is
+    # for, when it is not the registry's 0.05 (calc_ks_coefficient(level)).
+    significance: Optional[float] = None
+
+    @property
+    def scale(self) -> float:
+        """The sample-size factor ``sqrt((n_0 + n_t) / (n_0 n_t))`` the coefficient multiplies."""
+        return self.critical_value / self.coefficient
 
     @property
     def critical_value(self) -> float:
@@ -5167,6 +5341,16 @@ class BinShareShiftScenario(BaseScenario):
     """A feature binned at the training quantiles: training shares against recent shares, scored by PSI."""
     baseline_shares: List[float]
     current_shares: List[float]
+    bins: Optional[List[str]] = None  # bin names, aligned with the shares (added 2026-10-20)
+
+    def term(self, name: str) -> float:
+        """PSI contribution of the bin called ``name``."""
+        return self.terms[self.bins.index(name)]
+
+    def shares(self, name: str):
+        """(training share, recent share) of the bin called ``name``."""
+        i = self.bins.index(name)
+        return self.baseline_shares[i], self.current_shares[i]
 
     @property
     def terms(self) -> List[float]:
@@ -7972,6 +8156,38 @@ class ContactDeadlineScenario(BaseScenario):
     def fast_margin_ratio(self) -> float:
         return (self.deadline_fast / self.brake_onset_fast).to("").magnitude
 
+    # Optional (added 2026-10-20): the force when the brake command issues, and
+    # a counterfactual stall of ``stall`` at the guarded approach with no local
+    # trip, priced by the plate's spring model k x.
+    stall: Optional[Quantity] = None
+
+    def force_rate(self, speed: Quantity) -> Quantity:
+        return (self.site.k_latch * speed).to("N/ms")
+
+    def force_at_brake_onset(self, speed: Quantity) -> Quantity:
+        return (self.force_rate(speed) * self.brake_onset(speed)).to("N")
+
+    @property
+    def force_at_brake_onset_guarded(self) -> Quantity:
+        return self.force_at_brake_onset(self.guarded_speed)
+
+    @property
+    def compression_left_guarded(self) -> Quantity:
+        return ((self.site.f_latch_limit - self.force_at_brake_onset_guarded) / self.site.k_latch).to("mm")
+
+    @property
+    def stall_travel(self) -> Quantity:
+        return (self.guarded_speed * self.stall).to("mm")
+
+    @property
+    def stall_force(self) -> Quantity:
+        from ..physics.robotics.actuation import calc_contact_force
+        return calc_contact_force(self.site.k_latch, self.stall_travel).to("N")
+
+    @property
+    def stall_over_limit(self) -> float:
+        return (self.stall_force / self.site.f_latch_limit).to("").magnitude
+
 
 class SoftContactExploitScenario(BaseScenario):
     """``machine``'s arm coasting into ``site``'s latch plate at the fast approach: the peak force a
@@ -8828,6 +9044,34 @@ class TrainingStateFitScenario(BaseScenario):
     hardware: Optional[HardwareNode] = None
     bytes_per_value: Quantity
     optimizer_bytes_per_parameter: Quantity
+    # Optional (added 2026-10-20): the activations training saves for the
+    # backward pass at ``batch_size``, a stated estimate; saved activations
+    # grow in proportion to the batch.
+    batch_size: Optional[int] = None
+    activations: Optional[Quantity] = None
+    # Optional (added 2026-10-20): mixed precision keeps a higher-precision
+    # master copy of every trained weight (4 B, FP32) beside the 16-bit
+    # weights and gradients; None for a single-precision recipe.
+    master_bytes_per_parameter: Optional[Quantity] = None
+    # Optional (added 2026-10-20): trainable adapter parameters beside a
+    # frozen base (low-rank adapters). The base keeps only its weights; each
+    # adapter parameter carries weights, gradients, master copy, and
+    # optimizer state.
+    adapter_parameters: Optional[int] = None
+
+    def activations_at(self, batch_size: int) -> Quantity:
+        """Saved activations at another batch size, scaled linearly from ``activations``."""
+        return (self.activations * batch_size / self.batch_size).to("byte")
+
+    @property
+    def training_total(self) -> Quantity:
+        """Weights, gradients, optimizer state, and saved activations."""
+        return (self.total + self.activations).to("byte")
+
+    @property
+    def training_copies(self) -> float:
+        """Training total in units of the weights."""
+        return (self.training_total / self.weights).to("").magnitude
 
     def _state(self):
         from ..physics.neural import calc_training_state
@@ -8851,8 +9095,31 @@ class TrainingStateFitScenario(BaseScenario):
         return (self.optimizer_bytes_per_parameter / self.bytes_per_value).to("").magnitude
 
     @property
+    def master_weights(self) -> Quantity:
+        if self.master_bytes_per_parameter is None:
+            return Q_(0, "byte")
+        return (self.workload.parameters.to("count").magnitude * self.master_bytes_per_parameter).to("byte")
+
+    @property
+    def bytes_per_trained_parameter(self) -> Quantity:
+        """Weights, gradients, master copy, and optimizer state for one trained parameter."""
+        master = Q_(0, "byte") if self.master_bytes_per_parameter is None else self.master_bytes_per_parameter
+        return (2 * self.bytes_per_value + master + self.optimizer_bytes_per_parameter).to("byte")
+
+    @property
+    def adapter_state(self) -> Quantity:
+        """Everything the adapters hold: weights, gradients, master copy, optimizer state."""
+        return (self.adapter_parameters * self.bytes_per_trained_parameter).to("byte")
+
+    @property
+    def adapter_fraction(self) -> float:
+        return self.adapter_parameters / self.workload.parameters.to("count").magnitude
+
+    @property
     def total(self) -> Quantity:
-        return sum(self._state()[1:], self._state()[0])
+        if self.adapter_parameters is not None:
+            return (self.weights + self.adapter_state).to("byte")
+        return sum(self._state()[1:], self._state()[0]) + self.master_weights
 
     @property
     def copies(self) -> float:
@@ -8862,6 +9129,42 @@ class TrainingStateFitScenario(BaseScenario):
     @property
     def fits(self) -> bool:
         return self.hardware is not None and self.total <= self.hardware.memory.capacity
+
+    @property
+    def capacity_share(self) -> float:
+        """State before activations as a share of ``hardware``'s memory."""
+        return (self.total / self.hardware.memory.capacity).to("").magnitude
+
+    @property
+    def training_capacity_multiple(self) -> float:
+        """State and saved activations in units of ``hardware``'s memory."""
+        return (self.training_total / self.hardware.memory.capacity).to("").magnitude
+
+    @property
+    def checkpoint(self) -> Quantity:
+        """A resumable checkpoint: weights, master copy, and optimizer state; gradients are recomputed."""
+        return (self.weights + self.master_weights + self.optimizer_state).to("byte")
+
+    def checkpoint_write_time(self, bandwidth: Quantity) -> Quantity:
+        """Seconds to write ``checkpoint`` at ``bandwidth``."""
+        return (self.checkpoint / bandwidth).to("second")
+
+    @property
+    def update_bytes_per_parameter(self) -> Quantity:
+        """Bytes one optimizer update moves per parameter: read the gradient, the updated
+        weights, and the optimizer state; write the state and the weights back."""
+        p = self.workload.parameters.to("count").magnitude
+        updated = (self.master_weights if self.master_bytes_per_parameter is not None else self.weights) / p
+        return (self.gradients / p + 2 * updated + 2 * self.optimizer_state / p).to("byte")
+
+    @property
+    def update_traffic(self) -> Quantity:
+        return (self.update_bytes_per_parameter * self.workload.parameters.to("count").magnitude).to("GB")
+
+    @property
+    def update_time(self) -> Quantity:
+        """The optimizer update at ``hardware``'s memory bandwidth (elementwise, bandwidth-bound)."""
+        return (self.update_traffic / self.hardware.memory.bandwidth).to("ms")
 
 
 class ParameterGrowthScenario(BaseScenario):
@@ -9401,3 +9704,4291 @@ class PlatformBenefitScenario(BaseScenario):
     @property
     def benefit_cost_ratio(self) -> float:
         return (self.gross_benefit / self.platform_cost).to("").magnitude
+
+
+# --- Network architectures: attention, transformer blocks, KV caches, and recommenders (added 2026-10-20) ---
+
+
+def _labeled_capacity(hardware: HardwareNode) -> Quantity:
+    """The capacity a vendor label prints: binary gigabytes read as "GB" (an
+    "80 GB" A100 holds 80 GiB). Shares of a labeled device divide decimal bytes
+    by this figure, as the chapters do."""
+    return Q_(hardware.memory.capacity.to("GiB").magnitude, "GB")
+
+
+class ToyAttentionHeadScenario(BaseScenario):
+    """One attention head computed by hand: one row of ``queries``, ``keys``, and ``values`` per token."""
+    queries: List[List[float]]
+    keys: List[List[float]]
+    values: List[List[float]]
+
+    @property
+    def tokens(self) -> int:
+        return len(self.queries)
+
+    @property
+    def width(self) -> int:
+        return len(self.queries[0])
+
+    @property
+    def scores(self) -> List[List[float]]:
+        """q_i . k_j / sqrt(d) for every pair."""
+        s = _math.sqrt(self.width)
+        return [[sum(a * b for a, b in zip(q, k)) / s for k in self.keys] for q in self.queries]
+
+    @property
+    def weights(self) -> List[List[float]]:
+        """Softmax of each score row."""
+        out = []
+        for row in self.scores:
+            e = [_math.exp(x) for x in row]
+            out.append([x / sum(e) for x in e])
+        return out
+
+    @property
+    def outputs(self) -> List[List[float]]:
+        """Each token's weighted mix of the value rows."""
+        return [[sum(w * v[c] for w, v in zip(row, self.values)) for c in range(len(self.values[0]))]
+                for row in self.weights]
+
+    @property
+    def macs_per_product(self) -> int:
+        """Multiply-adds of one of the two products (scores, or the mix): S^2 d."""
+        return self.tokens ** 2 * self.width
+
+
+class PackedQkvProjectionScenario(BaseScenario):
+    """``tokens`` rows through ``workload``'s packed query-key-value projection, one d x 3d matrix."""
+    workload: Workload
+    tokens: int
+    projections: int = 3             # query, key, value
+
+    @property
+    def width(self) -> int:
+        return self.workload.hidden_dim
+
+    @property
+    def packed_width(self) -> int:
+        return self.projections * self.width
+
+    @property
+    def macs(self) -> int:
+        return self.tokens * self.width * self.packed_width
+
+
+class TransformerBlockScenario(BaseScenario):
+    """``workload``'s decoder blocks at a context of ``context_tokens``: the classic block's weights
+    (4 d^2 attention projections, 2 x ``ffn_multiple`` d^2 MLP), its dense and attention multiply-adds,
+    and, with ``hardware``, the attention arithmetic of one prompt at peak."""
+    workload: Workload
+    context_tokens: int
+    ffn_multiple: int = 4            # feed-forward width over model width
+    attention_projections: int = 4   # query, key, value, output
+    hardware: Optional[HardwareNode] = None
+    # Optional (added 2026-10-20): sequences of ``context_tokens`` in one training step.
+    batch_size: int = 1
+
+    def _w(self):
+        from ..physics.transformer import calc_transformer_block_weights
+        return calc_transformer_block_weights(self.width, self.ffn_multiple, self.attention_projections)
+
+    @property
+    def width(self) -> int:
+        return self.workload.hidden_dim
+
+    @property
+    def attention_weights_per_block(self) -> int:
+        return self._w()[0]
+
+    @property
+    def mlp_weights_per_block(self) -> int:
+        return self._w()[1]
+
+    @property
+    def weights_per_block(self) -> int:
+        return self._w()[2]
+
+    @property
+    def block_coefficient(self) -> int:
+        """Weights per block in units of d^2 (12 for the classic block)."""
+        return self.weights_per_block // self.width ** 2
+
+    @property
+    def mlp_share(self) -> float:
+        return self.mlp_weights_per_block / self.weights_per_block
+
+    @property
+    def block_weights(self) -> int:
+        """All blocks' weights."""
+        return self.weights_per_block * self.workload.layers
+
+    @property
+    def attention_weights(self) -> int:
+        return self.attention_weights_per_block * self.workload.layers
+
+    @property
+    def mlp_weights(self) -> int:
+        return self.mlp_weights_per_block * self.workload.layers
+
+    @property
+    def token_table(self) -> int:
+        """Token-embedding weights: one row of width d per vocabulary entry."""
+        return self.workload.vocab_size * self.width
+
+    @property
+    def block_rule_parameters(self) -> int:
+        return self.block_weights + self.token_table
+
+    @property
+    def exact_parameters(self) -> int:
+        """GPT-2 layout counted in full: projection and MLP biases, two LayerNorms per block,
+        the final LayerNorm, and a position table of ``context_length`` rows (nanoGPT, bias=True)."""
+        d, f = self.width, self.ffn_multiple
+        per_block = (d * 3 * d + 3 * d) + (d * d + d) + (d * f * d + f * d) + (f * d * d + d) + 2 * (2 * d)
+        return (self.workload.layers * per_block + self.workload.vocab_size * d
+                + self.workload.context_length * d + 2 * d)
+
+    @property
+    def flops_per_token(self) -> Quantity:
+        """Two FLOPs (a multiply and an add) per block weight per token."""
+        return Q_(2 * self.block_weights, "flop")
+
+    @property
+    def output_layer_flops(self) -> Quantity:
+        """The output projection onto the vocabulary, per token."""
+        return Q_(2 * self.token_table, "flop")
+
+    @property
+    def dense_macs(self) -> int:
+        """One block's projection and MLP multiply-adds over the context."""
+        return self.weights_per_block * self.context_tokens
+
+    @property
+    def attention_macs(self) -> int:
+        """One block's two attention products over the context."""
+        from ..physics.transformer import calc_attention_score_macs
+        return calc_attention_score_macs(self.context_tokens, self.width)
+
+    @property
+    def block_macs(self) -> int:
+        return self.dense_macs + self.attention_macs
+
+    @property
+    def attention_share(self) -> float:
+        return self.attention_macs / self.block_macs
+
+    @property
+    def dense_to_attention(self) -> float:
+        return self.dense_macs / self.attention_macs
+
+    @property
+    def attention_to_dense(self) -> float:
+        return self.attention_macs / self.dense_macs
+
+    @property
+    def crossover(self) -> float:
+        """Context length at which the attention products equal the dense products (6 d)."""
+        from ..physics.transformer import calc_attention_crossover
+        return calc_attention_crossover(self.width, self.ffn_multiple, self.attention_projections)
+
+    @property
+    def crossover_multiple(self) -> float:
+        """The crossover in units of the width (six for the classic block)."""
+        return self.crossover / self.width
+
+    @property
+    def prompt_dense_flops(self) -> Quantity:
+        return (self.flops_per_token * self.context_tokens).to("flop")
+
+    @property
+    def prompt_attention_flops(self) -> Quantity:
+        """Every block's attention products over the prompt, two FLOPs per multiply-add."""
+        return Q_(2 * self.attention_macs * self.workload.layers, "flop")
+
+    @property
+    def prompt_flops(self) -> Quantity:
+        return self.prompt_dense_flops + self.prompt_attention_flops
+
+    @property
+    def attention_time_at_peak(self) -> Quantity:
+        return (self.prompt_attention_flops / self.hardware.compute.peak_flops).to("minute")
+
+    @property
+    def training_to_forward(self) -> float:
+        """A training step in forward passes: 6P over 2P per token."""
+        from ..physics.transformer import calc_transformer_training_flops, calc_transformer_decode_flops
+        p = self.workload.parameters
+        return (calc_transformer_training_flops(p, 1) / calc_transformer_decode_flops(p, 1)).to("").magnitude
+
+    @property
+    def layer_forward_flops(self) -> Quantity:
+        """One block's forward FLOPs for the whole batch: dense and attention products, two FLOPs each."""
+        return Q_(2 * self.block_macs * self.batch_size, "flop").to("GFLOP")
+
+    @property
+    def training_step_flops(self) -> Quantity:
+        """One training step counted layer by layer, attention products included."""
+        return (self.layer_forward_flops * self.workload.layers * self.training_to_forward).to("TFLOP")
+
+    @property
+    def six_p_step_flops(self) -> Quantity:
+        """The same step by the 6P-per-token rule, which omits the attention products."""
+        from ..physics.transformer import calc_transformer_training_flops
+        return calc_transformer_training_flops(self.workload.parameters,
+                                               self.batch_size * self.context_tokens).to("TFLOP")
+
+    @property
+    def attention_step_flops(self) -> Quantity:
+        """The attention products' share of a training step, all layers."""
+        return Q_(2 * self.attention_macs * self.batch_size * self.workload.layers
+                  * self.training_to_forward, "flop").to("TFLOP")
+
+
+class MaterializedScoresScenario(BaseScenario):
+    """Attention scores stored in full: ``seq_len``^2 per head, ``heads`` per layer, ``layers`` layers."""
+    seq_len: int
+    heads: int
+    layers: int
+    bytes_per_score: Quantity
+    hardware: Optional[HardwareNode] = None
+
+    @property
+    def scores_per_layer(self) -> int:
+        return self.seq_len ** 2 * self.heads
+
+    @property
+    def layer_bytes(self) -> Quantity:
+        return (self.scores_per_layer * self.bytes_per_score).to("GB")
+
+    @property
+    def total_bytes(self) -> Quantity:
+        return (self.layer_bytes * self.layers).to("GB")
+
+    @property
+    def layer_device_multiple(self) -> float:
+        """One layer's scores in units of ``hardware``'s labeled capacity."""
+        return (self.layer_bytes / _labeled_capacity(self.hardware)).to("").magnitude
+
+
+class ContextGrowthScenario(BaseScenario):
+    """A context window grown from ``base_tokens`` to ``tokens``: a kept cache grows with the ratio,
+    attention's score work and stored scores with its square."""
+    base_tokens: int
+    tokens: int
+
+    @property
+    def ratio(self) -> float:
+        return self.tokens / self.base_tokens
+
+    @property
+    def score_ratio(self) -> float:
+        return self.ratio ** 2
+
+
+class KvFootprintScenario(BaseScenario):
+    """``workload``'s KV cache for ``tokens`` kept tokens; with ``hardware`` and ``kv_share``, how many
+    such requests the cache's share of the labeled device memory holds. ``kv_width_factor`` scales the
+    key-value width (one half: half the key-value heads)."""
+    workload: Workload
+    tokens: int
+    bytes_per_value: Quantity
+    hardware: Optional[HardwareNode] = None
+    kv_share: Optional[float] = None
+    kv_width_factor: float = 1.0
+
+    @property
+    def per_token(self) -> Quantity:
+        return (self.workload.get_kv_cache_size(1, 1, self.bytes_per_value) * self.kv_width_factor).to("byte")
+
+    @property
+    def total(self) -> Quantity:
+        return (self.per_token * self.tokens).to("GB")
+
+    @property
+    def weights(self) -> Quantity:
+        return self.workload.size_in_bytes(self.bytes_per_value).to("GB")
+
+    @property
+    def kv_budget(self) -> Quantity:
+        return (_labeled_capacity(self.hardware) * self.kv_share).to("GB")
+
+    @property
+    def tokens_in_budget(self) -> float:
+        return (self.kv_budget / self.per_token).to("").magnitude
+
+    @property
+    def requests(self) -> float:
+        return (self.kv_budget / self.total).to("").magnitude
+
+
+class ContextMemoryCrossingScenario(BaseScenario):
+    """Three memories of ``workload`` as context grows on ``hardware``: fixed weights, a KV cache linear
+    in tokens, and one layer's stored scores (all heads) quadratic in tokens."""
+    workload: Workload
+    hardware: HardwareNode
+    bytes_per_value: Quantity
+
+    @property
+    def weights(self) -> Quantity:
+        return self.workload.size_in_bytes(self.bytes_per_value).to("GB")
+
+    @property
+    def kv_per_token(self) -> Quantity:
+        return self.workload.get_kv_cache_size(1, 1, self.bytes_per_value).to("byte")
+
+    @property
+    def score_bytes_per_pair(self) -> Quantity:
+        """One layer's stored scores for one token pair, all heads."""
+        return (self.workload.heads * self.bytes_per_value).to("byte")
+
+    @property
+    def kv_crossing(self) -> float:
+        """Tokens at which the KV cache equals the weights."""
+        return (self.weights / self.kv_per_token).to("").magnitude
+
+    @property
+    def score_crossing(self) -> float:
+        """Tokens at which one layer's stored scores fill the device."""
+        return _math.sqrt((self.hardware.memory.capacity / self.score_bytes_per_pair).to("").magnitude)
+
+    @property
+    def kv_score_crossing(self) -> float:
+        """Tokens at which the KV cache and one layer's scores are equal."""
+        return (self.kv_per_token / self.score_bytes_per_pair).to("").magnitude
+
+
+class EmbeddingTableScenario(BaseScenario):
+    """``tables`` embedding tables of ``rows`` rows, each ``width`` values wide, against ``hardware``."""
+    rows: int
+    width: int
+    bytes_per_value: Quantity
+    hardware: HardwareNode
+    tables: int = 1
+
+    @property
+    def row_bytes(self) -> Quantity:
+        return (self.width * self.bytes_per_value).to("byte")
+
+    @property
+    def table_bytes(self) -> Quantity:
+        return (self.rows * self.row_bytes).to("GB")
+
+    @property
+    def total_bytes(self) -> Quantity:
+        return (self.table_bytes * self.tables).to("GB")
+
+    @property
+    def labeled_share(self) -> float:
+        """All tables over the device's labeled capacity."""
+        return (self.total_bytes / _labeled_capacity(self.hardware)).to("").magnitude
+
+    @property
+    def fits(self) -> bool:
+        return self.labeled_share <= 1
+
+
+class EmbeddingGatherScenario(BaseScenario):
+    """One recommender request on ``hardware``: one row of ``width`` values per categorical feature of
+    ``dataset`` is gathered, then the rows and the bottom MLP's output interact by pairwise dot products."""
+    dataset: DatasetProfile
+    width: int
+    bytes_per_value: Quantity
+    hardware: HardwareNode
+
+    @property
+    def features(self) -> int:
+        return self.dataset.categorical_features
+
+    @property
+    def row_bytes(self) -> Quantity:
+        return (self.width * self.bytes_per_value).to("byte")
+
+    @property
+    def request_bytes(self) -> Quantity:
+        return (self.features * self.row_bytes).to("byte")
+
+    @property
+    def vectors(self) -> int:
+        """The gathered rows and the bottom MLP's output."""
+        return self.features + 1
+
+    @property
+    def pairs(self) -> int:
+        return self.vectors * (self.vectors - 1) // 2
+
+    @property
+    def interaction_macs(self) -> int:
+        return self.pairs * self.width
+
+    @property
+    def intensity(self) -> Quantity:
+        """Interaction FLOPs (two per multiply-add) per gathered byte."""
+        return (Q_(2 * self.interaction_macs, "flop") / self.request_bytes).to("flop/byte")
+
+    @property
+    def device_rate(self) -> Quantity:
+        """Requests a second if every row streamed at device-memory bandwidth (an upper bound)."""
+        return (self.hardware.memory.bandwidth / self.request_bytes).to("1/s")
+
+    @property
+    def host_rate(self) -> Quantity:
+        """Requests a second if every row crossed the host link (an upper bound)."""
+        return (self.hardware.interconnect.bandwidth / self.request_bytes).to("1/s")
+
+    @property
+    def bandwidth_ratio(self) -> float:
+        return (self.device_rate / self.host_rate).to("").magnitude
+# --- Framework execution: dispatch, fusion, compilation payback, one training step (added 2026-10-20) ---
+
+class HostDispatchScenario(BaseScenario):
+    """The host's work to issue one eager step against ``device_time`` of accelerator work.
+
+    The step has ``blocks`` blocks of ``ops_per_block`` Python-level
+    operations, each paying ``dispatch``, and ``launches_per_block`` kernels
+    per block (default: one per operation), each paying ``launch``. The model
+    is additive with no host-device overlap: the overhead ratio is host time
+    over device time, and above 1 the host takes more than half of the step.
+    """
+    ops_per_block: int
+    blocks: int = 1
+    launches_per_block: Optional[int] = None
+    dispatch: Quantity
+    launch: Quantity
+    device_time: Quantity
+
+    @property
+    def operations(self) -> int:
+        return self.blocks * self.ops_per_block
+
+    @property
+    def launches(self) -> int:
+        per = self.ops_per_block if self.launches_per_block is None else self.launches_per_block
+        return self.blocks * per
+
+    @property
+    def per_op_cost(self) -> Quantity:
+        """Dispatch plus launch, for an operation that launches one kernel."""
+        return (self.dispatch + self.launch).to("microsecond")
+
+    @property
+    def dispatch_time(self) -> Quantity:
+        return (self.operations * self.dispatch).to("microsecond")
+
+    @property
+    def launch_time(self) -> Quantity:
+        return (self.launches * self.launch).to("microsecond")
+
+    @property
+    def host_time(self) -> Quantity:
+        return (self.dispatch_time + self.launch_time).to("microsecond")
+
+    @property
+    def overhead_ratio(self) -> float:
+        """Host time over device time (the dispatch overhead ratio)."""
+        return (self.host_time / self.device_time).to("").magnitude
+
+    @property
+    def launch_ratio(self) -> float:
+        """Kernel launches alone over device time."""
+        return (self.launch_time / self.device_time).to("").magnitude
+
+    @property
+    def host_share(self) -> float:
+        """Host time as a share of the serial step, host plus device."""
+        return (self.host_time / (self.host_time + self.device_time)).to("").magnitude
+
+    @property
+    def speedup_limit(self) -> float:
+        """Serial step over device time: the most removing all host work could gain."""
+        return ((self.host_time + self.device_time) / self.device_time).to("").magnitude
+
+
+class KernelFusionScenario(BaseScenario):
+    """A chain of ``chain_length`` element-wise operations, run as one kernel each or fused into one.
+
+    Unfused, every operation reads its input from device memory and writes its
+    output back (two trips each) and pays ``dispatch`` plus ``launch``; fused,
+    the chain reads once, keeps intermediates on chip, writes once, and pays
+    one launch. For N elements of b bytes the traffic is 2kNb against 2Nb.
+    """
+    chain_length: int
+    dispatch: Quantity
+    launch: Quantity
+
+    @property
+    def unfused_trips(self) -> int:
+        return 2 * self.chain_length
+
+    @property
+    def fused_trips(self) -> int:
+        return 2
+
+    @property
+    def unfused_launches(self) -> int:
+        return self.chain_length
+
+    @property
+    def fused_launches(self) -> int:
+        return 1
+
+    @property
+    def traffic_ratio(self) -> float:
+        return self.unfused_trips / self.fused_trips
+
+    @property
+    def unfused_overhead(self) -> Quantity:
+        return (self.unfused_launches * (self.dispatch + self.launch)).to("microsecond")
+
+    @property
+    def fused_overhead(self) -> Quantity:
+        return (self.fused_launches * (self.dispatch + self.launch)).to("microsecond")
+
+    @property
+    def overhead_speedup(self) -> float:
+        return (self.unfused_overhead / self.fused_overhead).to("").magnitude
+
+
+class CompileBreakevenScenario(BaseScenario):
+    """Eager against compiled execution: the work that repays ``compile_time``.
+
+    Compiling pays when the time saved per item, summed over items, exceeds
+    the compile time. An experiment of ``experiment_items`` items that changes
+    the code ``recompiles`` times pays a compile for every change.
+    """
+    eager_rate: Quantity                 # items per second
+    compiled_rate: Quantity              # items per second
+    compile_time: Quantity
+    experiment_items: Optional[int] = None
+    recompiles: Optional[int] = None
+
+    @property
+    def eager_item_time(self) -> Quantity:
+        return (1 / self.eager_rate).to("ms")
+
+    @property
+    def compiled_item_time(self) -> Quantity:
+        return (1 / self.compiled_rate).to("ms")
+
+    @property
+    def saving_per_item(self) -> Quantity:
+        return (self.eager_item_time - self.compiled_item_time).to("ms")
+
+    @property
+    def breakeven_items(self) -> float:
+        return (self.compile_time / self.saving_per_item).to("").magnitude
+
+    @property
+    def speedup(self) -> float:
+        return (self.compiled_rate / self.eager_rate).to("").magnitude
+
+    @property
+    def experiment_eager(self) -> Quantity:
+        return (self.experiment_items / self.eager_rate).to("second")
+
+    @property
+    def experiment_compiled_running(self) -> Quantity:
+        return (self.experiment_items / self.compiled_rate).to("second")
+
+    @property
+    def experiment_compiled_total(self) -> Quantity:
+        return (self.recompiles * self.compile_time + self.experiment_compiled_running).to("second")
+
+    @property
+    def experiment_slowdown(self) -> float:
+        return (self.experiment_compiled_total / self.experiment_eager).to("").magnitude
+
+
+class JacobianScenario(BaseScenario):
+    """The full Jacobian of one layer from ``input_width`` inputs to ``output_width`` outputs.
+
+    Reverse-mode differentiation never builds it; it chains vector-Jacobian products.
+    """
+    input_width: int
+    output_width: int
+    bytes_per_value: Quantity
+
+    @property
+    def elements(self) -> int:
+        return self.input_width * self.output_width
+
+    @property
+    def size(self) -> Quantity:
+        return (self.elements * self.bytes_per_value).to("byte")
+
+
+class HostInputPipelineScenario(BaseScenario):
+    """A data loader feeding one accelerator over its host link.
+
+    ``workers`` loader processes each prepare ``prefetch_factor`` batches of
+    ``batch_size`` samples. A sample is ``raw_sample`` bytes as decoded pixels
+    and ``model_sample`` bytes as the tensor copied to the device; the
+    accelerator consumes ``consume_rate`` samples a second. Copy times are
+    bandwidth-only lower bounds; ``step_times`` are compute times a serial
+    copy is compared with.
+    """
+    batch_size: int
+    workers: int
+    prefetch_factor: int
+    raw_sample: Quantity
+    model_sample: Quantity
+    consume_rate: Quantity               # samples per second
+    host_link: Quantity                  # bandwidth
+    device_memory: Quantity              # bandwidth
+    step_times: Dict[str, Quantity] = {}
+
+    @property
+    def batches_in_flight(self) -> int:
+        return self.workers * self.prefetch_factor
+
+    @property
+    def raw_feed(self) -> Quantity:
+        return (self.consume_rate * self.raw_sample).to("MB/second")
+
+    @property
+    def batch_bytes(self) -> Quantity:
+        return (self.batch_size * self.model_sample).to("byte")
+
+    @property
+    def copy_time(self) -> Quantity:
+        from ..physics import transfer_time
+        return transfer_time(self.batch_bytes, self.host_link).to("ms")
+
+    @property
+    def device_copy_time(self) -> Quantity:
+        from ..physics import transfer_time
+        return transfer_time(self.batch_bytes, self.device_memory).to("microsecond")
+
+    def copy_share(self, step: str) -> float:
+        """A serial copy as a share of one named step's compute time."""
+        return (self.copy_time / self.step_times[step]).to("").magnitude
+
+
+_MLP_FORWARD_OPS = ("matmul1", "relu", "matmul2", "loss")
+_MLP_BACKWARD_OPS = ("grad_w2", "grad_h", "grad_w1", "relu_backward", "loss_backward")
+
+
+class MlpTrainingStepScenario(BaseScenario):
+    """One eager training step of a one-hidden-layer MLP, operator by operator.
+
+    Forward: ``x @ W1``, ReLU, ``h @ W2``, and a combined cross-entropy loss
+    (``loss_flops_per_logit`` operations per logit). Backward: the weight
+    gradients of both layers and the hidden-activation gradient (raw inputs
+    need no gradient), the ReLU derivative, and the loss derivative, which
+    reads saved probabilities and integer labels of ``label_bytes`` each.
+    Bias adds are folded into their matrix multiplies. Every value is
+    ``bytes_per_value`` wide. Times are ideal lower bounds on ``hardware``;
+    the host issues one Python entry per forward operator plus one for
+    ``backward()``, and launches one kernel per operator.
+    """
+    batch_size: int
+    input_width: int
+    hidden_width: int
+    output_width: int
+    bytes_per_value: Quantity
+    label_bytes: Quantity
+    loss_flops_per_logit: int
+    optimizer_values_moved: int          # values read and written per parameter by one optimizer step
+    hardware: HardwareNode
+    precision: str = "fp32"
+    forward_ops: int
+    backward_ops: int
+    dispatch: Quantity
+    launch: Quantity
+
+    def _values(self, n: int) -> Quantity:
+        return (n * self.bytes_per_value).to("byte")
+
+    @property
+    def op_flops(self) -> Dict[str, Quantity]:
+        b, i, h, o = self.batch_size, self.input_width, self.hidden_width, self.output_width
+        f = {
+            "matmul1": 2 * b * i * h, "relu": b * h, "matmul2": 2 * b * h * o,
+            "loss": self.loss_flops_per_logit * b * o,
+            "grad_w2": 2 * h * b * o, "grad_h": 2 * b * o * h, "grad_w1": 2 * i * b * h,
+            "relu_backward": b * h, "loss_backward": 2 * b * o,
+        }
+        return {k: Q_(v, "flop") for k, v in f.items()}
+
+    @property
+    def op_bytes(self) -> Dict[str, Quantity]:
+        b, i, h, o = self.batch_size, self.input_width, self.hidden_width, self.output_width
+        v = self._values
+        return {
+            "matmul1": v(b * i + i * h + b * h), "relu": v(2 * b * h),
+            "matmul2": v(b * h + h * o + b * o), "loss": v(2 * b * o),
+            "grad_w2": v(b * h + b * o + h * o), "grad_h": v(b * o + h * o + b * h),
+            "grad_w1": v(b * i + b * h + i * h), "relu_backward": v(3 * b * h),
+            "loss_backward": (v(2 * b * o) + b * self.label_bytes).to("byte"),
+        }
+
+    def _sum(self, table, keys) -> Quantity:
+        return sum((table[k] for k in keys[1:]), table[keys[0]])
+
+    @property
+    def forward_flops(self) -> Quantity:
+        return self._sum(self.op_flops, _MLP_FORWARD_OPS)
+
+    @property
+    def backward_flops(self) -> Quantity:
+        return self._sum(self.op_flops, _MLP_BACKWARD_OPS)
+
+    @property
+    def forward_bytes(self) -> Quantity:
+        return self._sum(self.op_bytes, _MLP_FORWARD_OPS)
+
+    @property
+    def backward_bytes(self) -> Quantity:
+        return self._sum(self.op_bytes, _MLP_BACKWARD_OPS)
+
+    @property
+    def total_flops(self) -> Quantity:
+        return self.forward_flops + self.backward_flops
+
+    @property
+    def total_bytes(self) -> Quantity:
+        return self.forward_bytes + self.backward_bytes
+
+    @property
+    def dense_training_ratio(self) -> float:
+        """Matrix-multiply work of the whole step over the forward matrix multiplies."""
+        f = self.op_flops
+        fwd = f["matmul1"] + f["matmul2"]
+        return ((fwd + f["grad_w2"] + f["grad_h"] + f["grad_w1"]) / fwd).to("").magnitude
+
+    @property
+    def parameters(self) -> int:
+        i, h, o = self.input_width, self.hidden_width, self.output_width
+        return i * h + h + h * o + o
+
+    @property
+    def optimizer_step_bytes(self) -> Quantity:
+        return (self.parameters * self.optimizer_values_moved * self.bytes_per_value).to("byte")
+
+    @property
+    def peak_rate(self) -> Quantity:
+        return self.hardware.compute.precision_flops[self.precision]
+
+    @property
+    def compute_time(self) -> Quantity:
+        return (self.total_flops / self.peak_rate).to("microsecond")
+
+    @property
+    def memory_time(self) -> Quantity:
+        return (self.total_bytes / self.hardware.memory.bandwidth).to("microsecond")
+
+    @property
+    def host(self) -> HostDispatchScenario:
+        """The host's dispatch and launch work against the step's ideal device time."""
+        return HostDispatchScenario(
+            name=f"Host work of: {self.name}", description="Python entries and kernel launches of the step.",
+            ops_per_block=self.forward_ops + 1, launches_per_block=self.forward_ops + self.backward_ops,
+            dispatch=self.dispatch, launch=self.launch, device_time=self.compute_time + self.memory_time)
+
+
+class DeploymentPathScenario(BaseScenario):
+    """Candidate deployment paths measured against a latency and a memory budget.
+
+    ``paths`` maps each path to its measured ``latency`` and ``memory``; a
+    path passes when both are within budget.
+    """
+    latency_budget: Quantity
+    memory_budget: Quantity
+    paths: Dict[str, Dict[str, Quantity]]
+
+    def passes(self, path: str) -> bool:
+        p = self.paths[path]
+        return p["latency"] <= self.latency_budget and p["memory"] <= self.memory_budget
+
+    @property
+    def passing(self) -> List[str]:
+        return [k for k in self.paths if self.passes(k)]
+# --- Security and privacy of a fleet (added 2026-10-20) ---------------------
+
+class QueryExtractionBudgetScenario(BaseScenario):
+    """An extractor that needs ``extraction_queries`` answers from a priced API, under three
+    billing regimes: pay per query, a paid tier capped per day, and a lifetime per-principal
+    allowance after which every query is billed at the per-query price."""
+    training_cost: Quantity          # USD to train the victim model
+    extraction_queries: float        # answers for the target fidelity
+    target_fidelity: float           # agreement with the victim the extractor aims for
+    price_per_query: Quantity        # USD, pay-as-you-go
+    tier_price: Quantity             # USD per billing period
+    tier_daily_quota: float          # queries per day on the paid tier
+    billing_period: Quantity         # days per tier billing period
+    lifetime_allowance: float        # queries per principal before overage billing
+
+    def _tier_fee_per_day(self) -> Quantity:
+        return (self.tier_price / self.billing_period.to("day").magnitude).to("USD")
+
+    def tier_days(self, queries) -> float:
+        return queries / self.tier_daily_quota
+
+    def pay_per_query_cost(self, queries) -> Quantity:
+        return (queries * self.price_per_query).to("USD")
+
+    def tier_cost(self, queries) -> Quantity:
+        """Daily quota only: the tier fee for every day of collection."""
+        return (self.tier_days(queries) * self._tier_fee_per_day()).to("USD")
+
+    def lifetime_cost(self, queries) -> Quantity:
+        """Tier fees up to the allowance, then every query billed per query."""
+        within = min(queries, self.lifetime_allowance)
+        overage = max(queries - self.lifetime_allowance, 0)
+        return (self.tier_cost(within) + self.pay_per_query_cost(overage)).to("USD")
+
+    @property
+    def collection_days(self) -> float:
+        return self.tier_days(self.extraction_queries)
+
+    @property
+    def full_set_pay_per_query(self) -> Quantity:
+        return self.pay_per_query_cost(self.extraction_queries)
+
+    @property
+    def full_set_tier(self) -> Quantity:
+        return self.tier_cost(self.extraction_queries)
+
+    @property
+    def allowance_fees(self) -> Quantity:
+        return self.tier_cost(self.lifetime_allowance)
+
+    @property
+    def overage_cost(self) -> Quantity:
+        return self.pay_per_query_cost(max(self.extraction_queries - self.lifetime_allowance, 0))
+
+    @property
+    def full_set_lifetime(self) -> Quantity:
+        return self.lifetime_cost(self.extraction_queries)
+
+    @property
+    def tier_share_of_training(self) -> float:
+        return (self.full_set_tier / self.training_cost).to("").magnitude
+
+
+class OutputShapingScenario(BaseScenario):
+    """An API that returns the top ``top_k`` of ``class_count`` scores, rounded from
+    ``from_decimals`` to ``to_decimals`` decimal places."""
+    class_count: int
+    top_k: int
+    from_decimals: int
+    to_decimals: int
+
+    @property
+    def scores_reduction(self) -> float:
+        """Times fewer scores per answer than returning every class."""
+        return self.class_count / self.top_k
+
+    @property
+    def entries_removed(self) -> float:
+        return 1 - self.top_k / self.class_count
+
+    @property
+    def decimal_digits_removed(self) -> int:
+        return self.from_decimals - self.to_decimals
+
+    @property
+    def bits_removed(self) -> float:
+        """Bits per score removed under a decimal-bin count."""
+        from ..physics.privacy import calc_level_bits
+        return calc_level_bits(10 ** self.decimal_digits_removed)
+
+    @property
+    def retained_bits(self) -> float:
+        """Bits left in a score in [0, 1] at ``to_decimals`` places (10^d + 1 levels)."""
+        from ..physics.privacy import calc_level_bits
+        return calc_level_bits(10 ** self.to_decimals + 1)
+
+
+class DataParallelAttackSurfaceScenario(BaseScenario):
+    """``workload`` trained on ``fleet`` with ``dp_degree`` data-parallel replicas: the gradient
+    each step exchanges, the checkpoint it writes, and the traffic of a robust aggregate that
+    gathers every replica's gradient instead of a ring AllReduce of their sum."""
+    workload: Workload
+    fleet: Fleet
+    dp_degree: int
+    gradient_bytes_per_param: Quantity
+    checkpoint_bytes_per_param: Quantity
+    weight_bytes_per_param: Optional[Quantity] = None   # serving weights, when quoted
+
+    @property
+    def accelerators(self) -> int:
+        return self.fleet.total_accelerators
+
+    @property
+    def nodes(self) -> int:
+        return self.fleet.count
+
+    @property
+    def accelerators_per_node(self) -> int:
+        return self.fleet.node.accelerators_per_node
+
+    @property
+    def accelerators_per_replica(self) -> float:
+        return self.accelerators / self.dp_degree
+
+    @property
+    def gradient_bytes(self) -> Quantity:
+        from ..physics.quantities import memory_from_params
+        return memory_from_params(self.workload.parameters, self.gradient_bytes_per_param).to("byte")
+
+    @property
+    def checkpoint_bytes(self) -> Quantity:
+        from ..physics.quantities import memory_from_params
+        return memory_from_params(self.workload.parameters, self.checkpoint_bytes_per_param).to("byte")
+
+    @property
+    def weight_bytes(self) -> Quantity:
+        from ..physics.quantities import memory_from_params
+        return memory_from_params(self.workload.parameters, self.weight_bytes_per_param).to("byte")
+
+    @property
+    def allreduce_factor(self) -> float:
+        """Bytes each worker moves in a ring AllReduce, per byte of gradient."""
+        from ..physics.communication import calc_ring_allreduce_data_factor
+        return calc_ring_allreduce_data_factor(self.dp_degree)
+
+    @property
+    def gather_factor(self) -> float:
+        """Bytes each worker receives when it gathers every other replica's gradient."""
+        return self.dp_degree - 1
+
+    @property
+    def gather_traffic_ratio(self) -> float:
+        """Gather over ring AllReduce traffic; equals ``dp_degree / 2``."""
+        return self.gather_factor / self.allreduce_factor
+
+
+class MeanBreakdownScenario(BaseScenario):
+    """``workers`` contributions, all honest ones equal to ``honest_value`` and one chosen by an
+    attacker: the mean follows the attacker, the median does not."""
+    workers: int
+    honest_value: float
+    attacker_value: float
+
+    def mean(self, attacker_value=None) -> float:
+        v = self.attacker_value if attacker_value is None else attacker_value
+        return ((self.workers - 1) * self.honest_value + v) / self.workers
+
+    def median(self, attacker_value=None) -> float:
+        import statistics
+        v = self.attacker_value if attacker_value is None else attacker_value
+        return float(statistics.median([self.honest_value] * (self.workers - 1) + [v]))
+
+
+class ThroughputCostScenario(BaseScenario):
+    """The same workload and resource budget served at ``baseline_rate`` without a set of
+    controls and at ``controlled_rate`` with them."""
+    baseline_rate: Quantity
+    controlled_rate: Quantity
+
+    @property
+    def rate_lost(self) -> Quantity:
+        return (self.baseline_rate - self.controlled_rate).to(self.baseline_rate.units)
+
+    @property
+    def overhead(self) -> float:
+        return (1 - self.controlled_rate / self.baseline_rate).to("").magnitude
+
+
+class ProtectedMemoryFitScenario(BaseScenario):
+    """``workload``'s weights at ``bytes_per_weight`` against ``hardware``'s protected memory
+    (an enclave page cache), before activations."""
+    workload: Workload
+    hardware: HardwareNode
+    bytes_per_weight: Quantity
+
+    @property
+    def weight_bytes(self) -> Quantity:
+        from ..physics.quantities import memory_from_params
+        return memory_from_params(self.workload.parameters, self.bytes_per_weight / Q_(1, "param")).to("byte")
+
+    @property
+    def capacity(self) -> Quantity:
+        return self.hardware.memory.capacity
+
+    @property
+    def capacity_share(self) -> float:
+        return (self.weight_bytes / self.capacity).to("").magnitude
+
+
+class EncryptedInferenceLatencyScenario(BaseScenario):
+    """One inference at ``plaintext_latency``, with symmetric encryption around it
+    (``encryption_overhead``) and computed under homomorphic encryption (``fhe_multiplier``)."""
+    plaintext_latency: Quantity
+    encryption_overhead: Quantity
+    fhe_multiplier: float
+
+    @property
+    def encrypted_transport_latency(self) -> Quantity:
+        return (self.plaintext_latency + self.encryption_overhead).to("ms")
+
+    @property
+    def fhe_latency(self) -> Quantity:
+        return (self.plaintext_latency * self.fhe_multiplier).to("second")
+
+
+class ByteWiseSearchScenario(BaseScenario):
+    """Guessing a ``secret_bytes``-byte secret whole, against one byte at a time when a side
+    channel reveals how many leading bytes are correct."""
+    secret_bytes: int
+    bits_per_symbol: int
+
+    @property
+    def symbols(self) -> int:
+        return 2 ** self.bits_per_symbol
+
+    @property
+    def brute_force_guesses(self) -> int:
+        return self.symbols ** self.secret_bytes
+
+    @property
+    def bytewise_guesses(self) -> int:
+        return self.secret_bytes * self.symbols
+
+
+class LaplaceMeanReleaseScenario(BaseScenario):
+    """The mean of a public roster of ``group_size`` values in ``[0, value_range]`` released
+    under ``epsilon``-DP by one Laplace draw on the sum (replace-one adjacency)."""
+    value_range: Quantity
+    epsilon: float
+    group_size: int
+    small_group_size: Optional[int] = None
+
+    @property
+    def sensitivity(self) -> Quantity:
+        """The most one person can move the sum."""
+        return self.value_range
+
+    @property
+    def noise_scale(self) -> Quantity:
+        from ..physics.privacy import calc_laplace_scale
+        return calc_laplace_scale(self.sensitivity, self.epsilon)
+
+    def mean_error(self, group_size=None) -> Quantity:
+        """Expected absolute error of the released mean (the Laplace scale over the group)."""
+        n = self.group_size if group_size is None else group_size
+        return self.noise_scale / n
+
+    @property
+    def small_group_error(self) -> Quantity:
+        return self.mean_error(self.small_group_size)
+
+
+class BasicCompositionScenario(BaseScenario):
+    """``releases`` data-dependent releases about one population, each at ``epsilon_per_release``."""
+    releases: int
+    epsilon_per_release: float
+
+    @property
+    def total_epsilon(self) -> float:
+        from ..physics.privacy import calc_basic_composition
+        return calc_basic_composition([self.epsilon_per_release] * self.releases)
+
+
+class PrivacyAccountingComparisonScenario(BaseScenario):
+    """Two accountants' epsilon for the same DP-SGD run at several lengths (epochs -> epsilon)."""
+    sampling_rate: float
+    noise_multiplier: float
+    delta: float
+    accountant: Dict[int, float]      # tight accountant
+    strong_composition: Dict[int, float]
+
+    def tightening(self, epochs) -> float:
+        """Strong-composition epsilon over the accountant's, same run and length."""
+        return self.strong_composition[epochs] / self.accountant[epochs]
+
+
+class MembershipAuditScenario(BaseScenario):
+    """A membership-inference audit on the ROC plane against the ceiling a pure
+    ``epsilon``-DP release allows; the audit curve ``FPR + a FPR (1 - FPR)`` is illustrative."""
+    epsilon: float
+    audit_shape: float
+
+    def ceiling(self, fpr) -> float:
+        from ..physics.privacy import calc_membership_tpr_ceiling
+        return calc_membership_tpr_ceiling(fpr, self.epsilon)
+
+    def audit(self, fpr) -> float:
+        return fpr + self.audit_shape * fpr * (1 - fpr)
+
+
+class DpSgdRunScenario(BaseScenario):
+    """Inputs a DP-SGD privacy accountant needs for one Poisson-sampled run on ``dataset_size``
+    examples; this type does not estimate epsilon."""
+    dataset_size: int
+    batch_size: int
+    clip_norm: float
+    noise_multiplier: float
+    epochs: int
+    target_epsilon: float
+    delta: float
+
+    @property
+    def sampling_rate(self) -> float:
+        return self.batch_size / self.dataset_size
+
+    @property
+    def steps(self) -> int:
+        return int(self.epochs * self.dataset_size / self.batch_size)
+
+
+class PoisonableShareScenario(BaseScenario):
+    """A ``poisoned_fraction`` of a ``dataset_size``-item web-scale dataset an attacker could
+    control for ``cost``."""
+    dataset_size: float
+    poisoned_fraction: float
+    cost: Quantity
+
+    @property
+    def poisoned_items(self) -> float:
+        return self.dataset_size * self.poisoned_fraction
+# ── Robust AI: drift tests, per-request answering, attacks, and silent faults (added 2026-10-20) ──
+
+class MeanShiftTestScenario(BaseScenario):
+    """A feature mean that moves from ``reference_mean`` to ``observed_mean`` over ``n_samples`` requests.
+
+    The test assumes a known reference mean, independent requests, and the
+    stated spread ``feature_sd``: z is the move in standard errors of the mean.
+    """
+    reference_mean: float
+    observed_mean: float
+    feature_sd: float
+    n_samples: int
+    significance_bound: Optional[float] = None   # the bound prose compares the p-value with
+
+    @property
+    def mean_shift(self) -> float:
+        return self.observed_mean - self.reference_mean
+
+    @property
+    def standard_error(self) -> float:
+        from ..physics import calc_standard_error
+        return calc_standard_error(self.feature_sd, self.n_samples)
+
+    @property
+    def z_score(self) -> float:
+        return self.mean_shift / self.standard_error
+
+    @property
+    def p_value(self) -> float:
+        """Two-sided normal-tail probability of a move at least this large from noise alone."""
+        from statistics import NormalDist
+        return 2 * (1 - NormalDist().cdf(abs(self.z_score)))
+
+
+class GaussianDriftScenario(BaseScenario):
+    """A continuous feature fitted as a normal at reference and now: KL divergence of the reference from the current fit."""
+    reference_mean: float
+    reference_sd: float
+    current_mean: float
+    current_sd: float
+    kl_trigger: Optional[float] = None    # the service's investigate threshold on KL
+
+    @property
+    def triggers(self) -> bool:
+        return self.kl >= self.kl_trigger
+
+    @property
+    def kl_terms(self):
+        """(log term, ratio numerator, ratio denominator) of the closed form."""
+        from ..physics import calc_gaussian_kl_terms
+        return calc_gaussian_kl_terms(self.reference_mean, self.reference_sd, self.current_mean, self.current_sd)
+
+    @property
+    def kl_log_term(self) -> float:
+        return self.kl_terms[0]
+
+    @property
+    def kl_ratio_term(self) -> float:
+        _, num, den = self.kl_terms
+        return num / den
+
+    @property
+    def kl(self) -> float:
+        from ..physics import calc_gaussian_kl
+        return calc_gaussian_kl(self.reference_mean, self.reference_sd, self.current_mean, self.current_sd)
+
+
+class SelectiveAnsweringScenario(BaseScenario):
+    """A server that answers a ``coverage`` share of ``request_rate`` and routes the rest to a fallback.
+
+    The selective risk follows an illustrative curve,
+    ``risk(c) = risk_floor + risk_scale * c ** risk_exponent``, so answering
+    fewer requests lowers the error on those answered.
+    """
+    request_rate: Quantity
+    coverage: float
+    risk_floor: float
+    risk_scale: float
+    risk_exponent: float
+
+    def risk_at(self, coverage: float) -> float:
+        return self.risk_floor + self.risk_scale * coverage ** self.risk_exponent
+
+    @property
+    def risk(self) -> float:
+        """Error on the answered requests at the operating coverage."""
+        return self.risk_at(self.coverage)
+
+    @property
+    def full_risk(self) -> float:
+        """Error when every request is answered."""
+        return self.risk_at(1.0)
+
+    @property
+    def fallback_rate(self) -> Quantity:
+        return self.request_rate * (1 - self.coverage)
+
+
+class ConformalThresholdScenario(BaseScenario):
+    """Split conformal prediction with ``calibration_count`` held-out scores and target miscoverage ``alpha``."""
+    calibration_count: int
+    alpha: float
+
+    @property
+    def rank_bound(self) -> float:
+        """``(n + 1)(1 - alpha)`` before the ceiling."""
+        return (self.calibration_count + 1) * (1 - self.alpha)
+
+    @property
+    def rank(self) -> int:
+        from ..physics import calc_split_conformal_rank
+        return calc_split_conformal_rank(self.calibration_count, self.alpha)
+
+    @property
+    def target_coverage(self) -> float:
+        return 1 - self.alpha
+
+
+class AdversarialTrainingPassesScenario(BaseScenario):
+    """Work per batch of adversarial training, in standard forward-backward passes (equal cost, no reuse)."""
+    attack_passes: int                # passes spent finding the perturbation
+    update_passes: int                # passes spent on the update (2 for a doubled clean-plus-adversarial batch)
+    standard_passes: int = 1          # one pass per batch for standard training
+
+    @property
+    def passes(self) -> int:
+        return self.attack_passes + self.update_passes
+
+    @property
+    def slowdown(self) -> float:
+        """Work multiple over standard training."""
+        return self.passes / self.standard_passes
+
+
+class CrossConditionGapScenario(BaseScenario):
+    """A standard model's clean accuracy against a robust model's attacked accuracy: two of four cells.
+
+    The difference mixes a model change with a test change, so it is neither
+    the clean-accuracy penalty nor the robustness benefit.
+    """
+    standard_clean_accuracy: float    # percent
+    robust_attacked_accuracy: float   # percent
+
+    @property
+    def gap(self) -> float:
+        return self.standard_clean_accuracy - self.robust_attacked_accuracy
+
+
+class CertifiedRadiusScenario(BaseScenario):
+    """Binary randomized smoothing at noise ``noise_sd``, against an l-infinity budget on one input.
+
+    The l-infinity budget is ``linf_levels`` steps of an image whose pixels take
+    ``pixel_levels`` values; its box corner has Euclidean length
+    ``budget * sqrt(coordinates)``, the length the certificate must reach to
+    cover the whole box.
+    """
+    noise_sd: float
+    top_class_probability: float
+    linf_levels: int
+    pixel_levels: int                 # pixel values an 8-bit channel takes
+    coordinates: int                  # width * height * channels
+
+    @property
+    def radius(self) -> float:
+        from ..physics import calc_smoothing_radius
+        return calc_smoothing_radius(self.noise_sd, self.top_class_probability)
+
+    @property
+    def quantile(self) -> float:
+        """``Phi^-1(p_A)``."""
+        return self.radius / self.noise_sd
+
+    @property
+    def linf_budget(self) -> float:
+        return self.linf_levels / (self.pixel_levels - 1)
+
+    @property
+    def box_corner_l2(self) -> float:
+        from ..physics import calc_linf_corner_l2
+        return calc_linf_corner_l2(self.linf_budget, self.coordinates)
+
+    @property
+    def covers_box(self) -> bool:
+        return self.radius >= self.box_corner_l2
+
+
+class FloatBitFlipScenario(BaseScenario):
+    """One stored binary32 value with bit ``flipped_bit`` flipped (bit 30 is the top exponent bit)."""
+    value: float
+    flipped_bit: int
+    exponent_bits: int                # core.units.FLOAT_FORMAT_BITS["fp32"]
+    fraction_bits: int
+
+    @property
+    def _pair(self):
+        from ..physics import calc_float32_bit_flip
+        return calc_float32_bit_flip(self.value, self.flipped_bit)
+
+    @property
+    def stored(self) -> float:
+        return self._pair[0]
+
+    @property
+    def corrupted(self) -> float:
+        return self._pair[1]
+
+    @property
+    def scale_log2(self) -> int:
+        """The flip multiplies the value by 2 to this power."""
+        import math
+        return round(math.log2(self.corrupted / self.stored))
+
+    @property
+    def word_bits(self) -> int:
+        return 1 + self.exponent_bits + self.fraction_bits
+
+
+class StandardizedAttackScenario(BaseScenario):
+    """Published defenses under one standardized attack (``Literature.Series``): best by year and broken defenses.
+
+    Rows without a year and rows the benchmark flags unreliable are dropped. A
+    defense below ``broken_floor`` percent attacked accuracy provides no robustness.
+    """
+    series_name: str
+    first_year: int
+    last_year: int
+    broken_floor: float               # percent
+
+    @property
+    def rows(self):
+        from ..literature.registry import Literature
+        return [r for r in getattr(Literature.Series, self.series_name).entries
+                if r["year"] and r["unreliable"] != "True"]
+
+    @property
+    def years(self) -> List[int]:
+        return list(range(self.first_year, self.last_year + 1))
+
+    def best(self, year: int):
+        """The row with the highest attacked accuracy published in ``year``."""
+        return max((r for r in self.rows if int(r["year"]) == year), key=lambda r: r["autoattack_acc"])
+
+    @property
+    def best_first(self):
+        return self.best(self.first_year)
+
+    @property
+    def best_last(self):
+        return self.best(self.last_year)
+
+    @property
+    def broken(self):
+        return [r for r in self.rows if r["autoattack_acc"] < self.broken_floor]
+
+    def best_so_far(self, year: int) -> float:
+        return max(self.best(y)["autoattack_acc"] for y in self.years if y <= year)
+# --- The agent harness (added 2026-10-20) -------------------------------------
+# What the runtime around one trajectory holds, shares, and admits: approval
+# escrow, fair scheduling of model calls between request classes, admission of
+# the next call against a dollar allowance, the budget vector's meters, and
+# call or step ceilings read from public runs. Solvers in engine/solvers/harness.py.
+
+class ApprovalEscrowScenario(BaseScenario):
+    """Approval escrow for a long-running workload (held resources) and an urgent one (time)."""
+    repair_rate: Quantity            # review requests per unit time
+    repair_wait: Quantity            # mean time to a review decision
+    lease: Quantity                  # workspace each held trajectory keeps
+    remediation_rate: Quantity
+    diagnosis: Quantity              # before the proposal
+    remediation_wait: Quantity       # mean time to an on-call decision
+    apply_verify: Quantity           # after approval
+
+    @property
+    def result(self):
+        from .solvers import ApprovalEscrowModel
+        return ApprovalEscrowModel().solve(self.repair_rate, self.repair_wait, self.lease,
+                                           self.remediation_rate, self.diagnosis,
+                                           self.remediation_wait, self.apply_verify)
+
+
+class DeficitRoundRobinScenario(BaseScenario):
+    """Backlogged request classes sharing model calls under weighted deficit round-robin."""
+    quantum: float                   # charge units per unit weight per round
+    classes: Dict[str, Dict[str, int]]     # name -> weight, input, output (allowance)
+    simulated_rounds: int = 10_000
+
+    @property
+    def result(self):
+        from .solvers import DeficitRoundRobinModel
+        return DeficitRoundRobinModel().solve(self.quantum, self.classes, self.simulated_rounds)
+
+
+class BoundedLiabilityAdmissionScenario(BaseScenario):
+    """The next model call of a trajectory, tested against its dollar allowance."""
+    allowance: Quantity              # USD
+    settled: Quantity                # actual spend so far
+    reserved: Quantity               # outstanding reservations of unsettled work
+    finalization_reserve: Quantity   # protected for checks, report, and cleanup
+    input_tokens: int
+    output_allowance: int
+    input_price: Quantity            # USD per token (undiscounted)
+    output_price: Quantity
+    probe: Quantity                  # an unsettled amount for expressing sensitivity
+
+    @property
+    def result(self):
+        from .solvers import BoundedLiabilityAdmissionModel
+        return BoundedLiabilityAdmissionModel().solve(
+            self.allowance, self.settled, self.reserved, self.finalization_reserve,
+            self.input_tokens, self.output_allowance, self.input_price, self.output_price,
+            self.probe)
+
+
+class TrajectoryBudgetMeterScenario(BaseScenario):
+    """An append-only trajectory metered against turns, tokens, time, and dollars."""
+    trajectory: TrajectoryResendScenario
+    input_price: Quantity
+    cached_fraction: float           # cached input billed at this share of the input price
+    output_price: Quantity
+    turn_allowance: int
+    token_allowance: int
+    time_allowance: Quantity
+    dollar_allowance: Quantity
+    elapsed: Quantity                # wall clock at the readout
+
+    @property
+    def result(self):
+        from .solvers import TrajectoryBudgetMeterModel
+        t = self.trajectory.result
+        allowances = {"turns": self.turn_allowance, "tokens": self.token_allowance,
+                      "time": float(self.time_allowance.to("second").magnitude),
+                      "dollars": float(self.dollar_allowance.to("USD").magnitude)}
+        return TrajectoryBudgetMeterModel().solve(
+            t.turns, t.resent_tokens, t.reused_prefix_tokens, t.output_tokens,
+            self.input_price, self.input_price * self.cached_fraction, self.output_price,
+            allowances, float(self.elapsed.to("second").magnitude))
+
+
+class CallCeilingScenario(BaseScenario):
+    """A model-call ceiling at the accepted runs' quantile, over every submission in a series."""
+    series_name: str
+    quantile: float
+
+    @property
+    def rows(self):
+        from ..literature.registry import Literature
+        return getattr(Literature, self.series_name).entries
+
+    @property
+    def result(self):
+        from .solvers import CallCeilingModel
+        return CallCeilingModel().solve(self.rows, self.quantile)
+# --- Agent security: injection exposure and defense evaluation (added 2026-10-20) ---
+class InjectionExposureScenario(BaseScenario):
+    """Workloads reading ``reads`` untrusted items each, a fraction ``payload_fraction`` carrying
+    a payload, with and without a screen that misses ``miss_rate`` of payloads."""
+    payload_fraction: float
+    reads: Dict[str, int]            # untrusted items read per task, by workload
+    miss_rate: float                 # fraction of payloads the screen misses
+    cohort: int                      # tasks in the per-cohort count
+
+    @property
+    def result(self):
+        from .solvers import InjectionExposureModel
+        return InjectionExposureModel().solve(self.payload_fraction, self.reads, self.miss_rate,
+                                              self.cohort)
+
+
+class TurnExposureScenario(BaseScenario):
+    """``reads_per_turn`` untrusted items per turn over ``turns`` turns at ``payload_fraction``."""
+    payload_fraction: float
+    reads_per_turn: int
+    turns: int
+
+    @property
+    def result(self):
+        from .solvers import TurnExposureModel
+        return TurnExposureModel().solve(self.payload_fraction, self.reads_per_turn, self.turns)
+
+
+class PolicyComparisonScenario(BaseScenario):
+    """Two policies, each run on ``attacked`` attacked and ``benign`` separate benign episodes.
+
+    Each policy's counts: ``confirmed`` and ``unresolved`` harm and ``accepted_attacked`` among
+    attacked episodes; ``accepted_benign`` and ``false_block`` among benign ones.
+    """
+    attacked: int
+    benign: int
+    baseline: Dict[str, int]
+    candidate: Dict[str, int]
+    attempt_cost: Optional[float] = None    # USD per attempt, to price cost per accepted task
+
+    @property
+    def result(self):
+        from .solvers import PolicyComparisonModel
+        return PolicyComparisonModel().solve(self.attacked, self.benign, self.baseline,
+                                             self.candidate, self.attempt_cost)
+
+
+class TaskScopedGrantScenario(BaseScenario):
+    """A requester holding ``held`` resources delegates a task that needs ``needed`` of them."""
+    held: int
+    needed: int
+
+    @property
+    def refused(self) -> int:
+        """Resources the requester's own token reaches that the task-scoped grant refuses."""
+        return self.held - self.needed
+
+    @property
+    def scoped_share(self) -> float:
+        return self.needed / self.held
+
+
+class StepCeilingReturnScenario(BaseScenario):
+    """Success of the same models at several enforced step ceilings, from a published series."""
+    series_name: str
+    steps: Optional[List[int]] = None    # None: every ceiling the series reports
+
+    @property
+    def result(self):
+        from ..literature.registry import Literature
+        from .solvers import StepCeilingReturnModel
+        rows = getattr(Literature, self.series_name).entries
+        steps = self.steps or sorted({int(r["steps"]) for r in rows})
+        return StepCeilingReturnModel().solve(rows, steps)
+# --- Closed-loop evaluation: trial campaigns, sequential tests, and exposure (added 2026-10-20) ---
+
+class ClosedLoopCampaignScenario(BaseScenario):
+    """``clean_runs`` failure-free closed-loop trials of a frozen policy in one cell of ``table`` on
+    ``site``, each ``run`` long with an automated ``reset``, bounded at one-sided ``confidence``.
+
+    What a success target ``1 - target_rate`` costs in runs, cell time, and operator time; the
+    exact bound when ``recorded_failures`` runs fail; and the contrasts the bound is taught with:
+    a policy that fails one run in ``weak_policy_one_in``, ``fallacy_runs`` clean runs against the
+    target, ``looks`` independent looks at the significance level, and a Bonferroni split of the
+    significance level over ``joint_cells`` cells. A run that jams costs ``jam_reset`` instead of
+    ``reset``.
+    """
+    site: Any                        # EmbodiedSiteScenario (latch limits and approach speed)
+    table: Any                       # ScenarioTableCoverageScenario (the cells the campaign samples)
+    standoff: Quantity
+    run: Quantity
+    reset: Quantity
+    jam_reset: Quantity
+    operators: int
+    shift: Quantity
+    clean_runs: int
+    confidence: float
+    target_rate: float               # failure rate the campaign argues toward
+    estimate_target_rate: float      # failure rate of the trial-budget estimate
+    weak_policy_one_in: int
+    recorded_failures: int
+    joint_cells: int
+    looks: int
+    omissions: int                   # unclosed departures in the policy manifest's omission log
+    fallacy_runs: int
+
+    @property
+    def alpha(self) -> float:
+        return 1.0 - self.confidence
+
+    @property
+    def ln_inv_alpha(self) -> float:
+        """The numerator of every zero-failure count, about 3 at 95 percent."""
+        return -_math.log(self.alpha)
+
+    def lower_bound_at(self, trials: int, confidence: Optional[float] = None) -> float:
+        from ..physics.robotics.assurance import calc_clopper_pearson_zero_failure_bound
+        return calc_clopper_pearson_zero_failure_bound(trials, self.confidence if confidence is None else confidence)
+
+    def runs_for(self, target: float, confidence: Optional[float] = None) -> int:
+        from ..physics.robotics.assurance import calc_zero_failure_sample_size
+        return calc_zero_failure_sample_size(target, self.confidence if confidence is None else confidence)
+
+    @property
+    def lower_bound(self) -> float:
+        return self.lower_bound_at(self.clean_runs)
+
+    @property
+    def failure_upper(self) -> float:
+        return 1.0 - self.lower_bound
+
+    @property
+    def rule_of_three(self) -> float:
+        from ..physics.robotics.assurance import calc_rule_of_three_bound
+        return calc_rule_of_three_bound(self.clean_runs)
+
+    @property
+    def target(self) -> float:
+        return 1.0 - self.target_rate
+
+    @property
+    def nine_targets(self) -> List[float]:
+        """Success targets with one, two, ... nines, up to the campaign target (0.9, 0.99, 0.999)."""
+        nines = round(-_math.log10(self.target_rate))
+        return [1.0 - 10.0 ** -k for k in range(1, nines + 1)]
+
+    @property
+    def target_runs(self) -> int:
+        return self.runs_for(self.target)
+
+    @property
+    def joint_runs(self) -> int:
+        """Runs per cell when the significance level is split evenly over ``joint_cells``."""
+        return self.runs_for(self.target, 1.0 - self.alpha / self.joint_cells)
+
+    @property
+    def estimate_target(self) -> float:
+        return 1.0 - self.estimate_target_rate
+
+    @property
+    def estimate_runs(self) -> int:
+        return self.runs_for(self.estimate_target)
+
+    @property
+    def estimate_rule_of_three_runs(self) -> float:
+        from ..physics.robotics.assurance import calc_rule_of_three_trials
+        return calc_rule_of_three_trials(self.estimate_target)
+
+    def clean_probability(self, success: float) -> float:
+        """Chance that a policy of per-run success ``success`` logs the campaign clean."""
+        return success ** self.clean_runs
+
+    @property
+    def weak_policy_success(self) -> float:
+        return 1.0 - 1.0 / self.weak_policy_one_in
+
+    @property
+    def weak_policy_clean_probability(self) -> float:
+        return self.clean_probability(self.weak_policy_success)
+
+    @property
+    def lower_bound_with_failures(self) -> float:
+        from ..physics.robotics.assurance import calc_clopper_pearson_lower_bound
+        return calc_clopper_pearson_lower_bound(self.clean_runs - self.recorded_failures, self.clean_runs,
+                                                self.confidence)
+
+    @property
+    def observed_rate_with_failures(self) -> float:
+        return (self.clean_runs - self.recorded_failures) / self.clean_runs
+
+    @property
+    def fallacy_lower_bound(self) -> float:
+        return self.lower_bound_at(self.fallacy_runs)
+
+    @property
+    def any_false_positive(self) -> float:
+        """At least one false positive across ``looks`` independent looks at ``alpha``."""
+        from ..physics.agents import calc_independent_success
+        return calc_independent_success(self.alpha, self.looks)
+
+    @property
+    def cycle(self) -> Quantity:
+        return (self.run + self.reset).to("s")
+
+    def campaign_time(self, trials: Optional[int] = None) -> Quantity:
+        return ((self.clean_runs if trials is None else trials) * self.cycle).to("s")
+
+    def operator_time(self, trials: int) -> Quantity:
+        return (self.operators * self.campaign_time(trials)).to("hour")
+
+    def shifts(self, trials: int) -> float:
+        return (self.operator_time(trials) / self.shift).to("").magnitude
+
+    @property
+    def jam_reset_share(self) -> float:
+        return (self.jam_reset / (self.run + self.jam_reset)).to("").magnitude
+
+    @property
+    def jam_cycle(self) -> Quantity:
+        return (self.run + self.jam_reset).to("s")
+
+
+class SequentialTestScenario(BaseScenario):
+    """Wald's SPRT between an unacceptable failure rate ``p_unacceptable`` and an acceptable one
+    ``p_acceptable`` at error rates ``alpha`` and ``beta``; the score after ``trace_clean_runs``
+    clean runs and one failure; and the fixed zero-failure test for success ``1 - p_unacceptable``
+    at the same ``alpha``."""
+    p_unacceptable: float
+    p_acceptable: float
+    alpha: float
+    beta: float
+    trace_clean_runs: int
+
+    @property
+    def success_increment(self) -> float:
+        from ..physics.statistics import calc_sprt_increments
+        return calc_sprt_increments(self.p_unacceptable, self.p_acceptable)[0]
+
+    @property
+    def failure_increment(self) -> float:
+        from ..physics.statistics import calc_sprt_increments
+        return calc_sprt_increments(self.p_unacceptable, self.p_acceptable)[1]
+
+    @property
+    def accept(self) -> float:
+        from ..physics.statistics import calc_sprt_boundaries
+        return calc_sprt_boundaries(self.alpha, self.beta)[0]
+
+    @property
+    def reject(self) -> float:
+        from ..physics.statistics import calc_sprt_boundaries
+        return calc_sprt_boundaries(self.alpha, self.beta)[1]
+
+    @property
+    def runs_to_accept(self) -> int:
+        return _math.ceil(self.accept / self.success_increment)
+
+    @property
+    def false_accept_bound(self) -> float:
+        """Ville's inequality: ``e^-A = alpha / (1 - beta)``."""
+        return _math.exp(-self.accept)
+
+    @property
+    def false_reject_bound(self) -> float:
+        return _math.exp(self.reject)
+
+    @property
+    def trace_score(self) -> float:
+        return self.trace_clean_runs * self.success_increment + self.failure_increment
+
+    @property
+    def fixed_runs(self) -> int:
+        from ..physics.robotics.assurance import calc_zero_failure_sample_size
+        return calc_zero_failure_sample_size(1.0 - self.p_unacceptable, 1.0 - self.alpha)
+
+    @property
+    def fixed_rejects_acceptable(self) -> float:
+        """Chance that a policy at the acceptable rate fails the fixed zero-failure test."""
+        return 1.0 - (1.0 - self.p_acceptable) ** self.fixed_runs
+
+
+class ArmComparisonScenario(BaseScenario):
+    """Two policies run ``arm_runs`` times each, with ``successes_a`` and ``successes_b``
+    successes; Fisher's exact test, and the runs per arm that separate ``p_high`` from ``p_low``
+    two-sided at ``alpha`` with ``power``."""
+    arm_runs: int
+    successes_a: int
+    successes_b: int
+    alpha: float
+    power: float
+    p_high: float
+    p_low: float
+
+    @property
+    def fisher_p(self) -> float:
+        from ..physics.statistics import calc_fisher_exact_two_sided
+        n = self.arm_runs
+        return calc_fisher_exact_two_sided(self.successes_a, n - self.successes_a, self.successes_b, n - self.successes_b)
+
+    @property
+    def total_runs(self) -> int:
+        return 2 * self.arm_runs
+
+    @property
+    def failures(self) -> int:
+        return self.total_runs - self.successes_a - self.successes_b
+
+    @property
+    def all_in_one_arm(self) -> float:
+        """Chance that every failure lands in one named arm under the null."""
+        return _math.comb(self.arm_runs, self.failures) / _math.comb(2 * self.arm_runs, self.failures)
+
+    @property
+    def z_alpha(self) -> float:
+        from statistics import NormalDist
+        return NormalDist().inv_cdf(1 - self.alpha / 2)
+
+    @property
+    def z_power(self) -> float:
+        from statistics import NormalDist
+        return NormalDist().inv_cdf(self.power)
+
+    @property
+    def cohens_h(self) -> float:
+        from ..physics.statistics import calc_cohens_h
+        return calc_cohens_h(self.p_high, self.p_low)
+
+    def runs_per_arm_for(self, effect_h: float) -> int:
+        from ..physics.statistics import calc_arcsine_two_arm_sample_size
+        return calc_arcsine_two_arm_sample_size(effect_h, self.alpha, self.power)
+
+    @property
+    def runs_per_arm(self) -> int:
+        return self.runs_per_arm_for(self.cohens_h)
+
+
+class HazardExposureScenario(BaseScenario):
+    """Failure-free exposure that bounds each of ``rates`` (constant hazards per hour) at one-sided
+    ``confidence``, against what ``rigs`` rigs or one rig over ``rig_time`` accumulate."""
+    rates: List[Quantity]
+    confidence: float
+    rigs: int
+    rig_time: Quantity
+
+    @property
+    def ln_inv_alpha(self) -> float:
+        return -_math.log(1.0 - self.confidence)
+
+    def exposure(self, rate: Quantity) -> Quantity:
+        from ..physics.robotics.assurance import calc_empirical_testing_exposure
+        return calc_empirical_testing_exposure(rate, confidence=self.confidence).to("hour")
+
+    def fleet_time(self, rate: Quantity) -> Quantity:
+        return (self.exposure(rate) / self.rigs).to("hour")
+
+    @property
+    def rig_rate(self) -> Quantity:
+        """The smallest constant rate one rig running for ``rig_time`` can bound."""
+        return (self.ln_inv_alpha / self.rig_time).to("1/hour")
+
+    def shortfall(self, rate: Quantity) -> float:
+        return (self.rig_rate / rate).to("").magnitude
+
+
+class MissionExposureScenario(BaseScenario):
+    """Failure-free missions of ``mission`` at ``machine``'s drive limit, with ``reset`` between
+    them, that bound ``hazard_rate`` at one-sided ``confidence``; and the exposure a relaxed
+    target of one failure per ``relaxed_mtbf`` needs."""
+    machine: Any                     # MobileManipulator (drive limit, wheel diameter)
+    hazard_rate: Quantity
+    mission: Quantity
+    reset: Quantity
+    confidence: float
+    relaxed_mtbf: Quantity
+
+    @property
+    def mission_distance(self) -> Quantity:
+        return (self.machine.base.max_velocity * self.mission).to("m")
+
+    @property
+    def cycle(self) -> Quantity:
+        return (self.mission + self.reset).to("s")
+
+    @property
+    def continuous_exposure(self) -> Quantity:
+        from ..physics.robotics.assurance import calc_empirical_testing_exposure
+        return calc_empirical_testing_exposure(self.hazard_rate, confidence=self.confidence).to("hour")
+
+    @property
+    def mission_failure_probability(self) -> float:
+        return (self.hazard_rate * self.mission).to("").magnitude
+
+    @property
+    def missions_needed(self) -> float:
+        from ..physics.robotics.assurance import calc_zero_failure_mission_count
+        return calc_zero_failure_mission_count(self.hazard_rate, self.mission, self.confidence)
+
+    @property
+    def calendar_time(self) -> Quantity:
+        return (self.missions_needed * self.cycle).to("hour")
+
+    @property
+    def wheel_revolutions(self) -> float:
+        return (self.missions_needed * self.mission_distance
+                / (_math.pi * self.machine.drive_unit.wheel_diameter)).to("").magnitude
+
+    @property
+    def relaxed_exposure(self) -> Quantity:
+        from ..physics.robotics.assurance import calc_empirical_testing_exposure
+        return calc_empirical_testing_exposure(1 / self.relaxed_mtbf, confidence=self.confidence).to("hour")
+
+
+class InterventionCampaignScenario(BaseScenario):
+    """``interventions`` interventions in ``missions`` supervised runs of ``mission``: burden per
+    hour and per kilometer, and an exact two-sided ``1 - alpha`` interval on the rate."""
+    mission: MissionExposureScenario
+    missions: int
+    interventions: int
+    alpha: float
+
+    @property
+    def active_time(self) -> Quantity:
+        return (self.missions * self.mission.mission).to("hour")
+
+    @property
+    def distance(self) -> Quantity:
+        return (self.missions * self.mission.mission_distance).to("km")
+
+    @property
+    def mtbi(self) -> Quantity:
+        return (self.active_time / self.interventions).to("minute")
+
+    @property
+    def density(self) -> Quantity:
+        return (self.interventions / self.distance).to("1/km")
+
+    @property
+    def rate(self) -> Quantity:
+        return (self.interventions / self.active_time).to("1/hour")
+
+    @property
+    def count_interval(self):
+        from ..physics.statistics import calc_poisson_exact_interval
+        return calc_poisson_exact_interval(self.interventions, self.alpha)
+
+    @property
+    def rate_interval(self):
+        lo, hi = self.count_interval
+        return (lo / self.active_time).to("1/hour"), (hi / self.active_time).to("1/hour")
+
+
+class HeadingDriftScenario(BaseScenario):
+    """A persistent ``heading_offset`` at ``machine``'s drive limit in ``site``'s aisle: the
+    angular error an open-loop replay scores, and where the closed loop spends the side clearance
+    (``y = v sin(eps) t``)."""
+    machine: Any
+    site: Any
+    heading_offset: Quantity
+
+    @property
+    def speed(self) -> Quantity:
+        return self.machine.base.max_velocity
+
+    @property
+    def heading(self) -> float:
+        """The offset in radians."""
+        return _math.radians(self.heading_offset.to("degree").magnitude)
+
+    @property
+    def angular_mse(self) -> Quantity:
+        return (Q_(self.heading, "radian") ** 2).to("radian**2")
+
+    @property
+    def time_to_clearance(self) -> Quantity:
+        return (self.site.side_clearance / (self.speed * _math.sin(self.heading))).to("s")
+
+    @property
+    def distance_to_clearance(self) -> Quantity:
+        return (self.speed * self.time_to_clearance).to("m")
+
+    @property
+    def aisle_fraction(self) -> float:
+        return (self.distance_to_clearance / self.site.aisle_length).to("").magnitude
+
+
+class StiffContactScenario(BaseScenario):
+    """A stiff contact of ``stiffness`` (a linear spring, ``F = k x``): the force a ``residual``
+    penetration commands, and the penetrations at ``site``'s latch tripwire and limit."""
+    site: Any
+    stiffness: Quantity
+    residual: Quantity
+
+    @property
+    def residual_force(self) -> Quantity:
+        return (self.stiffness * self.residual).to("N")
+
+    def penetration_at(self, force: Quantity) -> Quantity:
+        return (force / self.stiffness).to("mm")
+
+    @property
+    def tripwire_penetration(self) -> Quantity:
+        return self.penetration_at(self.site.f_latch_tripwire)
+
+    @property
+    def limit_penetration(self) -> Quantity:
+        return self.penetration_at(self.site.f_latch_limit)
+
+
+class ForceTailScenario(BaseScenario):
+    """A contact force over ``trials`` trials with a benign ``mean_force`` and a ``p99_force`` tail,
+    against ``site``'s tripwire and structural limit."""
+    site: Any
+    trials: int
+    mean_force: Quantity
+    p99_force: Quantity
+
+    @property
+    def tail_over_limit(self) -> Quantity:
+        return (self.p99_force - self.site.f_latch_limit).to("N")
+
+    @property
+    def tail_over_mean(self) -> float:
+        return (self.p99_force / self.mean_force).to("").magnitude
+
+
+class RoadExposureScenario(BaseScenario):
+    """Miles-to-demonstrate requirements per event class (zero failures, precision, improvement),
+    in millions of miles at human benchmark ``rates`` per 100 million miles, against one dated
+    ``fleet_miles`` total (millions) at one-sided ``confidence``."""
+    rates: Dict[str, float]
+    zero_failure: Dict[str, float]
+    precision: Dict[str, float]
+    improvement: Dict[str, float]
+    fleet_miles: float
+    confidence: float
+
+    def recomputed_zero_failure(self, event: str) -> float:
+        """``-ln(1 - C) / rate``, in millions of miles: RAND's row (1) re-derived."""
+        return -_math.log(1.0 - self.confidence) / (self.rates[event] / 100.0)
+
+    def requirements(self, event: str):
+        """RAND's three rows for one event class: zero failures, precision, improvement (millions)."""
+        return tuple(float(t[event]) for t in (self.zero_failure, self.precision, self.improvement))
+
+    def shortfall(self, event: str) -> float:
+        return self.zero_failure[event] / self.fleet_miles
+
+    def precision_over_fleet(self, event: str) -> float:
+        return self.precision[event] / self.fleet_miles
+
+    @property
+    def cleared(self) -> List[float]:
+        """Requirements, of every event class and question, the fleet total exceeds."""
+        rows = list(self.zero_failure.values()) + list(self.precision.values()) + list(self.improvement.values())
+        return [m for m in rows if m < self.fleet_miles]
+
+
+class CrashRateDenominatorScenario(BaseScenario):
+    """A reported before-and-after crash rate and the same comparison on the cohort whose exposure
+    is complete (rates per million miles)."""
+    reported_before: float
+    reported_after: float
+    cohort_before: float
+    cohort_after: float
+    exact_exposure_share: float      # fraction of vehicles with exact exposure
+
+    @property
+    def reported_change(self) -> float:
+        return self.reported_after / self.reported_before - 1.0
+
+    @property
+    def cohort_change(self) -> float:
+        return self.cohort_after / self.cohort_before - 1.0
+# --- Sensor perception: capture timing, age, and error scales (added 2026-10-20) ---
+# A site scenario (``Embodied.Scenario.*``) supplies the machine's navigation
+# camera and lidar, the stage allowances, and the clearances; the solvers live
+# in ``engine/solvers/perception.py``.
+
+class ObservationAgeScenario(BaseScenario):
+    """``site.machine``'s navigation-camera observation age at ``speed``, with a ``batch_frames`` comparison."""
+    site: Any                                   # EmbodiedSiteScenario
+    speed: Quantity
+    batch_frames: int = 1
+
+    @property
+    def result(self):
+        from .solvers import ObservationAgeModel
+        s, cam = self.site, self.site.machine.nav_camera
+        return ObservationAgeModel().solve(cam.exposure_time, cam.readout_time, s.t_transport, s.t_dma,
+                                           s.t_isp, s.t_backbone, s.t_ipc, cam.frame_rate, self.speed,
+                                           self.batch_frames)
+
+
+class RollingShutterScenario(BaseScenario):
+    """``site.machine``'s rolling-shutter navigation camera at ``speed``, turning at the site's yaw rate toward the rack end."""
+    site: Any                                   # EmbodiedSiteScenario
+    speed: Quantity
+
+    @property
+    def result(self):
+        from .solvers import RollingShutterSkewModel
+        s, cam = self.site, self.site.machine.nav_camera
+        return RollingShutterSkewModel().solve(cam.resolution_height, cam.readout_time, cam.exposure_time,
+                                               self.speed, s.yaw_rate_turn, s.d_clear, s.delta_loc,
+                                               s.side_clearance)
+
+
+class TimingAttitudeErrorScenario(BaseScenario):
+    """A ``timing_error`` and an ``angle_error`` on a target at ``distance``, priced against ``reference``."""
+    speed: Quantity
+    yaw_rate: Quantity
+    distance: Quantity
+    timing_error: Quantity
+    angle_error: Quantity
+    reference: Optional[Quantity] = None
+
+    @property
+    def result(self):
+        from .solvers import TimingAttitudeErrorModel
+        return TimingAttitudeErrorModel().solve(self.speed, self.yaw_rate, self.distance, self.timing_error,
+                                                self.angle_error, self.reference)
+
+
+class LidarSweepAgeScenario(BaseScenario):
+    """``site.machine``'s spinning lidar at ``speed``: sweep motion and the age of the aisle sector at the rack end."""
+    site: Any                                   # EmbodiedSiteScenario
+    speed: Quantity
+
+    @property
+    def result(self):
+        from .solvers import LidarSweepAgeModel
+        s, lidar = self.site, self.site.machine.lidar
+        return LidarSweepAgeModel().solve(lidar.scan_rate, lidar.nominal_latency, lidar.time_sync_accuracy,
+                                          s.aisle_width, s.d_clear, self.speed, s.yaw_rate_turn,
+                                          s.perception_age)
+
+
+class StereoDepthErrorScenario(BaseScenario):
+    """A stereo rig's depth error at two ranges and at ``site``'s rack end, against the site's clearances."""
+    site: Any                                   # EmbodiedSiteScenario
+    baseline: Quantity
+    focal_length_px: float
+    disparity_sigma_px: float
+    near_range: Quantity
+    far_range: Quantity
+    ray_clearance: Quantity
+    baseline_change: Quantity
+    bias_range: Quantity
+
+    @property
+    def result(self):
+        from .solvers import StereoDepthErrorModel
+        s = self.site
+        return StereoDepthErrorModel().solve(self.baseline, self.focal_length_px, self.disparity_sigma_px,
+                                             self.near_range, self.far_range, s.d_clear, self.ray_clearance,
+                                             s.delta_loc, s.side_clearance, self.baseline_change,
+                                             self.bias_range)
+
+
+class DelayPhaseMarginScenario(BaseScenario):
+    """A loop with ``phase_margin`` at ``crossover``, closed through a pure ``delay``."""
+    phase_margin: Quantity
+    crossover: Quantity
+    delay: Quantity
+
+    @property
+    def result(self):
+        from .solvers import DelayPhaseMarginModel
+        return DelayPhaseMarginModel().solve(self.phase_margin, self.crossover, self.delay)
+
+
+class ConformalInsetScenario(BaseScenario):
+    """A split-conformal bound at miss rate ``alpha`` from ``calibration_count`` residuals."""
+    alpha: float
+    calibration_count: int
+
+    @property
+    def result(self):
+        from .solvers import ConformalInsetModel
+        return ConformalInsetModel().solve(self.alpha, self.calibration_count)
+
+
+class ClockConversionScenario(BaseScenario):
+    """A sensor clock drifting at ``drift_rate`` between syncs every ``sync_interval``, converted under ``site``'s bound."""
+    site: Any                                   # EmbodiedSiteScenario
+    drift_rate: Quantity
+    sync_interval: Quantity
+    speed: Quantity
+
+    @property
+    def result(self):
+        from .solvers import ClockConversionModel
+        s = self.site
+        return ClockConversionModel().solve(self.drift_rate, self.sync_interval, s.clock_conversion_bound,
+                                            s.perception_age, self.speed)
+
+
+class VisibilityRangeScenario(BaseScenario):
+    """Fog of extinction coefficient ``extinction`` against a contrast threshold."""
+    extinction: Quantity
+    contrast_threshold: float
+
+    @property
+    def result(self):
+        from .solvers import VisibilityRangeModel
+        return VisibilityRangeModel().solve(self.extinction, self.contrast_threshold)
+
+
+class ThermalExpansionScenario(BaseScenario):
+    """A member of ``length`` and expansion ``coefficient`` warmed by ``temperature_rise``."""
+    coefficient: Quantity
+    length: Quantity
+    temperature_rise: Quantity
+
+    @property
+    def result(self):
+        from .solvers import ThermalExpansionModel
+        return ThermalExpansionModel().solve(self.coefficient, self.length, self.temperature_rise)
+
+
+# --- Responsible AI (added 2026-10-20) -----------------------------------------
+# Group fairness criteria from confusion counts, the evidence a measured gap
+# carries, threshold policies, monitoring load, and the capacity each safeguard
+# spends on a named path.
+
+class GroupConfusionScenario(BaseScenario):
+    """Binary decisions for two or more groups as confusion counts ``{group: {tp, fp, fn, tn}}``.
+
+    A positive decision is an approval (or a flag); the positive label is the
+    outcome the decision should select. ``gap`` compares the first two groups,
+    first minus second.
+    """
+    groups: Dict[str, Dict[str, float]]
+
+    def _c(self, group: str) -> Dict[str, float]:
+        return self.groups[group]
+
+    @property
+    def first(self) -> str:
+        return list(self.groups)[0]
+
+    @property
+    def second(self) -> str:
+        return list(self.groups)[1]
+
+    def size(self, group: str) -> float:
+        c = self._c(group)
+        return c["tp"] + c["fp"] + c["fn"] + c["tn"]
+
+    def positives(self, group: str) -> float:
+        """Positive decisions (approved or flagged)."""
+        c = self._c(group)
+        return c["tp"] + c["fp"]
+
+    def positive_rate(self, group: str) -> float:
+        """Share of the group given a positive decision (the demographic-parity quantity)."""
+        return self.positives(group) / self.size(group)
+
+    def tpr(self, group: str) -> float:
+        c = self._c(group)
+        return c["tp"] / (c["tp"] + c["fn"])
+
+    def fpr(self, group: str) -> float:
+        c = self._c(group)
+        return c["fp"] / (c["fp"] + c["tn"])
+
+    def ppv(self, group: str) -> float:
+        c = self._c(group)
+        return c["tp"] / (c["tp"] + c["fp"])
+
+    def base_rate(self, group: str) -> float:
+        c = self._c(group)
+        return (c["tp"] + c["fn"]) / self.size(group)
+
+    def gap(self, metric: str) -> float:
+        """``metric`` (positive_rate, tpr, fpr, ppv, base_rate) of the first group minus the second's."""
+        f = getattr(self, metric)
+        return f(self.first) - f(self.second)
+
+    @property
+    def disparate_impact(self) -> float:
+        """Lower positive rate over higher positive rate across the first two groups."""
+        a, b = self.positive_rate(self.first), self.positive_rate(self.second)
+        return min(a, b) / max(a, b)
+
+    @property
+    def average_odds_difference(self) -> float:
+        """Mean of the absolute TPR and FPR gaps."""
+        return 0.5 * (abs(self.gap("tpr")) + abs(self.gap("fpr")))
+
+
+class ProportionGapTestScenario(BaseScenario):
+    """An observed gap between two rates, ``rate_a`` and ``rate_b``, on ``n_per_group`` decisions each.
+
+    Tested with the pooled two-proportion z statistic against the two-sided
+    normal critical value at ``significance``; the interval is the unpooled
+    normal-approximation interval at the same level.
+    """
+    rate_a: float
+    rate_b: float
+    n_per_group: int
+    significance: float = 0.05
+    small_n_per_group: Optional[int] = None   # a second, smaller sample for comparison
+
+    @property
+    def gap(self) -> float:
+        return self.rate_a - self.rate_b
+
+    @property
+    def pooled_rate(self) -> float:
+        return (self.rate_a + self.rate_b) / 2
+
+    @property
+    def z_critical(self) -> float:
+        from statistics import NormalDist
+        return NormalDist().inv_cdf(1 - self.significance / 2)
+
+    def z_at(self, n: float) -> float:
+        from ..physics import calc_two_proportion_z
+        return calc_two_proportion_z(self.rate_a, self.rate_b, n, n)
+
+    def interval_at(self, n: float):
+        from ..physics import calc_proportion_gap_interval
+        return calc_proportion_gap_interval(self.rate_a, self.rate_b, n, n, self.z_critical)
+
+    @property
+    def z(self) -> float:
+        return self.z_at(self.n_per_group)
+
+    @property
+    def interval(self):
+        return self.interval_at(self.n_per_group)
+
+    @property
+    def n_at_critical(self) -> float:
+        """Per-group sample size at which this gap first reaches the critical value."""
+        from ..physics import calc_equal_n_for_z
+        return calc_equal_n_for_z(self.rate_a, self.rate_b, self.z_critical)
+
+
+class ThresholdPolicyScenario(BaseScenario):
+    """Illustrative scores per group, ``{group: {"qualified": [...], "default": [...]}}``, under
+    one ``uniform_threshold`` or group-adapted ``group_thresholds`` (approve at or above)."""
+    scores: Dict[str, Dict[str, List[float]]]
+    uniform_threshold: float
+    group_thresholds: Dict[str, float]
+
+    def tpr(self, group: str, threshold: float) -> float:
+        q = self.scores[group]["qualified"]
+        return sum(s >= threshold for s in q) / len(q)
+
+    def fpr(self, group: str, threshold: float) -> float:
+        d = self.scores[group]["default"]
+        return sum(s >= threshold for s in d) / len(d)
+
+
+class ConstraintAccuracyCostScenario(BaseScenario):
+    """Accuracy before and after a fairness constraint (percent), with the policy's stated rates.
+
+    ``context`` holds the scenario's descriptive rates in percent (default
+    rates, approval rates, thresholds) so prose and slides quote one source.
+    """
+    baseline_accuracy: float      # percent
+    constrained_accuracy: float   # percent
+    context: Dict[str, float] = {}
+
+    @property
+    def accuracy_cost(self) -> float:
+        """Points of accuracy given up."""
+        return self.baseline_accuracy - self.constrained_accuracy
+
+    @property
+    def relative_cost(self) -> float:
+        """Accuracy given up as a fraction of the baseline."""
+        return self.accuracy_cost / self.baseline_accuracy
+
+
+class SampledDecisionMonitorScenario(BaseScenario):
+    """Per-group metric monitoring of a decision service at ``request_rate``.
+
+    ``sample_share`` of decisions are logged at ``record_size`` each; ``groups``
+    subgroups x ``metrics_per_group`` metrics are each tested at
+    ``false_alarm_rate`` per evaluation interval on a stable process.
+    """
+    request_rate: Quantity
+    sample_share: float
+    record_size: Quantity
+    groups: int
+    metrics_per_group: int
+    false_alarm_rate: float
+
+    @property
+    def decisions_per_day(self) -> float:
+        return (self.request_rate * Q_(1, "day")).to("").magnitude
+
+    @property
+    def records_per_day(self) -> float:
+        return self.decisions_per_day * self.sample_share
+
+    @property
+    def log_per_day(self) -> Quantity:
+        return (self.records_per_day * self.record_size).to("GB")
+
+    @property
+    def metrics(self) -> int:
+        return self.groups * self.metrics_per_group
+
+    @property
+    def false_alerts_per_interval(self) -> float:
+        """Expected false alerts per interval if nothing is wrong (no independence needed)."""
+        return self.metrics * self.false_alarm_rate
+
+    @property
+    def bonferroni_level(self) -> float:
+        return self.false_alarm_rate / self.metrics
+
+    @property
+    def false_alerts_bonferroni(self) -> float:
+        return self.metrics * self.bonferroni_level
+
+
+class ExactAttributionScenario(BaseScenario):
+    """Exact Shapley attribution by subset enumeration: 2^n subsets at ``time_per_subset`` each."""
+    feature_counts: List[int]
+    time_per_subset: Quantity
+    request_budget: Optional[Quantity] = None
+
+    def subsets(self, features: int) -> int:
+        return 2 ** features
+
+    def time(self, features: int) -> Quantity:
+        return (self.subsets(features) * self.time_per_subset).to("ms")
+
+
+class InlineOverheadScenario(BaseScenario):
+    """A safeguard added inline to a request path of ``base_latency``, costing
+    ``overhead_low`` to ``overhead_high`` (fractions of the base) per request.
+
+    Under the proportional assumption, holding throughput needs capacity in the
+    ratio of the new latency to the old.
+    """
+    base_latency: Quantity
+    overhead_low: float
+    overhead_high: float
+    request_rate: Optional[Quantity] = None
+
+    @property
+    def added_low(self) -> Quantity:
+        return (self.base_latency * self.overhead_low).to("ms")
+
+    @property
+    def added_high(self) -> Quantity:
+        return (self.base_latency * self.overhead_high).to("ms")
+
+    @property
+    def latency_low(self) -> Quantity:
+        return (self.base_latency + self.added_low).to("ms")
+
+    @property
+    def latency_high(self) -> Quantity:
+        return (self.base_latency + self.added_high).to("ms")
+
+    @property
+    def capacity_low(self) -> float:
+        return (self.latency_low / self.base_latency).to("").magnitude
+
+    @property
+    def capacity_high(self) -> float:
+        return (self.latency_high / self.base_latency).to("").magnitude
+
+
+class ExplanationLogScenario(BaseScenario):
+    """Logging an explanation with every prediction: ``predictions_per_day`` for ``days_per_month``,
+    each a ``map_size_low`` to ``map_size_high`` attribution map (or tabular attributions of
+    ``attribution_bytes_low`` to ``attribution_bytes_high`` per feature)."""
+    predictions_per_day: float
+    days_per_month: float
+    map_size_low: Quantity
+    map_size_high: Quantity
+    attribution_bytes_low: Quantity
+    attribution_bytes_high: Quantity
+
+    @property
+    def predictions_per_month(self) -> float:
+        return self.predictions_per_day * self.days_per_month
+
+    @property
+    def monthly_low(self) -> Quantity:
+        return (self.predictions_per_month * self.map_size_low).to("TB")
+
+    @property
+    def monthly_high(self) -> Quantity:
+        return (self.predictions_per_month * self.map_size_high).to("TB")
+
+
+class ShardedUnlearningScenario(BaseScenario):
+    """Exact unlearning by sharded retraining (SISA) against a full retrain of ``workload``.
+
+    The full retrain runs on ``n_accelerators`` of ``accelerator`` at ``mfu`` and
+    costs ``full_cost``. Planning rounds it to whole days; one request retrains
+    one of ``shards`` equal shards, at a proportional share of time and cost.
+    ``requests_per_day`` arrive uniformly at random over the shards.
+    """
+    workload: Workload
+    accelerator: HardwareNode
+    n_accelerators: int
+    mfu: float
+    full_cost: Quantity
+    shards: int
+    requests_per_day: int
+    accuracy_drop_low: Optional[float] = None    # fraction
+    accuracy_drop_high: Optional[float] = None   # fraction
+
+    @property
+    def full_retrain_time(self) -> Quantity:
+        rate = self.n_accelerators * self.accelerator.compute.peak_flops * self.mfu
+        return (self.workload.training_ops / rate).to("day")
+
+    @property
+    def planning_days(self) -> int:
+        """The full retrain rounded to whole days, the figure planning quotes."""
+        return round(self.full_retrain_time.to("day").magnitude)
+
+    @property
+    def shard_share(self) -> float:
+        return 1 / self.shards
+
+    @property
+    def shard_cost(self) -> Quantity:
+        return (self.full_cost * self.shard_share).to("USD")
+
+    @property
+    def shard_time(self) -> Quantity:
+        return (Q_(self.planning_days, "day") * self.shard_share).to("hour")
+
+    @property
+    def p_shard_untouched(self) -> float:
+        """Chance a given shard receives none of a day's requests."""
+        return (1 - self.shard_share) ** self.requests_per_day
+
+    @property
+    def shards_touched_per_day(self) -> float:
+        return self.shards * (1 - self.p_shard_untouched)
+
+    @property
+    def daily_batch_cost(self) -> Quantity:
+        """Cost if every touched shard retrains once a day."""
+        return (self.shards_touched_per_day * self.shard_cost).to("USD")
+
+
+class PreferenceLabelBudgetScenario(BaseScenario):
+    """Human preference labels for a reward model: ``comparisons_low`` to ``comparisons_high``
+    at ``price_low`` to ``price_high`` per comparison."""
+    comparisons_low: float
+    comparisons_high: float
+    price_low: Quantity
+    price_high: Quantity
+
+    @property
+    def budget_low(self) -> Quantity:
+        return (self.comparisons_low * self.price_low).to("USD")
+
+    @property
+    def budget_high(self) -> Quantity:
+        return (self.comparisons_high * self.price_high).to("USD")
+
+    @property
+    def spread(self) -> float:
+        return (self.budget_high / self.budget_low).to("").magnitude
+
+
+class AutomationBiasScenario(BaseScenario):
+    """A human reviews an AI's output; the human accepts ``miss_acceptance`` of the AI's misses.
+
+    The best case assumes the reviewer catches every other miss and never
+    overturns a correct detection, so team sensitivity is at most one minus the
+    accepted misses.
+    """
+    human_sensitivity: float
+    ai_sensitivity: float
+    miss_acceptance: float
+    acceptance_low: float
+    acceptance_high: float
+
+    @property
+    def ai_miss_rate(self) -> float:
+        return 1 - self.ai_sensitivity
+
+    def accepted_misses(self, acceptance: Optional[float] = None) -> float:
+        a = self.miss_acceptance if acceptance is None else acceptance
+        return self.ai_miss_rate * a
+
+    @property
+    def team_sensitivity_bound(self) -> float:
+        return 1 - self.accepted_misses()
+
+    @property
+    def gain_over_ai(self) -> float:
+        return self.team_sensitivity_bound - self.ai_sensitivity
+
+
+class PerRequestFailureVolumeScenario(BaseScenario):
+    """A per-request failure probability at a daily request volume: the expected failures a day."""
+    failure_probability: float
+    daily_requests: float
+
+    @property
+    def daily_failures(self) -> float:
+        return self.failure_probability * self.daily_requests
+
+
+class GradeStandardizationScenario(BaseScenario):
+    """A grade-standardization outcome from a published matrix of calculated against assessed grades.
+
+    ``matrix`` is a Literature series with one row per assessed grade: an
+    ``entries`` count and row percentages per calculated grade, columns in
+    ``grades`` order from highest to lowest. ``candidates`` counts candidates by
+    the number of their grades lowered.
+    """
+    matrix: Any
+    candidates: Any
+    grades: List[str]
+    stated_entries: Optional[float] = None      # the source's stated n for the matrix
+    stated_candidates: Optional[float] = None   # the source's stated n for the candidate table
+
+    def split(self, grade: str):
+        """Row percentages for one assessed grade: (higher, same, one lower, two or more lower)."""
+        row = next(r for r in self.matrix.entries if r["cag"] == grade)
+        i = self.grades.index(grade)
+        cells = [row[g] for g in self.grades]
+        one_lower = cells[i + 1] if i + 1 < len(cells) else 0
+        return (sum(cells[:i]), cells[i], one_lower, sum(cells[i + 2:]))
+
+    @property
+    def total_entries(self) -> float:
+        return sum(r["entries"] for r in self.matrix.entries)
+
+    @property
+    def entries_lowered_pct(self) -> float:
+        """Entry-weighted share lowered (percent), from the rounded row percentages and row counts."""
+        tot = sum(r["entries"] * sum(self.split(r["cag"])[2:]) for r in self.matrix.entries)
+        return tot / self.total_entries
+
+    @property
+    def row_entries_sum(self) -> float:
+        """Sum of the matrix rows' entry counts (may differ from the stated n)."""
+        return self.total_entries
+
+    @property
+    def candidate_rows_sum(self) -> float:
+        """Sum of the candidate table's rounded rows (may differ from the stated n)."""
+        return sum(r["candidates"] for r in self.candidates.entries)
+
+    @property
+    def total_candidates(self) -> float:
+        """The stated candidate count when given, else the sum of the rows."""
+        return self.stated_candidates if self.stated_candidates is not None else self.candidate_rows_sum
+
+    def candidates_with(self, lowered: int) -> float:
+        return next(r["candidates"] for r in self.candidates.entries if r["grades_lowered"] == lowered)
+
+    def candidate_share(self, lowered: int) -> float:
+        return self.candidates_with(lowered) / self.total_candidates
+
+    @property
+    def at_least_one_lowered_share(self) -> float:
+        return 1 - self.candidate_share(0)
+
+
+class DpTrainingPlanScenario(BaseScenario):
+    """An illustrative differential-privacy planning scenario for one training run of ``base_cost``.
+
+    Each privacy budget is an assumed accountant result; the stronger budget is
+    assumed to need ``cost_multiplier`` times the training, with the stated
+    accuracy drops and overheads (percent) as planning assumptions.
+    """
+    epsilon_strong: float
+    epsilon_moderate: float
+    epsilon_weak: float
+    base_cost: Quantity
+    cost_multiplier: float
+    accuracy_drop_strong: float      # percent
+    accuracy_drop_moderate: float    # percent
+    clipped_share: float             # percent of per-example gradients clipped
+    overhead_moderate: float         # percent
+
+    @property
+    def cost_strong(self) -> Quantity:
+        return (self.base_cost * self.cost_multiplier).to("USD")
+# --- Durable execution (added 2026-10-20) ----------------------------------------
+# What a runtime pays to survive a crash: one group commit, full snapshots
+# against deltas, checkpoint strides on a fixed crash trace, and the cost of
+# keeping recovery and replay data. Solvers in engine/solvers/durability.py.
+
+class GroupCommitScenario(BaseScenario):
+    """``batch_size`` intents gathered for up to ``batch_timer`` and acknowledged by one ``flush_time``."""
+    batch_timer: Quantity
+    flush_time: Quantity
+    batch_size: int
+
+    @property
+    def result(self):
+        from .solvers import GroupCommitModel
+        return GroupCommitModel().solve(self.batch_timer, self.flush_time, self.batch_size)
+
+
+class SnapshotVolumeScenario(BaseScenario):
+    """A trajectory of ``turns`` turns growing ``state_growth`` per turn, checkpointed every ``stride``."""
+    turns: int
+    stride: int
+    state_growth: Quantity
+
+    @property
+    def result(self):
+        from .solvers import SnapshotVolumeModel
+        return SnapshotVolumeModel().solve(self.turns, self.stride, self.state_growth)
+
+
+class CheckpointTraceScenario(BaseScenario):
+    """Checkpoint ``strides`` priced on ``turns`` turns that crash after the turns in ``crashes``."""
+    turns: int
+    crashes: List[int]
+    strides: List[int]
+    pause: Quantity                 # per checkpoint, including durable publication
+    restore: Quantity               # per crash
+    rebuild_per_turn: Quantity      # read, validate, and fold one logged turn
+    reexecute_per_turn: Quantity    # re-run one unlogged turn's model call and tools
+
+    @property
+    def result(self):
+        from .solvers import CheckpointTraceModel
+        return CheckpointTraceModel().solve(self.turns, self.crashes, self.strides, self.pause,
+                                            self.restore, self.rebuild_per_turn,
+                                            self.reexecute_per_turn)
+
+    def stride_overhead(self, stride: float, lost_turn_cost: Quantity) -> Quantity:
+        """Expected overhead per turn at ``stride`` on this trace's crash rate (seconds)."""
+        from ..physics.reliability import calc_stride_overhead
+        return calc_stride_overhead(self.pause, stride, len(self.crashes) / self.turns, lost_turn_cost)
+
+
+class RetentionCostScenario(BaseScenario):
+    """One trajectory's log (``turns`` x envelope and payload) and workspace snapshot kept for ``period``."""
+    turns: int
+    envelope: Quantity              # event envelopes per turn
+    payload: Quantity               # delivered inputs and result bodies per turn
+    workspace: Quantity             # one immutable workspace snapshot
+    rate: Quantity                  # object storage, USD per byte-time
+    period: Quantity
+    attempt_cost: Quantity          # USD of one attempt
+
+    @property
+    def result(self):
+        from .solvers import RetentionCostModel
+        return RetentionCostModel().solve(self.turns, self.envelope, self.payload, self.workspace,
+                                          self.rate, self.period, self.attempt_cost)
+# --- Failure recovery (added 2026-10-20) --------------------------------------
+# What the runtime does once an effect has failed: one repair against unwind,
+# checks ahead of a pivot, a loop stopped late, retries through nested layers,
+# a capped dependency, a jittered retry cohort, a cleanup graph, a breaker
+# window, and published retry-sustained outages. Solvers in
+# engine/solvers/recovery.py.
+
+class RepairBreakEvenScenario(BaseScenario):
+    """One bounded repair attempt against compensating and rebuilding to the same endpoint."""
+    unwind_time: Quantity            # compensation
+    rebuild_time: Quantity           # rebuild to the same readiness endpoint
+    rebuild_input: int               # rebuild model tokens
+    rebuild_output: int
+    repair_input: int                # the whole isolated repair request
+    repair_output: int
+    startup_time: Quantity           # pre-output processing, not a measured time to first token
+    output_rate: Quantity            # tokens per second
+    validation_time: Quantity        # local validation, charged on success and failure
+    input_price: Quantity            # USD per token
+    output_price: Quantity
+    assumed_success: float           # a policy comparison, not a measurement
+
+    @property
+    def result(self):
+        from .solvers import RepairBreakEvenModel
+        return RepairBreakEvenModel().solve(
+            self.unwind_time, self.rebuild_time, self.rebuild_input, self.rebuild_output,
+            self.repair_input, self.repair_output, self.startup_time, self.output_rate,
+            self.validation_time, self.input_price, self.output_price, self.assumed_success)
+
+
+class IrreversibleLossScenario(BaseScenario):
+    """A workload's wrong-change risk priced with its pre-pivot check, from its agent profile."""
+    workload: Any                    # a RemediationWorkload (Agents.*)
+    catch_step: float                # catch-rate increment for the sensitivity
+
+    @property
+    def attempt_cost(self) -> Quantity:
+        w = self.workload
+        return (w.model_cost_per_attempt + w.environment_cost_per_attempt
+                + w.assessment_cost_per_attempt + w.approval_cost_per_attempt).to("USD")
+
+    @property
+    def result(self):
+        from .solvers import IrreversibleLossModel
+        w = self.workload
+        return IrreversibleLossModel().solve(
+            w.wrong_change_probability, w.wrong_change_impact, w.canary_catch_rate,
+            w.canary_recovery_fraction, self.attempt_cost, self.catch_step)
+
+
+class UndetectedLoopScenario(BaseScenario):
+    """An append-only loop that resends its history, run to a turn ceiling or stopped early."""
+    first_input: int                 # tokens
+    output_per_turn: int
+    observation_per_turn: int        # appended error observation
+    turn_time: Quantity              # complete serial turn
+    ceiling: int                     # turns, counted from the loop's start
+    stop_after: int                  # intervention after this completed turn
+    context_window: int              # combined input and output capacity, tokens
+    input_price: Quantity            # USD per token
+    output_price: Quantity
+
+    @property
+    def result(self):
+        from .solvers import UndetectedLoopModel
+        return UndetectedLoopModel().solve(
+            self.first_input, self.output_per_turn, self.observation_per_turn, self.turn_time,
+            self.ceiling, self.stop_after, self.context_window, self.input_price, self.output_price)
+
+
+class RetryAmplificationScenario(BaseScenario):
+    """Nested retry layers, each with its own allowance, under one failing logical operation."""
+    layer_names: List[str]           # from the caller down to the dependency
+    attempts_per_layer: int          # one try plus retries
+
+    @property
+    def result(self):
+        from .solvers import RetryAmplificationModel
+        return RetryAmplificationModel().solve(self.attempts_per_layer, len(self.layer_names))
+
+
+class BulkheadAdmissionScenario(BaseScenario):
+    """One burst of blocking calls to a stalled dependency, uncapped and with a bulkhead."""
+    arrivals: int                    # blocking calls in the burst
+    workers: int                     # shared pool
+    worker_cap: int                  # occupied workers the dependency may hold
+    queue_cap: int                   # waiting requests, which hold no worker
+
+    @property
+    def result(self):
+        from .solvers import BulkheadAdmissionModel
+        return BulkheadAdmissionModel().solve(self.arrivals, self.workers, self.worker_cap, self.queue_cap)
+
+
+class RetryJitterScenario(BaseScenario):
+    """A cohort of eligible retries released together, synchronized or with full jitter."""
+    retries: int
+    burst_window: Quantity           # stipulated window if all arrive together
+    jitter_span: Quantity            # each retry's arrival drawn uniformly over this span
+
+    @property
+    def result(self):
+        from .solvers import RetryJitterModel
+        return RetryJitterModel().solve(self.retries, self.burst_window, self.jitter_span)
+
+
+class CleanupGraphScenario(BaseScenario):
+    """Registered cleanup operations with durations and dependencies, one outcome unresolved."""
+    durations: Dict[str, Quantity]   # time once admitted
+    depends_on: Dict[str, List[str]]
+    unresolved: str                  # the operation whose reply is lost
+
+    @property
+    def result(self):
+        from .solvers import CleanupGraphModel
+        return CleanupGraphModel().solve(self.durations, self.depends_on, self.unresolved)
+
+
+class BreakerWindowScenario(BaseScenario):
+    """One circuit-breaker window of classified outcomes and its trip rule."""
+    outcomes: Dict[str, int]         # outcome class -> count in the window
+    failure_classes: List[str]       # classes that show the dependency cannot do work
+    success_class: str
+    threshold: float                 # trip at failure fraction >= threshold
+    min_outcomes: int
+
+    @property
+    def result(self):
+        from .solvers import BreakerWindowModel
+        return BreakerWindowModel().solve(self.outcomes, self.failure_classes, self.success_class,
+                                          self.threshold, self.min_outcomes)
+
+
+class RetrySustainedOutagesScenario(BaseScenario):
+    """Published incidents (``Literature.Series``) counted by whether retries sustained them."""
+    series_name: str
+    threshold_hours: float           # count retry-sustained outages longer than this
+
+    @property
+    def rows(self):
+        from ..literature.registry import Literature
+        return getattr(Literature, self.series_name).entries
+
+    @property
+    def result(self):
+        from .solvers import RetrySustainedOutagesModel
+        return RetrySustainedOutagesModel().solve(self.rows, "incident", "retry_sustained",
+                                                  "duration_h", self.threshold_hours)
+# --- Sustainability (added 2026-10-20) ---------------------------------------
+
+def _rack_it_ratio(rack) -> float:
+    """IT load over accelerator power for a rack profile (hosts, switches, conversion inside IT)."""
+    return (rack.it_power / rack.accelerator_power).to("").magnitude
+
+
+class FacilityPowerScenario(BaseScenario):
+    """``devices`` accelerators at ``device_power`` in racks shaped like ``rack``, at ``pue``."""
+    devices: float
+    device_power: Quantity
+    rack: Any                 # a Systems.Racks profile: supplies the IT-to-accelerator ratio
+    pue: float
+
+    @property
+    def it_ratio(self) -> float:
+        return _rack_it_ratio(self.rack)
+
+    @property
+    def result(self):
+        from .solvers import FacilityPowerModel
+        return FacilityPowerModel().solve(self.devices, self.device_power, self.it_ratio, self.pue)
+
+
+class RunFootprintScenario(BaseScenario):
+    """A training run of ``device_hours`` on ``devices`` of ``device``: energy, carbon, embodied carbon, water."""
+    device_hours: Quantity
+    devices: float
+    device: HardwareNode      # rated power (TDP) and embodied carbon per device
+    rack: Any                 # a Systems.Racks profile (IT-to-accelerator ratio)
+    pue: float
+    grids: Dict[str, Any]     # named Infrastructure.Grids profiles
+    service_life: Quantity
+    wue: Dict[str, Quantity] = {}
+
+    @property
+    def it_ratio(self) -> float:
+        return _rack_it_ratio(self.rack)
+
+    @property
+    def result(self):
+        from .solvers import RunFootprintModel
+        return RunFootprintModel().solve(
+            self.device_hours, self.devices, self.device.tdp, self.it_ratio, self.pue,
+            {k: g.carbon_intensity for k, g in self.grids.items()},
+            self.device.embodied_carbon, self.service_life, self.wue,
+        )
+
+
+class WaterUseScenario(BaseScenario):
+    """An IT load held for ``period`` at each named WUE."""
+    it_power: Quantity
+    period: Quantity
+    wue: Dict[str, Quantity]
+
+    @property
+    def it_energy(self) -> Quantity:
+        return (self.it_power * self.period).to("kWh")
+
+    @property
+    def result(self):
+        from .solvers import WaterUseModel
+        return WaterUseModel().solve(self.it_energy, self.wue)
+
+
+class PueRetrofitScenario(BaseScenario):
+    """A fixed IT load moved from ``pue_before`` to ``pue_after`` for ``period`` at an electricity price."""
+    it_power: Quantity
+    pue_before: float
+    pue_after: float
+    period: Quantity
+    electricity_price: Quantity
+
+    @property
+    def result(self):
+        from .solvers import PueRetrofitModel
+        return PueRetrofitModel().solve(self.it_power, self.pue_before, self.pue_after, self.period,
+                                        self.electricity_price)
+
+
+class FacilityCarbonRateScenario(BaseScenario):
+    """Named sites with one IT load, each at its own PUE and grid intensity."""
+    it_power: Quantity
+    pues: Dict[str, float]
+    intensities: Dict[str, Quantity]
+
+    @property
+    def result(self):
+        from .solvers import FacilityCarbonRateModel
+        return FacilityCarbonRateModel().solve(self.it_power, self.pues, self.intensities)
+
+
+class GridPlacementScenario(BaseScenario):
+    """One facility ``energy`` placed on each named grid, with an optional fractional energy cut."""
+    energy: Quantity
+    grids: Dict[str, Any]
+    energy_cut: float = 0.0
+
+    @property
+    def intensities(self) -> Dict[str, Quantity]:
+        return {k: g.carbon_intensity for k, g in self.grids.items()}
+
+    @property
+    def result(self):
+        from .solvers import GridPlacementModel
+        return GridPlacementModel().solve(self.energy, self.intensities, self.energy_cut)
+
+
+class EmbodiedPaybackScenario(BaseScenario):
+    """A replacement for ``device`` that does its work with ``saved_fraction`` less energy, on named grids."""
+    device: HardwareNode
+    saved_fraction: float
+    grids: Dict[str, Any]
+
+    @property
+    def result(self):
+        from .solvers import EmbodiedPaybackModel
+        return EmbodiedPaybackModel().solve(self.device.embodied_carbon, self.device.tdp, self.saved_fraction,
+                                            {k: g.carbon_intensity for k, g in self.grids.items()})
+
+
+class ServiceLifeExtensionScenario(BaseScenario):
+    """A hardware service life extended from ``short_life`` to ``long_life``."""
+    short_life: Quantity
+    long_life: Quantity
+
+    @property
+    def result(self):
+        from .solvers import ServiceLifeExtensionModel
+        return ServiceLifeExtensionModel().solve(self.short_life, self.long_life)
+
+
+class PowerCapScenario(BaseScenario):
+    """A run needing ``required_power`` for ``planned_duration`` behind a ``feed_power`` grid feed."""
+    required_power: Quantity
+    feed_power: Quantity
+    planned_duration: Quantity
+
+    @property
+    def result(self):
+        from .solvers import PowerCapModel
+        return PowerCapModel().solve(self.required_power, self.feed_power, self.planned_duration)
+
+
+class RepeatedWorkEnergyScenario(BaseScenario):
+    """``fleet``'s accelerators at rated power, rolled back by each named interval."""
+    fleet: Fleet
+    rollbacks: Dict[str, Quantity]
+
+    @property
+    def result(self):
+        from .solvers import RepeatedWorkEnergyModel
+        return RepeatedWorkEnergyModel().solve(self.fleet.total_accelerators, self.fleet.node.accelerator.tdp,
+                                               self.rollbacks)
+
+
+class ServingCrossoverScenario(BaseScenario):
+    """Serving ``requests_per_day`` at ``energy_per_request`` against a one-time energy."""
+    one_time_energy: Quantity
+    requests_per_day: float
+    energy_per_request: Quantity
+
+    @property
+    def result(self):
+        from .solvers import ServingCrossoverModel
+        return ServingCrossoverModel().solve(self.one_time_energy, self.requests_per_day, self.energy_per_request)
+
+
+class CascadeEnergyScenario(BaseScenario):
+    """An edge model on every input, escalating a fraction to a cloud model over a radio link."""
+    edge_energy: Quantity
+    transmit_energy: Quantity
+    cloud_energy: Quantity
+    escalation: float
+
+    @property
+    def result(self):
+        from .solvers import CascadeEnergyModel
+        return CascadeEnergyModel().solve(self.edge_energy, self.transmit_energy, self.cloud_energy, self.escalation)
+
+
+class DutyCycledPowerScenario(BaseScenario):
+    """An always-on detector, a stage active a share of the time, and a full model run per event."""
+    always_on_power: Quantity
+    stage_power: Quantity
+    stage_activity: float
+    full_power: Quantity
+    event_rate: Quantity
+    full_duration: Quantity
+
+    @property
+    def full_duty(self) -> float:
+        return (self.event_rate * self.full_duration).to("").magnitude
+
+    @property
+    def result(self):
+        from .solvers import DutyCycledPowerModel
+        return DutyCycledPowerModel().solve(
+            {"always_on": self.always_on_power, "stage": self.stage_power, "full": self.full_power},
+            {"always_on": 1.0, "stage": self.stage_activity, "full": self.full_duty},
+            self.full_power,
+        )
+
+
+class DataMovementEnergyScenario(BaseScenario):
+    """One weight of ``bytes_per_param`` used for ``flops_per_param`` FLOPs at stated per-op energies."""
+    energy_per_flop: Quantity
+    energy_per_byte: Quantity
+    flops_per_param: float
+    bytes_per_param: Quantity
+    operand_bytes: Quantity
+
+    @property
+    def result(self):
+        from .solvers import DataMovementEnergyModel
+        return DataMovementEnergyModel().solve(self.energy_per_flop, self.energy_per_byte, self.flops_per_param,
+                                               self.bytes_per_param, self.operand_bytes)
+
+
+class DemandReboundScenario(BaseScenario):
+    """Per-unit energy scaled by a factor (or by a unit-price ratio) while volume scales by another."""
+    volume_factor: float
+    per_unit_factor: Optional[float] = None
+    unit_price_before: Optional[float] = None   # used when per_unit_factor is None: energy tracks price
+    unit_price_after: Optional[float] = None
+
+    @property
+    def unit_factor(self) -> float:
+        if self.per_unit_factor is not None:
+            return self.per_unit_factor
+        return self.unit_price_after / self.unit_price_before
+
+    @property
+    def result(self):
+        from .solvers import DemandReboundModel
+        return DemandReboundModel().solve(self.unit_factor, self.volume_factor)
+
+
+class DevelopmentSweepScenario(BaseScenario):
+    """A sweep of ``candidates`` runs, each costing ``relative_cost`` of the final run."""
+    candidates: float
+    relative_cost: float
+
+    @property
+    def result(self):
+        from .solvers import DevelopmentSweepModel
+        return DevelopmentSweepModel().solve(self.candidates, self.relative_cost)
+
+
+class RollingShareScenario(BaseScenario):
+    """Hourly share of ``share_columns`` in ``total_columns`` of a Literature series, over rolling windows."""
+    series_name: str
+    time_column: str
+    share_columns: List[str]
+    total_columns: List[str]
+    window: int
+
+    @property
+    def rows(self):
+        from ..literature.registry import Literature
+        return getattr(Literature.Series, self.series_name).entries
+
+    @property
+    def shares(self) -> List[float]:
+        """Hourly share, percent."""
+        return [100 * sum(r[c] for c in self.share_columns) / sum(r[c] for c in self.total_columns)
+                for r in self.rows]
+
+    @property
+    def times(self) -> List[str]:
+        return [r[self.time_column] for r in self.rows]
+
+    @property
+    def result(self):
+        from .solvers import RollingWindowModel
+        return RollingWindowModel().solve(self.shares, self.window)
+# --- Spatial memory: estimation, belief expiry, and volumetric maps (added 2026-10-20) ---
+# A site scenario (``Embodied.Scenario.*``) supplies the machine, the
+# clearances, the walking speed, and the observation age; the solvers live in
+# ``engine/solvers/estimation.py`` and ``engine/solvers/mapping.py``.
+
+class RangeFusionScenario(BaseScenario):
+    """The range to ``site``'s rack-end upright, predicted over one lidar sweep and updated by the lidar, then ``stereo``; the stereo update misdated by ``age``'s arrival stamp at ``speed``."""
+    site: Any                                   # EmbodiedSiteScenario
+    stereo: Any                                 # StereoDepthErrorScenario
+    age: Any                                    # ObservationAgeScenario
+    prior_sigma: Quantity
+    speed_sigma: Quantity
+    comparison_scale: float = 2.0
+
+    @property
+    def result(self):
+        from .solvers import RangeFusionModel
+        lidar = self.site.machine.lidar
+        return RangeFusionModel().solve(self.prior_sigma, self.speed_sigma, 1 / lidar.scan_rate,
+                                        lidar.range_precision_max, self.stereo.result.sigma_target,
+                                        self.age.result.arrival_travel, self.comparison_scale)
+
+
+class EstimatorConsistencyScenario(BaseScenario):
+    """A qualification campaign of ``runs`` scalar estimates, and single-update gates against ``fusion``'s misdated update."""
+    fusion: Any                                 # RangeFusionScenario
+    runs: int
+    dimension: int = 1
+    confidence: float = 0.95
+    gate_confidences: List[float] = [0.95, 0.99]
+
+    @property
+    def result(self):
+        from .solvers import EstimatorConsistencyModel
+        return EstimatorConsistencyModel().solve(self.runs, self.dimension, self.confidence,
+                                                 self.gate_confidences, self.fusion.result.nis_expected)
+
+
+class ReplayBufferScenario(BaseScenario):
+    """A rewind buffer at ``site.machine``'s IMU rate reaching back one observation age."""
+    site: Any                                   # EmbodiedSiteScenario
+
+    @property
+    def result(self):
+        from .solvers import ReplayBufferModel
+        return ReplayBufferModel().solve(self.site.perception_age, self.site.machine.imu.sample_rate)
+
+
+class InertialCoastScenario(BaseScenario):
+    """``site.machine``'s IMU coasting ``duration`` without a fix, seen at the rack-end distance."""
+    site: Any                                   # EmbodiedSiteScenario
+    duration: Quantity
+
+    @property
+    def result(self):
+        from .solvers import InertialCoastModel
+        imu, s = self.site.machine.imu, self.site
+        return InertialCoastModel().solve(imu.gyro_noise_density, imu.gyro_zero_rate_offset, imu.accel_noise_density,
+                                          imu.accel_zero_g_offset, self.duration, s.d_clear, s.delta_loc)
+
+
+class OdometryDriftScenario(BaseScenario):
+    """A square-path odometry benchmark's return errors, priced against ``site``'s localization bound at its aisle speed and length."""
+    site: Any                                   # EmbodiedSiteScenario
+    square_side: Quantity
+    legs: int
+    return_error_uncalibrated: Quantity
+    return_error_calibrated: Quantity
+    run_sigma: Quantity
+    test_speed: Quantity
+
+    @property
+    def path_length(self) -> Quantity:
+        return self.legs * self.square_side
+
+    @property
+    def result(self):
+        from .solvers import OdometryDriftModel
+        s = self.site
+        return OdometryDriftModel().solve(self.return_error_uncalibrated, self.return_error_calibrated,
+                                          self.path_length, s.delta_loc, s.v_aisle, s.aisle_length, self.test_speed)
+
+
+class OdometryLeaderboardScenario(BaseScenario):
+    """Ranked odometry methods (``entries``: translation_err_pct, sensor_group) against ``site``'s bound and aisle."""
+    site: Any                                   # EmbodiedSiteScenario
+    entries: List[Any]
+
+    @property
+    def result(self):
+        from .solvers import OdometryLeaderboardModel
+        return OdometryLeaderboardModel().solve(self.entries, self.site.delta_loc, self.site.aisle_length)
+
+
+class BeliefExpiryScenario(BaseScenario):
+    """A belief with initial error, growth law, and task tolerance; optionally admitted at ``use_age`` under ``age_bound``."""
+    initial_error: Quantity
+    growth_rate: Quantity
+    tolerance: Quantity
+    growth_acceleration: Optional[Quantity] = None
+    use_age: Optional[Quantity] = None
+    age_bound: Optional[Quantity] = None
+
+    @property
+    def result(self):
+        from .solvers import BeliefExpiryModel
+        return BeliefExpiryModel().solve(self.initial_error, self.growth_rate, self.tolerance,
+                                         self.growth_acceleration, self.use_age, self.age_bound)
+
+
+class StaleTransformScenario(BaseScenario):
+    """``belief``'s cached camera edge composed with the current wrist pose, one ``site.machine`` wrist-camera frame old."""
+    site: Any                                   # EmbodiedSiteScenario
+    belief: Any                                 # BeliefExpiryScenario
+    lever: Quantity
+    angular_rate: Quantity
+
+    @property
+    def result(self):
+        from .solvers import StaleTransformModel
+        return StaleTransformModel().solve(self.belief.result, self.lever, self.angular_rate,
+                                           1 / self.site.machine.wrist_camera.frame_rate)
+
+
+class FreeSpaceExpiryScenario(BaseScenario):
+    """``site``'s rack end: free space ahead (clear distance) and abreast (side clearance) eroding at the walking speed."""
+    site: Any                                   # EmbodiedSiteScenario
+    uniform_timeout: Optional[Quantity] = None
+
+    @property
+    def result(self):
+        from .solvers import FreeSpaceExpiryModel
+        s, rm = self.site, self.site.machine
+        return FreeSpaceExpiryModel().solve(s.d_clear, s.side_clearance, s.delta_loc, s.delta_margin,
+                                            s.v_human_approach, s.perception_age, 1 / rm.nav_camera.frame_rate,
+                                            rm.base.max_velocity, s.a_brake, s.tau_delay, self.uniform_timeout)
+
+
+class EpochGapScenario(BaseScenario):
+    """Named acquisition ``epochs`` in one cycle; the ``pair`` to fuse is projected across its gap at ``speed``."""
+    epochs: Dict[str, Quantity]
+    pair: List[str]
+    speed: Quantity
+
+    @property
+    def result(self):
+        from .solvers import EpochGapModel
+        a, b = self.pair
+        return EpochGapModel().solve(self.epochs[a], self.epochs[b], self.speed)
+
+
+class SkewedRecordsScenario(BaseScenario):
+    """Two records ``skew`` apart, compared at ``site``: the base at its drive limit and a person at the walking speed close on each other."""
+    site: Any                                   # EmbodiedSiteScenario
+    skew: Quantity
+    separation: Quantity
+
+    @property
+    def closing_speed(self) -> Quantity:
+        return self.site.machine.base.max_velocity + self.site.v_human_approach
+
+    @property
+    def result(self):
+        from .solvers import EpochGapModel
+        s = self.site
+        return EpochGapModel().solve(0 * self.skew, self.skew, self.closing_speed, self.separation,
+                                     (s.delta_loc, s.delta_margin))
+
+
+class SensorBiasDriftScenario(BaseScenario):
+    """A steady ``reading`` whose sensor bias drifts at ``drift_rate`` for ``span``, while the estimator reports ``reported_sigma``."""
+    reading: Quantity
+    reported_sigma: Quantity
+    drift_rate: Quantity
+    span: Quantity
+    excitation: Optional[Quantity] = None       # a deliberate contact break that would expose the bias
+
+    @property
+    def result(self):
+        from .solvers import SensorBiasDriftModel
+        return SensorBiasDriftModel().solve(self.reading, self.drift_rate, self.span)
+
+
+class FrozenTransformScenario(BaseScenario):
+    """``site``'s conveyor object tracked by a camera lost at ``loss_time``; its last transform republished every ``republish_period``."""
+    site: Any                                   # EmbodiedSiteScenario
+    republish_period: Quantity
+    freshness_threshold: Quantity
+    loss_time: Quantity
+    window: Quantity
+
+    @property
+    def result(self):
+        from .solvers import FrozenTransformModel
+        s = self.site
+        return FrozenTransformModel().solve(s.v_conveyor, self.window, s.grasp_tolerance, self.republish_period,
+                                            self.freshness_threshold)
+
+
+class TrackConfirmationScenario(BaseScenario):
+    """A tracker that outputs a track after ``min_hits`` hits, on ``site.machine``'s navigation camera at its drive limit."""
+    site: Any                                   # EmbodiedSiteScenario
+    min_hits: int
+
+    @property
+    def result(self):
+        from .solvers import TrackConfirmationModel
+        rm = self.site.machine
+        return TrackConfirmationModel().solve(self.min_hits, rm.nav_camera.frame_rate, rm.base.max_velocity)
+
+
+class ClearanceQueryScenario(BaseScenario):
+    """Sphere-hull clearance queries on ``site.machine``'s permission controller, and a snapshot of the stopping corridor."""
+    site: Any                                   # EmbodiedSiteScenario
+    collision_allocation: Quantity
+    hulls: int
+    fewest_hulls: int
+    hull_radius: Quantity
+    esdf_cell_bytes: Quantity
+    occupancy_cell_bytes: Quantity
+    map_edge: Quantity
+    slab_height: Quantity
+    pitches: List[Quantity]
+    trilinear_reads: int
+
+    @property
+    def slab_volume(self) -> Quantity:
+        return (self.site.aisle_width * self.site.d_clear * self.slab_height).to("m**3")
+
+    @property
+    def result(self):
+        from .solvers import ClearanceQueryModel
+        s, rm = self.site, self.site.machine
+        return ClearanceQueryModel().solve(rm.permission_rate, self.collision_allocation, self.hulls,
+                                           self.hull_radius, s.delta_margin, rm.permission_mcu.memory.sram_bandwidth,
+                                           self.esdf_cell_bytes, self.occupancy_cell_bytes, self.map_edge,
+                                           self.slab_volume, self.pitches, self.trilinear_reads, s.enforcer_wcet)
+
+
+class HostMapSizingScenario(BaseScenario):
+    """A workcell of ``extent`` mapped at ``pitch``: dense grid against a hashed band of ``band_half_width`` around ``surface_area``."""
+    extent: List[Quantity]
+    pitch: Quantity
+    voxel_bytes: Quantity
+    surface_area: Quantity
+    band_half_width: Quantity
+    block_edge: int
+
+    @property
+    def result(self):
+        from .solvers import HostMapSizingModel
+        return HostMapSizingModel().solve(self.extent, self.pitch, self.voxel_bytes, self.surface_area,
+                                          self.band_half_width, self.block_edge)
+
+
+class RaymarchTrafficScenario(BaseScenario):
+    """One depth stream ray-marched into a map on ``site.machine``'s host SoC."""
+    site: Any                                   # EmbodiedSiteScenario
+    width_px: int
+    height_px: int
+    frame_rate: Quantity
+    ray_length: Quantity
+    pitch: Quantity
+    bytes_per_step: Quantity
+
+    @property
+    def result(self):
+        from .solvers import RaymarchTrafficModel
+        return RaymarchTrafficModel().solve(self.width_px, self.height_px, self.frame_rate, self.ray_length,
+                                            self.pitch, self.bytes_per_step,
+                                            self.site.machine.brain_soc.memory.bandwidth)
+
+
+class EncoderRateScenario(BaseScenario):
+    """An encoder of ``flop_per_frame`` on every ``site.machine`` navigation frame, against the host SoC's dense FP16 peak."""
+    site: Any                                   # EmbodiedSiteScenario
+    flop_per_frame: Quantity
+    keyframe_rate_low: Optional[Quantity] = None
+    keyframe_rate_high: Optional[Quantity] = None
+
+    @property
+    def result(self):
+        from .solvers import EncoderRateModel
+        rm = self.site.machine
+        return EncoderRateModel().solve(self.flop_per_frame, rm.nav_camera.frame_rate,
+                                        rm.brain_soc.compute.precision_flops["fp16"])
+# --- Grounded intent: the intent lease and its gates (added 2026-10-20) --------
+
+class IntentCadenceScenario(BaseScenario):
+    """``site``'s conveyor target proposed by ``machine``'s intent model: evidence horizons against
+    the model's cadence, a host stall of ``stall``, and the stop onset after expiry.
+
+    ``target_speed`` defaults to the conveyor's; set it for a slower drift.
+    """
+    site: Any                                    # EmbodiedSiteScenario (tolerance, error, belt, slip, tick, bus, onset)
+    machine: Any                                 # EmbodiedMobileManipulator (intent rate and latency)
+    stall: Quantity
+    target_speed: Optional[Quantity] = None
+
+    @property
+    def speed(self) -> Quantity:
+        return self.site.v_conveyor if self.target_speed is None else self.target_speed
+
+    @property
+    def result(self):
+        from .solvers import IntentCadenceModel
+        s, rm = self.site, self.machine
+        return IntentCadenceModel().solve(
+            s.grasp_tolerance, s.grasp_initial_error, self.speed, s.a_conveyor_slip,
+            rm.intent_rate, rm.intent_inference_latency, self.stall, s.t_tick, s.t_bus, s.t_brake_onset)
+
+
+class DynamicReachScenario(BaseScenario):
+    """A target ``target_distance`` from the gripper at ``cadence.machine``'s TCP speed ceiling,
+    against the cadence scenario's evidence windows."""
+    cadence: IntentCadenceScenario
+    target_distance: Quantity
+
+    @property
+    def speed_ceiling(self) -> Quantity:
+        return self.cadence.machine.tcp_speed_limit
+
+    @property
+    def result(self):
+        from .solvers import DynamicReachModel
+        c = self.cadence.result
+        return DynamicReachModel().solve(self.speed_ceiling, self.target_distance,
+                                         c.tracked_horizon, c.untracked_horizon)
+
+
+class ForwardOccupancyScenario(BaseScenario):
+    """A coworker's forward occupancy set at ``cadence.site``'s design approach speed, screened over
+    the cadence scenario's evidence windows and over a ``forecast`` horizon, against the aisle."""
+    cadence: IntentCadenceScenario
+    forecast: Quantity
+
+    @property
+    def result(self):
+        from .solvers import ForwardOccupancyModel
+        s, c = self.cadence.site, self.cadence.result
+        return ForwardOccupancyModel().solve(s.v_human_approach, s.aisle_width, c.untracked_horizon,
+                                             c.tracked_horizon, self.forecast)
+
+
+class IntentLeaseExpiryScenario(BaseScenario):
+    """The intent lease for the cadence scenario's target: its evidence horizons, an
+    ``administrative_lease``, and the stopping deadline from ``clearance`` at the TCP speed ceiling,
+    with the arm's credible deceleration from its handbook worst-case stop."""
+    cadence: IntentCadenceScenario
+    administrative_lease: Quantity
+    clearance: Quantity
+
+    @property
+    def result(self):
+        from .solvers import IntentLeaseExpiryModel
+        c, rm = self.cadence.result, self.cadence.machine
+        return IntentLeaseExpiryModel().solve(
+            c.untracked_horizon, c.tracked_horizon, self.administrative_lease, c.stop_onset,
+            rm.tcp_speed_limit, rm.arm.cartesian_velocity_limit, rm.arm.emergency_stop_time,
+            self.clearance)
+
+
+class ReferentSetScenario(BaseScenario):
+    """Raw per-box ``scores`` of retained candidates screened by a conformal threshold calibrated on
+    ``calibration_count`` scenes at miss rate ``alpha``, whose calibration score is ``threshold_score``."""
+    labels: List[str]
+    scores: List[float]
+    calibration_count: int
+    alpha: float
+    threshold_score: float                       # qhat
+
+    @property
+    def result(self):
+        from .solvers import ReferentSetModel
+        return ReferentSetModel().solve(self.scores, self.calibration_count, self.alpha, self.threshold_score)
+
+
+class ConfidenceRegionScenario(BaseScenario):
+    """A Gaussian position estimate with principal standard deviations ``sigmas``: its ``coverage``
+    region against ``site``'s grasp tolerance."""
+    site: Any                                    # EmbodiedSiteScenario (grasp tolerance)
+    sigmas: List[Quantity]
+    coverage: float
+
+    @property
+    def result(self):
+        from .solvers import ConfidenceRegionModel
+        return ConfidenceRegionModel().solve(self.sigmas, self.coverage, self.site.grasp_tolerance)
+
+
+class GoalSetMembershipScenario(BaseScenario):
+    """Terminal TCP ``offsets`` along one axis tested against a goal set whose semi-axes all equal
+    ``site``'s grasp tolerance: the normalized ellipsoidal distance, inside when at most one."""
+    site: Any                                    # EmbodiedSiteScenario (grasp tolerance)
+    offsets: List[Quantity]
+
+    @property
+    def norms(self) -> List[float]:
+        return [(d / self.site.grasp_tolerance).to("").magnitude for d in self.offsets]
+
+    @property
+    def inside(self) -> List[bool]:
+        return [n <= 1.0 for n in self.norms]
+
+# --- Data selection: corpus repetition, deduplication, coresets, echoing, labels, and cost (added 2026-10-20) ---
+
+
+class CorpusRepetitionScenario(BaseScenario):
+    """A training ``run`` (``ClusterTrainingTimeScenario``) set against the unique tokens of its
+    workload's own corpus.
+
+    The corpus holds ``training_dataset_size / bytes_per_token`` unique tokens. The
+    run processes ``training_ops / (flops_per_param_token x parameters)`` tokens,
+    so it passes over the corpus that many times. A compute-optimal fit asks for
+    ``tokens_per_param`` training tokens per parameter.
+    """
+    run: Any                           # ClusterTrainingTimeScenario
+    bytes_per_token: Quantity          # bytes per token
+    tokens_per_param: float
+    flops_per_param_token: float
+
+    @property
+    def workload(self) -> Workload:
+        return self.run.workload
+
+    @property
+    def hardware(self) -> HardwareNode:
+        return self.run.hardware
+
+    @property
+    def accelerators(self) -> int:
+        return self.run.n_devices
+
+    @property
+    def utilization(self) -> float:
+        return self.run.efficiency
+
+    @property
+    def parameters(self) -> float:
+        return self.workload.parameters.to("param").magnitude
+
+    @property
+    def corpus_bytes(self) -> Quantity:
+        return self.workload.training_dataset_size
+
+    @property
+    def training_flops(self) -> Quantity:
+        return self.workload.training_ops
+
+    @property
+    def unique_tokens(self) -> Quantity:
+        return (self.corpus_bytes / self.bytes_per_token).to("count")
+
+    @property
+    def optimal_tokens(self) -> Quantity:
+        """Training tokens the compute-optimal ratio asks for at this parameter count."""
+        return Q_(self.tokens_per_param * self.parameters, "count")
+
+    @property
+    def shortfall(self) -> float:
+        """Compute-optimal tokens over the corpus's unique tokens."""
+        return (self.optimal_tokens / self.unique_tokens).to("").magnitude
+
+    @property
+    def unique_tokens_per_param(self) -> float:
+        return self.unique_tokens.magnitude / self.parameters
+
+    @property
+    def tokens_processed(self) -> Quantity:
+        return Q_(self.training_flops.to("flop").magnitude / (self.flops_per_param_token * self.parameters), "count")
+
+    @property
+    def trained_tokens_per_param(self) -> float:
+        return self.tokens_processed.magnitude / self.parameters
+
+    @property
+    def passes(self) -> float:
+        """Times the run read its corpus."""
+        return (self.tokens_processed / self.unique_tokens).to("").magnitude
+
+    @property
+    def run_time(self) -> Quantity:
+        return self.run.training_time.to("second")
+
+    @property
+    def run_energy(self) -> Quantity:
+        """Accelerator energy at board power for the whole run."""
+        return (self.accelerators * self.hardware.tdp * self.run_time).to("joule")
+
+    @property
+    def compute_optimal(self):
+        """(parameters, tokens) that spend the same compute at ``tokens_per_param``."""
+        from ..physics.scaling import calc_compute_optimal_allocation
+        return calc_compute_optimal_allocation(self.training_flops.to("flop").magnitude,
+                                               self.tokens_per_param, self.flops_per_param_token)
+
+
+class AllocationGrowthScenario(BaseScenario):
+    """A compute-optimal allocation ``X_opt ~ C^exponent`` when compute grows by ``compute_multiple``."""
+    compute_multiple: float
+    exponent: float
+
+    @property
+    def growth(self) -> float:
+        """Fractional growth of the allocation."""
+        from ..physics.scaling import calc_allocation_growth
+        return calc_allocation_growth(self.compute_multiple, self.exponent)
+
+
+class DuplicateRemovalScenario(BaseScenario):
+    """Near-duplicate shares removed from ``run``'s corpus: the training time and energy each
+    share returns, against one read of the corpus and the MinHash signatures of its documents."""
+    run: CorpusRepetitionScenario
+    duplicate_shares: Dict[str, float]   # corpus name -> fraction of documents removed
+    documents: float
+    signature_hashes: int
+    hash_bytes: Quantity
+    read_bandwidth: Quantity
+
+    def time_saved(self, corpus: str) -> Quantity:
+        return (self.duplicate_shares[corpus] * self.run.run_time).to("hour")
+
+    def energy_saved(self, corpus: str) -> Quantity:
+        return (self.duplicate_shares[corpus] * self.run.run_energy).to("kWh")
+
+    @property
+    def signature_bytes(self) -> Quantity:
+        return (self.documents * self.signature_hashes * self.hash_bytes).to("GB")
+
+    @property
+    def read_time(self) -> Quantity:
+        return (self.run.corpus_bytes / self.read_bandwidth).to("second")
+
+    @property
+    def all_pairs(self) -> float:
+        """Pairwise comparisons an exhaustive search would make."""
+        return self.documents * (self.documents - 1) / 2
+
+
+class MinHashBandingScenario(BaseScenario):
+    """A MinHash signature cut into ``bands`` bands of ``rows`` hashes over ``shingle_words``-word shingles."""
+    bands: int
+    rows: int
+    shingle_words: int
+    probe_similarities: List[float] = []   # Jaccard similarities at which to read the candidate chance
+
+    @property
+    def hashes(self) -> int:
+        return self.bands * self.rows
+
+    @property
+    def threshold(self) -> float:
+        from ..physics.retrieval import calc_lsh_threshold
+        return calc_lsh_threshold(self.bands, self.rows)
+
+    def candidate_probability(self, similarity: float) -> float:
+        from ..physics.retrieval import calc_lsh_candidate_probability
+        return calc_lsh_candidate_probability(similarity, self.bands, self.rows)
+
+
+class InformationComputeRatioScenario(BaseScenario):
+    """Accuracy gained per training FLOP for one epoch over all of ``dataset`` and over a
+    ``keep_fraction`` subset, with ``gain_full`` and ``gain_subset`` points of gain."""
+    workload: Workload
+    dataset: Any                       # DatasetProfile
+    gain_full: float                   # percentage points
+    gain_subset: float                 # percentage points
+    keep_fraction: float
+    training_flops_factor: float = 3.0
+
+    @property
+    def examples(self) -> float:
+        return self.dataset.training_examples.to("count").magnitude
+
+    @property
+    def training_flops_per_sample(self) -> Quantity:
+        return (self.workload.inference_flops * self.training_flops_factor).to("GFLOP")
+
+    @property
+    def epoch_flops(self) -> Quantity:
+        return (self.examples * self.training_flops_per_sample).to("flop")
+
+    @property
+    def subset_examples(self) -> float:
+        return self.examples * self.keep_fraction
+
+    @property
+    def subset_flops(self) -> Quantity:
+        return (self.subset_examples * self.training_flops_per_sample).to("flop")
+
+    @property
+    def icr_full(self) -> float:
+        return self.gain_full / self.epoch_flops.magnitude
+
+    @property
+    def icr_subset(self) -> float:
+        return self.gain_subset / self.subset_flops.magnitude
+
+    @property
+    def icr_ratio(self) -> float:
+        return self.icr_subset / self.icr_full
+
+
+class CoresetRunScenario(BaseScenario):
+    """``workload`` trained for ``epochs`` over ``dataset`` on one ``hardware`` at ``utilization``,
+    against a ``keep_fraction`` coreset scored by one forward pass of ``workload`` or ``proxy``.
+
+    The selection inequality compares scoring plus subset training with full
+    training; rescoring repeats the scoring pass before every epoch. The data-path
+    fields follow one epoch through storage (the archive at the node's storage
+    bandwidth), the host (``host_rate`` decoded samples a second), and the
+    host-to-accelerator link (``decoded_sample`` bytes each).
+    """
+    workload: Workload
+    dataset: Any                       # DatasetProfile
+    hardware: HardwareNode
+    utilization: float
+    keep_fraction: float
+    epochs: int
+    training_flops_factor: float = 3.0
+    proxy: Optional[Workload] = None
+    proxy_epochs: Optional[int] = None         # epochs a proxy trained from scratch runs before scoring
+    host_rate: Optional[Quantity] = None       # samples per second the host prepares
+    decoded_sample: Optional[Quantity] = None  # bytes per sample sent to the accelerator
+
+    @property
+    def examples(self) -> float:
+        return self.dataset.training_examples.to("count").magnitude
+
+    @property
+    def sustained_rate(self) -> Quantity:
+        return self.hardware.compute.peak_flops * self.utilization
+
+    @property
+    def training_flops_per_sample(self) -> Quantity:
+        return self.training_flops_factor * self.workload.inference_flops
+
+    @property
+    def epoch_flops(self) -> Quantity:
+        return (self.examples * self.training_flops_per_sample).to("flop")
+
+    @property
+    def epoch_time(self) -> Quantity:
+        return (self.epoch_flops / self.sustained_rate).to("second")
+
+    @property
+    def epoch_energy(self) -> Quantity:
+        return (self.hardware.tdp * self.epoch_time).to("kJ")
+
+    @property
+    def sample_rate(self) -> float:
+        """Samples a second the accelerator consumes at the sustained rate."""
+        return self.examples / self.epoch_time.magnitude
+
+    @property
+    def run_time(self) -> Quantity:
+        """``epochs`` full epochs."""
+        return (self.epochs * self.epoch_time).to("hour")
+
+    # Selection inequality
+    @property
+    def full_time(self) -> Quantity:
+        return (self.examples * self.epochs * self.training_flops_factor * self.workload.inference_flops
+                / self.sustained_rate).to("second")
+
+    @property
+    def subset_time(self) -> Quantity:
+        return self.keep_fraction * self.full_time
+
+    def score_time(self, scorer: Optional[Workload] = None) -> Quantity:
+        """One forward pass of ``scorer`` (default: the workload) over the whole pool."""
+        model = scorer or self.workload
+        return (self.examples * model.inference_flops / self.sustained_rate).to("second")
+
+    def score_energy(self, scorer: Optional[Workload] = None) -> Quantity:
+        return (self.hardware.tdp * self.score_time(scorer)).to("kJ")
+
+    def selection_time(self, scorer: Optional[Workload] = None) -> Quantity:
+        """Scoring once plus training on the subset."""
+        return self.score_time(scorer) + self.subset_time
+
+    def saving(self, scorer: Optional[Workload] = None) -> Quantity:
+        return self.full_time - self.selection_time(scorer)
+
+    def saving_fraction(self, scorer: Optional[Workload] = None) -> float:
+        return (self.saving(scorer) / self.full_time).to("").magnitude
+
+    @property
+    def rescoring_time(self) -> Quantity:
+        """The workload rescoring the pool before every epoch."""
+        return (self.epochs * self.score_time()).to("minute")
+
+    @property
+    def rescoring_saving_fraction(self) -> float:
+        return ((self.full_time - (self.rescoring_time + self.subset_time)) / self.full_time).to("").magnitude
+
+    @property
+    def rescoring_over_training(self) -> float:
+        return (self.rescoring_time / self.subset_time).to("").magnitude
+
+    # One pruned epoch through the machine
+    @property
+    def pruned_epoch_time(self) -> Quantity:
+        return self.keep_fraction * self.epoch_time
+
+    @property
+    def pruned_epoch_energy(self) -> Quantity:
+        return self.keep_fraction * self.epoch_energy
+
+    @property
+    def run_saving_time(self) -> Quantity:
+        return (self.epochs * (self.epoch_time - self.pruned_epoch_time)).to("hour")
+
+    @property
+    def run_saving_energy(self) -> Quantity:
+        return (self.epochs * (self.epoch_energy - self.pruned_epoch_energy)).to("MJ")
+
+    @property
+    def saving_over_score_energy(self) -> float:
+        return (self.run_saving_energy / self.score_energy()).to("").magnitude
+
+    @property
+    def archive_bytes(self) -> Quantity:
+        return self.dataset.training_archive_size.to("GB")
+
+    @property
+    def storage_time(self) -> Quantity:
+        return (self.archive_bytes / self.hardware.storage.bandwidth).to("second")
+
+    @property
+    def materialized_bytes(self) -> Quantity:
+        """The coreset written out as its own shards."""
+        return (self.keep_fraction * self.archive_bytes).to("GB")
+
+    @property
+    def link_bytes(self) -> Quantity:
+        return (self.examples * self.decoded_sample).to("GB")
+
+    @property
+    def link_time(self) -> Quantity:
+        return (self.link_bytes / self.hardware.interconnect.bandwidth).to("second")
+
+    @property
+    def host_epoch_time(self) -> Quantity:
+        return Q_(self.examples / self.host_rate.to("count/second").magnitude, "second")
+
+
+class DataEchoingScenario(BaseScenario):
+    """A host that prepares ``host_rate`` samples a second feeding an accelerator that consumes
+    ``accelerator_rate``, over ``epochs`` of ``examples``, with each prepared sample used
+    ``echo_factor`` times."""
+    accelerator_rate: Quantity
+    host_rate: Quantity
+    examples: Quantity                 # count
+    epochs: int
+    echo_factor: float
+
+    @property
+    def ratio(self) -> float:
+        """Accelerator rate over host rate; echoing helps up to this factor."""
+        return (self.accelerator_rate / self.host_rate).to("").magnitude
+
+    @property
+    def utilization(self) -> float:
+        """Accelerator busy share without echoing."""
+        return (self.host_rate / self.accelerator_rate).to("").magnitude
+
+    @property
+    def idle_fraction(self) -> float:
+        return 1 - (self.host_rate / self.accelerator_rate).to("").magnitude
+
+    @property
+    def run_time(self) -> Quantity:
+        return self.epochs * self.examples / self.host_rate
+
+    @property
+    def echoed_rate(self) -> Quantity:
+        return min(self.host_rate * self.echo_factor, self.accelerator_rate)
+
+    @property
+    def echoed_run_time(self) -> Quantity:
+        return self.epochs * self.examples / self.echoed_rate
+
+
+class SelectionBudgetScenario(BaseScenario):
+    """Selection that takes ``selection_time`` and leaves a subset that trains in ``subset_time``,
+    against full training in ``full_time`` (the selection inequality in hours)."""
+    selection_time: Quantity
+    subset_time: Quantity
+    full_time: Quantity
+    pool: Optional[float] = None
+    kept: Optional[float] = None
+
+    @property
+    def total_time(self) -> Quantity:
+        return self.selection_time + self.subset_time
+
+    @property
+    def net_saving(self) -> Quantity:
+        return self.full_time - self.total_time
+
+    @property
+    def pays(self) -> bool:
+        return self.total_time < self.full_time
+
+    @property
+    def breakeven_selection(self) -> Quantity:
+        """Longest selection that still saves time."""
+        return self.full_time - self.subset_time
+
+    @property
+    def overhead_ratio(self) -> float:
+        """Selection time over subset training time."""
+        return (self.selection_time / self.subset_time).to("").magnitude
+
+    @property
+    def selection_share(self) -> float:
+        """Selection time over full training time."""
+        return (self.selection_time / self.full_time).to("").magnitude
+
+
+class CoverageFloorScenario(BaseScenario):
+    """A ``keep_fraction`` coreset drawn without regard to class from ``pool`` examples, of which
+    ``rare_share`` belong to a rare class that needs at least ``floor`` examples."""
+    pool: float
+    rare_share: float
+    keep_fraction: float
+    floor: float
+
+    @property
+    def rare(self) -> float:
+        return self.pool * self.rare_share
+
+    @property
+    def expected_kept(self) -> float:
+        return self.rare * self.keep_fraction
+
+    @property
+    def shortfall(self) -> float:
+        return self.floor - self.expected_kept
+
+
+class CurriculumScheduleScenario(BaseScenario):
+    """A curriculum that reaches target in ``curriculum_epochs`` against ``baseline_epochs``
+    shuffled, with an optional linear warmup of ``warmup_epochs`` (epoch j serves j/W of the data)."""
+    baseline_epochs: int
+    curriculum_epochs: int
+    warmup_epochs: Optional[int] = None
+
+    @property
+    def epoch_reduction(self) -> float:
+        return (self.baseline_epochs - self.curriculum_epochs) / self.baseline_epochs
+
+    @property
+    def warmup_samples(self) -> float:
+        """Dataset passes the linear warmup serves: (W + 1) / 2."""
+        return (self.warmup_epochs + 1) / 2
+
+    @property
+    def warmup_share(self) -> float:
+        """Warmup samples over W full passes."""
+        return self.warmup_samples / self.warmup_epochs
+
+
+class ActiveLearningRoundsScenario(BaseScenario):
+    """Active learning from ``initial_labels`` adding ``labels_per_round`` for ``rounds`` rounds,
+    each round paying ``round_scoring_cost`` to score the pool, against random labeling that
+    needs ``random_labels`` at the same ``label_price``."""
+    label_price: Quantity              # USD per label
+    initial_labels: int
+    labels_per_round: int
+    rounds: int
+    round_scoring_cost: Quantity       # USD per round
+    random_labels: int
+    label_turnaround: Optional[Quantity] = None   # time each round waits for its labels
+
+    @property
+    def active_labels(self) -> int:
+        return self.initial_labels + self.rounds * self.labels_per_round
+
+    @property
+    def random_cost(self) -> Quantity:
+        return (self.random_labels * self.label_price).to("USD")
+
+    @property
+    def active_label_cost(self) -> Quantity:
+        return (self.active_labels * self.label_price).to("USD")
+
+    @property
+    def scoring_cost(self) -> Quantity:
+        return (self.rounds * self.round_scoring_cost).to("USD")
+
+    @property
+    def active_cost(self) -> Quantity:
+        return self.active_label_cost + self.scoring_cost
+
+    @property
+    def roi(self) -> float:
+        """Saving over the active-learning cost."""
+        return ((self.random_cost - self.active_cost) / self.active_cost).to("").magnitude
+
+
+class BudgetMatchedLabelingScenario(BaseScenario):
+    """A ``pool`` to label at ``label_price`` under ``budget``: random labeling spends the budget,
+    active learning reaches the same quality with ``active_labels``."""
+    pool: Quantity                     # count
+    label_price: Quantity              # USD per count
+    budget: Quantity                   # USD
+    active_labels: Quantity            # count
+    deadline: Optional[Quantity] = None
+
+    @property
+    def full_cost(self) -> Quantity:
+        return self.pool * self.label_price
+
+    @property
+    def random_labels(self) -> Quantity:
+        return (self.budget / self.label_price).to("count")
+
+    @property
+    def active_cost(self) -> Quantity:
+        return self.active_labels * self.label_price
+
+    @property
+    def unspent_share(self):
+        return (self.budget - self.active_cost) / self.budget
+
+    @property
+    def label_ratio(self) -> float:
+        return (self.random_labels / self.active_labels).to("").magnitude
+
+    @property
+    def saving(self) -> Quantity:
+        return self.budget - self.active_cost
+
+    @property
+    def over_budget_ratio(self) -> float:
+        return (self.full_cost / self.budget).to("").magnitude
+
+
+class SemiSupervisedCostScenario(BaseScenario):
+    """A supervised baseline with ``supervised_labels`` and ``supervised_compute`` against a
+    semi-supervised run with ``ssl_labels`` and ``ssl_compute``, labels at ``label_price``."""
+    label_price: Quantity              # USD per label
+    supervised_labels: int
+    supervised_compute: Quantity       # USD
+    ssl_labels: int
+    ssl_compute: Quantity              # USD
+
+    @property
+    def supervised_label_cost(self) -> Quantity:
+        return (self.supervised_labels * self.label_price).to("USD")
+
+    @property
+    def supervised_total(self) -> Quantity:
+        return self.supervised_label_cost + self.supervised_compute
+
+    @property
+    def ssl_label_cost(self) -> Quantity:
+        return (self.ssl_labels * self.label_price).to("USD")
+
+    @property
+    def ssl_total(self) -> Quantity:
+        return self.ssl_label_cost + self.ssl_compute
+
+    @property
+    def compute_multiple(self) -> float:
+        return (self.ssl_compute / self.supervised_compute).to("").magnitude
+
+    @property
+    def cost_reduction(self) -> float:
+        return (self.supervised_total / self.ssl_total).to("").magnitude
+
+    @property
+    def label_reduction(self) -> float:
+        return self.supervised_labels / self.ssl_labels
+
+
+class PretrainingAmortizationScenario(BaseScenario):
+    """``tasks`` tasks trained from scratch at ``scratch_compute`` each against one pretraining run
+    of ``pretrain_compute`` plus ``finetune_compute`` per task, with the labels each path needs."""
+    pretrain_compute: Quantity         # accelerator-hours
+    scratch_compute: Quantity          # accelerator-hours per task
+    finetune_compute: Quantity         # accelerator-hours per task
+    tasks: int
+    scratch_labels: Quantity           # count per task
+    finetune_labels: Quantity          # count per task
+    label_price: Quantity              # USD per count
+
+    @property
+    def scratch_total(self) -> Quantity:
+        return self.scratch_compute * self.tasks
+
+    @property
+    def foundation_total(self) -> Quantity:
+        return self.pretrain_compute + (self.finetune_compute * self.tasks)
+
+    @property
+    def scratch_label_cost(self) -> Quantity:
+        return self.scratch_labels * self.label_price * self.tasks
+
+    @property
+    def finetune_label_cost(self) -> Quantity:
+        return self.finetune_labels * self.label_price * self.tasks
+
+    @property
+    def label_cost_reduction(self):
+        return self.scratch_label_cost / self.finetune_label_cost
+
+    @property
+    def marginal_compute_reduction(self) -> float:
+        return (self.scratch_compute / self.finetune_compute).to("").magnitude
+
+    @property
+    def crossover_tasks(self) -> float:
+        """Tasks after which pretraining has paid for itself in compute."""
+        return (self.pretrain_compute / (self.scratch_compute - self.finetune_compute)).to("").magnitude
+
+
+class DataCostBreakdownScenario(BaseScenario):
+    """A supervised dataset's bill: ``acquisition``, ``labels`` at ``label_price``,
+    ``storage_bytes`` kept for ``storage_duration`` at ``storage_rate``, and ``runs`` training
+    runs of ``run_time`` each on ``accelerators`` at ``accelerator_rate``."""
+    acquisition: Quantity              # USD
+    labels: Quantity                   # count
+    label_price: Quantity              # USD per count
+    storage_bytes: Quantity
+    storage_rate: Quantity             # USD per GB per month
+    storage_duration: Quantity
+    run_time: Quantity
+    runs: int
+    accelerators: int
+    accelerator_rate: Quantity         # USD per accelerator-hour
+
+    @property
+    def label_cost(self) -> Quantity:
+        return self.labels * self.label_price
+
+    @property
+    def storage_cost(self) -> Quantity:
+        return (self.storage_bytes * self.storage_rate * self.storage_duration).to("USD")
+
+    @property
+    def accelerator_hours_per_run(self) -> Quantity:
+        return self.accelerators * self.run_time
+
+    @property
+    def accelerator_hours(self) -> Quantity:
+        return self.accelerator_hours_per_run * self.runs
+
+    @property
+    def compute_cost(self) -> Quantity:
+        return (self.accelerator_hours * self.accelerator_rate).to("USD")
+
+    @property
+    def total(self) -> Quantity:
+        return self.acquisition + self.label_cost + self.storage_cost + self.compute_cost
+
+    @property
+    def data_share(self):
+        return (self.acquisition + self.label_cost + self.storage_cost) / self.total
+
+    @property
+    def compute_share(self):
+        return self.compute_cost / self.total
+
+
+class RunAmortizationScenario(BaseScenario):
+    """A one-time investment of ``build_cost`` plus ``operating_cost`` that saves ``saving_per_run``
+    on every training run that reuses its output."""
+    build_cost: Quantity               # USD
+    operating_cost: Quantity           # USD, one-time
+    saving_per_run: Quantity           # USD per run
+    run_counts: List[int] = []         # campaign sizes at which to read the return
+
+    @property
+    def investment(self) -> Quantity:
+        return self.build_cost + self.operating_cost
+
+    def net_return(self, runs: int) -> float:
+        """(runs x saving - investment) / investment."""
+        return ((runs * self.saving_per_run - self.investment) / self.investment).to("").magnitude
+
+    def savings_multiple(self, runs: int) -> float:
+        """Total savings over the investment."""
+        return (runs * self.saving_per_run / self.investment).to("").magnitude
+
+    @property
+    def breakeven_runs(self) -> float:
+        return (self.investment / self.saving_per_run).to("").magnitude
+
+
+class DataScalingReturnScenario(BaseScenario):
+    """Growing a dataset from ``base_examples`` to ``scaled_examples`` for ``accuracy_gain`` points."""
+    base_examples: Quantity            # count
+    scaled_examples: Quantity          # count
+    accuracy_gain: float               # percentage points
+
+    @property
+    def scale(self) -> float:
+        return (self.scaled_examples / self.base_examples).to("").magnitude
+
+
+class CarbonPricedPlacementScenario(BaseScenario):
+    """A run of ``it_energy`` on ``fleet`` placed among ``regions`` with and without a carbon price."""
+    fleet: Fleet
+    it_energy: Quantity
+    regions: List[str]
+    carbon_price_per_ton: float     # dollars per tonne CO2
+    mfu: float
+    reference_grid: Any
+
+    @property
+    def result(self):
+        from .solvers import CarbonPricedPlacementModel
+        return CarbonPricedPlacementModel().solve(self.fleet, self.it_energy, self.regions,
+                                                  self.carbon_price_per_ton, self.mfu, self.reference_grid)

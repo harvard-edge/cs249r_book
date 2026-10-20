@@ -157,38 +157,38 @@ $$\Pr(\text{exp}) = 1-(1-\DocumentPayloadFraction)^{\TaskReadCount}$$ {#eq-vol3-
 # │ Show: Exposure at repair and research read volumes, the linear estimate,
 # │       residual exposure behind a screening classifier, per-archetype rows
 # │       for @tbl-vol3-authority-by-archetype and their research/support ratio.
-# │ How:  \Pr(\text{exp}) = 1 - (1 - q)^n_read; a classifier with miss rate m gives q*m.
+# │ How:  Scenarios.InjectionExposureByReadVolume (InjectionExposureModel):
+# │       \Pr(\text{exp}) = 1 - (1 - q)^n_read; a classifier with miss rate m gives q*m.
 # │
 # │ Note: Hypothetical poison fraction, miss rate, and repair read volume;
 # │       research, support, and remediation read volumes come from the
 # │       Agents.Research/Support/Remediation workload profiles. All are
 # │       scenario inputs, not measured properties of any corpus or product.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Agents
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_percent
 
 class InjectionExposure:
     # ┌── 1. LOAD (Scenario inputs and workload profiles) ──────────────────
-    q = 0.01  # hypothetical fraction of retrievable documents carrying a payload
-    miss = 0.05  # hypothetical fraction of payloads a screening classifier misses
-    tasks = 1000  # research tasks in the per-cohort count
-    r_repair = 20  # documents a repair task reads (READMEs, issues, search results)
-    r_research = Agents.Research.OrchestratorWorker.untrusted_reads_per_task  # pages, retrieved papers
-    r_support = Agents.Support.CustomerOps.untrusted_reads_per_task  # messages, attachments
-    r_remediation = Agents.Remediation.OnCall.untrusted_reads_per_task  # alerts, log excerpts
+    scenario = Scenarios.InjectionExposureByReadVolume
+    q = scenario.payload_fraction  # hypothetical fraction of retrievable documents carrying a payload
+    miss = scenario.miss_rate  # hypothetical fraction of payloads a screening classifier misses
+    tasks = scenario.cohort  # research tasks in the per-cohort count
+    r_repair = scenario.reads["repair"]  # documents a repair task reads (READMEs, issues, search results)
+    r_research = scenario.reads["research"]  # pages, retrieved papers
+    r_support = scenario.reads["support"]  # messages, attachments
+    r_remediation = scenario.reads["remediation"]  # alerts, log excerpts
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    def exposure(q, r):
-        return 1 - (1 - q) ** r
-
-    exp_repair = exposure(q, r_repair)
-    exp_research = exposure(q, r_research)
-    exp_support = exposure(q, r_support)
-    exp_remediation = exposure(q, r_remediation)
-    lin_repair = q * r_repair
-    res_repair = exposure(q * miss, r_repair)
-    res_research = exposure(q * miss, r_research)
-    res_research_tasks = res_research * tasks
+    result = scenario.result
+    exp_repair = result.exposure["repair"]
+    exp_research = result.exposure["research"]
+    exp_support = result.exposure["support"]
+    exp_remediation = result.exposure["remediation"]
+    lin_repair = result.linear["repair"]
+    res_repair = result.screened["repair"]
+    res_research = result.screened["research"]
+    res_research_tasks = result.screened_per_cohort["research"]
     research_over_support = exp_research / exp_support
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -790,32 +790,30 @@ The cached key-value tensors of that fourth state tier can leak private context 
 # │       prefix-hit estimate of @sec-vol3-kvcache-radix-tree.
 # │ Show: Prefill time a miss pays at two prefix lengths, and the weight-read
 # │       pass a hit pays instead.
-# │ How:  Same registry model, node, and sustained rate as that estimate;
-# │       prefill ops = 2NS + 2LdS^2 (@eq-appdx-prefill-long); hit floor =
-# │       16-bit weights / node memory bandwidth.
+# │ How:  Scenarios.PrefixCacheProbe2K and InvariantPrefixRebuildDgxH100
+# │       (PrefixRebuildModel): the same registry model, node, and sustained
+# │       rate as that estimate; prefill ops = 2NS + 2LdS^2
+# │       (@eq-appdx-prefill-long); hit floor = 16-bit weights / node memory
+# │       bandwidth.
 # │
 # │ Note: Prefix lengths are scenario inputs; the 4,096-token case matches the
 # │       earlier estimate so the two chapters quote one number.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import *
+from mlsysim import Scenarios
+from mlsysim.core.units import ms
 from mlsysim.fmt import check, fmt_int, MarkdownStr
 
 class PrefixProbe:
-    # ┌── 1. LOAD (Registry model and node; scenario prefix lengths) ───────
-    model = Models.Language.Llama3_70B
-    node = Systems.Nodes.DGX_H100
-    prefix_short = 2_048  # scenario: probed system-prompt prefix
-    prefix_long = 4_096  # scenario: the earlier prefix-hit estimate's prefix
-    utilization = Literature.Training.MfuHigh * 0.9  # scenario: sustained prefill utilization
+    # ┌── 1. LOAD (Scenarios on the registry model and node) ───────────────
+    probe = Scenarios.PrefixCacheProbe2K
+    rebuild = Scenarios.InvariantPrefixRebuildDgxH100
+    prefix_short = probe.prefix_tokens  # scenario: probed system-prompt prefix
+    prefix_long = rebuild.prefix_tokens  # scenario: the earlier prefix-hit estimate's prefix
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    n_params = model.parameters.to("count").magnitude
-    sustained_rate = node.accelerators_per_node * node.accelerator.compute.peak_flops * utilization
-    ops_short = (2 * n_params * prefix_short + 2 * model.layers * model.hidden_dim * prefix_short**2) * flop
-    ops_long = (2 * n_params * prefix_long + 2 * model.layers * model.hidden_dim * prefix_long**2) * flop
-    t_miss_short = (ops_short / sustained_rate).to(ms)
-    t_miss_long = (ops_long / sustained_rate).to(ms)
-    t_hit = (model.size_in_bytes(BYTES_FP16) / (node.accelerators_per_node * node.accelerator.memory.bandwidth)).to(ms)
+    t_miss_short = probe.result.rebuild_time.to(ms)
+    t_miss_long = rebuild.result.rebuild_time.to(ms)
+    t_hit = probe.result.weight_read_time.to(ms)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(150 < t_miss_long.magnitude < 190, "Must match the earlier ~170 ms prefix-hit estimate")
@@ -1000,37 +998,45 @@ Comprehensive evaluation also tallies operational latency and financial cost acr
 # │       outcomes, and bound an attack-success rate after zero observed successes.
 # │ Show: Observed and worst-case rates, relative reductions, the rise in cost
 # │       per accepted benign task, and the 95 percent zero-success upper bound.
-# │ How:  Rates over declared episode denominators; C_eff ratio at equal attempt
-# │       cost is p_acc(A)/p_acc(B); zero-success bound 1 - (1 - c)^(1/n).
+# │ How:  Scenarios.FixtureReleasePolicyComparison (PolicyComparisonModel):
+# │       rates over declared episode denominators; C_eff ratio at equal attempt
+# │       cost is p_acc(A)/p_acc(B). Scenarios.CleanAttackSuite100 and
+# │       CleanAttackSuite50 (ZeroFailureModel): zero-success bound 1 - (1 - c)^(1/n).
 # │
 # │ Note: Invented teaching counts; no empirical defense ranking.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_percent
 
 class SecurityPolicyComparison:
     # ┌── 1. LOAD (Scenario inputs: equally sized, isolated trial cohorts) ──
-    attacked = 100
-    benign = 100
-    harm_a, unknown_a, accepted_attack_a = 20, 5, 65
-    harm_b, unknown_b, accepted_attack_b = 5, 10, 55
-    accepted_benign_a, false_block_a = 90, 5
-    accepted_benign_b, false_block_b = 80, 15
-    conf = 0.95  # confidence level for the zero-success upper bound
-    zero_n = 100  # attacked trials with zero observed successes (prose example)
-    chk_n = 50  # attacked trials in the checkpoint's zero-success report
-    chk_target = 0.01  # tolerable attack-success rate in the checkpoint
+    comparison = Scenarios.FixtureReleasePolicyComparison
+    zero_suite = Scenarios.CleanAttackSuite100  # prose example
+    chk_suite = Scenarios.CleanAttackSuite50  # the checkpoint's zero-success report
+    a, b = comparison.baseline, comparison.candidate
+    attacked = comparison.attacked
+    benign = comparison.benign
+    harm_a, unknown_a, accepted_attack_a = a["confirmed"], a["unresolved"], a["accepted_attacked"]
+    harm_b, unknown_b, accepted_attack_b = b["confirmed"], b["unresolved"], b["accepted_attacked"]
+    accepted_benign_a, false_block_a = a["accepted_benign"], a["false_block"]
+    accepted_benign_b, false_block_b = b["accepted_benign"], b["false_block"]
+    conf = zero_suite.confidence  # confidence level for the zero-success upper bound
+    zero_n = zero_suite.trials  # attacked trials with zero observed successes (prose example)
+    chk_n = chk_suite.trials  # attacked trials in the checkpoint's zero-success report
+    chk_target = chk_suite.target_rate  # tolerable attack-success rate in the checkpoint
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    asr_a = harm_a / attacked
-    asr_b = harm_b / attacked
-    upper_a = (harm_a + unknown_a) / attacked
-    upper_b = (harm_b + unknown_b) / attacked
-    relative_reduction = 1 - asr_b / asr_a
-    upper_reduction = 1 - upper_b / upper_a
-    ceff_rise = accepted_benign_a / accepted_benign_b - 1
-    lost_benign = accepted_benign_a - accepted_benign_b
-    extra_false_blocks = false_block_b - false_block_a
-    zero_ub = 1 - (1 - conf) ** (1 / zero_n)
+    result = comparison.result
+    asr_a = result.baseline_lower
+    asr_b = result.candidate_lower
+    upper_a = result.baseline_upper
+    upper_b = result.candidate_upper
+    relative_reduction = result.reduction_observed
+    upper_reduction = result.reduction_upper
+    ceff_rise = result.cost_rise
+    lost_benign = result.lost_benign
+    extra_false_blocks = result.extra_false_blocks
+    zero_ub = zero_suite.result.rate_upper_exact
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(harm_a + unknown_a + accepted_attack_a <= attacked, "A outcome accounting")
@@ -1226,9 +1232,14 @@ Language models reopened these classical security challenges at an entirely new 
 # │       session and prefix sizes, and approval parameters come from the
 # │       Agents.Research/Support/Remediation workload profiles.
 # └─────────────────────────────────────────────────────────────────────────────
-import math
 from mlsysim import Agents
 from mlsysim.fmt import check, fmt_int, fmt_percent, fmt_usd
+from mlsysim.physics import (
+    calc_cost_per_accepted,
+    calc_injection_exposure,
+    calc_injection_read_budget,
+    calc_zero_failure_sample_size,
+)
 
 class SecurityExercises:
     # ┌── 1. LOAD (Scenario inputs and workload profiles) ──────────────────
@@ -1271,14 +1282,12 @@ class SecurityExercises:
     p8_impact_usd = remediation.wrong_change_impact.to("USD").magnitude
 
     # ┌── 2. EXECUTE (Compute the guarded results) ─────────────────────────
-    def exposure(q, n):
-        return 1 - (1 - q) ** n
-
-    p1_nmax = math.floor(math.log(1 - p1_target) / math.log(1 - p1_q))
-    p1_nmax_screened = math.floor(math.log(1 - p1_target) / math.log(1 - p1_q * p1_miss))
-    p3_n_needed = math.ceil(math.log(0.05) / math.log(1 - p3_tol))
-    p4_ceff_a = p4_attempt_usd * p4_benign / p4_acc_a
-    p4_ceff_c = p4_attempt_usd * p4_benign / p4_acc_c
+    exposure = calc_injection_exposure
+    p1_nmax = calc_injection_read_budget(p1_q, p1_target)
+    p1_nmax_screened = calc_injection_read_budget(p1_q * p1_miss, p1_target)
+    p3_n_needed = calc_zero_failure_sample_size(1 - p3_tol, confidence=0.95)
+    p4_ceff_a = calc_cost_per_accepted(p4_attempt_usd, p4_acc_a / p4_benign)
+    p4_ceff_c = calc_cost_per_accepted(p4_attempt_usd, p4_acc_c / p4_benign)
     p5_loss_support_screen = exposure(p5_q * p5_miss, p5_n_support) * p5_success * p5_loss_support_usd
     p5_loss_support_scope = exposure(p5_q, p5_n_support) * p5_success * p5_loss_scoped_usd
     p5_loss_research = exposure(p5_q, p5_n_research) * p5_success * p5_loss_research_usd

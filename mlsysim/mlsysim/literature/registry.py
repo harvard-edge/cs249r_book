@@ -32,9 +32,10 @@ DatacenterElectricity = _load("datacenter_electricity", "DatacenterElectricity",
 AcceleratorLifecycle = _load("accelerator_lifecycle", "AcceleratorLifecycle", "Accelerator life-cycle emission trends (Schneider et al. 2025).")
 StorageSystems = _load("storage_systems", "StorageSystems", "Measured production storage-system results (3FS read stress test).")
 # Incident investigation reports (added 2026-10-20)
-IncidentReports = _load("incident_reports", "IncidentReports", "Values reported by incident investigations (NTSB Tempe, Cruise pullover).")
+IncidentReports = _load("incident_reports", "IncidentReports", "Values reported by incident investigations (NTSB Tempe, Cruise pullover, the SEC Knight Capital order, the CrowdStrike PIR).")
 # Model calls and agent trajectories (added 2026-10-20)
 ServingIncidents = _load("serving_incidents", "ServingIncidents", "Reported production serving-incident figures (Anthropic 2025 postmortem).")
+MultiAgentFailures = _load("multi_agent_failures", "MultiAgentFailures", "Cited multi-agent failure-taxonomy results (MAST, Cemri et al. 2025).")  # added 2026-10-20
 SelfCorrection = _load("self_correction", "SelfCorrection", "Intrinsic self-correction results (Huang et al. 2024, GPT-4).")
 # Added 2026-10-20: benchmark error rates and documented accuracy failures.
 PredictionQuality = _load("prediction_quality", "PredictionQuality", "Cited prediction-quality results (ILSVRC-2012 errors, Google Flu Trends misses).")
@@ -47,6 +48,7 @@ AnnotationTimes = _load("annotation_times", "AnnotationTimes", "Measured human a
 DataPipelineResults = _load("data_pipeline_results", "DataPipelineResults", "Measured input-pipeline results (data stalls, FFCV, a profiler's step breakdown).")  # added 2026-10-20
 DataFileMeasurements = _load("data_file_measurements", "DataFileMeasurements", "Metadata of real public data files (a Parquet file, a WebDataset shard).")  # added 2026-10-20
 SpeechCommandsReleases = _load("speech_commands_releases", "SpeechCommandsReleases", "Speech Commands v1 and v2 sizes and cross-release accuracy (Warden 2018).")  # added 2026-10-20
+CompilerResults = _load("compiler_results", "CompilerResults", "Cited results of ML compilers and fused kernels (PyTorch 2, FlashAttention).")  # added 2026-10-20
 SpaceflightAnomalies = _load("spaceflight_anomalies", "SpaceflightAnomalies", "Cited results of spaceflight anomaly inquiries (ESA Schiaparelli 2017).")
 # Diabetic retinopathy screening studies (added 2026-10-20)
 ScreeningStudies = _load("screening_studies", "ScreeningStudies", "Cited results of diabetic retinopathy screening systems (Gulshan 2016, Beede 2020, FDA DEN180001).")
@@ -57,6 +59,12 @@ ContextUse = _load("context_use", "ContextUse", "Cited results on how models use
 AgentRetrieval = _load("agent_retrieval", "AgentRetrieval", "Cited results on how agents retrieve: SWE-agent against BM25 retrieval, PoisonedRAG's injection count.")  # added 2026-10-20
 SummarizationFaithfulness = _load("summarization_faithfulness", "SummarizationFaithfulness", "Cited summarization-faithfulness results (Maynez et al. 2020, XSum).")
 PrefixCaching = _load("prefix_caching", "PrefixCaching", "Cited prefix-cache results from a public serving deployment (SGLang 2024).")
+# Attacks on and defenses of learned systems (added 2026-10-20)
+ExtractionAttacks = _load("extraction_attacks", "ExtractionAttacks", "Cited extraction results through a model's query interface (Carlini et al. 2024 production-API extraction; Carlini et al. 2021 GPT-2 memorization).")
+DataPoisoning = _load("data_poisoning", "DataPoisoning", "Cited training-data poisoning results (Nightshade doses; web-scale poisoning cost).")
+DifferentialPrivacy = _load("differential_privacy", "DifferentialPrivacy", "Cited differentially private training results (Abadi et al. 2016 accountant comparison; MNIST and CIFAR-10 utility).")
+SecurityIncidents = _load("security_incidents", "SecurityIncidents", "Cited figures of documented security incidents (Stuxnet, Mirai).")
+PromptCacheAudit = _load("prompt_cache_audit", "PromptCacheAudit", "Cited results of a timing audit of prompt caching in model APIs (Gu et al. 2025).")  # added 2026-10-20
 MlOperations = _load("ml_operations", "MlOperations", "Measured ML-operations results (data validation anomalies, model-load latency, interleaving).")  # added 2026-10-20
 ToolInterception = _load("tool_interception", "ToolInterception", "Cited tool-interception results for augmented LLM serving (InferCept 2024).")  # added 2026-10-20
 SandboxIsolation = _load("sandbox_isolation", "SandboxIsolation", "Cited results on containing agent code: Cybench task count, gVisor system-call latency.")  # added 2026-10-20
@@ -69,9 +77,20 @@ EventDataRecorders = _load("event_data_recorders", "EventDataRecorders", "Pre-cr
 # Published vision-language-action and dual-system robot policies (added 2026-10-20)
 # Robot policy training: sim-to-real, parallel simulation, on-robot RL (added 2026-10-20)
 RobotLearning = _load("robot_learning", "RobotLearning", "Cited figures of published robot-learning runs (Dactyl, legged_gym, HIL-SERL, QT-Opt, a grasping farm, Diffusion Policy, OpenVLA pretraining).")
+RobotPerception = _load("robot_perception", "RobotPerception", "Cited figures of robot odometry, mapping, and tracking systems (UMBmark, nvblox Table II, SORT defaults).")  # added 2026-10-20
+# Road-vehicle safety demonstrated from driven exposure (added 2026-10-20)
+RobotGrounding = _load("robot_grounding", "RobotGrounding", "Cited results of grounding learned proposals on real robots (AutoRT task filter, OK-Robot failure analysis, KnowNo).")  # added 2026-10-20
+HumanMotion = _load("human_motion", "HumanMotion", "Cited measurements of how fast people walk (Bohannon 1997).")  # added 2026-10-20
+RoadVehicleSafety = _load("road_vehicle_safety", "RoadVehicleSafety", "Cited miles-to-demonstrate requirements (RAND RR-1478) and a dated driverless-fleet exposure total (Kusano et al. 2025).")
 # Network architectures (added 2026-10-20)
 NetflixPrize = _load("netflix_prize", "NetflixPrize", "Cited figures of the Netflix Prize and what Netflix shipped from it (Johnston 2012; Amatriain and Basilico 2012).")
 KerasApplications = _load("keras_applications", "KerasApplications", "Keras Applications model table: top-1 accuracy and time per inference step on a CPU and an A100.")
+ContextWindows = _load("context_windows", "ContextWindows", "Announced context windows of language models outside the Models registry (GPT-4 Turbo, Claude 2.1, Gemini 1.5 Pro).")  # added 2026-10-20
+RecommendationSystems = _load("recommendation_systems", "RecommendationSystems", "Cited figures of production recommendation systems (Gupta et al. 2020; Mudigere et al. 2022).")  # added 2026-10-20
+ServingMemoryLayout = _load("serving_memory_layout", "ServingMemoryLayout", "Memory layout of a 13B model served on one A100 40 GB (Kwon et al. 2023, Figure 1).")  # added 2026-10-20
+RobustnessStudies = _load("robustness_studies", "RobustnessStudies", "Cited results of robustness studies (Eykholt 2018 stickers, Goodfellow 2015 FGSM, Guo 2017 calibration, Zou 2023 GCG, Gu 2017 BadNets).")  # added 2026-10-20
+InferenceDeterminism = _load("inference_determinism", "InferenceDeterminism", "Cited results on run-to-run nondeterminism of LLM inference (He and Thinking Machines Lab 2025).")  # added 2026-10-20
+DataSelectionResults = _load("data_selection_results", "DataSelectionResults", "Cited data-selection results (model collapse, scored pruning, selection via proxy, echoing, deduplication, FineWeb, FixMatch, augmentation, an input-bound profile).")  # added 2026-10-20
 
 
 # ---------------------------------------------------------------------------
@@ -338,6 +357,7 @@ class Literature(Registry):
     StorageSystems = StorageSystems
     IncidentReports = IncidentReports
     ServingIncidents = ServingIncidents
+    InferenceDeterminism = InferenceDeterminism  # added 2026-10-20
     SelfCorrection = SelfCorrection
     LlmInferenceTraceCode2023 = _series.LlmInferenceTraceCode2023
     LlmInferenceTraceConversation2023 = _series.LlmInferenceTraceConversation2023  # added 2026-10-20
@@ -346,15 +366,21 @@ class Literature(Registry):
     GamePlaying = GamePlaying  # added 2026-10-20
     DeviceMeasurements = DeviceMeasurements  # added 2026-10-20
     SpaceflightAnomalies = SpaceflightAnomalies  # added 2026-10-20
+    CompilerResults = CompilerResults  # added 2026-10-20
     ScreeningStudies = ScreeningStudies  # added 2026-10-20
     TestTimeCompute = TestTimeCompute  # added 2026-10-20
     ContextUse = ContextUse  # added 2026-10-20
     AgentRetrieval = AgentRetrieval  # added 2026-10-20
     SummarizationFaithfulness = SummarizationFaithfulness  # added 2026-10-20
     PrefixCaching = PrefixCaching  # added 2026-10-20
+    PromptCacheAudit = PromptCacheAudit  # added 2026-10-20
     ToolInterception = ToolInterception  # added 2026-10-20
     SandboxIsolation = SandboxIsolation  # added 2026-10-20
     MlOperations = MlOperations  # added 2026-10-20
+    ExtractionAttacks = ExtractionAttacks  # added 2026-10-20
+    DataPoisoning = DataPoisoning  # added 2026-10-20
+    DifferentialPrivacy = DifferentialPrivacy  # added 2026-10-20
+    SecurityIncidents = SecurityIncidents  # added 2026-10-20
     VlaSystems = VlaSystems  # added 2026-10-20
     WakeWordBenchmarks = WakeWordBenchmarks  # added 2026-10-20
     AnnotationTimes = AnnotationTimes  # added 2026-10-20
@@ -365,8 +391,18 @@ class Literature(Registry):
     EventDataRecorders = EventDataRecorders  # added 2026-10-20
     OnDeviceLearning = OnDeviceLearning  # added 2026-10-20
     RobotLearning = RobotLearning  # added 2026-10-20
+    RobotPerception = RobotPerception  # added 2026-10-20
+    RoadVehicleSafety = RoadVehicleSafety  # added 2026-10-20
+    RobotGrounding = RobotGrounding  # added 2026-10-20
+    HumanMotion = HumanMotion  # added 2026-10-20
     NetflixPrize = NetflixPrize  # network architectures (added 2026-10-20)
     KerasApplications = KerasApplications  # network architectures (added 2026-10-20)
+    ContextWindows = ContextWindows  # network architectures (added 2026-10-20)
+    RecommendationSystems = RecommendationSystems  # network architectures (added 2026-10-20)
+    ServingMemoryLayout = ServingMemoryLayout  # network architectures (added 2026-10-20)
+    FlashAttentionBenchmark = _series.FlashAttentionBenchmark  # network architectures (added 2026-10-20)
+    RobustnessStudies = RobustnessStudies  # added 2026-10-20
+    DataSelectionResults = DataSelectionResults  # added 2026-10-20
     ComputeTrend = ComputeTrend
     AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks
@@ -382,6 +418,8 @@ class Literature(Registry):
     PoisonedRagBlackBox = _series.PoisonedRagBlackBox  # added 2026-10-20
     PagedAttentionMemoryBreakdown = _series.PagedAttentionMemoryBreakdown  # added 2026-10-20
     ToolInterceptionTimes = _series.ToolInterceptionTimes  # added 2026-10-20
+    MetastableFailures = _series.MetastableFailures  # added 2026-10-20
+    MultiAgentFailures = MultiAgentFailures  # added 2026-10-20
     AttentionSinkPerplexity = _series.AttentionSinkPerplexity  # added 2026-10-20
     SweBenchVerifiedRuns = _series.SweBenchVerifiedRuns
     CybenchSolveRate = _series.CybenchSolveRate

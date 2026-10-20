@@ -26,7 +26,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
 import numpy as np  # noqa: E402
-from deckvals import val  # noqa: E402
+from deckvals import val, num  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import calcs as K  # noqa: E402
 from calcs import m  # noqa: E402
@@ -157,7 +157,7 @@ price_trend()
 
 # 3. Latency ladder against a 1 ms line (values in ms), final state only
 bars_lines(out / "latency_ladder.svg", [
-    ("DRAM", 1e-4, "memory", "100 ns"),   # typed: chapter margin figure (see docstring)
+    ("DRAM", num("dram_lat_ns") * 1e-6, "memory", f"{val('dram_lat_ns')} ns"),  # ns to ms
     ("Local NVMe", m(K.STORE.LocalNvmeGen4.latency, "ms"), "memory", f"{val('nvme_lat_us')} µs", "in"),
     ("Remote SSD", 2, "danger", "2 ms"),
     ("Object store", 20, "danger", "20 ms"),
