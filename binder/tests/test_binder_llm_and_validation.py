@@ -77,18 +77,21 @@ def test_index_scanner_handles_single_qmd_file():
 def test_content_tree_skips_outside_volume_collection():
     """Ensure content-tree validation is a no-op when path is not a volume collection."""
     cmd = object.__new__(ValidateCommand)
+    # 2026-10-13: anchor to the repo root; relative paths made this test pass
+    # only when pytest ran from the repo root, and fail from binder/.
+    repo = Path(__file__).resolve().parents[2]
     # Chapter directory
-    r_dir = cmd._run_content_tree(Path("books/vol1/introduction"))
+    r_dir = cmd._run_content_tree(repo / "books/vol1/introduction")
     assert len(r_dir.issues) == 0
     assert r_dir.files_checked == 0
 
     # Chapter file
-    r_file = cmd._run_content_tree(Path("books/vol1/introduction/introduction.qmd"))
+    r_file = cmd._run_content_tree(repo / "books/vol1/introduction/introduction.qmd")
     assert len(r_file.issues) == 0
     assert r_file.files_checked == 0
 
     # Volume directory
-    r_vol = cmd._run_content_tree(Path("books/vol1"))
+    r_vol = cmd._run_content_tree(repo / "books/vol1")
     assert len(r_vol.issues) == 0
     assert r_vol.files_checked == 2
 

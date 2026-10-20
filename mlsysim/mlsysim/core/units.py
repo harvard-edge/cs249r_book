@@ -60,6 +60,12 @@ __all__ = [
     # Electrical and kinematic (Physical AI / Embodied)
     "volt", "V", "millivolt", "mV", "ampere", "A", "milliampere", "mA",
     "ohm", "milliohm", "newton", "N", "radian", "rad", "hertz", "Hz",
+    # Further aliases (2026-10-13 unit sweep)
+    "dimensionless", "terawatt_hour", "TWh", "megatonne", "Mt", "month", "picosecond",
+    "centimeter", "cm", "nanometer", "pound", "mph", "rpm", "degree", "milliradian",
+    "degC", "delta_degC", "kilohertz", "kHz", "megahertz", "MHz", "gigahertz", "GHz",
+    "kilobyte", "megabyte", "gigabyte", "kilonewton", "farad", "microfarad",
+    "millihenry", "picohenry", "mAh", "decibel", "lux", "ppm", "standard_gravity",
 ]
 
 ureg = pint.UnitRegistry()
@@ -318,4 +324,46 @@ radian = ureg.radian
 rad = ureg.radian
 hertz = ureg.hertz
 Hz = ureg.hertz
+
+# --- Further aliases (2026-10-13 unit sweep) ---
+# Every unit the books use gets an exported alias here, so LEGO cells import
+# it instead of writing ureg.<unit> or defining a local `_X = ureg.<unit>`.
+# Single-letter symbols are deliberately not added (W, N, K, ... collide with
+# cell variables); use the full name.
+dimensionless = ureg.dimensionless
+terawatt_hour = ureg.terawatt_hour
+TWh = ureg.terawatt_hour
+megatonne = ureg.megametric_ton
+Mt = ureg.megametric_ton
+month = ureg.month
+picosecond = ureg.picosecond
+centimeter = ureg.centimeter
+cm = ureg.centimeter
+nanometer = ureg.nanometer
+pound = ureg.pound
+mph = ureg.mph
+rpm = ureg.rpm
+degree = ureg.degree
+milliradian = ureg.milliradian
+degC = ureg.degC
+delta_degC = ureg.delta_degC
+kilohertz = ureg.kilohertz
+kHz = ureg.kilohertz
+megahertz = ureg.megahertz
+MHz = ureg.megahertz
+gigahertz = ureg.gigahertz
+GHz = ureg.gigahertz
+kilobyte = ureg.kilobyte
+megabyte = ureg.megabyte
+gigabyte = ureg.gigabyte
+kilonewton = ureg.kilonewton
+farad = ureg.farad
+microfarad = ureg.microfarad
+millihenry = ureg.millihenry
+picohenry = ureg.picohenry
+mAh = ureg.milliampere_hour
+decibel = ureg.decibel
+lux = ureg.lux
+ppm = ureg.ppm
+standard_gravity = ureg.standard_gravity
 

@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -389,7 +390,7 @@ def generate_plots(out_dir=None):
     tri_pdf = os.path.join(out_dir, 'fig_dam_triangle.pdf')
     tri_png = os.path.join(out_dir, 'fig_dam_triangle.png')
     tri_svg = os.path.join(out_dir, 'fig_dam_triangle.svg')
-    draw_dam_triangle(tri_pdf, tri_png, tri_svg)
+    generate_dam_venn(Path(out_dir))
 
     # Also save/copy to fig_dam_intersections.* for backwards compatibility
     import shutil
@@ -405,7 +406,7 @@ import sys
 _current_dir = os.path.dirname(os.path.abspath(__file__))
 if _current_dir not in sys.path:
     sys.path.insert(0, _current_dir)
-from draw_dam_triangle import draw_dam_triangle
+from draw_dam_triangle import generate_dam_venn
 
 if __name__ == '__main__':
     generate_plots()

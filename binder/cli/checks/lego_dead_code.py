@@ -17,6 +17,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+try:
+    from cli.checks.generated_paths import is_generated
+except ImportError:  # pragma: no cover - package-relative import path
+    from binder.cli.checks.generated_paths import is_generated
+
 CELL_START = re.compile(r"^```\{python\}")
 CELL_END = re.compile(r"^```\s*$")
 CLASS_DEF = re.compile(r"\bclass\s+([A-Za-z_]\w*)")
@@ -154,7 +159,9 @@ def qmd_files(paths: Iterable[Path]) -> list[Path]:
     files: list[Path] = []
     for path in paths:
         if path.is_dir():
-            files.extend(sorted(path.rglob("*.qmd")))
+            # 2026-10-12: render output (_build, .quarto, *_files) holds stale
+            # copies of chapters; scanning it reported variables already removed.
+            files.extend(sorted(p for p in path.rglob("*.qmd") if not is_generated(p, path)))
         elif path.suffix == ".qmd" and path.exists():
             files.append(path)
     return sorted(dict.fromkeys(files))

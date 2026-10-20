@@ -1,121 +1,22 @@
 # viz/plots.py
-# Simulator-aware plotters for generated MLSysIM figures.
-# Book publication style is owned by book.tools.figures.style; this module keeps
-# a local fallback so standalone mlsysim installs do not depend on the book tree.
-
-import os
+# Simulator-aware plotters for generated MLSysIM figures. Every plotter draws
+# through the shared style in viz/style.py.
 
 try:
     import numpy as np
 except ImportError:
     np = None
 
-try:
-    from binder.tools.figures.style import (
-        COLORS,
-        WEB_FIG_DPI,
-        bar_compare,
-        finalize_web_figure as _finalize_web_figure,
-        set_book_style,
-        setup_plot,
-    )
-except ImportError:
-    # Standalone mlsysim fallback. Keep in sync with book.tools.figures.style.
-    try:
-        import matplotlib
-
-        if "MPLBACKEND" not in os.environ:
-            matplotlib.use("Agg", force=True)
-        import matplotlib.pyplot as plt
-
-        _matplotlib_available = True
-    except ImportError:
-        plt = None
-        _matplotlib_available = False
-
-    COLORS = {
-        "crimson": "#A51C30",
-        "primary": "#333333",
-        "grid": "#CCCCCC",
-        "BlueLine": "#006395",
-        "BlueL": "#D1E6F3",
-        "BlueFill": "#D6EAF8",
-        "RedLine": "#CB202D",
-        "RedL": "#F5D2D5",
-        "RedFill": "#F2D7D5",
-        "GreenLine": "#008F45",
-        "GreenL": "#D4EFDF",
-        "GreenFill": "#D5F5E3",
-        "OrangeLine": "#E67817",
-        "OrangeL": "#FCE4CC",
-        "VioletLine": "#7E317B",
-        "VioletL": "#E6D4E5",
-        "BrownLine": "#78492A",
-        "BrownL": "#E3D3C8",
-        "YellowFill": "#FEF9E0",
-    }
-
-    WEB_FIG_DPI = 120
-
-    def set_book_style():
-        """Apply the global matplotlib style configuration."""
-        if not _matplotlib_available:
-            raise ImportError("matplotlib is required for plot generation.")
-        plt.rcParams.update(
-            {
-                "font.family": "sans-serif",
-                "font.sans-serif": [
-                    "Helvetica",
-                    "Helvetica Neue",
-                    "Arial",
-                    "DejaVu Sans",
-                ],
-                "font.size": 10,
-                "text.color": COLORS["primary"],
-                "axes.labelsize": 11,
-                "axes.titlesize": 12,
-                "axes.titleweight": "bold",
-                "axes.grid": True,
-                "grid.color": COLORS["grid"],
-                "grid.alpha": 0.4,
-                "grid.linestyle": "--",
-                "figure.dpi": 300,
-                "savefig.bbox": "tight",
-            }
-        )
-
-    def _finalize_web_figure(fig):
-        """Match Quarto web defaults while publication figures keep print DPI."""
-        fig.set_dpi(WEB_FIG_DPI)
-        return fig
-
-    def setup_plot(figsize=(8, 5)):
-        """One-line plot setup for generated plotting blocks."""
-        set_book_style()
-        fig, ax = plt.subplots(figsize=figsize)
-        return fig, ax, COLORS, plt
-
-    def bar_compare(labels, values, *, title=None, ylabel=None, figsize=(8, 4), color=None):
-        """Render a compact bar comparison with the MLSysBook style."""
-        fig, ax, colors, _ = setup_plot(figsize=figsize)
-        bar_color = color or colors["BlueLine"]
-        bars = ax.bar(labels, values, color=bar_color, alpha=0.8)
-        if title:
-            ax.set_title(title)
-        if ylabel:
-            ax.set_ylabel(ylabel)
-        ax.tick_params(axis="x", rotation=0)
-        for bar, value in zip(bars, values):
-            ax.text(
-                bar.get_x() + bar.get_width() / 2,
-                bar.get_height(),
-                f"{value:g}",
-                ha="center",
-                va="bottom",
-                fontsize=9,
-                color=colors["primary"],
-            )
-        return _finalize_web_figure(fig), ax
+from .style import (
+    COLORS,
+    WEB_FIG_DPI,
+    bar_compare,
+    finalize_web_figure as _finalize_web_figure,
+    set_book_style,
+    setup_plot,
+    plt,
+)
+from .style import BODY_FIGSIZE, MIN_FONT_PT
 
 
 def plot_roofline(hardware_node, workloads=None, title=None):
@@ -143,7 +44,7 @@ def plot_roofline(hardware_node, workloads=None, title=None):
     y_roof = np.minimum(y_mem, y_compute)
 
     # 4. PLOT
-    fig, ax, colors, _ = setup_plot(figsize=(9, 5.5))
+    fig, ax, colors, _ = setup_plot(figsize=(BODY_FIGSIZE[0], 4.6))
 
     # Shaded regions
     mem_mask = x <= ridge_point
@@ -189,7 +90,7 @@ def plot_roofline(hardware_node, workloads=None, title=None):
         slope_y * 1.6,
         f"BW ceiling: {peak_bw:.0f} GB/s",
         color=colors["BlueLine"],
-        fontsize=8.5,
+        fontsize=MIN_FONT_PT,
         fontweight="bold",
         rotation=38,
         ha="center",
@@ -198,13 +99,13 @@ def plot_roofline(hardware_node, workloads=None, title=None):
 
     # Compute ceiling label (on the flat)
     ax.text(
-        ridge_point * 8,
+        x_max * 0.8,
         peak_flops * 1.12,
         f"Compute ceiling: {peak_flops:.0f} TFLOP/s",
         color=colors["OrangeLine"],
-        fontsize=8.5,
+        fontsize=MIN_FONT_PT,
         fontweight="bold",
-        ha="center",
+        ha="right",
         va="bottom",
     )
 
@@ -221,7 +122,7 @@ def plot_roofline(hardware_node, workloads=None, title=None):
         f"Ridge Point\n{ridge_point:.1f} FLOP/Byte",
         xy=(ridge_point, peak_flops),
         xytext=(ridge_point * 2.6, peak_flops * 0.26),
-        fontsize=8.5,
+        fontsize=MIN_FONT_PT,
         fontweight="bold",
         color=colors["crimson"],
         ha="center",
@@ -286,7 +187,7 @@ def plot_roofline(hardware_node, workloads=None, title=None):
                 f"{model.name}\n({bound}-bound)",
                 xy=(ai, perf),
                 xytext=(ai * 0.3, perf * 0.4),
-                fontsize=8,
+                fontsize=MIN_FONT_PT,
                 fontweight="bold",
                 color=c,
                 ha="center",
@@ -301,7 +202,7 @@ def plot_roofline(hardware_node, workloads=None, title=None):
         ax.set_title(title)
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(peak_flops * 0.001, peak_flops * 2)
-    ax.legend(loc="lower right", fontsize=8, framealpha=0.9)
+    ax.legend(loc="lower right", fontsize=MIN_FONT_PT, framealpha=0.9)
     return _finalize_web_figure(fig), ax
 
 def plot_distributed_roofline(fleet_system, workloads=None):
@@ -328,7 +229,7 @@ def plot_distributed_roofline(fleet_system, workloads=None):
     y_roof = np.minimum(y_net, y_compute)
 
     # 4. PLOT
-    fig, ax, colors, _ = setup_plot(figsize=(9, 5.5))
+    fig, ax, colors, _ = setup_plot(figsize=(BODY_FIGSIZE[0], 4.6))
 
     # Shaded regions
     net_mask = x <= ridge_point
@@ -367,7 +268,7 @@ def plot_distributed_roofline(fleet_system, workloads=None):
         slope_y * 1.6,
         f"Bisection BW: {peak_network_bw:.0f} GB/s",
         color=colors["RedLine"],
-        fontsize=8.5,
+        fontsize=MIN_FONT_PT,
         fontweight="bold",
         rotation=38,
         ha="center",
@@ -376,13 +277,13 @@ def plot_distributed_roofline(fleet_system, workloads=None):
 
     # Fleet Compute ceiling label
     ax.text(
-        ridge_point * 8,
+        x_max * 0.8,
         peak_flops * 1.12,
         f"Fleet Compute: {peak_flops:.0f} TFLOP/s",
         color=colors["BlueLine"],
-        fontsize=8.5,
+        fontsize=MIN_FONT_PT,
         fontweight="bold",
-        ha="center",
+        ha="right",
         va="bottom",
     )
 
@@ -399,7 +300,7 @@ def plot_distributed_roofline(fleet_system, workloads=None):
         f"Network Ridge\n{ridge_point:.1f} FLOP/Byte",
         xy=(ridge_point, peak_flops),
         xytext=(ridge_point * 2, peak_flops * 0.25),
-        fontsize=8.5,
+        fontsize=MIN_FONT_PT,
         fontweight="bold",
         color=colors["crimson"],
         ha="center",
@@ -435,7 +336,7 @@ def plot_distributed_roofline(fleet_system, workloads=None):
     ax.set_title(f"Distributed Roofline: {fleet_system.count}x {fleet_system.node.accelerator.name}")
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(peak_flops * 0.001, peak_flops * 2)
-    ax.legend(loc="lower right", fontsize=8, framealpha=0.9)
+    ax.legend(loc="lower right", fontsize=MIN_FONT_PT, framealpha=0.9)
     return _finalize_web_figure(fig), ax
 
 def _metric_as_float(value, unit=None):
@@ -485,7 +386,7 @@ def plot_evaluation_scorecard(evaluation):
     ratios = [l1_ratio, l2_ratio]
     
     # 3. OUTPUT (Visualization)
-    fig, ax, colors, plt = setup_plot(figsize=(8, 4))
+    fig, ax, colors, plt = setup_plot(figsize=(BODY_FIGSIZE[0], 3.6))
     bar_colors = [colors['RedLine'] if r > 1.0 else colors['GreenLine'] for r in ratios]
     bars = ax.barh(levels, ratios, color=bar_colors, alpha=0.7, edgecolor='black')
     

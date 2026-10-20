@@ -190,8 +190,8 @@ CHAPTER_METADATA: Dict[int, Dict[str, str]] = {
         ),
     },
     17: {
-        "dir": "17_frontier",
-        "file": "17_frontier.qmd",
+        "dir": "18_frontier",
+        "file": "18_frontier.qmd",
         "title": "The Epistemic Frontier",
         "role": "Synthesizes the 4 bedrock laws, observational indistinguishability, and the 4 grand open challenges.",
         "established": (

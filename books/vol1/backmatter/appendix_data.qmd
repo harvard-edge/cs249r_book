@@ -1,25 +1,31 @@
 ---
 engine: jupyter
-notation-local: [\BroadcastTableSize, \DiscreteOutcome, \DiscreteRandomVariable, \LogisticProbability, \LogitVector, \MatchingRowCount, \NormalizingClassIndex, \RelationalSelection, \SessionRequestCount, \TableRowCount]
+notation-local: [\BaselineOnlyCorrectCount, \BroadcastTableSize, \CompressedOnlyCorrectCount, \ConfidenceCriticalQuantile, \DiscreteOutcome, \DiscreteRandomVariable, \EstimatedAccuracy, \EvaluationSampleCount, \MatchingRowCount, \McnemarTestStatistic, \MinimumDetectableEffect, \OutcomeStandardDeviation, \PowerCriticalQuantile, \RelationalSelection, \RequiredUsersPerVariant, \SessionRequestCount, \TableRowCount]
+format:
+  html:
+    number-sections: false
 ---
 
 # Data Foundations {#sec-appdx-data-foundations dropcap="chapter-opening"}
 
-Data problems rarely present as data problems; they surface as a training run that will not speed up, an accelerator sitting idle, or accuracy eroding while dashboards stay green. To keep chapter arguments focused on system design, this appendix gathers the back-of-the-envelope calculations and statistical tools that trace such symptoms back to measurable data bottlenecks: transfer times, storage-layout costs, drift diagnostics, and numerical-stability tools. The tools here lean on basic probability and on the data term of the iron law.
+Data problems rarely present as data problems; they surface as a training run that will not speed up, an accelerator sitting idle, accuracy eroding while dashboards stay green, or an evaluation whose verdict does not survive a second test set. The chapters use the back-of-the-envelope calculations and statistical tools that trace such symptoms back to measurable quantities without deriving them, and this appendix supplies the derivations: transfer times, decode and storage-layout costs, tail probabilities, the sample sizes that make a measured rate trustworthy, and drift divergences. The tools lean on basic probability and on the data term of the iron law.
 
 ## How to Use This Appendix {.unnumbered}
 
-This appendix is designed as a reference. Reach for it when debugging "slow training," "low accelerator utilization," or "production accuracy drift" calls for the quickest path from symptom to measurement.
+This appendix is a reference organized by symptom. Each section states its tool compactly and points to the chapter that teaches the concept and applies it to a lighthouse workload, and @tbl-appdx-data-lookup maps each symptom to the section that carries the tool.
 
-Conventions used here follow the book-wide notation (for example, $\BatchSize$ is reserved for batch size and $\Bandwidth$ denotes bandwidth).
+| **When the need is…**                                      | **Tool**                                       | **Section**                                                       |
+|:-----------------------------------------------------------|:-----------------------------------------------|:------------------------------------------------------------------|
+| **Moving a dataset between sites or regions**              | Transfer time $\DataVolume/\Bandwidth$         | @sec-appdx-data-foundations-napkin-math-physics-data-gravity-9ae0 |
+| **An accelerator starving behind CPU decode**              | Decode throughput by format                    | @sec-appdx-data-foundations-cost-serialization-b921               |
+| **Reading a few features from wide records**               | Row versus columnar layout                     | @sec-appdx-data-foundations-row-vs-columnar-formats-bca2          |
+| **A feature pipeline whose cost explodes**                 | Selection, projection, and join costs          | @sec-appdx-data-foundations-algebra-data-9792                     |
+| **An average that looks fine while users complain**        | Session-level tail probability                 | @sec-appdx-data-foundations-distributions-long-tail-901f          |
+| **Deciding whether a measured rate or difference is real** | Confidence interval, sample size, McNemar, A/B | @sec-appdx-data-foundations-sampling-estimation-5b1e              |
+| **Accuracy drifting silently in production**               | KL divergence, PSI, KS statistic               | @sec-appdx-data-foundations-measuring-drift-divergence-a6dd       |
+| **More data that no longer improves the model**            | Entropy and signal per byte                    | @sec-appdx-data-foundations-information-theory-systems-c033       |
 
-- **When data will not move**: Start with @tbl-data-gravity and the transfer-time equation in @sec-appdx-data-foundations-napkin-math-physics-data-gravity-9ae0.
-- **When the accelerator is starving**: Use @tbl-serialization-cost and the layout discussion in @sec-appdx-data-foundations-row-vs-columnar-formats-bca2.
-- **When pipelines explode in cost**: Use the primitives in @sec-appdx-data-foundations-algebra-data-9792, especially join-induced shuffles.
-- **When "average looks fine" but users complain**: Use @sec-appdx-data-foundations-distributions-long-tail-901f and session-level tail probability.
-- **When accuracy drifts silently**: Use @sec-appdx-data-foundations-measuring-drift-divergence-a6dd to compare full distributions.
-
-While production pipelines encounter an overwhelming variety of formats, encodings, and storage layers, this appendix focuses on the physical and statistical constants that govern them all.
+: **Symptom-to-Section Lookup**: Each row pairs a symptom a chapter may name with the tool in this appendix that turns it into a measurement. {#tbl-appdx-data-lookup tbl-colwidths="[38,30,32]"}
 
 ```{python}
 #| echo: false
@@ -93,19 +99,19 @@ class DataGravity:
     truck_1pb_str = fmt_time(truck_total_seconds / SEC_PER_DAY, day, precision=0, commas=False, style="word")
 ```
 
-With those reference points in place, the appendix begins with the physical constraints of data engineering and then moves to the statistical monitoring that keeps ML systems healthy. From storage formats that determine I/O throughput to drift metrics that detect silent failures, these foundations connect directly to the data pipelines in @sec-data-engineering-data-pipeline-architecture-b527 and the operational monitoring in @sec-ml-operations-model-infrastructure-monitoring-3988.
+The first half of the appendix, Moving and Storing Data, serves the data pipelines in @sec-data-engineering-data-pipeline-architecture-b527. The second half, Probability and Statistics, provides the tests that decide whether a measured number can be trusted for the evaluations in @sec-benchmarking-statistical-methodological-issues-7aa5 and the operational monitoring in @sec-ml-operations-model-infrastructure-monitoring-3988.
 
-## Data Engineering Foundations {#sec-appdx-data-foundations-data-engineering-foundations-0c20}
+## Moving and Storing Data {#sec-appdx-data-foundations-data-engineering-foundations-0c20}
 
-Understanding hardware constraints is only the first requirement; systems engineering must also shape data to fit them. Data engineering applies the principles of the memory hierarchy to storage formats and pipeline design, ensuring that the accelerator never starves. This process begins with recognizing that data is physical—it has volume, it takes time to move, and it requires energy to parse.
+Before a model can learn from a record, the record must leave storage, cross a network, and be decoded into tensors, and each step costs time. This section collects the reference cost of each step. @Sec-data-engineering develops each of them inside a working pipeline; the numbers here are templates for checking one by hand.
 
-### Napkin math: The physics of data gravity {#sec-appdx-data-foundations-napkin-math-physics-data-gravity-9ae0}
+### Data gravity {#sec-appdx-data-foundations-napkin-math-physics-data-gravity-9ae0}
 
-Data gravity[^fn-data-gravity-anchor] is a metaphor grounded in transfer-time calculations. Unlike compute, which gets faster every year, the speed of light is fixed and network bandwidth is a finite resource. When datasets grow large enough, their practical inertia grows—moving them can cost more time and energy than moving computation to where the data already lives.
+Copying a petabyte of training data across a 1 Gbps wide-area link takes months, whereas shipping the job to the cluster that already holds the data takes minutes. Data gravity[^fn-data-gravity-anchor] names this constraint, which transfer-time arithmetic makes precise, and @sec-data-engineering-data-gravity-adcb applies it to petabyte-scale training data. Network bandwidth is finite and does not grow with compute, so moving a large dataset can cost more time and energy than moving computation to where the data already lives.
 
-[^fn-data-gravity-anchor]: **Data gravity**\index{Data gravity!appendix refresher}: Coined by Dave McCrory\index{McCrory, Dave|seealso{Data gravity}} in 2010 to describe how large datasets attract services and applications toward them, much as massive bodies attract smaller ones in physics [@mccrory2010datagravity]. The analogy is apt: the "escape velocity" required to move a petabyte-scale dataset is often measured in weeks.
+[^fn-data-gravity-anchor]: **Data gravity**\index{Data gravity!appendix refresher}: Coined by Dave McCrory\index{McCrory, Dave|seealso{Data gravity}} in 2010 to describe how large datasets attract services and applications toward them, much as massive bodies attract smaller ones in physics [@mccrory2010datagravity].
 
-The ideal line-rate transfer time is $\DatasetTransferTime= \DataVolume/\Bandwidth$ after converting data volume and bandwidth to compatible units (the calculations below convert decimal bytes and bits per second explicitly). For the large volumes here, latency is negligible; the full equation appears in @sec-appdx-machine-foundations-bandwidth-vs-latency-5320. @Tbl-data-gravity gives lower bounds; protocol overhead and endpoint limits increase them.
+The ideal line-rate transfer time is $\DatasetTransferTime= \DataVolume/\Bandwidth$ after converting data volume and bandwidth to compatible units (the calculations below convert decimal bytes and bits per second explicitly). For the large volumes here, latency is negligible; @sec-appdx-machine-foundations-bandwidth-vs-latency-5320 gives the full equation with its latency term. @Tbl-data-gravity gives lower bounds; protocol overhead and endpoint limits increase them.
 
 | **Data Volume** |       **1 Gbps (Standard WAN)**       |       **10 Gbps (High-End WAN)**       |      **100 Gbps (Direct Connect)**      |       **Truck (Illustrative)**       |
 |:----------------|:-------------------------------------:|:--------------------------------------:|:---------------------------------------:|:------------------------------------:|
@@ -115,7 +121,7 @@ The ideal line-rate transfer time is $\DatasetTransferTime= \DataVolume/\Bandwid
 
 : **The Cost of Inertia**: These transfer times explain why we often "ship compute to data" rather than "ship data to compute." Network columns are lower bounds at sustained line rate. The truck entry is an illustrative elapsed-time model for 1 PB: 8 hours to load, 32 hours in transit, and 8 hours to unload, excluding scheduling and provisioning overhead. {#tbl-data-gravity tbl-colwidths="[23,20,20,20,17]"}
 
-### The cost of serialization {#sec-appdx-data-foundations-cost-serialization-b921}
+### Serialization cost {#sec-appdx-data-foundations-cost-serialization-b921}
 
 ```{python}
 #| echo: false
@@ -158,7 +164,7 @@ class SerializationCost:
     proto_cycles_str = MarkdownStr("Medium")
 ```
 
-Even after data arrives at the machine, the serialization tax remains a final hurdle.[^fn-serialization-binary-format] As @tbl-serialization-cost shows, many engineers meticulously optimize their accelerator kernels while ignoring the CPU overhead of decoding data. Parsing text-based formats like JavaScript Object Notation (JSON) or CSV is extremely CPU-intensive, often leaving the accelerator idling while the CPU struggles to convert strings into floating-point numbers.
+Even after data arrives at the machine, it must be decoded before the accelerator can use it.[^fn-serialization-binary-format] The CPU cost of that decoding can differ by an order of magnitude across formats (@tbl-serialization-cost). Parsing text-based formats like JavaScript Object Notation (JSON) or CSV into floating-point numbers is CPU-bound and often leaves the accelerator idle.
 
 [^fn-serialization-binary-format]: **Serialization**\index{Serialization!definition}: From Latin *serialis* (forming a series). The process of converting in-memory data structures into a byte stream for storage or transmission, and the reverse (*deserialization*). In ML pipelines, the choice of serialization format can dominate end-to-end training time; @sec-data-engineering-data-ingestion-8efc covers pipeline design strategies that minimize this overhead.
 
@@ -170,9 +176,9 @@ Even after data arrives at the machine, the serialization tax remains a final hu
 
 : **Serialization Overhead**: These illustrative values show why binary columnar formats can outperform row-based text, but they are not portable benchmarks. Arrow is an in-memory/IPC format; Parquet is a compressed storage format. {#tbl-serialization-cost tbl-colwidths="[21,27,27,25]"}
 
-### Row vs. columnar formats {#sec-appdx-data-foundations-row-vs-columnar-formats-bca2}
+### Row and columnar formats {#sec-appdx-data-foundations-row-vs-columnar-formats-bca2}
 
-The choice of file format determines the "physics" of how data traverses the storage hierarchy. Row-oriented formats such as CSV and JSON store data record-by-record, so reading the `age` field still requires parsing every attribute in each row. This layout suits append-only logs but incurs steep overhead for feature filtering. Parquet stores compressed column chunks on disk, while Arrow provides a contiguous columnar in-memory and IPC representation. Parquet readers exploit *projection pushdown*\index{Projection pushdown} to fetch selected column chunks directly, and both formats support *vectorized processing*\index{Vectorization!columnar processing}. @Fig-row-vs-col diagrams this structural contrast: where the row layout forces a wide scan across all fields (`ID`, `Age`, `Loc`), the columnar layout isolates the target `Age` chunk, avoiding data movement for irrelevant attributes.
+Decoding speed per byte is only half of the format cost, because the storage layout also decides how many bytes a query must read from disk in the first place. Row-oriented formats such as CSV and JSON store data record-by-record, so reading the `age` field still requires parsing every attribute in each row, a layout that suits append-only logs while penalizing feature filtering. In contrast, Parquet stores compressed column chunks on disk and Arrow provides a contiguous columnar representation in memory and across inter-process communication (IPC), allowing Parquet readers to use *projection pushdown*\index{Projection pushdown} to fetch only the requested column chunks while both formats feed *vectorized processing*\index{Vectorization!columnar processing}. Where the row layout forces a wide scan across all fields (`ID`, `Age`, `Loc`), the columnar layout isolates the target `Age` chunk and avoids moving irrelevant attributes (@fig-row-vs-col). @Sec-data-engineering-formats-compression-partitioning-8b17 develops format choice as a lever on the data term of the iron law.
 
 ::: {#fig-row-vs-col fig-env="figure" fig-pos="htb" fig-cap="**Storage Layouts**: Row-oriented formats group values by record, so the illustrated scan reads every field. Column-oriented formats group values by feature, so the illustrated scan reads only Age." fig-alt="Diagram contrasting row and column stores. The row store groups ID, Age, and Loc values by record and reads every column. The column store groups values by column and reads only Age."}
 ```{.tikz}
@@ -273,11 +279,9 @@ fill=\filllcirclecolor,minimum height=6mm,anchor=north]at(PO){};
 ```
 :::
 
-This physical partitioning in @fig-row-vs-col isolates how storage layout dictates bus traffic: extracting a single feature from a row store forces every intervening attribute into the host memory bus, whereas columnar chunking allows the storage subsystem to skip unreferenced columns entirely before deserialization.
-
 ::: {#psp-appendix-data-accelerator-starvation-problem .callout-perspective title="The accelerator starvation problem"}
 
-The choice of file format often determines whether a training pipeline is I/O bound or compute bound. Because row-oriented formats enforce full-record scans while columnar layouts enable projection pushdown, storage layout compounds the serialization tax whenever models consume a subset of tabular features. When ingest pipelines fail to filter at the storage layer, the data-movement term in the iron law can silently become the critical-path bottleneck, starving accelerators and leaving matrix cores idling.
+The choice of file format often determines whether a training pipeline is I/O bound or compute bound. Row-oriented formats force full-record scans, so storage layout compounds the decode cost whenever models consume a subset of tabular features, and the data-movement term of the iron law can silently become the critical path. @Sec-data-engineering-feeding-problem develops that starvation condition and the stage that binds it.
 
 :::
 
@@ -320,23 +324,23 @@ class DataAlgebra:
 
 ### The algebra of data {#sec-appdx-data-foundations-algebra-data-9792}
 
-Feature engineering turns raw records into the columns a model can learn from, and that transformation is usually a dataflow problem before it is a modeling problem. A pipeline first narrows the population, then chooses the features, then attaches context from other tables. Those three moves correspond to three Structured Query Language (SQL)\index{Structured query language!feature pipeline primitives}\index{SQL!feature pipeline primitives} primitives, and their computational cost determines whether the feature job stays local, scans unnecessary bytes, or turns into a network shuffle.
+Layout fixes what a scan can skip; the operations a feature pipeline applies decide how much it must read. Feature engineering turns raw records into the columns a model can learn from. A pipeline first narrows the population, then chooses the features, then attaches context from other tables. Those three moves correspond to three Structured Query Language (SQL)\index{Structured query language!feature pipeline primitives}\index{SQL!feature pipeline primitives} primitives, and their computational cost determines whether the feature job stays local, scans unnecessary bytes, or turns into a network shuffle.
 
 1.  **Selection ($\RelationalSelection$)**: Filtering rows (for example, `WHERE age > 30`).
     *   **Cost**: For a table of $\TableRowCount$ rows, $\mathcal{O}(\log \TableRowCount+ \MatchingRowCount)$ if a B-tree index lookup returns $\MatchingRowCount$ rows; $\mathcal{O}(\TableRowCount)$ for a full scan.
 2.  **Projection ($\pi$)**: Selecting columns (for example, `SELECT age`).
     *   **Cost**: Selected chunks plus decoding and metadata in columnar formats. This row-format example reads `{python} DataAlgebra.row_size_kb_str` for a `{python} DataAlgebra.int_size_bytes_value_str`-byte integer, wasting `{python} DataAlgebra.waste_pct_str` of the read.
-3.  **Join ($\bowtie$)**: Combining tables. The most expensive operation.
+3.  **Join ($\bowtie$)**: Combining tables. Usually the most expensive operation.
     *   **Shuffle Join**: Both tables are partitioned by key and exchanged over the network.
-        *   **Cost**: Reshuffling both `{python} DataAlgebra.join_table_tb_str` tables moves about `{python} DataAlgebra.join_network_tb_str`; partitioning and locality can reduce this.
+        *   **Cost**: Reshuffling both `{python} DataAlgebra.join_table_tb_str` tables moves `{python} DataAlgebra.join_network_tb_str`; partitioning and locality can reduce this.
     *   **Broadcast Join**: One small table is sent to all workers.
         *   **Cost**: $\BroadcastTableSize(\WorkerCount-1)$ bytes; the $\BroadcastTableSize$-byte table must fit on each of $\WorkerCount$ workers.
 
-Understanding data formats, serialization costs, and algebraic primitives tells how to move data efficiently. Even a perfectly engineered pipeline, however, can silently fail if the data it carries changes character over time. Detecting that change—and quantifying how much it matters—requires a different set of tools: probability and statistics.
+@Sec-data-engineering-scaling-distributed-processing-cb9b shows when these costs push feature processing beyond one machine. Formats, serialization, and algebraic primitives determine how efficiently data moves. They say nothing about whether the numbers computed from that data can be trusted, or whether the data has changed character since training. Answering those questions requires probability and statistics.
 
 ## Probability and Statistics {#sec-appdx-data-foundations-probability-statistics-3934}
 
-Once data is flowing through our pipelines, we need mathematical tools to ensure its quality and consistency. Probability and statistics provide the language for monitoring system health, detecting the silent failures of data drift, and managing uncertainty.
+A 10 ms mean latency can hide a 63 percent session-level tail-spike rate, a 0.5-point accuracy change on a finite validation set can sit inside binomial noise, and a feature's mean can stay constant while its tails drift enough to degrade predictions. Four statistical tools separate those failures from noise: tail probabilities for multi-request sessions, confidence intervals and paired or online sample-size formulas for finite evaluations, divergence measures for distribution shift, and information-theoretic units for the signal a dataset carries.
 
 ```{python}
 #| echo: false
@@ -411,13 +415,130 @@ class TailLatency:
 
 For $\SessionRequestCount= 100$ independent requests, each with a 0.01 chance of being slow, the probability of at least one p99-tail event is `{python} TailLatency.p_slow_math`.
 
-**Systems insight**: Under this model, a 100-request session is more likely than not to include an event beyond p99. Correlated slowdowns can change this probability [@dean2013].
+**Systems insight**: With independent requests, a 100-request session is more likely than not to include an event beyond p99. Correlated slowdowns can change this probability [@dean2013].
 
 :::
 
-### Measuring drift (divergence) {#sec-appdx-data-foundations-measuring-drift-divergence-a6dd}
+@Sec-model-serving-tail-latency-5376 develops tail latency for a serving system, where queuing produces the tail and request fan-out amplifies it. Tail probabilities describe one measured distribution; deciding whether a measured rate is itself trustworthy is a sampling question.
 
-Because distributions have long tails where the most dangerous failures hide, simple metrics like "mean shift" are insufficient. We need tools that compare the entire shape of the distribution. Detecting drift between the serving distribution ($\CurrentDistribution$) and training distribution ($\TrainingDistribution$) requires measuring the "distance" between distributions.
+### Sampling and estimation {#sec-appdx-data-foundations-sampling-estimation-5b1e}
+
+Every accuracy, error rate, and conversion rate in this book is measured on a finite sample, so every one of them carries sampling error. The question that decides a release is whether a measured number, or a measured difference, is larger than that error. Four tools answer it: an interval for one rate, the sample size that makes the interval narrow enough, a paired test for two models scored on the same examples, and the traffic an online A/B test needs. Each reduces to a short formula for the number of labeled examples or user sessions an engineer must collect.
+
+```{python}
+#| echo: false
+#| label: sampling-estimation
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SAMPLING AND ESTIMATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-appdx-data-foundations-sampling-estimation-5b1e
+# │
+# │ Goal:    Interval for a rate (ResNet-50 on the ImageNet validation set),
+# │          sample size for a rate (KWS detection), McNemar for FP32 vs INT8
+# │          ResNet-50, and A/B duration for the ML operations scenario.
+# │ Show:    Half-widths in percentage points, counts, chi-square, days.
+# │ How:     Normal approximation to the binomial; MLSysIM two-proportion
+# │          sample size; validation count and clip length from the registry.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from math import sqrt, ceil
+from statistics import NormalDist
+from mlsysim import Datasets
+from mlsysim.core.units import second, minute, hour, ureg
+from mlsysim.physics import calc_two_proportion_sample_size
+from mlsysim.fmt import check, fmt, fmt_count, fmt_percent, fmt_pp, fmt_time
+
+class SamplingEstimation:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────
+    confidence = 0.95
+    power = 0.80
+    n_val = int(Datasets.ImageNet.validation_examples.magnitude)
+    resnet_top1 = 0.76  # scenario assumption: ResNet-50 top-1 as quoted in benchmarking
+    n_base_only = 300  # scenario assumption: images only FP32 ResNet-50 gets right
+    n_comp_only = 250  # scenario assumption: images only INT8 ResNet-50 gets right
+    kws_detect = 0.98  # scenario assumption: KWS detection-rate target from data engineering
+    kws_half_pp = 0.5  # scenario assumption: target interval half-width (points)
+    clip_s = Datasets.MSWC.sample_duration.to(second).magnitude
+    ab_baseline = 0.05  # scenario assumption: A/B conversion baseline (ML operations scenario)
+    ab_rel_lift = 0.02  # scenario assumption: relative lift to detect
+    ab_users_per_arm_per_day = 100_000  # scenario assumption: daily users routed to each arm
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────
+    z = NormalDist().inv_cdf(1 - (1 - confidence) / 2)
+    z_beta = NormalDist().inv_cdf(power)
+    ci_half_pp = z * sqrt(resnet_top1 * (1 - resnet_top1) / n_val) * 100
+    diff_half_pp = ci_half_pp * sqrt(2)
+    net_drop_images = n_base_only - n_comp_only
+    net_drop_pp = net_drop_images / n_val * 100
+    chi2 = (n_base_only - n_comp_only) ** 2 / (n_base_only + n_comp_only)
+    chi2_crit = z**2
+    kws_n = ceil(z**2 * kws_detect * (1 - kws_detect) / (kws_half_pp / 100) ** 2)
+    kws_n_half = ceil(z**2 * kws_detect * (1 - kws_detect) / (kws_half_pp / 200) ** 2)
+    kws_audio_min = kws_n * clip_s / 60
+    kws_audio_half_h = kws_n_half * clip_s / 3600
+    ab_n = ceil(calc_two_proportion_sample_size(ab_baseline, ab_baseline * ab_rel_lift, z_alpha=z, z_beta=z_beta))
+    ab_days = ab_n / ab_users_per_arm_per_day
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────
+    check(0.3 < ci_half_pp < 0.45, f"ImageNet half-width drifted: {ci_half_pp:.3f} pp")
+    check(net_drop_pp < diff_half_pp, "The paired example must sit inside the unpaired interval")
+    check(chi2 > chi2_crit, "The paired example must resolve the drop")
+    check(kws_n_half == 4 * kws_n or abs(kws_n_half - 4 * kws_n) <= 3, "Halving the width must quadruple the sample")
+    check(740_000 <= ab_n <= 750_000, f"A/B sample size must match the ML operations scenario, got {ab_n:,}")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────
+    z_str = fmt(z, precision=2, commas=False)
+    confidence_pct_str = fmt_percent(confidence, precision=0, commas=False, style="prose")
+    power_pct_str = fmt_percent(power, precision=0, commas=False, style="prose")
+    n_val_str = fmt(n_val, precision=0, commas=True)
+    resnet_top1_pct_str = fmt_percent(resnet_top1, precision=0, commas=False, style="prose")
+    ci_half_pp_str = fmt_pp(ci_half_pp, precision=1, commas=False, style="prose")
+    diff_half_pp_str = fmt_pp(diff_half_pp, precision=1, commas=False, style="prose")
+    n_base_only_str = fmt(n_base_only, precision=0, commas=False)
+    n_comp_only_str = fmt(n_comp_only, precision=0, commas=False)
+    net_drop_images_str = fmt(net_drop_images, precision=0, commas=False)
+    net_drop_pp_str = fmt_pp(net_drop_pp, precision=1, commas=False, style="prose")
+    chi2_str = fmt(chi2, precision=2, commas=False)
+    chi2_crit_str = fmt(chi2_crit, precision=2, commas=False)
+    kws_detect_pct_str = fmt_percent(kws_detect, precision=0, commas=False, style="prose")
+    kws_half_pp_str = fmt_pp(kws_half_pp, precision=1, commas=False, style="prose")
+    kws_half_half_pp_str = fmt_pp(kws_half_pp / 2, precision=2, commas=False, style="prose")
+    kws_n_str = fmt(kws_n, precision=0, commas=True)
+    kws_n_half_str = fmt(kws_n_half, precision=0, commas=True)
+    kws_audio_min_str = fmt_time(round(kws_audio_min), minute, precision=0, commas=False, style="word")
+    kws_audio_half_h_str = fmt_time(kws_audio_half_h, hour, precision=1, commas=False, style="word")
+    ab_baseline_pct_str = fmt_percent(ab_baseline, precision=0, commas=False, style="prose")
+    ab_rel_lift_pct_str = fmt_percent(ab_rel_lift, precision=0, commas=False, style="prose")
+    ab_n_str = fmt(ab_n, precision=0, commas=True)
+    ab_users_per_arm_per_day_str = fmt(ab_users_per_arm_per_day, precision=0, commas=True)
+    ab_days_str = fmt(ab_days, precision=1, commas=False)
+```
+
+**Confidence interval for a rate.**\index{Confidence interval!appendix refresher} A model that classifies a fraction $\EstimatedAccuracy$ of $\EvaluationSampleCount$ independent examples correctly has, by the normal approximation to the binomial, an interval of
+
+$$ \EstimatedAccuracy \pm \ConfidenceCriticalQuantile \sqrt{\frac{\EstimatedAccuracy(1-\EstimatedAccuracy)}{\EvaluationSampleCount}} $$ {#eq-appdx-data-rate-interval}
+
+at the confidence level $\ConfidenceCriticalQuantile$ encodes (`{python} SamplingEstimation.z_str` for `{python} SamplingEstimation.confidence_pct_str`). ResNet-50 at `{python} SamplingEstimation.resnet_top1_pct_str` top-1 on the `{python} SamplingEstimation.n_val_str`-image ImageNet validation set is therefore known only to within about `{python} SamplingEstimation.ci_half_pp_str`. Two models scored on independent samples of that size have a difference interval about $\sqrt{2}$ times wider, because the variances of the two estimates add, roughly `{python} SamplingEstimation.diff_half_pp_str`, so a smaller accuracy gap between them cannot be resolved that way. @Sec-benchmarking-statistical-methodological-issues-7aa5 applies the interval to benchmark reports and shows why a single accuracy number without one is not a result.
+
+**Sample size for a rate.**\index{Sample size!rate estimation} Solving @eq-appdx-data-rate-interval for $\EvaluationSampleCount$ gives the number of examples a target half-width requires: the critical value squared, times $\EstimatedAccuracy(1-\EstimatedAccuracy)$, divided by the square of the half-width. Because the half-width falls only as the square root of the count, halving it quadruples the labeling cost. A keyword spotter expected to detect `{python} SamplingEstimation.kws_detect_pct_str` of wake words needs `{python} SamplingEstimation.kws_n_str` labeled one-second clips to pin that rate within `{python} SamplingEstimation.kws_half_pp_str` (about `{python} SamplingEstimation.kws_audio_min_str` of audio), and `{python} SamplingEstimation.kws_n_half_str` clips (`{python} SamplingEstimation.kws_audio_half_h_str`) to reach `{python} SamplingEstimation.kws_half_half_pp_str`. The count applies to every slice that must be certified separately. @Sec-responsible-engineering-predeployment-assessment-2324 multiplies it across demographic subgroups, where a rare group must be oversampled to reach the count at all, and @sec-data-selection-computeoptimal-frontier-24ba needs it to confirm that a curated subset still reaches the target accuracy.
+
+**McNemar's test for two models on the same examples.**\index{McNemar's test!appendix refresher} When a baseline and a compressed model are scored on the same examples, the examples both get right or both get wrong say nothing about which is better. Only the discordant counts matter: $\BaselineOnlyCorrectCount$ examples that only the baseline gets right and $\CompressedOnlyCorrectCount$ that only the compressed model gets right. The test statistic is
+
+$$ \McnemarTestStatistic = \frac{(\BaselineOnlyCorrectCount - \CompressedOnlyCorrectCount)^2}{\BaselineOnlyCorrectCount + \CompressedOnlyCorrectCount}, $$ {#eq-appdx-data-mcnemar}
+
+and the difference is significant at `{python} SamplingEstimation.confidence_pct_str` when it exceeds `{python} SamplingEstimation.chi2_crit_str` (the square of `{python} SamplingEstimation.z_str`). Suppose FP32 and INT8 ResNet-50 disagree on the ImageNet validation set as follows, an illustrative split: `{python} SamplingEstimation.n_base_only_str` images only the FP32 model gets right and `{python} SamplingEstimation.n_comp_only_str` only the INT8 model gets right. The net loss is `{python} SamplingEstimation.net_drop_images_str` images, `{python} SamplingEstimation.net_drop_pp_str` of accuracy, well inside the unpaired interval above, yet @eq-appdx-data-mcnemar gives $\McnemarTestStatistic=$ `{python} SamplingEstimation.chi2_str`, which exceeds the threshold. Pairing resolves a drop that independent samples could not, which is why an evaluation harness must keep per-example outcomes rather than only the two accuracies. @Sec-benchmarking-statistical-methodological-issues-7aa5 works through the case in which the same marginal scores leave the verdict open, and @sec-model-compression produces the INT8 model whose accuracy loss the test checks.
+
+**A/B tests.**\index{A/B testing!sample size} An online comparison of two model versions assigns users at random to a control arm and a treatment arm and compares a rate, such as conversion, between them. With $\MinimumDetectableEffect$ the smallest absolute difference worth detecting, $\OutcomeStandardDeviation^2$ the per-user variance (the baseline rate times one minus it for a yes-or-no outcome), and $\PowerCriticalQuantile$ the critical value for the chosen power, the users needed per arm are
+
+$$ \RequiredUsersPerVariant = \frac{2(\ConfidenceCriticalQuantile + \PowerCriticalQuantile)^2 \OutcomeStandardDeviation^2}{\MinimumDetectableEffect^2}. $$ {#eq-appdx-data-ab-sample-size}
+
+For a `{python} SamplingEstimation.ab_rel_lift_pct_str` relative lift on a `{python} SamplingEstimation.ab_baseline_pct_str` baseline at `{python} SamplingEstimation.confidence_pct_str` confidence and `{python} SamplingEstimation.power_pct_str` power, @eq-appdx-data-ab-sample-size gives the release scenario of @sec-ml-operations-ab-testing-model-validation-e480 `{python} SamplingEstimation.ab_n_str` users per arm. A service that can route `{python} SamplingEstimation.ab_users_per_arm_per_day_str` users per day to each arm needs about `{python} SamplingEstimation.ab_days_str` days to finish one test, and that duration, not compute, sets how often a recommendation model can be released on evidence.
+
+Each of these tools assumes the examples come from one fixed population. When the population itself moves, the question changes from estimating a rate to detecting that the distribution has shifted.
+
+### Measuring drift {#sec-appdx-data-foundations-measuring-drift-divergence-a6dd}
+
+Comparing means is not enough to catch that shift because a distribution's tails or bin shares can move while its average stays fixed, so comparing the serving distribution ($\CurrentDistribution$) with the training distribution ($\TrainingDistribution$) requires a distance measure across the full distribution shape. @Sec-data-engineering-detecting-responding-data-drift-509a owns drift detection and its taxonomy, and @sec-ml-operations-production-monitoring-5e1b decides what an alert should trigger; this section collects the three divergence measures they use, with one worked example.
 
 For discrete outcomes $\DiscreteOutcome$, @eq-appdx-data-kl-divergence expresses KL divergence\index{Kullback-Leibler divergence!appendix refresher}[^fn-kl-divergence-relative] as the expected extra coding cost of approximating $\CurrentDistribution$ with $\TrainingDistribution$ [@kullback1951; @cover2006]. The displayed form is finite only when $\TrainingDistribution(\DiscreteOutcome) > 0$ wherever $\CurrentDistribution(\DiscreteOutcome) > 0$; production implementations therefore need explicit smoothing or zero handling.
 $$ \KlDivergence(\CurrentDistribution \lVert \TrainingDistribution) = \sum_\DiscreteOutcome\CurrentDistribution(\DiscreteOutcome) \log \frac{\CurrentDistribution(\DiscreteOutcome)}{\TrainingDistribution(\DiscreteOutcome)} $$ {#eq-appdx-data-kl-divergence}
@@ -441,8 +562,8 @@ from mlsysim.fmt import fmt, check, fmt_math, MarkdownStr, fmt_percent
 
 class KLDrift:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    P0 = [0.60, 0.30, 0.10]
-    Pt = [0.45, 0.40, 0.15]
+    P0 = [0.60, 0.30, 0.10]  # scenario assumption: KWS training windows by SNR bin (high, medium, low)
+    Pt = [0.45, 0.40, 0.15]  # scenario assumption: fleet windows after the microphone change
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
     lr = [math.log(p0 / pt) for p0, pt in zip(P0, Pt)]
@@ -477,12 +598,12 @@ class KLDrift:
     kl_pq_str = fmt(kl_pq, precision=4, commas=False)
     kl_qp_str = fmt(kl_qp, precision=4, commas=False)
     psi_str = fmt(psi, precision=4, commas=False)
-    p0_positive_pct_str = fmt_percent(P0[0], precision=0, commas=False, style="prose")
-    p0_negative_pct_str = fmt_percent(P0[1], precision=0, commas=False, style="prose")
-    p0_neutral_pct_str = fmt_percent(P0[2], precision=0, commas=False, style="prose")
-    pt_positive_pct_str = fmt_percent(Pt[0], precision=0, commas=False, style="prose")
-    pt_negative_pct_str = fmt_percent(Pt[1], precision=0, commas=False, style="prose")
-    pt_neutral_pct_str = fmt_percent(Pt[2], precision=0, commas=False, style="prose")
+    p0_high_pct_str = fmt_percent(P0[0], precision=0, commas=False, style="prose")
+    p0_medium_pct_str = fmt_percent(P0[1], precision=0, commas=False, style="prose")
+    p0_low_pct_str = fmt_percent(P0[2], precision=0, commas=False, style="prose")
+    pt_high_pct_str = fmt_percent(Pt[0], precision=0, commas=False, style="prose")
+    pt_medium_pct_str = fmt_percent(Pt[1], precision=0, commas=False, style="prose")
+    pt_low_pct_str = fmt_percent(Pt[2], precision=0, commas=False, style="prose")
 
     # Bracketed vectors and display equations are structural math strings.
     P0_vec_str = MarkdownStr(f"[{_P0_fmt[0]}, {_P0_fmt[1]}, {_P0_fmt[2]}]")
@@ -550,7 +671,7 @@ KLDrift.psi_t_fmt = KLDrift._psi_t_fmt
 
 ::: {#nbk-appendix-data-kl-divergence-drift-detection .callout-notebook title="Worked example: KL divergence for drift detection"}
 
-**Scenario**: A sentiment classifier was trained on data where `{python} KLDrift.p0_positive_pct_str` of reviews were positive, `{python} KLDrift.p0_negative_pct_str` negative, and `{python} KLDrift.p0_neutral_pct_str` neutral. After deployment, the serving distribution shifts to `{python} KLDrift.pt_positive_pct_str` positive, `{python} KLDrift.pt_negative_pct_str` negative, and `{python} KLDrift.pt_neutral_pct_str` neutral.
+**Scenario**: A keyword-spotting model was trained on audio windows binned by signal-to-noise ratio: `{python} KLDrift.p0_high_pct_str` high, `{python} KLDrift.p0_medium_pct_str` medium, and `{python} KLDrift.p0_low_pct_str` low. After the device maker changes the microphone in a new product generation, the windows arriving from the fleet shift to `{python} KLDrift.pt_high_pct_str` high, `{python} KLDrift.pt_medium_pct_str` medium, and `{python} KLDrift.pt_low_pct_str` low.
 
 **Math**:
 
@@ -568,7 +689,7 @@ print(r"\vspace{-6mm}")
 print(KLDrift.kl_pq_calc_eq)
 ```
 
-Notice the asymmetry: $\KlDivergence(\TrainingDistribution \lVert \CurrentDistribution) \neq \KlDivergence(\CurrentDistribution \lVert \TrainingDistribution)$. The population stability index (PSI)\index{Population stability index!appendix refresher} symmetrizes this; the calculation below uses natural logarithms:
+The two directions give different values, $\KlDivergence(\TrainingDistribution \lVert \CurrentDistribution) \neq \KlDivergence(\CurrentDistribution \lVert \TrainingDistribution)$. The population stability index (PSI)\index{Population stability index!appendix refresher} symmetrizes this by summing the two directions; the calculation below uses natural logarithms:
 ```{python}
 #| echo: false
 #| output: asis
@@ -600,184 +721,28 @@ class PsiThreshold:
     psi_critical_str = fmt(psi_critical, precision=2, commas=False)
 ```
 
-**Systems insight**: Since PSI = `{python} KLDrift.psi_str` < `{python} PsiThreshold.psi_threshold_str`, this drift sits just below the conventional warning threshold and well short of the critical threshold of `{python} PsiThreshold.psi_critical_str` used in @sec-ml-operations. The right response is to keep the feature on the monitoring dashboard and look for corroborating drift signals rather than retraining from this statistic alone.
+**Systems insight**: Since PSI = `{python} KLDrift.psi_str` < `{python} PsiThreshold.psi_threshold_str`, this drift sits just below the conventional warning threshold and well short of the critical threshold of `{python} PsiThreshold.psi_critical_str` used in @sec-ml-operations. The right response is to keep the feature on the monitoring dashboard and look for corroborating drift signals rather than retraining from this statistic alone. The statistic is also cheap to collect on an always-on device, which can report three bin counters per interval instead of raw audio, so the check fits the power budget and raw recordings never need to leave the device.
 
 :::
 
-The threshold remains illustrative: its meaning depends on sample size, binning, smoothing, and zero handling, and retraining requires model-quality evidence.
+[^fn-kl-divergence-relative]: **KL divergence**\index{Kullback-Leibler divergence!appendix refresher}: Named after Solomon Kullback\index{Kullback, Solomon|seealso{Kullback-Leibler divergence}} and Richard Leibler\index{Leibler, Richard|seealso{Kullback-Leibler divergence}}, who introduced it in 1951. Also called *relative entropy*, it quantifies the expected extra information needed to encode samples from one distribution using a code optimized for another; for drift monitoring in this book, the canonical direction is $\KlDivergence(\CurrentDistribution \lVert \TrainingDistribution)$. With natural logarithms, as in the example above, the unit is nats; with base-2 logarithms, the unit is bits.
 
-[^fn-kl-divergence-relative]: **KL divergence**\index{Kullback-Leibler divergence!appendix refresher}: Named after Solomon Kullback\index{Kullback, Solomon|seealso{Kullback-Leibler divergence}} and Richard Leibler\index{Leibler, Richard|seealso{Kullback-Leibler divergence}}, who introduced it in 1951. Also called *relative entropy*, it quantifies the expected extra information needed to encode samples from one distribution using a code optimized for another; for drift monitoring in this book, the canonical direction is $\KlDivergence(\CurrentDistribution \lVert \TrainingDistribution)$. With natural logarithms, as in the example above, the unit is nats; with base-2 logarithms, the unit is bits. In production ML, KL divergence is the theoretical backbone of many drift-detection metrics.
+Those PSI thresholds remain illustrative because their meaning depends on sample size, binning, smoothing, and zero handling, and because retraining requires model-quality evidence. Moreover, KL divergence and PSI compare binned or categorical distributions. For a continuous feature, such as the loudness of an audio window, the two-sample Kolmogorov-Smirnov statistic\index{Kolmogorov-Smirnov test!appendix refresher} avoids binning altogether: it is the largest gap between the empirical cumulative distribution functions of a training sample and a serving sample,
 
-Both KL divergence and PSI are grounded in a deeper framework—information theory\index{Information theory}—which provides the units and bounds that make these metrics principled rather than *ad hoc*.
+$$\KolmogorovSmirnovStatistic= \max_{\MonitoredFeatureLevel}|\TrainingEmpiricalCdf(\MonitoredFeatureLevel) - \ServingEmpiricalCdf(\MonitoredFeatureLevel)|.$$
+
+Its critical value shrinks with the square root of the sample sizes, so a large serving sample flags even a tiny shift as significant; whether that shift matters is a separate question. @Sec-data-engineering-quality-validation-monitoring-498f works the test through with its critical value. All three measures rest on information theory\index{Information theory}, which supplies their units.
 
 ### Information theory for systems {#sec-appdx-data-foundations-information-theory-systems-c033}
 
-A training run can consume more examples, run longer, and still stop improving if the added data carries too little useful signal. At that point, the bottleneck is not only compute or bandwidth; it is the amount of information the data pipeline delivers to the learner. @Sec-appdx-dam-taxonomy-information-roofline-destination-6426 treats that data quality limit as a diagnostic constraint, and information theory provides the units for reasoning about it.
+A training run can consume more examples, run longer, and still stop improving if the added data carries too little useful signal. At that point the limit is the information the data pipeline delivers to the learner, not compute or bandwidth. @Sec-appdx-dam-taxonomy-information-roofline-destination-6426 treats that data quality limit as a diagnostic constraint, and information theory provides the units for reasoning about it.
 
 * **Entropy ($\ShannonEntropy$)**\index{Entropy!definition}:[^fn-entropy-information-theory] The average uncertainty in a distribution, defined as $\ShannonEntropy(\DiscreteRandomVariable) = -\sum \ProbabilityFunction(\DiscreteOutcome) \log \ProbabilityFunction(\DiscreteOutcome)$. The log base sets the unit: natural logs give nats, while $\log_2$ gives bits. A uniform distribution has maximum entropy only over a fixed finite support. This connects directly to KL divergence above: $\KlDivergence$ measures the excess coding cost of using the wrong distribution.
 * **Information density**\index{Information density!definition}: Used here as a book-level heuristic for useful learning signal per unit of storage, not as a standard information-theory quantity.
 * **Signal-to-noise ratio (SNR)**\index{Signal-to-noise ratio!definition}: The ratio of signal power to noise power. In ML, the book uses low SNR qualitatively for data in which task-relevant structure is weak relative to noise; adding compute cannot compensate for missing task-relevant signal.
 
-[^fn-entropy-information-theory]: **Entropy**\index{Entropy!appendix refresher}: Shannon\index{Shannon, Claude!information theory} adopted the term in 1948 to quantify information content [@shannon1948]. In systems terms, Shannon entropy is a lower bound on average lossless code length. Practical prefix codes approach it, and block codes can approach it asymptotically. With $\log_2$, the unit is bits; natural logs give nats. These bounds inform compression ratios and data-pipeline sizing.
-
-### Logits and numerical stability {#sec-appdx-data-foundations-logits-numerical-stability-13e2}
-
-```{python}
-#| echo: false
-#| label: logit-overflow-example
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Context: @sec-appdx-data-foundations-logits-numerical-stability-13e2
-# │ Goal: Example logit value that overflows naive softmax
-from mlsysim.fmt import fmt
-
-class LogitOverflowExample:
-    # ┌── 1. LOAD (Constants) ──────────────────────────────
-    logit_val = 100
-
-    # ┌── 4. OUTPUT (Formatting) ───────────────────────────
-    logit_val_str = fmt(logit_val, precision=0, commas=False)
-```
-
-Neural-network classifiers commonly output a vector of *logits*\index{Logits!appendix refresher}[^fn-logit-unnormalized-score] $\LogitVector$ (unnormalized scores). For class index $\ClassIndex$, softmax\index{Softmax!appendix refresher} normalizes $\OutputLogit_{\ClassIndex}$ over all class indices $\NormalizingClassIndex$ to produce a probability:
-
-$$ \text{Softmax}(\OutputLogit_{\ClassIndex}) = \frac{e^{\OutputLogit_{\ClassIndex}}}{\sum_{\NormalizingClassIndex} e^{\OutputLogit_{\NormalizingClassIndex}}} $$
-
-[^fn-logit-unnormalized-score]: **Logit**\index{Logits!logit function}: Joseph Berkson\index{Berkson, Joseph|seealso{Logits}} coined the term in 1944 by analogy with *probit*. The logit function is the inverse of the logistic (sigmoid) function: $\text{logit}(\LogisticProbability) = \log(\LogisticProbability/(1-\LogisticProbability))$. In deep learning, "logits" refers more loosely to the raw, unnormalized output of the final linear layer before any activation function is applied.
-
-The problem is that if $\OutputLogit_{\ClassIndex}$ is large (for example, `{python} LogitOverflowExample.logit_val_str`), the exponential $e^{\OutputLogit_{\ClassIndex}}$ overflows common training and inference formats such as FP32, BF16, and FP16. FP64 can represent this specific value, but production ML kernels rarely use FP64 for softmax. The solution is to compute in log-space: the "Log-Sum-Exp" trick\index{Log-sum-exp trick!appendix refresher} allows us to compute $\log\left(\sum_{\NormalizingClassIndex} e^{\OutputLogit_{\NormalizingClassIndex}}\right)$ without ever calculating the massive exponentials directly, preserving numerical precision.[^fn-logsumexp-numerical-stability]
-
-[^fn-logsumexp-numerical-stability]: **Log-sum-exp**\index{Log-sum-exp trick!appendix refresher}: Implemented as `torch.logsumexp` in PyTorch and `scipy.special.logsumexp` in SciPy. It relies on the identity $\log\left(\sum e^{\OutputLogit_{\NormalizingClassIndex}}\right) = \SoftmaxRowMaximum + \log\left(\sum e^{\OutputLogit_{\NormalizingClassIndex} - \SoftmaxRowMaximum}\right)$, where $\SoftmaxRowMaximum = \max(\OutputLogit_{\NormalizingClassIndex})$. Shifted values $\OutputLogit_{\NormalizingClassIndex} - \SoftmaxRowMaximum$ are $\le 0$, ensuring exponentials never overflow.
-
-A small worked example shows why this trick matters in practice, even for large but realistic logit values:
-
-```{python}
-#| echo: false
-#| label: logsumexp-example
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ LOG-SUM-EXP NUMERICAL STABILITY
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "Worked Example: Log-Sum-Exp in Action",
-# │          @sec-appdx-data-foundations-logits-numerical-stability-13e2 narrative.
-# │
-# │ Goal:    Demonstrate naive vs stable softmax via the Log-Sum-Exp trick.
-# │ Show:    Naive overflow risk, shifted exponentials, stable softmax values.
-# │ How:     Subtract max logit before exponentiation; compare to naive path.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-import math
-from mlsysim.fmt import fmt, check, fmt_math
-
-class LogSumExp:
-    # ┌── 1. LOAD ──────────────────────────────────────────
-    z = [100, 101, 102]
-
-    # ┌── 2. EXECUTE ───────────────────────────────────────
-    # Naive exponentials
-    naive_exp = [math.exp(zi) for zi in z]
-
-    # Stable version: shift by max (for-loop avoids Python 3 class-scope comprehension issue)
-    a = max(z)
-    shifted = []
-    for zi in z:
-        shifted.append(zi - a)
-    stable_exp = [math.exp(s) for s in shifted]
-    stable_sum = sum(stable_exp)
-    lse = a + math.log(stable_sum)
-
-    # Softmax from stable exponentials (for-loop avoids Python 3 class-scope comprehension issue)
-    softmax = []
-    for e in stable_exp:
-        softmax.append(e / stable_sum)
-
-    # ┌── 3. GUARD ─────────────────────────────────────────
-    check(abs(sum(softmax) - 1.0) < 1e-10, "Softmax must sum to 1")
-    check(all(0 <= s <= 1 for s in softmax), "Softmax values must be in [0,1]")
-
-    # ┌── 4. OUTPUT ────────────────────────────────────────
-    # fmt_math wraps in $...$ so prose needs no extra delimiters
-    # Renamed from z_str → z_math (canonical _math suffix for fmt_math result)
-    z_math = fmt_math(f"[{z[0]}, {z[1]}, {z[2]}]")
-    a_str = fmt(a, precision=0, commas=False)
-
-    # Naive exponentials in scientific notation
-    def _sci(v):
-        exp = int(math.floor(math.log10(v)))
-        mantissa = v / 10**exp
-        return f"{mantissa:.1f} \\times 10^{{{exp}}}"
-
-    # Internal helpers (no _str suffix — only the *_eq exports below are referenced in prose).
-    _naive0 = fmt_math(_sci(naive_exp[0]))
-    _naive1 = fmt_math(_sci(naive_exp[1]))
-    _naive2 = fmt_math(_sci(naive_exp[2]))
-
-    # Shifted logits; fmt_math wraps in $...$
-    # Renamed from shifted_str → shifted_math (canonical _math suffix for fmt_math result)
-    shifted_math = fmt_math(f"[{shifted[0]}, {shifted[1]}, {shifted[2]}]")
-
-    # Stable exponentials — internal interpolation helpers only (drop _str suffix).
-    _sexp0 = f"{stable_exp[0]:.3f}"
-    _sexp1 = f"{stable_exp[1]:.3f}"
-    _sexp2 = f"{stable_exp[2]:.1f}"
-
-    sum_str = fmt(stable_sum, precision=3, commas=False)
-    _lse = f"{lse:.3f}"
-    _log_sum = f"{math.log(stable_sum):.3f}"
-
-    # Softmax values — internal interpolation helpers only (sm_eq below is the prose export).
-    _sm0 = f"{softmax[0]:.3f}"
-    _sm1 = f"{softmax[1]:.3f}"
-    _sm2 = f"{softmax[2]:.3f}"
-
-    # Pre-formatted exp() expressions (each is a complete $...$ block to avoid split-delimiter LaTeX errors)
-    # Renamed *_expr → *_math (canonical _math suffix for fmt_math equation results)
-    naive_exp0_math = fmt_math(f"\\exp({z[0]}) \\approx {_sci(naive_exp[0])}")
-    naive_exp1_math = fmt_math(f"\\exp({z[1]}) \\approx {_sci(naive_exp[1])}")
-    naive_exp2_math = fmt_math(f"\\exp({z[2]}) \\approx {_sci(naive_exp[2])}")
-
-    stable_exp0_math = fmt_math(f"\\exp({shifted[0]}) \\approx {stable_exp[0]:.3f}")
-    stable_exp1_math = fmt_math(f"\\exp({shifted[1]}) \\approx {stable_exp[1]:.3f}")
-    stable_exp2_math = fmt_math(f"\\exp({shifted[2]}) = {stable_exp[2]:.1f}")
-
-    log_sum_math = fmt_math(f"+ \\log({stable_sum:.3f}) = {lse:.3f}")
-
-    sm_math = fmt_math(
-        f"[{stable_exp[0]:.3f}/{stable_sum:.3f},\\; "
-        f"{stable_exp[1]:.3f}/{stable_sum:.3f},\\; "
-        f"{stable_exp[2]:.1f}/{stable_sum:.3f}] = "
-        f"[{softmax[0]:.3f},\\; {softmax[1]:.3f},\\; {softmax[2]:.3f}]"
-    )
-```
-
-::: {#nbk-appendix-data-log-sum-exp-action .callout-notebook title="Log-sum-exp in action"}
-
-**Setup**: A three-class classifier outputs logits $\LogitVector=$ `{python} LogSumExp.z_math`.
-
-**Without the trick (naive softmax)**:
-$$\text{
-`{python} LogSumExp.naive_exp0_math`, `{python} LogSumExp.naive_exp1_math`, `{python} LogSumExp.naive_exp2_math`}$$
-
-These numbers are representable in FP64 but overflow FP32 (max $\approx 3.4 \times 10^{38}$). With FP16 (max $\approx 65{,}504$), even $e^{12}$ overflows. Raw logits rarely reach magnitude 100, but large intermediate values do arise (for example, unscaled attention scores or overconfident outputs), and because FP16 and BF16 are the standard training precisions, a naive softmax risks overflow often enough that the stable form is used by default.
-
-**With the trick**: Subtract $\SoftmaxRowMaximum = \max(\LogitVector) =$ `{python} LogSumExp.a_str`:
-
-Shifted logits: $\LogitVector- \SoftmaxRowMaximum =$ `{python} LogSumExp.shifted_math`
-
-Exponentials: `{python} LogSumExp.stable_exp0_math`, `{python} LogSumExp.stable_exp1_math`, `{python} LogSumExp.stable_exp2_math`
-
-Sum = `{python} LogSumExp.sum_str`. LogSumExp = `{python} LogSumExp.a_str` `{python} LogSumExp.log_sum_math`.
-
-Softmax: `{python} LogSumExp.sm_math`
-
-**Systems insight**: The exponentiated shifted values and the resulting softmax probabilities are in $[0, 1]$—no overflow risk, even in FP16.
-
-:::
-
-```{=latex}
-\enlargethispage{5\baselineskip}
-```
-
-Together, these worked examples connect the full chain, from physical data movement to distribution shift and numerical stability.
+[^fn-entropy-information-theory]: **Entropy**\index{Entropy!appendix refresher}: Shannon\index{Shannon, Claude!information theory} adopted the term in 1948 to quantify information content [@shannon1948]. In systems terms, Shannon entropy is a lower bound on average lossless code length. Practical prefix codes approach it, and block codes can approach it asymptotically. These bounds inform compression ratios and data-pipeline sizing.
 
 ## Summary {#sec-appdx-data-foundations-summary-3c72}
 
-The tools in this appendix—tail-aware metrics, drift divergences, information-theoretic bounds, and numerical stability techniques—support quantitative diagnosis of data-related failures rather than anecdotal explanations.
+When a data symptom appears, find its row in @tbl-appdx-data-lookup and compute the number. Each section points back to the chapter that teaches the tool, where the lighthouse workloads show it deciding a design.

@@ -606,6 +606,15 @@ class ValidateCommand:
             Scope("files", "_run_images"),
             Scope("alt-text-style", "_run_mitpress_alt_text_style",
                   note="alt-text follows body-prose rules (§10.12)"),
+            # Added 2026-10-13: matplotlib figures are scaled to the text block,
+            # so printed text = font size x (text width / cropped image width).
+            # vol2 canvases drifted from 0.62x to 1.04x with no check failing.
+            # Default=False because it executes every chapter's python cells.
+            # Enforced instead by two pre-commit hooks (2026-10-13, all four
+            # volumes at 0): book-check-figure-print-scale on changed chapters,
+            # and book-check-figure-print-scale-all when the style changes.
+            Scope("print-scale", "_run_figure_print_scale", default=False,
+                  note="matplotlib body figures print at 0.80-1.05x, text >= 9 pt, styled"),
         ],
         # ------------------------------------------------------------------
         # Semantic check groups: classify checks by WHAT is validated
@@ -631,6 +640,15 @@ class ValidateCommand:
                   note="callout title attribute sentence-case compliance"),
             Scope("unclosed-html-comments", "_run_unclosed_html_comments",
                   note="unclosed <!-- HTML comment tags that silently swallow prose"),
+            # Added 2026-10-11 (vol1 streamline): `\mbox{`{python} x`}` in
+            # prose is raw LaTeX, so the HTML build drops the computed value
+            # entirely (ch2, ch4, ch16 each lost a number this way).
+            # Added 2026-10-11: \\ref{nbk-...} to a callout defined in another
+            # chapter renders as raw LaTeX in the per-chapter HTML build.
+            Scope("cross-chapter-callout-ref", "_run_cross_chapter_callout_ref",
+                  note="\\ref{} to a notebook/war-story/checkpoint defined in another file renders raw in HTML; point to its section instead"),
+            Scope("raw-tex-inline-value", "_run_raw_tex_inline_value",
+                  note="raw LaTeX box (\\mbox/\\hbox/\\makebox) around an inline {python} value hides it from HTML"),
             # default=False until vol2 narrative callouts are normalized to the
             # same schema vol1 uses; flip to True once `--scope callout-schema`
             # is clean on dev for both volumes.
@@ -655,6 +673,9 @@ class ValidateCommand:
             Scope("spelling-dict", "_run_mitpress_spelling_dict",
                   note="canonical spellings (§10.7): trade-off, dataset, data center, Wi-Fi, …"),
             Scope("duplicate-words", "_run_duplicate_words"),
+            # Added 2026-10-13 after "ledger" was removed from all four books.
+            Scope("coined-nouns", "_run_coined_nouns",
+                  note='no "ledger": name the record plainly (list, log, table, record)'),
             Scope("unblended-prose", "_run_unblended_prose",
                   note="space after period"),
             Scope("above-below", "_run_mitpress_above_below",
@@ -752,10 +773,25 @@ class ValidateCommand:
         "structure": [
             Scope("concept-maps", "_run_concept_maps",
                   note="validate concept-map YAML files and frontmatter wiring"),
+            # 2026-10-12: forward touches (a concept used before its owning
+            # chapter) are a sculpting worklist, so they stay out of the gate.
+            Scope("concept-order", "_run_concept_order", default=False,
+                  note="concepts used before their owning chapter (schema v2 maps)"),
             Scope("heading-levels", "_run_heading_levels",
                   note="H1→H2→H3 hierarchy"),
             Scope("h2-landings", "_run_h2_landings",
                   note="## sections need prose before ### subsections"),
+            # 2026-10-13: two chapter renumberings (vol2 swap, vol3 split) left
+            # number-offset stale, so chapters printed the wrong number and no
+            # check noticed. The offset must equal the NN_ folder prefix minus one.
+            Scope("number-offset", "_run_number_offset",
+                  note="chapter number-offset matches its NN_ folder"),
+            # 2026-10-13: a top-level `number-sections: false` added to the
+            # volume entry files for the HTML landing page became book-wide
+            # metadata in the PDF, so every chapter went unnumbered and every
+            # figure printed as 0.x. Entry files may only switch it off for HTML.
+            Scope("pdf-entry-numbering", "_run_pdf_entry_numbering",
+                  note="volume PDF entry files must not turn number-sections off book-wide"),
             Scope("parts", "_run_parts",
                   note="part keys valid"),
             Scope("purpose-unnumbered", "_run_purpose_unnumbered",
@@ -1109,7 +1145,7 @@ class ValidateCommand:
         )
 
         try:
-            ns = parser.parse_args(args)
+            ns = parser.parse_intermixed_args(args)
         except SystemExit:
             # argparse uses SystemExit(0) for --help and non-zero for parse errors.
             return ("-h" in args) or ("--help" in args)
@@ -1228,6 +1264,8 @@ class ValidateCommand:
             elif method_name == "_run_check_references":
                 results.append(method(root, ns))
             elif method_name == "_run_sources":
+                results.append(method(root, ns))
+            elif method_name == "_run_figure_print_scale":
                 results.append(method(root, ns))
             elif method_name == "_run_epubcheck":
                 # Thresholds come from --max-fatal / --max-errors; when not
@@ -5469,7 +5507,15 @@ class ValidateCommand:
     # Concept Maps Validation
     # ------------------------------------------------------------------
 
-    def _run_concept_maps(self, root: Path) -> ValidationRunResult:
+    def _run_concept_order(self, root: Path) -> ValidationRunResult:
+        """Report schema-v2 concepts touched before their owning chapter teaches them."""
+        result = self._run_concept_maps(root, include_order=True)
+        result.issues = [i for i in result.issues if "used before it is taught" in i.message]
+        result.name = "concept-order"
+        result.description = "Concepts used before their owning chapter"
+        return result
+
+    def _run_concept_maps(self, root: Path, include_order: bool = False) -> ValidationRunResult:
         """Validate concept-map YAML files and QMD frontmatter wiring."""
         start = time.time()
         issues: List[ValidationIssue] = []
@@ -5480,7 +5526,7 @@ class ValidateCommand:
 
         repo_root = self.config_manager.root_dir
         contents_dir = root if "contents" in str(root) else repo_root  / "books"
-        findings = check_concept_maps(contents_dir, repo_root)
+        findings = check_concept_maps(contents_dir, repo_root, include_order=include_order)
         for finding in findings:
             issues.append(
                 ValidationIssue(
@@ -5605,6 +5651,99 @@ class ValidateCommand:
     # ------------------------------------------------------------------
     # H2 landing prose  (detect ## followed immediately by ###)
     # ------------------------------------------------------------------
+
+    def _run_pdf_entry_numbering(self, root: Path) -> ValidationRunResult:
+        """Flag a top-level ``number-sections: false`` in a volume's PDF entry file.
+
+        The entry file (``index-volN.qmd``, ``volN/index.qmd``, or
+        ``volN/frontmatter/about.qmd``) supplies the whole book's metadata in a
+        PDF build, so a top-level ``number-sections: false`` there unnumbers
+        every chapter. Scope it under ``format: html:`` instead.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        checked = 0
+        for file in files:
+            parts = file.parts
+            is_entry = (
+                re.fullmatch(r"index-vol\d\.qmd", file.name) is not None
+                or (file.name == "index.qmd" and len(parts) >= 2 and re.fullmatch(r"vol\d", parts[-2]))
+                or (file.name == "about.qmd" and len(parts) >= 3 and parts[-2] == "frontmatter"
+                    and re.fullmatch(r"vol\d", parts[-3]))
+            )
+            if not is_entry:
+                continue
+            lines = self._read_text(file).splitlines()
+            if not lines or lines[0].strip() != "---":
+                continue
+            checked += 1
+            for idx, line in enumerate(lines[1:], 2):
+                if line.strip() == "---":
+                    break
+                if re.match(r"^number-sections:\s*false\s*$", line):
+                    issues.append(ValidationIssue(
+                        file=self._relative_file(file),
+                        line=idx,
+                        code="pdf_entry_number_sections_off",
+                        message=("top-level number-sections: false in a volume entry file "
+                                 "turns off chapter numbering for the whole PDF (figures print as 0.x)"),
+                        context=line.strip(),
+                        suggestion="move it under format: html:",
+                    ))
+        return ValidationRunResult(
+            name="pdf-entry-numbering",
+            description="Volume PDF entry files keep book-wide numbering on",
+            files_checked=checked,
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_number_offset(self, root: Path) -> ValidationRunResult:
+        """Require each chapter's ``number-offset`` to equal its folder number minus one.
+
+        A chapter lives in ``books/volN/NN_name/NN_name.qmd``; its front matter
+        ``number-offset: [k]`` sets the printed chapter number to k + 1, so k
+        must be NN - 1. Files outside numbered chapter folders are skipped.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        offset_pat = re.compile(r"^number-offset:\s*\[\s*(\d+)\s*\]\s*$")
+        checked = 0
+        for file in files:
+            folder = file.parent.name
+            m_folder = re.match(r"^(\d\d)_", folder)
+            if not m_folder or file.stem != folder:
+                continue
+            lines = self._read_text(file).splitlines()
+            if not lines or lines[0].strip() != "---":
+                continue
+            checked += 1
+            for idx, line in enumerate(lines[1:], 2):
+                if line.strip() == "---":
+                    break
+                m = offset_pat.match(line.strip())
+                if m:
+                    expected = int(m_folder.group(1)) - 1
+                    if int(m.group(1)) != expected:
+                        issues.append(ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="number_offset_mismatch",
+                            message=(f"number-offset [{m.group(1)}] prints chapter {int(m.group(1)) + 1}, "
+                                     f"but the folder is chapter {int(m_folder.group(1))}"),
+                            context=line.strip(),
+                            suggestion=f"number-offset: [{expected}]",
+                        ))
+                    break
+        return ValidationRunResult(
+            name="number-offset",
+            description="Chapter number-offset matches its NN_ folder",
+            files_checked=checked,
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
 
     def _run_h2_landings(self, root: Path) -> ValidationRunResult:
         """Require H2 sections to orient readers before H3 subsections.
@@ -6248,6 +6387,21 @@ class ValidateCommand:
                        f"`@key` instead — citeproc renders it as "
                        f"'{h.detail} et al. (year)' and keeps the claim "
                        f"traceable to the bibliography."))
+
+    def _run_coined_nouns(self, root: Path) -> ValidationRunResult:
+        """Flag the coined noun "ledger" anywhere it renders.
+
+        Added 2026-10-13. A concept-map pass spread "ledger" across all four
+        books; the author ruled it jargon and every use was replaced with the
+        plain word for the record. The right word depends on context, so this
+        flags and never fixes.
+        """
+        from cli.checks.prose_integrity import find_coined_nouns
+        return self._run_prose_integrity(
+            root, find_coined_nouns, "coined-nouns", "coined_noun",
+            lambda h: (f"'{h.match}' is a banned coined noun. Name the record "
+                       f"plainly for what it holds: list, log, table, record, "
+                       f"or account."))
 
     def _run_underscore_italics(self, root: Path) -> ValidationRunResult:
         """Flag `_italic_` outside the Purpose hook question.
@@ -8814,6 +8968,80 @@ class ValidateCommand:
         return ValidationRunResult(
             name="unclosed-html-comments",
             description="Flag unclosed <!-- HTML comment tags",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_cross_chapter_callout_ref(self, root: Path) -> ValidationRunResult:
+        """Flag \\ref{} to callout ids (nbk/ws/chk/lhs/psp/exmp) defined in a different file."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        defs = {}
+        def_pat = re.compile(r"\{#((?:nbk|ws|chk|lhs|psp|exmp)-[\w-]+)")
+        ref_pat = re.compile(r"\\ref\{((?:nbk|ws|chk|lhs|psp|exmp)-[\w-]+)\}")
+        texts = {f: self._read_text(f) for f in files}
+        for f, t in texts.items():
+            for m in def_pat.finditer(t):
+                defs[m.group(1)] = f
+        # 2026-10-12: enforced for vol1 only. 2026-10-13: vol2-vol4 refs fixed
+        # (117 at the time), so every volume is enforced.
+        enforced_volumes = {"vol1", "vol2", "vol3", "vol4"}
+        for f, t in texts.items():
+            if not enforced_volumes & set(Path(f).parts):
+                continue
+            for idx, line in enumerate(t.splitlines(), 1):
+                for m in ref_pat.finditer(line):
+                    d = defs.get(m.group(1))
+                    if d is not None and d != f:
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(f),
+                                line=idx,
+                                code="cross_chapter_callout_ref",
+                                message=f"\\ref{{{m.group(1)}}} is defined in {self._relative_file(d)}; cite its section with @sec- instead.",
+                                severity="error",
+                                context=line.strip()[:100],
+                            )
+                        )
+        return ValidationRunResult(
+            name="cross-chapter-callout-ref",
+            description="Flag cross-chapter \\ref to callout ids",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_raw_tex_inline_value(self, root: Path) -> ValidationRunResult:
+        """Flag raw LaTeX boxes wrapping inline {python} values in prose (dropped by HTML)."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        pat = re.compile(r"\\(?:mbox|hbox|makebox)\{[^{}]*`\{python\}")
+        for file in files:
+            in_code = False
+            for idx, line in enumerate(self._read_text(file).splitlines(), 1):
+                if line.lstrip().startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                m = pat.search(line)
+                if m:
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="raw_tex_inline_value",
+                            message="Raw LaTeX box around an inline {python} value; HTML drops it. Remove the box.",
+                            severity="error",
+                            context=line.strip()[:100],
+                        )
+                    )
+        return ValidationRunResult(
+            name="raw-tex-inline-value",
+            description="Flag raw LaTeX boxes around inline {python} values",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
@@ -13227,6 +13455,10 @@ class ValidateCommand:
         # The verb marks the role; "is established in @sec-x" and "the bound established in @sec-x" both qualify.
         fwd = re.compile(r"\b(?:developed|measured|operationalized|enforced)\b[^.@]*\bin @")
         bwd = re.compile(r"\bestablished\b[^.@]*\bin @")
+        # 2026-10-12 author ruling (Vol I): an appendix collects material for reference and
+        # is never a concept's home, so a pointer into one may say "collected for reference
+        # in". Accepted, not required, so the other volumes' pointers are unaffected.
+        appx = re.compile(r"\bcollected for reference in @")
         homes: Dict[Path, Dict[str, object]] = {}
 
         def home_map(vol_dir: Path) -> Dict[str, object]:
@@ -13296,8 +13528,8 @@ class ValidateCommand:
                         problem = "↪ must point to a later chapter or an appendix"
                     elif body[0] == "↩" and not bwd.search(body):
                         problem = '↩ pointer wording uses "established in"'
-                    elif body[0] == "↪" and "**Byte layout:**" not in body and "**Protocol:**" not in body and not fwd.search(body):
-                        problem = '↪ pointer wording uses "developed / measured / operationalized / enforced in"'
+                    elif body[0] == "↪" and "**Byte layout:**" not in body and "**Protocol:**" not in body and not (fwd.search(body) or (tgt == "appendix" and appx.search(body))):
+                        problem = '↪ pointer wording uses "developed / measured / operationalized / enforced in" (an appendix target may use "collected for reference in")'
                     elif body[0] == "⇄" and not body.startswith("⇄ **Contrast:**"):
                         problem = "⇄ pointer must open with **Contrast:**"
                     elif re.match(r"↪ \*\*(Byte layout|Protocol):\*\*", body) and tgt != "appendix":
@@ -13495,6 +13727,36 @@ class ValidateCommand:
         return self._run_audit_check(
             root, "audit.checks.alt_text_style",
             "alt-text-style", "alt-text style compliance (§10.12)",
+        )
+
+    def _run_figure_print_scale(
+        self, root: Path, ns: Optional[argparse.Namespace] = None
+    ) -> ValidationRunResult:
+        """figures --scope print-scale: printed size of matplotlib body figures.
+
+        Executes each chapter's python cells in a subprocess and measures every
+        figure inside a ``#fig-`` div; see ``cli/checks/figure_print_scale.py``.
+        Positional files (pre-commit) narrow the run to those chapters.
+        """
+        try:
+            from cli.checks import figure_print_scale as fps
+        except ImportError:
+            from binder.cli.checks import figure_print_scale as fps
+
+        t0 = time.time()
+        repo_root = Path(__file__).resolve().parents[3]
+        if ns is not None and getattr(ns, "files", None):
+            candidates = [(repo_root / f) if not Path(f).is_absolute() else Path(f) for f in ns.files]
+            candidates = [q.resolve() for q in candidates if q.suffix == ".qmd" and q.is_file()]
+        else:
+            candidates = self._qmd_files(root)
+        qmds = [q for q in candidates if "```{python}" in q.read_text(encoding="utf-8")]
+        issues = [ValidationIssue(**f) for f in fps.check_chapters(qmds, repo_root)]
+        return ValidationRunResult(
+            name="figure-print-scale",
+            description="Matplotlib print scale and font floor (limits from mlsysim.viz.style)",
+            files_checked=len(qmds), issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
         )
 
     def _run_image_formats(self, root: Path) -> ValidationRunResult:
@@ -14501,7 +14763,7 @@ class ValidateCommand:
         approved_layout_vectors = {
             ("vol1/frontmatter/_conventions.qmd", (17, 85)),
             ("vol1/introduction/introduction.qmd", (10, 19, 24, 29, 17)),
-            ("vol1/ml_workflow/ml_workflow.qmd", (16, 44, 50)),
+            ("vol1/ml_lifecycle/ml_lifecycle.qmd", (16, 44, 50)),
         }
 
         for file in files:

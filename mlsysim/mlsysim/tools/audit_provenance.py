@@ -27,6 +27,7 @@ from mlsysim.literature.registry import (
     Chinchilla,
     Communication,
     ComputeTrend,
+    AlgorithmicEfficiency,
     Crypto,
     DatacenterElectricity,
     EdgeInferenceBenchmarks,
@@ -314,6 +315,7 @@ def audit_literature_sourced() -> list[str]:
                 issues.extend(_validate_provenance_record(f"{prefix}", item.provenance))
     for prefix, series_cls in (
         ("Literature.ComputeTrend", ComputeTrend),
+        ("Literature.AlgorithmicEfficiency", AlgorithmicEfficiency),
         ("Literature.EdgeInferenceBenchmarks", EdgeInferenceBenchmarks),
         ("Literature.KaplanScalingLaws", KaplanScalingLaws),
     ):

@@ -42,8 +42,14 @@ CHAPTER_REGISTRY: Dict[int, Dict[str, str]] = {
     14: {"title": "Intervention", "file": "books/vol4/14_intervention/14_intervention.qmd", "part": "Part IV: Governing"},
     15: {"title": "Verification", "file": "books/vol4/15_verification/15_verification.qmd", "part": "Part IV: Governing"},
     16: {"title": "Release", "file": "books/vol4/16_release/16_release.qmd", "part": "Part IV: Governing"},
-    17: {"title": "The Frontier", "file": "books/vol4/17_frontier/17_frontier.qmd", "part": "Conclusion"},
+    17: {"title": "Responsibility", "file": "books/vol4/17_responsibility/17_responsibility.qmd", "part": "Part IV: Governing"},
+    18: {"title": "The Frontier", "file": "books/vol4/18_frontier/18_frontier.qmd", "part": "Conclusion"},
 }
+
+# Chapter numbers in reading order, derived from the inventory above so that
+# adding or renumbering a chapter never leaves a stale hard-coded count.
+CHAPTER_NUMBERS: List[int] = sorted(CHAPTER_REGISTRY)
+LAST_CHAPTER: int = CHAPTER_NUMBERS[-1]
 
 
 class ChapterProgress(BaseModel):
@@ -66,7 +72,7 @@ class BookManifest(BaseModel):
     started_at: str
     last_updated: str
     current_chapter: int = 1
-    total_chapters: int = 17
+    total_chapters: int = len(CHAPTER_REGISTRY)
     completed_chapters_count: int = 0
     total_words_trimmed: int = 0
     total_scaffolding_edits: int = 0
@@ -104,11 +110,20 @@ class BookOrchestrator:
                     data = json.load(f)
                     # Convert chapter keys back to int
                     ch_dict = {int(k): ChapterProgress(**v) for k, v in data.get("chapters", {}).items()}
+                    # Reconcile with the current inventory: a saved manifest may predate a
+                    # renumbering, so titles and paths come from CHAPTER_REGISTRY and any
+                    # chapter missing from the file starts as PENDING.
+                    for num, meta in CHAPTER_REGISTRY.items():
+                        if num not in ch_dict or ch_dict[num].file_path != meta["file"]:
+                            ch_dict[num] = ChapterProgress(
+                                chapter_num=num, title=meta["title"], file_path=meta["file"], part=meta["part"]
+                            )
+                    ch_dict = {num: ch_dict[num] for num in CHAPTER_NUMBERS}
                     manifest = BookManifest(
                         started_at=data.get("started_at", now_str),
                         last_updated=data.get("last_updated", now_str),
                         current_chapter=data.get("current_chapter", 1),
-                        total_chapters=17,
+                        total_chapters=len(CHAPTER_REGISTRY),
                         completed_chapters_count=data.get("completed_chapters_count", 0),
                         total_words_trimmed=data.get("total_words_trimmed", 0),
                         total_scaffolding_edits=data.get("total_scaffolding_edits", 0),
@@ -323,13 +338,13 @@ class BookOrchestrator:
         max_sections_per_batch: int = 5,
         apply_live: bool = True,
     ):
-        """Iterate sequentially across the volume from start_chapter to 17."""
+        """Iterate sequentially across the volume from start_chapter to the last chapter."""
         print("=" * 80)
         print("📚 INITIATING WHOLE-BOOK PEDAGOGICAL AUDIT (VOLUME IV)")
-        print(f"Chapters: {start_chapter} through 17 | Batch Size: {max_sections_per_batch} sections/step")
+        print(f"Chapters: {start_chapter} through {LAST_CHAPTER} | Batch Size: {max_sections_per_batch} sections/step")
         print("=" * 80)
 
-        for ch_num in range(start_chapter, 18):
+        for ch_num in [n for n in CHAPTER_NUMBERS if n >= start_chapter]:
             ch = self.manifest.chapters[ch_num]
             if ch.status == "COMPLETED":
                 print(f"Skipping completed chapter {ch_num}: {ch.title}")
@@ -366,7 +381,7 @@ class BookOrchestrator:
         print("=" * 80)
 
         chapters_to_run = [
-            num for num in range(start_chapter, 18)
+            num for num in CHAPTER_NUMBERS if num >= start_chapter
             if self.manifest.chapters[num].status != "COMPLETED"
         ]
 
@@ -441,7 +456,7 @@ Progress: {bar_str}  {pct}% ({completed_ch}/{total_ch} chapters completed)
 |:---:|:---|:---|:---:|:---:|:---:|:---:|:---:|
 """
 
-        for num in range(1, 18):
+        for num in CHAPTER_NUMBERS:
             ch = self.manifest.chapters[num]
             if ch.status == "COMPLETED":
                 icon = "🟢 Completed"

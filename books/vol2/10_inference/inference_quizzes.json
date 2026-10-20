@@ -3,9 +3,9 @@
     "source_file": "books/vol2/10_inference/10_inference.qmd",
     "schema_version": 2,
     "generated_on": "2026-09-01",
-    "total_sections": 13,
-    "sections_with_quizzes": 13,
-    "sections_without_quizzes": 0
+    "total_sections": 17,
+    "sections_with_quizzes": 16,
+    "sections_without_quizzes": 1
   },
   "sections": [
     {
@@ -15,21 +15,154 @@
         "quiz_needed": true,
         "rationale": {
           "focus_areas": [
-            "Serving cost dominance principle (one-time vs. recurring expense)",
-            "Triggers for distributed inference (Memory, Throughput, Latency)",
-            "The serving tax breakdown and zero-copy serialization",
-            "Training vs inference operational inversion",
-            "The 4-tier serving hierarchy"
+            "Offered versus admitted load and the service contract",
+            "Capacity comparison at a fixed request mix and SLO",
+            "TTFT and TPOT as the budgets consumed before prefill and during decode",
+            "Serving policy decisions that a faster decode step does not settle"
           ],
-          "question_strategy": "Blend quantitative economic calculations, systems overhead trade-offs, conceptual inversions, and hierarchical ordering to establish foundational inference concepts.",
-          "difficulty_progression": "Begins with economic cost calculations and hierarchy mapping, progresses to distributed distribution overhead analysis, and concludes with architectural inversion principles.",
-          "integration": "Links single-replica hardware constraints directly to fleet-wide economics, queuing theory, and distributed systems taxes.",
-          "ranking_explanation": "Critical opening section establishing why inference economics fundamentally invert training priorities."
+          "question_strategy": "A TF on offered versus admitted load, an MCQ on comparing capacity at a fixed request mix and SLO, and a SHORT that maps queueing and decode contention onto the two latency budgets.",
+          "difficulty_progression": "Contract vocabulary -> capacity comparison -> latency-budget reasoning across the request lifecycle.",
+          "integration": "Builds on the replica-level efficiency and bandwidth floor of the performance engineering chapter and frames the policy questions that batching, routing, and autoscaling answer later.",
+          "ranking_explanation": "Tier 2 minimal quiz: an opening section that sets the service contract and the request lifecycle the rest of the chapter measures against."
+        },
+        "questions": [
+          {
+            "question_type": "TF",
+            "question": "True or False: A service that meets its latency SLO on every admitted request is serving all of its offered load.",
+            "answer": "False. Offered load counts all arriving work, including requests the service rejects or sheds, while admitted load counts only the work it accepts. A service can meet its latency target on admitted requests by refusing others, so capacity must be judged by how much offered work completes within the targets.",
+            "learning_objective": "Distinguish offered load from admitted load when judging whether a service meets its contract."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Configuration X reports 900 requests per second on a benchmark of short prompts, and configuration Y reports 700 requests per second on the production prompt and output mix, both at the same TTFT and TPOT targets. Which conclusion is justified?",
+            "choices": [
+              "X has more capacity, because request rate is the capacity metric for a serving system.",
+              "Neither can be ranked yet, because prompt and output lengths change the work per request, so capacity must be compared at the same request mix and SLO by counting offered work that completes within the targets.",
+              "Y has more capacity, because production traffic always contains longer requests than a benchmark.",
+              "The two are equivalent, because both meet the same latency targets."
+            ],
+            "answer": "The correct answer is B. For language models, request rate alone is insufficient because prompt and output lengths determine how much work each request carries, so a benchmark of short prompts inflates the rate. Ranking by raw rate repeats that error, and assuming production traffic is always longer replaces measurement with a guess. Meeting the same targets on different mixes does not make the configurations equivalent.",
+            "learning_objective": "Justify why serving capacity must be compared at a fixed request mix and SLO rather than by raw request rate."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "In a streaming language-model service, explain which latency budget is consumed by waiting before prefill and which by contention during decode, and why a faster decode kernel alone cannot settle either problem.",
+            "answer": "Everything up to the end of prefill, including routing, admission, tokenization, queueing, and the prefill pass, counts against time to first token, while contention among sequences sharing decode steps stretches the gaps between streamed tokens and so consumes the TPOT budget. A faster decode step raises the service rate, but it does not decide how long a request waits to join a batch, which replica receives it, which requests get scarce KV-cache space, or when the fleet adds a replica. A request queued 400 ms behind a burst misses a 300 ms TTFT target however fast decode runs, so the scheduler must budget waiting and contention alongside execution time.",
+            "learning_objective": "Analyze how queueing before prefill and contention during decode consume the TTFT and TPOT budgets independently of kernel speed."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-inference-scale-singlemachine-serving-insufficient-3f13",
+      "section_title": "Limits of Single-Machine Serving",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Memory, throughput, and latency as distinct triggers for distribution",
+            "Replication for throughput versus sharding for memory and latency",
+            "Per-phase measurement of sharding's latency benefit",
+            "TPOT as an average versus TBT as a per-gap target"
+          ],
+          "question_strategy": "An MCQ that matches a throughput trigger to replication, a SHORT on when a latency target still motivates sharding after quantization makes the model fit, and a TF on the TPOT and TBT distinction.",
+          "difficulty_progression": "Trigger classification -> sharding trade-off under a latency target -> streaming latency metrics.",
+          "integration": "Connects single-device HBM capacity and bandwidth limits to the replication and sharding mechanisms developed later in the chapter.",
+          "ranking_explanation": "Tier 2 minimal quiz: a short section, but it owns the decision of when and how a serving system must leave one machine."
         },
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "A production recommendation model costs $50,000 to train (a one-time expense) and serves 10,000 QPS continuously for 2 years (730 days) at an operational cost of $10 per million queries. According to the serving cost dominance principle, what is the ratio of lifetime serving cost to training cost?",
+            "question": "A recommendation service must answer 100,000 queries per second within 10 ms. Its model fits comfortably on one machine, which peaks at 10,000 queries per second with optimal batching. Which strategy addresses the binding constraint?",
+            "choices": [
+              "Shard the model with tensor parallelism across machines, because sharding is the general remedy whenever one machine is insufficient.",
+              "Quantize the weights so a single machine runs ten times faster.",
+              "Replicate the full model across at least ten machines and route requests among them, because the binding constraint is throughput rather than memory or per-request latency.",
+              "Raise the batch size on one machine until it reaches 100,000 queries per second."
+            ],
+            "answer": "The correct answer is C. The model fits and a single request meets its budget, so the shortfall is aggregate throughput, which horizontal replication solves by multiplying independent replicas. Sharding addresses memory or per-request latency and adds communication without multiplying throughput. Larger batches cannot help because the 10,000-query peak already assumes optimal batching, and quantization does not reliably deliver a tenfold gain.",
+            "learning_objective": "Classify a serving shortfall as a memory, throughput, or latency trigger and select replication or sharding accordingly."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A 70B-parameter model needs roughly 140 GB of FP16 weights, more than one 80 GB accelerator holds, and quantization can make it fit on one device. Explain why the team might still shard it, and how they should decide.",
+            "answer": "Fitting in memory removes the memory trigger, but the single-device execution time may still exceed the request latency budget. Sharding across several GPUs divides computation and weight traffic, yet it adds communication and synchronization, and it shortens compute-bound prefill and bandwidth-bound decode by different amounts. The team should measure the sharded configuration's prefill latency against the TTFT target and its decode latency against the TPOT target separately, and shard only if both phases gain more than the added communication costs.",
+            "learning_objective": "Evaluate when a latency target justifies sharding a model that already fits on one device, measuring each phase against its own target."
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: A stream that meets its TPOT target cannot stall the reader, because TPOT bounds the gap between successive tokens.",
+            "answer": "False. TPOT is the average of the gaps between tokens, so one long gap can stall the reader while the average still meets its target. Per-gap tail targets are stated as time between tokens (TBT), which must be monitored separately from average cadence.",
+            "learning_objective": "Distinguish average token cadence (TPOT) from per-gap time between tokens (TBT) when setting streaming latency targets."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-inference-scale-serving-tax-overhead-distribution-5ef3",
+      "section_title": "SLO Goodput and the Serving Tax",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "SLO goodput as the serving capacity metric",
+            "The serving tax breakdown within a request latency budget",
+            "Training vs inference operational inversion"
+          ],
+          "question_strategy": "Compute SLO goodput for two configurations, then check the latency-budget decomposition and the contract that separates serving from training.",
+          "difficulty_progression": "Begins with SLO goodput as the capacity metric, decomposes the serving tax, and concludes with the training-to-serving inversion of recovery contracts.",
+          "integration": "Links the request contract to the ML goodput of the performance engineering chapter and to the latency budget that distribution consumes.",
+          "ranking_explanation": "Tier 2 minimal quiz: the section owns SLO goodput and the serving tax, both first-order concepts of the chapter."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Two configurations serve the same request mix under the same TTFT and TPOT targets. Configuration X completes 1,200 requests per second, of which 70 percent meet both targets; configuration Y completes 1,000 requests per second, of which 95 percent meet both. Which has more serving capacity?",
+            "choices": [
+              "X, because it completes more requests per second and keeps its accelerators busier.",
+              "The two are equal, because both process the same request mix.",
+              "X, because requests that miss their targets still return results to users.",
+              "Y, because SLO goodput counts only requests that meet their targets, about 950 per second against about 840 for X."
+            ],
+            "answer": "The correct answer is D. SLO goodput is the rate of completed requests that meet the stated TTFT and TPOT targets for a fixed request mix, so X delivers about 840 useful requests per second and Y about 950. A request that misses its contract counts for nothing however busy the accelerators were, so higher raw throughput or a returned result does not add useful capacity.",
+            "learning_objective": "Calculate SLO goodput from completion rate and target attainment, and use it to compare serving configurations."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain the composition of the distributed 'serving tax' ($\\EndToEndRequestLatency = \\InferenceLatency + \\NetworkLatency + \\SerializationLatency + \\CoordinationLatency + \\QueueingLatency$) and describe how zero-copy serialization formats mitigate serialization overhead.",
+            "answer": "The serving tax comprises exposed network, serialization, coordination, and queueing delays beyond model execution. Zero-copy formats can expose compatible wire-format data without a separate parse-and-copy pass. They do not remove network transmission, all validation, or every memory copy: layout, ownership, device placement, and transport determine what can be avoided. Measure each contribution on the request critical path rather than adding overlapping intervals.",
+            "learning_objective": "Analyze the components of the distributed serving tax and the mechanism by which zero-copy serialization reduces latency."
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: Interactive inference recovery is judged against request latency and availability objectives, whereas long-running training recovery is usually judged against lost progress and time to completion.",
+            "answer": "True. Interactive serving may need rerouting, bounded retries, or a fallback before a request deadline. Training often restores a checkpoint and repeats lost work. Neither mode guarantees invisible recovery; the acceptable interruption follows the workload contract.",
+            "learning_objective": "Compare operational fault tolerance and state management requirements between distributed training and distributed inference."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-inference-scale-serving-cost-dominates-training-cost-576a",
+      "section_title": "Serving Cost Dominance in Production",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Serving cost dominance: one-time training expense versus recurring serving expense",
+            "Lifetime cost as training cost plus cost per query times duration times query rate",
+            "Consistent accounting boundary for unit serving cost",
+            "Conditions under which a unit-cost reduction yields recurring savings"
+          ],
+          "question_strategy": "A quantitative MCQ on lifetime leverage, a TF that targets the belief that serving always dominates, an MCQ on the accounting boundary of unit cost, and a SHORT on when cost-per-request reductions pay.",
+          "difficulty_progression": "Lifetime cost calculation -> scope of the principle -> accounting boundary -> engineering consequence.",
+          "integration": "Turns the per-request serving tax into a lifetime cost and motivates the batching, memory, and routing mechanisms that reduce cost per completed request.",
+          "ranking_explanation": "Tier 1: the section owns the serving cost dominance principle, a first-order concept of the chapter."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "A production recommendation model costs \\$50,000 to train (a one-time expense) and serves 10,000 QPS continuously for 2 years (730 days) at an operational cost of \\$10 per million queries. What is the ratio of lifetime serving cost to training cost?",
             "choices": [
               "Approximately $1.3\\times$",
               "Approximately $126.1\\times$",
@@ -40,11 +173,47 @@
             "learning_objective": "Calculate the lifetime economic leverage of recurring inference expense relative to one-time training expense."
           },
           {
-            "question_type": "SHORT",
-            "question": "Explain the composition of the distributed 'serving tax' ($T_{\\text{total}} = T_{\\text{compute}} + T_{\\text{network}} + T_{\\text{serialization}} + T_{\\text{coordination}} + T_{\\text{queuing}}$) and describe how zero-copy serialization formats mitigate serialization overhead.",
-            "answer": "The serving tax comprises exposed network, serialization, coordination, and queueing delays beyond model execution. Zero-copy formats can expose compatible wire-format data without a separate parse-and-copy pass. They do not remove network transmission, all validation, or every memory copy: layout, ownership, device placement, and transport determine what can be avoided. Measure each contribution on the request critical path rather than adding overlapping intervals.",
-            "learning_objective": "Analyze the components of the distributed serving tax and the mechanism by which zero-copy serialization reduces latency."
+            "question_type": "TF",
+            "question": "True or False: Serving cost always exceeds training cost once a model is large enough, because larger models cost more per query.",
+            "answer": "False. Whether serving dominates depends on traffic, unit serving cost, deployment duration, and the training expense, not on model size alone. A low-traffic deployment or a short lifetime can leave training as the larger cost over the whole deployment.",
+            "learning_objective": "Identify the inputs that decide whether serving or training dominates a model's lifetime cost."
           },
+          {
+            "question_type": "MCQ",
+            "question": "A team estimates its cost per query from GPU time on fully loaded replicas, but its fleet also bills for reserved replicas that sit idle overnight to absorb the daytime peak. What does the lifetime cost model require?",
+            "choices": [
+              "Nothing more, because idle replicas do no work and therefore add no cost per query.",
+              "Doubling the query rate to account for the peak, because peaks set the cost.",
+              "Replacing cost per query with training cost, because idle capacity is a one-time expense.",
+              "Charging the billed idle and reserved capacity inside the unit cost, and counting the same served queries in the rate that was used to estimate that cost."
+            ],
+            "answer": "The correct answer is D. Unit serving cost must include the chosen serving boundary, including idle or reserved capacity whenever it is billed, and the query rate must count the same served queries. Treating idle replicas as free understates the bill, and inflating the query rate double-counts traffic rather than fixing the cost boundary. Reserved capacity recurs with every billing period, so it is not a one-time expense.",
+            "learning_objective": "Apply a consistent accounting boundary when estimating unit serving cost for the lifetime cost model."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A model costs \\$2M to train, and its first year of serving costs about \\$18M. Explain why a 10 percent reduction in cost per request can be worth nearly as much as the original training run, and state the conditions under which that saving is real.",
+            "answer": "Serving expense recurs with traffic, so a 10 percent reduction in cost per request saves about \\$1.8M in the first year alone and keeps saving every year after, while training was paid once. The saving is real only if request volume and service quality stay fixed, because the reduction must lower billed capacity for the same useful work. A change that only lowers latency does not reduce billed capacity, so engineering effort on a deployed model should target cost per completed request at the SLO.",
+            "learning_objective": "Justify why recurring serving savings can rival training cost, and identify the conditions under which a unit-cost reduction yields real savings."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-inference-scale-serving-hierarchy-fe8c",
+      "section_title": "Serving Workloads and the Serving Hierarchy",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "The four-level serving hierarchy"
+          ],
+          "question_strategy": "Place optimizations at the hierarchy level that owns their bottleneck, then order the levels by scope.",
+          "difficulty_progression": "Classification of levers by level -> ordering of levels by scope.",
+          "integration": "Organizes the batching, memory, routing, and platform mechanisms of the chapter by the scope they act on.",
+          "ranking_explanation": "Tier 2 minimal quiz: the lifetime-cost item moved to the serving cost dominance section it tests."
+        },
+        "questions": [
           {
             "question_type": "MCQ",
             "question": "In the four-level Serving Hierarchy (Request, Replica, Service, Platform), which level and primary optimization lever are correctly matched to their target bottleneck?",
@@ -58,79 +227,10 @@
             "learning_objective": "Classify inference optimization levers according to their respective tiers in the Serving Hierarchy."
           },
           {
-            "question_type": "TF",
-            "question": "True or False: Interactive inference recovery is judged against request latency and availability objectives, whereas long-running training recovery is usually judged against lost progress and time to completion.",
-            "answer": "True. Interactive serving may need rerouting, bounded retries, or a fallback before a request deadline. Training often restores a checkpoint and repeats lost work. Neither mode guarantees invisible recovery; the acceptable interruption follows the workload contract.",
-            "learning_objective": "Compare operational fault tolerance and state management requirements between distributed training and distributed inference."
-          },
-          {
             "question_type": "ORDER",
             "question": "Order the four levels of the Serving Hierarchy from the most granular execution tier to the highest fleet-wide governance tier:\n(1) Service level (fleet routing, load balancing, autoscaling)\n(2) Request level (per-request latency, tokenization, dynamic batching)\n(3) Platform level (multi-tenancy, cross-workload scheduling, placement)\n(4) Replica level (intra-instance utilization, GPU memory allocation, kernel fusion)",
             "answer": "The correct sequence is (2) -> (4) -> (1) -> (3).\n- (2) Request level operates on individual input tensors, handling preprocessing, dynamic batching, and per-request latency.\n- (4) Replica level optimizes single-instance execution, managing GPU memory, KV cache allocation, and fused kernels.\n- (1) Service level coordinates multiple identical replicas into aggregate capacity via load balancers and autoscaling.\n- (3) Platform level manages the global fleet across multiple models and tenants, enforcing fair sharing, resource quotas, and physical placement.",
             "learning_objective": "Structure the hierarchy of inference optimization tiers from individual request processing to global platform management."
-          }
-        ]
-      }
-    },
-    {
-      "section_id": "#sec-inference-scale-serving-framework-selection-45d3",
-      "section_title": "Serving Architecture Dimensions",
-      "quiz_data": {
-        "quiz_needed": true,
-        "rationale": {
-          "focus_areas": [
-            "The 5 serving architecture dimensions (Batching, Memory, Scheduling, Topology, Statefulness)",
-            "Preallocated vs Paged memory management",
-            "Preemptive and priority scheduling under high generation variance",
-            "Stateful vs stateless scaling divide"
-          ],
-          "question_strategy": "Examine how workload characteristics (LLM vs Vision vs RecSys) dictate architectural choices across memory, scheduling, statefulness, and batching dimensions.",
-          "difficulty_progression": "Moves from dimension comparison matrices to memory fragmentation mechanisms, statefulness properties, and scheduling policies.",
-          "integration": "Connects framework-level design choices (such as vLLM and Triton) directly to the physical properties of generative versus fixed-graph models.",
-          "ranking_explanation": "Essential architectural taxonomy framing how workloads select specific serving topologies."
-        },
-        "questions": [
-          {
-            "question_type": "MCQ",
-            "question": "Which combination of architectural design choices addresses variable-length autoregressive generation and reusable session context in the chapter's LLM serving scenario?",
-            "choices": [
-              "Continuous batching, paged memory management, preemptive scheduling, and stateful routing",
-              "Static batching, preallocated memory management, first-come-first-served (FCFS) scheduling, and stateless routing",
-              "Feature-parallel batching, distributed memory tables, priority-aware scheduling, and stateless routing",
-              "Streaming frame batching, pinned buffer allocation, non-preemptive scheduling, and edge-only topology"
-            ],
-            "answer": "The correct answer is A. These mechanisms address variable-length generation, growing KV state, scheduling interference, and reusable session context. They are useful architectural choices rather than mandatory properties of every LLM endpoint: a stateless API can reconstruct context, and a scheduler can use different preemption policies. Uniform static batches are a better fit for predictable fixed-work requests.",
-            "learning_objective": "Evaluate how the computational characteristics of autoregressive LLMs dictate their specific profile across the five serving architecture dimensions."
-          },
-          {
-            "question_type": "SHORT",
-            "question": "Why can maximum-length KV cache preallocation waste memory when actual requests are shorter, and which allocation waste does paged memory management reduce?",
-            "answer": "Maximum-length preallocation reserves unused slots when a request is shorter than the limit; the wasted fraction depends on the length distribution. Paged allocation assigns fixed-size KV blocks on demand and reuses free blocks across sequences. It removes external fragmentation within the fixed-block pool, but the final partially filled page still wastes some capacity. Reclaimed memory helps only if the scheduler can use it within latency and quality limits.",
-            "learning_objective": "Explain the root causes of KV cache memory fragmentation under preallocation and how paged allocation mitigates them."
-          },
-          {
-            "question_type": "TF",
-            "question": "True or False: An autoregressive LLM must retain state during active decoding, but a serving API can still be stateless across completed requests if each new request supplies the required conversation history.",
-            "answer": "True. The active decode loop uses per-request KV state. Retaining that state across turns is a serving choice that can save prefill work and favor routing affinity; a full-history request can instead rebuild it on another replica.",
-            "learning_objective": "Distinguish active autoregressive state from optional session-cache retention across requests."
-          },
-          {
-            "question_type": "MCQ",
-            "question": "Why is pure First-Come-First-Served (FCFS) scheduling problematic for multi-tenant LLM serving, and what mechanism does preemptive scheduling use to resolve it?",
-            "choices": [
-              "FCFS requires excessive GPU memory for block tables; preemptive scheduling replaces block tables with static pointers.",
-              "FCFS causes extreme AllReduce communication overhead; preemptive scheduling converts tensor parallelism to pipeline parallelism.",
-              "FCFS forces all requests to run at INT4 precision; preemptive scheduling dynamically promotes high-priority requests to FP16.",
-              "FCFS can let long requests occupy scarce slots while short requests wait; preemption pauses selected requests and manages their KV state to admit other work"
-            ],
-            "answer": "The correct answer is D. Preemption can run at token boundaries, but the victim state must remain in HBM, move to host memory, or be rebuilt on resumption. These alternatives consume capacity, transfer bandwidth, or prefill compute. The policy must compare those costs with deadlines; preemption does not change model precision or replace tensor-parallel collectives.",
-            "learning_objective": "Analyze the causes of head-of-line blocking in FCFS LLM scheduling and the operational trade-offs of KV-cache preemption."
-          },
-          {
-            "question_type": "FILL",
-            "question": "The scheduling technique that decouples batch membership from request boundaries and evaluates sequence entry and termination at every decode iteration is called ____ batching (or iteration-level scheduling).",
-            "answer": "continuous (or continuous batching / iteration-level). Continuous batching dynamically admits waiting requests and releases completed request slots at every single decoding step, eliminating the idle bubbles caused by static batching.",
-            "learning_objective": "Identify the exact technical term for iteration-level dynamic batching in LLM serving engines."
           }
         ]
       }
@@ -144,12 +244,12 @@
           "focus_areas": [
             "The physics of the batching efficiency curve and knee point",
             "Traditional vs continuous batching waste ratio",
-            "Little's Law for inference capacity planning",
+            "Little's law for inference capacity planning",
             "Feature-parallel batching in recommendation systems",
             "Streaming inference and adaptive batching",
-            "The Logic Wall and test-time compute scaling"
+            "Per-request compute budgets for test-time compute"
           ],
-          "question_strategy": "Combine quantitative latency models ($T_{\\text{lat}}(B) = T_{\\text{fixed}} + B \\cdot T_{\\text{var}}$), queuing theory, recommendation execution pipelines, and reasoning-compute trade-offs.",
+          "question_strategy": "Combine quantitative latency models ($\\BatchServiceTime(\\BatchSize) = \\BatchFixedOverheadTime + \\BatchSize \\times \\MarginalRequestServiceTime$), queuing theory, recommendation execution pipelines, and reasoning-compute trade-offs.",
           "difficulty_progression": "Starts with analytical efficiency curve calculations, transitions to waste function formulas, recommendation pipelines, fleet sizing, and test-time reasoning constraints.",
           "integration": "Bridges mathematical latency-throughput modeling with real-world serving systems like Triton, vLLM, and Meta DLRM.",
           "ranking_explanation": "Core technical section detailing mathematical batching physics and workload-specific execution paradigms."
@@ -157,14 +257,14 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "A vision model has fixed latency overhead $T_{\\text{fixed}} = 2\\text{ ms}$ and variable compute time $T_{\\text{var}} = 1\\text{ ms/item}$. An LLM decode step has $T_{\\text{fixed}} = 40\\text{ ms}$ (loading 140 GB weights from HBM) and $T_{\\text{var}} = 0.5\\text{ ms/token}$. At what approximate batch size $B$ does each workload reach the 'knee' of its batching efficiency curve ($B \\approx T_{\\text{fixed}} / T_{\\text{var}}$)?",
+            "question": "A vision model has fixed latency overhead $\\BatchFixedOverheadTime = 2\\text{ ms}$ and variable compute time $\\MarginalRequestServiceTime = 1\\text{ ms/item}$. An LLM decode step has $\\BatchFixedOverheadTime = 40\\text{ ms}$ (loading 140 GB weights from HBM) and $\\MarginalRequestServiceTime = 0.5\\text{ ms/token}$. At what approximate batch size $\\BatchSize$ does each workload reach the 'knee' of its batching efficiency curve ($\\BatchSize \\approx \\BatchFixedOverheadTime / \\MarginalRequestServiceTime$)?",
             "choices": [
-              "Vision knee at $B \\approx 10$; LLM decode knee at $B \\approx 20$",
-              "Vision knee at $B \\approx 80$; LLM decode knee at $B \\approx 2$",
-              "Vision knee at $B \\approx 4$; LLM decode knee at $B \\approx 40$",
-              "Vision knee at $B \\approx 2$; LLM decode knee at $B \\approx 80$"
+              "Vision knee at $\\BatchSize \\approx 10$; LLM decode knee at $\\BatchSize \\approx 20$",
+              "Vision knee at $\\BatchSize \\approx 80$; LLM decode knee at $\\BatchSize \\approx 2$",
+              "Vision knee at $\\BatchSize \\approx 4$; LLM decode knee at $\\BatchSize \\approx 40$",
+              "Vision knee at $\\BatchSize \\approx 2$; LLM decode knee at $\\BatchSize \\approx 80$"
             ],
-            "answer": "The correct answer is D. The knee of the batching efficiency curve occurs where the variable compute cost ($B \\times T_{\\text{var}}$) begins to exceed fixed overhead ($T_{\\text{fixed}}$). For the vision model, $B_{\\text{knee}} \\approx 2\\text{ ms} / 1\\text{ ms} = 2$. For LLM decode, $B_{\\text{knee}} \\approx 40\\text{ ms} / 0.5\\text{ ms} = 80$. The larger LLM knee illustrates a stronger incentive to amortize weight reads across concurrent requests. The chosen batch can remain below that knee when arrivals, KV-cache capacity, or the latency budget limit useful concurrency; the knee is not a universal batch requirement. The inverted result swaps the two workloads; the intermediate configurations miscalculate the quotient of fixed and variable parameters.",
+            "answer": "The correct answer is D. The knee of the batching efficiency curve occurs where the variable compute cost ($\\BatchSize \\times \\MarginalRequestServiceTime$) begins to exceed fixed overhead ($\\BatchFixedOverheadTime$). For the vision model, $\\BatchSize \\approx 2\\text{ ms} / 1\\text{ ms} = 2$. For LLM decode, $\\BatchSize \\approx 40\\text{ ms} / 0.5\\text{ ms} = 80$. The larger LLM knee illustrates a stronger incentive to amortize weight reads across concurrent requests. The chosen batch can remain below that knee when arrivals, KV-cache capacity, or the latency budget limit useful concurrency; the knee is not a universal batch requirement. The inverted result swaps the two workloads; the intermediate configurations miscalculate the quotient of fixed and variable parameters.",
             "learning_objective": "Calculate the knee point on the batching efficiency curve for compute-bound versus memory-bandwidth-bound inference workloads."
           },
           {
@@ -188,14 +288,14 @@
               "Required concurrency $Q_{\\text{req}} = 80$; minimum SLO-sized fleet $= 10$ replicas",
               "Required concurrency $Q_{\\text{req}} = 100$; minimum SLO-sized fleet $= 10$ replicas"
             ],
-            "answer": "The correct answer is A. Little's Law gives 1,000 × 0.1 = 100 requests in flight on average, including waiting work. Fleet sizing instead uses the separate utilization target: ceil(1,000/(0.8 × 100)) = 13 replicas, running at about 76.9% utilization. Their 104 executing positions exclude queues. Under the idealized assumption that all other latency is waiting or batch formation, the fixed 80 ms service time gives 80 requests executing on average and leaves 20 waiting or accumulating. Ten replicas are the throughput-only saturation boundary. The assumed mean and tail SLO both require validation; dividing in-flight work by batch slots does not establish the fleet size.",
+            "answer": "The correct answer is A. Little's law gives 1,000 × 0.1 = 100 requests in flight on average, including waiting work. Fleet sizing instead uses the separate utilization target: ceil(1,000/(0.8 × 100)) = 13 replicas, running at about 76.9% utilization. Their 104 executing positions exclude queues. Under the idealized assumption that all other latency is waiting or batch formation, the fixed 80 ms service time gives 80 requests executing on average and leaves 20 waiting or accumulating. Ten replicas are the throughput-only saturation boundary. The assumed mean and tail SLO both require validation; dividing in-flight work by batch slots does not establish the fleet size.",
             "learning_objective": "Separate mean in-flight occupancy from executing capacity and size a candidate fleet with an explicit service-utilization target."
           },
           {
             "question_type": "SHORT",
-            "question": "What is the 'Logic Wall' in test-time compute scaling, and how does additional reasoning change the serving budget for a request?",
-            "answer": "The Logic Wall is reached when serial reasoning tokens exhaust a request's latency budget or its share of fleet capacity before further reasoning stops improving the answer. Additional generated tokens, candidate evaluations, or search steps increase work per request and can extend KV-cache residency without changing the bottleneck of each decode step. Dynamic compute allocation budgets that work using measured quality gains, request deadlines, and fleet load. Parallel candidate evaluations consume capacity without necessarily adding the same serial latency.",
-            "learning_objective": "Explain the systems implications of test-time compute scaling and the concept of the Logic Wall."
+            "question": "What is a per-request compute budget for test-time compute, and how does additional reasoning change the serving cost of a request?",
+            "answer": "A per-request compute budget limits the generated tokens, candidate evaluations, or search steps a request may consume, stated in both latency and capacity. It binds when serial reasoning tokens exhaust a request's latency budget or its share of fleet capacity before further reasoning stops improving the answer. Additional generated tokens, candidate evaluations, or search steps increase work per request and can extend KV-cache residency without changing the bottleneck of each decode step. A serving policy sets that budget from measured quality gains, request deadlines, and fleet load. Parallel candidate evaluations consume capacity without necessarily adding the same serial latency.",
+            "learning_objective": "Explain the serving cost of test-time compute and why a per-request compute budget is stated in both latency and capacity."
           },
           {
             "question_type": "TF",
@@ -216,9 +316,8 @@
             "The KV cache wall formula and sizing calculations",
             "PagedAttention block tables and fragmentation elimination",
             "Prefix caching and copy-on-write sharing",
-            "KV cache quantization (INT8/INT4/FP8) and GQA head reduction",
-            "Speculative decoding serving trade-offs and the speculation tax",
-            "Chunked prefill (Sarathi-Serve) and multi-tier memory hierarchies"
+            "KV cache quantization (INT8/INT4/FP8), GQA head reduction, and the precision dividend",
+            "Speculative decoding exactness, acceptance, and the draft model's memory overhead"
           ],
           "question_strategy": "Test memory sizing formulas, virtual memory indexing mechanics, prefix sharing gains, speculative decoding SLA criteria, and prefill chunking.",
           "difficulty_progression": "Advances from memory calculation formulas to PagedAttention indexing, prefix cache deduplication, speculative decoding admission control, and execution ordering.",
@@ -240,21 +339,81 @@
           },
           {
             "question_type": "MCQ",
-            "question": "What is the 'speculation tax' in speculative decoding, and how does it influence whether speculative decoding should be enabled for a specific serving endpoint?",
+            "question": "What cost does a colocated draft model impose on a speculative decoding replica, and how does it influence whether speculative decoding should be enabled for a specific serving endpoint?",
             "choices": [
               "The latency penalty paid when draft models fail to generate valid UTF-8 token encodings.",
               "The GPU memory allocated to draft model weights and draft KV cache, which reduces available HBM for batch concurrency.",
-              "The serialization tax incurred when transmitting draft tokens across InfiniBand interconnects.",
+              "The serialization overhead incurred when transmitting draft tokens across InfiniBand interconnects.",
               "The loss in model generation accuracy caused by greedy sampling during draft token verification."
             ],
             "answer": "The correct answer is B. Draft weights and draft KV cache consume memory that could otherwise support target-model concurrency. Speculation is useful when lower latency or more accepted output per target pass outweighs that capacity cost and draft execution. The result depends on load, acceptance, and both models; a latency-oriented endpoint does not automatically benefit, nor is every throughput-oriented endpoint harmed.",
             "learning_objective": "Evaluate the memory and throughput trade-offs of speculative decoding as an admission and scheduling policy under service-level agreements."
           },
           {
+            "question_type": "MCQ",
+            "question": "Why does speculative decoding accelerate autoregressive generation on modern GPUs without altering the target model's output probability distribution?",
+            "choices": [
+              "It lets the draft model's tokens through whenever the draft model's own confidence exceeds a fixed threshold, so the target pass can be skipped for confident tokens",
+              "It runs the target model at lower precision during verification, so each verification pass streams fewer weight bytes than an ordinary decode step",
+              "It accepts each draft token with probability equal to the smaller of one and the ratio of the target model's probability to the draft model's probability, resamples a rejected position from the normalized positive difference between the two distributions, and verifies all drafts in one target pass for roughly the weight traffic of one token",
+              "It verifies only the first draft token and emits the remaining drafts unchecked, relying on the draft model's training to match the target"
+            ],
+            "answer": "The correct answer is C. The acceptance-and-resampling rule makes the emitted sequence follow the target model's distribution exactly, and verifying every drafted position in one target pass streams the target's weights once, the same reuse batching buys but drawn from one request's future tokens. Confidence thresholds or partial verification are approximate rules that do not inherit the guarantee, and verification runs at the target's own precision.",
+            "learning_objective": "Analyze how speculative decoding achieves latency speedups while preserving exact target model output distributions"
+          },
+          {
             "question_type": "SHORT",
             "question": "A chatbot has 1,000 concurrent users sharing a 2,000-token prefix and retaining 500 private response tokens each. For a hypothetical MHA model with 80 layers, 64 KV heads, head width 128, and FP16 cache, explain the reduction from about 6.6 TB to 1.3 TB with prefix sharing.",
             "answer": "Each cached token uses 2 × 80 × 64 × 128 × 2 = 2,621,440 bytes. Without sharing, 2,500,000 token positions consume 6.5536 TB; storing the shared prefix once leaves 2,000 + 1,000 × 500 = 502,000 positions, or 1.316 TB. The reduction is 79.92%. This is an MHA scenario, not the smaller eight-KV-head GQA cache of Llama-2-70B; saved memory alone does not prove a fivefold throughput gain.",
             "learning_objective": "Calculate KV cache memory savings achieved through prefix caching in shared-context multi-tenant workloads."
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: When measured acceptance falls and the scheduler stops running the draft model, the memory that speculative decoding consumed returns immediately to the target model's KV-cache admission budget.",
+            "answer": "False. Disabling draft execution stops the drafting and verification work, but the resident draft weights and any draft KV pages remain allocated. Recovering that memory for target requests requires unloading the draft weights and ending or migrating the speculative state, so the speculation policy and the admission controller must be evaluated together.",
+            "learning_objective": "Evaluate speculative decoding as a serving policy whose memory cost persists until the draft state is released."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "In the precision dividend for the reference 70B replica, FP16 weights use 17.5 GB per GPU on eight 80 GB GPUs. Ignoring runtime reserves and quantization metadata, INT4 weights use about 4.4 GB per GPU and INT8 KV cache halves the per-request cache footprint. Why is the gain in maximum batch about 2.4 times rather than the fourfold weight reduction?",
+            "choices": [
+              "Because INT4 weights must be dequantized into a resident FP16 copy, so only part of the weight saving survives in HBM",
+              "Because the gain applies only to the eight-head GQA cache; the 64-head MHA baseline gains nothing from INT8 KV storage",
+              "Because the freed weight memory raises the KV budget from 62.5 GB to about 75.6 GB per GPU, a factor of about 1.21, and halving bytes per cached request doubles the count again, so the two effects multiply to about 2.4",
+              "Because quantizing the KV cache lengthens each decode step enough to cancel most of the extra capacity"
+            ],
+            "answer": "The correct answer is C. Maximum batch is free memory divided by per-request cache. INT4 weights raise free memory by 75.6/62.5 ≈ 1.21, and INT8 cache halves per-request state, a factor of two, giving about 2.4 for either attention layout. The weight reduction is fourfold, but weights are only part of each GPU's budget. Runtime reserves, metadata, and the latency target lower the deployable batch below this bound.",
+            "learning_objective": "Synthesize how weight and KV-cache quantization interact multiplicatively to expand serving batch capacity"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-inference-scale-prefill-decode",
+      "section_title": "Prefill and Decode",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "The arithmetic-intensity asymmetry between prefill and decode",
+            "Prompt-decode interference and chunked prefill",
+            "Disaggregated prefill and decode pools and the KV-cache handoff"
+          ],
+          "question_strategy": "Test why the two phases sit on opposite sides of the ridge, how colocating them creates interference that chunked prefill bounds, and what disaggregation costs in KV transfer.",
+          "difficulty_progression": "From phase characterization to the scheduling trade-off of chunking to the TTFT cost of the disaggregation handoff."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Why do the prompt prefill phase and the token decode phase of LLM serving exhibit different performance bottlenecks on the same accelerator?",
+            "choices": [
+              "Prefill generates tokens sequentially one by one, making it memory-bound by weight reads, whereas decode processes all prompt tokens in parallel, making it compute-bound by Tensor Cores",
+              "Prefill relies exclusively on integer arithmetic units, whereas decode requires floating-point matrix multiplication units",
+              "Long-prompt prefill GEMMs reuse weights across prompt tokens and can have a compute ceiling, whereas weight-dominated single-request decode has low intensity and a bandwidth ceiling",
+              "Prefill requires continuous network AllToAll collective exchanges between GPUs, whereas decode requires no inter-GPU communication"
+            ],
+            "answer": "The correct answer is C. Long-prompt prefill GEMMs can reuse weights across many prompt tokens, while single-request decode streams weights for one token. The simplified FP16 estimates place those components above and below the ridge, respectively. Neither estimate proves saturation or classifies every operator: actual traffic, kernel shapes, cache reads, dispatch, and communication require profiling. The phases use compatible arithmetic rather than exclusively different number types.",
+            "learning_objective": "Compare the computational characteristics and primary hardware bottlenecks of the prefill and decode serving phases"
           },
           {
             "question_type": "SHORT",
@@ -264,15 +423,15 @@
           },
           {
             "question_type": "FILL",
-            "question": "Switching from standard Multi-Head Attention (MHA) with 64 key-value heads to Grouped Query Attention (GQA) with 8 key-value heads reduces the KV cache memory footprint by a factor of ____$\\times$.",
-            "answer": "8 (or 8x / eight). Because KV cache size is directly proportional to the number of key-value heads ($H_{\\text{KV}}$), reducing $H_{\\text{KV}}$ from 64 to 8 yields an exact $64/8 = 8\\times$ reduction in cached key-value memory.",
-            "learning_objective": "Calculate the architectural compression factor of Grouped Query Attention on KV cache capacity."
+            "question": "The architectural pattern that decouples LLM inference by executing the compute-bound prompt prefill phase and the bandwidth-bound autoregressive token decode phase on separate, specialized hardware pools is known as ____ serving.",
+            "answer": "disaggregated. Separate pools specialize for prompt processing and token generation; transferring the KV cache between them adds a communication cost that the specialization must repay.",
+            "learning_objective": "Identify the architectural term for separating prefill and decode workloads across specialized hardware pools"
           },
           {
-            "question_type": "ORDER",
-            "question": "Order the steps executed during a single verification round of Speculative Decoding:\n(1) Target model runs a single batched parallel forward pass across all $K$ candidate positions\n(2) Rejection sampling evaluates candidate tokens sequentially against target probability distributions\n(3) Draft model autoregressively generates $K$ candidate tokens\n(4) KV cache block tables are updated to append accepted tokens and one target correction token, discarding rejected branches",
-            "answer": "The correct sequence is (3) -> (1) -> (2) -> (4).\n- (3) The fast draft model autoregressively produces $K$ speculative tokens in lightweight forward passes.\n- (1) The target model evaluates the proposed positions in one forward pass. Verifying multiple positions can amortize weight reads, but whether the pass is compute-bound depends on its shape and hardware.\n- (2) Rejection sampling determines how many draft tokens meet the target distribution criteria until a rejection or end-of-window.\n- (4) Accepted tokens plus one newly sampled target token are committed to the KV cache, and any unaccepted speculative allocations are released.",
-            "learning_objective": "Structure the sequence of execution and verification steps in speculative decoding."
+            "question_type": "TF",
+            "question": "True or False: Because disaggregation removes prefill-decode interference, moving a deployment to separate prefill and decode pools lowers time to first token most for the longest prompts.",
+            "answer": "False. The prefill pool must hand each request's KV cache to the decode pool, and that handoff costs at least a startup term plus KV bytes divided by link bandwidth. KV bytes grow linearly with prompt length, so the longest prompts pay the largest transfer, and it lands on time to first token. Disaggregation earns its transfer cost only when removing interference and balancing the two pools raises measured SLO goodput.",
+            "learning_objective": "Evaluate the KV-cache handoff cost that disaggregated serving adds to time to first token"
           }
         ]
       }
@@ -284,15 +443,13 @@
         "quiz_needed": true,
         "rationale": {
           "focus_areas": [
-            "LLM activation outlier problem (0.1% channels)",
-            "GPTQ layer-by-layer second-order Hessian error compensation",
-            "AWQ activation-aware salient channel protection",
-            "SmoothQuant W8A8 difficulty migration and prefill vs decode speedup",
-            "QuaRot rotation-based outlier elimination via Hadamard transforms",
-            "Hardware Tensor Core support (Hopper FP8 vs Ampere INT8)",
-            "Runtime serving contract and memory headroom"
+            "Block-wise scaling and its metadata cost",
+            "Where each outlier method pays: runtime (LLM.int8()), calibration (GPTQ, AWQ), or preprocessing (SmoothQuant, rotation)",
+            "SmoothQuant W8A8 and why it helps compute-bound prefill",
+            "Matching the binding serving constraint to the quantization change",
+            "PTQ first, QAT when PTQ misses the quality budget"
           ],
-          "question_strategy": "Test algorithmic differences between compensation (GPTQ), protection (AWQ), migration (SmoothQuant), and rotation (QuaRot), along with hardware speedup realities.",
+          "question_strategy": "Test the serving decision model: which bottleneck each method family relaxes, what each needs at deployment, and what to test before rollout.",
           "difficulty_progression": "Advances from outlier mechanics and speedup differences to mathematical formulations, rotation transforms, and execution pipelines.",
           "integration": "Connects PTQ algorithms directly to GPU hardware paths (Tensor Cores, HBM bandwidth) and serving cost reductions.",
           "ranking_explanation": "Crucial optimization section explaining how low-precision representations alter memory, bandwidth, and compute bottlenecks."
@@ -311,34 +468,40 @@
             "learning_objective": "Analyze the mathematical mechanism of SmoothQuant W8A8 quantization and contrast its performance gains during prefill versus decode phases."
           },
           {
+            "question_type": "TF",
+            "question": "True or False: In block-wise INT4 quantization with one FP16 scale per block, reducing the block size from 64 to 16 weights can improve local range resolution but quadruples the scale metadata, from 0.25 bits per weight (6.25 percent overhead on the INT4 payload) to 1.0 bit per weight (25 percent overhead).",
+            "answer": "True. Each block shares one 16-bit scale, so the metadata per weight is 16 bits divided by the block size: 16/64 = 0.25 bits (0.25/4 = 6.25 percent of the 4-bit payload) and 16/16 = 1.0 bit (25 percent), an effective 5.0 bits per weight. Whether the finer blocks improve quality or slow the kernel must be measured, not inferred from block size.",
+            "learning_objective": "Calculate the metadata overhead and effective bit-width scaling of block-wise quantization group sizes"
+          },
+          {
             "question_type": "MCQ",
-            "question": "What is the core algorithmic distinction between Generalized Post-Training Quantization (GPTQ) and Activation-Aware Weight Quantization (AWQ)?",
+            "question": "GPTQ and AWQ both produce 4-bit weight-only artifacts offline. How do they differ, and what extra deployment step does AWQ need?",
             "choices": [
-              "GPTQ quantizes activations while leaving weights in FP16; AWQ quantizes weights while leaving activations in FP32.",
-              "GPTQ requires full model retraining for 100 epochs; AWQ is an online dynamic quantization method with no calibration.",
-              "GPTQ compensates residual quantization error across remaining unquantized columns using inverse Hessian information ($H^{-1}$); AWQ protects salient weight channels based on activation magnitudes without error feedback.",
-              "GPTQ applies only to convolutional vision models; AWQ applies exclusively to sparse recommendation embedding tables."
+              "GPTQ quantizes activations while AWQ quantizes weights; AWQ needs no calibration data.",
+              "GPTQ compensates rounding error with approximate second-order information, while AWQ scales salient channels chosen from activation statistics; AWQ's scales must be fused into the deployed graph or they cost an extra runtime operation.",
+              "GPTQ requires full retraining while AWQ is applied at runtime; AWQ needs a second GPU to hold its scales.",
+              "Both methods are identical except for bit width; AWQ needs its weights stored in FP32."
             ],
-            "answer": "The correct answer is C. GPTQ performs layer-by-layer second-order error compensation: as each weight column is rounded to discrete grid points, the residual error is propagated to unquantized columns using the inverse Hessian matrix ($H = X^T X$). In contrast, AWQ observes activation magnitudes on a calibration set, identifies the top ~1% most salient channels, and scales those specific weight channels up prior to quantization to preserve precision without requiring iterative error compensation.",
-            "learning_objective": "Compare the algorithmic formulations and error-mitigation strategies of GPTQ versus AWQ."
+            "answer": "The correct answer is B. Both are offline, weight-only methods that need representative calibration inputs and supported packing kernels. GPTQ corrects the error left by rounding using approximate second-order information; AWQ protects the channels that activation statistics mark as salient by scaling them. If AWQ's scales are not fused into the deployed graph, the serving path pays for an extra operation that eats part of the latency saving.",
+            "learning_objective": "Contrast how GPTQ and AWQ preserve quality in 4-bit weight-only quantization and what each requires at deployment."
           },
           {
             "question_type": "SHORT",
-            "question": "Explain how QuaRot uses a data-free orthogonal rotation to reduce activation outliers, why its full quantization pipeline can still require calibration, and what runtime cost the rotation introduces.",
-            "answer": "An orthogonal rotation preserves $XW=(XH)(H^TW)$ while spreading large activation coordinates across dimensions. The rotation can be chosen without calibration data, but a QuaRot pipeline using GPTQ still uses calibration activations to quantize weights. Inline Hadamard transforms add runtime work; their cost and W4A4 quality must be evaluated on the deployed model and workload.",
-            "learning_objective": "Explain the theoretical foundation of rotation-based quantization (QuaRot) and its operational trade-offs."
-          },
-          {
-            "question_type": "TF",
-            "question": "True or False: Modern NVIDIA Hopper (H100) GPUs provide native Tensor Core instruction acceleration for FP8 (E4M3/E5M2) delivering a $2\\times$ compute throughput multiplier over FP16, whereas Ampere (A100) Tensor Cores do not natively support FP8 execution.",
-            "answer": "True. H100 Tensor Cores support native FP8 and advertise twice the dense arithmetic throughput of their FP16 path, while A100 lacks native FP8 Tensor Core instructions. This is a hardware ceiling, not an automatic twofold application speedup or a guarantee of preserved model quality.",
-            "learning_objective": "Identify native Tensor Core precision support across NVIDIA Ampere and Hopper accelerator architectures."
+            "question": "Explain what a rotation-based method such as QuaRot changes before quantization, what that makes possible for serving, and what it costs at run time.",
+            "answer": "It applies an orthogonal (Hadamard) transform that changes the coordinate basis, spreading large activation coordinates across many channels so that no single channel carries an extreme value. With the outliers spread out, a single low-precision scale fits the values better, which makes W4A4 (4-bit weights and activations) a serving candidate. The price is some rotation work performed online during inference and a narrower set of runtimes that support the transformed path, so the transform overhead must be measured before rollout.",
+            "learning_objective": "Explain how rotation-based quantization addresses activation outliers and the serving cost it introduces."
           },
           {
             "question_type": "ORDER",
-            "question": "Order the sequential steps in the GPTQ column-wise layer quantization pipeline:\n(1) Compute the Hessian matrix $H = 2 X^T X$ from calibration activations\n(2) Perform Cholesky decomposition on the inverse Hessian matrix $H^{-1}$\n(3) Round the current column weights to the nearest discrete quantized grid\n(4) Calculate the residual quantization error vector for the column\n(5) Propagate compensation updates to all remaining unquantized columns using the Cholesky inverse weights",
-            "answer": "The correct sequence is (1) -> (2) -> (3) -> (4) -> (5).\n- (1) Pass calibration data through the model to compute activation cross-products and form the Hessian matrix $H$.\n- (2) Compute the inverse Hessian and factor it via Cholesky decomposition to enable stable triangular error updates.\n- (3) Round the target column's continuous weights to the nearest low-bit quantized values.\n- (4) Compute the quantization error difference between original and rounded column weights.\n- (5) Propagate the scaled error vector to remaining unquantized columns to adjust their values before subsequent quantization steps.",
-            "learning_objective": "Structure the computational workflow of GPTQ layer-by-layer second-order quantization."
+            "question": "Order the steps for choosing and rolling out a quantization method for a serving system:\n(1) Test the method family's specific risk (calibration mismatch, kernel support, activation outliers, or transform overhead) before rollout\n(2) Identify which resource binds the serving system: memory fit, decode bandwidth, prefill compute, or outlier robustness\n(3) Choose the method family that makes that change\n(4) Choose the representation change that relaxes that resource",
+            "answer": "The correct sequence is (2) -> (4) -> (3) -> (1).\n- (2) A quantization method helps only if it relaxes the resource that actually binds, so the bottleneck comes first.\n- (4) The bottleneck determines the representation change: weights only, fewer bytes per token, weights and activations, or a change of coordinate basis.\n- (3) The method family follows from that change (for example GPTQ or AWQ for fit, SmoothQuant W8A8 for prefill compute).\n- (1) Each family carries its own rollout risk, which must be tested on the deployment before traffic moves to it.",
+            "learning_objective": "Apply the serving quantization decision model from bottleneck to rollout test."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A serving team's INT8 post-training quantization (PTQ) recipe meets its quality budget, and it now wants INT4 weights. When does quantization-aware training (QAT) earn its cost, and what must be checked after the model is converted for deployment?",
+            "answer": "An INT8 result says nothing about INT4, so the team first tries a PTQ recipe at INT4 and evaluates it on held-out task data, not the calibration set. QAT earns its training cost only if that PTQ model misses the quality budget: it simulates rounding in the forward pass and passes gradients through it with the straight-through estimator so the weights adapt to the error. Because merging adapters or requantizing can change the numerical path, quality must be rechecked on the final deployed representation.",
+            "learning_objective": "Decide when quantization-aware training is justified over post-training quantization for a serving deployment"
           }
         ]
       }
@@ -475,6 +638,12 @@
             "question": "The three-state resilience pattern that fails fast and stops routing traffic to a degraded or thermally throttled GPU replica before retries cascade across the fleet is called a ____.",
             "answer": "circuit breaker (or Circuit Breaker / circuit breaker pattern). A circuit breaker transitions from closed to open when error rates or latencies exceed a threshold, isolating the degraded replica and protecting the rest of the fleet.",
             "learning_objective": "Identify the circuit breaker pattern as the primary mechanism for preventing cascading failures in inference clusters."
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: An autoregressive LLM must retain state during active decoding, but a serving API can still be stateless across completed requests if each new request supplies the required conversation history.",
+            "answer": "True. The active decode loop uses per-request KV state. Retaining that state across turns is a serving choice that can save prefill work and favor routing affinity; a full-history request can instead rebuild it on another replica.",
+            "learning_objective": "Distinguish active autoregressive state from optional session-cache retention across requests."
           }
         ]
       }
@@ -508,6 +677,18 @@
             "learning_objective": "Compare the architectural mechanisms and isolation guarantees of deployment-level versus request-level bulkheads."
           },
           {
+            "question_type": "MCQ",
+            "question": "Why is pure First-Come-First-Served (FCFS) scheduling problematic for multi-tenant LLM serving, and what mechanism does preemptive scheduling use to resolve it?",
+            "choices": [
+              "FCFS requires excessive GPU memory for block tables; preemptive scheduling replaces block tables with static pointers.",
+              "FCFS causes extreme AllReduce communication overhead; preemptive scheduling converts tensor parallelism to pipeline parallelism.",
+              "FCFS forces all requests to run at INT4 precision; preemptive scheduling dynamically promotes high-priority requests to FP16.",
+              "FCFS can let long requests occupy scarce slots while short requests wait; preemption pauses selected requests and manages their KV state to admit other work"
+            ],
+            "answer": "The correct answer is D. Preemption can run at token boundaries, but the victim state must remain in HBM, move to host memory, or be rebuilt on resumption. These alternatives consume capacity, transfer bandwidth, or prefill compute. The policy must compare those costs with deadlines; preemption does not change model precision or replace tensor-parallel collectives.",
+            "learning_objective": "Analyze the causes of head-of-line blocking in FCFS LLM scheduling and the operational trade-offs of KV-cache preemption."
+          },
+          {
             "question_type": "FILL",
             "question": "When multiple tenants with unequal demand compete for a shared GPU pool, the fair-allocation algorithm that maximizes the minimum allocation by bounding per-tenant consumption using token generation rate (tokens/sec) is called ____ fairness.",
             "answer": "max-min (or Max-Min / max-min fairness). Max-min fairness allocates equal capacity up to each tenant's demand, redistributing unused headroom from low-demand tenants to high-demand tenants.",
@@ -537,9 +718,9 @@
             "question": "In an illustrative fresh-replica startup, fetching 140 GB of model artifacts takes five minutes while detection and controller decisions take seconds. Why are pre-warmed pools or predictive scaling useful?",
             "choices": [
               "Artifact loading dominates this scenario, so pre-warmed pools or advance provisioning can make capacity ready before the surge",
-              "$T_{\\text{decide}}$ dominates (10–15 minutes evaluating autoscaling PID loops); mitigated by switching to manual scaling.",
-              "$T_{\\text{detect}}$ dominates (30 minutes gathering Prometheus metrics); mitigated by removing metric telemetry entirely.",
-              "$T_{\\text{warmup}}$ dominates (1–2 hours running CUDA kernel JIT compilation); mitigated by disabling Tensor Cores."
+              "$\\AutoscalingDecisionTime$ dominates (10–15 minutes evaluating autoscaling PID loops); mitigated by switching to manual scaling.",
+              "$\\AutoscalingDetectionTime$ dominates (30 minutes gathering Prometheus metrics); mitigated by removing metric telemetry entirely.",
+              "$\\ReplicaWarmupTime$ dominates (1–2 hours running CUDA kernel JIT compilation); mitigated by disabling Tensor Cores."
             ],
             "answer": "The correct answer is A. Reactive decisions cannot supply ready capacity faster than provisioning, artifact loading, and warmup complete. A pre-warmed pool avoids much of that delay; forecasting starts the work before expected demand. Five minutes is a scenario assumption governed by effective storage bandwidth and cache state, not a universal cold-start duration or a reason to disable telemetry.",
             "learning_objective": "Analyze the components of autoscaling response latency and evaluate strategies for mitigating cold-start delays."
@@ -560,12 +741,15 @@
         "quiz_needed": true,
         "rationale": {
           "focus_areas": [
-            "Cross-region latency"
+            "Cross-region latency",
+            "Edge cache reuse validity",
+            "Cross-region failover state and headroom",
+            "Completion cost versus GPU price in regional routing"
           ],
-          "question_strategy": "Test the steady-state cost of splitting one request across regions.",
-          "difficulty_progression": "Evaluate a placement claim against the RTT and stage-compute comparison.",
-          "integration": "Connects sharding communication costs to geographic placement.",
-          "ranking_explanation": "Existing question relocated from the Autoscaling quiz when Global Inference Infrastructure became its own H2; a fuller quiz should be regenerated with the spec."
+          "question_strategy": "Test the steady-state cost of splitting one request across regions, the conditions for reusing a cached response, what failover needs beyond rerouting, and why hourly price does not decide placement.",
+          "difficulty_progression": "Evaluate a placement claim against the RTT and stage-compute comparison, then identify cache validity conditions, explain failover state recovery, and evaluate a price-only routing claim.",
+          "integration": "Connects sharding communication costs, caching, failover, and cost-aware routing to geographic placement.",
+          "ranking_explanation": "The relocated sharding question is joined by one item each on edge caching, failover, and cost-aware routing, following the section's subsections."
         },
         "questions": [
           {
@@ -573,6 +757,30 @@
             "question": "True or False: Cross-region model sharding (spanning pipeline stages between US-East and Asia-Pacific) is an effective strategy for minimizing single-request P99 latency.",
             "answer": "False for the stated interactive scenario. Exposed inter-region transfers add wide-area delay to the request critical path and can exceed the stage-compute budget. Compare actual transfer times, message sizes, and the request deadline rather than treating RTT as the cost of every stage. Independent regional replicas avoid these per-request cross-region stage transfers when the model fits within each eligible region; placement must also satisfy policy and available-capacity constraints.",
             "learning_objective": "Evaluate the latency implications and feasibility constraints of cross-region distributed model sharding."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "An edge point of presence receives a query whose visible text exactly matches a cached response. Which condition must hold before the edge may return that cached response as a hit?",
+            "choices": [
+              "The cached response is younger than the 10 ms edge latency budget, so it cannot be stale",
+              "The request passes authorization, and the cached response matches its model version, conversation or retrieval context, generation policy, and freshness requirements",
+              "The query text matches exactly, which by itself guarantees that the same answer is valid for every user",
+              "The regional gateway has confirmed that the central GPU cluster is overloaded"
+            ],
+            "answer": "The correct answer is B. Identical visible queries do not necessarily permit the same answer: the edge must enforce authorization and match the model version, the conversation or retrieval context, the generation policy, and freshness before reuse, and fresh-sample semantics may prohibit reuse entirely. The 10 ms figure is an illustrative hit-latency budget, not a validity window, and cluster load does not make a stored response valid for a different request.",
+            "learning_objective": "Identify the validity conditions an edge cache must check before reusing a generated response."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Region A fails and the global load balancer reroutes an ongoing conversation to a healthy replica in Region B. Explain why rerouting alone may not restore the session, and what Region B needs for the failover to succeed.",
+            "answer": "The KV state built in Region A is lost, so Region B must reconstruct it from accessible, authoritative conversation history. Region B therefore needs that history to be available and permitted for processing there under the data-placement policy, plus enough headroom to absorb both the reconstruction work and its continuing traffic. If the history is unavailable or cannot be processed in Region B, a healthy replica cannot restore the session; the failover policy must also respect the request's remaining deadline and version requirements.",
+            "learning_objective": "Explain the state, placement, and capacity requirements that cross-region failover must satisfy beyond rerouting."
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: In the chapter's hypothetical price snapshot, US-West H100 spot capacity costs 2.30 dollars per hour versus 2.50 dollars per hour in US-East, so routing low-priority batch work to US-West always lowers the cost of completing that work.",
+            "answer": "False. GPU price alone is insufficient. Transfer charges, startup and idle capacity, retries, and achieved useful throughput determine the cost of completing the workload, and deadline and data-placement constraints must filter eligible destinations before any cost comparison. The snapshot is hypothetical and time- and provider-specific, so a router must refresh prices and measured paths before deciding.",
+            "learning_objective": "Evaluate cost-aware regional routing using completion cost rather than hourly GPU price."
           }
         ]
       }
@@ -595,6 +803,24 @@
           "ranking_explanation": "Integrative design scenarios showing why one serving architecture does not fit every workload."
         },
         "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "The reference 70B replica's constructed batch-one decode step is 85 ms: 34 ms GEMM, 20.4 ms attention, 10.2 ms element-wise work, 10.2 ms AllReduce, and 10.2 ms launch and runtime overhead. INT4 weights cut only the GEMM interval, by 45 percent, leaving 69.7 ms. Why does this still miss a 50 ms TPOT target?",
+            "choices": [
+              "INT4 weights halve memory bandwidth, so the other intervals lengthen to absorb the saving",
+              "The bandwidth-only floor of about 5.2 ms already exceeds what INT4 can recover, so no precision change can help",
+              "The unchanged non-GEMM intervals still total 51 ms, so reducing GEMM alone by the assumed amount cannot reach the target",
+              "The TPOT target applies to prefill, and INT4 weights do not change prefill time"
+            ],
+            "answer": "The correct answer is C. GEMM becomes 34 × 0.55 = 18.7 ms, while the other exposed intervals remain 51 ms, so the step is 69.7 ms. The next experiment must attack other critical-path intervals: with attention at 15.3 ms, element-wise work at 3.4 ms, and launch and runtime overhead at 2 ms, the constructed budget reaches 49.6 ms. These are scenario assumptions, not benchmark claims, and the batch-one step says nothing yet about SLO goodput under load.",
+            "learning_objective": "Analyze bottleneck displacement across iterative optimization rounds using timeline breakdown data"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "After fusion and graph replay, the reference replica's decode step is 49.6 ms. Adding speculative decoding with a 4 ms draft and about 3.5 emitted tokens per round brings the average time per output token to about 15 ms. Why can the endpoint still miss a 50 ms time-between-tokens (TBT) target?",
+            "answer": "Speculation emits tokens in blocks, one block per draft-and-verify round. Each round takes 4 + 49.6 = 53.6 ms, so the gap between blocks exceeds 50 ms even though the average per token is about 15 ms. A TPOT target, which averages the cadence, is met easily; a per-gap TBT target is missed on every round. The gain also shrinks at larger batch, where verification no longer finds idle compute, so the policy must be measured at the admitted batch.",
+            "learning_objective": "Distinguish average token cadence from per-gap latency when evaluating speculative decoding against serving targets"
+          },
           {
             "question_type": "MCQ",
             "question": "In an illustrative search-ranking cascade (L0: 1M to 10k in 10 ms; L1: 10k to 1k in 20 ms; L2: 1k to 100 in 50 ms; L3: 100 to 10 in 100 ms), what follows under a simplified additive candidate-work model?",
@@ -621,15 +847,15 @@
           },
           {
             "question_type": "MCQ",
-            "question": "Which cross-cutting principle is demonstrated by the four illustrative serving scenarios: embedding-heavy recommendation, LLM generation, search ranking, and video recommendation?",
+            "question": "Which combination of architectural design choices addresses variable-length autoregressive generation and reusable session context in the chapter's LLM serving scenario?",
             "choices": [
-              "Production inference rejects one-size-fits-all stacks: systems specialize hardware and batching to match their binding bottleneck (embeddings, variable decode, cascade cost, or asynchronous freshness).",
-              "All modern inference workloads are compute-bound and converge onto identical 8-way tensor-parallel GPU clusters.",
-              "Traditional static batching with First-Come-First-Served scheduling remains optimal for all production workloads when scaled to 1,000 GPUs.",
-              "Quantization to 1-bit binary representations is universally deployed across all production recommendation and search systems."
+              "Continuous batching, paged memory management, preemptive scheduling, and stateful routing",
+              "Static batching, preallocated memory management, first-come-first-served (FCFS) scheduling, and stateless routing",
+              "Feature-parallel batching, distributed memory tables, priority-aware scheduling, and stateless routing",
+              "Streaming frame batching, pinned buffer allocation, non-preemptive scheduling, and edge-only topology"
             ],
-            "answer": "The correct answer is A. Embedding locality, variable decode work, cascade cost, and content freshness impose different constraints. Hardware placement, batching, and caching should match that limiting resource. The scenarios do not establish that every production deployment uses the same sharding configuration or precision; a common stack cannot be assumed optimal across these workload shapes.",
-            "learning_objective": "Synthesize the cross-cutting architectural principles governing production inference systems at scale."
+            "answer": "The correct answer is A. These mechanisms address variable-length generation, growing KV state, scheduling interference, and reusable session context. They are useful architectural choices rather than mandatory properties of every LLM endpoint: a stateless API can reconstruct context, and a scheduler can use different preemption policies. Uniform static batches are a better fit for predictable fixed-work requests.",
+            "learning_objective": "Evaluate how the computational characteristics of autoregressive LLMs dictate their specific profile across the five serving architecture dimensions."
           }
         ]
       }
@@ -644,7 +870,9 @@
             "Fallacy: Inference at scale is synonymous with LLM serving",
             "Pitfall: Sizing serving fleets for average throughput rather than peak + headroom",
             "Fallacy: More GPU memory always increases decode throughput",
-            "Pitfall: Ignoring the serving tax and multi-tenant isolation"
+            "Pitfall: Ignoring the serving tax and multi-tenant isolation",
+            "Fallacy: The lowest supported precision is always the best precision",
+            "Pitfall: Treating MoE expert count as a free scaling knob"
           ],
           "question_strategy": "Address prevalent misconceptions regarding memory capacity vs bandwidth, queue stability boundaries, and workload generalization.",
           "difficulty_progression": "Examines memory bandwidth plateaus, queuing theory utilization blowups, and multi-workload serving realities.",
@@ -675,6 +903,24 @@
             "question": "True or False: Deploying continuous batching alone completely solves all throughput and latency bottlenecks in LLM serving.",
             "answer": "False. Continuous batching reuses slots at iteration boundaries. It does not remove the quadratic attention work of long full-attention prefills, shrink the KV tensors needed by admitted requests, or eliminate communication within sharded replicas. Additional mechanisms are selected for the binding constraint: chunking can limit prefill interference, paging can recover allocation waste, compatible prefix reuse can avoid repeated work, and sharding or replication can supply needed capacity. No fixed combination establishes the service contract without workload measurements.",
             "learning_objective": "Evaluate the scope and limitations of continuous batching within the end-to-end LLM serving pipeline."
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: Because each token activates only a small fixed number of experts, raising an MoE model's expert count from 8 to 256 adds serving capacity at essentially no cost.",
+            "answer": "False. Every expert occupies memory whether or not a token selects it, so more experts mean more devices or less KV headroom, and a distributed placement adds dispatch, combine, and imbalance costs. The design is justified only when a matched-quality comparison shows active-compute savings exceeding routing, imbalance, memory, and communication costs.",
+            "learning_objective": "Analyze the system-level memory, communication, and load balancing costs of scaling expert counts in MoE models"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A team moves its endpoint from INT8 to INT4 weights and INT4 KV cache, doubling tokens per second while held-out perplexity changes by less than 1 percent. What should it conclude before rollout?",
+            "choices": [
+              "The change doubles useful capacity, because perplexity confirms quality is unchanged",
+              "The change is safe only if the KV cache returns to FP16, because weight precision never affects quality",
+              "Useful capacity has not been established: low-bit formats can degrade rare languages, edge cases, or reasoning while perplexity barely moves, so quality must be evaluated per layer and per task and reported beside throughput",
+              "The change should be rejected, because INT4 always reduces quality below an acceptable level"
+            ],
+            "answer": "The correct answer is C. Throughput and quality form a frontier, and a precision choice is a point on it. Perplexity can stay nearly flat while users see worse answers on hard or rare inputs, so targeted quantization measures per-layer sensitivity, keeps sensitive tensors at higher precision, and evaluates diverse quality benchmarks alongside latency and throughput. Neither blanket acceptance nor blanket rejection follows from bit width alone.",
+            "learning_objective": "Evaluate quantized serving changes on the throughput-quality frontier rather than throughput alone"
           }
         ]
       }
@@ -683,45 +929,8 @@
       "section_id": "#sec-inference-scale-summary-bb6a",
       "section_title": "Summary",
       "quiz_data": {
-        "quiz_needed": true,
-        "rationale": {
-          "focus_areas": [
-            "Serving cost dominance principle synthesis (one-time vs. recurring expense)",
-            "Prefill (compute-bound) vs Decode (memory-bandwidth bound) physical split",
-            "Matching batching and sharding primitives to model architecture",
-            "Budgeting the distribution serving tax within P99 SLOs"
-          ],
-          "question_strategy": "Synthesize the overarching physical, economic, and architectural principles of inference at scale.",
-          "difficulty_progression": "Summarizes economic dominance, physical rooflines, and systems trade-offs.",
-          "integration": "Unifies the chapter's physical roofline models, batching mechanisms, and distributed systems taxes.",
-          "ranking_explanation": "Final synthesis section consolidating core insights across economics, physics, and distributed systems."
-        },
-        "questions": [
-          {
-            "question_type": "MCQ",
-            "question": "Which statement best captures the central physical and economic synthesis of inference at scale presented in the chapter?",
-            "choices": [
-              "Inference costs are a fixed one-time expense, while training costs scale continuously with user traffic.",
-              "All inference workloads should be served using static batching on single-GPU instances to eliminate network communication.",
-              "Serving cost recurs with traffic throughout deployment; small-batch decode can bind on weight and KV traffic, so scheduling, memory allocation, and topology must be evaluated against the workload and service contract.",
-              "Multi-tenancy isolation can be safely omitted if GPUs are upgraded to Blackwell architectures."
-            ],
-            "answer": "The correct answer is C. For the high-traffic, small-batch LLM setting, serving cost accumulates with completed work over the deployment lifetime, and weight/KV traffic often limits decode. Efficient operation coordinates scheduling, cache allocation, sharding, and routing under latency and quality constraints. Cost dominance and bandwidth limitation depend on traffic, model, and serving regime; neither is universal across all inference workloads.",
-            "learning_objective": "Synthesize the core physical and economic principles governing large-scale inference systems."
-          },
-          {
-            "question_type": "SHORT",
-            "question": "Why must interactive inference evaluate tail latency alongside aggregate throughput, and how does its service contract differ from a training run?",
-            "answer": "Training evaluates aggregate progress, convergence, and time to solution over a run. Interactive inference receives external arrivals and must complete useful work within request-level latency, quality, and availability targets while paying recurring cost. High aggregate throughput does not establish timely responses when queues grow or token delivery stalls. Tail latency and SLO-compliant goodput therefore belong in the same evaluation; a latency-tolerant batch inference service can use a different contract.",
-            "learning_objective": "Explain why interactive serving evaluates tail latency and useful throughput under a request-level service contract."
-          },
-          {
-            "question_type": "FILL",
-            "question": "The economic principle stating that recurring lifetime serving expense can exceed one-time training expense by orders of magnitude is known as the ____ principle.",
-            "answer": "Serving cost dominance. The serving cost dominance principle highlights that inference efficiency improvements provide continuous financial return over a model's entire deployment lifetime.",
-            "learning_objective": "Identify the serving cost dominance principle governing the lifetime economics of machine learning systems."
-          }
-        ]
+        "quiz_needed": false,
+        "rationale": "Summary sections recap the chapter; the body and fallacy quizzes already test this material, and a quiz here would render after the chapter connection."
       }
     }
   ]

@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Sequence
 
 from .plots import COLORS, set_book_style
+from .style import MIN_FONT_PT
 
 __all__ = [
     "VOL4_ROLES",
@@ -121,7 +122,7 @@ class TimingStrip:
     distance_step_mm: Optional[float] = None    # distance-row tick spacing
     distance_notes: Sequence[tuple] = field(default_factory=list)  # (t_start, t_end, text)
     offaxis_note: Optional[tuple] = None        # (lane, text, role): arrow off the right edge
-    figsize: tuple = (10, 4.6)
+    figsize: tuple = (6.4, 4.6)
     xlabel: Optional[str] = None
 
 
@@ -141,7 +142,7 @@ def _text_width_data(ax, text, fontsize, renderer):
     return abs(x1 - x0)
 
 
-def _draw_bracket(ax, x0, x1, y, label, color, up=True, fontsize=8.5):
+def _draw_bracket(ax, x0, x1, y, label, color, up=True, fontsize=MIN_FONT_PT):
     tick = 0.09 if up else -0.09
     ax.plot([x0, x0, x1, x1], [y - tick, y, y, y - tick], color=color, lw=1.0, clip_on=False, zorder=6)
     ax.text(
@@ -195,7 +196,7 @@ def plot_timing_strip(strip, ax=None):
         if i % 2 == 0:
             ax.axhspan(lane_y[i] - 0.5, lane_y[i] + 0.5, color="#F4F6F9", zorder=0, lw=0)
     ax.set_yticks([lane_y[i] for i in range(n)])
-    ax.set_yticklabels(strip.lanes, fontsize=9)
+    ax.set_yticklabels(strip.lanes, fontsize=MIN_FONT_PT)
     ax.tick_params(axis="y", length=0)
     ax.grid(False)
     for side in ("left", "right", "top"):
@@ -213,7 +214,7 @@ def plot_timing_strip(strip, ax=None):
             ax.barh(y, width, left=s.start, height=_LANE_H,
                     facecolor=c if s.solid else _tint(c, 0.22),
                     edgecolor=c, lw=1.0, hatch=s.hatch, zorder=3)
-        fs = 8.5
+        fs = MIN_FONT_PT
         tw = _text_width_data(ax, s.label, fs, renderer)
         pos = s.label_pos
         if pos == "auto":
@@ -246,7 +247,7 @@ def plot_timing_strip(strip, ax=None):
         ax.plot([e.t, e.t], [-0.5, top + 0.12 + 0.42 * e.level], color=c, lw=0.9,
                 ls=styles[e.style], zorder=2)
         ax.text(e.t, top + 0.16 + 0.42 * e.level, e.label, ha=e.ha, va="bottom",
-                fontsize=8.5, color=c, zorder=6,
+                fontsize=MIN_FONT_PT, color=c, zorder=6,
                 bbox=dict(boxstyle="square,pad=0.06", fc="white", ec="none"))
         if axd is not None:
             axd.axvline(e.t, color=c, lw=0.9, ls=styles[e.style], zorder=2)
@@ -266,7 +267,7 @@ def plot_timing_strip(strip, ax=None):
         ax.annotate("", xy=(x1, y), xytext=(x1 - (x1 - x0) * 0.035, y),
                     arrowprops=dict(arrowstyle="-|>", color=c, lw=1.2), zorder=6, annotation_clip=False)
         ax.text(x1 - (x1 - x0) * 0.04, y, text, ha="right", va="center",
-                fontsize=8.5, color=c, zorder=6)
+                fontsize=MIN_FONT_PT, color=c, zorder=6)
 
     ax.tick_params(axis="x", labelbottom=not show_dist)
     if not show_dist:
@@ -279,7 +280,7 @@ def plot_timing_strip(strip, ax=None):
     # each extra distance-bracket level sits 0.3 lower; leave room for its label
     axd.set_ylim(-0.3 * n_dist_levels, 1)
     axd.set_yticks([0.5])
-    axd.set_yticklabels([strip.speed_label or "travel"], fontsize=9)
+    axd.set_yticklabels([strip.speed_label or "travel"], fontsize=MIN_FONT_PT)
     axd.tick_params(axis="y", length=0)
     axd.grid(False)
     for side in ("left", "right", "top"):
@@ -293,11 +294,11 @@ def plot_timing_strip(strip, ax=None):
         t = strip.distance_origin + k * step / v
         if t >= x0 - 1e-9:
             axd.plot([t, t], [0.62, 0.9], color=VOL4_ROLES["neutral"], lw=0.7, zorder=2)
-            axd.text(t, 0.93, f"{k * step:g}" + (" mm" if k == 0 else ""), ha="center", va="bottom", fontsize=8, color=VOL4_ROLES["neutral"],
+            axd.text(t, 0.93, f"{k * step:g}" + (" mm" if k == 0 else ""), ha="center", va="bottom", fontsize=MIN_FONT_PT, color=VOL4_ROLES["neutral"],
                      zorder=4, bbox=dict(boxstyle="square,pad=0.15", fc="white", ec="none"))
         k += 1
     for (ta, tb, text) in strip.distance_notes:
-        axd.text((ta + tb) / 2, 0.76, text, ha="center", va="center", fontsize=8,
+        axd.text((ta + tb) / 2, 0.76, text, ha="center", va="center", fontsize=MIN_FONT_PT,
                  color=VOL4_ROLES["neutral"], zorder=4,
                  bbox=dict(boxstyle="square,pad=0.06", fc=_tint(VOL4_ROLES["neutral"], 0.12), ec="none"))
     for b in strip.brackets:
@@ -393,7 +394,7 @@ def capture_to_onset_strip(scenario, speed, t_allowance=None, spare=None, delta_
         speed_label=f"travel at {v:.1f} m/s (mm)",
         distance_step_mm=50.0,
         distance_notes=dnotes,
-        figsize=(10, 5.4),
+        figsize=(6.4, 5.4),
         xlabel="Time from the exposure midpoint (ms)",
     )
 
@@ -430,7 +431,7 @@ def permission_tick_strip(scenario, speed):
         spans=spans, lanes=["measured", "declared"], events=events, brackets=brackets,
         xlim=(-30, T + 30), time_unit="µs", speed_mm_per_unit=v,
         speed_label=f"travel at {_mps(speed):.1f} m/s (mm)", distance_step_mm=0.25,
-        figsize=(9, 3.4), xlabel="Time from the tick's release (µs)",
+        figsize=(6.4, 3.4), xlabel="Time from the tick's release (µs)",
     )
 
 
@@ -498,7 +499,7 @@ def chunk_renewal_strip(machine, evidence_horizon=None, n_renewals=4):
     return TimingStrip(
         spans=spans,
         lanes=["capture", "inference", "chunk in force", "first chunk", "setpoints"],
-        events=events, brackets=brackets, xlim=(-8, t_end + 8), figsize=(10, 4.6),
+        events=events, brackets=brackets, xlim=(-8, t_end + 8), figsize=(6.4, 4.6),
         xlabel="Time from the first chunk's capture (ms)",
     )
 
@@ -530,7 +531,7 @@ def takeover_strip(scenario, speed=None):
     return TimingStrip(
         spans=spans, lanes=["console", "operator", "permission"], events=events,
         brackets=brackets, xlim=(-15, total + 25), speed_mm_per_unit=v,
-        speed_label=f"travel at {v:.2f} m/s (mm)", distance_step_mm=100.0, figsize=(10, 3.6),
+        speed_label=f"travel at {v:.2f} m/s (mm)", distance_step_mm=100.0, figsize=(6.4, 3.6),
     )
 
 
@@ -595,7 +596,7 @@ def perception_age_strip(scenario, speed):
         speed_label=f"travel at {v:.1f} m/s (mm)",
         distance_step_mm=50.0,
         distance_notes=dnotes,
-        figsize=(7.0, 3.5),
+        figsize=(6.4, 3.5),
         xlabel="Time from the exposure midpoint (ms)",
     )
 
@@ -645,6 +646,6 @@ def decoder_budget_strip(budget, t_lease, n_renewals=2):
         spans=spans,
         lanes=["setpoints", "ACT decoder", "diffusion head", f"diffusion, {t_jit:.0f} ms stretch",
                "lease from admission"],
-        events=events, brackets=brackets, xlim=(-3, t_end + 3), figsize=(9, 3.9),
+        events=events, brackets=brackets, xlim=(-3, t_end + 3), figsize=(6.4, 3.9),
         xlabel="Time from admission (ms)",
     )

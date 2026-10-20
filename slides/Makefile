@@ -130,7 +130,7 @@ build-%: svgs
 # Convenience aliases: ch01, ch02, ..., ch16
 ch01: build-01_introduction
 ch02: build-02_system_paradigms
-ch03: build-03_ml_workflow
+ch03: build-03_ml_lifecycle
 ch04: build-04_data_engineering
 ch05: build-05_nn_computation
 ch06: build-06_nn_architectures
@@ -191,8 +191,8 @@ v2ch01: svgs ; $(call build-chapter-impl,$(VOL2_SRC),$(VOL2_OUT),01_introduction
 v2ch02: svgs ; $(call build-chapter-impl,$(VOL2_SRC),$(VOL2_OUT),02_compute_infrastructure)
 v2ch03: svgs ; $(call build-chapter-impl,$(VOL2_SRC),$(VOL2_OUT),03_network_fabrics)
 v2ch04: svgs ; $(call build-chapter-impl,$(VOL2_SRC),$(VOL2_OUT),04_data_storage)
-v2ch05: svgs ; $(call build-chapter-impl,$(VOL2_SRC),$(VOL2_OUT),05_distributed_training)
-v2ch06: svgs ; $(call build-chapter-impl,$(VOL2_SRC),$(VOL2_OUT),06_collective_communication)
+v2ch05: svgs ; $(call build-chapter-impl,$(VOL2_SRC),$(VOL2_OUT),05_collective_communication)
+v2ch06: svgs ; $(call build-chapter-impl,$(VOL2_SRC),$(VOL2_OUT),06_distributed_training)
 v2ch07: svgs ; $(call build-chapter-impl,$(VOL2_SRC),$(VOL2_OUT),07_fault_tolerance)
 v2ch08: svgs ; $(call build-chapter-impl,$(VOL2_SRC),$(VOL2_OUT),08_fleet_orchestration)
 v2ch09: svgs ; $(call build-chapter-impl,$(VOL2_SRC),$(VOL2_OUT),09_performance_engineering)
@@ -222,7 +222,7 @@ pptx-vol2: vol2
 # Per-chapter PPTX: pptx-ch01, pptx-ch02, ..., pptx-v2ch01, ...
 pptx-ch01: ch01 ; @$(PDF2PPTX) $(VOL1_OUT)/01_introduction.pdf --output-dir $(VOL1_OUT) --dpi $(PPTX_DPI)
 pptx-ch02: ch02 ; @$(PDF2PPTX) $(VOL1_OUT)/02_system_paradigms.pdf --output-dir $(VOL1_OUT) --dpi $(PPTX_DPI)
-pptx-ch03: ch03 ; @$(PDF2PPTX) $(VOL1_OUT)/03_ml_workflow.pdf --output-dir $(VOL1_OUT) --dpi $(PPTX_DPI)
+pptx-ch03: ch03 ; @$(PDF2PPTX) $(VOL1_OUT)/03_ml_lifecycle.pdf --output-dir $(VOL1_OUT) --dpi $(PPTX_DPI)
 pptx-ch04: ch04 ; @$(PDF2PPTX) $(VOL1_OUT)/04_data_engineering.pdf --output-dir $(VOL1_OUT) --dpi $(PPTX_DPI)
 pptx-ch05: ch05 ; @$(PDF2PPTX) $(VOL1_OUT)/05_nn_computation.pdf --output-dir $(VOL1_OUT) --dpi $(PPTX_DPI)
 pptx-ch06: ch06 ; @$(PDF2PPTX) $(VOL1_OUT)/06_nn_architectures.pdf --output-dir $(VOL1_OUT) --dpi $(PPTX_DPI)
@@ -241,8 +241,8 @@ pptx-v2ch01: v2ch01 ; @$(PDF2PPTX) $(VOL2_OUT)/01_introduction.pdf --output-dir 
 pptx-v2ch02: v2ch02 ; @$(PDF2PPTX) $(VOL2_OUT)/02_compute_infrastructure.pdf --output-dir $(VOL2_OUT) --dpi $(PPTX_DPI)
 pptx-v2ch03: v2ch03 ; @$(PDF2PPTX) $(VOL2_OUT)/03_network_fabrics.pdf --output-dir $(VOL2_OUT) --dpi $(PPTX_DPI)
 pptx-v2ch04: v2ch04 ; @$(PDF2PPTX) $(VOL2_OUT)/04_data_storage.pdf --output-dir $(VOL2_OUT) --dpi $(PPTX_DPI)
-pptx-v2ch05: v2ch05 ; @$(PDF2PPTX) $(VOL2_OUT)/05_distributed_training.pdf --output-dir $(VOL2_OUT) --dpi $(PPTX_DPI)
-pptx-v2ch06: v2ch06 ; @$(PDF2PPTX) $(VOL2_OUT)/06_collective_communication.pdf --output-dir $(VOL2_OUT) --dpi $(PPTX_DPI)
+pptx-v2ch05: v2ch05 ; @$(PDF2PPTX) $(VOL2_OUT)/05_collective_communication.pdf --output-dir $(VOL2_OUT) --dpi $(PPTX_DPI)
+pptx-v2ch06: v2ch06 ; @$(PDF2PPTX) $(VOL2_OUT)/06_distributed_training.pdf --output-dir $(VOL2_OUT) --dpi $(PPTX_DPI)
 pptx-v2ch07: v2ch07 ; @$(PDF2PPTX) $(VOL2_OUT)/07_fault_tolerance.pdf --output-dir $(VOL2_OUT) --dpi $(PPTX_DPI)
 pptx-v2ch08: v2ch08 ; @$(PDF2PPTX) $(VOL2_OUT)/08_fleet_orchestration.pdf --output-dir $(VOL2_OUT) --dpi $(PPTX_DPI)
 pptx-v2ch09: v2ch09 ; @$(PDF2PPTX) $(VOL2_OUT)/09_performance_engineering.pdf --output-dir $(VOL2_OUT) --dpi $(PPTX_DPI)

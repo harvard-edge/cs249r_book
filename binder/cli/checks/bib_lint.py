@@ -300,6 +300,9 @@ CANONICAL_PUBLISHERS: set[str] = {
     "IEEE Computer Society", "ISCA", "Sage Publications", "SAGE Publications", "Routledge",
     "Frontiers Media S.A.", "American Statistical Association", "Pearson", "Prentice Hall",
     "Internet Society", "Farrar, Straus and Giroux", "NATO Science Committee",
+    # 2026-10-13: Nissenbaum, Privacy in Context (DOI 10.1515/9780804772891),
+    # cited by Vol IV's responsibility chapter, is a Stanford University Press book.
+    "Stanford University Press",
     # 2026-09-29: RSS proceedings (DOI prefix 10.15607) are published by the
     # RSS Foundation per Crossref; Vol IV cites them heavily.
     "Robotics: Science and Systems Foundation",

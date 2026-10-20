@@ -96,8 +96,10 @@ symbols:
     or not
   kind: scalar
   unit: s
-  notes: Denominator of the goodput ratio, $\GoodputRatio \approx T_{\text{useful}}/T_{\text{wall}}$.
+  notes: Denominator of runtime goodput, $\RuntimeGoodput \approx T_{\text{useful}}/T_{\text{wall}}$.
     Not $\Time$, the time of one unit of work.
+  aliases:
+  - \AllocationHoldTime
 - macro: \AllowedViolationFraction
   latex: V^{\text{allow}}
   definition: fraction of eligible observations allowed to violate one reliability target over a window,
@@ -491,7 +493,7 @@ symbols:
 - macro: \CompletedRoundIndex
   latex: r
   definition: position of one completed round among those a federated run executes, as summed in the time
-    to target and indexed in the per-round traffic ledger
+    to target and indexed in the per-round traffic budget
   kind: index
   notes: Same concept as \FederatedRoundIndex but lettered r here; see questions.
 - macro: \ComponentAvailability
@@ -716,8 +718,8 @@ symbols:
   kind: scalar
   unit: FLOP/s
   notes: '$\EffectiveFleetThroughput = N \PeakRate \times \ModelFlopsUtilization \times \ScalingEfficiency
-    \times \GoodputRatio$: $\ModelFlopsUtilization$ is the single-device baseline, $\ScalingEfficiency$
-    the in-step scaling loss, and $\GoodputRatio$ the out-of-step operational loss.'
+    \times \RuntimeGoodput$: $\ModelFlopsUtilization$ is the single-device baseline, $\ScalingEfficiency$
+    the in-step scaling loss, and $\RuntimeGoodput$ the out-of-step operational loss.'
 - macro: \EffectiveSpotTrainingCost
   latex: C_{\text{effective}}
   definition: spot price scaled by billed time over productive time, the cost of each hour of retained
@@ -725,12 +727,27 @@ symbols:
   kind: scalar
   unit: USD/hour
   notes: Stays near the spot price when interruption losses are small.
+- macro: \EgressArrivalRate
+  latex: \lambda_{\text{arr}}
+  definition: aggregate rate at which traffic arrives at one switch egress port
+  kind: scalar
+  unit: bytes/s
+  notes: Pairs with $\EgressServiceRate$; while it exceeds the service rate the egress queue grows. Same glyph
+    as the request arrival rate $\ArrivalRate$, which counts requests per second rather than bytes.
 - macro: \EgressBufferCapacity
   latex: Q_{\text{max}}
   definition: largest amount of traffic one switch egress buffer can hold
   kind: scalar
   unit: bytes
   notes: Upper cap of the egress queue occupancy.
+- macro: \EgressPortUtilization
+  latex: \rho_{\text{egress}}
+  definition: ratio of the traffic arrival rate at one switch egress port to the rate the port drains it
+  kind: scalar
+  unit: dimensionless
+  notes: $\EgressPortUtilization = \EgressArrivalRate/\EgressServiceRate$. Below one, idle intervals drain
+    the queue; above one, occupancy climbs to a control threshold or the buffer limit. A packet queue, not
+    the request queue of a server, $\ServingUtilization$.
 - macro: \EgressPrice
   latex: R_{\text{egress/GB}}
   definition: price of transferring one gigabyte out over the network
@@ -911,7 +928,6 @@ symbols:
   kind: scalar
   unit: varies
   notes: Its unit is that of the mechanism being bought, such as spare nodes or checkpoint bandwidth.
-    Not $\TransferPayloadSize$, which shares the glyph.
 - macro: \FeatureRetentionWindow
   latex: T_{\text{retention}}
   definition: length of feature history a feature store keeps so it can answer point-in-time queries
@@ -1057,14 +1073,6 @@ symbols:
   kind: vector
   notes: Equals $(1/\DeviceCount)\sum_k \MinibatchGradient_k$ for equal local batches; AllReduce computes
     it.
-- macro: \GoodputRatio
-  latex: \eta_{\text{goodput}}
-  definition: fraction of allocated wall time left for productive steps after out-of-step operational
-    losses
-  kind: scalar
-  unit: dimensionless
-  notes: Often $\GoodputRatio = 1 - \OperationalOverheadFraction$. In-step losses belong to $\ScalingEfficiency$,
-    not here.
 - macro: \GpdScaleParameter
   latex: \tilde{\sigma}
   definition: scale parameter of the generalized Pareto distribution fitted to exceedances over a threshold
@@ -1078,6 +1086,13 @@ symbols:
   unit: dimensionless
   notes: A cluster needing all $\RequiredComponentCount$ GPUs is up with probability $(\GpuAvailability)^{\RequiredComponentCount}$
     under independent failures. The GPU case of $\ComponentAvailability$.
+- macro: \GpuFailureRate
+  latex: \lambda_{\text{GPU}}
+  definition: rate at which one GPU fails, the reciprocal of its mean time to failure
+  kind: scalar
+  unit: failures/hour
+  notes: $1/\GpuMttf$ under a constant failure rate. The GPU term of a per-GPU failure-domain sum; the
+    generic per-component rate is $\ComponentFailureRate$.
 - macro: \GpuMttf
   latex: \text{MTTF}_{\text{GPU}}
   definition: mean time to failure of one GPU, its average operating time before it fails
@@ -1173,6 +1188,14 @@ symbols:
     as Benjamini-Hochberg. Same meaning as $\SignificanceLevel$ ($\alpha$); the two should merge.
   aliases:
   - \TypeIAndTypeIiErrorRatesSig
+- macro: \IdealAcceleratorTime
+  latex: T_{\text{ideal}}
+  definition: accelerator-time a job's work needs when every device runs at the ideal rate with no scheduling,
+    runtime or program loss
+  kind: scalar
+  unit: s
+  notes: Dividing it by $\DeviceCount \times \RuntimeGoodput \times \ProgramGoodput$ gives the job's run time once it
+    holds its devices.
 - macro: \IndependentEventProbability
   latex: p
   definition: probability of one of several independent, identical events, such as one component failing
@@ -1205,13 +1228,6 @@ symbols:
   definition: number of nodes a sequence is split across by ring attention in hierarchical context parallelism
   kind: count
   notes: The ring factor of a hierarchical layout; the Ulysses factor inside a node is \IntraNodeContextParallelDegree.
-- macro: \InterconnectBandwidth
-  latex: \text{BW}_{\text{interconnect}}
-  definition: sustained rate at which bytes move across the accelerator-to-accelerator interconnect, the
-    tier between device memory and the network
-  kind: scalar
-  unit: bytes/s
-  notes: Interconnect tier of the bandwidth hierarchy, between $\MemoryTierBandwidth$ and $\NetworkBandwidth$.
 - macro: \InterleavedPipelineBubbleFraction
   latex: b_{\text{interleaved}}
   definition: fraction of pipeline device time spent idle when each device runs several interleaved virtual
@@ -1291,6 +1307,14 @@ symbols:
   unit: dimensionless
   notes: One means no delay from sharing. Themis finish-time fairness has the same form with a fair-share
     denominator.
+- macro: \JobStartupTime
+  latex: T_{\text{startup}}
+  definition: time from a job's complete allocation to its first retained step, spent loading, initializing
+    and compiling
+  kind: scalar
+  unit: s
+  notes: A runtime goodput loss; dated from the scheduler's record of the complete allocation, not from the
+    first step.
 - macro: \KrumClientCount
   latex: n
   definition: total number of client updates a Krum-style robust aggregation rule selects among
@@ -1484,6 +1508,14 @@ symbols:
   definition: number of microbatches one pipeline-parallel step splits its batch into
   kind: count
   notes: The pipeline bubble fraction $\PipelineBubbleFraction$ falls as it grows.
+- macro: \MlProductivityGoodput
+  latex: \text{MPG}
+  definition: fraction of a fleet's capacity-time that becomes useful work at the ideal rate, the product
+    of scheduling, runtime and program goodput
+  kind: scalar
+  unit: dimensionless
+  notes: $\MlProductivityGoodput = \SchedulingGoodput \times \RuntimeGoodput \times \ProgramGoodput$, each loss charged
+    to exactly one factor. Written as a text acronym, like $\ModelFlopsUtilization$.
 - macro: \ModelLifetimeCost
   latex: C_{\text{total}}
   definition: total cost of one model version over its deployment, the one-time training cost plus the
@@ -1520,7 +1552,7 @@ symbols:
   definition: wall-clock time for a fixed amount of productive work on N devices
   kind: scalar
   unit: s
-  notes: Per step it equals $\DistributedStepTime$; excludes operational downtime counted by $\GoodputRatio$.
+  notes: Per step it equals $\DistributedStepTime$; excludes operational downtime counted by $\RuntimeGoodput$.
   aliases:
   - \NdeviceTime
 - macro: \NetworkDelayStandardDeviation
@@ -1599,7 +1631,7 @@ symbols:
   kind: scalar
   unit: dimensionless
   notes: Checkpoint pauses, failure recovery, scheduler preemption and maintenance; in-step losses are
-    in $\ScalingEfficiency$. Often $\GoodputRatio = 1 - \OperationalOverheadFraction$.
+    in $\ScalingEfficiency$. Often $\RuntimeGoodput = 1 - \OperationalOverheadFraction$.
 - macro: \OperationalTaxonomyDimension
   latex: C
   definition: one of the three operational dimensions of the C-cubed taxonomy, indexed 1 to 3 as compute,
@@ -1673,6 +1705,12 @@ symbols:
   kind: index
   notes: Runs from 0 to $\log_2\DeviceCount - 1$; ReduceScatter visits bits in increasing order and AllGather
     reverses it.
+- macro: \PcieLinkFailureRate
+  latex: \lambda_{\text{PCIe}}
+  definition: rate at which the PCIe connection between one GPU and its host fails
+  kind: scalar
+  unit: failures/hour
+  notes: Reciprocal of the PCIe switch mean time to failure. One term of a per-GPU failure-domain sum.
 - macro: \PerDeviceComputeTime
   latex: T_{\text{compute,local}}
   definition: compute time each device spends per step after the work is divided evenly across the devices
@@ -1690,6 +1728,28 @@ symbols:
   definition: engineering cost of one experiment
   kind: scalar
   unit: USD
+- macro: \PerGpuNetworkFailureRate
+  latex: \lambda_{\text{network/GPU}}
+  definition: share of a node's network-path failure rate charged to each of its GPUs
+  kind: scalar
+  unit: failures/hour
+  notes: The node's NIC and cable failure rate, $1/\NicMttf$, divided by the GPUs per node.
+- macro: \PerGpuPowerFailureRate
+  latex: \lambda_{\text{power/GPU}}
+  definition: share of a node's power-supply failure rate charged to each of its GPUs, counting only supplies
+    whose single failure stops the node
+  kind: scalar
+  unit: failures/hour
+  notes: $\SeriesPsuCount/\PsuMttf$ divided by the GPUs per node; zero when every supply sits in a redundant
+    set.
+- macro: \PerGpuTotalFailureRate
+  latex: \lambda_{\text{total/GPU}}
+  definition: failure rate of one GPU's whole failure domain, the sum of the rates of the subsystems in series
+    with it
+  kind: scalar
+  unit: failures/hour
+  notes: $\GpuFailureRate + \PcieLinkFailureRate + \PerGpuPowerFailureRate + \PerGpuNetworkFailureRate$ for
+    the series subsystems of one GPU.
 - macro: \PerTestSignificanceLevel
   latex: \alpha_{\text{sig}}'
   definition: significance threshold applied to each test of a family after a multiple-testing correction
@@ -1703,7 +1763,7 @@ symbols:
   kind: scalar
   unit: s
   notes: Exceeding it indicates stalled progress, not proof of a cyclic deadlock. Not the hardware watchdog
-    \HardwareWatchdogTimeout.
+    timeout.
 - macro: \PipelineBubbleFraction
   latex: b_{\text{pipe}}
   definition: fraction of pipeline device time spent idle while the pipeline fills and drains
@@ -1730,6 +1790,16 @@ symbols:
   kind: scalar
   unit: USD
   notes: Worked-example quantity; compared with \BaselineAnnualOperationsCost.
+- macro: \PlatformResourceCapacity
+  latex: \text{Cap}
+  definition: capacity of one resource pool of a shared platform, the weight of that pool in platform
+    utilization
+  kind: scalar
+  unit: varies
+  notes: Written $\text{Cap}_i$, indexed by \PlatformResourceIndex. Unit is that of the pool (devices, bytes,
+    bytes/s); within one platform-utilization sum every pool must be expressed in a common unit. Not
+    \FleetResourceCapacity, which is the fleet total of one resource type used to normalize tenant shares.
+  aliases: []
 - macro: \PlatformResourceIndex
   latex: i
   definition: index of one resource pool of a shared platform
@@ -1763,6 +1833,19 @@ symbols:
   definition: number of lower-priority jobs one admission displaces at each level of a preemption cascade
   kind: count
   notes: Two levels interrupt k plus k squared jobs; a no-repreemption rule caps it at k.
+- macro: \PreemptionRate
+  latex: \lambda_{\text{preempt}}
+  definition: number of forced preemptions a job suffers per hour of held time
+  kind: scalar
+  unit: hours^-1
+  notes: Multiplied by $\PreemptionTaxTime$ it gives the share of held time preemption costs.
+- macro: \PreemptionTaxTime
+  latex: T_{\text{preempt}}
+  definition: held time one forced preemption costs a job, the work discarded since its last checkpoint
+    plus reload and warmup
+  kind: scalar
+  unit: hours
+  notes: Not $\FailureRecoveryTime$, which has a detection step a scheduled preemption does not.
 - macro: \PreviousPeriodCost
   latex: C_{\text{previous}}
   definition: observed cost of the accounting period before the current one
@@ -1920,10 +2003,6 @@ symbols:
   unit: dimensionless
   notes: $1 - (1 - \ReplicaAvailability)^{\RedundantReplicaCount}$ under independent failures and enough
     capacity on any survivor. Not $\JobAvailability$, which multiplies availabilities that must all hold.
-- macro: \ReliabilityDimensionIndex
-  latex: i
-  definition: index of one dimension of the SLO vector (availability, latency, freshness, quality)
-  kind: index
 - macro: \ReplicaAvailability
   latex: A_{\text{single}}
   definition: probability that one serving replica is up at a randomly chosen instant
@@ -2045,7 +2124,7 @@ symbols:
   definition: bytes of model state a federated client downloads in one round
   kind: scalar
   unit: bytes
-  notes: Term of @eq-edge-federated-communication-ledger.
+  notes: Term of @eq-edge-federated-communication-volume.
 - macro: \RoundDuration
   latex: t_r
   definition: elapsed wall-clock duration of one completed federated round, including selection, local
@@ -2059,13 +2138,13 @@ symbols:
     one round
   kind: scalar
   unit: bytes
-  notes: Term of @eq-edge-federated-communication-ledger.
+  notes: Term of @eq-edge-federated-communication-volume.
 - macro: \RoundRetryVolume
   latex: M_{\text{retry},r}
   definition: bytes a federated client spends on failed or repeated transfers in one round
   kind: scalar
   unit: bytes
-  notes: Term of @eq-edge-federated-communication-ledger.
+  notes: Term of @eq-edge-federated-communication-volume.
 - macro: \RoundSampleCount
   latex: n_{\text{round}}
   definition: total number of training samples across the clients participating in one federated round
@@ -2076,7 +2155,7 @@ symbols:
   definition: bytes of client update a federated client uploads in one round
   kind: scalar
   unit: bytes
-  notes: Term of @eq-edge-federated-communication-ledger.
+  notes: Term of @eq-edge-federated-communication-volume.
 - macro: \RowParallelOutputMatrix
   latex: \mathbf{Z}
   definition: output of the row-parallel layer of a Megatron tensor-parallel pair, the sum of the per-device
@@ -2096,9 +2175,12 @@ symbols:
   kind: scalar
   unit: dimensionless
   notes: One factor of ML Productivity Goodput, $\SchedulingGoodput \times \RuntimeGoodput \times \ProgramGoodput$;
-    loses initialization, input stalls and work lost after the last checkpoint.
+    loses initialization, input stalls and work lost after the last checkpoint. It is also the out-of-step
+    operational goodput of the fleet throughput factorization, often $1 - \OperationalOverheadFraction$
+    (formerly \GoodputRatio).
   aliases:
   - \MlProductivityGoodputFactorsRuntime
+  - \GoodputRatio
 - macro: \SavedEngineeringTime
   latex: T_{\text{saved}}
   definition: engineering time a shared platform saves for one model in one accounting period
@@ -2198,11 +2280,6 @@ symbols:
   unit: s
   notes: Equals \BackwardPassTime + \CommunicationTime. Not \SequentialExecutionTime, the additive iron
     law.
-- macro: \SequentialTestObservationCount
-  latex: m
-  definition: number of observations a sequential probability ratio test has accumulated so far
-  kind: count
-  notes: The index of $\SequentialLikelihoodRatio$ ($\Lambda_m$).
 - macro: \SeriesComponentCount
   latex: N_{\text{series}}
   definition: number of components in a series reliability model, every one of which must survive for
@@ -2354,6 +2431,14 @@ symbols:
   kind: scalar
   unit: s
   notes: The coordination term of the Fleet Law; transfer time itself belongs to $\CommunicationTime$.
+- macro: \SystemFailureRate
+  latex: \lambda_{\text{system}}
+  definition: rate at which failures interrupt the whole job or system, the sum of its components' failure
+    rates
+  kind: scalar
+  unit: failures/hour
+  notes: The reciprocal of $\SystemMtbf$. Equals the device count times $\PerGpuTotalFailureRate$ for
+    independent, identical failure domains.
 - macro: \SystemMtbf
   latex: \text{MTBF}_{\text{system}}
   definition: mean time between failures that interrupt the whole job or system
@@ -2476,6 +2561,12 @@ symbols:
   kind: scalar
   unit: varies
   notes: Unit of \TailRiskObservation; indexed $y_i$ for one exceedance.
+- macro: \TimeToResult
+  latex: T_{\text{result}}
+  definition: wall-clock time from a job's submission to its result, its queue wait plus its run time
+  kind: scalar
+  unit: s
+  notes: One axis of the efficiency frontier, with goodput and cost per useful unit.
 - macro: \TimeToTarget
   latex: T_{\text{target}}
   definition: wall-clock time a federated run takes to reach a held-out quality target, the sum of its
@@ -2585,13 +2676,6 @@ symbols:
   definition: number of failures that occur during one training run
   kind: count
   notes: Random; the cost model uses its expectation $\mathbb{E}[\TrainingFailureCount]$.
-- macro: \TransferPayloadSize
-  latex: x
-  definition: size of the payload at which a transfer-time model is evaluated, for one link or one collective
-  kind: scalar
-  unit: bytes
-  notes: Argument of $\TransferTimeForPayload$. A collective contributes $\CollectivePayloadSize$ per
-    participant.
 - macro: \TransferTimeForPayload
   latex: T_{\text{transfer}}
   definition: time to communicate a payload of x bytes under the relevant link or collective model
@@ -2626,6 +2710,14 @@ symbols:
   notes: 'Renders like \IronLawComputeTime but is broader: it is the sum of the iron law''s data and compute
     terms plus host dispatch, not $\Operations/(\PeakRate \cdot \EfficiencyHw)$ alone. Partitioning a
     fixed workload across $\DeviceCount$ devices gives the local-execution term $T_{\text{compute}}/\DeviceCount$.'
+- macro: \UsefulAcceleratorHourCost
+  latex: C_{\text{useful}}
+  definition: price of one accelerator-hour of useful work at the ideal rate, the capacity price divided
+    by ML productivity goodput
+  kind: scalar
+  unit: USD/h
+  notes: $\UsefulAcceleratorHourCost = \AcceleratorHourlyPrice/\MlProductivityGoodput$, with the price taken per in-service
+    accelerator-hour.
 - macro: \UsefulComputeFraction
   latex: f_{\text{compute}}
   definition: share of the distributed step time spent on useful local arithmetic
@@ -2648,7 +2740,7 @@ symbols:
     the final model
   kind: scalar
   unit: s
-  notes: Numerator of the goodput ratio, $\GoodputRatio \approx T_{\text{useful}}/T_{\text{wall}}$; excludes
+  notes: Numerator of runtime goodput, $\RuntimeGoodput \approx T_{\text{useful}}/T_{\text{wall}}$; excludes
     checkpoint stalls, failure recovery, replayed work and scheduler preemptions.
 - macro: \VersionSkewBound
   latex: k_{\text{skew}}

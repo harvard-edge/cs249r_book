@@ -489,7 +489,7 @@ class TestWASMCompatibility:
 # in a browser (existing CI misses it because test_engine runs in native
 # Python where these packages are installed at the OS level).
 #
-# Incident: lab_05_dist_train shipped with `from plotly.subplots import
+# Incident: lab_05_dist_train (now lab_06_dist_train) shipped with `from plotly.subplots import
 # make_subplots` at line 55, BEFORE `await micropip.install([..., "plotly",
 # ...])` at line 60. All cells downstream of the setup cell cascaded with
 # "ancestor raised" errors on the production dev preview site. marimo
@@ -588,7 +588,7 @@ class TestWASMRuntimeImportOrder:
                 + "\n".join(f"  {v}" for v in violations)
                 + "\n\nfix: move the import(s) to AFTER the "
                 "`await micropip.install([..., 'plotly', ...])` line. "
-                "see lab_05_dist_train post-#1353 for the correct pattern."
+                "see lab_06_dist_train post-#1353 for the correct pattern."
             )
 
 

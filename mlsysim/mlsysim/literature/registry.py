@@ -29,6 +29,7 @@ ResponsibleAIOverhead = _load("rai_overhead", "ResponsibleAIOverhead", "Responsi
 TrainingRuns = _load("training_runs", "TrainingRuns", "Cited training-run field figures (GPU counts, durations, MFU, interruptions).")
 FleetOperations = _load("fleet_operations", "FleetOperations", "Measured fleet-operations results (job MTTF, utilization, cluster scale).")
 DatacenterElectricity = _load("datacenter_electricity", "DatacenterElectricity", "Datacenter electricity consumption and projections (LBNL, IEA).")
+AcceleratorLifecycle = _load("accelerator_lifecycle", "AcceleratorLifecycle", "Accelerator life-cycle emission trends (Schneider et al. 2025).")
 
 
 # ---------------------------------------------------------------------------
@@ -36,37 +37,48 @@ DatacenterElectricity = _load("datacenter_electricity", "DatacenterElectricity",
 # @fig-ai-training-compute-growth. The scalar-anchor YAML schema used by the
 # other literature data files cannot express a multi-field series, so this
 # curated milestone list lives in Python (per the mlsysim taxonomy rule:
-# "composing / series -> Python"). Values are order-of-magnitude
-# training-compute (FLOP) estimates, not vendor disclosures.
+# "composing / series -> Python"). Values are third-party training-compute
+# (FLOP) estimates from Epoch AI's Notable AI Models database, not vendor
+# disclosures. Era: "Large Scale" marks runs above 10^22 FLOP.
+#
+# 2026-10-12: the pre-2020 rows were 1.5-67x above Epoch's estimates (e.g.
+# Transformer 5e20 vs 7.4e18, AlphaGo Zero 3e22 vs 6.5e20) and ResNet-50 had no
+# source; all rows re-pinned to the Epoch snapshot and ResNet-50 replaced by
+# ResNet-152, the Epoch-listed ResNet. Epoch's AlphaGo Zero estimate counts
+# network training only, not self-play data generation.
 # ---------------------------------------------------------------------------
 from ..core.provenance import Provenance, ProvenanceKind
 
 _COMPUTE_TREND_PROVENANCE = Provenance(
     kind=ProvenanceKind.LITERATURE,
-    ref="Sevilla et al. (2022), Compute Trends Across Three Eras of Machine Learning (Epoch AI)",
-    url="https://arxiv.org/abs/2202.05924",
-    verified="2026-05-30",
+    ref=(
+        "Epoch AI, Notable AI Models database (training compute, FLOP), "
+        "accessed 2026-10-12; method per Sevilla et al. (2022), Compute Trends "
+        "Across Three Eras of Machine Learning"
+    ),
+    url="https://epoch.ai/data/notable-ai-models",
+    verified="2026-10-12",
 )
 
-# (model, calendar year, training FLOP, era)
+# (model, calendar year of publication, training FLOP, era)
 _COMPUTE_TREND_ROWS = (
-    ("AlexNet", 2012, 1.2e18, "Deep Learning"),
-    ("VGG-16", 2014, 3.0e19, "Deep Learning"),
-    ("ResNet-50", 2015, 5.0e19, "Deep Learning"),
-    ("GoogLeNet", 2014, 2.0e19, "Deep Learning"),
-    ("AlphaGoZero", 2017, 3.0e22, "Deep Learning"),
-    ("Transformer", 2017, 5.0e20, "Large Scale"),
-    ("BERT-Large", 2018, 3.0e21, "Large Scale"),
-    ("GPT-2-XL", 2019, 2.0e22, "Large Scale"),
-    ("T5-11 billion", 2019, 5.0e22, "Large Scale"),
-    ("GPT-3", 2020, 3.1e23, "Large Scale"),
-    ("Gopher", 2021, 6.0e23, "Large Scale"),
-    ("PaLM", 2022, 2.5e24, "Large Scale"),
-    ("GPT-4-class", 2023, 2.0e25, "Large Scale"),
-    ("Llama-3-70 billion", 2024, 8.0e24, "Large Scale"),
-    ("Gemini-Ultra", 2024, 5.0e25, "Large Scale"),
+    ("AlexNet", 2012, 4.7e17, "Deep Learning"),
+    ("VGG-16", 2014, 1.23e19, "Deep Learning"),
+    ("GoogLeNet", 2014, 1.51e18, "Deep Learning"),
+    ("ResNet-152", 2015, 1.04e19, "Deep Learning"),
+    ("Transformer", 2017, 7.42e18, "Deep Learning"),
+    ("AlphaGoZero", 2017, 6.49e20, "Deep Learning"),
+    ("BERT-Large", 2018, 2.85e20, "Deep Learning"),
+    ("GPT-2-XL", 2019, 1.92e21, "Deep Learning"),
+    ("T5-11 billion", 2019, 3.3e22, "Large Scale"),
+    ("GPT-3", 2020, 3.14e23, "Large Scale"),
+    ("Gopher", 2021, 6.31e23, "Large Scale"),
+    ("PaLM", 2022, 2.53e24, "Large Scale"),
+    ("GPT-4-class", 2023, 2.1e25, "Large Scale"),
+    ("Gemini-Ultra", 2023, 5.0e25, "Large Scale"),
+    ("Llama-3-70 billion", 2024, 7.86e24, "Large Scale"),
     ("Llama 3.1 405B", 2024, 3.8e25, "Large Scale"),
-    ("Grok-3", 2025, 3.0e26, "Large Scale"),
+    ("Grok-3", 2025, 3.5e26, "Large Scale"),
 )
 
 
@@ -83,6 +95,60 @@ class ComputeTrend:
         for (m, y, f, e) in _COMPUTE_TREND_ROWS
     )
     list = entries  # parity with the Registry `.list` convention
+
+
+# ---------------------------------------------------------------------------
+# Algorithmic-efficiency series for @fig-algo-efficiency (added 2026-10-12).
+# Training compute each ImageNet architecture needed to reach AlexNet-level
+# accuracy (79.1% top-5), measured by Hernandez and Brown with fixed hardware
+# held out. The efficiency factor of a model is AlexNet's compute divided by
+# its own; the book computes that ratio, so only the measured compute lives here.
+# Years are first-publication dates (fractional, for plotting order).
+# ---------------------------------------------------------------------------
+_ALGO_EFFICIENCY_PROVENANCE = Provenance(
+    kind=ProvenanceKind.LITERATURE,
+    ref=(
+        "Hernandez and Brown (2020), Measuring the Algorithmic Efficiency of "
+        "Neural Networks, Appendix B, Table 3 (teraflop/s-days to AlexNet-level accuracy)"
+    ),
+    url="https://arxiv.org/abs/2005.04305",
+    verified="2026-10-12",
+)
+
+# (model, publication year, teraflop/s-days to reach AlexNet-level accuracy)
+_ALGO_EFFICIENCY_ROWS = (
+    ("AlexNet", 2012.5, 266.1),
+    ("VGG-11", 2014.7, 367.7),
+    ("GoogLeNet", 2014.75, 61.4),
+    ("ResNet-18", 2015.9, 97.9),
+    ("DenseNet-121", 2016.7, 82.9),
+    ("MobileNet-v1", 2017.3, 24.0),
+    ("ShuffleNet-v1", 2017.5, 12.9),
+    ("MobileNet-v2", 2018.1, 20.2),
+    ("ShuffleNet-v2", 2018.5, 10.8),
+    ("EfficientNet-B0", 2019.4, 6.0),
+)
+
+
+class AlgorithmicEfficiency:
+    """Training compute to AlexNet-level ImageNet accuracy, by architecture.
+
+    Source: see ``provenance``. Consumed by @fig-algo-efficiency and the
+    efficiency-versus-scale prose in the introduction. Each entry is a dict
+    ``{"model", "year", "tfs_days"}``; ``baseline_model`` names the reference.
+    """
+
+    provenance = _ALGO_EFFICIENCY_PROVENANCE
+    baseline_model = "AlexNet"
+    entries = tuple(
+        {"model": m, "year": y, "tfs_days": c} for (m, y, c) in _ALGO_EFFICIENCY_ROWS
+    )
+
+    @classmethod
+    def factor(cls, model):
+        """AlexNet compute divided by ``model``'s compute (higher is more efficient)."""
+        by_model = {e["model"]: e["tfs_days"] for e in cls.entries}
+        return by_model[cls.baseline_model] / by_model[model]
 
 
 # ---------------------------------------------------------------------------
@@ -136,9 +202,9 @@ class EdgeInferenceBenchmarks:
 # ---------------------------------------------------------------------------
 _KAPLAN_SCALING_PROVENANCE = Provenance(
     kind=ProvenanceKind.LITERATURE,
-    ref="Kaplan et al. (2020), Scaling Laws for Neural Language Models",
+    ref="Kaplan et al. (2020), Scaling Laws for Neural Language Models (Figure 1; Tables 2, 3, 5, 6)",
     url="https://arxiv.org/abs/2001.08361",
-    verified="2026-06-13",
+    verified="2026-10-15",
 )
 
 # (axis, x_c, alpha, x_min, x_max)  -- L = (X / x_c)^(-alpha) on [x_min, x_max]
@@ -164,6 +230,53 @@ class KaplanScalingLaws:
     )
     list = entries  # parity with the Registry `.list` convention
 
+    # -- Added 2026-10-15: the joint fits and the compute-efficient frontier, so
+    # learning-curve and allocation figures regenerate from the published laws.
+    # Values verified against arXiv:2001.08361v1. ``entries`` above keep the
+    # constants printed on Figure 1 (C_min scale 2.3e8 PF-days); Table 5 states
+    # the same law's scale as 3.1e8 PF-days (``single_variable_fits`` below).
+
+    # Table 5 (Appendix A): single-variable power laws L = (X_c / X)^alpha.
+    # Units: params (non-embedding), tokens, PF-days, tokens, steps.
+    single_variable_fits = {
+        "params": {"alpha": 0.076, "scale": 8.8e13},
+        "data": {"alpha": 0.095, "scale": 5.4e13},
+        "compute_naive": {"alpha": 0.057, "scale": 1.6e7},
+        "compute_min": {"alpha": 0.050, "scale": 3.1e8},
+        "critical_batch": {"alpha": 0.21, "scale": 2.1e8},
+        "steps": {"alpha": 0.76, "scale": 2.1e3},
+    }
+
+    # Table 2 (Section 4.2): L(N, D) = [(N_c/N)^(alpha_N/alpha_D) + D_c/D]^alpha_D,
+    # Eq. 1.5, fit with early stopping. N in non-embedding params, D in tokens.
+    loss_vs_params_and_data = {"alpha_n": 0.076, "alpha_d": 0.103, "n_c": 6.4e13, "d_c": 1.8e13}
+
+    # Table 3 (Section 5.2): L(N, S_min) = (N_c/N)^alpha_N + (S_c/S_min)^alpha_S,
+    # Eq. 1.6 / 5.6, infinite-data learning curves. S_min = S / (1 + B_crit(L)/B)
+    # (Eq. 5.4), with B_crit(L) = B_star / L^(1/alpha_B) (Eq. 5.3, Table 5 values).
+    loss_vs_params_and_steps = {"alpha_n": 0.077, "alpha_s": 0.76, "n_c": 6.5e13, "s_c": 2.1e3}
+
+    # Table 6 (Appendix A): compute-efficient frontier X = X_e * C_min^p,
+    # C_min in PF-days. Units: params, tokens, steps, tokens.
+    compute_efficient_frontier = {
+        "params": {"p": 0.73, "scale": 1.3e9},
+        "batch_tokens": {"p": 0.24, "scale": 2.0e6},
+        "steps_min": {"p": 0.03, "scale": 5.4e3},
+        "tokens": {"p": 0.27, "scale": 2e10},
+    }
+
+    # Section 2.2: default run, 2.5e5 steps of 512 sequences x 1024 tokens
+    # (B = 2^19 tokens). Compute is C = 6NBS (Eq. 5.5; the 6 is
+    # Literature.Chinchilla.ComputeConstant); a PF-day is 1e15 FLOP/s for one
+    # day (Section 1.2), so build it with pint units rather than a constant here.
+    default_steps = 2.5e5
+    default_batch_sequences = 512
+    default_context_tokens = 1024
+
+
+from .series import Series  # noqa: E402  (dataset series behind trend figures)
+from . import series as _series
+
 
 class Literature(Registry):
     """Registry namespace for Literature."""
@@ -179,6 +292,29 @@ class Literature(Registry):
     TrainingRuns = TrainingRuns
     FleetOperations = FleetOperations
     DatacenterElectricity = DatacenterElectricity
+    AcceleratorLifecycle = AcceleratorLifecycle
     ComputeTrend = ComputeTrend
+    AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks
     KaplanScalingLaws = KaplanScalingLaws
+    Series = Series
+    AgentTimeHorizon = _series.AgentTimeHorizon
+    LowestPriceAtCapability = _series.LowestPriceAtCapability
+    TerminalBenchHarness = _series.TerminalBenchHarness
+    LongContextComprehension = _series.LongContextComprehension
+    SweBenchVerifiedRuns = _series.SweBenchVerifiedRuns
+    CybenchSolveRate = _series.CybenchSolveRate
+    OSWorldStepBudget = _series.OSWorldStepBudget
+    FrontierSweTrials = _series.FrontierSweTrials
+    SweBenchTrajectories = _series.SweBenchTrajectories
+    RepeatedSamplingCoverage = _series.RepeatedSamplingCoverage
+    RepeatedSamplingMajority = _series.RepeatedSamplingMajority
+    InjectionDefenseResults = _series.InjectionDefenseResults
+    ModelsByDomain = _series.ModelsByDomain
+    OpenXEmbodimentComposition = _series.OpenXEmbodimentComposition
+    LeRobotHubMonthly = _series.LeRobotHubMonthly
+    LeRobotEpisodeHistogram = _series.LeRobotEpisodeHistogram
+    EdgeInferenceOrin = _series.EdgeInferenceOrin
+    KittiOdometry = _series.KittiOdometry
+    CaliforniaDisengagements = _series.CaliforniaDisengagements
+    WaymoSafetyImpact = _series.WaymoSafetyImpact

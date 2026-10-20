@@ -164,6 +164,13 @@ EDGE_ADAPTATION_TIER_PROFILE = _est(
 )
 
 # --- Hardware technology-class facts (Hardware.Tech) ---
+OCONNOR_FGDRAM_2017 = _lit(
+    "prov:oconnor-fgdram-2017",
+    "O'Connor et al. (2017), Fine-Grained DRAM: Energy-Efficient DRAM for Extreme Bandwidth Systems, MICRO-50 (Section 1, Figure 1b)",
+    url="https://research.nvidia.com/publication/2017-10_fine-grained-dram-energy-efficient-dram-extreme-bandwidth-systems",
+    verified="2026-10-15",
+    notes="'The energy to access a bit in HBM2 is approximately 3.97 pJ/bit' (activation + on-die data movement + I/O).",
+)
 HOROWITZ_ENERGY = _lit(
     "prov:horowitz-2014",
     "Horowitz (2014), \"Computing's Energy Problem (and what we can do about it)\", ISSCC — 45 nm per-operation/per-byte energies",
@@ -950,13 +957,18 @@ MLPERF_TINY_KWS = _lit(
     notes="Parameter and FLOP counts aligned to TinyMLPerf KWS reference model scale.",
 )
 
-MLPERF_TRAINING_V30_RESNET50_A100 = Provenance(
-    id="prov:mlperf-training-v30-resnet50-a100",
+NVIDIA_DLE_RESNET50_A100_TRAINING = Provenance(
+    id="prov:nvidia-dle-resnet50-a100-training",
     kind=ProvenanceKind.INDUSTRY_REPORT,
-    ref="MLPerf Training v3.0 ResNet-50 results, A100 class systems",
-    url="https://mlcommons.org/benchmarks/training/",
-    verified="2026-05-31",
-    notes="Used as a broad single-accelerator throughput sanity anchor for ResNet-50/A100 teaching examples.",
+    ref="NVIDIA DeepLearningExamples, ResNet-50 v1.5 training performance on DGX A100 (8x A100 80GB), mixed precision",
+    url="https://github.com/NVIDIA/DeepLearningExamples/tree/master/MxNet/Classification/RN50v1.5",
+    verified="2026-10-13",
+    notes=(
+        "Measured per-GPU training throughput: MXNet (mxnet-22.10 container) 3,411 img/s on 1 GPU and "
+        "26,674 img/s on 8 (3,334 per GPU); PyTorch 2,470 and 16,621 (2,078 per GPU); TensorFlow (A100 "
+        "40GB) 2,375 and 17,400 (2,175 per GPU). 3,200 img/s is the well-tuned anchor, just below the "
+        "fastest framework's 8-GPU rate. Replaces an unverified 'MLPerf Training v3.0' attribution."
+    ),
 )
 
 MLPERF_TRAINING_V31_RESNET50_H100 = Provenance(
@@ -966,6 +978,15 @@ MLPERF_TRAINING_V31_RESNET50_H100 = Provenance(
     url="https://mlcommons.org/benchmarks/training/",
     verified="2026-05-31",
     notes="Used as a broad single-accelerator throughput sanity anchor for ResNet-50/H100 teaching examples.",
+)
+
+MLPERF_INFERENCE_V50_RESNET50_H100 = Provenance(
+    id="prov:mlperf-inference-v50-resnet50-h100",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="MLPerf Inference v5.0 Datacenter, closed division, ResNet-50: Cisco UCS C885A M8 (8x H100-SXM-80GB, TensorRT, INT8), result 5.0-0005; Offline 715,761 samples/s, Server 652,002 samples/s at p99 10.86 ms under a 15 ms bound",
+    url="https://github.com/mlcommons/inference_results_v5.0/tree/main/closed/Cisco/results/C885A_H100_SXMx8_TRT/resnet50",
+    verified="2026-10-12",
+    notes="Per-accelerator figures divide the eight-GPU system result by eight, as MLCommons and NVIDIA do; MLPerf itself reports system throughput.",
 )
 
 NVIDIA_NIM_LLAMA3_8B_H100 = Provenance(
@@ -1466,6 +1487,21 @@ FABRIC_LATENCY_ASSUMPTIONS = _conv(
     notes="Order-of-magnitude μs values for napkin math; not vendor QoS guarantees.",
 )
 
+EFFECTIVE_COLLECTIVE_ALPHA_RANGES = _est(
+    "prov:effective-collective-alpha-ranges",
+    "Effective per-message collective-launch latency (alpha) ranges by interconnect: NVLink 4.0, "
+    "PCIe Gen5, InfiniBand NDR and HDR, 100G RoCE",
+    notes=(
+        "Teaching assumption, not a vendor figure: alpha here is the EFFECTIVE launch latency of one "
+        "collective message, communication-library software stack included, so it sits above the wire "
+        "latencies in Tech.Interconnect and Fabrics. Ranges: NVLink 1-2 us, PCIe Gen5 2-5 us, IB NDR "
+        "1-3 us, IB HDR 2-5 us, RoCE 100G 5-10 us. They bracket the single-value anchors AlphaNdr "
+        "(1.5 us) and AlphaRoce (5 us) from prov:fabric-latency-assumptions. Consolidated 2026-10-15 "
+        "from three identical hand-typed copies in book cells into this one source."
+    ),
+    verified="2026-10-15",
+)
+
 SWITCH_OPTICS_REFERENCE = _conv(
     "prov:switch-optics-reference",
     "Datacenter switch-ASIC capacity (51.2T/102.4T) and 400G optics power (pluggable/CPO) reference figures",
@@ -1591,6 +1627,18 @@ MODEL_LOADING_SCENARIO_ASSUMPTIONS = _est(
         "values are teaching-scale assumptions and should be calibrated from fleet "
         "measurements for production sizing."
     ),
+)
+
+REPLICA_COLD_START_SCENARIO = _est(
+    "prov:replica-cold-start-scenario",
+    "Reference cold start of a newly placed LLM serving replica",
+    notes=(
+        "Documented teaching assumption: 60 seconds to acquire and boot an instance, the weight "
+        "artifact fetched from object storage at an effective 0.5 GB/s, and 60 seconds of device "
+        "loading and warmup. Calibrate all three from fleet measurements for production sizing; "
+        "cached artifacts or overlapped phases shorten the path, shared storage lengthens it."
+    ),
+    verified="2026-10-15",
 )
 
 LLM_SERVING_PRECISION_DIVIDEND_PROFILE = _est(
@@ -2048,13 +2096,19 @@ LBNL_US_DATACENTER_ENERGY_2024 = _report(
     "prov:lbnl-us-datacenter-energy-2024",
     "Shehabi et al. (2024), 2024 United States Data Center Energy Usage Report (LBNL)",
     "https://eta.lbl.gov/publications/2024-lbnl-data-center-energy-usage-report",
-    notes="US data centers: ~58 TWh (2014), ~176 TWh (2023), 325-580 TWh projected for 2028.",
+    notes="US data centers: ~58 TWh (2014), ~176 TWh (2023, 4.4% of US electricity), 325-580 TWh projected for 2028 (6.7-12%). LBNL-2001637, doi:10.71468/P1WC7Q.",
+)
+LBNL_US_DATACENTER_ENERGY_2025 = _report(
+    "prov:lbnl-us-datacenter-energy-2025",
+    "Smith et al. (2026), United States Data Center Energy Usage Report: 2025 Update (LBNL)",
+    "https://doi.org/10.71468/P1RP4F",
+    notes="US data centers: 192 TWh in 2024 (4.7% of US electricity); 2030 Reference Case 649 TWh (11.8%), Compounded Uncertainty range 521-843 TWh (9.5-15.3%). Revises 2023-2024 slightly below the 2024 Report; prints no pre-2024 values. LBNL-2001758, OSTI 3374245.",
 )
 IEA_ENERGY_AND_AI_2025 = _report(
     "prov:iea-energy-and-ai-2025",
     "IEA (2025), Energy and AI",
     "https://www.iea.org/reports/energy-and-ai",
-    notes="Global data-center electricity projected to ~945 TWh by 2030, just under 3% of global electricity.",
+    notes="Global data-center electricity ~415 TWh in 2024 (~1.5%), projected ~945 TWh by 2030 (just under 3%); emissions from data-center electricity 180 Mt today, 300 Mt by 2035 (Base Case), below 1.5% of energy-sector emissions.",
 )
 
 # --- Hardware additions ---
@@ -2098,6 +2152,15 @@ NVIDIA_HOPPER_HBM_STACKS = _ds(
     "https://developer.nvidia.com/blog/nvidia-hopper-architecture-in-depth/",
     verified=_V,
     notes="H100 SXM5: five active HBM3 stacks (six sites) for 80 GB; B200: eight HBM3e stacks for 192 GB.",
+)
+NVIDIA_BLACKWELL_NV_HBI = _ds(
+    "prov:nvidia-blackwell-nv-hbi",
+    "NVIDIA Blackwell Architecture (technology overview page)",
+    "https://www.nvidia.com/en-us/data-center/technologies/blackwell-architecture/",
+    verified="2026-10-15",
+    notes=("Quoted: two reticle-limited dies 'connected by a 10 terabytes per second (TB/s) "
+           "chip-to-chip interconnect in a unified single GPU' (NV-HBI). NVIDIA does not say "
+           "whether 10 TB/s is per direction or a bidirectional total."),
 )
 DGX_H100_USER_GUIDE_PHYSICAL = _ds(
     "prov:nvidia-dgx-h100-user-guide-physical",
@@ -2296,4 +2359,83 @@ SCALING_EFFICIENCY_REFERENCE_JOB_MODELED = Provenance(
         "is 0.90 from 256 to 1,024 and 0.93 from 3,072 to 12,288 GPUs."
     ),
     verified="2026-09-29",
+)
+
+# --- Accelerator life cycle (2026-10-13) ---
+SCHNEIDER_TPU_LIFECYCLE_2025 = _lit(
+    "prov:schneider-tpu-lifecycle-2025",
+    "Schneider et al. (2025), Life-Cycle Emissions of AI Hardware: A Cradle-to-Grave Approach and Generational Trends",
+    url="https://arxiv.org/abs/2502.01671",
+    verified="2026-10-13",
+    notes=(
+        "First published AI-accelerator LCA (five TPU generations, extraction through disposal). "
+        "Abstract: compute carbon intensity (CCI) improves 3x from TPU v4i to TPU v6e."
+    ),
+)
+GOOGLE_SEARCH_VOLUME_2025 = _lit(
+    "prov:google-search-volume-2025",
+    "Srinivasan (2025), AI, personalization and the future of shopping (Google, The Keyword, 3 March 2025)",
+    url="https://blog.google/products/ads-commerce/ai-personalization-and-the-future-of-shopping/",
+    verified="2026-10-13",
+    notes="'We already see more than 5 trillion searches on Google annually.' Daily figure = 5e12 / 365, a lower bound.",
+)
+
+# --- Fleet scheduling scenarios (2026-10-15) ---
+# Shared scenario anchors for the orchestration and performance-engineering
+# examples, registered so every reader computes from one source instead of
+# copying the values by hand.
+FORCED_PREEMPTION_SCENARIO = _est(
+    "prov:forced-preemption-scenario",
+    "Reference forced-preemption scenario for a low-priority training job on a shared fleet",
+    notes=(
+        "Documented teaching assumption: a forced (non-graceful) preemption discards 15 minutes of "
+        "work since the last durable checkpoint (half of a 30-minute checkpoint interval), and a "
+        "low-priority job with no preemption budget is struck 12 times a day. Relaunch, checkpoint "
+        "reload, and warmup are not part of this record: they come from "
+        "Systems.Reliability.Recovery.cold_restart_time(), the same cold-restart steps as a failure "
+        "recovery, without failure detection because the scheduler initiates the stop."
+    ),
+    verified="2026-10-15",
+)
+SPOT_INTERRUPTION_SCENARIO = _est(
+    "prov:spot-interruption-scenario",
+    "Reference spot-capacity interruption scenario for a large training job on slow storage",
+    notes=(
+        "Documented teaching assumption: each spot reclamation costs a 15-minute graceful checkpoint "
+        "to slow (object-class) storage plus 30 minutes to reacquire capacity, restart, and reload, "
+        "after every 2 hours of retained progress. Slower than the cluster recovery budget "
+        "(Systems.Reliability.Recovery) because the capacity is re-provisioned and the checkpoint "
+        "path is not the cluster's parallel file system."
+    ),
+    verified="2026-10-15",
+)
+ELASTIC_RESIZE_SCENARIO = _est(
+    "prov:elastic-resize-scenario",
+    "Reference elastic-resize decision scenario (128/256/512 GPUs over a 24-hour window)",
+    notes=(
+        "Documented teaching assumption: relative throughput 1.0, 1.8, and 3.2 epochs/hour at 128, "
+        "256, and 512 GPUs (90 and 80 percent scaling efficiency against 128); the full 512-GPU "
+        "allocation frees after a 4-hour queue wait; one resize costs 10 minutes to checkpoint, "
+        "reshard, and restart; 24-hour comparison window."
+    ),
+    verified="2026-10-15",
+)
+UTILIZATION_TIERS_SCENARIO = _est(
+    "prov:utilization-tiers-scenario",
+    "Reference allocated/active/productive capacity tiers for one team's allocation",
+    notes=(
+        "Documented teaching assumption: 500 GPUs allocated, 350 active-device equivalents, and 280 "
+        "device-equivalents of useful work at the job's fault-free step rate (time averages)."
+    ),
+    verified="2026-10-15",
+)
+FLEET_UTILIZATION_SNAPSHOT_SCENARIO = _est(
+    "prov:fleet-utilization-snapshot-scenario",
+    "Reference shared-fleet utilization snapshot (assigned, incomplete-gang, input-wait shares)",
+    notes=(
+        "Documented teaching assumption: 80 percent of in-service capacity assigned to jobs, of which "
+        "15 percent of the fleet sits in gangs still waiting for members and another 5 percent sits "
+        "in complete allocations waiting for input."
+    ),
+    verified="2026-10-15",
 )

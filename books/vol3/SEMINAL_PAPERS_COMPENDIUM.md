@@ -321,7 +321,7 @@ Volume III Seminal Papers Map
 - **The Paper / Book:** Jim Gray and Andreas Reuter. *Transaction Processing: Concepts and Techniques*. Morgan Kaufmann, 1992.
   `BibTeX: gray1992transaction`
 - **The Key Insight:** Defined ACID semantics (Atomicity, Consistency, Isolation, Durability) and established **Write-Ahead Logging (WAL)**: never write an updated data page to non-volatile disk until the log record describing the update is safely flushed to persistent storage.
-- **Why It's Important:** Jim Gray received the Turing Award for this work; it underlies every relational database, transactional filesystem, and distributed ledger in existence.
+- **Why It's Important:** Jim Gray received the Turing Award for this work; it underlies every relational database, transactional filesystem, and distributed database in existence.
 - **Why It Relates to This Book (Chapter 10, Section 10.2):** Trajectory event sourcing in agent runtimes must adhere to WAL discipline: an agent cannot dispatch a side-effecting action to a peripheral before the event record is appended to the durable trajectory log.
 
 ### 33. The Design and Implementation of a Log-Structured File System

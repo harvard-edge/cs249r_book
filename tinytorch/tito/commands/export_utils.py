@@ -222,9 +222,11 @@ def convert_py_to_notebook(
     console.print("[dim]🔄 Overwriting existing notebook (Python file is source of truth)[/dim]" if notebook_file.exists() else "[dim]✨ Creating new notebook from Python file[/dim]")
 
     try:
+        import sys
         from ..core.virtual_env_manager import get_venv_bin_dir
         jupytext_path = "jupytext"
-        venv_jupytext = get_venv_bin_dir(venv_path) / "jupytext"
+        venv_bin_dir = get_venv_bin_dir(venv_path)
+        venv_jupytext = venv_bin_dir / ("jupytext.exe" if sys.platform == "win32" else "jupytext")
 
         if venv_jupytext.exists():
             test_result = subprocess.run([str(venv_jupytext), "--version"], capture_output=True, text=True, encoding="utf-8", errors="replace")
@@ -281,7 +283,11 @@ def convert_py_to_notebook(
         return True
 
     except FileNotFoundError:
-        console.print("[red]❌ Jupytext not found. Install with: pip install jupytext[/red]")
+        console.print(
+            f"[red]❌ Jupytext not found at '{jupytext_path}' and not on PATH.[/red]\n"
+            f"[dim]It may still be installed inside your venv ({venv_bin_dir}) — "
+            f"activate your virtual environment, or run: tito setup[/dim]"
+        )
         return False
     except Exception as e:
         console.print(f"[red]❌ Conversion error: {e}[/red]")

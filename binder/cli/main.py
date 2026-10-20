@@ -171,7 +171,7 @@ class MLSysBookCLI:
         quality_table.add_row(_cmd("render figures --vol1|--vol2"), "Render figure PDF & contact sheets", _cmd("./binder/binder render figures --vol2"))
         quality_table.add_row(_cmd("build figures --vol1|--vol2"), "Alias for render figures", _cmd("./binder/binder build figures --vol2"))
         quality_table.add_row(_cmd("layout --vol1|--vol2"), "Build/reuse PDF and emit auto-layout plan", _cmd("./binder/binder layout --vol1 --no-build"))
-        quality_table.add_row(_cmd("layout chapter <name> --volN --aux <file>"), "Mapped isolated PDF component", _cmd("./binder/binder layout chapter ml_workflow --vol1 --aux full.aux"))
+        quality_table.add_row(_cmd("layout chapter <name> --volN --aux <file>"), "Mapped isolated PDF component", _cmd("./binder/binder layout chapter ml_lifecycle --vol1 --aux full.aux"))
         quality_table.add_row(_cmd("layout check <pdf> [--threshold]"), "Flag PDF pages with excessive bottom whitespace", _cmd("./binder/binder layout check book.pdf"))
         quality_table.add_row(_cmd("layout tables --vol1|--vol2"), "Render table-only PDF audit/contact sheets", _cmd("./binder/binder layout tables --vol2"))
         quality_table.add_row(_cmd("layout figures --vol1|--vol2"), "Render figure-only PDF audit/contact sheets", _cmd("./binder/binder layout figures --vol2"))

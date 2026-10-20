@@ -67,7 +67,7 @@ Every prediction is structured (radio buttons or numeric entry, never free text)
     </tr>
     <tr>
       <td>03</td>
-      <td><code>lab_03_ml_workflow</code></td>
+      <td><code>lab_03_ml_lifecycle</code></td>
       <td>The Silent Degradation Loop</td>
     </tr>
     <tr>
@@ -171,13 +171,13 @@ Every prediction is structured (radio buttons or numeric entry, never free text)
     </tr>
     <tr>
       <td>05</td>
-      <td><code>lab_05_dist_train</code></td>
-      <td>The Parallelism Puzzle</td>
+      <td><code>lab_05_collective_communication</code></td>
+      <td>Collective Communication</td>
     </tr>
     <tr>
       <td>06</td>
-      <td><code>lab_06_collective_communication</code></td>
-      <td>Collective Communication</td>
+      <td><code>lab_06_dist_train</code></td>
+      <td>The Parallelism Puzzle</td>
     </tr>
     <tr>
       <td>07</td>
