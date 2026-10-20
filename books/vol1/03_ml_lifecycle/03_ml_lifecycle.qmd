@@ -720,6 +720,8 @@ Iteration velocity\index{Machine learning lifecycle!iteration cycles} governs pr
 # │ How: Model accuracy growth as a function of iteration count over time.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
+from mlsysim.core.units import hour, week
 
 # ┌── LEGO ───────────────────────────────────────────────
 class IterationTax:
@@ -730,31 +732,36 @@ class IterationTax:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    weeks_total = 26
-    hours_per_week = 168
+    # Scenarios.SlowVersusFastIteration states every assumption once (window,
+    # cycle times, gains per run, the 100 effective experiments, the ceiling).
+    scenario = Scenarios.SlowVersusFastIteration
+    weeks_total = scenario.window.to(week).magnitude
+    hours_per_week = (1 * week).to(hour).magnitude
 
     # Large Model (Starts better, iterates slow)
-    large_start_acc = 95.0
-    large_gain_per_iter = 0.15  # Reduced from 0.5: SOTA gains are hard!
-    large_cycle_time_hours = 168  # 1 week
+    large_start_acc = scenario.slow_start
+    large_gain_per_iter = scenario.slow_gain
+    large_cycle_time_hours = scenario.slow_cycle.to(hour).magnitude
 
     # Small Model (Starts worse, iterates fast)
-    small_start_acc = 90.0
-    small_gain_per_iter = 0.1
-    small_cycle_time_hours = 1  # 1 hour
-    small_effective_iters = 100  # scenario cap on useful experiments
+    small_start_acc = scenario.fast_start
+    small_gain_per_iter = scenario.fast_gain
+    small_cycle_time_hours = scenario.fast_cycle.to(hour).magnitude
+    small_effective_iters = scenario.fast_effective_runs  # scenario cap on useful experiments
+    acc_ceiling = scenario.ceiling
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Large model: 1 iter/week -> 26 iters
-    large_iters = weeks_total * (hours_per_week / large_cycle_time_hours)
-    large_final_acc = min(large_start_acc + (large_iters * large_gain_per_iter), 99.0)
+    large_iters = scenario.slow_runs
+    large_final_acc = scenario.slow_final
 
     # Small model: Potential thousands, but capped by human ability to generate ideas
     # Step 2: We allow small model to reach same ceiling
-    small_uncapped_acc = small_start_acc + (small_effective_iters * small_gain_per_iter)
-    small_final_acc = min(small_uncapped_acc, 99.0)
+    small_total_capacity = scenario.fast_possible_runs
+    small_uncapped_acc = scenario.fast_uncapped
+    small_final_acc = scenario.fast_final
     # Step 3: What velocity actually buys: hypotheses tested
-    ideas_ratio = small_effective_iters / large_iters
+    ideas_ratio = scenario.ideas_ratio
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     # Invariant: Small model must CATCH UP or BEAT Large model
@@ -782,8 +789,8 @@ class IterationTax:
     small_final_str = fmt_percent(small_final_acc / 100, precision=0, commas=False, style='prose')
 
     # Logic check helper for text
-    small_total_capacity_str = fmt(weeks_total * hours_per_week, precision=0, commas=True)
-    acc_ceiling_pct_str = fmt_percent(99 / 100, precision=0, commas=False, style='prose')
+    small_total_capacity_str = fmt(small_total_capacity, precision=0, commas=True)
+    acc_ceiling_pct_str = fmt_percent(acc_ceiling / 100, precision=0, commas=False, style='prose')
     ideas_ratio_mult_str = fmt_multiple(ideas_ratio, precision=1, commas=False)
 ```
 
@@ -913,6 +920,7 @@ Enforcing explicit contracts turns the conceptual feedback loop in @fig-lifecycl
 # │ How: Sum supplied task durations, assuming resources are available.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.core.units import MB, day
 from mlsysim.fmt import check, fmt_memory, fmt_time
 
@@ -920,14 +928,15 @@ class ConstraintPropagation:
     """Hypothetical rework schedule; durations are assumptions, not measurements."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    stage5_memory_q = 500 * MB
-    preparation_q = 1 * day
-    training_q = 2 * day
-    validation_q = 2 * day
-    packaging_q = 1 * day
+    scenario = Scenarios.RetinopathyScreenerLateMemoryLimit
+    stage5_memory_q = scenario.memory_budget
+    preparation_q = scenario.repair_tasks["Revise preparation"]
+    training_q = scenario.repair_tasks["Train new weights"]
+    validation_q = scenario.repair_tasks["Repeat validation"]
+    packaging_q = scenario.repair_tasks["Package the release"]
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    elapsed_q = preparation_q + training_q + validation_q + packaging_q
+    elapsed_q = scenario.repair_elapsed
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(elapsed_q == 6 * day, "Sequential repair should occupy six days.")
@@ -1028,7 +1037,7 @@ Each retinal photograph spans several megabytes, and clinical protocols capture 
 # │ How: Calculate total upload duration vs. available clinic hours.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import ReferenceStats
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_bandwidth, fmt_multiple, fmt_percent, fmt_rate, fmt_time, fmt_memory
 from mlsysim.core.units import MB, GB, KB, hour, megabit, second
 
@@ -1040,27 +1049,28 @@ class BandwidthCompute:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    patients_day = 100  # scenario assumption: a busy rural screening clinic
-    photos_per_patient = 4  # screening protocol: two fields per eye
-    mb_per_photo_q = ReferenceStats.ClinicalImaging.RetinalPhotoSize
-    clinic_hours_q = 8.0 * hour  # scenario assumption
-    uplink_q = 2.0 * (megabit / second)  # scenario assumption
-    summary_per_patient_q = 10.0 * KB  # scenario assumption
+    scenario = Scenarios.RuralClinicRetinalUpload
+    patients_day = scenario.cases_per_day
+    photos_per_patient = scenario.files_per_case
+    mb_per_photo_q = scenario.file_size
+    clinic_hours_q = scenario.window
+    uplink_q = scenario.uplink
+    summary_per_patient_q = scenario.summary_size
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Data Volume
-    daily_q = patients_day * photos_per_patient * mb_per_photo_q
+    daily_q = scenario.daily_volume
 
     # Step 2: Transmission Time
     uplink_mbs_q = uplink_q.to(MB / second)
-    upload_time_q = (daily_q / uplink_mbs_q).to(second)
+    upload_time_q = scenario.upload_time
 
     # Step 3: Saturation
-    saturation_ratio = (upload_time_q / clinic_hours_q).to("").magnitude
+    saturation_ratio = scenario.window_share
 
     # Step 4: Edge Reduction
-    summary_total_q = patients_day * summary_per_patient_q
-    reduction_factor = (daily_q / summary_total_q).to("").magnitude
+    summary_total_q = scenario.summary_volume
+    reduction_factor = scenario.reduction
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(
@@ -1417,7 +1427,7 @@ Committing that serving path across a 500-clinic network turns per-device memory
 # │ How: Model CapEx and annual OpEx for 500 clinics.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import ReferenceStats
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_int, fmt_rate, fmt_time, fmt_usd, fmt_memory
 from mlsysim.core.units import MB, USD, millisecond, year, second, megabit
 
@@ -1429,43 +1439,45 @@ class DeploymentEconomics:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    n_clinics = 500
-    patients_day = 50
-    billable_images_per_patient = 1
-    days_year = DAYS_PER_YEAR  # scenario assumes clinics operate every day
+    # Scenarios.RetinopathyScreeningCloudVersusEdge states every assumption once.
+    scenario = Scenarios.RetinopathyScreeningCloudVersusEdge
+    n_clinics = scenario.sites
+    patients_day = scenario.cases_per_site_day
+    billable_images_per_patient = scenario.images_per_case
+    days_year = scenario.days_per_year  # scenario assumes clinics operate every day
 
     # Cloud Costs
-    cloud_inf_cost_q = 0.01 * USD  # scenario assumption
-    cloud_network_cost_q = 45000 * (USD / year)  # assumed connectivity and network-operations allocation
-    cloud_latency_q = 200 * millisecond  # scenario assumption: remote processing after upload
-    image_size_q = ReferenceStats.ClinicalImaging.RetinalPhotoSize
-    uplink_q = 2.0 * (megabit / second)  # same clinic uplink as the bandwidth notebook
+    cloud_inf_cost_q = scenario.cloud_cost_per_image
+    cloud_network_cost_q = scenario.cloud_fixed_annual  # assumed connectivity and network-operations allocation
+    cloud_latency_q = scenario.cloud_latency  # remote processing after upload
+    image_size_q = scenario.image_size
+    uplink_q = scenario.uplink  # same clinic uplink as the bandwidth notebook
 
     # Edge Costs
-    edge_unit_cost_q = 500 * USD  # scenario assumption
-    edge_maint_cost_q = 25000 * (USD / year)  # scenario assumption
-    edge_inf_cost_q = 0.001 * USD  # scenario assumption, per image
-    edge_latency_q = 50 * millisecond  # scenario assumption
+    edge_unit_cost_q = scenario.edge_device_cost
+    edge_maint_cost_q = scenario.edge_maintenance_annual
+    edge_inf_cost_q = scenario.edge_cost_per_image  # per image
+    edge_latency_q = scenario.edge_latency
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    total_images_year = n_clinics * patients_day * billable_images_per_patient * days_year
+    total_images_year = scenario.annual_images
 
     # Step 2: Cloud TCO (OpEx only)
-    cloud_annual_inf_q = total_images_year * cloud_inf_cost_q / year
-    cloud_total_year_q = cloud_annual_inf_q + cloud_network_cost_q
+    cloud_annual_inf_q = scenario.cloud_inference_annual
+    cloud_total_year_q = scenario.cloud_annual
 
     # Step 3: Edge TCO
-    edge_capex_q = n_clinics * edge_unit_cost_q
-    edge_inference_annual_q = total_images_year * edge_inf_cost_q / year
-    edge_opex_year_q = edge_maint_cost_q + edge_inference_annual_q
-    edge_total_yr1_q = edge_capex_q + edge_opex_year_q * year
+    edge_capex_q = scenario.edge_capex
+    edge_inference_annual_q = scenario.edge_inference_annual
+    edge_opex_year_q = scenario.edge_annual
+    edge_total_yr1_q = scenario.edge_first_year
 
     # Step 4: Cloud response time is bounded below by uploading the image
-    cloud_upload_q = (image_size_q / uplink_q).to(second)
+    cloud_upload_q = scenario.cloud_upload_time
 
     # Step 5: Payback
-    annual_savings_q = cloud_total_year_q - edge_opex_year_q
-    payback_q = (edge_capex_q / annual_savings_q).to(year)
+    annual_savings_q = scenario.annual_savings
+    payback_q = scenario.payback
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(
@@ -1596,6 +1608,7 @@ Bridging that delay between immediate clinic traffic and slow ground-truth label
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, check
 from mlsysim.core.units import millisecond
 
@@ -1603,9 +1616,10 @@ class MonitoringThresholds:
     """Illustrative monitoring targets and alert thresholds for the DR screening scenario."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    # Scenario policy assumptions
-    sens_target = 90  # target sensitivity percent
-    spec_target = 80  # target specificity percent
+    # Release floors from the screener's requirements; alert policy is local
+    requirements = Scenarios.RetinopathyScreenerRequirements
+    sens_target = 100 * requirements.sensitivity_floor  # target sensitivity percent
+    spec_target = 100 * requirements.specificity_floor  # target specificity percent
     alert_margin_pp = 2
     latency_p95_target_q = 50 * millisecond  # scenario assumption
     latency_alert_multiplier = 2

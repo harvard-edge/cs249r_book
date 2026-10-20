@@ -22,7 +22,7 @@ from .performance import (
     calc_pipeline_bubble,
     calc_effective_flops,
 )
-from .economics import calc_monthly_egress_cost, calc_fleet_tco
+from .economics import calc_monthly_egress_cost, calc_fleet_tco, calc_payback_period
 from .memory import (
     model_memory,
     calc_activation_memory,
@@ -191,6 +191,7 @@ __all__ = [
     "calc_effective_flops",
     "calc_monthly_egress_cost",
     "calc_fleet_tco",
+    "calc_payback_period",
     "model_memory",
     "calc_activation_memory",
     "calc_checkpoint_size",

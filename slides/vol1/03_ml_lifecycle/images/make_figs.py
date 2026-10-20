@@ -1,30 +1,20 @@
 #!/usr/bin/env python3
 """Figures for Lecture 3 (ML Lifecycle).
 
-Every value is sourced from the rendered chapter (ML Lifecycle) unless noted:
-  - Six stages and their artifacts: Sec. 3.1.
-  - Day-153 timeline: Sec. 3.1.2 (days 1, 90, 120, 150, 151, 152, 153; 92 and
-    94 percent sensitivity; 4 GB model; about 500 MB reserved for the model).
-  - Model weights: torchvision parameter counts from a real run
-    (data/count_params.py), times 4 bytes, via calcs.py. Derived values for
-    every figure come from calcs.py.
-  - Repair schedule: Example 3.1 (1 + 2 + 2 + 1 days).
-  - CrowdFlower 2016 survey shares: chapter figure 4 (60, 19, 9, 5, 4, 3).
-  - Accuracy trap: 90 percent healthy population (Sec. 3.5.1, Sec. 3.8.1);
-    illustrative population of 100.
-  - Floors: sensitivity above 90, specificity above 80 percent (Sec. 3.5.1),
-    drawn over the measured ROC curve of Gulshan et al., JAMA 2016, Fig. 2A
-    (inset). The clinic point is illustrative.
-  - Cloud against edge: Napkin Math 3.3 ($136,250 per year; $250,000 plus
-    $34,125 per year; payback about 2.4 years).
-  - Monitoring cadences: Sec. 3.11.1 (minute, day, week, month, quarter).
+Every value comes from calcs.py, which reads MLSysIM: the retinopathy-screener
+scenarios (Scenarios.RetinopathyScreenerRequirements, ...LateMemoryLimit,
+AlwaysNormalScreener, FundusPhotoAt224, RetinopathyScreeningCloudVersusEdge,
+RetinopathyMonitoringCadences), Literature.Surveys (CrowdFlower 2016), and
+ReferenceStats.TorchvisionParameterCounts. Figure code holds only layout
+(coordinates, sizes, colors) and labels; the chapter sections each figure
+redraws are noted at the figure.
+  - Six stages and their artifacts: Sec. 3.1. Stage contracts: table 2;
+    audit case: Checkpoint 3.3 (Sec. 3.11).
+  - ROC: the floors and the illustrative clinic point drawn over the measured
+    curve of Gulshan et al., JAMA 2016, Fig. 2A (inset).
   - 224-pixel demonstration: fundus photo by Hao et al. (CC BY 4.0, Wikimedia
-    Commons), shrunk to the ImageNet default of 224 x 224 (Sec. 3.7.2).
-    Lesion widths measured on that photo (see shrink_demo).
-  - Stage contracts: chapter table 2; audit case: Checkpoint 3.3 (Sec. 3.11).
-  - Release gate: Sec. 3.8 (manifest), Sec. 3.8.1 (94 percent overall), the
-    Sec. 3.8 self-check (76 percent for cataract patients), Sec. 3.10.2
-    (lens-opacity augmentation).
+    Commons); the scenario records the photo's size and the measured lesion
+    widths, and shrink_demo checks the file against it.
 
 Run from this folder: python3 make_figs.py
 """
@@ -36,7 +26,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import calcs as K  # noqa: E402
+import calcs as K  # noqa: E402  (records every value; figures read them)
+from deckvals import val, num  # noqa: E402
 
 out = Path(__file__).parent
 C = sp.C
@@ -241,14 +232,14 @@ def prop(step):
     p += flow_arrows()
     p += return_arrow(label=False)
     # the limit appears at deployment
-    p += badge(450, 474, "500 MB limit found here", C["danger"], "white")
+    p += badge(450, 474, f"{val('budget_mb')} MB limit found here", C["danger"], "white")
     if step >= 2:
         # backward arrow inside the loop from 5 to 2 (the rework path)
         p.append(line(450, BOT - BH / 2 - 8, 450, TOP + BH / 2 + 12, C["danger"], 4.5,
                       "r", dash="9,6"))
         p.append(text(468, 268, "redo", 24, C["danger"], "bold", "start"))
     if step == 3:
-        p += badge(170, 26, "state it here, day 1", C["data"], "white")
+        p += badge(170, 26, f"state it here, day {val('day_request')}", C["data"], "white")
     save_svg(p, f"propagation_step{step}.svg")
 
 
@@ -274,7 +265,7 @@ def directions(step):
     xs = (138, 450, 762)
     # backward: a deployment limit reaches the training data (right to left)
     p.append(text(5, 32, "Backward", 26, C["danger"], "bold", "start"))
-    p += chain_box(xs[2], 120, "2 Mb/s uplink", "at the clinic", C["danger"], C["danger_l"], "stage 5")
+    p += chain_box(xs[2], 120, f"{val('up_uplink_mbit')} Mb/s uplink", "at the clinic", C["danger"], C["danger_l"], "stage 5")
     p += chain_box(xs[1], 120, "compress photos", "before upload", C["danger"], C["danger_l"])
     p += chain_box(xs[0], 120, "train on", "compressed photos", C["danger"], C["danger_l"], "stage 2")
     p.append(line(626, 120, 589, 120, C["danger"], 5, "r"))
@@ -296,14 +287,14 @@ directions(2)
 # -----------------------------------------------------------------------------
 # 3. The day-153 timeline (Sec. 3.1.2). Events are evenly spaced, not to scale.
 # -----------------------------------------------------------------------------
-EVENTS = [
-    (1, "Request:", "one sentence", "good"),
-    (90, "92%", "sensitivity", "good"),
-    (120, "94%", "after tuning", "good"),
-    (150, "Handed to", "deployment", "warn"),
-    (151, "Model", "needs 4 GB", "bad"),
-    (152, "Reserved:", "500 MB", "bad"),
-    (153, "Five months", "discarded", "bad"),
+EVENTS = [  # (day key, line 1, line 2, kind)
+    ("day_request", "Request:", "one sentence", "good"),
+    ("day_val_a", f"{val('val_a_pct')}%", "sensitivity", "good"),
+    ("day_val_b", f"{val('val_b_pct')}%", "after tuning", "good"),
+    ("day_handoff", "Handed to", "deployment", "warn"),
+    ("day_found", "Model", f"needs {val('model_gb')} GB", "bad"),
+    ("day_check", "Reserved:", f"{val('budget_mb')} MB", "bad"),
+    ("day_discard", f"{val('months_lost_word').capitalize()} months", "discarded", "bad"),
 ]
 
 
@@ -316,10 +307,10 @@ def timeline(step):
         if i >= show:
             continue
         col = {"good": C["data"], "warn": C["neutral"], "bad": C["danger"]}[kind]
-        big = day == 153
+        big = day == "day_discard"
         p.append(f'<circle cx="{x}" cy="85" r="{19 if big else 13}" fill="{col}" '
                  f'stroke="white" stroke-width="3"/>')
-        p.append(text(x, 45, f"Day {day}", 24, col, "bold"))
+        p.append(text(x, 45, f"Day {val(day)}", 24, col, "bold"))
         p.append(text(x, 140, a, 21, C["text"], "bold" if big else "normal"))
         p.append(text(x, 166, b, 21, C["text"], "bold" if big else "normal"))
     p.append(text(450, 207, "Events evenly spaced, not to scale", 16, C["neutral"]))
@@ -334,18 +325,17 @@ for s in (1, 2, 3):
 # 4. Data plots
 # -----------------------------------------------------------------------------
 # Model memory against the clinic reservation (Sec. 3.1.2, Sec. 3.4)
-# Weights of three torchvision models: parameter counts from a real run of
-# data/count_params.py (torchvision 0.28.0), times 4 bytes (FP32), in calcs.py.
-_pc = K.param_counts()
-_mb = {k: v * K.FP32_BYTES / 1e6 for k, v in _pc.items()}
+# Weights of three torchvision models: exact parameter counts of a torchvision
+# 0.28.0 run (ReferenceStats.TorchvisionParameterCounts) at FP32, via calcs.py.
+_mb = {k: K.m(n * K.mlsysim.BYTES_FP32, "MB") for k, n in K.TORCHVISION_RUN}
 sp.hbars(out / "memory_fit.svg", [
-    ("Model on day 151", K.MODEL_MB, "danger",
-     f"4 GB: {K.MODEL_MB / K.RESERVED_MB:.0f}× the reservation"),
-    ("Reserved for the model", K.RESERVED_MB, "neutral", "about 500 MB"),
-    ("VGG-16 weights", _mb["vgg16"], "neutral", f"{_mb['vgg16']:.0f} MB"),
-    ("ResNet-50 weights", _mb["resnet50"], "compute", f"{_mb['resnet50']:.0f} MB"),
+    (f"Model on day {val('day_found')}", K.m(K.LATE.model_memory, "MB"), "danger",
+     f"{val('model_gb')} GB: {val('overrun_x')}× the reservation"),
+    ("Reserved for the model", K.m(K.REQ.memory_budget, "MB"), "neutral", f"about {val('budget_mb')} MB"),
+    ("VGG-16 weights", _mb["vgg16"], "neutral", f"{val('mb_vgg16')} MB"),
+    ("ResNet-50 weights", _mb["resnet50"], "compute", f"{val('mb_resnet50')} MB"),
     ("MobileNetV2 weights", _mb["mobilenet_v2"], "compute",
-     f"{_mb['mobilenet_v2']:.0f} MB"),
+     f"{val('mb_mobilenet_v2')} MB"),
 ], "MB", size=(5.8, 2.15), xlabel="Memory (MB, log scale; weights in FP32)")
 
 
@@ -354,12 +344,12 @@ sp.hbars(out / "memory_fit.svg", [
 def time_sinks(step):
     rows = []
     for name, v in K.SURVEY:
-        ck = "data" if v in (60, 19) else ("compute" if "algorithms" in name
-                                            else "neutral")
+        ck = "data" if v in K.DATA_WORK else ("compute" if "algorithms" in name
+                                               else "neutral")
         if step == 1 and "algorithms" in name:
             rows.append((name, 0, ck, "?"))
         else:
-            rows.append((name, v, ck, f"{v}%"))
+            rows.append((name, v, ck, f"{v:.0f}%"))
     sp.hbars(out / f"time_sinks_step{step}.svg", rows, "%", log=False,
              size=(5.8, 2.9),
              xlabel="Share of respondents naming it their biggest time sink (%)")
@@ -371,24 +361,27 @@ time_sinks(2)
 
 # Repair schedule (Example 3.1): each task waits for the one before
 def gantt():
-    tasks = [("Revise preparation", 0, 1), ("Train new weights", 1, 2),
-             ("Repeat validation", 3, 2), ("Package the release", 5, 1)]
+    tasks, start = [], 0          # each task starts when the one before ends
+    for (name, d), key in zip(K.REPAIR, ("rep_prep", "rep_train", "rep_val", "rep_pack")):
+        tasks.append((name, start, d, key))
+        start += d
+    total = num("rep_total")
     fig, ax = sp.plt.subplots(figsize=(5.8, 2.3))
-    for i, (name, s, d) in enumerate(tasks):
+    for i, (name, s, d, key) in enumerate(tasks):
         y = len(tasks) - 1 - i
         ax.barh(y, d, left=s, color=C["danger"], height=0.6)
         ax.text(-0.15, y, name, ha="right", va="center", fontsize=13,
                 fontweight="bold", color=C["text"])
-        ax.text(s + d / 2, y, f"{d} d", ha="center", va="center", fontsize=12,
+        ax.text(s + d / 2, y, f"{val(key)} d", ha="center", va="center", fontsize=12,
                 fontweight="bold", color="white")
-    ax.annotate("", xy=(6, -0.75), xytext=(0, -0.75),
+    ax.annotate("", xy=(total, -0.75), xytext=(0, -0.75),
                 arrowprops=dict(arrowstyle="<->", color=C["text"], lw=1.5))
-    ax.text(3, -1.1, "6 days in sequence", ha="center", va="top", fontsize=13,
+    ax.text(total / 2, -1.1, f"{val('rep_total')} days in sequence", ha="center", va="top", fontsize=13,
             fontweight="bold", color=C["text"])
-    ax.set_xlim(0, 6.2)
+    ax.set_xlim(0, total + 0.2)
     ax.set_ylim(-1.6, len(tasks) - 0.4)
     ax.set_yticks([])
-    ax.set_xticks(range(0, 7))
+    ax.set_xticks(range(0, int(total) + 1))
     ax.set_xlabel("Days")
     ax.spines["left"].set_visible(False)
     ax.grid(axis="x", color=C["grid"], linewidth=0.6)
@@ -402,9 +395,9 @@ gantt()
 # Accuracy trap: 100 patients, 10 with disease, a model that says "normal"
 def patients(step):
     fig, ax = sp.plt.subplots(figsize=(5.8, 2.7))
-    for i in range(100):
-        r, c = divmod(i, 10)
-        sick = i >= 90
+    for i in range(K.TRAP.population):
+        r, c = divmod(i, 10)              # a 10-wide grid
+        sick = i >= K.TRAP.healthy
         if step == 1:
             col = C["danger"] if sick else "#BBBBBB"
         else:
@@ -416,16 +409,17 @@ def patients(step):
                     va="center", color="white", fontsize=12, fontweight="bold")
     x0 = 12.3
     if step == 1:
-        ax.text(x0, 8.3, "90 healthy", fontsize=15, fontweight="bold", color="#888888")
-        ax.text(x0, 6.3, "10 with disease", fontsize=15, fontweight="bold",
+        ax.text(x0, 8.3, f"{val('trap_healthy')} healthy", fontsize=15, fontweight="bold", color="#888888")
+        ax.text(x0, 6.3, f"{val('trap_sick')} with disease", fontsize=15, fontweight="bold",
                 color=C["danger"])
     else:
         ax.text(x0, 8.6, "Model says “normal” to all", fontsize=13, color=C["text"])
-        ax.text(x0, 6.4, "Accuracy  90%", fontsize=17, fontweight="bold",
+        ax.text(x0, 6.4, f"Accuracy  {val('trap_acc')}%", fontsize=17, fontweight="bold",
                 color=C["data"])
-        ax.text(x0, 4.2, "Sensitivity  0%", fontsize=17, fontweight="bold",
+        ax.text(x0, 4.2, f"Sensitivity  {val('trap_sens')}%", fontsize=17, fontweight="bold",
                 color=C["danger"])
-        ax.text(x0, 2.3, "10 of 10 cases missed", fontsize=13, color=C["danger"])
+        ax.text(x0, 2.3, f"{val('trap_missed')} of {val('trap_sick')} cases missed", fontsize=13,
+                color=C["danger"])
     ax.text(0, -0.9, "Illustrative population", fontsize=9, color=C["neutral"])
     ax.set_xlim(-0.2, 23)
     ax.set_ylim(-1.3, 11.2)
@@ -446,7 +440,8 @@ patients(2)
 # y = 70 at row 1116, y = 100 at row 551.5), shifted by the crop origin.
 CROP0 = (505, 525)
 X0, X30, Y70, Y100 = 571, 1125, 1116, 551.5
-CLINIC_POINT = (88.0, 80.0)      # illustrative (specificity, sensitivity), Sec. 3.8
+CLINIC_POINT = tuple(100 * x for x in K.REQ.field_operating_point)   # illustrative (spec, sens), %
+SPEC_FLOOR, SENS_FLOOR = num("floor_spec"), num("floor_sens")
 
 
 def roc_px(spec, sens, k):
@@ -464,12 +459,13 @@ def roc_real(step):
     d = ImageDraw.Draw(im, "RGBA")
     red = (165, 28, 48)
     if step >= 2:
-        # pass corner: specificity >= 80 (1 - spec <= 20), sensitivity >= 90
-        x20, y90 = roc_px(80, 90, k)
+        # pass corner: specificity and sensitivity at or above their floors
+        # (axes: 1 - specificity 0 to 30 percent, sensitivity 70 to 100 percent)
+        x20, y90 = roc_px(SPEC_FLOOR, SENS_FLOOR, k)
         x0, ytop = roc_px(100, 100, k)
         d.rectangle([x0, ytop, x20, y90], fill=(46, 125, 50, 40))
         _, ybot = roc_px(100, 70, k)
-        xr, _ = roc_px(70, 90, k)
+        xr, _ = roc_px(70, SENS_FLOOR, k)
         for a, b in (((x0, y90), (xr, y90)), ((x20, ytop), (x20, ybot))):
             n = 24
             for i in range(0, n, 2):
@@ -491,10 +487,9 @@ for s in (1, 2, 3):
 
 
 # Cloud against edge cumulative cost (Napkin Math 3.3), values from calcs.py
-_images = K.CLINICS * K.PATIENTS_PER_CLINIC_DAY * K.DAYS_YEAR
-CLOUD_K = (_images * K.CLOUD_PER_IMAGE + K.CLOUD_NETWORK) / 1000
-EDGE_RUN_K = (K.EDGE_MAINT + _images * K.EDGE_PER_IMAGE) / 1000
-CAPEX_K = K.CLINICS * K.EDGE_DEVICE / 1000
+CLOUD_K = K.m(K.COST.cloud_annual, "kilodollar/year")
+EDGE_RUN_K = K.m(K.COST.edge_annual, "kilodollar/year")
+CAPEX_K = K.m(K.COST.edge_capex, "kilodollar")
 
 
 def cost(step):
@@ -504,18 +499,18 @@ def cost(step):
     edge = CAPEX_K + EDGE_RUN_K * t
     fig, ax = sp.plt.subplots(figsize=(5.8, 2.6))
     ax.plot(t, cloud, color=C["neutral"], lw=3.5)
-    ax.text(5.05, cloud[-1], f"Cloud\n\\${CLOUD_K:.0f}k per year", va="center", fontsize=12,
+    ax.text(5.05, cloud[-1], f"Cloud\n\\${val('cost_cloud_k')}k per year", va="center", fontsize=12,
             fontweight="bold", color=C["neutral"])
     if step >= 2:
         ax.plot(t, edge, color=C["memory"], lw=3.5)
-        ax.text(5.05, edge[-1] - 20, f"Edge\n\\${CAPEX_K:.0f}k + \\${EDGE_RUN_K:.0f}k per year", va="center",
+        ax.text(5.05, edge[-1] - 20, f"Edge\n\\${val('cost_capex_k')}k + \\${val('cost_edge_k')}k per year", va="center",
                 fontsize=12, fontweight="bold", color=C["memory"])
     if step >= 3:
-        tc = CAPEX_K / (CLOUD_K - EDGE_RUN_K)
+        tc = K.m(K.COST.payback, "year")
         ax.plot([tc], [CLOUD_K * tc], "o", ms=11, color=C["text"], mec="white",
                 mew=1.5, zorder=5)
         ax.axvline(tc, color=C["text"], lw=1, ls=":")
-        ax.text(tc + 0.08, 30, f"pays back at {tc:.1f} years", fontsize=12,
+        ax.text(tc + 0.08, 30, f"pays back at {val('cost_payback')} years", fontsize=12,
                 fontweight="bold", color=C["text"])
     ax.set_xlim(0, 5)
     ax.set_ylim(0, 720)
@@ -530,7 +525,7 @@ for s in (1, 2, 3):
     cost(s)
 
 # Monitoring cadences (Sec. 3.11.1), in minutes on a log scale
-_cm = K.cadence_minutes()
+_cm = K.CADENCE.minutes
 # Tick labels at 14 pt so the powers of ten stay legible in the column slot.
 with sp.plt.rc_context({"xtick.labelsize": 14}):
     sp.hbars(out / "cadences.svg", [
@@ -550,17 +545,18 @@ def shrink_demo():
     from PIL import Image, ImageDraw
     im = Image.open(out / "fundus-dr-hao.png").convert("RGB")
     w, h = im.size
+    assert (w, h) == (K.PHOTO.source_width, K.PHOTO.source_height), "photo differs from FundusPhotoAt224"
+    n = K.PHOTO.target_size
     left = 30                                    # keep the panel label out
     sq = im.crop((left, 0, left + h, h))          # square, as a 224 x 224 input
     # One exudate cluster, in square coords. Measured on the source with a
-    # local-contrast threshold, these exudates are about 8 to 12 pixels wide;
-    # the 224 x 224 input scales every length by 224 / 857 = 0.26, so they
-    # become about 2 to 3 pixels wide. Both panels are drawn at the same size
+    # local-contrast threshold, these exudates are the scenario's feature
+    # widths; the n x n input scales every length by n / h (FundusPhotoAt224). Both panels are drawn at the same size
     # (nearest-neighbor for the small image) so its pixel grid shows.
     box = (546, 150, 656, 250)
     full = sq.crop(box).resize((440, 400), Image.LANCZOS)
-    small = sq.resize((224, 224), Image.LANCZOS)
-    f = 224 / h
+    small = sq.resize((n, n), Image.LANCZOS)
+    f = K.PHOTO.scale
     sbox = tuple(round(v * f) for v in box)
     low = small.crop(sbox).resize((440, 400), Image.NEAREST)
     full.save(out / "retina_full_crop.png")
@@ -621,9 +617,9 @@ for s in (1, 2, 3, 4):
 
 
 # -----------------------------------------------------------------------------
-# 7. The release gate (Sec. 3.8, Sec. 3.8.1, Table 2, Sec. 3.10). The 94 and
-#    76 percent values are the chapter's subgroup example; the device
-#    rows are requirements, not measurements.
+# 7. The release gate (Sec. 3.8, Sec. 3.8.1, Table 2, Sec. 3.10). The slice
+#    sensitivities are the requirements scenario's subgroup example; the
+#    device rows are requirements, not measurements.
 # -----------------------------------------------------------------------------
 def gate(step):
     p = svg_open(980, 430)
@@ -635,9 +631,10 @@ def gate(step):
     p.append(text(572, 92, "Result", 21, C["neutral"], "bold", "start"))
     p.append('<line x1="22" y1="104" x2="688" y2="104" stroke="#BBBBBB" stroke-width="2"/>')
     rows = [
-        (1, "Sensitivity, all clinic photos", "90%", "94% pass", C["data"]),
-        (2, "Sensitivity, cataract patients", "90%", "76% fail", C["danger"]),
-        (3, "Peak memory on clinic device", "500 MB", "measure", C["neutral"]),
+        (1, "Sensitivity, all clinic photos", f"{val('floor_sens')}%", f"{val('gate_all_pct')}% pass", C["data"]),
+        (2, "Sensitivity, cataract patients", f"{val('floor_sens')}%", f"{val('gate_cataract_pct')}% fail",
+         C["danger"]),
+        (3, "Peak memory on clinic device", f"{val('budget_mb')} MB", "measure", C["neutral"]),
         (3, "Latency on clinic device", "in visit", "measure", C["neutral"]),
         (3, "Confidence matches accuracy", "per use", "measure", C["neutral"]),
     ]

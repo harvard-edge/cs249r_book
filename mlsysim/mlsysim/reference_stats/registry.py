@@ -1159,6 +1159,27 @@ class PhysicalAINumbers(Registry):
     Compute = PhysicalAICompute
 
 
+class TorchvisionParameterCounts(Registry):
+    """Exact parameter counts of three torchvision model constructors (a counted run, added 2026-10-20).
+
+    ``Models.Vision`` carries the papers' rounded counts (ResNet-50 25.6M, VGG-16 138M);
+    these are the exact counts a library run prints, for slides that show the run.
+    """
+
+    MobileNetV2 = sourced_qty(
+        3_504_872 * param, pc.TORCHVISION_0_28_PARAMETER_COUNTS,
+        name="torchvision mobilenet_v2 parameters",
+        description="Parameters of torchvision.models.mobilenet_v2() (1000-class head).")
+    ResNet50 = sourced_qty(
+        25_557_032 * param, pc.TORCHVISION_0_28_PARAMETER_COUNTS,
+        name="torchvision resnet50 parameters",
+        description="Parameters of torchvision.models.resnet50() (1000-class head).")
+    VGG16 = sourced_qty(
+        138_357_544 * param, pc.TORCHVISION_0_28_PARAMETER_COUNTS,
+        name="torchvision vgg16 parameters",
+        description="Parameters of torchvision.models.vgg16() (1000-class head).")
+
+
 class ReferenceStats(Registry):
     """Registry namespace for non-executable real-world scenario statistics."""
 
@@ -1166,6 +1187,7 @@ class ReferenceStats(Registry):
     AnomalyModel = AnomalyModel
     OuraSleepStudy = OuraSleepStudy
     ClinicalImaging = ClinicalImaging
+    TorchvisionParameterCounts = TorchvisionParameterCounts  # added 2026-10-20
     EnergyAnchors = EnergyAnchors
     EmissionsAnchors = EmissionsAnchors
     TrainingScaleProfiles = TrainingScaleProfiles
