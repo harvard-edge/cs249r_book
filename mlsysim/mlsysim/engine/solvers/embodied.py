@@ -60,6 +60,9 @@ class StoppingBudgetModel(ForwardModel):
     whole delay and stop (``v_h (tau + T_stop)``). With a jerk bound the
     speed ceiling is the S-curve root (``calc_scurve_max_permitted_velocity``)
     and the delay ceiling is ``(D_clear - overhead - inset - d_S(v)) / v``.
+    The same case reports the weakest deceleration whose S-curve stop still
+    fits the braking room, jerk fixed, and its shortfall from the stated one
+    (added 2026-10-20).
     """
     requires = ("speed", "delay", "deceleration")
     produces = StoppingBudgetResult
@@ -140,6 +143,19 @@ class StoppingBudgetModel(ForwardModel):
                 ceiling = calc_watchdog_lease_bound(room, speed, deceleration)["t_total_delay_max"]
                 out.update(delay_ceiling=ceiling.to(ureg.millisecond),
                            delay_spare=(ceiling - delay).to(ureg.millisecond))
+            if jerk is not None and approach_speed is None and speed_at_delay_end is None:
+                # Weakest deceleration whose S-curve stop still fits (added 2026-10-20), jerk
+                # fixed: on the trapezoidal branch v^2/(2a) + v a/(2j) = room - delay travel,
+                # i.e. (v/(2j)) a^2 - R a + v^2/2 = 0; the smaller root is the branch where
+                # distance falls as a rises. Set only when that root stays trapezoidal (v >= a^2/j).
+                brake_room = (room - delay_travel).to(m)
+                qa = (speed / (2 * jerk)).to(ureg.second ** 2)
+                disc = (brake_room ** 2 - 2 * qa * speed ** 2).to(m ** 2)
+                if brake_room.magnitude > 0 and disc.magnitude >= 0:
+                    a_min = ((brake_room - disc ** 0.5) / (2 * qa)).to(m / ureg.second ** 2)
+                    if speed >= (a_min ** 2 / jerk).to(m / ureg.second):
+                        out.update(braking_room=brake_room, min_deceleration=a_min,
+                                   deceleration_shortfall=_ratio(deceleration - a_min, deceleration))
         if added_delay is not None:
             out["added_delay_travel"] = (speed * added_delay).to(m)
         return StoppingBudgetResult(**out)

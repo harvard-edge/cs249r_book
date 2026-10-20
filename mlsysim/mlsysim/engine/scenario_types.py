@@ -12089,16 +12089,25 @@ class CrashRateDenominatorScenario(BaseScenario):
 # in ``engine/solvers/perception.py``.
 
 class ObservationAgeScenario(BaseScenario):
-    """``site.machine``'s navigation-camera observation age at ``speed``, with a ``batch_frames`` comparison."""
+    """``site.machine``'s navigation-camera observation age at ``speed``, with a ``batch_frames`` comparison.
+
+    ``exposure`` replaces the camera's own exposure time (for example, a dim
+    aisle that lengthens it); the other stages are unchanged (added 2026-10-20).
+    """
     site: Any                                   # EmbodiedSiteScenario
     speed: Quantity
     batch_frames: int = 1
+    exposure: Optional[Quantity] = None         # default: the navigation camera's exposure time
+
+    @property
+    def exposure_time(self) -> Quantity:
+        return self.site.machine.nav_camera.exposure_time if self.exposure is None else self.exposure
 
     @property
     def result(self):
         from .solvers import ObservationAgeModel
         s, cam = self.site, self.site.machine.nav_camera
-        return ObservationAgeModel().solve(cam.exposure_time, cam.readout_time, s.t_transport, s.t_dma,
+        return ObservationAgeModel().solve(self.exposure_time, cam.readout_time, s.t_transport, s.t_dma,
                                            s.t_isp, s.t_backbone, s.t_ipc, cam.frame_rate, self.speed,
                                            self.batch_frames)
 
@@ -17434,3 +17443,29 @@ class DiagnosticCoverageScenario(BaseScenario):
     def result(self):
         from .solvers import DiagnosticCoverageModel
         return DiagnosticCoverageModel().solve(self.strata, self.target, self.confidence)
+
+
+# --- Release arguments: how confidence combines across premises (added 2026-10-20) ---
+
+class ArgumentConfidenceScenario(BaseScenario):
+    """A stipulated safety argument: ``premises`` required premises at ``premise_confidence`` each,
+    and a claim carried by ``legs`` independent legs at ``leg_confidence`` each.
+
+    Required premises combine as a product (``calc_conjunctive_confidence``);
+    independent sufficient legs fail together with the product of their
+    failure probabilities (``calc_multilegged_confidence``).
+    """
+    premise_confidence: float
+    premises: int
+    leg_confidence: float
+    legs: int = 2
+
+    @property
+    def conjunction(self) -> float:
+        from ..physics import calc_conjunctive_confidence
+        return calc_conjunctive_confidence([self.premise_confidence] * self.premises)
+
+    @property
+    def multilegged(self) -> float:
+        from ..physics import calc_multilegged_confidence
+        return calc_multilegged_confidence([self.leg_confidence] * self.legs)

@@ -4669,3 +4669,23 @@ OKELLY_2018_RARE_EVENT = _lit(
     notes=("Sec. 4: the cross-entropy method 'achieves 2-16 times variance reduction depending on the threshold "
            "level' (Figure 2). Table 1 is Literature.OKelly2018RareEventTable1."),
 )
+ROGERS_COMMISSION_1986 = _lit(
+    "prov:rogers-commission-1986",
+    "Presidential Commission on the Space Shuttle Challenger Accident (1986), Report to the President, vol. 1",
+    url="https://sma.nasa.gov/SignificantIncidents/assets/rogers_commission_report.pdf",
+    verified="2026-10-20",
+    notes=("Ch. IV finding 6: launch-pad air temperature 36 F, 15 degrees colder than any previous launch; "
+           "the right aft field joint estimated at 28 F, plus or minus 5 F. Ch. III: breakup about 73 s after "
+           "liftoff. Ch. V: the joint had flown 24 previous times; Thiokol's 27 January chart recommended O-ring "
+           "temperature at least 53 F at launch, the coldest prior flight (SRM 15). Transcribed from the lecture "
+           "deck's cited passages; added 2026-10-20."),
+)
+NHTSA_WAYMO_RECALLS_2024_2025 = _lit(
+    "prov:nhtsa-waymo-recalls-24e013-24e049-25e034",
+    "NHTSA recall campaigns 24E-013, 24E-049, and 25E-034, Waymo LLC automated driving system software",
+    url="https://api.nhtsa.gov/recalls/campaignNumber?campaignNumber=25E034",
+    verified="2026-10-20",
+    notes=("Read from api.nhtsa.gov/recalls/campaignNumber for each campaign (2026-10-20): report received "
+           "13/02/2024, 444 units; 10/06/2024, 672 units; 12/05/2025, 1212 units. 25E-034 remedy: 'All "
+           "affected vehicles were repaired by December 26, 2024.' Dates stored as YYYYMMDD."),
+)

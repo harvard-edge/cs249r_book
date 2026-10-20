@@ -1026,6 +1026,11 @@ class StoppingBudgetResult(SolverResult):
     rigid_speed_ceiling: Optional[Quantity] = None  # (D_clear - overhead - inset) / delay: instantaneous braking
     ceiling_lead_time: Optional[Quantity] = None  # b = delay + a / (2 j), on the quadratic branch only
     ceiling_root: Optional[Quantity] = None      # sqrt(b^2 + 2 (D_clear - overhead - inset) / a), same branch
+    # The deceleration premise (added 2026-10-20): with a jerk bound and a clear distance,
+    # the weakest deceleration whose S-curve stop still fits, on the trapezoidal branch.
+    braking_room: Optional[Quantity] = None      # D_clear - overhead - inset - delay travel
+    min_deceleration: Optional[Quantity] = None  # deceleration at which the stop fills braking_room exactly
+    deceleration_shortfall: Optional[float] = None  # 1 - min_deceleration / deceleration
 
     def travel_over(self, duration: Quantity) -> Quantity:
         """Distance covered at ``speed`` over ``duration`` (the cost of one term of the delay)."""

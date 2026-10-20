@@ -1708,3 +1708,21 @@ Wang2025OpenVlaLiberoUntargeted = _Series(
     ),
     "OpenVLA task failure rates on the four LIBERO suites, benign and with an adversarial patch in view.",
 )
+
+ChallengerORingDistressRecord = _Series(
+    "challenger_oring_distress_record",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=("Dalal, S. R., Fowlkes, E. B., Hoadley, B. (1989), Risk Analysis of the Space Shuttle: "
+             "Pre-Challenger Prediction of Failure, JASA 84(408), Table 1; as posted in the UCI Machine "
+             "Learning Repository, Challenger USA Space Shuttle O-Ring data set"),
+        url="https://archive.ics.uci.edu/dataset/92/challenger+usa+space+shuttle+o+ring",
+        verified="2026-10-20",
+        notes=("File o-ring-erosion-or-blowby.data, converted column for column (no value typed): O-rings at "
+               "risk (6), O-rings with thermal distress (erosion or blow-by), launch temperature (F), "
+               "leak-check pressure (psi), temporal order. The 23 flights before Challenger whose boosters "
+               "were recovered; the temperatures are the calculated joint temperatures of the Rogers "
+               "Commission's figure 7. Added 2026-10-20."),
+    ),
+    "O-ring thermal distress of the 23 inspected Space Shuttle flights before Challenger, with joint temperature.",
+)
