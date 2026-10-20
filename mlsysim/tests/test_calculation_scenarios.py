@@ -5654,3 +5654,21 @@ def test_closing_an_agent_course():
     assert len(g.rows) == 13 and g.rows[0]["model_key"] == "gpt_4o_inspect"
     assert g.ratio_median == pytest.approx(5.4768583, rel=1e-6)
     assert g.ratio_min == pytest.approx(3.9935368, rel=1e-6) and g.ratio_max == pytest.approx(10.2870995, rel=1e-6)
+def test_volume1_synthesis_recall_scenarios():
+    """Recalled calculations of the Volume I synthesis (added 2026-10-20)."""
+    from mlsysim import Literature
+    assert Scenarios.Conv3x3At256Channels.separable_ratio == pytest.approx(9 * 256 / 265)
+    d = Scenarios.Llama2_70B_DecodeTwoH100.result
+    assert d.memory_time.m_as("ms") == pytest.approx(20.8955224, rel=1e-6)
+    assert d.compute_time.m_as("ms") == pytest.approx(0.0707786, rel=1e-5)
+    assert d.bound_ratio == pytest.approx(Scenarios.Llama2_70B_DecodeH100.result.bound_ratio)
+    assert Scenarios.ChatEndpointTtftMeanVersusP99.gap_high == pytest.approx(40)
+    a = Scenarios.HostPreprocessingRequestPath.result
+    assert a.stage_fraction == pytest.approx(0.10) and a.upgraded_total_time.m_as("percent") == pytest.approx(91)
+    assert a.overall_speedup == pytest.approx(1 / 0.91)
+    c = Scenarios.ComposedAssistantRequestPath
+    assert c.makespan.m_as("ms") == pytest.approx(370) and c.work.m_as("ms") == pytest.approx(440)
+    f = Scenarios.GpuFailuresTraining1KThreeWeeks.result
+    assert f.interval.m_as("hour") == pytest.approx(50000 / 1024)
+    assert f.expected_failures == pytest.approx(504 / (50000 / 1024))
+    assert float(Literature.TrainingRuns.Llama3_405B_HardwareInterruptionFraction) == pytest.approx(0.78)

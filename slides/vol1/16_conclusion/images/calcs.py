@@ -1,258 +1,310 @@
 #!/usr/bin/env python3
-"""Every derived number in Lecture 16 (Conclusion), computed from sourced inputs.
+"""Every number on the Lecture 16 (Conclusion) slides and notes, read from MLSysIM.
 
-One block per slide, in deck order. Inputs carry their source as a comment;
-each printed line is a value the slide or its note shows, under the label
-used there. make_figs.py imports from this file so figures and slides share
-one computation. "Chapter" means the rendered Conclusion chapter of Volume I.
+The conclusion recalls earlier lectures, so each recalled number is read from
+the same MLSysIM object the earlier deck reads (named in each block), not
+retyped: the hardware and model registries, the Scenarios.* the earlier
+chapters compute with, and the cited results in Literature. The scenarios the
+Conclusion chapter computes with (Llama2_70B_DecodeTwoH100,
+ChatEndpointTtftMeanVersusP99, HostPreprocessingRequestPath,
+ComposedAssistantRequestPath, Conv3x3At256Channels, GpuFailuresTraining1K) are
+the ones its LEGO cells read. This file only selects values, converts units,
+and formats them; it types no numbers. Each value is recorded with v() under
+the key the deck prints as \\val{key}; running this file writes
+images/numbers.tex. make_figs.py imports this module, so figures and slides
+share one computation.
 
 Run from this folder: python3 calcs.py
 """
 
 import math
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
+
+from mlsysim.core.units import BYTES_FP16, BYTES_FP32, BYTES_INT8  # noqa: E402
+
+Hardware, Models, Systems, Platforms = mlsysim.Hardware, mlsysim.Models, mlsysim.Systems, mlsysim.Platforms
+Scenarios, Literature = mlsysim.Scenarios, mlsysim.Literature
+SERIES, TR, IR = Literature.Series, Literature.TrainingRuns, Literature.IncidentReports
+DM, TECH = Literature.DeviceMeasurements, Hardware.Tech
+H100 = Hardware.Cloud.H100
+
+# Recalled scenarios, each as the earlier deck reads it
+CLAIM = Scenarios.DatasheetVersusSustainedEdgeChip          # Lecture 12
+HOST = Scenarios.Gpt2XlEagerDecodeDispatch                  # Lecture 7
+TOKEN = Scenarios.Llama2_7BTokenOnFlagshipPhone             # Lecture 10
+MIXED = Scenarios.Gpt2MixedPrecisionAdamOnH100              # Lecture 8
+FP32_STEP = Scenarios.Gpt2Fp32AdamBatch32OnH100             # Lecture 8
+PALM = Scenarios.Palm540BMixedPrecisionAdam                 # Lecture 8
+SVC = Scenarios.ResNet50EagerFp16BatchingH100               # Lecture 13
+COST = Scenarios.ResNet50BatchOneVersusEightCostH100        # Lecture 13
+FAN100 = Scenarios.ServingFanout100Leaves                   # Lecture 13
+WEBTEXT = Scenarios.Gpt2XlWebTextCorpus                     # Lecture 9
+SEP64 = Scenarios.ImageNet64ChannelConv                     # Lecture 6
+QKV = Scenarios.Gpt2XlQkvProjectionPrefill                  # Lecture 11
+S3_MIXED = Scenarios.ResNet50Stage3ConvBatch32Int8Weights   # Lecture 11
+ROOF_DECODE = Scenarios.Gpt2XlDecodeH100Roofline            # Lecture 11
+ARM = Scenarios.RoboticArmRegionalCloud                     # Lecture 2
+GFT = Scenarios.GoogleFluTrendsDrift                        # Lecture 1
+IRON_RN = Scenarios.ResNet50Batch64StepH100                 # Lecture 1
+YIELD = Scenarios.ThaiClinicRetinalPhotoYield               # Lecture 3
+POD, SPARK = Systems.Pods.TPUv4_4096, Hardware.Workstation.DGX_Spark   # Lecture 2
+# The Conclusion chapter's own scenarios
+SEP256 = Scenarios.Conv3x3At256Channels
+L70 = Scenarios.Llama2_70B_DecodeTwoH100
+TTFT = Scenarios.ChatEndpointTtftMeanVersusP99
+AMDAHL = Scenarios.HostPreprocessingRequestPath
+DAG = Scenarios.ComposedAssistantRequestPath
+FAIL = Scenarios.GpuFailuresTraining1KThreeWeeks
+FAIL16K = Scenarios.GpuFailuresLlama3Run
+GPT2_DECODE = Scenarios.Gpt2XlFp16DecodeOnH100
 
 
-def r(x, nd=1):
-    """Round half away from zero (Python's round() is half to even)."""
-    q = 10 ** nd
-    return math.floor(abs(x) * q + 0.5 + 1e-9) / q * (1 if x >= 0 else -1)
+def m(q, unit):
+    """Magnitude of a Pint quantity in ``unit``."""
+    return q.to(unit).magnitude
 
 
-def f(x, nd=1, commas=True):
-    v = r(x, nd)
-    return f"{v:,.{nd}f}" if commas else f"{v:.{nd}f}"
+def ratio(a, b):
+    """Dimensionless ratio of two quantities."""
+    return (a / b).to("").magnitude
 
 
-def head(s):
-    print(f"\n[{s}]")
+def lit(entry):
+    """A Literature value as a plain number."""
+    return float(entry)
 
 
-def show(label, value):
-    print(f"  {label}: {value}")
+def pct(x):
+    """A fraction as percent."""
+    return 100 * x
 
 
-# ---------------------------------------------------------------------------
-# Shared hardware inputs (chapter, NVIDIA H100 reference machine; as in L11)
-# ---------------------------------------------------------------------------
-H100_BW = 3.35e12          # B/s, HBM3
-H100_FP16 = 989e12         # FLOP/s, dense FP16
-H100_INT8 = 1979e12        # OP/s, dense INT8
-H100_GIB = 80              # GiB of HBM (Lecture 8 uses 80 GiB)
-RIDGE16 = H100_FP16 / H100_BW
-RIDGE8 = H100_INT8 / H100_BW
+def row(series, **match):
+    """The one row of a Literature series whose fields equal ``match``."""
+    rows = [r for r in series.entries if all(r[k] == x for k, x in match.items())]
+    assert len(rows) == 1, match
+    return rows[0]
 
-# Slide 2: the stack, one number per layer -----------------------------------
-# L13 (Example 13.1): batch 1 $3.92 and batch 8 $0.52 per million requests.
-B1_COST, B8_COST = 3.92, 0.52
-BATCH_COST_RATIO = B1_COST / B8_COST
-# L10 (Model Compression Sec. 10.1): 7B parameters at 2 bytes (FP16).
-P7B, FP16_BYTES = 7e9, 2
-MODEL_7B_GB = P7B * FP16_BYTES / 1e9
-# L8 (derived there): PaLM 540B parameters (Chowdhery et al. 2022) at the
-# chapter's 16 bytes per parameter of training state.
-P_PALM, TRAIN_BYTES = 540e9, 16
-PALM_STATE_TB = P_PALM * TRAIN_BYTES / 1e12
-PALM_H100S = P_PALM * TRAIN_BYTES / (H100_GIB * 2**30)
-# L9 (Data Selection Sec. 9.1): GPT-2 XL 1.5B parameters, 1.5e21 FLOP run,
-# 6 FLOP per parameter per token, WebText about 10 billion unique tokens.
-GPT2_RUN_FLOP, GPT2_P, WEBTEXT_TOKENS = 1.5e21, 1.5e9, 10e9
-WEBTEXT_PASSES = GPT2_RUN_FLOP / (6 * GPT2_P) / WEBTEXT_TOKENS
-# L8 (Chowdhery et al. 2022): PaLM trained on 6,144 TPU v4 chips (input).
-PALM_CHIPS = 6144
 
-# Slide 3 and journey: depthwise separable 3x3 conv, 256 output channels
-# (chapter table 2). Cost ratio standard / separable = 1 / (1/N + 1/K^2).
-K, N_OUT = 3, 256
-DW_RATIO = 1 / (1 / N_OUT + 1 / K**2)
-# Panel fix L8: Lecture 6 derived the ratio for a 64-channel layer
-# (36,864 against 4,672 MACs per output pixel); the 8.7x above is the
-# chapter's 256-channel case, so the slides credit table 2 for it.
-N_OUT_L6 = 64
-DW_RATIO_L6 = 1 / (1 / N_OUT_L6 + 1 / K**2)
-INT8_OF_FP32 = 8 / 32
+print("== The stack, one number per layer (each from the lecture that taught it)")
+v("tpu_ppw_lo", lit(DM.TpuV1PerfPerWattGainLow), "{:.0f}", "TPU v1 performance per watt, low (L11)")
+v("tpu_ppw_hi", lit(DM.TpuV1PerfPerWattGainHigh), "{:.0f}", "TPU v1 performance per watt, high (L11)")
+v("hook_eff", m(CLAIM.claimed_efficiency, "TOPS/W"), "{:.0f}", "datasheet TOPS/W (L12)")
+v("hook_sus_eff", m(CLAIM.sustained_efficiency, "TOPS/W"), "{:.1f}", "sustained TOPS/W (L12)")
+v("gpt2_host_ms", m(HOST.host_time, "ms"), "{:.1f}", "GPT-2 XL token, eager host time, ms (L7)")
+v("gpt2_read_ms", m(HOST.device_time, "ms"), "{:.1f}", "GPT-2 XL token, weight read, ms (L7)")
+v("p7b_b", m(TOKEN.workload.parameters, "param") / 10 ** 9, "{:.0f}", "7B model parameters, billions (L10)")
+v("mem7b_gb", m(TOKEN.weight_bytes, "GB"), "{:.0f}", "7B in FP16, GB (L10)")
+v("phone_ram_gb", m(Platforms.Mobile.ram, "GiB"), "{:.0f}", "phone RAM, GB as labeled (L10)")
+v("mp_total_b", m(MIXED.bytes_per_trained_parameter, "byte"), "{:.0f}", "training bytes per parameter (L8)")
+b_one, b_eight = COST.batch_sizes
+v("b1_usd", m(COST.cost_per_million(b_one), "dollar"), "{:.2f}", "batch 1, $ per million requests (L13)")
+v("b8_usd", m(COST.cost_per_million(b_eight), "dollar"), "{:.2f}", "batch 8, $ per million requests (L13)")
+v("batch_eight", b_eight, "{:.0f}", "the batched size")
+v("hook_ratio", COST.cost_ratio, "{:.1f}", "batch 1 cost over batch 8 cost (L13)")
+v("z_writedown_m", lit(IR.ZillowQ3WriteDownUsd) / 10 ** 6, "{:.0f}", "Zillow Q3 write-down, $ million (L14)")
+v("ober_before", lit(Literature.Fairness.ObermeyerBlackShareBeforePct), "{:.1f}", "Black share, cost label, %")
+v("ober_after", lit(Literature.Fairness.ObermeyerBlackShareAfterPct), "{:.1f}", "Black share, need label, %")
+v("tay_hours", IR.TayHoursToSuspension, "{:.0f}", "Tay launch to suspension, hours (L4)")
+v("gpt2_passes", WEBTEXT.passes, "{:.0f}", "GPT-2 XL passes over WebText (L9)")
 
-# Slide 9: roofline ridges on one H100 ----------------------------------------
-# Intensities 1 (decode), 1,046.7 (prefill), 569 (ResNet-50 conv, INT8 weights)
-# are read from Hardware Acceleration Napkin Math 11.4 to 11.10 (inputs).
-PREFILL_I, RESNET_INT8_I = 1046.7, 569
+print("== Depthwise separable (Scenarios.Conv3x3At256Channels; Lecture 6's ImageNet64ChannelConv)")
+v("dw_ratio", SEP256.separable_ratio, "{:.1f}", "standard over separable, 3x3, 256 channels")
+v("dw_kernel", SEP256.kernel, "{:.0f}", "kernel width")
+v("dw_channels", SEP256.out_channels, "{:.0f}", "output channels")
+v("dw_ratio_l6", SEP64.separable_ratio, "{:.1f}", "the same at 64 channels (L6)")
+v("dw_channels_l6", SEP64.out_channels, "{:.0f}", "Lecture 6's channels")
+v("int8_of_fp32_pct", pct(ratio(BYTES_INT8, BYTES_FP32)), "{:.0f}", "INT8 bytes as a share of FP32, %")
 
-# Slide 10: Llama 2 70B at batch 1 on two H100s (chapter Sec. 16.4) ----------
-P70 = 70e9
-L70_BYTES = P70 * FP16_BYTES
-L70_FLOP = 2 * P70
-TWO_BW, TWO_PEAK = 2 * H100_BW, 2 * H100_FP16
-T_MEM_MS = L70_BYTES / TWO_BW * 1e3
-T_COMP_MS = L70_FLOP / TWO_PEAK * 1e3
-MEM_OVER_COMP = T_MEM_MS / T_COMP_MS
+print("== Roofline on one H100 (Hardware.Cloud.H100; Lecture 11's scenarios)")
+bw, p16, p8 = H100.memory.bandwidth, H100.compute.peak_flops, H100.compute.precision_flops["int8"]
+ridge16, ridge8 = ratio(p16, bw * mlsysim.core.units.Q_(1, "flop/byte")), ratio(p8, bw * mlsysim.core.units.Q_(1, "flop/byte"))
+v("h100_bw", m(bw, "TB/s"), "{:.2f}", "H100 HBM bandwidth, TB/s")
+v("h100_fp16", m(p16, "TFLOP/s"), "{:,.0f}", "H100 dense FP16, TFLOP/s")
+v("h100_int8", m(p8, "TFLOP/s"), "{:,.0f}", "H100 dense INT8, TOPS")
+v("ridge16", ridge16, "{:.0f}", "FP16 ridge, FLOP/byte")
+v("ridge8", ridge8, "{:.0f}", "INT8 ridge, OP/byte")
+v("dec_ai", m(ROOF_DECODE.intensity, "flop/byte"), "{:.0f}", "GPT-2 XL decode intensity, FLOP/byte")
+v("dec_ai_word", m(ROOF_DECODE.intensity, "flop/byte"), "words", "the same, in prose")
+v("qkv_ai", QKV.traffic_intensity, "{:,.0f}", "GPT-2 XL QKV at prefill, FLOP/byte")
+v("s3_mixed", S3_MIXED.traffic_intensity, "{:.0f}", "ResNet-50 stage-3 conv, INT8 weights, FP16 activations")
 
-# Slide 13 (Part I): a stop command to a cloud 1,500 km away (Lecture 2).
-# Light in fiber about 200,000 km/s (two thirds of c).
-DIST_KM, FIBER_KMS = 1500, 200_000
-RTT_MS = 2 * DIST_KM / FIBER_KMS * 1e3
+print("== Llama 2 70B at batch 1 on two H100s (Scenarios.Llama2_70B_DecodeTwoH100)")
+d70 = L70.result
+shards = L70.tp_size
+v("l70_gb", m(d70.weight_bytes * shards, "GB"), "{:.0f}", "FP16 weights, GB")
+v("l70_gflop", m(d70.flops_per_step * shards, "GFLOP"), "{:.0f}", "work per token, GFLOP")
+v("two_bw", m(L70.hardware.memory.bandwidth * shards, "TB/s"), "{:.2f}", "two H100s, TB/s")
+v("two_peak", m(L70.hardware.compute.peak_flops * shards, "TFLOP/s"), "{:,.0f}", "two H100s, TFLOP/s")
+v("l70_mem_ms", m(d70.memory_time, "ms"), "{:.1f}", "memory floor, ms")
+v("l70_comp_ms", m(d70.compute_time, "ms"), "{:.2f}", "compute floor, ms")
+v("l70_ratio", d70.bound_ratio, "{:.1f}", "memory floor over compute floor")
+v("l70_ratio_round", d70.bound_ratio, "{:.0f}", "the same, whole (title)")
+MLP = SERIES.MLPerfInferenceV50Llama2_70B
+conv = row(MLP, benchmark="llama2-70b-99", scenario="Server")
+inter = row(MLP, benchmark="llama2-70b-interactive-99", scenario="Server")
+v("mlp_gpus", conv["accelerators"], "{:.0f}", "H100s in the MLPerf system")
+v("mlp_conv_tps", conv["tokens_per_s"], "{:,.0f}", "Server tokens/s, conversational bounds")
+v("mlp_conv_ttft", conv["ttft_bound_ms"], "{:,.0f}", "conversational TTFT bound, ms")
+v("mlp_conv_tpot", conv["tpot_bound_ms"], "{:.0f}", "conversational TPOT bound, ms")
+v("mlp_int_tps", inter["tokens_per_s"], "{:,.0f}", "Server tokens/s, interactive bounds")
+v("mlp_int_ttft", inter["ttft_bound_ms"], "{:.0f}", "interactive TTFT bound, ms")
+v("mlp_int_tpot", inter["tpot_bound_ms"], "{:.0f}", "interactive TPOT bound, ms")
 
-# Slide 15 (Part III): energy of one 32-bit DRAM read against one FP32
-# multiply, 45 nm (Horowitz 2014, via Lecture 11): 640 pJ and 3.7 pJ.
-E_DRAM32, E_FMUL32 = 640, 3.7
-DRAM_OVER_MUL = E_DRAM32 / E_FMUL32
+print("== Part I: data (Lecture 1's Google Flu Trends, Lecture 2's robot arm)")
+g = GFT.result
+v("gft_peak", g.peak_proxy, "{:.1f}", "2012-13 peak of the estimate, % of visits")
+v("cdc_peak", g.peak_reference, "{:.1f}", "2012-13 peak of the CDC count, % of visits")
+v("gft_miss_weeks", Literature.PredictionQuality.GoogleFluTrendsOverestimateWeeks, "{:.0f}", "weeks too high")
+v("gft_window_weeks", Literature.PredictionQuality.GoogleFluTrendsOverestimateWindowWeeks, "{:.0f}", "weeks compared")
+v("arm_km", m(ARM.distance, "km"), "{:,.0f}", "arm to cloud region, km")
+v("arm_rtt_ms", m(ARM.round_trip, "ms"), "{:.0f}", "fiber round trip, ms")
+v("arm_budget_ms", m(ARM.budget, "ms"), "{:.0f}", "stop deadline, ms")
 
-# Slide 16: Amdahl, 90 percent host preprocessing, inference 10x faster
-# (chapter Sec. 16.7).
-SERIAL, SPEEDUP = 0.90, 10
-NEW_TIME = SERIAL + (1 - SERIAL) / SPEEDUP
-AMDAHL = 1 / NEW_TIME
-AMDAHL_AVG = (1 + SPEEDUP) / 2   # the wrong answer B: averaging the speedups
+print("== Part II: the iron law and training memory (Lectures 1 and 8)")
+v("iron_eta", IRON_RN.efficiency, "{:.1f}", "utilization of Lecture 1's bars")
+v("iron_rn_batch", IRON_RN.batch_size, "{:.0f}", "ResNet-50 batch in the bars")
+v("palm_state_tb", m(PALM.total, "TB"), "{:.1f}", "PaLM mixed-precision Adam state, TB")
+v("palm_h100s", round(PALM.capacity_share, -1), "{:.0f}", "the same in H100s of memory, to the ten")
+v("palm_chips", TR.Palm540B_Phase1Chips, "{:,.0f}", "PaLM's TPU v4 chips")
+v("fp32_step_h100s_word", FP32_STEP.training_capacity_multiple, "words", "FP32 GPT-2 XL step in H100s")
 
-# Slide 17 (Part IV): Thai clinics, 393 of 1,838 images ungradable (Lecture 3,
-# Beede et al. 2020). Fairness gap 3.0 points grows 1.10 a quarter against a
-# 5-point gate (Lecture 15, Napkin Math 15.3).
-UNGRADABLE, IMAGES = 393, 1838
-GAP0, ALPHA, GATE = 3.0, 1.10, 5.0
-K_CROSS = math.log(GATE / GAP0) / math.log(ALPHA)
+print("== Part III: optimization (Hardware.Tech energies; Scenarios.HostPreprocessingRequestPath)")
+e_dram = m(TECH.Memory.DRAM.energy_per_access, "pJ")
+v("dram_per_mul", e_dram / m(TECH.Op.FlopFp32.energy, "pJ/flop"), "{:.0f}", "DRAM read over FP32 multiply")
+v("dram_per_fp16", e_dram / m(TECH.Op.FlopFp16.energy, "pJ/flop"), "{:.0f}", "DRAM read over FP16 operation")
+a = AMDAHL.result
+host_share = 1 - a.stage_fraction
+v("amdahl_speedup", AMDAHL.speedup, "{:.0f}", "inference made faster, times")
+v("amdahl_avg", (1 + AMDAHL.speedup) / (1 + 1), "{:.1f}", "wrong answer B: the two speedups averaged")
+v("amdahl_host", host_share, "{:.2f}", "host preprocessing, fraction")
+v("amdahl_inf", a.stage_fraction, "{:.2f}", "inference, fraction")
+v("amdahl_host_pct", pct(host_share), "{:.0f}", "host preprocessing, percent")
+v("amdahl_inf_pct", pct(a.stage_fraction), "{:.0f}", "inference, percent")
+v("amdahl_new", m(a.upgraded_total_time, "percent") / 100, "{:.2f}", "new request time, fraction of the old")
+v("amdahl_new_pct", m(a.upgraded_total_time, "percent"), "{:.0f}", "the same, percent")
+v("amdahl_gain", a.overall_speedup, "{:.1f}", "whole-request speedup")
 
-# Slide 22: tails. Illustrative TTFT 50 ms mean, 2,000 ms p99 (chapter Sec.
-# 16.4). Dean and Barroso 2013, Table 1: one leaf p99 10 ms, all leaves p99
-# 140 ms. Lecture 13: 100 servers each meeting a target 99 percent of the time.
-TTFT_MEAN, TTFT_P99 = 50, 2000
-LEAF_P99, ALL_P99 = 10, 140
-FANOUT, P_OK = 100, 0.99
+print("== Part IV: deployment (Lecture 3's Thai clinics)")
+v("beede_ungradable", YIELD.rejected, "{:,.0f}", "photos rejected as ungradable")
+v("beede_submitted", YIELD.attempted, "{:,.0f}", "photos submitted")
+v("ungradable_pct", pct(YIELD.rejected_share), "{:.0f}", "ungradable share, %")
 
-# Slide 23: MTBF of a 1,024-GPU job (chapter Sec. 16.5) ----------------------
-MTTF_YEARS, HOURS_PER_YEAR = 5.7, 8766       # 365.25 days
-MTTF_H_EXACT = MTTF_YEARS * HOURS_PER_YEAR
-MTTF_H = 50_000                               # the chapter's rounded value
-N_GPU = 1024
-MTBF_H = MTTF_H / N_GPU
-RUN_H = 21 * 24                               # a three-week run
-FAILS_IN_RUN = RUN_H / MTBF_H
+print("== Dual mandate: energy per prompt (Elsworth et al. 2025, as in Lecture 15b)")
+full_wh = sum(r["comprehensive_wh"] for r in SERIES.GeminiPromptEnergy.entries if r["comprehensive_counted"] == 1)
+v("prompt_wh", full_wh, "{:.2f}", "median Gemini prompt, full boundary, Wh")
+v("prompt_gco2", row(SERIES.GoogleServingFactors, parameter="prompt_emissions_total")["value"], "{:.2f}",
+  "the same prompt, g CO2e")
+v("prompt_cut", row(SERIES.GoogleServingFactors, parameter="energy_reduction_12_months")["value"], "{:.0f}",
+  "energy cut over twelve months, times")
 
-# Slide 25: power ladder (System Paradigms Sec. 2.1, as in Lecture 0) ---------
-P_CLOUD, P_TINY = 3e6, 1e-3                   # W
-POWER_DECADES = math.log10(P_CLOUD / P_TINY)
+print("== Tails (Scenarios.ChatEndpointTtftMeanVersusP99; Dean and Barroso 2013 via Lecture 12; Lecture 13)")
+v("ttft_mean", m(TTFT.mean, "ms"), "{:.0f}", "illustrative mean TTFT, ms")
+v("ttft_p99", m(TTFT.tail_high, "ms"), "{:,.0f}", "illustrative p99 TTFT, ms")
+v("ttft_gap", TTFT.gap_high, "{:.0f}", "p99 over mean")
+TAS = SERIES.TailAtScaleLeafLatency
 
-# Slide 26: composed assistant (chapter self-check 16.5, question 1) ---------
-RET, TOOL_A, TOOL_B, GEN, VER = 50, 110, 70, 180, 30
-CRIT = RET + max(TOOL_A, TOOL_B) + GEN + VER
-ALL_SUM = RET + TOOL_A + TOOL_B + GEN + VER
 
-# Slides 27 and 28: Llama 3 405B (Llama Team 2024, arXiv 2407.21783v3,
-# Sec. 3.3.4 and Table 5): 466 interruptions in a 54-day snapshot, 47 planned;
-# Table 5 counts by component; up to 16,384 H100s.
-INTERRUPTS, PLANNED, DAYS, LLAMA_GPUS = 466, 47, 54, 16384
-TABLE5 = [("Faulty GPU", "GPU", 148, 30.1), ("GPU HBM3 Memory", "GPU", 72, 17.2),
-          ("Software Bug", "Dependency", 54, 12.9),
-          ("Network Switch/Cable", "Network", 35, 8.4),
-          ("Host Maintenance", "Unplanned Maintenance", 32, 7.6),
-          ("GPU SRAM Memory", "GPU", 19, 4.5), ("GPU System Processor", "GPU", 17, 4.1),
-          ("NIC", "Host", 7, 1.7), ("NCCL Watchdog Timeouts", "Unknown", 7, 1.7),
-          ("Silent Data Corruption", "GPU", 6, 1.4),
-          ("GPU Thermal Interface + Sensor", "GPU", 6, 1.4), ("SSD", "Host", 3, 0.7),
-          ("Power Supply", "Host", 3, 0.7), ("Server Chassis", "Host", 2, 0.5),
-          ("IO Expansion Board", "Host", 2, 0.5), ("Dependency", "Dependency", 2, 0.5),
-          ("CPU", "Host", 2, 0.5), ("System Memory", "Host", 2, 0.5)]
-UNEXPECTED = INTERRUPTS - PLANNED
-TOP_ROWS = 5                                  # rows the slide quotes
-TOP_SUM = sum(c for _, _, c, _ in TABLE5[:TOP_ROWS])
-REST_SUM = sum(c for _, _, c, _ in TABLE5[TOP_ROWS:])
-REST_ROWS = len(TABLE5) - TOP_ROWS
-LLAMA_GAP_H = DAYS * 24 / UNEXPECTED
-MODEL_16K_H = MTTF_H / LLAMA_GPUS
+def median_and_p99(leaves):
+    """The median (lowest percentile) and p99 (highest) rows of one fan-out case."""
+    rows = sorted((r for r in TAS.entries if r["leaves_awaited"] == leaves), key=lambda r: r["percentile"])
+    return rows[0]["latency_ms"], rows[-1]["latency_ms"]
 
-# Slide 30 (voice request, chapter Sec. 16.8): GPT-2 XL 1.5B parameters in
-# FP16 (3 GB) read per token on one H100.
-P_GPT2XL = 1.5e9
-GPT2_BYTES = P_GPT2XL * FP16_BYTES
-GPT2_MEM_MS = GPT2_BYTES / H100_BW * 1e3
-GPT2_COMP_MS = 2 * P_GPT2XL / H100_FP16 * 1e3
 
+leaf_p50, leaf_p99 = median_and_p99("one random leaf")
+all_p50, all_p99 = median_and_p99("all leaves")
+v("leaf_p50", leaf_p50, "{:.0f}", "one leaf, median, ms")
+v("leaf_p99", leaf_p99, "{:.0f}", "one leaf, p99, ms")
+v("all_p50", all_p50, "{:.0f}", "all leaves, median, ms")
+v("all_p99", all_p99, "{:.0f}", "all leaves, p99, ms")
+v("tail_ratio", all_p99 / leaf_p99, "{:.0f}", "all-leaves p99 over one-leaf p99")
+v("fan_n100", FAN100.n_components, "{:.0f}", "servers (L13)")
+v("fan_avail_pct", pct(FAN100.availability), "{:.0f}", "each server on time, % (L13)")
+v("fan100", pct(FAN100.all_up), "{:.1f}", "all 100 on time, % (L13)")
+
+print("== MTBF of a 1,024-GPU job (Scenarios.GpuFailuresTraining1KThreeWeeks)")
+f = FAIL.result
+mttf_h = m(FAIL.component_mtbf, "hour")
+v("mttf_years", m(FAIL.component_mtbf, "year"), "{:.1f}", "one GPU's MTTF, years")
+v("mttf_h", mttf_h, "{:,.0f}", "one GPU's MTTF, hours")
+v("n_gpu", FAIL.n_components, "{:,.0f}", "GPUs in the job")
+v("mtbf_h", m(f.interval, "hour"), "{:.1f}", "job MTBF, hours")
+v("mtbf_days_word", m(f.interval, "day"), "words", "the same, whole days, in prose")
+v("run_h", m(FAIL.run_duration, "hour"), "{:.0f}", "three-week run, hours")
+v("run_fails_word", round(f.expected_failures), "words", "failures expected in the run, in prose")
+
+print("== Power ladder (Lecture 2's tiers) and the phone against an H100 (Conclusion)")
+cloud_w, edge_w = m(POD.power, "W"), m(SPARK.tdp, "W")
+mobile_w = float(Platforms.Mobile.tdp_range_w.split("-")[1])
+tiny_w = m(Platforms.Tiny.power_threshold, "W")
+v("cloud_mw", cloud_w / 10 ** 6, "{:.0f}", "cloud rung, MW")
+v("edge_w", edge_w, "{:.0f}", "edge rung, W")
+v("mobile_w", mobile_w, "{:.0f}", "mobile rung, W")
+v("tiny_mw", tiny_w * 10 ** 3, "{:.0f}", "TinyML rung, mW")
+v("power_orders_word", math.floor(math.log10(cloud_w / tiny_w)), "words", "whole orders of magnitude, cloud to TinyML")
+phone = Hardware.Mobile.iPhone15Pro
+v("phone_mem_ratio", ratio(H100.memory.capacity, Platforms.Mobile.ram), "{:.0f}", "H100 memory over a phone's")
+v("phone_power_ratio", ratio(H100.tdp, phone.tdp), "{:.0f}", "H100 power over a phone's")
+
+print("== Composed assistant (Scenarios.ComposedAssistantRequestPath)")
+ret, tool_a, tool_b, gen, ver = (m(DAG.durations[k], "ms") for k in sorted(DAG.durations))
+v("dag_ret", ret, "{:.0f}", "retrieval, ms")
+v("dag_tool_a", tool_a, "{:.0f}", "tool A, ms")
+v("dag_tool_b", tool_b, "{:.0f}", "tool B, ms")
+v("dag_gen", gen, "{:.0f}", "generation, ms")
+v("dag_ver", ver, "{:.0f}", "verifier, ms")
+v("dag_crit", m(DAG.makespan, "ms"), "{:.0f}", "critical path, ms")
+v("dag_sum", m(DAG.work, "ms"), "{:.0f}", "sum of every box, ms")
+
+print("== Llama 3 405B interruptions (Literature.TrainingRuns, Series.Llama3Interruptions)")
+QUOTED = ("Faulty GPU", "GPU HBM3 Memory", "Software Bug", "Network Switch/Cable", "Host Maintenance")
+T5 = SERIES.Llama3Interruptions.entries
+unexpected, planned = TR.Llama3_405B_UnexpectedInterruptions, TR.Llama3_405B_PlannedInterruptions
+days, gpus = TR.Llama3_405B_SnapshotDays, TR.Llama3_405B_Gpus16K
+assert sum(r["interruption_count"] for r in T5) == unexpected
+for key, name in zip(("faulty_gpu", "hbm3", "sw_bug", "network", "host_maint"), QUOTED):
+    v(f"t5_{key}", row(SERIES.Llama3Interruptions, component=name)["interruption_count"], "{:.0f}", name)
+rest = [r for r in T5 if r["component"] not in QUOTED]
+v("t5_rest_rows", len(rest), "{:.0f}", "rows not quoted")
+v("t5_rest_sum", sum(r["interruption_count"] for r in rest), "{:.0f}", "their counts summed")
+v("l3_unexpected", unexpected, "{:.0f}", "unexpected interruptions")
+v("l3_planned", planned, "{:.0f}", "planned interruptions")
+v("l3_total", unexpected + planned, "{:.0f}", "all interruptions")
+v("l3_days", days, "{:.0f}", "snapshot, days")
+v("l3_gpus", gpus, "{:,.0f}", "H100s, up to")
+v("l3_gap_h", days * m(mlsysim.core.units.Q_(1, "day"), "hour") / unexpected, "{:.1f}",
+  "hours between unexpected interruptions")
+v("l3_hw_pct", pct(TR.Llama3_405B_HardwareInterruptionFraction), "{:.0f}", "hardware share of unexpected, %")
+v("l3_effective_pct", pct(TR.Llama3_405B_EffectiveTrainingTimeFraction), "{:.0f}", "effective training time, %")
+v("l3_manual_word", TR.Llama3_405B_ManualInterventions, "words", "manual interventions, in prose")
+v("model_16k_h", m(FAIL16K.result.interval, "hour"), "{:.2f}", "MTTF / 16,384, hours")
+
+print("== Voice request (the Conclusion's registry trace; Scenarios.Gpt2XlFp16DecodeOnH100)")
+kws, mcu, mnv2, dlrm = Models.Tiny.DS_CNN, Hardware.Tiny.STM32F4, Models.Vision.MobileNetV2, Models.Recommendation.DLRM
+dec = GPT2_DECODE.result
+v("kws_kb", m(kws.size_in_bytes(BYTES_INT8), "KB"), "{:.0f}", "KWS INT8 weights, KB")
+v("mcu_flash_mb", m(mcu.memory.flash_capacity, "MiB"), "{:.0f}", "microcontroller flash, labeled MB")
+v("kws_mflop", m(kws.inference_flops, "MFLOP"), "{:.0f}", "KWS work per inference, MFLOP")
+v("mnv2_mflop", m(mnv2.inference_flops, "MFLOP"), "{:.0f}", "MobileNetV2 work, MFLOP")
+v("mnv2_int8_mb", m(mnv2.size_in_bytes(BYTES_INT8), "MB"), "{:.1f}", "MobileNetV2 INT8 weights, MB")
+v("phone_w", m(phone.tdp, "W"), "{:.0f}", "phone power envelope, W")
+v("dlrm_gb", m(dlrm.model_size, "GB"), "{:.0f}", "DLRM embedding tables, GB")
+v("h100_gib", m(H100.memory.capacity, "GiB"), "{:.0f}", "one H100, labeled GB")
+v("gpt2_gb", m(dec.weight_bytes, "GB"), "{:.0f}", "GPT-2 XL FP16 weights per token, GB")
+v("gpt2_mem_ms", m(dec.memory_time, "ms"), "{:.1f}", "memory floor, ms")
+v("gpt2_ratio", dec.bound_ratio, "{:.0f}", "memory floor over compute floor")
+
+print("== Lecture 0's questions (IEA via Literature.DatacenterElectricity; Lecture 10's phone token)")
+DCE = Literature.DatacenterElectricity
+v("dc_twh_2024", lit(DCE.Global2024Twh), "{:.0f}", "datacenters, 2024, TWh")
+v("dc_twh_2030", lit(DCE.Global2030Twh), "{:.0f}", "datacenters, 2030 projection, TWh")
+v("dc_growth", lit(DCE.Global2030Twh) / lit(DCE.Global2024Twh), "{:.1f}", "2030 over 2024")
+v("token_ms", round(m(TOKEN.read_time, "ms"), -1), "{:.0f}", "7B token on a phone, ms, to the ten (L10)")
+v("token_w", round(m(TOKEN.read_power, "W")), "{:.0f}", "7B DRAM power while decoding, W (L10)")
 
 if __name__ == "__main__":
-    head("Slide 2: the stack")
-    show("batch 1 against batch 8 cost", f"{BATCH_COST_RATIO:.1f}x")
-    show("7B model in FP16", f"{MODEL_7B_GB:.0f} GB")
-    show("PaLM training state", f"{PALM_STATE_TB:.2f} TB (slide: 8.6 TB)")
-    show("H100s of memory (80 GiB)", f"{PALM_H100S:.0f} (slide: about 100)")
-    show("GPT-2 passes over each WebText token", f"{WEBTEXT_PASSES:.1f} (slide: about 17)")
-
-    head("Slides 3 and 7: MobileNetV2")
-    show("depthwise separable FLOP ratio, 3x3, 256 out", f"{DW_RATIO:.1f}x")
-    show("depthwise separable FLOP ratio, 3x3, 64 out (Lecture 6)", f"{DW_RATIO_L6:.1f}x")
-    show("INT8 bytes as a fraction of FP32", f"{INT8_OF_FP32:.2f}")
-
-    head("Slide 9: roofline")
-    show("FP16 ridge", f"{RIDGE16:.1f} FLOP/byte (slide: 295)")
-    show("INT8 ridge", f"{RIDGE8:.1f} OP/byte (slide: 591)")
-    show("ResNet-50 INT8-weight conv below the INT8 ridge", f"{RESNET_INT8_I} < {RIDGE8:.0f}")
-    show("prefill above the FP16 ridge", f"{PREFILL_I:,} > {RIDGE16:.0f}")
-
-    head("Slide 10: Llama 2 70B, batch 1, two H100s")
-    show("weights", f"{L70_BYTES / 1e9:.0f} GB")
-    show("work per token", f"{L70_FLOP / 1e9:.0f} GFLOP")
-    show("two H100s bandwidth", f"{TWO_BW / 1e12:.2f} TB/s")
-    show("two H100s peak", f"{TWO_PEAK / 1e12:,.0f} TFLOP/s")
-    show("memory floor", f"{T_MEM_MS:.1f} ms")
-    show("compute floor", f"{T_COMP_MS:.2f} ms")
-    show("ratio", f"{MEM_OVER_COMP:.1f}x")
-
-    head("Slide 13: Part I")
-    show("round trip to 1,500 km in fiber", f"{RTT_MS:.0f} ms")
-
-    head("Slide 14: Part II")
-    show("PaLM state", f"{PALM_STATE_TB:.1f} TB")
-    show("H100s of memory", f"{PALM_H100S:.0f}")
-
-    head("Slide 15: Part III")
-    show("DRAM read in FP32 multiplies", f"{DRAM_OVER_MUL:.0f}x")
-    show("decode intensity against the ridge", f"1 against {RIDGE16:.0f}")
-
-    head("Slide 16: Amdahl")
-    show("new request time", f"{NEW_TIME * 100:.0f}% of the old")
-    show("speedup", f"{AMDAHL:.2f}x (slide: 1.1x)")
-    show("wrong answer B, averaging", f"{AMDAHL_AVG:.1f}x")
-
-    head("Slide 17: Part IV")
-    show("ungradable images", f"{UNGRADABLE / IMAGES * 100:.1f}% (slide: 21%)")
-    show("quarters for 3.0 to pass 5.0 at 1.10", f"{K_CROSS:.2f} (first whole quarter {math.ceil(K_CROSS)})")
-    show("gap in quarter 6", f"{GAP0 * ALPHA ** 6:.2f} points")
-
-    head("Slide 22: tails")
-    show("illustrative p99 over mean", f"{TTFT_P99 / TTFT_MEAN:.0f}x")
-    show("measured all-leaves p99 over one-leaf p99", f"{ALL_P99 / LEAF_P99:.0f}x")
-    show("fan-out of 100 all meeting target", f"{P_OK ** FANOUT * 100:.1f}%")
-
-    head("Slide 23: MTBF")
-    show("5.7 years in hours", f"{MTTF_H_EXACT:,.0f} h (chapter: about 50,000)")
-    show("MTBF of 1,024 GPUs", f"{MTBF_H:.1f} h")
-    show("in days", f"{MTBF_H / 24:.1f} days")
-    show("three-week run", f"{RUN_H} h")
-    show("failures expected in the run", f"{FAILS_IN_RUN:.1f}")
-
-    head("Slide 25: power ladder")
-    show("3 MW over 1 mW, decades", f"{POWER_DECADES:.1f} (note: nine orders of magnitude)")
-
-    head("Slide 26: composed assistant")
-    show("critical path", f"{CRIT} ms")
-    show("sum of every box", f"{ALL_SUM} ms")
-
-    head("Slides 27 and 28: Llama 3 405B")
-    show("unexpected interruptions", f"{UNEXPECTED}")
-    show("hours between unexpected interruptions", f"{LLAMA_GAP_H:.1f} h")
-    show("model at 16,384 GPUs", f"{MODEL_16K_H:.2f} h")
-    tot = sum(c for _, _, c, _ in TABLE5)
-    gpu = sum(c for _, cat, c, _ in TABLE5 if cat == "GPU")
-    show("Table 5 counts sum", f"{tot} (paper: 419)")
-    show("top five rows", f"{TOP_SUM}")
-    show(f"other {REST_ROWS} rows", f"{REST_SUM}")
-    show("top two rows (faulty GPU + HBM3)", f"{148 + 72}")
-    show("top two rows, share of 419", f"{(148 + 72) / UNEXPECTED * 100:.1f}%")
-    show("faulty GPU share of 419 (count)", f"{148 / UNEXPECTED * 100:.1f}% (Table 5 prints 30.1%)")
-    show("GPU-category share of 419 (counts)", f"{gpu / UNEXPECTED * 100:.1f}% (text: 58.7%)")
-
-    head("Lecture 0's three questions: datacenter electricity (IEA, Energy and AI, 2025)")
-    DC_TWH_2024, DC_TWH_2030 = 415, 945
-    show("2030 over 2024", f"{DC_TWH_2030 / DC_TWH_2024:.1f}x")
-
-    head("Slide 30: voice request, GPT-2 XL reply")
-    show("weights per token", f"{GPT2_BYTES / 1e9:.0f} GB")
-    show("memory floor", f"{GPT2_MEM_MS:.1f} ms")
-    show("compute floor", f"{GPT2_COMP_MS * 1e3:.2f} us")
-    show("ratio", f"{GPT2_MEM_MS / GPT2_COMP_MS:.0f}x")
+    write(__file__)

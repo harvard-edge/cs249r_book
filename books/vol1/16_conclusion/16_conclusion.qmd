@@ -146,8 +146,8 @@ from mlsysim.core.units import *
 # │          efficiency wins across the architecture/compression journey.
 # │ Show:    Depthwise-separable FLOP reduction, ResNet-50 vs. MobileNetV2
 # │          operation ratio, and INT8 byte ratios versus FP32/FP16.
-# │ How:     Apply the depthwise-separable FLOP formula at a representative
-# │          3x3, 256-channel layer; divide ResNet-50/MobileNetV2 inference
+# │ How:     Read the depthwise-separable ratio of a representative 3x3,
+# │          256-channel layer (Scenarios.Conv3x3At256Channels); divide ResNet-50/MobileNetV2 inference
 # │          FLOPs; divide FP32/FP16 byte widths by INT8 byte width.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
@@ -158,11 +158,10 @@ class MobileNetJourneyMath:
     # LOAD
     resnet = Models.Vision.ResNet50
     mobilenet = Models.Vision.MobileNetV2
-    kernel_size = 3
-    representative_output_channels = 256
+    layer = Scenarios.Conv3x3At256Channels
 
     # EXECUTE
-    standard_to_depthwise = (kernel_size**2 * representative_output_channels) / (kernel_size**2 + representative_output_channels)
+    standard_to_depthwise = layer.separable_ratio
     resnet_to_mobilenet = resnet.inference_flops / mobilenet.inference_flops
     int8_vs_fp32 = BYTES_FP32 / BYTES_INT8
     int8_vs_fp16 = BYTES_FP16 / BYTES_INT8
@@ -691,7 +690,6 @@ DLRM carries the first half, because a recommendation service can pass its offli
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, Models
-from mlsysim.physics import calc_transformer_decode_flops
 from mlsysim.fmt import fmt, check, fmt_params, fmt_flops, fmt_time, fmt_bandwidth, fmt_flop_rate, fmt_memory, fmt_multiple
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -702,22 +700,23 @@ class ConclusionRoofline:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    gpu = Hardware.Cloud.H100
-    gpu_count = 2
-    model = Models.Language.Llama2_70B
+    scenario = Scenarios.Llama2_70B_DecodeTwoH100
+    gpu = scenario.hardware
+    gpu_count = scenario.tp_size
+    model = scenario.workload
     gpt2 = Models.Language.GPT2  # the lighthouse this model scales up
-    precision_bytes = BYTES_FP16
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    d_vol = model.size_in_bytes(precision_bytes)
-    compute_req = calc_transformer_decode_flops(model.parameters)
+    decode = scenario.result
+    d_vol = decode.weight_bytes * gpu_count
+    compute_req = decode.flops_per_step * gpu_count
     aggregate_memory_bandwidth = gpu.memory.bandwidth * gpu_count
     aggregate_peak_flops = gpu.compute.peak_flops * gpu_count
 
-    t_mem = d_vol / aggregate_memory_bandwidth
-    t_comp = compute_req / aggregate_peak_flops
+    t_mem = decode.memory_time
+    t_comp = decode.compute_time
 
-    ratio = t_mem / t_comp
+    ratio = decode.bound_ratio
     family_scale = (model.parameters / gpt2.parameters).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -740,7 +739,7 @@ class ConclusionRoofline:
 
     t_mem_ms_str = fmt_time(t_mem, unit=ms, precision=1, commas=False)
     t_comp_ms_str = fmt_time(t_comp, unit=ms, precision=2, commas=False)
-    ratio_mult_str = fmt_multiple(ratio.to("").magnitude, precision=1, commas=False)
+    ratio_mult_str = fmt_multiple(ratio, precision=1, commas=False)
     family_scale_mult_str = fmt_multiple(round(family_scale), precision=0, commas=False)
     gpt2_params_modifier_str = fmt_params(gpt2.parameters, scale_style="word", precision=1, attributive=True)
 ```
@@ -795,11 +794,12 @@ class TailLatencyRatio:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    mean_latency_ms = 50.0  # scenario assumption: mean time to first token
-    p99_latency_ms = 2000.0  # scenario assumption: p99 driven by long prompts and queueing
+    scenario = Scenarios.ChatEndpointTtftMeanVersusP99
+    mean_latency_ms = scenario.mean.to(ms).magnitude
+    p99_latency_ms = scenario.tail_high.to(ms).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    ratio = p99_latency_ms / mean_latency_ms
+    ratio = scenario.gap_high
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(ratio - 40) < 1e-9, f"P99/mean ratio should be 40x, got {ratio:.1f}x.")
@@ -955,22 +955,22 @@ A composed system therefore cannot rely on a single model-quality claim; it need
 # │ Goal:    Show that independent failures across a thousand-GPU pool collapse
 # │          a multi-year component MTTF into an approximately two-day cluster MTBF.
 # │ Show:    Reference GPU MTTF in years, GPU count, and cluster MTBF in hours.
-# │ How:     Convert Systems.Reliability.Gpu.mttf_hours to years via HOURS_PER_DAY * DAYS_PER_YEAR;
-# │          call calc_mtbf_cluster for the independent-failure cluster MTBF.
+# │ How:     Convert the per-GPU MTTF of Scenarios.GpuFailuresTraining1K to years via
+# │          HOURS_PER_DAY * DAYS_PER_YEAR; read the scenario's independent-failure interval.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.physics import calc_mtbf_cluster
 from mlsysim.fmt import fmt, check, fmt_time
 from mlsysim.core.units import hour
 
 class FleetFailureMath:
     # LOAD
-    gpu_count = Systems.Clusters.Training_1K.total_accelerators
-    gpu_mtbf = float(Systems.Reliability.Gpu.mttf_hours) * hour
+    scenario = Scenarios.GpuFailuresTraining1K
+    gpu_count = scenario.n_components
+    gpu_mtbf = scenario.component_mtbf
 
     # EXECUTE
     gpu_mtbf_years = gpu_mtbf.to(hour).magnitude / (HOURS_PER_DAY * DAYS_PER_YEAR)
-    cluster_mtbf = calc_mtbf_cluster(gpu_mtbf, gpu_count)
+    cluster_mtbf = scenario.result.interval
 
     # GUARD
     check(gpu_mtbf_years > 1, "Component MTTF should read as years.")
@@ -1080,21 +1080,22 @@ The alarm fires in the monitoring layer, but its cause may sit in another layer 
 # │          small fraction of the pipeline is being optimized.
 # │ Show:    Local speedup factor, serial-fraction percent, and resulting
 # │          system-level speedup for the worked pitfall example.
-# │ How:     Apply calc_amdahls_speedup with optimized_fraction=0.10 and a
-# │          10x local speedup, then format each value for prose inlining.
+# │ How:     Read Scenarios.HostPreprocessingRequestPath (inference 10 percent
+# │          of the request, made 10x faster), then format each value for prose inlining.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.physics import calc_amdahls_speedup
 from mlsysim.fmt import fmt, check
 
 class AmdahlPitfallMath:
     # LOAD
-    optimized_fraction = 0.10
-    serial_fraction = 1 - optimized_fraction
-    local_speedup = 10.0
+    scenario = Scenarios.HostPreprocessingRequestPath
+    local_speedup = scenario.speedup
 
     # EXECUTE
-    system_speedup = calc_amdahls_speedup(optimized_fraction, local_speedup)
+    amdahl = scenario.result
+    optimized_fraction = amdahl.stage_fraction
+    serial_fraction = 1 - optimized_fraction
+    system_speedup = amdahl.overall_speedup
 
     # GUARD
     check(system_speedup < 1.2, "Amdahl example should remain bottlenecked by preprocessing.")
@@ -1169,18 +1170,20 @@ class VoiceRequestTrace:
     mcu = Hardware.Tiny.STM32F4
     phone_model = Models.Vision.MobileNetV2
     phone = Hardware.Mobile.iPhone15Pro
-    decoder = Models.Language.GPT2
+    decode = Scenarios.Gpt2XlFp16DecodeOnH100
+    decoder = decode.workload
     ranker = Models.Recommendation.DLRM
-    gpu = Hardware.Cloud.H100
+    gpu = decode.hardware
 
     # EXECUTE
     kws_bytes = kws.size_in_bytes(BYTES_INT8)
     kws_flash_share = (kws_bytes / mcu.memory.flash_capacity).to("").magnitude
     phone_bytes = phone_model.size_in_bytes(BYTES_INT8)
-    decode_bytes = decoder.size_in_bytes(BYTES_FP16)
-    decode_t_mem = (decode_bytes / gpu.memory.bandwidth).to(ms)
-    decode_t_comp = (decoder.inference_flops / gpu.compute.peak_flops).to(ms)
-    decode_ratio = (decode_t_mem / decode_t_comp).to("").magnitude
+    decode_bound = decode.result
+    decode_bytes = decode_bound.weight_bytes
+    decode_t_mem = decode_bound.memory_time.to(ms)
+    decode_t_comp = decode_bound.compute_time.to(ms)
+    decode_ratio = decode_bound.bound_ratio
     ranker_overflow = (ranker.model_size / gpu.memory.capacity).to("").magnitude
 
     # GUARD
