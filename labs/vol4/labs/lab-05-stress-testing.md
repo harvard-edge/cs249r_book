@@ -1,4 +1,4 @@
-# Lab 5: Stress-Testing — Prediction, Language & Recovery
+# Lab 5: Stress-Testing: Prediction, Language, and Recovery
 
 **Status:** `skeleton`\
 **Weeks:** 9 (Part 5A)\

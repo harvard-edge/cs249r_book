@@ -1,4 +1,4 @@
-# Lab 6: Safety Governor — Build It, Then Break It
+# Lab 6: Safety Governor: Build It, Then Break It
 
 **Status:** `skeleton`\
 **Weeks:** 10–11 (Parts 6A, 6B)\
