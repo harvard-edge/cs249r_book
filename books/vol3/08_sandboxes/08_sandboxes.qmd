@@ -99,7 +99,7 @@ from mlsysim.fmt import check, fmt_int, fmt_percent
 class CybenchCapability:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     rows = Literature.CybenchSolveRate.entries
-    n_tasks = 40  # task count published by the benchmark authors
+    n_tasks = Literature.SandboxIsolation.CybenchTasks  # task count published by the benchmark authors
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     best_2024 = max(r["unguided_solved"] for r in rows if r["release_date"] < "2025-01-01")
@@ -552,26 +552,29 @@ Here $\PrivilegeTrapTime$ is the hardware cost of crossing a privilege boundary,
 # │ Goal: Put a magnitude on @eq-vol3-syscall-tax for each envelope.
 # │ Show: Per-call cost and added time per million ordinary calls.
 # │ How: Sum the terms each envelope pays (tbl-vol3-isolation-transitions),
-# │      using the per-call givens of Problem 3.
+# │      using the per-call givens of Problem 3
+# │      (Scenarios.SyscallTaxPerMillionCalls, SyscallTaxModel).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 
 class SyscallTax:
     # 1. LOAD: hypothetical per-call costs (the Problem 3 givens), not measurements.
-    calls = 1_000_000
-    t_trap = Q_(0.1, "us")
-    t_filter = Q_(0.05, "us")  # in-kernel filter, shared-kernel container
-    t_emulate = Q_(1.5, "us")  # user-space kernel emulation
-    t_switch = Q_(2.0, "us")  # switch to the emulator
+    scenario = Scenarios.SyscallTaxPerMillionCalls
+    calls = scenario.calls
+    t_trap = scenario.trap
+    t_filter = scenario.filter  # in-kernel filter, shared-kernel container
+    t_emulate = scenario.emulate  # user-space kernel emulation
+    t_switch = scenario.switch  # switch to the emulator
 
     # 2. EXECUTE: terms paid on an ordinary (non-device) call.
-    container_call = t_trap + t_filter
-    userspace_call = t_trap + t_emulate + t_switch
-    microvm_call = t_trap
-    container_total = (calls * container_call).to("s")
-    userspace_total = (calls * userspace_call).to("s")
-    microvm_total = (calls * microvm_call).to("s")
-    userspace_vs_microvm = (userspace_call / microvm_call).to("dimensionless").magnitude
+    r = scenario.result
+    container_call = r.container_call
+    userspace_call = r.userspace_call
+    microvm_call = r.microvm_call
+    container_total = r.container_total
+    userspace_total = r.userspace_total
+    microvm_total = r.microvm_total
+    userspace_vs_microvm = r.userspace_vs_microvm
 
     # 3. GUARD: ordering the prose relies on.
     check(microvm_call < container_call < userspace_call, "Emulation costs most per ordinary call")
@@ -613,26 +616,29 @@ No single envelope fits every agent action. Starting a fresh microVM for a few m
 # │ Context: Execution-envelope lifetime in this section.
 # │ Goal: Isolate repeated setup cost without asserting a stronger boundary.
 # │ Show: Equal useful work, setup totals, and serialized elapsed components.
-# │ How: Charge setup N times or once, then add the same N useful calls.
+# │ How: Charge setup N times or once, then add the same N useful calls
+# │      (Scenarios.ParserCallsEnvelopeSetup, EnvelopeAmortizationModel).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 
 class EnvelopeAmortization:
     # 1. LOAD: hypothetical timings, not measurements of a named platform.
-    calls = 100
-    setup = Agents.Coding.SWE_Bench_Runner.sandbox_snapshot_restore_latency.to("ms")  # illustrative profile: readiness to useful work
-    work_per_call = Q_(3, "ms")  # held equal under both lifetime policies
+    scenario = Scenarios.ParserCallsEnvelopeSetup
+    calls = scenario.calls
+    setup = scenario.setup  # illustrative profile: readiness to useful work
+    work_per_call = scenario.work_per_call  # held equal under both lifetime policies
+    overhead_cap = scenario.overhead_cap  # decision threshold: setup at most this share of a fresh call
 
     # 2. EXECUTE: serialized setup and execution, without queueing or overlap.
-    useful_work = calls * work_per_call
-    per_call_setup = calls * setup
-    per_call_total = per_call_setup + useful_work
-    per_trajectory_total = setup + useful_work
-    setup_saved = per_call_setup - setup
-    reuse_speedup = (per_call_total / per_trajectory_total).to("dimensionless").magnitude
-    setup_share = (setup / (setup + work_per_call)).to("dimensionless").magnitude
-    overhead_cap = 0.10  # decision threshold: setup at most this share of a fresh call
-    work_for_cap = setup * (1 - overhead_cap) / overhead_cap  # W >= T_setup(1-phi)/phi
+    r = scenario.result
+    useful_work = r.useful_work
+    per_call_setup = r.per_call_setup
+    per_call_total = r.per_call_total
+    per_trajectory_total = r.per_trajectory_total
+    setup_saved = r.setup_saved
+    reuse_speedup = r.reuse_speedup
+    setup_share = r.setup_share
+    work_for_cap = r.work_for_cap  # W >= T_setup(1-phi)/phi
 
     # 3. GUARD: equal-work tally and independently checked totals.
     check(useful_work == Q_(300, "ms"), "Same useful work in both designs")
@@ -739,29 +745,32 @@ How much data copy-on-write actually copies on the first write depends on whethe
 # What: Compare full-copy and copy-on-write provisioning payloads, then
 #       first-mutation payload copying under two granularity assumptions.
 # How: Payload bytes per design; a lower bound on time at one drive's
-#      sequential rate (registry); one-byte change in a shared fixture.
+#      sequential rate (registry); one-byte change in a shared fixture
+#      (Scenarios.CopyOnWriteRepairWorkspaces, WorkspaceProvisioningModel).
 from mlsysim import *
 
 class WorkspaceCost:
     # LOAD: Hypothetical workspace sizes, not a particular filesystem benchmark.
-    disk_bw = Hardware.Tech.Storage.NvmeGen4.bandwidth  # one local drive, sequential
-    trajectories = 32
-    base_image = 2.4 * GB  # scenario: repository, toolchain, and dependencies
-    written = 40 * MB  # scenario: edits and build outputs per workspace
-    fixture = 1.2 * GB
-    block = 64 * KB
-    modified_per_workspace = 1 * byte
+    scenario = Scenarios.CopyOnWriteRepairWorkspaces
+    disk_bw = scenario.bandwidth  # one local drive, sequential
+    trajectories = scenario.workspaces
+    base_image = scenario.base_image  # scenario: repository, toolchain, and dependencies
+    written = scenario.written  # scenario: edits and build outputs per workspace
+    fixture = scenario.fixture
+    block = scenario.block
+    modified_per_workspace = scenario.modified
 
     # EXECUTE: Provisioning payloads, then one full-file or one block copy.
-    full_copy = trajectories * base_image
-    overlay_written = trajectories * written
-    full_copy_time = (full_copy / disk_bw).to("s")
-    overlay_time = (overlay_written / disk_bw).to("s")
-    copy_vs_overlay = (full_copy / overlay_written).to("dimensionless").magnitude
-    file_copy = trajectories * fixture
-    block_copy = trajectories * block
-    logical_changes = trajectories * modified_per_workspace
-    file_vs_block = (fixture / block).to("dimensionless").magnitude
+    r = scenario.result
+    full_copy = r.full_copy
+    overlay_written = r.cow_written
+    full_copy_time = r.full_copy_time
+    overlay_time = r.cow_time
+    copy_vs_overlay = r.copy_vs_cow
+    file_copy = r.file_copy
+    block_copy = r.block_copy
+    logical_changes = r.logical_changes
+    file_vs_block = r.file_vs_block
     file_vs_block_rounded = round(file_vs_block, -3)  # display to the nearest thousand
 
     # GUARD: Separate requested mutations from payload-copy accounting.
@@ -978,53 +987,39 @@ The equation combines mean active guest pages with the configured standby allowa
 # │       and @eq-vol3-pool-memory.
 # │
 # │ Note: The registry sandbox profile values are teaching assumptions
-# │       (provenance catalog), not measurements of a product.
+# │       (provenance catalog), not measurements of a product
+# │       (Scenarios.CodingSandboxPoolTwoPerSecond, SandboxPoolReserveModel).
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim import *
 
-def poisson_tail(mu, s):
-    """P(at least s prior outstanding replacements with Poisson mean mu)."""
-    if s == 0:
-        return 1.0
-    return 1 - sum(math.exp(-mu) * mu**k / math.factorial(k) for k in range(s))
-
 class SandboxPoolReserve:
     # 1. LOAD: illustrative coding-agent sandbox profile plus scenario inputs.
-    profile = Agents.Coding.SWE_Bench_Runner
-    t_init = profile.sandbox_snapshot_restore_latency  # one clean instance from snapshot
-    m_guest = profile.sandbox_memory_footprint  # full private guest image
-    arrival_rate = 2.0 / second  # offered rate; eventual admitted rate under the no-loss policy
-    t_hold = 300 * second  # scenario: lease held for the whole trajectory
-    m_dirty = 64 * MB  # scenario: private pages written per active lease
-    m_standby = 8 * MB  # scenario: private state per standby instance
-    initial_reserve = 1  # candidate to evaluate before selecting the minimum
-    target_miss = 1e-3  # design target for finding standby empty
-    slow_factor = 10  # scenario: a cold boot an order of magnitude slower than restore
+    scenario = Scenarios.CodingSandboxPoolTwoPerSecond
+    t_init = scenario.restore  # one clean instance from snapshot
+    m_guest = scenario.guest_memory  # full private guest image
+    arrival_rate = scenario.arrival_rate  # offered rate; eventual admitted rate under the no-loss policy
+    t_hold = scenario.hold  # scenario: lease held for the whole trajectory
+    m_dirty = scenario.dirty  # scenario: private pages written per active lease
+    m_standby = scenario.standby  # scenario: private state per standby instance
+    initial_reserve = scenario.initial_reserve  # candidate to evaluate before selecting the minimum
+    target_miss = scenario.target_miss  # design target for finding standby empty
+    slow_factor = scenario.slow_factor  # scenario: a cold boot an order of magnitude slower than restore
 
-    # 2. EXECUTE: mean active leases, request-level miss tail, memory budget.
-    n_active = (arrival_rate * t_hold).to("dimensionless").magnitude
-    mu_init = (arrival_rate * t_init).to("dimensionless").magnitude
-    p_one = poisson_tail(mu_init, initial_reserve)  # a request waits if one prior order is outstanding
-    reserve = initial_reserve
-    while poisson_tail(mu_init, reserve) >= target_miss:
-        reserve += 1
-    p_dry = poisson_tail(mu_init, reserve)
-    m_private = (n_active * m_guest).to(GB)
-    m_pool = (m_guest + n_active * m_dirty + reserve * m_standby).to(GB)
-    cow_ratio = (m_private / m_pool).to("dimensionless").magnitude
-
-    # Sensitivity: the largest restore time the selected reserve tolerates (bisection
-    # on the Poisson tail), and the reserve a slower restore would need.
-    lo, hi = 0.0, 1.0
-    for _ in range(60):
-        mid = (lo + hi) / 2
-        lo, hi = (mid, hi) if poisson_tail(mid, reserve) < target_miss else (lo, mid)
-    t_init_max = (lo / arrival_rate).to("ms")
-    mu_slow = mu_init * slow_factor
-    reserve_slow = 1
-    while poisson_tail(mu_slow, reserve_slow) >= target_miss:
-        reserve_slow += 1
+    # 2. EXECUTE: mean active leases, request-level miss tail, memory budget, and the
+    # sensitivity of the reserve to restore time.
+    r = scenario.result
+    n_active = r.active
+    mu_init = r.restore_arrivals
+    p_one = r.initial_miss  # a request waits if one prior order is outstanding
+    reserve = r.reserve
+    p_dry = r.reserve_miss
+    m_private = r.private_memory
+    m_pool = r.pool_memory
+    cow_ratio = r.memory_ratio
+    t_init_max = r.max_restore  # largest restore time the selected reserve tolerates
+    mu_slow = r.slow_arrivals
+    reserve_slow = r.slow_reserve
 
     # 3. GUARD: invariants the prose relies on.
     check(abs(n_active - 600) < 1e-9, "Little's law: 2/s times 300 s")

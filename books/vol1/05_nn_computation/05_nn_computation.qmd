@@ -121,16 +121,15 @@ class MNISTInference:
     """Namespace for the running MNIST network's headline counts."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    input_dim = 28 * 28
-    h1_dim = 128
-    h2_dim = 64
-    out_dim = 10
-    bytes_per_value = BYTES_FP32
+    net = Scenarios.MnistDenseNetwork  # 784 → 128 → 64 → 10, batch 32, FP32
+    input_dim, h1_dim, h2_dim, out_dim = net.layer_widths
+    bytes_per_value = net.bytes_per_value
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    total_macs = input_dim * h1_dim + h1_dim * h2_dim + h2_dim * out_dim
-    total_params = total_macs + h1_dim + h2_dim + out_dim
-    weight_bytes = total_params * bytes_per_value
+    counts = net.result
+    total_macs = counts.macs_per_example
+    total_params = counts.parameters
+    weight_bytes = counts.parameter_bytes
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(total_macs == 109_184, f"MNIST MLP MAC mismatch: {total_macs}")
@@ -207,11 +206,12 @@ class EarlySystemsClaims:
     """Namespace for early-chapter gradient-instability footnote."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    sigmoid_depth = 20
-    sigmoid_peak_derivative = 0.25
+    chain = Scenarios.TwentySigmoidLayers
+    sigmoid_depth = chain.depth
+    sigmoid_peak_derivative = chain.peak_slope
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    gradient_scale = sigmoid_peak_derivative**sigmoid_depth
+    gradient_scale = chain.surviving_fraction
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(gradient_scale < 1e-12, f"20 sigmoid layers should nearly zero gradients; got {gradient_scale:.2e}")
@@ -246,34 +246,32 @@ Before a learned network spent `{python} MNISTInference.total_macs_str` on that 
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_memory, fmt_qty_int, check
 
-_MNIST_DIMS = [784, 128, 64, 10]
-
 # ┌── LEGO ───────────────────────────────────────────────
 class ParadigmSystemsCost:
     """Namespace for paradigm cost escalation on one MNIST digit."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    rb_pixels = Datasets.MNIST.image_width * Datasets.MNIST.image_height
-    rb_ops = 100
-    rb_mem_bytes = rb_pixels
-    hog_grid_dim = 7
-    hog_cells = hog_grid_dim * hog_grid_dim
-    hog_bins = 9
-    hog_ops_approx = 8 * THOUSAND
-    hog_mem_kb = 2
-    mnist_dims = _MNIST_DIMS
+    # Illustrative rule tree, HOG pipeline, and the running network.
+    paradigms = Scenarios.DigitRecognitionParadigms
+    rb_pixels = paradigms.image_pixels
+    rb_ops = paradigms.rule_comparisons
+    hog_grid_dim = paradigms.feature_grid
+    hog_bins = paradigms.feature_bins
+    hog_ops_approx = paradigms.feature_operations
+    mnist_dims = paradigms.network.layer_widths
     training_examples = Datasets.MNIST.training_examples.to(count).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    dl_total_macs = _MNIST_DIMS[0] * _MNIST_DIMS[1] + _MNIST_DIMS[1] * _MNIST_DIMS[2] + _MNIST_DIMS[2] * _MNIST_DIMS[3]
-    dl_params_with_bias = sum(_MNIST_DIMS[i] * _MNIST_DIMS[i + 1] + _MNIST_DIMS[i + 1] for i in range(len(_MNIST_DIMS) - 1))
-    hog_features = hog_cells * hog_bins
-    hog_ops_ratio = hog_ops_approx / rb_ops
-    rb_mem = rb_mem_bytes * byte
-    hog_mem = hog_mem_kb * KB
-    dl_weight = dl_params_with_bias * BYTES_FP32
+    dl_counts = paradigms.network.result
+    dl_total_macs = dl_counts.macs_per_example
+    dl_params_with_bias = dl_counts.parameters
+    hog_features = paradigms.feature_count
+    hog_ops_ratio = paradigms.feature_to_rule_ratio
+    rb_mem = paradigms.rule_memory
+    hog_mem = paradigms.feature_memory
+    dl_weight = dl_counts.parameter_bytes
     dl_weight_kb = dl_weight.to(KB).magnitude
-    dl_ops_ratio = dl_total_macs / rb_ops
+    dl_ops_ratio = paradigms.network_to_rule_ratio
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(dl_total_macs == 109_184, f"Expected 109,184 MNIST MACs, got {dl_total_macs}")
@@ -1343,14 +1341,13 @@ class ActivationLogic:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    # Illustrative comparator-plus-selection budget
-    relu_transistors = 50
-
-    # Illustrative high-precision exponential-approximation budget
-    sigmoid_transistors = 2500
+    # Illustrative comparator-plus-selection and exponential-approximation budgets
+    logic = Scenarios.ReluVersusSigmoidLogic
+    relu_transistors = logic.cheap_transistors
+    sigmoid_transistors = logic.costly_transistors
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    ratio = sigmoid_transistors / relu_transistors
+    ratio = logic.ratio
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(ratio >= 40, f"Illustrative logic-cost ratio changed unexpectedly: {ratio:.1f}x")
@@ -1704,10 +1701,10 @@ class MnistArchCheckpointRecap:
     """Namespace for checkpoint self-test architecture string."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    mnist_dims = [784, 128, 64, 10]
+    mnist_dims = Scenarios.MnistDenseNetwork.layer_widths
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    mnist_arch_str = MarkdownStr("784 → 128 → 64 → 10")
+    mnist_arch_str = MarkdownStr(Scenarios.MnistDenseNetwork.architecture)
 ```
 
 ### Choosing a topology {#sec-neural-computation-architecture-design-523c}
@@ -1750,7 +1747,7 @@ Between the fixed `{python} MnistInputDimLocal.mnist_input_str`-unit input layer
 
 ```{python}
 #| echo: false
-from mlsysim.physics import model_memory
+from mlsysim.physics import calc_dense_params
 from mlsysim.fmt import fmt_int, fmt, fmt_count, fmt_qty_int, check
 
 # ┌─────────────────────────────────────────────────────────────────────────────
@@ -1767,27 +1764,19 @@ class MnistScaleComparison:
     """Namespace for wide vs. modest MNIST MLP scale comparison."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    mnist_input_dim = 784
-    mnist_output_dim = 10
-    mnist_large_l1 = 1000
+    mnist_input_dim = Scenarios.MnistDenseNetwork.layer_widths[0]
+    mnist_output_dim = Scenarios.MnistDenseNetwork.layer_widths[-1]
+    mnist_large_l1 = 1000  # scenario assumption: a wide MLP
     mnist_large_l2 = 1000
-    mnist_small_l1 = 100
+    mnist_small_l1 = 100  # scenario assumption: a modest MLP
     mnist_small_l2 = 100
-    mnist_large_arch = [
-        (mnist_input_dim, mnist_large_l1),
-        (mnist_large_l1, mnist_large_l2),
-        (mnist_large_l2, mnist_output_dim),
-    ]
-    mnist_small_arch = [
-        (mnist_input_dim, mnist_small_l1),
-        (mnist_small_l1, mnist_small_l2),
-        (mnist_small_l2, mnist_output_dim),
-    ]
+    mnist_large_arch = [mnist_input_dim, mnist_large_l1, mnist_large_l2, mnist_output_dim]
+    mnist_small_arch = [mnist_input_dim, mnist_small_l1, mnist_small_l2, mnist_output_dim]
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    mnist_large_params = sum(_i * _o + _o for _i, _o in mnist_large_arch)
+    mnist_large_params = calc_dense_params(mnist_large_arch)
     mnist_large_mem = mnist_large_params * BYTES_FP32
-    mnist_small_params = sum(_i * _o + _o for _i, _o in mnist_small_arch)
+    mnist_small_params = calc_dense_params(mnist_small_arch)
     mnist_small_mem = mnist_small_params * BYTES_FP32
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -2021,7 +2010,7 @@ class DenseConnectivityMnist:
     h1_dim = MNISTInference.h1_dim
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    l1_weights = input_dim * h1_dim
+    l1_weights = MNISTInference.counts.weights_per_layer[0]
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(l1_weights == 100_352, f"Expected 100,352 first-layer weights, got {l1_weights:,}")
@@ -2057,21 +2046,15 @@ class MnistModelSizeLocal:
     """Namespace for local MNIST model-size prose."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    mnist_l1_dim = 784
-    mnist_l2_dim = 128
-    mnist_l3_dim = 64
-    mnist_l4_dim = 10
+    mnist_l1_dim, mnist_l2_dim, mnist_l3_dim, mnist_l4_dim = Scenarios.MnistDenseNetwork.layer_widths
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    weights = [
-        mnist_l1_dim * mnist_l2_dim,
-        mnist_l2_dim * mnist_l3_dim,
-        mnist_l3_dim * mnist_l4_dim,
-    ]
-    biases = [mnist_l2_dim, mnist_l3_dim, mnist_l4_dim]
-    params_per_layer = [w + b for w, b in zip(weights, biases)]
-    total_params = sum(params_per_layer)
-    total_macs = sum(weights)
+    counts = Scenarios.MnistDenseNetwork.result
+    weights = counts.weights_per_layer
+    biases = counts.biases_per_layer
+    params_per_layer = counts.params_per_layer
+    total_params = counts.parameters
+    total_macs = counts.macs_per_example
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(total_params == 109_386, f"Expected 109,386 MNIST parameters, got {total_params}")
@@ -2152,44 +2135,31 @@ Each layer builds on the previous, allowing later computations to reuse earlier 
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_count, fmt_multiple, check
 
-def _dw_net(hidden_layers, width, input_dim, out_dim):
-    """Layer widths of a fully connected network with equal hidden widths."""
-    return [input_dim] + [width] * hidden_layers + [out_dim]
-
-def _dw_sweep(hidden_layer_counts, widths, input_dim, out_dim):
-    """Networks for paired (hidden-layer count, width) settings."""
-    return [_dw_net(h, w, input_dim, out_dim) for h, w in zip(hidden_layer_counts, widths)]
-
-def _dw_macs(widths):
-    """Forward MACs per example: one per weight."""
-    return sum(a * b for a, b in zip(widths[:-1], widths[1:]))
-
 # ┌── LEGO ───────────────────────────────────────────────
 class DepthWidthCost:
     """Cost of fully connected networks as width and depth vary."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    input_dim = MNISTInference.input_dim
-    out_dim = MNISTInference.out_dim
-    mnist_widths = [MNISTInference.input_dim, MNISTInference.h1_dim, MNISTInference.h2_dim, MNISTInference.out_dim]
-    sweep_hidden_layers = 2  # matches the running network
-    sweep_widths = [2**k for k in range(6, 13)]  # 64 ... 4,096
-    sweep_fixed_width = 512
-    sweep_depths = list(range(1, 33))  # 1 ... 32 hidden layers
+    sweep = Scenarios.DenseWidthDepthSweep
+    input_dim = sweep.input_dim
+    out_dim = sweep.output_dim
+    mnist_widths = Scenarios.MnistDenseNetwork.layer_widths
+    sweep_hidden_layers = sweep.hidden_layers  # matches the running network
+    sweep_widths = sweep.widths  # 64 ... 4,096
+    sweep_fixed_width = sweep.fixed_width
+    sweep_depths = sweep.depths  # 1 ... 32 hidden layers
     callout_deep = (10, 100)  # (hidden layers, width)
     callout_wide = (2, 500)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    width_sweep_nets = _dw_sweep([sweep_hidden_layers] * len(sweep_widths), sweep_widths, input_dim, out_dim)
-    depth_sweep_nets = _dw_sweep(sweep_depths, [sweep_fixed_width] * len(sweep_depths), input_dim, out_dim)
-    width_sweep_macs = [_dw_macs(n) for n in width_sweep_nets]
-    depth_sweep_macs = [_dw_macs(n) for n in depth_sweep_nets]
-    depth_sweep_retained = [sum(n) for n in depth_sweep_nets]  # input + every layer output
-    mnist_macs = _dw_macs(mnist_widths)
+    width_sweep_macs = sweep.width_sweep_macs
+    depth_sweep_macs = sweep.depth_sweep_macs
+    depth_sweep_retained = sweep.depth_sweep_saved_activations  # input + every layer output
+    mnist_macs = Scenarios.MnistDenseNetwork.result.macs_per_example
 
-    width_double_factor = width_sweep_macs[-1] / width_sweep_macs[-2]  # 2,048 → 4,096
-    depth_double_factor = depth_sweep_macs[-1] / depth_sweep_macs[15]  # 16 → 32 layers
-    retained_double_factor = depth_sweep_retained[-1] / depth_sweep_retained[15]
+    width_double_factor = sweep.width_double_factor  # 2,048 → 4,096
+    depth_double_factor = sweep.depth_double_factor  # 16 → 32 layers
+    retained_double_factor = sweep.saved_activations_double_factor
 
     callout_deep_units = callout_deep[0] * callout_deep[1]
     callout_wide_units = callout_wide[0] * callout_wide[1]
@@ -2332,7 +2302,7 @@ class MnistTrainingIntroRecap:
     """Namespace for learning-section MNIST training intro."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    total_params = 109_386
+    total_params = Scenarios.MnistDenseNetwork.result.parameters
     training_examples = Datasets.MNIST.training_examples.to(count).magnitude
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
@@ -2490,13 +2460,13 @@ class MnistForwardIntroLocal:
     """Namespace for local MNIST forward-propagation introduction."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    image_height = 28
-    image_width = 28
-    first_hidden_units = 128
+    image_height = Datasets.MNIST.image_height
+    image_width = Datasets.MNIST.image_width
+    first_hidden_units = Scenarios.MnistDenseNetwork.layer_widths[1]
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     input_values = image_height * image_width
-    first_layer_macs = input_values * first_hidden_units
+    first_layer_macs = Scenarios.MnistDenseNetwork.result.weights_per_layer[0]
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(input_values == 784, f"Expected 784 MNIST input values, got {input_values}")
@@ -2634,71 +2604,45 @@ class MnistFlopsCalc:
     """Namespace for Mnist Flops Calc."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    batch_size = 32
-    in_dim = 784
-    h1_dim = 128
-    h2_dim = 64
-    out_dim = 10
-    double_h1_dim = 256
-    double_h2_dim = 128
+    net = Scenarios.MnistDenseNetwork
+    wider = Scenarios.MnistDenseNetworkWiderHidden  # both hidden widths doubled
+    batch_size = net.batch_size
+    in_dim, h1_dim, h2_dim, out_dim = net.layer_widths
+    double_h1_dim, double_h2_dim = wider.layer_widths[1:3]
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    flops_l1_mm_value = 2 * batch_size * in_dim * h1_dim
-    flops_l1_bias_value = 2 * (batch_size * h1_dim)  # Bias add + ReLU
+    # Separate dense layers; fused bias/activation; each hidden output is written then read.
+    counts = net.result
+    single = net.variant(batch_size=1).result
+    flops_l1_mm_value, flops_l2_mm_value, flops_l3_mm_value = counts.matmul_flops_per_layer
+    flops_l1_bias_value, flops_l2_bias_value, flops_l3_bias_value = counts.elementwise_flops_per_layer  # bias + ReLU
 
-    flops_l2_mm_value = 2 * batch_size * h1_dim * h2_dim
-    flops_l2_bias_value = 2 * (batch_size * h2_dim)
-
-    flops_l3_mm_value = 2 * batch_size * h2_dim * out_dim
-    flops_l3_bias_value = 2 * (batch_size * out_dim)  # Bias + Softmax approx
-
-    total_flops_value = flops_l1_mm_value + flops_l1_bias_value + flops_l2_mm_value + flops_l2_bias_value + flops_l3_mm_value + flops_l3_bias_value
+    total_flops_value = counts.forward_flops
     total_mops_value = (total_flops_value * flop).to(MFLOPs).magnitude
-    weights = [
-        in_dim * h1_dim,
-        h1_dim * h2_dim,
-        h2_dim * out_dim,
-    ]
-    biases = [h1_dim, h2_dim, out_dim]
-    params_per_layer = [w + b for w, b in zip(weights, biases)]
-    total_params = sum(params_per_layer)
-    total_macs = sum(weights)
-    bytes_per_element = BYTES_FP32
-    param_mem = memory_from_params(total_params * param, bytes_per_element / param)
+    weights = counts.weights_per_layer
+    biases = counts.biases_per_layer
+    params_per_layer = counts.params_per_layer
+    total_params = counts.parameters
+    total_macs = counts.macs_per_example
+    bytes_per_element = net.bytes_per_value
+    param_mem = counts.parameter_bytes
     param_mem_kb = param_mem.to(KB).magnitude
-    inf_act_elements = in_dim + h1_dim + h2_dim + out_dim
+    inf_act_elements = counts.activation_values_per_example
     inf_act = inf_act_elements * bytes_per_element
     inf_act_kb = inf_act.to(KB).magnitude
     inference_total = param_mem + inf_act
     inference_total_kb = inference_total.to(KB).magnitude
-    per_image_kops = (total_flops_value / batch_size) / THOUSAND
-    single_image_traffic = param_mem + (in_dim + 2 * h1_dim + 2 * h2_dim + out_dim) * bytes_per_element
-    single_image_arith_intensity = (((total_flops_value / batch_size) * flop) / single_image_traffic).to(flop / byte).magnitude
-    layer1_pct = weights[0] / total_macs * 100
-    batch_in_values = batch_size * in_dim
-    batch_h1_values = batch_size * h1_dim
-    batch_h2_values = batch_size * h2_dim
-    batch_out_values = batch_size * out_dim
-    batch_act_total_values = batch_in_values + batch_h1_values + batch_h2_values + batch_out_values
-    # Separate dense layers; fused bias/activation; each hidden output is written then read.
-    batch_inference_traffic = param_mem + batch_size * (in_dim + 2 * h1_dim + 2 * h2_dim + out_dim) * bytes_per_element
+    per_image_kops = counts.forward_flops_per_example / THOUSAND
+    single_image_traffic = single.traffic_bytes
+    single_image_arith_intensity = single.intensity.to(flop / byte).magnitude
+    layer1_pct = counts.first_layer_share * 100
+    batch_in_values, batch_h1_values, batch_h2_values, batch_out_values = counts.activation_values_per_layer
+    batch_act_total_values = counts.saved_activation_values
+    batch_inference_traffic = counts.traffic_bytes
     batch_inference_traffic_kb = batch_inference_traffic.to(KB).magnitude
-    batch_arith_intensity = ((total_flops_value * flop) / batch_inference_traffic).to(flop / byte).magnitude
+    batch_arith_intensity = counts.intensity.to(flop / byte).magnitude
 
-    double_flops_l1_mm_value = 2 * batch_size * in_dim * double_h1_dim
-    double_flops_l1_bias_value = 2 * (batch_size * double_h1_dim)
-    double_flops_l2_mm_value = 2 * batch_size * double_h1_dim * double_h2_dim
-    double_flops_l2_bias_value = 2 * (batch_size * double_h2_dim)
-    double_flops_l3_mm_value = 2 * batch_size * double_h2_dim * out_dim
-    double_flops_l3_bias_value = 2 * (batch_size * out_dim)
-    double_total_flops_value = (
-        double_flops_l1_mm_value
-        + double_flops_l1_bias_value
-        + double_flops_l2_mm_value
-        + double_flops_l2_bias_value
-        + double_flops_l3_mm_value
-        + double_flops_l3_bias_value
-    )
+    double_total_flops_value = wider.result.forward_flops
     double_total_mops_value = (double_total_flops_value * flop).to(MFLOPs).magnitude
     double_ratio_value = double_total_mops_value / total_mops_value
 
@@ -2900,12 +2844,13 @@ class CrossEntropyExample:
     """Cross-entropy loss for a single correct-class probability."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    p_correct = 0.8
-    p_correct_confident = 0.9
+    examples = Scenarios.DigitCrossEntropyExamples
+    p_correct = examples.probabilities["correct"]
+    p_correct_confident = examples.probabilities["confident"]
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    loss = -math.log(p_correct)
-    loss_confident = -math.log(p_correct_confident)
+    loss = examples.loss("correct")
+    loss_confident = examples.loss("confident")
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(loss > loss_confident, "Higher confidence should lower the loss.")
@@ -3259,15 +3204,14 @@ from mlsysim.fmt import fmt_multiple, check
 
 class MnistTrainingArithmetic:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    dims = [784, 128, 64, 10]  # running teaching architecture
-    batch_size = 32
+    dims = Scenarios.MnistDenseNetwork.layer_widths  # running teaching architecture
+    batch_size = Scenarios.MnistDenseNetwork.batch_size
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    layer_flops = []
-    for input_width, output_width in zip(dims[:-1], dims[1:]):
-        layer_flops.append(2 * batch_size * input_width * output_width)
-    forward_flops = sum(layer_flops)
-    training_flops = 3 * forward_flops - layer_flops[0]
-    training_ratio = training_flops / forward_flops
+    counts = Scenarios.MnistDenseNetwork.result
+    layer_flops = counts.matmul_flops_per_layer
+    forward_flops = counts.matmul_flops
+    training_flops = counts.training_step_flops  # forward, weight gradients, input gradients after layer 1
+    training_ratio = counts.training_flops_ratio
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(2.08 < training_ratio < 2.09, "MNIST matrix-work multiplier should be about 2.08.")
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
@@ -3300,17 +3244,16 @@ class SevenThreeTrace:
     """Backward trace of a seven misread as a three."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    p_three = 0.6  # scenario assumption: probability on the wrong class
-    p_seven = 0.1  # scenario assumption: probability on the true class
-    dims = [784, 128, 64, 10]
+    misread = Scenarios.DigitCrossEntropyExamples  # a seven read as a three
+    p_three = misread.misread["wrong"]  # probability on the wrong class
+    p_seven = misread.misread["true"]  # probability on the true class
+    dims = Scenarios.MnistDenseNetwork.layer_widths
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    loss = -math.log(p_seven)
-    grad_three = p_three - 0.0
-    grad_seven = p_seven - 1.0
-    w3_grads = dims[2] * dims[3]
-    w2_grads = dims[1] * dims[2]
-    w1_grads = dims[0] * dims[1]
+    loss = misread.misread_loss
+    grad_three = misread.misread_gradient_wrong
+    grad_seven = misread.misread_gradient_true
+    w1_grads, w2_grads, w3_grads = Scenarios.MnistDenseNetwork.result.weights_per_layer
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(loss - 2.303) < 0.001, f"Expected loss ~2.30, got {loss:.3f}")
@@ -3424,8 +3367,8 @@ In practice an autograd\index{Autograd!automatic differentiation} engine perform
 
 from mlsysim.fmt import fmt_int, fmt, check, fmt_qty_int, fmt_memory
 
-_MNIST_LAYERS_DIMS = [784, 128, 64, 10]
-_MNIST_BATCH_SIZE = 32
+_MNIST_LAYERS_DIMS = Scenarios.MnistDenseNetwork.layer_widths
+_MNIST_BATCH_SIZE = Scenarios.MnistDenseNetwork.batch_size
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MnistTrainingMemoryCalc:
@@ -3434,22 +3377,21 @@ class MnistTrainingMemoryCalc:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     layers_dims = _MNIST_LAYERS_DIMS
     batch_size = _MNIST_BATCH_SIZE
-    bytes_per_param = int(BYTES_FP32.to(byte).magnitude)
+    bytes_per_param = int(Scenarios.MnistDenseNetwork.bytes_per_value.to(byte).magnitude)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    total_params = sum(in_dim * out_dim + out_dim for in_dim, out_dim in zip(layers_dims[:-1], layers_dims[1:]))
-    param_mem = memory_from_params(total_params * param, bytes_per_param * byte / param)
-    grad_mem = param_mem
-    opt_mem = param_mem * 2
+    counts = Scenarios.MnistDenseNetwork.result  # Adam: two FP32 values per parameter
+    total_params = counts.parameters
+    param_mem = counts.parameter_bytes
+    grad_mem = counts.gradient_bytes
+    opt_mem = counts.optimizer_bytes
     param_mem_kb = param_mem.to(KB).magnitude
     grad_mem_kb = grad_mem.to(KB).magnitude
     opt_mem_kb = opt_mem.to(KB).magnitude
-    batch_act_sizes = [_MNIST_BATCH_SIZE * dim for dim in _MNIST_LAYERS_DIMS]
-    act_mem = sum(batch_act_sizes) * bytes_per_param * byte
-    inference_peak_act_values = max(
-        _MNIST_BATCH_SIZE * (in_dim + out_dim) for in_dim, out_dim in zip(_MNIST_LAYERS_DIMS[:-1], _MNIST_LAYERS_DIMS[1:])
-    )
-    inf_act = inference_peak_act_values * bytes_per_param * byte
+    batch_act_sizes = counts.activation_values_per_layer
+    act_mem = counts.saved_activation_bytes
+    inference_peak_act_values = counts.inference_activation_values
+    inf_act = counts.inference_activation_bytes
     act_mem_kb = act_mem.to(KB).magnitude
     inf_act_kb = inf_act.to(KB).magnitude
     inference_total_kb = param_mem_kb + inf_act_kb
@@ -3584,7 +3526,7 @@ series = [
     ("Gradients", "OrangeL", "OrangeLine"),
     ("Saved activations", "RedL", "RedLine"),
 ]
-for ax, batch in zip(axes, (_MNIST_BATCH_SIZE, 32 * _MNIST_BATCH_SIZE)):
+for ax, batch in zip(axes, (_MNIST_BATCH_SIZE, Scenarios.MnistDenseNetworkLargeBatch.batch_size)):
     labels, A, G, infer_peak = timeline(batch)
     x = np.arange(len(labels))
     stack = [np.full_like(A, param_kb), np.full_like(A, 2 * param_kb), G, A]
@@ -3641,19 +3583,20 @@ class ParameterGrowth:
     """Parameter counts of notable models over time."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    split_year = 2010
-    rows = [r for r in Literature.Series.NotableModels.entries if r["parameters"]]
+    growth = Scenarios.NotableModelParameterGrowth  # Literature.Series.NotableModels, split at 2010
+    split_year = growth.split_year
+    rows = [r for r in growth.rows if r["parameters"]]
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    years = np.array([dt.date.fromisoformat(r["date"]).year + (dt.date.fromisoformat(r["date"]).timetuple().tm_yday - 1) / 365.25 for r in rows])
-    log_params = np.log10([r["parameters"] for r in rows])
-    early = years < split_year
-    early_slope, early_intercept = np.polyfit(years[early], log_params[early], 1)
-    late_slope, late_intercept = np.polyfit(years[~early], log_params[~early], 1)
-    early_doubling_months = 12 * np.log10(2) / early_slope
-    late_doubling_months = 12 * np.log10(2) / late_slope
-    largest_params = max(r["parameters"] for r in rows)
-    model_count = len(rows)
+    fit = growth.result
+    years = np.array(fit.years)
+    log_params = np.array(fit.log_parameters)
+    early_slope, early_intercept = fit.early_slope, fit.early_intercept
+    late_slope, late_intercept = fit.late_slope, fit.late_intercept
+    early_doubling_months = fit.early_doubling_months
+    late_doubling_months = fit.late_doubling_months
+    largest_params = fit.largest_parameters
+    model_count = fit.model_count
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(25 <= early_doubling_months <= 60, f"Expected ~43-month doubling before 2010, got {early_doubling_months:.0f}.")
@@ -3803,24 +3746,22 @@ class MemoryExplosionCalc:
     """Namespace for Memory Explosion Calc."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    # Re-derived inputs (MNIST canonical architecture: 784→128→64→10)
-    mnist_l1_dim = 784  # input: 28×28 pixels
-    mnist_l2_dim = 128  # hidden layer 1
-    mnist_l3_dim = 64  # hidden layer 2
-    mnist_l4_dim = 10  # output: 10 digit classes
-    mnist_arch_value = [(mnist_l1_dim, mnist_l2_dim), (mnist_l2_dim, mnist_l3_dim), (mnist_l3_dim, mnist_l4_dim)]
-    mnist_params_value = sum(i * o + o for i, o in mnist_arch_value)  # weights + biases
+    # The running MNIST network (784→128→64→10), GPT-2, and ResNet-50, all FP32
+    mnist_counts = Scenarios.MnistDenseNetwork.result
+    gpt2 = Scenarios.Gpt2Fp32AdamOnH100
+    resnet = Scenarios.ResNet50Fp32SgdMomentum
+    mnist_params_value = mnist_counts.parameters  # weights + biases
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    mnist_mem = mnist_params_value * BYTES_FP32
+    mnist_mem = mnist_counts.parameter_bytes
     mnist_mem_kb_value = mnist_mem.to(KB).magnitude  # Decimal KB (1000-byte) for prose display
-    gpt2_params_count_value = Models.Language.GPT2.parameters.to(param).magnitude
-    gpt2_params_b_value = Models.Language.GPT2.parameters.to(Bparam).magnitude
-    gpt2_mem = gpt2_params_count_value * BYTES_FP32
+    gpt2_params_count_value = gpt2.workload.parameters.to(param).magnitude
+    gpt2_params_b_value = gpt2.workload.parameters.to(Bparam).magnitude
+    gpt2_mem = gpt2.weights
     gpt2_mem_gb_value = gpt2_mem.to(GB).magnitude
     mem_jump_value = gpt2_params_count_value / mnist_params_value
-    resnet_params_count_value = Models.Vision.ResNet50.parameters.to(param).magnitude
-    resnet_mem = resnet_params_count_value * BYTES_FP32
+    resnet_params_count_value = resnet.workload.parameters.to(param).magnitude
+    resnet_mem = resnet.weights
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(round(mnist_mem_kb_value) == 438, f"Expected MNIST FP32 memory ~438 KB, got {mnist_mem_kb_value:.1f}")
@@ -3884,8 +3825,7 @@ COLORS = book_style.COLORS
 plt = book_style.plt
 fig, ax = plt.subplots(figsize=(6.2, 3.8))
 
-dims = _MNIST_LAYERS_DIMS
-mnist_params = sum(dims[i] * dims[i + 1] + dims[i + 1] for i in range(len(dims) - 1))
+mnist_params = Scenarios.MnistDenseNetwork.result.parameters
 models = [
     ("MNIST MLP", mnist_params),
     ("ResNet-50", Models.Vision.ResNet50.parameters.to(param).magnitude),
@@ -3899,7 +3839,7 @@ tiers = [
 ]
 y = np.arange(len(models))
 weights = np.array([n * bpp for _, n in models])
-train = weights * 4  # weights + gradients + two Adam buffers, before activations
+train = weights * Scenarios.Gpt2Fp32AdamOnH100.copies  # weights + gradients + two Adam buffers, before activations
 ax.barh(
     y + 0.18,
     train,
@@ -3983,10 +3923,10 @@ class MnistEpochLocal:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     training_examples = int(Datasets.MNIST.training_examples.to(count).magnitude)
-    batch_size = 32
+    batch_size = Scenarios.MnistDenseNetwork.batch_size
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    epoch_batches = training_examples // batch_size
+    epoch_batches = Scenarios.MnistDenseNetwork.result.steps_per_epoch
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(training_examples % batch_size == 0, "MNIST epoch example should divide evenly.")
@@ -4058,43 +3998,36 @@ class EpochTimeEnergy:
     """One training epoch of the running network: work, overhead, and energy."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    # Desktop CPU against H100, FP32; Python dispatch on every launched
+    # operation, plus a kernel launch on the accelerator.
+    epoch = Scenarios.MnistEpochCpuVersusH100
     steps = MnistEpochLocal.epoch_batches
     batch = MnistEpochLocal.batch_size
-    fwd_flops_per_image = 2 * MNISTInference.total_macs
-    train_ratio = MnistTrainingArithmetic.training_ratio
-    intensity_b32 = MnistFlopsCalc.batch_arith_intensity  # FLOP/byte
-    intensity_b1 = MnistFlopsCalc.single_image_arith_intensity  # FLOP/byte
     # Launched operations per step: 3 forward layers (bias + ReLU fused), loss,
     # 5 backward matrix products (no input gradient for raw pixels), 2 ReLU
     # masks, and 1 fused optimizer update.
-    ops_per_step = 3 + 1 + 5 + 2 + 1
-    dispatch = Ops.RuntimeOverheads.PythonDispatch
-    launch = Ops.RuntimeOverheads.KernelLaunch
-    machines = {
-        "cpu": Hardware.Cloud.ReferenceCPU,
-        "acc": Hardware.Cloud.H100,
-    }
-    e_dram_byte = Hardware.Tech.Memory.DRAM.energy_per_byte
+    dispatch = epoch.dispatch
+    launch = epoch.launch
+    machines = {"cpu": epoch.host, "acc": epoch.accelerator}
+    e_dram_byte = epoch.dram_energy_per_byte
     # One FLOP is half of a multiply-accumulate: average the multiply and add energies.
-    e_fp32_flop = (Hardware.Tech.Op.FlopFp32.energy + Hardware.Tech.Op.AddFp32.energy) / 2
+    e_fp32_flop = epoch.flop_energy
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    flops_step = (train_ratio * fwd_flops_per_image * batch) * flop
-    rate = {}
-    for k, hw in machines.items():
-        peak = hw.compute.precision_flops["fp32"].to(flop / second)
-        bw_bound = (hw.memory.bandwidth * intensity_b32 * flop / byte).to(flop / second)
-        rate[k] = min(peak, bw_bound)
-    work_epoch_cpu = (steps * flops_step / rate["cpu"]).to(millisecond)
-    work_epoch_acc = (steps * flops_step / rate["acc"]).to(millisecond)
-    ovh_epoch_cpu = (steps * ops_per_step * dispatch).to(millisecond)
-    ovh_epoch_acc = (steps * ops_per_step * (dispatch + launch)).to(millisecond)
-    total_cpu = work_epoch_cpu + ovh_epoch_cpu
-    total_acc = work_epoch_acc + ovh_epoch_acc
-    acc_work_speedup = (work_epoch_cpu / work_epoch_acc).to("").magnitude
-    ovh_share_acc = (ovh_epoch_acc / total_acc).to("").magnitude
-    move_vs_arith_b32 = (e_dram_byte / (intensity_b32 * flop / byte) / e_fp32_flop).to("").magnitude
-    move_vs_arith_b1 = (e_dram_byte / (intensity_b1 * flop / byte) / e_fp32_flop).to("").magnitude
+    run = epoch.result
+    ops_per_step = run.ops_per_step
+    flops_step = run.step_flops
+    rate = {"cpu": run.rate["host"], "acc": run.rate["accelerator"]}
+    work_epoch_cpu = run.work_time["host"]
+    work_epoch_acc = run.work_time["accelerator"]
+    ovh_epoch_cpu = run.overhead_time["host"]
+    ovh_epoch_acc = run.overhead_time["accelerator"]
+    total_cpu = run.total_time["host"]
+    total_acc = run.total_time["accelerator"]
+    acc_work_speedup = run.work_speedup
+    ovh_share_acc = run.overhead_share_accelerator
+    move_vs_arith_b32 = run.movement_to_arithmetic_energy
+    move_vs_arith_b1 = run.movement_to_arithmetic_energy_batch1
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(rate["cpu"] < rate["acc"], "The accelerator should have the higher attainable rate.")
@@ -4453,35 +4386,30 @@ class MnistInferenceResourceLocal:
     """Namespace for local MNIST inference resource prose."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    in_dim = 784
-    h1_dim = 128
-    h2_dim = 64
-    out_dim = 10
-    batch_size = 32
-    bytes_per_element = BYTES_FP32
-    layers_dims = [in_dim, h1_dim, h2_dim, out_dim]
+    net = Scenarios.MnistDenseNetwork
+    in_dim, h1_dim, h2_dim, out_dim = net.layer_widths
+    batch_size = net.batch_size
+    bytes_per_element = net.bytes_per_value
+    layers_dims = net.layer_widths
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    weights = [in_dim * h1_dim, h1_dim * h2_dim, h2_dim * out_dim]
-    biases = [h1_dim, h2_dim, out_dim]
-    params_per_layer = [w + b for w, b in zip(weights, biases)]
-    total_params = sum(params_per_layer)
-    total_macs = sum(weights)
-    param_mem = memory_from_params(total_params * param, bytes_per_element / param)
-    inf_act_elements = sum(layers_dims)
+    counts = net.result  # Adam: two FP32 values per parameter
+    weights = counts.weights_per_layer
+    biases = counts.biases_per_layer
+    params_per_layer = counts.params_per_layer
+    total_params = counts.parameters
+    total_macs = counts.macs_per_example
+    param_mem = counts.parameter_bytes
+    inf_act_elements = counts.activation_values_per_example
     inf_output_act_elements = sum(layers_dims[1:])
     inf_act = inf_act_elements * bytes_per_element
-    batch_act_elements = batch_size * inf_act_elements
-    batch_act = batch_act_elements * bytes_per_element
-    inference_peak_act_elements = batch_size * max(
-        in_dim + h1_dim,
-        h1_dim + h2_dim,
-        h2_dim + out_dim,
-    )
-    inference_peak_act = inference_peak_act_elements * bytes_per_element
-    inference_total = param_mem + inference_peak_act
-    training_total = param_mem + batch_act + param_mem + (2 * param_mem)
-    training_ratio = (training_total / inference_total).to_base_units().magnitude
+    batch_act_elements = counts.saved_activation_values
+    batch_act = counts.saved_activation_bytes
+    inference_peak_act_elements = counts.inference_activation_values
+    inference_peak_act = counts.inference_activation_bytes
+    inference_total = counts.inference_memory
+    training_total = counts.training_memory
+    training_ratio = counts.training_memory_ratio
     batch_output_act_elements = batch_size * inf_output_act_elements
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -4941,7 +4869,7 @@ The upstream boundary pairs image acquisition with conventional preprocessing\in
 #| echo: false
 #| label: usps-lenet-specs
 from mlsysim import BYTES_FP32, param
-from mlsysim import Models
+from mlsysim import Models, Scenarios
 from mlsysim.fmt import (
     fmt_count,
     fmt_memory,
@@ -4952,7 +4880,7 @@ from mlsysim.fmt import (
 class UspsLenetSpecs:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     lenet_1_params = Models.Vision.LeNet1.parameters.to(param).magnitude
-    running_mnist_params = 109_386  # 784→128→64→10 with biases
+    running_mnist_params = Scenarios.MnistDenseNetwork.result.parameters  # 784→128→64→10 with biases
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     lenet_1_mem = lenet_1_params * BYTES_FP32
@@ -5039,15 +4967,15 @@ class DamMnistDataAxis:
     """Data-axis numbers for the D·A·M reading of the running network."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    side = 28
-    side_doubled = 56  # scenario assumption: doubled input resolution
-    h1 = 128
-    total_macs = 784 * 128 + 128 * 64 + 64 * 10
+    doubled = Scenarios.MnistDenseNetworkDoubledInputSide  # scenario assumption: doubled input resolution
+    side = Datasets.MNIST.image_width
+    h1 = Scenarios.MnistDenseNetwork.layer_widths[1]
+    total_macs = Scenarios.MnistDenseNetwork.result.macs_per_example
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    w1 = side * side * h1
-    w1_doubled = side_doubled * side_doubled * h1
-    w1_share = w1 / total_macs
+    w1 = Scenarios.MnistDenseNetwork.result.weights_per_layer[0]
+    w1_doubled = doubled.result.weights_per_layer[0]
+    w1_share = Scenarios.MnistDenseNetwork.result.first_layer_share
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(w1 == 100_352, f"Expected 100,352 first-layer weights, got {w1}")
@@ -5108,39 +5036,28 @@ class FallacyQuantExamples:
     latency_budget = 50 * ms  # scenario assumption: end-to-end SLO budget
     majority_class = 99
     minority_class = 1
-    mnist_dims = [784, 128, 64, 10]
-    mnist_batch_size = 32
-    bytes_per_element = BYTES_FP32
+    mnist_net = Scenarios.MnistDenseNetwork
+    mnist_dims = mnist_net.layer_widths
+    mnist_batch_size = mnist_net.batch_size
+    bytes_per_element = mnist_net.bytes_per_value
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     pipeline_total = model_latency + preprocessing_latency + postprocessing_latency
     pipeline_over = pipeline_total - latency_budget
     imbalance_majority_acc = majority_class / (majority_class + minority_class) * 100
-    mnist_weights = [
-        mnist_dims[0] * mnist_dims[1],
-        mnist_dims[1] * mnist_dims[2],
-        mnist_dims[2] * mnist_dims[3],
-    ]
-    mnist_biases = mnist_dims[1:]
-    mnist_total_params = sum(w + b for w, b in zip(mnist_weights, mnist_biases))
-    mnist_total_flops = (2 * sum(mnist_weights) * mnist_batch_size) + (2 * sum(mnist_biases) * mnist_batch_size)
-    mnist_param_mem = memory_from_params(mnist_total_params * param, bytes_per_element / param)
-    mnist_batch_act = mnist_batch_size * sum(mnist_dims) * bytes_per_element
-    mnist_batch_traffic = mnist_batch_size * (mnist_dims[0] + 2 * mnist_dims[1] + 2 * mnist_dims[2] + mnist_dims[3]) * bytes_per_element
-    mnist_batch_inference_total = mnist_param_mem + mnist_batch_traffic
-    mnist_inference_peak_act = (
-        mnist_batch_size
-        * max(
-            mnist_dims[0] + mnist_dims[1],
-            mnist_dims[1] + mnist_dims[2],
-            mnist_dims[2] + mnist_dims[3],
-        )
-        * bytes_per_element
-    )
-    mnist_inference_memory_total = mnist_param_mem + mnist_inference_peak_act
-    mnist_training_total = mnist_param_mem + mnist_batch_act + mnist_param_mem + (2 * mnist_param_mem)
-    mnist_arith_intensity = ((mnist_total_flops * flop) / mnist_batch_inference_total).to(flop / byte).magnitude
-    training_ratio = (mnist_training_total / mnist_inference_memory_total).to_base_units().magnitude
+    mnist_counts = mnist_net.result
+    mnist_weights = mnist_counts.weights_per_layer
+    mnist_biases = mnist_counts.biases_per_layer
+    mnist_total_params = mnist_counts.parameters
+    mnist_total_flops = mnist_counts.forward_flops
+    mnist_param_mem = mnist_counts.parameter_bytes
+    mnist_batch_act = mnist_counts.saved_activation_bytes
+    mnist_batch_inference_total = mnist_counts.traffic_bytes  # weights + activation traffic
+    mnist_inference_peak_act = mnist_counts.inference_activation_bytes
+    mnist_inference_memory_total = mnist_counts.inference_memory
+    mnist_training_total = mnist_counts.training_memory
+    mnist_arith_intensity = mnist_counts.intensity.to(flop / byte).magnitude
+    training_ratio = mnist_counts.training_memory_ratio
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(pipeline_total > latency_budget, "Pipeline example should miss the latency SLO.")
@@ -5247,13 +5164,14 @@ class SummaryParadigmCostRecap:
     """Namespace for local chapter-summary paradigm costs."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    rb_ops = 100
-    hog_ops_approx = 8_000
-    mnist_dims = [784, 128, 64, 10]
+    paradigms = Scenarios.DigitRecognitionParadigms
+    rb_ops = paradigms.rule_comparisons
+    hog_ops_approx = paradigms.feature_operations
+    mnist_dims = paradigms.network.layer_widths
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    dl_total_macs = mnist_dims[0] * mnist_dims[1] + mnist_dims[1] * mnist_dims[2] + mnist_dims[2] * mnist_dims[3]
-    dl_ops_ratio = dl_total_macs / rb_ops
+    dl_total_macs = paradigms.network.result.macs_per_example
+    dl_ops_ratio = paradigms.network_to_rule_ratio
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(dl_total_macs == 109_184, f"Expected 109,184 MNIST MACs, got {dl_total_macs}")

@@ -62,6 +62,9 @@ __all__ = [
     "CoolantFlowResult",
     "OutageCostResult",
     "FailureIntervalResult",
+    "SeriesFailureResult",
+    "CheckpointIntervalResult",
+    "RecoveryBudgetResult",
     "GradientSyncResult",
     "CommunicationIntensityResult",
     "TrainingGrowthResult",
@@ -122,6 +125,42 @@ __all__ = [
     "DriveBusResult",
     "ZeroFailureResult",
     "ThrottledStageResult",
+    # Fleet orchestration (added 2026-10-20)
+    "JobSizeMixResult",
+    "PreemptionTaxResult",
+    # Context engineering (added 2026-10-20)
+    "ContextBudgetResult",
+    "AttentionDilutionResult",
+    "ComprehensionByLengthResult",
+    "PrefixLayoutBillResult",
+    "CompactionCadenceResult",
+    "ContextInvalidationResult",
+    "ProtectedFieldCheckResult",
+    # learned proposers (added 2026-10-20)
+    "VlaEvaluationResult",
+    "DecoderFamiliesResult",
+    "ProposerTrafficResult",
+    "EvidenceHorizonResult",
+    # Fleet goodput (added 2026-10-20)
+    "GoodputResult",
+    "RuntimeGoodputResult",
+    # Retrieval from long-term memory (added 2026-10-20)
+    "RetrievalPayloadResult",
+    "Bm25PairResult",
+    "ExactScanFloorResult",
+    "AnnFootprintResult",
+    "GraphNeighborhoodResult",
+    "IndexMaintenanceResult",
+    "StorageAmplificationResult",
+    "MaintainedPolicyCostResult",
+    "WordOverlapResult",
+    # Tool calling (added 2026-10-20)
+    "BlindRetryResult",
+    "ObservationCarryResult",
+    "ModelPollingResult",
+    "ToolCatalogSelectionResult",
+    "ToolkitGranularityResult",
+    "IntegrationAdaptersResult",
 ]
 
 
@@ -716,6 +755,42 @@ class FailureIntervalResult(SolverResult):
     failures_per_day: float
 
 
+class SeriesFailureResult(SolverResult):
+    """Result from SeriesFailureModel: a job that stops when any one component fails.
+
+    Rates are per hour; ``component_rates`` is each component's share per device.
+    """
+    component_rates: Dict[str, float]
+    device_rate: float
+    system_rate: float
+    mtbf: Quantity
+    failures_per_day: float
+
+
+class CheckpointIntervalResult(SolverResult):
+    """Result from CheckpointIntervalModel: the Young-Daly interval and its waste."""
+    write_time: Quantity
+    mtbf: Quantity
+    interval: Quantity
+    write_share: float
+    rework_share: float
+    waste: float
+
+
+class RecoveryBudgetResult(SolverResult):
+    """Result from RecoveryBudgetModel: one cold restart, and its daily cost at a failure rate."""
+    detect: Quantity
+    restart: Quantity
+    reload: Quantity
+    warmup: Quantity
+    total: Quantity
+    failure_interval: Quantity
+    failures_per_day: float
+    lost_per_day: Quantity
+    day_share: float
+    gpu_hours_per_day: float
+
+
 class GradientSyncResult(SolverResult):
     """Result from GradientSyncModel: one data-parallel gradient exchange per link."""
     sync_bytes: Quantity
@@ -935,6 +1010,8 @@ class StoppingBudgetResult(SolverResult):
     clear_over_stop: Optional[float] = None
     speed_ceiling: Optional[Quantity] = None  # fastest speed whose stop, with the overhead, fits
     added_delay_travel: Optional[Quantity] = None  # travel at ``speed`` during a stated delay step
+    delay_ceiling: Optional[Quantity] = None  # longest constant-speed delay whose stop, with the overhead, fits
+    delay_spare: Optional[Quantity] = None    # delay_ceiling - delay
 
     def travel_over(self, duration: Quantity) -> Quantity:
         """Distance covered at ``speed`` over ``duration`` (the cost of one term of the delay)."""
@@ -970,6 +1047,7 @@ class HorizonCompoundingResult(SolverResult):
     error_ratio: float                   # step_error / required_step_error
     required_error_horizon: float        # required_step_error x long horizon
     small_error_limit: float             # -ln(target): the same product as eps -> 0
+    first_horizon_below_target: int      # first horizon whose success falls below the target
 
 
 class AcceptedTaskCostResult(SolverResult):
@@ -1029,6 +1107,7 @@ class AgentRunSummaryResult(SolverResult):
     observations: int
     nonzero_exits: int
     truncated_outputs: int
+    truncated_tasks: int = 0             # tasks with at least one truncated output (added 2026-10-20)
     syntax_error_tasks: int
     syntax_error_accepted: int
     call_bins: List[Dict[str, Any]]      # {"low", "high", "tasks", "accepted"} per bin
@@ -1429,6 +1508,7 @@ class HubDriveElectricalResult(SolverResult):
     step_over_peak: float
     short_peak_electrical: Quantity  # rad/s
     short_peak_wheel_speed: Quantity # rpm
+    pole_frequency: Optional[Quantity] = None  # 1 / (2 pi tau_e), Hz: the winding's current pole
 
 
 class GearedRotorResult(SolverResult):
@@ -1522,3 +1602,1086 @@ class ThrottledStageResult(SolverResult):
     throttled: Quantity
     added_age: Quantity
     added_travel: Quantity
+
+
+# --- Fleet orchestration (added 2026-10-20) ---
+
+class JobSizeMixResult(SolverResult):
+    """Result from JobSizeMixModel: a cluster trace's jobs and GPU time by job-size class.
+
+    Each class dict holds ``jobs``, ``gpu_seconds``, ``job_share``,
+    ``time_share``, and ``mean_gpu_hours`` (GPU-hours per job).
+    """
+    job_count: float
+    gpu_seconds: float
+    classes: Dict[str, Dict[str, float]]
+    service_cv_lower_bound: float    # spread of GPU time per job, between size rows only
+    state_time_shares: Dict[str, float]
+
+
+class PreemptionTaxResult(SolverResult):
+    """Result from PreemptionTaxModel: what one forced preemption, and a day of them, costs."""
+    lost_work: Quantity
+    restart: Quantity
+    reload: Quantity
+    warmup: Quantity
+    relaunch: Quantity               # restart + reload + warmup, no detection
+    per_event: Quantity              # lost work + relaunch
+    cost_per_event: float            # USD
+    events_per_day: float
+    lost_per_day: Quantity
+    gpu_hours_per_day: float
+# ── Test-time deliberation: allocation, pools, checks, search (added 2026-10-20) ──
+
+class ProbeVsAnswerResult(SolverResult):
+    """Result from ProbeVsAnswerModel: a generated explanation against a prepared test."""
+    token_time: Quantity             # decode floor per output token
+    answer_time: Quantity            # answer_tokens * token_time
+    answer_cost: Quantity            # USD of output tokens
+    time_ratio: float                # answer_time / probe_time
+
+
+class AllocationAxesResult(SolverResult):
+    """Result from AllocationAxesModel: one output ceiling spent as depth, breadth, or feedback."""
+    token_time: Quantity
+    depth_input: int
+    depth_output: int
+    depth_time: Quantity
+    depth_cost: Quantity
+    breadth_input: int
+    breadth_output: int
+    breadth_time: Quantity           # concurrent streams: one candidate's generation time
+    breadth_cost: Quantity
+    feedback_input: int              # append-only: every round resends earlier candidates and reports
+    feedback_output: int
+    feedback_time: Quantity          # generation plus every check
+    feedback_cost: Quantity
+    path_ratio: float                # depth_time / breadth_time
+    bill_ratio: float                # breadth_cost / depth_cost
+    breadth_premium: int             # (N - 1) S re-read prompt tokens
+    serial_breadth_time: Quantity    # breadth when one stream runs at a time
+    grown_premium: Optional[int] = None          # premium at a grown prompt
+    grown_premium_cost: Optional[Quantity] = None
+
+
+class BestOfNPoolResult(SolverResult):
+    """Result from BestOfNPoolModel: pass@N, parallel pool against sequential retry, mixed workload."""
+    pass_at: Dict[int, float]        # pool size -> 1 - (1 - p)^N
+    last_gain: float                 # what the largest pool's last candidate adds
+    parallel_per_success: float      # candidates per success, parallel pool of the largest size
+    sequential_candidates: float     # expected candidates, stop at the first pass, same cap
+    sequential_per_success: float    # reduces to 1 / p
+    cost_ratio: float                # parallel / sequential candidates per success
+    mixed_average_rate: float        # the workload's average single-sample rate
+    mixed_plug_in: float             # pass@N at the averaged rate (wrong)
+    mixed_true: float                # pass@N per task, then averaged
+    easy_pass_at_max: float          # the easy half's pass@N
+
+
+class PassAtKEstimateResult(SolverResult):
+    """Result from PassAtKEstimateModel: unbiased subset estimate against the plug-in."""
+    subset_estimate: float
+    plug_in: float
+
+
+class CoverageVsVoteResult(SolverResult):
+    """Result from CoverageVsVoteModel: pool coverage against majority-vote accuracy."""
+    coverage_small: float            # at the largest pool
+    coverage_large: float
+    coverage_small_first: float      # at one sample
+    coverage_large_first: float
+    vote_small: float
+    vote_large: float
+    vote_gain_small: float           # vote gain from the knee to the largest pool, small model
+    vote_gain_after_knee: float      # the larger of the two models' vote gains
+    coverage_gain_small: float       # coverage gain over the same range
+    repair_first: float              # repository-repair coverage at one sample
+    repair_max: float                # at the repair pool size
+
+
+class VerifiedPoolResult(SolverResult):
+    """Result from VerifiedPoolModel: first-passing selection from a fixed pool under a fallible check."""
+    valid_pass: float                # v (1 - eps_FR)
+    invalid_pass: float              # (1 - v) eps_FA
+    pass_probability: float          # q, a candidate passes
+    precision: float                 # passing-set precision
+    defect_given_selection: float
+    any_selection: float             # 1 - (1 - q)^n
+    no_selection: float              # abstention
+    wrong_selection: float           # defective selection per attempt
+    any_false_pass: float            # the batch holds at least one false pass
+    expected_valid_passes: float
+    expected_invalid_passes: float
+    expected_passes: float
+    conditional_loss: Quantity       # loss per selection
+    task_loss: Quantity              # loss per attempt
+    output_bill: Quantity
+    loss_to_bill: float
+
+
+class ArgmaxNoiseResult(SolverResult):
+    """Result from ArgmaxNoiseModel: the winner's scoring error and a loophole's presence in a pool."""
+    expected_max: Dict[int, float]   # pool size -> E[max of N standard normals]
+    asymptote: Dict[int, float]      # pool size (N > 1) -> sqrt(2 ln N)
+    exploit_presence: float          # 1 - (1 - rate)^N at the large pool
+
+
+class ScopedRevisionResult(SolverResult):
+    """Result from ScopedRevisionModel: output of a full against a scoped regeneration."""
+    full_output: int
+    scoped_output: int
+    output_share: float
+    avoided_share: float
+
+
+class PrunedSearchTreeResult(SolverResult):
+    """Result from PrunedSearchTreeModel: tree size with and without a step check."""
+    effective_branching: float       # b (1 - r)
+    critical_rejection: float        # 1 - 1/b: the tree dies out above it
+    unpruned_nodes: int
+    pruned_nodes: float
+    unpruned_leaves: int
+    pruned_leaves: float
+    node_saving: float
+    flat_cut_nodes: float            # the unpruned count cut by r once (a reference)
+    wide_leaves: Optional[int] = None
+
+
+class SearchAccountsResult(SolverResult):
+    """Result from SearchAccountsModel: flat best-of-N against beam search, four accounts."""
+    token_time: Quantity
+    frontier_counts: List[int]       # extensions generated per beam stage
+    beam_segments: int
+    retained: int
+    flat_output_tokens: int
+    beam_output_tokens: int
+    flat_prompt_tokens: int
+    beam_prompt_tokens: int
+    beam_common_prompt_tokens: int   # the task prompt alone, once per extension
+    scorer_tokens: int
+    flat_waves: int
+    beam_waves: int
+    flat_test_waves: int
+    beam_test_waves: int
+    beam_scoring_time: Quantity
+    flat_elapsed: Quantity
+    beam_elapsed: Quantity
+    flat_token_cost: Quantity
+    beam_token_cost: Quantity
+    output_saving: float
+    output_saving_cost: Quantity
+    scorer_cost: Quantity
+    input_premium_cost: Quantity
+    breakeven_input_share: float     # input price fraction at which the bills match
+
+
+class DeadlinePolicyResult(SolverResult):
+    """Result from DeadlinePolicyModel: one candidate, a parallel pool, and feedback under one deadline."""
+    token_time: Quantity
+    round_time: Quantity
+    rounds: int                      # feedback rounds that fit the deadline (capped)
+    requested_time: Quantity         # the requested rounds, deadline ignored
+    revision_input: int
+    a_pass: float
+    b_pass: float
+    c_pass: float
+    c_rounds: float                  # expected rounds of the feedback policy
+    a_input: int
+    b_input: int
+    c_input: float
+    a_output: int
+    b_output: int
+    c_output: float
+    a_cost: Quantity
+    b_cost: Quantity
+    c_cost: Quantity
+    c_time: Quantity
+    max_c_time: Quantity
+    a_cost_per_pass: Quantity
+    b_cost_per_pass: Quantity
+    c_cost_per_pass: Quantity
+    a_output_per_pass: float
+    b_output_per_pass: float
+    c_output_per_pass: float
+    b_over_a: float
+
+
+class RecordedRunCostResult(SolverResult):
+    """Result from RecordedRunCostModel: one public agent run's recorded spend per resolved task."""
+    tasks: int
+    resolved: int
+    resolve_rate: float
+    cost_per_attempt: float          # dollars
+    cost_per_resolved: float
+    unresolved_share: float          # share of spend on attempts that failed
+    input_output_ratio: float
+    median_calls: float
+# --- Context engineering (added 2026-10-20) ----------------------------------
+# What one agent request carries: a budget by role, the softmax cost of
+# admitted keys, measured comprehension by length, a zoned layout's input bill,
+# compaction watermarks, invalidation edits, and a protected-field check.
+
+class ContextBudgetResult(SolverResult):
+    """Result from ContextBudgetModel: a request budgeted by role, appended against selected."""
+    input_limit: int                     # window - output reserve
+    fixed_tokens: int                    # system + tools + task state
+    evidence_tokens: int                 # input limit - system - tools: state plus observations
+    evidence_share: float                # evidence tokens / window
+    observation_budget: int              # input limit - fixed tokens
+    turns_fit: int                       # appended turns that fit the observation budget
+    overflow_turn: int                   # first turn that does not fit
+    overflow_observations: int           # observations the overflow turn needs
+    digest_turns: int                    # appended turns that fit at the digest size
+    max_observation_per_turn: int        # largest per-turn observation that lasts every turn
+    selected_request: int                # fixed tokens + selected observations
+    append_requests: List[int]           # request of each turn when every result is appended
+    append_cumulative: List[int]         # running input sent by appending
+    select_cumulative: List[int]         # running input sent by selecting
+    append_bill: int                     # input tokens over the turns, appending
+    select_bill: int                     # input tokens over the turns, selecting
+    bill_ratio: float                    # append bill / select bill
+    final_append_request: int            # the appending policy's last request
+    final_append_with_reserve: int       # the same plus the output reserve
+
+
+class AttentionDilutionResult(SolverResult):
+    """Result from AttentionDilutionModel: one head's weight on a target among fixed-logit keys."""
+    short_weight: float                  # target weight among the short context's keys
+    long_weight: float                   # target weight among the long context's keys
+    weight_without_lookalikes: Optional[float] = None    # unrelated keys only
+    weight_with_lookalikes: Optional[float] = None       # unrelated keys plus look-alike keys
+    lookalike_equivalent_keys: Optional[float] = None    # unrelated keys that weigh as much as the look-alikes
+    weight_half_unrelated: Optional[float] = None        # half the unrelated keys dropped, look-alikes kept
+    weight_no_unrelated: Optional[float] = None          # every unrelated key dropped, look-alikes kept
+
+
+class ComprehensionByLengthResult(SolverResult):
+    """Result from ComprehensionByLengthModel: models scored at every length of a sweep."""
+    lengths: List[str]                   # length labels, shortest first
+    scored_models: int                   # models with a score at every length
+    median: Dict[str, float]             # length -> median score (fraction)
+    q25: Dict[str, float]                # length -> 25th percentile
+    q75: Dict[str, float]                # length -> 75th percentile
+    held_count: int                      # models at or above the bar at the longest length
+    lowest_last: float                   # lowest score at the longest length
+    highest_last: float                  # highest score at the longest length
+    lowest_model: str
+    highest_model: str
+
+
+class PrefixLayoutBillResult(SolverResult):
+    """Result from PrefixLayoutBillModel: input bill of a trajectory, volatile first against zoned."""
+    request_tokens: int                  # root + trunk + leaf, every call
+    total_input: int                     # request tokens x calls
+    warm_calls: int                      # calls that change only the leaf
+    uncached_tokens: int                 # zoned layout's prefill
+    cached_tokens: int                   # zoned layout's reused prefix tokens
+    hit_rate: float                      # cached / total input
+    unstable_cost: Quantity              # USD, no prefix reused
+    stable_cost: Quantity                # USD, zoned layout
+    cost_ratio: float                    # unstable / stable
+    prefill_ratio: float                 # total input / uncached tokens
+    unstable_cost_per_call: Quantity
+    stable_cost_per_call: Quantity
+    rewrite_tokens: int                  # trunk + leaf: the prefill of one trunk rewrite
+    rewrite_in_leaf_calls: float         # rewrite tokens / leaf tokens
+
+
+class CompactionCadenceResult(SolverResult):
+    """Result from CompactionCadenceModel: passes between two watermarks over a turn budget."""
+    input_limit: int                     # window - output reserve
+    cycle_turns: int                     # turns between passes
+    trigger_length: int                  # request length when a pass fires
+    overshoot: int                       # trigger length - trigger watermark
+    length_with_reserve: int             # trigger length + output reserve
+    fits_window: bool
+    passes: int                          # passes within the turn budget
+    lengths: List[int]                   # request length after each turn's append, before any pass
+    alternate_cycle_turns: Optional[int] = None    # the same at the alternate target
+    alternate_passes: Optional[int] = None
+    alternate_lengths: Optional[List[int]] = None
+    frequency_ratio: Optional[float] = None        # cycle / alternate cycle
+
+
+class ContextInvalidationResult(SolverResult):
+    """Result from ContextInvalidationModel: remove, replace, or append a notice for stale text."""
+    removed_total: int                   # resident tokens after removal
+    removed_suffix: int                  # tokens after the reused prefix
+    replaced_total: int                  # resident tokens after an in-place marker
+    replaced_suffix: int
+    appended_total: int                  # resident tokens after an appended notice
+    appended_suffix: int
+    suffix_ratio: float                  # replaced suffix / appended suffix
+
+
+class ProtectedFieldCheckResult(SolverResult):
+    """Result from ProtectedFieldCheckModel: cost per accepted task with and without a check."""
+    exposures: int                       # constraints x rounds
+    survival_unchecked: float            # every constraint survives every round
+    acceptance_unchecked: float
+    cost_per_accepted_unchecked: float   # USD
+    undetected_loss: float               # per-round loss the check misses
+    survival_checked: float
+    acceptance_checked: float
+    attempt_cost_checked: float          # USD: attempt plus one check per round
+    cost_per_accepted_checked: float     # USD
+    checked_rounds_below_floor: int      # first round count at which checked survival falls below the floor
+    max_loss_for_target: Optional[float] = None    # per-round loss that holds the target survival
+# --- Learned proposers: VLA evaluation, decoders, bus traffic, evidence (added 2026-10-20) ---
+
+class VlaEvaluationResult(SolverResult):
+    """Result from VlaEvaluationModel: one fresh VLA evaluation and its roofline coordinates."""
+    weight_memory: Quantity                  # stored weights at the evaluated precision
+    sustained_bandwidth: Quantity            # peak bandwidth x bus efficiency
+    achieved_rate: Quantity                  # 16-bit peak x compute utilization
+    ridge_intensity: Quantity                # 16-bit peak / peak bandwidth
+    prefill_tokens: int
+    decode_steps: int
+    prefill_linear_flops: Quantity           # 2 N S
+    prefill_attention_flops: Quantity        # the S^2 attention term
+    prefill_flops: Quantity
+    prefill_intensity: Quantity              # linear FLOPs per weight byte
+    decode_intensity: Quantity               # 2 N FLOP per weight sweep, per weight byte
+    t_prefill_compute: Quantity
+    t_weight_sweep: Quantity
+    weight_sweep_rate: Quantity              # 1 / t_weight_sweep: the weight-streaming ceiling
+    t_prefill: Quantity
+    prefill_bound: str                       # "compute" or "memory"
+    t_decode_step: Quantity
+    t_decode: Quantity
+    t_total: Quantity
+    f_max: Quantity
+    prefill_share: float                     # t_prefill / t_total
+    prefill_ceiling: Quantity                # 1 / t_prefill: no weight-only format passes it
+
+
+class DecoderFamiliesResult(SolverResult):
+    """Result from DecoderFamiliesModel: one fresh chunk per decoder family on one backbone."""
+    binned_tokens: int
+    t_prefill: Quantity                      # prefill only, shared by every family
+    t_binned: Quantity
+    t_fast: Quantity
+    t_parallel: Quantity
+    expert_weights: Quantity
+    kv_per_token: Quantity                   # full-width keys and values, all layers
+    prefix_kv: Quantity                      # cached KV of the input tokens
+    t_expert_step_bandwidth: Quantity
+    t_expert_step_compute: Quantity
+    t_expert_step: Quantity
+    t_expert: Quantity
+    binned_over_expert: float
+    prefill_over_period: float               # shared prefill / renewal period
+
+
+class ProposerTrafficResult(SolverResult):
+    """Result from ProposerTrafficModel: two proposers' weight traffic on one memory bus."""
+    sustained_bandwidth: Quantity
+    intent_weights_fp16: Quantity
+    intent_weights_deployed: Quantity
+    chunk_weights: Quantity                  # chunk policy, 16-bit
+    intent_sweep_fp16: Quantity
+    intent_sweep_rate_fp16: Quantity         # the 16-bit weight-streaming ceiling
+    intent_sweep_deployed: Quantity
+    intent_sweep_rate_deployed: Quantity
+    amortized_sweep: Quantity                # 16-bit sweep / H
+    chunk_sweep: Quantity
+    chunk_sweep_rate: Quantity
+    chunk_sweep_share: float                 # chunk sweep x renewal rate
+    tick_over_sweep_rate: float              # permission tick / 16-bit sweep rate
+    setpoint_rate: Quantity
+    single_step_demand: Quantity             # one 16-bit sweep per setpoint
+    single_step_overload: float              # that demand / sustained bandwidth
+    chunked_demand: Quantity                 # one sweep per chunk of H
+    chunked_share: float
+    renewal_gap: float                       # intent latency in chunk renewal periods
+    sweeps_per_evaluation: int
+    intent_traffic: Quantity
+    chunk_traffic: Quantity
+    proposer_traffic: Quantity
+    proposer_share: float
+    decode_duty: float                       # intent decode time x intent rate
+
+
+class EvidenceHorizonResult(SolverResult):
+    """Result from EvidenceHorizonModel: a tracked target's evidence horizon against the chunk schedule."""
+    margin: Quantity                         # tolerance - initial error
+    untracked_deadline: Quantity             # margin / target speed
+    horizon: Quantity                        # sqrt(2 margin / a_slip)
+    renewal_period: Quantity
+    age_at_replacement: Quantity             # renewal period + inference
+    drift_at_replacement: Quantity
+    horizon_spare: Quantity                  # horizon - age at replacement
+    fits: bool
+    min_supply_setpoints: int
+    chunk_span: Quantity
+    drift_at_chunk_end: Quantity
+    error_at_chunk_end: Quantity             # initial error + drift at chunk end
+    outlast: Quantity                        # chunk span - horizon
+    setpoints_within_horizon: float
+
+
+# ── Fleet goodput (added 2026-10-20) ──────────────────────────────────────────
+
+class GoodputResult(SolverResult):
+    """Result from GoodputModel: ML productivity goodput S x R x P and where the rest went.
+
+    Shares are of offered capacity-time; each lost interval is charged at the
+    first boundary it fails (scheduling, then runtime, then program).
+    """
+    mpg: float                               # S x R x P
+    job_product: float                       # R x P, the job's own share of held time
+    after_scheduling: float                  # S
+    after_runtime: float                     # S x R
+    scheduling_share: float                  # 1 - S
+    runtime_share: float                     # S (1 - R)
+    program_share: float                     # S R (1 - P)
+    point_value: Dict[str, float]            # one point of a factor = product of the other two
+    ceiling_ratio: Dict[str, float]          # ceiling / current, per factor with a ceiling
+    ceiling_gain: Dict[str, float]           # MPG gained at each factor's ceiling, the others held
+    mpg_at_ceiling: Dict[str, float]
+    full_scheduling_gain: float              # MPG gained by a perfect S
+    cost_multiple: float                     # 1 / MPG, price of a useful unit over the raw price
+    job_cost_multiple: float                 # 1 / (R x P), a chargeback on held hours only
+    runtime_headroom: float                  # 1 / R - 1, the largest relative gain left in R
+    useful_rate: Optional[Quantity] = None   # device-hour rate / MPG
+
+
+class RuntimeGoodputResult(SolverResult):
+    """Result from RuntimeGoodputModel: held time a job keeps as retained steps, term by term.
+
+    Every ``*_share`` is a share of held time; the five add to ``runtime_loss``
+    (first-order: each term small, so overlaps are neglected).
+    """
+    mtbf: Quantity                           # system failure interval
+    write_time: Quantity                     # one checkpoint write
+    interval: Quantity                       # Young-Daly checkpoint interval
+    write_share: float
+    rework_share: float
+    checkpoint_share: float                  # write + rework at the interval
+    recovery_time: Quantity                  # detect + restart + reload + warmup
+    recovery_share: float                    # recovery_time / MTBF (rework counted in checkpoints)
+    startup_time: Quantity                   # restart + reload + warmup, no detection
+    startup_share: float                     # startup_time / held window
+    input_wait_share: float
+    preemption_cost: Quantity                # lost work + startup, per forced preemption
+    preemption_share: float                  # rate x cost
+    failure_side: float                      # checkpoints + recovery
+    runtime_loss: float
+    runtime_goodput: float
+    interruption_interval: Quantity          # MTBF with forced preemptions counted as interruptions
+    interruption_checkpoint_interval: Quantity
+# --- Serving at scale: traces, frontiers, admission (added 2026-10-20) --------
+
+class RequestTraceResult(SolverResult):
+    """Result from RequestTraceModel: arrivals and token lengths of a request trace."""
+    requests: int
+    duration: Quantity                       # first to last arrival
+    arrival_rate: Quantity                   # requests / duration
+    median_prompt: float
+    median_output: float
+    mean_prompt: float
+    mean_output: float
+    max_output: float
+    batch_size: int
+    fixed_batch_idle_share: float            # mean of 1 - mean/max over consecutive batches
+    per_second_mean: float                   # arrivals per one-second bin, empty seconds included
+    per_second_peak: int                     # busiest one-second bin
+
+
+class TrafficProfileResult(SolverResult):
+    """Result from TrafficProfileModel: request rate over a binned week."""
+    peak_rate: Quantity
+    min_rate: Quantity
+    weekday_trough_low: Quantity             # lowest and highest nightly minimum, weekdays
+    weekday_trough_high: Quantity
+    weekday_peak_low: Quantity               # lowest and highest daily maximum, weekdays
+    weekday_peak_high: Quantity
+    weekday_peak_to_trough: float            # mean over weekdays of max / min
+
+
+class ServingFrontierResult(SolverResult):
+    """Result from ServingFrontierModel: one accelerator's measured frontier and its best rate at a target."""
+    frontier: List[Tuple[float, float]]      # (interactivity, throughput), no point beaten on both
+    peak_interactivity: float                # interactivity of the highest-throughput point
+    peak_throughput: float
+    best_at: float                           # highest throughput among rows meeting the target
+
+
+# --- KV cache management: footprint, paging, prefix reuse, pauses, residency (added 2026-10-20) ---
+# KvAdmissionResult: copied verbatim from the v2-10 inference branch (same name and fields).
+class KvAdmissionResult(SolverResult):
+    """Result from KvAdmissionModel: requests of one context length that fit a replica's KV budget."""
+    head_dim: int
+    weights: Quantity
+    hbm_total: Quantity
+    kv_budget: Quantity                      # HBM - weights - reserve
+    kv_per_token: Quantity
+    kv_per_request: Quantity
+    max_requests: int                        # floor(kv_budget / kv_per_request)
+
+
+class PrecisionDividendResult(SolverResult):
+    """Result from PrecisionDividendModel: maximum batch before and after lower precision."""
+    weights_per_device: Quantity
+    weights_per_device_low: Quantity
+    kv_budget_per_device: Quantity
+    kv_budget_per_device_low: Quantity
+    kv_per_request: Quantity                 # whole request at the base KV precision
+    kv_per_request_low: Quantity
+    kv_per_request_per_device: Quantity
+    kv_per_request_per_device_low: Quantity
+    max_batch: int
+    max_batch_low: int
+    dividend: float                          # max_batch_low / max_batch
+    budget_gain: float                       # KV budget low / KV budget base
+
+
+class BallsIntoBinsResult(SolverResult):
+    """Result from BallsIntoBinsModel: simulated busiest-bin load, n balls into n bins."""
+    bins: List[int]
+    max_load: Dict[int, List[float]]         # choices -> mean busiest-bin load per bin count
+
+
+__all__ += [
+    "RequestTraceResult",
+    "TrafficProfileResult",
+    "ServingFrontierResult",
+    "KvAdmissionResult",
+    "PrecisionDividendResult",
+    "BallsIntoBinsResult",
+]
+# --- Retrieval from long-term memory (added 2026-10-20) ------------------------
+# Staging whole records in a token allowance, BM25 ranking, the exact-scan
+# bandwidth floor, approximate-index bytes, typed traversal depth, keeping an
+# index current, auxiliary bytes per store, and word overlap.
+
+class RetrievalPayloadResult(SolverResult):
+    """Result from RetrievalPayloadModel: whole serialized records in a retrieval allowance."""
+    allowance: int                       # window - output reserve - other input
+    record: int                          # body + metadata, tokens per serialized record
+    records: int                         # whole records that fit after the envelope
+    used: int                            # envelope + records x record
+    remaining: int                       # allowance - used
+    body_only: int                       # records a body-only count admits
+    body_only_used: int                  # those records serialized with metadata and envelope
+    overshoot: int                       # body_only_used - allowance
+    overcount: int                       # body_only - records
+    scaled_metadata: Optional[int] = None          # metadata after the stated scale
+    scaled_metadata_records: Optional[int] = None  # whole records at that metadata size
+
+
+class Bm25PairResult(SolverResult):
+    """Result from Bm25PairModel: one query term scored in a short and a long document."""
+    idf: float
+    short_normalizer: float              # k1 (1 - b + b |D| / avgdl), short document
+    long_normalizer: float
+    short_score: float
+    long_score: float
+
+
+class ExactScanFloorResult(SolverResult):
+    """Result from ExactScanFloorModel: the bandwidth floor of an exact vector scan."""
+    footprint: Quantity                  # bytes streamed per scan
+    bytes_per_vector: Quantity
+    flops: Quantity                      # 2 N d
+    intensity: Quantity                  # FLOP per byte
+    ridge: Quantity                      # host peak / bandwidth, FLOP per byte
+    stream_time: Quantity                # footprint / bandwidth
+    math_time: Quantity                  # flops / peak
+    trajectory_time: Optional[Quantity] = None     # searches x stream time
+    filtered_time: Optional[Quantity] = None       # stream time of the filtered set
+    budget_vectors: Optional[float] = None         # vectors the budget can stream
+
+
+class AnnFootprintResult(SolverResult):
+    """Result from AnnFootprintModel: resident bytes of a graph index and of PQ codes."""
+    raw: Quantity                        # full-precision vectors
+    graph: Quantity                      # graph links
+    graph_total: Quantity                # vectors + links
+    codes: Quantity                      # PQ codes
+    compression: float                   # raw / codes
+    lookup_table: Quantity               # subvectors x centroids x entry
+    sub_dim: int                         # components per subvector
+    bytes_per_vector: Quantity           # full precision
+    code_bytes_per_vector: Quantity
+
+
+class GraphNeighborhoodResult(SolverResult):
+    """Result from GraphNeighborhoodModel: an exact tree's neighborhood against an allowance."""
+    allowance: int
+    nodes_by_depth: List[int]            # cumulative nodes through depth 0, 1, ..., depth
+    tokens_by_depth: List[int]           # serialized tokens through each depth
+    nodes: int                           # through the stated depth
+    required: int                        # tokens through the stated depth
+    fit: int                             # most whole nodes the allowance holds
+    packed: int                          # tokens of that packing
+    shallow_nodes: int                   # one level less
+    shallow_required: int
+
+
+class IndexMaintenanceResult(SolverResult):
+    """Result from IndexMaintenanceModel: re-indexing an edit against excluding stale entries."""
+    chunks: int
+    batches: int
+    local_time: Quantity                 # parse + postings + local embedding batches
+    remote_batch_time: Quantity          # parse + postings + one remote request per batch
+    remote_per_file_time: Quantity       # parse + postings + one remote request per file
+    exclusion_write_time: Quantity       # one exclusion entry per changed file
+    exclusion_check_time: Quantity       # one lookup per candidate
+    write_path_ratio: float              # local re-index / exclusion write
+
+
+class StorageAmplificationResult(SolverResult):
+    """Result from StorageAmplificationModel: auxiliary bytes and re-index time of two stores."""
+    raw: Quantity                        # source bytes
+    postings: Quantity
+    graph: Quantity                      # structural edges
+    chunks: int
+    vectors: Quantity
+    vector_links: Quantity               # graph-index links over the vectors
+    aux_lexical_graph: Quantity          # postings + edges
+    aux_lexical_dense: Quantity          # postings + vectors + links
+    ratio_lexical_graph: float           # auxiliary / source
+    ratio_lexical_dense: float
+    edited_chunks: int
+    reindex_lexical_graph: Quantity
+    reindex_lexical_dense: Quantity
+    bytes_ratio: float                   # dense store / graph store, auxiliary bytes
+    time_ratio: float                    # dense store / graph store, re-index time
+
+
+class MaintainedPolicyCostResult(SolverResult):
+    """Result from MaintainedPolicyCostModel: cost per accepted task with and without upkeep."""
+    baseline_cost: float                 # cost per accepted task, units of the baseline attempt
+    maintained_cost: float
+    change: float                        # maintained / baseline - 1
+    break_even_acceptance: float         # acceptance at which the two match
+
+
+class WordOverlapResult(SolverResult):
+    """Result from WordOverlapModel: distinct words two texts share."""
+    shared: int
+    union: int
+    first_words: int
+    second_words: int
+    jaccard: float                       # shared / union
+
+class KvAttentionDesignResult(SolverResult):
+    """Result from KvAttentionDesignModel: bytes per token by attention design."""
+    per_token: Dict[str, Quantity]           # model name -> KV bytes per token
+    design: Dict[str, str]                   # model name -> MHA, GQA, or MLA
+    mha_over_mla: float
+    gqa_over_mla: float
+    gqa_session: Quantity                    # one session of session_tokens, GQA model
+    mla_session: Quantity
+
+
+class PagedAllocationResult(SolverResult):
+    """Result from PagedAllocationModel: full-cap reservation against paged blocks."""
+    reservation: Quantity                    # cap x bytes per token
+    reservations: int                        # full-cap reservations in the pool
+    final_length_efficiency: float           # mean final length / cap
+    small_block: Quantity                    # bytes of one small block
+    large_block: Quantity
+    small_tail_tokens: int                   # worst-case unused slots, small blocks
+    large_tail_tokens: int
+    small_tail: Quantity
+    large_tail: Quantity
+    large_tail_share: float                  # worst large tail / cap
+    small_allocated_tokens: float            # expected tokens held per request
+    small_waste: float                       # expected internal fragmentation
+    large_allocated_tokens: float
+    large_waste: float
+    paged_fit: int                           # final-length snapshots, small blocks
+    paged_gain: float                        # paged fit / reservations
+
+
+class PrefixRebuildResult(SolverResult):
+    """Result from PrefixRebuildModel: the prefill a prefix hit avoids, against one suffix pass."""
+    n_params: float
+    state: Quantity                          # KV bytes of the prefix
+    linear_ops: Quantity                     # 2 P S
+    attention_ops: Quantity                  # 2 L d S^2 (causal)
+    sustained_rate: Quantity                 # accelerators x peak x utilization
+    rebuild_time: Quantity                   # (linear + attention) / rate
+    weight_read_time: Quantity               # weights / node bandwidth
+    suffix_ops_time: Quantity                # 2 P S_suffix / rate
+    rebuild_over_hit: float                  # rebuild time / max(weight read, suffix ops)
+
+
+class ChunkedPrefillResult(SolverResult):
+    """Result from ChunkedPrefillModel: decode gap with a monolithic prefill against chunks."""
+    decode_step: Quantity                    # decode-only iteration
+    monolithic_prefill: Quantity             # the whole prompt in one iteration
+    monolithic_gap: Quantity                 # decode step + monolithic prefill
+    chunks: int
+    chunked_iteration: Quantity              # one chunk beside the decodes
+    chunked_done: Quantity                   # chunks x iteration
+    gap_ratio: float                         # monolithic gap / chunked iteration
+
+
+class PausedKvStateResult(SolverResult):
+    """Result from PausedKvStateModel: keep, move, or drop a paused request's KV state."""
+    blocks: int
+    state: Quantity                          # uniquely reclaimable KV bytes
+    link: Quantity                           # accelerators x host link
+    copy_out: Quantity
+    copy_in: Quantity
+    round_trip: Quantity                     # copy out + copy in
+    recompute: Quantity                      # 2 P S / rate, weight work only
+    recompute_over_reload: float
+    recompute_over_reload_derated: float     # at the derated link fraction
+    held_occupancy: Quantity                 # state x wait (bytes x time)
+    released_on_demand: Quantity             # wait - copy out
+    released_prefetch: Quantity              # wait - copy out - copy in
+    burst: Quantity                          # returns x state
+    burst_time: Quantity                     # burst / link
+    burst_slowdown: float                    # burst time / one reload
+
+
+class KvBlockSharingResult(SolverResult):
+    """Result from KvBlockSharingModel: block-rounded resident fit, shared prefix, and turn rate."""
+    block_bytes: Quantity
+    usable_blocks: int                       # floor((1 - headroom) pool / block)
+    usable: Quantity
+    unshared_blocks: int                     # ceil((context + output) / block)
+    common_blocks: int
+    private_blocks: int
+    unshared_bytes: Quantity
+    common_bytes: Quantity
+    private_bytes: Quantity
+    fit_unshared: int
+    fit_shared: int
+    retained_time: Quantity                  # generation + wait
+    retained_rate: Quantity                  # fit unshared / retained time
+    released_rate: Quantity                  # fit unshared / generation
+    shared_retained_rate: Quantity           # fit shared / retained time
+    shared_released_rate: Quantity           # fit shared / generation
+    residency_factor: float                  # 1 + wait / generation
+    shared_fraction: float                   # common blocks / unshared blocks
+    share_gain: float                        # fit shared / fit unshared
+    share_bound: float                       # 1 / (1 - f)
+
+
+class KvResidencyArchetypeResult(SolverResult):
+    """Result from KvResidencyArchetypeModel: sharing, residency tax, and resume cost for one workload."""
+    shared_fraction: float                   # shared prefix / context
+    fit_unshared: int
+    fit_shared: int
+    share_gain: float
+    residency_factor: float
+    turn_cycle: Quantity                     # generation + wait
+    recompute: Quantity
+    reload: Quantity
+    recompute_share: float                   # recompute / turn cycle
+    shared_retained_rate: Quantity           # fit shared / turn cycle
+    shared_released_rate: Quantity           # fit shared / generation
+# --- The real-time permission path of an embodied machine (added 2026-10-20) ---
+
+class PhaseLagBudgetResult(SolverResult):
+    """Result from PhaseLagBudgetModel: delay terms of a sampled loop and the phase they spend at crossover."""
+    hold_delay: Quantity                     # zero-order hold, half a sample period
+    total_delay: Quantity                    # hold + compute + transport
+    phase_hold: Quantity                     # degrees at crossover
+    phase_compute: Quantity
+    phase_transport: Quantity
+    phase_total: Quantity
+    phase_per_delay: Quantity                # degrees per millisecond of delay at crossover
+    allowed_delay: Optional[Quantity] = None  # largest total delay the allowance absorbs
+    delay_margin: Optional[Quantity] = None   # allowed_delay - total_delay (negative when it fails)
+    crossover_ceiling: Optional[Quantity] = None  # highest crossover the total delay supports
+    over_allowance: Optional[float] = None   # phase_total / phase_allowance
+    fits: Optional[bool] = None
+
+
+class ResponseTimeResult(SolverResult):
+    """Result from ResponseTimeModel: R = C + B + I of one periodic task against its deadline."""
+    wcet: Quantity
+    blocking: Quantity
+    interference: Quantity
+    deadline: Quantity
+    response: Quantity
+    margin: Quantity                         # deadline - response (negative when it misses)
+    meets_deadline: bool
+    blocking_limit: Quantity                 # largest blocking that still meets the deadline
+    wcet_claim: Optional[Quantity] = None    # declared WCET above the observed unloaded run
+
+
+class CanFdBusResult(SolverResult):
+    """Result from CanFdBusModel: serialization occupancy of a cyclic CAN FD axis exchange."""
+    frame_time: Quantity                     # one frame, both phases
+    nominal_time: Quantity                   # arbitration-phase share of one frame
+    data_time: Quantity                      # data-phase share of one frame
+    bits_nominal: int
+    bits_data: int
+    stuff_bits: int
+    frames: int                              # frames per cycle
+    occupancy: Quantity                      # frames x frame_time
+    utilization: float                       # occupancy / cycle
+    unallocated: Quantity                    # cycle - occupancy (negative when it overruns)
+    fits: bool
+    axes_capacity: int                       # most axes whose frames fit one cycle
+
+
+class EtherCatCycleResult(SolverResult):
+    """Result from EtherCatCycleModel: one summation frame through a chain of drives."""
+    frame_time: Quantity                     # serialization of the one frame
+    forward_time: Quantity                   # per-node forwarding, all nodes
+    occupancy: Quantity                      # frame_time + forward_time
+    utilization: float
+    unallocated: Quantity
+    fits: bool
+
+
+class LeaseBudgetResult(SolverResult):
+    """Result from LeaseBudgetModel: a chunk lease priced in the stopping budget and bounded by the lease rule."""
+    lease: Quantity
+    lease_path: Quantity                     # lease + tick + bus: last admission to the stop command
+    lease_path_travel: Quantity              # travel at speed along the lease path
+    admission_to_brake_onset: Quantity       # lease path + brake onset
+    admission_to_brake_onset_travel: Quantity
+    body_terms_distance: Quantity            # braking + overhead + onset travel
+    running_total: Quantity                  # body terms + lease path travel
+    spare: Quantity                          # clear distance - running total
+    delay_ceiling: Quantity                  # longest pre-brake delay whose stop fits
+    delay_spare: Quantity                    # delay ceiling - admission to brake onset
+    lease_floor: Quantity                    # renewal period + renewal jitter
+    lease_ceiling: Quantity                  # delay ceiling - tick - bus - brake onset
+    lease_ceiling_after_age: Quantity        # ... - observation age at dispatch
+    lease_ceiling_at_admission: Quantity     # ... - evidence age at admission
+    fits: bool                               # floor < lease <= ceiling at admission
+    stall_last_admission: Quantity           # second renewal completes, then the proposer stalls
+    stall_lease_expiry: Quantity
+    stall_brake_onset: Quantity
+
+
+class LatencyTailResult(SolverResult):
+    """Result from LatencyTailModel: the tail of a measured latency sample."""
+    count: int
+    p50: Quantity
+    p99: Quantity
+    p999: Quantity
+    maximum: Quantity
+    over_threshold: Optional[int] = None     # samples longer than the stated threshold
+
+
+# --- Tool calling (added 2026-10-20) ------------------------------------------
+
+class BlindRetryResult(SolverResult):
+    """Result from BlindRetryModel: timeouts and duplicate effects under one blind retry."""
+    timeout_probability: float           # 1 - (1 - q)(1 - r)
+    duplicate_probability: float         # (1 - q) r (1 - q)
+    calls: int                           # calls in the period
+    timeouts: float                      # expected timeouts in the period
+    duplicates: float                    # expected duplicate effects in the period
+
+
+class ObservationCarryResult(SolverResult):
+    """Result from ObservationCarryModel: a raw log against the shaped view later calls carry."""
+    raw_tokens: Quantity                 # raw bytes / bytes per token
+    raw_windows: float                   # raw tokens / window
+    shaped_share: float                  # shaped tokens / window
+    carried_tokens: Quantity             # shaped tokens x later calls
+    carried_cost_uncached: Quantity      # USD
+    carried_cost_cached: Quantity        # USD, at the cached share of the price
+
+
+class ModelPollingResult(SolverResult):
+    """Result from ModelPollingModel: status calls a model makes while a job is pending."""
+    polls: int                           # ceil(T / dt) - 1
+    input_tokens: int
+    output_tokens: int
+    cached_price: Quantity               # USD per cached input token
+    blended_input_price: Quantity        # USD per input token at the cache hit share
+    input_cost: Quantity                 # USD
+    output_cost: Quantity                # USD
+    cost: Quantity                       # USD, input + output
+    worst_delay: Quantity                # one poll interval
+
+
+class ToolCatalogSelectionResult(SolverResult):
+    """Result from ToolCatalogSelectionModel: descriptor tokens staged per call, full against selected."""
+    full_tokens: int                     # registered x per descriptor
+    selected_descriptor_tokens: int      # selected x per descriptor
+    selected_tokens: int                 # selected descriptors + overhead
+    released_tokens: int                 # full - selected
+    unused_descriptor_tokens: int        # descriptors selection leaves out
+    break_even_unused: float             # overhead / per descriptor
+
+
+class ToolkitGranularityResult(SolverResult):
+    """Result from ToolkitGranularityModel: structured tools against one shell tool, per accepted task."""
+    structured_descriptor_tokens: int    # tools x tokens, per call
+    saved_tokens: int                    # per trajectory
+    saved_cost: Quantity                 # USD per trajectory
+    shell_attempt_cost: Quantity         # structured attempt - savings
+    structured_cost_per_accepted: Quantity
+    shell_cost_per_accepted: Quantity
+    structured_cost_per_accepted_with_loss: Quantity
+    shell_cost_per_accepted_with_loss: Quantity
+    break_even_change_probability: float  # shell change probability matching structured
+
+
+class IntegrationAdaptersResult(SolverResult):
+    """Result from IntegrationAdaptersModel: pairwise adapters against one shared protocol."""
+    pairwise: int                        # hosts x services
+    shared: int                          # hosts + services
+
+
+# --- Agent sandboxes (added 2026-10-20) ---
+class SyscallTaxResult(SolverResult):
+    """Result from SyscallTaxModel: per-call mediation cost and added time by envelope."""
+    container_call: Quantity                 # trap + in-kernel filter
+    microvm_call: Quantity                   # native trap in the guest
+    userspace_call: Quantity                 # trap + emulation + switch
+    container_total: Quantity                # over all ordinary calls
+    microvm_total: Quantity
+    userspace_total: Quantity
+    userspace_vs_microvm: float              # per-call ratio
+
+
+class EnvelopeAmortizationResult(SolverResult):
+    """Result from EnvelopeAmortizationModel: setup paid per call or once per trajectory."""
+    useful_work: Quantity                    # calls x work per call
+    per_call_setup: Quantity                 # calls x setup
+    per_call_total: Quantity                 # fresh envelope per call
+    per_trajectory_total: Quantity           # one envelope retained
+    setup_saved: Quantity
+    reuse_speedup: float                     # per-call total / per-trajectory total
+    setup_share: float                       # setup / (setup + work) of a fresh call
+    work_for_cap: Quantity                   # work per call that holds setup to the cap
+
+
+class WorkspaceProvisioningResult(SolverResult):
+    """Result from WorkspaceProvisioningModel: full copy against copy-on-write, and first-write granularity."""
+    full_copy: Quantity                      # workspaces x base image
+    cow_written: Quantity                    # workspaces x bytes written
+    full_copy_time: Quantity                 # lower bound at the drive's sequential rate
+    cow_time: Quantity
+    copy_vs_cow: float                       # base image / bytes written
+    file_copy: Quantity                      # workspaces x fixture
+    block_copy: Quantity                     # workspaces x one block
+    logical_changes: Quantity                # workspaces x bytes modified
+    file_vs_block: float                     # fixture / block
+
+
+class SandboxPoolReserveResult(SolverResult):
+    """Result from SandboxPoolReserveModel: active leases, standby reserve, and resident memory."""
+    active: float                            # Little's law, arrival rate x hold time
+    restore_arrivals: float                  # arrivals during one restore (Poisson mean)
+    initial_miss: float                      # miss probability with the initial reserve
+    reserve: int                             # smallest reserve meeting the target
+    reserve_miss: float
+    private_memory: Quantity                 # every active lease with a private image
+    pool_memory: Quantity                    # copy-on-write: one image + dirty pages + standby
+    memory_ratio: float
+    max_restore: Quantity                    # longest restore the reserve tolerates
+    slow_arrivals: float                     # arrivals during a slower restore
+    slow_reserve: int
+
+
+class BootTimeCdfResult(SolverResult):
+    """Result from BootTimeCdfModel: the median and a tail percentile of a released boot-time CDF."""
+    booting: int                             # instances booting at once
+    median: Quantity
+    tail: Quantity
+
+
+# --- Neural computation: a dense network's counts, and one training epoch (added 2026-10-20) ---
+
+class DenseNetworkResult(SolverResult):
+    """Result from DenseNetworkModel: what one dense network costs at one batch size.
+
+    Counts are plain integers; byte totals and intensity carry units. Per-layer
+    lists run from the first layer to the output layer.
+    """
+    layer_widths: List[int]
+    batch_size: int
+    layers: int
+    weights_per_layer: List[int]
+    biases_per_layer: List[int]
+    params_per_layer: List[int]
+    weights: int
+    biases: int
+    parameters: int
+    macs_per_example: int                    # one MAC per weight
+    flops_per_example: int                   # 2 FLOPs per MAC
+    first_layer_share: float                 # first layer's weights / all weights (= its share of the MACs)
+    matmul_flops_per_layer: List[int]        # 2 B n_in n_out, at the batch
+    elementwise_flops_per_layer: List[int]   # bias add + activation, 2 B n_out
+    matmul_flops: int
+    elementwise_flops: int
+    forward_flops: int                       # matmul + elementwise, at the batch
+    forward_flops_per_example: float
+    matmul_share: float
+    elementwise_share: float
+    parameter_bytes: Quantity
+    traffic_values: int                      # activation values crossing memory, at the batch
+    traffic_bytes: Quantity                  # weights once + activation traffic
+    intensity: Quantity                      # forward FLOPs / traffic bytes
+    weight_gradient_flops: int
+    input_gradient_flops: int
+    training_step_flops: int                 # forward matmul + both gradient products
+    training_flops_ratio: float              # training step / forward matmul
+    activation_values_per_layer: List[int]   # B n_l for the input and every layer output
+    activation_values_per_example: int       # sum of widths
+    saved_activation_values: int             # training keeps all of them, at the batch
+    saved_activation_bytes: Quantity
+    inference_activation_values: int         # largest adjacent pair, at the batch
+    inference_activation_bytes: Quantity
+    gradient_bytes: Quantity
+    optimizer_bytes: Quantity
+    training_memory: Quantity                # weights + saved activations + gradients + optimizer
+    inference_memory: Quantity               # weights + the rolling activation pair
+    training_memory_ratio: float
+    steps_per_epoch: Optional[int] = None    # training examples // batch, when a dataset is given
+
+
+class EpochOverheadResult(SolverResult):
+    """Result from EpochOverheadModel: one training epoch's work and fixed overhead on a host and an accelerator.
+
+    Dictionaries are keyed ``"host"`` and ``"accelerator"``.
+    """
+    steps: int
+    step_flops: Quantity
+    ops_per_step: int
+    peak: Dict[str, Quantity]
+    bandwidth: Dict[str, Quantity]
+    ridge: Dict[str, Quantity]
+    rate_batch1: Dict[str, Quantity]         # attainable rate at the batch-1 intensity
+    rate: Dict[str, Quantity]                # attainable rate at the network's batch
+    batching_speedup: Dict[str, float]       # rate / rate_batch1
+    work_time: Dict[str, Quantity]
+    overhead_time: Dict[str, Quantity]
+    total_time: Dict[str, Quantity]
+    work_speedup: float                      # host work / accelerator work
+    overhead_share_accelerator: float
+    movement_to_arithmetic_energy: float     # DRAM energy per FLOP's bytes / FLOP energy, at the batch
+    movement_to_arithmetic_energy_batch1: float
+
+
+__all__ += [
+    "DenseNetworkResult",
+    "EpochOverheadResult",
+]
+
+
+class ParameterGrowthResult(SolverResult):
+    """Result from ParameterGrowthModel: parameter-count fits before and after a split year (added 2026-10-20)."""
+    models: List[str]
+    domains: List[str]
+    parameters: List[float]
+    years: List[float]                 # decimal publication years
+    log_parameters: List[float]
+    split_year: int
+    early_slope: float                 # decades of parameters per year, before the split
+    early_intercept: float
+    late_slope: float
+    late_intercept: float
+    early_doubling_months: float
+    late_doubling_months: float
+    largest_parameters: float
+    model_count: int
+
+
+__all__ += ["ParameterGrowthResult"]

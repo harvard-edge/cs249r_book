@@ -1,138 +1,259 @@
 #!/usr/bin/env python3
-"""Every derived number in Lecture 7 (Fault Tolerance), computed from sourced inputs.
+"""Every number on the Lecture 7 slides and notes, read from MLSysIM.
+
+MLSysIM holds the inputs (registry, Literature) and the calculations
+(Scenarios.*, each backed by a solver, a scenario type, or reliability
+physics); the chapter reads the same scenarios. This file only selects values,
+converts units, and formats them; it types no numbers. Each value is recorded
+with v() under the key the deck prints as \\val{key}; running this file writes
+images/numbers.tex.
+
+Not from MLSysIM, and typed where they appear: the PyTorch DCP and torchrun
+traces (measured by dcp_trace.py and crash_trace.py in this folder), the
+torchvision weights metadata on the degradation card, Example 7.1's incident
+timings, and the self-check and vote settings.
 
 Run from this folder: python3 calcs.py
-Each line prints the value and the slide (or note) that shows it. Inputs carry
-their source as a comment; nothing on a slide is computed by hand.
 """
 
-import math
+import csv
+import sys
+from pathlib import Path
 
-# --- Inputs -------------------------------------------------------------------
-GPU_MTTF_H = 50_000          # Fault Tolerance Sec. 7.2, planning constant
-PCIE_MTTF_H = 200_000        # Sec. 7.2.2 cascade
-NIC_MTTF_H = 150_000         # Sec. 7.2.2, per 8-GPU node
-GPUS_PER_NODE = 8            # Sec. 7.2.2
-CLUSTER = 10_000             # Sec. 7.2.2
-REF_CLUSTER = 1_024          # Napkin Math 7.3, 7.4
-GPU_AVAIL = 0.9999           # Sec. 7.2.1
-LLAMA_DAYS, LLAMA_INTERRUPTS, LLAMA_GPUS = 54, 419, 16_384   # Dubey et al. 2024 (War Story 7.2)
-LLAMA_GPU_PARTS = 268        # Dubey Table 5 via MLSysIM (148+72+19+17+6+6)
-KOK = {8: 1144.8, 1024: 7.9}  # Kokolis et al. 2025 via MLSysIM, measured job MTTF (h)
-PARAMS = 175e9               # reference job (Sec. 7.7.1)
-CKPT_BYTES_PER_PARAM = 14    # 2 BF16 + 4 FP32 master + 8 Adam (Sec. 7.8.1)
-OPT_BYTES = 12               # FP32 master + Adam moments (footnote 13, figure)
-WRITE_BW = 100e9             # B/s, Sec. 7.8.2
-DETECT, RESTART, WARMUP = 60, 180, 120   # s, Napkin Math 7.3
-GPU_PRICE = 2.0              # $/GPU-hour, Sec. 7.7.1
-REPLICA_A = 0.99             # Sec. 7.11.2
-DCP_SHARD_BYTES = 12_587_643  # measured, dcp_trace.py
-DCP_TIMES_MS = [0.00, 0.18, 2.14, 3.28, 24.38]  # measured mtimes, dcp_trace.py
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+sys.path.insert(0, str(HERE))
+from deckvals import v, write, mlsysim  # noqa: E402
+from digitize_sdc import BOX  # noqa: E402  (the keynote slide's highlighted window)
 
-out = []
-
-
-def show(label, value, fmt):
-    s = format(value, fmt)
-    out.append((label, s))
-    print(f"{label:<62} {s}")
-    return value
+Q_ = mlsysim.core.units.Q_
+Systems, Models, Literature, Scenarios = (mlsysim.Systems, mlsysim.Models, mlsysim.Literature,
+                                          mlsysim.Scenarios)
+RUNS, FLEET = Literature.TrainingRuns, Literature.FleetOperations
+LLAMA3 = Literature.Series.Llama3Interruptions.entries
+NODE = Systems.Nodes.DGX_H100
+LADDER = Scenarios.GpuFailureLadder                   # GPU-only, MTTF / N
+FULL, FULL100K = Scenarios.FullSystemFailures10K, Scenarios.FullSystemFailures100K
+YD, YD100K = Scenarios.Gpt3CheckpointInterval10K, Scenarios.Gpt3CheckpointInterval100K
+FIVE = Scenarios.FiveMinuteCheckpoint1K
+REC1K, REC10K = Scenarios.Gpt3RecoveryBudget1K, Scenarios.Gpt3RecoveryBudget10K
+SPARE = Scenarios.HotSpareNode10K
+STRAG = Scenarios.HalfSpeedStraggler1K
+NINES = Scenarios.GpuAvailability10K
+REPLICAS = (Scenarios.ServingReplica99, Scenarios.ServingReplicas99x2, Scenarios.ServingReplicas99x3)
+PROBE = Scenarios.InferenceReadinessProbe
+SDC = Scenarios.SdcExposure100K
 
 
-# --- Failure clock ------------------------------------------------------------
-show("hook: Llama 3 hours between interruptions", LLAMA_DAYS * 24 / LLAMA_INTERRUPTS, ".1f")
-show("predict: GPU MTTF in years", GPU_MTTF_H / 8760, ".1f")
-show("predict: GPU-only MTBF at 10,000 GPUs (h)", GPU_MTTF_H / CLUSTER, ".0f")
-for n in (8, 64, 512, 1000, 4000, 10_000, 25_000):
-    h = GPU_MTTF_H / n
-    show(f"ladder: {n:,} GPUs MTBF (h)", h, ".1f")
-    if h > 24:
-        show(f"ladder: {n:,} GPUs MTBF (days)", h / 24, ".0f")
-show("ladder note: all 10,000 up at 99.99% each (%)", 100 * GPU_AVAIL ** CLUSTER, ".1f")
-lam_gpu = 1 / GPU_MTTF_H
-lam_pcie = 1 / PCIE_MTTF_H
-lam_nic = 1 / NIC_MTTF_H / GPUS_PER_NODE
-show("estimate: GPU rate (1e-5 per h)", lam_gpu * 1e5, ".1f")
-show("estimate: PCIe rate (1e-5 per h)", lam_pcie * 1e5, ".1f")
-show("estimate: NIC share rate (1e-5 per h)", lam_nic * 1e5, ".3f")
-lam_tot = lam_gpu + lam_pcie + lam_nic
-show("estimate: per-GPU total (1e-5 per h)", lam_tot * 1e5, ".3f")
-show("estimate: GPU-only cluster rate (per h)", lam_gpu * CLUSTER, ".2f")
-show("estimate: cluster rate (per h)", lam_tot * CLUSTER, ".3f")
-M_FULL_H = 1 / (lam_tot * CLUSTER)
-show("estimate: full-system MTBF (h)", M_FULL_H, ".2f")
-show("estimate: failures per day", 24 / M_FULL_H, ".1f")
-show("measured: 8-GPU GPU-only over measured (x)", GPU_MTTF_H / 8 / KOK[8], ".1f")
-show("measured: 1,024-GPU GPU-only line (h)", GPU_MTTF_H / 1024, ".1f")
-show("measured: 1,024-GPU GPU-only over measured (x)", GPU_MTTF_H / 1024 / KOK[1024], ".1f")
+def m(q, unit):
+    """Magnitude of a Pint quantity in ``unit``."""
+    return q.to(unit).magnitude
 
-# --- Fault types --------------------------------------------------------------
-show("causes: GPU parts share (%)", 100 * LLAMA_GPU_PARTS / LLAMA_INTERRUPTS, ".0f")
 
-# --- Checkpoints ---------------------------------------------------------------
-ckpt = PARAMS * CKPT_BYTES_PER_PARAM
-show("young-daly: checkpoint size (TB)", ckpt / 1e12, ".2f")
-show("young-daly: optimizer share of checkpoint (%)", 100 * OPT_BYTES / CKPT_BYTES_PER_PARAM, ".0f")
-delta = ckpt / WRITE_BW
-show("young-daly: write time delta (s)", delta, ".1f")
-M = 3.87 * 3600   # chapter rounds MTBF to 3.87 h before converting (Napkin Math 7.2)
-show("your turn: M (s)", M, ".0f")
-tau = math.sqrt(2 * delta * M)
-show("your turn: tau* (s)", tau, ".0f")
-show("your turn: tau* (min)", tau / 60, ".1f")
-show("your turn: each term at optimum (%)", 100 * delta / tau, ".2f")
-show("your turn: waste at optimum (%)", 100 * (delta / tau + tau / (2 * M)), ".1f")
-show("your turn: hourly write term (%)", 100 * delta / 3600, ".1f")
-show("your turn: hourly rework term (%)", 100 * 3600 / (2 * M), ".1f")
-show("your turn: hourly waste (%)", 100 * (delta / 3600 + 3600 / (2 * M)), ".1f")
-show("your turn: 2M (s)", 2 * M, ".0f")
-show("your turn: sqrt(2)", math.sqrt(2), ".1f")
-M100k = 1 / (lam_tot * 100_000) * 3600
-show("open q: M at 100,000 GPUs (h)", M100k / 3600, ".2f")
-show("open q: M at 100,000 GPUs (s)", M100k, ".0f")
-show("open q: optimized waste at 100,000 GPUs (%)", 100 * math.sqrt(2 * delta / M100k), ".0f")
-show("T/F: 1,000 GPUs, 5-min write, 50 h MTBF, tau* (min)", math.sqrt(2 * 5 * 3000), ".0f")
-show("dcp: shard size (MB)", DCP_SHARD_BYTES / 1e6, ".1f")
-show("dcp: last shard (ms)", DCP_TIMES_MS[3], ".1f")
-show("dcp: metadata (ms)", DCP_TIMES_MS[4], ".1f")
+def pct(x):
+    return 100 * x
 
-# --- Recovery ------------------------------------------------------------------
-load = ckpt / WRITE_BW
-rec = DETECT + RESTART + load + WARMUP
-show("budget: total recovery (min)", rec / 60, ".1f")
-for n in (REF_CLUSTER, CLUSTER):
-    per_day = 24 / (GPU_MTTF_H / n)
-    mins = per_day * rec / 60
-    show(f"budget: {n:,} GPUs GPU-only failures per day", per_day, ".2f")
-    show(f"budget: {n:,} GPUs recovery minutes per day", mins, ".0f")
-    show(f"budget: {n:,} GPUs share of day (%)", 100 * mins / 1440, ".1f")
-    if n == CLUSTER:
-        show("budget: 10,000 GPUs GPU-hours lost per day", mins / 60 * n, ",.0f")
-spare_day = GPUS_PER_NODE * GPU_PRICE * 24
-show("budget note: hot spare cost ($ per day)", spare_day, ",.0f")
-per_min = (24 / M_FULL_H) * CLUSTER * GPU_PRICE / 60
-show("budget note: value of 1 min per recovery ($ per day)", per_min, ",.0f")
-show("budget note: break-even cut per recovery (s)", 60 * spare_day / per_min, ".0f")
-show("straggler: throughput (%)", 100 * 1 / 2, ".0f")
-show("straggler: idle cost, 1,024 GPUs at half throughput ($ per hour)",
-     REF_CLUSTER * GPU_PRICE / 2, ",.0f")
-show("elastic: devices kept after one node (%)", 100 * (REF_CLUSTER - 8) / REF_CLUSTER, ".1f")
-show("elastic: ring of 3 of 4 (%)", 100 * 3 / 4, ".0f")
 
-# --- Serving -------------------------------------------------------------------
-for r in (1, 2, 3):
-    down = (1 - REPLICA_A) ** r * 365 * 86400
-    show(f"serving: {r} replica(s) availability (%)", 100 * (1 - (1 - REPLICA_A) ** r), ".4f")
-    show(f"serving: {r} replica(s) downtime (s per year)", down, ",.1f")
-show("serving: 1 replica downtime (days)", 0.01 * 365, ".2f")
-show("serving: 2 replicas downtime (min)", 1e-4 * 365 * 1440, ".1f")
+def component(name):
+    return next(r["interruption_count"] for r in LLAMA3 if r["component"] == name)
 
-# --- SDC gradient-norm trace (digitized by digitize_sdc.py from the photo of
-# Jeff Dean's MLSys 2024 keynote slide; heights measured from the photographed
-# x axis, so the ratio is a reading of the photo, not a logged value) -------
-import csv as _csv  # noqa: E402
-from pathlib import Path  # noqa: E402
-with open(Path(__file__).parent / "sdc_trace.csv") as _f:
-    _rows = [(float(a), float(b)) for a, b in list(_csv.reader(_f))[1:]]
-_in = [g for t, g in _rows if 0.540 <= t <= 0.654]
-show("SDC note: tallest boxed point / median height (photo reading)", max(_in), ".1f")
+
+def category(name):
+    return sum(r["interruption_count"] for r in LLAMA3 if r["category"] == name)
+
+
+print("== Hook: Llama 3 405B (Dubey et al. 2024)")
+llama_gpus = m(Models.Language.Llama3_405B.training_accelerators_ref, "count")
+llama_days = float(RUNS.Llama3_405B_SnapshotDays)
+llama_n = float(RUNS.Llama3_405B_UnexpectedInterruptions)
+llama_mttf = m(Q_(llama_days, "day"), "hour") / llama_n
+v("llama_gpus", llama_gpus, "{:,.0f}", "H100s in the run")
+v("llama_gpus_k_words", round(llama_gpus / 10 ** 3), "words", "the same, thousands, in prose")
+v("llama_days", llama_days, "{:.0f}", "snapshot, days")
+v("llama_interrupts", llama_n, "{:.0f}", "unexpected interruptions")
+v("llama_mttf_h", llama_mttf, "{:.1f}", "hours between interruptions")
+v("hours_per_day", m(Q_(1, "day"), "hour"), "{:.0f}", "hours in a day")
+v("llama_eff_pct", pct(float(RUNS.Llama3_405B_EffectiveTrainingTimeFraction)), "{:.0f}",
+  "effective training time, over this %")
+v("llama_manual", float(RUNS.Llama3_405B_ManualInterventions), "{:.0f}", "manual interventions")
+v("llama_manual_words", float(RUNS.Llama3_405B_ManualInterventions), "words", "the same, in prose")
+
+print("== Running case and clusters")
+ref_gpus = Systems.Clusters.Training_1K.total_accelerators
+v("ref_gpus", ref_gpus, "{:,.0f}", "reference cluster GPUs")
+v("ref_gpus_less1", ref_gpus - 1, "{:,.0f}", "the other GPUs at the barrier")
+v("ref_nodes", Systems.Clusters.Training_1K.count, "{:.0f}", "reference cluster nodes")
+v("ref_nodes_less1", Systems.Clusters.Training_1K.count - 1, "{:.0f}", "nodes after one is lost")
+v("big_gpus", FULL.n_devices, "{:,.0f}", "the chapter's large cluster")
+v("gpus_per_node", NODE.accelerators_per_node, "{:.0f}", "GPUs per node")
+v("params_b", m(Models.Language.GPT3.parameters, "Gparam"), "{:.0f}", "running model, billions")
+v("ckpt_tb", m(YD.checkpoint_bytes, "TB"), "{:.2f}", "resumable checkpoint, TB")
+mpa = mlsysim.ReferenceStats.MixedPrecisionAdam
+ckpt_bpp = m(mpa.CheckpointBytesPerParameter, "byte/param")
+opt_bpp = m(mpa.OptimizerStateBytesPerParameter, "byte/param")
+fp32 = m(mlsysim.BYTES_FP32, "byte")
+v("ckpt_bpp", ckpt_bpp, "{:.0f}", "checkpoint, B per parameter")
+v("bf16_bytes", m(mlsysim.BYTES_FP16, "byte"), "{:.0f}", "BF16 weights, B per parameter")
+v("fp32_bytes", fp32, "{:.0f}", "FP32 master weights, B per parameter")
+v("adam_bytes", opt_bpp - fp32, "{:.0f}", "Adam moments, B per parameter")
+v("opt_share_pct", pct(opt_bpp / ckpt_bpp), "{:.0f}", "optimizer state share of the checkpoint, %")
+
+print("== Failure clock: GPU-only (MTTF / N)")
+mttf_h = m(LADDER.component_mtbf, "hour")
+v("gpu_mttf_h", mttf_h, "{:,.0f}", "GPU MTTF, hours")
+v("gpu_mttf_yr", m(LADDER.component_mtbf, "year"), "{:.1f}", "the same, years")
+day_h = m(Q_(1, "day"), "hour")
+for n in LADDER.sizes:
+    h = m(LADDER.intervals[n], "hour")
+    v(f"ladder_{n}_h", h, "{:,.0f}" if h >= day_h else "{:g}", f"{n} GPUs, hours")
+    if h >= day_h:
+        v(f"ladder_{n}_d", m(LADDER.intervals[n], "day"), "{:.0f}", f"{n} GPUs, days")
+v("nines_pct", pct(NINES.availability), "{:.2f}", "per-GPU availability, %")
+v("all_up_pct", pct(NINES.all_up), "{:.1f}", "all 10,000 up at once, %")
+
+print("== Failure clock: full system (series cascade)")
+fr = FULL.result
+x5 = 10 ** 5
+v("psus_per_node", NODE.psus_per_node, "{:.0f}", "power supplies per node")
+v("psus_needed", NODE.psus_per_node - NODE.psu_redundancy, "{:.0f}", "supplies the node needs")
+v("psu_redundancy", NODE.psu_redundancy, "{:.0f}", "redundant supplies")
+v("pcie_mttf_h", m(FULL.component_mttf["pcie"], "hour"), "{:,.0f}", "PCIe link MTTF, hours")
+v("nic_mttf_h", m(FULL.component_mttf["network"], "hour"), "{:,.0f}", "node network path MTTF, hours")
+v("psu_mttf_h", m(FULL.component_mttf["power"], "hour"), "{:,.0f}", "PSU MTTF, hours")
+v("rate_gpu", fr.component_rates["gpu"] * x5, "{:.1f}", "GPU, x 1e-5 per hour")
+v("rate_pcie", fr.component_rates["pcie"] * x5, "{:.1f}", "PCIe, x 1e-5 per hour")
+v("rate_nic", fr.component_rates["network"] * x5, "{:.3f}", "NIC share, x 1e-5 per hour")
+v("rate_power", fr.component_rates["power"] * x5, "{:.0f}", "power, x 1e-5 per hour")
+v("rate_total", fr.device_rate * x5, "{:.3f}", "per GPU, x 1e-5 per hour")
+v("rate_system", fr.system_rate, "{:.3f}", "cluster failures per hour")
+v("full_mtbf_h", m(fr.mtbf, "hour"), "{:.2f}", "full-system MTBF, hours")
+v("full_per_day", fr.failures_per_day, "{:.1f}", "failures per day")
+
+print("== Failure clock: measured (Kokolis et al. 2025)")
+kok8, kok1k = float(FLEET.Kokolis8GpuJobMttfHours), float(FLEET.Kokolis1024GpuJobMttfHours)
+kok16k = float(FLEET.Kokolis16KGpuProjectedMttfHours)
+line8 = m(LADDER.intervals[NODE.accelerators_per_node], "hour")
+line1k = m(mlsysim.physics.calc_mtbf_cluster(LADDER.component_mtbf, ref_gpus), "hour")
+v("kok_8_h", kok8, "{:,.0f}", "measured job MTTF at 8 GPUs, hours")
+v("kok_1k_h", kok1k, "{:.1f}", "measured job MTTF at 1,024 GPUs, hours")
+v("kok_16k_h", kok16k, "{:.1f}", "projected job MTTF at 16,384 GPUs, hours")
+v("line_1k_h", line1k, "{:.1f}", "GPU-only line at 1,024 GPUs, hours")
+v("kok_8_x", line8 / kok8, "{:.1f}", "GPU-only line over measured, 8 GPUs")
+v("kok_1k_x", line1k / kok1k, "{:.1f}", "GPU-only line over measured, 1,024 GPUs")
+
+print("== Fault types: Llama 3 root causes (Table 5 counts)")
+gpu_parts = category("GPU")
+v("causes_gpu", gpu_parts, "{:.0f}", "GPU-part interruptions")
+v("causes_gpu_pct", pct(gpu_parts / llama_n), "{:.0f}", "their share, %")
+v("causes_faulty", component("Faulty GPU"), "{:.0f}", "faulty GPU")
+v("causes_hbm", component("GPU HBM3 Memory"), "{:.0f}", "HBM3")
+v("causes_sram", component("GPU SRAM Memory"), "{:.0f}", "SRAM")
+v("causes_sysproc", component("GPU System Processor"), "{:.0f}", "system processor")
+v("causes_thermal", component("GPU Thermal Interface + Sensor"), "{:.0f}", "thermal")
+v("causes_software", category("Dependency"), "{:.0f}", "software, all")
+v("causes_bugs", component("Software Bug"), "{:.0f}", "software bugs")
+v("causes_dependency", component("Dependency"), "{:.0f}", "dependency failures")
+v("causes_network", category("Network"), "{:.0f}", "network switches and cables")
+v("causes_maint", category("Unplanned Maintenance"), "{:.0f}", "unplanned host maintenance")
+v("causes_sdc", component("Silent Data Corruption"), "{:.0f}", "detected silent data corruption")
+v("causes_sdc_words", component("Silent Data Corruption"), "words", "the same, in prose")
+v("tpu_pod_chips", Systems.Pods.TPUv4_4096.chips, "{:,.0f}", "TPU v4 pod chips")
+
+print("== Silent data corruption")
+with open(HERE / "sdc_trace.csv") as f:
+    rows = [(float(a), float(b)) for a, b in list(csv.reader(f))[1:]]
+boxed = [g for t, g in rows if BOX[0] <= t <= BOX[1]]
+v("sdc_spike_words", round(max(boxed)), "words", "tallest boxed point over the normal band (photo reading)")
+v("sdc_rate_per_m_words", SDC.event_rate * 10 ** 6, "words", "illustrative events per million GPU-hours")
+v("sdc_fleet_gpus", SDC.n_devices, "{:,.0f}", "fleet GPUs")
+v("sdc_steps", SDC.steps_between, "{:,.0f}", "steps between events")
+v("sdc_step_words", m(SDC.step_time, "second"), "words", "step time, seconds, in prose")
+v("sdc_hours", m(SDC.interval, "hour"), "{:.0f}", "hours between events")
+
+print("== Checkpoints: Young-Daly on the full-system MTBF")
+yd = YD.result
+hour = Q_(1, "hour")
+v("write_bw_gbs", m(YD.write_bandwidth, "GB/s"), "{:.0f}", "checkpoint write bandwidth, GB/s")
+v("delta_s", m(yd.write_time, "second"), "{:.1f}", "write time, s")
+v("m_h", m(yd.mtbf, "hour"), "{:.2f}", "system MTBF, hours")
+v("m_s", m(yd.mtbf, "second"), "{:,.0f}", "system MTBF, s")
+v("two_m_s", m(yd.interval, "second") / yd.rework_share, "{:,.0f}", "2M, s")
+v("tau_s", m(yd.interval, "second"), "{:.0f}", "Young-Daly interval, s")
+v("tau_min", m(yd.interval, "minute"), "{:.1f}", "Young-Daly interval, min")
+v("term_pct", pct(yd.write_share), "{:.2f}", "each term at the optimum, %")
+v("waste_pct", pct(yd.waste), "{:.1f}", "waste at the optimum, %")
+v("sec_per_hour", m(hour, "second"), "{:,.0f}", "seconds in an hour")
+v("hourly_write_pct", pct((yd.write_time / hour).to("").magnitude), "{:.1f}", "hourly saves, write term, %")
+v("hourly_rework_pct", pct(yd.rework_share * (hour / yd.interval).to("").magnitude), "{:.1f}",
+  "hourly saves, rework term, %")
+v("hourly_waste_pct", pct(YD.waste_at(hour)), "{:.1f}", "hourly saves, waste, %")
+doubled = FULL.variant(n_devices=FULL.n_devices + FULL.n_devices)   # twice the GPUs, half the MTBF
+yd_doubled = YD.variant(mtbf=doubled.result.mtbf).result
+v("sqrt2", yd_doubled.waste / YD.variant(mtbf=FULL.result.mtbf).result.waste, "{:.1f}",
+  "interval and waste change when the cluster doubles (MTBF halves)")
+yd100k = YD100K.result
+v("big_open_gpus", FULL100K.n_devices, "{:,.0f}", "open question, GPUs")
+v("m100k_h", m(yd100k.mtbf, "hour"), "{:.2f}", "full-system MTBF at 100,000 GPUs, hours")
+v("m100k_s", m(yd100k.mtbf, "second"), "{:,.0f}", "the same, s")
+v("waste100k", yd100k.waste, "{:.2f}", "optimized waste at 100,000 GPUs, fraction")
+v("waste100k_pct", pct(yd100k.waste), "{:.0f}", "the same, %")
+five = FIVE.result
+v("tf_write_min", m(FIVE.write_time, "minute"), "{:.0f}", "T/F: write, minutes")
+v("tf_mtbf_h", m(FIVE.mtbf, "hour"), "{:.0f}", "T/F: GPU-only MTBF at 1,000 GPUs, hours")
+v("tf_gpus", LADDER.sizes[3], "{:,.0f}", "T/F: GPUs")
+v("tf_tau_min", m(five.interval, "minute"), "{:.0f}", "T/F: Young-Daly interval, minutes")
+
+print("== Recovery: cold-restart budget (175B, GPU-only failure rate)")
+r1k, r10k = REC1K.result, REC10K.result
+v("t_detect_s", m(r1k.detect, "second"), "{:.0f}", "detect, s")
+v("t_restart_s", m(r1k.restart, "second"), "{:.0f}", "restart, s")
+v("t_restart_min", m(r1k.restart, "minute"), "{:.0f}", "restart, min")
+v("t_load_s", m(r1k.reload, "second"), "{:.1f}", "load, s")
+v("t_warmup_s", m(r1k.warmup, "second"), "{:.0f}", "warmup, s")
+v("t_warmup_min", m(r1k.warmup, "minute"), "{:.0f}", "warmup, min")
+v("t_total_min", m(r1k.total, "minute"), "{:.1f}", "one cold restart, min")
+v("fpd_1k", r1k.failures_per_day, "{:.2f}", "1,024 GPUs: failures per day")
+v("loss_1k_min", m(r1k.lost_per_day, "minute"), "{:.0f}", "1,024 GPUs: recovery per day, min")
+v("share_1k_pct", pct(r1k.day_share), "{:.1f}", "1,024 GPUs: share of the day, %")
+v("fpd_10k", r10k.failures_per_day, "{:.1f}", "10,000 GPUs: failures per day")
+v("loss_10k_min", m(r10k.lost_per_day, "minute"), "{:.0f}", "10,000 GPUs: recovery per day, min")
+v("share_10k_pct", pct(r10k.day_share), "{:.1f}", "10,000 GPUs: share of the day, %")
+v("lost_gpuh_10k", r10k.gpu_hours_per_day, "{:,.0f}", "10,000 GPUs: GPU-hours lost per day")
+v("gpu_price", m(SPARE.device_hour_rate, "USD/hour"), "{:.0f}", "price, $ per GPU-hour")
+v("spare_day_usd", m(SPARE.spare_cost_per_day, "USD"), "{:,.0f}", "hot-spare node, $ per day")
+v("spare_value_usd", m(SPARE.value_per_minute, "USD"), "{:,.0f}", "one minute off every recovery, $ per day")
+v("spare_breakeven_s", m(SPARE.breakeven, "second"), "{:.0f}", "break-even cut per recovery, s")
+
+print("== Recovery: straggler and elastic")
+v("strag_step_s", m(STRAG.step_time, "second"), "{:.0f}", "healthy step, s")
+v("strag_slow_s", m(STRAG.slow_step, "second"), "{:.0f}", "step with the straggler, s")
+v("strag_tput_pct", pct(STRAG.throughput), "{:.0f}", "job throughput, %")
+v("strag_idle_usd", m(STRAG.idle_cost, "USD"), "{:,.0f}", "idle compute, $ per hour")
+v("strag_hw_pct", pct(1 / STRAG.n_devices), "{:.1f}", "one GPU's share of the hardware, %")
+v("elastic_kept_pct", pct((ref_gpus - NODE.accelerators_per_node) / ref_gpus), "{:.1f}",
+  "devices kept after losing one node, %")
+
+print("== Serving: replicas, KV cache, probes")
+v("replica_pct", pct(REPLICAS[0].availability), "{:.0f}", "one replica's availability, %")
+v("down1_days", m(REPLICAS[0].replicated_downtime_per_year, "day"), "{:.2f}", "one replica, days a year")
+v("down2_min", m(REPLICAS[1].replicated_downtime_per_year, "minute"), "{:.1f}", "two replicas, min a year")
+v("down3_s", m(REPLICAS[2].replicated_downtime_per_year, "second"), "{:.1f}", "three replicas, s a year")
+llama70 = Models.Language.Llama3_70B
+kv = llama70.get_kv_cache_size(seq_len=llama70.context_length, batch_size=1, precision=mlsysim.BYTES_FP16)
+v("kv_gb", m(kv, "GB"), "{:.0f}", "KV cache of one full-context conversation, GB")
+v("kv_context_k", llama70.context_length >> 10, "{:.0f}", "context, K tokens (K = 1,024)")
+early, late = PROBE.detection_window
+v("probe_period_s", m(PROBE.interval, "second"), "{:.0f}", "probe period, s")
+v("probe_timeout_s", m(PROBE.timeout, "second"), "{:.0f}", "probe timeout, s")
+v("probe_fail", PROBE.failure_threshold, "{:.0f}", "failure threshold")
+v("probe_fail_words", PROBE.failure_threshold, "words", "the same, in prose")
+v("probe_success", PROBE.success_threshold, "{:.0f}", "success threshold")
+v("probe_early_s", m(early, "second"), "{:.0f}", "earliest removal, s")
+v("probe_late_s", m(late, "second"), "{:.0f}", "latest removal, s")
+v("vit_params_m", m(Models.Vision.ViT_Large.parameters, "Mparam"), "{:.0f}", "ViT-Large, registry, millions")
+v("effnet_params_m", m(Models.Vision.EfficientNetB4.parameters, "Mparam"), "{:.0f}", "EfficientNet-B4, millions")
+v("mobilenet_params_m", m(Models.Vision.MobileNetV3_Large.parameters, "Mparam"), "{:.1f}",
+  "MobileNetV3-Large, millions")
+
+if __name__ == "__main__":
+    write(__file__)

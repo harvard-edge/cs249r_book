@@ -30,6 +30,7 @@ from ...physics.agents import (
     calc_append_only_context,
     calc_break_even_acceptance,
     calc_cost_per_accepted,
+    calc_first_horizon_below,
     calc_independent_success,
     calc_step_error_for_target,
     calc_unchecked_success,
@@ -44,7 +45,8 @@ class HorizonCompoundingModel(ForwardModel):
     the next builds on it, and nothing recovers, so a task of ``H`` turns
     succeeds with probability ``p^H``. Holding ``target`` at ``H`` turns needs
     a per-step error of ``1 - target^(1/H)``; for small error the product
-    ``eps H`` approaches ``-ln(target)`` at any horizon.
+    ``eps H`` approaches ``-ln(target)`` at any horizon. The first horizon whose
+    success falls below ``target`` is ``floor(ln target / ln p) + 1``.
     """
     requires = ()
     produces = HorizonCompoundingResult
@@ -60,6 +62,7 @@ class HorizonCompoundingModel(ForwardModel):
             error_ratio=eps / needed,
             required_error_horizon=needed * target_horizon,
             small_error_limit=-math.log(target_success),
+            first_horizon_below_target=calc_first_horizon_below(step_success, target_success),
         )
 
 
@@ -213,6 +216,7 @@ class AgentRunSummaryModel(ForwardModel):
             observations=int(sum(r["observations"] for r in rows)),
             nonzero_exits=int(sum(r["nonzero_exit"] for r in rows)),
             truncated_outputs=int(sum(r["truncated"] for r in rows)),
+            truncated_tasks=sum(1 for r in rows if r["truncated"]),
             syntax_error_tasks=len(syntax), syntax_error_accepted=sum(1 for r in syntax if r["resolved"]),
             call_bins=bins,
         )

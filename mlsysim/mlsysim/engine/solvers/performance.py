@@ -498,14 +498,15 @@ class DecodeBoundModel(ForwardModel):
     requires = ("workload", "hardware")
 
     def solve(self, model: Workload, hardware: HardwareNode, precision: str = "fp16",
-              batch_size: int = 1, peak_flops: Quantity = None):
+              batch_size: int = 1, peak_flops: Quantity = None, tp_size: int = 1):
         from ..results import DecodeBoundResult
         from ...physics.performance import calc_bottleneck
         from ...physics.transformer import calc_transformer_decode_flops
 
         precision, _ = resolve_precision(precision)
-        weights = model.size_in_bytes(precision)
-        flops = calc_transformer_decode_flops(model.parameters) * batch_size
+        # tp_size (added 2026-10-20): each device holds and multiplies a 1/tp_size weight shard.
+        weights = model.size_in_bytes(precision) / tp_size
+        flops = calc_transformer_decode_flops(model.parameters) * batch_size / tp_size
         peak = peak_flops if peak_flops is not None else hardware.compute.peak_flops
         bw = hardware.memory.bandwidth
         b = calc_bottleneck(flops, weights, peak, bw)

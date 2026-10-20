@@ -36,11 +36,13 @@ from .control import (
     CANFD_DATA_FIELD_SIZES,
     calc_action_chunk_streaming_amortization,
     calc_chunk_renewal_schedule,
+    calc_temporal_ensemble_weights,
     calc_watchdog_lease_bound,
     calc_phase_lag_total,
     calc_canfd_frame_bits,
     calc_canfd_bus_utilization,
     calc_ethercat_cycle_time,
+    calc_response_time_bound,
     calc_cbf_qp_orthogonal_projection,
     calc_axi_fifo_contention,
 )
@@ -59,6 +61,21 @@ from .assurance import (
     calc_clopper_pearson_zero_failure_bound,
     calc_zero_failure_sample_size,
     calc_shielded_system_hazard_rate,
+)
+
+# Policy training (added 2026-10-20)
+from .learning import (
+    calc_discount_effective_horizon,
+    calc_discounted_weight,
+    calc_discount_for_retained_weight,
+    calc_trial_campaign_wall_time,
+    calc_iterative_decoder_latency,
+    calc_max_decoder_evaluations,
+    calc_series_stiffness,
+    calc_complementary_series_stiffness,
+    calc_impact_stiffness_for_force,
+    calc_penalty_stiffness_from_penetration,
+    calc_contact_timescale,
 )
 
 __all__ = [
@@ -93,11 +110,13 @@ __all__ = [
     "calc_quasistatic_spill_acceleration",
     "calc_action_chunk_streaming_amortization",
     "calc_chunk_renewal_schedule",
+    "calc_temporal_ensemble_weights",
     "calc_watchdog_lease_bound",
     "calc_phase_lag_total",
     "calc_canfd_frame_bits",
     "calc_canfd_bus_utilization",
     "calc_ethercat_cycle_time",
+    "calc_response_time_bound",
     "calc_cbf_qp_orthogonal_projection",
     "calc_axi_fifo_contention",
     "calc_spatial_information_age_displacement",
@@ -112,5 +131,16 @@ __all__ = [
     "calc_clopper_pearson_zero_failure_bound",
     "calc_zero_failure_sample_size",
     "calc_shielded_system_hazard_rate",
+    "calc_discount_effective_horizon",
+    "calc_discounted_weight",
+    "calc_discount_for_retained_weight",
+    "calc_trial_campaign_wall_time",
+    "calc_iterative_decoder_latency",
+    "calc_max_decoder_evaluations",
+    "calc_series_stiffness",
+    "calc_complementary_series_stiffness",
+    "calc_impact_stiffness_for_force",
+    "calc_penalty_stiffness_from_penetration",
+    "calc_contact_timescale",
 ]
 

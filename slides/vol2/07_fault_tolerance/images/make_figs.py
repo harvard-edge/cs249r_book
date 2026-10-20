@@ -1,32 +1,26 @@
 #!/usr/bin/env python3
 """Data plots and diagrams for Volume II, Lecture 7 (Fault Tolerance).
 
-Every value is from the rendered chapter (Fault Tolerance) or MLSysIM unless
-noted. MTBF values carry their basis, because the chapter uses three:
-  - GPU-only: 50,000 h per GPU, independent, MTBF = 50,000 h / N
-    (equation 4, table 1): 8 GPUs 6,250 h ... 10,000 GPUs 5 h, 25,000 GPUs 2 h.
-  - Full system (worked cascade, Sec. 7.2.2): per GPU 2.0 (GPU) + 0.5 (PCIe)
-    + 0.083 (one eighth of a node's NIC and cables) x 1e-5 per hour, power
-    supplies redundant (0); 10,000 GPUs give 0.2583 per hour, MTBF 3.87 h.
-  - Measured: Meta RSC (Kokolis et al. 2025) MTTF 1,144.8 h at 8 GPUs and
-    7.9 h at 1,024 GPUs measured, 1.8 h at 16,384 and 0.23 h at 131,072
-    projected; Llama 3 405B, 419 interruptions in 54 days on 16,384 H100s,
-    about 3.1 h (Dubey et al. 2024). Read from MLSysIM's Literature registry.
-  - Llama 3 root causes: MLSysIM Literature.Series.Llama3Interruptions
-    (Dubey et al. 2024, Table 5 counts), grouped here: faulty GPU 148, HBM3 72,
-    other GPU parts 42 (SRAM 19, system processor 17, thermal 6), software 56
-    (bugs 54, dependency 2), network 35, host maintenance 32, host hardware 21,
-    NCCL watchdog 7, silent data corruption 6; total 419.
-  - Young-Daly (Napkin Math 7.2): write 24.5 s (2.45 TB at 100 GB/s), MTBF
-    3.87 h = 13,932 s; tau* = 826 s = 13.8 min; waste 5.9 percent; hourly
-    checkpoints 13.6 percent (equation 8).
-  - Recovery budget (Napkin Math 7.3): 60 + 180 + 24.5 + 120 s = 6.4 min.
-  - Straggler (Napkin Math 7.4): 1,024 GPUs, 1 s step, one GPU at half speed.
+Every number is read from MLSysIM through calcs.py (the same Scenarios.* the
+chapter reads) unless noted. MTBF values carry their basis, because the
+chapter uses three:
+  - GPU-only: Scenarios.GpuFailureLadder, per-GPU MTTF / N (equation 4, table 1).
+  - Full system: Scenarios.FullSystemFailures10K, the worked cascade (Sec.
+    7.2.2): GPU, PCIe link, and one eighth of a node's NIC and cables in
+    series; redundant power supplies add no term.
+  - Measured: Meta RSC (Kokolis et al. 2025) and Llama 3 405B (Dubey et al.
+    2024), from Literature.FleetOperations and Literature.TrainingRuns.
+  - Llama 3 root causes: Literature.Series.Llama3Interruptions (Dubey et al.
+    2024, Table 5 counts), grouped here as the chart shows them.
+  - Young-Daly (Napkin Math 7.2): Scenarios.Gpt3CheckpointInterval10K.
+  - Recovery budget (Napkin Math 7.3): Scenarios.Gpt3RecoveryBudget1K.
+  - Straggler (Napkin Math 7.4): Scenarios.HalfSpeedStraggler1K.
+  - Serving (Sec. 7.11.2): Scenarios.ServingReplica99 and its two- and
+    three-replica variants; KV cache of Models.Language.Llama3_70B at its full
+    context in BF16 (footnote 19).
+Not from MLSysIM, and typed below:
   - Elastic (figure 16): four-node ring to three, 75 percent throughput.
   - Fencing (figure 15): epochs 7 and 8.
-  - Serving (Sec. 7.11.2): one replica 99 percent, 3.65 days a year; two
-    52.6 min; three 31.5 s. KV cache 43 GB for a Llama-family 70B model at
-    128K context in BF16 (footnote 19).
   - Degradation (Sec. 7.12.2 names the cascade): parameter counts and
     ImageNet-1K acc@1 from the torchvision 0.26 weights metadata, the same
     values as the slide's card: ViT_L_16 SWAG_E2E_V1 305.2M, 88.064;
@@ -39,7 +33,7 @@ noted. MTBF values carry their basis, because the chapter uses three:
     .metadata at 24.38 ms (file modification times relative to the first);
     each shard 12,587,643 bytes, .metadata 2,280 bytes.
 
-Companion scripts in this folder: calcs.py prints every derived number on the
+Companion scripts in this folder: calcs.py records every MLSysIM number on the
 slides and notes; dcp_trace.py produced the DCP trace above (run with a torch
 that has numpy); crash_trace.py produced the torchrun restart log on the
 "launcher restarts the whole group" slide (torchrun --nproc-per-node=4
@@ -53,7 +47,10 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import slideplot as sp  # noqa: E402
+import calcs as K  # noqa: E402  (records every value; figures read them)
+from deckvals import val, num  # noqa: E402
 
 plt = sp.plt
 C = sp.C
@@ -72,19 +69,15 @@ V = {
 
 def literature():
     """Measured fleet data from MLSysIM, so slide and book quote one source."""
-    sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "mlsysim"))
-    from mlsysim import Literature  # noqa: E402
-    F = Literature.FleetOperations
-    T = Literature.TrainingRuns
-    rows = Literature.Series.Llama3Interruptions.entries
+    F = K.FLEET
+    gpus = {f: float(getattr(F, f"Kokolis{f}GpuJobGpus")) for f in ("8", "1024", "16K", "131K")}
     kok = {
-        8: float(F.Kokolis8GpuJobMttfHours),
-        1024: float(F.Kokolis1024GpuJobMttfHours),
-        16384: float(F.Kokolis16KGpuProjectedMttfHours),
-        131072: float(F.Kokolis131KGpuProjectedMttfHours),
+        gpus["8"]: float(F.Kokolis8GpuJobMttfHours),
+        gpus["1024"]: float(F.Kokolis1024GpuJobMttfHours),
+        gpus["16K"]: float(F.Kokolis16KGpuProjectedMttfHours),
+        gpus["131K"]: float(F.Kokolis131KGpuProjectedMttfHours),
     }
-    llama_h = float(T.Llama3_405B_SnapshotDays) * 24 / float(T.Llama3_405B_UnexpectedInterruptions)
-    return kok, llama_h, rows
+    return kok, num("llama_mttf_h"), K.LLAMA3
 
 
 KOK, LLAMA_H, LLAMA_ROWS = literature()
@@ -112,12 +105,15 @@ def box(ax, x, y, w, h, fc, ec, lw=1.6, ls="-", alpha=1.0, r=0.06):
 
 # 1. GPU-only cluster MTBF ladder (table 1) ----------------------------------
 def _ladder_row(n):
-    h = 50_000 / n          # GPU-only MTBF, equation 4
-    s = f"{h:,.0f} h ({h / 24:.0f} days)" if h >= 24 else f"{h:g} h"
-    return ("8 GPUs" if n == 8 else f"{n:,}", h, s)
+    h = K.LADDER.intervals[n].to("hour").magnitude      # GPU-only MTBF, equation 4
+    s = f"{val(f'ladder_{n}_h')} h"
+    if h >= K.day_h:
+        s += f" ({val(f'ladder_{n}_d')} days)"
+    return ("8 GPUs" if n == K.LADDER.sizes[0] else f"{n:,}", h, s)
 
 
-LADDER = [_ladder_row(n) for n in (8, 64, 512, 1000, 4000, 10_000, 25_000)]
+LADDER = [_ladder_row(n) for n in K.LADDER.sizes]
+WEEK_H = K.Q_(1, "week").to("hour").magnitude
 
 
 def ladder(path, k):
@@ -126,7 +122,7 @@ def ladder(path, k):
     for i, (lab, h, s) in enumerate(LADDER):
         y = n - 1 - i
         shown = i < k
-        col = C["memory"] if h > 168 else C["danger"]
+        col = C["memory"] if h > WEEK_H else C["danger"]
         ax.barh(y, h if shown else 0, color=col, height=0.62)
         txt(ax, 0.75, y, lab + "  ", C["text"], ha="right", va="center", fontsize=12)
         txt(ax, h * 1.2, y, s, col, shown, va="center", fontsize=12, zorder=4,
@@ -140,7 +136,7 @@ def ladder(path, k):
     ax.spines["left"].set_visible(False)
     ax.set_xticks([1, 10, 100, 1000, 10000])
     ax.set_xticklabels(["1 h", "10 h", "100 h", "1,000 h", "10,000 h"])
-    ax.set_xlabel("Expected hours between GPU failures (GPU-only, 50,000 h each)", fontsize=11)
+    ax.set_xlabel(f"Expected hours between GPU failures (GPU-only, {val('gpu_mttf_h')} h each)", fontsize=11)
     ax.grid(axis="x", color=C["grid"], lw=0.6)
     ax.set_axisbelow(True)
     sp.save(fig, path)
@@ -154,28 +150,28 @@ for s, k in ((1, 2), (2, 4), (3, 7)):
 def measured(path, k):
     fig, ax = plt.subplots(figsize=(5.6, 2.35))
     ns = [4, 300000]
-    ax.plot(ns, [50000 / n for n in ns], color=C["neutral"], lw=2, ls="--")
-    txt(ax, 1500, 1500, "GPU-only line:\n50,000 h / N", C["neutral"], fontsize=11,
+    ax.plot(ns, [num("gpu_mttf_h") / n for n in ns], color=C["neutral"], lw=2, ls="--")
+    txt(ax, 1500, 1500, f"GPU-only line:\n{val('gpu_mttf_h')} h / N", C["neutral"], fontsize=11,
         ha="left", va="center", linespacing=1.0)
     # measured Meta RSC
     a = 1.0 if k >= 2 else 0.0
     for n in (8, 1024):
         ax.plot([n], [KOK[n]], "o", ms=10, color=C["memory"], alpha=a, zorder=5)
-    txt(ax, 5, KOK[8] / 9, f"Meta RSC, measured:\n{KOK[8]:,.0f} h at 8 GPUs", C["memory"],
+    txt(ax, 5, KOK[8] / 9, f"Meta RSC, measured:\n{val('kok_8_h')} h at 8 GPUs", C["memory"],
         k >= 2, fontsize=10.5, va="top", linespacing=1.0)
-    txt(ax, 1024 / 1.6, KOK[1024] / 2.0, f"{KOK[1024]:g} h at 1,024", C["memory"], k >= 2,
+    txt(ax, 1024 / 1.6, KOK[1024] / 2.0, f"{val('kok_1k_h')} h at 1,024", C["memory"], k >= 2,
         fontsize=10.5, va="top", ha="right")
     # model cascade, projections, Llama 3
     b = 1.0 if k >= 3 else 0.0
-    ax.plot([10000], [3.87], "X", ms=10, color=C["compute"], alpha=b, zorder=5)
-    txt(ax, 4500, 0.16, "chapter model, GPU+PCIe+NIC: 3.87 h",
+    ax.plot([K.FULL.n_devices], [num("full_mtbf_h")], "X", ms=10, color=C["compute"], alpha=b, zorder=5)
+    txt(ax, 4500, 0.16, f"chapter model, GPU+PCIe+NIC: {val('full_mtbf_h')} h",
         C["compute"], k >= 3, fontsize=10, ha="right", va="bottom")
     for n in (16384, 131072):
         ax.plot([n], [KOK[n]], "o", ms=10, mfc="white", mec=C["memory"], mew=2, alpha=b, zorder=5)
     ax.plot([16384], [LLAMA_H], "D", ms=10, color=C["danger"], alpha=b, zorder=6)
-    txt(ax, 22000, 9, f"Llama 3 405B,\nmeasured: {LLAMA_H:.1f} h",
+    txt(ax, 22000, 9, f"Llama 3 405B,\nmeasured: {val('llama_mttf_h')} h",
         C["danger"], k >= 3, fontsize=10.5, va="bottom", ha="left", linespacing=1.0)
-    txt(ax, 16384, 0.8, f"projected:\n{KOK[16384]:g} h", C["memory"], k >= 3,
+    txt(ax, 16384, 0.8, f"projected:\n{val('kok_16k_h')} h", C["memory"], k >= 3,
         fontsize=10.5, va="top", ha="center", linespacing=1.0)
     ax.set_xscale("log")
     ax.set_yscale("log")
@@ -217,7 +213,7 @@ CAUSES = [
     ("NCCL watchdog", cats["Unknown"], "neutral"),
     ("Silent data corruption", cnt("Silent Data Corruption"), "danger"),
 ]
-assert sum(c[1] for c in CAUSES) == 419
+assert sum(c[1] for c in CAUSES) == num("llama_interrupts")
 fig, ax = plt.subplots(figsize=(4.4, 2.25))
 n = len(CAUSES)
 for i, (lab, v, ck) in enumerate(CAUSES):
@@ -227,14 +223,15 @@ for i, (lab, v, ck) in enumerate(CAUSES):
     txt(ax, v + 2, y, f"{v:.0f}", C[ck], va="center", fontsize=11)
 ax.annotate("", xy=(176, n - 3.1), xytext=(176, n - 0.9),
             arrowprops=dict(arrowstyle="-", color=C["compute"], lw=2))
-txt(ax, 186, n - 2.0, "GPU parts:\n268 of 419\n(64%)", C["compute"], va="center", fontsize=11,
+txt(ax, 186, n - 2.0, f"GPU parts:\n{val('causes_gpu')} of {val('llama_interrupts')}\n({val('causes_gpu_pct')}%)",
+    C["compute"], va="center", fontsize=11,
     linespacing=1.0)
 txt(ax, 22, 0, "detected only", C["danger"], va="center", fontsize=10, fontweight="normal")
 ax.set_xlim(0, 235)
 ax.set_ylim(-0.6, n - 0.4)
 ax.set_yticks([])
 ax.spines["left"].set_visible(False)
-ax.set_xlabel("Unexpected interruptions, 54 days, 16,384 H100s")
+ax.set_xlabel(f"Unexpected interruptions, {val('llama_days')} days, {val('llama_gpus')} H100s")
 ax.grid(axis="x", color=C["grid"], lw=0.6)
 ax.set_axisbelow(True)
 sp.save(fig, out / "llama3_causes.svg")
@@ -322,11 +319,11 @@ for k in (1, 2, 3):
 
 
 # 7. Young-Daly waste curves (Napkin Math 7.2, figure 11) ---------------------
-DELTA, M = 24.5, 3.87 * 3600
-TAU = math.sqrt(2 * DELTA * M)
-W_OPT = DELTA / TAU + TAU / (2 * M)
-W_HOUR = DELTA / 3600 + 3600 / (2 * M)
-assert abs(TAU - 826.2) < 1 and abs(W_OPT - 0.0593) < 0.001 and abs(W_HOUR - 0.136) < 0.001
+_YD = K.YD.result                      # Scenarios.Gpt3CheckpointInterval10K
+DELTA, M = _YD.write_time.to("second").magnitude, _YD.mtbf.to("second").magnitude
+TAU = _YD.interval.to("second").magnitude
+W_OPT = _YD.waste
+W_HOUR = K.YD.waste_at(K.Q_(1, "hour"))
 
 
 def young_daly(path, k):
@@ -343,10 +340,10 @@ def young_daly(path, k):
     a3 = 1.0 if k >= 3 else 0.0
     ax.plot(t / 60, write + rework, color=C["text"], lw=3, alpha=a3)
     ax.plot([TAU / 60], [W_OPT * 100], "o", ms=11, color=C["data"], alpha=a3, zorder=5)
-    txt(ax, 24, 3.4, f"optimum {TAU / 60:.1f} min: {W_OPT * 100:.1f}% wasted", C["data"], k >= 3,
+    txt(ax, 24, 3.4, f"optimum {val('tau_min')} min: {val('waste_pct')}% wasted", C["data"], k >= 3,
         fontsize=12, va="center")
     ax.plot([60], [W_HOUR * 100], "s", ms=10, color=C["compute"], alpha=a3, zorder=5)
-    txt(ax, 58, 17.6, f"every hour: {W_HOUR * 100:.1f}%", C["compute"], k >= 3,
+    txt(ax, 58, 17.6, f"every hour: {val('hourly_waste_pct')}%", C["compute"], k >= 3,
         fontsize=12, ha="center")
     ax.set_xlim(0, 90)
     ax.set_ylim(0, 22)
@@ -432,17 +429,18 @@ sp.save(fig, out / "dcp_trace.svg")
 # 10. Recovery-time budget (Napkin Math 7.3) ----------------------------------
 def budget(path, k):
     fig, ax = plt.subplots(figsize=(5.6, 1.25))
-    parts = [("detect", 60, "c3"), ("restart", 180, "c1"), ("load", 24.5, "ok"),
-             ("warm up", 120, "c2")]
+    parts = [("detect", "t_detect_s", "c3"), ("restart", "t_restart_s", "c1"), ("load", "t_load_s", "ok"),
+             ("warm up", "t_warmup_s", "c2")]
     x = 0
-    for lab, w, ck in parts:
+    for lab, key, ck in parts:
+        w = num(key)
         ax.barh(0, w, left=x, color=V[ck], height=0.6, edgecolor="white", lw=1.5)
         hi = lab == "load"
         txt(ax, x + w / 2, 0.8 if hi else 0.42, lab, V[ck], ha="center", va="bottom", fontsize=11.5)
-        txt(ax, x + w / 2, -0.95 if hi else -0.55, f"{w:g} s", V[ck], ha="center", va="center",
+        txt(ax, x + w / 2, -0.95 if hi else -0.55, f"{val(key)} s", V[ck], ha="center", va="center",
             fontsize=11)
         x += w
-    txt(ax, x + 8, 0, f"= {x / 60:.1f} min", C["text"], va="center", fontsize=13)
+    txt(ax, x + 8, 0, f"= {val('t_total_min')} min", C["text"], va="center", fontsize=13)
     a = 1.0 if k >= 2 else 0.0
     ax.barh(0, 200, left=x + 160, height=0.6, fc=C["danger_l"], ec=C["danger"], ls="--",
             lw=1.5, alpha=a)
@@ -511,23 +509,27 @@ for k in (1, 2, 3):
 
 
 # 12. Straggler at the barrier (Napkin Math 7.4) -------------------------------
+T_OK, T_SLOW = num("strag_step_s"), num("strag_slow_s")   # Scenarios.HalfSpeedStraggler1K
+
+
 def straggler(path, k):
     fig, ax = plt.subplots(figsize=(5.4, 1.6))
-    ranks = ["rank 0", "rank 1", "rank 2", "rank 517", "rank 1,023"]
+    ranks = ["rank 0", "rank 1", "rank 2", "rank 517", f"rank {val('ref_gpus_less1')}"]
     for i, nm in enumerate(ranks):
         y = len(ranks) - 1 - i
         slow = k >= 2 and nm == "rank 517"
-        ax.barh(y, 2.0 if slow else 1.0, color=C["danger"] if slow else C["memory"], height=0.6)
+        ax.barh(y, T_SLOW if slow else T_OK, color=C["danger"] if slow else C["memory"], height=0.6)
         if k >= 2 and not slow:
-            ax.barh(y, 1.0, left=1.0, color=C["neutral_l"], height=0.6, hatch="//",
+            ax.barh(y, T_SLOW - T_OK, left=T_OK, color=C["neutral_l"], height=0.6, hatch="//",
                     edgecolor=C["neutral"], lw=0)
         txt(ax, -0.04, y, nm, C["text"], ha="right", va="center", fontsize=13)
-    bx = 2.0 if k >= 2 else 1.0
+    bx = T_SLOW if k >= 2 else T_OK
     ax.axvline(bx, color=V["c3"], lw=2.5)
     txt(ax, bx + 0.04, len(ranks) - 0.5, "AllReduce barrier", V["c3"], va="center", fontsize=13)
-    txt(ax, 1.5, 4.65, "1,023 GPUs wait", C["neutral"], k >= 2, ha="center", va="bottom",
+    txt(ax, 1.5, 4.65, f"{val('ref_gpus_less1')} GPUs wait", C["neutral"], k >= 2, ha="center", va="bottom",
         fontsize=13)
-    txt(ax, 1.0, 1.0, "half speed: 2 s", "white", k >= 2, va="center", ha="center", fontsize=13)
+    txt(ax, 1.0, 1.0, f"half speed: {val('strag_slow_s')} s", "white", k >= 2, va="center", ha="center",
+        fontsize=13)
     ax.set_xlim(0, 2.75)
     ax.set_ylim(-0.6, 5.3)
     ax.set_yticks([])
@@ -591,10 +593,10 @@ for k in (1, 2, 3):
 
 # 14. Serving: replicas and state (Sec. 7.11.2, footnote 19) -------------------
 fig, (a1, a2) = plt.subplots(1, 2, figsize=(5.6, 1.8), gridspec_kw={"width_ratios": [1.15, 1]})
-_down = [(1 - 0.99) ** r * 365 * 86400 for r in (1, 2, 3)]   # equation 12, 99% each
-rows = [("1 replica", _down[0], f"{_down[0] / 86400:.2f} days"),
-        ("2 replicas", _down[1], f"{_down[1] / 60:.1f} min"),
-        ("3 replicas", _down[2], f"{_down[2]:.1f} s")]
+_down = [r.replicated_downtime_per_year.to("second").magnitude for r in K.REPLICAS]   # equation 12
+rows = [("1 replica", _down[0], f"{val('down1_days')} days"),
+        ("2 replicas", _down[1], f"{val('down2_min')} min"),
+        ("3 replicas", _down[2], f"{val('down3_s')} s")]
 for i, (lab, v, s) in enumerate(rows):
     y = 2 - i
     a1.barh(y, v, color=C["memory"], height=0.6)
@@ -609,14 +611,14 @@ a1.set_xticks([10, 1e3, 1e5, 1e7])
 a1.set_xticklabels(["10 s", "17 min", "28 h", "116 d"], fontsize=10)
 a1.minorticks_off()
 a1.spines["left"].set_visible(False)
-a1.set_xlabel("Downtime per year, 99% each", fontsize=11)
-for i, (lab, v, ck) in enumerate([("image retry", 0, "data"), ("LLM chat", 43, "danger")]):
+a1.set_xlabel(f"Downtime per year, {val('replica_pct')}% each", fontsize=11)
+for i, (lab, v, ck) in enumerate([("image retry", 0, "data"), ("LLM chat", num("kv_gb"), "danger")]):
     y = 1 - i
     a2.barh(y, max(v, 0.4), color=C[ck], height=0.55)
     txt(a2, -0.03, y, lab, C["text"], ha="right", va="center", fontsize=11,
         transform=a2.get_yaxis_transform())
 txt(a2, 1.5, 1, "0 GB lost", C["data"], va="center", fontsize=11)
-txt(a2, 42, 0, "43 GB", "white", va="center", ha="right", fontsize=12)
+txt(a2, 42, 0, f"{val('kv_gb')} GB", "white", va="center", ha="right", fontsize=12)
 a2.set_xlim(0, 46)
 a2.set_ylim(-0.6, 1.6)
 a2.set_yticks([])

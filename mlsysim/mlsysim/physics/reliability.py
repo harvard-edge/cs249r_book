@@ -164,3 +164,58 @@ def calc_all_up_availability(availability, n_components):
 def calc_downtime(availability, interval):
     """Expected time down in ``interval`` at a steady-state ``availability``."""
     return ((1 - float(availability)) * interval)
+
+
+def calc_checkpoint_waste(write_time, interval, mtbf):
+    """First-order share of wall time lost to checkpointing at ``interval``.
+
+    ``W = write_time / interval + interval / (2 * mtbf)``: each save pauses
+    training for ``write_time`` once per interval, and each failure (one per
+    ``mtbf``) discards half an interval of work on average (Young 1974). At
+    the Young-Daly interval the two terms are equal and ``W = sqrt(2 * write_time
+    / mtbf)``. Added 2026-10-20.
+    """
+    delta = _ensure_unit(write_time, ureg.second, "write_time")
+    tau = _ensure_unit(interval, ureg.second, "interval")
+    mtbf_q = _ensure_unit(mtbf, ureg.second, "mtbf")
+    validate_positive(tau, "interval")
+    validate_positive(mtbf_q, "mtbf")
+    return float((delta / tau + tau / (2 * mtbf_q)).to("").magnitude)
+
+
+def calc_step_event_probability(rate_per_device_hour, n_devices, step_time):
+    """Probability that at least one of ``n_devices`` meets an event during one step.
+
+    Each device meets events at ``rate_per_device_hour`` (a probability per
+    device-hour); one step exposes ``n_devices * step_time`` device-hours, so
+    ``p = 1 - (1 - rate) ** exposure``. Used for silent-data-corruption
+    exposure across a synchronous job. Added 2026-10-20.
+    """
+    step = _ensure_unit(step_time, ureg.second, "step_time")
+    exposure = n_devices * step.m_as(ureg.hour)
+    return 1 - (1 - float(rate_per_device_hour)) ** exposure
+
+
+def calc_probe_detection_window(interval, timeout, failure_threshold):
+    """Earliest and latest time from a crash to removal by a health probe.
+
+    A replica leaves rotation after ``failure_threshold`` consecutive failed
+    probes, each failing ``timeout`` after it starts. A crash just before a
+    probe is removed after ``(threshold - 1) * interval + timeout``; a crash
+    just after a successful probe waits one more interval. Added 2026-10-20.
+    """
+    period = _ensure_unit(interval, ureg.second, "interval")
+    wait = _ensure_unit(timeout, ureg.second, "timeout")
+    validate_at_least(failure_threshold, 1, "failure_threshold")
+    earliest = (failure_threshold - 1) * period + wait
+    return earliest.to(ureg.second), (earliest + period).to(ureg.second)
+
+
+def calc_error_budget_spent(burn_rate, window, budget_period):
+    """Share of an SLO's error budget spent by a sustained burn rate (added 2026-10-20).
+
+    A burn rate of 1 spends exactly the budget over ``budget_period``; a burn
+    rate ``b`` sustained for ``window`` spends ``b * window / budget_period``
+    (Google SRE Workbook, "Alerting on SLOs").
+    """
+    return float(burn_rate * (window / budget_period).to("").magnitude)

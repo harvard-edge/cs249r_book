@@ -7,12 +7,17 @@ from .compression import CompressionModel
 from .data import DataModel, TransformationModel
 from .distributed import DistributedModel, MoERoutingModel, ParallelismOptimizer, TopologyModel
 from .economics import EconomicsModel, PlacementOptimizer, ResponsibleEngineeringModel, SustainabilityModel
-from .orchestration import OrchestrationModel
+from .orchestration import JobSizeMixModel, OrchestrationModel, PreemptionTaxModel
 from .facility import CoolantFlowModel, OutageCostModel, PowerTransientModel
 from .interconnect import (AlphaBetaModel, BisectionModel, CollectiveFitModel, CommunicationIntensityModel,
                            GradientSyncModel, IncastModel, TensorParallelCommModel, TransferLadderModel)
 from .performance import DecodeBoundModel, EfficiencyModel, NetworkRooflineModel, SensitivitySolver, SingleNodeModel, SynthesisSolver
 from .reliability import FailureIntervalModel, ReliabilityModel
+from .reliability import (  # added 2026-10-20
+    SeriesFailureModel,
+    CheckpointIntervalModel,
+    RecoveryBudgetModel,
+)
 from .serving import (
     BatchingOptimizer,
     ContinuousBatchingModel,
@@ -52,8 +57,11 @@ from .trends import TrainingGrowthModel
 from .performance import AmdahlModel, IronLawModel
 from .quality import ProxyDriftModel, ShiftedTestSetModel
 from .training import CheckpointModel, ScalingModel, TrainingMemoryModel, TrainingRunModel, TrainingStateModel
+from .goodput import GoodputModel, RuntimeGoodputModel  # fleet goodput (added 2026-10-20)
 
 __all__ = [
+    "GoodputModel",
+    "RuntimeGoodputModel",
     "BaseResolver",
     "ForwardModel",
     "BaseSolver",
@@ -68,6 +76,9 @@ __all__ = [
     "CoolantFlowModel",
     "OutageCostModel",
     "FailureIntervalModel",
+    "SeriesFailureModel",
+    "CheckpointIntervalModel",
+    "RecoveryBudgetModel",
     "GradientSyncModel",
     "CommunicationIntensityModel",
     "AlphaBetaModel",
@@ -148,6 +159,8 @@ __all__ = [
     "DataModel",
     "TransformationModel",
     "OrchestrationModel",
+    "JobSizeMixModel",
+    "PreemptionTaxModel",
     "CompressionModel",
 ]
 
@@ -181,3 +194,194 @@ __all__ += [
     "ZeroFailureModel",
     "ThrottledStageModel",
 ]
+
+# --- Test-time deliberation: allocation, pools, checks, search (added 2026-10-20) ---
+from .deliberation import (
+    ProbeVsAnswerModel,
+    AllocationAxesModel,
+    BestOfNPoolModel,
+    PassAtKEstimateModel,
+    CoverageVsVoteModel,
+    VerifiedPoolModel,
+    ArgmaxNoiseModel,
+    ScopedRevisionModel,
+    PrunedSearchTreeModel,
+    SearchAccountsModel,
+    DeadlinePolicyModel,
+    RecordedRunCostModel,
+)
+
+__all__ += [
+    "ProbeVsAnswerModel",
+    "AllocationAxesModel",
+    "BestOfNPoolModel",
+    "PassAtKEstimateModel",
+    "CoverageVsVoteModel",
+    "VerifiedPoolModel",
+    "ArgmaxNoiseModel",
+    "ScopedRevisionModel",
+    "PrunedSearchTreeModel",
+    "SearchAccountsModel",
+    "DeadlinePolicyModel",
+    "RecordedRunCostModel",
+]
+
+# --- Context engineering: budget, dilution, layout, compaction (added 2026-10-20) ---
+from .context import (
+    ContextBudgetModel,
+    AttentionDilutionModel,
+    ComprehensionByLengthModel,
+    PrefixLayoutBillModel,
+    CompactionCadenceModel,
+    ContextInvalidationModel,
+    ProtectedFieldCheckModel,
+)
+
+__all__ += [
+    "ContextBudgetModel",
+    "AttentionDilutionModel",
+    "ComprehensionByLengthModel",
+    "PrefixLayoutBillModel",
+    "CompactionCadenceModel",
+    "ContextInvalidationModel",
+    "ProtectedFieldCheckModel",
+]
+
+# --- Learned proposers: VLA evaluation, decoders, bus traffic, evidence (added 2026-10-20) ---
+from .proposer import (
+    VlaEvaluationModel,
+    DecoderFamiliesModel,
+    ProposerTrafficModel,
+    EvidenceHorizonModel,
+)
+
+__all__ += [
+    "VlaEvaluationModel",
+    "DecoderFamiliesModel",
+    "ProposerTrafficModel",
+    "EvidenceHorizonModel",
+]
+
+# --- Serving at scale: traces, frontiers, admission, routing (added 2026-10-20) ---
+from .serving_scale import (
+    BallsIntoBinsModel,
+    KvAdmissionModel,
+    PrecisionDividendModel,
+    RequestTraceModel,
+    ServingFrontierModel,
+    TrafficProfileModel,
+)
+
+__all__ += [
+    "BallsIntoBinsModel",
+    "KvAdmissionModel",
+    "PrecisionDividendModel",
+    "RequestTraceModel",
+    "ServingFrontierModel",
+    "TrafficProfileModel",
+]
+
+# --- Retrieval from long-term memory (added 2026-10-20) ---
+from .retrieval import (
+    RetrievalPayloadModel,
+    Bm25PairModel,
+    ExactScanFloorModel,
+    AnnFootprintModel,
+    GraphNeighborhoodModel,
+    IndexMaintenanceModel,
+    StorageAmplificationModel,
+    MaintainedPolicyCostModel,
+    WordOverlapModel,
+)
+
+__all__ += [
+    "RetrievalPayloadModel",
+    "Bm25PairModel",
+    "ExactScanFloorModel",
+    "AnnFootprintModel",
+    "GraphNeighborhoodModel",
+    "IndexMaintenanceModel",
+    "StorageAmplificationModel",
+    "MaintainedPolicyCostModel",
+    "WordOverlapModel",
+]
+
+# --- Tool calling (added 2026-10-20) ---
+from .tool_calls import (
+    BlindRetryModel,
+    ObservationCarryModel,
+    ModelPollingModel,
+    ToolCatalogSelectionModel,
+    ToolkitGranularityModel,
+    IntegrationAdaptersModel,
+)
+
+__all__ += [
+    "BlindRetryModel",
+    "ObservationCarryModel",
+    "ModelPollingModel",
+    "ToolCatalogSelectionModel",
+    "ToolkitGranularityModel",
+    "IntegrationAdaptersModel",
+]
+
+# --- KV cache management (added 2026-10-20) ---
+from .kv_cache import (
+    KvAttentionDesignModel,
+    PagedAllocationModel,
+    PrefixRebuildModel,
+    ChunkedPrefillModel,
+    PausedKvStateModel,
+    KvBlockSharingModel,
+    KvResidencyArchetypeModel,
+)
+
+__all__ += [
+    "KvAttentionDesignModel",
+    "PagedAllocationModel",
+    "PrefixRebuildModel",
+    "ChunkedPrefillModel",
+    "PausedKvStateModel",
+    "KvBlockSharingModel",
+    "KvResidencyArchetypeModel",
+]
+
+# --- The real-time permission path: phase, response time, fieldbus, lease (added 2026-10-20) ---
+from .realtime import (
+    PhaseLagBudgetModel,
+    ResponseTimeModel,
+    CanFdBusModel,
+    EtherCatCycleModel,
+    LeaseBudgetModel,
+    LatencyTailModel,
+)
+
+__all__ += [
+    "PhaseLagBudgetModel",
+    "ResponseTimeModel",
+    "CanFdBusModel",
+    "EtherCatCycleModel",
+    "LeaseBudgetModel",
+    "LatencyTailModel",
+]
+
+# --- Agent sandboxes (added 2026-10-20) ---
+from .sandboxes import (
+    SyscallTaxModel,
+    EnvelopeAmortizationModel,
+    WorkspaceProvisioningModel,
+    SandboxPoolReserveModel,
+    BootTimeCdfModel,
+)
+
+__all__ += [
+    "SyscallTaxModel",
+    "EnvelopeAmortizationModel",
+    "WorkspaceProvisioningModel",
+    "SandboxPoolReserveModel",
+    "BootTimeCdfModel",
+]
+from .neural import DenseNetworkModel, EpochOverheadModel  # neural computation (added 2026-10-20)
+__all__ += ["DenseNetworkModel", "EpochOverheadModel"]
+from .trends import ParameterGrowthModel  # added 2026-10-20
+__all__ += ["ParameterGrowthModel"]

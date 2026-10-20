@@ -3,7 +3,7 @@ Canonical physics and accounting formulas for ML systems.
 
 Domain modules:
   networking, performance, economics, memory, communication,
-  reliability, transformer, serving, statistics, agents, drivetrain, robotics
+  reliability, transformer, serving, statistics, agents, context, retrieval, tool_calls, drivetrain, robotics
 """
 
 from ._units import _ensure_unit
@@ -22,7 +22,7 @@ from .performance import (
     calc_pipeline_bubble,
     calc_effective_flops,
 )
-from .economics import calc_monthly_egress_cost, calc_fleet_tco
+from .economics import calc_monthly_egress_cost, calc_fleet_tco, calc_payback_period
 from .memory import (
     model_memory,
     calc_activation_memory,
@@ -71,7 +71,7 @@ from .transformer import (
     calc_transformer_prefill_flops,
     calc_vla_inference_latency,
 )
-from .serving import calc_queue_latency_mmc
+from .serving import calc_queue_latency_mmc, calc_mg1_wait_ratio
 from .statistics import (
     calc_population_stability_index,
     calc_two_proportion_sample_size,
@@ -81,11 +81,16 @@ from .statistics import (
     calc_cross_entropy_exponential_proposal,
     calc_conjunctive_confidence,
     calc_multilegged_confidence,
+    calc_chance_agreement,
+    calc_cohens_kappa,
+    calc_ks_critical_value,
+    calc_ks_normal_location_shift,
 )
 from .agents import (
     calc_kv_cache_bytes_per_token,
     calc_unchecked_success,
     calc_step_error_for_target,
+    calc_first_horizon_below,
     calc_cost_per_accepted,
     calc_break_even_acceptance,
     calc_independent_success,
@@ -94,6 +99,9 @@ from .agents import (
     calc_nucleus,
     calc_pass_posterior,
     calc_reused_prefix_prompt_tokens,
+    calc_pass_at_k_unbiased,
+    calc_expected_max_std_normal,
+    calc_pruned_tree_nodes,
 )
 from .drivetrain import (
     calc_traction_deceleration_limit,
@@ -125,11 +133,13 @@ from .robotics import (
     calc_voltage_droop,
     calc_action_chunk_streaming_amortization,
     calc_chunk_renewal_schedule,
+    calc_temporal_ensemble_weights,
     calc_watchdog_lease_bound,
     calc_phase_lag_total,
     calc_canfd_frame_bits,
     calc_canfd_bus_utilization,
     calc_ethercat_cycle_time,
+    calc_response_time_bound,
     calc_contact_force,
     calc_contact_yield_deadline,
     calc_inductive_voltage_droop,
@@ -157,6 +167,11 @@ from .robotics import (
 from .power import calc_rail_current_step, calc_inductive_droop
 from .scaling import calc_halving_multiple, calc_compute_optimal_allocation
 from .reliability import calc_all_up_availability, calc_downtime
+from .reliability import (  # added 2026-10-20
+    calc_checkpoint_waste,
+    calc_step_event_probability,
+    calc_probe_detection_window,
+)
 from .thermal import calc_coolant_mass_flow
 from .quantities import (
     transfer_time,
@@ -186,6 +201,7 @@ __all__ = [
     "calc_effective_flops",
     "calc_monthly_egress_cost",
     "calc_fleet_tco",
+    "calc_payback_period",
     "model_memory",
     "calc_activation_memory",
     "calc_checkpoint_size",
@@ -226,6 +242,7 @@ __all__ = [
     "calc_transformer_prefill_flops",
     "calc_vla_inference_latency",
     "calc_queue_latency_mmc",
+    "calc_mg1_wait_ratio",
     "calc_population_stability_index",
     "calc_monte_carlo_sample_size",
     "calc_importance_sampling_exponential",
@@ -233,10 +250,15 @@ __all__ = [
     "calc_cross_entropy_exponential_proposal",
     "calc_conjunctive_confidence",
     "calc_multilegged_confidence",
+    "calc_chance_agreement",
+    "calc_cohens_kappa",
+    "calc_ks_critical_value",
+    "calc_ks_normal_location_shift",
     "calc_two_proportion_sample_size",
     "calc_kv_cache_bytes_per_token",
     "calc_unchecked_success",
     "calc_step_error_for_target",
+    "calc_first_horizon_below",
     "calc_cost_per_accepted",
     "calc_break_even_acceptance",
     "calc_independent_success",
@@ -245,6 +267,9 @@ __all__ = [
     "calc_nucleus",
     "calc_pass_posterior",
     "calc_reused_prefix_prompt_tokens",
+    "calc_pass_at_k_unbiased",
+    "calc_expected_max_std_normal",
+    "calc_pruned_tree_nodes",
     "calc_safe_stopping_distance",
     "calc_max_permitted_velocity",
     "calc_c2_stop_suffix",
@@ -272,11 +297,13 @@ __all__ = [
     "calc_braking_limits",
     "calc_action_chunk_streaming_amortization",
     "calc_chunk_renewal_schedule",
+    "calc_temporal_ensemble_weights",
     "calc_watchdog_lease_bound",
     "calc_phase_lag_total",
     "calc_canfd_frame_bits",
     "calc_canfd_bus_utilization",
     "calc_ethercat_cycle_time",
+    "calc_response_time_bound",
     "calc_contact_force",
     "calc_contact_yield_deadline",
     "calc_inductive_voltage_droop",
@@ -303,6 +330,9 @@ __all__ = [
     "calc_compute_optimal_allocation",
     "calc_all_up_availability",
     "calc_downtime",
+    "calc_checkpoint_waste",
+    "calc_step_event_probability",
+    "calc_probe_detection_window",
     "calc_rail_current_step",
     "calc_inductive_droop",
     "calc_coolant_mass_flow",
@@ -342,4 +372,216 @@ __all__ += [
     "calc_peak_normalized_response",
     "calc_contact_force_rate",
     "calc_zero_failure_rate_upper_bound",
+]
+
+
+# --- Context engineering (added 2026-10-20) ---
+from .context import (
+    calc_observation_budget,
+    calc_turns_that_fit,
+    calc_softmax_target_weight,
+    calc_equivalent_key_count,
+    calc_zoned_prefill_tokens,
+    calc_compaction_cycle,
+)
+
+__all__ += [
+    "calc_observation_budget",
+    "calc_turns_that_fit",
+    "calc_softmax_target_weight",
+    "calc_equivalent_key_count",
+    "calc_zoned_prefill_tokens",
+    "calc_compaction_cycle",
+]
+
+
+# --- Serving at scale (added 2026-10-20) ---
+from .serving import (
+    calc_littles_law_occupancy,
+    calc_batch_knee,
+    calc_batch_throughput_share,
+    calc_padding_waste_fraction,
+    calc_speculative_expected_tokens,
+)
+
+__all__ += [
+    "calc_littles_law_occupancy",
+    "calc_batch_knee",
+    "calc_batch_throughput_share",
+    "calc_padding_waste_fraction",
+    "calc_speculative_expected_tokens",
+]
+
+# --- Retrieval from long-term memory (added 2026-10-20) ---
+from .retrieval import (
+    calc_records_that_fit,
+    calc_bm25_idf,
+    calc_bm25_length_normalizer,
+    calc_bm25_term_score,
+    calc_full_tree_nodes,
+    calc_vectors_in_budget,
+    calc_bandwidth_fit_through_origin,
+    calc_interface_bandwidth,
+    calc_word_overlap,
+)
+
+__all__ += [
+    "calc_records_that_fit",
+    "calc_bm25_idf",
+    "calc_bm25_length_normalizer",
+    "calc_bm25_term_score",
+    "calc_full_tree_nodes",
+    "calc_vectors_in_budget",
+    "calc_bandwidth_fit_through_origin",
+    "calc_interface_bandwidth",
+    "calc_word_overlap",
+]
+
+# --- Tool calling (added 2026-10-20) ---
+from .tool_calls import (
+    calc_timeout_probability,
+    calc_blind_retry_duplicate_probability,
+    calc_pending_polls,
+    calc_selection_break_even,
+    calc_integration_adapters,
+)
+
+__all__ += [
+    "calc_timeout_probability",
+    "calc_blind_retry_duplicate_probability",
+    "calc_pending_polls",
+    "calc_selection_break_even",
+    "calc_integration_adapters",
+]
+
+# --- Correlated samples and imitation-learning bounds (added 2026-10-20) ---
+from .statistics import (
+    calc_effective_sample_size,
+    calc_behavior_cloning_cost_bound,
+    calc_dagger_cost_bound,
+)
+from .constants import AGE_OF_UNIVERSE
+
+__all__ += [
+    "calc_effective_sample_size",
+    "calc_behavior_cloning_cost_bound",
+    "calc_dagger_cost_bound",
+    "AGE_OF_UNIVERSE",
+]
+
+# --- KV cache residency and turn rate (added 2026-10-20) ---
+from .memory import (
+    calc_kv_attention_design,
+    calc_kv_resident_fit,
+    calc_kv_block_count,
+    calc_shared_prefix_fit,
+    calc_sharing_gain_limit,
+)
+from .serving import calc_littles_law_rate, calc_residency_factor
+from .transformer import calc_weight_only_step_time
+
+__all__ += [
+    "calc_kv_attention_design",
+    "calc_kv_resident_fit",
+    "calc_kv_block_count",
+    "calc_shared_prefix_fit",
+    "calc_sharing_gain_limit",
+    "calc_littles_law_rate",
+    "calc_residency_factor",
+    "calc_weight_only_step_time",
+]
+
+# --- Agent sandboxes: setup amortization and Poisson reserve (added 2026-10-20) ---
+from .agents import calc_setup_share, calc_work_for_setup_cap
+from .statistics import calc_poisson_tail, calc_poisson_reserve, calc_poisson_mean_for_reserve
+from .statistics import calc_cdf_quantile
+
+__all__ += [
+    "calc_setup_share",
+    "calc_work_for_setup_cap",
+    "calc_poisson_tail",
+    "calc_poisson_reserve",
+    "calc_poisson_mean_for_reserve",
+    "calc_cdf_quantile",
+]
+
+# --- On-device training (added 2026-10-20) ---
+from .memory import (
+    calc_update_step_traffic,
+    calc_low_rank_update_params,
+    calc_residual_adapter_params,
+)
+
+__all__ += [
+    "calc_update_step_traffic",
+    "calc_low_rank_update_params",
+    "calc_residual_adapter_params",
+]
+
+# Network-architecture layer laws (added 2026-10-20)
+from .layers import (
+    calc_receptive_field,
+    calc_layers_for_receptive_field,
+    calc_separable_cost_fraction,
+    calc_gradient_product,
+)
+
+__all__ += [
+    "calc_receptive_field",
+    "calc_layers_for_receptive_field",
+    "calc_separable_cost_fraction",
+    "calc_gradient_product",
+]
+
+# --- Neural computation and number formats (added 2026-10-20) ---
+from .neural import (
+    calc_dense_weights,
+    calc_dense_biases,
+    calc_dense_params,
+    calc_dense_macs,
+    calc_dense_forward_flops,
+    calc_dense_backward_flops,
+    calc_dense_traffic_values,
+    calc_dense_saved_activations,
+    calc_dense_inference_activations,
+    calc_training_step_ops,
+    calc_training_state,
+    calc_sigmoid,
+    calc_sigmoid_slope,
+    calc_cross_entropy,
+    calc_relu,
+)
+from .numerics import calc_float_range, calc_float_round, calc_int_max
+
+__all__ += [
+    "calc_dense_weights",
+    "calc_dense_biases",
+    "calc_dense_params",
+    "calc_dense_macs",
+    "calc_dense_forward_flops",
+    "calc_dense_backward_flops",
+    "calc_dense_traffic_values",
+    "calc_dense_saved_activations",
+    "calc_dense_inference_activations",
+    "calc_training_step_ops",
+    "calc_training_state",
+    "calc_sigmoid",
+    "calc_sigmoid_slope",
+    "calc_cross_entropy",
+    "calc_relu",
+    "calc_float_range",
+    "calc_float_round",
+    "calc_int_max",
+]
+
+# --- ML operations at scale: canary stages, error budgets, own against rent (added 2026-10-20) ---
+from .statistics import calc_sample_collection_time
+from .reliability import calc_error_budget_spent
+from .economics import calc_rent_crossover, calc_ownership_breakeven_utilization
+
+__all__ += [
+    "calc_sample_collection_time",
+    "calc_error_budget_spent",
+    "calc_rent_crossover",
+    "calc_ownership_breakeven_utilization",
 ]

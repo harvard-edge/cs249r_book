@@ -282,3 +282,128 @@ def fit_exponential_growth(xs, ys, period=1.0):
     slope = (sum((x - mx) * (l - my) for x, l in zip(xs, ls))
              / sum((x - mx) ** 2 for x in xs))
     return 10 ** (slope * period), slope, my - slope * mx
+
+
+# --- Inter-annotator agreement (added 2026-10-20) ----------------------------
+def calc_chance_agreement(class_shares):
+    """Agreement two independent annotators reach by chance: ``sum_k s_k ** 2``.
+
+    ``class_shares`` is each annotator's label mix (fractions summing to 1);
+    both annotators are assumed to share it.
+    """
+    shares = list(class_shares)
+    if not shares or abs(sum(shares) - 1.0) > 1e-9:
+        raise ValueError("class_shares must be fractions that sum to 1.")
+    return sum(s * s for s in shares)
+
+
+def calc_cohens_kappa(observed_agreement, chance_agreement):
+    """Cohen's kappa: agreement beyond chance, ``(p_o - p_e) / (1 - p_e)`` (Cohen 1960)."""
+    if not 0.0 <= chance_agreement < 1.0:
+        raise ValueError("chance_agreement must be in [0, 1).")
+    return (observed_agreement - chance_agreement) / (1.0 - chance_agreement)
+
+
+# --- Two-sample drift statistics (added 2026-10-20) ---------------------------
+def calc_ks_critical_value(coefficient, n_reference, n_current):
+    """Large-sample two-sample Kolmogorov-Smirnov critical value.
+
+    ``D_crit = c * sqrt((n_0 + n_t) / (n_0 * n_t))``, where ``c`` is the
+    coefficient for the chosen significance level (1.36 at 0.05,
+    ``Ops.Monitoring.KsTestCoefficient``).
+    """
+    if n_reference <= 0 or n_current <= 0:
+        raise ValueError("sample sizes must be positive.")
+    return coefficient * math.sqrt((n_reference + n_current) / (n_reference * n_current))
+
+
+def calc_ks_normal_location_shift(shift_sd):
+    """K-S distance between two equal-variance normals whose means differ by ``shift_sd`` sds.
+
+    The CDF gap is largest midway between the means: ``2 * Phi(shift_sd / 2) - 1``,
+    which equals ``erf(shift_sd / (2 * sqrt(2)))``.
+    """
+    return math.erf(abs(shift_sd) / (2 * math.sqrt(2)))
+# --- Correlated samples and imitation-learning cost bounds (added 2026-10-20) --
+def calc_effective_sample_size(n_records, lag1_correlation):
+    """Effective number of independent samples in ``n_records`` of an AR(1) series.
+
+    ``N_eff = N (1 - rho) / (1 + rho)`` for estimating the mean of a series whose
+    adjacent records have lag-one correlation ``rho`` (Thiebaux and Zwiers 1984).
+    """
+    if not -1.0 < lag1_correlation < 1.0:
+        raise ValueError("lag1_correlation must be in (-1, 1).")
+    return n_records * (1.0 - lag1_correlation) / (1.0 + lag1_correlation)
+
+
+def calc_behavior_cloning_cost_bound(horizon_steps, per_step_error):
+    """Worst-case excess cost of behavioral cloning over ``horizon_steps``: ``S^2 eps``.
+
+    Ross and Bagnell (2010), Theorem 2.1: a policy trained only on the
+    demonstrator's states compounds a per-step error ``eps`` quadratically.
+    """
+    return horizon_steps * horizon_steps * per_step_error
+
+
+def calc_dagger_cost_bound(horizon_steps, per_step_error, recoverability=1.0):
+    """Worst-case excess cost with expert labels on learner states: ``u S eps``.
+
+    Ross, Gordon, and Bagnell (2011), Theorem 3.2: linear in the horizon while
+    the recoverability constant ``u`` stays bounded.
+    """
+    return recoverability * horizon_steps * per_step_error
+
+
+# --- Poisson reserve sizing (added 2026-10-20) ---
+def calc_poisson_tail(mean, at_least):
+    """``P(N >= s)`` for ``N ~ Poisson(mean)``: ``1 - sum_{k<s} e^-m m^k / k!``.
+
+    The chance that at least ``s`` events fall in an interval whose expected
+    count is ``mean``; 1 for ``s <= 0``. A pool with ``s`` standby instances
+    and a constant replenishment lead time misses a request exactly when at
+    least ``s`` earlier replacements are still outstanding.
+    """
+    if at_least <= 0:
+        return 1.0
+    return 1 - sum(math.exp(-mean) * mean**k / math.factorial(k) for k in range(at_least))
+
+
+def calc_poisson_reserve(mean, target):
+    """Smallest reserve ``s`` whose Poisson tail ``P(N >= s)`` is below ``target``."""
+    reserve = 0
+    while calc_poisson_tail(mean, reserve) >= target:
+        reserve += 1
+    return reserve
+
+
+def calc_poisson_mean_for_reserve(reserve, target, iterations=60):
+    """Largest Poisson mean at which ``reserve`` still holds ``P(N >= reserve)`` below ``target``.
+
+    Bisection on the tail, which rises monotonically with the mean.
+    """
+    lo, hi = 0.0, 1.0
+    while calc_poisson_tail(hi, reserve) < target:
+        hi *= 2
+    for _ in range(iterations):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if calc_poisson_tail(mid, reserve) < target else (lo, mid)
+    return lo
+
+
+def calc_cdf_quantile(values, cumulative, fraction):
+    """First value whose empirical cumulative fraction reaches ``fraction``.
+
+    ``values`` ascend with ``cumulative`` (a released CDF); past the end the
+    last value is returned.
+    """
+    for v, c in zip(values, cumulative):
+        if c >= fraction:
+            return v
+    return values[-1]
+def calc_sample_collection_time(samples, request_rate, traffic_share):
+    """Time for a traffic slice to collect ``samples`` observations (added 2026-10-20).
+
+    A canary stage that receives ``traffic_share`` of ``request_rate`` gathers
+    its planned guardrail sample in ``t = n / (r p)``.
+    """
+    return samples / (request_rate * traffic_share)

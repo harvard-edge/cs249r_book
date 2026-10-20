@@ -458,3 +458,114 @@ def calc_decoder_matmul_weights(layers, hidden_dim, vocab_size, mlp_ratio=4):
     d = hidden_dim
     per_block = d * 3 * d + d * d + 2 * d * mlp_ratio * d
     return {"block": layers * per_block, "block_matrices": 4 * layers, "output": vocab_size * d}
+
+
+# --- KV cache residency: fit, blocks, sharing (added 2026-10-20) -------------
+
+def calc_kv_attention_design(heads, kv_heads=None, kv_lora_rank=None) -> str:
+    """
+    The attention design a model's KV geometry implies: "MLA", "GQA", or "MHA".
+
+    Multi-head latent attention (MLA) caches one compressed latent per token
+    per layer (``kv_lora_rank`` set). Grouped-query attention (GQA) stores
+    fewer key-value heads than query heads. Multi-head attention (MHA) stores
+    one key-value head per query head.
+    """
+    if kv_lora_rank:
+        return "MLA"
+    if kv_heads and heads and kv_heads < heads:
+        return "GQA"
+    return "MHA"
+
+
+def calc_kv_resident_fit(pool, bytes_per_sequence) -> int:
+    """
+    Whole sequences of ``bytes_per_sequence`` that fit in ``pool``.
+
+        B = floor(M_pool / (S * m_token))
+
+    Both arguments are byte quantities. The count is a memory-only bound: it
+    ignores block rounding, headroom, and promised output growth unless the
+    caller has folded them into ``bytes_per_sequence``.
+    """
+    return int((pool / bytes_per_sequence).to("").magnitude)
+
+
+def calc_kv_block_count(tokens: int, block_tokens: int) -> int:
+    """Blocks of ``block_tokens`` a sequence of ``tokens`` occupies: ceil(S / b)."""
+    validate_at_least(block_tokens, 1, "block_tokens")
+    return math.ceil(tokens / block_tokens)
+
+
+def calc_shared_prefix_fit(pool_blocks: int, shared_blocks: int, private_blocks: int) -> int:
+    """
+    Requests that fit when ``shared_blocks`` are stored once for all of them.
+
+        B_shared = floor((N_blocks - N_common) / N_private)
+
+    Each request adds only its ``private_blocks``; the common prefix is
+    counted once, as unique physical blocks.
+    """
+    return (pool_blocks - shared_blocks) // private_blocks
+
+
+def calc_sharing_gain_limit(shared_fraction: float) -> float:
+    """
+    Large-pool limit of the resident-fit gain from sharing: 1 / (1 - f).
+
+    ``f`` is the shared fraction of each request's blocks. As the pool grows,
+    the one stored copy of the prefix becomes negligible and every request
+    costs only its private share.
+    """
+    if not 0 <= shared_fraction < 1:
+        raise ValueError("shared_fraction must be in [0, 1)")
+    return 1 / (1 - shared_fraction)
+
+
+# --- On-device training: update traffic and parameter-efficient updates (added 2026-10-20) ---
+
+def calc_update_step_traffic(weights, gradients, optimizer_state, activations):
+    """
+    DRAM traffic of one full-update training step, one crossing per tensor use.
+
+    With no cache reuse, the forward pass reads the weights and writes the
+    saved activations; the backward pass reads the activations and the
+    weights and writes the gradients; an Adam-style optimizer reads the
+    weights, the gradients, and its state, then writes the weights and its
+    state back:
+
+        V_step = (W + A) + (A + W + G) + (W + G + S) + (W + S)
+
+    Returns ``(step_traffic, weight_reads)``: the total bytes moved and the
+    bytes of the three weight reads (forward, backward, optimizer).
+    """
+    forward = weights + activations
+    backward = activations + weights + gradients
+    optimizer = (weights + gradients + optimizer_state) + (weights + optimizer_state)
+    return forward + backward + optimizer, 3 * weights
+
+
+def calc_low_rank_update_params(in_dim: int, out_dim: int, rank: int) -> int:
+    """
+    Trainable parameters of a rank-``rank`` update to an ``out_dim`` by ``in_dim`` weight.
+
+        P_LoRA = r (d_in + d_out)
+
+    The update is the product of a down-projection (r by d_in) and an
+    up-projection (d_out by r); the frozen weight itself holds d_in d_out.
+    """
+    validate_at_least(rank, 1, "rank")
+    return rank * (in_dim + out_dim)
+
+
+def calc_residual_adapter_params(width: int, bottleneck: int) -> int:
+    """
+    Parameters of one residual bottleneck adapter, weights and biases.
+
+        P_adapter = 2 d r + r + d
+
+    A down-projection from width d to bottleneck r and an up-projection back
+    to d, each with a bias.
+    """
+    validate_at_least(bottleneck, 1, "bottleneck")
+    return 2 * width * bottleneck + bottleneck + width

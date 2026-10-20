@@ -42,7 +42,36 @@ GamePlaying = _load("game_playing", "GamePlaying", "Cited results of landmark ga
 # Deployment-tier field figures (added 2026-10-20)
 DeviceMeasurements = _load("device_measurements", "DeviceMeasurements", "Cited measurements of deployed ML hardware (TPU v1 roofline, memory-wall growth, phone stress test, two-pass wake word).")
 # Spaceflight anomaly inquiries (added 2026-10-20)
+WakeWordBenchmarks = _load("wake_word_benchmarks", "WakeWordBenchmarks", "Published wake-word detector benchmark results (Picovoice wake-word benchmark).")  # added 2026-10-20
+AnnotationTimes = _load("annotation_times", "AnnotationTimes", "Measured human annotation times (ImageNet boxes, Cityscapes masks).")  # added 2026-10-20
+DataPipelineResults = _load("data_pipeline_results", "DataPipelineResults", "Measured input-pipeline results (data stalls, FFCV, a profiler's step breakdown).")  # added 2026-10-20
+DataFileMeasurements = _load("data_file_measurements", "DataFileMeasurements", "Metadata of real public data files (a Parquet file, a WebDataset shard).")  # added 2026-10-20
+SpeechCommandsReleases = _load("speech_commands_releases", "SpeechCommandsReleases", "Speech Commands v1 and v2 sizes and cross-release accuracy (Warden 2018).")  # added 2026-10-20
 SpaceflightAnomalies = _load("spaceflight_anomalies", "SpaceflightAnomalies", "Cited results of spaceflight anomaly inquiries (ESA Schiaparelli 2017).")
+# Diabetic retinopathy screening studies (added 2026-10-20)
+ScreeningStudies = _load("screening_studies", "ScreeningStudies", "Cited results of diabetic retinopathy screening systems (Gulshan 2016, Beede 2020, FDA DEN180001).")
+# Test-time compute results (added 2026-10-20)
+TestTimeCompute = _load("test_time_compute", "TestTimeCompute", "Cited test-time compute results (Snell et al. 2024; PRM800K, Lightman et al. 2024).")
+# Context engineering (added 2026-10-20)
+ContextUse = _load("context_use", "ContextUse", "Cited results on how models use a request: evidence position, an irrelevant sentence, the RULER bar.")
+AgentRetrieval = _load("agent_retrieval", "AgentRetrieval", "Cited results on how agents retrieve: SWE-agent against BM25 retrieval, PoisonedRAG's injection count.")  # added 2026-10-20
+SummarizationFaithfulness = _load("summarization_faithfulness", "SummarizationFaithfulness", "Cited summarization-faithfulness results (Maynez et al. 2020, XSum).")
+PrefixCaching = _load("prefix_caching", "PrefixCaching", "Cited prefix-cache results from a public serving deployment (SGLang 2024).")
+MlOperations = _load("ml_operations", "MlOperations", "Measured ML-operations results (data validation anomalies, model-load latency, interleaving).")  # added 2026-10-20
+ToolInterception = _load("tool_interception", "ToolInterception", "Cited tool-interception results for augmented LLM serving (InferCept 2024).")  # added 2026-10-20
+SandboxIsolation = _load("sandbox_isolation", "SandboxIsolation", "Cited results on containing agent code: Cybench task count, gVisor system-call latency.")  # added 2026-10-20
+# Published vision-language-action and dual-system robot policies (added 2026-10-20)
+VlaSystems = _load("vla_systems", "VlaSystems", "Cited figures of published VLA and dual-system robot policies (OpenVLA, ACT, pi0, FAST, Helix, GR00T N1).")
+# Robot demonstration data and event data recorders (added 2026-10-20)
+RobotDataSystems = _load("robot_data_systems", "RobotDataSystems", "Cited figures of dated robot demonstration-data systems and interactive imitation results (DROID, Open X-Embodiment, AgiBot World, ThriftyDAgger).")
+OnDeviceLearning = _load("on_device_learning", "OnDeviceLearning", "Cited results of on-device and federated learning systems (Gboard, Google FL system, TinyTL).")  # added 2026-10-20
+EventDataRecorders = _load("event_data_recorders", "EventDataRecorders", "Pre-crash recording windows required of automotive event data recorders (49 CFR 563).")
+# Published vision-language-action and dual-system robot policies (added 2026-10-20)
+# Robot policy training: sim-to-real, parallel simulation, on-robot RL (added 2026-10-20)
+RobotLearning = _load("robot_learning", "RobotLearning", "Cited figures of published robot-learning runs (Dactyl, legged_gym, HIL-SERL, QT-Opt, a grasping farm, Diffusion Policy, OpenVLA pretraining).")
+# Network architectures (added 2026-10-20)
+NetflixPrize = _load("netflix_prize", "NetflixPrize", "Cited figures of the Netflix Prize and what Netflix shipped from it (Johnston 2012; Amatriain and Basilico 2012).")
+KerasApplications = _load("keras_applications", "KerasApplications", "Keras Applications model table: top-1 accuracy and time per inference step on a CPU and an A100.")
 
 
 # ---------------------------------------------------------------------------
@@ -311,10 +340,33 @@ class Literature(Registry):
     ServingIncidents = ServingIncidents
     SelfCorrection = SelfCorrection
     LlmInferenceTraceCode2023 = _series.LlmInferenceTraceCode2023
+    LlmInferenceTraceConversation2023 = _series.LlmInferenceTraceConversation2023  # added 2026-10-20
+    LlmInferenceTraceConversation2024TenMinute = _series.LlmInferenceTraceConversation2024TenMinute  # added 2026-10-20
     PredictionQuality = PredictionQuality  # added 2026-10-20
     GamePlaying = GamePlaying  # added 2026-10-20
     DeviceMeasurements = DeviceMeasurements  # added 2026-10-20
     SpaceflightAnomalies = SpaceflightAnomalies  # added 2026-10-20
+    ScreeningStudies = ScreeningStudies  # added 2026-10-20
+    TestTimeCompute = TestTimeCompute  # added 2026-10-20
+    ContextUse = ContextUse  # added 2026-10-20
+    AgentRetrieval = AgentRetrieval  # added 2026-10-20
+    SummarizationFaithfulness = SummarizationFaithfulness  # added 2026-10-20
+    PrefixCaching = PrefixCaching  # added 2026-10-20
+    ToolInterception = ToolInterception  # added 2026-10-20
+    SandboxIsolation = SandboxIsolation  # added 2026-10-20
+    MlOperations = MlOperations  # added 2026-10-20
+    VlaSystems = VlaSystems  # added 2026-10-20
+    WakeWordBenchmarks = WakeWordBenchmarks  # added 2026-10-20
+    AnnotationTimes = AnnotationTimes  # added 2026-10-20
+    DataPipelineResults = DataPipelineResults  # added 2026-10-20
+    DataFileMeasurements = DataFileMeasurements  # added 2026-10-20
+    SpeechCommandsReleases = SpeechCommandsReleases  # added 2026-10-20
+    RobotDataSystems = RobotDataSystems  # added 2026-10-20
+    EventDataRecorders = EventDataRecorders  # added 2026-10-20
+    OnDeviceLearning = OnDeviceLearning  # added 2026-10-20
+    RobotLearning = RobotLearning  # added 2026-10-20
+    NetflixPrize = NetflixPrize  # network architectures (added 2026-10-20)
+    KerasApplications = KerasApplications  # network architectures (added 2026-10-20)
     ComputeTrend = ComputeTrend
     AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks
@@ -324,8 +376,16 @@ class Literature(Registry):
     LowestPriceAtCapability = _series.LowestPriceAtCapability
     TerminalBenchHarness = _series.TerminalBenchHarness
     LongContextComprehension = _series.LongContextComprehension
+    RulerEffectiveLength = _series.RulerEffectiveLength  # added 2026-10-20
+    AnswerPositionAccuracy = _series.AnswerPositionAccuracy  # added 2026-10-20
+    SweBenchBm25Context = _series.SweBenchBm25Context  # added 2026-10-20
+    PoisonedRagBlackBox = _series.PoisonedRagBlackBox  # added 2026-10-20
+    PagedAttentionMemoryBreakdown = _series.PagedAttentionMemoryBreakdown  # added 2026-10-20
+    ToolInterceptionTimes = _series.ToolInterceptionTimes  # added 2026-10-20
+    AttentionSinkPerplexity = _series.AttentionSinkPerplexity  # added 2026-10-20
     SweBenchVerifiedRuns = _series.SweBenchVerifiedRuns
     CybenchSolveRate = _series.CybenchSolveRate
+    FirecrackerBootPreconfigured = _series.FirecrackerBootPreconfigured  # added 2026-10-20
     OSWorldStepBudget = _series.OSWorldStepBudget
     FrontierSweTrials = _series.FrontierSweTrials
     SweBenchTrajectories = _series.SweBenchTrajectories
@@ -337,6 +397,7 @@ class Literature(Registry):
     OpenXEmbodimentComposition = _series.OpenXEmbodimentComposition
     LeRobotHubMonthly = _series.LeRobotHubMonthly
     LeRobotEpisodeHistogram = _series.LeRobotEpisodeHistogram
+    DactylPhysicalTrials = _series.DactylPhysicalTrials  # added 2026-10-20
     EdgeInferenceOrin = _series.EdgeInferenceOrin
     KittiOdometry = _series.KittiOdometry
     CaliforniaDisengagements = _series.CaliforniaDisengagements

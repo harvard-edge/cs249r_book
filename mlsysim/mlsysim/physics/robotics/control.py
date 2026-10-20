@@ -168,6 +168,46 @@ def calc_chunk_renewal_schedule(
     }
 
 
+def calc_temporal_ensemble_weights(decay: float, predictions: int):
+    """
+    Normalized weights of a temporal ensemble over overlapping action chunks.
+
+    A chunk policy queried every step holds ``predictions`` overlapping
+    predictions for the current step, index 0 the oldest. ACT blends them with
+    exponentially decaying weights
+
+        w_i = exp(-k i) / sum_j exp(-k j),   i = 0 .. n - 1,
+
+    so the oldest prediction weighs most for k > 0.
+
+    Source: Zhao et al., "Learning Fine-Grained Bimanual Manipulation with
+    Low-Cost Hardware" (ACT), RSS 2023, arXiv:2304.13705, and its reference
+    code (imitate_episodes.py, temporal-ensembling branch).
+
+    Parameters
+    ----------
+    decay : float
+        Decay constant k per prediction index (>= 0).
+    predictions : int
+        Number of overlapping predictions n (>= 1).
+
+    Returns
+    -------
+    dict
+        weights (numpy array, sums to 1), oldest_over_newest (w_0 / w_{n-1}),
+        newest_share (w_{n-1}).
+    """
+    validate_at_least(predictions, 1, "predictions")
+    validate_nonnegative(decay, "decay")
+    raw = np.exp(-decay * np.arange(predictions))
+    w = raw / raw.sum()
+    return {
+        "weights": w,
+        "oldest_over_newest": float(w[0] / w[-1]),
+        "newest_share": float(w[-1]),
+    }
+
+
 def calc_watchdog_lease_bound(
     clearance_distance,
     initial_velocity,
@@ -569,6 +609,43 @@ def calc_ethercat_cycle_time(
         "utilization": float(rho),
         "is_schedulable": bool(rho <= 1.0),
     }
+
+
+def calc_response_time_bound(wcet, blocking, interference, deadline=None):
+    """
+    Response-time bound of one periodic task: R = C + B + I.
+
+    ``wcet`` (C) is the task's worst-case execution time, ``blocking`` (B) the
+    longest section in which lower-priority code keeps it from running, and
+    ``interference`` (I) the higher-priority work that preempts it inside one
+    response window. The bound holds only as far as each term is itself a
+    bound: a measured execution time can refute a declared C but never
+    establish it. With a ``deadline`` D, the margin D - R and the largest
+    blocking that still meets D (D - C - I) are returned as well.
+
+    Source: Buttazzo, G., Hard Real-Time Computing Systems, 3rd ed., Springer,
+    2011 (response-time analysis with blocking); Sha, Rajkumar, and Lehoczky,
+    "Priority Inheritance Protocols," IEEE Trans. Computers 39(9), 1990.
+
+    Returns
+    -------
+    dict
+        response; with deadline, margin, meets_deadline, blocking_limit
+        (all times in microseconds).
+    """
+    us = ureg.microsecond
+    for q, name in ((wcet, "wcet"), (blocking, "blocking"), (interference, "interference")):
+        validate_nonnegative(q, name)
+    r = (wcet + blocking + interference).to(us)
+    out = {"response": r}
+    if deadline is not None:
+        validate_positive(deadline, "deadline")
+        out.update(
+            margin=(deadline - r).to(us),
+            meets_deadline=bool(r <= deadline),
+            blocking_limit=(deadline - wcet - interference).to(us),
+        )
+    return out
 
 
 def calc_cbf_qp_orthogonal_projection(u_nom, a_vec, b_scalar):

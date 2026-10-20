@@ -1,376 +1,260 @@
 #!/usr/bin/env python3
-"""Every derived number in Lecture 4 (Context Engineering), one block per slide.
+"""Every number on the Volume III Lecture 4 slides and notes, read from MLSysIM.
 
-"CE" is the rendered chapter, Context Engineering (Volume III, Chapter 4).
-Inputs carry their source as a comment; everything printed is derived here
-and copied onto the slide and into its note. Scenario inputs from the
-chapter's Napkin Math (NM) notebooks are hypothetical, so slides that show
-them say "illustrative".
+MLSysIM holds the inputs (the coding harness's window and step budget, the
+scenario sizes of the repair request, Literature results) and the
+calculations (Scenarios.*, each backed by a solver in
+engine/solvers/context.py, or the Lecture 1 and 2 scenarios the recall slide
+repeats); the chapter reads the same scenarios. The one other source is the
+deck's own tokenizer run, artifacts/tokenize_output.txt, read as recorded.
+This file only selects values, converts units, and formats them; it types no
+numbers. Each value is recorded with v() under the key the deck prints as
+\\val{key}; running this file writes images/numbers.tex.
 
-Run from anywhere:  python3 calcs.py
-make_figs.py imports the functions below, so figures and slides agree.
+Run from this folder: python3 calcs.py
 """
 
-import math
+import re
 import sys
 from pathlib import Path
 
-MLSYSIM = Path(__file__).resolve().parents[4] / "mlsysim"
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
+
+Literature, Scenarios = mlsysim.Literature, mlsysim.Scenarios
+HERE = Path(__file__).resolve().parent
+
+BUDGET = Scenarios.RepairContextBudget
+HEAD, LOOK = Scenarios.ToyHeadAttentionDilution, Scenarios.ToyHeadLookalikeExcerpt
+SWEEP = Scenarios.FictionLiveBenchThrough60K
+LAYOUT, LAYOUT4 = Scenarios.RepairPrefixLayoutBill, Scenarios.RepairPrefixLayoutEveryFourthCall
+MARKS = Scenarios.RepairCompactionWatermarks
+INVAL = Scenarios.SupersededExcerptInvalidation
+RETAIN, CHECK = Scenarios.CompactionConstraintRetention, Scenarios.ProtectedFieldCheckPayback
+RESEND, COST = Scenarios.CodingAgentResend30Turns, Scenarios.RepairAttemptCostLevers
+USE, SUMM, CACHE = Literature.ContextUse, Literature.SummarizationFaithfulness, Literature.PrefixCaching
+LIU, RULER = Literature.AnswerPositionAccuracy.entries, Literature.RulerEffectiveLength.entries
+
+K = 10 ** 3
+STEP_TURNS = 10  # hook step 2 pauses after this many turns (presentation choice)
 
 
-# ------------------------------------------------------------------ inputs
-# NM 4.1 (CE Sec. 4.2): the repair harness, scenario values.
-WINDOW = 128_000        # S_max, context window
-RESERVE = 8_000         # K_max, output reserve
-SYSTEM = 3_000          # system instructions
-TOOLS = 12_000          # tool declarations
-STATE = 24_000          # task state
-OBS_TURN = 4_000        # appended tool result per turn
-TURNS = 30              # step budget
-DIGEST = 2_000          # compacted digest per turn (NM 4.1 insight)
-LEAF = 8_000            # selected observations per call (NM 4.2, Sec. 4.4.1)
-
-# NM 4.2 (CE Sec. 4.4.3): prices are hypothetical.
-PRICE = 3.0 / 1e6       # $ per uncached input token
-CACHED = 0.10           # cached reads billed at 10 percent
-TRUNK_REWRITES = 2      # compaction passes in the step budget (NM 4.3)
-
-# NM 4.3 (CE Sec. 4.5.3)
-TARGET = 47_000         # post-compaction target
-TRIGGER = 92_000        # trigger watermark
-TARGET_NARROW = 81_000  # the narrower variant
-
-# NM 4.4 (CE Sec. 4.7.3)
-STALE = 850             # outdated r17 excerpt at the start of the trunk
-TOMBSTONE = 24          # in-place marker
-NOTICE = 128            # appended notice with framing
-
-# Equation 2 toy head (CE Sec. 4.3.1)
-TARGET_LOGIT = 6.0
-BACKGROUND_LOGIT = -2.0
-LOOKALIKE_LOGIT = 2.0   # Exercise 3: superseded excerpt keys
-EX3_UNRELATED = 40_000  # Exercise 3
-
-# Equation 6 (CE Sec. 4.8.2): hypothetical per-round loss
-LOSS = 0.05
-
-# Exercise 6 (CE Sec. 4.12), hypothetical
-EX6_CONSTRAINTS = 12
-EX6_LOSS = 0.03
-EX6_ROUNDS = 3
-EX6_PACC = 0.6
-EX6_ATTEMPT = 2.00
-EX6_DETECT = 0.90
-EX6_CHECK = 0.05        # $ per round
-
-# Lecture 2 recall (Foundation Model NM 2.2) and Lecture 1 (NM 1.2)
-L2_FIRST, L2_APPEND, L2_TURNS = 8_000, 1_500, 30
-L1_ATTEMPT, L1_PACC = 2.10, 0.40
+def usd(q):
+    return q.to("USD").magnitude
 
 
-def p(label, value):
-    print(f"{label:<58} {value}")
+print("== Hook and Napkin Math 4.1 (repair request budget scenario)")
+b = BUDGET.result
+v("b_window", BUDGET.window, "{:,.0f}", "context window, tokens")
+v("b_window_k", BUDGET.window / K, "{:.0f}", "context window, thousand tokens")
+v("b_turns", BUDGET.turns, "{:.0f}", "step budget, turns")
+v("b_reserve", BUDGET.output_reserve, "{:,.0f}", "output reserve, tokens")
+v("b_reserve_k", BUDGET.output_reserve / K, "{:.0f}", "output reserve, thousand tokens")
+v("b_system", BUDGET.system_tokens, "{:,.0f}", "system instructions, tokens")
+v("b_tools", BUDGET.tool_tokens, "{:,.0f}", "tool declarations, tokens")
+v("b_state", BUDGET.state_tokens, "{:,.0f}", "task state, tokens")
+v("b_state_k", BUDGET.state_tokens / K, "{:.0f}", "task state, thousand tokens")
+v("b_obs", BUDGET.observation_per_turn, "{:,.0f}", "tool result per turn, tokens")
+v("b_digest", BUDGET.digest_tokens, "{:,.0f}", "digest per turn, tokens")
+v("b_selected", BUDGET.selected_observation, "{:,.0f}", "selected observations per call, tokens")
+v("b_limit", b.input_limit, "{:,.0f}", "input allowance, tokens")
+v("b_limit_k", b.input_limit / K, "{:.0f}", "input allowance, thousand tokens")
+v("b_root", BUDGET.system_tokens + BUDGET.tool_tokens, "{:,.0f}", "instructions plus tools, tokens")
+v("b_root_k", (BUDGET.system_tokens + BUDGET.tool_tokens) / K, "{:.0f}", "the same, thousand tokens")
+v("b_fixed", b.fixed_tokens, "{:,.0f}", "instructions, tools, and state, tokens")
+v("b_fixed_k", b.fixed_tokens / K, "{:.0f}", "the same, thousand tokens")
+v("b_obs_budget", b.observation_budget, "{:,.0f}", "observation budget, tokens")
+v("b_turns_fit", b.turns_fit, "{:.0f}", "appended turns that fit")
+v("b_overflow_turn", b.overflow_turn, "{:.0f}", "first turn that does not fit")
+v("b_overflow_obs", b.overflow_observations, "{:,.0f}", "results the overflow turn needs, tokens")
+v("b_naive_turns", BUDGET.window // BUDGET.observation_per_turn, "{:.0f}",
+  "window / result size: the answer that forgets every reserve (vote choice D)")
+v("b_max_obs", b.max_observation_per_turn, "{:,.0f}", "largest result that lasts every turn, tokens")
+v("b_digest_turns", b.digest_turns, "{:.0f}", "appended turns that fit at the digest size")
+v("b_step_turns", STEP_TURNS, "{:.0f}", "hook step 2: turns shown")
+v("b_step_obs", STEP_TURNS * BUDGET.observation_per_turn, "{:,.0f}", "results after those turns, tokens")
+v("b_append_bill", b.append_bill, "{:,.0f}", "appending, cumulative input, tokens")
+v("b_select_bill", b.select_bill, "{:,.0f}", "selecting, cumulative input, tokens")
+v("b_append_bill_m", b.append_bill / K ** 2, "{:.2f}", "appending, million tokens (figure)")
+v("b_select_bill_m", b.select_bill / K ** 2, "{:.2f}", "selecting, million tokens (figure)")
+v("b_ratio", b.bill_ratio, "{:.1f}", "append bill / select bill")
+v("b_request", b.selected_request, "{:,.0f}", "selecting request, tokens")
+v("b_final", b.final_append_request, "{:,.0f}", "appending, last request, tokens")
+v("b_final_reserve", b.final_append_with_reserve, "{:,.0f}", "the same plus the output reserve")
 
+print("== Recall (Lecture 2 resend scenario, Lecture 1 cost scenario)")
+r30 = RESEND.result
+v("rs_turns", RESEND.turns, "{:.0f}", "turns")
+v("rs_first", RESEND.first_prompt, "{:,.0f}", "first prompt, tokens")
+v("rs_delta", RESEND.appended, "{:,.0f}", "appended per turn, tokens")
+v("rs_resent", r30.resent_tokens, "{:,.0f}", "resent input, tokens")
+v("rs_fresh", r30.reused_prefix_tokens, "{:,.0f}", "fresh prefill with reuse, tokens")
+v("rs_reduction", r30.reuse_reduction, "{:.1f}", "resent / fresh")
+v("rec_attempt", COST.result.attempt_cost, "{:.2f}", "cost per attempt, $")
+v("rec_acc", COST.acceptance, "{:.2f}", "acceptance probability")
+v("rec_acc_pct", 100 * COST.acceptance, "{:.0f}", "acceptance probability, %")
+v("rec_ceff", COST.result.cost_per_accepted, "{:.2f}", "cost per accepted task, $")
 
-# ------------------------------------------------------------------ hook / NM 4.1
-def budget():
-    allowance = WINDOW - RESERVE
-    after_fixed = allowance - SYSTEM - TOOLS
-    obs_budget = after_fixed - STATE
-    turns_fit = obs_budget // OBS_TURN
-    return dict(
-        allowance=allowance,
-        after_fixed=after_fixed,
-        after_fixed_share=after_fixed / WINDOW,
-        obs_budget=obs_budget,
-        turns_fit=turns_fit,
-        overflow_turn=turns_fit + 1,
-        max_per_turn=obs_budget / TURNS,
-        digest_turns=obs_budget // DIGEST,
-    )
+print("== Fiction.LiveBench sweep (Literature.LongContextComprehension)")
+s = SWEEP.result
+first, last = SWEEP.lengths[0], SWEEP.lengths[-1]
+v("fl_models", s.scored_models, "{:.0f}", "models scored at every length")
+v("fl_med_first", 100 * s.median[first], "{:.0f}", "median at the shortest version, %")
+v("fl_med_8k", 100 * s.median["8k"], "{:.0f}", "median at 8K, %")
+v("fl_med_last", 100 * s.median[last], "{:.0f}", "median at 60K, %")
+v("fl_hold", s.held_count, "{:.0f}", "models at or above the bar at 60K")
+v("fl_bar_pct", 100 * SWEEP.hold_bar, "{:.0f}", "the bar, %")
+v("fl_hi", 100 * s.highest_last, "{:.0f}", "highest score at 60K, %")
+v("fl_lo", 100 * s.lowest_last, "{:.0f}", "lowest score at 60K, %")
 
+print("== RULER (Literature.RulerEffectiveLength, ContextUse)")
+v("ruler_bar", USE.RulerEffectiveLengthThreshold, "{:.1f}", "effective-length threshold, %")
+v("ruler_rows_words", len(RULER), "words", "rows plotted")
+v("ruler_reached", sum(1 for e in RULER if e["effective_k"] is not None and e["effective_k"] >= e["claimed_k"]),
+  "{:.0f}", "rows reaching their claimed length")
+v("ruler_models", USE.RulerModelsEvaluated, "{:.0f}", "models the paper evaluated")
 
-def append_vs_select():
-    fixed = SYSTEM + TOOLS + STATE
-    append = [fixed + OBS_TURN * t for t in range(1, TURNS + 1)]
-    select = [fixed + LEAF for _ in range(1, TURNS + 1)]
-    cum_a, cum_s, a, s = [], [], 0, 0
-    for x, y in zip(append, select):
-        a += x
-        s += y
-        cum_a.append(a)
-        cum_s.append(s)
-    return dict(per_call_append=append, per_call_select=select,
-                cum_append=cum_a, cum_select=cum_s,
-                ratio=cum_a[-1] / cum_s[-1],
-                final_append_request=append[-1],
-                final_with_reserve=append[-1] + RESERVE)
+print("== Lost in the middle (Literature.AnswerPositionAccuracy, ContextUse)")
+acc = {int(e["position"]): e["accuracy"] for e in LIU}
+pos = sorted(acc)
+worst = min(pos, key=lambda p: acc[p])
+v("liu_docs", LIU[0]["documents"], "{:.0f}", "documents per question")
+v("liu_first", acc[pos[0]], "{:.1f}", "answer first, %")
+v("liu_last", acc[pos[-1]], "{:.1f}", "answer last, %")
+v("liu_worst", acc[worst], "{:.1f}", "worst position, %")
+v("liu_worst_pos", worst, "{:.0f}", "worst position")
+v("liu_closed", USE.Gpt35TurboClosedBook, "{:.1f}", "closed book, %")
 
+print("== Toy head (attention-dilution scenarios)")
+h, x = HEAD.result, LOOK.result
+v("dil_target", HEAD.target_logit, "{:g}", "target logit")
+v("dil_background", HEAD.background_logit, "{:g}", "background logit")
+v("dil_short", HEAD.short_keys, "{:,.0f}", "keys, short context")
+v("dil_long", HEAD.long_keys, "{:,.0f}", "keys, long context")
+v("dil_short_pct", 100 * h.short_weight, "{:.1f}", "target weight, short, %")
+v("dil_long_pct", 100 * h.long_weight, "{:.1f}", "target weight, long, %")
+v("dil_unrelated", LOOK.unrelated_keys, "{:,.0f}", "unrelated keys")
+v("dil_look", LOOK.lookalike_keys, "{:,.0f}", "look-alike keys (stale excerpt tokens)")
+v("dil_look_logit", LOOK.lookalike_logit, "{:g}", "look-alike logit")
+v("dil_gap", LOOK.lookalike_logit - LOOK.background_logit, "{:g}", "look-alike minus background logit")
+v("dil_without_pct", 100 * x.weight_without_lookalikes, "{:.1f}", "without the excerpt, %")
+v("dil_with_pct", 100 * x.weight_with_lookalikes, "{:.1f}", "with the excerpt, %")
+v("dil_equiv", x.lookalike_equivalent_keys, "{:,.0f}", "unrelated keys equal to the excerpt")
+v("dil_half_pct", 100 * x.weight_half_unrelated, "{:.1f}", "half the unrelated keys dropped, %")
 
-def recall_l2():
-    resend = L2_TURNS * L2_FIRST + L2_APPEND * L2_TURNS * (L2_TURNS - 1) // 2
-    fresh = L2_FIRST + (L2_TURNS - 1) * L2_APPEND
-    return dict(resend=resend, fresh=fresh, ratio=resend / fresh,
-                ceff=L1_ATTEMPT / L1_PACC)
+print("== Napkin Math 4.2 (prefix layout bill scenarios)")
+L, L4 = LAYOUT.result, LAYOUT4.result
+v("lay_root", LAYOUT.root_tokens, "{:,.0f}", "root, tokens")
+v("lay_root_k", LAYOUT.root_tokens / K, "{:.0f}", "root, thousand tokens")
+v("lay_trunk", LAYOUT.trunk_tokens, "{:,.0f}", "trunk, tokens")
+v("lay_trunk_k", LAYOUT.trunk_tokens / K, "{:.0f}", "trunk, thousand tokens")
+v("lay_leaf", LAYOUT.leaf_tokens, "{:,.0f}", "leaf, tokens")
+v("lay_leaf_k", LAYOUT.leaf_tokens / K, "{:.0f}", "leaf, thousand tokens")
+v("lay_calls", LAYOUT.turns, "{:.0f}", "calls")
+v("lay_rewrites", LAYOUT.trunk_rewrites, "{:.0f}", "trunk rewrites")
+v("lay_rewrites_words", LAYOUT.trunk_rewrites, "words", "trunk rewrites, in words")
+v("lay_price", LAYOUT.input_price.to("USD / Mtoken").magnitude, "{:.0f}", "input price, $ per million tokens")
+v("lay_cached_pct", 100 * LAYOUT.cached_fraction, "{:.0f}", "cached reads billed at, %")
+v("lay_request", L.request_tokens, "{:,.0f}", "request, tokens")
+v("lay_total", L.total_input, "{:,.0f}", "trajectory input, tokens")
+v("lay_rewrite", L.rewrite_tokens, "{:,.0f}", "a trunk rewrite prefills, tokens")
+v("lay_warm", L.warm_calls, "{:.0f}", "leaf-only calls")
+v("lay_uncached", L.uncached_tokens, "{:,.0f}", "stable layout, uncached tokens")
+v("lay_cached", L.cached_tokens, "{:,.0f}", "stable layout, cached tokens")
+v("lay_hit_pct", 100 * L.hit_rate, "{:.1f}", "cached share, %")
+v("lay_unstable", usd(L.unstable_cost), "{:.2f}", "volatile-first bill, $")
+v("lay_stable", usd(L.stable_cost), "{:.2f}", "stable bill, $")
+v("lay_ratio", L.cost_ratio, "{:.1f}", "bill ratio")
+v("lay_rewrite_calls", L.rewrite_in_leaf_calls, "{:.0f}", "a trunk rewrite in leaf-only calls")
+v("lay4_rewrites", LAYOUT4.trunk_rewrites, "{:.0f}", "Checkpoint 4.1: rewrites on every fourth call")
+v("lay4_uncached", L4.uncached_tokens, "{:,.0f}", "Checkpoint 4.1: uncached tokens")
+v("lay4_stable", usd(L4.stable_cost), "{:.2f}", "Checkpoint 4.1: stable bill, $")
 
+print("== SGLang deployment (Literature.PrefixCaching)")
+v("sg_llava", CACHE.SglangLlavaNext34BHitRate, "{:.1f}", "LLaVA-Next-34B hit rate, %")
+v("sg_vicuna", CACHE.SglangVicuna33BHitRate, "{:.1f}", "Vicuna-33B hit rate, %")
+v("sg_ttft", CACHE.SglangVicuna33BFirstTokenSpeedup, "{:.1f}", "Vicuna-33B first-token latency reduction, x")
 
-# ------------------------------------------------------------------ usable context
-def dilution(n_keys):
-    """Target weight among n_keys total keys (target plus n_keys - 1 others)."""
-    t = math.exp(TARGET_LOGIT)
-    return t / (t + (n_keys - 1) * math.exp(BACKGROUND_LOGIT))
+print("== Tokenizer run (artifacts/tokenize_output.txt)")
+runs = re.findall(r"shared prefix (\d+) of (\d+)", (HERE / "artifacts" / "tokenize_output.txt").read_text())
+v("tok_len", int(runs[0][1]), "{:.0f}", "request tokens")
+v("tok_shared_first", int(runs[0][0]), "{:.0f}", "shared prefix, id first")
+v("tok_shared_last", int(runs[1][0]), "{:.0f}", "shared prefix, id last")
 
+print("== Summaries (Literature.SummarizationFaithfulness)")
+systems = (SUMM.XsumPtGenHallucinated, SUMM.XsumTConvS2SHallucinated, SUMM.XsumTranS2SHallucinated,
+           SUMM.XsumBertS2SHallucinated)
+v("mz_n", SUMM.XsumSummariesPerSystem, "{:.0f}", "summaries per system")
+v("mz_systems_words", len(systems), "words", "model summarizers")
+v("mz_lo", min(systems), "{:.1f}", "lowest model share, %")
+v("mz_hi", max(systems), "{:.1f}", "highest model share, %")
+v("mz_gold", SUMM.XsumGoldHallucinated, "{:.1f}", "reference summaries, %")
 
-def lookalike():
-    t = math.exp(TARGET_LOGIT)
-    bg = EX3_UNRELATED * math.exp(BACKGROUND_LOGIT)
-    look = STALE * math.exp(LOOKALIKE_LOGIT)
-    return dict(
-        without=t / (t + bg),
-        with_excerpt=t / (t + bg + look),
-        equivalent_unrelated=STALE * math.exp(LOOKALIKE_LOGIT - BACKGROUND_LOGIT),
-        drop_half_unrelated=t / (t + bg / 2 + look),
-        drop_excerpt=t / (t + bg),
-    )
+print("== Napkin Math 4.3 (compaction watermark scenario)")
+w = MARKS.result
+v("cw_target", MARKS.target, "{:,.0f}", "target, tokens")
+v("cw_target_k", MARKS.target / K, "{:.0f}", "target, thousand tokens")
+v("cw_trigger", MARKS.trigger, "{:,.0f}", "trigger, tokens")
+v("cw_trigger_k", MARKS.trigger / K, "{:.0f}", "trigger, thousand tokens")
+v("cw_gap", MARKS.trigger - MARKS.target, "{:,.0f}", "watermark gap, tokens")
+v("cw_cycle", w.cycle_turns, "{:.0f}", "turns between passes")
+v("cw_passes", w.passes, "{:.0f}", "passes in the step budget")
+v("cw_passes_words", w.passes, "words", "the same, in words")
+v("cw_trigger_len", w.trigger_length, "{:,.0f}", "request when a pass fires, tokens")
+v("cw_overshoot", w.overshoot, "{:,.0f}", "overshoot, tokens")
+v("cw_with_reserve", w.length_with_reserve, "{:,.0f}", "the same plus the reserve, tokens")
+v("cw_alt_target", MARKS.alternate_target, "{:,.0f}", "narrow target, tokens")
+v("cw_alt_target_k", MARKS.alternate_target / K, "{:.0f}", "narrow target, thousand tokens")
+v("cw_alt_gap", MARKS.trigger - MARKS.alternate_target, "{:,.0f}", "narrow gap, tokens")
+v("cw_alt_cycle", w.alternate_cycle_turns, "{:.0f}", "narrow: turns between passes")
+v("cw_alt_passes", w.alternate_passes, "{:.0f}", "narrow: passes")
+v("cw_freq", w.frequency_ratio, "{:.0f}", "narrow / wide pass frequency")
 
+print("== Equation 6 and Exercise 6 (retention and protected-field check scenarios)")
+rt, c = RETAIN.result, CHECK.result
+v("ret_loss_pct", 100 * rt.step_error, "{:.0f}", "loss per round, %")
+v("ret_loss", rt.step_error, "{:.2f}", "loss per round")
+v("ret_short", RETAIN.short_horizon, "{:.0f}", "short run, rounds")
+v("ret_long", RETAIN.long_horizon, "{:.0f}", "long run, rounds")
+v("ret_short_pct", 100 * rt.success[RETAIN.short_horizon], "{:.1f}", "survives the short run, %")
+v("ret_long_pct", 100 * rt.success[RETAIN.long_horizon], "{:.1f}", "survives the long run, %")
+v("ret_below", rt.first_horizon_below_target, "{:.0f}", "first round below even odds")
+v("ret_floor_pct", 100 * RETAIN.target_success, "{:.0f}", "even odds, %")
+v("pf_constraints", CHECK.constraints, "{:.0f}", "constraints")
+v("pf_constraints_words", CHECK.constraints, "words", "constraints, in words")
+v("pf_loss_pct", 100 * CHECK.loss_per_round, "{:.0f}", "loss per constraint per round, %")
+v("pf_rounds", CHECK.rounds, "{:.0f}", "rounds")
+v("pf_pacc", CHECK.acceptance_if_intact, "{:.1f}", "acceptance when all survive")
+v("pf_attempt", usd(CHECK.attempt_cost), "{:.0f}", "attempt cost, $")
+v("pf_detect_pct", 100 * CHECK.detection, "{:.0f}", "losses the check catches, %")
+v("pf_check_cost", usd(CHECK.check_cost_per_round), "{:.2f}", "check cost per round, $")
+v("pf_s_no_pct", 100 * c.survival_unchecked, "{:.1f}", "all survive, no check, %")
+v("pf_s_no", c.survival_unchecked, "{:.3f}", "the same, fraction")
+v("pf_p_no", c.acceptance_unchecked, "{:.3f}", "p_acc, no check")
+v("pf_c_no", c.cost_per_accepted_unchecked, "{:.2f}", "C_eff, no check, $")
+v("pf_undetected_pct", 100 * c.undetected_loss, "{:.1f}", "loss the check misses, % per round")
+v("pf_s_chk_pct", 100 * c.survival_checked, "{:.1f}", "all survive, with check, %")
+v("pf_p_chk", c.acceptance_checked, "{:.3f}", "p_acc, with check")
+v("pf_attempt_chk", c.attempt_cost_checked, "{:.2f}", "attempt with checks, $")
+v("pf_c_chk", c.cost_per_accepted_checked, "{:.2f}", "C_eff, with check, $")
 
-def fiction_live():
-    sys.path.insert(0, str(MLSYSIM))
-    import numpy as np
-    from mlsysim import Literature
-    lengths = ("0", "400", "1k", "2k", "4k", "8k", "16k", "32k", "60k")
-    cols = tuple("score_" + n for n in lengths)
-    entries = Literature.LongContextComprehension.entries
-    scored = [e for e in entries if all(e[c] is not None for c in cols)]
-    arr = np.array([[e[c] for c in cols] for e in scored]) * 100
-    return dict(lengths=lengths, n=len(scored),
-                median=np.median(arr, axis=0), q25=np.percentile(arr, 25, axis=0),
-                q75=np.percentile(arr, 75, axis=0),
-                hold90=int((arr[:, -1] >= 90).sum()),
-                lo60=arr[:, -1].min(), hi60=arr[:, -1].max())
+print("== Napkin Math 4.4 (invalidation scenario) and Shi et al. 2023 (ContextUse)")
+iv = INVAL.result
+v("iv_stale", INVAL.superseded_tokens, "{:,.0f}", "superseded excerpt, tokens")
+v("iv_marker", INVAL.marker_tokens, "{:,.0f}", "marker, tokens")
+v("iv_notice", INVAL.notice_tokens, "{:,.0f}", "notice, tokens")
+v("iv_prefix", INVAL.prefix_tokens, "{:,.0f}", "reused root, tokens")
+v("iv_replaced_suffix", iv.replaced_suffix, "{:,.0f}", "replace: prefilled again, tokens")
+v("iv_appended_suffix", iv.appended_suffix, "{:,.0f}", "append: prefilled, tokens")
+v("iv_ratio", iv.suffix_ratio, "{:.0f}", "replace / append")
+base = USE.CodeDavinci002CotBase
+noisy = USE.CodeDavinci002CotIrrelevantSentence
+told = USE.CodeDavinci002CotIrrelevantSentenceIgnoreInstruction
+v("shi_base", base, "{:.1f}", "base problems, %")
+v("shi_noisy", noisy, "{:.1f}", "one irrelevant sentence, %")
+v("shi_told", told, "{:.1f}", "plus an instruction to ignore it, %")
+v("shi_drop", base - noisy, "{:.1f}", "points lost")
+v("shi_recovered", told - noisy, "{:.1f}", "points recovered")
 
-
-# Liu et al. 2024 (TACL), Table 6: 20 documents (about 4K tokens), GPT-3.5-Turbo.
-LIU_POS = [1, 5, 10, 15, 20]
-LIU_ACC = [75.8, 57.2, 53.8, 55.4, 63.2]
-LIU_CLOSED = 56.1   # Table 1, closed-book
-
-# Hsieh et al. 2024 (COLM), RULER Table 3: claimed and effective length (K tokens).
-# Effective "<4K" is drawn at 2K and labeled "<4K".
-RULER = [("GPT-4", 128, 64), ("Llama3.1 (70B)", 128, 64), ("Qwen2 (72B)", 128, 32),
-         ("Llama3.1 (8B)", 128, 32), ("Mixtral-8x22B", 64, 32),
-         ("Mistral-v0.2 (7B)", 32, 16), ("DBRX", 32, 8), ("Together (7B)", 32, 4),
-         ("LongChat (7B)", 32, None)]
-
-
-def liu():
-    return dict(drop_first_to_min=LIU_ACC[0] - min(LIU_ACC),
-                below_closed=min(LIU_ACC) < LIU_CLOSED)
-
-
-def ruler():
-    tested = len(RULER)
-    reached = sum(1 for _, c, e in RULER if e is not None and e >= c)
-    return dict(tested=tested, reached=reached)
-
-
-# ------------------------------------------------------------------ layout / NM 4.2
-def layout_bill(rewrites=TRUNK_REWRITES):
-    root = SYSTEM + TOOLS
-    request = root + STATE + LEAF
-    total = request * TURNS
-    warm = TURNS - 1 - rewrites
-    uncached = request + rewrites * (STATE + LEAF) + warm * LEAF
-    cached = total - uncached
-    unstable = total * PRICE
-    stable = uncached * PRICE + cached * PRICE * CACHED
-    return dict(root=root, request=request, total=total, uncached=uncached,
-                cached=cached, hit=cached / total, unstable=unstable,
-                stable=stable, ratio=unstable / stable,
-                prefill_ratio=total / uncached,
-                per_call_unstable=unstable / TURNS, per_call_stable=stable / TURNS,
-                rewrite_tokens=STATE + LEAF,
-                rewrite_in_leaf_calls=(STATE + LEAF) / LEAF)
-
-
-def layout_every_fourth():
-    """Checkpoint 4.1 variant: trunk rewritten on every fourth call after the first."""
-    rewrites = (TURNS - 1) // 4
-    return dict(rewrites=rewrites, **layout_bill(rewrites))
-
-
-# SGLang (Zheng et al., NeurIPS 2024; arXiv 2312.07104v2, Sec. 6): one month in a
-# public deployment, cache hit rate 52.4 percent (LLaVA-Next-34B) and 74.1
-# percent (Vicuna-33B); first-token latency 1.7 times lower for Vicuna-33B.
-SGLANG = [("LLaVA-Next-34B", 52.4), ("Vicuna-33B", 74.1)]
-
-
-# ------------------------------------------------------------------ compaction / NM 4.3
-def watermark(target=TARGET):
-    cycle = math.ceil((TRIGGER - target) / OBS_TURN)
-    trigger_len = target + cycle * OBS_TURN
-    passes, length = 0, target
-    trace = []
-    for _ in range(1, TURNS + 1):
-        length += OBS_TURN
-        trace.append(length)
-        if length >= TRIGGER:
-            passes += 1
-            length = target
-    return dict(cycle=cycle, trigger_len=trigger_len,
-                overshoot=trigger_len - TRIGGER,
-                with_reserve=trigger_len + RESERVE, passes=passes, trace=trace)
-
-
-# Maynez et al. 2020 (ACL), Table 2: percent of 500 XSum summaries per system
-# with at least one hallucinated span (intrinsic or extrinsic, I u E).
-MAYNEZ = [("PTGen", 75.3), ("TConvS2S", 78.5), ("TranS2S", 79.3),
-          ("BertS2S", 73.1), ("Gold reference", 76.9)]
-
-
-def survival():
-    first_below_half = next(n for n in range(1, 200) if (1 - LOSS) ** n < 0.5)
-    return dict(s10=(1 - LOSS) ** 10, s40=(1 - LOSS) ** 40,
-                below_half=first_below_half)
-
-
-def check_pays():
-    n = EX6_CONSTRAINTS * EX6_ROUNDS
-    s_no = (1 - EX6_LOSS) ** n
-    p_no = EX6_PACC * s_no
-    c_no = EX6_ATTEMPT / p_no
-    undetected = EX6_LOSS * (1 - EX6_DETECT)
-    s_chk = (1 - undetected) ** n
-    p_chk = EX6_PACC * s_chk
-    attempt_chk = EX6_ATTEMPT + EX6_ROUNDS * EX6_CHECK
-    c_chk = attempt_chk / p_chk
-    return dict(s_no=s_no, p_no=p_no, c_no=c_no, undetected=undetected,
-                s_chk=s_chk, p_chk=p_chk, attempt_chk=attempt_chk, c_chk=c_chk)
-
-
-# ------------------------------------------------------------------ invalidation / NM 4.4
-def invalidation():
-    request = SYSTEM + TOOLS + STATE + LEAF
-    root = SYSTEM + TOOLS
-    removed = request - STALE
-    replaced = removed + TOMBSTONE
-    appended = request + NOTICE
-    return dict(removed=removed, removed_suffix=removed - root,
-                replaced=replaced, replaced_suffix=replaced - root,
-                appended=appended, appended_suffix=NOTICE,
-                ratio=(replaced - root) / NOTICE)
-
-
-# Shi et al. 2023 (ICML), code-davinci-002 with chain-of-thought prompting:
-# base problems 95.0 (Table 2); GSM-IC-4K with one irrelevant sentence, micro
-# accuracy 72.4, with an instruction to ignore irrelevant text 77.8 (Table 3).
-SHI = [("Base problems", 95.0), ("One irrelevant sentence added", 72.4),
-       ("Plus instruction to ignore it", 77.8)]
-
-
-def shi():
-    return dict(drop=SHI[0][1] - SHI[1][1], recovered=SHI[2][1] - SHI[1][1])
-
-
-# ------------------------------------------------------------------ main
 if __name__ == "__main__":
-    b = budget()
-    print("== Hook and NM 4.1 (illustrative)")
-    p("input allowance S_max - K_max (tokens)", f"{b['allowance']:,}")
-    p("after instructions and tools (tokens)", f"{b['after_fixed']:,}")
-    p("  share of window", f"{100 * b['after_fixed_share']:.1f}%")
-    p("observation budget (tokens)", f"{b['obs_budget']:,}")
-    p("turns that fit at 4,000 per turn", b["turns_fit"])
-    p("overflow turn", b["overflow_turn"])
-    p("max observation per turn for 30 turns", f"{b['max_per_turn']:,.0f}")
-    p("turns with a 2,000-token digest", b["digest_turns"])
-    a = append_vs_select()
-    p("append cumulative input (tokens)", f"{a['cum_append'][-1]:,}")
-    p("select cumulative input (tokens)", f"{a['cum_select'][-1]:,}")
-    p("append / select", f"{a['ratio']:.1f}x")
-    p("final append request (tokens)", f"{a['final_append_request']:,}")
-    p("final append request plus reserve (tokens)", f"{a['final_with_reserve']:,}")
-
-    r = recall_l2()
-    print("== Recall (Lectures 1 and 2)")
-    p("L2 resent input (tokens)", f"{r['resend']:,}")
-    p("L2 fresh prefill with reuse (tokens)", f"{r['fresh']:,}")
-    p("L2 ratio", f"{r['ratio']:.1f}x")
-    p("L1 cost per accepted task", f"${r['ceff']:.2f}")
-
-    print("== Attention dilution (toy head, eq. 2)")
-    p("target weight among 100 keys", f"{100 * dilution(100):.1f}%")
-    p("target weight among 100,000 keys", f"{100 * dilution(100_000):.1f}%")
-    lk = lookalike()
-    p("Ex 3: 40,000 unrelated keys, no excerpt", f"{100 * lk['without']:.1f}%")
-    p("Ex 3: plus 850 look-alike keys", f"{100 * lk['with_excerpt']:.1f}%")
-    p("Ex 3: unrelated keys equal to 850 look-alikes", f"{lk['equivalent_unrelated']:,.0f}")
-    p("Ex 3: drop half the unrelated keys", f"{100 * lk['drop_half_unrelated']:.1f}%")
-    p("Ex 3: drop the excerpt", f"{100 * lk['drop_excerpt']:.1f}%")
-
-    f = fiction_live()
-    print("== Fiction.LiveBench via Epoch AI (MLSysIM)")
-    p("models scored through 60K", f["n"])
-    for L, m in zip(f["lengths"], f["median"]):
-        p(f"  median at {L}", f"{m:.0f}%")
-    p("models at or above 90% at 60K", f["hold90"])
-    p("range at 60K", f"{f['lo60']:.0f} to {f['hi60']:.0f}%")
-    lu = liu()
-    p("Liu: first minus worst position (points)", f"{lu['drop_first_to_min']:.1f}")
-    ru = ruler()
-    p("RULER rows plotted / reaching claimed length", f"{ru['tested']} / {ru['reached']}")
-
-    lb = layout_bill()
-    print("== NM 4.2 layout (illustrative)")
-    p("request tokens", f"{lb['request']:,}")
-    p("trajectory input tokens", f"{lb['total']:,}")
-    p("unstable bill", f"${lb['unstable']:.2f}")
-    p("stable uncached tokens", f"{lb['uncached']:,}")
-    p("stable cached tokens", f"{lb['cached']:,}")
-    p("cache hit share", f"{100 * lb['hit']:.1f}%")
-    p("stable bill", f"${lb['stable']:.2f}")
-    p("unstable / stable bill", f"{lb['ratio']:.1f}x")
-    p("uncached prefill ratio", f"{lb['prefill_ratio']:.1f}x")
-    p("per call unstable / stable", f"${lb['per_call_unstable']:.3f} / ${lb['per_call_stable']:.3f}")
-    p("trunk rewrite tokens, in leaf-only calls", f"{lb['rewrite_tokens']:,} = {lb['rewrite_in_leaf_calls']:.0f}")
-    e4 = layout_every_fourth()
-    p("Checkpoint 4.1: rewrites on every fourth call", e4["rewrites"])
-    p("  uncached tokens", f"{e4['uncached']:,}")
-    p("  stable bill", f"${e4['stable']:.2f}")
-    p("  unstable / this", f"{e4['ratio']:.1f}x")
-
-    print("== NM 4.3 watermarks (illustrative)")
-    w = watermark()
-    p("additions per cycle", w["cycle"])
-    p("trigger length / overshoot", f"{w['trigger_len']:,} / {w['overshoot']:,}")
-    p("trigger length plus reserve", f"{w['with_reserve']:,}")
-    p("passes in 30 turns", w["passes"])
-    wn = watermark(TARGET_NARROW)
-    p("narrow: additions per cycle", wn["cycle"])
-    p("narrow: passes in 30 turns", wn["passes"])
-    p("frequency ratio", f"{w['cycle'] / wn['cycle']:.0f}x")
-
-    print("== Survival and Exercise 6 (illustrative)")
-    s = survival()
-    p("survive 10 rounds at 5% loss", f"{100 * s['s10']:.1f}%")
-    p("survive 40 rounds", f"{100 * s['s40']:.1f}%")
-    p("first round below 50%", s["below_half"])
-    c = check_pays()
-    p("no check: all 12 survive 3 rounds", f"{100 * c['s_no']:.1f}%")
-    p("no check: p_acc", f"{c['p_no']:.3f}")
-    p("no check: C_eff", f"${c['c_no']:.2f}")
-    p("check: undetected loss per round", f"{c['undetected']:.3f}")
-    p("check: all survive", f"{100 * c['s_chk']:.1f}%")
-    p("check: p_acc", f"{c['p_chk']:.3f}")
-    p("check: attempt cost", f"${c['attempt_chk']:.2f}")
-    p("check: C_eff", f"${c['c_chk']:.2f}")
-
-    print("== NM 4.4 invalidation (illustrative)")
-    iv = invalidation()
-    p("remove: resident / uncached suffix", f"{iv['removed']:,} / {iv['removed_suffix']:,}")
-    p("replace: resident / uncached suffix", f"{iv['replaced']:,} / {iv['replaced_suffix']:,}")
-    p("append: resident / uncached suffix", f"{iv['appended']:,} / {iv['appended_suffix']:,}")
-    p("replace suffix / append suffix", f"{iv['ratio']:.1f}x")
-    sh = shi()
-    p("Shi: drop with one irrelevant sentence (points)", f"{sh['drop']:.1f}")
-    p("Shi: recovered by instruction (points)", f"{sh['recovered']:.1f}")
+    write(__file__)

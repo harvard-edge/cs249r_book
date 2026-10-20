@@ -46,3 +46,9 @@ EARTH_MEAN_RADIUS = 6371.0 * ureg.kilometer
 # Source: NBS Handbook 100, Copper Wire Tables (1966), alpha_20 = 0.00393 per K.
 COPPER_TEMPERATURE_COEFFICIENT = 0.00393 / ureg.kelvin
 COPPER_COEFFICIENT_REFERENCE_TEMPERATURE = ureg.Quantity(20.0, ureg.degC)
+# --- Age of the universe (added 2026-10-20) ----------------------------------
+# Planck 2018 results VI (Planck Collaboration, A&A 641, A6, 2020), Table 2,
+# TT,TE,EE+lowE+lensing: 13.787 +/- 0.020 Gyr; quoted to three significant
+# figures, the precision teaching estimates use. A scale anchor for
+# brute-force coverage arguments ("logging since the universe began").
+AGE_OF_UNIVERSE = 13.8e9 * ureg.year

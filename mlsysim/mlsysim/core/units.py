@@ -26,6 +26,7 @@ __all__ = [
     "NVLINK5_BANDWIDTH_UNIDIRECTIONAL", "NVLINK5_BANDWIDTH_BIDIRECTIONAL",
     # Bit widths, precision map, encoding/format facts
     "FP32_BITS", "INT8_BITS", "SIMD_REGISTER_BITS", "PRECISION_MAP",
+    "FLOAT_FORMAT_BITS", "INT16_BITS",  # number-format layouts (added 2026-10-20)
     "normalize_precision", "resolve_precision",
     "COLOR_DEPTH_8BIT", "IMAGE_CHANNELS_RGB", "VIDEO_BYTES_PER_PIXEL_RGB",
     "VIDEO_1080P_WIDTH", "VIDEO_1080P_HEIGHT",
@@ -135,6 +136,17 @@ NVLINK5_BANDWIDTH_BIDIRECTIONAL = 1800 * GB / second
 FP32_BITS = 32
 INT8_BITS = 8
 SIMD_REGISTER_BITS = 512
+INT16_BITS = 16
+
+# Binary floating-point layouts, (exponent bits, fraction bits): IEEE 754-2019
+# binary32 and binary16, and bfloat16 (FP32's exponent with a 7-bit fraction).
+# physics.numerics.calc_float_range derives each format's range from these.
+# (added 2026-10-20)
+FLOAT_FORMAT_BITS = {
+    "fp32": (8, 23),
+    "bf16": (8, 7),
+    "fp16": (5, 10),
+}
 
 # Precision string -> byte width. Shared by Engine, ServingModel, SynthesisSolver.
 PRECISION_MAP = {

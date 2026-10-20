@@ -1,40 +1,18 @@
 #!/usr/bin/env python3
 """Data plots for Lecture 4b (Data Engineering, Part 2: Delivery and Drift).
 
-Every value is sourced from the rendered chapter (Data Engineering) unless
-marked otherwise:
-  - Transfer time: 1 PB over 100 Gb/s takes 80,000 s, about 22 h; over
-    10 Gb/s about 9.3 days (Sec. 4.9.1, Napkin Math 4.7). The 20 h training
-    run is the chapter's self-check scenario.
-  - Storage price per TB, 1956 to 2023, constant 2020 US$: Our World in Data,
-    via MLSysIM Literature.Series.StoragePricePerTB (the book figure's data).
-  - Storage latency: DRAM 100 ns, local NVMe 100 us, remote SSD 2 ms, object
-    store 20 ms against a 1 ms line (Sec. 4.10 margin figure).
-  - Sequential bandwidth by tier (table 8): in-memory cache 20 to 50 GB/s,
-    local NVMe 5 to 7 GB/s, object store 100 to 500 MB/s per connection,
-    archive 10 to 50 MB/s after retrieval.
-  - ResNet-50 on one A100: 312 TFLOP/s / 24.6 GFLOP = 12,682 img/s ceiling,
-    3,200 img/s sustained, 150 KB JPEG, 602 KB decoded FP32, 480 MB/s and
-    1.9 GB/s demand, 250 MB/s attached volume (Sec. 4.9.3).
-  - Storage supply: object store about 100 MB/s per connection, SATA SSD
-    500 MB/s, NVMe 5 to 7 GB/s; eight accelerators 3.8 GB/s compressed,
-    15.4 GB/s decoded (Napkin Math 4.8, Sec. 4.10.1).
-  - Dataloader: 375 img/s per worker, 3,200 img/s accelerator rate; the
-    solid line is training throughput, min(375 w, 3,200); the thin dashed
-    line is loader capacity past the crossing, up to the book figure's
-    illustrative 3,500 img/s cap (Sec. 4.10.4).
-  - Format: 20 of 100 equal-size columns (Napkin Math 4.9).
-  - Codecs: 100 GB per epoch, gzip 120 MB/s gives 13.9 min, Snappy 500 MB/s
-    gives 3.3 min (Sec. 4.10.5).
-  - Stragglers: seven workers at 12 ms, one at 180 ms (Sec. 4.10.5).
-  - Recht et al. 2019 (ICML), abstract: accuracy drops of 3 to 15 points on
-    CIFAR-10 and 11 to 14 points on ImageNet.
-  - K-S: n = 1,000 per sample, critical value 0.061, observed D = 0.08
-    (Napkin Math 4.5); the critical value against n uses the same formula.
-    The two CDF curves are illustrative.
-  - PSI: baseline quintiles at 20 percent each against recent shares of
-    30/25/20/15/10 percent are illustrative; the formula and the bands
-    (0.1, 0.25) are the chapter's (Sec. 4.12.1).
+Every plotted value and every number in a label comes from calcs.py, which
+reads MLSysIM (the delivery and drift Scenarios.*, Systems.Storage, Ops,
+Literature); labels print the recorded strings with val(). Bars are drawn at
+the scenario's exact value, so a label and its bar cannot disagree.
+
+Typed here, because MLSysIM does not yet hold them (the chapter types them
+too): the latency ladder's DRAM 100 ns, remote SSD 2 ms, and object store
+20 ms against a 1 ms line (the chapter's Sec. 4.10 margin figure); the tier
+bandwidth ranges for the in-memory cache (20 to 50 GB/s), the object store's
+high end (500 MB/s per connection), and archive (10 to 50 MB/s) from table 8;
+and the straggler batch times, seven workers at 12 ms and one at 180 ms
+(Sec. 4.10.5). Axis limits and label positions are layout.
 
 Diagrams (drift types) are SVG written by this script.
 
@@ -42,15 +20,16 @@ Run from this folder: python3 make_figs.py
 """
 
 import sys
-from math import erf, log, sqrt
+from math import erf, sqrt
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
 import numpy as np  # noqa: E402
+from deckvals import val  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import calcs as K  # noqa: E402
+from calcs import m  # noqa: E402
 
 out = Path(__file__).parent
 C = sp.C
@@ -127,19 +106,15 @@ def steps(stem, rows, **kw):
 
 # 1. Moving a petabyte: transfer time at two link speeds against a 20 h run
 bars_lines(out / "transfer_time.svg", [
-    ("10 Gb/s link", K.slow_days * 24, "danger", f"{K.slow_days:.1f} days"),
-    ("100 Gb/s link", K.xfer_h, "neutral", f"{K.xfer_h:.0f} h"),
-], lines=[(K.RUN_H, f"{K.RUN_H} h training run", "data", 1.06)], log_x=False,
-    xlim=(0, 330), size=(4.0, 1.35), xlabel="Time to move 1 PB (hours)")
+    (f"{val('slow_gbps')} Gb/s link", m(K.MOVE.transfer_time("10 Gb/s"), "hour"), "danger", f"{val('slow_days')} days"),
+    (f"{val('link_gbps')} Gb/s link", m(K.MOVE.transfer_time("100 Gb/s"), "hour"), "neutral", f"{val('xfer_h')} h"),
+], lines=[(m(K.MOVE.job_time, "hour"), f"{val('run_h')} h training run", "data", 1.06)], log_x=False,
+    xlim=(0, 330), size=(4.0, 1.35), xlabel=f"Time to move {val('pb')} PB (hours)")
 
 
 # 2. Storage price per TB by medium, 1956 to 2023 (variant of the book figure)
 def price_trend():
-    root = str(ROOT / "mlsysim")
-    if root not in sys.path:
-        sys.path.insert(0, root)
-    from mlsysim import Literature
-    rows = Literature.Series.StoragePricePerTB.entries
+    rows = K.Literature.Series.StoragePricePerTB.entries
     series = [("dram", "DRAM", C["danger"]), ("ssd", "Solid-state drive", C["data"]),
               ("hdd", "Hard disk", C["memory"])]
     for k in (1, 2):
@@ -153,16 +128,16 @@ def price_trend():
         first = next(r for r in rows if r["hdd"] is not None)
         last = rows[-1]
         a = 1.0 if k == 2 else 0.0
-        ax.annotate(f"\\${first['hdd'] / 1e9:.0f}B per TB, {first['year']:.0f}",
+        ax.annotate(f"\\${val('hdd_first_b')}B per TB, {val('hdd_first_year')}",
                     xy=(first["year"], first["hdd"]), xytext=(1960, 3e5),
                     fontsize=11, fontweight="bold", color=C["memory"], alpha=a,
                     arrowprops=dict(arrowstyle="-", color=C["memory"], lw=1, alpha=a))
-        ax.annotate(f"\\${last['hdd']:.1f} per TB, {last['year']:.0f}",
+        ax.annotate(f"\\${val('hdd_last')} per TB, {val('hdd_last_year')}",
                     xy=(last["year"], last["hdd"]), xytext=(1988, 1e-1),
                     fontsize=11, fontweight="bold", color=C["memory"], alpha=a,
                     arrowprops=dict(arrowstyle="-", color=C["memory"], lw=1, alpha=a))
-        ax.text(1957, 3e2, f"2023: DRAM {last['dram'] / last['ssd']:.0f}× SSD,\n"
-                f"SSD {last['ssd'] / last['hdd']:.1f}× hard disk",
+        ax.text(1957, 3e2, f"{val('hdd_last_year')}: DRAM {val('dram_over_ssd')}× SSD,\n"
+                f"SSD {val('ssd_over_hdd')}× hard disk",
                 fontsize=11, fontweight="bold", color=C["text"], alpha=a, va="center")
         ax.set_yscale("log")
         ax.set_xlim(1955, 2048)
@@ -182,8 +157,8 @@ price_trend()
 
 # 3. Latency ladder against a 1 ms line (values in ms), final state only
 bars_lines(out / "latency_ladder.svg", [
-    ("DRAM", 1e-4, "memory", "100 ns"),
-    ("Local NVMe", 0.1, "memory", "100 µs", "in"),
+    ("DRAM", 1e-4, "memory", "100 ns"),   # typed: chapter margin figure (see docstring)
+    ("Local NVMe", m(K.STORE.LocalNvmeGen4.latency, "ms"), "memory", f"{val('nvme_lat_us')} µs", "in"),
     ("Remote SSD", 2, "danger", "2 ms"),
     ("Object store", 20, "danger", "20 ms"),
 ], lines=[(1, "1 ms", "danger", 1.07)], xlim=(3e-5, 2e3), size=(1.75, 1.45),
@@ -193,46 +168,51 @@ bars_lines(out / "latency_ladder.svg", [
 # 4. Sequential bandwidth by tier (table 8), ranges in MB/s
 bars_lines(out / "tier_bandwidth.svg", [
     ("Memory cache", (20000, 50000), "memory", "20–50 GB/s"),
-    ("Local NVMe", (5000, 7000), "memory", "5–7 GB/s"),
-    ("Object store", (100, 500), "danger", "0.1–0.5 GB/s"),
+    ("Local NVMe", (m(K.STORE.LocalNvmeTrainingTypical.bandwidth, "MB/s"), m(K.STORE.LocalNvmeGen4.bandwidth, "MB/s")),
+     "memory", f"{val('nvme_lo')}–{val('nvme_hi')} GB/s"),
+    ("Object store", (m(K.STORE.ObjectStoreSingleStream.bandwidth, "MB/s"), 500), "danger",
+     f"{m(K.STORE.ObjectStoreSingleStream.bandwidth, 'GB/s'):.1f}–0.5 GB/s"),
     ("Archive", (10, 50), "danger", "10–50 MB/s"),
 ], xlim=(5, 3e6), size=(1.55, 1.45), xlabel="Bandwidth (MB/s, log)",
     fs=12, tick_fs=12,
     xticks=[(10, "10"), (1e4, "10,000")])
 
 # 5. The accelerator's appetite: ceiling against sustained rate
-# The ceiling is the chapter's printed 12,682 (calcs.py: 12,682.9 unrounded).
+# The ceiling is the chapter's printed whole-image value (calcs.py).
 bars_lines(out / "appetite.svg", [
-    ("Arithmetic ceiling", K.CHAPTER_CEILING, "compute", f"{K.CHAPTER_CEILING:,} img/s"),
-    ("Sustained (chapter)", K.SUSTAINED, "compute",
-     f"{K.SUSTAINED:,} img/s  ({K.SUSTAINED / K.CHAPTER_CEILING:.0%})"),
-    ("Measured (NVIDIA)", K.NV_1GPU, "neutral",
-     f"{K.NV_1GPU:,} img/s  ({K.NV_1GPU / K.CHAPTER_CEILING:.0%})"),
+    ("Arithmetic ceiling", K.ceiling, "compute", f"{val('ceiling_img')} img/s"),
+    ("Sustained (chapter)", m(K.FEED.sustained_rate, "count/second"), "compute",
+     f"{val('img_per_s')} img/s  ({val('sustained_pct')}%)"),
+    ("Measured (NVIDIA)", K.nv1, "neutral",
+     f"{val('nv_img')} img/s  ({val('nv_pct_ceiling')}%)"),
 ], log_x=False, xlim=(0, 19000), size=(5.6, 1.75), xlabel="Images per second")
 
 # 6. Which bytes count: compressed against decoded demand, 250 MB/s supply
 steps("decoded_bytes", [
-    ("JPEG, 150 KB", K.need_MBs, "compute",
-     f"{K.need_MBs:.0f} MB/s  ({1 - K.supplied_frac:.0%} lost)"),
-    (f"Decoded FP32, {K.decoded_B / K.KB:.0f} KB", K.decoded_need_GBs * 1000, "danger",
-     f"{K.decoded_need_GBs:.1f} GB/s  ({K.decoded_loss:.0%} lost)"),
-], lines=[(K.SUPPLY_MBS, f"Supply: {K.SUPPLY_MBS} MB/s", "neutral", 1.07)], log_x=False,
+    (f"JPEG, {val('jpeg_kb')} KB", m(K.FEED.demand(), "MB/s"), "compute",
+     f"{val('need_mbs')} MB/s  ({val('loss_pct')}% lost)"),
+    (f"Decoded FP32, {val('decoded_kb')} KB", m(K.FEED.demand(decoded=True), "MB/s"), "danger",
+     f"{val('decoded_gbs')} GB/s  ({val('tensor_loss_pct')}% lost)"),
+], lines=[(m(K.FEED.supply.bandwidth, "MB/s"), f"Supply: {val('supply_mbs')} MB/s", "neutral", 1.07)], log_x=False,
     xlim=(0, 3000), size=(6.4, 1.3), fs=15, tick_fs=14,
-    xlabel="Storage bandwidth needed at 3,200 img/s (MB/s)")
+    xlabel=f"Storage bandwidth needed at {val('img_per_s')} img/s (MB/s)")
 
 # 7. Storage supply against demand (MB/s): today, the ceiling, eight A100s
+ceiling_rate = K.ceiling * K.FEED.sustained_rate.units
 supply_rows = [
-    (f"Needed at {K.SUSTAINED:,} img/s", K.need_MBs, "compute", f"{K.need_MBs:.0f} MB/s"),
-    ("Object store, 1 connection", 100, "neutral", "100 MB/s"),
-    ("Attached block volume", 250, "neutral", "250 MB/s"),
-    ("SATA SSD", 500, "memory", "500 MB/s"),
-    ("Local NVMe SSD", 5000, "memory", "5–7 GB/s", "in"),
-    ("Needed at the ceiling", K.ceiling_need_GBs * 1000, "danger", f"{K.ceiling_need_GBs:.1f} GB/s"),
-    ("Needed, eight A100s", K.eight_GBs * 1000, "danger", f"{K.eight_GBs:.1f} GB/s", "in"),
+    (f"Needed at {val('img_per_s')} img/s", m(K.FEED.demand(), "MB/s"), "compute", f"{val('need_mbs')} MB/s"),
+    ("Object store, 1 connection", m(K.STORE.ObjectStoreSingleStream.bandwidth, "MB/s"), "neutral",
+     f"{val('obj_mbs')} MB/s"),
+    ("Attached block volume", m(K.FEED.supply.bandwidth, "MB/s"), "neutral", f"{val('supply_mbs')} MB/s"),
+    ("SATA SSD", m(K.STORE.SataSsdEffective.bandwidth, "MB/s"), "memory", f"{val('sata_mbs')} MB/s"),
+    ("Local NVMe SSD", m(K.STORE.LocalNvmeTrainingTypical.bandwidth, "MB/s"), "memory",
+     f"{val('nvme_lo')}–{val('nvme_hi')} GB/s", "in"),
+    ("Needed at the ceiling", m(K.FEED.demand(rate=ceiling_rate), "MB/s"), "danger", f"{val('ceiling_gbs')} GB/s"),
+    ("Needed, eight A100s", m(K.SERVER.demand(), "MB/s"), "danger", f"{val('eight_gbs')} GB/s", "in"),
 ]
 for k in (1, 2, 3):
     bars_lines(out / f"storage_supply_step{k}.svg", supply_rows, step=4 + k,
-               lines=[(K.eight_decoded_GBs * 1000, f"decoded:\n{K.eight_decoded_GBs:.1f} GB/s",
+               lines=[(m(K.SERVER.demand(decoded=True), "MB/s"), f"decoded:\n{val('eight_decoded_gbs')} GB/s",
                        "danger", 1.06, k == 3)],
                xlim=(30, 1e5), size=(5.8, 3.0),
                xlabel="Sequential read bandwidth (MB/s, log scale)",
@@ -244,25 +224,28 @@ def choke():
     # Solid line: training throughput, min(375 w, 3,200). Thin dashed line:
     # what the loader alone could supply past the crossing, up to the book
     # figure's illustrative 3,500 img/s cap.
-    w = np.arange(1, 17)
-    loader = np.minimum(K.PER_WORKER * w, 3500)   # 3,500: the book figure's illustrative cap
-    train = np.minimum(K.PER_WORKER * w, K.SUSTAINED)
+    per_worker = m(K.FEED.worker_rate, "count/second")
+    rate = m(K.FEED.sustained_rate, "count/second")
+    crossing, whole = K.FEED.worker_crossing, K.FEED.workers_per_accelerator
+    w = np.arange(1, 17)   # plotted range of worker counts
+    loader = np.minimum(per_worker * w, m(K.FEED.host_decode_cap, "count/second"))
+    train = np.minimum(per_worker * w, rate)
     fig, ax = plt.subplots(figsize=(5.6, 2.5))
-    ax.plot(np.concatenate(([K.crossing], w[w >= K.workers_one])),
-            np.concatenate(([K.SUSTAINED], loader[w >= K.workers_one])),
+    ax.plot(np.concatenate(([crossing], w[w >= whole])),
+            np.concatenate(([rate], loader[w >= whole])),
             "--", color=C["neutral"], lw=1.3)
     ax.text(12.2, 3680, "loader capacity", color=C["neutral"], fontsize=11,
             fontweight="bold", va="center")
     ax.plot(w, train, "o-", color=C["memory"], lw=2.4, ms=6, zorder=4)
-    ax.axhline(3200, color=C["danger"], lw=2, ls="--", zorder=3)
-    ax.text(16.8, 2750, "Accelerator\n3,200 img/s", color=C["danger"], fontsize=11,
+    ax.axhline(rate, color=C["danger"], lw=2, ls="--", zorder=3)
+    ax.text(16.8, 2750, f"Accelerator\n{val('img_per_s')} img/s", color=C["danger"], fontsize=11,
             fontweight="bold", va="center")
     ax.fill_between(w, 0, train, color=C["memory_l"], alpha=0.5)
-    ax.axvline(K.crossing, color=C["text"], lw=1, ls=":")
-    ax.text(8.75, 600, "about 9 workers", fontsize=11, fontweight="bold", color=C["text"])
+    ax.axvline(crossing, color=C["text"], lw=1, ls=":")
+    ax.text(8.75, 600, f"about {whole} workers", fontsize=11, fontweight="bold", color=C["text"])
     ax.text(1.0, 2600, "Host decode binds", fontsize=11, va="center",
             fontweight="bold", color=C["memory"])
-    ax.text(4.5, 1150, "375 img/s\nper worker", fontsize=11, va="center",
+    ax.text(4.5, 1150, f"{val('worker_rate')} img/s\nper worker", fontsize=11, va="center",
             fontweight="bold", color=C["memory"])
     ax.text(11, 2300, "Accelerator binds", fontsize=11, fontweight="bold", color=C["danger"])
     ax.set_xlim(0.5, 16.5)
@@ -281,25 +264,27 @@ choke()
 
 # 9. Bytes read for 20 of 100 columns
 steps("format_bytes", [
-    ("Row format (CSV)", 100, "neutral", f"reads {K.COLS_ALL} of {K.COLS_ALL} columns"),
-    ("Columnar (Parquet)", 100 * K.COLS_USED / K.COLS_ALL, "data",
-     f"reads {K.COLS_USED} columns: {K.COLS_ALL // K.COLS_USED}× less"),
+    ("Row format (CSV)", 100, "neutral", f"reads {val('cols_all')} of {val('cols_all')} columns"),
+    ("Columnar (Parquet)", 100 * K.COLS.read_fraction, "data",
+     f"reads {val('cols_used')} columns: {val('col_speedup')}× less"),
 ], log_x=False, xlim=(0, 175), size=(6.0, 1.1), fs=15, tick_fs=14,
     xlabel="Share of the table read from disk (%)")
 
 # 9b. The profiler's step breakdown, PyTorch tutorial (published values in calcs.py)
 def profiler_bars():
-    rows = [("Default", K.PROF["default loader"]),
-            ("4 workers", K.PROF["num_workers=4"])]
+    P = K.PIPE
+    rows = [("Default", {"step": K.step_a, "DataLoader": K.dl_a, "dl_pct": float(P.ProfilerDefaultDataLoaderPct)}),
+            (f"{val('prof_workers')} workers",
+             {"step": K.step_b, "DataLoader": K.dl_b, "dl_pct": float(P.ProfilerFourWorkersDataLoaderPct)})]
     # Drawn for its column slot (about 3.5 by 1.1 in), with type to match.
     fig, ax = plt.subplots(figsize=(4.6, 1.1))
     for i, (lab, v) in enumerate(rows):
         y = 1 - i
-        dl, rest = v["DataLoader"] / 1000, (v["step"] - v["DataLoader"]) / 1000
+        dl, rest = v["DataLoader"] / K.us_per_ms, (v["step"] - v["DataLoader"]) / K.us_per_ms
         ax.barh(y, dl, color=C["danger"], height=0.6)
         ax.barh(y, rest, left=dl, color=C["neutral_l"], height=0.6)
         ax.text(-3, y, lab, ha="right", va="center", fontsize=15, color=C["text"])
-        ax.text(dl + rest + 2, y, f"{v['step'] / 1000:.1f} ms", va="center",
+        ax.text(dl + rest + 2, y, f"{v['step'] / K.us_per_ms:.1f} ms", va="center",
                 fontsize=15, fontweight="bold", color=C["text"])
         if dl > 20:
             ax.text(dl / 2, y, f"DataLoader {v['dl_pct']:.1f}%", ha="center", va="center",
@@ -323,32 +308,24 @@ profiler_bars()
 
 # 10. CPU decompression per epoch for 100 GB
 bars_lines(out / "codec_minutes.svg", [
-    ("gzip", K.EPOCH_GB * 1000 / K.GZIP_MBS / 60, "danger",
-     f"{K.EPOCH_GB * 1000 / K.GZIP_MBS / 60:.1f} min"),
-    ("Snappy", K.EPOCH_GB * 1000 / K.SNAPPY_MBS / 60, "data",
-     f"{K.EPOCH_GB * 1000 / K.SNAPPY_MBS / 60:.1f} min"),
+    ("gzip", m(K.CODECS.decode_time("gzip"), "minute"), "danger", f"{val('gzip_min')} min"),
+    ("Snappy", m(K.CODECS.decode_time("Snappy"), "minute"), "data", f"{val('snappy_min')} min"),
 ], log_x=False, xlim=(0, 24), size=(3.4, 1.4),
-    xlabel="CPU decompression, 100 GB (min)")
+    xlabel=f"CPU decompression, {val('codec_gb')} GB (min)")
 
 # 11. Stragglers: eight loader workers, one reading an oversized partition
+# (typed, as the chapter types them in Sec. 4.10.5; see the docstring)
 bars_lines(out / "stragglers.svg", [
     ("Workers 1 to 7", 12, "data", "12 ms each"),
     ("Worker 8", 180, "danger", "180 ms"),
 ], log_x=False, xlim=(0, 260), size=(3.6, 1.4), xlabel="Time to load one batch (ms)")
 
-# 12. Recht et al. 2019: accuracy drop on re-collected test sets (ranges)
-bars_lines(out / "recht_ranges.svg", [
-    ("CIFAR-10", (3, 15), "danger", "3 to 15 points"),
-    ("ImageNet", (11, 14), "danger", "11 to 14 points"),
-], log_x=False, xlim=(0, 22), size=(5.6, 1.5),
-    xlabel="Accuracy drop on the new test set, across models (points)",
-    xticks=[(0, "0"), (5, "5"), (10, "10"), (15, "15")])
-
 # 13. K-S test on clip loudness (illustrative curves, chapter numbers)
 xs = np.linspace(-50, -10, 400)
-cdf = np.vectorize(lambda x, m: 0.5 * (1 + erf((x - m) / (6 * sqrt(2)))))
-train = cdf(xs, -30.0)
-recent = cdf(xs, -31.2)   # a shift of 0.2 sigma gives a largest gap of about 0.08
+SH = K.SHIFT
+cdf = np.vectorize(lambda x, mu: 0.5 * (1 + erf((x - mu) / (SH.feature_sd * sqrt(2)))))
+train = cdf(xs, SH.reference_mean)
+recent = cdf(xs, SH.current_mean)   # the shift whose largest CDF gap matches the observed D
 i = int(np.argmax(recent - train))
 for k in (1, 2, 3):
     fig, ax = plt.subplots(figsize=(5.8, 2.6))
@@ -362,7 +339,7 @@ for k in (1, 2, 3):
     if k >= 3:
         ax.plot([xs[i], xs[i]], [train[i], recent[i]], color=C["text"], lw=3.5,
                 solid_capstyle="butt", zorder=6)
-        ax.annotate("D = 0.08, the largest gap", xy=(xs[i], (train[i] + recent[i]) / 2),
+        ax.annotate(f"D = {val('ks_d')}, the largest gap", xy=(xs[i], (train[i] + recent[i]) / 2),
                     xytext=(-24, 0.12), fontsize=12, fontweight="bold",
                     color=C["text"], arrowprops=dict(arrowstyle="-", color=C["text"], lw=1))
     ax.set_xlim(-50, -10)
@@ -375,15 +352,15 @@ for k in (1, 2, 3):
 # 14. K-S critical value against sample size (same formula as Napkin Math 4.5)
 def ks_vs_n():
     n = np.logspace(2, 5, 200)
-    crit = K.KS_C * np.sqrt(2 / n)
+    crit = K.KS.coefficient * np.sqrt(2 / n)   # equal samples of n each
     fig, ax = plt.subplots(figsize=(5.8, 2.6))
     ax.plot(n, crit, color=C["memory"], lw=3)
-    ax.axhline(0.08, color=C["danger"], lw=2, ls="--")
-    ax.text(1.4e4, 0.088, "observed D = 0.08", color=C["danger"], fontsize=11,
+    ax.axhline(K.KS.observed_statistic, color=C["danger"], lw=2, ls="--")
+    ax.text(1.4e4, 0.088, f"observed D = {val('ks_d')}", color=C["danger"], fontsize=11,
             fontweight="bold")
-    for nn, lab, tx, ty in ((1000, "0.061 at n = 1,000", 1400, 0.091),
-                            (100000, "0.006 at n = 100,000", 9000, 0.04)):
-        c = K.ks_crit(nn, nn)
+    for sc, key, tx, ty in ((K.KS, "", 1400, 0.091), (K.KS_BIG, "_big", 9000, 0.04)):
+        nn, c = sc.n_reference, sc.critical_value
+        lab = f"{val('ks_crit' + key)} at n = {val('ks_n' + key)}"
         ax.plot([nn], [c], "o", color=C["text"], ms=7, zorder=5)
         ax.annotate(lab, xy=(nn, c), xytext=(tx, ty),
                     fontsize=11, fontweight="bold", color=C["text"],
@@ -408,7 +385,7 @@ ks_vs_n()
 
 # 15. PSI over five loudness bins (illustrative shares; chapter formula)
 def psi_bins():
-    base, rec, terms = K.PSI_BASE, K.PSI_RECENT, K.psi_terms
+    base, rec, terms = K.BINS.baseline_shares, K.BINS.current_shares, K.BINS.terms
     names = ["Quietest", "2", "3", "4", "Loudest"]
     x = np.arange(5)
     for k in (1, 2, 3):
@@ -422,7 +399,7 @@ def psi_bins():
                     color=C["text"], alpha=1.0 if k >= 2 else 0.0)
         ax.text(4.55, 33.5, "PSI terms", ha="left", fontsize=11, color=C["neutral"],
                 alpha=1.0 if k >= 2 else 0.0)
-        ax.text(2, 40.5, f"PSI = {sum(terms):.3f}: moderate band (0.1 to 0.25)",
+        ax.text(2, 40.5, f"PSI = {val('psi')}: moderate band ({val('psi_warn')} to {val('psi_crit')})",
                 ha="center", fontsize=12.5, fontweight="bold", color=C["danger"],
                 alpha=1.0 if k >= 3 else 0.0)
         ax.set_xticks(x)
