@@ -3542,8 +3542,9 @@ ABADI_DPSGD_2016 = Provenance(
     url="https://arxiv.org/abs/1607.00133",
     verified="2026-10-20",
     notes=("q = 0.01, sigma = 4, delta = 1e-5: moments accountant epsilon 1.26 after 100 epochs and 2.55 after "
-           "400; strong composition 9.34 and 24.22. MNIST nonprivate baseline 98.3 percent; CIFAR-10 73 "
-           "percent at epsilon 8."),
+           "400; strong composition 9.34 and 24.22. Section 5.2: 90, 95, and 97 percent MNIST test accuracy for "
+           "(0.5, 1e-5), (2, 1e-5), and (8, 1e-5)-DP (large, medium, small noise); MNIST nonprivate baseline "
+           "98.30 percent; CIFAR-10 73 percent at epsilon 8."),
 )
 DE_DP_IMAGE_CLASSIFICATION_2022 = Provenance(
     id="prov:de-dp-image-classification-2022",
@@ -3551,7 +3552,19 @@ DE_DP_IMAGE_CLASSIFICATION_2022 = Provenance(
     ref="De, S. et al. (2022), Unlocking High-Accuracy Differentially Private Image Classification through Scale",
     url="https://arxiv.org/abs/2204.13650",
     verified="2026-10-20",
-    notes="CIFAR-10 from scratch, WRN-16-4: 81.4 percent at epsilon 8; the chapter's nonprivate reference is 93 percent.",
+    notes=("CIFAR-10 from scratch, WRN-16-4: 81.4 percent at epsilon 8. The paper states that the nonprivate "
+           "WRN-16-4 achieves >94 percent test accuracy, citing Zagoruyko and Komodakis (2016); the nonprivate "
+           "reference value is taken from that source (ZAGORUYKO_WRN_2016)."),
+)
+ZAGORUYKO_WRN_2016 = Provenance(
+    id="prov:zagoruyko-wide-residual-networks-2016",
+    kind=ProvenanceKind.LITERATURE,
+    ref="Zagoruyko, S. and Komodakis, N. (2016), Wide Residual Networks, BMVC 2016, Table 6",
+    url="https://arxiv.org/abs/1605.07146",
+    verified="2026-10-20",
+    notes=("Table 6 (effect of dropout in residual block; mean/std preprocessing, CIFAR numbers are the median of "
+           "5 runs): depth 16, k 4, no dropout, CIFAR-10 test error 5.02 percent (5.24 with dropout). Stored as "
+           "accuracy 100 - 5.02 = 94.98 percent. WRN-16-4 is the architecture De et al. (2022) train privately."),
 )
 NARAYANAN_NETFLIX_DEANON_2008 = Provenance(
     id="prov:narayanan-shmatikov-netflix-2008",
