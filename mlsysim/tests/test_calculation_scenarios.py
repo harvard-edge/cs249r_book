@@ -140,3 +140,52 @@ def test_series_lookups():
     assert last["first_operational_date"] <= "2025-12-31"
     assert last["power_mw"] == max(r["power_mw"] for r in s.entries
                                    if r["power_mw"] and r["first_operational_date"] <= "2025-12-31")
+
+
+# --- Data-parallel training at fleet scale (added 2026-10-20) ---------------
+
+def test_gradient_sync():
+    r = Scenarios.Gpt3GradientSync.result
+    assert r.sync_bytes.to("GB").magnitude == approx(700)
+    assert r.transfer_times["InfiniBand"].to("s").magnitude == approx(28)
+    assert r.step_times["Ethernet"].to("s").magnitude == approx(57.2)
+    assert r.compute_fractions["InfiniBand"] == approx(0.041096)
+    assert r.energy_per_step.to("J").magnitude == approx(196)
+    assert r.energy_total.to("MJ").magnitude == approx(196)
+    fast = Scenarios.Gpt3GradientSyncFasterAccelerator.result
+    assert fast.step_times["InfiniBand"].to("s").magnitude == approx(28.6)
+
+
+def test_communication_intensity():
+    r = Scenarios.Gpt3DataParallelIntensity.result
+    assert r.local_tokens == 8192
+    assert r.intensity == approx(8.138e-5)
+    assert r.balance == approx(8.0128e-5)
+    assert Scenarios.WorkloadBetaIntensity.intensity / Scenarios.WorkloadAlphaIntensity.intensity == approx(1000)
+
+
+def test_availability_and_compute_optimal():
+    assert Scenarios.NodeAvailability1K.all_up == approx(0.36770)
+    assert Scenarios.NodeAvailability10K.all_up == approx(4.5173e-5)
+    assert Scenarios.FourNinesAvailability10K.downtime_per_year.to("minute").magnitude == approx(52.56)
+    n, d = Scenarios.Gpt3ComputeOptimal.optimal
+    assert n == approx(5.1235e10)
+    assert d == approx(1.0247e12)
+
+
+def test_illustrative_fleet_law_scenarios():
+    p = Scenarios.FleetLawProfileExample
+    assert p.step_time.to("s").magnitude == approx(2.0)
+    assert p.compute_fraction == approx(0.40)
+    assert Scenarios.FleetLawDoublingExample.efficiency == approx(0.625)
+    assert Scenarios.CoordinationOverheadExample.realized_speedup == approx(1.8)
+    assert Scenarios.ChinchillaParameterPowerLaw.halving_multiple == approx(7.6804)
+
+
+def test_growth_and_runs():
+    g = Scenarios.NotableRunGrowth2012to2024.result
+    assert g.run_count == 146
+    assert g.compute_factor == approx(3.92995)
+    assert g.fleet_share == approx(0.51151)
+    assert Scenarios.GpuFailuresLlama3Run.result.interval.to("hour").magnitude == approx(3.0518)
+    assert Scenarios.Gpt3PublishedRun.peak_fraction == approx(0.2, rel=0.05)

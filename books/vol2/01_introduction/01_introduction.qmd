@@ -345,8 +345,8 @@ class Gpt3TrainingScenario:
     params_b = params / BILLION
     gradient_q = params * BYTES_FP32  # FP32 gradients
     training_accelerators = training_accelerators_q.to(count).magnitude
-    achieved_rate_q = (Models.Language.GPT3.training_ops / (training_accelerators * training_days_q)).to(TFLOPs / second)
-    mfu = (achieved_rate_q / Hardware.Cloud.V100.compute.peak_flops).to('').magnitude
+    achieved_rate_q = Scenarios.Gpt3PublishedRun.achieved_rate  # total compute over GPUs x days
+    mfu = Scenarios.Gpt3PublishedRun.peak_fraction  # achieved / V100 peak
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(params_b == 175, f"GPT-3 should be 175B params, got {params_b}")
@@ -439,43 +439,35 @@ def _decimal_year(s):
     d = dt.date.fromisoformat(s)
     return d.year + (d.timetuple().tm_yday - 1) / 365.25
 
-def _annual_factor(rows, value):
-    """10**slope of a least-squares fit of log10(value(row)) on publication date."""
-    return 10 ** np.polyfit([_decimal_year(r["date"]) for r in rows], np.log10([value(r) for r in rows]), 1)[0]
-
 def _in_window(rows, first, last):
     return [r for r in rows if r["training_compute_flop"] and first <= r["date"][:4] <= last]
-
-def _complete(rows):
-    return [r for r in rows if r["hardware_quantity"] and r["training_time_hours"]]
 
 # ┌── LEGO ───────────────────────────────────────────────
 class TrainingComputeGrowth:
     """Decomposition of training-compute growth into count, duration, and rate."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    first_year, last_year = "2012", "2024"
-    all_rows = _in_window(Literature.Series.NotableModelTrainingRuns.entries, first_year, last_year)
+    scenario = Scenarios.NotableRunGrowth2012to2024  # Epoch AI notable models, 2012-2024
+    first_year, last_year = scenario.first_year, scenario.last_year
+    all_rows = _in_window(Literature.Series.NotableModelTrainingRuns.entries, first_year, last_year)  # figure rows
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    runs = _complete(all_rows)
-    compute_g = _annual_factor(runs, lambda r: r["training_compute_flop"])
-    count_g = _annual_factor(runs, lambda r: r["hardware_quantity"])
-    duration_g = _annual_factor(runs, lambda r: r["training_time_hours"])
-    rate_g = _annual_factor(runs, lambda r: r["training_compute_flop"] / (r["hardware_quantity"] * r["training_time_hours"] * 3600))
-    fleet_share = (math.log(count_g) + math.log(duration_g)) / math.log(compute_g)
-    span_orders = math.log10(
-        max(r["training_compute_flop"] for r in all_rows) / next(r for r in all_rows if r["model"] == "AlexNet")["training_compute_flop"]
-    )
-
+    _growth = scenario.result
+    run_count = _growth.run_count
+    compute_g = _growth.compute_factor
+    count_g = _growth.count_factor
+    duration_g = _growth.duration_factor
+    rate_g = _growth.rate_factor
+    fleet_share = _growth.fleet_share
+    span_orders = _growth.span_orders
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(count_g * duration_g * rate_g / compute_g - 1) < 1e-6, "The three factors must multiply to the compute trend.")
     check(0.4 <= fleet_share <= 0.6, f"Prose says about half of the growth is count and duration, got {fleet_share:.2f}.")
     check(7 <= span_orders <= 8.5, f"Caption and @sec-sustainable-ai say seven to eight orders from AlexNet, got {span_orders:.1f}.")
-    check(len(runs) >= 100, "Decomposition rests on at least 100 complete runs.")
+    check(run_count >= 100, "Decomposition rests on at least 100 complete runs.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    run_count_str = fmt_int(len(runs))
+    run_count_str = fmt_int(run_count)
     compute_mult_str = fmt_multiple(round(compute_g, 1))
     count_mult_str = fmt_multiple(round(count_g, 1))
     duration_mult_str = fmt_multiple(round(duration_g, 1))
@@ -1245,19 +1237,18 @@ class Gpt3CiRatio:
     """Communication intensity of one GPT-3 data-parallel step vs. fabric balance."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    params = Models.Language.GPT3.parameters.to(param).magnitude
-    seq_len = Models.Language.GPT3.context_length
-    seqs_per_worker = 4  # scenario input: a local batch of four full-length sequences
-    link_bw = Systems.Fabrics.InfiniBand_HDR.bandwidth
-    peak_rate = Hardware.Cloud.A100.compute.peak_flops
+    scenario = Scenarios.Gpt3DataParallelIntensity  # four GPT-3 sequences per worker; A100 on HDR
+    seq_len = scenario.workload.context_length
+    seqs_per_worker = scenario.sequences_per_worker
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    local_tokens = seqs_per_worker * seq_len
-    ring_bytes = 2 * params * BYTES_FP16
-    local_flops = 6 * params * local_tokens
-    ci_bytes_per_flop = ring_bytes.to(byte).magnitude / local_flops
+    _ci = scenario.result
+    local_tokens = _ci.local_tokens
+    ring_bytes = _ci.bytes_per_step
+    local_flops = _ci.flops_per_step.to(flop).magnitude
+    ci_bytes_per_flop = _ci.intensity
     flops_per_byte = 1 / ci_bytes_per_flop
-    balance_bytes_per_flop = link_bw.to(byte / second).magnitude / peak_rate.to(flop / second).magnitude
+    balance_bytes_per_flop = _ci.balance
     ci_to_balance = ci_bytes_per_flop / balance_bytes_per_flop
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
@@ -2417,18 +2408,19 @@ class ReliabilityGap:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    a_node = 0.999  # scenario assumption: illustrative per-node availability
-    a_four_nines = 0.9999  # scenario assumption: comparison level, not a typical-server claim
-    calendar_year = 365 * day  # Explicit accounting interval
-    n_small = 1000  # scenario assumption: smaller job size (required nodes)
-    n_large = 10000  # scenario assumption: larger job size (required nodes)
+    _small = Scenarios.NodeAvailability1K  # illustrative 99.9 percent per node, independent failures
+    _large = Scenarios.NodeAvailability10K
+    _four_nines = Scenarios.FourNinesAvailability10K  # comparison level, not a typical-server claim
+    a_node = _small.availability
+    a_four_nines = _four_nines.availability
+    n_small = _small.n_components  # smaller job size (required nodes)
+    n_large = _large.n_components  # larger job size (required nodes)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    four_nines_downtime = ((1 - a_four_nines) * calendar_year).to(minute)
-    a_all_small = (a_node**n_small) * 100
-    a_all_large = (a_node**n_large) * 100
-    a_all_large_four_nines = (a_four_nines**n_large) * 100
-
+    four_nines_downtime = _four_nines.downtime_per_year  # 365-day accounting interval
+    a_all_small = _small.all_up * 100
+    a_all_large = _large.all_up * 100
+    a_all_large_four_nines = _four_nines.all_up * 100
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(52.55 < four_nines_downtime.magnitude < 52.57, "Four-nines downtime must be about 52.56 minutes per 365-day year")
     check(a_all_large < 1.0, f"All-required-node availability ({a_all_large:.2f}%) should be near zero.")
@@ -2799,35 +2791,31 @@ class GPT3SyncTax:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    model_params = Models.Language.GPT3.parameters
+    scenario = Scenarios.Gpt3GradientSync  # 175B, 16-bit ring AllReduce, no overlap
+    model_params = scenario.workload.parameters
     params = model_params.to(param).magnitude
-    bw_ib = Systems.Fabrics.InfiniBand_HDR.bandwidth  # HDR InfiniBand
-    bw_eth = Systems.Fabrics.Ethernet_100G.bandwidth
-    t_compute_iter = 1.2 * second  # illustrative per-worker compute time, not a measured GPT-3 step
+    bw_ib = scenario.links["InfiniBand"]  # HDR InfiniBand
+    bw_eth = scenario.links["Ethernet"]
+    t_compute_iter = scenario.compute_time  # illustrative per-worker compute time, not a measured GPT-3 step
     productivity_window = 100 * second  # scenario assumption: easy comparison window
-    million_steps = 1_000_000
-
+    million_steps = scenario.steps
     # Physics: energy cost of moving one bit across the InfiniBand fabric
-    energy_per_bit = Systems.NetworkEnergy.InfiniBandEnergyPerBit
-
+    energy_per_bit = scenario.energy_per_bit
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Ring AllReduce transfers ~2 * Params.
-    sync_size = 2 * params * BYTES_FP16
-    sync_bits = sync_size.to(bit)
-
+    _sync = scenario.result
+    sync_size = _sync.sync_bytes
     # Exposed transfer time
-    t_comm_ib = (sync_size / bw_ib).to(second)
-    t_comm_eth = (sync_size / bw_eth).to(second)
-
+    t_comm_ib = _sync.transfer_times["InfiniBand"]
+    t_comm_eth = _sync.transfer_times["Ethernet"]
     # Compute-time fraction = (T_compute/N) / (T_compute/N + T_comm)
-    compute_fraction_ib = (t_compute_iter / (t_compute_iter + t_comm_ib)).to("").magnitude * 100
-    compute_fraction_eth = (t_compute_iter / (t_compute_iter + t_comm_eth)).to("").magnitude * 100
-
+    compute_fraction_ib = _sync.compute_fractions["InfiniBand"] * 100
+    compute_fraction_eth = _sync.compute_fractions["Ethernet"] * 100
     # Network energy (per step)
     # Total Energy = bits * (Joules/bit)
     # 1 pJ = 1e-12 J
-    sync_energy = (sync_bits * energy_per_bit).to(joule)
-    sync_energy_total = sync_energy * million_steps
+    sync_energy = _sync.energy_per_step
+    sync_energy_total = _sync.energy_total
     sync_energy_expected = 196.0 * MJ
     sync_energy_delta = abs((sync_energy_total - sync_energy_expected).to(MJ))
 
@@ -3091,11 +3079,12 @@ class FasterAcceleratorFallacy:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     t_compute_iter = GPT3SyncTax.t_compute_iter
     t_comm = GPT3SyncTax.t_comm_ib
-    accel_speedup = 2.0  # scenario input: accelerator generation upgrade
+    _faster = Scenarios.Gpt3GradientSyncFasterAccelerator  # one accelerator generation, same exchange
+    accel_speedup = _faster.compute_speedup
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    step_before = t_compute_iter + t_comm
-    step_after = t_compute_iter / accel_speedup + t_comm
+    step_before = Scenarios.Gpt3GradientSync.result.step_times["InfiniBand"]
+    step_after = _faster.result.step_times["InfiniBand"]
     step_reduction = 1 - (step_after / step_before).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
@@ -3189,12 +3178,12 @@ class LinearScalingFallacy:
     """Realized speedup under a coordination-overhead fraction."""
 
     # ┌── 1. LOAD (Scenario) ────────────────────────────────────────────────
-    ideal_speedup = 3.0
-    coord_overhead_fraction = 0.40
+    _plan = Scenarios.CoordinationOverheadExample
+    ideal_speedup = _plan.planned_speedup
+    coord_overhead_fraction = _plan.overhead_fraction
 
     # ┌── 2. EXECUTE (The Compute) ──────────────────────────────────────────
-    realized_speedup = ideal_speedup * (1 - coord_overhead_fraction)
-
+    realized_speedup = _plan.realized_speedup
     # ┌── 3. GUARD (Invariants) ─────────────────────────────────────────────
     check(abs(realized_speedup - 1.8) < 1e-9, f"Expected 1.8x, got {realized_speedup}")
     check(0 < coord_overhead_fraction < 1, "Coordination overhead must be a fraction")

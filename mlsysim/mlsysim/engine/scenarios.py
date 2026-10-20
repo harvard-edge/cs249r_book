@@ -12,7 +12,8 @@ from ..models.registry import Models as _Models
 from ..hardware.registry import Hardware as _Hardware
 from ..systems.registry import Clusters as _Clusters
 from ..reference_stats.registry import ReferenceStats as _ReferenceStats
-from ..systems.registry import Fabrics as _Fabrics, Nodes as _Nodes
+from ..systems.registry import Fabrics as _Fabrics, Nodes as _Nodes, NetworkEnergy as _NetworkEnergy
+from ..literature.registry import Literature as _Literature
 from ..systems.reliability import Reliability as _Reliability
 from ..infrastructure.registry import Infrastructure as _Infrastructure
 from ..ops import Ops as _Ops
@@ -479,4 +480,102 @@ class Scenarios(Registry):
                     "that sustains 40 percent of peak.",
         planned_device_hours=1000,  # scenario assumption: budget from the datasheet rate
         sustained_fraction=0.4,  # scenario assumption: sustained share of peak
+    )
+
+    # --- Data-parallel training at fleet scale (added 2026-10-20) -----------
+    Gpt3GradientSync = _st.GradientSyncScenario(
+        name="175B data-parallel gradient sync over InfiniBand HDR and 100G Ethernet",
+        description="One worker computes for a stated 1.2 s, then ring-AllReduces 16-bit "
+                    "gradients with no overlap; energy charges each bit once on InfiniBand.",
+        workload=_Models.Language.GPT3,
+        precision="fp16",
+        links={"InfiniBand": _Fabrics.InfiniBand_HDR.bandwidth, "Ethernet": _Fabrics.Ethernet_100G.bandwidth},
+        compute_time=Q_(1.2, "second"),  # scenario assumption: illustrative compute per step, not a measured GPT-3 step
+        energy_per_bit=_NetworkEnergy.InfiniBandEnergyPerBit,
+        steps=1_000_000,  # scenario assumption: steps in the run
+    )
+
+    Gpt3GradientSyncFasterAccelerator = Gpt3GradientSync.variant(
+        name="The same step on accelerators with twice the compute rate",
+        description="Only the compute term halves; the exchange is unchanged.",
+        compute_speedup=2.0,  # scenario assumption: one accelerator generation
+    )
+
+    Gpt3DataParallelIntensity = _st.DataParallelIntensityScenario(
+        name="Communication intensity of a 175B data-parallel worker",
+        description="Four full-length GPT-3 sequences per worker per step; balance of one "
+                    "A100 on one 200 Gb/s HDR link.",
+        workload=_Models.Language.GPT3,
+        sequences_per_worker=4,  # scenario assumption: local batch of four sequences
+        link_bandwidth=_Fabrics.InfiniBand_HDR.bandwidth,
+        accelerator=_Hardware.Cloud.A100,
+    )
+
+    WorkloadAlphaIntensity = _st.IntensityScenario(
+        name="Workload Alpha (compute-heavy)", description="10 MB sent per 10^14 FLOPs per GPU per step.",
+        bytes_per_step=Q_(10, "MB"), flops_per_step=Q_(1e14, "flop"))
+
+    WorkloadBetaIntensity = _st.IntensityScenario(
+        name="Workload Beta (communication-heavy)", description="1 GB sent per 10^13 FLOPs per GPU per step.",
+        bytes_per_step=Q_(1, "GB"), flops_per_step=Q_(1e13, "flop"))
+
+    NodeAvailability1K = _st.AvailabilityScenario(
+        name="1,000 nodes at 99.9 percent", description="Illustrative per-node availability, independent failures.",
+        availability=0.999, n_components=1000)
+
+    NodeAvailability10K = NodeAvailability1K.variant(
+        name="10,000 nodes at 99.9 percent", n_components=10_000)
+
+    FourNinesAvailability10K = NodeAvailability1K.variant(
+        name="10,000 nodes at 99.99 percent", availability=0.9999, n_components=10_000)
+
+    Gpt3ComputeOptimal = _st.ComputeOptimalScenario(
+        name="GPT-3's budget at a compute-optimal split",
+        description="GPT-3's 6ND budget re-split at Chinchilla's tokens per parameter.",
+        workload=_Models.Language.GPT3,
+        tokens_per_param=float(_Literature.Chinchilla.TokensPerParam),
+        flops_per_param_token=float(_Literature.Chinchilla.ComputeConstant),
+    )
+
+    FleetLawProfileExample = _st.StepBreakdownScenario(
+        name="A step profile dominated by communication",
+        description="Illustrative Fleet Law terms: 0.8 s compute, 1.0 s communication, 0.2 s sync, no overlap.",
+        compute_time=Q_(0.8, "second"), communication_time=Q_(1.0, "second"),
+        synchronization_time=Q_(0.2, "second"), overlap_time=Q_(0, "second"))
+
+    FleetLawDoublingExample = _st.ScalingStepScenario(
+        name="Doubling N when communication does not shrink",
+        description="Illustrative units: the step falls from 10 to 8 when N doubles.",
+        step_at_n=10, step_at_scaled=8, factor=2)
+
+    CoordinationOverheadExample = _st.ScalingOverheadScenario(
+        name="A planned 3x speedup with 40 percent overhead",
+        description="Communication and coordination take 40 percent of the scaled step.",
+        planned_speedup=3.0, overhead_fraction=0.40)
+
+    ChinchillaParameterPowerLaw = _st.PowerLawScenario(
+        name="Chinchilla parameter term", description="Hoffmann et al. 2022 parameter exponent.",
+        exponent=float(_Literature.Chinchilla.ParametricLossAlpha))
+
+    ShallowPowerLawExample = _st.PowerLawScenario(
+        name="A shallow power law", description="Illustrative exponent of 0.1.", exponent=0.1)
+
+    NotableRunGrowth2012to2024 = _st.TrainingGrowthScenario(
+        name="Training-compute growth, 2012 to 2024",
+        description="Epoch AI notable models that report accelerator count and duration.",
+        series_name="NotableModelTrainingRuns", first_year="2012", last_year="2024")
+
+    GpuFailuresLlama3Run = _st.FailureIntervalScenario(
+        name="GPU failures across the Llama 3 405B run",
+        description="16,384 GPUs at the per-GPU MTTF over the 54-day snapshot.",
+        component_mtbf=Q_(_Reliability.Gpu.mttf_hours, "hour"),
+        n_components=int(_Models.Language.Llama3_405B.training_accelerators_ref.to("count").magnitude),
+        run_duration=Q_(float(_Literature.TrainingRuns.Llama3_405B_SnapshotDays), "day"),
+    )
+
+    Gpt3PublishedRun = _st.PublishedRunScenario(
+        name="GPT-3 175B as trained",
+        description="GPT-3's training compute over its reference V100 count and days (Patterson et al. 2021).",
+        workload=_Models.Language.GPT3,
+        accelerator=_Hardware.Cloud.V100,
     )
