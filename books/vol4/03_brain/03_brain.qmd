@@ -147,15 +147,17 @@ A first estimate shows why one model cannot do both jobs. If every fresh evaluat
 # └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
 import matplotlib.pyplot as plt
-from mlsysim import viz, Embodied
+from mlsysim import viz, Embodied, Scenarios
 from mlsysim.core.units import GB, second, hertz, param, byte
 from mlsysim.fmt import check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+_traffic = Scenarios.WarehouseProposerTraffic
 
 # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────────────
-_b_sus = (RM.brain_soc.memory.bandwidth * RM.dram_efficiency).to(GB / second).magnitude  # derived
-_bpp = {"FP16 weights": 2.0, "INT4 weights": RM.intent_weight_bytes_per_param.to(byte / param).magnitude}  # chosen
+_b_sus = _traffic.result.sustained_bandwidth.to(GB / second).magnitude  # derived
+_bpp_fp16 = _traffic.fp16_bytes_per_param.to(byte / param).magnitude  # chosen
+_bpp = {"FP16 weights": _bpp_fp16, "INT4 weights": RM.intent_weight_bytes_per_param.to(byte / param).magnitude}  # chosen
 _intent = (RM.intent_model.parameters.to(param).magnitude, RM.intent_rate.to(hertz).magnitude)
 _chunk = (RM.chunk_model.parameters.to(param).magnitude, RM.chunk_rate.to(hertz).magnitude)
 
@@ -163,7 +165,7 @@ _chunk = (RM.chunk_model.parameters.to(param).magnitude, RM.chunk_rate.to(hertz)
 _n = np.logspace(7, 10.5, 200)
 _ceiling = {k: _b_sus * 1e9 / (_n * v) for k, v in _bpp.items()}
 _intent_wall = _b_sus * 1e9 / (_intent[0] * _bpp["INT4 weights"])
-_chunk_wall = _b_sus * 1e9 / (_chunk[0] * 2.0)
+_chunk_wall = _b_sus * 1e9 / (_chunk[0] * _bpp_fp16)
 
 # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────────────
 check(_intent[1] < _intent_wall, "Intent rate must sit below its INT4 streaming ceiling")
@@ -275,9 +277,10 @@ The computational cost of this capability depends directly on the model's underl
 # │          without touching the argument
 # │ Show:    horizons (DP 16/8, pi0 50, ACT 100); OFT 26x; FAST 30-60 tokens;
 # │          Helix, GR00T N1, Gemini Robotics rates
-# │ How:     literature values, each verified against the paper on 2026-09-29;
-# │          promotion candidates for mlsysim literature/registry
+# │ How:     Literature.VlaSystems (each value verified against its paper; the
+# │          provenance records carry the source and date)
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
 from mlsysim.core.units import *
 from mlsysim.fmt import fmt_int, fmt_params, fmt_frequency, fmt_latency, fmt_multiple, fmt_percent, fmt_memory, check
 
@@ -285,40 +288,43 @@ class StateOfPractice:
     """Published architecture figures, verified against each source (2026-09-29)."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    V = Literature.VlaSystems  # category: literature (each entry carries its paper)
     # Chi et al. 2024 (Diffusion Policy): prediction horizon T_p and executed T_a
-    dp_predict, dp_execute = 16, 8  # category: literature
+    dp_predict, dp_execute = int(V.DiffusionPolicyPredictionHorizon), int(V.DiffusionPolicyExecutionHorizon)
     # Zhao et al. 2023 (ACT): chunk size k = 100 at 50 Hz
-    act_k = 100  # category: literature
-    act_rate = 50 * hertz  # category: literature (ACT control rate)
+    act_k = int(V.ActChunkSize)
+    act_rate = float(V.ActControlRateHz) * hertz
     # Black et al. 2024 (pi0), Sec. IV and App. A-D
-    pi0_params = 3.3e9 * param  # category: literature (total)
-    pi0_expert = 300e6 * param  # category: literature (action expert)
-    pi0_h = 50  # category: literature
-    pi0_steps = 10  # category: literature (flow integration steps)
-    pi0_rate = 50 * hertz  # category: literature ("up to 50 Hz")
-    pi0_latency = 73 * millisecond  # category: literature (on-board, RTX 4090)
+    pi0_params = float(V.Pi0TotalParams) * param
+    pi0_expert = float(V.Pi0ActionExpertParams) * param
+    pi0_h = int(V.Pi0ChunkHorizon)
+    pi0_steps = int(V.Pi0FlowSteps)
+    pi0_rate = float(V.Pi0ControlRateHz) * hertz  # "up to 50 Hz"
+    pi0_latency = float(V.Pi0OnboardLatencyMs) * millisecond  # on-board, RTX 4090
     # Kim et al. 2024 (OpenVLA): about 6 Hz on one RTX 4090 in bfloat16
-    openvla_rate = 6 * hertz  # category: literature
+    openvla_rate = float(V.OpenVlaRtx4090RateHz) * hertz
     # Kim, Finn, Liang 2025 (OpenVLA-OFT): LIBERO, A100, 8-step chunks
-    oft_hz, openvla_hz_a100, oft_chunk = 109.7 * hertz, 4.2 * hertz, 8  # category: literature
+    oft_hz, openvla_hz_a100 = float(V.OpenVlaOftRateHz) * hertz, float(V.OpenVlaA100RateHz) * hertz
+    oft_chunk = int(V.OpenVlaOftChunk)
     # Pertsch et al. 2025 (FAST): 30-60 tokens per chunk; pi0-FAST ~750 ms vs pi0 ~100 ms (RTX 4090)
-    fast_tok_lo, fast_tok_hi = 30, 60  # category: literature
-    fast_naive, fast_tok_50hz = 700, 53  # category: literature (shirt fold, 50 Hz, Table I)
-    fast_task_rate = 50 * hertz  # category: literature (shirt-fold control rate, Table I)
-    fast_latency, flow_latency = 750 * millisecond, 100 * millisecond  # category: literature (approximate)
+    fast_tok_lo, fast_tok_hi = int(V.FastTokensLow), int(V.FastTokensHigh)
+    fast_naive, fast_tok_50hz = int(V.FastNaiveTokens), int(V.FastTokens50Hz)  # shirt fold, 50 Hz, Table I
+    fast_task_rate = float(V.FastTaskRateHz) * hertz
+    fast_latency, flow_latency = float(V.Pi0FastLatencyMs) * millisecond, float(V.Pi0FlowLatencyMs) * millisecond
     # Figure AI 2025 (Helix)
-    helix_s2_params, helix_s1_params = 7e9 * param, 80e6 * param  # category: literature
-    helix_s2_lo, helix_s2_hi, helix_s1_rate = 7 * hertz, 9 * hertz, 200 * hertz  # category: literature
-    helix_dof = 35  # category: literature
+    helix_s2_params, helix_s1_params = float(V.HelixSlowParams) * param, float(V.HelixFastParams) * param
+    helix_s2_lo, helix_s2_hi = float(V.HelixSlowRateLowHz) * hertz, float(V.HelixSlowRateHighHz) * hertz
+    helix_s1_rate = float(V.HelixFastRateHz) * hertz
+    helix_dof = int(V.HelixDegreesOfFreedom)
     # Bjorck et al. 2025 (GR00T N1)
-    gr00t_params, gr00t_vlm = 2.2e9 * param, 1.34e9 * param  # category: literature
-    gr00t_s2_rate, gr00t_s1_rate = 10 * hertz, 120 * hertz  # category: literature
-    gr00t_h, gr00t_steps = 16, 4  # category: literature
-    gr00t_latency = 63.9 * millisecond  # category: literature (16-action chunk, L40, bf16)
+    gr00t_params, gr00t_vlm = float(V.Gr00tN1Params) * param, float(V.Gr00tN1VlmParams) * param
+    gr00t_s2_rate, gr00t_s1_rate = float(V.Gr00tN1SlowRateHz) * hertz, float(V.Gr00tN1FastRateHz) * hertz
+    gr00t_h, gr00t_steps = int(V.Gr00tN1ChunkHorizon), int(V.Gr00tN1FlowSteps)
+    gr00t_latency = float(V.Gr00tN1ChunkLatencyMs) * millisecond  # 16-action chunk, L40, bf16
     # Gemini Robotics Team 2025 (Gemini Robotics): cloud backbone plus on-robot decoder
-    gemini_backbone = 160 * millisecond  # category: literature (upper bound, "under 160 ms")
-    gemini_e2e = 250 * millisecond  # category: literature ("approximately 250 ms")
-    gemini_rate = 50 * hertz  # category: literature (effective control rate with chunks)
+    gemini_backbone = float(V.GeminiRoboticsBackboneLatencyMs) * millisecond  # upper bound, "under 160 ms"
+    gemini_e2e = float(V.GeminiRoboticsEndToEndMs) * millisecond  # "approximately 250 ms"
+    gemini_rate = float(V.GeminiRoboticsControlRateHz) * hertz  # effective control rate with chunks
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     oft_speedup = (oft_hz / openvla_hz_a100).to("dimensionless").magnitude
@@ -382,7 +388,7 @@ class StateOfPractice:
 # │ How:     RM.intent_model.layers and .hidden_dim; the camera count, frame
 # │          size, patch size, and prompt/state token counts are illustrative
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Embodied
+from mlsysim import Scenarios
 from mlsysim.core.units import byte, MB
 from mlsysim.fmt import fmt_int, fmt_memory, fmt_display_math, check
 
@@ -390,23 +396,21 @@ class TokenFootprint:
     """Patch, token, embedding, and per-token KV sizes for the illustrative backbone."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    model = Embodied.MobileManipulator.WarehouseMobileManipulator.intent_model  # category: chosen
+    tok = Scenarios.ThreeViewVlaTokens  # category: illustrative (three-camera step on the intent backbone)
+    model = tok.model  # category: chosen (the machine's intent model)
     n_layers = model.layers  # category: datasheet
     d_model = model.hidden_dim  # category: datasheet
-    cameras = 3  # category: illustrative (left wrist, right wrist, overhead)
-    frame_px = 224  # category: illustrative (square input frame)
-    patch_px = 14  # category: illustrative (ViT patch size)
-    prompt_tokens = 32  # category: illustrative
-    state_tokens = 16  # category: illustrative
-    s_round = 800  # category: illustrative (rounded context length)
-    elem_bytes = 2  # category: chosen (FP16)
+    cameras = tok.views  # category: illustrative (left wrist, right wrist, overhead)
+    prompt_tokens = tok.prompt_tokens  # category: illustrative
+    state_tokens = tok.state_tokens  # category: illustrative
+    s_round = tok.context_tokens  # category: illustrative (rounded context length)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    patches = (frame_px // patch_px) ** 2
-    visual_tokens = cameras * patches
-    embed_mem = (s_round * d_model * elem_bytes * byte).to(MB)
-    kv_token_bytes = 2 * n_layers * d_model * elem_bytes
-    kv_token_mem = (kv_token_bytes * byte).to(MB)
+    patches = tok.patches_per_view
+    visual_tokens = tok.visual_tokens
+    embed_mem = tok.embedding_memory.to(MB)
+    kv_token_bytes = round(tok.kv_per_token.to(byte).magnitude)
+    kv_token_mem = tok.kv_per_token.to(MB)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(patches == 256 and visual_tokens == 768, f"Patch count drifted: {patches}, {visual_tokens}")
@@ -517,42 +521,29 @@ Published measurements on the machine's own module show how far apart those cost
 # │       against the machine's chunk and intent periods.
 # │ Show: Which reference models fit one chunk period; how far the language
 # │       and image-generation models overrun the intent period.
-# │ How:  Literature.EdgeInferenceOrin, NVIDIA's own 64 GB developer-kit
-# │       submission, latest round per benchmark, p90 single-stream latency;
+# │ How:  Scenarios.OrinDevKitSingleStream (Literature.EdgeInferenceOrin), NVIDIA's
+# │       own 64 GB developer-kit submission, latest round per benchmark, p90;
 # │       periods from Embodied.MobileManipulator.WarehouseMobileManipulator.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Embodied, Hardware, Literature
+from mlsysim import Embodied, Hardware, Scenarios
 from mlsysim.core.units import millisecond, second
 from mlsysim.fmt import check, fmt, fmt_int, fmt_multiple, fmt_time
-
-def _latest_p90(rows, system, bench):
-    """Latest-round p90 single-stream latency (ms) for one system and benchmark."""
-    hits = [
-        r for r in rows if r["system"] == system and r["benchmark"] == bench and r["scenario"] == "SingleStream" and r["metric"].startswith("p90")
-    ]
-    return max(hits, key=lambda r: r["round"])["value"], max(hits, key=lambda r: r["round"])["round"]
 
 class MeasuredOrinLatency:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     RM = Embodied.MobileManipulator.WarehouseMobileManipulator
-    rows = Literature.EdgeInferenceOrin.entries
-    system = "NVIDIA Jetson AGX Orin Developer Kit 64G (TensorRT)"
-    benches = ("resnet50", "bert-99", "retinanet", "rnnt", "3d-unet-99", "gptj-99", "stable-diffusion-xl")
+    mlperf = Scenarios.OrinDevKitSingleStream  # category: measured (MLPerf Inference edge, latest round each)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     t_chunk = (1 / RM.chunk_rate).to(millisecond).magnitude
     t_intent = (1 / RM.intent_rate).to(millisecond).magnitude
     lat = {}
-    for _b in benches:
-        lat[_b] = _latest_p90(rows, system, _b)[0]
-    n_fit_chunk = 0
-    for _v in lat.values():
-        n_fit_chunk += _v <= t_chunk
+    for _b, _task, _model in mlperf.benchmarks:
+        lat[_b] = mlperf.latest(_b).to(millisecond).magnitude
+    n_fit_chunk = mlperf.count_within(1 / RM.chunk_rate)
     gptj_over_intent = lat["gptj-99"] / t_intent
-    span = lat["stable-diffusion-xl"] / lat["resnet50"]
-    for _r in rows:
-        if _r["system"] == system and _r["benchmark"] == "gptj-99" and _r["round"] == "v4.0" and _r["metric"].startswith("p90"):
-            gptj_earlier = _r["value"]
+    span = mlperf.span
+    gptj_earlier = mlperf.earliest("gptj-99").to(millisecond).magnitude
     gptj_sw_gain = gptj_earlier / lat["gptj-99"]
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
@@ -584,32 +575,18 @@ class MeasuredOrinLatency:
 # │ Goal: Show measured latencies on the machine's module against its cadences.
 # │ Show: p90 single-stream latency per reference model; chunk and intent
 # │       periods as reference lines.
-# │ How: Literature.EdgeInferenceOrin; Embodied.MobileManipulator rates;
+# │ How: Scenarios.OrinDevKitSingleStream; Embodied.MobileManipulator rates;
 # │      book_style.setup_plot().
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Embodied, Literature
+from mlsysim import Embodied, Scenarios
 from mlsysim.core.units import millisecond
 from binder.tools.figures import style as book_style
 
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 3.8))
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
-rows = Literature.EdgeInferenceOrin.entries
-system = "NVIDIA Jetson AGX Orin Developer Kit 64G (TensorRT)"
-tasks = [
-    ("resnet50", "Image classification (ResNet-50)"),
-    ("bert-99", "Question answering (BERT)"),
-    ("retinanet", "Object detection (RetinaNet)"),
-    ("rnnt", "Speech recognition (RNN-T)"),
-    ("3d-unet-99", "3D segmentation (3D U-Net)"),
-    ("gptj-99", "Text summarization (GPT-J 6B)"),
-    ("stable-diffusion-xl", "Text to image (SDXL)"),
-]
-vals = []
-for bench, _ in tasks:
-    hits = [
-        r for r in rows if r["system"] == system and r["benchmark"] == bench and r["scenario"] == "SingleStream" and r["metric"].startswith("p90")
-    ]
-    vals.append(max(hits, key=lambda r: r["round"])["value"])
+_mlperf = Scenarios.OrinDevKitSingleStream
+tasks = [(b, f"{task} ({model})") for b, task, model in _mlperf.benchmarks]
+vals = [_mlperf.latest(bench).to(millisecond).magnitude for bench, _ in tasks]
 t_chunk = (1 / RM.chunk_rate).to(millisecond).magnitude
 t_intent = (1 / RM.intent_rate).to(millisecond).magnitude
 colors = [COLORS["BlueLine"] if v <= t_chunk else (COLORS["OrangeLine"] if v <= t_intent else COLORS["secondary"]) for v in vals]
@@ -656,8 +633,8 @@ A multi-billion-parameter model takes hundreds of milliseconds on a processor ra
 # │ Show:    98.04 ms FP16 sweep (10.2 Hz wall); 188.5 ms compute-bound prefill
 # │          of S = 288 tokens; 6 decode sweeps; FP16 total 777 ms; INT4 total
 # │          336 ms (2.98 Hz) against the 336 ms Jetson measurement; 2 Hz rate
-# │ How:     calc_vla_inference_latency (prefill max(F/(u Pi), sweep) plus
-# │          (D - 1) bandwidth-bound decode sweeps); RM.intent_latency_breakdown
+# │ How:     Scenarios.IntentModelEvaluation* (VlaEvaluationModel: prefill
+# │          max(F/(u Pi), sweep) plus (D - 1) bandwidth-bound decode sweeps)
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
@@ -689,74 +666,39 @@ class IntentModelLatency:
     d_model = model.hidden_dim  # category: datasheet
     d_action = model.action_dim  # category: datasheet (one token per action dimension)
     s_in = RM.intent_input_tokens  # category: illustrative (256 patches derived + 32 prompt)
-    patches = 256  # category: derived; (224 / 14)^2 patches for one 224 x 224 view
+    patches = Scenarios.ThreeViewVlaTokens.patches_per_view  # category: derived; (224 / 14)^2 patches per view
     pi_fp16 = soc.compute.precision_flops["fp16"]  # category: datasheet (dense FP16 GPU)
     b_peak = soc.memory.bandwidth  # category: datasheet
     eta = RM.dram_efficiency  # category: illustrative (sustained fraction of peak)
     u = RM.intent_compute_utilization  # category: illustrative (achieved fraction of FP16 peak)
-    bpp_fp16 = 2 * (byte / param)  # category: chosen (FP16 weights)
+    bpp_fp16 = Scenarios.IntentModelEvaluationFp16.weight_bytes_per_param  # category: chosen (FP16 weights)
     bpp_int4 = RM.intent_weight_bytes_per_param  # category: chosen (INT4 weights, deployed)
     t_measured = RM.intent_reference_latency  # category: measured (Jetson AI Lab, INT4 on AGX Orin)
-    s_three_cameras = 800  # category: illustrative; three views plus prompt and state tokens
+    s_three_cameras = Scenarios.ThreeViewVlaTokens.context_tokens  # category: illustrative; three views plus prompt and state
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    m_fp16 = memory_from_params(n_params, bpp_fp16)
+    fp16 = Scenarios.IntentModelEvaluationFp16.result
+    int4 = Scenarios.IntentModelEvaluationInt4.result
+    int4_parallel = Scenarios.IntentModelEvaluationParallel.result
+    int4_three = Scenarios.IntentModelEvaluationThreeViews.result
+    m_fp16 = fp16.weight_memory
     m_int4 = RM.intent_weight_memory
-    b_sus = (b_peak * eta).to(GB / second)
-    ridge = (pi_fp16 / b_peak).to(flop / byte)
-    intensity_prefill = (2 * n_params.to(count).magnitude * s_in * flop / (m_fp16)).to(flop / byte)
-
-    fp16 = calc_vla_inference_latency(
-        n_params,
-        m_fp16,
-        s_in,
-        d_action,
-        pi_fp16,
-        b_peak,
-        bus_efficiency=eta,
-        compute_utilization=u,
-        n_layers=n_layers,
-        hidden_dim=d_model,
-    )
-    int4 = RM.intent_latency_breakdown
-    int4_parallel = calc_vla_inference_latency(
-        n_params,
-        m_int4,
-        s_in,
-        d_action,
-        pi_fp16,
-        b_peak,
-        bus_efficiency=eta,
-        compute_utilization=u,
-        parallel_decode=True,
-        n_layers=n_layers,
-        hidden_dim=d_model,
-    )
-    int4_three = calc_vla_inference_latency(
-        n_params,
-        m_int4,
-        s_three_cameras,
-        d_action,
-        pi_fp16,
-        b_peak,
-        bus_efficiency=eta,
-        compute_utilization=u,
-        n_layers=n_layers,
-        hidden_dim=d_model,
-    )
-    t_sweep_fp16 = fp16["t_weight_sweep"]
-    f_wall = (1 / t_sweep_fp16).to(hertz)
-    flops_linear = (2 * n_params.to(count).magnitude * s_in) * flop
-    flops_attn = (2 * n_layers * d_model * s_in**2) * flop
-    t_prefill = int4["t_prefill"]
+    b_sus = fp16.sustained_bandwidth.to(GB / second)
+    ridge = fp16.ridge_intensity.to(flop / byte)
+    intensity_prefill = fp16.prefill_intensity.to(flop / byte)
+    t_sweep_fp16 = fp16.t_weight_sweep
+    f_wall = fp16.weight_sweep_rate.to(hertz)
+    flops_linear = fp16.prefill_linear_flops
+    flops_attn = fp16.prefill_attention_flops
+    t_prefill = int4.t_prefill
     t_int4 = RM.intent_inference_latency
-    f_int4 = int4["f_max"]
+    f_int4 = int4.f_max
     rate = RM.intent_rate
     t_period = (1 / rate).to(millisecond)
     t_period_next = (1 / (rate + 1 * hertz)).to(millisecond)
-    t_period_5hz = (1 / (5 * hertz)).to(millisecond)
+    t_period_5hz = Scenarios.IntentModelFiveHertz.period
     measured_gap = abs((t_int4 - t_measured) / t_measured).to("dimensionless").magnitude
-    parallel_slack = ((t_period_5hz - int4_parallel["t_total"]) / t_period_5hz).to("dimensionless").magnitude
+    parallel_slack = Scenarios.IntentModelParallelFiveHertz.slack_fraction
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(m_fp16.to(GB).magnitude - 14.0) < 1e-9, f"FP16 weights drifted: {m_fp16}")
@@ -764,20 +706,20 @@ class IntentModelLatency:
     check(abs(f_wall.magnitude - 10.20) < 5e-3, f"Memory-wall rate drifted: {f_wall}")
     check(s_in == 288 and d_action == 7, f"Intent tokens drifted: {s_in}, {d_action}")
     check(intensity_prefill > ridge, "Prefill intensity must exceed the ridge (compute-bound)")
-    check(fp16["prefill_bound"] == "compute" and int4["prefill_bound"] == "compute", "Prefill must be compute-bound")
+    check(fp16.prefill_bound == "compute" and int4.prefill_bound == "compute", "Prefill must be compute-bound")
     check(abs(t_prefill.to(millisecond).magnitude - 188.55) < 5e-3, f"Prefill drifted: {t_prefill}")
-    check(int4["t_prefill"] == fp16["t_prefill"], "Weight-only quantization must not change the prefill")
-    check(abs(fp16["t_total"].to(millisecond).magnitude - 776.78) < 5e-3, f"FP16 total drifted: {fp16['t_total']}")
+    check(int4.t_prefill == fp16.t_prefill, "Weight-only quantization must not change the prefill")
+    check(abs(fp16.t_total.to(millisecond).magnitude - 776.78) < 5e-3, f"FP16 total drifted: {fp16.t_total}")
     check(abs(t_int4.to(millisecond).magnitude - 335.61) < 5e-3, f"INT4 total drifted: {t_int4}")
     check(measured_gap < 0.05, f"Model must stay near the measured INT4 latency: {measured_gap}")
     check(abs(rate.to(hertz).magnitude - 2.0) < 1e-9, f"Intent rate drifted: {rate}")
     check(t_period >= t_int4 > t_period_next, "Rate must be the largest whole-hertz rate the latency supports")
     check(t_int4 > t_period_5hz, "A 5 Hz intent rate must be infeasible at the deployed configuration")
     check(0 < parallel_slack < 0.05, f"Parallel decoding must fit 5 Hz only with thin slack: {parallel_slack}")
-    check(abs(int4_three["t_total"].to(millisecond).magnitude - 675.8) < 0.05, f"Three-camera case drifted: {int4_three['t_total']}")
+    check(abs(int4_three.t_total.to(millisecond).magnitude - 675.8) < 0.05, f"Three-camera case drifted: {int4_three.t_total}")
     # margin_intent_prefill_decode_envelope.svg fig-alt hand-types 189, 588, 147, 777, 336, and 500 ms.
     check(
-        [round(x.to(millisecond).magnitude) for x in (t_prefill, fp16["t_decode"], int4["t_decode"], t_period)] == [189, 588, 147, 500],
+        [round(x.to(millisecond).magnitude) for x in (t_prefill, fp16.t_decode, int4.t_decode, t_period)] == [189, 588, 147, 500],
         "Envelope margin labels drifted",
     )
 
@@ -786,7 +728,7 @@ class IntentModelLatency:
     n_layers_str = fmt_int(n_layers)
     d_model_str = fmt_int(d_model, commas=False)
     d_action_str = fmt_int(d_action)
-    decode_steps_str = fmt_int(int4["decode_steps"])
+    decode_steps_str = fmt_int(int4.decode_steps)
     s_in_str = fmt_int(s_in)
     patches_str = fmt_int(patches)
     prompt_tokens_str = fmt_int(s_in - patches)
@@ -801,14 +743,14 @@ class IntentModelLatency:
     ridge_str = fmt_arithmetic_intensity(ridge, precision=1)
     intensity_str = fmt_arithmetic_intensity(intensity_prefill, precision=0)
     sweep_fp16_str = fmt_latency(t_sweep_fp16, unit=millisecond, precision=1)
-    sweep_int4_str = fmt_latency(int4["t_weight_sweep"], unit=millisecond, precision=1)
+    sweep_int4_str = fmt_latency(int4.t_weight_sweep, unit=millisecond, precision=1)
     f_wall_str = fmt_frequency(f_wall, unit=hertz, precision=1)
     prefill_ms_str = fmt_latency(t_prefill, unit=millisecond, precision=1)
     prefill_whole_str = fmt_latency(round(t_prefill.to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
-    decode_fp16_str = fmt_latency(round(fp16["t_decode"].to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
-    decode_int4_str = fmt_latency(round(int4["t_decode"].to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
-    total_fp16_str = fmt_latency(round(fp16["t_total"].to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
-    f_fp16_str = fmt_frequency(fp16["f_max"], unit=hertz, precision=1)
+    decode_fp16_str = fmt_latency(round(fp16.t_decode.to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
+    decode_int4_str = fmt_latency(round(int4.t_decode.to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
+    total_fp16_str = fmt_latency(round(fp16.t_total.to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
+    f_fp16_str = fmt_frequency(fp16.f_max, unit=hertz, precision=1)
     total_int4_str = fmt_latency(round(t_int4.to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
     f_int4_str = fmt_frequency(f_int4, unit=hertz, precision=2)
     t_measured_str = fmt_latency(t_measured, unit=millisecond, precision=0)
@@ -819,20 +761,20 @@ class IntentModelLatency:
     period_next_str = fmt_latency(round(t_period_next.to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
     period_5hz_str = fmt_latency(t_period_5hz, unit=millisecond, precision=0)
     rate_5hz_str = fmt_frequency(1 / t_period_5hz, unit=hertz, precision=0)
-    parallel_tokens_str = fmt_int(int4_parallel["prefill_tokens"])
-    parallel_total_str = fmt_latency(round(int4_parallel["t_total"].to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
+    parallel_tokens_str = fmt_int(int4_parallel.prefill_tokens)
+    parallel_total_str = fmt_latency(round(int4_parallel.t_total.to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
     parallel_slack_str = fmt_percent(parallel_slack, precision=1, style="prose")
     s_three_str = fmt_int(s_three_cameras)
-    three_total_str = fmt_latency(round(int4_three["t_total"].to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
+    three_total_str = fmt_latency(round(int4_three.t_total.to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
 
     sweep_display_math = fmt_display_math(
         rf"t_{{\text{{sweep}}}} = \frac{{M_{{\text{{weights}}}}}}{{\text{{BW}}_{{\text{{mem}}}}}} = \frac{{{m_fp16_str}}}{{{b_sus_str}}} \approx {sweep_fp16_str}, \qquad f \le \frac{{1}}{{t_{{\text{{sweep}}}}}} \approx {f_wall_str}"
     )
     flops_display_math = fmt_display_math(
-        rf"O_{{\text{{prefill}}}} \approx 2 N S + 2 N_{{L}} d S^2 = {sci_latex(flops_linear, precision=2)} + {sci_latex(flops_attn, precision=2)} \approx {sci_latex(int4['prefill_flops'], precision=2)}\ \text{{FLOP}}"
+        rf"O_{{\text{{prefill}}}} \approx 2 N S + 2 N_{{L}} d S^2 = {sci_latex(flops_linear, precision=2)} + {sci_latex(flops_attn, precision=2)} \approx {sci_latex(int4.prefill_flops, precision=2)}\ \text{{FLOP}}"
     )
     prefill_display_math = fmt_display_math(
-        rf"t_{{\text{{prefill}}}} = \frac{{O_{{\text{{prefill}}}}}}{{\eta_{{\text{{hw}}}}\,R_{{\text{{peak}}}}}} = \frac{{{sci_latex(int4['prefill_flops'], precision=2)}\ \text{{FLOP}}}}{{{_u_display} \times {pi_str}}} \approx {prefill_ms_str}"
+        rf"t_{{\text{{prefill}}}} = \frac{{O_{{\text{{prefill}}}}}}{{\eta_{{\text{{hw}}}}\,R_{{\text{{peak}}}}}} = \frac{{{sci_latex(int4.prefill_flops, precision=2)}\ \text{{FLOP}}}}{{{_u_display} \times {pi_str}}} \approx {prefill_ms_str}"
     )
     fp16_total_display_math = fmt_display_math(
         rf"t_{{\text{{FP16}}}} = t_{{\text{{prefill}}}} + (S_{{\text{{out}}}}-1)\,t_{{\text{{sweep}}}} \approx {prefill_whole_str} + {decode_steps_str} \times {sweep_fp16_str} \approx {prefill_whole_str} + {decode_fp16_str} = {total_fp16_str}"
@@ -886,7 +828,7 @@ RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 soc = RM.brain_soc  # category: datasheet; the mobile manipulator's application processor
 # Select dense FP16 GPU throughput; the aggregate sparse INT8 rating is incompatible.
 node = soc.model_copy(update={"compute": soc.compute.model_copy(update={"peak_flops": soc.compute.precision_flops["fp16"]})})
-I_TOKEN = 1.0  # category: illustrative; FLOP/byte for a single-token weight sweep
+I_TOKEN = IntentModelLatency.fp16.decode_intensity.to(flop / byte).magnitude  # derived; FLOP/byte of one 16-bit weight sweep
 
 # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────────────
 peak = node.compute.peak_flops.to("TFLOPs/s").magnitude
@@ -1065,8 +1007,8 @@ That is about `{python} IntentModelLatency.f_fp16_str`.
 # │ Show:    777 / 483 / 336 ms computed vs 840 / 471 / 336 ms measured;
 # │          prefill 56 percent of INT4 latency; 5.3 Hz weight-only ceiling;
 # │          3.1 percent scale overhead at g = 128
-# │ How:     calc_vla_inference_latency at each bytes-per-parameter
-# │          (weight-only: prefill unchanged); f_ceiling = 1 / t_prefill
+# │ How:     Scenarios.OpenVlaOrinQuantization (each format a VlaEvaluation
+# │          scenario; weight-only: prefill unchanged); f_ceiling = 1 / t_prefill
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
@@ -1074,64 +1016,45 @@ from mlsysim.fmt import fmt, fmt_memory, fmt_latency, fmt_frequency, fmt_percent
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 
-def _q_latency(bytes_per_param):
-    """Prefill-plus-decode latency of the intent model at one weight precision."""
-    L = IntentModelLatency
-    return calc_vla_inference_latency(
-        L.n_params,
-        memory_from_params(L.n_params, bytes_per_param),
-        L.s_in,
-        L.d_action,
-        L.pi_fp16,
-        L.b_peak,
-        bus_efficiency=L.eta,
-        compute_utilization=L.u,
-        n_layers=L.n_layers,
-        hidden_dim=L.d_model,
-    )
-
 class IntentQuantization:
     """The intent model at three weight precisions, computed against measured."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    n_params = IntentModelLatency.n_params  # category: datasheet
-    bpp_fp16 = 2.0 * (byte / param)  # category: chosen
-    bpp_int8 = 1.0 * (byte / param)  # category: chosen (8-bit weights, 16-bit arithmetic)
-    bpp_int4 = RM.intent_weight_bytes_per_param  # category: chosen (deployed)
+    Q = Scenarios.OpenVlaOrinQuantization  # category: measured against computed (one scenario)
+    bpp_fp16 = Q.formats["FP16"].bytes_per_param  # category: chosen
+    bpp_int8 = Q.formats["8-bit"].bytes_per_param  # category: chosen (8-bit weights, 16-bit arithmetic)
+    bpp_int4 = Q.formats["INT4"].bytes_per_param  # category: chosen (deployed)
     # Jetson AI Lab, OpenVLA-7B on AGX Orin 64GB, JetPack 6 (prov:jetson-ai-lab-openvla-orin):
     # mean per-frame latency and action score (1 - mean range-normalized RMSE) on BridgeData V2 episodes that
     # were part of OpenVLA's training data (re-verified 2026-09-29). The page labels the
     # 8-bit row "FP8", but its command runs MLC's q8f16_ft mode: 8-bit weights, FP16 compute.
-    meas_fp16 = 840 * millisecond  # category: measured (Hugging Face runtime)
-    meas_int8 = 471 * millisecond  # category: measured (q8f16_ft, MLC runtime)
-    meas_int4 = RM.intent_reference_latency  # category: measured
-    acc_fp16, acc_int8, acc_int4 = 0.953, 0.952, 0.901  # category: measured
+    meas_fp16 = Q.measured["FP16"]  # category: measured (Hugging Face runtime)
+    meas_int8 = Q.measured["8-bit"]  # category: measured (q8f16_ft, MLC runtime)
+    meas_int4 = Q.measured["INT4"]  # category: measured
+    acc_fp16, acc_int8, acc_int4 = Q.scores["FP16"], Q.scores["8-bit"], Q.scores["INT4"]  # category: measured
     # Kim et al. 2024 (OpenVLA), Table 2: real-robot task success on a desktop GPU
-    ovla_bf16, ovla_int8, ovla_int4 = 0.713, 0.581, 0.719  # category: literature
+    V = Literature.VlaSystems
+    ovla_bf16, ovla_int8, ovla_int4 = float(V.OpenVlaSuccessBf16), float(V.OpenVlaSuccessInt8), float(V.OpenVlaSuccessInt4)  # category: literature
     # Kim et al. 2024, Sec. 5.3: int8 ran at 1.2 Hz on the A5000 evaluation GPU, against
     # the 5 Hz control rate of the training data; the authors attribute the drop to that
-    ovla_int8_rate, ovla_train_rate = 1.2 * hertz, 5 * hertz  # category: literature
-    group = 128  # category: literature (AWQ group size, Lin et al. 2024, Sec. 5.1)
-    scale_bits = 16  # category: chosen (one FP16 scale per group)
-    weight_bits = 4  # category: chosen (INT4)
+    ovla_int8_rate, ovla_train_rate = float(V.OpenVlaInt8RateHz) * hertz, float(V.OpenVlaTrainingRateHz) * hertz  # category: literature
+    group = Q.group_size  # category: literature (AWQ group size, Lin et al. 2024, Sec. 5.1)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    r_fp16, r_int8, r_int4 = _q_latency(bpp_fp16), _q_latency(bpp_int8), _q_latency(bpp_int4)
-    mem_fp16 = memory_from_params(n_params, bpp_fp16).to(GB)
-    mem_int8 = memory_from_params(n_params, bpp_int8).to(GB)
-    mem_int4 = memory_from_params(n_params, bpp_int4).to(GB)
-    gap_fp16 = ((r_fp16["t_total"] - meas_fp16) / meas_fp16).to("dimensionless").magnitude
-    gap_int8 = ((r_int8["t_total"] - meas_int8) / meas_int8).to("dimensionless").magnitude
-    gap_int4 = ((r_int4["t_total"] - meas_int4) / meas_int4).to("dimensionless").magnitude
-    t_prefill = r_int4["t_prefill"]
-    prefill_share = (t_prefill / r_int4["t_total"]).to("dimensionless").magnitude
-    f_ceiling = (1 / t_prefill).to(hertz)
-    scale_overhead = (scale_bits / group) / weight_bits
+    r_fp16, r_int8, r_int4 = Q.formats["FP16"].result, Q.formats["8-bit"].result, Q.formats["INT4"].result
+    mem_fp16 = r_fp16.weight_memory.to(GB)
+    mem_int8 = r_int8.weight_memory.to(GB)
+    mem_int4 = r_int4.weight_memory.to(GB)
+    gap_fp16, gap_int8, gap_int4 = Q.gap("FP16"), Q.gap("8-bit"), Q.gap("INT4")
+    t_prefill = r_int4.t_prefill
+    prefill_share = r_int4.prefill_share
+    f_ceiling = r_int4.prefill_ceiling.to(hertz)
+    scale_overhead = Q.scale_overhead
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(r_fp16["t_prefill"] == r_int8["t_prefill"] == t_prefill, "Weight-only formats must share one prefill")
-    check(abs(r_int8["t_total"].to(millisecond).magnitude - 482.66) < 0.01, f"8-bit total drifted: {r_int8['t_total']}")
-    check(abs((r_int4["t_total"] - IntentModelLatency.t_int4).to(millisecond).magnitude) < 1e-6, "INT4 row must match the notebook")
+    check(r_fp16.t_prefill == r_int8.t_prefill == t_prefill, "Weight-only formats must share one prefill")
+    check(abs(r_int8.t_total.to(millisecond).magnitude - 482.66) < 0.01, f"8-bit total drifted: {r_int8.t_total}")
+    check(abs((r_int4.t_total - IntentModelLatency.t_int4).to(millisecond).magnitude) < 1e-6, "INT4 row must match the notebook")
     check(abs(gap_int8) < 0.03 and abs(gap_int4) < 0.01, f"Computed must track measured: {gap_int8}, {gap_int4}")
     check(-0.09 < gap_fp16 < -0.06, f"FP16 underestimate drifted: {gap_fp16}")
     check(0.55 < prefill_share < 0.57, f"Prefill share drifted: {prefill_share}")
@@ -1147,12 +1070,12 @@ class IntentQuantization:
     mem_fp16_str = fmt_memory(mem_fp16, unit=GB, precision=0)
     mem_int8_str = fmt_memory(mem_int8, unit=GB, precision=0)
     mem_int4_str = fmt_memory(mem_int4, unit=GB, precision=1)
-    sweep_fp16_str = fmt_latency(r_fp16["t_weight_sweep"], unit=millisecond, precision=1)
-    sweep_int8_str = fmt_latency(r_int8["t_weight_sweep"], unit=millisecond, precision=1)
-    sweep_int4_str = fmt_latency(r_int4["t_weight_sweep"], unit=millisecond, precision=1)
-    pred_fp16_str = fmt_latency(round(r_fp16["t_total"].to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
-    pred_int8_str = fmt_latency(round(r_int8["t_total"].to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
-    pred_int4_str = fmt_latency(round(r_int4["t_total"].to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
+    sweep_fp16_str = fmt_latency(r_fp16.t_weight_sweep, unit=millisecond, precision=1)
+    sweep_int8_str = fmt_latency(r_int8.t_weight_sweep, unit=millisecond, precision=1)
+    sweep_int4_str = fmt_latency(r_int4.t_weight_sweep, unit=millisecond, precision=1)
+    pred_fp16_str = fmt_latency(round(r_fp16.t_total.to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
+    pred_int8_str = fmt_latency(round(r_int8.t_total.to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
+    pred_int4_str = fmt_latency(round(r_int4.t_total.to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
     meas_fp16_str = fmt_latency(round(meas_fp16.to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
     meas_int8_str = fmt_latency(round(meas_int8.to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
     meas_int4_str = fmt_latency(round(meas_int4.to(millisecond).magnitude) * millisecond, unit=millisecond, precision=0)
@@ -1231,7 +1154,8 @@ One INT4 evaluation of the intent model takes `{python} IntentModelLatency.total
 # │ Show:    40 Hz x 14 GB = 560 GB/s, 3.9x the 142.8 GB/s sustained; H = 16
 # │          cuts demand to 35.0 GB/s, 24.5 percent of sustained (25 ms
 # │          setpoint step since M5, 2026-09-28; was 50 Hz / 700 GB/s)
-# │ How:     demand = f_supply x M_weights; chunked = demand / H
+# │ How:     Scenarios.WarehouseProposerTraffic: demand = f_supply x M_weights;
+# │          chunked = demand / H
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
@@ -1243,16 +1167,17 @@ class ChunkSupplyDemand:
     """Weight-sweep bandwidth demanded at the setpoint rate, single-step versus chunked."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    f_supply = (1 / RM.chunk_step).to(hertz)  # category: derived (setpoint rate)
+    traffic = Scenarios.WarehouseProposerTraffic  # category: derived (the machine's two proposers)
     horizon = RM.chunk_horizon  # category: chosen
-    m_fp16 = IntentModelLatency.m_fp16  # category: derived (FP16 intent weights)
-    b_sus = IntentModelLatency.b_sus  # category: derived (sustained bandwidth)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    demand = (f_supply * m_fp16).to(GB / second)
-    over = (demand / b_sus).to("dimensionless").magnitude
-    demand_chunk = (demand / horizon).to(GB / second)
-    share_chunk = (demand_chunk / b_sus).to("dimensionless").magnitude
+    r = traffic.result
+    f_supply = r.setpoint_rate.to(hertz)
+    b_sus = r.sustained_bandwidth
+    demand = r.single_step_demand.to(GB / second)
+    over = r.single_step_overload
+    demand_chunk = r.chunked_demand.to(GB / second)
+    share_chunk = r.chunked_share
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(f_supply.magnitude - 40.0) < 1e-9, f"Setpoint rate drifted: {f_supply}")
@@ -1374,9 +1299,10 @@ In this illustrative schedule, a disturbance immediately after capture can wait 
 # │ Show:    every family pays the ~189 ms compute-bound prefill; binned
 # │          autoregressive ~2.9 s, FAST (30 tokens) ~0.9 s, parallel ~0.26 s,
 # │          flow expert (300M, 10 steps) ~0.24 s; none fits the 50 ms period
-# │ How:     calc_vla_inference_latency (INT4 backbone) with D = H x d_a, the
-# │          FAST low-end token count, or parallel decoding; expert steps are
-# │          max(compute, (expert weights + prefix KV) / B_sustained)
+# │ How:     Scenarios.IntentBackboneDecoderFamilies (DecoderFamiliesModel):
+# │          INT4 backbone with D = H x d_a, the FAST low-end token count, or
+# │          parallel decoding; expert steps are max(compute, (expert weights +
+# │          prefix KV) / B_sustained)
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
@@ -1384,53 +1310,28 @@ from mlsysim.fmt import fmt_latency, fmt_memory, fmt_int, fmt_multiple, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 
-def _backbone(action_tokens, parallel=False):
-    """The INT4 intent-sized backbone emitting action_tokens (sequential unless parallel)."""
-    L = IntentModelLatency
-    return calc_vla_inference_latency(
-        L.n_params,
-        L.m_int4,
-        L.s_in,
-        action_tokens,
-        L.pi_fp16,
-        L.b_peak,
-        bus_efficiency=L.eta,
-        compute_utilization=L.u,
-        parallel_decode=parallel,
-        n_layers=L.n_layers,
-        hidden_dim=L.d_model,
-    )
-
 class DecoderFamilies:
     """One fresh H-step chunk from the intent-sized backbone, per decoder family."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    fam = Scenarios.IntentBackboneDecoderFamilies  # category: derived (INT4 intent backbone, per family)
     horizon = RM.chunk_horizon  # category: chosen (the machine's H)
-    d_a = IntentModelLatency.d_action  # category: datasheet (values per action)
-    fast_tokens = StateOfPractice.fast_tok_lo  # category: literature (FAST low end, Pertsch et al. 2025)
-    expert_params = StateOfPractice.pi0_expert  # category: literature (pi0 action expert)
-    expert_steps = StateOfPractice.pi0_steps  # category: literature (pi0 integration steps)
-    expert_bpp = 2 * (byte / param)  # category: chosen (16-bit expert weights)
-    kv_per_token = (2 * IntentModelLatency.n_layers * IntentModelLatency.d_model * 2 * byte).to(MB)  # derived; full-width FP16 K and V
-    b_sus = IntentModelLatency.b_sus  # category: derived
-    pi_eff = IntentModelLatency.u * IntentModelLatency.pi_fp16  # category: derived (achieved FP16 rate)
+    fast_tokens = fam.fast_tokens  # category: literature (FAST low end, Pertsch et al. 2025)
+    expert_steps = fam.expert_steps  # category: literature (pi0 integration steps)
     t_period = ChunkSchedule.t_replan  # category: derived (the machine's renewal period)
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    n_binned = horizon * d_a
-    r_binned = _backbone(n_binned)
-    r_fast = _backbone(fast_tokens)
-    r_parallel = _backbone(n_binned, parallel=True)
-    r_prefill = _backbone(1)  # prefill only: the first token comes out of the prefill
-    t_prefill = r_prefill["t_total"]
-    expert_mem = memory_from_params(expert_params, expert_bpp).to(MB)
-    prefix_kv = (kv_per_token * IntentModelLatency.s_in).to(MB)
-    t_step_bw = ((expert_mem + prefix_kv) / b_sus).to(millisecond)
-    t_step_compute = (2 * expert_params.to(param).magnitude * horizon * flop / pi_eff).to(millisecond)
-    t_step = max(t_step_bw, t_step_compute)
-    t_expert = (t_prefill + expert_steps * t_step).to(millisecond)
-    t_binned, t_fast, t_parallel = r_binned["t_total"], r_fast["t_total"], r_parallel["t_total"]
-    spread = (t_binned / t_expert).to("dimensionless").magnitude
+    r = fam.result
+    n_binned = r.binned_tokens
+    t_prefill = r.t_prefill
+    expert_mem = r.expert_weights.to(MB)
+    prefix_kv = r.prefix_kv.to(MB)
+    t_step_bw = r.t_expert_step_bandwidth
+    t_step_compute = r.t_expert_step_compute
+    t_step = r.t_expert_step
+    t_expert = r.t_expert
+    t_binned, t_fast, t_parallel = r.t_binned, r.t_fast, r.t_parallel
+    spread = r.binned_over_expert
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(n_binned == 112, f"Binned token count drifted: {n_binned}")
@@ -1529,9 +1430,10 @@ Chunking reduces the cost per waypoint, but the decoder pricing showed that each
 # │          336 ms INT4 latency (calc-brain-intent-model-latency); chunk policy
 # │          20 Hz / 40 ms; renewal gap 6.7 periods; proposer weight traffic
 # │          7 x 3.5 GB x 2 Hz + 0.16 GB x 20 Hz = 52.2 GB/s (37 percent)
-# │ How:     t_stream = M_weights / (B_peak * dram_efficiency);
-# │          tau_step = t_stream / H (calc_action_chunk_streaming_amortization);
-# │          bus share = (D M_int4 f_intent + M_chunk f_chunk) / B_sustained
+# │ How:     Scenarios.WarehouseProposerTraffic (ProposerTrafficModel):
+# │          t_stream = M_weights / (B_peak * dram_efficiency); tau_step = t_stream / H;
+# │          bus share = (D M_int4 f_intent + M_chunk f_chunk) / B_sustained;
+# │          KV history from Scenarios.ThreeViewKvHistory
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
@@ -1560,8 +1462,9 @@ class ActionChunkingLPDDR5:
     soc = RM.brain_soc  # category: datasheet (application processor)
     params = model.parameters  # category: datasheet
     chunk_params = chunk_model.parameters  # category: datasheet
-    bytes_per_param = 2 * (byte / param)  # category: chosen; FP16 weight storage
-    bytes_per_param_int4 = 0.5 * (byte / param)  # category: chosen; INT4 alternative
+    traffic = Scenarios.WarehouseProposerTraffic  # category: derived (the machine's two proposers)
+    history = Scenarios.ThreeViewKvHistory  # category: illustrative (hypothetical retained history)
+    bytes_per_param = traffic.fp16_bytes_per_param  # category: chosen; FP16 weight storage
     b_peak = soc.memory.bandwidth  # category: datasheet
     soc_mem = soc.memory.capacity  # category: datasheet
     bus_efficiency = RM.dram_efficiency  # category: illustrative; sustained fraction of peak
@@ -1573,59 +1476,47 @@ class ActionChunkingLPDDR5:
     chunk_latency = RM.chunk_inference_latency  # category: illustrative; P99 incl. vision
     kv_layers = model.layers  # category: datasheet
     kv_hidden = model.hidden_dim  # category: datasheet
-    kv_bytes = 2 * byte  # category: chosen; FP16 key and value storage
-    cameras = 3  # category: illustrative; synchronized RGB streams
-    patches_per_frame = 256  # category: derived; patch tokens per 224 x 224 frame at P = 14
-    context_tokens = 800  # category: illustrative; visual plus language and proprioception tokens per step
-    history_window = 5 * second  # category: illustrative; retained visual history
-    history_rate = 10 * Hz  # category: illustrative; frames retained per second of history
+    cameras = history.tokens.views  # category: illustrative; synchronized RGB streams
+    patches_per_frame = history.tokens.patches_per_view  # category: derived; patch tokens per 224 x 224 frame at P = 14
+    context_tokens = history.tokens.context_tokens  # category: illustrative; visual plus language and proprioception tokens per step
+    history_window = history.history_window  # category: illustrative; retained visual history
+    history_rate = history.history_rate  # category: illustrative; frames retained per second of history
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    weight_mem = memory_from_params(params, bytes_per_param)
-    weight_mem_int4 = memory_from_params(params, bytes_per_param_int4)
-    res = calc_action_chunk_streaming_amortization(
-        model_weight_memory=weight_mem,
-        memory_bandwidth=b_peak,
-        chunk_horizon=chunk_horizon,
-        bus_efficiency=bus_efficiency,
-    )
-    b_sustained = res["b_sustained"]
-    t_stream = res["t_stream"]
-    f_single = res["f_single"]
-    tau_step = res["tau_step"]
-    chunk_span = (chunk_horizon * chunk_step).to(millisecond)
+    res = traffic.result
+    weight_mem = res.intent_weights_fp16
+    weight_mem_int4 = res.intent_weights_deployed
+    b_sustained = res.sustained_bandwidth
+    t_stream = res.intent_sweep_fp16
+    f_single = res.intent_sweep_rate_fp16
+    tau_step = res.amortized_sweep
+    chunk_span = RM.chunk_schedule["chunk_span"].to(millisecond)
 
-    chunk_weight_mem = memory_from_params(chunk_params, bytes_per_param)
-    chunk_res = calc_action_chunk_streaming_amortization(
-        model_weight_memory=chunk_weight_mem,
-        memory_bandwidth=b_peak,
-        chunk_horizon=chunk_horizon,
-        bus_efficiency=bus_efficiency,
-    )
-    chunk_t_stream = chunk_res["t_stream"]
+    chunk_weight_mem = res.chunk_weights
+    chunk_t_stream = res.chunk_sweep
 
     # The renewal gap and the two proposers' share of the bus (weight traffic only).
     # The INT4 intent model streams its weights D times per evaluation: once under
     # the compute-bound prefill and once per remaining decode token (eq-brain-eval-latency).
-    renewal_gap = (intent_latency * chunk_rate).to("dimensionless").magnitude
-    chunk_sweep_share = (chunk_t_stream * chunk_rate).to("dimensionless").magnitude
-    sweeps_per_eval = IntentModelLatency.d_action  # category: derived (1 + (D - 1) sweeps)
-    intent_bw = (sweeps_per_eval * weight_mem_int4 * intent_rate).to(GB / second)
-    chunk_bw = (chunk_weight_mem * chunk_rate).to(GB / second)
-    proposer_bw = (intent_bw + chunk_bw).to(GB / second)
-    proposer_share = (proposer_bw / b_sustained).to("dimensionless").magnitude
-    t_decode_int4 = IntentModelLatency.int4["t_decode"].to(millisecond)
-    decode_duty = (t_decode_int4 * intent_rate).to("dimensionless").magnitude
+    renewal_gap = res.renewal_gap
+    chunk_sweep_share = res.chunk_sweep_share
+    sweeps_per_eval = res.sweeps_per_evaluation  # category: derived (1 + (D - 1) sweeps)
+    intent_bw = res.intent_traffic
+    chunk_bw = res.chunk_traffic
+    proposer_bw = res.proposer_traffic
+    proposer_share = res.proposer_share
+    t_decode_int4 = IntentModelLatency.int4.t_decode.to(millisecond)
+    decode_duty = res.decode_duty
 
-    visual_tokens = cameras * patches_per_frame
-    kv_per_token = (2 * kv_layers * kv_hidden * kv_bytes).to(MB)
-    kv_per_frame = (kv_per_token * visual_tokens).to(MB)
-    history_frames = round((history_window * history_rate).to("dimensionless").magnitude)
-    kv_history_visual = (kv_per_frame * history_frames).to(GB)
-    kv_per_step = (kv_per_token * context_tokens).to(MB)
-    kv_history = (kv_per_step * history_frames).to(GB)
-    combined_mem = (weight_mem + kv_history).to(GB)
-    combined_ratio = (combined_mem / soc_mem).to("dimensionless").magnitude
+    visual_tokens = history.tokens.visual_tokens
+    kv_per_token = history.tokens.kv_per_token.to(MB)
+    kv_per_frame = history.kv_per_frame
+    history_frames = history.frames
+    kv_history_visual = history.visual_history
+    kv_per_step = history.kv_per_step
+    kv_history = history.history
+    combined_mem = history.combined
+    combined_ratio = history.combined_share
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(weight_mem.to(GB).magnitude - 14.0) < 0.1, f"Unexpected weight footprint: {weight_mem}")
@@ -1773,9 +1664,10 @@ The intent model as deployed reads one frame and keeps nothing between evaluatio
 # │          since M5, 2026-09-28) as a supply buffer that would breach the
 # │          grasp tolerance if executed to its end; half-rate sensitivity
 # │          (140 ms, h_min = 6)
-# │ How:     tau_ev = sqrt(2 (r_tol - e_0) / a_slip) via MLSysIM
-# │          calc_tracked_evidence_horizon (shared with Ch10); open-loop span, h_min, and
-# │          chunk span from RM.chunk_schedule; drift = a_slip T^2 / 2
+# │ How:     Scenarios.ConveyorMugEvidenceHorizon (EvidenceHorizonModel):
+# │          tau_ev = sqrt(2 (r_tol - e_0) / a_slip) via calc_tracked_evidence_horizon;
+# │          open-loop span, h_min, and chunk span from the renewal schedule;
+# │          drift = a_slip T^2 / 2
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim import *
@@ -1799,21 +1691,21 @@ class ConveyorChunkSizing:
     chunk_horizon = RM.chunk_horizon  # category: chosen
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    tau_ev = calc_tracked_evidence_horizon(r_tol, e_0, a_slip).to(millisecond)  # sqrt(2 (r_tol - e_0) / a_slip)
-    sched = RM.chunk_schedule  # calc_chunk_renewal_schedule
-    chunk_period = sched["renewal_period"]
-    open_loop = sched["open_loop_span"]  # renewal period + inference
-    h_min = sched["min_supply_setpoints"]  # ceil(open_loop / step)
-    chunk_span = sched["chunk_span"]  # H x step
-    drift_open_loop = (0.5 * a_slip * open_loop**2).to(millimeter)
-    drift_full = (0.5 * a_slip * chunk_span**2).to(millimeter)
-    margin = (r_tol - e_0).to(millimeter)
-    t_untracked = (margin / v_conv).to(millisecond)  # freshness deadline e_max / v_max without tracking
-    err_full = (e_0 + drift_full).to(millimeter)
-    outlast = (chunk_span - tau_ev).to(millisecond)
-    sched_half = calc_chunk_renewal_schedule(chunk_rate / 2, chunk_step, chunk_horizon, chunk_latency)  # sensitivity: half the renewal rate
-    open_half = sched_half["open_loop_span"]
-    h_min_half = sched_half["min_supply_setpoints"]
+    ev = Scenarios.ConveyorMugEvidenceHorizon.result  # EvidenceHorizonModel
+    tau_ev = ev.horizon  # sqrt(2 (r_tol - e_0) / a_slip)
+    chunk_period = ev.renewal_period
+    open_loop = ev.age_at_replacement  # renewal period + inference
+    h_min = ev.min_supply_setpoints  # ceil(open_loop / step)
+    chunk_span = ev.chunk_span  # H x step
+    drift_open_loop = ev.drift_at_replacement
+    drift_full = ev.drift_at_chunk_end
+    margin = ev.margin
+    t_untracked = ev.untracked_deadline  # freshness deadline e_max / v_max without tracking
+    err_full = ev.error_at_chunk_end
+    outlast = ev.outlast
+    half = Scenarios.ConveyorMugEvidenceHorizonHalfRenewal.result  # sensitivity: half the renewal rate
+    open_half = half.age_at_replacement
+    h_min_half = half.min_supply_setpoints
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(v_conv.to("m/s").magnitude - 0.20) < 1e-9, f"Conveyor speed drifted: {v_conv}")
@@ -2109,14 +2001,58 @@ In modern physical AI systems, populating the action payload's `confidence` fiel
 
 Each uncertainty estimation strategy incurs distinct hardware and memory-bandwidth costs. Generating multiple samples from a single observation can reuse visual backbone features and batch each decoding iteration through the policy head, sharing a weight read across samples. Iterative decoders still revisit their weights across refinement steps, and the balance between arithmetic and memory traffic depends on the batch and kernels. In contrast, an ensemble of disparate models requires reading separate sets of weights across the memory bus for every head, multiplying memory bandwidth traffic by the number of heads. The action payload must therefore treat the confidence scalar $\ProposerConfidenceScore$ as meaningful only when accompanied by the identifier of the method that produced it and the corresponding calibration record, both resolved through `model_id`. A model lacking a qualified estimation pipeline must omit the confidence score entirely rather than emit an ungrounded default value.
 
+```{python}
+#| label: calc-brain-calibration-regimes
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ STIPULATED CONFIDENCE AGAINST SUCCESS (TABLE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-03-calibration-degradation
+# │ Goal:    print the illustrative regimes and their confidence-success gaps
+# │          from one source the lecture slides also read
+# │ Show:    conf 0.91 / 0.89 / 0.78 / 0.84 against success 0.89 / 0.52 / 0.08 / 0.31
+# │ How:     Scenarios.ProposerConfidenceRegimes (stipulated, not test results)
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
+from mlsysim.fmt import fmt_math, check
+
+class CalibrationRegimes:
+    """Stipulated confidence and task success per operating regime."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    regimes = Scenarios.ProposerConfidenceRegimes  # category: illustrative (stipulated)
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    _in = regimes.row("In distribution")
+    _near = regimes.row("Near OOD")
+    _far = regimes.row("Far OOD")
+    _sensor = regimes.row("Sensor degraded")
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(all(c > a for _, c, a in regimes.regimes), "Every regime must report more confidence than success")
+    check(_in[1] - _in[2] < _near[1] - _near[2] < _sensor[1] - _sensor[2] < _far[1] - _far[2], "Gap ordering drifted")
+
+    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
+    in_pair_math = fmt_math(rf"\text{{conf}}={_in[1]:.2f}, \, \text{{acc}}={_in[2]:.2f}")
+    near_pair_math = fmt_math(rf"\text{{conf}}={_near[1]:.2f}, \, \text{{acc}}={_near[2]:.2f}")
+    far_pair_math = fmt_math(rf"\text{{conf}}={_far[1]:.2f}, \, \text{{acc}}={_far[2]:.2f}")
+    sensor_pair_math = fmt_math(rf"\text{{conf}}={_sensor[1]:.2f}, \, \text{{acc}}={_sensor[2]:.2f}")
+    in_gap_math = fmt_math(f"{regimes.gap('In distribution'):+.2f}")
+    near_gap_math = fmt_math(f"{regimes.gap('Near OOD'):+.2f}")
+    far_gap_math = fmt_math(f"{regimes.gap('Far OOD'):+.2f}")
+    sensor_gap_math = fmt_math(f"{regimes.gap('Sensor degraded'):+.2f}")
+```
+
 The stipulated values in @tbl-03-calibration-degradation illustrate how environmental and hardware shifts can open a gap between confidence and success; they describe nominal illustrative regimes rather than a single deployed benchmark. The near-OOD row is a *covariate shift*, a change in the inputs the deployed model meets while the task stays the same. Across all shifted regimes, reported confidence significantly outstrips actual task success. A supervisory filter relying solely on an uncalibrated score threshold would mistakenly admit hazardous trajectories. Choosing an appropriate supervisory response depends on the integrity of the remaining sensor streams and the physical capabilities of the machine; a confidence discrepancy alone cannot dictate whether the robot should slow down, collect additional sensor frames, or execute an emergency stop.
 
 | Distribution Shift Regime               | Physical & Environmental Trigger                                             | Conf. vs. Success ($\text{conf} \text{ vs. } \text{success}$) | Confidence–Success Gap ($\text{conf}-\text{acc}$) | Downstream Supervisory Action                                                     |
 |:----------------------------------------|:-----------------------------------------------------------------------------|:--------------------------------------------------------------|:--------------------------------------------------|:----------------------------------------------------------------------------------|
-| **In-Distribution** (Nominal Baseline)  | Clean optics, structured laboratory lighting, nominal workpiece textures     | $\text{conf}=0.91, \, \text{acc}=0.89$                        | $+0.02$                                           | Apply independent limits before nominal execution                                 |
-| **Near-OOD Shift** (Covariate Shift)    | Specular reflections, lens water droplets, dynamic shadow transitions        | $\text{conf}=0.89, \, \text{acc}=0.52$                        | $+0.37$                                           | Abstain or seek new evidence; permit probing only with a qualified contact policy |
-| **Far-OOD Shift** (Semantic Shift)      | Uncataloged deformable obstacles, human limb intrusion into workspace        | $\text{conf}=0.78, \, \text{acc}=0.08$                        | $+0.70$                                           | Reject proposal; use feasible controlled response                                 |
-| **Sensor Degradation** (Hardware Drift) | Photodetector thermal noise ($>75^\circ\text{C}$), focal blur from vibration | $\text{conf}=0.84, \, \text{acc}=0.31$                        | $+0.53$                                           | Restrict operation to modes supported despite the sensor degradation              |
+| **In-Distribution** (Nominal Baseline)  | Clean optics, structured laboratory lighting, nominal workpiece textures     | `{python} CalibrationRegimes.in_pair_math`                     | `{python} CalibrationRegimes.in_gap_math`                     | Apply independent limits before nominal execution                                 |
+| **Near-OOD Shift** (Covariate Shift)    | Specular reflections, lens water droplets, dynamic shadow transitions        | `{python} CalibrationRegimes.near_pair_math`                   | `{python} CalibrationRegimes.near_gap_math`                   | Abstain or seek new evidence; permit probing only with a qualified contact policy |
+| **Far-OOD Shift** (Semantic Shift)      | Uncataloged deformable obstacles, human limb intrusion into workspace        | `{python} CalibrationRegimes.far_pair_math`                    | `{python} CalibrationRegimes.far_gap_math`                    | Reject proposal; use feasible controlled response                                 |
+| **Sensor Degradation** (Hardware Drift) | Photodetector thermal noise ($>75^\circ\text{C}$), focal blur from vibration | `{python} CalibrationRegimes.sensor_pair_math`                 | `{python} CalibrationRegimes.sensor_gap_math`                 | Restrict operation to modes supported despite the sensor degradation              |
 
 : **Illustrative Confidence–Success gaps under distribution shift**: Stipulated confidence and task-success rates for four operating regimes, with candidate responses requiring separate physical justification. These values are illustrative, not test results. {#tbl-03-calibration-degradation tbl-colwidths="[18,18,20,24,20]"}
 

@@ -4156,3 +4156,322 @@ class ProtectedFieldCheckScenario(BaseScenario):
                                                 self.acceptance_if_intact, self.attempt_cost,
                                                 self.detection, self.check_cost_per_round,
                                                 self.survival_floor, self.target_survival)
+
+# --- Learned proposers: VLA evaluation, decoders, bus traffic, evidence (added 2026-10-20) ---
+
+class VlaEvaluationScenario(BaseScenario):
+    """One fresh evaluation of ``machine``'s intent model on its application processor.
+
+    Each input left as None takes the machine's deployed value: the weight
+    precision, the input and action token counts, and the decoding mode. The
+    sustained-bandwidth fraction and compute utilization are the machine's.
+    """
+    machine: Any                                          # EmbodiedMobileManipulator
+    weight_bytes_per_param: Optional[Quantity] = None     # default: the deployed precision
+    input_tokens: Optional[int] = None                    # default: machine.intent_input_tokens
+    action_tokens: Optional[int] = None                   # default: the model's action dimension
+    parallel_decode: Optional[bool] = None                # default: machine.intent_parallel_decode
+
+    @property
+    def bytes_per_param(self) -> Quantity:
+        return (self.machine.intent_weight_bytes_per_param if self.weight_bytes_per_param is None
+                else self.weight_bytes_per_param)
+
+    @property
+    def tokens_in(self) -> int:
+        return self.machine.intent_input_tokens if self.input_tokens is None else self.input_tokens
+
+    @property
+    def tokens_out(self) -> int:
+        return self.machine.intent_model.action_dim if self.action_tokens is None else self.action_tokens
+
+    @property
+    def result(self):
+        from .solvers import VlaEvaluationModel
+        rm = self.machine
+        parallel = rm.intent_parallel_decode if self.parallel_decode is None else self.parallel_decode
+        return VlaEvaluationModel().solve(rm.intent_model, rm.brain_soc, self.bytes_per_param, self.tokens_in,
+                                          self.tokens_out, rm.dram_efficiency, rm.intent_compute_utilization,
+                                          parallel_decode=parallel)
+
+
+class RateTargetScenario(BaseScenario):
+    """``evaluation`` held against a ``target_rate``: one fresh evaluation per period, not pipelined."""
+    evaluation: VlaEvaluationScenario
+    target_rate: Quantity
+
+    @property
+    def period(self) -> Quantity:
+        return (1 / self.target_rate).to("ms")
+
+    @property
+    def fits(self) -> bool:
+        return self.evaluation.result.t_total <= self.period
+
+    @property
+    def slack(self) -> Quantity:
+        """Period left over (negative: the overrun)."""
+        return (self.period - self.evaluation.result.t_total).to("ms")
+
+    @property
+    def slack_fraction(self) -> float:
+        return (self.slack / self.period).to("").magnitude
+
+    @property
+    def prefill_budget(self) -> Quantity:
+        """Prefill time that fits once the decode is paid."""
+        return (self.period - self.evaluation.result.t_decode).to("ms")
+
+    @property
+    def token_fraction(self) -> float:
+        """Share of the input tokens that fits, treating prefill as proportional to the token count."""
+        return (self.prefill_budget / self.evaluation.result.t_prefill).to("").magnitude
+
+    @property
+    def tokens_within(self) -> float:
+        return self.token_fraction * self.evaluation.result.prefill_tokens
+
+
+class VlaTokenBudgetScenario(BaseScenario):
+    """Tokens a VLA backbone reads from ``views`` square camera frames, and their memory per token."""
+    model: Any                       # EmbodiedWorkload (layers, hidden width)
+    views: int
+    frame_px: int
+    patch_px: int
+    prompt_tokens: int
+    state_tokens: int
+    context_tokens: int              # the rounded context length S the prose uses
+    element_bytes: Quantity          # bytes per stored activation, key, or value
+
+    @property
+    def patches_per_view(self) -> int:
+        return (self.frame_px // self.patch_px) ** 2
+
+    @property
+    def patches_per_side(self) -> int:
+        return self.frame_px // self.patch_px
+
+    @property
+    def visual_tokens(self) -> int:
+        return self.views * self.patches_per_view
+
+    @property
+    def total_tokens(self) -> int:
+        return self.visual_tokens + self.prompt_tokens + self.state_tokens
+
+    @property
+    def single_view_tokens(self) -> int:
+        """One view plus the prompt: the intent model's input."""
+        return self.patches_per_view + self.prompt_tokens
+
+    @property
+    def embedding_memory(self) -> Quantity:
+        return (self.context_tokens * self.model.hidden_dim * self.element_bytes).to("MB")
+
+    @property
+    def kv_per_token(self) -> Quantity:
+        """Full-width keys and values in every layer for one token."""
+        return (2 * self.model.layers * self.model.hidden_dim * self.element_bytes).to("byte")
+
+
+class KvHistoryScenario(BaseScenario):
+    """Key-value cache for ``history_window`` of retained context at ``history_rate`` beside ``machine``'s weights."""
+    tokens: VlaTokenBudgetScenario
+    machine: Any                     # EmbodiedMobileManipulator (module memory, intent model)
+    history_window: Quantity
+    history_rate: Quantity
+    weight_bytes_per_param: Quantity  # the stored weights the history sits beside
+
+    @property
+    def frames(self) -> int:
+        return round((self.history_window * self.history_rate).to("").magnitude)
+
+    @property
+    def kv_per_frame(self) -> Quantity:
+        return (self.tokens.kv_per_token * self.tokens.visual_tokens).to("MB")
+
+    @property
+    def kv_per_step(self) -> Quantity:
+        return (self.tokens.kv_per_token * self.tokens.context_tokens).to("MB")
+
+    @property
+    def visual_history(self) -> Quantity:
+        return (self.kv_per_frame * self.frames).to("GB")
+
+    @property
+    def history(self) -> Quantity:
+        return (self.kv_per_step * self.frames).to("GB")
+
+    @property
+    def weights(self) -> Quantity:
+        return (self.machine.intent_model.parameters * self.weight_bytes_per_param).to("GB")
+
+    @property
+    def combined(self) -> Quantity:
+        return (self.weights + self.history).to("GB")
+
+    @property
+    def module_memory(self) -> Quantity:
+        return self.machine.brain_soc.memory.capacity.to("GB")
+
+    @property
+    def combined_share(self) -> float:
+        return (self.combined / self.module_memory).to("").magnitude
+
+
+class DecoderFamiliesScenario(BaseScenario):
+    """One fresh ``machine.chunk_horizon``-step chunk from ``backbone``, per decoder family."""
+    backbone: VlaEvaluationScenario
+    fast_tokens: int
+    expert_params: Quantity
+    expert_steps: int
+    expert_bytes_per_param: Quantity
+    kv_bytes_per_value: Quantity
+
+    @property
+    def result(self):
+        from .solvers import DecoderFamiliesModel
+        b = self.backbone
+        rm = b.machine
+        return DecoderFamiliesModel().solve(
+            rm.intent_model, rm.brain_soc, b.bytes_per_param, b.tokens_in, rm.dram_efficiency,
+            rm.intent_compute_utilization, rm.chunk_horizon, rm.intent_model.action_dim, self.fast_tokens,
+            self.expert_params, self.expert_steps, self.expert_bytes_per_param, self.kv_bytes_per_value,
+            rm.chunk_period)
+
+
+class ProposerTrafficScenario(BaseScenario):
+    """``machine``'s intent model and chunk policy sharing its memory bus (weight traffic only)."""
+    machine: Any                     # EmbodiedMobileManipulator
+    fp16_bytes_per_param: Quantity   # the 16-bit format the sweep and supply comparisons price
+
+    @property
+    def result(self):
+        from .solvers import ProposerTrafficModel
+        return ProposerTrafficModel().solve(self.machine, self.fp16_bytes_per_param)
+
+
+class EvidenceHorizonScenario(BaseScenario):
+    """``site``'s conveyor target tracked by ``machine``'s chunk policy: evidence horizon against renewal."""
+    site: Any                                    # EmbodiedSiteScenario (conveyor, tolerance, initial error, slip)
+    machine: Any                                 # EmbodiedMobileManipulator (chunk schedule)
+    slip_acceleration: Optional[Quantity] = None  # default: the site's residual slip
+    chunk_rate: Optional[Quantity] = None         # default: the machine's renewal rate
+
+    @property
+    def a_slip(self) -> Quantity:
+        return self.site.a_conveyor_slip if self.slip_acceleration is None else self.slip_acceleration
+
+    @property
+    def renewal_rate(self) -> Quantity:
+        return self.machine.chunk_rate if self.chunk_rate is None else self.chunk_rate
+
+    @property
+    def result(self):
+        from .solvers import EvidenceHorizonModel
+        rm = self.machine
+        return EvidenceHorizonModel().solve(
+            self.site.grasp_tolerance, self.site.grasp_initial_error, self.site.v_conveyor, self.a_slip,
+            self.renewal_rate, rm.chunk_step, rm.chunk_horizon, rm.chunk_inference_latency)
+
+
+class TemporalEnsembleScenario(BaseScenario):
+    """A temporal ensemble of ``predictions`` overlapping chunks with decay ``decay`` per index."""
+    decay: float
+    predictions: int
+
+    @property
+    def result(self):
+        from ..physics.robotics import calc_temporal_ensemble_weights
+        return calc_temporal_ensemble_weights(self.decay, self.predictions)
+
+
+class WeightOnlyQuantizationScenario(BaseScenario):
+    """One backbone priced at several weight formats against measurements of the same formats.
+
+    ``formats`` maps a label to its evaluation scenario; ``measured`` and
+    ``scores`` map the same labels to a measured latency and a task score.
+    ``group_size``, ``scale_bits``, and ``weight_bits`` price the per-group
+    scale overhead of the deployed format.
+    """
+    formats: Dict[str, VlaEvaluationScenario]
+    measured: Dict[str, Quantity]
+    scores: Dict[str, float]
+    deployed: str                    # label of the deployed format
+    reference: str                   # label of the 16-bit reference format
+    group_size: int
+    scale_bits: int
+    weight_bits: int
+
+    def computed(self, label: str) -> Quantity:
+        return self.formats[label].result.t_total
+
+    def gap(self, label: str) -> float:
+        """(computed - measured) / measured."""
+        return ((self.computed(label) - self.measured[label]) / self.measured[label]).to("").magnitude
+
+    @property
+    def measured_speedup(self) -> float:
+        return (self.measured[self.reference] / self.measured[self.deployed]).to("").magnitude
+
+    @property
+    def score_drop(self) -> float:
+        return self.scores[self.reference] - self.scores[self.deployed]
+
+    @property
+    def scale_overhead(self) -> float:
+        return self.scale_bits / self.group_size / self.weight_bits
+
+
+class ConfidenceRegimesScenario(BaseScenario):
+    """Stipulated proposer confidence against task success in several operating regimes."""
+    regimes: List[Any]               # (regime, confidence, success)
+
+    def gap(self, regime: str) -> float:
+        for name, conf, success in self.regimes:
+            if name == regime:
+                return conf - success
+        raise KeyError(regime)
+
+    def row(self, regime: str):
+        for r in self.regimes:
+            if r[0] == regime:
+                return r
+        raise KeyError(regime)
+
+
+class SingleStreamLatencyScenario(BaseScenario):
+    """Published single-stream latencies of one ``system`` from a benchmark ``series``, latest round each."""
+    series: Any                      # a Literature series with .entries rows
+    system: str
+    benchmarks: List[Any]            # (benchmark id, task, model)
+    scenario: str = "SingleStream"
+    metric_prefix: str = "p90"
+
+    def rounds(self, bench: str) -> List[Any]:
+        """Every matching row for ``bench``, oldest round first."""
+        hits = [r for r in self.series.entries
+                if r["system"] == self.system and r["benchmark"] == bench
+                and r["scenario"] == self.scenario and r["metric"].startswith(self.metric_prefix)]
+        return sorted(hits, key=lambda r: r["round"])
+
+    def latest(self, bench: str) -> Quantity:
+        return Q_(self.rounds(bench)[-1]["value"], "ms")
+
+    def earliest(self, bench: str) -> Quantity:
+        return Q_(self.rounds(bench)[0]["value"], "ms")
+
+    def latest_round(self, bench: str) -> str:
+        return self.rounds(bench)[-1]["round"]
+
+    @property
+    def latencies(self) -> List[Quantity]:
+        return [self.latest(b[0]) for b in self.benchmarks]
+
+    def count_within(self, period: Quantity) -> int:
+        return sum(1 for t in self.latencies if t <= period)
+
+    @property
+    def span(self) -> float:
+        lat = self.latencies
+        return (max(lat) / min(lat)).to("").magnitude

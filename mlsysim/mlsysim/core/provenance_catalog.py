@@ -2794,3 +2794,88 @@ SHI_2023_DISTRACTED = _lit(
            "GSM-IC-4K micro accuracy 72.4, and 77.8 with an instruction to ignore irrelevant "
            "information (Table 3, exemplars without irrelevant context)."),
 )
+
+# --- Published vision-language-action systems (added 2026-10-20) ------------
+KIM_OPENVLA_2024 = _lit(
+    "prov:kim-openvla-real-robot-2024",
+    "Kim, M. J. et al. (2024), OpenVLA: An Open-Source Vision-Language-Action Model, arXiv:2406.09246",
+    url="https://arxiv.org/abs/2406.09246",
+    verified="2026-09-29",
+    notes=("Table 2: real-robot task success with bfloat16 71.3%, int8 58.1%, int4 71.9% weights; "
+           "Sec. 5.3: the int8 build ran at 1.2 Hz on the A5000 evaluation GPU against the 5 Hz control "
+           "rate of the training data; about 6 Hz on one RTX 4090 in bfloat16."),
+)
+ZHAO_ACT_2023 = _lit(
+    "prov:zhao-act-2023",
+    "Zhao, T. Z. et al. (2023), Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware (ACT), "
+    "RSS 2023, arXiv:2304.13705; code github.com/tonyzhaozh/act",
+    url="https://arxiv.org/abs/2304.13705",
+    verified="2026-10-20",
+    notes=("Chunk size k = 100 at a 50 Hz control rate; temporal ensembling weights exp(-k i) with "
+           "k = 0.01 (imitate_episodes.py, commit 742c753, lines 255-259)."),
+)
+CHI_DIFFUSION_POLICY_2024 = _lit(
+    "prov:chi-diffusion-policy-2024",
+    "Chi, C. et al. (2024), Diffusion Policy: Visuomotor Policy Learning via Action Diffusion, IJRR",
+    url="https://arxiv.org/abs/2303.04137",
+    verified="2026-09-29",
+    notes="Prediction horizon T_p = 16, action execution horizon T_a = 8.",
+)
+BLACK_PI0_2024 = _lit(
+    "prov:black-pi0-2024",
+    "Black, K. et al. (2024), pi0: A Vision-Language-Action Flow Model for General Robot Control, "
+    "arXiv:2410.24164",
+    url="https://arxiv.org/abs/2410.24164",
+    verified="2026-09-29",
+    notes=("Sec. IV and App. A-D: 3.3B parameters in total, a 300M action expert, H = 50, 10 flow "
+           "integration steps, up to 50 Hz control, 73 ms on-board latency (RTX 4090)."),
+)
+KIM_OPENVLA_OFT_2025 = _lit(
+    "prov:kim-openvla-oft-2025",
+    "Kim, M. J., Finn, C., Liang, P. (2025), Fine-Tuning Vision-Language-Action Models: Optimizing "
+    "Speed and Success, RSS 2025",
+    url="https://arxiv.org/abs/2502.19645",
+    verified="2026-09-29",
+    notes="LIBERO on an A100: OpenVLA-OFT 109.7 Hz with 8-step chunks against OpenVLA's 4.2 Hz.",
+)
+PERTSCH_FAST_2025 = _lit(
+    "prov:pertsch-fast-2025",
+    "Pertsch, K. et al. (2025), FAST: Efficient Action Tokenization for Vision-Language-Action Models, "
+    "arXiv:2501.09747",
+    url="https://arxiv.org/abs/2501.09747",
+    verified="2026-09-29",
+    notes=("30 to 60 tokens per chunk; Table I shirt fold at 50 Hz, 700 naive tokens against 53 FAST "
+           "tokens; pi0-FAST about 750 ms against pi0's about 100 ms on an RTX 4090."),
+)
+FIGURE_AI_HELIX_2025 = _report(
+    "prov:figure-ai-helix-2025",
+    "Figure AI (2025), Helix: A Vision-Language-Action Model for Generalist Humanoid Control",
+    "https://www.figure.ai/news/helix",
+    notes=("System 2: a 7B vision-language model at 7-9 Hz; System 1: an 80M visuomotor policy at "
+           "200 Hz; 35 degrees of freedom."),
+)
+BJORCK_GR00T_N1_2025 = _lit(
+    "prov:bjorck-gr00t-n1-2025",
+    "Bjorck, J. et al. (2025), GR00T N1: An Open Foundation Model for Generalist Humanoid Robots, "
+    "arXiv:2503.14734",
+    url="https://arxiv.org/abs/2503.14734",
+    verified="2026-09-29",
+    notes=("2.2B parameters with a 1.34B vision-language model at 10 Hz; a flow-matching action "
+           "transformer at 120 Hz; 16-action chunks, 4 integration steps, 63.9 ms per chunk (L40, bf16)."),
+)
+GEMINI_ROBOTICS_2025 = _lit(
+    "prov:gemini-robotics-2025",
+    "Gemini Robotics Team (2025), Gemini Robotics: Bringing AI into the Physical World, arXiv:2503.20020",
+    url="https://arxiv.org/abs/2503.20020",
+    verified="2026-09-29",
+    notes=("Cloud backbone under 160 ms, about 250 ms end to end, an effective 50 Hz control rate "
+           "with chunks."),
+)
+LIN_AWQ_2024 = _lit(
+    "prov:lin-awq-2024",
+    "Lin, J. et al. (2024), AWQ: Activation-aware Weight Quantization for LLM Compression and "
+    "Acceleration, MLSys 2024",
+    url="https://arxiv.org/abs/2306.00978",
+    verified="2026-10-20",
+    notes="Sec. 5.1: group size 128 for weight-only INT4 quantization.",
+)

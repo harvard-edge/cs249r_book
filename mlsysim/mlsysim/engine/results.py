@@ -136,6 +136,11 @@ __all__ = [
     "CompactionCadenceResult",
     "ContextInvalidationResult",
     "ProtectedFieldCheckResult",
+    # learned proposers (added 2026-10-20)
+    "VlaEvaluationResult",
+    "DecoderFamiliesResult",
+    "ProposerTrafficResult",
+    "EvidenceHorizonResult",
 ]
 
 
@@ -1898,3 +1903,94 @@ class ProtectedFieldCheckResult(SolverResult):
     cost_per_accepted_checked: float     # USD
     checked_rounds_below_floor: int      # first round count at which checked survival falls below the floor
     max_loss_for_target: Optional[float] = None    # per-round loss that holds the target survival
+# --- Learned proposers: VLA evaluation, decoders, bus traffic, evidence (added 2026-10-20) ---
+
+class VlaEvaluationResult(SolverResult):
+    """Result from VlaEvaluationModel: one fresh VLA evaluation and its roofline coordinates."""
+    weight_memory: Quantity                  # stored weights at the evaluated precision
+    sustained_bandwidth: Quantity            # peak bandwidth x bus efficiency
+    achieved_rate: Quantity                  # 16-bit peak x compute utilization
+    ridge_intensity: Quantity                # 16-bit peak / peak bandwidth
+    prefill_tokens: int
+    decode_steps: int
+    prefill_linear_flops: Quantity           # 2 N S
+    prefill_attention_flops: Quantity        # the S^2 attention term
+    prefill_flops: Quantity
+    prefill_intensity: Quantity              # linear FLOPs per weight byte
+    decode_intensity: Quantity               # 2 N FLOP per weight sweep, per weight byte
+    t_prefill_compute: Quantity
+    t_weight_sweep: Quantity
+    weight_sweep_rate: Quantity              # 1 / t_weight_sweep: the weight-streaming ceiling
+    t_prefill: Quantity
+    prefill_bound: str                       # "compute" or "memory"
+    t_decode_step: Quantity
+    t_decode: Quantity
+    t_total: Quantity
+    f_max: Quantity
+    prefill_share: float                     # t_prefill / t_total
+    prefill_ceiling: Quantity                # 1 / t_prefill: no weight-only format passes it
+
+
+class DecoderFamiliesResult(SolverResult):
+    """Result from DecoderFamiliesModel: one fresh chunk per decoder family on one backbone."""
+    binned_tokens: int
+    t_prefill: Quantity                      # prefill only, shared by every family
+    t_binned: Quantity
+    t_fast: Quantity
+    t_parallel: Quantity
+    expert_weights: Quantity
+    kv_per_token: Quantity                   # full-width keys and values, all layers
+    prefix_kv: Quantity                      # cached KV of the input tokens
+    t_expert_step_bandwidth: Quantity
+    t_expert_step_compute: Quantity
+    t_expert_step: Quantity
+    t_expert: Quantity
+    binned_over_expert: float
+    prefill_over_period: float               # shared prefill / renewal period
+
+
+class ProposerTrafficResult(SolverResult):
+    """Result from ProposerTrafficModel: two proposers' weight traffic on one memory bus."""
+    sustained_bandwidth: Quantity
+    intent_weights_fp16: Quantity
+    intent_weights_deployed: Quantity
+    chunk_weights: Quantity                  # chunk policy, 16-bit
+    intent_sweep_fp16: Quantity
+    intent_sweep_rate_fp16: Quantity         # the 16-bit weight-streaming ceiling
+    intent_sweep_deployed: Quantity
+    intent_sweep_rate_deployed: Quantity
+    amortized_sweep: Quantity                # 16-bit sweep / H
+    chunk_sweep: Quantity
+    chunk_sweep_rate: Quantity
+    chunk_sweep_share: float                 # chunk sweep x renewal rate
+    tick_over_sweep_rate: float              # permission tick / 16-bit sweep rate
+    setpoint_rate: Quantity
+    single_step_demand: Quantity             # one 16-bit sweep per setpoint
+    single_step_overload: float              # that demand / sustained bandwidth
+    chunked_demand: Quantity                 # one sweep per chunk of H
+    chunked_share: float
+    renewal_gap: float                       # intent latency in chunk renewal periods
+    sweeps_per_evaluation: int
+    intent_traffic: Quantity
+    chunk_traffic: Quantity
+    proposer_traffic: Quantity
+    proposer_share: float
+    decode_duty: float                       # intent decode time x intent rate
+
+
+class EvidenceHorizonResult(SolverResult):
+    """Result from EvidenceHorizonModel: a tracked target's evidence horizon against the chunk schedule."""
+    margin: Quantity                         # tolerance - initial error
+    untracked_deadline: Quantity             # margin / target speed
+    horizon: Quantity                        # sqrt(2 margin / a_slip)
+    renewal_period: Quantity
+    age_at_replacement: Quantity             # renewal period + inference
+    drift_at_replacement: Quantity
+    horizon_spare: Quantity                  # horizon - age at replacement
+    fits: bool
+    min_supply_setpoints: int
+    chunk_span: Quantity
+    drift_at_chunk_end: Quantity
+    error_at_chunk_end: Quantity             # initial error + drift at chunk end
+    outlast: Quantity                        # chunk span - horizon
+    setpoints_within_horizon: float

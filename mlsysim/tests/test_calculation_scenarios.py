@@ -1585,3 +1585,109 @@ def test_protected_field_check_payback():
     assert r.attempt_cost_checked == approx(2.15) and r.cost_per_accepted_checked == approx(3.992652)
     assert r.max_loss_for_target == approx(0.0014238)
     assert r.checked_rounds_below_floor == 20
+def test_intent_model_evaluations():
+    from mlsysim import Embodied
+    rm = Embodied.MobileManipulator.WarehouseMobileManipulator
+    f = Scenarios.IntentModelEvaluationFp16.result
+    assert f.weight_memory.to("GB").magnitude == approx(14.0)
+    assert f.t_weight_sweep.to("ms").magnitude == approx(98.0392)
+    assert f.t_prefill.to("ms").magnitude == approx(188.546)
+    assert f.t_total.to("ms").magnitude == approx(776.781)
+    assert f.prefill_bound == "compute"
+    assert f.prefill_intensity.to("flop/byte").magnitude == approx(288)
+    assert f.decode_intensity.to("flop/byte").magnitude == approx(1)
+    assert f.ridge_intensity.to("flop/byte").magnitude == approx(210.784)
+    assert f.prefill_attention_flops.to("flop").magnitude == approx(2 * 32 * 4096 * 288 ** 2)
+    i = Scenarios.IntentModelEvaluationInt4.result
+    assert i.t_total == rm.intent_inference_latency
+    assert i.t_prefill == f.t_prefill
+    assert i.prefill_share == approx(0.56181)
+    assert i.prefill_ceiling.to("Hz").magnitude == approx(5.30374)
+    assert Scenarios.IntentModelEvaluation8Bit.result.t_total.to("ms").magnitude == approx(482.664)
+    assert Scenarios.IntentModelEvaluationThreeViews.result.t_total.to("ms").magnitude == approx(675.792)
+    assert Scenarios.IntentModelEvaluationParallel.result.t_total.to("ms").magnitude == approx(194.215)
+    five = Scenarios.IntentModelFiveHertz
+    assert not five.fits
+    assert five.prefill_budget.to("ms").magnitude == approx(52.9412)
+    assert five.tokens_within == approx(80.8664)
+    assert Scenarios.IntentModelParallelFiveHertz.slack_fraction == approx(0.028924)
+    assert Scenarios.IntentModelHalfTokensFiveHertz.slack.to("ms").magnitude == approx(-41.0791)
+    r = Scenarios.IntentModelDecodeRoofline
+    assert r.attainable.to("TFLOPs/s").magnitude == approx(0.204)
+    assert r.peak_fraction == approx(0.0047442)
+
+
+def test_three_view_tokens_and_kv_history():
+    from mlsysim import Embodied
+    rm = Embodied.MobileManipulator.WarehouseMobileManipulator
+    t = Scenarios.ThreeViewVlaTokens
+    assert t.patches_per_view == 256 and t.visual_tokens == 768 and t.total_tokens == 816
+    assert t.single_view_tokens == rm.intent_input_tokens
+    assert t.embedding_memory.to("MB").magnitude == approx(6.5536)
+    assert t.kv_per_token.to("byte").magnitude == approx(524288)
+    k = Scenarios.ThreeViewKvHistory
+    assert k.frames == 50
+    assert k.kv_per_step.to("MB").magnitude == approx(419.4304)
+    assert k.visual_history.to("GB").magnitude == approx(20.1327)
+    assert k.history.to("GB").magnitude == approx(20.9715)
+    assert k.combined.to("GB").magnitude == approx(34.9715)
+    assert k.combined_share == approx(0.50890)
+
+
+def test_decoder_families_and_proposer_traffic():
+    d = Scenarios.IntentBackboneDecoderFamilies.result
+    assert d.binned_tokens == 112
+    assert d.t_binned.to("ms").magnitude == approx(2909.13)
+    assert d.t_fast.to("ms").magnitude == approx(899.331)
+    assert d.t_parallel.to("ms").magnitude == approx(264.367)
+    assert d.t_expert.to("ms").magnitude == approx(241.137)
+    assert d.t_expert_step_bandwidth > d.t_expert_step_compute
+    assert d.prefix_kv.to("MB").magnitude == approx(150.995)
+    t = Scenarios.WarehouseProposerTraffic.result
+    assert t.sustained_bandwidth.to("GB/s").magnitude == approx(142.8)
+    assert t.amortized_sweep.to("ms").magnitude == approx(6.12745)
+    assert t.single_step_demand.to("GB/s").magnitude == approx(560)
+    assert t.single_step_overload == approx(3.92157)
+    assert t.chunked_share == approx(0.245098)
+    assert t.chunk_sweep.to("ms").magnitude == approx(1.12045)
+    assert t.renewal_gap == approx(6.71210)
+    assert t.intent_traffic.to("GB/s").magnitude == approx(49.0)
+    assert t.proposer_traffic.to("GB/s").magnitude == approx(52.2)
+    assert t.proposer_share == approx(0.365546)
+    assert t.decode_duty == approx(0.294118)
+
+
+def test_conveyor_evidence_horizon():
+    e = Scenarios.ConveyorMugEvidenceHorizon.result
+    assert e.untracked_deadline.to("ms").magnitude == approx(60)
+    assert e.horizon.to("ms").magnitude == approx(219.089)
+    assert e.age_at_replacement.to("ms").magnitude == approx(90)
+    assert e.drift_at_replacement.to("mm").magnitude == approx(2.025)
+    assert e.min_supply_setpoints == 4
+    assert e.error_at_chunk_end.to("mm").magnitude == approx(43)
+    assert e.outlast.to("ms").magnitude == approx(180.911)
+    s4 = Scenarios.ConveyorMugEvidenceHorizonFourfoldSlip.result
+    assert s4.horizon.to("ms").magnitude == approx(109.545)
+    assert s4.drift_at_replacement.to("mm").magnitude == approx(8.1)
+    half = Scenarios.ConveyorMugEvidenceHorizonHalfRenewal.result
+    assert half.age_at_replacement.to("ms").magnitude == approx(140)
+    assert half.min_supply_setpoints == 6
+
+
+def test_quantization_ensemble_confidence_and_mlperf():
+    q = Scenarios.OpenVlaOrinQuantization
+    assert q.gap("FP16") == approx(-0.07526)
+    assert q.gap("8-bit") == approx(0.024764)
+    assert q.measured_speedup == approx(2.5)
+    assert q.score_drop == approx(0.052)
+    assert q.scale_overhead == approx(0.03125)
+    a = Scenarios.ActTemporalEnsemble.result
+    assert a["oldest_over_newest"] == approx(2.69123)
+    assert a["weights"].sum() == approx(1.0)
+    c = Scenarios.ProposerConfidenceRegimes
+    assert c.gap("Near OOD") == approx(0.37)
+    m = Scenarios.OrinDevKitSingleStream
+    assert m.latest("resnet50").to("ms").magnitude == approx(0.640259)
+    assert m.latest("gptj-99").to("s").magnitude == approx(4.17663)
+    assert m.earliest("gptj-99").to("s").magnitude == approx(10.2045)
+    assert m.span == approx(15566.8)
