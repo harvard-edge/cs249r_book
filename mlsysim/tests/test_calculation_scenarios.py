@@ -2388,3 +2388,91 @@ def test_repair_and_support_residency():
     assert s.shared_fraction == approx(0.75) and s.residency_factor == approx(11)
     assert s.recompute.to("s").magnitude == approx(0.32488215)
     assert s.reload.to("ms").magnitude == approx(5.24288)
+
+
+# --- Network architectures: dense, convolutional, and recurrent layers (added 2026-10-20) ---
+
+def test_mnist_dense_layers():
+    mlp = Scenarios.MnistMlpLayerStack
+    assert mlp.widths == [784, 128, 64, 10]
+    assert mlp.weights == 109184 and mlp.macs_per_example_dense == 109184
+    l1 = Scenarios.MnistMlpFirstLayer
+    assert l1.weights == 100352 and l1.parameters == 100480
+    assert l1.weight_bytes.to("KB").magnitude == approx(401.408)
+    assert l1.intensity == approx(0.5) and l1.batch_for_intensity(100) == approx(200)
+    assert Scenarios.MnistMlpFirstLayerDoubledInput.weights == 4 * l1.weights
+    wide = Scenarios.Dense2048Layer
+    assert wide.weights == 4194304 and wide.weight_bytes.to("MB").magnitude == approx(16.777216)
+    assert Scenarios.Dense1024LayerFp16.weight_bytes.to("MB").magnitude == approx(2.097152)
+
+
+def test_four_pixel_layer_by_hand():
+    toy = Scenarios.FourPixelThreeNeuronLayer
+    assert toy.multiply_adds == 12
+    assert toy.terms(0) == [approx(0.40), approx(-0.06), approx(0.18), approx(0.07)]
+    assert toy.preactivations == [approx(0.59), approx(-0.09), approx(0.45)]
+    assert toy.activations == [approx(0.59), 0.0, approx(0.45)]
+
+
+def test_mnist_conv_against_dense():
+    first = Scenarios.MnistFirstConvLayer
+    assert first.dense_weights == 25088 and first.weights == 288
+    assert first.sharing_ratio == approx(87.111111) and first.positions == 784
+    cnn = Scenarios.MnistSmallCnn
+    assert cnn.weights == 421408 and cnn.dense_share == approx(0.9555775)
+
+
+def test_imagenet_conv_layer():
+    rgb = Scenarios.ImageNetRgbFilterVersusDense
+    assert rgb.dense_weights == 150528 and rgb.weights == 27 and rgb.sharing_ratio == approx(5575.1111)
+    c = Scenarios.ImageNet64ChannelConv
+    assert c.weights == 36864 and c.dense_weights == 205520896
+    assert c.positions == 50176 and c.macs == 1849688064 and c.outputs == 3211264
+    assert c.weight_bytes.to("KB").magnitude == approx(147.456)
+    assert c.activation_bytes.to("MB").magnitude == approx(12.845056)
+    assert c.activation_to_weight_ratio == approx(87.111111)
+    assert c.variant(in_channels=1).weights == 576
+    assert (c.depthwise_weights, c.pointwise_weights, c.separable_weights) == (576, 4096, 4672)
+    assert c.separable_ratio == approx(7.890411) and c.separable_fraction == approx(1 / 64 + 1 / 9)
+    assert c.separable_limit == 9 and c.max_copies == 9
+    assert Scenarios.ImageNet64ChannelConvAt1024.dense_weights / c.dense_weights == approx(20.897959)
+    assert Scenarios.ImageNet64ChannelConvUnpadded.positions == 49284
+
+
+def test_im2col_alexnet_receptive_field():
+    mini = Scenarios.Im2colMiniature
+    assert (mini.input_values, mini.positions, mini.unfolded_entries) == (9, 4, 16)
+    assert Scenarios.AlexNetFirstConv.weights == 34848
+    rf = Scenarios.ThreeByThreeReceptiveField
+    assert (rf.growth_per_layer, rf.field, rf.layers_for_target) == (2, 7, 10)
+
+
+def test_depth_and_residual_add():
+    assert Scenarios.PlainStackGradientDecay.product == approx(0.0051538)
+    add = Scenarios.ResidualAddFp32
+    assert add.bytes_per_element.to("byte").magnitude == 12 and add.intensity == approx(1 / 12)
+    assert Scenarios.ResNet50ConvKernelShare.share == approx(0.4795231)
+
+
+def test_resnet50_thirty_fps_stream():
+    s = Scenarios.ResNet50ThirtyFpsStream
+    assert s.required_rate.to("GFLOP/s").magnitude == approx(246)
+    assert s.sustained_low.to("TFLOP/s").magnitude == approx(5) and s.sustained_high.to("TFLOP/s").magnitude == approx(6)
+    assert s.headroom == approx(20.325203) and s.alternative_headroom == approx(1.6666667)
+    assert s.alternative_required_rate.to("TFLOP/s").magnitude == approx(3)
+    assert s.peak_frame_rate.to("1/s").magnitude == approx(1219.5122)
+
+
+def test_keyword_spotter_on_nrf52840():
+    fp32, int8 = Scenarios.KwsDsCnnOnNrf52840Fp32, Scenarios.KwsDsCnnOnNrf52840Int8
+    assert fp32.weight_bytes.to("KB").magnitude == approx(800) and int8.weight_bytes.to("KB").magnitude == approx(200)
+    assert fp32.flash_share == approx(0.7629395) and int8.flash_share == approx(0.1907349)
+    assert fp32.sram_ratio == approx(3.0517578)
+
+
+def test_recurrent_steps():
+    rnn, lstm = Scenarios.ElmanRnnStep, Scenarios.LstmStep
+    assert (rnn.recurrent_macs, rnn.input_macs, rnn.macs_per_step) == (16384, 12800, 29184)
+    assert lstm.gate_rows == 512 and lstm.weights == 4 * rnn.weights
+    assert rnn.training_states == 1000
+    assert Scenarios.RecurrentState512Fp32.state_bytes.to("KiB").magnitude == approx(2)

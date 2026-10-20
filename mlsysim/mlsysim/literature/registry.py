@@ -63,6 +63,9 @@ VlaSystems = _load("vla_systems", "VlaSystems", "Cited figures of published VLA 
 # Robot demonstration data and event data recorders (added 2026-10-20)
 RobotDataSystems = _load("robot_data_systems", "RobotDataSystems", "Cited figures of dated robot demonstration-data systems and interactive imitation results (DROID, Open X-Embodiment, AgiBot World, ThriftyDAgger).")
 EventDataRecorders = _load("event_data_recorders", "EventDataRecorders", "Pre-crash recording windows required of automotive event data recorders (49 CFR 563).")
+# Network architectures (added 2026-10-20)
+NetflixPrize = _load("netflix_prize", "NetflixPrize", "Cited figures of the Netflix Prize and what Netflix shipped from it (Johnston 2012; Amatriain and Basilico 2012).")
+KerasApplications = _load("keras_applications", "KerasApplications", "Keras Applications model table: top-1 accuracy and time per inference step on a CPU and an A100.")
 
 
 # ---------------------------------------------------------------------------
@@ -352,6 +355,8 @@ class Literature(Registry):
     SpeechCommandsReleases = SpeechCommandsReleases  # added 2026-10-20
     RobotDataSystems = RobotDataSystems  # added 2026-10-20
     EventDataRecorders = EventDataRecorders  # added 2026-10-20
+    NetflixPrize = NetflixPrize  # network architectures (added 2026-10-20)
+    KerasApplications = KerasApplications  # network architectures (added 2026-10-20)
     ComputeTrend = ComputeTrend
     AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks

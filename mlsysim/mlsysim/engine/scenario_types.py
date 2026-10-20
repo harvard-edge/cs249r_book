@@ -7056,3 +7056,395 @@ class KvResidencyArchetypeScenario(BaseScenario):
                                                  p.prefill.result.sustained_rate, p.link,
                                                  self.context_tokens, self.shared_prefix,
                                                  self.generation, self.wait)
+
+
+# --- Network architectures: layer weights, work, and bytes (added 2026-10-20) ---
+#
+# Weight-only accounting, as the architectures chapter states it: a dense or
+# convolutional weight is read once per batch and used in one multiply-add
+# (two FLOPs) per example and output position; biases are counted only where
+# a property says so.
+
+from ..physics.layers import (  # noqa: E402
+    calc_receptive_field as _receptive_field,
+    calc_layers_for_receptive_field as _layers_for_field,
+    calc_separable_cost_fraction as _separable_fraction,
+    calc_gradient_product as _gradient_product,
+)
+
+
+class DenseLayerScenario(BaseScenario):
+    """One dense layer: ``in_features`` inputs to ``out_features`` outputs, ``bytes_per_weight`` each."""
+    in_features: int
+    out_features: int
+    bytes_per_weight: Quantity
+    batch_size: int = 1
+
+    @property
+    def weights(self) -> int:
+        return self.in_features * self.out_features
+
+    @property
+    def biases(self) -> int:
+        return self.out_features
+
+    @property
+    def parameters(self) -> int:
+        """Weights plus biases (what a framework's parameter count reports)."""
+        return self.weights + self.biases
+
+    @property
+    def macs_per_example(self) -> int:
+        return self.weights
+
+    @property
+    def weight_bytes(self) -> Quantity:
+        return (self.weights * self.bytes_per_weight).to("byte")
+
+    @property
+    def intensity(self) -> float:
+        """FLOPs per weight byte at ``batch_size``: each weight read serves the whole batch."""
+        flops = 2 * self.batch_size * self.weights
+        return flops / self.weight_bytes.to("byte").magnitude
+
+    def batch_for_intensity(self, target: float) -> float:
+        """Batch size at which the weight-only intensity reaches ``target`` FLOP/byte."""
+        return target / self.variant(batch_size=1).intensity
+
+
+class ConvLayerScenario(BaseScenario):
+    """One ``kernel``-by-``kernel`` convolution, stride one, over a ``height``-by-``width``-by-``in_channels``
+    input to ``out_channels`` feature maps; values of ``bytes_per_value`` each.
+
+    ``same_padding`` keeps the output the size of the input; without it the
+    window stays inside the input ("valid"), as an unpadded unfold does.
+    """
+    height: int
+    width: int
+    kernel: int
+    in_channels: int
+    out_channels: int
+    bytes_per_value: Quantity
+    same_padding: bool = True
+
+    @property
+    def weights(self) -> int:
+        return self.kernel * self.kernel * self.in_channels * self.out_channels
+
+    @property
+    def output_height(self) -> int:
+        return self.height if self.same_padding else self.height - self.kernel + 1
+
+    @property
+    def output_width(self) -> int:
+        return self.width if self.same_padding else self.width - self.kernel + 1
+
+    @property
+    def positions(self) -> int:
+        """Output positions per feature map, each a reuse of every filter weight."""
+        return self.output_height * self.output_width
+
+    @property
+    def macs(self) -> int:
+        return self.positions * self.weights
+
+    @property
+    def outputs(self) -> int:
+        """Output activation values for one example."""
+        return self.positions * self.out_channels
+
+    @property
+    def weight_bytes(self) -> Quantity:
+        return (self.weights * self.bytes_per_value).to("byte")
+
+    @property
+    def activation_bytes(self) -> Quantity:
+        return (self.outputs * self.bytes_per_value).to("byte")
+
+    @property
+    def activation_to_weight_ratio(self) -> float:
+        return (self.activation_bytes / self.weight_bytes).to("").magnitude
+
+    @property
+    def input_values(self) -> int:
+        return self.height * self.width * self.in_channels
+
+    @property
+    def dense_weights(self) -> int:
+        """Weights of a dense layer from the whole input to ``out_channels`` outputs."""
+        return self.input_values * self.out_channels
+
+    @property
+    def sharing_ratio(self) -> float:
+        """Dense weights over convolution weights for the same input and feature count."""
+        return self.dense_weights / self.weights
+
+    def dense_weight_growth(self, height: int, width: int) -> float:
+        """Factor by which the dense layer's weights grow when the input becomes ``height`` by ``width``."""
+        return (height * width) / (self.height * self.width)
+
+    @property
+    def unfolded_entries(self) -> int:
+        """Entries of the im2col patch matrix: one row of ``kernel**2 * in_channels`` per position."""
+        return self.positions * self.kernel * self.kernel * self.in_channels
+
+    @property
+    def max_copies(self) -> int:
+        """Most rows of the patch matrix one input value can appear in."""
+        return self.kernel * self.kernel
+
+    @property
+    def depthwise_weights(self) -> int:
+        """One ``kernel``-by-``kernel`` filter per input channel (multiply-adds per position)."""
+        return self.kernel * self.kernel * self.in_channels
+
+    @property
+    def pointwise_weights(self) -> int:
+        """A 1x1 convolution mixing ``in_channels`` into ``out_channels`` (multiply-adds per position)."""
+        return self.in_channels * self.out_channels
+
+    @property
+    def separable_weights(self) -> int:
+        return self.depthwise_weights + self.pointwise_weights
+
+    @property
+    def separable_ratio(self) -> float:
+        """Standard over depthwise separable weights (and multiply-adds per position)."""
+        return self.weights / self.separable_weights
+
+    @property
+    def separable_fraction(self) -> float:
+        return _separable_fraction(self.kernel, self.out_channels)
+
+    @property
+    def separable_limit(self) -> int:
+        """The ratio's limit with many output channels: the filter area."""
+        return self.kernel * self.kernel
+
+
+class LayerStackScenario(BaseScenario):
+    """Weight-only count of a network built from convolution and dense layers, input first (biases omitted).
+
+    A multilayer perceptron has no convolution layers; a small CNN ends in a
+    dense classifier head. (The full forward and training costs of a dense
+    network belong to the neural-computation solvers; this counts weights.)
+    """
+    conv_layers: List[ConvLayerScenario] = []
+    dense_layers: List[DenseLayerScenario]
+
+    @property
+    def widths(self) -> List[int]:
+        """Dense widths, input first."""
+        return [self.dense_layers[0].in_features] + [d.out_features for d in self.dense_layers]
+
+    @property
+    def conv_weights(self) -> int:
+        return sum(c.weights for c in self.conv_layers)
+
+    @property
+    def dense_weights(self) -> int:
+        return sum(d.weights for d in self.dense_layers)
+
+    @property
+    def weights(self) -> int:
+        return self.conv_weights + self.dense_weights
+
+    @property
+    def macs_per_example_dense(self) -> int:
+        """Multiply-adds of the dense layers per example (one per weight)."""
+        return self.dense_weights
+
+    @property
+    def dense_share(self) -> float:
+        """Share of the weights in the dense layers (a CNN's classifier head)."""
+        return self.dense_weights / self.weights
+
+
+class DenseForwardExampleScenario(BaseScenario):
+    """A small dense layer computed by hand: ``inputs`` times ``weights`` (one column per neuron), then ReLU."""
+    inputs: List[float]
+    weights: List[List[float]]       # rows: inputs; columns: neurons
+
+    @property
+    def neurons(self) -> int:
+        return len(self.weights[0])
+
+    def terms(self, neuron: int) -> List[float]:
+        """The products x_i * w_ij that sum to neuron ``neuron`` (zero-based)."""
+        return [x * row[neuron] for x, row in zip(self.inputs, self.weights)]
+
+    @property
+    def preactivations(self) -> List[float]:
+        return [sum(self.terms(j)) for j in range(self.neurons)]
+
+    @property
+    def activations(self) -> List[float]:
+        return [max(0.0, z) for z in self.preactivations]
+
+    @property
+    def multiply_adds(self) -> int:
+        return len(self.inputs) * self.neurons
+
+
+class ReceptiveFieldScenario(BaseScenario):
+    """A stack of ``layers`` stride-one ``kernel``-wide convolutions, and the depth a ``target_field`` needs."""
+    kernel: int
+    layers: int
+    target_field: int
+
+    @property
+    def growth_per_layer(self) -> int:
+        return self.kernel - 1
+
+    @property
+    def field(self) -> int:
+        return _receptive_field(self.layers, self.kernel)
+
+    @property
+    def layers_for_target(self) -> int:
+        return _layers_for_field(self.target_field, self.kernel)
+
+
+class GradientProductScenario(BaseScenario):
+    """A plain stack of ``depth`` layers whose per-layer gradient factors average ``gain``."""
+    gain: float
+    depth: int
+
+    @property
+    def product(self) -> float:
+        return _gradient_product(self.gain, self.depth)
+
+
+class ElementwiseIntensityScenario(BaseScenario):
+    """An unfused elementwise operation: ``flops_per_element`` FLOPs while ``operands_moved`` values
+    of ``bytes_per_value`` each are read or written."""
+    flops_per_element: int
+    operands_moved: int
+    bytes_per_value: Quantity
+
+    @property
+    def bytes_per_element(self) -> Quantity:
+        return (self.operands_moved * self.bytes_per_value).to("byte")
+
+    @property
+    def intensity(self) -> float:
+        """FLOPs per byte moved."""
+        return self.flops_per_element / self.bytes_per_element.to("byte").magnitude
+
+
+class FrameRateHeadroomScenario(BaseScenario):
+    """``workload`` at ``frame_rate`` on an accelerator of ``peak_rate`` that sustains a
+    ``utilization_low`` to ``utilization_high`` share of peak; ``alternative_flops`` is a heavier model per frame."""
+    workload: Workload
+    frame_rate: Quantity
+    peak_rate: Quantity
+    utilization_low: float
+    utilization_high: float
+    alternative_flops: Quantity
+
+    @property
+    def flops_per_frame(self) -> Quantity:
+        return self.workload.inference_flops.to("GFLOP")
+
+    @property
+    def required_rate(self) -> Quantity:
+        return (self.frame_rate * self.flops_per_frame).to("GFLOP/s")
+
+    @property
+    def sustained_low(self) -> Quantity:
+        return (self.peak_rate * self.utilization_low).to("TFLOP/s")
+
+    @property
+    def sustained_high(self) -> Quantity:
+        return (self.peak_rate * self.utilization_high).to("TFLOP/s")
+
+    @property
+    def headroom(self) -> float:
+        """Sustained rate at the low utilization over the rate the stream needs."""
+        return (self.sustained_low / self.required_rate).to("").magnitude
+
+    @property
+    def alternative_required_rate(self) -> Quantity:
+        return (self.frame_rate * self.alternative_flops).to("TFLOP/s")
+
+    @property
+    def alternative_headroom(self) -> float:
+        return (self.sustained_low / self.alternative_required_rate).to("").magnitude
+
+    @property
+    def peak_frame_rate(self) -> Quantity:
+        """Frames a second if the accelerator ran at peak (the planning mistake)."""
+        return (self.peak_rate / self.flops_per_frame).to("1/s")
+
+
+class WeightStorageFitScenario(BaseScenario):
+    """``workload``'s weights at ``bytes_per_weight`` against ``hardware``'s flash and SRAM."""
+    workload: Workload
+    hardware: HardwareNode
+    bytes_per_weight: Quantity
+
+    @property
+    def weight_bytes(self) -> Quantity:
+        return (self.workload.parameters.to("param").magnitude * self.bytes_per_weight).to("byte")
+
+    @property
+    def flash_share(self) -> float:
+        return (self.weight_bytes / self.hardware.memory.flash_capacity).to("").magnitude
+
+    @property
+    def sram_ratio(self) -> float:
+        """Weight bytes over SRAM capacity (above one: the weights cannot all sit in SRAM)."""
+        return (self.weight_bytes / self.hardware.memory.sram_capacity).to("").magnitude
+
+
+class RecurrentStepScenario(BaseScenario):
+    """One step of a recurrent layer: ``input_dim`` inputs, a ``hidden_dim`` state, and ``gates`` affine
+    maps per step (one for a plain RNN, four for an LSTM); ``steps`` steps in a sequence."""
+    input_dim: int
+    hidden_dim: int
+    bytes_per_value: Quantity
+    gates: int = 1
+    steps: int = 1
+
+    @property
+    def gate_rows(self) -> int:
+        """Rows of the fused input and recurrent weight matrices."""
+        return self.gates * self.hidden_dim
+
+    @property
+    def recurrent_macs(self) -> int:
+        return self.gate_rows * self.hidden_dim
+
+    @property
+    def input_macs(self) -> int:
+        return self.gate_rows * self.input_dim
+
+    @property
+    def macs_per_step(self) -> int:
+        return self.recurrent_macs + self.input_macs
+
+    @property
+    def weights(self) -> int:
+        """Input and recurrent weights (biases omitted); one multiply-add each per step."""
+        return self.macs_per_step
+
+    @property
+    def state_bytes(self) -> Quantity:
+        """One state vector: what inference keeps at any sequence length."""
+        return (self.hidden_dim * self.bytes_per_value).to("byte")
+
+    @property
+    def training_states(self) -> int:
+        """States backpropagation through time keeps: one per step."""
+        return self.steps
+
+
+class KernelShareScenario(BaseScenario):
+    """One kernel class's multiply-adds against a whole model's, per example."""
+    workload: Workload
+    kernel_macs: Quantity            # multiply-adds of the kernel class, per example
+    total_macs: Quantity             # multiply-adds of the whole model, per example
+
+    @property
+    def share(self) -> float:
+        return (self.kernel_macs / self.total_macs).to("").magnitude

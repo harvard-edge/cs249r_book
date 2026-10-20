@@ -3155,3 +3155,46 @@ NASA_MCO_PHASE1_1999 = _report(
     "https://llis.nasa.gov/llis_lib/pdf/1009464main1_0641-mr.pdf",
     notes="Planned orbit-insertion altitude 226 km; final estimate about 57 km.",
 )
+
+# --- Network architectures lecture and chapter (added 2026-10-20) ---
+JOHNSTON_NETFLIX_PRIZE_2012 = _report(
+    "prov:johnston-netflix-prize-2012",
+    "Johnston, C. (2012), Netflix Never Used Its $1 Million Algorithm Due to Engineering Costs, Ars Technica",
+    "https://arstechnica.com/information-technology/2012/04/netflix-never-used-its-1-million-algorithm-due-to-engineering-costs/",
+    notes="The 2009 Grand Prize: $1 million for a 10 percent accuracy improvement; the code was not deployed.",
+)
+AMATRIAIN_NETFLIX_RECOMMENDATIONS_2012 = _report(
+    "prov:amatriain-netflix-recommendations-2012",
+    "Amatriain, X. and Basilico, J. (2012), Netflix Recommendations: Beyond the 5 stars (Part 1), Netflix Tech Blog",
+    "https://netflixtechblog.com/netflix-recommendations-beyond-the-5-stars-part-1-55838468f429",
+    notes=("2007 Progress Prize: a linear blend of 107 algorithms, 8.43 percent improvement; Netflix kept two "
+           "(matrix factorization and an RBM) and rebuilt them for more than 5 billion ratings against the "
+           "contest's 100 million. Retrieved 2026-10-18."),
+)
+NETFLIX_PRIZE_LEADERBOARD = _report(
+    "prov:netflix-prize-leaderboard-2009",
+    "Netflix Prize leaderboard, June 2009 (screenshot by Ivongala, Wikimedia Commons, public domain)",
+    "https://commons.wikimedia.org/wiki/File:Netflix_prize.jpg",
+    notes="Rank 1, BellKor's Pragmatic Chaos: best score 0.8558, 10.05 percent improvement, submitted 2009-06-26.",
+)
+KERAS_APPLICATIONS_TABLE = _report(
+    "prov:keras-applications-table",
+    "Keras Applications, table of available models (keras.io/api/applications)",
+    "https://keras.io/api/applications/",
+    notes=("Top-1 ImageNet accuracy and time per inference step: batch 32, mean of 30 batches times 10 "
+           "repeats; CPU AMD EPYC (92 cores), GPU Tesla A100. Retrieved 2026-10-18."),
+)
+VASWANI_TRANSFORMER_2017 = _lit(
+    "prov:vaswani-transformer-2017",
+    "Vaswani et al. (2017), Attention Is All You Need, NeurIPS 2017",
+    url="https://arxiv.org/abs/1706.03762",
+    verified="2026-10-18",
+    notes="Table 2: WMT 2014 English-to-German BLEU and training cost (FLOPs).",
+)
+HE_RESNET_CIFAR10_TABLE6 = _lit(
+    "prov:he-resnet-2016-cifar10",
+    "He et al. (2016), Deep Residual Learning for Image Recognition, CVPR 2016, Table 6 (CIFAR-10)",
+    url="https://arxiv.org/abs/1512.03385",
+    verified="2026-10-18",
+    notes="Classification error on the CIFAR-10 test set; ResNet-20 8.75 percent, ResNet-56 6.97 percent.",
+)
