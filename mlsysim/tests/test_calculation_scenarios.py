@@ -4390,3 +4390,72 @@ def test_model_compression_scenarios():
     front = [t3[i]["model"] for i in calc_pareto_frontier([(r["pixel1_ms"], r["top1"]) for r in t3])]
     assert "V2 1.0" not in front and "V3-Large 0.75" in front
     assert Literature.CompressionResults.SanhDistilBertRetainedPct == 97
+# --- Hardware acceleration on one accelerator (added 2026-10-20) ---
+
+
+def test_h100_over_reference_cpu_and_systolic_reuse():
+    g = Scenarios.H100OverReferenceCpu
+    assert g.ratio_low == approx(494.5) and g.ratio_high == approx(989.0)
+    e = Scenarios.SystolicArrayReuseEnergy
+    assert e.naive_energy.to("pJ").magnitude == approx(2561.0)
+    assert e.systolic_accesses == approx(0.015625)
+    assert e.systolic_energy.to("pJ").magnitude == approx(11.0)
+    assert e.ratio == approx(232.818)
+
+
+def test_amdahl_on_h100_against_a_server_cpu():
+    rn, gpt, bw = (Scenarios.ResNet50InferenceH100OverServerCpu, Scenarios.Gpt2DecodeH100OverServerCpu,
+                   Scenarios.Gpt2DecodeH100OverServerCpuBandwidth)
+    assert rn.gain == approx(247.375) and rn.speedup == approx(18.5734)
+    assert gpt.speedup == approx(4.92044) and gpt.ceiling == approx(5.0)
+    assert bw.gain == approx(67.0) and bw.speedup == approx(4.71831)
+
+
+def test_resnet50_layers_against_the_h100_ridges():
+    assert Scenarios.ResNet50Stage3ConvBatch32.flops.to("GFLOP").magnitude == approx(7.39875)
+    assert Scenarios.ResNet50Stage3ConvBatch32.traffic_bytes.to("MB").magnitude == approx(13.13997)
+    assert Scenarios.ResNet50Stage3ConvBatch32.traffic_intensity == approx(563.072)
+    assert Scenarios.ResNet50Stage3ConvBatch32Int8.traffic_intensity == approx(1126.14)
+    assert Scenarios.ResNet50Stage3ConvBatch32Int8Weights.traffic_intensity == approx(569.463)
+    assert Scenarios.ResNet50Stage2ConvBatch32.traffic_intensity == approx(287.176)
+    assert Scenarios.ResNet50Stage2ConvBatch32Int8.traffic_intensity == approx(574.352)
+    assert Scenarios.ResNet50Stage2ExpansionBatch32.traffic_intensity == approx(51.1739)
+    assert Scenarios.ResNet50Stage2ExpansionBatch32Int8.traffic_intensity == approx(102.348)
+    assert Scenarios.ResNet50Batch1H100Int8PeakRate.result.latency_compute.to("us").magnitude == approx(4.14351)
+    assert Scenarios.ResNet50Batch1H100Fp16PeakRate.result.latency_compute.to("us").magnitude == approx(8.29120)
+
+
+def test_five_layers_on_the_h100_roofline():
+    qkv, head = Scenarios.Gpt2XlQkvProjectionPrefill, Scenarios.ResNet50ClassifierHeadBatch32
+    assert qkv.flops.to("GFLOP").magnitude == approx(125.829) and qkv.traffic_intensity == approx(1046.68)
+    assert head.traffic_bytes.to("MB").magnitude == approx(4.29107) and head.traffic_intensity == approx(30.5453)
+    assert Scenarios.Gpt2XlLayerNormPrefill.intensity == approx(1.99976)
+    assert Scenarios.Gpt2XlSoftmaxPrefill.intensity == approx(0.75)
+    assert Scenarios.Gpt2XlDecodeH100Roofline.peak_fraction == approx(0.0033873)
+    assert Scenarios.Gpt2XlLayerNormH100Roofline.attainable.to("TFLOP/s").magnitude == approx(6.69918)
+    assert Scenarios.ResNet50ClassifierHeadH100Roofline.peak_fraction == approx(0.103465)
+    assert Scenarios.ResNet50Stage3ConvH100Roofline.peak_fraction == approx(1.0)
+    a, h = Scenarios.KernelAt200FlopPerByteA100, Scenarios.KernelAt200FlopPerByteH100
+    assert a.attainable.to("TFLOP/s").magnitude == approx(312.0) and h.attainable.to("TFLOP/s").magnitude == approx(670.0)
+
+
+def test_batch_raises_dense_layer_intensity():
+    b1, b32, b512 = Scenarios.Dense2048Fp16Batch1, Scenarios.Dense2048Fp16Batch32, Scenarios.Dense2048Fp16Batch512
+    assert b1.traffic_intensity == approx(0.999024) and b32.traffic_intensity == approx(31.0303)
+    assert b512.traffic_intensity == approx(341.333)
+    assert b1.batch_for_traffic_intensity(295.2238806) == approx(414.818)
+    assert b1.variant(batch_size=415).traffic_intensity == approx(295.2238806, rel=1e-3)
+
+
+def test_accelerator_trends_and_latency_in_cycles():
+    w = Scenarios.DenseParametersVsBandwidthSince2014
+    assert w.parameter_growth == approx(3902.93) and w.bandwidth_growth == approx(33.3333)
+    e = Scenarios.AcceleratorEnvelopeSinceTpuV2
+    assert e.device_count == 52 and e.compute_growth == approx(54.7087) and e.bandwidth_growth == approx(13.3333)
+    assert e.best_bandwidth_since == "2025-02-15"
+    g = Scenarios.NvidiaGenerationsV100ToB200
+    assert g.compute_growth == approx(18.0) and g.bandwidth_growth == approx(8.88889) and g.gap_growth == approx(2.025)
+    c = Scenarios.HbmAccessAt2Ghz
+    assert c.cycle_time.to("ps").magnitude == approx(500.0) and c.cycles == approx(545.64)
+    t = Scenarios.TensorCoreMmaM16n8k16
+    assert t.macs == 2048 and t.macs_per_thread == approx(64.0)

@@ -1,33 +1,12 @@
 #!/usr/bin/env python3
 """Figures for Lecture 11 (Hardware Acceleration).
 
-Every value is sourced. "HA" is the rendered chapter, Hardware Acceleration.
-  - TPU v1 gains: 15-30x throughput, 30-80x performance per watt against
-    contemporary CPUs and GPUs on six Google inference workloads
-    (HA Example 11.1; Jouppi et al. 2017).
-  - INT8 ResNet-50 on the H100: batch one 0.38 -> 0.30 ms (1.3x), large
-    batch 5.9x, both against FP32 (Model Compression, table 13).
-  - Energy per operation, 45 nm: INT8 add 0.03 pJ, FP32 add 0.9, FP32
-    multiply 3.7, 8 KB SRAM read 5, DRAM read of a 32-bit value 640 pJ
-    (HA figure 4, Sec. 11.2.3; Horowitz 2014).
-  - Peak FP16: P100 21.2, V100 125 TFLOP/s (HA footnote 13; NVIDIA 2017).
-  - H100: 3.35 TB/s; FP32 67, FP16 989, INT8 1,979 TFLOP/s or TOPS; ridges
-    about 20, 295.2, 590.7 FLOP/byte (HA Napkin Math 11.6 and 11.10).
-  - Layer intensities on the H100 at FP16: GPT-2 XL decode 1, LayerNorm
-    2.0, ResNet-50 FC head 30.5, stage-3 3x3 conv 563.1, GPT-2 XL QKV
-    prefill 1,046.7 FLOP/byte (HA Napkin Math 11.4, 11.5, 11.7, 11.8, 11.10).
-  - Batch: I = 2Bn^2 / (2Bn + 2n^2 + 2Bn) for an n x n FP16 layer, n = 2048
-    (HA equation 5, Napkin Math 11.9). The crossing near batch 415 is
-    derived here from that equation.
-  - INT8 and the ridge: stage-3 3x3 563 / 1,126 / 569, stage-2 3x3 287 / 574,
-    stage-2 1x1 51 / 102 FLOP/byte (HA Napkin Math 11.6).
-  - Measured latency by working-set size on an H100 PCIe card: Chips and
-    Cheese, "Nvidia's H100: Funny L2, and Tons of Bandwidth" (2023); the
-    plateau values are that chart's data labels (calcs.CNC).
-  - Rising ridge: dense FP16 peak over bandwidth for V100, A100, H100, B200
-    (MLSysIM registry, as HA figure 9; calcs.OUT["ridges"]).
-  Derived values come from calcs.py. Lecture 11b's figures live in that
-  deck's own folder.
+Every number comes from MLSysIM through calcs.py: val(key) is the string a
+slide prints and num(key) its value; bar lengths and curves read the same
+registry entries and Scenarios.* the chapter reads. Layout values (axis
+limits, ticks, label offsets, the working-set sizes where the measured
+latency plateaus begin, read from the Chips and Cheese chart's axis) are
+typed here. Lecture 11b's figures live in that deck's own folder.
 
 Run from this folder: python3 make_figs.py
 """
@@ -43,7 +22,8 @@ import slideplot as sp  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import contextlib, io  # noqa: E401,E402
 with contextlib.redirect_stdout(io.StringIO()):
-    import calcs  # noqa: E402  (derived numbers; run calcs.py to see them)
+    import calcs  # noqa: E402  (every number; run calcs.py to see them)
+from deckvals import val, num  # noqa: E402
 
 C = sp.C
 plt = sp.plt
@@ -51,8 +31,10 @@ out = Path(__file__).parent
 
 # ---------------------------------------------------------------- hook gains
 fig, ax = plt.subplots(figsize=(3.0, 1.45))
-rows = [("Throughput", 15, 30, "compute", "15–30×"),
-        ("Performance per watt", 30, 80, "data", "30–80×")]
+rows = [("Throughput", num("tpu_thr_lo"), num("tpu_thr_hi"), "compute",
+         f"{val('tpu_thr_lo')}–{val('tpu_thr_hi')}×"),
+        ("Performance per watt", num("tpu_ppw_lo"), num("tpu_ppw_hi"), "data",
+         f"{val('tpu_ppw_lo')}–{val('tpu_ppw_hi')}×")]
 for i, (label, low, high, color_key, text) in enumerate(rows):
     y = 1 - i
     ax.barh(y, high - low, left=low, color=C[color_key], height=0.55)
@@ -77,19 +59,20 @@ sp.save(fig, out / "hook_gains.svg")
 
 # --------------------------------------------------------------- recall L10b
 sp.hbars(out / "recall_int8.svg", [
-    ("Batch one", 1.3, "neutral", "1.3×   (0.38 → 0.30 ms)"),
-    ("Large batch", 5.9, "compute", "5.9×"),
+    ("Batch one", num("int8_b1_gain"), "neutral",
+     f"{val('int8_b1_gain')}×   ({val('lat_fp32_ms')} → {val('lat_int8_ms')} ms)"),
+    ("Large batch", num("int8_big_gain"), "compute", f"{val('int8_big_gain')}×"),
 ], "×", log=False, xlabel="INT8 against FP32, ResNet-50, same H100",
     size=sp.SHORT)
 
 # ---------------------------------------------------------------- energy ladder
 energy_rows = [
-    ("INT8 add", 0.03, "compute", "0.03 pJ"),
-    ("FP32 add", 0.9, "compute", "0.9 pJ"),
-    ("FP32 multiply", 3.7, "compute", "3.7 pJ"),
-    ("SRAM read (8 KB)", 5, "memory", "5 pJ"),
-    ("DRAM read (32-bit)", 640, "danger",
-     f"640 pJ = {calcs.OUT['dram_per_mul']} multiplies"),
+    ("INT8 add", num("e_int8_add"), "compute", f"{val('e_int8_add')} pJ"),
+    ("FP32 add", num("e_fp32_add"), "compute", f"{val('e_fp32_add')} pJ"),
+    ("FP32 multiply", num("e_fp32_mul"), "compute", f"{val('e_fp32_mul')} pJ"),
+    ("SRAM read (8 KB)", num("e_sram8k"), "memory", f"{val('e_sram8k')} pJ"),
+    ("DRAM read (32-bit)", num("e_dram"), "danger",
+     f"{val('e_dram')} pJ = {val('dram_per_mul')} multiplies"),
 ]
 for k, shown in ((1, 3), (2, 4), (3, 5)):
     sp.hbars(out / f"energy_step{k}.svg", energy_rows, "pJ", step=shown,
@@ -98,8 +81,9 @@ for k, shown in ((1, 3), (2, 4), (3, 5)):
 
 # ---------------------------------------------------------------- Tensor Cores
 sp.hbars(out / "tensorcore.svg", [
-    ("P100 (2016)", 21.2, "neutral", "21.2"),
-    ("V100 (2017)", 125, "compute", "125: about 6×"),
+    (f"P100 ({calcs.P100.release_year})", num("p100_fp16"), "neutral", val("p100_fp16")),
+    (f"V100 ({calcs.V100.release_year})", num("v100_fp16"), "compute",
+     f"{val('v100_fp16')}: about {val('tc_gain')}×"),
 ], "TFLOP/s", log=False, xlabel="Peak FP16 (TFLOP/s)", size=(2.6, 1.3))
 
 # ---------------------------------------------------------------- three units
@@ -203,7 +187,7 @@ for k in (1, 2, 3):
     (out / f"systolic_step{k}.svg").write_text(systolic_svg(k))
 
 # ---------------------------------------------------------------- H100 roofline
-BW = 3.35  # TB/s
+BW = num("h100_bw")  # TB/s
 XLIM = (0.5, 5000)
 YLIM = (1, 6000)
 
@@ -231,18 +215,19 @@ def slope(ax, top):
     ax.plot(xs, xs * BW, color=C["memory"], lw=3, zorder=3)
 
 
-ceilings = [  # name, peak, ridge label, colour, line style
-    ("FP32", 67, f"{float(calcs.OUT['ridge32']):.0f}", "neutral", "-"),
-    ("FP16", 989, f"{float(calcs.OUT['ridge16']):.0f}", "compute", "-"),
-    ("INT8", 1979, f"{float(calcs.OUT['ridge8']):.0f}", "danger", "--"),
+ceilings = [  # name, peak key, ridge label, colour, line style
+    ("FP32", "h100_fp32", val("ridge32"), "neutral", "-"),
+    ("FP16", "h100_fp16", val("ridge16_int"), "compute", "-"),
+    ("INT8", "h100_int8", val("ridge8_int"), "danger", "--"),
 ]
 for k in (1, 2, 3):
     fig, ax = roof_axes()
-    slope(ax, ceilings[k - 1][1])
-    ax.text(6, 6 * BW / 3.2, "3.35 TB/s", color=C["memory"], fontsize=12,
+    slope(ax, num(ceilings[k - 1][1]))
+    ax.text(6, 6 * BW / 3.2, f"{val('h100_bw')} TB/s", color=C["memory"], fontsize=12,
             fontweight="bold", ha="left", va="top")
-    for i, (name, peak, ridge_text, color_key, style) in enumerate(ceilings):
+    for i, (name, peak_key, ridge_text, color_key, style) in enumerate(ceilings):
         alpha = 1.0 if i < k else 0.0
+        peak = num(peak_key)
         ridge = peak / BW
         ax.plot([ridge, XLIM[1]], [peak, peak], color=C[color_key], lw=3,
                 ls=style, alpha=alpha, zorder=3)
@@ -250,7 +235,7 @@ for k in (1, 2, 3):
                 ls=":", alpha=alpha)
         below = name == "FP16"
         ax.text(XLIM[1] / 1.15, peak / 1.15 if below else peak * 1.2,
-                f"{name} {peak:,} " + ("TOPS" if name == "INT8" else "TFLOP/s"),
+                f"{name} {val(peak_key)} " + ("TOPS" if name == "INT8" else "TFLOP/s"),
                 color=C[color_key], fontsize=11,
                 fontweight="bold", ha="right", va="top" if below else "bottom",
                 alpha=alpha)
@@ -262,13 +247,13 @@ for k in (1, 2, 3):
     sp.save(fig, out / f"roof_h100_step{k}.svg")
 
 # ---------------------------------------------------------------- five layers
-PEAK16 = 989
+PEAK16 = num("h100_fp16")
 layers = [  # label, intensity, colour, text offset (points), alignment
-    ("GPT-2 XL decode, batch 1: 0.3%", 1.0, "danger", (8, -4), "left"),
-    ("LayerNorm: 0.7%", 2.0, "danger", (8, -4), "left"),
-    ("ResNet-50 FC head: 10.3%", 30.5, "memory", (8, -4), "left"),
-    ("ResNet-50 stage-3 conv", 563.1, "compute", (4, -16), "left"),
-    ("GPT-2 XL QKV prefill", 1046.7, "compute", (0, 14), "center"),
+    (f"GPT-2 XL decode, batch 1: {val('dec_pct')}%", num("dec_ai"), "danger", (8, -4), "left"),
+    (f"LayerNorm: {val('ln_pct')}%", num("ln_ai"), "danger", (8, -4), "left"),
+    (f"ResNet-50 FC head: {val('head_pct')}%", num("head_ai"), "memory", (8, -4), "left"),
+    ("ResNet-50 stage-3 conv", num("conv_ai"), "compute", (4, -16), "left"),
+    ("GPT-2 XL QKV prefill", num("qkv_ai"), "compute", (0, 14), "center"),
 ]
 reveal = [2, 3, 4, 5]
 for k, shown in enumerate(reveal, start=1):
@@ -277,9 +262,9 @@ for k, shown in enumerate(reveal, start=1):
     ax.plot([PEAK16 / BW, XLIM[1]], [PEAK16, PEAK16], color=C["compute"], lw=3)
     ax.plot([PEAK16 / BW] * 2, [YLIM[0], 2.2], color=C["neutral"], lw=1.2,
             ls=":")
-    ax.text(PEAK16 / BW / 1.1, 1.3, "ridge 295", color=C["neutral"],
+    ax.text(PEAK16 / BW / 1.1, 1.3, f"ridge {val('ridge16_int')}", color=C["neutral"],
             fontsize=10, ha="right")
-    ax.text(0.02, 0.95, "FP16 ceiling: 989 TFLOP/s", transform=ax.transAxes,
+    ax.text(0.02, 0.95, f"FP16 ceiling: {val('h100_fp16')} TFLOP/s", transform=ax.transAxes,
             color=C["compute"], fontsize=11, fontweight="bold", ha="left",
             va="top")
     for i, (label, x, color_key, offset, align) in enumerate(layers):
@@ -293,15 +278,15 @@ for k, shown in enumerate(reveal, start=1):
     sp.save(fig, out / f"layers_step{k}.svg")
 
 # ---------------------------------------------------------------- batch
-WIDTH = 2048
+LAYER = calcs.BATCHES[0]  # Scenarios.Dense2048Fp16Batch1; batch varied below
 
 
 def intensity(batch):
-    return 2 * batch * WIDTH * WIDTH / (2 * batch * WIDTH + 2 * WIDTH * WIDTH
-                                        + 2 * batch * WIDTH)
+    """One-pass traffic intensity of the same layer at ``batch`` (model_copy: no int check)."""
+    return LAYER.variant(batch_size=batch).traffic_intensity
 
 
-crossing = float(calcs.OUT["crossing"])  # derived in calcs.py
+crossing = num("crossing")  # computed in calcs.py
 batches = np.logspace(0, np.log10(4096), 200)
 for k in (1, 2, 3):
     fig, ax = plt.subplots(figsize=(4.2, 2.5))
@@ -316,12 +301,14 @@ for k in (1, 2, 3):
     ax.set_yticklabels(["1", "10", "100", "1,000"])
     ax.grid(color=C["grid"], linewidth=0.5)
     ax.set_axisbelow(True)
-    ax.axhline(295.2, color=C["compute"], lw=2, ls="--")
-    ax.text(0.8, 295.2 * 1.25, "H100 FP16 ridge: 295", color=C["compute"],
+    ax.axhline(num("ridge16"), color=C["compute"], lw=2, ls="--")
+    ax.text(0.8, num("ridge16") * 1.25, f"H100 FP16 ridge: {val('ridge16_int')}", color=C["compute"],
             fontsize=11, fontweight="bold")
     if k >= 2:
-        ax.plot(batches, intensity(batches), color=C["memory"], lw=3)
-    pts = [(1, "≈ 1", (12, -12)), (32, "≈ 31", (8, -10)), (512, "341", (-10, 10))]
+        ax.plot(batches, [intensity(b) for b in batches], color=C["memory"], lw=3)
+    pts = [(s.batch_size, ("≈ " if j < 2 else "") + val(key), off)
+           for j, (s, key, off) in enumerate(zip(calcs.BATCHES, ("ai_b1", "ai_b32", "ai_b512"),
+                                                 ((12, -12), (8, -10), (-10, 10))))]
     for j, (b, text, offset) in enumerate(pts):
         alpha = 1.0 if (k >= 2 and j < 2) or k == 3 else 0.0
         ax.plot([b], [intensity(b)], "o", ms=10, color=C["memory"], mec="white",
@@ -330,11 +317,11 @@ for k in (1, 2, 3):
                     textcoords="offset points", fontsize=12, fontweight="bold",
                     color=C["memory"], alpha=alpha,
                     ha="right" if offset[0] < 0 else "left")
-    ax.text(512, 3, "???", fontsize=16, fontweight="bold", color=C["danger"],
+    ax.text(num("batch_big"), 3, "???", fontsize=16, fontweight="bold", color=C["danger"],
             ha="center", alpha=1.0 if k == 1 else 0.0)
     alpha = 1.0 if k == 3 else 0.0
     ax.axvline(crossing, color=C["danger"], lw=1.2, ls=":", alpha=alpha)
-    ax.text(crossing * 1.1, 1.0, "crosses near 415\n(derived)", color=C["danger"],
+    ax.text(crossing * 1.1, 1.0, f"crosses near {val('crossing')}\n(derived)", color=C["danger"],
             fontsize=10, alpha=alpha, va="bottom")
     ax.set_xlabel("Batch size (log scale)")
     ax.set_ylabel("FLOP/byte (log)")
@@ -343,11 +330,15 @@ for k in (1, 2, 3):
 # ---------------------------------------------------------------- INT8 ridge
 # Each layer: FP16 bar, INT8 bar; stage-3 also shows INT8 weights with FP16
 # activations (569).
+def bar(key, style, suffix=""):
+    return (num(key), val(key) + suffix, style)
+
+
 int8_bars = [  # layer, [(value, label, style)]
-    ("Stage-3 3×3 conv", [(563, "563", "fp16"), (1126, "1,126", "int8"),
-                          (569, "569: INT8, activations FP16", "wide")]),
-    ("Stage-2 3×3 conv", [(287, "287", "fp16"), (574, "574", "int8")]),
-    ("Stage-2 1×1 expansion", [(51, "51", "fp16"), (102, "102", "int8")]),
+    ("Stage-3 3×3 conv", [bar("s3_fp16", "fp16"), bar("s3_int8", "int8"),
+                          bar("s3_mixed", "wide", ": INT8, activations FP16")]),
+    ("Stage-2 3×3 conv", [bar("s2_fp16", "fp16"), bar("s2_int8", "int8")]),
+    ("Stage-2 1×1 expansion", [bar("p2_fp16", "fp16"), bar("p2_int8", "int8")]),
 ]
 for k in (1, 2, 3):
     fig, ax = plt.subplots(figsize=(5.2, 2.5))
@@ -376,12 +367,12 @@ for k in (1, 2, 3):
                 ha="right", va="center", fontsize=12, fontweight="bold",
                 color=C["text"])
     top = y - 0.4
-    ax.axvline(295.2, color=C["compute"], lw=2, ls="--")
-    ax.text(295.2 / 1.04, top, "FP16 ridge 295", color=C["compute"],
+    ax.axvline(num("ridge16"), color=C["compute"], lw=2, ls="--")
+    ax.text(num("ridge16") / 1.04, top, f"FP16 ridge {val('ridge16_int')}", color=C["compute"],
             fontsize=10, fontweight="bold", ha="right", va="bottom")
     alpha = 1.0 if k >= 2 else 0.0
-    ax.axvline(590.7, color=C["danger"], lw=2, ls="--", alpha=alpha)
-    ax.text(590.7 * 1.04, top, "INT8 ridge 591", color=C["danger"],
+    ax.axvline(num("ridge8"), color=C["danger"], lw=2, ls="--", alpha=alpha)
+    ax.text(num("ridge8") * 1.04, top, f"INT8 ridge {val('ridge8_int')}", color=C["danger"],
             fontsize=10, fontweight="bold", ha="left", va="bottom", alpha=alpha)
     ax.set_xscale("log")
     ax.set_xlim(20, 8000)
@@ -393,7 +384,7 @@ for k in (1, 2, 3):
     ax.spines["left"].set_visible(False)
     ax.grid(axis="x", color=C["grid"], linewidth=0.6)
     ax.set_axisbelow(True)
-    ax.set_xlabel("Arithmetic intensity at batch 32 (FLOP/byte, log scale)")
+    ax.set_xlabel(f"Arithmetic intensity at batch {val('conv_batch')} (FLOP/byte, log scale)")
     sp.save(fig, out / f"int8ridge_step{k}.svg")
 
 # ---------------------------------------------------------------- Amdahl
@@ -414,11 +405,13 @@ for value in (5, 10, 20, 50):
     edge = (1 - 1 / value) / (1 - 1 / 1000)
     ax.text(1150, edge, f"{value}×", va="center", ha="left", fontsize=10,
             color=C["memory"], fontweight="bold")
-points = [(0.95, "ResNet-50: 18.6×", (-8, 10)), (0.80, "GPT-2 decode: 4.9×", (-8, 10))]
+G_PATH = num("gain")
+points = [(num("p_resnet"), f"ResNet-50: {val('amdahl_rn')}×", (-8, 10)),
+          (num("p_gpt"), f"GPT-2 decode: {val('amdahl_gpt')}×", (-8, 10))]
 marks = []
 for p_frac, label, offset in points:
-    dot, = ax.plot([247], [p_frac], "o", ms=9, color=C["danger"], mec="white", mew=1.5)
-    text = ax.annotate(label, (247, p_frac), xytext=offset, textcoords="offset points",
+    dot, = ax.plot([G_PATH], [p_frac], "o", ms=9, color=C["danger"], mec="white", mew=1.5)
+    text = ax.annotate(label, (G_PATH, p_frac), xytext=offset, textcoords="offset points",
                        ha="right", fontsize=11, fontweight="bold", color=C["danger"],
                        bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none",
                                  alpha=0.85))
@@ -442,9 +435,10 @@ sp.save(fig, out / "amdahl_step1.svg")
 # Slide variant of HA margin figure 2 (Sec. 11.5.4): HBM 3,350, NVLink 900,
 # PCIe 64, network 50 GB/s, drawn for a 0.56-wide column beside the package
 # photo. HBM over PCIe (the reveal, 52x) is calcs.OUT["hbm_pcie"].
-taper_rows = [("HBM", 3350, "memory", "3,350 GB/s"), ("NVLink", 900, "network", "900"),
-              ("PCIe", 64, "danger", "64"),
-              ("Network", 50, "neutral", "50")]
+taper_rows = [("HBM", num("hbm_gbs"), "memory", f"{val('hbm_gbs')} GB/s"),
+              ("NVLink", num("nvlink_gbs"), "network", val("nvlink_gbs")),
+              ("PCIe", num("pcie_gbs"), "danger", val("pcie_gbs")),
+              ("Network", num("net_gbs"), "neutral", val("net_gbs"))]
 fig, ax = plt.subplots(figsize=(3.6, 2.3))
 for i, (label, value, color_key, text) in enumerate(taper_rows):
     y = len(taper_rows) - 1 - i
@@ -471,16 +465,16 @@ sp.save(fig, out / "taper.svg")
 # published chart's data labels (calcs.CNC); the test size where each plateau
 # begins is read from that chart's axis (L2 by 256 KB, far L2 by 40 MB, HBM by
 # 64 MB). Drawn for the 0.46-wide column.
-cnc = calcs.CNC
-starts = [(2, cnc["L1"]), (256, cnc["L2"]), (40960, cnc["L2 far"]), (65536, cnc["HBM"])]
+cnc = calcs.cnc
+starts = [(2, cnc["l1"]), (256, cnc["l2"]), (40960, cnc["l2far"]), (65536, cnc["hbm"])]
 fig, ax = plt.subplots(figsize=(3.4, 2.5))
 xs = [x for x, _ in starts] + [1048576]
-ys = [y for _, y in starts] + [cnc["HBM"]]
+ys = [y for _, y in starts] + [cnc["hbm"]]
 ax.step(xs, ys, where="post", color=C["memory"], lw=2.5)
-labels = [((16, cnc["L1"]), "L1: 22.4 ns", (0, 7), "center"),
-          ((2048, cnc["L2"]), "L2: 159.7 ns", (0, 7), "center"),
-          ((40960, cnc["L2 far"]), "far L2: 294 ns", (-6, 0), "right"),
-          ((65536, cnc["HBM"]), "HBM: 377.9 ns", (-6, 0), "right")]
+labels = [((16, cnc["l1"]), f"L1: {val('cnc_l1')} ns", (0, 7), "center"),
+          ((2048, cnc["l2"]), f"L2: {val('cnc_l2')} ns", (0, 7), "center"),
+          ((40960, cnc["l2far"]), f"far L2: {val('cnc_l2far')} ns", (-6, 0), "right"),
+          ((65536, cnc["hbm"]), f"HBM: {val('cnc_hbm')} ns", (-6, 0), "right")]
 for (x, y), text, off, ha in labels:
     ax.annotate(text, (x, y), xytext=off, textcoords="offset points", ha=ha,
                 va="bottom" if off[1] else "center", fontsize=11,
@@ -502,20 +496,21 @@ sp.save(fig, out / "latency_measured.svg")
 # Dense FP16 ridge per generation (calcs.OUT["ridges"]), with the 200
 # FLOP/byte kernel of the predict question: above the A100 ridge, below the
 # H100 ridge. Drawn for the 0.58-wide column.
-ridges = calcs.OUT["ridges"]
+ridges = [(h.name.split()[-1], h.release_year, h.ridge_point().to("flop/byte").magnitude)
+          for h in calcs.RIDGE_PLOT]
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(3.7, 2.6))
     years = [r[1] for r in ridges]
     vals = [r[2] for r in ridges]
     ax.plot(years, vals, "o-", color=C["danger"], lw=2.5, ms=9, mec="white", mew=1.5)
-    for name, year, val in ridges:
+    for name, year, ridge in ridges:
         dy = 10 if name in ("V100", "H100") else -20
-        ax.annotate(f"{name}: {val:.0f}", (year, val), xytext=(0, dy),
+        ax.annotate(f"{name}: {val('ridge_' + name.lower())}", (year, ridge), xytext=(0, dy),
                     textcoords="offset points", ha="center",
                     fontsize=11, fontweight="bold", color=C["danger"])
     alpha = 1.0 if k == 2 else 0.0
-    ax.axhline(200, color=C["memory"], lw=2, ls="--", alpha=alpha)
-    ax.text(2016.5, 208, "200 FLOP/byte kernel", color=C["memory"], fontsize=11,
+    ax.axhline(num("k_ai"), color=C["memory"], lw=2, ls="--", alpha=alpha)
+    ax.text(2016.5, num("k_ai") * 1.04, f"{val('k_ai')} FLOP/byte kernel", color=C["memory"], fontsize=11,
             fontweight="bold", ha="left", va="bottom", alpha=alpha)
     ax.set_xlim(2016.3, 2024.8)
     ax.set_ylim(0, 360)
@@ -531,12 +526,12 @@ for k in (1, 2):
 # image over each peak: about 8 and 4 microseconds (HA Sec. 11.4.5, Lighthouse
 # 11.1, Napkin Math 11.6).
 sp.hbars(out / "int8peak.svg", [
-    ("FP16", 989, "compute", "989 TFLOP/s"),
-    ("INT8", 1979, "danger", "1,979 TOPS: 2×"),
+    ("FP16", num("h100_fp16"), "compute", f"{val('h100_fp16')} TFLOP/s"),
+    ("INT8", num("h100_int8"), "danger", f"{val('h100_int8')} TOPS: {val('int8_over_fp16')}×"),
 ], "", log=False, xlabel="H100 dense peak", size=(2.9, 1.5))
 sp.hbars(out / "int8floor.svg", [
-    ("FP16", float(calcs.OUT["floor16"]), "compute", f"{float(calcs.OUT['floor16']):.0f} µs"),
-    ("INT8", float(calcs.OUT["floor8"]), "danger", f"{float(calcs.OUT['floor8']):.0f} µs"),
+    ("FP16", calcs.m(calcs.FLOOR16.result.latency_compute, "us"), "compute", f"{val('floor16_us')} µs"),
+    ("INT8", calcs.m(calcs.FLOOR8.result.latency_compute, "us"), "danger", f"{val('floor8_us')} µs"),
 ], "", log=False, xlabel="ResNet-50 arithmetic, one image", size=(2.9, 1.5))
 
 print("figures written")

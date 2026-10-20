@@ -8513,6 +8513,49 @@ class DenseLayerScenario(BaseScenario):
         """Batch size at which the weight-only intensity reaches ``target`` FLOP/byte."""
         return target / self.variant(batch_size=1).intensity
 
+    # One-pass traffic model (added 2026-10-20): the layer reads its input and
+    # weights once and writes its output once. ``activation_bytes_per_value``
+    # sizes inputs and outputs; None uses ``bytes_per_weight``.
+    activation_bytes_per_value: Optional[Quantity] = None
+
+    @property
+    def _act_bytes(self) -> float:
+        b = self.activation_bytes_per_value or self.bytes_per_weight
+        return b.to("byte").magnitude
+
+    @property
+    def flops(self) -> Quantity:
+        """2 x batch x in x out: one multiply and one add per weight per example."""
+        return Q_(2 * self.batch_size * self.weights, "flop")
+
+    @property
+    def input_bytes(self) -> Quantity:
+        return Q_(self.batch_size * self.in_features * self._act_bytes, "byte")
+
+    @property
+    def output_bytes(self) -> Quantity:
+        return Q_(self.batch_size * self.out_features * self._act_bytes, "byte")
+
+    @property
+    def traffic_bytes(self) -> Quantity:
+        """Input read, weights read, and output written once each."""
+        return self.input_bytes + self.weight_bytes + self.output_bytes
+
+    @property
+    def traffic_intensity(self) -> float:
+        """FLOP per byte of the one-pass traffic."""
+        return (self.flops / self.traffic_bytes).to("flop/byte").magnitude
+
+    def batch_for_traffic_intensity(self, target: float) -> float:
+        """Batch at which ``traffic_intensity`` reaches ``target`` FLOP/byte.
+
+        Solves 2 B n m = target (B n a + n m w + B m a) for B, with n, m the
+        widths and a, w the activation and weight bytes per value.
+        """
+        n, m = self.in_features, self.out_features
+        a, w = self._act_bytes, self.bytes_per_weight.to("byte").magnitude
+        return target * n * m * w / (2 * n * m - target * a * (n + m))
+
 
 class ConvLayerScenario(BaseScenario):
     """One ``kernel``-by-``kernel`` convolution, stride one, over a ``height``-by-``width``-by-``in_channels``
@@ -8555,13 +8598,43 @@ class ConvLayerScenario(BaseScenario):
         """Output activation values for one example."""
         return self.positions * self.out_channels
 
+    # Batch and one-pass traffic model (added 2026-10-20): ``batch_size``
+    # examples share one read of the weights; inputs are read and outputs
+    # written once. ``weight_bytes_per_value`` sizes the weights when they use a
+    # different format from the activations (INT8 weights, FP16 activations).
+    batch_size: int = 1
+    weight_bytes_per_value: Optional[Quantity] = None
+
     @property
     def weight_bytes(self) -> Quantity:
-        return (self.weights * self.bytes_per_value).to("byte")
+        return (self.weights * (self.weight_bytes_per_value or self.bytes_per_value)).to("byte")
 
     @property
     def activation_bytes(self) -> Quantity:
         return (self.outputs * self.bytes_per_value).to("byte")
+
+    @property
+    def flops(self) -> Quantity:
+        """2 x batch x MACs: one multiply and one add per weight per position."""
+        return Q_(2 * self.batch_size * self.macs, "flop")
+
+    @property
+    def batch_input_bytes(self) -> Quantity:
+        return (self.batch_size * self.input_values * self.bytes_per_value).to("byte")
+
+    @property
+    def batch_output_bytes(self) -> Quantity:
+        return (self.batch_size * self.outputs * self.bytes_per_value).to("byte")
+
+    @property
+    def traffic_bytes(self) -> Quantity:
+        """Batch input read, weights read, and batch output written once each."""
+        return self.batch_input_bytes + self.weight_bytes + self.batch_output_bytes
+
+    @property
+    def traffic_intensity(self) -> float:
+        """FLOP per byte of the one-pass traffic."""
+        return (self.flops / self.traffic_bytes).to("flop/byte").magnitude
 
     @property
     def activation_to_weight_ratio(self) -> float:
@@ -15486,3 +15559,269 @@ class StagedCompressionScenario(BaseScenario):
     @property
     def final_loss(self) -> float:
         return self.baseline_accuracy - self.final_accuracy
+# --- Hardware acceleration: reuse, rooflines, and limits on one accelerator (added 2026-10-20) ---
+
+
+class ElementwiseOpScenario(BaseScenario):
+    """An element-wise or normalization kernel over ``elements`` values, run unfused.
+
+    Each element is read ``reads`` times and written ``writes`` times from
+    device memory; ``parameter_values`` (a LayerNorm's scale and shift) are
+    read once. ``flops_per_element`` counts the arithmetic on each element.
+    """
+    elements: int
+    flops_per_element: float
+    bytes_per_value: Quantity
+    parameter_values: int = 0
+    reads: int = 1
+    writes: int = 1
+
+    @property
+    def flops(self) -> Quantity:
+        return Q_(self.elements * self.flops_per_element, "flop")
+
+    @property
+    def input_bytes(self) -> Quantity:
+        return (self.reads * self.elements * self.bytes_per_value).to("byte")
+
+    @property
+    def output_bytes(self) -> Quantity:
+        return (self.writes * self.elements * self.bytes_per_value).to("byte")
+
+    @property
+    def parameter_bytes(self) -> Quantity:
+        return (self.parameter_values * self.bytes_per_value).to("byte")
+
+    @property
+    def traffic_bytes(self) -> Quantity:
+        return self.input_bytes + self.output_bytes + self.parameter_bytes
+
+    @property
+    def intensity(self) -> float:
+        """FLOP per byte of the unfused traffic."""
+        return (self.flops / self.traffic_bytes).to("flop/byte").magnitude
+
+
+class AcceleratedFractionScenario(BaseScenario):
+    """Amdahl's law with a path gain set by two rates: ``fraction`` of the
+    baseline time runs ``accelerated_rate / baseline_rate`` times faster.
+
+    The rates may be operation rates (a compute-bound path) or bandwidths (a
+    bandwidth-bound path); only their ratio enters.
+    """
+    fraction: float
+    accelerated_rate: Quantity
+    baseline_rate: Quantity
+
+    @property
+    def gain(self) -> float:
+        return (self.accelerated_rate / self.baseline_rate).to("").magnitude
+
+    @property
+    def speedup(self) -> float:
+        from ..physics import calc_amdahls_speedup
+        return calc_amdahls_speedup(self.fraction, self.gain)
+
+    @property
+    def ceiling(self) -> float:
+        """The speedup with an infinitely fast path: 1 / (1 - fraction)."""
+        from ..physics import calc_amdahls_speedup
+        return calc_amdahls_speedup(self.fraction, float("inf"))
+
+
+class SystolicReuseEnergyScenario(BaseScenario):
+    """Energy per MAC with every operand from off-chip memory, against a systolic array.
+
+    Streaming: ``naive_accesses`` off-chip accesses per MAC (load both operands
+    and the running sum, write the sum back). Systolic: ``edge_loads`` operands
+    enter at the array's edge and serve ``array_dim`` MACs; partial sums stay
+    in the array.
+    """
+    access_energy: Quantity
+    mac_energy: Quantity
+    naive_accesses: int
+    edge_loads: int
+    array_dim: int
+
+    @property
+    def naive_energy(self) -> Quantity:
+        return (self.naive_accesses * self.access_energy + self.mac_energy).to("pJ")
+
+    @property
+    def systolic_accesses(self) -> float:
+        """Off-chip accesses per MAC in the array."""
+        return self.edge_loads / self.array_dim
+
+    @property
+    def systolic_energy(self) -> Quantity:
+        return (self.systolic_accesses * self.access_energy + self.mac_energy).to("pJ")
+
+    @property
+    def ratio(self) -> float:
+        return (self.naive_energy / self.systolic_energy).to("").magnitude
+
+
+class MatrixInstructionScenario(BaseScenario):
+    """One warp-wide matrix instruction of shape ``m`` x ``n`` x ``k``, issued by ``threads`` threads."""
+    m: int
+    n: int
+    k: int
+    threads: int
+
+    @property
+    def macs(self) -> int:
+        return self.m * self.n * self.k
+
+    @property
+    def macs_per_thread(self) -> float:
+        """Scalar fused multiply-adds each thread would otherwise issue."""
+        return self.macs / self.threads
+
+
+class ParameterBandwidthGrowthScenario(BaseScenario):
+    """Dense-model parameter growth against per-device memory-bandwidth growth.
+
+    Each series is indexed to its baseline entry; the growth is the largest
+    index. ``sparse_models`` are reported but kept out of the growth figure,
+    because their total parameter count does not set per-token traffic.
+    """
+    accelerators: List[HardwareNode]
+    dense_models: List[Workload]
+    sparse_models: List[Workload] = []
+    baseline_accelerator: HardwareNode
+    baseline_model: Workload
+
+    @property
+    def bandwidth_index(self) -> List[float]:
+        b0 = self.baseline_accelerator.memory.bandwidth
+        return [(h.memory.bandwidth / b0).to("").magnitude for h in self.accelerators]
+
+    @property
+    def dense_index(self) -> List[float]:
+        p0 = self.baseline_model.parameters
+        return [(m.parameters / p0).to("").magnitude for m in self.dense_models]
+
+    @property
+    def sparse_index(self) -> List[float]:
+        p0 = self.baseline_model.parameters
+        return [(m.parameters / p0).to("").magnitude for m in self.sparse_models]
+
+    @property
+    def bandwidth_growth(self) -> float:
+        return max(self.bandwidth_index)
+
+    @property
+    def parameter_growth(self) -> float:
+        return max(self.dense_index)
+
+
+class DeviceEnvelopeScenario(BaseScenario):
+    """Best-device-to-date envelopes of two columns of a ``Literature.Series`` device table.
+
+    Rows are ordered by ``date_key``; each envelope is the running maximum,
+    and growth is the final envelope over the earliest device's value.
+    """
+    series_name: str
+    date_key: str
+    compute_key: str
+    bandwidth_key: str
+
+    @property
+    def rows(self) -> List[dict]:
+        from ..literature.registry import Literature
+        return sorted(getattr(Literature.Series, self.series_name).entries, key=lambda r: r[self.date_key])
+
+    def _envelope(self, key) -> List[tuple]:
+        best, out = 0.0, []
+        for r in self.rows:
+            best = max(best, r[key])
+            out.append((r[self.date_key], best))
+        return out
+
+    @property
+    def compute_envelope(self) -> List[tuple]:
+        return self._envelope(self.compute_key)
+
+    @property
+    def bandwidth_envelope(self) -> List[tuple]:
+        return self._envelope(self.bandwidth_key)
+
+    @property
+    def device_count(self) -> int:
+        return len(self.rows)
+
+    @property
+    def baseline(self) -> dict:
+        return self.rows[0]
+
+    @property
+    def compute_growth(self) -> float:
+        return self.compute_envelope[-1][1] / self.baseline[self.compute_key]
+
+    @property
+    def bandwidth_growth(self) -> float:
+        return self.bandwidth_envelope[-1][1] / self.baseline[self.bandwidth_key]
+
+    @property
+    def best_bandwidth_since(self) -> str:
+        """Date of the first device that reached today's best bandwidth."""
+        env = self.bandwidth_envelope
+        return next(d for d, v in env if v == env[-1][1])
+
+
+class AcceleratorGenerationsScenario(BaseScenario):
+    """Peak compute against memory bandwidth across ``accelerators``, first to last.
+
+    The ridge point of each is its peak over its bandwidth; the gap growth is
+    how far the ridge rose from the first to the last.
+    """
+    accelerators: List[HardwareNode]
+
+    @property
+    def ridges(self) -> List[float]:
+        return [h.ridge_point().to("flop/byte").magnitude for h in self.accelerators]
+
+    @property
+    def compute_growth(self) -> float:
+        a, b = self.accelerators[0], self.accelerators[-1]
+        return (b.compute.peak_flops / a.compute.peak_flops).to("").magnitude
+
+    @property
+    def bandwidth_growth(self) -> float:
+        a, b = self.accelerators[0], self.accelerators[-1]
+        return (b.memory.bandwidth / a.memory.bandwidth).to("").magnitude
+
+    @property
+    def gap_growth(self) -> float:
+        return self.compute_growth / self.bandwidth_growth
+
+
+class LatencyInCyclesScenario(BaseScenario):
+    """A memory latency counted in cycles of a processor clocked at ``clock``."""
+    latency: Quantity
+    clock: Quantity
+
+    @property
+    def cycle_time(self) -> Quantity:
+        return (1 / self.clock).to("ps")
+
+    @property
+    def cycles(self) -> float:
+        return (self.latency * self.clock).to("").magnitude
+
+
+class PeakRatioRangeScenario(BaseScenario):
+    """One peak rate against a baseline stated as a range, ``baseline_low`` to ``baseline_high``."""
+    rate: Quantity
+    baseline_low: Quantity
+    baseline_high: Quantity
+
+    @property
+    def ratio_low(self) -> float:
+        """Against the high baseline."""
+        return (self.rate / self.baseline_high).to("").magnitude
+
+    @property
+    def ratio_high(self) -> float:
+        """Against the low baseline."""
+        return (self.rate / self.baseline_low).to("").magnitude
