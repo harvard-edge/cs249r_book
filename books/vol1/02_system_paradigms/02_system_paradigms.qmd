@@ -1146,9 +1146,10 @@ ResNet-50 becomes compute bound when batching and data reuse raise computation p
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim import Hardware, ReferenceStats, Scenarios, Systems
+from mlsysim import Hardware, Platforms, ReferenceStats, Scenarios, Systems
 from mlsysim.fmt import (
     check,
+    fmt_int,
     fmt_memory_capacity,
     fmt_usd,
     fmt_count,
@@ -1159,6 +1160,7 @@ from mlsysim.core.units import (
     TB,
     GB,
     MB,
+    KiB,
     GiB,
     TiB,
     watt,
@@ -1179,9 +1181,13 @@ class HardwareSpectrumSetup:
     # NVIDIA's marketed "1 petaflop" envelope is FP4 with sparsity; the registry
     # stores dense fp4 (500 TFLOPS) separately per its dense convention.
     edge_peak_ai_flops = Hardware.Workstation.DGX_Spark.compute.precision_flops["fp4_sparse"]
+    # Memory span, cloud pod HBM over the TinyML tier's SRAM. Both are binary
+    # quantities (128 TiB, 512 KiB) labeled TB and KB, so the ratio is 2^28.
+    mem_span = (Systems.Pods.TPUv4_4096.memory / Platforms.Tiny.ram).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(cloud_peak_flops > edge_peak_ai_flops, "Cloud peak compute must exceed edge workstation")
+    check(mem_span == 2 ** 28, f"Cloud-to-TinyML memory span must be 2^28: {mem_span}")
     check(round(cloud_peak_flops.to(EFLOP / second).magnitude, 1) == 1.1, f"TPU v4 pod peak FLOP/s mismatch: {cloud_peak_flops}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
@@ -1198,6 +1204,8 @@ class HardwareSpectrumSetup:
     edge_pwr_w_str = fmt_power(Hardware.Workstation.DGX_Spark.tdp, unit=watt, precision=0, commas=False)
     edge_price_min_str = fmt_usd(Hardware.Workstation.DGX_Spark.unit_cost.to(USD).magnitude, precision=0)
     edge_price_max_str = fmt_usd(Hardware.Workstation.DGX_Spark.unit_cost_max.to(USD).magnitude, precision=0)
+    tiny_ram_kb_str = fmt_memory_capacity(Platforms.Tiny.ram, unit=KiB, precision=0, commas=False)
+    mem_span_millions_str = fmt_int(mem_span / 1e6)
     tiny_flash_mb_str = fmt_memory_capacity(Hardware.Tiny.ESP32_S3.memory.flash_capacity.to(MB), unit=MB, precision=1, commas=False)
     tiny_pwr_min_w_str = fmt_power(Hardware.Tiny.ESP32_S3.tdp_min, unit=watt, precision=2, commas=False)
     tiny_pwr_max_w_str = fmt_power(Hardware.Tiny.ESP32_S3.tdp_max, unit=watt, precision=1, commas=False)
@@ -1351,7 +1359,7 @@ class DeploymentThresholdsTable:
     tiny_thresh_mw_str = fmt_power(tiny_power_threshold, unit=milliwatt, precision=0, commas=False, upper_bound=True)
 ```
 
-Extending that cloud-versus-mobile comparison across all four deployment tiers grounds the conceptual regimes of @tbl-deployment-paradigms-overview in concrete hardware. @Tbl-representative-systems places one real platform in each paradigm and pairs it with the per-device envelope that marks the tier.[^fn-cost-spectrum-ml] The example-platform and power columns describe complete systems, including a cloud pod, while the tier compute and bandwidth columns describe per-device envelopes. Because vendors quote peak rates at the numerical precisions their chips target, the per-device compute column must be read alongside its format: the cloud floor states dense 16-bit floating-point throughput per accelerator, whereas the edge ceiling reflects 4-bit sparse operations on a high-end workstation. At matched precision and density, one TPU v4 chip still delivers `{python} DeploymentThresholdsTable.cloud_edge_flops_mult_str` the dense 16-bit throughput and `{python} DeploymentThresholdsTable.cloud_edge_bw_mult_str` the memory bandwidth of the DGX Spark. The following spans compare the complete system examples rather than equivalent individual chips. Memory drops from `{python} HardwareSpectrumSetup.cloud_mem_tb_str` (cloud) to 512 KB (TinyML), a 250 million-fold reduction. Power runs from about `{python} HardwareSpectrumSetup.cloud_pwr_mw_str` for the cloud pod to the TinyML tier's average-power target of `{python} DeploymentThresholdsTable.tiny_thresh_mw_str`. Hardware cost spans six orders of magnitude, from multimillion-dollar clusters to \$10 microcontrollers. Together with facility overheads such as power usage effectiveness (PUE),[^fn-pue-facility-efficiency] these spreads decide which paradigm can serve a workload economically, and they explain why model compression becomes essential as the budget tightens.
+Extending that cloud-versus-mobile comparison across all four deployment tiers grounds the conceptual regimes of @tbl-deployment-paradigms-overview in concrete hardware. @Tbl-representative-systems places one real platform in each paradigm and pairs it with the per-device envelope that marks the tier.[^fn-cost-spectrum-ml] The example-platform and power columns describe complete systems, including a cloud pod, while the tier compute and bandwidth columns describe per-device envelopes. Because vendors quote peak rates at the numerical precisions their chips target, the per-device compute column must be read alongside its format: the cloud floor states dense 16-bit floating-point throughput per accelerator, whereas the edge ceiling reflects 4-bit sparse operations on a high-end workstation. At matched precision and density, one TPU v4 chip still delivers `{python} DeploymentThresholdsTable.cloud_edge_flops_mult_str` the dense 16-bit throughput and `{python} DeploymentThresholdsTable.cloud_edge_bw_mult_str` the memory bandwidth of the DGX Spark. The following spans compare the complete system examples rather than equivalent individual chips. Memory drops from `{python} HardwareSpectrumSetup.cloud_mem_tb_str` (cloud) to `{python} HardwareSpectrumSetup.tiny_ram_kb_str` (TinyML), a `{python} HardwareSpectrumSetup.mem_span_millions_str` million-fold reduction. Power runs from about `{python} HardwareSpectrumSetup.cloud_pwr_mw_str` for the cloud pod to the TinyML tier's average-power target of `{python} DeploymentThresholdsTable.tiny_thresh_mw_str`. Hardware cost spans six orders of magnitude, from multimillion-dollar clusters to \$10 microcontrollers. Together with facility overheads such as power usage effectiveness (PUE),[^fn-pue-facility-efficiency] these spreads decide which paradigm can serve a workload economically, and they explain why model compression becomes essential as the budget tightens.
 
 The hardware spectrum\index{Hardware spectrum!resource progression}\index{Hardware spectrum!deployment platforms} turns the bottleneck diagnosis into a fit test, in which each workload must be matched to the tier whose compute, bandwidth, power, and cost envelope it can satisfy. These platforms are products of decades of hardware evolution, from floating-point coprocessors in the 1980s through graphics processors in the 2000s to today's domain-specific AI accelerators.
 
