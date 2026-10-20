@@ -1059,3 +1059,120 @@ def test_doorbell_braking_voice_and_pipeline():
     assert p.accelerated_total.to("ms").magnitude == approx(146)
     assert p.overall_speedup == approx(1.3699)
     assert p.limit == approx(1.4286)
+# --- Physical-plant budgets of the warehouse mobile manipulator (added 2026-10-20) ---
+
+def test_stopping_budgets_warehouse_base():
+    body = Scenarios.WarehouseBaseStopBodyTerms.result
+    assert body.braking_travel.to("mm").magnitude == approx(562.5)
+    assert body.overhead.to("mm").magnitude == approx(150)
+    assert body.delay_travel.to("mm").magnitude == approx(30)
+    assert body.required_distance.to("mm").magnitude == approx(742.5)
+    assert body.spare.to("mm").magnitude == approx(357.5)
+    assert body.speed_ceiling.to("m/s").magnitude == approx(1.90977)
+    assert body.added_delay_travel.to("mm").magnitude == approx(150)
+    assert body.braking_time.to("ms").magnitude == approx(750)
+    full = Scenarios.WarehouseBaseStopFullDelay.result
+    assert full.delay_travel.to("mm").magnitude == approx(200.4)
+    assert full.stop_distance.to("mm").magnitude == approx(762.9)
+    assert full.required_distance.to("mm").magnitude == approx(912.9)
+    assert full.spare.to("mm").magnitude == approx(187.1)
+    assert full.speed_ceiling.to("m/s").magnitude == approx(1.70039)
+    assert full.crossover_speed.to("m/s").magnitude == approx(0.5344)
+    fast = Scenarios.WarehouseBaseStopFastSetpoint.result
+    assert fast.required_distance.to("mm").magnitude == approx(1417.2)
+    assert fast.spare.to("mm").magnitude == approx(-317.2)
+    insp = Scenarios.WarehouseBaseStopInspectedFloor
+    assert insp.a_brake.to("m/s**2").magnitude == approx(1.17680)
+    assert insp.result.speed_ceiling.to("m/s").magnitude == approx(1.34632)
+    step = Scenarios.WarehouseBaseSpeedStep.result
+    assert step.braking_growth == approx(0.77778)
+    assert step.braking_added.to("mm").magnitude == approx(437.5)
+    assert step.equivalent_delay.to("ms").magnitude == approx(291.667)
+
+
+def test_braking_ceilings_and_hub_drive():
+    r = Scenarios.WarehouseBaseBrakingCeilings.result
+    assert r.wheel_torque.to("N*m").magnitude == approx(60)
+    assert r.force.to("N").magnitude == approx(902.256)
+    assert r.m_eff.to("kg").magnitude == approx(387)
+    assert r.a_torque.to("m/s**2").magnitude == approx(2.33141)
+    assert r.torque_margin == approx(0.16570)
+    assert r.a_torque_rated.to("m/s**2").magnitude == approx(0.77714)
+    assert r.mu_required == approx(0.20394)
+    assert r.mu_required_rated == approx(0.25017)
+    assert r.a_traction_dry.to("m/s**2").magnitude == approx(4.79673)
+    assert r.a_traction_inspected.to("m/s**2").magnitude == approx(1.17680)
+    assert r.cg_ratio_max == approx(4.90333)
+    assert r.a_tip is None and r.passes is False
+    assert r.wheel_speed.to("rpm").magnitude == approx(107.699)
+    assert r.back_emf.to("V").magnitude == approx(28.2171)
+    assert r.v_brake.to("V").magnitude == approx(10.7171)
+    assert r.v_drive.to("V").magnitude == approx(45.7171)
+    e = Scenarios.WarehouseBaseHubDriveElectrical.result
+    assert e.time_constant.to("ms").magnitude == approx(2.69286)
+    assert e.ramp_time.to("ms").magnitude == approx(1.12202)
+    assert e.ramp_share == approx(0.056101)
+    assert e.full_step_current.to("A").magnitude == approx(60)
+    assert e.short_peak_wheel_speed.to("rpm").magnitude == approx(177.308)
+
+
+def test_grasp_freshness_profile():
+    r = Scenarios.WristCameraGraspAgeProfile.result
+    assert r.deadline.to("ms").magnitude == approx(60)
+    assert r.stage_sum_p50.to("ms").magnitude == approx(35)
+    assert r.stage_sum_p99.to("ms").magnitude == approx(50)
+    assert r.stage_sum_max.to("ms").magnitude == approx(80.7)
+    assert r.focus_share == approx(0.52857)
+    assert r.focus_rate.to("Hz").magnitude == approx(54.054)
+    assert r.travel_p50.to("mm").magnitude == approx(7)
+    assert r.travel_tail.to("mm").magnitude == approx(13.68)
+    assert r.overrun_tail.to("mm").magnitude == approx(1.68)
+
+
+def test_joint_gearing_heat_and_stall():
+    g = Scenarios.GearedRotorFlywheel.result
+    assert g.reflected_inertia.to("kg*m**2").magnitude == approx(0.056)
+    assert g.flywheel_mass.to("kg").magnitude == approx(11.2)
+    assert g.matched_ratio == approx(38.9597)
+    assert g.acceleration_share == approx(0.67651)
+    c = Scenarios.PandaClassJointGearRatios.result
+    assert c.motor_constant.magnitude == approx(0.26579)
+    assert c.copper_loss[50].to("W").magnitude == approx(59.3175)
+    assert c.copper_loss[100].to("W").magnitude == approx(14.8294)
+    assert c.reflected_inertia[100].to("kg*m**2").magnitude == approx(0.734)
+    assert c.loss_inertia_product[50].magnitude == approx(10.8848)
+    assert c.over_peak[10] == approx(2.52723)
+    b = Scenarios.PandaClassJointBurst.result
+    assert b.time_constant.to("s").magnitude == approx(300)
+    assert b.horizon_cold.to("s").magnitude == approx(78.4162)
+    assert b.horizon_hot.to("s").magnitude == approx(43.0813)
+    assert b.duty == approx(0.20002)
+    assert b.off_time_scheduled.to("s").magnitude == approx(12)
+    assert b.periodic_peak.to("degC").magnitude == approx(142.002)
+    s = Scenarios.PandaClassElbowStall.result
+    assert s.feedback_gain == approx(0.41961)
+    assert s.steady_rise.to("K").magnitude == approx(198.425)
+    assert s.sustainable_hold.to("N*m").magnitude == approx(72.9822)
+    assert s.derating == approx(0.16112)
+    d = Scenarios.SealedJointCatalogDerating.result
+    assert d.ambient_share == approx(0.93250)
+    assert d.combined_share == approx(0.65938)
+
+
+def test_drive_bus_campaign_and_throttle():
+    r = Scenarios.WarehouseDriveBusStop.result
+    assert r.sag.to("V").magnitude == approx(4.2)
+    assert r.sustained_depleted.to("V").magnitude == approx(37.8)
+    assert r.margin_depleted.to("V").magnitude == approx(4.8)
+    assert r.crossing_current.to("A").magnitude == approx(150)
+    assert r.kinetic_energy.to("J").magnitude == approx(414)
+    assert r.capacitor_only_endpoint.to("V").magnitude == approx(176.475)
+    assert r.capacitor_to_clamp.to("J").magnitude == approx(7.524)
+    assert r.peak_power.to("W").magnitude == approx(828)
+    assert r.resistor_max.to("ohm").magnitude == approx(4.34783)
+    z = Scenarios.CleanLoadedStopCampaign.result
+    assert z.coefficient == approx(2.99573)
+    assert z.one_in == approx(1001.42)
+    t = Scenarios.ThrottledNavigationBackbone.result
+    assert t.added_age.to("ms").magnitude == approx(11)
+    assert t.added_travel.to("mm").magnitude == approx(16.5)

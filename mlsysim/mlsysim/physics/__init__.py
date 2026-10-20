@@ -315,3 +315,31 @@ __all__ = [
     "calc_decoder_matmul_weights",  # added 2026-10-20
 ]
 
+
+# --- Motors, winding heat, and the zero-failure rate bound (added 2026-10-20) ---
+from .constants import COPPER_TEMPERATURE_COEFFICIENT, COPPER_COEFFICIENT_REFERENCE_TEMPERATURE
+from .motors import (
+    calc_copper_resistance_factor,
+    calc_first_order_temperature,
+    calc_first_order_time_to_temperature,
+    calc_periodic_burst_peak_rise,
+    calc_voltage_limited_speed,
+    calc_inertia_matched_ratio,
+    calc_peak_normalized_response,
+    calc_contact_force_rate,
+)
+from .robotics.assurance import calc_zero_failure_rate_upper_bound
+
+__all__ += [
+    "COPPER_TEMPERATURE_COEFFICIENT",
+    "COPPER_COEFFICIENT_REFERENCE_TEMPERATURE",
+    "calc_copper_resistance_factor",
+    "calc_first_order_temperature",
+    "calc_first_order_time_to_temperature",
+    "calc_periodic_burst_peak_rise",
+    "calc_voltage_limited_speed",
+    "calc_inertia_matched_ratio",
+    "calc_peak_normalized_response",
+    "calc_contact_force_rate",
+    "calc_zero_failure_rate_upper_bound",
+]

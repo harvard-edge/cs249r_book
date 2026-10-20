@@ -205,6 +205,7 @@ class FramelessMotor(BaseModel):
     rotor_inertia: Quantity
     pole_pairs: int
     mass: Quantity
+    no_load_speed: Optional[Quantity] = None  # at rated voltage, theoretical (added 2026-10-20)
     metadata: Metadata = Field(default_factory=Metadata)
 
     @field_validator("rated_voltage", mode="after")

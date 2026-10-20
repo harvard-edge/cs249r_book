@@ -39,3 +39,10 @@ INSULATION_CLASS_F_LIMIT = ureg.Quantity(155.0, ureg.degC)
 # Source: Moritz (2000), Geodetic Reference System 1980, J. Geodesy 74, mean
 # radius R1 = 6,371.0088 km; rounded to the conventional 6,371 km.
 EARTH_MEAN_RADIUS = 6371.0 * ureg.kilometer
+# --- Copper winding resistance (added 2026-10-20) ---------------------------
+# Temperature coefficient of resistance of annealed copper, 100 percent IACS,
+# stated at 20 degC: R(T) = R_20 [1 + alpha (T - 20 degC)]. A property of the
+# conductor, not of any motor; winding heat budgets read it from here.
+# Source: NBS Handbook 100, Copper Wire Tables (1966), alpha_20 = 0.00393 per K.
+COPPER_TEMPERATURE_COEFFICIENT = 0.00393 / ureg.kelvin
+COPPER_COEFFICIENT_REFERENCE_TEMPERATURE = ureg.Quantity(20.0, ureg.degC)

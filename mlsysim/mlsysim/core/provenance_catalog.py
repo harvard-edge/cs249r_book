@@ -2634,3 +2634,17 @@ APPLE_HEY_SIRI_2017 = _report(
     notes=("The always-on processor runs a DNN of 5 layers of 32 hidden units; the main-processor "
            "detector uses 5 layers of 192 hidden units (two-pass detection, fig. 5)."),
 )
+# --- Spaceflight anomaly inquiries (added 2026-10-20) -----------------------
+ESA_SCHIAPARELLI_INQUIRY = _lit(
+    "prov:esa-schiaparelli-inquiry-2017",
+    "ESA Investigation Board, ExoMars 2016 - Schiaparelli Anomaly Inquiry (2017)",
+    url="https://exploration.esa.int/web/mars/-/59176-exomars-2016-schiaparelli-anomaly-inquiry",
+    verified="2026-10-20",
+    notes=(
+        "Descent of 19 October 2016: the IMU saturation flag persisted longer than the 15 ms "
+        "assumed at acceptance; the attitude estimate drifted by about 165 degrees and the "
+        "computed altitude went negative; the parachute and backshell were released and the "
+        "thrusters fired for 3 s instead of the planned 30 s at about 3.7 km altitude; free fall "
+        "ended in an impact at about 540 km/h."
+    ),
+)

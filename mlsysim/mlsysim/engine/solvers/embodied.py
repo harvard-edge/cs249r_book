@@ -37,25 +37,35 @@ class StoppingBudgetModel(ForwardModel):
     braking time are from ``speed``, the speed when the hazard appears, as the
     elementary budget assumes. The crossover speed ``2 a tau`` is where the
     two terms are equal; the speed ceiling is the fastest speed whose stop
-    fits ``clear_distance``. Jerk-limited braking, localization error, and a
-    protective margin are left out (``calc_scurve_stop_distance`` and
-    ``calc_safe_stopping_distance`` add them).
+    fits ``clear_distance``. A localization bound and a protective margin, when
+    stated, add to the required distance and lower the ceiling
+    (``calc_safe_stopping_distance``); jerk-limited braking is left out
+    (``calc_scurve_stop_distance`` adds it). ``added_delay`` prices one more
+    delay step as travel at ``speed``.
     """
     requires = ("speed", "delay", "deceleration")
     produces = StoppingBudgetResult
 
     def solve(self, speed: Quantity, delay: Quantity, deceleration: Quantity,
               clear_distance: Optional[Quantity] = None,
-              speed_at_delay_end: Optional[Quantity] = None) -> StoppingBudgetResult:
+              speed_at_delay_end: Optional[Quantity] = None,
+              loc_margin: Optional[Quantity] = None,
+              physical_margin: Optional[Quantity] = None,
+              added_delay: Optional[Quantity] = None) -> StoppingBudgetResult:
         m = ureg.meter
         end = speed if speed_at_delay_end is None else speed_at_delay_end
         delay_travel = calc_travel_between_speeds(speed, end, delay).to(m)
         braking = (speed ** 2 / (2 * deceleration)).to(m)
         stop = (delay_travel + braking).to(m)
+        loc = 0 * m if loc_margin is None else loc_margin.to(m)
+        margin = 0 * m if physical_margin is None else physical_margin.to(m)
+        overhead = (loc + margin).to(m)
+        required = (stop + overhead).to(m)
         delay_positive = delay.to(ureg.second).magnitude > 0
         out = dict(
             speed=speed, delay=delay, deceleration=deceleration,
             delay_travel=delay_travel, braking_travel=braking, stop_distance=stop,
+            overhead=overhead, required_distance=required,
             braking_time=calc_braking_time(speed, deceleration),
             crossover_speed=calc_stopping_crossover_speed(delay, deceleration),
         )
@@ -63,11 +73,14 @@ class StoppingBudgetModel(ForwardModel):
             out["braking_over_delay"] = _ratio(braking, delay_travel)
             out["delay_share_of_braking"] = _ratio(delay_travel, braking)
         if clear_distance is not None:
-            spare = (clear_distance - stop).to(m)
+            spare = (clear_distance - required).to(m)
             out.update(clear_distance=clear_distance, spare=spare,
-                       fits=spare.magnitude >= 0, clear_over_stop=_ratio(clear_distance, stop))
+                       fits=spare.magnitude >= 0, clear_over_stop=_ratio(clear_distance, required))
             if delay_positive:
-                out["speed_ceiling"] = calc_max_permitted_velocity(clear_distance, delay, deceleration)
+                out["speed_ceiling"] = calc_max_permitted_velocity(clear_distance, delay, deceleration,
+                                                                   loc_margin=loc, physical_margin=margin)
+        if added_delay is not None:
+            out["added_delay_travel"] = (speed * added_delay).to(m)
         return StoppingBudgetResult(**out)
 
 

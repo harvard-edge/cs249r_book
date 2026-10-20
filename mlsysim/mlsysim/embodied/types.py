@@ -485,6 +485,11 @@ class MobileManipulatorPlatform(BaseModel):
         return (2 * self.permission_rail_load * self.permission_rail_holdup
                 / (self.control_rail_battery_low**2 - self.control_rail_dropout**2)).to(ureg.farad)
 
+    @property
+    def permission_rail_holdup_energy(self):
+        """Energy the hold-up store delivers between its lowest charge and dropout: P t (added 2026-10-20)."""
+        return (self.permission_rail_load * self.permission_rail_holdup).to(ureg.joule)
+
 
 class EmbodiedSiteScenario(BaseModel):
     """Budget terms for one embodied machine at one site. Illustrative unless a field is sourced."""

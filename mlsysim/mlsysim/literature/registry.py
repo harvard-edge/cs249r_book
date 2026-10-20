@@ -41,6 +41,8 @@ PredictionQuality = _load("prediction_quality", "PredictionQuality", "Cited pred
 GamePlaying = _load("game_playing", "GamePlaying", "Cited results of landmark game-playing systems (Deep Blue, AlphaGo Zero).")
 # Deployment-tier field figures (added 2026-10-20)
 DeviceMeasurements = _load("device_measurements", "DeviceMeasurements", "Cited measurements of deployed ML hardware (TPU v1 roofline, memory-wall growth, phone stress test, two-pass wake word).")
+# Spaceflight anomaly inquiries (added 2026-10-20)
+SpaceflightAnomalies = _load("spaceflight_anomalies", "SpaceflightAnomalies", "Cited results of spaceflight anomaly inquiries (ESA Schiaparelli 2017).")
 
 
 # ---------------------------------------------------------------------------
@@ -312,6 +314,7 @@ class Literature(Registry):
     PredictionQuality = PredictionQuality  # added 2026-10-20
     GamePlaying = GamePlaying  # added 2026-10-20
     DeviceMeasurements = DeviceMeasurements  # added 2026-10-20
+    SpaceflightAnomalies = SpaceflightAnomalies  # added 2026-10-20
     ComputeTrend = ComputeTrend
     AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks
