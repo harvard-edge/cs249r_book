@@ -3,8 +3,10 @@
 
 Plots use the shared slideplot helper; diagrams are SVG written by the small
 builder below, one file per build step on one canvas so nothing moves. Every
-derived value comes from calcs.py in this folder (imported, never retyped).
-Inputs and their sources are listed in calcs.py.
+number comes from MLSysIM through calcs.py in this folder (imported, never
+retyped): printed labels use val(key), plotted points num(key) or the same
+Scenarios.* and Literature series calcs.py reads. Axis ranges and tick
+positions are layout.
 
 Diagrams follow the Volume II C3 roles: compute blue #1F407A, communication
 amber #d97706, coordination violet #7c3aed, storage green, risk red.
@@ -24,8 +26,8 @@ import slideplot as sp  # noqa: E402
 
 with contextlib.redirect_stdout(io.StringIO()):
     import calcs  # noqa: E402
+from deckvals import val, num  # noqa: E402
 
-R = calcs.results
 plt = sp.plt
 C = sp.C
 out = HERE
@@ -86,27 +88,24 @@ class Svg:
             (out / name).write_text(svg)
 
 
-def num(label, fmt):
-    return fmt.format(R[label])
-
-
 # =============================================================================
 # 1. The fleet stack with one number per row (retrieval reveal)
 #    Canvas 900 x 372 for a full-width slot (about 14.5 cm): 19 px = 8.7 pt.
 # =============================================================================
 rows = [  # top to bottom: layer, number, owning lecture
     ("Governance & Sustainability",
-     f"Same energy: Poland grid {num('Poland / Quebec', '{:.0f}')}× Quebec's carbon", "L15"),
-    ("Assurance", "DP noise: $200 error on a mean of 1,000 salaries", "L13"),
-    ("Operations", "864 false alarms a day from 1,000 monitors", "L12"),
-    ("Runtime & Serving", "12 requests of 128K tokens fill one 8-GPU node", "L10"),
-    ("Reliability & Control", "Checkpoint every 13.8 min at 10,000 GPUs", "L7"),
-    ("Distributed Execution", "175B, pure data parallel, 1,024 GPUs: 15% efficient", "L6"),
-    ("Fabric & Storage", "2,450 GB checkpoint: 0.34 s to local NVMe", "L4"),
+     f"Same energy: Poland grid {val('geo_ratio')}× Quebec's carbon", "L15"),
+    ("Assurance", f"DP noise: ${val('sal_err')} error on a mean of {val('sal_n')} salaries", "L13"),
+    ("Operations", f"{val('al_daily')} false alarms a day from {val('al_monitors')} monitors", "L12"),
+    ("Runtime & Serving",
+     f"{val('kv_long_n')} requests of {val('kv_context_k')}K tokens fill one {val('node_gpus')}-GPU node", "L10"),
+    ("Reliability & Control", f"Checkpoint every {val('yd_tau_min')} min at {val('yd_gpus')} GPUs", "L7"),
+    ("Distributed Execution",
+     f"{val('params_b')}B, pure data parallel, {val('ref_gpus')} GPUs: {val('dp_eff_pct')}% efficient", "L6"),
+    ("Fabric & Storage", f"{val('ckpt_gb')} GB checkpoint: {val('pause_s')} s to local NVMe", "L4"),
     ("Facility & Accelerators",
-     f"10 GB: HBM {num('10 GB over HBM, ms', '{:.1f}')} ms, NVLink "
-     f"{num('10 GB over NVLink, ms', '{:.1f}')}, InfiniBand "
-     f"{num('10 GB over InfiniBand, ms', '{:.0f}')}", "L2"),
+     f"{val('stair_gb')} GB: HBM {val('stair_hbm_ms')} ms, NVLink {val('stair_nvlink_ms')}, "
+     f"InfiniBand {val('stair_ib_ms')}", "L2"),
 ]
 g = Svg(900, 372)
 for i, (name, number, lec) in enumerate(rows):
@@ -149,53 +148,41 @@ g.add(3, f'<text {FONT} x="14" y="190" font-size="18" font-weight="700" fill="{R
 g.write("principles", 3)
 
 # =============================================================================
-# 3. Llama 3 405B: 419 unexpected interruptions by category (measured)
-# =============================================================================
-cat_rows = [
-    ("GPU (incl. HBM3)", R["Llama 3 interruptions, GPU"], "danger"),
-    ("Software and dependency", R["Llama 3 interruptions, Dependency"], "neutral"),
-    ("Network switch/cable", R["Llama 3 interruptions, Network"], "network"),
-    ("Host maintenance", R["Llama 3 interruptions, Unplanned maintenance"], "neutral"),
-    ("Other host hardware", R["Llama 3 interruptions, Host"], "neutral"),
-    ("Unknown (NCCL timeouts)", R["Llama 3 interruptions, Unknown"], "neutral"),
-]
-sp.hbars(out / "llama_causes.svg", cat_rows, "", log=False, size=(5.6, 2.9),
-         value_fmt="{:.0f}")
-
-# =============================================================================
 # 4. Tail at scale: Dean and Barroso 2013, Table 1, p99 (measured)
 # =============================================================================
 tail_rows = [
-    ("One random leaf", calcs.DB_ONE_LEAF_P99_MS, "memory", "10 ms"),
-    ("95% of all leaves", calcs.DB_95_LEAVES_P99_MS, "compute", "70 ms"),
-    ("All leaves", calcs.DB_ALL_LEAVES_P99_MS, "danger", "140 ms"),
+    ("One random leaf", num("db_one_p99"), "memory", f"{val('db_one_p99')} ms"),
+    ("95% of all leaves", num("db_95_p99"), "compute", f"{val('db_95_p99')} ms"),
+    ("All leaves", num("db_all_p99"), "danger", f"{val('db_all_p99')} ms"),
 ]
 sp.hbars(out / "tail_measured.svg", tail_rows, "ms", log=False, size=(5.8, 1.9))
 
 # =============================================================================
-# 5. Interruption interval against job size: model 50,000 h / N, and measured
+# 5. Interruption interval against job size: model MTTF / N, and measured
 # =============================================================================
 import numpy as np  # noqa: E402
 
+mttf_h = calcs.EXP.component_mtbf.to("hour").magnitude
 fig, ax = plt.subplots(figsize=(5.8, 2.75))
 ns = np.logspace(2, 4.6, 100)
-ax.plot(ns, calcs.GPU_MTTF_H / ns, color=C["memory"], lw=2.5)
-ax.text(150, calcs.GPU_MTTF_H / 150 * 1.5, "model: 50,000 h / N", color=C["memory"],
+ax.plot(ns, mttf_h / ns, color=C["memory"], lw=2.5)
+ax.text(150, mttf_h / 150 * 1.5, f"model: {val('gpu_mttf_h')} h / N", color=C["memory"],
         fontsize=12, fontweight="bold")
-pts = [(calcs.N_REF, R["MTBI 1,024 GPUs, h"], "1,024: 48.8 h"),
-       (calcs.N_BIG, R["MTBI 2,048 GPUs, h"], "2,048: 24.4 h")]
+pts = [(num("ref_gpus"), calcs.m(calcs.EXP.mtbf, "hour"), f"{val('ref_gpus')}: {val('mtbi_ref_h')} h"),
+       (num("exp_gpus"), calcs.m(calcs.EXP.expanded_mtbf, "hour"), f"{val('exp_gpus')}: {val('mtbi_exp_h')} h")]
 for x, y, lab in pts:
     ax.plot([x], [y], "o", ms=9, color=C["memory"], mec="white", mew=1.5, zorder=5)
     ax.annotate(lab, (x, y), xytext=(-8, -6), textcoords="offset points", ha="right",
                 va="top", fontsize=12, color=C["memory"], fontweight="bold")
-x = calcs.LLAMA_GPUS
-ax.plot([x], [R["Llama 3 measured hours per unexpected interruption"]], "D", ms=9,
-        color=C["danger"], zorder=6)
-ax.annotate("Llama 3, measured: 3.1 h", (x, 3.1), xytext=(-14, -16), textcoords="offset points",
-            ha="right", va="top", fontsize=12, color=C["danger"], fontweight="bold")
-ax.plot([x], [calcs.KOKOLIS_16K_MTTF_H], "o", ms=8, mfc="white", mec=C["danger"], mew=2, zorder=6)
-ax.annotate("projected: 1.8 h", (x, 1.8), xytext=(-14, -22), textcoords="offset points",
-            ha="right", va="top", fontsize=12, color=C["danger"])
+x = num("llama_gpus")
+llama_h = calcs.m(calcs.Q_(calcs.llama_days, "day"), "hour") / calcs.llama_n
+ax.plot([x], [llama_h], "D", ms=9, color=C["danger"], zorder=6)
+ax.annotate(f"Llama 3, measured: {val('llama_mttf_h')} h", (x, num("llama_mttf_h")), xytext=(-14, -16),
+            textcoords="offset points", ha="right", va="top", fontsize=12, color=C["danger"],
+            fontweight="bold")
+ax.plot([x], [num("kok_16k_h")], "o", ms=8, mfc="white", mec=C["danger"], mew=2, zorder=6)
+ax.annotate(f"projected: {val('kok_16k_h')} h", (x, num("kok_16k_h")), xytext=(-14, -22),
+            textcoords="offset points", ha="right", va="top", fontsize=12, color=C["danger"])
 ax.set_xscale("log")
 ax.set_yscale("log")
 ax.set_xlim(100, 4e4)
@@ -215,22 +202,21 @@ sp.save(fig, out / "mtbi.svg")
 # =============================================================================
 fig, ax = plt.subplots(figsize=(5.8, 2.6))
 ns = np.logspace(np.log10(128), np.log10(16384), 100)
-ov = [100 * calcs.yd_overhead(n) for n in ns]
+ov = [100 * calcs.EXP.at(n).result.waste for n in ns]
 ax.plot(ns, ov, color=C["network"], lw=2.5)
-for n, lab in [(calcs.N_REF, "Young-Daly overhead 1,024, percent"),
-               (calcs.N_BIG, "Young-Daly overhead 2,048, percent")]:
-    v = R[lab]
+for gpus, pct_key, ov_n, off, ha in [("ref_gpus", "ov_ref_pct", calcs.EXP.overhead, (-10, 10), "right"),
+                                     ("exp_gpus", "ov_exp_pct", calcs.EXP.expanded_overhead, (10, -18), "left")]:
+    n, v = num(gpus), 100 * ov_n
     ax.plot([n], [v], "o", ms=9, color=C["network"], mec="white", mew=1.5, zorder=5)
-    off, ha = ((-10, 10), "right") if n == calcs.N_REF else ((10, -18), "left")
-    ax.annotate(f"{n:,} GPUs: {v:.1f}%", (n, v), xytext=off, textcoords="offset points",
+    ax.annotate(f"{val(gpus)} GPUs: {val(pct_key)}%", (n, v), xytext=off, textcoords="offset points",
                 ha=ha, fontsize=12, color=C["network"], fontweight="bold")
-ax.text(4200, 4.6, f"×{R['Overhead ratio (sqrt 2)']:.2f} per doubling\n(grows as √N)",
+ax.text(4200, 4.6, f"×{val('ov_growth')} per doubling\n(grows as √N)",
         fontsize=12, color=C["text"], ha="center")
 ax.set_xscale("log")
 ax.set_xlim(128, 16384)
 ax.set_ylim(0, 7.5)
-ax.set_xticks([128, 1024, 2048, 16384])
-ax.set_xticklabels(["128", "1,024", "2,048", "16,384"])
+ax.set_xticks([128, num("ref_gpus"), num("exp_gpus"), 16384])
+ax.set_xticklabels(["128", val("ref_gpus"), val("exp_gpus"), "16,384"])
 ax.minorticks_off()
 ax.set_xlabel("GPUs (independent GPU failures only)")
 ax.set_ylabel("Checkpoint + rework (%)")
@@ -241,17 +227,19 @@ sp.save(fig, out / "overhead.svg")
 # 7. MegaScale strong scaling, 175B (measured, Jiang et al. 2024, Table 2)
 # =============================================================================
 fig, ax = plt.subplots(figsize=(5.8, 2.7))
-gs = list(calcs.MEGASCALE)
-tp = [calcs.MEGASCALE[g_] / 1e3 for g_ in gs]
-ideal = [calcs.MEGASCALE[512] / 1e3 * g_ / 512 for g_ in gs]
+gs = [int(r["gpus"]) for r in calcs.MEGA]
+tp = [r["megascale_tokens_s"] / 1e3 for r in calcs.MEGA]
+mid = calcs.mega(num("ms_mid_gpus"))
+ideal = [mid["megascale_tokens_s"] / 1e3 * g_ / mid["gpus"] for g_ in gs]
 ax.plot(gs, ideal, ls="--", color=C["neutral"], lw=1.8)
-ax.text(1090, 12, "dashed: linear from 512", color=C["neutral"], fontsize=11, ha="right",
+ax.text(1090, 12, f"dashed: linear from {val('ms_mid_gpus')}", color=C["neutral"], fontsize=11, ha="right",
         va="bottom")
 ax.plot(gs, tp, "o-", color=C["compute"], lw=2.5, ms=9, mec="white", mew=1.5)
 for g_, t in zip(gs, tp):
     ax.annotate(f"{t:.1f}k", (g_, t), xytext=(10, -14), textcoords="offset points",
                 fontsize=11, color=C["compute"], fontweight="bold")
-ax.annotate(f"512 to 1,024 GPUs: {R['MegaScale measured speedup 512 -> 1,024']:.2f}× (linear: 2×)",
+ax.annotate(f"{val('ms_mid_gpus')} to {val('ms_hi_gpus')} GPUs: {val('ms_speedup')}× "
+            f"(linear: {val('exp_factor')}×)",
             (1024, tp[-1]), xytext=(256, 175), textcoords="data", fontsize=12,
             color=C["text"], fontweight="bold")
 ax.set_xlim(200, 1100)
@@ -267,19 +255,18 @@ sp.save(fig, out / "megascale.svg")
 # 8. Each compute doubling buys the same fraction, a smaller amount (derived)
 # =============================================================================
 fig, ax = plt.subplots(figsize=(5.8, 2.6))
-mult = R["Loss multiplier per compute doubling"]
-xs = [1, 2, 4, 8, 16]
-ls = [mult ** k for k in range(5)]
+mult, step = calcs.K2.multiple_factor, calcs.K2.resource_multiple
+xs = [step ** k for k in range(calcs.doublings + 1)]
+ls = [mult ** k for k in range(calcs.doublings + 1)]
 ax.plot(xs, ls, "o-", color=C["memory"], lw=2.5, ms=9, mec="white", mew=1.5)
-for k in range(1, 5):
-    drop = R[f"Doubling {k}: absolute drop (normalized loss 1.0 at start)"]
-    ax.annotate(f"−{drop:.3f}", (xs[k], ls[k]), xytext=(0, 12), textcoords="offset points",
+for k in range(1, calcs.doublings + 1):
+    ax.annotate(f"−{val(f'loss_drop{k}')}", (xs[k], ls[k]), xytext=(0, 12), textcoords="offset points",
                 ha="center", fontsize=11, color=C["memory"], fontweight="bold")
-ax.text(16, 0.995, f"each doubling: ×{mult:.3f} (−{R['Loss reduction per doubling, percent']:.1f}%)",
+ax.text(xs[-1], 0.995, f"each doubling: ×{val('loss_factor')} (−{val('loss_cut_pct')}%)",
         ha="right", fontsize=12, color=C["text"], fontweight="bold")
 ax.set_xscale("log", base=2)
 ax.set_xticks(xs)
-ax.set_xticklabels(["1×", "2×", "4×", "8×", "16×"])
+ax.set_xticklabels([f"{x:.0f}×" for x in xs])
 ax.minorticks_off()
 ax.set_ylim(0.85, 1.02)
 ax.set_xlabel("Training compute (accelerator-hours), multiple of today")
@@ -318,34 +305,12 @@ g.text(450, 366, "Same steps: a fairness alert may trace to labels, reviewers, o
 g.write("diagnose", 3)
 
 # =============================================================================
-# 10. Where next: interactivity costs per-GPU output (InferenceX, Chapter 10)
-# =============================================================================
-fig, ax = plt.subplots(figsize=(3.6, 2.5))
-xs = [0, 1]
-vals = [calcs.IX_LOW_INTERACT, calcs.IX_HIGH_INTERACT]
-ax.bar(xs, vals, width=0.6, color=[C["compute"], C["danger"]])
-for x_, v, lab in zip(xs, vals, ["6,300", "210"]):
-    ax.text(x_, v + 150, lab, ha="center", va="bottom", fontsize=14, fontweight="bold",
-            color=C["compute"] if x_ == 0 else C["danger"])
-ax.text(1, 2600, f"{R['InferenceX per-GPU output ratio']:.0f}× less", ha="center",
-        fontsize=14, fontweight="bold", color=C["text"])
-ax.set_xticks(xs)
-ax.set_xticklabels(["13 tok/s\nper user", "100 tok/s\nper user"], fontsize=13)
-ax.set_ylim(0, 7600)
-ax.set_yticks([0, 2000, 4000, 6000])
-ax.set_yticklabels(["0", "2,000", "4,000", "6,000"], fontsize=12)
-ax.set_ylabel("Output tok/s per GPU", fontsize=13)
-ax.grid(axis="y", color=C["grid"], lw=0.6)
-ax.set_axisbelow(True)
-sp.save(fig, out / "interactivity.svg")
-
-# =============================================================================
-# 11. Where next: MoE resident against active bytes (Chapter 10, Sec. 10.10.4)
+# 10. Where next: MoE resident against active bytes (Chapter 10, Sec. 10.10.4)
 # =============================================================================
 moe_rows = [
-    ("MoE, all experts resident", calcs.MOE_RESIDENT_GB, "memory", "1,342 GB"),
-    ("Dense 400B, read per step", calcs.DENSE_400B_GB, "neutral", "800 GB"),
-    ("MoE, active per token", calcs.MOE_ACTIVE_GB, "compute", "74 GB"),
+    ("MoE, all experts resident", num("moe_resident_gb"), "memory", f"{val('moe_resident_gb')} GB"),
+    (f"Dense {val('dense_b')}B, read per step", num("dense_gb"), "neutral", f"{val('dense_gb')} GB"),
+    ("MoE, active per token", num("moe_active_gb"), "compute", f"{val('moe_active_gb')} GB"),
 ]
 sp.hbars(out / "moe_bytes.svg", moe_rows, "", log=False, size=(5.8, 1.9))
 
