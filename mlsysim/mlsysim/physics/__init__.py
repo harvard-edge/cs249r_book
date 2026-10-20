@@ -885,3 +885,19 @@ __all__ += [
     "calc_block_bits_per_weight",
     "calc_accumulator_headroom",
 ]
+
+
+# --- One-server queueing and batch formation (added 2026-10-20) ---
+from .serving import (
+    calc_mm1_time_in_system,
+    calc_exponential_quantile_factor,
+    calc_mm1_max_utilization,
+    calc_batch_formation_wait,
+)
+
+__all__ += [
+    "calc_mm1_time_in_system",
+    "calc_exponential_quantile_factor",
+    "calc_mm1_max_utilization",
+    "calc_batch_formation_wait",
+]

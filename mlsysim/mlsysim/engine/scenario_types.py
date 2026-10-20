@@ -3046,7 +3046,7 @@ class PipelineSpeedupScenario(BaseScenario):
     """Serial pipeline stages; one stage is made ``speedup`` times faster (Amdahl's law)."""
     stages: Dict[str, Quantity]
     accelerated: str
-    speedup: float
+    speedup: float = 1.0                 # default (added 2026-10-20): the path as it is
 
     @property
     def total(self) -> Quantity:
@@ -3075,6 +3075,23 @@ class PipelineSpeedupScenario(BaseScenario):
         """Speedup with an infinitely fast accelerated stage."""
         from ..physics.performance import calc_amdahls_speedup
         return calc_amdahls_speedup(self.fraction, float("inf"))
+
+    # Stage groups and overlap (added 2026-10-20).
+    def subtotal(self, *names) -> Quantity:
+        """Summed time of the named stages."""
+        return sum((self.stages[n] for n in names), Q_(0, "millisecond")).to("millisecond")
+
+    def share(self, *names) -> float:
+        """Share of the serial total spent in the named stages."""
+        return (self.subtotal(*names) / self.total).to("").magnitude
+
+    def overlapped_share(self, stage: str, *feeders) -> float:
+        """Busy share of ``stage`` when the ``feeders`` run concurrently on other hardware.
+
+        With the stages pipelined, one request leaves per max(feeders, stage),
+        so ``stage`` is busy stage / max(feeders, stage) of the time.
+        """
+        return min(1.0, (self.stages[stage] / self.subtotal(*feeders)).to("").magnitude)
 
 
 class SpeedStepScenario(BaseScenario):
@@ -5815,6 +5832,7 @@ class BatchingKneeScenario(BaseScenario):
     """Batch service time S(B) = t_0 + B t_req: where throughput turns over."""
     fixed_time: Quantity                 # paid once per batch
     per_request_time: Quantity           # added per request
+    batch_sizes: List[int] = []          # batch sizes at which the service is reported (added 2026-10-20)
 
     @property
     def knee(self) -> float:
@@ -5824,6 +5842,23 @@ class BatchingKneeScenario(BaseScenario):
     def throughput_share(self, batch_size) -> float:
         from ..physics.serving import calc_batch_throughput_share
         return calc_batch_throughput_share(batch_size, self.fixed_time, self.per_request_time)
+
+    # The affine service model as a function of batch size (added 2026-10-20).
+    def service_time(self, batch_size) -> Quantity:
+        """Time to serve one batch: t_0 + B t_req."""
+        return (self.fixed_time + batch_size * self.per_request_time).to("ms")
+
+    def throughput(self, batch_size) -> Quantity:
+        """Requests per second when batches of ``batch_size`` run back to back."""
+        return (batch_size / self.service_time(batch_size)).to("1/second")
+
+    def time_per_request(self, batch_size) -> Quantity:
+        """Service time of one batch divided among its requests."""
+        return (self.service_time(batch_size) / batch_size).to("ms")
+
+    def fixed_share(self, batch_size) -> float:
+        """Share of a batch's service time that does not depend on the batch: t_0 / S(B)."""
+        return (self.fixed_time / self.service_time(batch_size)).to("").magnitude
 
 
 class LittlesLawScenario(BaseScenario):
@@ -17215,3 +17250,381 @@ class QuantizedDeploymentProfileScenario(BaseScenario):
     @property
     def passes_calibration(self) -> bool:
         return self.int_calibration_error_pct <= self.calibration_error_limit_pct
+
+
+# --- Model serving on one machine (added 2026-10-20) --------------------------
+# A request's latency budget, the one-server queue that sizes a fleet, the
+# batch a request waits for, a replica's startup, and the cost per request.
+# The service-time model is ``BatchingKneeScenario`` (S(B) = t_0 + B t_req).
+
+class BatchServingCostScenario(BaseScenario):
+    """One accelerator rented at ``price``, serving batches back to back: cost per request by batch size."""
+    service: BatchingKneeScenario
+    price: Quantity                       # USD per accelerator-hour
+    batch_sizes: List[int]
+
+    def cost_per_million(self, batch_size) -> Quantity:
+        return (self.price / self.service.throughput(batch_size) * 1e6).to("dollar")
+
+    @property
+    def cost_ratio(self) -> float:
+        """Cost per request at the first batch size over the last."""
+        first, last = self.batch_sizes[0], self.batch_sizes[-1]
+        return (self.cost_per_million(first) / self.cost_per_million(last)).to("").magnitude
+
+    @property
+    def added_time(self) -> Quantity:
+        """Service time of the last batch size beyond the first."""
+        first, last = self.batch_sizes[0], self.batch_sizes[-1]
+        return (self.service.service_time(last) - self.service.service_time(first)).to("ms")
+
+
+class PrecomputeVersusOnDemandScenario(BaseScenario):
+    """``items`` inputs answered one at a time on demand, or precomputed at a large-batch ``offline_rate``."""
+    items: int
+    on_demand_time: Quantity              # one request at batch one
+    offline_rate: Quantity                # requests per second at large batch
+    latency_budget: Quantity              # the on-demand service's deadline
+
+    @property
+    def on_demand_total(self) -> Quantity:
+        return (self.items * self.on_demand_time).to("second")
+
+    @property
+    def offline_total(self) -> Quantity:
+        return (self.items / self.offline_rate).to("second")
+
+    @property
+    def ratio(self) -> float:
+        return (self.on_demand_total / self.offline_total).to("").magnitude
+
+
+class MM1CapacityPlanScenario(BaseScenario):
+    """Accelerators for ``peak_rate`` when each is an M/M/1 server whose tail must meet ``tail_budget``.
+
+    The tail is ``tail_factor`` times the mean time in system S/(1 - rho), so
+    the highest safe utilization is 1 - k S / T. The plan divides the peak by
+    that utilization, rounds up to whole accelerators, then adds ``headroom``.
+    Optional: ``batched_rate`` re-plans with batched service at the same
+    utilization; ``accelerator_price`` prices a plan per million requests.
+    """
+    service_time: Quantity
+    tail_factor: float                    # tail as a multiple of the mean
+    tail_quantile: float = 0.99           # the tail the factor stands for
+    tail_budget: Quantity                 # queue-plus-service tail target
+    peak_rate: Quantity
+    headroom: float                       # multiplier on the rounded-up count
+    utilization_points: List[float] = []  # loads at which to report time in system
+    example_utilization: Optional[float] = None
+    batched_rate: Optional[Quantity] = None
+    accelerator_price: Optional[Quantity] = None   # USD per accelerator-hour
+
+    @property
+    def service_rate(self) -> Quantity:
+        return (1 / self.service_time).to("1/second")
+
+    def time_in_system(self, utilization) -> Quantity:
+        from ..physics.serving import calc_mm1_time_in_system
+        return calc_mm1_time_in_system(self.service_time, utilization).to("ms")
+
+    def tail_time(self, utilization) -> Quantity:
+        return (self.tail_factor * self.time_in_system(utilization)).to("ms")
+
+    @property
+    def exact_tail_factor(self) -> float:
+        """The factor ``tail_factor`` rounds: ln(1/(1 - q)) for an exponential time in system."""
+        from ..physics.serving import calc_exponential_quantile_factor
+        return calc_exponential_quantile_factor(self.tail_quantile)
+
+    @property
+    def max_utilization(self) -> float:
+        from ..physics.serving import calc_mm1_max_utilization
+        return calc_mm1_max_utilization(self.service_time, self.tail_budget, self.tail_factor)
+
+    @property
+    def required_rate(self) -> Quantity:
+        return (self.peak_rate / self.max_utilization).to("1/second")
+
+    @property
+    def accelerators_exact(self) -> float:
+        return (self.required_rate / self.service_rate).to("").magnitude
+
+    @property
+    def accelerators(self) -> int:
+        return _math.ceil(self.accelerators_exact)
+
+    @property
+    def accelerators_planned(self) -> int:
+        return _math.ceil(self.accelerators * self.headroom)
+
+    @property
+    def utilization_after_failure(self) -> float:
+        """Utilization of the planned fleet with one accelerator lost."""
+        return (self.peak_rate / (self.service_rate * (self.accelerators_planned - 1))).to("").magnitude
+
+    @property
+    def saturated_accelerators_exact(self) -> float:
+        """Accelerators if each ran 100 percent busy (no queueing headroom)."""
+        return (self.peak_rate / self.service_rate).to("").magnitude
+
+    @property
+    def batched_accelerators(self) -> int:
+        return _math.ceil((self.peak_rate / (self.max_utilization * self.batched_rate)).to("").magnitude)
+
+    @property
+    def batched_accelerators_planned(self) -> int:
+        return _math.ceil(self.batched_accelerators * self.headroom)
+
+    def cost_per_million(self, accelerators) -> Quantity:
+        """Fleet cost per million requests served at ``peak_rate``."""
+        return (accelerators * self.accelerator_price / self.peak_rate * 1e6).to("dollar")
+
+
+class MM1ServiceSpeedupScenario(BaseScenario):
+    """The same traffic on an M/M/1 server before and after its service time falls."""
+    slow_service: Quantity
+    fast_service: Quantity
+    utilization: float                    # load with the slow service
+
+    @property
+    def arrival_rate(self) -> Quantity:
+        return (self.utilization / self.slow_service).to("1/second")
+
+    @property
+    def fast_utilization(self) -> float:
+        return self.utilization * (self.fast_service / self.slow_service).to("").magnitude
+
+    @property
+    def slow_time(self) -> Quantity:
+        from ..physics.serving import calc_mm1_time_in_system
+        return calc_mm1_time_in_system(self.slow_service, self.utilization).to("ms")
+
+    @property
+    def fast_time(self) -> Quantity:
+        from ..physics.serving import calc_mm1_time_in_system
+        return calc_mm1_time_in_system(self.fast_service, self.fast_utilization).to("ms")
+
+    @property
+    def slow_wait(self) -> Quantity:
+        return (self.slow_time - self.slow_service).to("ms")
+
+    @property
+    def fast_wait(self) -> Quantity:
+        return (self.fast_time - self.fast_service).to("ms")
+
+    @property
+    def service_gain(self) -> float:
+        return (self.slow_service / self.fast_service).to("").magnitude
+
+    @property
+    def time_gain(self) -> float:
+        return (self.slow_time / self.fast_time).to("").magnitude
+
+    @property
+    def wait_gain(self) -> float:
+        return (self.slow_wait / self.fast_wait).to("").magnitude
+
+
+class BatchWindowScenario(BaseScenario):
+    """Requests arriving as a Poisson stream into a batching window of length ``window``.
+
+    The window collects lambda W arrivals on average; a request waits half the
+    window on average; the batch a request finds itself in is size-biased,
+    1 + lambda W on average, and its ``tail_quantile`` is 1 plus that
+    quantile of the Poisson count.
+    """
+    window: Quantity
+    arrival_rates: List[Quantity] = []
+    latency_budget: Optional[Quantity] = None
+    tail_quantile: float = 0.99
+
+    def mean_arrivals(self, arrival_rate) -> float:
+        return (arrival_rate * self.window).to("").magnitude
+
+    def arrival_spread(self, arrival_rate) -> float:
+        """Standard deviation of the count, sqrt(lambda W)."""
+        return _math.sqrt(self.mean_arrivals(arrival_rate))
+
+    def empty_share(self, arrival_rate) -> float:
+        return _math.exp(-self.mean_arrivals(arrival_rate))
+
+    def count_at_least(self, arrival_rate, at_least: int) -> float:
+        from ..physics.statistics import calc_poisson_tail
+        return calc_poisson_tail(self.mean_arrivals(arrival_rate), at_least)
+
+    @property
+    def mean_wait(self) -> Quantity:
+        return (self.window / 2).to("ms")
+
+    @property
+    def budget_share(self) -> float:
+        return (self.mean_wait / self.latency_budget).to("").magnitude
+
+    def seen_batch_mean(self, arrival_rate) -> float:
+        return 1 + self.mean_arrivals(arrival_rate)
+
+    def seen_batch_tail(self, arrival_rate) -> int:
+        """1 plus the ``tail_quantile`` of the Poisson count: the smallest s with P(N >= s) below 1 - q."""
+        from ..physics.statistics import calc_poisson_reserve
+        return calc_poisson_reserve(self.mean_arrivals(arrival_rate), 1 - self.tail_quantile)
+
+
+class BatchDispatchScenario(BaseScenario):
+    """A dual-trigger batch: it may leave at ``timeout`` after its oldest arrival, then waits for a worker."""
+    arrivals: List[Quantity]              # offsets from the oldest request
+    timeout: Quantity
+    worker_free: Quantity                 # when the worker finishes its current batch
+    response_path: Quantity               # time after the batch finishes
+    deadline: Quantity
+    service: BatchingKneeScenario
+
+    @property
+    def formation_end(self) -> Quantity:
+        return (self.arrivals[0] + self.timeout).to("ms")
+
+    @property
+    def dispatch(self) -> Quantity:
+        return max(self.formation_end, self.worker_free.to("ms"))
+
+    @property
+    def backlog_wait(self) -> Quantity:
+        return (self.dispatch - self.formation_end).to("ms")
+
+    @property
+    def batch_time(self) -> Quantity:
+        return self.service.service_time(len(self.arrivals))
+
+    @property
+    def oldest_latency(self) -> Quantity:
+        return (self.dispatch + self.batch_time + self.response_path - self.arrivals[0]).to("ms")
+
+    @property
+    def slack(self) -> Quantity:
+        return (self.deadline - self.oldest_latency).to("ms")
+
+    @property
+    def timer_only_latency(self) -> Quantity:
+        """The answer that ignores the busy worker and the response path."""
+        return (self.timeout + self.batch_time).to("ms")
+
+
+class BatchCapChoiceScenario(BaseScenario):
+    """Two batch caps at one arrival rate, batches waiting until full: throughput against formation wait."""
+    service: BatchingKneeScenario
+    arrival_rate: Quantity
+    small_cap: int
+    large_cap: int
+
+    def formation_wait(self, cap) -> Quantity:
+        from ..physics.serving import calc_batch_formation_wait
+        return calc_batch_formation_wait(cap, self.arrival_rate).to("ms")
+
+    @property
+    def throughput_gain(self) -> float:
+        return (self.service.throughput(self.large_cap) / self.service.throughput(self.small_cap)).to("").magnitude - 1
+
+    @property
+    def capacity_over_load(self) -> float:
+        return (self.service.throughput(self.small_cap) / self.arrival_rate).to("").magnitude
+
+
+class ReplicaStartupScenario(BaseScenario):
+    """A serving replica's startup phases; ``warm_path`` and ``cold_path`` name the phases each start pays."""
+    phases: Dict[str, Quantity]
+    ranges: Dict[str, List[Quantity]] = {}   # stated low and high for phases given as a range
+    warm_path: List[str]
+    cold_path: List[str]
+
+    @property
+    def warm_total(self) -> Quantity:
+        return sum((self.phases[p] for p in self.warm_path), Q_(0, "second")).to("second")
+
+    @property
+    def cold_total(self) -> Quantity:
+        return sum((self.phases[p] for p in self.cold_path), Q_(0, "second")).to("second")
+
+
+class TrafficSurgeScenario(BaseScenario):
+    """A service sized for ``normal_rate`` that receives ``surge_rate``; latency in each regime."""
+    normal_rate: Quantity
+    surge_rate: Quantity
+    normal_latency: Quantity
+    surge_latency: Quantity               # stated latency once the queue has grown
+
+    @property
+    def surge_factor(self) -> float:
+        return (self.surge_rate / self.normal_rate).to("").magnitude
+
+
+class BatchEnergyPerImageScenario(BaseScenario):
+    """Bytes, arithmetic intensity, and energy per image when a batch shares one weight read.
+
+    Each image moves the weights divided by the batch plus its own
+    activations ``activation_passes`` times (written once, read once), at
+    ``byte_energy``; its arithmetic costs ``flop_energy`` per FLOP.
+    """
+    workload: Workload
+    weight_bytes_per_param: Quantity
+    activation_bytes: Quantity            # one image's activation footprint
+    activation_passes: int
+    byte_energy: Quantity
+    flop_energy: Quantity
+
+    @property
+    def weights(self) -> Quantity:
+        return self.workload.size_in_bytes(self.weight_bytes_per_param)
+
+    def weight_per_image(self, batch_size) -> Quantity:
+        return self.weights / batch_size
+
+    def bytes_per_image(self, batch_size) -> Quantity:
+        return self.weight_per_image(batch_size) + self.activation_passes * self.activation_bytes
+
+    def intensity(self, batch_size) -> Quantity:
+        return (self.workload.inference_flops / self.bytes_per_image(batch_size)).to("flop/byte")
+
+    def movement_energy(self, batch_size) -> Quantity:
+        return (self.bytes_per_image(batch_size) * self.byte_energy).to("mJ")
+
+    @property
+    def compute_energy(self) -> Quantity:
+        return (self.workload.inference_flops * self.flop_energy).to("mJ")
+
+    def energy(self, batch_size) -> Quantity:
+        return self.movement_energy(batch_size) + self.compute_energy
+
+    def movement_share(self, batch_size) -> float:
+        return (self.movement_energy(batch_size) / self.energy(batch_size)).to("").magnitude
+
+
+class ServingInstanceCostScenario(BaseScenario):
+    """Instances with an hourly price and a saturated request rate: cost per request, and when the
+    ``small`` instance sized to the load undercuts one ``large`` instance."""
+    prices: Dict[str, Quantity]           # USD per instance-hour
+    rates: Dict[str, Quantity]            # requests per second, fully busy
+    small: str
+    large: str
+
+    def cost_per_million(self, name) -> Quantity:
+        return (self.prices[name] / self.rates[name] * 1e6).to("dollar")
+
+    def requests_per_hour(self, name) -> float:
+        return (self.rates[name] * Q_(1, "hour")).to("").magnitude
+
+    @property
+    def price_ratio(self) -> float:
+        return (self.prices[self.large] / self.prices[self.small]).to("").magnitude
+
+    @property
+    def breakeven_rate(self) -> Quantity:
+        """Load at which the large instance's price buys the same capacity of small instances."""
+        return (self.price_ratio * self.rates[self.small]).to("1/second")
+
+    @property
+    def small_within_large_price(self) -> int:
+        """Most small instances that cost less than one large instance."""
+        return _math.ceil(self.price_ratio) - 1
+
+    @property
+    def small_fleet_rate(self) -> Quantity:
+        return (self.small_within_large_price * self.rates[self.small]).to("1/second")

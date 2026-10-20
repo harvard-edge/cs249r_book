@@ -1395,6 +1395,45 @@ class Series:
         "llama-bench prompt and generation throughput of Llama 2 7B in F16, Q8_0, and Q4_0 on Apple chips.",
         numeric=("bandwidth_gbs", "gpu_cores", "size_gib", "pp512_tps", "tg128_tps"),
     )
+    # Copied verbatim from the v1-12 benchmarking branch (same name, file, and rows);
+    # on merge keep one copy.
+    MLPerfInferenceV50ResNet50 = TrendSeries(
+        "mlperf_inference_v5_0_resnet50",
+        _lit("MLCommons, MLPerf Inference v5.0 results (Apache-2.0), closed division, resnet50, "
+             "summary_results.json, results 5.0-0032, 5.0-0010, 5.0-0065",
+             "https://github.com/mlcommons/inference_results_v5.0",
+             "One RTX 4090 (SingleStream p90 latency and Offline throughput) and two 8x H100-SXM servers "
+             "(Offline and Server throughput); system totals as reported, all VALID."),
+        "ResNet-50 MLPerf Inference v5.0 results by scenario for one RTX 4090 and two eight-H100 servers.",
+        numeric=("accelerators", "value"),
+    )
+    # --- Model serving on one machine (added 2026-10-20) ---------------------
+    MLPerfInferenceV50ResNet50L4 = TrendSeries(
+        "mlperf_inference_v5_0_resnet50_l4",
+        _lit("MLCommons, MLPerf Inference v5.0 results (Apache-2.0), closed division, edge suite, resnet50, "
+             "summary_results.json, result 5.0-0047 (HPE ProLiant DL145 Gen11, 3x L4-PCIe-24GB, TensorRT), "
+             "Performance_Result, retrieved 2026-10-20",
+             "https://github.com/mlcommons/inference_results_v5.0",
+             "SingleStream is the 90th-percentile latency of one query of one image; MultiStream the "
+             "99th-percentile latency of one query of eight images (samples per query from the MLPerf "
+             "Inference rules, inference_policies commit 61ca74a, scenario table); Offline the system "
+             "throughput of all three L4s. The summary does not say how many L4s the latency runs used."),
+        "ResNet-50 MLPerf Inference v5.0 edge results for one three-L4 server, by scenario.",
+        numeric=("accelerators", "samples_per_query", "value"),
+    )
+    MLPerfInferenceV50Llama2_70B = TrendSeries(
+        "mlperf_inference_v5_0_llama2_70b",
+        _lit("MLCommons, MLPerf Inference v5.0 results (Apache-2.0), closed division, datacenter, result "
+             "5.0-0020 (Dell PowerEdge XE9680, 8x H100-SXM-80GB, TensorRT), summary_results.json, "
+             "retrieved 2026-10-20; latency bounds from the MLPerf Inference rules (inference_rules.adoc at "
+             "mlcommons/inference_policies commit 61ca74a, datacenter benchmark table)",
+             "https://github.com/mlcommons/inference_results_v5.0",
+             "Tokens per second of the whole server for llama2-70b-99 (Offline, and Server under the "
+             "conversational TTFT/TPOT bounds) and llama2-70b-interactive-99 (Server under the interactive "
+             "bounds). Bounds are the rules' time to first token and time per output token, ms."),
+        "Llama 2 70B MLPerf Inference v5.0 throughput on one eight-H100 server, by latency bound.",
+        numeric=("accelerators", "ttft_bound_ms", "tpot_bound_ms", "tokens_per_s"),
+    )
 
 # --- Context engineering (added 2026-10-20) ----------------------------------
 RulerEffectiveLength = _Series(

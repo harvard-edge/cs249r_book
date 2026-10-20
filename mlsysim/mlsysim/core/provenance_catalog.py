@@ -4548,3 +4548,52 @@ LLAMA_BENCH_APPLE_SILICON = Provenance(
     verified="2026-10-18",
     notes="llama-bench rows for Llama 2 7B report params 6.74 B.",
 )
+
+# --- Model serving on one machine (added 2026-10-20) --------------------------
+FU_SERVERLESSLLM_2024 = _lit(
+    "prov:fu-serverlessllm-2024",
+    "Fu, Xue, Huang, Brabete, Ustiugov, Patel, and Mai (2024), ServerlessLLM: Low-Latency Serverless "
+    "Inference for Large Language Models, OSDI 2024, section 2.3",
+    url="https://arxiv.org/abs/2401.14351",
+    verified="2026-10-20",
+    notes="Loading OPT-30B into 4 GPUs takes 34 s with PyTorch and LLaMA-2-70B into 8 GPUs 84 s; a 130 GB "
+          "checkpoint takes at least 26 s to download at 5 GB/s. Read from the arXiv v2 PDF with pdftotext.",
+)
+RICHINS_AI_TAX_2020 = _lit(
+    "prov:richins-ai-tax-2020",
+    "Richins, Doshi, Blackmore, Nair, Pathapati, Patel, Ponnusamy, Reddi, and others (2020), AI Tax: The "
+    "Hidden Cost of AI Data Center Applications, arXiv 2007.10571, figure 6",
+    url="https://arxiv.org/abs/2007.10571",
+    verified="2026-10-20",
+    notes="Mean latency of one video frame through an edge-datacenter face-recognition pipeline, by stage, "
+          "as printed on the pie chart (ingestion, face detection, message brokers, identification).",
+)
+TRITON_PERF_ANALYZER_QUICK_START = Provenance(
+    id="prov:triton-perf-analyzer-quick-start",
+    kind=ProvenanceKind.DATASHEET,
+    ref="triton-inference-server/perf_analyzer, docs/quick_start.md (commit 93ba37f), sample output of "
+        "perf_analyzer -m simple",
+    url="https://github.com/triton-inference-server/perf_analyzer/blob/93ba37f/docs/quick_start.md",
+    verified="2026-10-20",
+    notes="Request concurrency 1 against Triton's example model 'simple' (adds and subtracts two vectors of "
+          "16 integers). Client and server lines as printed.",
+)
+TRITON_DYNAMIC_BATCHER_GUIDE = Provenance(
+    id="prov:triton-dynamic-batcher-guide",
+    kind=ProvenanceKind.DATASHEET,
+    ref="triton-inference-server/server, docs/user_guide/batcher.md and model_configuration.md (commit 57b3eba)",
+    url="https://github.com/triton-inference-server/server/blob/57b3eba/docs/user_guide/batcher.md",
+    verified="2026-10-20",
+    notes="The guide's delayed-batching example sets max_queue_delay_microseconds: 100 and its preferred-size "
+          "example preferred_batch_size: [ 4, 8 ]; the example model configuration sets max_batch_size: 8.",
+)
+MLPERF_INFERENCE_RULES_V50 = Provenance(
+    id="prov:mlperf-inference-rules-v50",
+    kind=ProvenanceKind.DATASHEET,
+    ref="MLCommons, MLPerf Inference rules, inference_rules.adoc (mlcommons/inference_policies commit 61ca74a, "
+        "March 2025), datacenter benchmark table",
+    url="https://github.com/mlcommons/inference_policies/blob/61ca74a/inference_rules.adoc",
+    verified="2026-10-20",
+    notes="Server latency constraint for Resnet50-v1.5: 15 ms at the 99th percentile; Llama2-70b "
+          "conversational TTFT/TPOT 2000 ms/200 ms, interactive 450 ms/40 ms.",
+)
