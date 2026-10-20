@@ -62,6 +62,9 @@ __all__ = [
     "CoolantFlowResult",
     "OutageCostResult",
     "FailureIntervalResult",
+    "GradientSyncResult",
+    "CommunicationIntensityResult",
+    "TrainingGrowthResult",
 ]
 
 
@@ -654,3 +657,35 @@ class FailureIntervalResult(SolverResult):
     interval: Quantity
     expected_failures: float
     failures_per_day: float
+
+
+class GradientSyncResult(SolverResult):
+    """Result from GradientSyncModel: one data-parallel gradient exchange per link."""
+    sync_bytes: Quantity
+    compute_time: Quantity
+    transfer_times: Dict[str, Quantity]
+    step_times: Dict[str, Quantity]
+    compute_fractions: Dict[str, float]
+    energy_per_step: Quantity      # on the energy link, per worker
+    energy_total: Quantity         # over all steps, per worker
+
+
+class CommunicationIntensityResult(SolverResult):
+    """Result from CommunicationIntensityModel: bytes sent per local FLOP vs. fabric balance."""
+    local_tokens: int
+    bytes_per_step: Quantity
+    flops_per_step: Quantity
+    intensity: float               # bytes per FLOP
+    balance: float                 # link bytes/s per peak FLOP/s
+    compute_time_at_peak: Quantity
+
+
+class TrainingGrowthResult(SolverResult):
+    """Result from TrainingGrowthModel: annual growth of training compute and its factors."""
+    run_count: int
+    compute_factor: float
+    count_factor: float
+    duration_factor: float
+    rate_factor: float
+    fleet_share: float             # share of the compute exponent from count and duration
+    span_orders: float             # orders of magnitude from AlexNet to the largest run

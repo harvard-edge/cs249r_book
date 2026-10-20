@@ -7,7 +7,7 @@ from .distributed import DistributedModel, MoERoutingModel, ParallelismOptimizer
 from .economics import EconomicsModel, PlacementOptimizer, ResponsibleEngineeringModel, SustainabilityModel
 from .orchestration import OrchestrationModel
 from .facility import CoolantFlowModel, OutageCostModel, PowerTransientModel
-from .interconnect import TensorParallelCommModel, TransferLadderModel
+from .interconnect import CommunicationIntensityModel, GradientSyncModel, TensorParallelCommModel, TransferLadderModel
 from .performance import DecodeBoundModel, EfficiencyModel, NetworkRooflineModel, SensitivitySolver, SingleNodeModel, SynthesisSolver
 from .reliability import FailureIntervalModel, ReliabilityModel
 from .serving import (
@@ -19,6 +19,7 @@ from .serving import (
     TailLatencyModel,
     WeightStreamingModel,
 )
+from .trends import TrainingGrowthModel
 from .training import CheckpointModel, ScalingModel, TrainingMemoryModel, TrainingRunModel, TrainingStateModel
 
 __all__ = [
@@ -36,6 +37,9 @@ __all__ = [
     "CoolantFlowModel",
     "OutageCostModel",
     "FailureIntervalModel",
+    "GradientSyncModel",
+    "CommunicationIntensityModel",
+    "TrainingGrowthModel",
     "NetworkRooflineModel",
     "EfficiencyModel",
     "SensitivitySolver",
