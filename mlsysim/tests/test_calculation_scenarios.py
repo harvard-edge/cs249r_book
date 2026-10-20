@@ -3516,3 +3516,107 @@ def test_sensor_perception_error_scales():
     assert (k.min_count, k.rank, k.rank_from_top) == (99, 991, 10)
     assert Scenarios.DenseFogVisibility.result.visibility_range.to("m").magnitude == approx(59.915)
     assert Scenarios.AluminumLinkWarming.result.expansion.to("mm").magnitude == approx(0.231)
+
+
+# --- Sustainability (added 2026-10-20) ---------------------------------------
+
+def test_llama31_405b_training_footprint():
+    r = Scenarios.Llama31_405BTrainingFootprint.result
+    assert r.power.accelerator_power.to("MW").magnitude == approx(11.4688)
+    assert r.power.it_power.to("MW").magnitude == approx(15.7696)
+    assert r.power.facility_power.to("MW").magnitude == approx(17.662)
+    assert r.accelerator_energy.to("MWh").magnitude == approx(21588.0)
+    assert r.it_energy.to("MWh").magnitude == approx(29683.5)
+    assert r.facility_energy.to("MWh").magnitude == approx(33245.52)
+    assert r.duration.to("hour").magnitude == approx(1882.32)
+    assert r.carbon["US average"].to("metric_ton").magnitude == approx(14262.3)
+    assert r.carbon["Norway"].to("metric_ton").magnitude == approx(332.455)
+    assert r.carbon["Poland"].to("metric_ton").magnitude == approx(27261.3)
+    assert r.embodied_manufactured.to("metric_ton").magnitude == approx(2686.98)
+    assert r.embodied_allocated.to("metric_ton").magnitude == approx(192.457)
+    assert r.embodied_share["Quebec"] == approx(0.22447)
+    assert r.water["Google fleet"].to("liter").magnitude == approx(3.4136e7)
+    assert r.water["evaporative"].to("liter").magnitude == approx(5.3430e7)
+
+
+def test_facility_power_chain_and_rollback():
+    m = Scenarios.Mega100KFacilityPower.result
+    assert m.accelerator_power.to("MW").magnitude == approx(70.0)
+    assert m.it_power.to("MW").magnitude == approx(96.25) and m.facility_power.to("MW").magnitude == approx(107.8)
+    assert Scenarios.Reference25KFacilityPower.result.accelerator_power.to("MW").magnitude == approx(17.5)
+    assert Scenarios.FeedSizing14KGpus.result.it_power.to("MW").magnitude == approx(13.475)
+    e = Scenarios.Training10KCoolingRollback.result.energy
+    assert e["low"].to("MWh").magnitude == approx(3.5) and e["high"].to("MWh").magnitude == approx(7.0)
+
+
+def test_pue_retrofit_and_site_rates():
+    r = Scenarios.PueRetrofit2MW.result
+    assert r.facility_power_before.to("MW").magnitude == approx(3.16)
+    assert r.saved_power.to("MW").magnitude == approx(0.96)
+    assert r.saved_energy.to("MWh").magnitude == approx(8409.6)
+    assert r.saved_cost.to("USD").magnitude == approx(588672.0)
+    rates = Scenarios.PueVersusGridSites.result.rates
+    assert rates["A"].to("metric_ton/hour").magnitude == approx(4.86)
+    assert rates["B"].to("metric_ton/hour").magnitude == approx(0.675)
+
+
+def test_grid_placement():
+    q = Scenarios.QuebecVersusPolandPlacement.result
+    assert q.emissions["Quebec"].to("metric_ton").magnitude == approx(200.0)
+    assert q.emissions["Poland"].to("metric_ton").magnitude == approx(8200.0)
+    assert q.emissions_after_cut["Poland"].to("metric_ton").magnitude == approx(6970.0)
+    assert q.spread == approx(41.0)
+    g = Scenarios.RegionalGridPlacement.result
+    assert (g.lowest, g.highest) == ("Norway", "Poland") and g.spread == approx(82.0)
+
+
+def test_embodied_payback_and_life_extension():
+    r = Scenarios.H100ReplacementPayback.result
+    assert r.saved_energy_per_day.to("kWh").magnitude == approx(8.4)
+    assert r.avoided_per_day["US average"].to("kg").magnitude == approx(3.6036)
+    assert r.payback["US average"].to("week").magnitude == approx(6.5014)
+    assert r.payback["Quebec"].to("day").magnitude == approx(976.19)
+    assert Scenarios.AcceleratorLifeExtension.result.annual_charge_reduction == approx(0.4)
+
+
+def test_power_cap_and_serving_crossover():
+    c = Scenarios.FeedCappedTrainingRun.result
+    assert c.concurrency == approx(2 / 3) and c.stretched_duration.to("day").magnitude == approx(4.5)
+    s = Scenarios.GeminiPromptsAgainstLlama31Training.result
+    assert s.daily_energy.to("MWh").magnitude == approx(240.0)
+    assert s.crossover_days == approx(138.52)
+
+
+def test_edge_energy_models():
+    c = Scenarios.EdgeFirstImageCascade.result
+    assert c.mean_energy.to("mJ").magnitude == approx(6.5) and c.saving == approx(0.89167)
+    w = Scenarios.WakeWordHierarchyPower.result
+    assert w.average_power.to("uW").magnitude == approx(15.5) and w.reduction == approx(645.16)
+    d = Scenarios.BatchOneDecodeWeightEnergy.result
+    assert d.movement_energy.to("pJ").magnitude == approx(320.0) and d.compute_energy.to("pJ").magnitude == approx(20.0)
+    assert d.movement_share == approx(0.94118) and d.crossover_intensity == approx(16.0)
+    assert d.operand_energy.to("pJ").magnitude == approx(640.0) and d.operand_over_flop == approx(64.0)
+
+
+def test_demand_rebound_sweep_and_scaling():
+    assert Scenarios.HalvedQueryEnergyRebound.result.net_factor == approx(2.0)
+    assert Scenarios.QuarterTaskEnergyRebound.result.net_factor == approx(5.0)
+    assert Scenarios.TokenPriceRebound.result.net_factor == approx(3.3333)
+    assert Scenarios.CandidateSweep50.result.final_run_equivalents == approx(5.0)
+    assert Scenarios.KaplanTenPercentLowerLoss.reduction_multiple == approx(8.2253)
+
+
+def test_eu_week_fossil_share_and_water():
+    e = Scenarios.EuropeWeek47FossilShare
+    r = e.result
+    assert min(e.shares) == approx(20.0006) and max(e.shares) == approx(37.8716)
+    assert r.low == approx(22.7386) and r.high == approx(35.7098) and r.ratio == approx(1.57045)
+    w = Scenarios.ReferenceItLoadAnnualWater.result.water["evaporative"]
+    assert w.to("liter").magnitude == approx(1.5768e8)
+
+
+def test_carbon_priced_region_placement():
+    r = Scenarios.CarbonPricedRegionPlacement.result
+    assert r.best_region == "Quebec" and r.best_region_untaxed == "Quebec"
+    assert r.objective_value == approx(25336888.4)
+    assert r.objective["US_Avg"] - r.objective["Quebec"] == approx(531280.0)

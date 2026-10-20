@@ -2942,3 +2942,166 @@ class VisibilityRangeResult(SolverResult):
 class ThermalExpansionResult(SolverResult):
     """Result from ThermalExpansionModel: a heated member's length change."""
     expansion: Quantity
+
+
+# --- Sustainability (added 2026-10-20) ---------------------------------------
+
+class FacilityPowerResult(SolverResult):
+    """Result from FacilityPowerModel: accelerator, IT, and facility power."""
+    accelerator_power: Quantity
+    it_power: Quantity
+    facility_power: Quantity
+    support_power: Quantity          # IT minus accelerators (hosts, switches, conversion)
+    overhead_power: Quantity         # facility minus IT (PUE overhead)
+
+
+class WaterUseResult(SolverResult):
+    """Result from WaterUseModel: water consumed at each named WUE."""
+    water: Dict[str, Quantity]
+
+
+class RunFootprintResult(SolverResult):
+    """Result from RunFootprintModel: one run's energy, carbon, embodied carbon, and water."""
+    power: FacilityPowerResult
+    duration: Quantity               # device-hours / devices (every device running throughout)
+    accelerator_energy: Quantity
+    it_energy: Quantity
+    facility_energy: Quantity
+    carbon: Dict[str, Quantity]      # operational, per named grid
+    embodied_manufactured: Quantity  # every device, at manufacture
+    embodied_allocated: Quantity     # the run's time share of a service life
+    embodied_share: Dict[str, float]  # allocated / (operational + allocated), per grid
+    water: Dict[str, Quantity]       # per named WUE
+
+
+class PueRetrofitResult(SolverResult):
+    """Result from PueRetrofitModel: facility power before and after, and what the change saves."""
+    facility_power_before: Quantity
+    facility_power_after: Quantity
+    saved_power: Quantity
+    saved_energy: Quantity
+    saved_cost: Quantity
+
+
+class FacilityCarbonRateResult(SolverResult):
+    """Result from FacilityCarbonRateModel: operational carbon per hour of each site."""
+    rates: Dict[str, Quantity]
+
+
+class GridPlacementResult(SolverResult):
+    """Result from GridPlacementModel: emissions of one energy on each grid."""
+    emissions: Dict[str, Quantity]
+    emissions_after_cut: Dict[str, Quantity]
+    lowest: str
+    highest: str
+    spread: float                    # highest / lowest intensity
+
+
+class EmbodiedPaybackResult(SolverResult):
+    """Result from EmbodiedPaybackModel: carbon a replacement avoids per day and its payback time."""
+    saved_power: Quantity
+    saved_energy_per_day: Quantity
+    avoided_per_day: Dict[str, Quantity]
+    payback: Dict[str, Quantity]
+
+
+class ServiceLifeExtensionResult(SolverResult):
+    """Result from ServiceLifeExtensionModel: cut in embodied carbon charged per year."""
+    annual_charge_reduction: float
+
+
+class PowerCapResult(SolverResult):
+    """Result from PowerCapModel: the concurrency a feed allows and the stretched duration."""
+    concurrency: float
+    stretched_duration: Quantity
+
+
+class RepeatedWorkEnergyResult(SolverResult):
+    """Result from RepeatedWorkEnergyModel: energy repeated per named rollback."""
+    energy: Dict[str, Quantity]
+
+
+class ServingCrossoverResult(SolverResult):
+    """Result from ServingCrossoverModel: daily serving energy and the day it passes a one-time energy."""
+    daily_energy: Quantity
+    crossover_days: float
+
+
+class CascadeEnergyResult(SolverResult):
+    """Result from CascadeEnergyModel: mean energy per input of an edge-first cascade."""
+    escalated_energy: Quantity
+    mean_energy: Quantity
+    cloud_only_energy: Quantity
+    saving: float
+
+
+class DutyCycledPowerResult(SolverResult):
+    """Result from DutyCycledPowerModel: each stage's average contribution and the total."""
+    contributions: Dict[str, Quantity]
+    average_power: Quantity
+    reduction: float                 # reference power / average power
+
+
+class DataMovementEnergyResult(SolverResult):
+    """Result from DataMovementEnergyModel: arithmetic against data-movement energy per weight."""
+    compute_energy: Quantity
+    movement_energy: Quantity
+    movement_share: float
+    movement_over_compute: float
+    intensity: float                 # FLOP/byte of the access pattern
+    crossover_intensity: float       # FLOP/byte at which the two energies match
+    balance_batch: float
+    operand_energy: Quantity
+    operand_over_flop: float
+
+
+class DemandReboundResult(SolverResult):
+    """Result from DemandReboundModel: fleet energy multiple after efficiency and volume change."""
+    net_factor: float
+
+
+class DevelopmentSweepResult(SolverResult):
+    """Result from DevelopmentSweepModel: final-run equivalents a sweep consumes."""
+    final_run_equivalents: float
+
+
+class RollingWindowResult(SolverResult):
+    """Result from RollingWindowModel: window means and their extremes."""
+    means: List[float]
+    low_index: int
+    high_index: int
+    low: float
+    high: float
+    ratio: float
+
+
+class CarbonPricedPlacementResult(SolverResult):
+    """Result from CarbonPricedPlacementModel: region ranking with and without a carbon price."""
+    duration_days: float
+    best_region: str
+    best_region_untaxed: str
+    objective_value: float
+    objective: Dict[str, float]
+    objective_untaxed: Dict[str, float]
+
+
+__all__ += [
+    "FacilityPowerResult",
+    "WaterUseResult",
+    "RunFootprintResult",
+    "PueRetrofitResult",
+    "FacilityCarbonRateResult",
+    "GridPlacementResult",
+    "EmbodiedPaybackResult",
+    "ServiceLifeExtensionResult",
+    "PowerCapResult",
+    "RepeatedWorkEnergyResult",
+    "ServingCrossoverResult",
+    "CascadeEnergyResult",
+    "DutyCycledPowerResult",
+    "DataMovementEnergyResult",
+    "DemandReboundResult",
+    "DevelopmentSweepResult",
+    "RollingWindowResult",
+    "CarbonPricedPlacementResult",
+]

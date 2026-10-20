@@ -672,3 +672,9 @@ __all__ += [
     "calc_arcsine_two_arm_sample_size",
     "calc_poisson_exact_interval",
 ]
+
+from .scaling import calc_loss_reduction_compute_multiple  # added 2026-10-20
+
+__all__ += [
+    "calc_loss_reduction_compute_multiple",
+]
