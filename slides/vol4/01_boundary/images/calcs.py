@@ -137,8 +137,10 @@ v("stall_mm", m(STALL.result.delay_travel, "mm"), "{:.0f}", "travel during the s
 print("== Convergence: slick floor and Cruise")
 k = SLICK.result
 assert not k.premise_holds  # the notes say the slick floor falls below the premise (the chapter guards "quadruple")
-v("mu_dry", SLICK.mu_before, "{:.1f}", "illustrative dry friction")
-v("mu_slick", SLICK.mu_after, "{:.1f}", "illustrative friction with hydraulic fluid")
+assert (SLICK.mu_before, SLICK.mu_after) == (AISLE.mu_dry, AISLE.mu_oil_film)  # the aisle's own floor
+v("mu_dry", SLICK.mu_before, "{:.2f}", "the aisle's dry floor friction (illustrative)")
+v("mu_slick", SLICK.mu_after, "{:.2f}", "the aisle's oil-film friction (illustrative)")
+v("slick_ratio", k.braking_distance_ratio, "{:.0f}", "braking distance at the traction limit, after / before")
 v("mu_required", k.required_friction, "{:.3f}", "friction the card's deceleration needs")
 v("cruise_m", m(Q_(float(IR.CruisePulloverDistanceFt), "ft"), "m"), "{:.1f}", "Cruise pullover distance, m")
 v("cruise_mph", IR.CruisePulloverMaxSpeedMph, "{:.1f}", "Cruise pullover top speed, mph")

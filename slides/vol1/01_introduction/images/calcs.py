@@ -20,6 +20,8 @@ import re
 import sys
 from pathlib import Path
 
+import numpy as np
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 from deckvals import v, write, mlsysim  # noqa: E402
 
@@ -301,6 +303,9 @@ v("algo_mult", efficientnet, "{:.0f}", "EfficientNet compute reduction at AlexNe
 v("growth_exp", round(math.log10(trend["GPT-4-class"] / trend["AlexNet"])), "{:.0f}",
   "orders of magnitude of training-compute growth")
 v("growth_exp_word", round(math.log10(trend["GPT-4-class"] / trend["AlexNet"])), "words", "the same, in prose")
+_fit = np.polyfit([e["year"] for e in Literature.ComputeTrend.entries],
+                  np.log2([e["flops"] for e in Literature.ComputeTrend.entries]), 1)[0]
+v("growth_doubling_mo", mlsysim.core.units.Q_(1 / _fit, "year").to("month").magnitude, "{:.0f}", "least-squares doubling time of the plotted runs, months (the chapter's caption fit)")
 
 if __name__ == "__main__":
     write(__file__)

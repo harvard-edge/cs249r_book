@@ -1097,11 +1097,11 @@ class Scenarios(Registry):
 
     HydraulicFluidSlickTraction = _st.TractionLossScenario(
         name="Hydraulic fluid on a dry concrete floor under the warehouse base",
-        description="Illustrative tire-floor pair, about 0.8 dry and 0.2 with hydraulic fluid, "
-                    "against the running machine's credible deceleration with all weight on the "
-                    "driven wheels.",
-        mu_before=0.8,  # scenario assumption: tire on dry concrete (illustrative)
-        mu_after=0.2,  # scenario assumption: tire on spilled hydraulic fluid (illustrative)
+        description="The warehouse aisle's illustrative floor friction, dry (0.60) and under a "
+                    "clear oil film (0.05), against the running machine's credible deceleration "
+                    "with all weight on the driven wheels.",
+        mu_before=_Embodied.Scenario.WarehouseAisle.mu_dry,  # the aisle's dry floor (illustrative)
+        mu_after=_Embodied.Scenario.WarehouseAisle.mu_oil_film,  # the aisle's oil film (illustrative)
         deceleration=_Embodied.Scenario.WarehouseAisle.a_brake,
     )
 

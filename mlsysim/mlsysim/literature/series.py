@@ -1024,7 +1024,7 @@ class Series:
     )
     HorovodScaling128Gpu = TrendSeries(
         "horovod_scaling_128gpu",
-        _lit("Sergeev and Del Balso (2018), Horovod, arXiv:1802.05799, scaling bar chart (Figure 7 in v3)",
+        _lit("Sergeev and Del Balso (2018), Horovod, arXiv:1802.05799, scaling bar chart (Figure 6 in v3)",
              "https://arxiv.org/abs/1802.05799",
              "images per second at 128 NVIDIA Pascal GPUs over 25GbE TCP: ideal (one-GPU rate times 128), "
              "standard distributed TensorFlow, and Horovod; bar heights read from the figure to about "
@@ -1034,7 +1034,7 @@ class Series:
     )
     HorovodTimelineTrace = TrendSeries(
         "horovod_timeline_trace",
-        _lit("Sergeev and Del Balso (2018), Horovod, arXiv:1802.05799, Horovod Timeline screenshot (Figure 6 in v3)",
+        _lit("Sergeev and Del Balso (2018), Horovod, arXiv:1802.05799, Horovod Timeline screenshot (Figure 5 in v3)",
              "https://arxiv.org/abs/1802.05799",
              "phase edges of five gradient tensors' AllReduces, read against the screenshot's 100 ms ticks to "
              "about +/-2 ms, in ms after its first tick (Literature.Communication.HorovodTimelineOriginMs); "

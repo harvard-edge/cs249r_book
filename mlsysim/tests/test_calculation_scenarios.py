@@ -491,8 +491,8 @@ def test_tempe_through_the_stopping_budget():
 
 def test_floor_traction_loss():
     r = Scenarios.HydraulicFluidSlickTraction.result
-    assert r.braking_distance_ratio == approx(4.0)
-    assert r.traction_ceiling.to("m/s**2").magnitude == approx(1.9613)
+    assert r.braking_distance_ratio == approx(12.0)
+    assert r.traction_ceiling.to("m/s**2").magnitude == approx(0.49033)
     assert r.required_friction == approx(0.20394)
     assert not r.premise_holds
 
