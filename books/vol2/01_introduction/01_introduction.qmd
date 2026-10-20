@@ -2172,81 +2172,62 @@ plt.close()
 
 :::
 
-The third cut follows lifecycle stage, because additional compute can be spent on the foundation run, on adapting the model afterward, or on each request in deployment (@fig-scaling-regimes). Pretraining scaling (orange curve) increases the resource investment in the foundation run. Posttraining scaling (blue curve) adapts an existing model through fine-tuning or preference optimization. Test-time scaling (green curve, "long thinking") spends additional computation on a particular request through intermediate generation, search, or sampling, trading serving latency and throughput for a possible quality gain. Each phase stresses a different part of the fleet. Pretraining is one long, failure-sensitive foundation run whose scaling-law gains must be realized in wall-clock time. Posttraining replaces that single large job with many smaller, coordination-heavy runs. Test-time scaling moves computation into the serving path, where it competes with latency targets. The schematic curves do not establish a universal efficiency ranking among these choices, so the full treatments belong with their workloads. Test-time compute at serving is treated in @sec-inference-logic-wall. A resource plan must compare measured task improvements and costs before choosing where to spend the next increment of compute.
+The third cut follows lifecycle stage, because additional compute can be spent on the foundation run, on adapting the model afterward, or on each request in deployment (@fig-scaling-regimes). Pretraining scaling (top panel) increases the resource investment in the foundation run. Posttraining scaling (middle panel) adapts an existing model through fine-tuning or preference optimization. Test-time scaling (bottom panel) spends additional computation on a particular request through intermediate generation, search, or sampling, trading serving latency and throughput for a possible quality gain. Each phase stresses a different part of the fleet. Pretraining is one long, failure-sensitive foundation run whose scaling-law gains must be realized in wall-clock time. Posttraining replaces that single large job with many smaller, coordination-heavy runs. Test-time scaling moves computation into the serving path, where it competes with latency targets. Each panel therefore uses a separate compute budget. Comparing the heights or slopes across panels would not establish which choice buys more quality per unit of compute. Test-time compute at serving is treated in @sec-inference-logic-wall. A resource plan must compare measured task improvements and costs before choosing where to spend the next increment of compute.
 
 ::: {.column-margin .margin-pointer}
 ↪ The multi-model coordination that posttraining alignment runs require is developed in @sec-distributed-training-rlhf-coordination.
 :::
 
-::: {#fig-scaling-regimes fig-env="figure" fig-pos="htb" fig-cap="**The Three Scaling Phases**: A schematic of three points in the lifecycle where additional computation can raise capability. Pretraining scales with compute and data [@kaplan2020scaling]. Posttraining (reinforcement learning from human feedback, instruction tuning) refines behavior [@ouyang2022instructgpt]. Test-time scaling (chain-of-thought, search) spends additional computation on each request at inference [@snell2025scaling]. The curves are illustrative and carry no measured values." fig-alt="Schematic plot of intelligence vs. compute. An orange pretraining curve, a blue posttraining curve, and a green test-time scaling curve labeled long thinking join end to end at two dots, each with a faded dashed continuation of its own trend. Colored brackets along the compute axis mark each phase's span, labeled one long foundation run, many smaller runs, and compute per request."}
+::: {#fig-scaling-regimes fig-env="figure" fig-pos="htb" fig-cap="**The Three Scaling Phases**: Three independent schematics show where additional computation can raise task quality. Pretraining spends compute on a foundation run [@kaplan2020scaling]. Posttraining spends it on adaptation, including instruction tuning and reinforcement learning from human feedback [@ouyang2022instructgpt]. Test-time scaling spends it on each request through generation, search, or sampling [@snell2025scaling]. Each panel has its own budget and quality scale. The curve shapes carry no measured values and establish no efficiency ranking." fig-alt="Three stacked schematic panels with separate axes. An orange pretraining curve is plotted against foundation-run compute, a blue posttraining curve against adaptation-run compute, and a green test-time curve against compute per request. The vertical label is Task quality, schematic. A note states that the axes are independent and carry no measured values or efficiency ranking."}
 
 ```{python}
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SCALING BUDGETS ACROSS THE MODEL LIFECYCLE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-scaling-regimes—where additional computation is spent.
+# │ Goal: Distinguish foundation-run, adaptation-run, and per-request budgets.
+# │ Show: Independent schematic panels; neither a common budget nor a ranking.
+# │ How: Retain the illustrative curve shapes on separate, unlabeled scales.
+# └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
 from binder.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 4.2))
+fig, _, COLORS, plt = book_style.setup_plot(figsize=(6.2, 5.6))
+fig.clear()
+_panels = fig.subplots(3, 1)
 
-# Curve stages:
-# Pretraining: 0.2 to 3.5
+# These arrays describe drawing geometry, not measurements or fitted laws.
 x_pre = np.linspace(0.2, 3.5, 100)
 y_pre = 1.0 * np.log(x_pre + 1.0) + 0.9  # lifted to clear the stage brackets below
-ax.plot(x_pre, y_pre, color=COLORS['OrangeLine'], linewidth=2.4, zorder=4)
-
-# Pretraining dashed tangent projection
-x_pre_proj = np.linspace(3.5, 7.0, 80)
-slope_pre = (y_pre[-1] - y_pre[-10]) / (x_pre[-1] - x_pre[-10])
-y_pre_proj = y_pre[-1] + slope_pre * (x_pre_proj - x_pre[-1]) * 0.7
-ax.plot(x_pre_proj, y_pre_proj, color=COLORS['OrangeLine'], linestyle='--', linewidth=1.4, alpha=0.5)
-
-# Posttraining: 3.5 to 6.5
 x_post = np.linspace(3.5, 6.5, 100)
 y_post = y_pre[-1] + 0.6 * (x_post - 3.5) ** 0.85
-ax.plot(x_post, y_post, color=COLORS['BlueLine'], linewidth=2.4, zorder=4)
-
-# Posttraining dashed projection
-x_post_proj = np.linspace(6.5, 9.2, 60)
-slope_post = (y_post[-1] - y_post[-10]) / (x_post[-1] - x_post[-10])
-y_post_proj = y_post[-1] + slope_post * (x_post_proj - x_post[-1]) * 0.7
-ax.plot(x_post_proj, y_post_proj, color=COLORS['BlueLine'], linestyle='--', linewidth=1.4, alpha=0.5)
-
-# Test-time scaling: 6.5 to 8.8
 x_tt = np.linspace(6.5, 8.8, 100)
 y_tt = y_post[-1] + 0.75 * (x_tt - 6.5) ** 0.88
-ax.plot(x_tt, y_tt, color=COLORS['GreenLine'], linewidth=2.4, zorder=4)
 
-# Test-time projection
-x_tt_proj = np.linspace(8.8, 10.2, 40)
-slope_tt = (y_tt[-1] - y_tt[-10]) / (x_tt[-1] - x_tt[-10])
-y_tt_proj = y_tt[-1] + slope_tt * (x_tt_proj - x_tt[-1]) * 0.75
-ax.plot(x_tt_proj, y_tt_proj, color=COLORS['GreenLine'], linestyle='--', linewidth=1.4, alpha=0.5)
-
-# Direct labels: one style for all three phases, each pointing at its curve
-_label = dict(fontsize=10, fontweight='bold', ha='center', va='center')
-ax.text(1.55, 2.45, 'Pretraining\nscaling', color=COLORS['OrangeLine'], **_label)
-ax.text(4.35, 3.75, 'Posttraining\nscaling', color=COLORS['BlueLine'], **_label)
-ax.text(6.85, 5.55, 'Test-time scaling\n("long thinking")', color=COLORS['GreenLine'], **_label)
-
-# Phase hand-offs: a dot where each phase starts from the previous one.
-ax.scatter([3.5, 6.5], [y_pre[-1], y_post[-1]], s=22, color=COLORS['primary'], zorder=5)
-
-# Where each phase spends its compute, as brackets along the compute axis.
-for (_a, _b), _name, _c in (
-    ((0.2, 3.45), 'one long foundation run', 'OrangeLine'),
-    ((3.55, 6.45), 'many smaller runs', 'BlueLine'),
-    ((6.55, 8.8), 'compute per request', 'GreenLine'),
+for _ax, _x, _y, _title, _xlabel, _cost, _color in (
+    (_panels[0], x_pre, y_pre, '(a) Pretraining', 'Foundation-run compute', 'One foundation run', 'OrangeLine'),
+    (_panels[1], x_post, y_post, '(b) Posttraining', 'Adaptation-run compute', 'Many smaller runs', 'BlueLine'),
+    (_panels[2], x_tt, y_tt, '(c) Test-time scaling', 'Compute per request', 'Serving latency and capacity', 'GreenLine'),
 ):
-    ax.plot([_a, _a, _b, _b], [0.62, 0.5, 0.5, 0.62], color=COLORS[_c], lw=1.2)
-    ax.text((_a + _b) / 2, 0.28, _name, ha='center', va='center', fontsize=10, color=COLORS['primary'])
-
-ax.set_xlim(0, 11)
-ax.set_ylim(0, 6.6)
-ax.set_xlabel('Compute')
-ax.set_ylabel('Intelligence')
-ax.set_xticks([])
-ax.set_yticks([])
-ax.grid(False)
-plt.tight_layout()
+    _ax.plot(_x, _y, color=COLORS[_color], linewidth=2.4)
+    _ax.set_title(_title, loc='left')
+    _ax.set_xlabel(_xlabel)
+    _ax.text(0.98, 0.94, _cost, transform=_ax.transAxes, ha='right', va='top', fontsize=book_style.MIN_FONT_PT, color=COLORS['secondary'])
+    _ax.set_xticks([])
+    _ax.set_yticks([])
+    _ax.margins(x=0.08, y=0.35)
+    _ax.grid(False)
+fig.supylabel('Task quality (schematic)')
+fig.text(
+    0.54,
+    0.012,
+    'Independent axes; no measured values or efficiency ranking.',
+    ha='center',
+    fontsize=book_style.MIN_FONT_PT,
+    color=COLORS['secondary'],
+)
+fig.tight_layout(rect=(0.035, 0.045, 1, 1), h_pad=1.2)
 plt.show()
 plt.close()
 ```
@@ -2726,8 +2707,8 @@ class EfficiencyMeasureAnchors:
     """Published MFU values beside a recomputation-inclusive percent of peak."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    mtnlg_mfu = float(Literature.TrainingRuns.MtNlgMfu)   # PaLM Table 3
-    palm_mfu = float(Literature.TrainingRuns.PalmMfu)     # PaLM Table 3
+    mtnlg_mfu = float(Literature.TrainingRuns.MtNlgMfu)  # PaLM Table 3
+    palm_mfu = float(Literature.TrainingRuns.PalmMfu)  # PaLM Table 3
     megatron_peak = ComputeAllocationAnchors.megatron_peak_fraction  # counts recomputation
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
