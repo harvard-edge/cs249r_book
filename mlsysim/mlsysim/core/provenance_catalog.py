@@ -2503,6 +2503,18 @@ DEEPSEEK_3FS_README = _lit(
 )
 
 # --- Incident investigation reports (added 2026-10-20) ----------------------
+LIONS_ARIANE_501_1996 = _lit(
+    "prov:lions-ariane-501-1996",
+    "J. L. Lions (chair), ARIANE 5 Flight 501 Failure: Report by the Inquiry Board, ESA/CNES, Paris, 19 July 1996",
+    url="https://esamultimedia.esa.int/docs/esa-x-1819eng.pdf",
+    verified="2026-10-21",
+    notes=(
+        "Read from the scanned report (OCR, sections 1 and 1.1-1.3): the flight was nominal until "
+        "approximately H0 + 37 s; both Inertial Reference Systems ceased to function at around "
+        "H0 + 36.7 s; the launcher broke up and exploded about 40 s after initiation of the flight "
+        "sequence, at an altitude of about 3700 m (self-destruction near the pad at about 4000 m)."
+    ),
+)
 NTSB_HAR_19_03 = _lit(
     "prov:ntsb-har-19-03",
     "NTSB, Collision Between Vehicle Controlled by Developmental Automated Driving System and "
