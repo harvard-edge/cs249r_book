@@ -18367,3 +18367,509 @@ class ArgumentConfidenceScenario(BaseScenario):
     def multilegged(self) -> float:
         from ..physics import calc_multilegged_confidence
         return calc_multilegged_confidence([self.leg_confidence] * self.legs)
+# --- Coordinating several agents: partitions, schedules, merges, votes, and allowances (added 2026-10-20) ---
+
+
+class PartitionScreenScenario(BaseScenario):
+    """A fixed partition screened over worker counts: (1 - p) + p / N + c (N - 1) of the serial time.
+
+    The best count is the integer that minimizes elapsed time under the ceiling
+    ``max_workers``; no count beats 1 / (1 - p), and the continuous optimum sits
+    at sqrt(p / c).
+    """
+    parallel_fraction: float
+    overhead_per_extra_worker: float
+    max_workers: int
+
+    @property
+    def elapsed(self) -> Dict[int, float]:
+        """Elapsed time over the serial reference, for each count from one to the ceiling."""
+        from ..physics.coordination import calc_partition_elapsed
+        return {n: calc_partition_elapsed(n, self.parallel_fraction, self.overhead_per_extra_worker)
+                for n in range(1, self.max_workers + 1)}
+
+    @property
+    def best_workers(self) -> int:
+        t = self.elapsed
+        return min(t, key=t.get)
+
+    @property
+    def best_time(self) -> float:
+        return self.elapsed[self.best_workers]
+
+    @property
+    def best_speedup(self) -> float:
+        return 1 / self.best_time
+
+    @property
+    def speedup_cap(self) -> float:
+        """Amdahl's ceiling with free coordination: 1 / (1 - p)."""
+        return 1 / (1 - self.parallel_fraction)
+
+    @property
+    def continuous_best(self) -> float:
+        """sqrt(p / c), where the derivative of the elapsed time vanishes."""
+        return _math.sqrt(self.parallel_fraction / self.overhead_per_extra_worker)
+
+
+class ScalabilityLawScenario(BaseScenario):
+    """Relative capacity N / (1 + sigma (N - 1) + kappa N (N - 1)) over integer worker counts."""
+    contention: float                         # sigma
+    coherency: float                          # kappa
+    search_limit: int
+
+    @property
+    def capacity(self) -> Dict[int, float]:
+        from ..physics.performance import calc_universal_scalability_law
+        return {n: calc_universal_scalability_law(n, self.contention, self.coherency)
+                for n in range(1, self.search_limit + 1)}
+
+    @property
+    def best_workers(self) -> int:
+        c = self.capacity
+        return max(c, key=c.get)
+
+    @property
+    def peak_capacity(self) -> float:
+        return self.capacity[self.best_workers]
+
+    @property
+    def continuous_peak(self) -> float:
+        """N* = sqrt((1 - sigma) / kappa)."""
+        from ..physics.performance import calc_usl_optimal_concurrency
+        return calc_usl_optimal_concurrency(self.contention, self.coherency)
+
+    @property
+    def retrograde_threshold(self) -> float:
+        """(1 - sigma) / kappa: past it, capacity falls below one worker's."""
+        return (1 - self.contention) / self.coherency
+
+    @property
+    def first_slower(self) -> Optional[int]:
+        """The smallest count above one whose capacity is below one worker's."""
+        return next((n for n, c in self.capacity.items() if n > 1 and c < 1), None)
+
+
+class DelegationTokenBreakEvenScenario(BaseScenario):
+    """Delegation at a token multiple m per attempt: cost per accepted task scales by m p_single / p_multi.
+
+    With cost proportional to tokens, delegation breaks even only if it multiplies
+    acceptance by m, which is possible only while single-agent acceptance is at
+    most 1 / m.
+    """
+    agent_tokens_vs_chat: float               # single agent's tokens over a chat answer's
+    multi_agent_tokens_vs_chat: float         # delegated system's tokens over a chat answer's
+    reported_gain: float                      # a reported relative score gain, read as acceptance
+    single_acceptance: Optional[float] = None  # a stated single-agent acceptance to test
+
+    @property
+    def token_multiple(self) -> float:
+        return self.multi_agent_tokens_vs_chat / self.agent_tokens_vs_chat
+
+    @property
+    def max_single_acceptance(self) -> float:
+        """Largest single-agent acceptance at which break-even is possible: 1 / m."""
+        return 1 / self.token_multiple
+
+    @property
+    def acceptance_multiplier(self) -> float:
+        return 1 + self.reported_gain
+
+    @property
+    def cost_ratio_if_gain_is_acceptance(self) -> float:
+        """Delegated over single cost per accepted task if the gain multiplied acceptance."""
+        return self.token_multiple / self.acceptance_multiplier
+
+    @property
+    def required_multi_acceptance(self) -> Optional[float]:
+        """Delegated acceptance that breaks even against ``single_acceptance``: m p_single."""
+        return None if self.single_acceptance is None else self.token_multiple * self.single_acceptance
+
+
+class DependencyScheduleScenario(BaseScenario):
+    """A dependency graph on interchangeable slots: aggregate work, the critical path, and both bounds.
+
+    The schedule starts each node when its last predecessor finishes. No schedule
+    on ``slots`` slots ends before ``max(W / slots, L)``.
+    """
+    durations: Dict[int, Quantity]
+    predecessors: Dict[int, List[int]]
+    slots: int
+
+    @property
+    def schedule(self):
+        from ..physics.coordination import calc_earliest_schedule
+        return calc_earliest_schedule(self.durations, self.predecessors)
+
+    @property
+    def start(self) -> Dict[int, Quantity]:
+        return self.schedule[0]
+
+    @property
+    def finish(self) -> Dict[int, Quantity]:
+        return self.schedule[1]
+
+    @property
+    def work(self) -> Quantity:
+        return sum(self.durations.values(), 0 * next(iter(self.durations.values())))
+
+    @property
+    def makespan(self) -> Quantity:
+        """The critical path: the latest earliest finish."""
+        return max(self.finish.values())
+
+    @property
+    def work_bound(self) -> Quantity:
+        return self.work / self.slots
+
+    @property
+    def speedup(self) -> float:
+        """Serial time over the makespan."""
+        return (self.work / self.makespan).to("").magnitude
+
+    @property
+    def peak_slots(self) -> int:
+        """Most nodes running at once in the earliest schedule."""
+        s, f = self.start, self.finish
+        return max(sum(1 for m in self.durations if s[m] <= s[n] < f[m]) for n in self.durations)
+
+    @property
+    def free_float(self) -> Dict[int, Quantity]:
+        """For each node with successors, how long it can slip before delaying the earliest one."""
+        s, f = self.start, self.finish
+        out = {}
+        for n in self.durations:
+            succ = [m for m, preds in self.predecessors.items() if n in preds]
+            if succ:
+                out[n] = min(s[m] for m in succ) - f[n]
+        return out
+
+
+class ReferencePassingScenario(BaseScenario):
+    """Children handed a pasted repository slice, or a reference and the files they then read."""
+    workers: int
+    slice_tokens: int                         # pasted into each child
+    reference_tokens: int                     # the envelope's reference instead
+    read_tokens: int                          # files each child then reads
+    input_price: Quantity                     # USD per million input tokens
+
+    @property
+    def pasted_tokens(self) -> int:
+        return self.workers * self.slice_tokens
+
+    @property
+    def reference_total_tokens(self) -> int:
+        return self.workers * (self.reference_tokens + self.read_tokens)
+
+    @property
+    def full_read_tokens(self) -> int:
+        """A reference after which each child reads the whole slice."""
+        return self.workers * (self.reference_tokens + self.slice_tokens)
+
+    @property
+    def pasted_cost(self) -> Quantity:
+        return (Q_(self.pasted_tokens, "token") * self.input_price).to("dollar")
+
+    @property
+    def reference_cost(self) -> Quantity:
+        return (Q_(self.reference_total_tokens, "token") * self.input_price).to("dollar")
+
+    @property
+    def reduction(self) -> float:
+        return self.pasted_tokens / self.reference_total_tokens
+
+    @property
+    def read_fraction(self) -> float:
+        return self.read_tokens / self.slice_tokens
+
+    @property
+    def break_even_read_tokens(self) -> int:
+        """Reads per child at which the reference saves nothing."""
+        return self.slice_tokens - self.reference_tokens
+
+
+class SharedWriteScenario(BaseScenario):
+    """Workers each writing ``writes_per_worker`` of ``files`` files, uniformly and independently."""
+    files: int
+    writes_per_worker: int
+    max_fleet: int
+    small_fleet: int                          # fleet sizes the comparison quotes
+    large_fleet: int
+
+    @property
+    def disjoint(self) -> Dict[int, float]:
+        """Exact probability that no two write sets overlap, for each fleet size."""
+        from ..physics.coordination import calc_disjoint_writes
+        return {n: calc_disjoint_writes(n, self.files, self.writes_per_worker) for n in range(1, self.max_fleet + 1)}
+
+    @property
+    def disjoint_approx(self) -> Dict[int, float]:
+        from ..physics.coordination import calc_disjoint_writes_approx
+        return {n: calc_disjoint_writes_approx(n, self.files, self.writes_per_worker)
+                for n in range(1, self.max_fleet + 1)}
+
+    @property
+    def collision(self) -> Dict[int, float]:
+        """Probability of at least one shared write."""
+        return {n: 1 - p for n, p in self.disjoint.items()}
+
+    @property
+    def even_odds_fleet(self) -> Optional[int]:
+        """The smallest fleet for which a shared write is more likely than not."""
+        return next((n for n, p in self.disjoint.items() if p < 0.5), None)
+
+
+class CorrelatedReviewersScenario(BaseScenario):
+    """Reviewers who each falsely approve with the same marginal rate, independent or correlated.
+
+    The correlated model draws one propensity per candidate from a beta law with
+    the stated mean and pairwise correlation; reviewers err independently given
+    it (a beta-binomial). The beta mass above one half floors the majority
+    error of any panel size.
+    """
+    reviewers: int                            # an odd panel
+    false_approval: float                     # marginal false-approval rate
+    correlation: float                        # pairwise correlation of the beta mixture
+    large_ensemble: int                       # a larger odd panel to compare
+
+    @property
+    def shape(self):
+        from ..physics.coordination import calc_beta_mixture_shape
+        return calc_beta_mixture_shape(self.false_approval, self.correlation)
+
+    def independent_majority(self, panel: int) -> float:
+        from ..physics.coordination import calc_binomial_tail
+        return calc_binomial_tail(panel, self.false_approval, panel // 2 + 1)
+
+    def correlated_majority(self, panel: int) -> float:
+        from ..physics.coordination import calc_beta_binomial_pmf
+        return sum(calc_beta_binomial_pmf(panel, self.false_approval, self.correlation)[panel // 2 + 1:])
+
+    @property
+    def independent_unanimous(self) -> float:
+        return self.false_approval ** self.reviewers
+
+    @property
+    def correlated_unanimous(self) -> float:
+        from ..physics.coordination import calc_beta_binomial_pmf
+        return calc_beta_binomial_pmf(self.reviewers, self.false_approval, self.correlation)[-1]
+
+    @property
+    def unanimous_ratio(self) -> float:
+        return self.correlated_unanimous / self.independent_unanimous
+
+    @property
+    def floor(self) -> float:
+        """P(propensity > 1/2): the limit of correlated majority error as the panel grows."""
+        from ..physics.coordination import calc_beta_tail
+        return calc_beta_tail(self.false_approval, self.correlation, 0.5)
+
+    @property
+    def panels(self) -> List[int]:
+        """Odd panel sizes from one to the large ensemble."""
+        return list(range(1, self.large_ensemble + 1, 2))
+
+
+class FanoutDeadlineScenario(BaseScenario):
+    """A fan-out whose workers each finish by the deadline with one probability, independently.
+
+    An all-results barrier needs every worker (horizon compounding across workers);
+    a quorum contract accepts any ``required`` of ``workers``.
+    """
+    workers: int
+    required: int
+    on_time_probability: float
+    deadline: Quantity
+    max_fleet: int                            # fleet sizes to tabulate
+
+    @property
+    def all_on_time(self) -> float:
+        from ..physics.agents import calc_unchecked_success
+        return calc_unchecked_success(self.on_time_probability, self.workers)
+
+    @property
+    def quorum_on_time(self) -> float:
+        from ..physics.coordination import calc_binomial_tail
+        return calc_binomial_tail(self.workers, self.on_time_probability, self.required)
+
+    @property
+    def even_odds_workers(self) -> int:
+        """The smallest fleet whose all-results barrier falls below even odds."""
+        from ..physics.agents import calc_first_horizon_below
+        return calc_first_horizon_below(self.on_time_probability, 0.5)
+
+    @property
+    def all_on_time_by_fleet(self) -> Dict[int, float]:
+        from ..physics.agents import calc_unchecked_success
+        return {n: calc_unchecked_success(self.on_time_probability, n) for n in range(1, self.max_fleet + 1)}
+
+
+class CreditWindowScenario(BaseScenario):
+    """A producer feeding a slower model consumer, unbounded or behind a credit window.
+
+    The consumer serves one item per ``tokens_per_item`` at its decode rate. With
+    no bound the queue grows at the rate difference; a saturated window of W
+    credits holds each item about W / mu by Little's law.
+    """
+    producer_rate: Quantity                   # items per second
+    decode_rate: Quantity                     # consumer tokens per second
+    tokens_per_item: Quantity
+    horizon: Quantity
+    credits: int
+    residence_target: Quantity                # a mean residence to size a window for
+
+    @property
+    def service_rate(self) -> Quantity:
+        return (self.decode_rate / self.tokens_per_item).to("1/s")
+
+    @property
+    def growth_rate(self) -> Quantity:
+        return (self.producer_rate - self.service_rate).to("1/s")
+
+    @property
+    def backlog(self) -> float:
+        """Items waiting after the horizon."""
+        return (self.growth_rate * self.horizon).to("").magnitude
+
+    @property
+    def backlog_wait(self) -> Quantity:
+        """Wait of the newest item behind that backlog."""
+        return (self.backlog / self.service_rate).to("s")
+
+    @property
+    def window_residence(self) -> Quantity:
+        return (self.credits / self.service_rate).to("s")
+
+    @property
+    def window_for_target(self) -> int:
+        """Largest window whose saturated mean residence stays within the target."""
+        return _math.floor((self.residence_target * self.service_rate).to("").magnitude + 1e-9)
+
+
+class SplitAllowanceScenario(BaseScenario):
+    """Children asking for allowances out of a parent's remaining balance."""
+    remaining: Quantity
+    finalization_reserve: Quantity
+    own_reserved: Quantity                    # the parent's own outstanding work
+    requests: List[Quantity]                  # in dispatch order
+    nested_request: Optional[Quantity] = None  # a grandchild's allowance, carved from one child's
+
+    @property
+    def available(self) -> Quantity:
+        return (self.remaining - self.finalization_reserve - self.own_reserved).to("dollar")
+
+    @property
+    def copied_liability(self) -> Quantity:
+        """What copying each child's allowance from the balance would promise."""
+        return sum(self.requests, 0 * self.remaining).to("dollar")
+
+    @property
+    def admission(self):
+        """Atomic reservation in dispatch order: (admitted flags, balance left)."""
+        left, admitted = self.available, []
+        for ask in self.requests:
+            ok = ask <= left
+            admitted.append(ok)
+            if ok:
+                left = left - ask
+        return admitted, left.to("dollar")
+
+    @property
+    def equal_allowance(self) -> Quantity:
+        """The largest equal allowance that admits every child."""
+        return (self.available / len(self.requests)).to("dollar")
+
+    @property
+    def naive_allowance(self) -> Quantity:
+        """An equal split of the whole remaining balance, ignoring the reserve and the parent's own work."""
+        return (self.remaining / len(self.requests)).to("dollar")
+
+
+class CohortArmRecord(BaseModel):
+    """One policy's outcomes and settled usage over a cohort of attempted tasks."""
+    accepted: int                             # accepted by the final cutoff
+    on_time: int                              # accepted by the deadline
+    median_accepted_time: Quantity            # among accepted tasks
+    input_tokens: Quantity
+    output_tokens: Quantity
+    service_time: Quantity                    # metered tool, assessment, and cleanup time
+    discard_input_tokens: Quantity            # failed attempts and canceled branches, included above
+    discard_output_tokens: Quantity
+    discard_service_time: Quantity
+
+
+class DelegationCohortScenario(BaseScenario):
+    """A single controller and a delegated design on one matched cohort, priced alike.
+
+    Spend charges every initiated attempt at the same prices; cost per accepted
+    task divides it by the accepted count. A policy passes the screen if it meets
+    both acceptance floors within the budget.
+    """
+    attempted: int
+    accepted_floor: int
+    on_time_floor: int
+    deadline: Quantity
+    cutoff: Quantity
+    budget: Quantity
+    input_price: Quantity                     # USD per million tokens
+    output_price: Quantity
+    service_price: Quantity                   # USD per second
+    single: CohortArmRecord
+    delegated: CohortArmRecord
+
+    def spend(self, arm: CohortArmRecord) -> Quantity:
+        return (arm.input_tokens * self.input_price + arm.output_tokens * self.output_price
+                + arm.service_time * self.service_price).to("dollar")
+
+    def discarded(self, arm: CohortArmRecord) -> Quantity:
+        return (arm.discard_input_tokens * self.input_price + arm.discard_output_tokens * self.output_price
+                + arm.discard_service_time * self.service_price).to("dollar")
+
+    def cost_per_accepted(self, arm: CohortArmRecord) -> Quantity:
+        return self.spend(arm) / arm.accepted
+
+    def passes(self, arm: CohortArmRecord) -> bool:
+        return (arm.accepted >= self.accepted_floor and arm.on_time >= self.on_time_floor
+                and self.spend(arm) <= self.budget)
+
+    @property
+    def extra_spend(self) -> Quantity:
+        return self.spend(self.delegated) - self.spend(self.single)
+
+    @property
+    def extra_on_time(self) -> int:
+        return self.delegated.on_time - self.single.on_time
+
+    @property
+    def marginal_on_time_cost(self) -> Quantity:
+        """Added spend per added on-time acceptance."""
+        return self.extra_spend / self.extra_on_time
+
+    @property
+    def cost_ratio(self) -> float:
+        return (self.cost_per_accepted(self.delegated) / self.cost_per_accepted(self.single)).to("").magnitude
+
+    @property
+    def discard_share(self) -> float:
+        """Delegated spend on failed and canceled work."""
+        return (self.discarded(self.delegated) / self.spend(self.delegated)).to("").magnitude
+
+
+class MessageRoundScenario(BaseScenario):
+    """One round in which each of ``workers`` agents speaks once: full mesh against a supervisor."""
+    workers: int
+
+    @property
+    def mesh_deliveries(self) -> int:
+        from ..physics.coordination import calc_full_mesh_deliveries
+        return calc_full_mesh_deliveries(self.workers)
+
+    @property
+    def supervisor_deliveries(self) -> int:
+        from ..physics.coordination import calc_supervisor_deliveries
+        return calc_supervisor_deliveries(self.workers)
+
+    @property
+    def ratio(self) -> float:
+        """(N - 1) / 2."""
+        return self.mesh_deliveries / self.supervisor_deliveries

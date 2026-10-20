@@ -3945,7 +3945,46 @@ CEMRI_2025_MAST = _lit(
     url="https://arxiv.org/abs/2503.13657",
     verified="2026-10-20",
     notes=("Read from the HTML version: 1642 annotated execution traces (Figure 1 caption, Section 1) "
-           "from 7 MAS frameworks (Section 1); step repetition FM-1.3 at 15.7 percent (Section 4)."),
+           "from 7 MAS frameworks (Section 1); step repetition FM-1.3 at 15.7 percent (Section 4). "
+           "Added 2026-10-20: the other mode shares of Section 4 (FM-1.1 11.8, FM-1.5 12.4, FM-2.3 "
+           "7.40, FM-2.6 13.2, FM-3.2 8.20, FM-3.3 9.10 percent); the category shares printed in "
+           "Figure 1 (system design 44.2, inter-agent misalignment 32.3, task verification 23.5 "
+           "percent); and Section 4's '+15.6% improvement in task success on ProgramDev' from a "
+           "verification step added to ChatDev."),
+)
+
+# --- Coordinating several agents (added 2026-10-20) ---
+HADFIELD_2025_RESEARCH_SYSTEM = _lit(
+    "prov:hadfield-2025-research-system",
+    "Hadfield et al. (2025), How we built our multi-agent research system, Anthropic Engineering, 13 June 2025",
+    url="https://www.anthropic.com/engineering/built-multi-agent-research-system",
+    verified="2026-10-20",
+    notes=("Benefits section: 'a multi-agent system with Claude Opus 4 as the lead agent and Claude "
+           "Sonnet 4 subagents outperformed single-agent Claude Opus 4 by 90.2% on our internal "
+           "research eval'; 'token usage by itself explains 80% of the variance' (BrowseComp). Prompt "
+           "engineering section: 'Early agents made errors like spawning 50 subagents for simple queries'."),
+)
+
+KIM_2025_CORRELATED_ERRORS = _lit(
+    "prov:kim-2025-correlated-errors",
+    "Kim, Garg, Peng, and Garg (2025), Correlated Errors in Large Language Models, ICML 2025, arXiv:2506.07962v1",
+    url="https://arxiv.org/abs/2506.07962",
+    verified="2026-10-20",
+    notes=("Introduction: '71 LLMs on 14,042 multiple choice questions on the Helm leaderboard'; 'on Helm, "
+           "pairs of models agree on average about 60% of the time when both models are incorrect'; "
+           "uniform choice among incorrect answers agrees 1/3 of the time. Section 3.2: 'each question "
+           "has 3 incorrect answer choices'."),
+)
+
+DEAN_BARROSO_2013_TAIL = _lit(
+    "prov:dean-barroso-2013-tail",
+    "Dean, J. and Barroso, L. A. (2013), The Tail at Scale, Communications of the ACM 56(2)",
+    url="https://doi.org/10.1145/2408776.2408794",
+    verified="2026-10-20",
+    notes=("Table 1, a real Google service measured at the root: one random leaf finishes in 1 ms "
+           "(50th percentile) and 10 ms (99th); all leaves in 40 ms and 140 ms. Hedged requests: reading "
+           "1,000 keys from 100 servers, a hedge after a 10 ms delay cut the 99.9th-percentile time from "
+           "1,800 ms to 74 ms while sending 2% more requests."),
 )
 
 # --- Robot odometry, mapping, and tracking results (added 2026-10-20) ---
