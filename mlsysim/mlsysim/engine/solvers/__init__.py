@@ -37,6 +37,9 @@ from .storage import (
 )
 from .trends import DomainComputeGapModel, TrainingGrowthModel
 from .embodied import StoppingBudgetModel, TractionLossModel  # added 2026-10-20
+# Agent trajectories (added 2026-10-20)
+from .agents import (AcceptedTaskCostModel, AgentRunSummaryModel, AppendOnlyContextModel,
+                     HorizonCompoundingModel, TaskHorizonTrendModel)
 from .training import CheckpointModel, ScalingModel, TrainingMemoryModel, TrainingRunModel, TrainingStateModel
 
 __all__ = [
@@ -77,6 +80,12 @@ __all__ = [
     "UtilizationLossModel",
     "SyntheticFootprintModel",
     "StorageBenchmarkDemandModel",
+    # Agent trajectories (added 2026-10-20)
+    "HorizonCompoundingModel",
+    "AcceptedTaskCostModel",
+    "AppendOnlyContextModel",
+    "TaskHorizonTrendModel",
+    "AgentRunSummaryModel",
     "NetworkRooflineModel",
     "EfficiencyModel",
     "SensitivitySolver",

@@ -23,6 +23,7 @@ from ..systems.reliability import Reliability as _Reliability
 from ..infrastructure.registry import Infrastructure as _Infrastructure
 from ..ops import Ops as _Ops
 from ..embodied.registry import Embodied as _Embodied  # embodied stopping scenarios (2026-10-20)
+from ..agents.registry import Agents as _Agents  # agent harness profiles (added 2026-10-20)
 from . import scenario_types as _st
 
 class Scenario(BaseModel):
@@ -1069,4 +1070,69 @@ class Scenarios(Registry):
         description="Epoch AI training-compute estimates (Literature.ModelsByDomain).",
         series_name="ModelsByDomain",
         model="GR00T N1 2B",
+    )
+
+    # --- Agent trajectories (added 2026-10-20) ------------------------------
+    UncheckedRepairHorizon = _st.HorizonCompoundingScenario(
+        name="Unchecked repair trajectory at 99 percent per step",
+        description="Independent steps, no checks, no recovery: success at 10, 100, and 200 turns, "
+                    "and the step error that holds 90 percent at 100 turns.",
+        step_success=0.99,  # scenario assumption: hypothetical per-step accuracy
+        short_horizon=10,  # scenario assumption: turns
+        long_horizon=100,  # scenario assumption: turns
+        target_success=0.90,  # scenario assumption: success to hold at the long horizon
+        extended_horizon=200,  # twice the long horizon: success squares
+    )
+
+    RepairAttemptCostLevers = _st.AcceptedTaskCostScenario(
+        name="Repair attempt: cheaper tokens or more acceptances",
+        description="$1.30 of model tokens and $0.80 of sandbox, tests, and review per attempt, "
+                    "accepted 40 percent of the time; halve the token price, or raise acceptance "
+                    "to 60 percent; halve the $0.80, or add 10 points of acceptance; five "
+                    "independent attempts.",
+        model_cost=Q_(1.30, "USD"),  # scenario assumption: tokens per attempt
+        other_cost=Q_(0.80, "USD"),  # scenario assumption: sandbox, tests, and review per attempt
+        acceptance=0.40,  # scenario assumption
+        token_price_cut=0.5,  # scenario assumption: a tariff at half the token price
+        improved_acceptance=0.60,  # scenario assumption: after a context or tool improvement
+        other_cost_cut=0.5,  # scenario assumption: halve the sandbox, test, and review cost
+        acceptance_gain=0.10,  # scenario assumption: a tool change adds 10 points
+        independent_attempts=5,  # scenario assumption: retry budget
+    )
+
+    AppendOnlyRepairContext = _st.AppendOnlyContextScenario(
+        name="Append-only repair transcript over the reference harness's turn budget",
+        description="An 8,000-token first prompt plus 1,500 tokens per turn, resent every turn, "
+                    "over the SWE-bench harness's step budget and window.",
+        initial_tokens=Q_(8000, "token"),  # scenario assumption: first serialized prompt
+        tokens_per_turn=Q_(1500, "token"),  # scenario assumption: model output plus observation
+        turns=_Agents.Coding.SWE_Bench_Runner.max_trajectory_steps,
+        context_window=_Agents.Coding.SWE_Bench_Runner.context_window,
+    )
+
+    FrontierTaskHorizonTrend = _st.TaskHorizonTrendScenario(
+        name="Frontier 50 percent task horizon, METR Time Horizon v1.1",
+        description="Doubling time of the frontier horizon at release, over the whole series and "
+                    "since 2023, fit as the source fits it (frontier points at or below 16 h).",
+        series_name="AgentTimeHorizon",
+        fit_cap=Q_(16, "hour"),  # the source's own fit rule
+        recent_from="2023-01-01",  # the source's recent window
+        published_recent_doubling=Q_(_Literature.Benchmarks.AgentHorizonDoublingDays2023On, "day"),
+    )
+
+    MiniSweAgentSonnet4Run = _st.AgentRunScenario(
+        name="mini-swe-agent 1.0.0 with Claude 4 Sonnet on SWE-bench Verified",
+        description="500 tasks, one attempt each, bash only; hidden tests decide acceptance.",
+        series_name="SweBenchMiniSonnet4Run",
+        call_bin_edges=[20, 30, 40, 60],  # scenario assumption: model-call bins for acceptance by length
+    )
+
+    AstropyBitmaskRepair = _st.BenchmarkTaskScenario(
+        name="astropy__astropy-14995 in the mini-swe-agent Claude 4 Sonnet run",
+        description="Mask propagation fails when one NDData operand has no mask (astropy issue "
+                    "14978); judged by one new test and the existing tests of its file.",
+        run=MiniSweAgentSonnet4Run,
+        instance_id="astropy__astropy-14995",
+        fail_to_pass_tests=1,  # SWE-bench Verified record: test_nddata_bitmask_arithmetic
+        pass_to_pass_tests=179,  # SWE-bench Verified record (princeton-nlp/SWE-bench_Verified)
     )

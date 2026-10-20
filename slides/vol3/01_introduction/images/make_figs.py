@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Figures for Volume III, Lecture 1 (Introduction).
 
-Every number drawn comes from calcs.py (which names its sources) or is typed
-here with its source. Diagrams are SVG drawn at the size of their slot, in the
+Every number drawn comes from MLSysIM through calcs.py (its scenarios and
+the values it records, read here with val and num); layout coordinates are
+typed. Diagrams are SVG drawn at the size of their slot, in the
 Volume III agentic-stack palette (rules/volumes/vol3/palette.md); data plots
 use the shared slideplot helper. The slides Makefile converts SVG to PDF.
 
@@ -28,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import calcs  # noqa: E402
 import slideplot as sp  # noqa: E402
+from deckvals import val, num  # noqa: E402,F401
 
 C = sp.C
 plt = sp.plt
@@ -227,27 +229,27 @@ def traj():
             s.text(x0 + 10, y0 + 122, obs, 19, color=INK, font=MONO, op=op)
         if k == 3:
             s.add('<path d="M6,350 L6,358 L894,358 L894,350" stroke="#7c3aed" stroke-width="2.5" fill="none"/>')
-            s.text(450, 390, "The record keeps the failed patch: 28 calls, $0.34",
+            s.text(450, 390, f"The record keeps the failed patch: {val('hook_calls')} calls, ${val('hook_cost')}",
                    23, "bold", RUNTIME[2], "middle")
         s.save(f"traj_step{k}")
 
 
 # ------------------------------------------------------------- data: model calls
 def calls_hist():
-    r = calcs.real_run()
+    rows = calcs.RUN.rows
     edges = list(range(0, 130, 10))
-    ok = [int(x["model_calls"]) for x in r["rows"] if x["resolved"] == "1"]
-    bad = [int(x["model_calls"]) for x in r["rows"] if x["resolved"] != "1"]
+    ok = [int(x["model_calls"]) for x in rows if x["resolved"]]
+    bad = [int(x["model_calls"]) for x in rows if not x["resolved"]]
     fig, ax = plt.subplots(figsize=(5.8, 2.35))
     ax.hist([ok, bad], bins=edges, stacked=True, color=[C["data"], C["danger"]],
             edgecolor="white", linewidth=0.8)
-    med = r["calls_median"]
+    med = calcs.r.calls_median
     ax.axvline(med, color=C["text"], lw=1.5, ls="--")
-    ax.text(med + 2, ax.get_ylim()[1] * 0.92, f"median {med:.0f} calls", fontsize=12,
+    ax.text(med + 2, ax.get_ylim()[1] * 0.92, f"median {val('run_calls_med')} calls", fontsize=12,
             fontweight="bold", va="top")
-    ax.text(70, ax.get_ylim()[1] * 0.62, f"accepted ({r['acc']})", color=C["data"], fontsize=12,
+    ax.text(70, ax.get_ylim()[1] * 0.62, f"accepted ({val('run_acc')})", color=C["data"], fontsize=12,
             fontweight="bold")
-    ax.text(70, ax.get_ylim()[1] * 0.42, f"rejected ({r['rejected']})", color=C["danger"],
+    ax.text(70, ax.get_ylim()[1] * 0.42, f"rejected ({val('run_rej')})", color=C["danger"],
             fontsize=12, fontweight="bold")
     ax.set_xlabel("Model calls in one task's trajectory")
     ax.set_ylabel("Tasks")
@@ -256,20 +258,20 @@ def calls_hist():
 
 
 def cmd_classes():
-    r = calcs.real_run()
-    rows = [("Read files", r["cmd"]["read"], "memory"), ("Write the copy", r["cmd"]["write"], "compute"),
-            ("Run code", r["cmd"]["run"], "network"), ("Reach network", r["cmd"]["net"], "danger")]
+    r = calcs.r
+    rows = [("Read files", r.commands["read"], "memory"), ("Write the copy", r.commands["write"], "compute"),
+            ("Run code", r.commands["run"], "network"), ("Reach network", r.commands["net"], "danger")]
     fig, ax = plt.subplots(figsize=(5.8, 1.9))
     for i, (lab, v, ck) in enumerate(rows):
         y = len(rows) - 1 - i
         ax.barh(y, v, color=C[ck], height=0.62)
         ax.text(-150, y, lab, ha="right", va="center", fontsize=13, fontweight="bold")
-        ax.text(v + 120, y, f"{v:,}  ({v / r['cmds']:.0%})" if v > 100 else f"{v}", va="center",
+        ax.text(v + 120, y, f"{v:,}  ({v / r.command_total:.0%})" if v > 100 else f"{v}", va="center",
                 fontsize=13, fontweight="bold", color=C[ck])
     ax.set_xlim(0, 11500)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
-    ax.set_xlabel(f"Commands, all {r['cmds']:,} in one run of 500 tasks")
+    ax.set_xlabel(f"Commands, all {val('run_cmds')} in one run of {val('run_tasks')} tasks")
     sp.save(fig, OUT / "cmd_classes.svg")
 
 
@@ -343,10 +345,10 @@ def hsa():
 
 # ------------------------------------------------------------- data: claimed vs accepted
 def claimed():
-    r = calcs.real_run()
-    rows = [("Claimed done", r["submitted"], "neutral", f"{r['submitted']}  (all)"),
-            ("Accepted", r["acc"], "data", f"{r['acc']}  ({r['acc'] / r['n']:.0%})"),
-            ("Rejected", r["rejected"], "danger", f"{r['rejected']}  ({r['rejected'] / r['n']:.0%})")]
+    r = calcs.r
+    rows = [("Claimed done", r.submitted, "neutral", f"{val('run_submitted')}  (all)"),
+            ("Accepted", r.accepted, "data", f"{val('run_acc')}  ({r.accepted / r.tasks:.0%})"),
+            ("Rejected", r.rejected, "danger", f"{val('run_rej')}  ({val('run_rej_pct')}%)")]
     fig, ax = plt.subplots(figsize=(3.4, 2.4))
     for i, (lab, v, ck, txt) in enumerate(rows):
         y = 2 - i
@@ -384,7 +386,8 @@ def ladder():
     lv = [("Self-report", "the agent's own account", "“The fix is working perfectly.”"),
           ("Static analysis", "types and structure, no run", "(not used in this run)"),
           ("Visible tests", "cases the agent can read", "pytest test_ndarithmetic.py"),
-          ("Sealed tests", "withheld: 1 new, 179 old tests", "test_nddata_bitmask_arithmetic"),
+          ("Sealed tests", f"withheld: {val('hook_f2p')} new, {val('hook_p2p')} old tests",
+           "test_nddata_bitmask_arithmetic"),
           ("Formal proof", "meets a written specification", "(not used)")]
     for k in (1, 2):
         s = Svg(900, 360)
@@ -407,8 +410,8 @@ def ladder():
 def metr():
     import matplotlib.dates as mdates
     import numpy as np
-    m = calcs.metr()
-    rows = m["rows"]
+    trend = calcs.TREND
+    rows = trend.rows
     date = lambda r: dt.datetime.fromisoformat(r["release_date"])  # noqa: E731
     fig, ax = plt.subplots(figsize=(5.8, 2.55))
     for front in (False, True):
@@ -421,11 +424,8 @@ def metr():
         else:
             ax.errorbar(x, y, yerr=err, fmt="o", mfc="white", mec=C["neutral"], ecolor=C["grid"],
                         ms=5, elinewidth=1, zorder=4)
-    fit = [r for r in rows if r["is_sota"] and r["release_date"] >= "2023-01-01" and r["p50_min"] <= 960]
-    fx = mdates.date2num([date(r) for r in fit])
-    slope, icpt = np.polyfit(fx, np.log2([r["p50_min"] for r in fit]), 1)
-    xs = np.linspace(mdates.datestr2num("2023-01-01"), mdates.datestr2num("2026-07-01"), 50)
-    ax.plot(mdates.num2date(xs), 2 ** (icpt + slope * xs), "--", color=C["neutral"], lw=1.5)
+    xs = mdates.num2date(np.linspace(mdates.datestr2num(trend.recent_from), mdates.datestr2num("2026-07-01"), 50))
+    ax.plot(xs, [trend.fitted_minutes(d) for d in xs], "--", color=C["neutral"], lw=1.5)
     ax.set_yscale("log")
     ticks = {"1 s": 1 / 60, "1 min": 1, "1 hr": 60, "8 hr": 480, "40 hr": 2400}
     ax.set_yticks(list(ticks.values()))
@@ -435,12 +435,12 @@ def metr():
     ax.set_ylabel("Task length done\nhalf the time")
     first = rows[0]
     last = [r for r in rows if r["is_sota"]][-1]
-    ax.annotate(f"{m['first_s']:.0f} s", (date(first), first["p50_min"]), xytext=(8, -2),
+    ax.annotate(f"{val('metr_first_s')} s", (date(first), first["p50_min"]), xytext=(8, -2),
                 textcoords="offset points", fontsize=12, fontweight="bold", color=C["memory"])
-    ax.annotate(f"{m['last_h']:.0f} hr", (date(last), last["p50_min"]), xytext=(-10, 6),
+    ax.annotate(f"{val('metr_last_h')} hr", (date(last), last["p50_min"]), xytext=(-10, 6),
                 textcoords="offset points", fontsize=12, fontweight="bold", color=C["memory"], ha="right")
     ax.text(dt.datetime(2018, 12, 1), 200,
-            f"Frontier horizon doubles every\n{m['recent_months']:.1f} months since 2023",
+            f"Frontier horizon doubles every\n{val('metr_recent_months')} months since 2023",
             fontsize=12, fontweight="bold", color=C["text"])
     ax.set_xlabel("Model release date (filled: frontier at release)")
     sp.save(fig, OUT / "metr.svg")
@@ -449,25 +449,27 @@ def metr():
 # ------------------------------------------------------------- horizon compounding
 def horizon_curve():
     import numpy as np
-    h = calcs.horizon()
+    sc = calcs.HORIZON
+    h = sc.result
     H = np.logspace(0, np.log10(300), 300)
     for k in (1, 2, 3):
         fig, ax = plt.subplots(figsize=(5.8, 2.45))
-        ax.plot(H, calcs.STEP_OK ** H, color=C["danger"], lw=3)
-        ax.text(1.3, 0.2, "99% per step,\nno checks", color=C["danger"], fontsize=12, fontweight="bold")
-        for hh, v, dx, dy in ((10, h["p10"], -48, -24), (100, h["p100"], 6, 6)):
-            ax.plot([hh], [v], "o", color=C["danger"], ms=8, zorder=5)
-            ax.annotate(f"{v:.1%}", (hh, v), xytext=(dx, dy), textcoords="offset points",
+        ax.plot(H, sc.step_success ** H, color=C["danger"], lw=3)
+        ax.text(1.3, 0.2, f"{val('step_ok_pct')}% per step,\nno checks", color=C["danger"], fontsize=12,
+                fontweight="bold")
+        for hh, key, dx, dy in ((sc.short_horizon, "p_short_pct", -48, -24), (sc.long_horizon, "p_long_pct", 6, 6)):
+            ax.plot([hh], [h.success[hh]], "o", color=C["danger"], ms=8, zorder=5)
+            ax.annotate(f"{val(key)}%", (hh, h.success[hh]), xytext=(dx, dy), textcoords="offset points",
                         fontsize=13, fontweight="bold", color=C["danger"])
         if k >= 2:
-            ax.plot(H, (1 - h["eps_req"]) ** H, color=C["data"], lw=3)
-            ax.text(1.3, 0.52, f"{h['eps_req']:.2%} per step: 90% at 100 turns",
+            ax.plot(H, (1 - h.required_step_error) ** H, color=C["data"], lw=3)
+            ax.text(1.3, 0.52, f"{val('eps_req_pct')}% per step: {val('target_pct')}% at {val('h_long')} turns",
                         ha="left",
                         fontsize=12, fontweight="bold", color=C["data"])
         if k >= 3:
-            v200 = calcs.STEP_OK ** 200
-            ax.plot([200], [v200], "o", color=C["danger"], ms=8, zorder=5)
-            ax.annotate(f"twice the turns: {v200:.1%} = {h['p100']:.3f}²", (200, v200), xytext=(-16, -4),
+            hx = sc.extended_horizon
+            ax.plot([hx], [h.success[hx]], "o", color=C["danger"], ms=8, zorder=5)
+            ax.annotate(f"twice the turns: {val('p_ext_pct')}% = {val('p_long')}²", (hx, h.success[hx]), xytext=(-16, -4),
                         textcoords="offset points", ha="right", va="center", fontsize=12, fontweight="bold",
                         color=C["text"])
         ax.set_xscale("log")
@@ -484,17 +486,18 @@ def horizon_curve():
 
 # ------------------------------------------------------------- NM 1.2 bars
 def cost_bars():
-    c = calcs.cost()
-    rows = [("Baseline", c["base"], "neutral"), ("Half token price", c["price_cut"], "memory"),
-            ("Acceptance 60%", c["better"], "data")]
+    c = calcs.c
+    rows = [("Baseline", c.cost_per_accepted, "neutral", "c_eff"),
+            ("Half token price", c.cost_per_accepted_cheaper_tokens, "memory", "c_eff_cheap"),
+            (f"Acceptance {val('p_better_pct')}%", c.cost_per_accepted_improved, "data", "c_eff_better")]
     for k in (1, 2):
         fig, ax = plt.subplots(figsize=(3.3, 1.5))
-        for i, (lab, v, ck) in enumerate(rows):
+        for i, (lab, v, ck, key) in enumerate(rows):
             y = 2 - i
             shown = i == 0 or k == 2
             ax.barh(y, v, color=C[ck], height=0.6, alpha=1.0 if shown else 0.0)
             ax.text(-0.15, y, lab, ha="right", va="center", fontsize=13, fontweight="bold")
-            txt = f"${v:.2f}" if shown else "?"
+            txt = f"${val(key)}" if shown else "?"
             ax.text((v if shown else 0) + 0.12, y, txt, va="center", fontsize=13, fontweight="bold",
                     color=C[ck] if shown else C["danger"])
         ax.set_xlim(0, 6.6)
@@ -505,10 +508,10 @@ def cost_bars():
 
 
 def real_cost():
-    r = calcs.real_run()
-    rows = [("Accepted runs only", r["winners_only"], "neutral"),
-            ("Mean attempt", r["mean_attempt"], "memory"),
-            ("Per accepted task", r["per_accepted"], "danger")]
+    r = calcs.r
+    rows = [("Accepted runs only", r.accepted_mean_cost, "neutral"),
+            ("Mean attempt", r.mean_attempt_cost, "memory"),
+            ("Per accepted task", r.cost_per_accepted, "danger")]
     fig, ax = plt.subplots(figsize=(5.8, 1.75))
     for i, (lab, v, ck) in enumerate(rows):
         y = 2 - i
@@ -518,7 +521,7 @@ def real_cost():
     ax.set_xlim(0, 0.75)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
-    ax.set_xlabel(f"Dollars per task; {r['n']} tasks, one attempt each, {r['acc']} accepted")
+    ax.set_xlabel(f"Dollars per task; {val('run_tasks')} tasks, one attempt each, {val('run_acc')} accepted")
     sp.save(fig, OUT / "realcost.svg")
 
 

@@ -312,6 +312,7 @@ class Literature(Registry):
     OSWorldStepBudget = _series.OSWorldStepBudget
     FrontierSweTrials = _series.FrontierSweTrials
     SweBenchTrajectories = _series.SweBenchTrajectories
+    SweBenchMiniSonnet4Run = _series.SweBenchMiniSonnet4Run  # added 2026-10-20
     RepeatedSamplingCoverage = _series.RepeatedSamplingCoverage
     RepeatedSamplingMajority = _series.RepeatedSamplingMajority
     InjectionDefenseResults = _series.InjectionDefenseResults

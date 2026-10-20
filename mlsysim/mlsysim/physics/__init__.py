@@ -82,6 +82,12 @@ from .statistics import (
 )
 from .agents import (
     calc_kv_cache_bytes_per_token,
+    calc_unchecked_success,
+    calc_step_error_for_target,
+    calc_cost_per_accepted,
+    calc_break_even_acceptance,
+    calc_independent_success,
+    calc_append_only_context,
 )
 from .drivetrain import (
     calc_traction_deceleration_limit,
@@ -222,6 +228,12 @@ __all__ = [
     "calc_multilegged_confidence",
     "calc_two_proportion_sample_size",
     "calc_kv_cache_bytes_per_token",
+    "calc_unchecked_success",
+    "calc_step_error_for_target",
+    "calc_cost_per_accepted",
+    "calc_break_even_acceptance",
+    "calc_independent_success",
+    "calc_append_only_context",
     "calc_safe_stopping_distance",
     "calc_max_permitted_velocity",
     "calc_c2_stop_suffix",

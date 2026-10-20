@@ -82,6 +82,12 @@ __all__ = [
     "UtilizationLossResult",
     "SyntheticFootprintResult",
     "StorageBenchmarkResult",
+    # Agent trajectories (added 2026-10-20)
+    "HorizonCompoundingResult",
+    "AcceptedTaskCostResult",
+    "AppendOnlyContextResult",
+    "TaskHorizonTrendResult",
+    "AgentRunSummaryResult",
 ]
 
 
@@ -915,3 +921,77 @@ class DomainComputeGapResult(SolverResult):
     reference_flop: float
     gap: float                               # reference_flop / model_flop
     domain_models_with_compute: int          # rows of the model's domain that carry a compute estimate
+
+
+# --- Agent trajectories: reliability, cost, context, measured runs (added 2026-10-20) ---
+
+class HorizonCompoundingResult(SolverResult):
+    """Result from HorizonCompoundingModel: unchecked task success across horizons."""
+    step_error: float                    # 1 - per-step success
+    success: Dict[int, float]            # horizon (turns) -> unchecked task success
+    required_step_error: float           # per-step error that holds the target at the long horizon
+    error_ratio: float                   # step_error / required_step_error
+    required_error_horizon: float        # required_step_error x long horizon
+    small_error_limit: float             # -ln(target): the same product as eps -> 0
+
+
+class AcceptedTaskCostResult(SolverResult):
+    """Result from AcceptedTaskCostModel: cost per accepted task and two levers on it (dollars)."""
+    attempt_cost: float
+    token_share: float                   # model-token share of the attempt cost
+    attempts_per_acceptance: float       # 1 / p_acc
+    cost_per_accepted: float
+    accepted_only_understatement: float  # cost_per_accepted / attempt_cost
+    cheaper_attempt_cost: Optional[float] = None
+    cost_per_accepted_cheaper_tokens: Optional[float] = None
+    cost_per_accepted_improved: Optional[float] = None
+    break_even_acceptance: Optional[float] = None
+    cost_per_accepted_cheaper_other: Optional[float] = None
+    cost_per_accepted_acceptance_gain: Optional[float] = None
+    independent_success: Optional[float] = None
+
+
+class AppendOnlyContextResult(SolverResult):
+    """Result from AppendOnlyContextModel: what an append-only trajectory reads and resends."""
+    last_call_tokens: Quantity
+    window_fraction: float               # last call / context window
+    cumulative_input_tokens: Quantity
+    reread_ratio: float                  # cumulative input / last call
+
+
+class TaskHorizonTrendResult(SolverResult):
+    """Result from TaskHorizonTrendModel: growth of the measured 50% task horizon."""
+    first_frontier_minutes: float
+    last_frontier_minutes: float
+    first_date: str
+    last_date: str
+    growth: float                        # last / first frontier horizon
+    doubling_all: Quantity               # whole-period fit
+    doubling_recent: Quantity            # fit from the recent start date
+    recent_slope_per_day: float          # log2(minutes) per day, recent fit
+    recent_intercept: float              # log2(minutes) at date ordinal 0, recent fit
+
+
+class AgentRunSummaryResult(SolverResult):
+    """Result from AgentRunSummaryModel: one recorded agent run over a benchmark, one attempt per task."""
+    tasks: int
+    accepted: int
+    rejected: int
+    acceptance: float
+    submitted: int                       # tasks whose loop ended by the agent's own submission
+    total_cost: float                    # dollars
+    mean_attempt_cost: float
+    cost_per_accepted: float
+    accepted_mean_cost: float            # mean over accepted attempts only
+    accepted_only_understatement: float  # cost_per_accepted / accepted_mean_cost
+    calls_median: float
+    calls_min: int
+    calls_max: int
+    commands: Dict[str, int]             # command class -> count
+    command_total: int
+    observations: int
+    nonzero_exits: int
+    truncated_outputs: int
+    syntax_error_tasks: int
+    syntax_error_accepted: int
+    call_bins: List[Dict[str, Any]]      # {"low", "high", "tasks", "accepted"} per bin

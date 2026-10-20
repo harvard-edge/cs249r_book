@@ -2518,3 +2518,16 @@ QUINN_EMANUEL_CRUISE_2024 = _lit(
         "not re-read against the report in this pass."
     ),
 )
+
+# --- Agent task horizon (added 2026-10-20) -----------------------------------
+METR_TIME_HORIZON_V1_1 = _lit(
+    "prov:metr-time-horizon-v1-1",
+    "METR, Time Horizon v1.1 benchmark results; Kwa et al. (2025), Measuring AI Ability to "
+    "Complete Long Software Tasks, arXiv:2503.14499",
+    url="https://metr.org/assets/benchmark_results_1_1.yaml",
+    verified="2026-10-12",
+    notes=(
+        "Stated 2023-on doubling time of the 50% time horizon: 128.744 days (CI 104.4-158.0), "
+        "fit on frontier models with p50 at or below 16 h."
+    ),
+)
