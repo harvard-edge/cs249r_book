@@ -2382,8 +2382,7 @@ Schema and latency alerts expose structural and timing failures, but a shift in 
 # │ How: Calculate the K-S critical value at alpha = 0.05.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-import math
-from mlsysim import Ops
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_math, check
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2394,12 +2393,13 @@ class KSTest:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    n_train = 1000
-    n_serving = 1000
-    coeff = Ops.Monitoring.KsTestCoefficient  # 1.36 for alpha=0.05
+    test = Scenarios.LoudnessDriftKs1000
+    n_train = test.n_reference
+    n_serving = test.n_current
+    coeff = test.coefficient  # Ops.Monitoring.KsTestCoefficient: 1.36 for alpha=0.05
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    d_crit = coeff * math.sqrt((n_train + n_serving) / (n_train * n_serving))
+    d_crit = test.critical_value
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(d_crit - 0.061) < 0.001, f"Critical value ({d_crit:.3f}) drifted from ~0.061 for n=1000 per sample.")
@@ -3599,26 +3599,25 @@ class DataGravity:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    dataset_pb = 1
-    network_bw = Systems.Fabrics.Ethernet_100G.bandwidth
-    egress_rate = 0.02 * USD / GB  # scenario assumption: AWS inter-region transfer rate
-    tpu_rate = Infrastructure.Pricing.Cloud.TpuV4PerHour.rate
+    move = Scenarios.PetabyteCrossRegionMove
+    dataset = move.payload
+    network_bw = move.links["100 Gb/s"]
+    egress_rate = move.egress_rate.to(USD / GB)  # AWS inter-region transfer rate (scenario assumption)
+    tpu_rate = move.compute_price
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    dataset = dataset_pb * PB
-
-    # Step 1: Time using library formula
-    t_100g = dataset / network_bw
+    # Step 1: Time over the dedicated 100 Gb/s link
+    t_100g = move.transfer_time("100 Gb/s")
     transfer_seconds = t_100g.to(second).magnitude
     transfer_hours = t_100g.to(hour).magnitude
 
-    # Step 2: 10 Gbps = 1.25 GB/s
-    t_10g = dataset / (10 * Gbps)
+    # Step 2: Time over a 10 Gb/s link
+    t_10g = move.transfer_time("10 Gb/s")
     transfer_days_10g = t_10g.to(day).magnitude
 
     # Step 3: Cost
-    transfer_cost = (dataset * egress_rate).to(USD)
-    equiv_tpu_hours = (transfer_cost / tpu_rate).to(hour).magnitude
+    transfer_cost = move.egress_cost
+    equiv_tpu_hours = move.egress_compute_hours.to(hour).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(transfer_hours >= 20, f"Transfer time ({transfer_hours:.1f} h) is too fast. Data gravity argument fails.")
@@ -3694,7 +3693,7 @@ The numerator is not a universal physical quantity. A team estimates marginal le
 # │       class so the four starvation sites share one scenario.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, fmt, check, fmt_rate, fmt_percent, fmt_bandwidth, fmt_memory, fmt_flops, fmt_flop_rate
-from mlsysim.core.units import GB, MB, KB, second, flop, BYTES_FP32, GFLOPs, TFLOPs
+from mlsysim.core.units import GB, MB, KB, second, count, GFLOPs, TFLOPs
 
 # ┌── LEGO ───────────────────────────────────────────────
 class FeedingProblem:
@@ -3704,45 +3703,33 @@ class FeedingProblem:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    from mlsysim import Models, Hardware, Datasets, Systems
-    from mlsysim.solvers import DataModel
-
-    m = Models.Vision.ResNet50
-    h = Hardware.Cloud.A100
-
-    # Shared scenario anchor: sustained rate once input keeps up.
-    sustained_img_per_sec = ResNetTrainingScenario.sustained_img_per_sec
-    # Scenario assumption: average compressed JPEG as stored on disk.
-    compressed_image_kb = 150
-
-    # Decoded tensor in host memory: 224x224x3 at FP32
-    IMAGE_DIM_RESNET = Datasets.ImageNet.image_width
-    decoded_image = IMAGE_DIM_RESNET * IMAGE_DIM_RESNET * IMAGE_CHANNELS_RGB * BYTES_FP32
-    compressed_image = compressed_image_kb * KB
-
-    # Standard Cloud Disk (e.g. AWS gp3 baseline)
-    disk_profile = Systems.Storage.CloudBlockStorageBaseline
-    h_custom = h.model_copy(update={'storage': disk_profile})
+    # Scenarios.ResNet50A100InputFeed: ResNet-50 on one A100, the shared sustained
+    # rate, 150 KB JPEGs (scenario assumption) that decode to 224x224x3 FP32
+    # tensors, and a standard cloud block volume (AWS gp3 baseline).
+    feed = Scenarios.ResNet50A100InputFeed
+    m = feed.workload
+    h = feed.hardware
+    sustained_img_per_sec = feed.sustained_rate.to(count / second).magnitude
+    compressed_image = feed.encoded_sample
+    decoded_image = feed.decoded_sample
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Compute ceiling: peak FLOP/s over forward + backward (3x forward) FLOPs
-    peak_flops = h.compute.peak_flops.to(flop / second).magnitude
-    train_flops_per_img = (m.inference_flops * 3).to(flop).magnitude
-    ceiling_img_per_sec = int(peak_flops / train_flops_per_img)
-    sustained_fraction = sustained_img_per_sec / ceiling_img_per_sec
+    ceiling_img_per_sec = int(feed.ceiling_rate.to(count / second).magnitude)
+    sustained_fraction = feed.sustained_fraction
 
     # Step 2: Demand in compressed (disk) bytes and decoded (memory) bytes
-    compressed_bw = (sustained_img_per_sec / second) * compressed_image
-    decoded_bw = (sustained_img_per_sec / second) * decoded_image
-    decode_expansion = (decoded_image / compressed_image).to("").magnitude
+    compressed_bw = feed.demand()
+    decoded_bw = feed.demand(decoded=True)
+    decode_expansion = feed.decode_expansion
 
     # Step 3: Feeding tax on baseline disk, for JPEG reads and for a pre-decoded tensor cache
-    jpeg_res = DataModel().solve(compressed_bw, h_custom)
-    tensor_res = DataModel().solve(decoded_bw, h_custom)
-    feeding_tax_pct = (1.0 - 1.0 / max(jpeg_res.utilization, 1.0)) * 100
-    tensor_tax_pct = (1.0 - 1.0 / max(tensor_res.utilization, 1.0)) * 100
+    disk_bw = feed.supply.bandwidth
+    feeding_tax_pct = feed.feeding_loss() * 100
+    tensor_tax_pct = feed.feeding_loss(decoded=True) * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(sustained_img_per_sec == ResNetTrainingScenario.sustained_img_per_sec, "Feed and labeling scenarios share one sustained rate.")
     check(12000 < ceiling_img_per_sec < 13500, f"ResNet-50 training ceiling drifted: {ceiling_img_per_sec}.")
     check(0.2 < sustained_fraction < 0.3, f"Sustained rate should be about a quarter of the ceiling, got {sustained_fraction:.2f}.")
     check(abs(compressed_bw.to(MB / second).magnitude - 480) < 1, "3,200 img/s at 150 KB should be 480 MB/s.")
@@ -3753,7 +3740,7 @@ class FeedingProblem:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     ceiling_img_per_s_str = fmt_rate(ceiling_img_per_sec, 'img/s', precision=0, commas=True)
     peak_tflop_per_s_str = fmt_flop_rate(h.compute.peak_flops, unit=TFLOPs / second, precision=0, commas=False)
-    train_gflop_per_img_str = fmt_flops(m.inference_flops * 3, unit=GFLOPs, precision=1, commas=False)
+    train_gflop_per_img_str = fmt_flops(feed.training_flops_per_sample, unit=GFLOPs, precision=1, commas=False)
     img_per_s_str = fmt_rate(sustained_img_per_sec, 'img/s', precision=0, commas=True)
     sustained_fraction_pct_str = fmt_percent(round(sustained_fraction * 100) / 100, precision=0, commas=False, style='prose')
     compressed_image_kb_str = fmt_memory(compressed_image, unit=KB, precision=0, commas=False)
@@ -3761,7 +3748,7 @@ class FeedingProblem:
     decode_expansion_str = fmt_int(round(decode_expansion))
     compressed_bw_mb_per_s_str = fmt_bandwidth(compressed_bw, unit=MB / second, precision=0, commas=False)
     req_bw_gb_per_s_str = fmt_bandwidth(decoded_bw, unit=GB / second, precision=1, commas=False)
-    disk_bw_mb_per_s_str = fmt_bandwidth(jpeg_res.supply_bw, unit=MB / second, precision=0, commas=False)
+    disk_bw_mb_per_s_str = fmt_bandwidth(disk_bw, unit=MB / second, precision=0, commas=False)
     feeding_tax_pct_str = fmt_percent(round(feeding_tax_pct) / 100, precision=0, commas=False, style='prose')
     tensor_tax_pct_str = fmt_percent(round(tensor_tax_pct) / 100, precision=0, commas=False, style='prose')
 ```
@@ -3913,26 +3900,28 @@ Each lifecycle stage also reads the same data in its own way:\index{Machine lear
 # │ Note: Per-accelerator rate and image sizes come from FeedingProblem.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check, fmt_rate, fmt_multiple, fmt_bandwidth, fmt_memory
-from mlsysim.core.units import KB, GB, second
+from mlsysim.core.units import KB, GB, second, count
 
 # ┌── LEGO ───────────────────────────────────────────────
 class LifecycleStorageRequirements:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    n_accelerators = 8
-    train_img_per_sec = n_accelerators * FeedingProblem.sustained_img_per_sec
-    image_size = FeedingProblem.compressed_image
-    decoded_image = FeedingProblem.decoded_image
-    feature_vector_kb = 5
-    feature_vector = feature_vector_kb * KB
-    serving_rps = 10_000
-    feature_reads_per_request = 10
+    # Scenarios.ResNet50EightA100InputFeed: the one-A100 feed on all eight
+    # accelerators of one server. Scenarios.RecommendationFeatureLookups: an
+    # online service's feature reads (scenario assumptions).
+    server = Scenarios.ResNet50EightA100InputFeed
+    lookups = Scenarios.RecommendationFeatureLookups
+    train_img_per_sec = server.total_rate.to(count / second).magnitude
+    image_size = server.encoded_sample
+    feature_vector = lookups.feature_bytes
+    serving_rps = lookups.request_rate.to(1 / second).magnitude
+    feature_reads_per_request = lookups.reads_per_request
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    training_bw = (train_img_per_sec / second) * image_size
+    training_bw = server.demand()
     training_bw_value = training_bw.to(GB / second).magnitude
-    decoded_bw = (train_img_per_sec / second) * decoded_image
-    storage_reduction = (image_size / feature_vector).to("").magnitude
-    random_reads_per_sec = serving_rps * feature_reads_per_request
+    decoded_bw = server.demand(decoded=True)
+    storage_reduction = lookups.storage_reduction
+    random_reads_per_sec = lookups.reads_per_second
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(training_bw_value - 3.84) < 0.05, f"25.6K img/s at 150 KB should be 3.84 GB/s, got {training_bw_value:.2f}.")
@@ -4069,27 +4058,19 @@ class KWSStorageEconomics:
     """Storage-cost recap for the KWS training dataset."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    dataset = Datasets.MSWC
-    sample_duration = dataset.sample_duration
-    sample_rate = dataset.sample_rate
-    sample_width = dataset.sample_width
-    storage_cost_s3 = Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate
-    storage_cost_nvme_low = Infrastructure.Pricing.Storage.NvmeLowPerTbMonth.rate
-    storage_cost_nvme_high = Infrastructure.Pricing.Storage.NvmeHighPerTbMonth.rate
-    nvme_bw = Systems.Storage.LocalNvmeTrainingTypical.bandwidth
+    tiers = Scenarios.MswcCorpusStorageTiers
+    nvme_bw = tiers.read_bandwidths["NVMe"]
     nvme_bw_high = Systems.Storage.LocalNvmeGen4.bandwidth
     sata_bw = Systems.Storage.SataSsdEffective.bandwidth
-    obj_bw = Systems.Storage.ObjectStoreSingleStream.bandwidth
+    obj_bw = tiers.read_bandwidths["object store"]
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    total_examples_count = dataset.training_examples.to(count).magnitude
-    sample_count = total_examples_count
-    dataset_size = sample_count * sample_duration * sample_rate * sample_width
+    dataset_size = tiers.corpus_bytes
     dataset_size_value = dataset_size.to(GB).magnitude
-    storage_s3_cost = (dataset_size * storage_cost_s3).to(USD / month)
-    storage_nvme_low_cost = (dataset_size * storage_cost_nvme_low).to(USD / month)
-    storage_nvme_high_cost = (dataset_size * storage_cost_nvme_high).to(USD / month)
-    load_speedup = (nvme_bw / obj_bw).to("").magnitude
+    storage_s3_cost = tiers.monthly_cost("object store")
+    storage_nvme_low_cost = tiers.monthly_cost("NVMe low")
+    storage_nvme_high_cost = tiers.monthly_cost("NVMe high")
+    load_speedup = (tiers.load_time("object store") / tiers.load_time("NVMe")).to("").magnitude
     nvme_bw_low_value = nvme_bw.to(GB / second).magnitude
     nvme_bw_high_value = nvme_bw_high.to(GB / second).magnitude
     nvme_over_sata = (nvme_bw / sata_bw).to("").magnitude
@@ -4158,19 +4139,12 @@ class StorageLoading:
     """KWS dataset load time comparison: NVMe vs. object storage."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    dataset = Datasets.MSWC
-    sample_duration = dataset.sample_duration
-    sample_rate = dataset.sample_rate
-    sample_width = dataset.sample_width
-    nvme_bw = Systems.Storage.LocalNvmeTrainingTypical.bandwidth
-    obj_bw = Systems.Storage.ObjectStoreSingleStream.bandwidth
+    tiers = Scenarios.MswcCorpusStorageTiers
+    nvme_bw = tiers.read_bandwidths["NVMe"]
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    total_examples_count = dataset.training_examples.to(count).magnitude
-    sample_count = total_examples_count
-    kws_dataset = sample_count * sample_duration * sample_rate * sample_width
-    nvme_load = kws_dataset / nvme_bw
-    obj_load = kws_dataset / obj_bw
+    nvme_load = tiers.load_time("NVMe")
+    obj_load = tiers.load_time("object store")
     load_speedup = (obj_load / nvme_load).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -4261,21 +4235,21 @@ Each storage tier sets its own ceiling on the feeding problem of @sec-data-engin
 # │       12.7K img/s ceiling; NVMe covers the ceiling.
 # │ How: Calculate required MB/s from image consumption rate and file size.
 # │
-# │ Note: Ceiling, sustained rate, and JPEG size come from FeedingProblem
-# │       (chapter scenario anchor).
+# │ Note: Ceiling, sustained rate, and JPEG size come from
+# │       Scenarios.ResNet50A100InputFeed, as in FeedingProblem.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Models, Systems
+from mlsysim import Scenarios, Systems
 from mlsysim.fmt import fmt_int, fmt, fmt_count, check, fmt_rate, fmt_percent, fmt_flops, fmt_flop_rate, fmt_bandwidth, fmt_memory
-from mlsysim.core.units import KB, GB, MB, byte, second, flop, GFLOPs, TFLOPs
+from mlsysim.core.units import KB, GB, MB, second, count, GFLOPs, TFLOPs
 
 # ┌── LEGO ───────────────────────────────────────────────
 class StorageBandwidth:
     """Storage bandwidth budget for saturating an A100 training ResNet-50."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    h_a100 = Hardware.Cloud.A100
-    m_resnet = Models.Vision.ResNet50
-    image_size = FeedingProblem.compressed_image
+    feed = Scenarios.ResNet50A100InputFeed
+    h_a100 = feed.hardware
+    image_size = feed.encoded_sample
     sustained_img_per_sec = FeedingProblem.sustained_img_per_sec
     sata = Systems.Storage.SataSsdEffective
     sata_max = Systems.Storage.SataSsd
@@ -4289,15 +4263,13 @@ class StorageBandwidth:
     nvme_bw_high = nvme_high.bandwidth
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    a100_flops_val = h_a100.compute.peak_flops.to(flop / second).magnitude
-    resnet_flops_per_img = (m_resnet.inference_flops * 3).to(flop).magnitude  # forward + backward
-    max_img_per_sec = int(a100_flops_val / resnet_flops_per_img)
+    max_img_per_sec = int(feed.ceiling_rate.to(count / second).magnitude)
     required_bw = (max_img_per_sec / second) * image_size
-    sustained_bw = (sustained_img_per_sec / second) * image_size
+    sustained_bw = feed.demand()
     required_bw_value = required_bw.to(GB / second).magnitude
-    sata_max_img_sec = int((sata_bw / image_size).to(1 / second).magnitude)
+    sata_max_img_sec = int(feed.samples_supplied(sata_bw).to(count / second).magnitude)
     sata_utilization_pct = int(round(sata_max_img_sec / max_img_per_sec * 100))
-    s3_workers = int(round((required_bw / s3_bw).to("").magnitude))
+    s3_workers = int(round(feed.streams_needed(s3_bw, rate=max_img_per_sec * count / second)))
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(required_bw > 1.5 * GB / second, f"Reference accelerator storage budget should exceed 1.5 GB/s, got {required_bw_value:.1f}.")
@@ -4315,7 +4287,7 @@ class StorageBandwidth:
     sustained_bw_mb_per_s_str = fmt_bandwidth(sustained_bw, unit=MB / second, precision=0, commas=False)
     required_bw_gb_per_s_str = fmt_bandwidth(required_bw, unit=GB / second, precision=1, commas=False)
     a100_fp16_tflop_per_s_str = fmt_flop_rate(h_a100.compute.peak_flops, unit=TFLOPs / second, precision=0, commas=False)
-    resnet_fwdbwd_gflop_str = fmt_flops(m_resnet.inference_flops * 3, unit=GFLOPs, precision=1, commas=False)
+    resnet_fwdbwd_gflop_str = fmt_flops(feed.training_flops_per_sample, unit=GFLOPs, precision=1, commas=False)
     image_size_kb_str = fmt_memory(image_size, unit=KB, precision=0, commas=False)
     sata_bw_mb_per_s_str = fmt_bandwidth(sata_bw, unit=MB / second, precision=0, commas=False)
     sata_max_bw_mb_per_s_str = fmt_bandwidth(sata_max_bw, unit=MB / second, precision=0, commas=False)
@@ -4391,8 +4363,9 @@ Between storage and the accelerator sits the host processor, which reads each st
 # │
 # │ Note: The accelerator rate comes from FeedingProblem (chapter scenario anchor).
 # └─────────────────────────────────────────────────────────────────────────────
-import math
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, check, fmt_rate
+from mlsysim.core.units import count, second
 
 # ┌── LEGO ───────────────────────────────────────────────
 class DataloaderStats:
@@ -4401,13 +4374,14 @@ class DataloaderStats:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    feed = Scenarios.ResNet50A100InputFeed
     gpu_limit_img_sec = FeedingProblem.sustained_img_per_sec  # chapter scenario rate
-    worker_img_sec = 375  # scenario assumption: JPEG decode + augment per CPU worker
-    cpu_throughput_cap_img_sec = 3500
-    max_workers = 16
+    worker_img_sec = feed.worker_rate.to(count / second).magnitude  # JPEG decode + augment per CPU worker
+    cpu_throughput_cap_img_sec = feed.host_decode_cap.to(count / second).magnitude
+    max_workers = 16  # plotted range of worker counts
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    resnet_worker_count = math.ceil(gpu_limit_img_sec / worker_img_sec)
+    resnet_worker_count = feed.workers_per_accelerator
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(resnet_worker_count == 9, f"Expected 9 workers for the illustrative dataloader saturation point, got {resnet_worker_count}.")
@@ -4508,6 +4482,7 @@ Scanning a 100-column CSV file when the model uses only 20 columns wastes four-f
 # │ How: Model effective data transfer for 20 columns out of a 100-column dataset.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -4515,14 +4490,15 @@ class FormatEfficiency:
     """CSV vs. Parquet I/O efficiency for a 20-of-100-column fraud model."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    needed_cols = 20
-    total_cols = 100
-    eta_parquet = 1.0
+    projection = Scenarios.FraudModelColumnProjection
+    needed_cols = projection.columns_used
+    total_cols = projection.columns_total
+    eta_parquet = 1.0  # a columnar reader fetches only the needed columns
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    eta_csv = needed_cols / total_cols
-    waste_pct = (1 - eta_csv) * 100
-    throughput_ratio = eta_parquet / eta_csv
+    eta_csv = projection.read_fraction
+    waste_pct = projection.wasted_fraction * 100
+    throughput_ratio = projection.speedup
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(throughput_ratio == 5, f"20-of-100 column projection should be 5x, got {throughput_ratio:.1f}x.")
@@ -4570,6 +4546,7 @@ Columnar storage formats\index{Parquet!columnar format}\index{ORC!columnar forma
 # │ How: Calculate total decompression latency for a 100 GB dataset.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt_int, fmt, check, fmt_time, fmt_multiple, fmt_count, fmt_bandwidth, fmt_memory
 from mlsysim.core.units import MB, GB, second, minute, hour
 
@@ -4578,20 +4555,18 @@ class CompressionTradeoff:
     """Snappy vs. Gzip decompression time over 50 training epochs."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    snappy_decompress_mbs = 500  # MB/s
-    gzip_decompress_mbs = 120  # MB/s
-    dataset_gb = 100
-    n_epochs = 50
+    codecs = Scenarios.GzipVersusSnappyEpochs
+    snappy_decompress = codecs.decode_rates["Snappy"]
+    gzip_decompress = codecs.decode_rates["gzip"]
+    dataset = codecs.epoch_bytes
+    n_epochs = codecs.epochs
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    snappy_decompress = snappy_decompress_mbs * MB / second
-    gzip_decompress = gzip_decompress_mbs * MB / second
-    dataset = dataset_gb * GB
-    decompress_speedup = snappy_decompress_mbs / gzip_decompress_mbs
-    gzip_decompress_min = (dataset / gzip_decompress).to(minute).magnitude
-    snappy_decompress_min = (dataset / snappy_decompress).to(minute).magnitude
-    time_diff_min = gzip_decompress_min - snappy_decompress_min
-    total_diff_hours = (time_diff_min * minute * n_epochs).to(hour).magnitude
+    decompress_speedup = codecs.rate_ratio("Snappy", "gzip")
+    gzip_decompress_min = codecs.decode_time("gzip").to(minute).magnitude
+    snappy_decompress_min = codecs.decode_time("Snappy").to(minute).magnitude
+    time_diff_min = codecs.time_saved("gzip", "Snappy").to(minute).magnitude
+    total_diff_hours = codecs.run_time_saved("gzip", "Snappy").to(hour).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(decompress_speedup > 4, f"Snappy should be over 4x faster in this scenario, got {decompress_speedup:.1f}x.")
@@ -5175,19 +5150,12 @@ class StorageLoadingRecap:
     """Summary recap of NVMe vs. object-storage loading speed."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    dataset = Datasets.MSWC
-    sample_duration = dataset.sample_duration
-    sample_rate = dataset.sample_rate
-    sample_width = dataset.sample_width
-    nvme_bw = Systems.Storage.LocalNvmeTrainingTypical.bandwidth
-    obj_bw = Systems.Storage.ObjectStoreSingleStream.bandwidth
+    tiers = Scenarios.MswcCorpusStorageTiers
+    nvme_bw = tiers.read_bandwidths["NVMe"]
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    total_examples_count = dataset.training_examples.to(count).magnitude
-    sample_count = total_examples_count
-    kws_dataset = sample_count * sample_duration * sample_rate * sample_width
-    nvme_load = kws_dataset / nvme_bw
-    obj_load = kws_dataset / obj_bw
+    nvme_load = tiers.load_time("NVMe")
+    obj_load = tiers.load_time("object store")
     load_speedup = (obj_load / nvme_load).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
