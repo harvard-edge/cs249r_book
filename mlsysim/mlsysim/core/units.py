@@ -18,7 +18,7 @@ __all__ = [
     # Data scale units
     "KB", "MB", "GB", "TB", "PB", "KiB", "MiB", "GiB", "TiB",
     # Precision sizes
-    "BYTES_FP32", "BYTES_INT32", "BYTES_INT64", "BYTES_FP16", "BYTES_INT8", "BYTES_INT4",
+    "BYTES_FP32", "BYTES_INT32", "BYTES_INT64", "BYTES_INT16", "BYTES_FP16", "BYTES_INT8", "BYTES_INT4",
     "BYTES_ADAM_STATE", "BYTES_ADAM_MOMENTS", "BYTES_ADAM_TOTAL", "BYTES_TRAINING_STATE_MIXED_PRECISION",
     # Interconnect standards
     "NVLINK3_BANDWIDTH_UNIDIRECTIONAL", "NVLINK3_BANDWIDTH_BIDIRECTIONAL",
@@ -113,6 +113,7 @@ PB = ureg.PB
 BYTES_FP32 = 4 * byte
 BYTES_INT32 = 4 * byte
 BYTES_INT64 = 8 * byte  # integer class labels, indices (added 2026-10-20)
+BYTES_INT16 = 2 * byte  # 16-bit sparse-format indices (added 2026-10-20)
 BYTES_FP16 = 2 * byte
 BYTES_INT8 = 1 * byte
 BYTES_INT4 = 0.5 * byte

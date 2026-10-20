@@ -4047,3 +4047,51 @@ def test_carbon_priced_region_placement():
     assert r.best_region == "Quebec" and r.best_region_untaxed == "Quebec"
     assert r.objective_value == approx(25336888.4)
     assert r.objective["US_Avg"] - r.objective["Quebec"] == approx(531280.0)
+
+
+def test_model_compression_scenarios():
+    from mlsysim import Literature
+    from mlsysim.physics import (calc_csr_bytes, calc_pareto_frontier, calc_sparse_breakeven_zero_share,
+                                 calc_sparse_bytes_per_nonzero)
+    from mlsysim.core.units import BYTES_FP32, BYTES_INT32
+    t = Scenarios.Llama2_7BTokenOnFlagshipPhone
+    assert t.weight_bytes.to("GB").magnitude == approx(14.0) and t.read_time.to("ms").magnitude == approx(273.4375)
+    assert t.read_energy.to("J").magnitude == approx(2.24) and t.read_power.to("W").magnitude == approx(8.192)
+    assert Scenarios.MobileNetV2Fp32WeightReadPhone.read_time.to("ms").magnitude == approx(0.27382, rel=1e-4)
+    assert Scenarios.ResNet50Fp32WeightReadPhone.weight_bytes.to("MB").magnitude == approx(102.228128)
+    assert Scenarios.Gpt2XlFp16WeightReadPhone.read_time.to("ms").magnitude == approx(58.59375)
+    assert Scenarios.Gpt2XlInt4WeightReadPhone.read_time.to("ms").magnitude == approx(14.6484375)
+    b = Scenarios.MobileNetV2BlurPipelinePhone
+    assert b.cpu_frame.to("ms").magnitude == approx(125.0) and b.flop_fraction == approx(418 / 600)
+    assert b.pruned_cpu_frame.to("ms").magnitude == approx(87.0833, rel=1e-5)
+    assert b.pruned_bytes.to("MB").magnitude == approx(10.44) and b.pruned_int_bytes.to("MB").magnitude == approx(2.61)
+    m = Scenarios.SmallestModelAtSixtyPercentMmlu
+    assert m.first["model"] == "Gopher 280B" and m.last["model"] == "Qwen2.5-Coder-3B"
+    assert m.shrink == approx(93.333, rel=1e-4) and m.span_years == approx(2.7789, rel=1e-4)
+    r = Scenarios.Rank128Factorization4096
+    assert r.full_bytes.to("MB").magnitude == approx(67.108864) and r.compression == approx(16.0)
+    f = Scenarios.ResNet50Conv256FusionH100
+    assert f.unfused_traffic.to("MB").magnitude == approx(7.17824) and f.fused_traffic.to("MB").magnitude == approx(3.964928)
+    assert f.traffic_cut == approx(0.447646, rel=1e-5) and f.time_ratio == approx(1.810434, rel=1e-5)
+    s = Scenarios.SparseMatVec4x4
+    assert s.nonzeros == 6 and s.csr_bytes.to("byte").magnitude == 68 and s.dense_bytes.to("byte").magnitude == 64
+    p = Scenarios.MagnitudePruned3x3
+    assert p.survivors == [0.8, -0.7, -0.9, -0.6] and p.csr_bytes.to("byte").magnitude == 80
+    w = Scenarios.WearableMobileNetV2SparseFlash
+    assert w.stored_bytes.to("MB").magnitude == approx(3.0) and not w.fits
+    assert Scenarios.Channels256To250Tile8.last_tile_lanes == 2 and Scenarios.Channels256To248Tile8.remainder == 0
+    assert [round(100 * x) for x in Scenarios.TeacherSoftTargetsT4.softened] == [48, 28, 24]
+    assert Scenarios.PrunedInt8PaperVsMeasured.paper == approx(8.0)
+    assert Scenarios.PrunedInt8PaperVsMeasured.realized_share == approx(0.1875)
+    assert Scenarios.BertBaseMobileCompression.compression_ratio == approx(16.0)
+    assert Scenarios.ModelFifthOfRequestLatency.result.overall_speedup == approx(1.25)
+    assert Scenarios.ModelThreeFifthsFourTimesFaster.result.overall_speedup == approx(1 / 0.55)
+    csr = calc_sparse_bytes_per_nonzero(BYTES_FP32, BYTES_INT32)
+    coo = calc_sparse_bytes_per_nonzero(BYTES_FP32, BYTES_INT32, indices=2)
+    assert calc_sparse_breakeven_zero_share(BYTES_FP32, csr) == approx(0.5)
+    assert calc_sparse_breakeven_zero_share(BYTES_FP32, coo) == approx(2 / 3)
+    assert calc_csr_bytes(6, 4, BYTES_FP32, BYTES_INT32).to("byte").magnitude == 68
+    t3 = Literature.Series.MobileNetV3Table3.entries
+    front = [t3[i]["model"] for i in calc_pareto_frontier([(r["pixel1_ms"], r["top1"]) for r in t3])]
+    assert "V2 1.0" not in front and "V3-Large 0.75" in front
+    assert Literature.CompressionResults.SanhDistilBertRetainedPct == 97

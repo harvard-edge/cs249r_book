@@ -569,3 +569,43 @@ def calc_residual_adapter_params(width: int, bottleneck: int) -> int:
     """
     validate_at_least(bottleneck, 1, "bottleneck")
     return 2 * width * bottleneck + bottleneck + width
+
+
+# --- Sparse storage formats (added 2026-10-20) --------------------------------
+
+def calc_sparse_bytes_per_nonzero(value_bytes, index_bytes, indices: int = 1):
+    """
+    Bytes one stored nonzero costs in an index-based sparse format.
+
+        b_nz = b_value + k b_index
+
+    CSR keeps one column index per value (k = 1; its row pointers are one per
+    row, not per value); COO keeps a row and a column index (k = 2).
+    """
+    validate_at_least(indices, 0, "indices")
+    return value_bytes + indices * index_bytes
+
+
+def calc_sparse_breakeven_zero_share(dense_bytes_per_value, bytes_per_nonzero) -> float:
+    """
+    Share of zeros above which a sparse format stores fewer bytes than dense.
+
+        z* = 1 - b_dense / b_nz
+
+    A dense tensor pays b_dense per entry, zero or not; a sparse one pays b_nz
+    per survivor, so it wins only when fewer than b_dense / b_nz survive.
+    Per-row overheads (CSR row pointers) are excluded.
+    """
+    return 1 - float(dense_bytes_per_value / bytes_per_nonzero)
+
+
+def calc_csr_bytes(nonzeros: int, rows: int, value_bytes, index_bytes):
+    """
+    Bytes of a matrix in compressed sparse row (CSR) form.
+
+        B_CSR = nnz (b_value + b_index) + (rows + 1) b_index
+
+    Values and column indices are one each per nonzero; row pointers are one
+    per row boundary, rows + 1 in all.
+    """
+    return nonzeros * (value_bytes + index_bytes) + (rows + 1) * index_bytes

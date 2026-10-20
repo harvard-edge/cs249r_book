@@ -755,3 +755,14 @@ from .scaling import calc_loss_reduction_compute_multiple  # added 2026-10-20
 __all__ += [
     "calc_loss_reduction_compute_multiple",
 ]
+
+# --- Model compression (added 2026-10-20) ---
+from .memory import calc_sparse_bytes_per_nonzero, calc_sparse_breakeven_zero_share, calc_csr_bytes
+from .performance import calc_pareto_frontier
+
+__all__ += [
+    "calc_sparse_bytes_per_nonzero",
+    "calc_sparse_breakeven_zero_share",
+    "calc_csr_bytes",
+    "calc_pareto_frontier",
+]
