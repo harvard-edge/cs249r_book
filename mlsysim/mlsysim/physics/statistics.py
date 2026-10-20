@@ -563,3 +563,12 @@ def calc_poisson_exact_interval(events, alpha=0.05):
     lower = 0.0 if k == 0 else _solve(lambda mu: alpha / 2 - (1.0 - _poisson_cdf(k - 1, mu)))
     upper = _solve(lambda mu: _poisson_cdf(k, mu) - alpha / 2)
     return lower, upper
+def calc_split_conformal_min_count(alpha: float) -> int:
+    """Fewest calibration scores for which the split-conformal rank exists (added 2026-10-20).
+
+    The rank ``ceil((n + 1)(1 - alpha))`` must not exceed ``n``, which holds
+    from ``n = ceil((1 - alpha) / alpha)``.
+    """
+    if not 0.0 < alpha < 1.0:
+        raise ValueError("alpha must be in (0, 1)")
+    return math.ceil((1 - alpha) / alpha)

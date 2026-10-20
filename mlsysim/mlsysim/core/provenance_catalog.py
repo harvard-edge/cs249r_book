@@ -3715,3 +3715,25 @@ LI_SIMPLER_2024 = _lit(
     verified="2026-10-20",
     notes="Figure 1 caption: real and simulated success of the same policies 'over ~1500 evaluation episodes'.",
 )
+
+# --- Sensor perception sources (added 2026-10-20) ---------------------------
+KITTI_GEIGER_2013 = _lit(
+    "prov:kitti-geiger-2013",
+    "Geiger, Lenz, Stiller, and Urtasun, Vision meets Robotics: The KITTI Dataset, "
+    "International Journal of Robotics Research 32(11), 2013",
+    url="https://www.cvlibs.net/publications/Geiger2013IJRR.pdf",
+    verified="2026-10-20",
+    notes=("Sensor setup (Sec. II): Velodyne HDL-64E rotating 3D laser scanner, 10 Hz, 64 beams, "
+           "field of view 360 deg horizontal and 26.8 deg vertical, range 120 m."),
+)
+
+NTSB_HAR_17_02 = _lit(
+    "prov:ntsb-har-17-02",
+    "NTSB, Collision Between a Car Operating With Automated Vehicle Control Systems and a "
+    "Tractor-Semitrailer Truck Near Williston, Florida, May 7, 2016, Highway Accident Report "
+    "NTSB/HAR-17/02 (2017)",
+    url="https://www.ntsb.gov/investigations/AccidentReports/Reports/HAR1702.pdf",
+    verified="2026-10-19",
+    notes=("The car's speed just before impact was 74 mph, with Traffic-Aware Cruise Control and "
+           "Autosteer active (p. 2). Read for the Sensor Perception lecture plan, 2026-10-19."),
+)

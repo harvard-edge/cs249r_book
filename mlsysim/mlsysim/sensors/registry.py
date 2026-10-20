@@ -80,6 +80,8 @@ class LiDARs(Registry):
         range_precision_min=5.0 * ureg.millimeter,
         range_precision_max=30.0 * ureg.millimeter,
         range_accuracy=25.0 * ureg.millimeter,
+        range_accuracy_retroreflective=50.0 * ureg.millimeter,  # Rev7 datasheet: +/-5 cm, retroreflective targets
+        vertical_fov=42.4 * ureg.degree,  # Rev7 datasheet: 42.4 deg (+21.2 to -21.2)
         time_sync_accuracy=1.0 * ureg.millisecond,
         internal_clock_drift=10.0 * ureg.ppm,
         laser_wavelength=865.0 * ureg.nanometer,  # Rev7 datasheet (Class 1, IEC 60825-1:2014)
@@ -88,6 +90,22 @@ class LiDARs(Registry):
         metadata=Metadata(
             provenance=pc.OUSTER_OS1_64,
             description="Ouster OS1-64 64-channel digital LiDAR with 120 m range and 20 Hz scan rate.",
+        ),
+    )
+
+
+    # Added 2026-10-20: the lidar of the KITTI recording platform, as that
+    # platform's paper states it (KITTI ran it at 10 Hz).
+    Velodyne_HDL_64E = LiDARSensor(
+        name="Velodyne HDL-64E",
+        channels=64,
+        scan_rate=10.0 * ureg.Hz,
+        max_range=120.0 * ureg.meter,
+        vertical_fov=26.8 * ureg.degree,
+        interface="Ethernet (UDP)",
+        metadata=Metadata(
+            provenance=pc.KITTI_GEIGER_2013,
+            description="Velodyne HDL-64E 64-beam spinning lidar of the KITTI recording platform, run at 10 Hz.",
         ),
     )
 

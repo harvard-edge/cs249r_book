@@ -52,3 +52,15 @@ COPPER_COEFFICIENT_REFERENCE_TEMPERATURE = ureg.Quantity(20.0, ureg.degC)
 # figures, the precision teaching estimates use. A scale anchor for
 # brute-force coverage arguments ("logging since the universe began").
 AGE_OF_UNIVERSE = 13.8e9 * ureg.year
+# --- Aluminum thermal expansion (added 2026-10-20) ---------------------------
+# Linear thermal expansion coefficient of aluminum at 25 degC. A property of the
+# material, not of any link; calibration-drift estimates read it from here.
+# Source: CRC Handbook of Chemistry and Physics, "Thermal Expansion of the
+# Elements": aluminum, 23.1e-6 per K at 25 degC (alloys differ by a few percent).
+ALUMINUM_THERMAL_EXPANSION_COEFFICIENT = 23.1e-6 / ureg.kelvin
+# --- Meteorological optical range contrast threshold (added 2026-10-20) ------
+# The contrast at which a black target is taken to vanish against the horizon
+# sky when defining meteorological optical range (Koschmieder's law).
+# Source: WMO Guide to Instruments and Methods of Observation (WMO-No. 8),
+# Vol. I, Ch. 9: a contrast threshold of 0.05.
+MOR_CONTRAST_THRESHOLD = 0.05

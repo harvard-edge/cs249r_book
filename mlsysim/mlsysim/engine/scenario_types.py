@@ -11485,3 +11485,148 @@ class CrashRateDenominatorScenario(BaseScenario):
     @property
     def cohort_change(self) -> float:
         return self.cohort_after / self.cohort_before - 1.0
+# --- Sensor perception: capture timing, age, and error scales (added 2026-10-20) ---
+# A site scenario (``Embodied.Scenario.*``) supplies the machine's navigation
+# camera and lidar, the stage allowances, and the clearances; the solvers live
+# in ``engine/solvers/perception.py``.
+
+class ObservationAgeScenario(BaseScenario):
+    """``site.machine``'s navigation-camera observation age at ``speed``, with a ``batch_frames`` comparison."""
+    site: Any                                   # EmbodiedSiteScenario
+    speed: Quantity
+    batch_frames: int = 1
+
+    @property
+    def result(self):
+        from .solvers import ObservationAgeModel
+        s, cam = self.site, self.site.machine.nav_camera
+        return ObservationAgeModel().solve(cam.exposure_time, cam.readout_time, s.t_transport, s.t_dma,
+                                           s.t_isp, s.t_backbone, s.t_ipc, cam.frame_rate, self.speed,
+                                           self.batch_frames)
+
+
+class RollingShutterScenario(BaseScenario):
+    """``site.machine``'s rolling-shutter navigation camera at ``speed``, turning at the site's yaw rate toward the rack end."""
+    site: Any                                   # EmbodiedSiteScenario
+    speed: Quantity
+
+    @property
+    def result(self):
+        from .solvers import RollingShutterSkewModel
+        s, cam = self.site, self.site.machine.nav_camera
+        return RollingShutterSkewModel().solve(cam.resolution_height, cam.readout_time, cam.exposure_time,
+                                               self.speed, s.yaw_rate_turn, s.d_clear, s.delta_loc,
+                                               s.side_clearance)
+
+
+class TimingAttitudeErrorScenario(BaseScenario):
+    """A ``timing_error`` and an ``angle_error`` on a target at ``distance``, priced against ``reference``."""
+    speed: Quantity
+    yaw_rate: Quantity
+    distance: Quantity
+    timing_error: Quantity
+    angle_error: Quantity
+    reference: Optional[Quantity] = None
+
+    @property
+    def result(self):
+        from .solvers import TimingAttitudeErrorModel
+        return TimingAttitudeErrorModel().solve(self.speed, self.yaw_rate, self.distance, self.timing_error,
+                                                self.angle_error, self.reference)
+
+
+class LidarSweepAgeScenario(BaseScenario):
+    """``site.machine``'s spinning lidar at ``speed``: sweep motion and the age of the aisle sector at the rack end."""
+    site: Any                                   # EmbodiedSiteScenario
+    speed: Quantity
+
+    @property
+    def result(self):
+        from .solvers import LidarSweepAgeModel
+        s, lidar = self.site, self.site.machine.lidar
+        return LidarSweepAgeModel().solve(lidar.scan_rate, lidar.nominal_latency, lidar.time_sync_accuracy,
+                                          s.aisle_width, s.d_clear, self.speed, s.yaw_rate_turn,
+                                          s.perception_age)
+
+
+class StereoDepthErrorScenario(BaseScenario):
+    """A stereo rig's depth error at two ranges and at ``site``'s rack end, against the site's clearances."""
+    site: Any                                   # EmbodiedSiteScenario
+    baseline: Quantity
+    focal_length_px: float
+    disparity_sigma_px: float
+    near_range: Quantity
+    far_range: Quantity
+    ray_clearance: Quantity
+    baseline_change: Quantity
+    bias_range: Quantity
+
+    @property
+    def result(self):
+        from .solvers import StereoDepthErrorModel
+        s = self.site
+        return StereoDepthErrorModel().solve(self.baseline, self.focal_length_px, self.disparity_sigma_px,
+                                             self.near_range, self.far_range, s.d_clear, self.ray_clearance,
+                                             s.delta_loc, s.side_clearance, self.baseline_change,
+                                             self.bias_range)
+
+
+class DelayPhaseMarginScenario(BaseScenario):
+    """A loop with ``phase_margin`` at ``crossover``, closed through a pure ``delay``."""
+    phase_margin: Quantity
+    crossover: Quantity
+    delay: Quantity
+
+    @property
+    def result(self):
+        from .solvers import DelayPhaseMarginModel
+        return DelayPhaseMarginModel().solve(self.phase_margin, self.crossover, self.delay)
+
+
+class ConformalInsetScenario(BaseScenario):
+    """A split-conformal bound at miss rate ``alpha`` from ``calibration_count`` residuals."""
+    alpha: float
+    calibration_count: int
+
+    @property
+    def result(self):
+        from .solvers import ConformalInsetModel
+        return ConformalInsetModel().solve(self.alpha, self.calibration_count)
+
+
+class ClockConversionScenario(BaseScenario):
+    """A sensor clock drifting at ``drift_rate`` between syncs every ``sync_interval``, converted under ``site``'s bound."""
+    site: Any                                   # EmbodiedSiteScenario
+    drift_rate: Quantity
+    sync_interval: Quantity
+    speed: Quantity
+
+    @property
+    def result(self):
+        from .solvers import ClockConversionModel
+        s = self.site
+        return ClockConversionModel().solve(self.drift_rate, self.sync_interval, s.clock_conversion_bound,
+                                            s.perception_age, self.speed)
+
+
+class VisibilityRangeScenario(BaseScenario):
+    """Fog of extinction coefficient ``extinction`` against a contrast threshold."""
+    extinction: Quantity
+    contrast_threshold: float
+
+    @property
+    def result(self):
+        from .solvers import VisibilityRangeModel
+        return VisibilityRangeModel().solve(self.extinction, self.contrast_threshold)
+
+
+class ThermalExpansionScenario(BaseScenario):
+    """A member of ``length`` and expansion ``coefficient`` warmed by ``temperature_rise``."""
+    coefficient: Quantity
+    length: Quantity
+    temperature_rise: Quantity
+
+    @property
+    def result(self):
+        from .solvers import ThermalExpansionModel
+        return ThermalExpansionModel().solve(self.coefficient, self.length, self.temperature_rise)

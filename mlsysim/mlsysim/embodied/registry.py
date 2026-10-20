@@ -390,6 +390,8 @@ class SiteScenarios(Registry):
         t_isp=2.5 * ureg.millisecond,                          # illustrative
         t_backbone=22.0 * ureg.millisecond,                    # illustrative
         t_ipc=0.5 * ureg.millisecond,                          # illustrative
+        yaw_rate_turn=0.5 * (ureg.radian / ureg.second),     # illustrative (base turning into the aisle; added 2026-10-20)
+        clock_conversion_bound=0.2 * ureg.millisecond,         # illustrative (capture-to-MCU clock conversion; added 2026-10-20)
         heartbeat_rate=100.0 * ureg.Hz,                        # chosen
         heartbeat_timeout=30.0 * ureg.millisecond,             # chosen
         mcu_self_watchdog=5.0 * ureg.millisecond,              # chosen

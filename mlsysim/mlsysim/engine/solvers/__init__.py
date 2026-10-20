@@ -408,3 +408,30 @@ __all__ += [
     "CallCeilingModel",
     "StepCeilingReturnModel",
 ]
+
+# --- Sensor perception (added 2026-10-20) ---
+from .perception import (
+    ObservationAgeModel,
+    RollingShutterSkewModel,
+    TimingAttitudeErrorModel,
+    LidarSweepAgeModel,
+    StereoDepthErrorModel,
+    DelayPhaseMarginModel,
+    ConformalInsetModel,
+    ClockConversionModel,
+    VisibilityRangeModel,
+    ThermalExpansionModel,
+)
+
+__all__ += [
+    "ObservationAgeModel",
+    "RollingShutterSkewModel",
+    "TimingAttitudeErrorModel",
+    "LidarSweepAgeModel",
+    "StereoDepthErrorModel",
+    "DelayPhaseMarginModel",
+    "ConformalInsetModel",
+    "ClockConversionModel",
+    "VisibilityRangeModel",
+    "ThermalExpansionModel",
+]
