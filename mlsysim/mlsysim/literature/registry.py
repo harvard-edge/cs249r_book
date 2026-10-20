@@ -85,6 +85,7 @@ ContextWindows = _load("context_windows", "ContextWindows", "Announced context w
 RecommendationSystems = _load("recommendation_systems", "RecommendationSystems", "Cited figures of production recommendation systems (Gupta et al. 2020; Mudigere et al. 2022).")  # added 2026-10-20
 ServingMemoryLayout = _load("serving_memory_layout", "ServingMemoryLayout", "Memory layout of a 13B model served on one A100 40 GB (Kwon et al. 2023, Figure 1).")  # added 2026-10-20
 RobustnessStudies = _load("robustness_studies", "RobustnessStudies", "Cited results of robustness studies (Eykholt 2018 stickers, Goodfellow 2015 FGSM, Guo 2017 calibration, Zou 2023 GCG, Gu 2017 BadNets).")  # added 2026-10-20
+DataSelectionResults = _load("data_selection_results", "DataSelectionResults", "Cited data-selection results (model collapse, scored pruning, selection via proxy, echoing, deduplication, FineWeb, FixMatch, augmentation, an input-bound profile).")  # added 2026-10-20
 
 
 # ---------------------------------------------------------------------------
@@ -392,6 +393,7 @@ class Literature(Registry):
     ServingMemoryLayout = ServingMemoryLayout  # network architectures (added 2026-10-20)
     FlashAttentionBenchmark = _series.FlashAttentionBenchmark  # network architectures (added 2026-10-20)
     RobustnessStudies = RobustnessStudies  # added 2026-10-20
+    DataSelectionResults = DataSelectionResults  # added 2026-10-20
     ComputeTrend = ComputeTrend
     AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks

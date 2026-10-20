@@ -11630,3 +11630,702 @@ class ThermalExpansionScenario(BaseScenario):
     def result(self):
         from .solvers import ThermalExpansionModel
         return ThermalExpansionModel().solve(self.coefficient, self.length, self.temperature_rise)
+
+
+# --- Data selection: corpus repetition, deduplication, coresets, echoing, labels, and cost (added 2026-10-20) ---
+
+
+class CorpusRepetitionScenario(BaseScenario):
+    """A training ``run`` (``ClusterTrainingTimeScenario``) set against the unique tokens of its
+    workload's own corpus.
+
+    The corpus holds ``training_dataset_size / bytes_per_token`` unique tokens. The
+    run processes ``training_ops / (flops_per_param_token x parameters)`` tokens,
+    so it passes over the corpus that many times. A compute-optimal fit asks for
+    ``tokens_per_param`` training tokens per parameter.
+    """
+    run: Any                           # ClusterTrainingTimeScenario
+    bytes_per_token: Quantity          # bytes per token
+    tokens_per_param: float
+    flops_per_param_token: float
+
+    @property
+    def workload(self) -> Workload:
+        return self.run.workload
+
+    @property
+    def hardware(self) -> HardwareNode:
+        return self.run.hardware
+
+    @property
+    def accelerators(self) -> int:
+        return self.run.n_devices
+
+    @property
+    def utilization(self) -> float:
+        return self.run.efficiency
+
+    @property
+    def parameters(self) -> float:
+        return self.workload.parameters.to("param").magnitude
+
+    @property
+    def corpus_bytes(self) -> Quantity:
+        return self.workload.training_dataset_size
+
+    @property
+    def training_flops(self) -> Quantity:
+        return self.workload.training_ops
+
+    @property
+    def unique_tokens(self) -> Quantity:
+        return (self.corpus_bytes / self.bytes_per_token).to("count")
+
+    @property
+    def optimal_tokens(self) -> Quantity:
+        """Training tokens the compute-optimal ratio asks for at this parameter count."""
+        return Q_(self.tokens_per_param * self.parameters, "count")
+
+    @property
+    def shortfall(self) -> float:
+        """Compute-optimal tokens over the corpus's unique tokens."""
+        return (self.optimal_tokens / self.unique_tokens).to("").magnitude
+
+    @property
+    def unique_tokens_per_param(self) -> float:
+        return self.unique_tokens.magnitude / self.parameters
+
+    @property
+    def tokens_processed(self) -> Quantity:
+        return Q_(self.training_flops.to("flop").magnitude / (self.flops_per_param_token * self.parameters), "count")
+
+    @property
+    def trained_tokens_per_param(self) -> float:
+        return self.tokens_processed.magnitude / self.parameters
+
+    @property
+    def passes(self) -> float:
+        """Times the run read its corpus."""
+        return (self.tokens_processed / self.unique_tokens).to("").magnitude
+
+    @property
+    def run_time(self) -> Quantity:
+        return self.run.training_time.to("second")
+
+    @property
+    def run_energy(self) -> Quantity:
+        """Accelerator energy at board power for the whole run."""
+        return (self.accelerators * self.hardware.tdp * self.run_time).to("joule")
+
+    @property
+    def compute_optimal(self):
+        """(parameters, tokens) that spend the same compute at ``tokens_per_param``."""
+        from ..physics.scaling import calc_compute_optimal_allocation
+        return calc_compute_optimal_allocation(self.training_flops.to("flop").magnitude,
+                                               self.tokens_per_param, self.flops_per_param_token)
+
+
+class AllocationGrowthScenario(BaseScenario):
+    """A compute-optimal allocation ``X_opt ~ C^exponent`` when compute grows by ``compute_multiple``."""
+    compute_multiple: float
+    exponent: float
+
+    @property
+    def growth(self) -> float:
+        """Fractional growth of the allocation."""
+        from ..physics.scaling import calc_allocation_growth
+        return calc_allocation_growth(self.compute_multiple, self.exponent)
+
+
+class DuplicateRemovalScenario(BaseScenario):
+    """Near-duplicate shares removed from ``run``'s corpus: the training time and energy each
+    share returns, against one read of the corpus and the MinHash signatures of its documents."""
+    run: CorpusRepetitionScenario
+    duplicate_shares: Dict[str, float]   # corpus name -> fraction of documents removed
+    documents: float
+    signature_hashes: int
+    hash_bytes: Quantity
+    read_bandwidth: Quantity
+
+    def time_saved(self, corpus: str) -> Quantity:
+        return (self.duplicate_shares[corpus] * self.run.run_time).to("hour")
+
+    def energy_saved(self, corpus: str) -> Quantity:
+        return (self.duplicate_shares[corpus] * self.run.run_energy).to("kWh")
+
+    @property
+    def signature_bytes(self) -> Quantity:
+        return (self.documents * self.signature_hashes * self.hash_bytes).to("GB")
+
+    @property
+    def read_time(self) -> Quantity:
+        return (self.run.corpus_bytes / self.read_bandwidth).to("second")
+
+    @property
+    def all_pairs(self) -> float:
+        """Pairwise comparisons an exhaustive search would make."""
+        return self.documents * (self.documents - 1) / 2
+
+
+class MinHashBandingScenario(BaseScenario):
+    """A MinHash signature cut into ``bands`` bands of ``rows`` hashes over ``shingle_words``-word shingles."""
+    bands: int
+    rows: int
+    shingle_words: int
+    probe_similarities: List[float] = []   # Jaccard similarities at which to read the candidate chance
+
+    @property
+    def hashes(self) -> int:
+        return self.bands * self.rows
+
+    @property
+    def threshold(self) -> float:
+        from ..physics.retrieval import calc_lsh_threshold
+        return calc_lsh_threshold(self.bands, self.rows)
+
+    def candidate_probability(self, similarity: float) -> float:
+        from ..physics.retrieval import calc_lsh_candidate_probability
+        return calc_lsh_candidate_probability(similarity, self.bands, self.rows)
+
+
+class InformationComputeRatioScenario(BaseScenario):
+    """Accuracy gained per training FLOP for one epoch over all of ``dataset`` and over a
+    ``keep_fraction`` subset, with ``gain_full`` and ``gain_subset`` points of gain."""
+    workload: Workload
+    dataset: Any                       # DatasetProfile
+    gain_full: float                   # percentage points
+    gain_subset: float                 # percentage points
+    keep_fraction: float
+    training_flops_factor: float = 3.0
+
+    @property
+    def examples(self) -> float:
+        return self.dataset.training_examples.to("count").magnitude
+
+    @property
+    def training_flops_per_sample(self) -> Quantity:
+        return (self.workload.inference_flops * self.training_flops_factor).to("GFLOP")
+
+    @property
+    def epoch_flops(self) -> Quantity:
+        return (self.examples * self.training_flops_per_sample).to("flop")
+
+    @property
+    def subset_examples(self) -> float:
+        return self.examples * self.keep_fraction
+
+    @property
+    def subset_flops(self) -> Quantity:
+        return (self.subset_examples * self.training_flops_per_sample).to("flop")
+
+    @property
+    def icr_full(self) -> float:
+        return self.gain_full / self.epoch_flops.magnitude
+
+    @property
+    def icr_subset(self) -> float:
+        return self.gain_subset / self.subset_flops.magnitude
+
+    @property
+    def icr_ratio(self) -> float:
+        return self.icr_subset / self.icr_full
+
+
+class CoresetRunScenario(BaseScenario):
+    """``workload`` trained for ``epochs`` over ``dataset`` on one ``hardware`` at ``utilization``,
+    against a ``keep_fraction`` coreset scored by one forward pass of ``workload`` or ``proxy``.
+
+    The selection inequality compares scoring plus subset training with full
+    training; rescoring repeats the scoring pass before every epoch. The data-path
+    fields follow one epoch through storage (the archive at the node's storage
+    bandwidth), the host (``host_rate`` decoded samples a second), and the
+    host-to-accelerator link (``decoded_sample`` bytes each).
+    """
+    workload: Workload
+    dataset: Any                       # DatasetProfile
+    hardware: HardwareNode
+    utilization: float
+    keep_fraction: float
+    epochs: int
+    training_flops_factor: float = 3.0
+    proxy: Optional[Workload] = None
+    proxy_epochs: Optional[int] = None         # epochs a proxy trained from scratch runs before scoring
+    host_rate: Optional[Quantity] = None       # samples per second the host prepares
+    decoded_sample: Optional[Quantity] = None  # bytes per sample sent to the accelerator
+
+    @property
+    def examples(self) -> float:
+        return self.dataset.training_examples.to("count").magnitude
+
+    @property
+    def sustained_rate(self) -> Quantity:
+        return self.hardware.compute.peak_flops * self.utilization
+
+    @property
+    def training_flops_per_sample(self) -> Quantity:
+        return self.training_flops_factor * self.workload.inference_flops
+
+    @property
+    def epoch_flops(self) -> Quantity:
+        return (self.examples * self.training_flops_per_sample).to("flop")
+
+    @property
+    def epoch_time(self) -> Quantity:
+        return (self.epoch_flops / self.sustained_rate).to("second")
+
+    @property
+    def epoch_energy(self) -> Quantity:
+        return (self.hardware.tdp * self.epoch_time).to("kJ")
+
+    @property
+    def sample_rate(self) -> float:
+        """Samples a second the accelerator consumes at the sustained rate."""
+        return self.examples / self.epoch_time.magnitude
+
+    @property
+    def run_time(self) -> Quantity:
+        """``epochs`` full epochs."""
+        return (self.epochs * self.epoch_time).to("hour")
+
+    # Selection inequality
+    @property
+    def full_time(self) -> Quantity:
+        return (self.examples * self.epochs * self.training_flops_factor * self.workload.inference_flops
+                / self.sustained_rate).to("second")
+
+    @property
+    def subset_time(self) -> Quantity:
+        return self.keep_fraction * self.full_time
+
+    def score_time(self, scorer: Optional[Workload] = None) -> Quantity:
+        """One forward pass of ``scorer`` (default: the workload) over the whole pool."""
+        model = scorer or self.workload
+        return (self.examples * model.inference_flops / self.sustained_rate).to("second")
+
+    def score_energy(self, scorer: Optional[Workload] = None) -> Quantity:
+        return (self.hardware.tdp * self.score_time(scorer)).to("kJ")
+
+    def selection_time(self, scorer: Optional[Workload] = None) -> Quantity:
+        """Scoring once plus training on the subset."""
+        return self.score_time(scorer) + self.subset_time
+
+    def saving(self, scorer: Optional[Workload] = None) -> Quantity:
+        return self.full_time - self.selection_time(scorer)
+
+    def saving_fraction(self, scorer: Optional[Workload] = None) -> float:
+        return (self.saving(scorer) / self.full_time).to("").magnitude
+
+    @property
+    def rescoring_time(self) -> Quantity:
+        """The workload rescoring the pool before every epoch."""
+        return (self.epochs * self.score_time()).to("minute")
+
+    @property
+    def rescoring_saving_fraction(self) -> float:
+        return ((self.full_time - (self.rescoring_time + self.subset_time)) / self.full_time).to("").magnitude
+
+    @property
+    def rescoring_over_training(self) -> float:
+        return (self.rescoring_time / self.subset_time).to("").magnitude
+
+    # One pruned epoch through the machine
+    @property
+    def pruned_epoch_time(self) -> Quantity:
+        return self.keep_fraction * self.epoch_time
+
+    @property
+    def pruned_epoch_energy(self) -> Quantity:
+        return self.keep_fraction * self.epoch_energy
+
+    @property
+    def run_saving_time(self) -> Quantity:
+        return (self.epochs * (self.epoch_time - self.pruned_epoch_time)).to("hour")
+
+    @property
+    def run_saving_energy(self) -> Quantity:
+        return (self.epochs * (self.epoch_energy - self.pruned_epoch_energy)).to("MJ")
+
+    @property
+    def saving_over_score_energy(self) -> float:
+        return (self.run_saving_energy / self.score_energy()).to("").magnitude
+
+    @property
+    def archive_bytes(self) -> Quantity:
+        return self.dataset.training_archive_size.to("GB")
+
+    @property
+    def storage_time(self) -> Quantity:
+        return (self.archive_bytes / self.hardware.storage.bandwidth).to("second")
+
+    @property
+    def materialized_bytes(self) -> Quantity:
+        """The coreset written out as its own shards."""
+        return (self.keep_fraction * self.archive_bytes).to("GB")
+
+    @property
+    def link_bytes(self) -> Quantity:
+        return (self.examples * self.decoded_sample).to("GB")
+
+    @property
+    def link_time(self) -> Quantity:
+        return (self.link_bytes / self.hardware.interconnect.bandwidth).to("second")
+
+    @property
+    def host_epoch_time(self) -> Quantity:
+        return Q_(self.examples / self.host_rate.to("count/second").magnitude, "second")
+
+
+class DataEchoingScenario(BaseScenario):
+    """A host that prepares ``host_rate`` samples a second feeding an accelerator that consumes
+    ``accelerator_rate``, over ``epochs`` of ``examples``, with each prepared sample used
+    ``echo_factor`` times."""
+    accelerator_rate: Quantity
+    host_rate: Quantity
+    examples: Quantity                 # count
+    epochs: int
+    echo_factor: float
+
+    @property
+    def ratio(self) -> float:
+        """Accelerator rate over host rate; echoing helps up to this factor."""
+        return (self.accelerator_rate / self.host_rate).to("").magnitude
+
+    @property
+    def utilization(self) -> float:
+        """Accelerator busy share without echoing."""
+        return (self.host_rate / self.accelerator_rate).to("").magnitude
+
+    @property
+    def idle_fraction(self) -> float:
+        return 1 - (self.host_rate / self.accelerator_rate).to("").magnitude
+
+    @property
+    def run_time(self) -> Quantity:
+        return self.epochs * self.examples / self.host_rate
+
+    @property
+    def echoed_rate(self) -> Quantity:
+        return min(self.host_rate * self.echo_factor, self.accelerator_rate)
+
+    @property
+    def echoed_run_time(self) -> Quantity:
+        return self.epochs * self.examples / self.echoed_rate
+
+
+class SelectionBudgetScenario(BaseScenario):
+    """Selection that takes ``selection_time`` and leaves a subset that trains in ``subset_time``,
+    against full training in ``full_time`` (the selection inequality in hours)."""
+    selection_time: Quantity
+    subset_time: Quantity
+    full_time: Quantity
+    pool: Optional[float] = None
+    kept: Optional[float] = None
+
+    @property
+    def total_time(self) -> Quantity:
+        return self.selection_time + self.subset_time
+
+    @property
+    def net_saving(self) -> Quantity:
+        return self.full_time - self.total_time
+
+    @property
+    def pays(self) -> bool:
+        return self.total_time < self.full_time
+
+    @property
+    def breakeven_selection(self) -> Quantity:
+        """Longest selection that still saves time."""
+        return self.full_time - self.subset_time
+
+    @property
+    def overhead_ratio(self) -> float:
+        """Selection time over subset training time."""
+        return (self.selection_time / self.subset_time).to("").magnitude
+
+    @property
+    def selection_share(self) -> float:
+        """Selection time over full training time."""
+        return (self.selection_time / self.full_time).to("").magnitude
+
+
+class CoverageFloorScenario(BaseScenario):
+    """A ``keep_fraction`` coreset drawn without regard to class from ``pool`` examples, of which
+    ``rare_share`` belong to a rare class that needs at least ``floor`` examples."""
+    pool: float
+    rare_share: float
+    keep_fraction: float
+    floor: float
+
+    @property
+    def rare(self) -> float:
+        return self.pool * self.rare_share
+
+    @property
+    def expected_kept(self) -> float:
+        return self.rare * self.keep_fraction
+
+    @property
+    def shortfall(self) -> float:
+        return self.floor - self.expected_kept
+
+
+class CurriculumScheduleScenario(BaseScenario):
+    """A curriculum that reaches target in ``curriculum_epochs`` against ``baseline_epochs``
+    shuffled, with an optional linear warmup of ``warmup_epochs`` (epoch j serves j/W of the data)."""
+    baseline_epochs: int
+    curriculum_epochs: int
+    warmup_epochs: Optional[int] = None
+
+    @property
+    def epoch_reduction(self) -> float:
+        return (self.baseline_epochs - self.curriculum_epochs) / self.baseline_epochs
+
+    @property
+    def warmup_samples(self) -> float:
+        """Dataset passes the linear warmup serves: (W + 1) / 2."""
+        return (self.warmup_epochs + 1) / 2
+
+    @property
+    def warmup_share(self) -> float:
+        """Warmup samples over W full passes."""
+        return self.warmup_samples / self.warmup_epochs
+
+
+class ActiveLearningRoundsScenario(BaseScenario):
+    """Active learning from ``initial_labels`` adding ``labels_per_round`` for ``rounds`` rounds,
+    each round paying ``round_scoring_cost`` to score the pool, against random labeling that
+    needs ``random_labels`` at the same ``label_price``."""
+    label_price: Quantity              # USD per label
+    initial_labels: int
+    labels_per_round: int
+    rounds: int
+    round_scoring_cost: Quantity       # USD per round
+    random_labels: int
+    label_turnaround: Optional[Quantity] = None   # time each round waits for its labels
+
+    @property
+    def active_labels(self) -> int:
+        return self.initial_labels + self.rounds * self.labels_per_round
+
+    @property
+    def random_cost(self) -> Quantity:
+        return (self.random_labels * self.label_price).to("USD")
+
+    @property
+    def active_label_cost(self) -> Quantity:
+        return (self.active_labels * self.label_price).to("USD")
+
+    @property
+    def scoring_cost(self) -> Quantity:
+        return (self.rounds * self.round_scoring_cost).to("USD")
+
+    @property
+    def active_cost(self) -> Quantity:
+        return self.active_label_cost + self.scoring_cost
+
+    @property
+    def roi(self) -> float:
+        """Saving over the active-learning cost."""
+        return ((self.random_cost - self.active_cost) / self.active_cost).to("").magnitude
+
+
+class BudgetMatchedLabelingScenario(BaseScenario):
+    """A ``pool`` to label at ``label_price`` under ``budget``: random labeling spends the budget,
+    active learning reaches the same quality with ``active_labels``."""
+    pool: Quantity                     # count
+    label_price: Quantity              # USD per count
+    budget: Quantity                   # USD
+    active_labels: Quantity            # count
+    deadline: Optional[Quantity] = None
+
+    @property
+    def full_cost(self) -> Quantity:
+        return self.pool * self.label_price
+
+    @property
+    def random_labels(self) -> Quantity:
+        return (self.budget / self.label_price).to("count")
+
+    @property
+    def active_cost(self) -> Quantity:
+        return self.active_labels * self.label_price
+
+    @property
+    def unspent_share(self):
+        return (self.budget - self.active_cost) / self.budget
+
+    @property
+    def label_ratio(self) -> float:
+        return (self.random_labels / self.active_labels).to("").magnitude
+
+    @property
+    def saving(self) -> Quantity:
+        return self.budget - self.active_cost
+
+    @property
+    def over_budget_ratio(self) -> float:
+        return (self.full_cost / self.budget).to("").magnitude
+
+
+class SemiSupervisedCostScenario(BaseScenario):
+    """A supervised baseline with ``supervised_labels`` and ``supervised_compute`` against a
+    semi-supervised run with ``ssl_labels`` and ``ssl_compute``, labels at ``label_price``."""
+    label_price: Quantity              # USD per label
+    supervised_labels: int
+    supervised_compute: Quantity       # USD
+    ssl_labels: int
+    ssl_compute: Quantity              # USD
+
+    @property
+    def supervised_label_cost(self) -> Quantity:
+        return (self.supervised_labels * self.label_price).to("USD")
+
+    @property
+    def supervised_total(self) -> Quantity:
+        return self.supervised_label_cost + self.supervised_compute
+
+    @property
+    def ssl_label_cost(self) -> Quantity:
+        return (self.ssl_labels * self.label_price).to("USD")
+
+    @property
+    def ssl_total(self) -> Quantity:
+        return self.ssl_label_cost + self.ssl_compute
+
+    @property
+    def compute_multiple(self) -> float:
+        return (self.ssl_compute / self.supervised_compute).to("").magnitude
+
+    @property
+    def cost_reduction(self) -> float:
+        return (self.supervised_total / self.ssl_total).to("").magnitude
+
+    @property
+    def label_reduction(self) -> float:
+        return self.supervised_labels / self.ssl_labels
+
+
+class PretrainingAmortizationScenario(BaseScenario):
+    """``tasks`` tasks trained from scratch at ``scratch_compute`` each against one pretraining run
+    of ``pretrain_compute`` plus ``finetune_compute`` per task, with the labels each path needs."""
+    pretrain_compute: Quantity         # accelerator-hours
+    scratch_compute: Quantity          # accelerator-hours per task
+    finetune_compute: Quantity         # accelerator-hours per task
+    tasks: int
+    scratch_labels: Quantity           # count per task
+    finetune_labels: Quantity          # count per task
+    label_price: Quantity              # USD per count
+
+    @property
+    def scratch_total(self) -> Quantity:
+        return self.scratch_compute * self.tasks
+
+    @property
+    def foundation_total(self) -> Quantity:
+        return self.pretrain_compute + (self.finetune_compute * self.tasks)
+
+    @property
+    def scratch_label_cost(self) -> Quantity:
+        return self.scratch_labels * self.label_price * self.tasks
+
+    @property
+    def finetune_label_cost(self) -> Quantity:
+        return self.finetune_labels * self.label_price * self.tasks
+
+    @property
+    def label_cost_reduction(self):
+        return self.scratch_label_cost / self.finetune_label_cost
+
+    @property
+    def marginal_compute_reduction(self) -> float:
+        return (self.scratch_compute / self.finetune_compute).to("").magnitude
+
+    @property
+    def crossover_tasks(self) -> float:
+        """Tasks after which pretraining has paid for itself in compute."""
+        return (self.pretrain_compute / (self.scratch_compute - self.finetune_compute)).to("").magnitude
+
+
+class DataCostBreakdownScenario(BaseScenario):
+    """A supervised dataset's bill: ``acquisition``, ``labels`` at ``label_price``,
+    ``storage_bytes`` kept for ``storage_duration`` at ``storage_rate``, and ``runs`` training
+    runs of ``run_time`` each on ``accelerators`` at ``accelerator_rate``."""
+    acquisition: Quantity              # USD
+    labels: Quantity                   # count
+    label_price: Quantity              # USD per count
+    storage_bytes: Quantity
+    storage_rate: Quantity             # USD per GB per month
+    storage_duration: Quantity
+    run_time: Quantity
+    runs: int
+    accelerators: int
+    accelerator_rate: Quantity         # USD per accelerator-hour
+
+    @property
+    def label_cost(self) -> Quantity:
+        return self.labels * self.label_price
+
+    @property
+    def storage_cost(self) -> Quantity:
+        return (self.storage_bytes * self.storage_rate * self.storage_duration).to("USD")
+
+    @property
+    def accelerator_hours_per_run(self) -> Quantity:
+        return self.accelerators * self.run_time
+
+    @property
+    def accelerator_hours(self) -> Quantity:
+        return self.accelerator_hours_per_run * self.runs
+
+    @property
+    def compute_cost(self) -> Quantity:
+        return (self.accelerator_hours * self.accelerator_rate).to("USD")
+
+    @property
+    def total(self) -> Quantity:
+        return self.acquisition + self.label_cost + self.storage_cost + self.compute_cost
+
+    @property
+    def data_share(self):
+        return (self.acquisition + self.label_cost + self.storage_cost) / self.total
+
+    @property
+    def compute_share(self):
+        return self.compute_cost / self.total
+
+
+class RunAmortizationScenario(BaseScenario):
+    """A one-time investment of ``build_cost`` plus ``operating_cost`` that saves ``saving_per_run``
+    on every training run that reuses its output."""
+    build_cost: Quantity               # USD
+    operating_cost: Quantity           # USD, one-time
+    saving_per_run: Quantity           # USD per run
+    run_counts: List[int] = []         # campaign sizes at which to read the return
+
+    @property
+    def investment(self) -> Quantity:
+        return self.build_cost + self.operating_cost
+
+    def net_return(self, runs: int) -> float:
+        """(runs x saving - investment) / investment."""
+        return ((runs * self.saving_per_run - self.investment) / self.investment).to("").magnitude
+
+    def savings_multiple(self, runs: int) -> float:
+        """Total savings over the investment."""
+        return (runs * self.saving_per_run / self.investment).to("").magnitude
+
+    @property
+    def breakeven_runs(self) -> float:
+        return (self.investment / self.saving_per_run).to("").magnitude
+
+
+class DataScalingReturnScenario(BaseScenario):
+    """Growing a dataset from ``base_examples`` to ``scaled_examples`` for ``accuracy_gain`` points."""
+    base_examples: Quantity            # count
+    scaled_examples: Quantity          # count
+    accuracy_gain: float               # percentage points
+
+    @property
+    def scale(self) -> float:
+        return (self.scaled_examples / self.base_examples).to("").magnitude

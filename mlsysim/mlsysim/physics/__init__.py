@@ -672,3 +672,13 @@ __all__ += [
     "calc_arcsine_two_arm_sample_size",
     "calc_poisson_exact_interval",
 ]
+
+# --- Data selection (added 2026-10-20) ---
+from .retrieval import calc_lsh_candidate_probability, calc_lsh_threshold
+from .scaling import calc_allocation_growth
+
+__all__ += [
+    "calc_lsh_candidate_probability",
+    "calc_lsh_threshold",
+    "calc_allocation_growth",
+]
