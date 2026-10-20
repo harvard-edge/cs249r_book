@@ -1,354 +1,322 @@
 #!/usr/bin/env python3
-"""Every derived number in Lecture 11 (Trajectory Planning), one block per slide.
+"""Every number on the Lecture 11 slides and notes (Trajectory Planning), read from MLSysIM.
 
-Inputs carry their source. "TP" is the rendered chapter, Trajectory Planning
-(Volume IV, Chapter 11). Every printed value is what the slide or its note
-shows, with the label used there. make_figs.py imports from this file.
+MLSysIM holds the inputs (the Embodied.* running machine and its aisle
+record, the Panda-class joint in Actuators.*, Literature.* for Diffusion
+Policy, pi0, and Ruckig) and the calculations (Scenarios.*, backed by the
+solvers in engine/solvers/trajectory.py); the chapter reads the same
+scenarios. This file only selects values, converts units, and formats them;
+it types no numbers. Each value is recorded with v() under the key the deck
+prints as \\val{key}; running this file writes images/numbers.tex.
+make_figs.py imports it for the plotted quantities (module-level names below)
+and the formatted labels (val()).
 
 Run from this folder: python3 calcs.py
-(The reflected rotor inertia comes from the MLSysIM registry when it is
-importable; the fallback value is the same registry value, 0.1835 kg m^2.)
 """
 
 import math
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
 
-def head(title):
-    print(f"\n--- {title}")
+Embodied, Scenarios, Literature, Actuators = (mlsysim.Embodied, mlsysim.Scenarios, mlsysim.Literature,
+                                              mlsysim.Actuators)
+from mlsysim.physics.robotics import calc_dls_joint_rate, calc_two_link_singular_values  # noqa: E402
+
+Q_ = mlsysim.core.units.Q_
+
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+JOINT = Actuators.PandaClassJoint.CSG_25_50_ILM70x18
+VLA = Literature.VlaSystems
+RUCKIG = Literature.TrajectoryGeneration
+
+MISSION = Scenarios.GenericReplannerMissionExposure
+GOOD, BAD = Scenarios.WarehouseArmRightAngleElbow, Scenarios.WarehouseArmNearStraightElbow
+REPLACE = Scenarios.WarehouseArmChunkReplacement
+ANCHOR = Scenarios.WarehouseArmStaleAnchor
+SWING_S = Scenarios.WarehouseArmShoulderSwing
+SEAM_S = Scenarios.PandaClassJointSeamBridge
+SHORT_S = Scenarios.PandaClassJointSeamBridgeCompressed
+HALF_S = Scenarios.PandaClassJointSeamBridgeHalved
+ARM_S = Scenarios.WarehouseArmStallStop
+MUG_S = Scenarios.WarehouseArmOpenMugStop
+SCHED_S = Scenarios.WarehouseArmCommitmentSchedule
+BASE_S = Scenarios.WarehouseBaseJerkLimitedStop
+WINDOW_S = Scenarios.WarehouseBaseDynamicWindow
 
 
-def show(label, value):
-    print(f"  {label}: {value}")
+def m(q, unit):
+    """Magnitude of a Pint quantity in ``unit``."""
+    return q.to(unit).magnitude
 
 
-# =============================================================================
-# Shared inputs
-# =============================================================================
-G = 9.80665                   # m/s^2, standard gravity (the chapter uses it)
-
-# Arm (TP Sec. 11.2.1, 11.4.1; Franka Robotics 2023 datasheet values)
-L1, L2 = 0.316, 0.384         # m, Panda planar two-link abstraction (TP Sec. 11.2.1)
-V_TCP = 1.0                   # m/s, TCP speed limit (TP Sec. 11.2.1)
-QDOT_MAX = 2.175              # rad/s, joints 1-4 velocity limit (Franka 2023)
-QDDOT_MAX = 7.5               # rad/s^2, joint acceleration limit (Franka 2023; TP NM 11.3)
-TAU_MAX = 87.0                # N m, joints 1-4 torque limit (Franka 2023)
-TAU_RATE_MAX = 1000.0         # N m/s, torque-rate limit (Franka 2023; TP NM 11.2)
-M_PAY = 3.0                   # kg, rated payload (Franka 2023; TP Sec. 11.4.1)
-LAMBDA = 0.050                # m, illustrative DLS damping (TP Sec. 11.2.1)
-
-# Reflected rotor inertia of the Panda-class stand-in joint (MLSysIM registry,
-# Actuators.PandaClassJoint.CSG_25_50_ILM70x18: 50^2 x 7.34e-5 kg m^2)
-try:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "mlsysim"))
-    from mlsysim.actuators.registry import Actuators  # noqa: E402
-    J_REFL = Actuators.PandaClassJoint.CSG_25_50_ILM70x18.reflected_inertia.to("kg*m**2").magnitude
-    TAU_RATED = Actuators.PandaClassJoint.CSG_25_50_ILM70x18.rated_torque.to("N*m").magnitude
-    TAU_PEAK = Actuators.PandaClassJoint.CSG_25_50_ILM70x18.peak_torque.to("N*m").magnitude
-except Exception:  # registry not importable: same values, typed from it
-    J_REFL, TAU_RATED, TAU_PEAK = 0.1835, 51.0, 127.0
-
-# Timing (TP Sec. 11.2.2, 11.3.1)
-T_AGE = 51.6                  # ms, capture-to-dispatch age (TP Sec. 11.3.1, from Lecture 8's waterfall)
-T_DA = 63.3                   # ms, dispatch-to-admission allocation (TP Sec. 11.3.1)
-T_INFER = 40.0                # ms, chunk policy p99 pass (illustrative, TP Sec. 11.1)
-T_VALIDATE = 18.0             # ms, whole-plan validation allowance (TP Sec. 11.3.1)
-T_RENEW = 50.0                # ms, desired admission interval (TP Sec. 11.2.2)
-T_LEASE = 60.0                # ms, chunk lease (TP Sec. 11.2.2)
-T_SETPOINT = 25.0             # ms, setpoint spacing (TP Sec. 11.3.2)
-N_SETPOINTS = 16              # setpoints per chunk (TP Sec. 11.3.2)
+mission, good, bad, repl, anchor = MISSION.result, GOOD.result, BAD.result, REPLACE.result, ANCHOR.result
+swing, seam, short, half = SWING_S.result, SEAM_S.result, SHORT_S.result, HALF_S.result
+arm, mug, sched, base, window = ARM_S.result, MUG_S.result, SCHED_S.result, BASE_S.result, WINDOW_S.result
 
 # =============================================================================
-# Slide: Predict, a p99 replanner across a ten-minute mission (hook, NM 11.1)
+# Module-level quantities make_figs.py plots (units in the comments)
 # =============================================================================
-head("Hook: handoff deadlines across a mission (TP Napkin Math 11.1)")
-MISSION_S, REPLAN_HZ = 600, 5          # illustrative
-P_LATE = 0.01                          # p99 budget, definitional
-MISSION_BUDGET = 1e-3                  # chosen
-N_HANDOFF = MISSION_S * REPLAN_HZ
-P_ALL = (1 - P_LATE) ** N_HANDOFF
-P_TARGET = MISSION_BUDGET / N_HANDOFF
-show("handoffs", f"{N_HANDOFF:,}")
-show("expected late handoffs", f"{N_HANDOFF * P_LATE:.0f}")
-show("P(every handoff on time)", f"{P_ALL:.1e}")
-show("per-handoff design target", f"{P_TARGET:.1e}")
-show("design quantile (percent)", f"{100 * (1 - P_TARGET):.5f}")
-show("deeper than p99 by", f"{P_LATE / P_TARGET:.0e}")
-show("orders of magnitude deeper", f"{math.log10(P_LATE / P_TARGET):.1f}")
-
-# =============================================================================
-# Slide: A 1 m/s tool speed can ask a joint for 37.8 rad/s (Jacobian)
-# =============================================================================
-head("Jacobian: weakest-direction joint rate for 1 m/s of tool speed (TP Sec. 11.2.1)")
+L1, L2 = m(RM.arm.upper_arm_length, "m"), m(RM.arm.forearm_length, "m")   # m
+V_TCP = m(RM.tcp_speed_limit, "m/s")
+QDOT_MAX = m(RM.arm.joint_velocity_limits[1], "rad/s")
+QDDOT_MAX = m(RM.arm.joint_acceleration_limits[1], "rad/s**2")
+TAU_MAX = m(RM.arm.max_torque, "N*m")
+LAMBDA = m(GOOD.damping, "m")
+Q2_GOOD, Q2_BAD = round(m(GOOD.elbow_angle, "degree")), round(m(BAD.elbow_angle, "degree"))
+JAC = {
+    Q2_GOOD: dict(exact=m(good.joint_rate_norm, "rad/s"), damped=m(good.damped_joint_rate, "rad/s")),
+    Q2_BAD: dict(exact=m(bad.joint_rate_norm, "rad/s"), damped=m(bad.damped_joint_rate, "rad/s")),
+}
 
 
-def sing_vals(q2_deg, q1_deg=0.0):
-    q1, q2 = math.radians(q1_deg), math.radians(q2_deg)
-    j11 = -L1 * math.sin(q1) - L2 * math.sin(q1 + q2)
-    j12 = -L2 * math.sin(q1 + q2)
-    j21 = L1 * math.cos(q1) + L2 * math.cos(q1 + q2)
-    j22 = L2 * math.cos(q1 + q2)
-    # singular values of a 2x2 from J^T J
-    a = j11 * j11 + j21 * j21
-    b = j11 * j12 + j21 * j22
-    d = j12 * j12 + j22 * j22
-    tr, det = a + d, a * d - b * b
-    disc = math.sqrt(max(tr * tr / 4 - det, 0.0))
-    return math.sqrt(tr / 2 + disc), math.sqrt(max(tr / 2 - disc, 0.0))
+def sing_vals(q2_deg):
+    """(sigma_max, sigma_min) of the arm's planar Jacobian at elbow angle q2_deg, m per rad."""
+    s_max, s_min = calc_two_link_singular_values(RM.arm.upper_arm_length, RM.arm.forearm_length,
+                                                 Q_(float(q2_deg), "degree"))
+    return m(s_max, "m"), m(s_min, "m")
 
 
 def dls_rate(sigma):
-    return V_TCP * sigma / (sigma ** 2 + LAMBDA ** 2)
+    """Damped joint rate (rad/s) for the TCP limit along a singular value sigma (m per rad)."""
+    return m(calc_dls_joint_rate(RM.tcp_speed_limit, Q_(sigma, "m"), GOOD.damping)[0], "rad/s")
 
 
-JAC = {}
-for q2 in (90, 10):
-    smax, smin = sing_vals(q2)
-    exact = V_TCP / smin
-    JAC[q2] = dict(smin=smin, smax=smax, exact=exact, damped=dls_rate(smin),
-                   realized=smin ** 2 / (smin ** 2 + LAMBDA ** 2))
-    show(f"elbow {q2} deg: sigma_min (m/rad)", f"{smin:.4f}")
-    show(f"elbow {q2} deg: exact joint-rate norm (rad/s)", f"{exact:.1f}")
-    show(f"elbow {q2} deg: damped joint-rate norm (rad/s)", f"{dls_rate(smin):.1f}")
-    show(f"elbow {q2} deg: realized tool motion (percent)", f"{100 * JAC[q2]['realized']:.1f}")
-show("largest joint at 90 deg, at least (rad/s)", f"{JAC[90]['exact'] / math.sqrt(2):.1f}")
-show("against the joint limit (rad/s)", f"{QDOT_MAX}")
-show("planar reach (m)", f"{L1 + L2:.2f}")
-show("DLS ceiling 1/(2 lambda) (rad/s per m/s)", f"{V_TCP / (2 * LAMBDA):.0f}")
-
-# =============================================================================
-# Slide: Replacement latency outlasts the renewal period (TP Sec. 11.3.1)
-# =============================================================================
-head("Replacement latency (TP equation 3)")
-T_REPL = T_AGE + T_DA
-show("replacement latency (ms)", f"{T_REPL:.1f}")
-show("other dispatch-to-admission stages (ms)", f"{T_DA - T_INFER - T_VALIDATE:.1f}")
-show("latency / renewal period", f"{T_REPL / T_RENEW:.2f}")
-show("requests in flight at once, at least", f"{math.ceil(T_REPL / T_RENEW)}")
-show("latency beyond the lease (ms)", f"{T_REPL - T_LEASE:.1f}")
-
-# =============================================================================
-# Slide: Predict far, execute little (published chunk configurations)
-# =============================================================================
-head("Horizon against executed prefix")
-CHUNKS = [
-    # (name, predicted steps, executed steps, source)
-    ("Diffusion Policy, Push-T", 16, 6, "Chi et al. 2025 via TP Sec. 11.3.2"),
-    ("pi0, 50 Hz robots", 50, 25, "Black et al. 2024 via TP table 4"),
-    ("Running machine", N_SETPOINTS, int(T_RENEW / T_SETPOINT), "TP Sec. 11.3.2"),
+P_LATE, MISSION_BUDGET, P_TARGET = MISSION.late_probability, MISSION.mission_budget, mission.per_handoff_budget
+T_AGE, T_DA = m(AISLE.perception_age, "ms"), m(AISLE.t_dispatch_to_admission, "ms")
+T_INFER, T_VALIDATE = m(RM.chunk_inference_latency, "ms"), m(AISLE.t_plan_validate, "ms")
+T_REPL, T_RENEW, T_LEASE = m(repl.latency, "ms"), m(REPLACE.renewal_period, "ms"), m(AISLE.t_lease, "ms")
+T_TICK = m(AISLE.t_tick, "ms")
+T_SETPOINT, N_SETPOINTS = m(RM.chunk_step, "ms"), RM.chunk_horizon
+T_NOMINAL = m(sched.nominal_end, "ms")
+CHUNKS = [  # (name, predicted steps, executed steps)
+    ("Diffusion Policy, Push-T", round(VLA.DiffusionPolicyPredictionHorizon),
+     round(VLA.DiffusionPolicyRealPushTExecutionHorizon)),
+    (f"pi0, {VLA.Pi0ControlRateHz:.0f} Hz robots", round(VLA.Pi0ChunkHorizon), round(VLA.Pi0ExecutedActions50Hz)),
+    ("Running machine", N_SETPOINTS, round(sched.executed_setpoints)),
 ]
-for n, h, e, s in CHUNKS:
-    show(f"{n}: executed share (percent)", f"{100 * e / h:.1f}")
-show("running machine nominal trajectory (ms)", f"{N_SETPOINTS * T_SETPOINT:.0f}")
-show("pi0 re-inference interval (s)", f"{25 / 50:.1f}")
+W_JOINT, T_DELAY, GAP = m(ANCHOR.joint_speed, "rad/s"), m(ANCHOR.delay, "s"), m(anchor.gap, "rad")
+SWING = m(SWING_S.swing, "rad")
+TAU_GRAV, J_EFF = m(swing.holding_torque, "N*m"), m(swing.effective_inertia, "kg*m**2")
+A_UP, A_DN = m(swing.accel_up, "rad/s**2"), m(swing.accel_down, "rad/s**2")
+V_PEAK_SW, JERK_SW = m(swing.peak_speed, "rad/s"), m(swing.jerk_bound, "rad/s**3")
+T_BANG, T_S = m(swing.bang_bang_time, "s"), m(swing.jerk_limited_time, "s")
+DW, T_BRIDGE = m(SEAM_S.velocity_gap, "rad/s"), m(SEAM_S.bridge_duration, "ms")
+J_REFL = m(seam.reflected_inertia, "kg*m**2")
+TAU_STEP, TAU_BRIDGE = m(seam.step_torque, "N*m"), m(seam.peak_torque, "N*m")
+TAU_RATED, TAU_PEAK = m(JOINT.rated_torque, "N*m"), m(JOINT.peak_torque, "N*m")
+A_ARM, J_ARM = m(ARM_S.deceleration, "m/s**2"), m(arm.jerk, "m/s**3")
+T_PATH, D_PATH = m(arm.delay, "ms"), m(arm.delay_travel, "mm")
+D_STOP_ARM, T_STOP_ARM = m(arm.scurve_travel, "mm"), m(arm.stop_time, "s")
+D_CLEAR_ARM, TOTAL_ARM = m(ARM_S.clear_distance, "mm"), m(arm.required_distance, "mm")
+A_MUG, D_STOP_MUG, TOTAL_MUG = (m(mug.spill_deceleration, "m/s**2"), m(mug.stop.scurve_travel, "mm"),
+                                m(mug.stop.required_distance, "mm"))
+T_COMMIT, T_PREF, T_CUTOFF = m(SCHED_S.commit, "ms"), m(sched.preferred_admission, "ms"), m(sched.admission_cutoff, "ms")
+T_END, TOTAL_ALT = m(sched.rest, "ms"), m(sched.used, "mm")
+V_BASE, A_BASE, J_BASE = m(BASE_S.speed, "m/s"), m(BASE_S.deceleration, "m/s**2"), m(base.jerk, "m/s**3")
+D_CONST, D_SC, D_POLY = m(base.braking_travel, "mm"), m(base.scurve_travel, "mm"), m(base.polynomial_distance, "mm")
+T_CONST, T_SC, T_POLY = m(base.braking_time, "ms"), m(base.stop_time, "ms"), m(base.polynomial_time, "ms")
+RUCKIG_MEAN = m(Q_(float(RUCKIG.RuckigMeanUs), "us"), "ms")
+RUCKIG_WORST = m(Q_(float(RUCKIG.RuckigWorstUs), "us"), "ms")
 
 # =============================================================================
-# Slide: Plan from the seam, not from the request (future-state conditioning)
+# Values the slides and notes print
 # =============================================================================
-head("Stale anchor (TP Sec. 11.3.3)")
-W_JOINT, T_DELAY = 0.50, 0.080          # rad/s, s (illustrative)
-GAP = W_JOINT * T_DELAY
-show("joint gap (rad)", f"{GAP:.3f}")
-show("joint gap (deg)", f"{math.degrees(GAP):.2f}")
-show("tool displacement at full reach (mm)", f"{1000 * (L1 + L2) * GAP:.0f}")
+print("== Hook: handoff deadlines across a mission (Napkin Math 11.1)")
+v("n_handoff", mission.handoffs, "{:,.0f}", "handoffs per mission")
+v("mission_min_words", m(MISSION.mission_time, "min"), "words", "mission, minutes")
+v("mission_s", m(MISSION.mission_time, "s"), "{:.0f}", "mission, s")
+v("f_replan", m(MISSION.replan_rate, "Hz"), "{:.0f}", "replanning rate, Hz")
+v("p99_on_time", 100 * (1 - P_LATE), "{:.0f}", "plans on time per hundred at p99")
+v("p99_of", mission.handoffs_per_expected_late, "{:.0f}", "one late plan in this many")
+v("p_late", P_LATE, "{:.2f}", "late probability per handoff")
+v("p_on_time", 1 - P_LATE, "{:.2f}", "on-time probability per handoff")
+v("mission_one_in", 1 / MISSION_BUDGET, "{:,.0f}", "mission target, one failure in")
+p_all_exp = -math.floor(math.log10(mission.all_on_time))
+v("p_all_mant", mission.all_on_time * 10 ** p_all_exp, "{:.0f}", "P(all on time), mantissa")
+v("p_all_exp", p_all_exp, "{:.0f}", "P(all on time), negative exponent")
+v("n_late", mission.expected_late, "{:.0f}", "expected late handoffs")
+v("one_in_millions", 1 / P_TARGET / 10 ** 6, "{:.0f}", "per-handoff budget, one late plan in this many million")
+v("q_design", 100 * mission.design_quantile, "{:.5f}", "design quantile, %")
+v("orders_deeper", mission.orders_deeper, "{:.1f}", "orders of magnitude deeper than p99")
+v("p_target_one_in", 1 / P_TARGET, "{:,.0f}", "per-handoff budget, one in")
 
-# =============================================================================
-# Slide: Holding the payload already spends torque (TP Sec. 11.4.1)
-# =============================================================================
-head("One-joint dynamics (TP equation 7)")
-REACH = L1 + L2
-TAU_GRAV = M_PAY * G * REACH
-J_EFF = M_PAY * REACH ** 2 + J_REFL
-show("holding torque (N m)", f"{TAU_GRAV:.1f}")
-show("share of 87 N m (percent)", f"{100 * TAU_GRAV / TAU_MAX:.1f}")
-show("reflected rotor inertia (kg m^2)", f"{J_REFL:.4f}")
-show("effective inertia with payload (kg m^2)", f"{J_EFF:.2f}")
+print("== Recall and the opening (Sec. 11.1)")
+v("r_tol", m(AISLE.grasp_tolerance, "mm"), "{:.0f}", "intent-lease grasp tolerance, mm")
+v("t_infer", T_INFER, "{:.0f}", "chunk pass p99, ms")
+v("t_tail", m(REPLACE.interference_tail, "ms"), "{:.0f}", "interference tail, ms")
+v("v_tcp", V_TCP, "{:.0f}", "TCP speed limit, m/s")
+v("n_setpoints", N_SETPOINTS, "{:.0f}", "setpoints per chunk")
+v("t_setpoint", T_SETPOINT, "{:.0f}", "setpoint period, ms")
+v("t_nominal", T_NOMINAL, "{:.0f}", "nominal end, ms")
+v("dw", DW, "{:.1f}", "seam velocity gap, rad/s")
+v("t_lease", T_LEASE, "{:.0f}", "chunk lease, ms")
+v("t_path", T_PATH, "{:.0f}", "lease path, ms")
+v("t_rest_run", m(arm.rest_time, "ms"), "{:.0f}", "running lease: at rest, ms")
 
-# =============================================================================
-# Slide: The seam spike (TP Napkin Math 11.2)
-# =============================================================================
-head("Seam spike (TP NM 11.2)")
-DW, DT_TICK, T_BRIDGE = 0.2, 0.001, 0.050
-TAU_STEP = J_REFL * DW / DT_TICK
-RATE_STEP = TAU_STEP / DT_TICK
-A_BRIDGE = 1.5 * DW / T_BRIDGE
-JERK_BRIDGE = 6 * DW / T_BRIDGE ** 2
-show("one-tick torque (N m)", f"{TAU_STEP:.1f}")
-show("one-tick torque rate (N m/s)", f"{RATE_STEP:,.0f}")
-show("multiple of the torque-rate limit", f"{RATE_STEP / TAU_RATE_MAX:.1f}")
-show("bridge peak acceleration (rad/s^2)", f"{A_BRIDGE:.0f}")
-show("bridge peak torque (N m)", f"{J_REFL * A_BRIDGE:.1f}")
-show("bridge peak jerk (rad/s^3)", f"{JERK_BRIDGE:.0f}")
-show("bridge peak torque rate (N m/s)", f"{J_REFL * JERK_BRIDGE:.1f}")
-show("bridge torque rate share of limit (percent)", f"{100 * J_REFL * JERK_BRIDGE / TAU_RATE_MAX:.1f}")
-show("torque peak ratio step/bridge", f"{TAU_STEP / (J_REFL * A_BRIDGE):.1f}")
-show("one-tick step with payload inertia (N m)", f"{J_EFF * DW / DT_TICK:.0f}")
-show("one-tick velocity ceiling on 127 N m (rad/s)", f"{TAU_PEAK * DT_TICK / J_REFL:.2f}")
+print("== Jacobian and damped least squares (Sec. 11.2.1)")
+v("qd_max", QDOT_MAX, "{:.3f}", "joint velocity limit, rad/s")
+v("q2_good", Q2_GOOD, "{:.0f}", "right-angle elbow, degrees")
+v("q2_bad", Q2_BAD, "{:.0f}", "nearly straight elbow, degrees")
+v("qd_norm_good", JAC[Q2_GOOD]["exact"], "{:.1f}", "joint-rate norm at the right angle, rad/s")
+v("qd_one_good", m(good.joint_rate_one_joint, "rad/s"), "{:.1f}", "at least one joint, rad/s")
+v("qd_norm_bad", JAC[Q2_BAD]["exact"], "{:.1f}", "joint-rate norm near straight, rad/s")
+v("lam_mm", m(GOOD.damping, "mm"), "{:.0f}", "damping, mm")
+v("qd_dls_good", JAC[Q2_GOOD]["damped"], "{:.1f}", "damped joint rate at the right angle, rad/s")
+v("qd_dls_bad", JAC[Q2_BAD]["damped"], "{:.1f}", "damped joint rate near straight, rad/s")
+v("frac_good", 100 * good.realized_fraction, "{:.1f}", "realized tool motion at the right angle, %")
+v("frac_bad", 100 * bad.realized_fraction, "{:.1f}", "realized tool motion near straight, %")
+v("qd_bound", m(good.damped_ceiling, "rad/s"), "{:.0f}", "damped ceiling, rad/s per (m/s)")
 
-head("Estimate: the bridge squeezed to 10 ms (Checkpoint 11.2)")
-T_SHORT = 0.010
-A_S = 1.5 * DW / T_SHORT
-JK_S = 6 * DW / T_SHORT ** 2
-show("10 ms bridge peak acceleration (rad/s^2)", f"{A_S:.0f}")
-show("10 ms bridge peak torque (N m)", f"{J_REFL * A_S:.1f}")
-show("10 ms bridge peak jerk (rad/s^3)", f"{JK_S:,.0f}")
-show("10 ms bridge torque rate (N m/s)", f"{J_REFL * JK_S:,.0f}")
-show("multiple of the torque-rate limit", f"{J_REFL * JK_S / TAU_RATE_MAX:.1f}")
-show("shortest bridge inside the limit (ms)", f"{1000 * math.sqrt(6 * DW * J_REFL / TAU_RATE_MAX):.1f}")
+print("== Trajectory record (Sec. 11.2.2, 11.8)")
+v("d_stop_arm", D_STOP_ARM, "{:.1f}", "arm S-curve stop, mm")
+v("t_stop_arm", m(arm.stop_time, "ms"), "{:.0f}", "arm S-curve stop, ms")
+v("t_commit", T_COMMIT, "{:.0f}", "commitment instant, ms")
+v("t_rest", T_END, "{:.0f}", "at rest, ms")
+v("m_payload", m(RM.arm.payload_capacity, "kg"), "{:.0f}", "payload bound, kg")
 
-# =============================================================================
-# Slide: The fastest swing asks for a step the drive refuses (TP NM 11.3)
-# =============================================================================
-head("Time-optimal swing (TP NM 11.3)")
-SWING = 0.5
-show("torque-limited acceleration up (rad/s^2)", f"{(TAU_MAX - TAU_GRAV) / J_EFF:.1f}")
-show("torque-limited braking (rad/s^2)", f"{(TAU_MAX + TAU_GRAV) / J_EFF:.1f}")
-V_PEAK_SW = math.sqrt(QDDOT_MAX * SWING)
-T_BANG = 2 * math.sqrt(SWING / QDDOT_MAX)
-JERK_SW = TAU_RATE_MAX / J_EFF
-RAMP = QDDOT_MAX / JERK_SW
-T1 = (-RAMP + math.sqrt(RAMP ** 2 + 4 * SWING / QDDOT_MAX)) / 2
-T_S = 2 * (T1 + RAMP)
-show("peak speed (rad/s)", f"{V_PEAK_SW:.2f}")
-show("bang-bang swing (ms)", f"{1000 * T_BANG:.1f}")
-show("switch-point torque step (N m)", f"{2 * J_EFF * QDDOT_MAX:.1f}")
-show("jerk bound from torque rate (rad/s^3)", f"{JERK_SW:.1f}")
-show("jerk ramp a/j (ms)", f"{1000 * RAMP:.1f}")
-show("S-curve swing (ms)", f"{1000 * T_S:.1f}")
-show("penalty (ms)", f"{1000 * (T_S - T_BANG):.1f}")
-show("penalty (percent)", f"{100 * (T_S - T_BANG) / T_BANG:.1f}")
+print("== Replacement latency (equation 3)")
+v("t_age", T_AGE, "{:.1f}", "capture to dispatch, ms")
+v("t_da", T_DA, "{:.1f}", "dispatch to admission, ms")
+v("t_validate", T_VALIDATE, "{:.0f}", "whole-plan validation, ms")
+v("t_other", m(repl.other_stages, "ms"), "{:.1f}", "link, decoding, staging, tick wait, ms")
+v("t_repl", T_REPL, "{:.1f}", "replacement latency, ms")
+v("t_renew", T_RENEW, "{:.0f}", "renewal period, ms")
+v("repl_over_renew", repl.latency_over_renewal, "{:.1f}", "latency over renewal")
+v("n_inflight", repl.requests_in_flight, "{:.0f}", "requests in flight, at least")
+v("n_inflight_words", repl.requests_in_flight, "words", "the same, in words")
 
-# =============================================================================
-# Stops: equation 16 polynomial and equation 17 S-curve
-# =============================================================================
+print("== Chunk configurations (Sec. 11.3.2)")
+v("dp_predict", CHUNKS[0][1], "{:.0f}", "Diffusion Policy predicted steps")
+v("dp_execute", CHUNKS[0][2], "{:.0f}", "Diffusion Policy executed steps (real Push-T)")
+v("pi0_h", CHUNKS[1][1], "{:.0f}", "pi0 chunk, actions")
+v("pi0_hz", VLA.Pi0ControlRateHz, "{:.0f}", "pi0 robots, Hz")
+v("pi0_exec", CHUNKS[1][2], "{:.0f}", "pi0 actions executed before re-inference")
+v("pi0_reinfer", VLA.Pi0ExecutedActions50Hz / VLA.Pi0ControlRateHz, "{:.1f}", "pi0 re-inference interval, s")
+v("rm_exec_words", sched.executed_setpoints, "words", "running machine setpoints per renewal")
+
+print("== Stale anchor (Sec. 11.3.3)")
+v("w_joint", W_JOINT, "{:.2f}", "joint speed, rad/s")
+v("t_delay", m(ANCHOR.delay, "ms"), "{:.0f}", "replacement delay, ms")
+v("gap", GAP, "{:.3f}", "joint gap, rad")
+v("gap_deg", m(anchor.gap_degrees, "degree"), "{:.2f}", "joint gap, degrees")
+v("reach", m(SWING_S.reach, "m"), "{:.2f}", "planar reach, m")
+v("d_tool", m(anchor.tool_displacement, "mm"), "{:.0f}", "tool displacement, mm")
+
+print("== Joint limits and the loaded shoulder (Sec. 11.4.1)")
+v("qdd_max", QDDOT_MAX, "{:.1f}", "datasheet acceleration, rad/s^2")
+v("tau_max", TAU_MAX, "{:.0f}", "joint torque limit, N m")
+v("tau_grav", TAU_GRAV, "{:.1f}", "holding torque, N m")
+v("grav_pct", 100 * swing.holding_share, "{:.1f}", "share of the torque limit, %")
+
+print("== Seam spike and bridge (Napkin Math 11.2, Checkpoint 11.2)")
+v("t_tick", T_TICK, "{:.0f}", "servo tick, ms")
+v("f_arm_khz", m(RM.arm.control_frequency, "kHz"), "{:.0f}", "arm joint loop, kHz")
+v("j_refl", J_REFL, "{:.4f}", "reflected rotor inertia, kg m^2")
+v("tau_step", TAU_STEP, "{:.1f}", "one-tick torque, N m")
+v("tau_rated", TAU_RATED, "{:.0f}", "rated torque, N m")
+v("tau_peak", TAU_PEAK, "{:.0f}", "repeated peak torque, N m")
+v("rate_step", m(seam.step_torque_rate, "N*m/s"), "{:,.0f}", "one-tick torque rate, N m/s")
+v("step_over", seam.step_over_rate_limit, "{:.1f}", "multiple of the torque-rate limit")
+v("taud_max", m(RM.arm.joint_torque_rate_limit, "N*m/s"), "{:,.0f}", "torque-rate limit, N m/s")
+v("t_bridge", T_BRIDGE, "{:.0f}", "bridge duration, ms")
+v("tau_bridge", TAU_BRIDGE, "{:.1f}", "bridge peak torque, N m")
+v("rate_bridge", m(seam.torque_rate, "N*m/s"), "{:.1f}", "bridge torque rate, N m/s")
+v("bridge_pct", 100 * seam.torque_rate_share, "{:.1f}", "bridge share of the limit, %")
+v("peak_reduction", seam.peak_reduction, "{:.1f}", "step torque over bridge peak")
+v("gear_ratio", JOINT.gear_ratio, "{:.0f}", "gear ratio")
+v("gear_ratio_sq", JOINT.gear_ratio ** 2, "{:,.0f}", "gear ratio squared")
+v("j_eff", J_EFF, "{:.2f}", "inertia with the payload, kg m^2")
+v("tau_step_loaded", m(seam.loaded_step_torque, "N*m"), "{:.0f}", "one-tick step with the payload, N m")
+v("t_short", m(SHORT_S.bridge_duration, "ms"), "{:.0f}", "compressed bridge, ms")
+v("t_short_s", m(SHORT_S.bridge_duration, "s"), "{:.2f}", "compressed bridge, s")
+v("t_short_sq", m(SHORT_S.bridge_duration, "s") ** 2, "{:.4f}", "compressed bridge squared, s^2")
+v("a_short", m(short.peak_acceleration, "rad/s**2"), "{:.0f}", "compressed peak acceleration, rad/s^2")
+v("tau_short", m(short.peak_torque, "N*m"), "{:.1f}", "compressed peak torque, N m")
+v("jerk_short", m(short.peak_jerk, "rad/s**3"), "{:,.0f}", "compressed peak jerk, rad/s^3")
+v("rate_short", m(short.torque_rate, "N*m/s"), "{:,.0f}", "compressed torque rate, N m/s")
+v("short_over", short.torque_rate_share, "{:.1f}", "compressed, multiple of the limit")
+v("t_bridge_min", m(seam.shortest_bridge, "ms"), "{:.1f}", "shortest bridge inside the limit, ms")
+v("halving_rate_words", (half.torque_rate / seam.torque_rate).to("").magnitude, "words", "torque-rate factor when the bridge halves")
+
+print("== Time-optimal swing (Napkin Math 11.3)")
+v("swing", SWING, "{:.1f}", "swing, rad")
+v("a_up", m(swing.accel_up, "rad/s**2"), "{:.1f}", "torque-limited lift, rad/s^2")
+v("a_dn", m(swing.accel_down, "rad/s**2"), "{:.1f}", "torque-limited braking, rad/s^2")
+v("t_bang", m(swing.bang_bang_time, "ms"), "{:.1f}", "bang-bang swing, ms")
+v("v_peak_sw", V_PEAK_SW, "{:.2f}", "peak speed, rad/s")
+v("tau_switch", m(swing.switch_torque_step, "N*m"), "{:.1f}", "switch-point torque step, N m")
+v("jerk_sw", JERK_SW, "{:.1f}", "jerk bound from the torque rate, rad/s^3")
+v("t_scurve_sw", m(swing.jerk_limited_time, "ms"), "{:.1f}", "jerk-limited swing, ms")
+v("t_penalty", m(swing.penalty, "ms"), "{:.1f}", "penalty, ms")
+v("penalty_pct", 100 * swing.penalty_share, "{:.1f}", "penalty, %")
+
+print("== Ruckig's arm stop and the stall runway (Napkin Math 11.4, Sec. 11.5.2)")
+v("a_arm", A_ARM, "{:.0f}", "arm deceleration bound, m/s^2")
+v("j_arm", J_ARM, "{:.1f}", "arm jerk bound, m/s^3")
+v("d_brake_arm", m(arm.braking_travel, "mm"), "{:.0f}", "constant-deceleration part, mm")
+v("t_brake_arm", m(arm.braking_time, "ms"), "{:.0f}", "constant-deceleration stop, ms")
+v("d_ramp_arm", m(arm.jerk_ramp_travel, "mm"), "{:.1f}", "jerk-ramp part, mm")
+v("t_response", m(SCHED_S.response, "ms"), "{:.0f}", "tick, bus, and onset, ms")
+v("t_onset", m(AISLE.t_brake_onset, "ms"), "{:.0f}", "brake onset charged to the arm, ms")
+v("d_path", D_PATH, "{:.0f}", "lease-path travel, mm")
+v("total_arm", TOTAL_ARM, "{:.1f}", "lease path + stop, mm")
+v("d_clear_arm", D_CLEAR_ARM, "{:.0f}", "clearance, mm")
+v("margin_arm", m(arm.spare, "mm"), "{:.1f}", "margin, mm")
+v("r_mug", m(MUG_S.inner_radius, "mm"), "{:.0f}", "mug inner radius, mm")
+v("h_free", m(MUG_S.freeboard, "mm"), "{:.0f}", "freeboard, mm")
+v("rise_free", m(mug.rise_at_free_deceleration, "mm"), "{:.1f}", "liquid rise at the free-space stop, mm")
+v("a_mug", A_MUG, "{:.2f}", "spill deceleration bound, m/s^2")
+v("j_mug", m(mug.stop.jerk, "m/s**3"), "{:.0f}", "jerk at that peak, m/s^3 (slide)")
+v("j_mug_1", m(mug.stop.jerk, "m/s**3"), "{:.1f}", "jerk at that peak, m/s^3 (notes)")
+v("d_stop_mug", D_STOP_MUG, "{:.1f}", "open-mug stop, mm")
+v("total_mug", TOTAL_MUG, "{:.1f}", "open-mug lease path + stop, mm")
+v("d_mug_reused", m(mug.reused_jerk_stop_distance, "mm"), "{:.1f}", "open-mug stop with the 66.7 jerk, mm")
+v("v_carry", m(mug.carry_speed, "m/s"), "{:.2f}", "carry speed that fits, m/s")
+
+print("== The record's own deadlines (Sec. 11.5.1 to 11.5.3)")
+v("t_request", m(SCHED_S.request_delay, "ms"), "{:.0f}", "request, ms")
+v("q_latency", m(SCHED_S.latency_target, "ms"), "{:.0f}", "tail latency budget, ms")
+v("t_sched_slack", m(SCHED_S.schedule_slack, "ms"), "{:.0f}", "scheduling slack, ms")
+v("t_pref", T_PREF, "{:.0f}", "preferred admission, ms")
+v("t_cutoff", T_CUTOFF, "{:.0f}", "admission cutoff, ms")
+v("total_alt", TOTAL_ALT, "{:.1f}", "charged cruise + stop, mm")
+v("t_wait", m(SCHED_S.late_wait, "ms"), "{:.0f}", "late wait at commitment, ms")
+v("late_cruise", m(sched.late_cruise, "mm"), "{:.0f}", "late cruise, mm")
+v("late_breach", m(sched.late_breach, "mm"), "{:.1f}", "breach, mm")
+
+print("== Base stop at the drive limit (Sec. 11.5.4)")
+v("v_base", V_BASE, "{:.1f}", "drive limit, m/s")
+v("a_base", A_BASE, "{:.0f}", "credible deceleration, m/s^2")
+v("j_base", J_BASE, "{:.2f}", "jerk bound, m/s^3")
+v("d_clear_base", m(AISLE.d_clear, "m"), "{:.2f}", "rack-end clear distance, m")
+v("t_const", T_CONST, "{:.0f}", "constant-deceleration stop, ms")
+v("d_const", D_CONST, "{:.1f}", "constant-deceleration braking, mm")
+v("t_sc_round", T_SC, "{:,.0f}", "S-curve stop, ms (title)")
+v("t_sc", T_SC, "{:,.2f}", "S-curve stop, ms")
+v("d_sc", D_SC, "{:.2f}", "S-curve stop, mm")
+v("t_poly", T_POLY, "{:,.0f}", "polynomial stop, ms")
+v("d_poly", D_POLY, "{:.2f}", "polynomial stop, mm")
+v("d_jerk_inc", m(base.jerk_ramp_travel, "mm"), "{:.2f}", "S-curve adds, mm")
+v("t_equiv", m(base.ramp_delay, "ms"), "{:.1f}", "equivalent cruise (jerk ramps as delay), ms")
+v("total_const", m(base.constant_required, "mm"), "{:.1f}", "constant stopping total, mm")
+v("total_sc", m(base.required_distance, "mm"), "{:,.2f}", "S-curve stopping total, mm")
+v("total_poly", m(base.polynomial_required, "mm"), "{:,.2f}", "polynomial stopping total, mm")
+v("overrun_base", m(-base.spare, "mm"), "{:.2f}", "overrun past the clearance, mm")
+v("delay_base", m(base.delay_travel, "mm"), "{:.1f}", "delay travel at the drive limit, mm")
+v("tau_delay", m(AISLE.tau_delay, "ms"), "{:.1f}", "pre-brake delay, ms")
+v("overhead_base", m(base.overhead, "mm"), "{:.0f}", "localization and protective allowances, mm")
+
+print("== Generators and the base's window (Sec. 11.6, table 4)")
+v("ruckig_mean", RUCKIG.RuckigMeanUs, "{:.1f}", "Ruckig mean, us")
+v("ruckig_worst", RUCKIG.RuckigWorstUs, "{:.0f}", "Ruckig worst case, us")
+v("ruckig_axes_words", RUCKIG.RuckigBenchmarkAxes, "words", "axes in the benchmark")
+v("dv_window", m(window.half_width, "m/s"), "{:.1f}", "dynamic window half-width, m/s")
+v("v_admissible", m(window.admissible_speed, "m/s"), "{:.2f}", "textbook admissible speed, m/s")
 
 
-def poly_jerk(v, a):
-    """Peak jerk of the equation 16 polynomial stop with peak deceleration a."""
-    t = 1.5 * v / a
-    return 6 * v / t ** 2
-
-
-def scurve(v, a, j):
-    """Distance (m) and duration (s) of the jerk-limited S-curve stop, eq. 17."""
-    if v >= a * a / j:
-        return v * v / (2 * a) + v * a / (2 * j), v / a + a / j
-    return v * math.sqrt(v / j), 2 * math.sqrt(v / j)
-
-
-# =============================================================================
-# Slide: The stall runway (TP Napkin Math 11.4)
-# =============================================================================
-head("Stall runway, empty gripper (TP NM 11.4)")
-A_ARM = 5.0                   # m/s^2, illustrative
-D_CLEAR_ARM = 300.0           # mm, illustrative
-T_TICK, T_BUS, T_ONSET = 1.0, 1.0, 20.0   # ms (derived, illustrative, illustrative)
-J_ARM = poly_jerk(V_TCP, A_ARM)
-T_PATH = T_LEASE + T_TICK + T_BUS + T_ONSET
-D_PATH = V_TCP * T_PATH       # mm, since 1 m/s = 1 mm/ms
-D_STOP_ARM, T_STOP_ARM = scurve(V_TCP, A_ARM, J_ARM)
-D_STOP_ARM *= 1000
-TOTAL_ARM = D_PATH + D_STOP_ARM
-show("jerk bound (m/s^3)", f"{J_ARM:.1f}")
-show("plateau threshold a^2/j (m/s)", f"{A_ARM ** 2 / J_ARM:.3f}")
-show("lease path (ms)", f"{T_PATH:.0f}")
-show("lease path travel (mm)", f"{D_PATH:.0f}")
-show("S-curve stop (mm)", f"{D_STOP_ARM:.1f}")
-show("S-curve stop (ms)", f"{1000 * T_STOP_ARM:.0f}")
-show("constant-deceleration part (mm)", f"{1000 * V_TCP ** 2 / (2 * A_ARM):.0f}")
-show("jerk-ramp part (mm)", f"{1000 * V_TCP * A_ARM / (2 * J_ARM):.1f}")
-show("polynomial stop, same peaks (mm)", f"{1000 * 0.75 * V_TCP ** 2 / A_ARM:.0f}")
-show("lease path + stop (mm)", f"{TOTAL_ARM:.1f}")
-show("margin (mm)", f"{D_CLEAR_ARM - TOTAL_ARM:.1f}")
-show("lease travel / stop (percent)", f"{100 * D_PATH / D_STOP_ARM:.1f}")
-show("rest at (ms after last admission)", f"{T_PATH + 1000 * T_STOP_ARM:.0f}")
-
-head("Stall runway, open mug (TP Sec. 11.5.2)")
-R_MUG, FREEBOARD = 40.0, 10.0  # mm, illustrative
-show("liquid rise at 5 m/s^2 (mm)", f"{R_MUG * A_ARM / G:.1f}")
-A_MUG = G * FREEBOARD / R_MUG
-J_MUG = poly_jerk(V_TCP, A_MUG)
-D_STOP_MUG = 1000 * scurve(V_TCP, A_MUG, J_MUG)[0]
-TOTAL_MUG = D_PATH + D_STOP_MUG
-show("slosh deceleration bound (m/s^2)", f"{A_MUG:.2f}")
-show("jerk at that peak (m/s^3)", f"{J_MUG:.1f}")
-show("open-mug stop (mm)", f"{D_STOP_MUG:.1f}")
-show("open-mug stop if the 66.7 jerk were reused (mm)", f"{1000 * scurve(V_TCP, A_MUG, J_ARM)[0]:.1f}")
-show("lease path + stop (mm)", f"{TOTAL_MUG:.1f}")
-show("overrun (mm)", f"{TOTAL_MUG - D_CLEAR_ARM:.1f}")
-lo, hi = 0.1, 1.0
-for _ in range(60):
-    mid = (lo + hi) / 2
-    need = mid * T_PATH + 1000 * scurve(mid, A_MUG, J_MUG)[0]
-    lo, hi = (mid, hi) if need <= D_CLEAR_ARM else (lo, mid)
-V_MUG_MAX = lo
-show("highest speed that fits (m/s)", f"{V_MUG_MAX:.2f}")
-
-# =============================================================================
-# Slide: The record's own deadlines (alternate longer-lease schedule)
-# =============================================================================
-head("Alternate schedule (TP Sec. 11.3.2, 11.5.2)")
-T_REQ, T_Q, T_SLACK, T_RESP = 60.0, 160.0, 20.0, 22.0   # ms, chosen/illustrative
-T_COMMIT = 300.0
-T_PREF = T_REQ + T_Q + T_SLACK
-T_CUTOFF = T_COMMIT - T_RESP
-T_END = T_COMMIT + 1000 * T_STOP_ARM
-CRUISE_ALT = V_TCP * (T_COMMIT - T_PREF)
-TOTAL_ALT = CRUISE_ALT + D_STOP_ARM
-show("preferred admission (ms)", f"{T_PREF:.0f}")
-show("full reserve (ms)", f"{T_SLACK + T_RESP:.0f}")
-show("minimum stop onset (ms)", f"{T_PREF + T_RESP:.0f}")
-show("admission cutoff (ms)", f"{T_CUTOFF:.0f}")
-show("rest at (ms)", f"{T_END:.0f}")
-show("nominal end (ms)", f"{N_SETPOINTS * T_SETPOINT:.0f}")
-show("setpoint periods in window", f"{T_END / T_SETPOINT:.0f}")
-show("cruise charged 240->300 (mm)", f"{CRUISE_ALT:.0f}")
-show("used (mm)", f"{TOTAL_ALT:.1f}")
-show("margin (mm)", f"{D_CLEAR_ARM - TOTAL_ALT:.1f}")
-show("200 ms late: breach (mm)", f"{TOTAL_ALT + 200 * V_TCP - D_CLEAR_ARM:.1f}")
-
-# =============================================================================
-# Slide: The jerk-limited stop at the rack end (TP Sec. 11.5.4)
-# =============================================================================
-head("Base stop at 1.5 m/s (TP Sec. 11.5.4)")
-V_BASE, A_BASE, D_CLEAR_BASE = 1.5, 2.0, 1100.0   # illustrative card values
-BUDGET_BEFORE = 912.9          # mm, running budget after Lecture 8's waterfall (TP Sec. 11.5.4)
-J_BASE = poly_jerk(V_BASE, A_BASE)
-D_CONST = 1000 * V_BASE ** 2 / (2 * A_BASE)
-T_CONST = 1000 * V_BASE / A_BASE
-D_SC, T_SC = scurve(V_BASE, A_BASE, J_BASE)
-D_SC, T_SC = 1000 * D_SC, 1000 * T_SC
-D_POLY = 1000 * 0.75 * V_BASE ** 2 / A_BASE
-T_POLY = 1000 * 1.5 * V_BASE / A_BASE
-show("jerk bound (m/s^3)", f"{J_BASE:.2f}")
-show("plateau speed (m/s)", f"{A_BASE ** 2 / J_BASE:.4f}")
-show("constant deceleration: mm, ms", f"{D_CONST:.1f}, {T_CONST:.0f}")
-show("S-curve: mm, ms", f"{D_SC:.2f}, {T_SC:.2f}")
-show("polynomial: mm, ms", f"{D_POLY:.2f}, {T_POLY:.0f}")
-show("S-curve adds (mm)", f"{D_SC - D_CONST:.2f}")
-show("equivalent cruise (ms)", f"{(D_SC - D_CONST) / V_BASE:.1f}")
-show("budget before stop term (mm)", f"{BUDGET_BEFORE - D_CONST:.1f}")
-DELAY_BASE = 1.5 * 133.6       # mm, 133.6 ms elementary delay at 1.5 m/s (TP Sec. 11.5.4; Lecture 1 budget)
-ALLOW_BASE = 50.0 + 100.0      # mm, localization + protective allowances (Lecture 8 budget rows)
-show("delay travel at 1.5 m/s (mm)", f"{DELAY_BASE:.1f}")
-show("allowances (mm)", f"{ALLOW_BASE:.0f}")
-show("delay + allowances (mm)", f"{DELAY_BASE + ALLOW_BASE:.1f}")
-show("running total with S-curve (mm)", f"{BUDGET_BEFORE + D_SC - D_CONST:.2f}")
-show("overrun (mm)", f"{BUDGET_BEFORE + D_SC - D_CONST - D_CLEAR_BASE:.2f}")
-show("running total with polynomial (mm)", f"{BUDGET_BEFORE + D_POLY - D_CONST:.2f}")
-
-# =============================================================================
-# Slide: DWA admits speeds the full budget refuses (TP Sec. 11.6.1)
-# =============================================================================
-head("Dynamic window (TP Sec. 11.6.1)")
-show("window half-width (m/s)", f"{A_BASE * T_RENEW / 1000:.1f}")
-show("textbook admissible speed (m/s)", f"{math.sqrt(2 * D_CLEAR_BASE / 1000 * A_BASE):.2f}")
-
-# =============================================================================
-# Slide: Generators, reported compute (TP table 4)
-# =============================================================================
-head("Generator timing")
-RUCKIG_MEAN, RUCKIG_WORST = 19.8e-3, 123e-3   # ms, Berscheid and Kroger 2021 (TP table 4)
-show("Ruckig worst case share of a 1 ms tick (percent)", f"{100 * RUCKIG_WORST / 1.0:.1f}")
-show("chunk pass / Ruckig worst case", f"{T_INFER / RUCKIG_WORST:.0f}")
+if __name__ == "__main__":
+    write(__file__)

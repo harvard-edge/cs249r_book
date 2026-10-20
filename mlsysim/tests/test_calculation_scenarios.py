@@ -4459,3 +4459,99 @@ def test_accelerator_trends_and_latency_in_cycles():
     assert c.cycle_time.to("ps").magnitude == approx(500.0) and c.cycles == approx(545.64)
     t = Scenarios.TensorCoreMmaM16n8k16
     assert t.macs == 2048 and t.macs_per_thread == approx(64.0)
+def test_trajectory_planning_joint_rates_handoffs_and_replacement():
+    good = Scenarios.WarehouseArmRightAngleElbow.result
+    assert good.reach.to("m").magnitude == approx(0.700)
+    assert good.joint_rate_norm.to("rad/s").magnitude == approx(4.896751, rel=1e-6)
+    assert good.joint_rate_one_joint.to("rad/s").magnitude == approx(3.462526, rel=1e-6)
+    assert good.exceeds_joint_limit
+    assert good.damped_joint_rate.to("rad/s").magnitude == approx(4.619815, rel=1e-6)
+    assert good.realized_fraction == approx(0.943445, rel=1e-5)
+    assert good.damped_ceiling.to("rad/s").magnitude == approx(10.0)
+    bad = Scenarios.WarehouseArmNearStraightElbow.result
+    assert bad.joint_rate_norm.to("rad/s").magnitude == approx(37.760396, rel=1e-6)
+    assert bad.damped_joint_rate.to("rad/s").magnitude == approx(8.272410, rel=1e-6)
+    assert bad.realized_fraction == approx(0.219076, rel=1e-5) and bad.damped_exceeds_joint_limit
+    m = Scenarios.GenericReplannerMissionExposure.result
+    assert m.handoffs == 3000 and m.expected_late == approx(30.0)
+    assert m.all_on_time == approx(8.046070e-14, rel=1e-5)
+    assert m.per_handoff_budget == approx(1e-3 / 3000)
+    assert m.orders_deeper == approx(4.477121, rel=1e-6) and m.handoffs_per_expected_late == approx(100.0)
+    r = Scenarios.WarehouseArmChunkReplacement.result
+    assert r.latency.to("ms").magnitude == approx(114.91072)
+    assert r.other_stages.to("ms").magnitude == approx(5.31072)
+    assert r.requests_in_flight == 3 and r.latency_beyond_lease.to("ms").magnitude == approx(54.91072)
+    assert r.tail_over_inference == approx(3.75)
+    s = Scenarios.WarehouseArmStaleAnchor.result
+    assert s.gap.to("rad").magnitude == approx(0.040) and s.tool_displacement.to("mm").magnitude == approx(28.0)
+    w = Scenarios.WarehouseBaseDynamicWindow.result
+    assert w.half_width.to("m/s").magnitude == approx(0.1)
+    assert w.admissible_speed.to("m/s").magnitude == approx(2.097618, rel=1e-6) and w.admits_drive_limit
+
+
+def test_trajectory_planning_jerk_limited_stops_and_deadlines():
+    arm = Scenarios.WarehouseArmStallStop.result
+    assert arm.jerk.to("m/s**3").magnitude == approx(200 / 3)
+    assert arm.delay.to("ms").magnitude == approx(82.0) and arm.delay_travel.to("mm").magnitude == approx(82.0)
+    assert arm.scurve_travel.to("mm").magnitude == approx(137.5) and arm.stop_time.to("ms").magnitude == approx(275.0)
+    assert arm.braking_travel.to("mm").magnitude == approx(100.0) and arm.jerk_ramp_travel.to("mm").magnitude == approx(37.5)
+    assert arm.polynomial_distance.to("mm").magnitude == approx(150.0)
+    assert arm.required_distance.to("mm").magnitude == approx(219.5) and arm.spare.to("mm").magnitude == approx(80.5)
+    assert arm.rest_time.to("ms").magnitude == approx(357.0) and arm.fits
+    assert arm.stop_distance.to("mm").magnitude == approx(219.5) and arm.ramp_delay.to("ms").magnitude == approx(37.5)
+    mug = Scenarios.WarehouseArmOpenMugStop.result
+    assert mug.spill_deceleration.to("m/s**2").magnitude == approx(2.4516625)
+    assert mug.rise_at_free_deceleration.to("mm").magnitude == approx(20.394324, rel=1e-6)
+    assert mug.stop.jerk.to("m/s**3").magnitude == approx(16.028397, rel=1e-6)
+    assert mug.stop.scurve_travel.to("mm").magnitude == approx(280.421959, rel=1e-6)
+    assert mug.stop.required_distance.to("mm").magnitude == approx(362.421959, rel=1e-6)
+    assert mug.reused_jerk_stop_distance.to("mm").magnitude == approx(222.330711, rel=1e-6)
+    assert mug.carry_speed.to("m/s").magnitude == approx(0.885025, rel=1e-5)
+    base = Scenarios.WarehouseBaseJerkLimitedStop.result
+    assert base.jerk.to("m/s**3").magnitude == approx(64 / 9)
+    assert base.scurve_travel.to("mm").magnitude == approx(773.4375) and base.stop_time.to("ms").magnitude == approx(1031.25)
+    assert base.polynomial_distance.to("mm").magnitude == approx(843.75)
+    assert base.jerk_ramp_travel.to("mm").magnitude == approx(210.9375)
+    assert base.ramp_delay.to("ms").magnitude == approx(140.625)
+    assert base.constant_required.to("mm").magnitude == approx(912.9)
+    assert base.required_distance.to("mm").magnitude == approx(1123.8375)
+    assert base.polynomial_required.to("mm").magnitude == approx(1194.15)
+    assert base.spare.to("mm").magnitude == approx(-23.8375) and not base.fits
+    d = Scenarios.WarehouseArmCommitmentSchedule.result
+    assert d.preferred_admission.to("ms").magnitude == approx(240.0) and d.reserve.to("ms").magnitude == approx(42.0)
+    assert d.minimum_onset.to("ms").magnitude == approx(262.0) and d.admission_cutoff.to("ms").magnitude == approx(278.0)
+    assert d.rest.to("ms").magnitude == approx(575.0) and d.nominal_end.to("ms").magnitude == approx(400.0)
+    assert d.window_periods == approx(23.0) and d.used.to("mm").magnitude == approx(197.5)
+    assert d.margin.to("mm").magnitude == approx(102.5) and d.late_breach.to("mm").magnitude == approx(97.5)
+
+
+def test_trajectory_planning_seam_bridge_and_shoulder_swing():
+    sh = Scenarios.WarehouseArmShoulderSwing.result
+    assert sh.holding_torque.to("N*m").magnitude == approx(20.593965, rel=1e-6)
+    assert sh.holding_share == approx(0.236712, rel=1e-5)
+    assert sh.effective_inertia.to("kg*m**2").magnitude == approx(1.6535)
+    assert sh.accel_up.to("rad/s**2").magnitude == approx(40.160892, rel=1e-6)
+    assert sh.accel_down.to("rad/s**2").magnitude == approx(65.070435, rel=1e-6)
+    assert sh.binding_acceleration.to("rad/s**2").magnitude == approx(7.5)
+    assert sh.bang_bang_time.to("ms").magnitude == approx(516.397779, rel=1e-6)
+    assert sh.switch_torque_step.to("N*m").magnitude == approx(24.8025)
+    assert sh.jerk_bound.to("rad/s**3").magnitude == approx(604.777744, rel=1e-6)
+    assert sh.jerk_limited_time.to("ms").magnitude == approx(528.947916, rel=1e-6)
+    assert sh.penalty.to("ms").magnitude == approx(12.550136, rel=1e-5) and sh.reaches_plateau
+    b = Scenarios.PandaClassJointSeamBridge.result
+    assert b.step_torque.to("N*m").magnitude == approx(36.7)
+    assert b.step_torque_rate.to("N*m/s").magnitude == approx(36700.0) and b.step_over_rate_limit == approx(36.7)
+    assert b.peak_torque.to("N*m").magnitude == approx(1.101) and b.peak_reduction == approx(100 / 3)
+    assert b.peak_jerk.to("rad/s**3").magnitude == approx(480.0)
+    assert b.torque_rate.to("N*m/s").magnitude == approx(88.08) and b.within_rate_limit
+    a3, a4, a5 = b.coefficients
+    assert a3 == approx(80.0) and a4 == approx(-800.0) and abs(a5) < 1e-6
+    assert b.loaded_step_torque.to("N*m").magnitude == approx(330.7)
+    assert b.shortest_bridge.to("ms").magnitude == approx(14.839137, rel=1e-6)
+    assert b.velocity_ceiling.to("rad/s").magnitude == approx(0.692098, rel=1e-5)
+    h = Scenarios.PandaClassJointSeamBridgeHalved.result
+    assert h.peak_torque.to("N*m").magnitude == approx(2.202) and h.torque_rate.to("N*m/s").magnitude == approx(352.32)
+    c = Scenarios.PandaClassJointSeamBridgeCompressed.result
+    assert c.peak_acceleration.to("rad/s**2").magnitude == approx(30.0)
+    assert c.peak_torque.to("N*m").magnitude == approx(5.505) and c.torque_rate.to("N*m/s").magnitude == approx(2202.0)
+    assert not c.within_rate_limit and c.torque_rate_share == approx(2.202)

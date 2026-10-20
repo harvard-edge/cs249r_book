@@ -620,3 +620,30 @@ from .acceptance import (
 __all__ += [
     "PairedComparisonModel",
 ]
+
+# --- Trajectory planning: joint rates, handoffs, seams, swings, jerk-limited stops (added 2026-10-20) ---
+from .trajectory import (
+    TwoLinkJointRateModel,
+    HandoffExposureModel,
+    ChunkReplacementModel,
+    JerkLimitedStopModel,
+    SpillLimitedStopModel,
+    TrajectoryDeadlinesModel,
+    SeamBridgeModel,
+    ShoulderSwingModel,
+    DynamicWindowModel,
+    StaleAnchorModel,
+)
+
+__all__ += [
+    "TwoLinkJointRateModel",
+    "HandoffExposureModel",
+    "ChunkReplacementModel",
+    "JerkLimitedStopModel",
+    "SpillLimitedStopModel",
+    "TrajectoryDeadlinesModel",
+    "SeamBridgeModel",
+    "ShoulderSwingModel",
+    "DynamicWindowModel",
+    "StaleAnchorModel",
+]

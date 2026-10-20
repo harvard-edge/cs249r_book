@@ -2896,7 +2896,8 @@ CHI_DIFFUSION_POLICY_2024 = _lit(
     "Chi, C. et al. (2024), Diffusion Policy: Visuomotor Policy Learning via Action Diffusion, IJRR",
     url="https://arxiv.org/abs/2303.04137",
     verified="2026-09-29",
-    notes="Prediction horizon T_p = 16, action execution horizon T_a = 8.",
+    notes=("Prediction horizon T_p = 16, action execution horizon T_a = 8 (simulation tasks); "
+           "real-world Push-T executes T_a = 6 of T_p = 16 (App. A.4, Tables 7 and 8, checked 2026-10-20)."),
 )
 BLACK_PI0_2024 = _lit(
     "prov:black-pi0-2024",
@@ -2905,7 +2906,17 @@ BLACK_PI0_2024 = _lit(
     url="https://arxiv.org/abs/2410.24164",
     verified="2026-09-29",
     notes=("Sec. IV and App. A-D: 3.3B parameters in total, a 300M action expert, H = 50, 10 flow "
-           "integration steps, up to 50 Hz control, 73 ms on-board latency (RTX 4090)."),
+           "integration steps, up to 50 Hz control, 73 ms on-board latency (RTX 4090). App. A-D: "
+           "robots at 50 Hz run inference every 0.5 s, after executing 25 actions (checked 2026-10-20)."),
+)
+BERSCHEID_RUCKIG_2021 = _lit(
+    "prov:berscheid-ruckig-2021",
+    "Berscheid, L. and Kroger, T. (2021), Jerk-limited Real-time Trajectory Generation with Arbitrary "
+    "Target States, Robotics: Science and Systems XVII",
+    url="https://arxiv.org/abs/2105.04830",
+    verified="2026-10-20",
+    notes=("Sec. V-B, Table III (7 degrees of freedom, Intel i7-8700K, single thread, PREEMPT Linux): "
+           "Ruckig mean 19.8 +/- 0.2 us, worst case 123 +/- 13 us."),
 )
 KIM_OPENVLA_OFT_2025 = _lit(
     "prov:kim-openvla-oft-2025",
