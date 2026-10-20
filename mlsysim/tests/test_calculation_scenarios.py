@@ -1691,3 +1691,121 @@ def test_quantization_ensemble_confidence_and_mlperf():
     assert m.latest("gptj-99").to("s").magnitude == approx(4.17663)
     assert m.earliest("gptj-99").to("s").magnitude == approx(10.2045)
     assert m.span == approx(15566.8)
+
+
+# --- Physical demonstration data (added 2026-10-20) ---
+
+def test_correlated_log_and_imitation_bounds():
+    e = Scenarios.PermissionTickTelemetryHour
+    assert e.records == approx(3.6e6)
+    assert e.effective_samples == approx(1800.9)
+    assert e.oversampling == approx(1999.0)
+    b = Scenarios.ImitationBoundsFiveSecondEpisode
+    assert b.horizon_steps == 500
+    assert b.open_loop == approx(0.5)
+    assert b.cloning == approx(250)
+    assert b.aggregation == approx(0.5)
+    assert b.vacuous_error == approx(0.002)
+    assert b.cloning_over_maximum == approx(0.5)
+    assert Scenarios.ImitationBoundsTenSecondEpisode.vacuous_error == approx(0.001)
+
+
+def test_pairing_lag_and_teleop_loop():
+    p = Scenarios.LatchPairingLag
+    assert p.displacement_transit.to("mm").magnitude == approx(17.5)
+    assert p.displacement_guarded.to("mm").magnitude == approx(1.05)
+    assert p.displacement_fast.to("mm").magnitude == approx(3.5)
+    assert p.transit_over_clearance == approx(8.75)
+    assert p.lag_ceiling_guarded.to("ms").magnitude == approx(66.667)
+    assert p.lag_ceiling_fast.to("ms").magnitude == approx(20)
+    assert p.skew_displacement_fast.to("mm").magnitude == approx(3.3)
+    t = Scenarios.LatchPairingLagTightPlate
+    assert t.lag_ceiling_fast.to("ms").magnitude == approx(10)
+    assert t.fast_over_clearance == approx(3.5)
+    loop = Scenarios.TeleopCorrectionLoop
+    assert loop.loop.to("ms").magnitude == approx(340)
+    assert loop.command_issued.to("ms").magnitude == approx(250)
+    assert loop.human_share == approx(0.588235)
+
+
+def test_teleop_ingestion():
+    i = Scenarios.WarehouseTeleopIngestion
+    assert i.record_bytes == 224
+    assert i.kinematic_rate.to("MB/s").magnitude == approx(0.224)
+    assert i.nav_rate.to("MB/s").magnitude == approx(2219.44)
+    assert i.wrist_rate.to("MB/s").magnitude == approx(279.94)
+    assert i.external_rate.to("MB/s").magnitude == approx(622.08)
+    assert i.total_rate.to("MB/s").magnitude == approx(3121.68)
+    assert i.storage_per_hour.to("TB").magnitude == approx(11.238)
+    assert i.storage_per_shift.to("TB").magnitude == approx(89.904)
+    assert i.nav_over_slow_drive == approx(4.0354)
+    assert i.kinematic_share == approx(7.1756e-5)
+    assert i.compressed_rate.to("MB/s").magnitude == approx(390.21)
+
+
+def test_demonstration_campaign():
+    c = Scenarios.LatchDemonstrationCampaign
+    assert c.attempts_per_session == 52
+    assert c.idle.to("s").magnitude == approx(20)
+    assert c.retention == approx(0.68)
+    assert c.kept_per_session == approx(35.36)
+    assert c.kept_time.to("minute").magnitude == approx(14.733)
+    assert c.kept_share == approx(0.245556)
+    assert c.campaign_attempts == 7353
+    assert c.campaign_time.to("hour").magnitude == approx(141.404)
+    assert c.overhead_factor == approx(4.0724)
+    assert c.gear_cycles == 102942
+    assert c.cable_cycles == 58824
+    assert c.gear_life_used == approx(0.0205884)
+    assert c.cable_life_used == approx(0.29412)
+    assert c.repeat_cable_life_used == approx(0.88236)
+
+
+def test_hub_counts_and_pooled_corpus():
+    h = Scenarios.LeRobotHubDatasetCounts
+    assert h.count_at("2024-12") == 1085
+    assert h.count_at("2025-12") == 26548
+    assert h.latest_count == 80132
+    assert h.counted == 59031
+    assert h.small_share == approx(0.583676)
+    assert h.large_share == approx(0.0191764)
+    assert h.median_bin_low == 8
+    assert h.median_bin_high == 16
+    o = Scenarios.OpenXEmbodimentPoolComposition
+    assert o.datasets == 72
+    assert o.total == 2419193
+    assert o.morphology_share("Single Arm") == approx(0.914399)
+    assert o.morphology_share("Mobile Manipulator") == approx(0.0493495)
+    assert o.top_datasets == 2
+    assert o.top_share_within("Mobile Manipulator") == approx(0.945245)
+    assert o.table_top_share == approx(0.891549)
+    assert o.rate_share(10.0) == approx(0.569732)
+    assert o.rate_share(None) == approx(0.276674)
+    assert o.at_or_above_threshold_share == approx(0.0183892)
+
+
+def test_coverage_grids_and_gripper_transfer():
+    g = Scenarios.WarehouseManipulatorStateGrid
+    assert g.dims == 28
+    assert g.cells == approx(1e28)
+    assert g.fine_cells == approx(1e56)
+    assert g.records == approx(4.35495e23)
+    assert g.max_coverage == approx(4.35495e-5)
+    k = Scenarios.ContactAngleCoverage
+    assert k.cells == 600
+    assert k.occupied("cautious") == 8
+    assert k.occupied("exploratory") == 510
+    assert k.bin_span("cautious") == (13, 4, 4, 2)
+    assert k.empty_share("cautious") == approx(0.986667)
+    t = Scenarios.LatchScenarioTable
+    assert (t.cells, t.supported, t.absences) == (6, 1, 5)
+    r = Scenarios.LatchScenarioTableAfterRecovery
+    assert (r.cells, r.supported, r.absences) == (6, 2, 4)
+    s = Scenarios.LatchScenarioTableThirdSpeed
+    assert (s.cells, s.supported, s.absences) == (9, 1, 8)
+    gr = Scenarios.GripperStrokeTransfer
+    assert gr.donor_opening.to("mm").magnitude == approx(80)
+    assert gr.target_opening.to("mm").magnitude == approx(48)
+    assert gr.stroke_excess.to("mm").magnitude == approx(20)
+    assert gr.force_ratio == approx(2)
+    assert gr.donor_clears and not gr.target_clears

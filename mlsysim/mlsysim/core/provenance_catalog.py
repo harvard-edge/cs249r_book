@@ -2879,3 +2879,82 @@ LIN_AWQ_2024 = _lit(
     verified="2026-10-20",
     notes="Sec. 5.1: group size 128 for weight-only INT4 quantization.",
 )
+
+
+# --- Robot demonstration data: dated systems, interventions, recorders (added 2026-10-20) ---
+DROID_RECALIBRATION_2025 = _lit(
+    "prov:droid-recalibration-2025",
+    "DROID project website, April 2025 release of improved camera calibrations (droid-dataset.github.io)",
+    url="https://droid-dataset.github.io/",
+    verified="2026-10-19",
+    notes="New camera calibrations published for about 36,000 episodes after an overlap check.",
+)
+BU_AGIBOT_WORLD_2025 = _lit(
+    "prov:bu-agibot-world-2025",
+    "Bu, Q. et al. (2025), AgiBot World Colosseo: A Large-Scale Manipulation Platform for Scalable and "
+    "Intelligent Embodied Systems, IROS 2025",
+    url="https://doi.org/10.1109/IROS60139.2025.11247088",
+    verified="2026-10-18",
+    notes=("Sec. 3: 1,001,552 trajectories, 217 tasks, more than 100 homogeneous robots; abstract: "
+           "30 percent average gain over pretraining on Open X-Embodiment."),
+)
+LIN_DATA_SCALING_2025 = _lit(
+    "prov:lin-data-scaling-2025",
+    "Lin, F. et al. (2025), Data Scaling Laws in Imitation Learning for Robotic Manipulation, ICLR 2025",
+    url="https://arxiv.org/abs/2410.18647",
+    verified="2026-10-18",
+    notes=("Sec. 1: over 40,000 demonstrations; recipe of 32 environments with 50 demonstrations each; "
+           "about 90 percent success in a new environment with a new object."),
+)
+BLACK_PI05_2025 = _lit(
+    "prov:black-pi05-2025",
+    "Black, K. et al. (2025), pi0.5: A Vision-Language-Action Model with Open-World Generalization, CoRL 2025",
+    url="https://proceedings.mlr.press/v305/black25a.html",
+    verified="2026-10-18",
+    notes="Sec. I: about 400 hours of mobile manipulation in homes; Sec. V-B: 3 to 104 training locations.",
+)
+MANDLEKAR_MIMICGEN_2023 = _lit(
+    "prov:mandlekar-mimicgen-2023",
+    "Mandlekar, A. et al. (2023), MimicGen: A Data Generation System for Scalable Robot Learning using "
+    "Human Demonstrations, CoRL 2023",
+    url="https://proceedings.mlr.press/v229/mandlekar23a.html",
+    verified="2026-10-18",
+    notes="Abstract: over 50K demonstrations generated from about 200 human demonstrations across 18 tasks.",
+)
+MADDUKURI_COTRAINING_2025 = _lit(
+    "prov:maddukuri-cotraining-2025",
+    "Maddukuri, A. et al. (2025), Sim-and-Real Co-Training: A Simple Recipe for Vision-Based Robotic "
+    "Manipulation, RSS 2025",
+    url="https://doi.org/10.15607/RSS.2025.XXI.109",
+    verified="2026-10-18",
+    notes="Abstract: 38 percent average gain in real-robot success.",
+)
+HOQUE_THRIFTYDAGGER_2022 = _lit(
+    "prov:hoque-thriftydagger-2022",
+    "Hoque, R. et al. (2022), ThriftyDAgger: Budget-Aware Novelty and Risk Gating for Interactive "
+    "Imitation Learning, CoRL 2021 (PMLR 164)",
+    url="https://proceedings.mlr.press/v164/hoque22a.html",
+    verified="2026-10-19",
+    notes=("Table 3, physical cable routing, 15 autonomous trials each: behavior cloning 0, HG-DAgger 10, "
+           "ThriftyDAgger 12; training interventions per episode 1.55 +/- 1.16 and 1.42 +/- 1.14."),
+)
+LEROBOT_ALOHA_STATIC_COFFEE = _ds(
+    "prov:lerobot-aloha-static-coffee",
+    "Hugging Face, lerobot/aloha_static_coffee, meta/info.json",
+    "https://huggingface.co/datasets/lerobot/aloha_static_coffee",
+    verified="2026-10-19",
+    notes="total_episodes 50, fps 50, observation.state, observation.effort, and action of 14 values.",
+)
+ECFR_49_CFR_563_EDR = _report(
+    "prov:ecfr-49-cfr-563-7",
+    "eCFR, 49 CFR Part 563 (Event Data Recorders), Sec. 563.7 Table I and footnote 4",
+    "https://www.ecfr.gov/current/title-49/subtitle-B/chapter-V/part-563",
+    notes=("Speed, accelerator pedal, and service brake from -20 to 0 s at 10 samples/s (phase-in from "
+           "2028); before the phase-in, -5.0 to 0 s at 2 samples/s. Retrieved 2026-10-19."),
+)
+NASA_MCO_PHASE1_1999 = _report(
+    "prov:nasa-mco-phase1-1999",
+    "Stephenson, A. G. et al. (1999), Mars Climate Orbiter Mishap Investigation Board Phase I Report, NASA",
+    "https://llis.nasa.gov/llis_lib/pdf/1009464main1_0641-mr.pdf",
+    notes="Planned orbit-insertion altitude 226 km; final estimate about 57 km.",
+)

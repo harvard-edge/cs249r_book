@@ -40,6 +40,9 @@ from ..actuators.registry import Actuators as _Actuators
 from ..physics.constants import INSULATION_CLASS_F_LIMIT as _CLASS_F
 from ..physics.drivetrain import calc_traction_deceleration_limit as _traction_limit
 from ..physics.memory import calc_checkpoint_size as _calc_checkpoint_size  # fleet orchestration (2026-10-20)
+# Physical demonstration data (added 2026-10-20)
+from ..sensors.registry import Sensors as _Sensors
+from ..physics.constants import AGE_OF_UNIVERSE as _AGE_OF_UNIVERSE
 
 class Scenario(BaseModel):
     """
@@ -3065,4 +3068,164 @@ class Scenarios(Registry):
             ("gptj-99", "Text summarization", "GPT-J 6B"),
             ("stable-diffusion-xl", "Text to image", "SDXL"),
         ],
+    )
+
+    # --- Physical demonstration data (added 2026-10-20) ---
+    PermissionTickTelemetryHour = _st.CorrelatedLogScenario(
+        name="One hour of telemetry logged at the warehouse manipulator's permission tick",
+        description="A slowly varying statistic with lag-one correlation 0.999: records against "
+                    "effective independent samples.",
+        rate=_Embodied.MobileManipulator.WarehouseMobileManipulator.permission_rate,
+        duration=Q_(1, "hour"),     # scenario assumption
+        lag1_correlation=0.999,     # scenario assumption: slowly varying statistic
+    )
+    ImitationBoundsFiveSecondEpisode = _st.ImitationBoundScenario(
+        name="Imitation cost bounds over a 5 s episode at 100 Hz",
+        description="Open loop, behavioral cloning (S^2 eps), and aggregation (u S eps, u = 1) at a "
+                    "per-step error of 0.001.",
+        episode=Q_(5, "second"),        # scenario assumption
+        control_rate=Q_(100, "Hz"),     # scenario assumption
+        per_step_error=1.0e-3,          # scenario assumption
+        recoverability=1.0,             # scenario assumption: a recoverable task
+    )
+    ImitationBoundsTenSecondEpisode = ImitationBoundsFiveSecondEpisode.variant(
+        name="Imitation cost bounds over a 10 s episode at 100 Hz",
+        episode=Q_(10, "second"),       # scenario assumption
+    )
+    LatchPairingLag = _st.PairingLagScenario(
+        name="An uncompensated 35 ms observation-action lag at the cage-door latch",
+        description="Pairing error at a transit speed and the two latch approaches against a 2 mm "
+                    "clearance; full-frame rolling-shutter skew beside it.",
+        site=_Embodied.Scenario.WarehouseAisle,
+        lag=Q_(35, "ms"),               # scenario assumption: exposure-to-arrival lag
+        clearance=Q_(2, "mm"),          # scenario assumption: latch clearance
+        transit_speed=Q_(0.50, "m/s"),  # scenario assumption: generic arm transit speed
+        shutter_skew_low=Q_(15, "ms"),  # scenario assumption: fast full-frame readout
+        shutter_skew_high=Q_(33, "ms"), # scenario assumption: one 30 Hz frame
+    )
+    LatchPairingLagTightPlate = LatchPairingLag.variant(
+        name="The same lag against a tighter 1 mm strike-plate clearance",
+        clearance=Q_(1, "mm"),          # scenario assumption
+    )
+    TeleopCorrectionLoop = _st.TeleopLoopScenario(
+        name="One teleoperated correction in an illustrative reference setup",
+        description="Display, operator reaction, command transport, and mechanical response.",
+        display=Q_(50, "ms"),       # scenario assumption: exposure, decode, raster refresh
+        human=Q_(200, "ms"),        # scenario assumption: perception, planning, neuromuscular
+        command=Q_(10, "ms"),       # scenario assumption: quantization, packetization, bus
+        mechanical=Q_(80, "ms"),    # scenario assumption: torque ramp and structural inertia
+    )
+    WarehouseTeleopIngestion = _st.TeleopIngestionScenario(
+        name="Raw telemetry of one teleoperated session on the warehouse mobile manipulator",
+        description="Navigation and wrist cameras, two external RGB-D cameras, and the kinematic record "
+                    "at the permission tick, against SATA and Gen4 NVMe write bandwidth.",
+        machine=_Embodied.MobileManipulator.WarehouseMobileManipulator,
+        external_camera=_Sensors.Camera.Intel_RealSense_D435i,
+        external_cameras=2,         # scenario assumption
+        rgb_bytes_per_pixel=3,      # scenario assumption: 24-bit RGB after debayering
+        depth_bytes_per_pixel=2,    # scenario assumption: uint16 depth aligned to color
+        values_per_axis=6,          # scenario assumption: position, velocity, torque, and three action taps
+        bytes_per_value=4,          # scenario assumption: float32
+        timestamp_bytes=8,          # scenario assumption: one 64-bit timestamp per record
+        shift=Q_(8, "hour"),        # scenario assumption
+        compression_ratio=8.0,      # scenario assumption: intra-frame video codec
+        slow_drive_bandwidth=_Storage.SataSsd.bandwidth,
+        fast_drive_bandwidth=_Hardware.Tech.Storage.NvmeGen4.bandwidth,
+    )
+    LatchDemonstrationCampaign = _st.DemonstrationCampaignScenario(
+        name="Door-opening demonstrations on the cage-door latch, an illustrative campaign",
+        description="One scheduled hour of attempt-and-reset cycles, the campaign that keeps 5,000 "
+                    "demonstrations, and the wear on the wrist gear and flex cable.",
+        session=Q_(60, "minute"),       # scenario assumption: declared session length
+        startup=Q_(8, "minute"),        # scenario assumption: cell startup and bus sync
+        calibration=Q_(7, "minute"),    # scenario assumption: sensor calibration and nulling
+        rest=Q_(10, "minute"),          # scenario assumption: operator rest
+        attempt=Q_(25, "second"),       # scenario assumption
+        reset=Q_(15, "second"),         # scenario assumption: re-latch the door
+        failure_rate=0.20,              # scenario assumption
+        qa_rate=0.15,                   # scenario assumption
+        target_kept=5000,               # scenario assumption: campaign target
+        gear_reversals_per_attempt=14,  # scenario assumption
+        cable_flexes_opening=6,         # scenario assumption
+        cable_flexes_return=2,          # scenario assumption: return stroke during the re-latch
+        gear_rated_cycles=5_000_000,    # scenario assumption: rated stress cycles
+        cable_rated_cycles=200_000,     # scenario assumption: rated bending cycles
+        repeat_campaigns=3,             # scenario assumption: campaigns compared against the cable's life
+    )
+    LeRobotHubDatasetCounts = _st.HubDatasetCountsScenario(
+        name="Public LeRobot-format datasets on the Hugging Face Hub",
+        description="Cumulative dataset count by month and episodes per dataset.",
+        monthly=_Literature.LeRobotHubMonthly,
+        histogram=_Literature.LeRobotEpisodeHistogram,
+        small_episodes=16,              # scenario assumption: "small" threshold
+        large_episodes=512,             # scenario assumption: "large" threshold
+    )
+    OpenXEmbodimentPoolComposition = _st.PooledCorpusCompositionScenario(
+        name="Open X-Embodiment by morphology and declared command rate",
+        description="Episode-weighted shares against the warehouse manipulator's chunk rate.",
+        series=_Literature.OpenXEmbodimentComposition,
+        rate_threshold=_Embodied.MobileManipulator.WarehouseMobileManipulator.chunk_rate,
+        top_datasets=2,                 # scenario assumption: "two datasets supply most of them"
+    )
+    WarehouseManipulatorStateGrid = _st.StateGridScenario(
+        name="Brute-force coverage of a 28-dimensional manipulation state grid",
+        description="Cells at 10 and 100 bins per axis against a 1,000-robot fleet logging at 1 kHz "
+                    "for the age of the universe.",
+        state_components={            # scenario assumption: the state a contact task conditions on
+            "joint angles": 7, "joint velocities": 7, "wheel states": 2,
+            "wrist wrench": 6, "workpiece pose": 6,
+        },
+        bins=10,                        # scenario assumption
+        fine_bins=100,                  # scenario assumption: fine enough to guide contact
+        fleet=1000,                     # scenario assumption
+        log_rate=Q_(1000, "Hz"),        # scenario assumption
+        duration=_AGE_OF_UNIVERSE,
+    )
+    ContactAngleCoverage = _st.ContactGridScenario(
+        name="Two archives of one million records on a contact-angle and normal-force grid",
+        description="A cautious teleoperator and an exploratory policy against 1 degree by 1 N bins.",
+        angle_min=Q_(-15, "degree"),    # scenario assumption
+        angle_max=Q_(15, "degree"),     # scenario assumption
+        angle_bin=Q_(1, "degree"),      # scenario assumption
+        force_max=Q_(20, "N"),          # scenario assumption
+        force_bin=Q_(1, "N"),           # scenario assumption
+        records=1_000_000,              # scenario assumption
+        record_rate=Q_(100, "Hz"),      # scenario assumption
+        archives={                      # scenario assumption: occupied ranges and stipulated errors
+            "cautious": (Q_(-2, "degree"), Q_(2, "degree"), Q_(4, "N"), Q_(6, "N"), Q_(0.001, "rad")),
+            "exploratory": (Q_(-15, "degree"), Q_(15, "degree"), Q_(1, "N"), Q_(18, "N"),
+                            Q_(0.012, "rad")),
+        },
+    )
+    LatchScenarioTable = _st.ScenarioTableCoverageScenario(
+        name="Cage-door latch archive against plate offset and approach speed",
+        description="Three plate offsets by the two latch approaches; the archive holds the nominal "
+                    "plate at the guarded speed.",
+        offsets=[Q_(0, "mm"), Q_(3, "mm"), Q_(-3, "mm")],   # scenario assumption: +/-3 mm plate offset
+        speeds=[_Embodied.Scenario.WarehouseAisle.v_latch_approach,
+                _Embodied.Scenario.WarehouseAisle.v_latch_high],
+        logged_offset=Q_(0.5, "mm"),    # scenario assumption: offset band the archive logged
+        demonstrated_speed=_Embodied.Scenario.WarehouseAisle.v_latch_approach,
+    )
+    LatchScenarioTableAfterRecovery = LatchScenarioTable.variant(
+        name="The latch table after a recovery collection at +3 mm and the guarded speed",
+        added_offsets=[Q_(3, "mm")],    # scenario assumption: the stipulated latch-recovery-02
+    )
+    LatchScenarioTableThirdSpeed = LatchScenarioTable.variant(
+        name="The latch table with a third approach speed between the two",
+        speeds=[_Embodied.Scenario.WarehouseAisle.v_latch_approach,
+                (_Embodied.Scenario.WarehouseAisle.v_latch_approach
+                 + _Embodied.Scenario.WarehouseAisle.v_latch_high) / 2,  # scenario assumption
+                _Embodied.Scenario.WarehouseAisle.v_latch_high],
+    )
+    GripperStrokeTransfer = _st.GripperTransferScenario(
+        name="A normalized gripper command moved from a 100 mm stroke to a 60 mm stroke",
+        description="The same 0.80 command on both grippers against a 75 mm part; the donor's hold "
+                    "force against the target's continuous rating.",
+        command=0.80,                   # scenario assumption
+        donor_stroke=Q_(100, "mm"),     # scenario assumption
+        target_stroke=Q_(60, "mm"),     # scenario assumption
+        part_width=Q_(75, "mm"),        # scenario assumption
+        donor_hold_force=Q_(30, "N"),   # scenario assumption
+        target_force_rating=Q_(15, "N"),  # scenario assumption
     )

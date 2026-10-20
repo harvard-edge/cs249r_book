@@ -4475,3 +4475,643 @@ class SingleStreamLatencyScenario(BaseScenario):
     def span(self) -> float:
         lat = self.latencies
         return (max(lat) / min(lat)).to("").magnitude
+
+
+# --- Physical demonstration data: samples, labels, yield, coverage (added 2026-10-20) ---
+
+class CorrelatedLogScenario(BaseScenario):
+    """``duration`` of records logged at ``rate`` whose adjacent records have lag-one correlation
+    ``lag1_correlation``: how few independent samples the record count holds."""
+    rate: Quantity
+    duration: Quantity
+    lag1_correlation: float
+
+    @property
+    def records(self) -> float:
+        return (self.rate * self.duration).to("").magnitude
+
+    @property
+    def record_interval(self) -> Quantity:
+        return (1 / self.rate).to("ms")
+
+    @property
+    def effective_samples(self) -> float:
+        from ..physics.statistics import calc_effective_sample_size
+        return calc_effective_sample_size(self.records, self.lag1_correlation)
+
+    @property
+    def oversampling(self) -> float:
+        """Records per effective independent sample."""
+        return self.records / self.effective_samples
+
+
+class ImitationBoundScenario(BaseScenario):
+    """Worst-case imitation cost over one ``episode`` at ``control_rate`` with per-step error
+    ``per_step_error``: open loop, behavioral cloning, and aggregation with recoverability ``u``."""
+    episode: Quantity
+    control_rate: Quantity
+    per_step_error: float
+    recoverability: float = 1.0
+
+    @property
+    def horizon_steps(self) -> int:
+        return int(round((self.episode * self.control_rate).to("").magnitude))
+
+    @property
+    def open_loop(self) -> float:
+        """S eps: the expected cost if errors did not feed back."""
+        return self.horizon_steps * self.per_step_error
+
+    @property
+    def cloning(self) -> float:
+        from ..physics.statistics import calc_behavior_cloning_cost_bound
+        return calc_behavior_cloning_cost_bound(self.horizon_steps, self.per_step_error)
+
+    @property
+    def aggregation(self) -> float:
+        from ..physics.statistics import calc_dagger_cost_bound
+        return calc_dagger_cost_bound(self.horizon_steps, self.per_step_error, self.recoverability)
+
+    @property
+    def vacuous_error(self) -> float:
+        """Per-step error above which the cloning bound exceeds the episode maximum S."""
+        return 1.0 / self.horizon_steps
+
+    @property
+    def cloning_over_maximum(self) -> float:
+        """The cloning bound as a fraction of the episode maximum S."""
+        return self.cloning / self.horizon_steps
+
+
+class PairingLagScenario(BaseScenario):
+    """An observation paired with an action ``lag`` later, against a ``clearance``, at a transit
+    speed and at ``site``'s guarded and fast latch approaches."""
+    site: Any                    # EmbodiedScenario (latch approach speeds)
+    lag: Quantity
+    clearance: Quantity
+    transit_speed: Quantity
+    shutter_skew_low: Quantity   # full-frame rolling-shutter skew, fast readout
+    shutter_skew_high: Quantity  # full-frame rolling-shutter skew, one frame
+
+    @property
+    def guarded_speed(self) -> Quantity:
+        return self.site.v_latch_approach
+
+    @property
+    def fast_speed(self) -> Quantity:
+        return self.site.v_latch_high
+
+    def displacement(self, speed: Quantity, lag: Optional[Quantity] = None) -> Quantity:
+        """Pairing error: speed times lag."""
+        return (speed * (self.lag if lag is None else lag)).to("mm")
+
+    def lag_ceiling(self, speed: Quantity) -> Quantity:
+        """Largest lag that keeps the pairing error inside the clearance."""
+        return (self.clearance / speed).to("ms")
+
+    @property
+    def displacement_transit(self) -> Quantity:
+        return self.displacement(self.transit_speed)
+
+    @property
+    def displacement_guarded(self) -> Quantity:
+        return self.displacement(self.guarded_speed)
+
+    @property
+    def displacement_fast(self) -> Quantity:
+        return self.displacement(self.fast_speed)
+
+    @property
+    def transit_over_clearance(self) -> float:
+        return (self.displacement_transit / self.clearance).to("").magnitude
+
+    @property
+    def fast_over_clearance(self) -> float:
+        return (self.displacement_fast / self.clearance).to("").magnitude
+
+    @property
+    def lag_ceiling_guarded(self) -> Quantity:
+        return self.lag_ceiling(self.guarded_speed)
+
+    @property
+    def lag_ceiling_fast(self) -> Quantity:
+        return self.lag_ceiling(self.fast_speed)
+
+    @property
+    def skew_displacement_transit(self) -> Quantity:
+        return self.displacement(self.transit_speed, self.shutter_skew_high)
+
+    @property
+    def skew_displacement_fast(self) -> Quantity:
+        return self.displacement(self.fast_speed, self.shutter_skew_high)
+
+
+class TeleopLoopScenario(BaseScenario):
+    """One teleoperated correction: display, human, command transport, and mechanical response."""
+    display: Quantity
+    human: Quantity
+    command: Quantity
+    mechanical: Quantity
+
+    @property
+    def loop(self) -> Quantity:
+        return (self.display + self.human + self.command + self.mechanical).to("ms")
+
+    @property
+    def command_issued(self) -> Quantity:
+        """Time after the event at which the operator's correction is commanded."""
+        return (self.display + self.human).to("ms")
+
+    @property
+    def human_share(self) -> float:
+        return (self.human / self.loop).to("").magnitude
+
+
+class TeleopIngestionScenario(BaseScenario):
+    """Raw telemetry of one teleoperated session on ``machine``: its navigation and wrist cameras,
+    ``external_cameras`` RGB-D cameras, and the kinematic record at the permission tick."""
+    machine: Any                   # EmbodiedMobileManipulator (cameras, axes, permission rate)
+    external_camera: Any           # Sensors.Camera entry (RGB and aligned depth)
+    external_cameras: int
+    rgb_bytes_per_pixel: int
+    depth_bytes_per_pixel: int
+    values_per_axis: int
+    bytes_per_value: int
+    timestamp_bytes: int
+    shift: Quantity
+    compression_ratio: float
+    slow_drive_bandwidth: Quantity
+    fast_drive_bandwidth: Quantity
+
+    @property
+    def record_bytes(self) -> int:
+        return self.machine.servo_axes * self.values_per_axis * self.bytes_per_value + self.timestamp_bytes
+
+    @property
+    def kinematic_rate(self) -> Quantity:
+        return (self.record_bytes * Q_(1, "byte") * self.machine.permission_rate).to("MB/s")
+
+    def _budget(self, camera, count, depth, kinematics=None):
+        from ..physics.robotics.perception import calc_teleop_ingestion_budget
+        fps = camera.frame_rate.to("Hz").magnitude
+        extra = dict(depth_width=camera.resolution_width, depth_height=camera.resolution_height,
+                     depth_fps=fps, depth_bytes_per_pixel=self.depth_bytes_per_pixel) if depth else {}
+        return calc_teleop_ingestion_budget(
+            num_cameras=count, rgb_width=camera.resolution_width, rgb_height=camera.resolution_height,
+            rgb_fps=fps, rgb_bytes_per_pixel=self.rgb_bytes_per_pixel,
+            kinematics_bytes_per_sec=kinematics, **extra)
+
+    @property
+    def nav_budget(self) -> dict:
+        return self._budget(self.machine.nav_camera, 1, False, self.kinematic_rate)
+
+    @property
+    def wrist_budget(self) -> dict:
+        return self._budget(self.machine.wrist_camera, 1, False)
+
+    @property
+    def external_budget(self) -> dict:
+        return self._budget(self.external_camera, self.external_cameras, True)
+
+    @property
+    def nav_rate(self) -> Quantity:
+        return self.nav_budget["bw_rgb"]
+
+    @property
+    def wrist_rate(self) -> Quantity:
+        return self.wrist_budget["bw_rgb"]
+
+    @property
+    def external_rgb_rate(self) -> Quantity:
+        return self.external_budget["bw_rgb"]
+
+    @property
+    def external_depth_rate(self) -> Quantity:
+        return self.external_budget["bw_depth"]
+
+    @property
+    def external_rate(self) -> Quantity:
+        return self.external_budget["bw_vision"]
+
+    @property
+    def total_rate(self) -> Quantity:
+        return (self.nav_budget["bw_total"] + self.wrist_budget["bw_total"]
+                + self.external_budget["bw_total"]).to("MB/s")
+
+    @property
+    def storage_per_hour(self) -> Quantity:
+        return (self.nav_budget["storage_per_hour"] + self.wrist_budget["storage_per_hour"]
+                + self.external_budget["storage_per_hour"]).to("TB")
+
+    @property
+    def storage_per_shift(self) -> Quantity:
+        return (self.storage_per_hour * self.shift.to("hour").magnitude).to("TB")
+
+    @property
+    def nav_over_slow_drive(self) -> float:
+        return (self.nav_rate / self.slow_drive_bandwidth).to("").magnitude
+
+    @property
+    def kinematic_share(self) -> float:
+        return (self.kinematic_rate / self.total_rate).to("").magnitude
+
+    @property
+    def compressed_rate(self) -> Quantity:
+        return (self.total_rate / self.compression_ratio).to("MB/s")
+
+    @property
+    def compressed_storage_per_hour(self) -> Quantity:
+        return (self.storage_per_hour / self.compression_ratio).to("TB")
+
+
+class DemonstrationCampaignScenario(BaseScenario):
+    """Scheduled sessions of attempt-and-reset cycles: demonstrations kept per session, the
+    campaign that keeps ``target_kept`` of them, and the wear it puts on a gear and a cable."""
+    session: Quantity              # scheduled session length
+    startup: Quantity
+    calibration: Quantity
+    rest: Quantity
+    attempt: Quantity
+    reset: Quantity
+    failure_rate: float            # attempts that fail in the trial
+    qa_rate: float                 # surviving attempts discarded by quality filtering
+    target_kept: int
+    gear_reversals_per_attempt: int
+    cable_flexes_opening: int
+    cable_flexes_return: int
+    gear_rated_cycles: int
+    cable_rated_cycles: int
+    repeat_campaigns: int = 1      # campaigns compared against the rated lives
+
+    @property
+    def active(self) -> Quantity:
+        """Session time left for attempts and resets."""
+        s = [q.to("second") for q in (self.session, self.startup, self.calibration, self.rest)]
+        return (s[0] - s[1] - s[2] - s[3]).to("minute")
+
+    @property
+    def cycle(self) -> Quantity:
+        return (self.attempt + self.reset).to("second")
+
+    @property
+    def attempts_per_session(self) -> int:
+        return int(self.active.to("second").magnitude // self.cycle.to("second").magnitude)
+
+    @property
+    def idle(self) -> Quantity:
+        """Active time too short for one more cycle."""
+        return (self.active.to("second") - self.attempts_per_session * self.cycle.to("second")).to("second")
+
+    @property
+    def retention(self) -> float:
+        return (1.0 - self.failure_rate) * (1.0 - self.qa_rate)
+
+    @property
+    def kept_per_session(self) -> float:
+        return self.attempts_per_session * self.retention
+
+    @property
+    def kept_time(self) -> Quantity:
+        return (self.kept_per_session * self.attempt).to("minute")
+
+    @property
+    def kept_share(self) -> float:
+        return (self.kept_time / self.session).to("").magnitude
+
+    @property
+    def reset_time(self) -> Quantity:
+        return (self.attempts_per_session * self.reset).to("second")
+
+    @property
+    def attempt_time(self) -> Quantity:
+        return (self.attempts_per_session * self.attempt).to("second")
+
+    @property
+    def failed_time(self) -> Quantity:
+        return (self.failure_rate * self.attempt_time).to("second")
+
+    @property
+    def qa_time(self) -> Quantity:
+        return (self.qa_rate * (self.attempt_time - self.failed_time)).to("second")
+
+    @property
+    def failed_episodes(self) -> float:
+        return self.failure_rate * self.attempts_per_session
+
+    @property
+    def qa_episodes(self) -> float:
+        return self.qa_rate * (self.attempts_per_session - self.failed_episodes)
+
+    @property
+    def campaign_attempts(self) -> int:
+        import math
+        return int(math.ceil(self.target_kept / self.retention))
+
+    @property
+    def campaign_time(self) -> Quantity:
+        """Scheduled cell time: one session per ``attempts_per_session`` attempts."""
+        return (self.campaign_attempts / self.attempts_per_session * self.session).to("hour")
+
+    @property
+    def kept_motion_time(self) -> Quantity:
+        return (self.target_kept * self.attempt).to("hour")
+
+    @property
+    def overhead_factor(self) -> float:
+        return (self.campaign_time / self.kept_motion_time).to("").magnitude
+
+    @property
+    def cable_flexes_per_attempt(self) -> int:
+        return self.cable_flexes_opening + self.cable_flexes_return
+
+    @property
+    def gear_cycles(self) -> int:
+        return self.campaign_attempts * self.gear_reversals_per_attempt
+
+    @property
+    def cable_cycles(self) -> int:
+        return self.campaign_attempts * self.cable_flexes_per_attempt
+
+    @property
+    def gear_life_used(self) -> float:
+        return self.gear_cycles / self.gear_rated_cycles
+
+    @property
+    def cable_life_used(self) -> float:
+        return self.cable_cycles / self.cable_rated_cycles
+
+    @property
+    def repeat_cable_life_used(self) -> float:
+        """Cable rated life used by ``repeat_campaigns`` campaigns."""
+        return self.repeat_campaigns * self.cable_life_used
+
+
+class HubDatasetCountsScenario(BaseScenario):
+    """Public datasets on a hub over time and episodes per dataset, from a monthly series and a
+    power-of-two episode histogram (all creation years pooled)."""
+    monthly: Any                   # Literature series: month, cumulative_datasets
+    histogram: Any                 # Literature series: bin_lo, bin_hi, datasets
+    small_episodes: int            # "small" datasets hold fewer than this many episodes
+    large_episodes: int            # "large" datasets hold at least this many
+
+    def count_at(self, month: str) -> float:
+        return {m["month"]: m["cumulative_datasets"] for m in self.monthly.entries}[month]
+
+    @property
+    def latest_month(self) -> str:
+        return self.monthly.entries[-1]["month"]
+
+    @property
+    def latest_count(self) -> float:
+        return self.monthly.entries[-1]["cumulative_datasets"]
+
+    def growth_since(self, month: str) -> float:
+        return self.latest_count / self.count_at(month)
+
+    @property
+    def pooled(self) -> Dict[float, float]:
+        """Datasets per bin lower edge, creation years pooled."""
+        out: Dict[float, float] = {}
+        for b in self.histogram.entries:
+            out[b["bin_lo"]] = out.get(b["bin_lo"], 0) + b["datasets"]
+        return out
+
+    @property
+    def counted(self) -> float:
+        return sum(b["datasets"] for b in self.histogram.entries)
+
+    @property
+    def small_share(self) -> float:
+        return sum(b["datasets"] for b in self.histogram.entries
+                   if b["bin_hi"] <= self.small_episodes) / self.counted
+
+    @property
+    def large_share(self) -> float:
+        return sum(b["datasets"] for b in self.histogram.entries
+                   if b["bin_lo"] >= self.large_episodes) / self.counted
+
+    @property
+    def median_bin_low(self) -> float:
+        run = 0.0
+        pooled = self.pooled
+        for lo in sorted(pooled):
+            run += pooled[lo]
+            if run >= self.counted / 2:
+                return lo
+        raise ValueError("empty histogram")
+
+    @property
+    def median_bin_high(self) -> float:
+        """Exclusive upper edge of the median bin (power-of-two bins)."""
+        return 2 * self.median_bin_low if self.median_bin_low else 1
+
+
+class PooledCorpusCompositionScenario(BaseScenario):
+    """Episode-weighted composition of a pooled cross-embodiment corpus against a machine's
+    command rate ``rate_threshold``."""
+    series: Any                    # Literature series: one row per constituent dataset
+    rate_threshold: Quantity
+    top_datasets: int = 2          # how many of a morphology's largest datasets top_share_within counts
+
+    @property
+    def rows(self) -> List[dict]:
+        return [r for r in self.series.entries if r["episodes"]]
+
+    def row(self, dataset: str) -> dict:
+        return next(r for r in self.rows if r["dataset"] == dataset)
+
+    @property
+    def datasets(self) -> int:
+        return len(self.rows)
+
+    @property
+    def total(self) -> float:
+        return sum(r["episodes"] for r in self.rows)
+
+    @property
+    def by_morphology(self) -> Dict[str, float]:
+        out: Dict[str, float] = {}
+        for r in self.rows:
+            out[r["robot_morphology"]] = out.get(r["robot_morphology"], 0) + r["episodes"]
+        return out
+
+    @property
+    def by_rate(self) -> Dict[Optional[float], float]:
+        """Episodes per declared command rate in Hz; None collects rows with no stated rate."""
+        out: Dict[Optional[float], float] = {}
+        for r in self.rows:
+            k = r["control_frequency_hz"] if isinstance(r["control_frequency_hz"], float) else None
+            out[k] = out.get(k, 0) + r["episodes"]
+        return out
+
+    def morphology_share(self, morphology: str) -> float:
+        return self.by_morphology.get(morphology, 0) / self.total
+
+    def rate_share(self, rate_hz: Optional[float]) -> float:
+        return self.by_rate.get(rate_hz, 0) / self.total
+
+    @property
+    def table_top_share(self) -> float:
+        return sum(r["episodes"] for r in self.rows if "table" in str(r["scene_type"]).lower()) / self.total
+
+    @property
+    def threshold_hz(self) -> float:
+        return self.rate_threshold.to("Hz").magnitude
+
+    @property
+    def at_or_above_threshold_share(self) -> float:
+        return sum(v for k, v in self.by_rate.items() if k is not None and k >= self.threshold_hz) / self.total
+
+    def top_share_within(self, morphology: str, n: Optional[int] = None) -> float:
+        """Share of a morphology's episodes supplied by its ``n`` largest datasets (default ``top_datasets``)."""
+        n = self.top_datasets if n is None else n
+        eps = sorted(r["episodes"] for r in self.rows if r["robot_morphology"] == morphology)
+        return sum(eps[-n:]) / sum(eps)
+
+
+class StateGridScenario(BaseScenario):
+    """A state space of ``state_components`` axes cut into ``bins`` per axis, against the records
+    ``fleet`` robots log at ``log_rate`` for ``duration``."""
+    state_components: Dict[str, int]
+    bins: int
+    fine_bins: int
+    fleet: int
+    log_rate: Quantity
+    duration: Quantity
+
+    @property
+    def dims(self) -> int:
+        return sum(self.state_components.values())
+
+    @property
+    def cells(self) -> float:
+        return float(self.bins) ** self.dims
+
+    @property
+    def fine_cells(self) -> float:
+        return float(self.fine_bins) ** self.dims
+
+    @property
+    def records(self) -> float:
+        return self.fleet * (self.log_rate * self.duration).to("").magnitude
+
+    @property
+    def max_coverage(self) -> float:
+        """Largest fraction of the coarse grid the records could visit."""
+        return self.records / self.cells
+
+
+class ContactGridScenario(BaseScenario):
+    """A contact task binned by contact angle and normal force, and the cells each archive occupies.
+
+    ``archives`` maps a name to (angle_low, angle_high, force_low, force_high, held-out RMS action
+    error); each archive's occupied region is a rectangle of whole bins.
+    """
+    angle_min: Quantity
+    angle_max: Quantity
+    angle_bin: Quantity
+    force_max: Quantity
+    force_bin: Quantity
+    records: int                   # transitions each archive records
+    record_rate: Quantity
+    archives: Dict[str, Any]
+
+    @property
+    def angle_bins(self) -> int:
+        return int(round(((self.angle_max - self.angle_min) / self.angle_bin).to("").magnitude))
+
+    @property
+    def force_bins(self) -> int:
+        return int(round((self.force_max / self.force_bin).to("").magnitude))
+
+    @property
+    def cells(self) -> int:
+        return self.angle_bins * self.force_bins
+
+    def bin_span(self, name: str):
+        """(first angle bin, angle bins, first force bin, force bins) the archive occupies."""
+        a_lo, a_hi, f_lo, f_hi, _ = self.archives[name]
+        first_a = int(round(((a_lo - self.angle_min) / self.angle_bin).to("").magnitude))
+        n_a = int(round(((a_hi - a_lo) / self.angle_bin).to("").magnitude))
+        first_f = int(round((f_lo / self.force_bin).to("").magnitude))
+        n_f = int(round(((f_hi - f_lo) / self.force_bin).to("").magnitude))
+        return first_a, n_a, first_f, n_f
+
+    def occupied(self, name: str) -> int:
+        _, n_a, _, n_f = self.bin_span(name)
+        return n_a * n_f
+
+    def share(self, name: str) -> float:
+        return self.occupied(name) / self.cells
+
+    def empty(self, name: str) -> int:
+        return self.cells - self.occupied(name)
+
+    def empty_share(self, name: str) -> float:
+        return self.empty(name) / self.cells
+
+    def rms_error(self, name: str) -> Quantity:
+        return self.archives[name][4]
+
+
+class ScenarioTableCoverageScenario(BaseScenario):
+    """A scenario table of ``offsets`` by ``speeds`` joined against an archive demonstrated within
+    ``logged_offset`` at ``demonstrated_speed``, plus recovery collections at ``added_offsets``."""
+    offsets: List[Quantity]
+    speeds: List[Quantity]
+    logged_offset: Quantity
+    demonstrated_speed: Quantity
+    added_offsets: List[Quantity] = []
+
+    @property
+    def cells(self) -> int:
+        return len(self.offsets) * len(self.speeds)
+
+    def supported_cell(self, offset: Quantity, speed: Quantity) -> bool:
+        if speed != self.demonstrated_speed:
+            return False
+        return abs(offset) <= self.logged_offset or any(offset == a for a in self.added_offsets)
+
+    @property
+    def supported(self) -> int:
+        return sum(self.supported_cell(d, v) for d in self.offsets for v in self.speeds)
+
+    @property
+    def absences(self) -> int:
+        return self.cells - self.supported
+
+
+class GripperTransferScenario(BaseScenario):
+    """A normalized gripper command from a donor gripper replayed on a target with a shorter stroke
+    and a lower continuous force rating, against a part of ``part_width``."""
+    command: float                 # normalized opening command, 0 to 1
+    donor_stroke: Quantity
+    target_stroke: Quantity
+    part_width: Quantity
+    donor_hold_force: Quantity
+    target_force_rating: Quantity
+
+    @property
+    def donor_opening(self) -> Quantity:
+        return (self.command * self.donor_stroke).to("mm")
+
+    @property
+    def target_opening(self) -> Quantity:
+        return (self.command * self.target_stroke).to("mm")
+
+    @property
+    def stroke_excess(self) -> Quantity:
+        """How far the donor's opening exceeds the target's whole stroke."""
+        return (self.donor_opening - self.target_stroke).to("mm")
+
+    @property
+    def force_ratio(self) -> float:
+        return (self.donor_hold_force / self.target_force_rating).to("").magnitude
+
+    @property
+    def donor_clears(self) -> bool:
+        return self.donor_opening > self.part_width
+
+    @property
+    def target_clears(self) -> bool:
+        return self.target_opening > self.part_width
