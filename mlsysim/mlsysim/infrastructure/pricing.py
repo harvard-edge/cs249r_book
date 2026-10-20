@@ -49,6 +49,18 @@ class Cloud(Registry):
         rate=0.50 * USD / hour,
         metadata=_CLOUD,
     )
+    # Model serving on one machine (added 2026-10-20): the CPU and T4 instances
+    # of a cost-per-image comparison against an H100 at GpuTrainingPerHour.
+    CpuInstanceC5XlargePerHour = PricePoint(
+        name="c5.xlarge CPU instance",
+        rate=0.17 * USD / hour,
+        metadata=_CLOUD,
+    )
+    T4InstanceG4dnXlargePerHour = PricePoint(
+        name="g4dn.xlarge instance (one NVIDIA T4)",
+        rate=0.53 * USD / hour,
+        metadata=_CLOUD,
+    )
     A10GInferencePerHour = PricePoint(
         name="A10G inference GPU",
         rate=0.75 * USD / hour,

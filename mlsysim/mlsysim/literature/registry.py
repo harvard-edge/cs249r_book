@@ -96,6 +96,7 @@ RecommendationSystems = _load("recommendation_systems", "RecommendationSystems",
 ServingMemoryLayout = _load("serving_memory_layout", "ServingMemoryLayout", "Memory layout of a 13B model served on one A100 40 GB (Kwon et al. 2023, Figure 1).")  # added 2026-10-20
 RobustnessStudies = _load("robustness_studies", "RobustnessStudies", "Cited results of robustness studies (Eykholt 2018 stickers, Goodfellow 2015 FGSM, Guo 2017 calibration, Zou 2023 GCG, Gu 2017 BadNets, Brown 2017 patch, Robey 2025 RoboPAIR).")  # added 2026-10-20
 VerificationStudies = _load("verification_studies", "VerificationStudies", "Cited results of verification studies of driving stacks (DriveFI fault injection, Jha et al. 2019; cross-entropy rare-event simulation, O'Kelly et al. 2018).")  # added 2026-10-20
+ServingResults = _load("serving_results", "ServingResults", "Cited model-serving results and documented defaults (ServerlessLLM loading, the AI Tax frame breakdown, Triton perf_analyzer and dynamic-batcher examples, the MLPerf Inference ResNet-50 Server bound).")  # model serving (added 2026-10-20)
 InferenceDeterminism = _load("inference_determinism", "InferenceDeterminism", "Cited results on run-to-run nondeterminism of LLM inference (He and Thinking Machines Lab 2025).")  # added 2026-10-20
 DataSelectionResults = _load("data_selection_results", "DataSelectionResults", "Cited data-selection results (model collapse, scored pruning, selection via proxy, echoing, deduplication, FineWeb, FixMatch, augmentation, an input-bound profile).")  # added 2026-10-20
 TrajectoryGeneration = _load("trajectory_generation", "TrajectoryGeneration", "Cited figures of published online trajectory generators (Ruckig calculation times, Berscheid and Kroger 2021).")  # added 2026-10-20
@@ -428,6 +429,7 @@ class Literature(Registry):
     TrajectoryGeneration = TrajectoryGeneration  # added 2026-10-20
     SharedHardwareInterference = SharedHardwareInterference  # added 2026-10-20
     PlatformConfigurations = PlatformConfigurations  # added 2026-10-20
+    ServingResults = ServingResults  # model serving (added 2026-10-20)
     RobotOffload = RobotOffload  # added 2026-10-20
     HumanTakeover = HumanTakeover  # added 2026-10-20
     ComputeTrend = ComputeTrend

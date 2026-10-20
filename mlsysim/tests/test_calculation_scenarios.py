@@ -5071,3 +5071,48 @@ def test_benchmarking_scenarios():
     assert s.speedup == approx(5.296376, rel=1e-6) and s.efficiency == approx(0.662047, rel=1e-5)
     i = Scenarios.ImageClassifierEightGpuScaling
     assert i.efficiency == approx(0.75) and i.ideal_time.m_as("hour") == approx(3.0)
+def test_single_machine_serving_scenarios():
+    """ResNet-50 serving on one H100: cost, budget, M/M/1 plan, batching, startup, cost per image (added 2026-10-20)."""
+    from mlsysim.physics import calc_exponential_quantile_factor, calc_batch_formation_wait
+    from mlsysim.core.units import Q_
+    svc = Scenarios.ResNet50EagerFp16BatchingH100
+    assert svc.service_time(1).m_as("ms") == pytest.approx(3.528119, rel=1e-6)
+    assert svc.throughput(32).m_as("1/s") == pytest.approx(7037.878, rel=1e-6)
+    assert svc.fixed_share(1) == pytest.approx(0.99069, rel=1e-4)
+    cost = Scenarios.ResNet50BatchOneVersusEightCostH100
+    assert cost.cost_per_million(1).m_as("dollar") == pytest.approx(3.920133, rel=1e-6)
+    assert cost.cost_ratio == pytest.approx(7.510333, rel=1e-6)
+    assert Scenarios.PhotoLibraryPrecomputeH100.ratio == pytest.approx(315.6608, rel=1e-6)
+    path = Scenarios.ResNet50RequestPathH100
+    assert path.total.m_as("ms") == pytest.approx(8.628119, rel=1e-6)
+    assert path.overall_speedup == pytest.approx(1.582325, rel=1e-6)
+    assert path.overlapped_share("forward pass", "JPEG decode", "resize", "normalize") == pytest.approx(0.784027, rel=1e-5)
+    assert Scenarios.DlrmRequestPath.share("MLP forward") == pytest.approx(1.5 / 9)
+    plan = Scenarios.ResNet50FleetPlanH100
+    assert plan.max_utilization == pytest.approx(0.675413, rel=1e-5)
+    assert (plan.accelerators, plan.accelerators_planned, plan.batched_accelerators_planned) == (27, 36, 3)
+    assert plan.tail_time(0.7).m_as("ms") == pytest.approx(54.09783, rel=1e-6)
+    assert plan.cost_per_million(36).m_as("dollar") == pytest.approx(8.0)
+    assert calc_exponential_quantile_factor(0.99) == pytest.approx(4.605170, rel=1e-6)
+    vote = Scenarios.ResNet50FasterModelAt80PctH100
+    assert vote.fast_time.m_as("ms") == pytest.approx(3.007545, rel=1e-5)
+    win = Scenarios.BatchWindow10ms
+    assert win.empty_share(win.arrival_rates[0]) == pytest.approx(0.606531, rel=1e-5)
+    assert win.seen_batch_mean(win.arrival_rates[2]) == pytest.approx(6) and win.seen_batch_tail(win.arrival_rates[2]) == 12
+    assert Scenarios.BatchWindow20msIn50msBudget.budget_share == pytest.approx(0.2)
+    t = Scenarios.DualTriggerBatchFourRequests
+    assert t.backlog_wait.m_as("ms") == pytest.approx(6) and t.slack.m_as("ms") == pytest.approx(24.373296, rel=1e-5)
+    cap = Scenarios.BatchCap16Or32At500Qps
+    assert cap.formation_wait(32).m_as("ms") == pytest.approx(31) and cap.throughput_gain == pytest.approx(0.768725, rel=1e-5)
+    assert calc_batch_formation_wait(16, Q_(500, "1/s")).m_as("ms") == pytest.approx(15)
+    s = Scenarios.ResNet50ReplicaStartup
+    assert s.warm_total.m_as("s") == pytest.approx(1.5) and s.cold_total.m_as("s") == pytest.approx(35)
+    assert Scenarios.ModelSwapPcieGen4.transfer_time("PCIe Gen4 x16").m_as("ms") == pytest.approx(312.5)
+    e = Scenarios.ResNet50BatchEnergyPerImage
+    assert e.energy(1).m_as("mJ") == pytest.approx(39.2165, rel=1e-5) and e.movement_share(32) == pytest.approx(0.193022, rel=1e-5)
+    inst = Scenarios.ResNet50CloudInstanceCost
+    assert inst.cost_per_million("CPU").m_as("dollar") == pytest.approx(0.944444, rel=1e-5)
+    assert inst.small_within_large_price == 7 and inst.breakeven_rate.m_as("1/s") == pytest.approx(3018.868, rel=1e-6)
+    assert Scenarios.ServingFanout10Leaves.all_up == pytest.approx(0.99 ** 10)
+    assert Scenarios.RecommenderTrafficSurge.surge_factor == pytest.approx(10)
+    assert Scenarios.ImageServiceLittlesLaw.in_flight == pytest.approx(50)
