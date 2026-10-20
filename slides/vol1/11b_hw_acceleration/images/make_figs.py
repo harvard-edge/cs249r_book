@@ -1,60 +1,13 @@
 #!/usr/bin/env python3
 """Figures for Lecture 11b (Hardware Acceleration, Part 2: mapping).
 
-Every value is sourced. "HA" is the rendered chapter, Hardware Acceleration.
-Values marked "derived" are computed here from the cited inputs and are
-labeled derived on the slide.
-
-Outside sources (read 2026-10-17):
-  - Boehm, "How to Optimize a CUDA Matmul Kernel for cuBLAS-like
-    Performance: a Worklog" (siboehm.com/articles/22/CUDA-MMM, 2022),
-    results table, FP32 SGEMM: naive 309.0, global-memory coalescing
-    1,986.5, shared-memory caching 2,980.3, 1D blocktiling 8,474.7, 2D
-    blocktiling 15,971.7, vectorized memory access 18,237.3, autotuning
-    19,721.0, warptiling 21,779.3, cuBLAS 23,249.6 GFLOP/s. The article's
-    text names the GPU (the author's A6000) and the size (4,092-square
-    FP32 matrices). 23,249.6 / 309.0 = 75.2x (derived).
-  - NVIDIA, Matrix Multiplication Background User's Guide: section 3.1 and
-    figure 7 (tile quantization, A100-SXM4-80GB, cuBLAS 11.4, M = 27,648,
-    K = 4,096, 256x128 tiles forced; the plotted values below were read from
-    the published SVG plot for Lecture 11 Part 1); section 3.2 (wave
-    quantization: 108 SMs, M = 2,304, N = 1,536 gives 108 tiles, 1,544
-    gives 117, the tail uses 9/108 = 8.33 percent of the SMs, "GFLOPS
-    roughly halve and duration roughly doubles").
-  - Chen, Emer, Sze, Eyeriss, ISCA 2016, abstract: row stationary 1.4x to
-    2.5x more energy efficient than other dataflows on AlexNet
-    convolutional layers, at least 1.3x on fully connected layers for batch
-    larger than 16.
-  - Chen et al., TVM, OSDI 2018, Figure 4 text: fused operators 1.2x to 2x
-    faster than unfused (NVIDIA Titan X).
-
-Chapter sources:
-  - 2x2 weight-stationary trace (HA Sec. 11.7.5): PE00..PE11 hold b00..b11;
-    a00 enters row 0 in cycle 0; a01 enters row 1 one cycle later; C00
-    leaves in cycle 1, C01 one cycle after. The second input row (a10, a11)
-    follows one cycle behind, "staggered in the same way".
-  - Fill and drain: an N x N weight-stationary array streaming B input rows
-    takes B + 2N - 2 cycles (derived from one hop per cycle, HA 11.7.5);
-    N = 128 as in TPU v4 (Jouppi et al. 2023, HA Sec. 11.4.4).
-  - Listing 14 layer: weights 512 x 256, input 256 x 32, 4,194,304 MACs
-    (HA Sec. 11.7.4). Traffic per loop order and the tiled count: derived.
-  - H100: 228 KB shared memory per SM, 160 pJ per HBM byte (45 nm
-    estimate), stage-2 map 56 x 56 x 64 (HA Lighthouse 11.2).
-  - Equation 6 (HA Sec. 11.7.5): 2 T_M T_K + 2 T_K T_N + 4 T_M T_N bytes.
-  - Mapping space per memory level: 4^5 = 1,024 placements, 7! = 5,040
-    orders, 6!/3! = 120 parallelizations (HA Sec. 11.7.2, margin figure);
-    all three at one level 1,024 x 5,040 x 120 = 619,315,200 (derived).
-  - H100 registers (NVIDIA CUDA Programming Guide, compute capability 9.0,
-    Table 30 and Table 31, read 2026-10-18): 64 K 32-bit registers per SM,
-    at most 2,048 resident threads per SM, at most 255 registers per
-    thread. Resident threads at r registers per thread: min(2,048,
-    65,536 / r), rounded down to whole warps of 32 (derived; ignores
-    per-block limits): 32 -> 2,048, 64 -> 1,024, 128 -> 512, and
-    255 -> 65,536 / 255 = 257, rounded down to 8 warps = 256 threads.
-  - Figures carried over from Lecture 11 Part 1 (same code, same sources):
-    weight_reads (Example 11.4), tiling and cliff (Sec. 11.7.5), measured
-    tiles (NVIDIA guide figure 7), layers (Napkin Math 11.4 to 11.10),
-    recall_roof (Napkin Math 11.5 and 11.10).
+Every number comes from MLSysIM through calcs.py: val(key) is the string a
+slide prints and num(key) its value; bar lengths, grids, and curves read the
+same registry entries, Literature results, and Scenarios.* the chapter reads.
+Layout values (canvas sizes, coordinates, axis limits, ticks, label offsets)
+and the illustrative liveness and compiler-stage drawings are typed here.
+Outside sources are recorded with each MLSysIM entry (provenance) and in
+SOURCES.yml.
 
 Run from this folder: python3 make_figs.py
 """
@@ -69,9 +22,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import calcs  # noqa: E402  (every derived label below comes from calcs.OUT)
-
-V = calcs.OUT
+import contextlib, io  # noqa: E401,E402
+with contextlib.redirect_stdout(io.StringIO()):
+    import calcs  # noqa: E402  (every number; run calcs.py to see them)
+from deckvals import val, num  # noqa: E402
 
 C = sp.C
 plt = sp.plt
@@ -158,23 +112,21 @@ def logbars(path, rows, ticks, xlim, xlabel, size, step=None, fontsize=13):
 
 
 # ================================================================ hook: 75x
-BOEHM = [  # kernel, GFLOP/s, colour, tag (the lecture segment that explains it)
-    ("1 Naive", 309.0, "neutral", ""),
-    ("2 Coalesced loads", 1986.5, "memory", "layout"),
-    ("3 Shared-memory tiles", 2980.3, "memory", "tile staging"),
-    ("4 1D register tiles", 8474.7, "memory", "bigger tile"),
-    ("5 2D register tiles", 15971.7, "memory", "bigger tile"),
-    ("6 Vector loads", 18237.3, "memory", "wider loads"),
-    ("9 Autotuned", 19721.0, "memory", "search"),
-    ("10 Warp tiles", 21779.3, "memory", "one more tier"),
-    ("cuBLAS", 23249.6, "compute", ""),
-]
+TAGS = {  # colour and tag (the lecture segment that explains each kernel)
+    "1 Naive": ("neutral", ""), "2 Coalesced loads": ("memory", "layout"),
+    "3 Shared-memory tiles": ("memory", "tile staging"), "4 1D register tiles": ("memory", "bigger tile"),
+    "5 2D register tiles": ("memory", "bigger tile"), "6 Vector loads": ("memory", "wider loads"),
+    "9 Autotuned": ("memory", "search"), "10 Warp tiles": ("memory", "one more tier"),
+    "cuBLAS": ("compute", ""),
+}
+BOEHM = [(label, gflops) + TAGS[label] for label, gflops in calcs.BOEHM]  # Literature.CompilerResults
 
 
 def hook_fig(step):
     fig, ax = plt.subplots(figsize=(5.8, 1.6))
-    rows = [("Naive kernel", 309.0, "neutral", "309 GFLOP/s"),
-            ("cuBLAS", 23249.6, "compute", "23,250 GFLOP/s:  75× faster")]
+    rows = [("Naive kernel", num("boehm_naive_1"), "neutral", f"{val('boehm_naive')} GFLOP/s"),
+            ("cuBLAS", num("boehm_cublas_1"), "compute",
+             f"{val('boehm_cublas')} GFLOP/s:  {val('boehm_total_int')}× faster")]
     for i, (label, value, color_key, text) in enumerate(rows):
         y = 1 - i
         shown = i == 0 or step >= 2
@@ -286,10 +238,11 @@ def trace_svg(step):
             parts.append(svg_text(610, 62 + 36 * k, f"cycle {k}:  {log[k]}", 24, "700",
                                   C["data"], "start"))
     if t >= 3:
-        parts.append(svg_text(610, 228, "2 rows on a 2 × 2 array:", 22, "400",
-                              C["text"], "start"))
-        parts.append(svg_text(610, 258, "4 cycles = 2 + 2·2 − 2", 22, "700", C["text"],
-                              "start"))
+        dim = calcs.TRACE2.array_dim
+        parts.append(svg_text(610, 228, f"{val('trace2_rows')} rows on a {dim} × {dim} array:", 22,
+                              "400", C["text"], "start"))
+        parts.append(svg_text(610, 258, f"{val('trace2_cycles')} cycles = {val('trace2_rows')} + 2·{dim} − 2",
+                              22, "700", C["text"], "start"))
     legend = [("weights stay", C["compute"]), ("activations move right", C["memory"]),
               ("partial sums move down", C["data"])]
     for k, (text, col) in enumerate(legend):
@@ -306,8 +259,9 @@ for k in range(1, 6):
 # on input row t - r - c (cycles r + c to r + c + 7). Derived from one hop
 # per cycle (HA Sec. 11.7.5): 8 + 2*4 - 2 = 14 cycles.
 def wave4_svg(step):
-    t = {1: 2, 2: 6, 3: 11}[step]
-    rows_in, n, cell, gap, x0, y0 = 8, 4, 72, 10, 40, 20
+    t = {1: int(num("sys4_fill_t")), 2: int(num("sys4_full_first")), 3: int(num("sys4_drain_t"))}[step]
+    rows_in, n = calcs.SYS4.rows, calcs.SYS4.array_dim
+    cell, gap, x0, y0 = 72, 10, 40, 20
     parts = svg_open(900, 400)
     busy = 0
     for r in range(n):
@@ -327,18 +281,20 @@ def wave4_svg(step):
     phase = {1: "filling", 2: "full", 3: "draining"}[step]
     px = 410
     parts.append(svg_text(px, 45, f"Cycle {t}", 36, "700", C["text"], "start"))
-    parts.append(svg_text(px, 95, f"{busy} of 16 cells busy: {phase}", 28, "700",
+    parts.append(svg_text(px, 95, f"{busy} of {val('sys4_cells')} cells busy: {phase}", 28, "700",
                           C["compute"] if step == 2 else C["danger"], "start"))
-    total = rows_in + 2 * n - 2
+    total = calcs.SYS4.cycles
     for k in range(total):
         x = px + k * 32
         parts.append(rect(x, 140, 28, 36, C["text"] if k == t else "white", C["neutral"],
                           1.5, 3))
     parts.append(svg_text(px, 196, "cycle 0", 20, "400", C["neutral"], "start"))
-    parts.append(svg_text(px + 13 * 32 + 28, 196, "13", 20, "400", C["neutral"], "end"))
-    parts.append(svg_text(px, 250, f"8 input rows: 8 + 2·4 − 2 = {V['c4']} cycles", 23,
-                          "700", C["text"], "start"))
-    parts.append(svg_text(px, 285, f"busy on average: 8 / {V['c4']} = {V['busy4']}%", 23,
+    last = total - 1
+    parts.append(svg_text(px + last * 32 + 28, 196, val("sys4_last_cycle"), 20, "400", C["neutral"],
+                          "end"))
+    parts.append(svg_text(px, 250, f"{val('sys4_rows')} input rows: {val('sys4_rows')} + 2·{val('sys4_dim')} − 2"
+                          f" = {val('c4')} cycles", 23, "700", C["text"], "start"))
+    parts.append(svg_text(px, 285, f"busy on average: {val('sys4_rows')} / {val('c4')} = {val('busy4')}%", 23,
                           "400", C["text"], "start"))
     parts.append(svg_text(x0, 372, "Orange: busy (number = input row it works on).   "
                           "Gray: done.   White: not reached yet.", 20, "400",
@@ -350,14 +306,13 @@ for k in (1, 2, 3):
     wave4_svg(k)
 
 # ================================================================ busy fraction, 128 x 128
-N_ARRAY = 128
 busy_rows = []
-for b, color_key in ((1, "danger"), (128, "memory"), (1024, "memory"), (4096, "data")):
-    frac = 100 * b / (b + 2 * N_ARRAY - 2)
-    text = f"{frac:.1f}%" if frac < 1 else f"{frac:.0f}%"
-    busy_rows.append((f"{b:,} input row" + ("" if b == 1 else "s"), frac, color_key, text))
+for s, key, color_key in zip(calcs.MXU_ROWS, ("b1", "b128", "b1024", "b4096"),
+                             ("danger", "memory", "memory", "data")):
+    busy_rows.append((f"{val('rows_' + key)} input row" + ("" if s.rows == 1 else "s"),
+                      100 * s.busy_fraction, color_key, f"{val('busy_' + key)}%"))
 sp.hbars(out / "busy.svg", busy_rows, "%", log=False, size=(5.8, 1.9),
-         xlabel="Busy fraction, 128 × 128 array, one weight tile (%, derived)")
+         xlabel=f"Busy fraction, {val('mxu_dim')} × {val('mxu_dim')} array, one weight tile (%, derived)")
 
 
 # ================================================================ three stationary grids
@@ -406,15 +361,16 @@ for kind in ("ws", "os", "is"):
 
 # ================================================================ Eyeriss range bars
 fig, ax = plt.subplots(figsize=(4.4, 1.55))
-ax.barh(1, 2.5 - 1.4, left=1.4, color=C["data"], height=0.55)
-ax.text(2.58, 1, "1.4–2.5×", va="center", fontsize=13, fontweight="bold",
-        color=C["data"])
-ax.annotate("", xy=(2.05, 0), xytext=(1.3, 0),
+lo, hi, fc = num("eyeriss_conv_lo"), num("eyeriss_conv_hi"), num("eyeriss_fc")
+ax.barh(1, hi - lo, left=lo, color=C["data"], height=0.55)
+ax.text(hi + 0.08, 1, f"{val('eyeriss_conv_lo')}–{val('eyeriss_conv_hi')}×", va="center", fontsize=13,
+        fontweight="bold", color=C["data"])
+ax.annotate("", xy=(fc + 0.75, 0), xytext=(fc, 0),  # open-ended arrow: "at least"
             arrowprops=dict(arrowstyle="-|>", color=C["data"], lw=3))
-ax.plot([1.3], [0], "o", ms=9, color=C["data"])
-ax.text(2.13, 0, "at least 1.3×", va="center", fontsize=13, fontweight="bold",
+ax.plot([fc], [0], "o", ms=9, color=C["data"])
+ax.text(fc + 0.83, 0, f"at least {val('eyeriss_fc')}×", va="center", fontsize=13, fontweight="bold",
         color=C["data"])
-for y, label in ((1, "Conv layers"), (0, "FC, batch > 16")):
+for y, label in ((1, "Conv layers"), (0, f"FC, batch > {val('eyeriss_batch')}")):
     ax.text(-0.01, y, label, transform=ax.get_yaxis_transform(), ha="right",
             va="center", fontsize=12, fontweight="bold", color=C["text"])
 ax.axvline(1, color=C["neutral"], lw=2)
@@ -444,15 +400,15 @@ def layertile_mats_svg():
         parts.append(f'<line x1="20" y1="{y}" x2="170" y2="{y}" stroke="{C["compute"]}" '
                      f'stroke-width="1.5" stroke-dasharray="6,4"/>')
     parts.append(rect(20, 60, 150, 50, C["compute_l"], C["compute"], 3, 2))
-    parts.append(svg_text(95, 85, "128 rows", 26, "700", C["compute"]))
+    parts.append(svg_text(95, 85, f"{val('w_tile_rows')} rows", 26, "700", C["compute"]))
     parts.append(svg_text(192, 60, "×", 34, "700", C["text"]))
     parts.append(rect(215, 10, 40, 100, C["memory_l"], C["memory"], 2.5, 2))
     parts.append(svg_text(277, 60, "=", 34, "700", C["text"]))
     parts.append(rect(300, 10, 40, 200, "white", C["data"], 2.5, 2))
     parts.append(rect(300, 60, 40, 50, C["data_l"], C["data"], 3, 2))
-    for x, y, name, dims, col in ((95, 240, "W", "512 × 256", C["compute"]),
-                                  (235, 140, "X", "256 × 32", C["memory"]),
-                                  (320, 240, "Z", "512 × 32", C["data"])):
+    for x, y, name, dims, col in ((95, 240, "W", f"{val('w_rows')} × {val('w_cols')}", C["compute"]),
+                                  (235, 140, "X", f"{val('w_cols')} × {val('x_cols')}", C["memory"]),
+                                  (320, 240, "Z", f"{val('w_rows')} × {val('x_cols')}", C["data"])):
         parts.append(svg_text(x, y, name, 28, "700", col))
         parts.append(svg_text(x, y + 34, dims, 24, "700", col))
     write_svg("layertile_mats.svg", parts)
@@ -465,24 +421,24 @@ def layertile_cost_svg(step):
     a2 = 1.0 if step >= 2 else 0.0
     x0, s = 10, 1.6
     parts.append(f'<g opacity="{a2}">')
-    parts.append(svg_text(x0, 22, "One SM holds 228 KB", 22, "700", C["text"], "start"))
+    parts.append(svg_text(x0, 22, f"One SM holds {val('smem_kb')} KB", 22, "700", C["text"], "start"))
     x = x0
-    for kb, col, light, label in ((64, C["compute"], C["compute_l"], "W tile"),
-                                  (16, C["memory"], C["memory_l"], ""),
-                                  (16, C["data"], C["data_l"], "")):
+    for kb, col, light, label in ((num("w_tile_kb"), C["compute"], C["compute_l"], "W tile"),
+                                  (num("x_kb"), C["memory"], C["memory_l"], ""),
+                                  (num("z_tile_kb"), C["data"], C["data_l"], "")):
         parts.append(rect(x, 40, kb * s, 40, light, col, 2, 0))
         if label:
             parts.append(svg_text(x + kb * s / 2, 60, label, 20, "700", col))
         x += kb * s
-    parts.append(svg_text(x0, 102, "64 + 16 + 16 = 96 KB: fits", 21, "700", C["data"],
-                          "start"))
-    parts.append(rect(x0, 120, 256 * s, 38, "white", C["danger"], 2.5, 0, 1.0, "7,4"))
-    parts.append(svg_text(x0 + 10, 139, "all of W: 256 KB, too big", 21, "700",
+    parts.append(svg_text(x0, 102, f"{val('w_tile_kb')} + {val('x_kb')} + {val('z_tile_kb')} = "
+                          f"{val('live_kb')} KB: fits", 21, "700", C["data"], "start"))
+    parts.append(rect(x0, 120, num("w_all_kb") * s, 38, "white", C["danger"], 2.5, 0, 1.0, "7,4"))
+    parts.append(svg_text(x0 + 10, 139, f"all of W: {val('w_all_kb')} KB, too big", 21, "700",
                           C["danger"], "start"))
-    xl = x0 + 228 * s
+    xl = x0 + num("smem_kb") * s
     parts.append(f'<line x1="{xl}" y1="32" x2="{xl}" y2="166" stroke="{C["text"]}" '
                  f'stroke-width="2.5"/>')
-    parts.append(svg_text(xl, 182, "228 KB", 20, "700", C["text"]))
+    parts.append(svg_text(xl, 182, f"{val('smem_kb')} KB", 20, "700", C["text"]))
     parts.append('</g>')
     # traffic (step 3): log scale, 100 px per decade from 1e4
     a3 = 1.0 if step >= 3 else 0.0
@@ -493,14 +449,14 @@ def layertile_cost_svg(step):
     def xpos(v):
         return x0 + (np.log10(v) - 4) * 100
 
-    untiled = int(V["untiled"].replace(",", ""))
-    tiled = int(V["tiled"].replace(",", ""))
+    untiled = int(num("untiled"))
+    tiled = int(num("tiled"))
     for y, v, col, label in ((244, untiled, C["danger"], "untiled, output stationary"),
                              (312, tiled, C["data"], "four weight tiles")):
         parts.append(svg_text(x0, y, label, 20, "400", C["text"], "start"))
         parts.append(rect(x0, y + 13, xpos(v) - x0, 32, col, col, 1, 0))
         parts.append(svg_text(xpos(v) + 8, y + 29, f"{v:,}", 21, "700", col, "start"))
-    parts.append(svg_text(x0 + 250, 335, f"{float(V['tile_gain']):.0f}× fewer", 28, "700",
+    parts.append(svg_text(x0 + 250, 335, f"{val('tile_gain')}× fewer", 28, "700",
                           C["data"], "start"))
     parts.append('</g>')
     write_svg(f"layertile_cost_step{step}.svg", parts)
@@ -514,10 +470,10 @@ for k in (1, 2, 3):
 # FP16 4,096-square multiply: T_M T_N / (T_M + T_N) FLOP per byte loaded for
 # square-ish tiles (derived from HA Sec. 11.7.5).
 tile_rows = [
-    ("No reuse", 0.5, "danger", "0.5"),
-    ("128 × 128 tiles", float(V["i128"]), "memory", f"{float(V['i128']):.0f}"),
-    ("256 × 128 tiles", float(V["i256"]), "memory", f"{float(V['i256']):.0f}"),
-    ("Load each once", float(V["ionce"]), "compute", f"{float(V['ionce']):,.0f}"),
+    ("No reuse", num("i_none"), "danger", val("i_none")),
+    (f"{val('tile_dim')} × {val('tile_dim')} tiles", calcs.MM.tile_intensity, "memory", val("i128")),
+    (f"{val('big_tile_m')} × {val('big_tile_n')} tiles", calcs.MM_256.tile_intensity, "memory", val("i256")),
+    ("Load each once", calcs.MM.compulsory_intensity, "compute", val("ionce")),
 ]
 logbars(out / "tileintensity.svg", tile_rows, [(1, "1"), (10, "10"), (100, "100"),
                                               (1000, "1,000")], (0.2, 40000),
@@ -526,11 +482,19 @@ logbars(out / "tileintensity.svg", tile_rows, [(1, "1"), (10, "10"), (100, "100"
 
 # ================================================================ equation 6: capacity
 def capacity_fig(step):
-    rows = [  # label, A, B, C (KB of 1,024 bytes)
-        ("128³, single", 32, 32, 64),
-        ("128³, double", 64, 64, 64),
-        ("K-tile 256, double", 128, 128, 64),
+    def kib(q):
+        return q.to("KiB").magnitude
+
+    rows = [  # label, A, B, C (KB of 1,024 bytes), from Scenarios.Matmul4096Fp16Tile128*
+        (f"{val('tile_dim')}³, single", *(kib(b) for b in (calcs.MM.a_tile_bytes, calcs.MM.b_tile_bytes,
+                                                           calcs.MM.accumulator_tile_bytes))),
+        (f"{val('tile_dim')}³, double", *(kib(b) for b in (calcs.MM_DBL.a_tile_bytes, calcs.MM_DBL.b_tile_bytes,
+                                                           calcs.MM_DBL.accumulator_tile_bytes))),
+        (f"K-tile {val('tk_big')}, double", *(kib(b) for b in (calcs.MM_K256.a_tile_bytes,
+                                                               calcs.MM_K256.b_tile_bytes,
+                                                               calcs.MM_K256.accumulator_tile_bytes))),
     ]
+    budget = num("smem_kb")
     fig, ax = plt.subplots(figsize=(5.8, 2.1))
     for i, (label, a, b, c) in enumerate(rows):
         y = len(rows) - 1 - i
@@ -544,14 +508,14 @@ def capacity_fig(step):
                     fontweight="bold", color="white", alpha=alpha)
             left += value
         total = a + b + c
-        over = total > 228
-        ax.text(335, y, f"{total} KB" + (": over" if over else ": fits"),
+        over = total > budget
+        ax.text(335, y, f"{total:.0f} KB" + (": over" if over else ": fits"),
                 va="center", fontsize=13, fontweight="bold",
                 color=C["danger"] if over else C["data"], alpha=alpha)
         ax.text(-0.01, y, label, transform=ax.get_yaxis_transform(), ha="right",
                 va="center", fontsize=13, fontweight="bold", color=C["text"])
-    ax.axvline(228, color=C["text"], lw=2, ls="--")
-    ax.text(230, 2.55, "228 KB", fontsize=11, fontweight="bold", color=C["text"])
+    ax.axvline(budget, color=C["text"], lw=2, ls="--")
+    ax.text(budget + 2, 2.55, f"{val('smem_kb')} KB", fontsize=11, fontweight="bold", color=C["text"])
     ax.set_xlim(0, 450)
     ax.set_xticks([0, 100, 200, 300])
     ax.set_ylim(-0.6, 2.9)
@@ -570,11 +534,14 @@ for k in (1, 2, 3, 4):  # step 1: the axes and the budget only
 # ================================================================ wave quantization
 # NVIDIA guide Sec. 3.2: A100, 108 SMs, one 256 x 128 tile per SM.
 def wave_svg(step):
-    cols, rows_n, box, gap = 12, 9, 24, 5
+    cols, rows_n = int(num("wave_cols1")), int(num("wave_rows"))  # one wave's tiles, one per SM
+    box, gap = 24, 5
     parts = svg_open(900, 340)
     for panel, (x0, filled, title, colour) in enumerate((
-            (40, 108, "Wave 1: 108 tiles on 108 SMs", C["compute"]),
-            (500, 9, "Wave 2: 9 tiles, 99 SMs idle", C["danger"]))):
+            (40, int(num("wave_tiles1")), f"Wave 1: {val('wave_tiles1')} tiles on {val('a100_sms')} SMs",
+             C["compute"]),
+            (500, int(num("wave_tail")), f"Wave 2: {val('wave_tail')} tiles, {val('wave_idle')} SMs idle",
+             C["danger"]))):
         alpha = 1.0 if panel == 0 or step >= 2 else 0.0
         parts.append(f'<g opacity="{alpha}">')
         parts.append(svg_text(x0, 22, title, 23, "700", colour, "start"))
@@ -595,12 +562,14 @@ for k in (1, 2):
     wave_svg(k)
 
 # ================================================================ mapping space
+SUP = str.maketrans("0123456789", "⁰¹²³⁴⁵⁶⁷⁸⁹")
 space_rows = [
-    ("Placement", 1024, "neutral", "4⁵ = 1,024"),
-    ("Loop order", 5040, "neutral", "7! = 5,040"),
-    ("Parallelization", 120, "neutral", "6!/3! = 120"),
-    ("All three, one level", int(V["space"].replace(",", "")), "danger",
-     f"≈ {round(int(V['space'].replace(',', '')) / 1e6, -1):.0f} million"),
+    ("Placement", calcs.SPACE.placements, "neutral",
+     f"{val('sp_tiers')}{val('sp_tensors').translate(SUP)} = {val('sp_place')}"),
+    ("Loop order", calcs.SPACE.loop_orders, "neutral", f"{val('sp_depth')}! = {val('sp_orders')}"),
+    ("Parallelization", calcs.SPACE.parallelizations, "neutral",
+     f"{val('sp_cand')}!/{val('sp_cand_rest')}! = {val('sp_par')}"),
+    ("All three, one level", calcs.SPACE.per_level, "danger", f"≈ {val('space_m')} million"),
 ]
 for k in (1, 2):
     logbars(out / f"space_step{k}.svg", space_rows,
@@ -689,16 +658,11 @@ for k in (1, 2, 3, 4):
 # ================================================================ registers and resident threads
 # H100 SM (compute capability 9.0, CUDA Programming Guide Tables 30 and 31):
 # 65,536 registers, at most 2,048 threads, at most 255 registers per thread.
-def resident_threads(regs):
-    return min(2048, (65536 // regs) // 32 * 32)
-
-
 reg_rows = []
-for regs, color_key in ((32, "data"), (64, "memory"), (128, "memory"), (255, "danger")):
-    threads = resident_threads(regs)
-    share = 100 * threads / 2048
-    reg_rows.append((f"{regs} registers", threads, color_key,
-                     f"{threads:,} threads: {share:g}%"))
+for s, key, color_key in zip(calcs.REGS, ("r32", "r64", "r128", "rmax"),
+                             ("data", "memory", "memory", "danger")):
+    reg_rows.append((f"{val(key + '_regs')} registers", s.resident_threads, color_key,
+                     f"{val(key + '_threads')} threads: {val(key + '_pct')}%"))
 sp.hbars(out / "regs.svg", reg_rows, "threads", log=False, size=(5.8, 1.55),
          xlabel="Threads resident on one H100 SM (derived)")
 
@@ -764,19 +728,20 @@ def diag_svg(step):
     parts.append('</g>')
     # 2: shape (top right), an illustrative width of 1,000 in blocks of 64
     parts.append(f'<g opacity="{1.0 if step >= 3 else 0.0}">')
-    head(462, 16, "2  Shape (width 1,000, illustrative)")
+    head(462, 16, f"2  Shape (width {val('pad_width')}, illustrative)")
     bw, x0 = 24, 462
-    for k in range(16):
+    pad = calcs.PAD
+    for k in range(pad.tiles):
         x = x0 + k * (bw + 2)
-        if k < 15:
+        if k < pad.full_tiles:
             parts.append(rect(x, 36, bw, 34, C["compute_l"], C["compute"], 1.5, 3))
         else:
             parts.append(rect(x, 36, bw, 34, "white", C["danger"], 2, 3, 1.0, "4,3"))
-            parts.append(rect(x, 36, bw * 40 / 64, 34, C["danger_l"], C["danger"], 1.5, 3))
-    parts.append(svg_text(x0, 92, "1,000 = 15 × 64 + 40", 19, "700", C["danger"],
-                          "start"))
-    parts.append(svg_text(x0, 118, "A100: multiples of 64; pad to 1,024", 19, "700",
-                          C["data"], "start"))
+            parts.append(rect(x, 36, bw * pad.remainder / pad.tile, 34, C["danger_l"], C["danger"], 1.5, 3))
+    parts.append(svg_text(x0, 92, f"{val('pad_width')} = {val('pad_blocks')} × {val('dim_mult_a100')} + "
+                          f"{val('pad_rest')}", 19, "700", C["danger"], "start"))
+    parts.append(svg_text(x0, 118, f"A100: multiples of {val('dim_mult_a100')}; pad to {val('pad_to')}", 19,
+                          "700", C["data"], "start"))
     parts.append('</g>')
     # 3: layout (bottom), the first nine values of the 3 x 3 RGB image
     parts.append(f'<g opacity="{1.0 if step >= 4 else 0.0}">')
@@ -808,13 +773,14 @@ for k in (1, 2, 3, 4):
 # ================================================================ HBM energy per boundary
 # 160 pJ per byte: HA Lighthouse 11.2, 45 nm DRAM estimate; 7 nm HBM2 I/O
 # range from Jouppi et al. 2021, Table 2. Values from calcs.py.
-fp16_uj = float(V["b_fp16"])
-int8_uj = float(V["b_int8"])
-hbm_lo, hbm_hi = (float(x) for x in V["b_hbm"].split(" to "))
+def uj(scenario):
+    return scenario.energy.to("microjoule").magnitude
+
+
 sp.hbars(out / "boundary.svg", [
-    ("Unfused, FP16, 45 nm", fp16_uj, "danger", f"{fp16_uj:.0f} µJ"),
-    ("Unfused, INT8, 45 nm", int8_uj, "memory", f"{int8_uj:.0f} µJ"),
-    ("Unfused, INT8, 7 nm HBM2", hbm_hi, "neutral", f"{hbm_lo:.1f} to {hbm_hi:.1f} µJ"),
+    ("Unfused, FP16, 45 nm", uj(calcs.B_FP16), "danger", f"{val('b_fp16')} µJ"),
+    ("Unfused, INT8, 45 nm", uj(calcs.B_INT8), "memory", f"{val('b_int8')} µJ"),
+    ("Unfused, INT8, 7 nm HBM2", uj(calcs.B_HBM_HI), "neutral", f"{val('b_hbm_lo')} to {val('b_hbm_hi')} µJ"),
     ("Fused", 0.0, "data", "about 0: the map stays on chip"),
 ], "µJ", log=False, size=(5.8, 2.0),
     xlabel="HBM energy per image at one layer boundary (µJ, derived)")
@@ -825,8 +791,8 @@ sp.hbars(out / "boundary.svg", [
 # their figures and sources.
 fig, ax = plt.subplots(figsize=(4.6, 0.95))
 for y, (label, value, color_key, text) in enumerate((
-        ("Filters spilled", 5184, "danger", "5,184 reads: 36×"),
-        ("Filters held", 144, "data", "144 reads"))):
+        ("Filters spilled", num("ex_spilled"), "danger", f"{val('ex_spilled')} reads: {val('ex_positions')}×"),
+        ("Filters held", num("ex_held"), "data", f"{val('ex_held')} reads"))):
     ax.barh(y, value, color=C[color_key], height=0.62)
     ax.text(-0.01, y, label, transform=ax.get_yaxis_transform(), ha="right",
             va="center", fontsize=14, fontweight="bold", color=C["text"])
@@ -839,7 +805,7 @@ sp.save(fig, out / "weight_reads.svg")
 
 
 def tiling_svg():
-    side, x0, y0, tiles = 400, 40, 30, 32
+    side, x0, y0, tiles = 400, 40, 30, int(num("mm_tiles_dim"))
     step_px = side / tiles
     parts = ['<svg xmlns="http://www.w3.org/2000/svg" width="480" height="485" '
              'viewBox="0 0 480 485">', '<rect width="480" height="485" fill="white"/>']
@@ -860,9 +826,10 @@ def tiling_svg():
                  f'y2="{ty + 50}" stroke="{C["compute"]}" stroke-width="2"/>')
     parts.append(f'<rect x="{tx + 60}" y="{ty + 28}" width="310" height="46" rx="4" '
                  f'fill="white" stroke="{C["compute"]}" stroke-width="1.5"/>')
-    parts.append(svg_text(tx + 215, ty + 51, "one 128 × 128 tile", 29, "700",
+    parts.append(svg_text(tx + 215, ty + 51, f"one {val('tile_dim')} × {val('tile_dim')} tile", 29, "700",
                           C["compute"]))
-    parts.append(svg_text(x0 + side / 2, y0 + side + 30, "4,096 = 32 tiles of 128",
+    parts.append(svg_text(x0 + side / 2, y0 + side + 30,
+                          f"{val('mm_dim')} = {val('mm_tiles_dim')} tiles of {val('tile_dim')}",
                           29, "700", C["text"]))
     parts.append('</svg>')
     return "\n".join(parts)
@@ -870,22 +837,24 @@ def tiling_svg():
 
 (out / "tiling.svg").write_text(tiling_svg())
 
+TILE = calcs.FRINGE.tile                   # the 128-wide array
 widths = np.arange(64, 321)
-util = widths / (128 * np.ceil(widths / 128))
+util = widths / (TILE * np.ceil(widths / TILE))
 fig, ax = plt.subplots(figsize=(3.6, 2.3))
 ax.plot(widths, util * 100, color=C["text"], lw=2.5)
-ax.axvspan(129, 256, color=C["danger_l"], zorder=0)
-ax.plot([128], [100], "o", ms=10, color=C["text"], zorder=5)
-ax.plot([129], [129 / 256 * 100], "o", ms=10, color=C["danger"], zorder=5)
-ax.text(134, 104, "128: 100%", ha="left", fontsize=12, fontweight="bold",
+W129, PAD129 = calcs.FRINGE.pruned_channels, calcs.FRINGE.padded_channels
+ax.axvspan(W129, PAD129, color=C["danger_l"], zorder=0)
+ax.plot([TILE], [100], "o", ms=10, color=C["text"], zorder=5)
+ax.plot([W129], [100 * calcs.FRINGE.utilization], "o", ms=10, color=C["danger"], zorder=5)
+ax.text(134, 104, f"{TILE}: 100%", ha="left", fontsize=12, fontweight="bold",
         color=C["text"])
-ax.text(134, 44, "129: 50%", ha="left", fontsize=12, fontweight="bold",
+ax.text(134, 44, f"{val('w129')}: {val('w129_pct')}%", ha="left", fontsize=12, fontweight="bold",
         color=C["danger"])
 ax.set_xlim(64, 320)
 ax.set_ylim(0, 118)
 ax.set_xticks([64, 128, 192, 256, 320])
 ax.set_yticks([0, 50, 100])
-ax.set_xlabel("Layer width (128-wide array)")
+ax.set_xlabel(f"Layer width ({TILE}-wide array)")
 ax.set_ylabel("Array use (%)")
 ax.text(0.99, 0.02, "Modeled", transform=ax.transAxes, ha="right",
         va="bottom", fontsize=11, color=C["neutral"])
@@ -893,28 +862,23 @@ sp.save(fig, out / "cliff.svg")
 
 # NVIDIA figure 7(a), A100: achieved TFLOP/s against N, read from the
 # published SVG (for Lecture 11 Part 1).
-nv_n = np.arange(112, 513, 8)
-nv_tflops = np.array([
-    167.0, 177.9, 189.7, 148.2, 158.6, 163.7, 174.8, 177.3, 190.1, 192.3,
-    205.7, 205.4, 219.9, 220.0, 234.4, 232.2, 247.7, 244.7, 263.2, 192.3,
-    199.7, 202.6, 210.8, 212.5, 219.8, 221.8, 231.6, 231.1, 240.7, 241.5,
-    227.5, 250.6, 259.5, 259.1, 269.7, 213.7, 219.0, 221.5, 225.4, 227.9,
-    233.7, 235.0, 242.0, 242.2, 248.9, 248.7, 254.2, 256.0, 263.1, 262.9,
-    270.6])
+nv_n = np.array([r["n"] for r in calcs.TILE_SERIES.entries])          # Literature series
+nv_tflops = np.array([r["tflops"] for r in calcs.TILE_SERIES.entries])
+N0, N1 = num("nv_n0"), num("nv_n1")
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 2.5))
-    shown = nv_n <= 128 if k == 1 else nv_n <= 512
+    shown = nv_n <= N0 if k == 1 else nv_n <= nv_n[-1]
     ax.plot(nv_n[shown], nv_tflops[shown], color=C["data"], lw=2.5,
             marker="o", ms=4)
-    for edge in (128, 256, 384):
+    for edge in (N0, num("nv_edge2"), num("nv_edge3")):
         ax.axvline(edge, color=C["neutral"], lw=1, ls=":")
     alpha = 1.0 if k == 2 else 0.0
-    ax.annotate(f"136: 148 TFLOP/s\n6% more work,\n"
-                f"{100 * (float(V['time36']) - 1):.0f}% more time",
-                (136, 148.2), xytext=(150, 22), textcoords="data",
+    ax.annotate(f"{val('nv_n1')}: {val('nv_t1')} TFLOP/s\n{val('nv_work_pct')}% more work,\n"
+                f"{val('time36_pct')}% more time",
+                (N1, num("nv_t1_1")), xytext=(150, 22), textcoords="data",
                 fontsize=11, fontweight="bold", color=C["danger"], alpha=alpha,
                 arrowprops=dict(arrowstyle="->", color=C["danger"], alpha=alpha))
-    ax.annotate("128: 190 TFLOP/s", (128, 189.7), xytext=(150, 284),
+    ax.annotate(f"{val('nv_n0')}: {val('nv_t0')} TFLOP/s", (N0, num("nv_t0_1")), xytext=(150, 284),
                 textcoords="data", fontsize=11, fontweight="bold",
                 color=C["data"], va="center",
                 arrowprops=dict(arrowstyle="->", color=C["data"]))
@@ -924,15 +888,15 @@ for k in (1, 2):
     ax.set_ylim(0, 300)
     ax.set_xticks([128, 256, 384, 512])
     ax.set_yticks([0, 100, 200, 300])
-    ax.set_xlabel("N, output width (tiles 128 wide)")
+    ax.set_xlabel(f"N, output width (tiles {val('big_tile_n')} wide)")
     ax.set_ylabel("TFLOP/s")
     sp.save(fig, out / f"measured_tiles_step{k}.svg")
 
 # H100 roofline pieces (HA Napkin Math 11.4 to 11.10)
-BW = 3.35  # TB/s
+BW = num("h100_bw")  # TB/s
 XLIM = (0.5, 5000)
 YLIM = (1, 6000)
-PEAK16 = 989
+PEAK16 = num("h100_fp16")
 
 
 def roof_axes(size=(5.8, 2.9)):
@@ -962,9 +926,9 @@ def fp16_roof(ax, where=(0.02, 0.95, "left"), size=None):
     slope(ax, PEAK16)
     ax.plot([PEAK16 / BW, XLIM[1]], [PEAK16, PEAK16], color=C["compute"], lw=3)
     ax.plot([PEAK16 / BW] * 2, [YLIM[0], 2.2], color=C["neutral"], lw=1.2, ls=":")
-    ax.text(PEAK16 / BW / 1.1, 1.3, "ridge 295", color=C["neutral"],
+    ax.text(PEAK16 / BW / 1.1, 1.3, f"ridge {val('ridge16_int')}", color=C["neutral"],
             fontsize=size or 10, ha="right")
-    ax.text(where[0], where[1], "FP16 ceiling: 989 TFLOP/s", transform=ax.transAxes,
+    ax.text(where[0], where[1], f"FP16 ceiling: {val('h100_fp16')} TFLOP/s", transform=ax.transAxes,
             color=C["compute"], fontsize=size or 11, fontweight="bold", ha=where[2], va="top")
 
 
@@ -974,19 +938,19 @@ ax.xaxis.label.set_size(13)
 ax.yaxis.label.set_size(13)
 ax.tick_params(labelsize=13)
 fp16_roof(ax, (0.98, 0.30, "right"), size=13)
-ax.plot([563.1], [PEAK16], "o", ms=11, color=C["compute"], mec="white", mew=1.5, zorder=5)
-ax.annotate("ResNet-50 stage-3 conv: 563", (563.1, PEAK16), xytext=(0, 16),
+ax.plot([num("conv_ai")], [PEAK16], "o", ms=11, color=C["compute"], mec="white", mew=1.5, zorder=5)
+ax.annotate(f"ResNet-50 stage-3 conv: {val('conv_ai_int')}", (num("conv_ai"), PEAK16), xytext=(0, 16),
             textcoords="offset points", ha="right", fontsize=13, fontweight="bold",
             color=C["compute"])
 sp.save(fig, out / "recall_roof.svg")
 
 # five layers, final state (thumbnail for the next-lecture slide)
 layers = [
-    ("GPT-2 XL decode, batch 1: 0.3%", 1.0, "danger", (8, -4), "left"),
-    ("LayerNorm: 0.7%", 2.0, "danger", (8, -4), "left"),
-    ("ResNet-50 FC head: 10.3%", 30.5, "memory", (8, -4), "left"),
-    ("ResNet-50 stage-3 conv", 563.1, "compute", (4, -16), "left"),
-    ("GPT-2 XL QKV prefill", 1046.7, "compute", (0, 14), "center"),
+    (f"GPT-2 XL decode, batch 1: {val('dec_pct')}%", num("dec_ai"), "danger", (8, -4), "left"),
+    (f"LayerNorm: {val('ln_pct')}%", num("ln_ai"), "danger", (8, -4), "left"),
+    (f"ResNet-50 FC head: {val('head_pct')}%", num("head_ai"), "memory", (8, -4), "left"),
+    ("ResNet-50 stage-3 conv", num("conv_ai"), "compute", (4, -16), "left"),
+    ("GPT-2 XL QKV prefill", num("qkv_ai"), "compute", (0, 14), "center"),
 ]
 fig, ax = roof_axes()
 fp16_roof(ax)
