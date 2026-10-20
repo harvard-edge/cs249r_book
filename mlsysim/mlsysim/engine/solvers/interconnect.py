@@ -1,4 +1,5 @@
-"""Interconnect solvers: bandwidth-only transfer bounds across link tiers.
+"""Interconnect solvers: transfer bounds across link tiers, alpha-beta messages,
+bisection cuts, incast, and fits to measured collectives.
 
 Domain implementations behind ``mlsysim.solvers`` (the public import
 path, derived from ``engine.solvers.__init__``); kept per-domain so the logic stays reviewable.
@@ -8,7 +9,8 @@ from __future__ import annotations
 
 from typing import Dict
 
-from ..results import (CommunicationIntensityResult, GradientSyncResult,
+from ..results import (AlphaBetaResult, BisectionResult, CollectiveFitResult,
+                       CommunicationIntensityResult, GradientSyncResult, IncastResult,
                        TensorParallelCommResult, TransferLadderResult)
 from ...core.types import Quantity
 from ...core.units import BYTES_FP16, Q_
@@ -128,4 +130,120 @@ class CommunicationIntensityModel(ForwardModel):
             intensity=(sent.to("byte").magnitude / flops.to("flop").magnitude),
             balance=(link_bandwidth.to("byte/second").magnitude / peak_flops.to("flop/second").magnitude),
             compute_time_at_peak=(flops / peak_flops).to("second"),
+        )
+
+
+class AlphaBetaModel(ForwardModel):
+    """
+    Point-to-point message time under the alpha-beta model on several paths.
+
+    Each message of ``n`` bytes pays a fixed startup ``alpha`` (NIC, switch
+    hops, error correction, software) plus ``n / beta`` on the wire. The two
+    terms are equal at ``n* = alpha * beta``: below it a lower alpha helps,
+    above it only a higher beta does.
+
+    Literature Source: Hockney (1994), "The communication challenge for MPP".
+    """
+    requires = ("alphas", "bandwidths", "messages")
+    produces = AlphaBetaResult
+
+    def solve(self, alphas: Dict[str, Quantity], bandwidths: Dict[str, Quantity],
+              messages: Dict[str, Quantity]) -> AlphaBetaResult:
+        from ...physics.communication import calc_alpha_beta_crossover, calc_point_to_point_time
+        times, wire = {}, {}
+        for path, alpha in alphas.items():
+            beta = bandwidths[path]
+            times[path] = {m: calc_point_to_point_time(n, alpha, beta) for m, n in messages.items()}
+            wire[path] = {m: (n / beta).to("second") for m, n in messages.items()}
+        cross = {path: calc_alpha_beta_crossover(alpha, bandwidths[path]) for path, alpha in alphas.items()}
+        return AlphaBetaResult(alphas=dict(alphas), bandwidths=dict(bandwidths), messages=dict(messages),
+                               times=times, transmission_times=wire, crossovers=cross)
+
+
+class BisectionModel(ForwardModel):
+    """
+    A ring AllReduce whose every edge crosses the bisection, on a full and an oversubscribed cut.
+
+    With ranks placed alternately in the two halves, each of the ``N/2`` ring
+    edges in one direction crosses the cut and carries ``2(N-1)/N`` times the
+    per-device payload (ReduceScatter then AllGather). The cut carries ``N/2``
+    links, divided by the oversubscription ratio. Only the communication
+    fraction of the step stretches, so relative throughput is
+    ``1 / ((1 - f) + f r)``; the lost share of a cluster's capital cost is its
+    equivalent idle capacity. This placement is the worst case.
+    """
+    requires = ("n_devices", "link_bandwidth", "oversubscription_ratio")
+    produces = BisectionResult
+
+    def solve(self, n_devices: int, link_bandwidth: Quantity, oversubscription_ratio: float,
+              payload_per_device: Quantity, communication_fraction: float,
+              cluster_cost: Quantity) -> BisectionResult:
+        from ...physics.communication import calc_bisection_bandwidth, calc_oversubscription_effect
+        side = n_devices // 2
+        full = calc_bisection_bandwidth(side, link_bandwidth)
+        over = calc_bisection_bandwidth(side, link_bandwidth, oversubscription_ratio=oversubscription_ratio)
+        factor = calc_ring_allreduce_data_factor(n_devices)
+        crossing = side * payload_per_device * factor
+        t_full = (crossing / full).to("second")
+        t_over = (crossing / over).to("second")
+        rel, loss = calc_oversubscription_effect(communication_fraction, oversubscription_ratio)
+        return BisectionResult(
+            devices_per_side=side, bisection_full=full, bisection_oversubscribed=over,
+            ring_factor=factor, crossing_bytes=crossing.to("GB"), time_full=t_full,
+            time_oversubscribed=t_over, slowdown=(t_over / t_full).to("").magnitude,
+            relative_throughput=rel, throughput_loss=loss, idle_cost=loss * cluster_cost,
+        )
+
+
+class IncastModel(ForwardModel):
+    """
+    Many senders converge on one egress port (incast).
+
+    The offered load is the senders' combined rate; the buffer fills at the
+    offered load less what the egress drains, and a full buffer holds
+    ``buffer / egress`` of waiting. The bandwidth-delay product is the data in
+    flight on the egress link during one feedback round trip, which is what
+    end-to-end congestion control must absorb before it can react.
+    """
+    requires = ("n_senders", "sender_bandwidth", "egress_bandwidth", "buffer")
+    produces = IncastResult
+
+    def solve(self, n_senders: int, sender_bandwidth: Quantity, egress_bandwidth: Quantity,
+              buffer: Quantity, feedback_rtt: Quantity) -> IncastResult:
+        offered = n_senders * sender_bandwidth
+        net = offered - egress_bandwidth
+        return IncastResult(
+            offered_load=offered, oversubscription=(offered / egress_bandwidth).to("").magnitude,
+            net_fill_rate=net, overflow_time=(buffer / net).to("microsecond"),
+            drain_time=(buffer / egress_bandwidth).to("microsecond"),
+            bandwidth_delay_product=(egress_bandwidth * feedback_rtt).to("KB"),
+        )
+
+
+class CollectiveFitModel(ForwardModel):
+    """
+    Two-parameter fit to a measured collective sweep (nccl-tests rows).
+
+    The floor is the median time of the small messages; the bandwidth is the
+    algorithm bandwidth at the largest message. The model ``floor + n / bw``
+    is close at both ends; the worst ratio of measured to modeled time in a
+    middle size range shows where delivered bandwidth is still ramping.
+    """
+    requires = ("rows",)
+    produces = CollectiveFitResult
+
+    def solve(self, rows, floor_cutoff: Quantity, mid_low: Quantity, mid_high: Quantity) -> CollectiveFitResult:
+        import statistics
+        cut = floor_cutoff.to("byte").magnitude
+        lo, hi = mid_low.to("byte").magnitude, mid_high.to("byte").magnitude
+        floor_us = statistics.median(r["oop_time_us"] for r in rows if r["size_bytes"] <= cut)
+        bw_gbps = rows[-1]["oop_algbw_GBps"]
+        mid = [r for r in rows if lo <= r["size_bytes"] <= hi]
+        worst = max(r["oop_time_us"] / (floor_us + r["size_bytes"] / (bw_gbps * 1e9) * 1e6) for r in mid)
+        bus = [r["oop_busbw_GBps"] for r in mid]
+        return CollectiveFitResult(
+            row_count=len(rows), floor_time=Q_(floor_us, "microsecond"), bandwidth=Q_(bw_gbps, "GB/s"),
+            knee=Q_(floor_us * 1e-6 * bw_gbps * 1e9, "byte"), worst_mid_ratio=worst,
+            peak_bus_bandwidth=Q_(max(r["oop_busbw_GBps"] for r in rows), "GB/s"),
+            mid_bus_bandwidth_low=Q_(min(bus), "GB/s"), mid_bus_bandwidth_high=Q_(max(bus), "GB/s"),
         )

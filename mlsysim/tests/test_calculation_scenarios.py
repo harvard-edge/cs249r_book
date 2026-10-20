@@ -189,3 +189,139 @@ def test_growth_and_runs():
     assert g.fleet_share == approx(0.51151)
     assert Scenarios.GpuFailuresLlama3Run.result.interval.to("hour").magnitude == approx(3.0518)
     assert Scenarios.Gpt3PublishedRun.peak_fraction == approx(0.2, rel=0.05)
+
+
+# --- Network fabrics (added 2026-10-20) --------------------------------------
+
+def test_exposed_allreduce_step():
+    intra, inter = Scenarios.ExposedAllReduceIntraNode, Scenarios.ExposedAllReduceInterNode
+    assert sum(q.to("ms").magnitude for q in intra.compute_phases.values()) == approx(intra.compute_time.to("ms").magnitude)
+    assert inter.step_time.to("ms").magnitude == approx(230)
+    assert inter.exposed_communication_fraction == approx(0.13043)
+    assert inter.compute_fraction == approx(0.86957)
+    assert intra.compute_fraction == approx(0.99502)
+
+
+def test_ecmp_hash_collision():
+    s = Scenarios.EcmpHashCollision
+    assert (s.flows, s.paths, s.worst_load, s.idle_paths) == (8, 4, 4, 1)
+    assert s.even_load == approx(2.0)
+    assert s.slowdown == approx(2.0)
+
+
+def test_spine_optics_buildout():
+    s = Scenarios.SpineOpticsTraining10K
+    assert s.n_links == 20_000
+    assert s.total_cost.to("USD").magnitude == approx(10e6)
+    assert s.total_power.to("kW").magnitude == approx(400)
+
+
+def test_go_back_n_window():
+    assert Scenarios.GoBackNResendNdr.product.to("KB").magnitude == approx(250)
+
+
+def test_alpha_beta_ndr_roce():
+    r = Scenarios.AlphaBetaNdrRoce.result
+    t = {p: {m: v.to("microsecond").magnitude for m, v in d.items()} for p, d in r.times.items()}
+    assert t["NDR"]["control"] == approx(1.58)
+    assert t["RoCE 100G"]["control"] == approx(5.32)
+    assert t["RoCE 400G"]["control"] == approx(5.08)
+    assert t["NDR"]["shard"] == approx(7001.5)
+    assert t["RoCE 100G"]["shard"] == approx(28005)
+    assert t["RoCE 400G"]["shard"] == approx(7005)
+    assert r.crossovers["NDR"].to("KB").magnitude == approx(75)
+    assert r.crossovers["RoCE 100G"].to("KB").magnitude == approx(62.5)
+
+
+def test_alpha_beta_hdr_ndr_small_message():
+    r = Scenarios.AlphaBetaHdrNdrSmallMessage.result
+    hdr, ndr = (r.times[p]["small"].to("microsecond").magnitude for p in ("HDR", "NDR"))
+    assert (hdr, ndr) == (approx(1.9), approx(1.7))
+    assert 1 - ndr / hdr == approx(0.10526)
+
+
+def test_nccl_allreduce_fit():
+    r = Scenarios.NcclAllReduceH100NodeFit.result
+    assert r.row_count == 32
+    assert r.floor_time.to("microsecond").magnitude == approx(17.04)
+    assert r.bandwidth.to("GB/s").magnitude == approx(274.23)
+    assert r.knee.to("MB").magnitude == approx(4.6729)
+    assert r.worst_mid_ratio == approx(1.7435)
+    assert r.peak_bus_bandwidth.to("GB/s").magnitude == approx(480.16)
+    assert r.mid_bus_bandwidth_low.to("GB/s").magnitude == approx(176.77)
+    assert r.mid_bus_bandwidth_high.to("GB/s").magnitude == approx(400.53)
+    assert r.model_time(r.knee).to("microsecond").magnitude == approx(2 * 17.04)
+
+
+def test_ring_allreduce_across_oversubscribed_spine():
+    r = Scenarios.RingAllReduceAcross4to1Spine.result
+    assert r.devices_per_side == 512
+    assert r.bisection_full.to("TB/s").magnitude == approx(25.6)
+    assert r.bisection_oversubscribed.to("TB/s").magnitude == approx(6.4)
+    assert r.ring_factor == approx(1.998047)
+    assert r.crossing_bytes.to("GB").magnitude == approx(5115)
+    assert r.time_full.to("second").magnitude == approx(0.19980)
+    assert r.time_oversubscribed.to("second").magnitude == approx(0.79922)
+    assert r.slowdown == approx(4.0)
+    assert r.relative_throughput == approx(0.52632)
+    assert r.idle_cost.to("USD").magnitude == approx(142.105e6)
+    assert Scenarios.RingAllReduceAcross2to1Spine.result.throughput_loss == approx(0.23077)
+
+
+def test_fat_tree_reach():
+    k64, k256 = Scenarios.FatTreeNdrSwitch, Scenarios.FatTree102T4Switch
+    assert (k64.radix, k64.two_tier_hosts, k64.three_tier_hosts, k64.three_tier_switches, k64.pod_hosts) == (
+        64, 2048, 65536, 5120, 1024)
+    assert (k256.radix, k256.two_tier_hosts, k256.three_tier_hosts) == (256, 32768, 4194304)
+
+
+def test_torus_against_fat_tree():
+    s = Scenarios.TorusVsFatTree4K
+    assert (s.n_endpoints, s.side, s.torus_cut_links, s.fat_tree_cut_links) == (4096, 16, 512, 2048)
+    assert s.torus_bisection.to("TB/s").magnitude == approx(25.6)
+    assert s.fat_tree_bisection.to("TB/s").magnitude == approx(102.4)
+    assert (s.torus_diameter, s.fat_tree_path_switches) == (24, 5)
+
+
+def test_rail_hops():
+    lat = Scenarios.RailVsLeafSpineHops.latencies
+    assert lat["leaf-spine-leaf"].to("microsecond").magnitude == approx(1.8)
+    assert lat["rail"].to("microsecond").magnitude == approx(0.6)
+
+
+def test_incast_superpod_unit():
+    r = Scenarios.IncastSuperPodUnit.result
+    assert r.offered_load.to("TB/s").magnitude == approx(12.8)
+    assert r.oversubscription == approx(256)
+    assert r.net_fill_rate.to("TB/s").magnitude == approx(12.75)
+    assert r.overflow_time.to("microsecond").magnitude == approx(2.5098)
+    assert r.drain_time.to("microsecond").magnitude == approx(640)
+    assert r.bandwidth_delay_product.to("KB").magnitude == approx(250)
+
+
+def test_component_exposure():
+    t = Scenarios.TransceiverDegradationRoce4K
+    assert t.n_components == 24576
+    assert t.p_any == approx(0.21789)
+    links = Scenarios.DegradedLinksReferenceFabric
+    assert links.expected_events == approx(3.0)
+    assert links.p_any == approx(0.95029)
+
+
+def test_silent_slowdown_run():
+    s = Scenarios.DegradedTransceiverRun1K
+    assert s.device_hours == approx(737280)
+    assert s.lost_device_hours["low"] == approx(14745.6)
+    assert s.lost_device_hours["high"] == approx(22118.4)
+    assert s.lost_cost["high"].to("USD").magnitude == approx(44236.8)
+    assert s.no_overlap_slowdown == approx(0.033333)
+
+
+def test_nic_sharing_and_diagnosis():
+    n = Scenarios.SriovNdrNic
+    assert n.slice_rate.to("Gbps").magnitude == approx(50)
+    assert n.burst_time.to("second").magnitude == approx(2)
+    d = Scenarios.HalfRateLinkDiagnosis
+    assert d.slowdown == approx(0.142857)
+    assert d.expected_bandwidth.to("GB/s").magnitude == approx(48)
+    assert d.measured_bandwidth.to("GB/s").magnitude == approx(24)

@@ -15,11 +15,12 @@ scenario rather than restating it.
 
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict
 
 from ..core.types import Quantity
+from ..core.units import Q_
 from ..hardware.types import HardwareNode
 from ..models.types import Workload
 from ..systems.types import Fleet
@@ -329,6 +330,7 @@ class StepBreakdownScenario(BaseScenario):
     synchronization_time: Quantity
     overlap_time: Quantity
     compute_speedup: float = 1.0
+    compute_phases: Dict[str, Quantity] = {}   # optional split of compute_time (forward, backward)
 
     @property
     def step_time(self) -> Quantity:
@@ -338,6 +340,12 @@ class StepBreakdownScenario(BaseScenario):
     @property
     def compute_fraction(self) -> float:
         return ((self.compute_time / self.compute_speedup) / self.step_time).to("").magnitude
+
+    @property
+    def exposed_communication_fraction(self) -> float:
+        """Share of the step spent in communication and synchronization that overlap does not hide."""
+        exposed = self.communication_time + self.synchronization_time - self.overlap_time
+        return (exposed / self.step_time).to("").magnitude
 
 
 class ScalingStepScenario(BaseScenario):
@@ -408,3 +416,313 @@ class PublishedRunScenario(BaseScenario):
     @property
     def peak_fraction(self) -> float:
         return (self.achieved_rate / self.accelerator.compute.peak_flops).to("").magnitude
+
+
+
+# --- Network fabrics (added 2026-10-20) --------------------------------------
+
+class AlphaBetaScenario(BaseScenario):
+    """Named messages on named paths, each path an ``alpha`` startup and a ``beta`` bandwidth."""
+    alphas: Dict[str, Quantity]
+    bandwidths: Dict[str, Quantity]
+    messages: Dict[str, Quantity]
+
+    @property
+    def result(self):
+        from .solvers import AlphaBetaModel
+        return AlphaBetaModel().solve(self.alphas, self.bandwidths, self.messages)
+
+
+class PathLoadScenario(BaseScenario):
+    """Equal flows placed on equal-cost paths; the most loaded path drains last.
+
+    Loads count flows per path; drain time is in units of one flow alone on a path.
+    """
+    path_loads: List[int]
+
+    @property
+    def flows(self) -> int:
+        return sum(self.path_loads)
+
+    @property
+    def paths(self) -> int:
+        return len(self.path_loads)
+
+    @property
+    def even_load(self) -> float:
+        return self.flows / self.paths
+
+    @property
+    def worst_load(self) -> int:
+        return max(self.path_loads)
+
+    @property
+    def idle_paths(self) -> int:
+        return sum(1 for n in self.path_loads if n == 0)
+
+    @property
+    def slowdown(self) -> float:
+        """Drain time of the worst path against an even split."""
+        return self.worst_load / self.even_load
+
+
+class LinkBuildoutScenario(BaseScenario):
+    """``links_per_device`` links per accelerator of ``fleet``, each with a price and a module power."""
+    fleet: Fleet
+    links_per_device: int
+    cost_per_link: Quantity
+    power_per_link: Quantity
+
+    @property
+    def n_links(self) -> int:
+        return self.links_per_device * self.fleet.total_accelerators
+
+    @property
+    def total_cost(self) -> Quantity:
+        return self.n_links * self.cost_per_link
+
+    @property
+    def total_power(self) -> Quantity:
+        return (self.n_links * self.power_per_link).to("kW")
+
+
+class BandwidthDelayScenario(BaseScenario):
+    """Data a link carries during ``delay``: line rate times delay (for example, a Go-Back-N resend window)."""
+    link_bandwidth: Quantity
+    delay: Quantity
+
+    @property
+    def product(self) -> Quantity:
+        return (self.link_bandwidth * self.delay).to("KB")
+
+
+class OversubscriptionScenario(BaseScenario):
+    """A ring AllReduce whose edges all cross the bisection of ``fleet``, at 1:1 and at ``oversubscription_ratio``."""
+    fleet: Fleet
+    link_bandwidth: Quantity
+    oversubscription_ratio: float
+    payload_per_device: Quantity
+    communication_fraction: float
+    cluster_cost: Quantity
+
+    @property
+    def result(self):
+        from .solvers import BisectionModel
+        return BisectionModel().solve(
+            self.fleet.total_accelerators, self.link_bandwidth, self.oversubscription_ratio,
+            self.payload_per_device, self.communication_fraction, self.cluster_cost)
+
+
+class FatTreeScenario(BaseScenario):
+    """A non-blocking fat-tree of radix-``radix`` switches (Al-Fares et al. 2008)."""
+    radix: int
+
+    def hosts(self, tiers: int) -> int:
+        from ..physics.communication import calc_fat_tree_hosts
+        return calc_fat_tree_hosts(self.radix, tiers)
+
+    def switches(self, tiers: int) -> int:
+        from ..physics.communication import calc_fat_tree_switches
+        return calc_fat_tree_switches(self.radix, tiers)
+
+    @property
+    def two_tier_hosts(self) -> int:
+        return self.hosts(2)
+
+    @property
+    def three_tier_hosts(self) -> int:
+        return self.hosts(3)
+
+    @property
+    def three_tier_switches(self) -> int:
+        return self.switches(3)
+
+    @property
+    def pod_hosts(self) -> int:
+        """Hosts in one pod of the three-tier design: k/2 leaves of k/2 host ports."""
+        return (self.radix // 2) ** 2
+
+
+class TorusScenario(BaseScenario):
+    """``n_endpoints`` as a cubic torus against a non-blocking fat-tree, at equal per-link bandwidth."""
+    n_endpoints: int
+    link_bandwidth: Quantity
+    dims: int = 3
+    fat_tree_tiers: int = 3
+
+    @property
+    def side(self) -> int:
+        return round(self.n_endpoints ** (1 / self.dims))
+
+    @property
+    def torus_cut_links(self) -> int:
+        from ..physics.communication import calc_torus_bisection_links
+        return calc_torus_bisection_links(self.side, self.dims)
+
+    @property
+    def fat_tree_cut_links(self) -> int:
+        return self.n_endpoints // 2
+
+    @property
+    def torus_bisection(self) -> Quantity:
+        return self.torus_cut_links * self.link_bandwidth
+
+    @property
+    def fat_tree_bisection(self) -> Quantity:
+        return self.fat_tree_cut_links * self.link_bandwidth
+
+    @property
+    def torus_diameter(self) -> int:
+        from ..physics.communication import calc_torus_diameter
+        return calc_torus_diameter(self.side, self.dims)
+
+    @property
+    def fat_tree_path_switches(self) -> int:
+        from ..physics.communication import calc_fat_tree_path_switches
+        return calc_fat_tree_path_switches(self.fat_tree_tiers)
+
+
+class HopPathScenario(BaseScenario):
+    """Named paths through ``hops`` identical switch traversals of ``hop_latency`` each."""
+    hop_latency: Quantity
+    hops: Dict[str, int]
+
+    @property
+    def latencies(self) -> Dict[str, Quantity]:
+        from ..physics.communication import calc_hop_latency
+        return {k: calc_hop_latency(n, self.hop_latency) for k, n in self.hops.items()}
+
+
+class IncastScenario(BaseScenario):
+    """``n_senders`` at ``sender_bandwidth`` into one egress port with a ``buffer``."""
+    n_senders: int
+    sender_bandwidth: Quantity
+    egress_bandwidth: Quantity
+    buffer: Quantity
+    feedback_rtt: Quantity
+
+    @property
+    def result(self):
+        from .solvers import IncastModel
+        return IncastModel().solve(self.n_senders, self.sender_bandwidth, self.egress_bandwidth,
+                                   self.buffer, self.feedback_rtt)
+
+
+class ComponentExposureScenario(BaseScenario):
+    """Independent components, each affected with ``probability`` (per day, or at one instant).
+
+    ``counts`` lists the factors whose product is the component count, so the
+    breakdown (devices, links per device, modules per link) stays visible.
+    """
+    counts: Dict[str, int]
+    probability: float
+
+    @property
+    def n_components(self) -> int:
+        n = 1
+        for c in self.counts.values():
+            n *= c
+        return n
+
+    @property
+    def expected_events(self) -> float:
+        return self.n_components * self.probability
+
+    @property
+    def p_none(self) -> float:
+        from ..physics.reliability import calc_all_up_availability
+        return calc_all_up_availability(1 - self.probability, self.n_components)
+
+    @property
+    def p_any(self) -> float:
+        return 1 - self.p_none
+
+
+class SilentSlowdownScenario(BaseScenario):
+    """A run on ``fleet`` slowed a few percent by a degraded link, with no alarm.
+
+    ``slowdowns`` are stated per-step slowdowns; ``bandwidth_loss`` and
+    ``communication_fraction`` give the no-overlap upper bound, where only the
+    communicating share of the step stretches by ``1 / (1 - loss)``.
+    """
+    fleet: Fleet
+    run_duration: Quantity
+    slowdowns: Dict[str, float]
+    device_hour_rate: Quantity
+    bandwidth_loss: float
+    communication_fraction: float
+
+    @property
+    def device_hours(self) -> float:
+        return (self.fleet.total_accelerators * self.run_duration).to("hour").magnitude
+
+    @property
+    def lost_device_hours(self) -> Dict[str, float]:
+        return {k: self.device_hours * f for k, f in self.slowdowns.items()}
+
+    @property
+    def lost_cost(self) -> Dict[str, Quantity]:
+        rate = self.device_hour_rate.to("USD/hour").magnitude
+        return {k: Q_(h * rate, "USD") for k, h in self.lost_device_hours.items()}
+
+    @property
+    def no_overlap_slowdown(self) -> float:
+        f = self.communication_fraction
+        return (1 - f) + f / (1 - self.bandwidth_loss) - 1
+
+
+class CollectiveFitScenario(BaseScenario):
+    """A floor-plus-bandwidth fit to the measured collective sweep ``series_name`` (Literature.Series)."""
+    series_name: str
+    floor_cutoff: Quantity
+    mid_low: Quantity
+    mid_high: Quantity
+
+    @property
+    def rows(self):
+        from ..literature.registry import Literature
+        return getattr(Literature.Series, self.series_name).entries
+
+    @property
+    def result(self):
+        from .solvers import CollectiveFitModel
+        return CollectiveFitModel().solve(self.rows, self.floor_cutoff, self.mid_low, self.mid_high)
+
+
+class NicSharingScenario(BaseScenario):
+    """One NIC split into ``n_virtual_functions`` rate-capped slices, and a burst at full line rate."""
+    nic_bandwidth: Quantity
+    n_virtual_functions: int
+    burst_size: Quantity
+
+    @property
+    def slice_rate(self) -> Quantity:
+        return self.nic_bandwidth / self.n_virtual_functions
+
+    @property
+    def burst_time(self) -> Quantity:
+        return (self.burst_size / self.nic_bandwidth).to("second")
+
+
+class SlowdownDiagnosisScenario(BaseScenario):
+    """A training step that slowed, and a pairwise link test that finds one link at a fraction of its rate."""
+    step_before: Quantity
+    step_after: Quantity
+    utilization_before: float
+    utilization_after: float
+    days_since_launch: int
+    port_bandwidth: Quantity
+    delivered_efficiency: float      # payload share a healthy link test reports
+    measured_fraction: float         # the degraded pair's share of the expected rate
+
+    @property
+    def slowdown(self) -> float:
+        return (self.step_after / self.step_before - 1).to("").magnitude
+
+    @property
+    def expected_bandwidth(self) -> Quantity:
+        return self.delivered_efficiency * self.port_bandwidth
+
+    @property
+    def measured_bandwidth(self) -> Quantity:
+        return self.expected_bandwidth * self.measured_fraction

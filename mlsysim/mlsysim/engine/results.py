@@ -65,6 +65,10 @@ __all__ = [
     "GradientSyncResult",
     "CommunicationIntensityResult",
     "TrainingGrowthResult",
+    "AlphaBetaResult",
+    "BisectionResult",
+    "IncastResult",
+    "CollectiveFitResult",
 ]
 
 
@@ -689,3 +693,54 @@ class TrainingGrowthResult(SolverResult):
     rate_factor: float
     fleet_share: float             # share of the compute exponent from count and duration
     span_orders: float             # orders of magnitude from AlexNet to the largest run
+
+
+class AlphaBetaResult(SolverResult):
+    """Result from AlphaBetaModel: alpha + n/beta for each message on each path."""
+    alphas: Dict[str, Quantity]
+    bandwidths: Dict[str, Quantity]
+    messages: Dict[str, Quantity]
+    times: Dict[str, Dict[str, Quantity]]               # times[path][message]
+    transmission_times: Dict[str, Dict[str, Quantity]]  # the n/beta term alone
+    crossovers: Dict[str, Quantity]                     # n* = alpha * beta, per path
+
+
+class BisectionResult(SolverResult):
+    """Result from BisectionModel: a ring AllReduce across a full and an oversubscribed cut."""
+    devices_per_side: int
+    bisection_full: Quantity
+    bisection_oversubscribed: Quantity
+    ring_factor: float
+    crossing_bytes: Quantity
+    time_full: Quantity
+    time_oversubscribed: Quantity
+    slowdown: float
+    relative_throughput: float
+    throughput_loss: float
+    idle_cost: Quantity
+
+
+class IncastResult(SolverResult):
+    """Result from IncastModel: many senders into one egress port with a finite buffer."""
+    offered_load: Quantity
+    oversubscription: float
+    net_fill_rate: Quantity
+    overflow_time: Quantity          # buffer fills from empty
+    drain_time: Quantity             # a full buffer drained by the egress port alone
+    bandwidth_delay_product: Quantity
+
+
+class CollectiveFitResult(SolverResult):
+    """Result from CollectiveFitModel: a floor-plus-bandwidth fit to a measured collective sweep."""
+    row_count: int
+    floor_time: Quantity
+    bandwidth: Quantity
+    knee: Quantity
+    worst_mid_ratio: float
+    peak_bus_bandwidth: Quantity
+    mid_bus_bandwidth_low: Quantity
+    mid_bus_bandwidth_high: Quantity
+
+    def model_time(self, size: Quantity) -> Quantity:
+        """Modeled time for a message of ``size``: floor + size / bandwidth."""
+        return (self.floor_time + size / self.bandwidth).to("microsecond")
