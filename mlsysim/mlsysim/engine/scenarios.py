@@ -10164,3 +10164,177 @@ class Scenarios(Registry):
         interval=Q_(5, "minute"),  # Argo Rollouts docs example
         failure_limit=3,  # Argo Rollouts docs example
     )
+
+    # --- Serving a stream of tokens on one machine (added 2026-10-20) ---------
+    # GPT-2 XL is the bandwidth-bound chat decoder, Llama 3 8B the case-study
+    # service, and a 70B-class model (Llama 3 70B geometry) the larger model.
+    Gpt2XlChatDecodeBatchesH100 = _st.KvDecodeBatchScenario(
+        name="GPT-2 XL chat decode batches on one H100 with full 1,024-token contexts",
+        description="FP16 weights read once per step; every sequence reads its own FP16 cache (no grouped-query "
+                    "sharing); a 512-token prompt prefilled at 40 percent of the dense FP16 peak.",
+        workload=_Models.Language.GPT2,
+        hardware=_Hardware.Cloud.H100,
+        weight_bytes_per_param=_BYTES_FP16,
+        kv_bytes_per_value=_BYTES_FP16,
+        context_tokens=_Models.Language.GPT2.context_length,
+        batch_sizes=[1, 8, 32, 64, 128],  # scenario assumption: batch sizes compared
+        prompt_tokens=512,  # scenario assumption: chat prompt length
+        prefill_efficiency=0.4,  # scenario assumption: share of the FP16 peak sustained in prefill
+    )
+    Gpt2XlSpeculativeGpt2SmallH100 = _st.SpeculativeRoundScenario(
+        name="Speculative decoding of GPT-2 XL with a GPT-2 Small draft on one H100",
+        description="Batch one, both models bandwidth bound: each draft step reads GPT-2 Small's FP16 weights, "
+                    "the verification pass GPT-2 XL's once.",
+        acceptance=0.7,  # scenario assumption: per-token acceptance probability
+        draft_length=4,  # scenario assumption: tokens proposed per round
+        draft_step=(_Models.Language.GPT2_Small.size_in_bytes(_BYTES_FP16)
+                    / _Hardware.Cloud.H100.memory.bandwidth).to("ms"),
+        verify_time=Gpt2XlFp16DecodeOnH100.result.memory_time,
+    )
+    Llama3_8BFp16ConversationsH100 = _st.KvAdmissionScenario(
+        name="Llama 3 8B conversations of 8,192 tokens on one H100, 16-bit weights and cache",
+        description="The H100's memory after the weights, over each conversation's cache; no runtime reserve.",
+        workload=_Models.Language.Llama3_8B,
+        accelerators=1,
+        hbm_per_accelerator=_Hardware.Cloud.H100.memory.capacity,
+        weight_bytes_per_param=_BYTES_FP16,
+        reserve=Q_(0, "GB"),  # scenario assumption: before runtime workspace
+        context_tokens=8192,  # scenario assumption: one long conversation
+        kv_bytes_per_elem=_BYTES_FP16,
+    )
+    Llama3_70BInt4KvBudgetH100 = Llama3_8BFp16ConversationsH100.variant(
+        name="A 70B-class model with 4-bit weights on one H100: the 16-bit cache budget",
+        description="Llama 3 70B geometry (80 layers, 8 key-value heads of 128); 4-bit weights.",
+        workload=_Models.Language.Llama3_70B,
+        weight_bytes_per_param=_BYTES_INT4,
+        requests=32,  # scenario assumption: concurrent conversations for the scale-up
+    )
+    Llama3_8BInt4ChatServiceH100 = _st.SingleAcceleratorLlmServiceScenario(
+        name="An 8-billion-parameter Llama 3 chat service on one H100 with 4-bit weights",
+        description="1,000-token prompts and 256-token answers; AWQ 4-bit weights and a 16-bit cache; a 72 GiB "
+                    "cache reserve; prefill admits 10,000 prompt tokens per second; $3 per H100-hour.",
+        workload=_Models.Language.Llama3_8B,
+        hardware=_Hardware.Cloud.H100,
+        precision="int4",
+        kv_bytes_per_value=_BYTES_FP16,
+        prompt_tokens=1000,  # scenario assumption
+        decode_tokens=256,  # scenario assumption
+        prefill_efficiency=0.4,  # scenario assumption: share of peak in prefill
+        kv_reserve=Q_(72, "GiB"),  # scenario assumption: memory set aside for the cache
+        prefill_rate=Q_(10_000, "1/second"),  # scenario assumption: isolated prefill rate, prompt tokens
+        price=Q_(3.00, "dollar/hour"),  # scenario assumption: H100 SXM5 rental
+        ttft_target=Q_(200, "ms"),  # scenario assumption
+        tpot_target=Q_(20, "ms"),  # scenario assumption
+    )
+    Llama3_8BInt4PrefillStallH100 = _st.PrefillStallScenario(
+        name="A 1,000-token prompt arriving among 32 Llama 3 8B conversations on one H100",
+        description="Each of 32 streams holds a full 1,256-token conversation; the prompt's prefill runs "
+                    "whole in one step or in four chunks; the case study's 20 ms TPOT target.",
+        weights=Llama3_8BInt4ChatServiceH100.weights,
+        kv_per_token=Llama3_8BInt4ChatServiceH100.kv_per_token,
+        bandwidth=_Hardware.Cloud.H100.memory.bandwidth,
+        decodes=32,  # scenario assumption: streams decoding
+        context_tokens=Llama3_8BInt4ChatServiceH100.total_tokens,
+        prefill_time=Llama3_8BInt4ChatServiceH100.ttft,
+        prefill_tokens=Llama3_8BInt4ChatServiceH100.prompt_tokens,
+        prompt_tokens=Llama3_8BInt4ChatServiceH100.prompt_tokens,
+        chunks=4,  # scenario assumption
+        tpot_target=Llama3_8BInt4ChatServiceH100.tpot_target,
+    )
+    RequestLevelVersusContinuousBatching = _st.FixedBatchScheduleScenario(
+        name="Four decode slots: requests of 10, 100, 40, and 60 tokens with four more waiting",
+        description="Illustrative lengths, one token per step, prefill omitted; request-level batching keeps "
+                    "the batch until its longest member ends, continuous batching refills a freed slot at once.",
+        output_lengths=[10, 100, 40, 60],  # scenario assumption: illustrative
+        waiting_lengths=[30, 50, 20, 40],  # scenario assumption: illustrative
+    )
+    Llama3_8BSharedSystemPrompt = _st.PrefixSharingScenario(
+        name="100 Llama 3 8B conversations that begin with one 2,000-token system prompt",
+        description="The prefix's 16-bit cache stored per conversation or once.",
+        workload=_Models.Language.Llama3_8B,
+        prefix_tokens=2000,  # scenario assumption
+        users=100,  # scenario assumption
+        unique_tokens_per_user=0,
+        kv_width=_Models.Language.Llama3_8B.kv_heads
+        * (_Models.Language.Llama3_8B.hidden_dim // _Models.Language.Llama3_8B.heads),
+        bytes_per_elem=_BYTES_FP16,
+    )
+    Llama3_8BConversationReloadPcieGen4 = ModelSwapPcieGen4.variant(
+        name="One 8,192-token Llama 3 8B cache reloaded from host memory over PCIe Gen4 x16",
+        description="Bandwidth term only; the cache of Llama3_8BFp16ConversationsH100's conversation.",
+        payload=Llama3_8BFp16ConversationsH100.result.kv_per_request,
+    )
+    VllmKvPoolLlama3_8BH100 = _st.KvPoolAccountingScenario(
+        name="vLLM's startup KV pool for Llama 3 8B on one H100 against the free-memory estimate",
+        description="vLLM v0.9.1 defaults: 0.9 of the GPU claimed, 16-token blocks; pool from its startup log.",
+        capacity=_Hardware.Cloud.H100.memory.capacity,
+        memory_utilization=float(_Literature.ServingResults.VllmGpuMemoryUtilizationDefault),
+        weights=Q_(float(_Literature.ServingResults.VllmStartupLlama3_8bWeightsGiB), "GiB"),
+        kv_pool=Q_(float(_Literature.ServingResults.VllmStartupLlama3_8bKvCacheGiB), "GiB"),
+        kv_pool_tokens=int(_Literature.ServingResults.VllmStartupLlama3_8bKvCacheTokens),
+        kv_per_token=Llama3_8BFp16ConversationsH100.result.kv_per_token,
+        block_tokens=int(_Literature.ServingResults.VllmBlockSizeDefault),
+        context_tokens=int(_Literature.ServingResults.VllmStartupMaxSeqLen),
+        request_tokens=Llama3_8BInt4ChatServiceH100.total_tokens,
+    )
+    DistServe13BPoolsA100 = _st.DisaggregatedPoolScenario(
+        name="Prefill and decode pools for DistServe's 13B model on A100s",
+        description="Measured per-GPU goodput of each phase alone and of both together (512 tokens in, 64 out, "
+                    "90 percent SLO attainment); one decode GPU; the cache transfer of a 512-token OPT-66B "
+                    "request at 10 requests per second.",
+        prefill_rate=Q_(float(_Literature.ServingResults.DistServePrefillOnlyGoodputRps), "1/second"),
+        decode_rate=Q_(float(_Literature.ServingResults.DistServeDecodeOnlyGoodputRps), "1/second"),
+        colocated_rate=Q_(float(_Literature.ServingResults.DistServeColocatedGoodputRps), "1/second"),
+        decode_accelerators=1,  # scenario assumption: one decode GPU
+        kv_per_request=Q_(float(_Literature.ServingResults.DistServeOpt66bKvPerRequestGb), "GB"),
+        kv_arrival_rate=Q_(float(_Literature.ServingResults.DistServeTransferArrivalRps), "1/second"),
+        link_bandwidth=Q_(float(_Literature.ServingResults.DistServeA100LinkGBps), "GB/second"),
+    )
+    H100ChatEnergyPerToken = _st.TokenEnergyScenario(
+        name="Energy per generated token of an H100 chat service, well used and poorly used",
+        description="The H100 at its TDP plus a 300 W host share, 114 requests at 8 tokens per second each; "
+                    "at 10 percent of that rate the GPU still draws 300 W.",
+        accelerator_power=_Hardware.Cloud.H100.tdp,
+        host_power=Q_(300, "watt"),  # scenario assumption: host server share
+        low_use_accelerator_power=Q_(300, "watt"),  # scenario assumption: GPU near idle
+        concurrent_requests=114,  # scenario assumption: concurrent requests per H100
+        per_request_rate=Q_(8, "1/second"),  # scenario assumption: decode tokens/s per request
+        response_tokens=500,  # scenario assumption: typical response length
+        low_use_fraction=0.1,  # scenario assumption: poorly batched
+    )
+    Llama2_70BConversationalDecodeStreams = _st.LittlesLawScenario(
+        name="Streams decoding at once on the MLPerf Llama 2 70B server under the 200 ms TPOT bound",
+        description="Little's law: measured Server tokens per second times the TPOT bound.",
+        arrival_rate=Q_([r["tokens_per_s"] for r in _Literature.Series.MLPerfInferenceV50Llama2_70B.entries
+                         if r["benchmark"] == "llama2-70b-99" and r["scenario"] == "Server"][0], "1/second"),
+        time_in_system=Q_([r["tpot_bound_ms"] for r in _Literature.Series.MLPerfInferenceV50Llama2_70B.entries
+                           if r["benchmark"] == "llama2-70b-99" and r["scenario"] == "Server"][0], "ms"),
+    )
+    Llama2_70BInteractiveDecodeStreams = Llama2_70BConversationalDecodeStreams.variant(
+        name="Streams decoding at once on the same server under the 40 ms interactive TPOT bound",
+        arrival_rate=Q_([r["tokens_per_s"] for r in _Literature.Series.MLPerfInferenceV50Llama2_70B.entries
+                         if r["benchmark"] == "llama2-70b-interactive-99" and r["scenario"] == "Server"][0],
+                        "1/second"),
+        time_in_system=Q_([r["tpot_bound_ms"] for r in _Literature.Series.MLPerfInferenceV50Llama2_70B.entries
+                           if r["benchmark"] == "llama2-70b-interactive-99" and r["scenario"] == "Server"][0],
+                          "ms"),
+    )
+    Llama3_70BFp16ConversationsEightH100 = Llama3_8BFp16ConversationsH100.variant(
+        name="70B-class conversations of 1,256 tokens on eight H100s, 16-bit weights and cache",
+        description="Llama 3 70B geometry; the case study's conversation length; no runtime reserve.",
+        workload=_Models.Language.Llama3_70B,
+        accelerators=8,  # one eight-GPU server
+        context_tokens=Llama3_8BInt4ChatServiceH100.total_tokens,
+    )
+    Llama3_70BInt8ConversationsEightH100 = Llama3_70BFp16ConversationsEightH100.variant(
+        name="The same conversations with 8-bit weights and cache",
+        weight_bytes_per_param=_BYTES_INT8,
+        kv_bytes_per_elem=_BYTES_INT8,
+    )
+    InteractiveChatTargetsLlama3_8B = Llama3_8BInt4ChatServiceH100.variant(
+        name="The same chat service under illustrative interactive targets",
+        description="Time to first token under 500 ms for a 1,000-token prompt and time per output token under "
+                    "50 ms, about 20 tokens per second, faster than people read.",
+        ttft_target=Q_(500, "ms"),  # scenario assumption: illustrative target
+        tpot_target=Q_(50, "ms"),  # scenario assumption: illustrative target
+    )

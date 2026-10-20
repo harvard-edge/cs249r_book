@@ -1566,9 +1566,31 @@ class Series:
              "https://github.com/mlcommons/inference_results_v5.0",
              "Tokens per second of the whole server for llama2-70b-99 (Offline, and Server under the "
              "conversational TTFT/TPOT bounds) and llama2-70b-interactive-99 (Server under the interactive "
-             "bounds). Bounds are the rules' time to first token and time per output token, ms."),
+             "bounds). Bounds are the rules' time to first token and time per output token, ms. The "
+             "llama2-70b-interactive-99 Offline row (added 2026-10-20) is that benchmark entry's own Offline "
+             "run, 30989.5 tokens/s in its mlperf_log_summary.txt and summary.html (VALID)."),
         "Llama 2 70B MLPerf Inference v5.0 throughput on one eight-H100 server, by latency bound.",
         numeric=("accelerators", "ttft_bound_ms", "tpot_bound_ms", "tokens_per_s"),
+    )
+    # --- Serving a stream of tokens (added 2026-10-20) -----------------------
+    VllmServingBenchmarkH100 = TrendSeries(
+        "vllm_serving_benchmark_h100",
+        Provenance(
+            id="prov:vllm-issue-24684-series",
+            kind=ProvenanceKind.DATASHEET,
+            ref="vllm-project/vllm issue 24684 (opened 2025-09-11), two printed outputs of vLLM's serving "
+                "benchmark",
+            url="https://github.com/vllm-project/vllm/issues/24684",
+            verified="2026-10-20",
+            notes="Llama-3.1-8B-Instruct, vLLM 0.10.1.1, NVIDIA H100 80GB HBM3, 640 requests at maximum "
+                  "request concurrency 64. The sharegpt row is benchmark_serving.py before PR 24411; the "
+                  "random row is vllm bench serve after its default dataset changed to random prompts. "
+                  "Columns transcribed exactly as printed (E2EL lines omitted).",
+        ),
+        "Two vLLM serving-benchmark runs of Llama 3.1 8B on one H100 at 64 concurrent requests.",
+        numeric=("requests", "max_concurrency", "duration_s", "input_tokens", "output_tokens", "request_rate",
+                 "output_tok_s", "mean_ttft_ms", "median_ttft_ms", "p99_ttft_ms", "mean_tpot_ms",
+                 "median_tpot_ms", "p99_tpot_ms", "mean_itl_ms", "median_itl_ms", "p99_itl_ms"),
     )
 
 # --- Context engineering (added 2026-10-20) ----------------------------------

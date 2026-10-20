@@ -6062,6 +6062,8 @@ class KvAdmissionScenario(BaseScenario):
     reserve: Quantity
     context_tokens: int
     kv_bytes_per_elem: Quantity
+    # Optional (added 2026-10-20): a concurrent request count for ``context_fit``.
+    requests: Optional[int] = None
 
     @property
     def result(self):
@@ -6069,6 +6071,13 @@ class KvAdmissionScenario(BaseScenario):
         return KvAdmissionModel().solve(self.workload, self.accelerators, self.hbm_per_accelerator,
                                         self.weight_bytes_per_param, self.reserve, self.context_tokens,
                                         self.kv_bytes_per_elem)
+
+    def context_fit(self, requests: Optional[int] = None) -> float:
+        """Tokens of context each of ``requests`` (default: ``self.requests``) requests can hold in the
+        budget (added 2026-10-20)."""
+        r = self.result
+        n = self.requests if requests is None else requests
+        return (r.kv_budget / (n * r.kv_per_token)).to("").magnitude
 
 
 class KvInFlightScenario(BaseScenario):
@@ -6127,6 +6136,11 @@ class PrefixSharingScenario(BaseScenario):
     @property
     def capacity_ratio(self) -> float:
         return (self.kv_unshared / self.kv_shared).to("").magnitude
+
+    @property
+    def prefill_tokens_skipped(self) -> int:
+        """Prefix tokens every user after the first need not prefill (added 2026-10-20)."""
+        return (self.users - 1) * self.prefix_tokens
 
 
 class PrecisionDividendScenario(BaseScenario):
@@ -6336,8 +6350,17 @@ class SpeculativeRoundScenario(BaseScenario):
     """A draft proposes ``draft_length`` tokens; the target verifies them in one step."""
     acceptance: float
     draft_length: int
-    draft_time: Quantity
+    draft_time: Optional[Quantity] = None    # all draft steps of one round
     verify_time: Quantity
+    # Optional (added 2026-10-20): one draft step; with no ``draft_time`` the
+    # round's draft cost is ``draft_length`` such steps.
+    draft_step: Optional[Quantity] = None
+
+    @property
+    def draft_cost(self) -> Quantity:
+        if self.draft_time is not None:
+            return self.draft_time.to("ms")
+        return (self.draft_length * self.draft_step).to("ms")
 
     @property
     def expected_tokens(self) -> float:
@@ -6346,7 +6369,7 @@ class SpeculativeRoundScenario(BaseScenario):
 
     @property
     def round_time(self) -> Quantity:
-        return (self.draft_time + self.verify_time).to("ms")
+        return (self.draft_cost + self.verify_time).to("ms")
 
     @property
     def per_token_time(self) -> Quantity:
@@ -6473,7 +6496,10 @@ class FixedBatchScheduleScenario(BaseScenario):
     """Requests in one batch of fixed membership, one token per iteration."""
     output_lengths: List[int]
     prompt_lengths: Optional[List[int]] = None
-    iteration_time: Quantity
+    iteration_time: Optional[Quantity] = None
+    # Optional (added 2026-10-20): requests waiting from the start, admitted in
+    # order, for the request-level against continuous schedules below.
+    waiting_lengths: Optional[List[int]] = None
 
     @property
     def total_tokens(self) -> List[int]:
@@ -6504,6 +6530,47 @@ class FixedBatchScheduleScenario(BaseScenario):
     def requests_advanced(self) -> int:
         """Requests served in the same iterations when each freed slot is refilled once."""
         return len(self.output_lengths) + sum(1 for x in self.output_lengths if x < self.max_output)
+
+    @property
+    def all_lengths(self) -> List[int]:
+        return list(self.output_lengths) + list(self.waiting_lengths or [])
+
+    @property
+    def all_useful_iterations(self) -> int:
+        return sum(self.all_lengths)
+
+    def request_level_spans(self) -> List[tuple]:
+        """(start, end) per request when the waiting batch starts only after the whole first batch ends."""
+        first = [(0, n) for n in self.output_lengths]
+        return first + [(self.max_output, self.max_output + n) for n in (self.waiting_lengths or [])]
+
+    def continuous_spans(self) -> List[tuple]:
+        """(start, end) per request when each freed slot takes the next waiting request at once."""
+        import heapq
+        free = [(n, i) for i, n in enumerate(self.output_lengths)]
+        heapq.heapify(free)
+        spans = [(0, n) for n in self.output_lengths]
+        for n in self.waiting_lengths or []:
+            t, slot = heapq.heappop(free)
+            spans.append((t, t + n))
+            heapq.heappush(free, (t + n, slot))
+        return spans
+
+    @property
+    def request_level_iterations(self) -> int:
+        return max(end for _, end in self.request_level_spans())
+
+    @property
+    def continuous_iterations(self) -> int:
+        return max(end for _, end in self.continuous_spans())
+
+    @property
+    def request_level_utilization(self) -> float:
+        return self.all_useful_iterations / (len(self.output_lengths) * self.request_level_iterations)
+
+    @property
+    def continuous_utilization(self) -> float:
+        return self.all_useful_iterations / (len(self.output_lengths) * self.continuous_iterations)
 
 
 class BallsIntoBinsScenario(BaseScenario):
@@ -19659,3 +19726,432 @@ class AnalysisGateScenario(BaseScenario):
     def failures_to_abort(self) -> int:
         """The run fails when failed measurements exceed the limit."""
         return self.failure_limit + 1
+
+
+# --- Serving a stream of tokens on one machine (added 2026-10-20) ------------
+class KvDecodeBatchScenario(BaseScenario):
+    """Batched decode on one accelerator when every sequence also reads its own KV cache.
+
+    Each step reads the weights once and each sequence's cache of
+    ``context_tokens``: bytes ``W + B m_seq``, time ``(W + B m_seq) / B_mem``
+    (a bandwidth floor), aggregate rate ``B / step``. The rate approaches
+    ``B_mem / m_seq`` as caches dominate. A TPOT target caps the batch at
+    ``floor((t B_mem - W) / m_seq)``; memory caps it at
+    ``floor((M - W) / m_seq)``. Prefill of ``prompt_tokens`` runs at
+    ``prefill_efficiency`` of the ``peak_precision`` peak.
+    """
+    workload: Workload
+    hardware: HardwareNode
+    weight_bytes_per_param: Quantity
+    kv_bytes_per_value: Quantity
+    context_tokens: int
+    batch_sizes: List[int]
+    prompt_tokens: int
+    prefill_efficiency: float
+    peak_precision: str = "fp16_dense"
+
+    @property
+    def weights(self) -> Quantity:
+        return self.workload.size_in_bytes(self.weight_bytes_per_param).to("GB")
+
+    @property
+    def kv_per_token(self) -> Quantity:
+        return self.workload.get_kv_cache_size(1, 1, self.kv_bytes_per_value).to("byte")
+
+    @property
+    def kv_per_sequence(self) -> Quantity:
+        return (self.kv_per_token * self.context_tokens).to("MB")
+
+    @property
+    def bandwidth(self) -> Quantity:
+        return self.hardware.memory.bandwidth
+
+    def step_bytes(self, batch_size: int) -> Quantity:
+        return (self.weights + batch_size * self.kv_per_sequence).to("GB")
+
+    def step_time(self, batch_size: int) -> Quantity:
+        from ..physics import transfer_time
+        return transfer_time(self.step_bytes(batch_size), self.bandwidth).to("ms")
+
+    def token_rate(self, batch_size: int) -> Quantity:
+        return (batch_size / self.step_time(batch_size)).to("1/second")
+
+    def cache_share(self, batch_size: int) -> float:
+        return (batch_size * self.kv_per_sequence / self.step_bytes(batch_size)).to("").magnitude
+
+    @property
+    def rate_ceiling(self) -> Quantity:
+        """Tokens per second when cache reads are the whole step."""
+        return (self.bandwidth / self.kv_per_sequence).to("1/second")
+
+    def max_batch_within(self, tpot: Quantity) -> int:
+        """Largest batch whose step stays within ``tpot``."""
+        return _math.floor(((tpot * self.bandwidth - self.weights) / self.kv_per_sequence).to("").magnitude)
+
+    @property
+    def max_batch_in_memory(self) -> int:
+        """Largest batch whose weights and full caches fit the accelerator's memory."""
+        free = self.hardware.memory.capacity - self.weights
+        return _math.floor((free / self.kv_per_sequence).to("").magnitude)
+
+    @property
+    def peak_rate(self) -> Quantity:
+        return self.hardware.compute.precision_flops[self.peak_precision]
+
+    @property
+    def ridge(self) -> Quantity:
+        return (self.peak_rate / self.bandwidth).to("flop/byte")
+
+    @property
+    def prefill_ops(self) -> Quantity:
+        return (self.workload.inference_flops * self.prompt_tokens).to("flop")
+
+    @property
+    def prefill_time(self) -> Quantity:
+        return (self.prefill_ops / (self.peak_rate * self.prefill_efficiency)).to("ms")
+
+
+class SingleAcceleratorLlmServiceScenario(BaseScenario):
+    """An LLM chat service on one accelerator: latency, KV residency, request rate, and token cost.
+
+    ``ServingModel`` gives TTFT for the prompt and the weight footprint; TPOT
+    is the weight and one request's cache read plus the solver's per-layer
+    dispatch cost. The KV reserve over the cache per token sets resident
+    requests. The request rate is the smaller of the prefill admission rate
+    and the residency turnover (Little's law at the batch-one request time);
+    tokens per hour count prompt and output tokens.
+    """
+    workload: Workload
+    hardware: HardwareNode
+    precision: str                       # weight precision for ServingModel
+    kv_bytes_per_value: Quantity
+    prompt_tokens: int
+    decode_tokens: int
+    prefill_efficiency: float
+    kv_reserve: Quantity
+    prefill_rate: Quantity               # prompt tokens per second
+    price: Quantity                      # USD per accelerator-hour
+    ttft_target: Optional[Quantity] = None
+    tpot_target: Optional[Quantity] = None
+
+    @property
+    def total_tokens(self) -> int:
+        return self.prompt_tokens + self.decode_tokens
+
+    def _serve(self, seq_len: int):
+        from .solvers import ServingModel
+        return ServingModel().solve(self.workload, self.hardware, seq_len=seq_len, batch_size=1,
+                                    precision=self.precision, efficiency=self.prefill_efficiency)
+
+    @property
+    def ttft(self) -> Quantity:
+        """Model-side time to first token for the prompt alone."""
+        return self._serve(self.prompt_tokens).ttft.to("ms")
+
+    @property
+    def weights(self) -> Quantity:
+        return self._serve(self.total_tokens).model_weights_size
+
+    @property
+    def bandwidth(self) -> Quantity:
+        return self.hardware.memory.bandwidth
+
+    @property
+    def kv_per_token(self) -> Quantity:
+        return self.workload.get_kv_cache_size(seq_len=1, batch_size=1, precision=self.kv_bytes_per_value)
+
+    @property
+    def kv_per_request(self) -> Quantity:
+        return self.workload.get_kv_cache_size(seq_len=self.total_tokens, batch_size=1,
+                                               precision=self.kv_bytes_per_value)
+
+    @property
+    def weight_floor(self) -> Quantity:
+        from ..physics import transfer_time
+        return transfer_time(self.weights, self.bandwidth)
+
+    @property
+    def dispatch_cost(self) -> Quantity:
+        """The solver's per-step overhead beyond its bandwidth floor."""
+        from ..physics import transfer_time
+        res = self._serve(self.total_tokens)
+        return res.itl - transfer_time(res.total_memory_required, self.bandwidth)
+
+    @property
+    def tpot(self) -> Quantity:
+        from ..physics import transfer_time
+        return transfer_time(self.weights + self.kv_per_request, self.bandwidth) + self.dispatch_cost
+
+    @property
+    def decode_time(self) -> Quantity:
+        return (self.decode_tokens * self.tpot).to("second")
+
+    @property
+    def kv_capacity_tokens(self) -> int:
+        return int(round((self.kv_reserve / self.kv_per_token).to("").magnitude))
+
+    @property
+    def resident_requests(self) -> int:
+        return int(self.kv_capacity_tokens / self.total_tokens)
+
+    @property
+    def request_time(self) -> Quantity:
+        return (self._serve(self.total_tokens).ttft + self.decode_time).to("second")
+
+    @property
+    def prefill_request_rate(self) -> Quantity:
+        return (self.prefill_rate / self.prompt_tokens).to("1/second")
+
+    @property
+    def residency_request_rate(self) -> Quantity:
+        from ..physics.serving import calc_littles_law_rate
+        return calc_littles_law_rate(self.resident_requests, self.request_time).to("1/second")
+
+    @property
+    def request_rate(self) -> Quantity:
+        return min(self.prefill_request_rate, self.residency_request_rate)
+
+    @property
+    def tokens_per_hour(self) -> float:
+        return (self.request_rate * Q_(1, "hour")).to("").magnitude * self.total_tokens
+
+    @property
+    def cost_per_million_tokens(self) -> Quantity:
+        return (self.price * Q_(1, "hour") / (self.tokens_per_hour / 1e6)).to("dollar")
+
+    @property
+    def remaining_memory(self) -> Quantity:
+        return (self.hardware.memory.capacity - self.weights).to("GB")
+
+
+class PrefillStallScenario(BaseScenario):
+    """A new prompt's prefill inside the decode steps of running streams, whole or in chunks.
+
+    A decode step reads the weights and ``decodes`` caches of
+    ``context_tokens`` at memory bandwidth; prefill time scales linearly from
+    ``prefill_time`` for ``prefill_tokens``. Run whole, the prompt stretches
+    one step to ``decode + prefill(prompt)``; split into ``chunks``, each step
+    adds one chunk and the new request's first token comes after ``chunks``
+    steps. The largest chunk that keeps a step within ``tpot_target`` is
+    ``(t - decode) / prefill per token``.
+    """
+    weights: Quantity
+    kv_per_token: Quantity
+    bandwidth: Quantity
+    decodes: int
+    context_tokens: int
+    prefill_time: Quantity
+    prefill_tokens: int
+    prompt_tokens: int
+    chunks: int
+    tpot_target: Quantity
+
+    @property
+    def decode_bytes(self) -> Quantity:
+        return (self.weights + self.decodes * self.context_tokens * self.kv_per_token).to("GB")
+
+    @property
+    def decode_step(self) -> Quantity:
+        from ..physics import transfer_time
+        return transfer_time(self.decode_bytes, self.bandwidth).to("ms")
+
+    @property
+    def prefill_per_token(self) -> Quantity:
+        return (self.prefill_time / self.prefill_tokens).to("ms")
+
+    @property
+    def prompt_prefill(self) -> Quantity:
+        return (self.prefill_per_token * self.prompt_tokens).to("ms")
+
+    @property
+    def stalled_step(self) -> Quantity:
+        return (self.decode_step + self.prompt_prefill).to("ms")
+
+    @property
+    def chunk_tokens(self) -> float:
+        return self.prompt_tokens / self.chunks
+
+    @property
+    def chunk_prefill(self) -> Quantity:
+        return (self.prompt_prefill / self.chunks).to("ms")
+
+    @property
+    def chunked_step(self) -> Quantity:
+        return (self.decode_step + self.chunk_prefill).to("ms")
+
+    @property
+    def chunked_first_token(self) -> Quantity:
+        return (self.chunks * self.chunked_step).to("ms")
+
+    @property
+    def largest_safe_chunk(self) -> float:
+        return ((self.tpot_target - self.decode_step) / self.prefill_per_token).to("").magnitude
+
+
+class DisaggregatedPoolScenario(BaseScenario):
+    """Separate prefill and decode pools sized from per-accelerator rates, against both phases on one.
+
+    ``decode_accelerators`` decode at ``decode_rate`` each; prefill
+    accelerators at ``prefill_rate`` each are added until they keep up
+    (``ceil``). The pool's rate per accelerator, over ``colocated_rate``, is
+    the gain from splitting. Each request's cache crosses the link once:
+    ``kv_per_request`` at ``kv_arrival_rate`` is the traffic.
+    """
+    prefill_rate: Quantity               # requests/s per prefill accelerator
+    decode_rate: Quantity                # requests/s per decode accelerator
+    colocated_rate: Quantity             # requests/s per accelerator running both phases
+    decode_accelerators: int = 1
+    kv_per_request: Optional[Quantity] = None
+    kv_arrival_rate: Optional[Quantity] = None
+    link_bandwidth: Optional[Quantity] = None
+
+    @property
+    def pool_rate(self) -> Quantity:
+        return (self.decode_accelerators * self.decode_rate).to("1/second")
+
+    @property
+    def prefill_accelerators_exact(self) -> float:
+        return (self.pool_rate / self.prefill_rate).to("").magnitude
+
+    @property
+    def prefill_accelerators(self) -> int:
+        return _math.ceil(self.prefill_accelerators_exact)
+
+    @property
+    def accelerators(self) -> int:
+        return self.prefill_accelerators + self.decode_accelerators
+
+    @property
+    def per_accelerator_rate(self) -> Quantity:
+        return (self.pool_rate / self.accelerators).to("1/second")
+
+    @property
+    def gain(self) -> float:
+        return (self.per_accelerator_rate / self.colocated_rate).to("").magnitude
+
+    @property
+    def kv_traffic(self) -> Quantity:
+        return (self.kv_per_request * self.kv_arrival_rate).to("GB/second")
+
+    @property
+    def link_share(self) -> float:
+        return (self.kv_traffic / self.link_bandwidth).to("").magnitude
+
+
+class TokenEnergyScenario(BaseScenario):
+    """Joules per generated token: node power over aggregate token rate, well used and poorly used.
+
+    The node draws the accelerator's power plus a host share whether a step
+    carries one sequence or many. ``concurrent_requests`` at
+    ``per_request_rate`` set the well-used token rate; at
+    ``low_use_fraction`` of that rate the accelerator still draws
+    ``low_use_accelerator_power``.
+    """
+    accelerator_power: Quantity
+    host_power: Quantity
+    low_use_accelerator_power: Quantity
+    concurrent_requests: int
+    per_request_rate: Quantity           # tokens per second per request
+    response_tokens: int
+    low_use_fraction: float
+
+    @property
+    def node_power(self) -> Quantity:
+        return (self.accelerator_power + self.host_power).to("watt")
+
+    @property
+    def low_use_power(self) -> Quantity:
+        return (self.low_use_accelerator_power + self.host_power).to("watt")
+
+    @property
+    def token_rate(self) -> Quantity:
+        return (self.concurrent_requests * self.per_request_rate).to("1/second")
+
+    def energy_per_token(self, token_rate: Quantity, low_use: bool = False) -> Quantity:
+        """Joules per token at ``token_rate``, at full or low-use power."""
+        power = self.low_use_power if low_use else self.node_power
+        return (power / token_rate).to("joule")
+
+    @property
+    def joules_per_token(self) -> Quantity:
+        return self.energy_per_token(self.token_rate)
+
+    @property
+    def response_energy(self) -> Quantity:
+        return (self.joules_per_token * self.response_tokens).to("joule")
+
+    @property
+    def low_use_token_rate(self) -> Quantity:
+        return (self.token_rate * self.low_use_fraction).to("1/second")
+
+    @property
+    def low_use_joules_per_token(self) -> Quantity:
+        return self.energy_per_token(self.low_use_token_rate, low_use=True)
+
+    @property
+    def low_use_ratio(self) -> float:
+        return (self.low_use_joules_per_token / self.joules_per_token).to("").magnitude
+
+
+class KvPoolAccountingScenario(BaseScenario):
+    """A serving engine's reported KV pool checked against an estimate of free memory.
+
+    The engine claims ``memory_utilization`` of ``capacity``; after the
+    ``weights`` and the reported ``kv_pool`` the rest is its activation and
+    workspace reserve. The pool's ``kv_pool_tokens`` times the cache per
+    token should equal ``kv_pool``. Paged in blocks of ``block_tokens``, a
+    request of ``request_tokens`` holds ``ceil(S / b)`` blocks.
+    """
+    capacity: Quantity
+    memory_utilization: float
+    weights: Quantity
+    kv_pool: Quantity
+    kv_pool_tokens: int
+    kv_per_token: Quantity
+    block_tokens: int
+    context_tokens: int                  # tokens per request in the engine's concurrency line
+    request_tokens: int                  # tokens per paged conversation
+
+    @property
+    def claimed(self) -> Quantity:
+        return (self.memory_utilization * self.capacity).to("GiB")
+
+    @property
+    def held_back(self) -> Quantity:
+        return ((1 - self.memory_utilization) * self.capacity).to("GB")
+
+    @property
+    def workspace(self) -> Quantity:
+        """Claimed memory left after the weights and the KV pool."""
+        return (self.claimed - self.weights - self.kv_pool).to("GiB")
+
+    @property
+    def pool_bytes(self) -> Quantity:
+        return (self.kv_pool_tokens * self.kv_per_token).to("GiB")
+
+    @property
+    def concurrency(self) -> float:
+        return self.kv_pool_tokens / self.context_tokens
+
+    @property
+    def blocks_per_request(self) -> int:
+        from ..physics.memory import calc_kv_block_count
+        return calc_kv_block_count(self.request_tokens, self.block_tokens)
+
+    @property
+    def paged_request_bytes(self) -> Quantity:
+        return (self.blocks_per_request * self.block_tokens * self.kv_per_token).to("MB")
+
+    def paged_requests(self, budget: Quantity) -> int:
+        """Whole paged conversations ``budget`` holds."""
+        return _math.floor((budget / self.paged_request_bytes).to("").magnitude)
+
+    @property
+    def pool_paged_requests(self) -> int:
+        """Whole paged conversations in the engine's own pool of whole blocks."""
+        return (self.kv_pool_tokens // self.block_tokens) // self.blocks_per_request
+
+    @property
+    def last_block_waste(self) -> Quantity:
+        """Most a request wastes: all but one slot of its last block."""
+        return ((self.block_tokens - 1) * self.kv_per_token).to("MB")

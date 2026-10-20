@@ -4988,3 +4988,107 @@ TUMMALAPALLI_2026_RTX4050 = _lit(
     notes="NVIDIA RTX 4050, runs 2 to 20: mean decode throughput 131.70 tok/s, standard deviation 2.87 tok/s; the "
           "text states CV = 2.2 percent.",
 )
+
+# --- Serving a stream of tokens (added 2026-10-20) ----------------------------
+PATEL_SPLITWISE_2024 = _lit(
+    "prov:patel-splitwise-2024",
+    "Patel, Choukse, Zhang, Shah, Goiri, Maleki, and Bianchini (2024), Splitwise: Efficient Generative "
+    "LLM Inference Using Phase Splitting, ISCA 2024, arXiv 2311.18677v2",
+    url="https://arxiv.org/abs/2311.18677",
+    verified="2026-10-20",
+    notes="Table IV: P50 request metrics without batching on Llama-70B, conversation trace (TTFT, TBT, E2E "
+          "on DGX-A100 and DGX-H100). Section III-C: for BLOOM-176B a 1500-token prompt phase takes the "
+          "same time as a token phase with 6 output tokens; a batch of 64 has only 2x impact on TBT. "
+          "Section III-F: power capping by over 50% (700 to 350 W) has almost no latency impact on the "
+          "token phase. Section VI-A: the KV-cache transfer is 0.8% of E2E, about 5 ms on H100. Abstract: "
+          "1.4x higher throughput at 20% lower cost. Read from the arXiv HTML; the 0.8% and 5 ms values "
+          "from a summary of Section VI-A.",
+)
+ZHONG_DISTSERVE_2024 = _lit(
+    "prov:zhong-distserve-2024",
+    "Zhong, Liu, Chen, Hu, Zhu, Liu, Jin, and Zhang (2024), DistServe: Disaggregating Prefill and Decoding "
+    "for Goodput-optimized Large Language Model Serving, OSDI 2024, arXiv 2401.09670v3",
+    url="https://arxiv.org/abs/2401.09670",
+    verified="2026-10-20",
+    notes="Section 1 and Figure 1: a 13B model, input 512 and output 64 tokens, one 80 GB A100, 90% SLO "
+          "attainment: about 1.6 requests/s with both phases on the GPU, 5.6 per GPU for prefill alone, 10 "
+          "for decoding alone. Section 3.3: the KV cache of one 512-token OPT-66B request is about 1.13 GB; "
+          "at 10 requests/s, 11.3 GB/s; 600 GB/s between A100 GPUs. Section 6.3: KV transfer is under 0.1% "
+          "of total latency. Abstract: 7.4x more requests or 12.6x tighter SLO than state-of-the-art "
+          "systems. Sections 3.3 and 6.3 read from a summary of the arXiv HTML.",
+)
+YU_ORCA_2022 = _lit(
+    "prov:yu-orca-2022",
+    "Yu, Jeong, Kim, Kim, and Chun (2022), Orca: A Distributed Serving System for Transformer-Based "
+    "Generative Models, OSDI 2022, abstract",
+    url="https://www.usenix.org/conference/osdi22/presentation/yu",
+    verified="2026-10-20",
+    notes="GPT-3 175B: 36.9x throughput improvement over NVIDIA FasterTransformer at the same level of latency.",
+)
+AGRAWAL_SARATHI_SERVE_2024 = _lit(
+    "prov:agrawal-sarathi-serve-2024",
+    "Agrawal, Kedia, Panwar, Mohan, Kwatra, Gulavani, Tumanov, and Ramjee (2024), Taming Throughput-Latency "
+    "Tradeoff in LLM Inference with Sarathi-Serve, OSDI 2024, arXiv 2403.02310, abstract",
+    url="https://arxiv.org/abs/2403.02310",
+    verified="2026-10-20",
+    notes="Against vLLM: 2.6x higher serving capacity for Mistral-7B on single A100 GPUs and up to 3.7x for "
+          "Yi-34B on two A100 GPUs. Section 1 names the prefill-caused pauses generation stalls.",
+)
+KWON_PAGEDATTENTION_EVAL_2023 = _lit(
+    "prov:kwon-pagedattention-eval-2023",
+    "Kwon, Li, Zhuang, Sheng, Zheng, Yu, Gonzalez, Zhang, and Stoica (2023), Efficient Memory Management "
+    "for Large Language Model Serving with PagedAttention, SOSP 2023, arXiv 2309.06180, Sections 6.2-6.3",
+    url="https://arxiv.org/abs/2309.06180",
+    verified="2026-10-20",
+    notes="Section 6.2 (ShareGPT): 1.7x-2.7x higher request rates than Orca (Oracle) and up to 22x than "
+          "FasterTransformer at similar latency; OPT-13B batches 2.2x more requests than Orca (Oracle). "
+          "Figure 13(a) bar labels (OPT-13B, ShareGPT, 2 requests/s): average batched requests 13.62 for "
+          "Orca (Oracle) and 30.42 for vLLM; these two values were read from the figure, not the text. "
+          "Section 6.3: 6.1%-9.8% memory saving on parallel sampling and 37.6%-55.2% on beam search.",
+)
+LEVIATHAN_SPECULATIVE_2023 = _lit(
+    "prov:leviathan-speculative-2023",
+    "Leviathan, Kalman, and Matias (2023), Fast Inference from Transformers via Speculative Decoding, ICML "
+    "2023, arXiv 2211.17192, abstract",
+    url="https://arxiv.org/abs/2211.17192",
+    verified="2026-10-20",
+    notes="T5-XXL: a 2X-3X acceleration compared to the standard T5X implementation, with identical outputs.",
+)
+ELSWORTH_GOOGLE_AI_FOOTPRINT_2025 = _lit(
+    "prov:elsworth-google-ai-footprint-2025",
+    "Elsworth et al. (2025), Measuring the environmental impact of delivering AI at Google Scale, arXiv "
+    "2508.15734, Section 4.3",
+    url="https://arxiv.org/abs/2508.15734",
+    verified="2026-10-20",
+    notes="May 2024 to May 2025: a 33x reduction in per-prompt energy for the median Gemini Apps text "
+          "prompt, including a 23x reduction from model improvements and a 1.4x reduction from improved "
+          "machine utilization.",
+)
+VLLM_ISSUE_24684 = Provenance(
+    id="prov:vllm-issue-24684",
+    kind=ProvenanceKind.DATASHEET,
+    ref="vllm-project/vllm issue 24684 (opened 2025-09-11), two printed outputs of vLLM's serving benchmark",
+    url="https://github.com/vllm-project/vllm/issues/24684",
+    verified="2026-10-20",
+    notes="Llama-3.1-8B-Instruct, vLLM 0.10.1.1, NVIDIA H100 80GB HBM3, 640 requests at maximum request "
+          "concurrency 64. The first run used the ShareGPT prompts (benchmark_serving.py before PR 24411), "
+          "the second random prompts (vllm bench serve after the default dataset changed). Values as printed.",
+)
+VLLM_ISSUE_21266 = Provenance(
+    id="prov:vllm-issue-21266",
+    kind=ProvenanceKind.DATASHEET,
+    ref="vllm-project/vllm issue 21266 (opened 2025-07-20), startup log of the unquantized Meta-Llama-3-8B run",
+    url="https://github.com/vllm-project/vllm/issues/21266",
+    verified="2026-10-20",
+    notes="V1 engine v0.9.1 on one SM90 H100, bfloat16, max_seq_len 8192, default settings. Log lines as "
+          "printed: model loading took 14.9596 GiB; available KV cache memory 51.39 GiB; GPU KV cache size "
+          "420,976 tokens; maximum concurrency for 8,192 tokens per request 51.39x.",
+)
+VLLM_V091_SOURCE = Provenance(
+    id="prov:vllm-v091-source",
+    kind=ProvenanceKind.DATASHEET,
+    ref="vllm-project/vllm v0.9.1 (b6553be), vllm/config.py CacheConfig defaults",
+    url="https://github.com/vllm-project/vllm/blob/b6553be/vllm/config.py",
+    verified="2026-10-20",
+    notes="gpu_memory_utilization: float = 0.9 (line 1464); the default KV block size is 16 tokens.",
+)
