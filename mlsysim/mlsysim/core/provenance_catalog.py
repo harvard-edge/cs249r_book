@@ -2879,3 +2879,119 @@ LIN_AWQ_2024 = _lit(
     verified="2026-10-20",
     notes="Sec. 5.1: group size 128 for weight-only INT4 quantization.",
 )
+
+# --- Data engineering: wake-word benchmarks, annotation times, Speech Commands (added 2026-10-20) ---
+PICOVOICE_WAKE_WORD_BENCHMARK = Provenance(
+    id="prov:picovoice-wake-word-benchmark",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="Picovoice, wake-word-benchmark (GitHub), README 'Accuracy' and doc/img/summary.png, commit 84919190fb18",
+    url="https://github.com/Picovoice/wake-word-benchmark",
+    verified="2026-10-17",
+    notes=("Miss rates at 1 false alarm per 10 hours (plot.py target_false_alarm_per_hour=0.1), averaged "
+           "over six wake words; more than 300 recordings per word from more than 50 speakers, mixed at "
+           "10 dB SNR with DEMAND noise from 18 environments, with LibriSpeech as background speech. "
+           "Run by the maker of Porcupine."),
+)
+PAPADOPOULOS_EXTREME_CLICKING_2017 = _lit(
+    "prov:papadopoulos-extreme-clicking-2017",
+    "Papadopoulos, Uijlings, Keller, and Ferrari (2017), Extreme Clicking for Efficient Object "
+    "Annotation, ICCV",
+    url="https://doi.org/10.1109/ICCV.2017.528",
+    verified="2026-10-20",
+    notes="About 35 s to draw one high-quality box in ImageNet's annotation campaign, as the paper reports it.",
+)
+CITYSCAPES_2016 = _lit(
+    "prov:cordts-cityscapes-2016",
+    "Cordts et al. (2016), The Cityscapes Dataset for Semantic Urban Scene Understanding, CVPR",
+    url="https://www.cityscapes-dataset.com/",
+    verified="2026-10-20",
+    notes="Fine pixel-level annotation and quality control took more than 1.5 h on average for one image.",
+)
+SPEECH_COMMANDS_V2_CARD = _report(
+    "prov:speech-commands-v002-hf-card",
+    "Hugging Face dataset card google/speech_commands, config v0.02 (rev. 57ba463); Warden (2018), "
+    "Speech Commands: A Dataset for Limited-Vocabulary Speech Recognition, arXiv:1804.03209",
+    "https://huggingface.co/datasets/google/speech_commands",
+    notes="Split sizes from the card's dataset_info: train 84,848, validation 9,982, test 4,890 clips.",
+)
+TENSORFLOW_SPEECH_COMMANDS_SPLIT = _conv(
+    "prov:tensorflow-speech-commands-which-set",
+    "TensorFlow v2.16.1, examples/speech_commands train.py flags --validation_percentage and "
+    "--testing_percentage (default 10 each), applied by input_data.which_set()",
+    notes="The reference loader assigns each hashed speaker key to a split by these default percentages.",
+)
+MICROSOFT_TAY_2016 = _report(
+    "prov:microsoft-tay-2016",
+    "Peter Lee (2016), Learning from Tay's Introduction, The Official Microsoft Blog, March 25, 2016",
+    "https://blogs.microsoft.com/blog/2016/03/25/learning-tays-introduction/",
+    notes="Tay was taken offline about 16 hours after launch, inside the 'first 24 hours' the post describes.",
+)
+
+
+# --- Data delivery and drift: measured pipelines, files, and releases (added 2026-10-20) ---
+MOHAN_DATA_STALLS_2021 = _lit(
+    "prov:mohan-data-stalls-2021",
+    "Mohan, Phanishayee, Raniwala, and Chidambaram (2021), Analyzing and Mitigating Data Stalls in DNN "
+    "Training, PVLDB 14(5)",
+    url="https://www.vldb.org/pvldb/vol14/p771-mohan.pdf",
+    verified="2026-10-18",
+    notes="Nine vision and audio models profiled; CoorDL (coordinated caching and preprocessing) cuts training "
+          "time by up to 5x on a single server with the same model and accelerators.",
+)
+LECLERC_FFCV_2023 = _lit(
+    "prov:leclerc-ffcv-2023",
+    "Leclerc, Ilyas, Engstrom, Park, Salman, and Madry (2023), FFCV: Accelerating Training by Removing Data "
+    "Bottlenecks, CVPR",
+    url="https://arxiv.org/abs/2306.12517",
+    verified="2026-10-18",
+    notes="ResNet-50 trained to 75 percent ImageNet top-1 in about 20 minutes on one machine (8 A100s).",
+)
+PYTORCH_PROFILER_TUTORIAL = Provenance(
+    id="prov:pytorch-profiler-tensorboard-tutorial",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="PyTorch tutorials, PyTorch Profiler With TensorBoard (intermediate_source/tensorboard_profiler_tutorial.py, "
+        "commit 45a5b17, the last version before its removal on 2026-06-01; _static/img/profiler_overview1.png "
+        "and profiler_overview2.png)",
+    url="https://github.com/pytorch/tutorials/blob/45a5b17/intermediate_source/tensorboard_profiler_tutorial.py",
+    verified="2026-10-18",
+    notes="ResNet-18 on CIFAR-10 resized to 224, batch 32, one Tesla V100; Execution Summary of the average step "
+          "as the tool prints it, for the default loader and for num_workers=4.",
+)
+NYC_TLC_YELLOW_TAXI_2024_01_PARQUET = Provenance(
+    id="prov:nyc-tlc-yellow-taxi-2024-01-parquet",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="NYC Taxi and Limousine Commission, Yellow Taxi Trip Records, January 2024 (yellow_tripdata_2024-01.parquet, "
+        "49,961,641 bytes); metadata printed by pyarrow 25.0.0",
+    url="https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-01.parquet",
+    verified="2026-10-18",
+    notes="ParquetFile(path).metadata.row_group(0).column(i) sizes and pyarrow.compute.count_distinct per column; "
+          "uncompressed sizes are measured after encoding.",
+)
+WEBDATASET_PUBLAYNET_SHARD = Provenance(
+    id="prov:webdataset-publaynet-shard",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="WebDataset README (github.com/webdataset/webdataset, v0.2.107), test shard publaynet-train-000000.tar",
+    url="https://storage.googleapis.com/webdataset/testdata/publaynet-train-000000.tar",
+    verified="2026-10-18",
+    notes="Content-Length 303,779,840 bytes; `tar tf | wc -l` prints 1,970 members, a .json and a .png per sample. "
+          "The README suggests a shuffle buffer of about 1,000 samples.",
+)
+WARDEN_SPEECH_COMMANDS_2018 = _lit(
+    "prov:warden-speech-commands-2018",
+    "Warden (2018), Speech Commands: A Dataset for Limited-Vocabulary Speech Recognition, arXiv:1804.03209",
+    url="https://arxiv.org/abs/1804.03209",
+    verified="2026-10-18",
+    notes="Section 6 (v2: 105,829 utterances, 35 words, 2,618 speakers), Section 7.3 (v1, released 2017-08-03: "
+          "64,727 utterances, 1,881 speakers), and the Top-One table: the default convolution model trained on "
+          "each release and scored on each release's test set.",
+)
+EVIDENTLY_DEFAULT_STATTESTS = Provenance(
+    id="prov:evidently-default-stattests-v0-7-23",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="Evidently v0.7.23 (Apache 2.0), src/evidently/legacy/calculations/stattests/: registry.py "
+        "_get_default_stattest, ks_stattest.py, wasserstein_distance_norm.py",
+    url="https://github.com/evidentlyai/evidently/tree/v0.7.23/src/evidently/legacy/calculations/stattests",
+    verified="2026-10-18",
+    notes="Numerical features: two-sample K-S at 1,000 or fewer reference rows (drift when p <= 0.05), normed "
+          "Wasserstein distance above (drift when distance / reference sd >= 0.1).",
+)

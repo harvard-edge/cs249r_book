@@ -42,6 +42,11 @@ GamePlaying = _load("game_playing", "GamePlaying", "Cited results of landmark ga
 # Deployment-tier field figures (added 2026-10-20)
 DeviceMeasurements = _load("device_measurements", "DeviceMeasurements", "Cited measurements of deployed ML hardware (TPU v1 roofline, memory-wall growth, phone stress test, two-pass wake word).")
 # Spaceflight anomaly inquiries (added 2026-10-20)
+WakeWordBenchmarks = _load("wake_word_benchmarks", "WakeWordBenchmarks", "Published wake-word detector benchmark results (Picovoice wake-word benchmark).")  # added 2026-10-20
+AnnotationTimes = _load("annotation_times", "AnnotationTimes", "Measured human annotation times (ImageNet boxes, Cityscapes masks).")  # added 2026-10-20
+DataPipelineResults = _load("data_pipeline_results", "DataPipelineResults", "Measured input-pipeline results (data stalls, FFCV, a profiler's step breakdown).")  # added 2026-10-20
+DataFileMeasurements = _load("data_file_measurements", "DataFileMeasurements", "Metadata of real public data files (a Parquet file, a WebDataset shard).")  # added 2026-10-20
+SpeechCommandsReleases = _load("speech_commands_releases", "SpeechCommandsReleases", "Speech Commands v1 and v2 sizes and cross-release accuracy (Warden 2018).")  # added 2026-10-20
 SpaceflightAnomalies = _load("spaceflight_anomalies", "SpaceflightAnomalies", "Cited results of spaceflight anomaly inquiries (ESA Schiaparelli 2017).")
 # Diabetic retinopathy screening studies (added 2026-10-20)
 ScreeningStudies = _load("screening_studies", "ScreeningStudies", "Cited results of diabetic retinopathy screening systems (Gulshan 2016, Beede 2020, FDA DEN180001).")
@@ -331,6 +336,11 @@ class Literature(Registry):
     SummarizationFaithfulness = SummarizationFaithfulness  # added 2026-10-20
     PrefixCaching = PrefixCaching  # added 2026-10-20
     VlaSystems = VlaSystems  # added 2026-10-20
+    WakeWordBenchmarks = WakeWordBenchmarks  # added 2026-10-20
+    AnnotationTimes = AnnotationTimes  # added 2026-10-20
+    DataPipelineResults = DataPipelineResults  # added 2026-10-20
+    DataFileMeasurements = DataFileMeasurements  # added 2026-10-20
+    SpeechCommandsReleases = SpeechCommandsReleases  # added 2026-10-20
     ComputeTrend = ComputeTrend
     AlgorithmicEfficiency = AlgorithmicEfficiency
     EdgeInferenceBenchmarks = EdgeInferenceBenchmarks

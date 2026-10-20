@@ -29,6 +29,7 @@ from ..embodied.registry import Embodied as _Embodied  # embodied stopping scena
 from ..agents.registry import Agents as _Agents  # agent harness profiles (added 2026-10-20)
 from . import scenario_types as _st
 from ..core.units import COLOR_DEPTH_8BIT as _COLOR_DEPTH_8BIT  # added 2026-10-20
+from ..core.units import DAYS_PER_MONTH as _DAYS_PER_MONTH  # added 2026-10-20
 # Deployment paradigms block (added 2026-10-20)
 from ..systems.registry import Pods as _Pods
 from ..core.units import (VIDEO_1080P_WIDTH as _VIDEO_1080P_WIDTH, VIDEO_1080P_HEIGHT as _VIDEO_1080P_HEIGHT,
@@ -3065,4 +3066,277 @@ class Scenarios(Registry):
             ("gptj-99", "Text summarization", "GPT-J 6B"),
             ("stable-diffusion-xl", "Text to image", "SDXL"),
         ],
+    )
+
+    # --- Data engineering: an always-on keyword spotter's data, and the labels behind it (added 2026-10-20) ---
+    # One smart-speaker wake-word detector carries the product targets, the
+    # false-wake budget and the listening it takes to verify, and the data budget.
+    # The labeling entries price labels against compute, agreement, and active
+    # learning. Cited figures come from Literature, Datasets, and Infrastructure;
+    # everything else is a stated scenario assumption.
+
+    KeywordSpotterTargets = _st.AlwaysOnDetectorTargetsScenario(
+        name="A smart-speaker keyword spotter's product targets",
+        description="Catch 98 percent of spoken wake words, wake falsely less than once a month, answer within "
+                    "200 ms, fit a 256 KB always-on model and 16 KB of preprocessing state, on a $150K data "
+                    "budget in six months.",
+        detection_target=0.98,            # scenario assumption: share of spoken wake words caught
+        false_wake_budget=1,              # scenario assumption: expected false wakes per month
+        false_wake_horizon=Q_(_DAYS_PER_MONTH, "day"),
+        response_limit=Q_(200, "ms"),     # scenario assumption: end of keyword to response
+        model_memory=Q_(256, "KB"),       # scenario assumption: always-on island sized for the INT8 DS-CNN
+        preprocessing_memory=Q_(16, "KB"),  # scenario assumption: preprocessing-state budget
+        data_budget=Q_(150_000, "USD"),   # scenario assumption: total data-engineering budget
+        timeline=Q_(6, "month"),          # scenario assumption: time to production
+        base_detection_rate=0.90,         # scenario assumption: illustrative base-model detection rate
+    )
+    KeywordSpotterSampleRateChoice = _st.DesignTradeoffScenario(
+        name="Keyword spotter: 8 kHz to 16 kHz sampling",
+        description="Illustrative detection-rate gain; raw-audio storage and processing scale with the rate (kHz).",
+        baseline=8, alternative=16,       # scenario assumption: sampling rates compared, kHz
+        gain_low=0.02, gain_high=0.04,    # scenario assumption: illustrative detection-rate gain
+    )
+    KeywordSpotterMfccChoice = _st.DesignTradeoffScenario(
+        name="Keyword spotter: 13 to 40 MFCC coefficients per frame",
+        description="Illustrative detection-rate gain; model input and feature memory scale with the count.",
+        baseline=13, alternative=40,      # scenario assumption: coefficients per frame compared
+        gain_low=0.03, gain_high=0.05,    # scenario assumption: illustrative detection-rate gain
+    )
+    KeywordSpotterExampleCountChoice = _st.DesignTradeoffScenario(
+        name="Keyword spotter: 1M to 10M training examples",
+        description="Illustrative detection-rate gain; labeling cost, storage, and training time scale with the count.",
+        baseline=1_000_000, alternative=10_000_000,  # scenario assumption: training examples compared
+        gain_low=0.05, gain_high=0.08,    # scenario assumption: illustrative detection-rate gain
+    )
+    KeywordSpotterFalseWakes = _st.FalseAlarmBudgetScenario(
+        name="One-second windows checked every second, all month, against one false wake a month",
+        description="An always-on detector scores one non-keyword window a second around the clock; the "
+                    "false-wake budget sets the per-window false-positive rate it must hold.",
+        window=Q_(1, "second"),           # scenario assumption: one window scored each second
+        listening_per_day=Q_(24, "hour"),  # always on
+        horizon=KeywordSpotterTargets.false_wake_horizon,
+        budget=KeywordSpotterTargets.false_wake_budget,
+        rejection_levels=[0.999, 0.9999, 0.99999],  # scenario assumption: per-window rejection rates compared
+    )
+    KeywordSpotterFalseWakeEvidence = _st.ZeroEventExposureScenario(
+        name="Listening needed to support one false wake a month with none observed",
+        description="Representative non-keyword audio, at 95 percent one-sided confidence (the zero-event rule "
+                    "of three), recorded at 16 kHz and 16 bits.",
+        budget=KeywordSpotterFalseWakes.budget,
+        horizon=KeywordSpotterFalseWakes.listening_time,
+        confidence=0.95,                  # scenario assumption: one-sided confidence of the claim
+        sample_rate=Q_(16_000, "Hz"),     # scenario assumption: the 16 kHz candidate configuration
+        sample_width=Q_(2, "byte"),       # 16-bit mono audio
+    )
+    KeywordSpotterDataBudget = _st.DataBudgetScenario(
+        name="A $150K keyword-spotting data budget split across labeling, storage, and governance",
+        description="Sixty percent buys crowdsourced recordings and labels at $0.10 each plus 20 percent review.",
+        total=KeywordSpotterTargets.data_budget,
+        shares={"labeling": 0.60,         # scenario assumption
+                "storage and processing": 0.25,  # scenario assumption
+                "governance": 0.15},      # scenario assumption
+        label_price=Q_(0.10, "USD"),      # scenario assumption: per recorded and labeled example
+        review_overhead=0.20,             # scenario assumption: quality-review surcharge
+    )
+    ImageNetLabelingVersusResNetRun = _st.LabelingVersusTrainingScenario(
+        name="Labeling one million images against one ResNet-50 run on eight A100s",
+        description="A $100K labeling budget against 90 epochs of ImageNet at the A100 ResNet-50 sustained rate, "
+                    "priced at the reference and cloud GPU-hour rates.",
+        labeling_budget=Q_(100_000, "USD"),  # scenario assumption: crowd labels plus review and relabeling
+        dataset_examples=_Datasets.ImageNet.training_examples,
+        epochs=90,                        # scenario assumption: the standard ResNet-50 schedule
+        throughput_per_accelerator=Q_(float(_Literature.Benchmarks.ResNet50A100TrainThroughput), "count/second"),
+        accelerators=8,                   # scenario assumption: one 8-GPU server
+        price_low=_Infrastructure.Pricing.Fleet.GpuHourRef.rate,
+        price_high=_Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate,
+        labeling_time_low=Q_(2, "week"),  # scenario assumption: crowdsourced labeling of 1M images, low
+        labeling_time_high=Q_(4, "week"),  # scenario assumption: and high
+    )
+    FullHdMaskVersusBoxes = _st.LabelGranularityScenario(
+        name="A 1920x1080 segmentation mask against ten bounding boxes",
+        description="One class per pixel against four coordinates per box.",
+        image_width=_VIDEO_1080P_WIDTH,
+        image_height=_VIDEO_1080P_HEIGHT,
+        boxes=10,                         # scenario assumption: objects in one street scene
+        coords_per_box=4,
+    )
+    CityscapesMasksForMillionFrames = _st.LaborEffortScenario(
+        name="Pixel masks for one million street frames at the Cityscapes annotation time",
+        description="More than 1.5 hours per fine annotation (Cordts et al. 2016), in full-time person-years.",
+        items=1_000_000,                  # scenario assumption: frames a driving team wants masked
+        time_per_item=Q_(float(_Literature.AnnotationTimes.CityscapesFineMaskHours), "hour"),
+        work_year=Q_(2000, "hour"),       # convention: a full-time person-year of 2,000 working hours
+    )
+    MswcByHand = _st.LaborEffortScenario(
+        name="The Multilingual Spoken Words Corpus labeled by hand at 10 s per clip",
+        description="What forced alignment saved: every clip of the corpus labeled manually.",
+        items=_Datasets.MSWC.training_examples.to("count").magnitude,
+        time_per_item=Q_(10, "second"),   # scenario assumption: a fast manual label
+        work_year=CityscapesMasksForMillionFrames.work_year,
+    )
+    BinaryLabelChanceAgreement = _st.AnnotatorAgreementScenario(
+        name="Two annotators who each label 90 percent of items 'not spam'",
+        description="Chance agreement from the label mix alone, and kappa at 85 percent raw agreement.",
+        class_shares=[0.90, 0.10],        # scenario assumption: binary label mix
+        observed_agreement=0.85,          # scenario assumption: raw agreement that looks high
+    )
+    WakeWordLabelQualityDrift = _st.AgreementDriftScenario(
+        name="A wake-word labeling campaign whose agreement falls after new annotators join",
+        description="Kappa falls while every input-feature monitor stays flat.",
+        baseline_kappa=0.85,              # scenario assumption: initial collection
+        later_kappa=0.72,                 # scenario assumption: six months later
+        elapsed=Q_(6, "month"),           # scenario assumption
+    )
+    ActiveLearningTenMillionPool = _st.ActiveLearningBudgetScenario(
+        name="Active learning over a 10M-image pool on a $50K budget",
+        description="Hosted-model scoring at $0.01 an image and labels at $0.50, from 85 to 95 percent accuracy; "
+                    "a tenth of the budget scores a narrowed candidate pool.",
+        pool=10_000_000,                  # scenario assumption: unlabeled images
+        label_budget=Q_(50_000, "USD"),   # scenario assumption
+        label_price=Q_(0.50, "USD"),      # scenario assumption: a label that needs careful review
+        scoring_price=Q_(0.01, "USD"),    # scenario assumption: hosted multimodal model per image
+        random_labels_needed=1_000_000,   # scenario assumption: random sampling to the target
+        active_labels_low=100_000,        # scenario assumption: hard examples needed, low
+        active_labels_high=200_000,       # scenario assumption: hard examples needed, high
+        compute_share=0.10,               # scenario assumption: budget share spent on scoring
+        baseline_accuracy=0.85,           # scenario assumption
+        target_accuracy=0.95,             # scenario assumption
+    )
+    SpeechCommandsHashSplit = _st.HashSplitScenario(
+        name="Speech Commands v0.02 split by hashed speaker key",
+        description="TensorFlow's which_set() default percentages against the split sizes the dataset card records.",
+        dataset=_Datasets.SpeechCommandsV2,
+        validation_percent=10,            # TensorFlow train.py --validation_percentage default
+        test_percent=10,                  # TensorFlow train.py --testing_percentage default
+    )
+    MillionEventBatchVersusStreaming = _st.BatchVersusStreamingIngestScenario(
+        name="One million 1 KB events a second, streamed or batched hourly",
+        description="Always-on streaming cores with a standby each, against a batch job that clears each hour's "
+                    "data in 10 minutes, at one core-hour price.",
+        event_rate=Q_(1_000_000, "1/second"),  # scenario assumption
+        event_size=Q_(1, "KB"),           # scenario assumption
+        stream_cores=100,                 # scenario assumption: 50 primary cores plus a standby each
+        stream_hours_per_day=Q_(24, "hour"),
+        batch_cores=200,                  # scenario assumption
+        batch_window=Q_(10, "minute"),    # scenario assumption: per clock hour
+        core_hour_price=Q_(0.05, "USD/hour"),  # scenario assumption: per core-hour
+        redundancy_factor=2,              # scenario assumption: one standby core per primary
+    )
+    PretrainingCorpusGrowth = _st.TrendFitScenario(
+        name="Reported pre-training tokens of landmark language models, fitted growth per year",
+        description="Least-squares fit of log tokens on release date (Literature.Series.PretrainingTokens).",
+        series_name="PretrainingTokens", x_key="date", y_key="tokens", x_is_date=True,
+    )
+
+    # --- Data engineering: delivering a dataset to the accelerator, and watching it drift (added 2026-10-20) ---
+    # ResNet-50 on one A100 carries delivery: the arithmetic ceiling, the bytes a
+    # sustained rate demands, what each storage tier supplies, and the loader
+    # workers that decode it. The keyword spotter's loudness feature carries drift:
+    # a K-S test at two sample sizes, an illustrative location shift, and PSI on
+    # quintile bins. Cited figures come from Hardware, Models, Datasets, Systems,
+    # Infrastructure, Ops, and Literature; the rest are stated scenario assumptions.
+
+    PetabyteCrossRegionMove = _st.TransferScenario(
+        name="One petabyte moved between cloud regions",
+        description="A training corpus in US East and accelerators in US West, over a dedicated 100 Gb/s or a "
+                    "10 Gb/s link, priced at an inter-region egress rate and set against a 20-hour training run.",
+        payload=Q_(1, "PB"),              # scenario assumption: the corpus
+        links={"100 Gb/s": _Fabrics.Ethernet_100G.bandwidth, "10 Gb/s": _Fabrics.Ethernet_10G.bandwidth},
+        egress_rate=Q_(0.02, "USD/GB"),   # scenario assumption: AWS inter-region transfer rate (2024)
+        compute_price=_Infrastructure.Pricing.Cloud.TpuV4PerHour.rate,
+        job_time=Q_(20, "hour"),          # scenario assumption: the training run the data would feed
+    )
+    ResNet50A100InputFeed = _st.AcceleratorInputFeedScenario(
+        name="ResNet-50 training on one A100, fed JPEGs from a cloud block volume",
+        description="The A100's arithmetic ceiling for ResNet-50 training, the well-tuned sustained rate, 150 KB "
+                    "JPEGs that decode to 224x224x3 FP32 tensors, a 250 MB/s attached volume, and host loader "
+                    "workers at 375 images a second each.",
+        workload=_Models.Vision.ResNet50,
+        hardware=_Hardware.Cloud.A100,
+        sustained_rate=ImageNetLabelingVersusResNetRun.throughput_per_accelerator,
+        encoded_sample=Q_(150, "KB"),     # scenario assumption: average ImageNet-class JPEG as stored
+        decoded_sample=(_Datasets.ImageNet.image_width * _Datasets.ImageNet.image_height
+                        * _Datasets.ImageNet.image_channels * _BYTES_FP32),
+        supply=_Storage.CloudBlockStorageBaseline,
+        training_flops_factor=3,          # forward pass plus a backward pass of about twice its cost
+        worker_rate=Q_(375, "count/second"),  # scenario assumption: JPEG decode and augment per CPU worker
+        host_decode_cap=Q_(3500, "count/second"),  # scenario assumption: illustrative host-wide decode ceiling
+    )
+    ResNet50EightA100InputFeed = ResNet50A100InputFeed.variant(
+        name="ResNet-50 training on eight A100s in one server, fed from one storage path",
+        description="The one-A100 feed scaled to the eight accelerators of one server.",
+        accelerators=8,                   # one 8-GPU server
+    )
+    RecommendationFeatureLookups = _st.FeatureLookupScenario(
+        name="A recommendation service reading ten stored features per request",
+        description="10,000 requests a second, ten feature reads each, 5 KB feature vectors summarizing 150 KB images.",
+        request_rate=Q_(10_000, "1/second"),  # scenario assumption
+        reads_per_request=10,             # scenario assumption
+        feature_bytes=Q_(5, "KB"),        # scenario assumption: one stored feature vector
+        raw_sample_bytes=ResNet50A100InputFeed.encoded_sample,
+    )
+    MswcCorpusStorageTiers = _st.CorpusTierScenario(
+        name="The Multilingual Spoken Words Corpus on object storage and on local NVMe",
+        description="Every clip at 16 kHz and 16 bits, priced per month and read sequentially on each tier.",
+        dataset=_Datasets.MSWC,
+        storage_rates={"object store": _Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate,
+                       "NVMe low": _Infrastructure.Pricing.Storage.NvmeLowPerTbMonth.rate,
+                       "NVMe high": _Infrastructure.Pricing.Storage.NvmeHighPerTbMonth.rate},
+        read_bandwidths={"object store": _Storage.ObjectStoreSingleStream.bandwidth,
+                         "NVMe": _Storage.LocalNvmeTrainingTypical.bandwidth},
+    )
+    FraudModelColumnProjection = _st.ColumnProjectionScenario(
+        name="A fraud model that uses 20 of a table's 100 equal-size columns",
+        description="A row format reads every column; a columnar format reads only the 20.",
+        columns_used=20,                  # scenario assumption
+        columns_total=100,                # scenario assumption
+    )
+    GzipVersusSnappyEpochs = _st.CodecEpochScenario(
+        name="A 100 GB epoch decompressed with gzip or Snappy for 50 epochs",
+        description="Host CPU decompression time per epoch and over the run, at each codec's decompression rate.",
+        epoch_bytes=Q_(100, "GB"),        # scenario assumption
+        epochs=50,                        # scenario assumption
+        decode_rates={"gzip": Q_(120, "MB/s"),    # scenario assumption: typical gzip decompression
+                      "Snappy": Q_(500, "MB/s")},  # scenario assumption: typical Snappy decompression
+    )
+    LoudnessDriftKs1000 = _st.KsDriftScenario(
+        name="K-S drift test on clip loudness, 1,000 training against 1,000 recent clips",
+        description="A quieter microphone on part of the fleet; the observed largest CDF gap against the "
+                    "critical value at the 0.05 level.",
+        coefficient=_Ops.Monitoring.KsTestCoefficient,
+        n_reference=1000,                 # scenario assumption
+        n_current=1000,                   # scenario assumption
+        observed_statistic=0.08,          # scenario assumption: observed largest CDF gap
+    )
+    LoudnessDriftKs100k = LoudnessDriftKs1000.variant(
+        name="K-S drift test on clip loudness, 100,000 clips per sample",
+        description="The same observed gap against the critical value of a monitor that sees all traffic.",
+        n_reference=100_000,              # scenario assumption
+        n_current=100_000,                # scenario assumption
+    )
+    LoudnessShiftMatchingObservedGap = _st.LocationShiftScenario(
+        name="Clip loudness shifted 1.2 dB quieter",
+        description="Illustrative normal loudness curves, sd 6 dB about -30 dBFS; a 1.2 dB shift opens a K-S gap "
+                    "of about the observed 0.08.",
+        reference_mean=-30,               # scenario assumption: training loudness, dBFS
+        feature_sd=6,                     # scenario assumption: dB
+        shift=-1.2,                       # scenario assumption: dB
+    )
+    LoudnessShiftHarmless = LoudnessShiftMatchingObservedGap.variant(
+        name="Clip loudness shifted 0.3 dB quieter",
+        description="A shift too small to matter, on the same illustrative curves.",
+        shift=-0.3,                       # scenario assumption: dB
+    )
+    QuieterMicrophoneLoudnessBins = _st.BinShareShiftScenario(
+        name="Clip loudness in training quintiles after a quieter microphone ships",
+        description="Recent clips pile into the quiet bins; illustrative shares scored by PSI.",
+        baseline_shares=[0.20] * 5,       # training quintiles
+        current_shares=[0.30, 0.25, 0.20, 0.15, 0.10],  # scenario assumption: recent shares, quietest first
+    )
+    KeywordSpotterSilentRegression = _st.MetricRegressionScenario(
+        name="The keyword spotter's detection rate six months after launch",
+        description="Launched at the 98 percent target; four points lower six months later with the model unchanged.",
+        launch_value=KeywordSpotterTargets.detection_target,
+        drop=0.04,                        # scenario assumption: fall below the target, in points / 100
+        elapsed=Q_(6, "month"),           # scenario assumption
     )
