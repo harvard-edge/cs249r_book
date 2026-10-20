@@ -212,6 +212,26 @@ SweBenchTrajectories = _Series(
     "Per-trajectory model calls, role-split characters, tokens, and cost for public repair-agent runs.",
 )
 
+# --- DAgger on Super Tux Kart (added 2026-10-20) -----------------------------
+ImitationSuperTuxKart = _Series(
+    "ross_dagger_supertuxkart",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=("Ross, Gordon, and Bagnell (2011), A Reduction of Imitation Learning and Structured "
+             "Prediction to No-Regret Online Learning, AISTATS, Figure 2 and Sec. 5.1"),
+        url="https://arxiv.org/abs/1011.0686",
+        verified="2026-10-19",
+        notes=(
+            "Super Tux Kart, Star Track: average falls per lap of a linear controller on image "
+            "features after 1, 5, 10, 15, and 20 training iterations, for supervised cloning, "
+            "SMILe, and DAgger. Falls are read from Figure 2 (the plot has 95 percent "
+            "confidence bars), so the decimals are by eye; Sec. 5.1 gives about 1,000 data "
+            "points collected per iteration."
+        ),
+    ),
+    "Falls per lap against training iterations for three imitation methods on one racing track.",
+)
+
 # --- One mini-SWE-agent run, per task (added 2026-10-20) ---------------------
 SweBenchMiniSonnet4Run = _Series(
     "swe_bench_verified_mini_v1_sonnet4_run",

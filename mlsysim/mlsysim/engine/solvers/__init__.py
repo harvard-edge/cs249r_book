@@ -664,3 +664,26 @@ __all__ += [
     "CorpusDenominatorsModel",
     "StagingBurstModel",
 ]
+
+# --- Fine-tuning on trajectories: masks, weighting, packing, preference, release (added 2026-10-20) ---
+from .fine_tuning import (
+    TargetMaskModel,
+    PerInvocationSerializationModel,
+    TrajectoryRoleShareModel,
+    LossNormalizationModel,
+    SequencePackingModel,
+    PreferencePairModel,
+    ContextDistillationModel,
+    CandidateReleaseModel,
+)
+
+__all__ += [
+    "TargetMaskModel",
+    "PerInvocationSerializationModel",
+    "TrajectoryRoleShareModel",
+    "LossNormalizationModel",
+    "SequencePackingModel",
+    "PreferencePairModel",
+    "ContextDistillationModel",
+    "CandidateReleaseModel",
+]

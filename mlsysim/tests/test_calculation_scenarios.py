@@ -4646,3 +4646,71 @@ def test_curation_cohort_dispositions():
     assert d.cost_per_attempt.to("USD").magnitude == approx(0.6)
     assert d.cost_per_artifact().to("USD").magnitude == approx(20.0)
     assert d.cost_per_artifact(0.06).to("USD").magnitude == approx(10.0)
+def test_fine_tuning_serialization_and_target_mask():
+    """Per-call examples, the recovery record's mask, and recorded role shares (added 2026-10-20)."""
+    s = Scenarios.RepairTrajectoryPerCallExamples.result
+    assert s.expansion == approx(15.5) and s.per_invocation_tokens == 697_500
+    m = Scenarios.RecoveryRecordTargetMask.result
+    assert m.stored == 16_384 and m.predicted == 16_383
+    assert m.targets_without_rationale == 800 and m.targets_with_rationale == 2_200
+    assert m.observation_share == approx(0.771484)
+    assert m.dilution_without_rationale == approx(20.47875) and m.dilution_with_rationale == approx(7.446818)
+    assert m.unselected_share_of_responses == approx(1 / 6) and m.unselected_vs_selected == approx(0.2)
+    assert m.other_context_share == approx(0.1796875)
+    assert Scenarios.RecoveryRecordTargetMaskDoubledObservations.result.dilution_without_rationale == approx(36.27875)
+    assert Scenarios.RecoveryRecordTargetMaskLongObservations.result.dilution_without_rationale == approx(42.17875)
+    r = Scenarios.SweBenchVerifiedRoleShares.result
+    assert r.runs == 2_100 and len(r.configurations) == 5
+    assert r.observation_low == approx(0.560694) and r.observation_high == approx(0.724431)
+    assert r.model_low == approx(0.124767) and r.model_high == approx(0.306965)
+    c = Scenarios.SweAgentClaude35SonnetRunCost.result
+    assert c.median_input_tokens == approx(387_195.5) and c.median_output_tokens == approx(3_852.5)
+    assert c.median_input_output_ratio == approx(102.131) and c.output_token_share == approx(0.0095005)
+
+
+def test_fine_tuning_weighting_packing_and_bounds():
+    w = Scenarios.RepairTraceWithLookupWeighting.result
+    assert w.focus_token_share == approx(0.969697) and w.focus_over_other == approx(32.0)
+    a = Scenarios.RepairTraceWithFifteenLookups.result
+    assert a.focus_token_share == approx(2 / 3) and a.focus_example_share == approx(0.0625)
+    b = Scenarios.RepairTraceSplitIntoTwentyRecords.result
+    assert b.focus_token_share == approx(2 / 3) and b.focus_example_share == approx(20 / 35)
+    p = Scenarios.EightExamplePackingBatch.result
+    assert p.stored == 50_176 and p.padded_positions == 262_144 and p.buffers == 2
+    assert p.buffer_loads == [32_768, 17_408]
+    assert p.padded_occupancy == approx(0.19140625) and p.packed_occupancy == approx(0.765625)
+    assert p.position_ratio == approx(4.0)
+    i = Scenarios.RepairPolicyImitationBounds
+    assert i.horizon_steps == 30 and i.cloning_capped == approx(18.0) and i.aggregation_capped == approx(0.6)
+    assert i.capped_gap == approx(30.0) and i.matching_error == approx(0.000666667)
+    assert i.saturation_horizon == approx(50.0)
+    assert i.variant(recoverability=i.horizon_steps).aggregation_capped == approx(18.0)
+
+
+def test_fine_tuning_preference_distillation_adapters_release():
+    d = Scenarios.RepairPreferencePair.result
+    assert d.score_preferred == approx(2.0) and d.score_dispreferred == approx(-1.0)
+    assert d.margin == approx(0.6) and d.preference_score == approx(0.645656)
+    assert d.loss == approx(0.437488) and d.initial_loss == approx(0.693147)
+    assert d.saturation_factor == approx(0.354344) and d.gradient_coefficient == approx(0.0708687)
+    d2 = Scenarios.RepairPreferencePairDoubledBeta.result
+    assert d2.preference_score == approx(0.768525) and d2.loss == approx(0.263282)
+    assert d2.gradient_coefficient == approx(0.0925901)
+    c = Scenarios.SupportChecklistDistillation.result
+    assert c.monthly_prefix_tokens == approx(2.4e10)
+    assert c.uncached_spend.to("USD").magnitude == approx(48_000) and c.cached_spend.to("USD").magnitude == approx(4_800)
+    assert c.net_uncached.to("USD").magnitude == approx(33_000) and c.net_cached.to("USD").magnitude == approx(-10_200)
+    assert c.break_even_revisions == approx(3.2)
+    L = Scenarios.Rank16AdaptersOnHypothetical8B
+    assert L.adapter_count == 8_388_608 and L.adapter_fraction == approx(0.001048576)
+    assert L.adapter_state.to("byte").magnitude == approx(134_217_728)
+    assert L.total.to("GB").magnitude == approx(16.134217728, rel=1e-9)
+    assert L.full_state.to("GB").magnitude == approx(128.0)
+    assert L.adapter_reduction == approx(7.933449) and L.frozen_share == approx(0.991681)
+    assert L.adapter_reduction_ceiling == approx(8.0)
+    assert Scenarios.Rank32AdaptersOnHypothetical8B.adapter_state.to("MB").magnitude == approx(268.435456)
+    r = Scenarios.RepairCandidateRelease.result
+    assert r.baseline_cost_per_accepted.to("USD").magnitude == approx(2.0)
+    assert r.candidate_cost_per_accepted.to("USD").magnitude == approx(2.272727)
+    assert r.break_even_attempt_cost.to("USD").magnitude == approx(1.32)
+    assert r.gap_se == approx(0.0304762) and r.gap_z == approx(1.968748) and r.recall_error_ratio == approx(6.0)

@@ -594,8 +594,16 @@ def calc_proportion_gap_interval(rate_a, rate_b, n_a, n_b, z_critical):
     ``se = sqrt(p_a (1 - p_a) / n_a + p_b (1 - p_b) / n_b)``.
     """
     gap = rate_a - rate_b
-    se = math.sqrt(rate_a * (1 - rate_a) / n_a + rate_b * (1 - rate_b) / n_b)
+    se = calc_proportion_gap_se(rate_a, rate_b, n_a, n_b)
     return gap - z_critical * se, gap + z_critical * se
+
+
+def calc_proportion_gap_se(rate_a, rate_b, n_a, n_b):
+    """Unpooled standard error of a gap ``rate_a - rate_b`` between two independent groups (added 2026-10-20).
+
+    ``se = sqrt(p_a (1 - p_a) / n_a + p_b (1 - p_b) / n_b)``.
+    """
+    return math.sqrt(rate_a * (1 - rate_a) / n_a + rate_b * (1 - rate_b) / n_b)
 
 
 def calc_equal_n_for_z(rate_a, rate_b, z_critical):
