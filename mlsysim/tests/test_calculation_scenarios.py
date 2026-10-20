@@ -5622,3 +5622,35 @@ def test_premises_no_sensor_reports():
     t = Literature.ContaminatedSurfaceFriction
     assert (t.AsphaltEngineOilPft, t.ConcreteDrySkidCars) == (0.01, 0.85)
     assert Literature.RobotDeployments.AgilityDigitTotesMoved == 100000
+def test_closing_an_agent_course():
+    """Remediation attempt, lost reply, residual violations, passing set, blame search,
+    specification bound, passing-patch audit, and METR's 50 against 80 percent horizons (added 2026-10-20)."""
+    from mlsysim import Agents
+    r = Scenarios.RemediationIncidentAttempt.result
+    assert r.attempt_cost == pytest.approx(20.45) and r.cost_per_accepted == pytest.approx(20.45 / 0.70)
+    assert r.token_share == pytest.approx(0.15 / 20.45)
+    assert r.grown_attempt_cost == pytest.approx(20.60) and r.grown_attempt_rise == pytest.approx(0.15 / 20.45)
+    assert r.grown_break_even_acceptance == pytest.approx(0.70 * 20.60 / 20.45)
+    w = Agents.Remediation.OnCall
+    assert w.attempt_cost.m_as("USD") == pytest.approx(20.45) and w.approval_share == pytest.approx(20 / 20.45)
+    assert Scenarios.RemediationCanaryPivotLoss.attempt_cost.m_as("USD") == pytest.approx(20.45)
+    b = Scenarios.BlindRetryAgainstStatusLookup
+    assert b.result.timeouts == pytest.approx(124.9) and b.result.duplicates == pytest.approx(99.8001)
+    assert b.duplicate_cost_per_day.m_as("USD") == pytest.approx(199_600.2)
+    assert b.lookup_cost_per_day.m_as("USD") == pytest.approx(1.249)
+    assert b.unapplied_closures == pytest.approx(25) and b.lost_request_share == pytest.approx(0.001 / 0.004996)
+    v = Scenarios.ResidualViolationsFiftyTurns
+    assert v.trajectory_violation == pytest.approx(0.0487944, rel=1e-5)
+    assert round(v.violating_per_day) == 488
+    assert Scenarios.ThirtyPercentValidPassingSet.result.posterior == pytest.approx(0.035 / 0.305)
+    assert Scenarios.HalvedHealthWindow.interval_widening == pytest.approx(2 ** 0.5)
+    c = Scenarios.CheckedWindowBlameSearch
+    assert c.full_paths == 4 ** 50 and round(c.full_exponent) == 30 and c.window_paths == 1024
+    assert c.window_search_time.m_as("minute") == pytest.approx(20.48)
+    assert Scenarios.SpecificationReviewHalfOfEffort.result.overall_speedup == pytest.approx(2.0)
+    a = Scenarios.SweAgentGpt4PassingPatchAudit
+    assert (a.total, a.suspicious, a.weak_tests, a.correct) == (251, 160, 78, 91)
+    g = Scenarios.FrontierHorizonReliabilityGap
+    assert len(g.rows) == 13 and g.rows[0]["model_key"] == "gpt_4o_inspect"
+    assert g.ratio_median == pytest.approx(5.4768583, rel=1e-6)
+    assert g.ratio_min == pytest.approx(3.9935368, rel=1e-6) and g.ratio_max == pytest.approx(10.2870995, rel=1e-6)

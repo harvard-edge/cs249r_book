@@ -1408,6 +1408,10 @@ class AcceptedTaskCostScenario(BaseScenario):
     other_cost_cut: Optional[float] = None     # fraction of the other cost removed
     acceptance_gain: Optional[float] = None    # added to acceptance
     independent_attempts: Optional[int] = None
+    # Optional (added 2026-10-20): more model calls per attempt, as a fraction
+    # added to the model cost (1.0 doubles it), and the acceptance that keeps
+    # cost per accepted task unchanged at the costlier attempt.
+    model_cost_growth: Optional[float] = None
 
     @property
     def result(self):
@@ -1415,7 +1419,7 @@ class AcceptedTaskCostScenario(BaseScenario):
         return AcceptedTaskCostModel().solve(self.model_cost, self.other_cost, self.acceptance,
                                              self.token_price_cut, self.improved_acceptance,
                                              self.other_cost_cut, self.acceptance_gain,
-                                             self.independent_attempts)
+                                             self.independent_attempts, self.model_cost_growth)
 
 
 class AppendOnlyContextScenario(BaseScenario):
@@ -7603,6 +7607,10 @@ class BlindRetryScenario(BaseScenario):
     reply_loss: float                # probability a reply is lost
     workers: int
     calls_per_worker: int            # mutating calls per worker per day
+    # Optional (added 2026-10-20): what a duplicated change and a read-only
+    # status lookup cost, to price blind retry against settlement by status.
+    duplicate_cost: Optional[Quantity] = None       # USD per duplicated change
+    status_lookup_cost: Optional[Quantity] = None   # USD per status query
 
     @property
     def calls(self) -> int:
@@ -7612,6 +7620,25 @@ class BlindRetryScenario(BaseScenario):
     def result(self):
         from .solvers import BlindRetryModel
         return BlindRetryModel().solve(self.request_loss, self.reply_loss, self.calls)
+
+    @property
+    def lost_request_share(self) -> float:
+        """Share of timeouts whose request never arrived (nothing applied)."""
+        return self.request_loss / self.result.timeout_probability
+
+    @property
+    def unapplied_closures(self) -> float:
+        """Calls a runtime that assumes success after a timeout closes although nothing applied."""
+        return self.calls * self.request_loss
+
+    @property
+    def duplicate_cost_per_day(self) -> Quantity:
+        return (self.result.duplicates * self.duplicate_cost).to("USD")
+
+    @property
+    def lookup_cost_per_day(self) -> Quantity:
+        """One status query on every timeout."""
+        return (self.result.timeouts * self.status_lookup_cost).to("USD")
 
 
 class ObservationCarryScenario(BaseScenario):
@@ -12985,9 +13012,7 @@ class IrreversibleLossScenario(BaseScenario):
 
     @property
     def attempt_cost(self) -> Quantity:
-        w = self.workload
-        return (w.model_cost_per_attempt + w.environment_cost_per_attempt
-                + w.assessment_cost_per_attempt + w.approval_cost_per_attempt).to("USD")
+        return self.workload.attempt_cost
 
     @property
     def result(self):
@@ -20444,6 +20469,93 @@ class PriceDeclineScenario(BaseScenario):
     def result(self):
         from .solvers import PriceDeclineModel
         return PriceDeclineModel().solve(self.rows)
+# --- Closing an agent course: residual risk, evidence, blame, and reliability (added 2026-10-20) ---
+# A residual violation rate over a day's trajectories, a shortened observation
+# window, the counterfactual search for the step that caused a failure, and the
+# gap between a published series' 50 and 80 percent task horizons.
+
+
+class ResidualViolationScenario(BaseScenario):
+    """A residual per-step rate of violating proposals over ``horizon`` steps, for a day's trajectories."""
+    step_violation: float            # per-step rate of violating proposals that training leaves
+    horizon: int                     # steps per trajectory
+    trajectories_per_day: int
+
+    @property
+    def trajectory_violation(self) -> float:
+        """Share of trajectories with at least one violating proposal: ``1 - (1 - eps)^H``."""
+        from ..physics.agents import calc_unchecked_success
+        return 1 - calc_unchecked_success(1 - self.step_violation, self.horizon)
+
+    @property
+    def violating_per_day(self) -> float:
+        return self.trajectory_violation * self.trajectories_per_day
+
+
+class ShortenedWindowScenario(BaseScenario):
+    """An observation window cut to ``window_share`` of its adopted length; samples scale with it."""
+    window_share: float
+
+    @property
+    def interval_widening(self) -> float:
+        """A half-width shrinks as ``1 / sqrt(samples)``, so it widens by ``1 / sqrt(window_share)``."""
+        return 1 / _math.sqrt(self.window_share)
+
+
+class CounterfactualSearchScenario(BaseScenario):
+    """Replay paths that blame for a failure must search: a whole horizon, or one checked window."""
+    branching: int                   # candidate actions per step
+    horizon: int                     # steps in the task
+    window: int                      # steps between intermediate checks
+    replay_time: Quantity            # time per replayed check
+
+    @property
+    def full_paths(self) -> int:
+        return self.branching ** self.horizon
+
+    @property
+    def full_exponent(self) -> float:
+        """log10 of the full search space."""
+        return _math.log10(self.full_paths)
+
+    @property
+    def window_paths(self) -> int:
+        return self.branching ** self.window
+
+    @property
+    def window_search_time(self) -> Quantity:
+        return (self.window_paths * self.replay_time).to("minute")
+
+
+class TaskHorizonReliabilityScenario(BaseScenario):
+    """Frontier models' 50 percent against 80 percent task horizons in a published series."""
+    series_name: str
+    released_from: str               # ISO date: frontier models released on or after it
+
+    @property
+    def rows(self):
+        from ..literature.registry import Literature
+        rows = [r for r in getattr(Literature, self.series_name).entries
+                if r["is_sota"] and r["release_date"] >= self.released_from]
+        return sorted(rows, key=lambda r: r["release_date"])
+
+    @property
+    def ratios(self) -> List[float]:
+        """p50 horizon over p80 horizon, per model, ascending."""
+        return sorted(r["p50_min"] / r["p80_min"] for r in self.rows)
+
+    @property
+    def ratio_min(self) -> float:
+        return self.ratios[0]
+
+    @property
+    def ratio_max(self) -> float:
+        return self.ratios[-1]
+
+    @property
+    def ratio_median(self) -> float:
+        import statistics
+        return statistics.median(self.ratios)
 
 
 class CostVsScoreScenario(BaseScenario):
@@ -21000,3 +21112,37 @@ class RestrictedTransitScenario(BaseScenario):
     @property
     def time_increase(self) -> float:
         return float((self.leg_time_added / self.leg_time_nominal).to("").magnitude)
+
+
+class PassingPatchAuditScenario(BaseScenario):
+    """A manual review of patches that passed a benchmark's tests, by what each pass rested on.
+
+    Counts are patches: a leaked solution, three kinds a weak test let through,
+    and two kinds of correct fix.
+    """
+    solution_leak: float
+    incorrect_fix: float
+    different_files: float
+    incomplete_fix: float
+    different_correct: float
+    more_comprehensive: float
+
+    @property
+    def weak_tests(self) -> float:
+        """Wrong patches the tests failed to catch."""
+        return self.incorrect_fix + self.different_files + self.incomplete_fix
+
+    @property
+    def correct(self) -> float:
+        return self.different_correct + self.more_comprehensive
+
+    @property
+    def suspicious(self) -> float:
+        return self.solution_leak + self.weak_tests
+
+    @property
+    def total(self) -> float:
+        return self.suspicious + self.correct
+
+    def share(self, count: float) -> float:
+        return count / self.total

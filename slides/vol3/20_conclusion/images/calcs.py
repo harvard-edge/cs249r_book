@@ -1,240 +1,246 @@
-"""Lecture 20 (Conclusion): every derived number on the slides and in the notes.
+#!/usr/bin/env python3
+"""Every number on the Volume III Lecture 20 slides and notes, read from MLSysIM.
 
-Run: python3 calcs.py   (prints each value with the label the slide uses).
-Inputs are typed with their source; only derived values are computed here.
-"Ch N" is the rendered Volume III chapter (dev text, read 2026-10-19).
-make_figs.py imports these functions, so the figures and the slides agree.
+MLSysIM holds the inputs (registry, Literature, series) and the calculations
+(Scenarios.*); the chapter reads the same scenarios. A number this lecture
+recalls from an earlier one is read from the scenario or Literature entry that
+lecture's deck reads, so the recall is the same object, not a copy. This file
+only selects values, converts units, and formats them; it types no numbers.
+Each value is recorded with v() under the key the deck prints as \\val{key};
+running this file writes images/numbers.tex.
+
+Sources
+  Incident bill       Scenarios.RemediationIncidentAttempt (Agents.Remediation.OnCall),
+                      Scenarios.RemediationCanaryPivotLoss (expected irreversible loss)
+  Lost reply          Scenarios.BlindRetryAgainstStatusLookup (hypothetical rates and prices)
+  Measured run        data/settle_run.json: the deck's localhost run (data/settle_run.py)
+  Passing set         Scenarios.ThirtyPercentValidPassingSet
+  SWE-bench+          Scenarios.SweAgentGpt4PassingPatchAudit (Literature.AgentEvaluation)
+  SWE-agent           Literature.AgentRetrieval (Yang et al. 2024, Tables 1 and 3)
+  Release evidence    Scenarios.AcceptanceRatePlanning (Lecture 13's detectable differences)
+  Fallacy             Scenarios.ResidualViolationsFiftyTurns
+  Health window       Scenarios.HalvedHealthWindow
+  Attribution         Scenarios.CheckedWindowBlameSearch
+  Specification       Scenarios.SpecificationReviewHalfOfEffort (Amdahl)
+  Two relations       Scenarios.UncheckedRepairHorizon, Scenarios.RepairAttemptCostLevers (Lecture 1)
+  METR p50 and p80    Scenarios.FrontierHorizonReliabilityGap (Literature.AgentTimeHorizon)
+  Recalled lectures   L2 Scenarios.CodingAgentResend30Turns; L4 Scenarios.RepairContextBudget;
+                      L7 Scenarios.BlindRetryTwoPercentLoss; L10 Scenarios.FreezeRuleOverStepBudget;
+                      L17 Literature.AgentEvaluation (METR o3); L18 Scenarios.ResearchSystemTokenBreakEven
+  Not yet wired       the Lecture 19 recall (100 tickets, $1.32 against $0.55): its Agent
+                      Economics scenario is being added with the Lecture 19 deck.
+
+Run from this folder: python3 calcs.py
 """
 
 import json
 import math
-from decimal import ROUND_HALF_UP, Decimal
+import sys
 from pathlib import Path
 
-import yaml
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
 
+Agents, Scenarios, Literature = mlsysim.Agents, mlsysim.Scenarios, mlsysim.Literature
 HERE = Path(__file__).resolve().parent
 
+REMED = Agents.Remediation.OnCall
+BILL = Scenarios.RemediationIncidentAttempt
+PIVOT = Scenarios.RemediationCanaryPivotLoss
+LOST = Scenarios.BlindRetryAgainstStatusLookup
+PASSING = Scenarios.ThirtyPercentValidPassingSet
+AUDIT = Scenarios.SweAgentGpt4PassingPatchAudit
+SWE = Literature.AgentRetrieval
+PLAN = Scenarios.AcceptanceRatePlanning
+RESIDUAL = Scenarios.ResidualViolationsFiftyTurns
+WINDOW = Scenarios.HalvedHealthWindow
+BLAME = Scenarios.CheckedWindowBlameSearch
+SPEC = Scenarios.SpecificationReviewHalfOfEffort
+HORIZON = Scenarios.UncheckedRepairHorizon
+COST = Scenarios.RepairAttemptCostLevers
+GAP = Scenarios.FrontierHorizonReliabilityGap
+RESEND = Scenarios.CodingAgentResend30Turns
+BUDGET = Scenarios.RepairContextBudget
+RETRY = Scenarios.BlindRetryTwoPercentLoss
+RULE = Scenarios.FreezeRuleOverStepBudget
+METR = Literature.AgentEvaluation
+TOKENS = Scenarios.ResearchSystemTokenBreakEven
 
-# ---------------------------------------------------------------- recall (L19)
-def recall_l19():
-    """NM 19.1, Ch 19 §19.2, table 1: 100 tickets per configuration."""
-    tickets = 100
-    acc_frontier, acc_cheap = 75, 25           # accepted tickets (table 1)
-    cpa_frontier, cpa_cheap = 0.55, 1.32       # $ per accepted repair (NM 19.1)
-    return dict(
-        rej_per_acc_frontier=(tickets - acc_frontier) / acc_frontier,
-        rej_per_acc_cheap=(tickets - acc_cheap) / acc_cheap,
-        cpa_ratio=cpa_cheap / cpa_frontier,
-        cpa_frontier=cpa_frontier, cpa_cheap=cpa_cheap)
+
+def pct(x):
+    return 100 * x
 
 
-# ---------------------------------------------------------------- the lost reply
-P_REQ, P_REP = 0.001, 0.004      # Exercise 3, Ch 20 §20.13
-CALLS = 25_000                   # mutating calls per day (Exercise 3)
-DUP_COST, LOOKUP_COST = 2_000, 0.01   # $ per duplicated change, $ per status lookup
-
-
-def lost_reply():
-    """Exercise 3: timeouts, duplicates under a fresh-identity blind retry."""
-    p_timeout = P_REQ + (1 - P_REQ) * P_REP
-    p_dup = (1 - P_REQ) * P_REP * (1 - P_REQ)   # settlement relation, table 8
-    timeouts = CALLS * p_timeout
-    dups = CALLS * p_dup
-    lookups = timeouts * LOOKUP_COST
-    lost_req_share = P_REQ / p_timeout
-    false_closures = CALLS * P_REQ             # assume success after a lost request
-    return dict(timeouts=timeouts, dups=dups, dup_cost=dups * DUP_COST,
-                lookup_cost=lookups, lost_req_share=lost_req_share, false_closures=false_closures,
-                p_dup=p_dup)
+def usd(q):
+    return q.to("USD").magnitude
 
 
 def measured_run():
-    """images/data/settle_run.json: our localhost run of the four runtimes."""
+    """data/settle_run.json: the deck's localhost run of the four runtimes."""
     return json.loads((HERE / "data" / "settle_run.json").read_text())
 
 
-# ---------------------------------------------------------------- the incident's bill
-def incident_bill():
-    """Ch 20 §20.3.2: one incident_42 attempt (remediation profile, Lighthouse 19.1)."""
-    model, tools, health, approval = 0.15, 0.10, 0.20, 20.00
-    acc = 0.70
-    attempt = model + tools + health + approval
-    p_wrong, consequence = 0.04, 12_000          # §20.3.2, eq. 12.5 with no check
-    loss = p_wrong * consequence
-    # Doubling the model calls (§20.3.2): break-even acceptance at the new cost
-    attempt2 = attempt + model
-    acc_needed = acc * attempt2 / attempt
-    return dict(attempt=attempt, cpa=attempt / acc, model_share=model / attempt,
-                approval_share=approval / attempt, loss=loss,
-                loss_over_attempt=loss / attempt, attempt2=attempt2,
-                attempt_rise=attempt2 / attempt - 1, acc_needed=acc_needed,
-                parts=dict(model=model, tools=tools, health=health, approval=approval))
+print("== The lost reply (Scenarios.BlindRetryAgainstStatusLookup)")
+lr = LOST.result
+v("lr_calls", LOST.calls, "{:,.0f}", "mutating calls a day")
+v("lr_req", LOST.request_loss, "{:.3f}", "request lost")
+v("lr_rep", LOST.reply_loss, "{:.3f}", "reply lost")
+v("lr_keep", 1 - LOST.request_loss, "{:.3f}", "request delivered")
+v("lr_dup_cost", usd(LOST.duplicate_cost), "{:,.0f}", "a duplicated change, $")
+v("lr_lookup", usd(LOST.status_lookup_cost), "{:.2f}", "a status lookup, $")
+v("lr_timeouts", lr.timeouts, "{:.1f}", "timeouts a day")
+v("lr_dups", lr.duplicates, "{:.1f}", "blind-retry duplicates a day")
+v("lr_dup_day", usd(LOST.duplicate_cost_per_day), "{:,.0f}", "duplicates, $ a day")
+v("lr_lookup_day", usd(LOST.lookup_cost_per_day), "{:.2f}", "lookups on every timeout, $ a day")
+v("lr_false", LOST.unapplied_closures, "{:.0f}", "assume success: expected closures with nothing applied")
 
+print("== Measured run (data/settle_run.json)")
+run = measured_run()
+assert (run["p_request_lost"], run["p_reply_lost"]) == (LOST.request_loss, LOST.reply_loss), \
+    "the run used the scenario's loss rates"
+rt = run["runtimes"]
+n_runs = {r["incidents"] for r in rt.values()}
+assert n_runs == {LOST.calls}, "every runtime handled one day's calls"
+v("ms_n", n_runs.pop(), "{:,.0f}", "incidents per runtime")
+v("ms_dups", rt["retry"]["duplicates"], "{:.0f}", "retry blindly: duplicated changes")
+v("ms_false", rt["assume"]["false_closures"], "{:.0f}", "assume success: closed, never applied")
+v("ms_halt", rt["halt"]["unowned_unknowns"], "{:.0f}", "halt: no recorded outcome")
+v("ms_halt_applied", rt["halt"]["applied_but_unknown"], "{:.0f}", "halt: of them, already applied")
+v("ms_settle_words", sum(rt["settle"][k] for k in ("duplicates", "false_closures", "unowned_unknowns")),
+  "words", "settle by status: failures, in words")
 
-# ---------------------------------------------------------------- verification
-def passing_set():
-    """§20.10 pitfall, eq. 3.3: 30% valid, FR 10%, FA 5%."""
-    valid, fr, fa = 0.30, 0.10, 0.05
-    pass_valid = valid * (1 - fr)
-    pass_invalid = (1 - valid) * fa
-    precision = pass_valid / (pass_valid + pass_invalid)
-    return dict(invalid_before=1 - valid, invalid_after=1 - precision,
-                precision=precision, pass_rate=pass_valid + pass_invalid)
+print("== The incident's bill (Scenarios.RemediationIncidentAttempt, RemediationCanaryPivotLoss)")
+b = BILL.result
+v("bill_model", usd(REMED.model_cost_per_attempt), "{:.2f}", "model calls, $")
+v("bill_tools", usd(REMED.environment_cost_per_attempt), "{:.2f}", "telemetry and change tools, $")
+v("bill_health", usd(REMED.assessment_cost_per_attempt), "{:.2f}", "health-window check, $")
+v("bill_approval", usd(REMED.approval_cost_per_attempt), "{:.0f}", "on-call review, $")
+v("bill_approval2", usd(REMED.approval_cost_per_attempt), "{:.2f}", "on-call review, $ (figure label)")
+v("bill_attempt", b.attempt_cost, "{:.2f}", "attempt, $")
+v("bill_acc_pct", pct(BILL.acceptance), "{:.0f}", "acceptance, %")
+v("bill_acc", BILL.acceptance, "{:.2f}", "acceptance, fraction")
+v("bill_cpa", b.cost_per_accepted, "{:.2f}", "per accepted incident, $")
+v("bill_model_share", pct(b.token_share), "{:.1f}", "model share of the attempt, %")
+v("bill_approval_share", pct(REMED.approval_share), "{:.1f}", "approval share of the attempt, %")
+v("bill_p_wrong", pct(REMED.wrong_change_probability), "{:.0f}", "wrong change proposed, % of attempts")
+v("bill_impact", usd(REMED.wrong_change_impact), "{:,.0f}", "a committed wrong change, $")
+v("bill_loss", usd(PIVOT.result.loss_without_check), "{:.0f}", "expected irreversible loss, no check, $")
+v("bill_loss_mult", usd(PIVOT.result.loss_without_check) / b.attempt_cost, "{:.1f}", "the loss over the attempt")
+v("bill_attempt2", b.grown_attempt_cost, "{:.2f}", "attempt with twice the model calls, $")
+v("bill_rise", pct(b.grown_attempt_rise), "{:.2f}", "attempt rise, %")
+v("bill_acc_needed", pct(b.grown_break_even_acceptance), "{:.2f}", "acceptance needed, %")
 
+print("== The passing set (Scenarios.ThirtyPercentValidPassingSet)")
+ps = PASSING.result
+v("ps_valid", pct(1 - PASSING.defect_rate), "{:.0f}", "valid candidates, %")
+v("ps_fr", pct(1 - PASSING.valid_accept_rate), "{:.0f}", "valid ones the check misses, %")
+v("ps_fa", pct(PASSING.false_accept_rate), "{:.0f}", "invalid ones the check passes, %")
+v("ps_invalid", pct(PASSING.defect_rate), "{:.0f}", "invalid candidates, %")
+v("ps_valid_frac", 1 - PASSING.defect_rate, "{:.2f}", "valid, fraction")
+v("ps_keep_frac", PASSING.valid_accept_rate, "{:.2f}", "valid passed, fraction")
+v("ps_invalid_frac", PASSING.defect_rate, "{:.2f}", "invalid, fraction")
+v("ps_fa_frac", PASSING.false_accept_rate, "{:.2f}", "invalid passed, fraction")
+v("ps_pass_valid", ps.pass_share - ps.defective_pass, "{:.2f}", "valid and passing, of all candidates")
+v("ps_pass_invalid", ps.defective_pass, "{:.3f}", "invalid and passing, of all candidates")
+v("ps_pass", ps.pass_share, "{:.3f}", "passing, of all candidates")
+v("ps_after", pct(ps.posterior), "{:.1f}", "invalid share of the passing set, %")
+v("ps_fa_ok", pct(1 - PASSING.false_accept_rate), "{:.0f}", "the check is right on invalid ones, %")
 
-def swebench_plus():
-    """Aleithan et al. 2024 (SWE-bench+), arXiv 2410.06992v2, Table 1:
-    the 251 passing patches of SWE-Agent + GPT-4 on SWE-bench."""
-    leak, incorrect, other_files, incomplete = 82, 32, 9, 37
-    different_ok, more_complete = 76, 15
-    total = leak + incorrect + other_files + incomplete + different_ok + more_complete
-    weak = incorrect + other_files + incomplete
-    correct = different_ok + more_complete
-    return dict(total=total, leak=leak, weak=weak, correct=correct,
-                leak_share=leak / total, weak_share=weak / total,
-                correct_share=correct / total, suspicious_share=(leak + weak) / total)
+print("== SWE-bench+ (Scenarios.SweAgentGpt4PassingPatchAudit)")
+v("sbp_total", AUDIT.total, "{:.0f}", "passing patches reviewed")
+v("sbp_leak", AUDIT.solution_leak, "{:.0f}", "solution in the issue")
+v("sbp_weak", AUDIT.weak_tests, "{:.0f}", "passed weak tests")
+v("sbp_incorrect", AUDIT.incorrect_fix, "{:.0f}", "incorrect")
+v("sbp_incomplete", AUDIT.incomplete_fix, "{:.0f}", "incomplete")
+v("sbp_other", AUDIT.different_files, "{:.0f}", "changed other files")
+v("sbp_correct", AUDIT.correct, "{:.0f}", "correct")
+v("sbp_diff", AUDIT.different_correct, "{:.0f}", "correct by a different route")
+v("sbp_suspect", AUDIT.suspicious, "{:.0f}", "suspect")
+v("sbp_suspect_pct", pct(AUDIT.share(AUDIT.suspicious)), "{:.2f}", "suspect, %")
 
+print("== SWE-agent (Literature.AgentRetrieval)")
+v("swa_agent", SWE.SweBenchLiteSweAgentResolved, "{:.1f}", "SWE-agent interface, %")
+v("swa_noedit", SWE.SweAgentNoEditCommandResolved, "{:.1f}", "no edit command, %")
+v("swa_n", SWE.SweBenchLiteInstances, "{:.0f}", "SWE-bench Lite issues")
 
-def swe_agent():
-    """Yang et al. 2024 (SWE-agent), arXiv 2405.15793v3, SWE-bench Lite,
-    GPT-4 Turbo unless named: Table 1 and Table 3 (percent resolved)."""
-    rows = [("SWE-agent interface", 18.0), ("Viewer shows whole file", 12.7),
-            ("Iterative search", 12.0), ("Shell only", 11.0), ("No edit command", 10.3)]
-    swap = ("Same interface, Claude 3 Opus", 13.0)
-    return dict(rows=rows, swap=swap, n=300,
-                resolved_full=round(18.0 / 100 * 300), shell_rel=18.0 / 11.0 - 1)
+print("== Release evidence (Scenarios.AcceptanceRatePlanning: eq. 13.3, n proportional to 1/delta^2)")
+wide, narrow = PLAN.differences
+v("rel_halve", (wide / narrow) ** 2, "{:.0f}", "tasks per arm when the difference halves, x")
+v("rel_shrink", math.sqrt(narrow / wide), "{:.2f}", "difference after doubling the tasks, of before")
 
+print("== The capable-model fallacy (Scenarios.ResidualViolationsFiftyTurns)")
+v("fc_eps", pct(RESIDUAL.step_violation), "{:.1f}", "residual violations per step, %")
+v("fc_ok", 1 - RESIDUAL.step_violation, "{:.3f}", "per-step compliance")
+v("fc_h", RESIDUAL.horizon, "{:.0f}", "turns")
+v("fc_pct", pct(RESIDUAL.trajectory_violation), "{:.2f}", "trajectories with a violation, %")
+v("fc_day", RESIDUAL.trajectories_per_day, "{:,.0f}", "trajectories a day")
+v("fc_per_day", RESIDUAL.violating_per_day, "{:.0f}", "hazardous proposals a day")
 
-# ---------------------------------------------------------------- fallacies, limits
-def fallacy_capable():
-    """§20.10: 0.1% per step, 50 turns, 10,000 trajectories a day."""
-    eps, H, daily = 0.001, 50, 10_000
-    p_any = 1 - (1 - eps) ** H
-    return dict(p_any=p_any, per_day=p_any * daily)
+print("== Shortened health window (Scenarios.HalvedHealthWindow)")
+v("hw_widen", WINDOW.interval_widening, "{:.2f}", "interval widens, x")
 
+print("== Attribution (Scenarios.CheckedWindowBlameSearch)")
+v("at_b", BLAME.branching, "{:.0f}", "candidate actions per step")
+v("at_b_words", BLAME.branching, "words", "the same, in words")
+v("at_h", BLAME.horizon, "{:.0f}", "steps")
+v("at_exp", round(BLAME.full_exponent), "{:.0f}", "full search, power of ten")
+v("at_w", BLAME.window, "{:.0f}", "steps between checks")
+v("at_w_words", BLAME.window, "words", "the same, in words")
+v("at_window", BLAME.window_paths, "{:,.0f}", "paths in one window")
+v("at_sec", BLAME.replay_time.to("s").magnitude, "{:.1f}", "per replayed check, s")
+v("at_min", BLAME.window_search_time.to("minute").magnitude, "{:.0f}", "window search, minutes")
 
-def window_halving():
-    """§20.10: halving the window halves the samples; CI widens by sqrt(2)."""
-    return dict(widen=math.sqrt(2))
+print("== Specification boundary (Scenarios.SpecificationReviewHalfOfEffort)")
+sp = SPEC.result
+v("sp_serial", 1 - sp.stage_fraction, "{:.1f}", "serial fraction")
+v("sp_cap", sp.overall_speedup, "{:.0f}", "speedup cap, x")
 
+print("== Lecture 1: horizon compounding (Scenarios.UncheckedRepairHorizon)")
+h = HORIZON.result
+v("hz_step", pct(HORIZON.step_success), "{:.0f}", "per-step success, %")
+v("hz_short", HORIZON.short_horizon, "{:.0f}", "short horizon, turns")
+v("hz_long", HORIZON.long_horizon, "{:.0f}", "long horizon, turns")
+v("hz_p_short", pct(h.success[HORIZON.short_horizon]), "{:.1f}", "success at the short horizon, %")
+v("hz_p_long", pct(h.success[HORIZON.long_horizon]), "{:.1f}", "success at the long horizon, %")
 
-def tasks_per_arm():
-    """eq. 13.3: n ∝ 1/Δ²; halving Δ quadruples n; doubling n shrinks Δ by sqrt(2)."""
-    return dict(halve_delta=(1 / 0.5) ** 2, double_n_shrink=1 / math.sqrt(2))
+print("== Lecture 1: cost per accepted task (Scenarios.RepairAttemptCostLevers)")
+c = COST.result
+v("c_attempt", c.attempt_cost, "{:.2f}", "attempt, $")
+v("c_token_share", pct(c.token_share), "{:.0f}", "token share, %")
+v("c_acc", pct(COST.acceptance), "{:.0f}", "acceptance, %")
+v("c_better_acc", pct(COST.improved_acceptance), "{:.0f}", "improved acceptance, %")
+v("c_eff", c.cost_per_accepted, "{:.2f}", "per accepted task, $")
+v("c_cheap", c.cost_per_accepted_cheaper_tokens, "{:.2f}", "half the token price, $")
+v("c_better", c.cost_per_accepted_improved, "{:.2f}", "better acceptance, $")
 
+print("== METR p50 against p80 (Scenarios.FrontierHorizonReliabilityGap)")
+v("mt_n", len(GAP.rows), "{:.0f}", "frontier models since 2024")
+v("mt_median", GAP.ratio_median, "{:.1f}", "median p50 / p80")
+v("mt_min", GAP.ratio_min, "{:.0f}", "smallest ratio")
+v("mt_max", GAP.ratio_max, "{:.0f}", "largest ratio")
 
-def attribution():
-    """§20.8: 4 candidate actions per step, 50 steps; one checked 5-step window,
-    1.2 s per replayed check."""
-    b, H, w, sec = 4, 50, 5, 1.2
-    full = b ** H
-    window = b ** w
-    return dict(full=full, full_exp=math.log10(full), window=window,
-                minutes=window * sec / 60)
-
-
-def amdahl_spec():
-    """§20.9: half the effort stays human specification and review."""
-    serial = 0.5
-    return dict(cap=1 / serial)
-
-
-# ---------------------------------------------------------------- the two relations
-def horizon():
-    """eq. 1.1 at 99% per step (NM 1.1, §20.11 figure)."""
-    p = 0.99
-    return dict(p10=p ** 10, p100=p ** 100, curve=[(h, p ** h) for h in range(0, 101)])
-
-
-def freeze():
-    """Ch 10 §10.10: an instruction honored on 99% of turns, over 30 turns."""
-    p30 = 0.99 ** 30
-    return dict(p30=p30, violate=1 - p30)
-
-
-def cost_bars():
-    """NM 1.2 (Ch 1 §1.6): $2.10 attempt, 40% acceptance; tokens 62% of the attempt."""
-    attempt, acc, token_share = 2.10, 0.40, 0.62
-    base = attempt / acc
-    # The chapter rounds the cheaper attempt to $1.45 before dividing
-    # (Ch 1 NM 1.2: "lowers the attempt to $1.45, giving 1.45 / 0.40 = 3.63").
-    cheap = round(attempt * (1 - 0.5 * token_share), 2)
-    half_price = float(Decimal(str(cheap)) / Decimal("0.40"))
-    better_acc = attempt / 0.60
-    return dict(base=base, half_price=half_price, better_acc=better_acc,
-                cheap_attempt=attempt * (1 - 0.5 * token_share))
-
-
-def metr():
-    """METR Time Horizon 1.1 (benchmark_results_1_1.yaml): p50 and p80 horizons
-    (minutes) of models METR marks state of the art, released 2024 or later."""
-    d = yaml.safe_load((HERE / "data" / "metr_benchmark_results_1_1.yaml").read_text())
-    rows = []
-    for name, v in d["results"].items():
-        m = v["metrics"]
-        if m.get("is_sota") and str(v["release_date"]) >= "2024-01-01":
-            rows.append((str(v["release_date"]), name,
-                         m["p50_horizon_length"]["estimate"],
-                         m["p80_horizon_length"]["estimate"]))
-    rows.sort()
-    ratios = sorted(r[2] / r[3] for r in rows)
-    mid = len(ratios) // 2
-    median = ratios[mid] if len(ratios) % 2 else (ratios[mid - 1] + ratios[mid]) / 2
-    return dict(rows=rows, ratio_min=ratios[0], ratio_max=ratios[-1], ratio_median=median)
-
+print("== Recalled lectures")
+v("rs_resent", RESEND.result.resent_tokens, "{:,.0f}", "L2: 30 turns resend, input tokens")
+v("rs_fresh", RESEND.result.reused_prefix_tokens, "{:,.0f}", "L2: fresh with prefix reuse, tokens")
+v("rs_turns", RESEND.turns, "{:.0f}", "L2: turns")
+v("b_append_bill", BUDGET.result.append_bill, "{:,.0f}", "L4: appending, input tokens")
+v("b_select_bill", BUDGET.result.select_bill, "{:,.0f}", "L4: selecting, input tokens")
+v("rt_dup_pct", pct(RETRY.result.duplicate_probability), "{:.2f}", "L7: duplicates, % of calls")
+v("rt_dup_pct4", pct(RETRY.result.duplicate_probability), "{:.4f}", "L7: the same, four places")
+v("rt_dups", RETRY.result.duplicates, "{:,.0f}", "L7: duplicates a day")
+v("rt_calls", RETRY.calls, "{:,.0f}", "L7: mutating calls a day")
+hold = RULE.result.success[RULE.short_horizon]
+v("fr_step", pct(RULE.step_success), "{:.0f}", "L10: per-turn compliance, %")
+v("fr_turns", RULE.short_horizon, "{:.0f}", "L10: turns")
+v("fr_hold", pct(hold), "{:.0f}", "L10: rule held on every turn, %")
+v("metr_rebench_hacks", METR.MetrO3ReBenchHackRuns, "{:.0f}", "L17: RE-Bench runs that hacked")
+v("metr_rebench_runs", METR.MetrO3ReBenchRuns, "{:.0f}", "L17: RE-Bench runs")
+v("metr_rebench_pct", pct(METR.MetrO3ReBenchHackRuns / METR.MetrO3ReBenchRuns), "{:.0f}", "L17: RE-Bench, %")
+v("metr_hcast_hacks", METR.MetrO3HcastHackRuns, "{:.0f}", "L17: HCAST runs that hacked")
+v("metr_hcast_runs", METR.MetrO3HcastRuns, "{:,.0f}", "L17: HCAST runs")
+v("metr_hcast_pct", pct(METR.MetrO3HcastHackRuns / METR.MetrO3HcastRuns), "{:.1f}", "L17: HCAST, %")
+v("hook_agent", TOKENS.agent_tokens_vs_chat, "{:.0f}", "L18: single agent, tokens over chat")
+v("hook_multi", TOKENS.multi_agent_tokens_vs_chat, "{:.0f}", "L18: multi-agent, tokens over chat")
 
 if __name__ == "__main__":
-    r = recall_l19()
-    print("[Recall L19] rejected per accepted: frontier", f"{r['rej_per_acc_frontier']:.2f}",
-          " cheap", f"{r['rej_per_acc_cheap']:.0f}", " cost ratio", f"{r['cpa_ratio']:.1f}x")
-    lr = lost_reply()
-    print("[Estimate ex3] timeouts/day", f"{lr['timeouts']:.1f}", " duplicates/day", f"{lr['dups']:.1f}",
-          " $/day", f"{lr['dup_cost']:,.0f}", " lookups $/day", f"{lr['lookup_cost']:.2f}",
-          " share of timeouts with request lost", f"{lr['lost_req_share']:.1%}",
-          " expected false closures", f"{lr['false_closures']:.0f}")
-    try:
-        m = measured_run()
-        for k, v in m["runtimes"].items():
-            print(f"[Measured] {k:7s}", {kk: v[kk] for kk in ('lost_replies_seen', 'duplicates',
-                  'false_closures', 'unowned_unknowns', 'applied_but_unknown')})
-    except FileNotFoundError:
-        print("[Measured] run data/settle_run.py first")
-    b = incident_bill()
-    print("[Bill] attempt", f"${b['attempt']:.2f}", " per accepted", f"${b['cpa']:.2f}",
-          " model share", f"{b['model_share']:.1%}", " approval share", f"{b['approval_share']:.1%}")
-    print("[Bill] expected irreversible loss", f"${b['loss']:.0f}", "=", f"{b['loss_over_attempt']:.1f}x attempt")
-    print("[Estimate] doubled model calls: attempt", f"${b['attempt2']:.2f}", f"(+{b['attempt_rise']:.2%})",
-          " acceptance needed", f"{b['acc_needed']:.4f}")
-    ps = passing_set()
-    print("[Predict] invalid before", f"{ps['invalid_before']:.0%}", " invalid in passing set",
-          f"{ps['invalid_after']:.1%}", " precision", f"{ps['precision']:.1%}", " pass rate", f"{ps['pass_rate']:.1%}")
-    s = swebench_plus()
-    print("[SWE-bench+] total", s["total"], " leak", s["leak"], f"({s['leak_share']:.2%})",
-          " weak tests", s["weak"], f"({s['weak_share']:.2%})", " correct", s["correct"],
-          f"({s['correct_share']:.2%})", " suspicious", f"{s['suspicious_share']:.2%}")
-    sa = swe_agent()
-    print("[SWE-agent] 18.0% of 300 =", sa["resolved_full"], " relative gain over shell only",
-          f"{sa['shell_rel']:.0%}")
-    f = fallacy_capable()
-    print("[Fallacy] 1-(0.999)^50 =", f"{f['p_any']:.2%}", " per day of 10,000:", f"{f['per_day']:.0f}")
-    print("[Pitfall] halving the window widens the interval by", f"{window_halving()['widen']:.2f}x")
-    t = tasks_per_arm()
-    print("[Release] halving the detectable difference: x", f"{t['halve_delta']:.0f}", "tasks;",
-          " doubling tasks shrinks it to", f"{t['double_n_shrink']:.2f}", "of before")
-    a = attribution()
-    print("[Attribution] 4^50 =", f"{a['full']:.3e}", f"(10^{a['full_exp']:.1f})", " 4^5 =", a["window"],
-          " replay minutes", f"{a['minutes']:.1f}")
-    print("[Spec boundary] speedup cap", f"{amdahl_spec()['cap']:.0f}x")
-    h = horizon()
-    print("[Horizon] 0.99^10 =", f"{h['p10']:.1%}", " 0.99^100 =", f"{h['p100']:.1%}")
-    fz = freeze()
-    print("[Part IV] 0.99^30 =", f"{fz['p30']:.0%}", " violate at least once", f"{fz['violate']:.0%}")
-    c = cost_bars()
-    print("[Cost] base", f"${c['base']:.2f}", " half token price", f"${Decimal(str(c['half_price'])).quantize(Decimal('0.01'), ROUND_HALF_UP)}",
-          f"(attempt ${c['cheap_attempt']:.2f})", " 60% acceptance", f"${c['better_acc']:.2f}")
-    me = metr()
-    print("[METR] SOTA models since 2024:", len(me["rows"]), " p50/p80 ratio min", f"{me['ratio_min']:.1f}",
-          " median", f"{me['ratio_median']:.1f}", " max", f"{me['ratio_max']:.1f}")
-    for row in me["rows"]:
-        print("   ", row[0], row[1], f"p50 {row[2]:.1f} min", f"p80 {row[3]:.1f} min", f"ratio {row[2]/row[3]:.1f}")
+    write(__file__)

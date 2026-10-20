@@ -66,10 +66,11 @@ AgentTimeHorizon = _Series(
             "Copied from METR's published YAML (benchmark METR-Horizon-v1.1). "
             "METR's stated 2023-on doubling time is 128.744 days (CI 104.4-158.0), "
             "fit on frontier models with p50 <= 16 h; refitting these rows the same "
-            "way reproduces it."
+            "way reproduces it. The p80 columns (80% task-completion horizon, "
+            "p80_horizon_length estimate and CI) were added 2026-10-20 from the same YAML."
         ),
     ),
-    "50%-success task horizon by model release (METR Time Horizon v1.1).",
+    "50%- and 80%-success task horizons by model release (METR Time Horizon v1.1).",
 )
 
 LowestPriceAtCapability = _Series(

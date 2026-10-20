@@ -1105,6 +1105,9 @@ class AcceptedTaskCostResult(SolverResult):
     cost_per_accepted_cheaper_other: Optional[float] = None
     cost_per_accepted_acceptance_gain: Optional[float] = None
     independent_success: Optional[float] = None
+    grown_attempt_cost: Optional[float] = None           # model cost grown by model_cost_growth (added 2026-10-20)
+    grown_attempt_rise: Optional[float] = None           # grown attempt / attempt - 1
+    grown_break_even_acceptance: Optional[float] = None  # acceptance that holds cost per accepted task
 
 
 class AppendOnlyContextResult(SolverResult):
