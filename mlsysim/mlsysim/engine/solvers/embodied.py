@@ -14,6 +14,7 @@ from ..results import StoppingBudgetResult, TractionLossResult
 from ...core.types import Quantity
 from ...core.units import ureg
 from ...physics.drivetrain import calc_required_friction, calc_traction_deceleration_limit
+from ...physics.robotics.control import calc_watchdog_lease_bound
 from ...physics.robotics.stopping import (
     calc_braking_time,
     calc_max_permitted_velocity,
@@ -41,7 +42,9 @@ class StoppingBudgetModel(ForwardModel):
     stated, add to the required distance and lower the ceiling
     (``calc_safe_stopping_distance``); jerk-limited braking is left out
     (``calc_scurve_stop_distance`` adds it). ``added_delay`` prices one more
-    delay step as travel at ``speed``.
+    delay step as travel at ``speed``. The delay ceiling is the longest
+    constant-speed pre-brake delay whose stop, with the overhead, still fits
+    (``calc_watchdog_lease_bound``): ``(D_clear - overhead - v^2/2a) / v``.
     """
     requires = ("speed", "delay", "deceleration")
     produces = StoppingBudgetResult
@@ -79,6 +82,11 @@ class StoppingBudgetModel(ForwardModel):
             if delay_positive:
                 out["speed_ceiling"] = calc_max_permitted_velocity(clear_distance, delay, deceleration,
                                                                    loc_margin=loc, physical_margin=margin)
+            room = (clear_distance - overhead).to(m)
+            if speed_at_delay_end is None and room > braking:
+                ceiling = calc_watchdog_lease_bound(room, speed, deceleration)["t_total_delay_max"]
+                out.update(delay_ceiling=ceiling.to(ureg.millisecond),
+                           delay_spare=(ceiling - delay).to(ureg.millisecond))
         if added_delay is not None:
             out["added_delay_travel"] = (speed * added_delay).to(m)
         return StoppingBudgetResult(**out)

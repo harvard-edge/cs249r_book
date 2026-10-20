@@ -1003,6 +1003,8 @@ class StoppingBudgetResult(SolverResult):
     clear_over_stop: Optional[float] = None
     speed_ceiling: Optional[Quantity] = None  # fastest speed whose stop, with the overhead, fits
     added_delay_travel: Optional[Quantity] = None  # travel at ``speed`` during a stated delay step
+    delay_ceiling: Optional[Quantity] = None  # longest constant-speed delay whose stop, with the overhead, fits
+    delay_spare: Optional[Quantity] = None    # delay_ceiling - delay
 
     def travel_over(self, duration: Quantity) -> Quantity:
         """Distance covered at ``speed`` over ``duration`` (the cost of one term of the delay)."""
@@ -1498,6 +1500,7 @@ class HubDriveElectricalResult(SolverResult):
     step_over_peak: float
     short_peak_electrical: Quantity  # rad/s
     short_peak_wheel_speed: Quantity # rpm
+    pole_frequency: Optional[Quantity] = None  # 1 / (2 pi tau_e), Hz: the winding's current pole
 
 
 class GearedRotorResult(SolverResult):
@@ -2365,3 +2368,90 @@ class KvResidencyArchetypeResult(SolverResult):
     recompute_share: float                   # recompute / turn cycle
     shared_retained_rate: Quantity           # fit shared / turn cycle
     shared_released_rate: Quantity           # fit shared / generation
+# --- The real-time permission path of an embodied machine (added 2026-10-20) ---
+
+class PhaseLagBudgetResult(SolverResult):
+    """Result from PhaseLagBudgetModel: delay terms of a sampled loop and the phase they spend at crossover."""
+    hold_delay: Quantity                     # zero-order hold, half a sample period
+    total_delay: Quantity                    # hold + compute + transport
+    phase_hold: Quantity                     # degrees at crossover
+    phase_compute: Quantity
+    phase_transport: Quantity
+    phase_total: Quantity
+    phase_per_delay: Quantity                # degrees per millisecond of delay at crossover
+    allowed_delay: Optional[Quantity] = None  # largest total delay the allowance absorbs
+    delay_margin: Optional[Quantity] = None   # allowed_delay - total_delay (negative when it fails)
+    crossover_ceiling: Optional[Quantity] = None  # highest crossover the total delay supports
+    over_allowance: Optional[float] = None   # phase_total / phase_allowance
+    fits: Optional[bool] = None
+
+
+class ResponseTimeResult(SolverResult):
+    """Result from ResponseTimeModel: R = C + B + I of one periodic task against its deadline."""
+    wcet: Quantity
+    blocking: Quantity
+    interference: Quantity
+    deadline: Quantity
+    response: Quantity
+    margin: Quantity                         # deadline - response (negative when it misses)
+    meets_deadline: bool
+    blocking_limit: Quantity                 # largest blocking that still meets the deadline
+    wcet_claim: Optional[Quantity] = None    # declared WCET above the observed unloaded run
+
+
+class CanFdBusResult(SolverResult):
+    """Result from CanFdBusModel: serialization occupancy of a cyclic CAN FD axis exchange."""
+    frame_time: Quantity                     # one frame, both phases
+    nominal_time: Quantity                   # arbitration-phase share of one frame
+    data_time: Quantity                      # data-phase share of one frame
+    bits_nominal: int
+    bits_data: int
+    stuff_bits: int
+    frames: int                              # frames per cycle
+    occupancy: Quantity                      # frames x frame_time
+    utilization: float                       # occupancy / cycle
+    unallocated: Quantity                    # cycle - occupancy (negative when it overruns)
+    fits: bool
+    axes_capacity: int                       # most axes whose frames fit one cycle
+
+
+class EtherCatCycleResult(SolverResult):
+    """Result from EtherCatCycleModel: one summation frame through a chain of drives."""
+    frame_time: Quantity                     # serialization of the one frame
+    forward_time: Quantity                   # per-node forwarding, all nodes
+    occupancy: Quantity                      # frame_time + forward_time
+    utilization: float
+    unallocated: Quantity
+    fits: bool
+
+
+class LeaseBudgetResult(SolverResult):
+    """Result from LeaseBudgetModel: a chunk lease priced in the stopping budget and bounded by the lease rule."""
+    lease: Quantity
+    lease_path: Quantity                     # lease + tick + bus: last admission to the stop command
+    lease_path_travel: Quantity              # travel at speed along the lease path
+    admission_to_brake_onset: Quantity       # lease path + brake onset
+    admission_to_brake_onset_travel: Quantity
+    body_terms_distance: Quantity            # braking + overhead + onset travel
+    running_total: Quantity                  # body terms + lease path travel
+    spare: Quantity                          # clear distance - running total
+    delay_ceiling: Quantity                  # longest pre-brake delay whose stop fits
+    delay_spare: Quantity                    # delay ceiling - admission to brake onset
+    lease_floor: Quantity                    # renewal period + renewal jitter
+    lease_ceiling: Quantity                  # delay ceiling - tick - bus - brake onset
+    lease_ceiling_after_age: Quantity        # ... - observation age at dispatch
+    lease_ceiling_at_admission: Quantity     # ... - evidence age at admission
+    fits: bool                               # floor < lease <= ceiling at admission
+    stall_last_admission: Quantity           # second renewal completes, then the proposer stalls
+    stall_lease_expiry: Quantity
+    stall_brake_onset: Quantity
+
+
+class LatencyTailResult(SolverResult):
+    """Result from LatencyTailModel: the tail of a measured latency sample."""
+    count: int
+    p50: Quantity
+    p99: Quantity
+    p999: Quantity
+    maximum: Quantity
+    over_threshold: Optional[int] = None     # samples longer than the stated threshold

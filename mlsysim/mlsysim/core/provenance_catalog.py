@@ -1853,6 +1853,19 @@ THERMAL_CONSTANTS_ELECTROMECHANICAL = _est(
 # Drivetrain, drive bus, and arm-joint sources (added 2026-09-28, vol4 M6).
 # ---------------------------------------------------------------------------
 
+# Pilz PNOZ s4 safety relay (added 2026-10-20).
+PILZ_PNOZ_S4 = _ds(
+    "prov:pilz-pnoz-s4",
+    "Pilz GmbH & Co. KG, PNOZ s4 safety relay operating manual 1001742-EN-05, Technical details, Times",
+    "https://www.farnell.com/datasheets/1679412.pdf",
+    verified="2026-10-20",
+    notes=(
+        "Delay-on de-energisation with E-STOP: typ. 10 ms, max. 20 ms. Transcribed from the "
+        "Times table; the PDF fetch on entry (2026-10-20) timed out, so re-check against the "
+        "manual before citing elsewhere."
+    ),
+)
+
 ZLTECH_ZLLG10ASM800 = _ds(
     "prov:zltech-zllg10asm800",
     "Shenzhen Zhongling Technology (ZLTECH), ZLLG10ASM800-48 V1.0 robot hub motor "

@@ -63,6 +63,7 @@ VlaSystems = _load("vla_systems", "VlaSystems", "Cited figures of published VLA 
 # Robot demonstration data and event data recorders (added 2026-10-20)
 RobotDataSystems = _load("robot_data_systems", "RobotDataSystems", "Cited figures of dated robot demonstration-data systems and interactive imitation results (DROID, Open X-Embodiment, AgiBot World, ThriftyDAgger).")
 EventDataRecorders = _load("event_data_recorders", "EventDataRecorders", "Pre-crash recording windows required of automotive event data recorders (49 CFR 563).")
+# Published vision-language-action and dual-system robot policies (added 2026-10-20)
 
 
 # ---------------------------------------------------------------------------

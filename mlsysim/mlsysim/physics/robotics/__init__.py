@@ -42,6 +42,7 @@ from .control import (
     calc_canfd_frame_bits,
     calc_canfd_bus_utilization,
     calc_ethercat_cycle_time,
+    calc_response_time_bound,
     calc_cbf_qp_orthogonal_projection,
     calc_axi_fifo_contention,
 )
@@ -100,6 +101,7 @@ __all__ = [
     "calc_canfd_frame_bits",
     "calc_canfd_bus_utilization",
     "calc_ethercat_cycle_time",
+    "calc_response_time_bound",
     "calc_cbf_qp_orthogonal_projection",
     "calc_axi_fifo_contention",
     "calc_spatial_information_age_displacement",

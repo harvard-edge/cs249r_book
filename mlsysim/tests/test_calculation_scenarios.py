@@ -2388,3 +2388,79 @@ def test_repair_and_support_residency():
     assert s.shared_fraction == approx(0.75) and s.residency_factor == approx(11)
     assert s.recompute.to("s").magnitude == approx(0.32488215)
     assert s.reload.to("ms").magnitude == approx(5.24288)
+def test_permission_path_phase_and_response_time():
+    p = Scenarios.WarehouseJointLoopThroughTick.result
+    assert p.phase_hold.to("degree").magnitude == approx(3.6)
+    assert p.phase_compute.to("degree").magnitude == approx(1.8)
+    assert p.phase_transport.to("degree").magnitude == approx(7.2)
+    assert p.phase_total.to("degree").magnitude == approx(12.6)
+    assert p.total_delay.to("ms").magnitude == approx(1.75)
+    assert p.allowed_delay.to("ms").magnitude == approx(0.69444)
+    assert p.crossover_ceiling.to("Hz").magnitude == approx(7.93651)
+    assert p.over_allowance == approx(2.52)
+    assert p.phase_per_delay.to("degree/ms").magnitude == approx(7.2)
+    assert not p.fits
+    assert Scenarios.WarehouseJointLoopNextTickOutput.result.phase_total.to("degree").magnitude == approx(18.0)
+    assert Scenarios.WarehouseJointLoopSlowTick.result.phase_hold.to("degree").magnitude == approx(7.2)
+    r = Scenarios.WarehousePermissionTickResponse.result
+    assert r.response.to("us").magnitude == approx(340)
+    assert r.margin.to("us").magnitude == approx(60)
+    assert r.blocking_limit.to("us").magnitude == approx(110)
+    assert r.wcet_claim.to("us").magnitude == approx(115)
+    assert r.meets_deadline
+    b = Scenarios.WarehousePermissionTickLongBlocking.result
+    assert b.response.to("us").magnitude == approx(410)
+    assert b.margin.to("us").magnitude == approx(-10)
+    assert not b.meets_deadline
+
+
+def test_servo_fieldbus_occupancy():
+    one = Scenarios.WarehouseServoCanFdOneBus.result
+    assert one.frame_time.to("us").magnitude == approx(56.6)
+    assert (one.bits_nominal, one.bits_data, one.frames) == (34, 113, 18)
+    assert one.occupancy.to("us").magnitude == approx(1018.8)
+    assert not one.fits
+    assert one.axes_capacity == 8
+    arm = Scenarios.WarehouseServoCanFdArmBus.result
+    assert arm.occupancy.to("us").magnitude == approx(792.4)
+    assert arm.unallocated.to("us").magnitude == approx(207.6)
+    assert Scenarios.WarehouseServoCanFdBaseBus.result.occupancy.to("us").magnitude == approx(226.4)
+    e = Scenarios.WarehouseServoEtherCat.result
+    assert e.occupancy.to("us").magnitude == approx(22.04)
+    assert e.unallocated.to("us").magnitude == approx(977.96)
+    assert e.utilization == approx(0.02204)
+
+
+def test_chunk_lease_budget_and_rule():
+    r = Scenarios.WarehouseChunkLease.result
+    assert r.delay_ceiling.to("ms").magnitude == approx(258.3333)
+    assert r.body_terms_distance.to("mm").magnitude == approx(742.5)
+    assert r.lease_path_travel.to("mm").magnitude == approx(93)
+    assert r.running_total.to("mm").magnitude == approx(835.5)
+    assert r.spare.to("mm").magnitude == approx(264.5)
+    assert r.admission_to_brake_onset.to("ms").magnitude == approx(82)
+    assert r.delay_spare.to("ms").magnitude == approx(176.3333)
+    assert r.lease_floor.to("ms").magnitude == approx(55)
+    assert r.lease_ceiling.to("ms").magnitude == approx(236.3333)
+    assert r.lease_ceiling_after_age.to("ms").magnitude == approx(184.7333)
+    assert r.lease_ceiling_at_admission.to("ms").magnitude == approx(121.4226)
+    assert r.fits
+    assert (r.stall_last_admission.to("ms").magnitude, r.stall_lease_expiry.to("ms").magnitude,
+            r.stall_brake_onset.to("ms").magnitude) == (approx(90), approx(150), approx(172))
+    long = Scenarios.WarehouseChunkLeaseLengthened.result
+    assert long.running_total.to("mm").magnitude == approx(895.5)
+    assert long.admission_to_brake_onset.to("ms").magnitude == approx(122)
+    assert long.fits
+    stop = Scenarios.WarehouseBaseStopFullDelay.result
+    assert stop.delay_ceiling.to("ms").magnitude == approx(258.3333)
+    assert Scenarios.WarehouseBaseHubDriveElectrical.result.pole_frequency.to("Hz").magnitude == approx(59.1026)
+
+
+def test_latency_tail_model():
+    from mlsysim.core.units import Q_
+    from mlsysim.solvers import LatencyTailModel
+    t = LatencyTailModel().solve(list(range(1, 1001)), threshold=Q_(0.9, "ms"))
+    assert t.count == 1000
+    assert t.p50.to("us").magnitude == approx(500.5)
+    assert t.maximum.to("us").magnitude == approx(1000)
+    assert t.over_threshold == 100
