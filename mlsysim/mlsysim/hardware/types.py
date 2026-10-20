@@ -36,6 +36,13 @@ class ComputeCore(BaseModel):
     # array is systolic_array_dim x systolic_array_dim multiply-accumulate
     # cells. None for devices whose matrix unit is not a published square array.
     systolic_array_dim: Optional[int] = None
+    # Per-SM thread limits of a GPU (added 2026-10-20): resident threads per SM,
+    # registers per thread, and threads per warp. Together with
+    # register_file_per_sm they set how many threads a kernel's register use
+    # leaves resident (occupancy). None for device classes without SMs.
+    max_threads_per_sm: Optional[int] = None
+    max_registers_per_thread: Optional[int] = None
+    warp_size: Optional[int] = None
 
     @property
     def systolic_macs_per_cycle(self) -> Optional[int]:

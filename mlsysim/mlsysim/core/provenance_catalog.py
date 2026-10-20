@@ -4440,3 +4440,56 @@ LINUX_TEGRA234_P3701_DTS = _ds(
     verified="2026-10-20",
     notes="tj-thermal zone: polling-delay = <1000> (ms); active trips at 75000 and 95000 m-degC, hysteresis 4000.",
 )
+
+# --- Mapping a computation onto an accelerator (added 2026-10-20) ---
+NVIDIA_MATMUL_BACKGROUND_GUIDE = _ds(
+    "prov:nvidia-matmul-background-guide",
+    "NVIDIA, Matrix Multiplication Background User's Guide (Deep Learning Performance documentation)",
+    "https://docs.nvidia.com/deeplearning/performance/dl-performance-matrix-multiplication/index.html",
+    verified="2026-10-17",
+    notes=("Sec. 2.3 lists cuBLAS tiles from 256x128 (most efficient) to 64x64; Sec. 3.1 and figure 7 "
+           "measure tile quantization on an A100-SXM4-80GB (cuBLAS 11.4, M = 27,648, K = 4,096, "
+           "256x128 tiles forced; values read from the published SVG plot); Sec. 3.2 measures wave "
+           "quantization (M = 2,304, N = 1,536 and 1,544, one 256x128 tile per SM); Table 1 gives the "
+           "dimension multiples (FP16 multiples of 8, on A100 multiples of 64)."),
+)
+NVIDIA_CUDA_PROGRAMMING_GUIDE_CC90 = _ds(
+    "prov:nvidia-cuda-programming-guide-cc90",
+    "NVIDIA, CUDA C++ Programming Guide, compute capabilities, Tables 30 and 31 (compute capability 9.0)",
+    "https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#compute-capabilities",
+    verified="2026-10-18",
+    notes=("64 K 32-bit registers per SM, at most 2,048 resident threads per SM, at most 255 "
+           "registers per thread, warps of 32 threads."),
+)
+CHEN_EYERISS_ISCA_2016 = _lit(
+    "prov:chen-eyeriss-isca-2016",
+    "Chen, Emer, Sze (2016), Eyeriss: A Spatial Architecture for Energy-Efficient Dataflow for "
+    "Convolutional Neural Networks, ISCA 2016",
+    url="https://dspace.mit.edu/handle/1721.1/102369",
+    verified="2026-10-17",
+    notes=("Abstract: on AlexNet, row stationary is 1.4x to 2.5x more energy efficient than other "
+           "dataflows in convolutional layers and at least 1.3x in fully connected layers for batch "
+           "sizes larger than 16. The ISSCC 2016 test chip has 168 PEs in a 12 x 14 array."),
+)
+CHEN_TVM_OSDI_2018 = _lit(
+    "prov:chen-tvm-osdi-2018",
+    "Chen et al. (2018), TVM: An Automated End-to-End Optimizing Compiler for Deep Learning, OSDI 2018",
+    url="https://arxiv.org/abs/1802.04799",
+    verified="2026-10-17",
+    notes="Figure 4: fused operators run 1.2x to 2x faster than unfused on an NVIDIA Titan X.",
+)
+ZHENG_ANSOR_OSDI_2020 = _lit(
+    "prov:zheng-ansor-osdi-2020",
+    "Zheng et al. (2020), Ansor: Generating High-Performance Tensor Programs for Deep Learning, OSDI 2020",
+    url="https://arxiv.org/abs/2006.06762",
+    verified="2026-10-17",
+    notes="Abstract: up to 3.8x on Intel CPU, 2.6x on ARM CPU, and 1.7x on NVIDIA GPU over the prior best.",
+)
+PYTORCH_TF32_NOTE_V290 = _ds(
+    "prov:pytorch-tf32-note-v290",
+    "PyTorch documentation, CUDA semantics, TensorFloat-32 (TF32) on Ampere (and later) devices (v2.9.0)",
+    "https://github.com/pytorch/pytorch/blob/v2.9.0/docs/source/notes/cuda.rst",
+    verified="2026-10-19",
+    notes=("Example: one 10,240-square matrix multiply on GA100 takes 0.016 s with TF32 allowed and "
+           "0.11 s without."),
+)

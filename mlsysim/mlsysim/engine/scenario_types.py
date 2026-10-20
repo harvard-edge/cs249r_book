@@ -15762,6 +15762,17 @@ class ChannelTileScenario(BaseScenario):
     def work_removed(self) -> float:
         return 1 - self.pruned_channels / self.channels
 
+    # Padding view (added 2026-10-20): the unit runs whole tiles, so the layer
+    # occupies tiles x tile lanes and uses pruned_channels of them.
+    @property
+    def padded_channels(self) -> int:
+        return self.tiles * self.tile
+
+    @property
+    def utilization(self) -> float:
+        """Busy share of the lanes the layer occupies: pruned_channels / padded_channels."""
+        return self.pruned_channels / self.padded_channels
+
 
 class SoftTargetScenario(BaseScenario):
     """A teacher's class probabilities softened at ``temperature``: softmax(log p / T)."""
@@ -16568,3 +16579,343 @@ class CandidateReleaseScenario(BaseScenario):
                                              self.baseline_attempt_cost, self.candidate_acceptance,
                                              self.candidate_attempt_cost, self.baseline_pre_renamed,
                                              self.candidate_pre_renamed)
+# --- Mapping a computation onto an accelerator: arrays, tiles, waves, and compilers (added 2026-10-20) ---
+
+
+class SystolicFillDrainScenario(BaseScenario):
+    """``rows`` input rows streamed through one weight load of an ``array_dim`` x ``array_dim``
+    weight-stationary systolic array.
+
+    Operands move one hop per cycle, so in cycle t cell (r, c) works on input row
+    t - r - c. The last row enters in cycle rows - 1 and leaves the far corner
+    2 (array_dim - 1) cycles later. Loading the weights is not counted.
+    """
+    array_dim: int
+    rows: int
+
+    @property
+    def cells(self) -> int:
+        return self.array_dim * self.array_dim
+
+    @property
+    def fill_drain_cycles(self) -> int:
+        """Cycles to fill and drain the array: 2 N - 2."""
+        return 2 * self.array_dim - 2
+
+    @property
+    def cycles(self) -> int:
+        """Cycles from the first row entering to the last result leaving: B + 2 N - 2."""
+        return self.rows + self.fill_drain_cycles
+
+    @property
+    def busy_fraction(self) -> float:
+        """Average share of cells busy: each cell does ``rows`` MACs over ``cycles`` cycles."""
+        return self.rows / self.cycles
+
+    def busy_cells(self, cycle: int) -> int:
+        """Cells working on some input row in ``cycle``."""
+        n = self.array_dim
+        return sum(1 for r in range(n) for c in range(n) if 0 <= cycle - r - c < self.rows)
+
+    @property
+    def first_full_cycle(self) -> int:
+        """First cycle in which the far corner cell starts work."""
+        return self.fill_drain_cycles
+
+    @property
+    def full_cycles(self) -> int:
+        """Cycles in which every cell is busy (zero when rows < 2 N - 1)."""
+        return max(0, self.rows - self.fill_drain_cycles)
+
+
+class MatmulTileScenario(BaseScenario):
+    """C = A B with A ``m`` x ``k`` and B ``k`` x ``n``, computed one ``tile_m`` x ``tile_n``
+    output tile at a time, stepping through the reduction ``tile_k`` elements per step.
+
+    Operands are ``operand_bytes`` each and the accumulator ``accumulator_bytes``. The
+    on-chip store holds one A tile and one B tile (two of each when double buffered)
+    and the accumulator tile. Traffic counts element moves between memory and the
+    on-chip store: A is loaded once per output-tile column, B once per output-tile
+    row, and C written once. The single-cell loop orders (no tile) count one held
+    value per cell: the other operands stream once per MAC, and a partial sum
+    that is not held is read and written once per MAC.
+    """
+    m: int
+    n: int
+    k: int
+    tile_m: int
+    tile_n: int
+    tile_k: int
+    operand_bytes: Quantity
+    accumulator_bytes: Quantity
+    double_buffered: bool = False
+
+    @property
+    def macs(self) -> int:
+        return self.m * self.n * self.k
+
+    @property
+    def flops(self) -> Quantity:
+        return Q_(2 * self.macs, "flop")
+
+    @property
+    def tiles_m(self) -> int:
+        return -(-self.m // self.tile_m)
+
+    @property
+    def tiles_n(self) -> int:
+        return -(-self.n // self.tile_n)
+
+    @property
+    def tiles_k(self) -> int:
+        return -(-self.k // self.tile_k)
+
+    @property
+    def output_tiles(self) -> int:
+        return self.tiles_m * self.tiles_n
+
+    @property
+    def tile_products(self) -> int:
+        """A-tile-by-B-tile products: every output tile sums ``tiles_k`` of them."""
+        return self.output_tiles * self.tiles_k
+
+    @property
+    def tile_product_flops(self) -> Quantity:
+        return Q_(2 * self.tile_m * self.tile_n * self.tile_k, "flop")
+
+    @property
+    def tile_product_bytes(self) -> Quantity:
+        """One A tile and one B tile loaded."""
+        return ((self.tile_m * self.tile_k + self.tile_k * self.tile_n) * self.operand_bytes).to("byte")
+
+    @property
+    def tile_intensity(self) -> float:
+        """FLOP per operand byte loaded: (2 / b) T_M T_N / (T_M + T_N), independent of T_K."""
+        return (self.tile_product_flops / self.tile_product_bytes).to("flop/byte").magnitude
+
+    @property
+    def unblocked_intensity(self) -> float:
+        """No reuse: every MAC (2 FLOP) loads its two operands."""
+        return (Q_(2, "flop") / (2 * self.operand_bytes)).to("flop/byte").magnitude
+
+    @property
+    def compulsory_intensity(self) -> float:
+        """Each of A, B, and C moved exactly once, all at ``operand_bytes``."""
+        moved = (self.m * self.k + self.k * self.n + self.m * self.n) * self.operand_bytes
+        return (self.flops / moved).to("flop/byte").magnitude
+
+    @property
+    def buffer_copies(self) -> int:
+        return 2 if self.double_buffered else 1
+
+    @property
+    def a_tile_bytes(self) -> Quantity:
+        return (self.buffer_copies * self.tile_m * self.tile_k * self.operand_bytes).to("byte")
+
+    @property
+    def b_tile_bytes(self) -> Quantity:
+        return (self.buffer_copies * self.tile_k * self.tile_n * self.operand_bytes).to("byte")
+
+    @property
+    def accumulator_tile_bytes(self) -> Quantity:
+        return (self.tile_m * self.tile_n * self.accumulator_bytes).to("byte")
+
+    @property
+    def operand_tile_bytes(self) -> Quantity:
+        """The A and B buffers alone (what a GPU stages in shared memory)."""
+        return self.a_tile_bytes + self.b_tile_bytes
+
+    @property
+    def live_bytes(self) -> Quantity:
+        """Every buffer live at once: 2 T_M T_K + 2 T_K T_N + 4 T_M T_N bytes for FP16 operands, FP32 sums."""
+        return self.operand_tile_bytes + self.accumulator_tile_bytes
+
+    def fits(self, capacity: Quantity) -> bool:
+        return bool(self.live_bytes <= capacity)
+
+    @property
+    def a_bytes(self) -> Quantity:
+        return (self.m * self.k * self.operand_bytes).to("byte")
+
+    @property
+    def a_elements(self) -> int:
+        return self.m * self.k
+
+    @property
+    def b_elements(self) -> int:
+        return self.k * self.n
+
+    @property
+    def c_elements(self) -> int:
+        return self.m * self.n
+
+    @property
+    def a_moves(self) -> int:
+        return self.a_elements * self.tiles_n
+
+    @property
+    def b_moves(self) -> int:
+        return self.b_elements * self.tiles_m
+
+    @property
+    def tiled_moves(self) -> int:
+        """Element moves with the tiling: A per output-tile column, B per output-tile row, C once."""
+        return self.a_moves + self.b_moves + self.c_elements
+
+    @property
+    def global_loads_per_mac(self) -> float:
+        """Operand loads from memory per MAC inside a full tile: 1/T_N + 1/T_M."""
+        return 1 / self.tile_n + 1 / self.tile_m
+
+    @property
+    def partial_sum_moves(self) -> int:
+        """A partial sum read and written once per MAC."""
+        return 2 * self.macs
+
+    @property
+    def a_stationary_moves(self) -> int:
+        """One cell holds an A value: A loaded once; B and the partial sums stream."""
+        return self.a_elements + self.macs + self.partial_sum_moves
+
+    @property
+    def output_stationary_moves(self) -> int:
+        """One cell holds the running sum: A and B stream, C written once."""
+        return 2 * self.macs + self.c_elements
+
+    @property
+    def b_stationary_moves(self) -> int:
+        """One cell holds a B value: B loaded once; A and the partial sums stream."""
+        return self.b_elements + self.macs + self.partial_sum_moves
+
+    def row_b_reads(self, cells: int) -> int:
+        """B reads when each B value passes along a row of ``cells`` cells holding A values."""
+        return self.macs // cells
+
+
+class WaveQuantizationScenario(BaseScenario):
+    """An ``m`` x ``n`` output cut into ``tile_m`` x ``tile_n`` tiles, one tile per SM at a time.
+
+    The SMs of ``hardware`` run the tiles in waves; a last, partial wave (the
+    tail) takes about as long as a full one.
+    """
+    m: int
+    n: int
+    tile_m: int
+    tile_n: int
+    hardware: HardwareNode
+
+    @property
+    def tile_rows(self) -> int:
+        return -(-self.m // self.tile_m)
+
+    @property
+    def tile_cols(self) -> int:
+        return -(-self.n // self.tile_n)
+
+    @property
+    def tiles(self) -> int:
+        return self.tile_rows * self.tile_cols
+
+    @property
+    def sms(self) -> int:
+        return self.hardware.compute.sm_count
+
+    @property
+    def waves(self) -> int:
+        return -(-self.tiles // self.sms)
+
+    @property
+    def tail_tiles(self) -> int:
+        """Tiles in the last wave when it is partial (zero when the tiles fill whole waves)."""
+        return self.tiles % self.sms
+
+    @property
+    def tail_share(self) -> float:
+        """Share of the SMs the tail wave uses."""
+        return self.tail_tiles / self.sms
+
+
+class MappingSpaceScenario(BaseScenario):
+    """Unconstrained mapping choices at one memory level, as three separate toy counts.
+
+    ``tensors`` tensors each placed in one of ``tiers`` ways; a ``loop_depth``-deep
+    loop nest in any order; ``parallel_loops`` of ``parallel_candidates`` loops
+    chosen, in order, for parallel execution. The three combine by product.
+    """
+    tensors: int
+    tiers: int
+    loop_depth: int
+    parallel_candidates: int
+    parallel_loops: int
+
+    @property
+    def placements(self) -> int:
+        return self.tiers ** self.tensors
+
+    @property
+    def loop_orders(self) -> int:
+        return _math.factorial(self.loop_depth)
+
+    @property
+    def parallelizations(self) -> int:
+        return _math.perm(self.parallel_candidates, self.parallel_loops)
+
+    @property
+    def per_level(self) -> int:
+        return self.placements * self.loop_orders * self.parallelizations
+
+
+class RegisterOccupancyScenario(BaseScenario):
+    """Threads a kernel using ``registers_per_thread`` 32-bit registers leaves resident on
+    one SM of ``hardware`` (register limit only; per-block limits ignored).
+
+    Threads are allocated in whole warps and capped at the SM's resident-thread limit.
+    """
+    hardware: HardwareNode
+    registers_per_thread: int
+
+    @property
+    def registers_per_sm(self) -> int:
+        """The SM's register file in 32-bit registers."""
+        return int((self.hardware.memory.register_file_per_sm / Q_(4, "byte")).to("").magnitude)
+
+    @property
+    def threads_by_registers(self) -> int:
+        return self.registers_per_sm // self.registers_per_thread
+
+    @property
+    def resident_threads(self) -> int:
+        warp = self.hardware.compute.warp_size
+        return min(self.hardware.compute.max_threads_per_sm, self.threads_by_registers // warp * warp)
+
+    @property
+    def occupancy(self) -> float:
+        """Resident threads over the SM's limit."""
+        return self.resident_threads / self.hardware.compute.max_threads_per_sm
+
+
+class TimedMatmulScenario(BaseScenario):
+    """One ``dim``-square matrix multiply that took ``time``: 2 dim^3 FLOP over the time."""
+    dim: int
+    time: Quantity
+
+    @property
+    def flops(self) -> Quantity:
+        return Q_(2 * self.dim ** 3, "flop")
+
+    @property
+    def rate(self) -> Quantity:
+        return (self.flops / self.time).to("TFLOPs/s")
+
+
+class MemoryRoundTripScenario(BaseScenario):
+    """A tensor of ``tensor_bytes`` crossing to and from memory ``trips`` times at
+    ``energy_per_byte`` (a layer boundary writes it and the next layer reads it back)."""
+    tensor_bytes: Quantity
+    energy_per_byte: Quantity
+    trips: int = 2
+
+    @property
+    def energy(self) -> Quantity:
+        return (self.trips * self.tensor_bytes * self.energy_per_byte).to("microjoule")
+

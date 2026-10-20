@@ -415,6 +415,7 @@ class Literature(Registry):
     RecommendationSystems = RecommendationSystems  # network architectures (added 2026-10-20)
     ServingMemoryLayout = ServingMemoryLayout  # network architectures (added 2026-10-20)
     FlashAttentionBenchmark = _series.FlashAttentionBenchmark  # network architectures (added 2026-10-20)
+    NvidiaGemmTileQuantizationA100 = _series.NvidiaGemmTileQuantizationA100  # added 2026-10-20
     SsdGradientHistogram = _series.SsdGradientHistogram  # added 2026-10-20
     RobustnessStudies = RobustnessStudies  # added 2026-10-20
     DataSelectionResults = DataSelectionResults  # added 2026-10-20
