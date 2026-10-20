@@ -3,10 +3,10 @@
 Conclusion §20.2 asks what a runtime does when the configuration endpoint
 drops the connection before acknowledging a change. This script runs four
 runtimes against a real HTTP server (Python http.server) that injects the two
-faults of Exercise 3 (§20.13): the request is lost before the endpoint applies
+faults of the lost-reply estimate (§20.6): the request is lost before the endpoint applies
 it (probability 0.001), or the endpoint applies it and the reply is lost
 (probability 0.004). Each runtime handles 25,000 incidents, one mutating
-change each, the daily volume of Exercise 3.
+change each, the daily volume of that estimate.
 
   retry   : on a lost reply, send the change again (a fresh request; the
             endpoint keeps no operation identity)

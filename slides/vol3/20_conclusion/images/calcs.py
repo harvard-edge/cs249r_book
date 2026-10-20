@@ -26,9 +26,8 @@ Sources
   METR p50 and p80    Scenarios.FrontierHorizonReliabilityGap (Literature.AgentTimeHorizon)
   Recalled lectures   L2 Scenarios.CodingAgentResend30Turns; L4 Scenarios.RepairContextBudget;
                       L7 Scenarios.BlindRetryTwoPercentLoss; L10 Scenarios.FreezeRuleOverStepBudget;
-                      L17 Literature.AgentEvaluation (METR o3); L18 Scenarios.ResearchSystemTokenBreakEven
-  Not yet wired       the Lecture 19 recall (100 tickets, $1.32 against $0.55): its Agent
-                      Economics scenario is being added with the Lecture 19 deck.
+                      L17 Literature.AgentEvaluation (METR o3); L18 Scenarios.ResearchSystemTokenBreakEven;
+                      L19 Scenarios.RepairCohortTokenPriceComparison
 
 Run from this folder: python3 calcs.py
 """
@@ -241,6 +240,18 @@ v("metr_hcast_runs", METR.MetrO3HcastRuns, "{:,.0f}", "L17: HCAST runs")
 v("metr_hcast_pct", pct(METR.MetrO3HcastHackRuns / METR.MetrO3HcastRuns), "{:.1f}", "L17: HCAST, %")
 v("hook_agent", TOKENS.agent_tokens_vs_chat, "{:.0f}", "L18: single agent, tokens over chat")
 v("hook_multi", TOKENS.multi_agent_tokens_vs_chat, "{:.0f}", "L18: multi-agent, tokens over chat")
+
+# L19 recall: the same objects Lecture 19's hook reads (Napkin Math 19.1, table 1)
+RECALL = Scenarios.RepairCohortTokenPriceComparison
+RFR, RLP = RECALL.baseline, RECALL.alternative
+v("rc_tasks", RFR.tasks, "{:.0f}", "L19: tickets per configuration")
+v("rc_fr_acc", RFR.accepted, "{:.0f}", "L19: frontier accepted")
+v("rc_lp_acc", RLP.accepted, "{:.0f}", "L19: low-price accepted")
+v("rc_fr_ceff", RECALL.result.baseline.cost_per_accepted, "{:.2f}", "L19: frontier $ per accepted")
+v("rc_lp_ceff", RECALL.result.alternative.cost_per_accepted, "{:.2f}", "L19: low-price $ per accepted")
+v("rc_ratio", RECALL.result.cost_ratio, "{:.1f}", "L19: cost ratio, x")
+v("rc_rej_fr", (RFR.tasks - RFR.accepted) / RFR.accepted, "{:.2f}", "L19: frontier rejected per accepted")
+v("rc_rej_lp", (RLP.tasks - RLP.accepted) / RLP.accepted, "{:.0f}", "L19: low-price rejected per accepted")
 
 if __name__ == "__main__":
     write(__file__)

@@ -225,15 +225,8 @@ def measured():
 
 
 def recall_l19():
-    """NM 19.1, Ch 19 table 1: 100 tickets per configuration.
-
-    PENDING: typed until the Agent Economics token-price scenario (being added
-    with the Lecture 19 deck) lands; then read it from MLSysIM in calcs.py.
-    """
-    tickets = 100
-    acc_frontier, acc_cheap = 75, 25           # accepted tickets (table 1)
-    return dict(rej_per_acc_frontier=(tickets - acc_frontier) / acc_frontier,
-                rej_per_acc_cheap=(tickets - acc_cheap) / acc_cheap)
+    """NM 19.1, Ch 19 table 1, read from calcs.py (Scenarios.RepairCohortTokenPriceComparison)."""
+    return dict(rej_per_acc_frontier=num("rc_rej_fr"), rej_per_acc_cheap=num("rc_rej_lp"))
 
 
 def recall_bars():
