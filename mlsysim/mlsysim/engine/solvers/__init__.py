@@ -385,3 +385,22 @@ from .neural import DenseNetworkModel, EpochOverheadModel  # neural computation 
 __all__ += ["DenseNetworkModel", "EpochOverheadModel"]
 from .trends import ParameterGrowthModel  # added 2026-10-20
 __all__ += ["ParameterGrowthModel"]
+
+# --- The agent harness (added 2026-10-20) ---
+from .harness import (
+    ApprovalEscrowModel,
+    DeficitRoundRobinModel,
+    BoundedLiabilityAdmissionModel,
+    TrajectoryBudgetMeterModel,
+    CallCeilingModel,
+    StepCeilingReturnModel,
+)
+
+__all__ += [
+    "ApprovalEscrowModel",
+    "DeficitRoundRobinModel",
+    "BoundedLiabilityAdmissionModel",
+    "TrajectoryBudgetMeterModel",
+    "CallCeilingModel",
+    "StepCeilingReturnModel",
+]

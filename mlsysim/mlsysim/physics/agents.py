@@ -272,3 +272,42 @@ def calc_setup_share(setup, work):
 def calc_work_for_setup_cap(setup, cap: float):
     """Useful work per call that holds setup to a share ``phi``: ``W >= T_setup (1 - phi) / phi``."""
     return setup * (1 - cap) / cap
+
+
+# --- The agent harness: admission, fair share, and the budget meter (added 2026-10-20) ---
+# Closed forms the harness evaluates before it admits work: the most one model
+# call can bill, the long-run call rate a weighted deficit round-robin gives a
+# backlogged class, and an allowance's used fraction. The solvers in
+# engine/solvers/harness.py compose them.
+
+
+def calc_bounded_liability(input_tokens, output_allowance, input_price, output_price):
+    """
+    Most one model call can bill before it settles.
+
+        L = n_in p_in + K_out p_out
+
+    Every input token is priced at the undiscounted input rate (a cache hit is
+    not guaranteed before dispatch) and the whole output allowance at the
+    output rate. Prices are per token, in any one currency unit.
+    """
+    return input_tokens * input_price + output_allowance * output_price
+
+
+def calc_drr_calls_per_round(weight: float, quantum: float, charge: float) -> float:
+    """
+    Long-run calls per round of a backlogged class under weighted deficit round-robin.
+
+        calls/round = w q / c
+
+    The class earns ``w q`` charge units of credit per round and spends ``c``
+    per call; unspent credit carries over, so the rate holds on average even
+    when one call needs several rounds of credit (Shreedhar and Varghese 1995).
+    """
+    return weight * quantum / charge
+
+
+def calc_used_fraction(used, allowance) -> float:
+    """Share of one budget dimension consumed: ``rho = used / allowance``."""
+    ratio = used / allowance
+    return float(ratio.to("").magnitude) if hasattr(ratio, "to") else float(ratio)

@@ -1534,6 +1534,12 @@ class StreamCancelScenario(BaseScenario):
     def decode_time_avoided(self) -> Quantity:
         return (self.skipped_steps * self.floors.result.memory_time).to("second")
 
+    @property
+    def allowance_decode_time(self) -> Quantity:
+        """Decode time of the whole allowance (added 2026-10-20): ``K_max t_dec``, the longest
+        one admitted call postpones the next turn boundary when control waits for its reply."""
+        return (self.output_allowance * self.floors.result.memory_time).to("second")
+
 
 class TrajectoryResendScenario(BaseScenario):
     """A trajectory of ``turns`` calls that each resend the whole history (``TrajectoryResendModel``)."""
@@ -4110,6 +4116,8 @@ class RecordedRunCostScenario(BaseScenario):
     """One public submission in a per-trajectory ``Literature`` series, priced as it recorded."""
     series_name: str
     submission: str
+    # Optional (added 2026-10-20): the cost limit the run's harness enforced.
+    cost_limit: Optional[Quantity] = None
 
     @property
     def rows(self):
@@ -4119,7 +4127,8 @@ class RecordedRunCostScenario(BaseScenario):
     @property
     def result(self):
         from .solvers import RecordedRunCostModel
-        return RecordedRunCostModel().solve(self.rows)
+        limit = None if self.cost_limit is None else float(self.cost_limit.to("USD").magnitude)
+        return RecordedRunCostModel().solve(self.rows, limit)
 # --- Context engineering (added 2026-10-20) -----------------------------------
 # What one agent request carries and what it costs: the solvers live in
 # engine/solvers/context.py. Token counts are serialized-request counts.
@@ -9401,3 +9410,115 @@ class PlatformBenefitScenario(BaseScenario):
     @property
     def benefit_cost_ratio(self) -> float:
         return (self.gross_benefit / self.platform_cost).to("").magnitude
+
+
+# --- The agent harness (added 2026-10-20) -------------------------------------
+# What the runtime around one trajectory holds, shares, and admits: approval
+# escrow, fair scheduling of model calls between request classes, admission of
+# the next call against a dollar allowance, the budget vector's meters, and
+# call or step ceilings read from public runs. Solvers in engine/solvers/harness.py.
+
+class ApprovalEscrowScenario(BaseScenario):
+    """Approval escrow for a long-running workload (held resources) and an urgent one (time)."""
+    repair_rate: Quantity            # review requests per unit time
+    repair_wait: Quantity            # mean time to a review decision
+    lease: Quantity                  # workspace each held trajectory keeps
+    remediation_rate: Quantity
+    diagnosis: Quantity              # before the proposal
+    remediation_wait: Quantity       # mean time to an on-call decision
+    apply_verify: Quantity           # after approval
+
+    @property
+    def result(self):
+        from .solvers import ApprovalEscrowModel
+        return ApprovalEscrowModel().solve(self.repair_rate, self.repair_wait, self.lease,
+                                           self.remediation_rate, self.diagnosis,
+                                           self.remediation_wait, self.apply_verify)
+
+
+class DeficitRoundRobinScenario(BaseScenario):
+    """Backlogged request classes sharing model calls under weighted deficit round-robin."""
+    quantum: float                   # charge units per unit weight per round
+    classes: Dict[str, Dict[str, int]]     # name -> weight, input, output (allowance)
+    simulated_rounds: int = 10_000
+
+    @property
+    def result(self):
+        from .solvers import DeficitRoundRobinModel
+        return DeficitRoundRobinModel().solve(self.quantum, self.classes, self.simulated_rounds)
+
+
+class BoundedLiabilityAdmissionScenario(BaseScenario):
+    """The next model call of a trajectory, tested against its dollar allowance."""
+    allowance: Quantity              # USD
+    settled: Quantity                # actual spend so far
+    reserved: Quantity               # outstanding reservations of unsettled work
+    finalization_reserve: Quantity   # protected for checks, report, and cleanup
+    input_tokens: int
+    output_allowance: int
+    input_price: Quantity            # USD per token (undiscounted)
+    output_price: Quantity
+    probe: Quantity                  # an unsettled amount for expressing sensitivity
+
+    @property
+    def result(self):
+        from .solvers import BoundedLiabilityAdmissionModel
+        return BoundedLiabilityAdmissionModel().solve(
+            self.allowance, self.settled, self.reserved, self.finalization_reserve,
+            self.input_tokens, self.output_allowance, self.input_price, self.output_price,
+            self.probe)
+
+
+class TrajectoryBudgetMeterScenario(BaseScenario):
+    """An append-only trajectory metered against turns, tokens, time, and dollars."""
+    trajectory: TrajectoryResendScenario
+    input_price: Quantity
+    cached_fraction: float           # cached input billed at this share of the input price
+    output_price: Quantity
+    turn_allowance: int
+    token_allowance: int
+    time_allowance: Quantity
+    dollar_allowance: Quantity
+    elapsed: Quantity                # wall clock at the readout
+
+    @property
+    def result(self):
+        from .solvers import TrajectoryBudgetMeterModel
+        t = self.trajectory.result
+        allowances = {"turns": self.turn_allowance, "tokens": self.token_allowance,
+                      "time": float(self.time_allowance.to("second").magnitude),
+                      "dollars": float(self.dollar_allowance.to("USD").magnitude)}
+        return TrajectoryBudgetMeterModel().solve(
+            t.turns, t.resent_tokens, t.reused_prefix_tokens, t.output_tokens,
+            self.input_price, self.input_price * self.cached_fraction, self.output_price,
+            allowances, float(self.elapsed.to("second").magnitude))
+
+
+class CallCeilingScenario(BaseScenario):
+    """A model-call ceiling at the accepted runs' quantile, over every submission in a series."""
+    series_name: str
+    quantile: float
+
+    @property
+    def rows(self):
+        from ..literature.registry import Literature
+        return getattr(Literature, self.series_name).entries
+
+    @property
+    def result(self):
+        from .solvers import CallCeilingModel
+        return CallCeilingModel().solve(self.rows, self.quantile)
+
+
+class StepCeilingReturnScenario(BaseScenario):
+    """Success of the same models at several enforced step ceilings, from a published series."""
+    series_name: str
+    steps: Optional[List[int]] = None    # None: every ceiling the series reports
+
+    @property
+    def result(self):
+        from ..literature.registry import Literature
+        from .solvers import StepCeilingReturnModel
+        rows = getattr(Literature, self.series_name).entries
+        steps = self.steps or sorted({int(r["steps"]) for r in rows})
+        return StepCeilingReturnModel().solve(rows, steps)

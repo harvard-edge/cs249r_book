@@ -1816,6 +1816,11 @@ class RecordedRunCostResult(SolverResult):
     unresolved_share: float          # share of spend on attempts that failed
     input_output_ratio: float
     median_calls: float
+    # Optional (added 2026-10-20): runs that ended above a recorded cost limit.
+    cost_limit: Optional[float] = None       # dollars
+    over_limit_runs: Optional[int] = None
+    mean_overshoot: Optional[float] = None   # dollars above the limit, over those runs
+    max_overshoot: Optional[float] = None
 # --- Context engineering (added 2026-10-20) ----------------------------------
 # What one agent request carries: a budget by role, the softmax cost of
 # admitted keys, measured comprehension by length, a zoned layout's input bill,
@@ -2685,3 +2690,98 @@ class ParameterGrowthResult(SolverResult):
 
 
 __all__ += ["ParameterGrowthResult"]
+
+
+# --- The agent harness (added 2026-10-20) -------------------------------------
+# Approval escrow by Little's law, weighted deficit round-robin, bounded-liability
+# admission, a trajectory metered against its budget vector, and call or step
+# ceilings read from public runs.
+
+class ApprovalEscrowResult(SolverResult):
+    """Result from ApprovalEscrowModel: what approval escrow holds for two workloads."""
+    held: float                              # repair trajectories in escrow, Little's law
+    retained_memory: Quantity                # held x workspace lease, GiB
+    remediation_held: float                  # remediation trajectories in escrow
+    time_to_mitigate: Quantity               # diagnosis + decision + apply and verify
+    approval_share: float                    # decision / time to mitigate
+
+
+class DeficitRoundRobinResult(SolverResult):
+    """Result from DeficitRoundRobinModel: charge shares against call shares, per class."""
+    credit_per_round: Dict[str, float]       # weight x quantum
+    charge_per_call: Dict[str, float]        # input + output allowance
+    calls_per_round: Dict[str, float]        # long-run, backlogged
+    rounds_per_call: Dict[str, float]
+    charge_share: Dict[str, float]           # weight / total weight
+    call_share: Dict[str, float]
+    call_ratio: float                        # most calls per round / fewest
+    simulated_rounds: int
+    simulated_call_share: Dict[str, float]
+    simulated_charge_share: Dict[str, float]
+
+
+class BoundedLiabilityAdmissionResult(SolverResult):
+    """Result from BoundedLiabilityAdmissionModel: a spend check against the reservation test (dollars)."""
+    input_liability: float
+    output_liability: float
+    liability: float                         # most the call can bill
+    spend_headroom: float                    # allowance - settled
+    headroom: float                          # allowance - settled - reserved - finalization reserve
+    spend_check_admits: bool
+    admitted: bool
+    finalization_shortfall: float            # reserve left unfunded if the call were admitted
+    input_share: float                       # input liability / liability
+    max_input_tokens: float                  # largest input that fits beside the output allowance
+    tokens_per_probe: float                  # input tokens one probe amount of unsettled spend costs
+    reservation_share: float                 # outstanding reservation / allowance
+
+
+class TrajectoryBudgetMeterResult(SolverResult):
+    """Result from TrajectoryBudgetMeterModel: one trajectory's used fractions, with and without prefix reuse."""
+    input_tokens: int
+    cached_tokens: int
+    uncached_tokens: int
+    output_tokens: int
+    total_tokens: int
+    cost_with_reuse: float                   # dollars
+    cost_without_reuse: float
+    cost_ratio: float                        # without / with
+    used_with_reuse: Dict[str, float]        # turns, tokens, time, dollars
+    used_without_reuse: Dict[str, float]
+    leading_with_reuse: str                  # dimension with the largest used fraction
+    leading_without_reuse: str
+
+
+class CallCeilingResult(SolverResult):
+    """Result from CallCeilingModel: a call ceiling at the accepted runs' quantile, per configuration."""
+    quantile: float
+    runs: int
+    configurations: List[Dict[str, Any]]     # one row per submission, sorted by submission id
+    failed_halted_low: float
+    failed_halted_high: float
+    accepted_halted_high: float
+    cap_low: float
+    cap_high: float
+    median_calls_low: float
+    median_calls_high: float
+    longer_when_failed: bool                 # failed median above accepted median everywhere
+
+
+class StepCeilingReturnResult(SolverResult):
+    """Result from StepCeilingReturnModel: success of the same model at several enforced step ceilings."""
+    steps: List[int]
+    scores: Dict[str, Dict[int, float]]      # model -> step ceiling -> percent completed
+    gain: Dict[str, float]                   # points from the lowest to the highest ceiling
+    flat_after_middle: int                   # models no better at the highest than the middle ceiling
+    best_gain: float
+    best_model: str
+
+
+__all__ += [
+    "ApprovalEscrowResult",
+    "DeficitRoundRobinResult",
+    "BoundedLiabilityAdmissionResult",
+    "TrajectoryBudgetMeterResult",
+    "CallCeilingResult",
+    "StepCeilingReturnResult",
+]

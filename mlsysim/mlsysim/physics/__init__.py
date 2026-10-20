@@ -585,3 +585,12 @@ __all__ += [
     "calc_rent_crossover",
     "calc_ownership_breakeven_utilization",
 ]
+
+# --- The agent harness: admission, fair share, and the budget meter (added 2026-10-20) ---
+from .agents import calc_bounded_liability, calc_drr_calls_per_round, calc_used_fraction
+
+__all__ += [
+    "calc_bounded_liability",
+    "calc_drr_calls_per_round",
+    "calc_used_fraction",
+]

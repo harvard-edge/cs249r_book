@@ -3032,3 +3032,60 @@ def test_lifecycle_tco_payback_and_platform_benefit():
     assert Scenarios.TrainingOptimizationPayback.payback.to("month").magnitude == approx(1.777778)
     assert Scenarios.SharedPlatformBenefit50.benefit_cost_ratio == approx(1.25)
     assert Scenarios.SharedPlatformBenefit20.benefit_cost_ratio == approx(0.5)
+
+
+# --- The agent harness (added 2026-10-20) ------------------------------------
+
+def test_freeze_rule_and_turn_boundary_wait():
+    r = Scenarios.FreezeRuleOverStepBudget.result
+    assert r.success[30] == approx(0.739700)
+    assert Scenarios.CanceledStreamDecodeSavings.allowance_decode_time.to("s").magnitude == approx(86.32167)
+
+
+def test_approval_escrow_by_workload():
+    r = Scenarios.RepairRemediationApprovalEscrow.result
+    assert r.held == approx(12) and r.retained_memory.to("GiB").magnitude == approx(6)
+    assert r.remediation_held == approx(0.5) and r.time_to_mitigate.to("minute").magnitude == approx(30)
+    assert r.approval_share == approx(0.5)
+    f = Scenarios.RepairRemediationEscrowFasterReview.result
+    assert f.retained_memory.to("GiB").magnitude == approx(3) and f.time_to_mitigate.to("minute").magnitude == approx(22.5)
+
+
+def test_deficit_round_robin_shares():
+    r = Scenarios.InteractiveMaintenanceDrr.result
+    assert r.calls_per_round["interactive"] == approx(9.6) and r.rounds_per_call["maintenance"] == approx(5.25)
+    assert r.charge_share["interactive"] == approx(0.75) and r.call_share["interactive"] == approx(0.980545)
+    assert r.call_ratio == approx(50.4)
+    assert r.simulated_call_share["interactive"] == approx(r.call_share["interactive"], rel=1e-4)
+    assert Scenarios.InteractiveMaintenanceDrrCompacted.result.rounds_per_call["maintenance"] == approx(2.75)
+
+
+def test_bounded_liability_admission():
+    r = Scenarios.RepairNextCallAdmission.result
+    assert r.liability == approx(0.21144) and r.spend_headroom == approx(0.92) and r.headroom == approx(0.12)
+    assert r.spend_check_admits and not r.admitted
+    assert r.finalization_shortfall == approx(0.09144) and r.input_share == approx(0.709421)
+    assert r.max_input_tokens == approx(19520) and r.reservation_share == approx(0.142857)
+
+
+def test_trajectory_budget_meter():
+    r = Scenarios.RepairTrajectoryBudgetMeter.result
+    assert r.input_tokens == 892500 and r.cached_tokens == 841000 and r.total_tokens == 898500
+    assert r.cost_with_reuse == approx(0.4968) and r.cost_without_reuse == approx(2.7675)
+    assert r.used_with_reuse["tokens"] == approx(0.44925) and r.used_without_reuse["dollars"] == approx(0.790714)
+    assert r.leading_with_reuse == "turns" and r.leading_without_reuse == "dollars"
+
+
+def test_call_and_step_ceilings_from_public_runs():
+    r = Scenarios.SweBenchCallCeilingP90.result
+    assert r.runs == 2100 and len(r.configurations) == 5 and r.longer_when_failed
+    assert r.failed_halted_low == approx(0.148649) and r.failed_halted_high == approx(0.310241)
+    assert r.accepted_halted_high == approx(0.100529)
+    assert r.cap_low == approx(46.3) and r.cap_high == approx(101)
+    assert r.median_calls_low == approx(23) and r.median_calls_high == approx(64)
+    c = Scenarios.MiniSweAgentOpus46RunCost.result
+    assert c.cost_per_resolved == approx(0.729527) and c.over_limit_runs == 8
+    assert c.mean_overshoot == approx(0.057131) and c.max_overshoot == approx(0.286232)
+    s = Scenarios.OSWorldStepCeilingReturn.result
+    assert s.steps == [15, 50, 100] and s.flat_after_middle == 3
+    assert s.best_gain == approx(20.0) and s.best_model == "claude-sonnet-4-5-20250929"
