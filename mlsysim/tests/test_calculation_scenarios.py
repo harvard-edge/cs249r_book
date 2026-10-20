@@ -4564,3 +4564,77 @@ def test_warehouse_jerk_limited_stop_matches_finished_budget():
     assert base.jerk.m_as("m/s**3") == pytest.approx(budget.jerk.m_as("m/s**3"))
     assert base.stop_distance.m_as("mm") == pytest.approx(budget.stop_distance.m_as("mm"))
     assert base.jerk_ramp_travel.m_as("mm") == pytest.approx(budget.jerk_ramp_travel.m_as("mm"))
+
+
+# --- Mapping a computation onto an accelerator (added 2026-10-20) ---
+
+
+def test_systolic_fill_and_drain():
+    assert Scenarios.SystolicArray2x2TwoRows.cycles == 4
+    s = Scenarios.SystolicArray4x4EightRows
+    assert s.cycles == 14 and s.busy_fraction == approx(0.571429)
+    assert [s.busy_cells(t) for t in (2, 6, 7, 11)] == [6, 16, 16, 6]
+    assert s.first_full_cycle == 6 and s.full_cycles == 2
+    fractions = [x.busy_fraction for x in (Scenarios.TpuV4MxuOneRow, Scenarios.TpuV4Mxu128Rows,
+                                           Scenarios.TpuV4Mxu1024Rows, Scenarios.TpuV4Mxu4096Rows)]
+    assert fractions == approx([1 / 255, 128 / 382, 1024 / 1278, 4096 / 4350])
+
+
+def test_dense_layer_loop_orders_and_weight_tiles():
+    t = Scenarios.Dense256To512Batch32WeightTiles
+    assert t.macs == 4_194_304
+    assert t.a_stationary_moves == 12_713_984
+    assert t.output_stationary_moves == 8_404_992
+    assert t.b_stationary_moves == 12_591_104
+    assert t.row_b_reads(128) == 32_768
+    assert t.tiled_moves == 180_224
+    assert t.live_bytes.to("KiB").magnitude == approx(96.0)
+    assert t.a_bytes.to("KiB").magnitude == approx(256.0)
+    c = Scenarios.Conv3x3Filters16On8x8
+    assert (c.weights, c.positions, c.macs) == (144, 36, 5184)
+
+
+def test_matmul_tiles_intensity_and_capacity():
+    t = Scenarios.Matmul4096Fp16Tile128
+    assert (t.output_tiles, t.tiles_k, t.tile_products) == (1024, 32, 32768)
+    assert t.tile_intensity == approx(64.0) and t.unblocked_intensity == approx(0.5)
+    assert t.compulsory_intensity == approx(1365.333)
+    assert Scenarios.Matmul4096Fp16Tile256x128.tile_intensity == approx(85.3333)
+    kib = [x.live_bytes.to("KiB").magnitude for x in (t, Scenarios.Matmul4096Fp16Tile128Double,
+                                                      Scenarios.Matmul4096Fp16Tile128K256Double)]
+    assert kib == approx([128.0, 192.0, 320.0])
+    assert Scenarios.BoehmSgemmNaiveKernel.global_loads_per_mac == approx(2.0)
+    assert Scenarios.BoehmSgemmSharedMemKernel.global_loads_per_mac == approx(0.0625)
+    assert Scenarios.BoehmSgemmSharedMemKernel.operand_tile_bytes.to("KiB").magnitude == approx(8.0)
+
+
+def test_tile_padding_and_wave_quantization():
+    f = Scenarios.Width129On128Array
+    assert f.tiles == 2 and f.padded_channels == 256 and f.utilization == approx(0.50390625)
+    p = Scenarios.Width1000OnA100Fp16Multiple
+    assert (p.full_tiles, p.remainder, p.padded_channels) == (15, 40, 1024)
+    one, tail = Scenarios.A100GemmOneWave, Scenarios.A100GemmTailWave
+    assert one.tiles == 108 and one.waves == 1 and one.tail_tiles == 0
+    assert tail.tiles == 117 and tail.waves == 2 and tail.tail_tiles == 9
+    assert tail.tail_share == approx(0.0833333)
+
+
+def test_mapping_space_and_register_occupancy():
+    m = Scenarios.MappingChoicesOneLevel
+    assert (m.placements, m.loop_orders, m.parallelizations, m.per_level) == (1024, 5040, 120, 619_315_200)
+    regs = (Scenarios.H100Registers32PerThread, Scenarios.H100Registers64PerThread,
+            Scenarios.H100Registers128PerThread, Scenarios.H100RegistersMaxPerThread)
+    assert regs[0].registers_per_sm == 65536
+    assert [r.resident_threads for r in regs] == [2048, 1024, 512, 256]
+    assert regs[-1].threads_by_registers == 257 and regs[2].occupancy == approx(0.25)
+
+
+def test_tf32_timing_and_activation_round_trips():
+    assert Scenarios.PytorchTf32MatmulGa100.rate.to("TFLOP/s").magnitude == approx(134.2177)
+    assert Scenarios.PytorchFp32MatmulGa100.rate.to("TFLOP/s").magnitude == approx(19.5226)
+    assert Scenarios.ResNet50Stage2MapInt8ReadOnce.energy.to("uJ").magnitude == approx(32.11264)
+    assert Scenarios.ResNet50Stage2MapInt8Boundary.energy.to("uJ").magnitude == approx(64.22528)
+    assert Scenarios.ResNet50Stage2MapFp16Boundary.energy.to("uJ").magnitude == approx(128.45056)
+    assert Scenarios.ResNet50Stage2MapInt8BoundaryHbm2Low.energy.to("uJ").magnitude == approx(12.544)
+    assert Scenarios.ResNet50Stage2MapInt8BoundaryHbm2High.energy.to("uJ").magnitude == approx(22.5792)
+    assert Scenarios.ResNet50Stage2MapInt8BoundaryDdr7nm.energy_per_byte.to("pJ/B").magnitude == approx(162.5)

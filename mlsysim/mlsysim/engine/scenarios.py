@@ -8210,6 +8210,185 @@ class Scenarios(Registry):
         clock=Q_(2, "GHz"),                   # scenario assumption: illustrative accelerator clock
     )
 
+    # --- Mapping a computation onto an accelerator (added 2026-10-20) ---
+    SystolicArray2x2TwoRows = _st.SystolicFillDrainScenario(
+        name="Two input rows through a 2 x 2 weight-stationary systolic array",
+        description="The smallest trace of skewed inputs: four cycles from first entry to last result.",
+        array_dim=2, rows=2,                  # scenario assumption: the smallest traceable array
+    )
+    SystolicArray4x4EightRows = SystolicArray2x2TwoRows.variant(
+        name="Eight input rows through a 4 x 4 weight-stationary systolic array",
+        description="Long enough to fill the array completely for two cycles before it drains.",
+        array_dim=4, rows=8,                  # scenario assumption
+    )
+    TpuV4MxuOneRow = SystolicArray2x2TwoRows.variant(
+        name="One input row through a TPU v4 MXU (128 x 128) per weight load",
+        description="Fill and drain dominate: the array is busy well under one percent of the time.",
+        array_dim=_Hardware.Cloud.TPUv4.compute.systolic_array_dim, rows=1,
+    )
+    TpuV4Mxu128Rows = TpuV4MxuOneRow.variant(
+        name="128 input rows through a TPU v4 MXU per weight load",
+        rows=_Hardware.Cloud.TPUv4.compute.systolic_array_dim,  # one row per array row
+    )
+    TpuV4Mxu1024Rows = TpuV4MxuOneRow.variant(
+        name="1,024 input rows through a TPU v4 MXU per weight load",
+        rows=1024,                            # scenario assumption
+    )
+    TpuV4Mxu4096Rows = TpuV4MxuOneRow.variant(
+        name="4,096 input rows through a TPU v4 MXU per weight load",
+        rows=4096,                            # scenario assumption
+    )
+    Dense256To512Batch32WeightTiles = _st.MatmulTileScenario(
+        name="A 256-to-512 dense layer at batch 32 in four 128-row weight tiles",
+        description="W (512 x 256, FP16) times X (256 x 32, FP16) into FP32 outputs; each tile holds 128 "
+                    "weight rows, the whole input, and a 128 x 32 output block.",
+        m=512, k=256, n=32,                   # scenario assumption: weights 512 x 256, batch 32
+        tile_m=128,                           # scenario assumption: 128-row weight tiles
+        tile_k=256, tile_n=32,                # the whole reduction and the whole batch
+        operand_bytes=_BYTES_FP16,
+        accumulator_bytes=_BYTES_FP32,
+    )
+    Matmul4096Fp16Tile128 = _st.MatmulTileScenario(
+        name="A 4,096-square FP16 matrix multiply in 128 x 128 x 128 tiles, single buffered",
+        description="FP16 operands, FP32 accumulator; 1,024 output tiles, each summing 32 tile products.",
+        m=4096, n=4096, k=4096,               # scenario assumption: a transformer-width layer
+        tile_m=_Hardware.Cloud.TPUv4.compute.systolic_array_dim,  # tiles the width of a 128-wide array
+        tile_n=_Hardware.Cloud.TPUv4.compute.systolic_array_dim,
+        tile_k=_Hardware.Cloud.TPUv4.compute.systolic_array_dim,
+        operand_bytes=_BYTES_FP16,
+        accumulator_bytes=_BYTES_FP32,
+    )
+    Matmul4096Fp16Tile128Double = Matmul4096Fp16Tile128.variant(
+        name="The 4,096-square FP16 multiply in 128-cubed tiles, double buffered",
+        description="The next pair of operand tiles loads while the current pair computes.",
+        double_buffered=True,
+    )
+    Matmul4096Fp16Tile128K256Double = Matmul4096Fp16Tile128Double.variant(
+        name="The 4,096-square FP16 multiply in 128 x 128 tiles with a 256-deep reduction step, double buffered",
+        tile_k=2 * _Hardware.Cloud.TPUv4.compute.systolic_array_dim,  # scenario assumption: doubled T_K
+    )
+    Matmul4096Fp16Tile256x128 = Matmul4096Fp16Tile128.variant(
+        name="The 4,096-square FP16 multiply in 256 x 128 tiles",
+        description="cuBLAS's largest listed tile (NVIDIA Matrix Multiplication Background guide).",
+        tile_m=int(_Literature.CompilerResults.NvidiaGemmLargestTileM),
+        tile_n=int(_Literature.CompilerResults.NvidiaGemmLargestTileN),
+    )
+    BoehmSgemmNaiveKernel = _st.MatmulTileScenario(
+        name="Boehm's naive SGEMM kernel: one thread per output element",
+        description="No tile: every multiply-add loads one A and one B element from global memory.",
+        m=int(_Literature.CompilerResults.BoehmSgemmMatrixDim),
+        n=int(_Literature.CompilerResults.BoehmSgemmMatrixDim),
+        k=int(_Literature.CompilerResults.BoehmSgemmMatrixDim),
+        tile_m=1, tile_n=1, tile_k=1,
+        operand_bytes=_BYTES_FP32,
+        accumulator_bytes=_BYTES_FP32,
+    )
+    BoehmSgemmSharedMemKernel = BoehmSgemmNaiveKernel.variant(
+        name="Boehm's shared-memory SGEMM kernel: 32 x 32 tiles of A and B in shared memory",
+        description="Each thread copies one A and one B element per step, then does 32 multiply-adds "
+                    "from shared memory.",
+        tile_m=int(_Literature.CompilerResults.BoehmSgemmSharedMemBlockSize),
+        tile_n=int(_Literature.CompilerResults.BoehmSgemmSharedMemBlockSize),
+        tile_k=int(_Literature.CompilerResults.BoehmSgemmSharedMemBlockSize),
+    )
+    Conv3x3Filters16On8x8 = _st.ConvLayerScenario(
+        name="Sixteen 3 x 3 filters over an 8 x 8 single-channel map, no padding",
+        description="36 output positions; holding all 144 filter weights against reloading them per position.",
+        height=8, width=8, kernel=3,          # scenario assumption: a small loop-ordering example
+        in_channels=1, out_channels=16,       # scenario assumption
+        bytes_per_value=_BYTES_FP32,
+        same_padding=False,
+    )
+    Width129On128Array = Channels256To250Tile8.variant(
+        name="A layer 129 wide on a 128-wide matrix unit",
+        description="One column past the tile: a second tile runs with one busy lane of 128.",
+        channels=129, pruned_channels=129,    # scenario assumption: one past the array width
+        tile=_Hardware.Cloud.TPUv4.compute.systolic_array_dim,
+    )
+    Width1000OnA100Fp16Multiple = Channels256To250Tile8.variant(
+        name="A layer 1,000 wide against the A100's FP16 dimension multiple of 64",
+        description="15 whole blocks of 64 and 40 left over; padding to 1,024 makes 16 whole blocks.",
+        channels=1000, pruned_channels=1000,  # scenario assumption: illustrative width
+        tile=int(_Literature.CompilerResults.NvidiaGemmA100Fp16DimMultiple),
+    )
+    A100GemmOneWave = _st.WaveQuantizationScenario(
+        name="A 2,304 x 1,536 output in 256 x 128 tiles on an A100: exactly one wave",
+        description="NVIDIA's wave-quantization example: 108 tiles on 108 SMs.",
+        m=int(_Literature.CompilerResults.NvidiaGemmWaveQuantizationM),
+        n=int(_Literature.CompilerResults.NvidiaGemmWaveQuantizationOneWaveN),
+        tile_m=int(_Literature.CompilerResults.NvidiaGemmLargestTileM),
+        tile_n=int(_Literature.CompilerResults.NvidiaGemmLargestTileN),
+        hardware=_Hardware.Cloud.A100,
+    )
+    A100GemmTailWave = A100GemmOneWave.variant(
+        name="The same output widened to 1,544: a full wave plus a tail",
+        n=int(_Literature.CompilerResults.NvidiaGemmWaveQuantizationTailN),
+    )
+    MappingChoicesOneLevel = _st.MappingSpaceScenario(
+        name="Unconstrained mapping choices at one memory level (toy counts)",
+        description="Five tensors in four placements, a seven-deep loop nest in any order, and three of six "
+                    "loops parallelized in order.",
+        tensors=5, tiers=4,                   # scenario assumption: placement toy example
+        loop_depth=7,                         # scenario assumption: loop-order toy example
+        parallel_candidates=6, parallel_loops=3,  # scenario assumption: parallelization toy example
+    )
+    H100Registers32PerThread = _st.RegisterOccupancyScenario(
+        name="An H100 kernel using 32 registers per thread",
+        description="Register use per thread sets how many threads stay resident on one SM.",
+        hardware=_Hardware.Cloud.H100,
+        registers_per_thread=32,              # scenario assumption
+    )
+    H100Registers64PerThread = H100Registers32PerThread.variant(
+        name="An H100 kernel using 64 registers per thread", registers_per_thread=64)  # scenario assumption
+    H100Registers128PerThread = H100Registers32PerThread.variant(
+        name="An H100 kernel using 128 registers per thread (a fused kernel)",
+        registers_per_thread=128)             # scenario assumption
+    H100RegistersMaxPerThread = H100Registers32PerThread.variant(
+        name="An H100 kernel at the 255-register-per-thread limit",
+        registers_per_thread=_Hardware.Cloud.H100.compute.max_registers_per_thread)
+    PytorchTf32MatmulGa100 = _st.TimedMatmulScenario(
+        name="A 10,240-square matrix multiply on GA100 with TF32 allowed (PyTorch notes)",
+        description="Tensor Cores run the FP32 multiply in TF32.",
+        dim=int(_Literature.CompilerResults.PytorchTf32ExampleMatrixDim),
+        time=Q_(float(_Literature.CompilerResults.PytorchTf32ExampleTf32Seconds), "second"),
+    )
+    PytorchFp32MatmulGa100 = PytorchTf32MatmulGa100.variant(
+        name="The same multiply with TF32 off (CUDA cores, FP32)",
+        time=Q_(float(_Literature.CompilerResults.PytorchTf32ExampleFp32Seconds), "second"),
+    )
+    ResNet50Stage2ConvBatch32Fp32 = ResNet50Stage2ConvBatch32.variant(
+        name="ResNet-50 stage-2 3x3 convolution, batch 32, FP32", bytes_per_value=_BYTES_FP32)
+    ResNet50Stage2MapInt8ReadOnce = _st.MemoryRoundTripScenario(
+        name="One ResNet-50 stage-2 output map (INT8, one image) read once from DRAM at 160 pJ/byte",
+        description="45 nm off-chip DRAM energy per byte (Horowitz).",
+        tensor_bytes=ResNet50Stage2ConvBatch32Int8.activation_bytes,
+        energy_per_byte=_Hardware.Tech.Memory.DRAM.energy_per_byte,
+        trips=1,
+    )
+    ResNet50Stage2MapInt8Boundary = ResNet50Stage2MapInt8ReadOnce.variant(
+        name="The INT8 stage-2 map crossing one unfused layer boundary (write, then read)",
+        trips=2,
+    )
+    ResNet50Stage2MapFp16Boundary = ResNet50Stage2MapInt8Boundary.variant(
+        name="The FP16 stage-2 map crossing one unfused layer boundary",
+        tensor_bytes=ResNet50Stage2ConvBatch32.activation_bytes,
+    )
+    ResNet50Stage2MapInt8BoundaryHbm2Low = ResNet50Stage2MapInt8Boundary.variant(
+        name="The INT8 stage-2 map crossing one boundary at 7 nm HBM2 I/O energy, low end",
+        energy_per_byte=(_Hardware.Tech.Memory.Hbm2_Access64b_7nm_Low.energy_per_access
+                         / Q_(8, "byte")).to("pJ/byte"),  # one 64-bit access is 8 bytes
+    )
+    ResNet50Stage2MapInt8BoundaryHbm2High = ResNet50Stage2MapInt8Boundary.variant(
+        name="The INT8 stage-2 map crossing one boundary at 7 nm HBM2 I/O energy, high end",
+        energy_per_byte=(_Hardware.Tech.Memory.Hbm2_Access64b_7nm_High.energy_per_access
+                         / Q_(8, "byte")).to("pJ/byte"),
+    )
+    ResNet50Stage2MapInt8BoundaryDdr7nm = ResNet50Stage2MapInt8Boundary.variant(
+        name="The INT8 stage-2 map crossing one boundary at 7 nm DDR3/4 I/O energy",
+        energy_per_byte=(_Hardware.Tech.Memory.DdrDram_Access64b_7nm.energy_per_access
+                         / Q_(8, "byte")).to("pJ/byte"),
+    )
+
     # --- Trajectory planning on the warehouse mobile manipulator (added 2026-10-20) ---
     # Joint rates through the arm's Jacobian, a replanner's mission exposure, chunk
     # replacement, the jerk-limited stops of the arm and the base, a trajectory

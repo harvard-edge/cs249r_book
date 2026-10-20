@@ -1535,3 +1535,21 @@ DapperSamplingOverhead = _Series(
     ),
     "Dapper tracing overhead on a Web search cluster at six sampling frequencies (added 2026-10-20).",
 )
+
+
+# --- Mapping a computation onto an accelerator (added 2026-10-20) ------------
+NvidiaGemmTileQuantizationA100 = _Series(
+    "nvidia_gemm_tile_quantization_a100",
+    Provenance(
+        kind=ProvenanceKind.DATASHEET,
+        ref="NVIDIA, Matrix Multiplication Background User's Guide, Sec. 3.1, figure 7(a)",
+        url="https://docs.nvidia.com/deeplearning/performance/dl-performance-matrix-multiplication/index.html",
+        verified="2026-10-17",
+        notes=(
+            "Achieved TFLOP/s against N in steps of 8 on an A100-SXM4-80GB (CUDA 11.2, cuBLAS 11.4), "
+            "M = 27,648, K = 4,096, cuBLAS forced to 256x128 tiles. Read from the vector paths of the "
+            "published SVG plot."
+        ),
+    ),
+    "Tile quantization measured on an A100: achieved TFLOP/s by output width N (tiles 128 wide along N).",
+)
