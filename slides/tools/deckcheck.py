@@ -212,13 +212,20 @@ DROP_ENV_ARGS = ("column", "minipage", "columns", "tabular", "mlsyscard",
 # substitutes them into the source as it loads (no newlines change, so line
 # numbers hold), so lengths and words count what students see (2026-10-20:
 # titles holding \val keys were measured by the key's name).
+def _cap(value, m):
+    """A \\val or \\Val match as printed (\\Val capitalizes the first letter)."""
+    if value is None:
+        return m.group(0)
+    return value[:1].upper() + value[1:] if m.group(1) == "V" else value
+
+
 def _with_values(text, deck_dir):
     f = Path(deck_dir) / "images" / "numbers.tex"
     if not f.exists() or "\\val{" not in text:
         return text
     vals = {k: v.replace("{,}", ",") for k, v in
             re.findall(r"\\defval\{([a-z0-9_]+)\}\{(.*)\}\s*$", f.read_text(), re.M)}
-    return re.sub(r"\\val\{([a-z0-9_]+)\}", lambda m: vals.get(m.group(1), m.group(0)), text)
+    return re.sub(r"\\([vV])al\{([a-z0-9_]+)\}", lambda m: _cap(vals.get(m.group(2)), m), text)
 
 
 def detex(s):
