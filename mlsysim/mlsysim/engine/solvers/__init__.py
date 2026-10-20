@@ -6,8 +6,10 @@ from .data import DataModel, TransformationModel
 from .distributed import DistributedModel, MoERoutingModel, ParallelismOptimizer, TopologyModel
 from .economics import EconomicsModel, PlacementOptimizer, ResponsibleEngineeringModel, SustainabilityModel
 from .orchestration import OrchestrationModel
-from .performance import EfficiencyModel, NetworkRooflineModel, SensitivitySolver, SingleNodeModel, SynthesisSolver
-from .reliability import ReliabilityModel
+from .facility import CoolantFlowModel, OutageCostModel, PowerTransientModel
+from .interconnect import TensorParallelCommModel, TransferLadderModel
+from .performance import DecodeBoundModel, EfficiencyModel, NetworkRooflineModel, SensitivitySolver, SingleNodeModel, SynthesisSolver
+from .reliability import FailureIntervalModel, ReliabilityModel
 from .serving import (
     BatchingOptimizer,
     ContinuousBatchingModel,
@@ -17,7 +19,7 @@ from .serving import (
     TailLatencyModel,
     WeightStreamingModel,
 )
-from .training import CheckpointModel, ScalingModel, TrainingMemoryModel
+from .training import CheckpointModel, ScalingModel, TrainingMemoryModel, TrainingRunModel, TrainingStateModel
 
 __all__ = [
     "BaseResolver",
@@ -25,6 +27,15 @@ __all__ = [
     "BaseSolver",
     "BaseOptimizer",
     "SingleNodeModel",
+    "DecodeBoundModel",
+    "TransferLadderModel",
+    "TensorParallelCommModel",
+    "TrainingRunModel",
+    "TrainingStateModel",
+    "PowerTransientModel",
+    "CoolantFlowModel",
+    "OutageCostModel",
+    "FailureIntervalModel",
     "NetworkRooflineModel",
     "EfficiencyModel",
     "SensitivitySolver",

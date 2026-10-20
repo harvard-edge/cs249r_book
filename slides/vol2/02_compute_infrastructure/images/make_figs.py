@@ -11,11 +11,11 @@ Every value is from the rendered chapter (Compute Infrastructure, dev build of
     10,000 GPUs at a per-GPU MTTF of 50,000 h, about 5 h between GPU failures
     (Sec. 2.7.1, Sec. 2.11).
   - Two tests: 141.2 GB of 70B FP16 weights against one H100's 80 GB; decode
-    floors 69.2, 42.1, 17.6 ms (calcs.py) at 2.04, 3.35, 8 TB/s (Sec. 2.3.1).
+    floors 69.2, 42.1, 17.7 ms (calcs.py) at 2.04, 3.35, 8 TB/s (Sec. 2.3.1).
   - Roofline: H100 FP16 989 TFLOP/s, 3.35 TB/s, ridge 295.2 FLOP/byte;
     decode 1 FLOP/byte (0.34 percent of peak), batch 64 (about 22 percent),
     training with 2,048 local tokens (Sec. 2.3.2, Example 2.2).
-  - H200 against H100: same peak, 1.4x bandwidth, 1.6x capacity, modeled
+  - H200 against H100: same peak, 1.4x bandwidth, 1.8x labeled capacity, modeled
     decode speedup 1.4x (Napkin Math 2.2).
   - Die arithmetic share: CPU 5-10, GPU 50-60, TPU 70-80, ASIC over 90
     percent, approximate shares that mark a direction (Sec. 2.2, figure 2).
@@ -57,6 +57,9 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
 import slideplot as sp  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import calcs  # noqa: E402,F401  (records every value; figures read them)
+from deckvals import val, num  # noqa: E402
 
 plt = sp.plt
 C = sp.C
@@ -106,16 +109,16 @@ def label(ax, x, y, s, color, shown=True, **kw):
 
 # 1. Hook: arithmetic against weight transfer, batch-1 decode ---------------
 sp.hbars(out / "hook_decode.svg",
-         [("Arithmetic", 0.14, "compute", "0.14 ms"),
-          ("Weights", 42.1, "memory", "42.1 ms")],
+         [("Arithmetic", num("hook_t_arith_ms"), "compute", f"{val('hook_t_arith_ms')} ms"),
+          ("Weights", num("hook_t_mem_ms"), "memory", f"{val('hook_t_mem_ms')} ms")],
          "ms", log=True, xlabel="ms per token (log)", size=(3.6, 1.45))
 
 # 2. The four walls, one scale per step (900 x 500) -------------------------
 walls = [
-    ("Accelerator", "1 GPU", ("Memory", "wall"), "3.35 TB/s", ("HBM feeding", "989 TFLOP/s"), "c1"),
-    ("Node", "8 GPUs", ("Communication", "wall"), "450 \u2192 50", ("GB/s per GPU:", "a 9\u00d7 drop"), "c2"),
-    ("Rack", "32 GPUs", ("Power", "wall"), "33.5 kW", ("per rack, against", "12 kW for servers"), "frame"),
-    ("Pod", "10,000 GPUs", ("Reliability", "wall"), "about 5 h", ("between GPU", "failures"), "red"),
+    ("Accelerator", "1 GPU", ("Memory", "wall"), f"{val('h100_bw')} TB/s", ("HBM feeding", f"{val('h100_fp16')} TFLOP/s"), "c1"),
+    ("Node", "8 GPUs", ("Communication", "wall"), f"{val('nvlink_gbs')} \u2192 {val('ib_gbs')}", ("GB/s per GPU:", f"a {val('nvlink_ib_ratio')}\u00d7 drop"), "c2"),
+    ("Rack", "32 GPUs", ("Power", "wall"), f"{val('dgx_rack_kw')} kW", ("per rack, against", f"{val('trad_rack_kw')} kW for servers"), "frame"),
+    ("Pod", f"{val('pod_gpus')} GPUs", ("Reliability", "wall"), f"about {val('pod_fail_h')} h", ("between GPU", "failures"), "red"),
 ]
 for k in range(1, 5):
     b = ""
@@ -149,18 +152,18 @@ for k in range(1, 5):
 for k in (1, 2):
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(6.0, 2.6),
                                  gridspec_kw={"width_ratios": [1, 1.8], "wspace": 0.5})
-    a1.bar([0], [141.2], 0.55, color=C["memory"])
-    a1.axhline(80, color=C["danger"], lw=2, ls="--")
-    a1.text(0.34, 84, "one H100\n80 GB", color=C["danger"], fontsize=13.5,
+    a1.bar([0], [num("llama70_weights_gb")], 0.55, color=C["memory"])
+    a1.axhline(num("h100_hbm_gb"), color=C["danger"], lw=2, ls="--")
+    a1.text(0.34, 84, f"one H100\n{val('h100_hbm_gb')} GB", color=C["danger"], fontsize=13.5,
             fontweight="bold", va="bottom", ha="left", linespacing=1.0)
-    a1.text(0.12, 146, "141.2 GB", ha="center", fontsize=14.5, fontweight="bold", color=C["memory"])
+    a1.text(0.12, 146, f"{val('llama70_weights_gb')} GB", ha="center", fontsize=14.5, fontweight="bold", color=C["memory"])
     a1.set_xticks([0], ["70B FP16\nweights"], fontsize=13.5)
     a1.set_xlim(-0.9, 1.6)
     a1.set_ylim(0, 175)
     a1.set_ylabel("GB")
     a1.set_title("Capacity: does it fit?", fontsize=14.5, fontweight="bold", color=C["text"])
-    names = ["A100\n2.04 TB/s", "H100\n3.35 TB/s", "B200\n8 TB/s"]
-    vals = [69.2, 42.1, 17.6]
+    names = [f"A100\n{val('a100_bw')} TB/s", f"H100\n{val('h100_bw')} TB/s", f"B200\n{val('b200_bw')} TB/s"]
+    vals = [num("floor_a100_ms"), num("hook_t_mem_ms"), num("floor_b200_ms")]
     shown = k >= 2
     a2.bar(range(3), vals, 0.6, color=C["memory"], alpha=1.0 if shown else 0.0)
     for i, v in enumerate(vals):
@@ -177,11 +180,11 @@ for k in (1, 2):
     sp.save(fig, out / f"two_tests_step{k}.svg")
 
 # 4. H100 roofline with real ceilings, three workload points ----------------
-PEAK, BW = 989.0, 3.35  # TFLOP/s FP16 dense; TB/s
+PEAK, BW = calcs.m(calcs.H100.compute.peak_flops, "TFLOP/s"), calcs.m(calcs.H100.memory.bandwidth, "TB/s")
 RIDGE = PEAK / BW
-pts = [("Decode, batch 1\n1 FLOP/byte: 0.34%", 1, "memory", (14, -6), "left"),
-       ("Decode, batch 64\n64 FLOP/byte: 22%", 64, "memory", (-14, 26), "right"),
-       ("Training, 2,048\nlocal tokens", 2048, "compute", (0, -48), "center")]
+pts = [(f"Decode, batch 1\n1 FLOP/byte: {val('b1_pct')}%", 1, "memory", (14, -6), "left"),
+       (f"Decode, batch 64\n64 FLOP/byte: {val('b64_pct')}%", 64, "memory", (-14, 26), "right"),
+       (f"Training, {val('tp_seq')}\nlocal tokens", num("tp_seq"), "compute", (0, -48), "center")]
 for k in range(1, 4):
     fig, ax = plt.subplots(figsize=(5.8, 2.7))
     xs = np.logspace(-0.3, 4, 400)
@@ -189,11 +192,11 @@ for k in range(1, 4):
     ax.plot(xs[xs <= RIDGE], roof[xs <= RIDGE], color=C["memory"], lw=3)
     ax.plot(xs[xs >= RIDGE], roof[xs >= RIDGE], color=C["compute"], lw=3)
     ax.axvline(RIDGE, color=C["neutral"], lw=1, ls="--")
-    ax.text(RIDGE * 1.1, 0.32, "ridge\n295 FLOP/byte", color=C["neutral"], fontsize=13.5,
+    ax.text(RIDGE * 1.1, 0.32, f"ridge\n{val('ridge')} FLOP/byte", color=C["neutral"], fontsize=13.5,
             fontweight="bold", va="bottom")
-    ax.text(5000, PEAK * 1.25, "989 TFLOP/s", color=C["compute"], fontsize=13.5,
+    ax.text(5000, PEAK * 1.25, f"{val('h100_fp16')} TFLOP/s", color=C["compute"], fontsize=13.5,
             fontweight="bold", ha="right", va="bottom")
-    ax.text(12, BW * 12 / 4.5, "3.35 TB/s", color=C["memory"], fontsize=13.5,
+    ax.text(12, BW * 12 / 4.5, f"{val('h100_bw')} TB/s", color=C["memory"], fontsize=13.5,
             fontweight="bold", rotation=25, ha="center")
     for i, (lab, x, ck, off, ha) in enumerate(pts):
         shown = i < k
@@ -216,8 +219,8 @@ for k in range(1, 4):
 
 # 5. H200 relative to H100 ----------------------------------------------------
 fig, ax = plt.subplots(figsize=(3.9, 2.1))
-rows = [("FP16 peak", 1.0, "compute"), ("HBM bandwidth", 1.4, "memory"),
-        ("HBM capacity", 1.6, "memory"), ("Decode speed", 1.4, "data")]
+rows = [("FP16 peak", 1.0, "compute"), ("HBM bandwidth", num("h200_bw_ratio"), "memory"),
+        ("HBM capacity", num("h200_cap_ratio"), "memory"), ("Decode speed", num("h200_speedup"), "data")]
 for i, (lab, v, ck) in enumerate(rows):
     y = len(rows) - 1 - i
     ax.barh(y, v, 0.6, color=C[ck])
@@ -273,10 +276,10 @@ xx = np.linspace(2017, 2026.3, 50)
 ax.plot(xx, 10 ** (kfit * xx + bfit), "--", color=C["text"], lw=1.4, zorder=2)
 ax.text(2026.4, 0.118, f"dashed fit: {annual:.1f}× per year",
         fontsize=13.5, fontweight="bold", ha="right", color=C["text"])
-for lab, name, off in (("V100 0.42", "NVIDIA Tesla V100 SXM2", (60, -26)),
-                       ("A100 0.78", "NVIDIA A100 SXM4 40 GB", (-4, 14)),
-                       ("H100 1.41", "NVIDIA H100 SXM5 80GB", (-8, 14)),
-                       ("B200 2.25", "NVIDIA B200", (-8, 12))):
+for lab, name, off in ((f"V100 {val('perwatt_v100')}", "NVIDIA Tesla V100 SXM2", (60, -26)),
+                       (f"A100 {val('perwatt_a100')}", "NVIDIA A100 SXM4 40 GB", (-4, 14)),
+                       (f"H100 {val('perwatt_h100')}", "NVIDIA H100 SXM5 80GB", (-8, 14)),
+                       (f"B200 {val('perwatt_b200')}", "NVIDIA B200", (-8, 12))):
     r = next(r for r in rows if r["device"] == name)
     p = (dyear(r["release_date"]), r["flops_per_w"] / 1e12)
     ax.scatter([p[0]], [p[1]], s=110, facecolors="none", edgecolors=C["data"], lw=1.6, zorder=4)
@@ -298,9 +301,9 @@ print(f"perwatt: {len(rows)} devices, fit {annual:.2f}x per year")
 for k in (1, 2):
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(6.6, 2.4),
                                  gridspec_kw={"width_ratios": [1, 1], "wspace": 0.6})
-    parts = [("weights", 350, C["memory"]), ("gradients", 350, C["network"]),
-             ("master", 700, C["neutral"]), ("Adam m", 700, C["compute"]),
-             ("Adam v", 700, "#B85A0B")]
+    parts = [("weights", num("weights_gb"), C["memory"]), ("gradients", num("weights_gb"), C["network"]),
+             ("master", num("master_gb"), C["neutral"]), ("Adam m", num("adam_moment_gb"), C["compute"]),
+             ("Adam v", num("adam_moment_gb"), "#B85A0B")]
     bot = 0
     for lab, v, col in parts:
         a1.bar(0, v, 0.6, bottom=bot, color=col, edgecolor="white")
@@ -309,10 +312,10 @@ for k in (1, 2):
     a1.bar(0, 250, 0.6, bottom=bot, color=C["data_l"], edgecolor=C["data"], hatch="//")
     a1.text(0.36, bot + 125, "activations", va="center", fontsize=12.5,
             color=C["data"], fontweight="bold", linespacing=1.0)
-    a1.axhline(640, color=C["danger"], lw=2, ls="--")
-    a1.text(-1.85, 700, "node\n640 GB", color=C["danger"], fontsize=13, fontweight="bold",
+    a1.axhline(num("node_hbm_gb"), color=C["danger"], lw=2, ls="--")
+    a1.text(-1.85, 700, f"node\n{val('node_hbm_gb')} GB", color=C["danger"], fontsize=13, fontweight="bold",
             ha="left", va="bottom", linespacing=1.0)
-    a1.text(0, 3330, "2.8 TB + act.", ha="center", fontsize=13.5, fontweight="bold", color=C["text"])
+    a1.text(0, 3330, f"{val('state_tb')} TB + act.", ha="center", fontsize=13.5, fontweight="bold", color=C["text"])
     a1.set_xlim(-1.9, 1.5)
     a1.set_ylim(0, 3700)
     a1.set_xticks([])
@@ -320,17 +323,17 @@ for k in (1, 2):
     a1.set_title("175B training state", fontsize=14.5, fontweight="bold", color=C["text"])
     shown = k >= 2
     al = 1.0 if shown else 0.0
-    gp = [("weights, grads", 87.5, C["memory"]), ("master", 87.5, C["neutral"]),
-          ("Adam m, v", 175, C["compute"]), ("other", 25, C["data"])]
+    gp = [("weights, grads", num("tp8_wg_gb"), C["memory"]), ("master", num("tp8_master_gb"), C["neutral"]),
+          ("Adam m, v", num("tp8_adam_gb"), C["compute"]), ("other", num("tp8_other_gb"), C["data"])]
     bot = 0
     for lab, v, col in gp:
         a2.bar(0, v, 0.6, bottom=bot, color=col, edgecolor="white", alpha=al)
         label(a2, 0.36, bot + v / 2, lab, col, shown, va="center", fontsize=12.5)
         bot += v
-    a2.axhline(80, color=C["danger"], lw=2, ls="--", alpha=al)
-    label(a2, -1.85, 92, "H100\n80 GB", C["danger"], shown, fontsize=13, ha="left",
+    a2.axhline(num("h100_hbm_gb"), color=C["danger"], lw=2, ls="--", alpha=al)
+    label(a2, -1.85, 92, f"H100\n{val('h100_hbm_gb')} GB", C["danger"], shown, fontsize=13, ha="left",
           va="bottom", linespacing=1.0)
-    label(a2, 0, 385, "375 GB", C["text"], shown, ha="center", fontsize=13.5)
+    label(a2, 0, 385, f"{val('tp8_total_gb')} GB", C["text"], shown, ha="center", fontsize=13.5)
     a2.set_xlim(-1.9, 1.5)
     a2.set_ylim(0, 430)
     a2.set_xticks([])
@@ -344,19 +347,19 @@ for k in (1, 2):
 
 # 9. The bandwidth staircase: one 10 GB buffer --------------------------------
 sp.hbars_steps(str(out / "staircase"),
-               [("HBM, 3,350 GB/s", 3.0, "memory", "3.0 ms"),
-                ("NVLink, 450 GB/s", 22.2, "compute", "22.2 ms"),
-                ("InfiniBand, 50 GB/s", 200, "network", "200 ms")],
-               "ms", log=True, xlabel="Time to move 10 GB, ms (log)", size=(4.3, 2.5))
+               [(f"HBM, {val('h100_bw_gbs')} GB/s", num("stair_hbm_ms"), "memory", f"{val('stair_hbm_ms')} ms"),
+                (f"NVLink, {val('nvlink_gbs')} GB/s", num("stair_nvlink_ms"), "compute", f"{val('stair_nvlink_ms')} ms"),
+                (f"InfiniBand, {val('ib_gbs')} GB/s", num("stair_ib_ms"), "network", f"{val('stair_ib_ms')} ms")],
+               "ms", log=True, xlabel=f"Time to move {val('buffer_gb')} GB, ms (log)", size=(4.3, 2.5))
 
 # 10. Placement: three strategies on two tiers (900 x 500) ---------------------
 lanes = [
-    ("Tensor parallel", "Inside one node: NVLink, 450 GB/s",
-     "201 MB, 192 times per step", "on the critical path", "c1"),
-    ("Pipeline parallel", "Between nodes: InfiniBand, 50 GB/s",
-     "201 MB per micro-batch per stage boundary", "partly hidden", "c2"),
-    ("Data parallel", "Across the cluster: InfiniBand, 50 GB/s",
-     "350 GB of gradients, once per step", "overlaps backward", "green"),
+    ("Tensor parallel", f"Inside one node: NVLink, {val('nvlink_gbs')} GB/s",
+     f"{val('tp_payload_mb')} MB, 192 times per step", "on the critical path", "c1"),
+    ("Pipeline parallel", f"Between nodes: InfiniBand, {val('ib_gbs')} GB/s",
+     f"{val('tp_payload_mb')} MB per micro-batch per stage boundary", "partly hidden", "c2"),
+    ("Data parallel", f"Across the cluster: InfiniBand, {val('ib_gbs')} GB/s",
+     f"{val('weights_gb')} GB of gradients, once per step", "overlaps backward", "green"),
 ]
 for k in range(1, 4):
     b = ""
@@ -373,15 +376,16 @@ for k in range(1, 4):
 
 # 11. Tensor-parallel AllReduce over NVLink and PCIe ---------------------------
 fig, ax = plt.subplots(figsize=(5.8, 2.0))
-for y, comm, lab, pct in ((1, 150.3, "NVLink", "compute 57%"), (0, 1057, "PCIe Gen5", "compute 16%")):
-    ax.barh(y, 200, 0.6, color=C["compute"])
-    ax.barh(y, comm, 0.6, left=200, color=C["network"])
+for y, comm, lab, pct, step in ((1, num("tp_nvlink_total_ms"), "NVLink", f"compute {val('tp_nvlink_compute_pct')}%", val("tp_nvlink_step_ms")),
+                                (0, num("tp_pcie_total_ms"), "PCIe Gen5", f"compute {val('tp_pcie_compute_pct')}%", val("tp_pcie_step_ms"))):
+    ax.barh(y, num("tp_compute_ms"), 0.6, color=C["compute"])
+    ax.barh(y, comm, 0.6, left=num("tp_compute_ms"), color=C["network"])
     ax.text(-15, y, lab, ha="right", va="center", fontsize=15.5, fontweight="bold", color=C["text"])
-    ax.text(200 + comm + 20, y, f"{200 + comm:,.0f} ms\n{pct}", va="center", fontsize=14,
+    ax.text(num("tp_compute_ms") + comm + 20, y, f"{step} ms\n{pct}", va="center", fontsize=14,
             fontweight="bold", color=C["text"], linespacing=1.0)
-ax.text(100, 1.48, "compute 200 ms (assumed)", ha="center", fontsize=13, fontweight="bold",
+ax.text(num("tp_compute_ms") / 2, 1.48, f"compute {val('tp_compute_ms')} ms (assumed)", ha="center", fontsize=13, fontweight="bold",
         color=C["compute"])
-ax.text(730, 0, "192 AllReduces", ha="center", va="center", fontsize=13.5, fontweight="bold", color="white")
+ax.text(730, 0, f"{val('tp_collectives')} AllReduces", ha="center", va="center", fontsize=13.5, fontweight="bold", color="white")
 ax.set_yticks([])
 ax.set_xlim(0, 1550)
 ax.set_ylim(-0.5, 1.75)
@@ -391,10 +395,10 @@ sp.save(fig, out / "tp_links.svg")
 
 # 12. Rack power ---------------------------------------------------------------
 sp.hbars(out / "rack_power.svg",
-         [("Server rack", 12, "neutral", "12 kW"),
-          ("4 DGX H100", 33.5, "compute", "33.5 kW"),
-          ("Liquid class", 100, "danger", "100 kW"),
-          ("GB200 NVL72", 120, "danger", "120 kW")],
+         [("Server rack", num("trad_rack_kw"), "neutral", f"{val('trad_rack_kw')} kW"),
+          ("4 DGX H100", num("dgx_rack_kw"), "compute", f"{val('dgx_rack_kw')} kW"),
+          ("Liquid class", num("rack_heat_kw"), "danger", f"{val('rack_heat_kw')} kW"),
+          ("GB200 NVL72", num("nvl72_kw"), "danger", f"{val('nvl72_kw')} kW")],
          "kW", log=False, xlabel="kW per rack", size=(4.2, 2.2))
 
 # 13. Package power against system power ---------------------------------------
@@ -413,17 +417,17 @@ a1.set_ylim(0, 1650)
 a1.set_xlim(2011, 2026.5)
 a1.set_xticks([2013, 2017, 2021, 2025])
 a1.set_ylabel("W per package")
-a1.set_title("One accelerator: 2×", fontsize=14.5, fontweight="bold", color=C["text"])
+a1.set_title(f"One accelerator: {val('chip_growth')}×", fontsize=14.5, fontweight="bold", color=C["text"])
 sx = np.array([dyear(r["first_operational_date"]) for r in systems])
 syv = np.array([r["power_mw"] for r in systems])
 o = np.argsort(sx)
 a2.scatter(sx, syv, s=8, color=C["neutral_l"], zorder=2)
 run = np.maximum.accumulate(syv[o])
 a2.step(sx[o], run, where="post", color=C["danger"], lw=2.2, zorder=3)
-a2.annotate("Frontier 40 MW", (2022.4, 40), xytext=(2013.0, 150), textcoords="data",
+a2.annotate(f"Frontier {val('frontier_mw')} MW", (2022.4, num("frontier_mw")), xytext=(2013.0, 150), textcoords="data",
             ha="left", fontsize=12.5, fontweight="bold", color=C["danger"],
             arrowprops=dict(arrowstyle="-", color=C["danger"], lw=1))
-a2.annotate("about 350 MW", (2025.5, 350), xytext=(-4, 8), textcoords="offset points",
+a2.annotate(f"{val('largest_2025_mw')} MW", (2025.5, num("largest_2025_mw")), xytext=(-4, 8), textcoords="offset points",
             ha="right", fontsize=12.5, fontweight="bold", color=C["danger"])
 a2.set_yscale("log")
 a2.set_xlim(2011, 2026.5)
@@ -432,13 +436,15 @@ a2.set_xticks([2013, 2017, 2021, 2025])
 a2.set_yticks([1, 10, 100, 1000], ["1", "10", "100", "1,000"])
 a2.minorticks_off()
 a2.set_ylabel("MW per system")
-a2.set_title("Largest AI system: 9×", fontsize=14.5, fontweight="bold", color=C["text"])
+a2.set_title(f"Largest AI system: {val('largest_over_frontier')}×", fontsize=14.5, fontweight="bold", color=C["text"])
 sp.save(fig, out / "power_trend.svg")
 print(f"power_trend: {len(chips)} packages, {len(systems)} systems")
 
 # 14. Cooling: volumetric flow to remove 100 kW at a 15 K rise -----------------
 fig, ax = plt.subplots(figsize=(3.8, 1.5))
-for y, lab, v, ck, txt in ((1, "Air", 5500, "neutral", "5,500 L/s"), (0, "Water", 1.6, "memory", "1.6 L/s")):
+air_ls = num("air_m3s") * 1000
+for y, lab, v, ck, txt in ((1, "Air", air_ls, "neutral", f"{air_ls:,.0f} L/s"),
+                           (0, "Water", num("water_kgs"), "memory", f"{val('water_kgs')} L/s")):
     ax.barh(y, v, 0.6, color=C[ck])
     ax.text(v * 1.3, y, txt, va="center", fontsize=15, fontweight="bold", color=C[ck])
     ax.text(0.55, y, lab + " ", ha="right", va="center", fontsize=15, fontweight="bold", color=C["text"])
@@ -449,7 +455,7 @@ ax.set_yticks([])
 ax.spines["left"].set_visible(False)
 ax.set_xticks([1, 100, 10000], ["1", "100", "10,000"])
 ax.minorticks_off()
-ax.set_xlabel("L/s for 100 kW, 15 K rise")
+ax.set_xlabel(f"L/s for {val('rack_heat_kw')} kW, {val('cool_rise_k')} K rise")
 sp.save(fig, out / "cooling_flow.svg")
 
 # 15. Nested failure domains (column slot, 520 x 470) --------------------------
@@ -470,9 +476,9 @@ for i, (nm, what) in enumerate(doms):
 svg_write(out / "failure_domains.svg", b, w=520, h=470)
 
 # 16. Pod chain: 175B on 8,192 H100s ----------------------------------------
-chain = [("Full\npeak", 5.4, "neutral"), ("Local\n45%", 12.0, "compute"),
-         ("Scaling\n0.56", 21.4, "network"), ("Checkpoint\n+3%", 22.1, "memory"),
-         ("Failures\n+10%", 24.3, "danger"), ("Upkeep\n+5%", 25.5, "neutral")]
+chain = [("Full\npeak", num("chain_peak_h"), "neutral"), (f"Local\n{val('local_eff_pct')}%", num("chain_compute_h"), "compute"),
+         (f"Scaling\n{val('scale_eff')}", num("chain_scaled_h"), "network"), (f"Checkpoint\n+{val('ovh_ckpt_pct')}%", num("chain_ckpt_h"), "memory"),
+         (f"Failures\n+{val('ovh_fail_pct')}%", num("chain_fail_h"), "danger"), (f"Upkeep\n+{val('ovh_maint_pct')}%", num("chain_total_h"), "neutral")]
 for k, upto in ((1, 2), (2, 3), (3, 6)):
     fig, ax = plt.subplots(figsize=(6.6, 2.5))
     prev = 0
@@ -494,8 +500,8 @@ for k, upto in ((1, 2), (2, 3), (3, 6)):
 
 # 17. Delivered share of peak --------------------------------------------------
 sp.hbars(out / "delivered.svg",
-         [("Decode, batch 1", 0.34, "memory", "0.34%"),
-          ("Local training", 45, "compute", "45%"),
-          ("8,192-GPU run", 21, "network", "21%")],
+         [("Decode, batch 1", num("b1_pct"), "memory", f"{val('b1_pct')}%"),
+          ("Local training", num("local_eff_pct"), "compute", f"{val('local_eff_pct')}%"),
+          ("8,192-GPU run", num("chain_share_pct"), "network", f"{val('chain_share_pct')}%")],
          "%", log=False, xlabel="Share of peak that becomes progress, %",
          size=(4.2, 1.9))

@@ -12,6 +12,11 @@ from ..models.registry import Models as _Models
 from ..hardware.registry import Hardware as _Hardware
 from ..systems.registry import Clusters as _Clusters
 from ..reference_stats.registry import ReferenceStats as _ReferenceStats
+from ..systems.registry import Fabrics as _Fabrics, Nodes as _Nodes
+from ..systems.reliability import Reliability as _Reliability
+from ..infrastructure.registry import Infrastructure as _Infrastructure
+from ..ops import Ops as _Ops
+from . import scenario_types as _st
 
 class Scenario(BaseModel):
     """
@@ -306,4 +311,172 @@ class Scenarios(Registry):
         system=_Hardware.Tiny.ESP32_S3,
         sla_latency=Q_("30 ms"),
         power_budget=Q_("1 mW"),
+    )
+
+    # --- CALCULATION SCENARIOS (added 2026-10-20) ---------------------------
+    # Named inputs for recurring calculations that chapters and lecture slides
+    # both quote. Each entry states its assumptions once; .result runs the
+    # solver that owns the arithmetic (engine/scenario_types.py).
+
+    Llama3_70B_DecodeH100 = _st.DecodeScenario(
+        name="Llama-3 70B batch-1 decode on one H100",
+        description="FP16 weights streamed once per token on one H100-equivalent path "
+                    "(capacity assumed, to isolate arithmetic from weight transfer).",
+        workload=_Models.Language.Llama3_70B,
+        hardware=_Hardware.Cloud.H100,
+    )
+
+    Llama3_70B_DecodeH100Batch64 = _st.DecodeScenario(
+        name="Llama-3 70B decode at batch 64 on one H100",
+        description="The batch-1 decode scenario with 64 requests sharing each weight read, "
+                    "which raises the weight-only arithmetic intensity 64-fold.",
+        workload=_Models.Language.Llama3_70B,
+        hardware=_Hardware.Cloud.H100,
+        batch_size=64,  # scenario assumption: concurrent decode requests
+    )
+
+    Llama3_70B_ServingH100 = _st.ServingScenario(
+        name="Llama-3 70B single-request serving on one H100",
+        description="ServingModel latency (weights, KV-cache reads, launch overhead) for one "
+                    "request at a 2,048-token context; .variant(hardware=...) compares parts.",
+        workload=_Models.Language.Llama3_70B,
+        hardware=_Hardware.Cloud.H100,
+        seq_len=2048,  # scenario assumption: serving context length
+        batch_size=1,  # scenario assumption: single-request decode
+    )
+
+    BufferTransfer10GB = _st.TransferScenario(
+        name="10 GB buffer across the H100 bandwidth hierarchy",
+        description="One synchronized 10 GB buffer moved one hop on each tier: local HBM, "
+                    "NVLink inside a node (one direction), InfiniBand NDR between nodes, "
+                    "PCIe Gen5 to the host. Bandwidth-only bounds.",
+        payload=Q_(10, "GB"),  # scenario assumption: synchronized buffer size
+        links={
+            "HBM": _Hardware.Cloud.H100.memory.bandwidth,
+            "NVLink": _Hardware.Cloud.H100.nvlink.bandwidth_per_direction,
+            "InfiniBand": _Fabrics.InfiniBand_NDR.bandwidth,
+            "PCIe": _Hardware.Cloud.H100.interconnect.bandwidth,
+        },
+    )
+
+    Gpt3TensorParallelStepDgxH100 = _st.TensorParallelScenario(
+        name="175B tensor-parallel step inside one DGX H100",
+        description="GPT-3 175B split eight ways inside one DGX H100 node; one activation "
+                    "AllReduce per layer per pass over NVLink; 200 ms of compute is a stated input.",
+        workload=_Models.Language.GPT3,
+        tp_size=_Nodes.DGX_H100.accelerators_per_node,
+        microbatch=4,  # scenario assumption: sequences per microbatch
+        link_bandwidth=_Hardware.Cloud.H100.nvlink.bandwidth_per_direction,
+        compute_time=Q_(200, "ms"),  # scenario assumption: compute per step, not derived
+    )
+
+    Gpt3PretrainingFrontier8K = _st.TrainingRunScenario(
+        name="175B pretraining on 8,192 H100s",
+        description="GPT-3 175B on its training tokens at the H100 FP8 peak, the 8,192-GPU "
+                    "pod's modeled scaling efficiency, and the standard run overheads.",
+        workload=_Models.Language.GPT3,
+        fleet=_Clusters.Frontier_8K,
+        precision="fp8",
+        local_efficiency=_ReferenceStats.TrainingScaleProfiles.LocalComputeEfficiency,
+        scaling_efficiency=_ReferenceStats.TrainingScaleProfiles.Eff8192Gpu,
+        overheads={
+            "checkpoint": _Ops.TrainingRunOverheads.Checkpoint,
+            "failures": _Ops.TrainingRunOverheads.FailureRecovery,
+            "maintenance": _Ops.TrainingRunOverheads.Maintenance,
+        },
+    )
+
+    Gpt3TrainingStateTp8 = _st.TrainingStateScenario(
+        name="175B training state under 8-way tensor parallelism",
+        description="Mixed-precision Adam state of GPT-3 175B split over one DGX H100 node "
+                    "(TP-8), with 128 data-parallel replicas for ZeRO sharding of the moments.",
+        workload=_Models.Language.GPT3,
+        tp_size=_Nodes.DGX_H100.accelerators_per_node,
+        dp_size=128,  # scenario assumption: data-parallel replicas (1,024 GPUs)
+        activations=Q_(200, "GB"),  # scenario assumption: inside the 100 to 400 GB activation range
+    )
+
+    H100BarrierLoadStep = _st.PowerTransientScenario(
+        name="Barrier-aligned H100 load step",
+        description="Each H100 steps from communication-phase power to its TDP when a "
+                    "collective barrier releases it; one board loop, then 1,024 GPUs together.",
+        hardware=_Hardware.Cloud.H100,
+        low_power=Q_(400, "W"),  # scenario assumption: communication-phase GPU power
+        rail_voltage=Q_(0.8, "V"),  # scenario assumption: accelerator core-rail voltage
+        loop_inductance=Q_(50, "pH"),  # scenario assumption: VRM-to-package loop on one board
+        rise_times={
+            "slow": Q_(1, "microsecond"),  # edge once package capacitors act
+            "fast": Q_(100, "nanosecond"),  # the same step with no package decoupling
+        },
+        n_devices=_Clusters.Training_1K.total_accelerators,
+        ramp_window=Q_(100, "microsecond"),  # scenario assumption: cluster transition window
+    )
+
+    AiRackAirCooling = _st.CoolingScenario(
+        name="High-density AI rack cooled by air",
+        description="The high-density AI rack's heat load carried by air at a 15 K rise.",
+        heat_load=Q_(_Infrastructure.Racks.AI_High.power_kw, "kW"),
+        temperature_rise=Q_(15, "K"),  # scenario assumption: inlet 20 C, outlet 35 C
+        coolant="air",
+    )
+
+    Nvl72WaterCooling = _st.CoolingScenario(
+        name="GB200 NVL72 rack cooled by water",
+        description="The GB200 NVL72 rack's heat carried by water at a 10 K coolant rise.",
+        heat_load=_Hardware.Cloud.GB200_NVL72.tdp,
+        temperature_rise=Q_(10, "K"),  # scenario assumption: coolant rise across the rack
+        coolant="water",
+    )
+
+    H100AirCooling = _st.CoolingScenario(
+        name="One H100 cooled by air",
+        description="One H100's TDP carried by air at a 15 K rise.",
+        heat_load=_Hardware.Cloud.H100.tdp,
+        temperature_rise=Q_(15, "K"),
+        coolant="air",
+    )
+
+    CduOutageTraining10K = _st.OutageScenario(
+        name="Coolant distribution unit outage under a 10,000-GPU job",
+        description="One rack's CDU pump fails for a four-hour repair; a synchronous job "
+                    "on the 10,000-GPU cluster idles with it.",
+        failed_devices=256,  # scenario assumption: GPUs behind the failed CDU
+        fleet=_Clusters.Training_10K,
+        repair_time=Q_(4, "hour"),  # scenario assumption: pump repair window
+        device_hour_rate=_Infrastructure.Pricing.Fleet.GpuHourRef.rate,
+        rollback_times={"low": Q_(30, "minute"), "high": Q_(60, "minute")},
+    )
+
+    GpuFailuresTraining10K = _st.FailureIntervalScenario(
+        name="GPU failures across 10,000 H100s",
+        description="Independent GPU failures at the per-GPU MTTF over a two-week run.",
+        component_mtbf=Q_(_Reliability.Gpu.mttf_hours, "hour"),
+        n_components=_Clusters.Training_10K.total_accelerators,
+        run_duration=Q_(14, "day"),  # scenario assumption: two-week training run
+    )
+
+    NodeFailuresTraining1K = _st.FailureIntervalScenario(
+        name="Node failures across the 128-node reference cluster",
+        description="Composite DGX node failures (GPUs, hosts, power, links) over a two-week run.",
+        component_mtbf=Q_(_Reliability.DgxNodeComposite.mttf_hours, "hour"),
+        n_components=_Clusters.Training_1K.count,
+        run_duration=Q_(14, "day"),
+    )
+
+    V100ToB200 = _st.AcceleratorComparison(
+        name="V100 to B200", description="Dense FP16 peak, TDP, and peak per watt.",
+        baseline=_Hardware.Cloud.V100, candidate=_Hardware.Cloud.B200)
+
+    V100ToH100 = _st.AcceleratorComparison(
+        name="V100 to H100", description="Dense FP16 peak, TDP, and peak per watt; a "
+                                         "10,000 V100 GPU-hour job restated in H100 GPU-hours.",
+        baseline=_Hardware.Cloud.V100, candidate=_Hardware.Cloud.H100,
+        baseline_device_hours=10_000)  # scenario assumption: job size measured on V100s
+
+    PeakPlannedTrainingBudget = _st.SustainedThroughputScenario(
+        name="Training budget planned from peak throughput",
+        description="1,000 GPU-hours estimated from datasheet TFLOP/s, for a workload "
+                    "that sustains 40 percent of peak.",
+        planned_device_hours=1000,  # scenario assumption: budget from the datasheet rate
+        sustained_fraction=0.4,  # scenario assumption: sustained share of peak
     )

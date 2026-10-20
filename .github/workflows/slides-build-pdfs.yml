@@ -9,6 +9,8 @@ name: '📊 Slides · 🔨 Build PDFs'
 # artifacts. The job fails if any deck folder with a .tex produced no PDF.
 #
 # Flow:
+#   0. NUMBERS      — Every deck's images/numbers.tex matches its calcs.py
+#                     (values from MLSysIM); a stale file fails the run
 #   1. INSTALL      — TeX Live + Inkscape + Metropolis theme
 #   2. CONVERT_SVGS — Makefile-driven SVG-to-PDF conversion
 #   3. BUILD_DECKS  — Compile Vol I-IV slide decks (pdflatex, 2-pass)
@@ -17,8 +19,9 @@ name: '📊 Slides · 🔨 Build PDFs'
 #   6. CHECK        — Fail if any deck did not build (rebuilds it with log tail)
 #
 # Triggers:
-#   - push: dev branch, slides/vol{1..4}/**/*.tex or *.svg, slides/assets/**
-#     (theme + kit affect every deck), slides/Makefile changes
+#   - push: dev branch, slides/vol{1..4}/**/*.tex, *.svg, or calcs.py,
+#     slides/assets/** (theme + kit affect every deck), slides/Makefile, and
+#     mlsysim/mlsysim/** (a registry change can change a deck's numbers)
 #   - workflow_dispatch: manual
 #
 # Deploys to: N/A (artifacts only — slides-vol1 ... slides-vol4)
@@ -43,6 +46,8 @@ on:
       - 'slides/vol3/**/*.svg'
       - 'slides/vol4/**/*.tex'
       - 'slides/vol4/**/*.svg'
+      - 'slides/vol*/**/calcs.py'
+      - 'mlsysim/mlsysim/**'
       - 'slides/assets/**'
       - 'slides/Makefile'
       - '.github/workflows/slides-build-pdfs.yml'
@@ -63,6 +68,20 @@ jobs:
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v6
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ vars.PYTHON_VERSION || '3.12' }}
+
+      - name: 🔢 Check computed numbers
+        working-directory: slides
+        run: |
+          # Each deck's calcs.py reads MLSysIM and writes images/numbers.tex,
+          # which the deck prints with \val{key}. The file is committed so a
+          # deck builds with LaTeX alone; this fails if any is stale.
+          pip install ../mlsysim/
+          make numbers-check
 
       - name: 🔧 Install TeX Live + Inkscape + Poppler
         run: |
@@ -124,11 +143,6 @@ jobs:
                     $ch_dir/$tex_name.pdf 2>/dev/null
             done
           done
-
-      - name: 🐍 Setup Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: ${{ vars.PYTHON_VERSION || '3.12' }}
 
       - name: 📦 Install PPTX dependencies
         run: pip install python-pptx Pillow

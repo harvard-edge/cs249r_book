@@ -51,6 +51,17 @@ __all__ = [
     "ParallelismOptimizerResult",
     "BatchingOptimizerResult",
     "PlacementOptimizerResult",
+    # Situation models (2026-10-20): one solver per recurring calculation that
+    # chapters and lecture slides both quote, so the arithmetic has one home.
+    "DecodeBoundResult",
+    "TransferLadderResult",
+    "TensorParallelCommResult",
+    "TrainingRunResult",
+    "TrainingStateResult",
+    "PowerTransientResult",
+    "CoolantFlowResult",
+    "OutageCostResult",
+    "FailureIntervalResult",
 ]
 
 
@@ -544,3 +555,102 @@ class PlacementOptimizerResult(OptimizerResult):
     carbon_footprint: float
     pue: float
     top_candidates: List[Dict[str, Any]]
+
+
+# ── Situation results (2026-10-20) ────────────────────────────────
+
+class DecodeBoundResult(SolverResult):
+    """Result from DecodeBoundModel: weight-streaming bound on one decode step."""
+    weight_bytes: Quantity
+    flops_per_step: Quantity
+    compute_time: Quantity
+    memory_time: Quantity
+    memory_share: float          # memory_time / (compute_time + memory_time)
+    bound_ratio: float           # memory_time / compute_time
+    intensity: Quantity          # FLOP per weight byte
+    attainable_flops: Quantity   # min(peak, bandwidth x intensity)
+    peak_fraction: float         # attainable / peak
+    bottleneck: str
+
+
+class TransferLadderResult(SolverResult):
+    """Result from TransferLadderModel: one payload moved over each link tier."""
+    payload: Quantity
+    bandwidths: Dict[str, Quantity]
+    times: Dict[str, Quantity]
+
+
+class TensorParallelCommResult(SolverResult):
+    """Result from TensorParallelCommModel: activation AllReduces in one TP step."""
+    payload: Quantity            # one AllReduce's logical tensor
+    ring_factor: float           # 2(N-1)/N
+    traffic_per_device: Quantity
+    collectives_per_step: int
+    per_collective_time: Quantity
+    communication_time: Quantity
+    compute_time: Quantity
+    step_time: Quantity          # compute + communication, no overlap
+    compute_fraction: float
+    communication_fraction: float
+
+
+class TrainingRunResult(SolverResult):
+    """Result from TrainingRunModel: wall-clock chain from peak to delivered time."""
+    total_flops: Quantity
+    peak_time: Quantity          # every device at its peak
+    compute_time: Quantity       # at the local compute efficiency
+    scaled_time: Quantity        # after the scaling efficiency
+    stage_times: Dict[str, Quantity]   # after each overhead, in order
+    total_time: Quantity
+    delivered_fraction: float    # peak_time / total_time
+
+
+class TrainingStateResult(SolverResult):
+    """Result from TrainingStateModel: persistent training state and its shards."""
+    weights: Quantity
+    gradients: Quantity
+    master_weights: Quantity
+    adam_moment: Quantity        # one Adam moment (m or v)
+    optimizer_moments: Quantity  # both moments
+    persistent_state: Quantity
+    activations: Quantity
+    tp_weights_per_device: Quantity
+    tp_gradients_per_device: Quantity
+    tp_master_per_device: Quantity
+    tp_moments_per_device: Quantity
+    tp_activations_per_device: Quantity
+    tp_total_per_device: Quantity
+    tp_offloaded_per_device: Quantity  # after moving master and moments to host
+    zero_moments_per_device: Quantity  # moments sharded over TP x DP
+    zero_moments_per_tp_group: Quantity
+    zero_weights_and_moments_per_device: Quantity
+
+
+class PowerTransientResult(SolverResult):
+    """Result from PowerTransientModel: one device's load step and a cluster's ramp."""
+    power_step: Quantity
+    current_step: Quantity
+    droop: Dict[str, Quantity]         # keyed by rise time label
+    droop_share: Dict[str, float]
+    cluster_power_step: Quantity
+    ramp_rate: Quantity
+
+
+class CoolantFlowResult(SolverResult):
+    """Result from CoolantFlowModel: coolant flow that carries away a heat load."""
+    mass_flow: Quantity
+    volume_flow: Quantity
+
+
+class OutageCostResult(SolverResult):
+    """Result from OutageCostModel: idle cost of a failure domain going down."""
+    direct_cost: float           # dollars, failed devices only
+    job_cost: float              # dollars, a synchronous job idles every device
+    job_cost_with_rollback: Dict[str, float]
+
+
+class FailureIntervalResult(SolverResult):
+    """Result from FailureIntervalModel: series failures across identical components."""
+    interval: Quantity
+    expected_failures: float
+    failures_per_day: float

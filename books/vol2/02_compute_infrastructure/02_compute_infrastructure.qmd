@@ -687,7 +687,7 @@ class GpuEfficiencyTableRecap:
     v100_relative_mult_str = fmt_multiple((_v100_eff / _v100_eff).magnitude, precision=0, commas=False)
     a100_relative_mult_str = fmt_multiple((_a100_eff / _v100_eff).magnitude, precision=1, commas=False)
     h100_relative_mult_str = fmt_multiple((_h100_eff / _v100_eff).magnitude, precision=1, commas=False)
-    b200_relative_mult_str = fmt_multiple((_b200_eff / _v100_eff).magnitude, precision=1, commas=False)
+    b200_relative_mult_str = fmt_multiple(Scenarios.V100ToB200.efficiency_ratio, precision=1, commas=False)
 ```
 
 ```{python}
@@ -1765,13 +1765,18 @@ from mlsysim.fmt import check, fmt, fmt_flop_rate, fmt_math, fmt_memory, fmt_per
 
 # ┌── LEGO ───────────────────────────────────────────────
 class TokenLatencyScenario:
-    h_h100 = Hardware.Cloud.H100
-    m_llama70b = Models.Language.Llama3_70B
-    weight_vol = m_llama70b.size_in_bytes(BYTES_FP16)
-    token_flops = 2 * m_llama70b.parameters * flop / param
-    t_mem = (weight_vol / h_h100.memory.bandwidth).to(millisecond)
-    t_comp = (token_flops / h_h100.compute.peak_flops).to(millisecond)
-    dominance = (t_mem / (t_mem + t_comp)).to_base_units().magnitude
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    scenario = Scenarios.Llama3_70B_DecodeH100  # batch-1 decode on one H100-equivalent path
+    h_h100 = scenario.hardware
+    m_llama70b = scenario.workload
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    decode = scenario.result
+    weight_vol = decode.weight_bytes
+    token_flops = decode.flops_per_step
+    t_mem = decode.memory_time
+    t_comp = decode.compute_time
+    dominance = decode.memory_share
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     h100_fp16_tflop_per_s_str = fmt_flop_rate(h_h100.compute.peak_flops, unit=TFLOP / second, precision=0, commas=False)
@@ -1779,6 +1784,10 @@ class TokenLatencyScenario:
     weight_gb_str = fmt_memory(weight_vol, unit=GB, precision=1, commas=False)
     t_comp_math = fmt_math(f"\\IronLawComputeTime \\approx \\text{{\\textbf{{{t_comp.to(millisecond).magnitude:.2f}}}}}\\text{{ ms}}")
     t_mem_math = fmt_math(f"\\IronLawMemoryTime \\approx \\text{{\\textbf{{{t_mem.to(millisecond).magnitude:.1f}}}}}\\text{{ ms}}")
+    token_flops_math = fmt_math(
+        f"2 \\times {m_llama70b.parameters.to(Bparam).magnitude:.1f} \\times 10^9 = "
+        f"{token_flops.to(flop).magnitude / 1e11:.2f} \\times 10^{{11}}"
+    )
 ```
 
 ```{python}
@@ -1796,7 +1805,7 @@ class MemoryBandwidthLatencyRecap:
 
 **Problem**: A weight-only model of batch-1 decode for Llama-3\index{Llama-3!inference memory footprint} 70B uses `{python} TokenLatencyScenario.weight_gb_str` of FP16 weights. To isolate the two resource demands, assume hypothetical capacity sufficient to hold them while retaining one H100-equivalent compute rate and HBM path. Which term gives the larger time estimate: arithmetic or weight transfer?
 
-1. **Compute time**\index{Latency!compute time}: Each token requires $2 \times 70 \times 10^9 = 1.4 \times 10^{11}$ floating-point operations. At `{python} TokenLatencyScenario.h100_fp16_tflop_per_s_str` of FP16/BF16 Tensor Core peak throughput, the arithmetic takes `{python} TokenLatencyScenario.t_comp_math`.
+1. **Compute time**\index{Latency!compute time}: Each token requires `{python} TokenLatencyScenario.token_flops_math` floating-point operations. At `{python} TokenLatencyScenario.h100_fp16_tflop_per_s_str` of FP16/BF16 Tensor Core peak throughput, the arithmetic takes `{python} TokenLatencyScenario.t_comp_math`.
 2. **Memory time**\index{Latency!memory time}: Loading `{python} TokenLatencyScenario.weight_gb_str` of weights from HBM at `{python} MemoryBandwidthLatencyRecap.h100_bw_tb_per_s_str` takes `{python} TokenLatencyScenario.t_mem_math`.
 
 **Systems insight**: The memory term accounts for `{python} TokenLatencyScenario.dominance_str` of the sum of these two idealized times. That ratio identifies a bandwidth-dominated estimate; it is not a measurement of cycles spent idle. Raising compute throughput alone barely changes this estimate. A faster memory path reduces the weight-transfer floor, while actual token latency also includes the other memory traffic, communication, and execution costs omitted here.
@@ -1818,16 +1827,16 @@ from mlsysim.fmt import check, fmt_bandwidth, fmt_flop_rate, fmt_int, fmt_multip
 
 class H200Comparison:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    h_h100 = mlsysim.Hardware.Cloud.H100
+    scenario = Scenarios.Llama3_70B_ServingH100  # one request, 2,048-token context
+    h_h100 = scenario.hardware
     h200 = mlsysim.Hardware.Cloud.H200
-    model = mlsysim.Models.Language.Llama3_70B
-    seq_len = 2048  # scenario assumption: serving sequence length for this Llama 3 comparison (not GPT-3)
-    batch_size = 1  # scenario assumption: single-request decode
+    model = scenario.workload
+    seq_len = scenario.seq_len  # serving sequence length for this Llama 3 comparison (not GPT-3)
+    batch_size = scenario.batch_size  # single-request decode
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    serving_model = ServingModel()
-    res_h100 = serving_model.solve(model, h_h100, seq_len=seq_len, batch_size=batch_size)
-    res_h200 = serving_model.solve(model, h200, seq_len=seq_len, batch_size=batch_size)
+    res_h100 = scenario.result
+    res_h200 = scenario.variant(hardware=h200).result
 
     itl_h100 = res_h100.itl
     itl_h200 = res_h200.itl
@@ -1868,9 +1877,10 @@ class A100HbmQuantRecap:
     b200_bw = Hardware.Cloud.B200.memory.bandwidth
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    a100_token = (weights / a100_bw).to(millisecond)
-    h100_token = (weights / h100_bw).to(millisecond)
-    b200_token = (weights / b200_bw).to(millisecond)
+    _decode = Scenarios.Llama3_70B_DecodeH100
+    a100_token = _decode.variant(hardware=Hardware.Cloud.A100).result.memory_time
+    h100_token = _decode.result.memory_time
+    b200_token = _decode.variant(hardware=Hardware.Cloud.B200).result.memory_time
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(a100_token.to(millisecond).magnitude > 50, "A100 token latency should exceed 50 ms")
@@ -2237,7 +2247,7 @@ class BatchReuseRecap:
     """Weight-only roofline fraction of H100 FP16 peak at batch 1 and batch 64."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────
-    batch = 64  # scenario assumption: concurrent decode requests sharing each weight read
+    batch = Scenarios.Llama3_70B_DecodeH100Batch64.batch_size  # concurrent decode requests sharing each weight read
     bandwidth = RooflineLandscapeMath.bandwidth
     peak_rate = RooflineLandscapeMath.peak_rate
     base_intensity = RooflineLandscapeMath.decode_intensity * flop / byte  # 2 FLOPs per 2-byte FP16 weight
@@ -2401,7 +2411,31 @@ Approaching peak throughput requires pipeline balance\index{Pipeline!balance}. O
 
 ### Peak vs. sustained throughput {#sec-compute-infrastructure-peak-vs-sustained-throughput-625a}
 
-A training run budgeted for 1,000 GPU-hours from datasheet TFLOP/s will consume 2,500 GPU-hours in practice when the workload sustains only 40 percent of peak throughput. Infrastructure planning therefore separates *peak* throughput (the maximum rate for the vendor-specified operation and precision) from *sustained* throughput (what the complete workload delivers). Peak TFLOP/s assumes that eligible arithmetic units remain fed under the stated sparsity, precision, and clock conditions; it does not include memory stalls, ineligible operations, communication, or software overhead. Sustained fractions therefore vary with model shape, batch size, precision, implementation, and scale. The gap arises from several sources, each representing a different physical or software limitation.
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Context: peak-vs-sustained opener immediately below.
+from mlsysim.fmt import check, fmt_int, fmt_percent
+
+class PeakSustainedBudget:
+    """GPU-hours a run planned from peak needs at its sustained share of peak."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    scenario = Scenarios.PeakPlannedTrainingBudget
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    required = scenario.required_device_hours
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(required > scenario.planned_device_hours, "A sustained share below peak must raise the budget")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    planned_str = fmt_int(scenario.planned_device_hours)
+    required_str = fmt_int(required)
+    sustained_pct_str = fmt_percent(scenario.sustained_fraction, precision=0, style="prose")
+```
+
+A training run budgeted for `{python} PeakSustainedBudget.planned_str` GPU-hours from datasheet TFLOP/s will consume `{python} PeakSustainedBudget.required_str` GPU-hours in practice when the workload sustains only `{python} PeakSustainedBudget.sustained_pct_str` of peak throughput. Infrastructure planning therefore separates *peak* throughput (the maximum rate for the vendor-specified operation and precision) from *sustained* throughput (what the complete workload delivers). Peak TFLOP/s assumes that eligible arithmetic units remain fed under the stated sparsity, precision, and clock conditions; it does not include memory stalls, ineligible operations, communication, or software overhead. Sustained fractions therefore vary with model shape, batch size, precision, implementation, and scale. The gap arises from several sources, each representing a different physical or software limitation.
 
 ```{python}
 #| echo: false
@@ -2649,16 +2683,18 @@ from mlsysim.fmt import check, fmt, fmt_time
 
 class BandwidthStaircase:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    hbm_bw = Hardware.Cloud.H100.memory.bandwidth  # H100 HBM3
     # One-way deliverable NVLink rate (450 GB/s); the datasheet 900 GB/s is the
     # bidirectional total, and moving a buffer in one direction uses half of it.
-    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth_per_direction  # H100 NVLink (per-direction)
-    ib_bw = Systems.Fabrics.InfiniBand_NDR.bandwidth  # 400G NDR InfiniBand
-    transfer = 10 * GB  # scenario assumption: synchronized buffer size
+    scenario = Scenarios.BufferTransfer10GB  # HBM, NVLink (one direction), IB NDR, PCIe
+    hbm_bw = scenario.links["HBM"]
+    nvlink_bw = scenario.links["NVLink"]
+    ib_bw = scenario.links["InfiniBand"]
+    transfer = scenario.payload
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    hbm_time = (transfer / hbm_bw).to(millisecond)
-    nvlink_time = (transfer / nvlink_bw).to(millisecond)
-    ib_time = (transfer / ib_bw).to(millisecond)
+    _times = scenario.result.times
+    hbm_time = _times["HBM"]
+    nvlink_time = _times["NVLink"]
+    ib_time = _times["InfiniBand"]
     gap_hbm_nv = (hbm_bw / nvlink_bw).to_base_units().magnitude
     gap_nv_ib = (nvlink_bw / ib_bw).to_base_units().magnitude
     # ┌── 3. GUARD ─────────────────────────────────────────
@@ -2866,30 +2902,33 @@ from mlsysim.fmt import MarkdownStr, fmt_int, fmt_memory, fmt_percent, fmt_time,
 # ┌── LEGO ───────────────────────────────────────────────
 class TensorParallelAllReduce:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    model = Models.Language.GPT3  # 175B: hidden 12,288, layers 96
-    tp_gpus = Systems.Nodes.DGX_H100.accelerators_per_node  # tensor-parallel group = one DGX H100 node
-    microbatch = 4  # scenario assumption: sequences per microbatch
+    scenario = Scenarios.Gpt3TensorParallelStepDgxH100  # 175B, TP-8 in one DGX H100, NVLink
+    model = scenario.workload  # 175B: hidden 12,288, layers 96
+    tp_gpus = scenario.tp_size  # tensor-parallel group = one DGX H100 node
+    microbatch = scenario.microbatch
     seq_len = model.context_length  # GPT-3 training sequence length
-    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth_per_direction
-    pcie_bw = Hardware.Cloud.H100.interconnect.bandwidth
-    compute_step = 200 * millisecond  # scenario anchor for the diagnostic below
+    nvlink_bw = scenario.link_bandwidth
+    pcie_bw = Scenarios.BufferTransfer10GB.links["PCIe"]
+    compute_step = scenario.compute_time
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     hidden = model.hidden_dim
     layers = model.layers
-    sync_events = 2 * layers
+    _nv = scenario.result
+    _pcie = scenario.variant(link_bandwidth=pcie_bw).result
+    sync_events = _nv.collectives_per_step
     shard_cols = hidden // tp_gpus
     bytes_fp16 = int(BYTES_FP16.to(byte).magnitude)
-    allreduce_bytes = microbatch * seq_len * hidden * bytes_fp16 * byte
-    ring_traffic_factor = 2 * (tp_gpus - 1) / tp_gpus
-    allreduce_traffic = ring_traffic_factor * allreduce_bytes
-    per_allreduce = (allreduce_traffic / nvlink_bw).to("millisecond")
-    cumulative = sync_events * per_allreduce
-    pcie_per_allreduce = (allreduce_traffic / pcie_bw).to(millisecond)
-    pcie_cumulative = sync_events * pcie_per_allreduce
+    allreduce_bytes = _nv.payload
+    ring_traffic_factor = _nv.ring_factor
+    allreduce_traffic = _nv.traffic_per_device
+    per_allreduce = _nv.per_collective_time
+    cumulative = _nv.communication_time
+    pcie_per_allreduce = _pcie.per_collective_time
+    pcie_cumulative = _pcie.communication_time
     pcie_cumulative_display = round(pcie_cumulative.to(millisecond).magnitude) * millisecond
-    pcie_wait_fraction = (pcie_cumulative / (compute_step + pcie_cumulative)).to_base_units().magnitude
-    nvlink_compute_fraction = (compute_step / (compute_step + cumulative)).to_base_units().magnitude
+    pcie_wait_fraction = _pcie.communication_fraction
+    nvlink_compute_fraction = _nv.compute_fraction
     hidden_disp = format(hidden, ",").replace(",", "{,}")
     shard_disp = format(shard_cols, ",").replace(",", "{,}")
     seq_disp = format(seq_len, ",").replace(",", "{,}")
@@ -3128,7 +3167,7 @@ class NodeCapacityTrainMemRecap:
     params = model.parameters
     gpus_per_node = Systems.Nodes.DGX_H100.accelerators_per_node
     tp_degree = gpus_per_node
-    dp_degree = 128  # scenario assumption: data-parallel replicas
+    dp_degree = Scenarios.Gpt3TrainingStateTp8.dp_size  # data-parallel replicas
     host_dram = Systems.Nodes.DGX_H100.host_memory
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
@@ -3139,10 +3178,11 @@ class NodeCapacityTrainMemRecap:
     gpu_hbm = Hardware.Cloud.H100.memory.capacity
     node_hbm = gpu_hbm * gpus_per_node
     zero3_per_gpu = total_dp / gpus_per_node
-    tp_weight_shard = weights / tp_degree
-    optimizer_per_gpu = optimizer / (tp_degree * dp_degree)
-    optimizer_per_tp_group = optimizer / dp_degree
-    weight_plus_optimizer = tp_weight_shard + optimizer_per_gpu
+    _state = Scenarios.Gpt3TrainingStateTp8.result  # TP-8 in one node, 128 data-parallel replicas
+    tp_weight_shard = _state.tp_weights_per_device
+    optimizer_per_gpu = _state.zero_moments_per_device
+    optimizer_per_tp_group = _state.zero_moments_per_tp_group
+    weight_plus_optimizer = _state.zero_weights_and_moments_per_device
     tp_optimizer_shard_divisor = tp_degree * dp_degree
 
     # ┌── 3. GUARD ─────────────────────────────────────────
@@ -3362,8 +3402,9 @@ class NodeReliabilityScenario:
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
     run_hours = run_days * hours_per_day
-    expected_failures = nodes * run_hours / composite_node_mtbf_hours
-    failures_per_day = expected_failures / run_days
+    _nodes = Scenarios.NodeFailuresTraining1K.result  # composite node MTBF over a two-week run
+    expected_failures = _nodes.expected_failures
+    failures_per_day = _nodes.failures_per_day
     gpu_only_node_mtbf_hours = canonical_gpu_mtbf_hours / gpus_per_node
     gpu_only_expected_outages = nodes * run_hours / gpu_only_node_mtbf_hours
 
@@ -3497,8 +3538,8 @@ class DvfsPowerSwingScenario:
     """Communication-phase versus compute-phase H100 power during a training step."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────
-    gpu_tdp = Hardware.Cloud.H100.tdp
-    comm_phase_power = 400 * watt  # scenario assumption: communication-phase GPU power
+    gpu_tdp = Scenarios.H100BarrierLoadStep.hardware.tdp
+    comm_phase_power = Scenarios.H100BarrierLoadStep.low_power  # communication-phase GPU power
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(comm_phase_power < gpu_tdp, "Communication-phase power should sit below the H100 TDP")
@@ -3514,15 +3555,17 @@ from mlsysim.fmt import fmt_int, fmt_power
 # ┌── LEGO ───────────────────────────────────────────────
 class H100TdpRackRecap:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    gpu_tdp = Hardware.Cloud.H100.tdp
-    cluster_gpus = Systems.Clusters.Training_1K.total_accelerators
-    comm_phase_power = DvfsPowerSwingScenario.comm_phase_power  # scenario assumption, defined with the DVFS prose
-    transition = 100 * microsecond  # scenario assumption: power-ramp transition window
+    scenario = Scenarios.H100BarrierLoadStep  # barrier-aligned step on the 1,024-GPU cluster
+    gpu_tdp = scenario.hardware.tdp
+    cluster_gpus = scenario.n_devices
+    comm_phase_power = scenario.low_power  # defined with the DVFS prose
+    transition = scenario.ramp_window
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    power_delta = gpu_tdp - comm_phase_power
-    cluster_power_delta = power_delta * cluster_gpus
-    power_rate = cluster_power_delta / transition
+    _step = scenario.result
+    power_delta = _step.power_step
+    cluster_power_delta = _step.cluster_power_step
+    power_rate = _step.ramp_rate
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(cluster_power_delta.to(kW).magnitude > 300, "Power ramp should exceed 300 kW")
@@ -3724,14 +3767,13 @@ class FutureTdpScenario:
     b200_tdp = Hardware.Cloud.B200.tdp
     tdp_cagr = B200PerformanceScenarioSecComputeTdpRecap.tdp_cagr
     years_per_generation = 2  # scenario assumption: two-year flagship cadence
-    coolant_rise_k = 10  # scenario assumption: coolant warms 10 °C across the rack
-    water_cp_j_per_kg_k = 4186  # specific heat of water; 1 kg of water is about 1 L
+    _rack_water = Scenarios.Nvl72WaterCooling  # GB200 NVL72 rack, water, 10 K rise
+    coolant_rise_k = _rack_water.temperature_rise.to(K).magnitude
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
     node_gpu_power = (future_tdp * gpus_per_node).to(kilowatt)
     next_gen_tdp = (b200_tdp * (1 + tdp_cagr) ** years_per_generation).to(watt)
     second_gen_tdp = (b200_tdp * (1 + tdp_cagr) ** (2 * years_per_generation)).to(watt)
-    rack_heat_w = Hardware.Cloud.GB200_NVL72.tdp.to(watt).magnitude
-    coolant_l_per_min = rack_heat_w / (water_cp_j_per_kg_k * coolant_rise_k) * 60
+    coolant_l_per_min = _rack_water.result.volume_flow.to(liter / minute).magnitude
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
     check(abs(node_gpu_power.to(kilowatt).magnitude - 16) < 1e-9, "2,000 W x 8 accelerators should be 16 kW")
     check(1300 < next_gen_tdp.magnitude < 1500, "One generation of the trend should approach 1,400 W")
@@ -3770,14 +3812,6 @@ from mlsysim import Hardware, Literature
 from mlsysim.core.units import megawatt, watt
 from mlsysim.fmt import check, fmt_int, fmt_multiple, fmt_power, fmt_text
 
-def _largest_by(rows, date_limit):
-    """Most powerful system operating on or before date_limit (ISO string)."""
-    live = [r for r in rows if r["power_mw"] and r["first_operational_date"] <= date_limit]
-    return max(live, key=lambda r: r["power_mw"])
-
-def _named(rows, fragment):
-    return next(r for r in rows if fragment in r["name"])
-
 # ┌── LEGO ───────────────────────────────────────────────
 class ChipVersusSystemPower:
     """Power rating of one accelerator package against power of the largest AI supercomputer."""
@@ -3803,10 +3837,11 @@ class ChipVersusSystemPower:
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     chip_last = max(chips, key=lambda r: r["power_w"])
     chip_growth = chip_last["power_w"] / h100_tdp.to(watt).magnitude
-    plateau_low_sys = _largest_by(systems, "2013-12-31")
-    plateau_sys = _largest_by(systems, f"{break_year - 1}-12-31")
-    frontier_sys = _named(systems, "Frontier")
-    sys_last = _largest_by(systems, f"{end_year}-12-31")
+    _series = Literature.Series.AISupercomputers  # largest system operating by each date
+    plateau_low_sys = _series.largest("power_mw", "first_operational_date", "2013-12-31")
+    plateau_sys = _series.largest("power_mw", "first_operational_date", f"{break_year - 1}-12-31")
+    frontier_sys = _series.find("name", "Frontier")
+    sys_last = _series.largest("power_mw", "first_operational_date", f"{end_year}-12-31")
     sys_growth = sys_last["power_mw"] / frontier_sys["power_mw"]
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -4001,20 +4036,22 @@ class PdnDroopEstimate:
     """Board-loop voltage droop for one H100 core-rail load step."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────
-    p_high = Hardware.Cloud.H100.tdp
-    p_low = DvfsPowerSwingScenario.comm_phase_power  # scenario assumption, defined with the DVFS prose
-    v_core = 0.8 * volt  # scenario assumption: accelerator core-rail voltage
-    l_loop = 50 * picohenry  # scenario assumption: VRM-to-package loop inductance on one board
-    rise_slow = 1 * microsecond  # scenario assumption: edge seen by the board loop once package capacitors act
-    rise_fast = 100 * nanosecond  # scenario assumption: the same step with no package decoupling
+    scenario = Scenarios.H100BarrierLoadStep  # one H100 core rail, one board loop
+    p_high = scenario.hardware.tdp
+    p_low = scenario.low_power
+    v_core = scenario.rail_voltage
+    l_loop = scenario.loop_inductance
+    rise_slow = scenario.rise_times["slow"]  # edge seen by the board loop once package capacitors act
+    rise_fast = scenario.rise_times["fast"]  # the same step with no package decoupling
     rail_tolerance = 0.05  # scenario assumption: allowed core-rail excursion as a fraction of V_core
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    delta_i = ((p_high - p_low) / v_core).to(ampere)
-    droop_slow = (l_loop * delta_i / rise_slow).to(millivolt)
-    droop_fast = (l_loop * delta_i / rise_fast).to(millivolt)
-    droop_slow_share = (droop_slow / v_core).to_base_units().magnitude
-    droop_fast_share = (droop_fast / v_core).to_base_units().magnitude
+    _step = scenario.result
+    delta_i = _step.current_step
+    droop_slow = _step.droop["slow"]
+    droop_fast = _step.droop["fast"]
+    droop_slow_share = _step.droop_share["slow"]
+    droop_fast_share = _step.droop_share["fast"]
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(300 < delta_i.magnitude < 450, "A 300 W step at 0.8 V should be several hundred amperes")
@@ -4205,14 +4242,16 @@ _cfm_unit = feet**3 / minute
 
 class AirCoolingMassFlow:
     # ┌── 1. LOAD ──────────────────────────────────────────
+    scenario = Scenarios.AiRackAirCooling  # high-density AI rack, air, 15 K rise
     cp = AIR_SPECIFIC_HEAT  # specific heat capacity of air at constant pressure
-    delta_t = 15 * K  # scenario assumption: inlet 20 C → outlet 35 C
+    delta_t = scenario.temperature_rise  # inlet 20 C → outlet 35 C
     air_density = AIR_DENSITY_SEA_LEVEL  # sea-level dry air
-    heat_load = Infrastructure.Racks.AI_High.power_kw * kW  # high-density AI rack heat load
+    heat_load = scenario.heat_load  # high-density AI rack heat load
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
-    mass_flow = (heat_load / (cp * delta_t)).to(kg / second)
-    volumetric_flow = (mass_flow / air_density).to(_m3 / second)
+    _flow = scenario.result
+    mass_flow = _flow.mass_flow.to(kg / second)
+    volumetric_flow = _flow.volume_flow.to(_m3 / second)
     cfm = volumetric_flow.to(_cfm_unit)
 
     # ┌── 3. GUARD ─────────────────────────────────────────
@@ -4266,15 +4305,15 @@ class CoolantFlowComparison:
     """Volumetric coolant flow needed to remove one H100's heat."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
-    gpu_power = Hardware.Cloud.H100.tdp
-    delta_t = 15 * K  # scenario assumption: same rise as the air-cooling example
-    water_density = 1 * kg / liter  # scenario assumption: liquid water, ~1 kg per liter
+    scenario = Scenarios.H100AirCooling  # one H100, 15 K rise, same as the air-cooling example
+    gpu_power = scenario.heat_load
+    delta_t = scenario.temperature_rise
 
     # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
     cp_ratio = (WATER_SPECIFIC_HEAT / AIR_SPECIFIC_HEAT).to("").magnitude
     k_ratio = (THERMAL_CONDUCTIVITY_WATER / THERMAL_CONDUCTIVITY_AIR).to("").magnitude
-    air_flow = (gpu_power / (AIR_SPECIFIC_HEAT * delta_t) / AIR_DENSITY_SEA_LEVEL).to(liter / second)
-    water_flow = (gpu_power / (WATER_SPECIFIC_HEAT * delta_t) / water_density).to(liter / second)
+    air_flow = scenario.result.volume_flow.to(liter / second)
+    water_flow = scenario.variant(coolant="water").result.volume_flow.to(liter / second)
     flow_ratio = (air_flow / water_flow).to("").magnitude
 
     # ┌── 3. GUARD ─────────────────────────────────────────────────────────
@@ -4469,20 +4508,21 @@ from mlsysim.core.units import hour
 
 class StragglerFailureCost:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    failed_gpus = 256  # scenario: GPUs in the shut-down rack
-    cluster_gpus = Systems.Clusters.Training_10K.total_accelerators
-    repair_duration = 4 * hour  # scenario: CDU pump repair window
-    rollback_low, rollback_high = 0.5 * hour, 1.0 * hour  # scenario: work lost to the last checkpoint
-    gpu_hour_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate  # fleet in-service GPU-hour (reference canon)
+    scenario = Scenarios.CduOutageTraining10K  # one rack's CDU down under a 10,000-GPU job
+    failed_gpus = scenario.failed_devices
+    cluster_gpus = scenario.fleet.total_accelerators
+    repair_duration = scenario.repair_time
+    rollback_low, rollback_high = scenario.rollback_times["low"], scenario.rollback_times["high"]
+    gpu_hour_rate = scenario.device_hour_rate  # fleet in-service GPU-hour (reference canon)
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
+    _cost = scenario.result
     idle_gpus = cluster_gpus - failed_gpus
-    repair_hours = repair_duration.to(hour).magnitude
     rate = gpu_hour_rate.to("dollar/hour").magnitude
-    direct_cost = failed_gpus * rate * repair_hours
-    cluster_cost = cluster_gpus * rate * repair_hours
-    total_low = cluster_gpus * rate * (repair_hours + rollback_low.to(hour).magnitude)
-    total_high = cluster_gpus * rate * (repair_hours + rollback_high.to(hour).magnitude)
+    direct_cost = _cost.direct_cost
+    cluster_cost = _cost.job_cost
+    total_low = _cost.job_cost_with_rollback["low"]
+    total_high = _cost.job_cost_with_rollback["high"]
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(abs(direct_cost - 2048) < 1, f"Direct straggler cost drifted: {direct_cost}")
@@ -4638,7 +4678,7 @@ class PodTrainingMath:
     n_gpus_fmt = fmt(n_gpus, precision=0, commas=True)
     cluster_throughput_math = fmt_math(f"{n_gpus_fmt} \\times {h100_fp8_tflop_per_s_value_str} \\times 10^{{12}} \\times {local_efficiency}")
     cluster_throughput = n_gpus * h100_fp8_flops * local_efficiency
-    t_compute_hr = (_total_flops * flop / cluster_throughput).to(hour).magnitude
+    t_compute_hr = Scenarios.Gpt3PretrainingFrontier8K.result.compute_time.to(hour).magnitude
     check(11 < t_compute_hr < 13, "Prose quotes a compute-only baseline of approximately 12 hours")
     t_compute_hr_str = fmt_time(round(t_compute_hr), 'hour', precision=0, commas=False, style='word')
     cluster_eflop_per_s_str = fmt_flop_rate(cluster_throughput, unit=EFLOP / second, precision=2, commas=False)
@@ -4703,31 +4743,26 @@ class TrainingTime175B:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    from mlsysim.physics import dTime
 
-    n_params = Models.Language.GPT3.parameters.to(param).magnitude
-    n_tokens = Models.Language.GPT3.training_tokens.to(count).magnitude
-    n_gpus = Systems.Clusters.Frontier_8K.total_accelerators
-    peak_flops = Hardware.Cloud.H100.compute.precision_flops["fp8"]
-    local_efficiency = ReferenceStats.TrainingScaleProfiles.LocalComputeEfficiency  # useful compute before distributed overhead
+    scenario = Scenarios.Gpt3PretrainingFrontier8K  # 175B on 8,192 H100s at FP8 peak
+    n_gpus = scenario.fleet.total_accelerators
+    local_efficiency = scenario.local_efficiency  # useful compute before distributed overhead
 
     # Scenario multipliers; each additive overhead is relative to the preceding subtotal
     # Modeled scaling-efficiency tier for 8,192 GPUs (includes pipeline bubbles).
-    scaling_eff = ReferenceStats.TrainingScaleProfiles.Eff8192Gpu
-    ckpt_overhead = Ops.TrainingRunOverheads.Checkpoint
-    fail_overhead = Ops.TrainingRunOverheads.FailureRecovery
-    maint_overhead = Ops.TrainingRunOverheads.Maintenance
+    scaling_eff = scenario.scaling_efficiency
+    ckpt_overhead = scenario.overheads["checkpoint"]
+    fail_overhead = scenario.overheads["failures"]
+    maint_overhead = scenario.overheads["maintenance"]
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Use dTime for authoritative training time math
-    t_base = dTime(total_ops=6 * n_params * n_tokens * flop, num_devices=n_gpus, peak_flops_per_device=peak_flops, efficiency_eta=local_efficiency)
-    t_physics_hr = t_base.to(hour).magnitude
-
     # Sequential overhead accumulation; these are assumed nonoverlapping increments
-    t_comm_hr = t_physics_hr / scaling_eff
-    t_ckpt_hr = t_comm_hr * (1 + ckpt_overhead)
-    t_fail_hr = t_ckpt_hr * (1 + fail_overhead)
-    t_maint_hr = t_fail_hr * (1 + maint_overhead)
+    _run = scenario.result
+    t_physics_hr = _run.compute_time.to(hour).magnitude
+    t_comm_hr = _run.scaled_time.to(hour).magnitude
+    t_ckpt_hr = _run.stage_times["checkpoint"].to(hour).magnitude
+    t_fail_hr = _run.stage_times["failures"].to(hour).magnitude
+    t_maint_hr = _run.total_time.to(hour).magnitude
 
     t_total_weeks = t_maint_hr / (24 * 7)
 
@@ -4814,7 +4849,7 @@ class WscThroughput:
     # BisectionDefinitionExample convention in @sec-network-fabrics.
     wsc_bisection = (n_gpus / 2) * per_gpu_inject
     wsc_oversub = wsc_bisection / oversub_factor
-    wsc_mtbf = calc_mtbf_cluster(gpu_mtbf, n_gpus)
+    wsc_mtbf = Scenarios.GpuFailuresTraining10K.result.interval
     check(oversub_factor == 4, "Prose glosses 4:1 oversubscription as one quarter as much uplink")
     check(abs(wsc_mtbf.to(hour).magnitude - 5) < 0.01, "Prose says a failure roughly once every five hours")
 
@@ -5356,12 +5391,12 @@ class GpuHourEquivalence:
     v100_flops = Hardware.Cloud.V100.compute.peak_flops  # FP16
     a100_flops = Hardware.Cloud.A100.compute.peak_flops  # FP16
     h100_flops = Hardware.Cloud.H100.compute.peak_flops  # dense FP16, same convention as the other devices
-    v100_gpu_hours = 10000  # scenario training run
+    v100_gpu_hours = Scenarios.V100ToH100.baseline_device_hours  # job size measured on V100s
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     ratio_a100 = (h100_flops / a100_flops).to_base_units().magnitude
-    ratio_v100 = (h100_flops / v100_flops).to_base_units().magnitude
-    equiv_h100_hours = v100_gpu_hours / ratio_v100
+    ratio_v100 = Scenarios.V100ToH100.peak_ratio
+    equiv_h100_hours = Scenarios.V100ToH100.candidate_device_hours
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(round(ratio_a100, 1) == 3.2, f"Expected 3.2x H100/A100 ratio, got {ratio_a100:.1f}")
@@ -5451,8 +5486,9 @@ class A100FallaciesRecap:
     # ┌── 2. EXECUTE ───────────────────────────────────────
     weights_fp16 = model.size_in_bytes(BYTES_FP16)
     weights_int8 = model.size_in_bytes(BYTES_INT8)
-    option_a_lat = (weights_fp16 / a100_bw).to(millisecond)
-    option_b_lat = (weights_int8 / h100_bw).to(millisecond)
+    _decode = Scenarios.Llama3_70B_DecodeH100
+    option_a_lat = _decode.variant(hardware=Hardware.Cloud.A100).result.memory_time
+    option_b_lat = _decode.variant(precision="int8").result.memory_time
     speedup = (option_a_lat / option_b_lat).to_base_units().magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────

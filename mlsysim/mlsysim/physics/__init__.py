@@ -134,6 +134,8 @@ from .robotics import (
     calc_axi_fifo_contention,
 )
 
+from .power import calc_rail_current_step, calc_inductive_droop
+from .thermal import calc_coolant_mass_flow
 from .quantities import (
     transfer_time,
     compute_time,
@@ -256,6 +258,9 @@ __all__ = [
     "calc_scurve_rest_to_rest_time",
     "calc_quasistatic_spill_acceleration",
     "calc_axi_fifo_contention",
+    "calc_rail_current_step",
+    "calc_inductive_droop",
+    "calc_coolant_mass_flow",
     "transfer_time",
     "compute_time",
     "energy_from_power",
