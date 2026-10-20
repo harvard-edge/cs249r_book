@@ -4463,3 +4463,40 @@ __all__ += [
     "RolloutStepBudgetResult", "RepeatedVerificationResult", "RatioClipResult",
     "RolloutSlotCycleResult", "GroupBarrierResult", "VerifierPoolResult",
 ]
+
+
+# --- Responsible physical AI: per-group detection shortfall, one assistant's queue (added 2026-10-20) ---
+
+class DetectionShortfallRow(SolverResult):
+    """One group's detection gap, priced in distance, impact speed, and impact energy."""
+    per_frame_detection: float
+    frames: int                          # consecutive frames before detection counts
+    extra_frames: int                    # frames beyond the reference group's
+    extra_time: Quantity                 # extra frames x frame period
+    distance_lost: Quantity              # v x frame period x extra frames
+    impact_speed: Quantity               # sqrt(2 a distance_lost), while distance_lost < braking travel
+    impact_energy: Quantity              # m a distance_lost = 1/2 m v_impact^2
+
+
+class DetectionShortfallResult(SolverResult):
+    """Result from DetectionShortfallModel: a stop sized for the reference group, met by groups seen less often."""
+    frame_period: Quantity
+    reference_frames: int
+    braking_travel: Quantity             # v^2 / (2 a)
+    reference_brake_onset: Optional[Quantity] = None   # v (N_ref T_frame + delay): travel before the reference stop brakes
+    reference_stop: Optional[Quantity] = None          # where the reference stop ends: the person's position
+    rows: List[DetectionShortfallRow]
+    within_braking: bool                 # every distance lost is shorter than the braking travel
+
+
+class SupervisorQueueResult(SolverResult):
+    """Result from SupervisorQueueModel: one remote assistant serving ``machines`` as an M/M/1 queue."""
+    machines: int
+    arrival_rate: Quantity               # fleet help requests per hour
+    utilization: float                   # rho = lambda s
+    mean_wait: Quantity                  # W_q = rho s / (1 - rho)
+    p99_wait: Quantity                   # 99th-percentile queueing wait
+    busy_per_hour: Quantity              # assistant minutes per operating hour
+
+
+__all__ += ["DetectionShortfallRow", "DetectionShortfallResult", "SupervisorQueueResult"]

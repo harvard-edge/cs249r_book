@@ -536,6 +536,23 @@ TakeoverTimeMeta = _Series(
     "Mean take-over time of each of 520 study conditions in 129 automated-driving studies.",
 )
 
+# Per-group pedestrian detection (added 2026-10-20)
+from ..core import provenance_catalog as _pc  # noqa: E402
+
+PedestrianAp75BySkinType = _Series(
+    "wilson2019_bdd100k_person_ap75",
+    _pc.WILSON_2019_PREDICTIVE_INEQUITY,
+    "AP75 (percent) for lighter- and darker-skinned pedestrians, eight COCO-trained detectors on "
+    "BDD100K validation people (Wilson et al. 2019, Table 4; Average row in Literature.Fairness).",
+)
+
+PedestrianMissRateByAge = _Series(
+    "li2025_pedestrian_miss_rate_by_age",
+    _pc.LI_2025_BIAS_BEHIND_THE_WHEEL,
+    "Miss rate (percent) for adults and children, eight pedestrian detectors (Li et al. 2025, "
+    "Table 7; Average row in Literature.Fairness).",
+)
+
 WaymoSafetyImpact = _Series(
     "waymo_safety_impact_headline",
     Provenance(

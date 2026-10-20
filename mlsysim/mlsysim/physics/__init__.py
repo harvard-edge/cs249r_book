@@ -928,3 +928,7 @@ __all__ += [
     "calc_beta_binomial_pmf",
     "calc_beta_tail",
 ]
+# --- Per-group detection: frames to a reliable detection, exact intervals (added 2026-10-20) ---
+from .statistics import calc_consecutive_detection_frames, calc_clopper_pearson_interval
+
+__all__ += ["calc_consecutive_detection_frames", "calc_clopper_pearson_interval"]

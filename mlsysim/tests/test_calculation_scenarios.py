@@ -5272,3 +5272,59 @@ def test_credit_window_allowances_and_delegation_cohort():
     assert m.discarded(m.single).m_as("USD") == pytest.approx(3) and m.discarded(m.delegated).m_as("USD") == pytest.approx(6)
     assert m.cost_ratio == pytest.approx(1.5) and m.marginal_on_time_cost.m_as("USD") == pytest.approx(0.75)
     assert not m.passes(m.single) and m.passes(m.delegated) and m.discard_share == pytest.approx(1 / 3)
+
+
+def test_responsibility_scenarios():
+    """Decision chain, oversight time, the assistant's queue and labor, stage exit (added 2026-10-20)."""
+    c = Scenarios.AdmittedCommandDecisionChain.completeness_by_link
+    assert c[0.99] == pytest.approx(0.94148015, rel=1e-7) and c[0.90] == pytest.approx(0.531441)
+    o = Scenarios.WarehouseRackEndOversightTime
+    assert o.hazard_window.m_as("s") == pytest.approx(1.10 / 1.3)
+    assert o.takeover_travel.m_as("m") == pytest.approx(5.8045)
+    assert o.takeover_over_window == pytest.approx(5.2768182, rel=1e-7)
+    q = Scenarios.WarehouseRemoteAssistantQueue
+    r = q.result
+    assert r.utilization == pytest.approx(0.5) and r.mean_wait.m_as("s") == pytest.approx(180.0)
+    assert r.p99_wait.m_as("s") == pytest.approx(1408.3282820, rel=1e-8)
+    assert r.busy_per_hour.m_as("minute/hour") == pytest.approx(30.0) and q.max_machines == 20
+    assert Scenarios.WarehouseRemoteAssistantQueueTenMachines.result.mean_wait.m_as("s") == pytest.approx(60.0)
+    assert Scenarios.WarehouseRemoteAssistantQueueThirtyTwoMachines.result.utilization == pytest.approx(0.8)
+    k = Scenarios.WarehouseRemoteAssistantQueueTwentyFourMachines.result
+    assert k.utilization == pytest.approx(0.4) and k.mean_wait.m_as("s") == pytest.approx(50.0)
+    lab = Scenarios.WarehouseRemoteAssistantLabor
+    assert lab.request_time.m_as("hour") == pytest.approx(8.0) and lab.total.m_as("hour") == pytest.approx(52 / 3)
+    assert lab.shifts == pytest.approx(13 / 6)
+    e = Scenarios.WarehouseSupervisedStageExit
+    assert e.exposure(e.rates[0]).m_as("hour") == pytest.approx(2995.7322736, rel=1e-9)
+    assert e.calendar_days(e.rates[0]).m_as("day") == pytest.approx(18.7233267, rel=1e-8)
+
+
+def test_responsibility_groups_and_records():
+    """Detection shortfall, group samples, exposure, retention, and the Cruise penalties (added 2026-10-20)."""
+    from mlsysim import Literature
+    from mlsysim.physics import calc_consecutive_detection_frames, calc_clopper_pearson_interval
+    assert calc_consecutive_detection_frames(0.95, 1e-3) == 3 and calc_consecutive_detection_frames(0.9, 1e-3) == 3
+    lo, hi = calc_clopper_pearson_interval(190, 200)
+    assert lo == pytest.approx(0.9099725, rel=1e-6) and hi == pytest.approx(0.9757658, rel=1e-6)
+    d = Scenarios.WarehouseGroupDetectionShortfall.result
+    assert d.reference_frames == 3 and [r.frames for r in d.rows] == [4, 5, 8] and d.within_braking
+    mid = d.rows[1]
+    assert mid.distance_lost.m_as("mm") == pytest.approx(43.333333, rel=1e-7)
+    assert mid.impact_speed.m_as("m/s") == pytest.approx(0.4163332, rel=1e-6)
+    assert mid.impact_energy.m_as("J") == pytest.approx(31.893333, rel=1e-7)
+    assert d.reference_stop.m_as("m") == pytest.approx(0.66118, rel=1e-6)
+    g = Scenarios.PedestrianGroupEvaluationSample
+    assert (g.small, g.large, g.per_group_needed) == (200, 9800, 1059)
+    assert g.width_ratio == pytest.approx(7.5335335, rel=1e-6)
+    x = Scenarios.WarehouseCrossingExposure
+    assert x.concentration == pytest.approx(8.0) and x.rest_ratio == pytest.approx(2 / 9)
+    t = Scenarios.WarehouseEventTriggeredRetention
+    assert t.window.m_as("s") == pytest.approx(30.0) and t.reduction == pytest.approx(96.0)
+    p = Scenarios.CruiseDisclosurePenalties
+    assert p.per_day_penalty == Literature.IncidentReports.CruiseCpucPenaltyUsd == 112500
+    assert p.total == 2112500
+    assert len(Literature.PedestrianMissRateByAge) == 8 and len(Literature.PedestrianAp75BySkinType) == 8
+    li = Literature.PedestrianMissRateByAge.entries
+    assert sum(e["miss_rate_child_pct"] for e in li) / 8 == pytest.approx(43.89, abs=0.005)
+    w = Literature.PedestrianAp75BySkinType.entries
+    assert round(sum(e["ap75_darker_pct"] for e in w) / 8, 1) == Literature.Fairness.WilsonAp75AverageDarkerPct
