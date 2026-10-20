@@ -9760,6 +9760,13 @@ class TwoProportionTestScenario(BaseScenario):
     daily_requests: Optional[Quantity] = None
     significance: float = 0.05
     family_size: int = 20
+    # Optional (added 2026-10-20): the confidence and power the quantiles come
+    # from, the lift as a share of the baseline, and the users per arm that
+    # traffic actually allows (for the detectable lift).
+    confidence: Optional[float] = None
+    power: Optional[float] = None
+    relative_lift: Optional[float] = None
+    available_per_variant: Optional[float] = None
 
     @property
     def z_sum_squared(self) -> float:
@@ -9781,6 +9788,17 @@ class TwoProportionTestScenario(BaseScenario):
     @property
     def total(self) -> float:
         return 2 * self.per_variant
+
+    @property
+    def target_rate(self) -> float:
+        return self.baseline_rate + self.lift
+
+    def detectable_lift(self, n_per_variant=None) -> float:
+        """Smallest absolute lift ``n_per_variant`` users per arm can detect (default:
+        ``available_per_variant``). Added 2026-10-20."""
+        from ..physics.statistics import calc_two_proportion_detectable_lift
+        n = self.available_per_variant if n_per_variant is None else n_per_variant
+        return calc_two_proportion_detectable_lift(self.baseline_rate, n, self.z_alpha, self.z_beta)
 
     @property
     def collection_time(self) -> Quantity:
@@ -18152,3 +18170,150 @@ class ServingInstanceCostScenario(BaseScenario):
     @property
     def small_fleet_rate(self) -> Quantity:
         return (self.small_within_large_price * self.rates[self.small]).to("1/second")
+
+
+
+# --- ML operations: release controls, automation, skew, drift (added 2026-10-20) ---
+
+
+class ReleaseFootprintScenario(BaseScenario):
+    """Resident copies of ``model`` that release controls hold on ``device``.
+
+    A copy is the registry ``model_size``, or the parameters at
+    ``bytes_per_param`` when given; it spans ``accelerators_per_copy`` devices.
+    A canary, shadow, A/B test, blue-green switch, and hot standby each hold one
+    more copy whatever share of traffic they serve. Optional: the node's
+    ``node_accelerators``, a retraining run of ``retrain_accelerators`` for
+    ``retrain_time`` on the same node, the ``canary_share``, and the staged
+    exposure ``ramp`` (traffic shares, first stage the canary).
+    """
+    model: Any
+    device: HardwareNode
+    bytes_per_param: Optional[Quantity] = None
+    node_accelerators: Optional[int] = None
+    retrain_accelerators: Optional[int] = None
+    retrain_time: Optional[Quantity] = None
+    canary_share: Optional[float] = None
+    ramp: Optional[List[float]] = None
+
+    @property
+    def copy_bytes(self) -> Quantity:
+        if self.bytes_per_param is None:
+            return self.model.model_size
+        return self.model.size_in_bytes(self.bytes_per_param)
+
+    @property
+    def copy_fraction(self) -> float:
+        """One copy as a share of one device's memory."""
+        return (self.copy_bytes / self.device.memory.capacity).to("").magnitude
+
+    @property
+    def accelerators_per_copy(self) -> int:
+        return _math.ceil(self.copy_fraction)
+
+    def accelerators_for(self, copies: int) -> int:
+        return copies * self.accelerators_per_copy
+
+    @property
+    def retrain_accelerator_hours(self) -> Quantity:
+        return (self.retrain_accelerators * self.retrain_time).to("hour")
+
+    @property
+    def free_during_retrain(self) -> int:
+        """Accelerators left beside the serving copy and the retraining run."""
+        return self.node_accelerators - self.accelerators_per_copy - self.retrain_accelerators
+
+    def free_after(self, copies: int) -> int:
+        """Accelerators left once ``copies`` copies are resident and no run is active."""
+        return self.node_accelerators - self.accelerators_for(copies)
+
+
+class DualBankUpdateScenario(BaseScenario):
+    """An over-the-air update that keeps a second flash bank: two copies of ``model``
+    at ``bytes_per_param`` in the flash of ``device``."""
+    model: Any
+    device: HardwareNode
+    bytes_per_param: Quantity
+
+    @property
+    def bank_bytes(self) -> Quantity:
+        return self.model.size_in_bytes(self.bytes_per_param)
+
+    @property
+    def banks_bytes(self) -> Quantity:
+        return 2 * self.bank_bytes
+
+    @property
+    def flash(self) -> Quantity:
+        return self.device.memory.flash_capacity
+
+    @property
+    def flash_share(self) -> float:
+        return (self.banks_bytes / self.flash).to("").magnitude
+
+
+class AutomationBreakevenScenario(BaseScenario):
+    """A pipeline that costs ``build_time`` once, against ``manual_rate`` of work by hand;
+    the pipeline itself needs ``upkeep_rate``. Break-even is
+    ``build / (manual - upkeep)``."""
+    build_time: Quantity
+    manual_rate: Quantity               # hours per week
+    upkeep_rate: Optional[Quantity] = None
+
+    @property
+    def breakeven(self) -> Quantity:
+        from ..physics.economics import calc_rent_crossover
+        upkeep = self.upkeep_rate if self.upkeep_rate is not None else 0 * self.manual_rate
+        return calc_rent_crossover(self.build_time, upkeep, self.manual_rate).to("week")
+
+
+class SkewCostScenario(BaseScenario):
+    """Training-serving skew that makes ``skew_rate`` of ``query_rate`` wrong, each
+    wrong prediction costing ``cost_per_error``."""
+    skew_rate: float
+    query_rate: Quantity                # queries per day
+    cost_per_error: Quantity
+
+    @property
+    def errors_per_day(self) -> float:
+        return (self.skew_rate * self.query_rate * Q_(1, "day")).to("").magnitude
+
+    @property
+    def cost_rate(self) -> Quantity:
+        from ..physics.economics import calc_skew_cost
+        return calc_skew_cost(self.skew_rate, self.query_rate, self.cost_per_error).to("USD/day")
+
+    def cost_over(self, period: Quantity) -> Quantity:
+        return (self.cost_rate * period).to("USD")
+
+
+class AccuracyDecayScenario(BaseScenario):
+    """A deployed model read at ``initial_accuracy`` and, ``elapsed`` later, at
+    ``later_accuracy``; ``noticed`` is when someone outside monitoring saw it.
+    ``decay_rate`` fits ``A(t) = A0 exp(-gamma t)`` through the two readings."""
+    initial_accuracy: float
+    later_accuracy: float
+    elapsed: Quantity
+    noticed: Optional[Quantity] = None
+
+    @property
+    def decay_rate(self) -> Quantity:
+        from ..physics.statistics import calc_exponential_decay_rate
+        return calc_exponential_decay_rate(self.initial_accuracy, self.later_accuracy, self.elapsed)
+
+    @property
+    def drop(self) -> float:
+        return self.initial_accuracy - self.later_accuracy
+
+
+class AnalysisGateScenario(BaseScenario):
+    """A rollout analysis that measures every ``interval``, passes a measurement at or
+    above ``success_threshold``, and tolerates ``failure_limit`` failed measurements."""
+    success_threshold: float
+    interval: Quantity
+    failure_limit: int
+
+    @property
+    def failures_to_abort(self) -> int:
+        """The run fails when failed measurements exceed the limit."""
+        return self.failure_limit + 1
