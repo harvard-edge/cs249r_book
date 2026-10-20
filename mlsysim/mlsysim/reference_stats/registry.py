@@ -285,6 +285,17 @@ class FleetUtilizationSnapshot(Registry):
         name="Input-wait share", description="In-service capacity in complete allocations waiting for input.")
 
 
+class ProfilerTraceProfile(Registry):
+    """Trace volume of a short GPU profiling window (added 2026-10-20)."""
+
+    NsightTracePerGpu = sourced_qty(
+        500 * ureg.MB, pc.NSIGHT_TRACE_VOLUME_SCENARIO,
+        name="Nsight Systems trace per GPU", description="Trace bytes for one GPU over one window.")
+    TraceWindow = sourced_qty(
+        5 * ureg.second, pc.NSIGHT_TRACE_VOLUME_SCENARIO,
+        name="Trace window", description="Length of the traced window.")
+
+
 class TrainingCostAnchors(Registry):
     """Cited training-cost estimates anchoring the training-vs-inference cost asymmetry."""
 
@@ -1192,6 +1203,7 @@ class ReferenceStats(Registry):
     ElasticResizeProfile = ElasticResizeProfile
     UtilizationTierProfile = UtilizationTierProfile
     FleetUtilizationSnapshot = FleetUtilizationSnapshot
+    ProfilerTraceProfile = ProfilerTraceProfile  # added 2026-10-20
     TrainingCostAnchors = TrainingCostAnchors
     FleetEvolution = FleetEvolution
     StorageTrainingCorpus = StorageTrainingCorpus

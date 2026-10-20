@@ -239,6 +239,41 @@ LlmInferenceTraceCode2023 = _Series(
     "Prompt (context) and output (generated) tokens of production code-completion requests.",
 )
 
+# Serving at scale: request traces (added 2026-10-20)
+LlmInferenceTraceConversation2023 = _Series(
+    "azure_llm_inference_conv_2023",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Azure LLM inference trace 2023, conversation (Patel et al., Splitwise, ISCA 2024)",
+        url="https://github.com/Azure/AzurePublicDataset/blob/master/AzureLLMInferenceDataset2023.md",
+        verified="2026-10-18",
+        notes=(
+            "The released file AzureLLMInferenceTrace_conv.csv, unmodified: one row per request "
+            "(timestamp, context tokens, generated tokens), 19,366 requests in one hour on "
+            "2023-11-16 to a production conversation service. Raw: raw.githubusercontent.com/"
+            "Azure/AzurePublicDataset/master/data/AzureLLMInferenceTrace_conv.csv. License CC BY 4.0."
+        ),
+    ),
+    "Arrival time, prompt (context) tokens, and output (generated) tokens of production chat requests.",
+)
+
+LlmInferenceTraceConversation2024TenMinute = _Series(
+    "azure_llm_inference_conv_2024_10min",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Azure LLM inference trace 2024, conversation, one week (Stojkovic et al., DynamoLLM, HPCA 2025)",
+        url="https://github.com/Azure/AzurePublicDataset/blob/master/AzureLLMInferenceDataset2024.md",
+        verified="2026-10-18",
+        notes=(
+            "Requests and tokens per 10-minute bin, 2024-05-12 00:00 to 2024-05-18 23:50, counted "
+            "from the released AzureLLMInferenceTrace_conv_1week.csv by aggregate_azure_2024.py "
+            "(slides tree, images/data of the serving lecture): a bin is the timestamp truncated "
+            "to its ten-minute digit. License CC BY 4.0."
+        ),
+    ),
+    "Requests, prompt tokens, and output tokens per 10-minute bin over one week of a chat service.",
+)
+
 _MONKEYS_NOTES = (
     "Brown et al. (2024), Large Language Monkeys. Recomputed from the released "
     "per-sample correctness labels: Hugging Face ScalingIntelligence/monkey_business "
@@ -1066,4 +1101,94 @@ AnswerPositionAccuracy = _Series(
         ),
     ),
     "Multi-document QA accuracy by position of the answer document among 20 (GPT-3.5-Turbo).",
+)
+
+
+# --- Retrieval from long-term memory (added 2026-10-20) ---
+SweBenchBm25Context = _Series(
+    "swe_bench_bm25_context",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=("Jimenez et al. (2024), SWE-bench: Can Language Models Resolve Real-World GitHub "
+             "Issues?, ICLR 2024, Table 2 (Claude 2) and Table 3 (Avg. row)"),
+        url="https://arxiv.org/abs/2310.06770",
+        verified="2026-10-20",
+        notes=(
+            "By maximum retrieved context in thousand tokens (BM25 over the repository, the issue "
+            "text as the query): recall of the files the reference fix edits, in percent, and "
+            "Claude 2's percent of issues resolved. Transcribed from arXiv 2310.06770v3."
+        ),
+    ),
+    "SWE-bench BM25 retrieval by context limit: oracle-file recall and Claude 2 resolve rate (percent).",
+)
+
+PoisonedRagBlackBox = _Series(
+    "poisonedrag_black_box_palm2",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=("Zou et al. (2025), PoisonedRAG: Knowledge Corruption Attacks to Retrieval-Augmented "
+             "Generation of Large Language Models, USENIX Security 2025, Section 5.1 and Table 1"),
+        url="https://arxiv.org/abs/2402.07867",
+        verified="2026-10-20",
+        notes=(
+            "Clean knowledge-base size in texts (Section 5.1) and black-box attack success rate "
+            "with PaLM 2 as the generator (Table 1), five malicious texts per target question "
+            "(Literature.AgentRetrieval.PoisonedRagTextsPerQuestion). Transcribed from arXiv "
+            "2402.07867v3."
+        ),
+    ),
+    "PoisonedRAG black-box attack: knowledge-base size and attack success rate per dataset (PaLM 2).",
+)
+
+# --- KV cache management (added 2026-10-20) ----------------------------------
+PagedAttentionMemoryBreakdown = _Series(
+    "pagedattention_kv_memory_breakdown",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Kwon et al. (2023), Efficient Memory Management for Large Language Model Serving with "
+            "PagedAttention, SOSP 2023, Figure 2",
+        url="https://arxiv.org/abs/2309.06180",
+        verified="2026-10-18",
+        notes=(
+            "Average percentage of KV cache memory by use in three Orca variants (reservation for the "
+            "maximum length, the next power of two, or the exact final length) and vLLM, OPT-13B on one "
+            "A100 (Section 6.2 setup), read from the bar labels of Figure 2. vLLM reports only its token "
+            "states (96.3); the remaining columns are empty."
+        ),
+    ),
+    "KV memory holding token states, reservations, internal and external fragmentation (percent).",
+)
+
+ToolInterceptionTimes = _Series(
+    "infercept_interception_times",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Abhyankar et al. (2024), InferCept: Efficient Intercept Support for Augmented Large "
+            "Language Model Inference, ICML 2024, Table 1",
+        url="https://arxiv.org/abs/2402.01869",
+        verified="2026-10-18",
+        notes=(
+            "Mean interception (tool or human pause) time per augmentation, in seconds, read from "
+            "Table 1; the chatbot and image-generation times are partly estimated by the authors. "
+            "Recomputation share of forwarding time: Literature.ToolInterception."
+        ),
+    ),
+    "Mean pause per augmentation type while an LLM waits on a tool or a person (seconds).",
+)
+
+AttentionSinkPerplexity = _Series(
+    "streamingllm_attention_sink_perplexity",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Xiao et al. (2024), Efficient Streaming Language Models with Attention Sinks, ICLR 2024, "
+            "Tables 1 and 2",
+        url="https://arxiv.org/abs/2309.17453",
+        verified="2026-10-18",
+        notes=(
+            "PG19 perplexity with a KV cache of cache_tokens holding only the most recent tokens "
+            "(window_perplexity) against the same cache with the first sink_tokens kept "
+            "(sink_perplexity, 4 + cache_tokens - 4); Llama-2-13B from Table 1, Llama-2-7B from Table 2."
+        ),
+    ),
+    "Sliding-window perplexity with and without the first four tokens kept (PG19).",
 )

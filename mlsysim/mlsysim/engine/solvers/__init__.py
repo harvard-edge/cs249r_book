@@ -57,8 +57,11 @@ from .trends import TrainingGrowthModel
 from .performance import AmdahlModel, IronLawModel
 from .quality import ProxyDriftModel, ShiftedTestSetModel
 from .training import CheckpointModel, ScalingModel, TrainingMemoryModel, TrainingRunModel, TrainingStateModel
+from .goodput import GoodputModel, RuntimeGoodputModel  # fleet goodput (added 2026-10-20)
 
 __all__ = [
+    "GoodputModel",
+    "RuntimeGoodputModel",
     "BaseResolver",
     "ForwardModel",
     "BaseSolver",
@@ -257,4 +260,69 @@ __all__ += [
     "DecoderFamiliesModel",
     "ProposerTrafficModel",
     "EvidenceHorizonModel",
+]
+
+# --- Serving at scale: traces, frontiers, admission, routing (added 2026-10-20) ---
+from .serving_scale import (
+    BallsIntoBinsModel,
+    KvAdmissionModel,
+    PrecisionDividendModel,
+    RequestTraceModel,
+    ServingFrontierModel,
+    TrafficProfileModel,
+)
+
+__all__ += [
+    "BallsIntoBinsModel",
+    "KvAdmissionModel",
+    "PrecisionDividendModel",
+    "RequestTraceModel",
+    "ServingFrontierModel",
+    "TrafficProfileModel",
+]
+
+# --- Retrieval from long-term memory (added 2026-10-20) ---
+from .retrieval import (
+    RetrievalPayloadModel,
+    Bm25PairModel,
+    ExactScanFloorModel,
+    AnnFootprintModel,
+    GraphNeighborhoodModel,
+    IndexMaintenanceModel,
+    StorageAmplificationModel,
+    MaintainedPolicyCostModel,
+    WordOverlapModel,
+)
+
+__all__ += [
+    "RetrievalPayloadModel",
+    "Bm25PairModel",
+    "ExactScanFloorModel",
+    "AnnFootprintModel",
+    "GraphNeighborhoodModel",
+    "IndexMaintenanceModel",
+    "StorageAmplificationModel",
+    "MaintainedPolicyCostModel",
+    "WordOverlapModel",
+]
+
+# --- KV cache management (added 2026-10-20) ---
+from .kv_cache import (
+    KvAttentionDesignModel,
+    PagedAllocationModel,
+    PrefixRebuildModel,
+    ChunkedPrefillModel,
+    PausedKvStateModel,
+    KvBlockSharingModel,
+    KvResidencyArchetypeModel,
+)
+
+__all__ += [
+    "KvAttentionDesignModel",
+    "PagedAllocationModel",
+    "PrefixRebuildModel",
+    "ChunkedPrefillModel",
+    "PausedKvStateModel",
+    "KvBlockSharingModel",
+    "KvResidencyArchetypeModel",
 ]

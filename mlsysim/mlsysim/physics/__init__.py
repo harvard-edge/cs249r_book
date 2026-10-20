@@ -3,7 +3,7 @@ Canonical physics and accounting formulas for ML systems.
 
 Domain modules:
   networking, performance, economics, memory, communication,
-  reliability, transformer, serving, statistics, agents, context, drivetrain, robotics
+  reliability, transformer, serving, statistics, agents, context, retrieval, drivetrain, robotics
 """
 
 from ._units import _ensure_unit
@@ -81,6 +81,10 @@ from .statistics import (
     calc_cross_entropy_exponential_proposal,
     calc_conjunctive_confidence,
     calc_multilegged_confidence,
+    calc_chance_agreement,
+    calc_cohens_kappa,
+    calc_ks_critical_value,
+    calc_ks_normal_location_shift,
 )
 from .agents import (
     calc_kv_cache_bytes_per_token,
@@ -245,6 +249,10 @@ __all__ = [
     "calc_cross_entropy_exponential_proposal",
     "calc_conjunctive_confidence",
     "calc_multilegged_confidence",
+    "calc_chance_agreement",
+    "calc_cohens_kappa",
+    "calc_ks_critical_value",
+    "calc_ks_normal_location_shift",
     "calc_two_proportion_sample_size",
     "calc_kv_cache_bytes_per_token",
     "calc_unchecked_success",
@@ -382,4 +390,84 @@ __all__ += [
     "calc_equivalent_key_count",
     "calc_zoned_prefill_tokens",
     "calc_compaction_cycle",
+]
+
+
+# --- Serving at scale (added 2026-10-20) ---
+from .serving import (
+    calc_littles_law_occupancy,
+    calc_batch_knee,
+    calc_batch_throughput_share,
+    calc_padding_waste_fraction,
+    calc_speculative_expected_tokens,
+)
+
+__all__ += [
+    "calc_littles_law_occupancy",
+    "calc_batch_knee",
+    "calc_batch_throughput_share",
+    "calc_padding_waste_fraction",
+    "calc_speculative_expected_tokens",
+]
+
+# --- Retrieval from long-term memory (added 2026-10-20) ---
+from .retrieval import (
+    calc_records_that_fit,
+    calc_bm25_idf,
+    calc_bm25_length_normalizer,
+    calc_bm25_term_score,
+    calc_full_tree_nodes,
+    calc_vectors_in_budget,
+    calc_bandwidth_fit_through_origin,
+    calc_interface_bandwidth,
+    calc_word_overlap,
+)
+
+__all__ += [
+    "calc_records_that_fit",
+    "calc_bm25_idf",
+    "calc_bm25_length_normalizer",
+    "calc_bm25_term_score",
+    "calc_full_tree_nodes",
+    "calc_vectors_in_budget",
+    "calc_bandwidth_fit_through_origin",
+    "calc_interface_bandwidth",
+    "calc_word_overlap",
+]
+
+# --- Correlated samples and imitation-learning bounds (added 2026-10-20) ---
+from .statistics import (
+    calc_effective_sample_size,
+    calc_behavior_cloning_cost_bound,
+    calc_dagger_cost_bound,
+)
+from .constants import AGE_OF_UNIVERSE
+
+__all__ += [
+    "calc_effective_sample_size",
+    "calc_behavior_cloning_cost_bound",
+    "calc_dagger_cost_bound",
+    "AGE_OF_UNIVERSE",
+]
+
+# --- KV cache residency and turn rate (added 2026-10-20) ---
+from .memory import (
+    calc_kv_attention_design,
+    calc_kv_resident_fit,
+    calc_kv_block_count,
+    calc_shared_prefix_fit,
+    calc_sharing_gain_limit,
+)
+from .serving import calc_littles_law_rate, calc_residency_factor
+from .transformer import calc_weight_only_step_time
+
+__all__ += [
+    "calc_kv_attention_design",
+    "calc_kv_resident_fit",
+    "calc_kv_block_count",
+    "calc_shared_prefix_fit",
+    "calc_sharing_gain_limit",
+    "calc_littles_law_rate",
+    "calc_residency_factor",
+    "calc_weight_only_step_time",
 ]

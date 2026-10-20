@@ -36,3 +36,22 @@ class Monitoring(Registry):
         name="PSI critical threshold",
         description="Population Stability Index threshold for critical drift.",
     )
+    # Evidently's default drift tests for a numerical feature (added 2026-10-20).
+    EvidentlyKsMaxReferenceRows = sourced(
+        1000,
+        pc.EVIDENTLY_DEFAULT_STATTESTS,
+        name="Evidently K-S reference-row limit",
+        description="Evidently runs the two-sample K-S test at this many reference rows or fewer, the normed Wasserstein distance above.",
+    )
+    EvidentlyKsPValueThreshold = sourced(
+        0.05,
+        pc.EVIDENTLY_DEFAULT_STATTESTS,
+        name="Evidently K-S p-value threshold",
+        description="Drift when the K-S p-value is at most this value.",
+    )
+    EvidentlyWassersteinThreshold = sourced(
+        0.1,
+        pc.EVIDENTLY_DEFAULT_STATTESTS,
+        name="Evidently normed Wasserstein threshold",
+        description="Drift when the Wasserstein distance divided by the reference standard deviation is at least this value.",
+    )

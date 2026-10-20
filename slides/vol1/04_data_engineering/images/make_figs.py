@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Data plots for Lecture 4 (Data Engineering).
 
-Every derived value comes from calcs.py (run it to print them); inputs are
-sourced from the rendered chapter (Data Engineering) unless marked:
-  - Listening hours: rule of three, 2,160 h of non-keyword audio to support
-    one false wake a month (Sec. 4.11); a 30-day month is 720 h.
-  - Label entries: a 1920x1080 mask has 2,073,600 labels; ten boxes of four
-    coordinates have 40 entries (Sec. 4.6.1).
-  - Label cost: $100K labeling budget against a $20 to $40 ResNet-50 run on
-    8 A100s (Sec. 4.6.2).
+Every plotted value and every number in a label comes from calcs.py, which
+reads MLSysIM (the keyword-spotter and labeling Scenarios.*, Literature,
+Datasets); this file types no data. The scenarios behind each figure:
+  - Listening hours: Scenarios.KeywordSpotterFalseWakeEvidence (Sec. 4.11).
+  - Label entries: Scenarios.FullHdMaskVersusBoxes (Sec. 4.6.1).
+  - Label cost: Scenarios.ImageNetLabelingVersusResNetRun (Sec. 4.6.2).
+  - Picovoice miss rates: Literature.WakeWordBenchmarks.
+  - Label errors: Literature.Series.TestSetLabelErrors (Northcutt et al. 2021).
+  - Forced alignment: Datasets.MSWC.
 
 2026-10-17: the storage latency, storage supply, format, drift-type, and K-S
 figures moved to Lecture 4b (Data Engineering, Part 2), whose own
@@ -30,6 +31,7 @@ import numpy as np  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import calcs as K  # noqa: E402
+from deckvals import val, num  # noqa: E402
 
 out = Path(__file__).parent
 C = sp.C
@@ -98,12 +100,12 @@ def steps(stem, rows, **kw):
 # slide size as vertical bars.
 def picovoice():
     fig, ax = plt.subplots(figsize=(5.8, 2.5))
-    names = list(K.PV_MISS_PCT)
-    vals = [K.PV_MISS_PCT[n] for n in names]
+    names = [n for n, _ in K.PV_ENGINES]
+    vals = [num(f"pv_{n.lower()}") for n in names]
     cols = [C["neutral"], C["neutral"], C["memory"]]
     ax.bar(range(3), vals, width=0.5, color=cols)
     for i, v in enumerate(vals):
-        ax.text(i, v + 2, f"{v:.1f}%", ha="center", va="bottom", fontsize=14,
+        ax.text(i, v + 2, f"{val(f'pv_{names[i].lower()}')}%", ha="center", va="bottom", fontsize=14,
                 fontweight="bold", color=cols[i])
     ax.set_xticks(range(3))
     ax.set_xticklabels(names, fontsize=13)
@@ -112,8 +114,8 @@ def picovoice():
     ax.set_ylabel("Wake words missed (%)")
     ax.grid(axis="y", color=C["grid"], linewidth=0.6)
     ax.set_axisbelow(True)
-    ax.text(2.45, 58, f"All three held to {K.PV_FA_PER_HOUR * 10:.0f} false alarm per 10 h\n"
-            f"= {K.PV_FA_PER_MONTH:.0f} a month; budget: {K.BUDGET_PER_MONTH} a month",
+    ax.text(2.45, 58, f"All three held to 1 false alarm per {val('pv_hours')} h\n"
+            f"= {val('pv_month')} a month; budget: {val('kws_false_wakes')} a month",
             ha="right", va="top", fontsize=12, color=C["danger"], fontweight="bold")
     sp.save(fig, out / "pv_missrate.svg")
 
@@ -122,9 +124,9 @@ picovoice()
 
 # 2. Listening needed to support the budget (rule of three)
 bars_lines(out / "listen_hours.svg", [
-    ("One month of listening", K.HOURS_PER_MONTH, "neutral", f"{K.HOURS_PER_MONTH} h"),
-    ("Needed, zero false wakes", K.HOURS_NEEDED, "data",
-     f"{K.HOURS_NEEDED:,.0f} h  = {K.EVAL_GB:.0f} GB at 16 kHz"),
+    ("One month of listening", num("month_hours"), "neutral", f"{val('month_hours')} h"),
+    ("Needed, zero false wakes", num("eval_hours"), "data",
+     f"{val('eval_hours')} h  = {val('eval_gb')} GB at {val('eval_khz')} kHz"),
 ], log=False, xlim=(0, 4200), size=sp.SHORT,
     xlabel="Hours of representative non-keyword audio")
 
@@ -132,17 +134,17 @@ bars_lines(out / "listen_hours.svg", [
 # column beside a Cityscapes annotation (2026-10-18)
 steps("label_entries", [
     ("Class label", 1, "data", "1"),
-    ("Ten boxes", K.BOX_ENTRIES, "data", f"{K.BOX_ENTRIES}"),
-    ("Mask, 1920×1080", K.MASK_ENTRIES, "data", f"{K.MASK_ENTRIES / 1e6:.1f} M", "in"),
+    (f"{val('boxes_word').capitalize()} boxes", num("box_entries"), "data", val("box_entries")),
+    (f"Mask, {val('mask_w')}×{val('mask_h')}", K.GRANULARITY.mask_entries, "data", f"{val('mask_m')} M", "in"),
 ], xlim=(0.3, 1e7), xlabel="Label entries per image (log)", size=(3.6, 2.5),
     xticks=[(1, "1"), (100, "100"), (1e4, "10$^4$"), (1e6, "10$^6$")])
 
 # 4. Labeling against one training run (log)
 steps("label_cost", [
-    ("Label 1M images", K.LABEL_BUDGET_USD, "data",
-     rf"\${K.LABEL_BUDGET_USD:,}   (2 to 4 weeks)"),
-    ("Train ResNet-50 once", K.TRAIN_USD[1], "compute",
-     rf"\${K.TRAIN_USD[0]:.0f} to \${K.TRAIN_USD[1]:.0f}   ({K.TRAIN_HOURS:.1f} hours)"),
+    ("Label 1M images", num("lab_budget_usd"), "data",
+     rf"\${val('lab_budget_usd')}   ({val('lab_weeks_lo')} to {val('lab_weeks_hi')} weeks)"),
+    ("Train ResNet-50 once", K.m(K.RUN.train_cost_high, "USD"), "compute",
+     rf"\${val('train_usd_lo')} to \${val('train_usd_hi')}   ({val('train_h')} hours)"),
 ], xlim=(5, 2e7), size=sp.SHORT, xlabel="Cost (US dollars, log scale)",
     xticks=[(10, r"\$10"), (1000, r"\$1,000"), (1e5, r"\$100,000")])
 
@@ -296,13 +298,18 @@ for k in (1, 2):
 
 # Label errors in benchmark test sets (slide variant of the book figure,
 # a subset of its rows; Northcutt, Athalye, and Mueller 2021)
+_ERR_COLOR = {"image": "memory", "text": "compute", "audio": "network"}
+_errs = K.label_errors()
+
+
+def _err_key(name):
+    return "err_" + "".join(c for c in name.lower() if c.isalnum())
+
+
 bars_lines(out / "label_errors.svg", [
-    ("QuickDraw (images)", 10.12, "memory", "10.1%"),
-    ("CIFAR-100 (images)", 5.85, "memory", "5.9%"),
-    ("ImageNet val (images)", 5.83, "memory", "5.8%"),
-    ("IMDB (text)", 2.90, "compute", "2.9%"),
-    ("AudioSet (audio)", 1.35, "network", "1.4%"),
-    ("MNIST (images)", 0.15, "memory", "0.15%"),
+    (label, num(_err_key(name)), _ERR_COLOR[_errs[name]["modality"]],
+     val(_err_key(name)) + "%")
+    for name, label in K.LABEL_ERROR_ROWS
 ], log=False, xlim=(0, 13), size=(5.8, 2.8),
     xlabel="Test-set labels found to be wrong (%)")
 
@@ -465,7 +472,7 @@ synthetic_audio()
 def forced_alignment():
     G, GL, O, OL = C["data"], C["data_l"], C["compute"], C["compute_l"]
     heads = ["Sentence audio\n+ transcript", "Forced alignment\nfinds word edges",
-             "Cut 1 s clips\nfor each keyword", "Train the\nkeyword model"]
+             f"Cut {val('mswc_clip_s')} s clips\nfor each keyword", "Train the\nkeyword model"]
     s = ""
     xs = [10, 237, 464, 691]
     for j, (x, h) in enumerate(zip(xs, heads)):
@@ -492,11 +499,12 @@ def forced_alignment():
     # 3: one clip cut around one word
     s += box(464, 112, 200, 150, "#F7F7F7", "#999999", "", rx=8)
     s += box(504, 132, 120, 50, OL, O, "bank", 24, True, rx=4)
-    s += txt(564, 204, "one 1 s clip", 20, True, "#666666")
+    s += txt(564, 204, f"one {val('mswc_clip_s')} s clip", 20, True, "#666666")
     s += txt(564, 232, "labeled “bank”", 20, True, "#666666")
     # 4: the corpus that results
     s += box(691, 112, 200, 150, GL, G, "", rx=8)
-    for m, ln in enumerate(["23.4M clips", "340K keywords", "50 languages"]):
+    for m, ln in enumerate([f"{val('mswc_m')}M clips", f"{val('mswc_kw_k')}K keywords",
+                            f"{val('mswc_lang')} languages"]):
         s += txt(791, 146 + m * 40, ln, 23, True, C["text"])
     svg(out / "forced_alignment.svg", s, w=900, h=270)
 

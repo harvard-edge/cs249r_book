@@ -1604,7 +1604,8 @@ JEDEC_MEMORY_INTERFACE_WIDTHS = _conv(
     "JEDEC JESD238 (HBM3) and JESD79-5 (DDR5) interface widths",
     notes=(
         "Added 2026-10-20. HBM3: 1,024 data bits per stack in 16 channels of 64 bits. "
-        "DDR5: 64 data bits per DIMM channel as two independent 32-bit subchannels."
+        "DDR5: 64 data bits per DIMM channel as two independent 32-bit subchannels. "
+        "Added 2026-10-20: the DDR5-4800 speed grade transfers 4,800 MT/s per pin."
     ),
 )
 
@@ -2784,6 +2785,15 @@ ZHENG_2024_SGLANG = _lit(
            "LLaVA-Next-34B and 74.1 percent for Vicuna-33B; first-token latency 1.7 times lower on "
            "average for Vicuna-33B. Read from arxiv.org/html/2312.07104v2."),
 )
+ABHYANKAR_2024_INFERCEPT = _lit(  # added 2026-10-20
+    "prov:abhyankar-2024-infercept",
+    "Abhyankar et al. (2024), InferCept: Efficient Intercept Support for Augmented Large Language "
+    "Model Inference, ICML 2024",
+    url="https://arxiv.org/abs/2402.01869",
+    verified="2026-10-18",
+    notes=("Abstract: discarding context at every interception and recomputing it took 37 to 40 "
+           "percent of model forwarding time in the systems measured."),
+)
 SHI_2023_DISTRACTED = _lit(
     "prov:shi-2023-distracted",
     "Shi et al. (2023), Large Language Models Can Be Easily Distracted by Irrelevant Context, "
@@ -2878,4 +2888,270 @@ LIN_AWQ_2024 = _lit(
     url="https://arxiv.org/abs/2306.00978",
     verified="2026-10-20",
     notes="Sec. 5.1: group size 128 for weight-only INT4 quantization.",
+)
+
+# --- Data engineering: wake-word benchmarks, annotation times, Speech Commands (added 2026-10-20) ---
+PICOVOICE_WAKE_WORD_BENCHMARK = Provenance(
+    id="prov:picovoice-wake-word-benchmark",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="Picovoice, wake-word-benchmark (GitHub), README 'Accuracy' and doc/img/summary.png, commit 84919190fb18",
+    url="https://github.com/Picovoice/wake-word-benchmark",
+    verified="2026-10-17",
+    notes=("Miss rates at 1 false alarm per 10 hours (plot.py target_false_alarm_per_hour=0.1), averaged "
+           "over six wake words; more than 300 recordings per word from more than 50 speakers, mixed at "
+           "10 dB SNR with DEMAND noise from 18 environments, with LibriSpeech as background speech. "
+           "Run by the maker of Porcupine."),
+)
+PAPADOPOULOS_EXTREME_CLICKING_2017 = _lit(
+    "prov:papadopoulos-extreme-clicking-2017",
+    "Papadopoulos, Uijlings, Keller, and Ferrari (2017), Extreme Clicking for Efficient Object "
+    "Annotation, ICCV",
+    url="https://doi.org/10.1109/ICCV.2017.528",
+    verified="2026-10-20",
+    notes="About 35 s to draw one high-quality box in ImageNet's annotation campaign, as the paper reports it.",
+)
+CITYSCAPES_2016 = _lit(
+    "prov:cordts-cityscapes-2016",
+    "Cordts et al. (2016), The Cityscapes Dataset for Semantic Urban Scene Understanding, CVPR",
+    url="https://www.cityscapes-dataset.com/",
+    verified="2026-10-20",
+    notes="Fine pixel-level annotation and quality control took more than 1.5 h on average for one image.",
+)
+SPEECH_COMMANDS_V2_CARD = _report(
+    "prov:speech-commands-v002-hf-card",
+    "Hugging Face dataset card google/speech_commands, config v0.02 (rev. 57ba463); Warden (2018), "
+    "Speech Commands: A Dataset for Limited-Vocabulary Speech Recognition, arXiv:1804.03209",
+    "https://huggingface.co/datasets/google/speech_commands",
+    notes="Split sizes from the card's dataset_info: train 84,848, validation 9,982, test 4,890 clips.",
+)
+TENSORFLOW_SPEECH_COMMANDS_SPLIT = _conv(
+    "prov:tensorflow-speech-commands-which-set",
+    "TensorFlow v2.16.1, examples/speech_commands train.py flags --validation_percentage and "
+    "--testing_percentage (default 10 each), applied by input_data.which_set()",
+    notes="The reference loader assigns each hashed speaker key to a split by these default percentages.",
+)
+MICROSOFT_TAY_2016 = _report(
+    "prov:microsoft-tay-2016",
+    "Peter Lee (2016), Learning from Tay's Introduction, The Official Microsoft Blog, March 25, 2016",
+    "https://blogs.microsoft.com/blog/2016/03/25/learning-tays-introduction/",
+    notes="Tay was taken offline about 16 hours after launch, inside the 'first 24 hours' the post describes.",
+)
+
+
+# --- Data delivery and drift: measured pipelines, files, and releases (added 2026-10-20) ---
+MOHAN_DATA_STALLS_2021 = _lit(
+    "prov:mohan-data-stalls-2021",
+    "Mohan, Phanishayee, Raniwala, and Chidambaram (2021), Analyzing and Mitigating Data Stalls in DNN "
+    "Training, PVLDB 14(5)",
+    url="https://www.vldb.org/pvldb/vol14/p771-mohan.pdf",
+    verified="2026-10-18",
+    notes="Nine vision and audio models profiled; CoorDL (coordinated caching and preprocessing) cuts training "
+          "time by up to 5x on a single server with the same model and accelerators.",
+)
+LECLERC_FFCV_2023 = _lit(
+    "prov:leclerc-ffcv-2023",
+    "Leclerc, Ilyas, Engstrom, Park, Salman, and Madry (2023), FFCV: Accelerating Training by Removing Data "
+    "Bottlenecks, CVPR",
+    url="https://arxiv.org/abs/2306.12517",
+    verified="2026-10-18",
+    notes="ResNet-50 trained to 75 percent ImageNet top-1 in about 20 minutes on one machine (8 A100s).",
+)
+PYTORCH_PROFILER_TUTORIAL = Provenance(
+    id="prov:pytorch-profiler-tensorboard-tutorial",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="PyTorch tutorials, PyTorch Profiler With TensorBoard (intermediate_source/tensorboard_profiler_tutorial.py, "
+        "commit 45a5b17, the last version before its removal on 2026-06-01; _static/img/profiler_overview1.png "
+        "and profiler_overview2.png)",
+    url="https://github.com/pytorch/tutorials/blob/45a5b17/intermediate_source/tensorboard_profiler_tutorial.py",
+    verified="2026-10-18",
+    notes="ResNet-18 on CIFAR-10 resized to 224, batch 32, one Tesla V100; Execution Summary of the average step "
+          "as the tool prints it, for the default loader and for num_workers=4.",
+)
+NYC_TLC_YELLOW_TAXI_2024_01_PARQUET = Provenance(
+    id="prov:nyc-tlc-yellow-taxi-2024-01-parquet",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="NYC Taxi and Limousine Commission, Yellow Taxi Trip Records, January 2024 (yellow_tripdata_2024-01.parquet, "
+        "49,961,641 bytes); metadata printed by pyarrow 25.0.0",
+    url="https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2024-01.parquet",
+    verified="2026-10-18",
+    notes="ParquetFile(path).metadata.row_group(0).column(i) sizes and pyarrow.compute.count_distinct per column; "
+          "uncompressed sizes are measured after encoding.",
+)
+WEBDATASET_PUBLAYNET_SHARD = Provenance(
+    id="prov:webdataset-publaynet-shard",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="WebDataset README (github.com/webdataset/webdataset, v0.2.107), test shard publaynet-train-000000.tar",
+    url="https://storage.googleapis.com/webdataset/testdata/publaynet-train-000000.tar",
+    verified="2026-10-18",
+    notes="Content-Length 303,779,840 bytes; `tar tf | wc -l` prints 1,970 members, a .json and a .png per sample. "
+          "The README suggests a shuffle buffer of about 1,000 samples.",
+)
+WARDEN_SPEECH_COMMANDS_2018 = _lit(
+    "prov:warden-speech-commands-2018",
+    "Warden (2018), Speech Commands: A Dataset for Limited-Vocabulary Speech Recognition, arXiv:1804.03209",
+    url="https://arxiv.org/abs/1804.03209",
+    verified="2026-10-18",
+    notes="Section 6 (v2: 105,829 utterances, 35 words, 2,618 speakers), Section 7.3 (v1, released 2017-08-03: "
+          "64,727 utterances, 1,881 speakers), and the Top-One table: the default convolution model trained on "
+          "each release and scored on each release's test set.",
+)
+EVIDENTLY_DEFAULT_STATTESTS = Provenance(
+    id="prov:evidently-default-stattests-v0-7-23",
+    kind=ProvenanceKind.INDUSTRY_REPORT,
+    ref="Evidently v0.7.23 (Apache 2.0), src/evidently/legacy/calculations/stattests/: registry.py "
+        "_get_default_stattest, ks_stattest.py, wasserstein_distance_norm.py",
+    url="https://github.com/evidentlyai/evidently/tree/v0.7.23/src/evidently/legacy/calculations/stattests",
+    verified="2026-10-18",
+    notes="Numerical features: two-sample K-S at 1,000 or fewer reference rows (drift when p <= 0.05), normed "
+          "Wasserstein distance above (drift when distance / reference sd >= 0.1).",
+)
+
+# Fleet efficiency (added 2026-10-20)
+WONGPANICH_ML_GOODPUT_2025 = _lit(
+    "prov:wongpanich-ml-goodput-2025",
+    "Wongpanich et al. (2025), Machine Learning Fleet Efficiency: Analyzing and Optimizing "
+    "Large-Scale Google TPU Systems with ML Productivity Goodput",
+    url="https://arxiv.org/abs/2502.06982",
+    verified="2026-10-20",
+    notes=("Defines ML productivity goodput as scheduling x runtime x program goodput; scheduling "
+           "goodput exceeds 95 percent for every job-size cohort of Google's TPU fleet."),
+)
+CLOUDFLARE_OUTAGE_2019 = _lit(
+    "prov:cloudflare-outage-2019",
+    "Cloudflare (2019), Details of the Cloudflare outage on July 2, 2019",
+    url="https://blog.cloudflare.com/details-of-the-cloudflare-outage-on-july-2-2019/",
+    verified="2026-10-20",
+    notes=("A WAF rule's regular expression backtracked and drove edge CPUs to nearly 100 percent; "
+           "a 27-minute outage in which traffic dropped by about 82 percent."),
+)
+NSIGHT_TRACE_VOLUME_SCENARIO = _est(
+    "prov:nsight-trace-volume-scenario",
+    "Reference Nsight Systems trace volume per GPU for a short profiling window",
+    notes=("Documented teaching assumption: a 5-second Nsight Systems trace of one training GPU, "
+           "with CUDA, NVTX, and NCCL ranges, is about 500 MB."),
+    verified="2026-10-20",
+)
+
+# --- Retrieval from long-term memory: agents, poisoning, a tribunal record (added 2026-10-20) ---
+JIMENEZ_2024_SWE_BENCH = _lit(
+    "prov:jimenez-2024-swe-bench",
+    "Jimenez et al. (2024), SWE-bench: Can Language Models Resolve Real-World GitHub Issues?, "
+    "ICLR 2024, Table 2 (Claude 2, BM25 retrieval) and Table 3 (BM25 recall, Avg. row)",
+    url="https://arxiv.org/abs/2310.06770",
+    verified="2026-10-20",
+    notes=("Claude 2 percent resolved and BM25 recall of the oracle (edited) files at maximum "
+           "retrieved contexts of 13K, 27K, and 50K tokens; the issue text is the query. "
+           "Read from arxiv.org/html/2310.06770v3."),
+)
+YANG_2024_SWE_AGENT = _lit(
+    "prov:yang-2024-swe-agent",
+    "Yang et al. (2024), SWE-agent: Agent-Computer Interfaces Enable Automated Software "
+    "Engineering, NeurIPS 2024, Table 1 (SWE-bench Lite, GPT-4 Turbo) and Section 5",
+    url="https://arxiv.org/abs/2405.15793",
+    verified="2026-10-20",
+    notes=("Percent resolved on SWE-bench Lite with GPT-4 Turbo: RAG (BM25) 2.67, shell-only "
+           "agent 11.00, SWE-agent 18.00. Section 5: 'compared to RAG on Lite, SWE-agent is "
+           "8-13x more costly but yields a 6.7-fold improved % Resolved rate.' Read from "
+           "arxiv.org/html/2405.15793v3."),
+)
+ZOU_2025_POISONEDRAG = _lit(
+    "prov:zou-2025-poisonedrag",
+    "Zou et al. (2025), PoisonedRAG: Knowledge Corruption Attacks to Retrieval-Augmented "
+    "Generation of Large Language Models, USENIX Security 2025, Section 5.1 and Table 1",
+    url="https://arxiv.org/abs/2402.07867",
+    verified="2026-10-20",
+    notes=("Knowledge bases of 2,681,468 (NQ), 5,233,329 (HotpotQA), and 8,841,823 (MS-MARCO) "
+           "texts; N = 5 malicious texts per target question; black-box attack success rate "
+           "with PaLM 2 as the generator. Read from arxiv.org/html/2402.07867v3."),
+)
+MOFFATT_V_AIR_CANADA_2024 = Provenance(
+    id="prov:moffatt-v-air-canada-2024",
+    kind=ProvenanceKind.INDUSTRY_REPORT,  # a published tribunal decision (public record)
+    ref=("Moffatt v. Air Canada, 2024 BCCRT 149 (British Columbia Civil Resolution Tribunal, "
+         "February 14, 2024), paras 15, 40, and 44"),
+    url="https://www.canlii.org/en/bc/bccrt/doc/2024/2024bccrt149/2024bccrt149.html",
+    verified="2026-10-20",
+    notes=("Amounts in Canadian dollars. Para 15: the chatbot's answer quotes a 90-day window "
+           "from ticket issue. Para 40: paid 1,630.36, should have paid 979.48, damages 650.88. "
+           "Para 44: total 812.02 (650.88 damages, 36.14 pre-judgment interest, 125 CRT fees). "
+           "Checked 2026-10-20 against a PDF copy of the CanLII decision (CanLII blocks scripted "
+           "access)."),
+)
+
+# --- Robot demonstration data: dated systems, interventions, recorders (added 2026-10-20) ---
+DROID_RECALIBRATION_2025 = _lit(
+    "prov:droid-recalibration-2025",
+    "DROID project website, April 2025 release of improved camera calibrations (droid-dataset.github.io)",
+    url="https://droid-dataset.github.io/",
+    verified="2026-10-19",
+    notes="New camera calibrations published for about 36,000 episodes after an overlap check.",
+)
+BU_AGIBOT_WORLD_2025 = _lit(
+    "prov:bu-agibot-world-2025",
+    "Bu, Q. et al. (2025), AgiBot World Colosseo: A Large-Scale Manipulation Platform for Scalable and "
+    "Intelligent Embodied Systems, IROS 2025",
+    url="https://doi.org/10.1109/IROS60139.2025.11247088",
+    verified="2026-10-18",
+    notes=("Sec. 3: 1,001,552 trajectories, 217 tasks, more than 100 homogeneous robots; abstract: "
+           "30 percent average gain over pretraining on Open X-Embodiment."),
+)
+LIN_DATA_SCALING_2025 = _lit(
+    "prov:lin-data-scaling-2025",
+    "Lin, F. et al. (2025), Data Scaling Laws in Imitation Learning for Robotic Manipulation, ICLR 2025",
+    url="https://arxiv.org/abs/2410.18647",
+    verified="2026-10-18",
+    notes=("Sec. 1: over 40,000 demonstrations; recipe of 32 environments with 50 demonstrations each; "
+           "about 90 percent success in a new environment with a new object."),
+)
+BLACK_PI05_2025 = _lit(
+    "prov:black-pi05-2025",
+    "Black, K. et al. (2025), pi0.5: A Vision-Language-Action Model with Open-World Generalization, CoRL 2025",
+    url="https://proceedings.mlr.press/v305/black25a.html",
+    verified="2026-10-18",
+    notes="Sec. I: about 400 hours of mobile manipulation in homes; Sec. V-B: 3 to 104 training locations.",
+)
+MANDLEKAR_MIMICGEN_2023 = _lit(
+    "prov:mandlekar-mimicgen-2023",
+    "Mandlekar, A. et al. (2023), MimicGen: A Data Generation System for Scalable Robot Learning using "
+    "Human Demonstrations, CoRL 2023",
+    url="https://proceedings.mlr.press/v229/mandlekar23a.html",
+    verified="2026-10-18",
+    notes="Abstract: over 50K demonstrations generated from about 200 human demonstrations across 18 tasks.",
+)
+MADDUKURI_COTRAINING_2025 = _lit(
+    "prov:maddukuri-cotraining-2025",
+    "Maddukuri, A. et al. (2025), Sim-and-Real Co-Training: A Simple Recipe for Vision-Based Robotic "
+    "Manipulation, RSS 2025",
+    url="https://doi.org/10.15607/RSS.2025.XXI.109",
+    verified="2026-10-18",
+    notes="Abstract: 38 percent average gain in real-robot success.",
+)
+HOQUE_THRIFTYDAGGER_2022 = _lit(
+    "prov:hoque-thriftydagger-2022",
+    "Hoque, R. et al. (2022), ThriftyDAgger: Budget-Aware Novelty and Risk Gating for Interactive "
+    "Imitation Learning, CoRL 2021 (PMLR 164)",
+    url="https://proceedings.mlr.press/v164/hoque22a.html",
+    verified="2026-10-19",
+    notes=("Table 3, physical cable routing, 15 autonomous trials each: behavior cloning 0, HG-DAgger 10, "
+           "ThriftyDAgger 12; training interventions per episode 1.55 +/- 1.16 and 1.42 +/- 1.14."),
+)
+LEROBOT_ALOHA_STATIC_COFFEE = _ds(
+    "prov:lerobot-aloha-static-coffee",
+    "Hugging Face, lerobot/aloha_static_coffee, meta/info.json",
+    "https://huggingface.co/datasets/lerobot/aloha_static_coffee",
+    verified="2026-10-19",
+    notes="total_episodes 50, fps 50, observation.state, observation.effort, and action of 14 values.",
+)
+ECFR_49_CFR_563_EDR = _report(
+    "prov:ecfr-49-cfr-563-7",
+    "eCFR, 49 CFR Part 563 (Event Data Recorders), Sec. 563.7 Table I and footnote 4",
+    "https://www.ecfr.gov/current/title-49/subtitle-B/chapter-V/part-563",
+    notes=("Speed, accelerator pedal, and service brake from -20 to 0 s at 10 samples/s (phase-in from "
+           "2028); before the phase-in, -5.0 to 0 s at 2 samples/s. Retrieved 2026-10-19."),
+)
+NASA_MCO_PHASE1_1999 = _report(
+    "prov:nasa-mco-phase1-1999",
+    "Stephenson, A. G. et al. (1999), Mars Climate Orbiter Mishap Investigation Board Phase I Report, NASA",
+    "https://llis.nasa.gov/llis_lib/pdf/1009464main1_0641-mr.pdf",
+    notes="Planned orbit-insertion altitude 226 km; final estimate about 57 km.",
 )

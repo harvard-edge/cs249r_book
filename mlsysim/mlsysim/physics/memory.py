@@ -458,3 +458,65 @@ def calc_decoder_matmul_weights(layers, hidden_dim, vocab_size, mlp_ratio=4):
     d = hidden_dim
     per_block = d * 3 * d + d * d + 2 * d * mlp_ratio * d
     return {"block": layers * per_block, "block_matrices": 4 * layers, "output": vocab_size * d}
+
+
+# --- KV cache residency: fit, blocks, sharing (added 2026-10-20) -------------
+
+def calc_kv_attention_design(heads, kv_heads=None, kv_lora_rank=None) -> str:
+    """
+    The attention design a model's KV geometry implies: "MLA", "GQA", or "MHA".
+
+    Multi-head latent attention (MLA) caches one compressed latent per token
+    per layer (``kv_lora_rank`` set). Grouped-query attention (GQA) stores
+    fewer key-value heads than query heads. Multi-head attention (MHA) stores
+    one key-value head per query head.
+    """
+    if kv_lora_rank:
+        return "MLA"
+    if kv_heads and heads and kv_heads < heads:
+        return "GQA"
+    return "MHA"
+
+
+def calc_kv_resident_fit(pool, bytes_per_sequence) -> int:
+    """
+    Whole sequences of ``bytes_per_sequence`` that fit in ``pool``.
+
+        B = floor(M_pool / (S * m_token))
+
+    Both arguments are byte quantities. The count is a memory-only bound: it
+    ignores block rounding, headroom, and promised output growth unless the
+    caller has folded them into ``bytes_per_sequence``.
+    """
+    return int((pool / bytes_per_sequence).to("").magnitude)
+
+
+def calc_kv_block_count(tokens: int, block_tokens: int) -> int:
+    """Blocks of ``block_tokens`` a sequence of ``tokens`` occupies: ceil(S / b)."""
+    validate_at_least(block_tokens, 1, "block_tokens")
+    return math.ceil(tokens / block_tokens)
+
+
+def calc_shared_prefix_fit(pool_blocks: int, shared_blocks: int, private_blocks: int) -> int:
+    """
+    Requests that fit when ``shared_blocks`` are stored once for all of them.
+
+        B_shared = floor((N_blocks - N_common) / N_private)
+
+    Each request adds only its ``private_blocks``; the common prefix is
+    counted once, as unique physical blocks.
+    """
+    return (pool_blocks - shared_blocks) // private_blocks
+
+
+def calc_sharing_gain_limit(shared_fraction: float) -> float:
+    """
+    Large-pool limit of the resident-fit gain from sharing: 1 / (1 - f).
+
+    ``f`` is the shared fraction of each request's blocks. As the pool grows,
+    the one stored copy of the prefix becomes negligible and every request
+    costs only its private share.
+    """
+    if not 0 <= shared_fraction < 1:
+        raise ValueError("shared_fraction must be in [0, 1)")
+    return 1 / (1 - shared_fraction)

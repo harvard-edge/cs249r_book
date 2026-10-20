@@ -200,8 +200,9 @@ Because the collection source determines how the machine interacts with its phys
 # │ Goal:    Show how few independent observations one hour of 1 kHz logging
 # │          holds when adjacent records are almost perfectly correlated.
 # │ Show:    Records per hour; lag-1 correlation; effective sample size.
-# │ How:     N = rate * 1 h; N_eff = N (1 - rho) / (1 + rho) for an AR(1)
-# │          statistic (Thiebaux and Zwiers 1984).
+# │ How:     Scenarios.PermissionTickTelemetryHour: N = rate * 1 h;
+# │          N_eff = N (1 - rho) / (1 + rho) for an AR(1) statistic
+# │          (Thiebaux and Zwiers 1984).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
@@ -213,14 +214,15 @@ class EffectiveSampleSize:
     """Effective sample size of one hour of permission-tick telemetry."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    f_log = RM.permission_rate  # one record per permission tick; category: datasheet
-    t_log = 1.0 * hour  # category: chosen
-    rho = 0.999  # lag-1 autocorrelation of a slowly varying statistic; category: illustrative
+    _log = Scenarios.PermissionTickTelemetryHour
+    f_log = _log.rate  # one record per permission tick; category: datasheet
+    t_log = _log.duration  # category: chosen
+    rho = _log.lag1_correlation  # lag-1 autocorrelation of a slowly varying statistic; category: illustrative
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    n_records = (f_log * t_log).to("").magnitude
-    n_eff = n_records * (1.0 - rho) / (1.0 + rho)
-    ratio = n_records / n_eff
+    n_records = _log.records
+    n_eff = _log.effective_samples
+    ratio = _log.oversampling
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
     check(abs(n_records - 3.6e6) < 1e-6, "One hour at 1 kHz should be 3.6 million records")
@@ -310,38 +312,38 @@ Recording the right action tap still leaves open when each recorded observation 
 # │          injects against the latch clearance, at transit and latch speeds.
 # │ Show:    Displacement at 0.50 m/s transit and at the two latch approaches;
 # │          the largest tolerable lag at each latch speed.
-# │ How:     dx = v * lag; lag_max = clearance / v. Latch speeds from AISLE;
-# │          transit speed, lag, and clearance are chapter-local scenario inputs.
+# │ How:     Scenarios.LatchPairingLag: dx = v * lag; lag_max = clearance / v.
+# │          Latch speeds from AISLE; the tighter plate is its 1 mm variant.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
 from mlsysim.fmt import fmt_length, fmt_velocity, fmt_latency, fmt_multiple, check
 
-AISLE = Embodied.Scenario.WarehouseAisle
-
 class SyncDisplacement:
     """Displacement from pairing an observation with an action across a lag."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    v_transit = 0.50 * meter / second  # generic arm transit speed; category: illustrative
-    t_lag = 35.0 * millisecond  # uncompensated exposure-to-arrival lag; category: illustrative
-    clearance = 2.0 * millimeter  # latch clearance; scenario assumption; category: illustrative
-    v_guarded = AISLE.v_latch_approach  # category: illustrative
-    v_fast = AISLE.v_latch_high  # category: illustrative
-    t_skew_lo = 15.0 * millisecond  # full-frame rolling-shutter skew, fast readout; category: illustrative
-    t_skew_hi = 33.0 * millisecond  # full-frame rolling-shutter skew, one 30 Hz frame; category: illustrative
-    clearance_tight = 1.0 * millimeter  # tighter strike plate asked about in the checkpoint; category: illustrative
+    _pair = Scenarios.LatchPairingLag
+    _tight = Scenarios.LatchPairingLagTightPlate  # tighter strike plate asked about in the checkpoint
+    v_transit = _pair.transit_speed  # generic arm transit speed; category: illustrative
+    t_lag = _pair.lag  # uncompensated exposure-to-arrival lag; category: illustrative
+    clearance = _pair.clearance  # latch clearance; category: illustrative
+    v_guarded = _pair.guarded_speed  # AISLE.v_latch_approach; category: illustrative
+    v_fast = _pair.fast_speed  # AISLE.v_latch_high; category: illustrative
+    t_skew_lo = _pair.shutter_skew_low  # full-frame rolling-shutter skew, fast readout; category: illustrative
+    t_skew_hi = _pair.shutter_skew_high  # full-frame rolling-shutter skew, one 30 Hz frame; category: illustrative
+    clearance_tight = _tight.clearance  # category: illustrative
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    dx_transit = (v_transit * t_lag).to(millimeter)
-    dx_guarded = (v_guarded * t_lag).to(millimeter)
-    dx_fast = (v_fast * t_lag).to(millimeter)
-    transit_over_clearance = (dx_transit / clearance).to("").magnitude
-    lag_max_guarded = (clearance / v_guarded).to(millisecond)
-    lag_max_fast = (clearance / v_fast).to(millisecond)
-    dx_skew_transit = (v_transit * t_skew_hi).to(millimeter)
-    dx_skew_fast = (v_fast * t_skew_hi).to(millimeter)
-    lag_max_tight = (clearance_tight / v_fast).to(millisecond)  # checkpoint answer; not printed
+    dx_transit = _pair.displacement_transit
+    dx_guarded = _pair.displacement_guarded
+    dx_fast = _pair.displacement_fast
+    transit_over_clearance = _pair.transit_over_clearance
+    lag_max_guarded = _pair.lag_ceiling_guarded
+    lag_max_fast = _pair.lag_ceiling_fast
+    dx_skew_transit = _pair.skew_displacement_transit
+    dx_skew_fast = _pair.skew_displacement_fast
+    lag_max_tight = _tight.lag_ceiling_fast  # checkpoint answer; not printed
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
     check(abs(dx_transit.magnitude - 17.5) < 1e-9, "Transit displacement should be 17.5 mm")
@@ -557,8 +559,8 @@ By mapping each leader joint directly to the corresponding follower joint ($\Lea
 # │          that the operator's own reaction dominates the loop.
 # │ Show:    Display, human, command, and mechanical latencies; their sum; the
 # │          instant the correction is commanded; the human share.
-# │ How:     t_loop = t_disp + t_hum + t_cmd + t_mech. Stage values are the
-# │          chapter's illustrative reference setup (see the Reader Guide).
+# │ How:     Scenarios.TeleopCorrectionLoop: t_loop = t_disp + t_hum + t_cmd
+# │          + t_mech, an illustrative reference setup (see the Reader Guide).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
@@ -568,15 +570,16 @@ class TeleopLoopLatency:
     """Round-trip latency of one teleoperated correction."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    t_disp = 50.0 * millisecond  # exposure, decode, raster refresh; category: illustrative
-    t_hum = 200.0 * millisecond  # perception, planning, neuromuscular; category: illustrative
-    t_cmd = 10.0 * millisecond  # quantization, packetization, bus; category: illustrative
-    t_mech = 80.0 * millisecond  # torque ramp and structural inertia; category: illustrative
+    _loop = Scenarios.TeleopCorrectionLoop
+    t_disp = _loop.display  # exposure, decode, raster refresh; category: illustrative
+    t_hum = _loop.human  # perception, planning, neuromuscular; category: illustrative
+    t_cmd = _loop.command  # quantization, packetization, bus; category: illustrative
+    t_mech = _loop.mechanical  # torque ramp and structural inertia; category: illustrative
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    t_loop = (t_disp + t_hum + t_cmd + t_mech).to(millisecond)
-    t_commanded = (t_disp + t_hum).to(millisecond)  # correction commanded after contact
-    hum_share = (t_hum / t_loop).to("").magnitude
+    t_loop = _loop.loop
+    t_commanded = _loop.command_issued  # correction commanded after contact
+    hum_share = _loop.human_share
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
     # margin_teleop_loop_latency_strip.svg fig-alt hand-types the same stage values.
@@ -643,83 +646,57 @@ The loop's latency is the first cost a demonstration carries; the second is what
 # │ Show:    Per-camera raw rates, the 9-axis kinematic stream, the total, the
 # │          hourly and per-shift storage, and the 8x-compressed rate against
 # │          SATA and Gen4 NVMe write bandwidth.
-# │ How:     Camera geometry and frame rates from the registry (navigation
-# │          IMX477, wrist IMX296, two external RealSense D435i); axis count and
-# │          logging rate from RM; calc_teleop_ingestion_budget per camera group.
+# │ How:     Scenarios.WarehouseTeleopIngestion: camera geometry and frame
+# │          rates from the registry (navigation IMX477, wrist IMX296, two
+# │          external RealSense D435i); axis count and logging rate from RM;
+# │          calc_teleop_ingestion_budget per camera group.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
 from mlsysim.fmt import fmt_bandwidth, fmt_memory, fmt_frequency, fmt_int, fmt_multiple, fmt_percent, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
-AISLE = Embodied.Scenario.WarehouseAisle
 
 class MultiCameraIngestionBudget:
     """Raw telemetry bandwidth and storage for the machine's teleoperation sessions."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    _ing = Scenarios.WarehouseTeleopIngestion
     cam_nav = RM.nav_camera  # category: datasheet
     cam_wrist = RM.wrist_camera  # category: datasheet
-    cam_ext = Sensors.Camera.Intel_RealSense_D435i  # category: datasheet
-    n_ext = 2  # scenario assumption; category: chosen
-    bytes_per_px_rgb = 3  # 24-bit RGB after debayering; category: chosen
-    bytes_per_px_depth = 2  # uint16 depth aligned to the color frame; category: chosen
+    cam_ext = _ing.external_camera  # Sensors.Camera.Intel_RealSense_D435i; category: datasheet
+    n_ext = _ing.external_cameras  # category: chosen
+    bytes_per_px_rgb = _ing.rgb_bytes_per_pixel  # 24-bit RGB after debayering; category: chosen
+    bytes_per_px_depth = _ing.depth_bytes_per_pixel  # uint16 depth aligned to the color frame; category: chosen
 
     n_axes = RM.servo_axes  # 2 base + 7 arm; category: datasheet
     f_log = RM.permission_rate  # kinematics logged every permission tick; category: chosen
-    values_per_axis = 6  # position, velocity (a_meas), torque, a_req, a_cmd, a_enf; category: chosen
-    bytes_per_value = 4  # float32; category: chosen
-    bytes_timestamp = 8  # one 64-bit timestamp per step; category: chosen
+    values_per_axis = _ing.values_per_axis  # position, velocity (a_meas), torque, a_req, a_cmd, a_enf; category: chosen
+    bytes_per_value = _ing.bytes_per_value  # float32; category: chosen
+    bytes_timestamp = _ing.timestamp_bytes  # one 64-bit timestamp per step; category: chosen
 
-    shift_hours = 8.0  # scenario assumption; category: chosen
-    compression_ratio = 8.0  # intra-frame video codec; category: illustrative
-    bw_sata = Systems.Storage.SataSsd.bandwidth  # category: datasheet
-    bw_nvme = Hardware.Tech.Storage.NvmeGen4.bandwidth  # category: datasheet
+    shift_hours = _ing.shift.to(hour).magnitude  # category: chosen
+    compression_ratio = _ing.compression_ratio  # intra-frame video codec; category: illustrative
+    bw_sata = _ing.slow_drive_bandwidth  # Systems.Storage.SataSsd; category: datasheet
+    bw_nvme = _ing.fast_drive_bandwidth  # Hardware.Tech.Storage.NvmeGen4; category: datasheet
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    bytes_per_step = n_axes * values_per_axis * bytes_per_value + bytes_timestamp
-    bw_kin = (bytes_per_step * byte * f_log).to(MB / second)
+    bytes_per_step = _ing.record_bytes
+    bw_kin = _ing.kinematic_rate
 
-    res_nav = calc_teleop_ingestion_budget(
-        num_cameras=1,
-        rgb_width=cam_nav.resolution_width,
-        rgb_height=cam_nav.resolution_height,
-        rgb_fps=cam_nav.frame_rate.to(hertz).magnitude,
-        rgb_bytes_per_pixel=bytes_per_px_rgb,
-        kinematics_bytes_per_sec=bw_kin,
-    )
-    res_wrist = calc_teleop_ingestion_budget(
-        num_cameras=1,
-        rgb_width=cam_wrist.resolution_width,
-        rgb_height=cam_wrist.resolution_height,
-        rgb_fps=cam_wrist.frame_rate.to(hertz).magnitude,
-        rgb_bytes_per_pixel=bytes_per_px_rgb,
-    )
-    res_ext = calc_teleop_ingestion_budget(
-        num_cameras=n_ext,
-        rgb_width=cam_ext.resolution_width,
-        rgb_height=cam_ext.resolution_height,
-        rgb_fps=cam_ext.frame_rate.to(hertz).magnitude,
-        rgb_bytes_per_pixel=bytes_per_px_rgb,
-        depth_width=cam_ext.resolution_width,
-        depth_height=cam_ext.resolution_height,
-        depth_fps=cam_ext.frame_rate.to(hertz).magnitude,
-        depth_bytes_per_pixel=bytes_per_px_depth,
-    )
+    bw_nav = _ing.nav_rate
+    bw_wrist = _ing.wrist_rate
+    bw_ext_rgb = _ing.external_rgb_rate
+    bw_ext_depth = _ing.external_depth_rate
+    bw_ext = _ing.external_rate
+    bw_total = _ing.total_rate
+    storage_hour = _ing.storage_per_hour
+    storage_shift = _ing.storage_per_shift
 
-    bw_nav = res_nav["bw_rgb"]
-    bw_wrist = res_wrist["bw_rgb"]
-    bw_ext_rgb = res_ext["bw_rgb"]
-    bw_ext_depth = res_ext["bw_depth"]
-    bw_ext = res_ext["bw_vision"]
-    bw_total = (res_nav["bw_total"] + res_wrist["bw_total"] + res_ext["bw_total"]).to(MB / second)
-    storage_hour = (res_nav["storage_per_hour"] + res_wrist["storage_per_hour"] + res_ext["storage_per_hour"]).to(TB)
-    storage_shift = (storage_hour * shift_hours).to(TB)
-
-    nav_over_sata = (bw_nav / bw_sata).to("").magnitude
-    kin_share = (bw_kin / bw_total).to("").magnitude
-    bw_compressed = (bw_total / compression_ratio).to(MB / second)
-    storage_hour_compressed = (storage_hour / compression_ratio).to(TB)
+    nav_over_sata = _ing.nav_over_slow_drive
+    kin_share = _ing.kinematic_share
+    bw_compressed = _ing.compressed_rate
+    storage_hour_compressed = _ing.compressed_storage_per_hour
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
     check(n_axes == 9, "The machine logs 9 axes (2 base, 7 arm)")
@@ -833,10 +810,10 @@ Sizing the NVMe drive settles what one hour in the workcell writes to disk, but 
 # │          wear per campaign on the warehouse mobile manipulator.
 # │ Show:    Expected retained episodes per session and campaign wear budget;
 # │          the latch tripwire that ends a failed attempt.
-# │ How:     Floor active time / cycle time (one opening plus one re-latch),
-# │          apply retention, then count cycles. Tripwire from AISLE.
+# │ How:     Scenarios.LatchDemonstrationCampaign: floor active time / cycle
+# │          time (one opening plus one re-latch), apply retention, then count
+# │          cycles. Tripwire from AISLE.
 # └─────────────────────────────────────────────────────────────────────────────
-import math
 from mlsysim import *
 from mlsysim.core.units import *
 from mlsysim.fmt import fmt, fmt_time, fmt_force, fmt_int, fmt_percent, fmt_multiple, check
@@ -848,52 +825,53 @@ class DemonstrationYieldFatigue:
     """Facility operational yield and mechanical component wear budgeting."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    _camp = Scenarios.LatchDemonstrationCampaign
     f_trip = AISLE.f_latch_tripwire  # category: illustrative
-    t_sched = 60.0 * minute  # declared session length; category: chosen
-    t_motion = 35.0 * minute  # category: illustrative
-    t_startup = 8.0 * minute  # cell startup and bus sync; category: illustrative
-    t_calib = 7.0 * minute  # sensor calibration and nulling; category: illustrative
-    t_rest = 10.0 * minute  # operator rest; category: illustrative
-    t_att = 25.0 * second  # category: illustrative
-    t_rst = 15.0 * second  # category: illustrative
-    t_cyc = t_att + t_rst  # category: derived
+    t_sched = _camp.session  # declared session length; category: chosen
+    t_motion = _camp.active  # category: illustrative
+    t_startup = _camp.startup  # cell startup and bus sync; category: illustrative
+    t_calib = _camp.calibration  # sensor calibration and nulling; category: illustrative
+    t_rest = _camp.rest  # operator rest; category: illustrative
+    t_att = _camp.attempt  # category: illustrative
+    t_rst = _camp.reset  # category: illustrative
+    t_cyc = _camp.cycle  # category: derived
 
-    failure_rate = 0.20  # category: illustrative
-    qa_filter_rate = 0.15  # category: illustrative
-    retention_rate = (1.0 - failure_rate) * (1.0 - qa_filter_rate)  # category: derived
+    failure_rate = _camp.failure_rate  # category: illustrative
+    qa_filter_rate = _camp.qa_rate  # category: illustrative
+    retention_rate = _camp.retention  # category: derived
 
-    n_campaign_target = 5000  # benchmark target; category: chosen
-    n_gear_reversals = 14  # category: illustrative
-    n_cable_open = 6  # flexes while opening; category: illustrative
-    n_cable_return = 2  # flexes on the return stroke during the re-latch; category: illustrative
-    n_cable_flex = n_cable_open + n_cable_return  # category: derived
-    l10_gear_life = 5_000_000  # rated stress cycles; category: illustrative
-    l10_cable_life = 200_000  # rated bending cycles; category: illustrative
+    n_campaign_target = _camp.target_kept  # benchmark target; category: chosen
+    n_gear_reversals = _camp.gear_reversals_per_attempt  # category: illustrative
+    n_cable_open = _camp.cable_flexes_opening  # flexes while opening; category: illustrative
+    n_cable_return = _camp.cable_flexes_return  # flexes on the return stroke during the re-latch; category: illustrative
+    n_cable_flex = _camp.cable_flexes_per_attempt  # category: derived
+    l10_gear_life = _camp.gear_rated_cycles  # rated stress cycles; category: illustrative
+    l10_cable_life = _camp.cable_rated_cycles  # rated bending cycles; category: illustrative
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    n_raw_attempts = int(t_motion.to(second) // t_cyc.to(second))
-    n_usable = n_raw_attempts * retention_rate
-    t_idle = (t_motion - n_raw_attempts * t_cyc).to(second)  # active time too short for one more cycle
-    t_yield = (n_usable * t_att).to(minute)
-    yield_pct = (t_yield / t_sched).magnitude * 100.0
+    n_raw_attempts = _camp.attempts_per_session
+    n_usable = _camp.kept_per_session
+    t_idle = _camp.idle  # active time too short for one more cycle
+    t_yield = _camp.kept_time
+    yield_pct = _camp.kept_share * 100.0
 
-    n_total_attempts = int(math.ceil(n_campaign_target / retention_rate))
-    t_sched_campaign = (n_total_attempts / n_raw_attempts) * (1.0 * hour)
-    overhead_factor = t_sched_campaign.magnitude / ((n_campaign_target * t_att).to(hour).magnitude)
+    n_total_attempts = _camp.campaign_attempts
+    t_sched_campaign = _camp.campaign_time
+    overhead_factor = _camp.overhead_factor
 
-    gear_cycles = n_total_attempts * n_gear_reversals
-    cable_cycles = n_total_attempts * n_cable_flex
-    gear_fatigue_pct = (gear_cycles / l10_gear_life) * 100.0
-    cable_fatigue_pct = (cable_cycles / l10_cable_life) * 100.0
+    gear_cycles = _camp.gear_cycles
+    cable_cycles = _camp.cable_cycles
+    gear_fatigue_pct = _camp.gear_life_used * 100.0
+    cable_fatigue_pct = _camp.cable_life_used * 100.0
 
-    # Per-session rows of @tbl-05-collection-budget
-    t_resets = (n_raw_attempts * t_rst).to(second)
-    t_attempts = (n_raw_attempts * t_att).to(second)
-    t_fail = (-failure_rate * t_attempts).to(second)
-    t_qa = (-qa_filter_rate * (t_attempts + t_fail)).to(second)
+    # Per-session rows of @tbl-05-collection-budget (losses as negative rows)
+    t_resets = _camp.reset_time
+    t_attempts = _camp.attempt_time
+    t_fail = -_camp.failed_time
+    t_qa = -_camp.qa_time
     t_net = (t_attempts + t_fail + t_qa).to(second)
-    ep_fail = -failure_rate * n_raw_attempts
-    ep_qa = -qa_filter_rate * (n_raw_attempts + ep_fail)
+    ep_fail = -_camp.failed_episodes
+    ep_qa = -_camp.qa_episodes
     sess_return_flex = n_raw_attempts * n_cable_return
     sess_reversals = n_raw_attempts * n_gear_reversals
     sess_open_flex = n_raw_attempts * n_cable_open
@@ -1048,39 +1026,26 @@ Public collection shows what that yield arithmetic produces at community scale. 
 # │       not by episodes per dataset.
 # │ Show: Dataset count at three dates; median-scale facts about episodes
 # │       per dataset (share under 16, share at or above 512).
-# │ How:  Literature.LeRobotHubMonthly and LeRobotEpisodeHistogram
-# │       (power-of-two bins, all creation years pooled).
+# │ How:  Scenarios.LeRobotHubDatasetCounts over Literature.LeRobotHubMonthly
+# │       and LeRobotEpisodeHistogram (power-of-two bins, creation years pooled).
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Literature
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_int, fmt_percent
 
 class LeRobotHub:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    months = Literature.LeRobotHubMonthly.entries
-    bins = Literature.LeRobotEpisodeHistogram.entries
-    small, large = 16, 512  # episodes per dataset
+    _hub = Scenarios.LeRobotHubDatasetCounts
+    small, large = _hub.small_episodes, _hub.large_episodes  # episodes per dataset
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    count_at = {m["month"]: m["cumulative_datasets"] for m in months}
-    n_2024_12, n_2025_12, n_now = count_at["2024-12"], count_at["2025-12"], months[-1]["cumulative_datasets"]
-    now_month = months[-1]["month"]
+    n_2024_12, n_2025_12, n_now = _hub.count_at("2024-12"), _hub.count_at("2025-12"), _hub.latest_count
+    now_month = _hub.latest_month
     session_yield = DemonstrationYieldFatigue.n_usable  # illustrative hour of @tbl-05-collection-budget
-    n_counted = under_small = at_large = 0.0
-    for _b in bins:
-        n_counted += _b["datasets"]
-        under_small += _b["datasets"] * (_b["bin_hi"] <= small)
-        at_large += _b["datasets"] * (_b["bin_lo"] >= large)
-
-    _pooled = {}
-    for _b in bins:
-        _pooled[_b["bin_lo"]] = _pooled.get(_b["bin_lo"], 0) + _b["datasets"]
-    _run = 0.0
-    for _lo in sorted(_pooled):
-        _run += _pooled[_lo]
-        if _run >= n_counted / 2:
-            median_lo = _lo
-            break
-    median_hi = 2 * median_lo if median_lo else 1
+    n_counted = _hub.counted
+    under_small = _hub.small_share * n_counted
+    at_large = _hub.large_share * n_counted
+    median_lo = _hub.median_bin_low
+    median_hi = _hub.median_bin_high
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(median_hi <= session_yield, "Prose says the median dataset is smaller than one illustrative session")
@@ -1155,6 +1120,59 @@ The three costs compound into a fourth that no bill shows. Teleoperated demonstr
 
 ## Collection Policy Coverage {#sec-data-policy-coverage}
 
+```{python}
+#| label: calc-data-contact-grid-coverage
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CONTACT-GRID COVERAGE OF TWO ARCHIVES (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-data-policy-coverage (opening paragraph) and
+# │          @tbl-data-collector-coverage
+# │ Goal:    Pin the hand-typed grid, occupancy, and error values of the
+# │          paragraph and table to the scenario the slides read.
+# │ Show:    Nothing printed: the prose types one-decimal values ("15.0",
+# │          "85.0%") that the fmt precision guard rejects as integer-like.
+# │ How:     Scenarios.ContactAngleCoverage: cells = angle bins x force bins;
+# │          an archive occupies the whole bins inside its ranges.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import check
+
+class ContactGridCoverage:
+    """Occupied cells of a contact grid for a cautious and an exploratory archive."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    _grid = Scenarios.ContactAngleCoverage
+    c_a_lo, c_a_hi, c_f_lo, c_f_hi, c_rms = _grid.archives["cautious"]  # category: illustrative
+    e_a_lo, e_a_hi, e_f_lo, e_f_hi, e_rms = _grid.archives["exploratory"]  # category: illustrative
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    n_cells = _grid.cells
+    c_cells, e_cells = _grid.occupied("cautious"), _grid.occupied("exploratory")
+    c_empty, e_empty = _grid.empty("cautious"), _grid.empty("exploratory")
+
+    # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
+    # The paragraph and @tbl-data-collector-coverage hand-type every value below.
+    check(_grid.angle_min.to(degree).magnitude == -15 and _grid.angle_max.to(degree).magnitude == 15, "Prose: -15.0 to +15.0 degrees")
+    check(_grid.angle_bin.to(degree).magnitude == 1 and _grid.force_bin.to(newton).magnitude == 1, "Prose: 1.0 degree and 1.0 N bins")
+    check(_grid.force_max.to(newton).magnitude == 20, "Prose: normal forces up to 20.0 N")
+    check(_grid.records == 1_000_000 and _grid.record_rate.to(hertz).magnitude == 100, "Prose and table: 1,000,000 transitions at 100 Hz")
+    check(c_a_hi.to(degree).magnitude == 2 and c_a_lo == -c_a_hi, "Prose: within plus or minus 2.0 degrees")
+    check(c_f_lo.to(newton).magnitude == 4 and c_f_hi.to(newton).magnitude == 6, "Prose: 4.0 to 6.0 N")
+    check(e_f_lo.to(newton).magnitude == 1 and e_f_hi.to(newton).magnitude == 18, "Prose: 1.0 and 18.0 N")
+    check(n_cells == 600 and c_cells == 8 and e_cells == 510, "Prose and table: 8 and 510 of 600 cells")
+    check(c_empty == 592 and e_empty == 90, "Table: 592 and 90 zero-count cells")
+    check(round(100 * _grid.share("cautious"), 1) == 1.3 and round(100 * _grid.share("exploratory"), 1) == 85.0, "Table: 1.3% and 85.0%")
+    check(round(100 * _grid.empty_share("cautious"), 1) == 98.7 and round(100 * _grid.empty_share("exploratory"), 1) == 15.0, "Prose and table: 98.7 and 15.0 percent empty")
+    check(c_rms.to(radian).magnitude == 0.001 and e_rms.to(radian).magnitude == 0.012, "Table: 0.001 and 0.012 rad held-out error")
+
+    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
+    # None: the paragraph and table hand-type the values guarded above.
+```
+
 Every logged latch record carries an ingestion cost, an attributed action label, and a hardware timestamp, yet those fields say nothing about which physical situations the archive covers. In an illustrative contact task where a gripper aligns with a workpiece edge across contact angles $\GripperContactAngle \in [-15.0^\circ, +15.0^\circ]$ and normal forces up to $20.0\text{ N}$, binning at $1.0^\circ$ and $1.0\text{ N}$ forms an operational grid of 600 discrete cells. Suppose two collection policies each record $1{,}000{,}000$ transitions at $100\text{ Hz}$ with identical sensors. A cautious teleoperator keeps contact within $\pm 2.0^\circ$ of perpendicular under $4.0\text{ to }6.0\text{ N}$ of normal force, populating 8 cells and leaving 98.7 percent of the grid empty. An exploratory policy approaches across the full angular range, slips, and loads the contact between $1.0\text{ and }18.0\text{ N}$, filling 510 cells and leaving 15.0 percent empty. Although both datasets have identical record counts, storage sizes, and hardware timestamps, they answer different operational questions. Record count therefore fails as a measure twice over: correlated control steps hold few independent samples (@eq-data-effective-sample-size), and even independent samples support only the cells where they land.
 
 That disparity arises because a physical dataset comes from running a closed-loop policy on hardware and logging the resulting transitions, violating the independent-and-identically-distributed assumption of standard empirical risk minimization (@sec-data-covariate-shift). Instead, it traces an **empirical state-action occupancy distribution**\index{Empirical state-action occupancy distribution} [@spencer2021feedback] $\CollectionStateVisitationDistribution(\DecisionProcessState, \DemonstrationActionLabel)$ generated by a specific collecting policy $\pi_{\text{col}}$ under its own control biases, interface delays, and risk tolerance. Formally, imitation learning minimizes prediction error weighted solely by this empirical occupancy:
@@ -1180,7 +1198,8 @@ $$\StateSpaceDimension = 7\text{ (joint angles)} + 7\text{ (joint velocities)} +
 # │ Show:    Cells at B = 10 bins per axis; records from a 1,000-robot fleet
 # │          logging at 1 kHz for the age of the universe; the largest
 # │          fraction of cells those records could visit.
-# │ How:     cells = B^d; records = fleet * rate * age; fraction = records/cells.
+# │ How:     Scenarios.WarehouseManipulatorStateGrid: cells = B^d; records =
+# │          fleet * rate * age (AGE_OF_UNIVERSE); fraction = records/cells.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
@@ -1190,18 +1209,19 @@ class StateSpaceCoverage:
     """Upper bound on grid coverage from brute-force logging."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    d = 7 + 7 + 2 + 6 + 6  # joint angles, velocities, wheels, wrench, workpiece pose; category: derived
-    bins = 10  # bins per axis; category: illustrative
-    bins_fine = 100  # bins per axis fine enough to guide contact; category: illustrative
-    n_fleet = 1000  # robots; category: illustrative
-    f_log = 1000.0 * hertz  # category: illustrative
-    t_universe = 13.8e9 * year  # age of the universe (Planck 2018, 13.8 Gyr); category: physical constant
+    _grid = Scenarios.WarehouseManipulatorStateGrid
+    d = _grid.dims  # joint angles, velocities, wheels, wrench, workpiece pose; category: derived
+    bins = _grid.bins  # bins per axis; category: illustrative
+    bins_fine = _grid.fine_bins  # bins per axis fine enough to guide contact; category: illustrative
+    n_fleet = _grid.fleet  # robots; category: illustrative
+    f_log = _grid.log_rate  # category: illustrative
+    t_universe = _grid.duration  # age of the universe (Planck 2018, 13.8 Gyr); category: physical constant
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    n_cells = float(bins) ** d
-    n_cells_fine = float(bins_fine) ** d
-    n_records = n_fleet * (f_log * t_universe).to("").magnitude
-    frac_max = n_records / n_cells
+    n_cells = _grid.cells
+    n_cells_fine = _grid.fine_cells
+    n_records = _grid.records
+    frac_max = _grid.max_coverage
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
     check(d == 28, "State dimension should be 28")
@@ -1269,8 +1289,8 @@ A held-out validation split drawn from the same collecting policy can evaluate a
 # │          nominal table and mostly empty against the table the door needs.
 # │ Show:    Plate offset {nominal, +3, -3 mm} x approach {0.03, 0.10 m/s};
 # │          demonstrations only in (nominal, 0.03 m/s); 5 of 6 cells at zero.
-# │ How:     Approach speeds and tripwire from AISLE; plate offsets and the
-# │          logged offset band are chapter-local scenario inputs.
+# │ How:     Scenarios.LatchScenarioTable and its AfterRecovery variant;
+# │          approach speeds and tripwire from AISLE.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
@@ -1287,23 +1307,21 @@ class LatchScenarioTable:
     v_fast = AISLE.v_latch_high  # category: illustrative
     f_trip = AISLE.f_latch_tripwire  # category: illustrative
     f_limit = AISLE.f_latch_limit  # category: illustrative (latch damage limit)
-    plate_offset = 3.0 * millimeter  # scenario assumption; category: illustrative
-    logged_offset = 0.5 * millimeter  # scenario assumption; category: illustrative
-    offsets = [0.0 * millimeter, plate_offset, -plate_offset]  # category: illustrative
-    speeds = [v_guarded, v_fast]  # category: illustrative
+    _table = Scenarios.LatchScenarioTable
+    _recovery = Scenarios.LatchScenarioTableAfterRecovery
+    plate_offset = max(_table.offsets)  # category: illustrative
+    logged_offset = _table.logged_offset  # category: illustrative
+    offsets = _table.offsets  # category: illustrative
+    speeds = _table.speeds  # category: illustrative
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     # Demonstrated cells: the plate within the logged band and the guarded speed.
-    n_cells = len(offsets) * len(speeds)
-    n_supported = 0
-    for _d in offsets:
-        for _v in speeds:
-            if abs(_d) <= logged_offset and _v == v_guarded:
-                n_supported += 1
-    n_zero = n_cells - n_supported
+    n_cells = _table.cells
+    n_supported = _table.supported
+    n_zero = _table.absences
     # Successor archive after latch-recovery-02: adds the positive-offset guarded cell.
-    n_supported_recovery = n_supported + offsets.count(plate_offset)
-    n_zero_recovery = n_cells - n_supported_recovery
+    n_supported_recovery = _recovery.supported
+    n_zero_recovery = _recovery.absences
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────
     check(abs(v_guarded.to(meter / second).magnitude - 0.03) < 1e-9, "Guarded approach should be 0.03 m/s")
@@ -1455,7 +1473,8 @@ where $\AggregatedSurrogateLoss$ represents the surrogate loss of the best singl
 # │          enough that the quadratic bound is not vacuous.
 # │ Show:    Horizon in steps, both bound values, and the per-step error above
 # │          which T^2*eps exceeds the episode's maximum cost T.
-# │ How:     T = episode duration x control rate; crossover eps = 1/S.
+# │ How:     Scenarios.ImitationBoundsFiveSecondEpisode: T = episode
+# │          duration x control rate; crossover eps = 1/S.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import *
@@ -1465,16 +1484,17 @@ class BoundComparison:
     """Illustrative horizon dependence of the two imitation cost bounds."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    t_episode = 5.0 * second  # category: illustrative
-    f_ctrl = 100.0 * hertz  # category: illustrative
-    eps = 1.0e-3  # per-step disagreement probability; category: illustrative
-    u = 1.0  # recoverability constant for a recoverable task; category: illustrative
+    _bounds = Scenarios.ImitationBoundsFiveSecondEpisode
+    t_episode = _bounds.episode  # category: illustrative
+    f_ctrl = _bounds.control_rate  # category: illustrative
+    eps = _bounds.per_step_error  # per-step disagreement probability; category: illustrative
+    u = _bounds.recoverability  # recoverability constant for a recoverable task; category: illustrative
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
-    T = int(round((t_episode * f_ctrl).to("").magnitude))
-    bc = T * T * eps
-    agg = u * T * eps
-    eps_vacuous = 1.0 / T
+    T = _bounds.horizon_steps
+    bc = _bounds.cloning
+    agg = _bounds.aggregation
+    eps_vacuous = _bounds.vacuous_error
 
     # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
     check(T == 500, "Horizon should be 500 steps")
@@ -1558,36 +1578,28 @@ How much work the compatibility contract has to do is visible in the largest poo
 # │       embodiment contract.
 # │ Show: Single-arm and mobile-manipulator shares; table-top share; share
 # │       recorded at 10 Hz; share with no stated command rate.
-# │ How:  Literature.OpenXEmbodimentComposition, episode-weighted; chunk rate
-# │       from Embodied.MobileManipulator.WarehouseMobileManipulator.
+# │ How:  Scenarios.OpenXEmbodimentPoolComposition over
+# │       Literature.OpenXEmbodimentComposition, episode-weighted, against the
+# │       chunk rate of Embodied.MobileManipulator.WarehouseMobileManipulator.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Embodied, Literature
-from mlsysim.core.units import hertz
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_int, fmt_percent
 
 class OxeComposition:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    rows = tuple(filter(lambda r: r["episodes"], Literature.OpenXEmbodimentComposition.entries))
-    chunk_hz = Embodied.MobileManipulator.WarehouseMobileManipulator.chunk_rate.to(hertz).magnitude
+    _pool = Scenarios.OpenXEmbodimentPoolComposition
+    rows = tuple(_pool.rows)
+    chunk_hz = _pool.threshold_hz
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    total = sum(r["episodes"] for r in rows)
-    single_arm = mobile = table = at_10hz = no_rate = top_two_mobile = 0.0
-    _mobile = []
-    for _r in rows:
-        _e = _r["episodes"]
-        single_arm += _e * (_r["robot_morphology"] == "Single Arm")
-        table += _e * ("table" in str(_r["scene_type"]).lower())
-        at_10hz += _e * (_r["control_frequency_hz"] == 10.0)
-        no_rate += _e * (not isinstance(_r["control_frequency_hz"], float))
-        if _r["robot_morphology"] == "Mobile Manipulator":
-            mobile += _e
-            _mobile.append(_e)
-    top_two_mobile = sum(sorted(_mobile)[-2:])
-    at_or_above_chunk = 0.0
-    for _r in rows:
-        if isinstance(_r["control_frequency_hz"], float) and _r["control_frequency_hz"] >= chunk_hz:
-            at_or_above_chunk += _r["episodes"]
+    total = _pool.total
+    single_arm = _pool.morphology_share("Single Arm") * total
+    mobile = _pool.morphology_share("Mobile Manipulator") * total
+    table = _pool.table_top_share * total
+    at_10hz = _pool.rate_share(10.0) * total
+    no_rate = _pool.rate_share(None) * total
+    top_two_mobile = _pool.top_share_within("Mobile Manipulator") * mobile  # the two largest datasets
+    at_or_above_chunk = _pool.at_or_above_threshold_share * total
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(abs(total - 2_419_193) < 1, "Episode total must match the source sheet")
@@ -1683,14 +1695,71 @@ Of the `{python} OxeComposition.total_m_str` million episodes across `{python} O
 
 A data-reuse pipeline must separate environmental task invariants from embodiment-specific realizations. A task invariant is a geometric or dynamical condition imposed by the physical process, for example bringing a compliant probe into contact with a terminal pad within $5^\circ$ of the surface normal while sustaining a normal contact force between $2.0\text{ N}$ and $5.0\text{ N}$. An embodiment realization is the concrete sequence of joint encoder counts, pulse-width modulation duty cycles, perception transport latencies, and sensor pixel rasters used to achieve that condition on a particular test rig. While the contact goal exists in world coordinates, the dataset stores only the realization. When a model trains directly on raw hardware realizations, it internalizes the idiosyncratic mechanics of the source testbed, including structural flexure, drive backlash, and sensor mounting oscillations.
 
+```{python}
+#| label: calc-data-gripper-stroke-transfer
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ NORMALIZED GRIPPER COMMAND ACROSS TWO STROKES (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-data-embodiment-contracts (two-gripper scenario) and the
+# │          target-label gate
+# │ Goal:    Show that one normalized opening command clears the part on the
+# │          donor gripper and lands inside it on the target.
+# │ Show:    Strokes, part width, both openings, the stroke excess, and the
+# │          hold force against the target's continuous rating.
+# │ How:     Scenarios.GripperStrokeTransfer: opening = command x stroke.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt, fmt_int, fmt_math, check
+
+class GripperStrokeTransfer:
+    """A 0.80 gripper command replayed from a 100 mm stroke on a 60 mm stroke."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    _grip = Scenarios.GripperStrokeTransfer
+    command = _grip.command  # normalized opening command; category: illustrative
+    stroke_a = _grip.donor_stroke  # category: illustrative
+    stroke_b = _grip.target_stroke  # category: illustrative
+    part = _grip.part_width  # category: illustrative
+    hold_a = _grip.donor_hold_force  # category: illustrative
+    rating_b = _grip.target_force_rating  # category: illustrative
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    open_a = _grip.donor_opening
+    open_b = _grip.target_opening
+    excess = _grip.stroke_excess
+    force_ratio = _grip.force_ratio
+
+    # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
+    check(_grip.donor_clears and not _grip.target_clears, "Machine A's opening clears the part; Machine B's does not")
+    check(open_a > stroke_b, "The donor opening must exceed the target's whole stroke")
+    check(abs(force_ratio - 2.0) < 1e-9, "Prose says the hold force doubles the target's rating")
+
+    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
+    stroke_a_math = fmt_math(rf"0\text{{ to }}{fmt_int(stroke_a.to(millimeter).magnitude)}\text{{ mm}}")
+    stroke_b_math = fmt_math(rf"0\text{{ to }}{fmt_int(stroke_b.to(millimeter).magnitude)}\text{{ mm}}")
+    stroke_b_mm_math = fmt_math(rf"{fmt_int(stroke_b.to(millimeter).magnitude)}\text{{ mm}}")
+    part_math = fmt_math(rf"{fmt_int(part.to(millimeter).magnitude)}\text{{ mm}}")
+    open_a_math = fmt_math(rf"{fmt_int(open_a.to(millimeter).magnitude)}\text{{ mm}}")
+    open_b_math = fmt_math(rf"{fmt_int(open_b.to(millimeter).magnitude)}\text{{ mm}}")
+    excess_math = fmt_math(rf"{fmt_int(excess.to(millimeter).magnitude)}\text{{ mm}}")
+    hold_a_math = fmt_math(rf"{fmt_int(hold_a.to(newton).magnitude)}\text{{ N}}")
+    rating_b_math = fmt_math(rf"{fmt_int(rating_b.to(newton).magnitude)}\text{{ N}}")
+    command_math = fmt_math(rf"\NormalizedActionCommand = {fmt(command, precision=2)}")
+    open_b_product_math = fmt_math(rf"{fmt(command, precision=2)} \times {fmt_int(stroke_b.to(millimeter).magnitude)}\text{{ mm}}")
+```
+
 Consider transferring a demonstration dataset collected on Machine A to Machine B for an identical pick-and-place task:
 
-- **Machine A** operates a parallel-jaw gripper with a stroke of $0\text{ to }100\text{ mm}$, a $50\text{ Hz}$ command rate ($20\text{ ms}$ period), a continuous grasp force limit of $40\text{ N}$, and a wrist camera mounted $45\text{ mm}$ behind the tool center point with a $15\text{ ms}$ transport delay.
-- **Machine B** operates a compact gripper with a stroke of $0\text{ to }60\text{ mm}$, a $20\text{ Hz}$ command rate ($50\text{ ms}$ period), a continuous force limit of $15\text{ N}$, and a wrist camera mounted $20\text{ mm}$ behind the tool center point with a $35\text{ ms}$ transport delay.
+- **Machine A** operates a parallel-jaw gripper with a stroke of `{python} GripperStrokeTransfer.stroke_a_math`, a $50\text{ Hz}$ command rate ($20\text{ ms}$ period), a continuous grasp force limit of $40\text{ N}$, and a wrist camera mounted $45\text{ mm}$ behind the tool center point with a $15\text{ ms}$ transport delay.
+- **Machine B** operates a compact gripper with a stroke of `{python} GripperStrokeTransfer.stroke_b_math`, a $20\text{ Hz}$ command rate ($50\text{ ms}$ period), a continuous force limit of `{python} GripperStrokeTransfer.rating_b_math`, and a wrist camera mounted $20\text{ mm}$ behind the tool center point with a $35\text{ ms}$ transport delay.
 
-Projecting Machine A's demonstrations directly through the physical constraints of Machine B reveals immediate points of hardware failure. For a workpiece of width $75\text{ mm}$, Machine A commands a gripper aperture of $80\text{ mm}$. That command exceeds Machine B's mechanical stroke by $20\text{ mm}$, driving its leadscrew into the mechanical endstop. During the hold phase, Machine A applies $30\text{ N}$ of clamping force; executing that command on Machine B doubles its continuous rating of $15\text{ N}$ and forces its motor amplifier into current saturation. In the time domain, subsampling the $50\text{ Hz}$ trajectory onto Machine B's $20\text{ Hz}$ bus aliases rapid contact dynamics and increases the half-period average hold age $\FiniteChange \TimeInstant / 2$ from $10\text{ ms}$ to $25\text{ ms}$, introducing $15\text{ ms}$ of additional zero-order hold phase lag (@sec-appendix-control-zoh). Compounded by the $20\text{ ms}$ difference in camera transport delay ($35\text{ ms} - 15\text{ ms}$), the added low-frequency phase-equivalent delay is $35\text{ ms}$, of which the camera difference contributes $20\text{ ms}$. At the assumed constant approach velocity of $0.10\text{ m/s}$, that phase approximation corresponds to an equivalent displacement of $3.5\text{ mm}$. Actual contact overrun requires measured or bounded sampling phase, capture and transport, computation, actuation, and plant response; the phase-equivalent value does not establish when the first correction dispatches. Meanwhile, the $25\text{ mm}$ disparity in wrist camera mounting introduces optical parallax that shifts the apparent position of the workpiece boundary across the camera raster.
+Projecting Machine A's demonstrations directly through the physical constraints of Machine B reveals immediate points of hardware failure. For a workpiece of width `{python} GripperStrokeTransfer.part_math`, Machine A commands a gripper aperture of `{python} GripperStrokeTransfer.open_a_math`. That command exceeds Machine B's mechanical stroke by `{python} GripperStrokeTransfer.excess_math`, driving its leadscrew into the mechanical endstop. During the hold phase, Machine A applies `{python} GripperStrokeTransfer.hold_a_math` of clamping force; executing that command on Machine B doubles its continuous rating of `{python} GripperStrokeTransfer.rating_b_math` and forces its motor amplifier into current saturation. In the time domain, subsampling the $50\text{ Hz}$ trajectory onto Machine B's $20\text{ Hz}$ bus aliases rapid contact dynamics and increases the half-period average hold age $\FiniteChange \TimeInstant / 2$ from $10\text{ ms}$ to $25\text{ ms}$, introducing $15\text{ ms}$ of additional zero-order hold phase lag (@sec-appendix-control-zoh). Compounded by the $20\text{ ms}$ difference in camera transport delay ($35\text{ ms} - 15\text{ ms}$), the added low-frequency phase-equivalent delay is $35\text{ ms}$, of which the camera difference contributes $20\text{ ms}$. At the assumed constant approach velocity of $0.10\text{ m/s}$, that phase approximation corresponds to an equivalent displacement of $3.5\text{ mm}$. Actual contact overrun requires measured or bounded sampling phase, capture and transport, computation, actuation, and plant response; the phase-equivalent value does not establish when the first correction dispatches. Meanwhile, the $25\text{ mm}$ disparity in wrist camera mounting introduces optical parallax that shifts the apparent position of the workpiece boundary across the camera raster.
 
-Standard machine learning pipelines often try to reconcile these discrepancies by normalizing observation and action channels to $[0, 1]$ or $[-1, 1]$. That rescaling aligns tensor ranges while leaving the physical mismatch intact. Normalizing gripper travel to $[0, 1]$ turns Machine A's safe $80\text{ mm}$ opening ($\NormalizedActionCommand = 0.80$) into a $48\text{ mm}$ opening on Machine B ($0.80 \times 60\text{ mm}$) that drives its fingers into the $75\text{ mm}$ workpiece during approach. Normalizing feature ranges rescales numbers, but it cannot lengthen a leadscrew, lower motor coil resistance, or recover bus transport delay. Demonstration trajectories plotted in normalized unit spaces may look identical, yet only the subset inside the physical intersection (apertures below $60\text{ mm}$, forces under $15\text{ N}$, and command frequencies below $20\text{ Hz}$) can run on the target hardware without saturation or contact damage. Even within that intersection, two arms with different joint layouts can collide with the workspace when they share a single Cartesian command (@sec-data-kinematic-topology).
+Standard machine learning pipelines often try to reconcile these discrepancies by normalizing observation and action channels to $[0, 1]$ or $[-1, 1]$. That rescaling aligns tensor ranges while leaving the physical mismatch intact. Normalizing gripper travel to $[0, 1]$ turns Machine A's safe `{python} GripperStrokeTransfer.open_a_math` opening (`{python} GripperStrokeTransfer.command_math`) into a `{python} GripperStrokeTransfer.open_b_math` opening on Machine B (`{python} GripperStrokeTransfer.open_b_product_math`) that drives its fingers into the `{python} GripperStrokeTransfer.part_math` workpiece during approach. Normalizing feature ranges rescales numbers, but it cannot lengthen a leadscrew, lower motor coil resistance, or recover bus transport delay. Demonstration trajectories plotted in normalized unit spaces may look identical, yet only the subset inside the physical intersection (apertures below `{python} GripperStrokeTransfer.stroke_b_mm_math`, forces under `{python} GripperStrokeTransfer.rating_b_math`, and command frequencies below $20\text{ Hz}$) can run on the target hardware without saturation or contact damage. Even within that intersection, two arms with different joint layouts can collide with the workspace when they share a single Cartesian command (@sec-data-kinematic-topology).
 
 ### Kinematic topology mismatches and null-space projection {#sec-data-kinematic-topology}
 
@@ -1712,7 +1781,7 @@ Reusing physical data across different robots therefore requires two validation 
 - The **pretraining admission gate** evaluates whether a trajectory can safely contribute to general representation learning. This gate validates data provenance, observation integrity, coordinate frame conventions, action semantics (reference frame, absolute vs. relative representations, position vs. velocity modes), and sampling rates. In particular, source actions admitted at this gate need not be physically executable on the target robot. Multi-embodiment foundation models rely on this gate to ingest broad visual and task structures across dozens of robot morphologies before fine-tuning on target hardware [@open_x_embodiment_collaboration2024open; @black2024pi0].
 - The **target-label gate** applies whenever recorded actions serve as direct imitation labels or execution setpoints on the physical plant. This gate maps the source trajectory through target forward kinematics to verify coordinate consistency [@lynch2017modern]. It confirms that commanded joint velocities and accelerations remain within the target plant's dynamic envelope [@tedrake2023manipulation]. It also verifies that task-critical features remain within the field of view and dynamic range of the target sensors. When commanded trajectories violate kinematic reach or motor torque limits, an ingestion pipeline cannot simply clamp the values to target boundaries. Clamping distorts velocity profiles, alters phase relationships, and destroys the causal link between observed spatial errors and corrective control outputs. Trajectories that satisfy the target dynamics pass untouched; trajectories that admit valid geometric retargeting through inverse kinematics are relabeled; and trajectories that demand unobtainable actuator authority or rely on unobservable states are rejected.
 
-Evaluating the two-gripper scenario of @sec-data-embodiment-contracts through this target-label gate resolves each trajectory segment systematically. The initial opening phase must be rejected rather than relabeled, because satisfying the task invariant (clearing the $75\text{ mm}$ workpiece) demands an aperture that Machine B cannot physically achieve. The $30\text{ N}$ grasp hold is rejected on identical grounds, as it exceeds Machine B's continuous motor rating. Conversely, the $50\text{ Hz}$ trajectory can be resampled and relabeled onto Machine B's $20\text{ Hz}$ control bus only if the slower command stream preserves the task-critical contact dynamics and remains within the target's verified tracking and force limits. The data record must also log the added zero-order hold lag and camera transport delay so that policy training accounts for the altered timing. An ingestion pipeline lacking this gate injects dynamically invalid trajectories into the training distribution. A policy trained on such unvetted data fails in deployment not because of neural network underfitting, but because its training labels were physically valid only on the donor hardware. For the latch-servicing campaign, the target plant is the mobile manipulator's own arm and gripper. Every borrowed trajectory proposed as a latch training label must pass this gate against the mobile manipulator's verified limit record, regardless of the donor platform's reported capabilities.
+Evaluating the two-gripper scenario of @sec-data-embodiment-contracts through this target-label gate resolves each trajectory segment systematically. The initial opening phase must be rejected rather than relabeled, because satisfying the task invariant (clearing the `{python} GripperStrokeTransfer.part_math` workpiece) demands an aperture that Machine B cannot physically achieve. The `{python} GripperStrokeTransfer.hold_a_math` grasp hold is rejected on identical grounds, as it exceeds Machine B's continuous motor rating. Conversely, the $50\text{ Hz}$ trajectory can be resampled and relabeled onto Machine B's $20\text{ Hz}$ control bus only if the slower command stream preserves the task-critical contact dynamics and remains within the target's verified tracking and force limits. The data record must also log the added zero-order hold lag and camera transport delay so that policy training accounts for the altered timing. An ingestion pipeline lacking this gate injects dynamically invalid trajectories into the training distribution. A policy trained on such unvetted data fails in deployment not because of neural network underfitting, but because its training labels were physically valid only on the donor hardware. For the latch-servicing campaign, the target plant is the mobile manipulator's own arm and gripper. Every borrowed trajectory proposed as a latch training label must pass this gate against the mobile manipulator's verified limit record, regardless of the donor platform's reported capabilities.
 
 ::: {.column-margin .margin-pointer}
 ↩ The limit record, which states each measured limit with its operating conditions, uncertainty, and margin, is established in @sec-body-limit-record-schema.
@@ -1791,37 +1860,39 @@ Pretraining on a million pooled trajectories from foreign robots does not help t
 # │ Goal:    Hold the reported scale and headline result of each dated system
 # │          in one place so a later edition can refresh them.
 # │ Show:    Corpus sizes and the reported scaling and transfer results.
-# │ How:     Literature values, each from the cited paper (section in comment).
-# │          Promotion candidate: MLSysIM literature registry.
+# │ How:     Literature.RobotDataSystems, each value from the cited paper
+# │          (section in its provenance record).
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
 from mlsysim.fmt import fmt_int, fmt_percent, check
 
 class StateOfPractice:
     """Reported scale of dated robot-data systems (literature values)."""
 
     # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
-    oxe_datasets = 60  # Open X-Embodiment, Fig. 2; category: literature
-    oxe_embodiments = 22  # Open X-Embodiment, Fig. 2; category: literature
-    oxe_rt1x_gain = 0.50  # RT-1-X mean success vs. original methods, Fig. 4; category: literature
-    droid_traj = 76_000  # DROID, Fig. 1 ("76k trajectories"); category: literature
-    droid_hours = 350  # DROID, Fig. 1; category: literature
-    droid_scenes = 564  # DROID, Fig. 1; category: literature
-    agibot_traj = 1_001_552  # AgiBot World, Sec. 3; category: literature
-    agibot_robots = 100  # AgiBot World, "more than 100 homogeneous robots"; category: literature
-    agibot_tasks = 217  # AgiBot World, Sec. 3; category: literature
-    agibot_gain = 0.30  # average gain over OXE pretraining, abstract; category: literature
-    lin_demos = 40_000  # Lin et al., Sec. 1 ("over 40,000 demonstrations"); category: literature
-    lin_envs = 32  # Lin et al., Sec. 1 recipe; category: literature
-    lin_demos_per_env = 50  # Lin et al., Sec. 1 recipe; category: literature
-    lin_success = 0.90  # Lin et al., Sec. 1, new environment and object; category: literature
-    pi05_homes_min = 3  # pi0.5, Sec. V-B; category: literature
-    pi05_homes_max = 104  # pi0.5, Sec. V-B; category: literature
-    pi05_hours = 400  # pi0.5, Sec. I, mobile manipulation in homes; category: literature
-    mimicgen_seed = 200  # MimicGen, abstract (~200 human demonstrations); category: literature
-    mimicgen_generated = 50_000  # MimicGen, abstract (over 50K); category: literature
-    mimicgen_tasks = 18  # MimicGen, abstract; category: literature
-    cotrain_gain = 0.38  # sim-and-real co-training, abstract (average); category: literature
-    droid_recal = 36_000  # DROID website, April 2025 release of improved calibrations; category: literature
+    _lit = Literature.RobotDataSystems
+    oxe_datasets = int(_lit.OxeDatasets)  # Open X-Embodiment, Fig. 2; category: literature
+    oxe_embodiments = int(_lit.OxeEmbodiments)  # Open X-Embodiment, Fig. 2; category: literature
+    oxe_rt1x_gain = float(_lit.OxeRt1xMeanSuccessGain)  # RT-1-X mean success vs. original methods, Fig. 4; category: literature
+    droid_traj = int(_lit.DroidTrajectories)  # DROID, Fig. 1 ("76k trajectories"); category: literature
+    droid_hours = int(_lit.DroidHours)  # DROID, Fig. 1; category: literature
+    droid_scenes = int(_lit.DroidScenes)  # DROID, Fig. 1; category: literature
+    agibot_traj = int(_lit.AgibotTrajectories)  # AgiBot World, Sec. 3; category: literature
+    agibot_robots = int(_lit.AgibotRobots)  # AgiBot World, "more than 100 homogeneous robots"; category: literature
+    agibot_tasks = int(_lit.AgibotTasks)  # AgiBot World, Sec. 3; category: literature
+    agibot_gain = float(_lit.AgibotGainOverOxe)  # average gain over OXE pretraining, abstract; category: literature
+    lin_demos = int(_lit.LinDemonstrations)  # Lin et al., Sec. 1 ("over 40,000 demonstrations"); category: literature
+    lin_envs = int(_lit.LinEnvironments)  # Lin et al., Sec. 1 recipe; category: literature
+    lin_demos_per_env = int(_lit.LinDemosPerEnvironment)  # Lin et al., Sec. 1 recipe; category: literature
+    lin_success = float(_lit.LinNewEnvironmentSuccess)  # Lin et al., Sec. 1, new environment and object; category: literature
+    pi05_homes_min = int(_lit.Pi05TrainingHomesMin)  # pi0.5, Sec. V-B; category: literature
+    pi05_homes_max = int(_lit.Pi05TrainingHomesMax)  # pi0.5, Sec. V-B; category: literature
+    pi05_hours = int(_lit.Pi05MobileHours)  # pi0.5, Sec. I, mobile manipulation in homes; category: literature
+    mimicgen_seed = int(_lit.MimicgenSeedDemos)  # MimicGen, abstract (~200 human demonstrations); category: literature
+    mimicgen_generated = int(_lit.MimicgenGeneratedDemos)  # MimicGen, abstract (over 50K); category: literature
+    mimicgen_tasks = int(_lit.MimicgenTasks)  # MimicGen, abstract; category: literature
+    cotrain_gain = float(_lit.CotrainingSuccessGain)  # sim-and-real co-training, abstract (average); category: literature
+    droid_recal = int(_lit.DroidRecalibratedEpisodes)  # DROID website, April 2025 release of improved calibrations; category: literature
 
     # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
     agibot_over_droid = agibot_traj / droid_traj
@@ -1937,12 +2008,53 @@ Aggregating fleet data also exposes a second failure mode: confusing physical ta
 
 Even when every packet arrives intact, a fleet interface can still corrupt an archive by recording numbers in the wrong physical units or coordinate frame. Because standard schema validators check only data types and value ranges, such mismatches pass ingestion silently until a downstream consumer interprets the numbers under a different convention (war story \ref{ws-data-mars-climate-orbiter-unit-mismatch}).
 
+```{python}
+#| label: calc-data-mars-climate-orbiter
+#| echo: false
+#| warning: false
+#| message: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MARS CLIMATE ORBITER UNIT MISMATCH (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @ws-data-mars-climate-orbiter-unit-mismatch
+# │ Goal:    Size the impulse error and its consequence at orbit insertion.
+# │ Show:    The pound-force-second to newton-second factor; the planned and
+# │          estimated insertion altitudes.
+# │ How:     Pint unit conversion; altitudes from
+# │          Literature.SpaceflightAnomalies (Phase I report, 1999).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim.fmt import fmt, fmt_int, fmt_math, check
+
+class MarsClimateOrbiter:
+    """Impulse reported in lbf*s and read as N*s."""
+
+    # ┌── 1. LOAD (Constants & Parameters) ─────────────────────────────────
+    _lit = Literature.SpaceflightAnomalies
+    h_planned = float(_lit.MarsClimateOrbiterPlannedAltitudeKm) * kilometer  # category: literature
+    h_actual = float(_lit.MarsClimateOrbiterActualAltitudeKm) * kilometer  # category: literature
+
+    # ┌── 2. EXECUTE (Compute) ─────────────────────────────────────────────
+    lbf_s_in_n_s = (1 * ureg.lbf * second).to(newton * second).magnitude
+
+    # ┌── 3. GUARD (Assertions) ────────────────────────────────────────────
+    check(h_actual < h_planned, "The orbiter passed below its planned altitude")
+
+    # ┌── 4. OUTPUT (Format & Export) ────────────────────────────────────────
+    factor_str = fmt(lbf_s_in_n_s, precision=2)
+    factor_math = fmt_math(factor_str)
+    conversion_math = fmt_math(rf"1\text{{ lbf}}\cdot\text{{s}} = {factor_str}\text{{ N}}\cdot\text{{s}}")
+    h_actual_math = fmt_math(rf"{fmt_int(h_actual.to(kilometer).magnitude)}\text{{ km}}")
+    h_planned_math = fmt_math(rf"{fmt_int(h_planned.to(kilometer).magnitude)}\text{{ km}}")
+```
+
 ::: {#ws-data-mars-climate-orbiter-unit-mismatch .callout-war-story title="Mars Climate Orbiter unit mismatch (1999)"}
 **Context**: During its nine-month cruise to Mars in 1998 and 1999, the Mars Climate Orbiter fired small thrusters to desaturate its reaction wheels, and the navigation team on the ground folded the resulting velocity changes into the trajectory models used to plan each correction maneuver [@nasa1999mco].
 
-**Mechanism**: A ground software file (called "Small Forces" in the investigation) reported thruster impulse in pound-force-seconds ($\text{lbf}\cdot\text{s}$), while the trajectory models that consumed it assumed newton-seconds ($\text{N}\cdot\text{s}$) as the interface specification required. Because $1\text{ lbf}\cdot\text{s} = 4.45\text{ N}\cdot\text{s}$, every desaturation event entered the models too small by a factor of $4.45$. The values were well formed, in range, and of the expected type, so no schema check could flag them.
+**Mechanism**: A ground software file (called "Small Forces" in the investigation) reported thruster impulse in pound-force-seconds ($\text{lbf}\cdot\text{s}$), while the trajectory models that consumed it assumed newton-seconds ($\text{N}\cdot\text{s}$) as the interface specification required. Because `{python} MarsClimateOrbiter.conversion_math`, every desaturation event entered the models too small by a factor of `{python} MarsClimateOrbiter.factor_math`. The values were well formed, in range, and of the expected type, so no schema check could flag them.
 
-**Impact**: The accumulated error was never resolved during cruise. At orbit insertion the spacecraft passed about $57\text{ km}$ above the surface instead of the planned $226\text{ km}$ and was lost.
+**Impact**: The accumulated error was never resolved during cruise. At orbit insertion the spacecraft passed about `{python} MarsClimateOrbiter.h_actual_math` above the surface instead of the planned `{python} MarsClimateOrbiter.h_planned_math` and was lost.
 
 **Response**: The Mishap Investigation Board traced the loss to the missing unit conversion in the ground file. It recommended that the Mars Polar Lander project verify consistent units throughout design and operations and audit all data transferred between JPL and Lockheed Martin Astronautics for compliance with the interface specification, along with stronger navigation review and anomaly escalation.
 

@@ -20,6 +20,7 @@ from ..datasets.registry import Datasets as _Datasets
 from ..physics.quantities import memory_from_params as _memory_from_params
 from ..core.units import BYTES_FP16 as _BYTES_FP16, param as _param
 from ..core.units import BYTES_FP32 as _BYTES_FP32, BYTES_INT8 as _BYTES_INT8
+from ..core.units import BYTES_INT4 as _BYTES_INT4  # serving at scale (added 2026-10-20)
 from ..core.units import BYTES_TRAINING_STATE_MIXED_PRECISION as _BYTES_TRAINING_STATE
 from ..literature.registry import Literature as _Literature
 from ..systems.reliability import Reliability as _Reliability
@@ -29,6 +30,7 @@ from ..embodied.registry import Embodied as _Embodied  # embodied stopping scena
 from ..agents.registry import Agents as _Agents  # agent harness profiles (added 2026-10-20)
 from . import scenario_types as _st
 from ..core.units import COLOR_DEPTH_8BIT as _COLOR_DEPTH_8BIT  # added 2026-10-20
+from ..core.units import DAYS_PER_MONTH as _DAYS_PER_MONTH  # added 2026-10-20
 # Deployment paradigms block (added 2026-10-20)
 from ..systems.registry import Pods as _Pods
 from ..core.units import (VIDEO_1080P_WIDTH as _VIDEO_1080P_WIDTH, VIDEO_1080P_HEIGHT as _VIDEO_1080P_HEIGHT,
@@ -40,6 +42,9 @@ from ..actuators.registry import Actuators as _Actuators
 from ..physics.constants import INSULATION_CLASS_F_LIMIT as _CLASS_F
 from ..physics.drivetrain import calc_traction_deceleration_limit as _traction_limit
 from ..physics.memory import calc_checkpoint_size as _calc_checkpoint_size  # fleet orchestration (2026-10-20)
+# Physical demonstration data (added 2026-10-20)
+from ..sensors.registry import Sensors as _Sensors
+from ..physics.constants import AGE_OF_UNIVERSE as _AGE_OF_UNIVERSE
 
 class Scenario(BaseModel):
     """
@@ -3065,4 +3070,1133 @@ class Scenarios(Registry):
             ("gptj-99", "Text summarization", "GPT-J 6B"),
             ("stable-diffusion-xl", "Text to image", "SDXL"),
         ],
+    )
+
+    # --- Data engineering: an always-on keyword spotter's data, and the labels behind it (added 2026-10-20) ---
+    # One smart-speaker wake-word detector carries the product targets, the
+    # false-wake budget and the listening it takes to verify, and the data budget.
+    # The labeling entries price labels against compute, agreement, and active
+    # learning. Cited figures come from Literature, Datasets, and Infrastructure;
+    # everything else is a stated scenario assumption.
+
+    KeywordSpotterTargets = _st.AlwaysOnDetectorTargetsScenario(
+        name="A smart-speaker keyword spotter's product targets",
+        description="Catch 98 percent of spoken wake words, wake falsely less than once a month, answer within "
+                    "200 ms, fit a 256 KB always-on model and 16 KB of preprocessing state, on a $150K data "
+                    "budget in six months.",
+        detection_target=0.98,            # scenario assumption: share of spoken wake words caught
+        false_wake_budget=1,              # scenario assumption: expected false wakes per month
+        false_wake_horizon=Q_(_DAYS_PER_MONTH, "day"),
+        response_limit=Q_(200, "ms"),     # scenario assumption: end of keyword to response
+        model_memory=Q_(256, "KB"),       # scenario assumption: always-on island sized for the INT8 DS-CNN
+        preprocessing_memory=Q_(16, "KB"),  # scenario assumption: preprocessing-state budget
+        data_budget=Q_(150_000, "USD"),   # scenario assumption: total data-engineering budget
+        timeline=Q_(6, "month"),          # scenario assumption: time to production
+        base_detection_rate=0.90,         # scenario assumption: illustrative base-model detection rate
+    )
+    KeywordSpotterSampleRateChoice = _st.DesignTradeoffScenario(
+        name="Keyword spotter: 8 kHz to 16 kHz sampling",
+        description="Illustrative detection-rate gain; raw-audio storage and processing scale with the rate (kHz).",
+        baseline=8, alternative=16,       # scenario assumption: sampling rates compared, kHz
+        gain_low=0.02, gain_high=0.04,    # scenario assumption: illustrative detection-rate gain
+    )
+    KeywordSpotterMfccChoice = _st.DesignTradeoffScenario(
+        name="Keyword spotter: 13 to 40 MFCC coefficients per frame",
+        description="Illustrative detection-rate gain; model input and feature memory scale with the count.",
+        baseline=13, alternative=40,      # scenario assumption: coefficients per frame compared
+        gain_low=0.03, gain_high=0.05,    # scenario assumption: illustrative detection-rate gain
+    )
+    KeywordSpotterExampleCountChoice = _st.DesignTradeoffScenario(
+        name="Keyword spotter: 1M to 10M training examples",
+        description="Illustrative detection-rate gain; labeling cost, storage, and training time scale with the count.",
+        baseline=1_000_000, alternative=10_000_000,  # scenario assumption: training examples compared
+        gain_low=0.05, gain_high=0.08,    # scenario assumption: illustrative detection-rate gain
+    )
+    KeywordSpotterFalseWakes = _st.FalseAlarmBudgetScenario(
+        name="One-second windows checked every second, all month, against one false wake a month",
+        description="An always-on detector scores one non-keyword window a second around the clock; the "
+                    "false-wake budget sets the per-window false-positive rate it must hold.",
+        window=Q_(1, "second"),           # scenario assumption: one window scored each second
+        listening_per_day=Q_(24, "hour"),  # always on
+        horizon=KeywordSpotterTargets.false_wake_horizon,
+        budget=KeywordSpotterTargets.false_wake_budget,
+        rejection_levels=[0.999, 0.9999, 0.99999],  # scenario assumption: per-window rejection rates compared
+    )
+    KeywordSpotterFalseWakeEvidence = _st.ZeroEventExposureScenario(
+        name="Listening needed to support one false wake a month with none observed",
+        description="Representative non-keyword audio, at 95 percent one-sided confidence (the zero-event rule "
+                    "of three), recorded at 16 kHz and 16 bits.",
+        budget=KeywordSpotterFalseWakes.budget,
+        horizon=KeywordSpotterFalseWakes.listening_time,
+        confidence=0.95,                  # scenario assumption: one-sided confidence of the claim
+        sample_rate=Q_(16_000, "Hz"),     # scenario assumption: the 16 kHz candidate configuration
+        sample_width=Q_(2, "byte"),       # 16-bit mono audio
+    )
+    KeywordSpotterDataBudget = _st.DataBudgetScenario(
+        name="A $150K keyword-spotting data budget split across labeling, storage, and governance",
+        description="Sixty percent buys crowdsourced recordings and labels at $0.10 each plus 20 percent review.",
+        total=KeywordSpotterTargets.data_budget,
+        shares={"labeling": 0.60,         # scenario assumption
+                "storage and processing": 0.25,  # scenario assumption
+                "governance": 0.15},      # scenario assumption
+        label_price=Q_(0.10, "USD"),      # scenario assumption: per recorded and labeled example
+        review_overhead=0.20,             # scenario assumption: quality-review surcharge
+    )
+    ImageNetLabelingVersusResNetRun = _st.LabelingVersusTrainingScenario(
+        name="Labeling one million images against one ResNet-50 run on eight A100s",
+        description="A $100K labeling budget against 90 epochs of ImageNet at the A100 ResNet-50 sustained rate, "
+                    "priced at the reference and cloud GPU-hour rates.",
+        labeling_budget=Q_(100_000, "USD"),  # scenario assumption: crowd labels plus review and relabeling
+        dataset_examples=_Datasets.ImageNet.training_examples,
+        epochs=90,                        # scenario assumption: the standard ResNet-50 schedule
+        throughput_per_accelerator=Q_(float(_Literature.Benchmarks.ResNet50A100TrainThroughput), "count/second"),
+        accelerators=8,                   # scenario assumption: one 8-GPU server
+        price_low=_Infrastructure.Pricing.Fleet.GpuHourRef.rate,
+        price_high=_Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate,
+        labeling_time_low=Q_(2, "week"),  # scenario assumption: crowdsourced labeling of 1M images, low
+        labeling_time_high=Q_(4, "week"),  # scenario assumption: and high
+    )
+    FullHdMaskVersusBoxes = _st.LabelGranularityScenario(
+        name="A 1920x1080 segmentation mask against ten bounding boxes",
+        description="One class per pixel against four coordinates per box.",
+        image_width=_VIDEO_1080P_WIDTH,
+        image_height=_VIDEO_1080P_HEIGHT,
+        boxes=10,                         # scenario assumption: objects in one street scene
+        coords_per_box=4,
+    )
+    CityscapesMasksForMillionFrames = _st.LaborEffortScenario(
+        name="Pixel masks for one million street frames at the Cityscapes annotation time",
+        description="More than 1.5 hours per fine annotation (Cordts et al. 2016), in full-time person-years.",
+        items=1_000_000,                  # scenario assumption: frames a driving team wants masked
+        time_per_item=Q_(float(_Literature.AnnotationTimes.CityscapesFineMaskHours), "hour"),
+        work_year=Q_(2000, "hour"),       # convention: a full-time person-year of 2,000 working hours
+    )
+    MswcByHand = _st.LaborEffortScenario(
+        name="The Multilingual Spoken Words Corpus labeled by hand at 10 s per clip",
+        description="What forced alignment saved: every clip of the corpus labeled manually.",
+        items=_Datasets.MSWC.training_examples.to("count").magnitude,
+        time_per_item=Q_(10, "second"),   # scenario assumption: a fast manual label
+        work_year=CityscapesMasksForMillionFrames.work_year,
+    )
+    BinaryLabelChanceAgreement = _st.AnnotatorAgreementScenario(
+        name="Two annotators who each label 90 percent of items 'not spam'",
+        description="Chance agreement from the label mix alone, and kappa at 85 percent raw agreement.",
+        class_shares=[0.90, 0.10],        # scenario assumption: binary label mix
+        observed_agreement=0.85,          # scenario assumption: raw agreement that looks high
+    )
+    WakeWordLabelQualityDrift = _st.AgreementDriftScenario(
+        name="A wake-word labeling campaign whose agreement falls after new annotators join",
+        description="Kappa falls while every input-feature monitor stays flat.",
+        baseline_kappa=0.85,              # scenario assumption: initial collection
+        later_kappa=0.72,                 # scenario assumption: six months later
+        elapsed=Q_(6, "month"),           # scenario assumption
+    )
+    ActiveLearningTenMillionPool = _st.ActiveLearningBudgetScenario(
+        name="Active learning over a 10M-image pool on a $50K budget",
+        description="Hosted-model scoring at $0.01 an image and labels at $0.50, from 85 to 95 percent accuracy; "
+                    "a tenth of the budget scores a narrowed candidate pool.",
+        pool=10_000_000,                  # scenario assumption: unlabeled images
+        label_budget=Q_(50_000, "USD"),   # scenario assumption
+        label_price=Q_(0.50, "USD"),      # scenario assumption: a label that needs careful review
+        scoring_price=Q_(0.01, "USD"),    # scenario assumption: hosted multimodal model per image
+        random_labels_needed=1_000_000,   # scenario assumption: random sampling to the target
+        active_labels_low=100_000,        # scenario assumption: hard examples needed, low
+        active_labels_high=200_000,       # scenario assumption: hard examples needed, high
+        compute_share=0.10,               # scenario assumption: budget share spent on scoring
+        baseline_accuracy=0.85,           # scenario assumption
+        target_accuracy=0.95,             # scenario assumption
+    )
+    SpeechCommandsHashSplit = _st.HashSplitScenario(
+        name="Speech Commands v0.02 split by hashed speaker key",
+        description="TensorFlow's which_set() default percentages against the split sizes the dataset card records.",
+        dataset=_Datasets.SpeechCommandsV2,
+        validation_percent=10,            # TensorFlow train.py --validation_percentage default
+        test_percent=10,                  # TensorFlow train.py --testing_percentage default
+    )
+    MillionEventBatchVersusStreaming = _st.BatchVersusStreamingIngestScenario(
+        name="One million 1 KB events a second, streamed or batched hourly",
+        description="Always-on streaming cores with a standby each, against a batch job that clears each hour's "
+                    "data in 10 minutes, at one core-hour price.",
+        event_rate=Q_(1_000_000, "1/second"),  # scenario assumption
+        event_size=Q_(1, "KB"),           # scenario assumption
+        stream_cores=100,                 # scenario assumption: 50 primary cores plus a standby each
+        stream_hours_per_day=Q_(24, "hour"),
+        batch_cores=200,                  # scenario assumption
+        batch_window=Q_(10, "minute"),    # scenario assumption: per clock hour
+        core_hour_price=Q_(0.05, "USD/hour"),  # scenario assumption: per core-hour
+        redundancy_factor=2,              # scenario assumption: one standby core per primary
+    )
+    PretrainingCorpusGrowth = _st.TrendFitScenario(
+        name="Reported pre-training tokens of landmark language models, fitted growth per year",
+        description="Least-squares fit of log tokens on release date (Literature.Series.PretrainingTokens).",
+        series_name="PretrainingTokens", x_key="date", y_key="tokens", x_is_date=True,
+    )
+
+    # --- Data engineering: delivering a dataset to the accelerator, and watching it drift (added 2026-10-20) ---
+    # ResNet-50 on one A100 carries delivery: the arithmetic ceiling, the bytes a
+    # sustained rate demands, what each storage tier supplies, and the loader
+    # workers that decode it. The keyword spotter's loudness feature carries drift:
+    # a K-S test at two sample sizes, an illustrative location shift, and PSI on
+    # quintile bins. Cited figures come from Hardware, Models, Datasets, Systems,
+    # Infrastructure, Ops, and Literature; the rest are stated scenario assumptions.
+
+    PetabyteCrossRegionMove = _st.TransferScenario(
+        name="One petabyte moved between cloud regions",
+        description="A training corpus in US East and accelerators in US West, over a dedicated 100 Gb/s or a "
+                    "10 Gb/s link, priced at an inter-region egress rate and set against a 20-hour training run.",
+        payload=Q_(1, "PB"),              # scenario assumption: the corpus
+        links={"100 Gb/s": _Fabrics.Ethernet_100G.bandwidth, "10 Gb/s": _Fabrics.Ethernet_10G.bandwidth},
+        egress_rate=Q_(0.02, "USD/GB"),   # scenario assumption: AWS inter-region transfer rate (2024)
+        compute_price=_Infrastructure.Pricing.Cloud.TpuV4PerHour.rate,
+        job_time=Q_(20, "hour"),          # scenario assumption: the training run the data would feed
+    )
+    ResNet50A100InputFeed = _st.AcceleratorInputFeedScenario(
+        name="ResNet-50 training on one A100, fed JPEGs from a cloud block volume",
+        description="The A100's arithmetic ceiling for ResNet-50 training, the well-tuned sustained rate, 150 KB "
+                    "JPEGs that decode to 224x224x3 FP32 tensors, a 250 MB/s attached volume, and host loader "
+                    "workers at 375 images a second each.",
+        workload=_Models.Vision.ResNet50,
+        hardware=_Hardware.Cloud.A100,
+        sustained_rate=ImageNetLabelingVersusResNetRun.throughput_per_accelerator,
+        encoded_sample=Q_(150, "KB"),     # scenario assumption: average ImageNet-class JPEG as stored
+        decoded_sample=(_Datasets.ImageNet.image_width * _Datasets.ImageNet.image_height
+                        * _Datasets.ImageNet.image_channels * _BYTES_FP32),
+        supply=_Storage.CloudBlockStorageBaseline,
+        training_flops_factor=3,          # forward pass plus a backward pass of about twice its cost
+        worker_rate=Q_(375, "count/second"),  # scenario assumption: JPEG decode and augment per CPU worker
+        host_decode_cap=Q_(3500, "count/second"),  # scenario assumption: illustrative host-wide decode ceiling
+    )
+    ResNet50EightA100InputFeed = ResNet50A100InputFeed.variant(
+        name="ResNet-50 training on eight A100s in one server, fed from one storage path",
+        description="The one-A100 feed scaled to the eight accelerators of one server.",
+        accelerators=8,                   # one 8-GPU server
+    )
+    RecommendationFeatureLookups = _st.FeatureLookupScenario(
+        name="A recommendation service reading ten stored features per request",
+        description="10,000 requests a second, ten feature reads each, 5 KB feature vectors summarizing 150 KB images.",
+        request_rate=Q_(10_000, "1/second"),  # scenario assumption
+        reads_per_request=10,             # scenario assumption
+        feature_bytes=Q_(5, "KB"),        # scenario assumption: one stored feature vector
+        raw_sample_bytes=ResNet50A100InputFeed.encoded_sample,
+    )
+    MswcCorpusStorageTiers = _st.CorpusTierScenario(
+        name="The Multilingual Spoken Words Corpus on object storage and on local NVMe",
+        description="Every clip at 16 kHz and 16 bits, priced per month and read sequentially on each tier.",
+        dataset=_Datasets.MSWC,
+        storage_rates={"object store": _Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate,
+                       "NVMe low": _Infrastructure.Pricing.Storage.NvmeLowPerTbMonth.rate,
+                       "NVMe high": _Infrastructure.Pricing.Storage.NvmeHighPerTbMonth.rate},
+        read_bandwidths={"object store": _Storage.ObjectStoreSingleStream.bandwidth,
+                         "NVMe": _Storage.LocalNvmeTrainingTypical.bandwidth},
+    )
+    FraudModelColumnProjection = _st.ColumnProjectionScenario(
+        name="A fraud model that uses 20 of a table's 100 equal-size columns",
+        description="A row format reads every column; a columnar format reads only the 20.",
+        columns_used=20,                  # scenario assumption
+        columns_total=100,                # scenario assumption
+    )
+    GzipVersusSnappyEpochs = _st.CodecEpochScenario(
+        name="A 100 GB epoch decompressed with gzip or Snappy for 50 epochs",
+        description="Host CPU decompression time per epoch and over the run, at each codec's decompression rate.",
+        epoch_bytes=Q_(100, "GB"),        # scenario assumption
+        epochs=50,                        # scenario assumption
+        decode_rates={"gzip": Q_(120, "MB/s"),    # scenario assumption: typical gzip decompression
+                      "Snappy": Q_(500, "MB/s")},  # scenario assumption: typical Snappy decompression
+    )
+    LoudnessDriftKs1000 = _st.KsDriftScenario(
+        name="K-S drift test on clip loudness, 1,000 training against 1,000 recent clips",
+        description="A quieter microphone on part of the fleet; the observed largest CDF gap against the "
+                    "critical value at the 0.05 level.",
+        coefficient=_Ops.Monitoring.KsTestCoefficient,
+        n_reference=1000,                 # scenario assumption
+        n_current=1000,                   # scenario assumption
+        observed_statistic=0.08,          # scenario assumption: observed largest CDF gap
+    )
+    LoudnessDriftKs100k = LoudnessDriftKs1000.variant(
+        name="K-S drift test on clip loudness, 100,000 clips per sample",
+        description="The same observed gap against the critical value of a monitor that sees all traffic.",
+        n_reference=100_000,              # scenario assumption
+        n_current=100_000,                # scenario assumption
+    )
+    LoudnessShiftMatchingObservedGap = _st.LocationShiftScenario(
+        name="Clip loudness shifted 1.2 dB quieter",
+        description="Illustrative normal loudness curves, sd 6 dB about -30 dBFS; a 1.2 dB shift opens a K-S gap "
+                    "of about the observed 0.08.",
+        reference_mean=-30,               # scenario assumption: training loudness, dBFS
+        feature_sd=6,                     # scenario assumption: dB
+        shift=-1.2,                       # scenario assumption: dB
+    )
+    LoudnessShiftHarmless = LoudnessShiftMatchingObservedGap.variant(
+        name="Clip loudness shifted 0.3 dB quieter",
+        description="A shift too small to matter, on the same illustrative curves.",
+        shift=-0.3,                       # scenario assumption: dB
+    )
+    QuieterMicrophoneLoudnessBins = _st.BinShareShiftScenario(
+        name="Clip loudness in training quintiles after a quieter microphone ships",
+        description="Recent clips pile into the quiet bins; illustrative shares scored by PSI.",
+        baseline_shares=[0.20] * 5,       # training quintiles
+        current_shares=[0.30, 0.25, 0.20, 0.15, 0.10],  # scenario assumption: recent shares, quietest first
+    )
+    KeywordSpotterSilentRegression = _st.MetricRegressionScenario(
+        name="The keyword spotter's detection rate six months after launch",
+        description="Launched at the 98 percent target; four points lower six months later with the model unchanged.",
+        launch_value=KeywordSpotterTargets.detection_target,
+        drop=0.04,                        # scenario assumption: fall below the target, in points / 100
+        elapsed=Q_(6, "month"),           # scenario assumption
+    )
+
+    # ── Fleet goodput: one 70B training job on a shared pool (added 2026-10-20) ──
+    SharedPoolSchedulingSnapshot = _st.SchedulingSnapshotScenario(
+        name="Scheduling goodput of a shared pool in one utilization snapshot",
+        description="Assigned capacity less the gangs still waiting for members; input waits inside "
+                    "complete allocations are left to runtime goodput.",
+        assigned_share=float(_ReferenceStats.FleetUtilizationSnapshot.AssignedShare),
+        incomplete_gang_share=float(_ReferenceStats.FleetUtilizationSnapshot.IncompleteGangShare),
+        input_wait_share=float(_ReferenceStats.FleetUtilizationSnapshot.InputWaitShare),
+    )
+    Llama2_70BJobFailures128 = _st.SeriesFailureScenario(
+        name="Failure interval of a 128-GPU Llama 2 70B training job",
+        description="Sixteen DGX H100 nodes; GPU, PCIe link, and the node's NIC in series.",
+        n_devices=16 * _Nodes.DGX_H100.accelerators_per_node,  # scenario assumption: 16 nodes of 8
+        devices_per_node=_Nodes.DGX_H100.accelerators_per_node,
+        component_mttf={
+            "gpu": Q_(_Reliability.Gpu.mttf_hours, "hour"),
+            "pcie": Q_(_Reliability.PcieSwitch.mttf_hours, "hour"),
+            "network": Q_(_Reliability.Nic.mttf_hours, "hour"),
+        },
+        per_node={
+            "gpu": _Nodes.DGX_H100.accelerators_per_node,
+            "pcie": _Nodes.DGX_H100.accelerators_per_node,  # one PCIe link to the host per GPU
+            "network": 1,  # scenario assumption: one NIC shared by the node's GPUs
+        },
+    )
+    Llama2_70BRuntimeGoodput128 = _st.RuntimeGoodputScenario(
+        name="Runtime goodput of a 128-GPU Llama 2 70B training job over one week",
+        description="Startup, input waits, checkpoint waste at the Young-Daly interval, recovery, and one "
+                    "budgeted forced preemption a day, on one held-time denominator.",
+        failures=Llama2_70BJobFailures128,
+        workload=_Models.Language.Llama2_70B,
+        bytes_per_param=_ReferenceStats.MixedPrecisionAdam.CheckpointBytesPerParameter,
+        recovery=_Reliability.Recovery,
+        input_wait=SharedPoolSchedulingSnapshot.input_wait_of_held,  # the pool's input waits, of held time
+        window=Q_(1, "week"),  # scenario assumption: one launch per week of held time
+        lost_work=_ReferenceStats.ForcedPreemptionProfile.LostWork,
+        preemption_rate=Q_(1, "1/day"),  # scenario assumption: a per-job budget of one forced preemption a day
+    )
+    Llama2_70BFleetMfu128 = _st.FleetMfuScenario(
+        name="Llama 2 70B training MFU on one DGX H100 node and on 128 H100s",
+        description="The same work per GPU: 180 ms node steps at the node's batch, 245 ms steps on the "
+                    "shared fleet with exposed cross-node gradient reduction.",
+        workload=_Models.Language.Llama2_70B,
+        hardware=_Hardware.Cloud.H100,
+        node_devices=_Nodes.DGX_H100.accelerators_per_node,
+        fleet_devices=Llama2_70BJobFailures128.n_devices,
+        node_tokens=2204,  # scenario assumption: node baseline tokens per step
+        fleet_tokens=35446,  # scenario assumption: 128-GPU tokens per step
+        node_step_time=Q_(180, "ms"),  # scenario assumption: node baseline, optimizer state offloaded to host
+        fleet_step_time=Q_(245, "ms"),  # scenario assumption: 128-GPU step on the shared fleet
+    )
+    Llama2_70BSharedPoolGoodput128 = _st.GoodputScenario(
+        name="ML productivity goodput of the 128-GPU Llama 2 70B job on the shared pool",
+        description="The pool's scheduling goodput, the job's runtime goodput, and its fleet MFU, with "
+                    "each owner's ceiling: partial holds refilled, input waits removed, the node baseline.",
+        scheduling=SharedPoolSchedulingSnapshot.scheduling_goodput,
+        runtime=Llama2_70BRuntimeGoodput128.result.runtime_goodput,
+        program=Llama2_70BFleetMfu128.fleet_mfu,
+        ceilings={
+            "S": SharedPoolSchedulingSnapshot.partial_hold_ceiling,
+            "R": (Llama2_70BRuntimeGoodput128.result.runtime_goodput
+                  + Llama2_70BRuntimeGoodput128.result.input_wait_share),
+            "P": Llama2_70BFleetMfu128.node_mfu,
+        },
+        device_hour_rate=_Infrastructure.Pricing.Fleet.GpuHourRef.rate,
+    )
+    Llama2_70BTenthTwelfthTrade = Llama2_70BSharedPoolGoodput128.variant(
+        name="The 128-GPU job after a change that raises P by a tenth and lowers R by a twelfth",
+        description="A trade judged by the product of the factor ratios, S unchanged.",
+        program=Llama2_70BSharedPoolGoodput128.program * (1 + 1 / 10),  # scenario assumption
+        runtime=Llama2_70BSharedPoolGoodput128.runtime * (1 - 1 / 12),  # scenario assumption
+    )
+    Llama3_405BGoodput16K = _st.GoodputScenario(
+        name="Llama 3 405B on its dedicated 16,384-GPU cluster",
+        description="Effective training time (a lower bound) as R and BF16 MFU at 16,384 GPUs as P; S = 1 "
+                    "on a dedicated cluster. The two come from different windows, so the product is an estimate.",
+        scheduling=1.0,
+        runtime=float(_Literature.TrainingRuns.Llama3_405B_EffectiveTrainingTimeFraction),
+        program=float(_Literature.TrainingRuns.Llama3_405B_Mfu16K),
+    )
+    Llama3_405BOnSharedPool = Llama3_405BGoodput16K.variant(
+        name="Llama 3 405B's runtime and program goodput on the shared pool",
+        scheduling=SharedPoolSchedulingSnapshot.scheduling_goodput,
+    )
+    Llama2_70BDecodeFloorTp8 = _st.DecodeScenario(
+        name="Batch-one decode floor of Llama 2 70B on one 8-way tensor-parallel H100 node",
+        description="Each GPU streams its FP16 weight shard once per token.",
+        workload=_Models.Language.Llama2_70B,
+        hardware=_Hardware.Cloud.H100,
+        precision="fp16",
+        batch_size=1,
+        tp_size=_Nodes.DGX_H100.accelerators_per_node,
+    )
+    LayerNormMeasuredH100 = _st.RooflinePointScenario(
+        name="A profiled LayerNorm kernel placed on the H100 roofline",
+        description="Illustrative counter readings: achieved FLOP rate and achieved HBM bandwidth.",
+        hardware=_Hardware.Cloud.H100,
+        achieved_rate=Q_(5, "TFLOPs/s"),  # scenario assumption: counter reading
+        achieved_bandwidth=Q_(2.8, "TB/s"),  # scenario assumption: counter reading
+    )
+    Llama2_70BNodeTensorParallelStep = _st.TensorParallelScenario(
+        name="Tensor-parallel AllReduces of one Llama 2 70B node-baseline training step",
+        description="Two exchanges per layer forward and two backward over NVLink, bandwidth only, "
+                    "against the 180 ms node step.",
+        workload=_Models.Language.Llama2_70B,
+        tp_size=_Nodes.DGX_H100.accelerators_per_node,
+        microbatch=1,
+        seq_len=Llama2_70BFleetMfu128.node_tokens,  # the node step's tokens as one sequence
+        collectives_per_layer=4,  # Megatron layout: 2 forward + 2 backward
+        link_bandwidth=_Hardware.Cloud.H100.nvlink.bandwidth_per_direction,
+        compute_time=Llama2_70BFleetMfu128.node_step_time,
+    )
+    Llama2_70BDecodeAllReduceTp8 = _st.MessageFusionScenario(
+        name="Batch-one tensor-parallel AllReduces of the Llama 2 70B serving replica",
+        description="Each per-layer exchange moves tens of kilobytes over NVLink; the collective launch "
+                    "costs far more than the bytes.",
+        alpha=_Ops.RuntimeOverheads.KernelLaunch,
+        bandwidth=_Hardware.Cloud.H100.nvlink.bandwidth_per_direction,
+        # 2 x d_model activations of 2 bytes per AllReduce at batch one
+        message=(2 * _Models.Language.Llama2_70B.hidden_dim * 1 * _BYTES_FP16).to("byte"),
+        count=2 * _Models.Language.Llama2_70B.layers,  # two exchanges per layer per token
+    )
+    Decode13BCompilationPayback = _st.CompilationPaybackScenario(
+        name="Compilation payback for a 13B decode step on one H100",
+        description="A constructed decode budget: compilation keeps the matrix multiplies, removes most "
+                    "element-wise and launch time; default and autotuning builds; 128 one-GPU replicas.",
+        token_rate=Q_(120, "1/s"),  # scenario assumption: eager tokens per second, 13B INT4 weights
+        step_time=Q_(8.33, "ms"),  # scenario assumption: 1/120 s, carried at the two decimals shown
+        shares={"matmul": 0.50, "elementwise": 0.35, "launch": 0.15},  # scenario assumption
+        removed={"elementwise": 0.70, "launch": 0.80},  # scenario assumption
+        builds={"default": Q_(1, "minute"), "autotune": Q_(15, "minute")},  # scenario assumption
+        replicas=Llama2_70BJobFailures128.n_devices,  # replicas filling an allocation of the same size
+        gpus_per_replica=1,
+        replica_life=Q_(1, "hour"),  # scenario assumption: a replica added for one burst hour
+    )
+    NsightTraceVolume1K = _st.TraceVolumeScenario(
+        name="A 5-second Nsight Systems trace of every GPU in a 1,024-GPU job",
+        description="Trace volume grows with every traced device.",
+        per_device=_ReferenceStats.ProfilerTraceProfile.NsightTracePerGpu,
+        devices=DenseLLMPretrainingReference.system.total_accelerators,
+        window=_ReferenceStats.ProfilerTraceProfile.TraceWindow,
+    )
+    MlperfInferenceSoftwareGainsDgxH100 = _st.SoftwareGainsScenario(
+        name="Offline throughput of one DGX H100 across four MLPerf Inference rounds",
+        description="Same eight-GPU system; the gains come from software alone.",
+        series=_Literature.Series.MLPerfInferenceDGXH100,
+        benchmarks=[
+            ("gptj-99", "GPT-J 6B"),
+            ("llama2-70b-99.9", "Llama 2 70B"),
+            ("stable-diffusion-xl", "Stable Diffusion XL"),
+            ("bert-99", "BERT-Large"),
+            ("resnet50", "ResNet-50"),
+        ],
+    )
+
+    # --- Serving at scale (added 2026-10-20) --------------------------------
+    # What counts as a served request, how many one replica admits, and what a
+    # fleet of replicas costs. The reference replica is the Llama-3 70B GQA
+    # model on one DGX H100 node; the measured traffic is the Azure LLM
+    # inference traces; the measured frontier is InferenceX.
+    LlmServingFirstYear = _st.ServingCostScenario(
+        name="A 70B model trained once, then served for a year",
+        description="One million daily users send 50 requests each at an assumed tenth of a cent "
+                    "per request; training cost $2M once.",
+        training_cost=2_000_000,  # scenario assumption: one-time training spend, USD
+        daily_users=1_000_000,  # scenario assumption
+        requests_per_user_per_day=50,  # scenario assumption
+        cost_per_request=0.001,  # scenario assumption: serving cost per request, USD
+        efficiency_gain=0.10,  # scenario assumption: cut in cost per request
+        days_per_year=_DAYS_PER_YEAR,
+    )
+
+    SloGoodputTwoConfigurations = _st.SloGoodputScenario(
+        name="Two serving configurations on the same request mix and targets",
+        description="X completes more requests per second; Y completes fewer but more of them "
+                    "meet both TTFT and TPOT targets.",
+        completed={"X": Q_(1200, "1/second"), "Y": Q_(1000, "1/second")},  # scenario assumption
+        met_share={"X": 0.70, "Y": 0.95},  # scenario assumption
+    )
+
+    InteractiveRequestServingTax = _st.ServingTaxScenario(
+        name="A 100 ms interactive request with 70 ms of model execution",
+        description="Everything outside the model (routing, network, serialization, coordination, "
+                    "queueing) shares what is left; four sequential exchanges of 50 to 500 us.",
+        latency_target=Q_(100, "ms"),  # scenario assumption
+        model_time=Q_(70, "ms"),  # scenario assumption: idle-replica model execution
+        exchanges=4,  # scenario assumption: sequential network exchanges
+        exchange_low=Q_(50, "microsecond"),  # scenario assumption
+        exchange_high=Q_(500, "microsecond"),  # scenario assumption
+    )
+
+    VisionBatchingKnee = _st.BatchingKneeScenario(
+        name="Vision batch: 2 ms fixed, 1 ms per image",
+        description="A compute-bound vision model whose fixed cost per batch is small.",
+        fixed_time=Q_(2, "ms"),  # scenario assumption
+        per_request_time=Q_(1, "ms"),  # scenario assumption
+    )
+    LlmDecodeBatchingKnee = VisionBatchingKnee.variant(
+        name="LLM decode batch: 40 ms fixed, 0.5 ms per sequence",
+        description="About 40 ms streams a 70B model's FP16 weights through one H100's HBM "
+                    "(Llama3_70B_DecodeH100); 0.5 ms reads one sequence's own KV state.",
+        fixed_time=Q_(40, "ms"),  # scenario assumption: rounded weight-stream time
+        per_request_time=Q_(0.5, "ms"),  # scenario assumption: per-sequence KV read
+    )
+
+    VisionServingLittlesLaw = _st.LittlesLawScenario(
+        name="Vision service at 1,000 requests per second, 100 ms mean latency",
+        description="Replicas run batches of 8 in 80 ms; the fleet targets 80 percent mean "
+                    "service utilization.",
+        arrival_rate=Q_(1000, "1/second"),  # scenario assumption
+        time_in_system=Q_(100, "ms"),  # scenario assumption: mean end-to-end latency
+        batch_size=8,  # scenario assumption
+        batch_service_time=Q_(80, "ms"),  # scenario assumption
+        utilization_target=0.8,  # scenario assumption
+    )
+
+    LlmChatTrace2023 = _st.RequestTraceScenario(
+        name="Azure LLM chat trace 2023, one hour",
+        description="19,366 production chat requests; idle share for fixed batches of 8 "
+                    "consecutive requests.",
+        series=_Literature.LlmInferenceTraceConversation2023,
+        batch_size=8,  # scenario assumption: fixed batch of consecutive requests
+    )
+    LlmCodeTrace2023 = LlmChatTrace2023.variant(
+        name="Azure LLM code-completion trace 2023, one hour",
+        description="8,819 production code-completion requests, same batching.",
+        series=_Literature.LlmInferenceTraceCode2023,
+    )
+    LlmChatWeekTraffic2024 = _st.TrafficProfileScenario(
+        name="Azure LLM chat traffic 2024, one week in 10-minute bins",
+        description="Request rate per bin, 12 to 18 May 2024; weekday nightly trough and "
+                    "afternoon peak.",
+        series=_Literature.LlmInferenceTraceConversation2024TenMinute,
+        bin_column="bin10min",
+        count_column="requests",
+        bin_width=Q_(10, "minute"),
+    )
+
+    Llama3_70B_ReplicaDecodeBudget = _st.DecodeBudgetScenario(
+        name="Constructed batch-one decode budget of a 70B replica on 8 H100s",
+        description="An 85 ms baseline step split over GEMM, attention, element-wise, AllReduce, and "
+                    "launch; INT4 weights cut GEMM, then fusion and graph replay cut the rest.",
+        workload=_Models.Language.Llama2_70B,
+        tp_size=int(_ReferenceStats.ServingProfiles.PrecisionDividendTensorParallelDegree),
+        accelerator=_Hardware.Cloud.H100,
+        weight_bytes_per_param=_BYTES_FP16,
+        tpot_target=Q_(50, "ms"),  # scenario assumption: illustrative endpoint TPOT target
+        baseline_step=Q_(85, "ms"),  # scenario assumption: constructed baseline step
+        intervals=["GEMM", "attention", "element-wise", "AllReduce", "launch"],
+        baseline_shares=[0.40, 0.24, 0.12, 0.12, 0.12],  # scenario assumption
+        gemm_cut=0.45,  # scenario assumption: INT4 weights
+        attention_cut=0.25,  # scenario assumption: fused decode-attention kernel
+        fused_elementwise=Q_(3.4, "ms"),  # scenario assumption
+        replay_overhead=Q_(2.0, "ms"),  # scenario assumption: graph replay
+        collective_launch=Q_(5, "microsecond"),  # scenario assumption: collective launch latency
+    )
+    Llama3_70B_ReplicaSpeculation = _st.SpeculativeRoundScenario(
+        name="Speculative decoding on the tuned 70B replica step",
+        description="A draft proposes 5 tokens in 4 ms; the target verifies them in one tuned step; "
+                    "each candidate is accepted with probability 0.78.",
+        acceptance=0.78,  # scenario assumption: draft/target pair
+        draft_length=5,  # scenario assumption
+        draft_time=Q_(4, "ms"),  # scenario assumption
+        verify_time=Q_(Llama3_70B_ReplicaDecodeBudget.totals[2], "ms"),
+    )
+
+    LlmChatLittlesLaw = VisionServingLittlesLaw.variant(
+        name="Chat requests at 1,000 per second, each streaming the trace's mean answer",
+        description="Time in system is the Azure chat trace's mean answer, rounded to whole "
+                    "tokens, at the replica's 50 ms TPOT target (prefill ignored).",
+        time_in_system=(round(LlmChatTrace2023.mean_output_tokens)
+                        * Llama3_70B_ReplicaDecodeBudget.tpot_target).to("second"),
+        batch_size=None, batch_service_time=None, utilization_target=None,
+    )
+
+    # --- KV cache management on one DGX H100 node (added 2026-10-20) ----------
+    RepairRequestZones = _st.RequestZonesScenario(
+        name="Repair-agent request at revision r18, laid out in zones",
+        description="A 32,768-token request: system prompt, tool schemas, and workspace form the "
+                    "invariant shared prefix; turn history and the latest observation follow.",
+        zones={  # scenario assumption: tokens per zone, in serialization order
+            "System prompt": 2_048,
+            "Tool schemas": 4_096,
+            "Workspace": 8_192,
+            "Turn history": 16_384,
+            "Latest observation": 2_048,
+        },
+        shared_zones=3,  # system prompt, tool schemas, workspace
+    )
+    # Copied verbatim from the v2-10 inference branch; on merge keep one copy.
+    Llama3_70BLongContextAdmissionDgxH100 = _st.KvAdmissionScenario(
+        name="128K-token requests on the 70B GQA replica (8 H100s)",
+        description="FP16 weights and KV cache; HBM at the registered byte capacity, less a 20 GB "
+                    "runtime reserve.",
+        workload=_Models.Language.Llama3_70B,
+        accelerators=_Nodes.DGX_H100.accelerators_per_node,
+        hbm_per_accelerator=_ReferenceStats.ServingProfiles.H100VendorMemoryBudget,
+        weight_bytes_per_param=_BYTES_FP16,
+        reserve=Q_(20, "GB"),  # scenario assumption: system reserve
+        context_tokens=_Models.Language.Llama3_70B.context_length,
+        kv_bytes_per_elem=_BYTES_FP16,
+    )
+    Llama3_70BChatAdmissionDgxH100 = Llama3_70BLongContextAdmissionDgxH100.variant(
+        name="Median chat requests on the 70B GQA replica (8 H100s)",
+        description="Each request holds the Azure chat trace's median prompt plus median answer.",
+        context_tokens=LlmChatTrace2023.median_request_tokens,
+    )
+    LlmChatKvInFlight = _st.KvInFlightScenario(
+        name="KV state of every chat request in flight at 1,000 per second",
+        description="Each request holds its prompt plus half its answer on average (trace means).",
+        occupancy=LlmChatLittlesLaw,
+        resident_tokens=LlmChatTrace2023.mean_resident_tokens,
+        admission=Llama3_70BLongContextAdmissionDgxH100,
+    )
+    MedianChatKvHandoff = BufferTransfer10GB.variant(
+        name="Median chat KV cache handed from a prefill to a decode pool",
+        description="The 70B replica's FP16 KV for the median chat request, over NVLink inside a "
+                    "node or InfiniBand NDR between nodes. Bandwidth term only.",
+        payload=Llama3_70BChatAdmissionDgxH100.result.kv_per_request,
+        links={"NVLink": BufferTransfer10GB.links["NVLink"],
+               "InfiniBand": BufferTransfer10GB.links["InfiniBand"]},
+    )
+    LongContextKvHandoff = MedianChatKvHandoff.variant(
+        name="128K-token KV cache handed from a prefill to a decode pool",
+        payload=Llama3_70BLongContextAdmissionDgxH100.result.kv_per_request,
+    )
+
+    ChatbotSharedSystemPrompt = _st.PrefixSharingScenario(
+        name="1,000 chat users sharing a 2,000-token system prompt",
+        description="Full-width multi-head KV (64 heads of 128, FP16) with Llama-2 70B's 80 layers; "
+                    "500 unique response tokens per user.",
+        workload=_Models.Language.Llama2_70B,
+        prefix_tokens=2000,  # scenario assumption
+        users=1000,  # scenario assumption
+        unique_tokens_per_user=500,  # scenario assumption: mean response
+        kv_width=_Models.Language.Llama2_70B.hidden_dim,  # full-width MHA: heads x head width
+        bytes_per_elem=_BYTES_FP16,
+    )
+
+    Llama2_70BPrecisionDividendGqaTp8 = _st.PrecisionDividendScenario(
+        name="Precision dividend of a 70B GQA model on 8 H100s",
+        description="INT4 weights and an INT8 KV cache against FP16 for both, at a 4,096-token "
+                    "context, with a decimal 80 GB budget per GPU.",
+        workload=_Models.Language.Llama2_70B,
+        tp_size=int(_ReferenceStats.ServingProfiles.PrecisionDividendTensorParallelDegree),
+        hbm_per_accelerator=Q_(_ReferenceStats.ServingProfiles.H100VendorMemoryBudget.to("GiB").magnitude,
+                               "GB"),  # nameplate label read as decimal GB
+        context_tokens=int(_ReferenceStats.ServingProfiles.PrecisionDividendContextLengthTokens),
+        kv_heads=_Models.Language.Llama2_70B.kv_heads,
+        weight_bytes=_BYTES_FP16, weight_bytes_low=_BYTES_INT4,
+        kv_bytes=_BYTES_FP16, kv_bytes_low=_BYTES_INT8,
+    )
+    Llama2_70BPrecisionDividendMhaTp8 = Llama2_70BPrecisionDividendGqaTp8.variant(
+        name="Precision dividend of the same 70B model with 64-head attention",
+        kv_heads=_Models.Language.Llama2_70B.heads,
+    )
+
+    LongPromptChunkedPrefill = _st.ChunkedPrefillScenario(
+        name="A 10,000-token prompt in 512-token chunks",
+        description="Each iteration runs the active streams' decode tokens plus one chunk.",
+        prompt_tokens=10_000,  # scenario assumption
+        chunk_tokens=512,  # scenario assumption
+    )
+
+    Llama2_70BPrefillTensorParallel8 = _st.TensorParallelSpeedupScenario(
+        name="Long-prompt prefill layer of a 70B model, 8-way tensor parallel",
+        description="Stated 30 ms of serial compute per layer (12 attention, 18 feed-forward) and "
+                    "0.3 ms per AllReduce, two per layer.",
+        serial_layer_times={"attention": Q_(12, "ms"), "feed-forward": Q_(18, "ms")},  # scenario assumption
+        tp_size=_Nodes.DGX_H100.accelerators_per_node,
+        allreduce_time=Q_(0.3, "ms"),  # scenario assumption
+        layers=_Models.Language.Llama2_70B.layers,
+    )
+
+    HeterogeneousH100A100Routing = _st.WeightedRoutingScenario(
+        name="15,000 QPS over 10 H100 and 20 A100 servers",
+        description="Weights proportional to each server's capacity equalize utilization.",
+        servers={"H100": int(_ReferenceStats.ServingProfiles.HeterogeneousRoutingH100Servers),
+                 "A100": int(_ReferenceStats.ServingProfiles.HeterogeneousRoutingA100Servers)},
+        capacity={"H100": int(_ReferenceStats.ServingProfiles.HeterogeneousRoutingH100CapacityQps),
+                  "A100": int(_ReferenceStats.ServingProfiles.HeterogeneousRoutingA100CapacityQps)},
+        offered=int(_ReferenceStats.ServingProfiles.HeterogeneousRoutingTargetQps),
+    )
+    ServingFanout100Leaves = _st.AvailabilityScenario(
+        name="A request that waits for 100 independent leaves",
+        description="Each leaf meets its own p99 (fast 99 percent of the time); 1 - all_up is the "
+                    "share of slow requests.",
+        availability=0.99,  # scenario assumption: each leaf fast at its p99
+        n_components=100,  # scenario assumption: leaves per request
+    )
+    RecommenderTailEvents = _st.TailEventRateScenario(
+        name="A one-in-10,000 slow request at recommender platform scale",
+        description="Archetype B request rate times a rare per-request event.",
+        request_rate=_ReferenceStats.RecommenderAtScaleProfile.PlatformQps,
+        event_probability=1e-4,  # scenario assumption: rare slow-request event
+    )
+    Llama70BReplicaColdStart = _st.ColdStartScenario(
+        name="Cold start of a 70B FP16 serving replica",
+        description="Provision, fetch the FP16 weights from object storage, load and warm up; a "
+                    "forecast that starts replicas early lowers the peak fleet.",
+        workload=_Models.Language.Llama2_70B,
+        weight_bytes_per_param=_BYTES_FP16,
+        fetch_bandwidth=_ReferenceStats.ReplicaColdStartProfile.ArtifactFetchBandwidth,
+        provisioning_time=_ReferenceStats.ReplicaColdStartProfile.ProvisioningTime,
+        load_warmup_time=_ReferenceStats.ReplicaColdStartProfile.LoadWarmupTime,
+        reactive_peak_replicas=45,  # scenario assumption: reactive-only peak fleet
+        predictive_peak_replicas=30,  # scenario assumption: forecast peak fleet
+        prewarm_lead=Q_(30, "minute"),  # scenario assumption: pre-warm lead before each ramp
+    )
+    SharedPoolNoisyNeighbor = _st.NoisyNeighborScenario(
+        name="Ten tenants on shared H100s, one bursting fivefold",
+        description="Three tenants share a 60 GB KV pool; one swells to 45 GB. Latencies are "
+                    "scenario values, not measurements.",
+        kv_pool=Q_(60, "GB"),  # scenario assumption
+        pool_tenants=3,  # scenario assumption
+        swollen_share=Q_(45, "GB"),  # scenario assumption
+        base_sequences=200,  # scenario assumption
+        base_rate=100,  # scenario assumption: QPS per tenant
+        burst_rate=500,  # scenario assumption
+        slo=Q_(50, "ms"),  # scenario assumption: p99 SLO
+        unprotected_p99_low=Q_(22, "ms"),  # scenario assumption
+        unprotected_p99_high=Q_(45, "ms"),  # scenario assumption
+        quota_rate=120,  # scenario assumption: quota-enforced QPS
+        protected_p99=Q_(15, "ms"),  # scenario assumption
+    )
+    ReasoningTokenLatency = _st.ReasoningLatencyScenario(
+        name="128 serial reasoning tokens at 100 ms per token",
+        description="A round figure per token; the ratio does not depend on it.",
+        per_token_time=Q_(100, "ms"),  # scenario assumption
+        reasoning_tokens=128,  # scenario assumption
+    )
+    FourRequestDecodeBatch = _st.FixedBatchScheduleScenario(
+        name="Four concurrent requests with answers of 50 to 200 tokens",
+        description="One token per 20 ms decode iteration; fixed membership keeps every slot until "
+                    "the longest answer ends.",
+        output_lengths=[50, 200, 100, 150],  # scenario assumption
+        prompt_lengths=[100, 80, 120, 90],  # scenario assumption
+        iteration_time=Q_(20, "ms"),  # scenario assumption
+    )
+    RandomVsTwoChoicePlacement = _st.BallsIntoBinsScenario(
+        name="n equal jobs into n replicas: random against two random probes",
+        description="Static placement, no departures; 20 trials per size (5 at 100,000), seed 7.",
+        bins=[10, 100, 1000, 10_000, 100_000],
+        choices=[1, 2],
+        trials={10: 20, 100: 20, 1000: 20, 10_000: 20, 100_000: 5},  # simulation budget
+        seed=7,
+    )
+
+    InferenceXServingFrontier = _st.ServingFrontierScenario(
+        name="InferenceX: DeepSeek-R1 FP8, 1,024 tokens in and out",
+        description="Measured per-GPU output against per-user interactivity, per accelerator.",
+        series=_Literature.Series.InferenceXDeepSeekR1,
+        targets=[25, 50, 100],  # scenario assumption: per-user rates for split-versus-colocated comparison
+    )
+    H100OutputTokenCost = _st.TokenCostScenario(
+        name="Output-token cost on the best measured H100 configuration",
+        description="At 13, 50, and 100 output tokens per second per user, priced at a hypothetical "
+                    "$4.00 per H100-hour (on-demand, US-East, in a regional price snapshot).",
+        frontier=InferenceXServingFrontier,
+        hardware="h100",
+        targets=[13, 50, 100],  # scenario assumption: per-user rates compared
+        gpu_hour_price=Q_(4.00, "USD/hour"),  # scenario assumption: hypothetical on-demand price
+    )
+
+    # --- Retrieval from long-term memory (added 2026-10-20) ------------------
+    RetrievalRecordsInAllowance = _st.RetrievalPayloadScenario(
+        name="Whole retrieval records staged in a 32,768-token call",
+        description="2,048 tokens reserved for output and 24,576 for the system prompt, tool "
+                    "schemas, and history; a 128-token envelope and records of 512 body plus 64 "
+                    "metadata tokens; metadata doubled for comparison.",
+        window=32_768,           # scenario assumption: hypothetical call limit
+        output_reserve=2_048,    # scenario assumption
+        other_input=24_576,      # scenario assumption: system prompt, tool schemas, history
+        envelope=128,            # scenario assumption: response envelope
+        body=512,                # scenario assumption: body tokens per record
+        metadata=64,             # scenario assumption: provenance tokens per record
+        metadata_scale=2,        # scenario assumption: per-record metadata doubled
+    )
+    Bm25ShortAgainstLongFile = _st.Bm25PairScenario(
+        name="One rare term in a short file with one match and a long file with six",
+        description="100,000 documents, 5 containing the term, mean length 400 analyzer terms; "
+                    "80 terms with one occurrence against 4,000 with six; k1 = 1.2, b = 0.75.",
+        documents=100_000,       # scenario assumption: stipulated corpus statistics
+        matching_documents=5,    # scenario assumption
+        average_length=400,      # scenario assumption: analyzer terms
+        short_length=80,         # scenario assumption
+        short_frequency=1,       # scenario assumption
+        long_length=4_000,       # scenario assumption
+        long_frequency=6,        # scenario assumption
+        k1=1.2,                  # scenario assumption: a common default
+        b=0.75,                  # scenario assumption: a common default
+    )
+    ExactScanTenMillionVectors = _st.ExactScanScenario(
+        name="Exact scan of 10 million 768-dimension FP16 vectors on the reference desktop CPU",
+        description="20 searches in one trajectory; a scope filter that leaves 10,000 vectors; "
+                    "a 10 ms per-search budget.",
+        host=_Hardware.Cloud.ReferenceCPU,
+        vectors=10_000_000,      # scenario assumption: hypothetical corpus
+        dimension=768,           # scenario assumption: a common embedding width
+        bytes_per_value=_BYTES_FP16,
+        searches=20,             # scenario assumption: searches in one trajectory
+        filtered_vectors=10_000,  # scenario assumption: eligible set after a selective filter
+        budget=Q_(10, "ms"),     # scenario assumption: per-search latency budget
+    )
+    AnnIndexesTenMillionVectors = _st.AnnFootprintScenario(
+        name="HNSW links and IVF-PQ codes over the 10-million-vector exact-scan corpus",
+        description="32 eight-byte links per node; 64 one-byte subvector codes with 256 "
+                    "centroids each and an FP32 lookup table.",
+        vectors=ExactScanTenMillionVectors.vectors,
+        dimension=ExactScanTenMillionVectors.dimension,
+        bytes_per_value=ExactScanTenMillionVectors.bytes_per_value,
+        links_per_node=32,       # scenario assumption: graph degree M
+        link_bytes=Q_(8, "byte"),  # scenario assumption: one 64-bit neighbor id
+        subvectors=64,           # scenario assumption: PQ subvectors m
+        centroids=256,           # scenario assumption: one-byte codes
+        code_bytes=Q_(1, "byte"),
+        table_entry_bytes=_BYTES_FP32,
+    )
+    TypedTraversalDepthThree = _st.GraphNeighborhoodScenario(
+        name="A depth-3 exact-tree neighborhood against the same call's retrieval allowance",
+        description="3 children per node, 180 serialized tokens per node, 100 tokens of edges "
+                    "and envelope.",
+        window=RetrievalRecordsInAllowance.window,
+        output_reserve=RetrievalRecordsInAllowance.output_reserve,
+        other_input=RetrievalRecordsInAllowance.other_input,
+        children=3,              # scenario assumption: exact tree, no repeated nodes
+        depth=3,                 # scenario assumption: the seed is depth zero
+        node_tokens=180,         # scenario assumption: per node, provenance included
+        envelope_tokens=100,     # scenario assumption: edges and envelope
+    )
+    RepairEditIndexMaintenance = _st.IndexMaintenanceScenario(
+        name="An eight-file edit: synchronous re-indexing against exclusion",
+        description="Two chunks per file; stipulated per-stage costs for parsing, postings, a "
+                    "local embedding batch of 16, and a remote embedding request; in-memory "
+                    "exclusion entries and checks over 50 candidates.",
+        files=8,                                   # scenario assumption
+        chunks_per_file=2,                         # scenario assumption
+        parse_time=Q_(3.5, "ms"),                  # scenario assumption: per file
+        postings_time=Q_(2.0, "ms"),               # scenario assumption: per chunk
+        local_batch_time=Q_(28.0, "ms"),           # scenario assumption: one local batch
+        batch=16,                                  # scenario assumption
+        remote_request_time=Q_(150, "ms"),         # scenario assumption: one remote request
+        exclusion_write_time=Q_(50, "ns"),         # scenario assumption: per entry, in memory
+        candidates=50,                             # scenario assumption
+        exclusion_check_time=Q_(30, "ns"),         # scenario assumption: per candidate, in memory
+    )
+    LexicalGraphAgainstDenseStore = _st.StorageAmplificationScenario(
+        name="A lexical-plus-graph store against a lexical-plus-dense store over 50,000 files",
+        description="200 tokens and 800 bytes per file; 0.8 bytes of postings per token; four "
+                    "32-byte edges per file; 100-token chunks of 768 FP32 values with the ANN "
+                    "graph's links; 15 edited files; stipulated throughputs.",
+        files=50_000,                              # scenario assumption
+        tokens_per_file=200,                       # scenario assumption
+        bytes_per_file=Q_(800, "byte"),            # scenario assumption
+        postings_per_token=Q_(0.8, "byte"),        # scenario assumption
+        edges_per_file=4,                          # scenario assumption
+        edge_bytes=Q_(32, "byte"),                 # scenario assumption
+        passage_tokens=100,                        # scenario assumption
+        dimension=768,                             # scenario assumption
+        bytes_per_value=_BYTES_FP32,
+        links_per_node=AnnIndexesTenMillionVectors.links_per_node,
+        link_bytes=AnnIndexesTenMillionVectors.link_bytes,
+        edited_files=15,                           # scenario assumption
+        lexical_rate=1_250,                        # scenario assumption: files per second
+        parse_rate=680,                            # scenario assumption: files per second
+        embed_rate=50,                             # scenario assumption: chunks per second
+    )
+    MaintainedMemoryPolicyCost = _st.MaintainedPolicyCostScenario(
+        name="A memory policy that adds upkeep of a tenth of an attempt and lifts acceptance",
+        description="Policy A accepts 50 percent of tasks; policy B accepts 60 percent and adds "
+                    "maintenance of 0.1 of A's attempt cost.",
+        baseline_acceptance=0.50,    # scenario assumption
+        maintained_acceptance=0.60,  # scenario assumption
+        maintenance_share=0.10,      # scenario assumption
+    )
+    ConditionNotifyDocstrings = _st.WordOverlapScenario(
+        name="First docstring lines of CPython's Condition.notify and Condition.notify_all",
+        description="CPython v3.14.4, Lib/threading.py; two methods with different effects "
+                    "share most of their words.",
+        first="Wake up one or more threads waiting on this condition, if any.",
+        second="Wake up all threads waiting on this condition.",
+    )
+    MeetingPreferenceRevision = _st.WordOverlapScenario(
+        name="A scheduling preference and its superseding revision",
+        description="Mutually exclusive directives that differ in one word.",
+        first="Schedule no meetings before 10:00 AM",
+        second="Schedule no meetings before 11:00 AM",
+    )
+
+    # --- Physical demonstration data (added 2026-10-20) ---
+    PermissionTickTelemetryHour = _st.CorrelatedLogScenario(
+        name="One hour of telemetry logged at the warehouse manipulator's permission tick",
+        description="A slowly varying statistic with lag-one correlation 0.999: records against "
+                    "effective independent samples.",
+        rate=_Embodied.MobileManipulator.WarehouseMobileManipulator.permission_rate,
+        duration=Q_(1, "hour"),     # scenario assumption
+        lag1_correlation=0.999,     # scenario assumption: slowly varying statistic
+    )
+    ImitationBoundsFiveSecondEpisode = _st.ImitationBoundScenario(
+        name="Imitation cost bounds over a 5 s episode at 100 Hz",
+        description="Open loop, behavioral cloning (S^2 eps), and aggregation (u S eps, u = 1) at a "
+                    "per-step error of 0.001.",
+        episode=Q_(5, "second"),        # scenario assumption
+        control_rate=Q_(100, "Hz"),     # scenario assumption
+        per_step_error=1.0e-3,          # scenario assumption
+        recoverability=1.0,             # scenario assumption: a recoverable task
+    )
+    ImitationBoundsTenSecondEpisode = ImitationBoundsFiveSecondEpisode.variant(
+        name="Imitation cost bounds over a 10 s episode at 100 Hz",
+        episode=Q_(10, "second"),       # scenario assumption
+    )
+    LatchPairingLag = _st.PairingLagScenario(
+        name="An uncompensated 35 ms observation-action lag at the cage-door latch",
+        description="Pairing error at a transit speed and the two latch approaches against a 2 mm "
+                    "clearance; full-frame rolling-shutter skew beside it.",
+        site=_Embodied.Scenario.WarehouseAisle,
+        lag=Q_(35, "ms"),               # scenario assumption: exposure-to-arrival lag
+        clearance=Q_(2, "mm"),          # scenario assumption: latch clearance
+        transit_speed=Q_(0.50, "m/s"),  # scenario assumption: generic arm transit speed
+        shutter_skew_low=Q_(15, "ms"),  # scenario assumption: fast full-frame readout
+        shutter_skew_high=Q_(33, "ms"), # scenario assumption: one 30 Hz frame
+    )
+    LatchPairingLagTightPlate = LatchPairingLag.variant(
+        name="The same lag against a tighter 1 mm strike-plate clearance",
+        clearance=Q_(1, "mm"),          # scenario assumption
+    )
+    TeleopCorrectionLoop = _st.TeleopLoopScenario(
+        name="One teleoperated correction in an illustrative reference setup",
+        description="Display, operator reaction, command transport, and mechanical response.",
+        display=Q_(50, "ms"),       # scenario assumption: exposure, decode, raster refresh
+        human=Q_(200, "ms"),        # scenario assumption: perception, planning, neuromuscular
+        command=Q_(10, "ms"),       # scenario assumption: quantization, packetization, bus
+        mechanical=Q_(80, "ms"),    # scenario assumption: torque ramp and structural inertia
+    )
+    WarehouseTeleopIngestion = _st.TeleopIngestionScenario(
+        name="Raw telemetry of one teleoperated session on the warehouse mobile manipulator",
+        description="Navigation and wrist cameras, two external RGB-D cameras, and the kinematic record "
+                    "at the permission tick, against SATA and Gen4 NVMe write bandwidth.",
+        machine=_Embodied.MobileManipulator.WarehouseMobileManipulator,
+        external_camera=_Sensors.Camera.Intel_RealSense_D435i,
+        external_cameras=2,         # scenario assumption
+        rgb_bytes_per_pixel=3,      # scenario assumption: 24-bit RGB after debayering
+        depth_bytes_per_pixel=2,    # scenario assumption: uint16 depth aligned to color
+        values_per_axis=6,          # scenario assumption: position, velocity, torque, and three action taps
+        bytes_per_value=4,          # scenario assumption: float32
+        timestamp_bytes=8,          # scenario assumption: one 64-bit timestamp per record
+        shift=Q_(8, "hour"),        # scenario assumption
+        compression_ratio=8.0,      # scenario assumption: intra-frame video codec
+        slow_drive_bandwidth=_Storage.SataSsd.bandwidth,
+        fast_drive_bandwidth=_Hardware.Tech.Storage.NvmeGen4.bandwidth,
+    )
+    LatchDemonstrationCampaign = _st.DemonstrationCampaignScenario(
+        name="Door-opening demonstrations on the cage-door latch, an illustrative campaign",
+        description="One scheduled hour of attempt-and-reset cycles, the campaign that keeps 5,000 "
+                    "demonstrations, and the wear on the wrist gear and flex cable.",
+        session=Q_(60, "minute"),       # scenario assumption: declared session length
+        startup=Q_(8, "minute"),        # scenario assumption: cell startup and bus sync
+        calibration=Q_(7, "minute"),    # scenario assumption: sensor calibration and nulling
+        rest=Q_(10, "minute"),          # scenario assumption: operator rest
+        attempt=Q_(25, "second"),       # scenario assumption
+        reset=Q_(15, "second"),         # scenario assumption: re-latch the door
+        failure_rate=0.20,              # scenario assumption
+        qa_rate=0.15,                   # scenario assumption
+        target_kept=5000,               # scenario assumption: campaign target
+        gear_reversals_per_attempt=14,  # scenario assumption
+        cable_flexes_opening=6,         # scenario assumption
+        cable_flexes_return=2,          # scenario assumption: return stroke during the re-latch
+        gear_rated_cycles=5_000_000,    # scenario assumption: rated stress cycles
+        cable_rated_cycles=200_000,     # scenario assumption: rated bending cycles
+        repeat_campaigns=3,             # scenario assumption: campaigns compared against the cable's life
+    )
+    LeRobotHubDatasetCounts = _st.HubDatasetCountsScenario(
+        name="Public LeRobot-format datasets on the Hugging Face Hub",
+        description="Cumulative dataset count by month and episodes per dataset.",
+        monthly=_Literature.LeRobotHubMonthly,
+        histogram=_Literature.LeRobotEpisodeHistogram,
+        small_episodes=16,              # scenario assumption: "small" threshold
+        large_episodes=512,             # scenario assumption: "large" threshold
+    )
+    OpenXEmbodimentPoolComposition = _st.PooledCorpusCompositionScenario(
+        name="Open X-Embodiment by morphology and declared command rate",
+        description="Episode-weighted shares against the warehouse manipulator's chunk rate.",
+        series=_Literature.OpenXEmbodimentComposition,
+        rate_threshold=_Embodied.MobileManipulator.WarehouseMobileManipulator.chunk_rate,
+        top_datasets=2,                 # scenario assumption: "two datasets supply most of them"
+    )
+    WarehouseManipulatorStateGrid = _st.StateGridScenario(
+        name="Brute-force coverage of a 28-dimensional manipulation state grid",
+        description="Cells at 10 and 100 bins per axis against a 1,000-robot fleet logging at 1 kHz "
+                    "for the age of the universe.",
+        state_components={            # scenario assumption: the state a contact task conditions on
+            "joint angles": 7, "joint velocities": 7, "wheel states": 2,
+            "wrist wrench": 6, "workpiece pose": 6,
+        },
+        bins=10,                        # scenario assumption
+        fine_bins=100,                  # scenario assumption: fine enough to guide contact
+        fleet=1000,                     # scenario assumption
+        log_rate=Q_(1000, "Hz"),        # scenario assumption
+        duration=_AGE_OF_UNIVERSE,
+    )
+    ContactAngleCoverage = _st.ContactGridScenario(
+        name="Two archives of one million records on a contact-angle and normal-force grid",
+        description="A cautious teleoperator and an exploratory policy against 1 degree by 1 N bins.",
+        angle_min=Q_(-15, "degree"),    # scenario assumption
+        angle_max=Q_(15, "degree"),     # scenario assumption
+        angle_bin=Q_(1, "degree"),      # scenario assumption
+        force_max=Q_(20, "N"),          # scenario assumption
+        force_bin=Q_(1, "N"),           # scenario assumption
+        records=1_000_000,              # scenario assumption
+        record_rate=Q_(100, "Hz"),      # scenario assumption
+        archives={                      # scenario assumption: occupied ranges and stipulated errors
+            "cautious": (Q_(-2, "degree"), Q_(2, "degree"), Q_(4, "N"), Q_(6, "N"), Q_(0.001, "rad")),
+            "exploratory": (Q_(-15, "degree"), Q_(15, "degree"), Q_(1, "N"), Q_(18, "N"),
+                            Q_(0.012, "rad")),
+        },
+    )
+    LatchScenarioTable = _st.ScenarioTableCoverageScenario(
+        name="Cage-door latch archive against plate offset and approach speed",
+        description="Three plate offsets by the two latch approaches; the archive holds the nominal "
+                    "plate at the guarded speed.",
+        offsets=[Q_(0, "mm"), Q_(3, "mm"), Q_(-3, "mm")],   # scenario assumption: +/-3 mm plate offset
+        speeds=[_Embodied.Scenario.WarehouseAisle.v_latch_approach,
+                _Embodied.Scenario.WarehouseAisle.v_latch_high],
+        logged_offset=Q_(0.5, "mm"),    # scenario assumption: offset band the archive logged
+        demonstrated_speed=_Embodied.Scenario.WarehouseAisle.v_latch_approach,
+    )
+    LatchScenarioTableAfterRecovery = LatchScenarioTable.variant(
+        name="The latch table after a recovery collection at +3 mm and the guarded speed",
+        added_offsets=[Q_(3, "mm")],    # scenario assumption: the stipulated latch-recovery-02
+    )
+    LatchScenarioTableThirdSpeed = LatchScenarioTable.variant(
+        name="The latch table with a third approach speed between the two",
+        speeds=[_Embodied.Scenario.WarehouseAisle.v_latch_approach,
+                (_Embodied.Scenario.WarehouseAisle.v_latch_approach
+                 + _Embodied.Scenario.WarehouseAisle.v_latch_high) / 2,  # scenario assumption
+                _Embodied.Scenario.WarehouseAisle.v_latch_high],
+    )
+    GripperStrokeTransfer = _st.GripperTransferScenario(
+        name="A normalized gripper command moved from a 100 mm stroke to a 60 mm stroke",
+        description="The same 0.80 command on both grippers against a 75 mm part; the donor's hold "
+                    "force against the target's continuous rating.",
+        command=0.80,                   # scenario assumption
+        donor_stroke=Q_(100, "mm"),     # scenario assumption
+        target_stroke=Q_(60, "mm"),     # scenario assumption
+        part_width=Q_(75, "mm"),        # scenario assumption
+        donor_hold_force=Q_(30, "N"),   # scenario assumption
+        target_force_rating=Q_(15, "N"),  # scenario assumption
+    )
+
+    Llama3_70BAgentContextAdmissionDgxH100 = Llama3_70BLongContextAdmissionDgxH100.variant(
+        name="32,768-token agent requests on the 70B GQA replica (8 H100s)",
+        description="The repair request's 32,768 retained tokens per request, same replica and reserve.",
+        context_tokens=RepairRequestZones.total_tokens,
+    )
+    Llama3_70BShortContextAdmissionDgxH100 = Llama3_70BLongContextAdmissionDgxH100.variant(
+        name="8,192-token requests on the 70B GQA replica (8 H100s)",
+        description="A short session of 8,192 retained tokens per request, same replica and reserve.",
+        context_tokens=8_192,  # scenario assumption: short-session context
+    )
+    KvBytesPerTokenByAttentionDesign = _st.KvAttentionDesignScenario(
+        name="KV bytes per token across multi-head, grouped-query, and latent attention",
+        description="Six registry geometries at 16 bits; GPT-3 (MHA), Llama 3 70B (GQA), and "
+                    "DeepSeek-V3 (MLA) as references, with one 131,072-token session.",
+        models=[_Models.Language.GPT3, _Models.Language.Llama3_405B, _Models.Language.Llama3_70B,
+                _Models.Language.Llama2_70B, _Models.Language.Mixtral_8x7B, _Models.Language.DeepSeek_V3],
+        mha=_Models.Language.GPT3,
+        gqa=_Models.Language.Llama3_70B,
+        mla=_Models.Language.DeepSeek_V3,
+        session_tokens=Llama3_70BLongContextAdmissionDgxH100.context_tokens,
+    )
+    CappedRequestsPagedAllocation = _st.PagedAllocationScenario(
+        name="Requests capped at 32,768 tokens with a mean final length of 2,048: reserved or paged",
+        description="Full-cap contiguous reservation against 16- and 64-token blocks in the same pool; "
+                    "final lengths capped exponential (a modeling assumption).",
+        pool=Llama3_70BAgentContextAdmissionDgxH100,
+        cap=32_768,  # scenario assumption: deployment cap, not a model specification
+        mean_final=2_048,  # scenario assumption: hypothetical mean final length, not a trace mean
+        small_block=16,  # scenario assumption: allocator block sizes
+        large_block=64,
+    )
+    ForkedCandidatesPrefixCopy = _st.KvForkCopyScenario(
+        name="Four candidate repairs forked from an 8,192-token prefix without block sharing",
+        description="Each candidate copies the prefix's KV state under contiguous allocation.",
+        pool=Llama3_70BAgentContextAdmissionDgxH100,
+        prefix_tokens=8_192,  # scenario assumption: processed prefix shared by the candidates
+        branches=4,  # scenario assumption: sampled candidate repairs
+    )
+    InvariantPrefixRebuildDgxH100 = _st.PrefixRebuildScenario(
+        name="A 4,096-token invariant prefix rebuilt on a miss, against a 32-token suffix pass on a hit",
+        description="Llama 3 70B geometry on one DGX H100 node; sustained prefill at 90 percent of the "
+                    "high-MFU figure (45 percent of 16-bit peak).",
+        workload=_Models.Language.Llama3_70B,
+        node=_Nodes.DGX_H100,
+        precision="fp16",
+        prefix_tokens=4_096,  # scenario assumption: invariant instructions and tool schemas
+        suffix_tokens=32,  # scenario assumption: short novel suffix after a hit
+        utilization=_Literature.Training.MfuHigh * 0.9,  # scenario assumption: sustained prefill share
+    )
+    ChunkedPrefillAmongDecodes = _st.ChunkedPrefillScenario(
+        name="A 4,096-token uncached prompt among 32 decodes, whole or in 512-token chunks",
+        description="Weight-only step time on the DGX H100 node at the sustained prefill rate.",
+        prefill=InvariantPrefixRebuildDgxH100,
+        decodes=32,  # scenario assumption: ongoing decode requests
+        prompt_tokens=4_096,  # scenario assumption: new uncached prefill
+        chunk_tokens=512,  # scenario assumption: prefill chunk per iteration
+    )
+    RepairToolWaitPausedState = _st.PausedKvStateScenario(
+        name="Repair request paused for a 45 s integration test: keep, move, or drop its KV state",
+        description="The 32,768-token request in 16-token blocks, moved over the eight PCIe host links "
+                    "in parallel; 32 such requests returning together.",
+        pool=Llama3_70BAgentContextAdmissionDgxH100,
+        prefill=InvariantPrefixRebuildDgxH100,
+        context_tokens=RepairRequestZones.total_tokens,
+        block_tokens=16,  # scenario assumption: allocation granularity
+        wait=Q_("45 s"),  # scenario assumption: stipulated integration-test wait
+        link_fraction=0.25,  # scenario assumption: links sustain a quarter of rated bandwidth
+        returns=32,  # scenario assumption: paused repairs whose tests finish together
+    )
+    RepairBlockSharingResidency = _st.KvBlockSharingScenario(
+        name="Repair requests in 16-token blocks: unshared, sharing a workspace prefix, kept or released",
+        description="32,768 input and 2,048 output tokens per request, a 24,576-token shareable "
+                    "prefix, 10 percent headroom, 5 s of generation and a 45 s test per turn.",
+        pool=Llama3_70BAgentContextAdmissionDgxH100,
+        headroom=0.10,  # scenario assumption: fraction of the pool withheld
+        context=RepairRequestZones.total_tokens,
+        output=2_048,  # scenario assumption: maximum private output tokens
+        common=24_576,  # scenario assumption: identical, compatible, shareable prefix tokens
+        block_tokens=RepairToolWaitPausedState.block_tokens,
+        generation=Q_("5 s"),  # scenario assumption: residence while generating
+        wait=RepairToolWaitPausedState.wait,
+    )
+    RepairBlockSharingResidencyLongTest = RepairBlockSharingResidency.variant(
+        name="Repair requests in 16-token blocks with a 90 s test",
+        wait=Q_("90 s"),  # scenario assumption: a test twice as long
+    )
+    RepairAgentResidency = _st.KvResidencyArchetypeScenario(
+        name="Repair agent: sharing only its system prompt and tool schemas, 5 s generation, 45 s test",
+        description="The 32,768-token repair context with the support profile's 6,144-token shared "
+                    "prefix (taken to be the same length).",
+        paused=RepairToolWaitPausedState,
+        context_tokens=RepairRequestZones.total_tokens,
+        shared_prefix=int(_Agents.Support.CustomerOps.shared_prefix.to("token").magnitude),
+        generation=RepairBlockSharingResidency.generation,
+        wait=RepairBlockSharingResidency.wait,
+    )
+    SupportAgentResidency = _st.KvResidencyArchetypeScenario(
+        name="Customer-support agent: shared policy prefix, short generation, customer reply wait",
+        description="The CustomerOps support profile's session context, shared prefix, generation "
+                    "residence, and customer reply time.",
+        paused=RepairToolWaitPausedState,
+        context_tokens=int(_Agents.Support.CustomerOps.session_context.to("token").magnitude),
+        shared_prefix=int(_Agents.Support.CustomerOps.shared_prefix.to("token").magnitude),
+        generation=_Agents.Support.CustomerOps.generation_residence,
+        wait=_Agents.Support.CustomerOps.customer_reply_time,
     )

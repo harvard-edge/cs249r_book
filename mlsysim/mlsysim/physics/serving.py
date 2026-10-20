@@ -120,3 +120,92 @@ def calc_mg1_wait_ratio(utilization, service_cv):
     if rho >= 1:
         return float("inf")
     return rho / (1 - rho) * (1 + cv * cv) / 2
+
+
+# --- Serving at scale: occupancy, batching, speculation (added 2026-10-20) -----
+
+def calc_littles_law_occupancy(arrival_rate, time_in_system):
+    """
+    Mean requests in a stable system, by Little's law.
+
+        L = lambda W
+
+    ``arrival_rate`` (requests per unit time) times ``time_in_system`` (the
+    mean time each request spends inside). The law needs only stability, not
+    a distribution, so it gives a mean and says nothing about the tail.
+    """
+    return arrival_rate * time_in_system
+
+
+def calc_batch_knee(fixed_time, per_request_time):
+    """
+    Batch size at which per-request cost equals the per-batch fixed cost.
+
+        B_knee = t_0 / t_req
+
+    With batch service time S(B) = t_0 + B t_req, throughput B / S(B) reaches
+    half its ceiling 1 / t_req at this batch.
+    """
+    return (fixed_time / per_request_time).to("").magnitude
+
+
+def calc_batch_throughput_share(batch_size, fixed_time, per_request_time) -> float:
+    """Throughput at ``batch_size`` as a share of the ceiling 1 / t_req: B t_req / (t_0 + B t_req)."""
+    work = batch_size * per_request_time
+    return (work / (fixed_time + work)).to("").magnitude
+
+
+def calc_padding_waste_fraction(lengths) -> float:
+    """
+    Share of slot time a fixed-membership batch leaves idle.
+
+        W = 1 - mean(L) / max(L)
+
+    Every member holds its slot until the longest member finishes, so slot
+    time is ``n max(L)`` while useful work is ``sum(L)``.
+    """
+    lengths = [float(x) for x in lengths]
+    if not lengths or max(lengths) <= 0:
+        raise ValueError("lengths must be nonempty and positive")
+    return 1 - (sum(lengths) / len(lengths)) / max(lengths)
+
+
+def calc_speculative_expected_tokens(acceptance: float, draft_length: int) -> float:
+    """
+    Expected tokens one speculative round emits.
+
+        E[tokens] = (1 - alpha^(K+1)) / (1 - alpha)
+
+    A draft proposes ``draft_length`` (K) tokens, each accepted independently
+    with probability ``acceptance`` (alpha) until the first rejection; the
+    target's verification pass always contributes one token.
+    """
+    a = float(acceptance)
+    if not 0 <= a < 1:
+        raise ValueError("acceptance must be in [0, 1)")
+    return (1 - a ** (draft_length + 1)) / (1 - a)
+# --- Residence time and turn rate (added 2026-10-20) --------------------------
+
+def calc_littles_law_rate(occupied_slots, residence_time):
+    """
+    Turns per unit time that ``occupied_slots`` sustain, by Little's law.
+
+        L = lambda W   =>   lambda = L / W
+
+    ``residence_time`` is the time each turn holds its slot. The law assumes
+    only a stable system, so the rate is an average, not a peak.
+    """
+    return occupied_slots / residence_time
+
+
+def calc_residency_factor(generation_time, wait_time) -> float:
+    """
+    How much holding a slot through a wait divides the turn rate.
+
+        1 + T_wait / T_gen
+
+    Keeping state through a wait stretches each turn's residence from
+    ``generation_time`` to ``generation_time + wait_time``; for the same slots,
+    Little's law divides the rate by this factor (the residency tax).
+    """
+    return ((generation_time + wait_time) / generation_time).to("").magnitude
