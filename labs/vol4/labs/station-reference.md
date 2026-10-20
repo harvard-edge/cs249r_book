@@ -41,11 +41,11 @@ This page describes the standard bench station used across all Volume IV labs. I
 
 These invariants apply to every lab and every experiment:
 
-> **Rule 1 — Dual-Power Isolation.** Actuator bus power (7.4V DC) must never flow through the compute logic rails. The two supplies share only a common star ground. Staff must qualify transient coupling and continued logic operation under the declared motor and supply faults; separate positive rails do not eliminate common-ground coupling.
+> **Rule 1: Dual-Power Isolation.** Actuator bus power (7.4V DC) must never flow through the compute logic rails. The two supplies share only a common star ground. Staff must qualify transient coupling and continued logic operation under the declared motor and supply faults; separate positive rails do not eliminate common-ground coupling.
 
-> **Rule 2 — Single Command Path.** The Linux host must NEVER have a physical, electrical, or software bypass directly to the servo bus. All motor commands flow exclusively through the STM32 MCU, which evaluates and permits each proposal before forwarding it to the STS3215 bus.
+> **Rule 2: Single Command Path.** The Linux host must never have a physical, electrical, or software bypass directly to the servo bus. All motor commands flow exclusively through the STM32 MCU, which evaluates and permits each proposal before forwarding it to the STS3215 bus.
 
-> **Rule 3 — Strict Separation of Concerns.** Linux proposes intent. The MCU governs physical reality. The independent motor cutoff must remain available under the declared faults. Continued telemetry and logging depend on the surviving logic supply, ground, and controllers. Motor cutoff alone does not establish safe rest for a gravity-loaded arm.
+> **Rule 3: Strict Separation of Concerns.** Linux proposes intent. The MCU governs physical reality. The independent motor cutoff must remain available under the declared faults. Continued telemetry and logging depend on the surviving logic supply, ground, and controllers. Motor cutoff alone does not establish safe rest for a gravity-loaded arm.
 
 ---
 

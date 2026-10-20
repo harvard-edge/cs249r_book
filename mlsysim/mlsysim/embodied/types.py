@@ -39,6 +39,8 @@ class EmbodiedPlatform(BaseModel):
     joint_jerk_limits: Optional[tuple[Quantity, ...]] = None
     joint_torque_rate_limit: Optional[Quantity] = None                # same on every joint
     cartesian_velocity_limit: Optional[Quantity] = None               # commanded TCP translation
+    cartesian_acceleration_limit: Optional[Quantity] = None           # commanded TCP translation
+    emergency_stop_time: Optional[Quantity] = None                    # worst-case stop, request to rest
     # Standing center-of-mass height above the support surface (legged/bipedal
     # platforms; the inverted-pendulum length z_c). None where not applicable.
     com_height: Optional[Quantity] = None
@@ -83,6 +85,20 @@ class EmbodiedPlatform(BaseModel):
         if v is None:
             return v
         return require_dimensionality(v, ureg.meter / ureg.second, "cartesian_velocity_limit")
+
+    @field_validator("emergency_stop_time", mode="after")
+    @classmethod
+    def _validate_emergency_stop_time(cls, v):
+        if v is None:
+            return v
+        return require_dimensionality(v, ureg.second, "emergency_stop_time")
+
+    @field_validator("cartesian_acceleration_limit", mode="after")
+    @classmethod
+    def _validate_cartesian_acceleration(cls, v):
+        if v is None:
+            return v
+        return require_dimensionality(v, ureg.meter / ureg.second**2, "cartesian_acceleration_limit")
 
     @field_validator("mass", "payload_capacity", mode="after")
     @classmethod

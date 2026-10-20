@@ -46,7 +46,12 @@ class Platforms(Registry):
         typical_latency_budget=200 * ureg.ms,
         latency_range_ms=CLOUD_LATENCY_RANGE_MS,
         ram_range=f"{CLOUD_MEM_GIB.to('GiB').magnitude:.0f}+ GiB",
-        compute_threshold=1000 * (TFLOPs / second),
+        # Per-accelerator dense 16-bit floor. It sits above an edge
+        # workstation's dense rate (DGX Spark, 125 TFLOP/s) and below the
+        # datacenter accelerators used as cloud examples (TPU v4, 275; A100,
+        # 312; H100, 989). The earlier 1,000 TFLOP/s floor excluded all three
+        # (corrected 2026-10-19).
+        compute_threshold=200 * (TFLOPs / second),
         bandwidth_threshold=1000 * (GB / second),
         metadata=Metadata(
             provenance=pc.DEPLOYMENT_ENVELOPES,

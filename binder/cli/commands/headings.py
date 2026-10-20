@@ -69,8 +69,9 @@ def _load_rules() -> Tuple[set[str], set[Tuple[str, str]], set[str], set[str], s
                     skip_callout_titles,
                     skip_titles,
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"binder headings: could not load {yaml_path} ({type(exc).__name__}: {exc}); "
+                  "using the built-in fallback rules, which may be out of date", file=sys.stderr)
 
     # Fallback if YAML is missing
     fallback_acronyms = set("""
@@ -553,6 +554,11 @@ class HeadingsCommand:
             self._print_help()
             return True
 
+        if ns.path and not Path(ns.path).exists():
+            # Falling back to the whole book here would let a mistyped
+            # `headings apply --path` rewrite every chapter.
+            console.print(f"[red]❌ --path not found: {ns.path}[/red]")
+            return False
         files = self._resolve_files(ns.path, ns.vol1, ns.vol2)
 
         if ns.subcommand == "check":
@@ -591,10 +597,9 @@ class HeadingsCommand:
     def _resolve_files(self, path: Optional[str], vol1: bool, vol2: bool) -> List[str]:
         """Return the sorted ``.qmd`` files to process.
 
-        An existing ``--path`` file or directory wins. Otherwise globs
-        ``books/vol1`` and/or ``books/vol2`` (or all of ``books/``) relative to
-        the current working directory. A ``--path`` that does not exist falls
-        through to the volume globs.
+        An existing ``--path`` file or directory wins (``run`` rejects one
+        that does not exist). Otherwise globs ``vol1`` and/or ``vol2`` (or the
+        whole book) under the book directory.
         """
         if path:
             p = Path(path)
@@ -602,16 +607,11 @@ class HeadingsCommand:
                 return [str(p)]
             if p.is_dir():
                 return sorted(str(f) for f in p.rglob("*.qmd"))
-        roots = []
-        if vol1:
-            roots.append("books/vol1/**/*.qmd")
-        if vol2:
-            roots.append("books/vol2/**/*.qmd")
-        if not roots:
-            roots = ["books/**/*.qmd"]
+        book_dir = self.config_manager.book_dir
+        roots = [book_dir / vol for vol, chosen in (("vol1", vol1), ("vol2", vol2)) if chosen] or [book_dir]
         out: List[str] = []
-        for pattern in roots:
-            out.extend(glob.glob(pattern, recursive=True))
+        for root in roots:
+            out.extend(glob.glob(str(root / "**" / "*.qmd"), recursive=True))
         return sorted(out)
 
     # ------------------------------------------------------------------
@@ -622,6 +622,7 @@ class HeadingsCommand:
         """Validate; return True on pass, False on fail. Prints diagnostic on fail."""
         violations = find_violations(files)
         if not violations:
+            console.print(f"[green]✓ headings: {len(files)} file(s) checked, no heading-case violations[/green]")
             return True
         # Group by file
         by_file: dict = {}
@@ -644,8 +645,8 @@ class HeadingsCommand:
                 console.print(f"    L{v.line}")
                 console.print(f"      [dim]current:[/dim]  {v.current[:140]}")
                 console.print(f"      [dim]expected:[/dim] {v.expected[:140]}")
-        console.print(f"\n   [cyan]Fix:[/cyan] ./binder/binder headings apply")
-        console.print(f"   Or manually edit the headings to match the expected form.\n")
+        console.print("\n   [cyan]Fix:[/cyan] ./binder/binder headings apply")
+        console.print("   Or manually edit the headings to match the expected form.\n")
         return False
 
     def _run_dry_run(self, files: List[str]) -> bool:

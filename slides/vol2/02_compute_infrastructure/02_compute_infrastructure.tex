@@ -1,1727 +1,548 @@
 % =============================================================================
-% Chapter 2: Compute Infrastructure — ML Systems Lecture Slides (Volume II)
+% Lecture 2: Compute Infrastructure
+% Scaling Machine Learning Systems (Volume II), Chapter 2
 % =============================================================================
-% This deck covers the physical infrastructure stack from accelerator to pod.
-% Running example: 175B-parameter model on H100 cluster.
+% Thesis: memory, communication, power, and reliability walls bind at
+% successive physical scales, and capacity bought at peak FLOP/s is not
+% capacity delivered. Running case: the 175B reference job (Archetype A) on
+% H100s, climbed from one accelerator to an 8,192-GPU pod.
+% Hook: Llama-3 70B batch-1 decode, 0.14 ms of arithmetic against 42.1 ms of
+% weight transfer (Napkin Math 2.1). Synthesis: the share of the H100's peak
+% that becomes progress at each scale.
 %
-% IMAGES (SVG → PDF):
-%   - accelerator-spectrum.pdf   - hbm-architecture.pdf
-%   - roofline-h100.pdf          - bandwidth-hierarchy.pdf
-%   - gpu-evolution.pdf          - infra-stack.pdf
-%   - tco-overview.pdf
+% Build: make deck V=2 D=02_compute_infrastructure  (figures: images/make_figs.py)
+% Plan:  lecture_map.yml in this folder.
+% Numbers: images/calcs.py computes them from MLSysIM and the rendered chapter
+% and writes images/numbers.tex; the slides print them with \val{key}.
 % =============================================================================
+
 \documentclass[aspectratio=169, 12pt]{beamer}
 \usepackage{../../assets/beamerthememlsys}
-
 \mlsyssetup{
-  volume       = {Volume II},
-  chapter      = {Chapter 2},
-  logo         = {../../assets/img/logo-mlsysbook.png},
-  instlogo     = {../../assets/img/logo-harvard.png},
-  chaptertitle = {Compute Infrastructure},
+  volume={Volume II},
+  chapter={Chapter 2},
+  chaptertitle={Compute Infrastructure},
+  layer=facility,
+  logo={../../assets/img/logo-mlsysbook.png},
+  instlogo={../../assets/img/logo-harvard.png},
 }
-
-% --- Fonts ---
 \usepackage[T1]{fontenc}
 \usepackage[scaled=0.9]{helvet}
 \usepackage{courier}
 \renewcommand{\familydefault}{\sfdefault}
-
-% --- Packages ---
-\usepackage{booktabs}
-\usepackage{amsmath}
-
-% --- Image paths ---
-\graphicspath{
-  {images/}
-}
-
-% --- Chapter-specific macros ---
-\newcommand{\memwall}{\textcolor{computestroke}{\textbf{Memory Wall}}}
-\newcommand{\powerwall}{\textcolor{errorstroke}{\textbf{Power Wall}}}
-\newcommand{\commwall}{\textcolor{routingstroke}{\textbf{Communication Wall}}}
-
-% --- Helper: safe image include ---
-\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
-  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
-    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
-      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{\centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
-    }%
-  }%
-}
-
-% --- Section count for navigation ---
-\setcounter{mlsystotalsections}{8}
+\usepackage{booktabs,amsmath}
+\graphicspath{{images/}}
+\input{images/numbers.tex}
+\setcounter{mlsystotalsections}{6}
 
 \title{Compute Infrastructure}
 \author{Vijay Janapa Reddi}
 \institute{Harvard University}
 \date{}
 
+% A large answer choice for predict and concept-question slides
+\newcommand{\choice}[2]{\textbf{\textcolor{mlsysaccent}{#1}}\enspace #2}
+
+% Golden thread (D4): the Fleet Law term and C3 axis this lecture acts on, once, on the goals slide
+\newcommand{\fleetterm}[2]{\par\vspace{0.08cm}{\small\textcolor{mlsysaccent}{\textbf{Fleet Law term:}}~#1\qquad\textcolor{mlsysaccent}{\textbf{C$^3$ axis:}}~#2\par}}
+
 \begin{document}
 
 % =============================================================================
-% TITLE SLIDE
+% TITLE
 % =============================================================================
-\mlsystitle{Compute Infrastructure}{The Physics of the ML Fleet}{cover_infrastructure.png}
+\mlsysnote{[0.5 min] [CORE] Read the thesis aloud once. Today climbs the physical hierarchy one level at a time: one accelerator, an eight-GPU node, a rack, and a pod of thousands of GPUs. At each level one physical resource runs out first. The running case is the 175-billion-parameter model of the course on H100 GPUs. The notes total 71 minutes; cutting every slide tagged [OPTIONAL] leaves a complete lecture of about 59 minutes.}
+\mlsystitle{Compute Infrastructure}{Memory, communication, power, and reliability walls bind at successive physical scales, and a fleet delivers only part of the capacity bought at peak FLOP/s.}{cover_compute_infrastructure_blueprint.png}
 
 % =============================================================================
-% LEARNING OBJECTIVES
+% SECTION: THE WALLS
 % =============================================================================
-\begin{frame}{Learning Objectives}
-\note{
-[1 min] % -- LINK: Ch1 established the fleet concept; this chapter builds its physical foundation
-Students know WHY fleets exist. Now: the silicon, memory, power, and cooling
-that make fleets physically possible.
+\mlsysnote{[0.5 min] [CORE] Open on one datasheet number and ask how much of it a real workload receives.}
+\mlsysdivider{What limits the useful compute that a fleet can deliver?}{Compute Infrastructure, \S2.1}
+\section{The Walls}
 
-% -- NARRATE: What to SAY while showing this slide
-``These six objectives map the physical infrastructure from transistor to datacenter.
-By the end, you will be able to diagnose whether a workload is memory-bound or
-compute-bound, calculate cooling costs, and evaluate build-vs-buy decisions.''
-
-% -- ENGAGE: Specific question for THIS slide
-Ask: ``How many of you have thought about where the electricity comes from
-to train GPT-4?'' Use the response to motivate the power and cooling sections.
-
-% -- FLEX: [CORE] Sets expectations for the lecture.
-IF SHORT: Read objectives quickly, do not elaborate.
-}
-
-\small
-\begin{enumerate}
-  \item Explain the \textbf{Accelerator Spectrum} (GPU vs.\ TPU vs.\ ASIC) and the \textbf{Generality Tax}
-  \item Quantify the \textbf{Memory Wall} using HBM generations and token latency analysis
-  \item Apply the \textbf{Roofline Model} to diagnose memory-bound vs.\ compute-bound workloads
-  \item Analyze the \textbf{Bandwidth Hierarchy} (HBM $\to$ NVLink $\to$ InfiniBand) and its impact on parallelism
-  \item Evaluate \textbf{Cooling Architectures} and calculate power requirements using \textbf{PUE}
-  \item Perform a \textbf{TCO} analysis to determine break-even for build-vs-buy decisions
-\end{enumerate}
-
+\begin{frame}{Which takes longer per token: math or bytes?}
+  \mlsysactivity{Predict}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.40\textwidth}
+      \centering\mlsysphoto[width=\textwidth,height=3.3cm,keepaspectratio]{nvidia-h100-pcie.jpg}\\[0.1cm]
+      {\small\textbf{H100: \val{h100_fp16} TFLOP/s} (FP16)}\\
+      {\small\textbf{HBM: \val{h100_bw} TB/s}}\\
+      {\footnotesize\textcolor{midgray}{TFLOP/s: $10^{12}$ operations per second.\\HBM: the stacked memory beside the chip.}\par}
+    \end{column}
+    \begin{column}{0.57\textwidth}
+      {\normalsize Llama-3 70B answers one user (batch 1). Each token reads all \val{llama70_weights_gb} GB of FP16 weights and does $\val{hook_flops_mant}\times10^{11}$ FLOPs.}\\[0.2cm]
+      {\large\choice{A}{arithmetic}\enspace\choice{B}{weight transfer}\enspace\choice{C}{equal}}\\[0.2cm]
+      \uncover<2->{\centering\safeimg[width=\textwidth,height=3.0cm,keepaspectratio]{hook_decode.pdf}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: Geekerwan, CC BY 3.0, Wikimedia Commons (H100 PCIe card). Numbers: Compute Infrastructure, Napkin Math 2.1 (weights assumed to fit one H100-equivalent path).}
+  \note{[3 min] [CORE] The H100 is the accelerator of today's running case; the photo shows the PCIe card version. Its datasheet promises \val{h100_fp16} trillion 16-bit operations per second and \val{h100_bw} TB/s from HBM, the high-bandwidth memory stacked beside the chip. ENGAGE: Llama-3 70B serves one request at a time. Each new token multiplies every weight once: $2 \times \val{llama70_params_b}\times10^9$ FLOPs, and it must read all \val{llama70_weights_gb} GB of weights. Students vote A, B, or C. Most pick A or C. Step 2: arithmetic takes $\val{hook_flops_mant}\times10^{11} / \val{h100_fp16}\times10^{12} = \val{hook_t_arith_ms}$ ms; streaming the weights takes \val{llama70_weights_gb} GB / \val{h100_bw} TB/s $= \val{hook_t_mem_ms}$ ms, about \val{hook_ratio} times longer. The memory term is \val{hook_mem_share} percent of the sum. WARN: no single H100 holds \val{llama70_weights_gb} GB; the chapter assumes one H100-equivalent path to isolate the two demands, so the result is a computed floor on latency. The question for today: if the datasheet number is not the delivered number, what is, at each scale?}
 \end{frame}
 
-\begin{frame}{Visual Language}
-\note{
-[0.5 min] % -- NARRATE: What to SAY while showing this slide
-``Same color system as last lecture. Blue = compute, green = data,
-orange = routing, red = error or bottleneck. You will see these in every
-diagram today --- especially the bandwidth hierarchy pyramid.''
-
-% -- FLEX: [OPTIONAL] Skip if students saw this in Ch1.
-IF SHORT: Point to the four cards and move on in 15 seconds.
-}
-
-\small
-Throughout this course, colors carry meaning:
-
-\vspace{0.3cm}
-\begin{columns}[T]
-  \begin{column}{0.45\textwidth}
-    \begin{mlsyscard}{computestroke}
-    \textbf{Blue} --- Compute / Processing\\
-    {\footnotesize GPU ops, forward/backward pass, inference}
-    \end{mlsyscard}
-    \vspace{0.15cm}
-    \begin{mlsyscard}{datastroke}
-    \textbf{Green} --- Data / Memory\\
-    {\footnotesize Data flow, caches, healthy paths}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.45\textwidth}
-    \begin{mlsyscard}{routingstroke}
-    \textbf{Orange} --- Routing / Scheduling\\
-    {\footnotesize Load balancers, batch windows}
-    \end{mlsyscard}
-    \vspace{0.15cm}
-    \begin{mlsyscard}{errorstroke}
-    \textbf{Red} --- Error / Cost / Bottleneck\\
-    {\footnotesize Loss, decode phase, waste}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
+\begin{frame}{Recall: which Fleet Law terms does hardware set?}
+  \mlsysactivity{Retrieval}{1.5 min}
+  \centering
+  {\Large\bfseries Close your notes.}\\[0.2cm]
+  {\normalsize Write the Fleet Law from Lecture 1. Circle the terms that depend on the hardware.}\\[0.5cm]
+  \uncover<2->{%
+    {\large $T_{\text{step}}(N) = \dfrac{\alert{T_{\text{compute}}}}{N} + \alert{T_{\text{comm}}(N)} + T_{\text{sync}}(N) - T_{\text{overlap}}$}\\[0.35cm]
+    {\normalsize Device rate sets $T_{\text{compute}}$; link bandwidth sets $T_{\text{comm}}$; failures interrupt every term.}}
+  \mlsyscredit{Fleet Law: Introduction, \S1.5.4. Hardware mapping: Compute Infrastructure, \S2.11.}
+  \note{[2 min] [CORE] Retrieval from Lecture 1. Give 60 seconds. Step 2: the step time on $N$ devices is the compute time divided by $N$, plus communication and synchronization time that grow with $N$, minus whatever communication overlaps computation. This lecture's hardware sets two of the terms directly: the per-device rate behind $T_{\text{compute}}/N$ and the link bandwidths behind $T_{\text{comm}}(N)$. Rack and pod reliability decide how often recovery interrupts the step. ENGAGE: which term would a faster accelerator shrink, and which would it leave alone? (Expected: only $T_{\text{compute}}/N$; communication and synchronization stay.) FLEX: if the class did not see Lecture 1, write the equation on the board and name the terms in one sentence each.}
 \end{frame}
 
-
-
-% =============================================================================
-\section{Infra Stack}
-% =============================================================================
-
-\begin{frame}{The Infrastructure Stack}
-\note{
-[2 min] % -- LINK: Ch1 introduced the Fleet Stack conceptually; now we zoom into the Infrastructure layer
-Students saw Infrastructure at the bottom of the Fleet Stack. This slide
-expands that single layer into four physical levels.
-
-% -- NARRATE: What to SAY while showing this slide
-Walk bottom-to-top: ``Accelerator: bounded by the Memory Wall --- HBM bandwidth
-limits throughput. Node: 8 GPUs connected by NVLink to pool capacity.
-Rack: where the Power Wall hits --- 33--40 kW per ML rack. Pod: the Communication
-Wall --- InfiniBand binds nodes into a warehouse-scale computer.
-Each level exists because a constraint at the level below became intolerable.''
-
-% -- ENGAGE: Specific question for THIS slide
-Ask: ``Which wall do you think is hardest to overcome?''
-No right answer --- the goal is to prime thinking about interdependencies.
-
-% -- WARN: What students will get wrong
-Students pick one wall and treat it as independent. In reality, solving
-the Memory Wall (bigger HBM) worsens the Power Wall (more watts per chip).
-
-% -- FLEX: [CORE] This is the organizing framework for the entire chapter.
-IF SHORT: Name the four levels and their walls, skip the question.
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{infra-stack.pdf}
-
-\vspace{0.1cm}
-\mlsysinsight{Key principle:}{Each constraint at one level creates the engineering motivation for the next level.}
-
+\begin{frame}{What limits the useful compute at each physical scale?}
+  \normalsize
+  By the end of today, you will be able to:\\[0.2cm]
+  \begin{itemize}\setlength{\itemsep}{0.2cm}
+    \item Test an accelerator for capacity and for bandwidth separately, with the roofline.
+    \item Place tensor, pipeline, and data parallelism on the bandwidth staircase.
+    \item Size a rack's power and cooling, and name its failure domains.
+    \item Turn a training budget into wall-clock hours using sustained throughput.
+  \end{itemize}
+  \vspace{0.2cm}
+  {\small\textcolor{midgray}{Running case: a \val{gpt3_params_b}B model, mixed-precision Adam, \val{state_tb} TB of training state, on H100 GPUs (\val{ref_gpus} in the reference cluster).}}
+  \fleetterm{$T_{\text{compute}}/N$ and $T_{\text{comm}}(N)$}{Compute ($C_1$) and Communication ($C_2$)}
+  \note{[1.5 min] [CORE] The title is the driving question. Each goal is one segment: the accelerator, the node, the rack, and the pod. The running case is the course's reference job, a GPT-3-class dense model of \val{gpt3_params_b} billion parameters trained with mixed precision and the Adam optimizer. Its persistent training state is 16 bytes per parameter, \val{state_tb} TB, and its reference cluster is \val{ref_gpus} H100 GPUs in \val{ref_nodes} nodes of eight. The pod segment steps up to \val{pod8k_gpus} GPUs, the chapter's worked scenario. WARN: today stays on the hardware. How collectives work is Lecture 5, and parallelism plans are Lecture 6; both appear here only as traffic the hardware must carry. The accent line at the bottom names the Fleet Law term and C$^3$ axis that today's mechanisms act on; say it once.}
 \end{frame}
 
-\begin{frame}{Three Walls Across the Stack}
-\note{
-[2 min] % -- LINK: The stack overview named the walls; this table quantifies them at each level
-Students saw qualitative wall names. Now they get specific numbers per level.
-
-% -- NARRATE: What to SAY while showing this slide
-``This table shows the three walls manifested at each infrastructure level.
-At the accelerator level, HBM bandwidth is the memory constraint and 700 W TDP
-is the power constraint. At the pod level, InfiniBand at 50 GB/s is the
-communication constraint and 7--10 MW is the power constraint.''
-Point to the running example: ``175B model = 350 GB weights = 1.4 TB training
-state. Does not fit on one chip. That single fact drives everything above.''
-
-% -- WARN: What students will get wrong
-Students treat the three walls as independent problems. Correct: solving one
-shifts pressure to another. More HBM stacks = more power per chip.
-
-% -- FLEX: [OPTIONAL] This is a reference table, not a new concept.
-IF SHORT: State the running example numbers, skip the table walkthrough.
-}
-
-\small
-\renewcommand{\arraystretch}{1.2}
-{\footnotesize
-\begin{tabular}{@{}llll@{}}
-  \toprule
-  \textbf{Level} & \textbf{\memwall} & \textbf{\powerwall} & \textbf{\commwall} \\
-  \midrule
-  \textbf{Accelerator} & HBM bandwidth & 700 W TDP & On-die mesh \\
-  \textbf{Node}        & 640 GB aggregate & 7 kW per node & NVLink: 900 GB/s \\
-  \textbf{Rack}        & PCIe to host DRAM & 33--40 kW/rack & ToR switch \\
-  \textbf{Pod}         & Distributed storage & 7--10 MW & IB: 50 GB/s \\
-  \bottomrule
-\end{tabular}
-}
-
-\vspace{0.2cm}
-\begin{mlsyscard}{crimson}
-\textbf{Running Example}: 175B model $\to$ 350 GB weights (FP16) $\to$ 1.4 TB training state $\to$ does not fit on one chip.
-\end{mlsyscard}
-
+\begin{frame}{Four walls bind at four physical scales}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=5.7cm,keepaspectratio]{walls_step}{4}
+  \mlsyscredit{Compute Infrastructure, \S2.1 (figure 1), \S2.3, \S2.5.1, \S2.6, \S2.7.1. Pod failure interval: \val{pod_gpus} GPUs, per-GPU MTTF \val{gpu_mttf_h} h, independent failures.}
+  \note{[2.5 min] [CORE] The map for the whole lecture; it returns at the end. Step 1, the accelerator: HBM delivers \val{h100_bw} TB/s to arithmetic that can consume far more, so memory bandwidth binds first; that is the memory wall. Step 2, the node: eight GPUs exchange data at \val{nvlink_gbs} GB/s per direction over NVLink, NVIDIA's link inside a server, but only \val{ib_gbs} GB/s over InfiniBand between servers, a nine-fold drop; that is the communication wall. Step 3, the rack: four eight-GPU servers draw \val{dgx_rack_kw} kW, nearly three times a \val{trad_rack_kw} kW server rack; that is the power wall. Step 4, the pod: with \val{pod_gpus} GPUs that each fail on average once in \val{gpu_mttf_h} hours, some GPU fails about every five hours; that is the reliability wall. ENGAGE: why would fixing one wall expose the next? (Expected: relieving memory by adding GPUs adds links, watts, and parts that fail.) WARN: these are the chapter's examples; the workload decides which wall binds at each level.}
 \end{frame}
 
 % =============================================================================
-\section{Accelerators}
+% SECTION: ACCELERATOR
 % =============================================================================
+\mlsysnote{[0.5 min] [CORE] Start with one device and two separate questions: does it fit, and how fast do its bytes arrive?}
+\mlsysdivider{Does the model fit, and how fast do its bytes arrive?}{Compute Infrastructure, \S2.2 to \S2.4}
+\section{Accelerator}
 
-\begin{frame}{The Accelerator Spectrum}
-\note{
-[2 min] % -- LINK: Infrastructure Stack showed the accelerator level; now we zoom into accelerator design
-Students know the accelerator is the atomic unit. This slide shows the design
-space: CPU, GPU, TPU, ASIC --- a trade-off continuum, not a ranking.
-
-% -- NARRATE: What to SAY while showing this slide
-Point left to right: ``CPU: most flexible, least efficient for ML. GPU: reclaims
-die area from branch prediction and caches, spends it on multipliers. TPU: removes
-the GPU's graphics legacy, pure matrix engine. ASIC: fully custom, maximum throughput,
-zero flexibility.'' Emphasize: ``The Generality Tax: every transistor spent on
-branch prediction is a transistor that could have been a multiplier.''
-
-% -- ENGAGE: Specific question for THIS slide
-Ask: ``Why would anyone choose a GPU over a custom ASIC?''
-Expected: flexibility --- GPUs run any model; ASICs are locked to one architecture.
-
-% -- WARN: What students will get wrong
-Students assume ASICs are always superior. Correct: ASICs take 2--3 years to design.
-If the model architecture shifts (it does), the ASIC is obsolete before deployment.
-
-% -- FLEX: [CORE] The Generality Tax is a foundational concept for hardware reasoning.
-IF AHEAD: ``What happens to the Generality Tax as model architectures converge on Transformers?''
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{accelerator-spectrum.pdf}
-
-\vspace{0.1cm}
-\mlsysconcept{The Generality Tax:}{Every transistor spent on branch prediction is a transistor that could have been a multiplier.}
-
+\begin{frame}{HBM sits beside the die and gives about \val{hbm_ddr5_ratio}$\times$ DDR5's bandwidth}
+  \begin{columns}[c]
+    \begin{column}{0.48\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.4cm,keepaspectratio]{amd-fiji-hbm-package.jpg}\\[0.1cm]
+      {\footnotesize\textcolor{midgray}{AMD Fiji (2015): GPU die with four HBM stacks on one silicon interposer.}}
+    \end{column}
+    \begin{column}{0.50\textwidth}
+      \small
+      \begin{tabular}{@{}lrr@{}}
+        \toprule
+        & DDR5 (host) & HBM3 (H100) \\
+        \midrule
+        Bandwidth & $\sim$200 GB/s & \textbf{\val{h100_bw} TB/s} \\
+        Interface & 64-bit & 1,024-bit per stack \\
+        Energy & $\sim$\val{dram_pj_bit} pJ/bit & $\sim$4 pJ/bit \\
+        Price & $\sim$\$3/GB & \$10 to \$15/GB \\
+        \bottomrule
+      \end{tabular}\\[0.3cm]
+      {\normalsize A 1,024-bit interface per stack supplies the bandwidth at a moderate clock.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: C. Spille/pcgameshardware.de, CC BY-SA 4.0, Wikimedia Commons. Table: Compute Infrastructure, \S2.3.1 (table 5); energy per bit: Horowitz 2014; O'Connor et al. 2017 (HBM2).}
+  \note{[2.5 min] [OPTIONAL] A real HBM package: the large GPU die in the middle and four memory stacks beside it, all on a silicon interposer, a thin slab of silicon that wires them together over millimeters instead of centimeters of board. Each stack is 8 to 12 DRAM dies joined by through-silicon vias and exposes a 1,024-bit interface, \val{width_ratio} times a DDR5 channel's 64 bits. That width gives the H100's \val{h100_bw} TB/s, about \val{hbm_ddr5_ratio} times a server's 200 GB/s of DDR5, at about one fifth of the energy per bit. The price is about four times per GB, which is why accelerators carry 80 to 192 GB while hosts carry 512 GB to 2 TB. ENGAGE: reading one FP16 operand from HBM costs about \val{hbm_operand_pj} pJ, and a 16-bit multiply-add costs about \val{mac_pj} pJ; what does that ratio, \val{operand_mac_ratio} times, tell a chip designer? (Expected: spend silicon on reuse, so each fetched byte feeds many operations.) WARN: HBM moves the memory wall; it does not remove it. Peak arithmetic grew faster than HBM bandwidth from V100 to H100.}
 \end{frame}
 
-\begin{frame}{GPU Architecture Evolution}
-\note{
-[2 min] % -- LINK: Accelerator Spectrum showed the GPU's position; now we trace its evolution
-Students placed the GPU on the spectrum. This slide shows four generations
-of co-evolution between hardware and ML workloads.
-
-% -- NARRATE: What to SAY while showing this slide
-Point to each generation: ``Volta: first Tensor Cores, addressed the compute gap.
-Ampere: mixed precision (BF16/TF32), addressed precision flexibility.
-Hopper: Transformer Engine, addressed the dominant architecture.
-Blackwell: multi-die design, addressed the reticle limit.''
-Emphasize: ``Efficiency grew 70x, but raw TFLOPS grew 236x. The 3.4x gap
-between them is what the power grid must absorb.''
-
-% -- ENGAGE: Specific question for THIS slide
-``What bottleneck will the NEXT generation need to address?''
-Expected: memory bandwidth or interconnect --- the walls are shifting.
-
-% -- WARN: What students will get wrong
-Students focus on peak TFLOPS as the key metric. Correct: the TFLOPS/W column
-reveals the efficiency wall. Raw performance is meaningless if you cannot power it.
-
-% -- FLEX: [CORE] The generational pattern teaches students to think about hardware evolution.
-IF SHORT: Point to the first and last rows, state the 236x vs 70x gap, move on.
-}
-
-% --- Layout: FULL-WIDTH timeline ---
-\centering
-\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{gpu-evolution.pdf}
-
-\vspace{0.1cm}
-\mlsysalert{Pattern:}{Each generation solves the previous generation's bottleneck. Hardware lifetime is shrinking.}
-
+\begin{frame}{Capacity decides whether it fits; bandwidth decides how fast}
+  \centering
+  \mlsyssteps[width=0.92\textwidth,height=5.0cm,keepaspectratio]{two_tests_step}{2}
+  \mlsyscredit{Compute Infrastructure, \S2.3.1: Llama-3 70B, FP16 weights, batch-1 decode; floor = weight bytes / HBM bandwidth on one accelerator-equivalent path.}
+  \note{[2.5 min] [CORE] Two separate procurement tests. Step 1, capacity: Llama-3 70B's FP16 weights are \val{llama70_weights_gb} GB against one H100's \val{h100_hbm_gb} GB, so the weights alone need \val{weights_gpus} GPUs, before any key-value cache or workspace. Step 2, bandwidth: at batch 1 every token streams every weight, so the time per token is at least bytes divided by bandwidth: \val{floor_a100_ms} ms at A100-class \val{a100_bw} TB/s, \val{hook_t_mem_ms} ms at H100-class \val{h100_bw} TB/s, \val{floor_b200_ms} ms at B200-class \val{b200_bw} TB/s. The floor falls almost in proportion to bandwidth. ENGAGE: a vendor offers a chip with twice the FP16 FLOP/s and the same HBM bandwidth; what happens to this floor? (Expected: nothing.) WARN: a model that fits but misses its latency target is as unusable as one that does not fit. The chapter's pitfall: 192 GB of HBM2e at \val{a100_bw} TB/s holds the 141 GB payload at a \val{floor_a100_ms} ms floor, while an \val{h100_hbm_gb} GB HBM3 part needs INT8 weights to fit and then reaches \val{int8_floor_ms} ms. Capacity and bandwidth answer different questions.}
 \end{frame}
 
-\begin{frame}{GPU Specs: Four Generations}
-\note{
-[2 min] % -- LINK: GPU Evolution showed the qualitative pattern; this table provides the numbers
-Students saw the generational story. Now they get the spec sheet to reference.
-
-% -- NARRATE: What to SAY while showing this slide
-``Three columns matter most. Peak TF: raw headline throughput for the listed precision --- note
-the precision differs across rows. V100 and A100 are FP16 Tensor Core peaks;
-H100 lists the FP8 Tensor Core peak (1,979) which is why it looks so much higher.
-The H100 FP16 peak is 989 TFLOPS, used for the ridge-point math later.
-NVLink grew 6x (300 to 1800 GB/s) while TDP grew only 3.3x (300 to 1000 W).
-NVLink scaling outpaces power scaling --- that is good news for distributed training.''
-
-% -- ENGAGE: Specific question for THIS slide
-``Before we move to the Roofline section: which metric would you use to compare
-accelerators for a production inference system?'' Expected: bandwidth or TF/W, not raw TF.
-
-% -- WARN: What students will get wrong
-Students compare Peak TF across generations without noticing the precision differs.
-The H100 row shows FP8 (1,979); V100 and A100 rows show FP16 (125 and 312).
-The FP16 ridge-point calculation uses 989 TFLOPS, not 1,979. Mixing these
-produces a ridge point twice as high as the chapter defines.
-
-% -- FLEX: [OPTIONAL] This is a reference table --- students can look it up later.
-IF SHORT: Highlight the NVLink and TF/W columns only. Flag the precision footnote.
-}
-
-\small
-\renewcommand{\arraystretch}{1.15}
-{\footnotesize
-\begin{tabular}{@{}llrrrr@{}}
-  \toprule
-  \textbf{Arch.} & \textbf{Year} & \textbf{Peak TF (precision)} & \textbf{TDP} & \textbf{NVLink} & \textbf{TF/W} \\
-  \midrule
-  Volta (V100)     & 2017 &  125 (FP16) & 300 W &  300 GB/s & 0.42 \\
-  Ampere (A100)    & 2020 &  312 (FP16) & 400 W &  600 GB/s & 0.78 \\
-  Hopper (H100)    & 2022 & 1,979 (\textbf{FP8}) & 700 W &  900 GB/s & 2.83 \\
-  Blackwell (B200) & 2024 & 4,500 (\textbf{FP8}) & 1,000 W & 1,800 GB/s & 4.50 \\
-  \bottomrule
-\end{tabular}
-}
-
-\vspace{0.15cm}
-\begin{mlsyscard}{errorstroke}
-{\footnotesize \textbf{The Efficiency Wall}: Raw TFLOPS grew \textbf{236$\times$} (P100$\to$B200), but TFLOPS/Watt grew only \textbf{70$\times$}. The gap is what cooling and power infrastructure must absorb.}
-\end{mlsyscard}
-
-{\scriptsize\textcolor{midgray}{H100 FP16 peak is 989 TFLOPS (used for ridge-point math); 1,979 is the FP8 Tensor Core headline. V100/A100 rows are FP16. Always match precision to your workload.}}
-
+\begin{frame}{How much faster does an H200 decode?}
+  \mlsysactivity{Predict}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.40\textwidth}
+      \normalsize
+      H200 against H100:\\[0.1cm]
+      same FP16 peak,\\\val{h200_bw_ratio}$\times$ HBM bandwidth,\\\val{h200_cap_ratio}$\times$ HBM capacity.\\[0.3cm]
+      Llama 3 70B, batch 1.\\[0.3cm]
+      {\large\choice{A}{1.0$\times$}\enspace\choice{B}{1.4$\times$}\\\choice{C}{\val{h200_cap_ratio}$\times$}\enspace\choice{D}{2$\times$}}
+    \end{column}
+    \begin{column}{0.58\textwidth}
+      \centering\uncover<2->{\safeimg[width=\textwidth,height=4.2cm,keepaspectratio]{h200_ratio.pdf}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Compute Infrastructure, Napkin Math 2.2 (70.6B parameters, FP16, sequence 2,048, batch 1; latency model adds KV-cache reads and launch overhead).}
+  \note{[2.5 min] [OPTIONAL] ENGAGE: students vote, then convince a neighbor, then vote again. Many pick C, because capacity grew most, or A, because peak arithmetic did not change. Step 2: the chapter's latency model predicts \val{h200_speedup} times, the bandwidth ratio, \val{h200_bw} TB/s over \val{h100_bw} TB/s. Capacity does not speed up a model that already has a path to its weights; arithmetic does not help a phase that waits on bytes. The agreement with the bandwidth ratio supports the memory-bound diagnosis. WARN: this holds for this batch and context; at larger batches the answer moves toward arithmetic, which is the next slide's point. Land: for batch-1 decode, the procurement metric is bandwidth per dollar. Serving and batching are taught in Lecture 10.}
 \end{frame}
 
-\begin{frame}{Beyond GPUs: TPUs, Wafer-Scale, and Selection}
-\note{
-[2 min] % -- LINK: GPU evolution showed NVIDIA's trajectory; this slide broadens the
-accelerator landscape to include the major alternatives students will encounter.
-
-% -- NARRATE: What to SAY while showing this slide
-``GPUs are dominant but not the only option. TPU v4: Google's custom ASIC, 275 TFLOPS
-BF16, connected via proprietary ICI at 4,800 Gbps --- 6x InfiniBand. Cerebras CS-2:
-an entire wafer as one chip, 850,000 cores, eliminates inter-chip communication
-entirely. Graphcore IPU: designed for sparse and dynamic graphs.''
-Point to the selection matrix: ``Choice depends on workload: dense LLM training
-favors GPUs/TPUs. Sparse models may benefit from IPUs. If your workload is
-entirely within one chip, Cerebras eliminates the network problem.''
-
-% -- ENGAGE: ``Why do most labs still choose GPUs despite alternatives?''
-Expected: ecosystem (CUDA, PyTorch), flexibility, and supply chain.
-
-% -- WARN: Students assume GPU is always optimal. Correct: for specific workloads
-(e.g., Google's internal models), TPUs achieve higher MFU due to ICI bandwidth.
-
-% -- FLEX: [OPTIONAL] Broadens perspective but is not load-bearing.
-IF SHORT: Name the three alternatives, state the ecosystem lock-in point.
-}
-
-\small
-\renewcommand{\arraystretch}{1.15}
-{\footnotesize
-\begin{tabular}{@{}lrrlr@{}}
-  \toprule
-  \textbf{Accelerator} & \textbf{BF16 TF (sparse)} & \textbf{Mem BW} & \textbf{Interconnect} & \textbf{TDP} \\
-  \midrule
-  H100 (NVIDIA)  & 1,979 (FP8)  & 3,350 GB/s & NVLink: 900 GB/s  & 700 W \\
-  TPU v4 (Google) & 275   & 1,200 GB/s & ICI: 4,800 Gbps   & 170 W \\
-  CS-2 (Cerebras) & 1,840 & 20 PB/s (on-chip) & N/A (single wafer) & 23 kW \\
-  \bottomrule
-\end{tabular}
-}
-
-\vspace{0.1cm}
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    \begin{mlsyscard}{computestroke}
-    {\scriptsize \textbf{Selection criteria:} (1) Workload pattern (dense vs sparse), (2) Ecosystem (CUDA vs JAX vs custom), (3) Interconnect topology, (4) Supply chain and cost.}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \begin{mlsyscard}{routingstroke}
-    {\scriptsize \textbf{Lock-in risk:} GPU/CUDA dominates because of ecosystem, not hardware superiority. TPU ICI is 6$\times$ IB bandwidth.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
+\begin{frame}{Decode sits at 1 FLOP/byte, far left of the H100 ridge at \val{ridge}}
+  \centering
+  \mlsyssteps[width=0.92\textwidth,height=5.0cm,keepaspectratio]{roofline_step}{3}\\[0.05cm]
+  {\small Attainable FLOP/s $=\min(R_{\text{peak}},\ \text{BW}\times I)$;\quad $I$ = FLOP per byte read from HBM}
+  \mlsyscredit{H100: \val{h100_fp16} TFLOP/s dense FP16, \val{h100_bw} TB/s. Intensities: Compute Infrastructure, \S2.3.2 (table 7, Example 2.2), idealized weight-traffic model. Roofline: Williams et al. 2009; Appendix A.}
+  \note{[3 min] [CORE] The roofline from the course prerequisites (Appendix A), now used as a purchase screen. Attainable throughput is the lower of two ceilings: the flat peak, \val{h100_fp16} TFLOP/s, and the sloped line, bandwidth times arithmetic intensity $I$, the operations done per byte fetched. They meet at the ridge, $\val{h100_fp16}/\val{h100_bw} = \val{ridge}$ FLOP per byte. Step 1: batch-1 decode does two FLOPs per two-byte weight, $I = 1$, so the bound is $\val{b1_tflops}$ TFLOP/s, \val{b1_pct} percent of peak. Step 2: batching 64 requests reuses each weight 64 times; the bound rises to about \val{b64_pct} percent, still left of the ridge. Step 3: training with 2,048 tokens per GPU sharing each weight read crosses the ridge and meets the arithmetic roof. ENGAGE: which upgrade helps each point? (Expected: bandwidth for the two decode points, FLOP/s for training.) WARN: the roofline rules out upgrades that raise a ceiling that is not binding; it does not forecast throughput. A measured kernel can sit well below either line. MFU, the measured share of peak, is Lecture 9's measure.}
 \end{frame}
 
-\begin{frame}{Tensor Cores and MFU}
-\note{
-[2 min] % -- LINK: GPU spec table showed raw TFLOPS peaks; this slide explains how Tensor Cores
-achieve those peaks and why real workloads fall far short --- setting up the Memory Wall.
+\begin{frame}{Specialization raises the arithmetic share by betting on the workload}
+  \begin{columns}[c]
+    \begin{column}{0.56\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.3cm,keepaspectratio]{die_share.pdf}\\
+      {\footnotesize\textcolor{midgray}{Approximate shares; they show a trend across products.}}
+    \end{column}
+    \begin{column}{0.41\textwidth}
+      \centering\mlsysphoto[width=\textwidth,height=3.0cm,keepaspectratio]{google-tpu-v4-board.jpg}\\[0.05cm]
+      {\footnotesize\textcolor{midgray}{A TPU v4 board (2021).}}\\[0.15cm]
+      {\small TPU v1 (2015): \val{tpu_v1_tops} TOPS INT8 in \val{tpu_v1_w} W,\\15 months from design to deployment.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Shares: Compute Infrastructure, \S2.2 (figure 2). TPU v1: Example 2.1; Jouppi et al. 2017. Photo: Norman P. Jouppi et al., CC BY 4.0, Wikimedia Commons.}
+  \note{[2.5 min] [OPTIONAL] Left: the share of a die spent on arithmetic rather than control and caches rises from roughly 5 to 10 percent on a CPU to 50 to 60 on a GPU, 70 to 80 on a TPU, Google's tensor processing unit, and over 90 on a custom chip. The chapter calls the rest the generality tax. Right: the TPU story. In 2013 Google projected that three minutes of daily voice search per Android user would double its data-center compute on CPUs. TPU v1 hardwired a 256-by-256 grid of multiply-accumulate units, \val{tpu_v1_tops} trillion INT8 operations per second in \val{tpu_v1_w} W, and reported 30 to 80 times the performance per watt of contemporary CPUs and GPUs on its inference workloads. ENGAGE: in 2015, what would have made this bet fail? (Expected: a shift in the dominant operator; attention-based Transformers replaced convolutional networks within five years.) WARN: specialization is not a ranking from bad to good; a fixed dataflow is a multi-year bet against a 15-year building.}
+\end{frame}
 
-% -- NARRATE: What to SAY while showing this slide
-``The GPU's TFLOPS headline comes from Tensor Cores: specialized matrix-multiply-accumulate
-units that execute $\mathbf{Y} = \mathbf{A} \times \mathbf{B} + \mathbf{C}$ on small tiles
-in one clock cycle. With 528 Tensor Cores, the H100 reaches 989 TFLOPS FP16.
-But peak is not the whole story. Model FLOPs Utilization (MFU) measures how much of
-that peak your workload actually achieves. For large-scale LLM training: 40--50\% MFU
-is considered good. For batch-1 inference: typically $<$5\%. The gap is not bad
-engineering --- it is the memory wall, which we cover next.''
-Point to the tiling diagram: ``Tensor Cores require data locality. Weights must be
-tiled into SRAM before the multipliers can run. Loading takes time; the tile
-strategy amortizes the load cost across as many operations as possible.''
-
-% -- ENGAGE: ``Why is MFU so much lower for inference than training?''
-Expected: training uses large batches (matrix-matrix = high intensity);
-inference at batch 1 is matrix-vector (low intensity, dominated by memory).
-
-% -- WARN: Students confuse GPU utilization (reporting compute unit activity)
-with MFU (ratio of useful FLOPs to peak FLOPs over wall time). They are
-different metrics. A GPU can be 100\% `utilized' (Tensor Cores running) yet
-achieve only 40\% MFU if the computation is wasteful (pipeline bubbles, etc.).
-
-% -- FLEX: [CORE] MFU is the primary infrastructure efficiency metric in the chapter.
-IF SHORT: State the 40--50\% / $<$5\% anchors and move on.
-IF AHEAD: ``What limits MFU in training beyond the memory wall?'' (communication, pipeline bubbles.)
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    \textbf{Tensor Cores:} specialized matrix-multiply-accumulate (MMA) units.\\[0.02cm]
-    On the H100: 528 Tensor Cores across 132 SMs\\
-    Executes $\mathbf{Y} = \mathbf{A} \times \mathbf{B} + \mathbf{C}$ on small tiles\\
-    Tiling: load once into SRAM, reuse many times\\[0.06cm]
-    \textbf{MFU} $= \tfrac{\text{useful FLOPs}}{\text{peak FLOP/s} \times \text{wall time}}$
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \begin{mlsyscard}{computestroke}
-    {\scriptsize \textbf{LLM Training (large batch):}\\
-    40--50\% MFU $\to$ \textbf{good}\\
-    Above 50\% $\to$ excellent\\[0.02cm]
-    \textbf{Batch-1 Inference:}\\
-    $<$5\% MFU $\to$ \textbf{expected}\\
-    (memory-bound GEMV)}
-    \end{mlsyscard}
-
-    \vspace{0.03cm}
-    \begin{mlsyscard}{errorstroke}
-    {\scriptsize \textbf{Capacity planning:} use sustained MFU (40--50\%), not peak TFLOPS. A ``1,000 GPU-hour'' job at 40\% MFU takes 2,500 real GPU-hours.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
+\begin{frame}{Peak FLOP/s per watt rises about 1.2$\times$ per year}
+  \centering
+  \safeimg[width=0.92\textwidth,height=5.0cm,keepaspectratio]{perwatt.pdf}\\[0.05cm]
+  {\small V100 to B200: FP16 peak \val{v100_b200_peak}$\times$, TDP \val{v100_b200_tdp}$\times$, peak per watt \val{v100_b200_perwatt}$\times$.}
+  \mlsyscredit{Epoch AI, Machine Learning Hardware (2026), via MLSysIM; Compute Infrastructure, \S2.2.3 (tables 1 and 2, figure 5). Dense FP16 peak over TDP, a ceiling, not measured energy.}
+  \note{[2 min] [CORE] Real data: 64 accelerators released since 2017 for which Epoch AI records both a dense FP16 rate and a thermal design power (TDP), the vendor's sustained power target. Green points are NVIDIA; gray are other vendors. Across all of them, peak FP16 operations per watt rose about 1.2 times per year, doubling about every four years. The circled NVIDIA parts rose faster: V100 \val{perwatt_v100}, A100 \val{perwatt_a100}, H100 \val{perwatt_h100}, B200 \val{perwatt_b200} TFLOP/s per watt, \val{v100_b200_perwatt} times in seven years. Over the same span raw FP16 peak rose \val{v100_b200_peak} times, because TDP itself rose \val{v100_b200_tdp} times, from \val{tdp_v100} to \val{tdp_b200} W. ENGAGE: if arithmetic per watt rises \val{v100_b200_perwatt} times and arithmetic \val{v100_b200_peak} times, what happens to the power each rack must deliver? (Expected: it rises; the rack segment quantifies it.) WARN: compare per-watt figures only at one precision. The H100's FP8 peak per watt is \val{h100_fp8_perwatt_ratio} times the V100's FP16 figure, but a factor of two of that is the change of precision. Land: one device fits a 70B model's weights in two GPUs only if bandwidth also passes, and its rising power heads for the rack.}
 \end{frame}
 
 % =============================================================================
-\section{Memory Wall}
+% SECTION: NODE
 % =============================================================================
+\mlsysnote{[0.5 min] [CORE] The 175B model needs more memory than one device. Put eight in a box and see what changes.}
+\mlsysdivider{Where must each kind of traffic run, inside and between nodes?}{Compute Infrastructure, \S2.5}
+\section{Node}
 
-\begin{frame}{The Memory Wall}
-\note{
-[2 min] % -- LINK: Accelerator section showed compute power; now the Memory Wall shows its limit
-Students saw impressive TFLOPS numbers. This slide reveals that those Tensor
-Cores sit idle 99\% of the time during inference because data cannot arrive fast enough.
-
-% -- NARRATE: What to SAY while showing this slide
-Point to the diagram: ``HBM: 3,350 GB/s --- 50x faster than DDR5. 10x more
-energy efficient. But even HBM cannot keep the Tensor Cores fed during single-token
-generation. The paradox: faster logic idles MORE, waiting for data.''
-Point to the table: ``The 50x bandwidth gap and 10x energy gap are why HBM exists.''
-
-% -- ENGAGE: Specific question for THIS slide
-Ask: ``If you could double either FLOPS or bandwidth, which helps more for
-serving a chatbot?'' Expected: bandwidth --- inference is memory-bound.
-
-% -- WARN: What students will get wrong
-Students assume more TFLOPS helps inference. Correct: at arithmetic intensity of 1,
-the workload is deep in the memory-bound regime. More compute yields zero benefit.
-
-% -- FLEX: [CORE] The Memory Wall is the single most important concept for inference.
-IF AHEAD: ``What about batched inference? Does batching change the answer?''
-(Yes --- higher batch size increases arithmetic intensity.)
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.52\textwidth}
-    \safeimg[width=\textwidth,height=5.5cm,keepaspectratio]{hbm-architecture.pdf}
-  \end{column}
-  \begin{column}{0.45\textwidth}
-    \textbf{The paradox:} faster logic idles more, waiting for data.
-
-    \vspace{0.15cm}
-    {\footnotesize
-    \renewcommand{\arraystretch}{1.15}
-    \begin{tabular}{@{}lr@{}}
-      \toprule
-      \textbf{Metric} & \textbf{Value} \\
-      \midrule
-      DDR5 BW & $\sim$200 GB/s \\
-      HBM3 BW & \textbf{3,350 GB/s} \\
-      \textbf{Ratio} & \textbf{50$\times$} \\
-      \midrule
-      DDR5 energy & 20 pJ/bit \\
-      HBM3 energy & \textbf{2 pJ/bit} \\
-      \bottomrule
-    \end{tabular}
-    }
-
-    \vspace{0.1cm}
-    \mlsysalert{Key:}{HBM \emph{moves} the Memory Wall but does not eliminate it.}
-  \end{column}
-\end{columns}
-
+\begin{frame}{A node joins eight GPUs, but each keeps its memory private}
+  \begin{columns}[c]
+    \begin{column}{0.48\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.0cm,keepaspectratio]{hgx-b200-baseboard.jpg}\\[0.05cm]
+      {\footnotesize\textcolor{midgray}{An eight-GPU HGX B200 baseboard, under heatsinks.}}
+    \end{column}
+    \begin{column}{0.49\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \textbf{DGX H100 node (the running case)}\\[0.1cm]
+        8 GPUs $\times$ \val{h100_hbm_gb} GB $=$ \textbf{\val{node_hbm_gb} GB} of HBM\\
+        NVLink (GPU to GPU): \textbf{\val{nvlink_gbs} GB/s} per direction\\
+        InfiniBand: \textbf{\val{ib_gbs} GB/s} per GPU to other nodes\\
+        Host DDR5: 2 TB
+      \end{mlsyscard}
+      \vspace{0.2cm}
+      {\small Software must split tensors explicitly; no GPU reads another's HBM as its own.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: Pokiiri, CC BY-SA 4.0, Wikimedia Commons (B200 generation, not the H100 node). DGX H100: Compute Infrastructure, \S2.5 (Definition 2.4, \S2.5.2).}
+  \note{[1.5 min] [CORE] A real eight-GPU baseboard, here the newer B200 generation; the running case uses its predecessor, the DGX H100, with the same eight-GPU layout. Under each heatsink is one GPU package with its own HBM. Eight H100s give \val{node_hbm_gb} GB of HBM and eight times the arithmetic, joined by NVSwitch chips into an NVLink fabric at \val{nvlink_gbs} GB/s per direction per GPU. Each GPU also has its own InfiniBand network card at \val{ib_gbs} GB/s to other nodes. ENGAGE: is a node one big GPU with \val{node_hbm_gb} GB? (Expected: no; each GPU's memory stays private, so the framework must shard tensors and move data with collectives, the group operations Lecture 5 teaches.) WARN: the photo shows the B200 board; only the layout carries over to the H100 node.}
 \end{frame}
 
-\begin{frame}{Token Latency: The Physics}
-\note{
-[3 min] % -- LINK: Memory Wall introduced the paradox qualitatively; this makes it quantitative
-Students heard that logic idles waiting for data. Now they see the exact numbers.
-
-% -- NARRATE: What to SAY while showing this slide
-Walk through the table row by row: ``Llama-3 70B on H100. Compute: 2 times 70B
-FLOPs divided by 989 dense FP16 TFLOPS = 0.14 ms. Memory: 140 GB of weights divided by
-3.35 TB/s = 41.8 ms. The processor spends essentially all its time waiting for data.''
-Pause for effect. ``Even a chip with INFINITE compute generates tokens only
-negligibly faster. Memory bandwidth is the binding constraint.''
-
-% -- ENGAGE: Specific question for THIS slide
-``If HBM4 delivers 6 TB/s (roughly 2x), what is the new token latency?''
-Expected: approximately 23 ms --- nearly 2x speedup, confirming bandwidth is the lever.
-
-% -- WARN: What students will get wrong
-Students will try to optimize the compute term (use quantization to reduce FLOPs).
-Correct: the compute term is already $<$1\% --- even zeroing it out saves only 0.14 ms.
-
-% -- FLEX: [CORE] This worked example is the quantitative proof of the Memory Wall.
-IF SHORT: Show the table, state the $>$99\% memory-bound result, skip the derivation walkthrough.
-}
-
-\small
-\textbf{Scenario: One token of Llama-3 70B on H100}
-
-\vspace{0.1cm}
-\renewcommand{\arraystretch}{1.2}
-{\footnotesize
-\begin{tabular}{@{}llll@{}}
-  \toprule
-  \textbf{Component} & \textbf{Calculation} & \textbf{Time} & \textbf{Share} \\
-  \midrule
-  \textcolor{computestroke}{Compute} & $2 \times 70\text{B} / 989\text{ TF}$ & \textbf{0.14 ms} & $<$1\% \\
-  \textcolor{datastroke}{Memory}  & $140\text{ GB} / 3.35\text{ TB/s}$ & \textbf{41.8 ms} & \textbf{$>$99\%} \\
-  \midrule
-  & & $T_{\text{token}} \approx$ & \textbf{41.9 ms} \\
-  \bottomrule
-\end{tabular}
-}
-
-\vspace{0.15cm}
-\begin{mlsyscard}{errorstroke}
-\textbf{The processor spends more than 99\% of this idealized token step waiting for data.}
-Even a hypothetical chip with \emph{infinite} compute would generate tokens only negligibly faster. Memory bandwidth is the binding constraint.
-\end{mlsyscard}
-
+\begin{frame}{Does the 175B training state fit in one node?}
+  \mlsysactivity{Estimate}{3 min}
+  {\small\textbf{Given}, bytes per parameter: weights 2, gradients 2 (FP16); master copy 4, Adam $m$ 4, $v$ 4 (FP32). \val{gpt3_params_b}B parameters; node \val{node_hbm_gb} GB. \textbf{Then} split 8 ways (TP-8): how much per GPU?}\\[0.1cm]
+  \centering\only<1|handout:0>{\phantom{\includegraphics[width=0.95\textwidth,height=4.2cm,keepaspectratio]{node_state_step2}}}%
+  \only<2|handout:0>{\includegraphics[width=0.95\textwidth,height=4.2cm,keepaspectratio]{node_state_step1}}%
+  \only<3-|handout:1>{\includegraphics[width=0.95\textwidth,height=4.2cm,keepaspectratio]{node_state_step2}}\\[0.02cm]
+  {\footnotesize\uncover<3->{Per GPU: Adam \val{tp8_adam_gb}, master \val{tp8_master_gb}, weights and gradients \val{tp8_wg_gb}, other \val{tp8_other_gb} GB.}}
+  \mlsyscredit{Compute Infrastructure, \S2.5.3 (table 11) and Example 2.4. Activations and workspace (\val{tp8_other_gb} GB per GPU) are the scenario remainder, derived.}
+  \note{[3.5 min] [CORE] ENGAGE: pairs compute the total, then the per-GPU share under 8-way tensor parallelism (TP-8), which splits every layer's matrices across the eight GPUs. Two minutes. Step 2: 16 bytes per parameter times \val{gpt3_params_b} billion is \val{state_tb} TB of persistent state: \val{weights_gb} GB of weights, \val{weights_gb} of gradients, \val{master_gb} of FP32 master weights, and \val{adam_moment_gb} for each Adam moment. Activations add 100 to 400 GB. The node holds \val{node_hbm_gb} GB. The largest terms are the FP32 master weights and Adam moments. Step 3: split eight ways, each GPU holds \val{tp8_adam_gb} GB of Adam moments, \val{tp8_master_gb} GB of master weights, \val{tp8_wg_gb} GB of weights and gradients, and about \val{tp8_other_gb} GB of activations and workspace, \val{tp8_total_gb} GB in all against \val{h100_hbm_gb} GB. WARN: students who shard only the weights get \val{tp8_weights_gb} GB and declare victory; the optimizer state is the problem. Offloading the moments and master copy to host memory over PCIe still leaves \val{tp8_offload_gb} GB per GPU.}
 \end{frame}
 
-% --- ACTIVE LEARNING 1: Predict ---
-\begin{frame}{Predict: Memory-Bound or Compute-Bound?}
-\note{
-[3 min] % -- LINK: Token latency showed >99\% memory-bound for inference; now students predict for training
-Students saw inference is memory-bound. This prediction primes the Roofline reveal.
+\begin{frame}{Adding 128-way data parallelism brings each GPU to about 45 GB}
+  \begin{columns}[c]
+    \begin{column}{0.48\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \small\textbf{Given:} \val{ref_gpus} GPUs as TP-8 inside each node $\times$ \val{ref_nodes} data-parallel replicas; optimizer state sharded across replicas (ZeRO).
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \small
+      \uncover<2->{Weights per GPU: $\val{weights_gb} / 8 = \val{tp8_weights_gb}$ GB\\[0.15cm]}
+      \uncover<3->{Adam moments: $\val{adam_gb} / \val{ref_gpus} \approx \val{zero_adam_gb}$ GB\\[0.15cm]}
+      \uncover<4->{\textbf{Subtotal $\approx$ \val{zero_subtotal_gb} GB}, before gradients, activations, and buffers.}
+    \end{column}
+  \end{columns}
+  \vspace{0.35cm}
+  \centering{\normalsize\uncover<4->{The full state fits only when it is sharded across many nodes.}}
+  \mlsyscredit{Compute Infrastructure, \S2.5.3. ZeRO and sharded data parallelism: Lecture 6.}
+  \note{[2 min] [OPTIONAL] The way out. Step 1: keep TP-8 inside each node, where NVLink is fast, and run \val{ref_nodes} such groups as data-parallel replicas, each training on different examples, \val{ref_gpus} GPUs in all. Step 2: each GPU holds one eighth of the weights, \val{tp8_weights_gb} GB. Step 3: shard the \val{adam_gb} GB of Adam moments across all \val{ref_gpus} GPUs as well, as ZeRO (the zero redundancy optimizer) does: about \val{zero_adam_gb} GB each, or \val{zero_adam_group_gb} GB per eight-GPU group. Step 4: about \val{zero_subtotal_gb} GB before gradients, activations, and buffers, which now fits under \val{h100_hbm_gb} GB. ENGAGE: why can the same eight GPUs not also give ZeRO an eight-way axis? (Expected: parallel degrees multiply to the device count; the eight GPUs are already the tensor-parallel axis.) WARN: this is only the starting point of a memory plan; Lecture 6 builds the plan and its traffic.}
+\end{frame}
 
-% -- NARRATE: What to SAY while showing this slide
-``Think about it. Training at batch 2048 vs serving at batch 1. Same model,
-same hardware. Which benefits more from a faster GPU? Write your answer and
-reasoning. 60 seconds.'' Ask 2--3 students to share before the reveal.
+\begin{frame}{One \val{buffer_gb} GB buffer: 3 ms in HBM, 22 ms on NVLink, \val{stair_ib_ms} on InfiniBand}
+  \begin{columns}[c]
+    \begin{column}{0.66\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=4.6cm,keepaspectratio]{staircase_step}{3}\\[0.15cm]
+      {\normalsize Each physical boundary costs about 10$\times$.}
+    \end{column}
+    \begin{column}{0.31\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.4cm,keepaspectratio]{infiniband-switch-cables.jpg}\\[0.05cm]
+      {\footnotesize\textcolor{midgray}{InfiniBand cables plugged into a switch: the hop between nodes.}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Compute Infrastructure, Napkin Math 2.3, table 9 (per GPU, one direction; InfiniBand NDR). Bandwidth-only bounds. Photo: ChrisDag, CC BY 2.0, Wikimedia Commons (older InfiniBand switch).}
+  \note{[2.5 min] [CORE] The bandwidth staircase, the number this lecture owns for the course. Move one \val{buffer_gb} GB buffer one hop at each tier. Step 1: a local HBM read at \val{h100_bw_gbs} GB/s, \val{stair_hbm_ms} ms. Step 2: to another GPU in the node over NVLink at \val{nvlink_gbs} GB/s, \val{stair_nvlink_ms} ms. Step 3: to a GPU in another node over InfiniBand NDR at \val{ib_gbs} GB/s, \val{stair_ib_ms} ms, \val{nvlink_ib_ratio_word} times the NVLink time. Each step outward crosses a longer, slower physical path: millimeters of interposer, tens of centimeters of board copper, then meters of cable through switches. PCIe Gen5 to the host sits between, at about \val{pcie_gbs} GB/s. ENGAGE: a buffer that crosses the slow tier once per step, or one that crosses it inside every layer: which hurts more? (Expected: the frequent one, unless the large one cannot overlap.) WARN: these are bandwidth-only floors; startup latency per message is added by the alpha-beta model of Lecture 3.}
+\end{frame}
 
-% -- ENGAGE: This IS the active learning moment
-Do NOT reveal the Roofline framework yet. The prediction creates a knowledge
-gap that the next slide fills. Listen for reasoning about batch size and
-arithmetic intensity, even if students do not use those terms yet.
+\begin{frame}{Frequent exchanges stay on fast links; rare ones cross the cluster}
+  \centering
+  \mlsyssteps[width=0.92\textwidth,height=4.7cm,keepaspectratio]{placement_step}{3}\\[0.05cm]
+  {\footnotesize The bandwidth hierarchy dictates placement. Tensor splits a layer; pipeline splits the layers into stages; data copies the model.}
+  \mlsyscredit{Compute Infrastructure, \S2.5.1 (table 10) and \S2.5.2: 175B, hidden \val{tp_hidden}, micro-batch \val{tp_microbatch} $\times$ \val{tp_seq} tokens, FP16. Parallelism plans: Lecture 6.}
+  \note{[2.5 min] [CORE] Why the staircase decides placement. Step 1, tensor parallelism: each layer's output must be summed across the group, a \val{tp_payload_mb} MB exchange for the running model (\val{tp_microbatch} sequences of \val{tp_seq} tokens times hidden size \val{tp_hidden} times 2 bytes), \val{tp_collectives} times per step, and later work waits on it. It belongs inside the NVLink domain. Step 2, pipeline parallelism: each group of nodes holds a stage of layers and passes a micro-batch's activations, also about \val{tp_payload_mb} MB, once per micro-batch at each stage boundary; micro-batching hides part of the wait, so it can cross InfiniBand between neighboring nodes. Step 3, data parallelism: the full \val{weights_gb} GB gradient, the largest transfer, but once per step and overlapped with the backward pass, so it can span the cluster. ENGAGE: data parallelism moves the most bytes; why does it get the slowest tier? (Expected: frequency and overlap decide the tier.) WARN: this is the mapping for this topology; a fast domain spanning several chassis changes it.}
+\end{frame}
 
-% -- FLEX: [CORE] This prediction makes the Roofline reveal dramatically more effective.
-}
-
-\centering
-\vspace{0.8cm}
-{\Large\bfseries Think--Write--Share}
-
-\vspace{0.5cm}
-{\large A team trains a 175B model at batch size 2048.\\
-Another team serves the same model at batch size 1.\\[0.3cm]
-\alert{Which workload benefits more from buying\\a faster GPU (more TFLOPS)?}}
-
-\vspace{0.5cm}
-{\normalsize Write your answer and reasoning. \textcolor{midgray}{(60 seconds)}}
-
+\begin{frame}{What does PCIe do to tensor parallelism?}
+  \mlsysactivity{Predict}{2 min}
+  {\normalsize Same \val{tp_collectives} AllReduces per step, same \val{tp_compute_ms} ms of compute.\\Move tensor parallelism from NVLink (\val{nvlink_gbs} GB/s) to PCIe Gen5, the host bus (\val{pcie_gbs} GB/s).\\What share of the step is communication?}\\[0.2cm]
+  \centering
+  \uncover<2->{\safeimg[width=0.9\textwidth,height=3.9cm,keepaspectratio]{tp_links.pdf}}
+  \mlsyscredit{Compute Infrastructure, \S2.5.2 and Example 2.3: ring AllReduce moves \val{tp_ring_factor} $\times$ \val{tp_payload_mb} MB per GPU; \val{tp_compute_ms} ms compute is a stated scenario input; no overlap.}
+  \note{[2.5 min] [CORE] ENGAGE: students write a percentage. Hint: an AllReduce sums each GPU's partial result and returns the sum to every GPU; with eight GPUs in a ring each moves \val{tp_ring_factor} times the \val{tp_payload_mb} MB payload, \val{tp_ring_mb} MB (Lecture 5 derives the factor). Step 2: over NVLink each AllReduce takes at least \val{tp_ring_mb} MB / \val{nvlink_gbs} GB/s $= \val{tp_nvlink_ms}$ ms; \val{tp_collectives} of them take \val{tp_nvlink_total_ms} ms, and compute is \val{tp_nvlink_compute_pct} percent of the \val{tp_nvlink_step_ms} ms step. Over PCIe at \val{pcie_gbs} GB/s each takes \val{tp_pcie_ms} ms, \val{tp_pcie_total_ms} ms per step, and communication is \val{tp_pcie_comm_pct} percent of the step. WARN: these are bandwidth-only bounds with no overlap and an assumed \val{tp_compute_ms} ms of compute; a longer compute time makes the same communication matter less. Land the segment: a node aggregates capacity but each memory stays private, so the partition must put its most frequent exchanges on the fastest wires, and the staircase decides what fits where.}
 \end{frame}
 
 % =============================================================================
-\section{Roofline}
+% SECTION: RACK
 % =============================================================================
+\mlsysnote{[0.5 min] [CORE] Stack the nodes. At the rack the limit becomes watts and heat.}
+\mlsysdivider{Can the building power and cool what the fleet bought?}{Compute Infrastructure, \S2.6}
+\section{Rack}
 
-\mlsysfocus{The Roofline Model}{%
-$\text{Achievable FLOPS} = \min\left(R_{\text{peak}},\; \text{BW} \times I\right)$\\[0.3cm]
-\normalsize where $I = \text{FLOP/byte}$ (arithmetic intensity)%
-}
-
-\begin{frame}{Roofline: H100 Landscape}
-\note{
-[3 min] % -- LINK: Students just predicted which workload benefits from faster GPUs; this is the reveal
-The Roofline Model provides the visual framework that answers the prediction.
-
-% -- NARRATE: What to SAY while showing this slide
-``Here is the answer to the prediction. The Roofline has two regimes separated
-by the FP16 ridge point at $\approx$295 FLOP/byte (989 TFLOPS FP16 divided by 3.35 TB/s).
-Left of the ridge: memory-bound --- more TFLOPS is wasted money. Right of the ridge:
-compute-bound --- more bandwidth is wasted money. LLM decode at batch 1: far left,
-less than 1\% of peak. LLM training: crosses the ridge. The answer: training
-benefits from more TFLOPS; inference benefits from more bandwidth.''
-PRECISION NOTE: The chapter uses FP16 for ridge-point math (989 TFLOPS) giving
-$\approx$295 FLOP/byte. The FP8 headline (1,979) gives a 591 FLOP/byte ridge,
-but that is not the figure the chapter uses for latency analysis.
-
-% -- ENGAGE: Specific question for THIS slide
-``Where on this plot does YOUR workload sit?'' Ask students to think about
-a model they have trained or served.
-
-% -- WARN: What students will get wrong
-Students confuse arithmetic intensity with utilization. High AI does not mean
-high utilization --- you can be compute-bound and still only achieve 30\% of peak
-due to scheduling overhead.
-
-% -- FLEX: [CORE] The Roofline is the diagnostic tool students will use throughout the course.
-IF AHEAD: ``What shifts a workload horizontally on this plot?'' (Batch size.)
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{roofline-h100.pdf}
-
-\vspace{0.1cm}
-\mlsysconcept{Diagnostic power:}{The Roofline tells you \emph{which resource to optimize} before you spend money.}
-
+\begin{frame}{A training rack draws \val{dgx_rack_ratio} to \val{nvl72_rack_ratio} times a server rack's \val{trad_rack_kw} kW}
+  \begin{columns}[c]
+    \begin{column}{0.30\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.6cm,keepaspectratio]{gb200-nvl72-rack.jpg}
+    \end{column}
+    \begin{column}{0.67\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.8cm,keepaspectratio]{rack_power.pdf}\\[0.1cm]
+      {\small Left: a GB200 NVL72 rack, 72 GPUs, liquid cooled, \val{nvl72_kw} kW.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: Pokiiri, CC BY-SA 4.0, Wikimedia Commons. Values: Compute Infrastructure, \S2.6 (\val{dgx_rack_kw} kW includes host, network, conversion, and allocated cooling) and \S2.6.2 (GB200 NVL72, modeled \val{nvl72_kw} kW).}
+  \note{[2 min] [CORE] The power wall in one picture. On the left, a real rack: NVIDIA's GB200 NVL72, 72 GPUs and 36 CPUs in one liquid-cooled cabinet, modeled by the chapter at \val{nvl72_kw} kW. On the right, four rack loads. A traditional enterprise rack draws about \val{trad_rack_kw} kW and is cooled by room air. The running case's rack, four DGX H100 nodes, 32 GPUs at \val{tdp_h100} W each, draws \val{dgx_rack_kw} kW once hosts, network, power conversion, and its share of cooling are included. The 100 kW class needs liquid. The \val{ref_gpus}-GPU reference cluster is 32 such racks, about \val{cluster_mw} MW. ENGAGE: why not spread the GPUs over three times as many ordinary racks? (Expected: distance costs bandwidth; the staircase from the last segment pushes GPUs together, and heat pushes them apart.) WARN: \val{dgx_rack_kw} kW is not 32 times \val{tdp_h100} W; the GPUs alone are \val{rack_gpu_kw} kW, and the rest is everything that supports them.}
 \end{frame}
 
-\begin{frame}{Roofline: Workload Placement}
-\note{
-[2 min] % -- LINK: Roofline plot showed the two regimes; this table shows where real workloads land
-Students saw the visual. Now they get a reference table of specific workloads.
-
-% -- NARRATE: What to SAY while showing this slide
-``LLM decode at batch 1: arithmetic intensity of 1, less than 1\% of peak ---
-deeply memory-bound. LLM training at 175B: intensity of 2000, 30--50\% of peak ---
-compute-bound. The same model, same hardware, but the batch size determines
-the regime. Doubling batch size doubles FLOPs for the same bytes, shifting right.''
-Point to the two cards: ``Below ridge: buy bandwidth. Above ridge: buy compute.
-The Roofline tells you WHERE to spend money before you spend it.''
-
-% -- WARN: What students will get wrong
-Students assume CNN training is compute-bound. The table shows it is near the
-ridge at 30--60\% --- it could go either way depending on resolution and batch size.
-
-% -- FLEX: [OPTIONAL] Reference table for later use.
-IF SHORT: Highlight the LLM decode and LLM training rows, skip the middle rows.
-}
-
-\footnotesize
-\renewcommand{\arraystretch}{1.15}
-\begin{tabular}{@{}lrrl@{}}
-  \toprule
-  \textbf{Workload} & \textbf{$I$ (FLOP/B)} & \textbf{\% Peak} & \textbf{Regime} \\
-  \midrule
-  LLM decode (B=1)    & $\sim$1    & $<$1\%  & \textcolor{computestroke}{\textbf{Memory-bound}} \\
-  LLM decode (B=32)   & $\sim$32   & $\sim$5\%  & \textcolor{computestroke}{Memory-bound} \\
-  CNN training         & 50--200    & 30--60\% & Near ridge \\
-  LLM prefill          & 100--500   & 50--80\% & Transitioning \\
-  LLM training (175B)  & $\sim$2000 & 30--50\% & \textcolor{routingstroke}{\textbf{Compute-bound}} \\
-  \bottomrule
-\end{tabular}
-
-\vspace{0.15cm}
-\begin{columns}[T]
-  \begin{column}{0.48\textwidth}
-    \begin{mlsyscard}{computestroke}
-    {\footnotesize \textbf{Below ridge:} Buy bandwidth.\\
-    Faster GPU is wasted money.}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.48\textwidth}
-    \begin{mlsyscard}{routingstroke}
-    {\footnotesize \textbf{Above ridge:} Buy compute.\\
-    Faster HBM is wasted money.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
+\begin{frame}{The largest AI system drew \val{largest_over_frontier}$\times$ more power in three years}
+  \centering
+  \safeimg[width=0.95\textwidth,height=5.5cm,keepaspectratio]{power_trend.pdf}
+  \mlsyscredit{Left: vendor ratings, 14 packages (TDP, board power, or max TGP). Right: Epoch AI (2026); Pilz et al. 2025; red: largest to date. Compute Infrastructure, \S2.6.1.}
+  \note{[2.5 min] [CORE] Real data at both ends of the stack. Left: the published power rating of one accelerator package, 14 parts from four vendors. Ratings rise steadily, from the H100's \val{tdp_h100} W in 2022 to the B300's 1,400 W maximum in 2025, about two times. Vendors use different conventions, so these bound design envelopes rather than measure use. Right: the facility power of supercomputers that Epoch AI tracks; the red staircase is the largest system operating at each date. It stayed between 20 and 30 MW from 2013 to 2021, set by national supercomputers. Frontier raised it to \val{frontier_mw} MW in 2022, and AI training clusters lifted it to \val{largest_2025_mw} MW by 2025, \val{largest_over_frontier_word} times in three years. ENGAGE: if one package only doubled, where did the other factor of four or five come from? (Expected: more accelerators joined into one system, and buildings built to feed them.) Land: the power wall at fleet scale is a building provisioning problem as well as a chip problem.}
 \end{frame}
 
-% --- ACTIVE LEARNING 2: Exercise ---
-\begin{frame}{Your Turn: Roofline Diagnosis}
-\note{
-[4 min] % -- LINK: Roofline table showed workload placement; now students calculate it themselves
-Students saw pre-computed placements. Now they derive arithmetic intensity from first principles.
+\begin{frame}{A barrier swings every GPU from \val{step_low_w} W to \val{tdp_h100} W at once}
+  \begin{columns}[c]
+    \begin{column}{0.48\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \small\textbf{One H100}, \val{rail_v} V core rail:\\
+        \val{step_low_w} W $\rightarrow$ \val{tdp_h100} W: \textbf{+\val{swing_a} A}\\[0.1cm]
+        $\Delta V = L\,\dfrac{dI}{dt}$,\enspace $L = \val{loop_ph}$ pH\\[0.1cm]
+        over \val{rise_slow_us} \textmu s: \val{droop_1us_mv} mV (\val{droop_1us_pct}\%)\\
+        over \val{rise_fast_ns} ns: \textbf{\val{droop_100ns_mv} mV (\val{droop_100ns_pct}\%)}
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \centering
+      {\small \val{ref_gpus} GPUs step together in \val{ramp_us} \textmu s:}\\[0.15cm]
+      {\fontsize{30}{34}\selectfont\bfseries\textcolor{mlsysaccent}{\val{ramp_gws} GW/s}}\\[0.15cm]
+      {\small a \val{step_kw} kW step seen by shared upstream supplies}
+    \end{column}
+  \end{columns}
+  \vspace{0.3cm}
+  \centering{\small Average power and transient voltage need separate checks.}
+  \mlsyscredit{Compute Infrastructure, \S2.6.1 (equation 2, table 13). Inductance, rise times, and the \val{ref_gpus}-GPU ramp are the chapter's scenario inputs.}
+  \note{[2 min] [OPTIONAL] Synchronous training makes the power draw jump. When a collective barrier releases the GPUs from communication into dense arithmetic, each one steps from about \val{step_low_w} W toward \val{tdp_h100} W within microseconds, and the barrier aligns the steps. Left: on a \val{rail_v} V core rail that step is \val{swing_a} A. Every conductor loop has inductance, which resists a change in current, so the voltage dips by $L\,dI/dt$. With an assumed \val{loop_ph} pH board loop, a \val{rise_slow_us} \textmu s rise gives \val{droop_1us_mv} mV, \val{droop_1us_pct} percent of the rail; a \val{rise_fast_ns} ns rise gives \val{droop_100ns_mv} mV, \val{droop_100ns_pct} percent, far outside a 5 percent band. The tenfold sensitivity to rise time is physical. Charge stored on the die, the package, and the board answers the fast edges, each tier faster than the one above. Right: \val{ref_gpus} GPUs stepping \val{swing_w} W each in \val{ramp_us} \textmu s is a \val{step_kw} kW step, \val{ramp_gws} GW per second, seen by the facility's shared supplies. WARN: these values are assumed scenario inputs. Lecture 15 takes the grid side of this ramp.}
+\end{frame}
 
-% -- NARRATE: What to SAY while showing this slide
-``90 seconds. A 7B model, 14 GB in FP16, served at batch 1 on H100.
-Calculate the arithmetic intensity and determine the regime. Work with
-your neighbor.''
-After pause: ``$I = 2 \times 7B / 14$ GB = 1 FLOP/byte. The FP16 ridge point is
-$\approx$295 (989 TFLOPS FP16 / 3.35 TB/s). 1 is roughly 295x below the ridge ---
-deeply memory-bound. More TFLOPS yields zero benefit. You need more bandwidth.''
-PRECISION NOTE: We use 989 TFLOPS FP16 (not 1,979 FP8) because the token latency
-worked example uses FP16, keeping both calculations in the same precision regime.
+\begin{frame}{How much air carries away \val{rack_heat_kw} kW?}
+  \mlsysactivity{Estimate}{2.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.64\textwidth}
+      {\normalsize $Q = \dot m \, c_p \, \Delta T$}\quad{\small heat $=$ mass flow $\times$ specific heat $\times$ rise}\\[0.1cm]
+      {\small Air: $c_p = \val{air_cp}$ J/(kg K), \val{air_rho} kg/m$^3$, $\Delta T = \val{cool_rise_k}$ K.\\Water: $c_p = \val{water_cp}$ J/(kg K), same rise.}\\[0.15cm]
+      \uncover<2->{\safeimg[width=\textwidth,height=3.1cm,keepaspectratio]{cooling_flow.pdf}}
+    \end{column}
+    \begin{column}{0.33\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.4cm,keepaspectratio]{datacenter-cooling-tower.jpg}\\[0.05cm]
+      {\footnotesize\textcolor{midgray}{Cooling towers on a data center roof, Mesa, Arizona.}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Compute Infrastructure, \S2.6.2 (equation 3): air \val{air_kgs} kg/s, \val{air_m3s} m$^3$/s. Water flow derived from the same equation. Photo: Rsparks3, CC0, Wikimedia Commons.}
+  \note{[2.5 min] [CORE] In steady operation every joule a rack draws leaves as heat, so cooling must remove heat at the rate the rack consumes power. ENGAGE: pairs solve for the air flow that removes \val{rack_heat_kw} kW at a \val{cool_rise_k} K rise. Step 2: $\val{rack_heat_w} / (\val{air_cp} \times \val{cool_rise_k}) = \val{air_kgs}$ kg/s; at \val{air_rho} kg/m$^3$ that is \val{air_m3s} m$^3$ of air per second, about \val{air_cfm} cubic feet per minute, through one rack. Water: $\val{rack_heat_w} / (\val{water_cp} \times \val{cool_rise_k}) = \val{water_kgs}$ kg/s, about \val{water_kgs} liters per second, about \val{air_water_ratio} times less volume. That is why the \val{rack_heat_kw} kW class uses liquid: cold plates on the GPUs, a coolant distribution unit at the rack, and a facility loop that ends at towers like these. The chapter sizes a GB200 NVL72 rack at \val{nvl72_kw} kW and a \val{nvl72_rise_k} K rise: about \val{nvl72_lpm} liters per minute. WARN: low flow does not mean low pumping energy, and liquid brings leaks and serviceability costs; PUE, the facility overhead ratio, is Lecture 15.}
+\end{frame}
 
-% -- ENGAGE: This IS the active learning moment
-After the solution: ``What batch size would push this workload to the ridge?''
-Expected: roughly 295 --- but that is impractical for latency-sensitive serving.
-
-% -- WARN: What students will get wrong
-Students will compute $2 \times 7B = 14B$ FLOPs and divide by 14 GB to get 1.
-Some will use the FP8 peak (1,979) instead of FP16 (989) and get ridge = 591.
-Both arrive at the same qualitative conclusion (deeply memory-bound), but using
-FP16 is consistent with the token latency example and the chapter definition.
-
-% -- FLEX: [CORE] This exercise builds the muscle memory for Roofline diagnosis.
-IF AHEAD: ``What changes if we quantize to INT8? New AI = 2, still memory-bound.''
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    {\normalsize\bfseries Diagnose the Bottleneck}
-
-    \vspace{0.2cm}
-    A 7B model (14 GB FP16 weights) served at batch size 1 on an H100:
-    \begin{itemize}
-      \item $R_{\text{peak}}$ = 989 TFLOPS \textcolor{midgray}{(FP16)}
-      \item BW = 3.35 TB/s
-      \item Ridge point $\approx$ 295 FLOP/byte
-    \end{itemize}
-
-    \vspace{0.1cm}
-    \textbf{Calculate} the arithmetic intensity and determine the regime.
-
-    {\footnotesize\textcolor{midgray}{(90 seconds --- then compare with a neighbor)}}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \pause
-    \begin{mlsyscard}{datastroke}
-    \textbf{Solution:}\\[0.1cm]
-    {\footnotesize
-    $I = \frac{2 \times 7\text{B}}{14\text{ GB}} = 1$ FLOP/byte\\[0.1cm]
-    Ridge point $\approx$ 295 (FP16)\\
-    $1 \ll 295$\\[0.1cm]
-    \textcolor{computestroke}{\textbf{Deeply memory-bound!}}\\[0.05cm]
-    More TFLOPS $\to$ zero benefit.\\
-    More BW $\to$ linear speedup.
-    }
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
+\begin{frame}{One building fire took 3.6 million websites offline in 2021}
+  \begin{columns}[c]
+    \begin{column}{0.55\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.7cm,keepaspectratio]{failure_domains.pdf}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.3cm,keepaspectratio]{ovh-fire-pompidou-notice.jpg}\\[0.05cm]
+      {\footnotesize\textcolor{midgray}{Pompidou museum website, March 2021, offline after the OVHcloud fire.}}\\[0.15cm]
+      {\small A CDU down \val{cdu_repair_h} h idles \val{cdu_gpus} GPUs: \$\val{cdu_cost}. A synchronous job idles \val{pod_gpus}: \textbf{\$\val{job_cost}}.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Compute Infrastructure, \S2.5.5, \S2.6.4, War Story 2.1 (OVHcloud 2021). CDU example: \$\val{gpu_hour_usd} per GPU-hour, illustrative. Screenshot: Fraguando, CC BY-SA 4.0, Wikimedia Commons.}
+  \note{[3 min] [CORE] Left: failure domains, the set of resources one fault takes out together, nested by the physical hierarchy. An HBM error removes a GPU, and with it the eight-GPU tensor-parallel group of its node. A power shelf, top-of-rack switch, or cooling loop removes a rack. Row power and coolant distribution remove racks; a building's feed, cooling plant, and fire compartment remove halls. Right: on 10 March 2021 a fire destroyed OVHcloud's SBG2 building in Strasbourg, damaged a neighbor, and forced shutdown of the other two; over 3.6 million websites went offline, including this museum's, and unbacked-up data was lost. Shared power paths and missing fire barriers made one building the failure domain. The chapter's training version: one coolant distribution unit (CDU) failing for \val{cdu_repair_h} hours idles \val{cdu_gpus} GPUs, \$\val{cdu_cost} at \$\val{gpu_hour_usd} per GPU-hour; a synchronous job that cannot continue idles all \val{pod_gpus}, \$\val{job_cost}. ENGAGE: buy facility redundancy, or better checkpoints? (Expected: compare expected outage cost with each price.) Land: power delivery, cooling, and failure domains bound how much compute a building can install. Lecture 7 owns recovery.}
 \end{frame}
 
 % =============================================================================
-\section{Node \& BW}
+% SECTION: POD
 % =============================================================================
+\mlsysnote{[0.5 min] [CORE] Join hundreds of racks into one machine and ask how much of its peak becomes progress.}
+\mlsysdivider{How much of the purchased peak becomes training progress?}{Compute Infrastructure, \S2.4.1, \S2.7, and \S2.8}
+\section{Pod}
 
-\begin{frame}{The Node: Aggregating Accelerators}
-\note{
-[2 min] % -- LINK: Roofline diagnosed per-GPU bottlenecks; the node aggregates GPUs to overcome capacity limits
-Students diagnosed single-GPU workloads. But 175B does not fit on one GPU.
-The node pools 8 GPUs via NVLink to bridge the capacity gap.
-
-% -- NARRATE: What to SAY while showing this slide
-Walk through the table: ``175B model: 350 GB weights, 350 GB gradients, 700 GB
-optimizer state. Total: 1.4 TB. One H100: 80 GB. Even 8 GPUs (640 GB) is not
-enough for the full training state --- you still need ZeRO sharding or offloading.''
-Point to the DGX card: ``NVSwitch makes 8 GPUs look like one virtual accelerator
-with unified memory access at 900 GB/s per GPU.''
-
-% -- ENGAGE: Specific question for THIS slide
-``If 640 GB is not enough for 1.4 TB, what else can you do?''
-Expected: shard optimizer state (ZeRO), offload to host DRAM, or use more nodes.
-
-% -- WARN: What students will get wrong
-Students assume 8 GPUs = 640 GB usable. Correct: NCCL buffers, activations,
-and fragmentation consume 20--30\% of HBM. Effective capacity is lower.
-
-% -- FLEX: [CORE] The node is where the bandwidth hierarchy begins.
-IF SHORT: State the 1.4 TB vs 640 GB gap, mention ZeRO, move on.
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.52\textwidth}
-    \textbf{Why nodes exist:} HBM has bandwidth but not enough \emph{capacity}.
-
-    \vspace{0.15cm}
-    {\footnotesize
-    \renewcommand{\arraystretch}{1.15}
-    \begin{tabular}{@{}lr@{}}
-      \toprule
-      \textbf{Component} & \textbf{175B Model} \\
-      \midrule
-      Weights (FP16)     & 350 GB \\
-      Gradients          & 350 GB \\
-      Optimizer (Adam)   & 700 GB \\
-      \textbf{Total}     & \textbf{1.4 TB} \\
-      \midrule
-      Single H100 HBM    & 80 GB \\
-      8-GPU Node HBM     & \textbf{640 GB} \\
-      \bottomrule
-    \end{tabular}
-    }
-
-    \vspace{0.1cm}
-    {\footnotesize Still not enough for full training state $\to$ ZeRO sharding, offloading.}
-  \end{column}
-  \begin{column}{0.45\textwidth}
-    \begin{mlsyscard}{crimson}
-    \textbf{DGX H100 Node}\\[0.1cm]
-    {\footnotesize
-    8$\times$ H100 SXM GPUs\\
-    640 GB aggregate HBM\\
-    NVSwitch: 900 GB/s per GPU\\
-    4$\times$ NVSwitch chips\\
-    Total: $\sim$7 kW}
-    \end{mlsyscard}
-
-    \vspace{0.1cm}
-    \begin{mlsyscard}{datastroke}
-    {\footnotesize \textbf{Key insight:} NVSwitch transforms 8 independent GPUs into one ``virtual accelerator'' with unified memory.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
+\begin{frame}{At \val{pod_gpus} GPUs, some GPU fails about every five hours}
+  \begin{columns}[c]
+    \begin{column}{0.52\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.5cm,keepaspectratio]{frontier-supercomputer.jpg}\\[0.05cm]
+      {\footnotesize\textcolor{midgray}{Frontier, Oak Ridge (2022): a \val{frontier_mw} MW machine that fills a hall.}}
+    \end{column}
+    \begin{column}{0.45\textwidth}
+      \small
+      \textbf{A \val{pod_gpus}-H100 pod}\\[0.1cm]
+      \val{pod_eflops} EFLOP/s FP16 peak\\
+      \val{pod_tbs} TB/s injected into the fabric\\
+      \val{pod_mw} MW for the GPUs alone\\[0.2cm]
+      \textbf{\val{gpu_mttf_h} h $\div$ \val{pod_gpus} $\approx$ \val{pod_fail_h} h}\\between GPU failures
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Compute Infrastructure, \S2.6.1, \S2.7.1 (independent failures, per-GPU MTTF \val{gpu_mttf_h} h). Photo: OLCF at ORNL, CC BY 2.0, Wikimedia Commons (an AMD-based system, not H100).}
+  \note{[2 min] [CORE] At this scale the building is one computer, a warehouse-scale computer. The fabric is its bus and the scheduler its operating system. The photo is Frontier, the system that held the power record in 2022 at \val{frontier_mw} MW; it uses AMD accelerators. Right: the chapter's round \val{pod_gpus}-H100 pod. Its GPUs alone draw \val{pod_mw} MW. Every GPU can push \val{ib_gbs} GB/s into the network, \val{pod_tbs} TB/s in all. And if each GPU fails on average once in \val{gpu_mttf_h} hours, independently, some GPU fails about every five hours; Lecture 1 called this the reliability gap. ENGAGE: a training run lasts two weeks; how many GPU failures should it plan for? (Expected: about \val{run_failures} at \val{run_h} hours, and shared power or cooling faults add correlated ones.) WARN: five hours is an average interval between random failures, and it counts GPUs only; the chapter's node-level assumption of \val{node_mtbf_h} hours, including hosts, power, and links, gives about \val{node_fail_day_word} node failures a day on \val{ref_nodes} nodes. Lecture 7 owns the failure rate and checkpoint interval.}
 \end{frame}
 
-\begin{frame}{The Bandwidth Hierarchy}
-\note{
-[3 min] % -- LINK: The node showed intra-node NVLink; now the full hierarchy reveals the 18x cliff
-Students saw NVLink inside the node. This diagram zooms out to show how
-bandwidth drops at every zone boundary.
-
-% -- NARRATE: What to SAY while showing this slide
-``This is the most important systems diagram in the chapter. Read the numbers:
-HBM 3,350 GB/s, NVLink 900 GB/s, InfiniBand 50 GB/s. Each boundary drops
-bandwidth by roughly 10x. The 18x cliff between NVLink and InfiniBand is the
-single boundary that dictates the entire parallelism hierarchy.''
-Point to the three labels below: ``Tensor parallel: must stay within the node
-(NVLink). Pipeline parallel: can cross nodes (IB). Data parallel: spans the
-whole fabric because it communicates least frequently.''
-
-% -- ENGAGE: Specific question for THIS slide
-``Why can tensor parallelism not cross the node boundary?''
-Expected: TP requires AllReduce per layer --- hundreds of times per step ---
-and 50 GB/s is 18x too slow for that frequency.
-
-% -- WARN: What students will get wrong
-Students assume the 18x cliff is an engineering failure that will be fixed.
-Correct: it reflects physics --- electrical signaling over copper (NVLink)
-vs optical/electrical over longer distances (IB). The ratio has been stable
-across four GPU generations.
-
-% -- FLEX: [CORE] The bandwidth hierarchy is the foundational constraint for all parallelism.
-IF AHEAD: ``What if NVLink extended across nodes? (Answer: NVSwitch 3.0 in DGX
-SuperPOD attempts this, but at enormous cost.)''
-}
-
-% --- Layout: FULL-WIDTH pyramid ---
-\centering
-\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{bandwidth-hierarchy.pdf}
-
-\vspace{0.1cm}
-\small
-\begin{columns}[T]
-  \begin{column}{0.30\textwidth}
-    \centering
-    \textcolor{computestroke}{\textbf{Tensor Parallel}}\\
-    {\scriptsize Within node (NVLink)}
-  \end{column}
-  \begin{column}{0.30\textwidth}
-    \centering
-    \textcolor{routingstroke}{\textbf{Pipeline Parallel}}\\
-    {\scriptsize Across nodes (IB)}
-  \end{column}
-  \begin{column}{0.30\textwidth}
-    \centering
-    \textcolor{datastroke}{\textbf{Data Parallel}}\\
-    {\scriptsize Across pods (fabric)}
-  \end{column}
-\end{columns}
-
+\begin{frame}{A run planned at peak needs $1/\eta$ times the GPU-hours}
+  \centering
+  \begin{tikzpicture}[x=1cm,y=1cm]
+    \fill[OrangeLine] (0,1.1) rectangle (4.0,1.8);
+    \node[anchor=east, font=\small\bfseries] at (-0.15,1.45) {Plan from peak};
+    \node[anchor=west, font=\small\bfseries, text=OrangeLine] at (4.1,1.45) {\val{budget_gpuh} GPU-hours};
+    \uncover<2->{%
+    \fill[OrangeLine] (0,0) rectangle (4.0,0.7);
+    \fill[OrangeL] (4.0,0) rectangle (10.0,0.7);
+    \node[anchor=east, font=\small\bfseries] at (-0.15,0.35) {At $\eta = \val{sustained}$};
+    \node[anchor=west, font=\small\bfseries, text=OrangeLine] at (10.1,0.35) {\val{eta_gpuh}};
+    \node[font=\footnotesize\bfseries, text=darktext] at (7.0,0.35) {stalls, waits, overhead};}
+  \end{tikzpicture}\\[0.4cm]
+  \uncover<3->{{\normalsize Memory stalls \textbullet{} dependencies \textbullet{} communication \textbullet{} launch overhead \textbullet{} slow devices}\\[0.15cm]
+  {\small $\eta$: the measured share of peak; compare only at matched precision, FLOP convention, and scale.}}
+  \mlsyscredit{Compute Infrastructure, \S2.4.1. MFU as a fleet measure: Lecture 9.}
+  \note{[2 min] [CORE] Peak throughput assumes every arithmetic unit stays fed at the vendor's stated precision. Step 1: a run estimated at \val{budget_gpuh} GPU-hours from the datasheet. Step 2: if the workload sustains \val{sustained_pct} percent of peak, it needs $1/\val{sustained} = \val{stretch}$ times that, \val{eta_gpuh} GPU-hours. Step 3: where the gap comes from: Tensor Cores waiting on HBM, one layer waiting for the previous one, operations waiting on collectives, microsecond kernels whose launch overhead is as long as their work, and devices that run slower than their peers. One GPU sustaining a clock 2.5 percent below the others can slow every synchronous step it joins by up to 2.5 percent. ENGAGE: an H100's FP8 rate is twice its FP16 rate; does FP8 halve the plan? (Expected: no; only eligible matrix operations double, and the precision must be validated.) WARN: model FLOPs utilization (MFU) figures compare only under matched FLOP conventions, precision, peak, and scale.}
 \end{frame}
 
-\begin{frame}{Bandwidth Hierarchy: The Numbers}
-\note{
-[2 min] % -- LINK: Bandwidth hierarchy diagram showed the cliff visually; this table adds latency
-Students saw bandwidth ratios. Now they get latency numbers that explain
-why different parallelism strategies have different communication profiles.
-
-% -- NARRATE: What to SAY while showing this slide
-``NVLink: 900 GB/s at 1 microsecond. InfiniBand: 50 GB/s at 5--10 microseconds.
-The 18x bandwidth cliff PLUS the 5--10x latency gap means crossing a node
-boundary is 100x more expensive per byte. That is not a tuning knob ---
-it is a hard architectural constraint.''
-
-% -- WARN: What students will get wrong
-Students focus only on bandwidth and ignore latency. For small messages
-(control synchronization), the latency term dominates --- Ch3 will formalize
-this with the alpha-beta model.
-
-% -- FLEX: [OPTIONAL] Reference table --- students can look it up later.
-IF SHORT: State the 18x cliff number and the NVLink-to-IB row, move on.
-}
-
-\footnotesize
-\renewcommand{\arraystretch}{1.15}
-\begin{tabular}{@{}llrrl@{}}
-  \toprule
-  \textbf{Domain} & \textbf{Interconnect} & \textbf{BW} & \textbf{Latency} & \textbf{Scope} \\
-  \midrule
-  Intra-Package   & Si Interposer  & $\sim$3,350 GB/s & $<$100 ns  & Single chip \\
-  Intra-Node      & NVLink 4.0     & $\sim$900 GB/s   & $\sim$1 $\mu$s  & 8 GPUs \\
-  Intra-Node (IO) & PCIe Gen5 x16  & $\sim$64 GB/s    & $\sim$2 $\mu$s  & CPU--GPU \\
-  Inter-Node      & IB NDR 400G    & $\sim$50 GB/s    & 5--10 $\mu$s & 1000s GPUs \\
-  \bottomrule
-\end{tabular}
-
-\vspace{0.15cm}
-\begin{mlsyscard}{errorstroke}
-{\footnotesize \textbf{The 18$\times$ cliff:} NVLink (900 GB/s) $\to$ InfiniBand (50 GB/s). This single boundary dictates the entire parallelism hierarchy for distributed training.}
-\end{mlsyscard}
-
+\begin{frame}{The 175B run: \val{chain_compute_h} hours of compute becomes \val{chain_total_h} hours}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=4.8cm,keepaspectratio]{pod_chain_step}{3}\\[0.05cm]
+  {\small $\val{chain_flops_mant}\times10^{23}$ FLOPs ($C \approx 6ND$, \val{chain_tokens_b}B tokens) on \val{pod8k_gpus} H100s at \val{h100_fp8} TFLOP/s FP8.}
+  \mlsyscredit{Compute Infrastructure, Napkin Math 2.4. Efficiency \val{local_eff}, scaling \val{scale_eff}, and the \val{ovh_ckpt_pct}, \val{ovh_fail_pct}, and \val{ovh_maint_pct} percent allowances are scenario assumptions; the \val{chain_peak_h} h at full peak is derived.}
+  \note{[3 min] [CORE] The worked example of pod sizing. Training compute is about $6ND$ FLOPs, 6 times \val{gpt3_params_b} billion parameters times \val{chain_tokens_b} billion tokens, $\val{chain_flops_mant}\times10^{23}$; Lecture 1 introduced this estimate. Step 1: at the full FP8 peak of \val{pod8k_gpus} GPUs the run would take \val{chain_peak_h} hours (derived). At an assumed \val{local_eff_pct} percent local efficiency it takes \val{chain_compute_h} hours, the compute-only baseline, the $T_{\text{compute}}/N$ term. Step 2: divide by a scaling efficiency of \val{scale_eff} for communication and pipeline bubbles: \val{chain_scaled_h} hours. Step 3: multiply by \val{ovh_ckpt} for checkpoints, \val{ovh_fail} for failures and restarts, and \val{ovh_maint} for maintenance: \val{chain_total_h} hours. Each factor applies to the subtotal before it. ENGAGE: which factor is the largest, and which lecture attacks it? (Expected: the \val{scale_eff}; Lectures 5 and 6.) WARN: these factors are assumed scenario inputs, and real calendars stretch to weeks once queueing, debugging, and reruns enter. Of the peak purchased, about \val{chain_share_pct} percent becomes progress.}
 \end{frame}
 
-% --- ACTIVE LEARNING: Micro-Retrieval Cue ---
-\begin{frame}{Quick Check}
-\note{
-[1 min] % -- NARRATE: What to SAY while showing this slide
-``Without looking at your notes: what is the 18x bandwidth cliff, and why
-does it matter for parallelism? 15 seconds.''
-Answer: NVLink 900 GB/s vs IB 50 GB/s. Tensor parallelism must stay intra-node.
-
-% -- ENGAGE: Listen for whether students connect bandwidth to parallelism topology
-or just recite the number. If they only recite the number, ask: ``And what does
-that mean for which GPUs can run tensor-parallel layers together?''
-
-% -- WARN: Students may confuse bandwidth cliff with latency. Both matter but
-the 18x figure is bandwidth (GB/s), not latency (microseconds).
-
-% -- FLEX: [CORE] Micro-retrieval reinforces the chapter's central number.
-}
-
-\centering
-\vspace{1.0cm}
-{\Large\bfseries Quick Check}
-
-\vspace{0.6cm}
-{\large What is the 18$\times$ bandwidth cliff,}\\
-{\large and why does it matter for parallelism?}
-
-\vspace{0.5cm}
-{\normalsize\textcolor{midgray}{15 seconds --- then I will cold-call.}}
-
-\end{frame}
-
-
-
-% =============================================================================
-\section{Rack \& Pod}
-% =============================================================================
-
-\begin{frame}{The Rack: Power and Cooling}
-\note{
-[2 min] % -- LINK: Bandwidth hierarchy showed the node boundary; the rack introduces the Power Wall
-Students crossed from accelerator to node. Now: the rack is where power
-density becomes an industrial engineering problem.
-
-% -- NARRATE: What to SAY while showing this slide
-``A traditional server rack draws 5--10 kW. An ML rack with 4 DGX H100 nodes
-draws 33--40 kW --- that is an industrial furnace, not a server closet.''
-Point to the PUE card: ``PUE measures cooling overhead. Air-cooled: 40--60\% waste.
-Liquid-cooled: 5--10\% overhead. For 1,000 GPUs, liquid cooling saves 294 kW ---
-that is \$180K per year just in electricity.''
-
-% -- ENGAGE: Specific question for THIS slide
-Ask: ``Why is liquid cooling a necessity, not a luxury, for ML racks?''
-Expected: at 33--40 kW per rack, air cooling cannot physically remove enough heat.
-
-% -- WARN: What students will get wrong
-Students think cooling is a facilities problem for someone else. Correct: PUE directly
-affects TCO and is a first-order design variable for the ML systems engineer.
-
-% -- FLEX: [CORE] Power and cooling constrain everything above in the stack.
-IF AHEAD: ``What happens when a cooling failure occurs in a 250-rack cluster?''
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.52\textwidth}
-    \textbf{ML rack power density:} 10$\times$ traditional DC
-
-    \vspace{0.15cm}
-    {\footnotesize
-    \renewcommand{\arraystretch}{1.15}
-    \begin{tabular}{@{}lr@{}}
-      \toprule
-      \textbf{Component} & \textbf{Power} \\
-      \midrule
-      32 GPUs ($\times$700 W)  & 22.4 kW \\
-      CPUs, NVSwitch, NICs      & $\sim$8 kW \\
-      Power conversion losses   & $\sim$3 kW \\
-      \textbf{Total per rack}   & \textbf{33--40 kW} \\
-      \midrule
-      Traditional server rack   & 5--10 kW \\
-      \bottomrule
-    \end{tabular}
-    }
-
-    \vspace{0.1cm}
-    {\footnotesize 128 racks for 175B training $\to$ $\sim$5 MW cluster.}
-  \end{column}
-  \begin{column}{0.45\textwidth}
-    \begin{mlsyscard}{routingstroke}
-    \textbf{PUE: Cooling Tax}\\[0.1cm]
-    {\footnotesize
-    $\text{PUE} = \frac{\text{Total Facility Power}}{\text{IT Equipment Power}}$\\[0.1cm]
-    Air-cooled: PUE 1.4--1.6\\
-    (40--60\% waste!)\\[0.05cm]
-    \textbf{Liquid-cooled: PUE 1.05--1.10}\\
-    (5--10\% overhead only)}
-    \end{mlsyscard}
-
-    \vspace{0.1cm}
-    \begin{mlsyscard}{errorstroke}
-    {\footnotesize For 1,000 GPUs: liquid cooling saves \textbf{294 kW} $\to$ \$180K/yr in electricity.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
-\end{frame}
-
-\begin{frame}{The Pod: Warehouse-Scale Computer}
-\note{
-[2 min] % -- LINK: The rack showed power density; the pod is where the Communication Wall arrives
-Students saw individual rack constraints. The pod aggregates 250 racks into
-a warehouse-scale computer where communication overhead dominates.
-
-% -- NARRATE: What to SAY while showing this slide
-``1,024 nodes. 8,192 GPUs. 250 racks. 7--10 MW. 300+ metric tons.''
-Point to the crimson card: ``Physics-limit training time for 175B: about 12 hours.
-Actual: 2--4 weeks. That 15--25x gap is communication overhead, pipeline bubbles,
-checkpointing, and failure recovery. Closing that gap is what distributed
-systems engineering IS.''
-
-% -- ENGAGE: Specific question for THIS slide
-``What fraction of the 15--25x gap is communication alone?''
-Expected: roughly half --- the rest is coordination overhead and failures.
-
-% -- WARN: What students will get wrong
-Students assume the gap can be closed with better algorithms. Much of it
-is physics (speed of light, switch latency, failure rates).
-
-% -- FLEX: [CORE] The pod completes the infrastructure stack and sets up TCO.
-IF SHORT: State the key numbers, read the crimson card, move on.
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    \textbf{1,024-node DGX H100 cluster:}
-
-    \vspace{0.1cm}
-    {\footnotesize
-    \renewcommand{\arraystretch}{1.1}
-    \begin{tabular}{@{}lr@{}}
-      \toprule
-      \textbf{Resource} & \textbf{Scale} \\
-      \midrule
-      GPUs            & 8,192 \\
-      Racks           & $\sim$250 \\
-      Power draw      & 7--10 MW \\
-      Weight          & 300+ metric tons \\
-      IB switches     & Hundreds \\
-      Cables          & Tens of thousands \\
-      \bottomrule
-    \end{tabular}
-    }
-
-    \vspace{0.1cm}
-    {\footnotesize The datacenter floor must support 1,500--2,500 kg/m$^2$ (vs.\ 500--1,000 traditional).}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \begin{mlsyscard}{crimson}
-    \textbf{175B Training Time}\\[0.1cm]
-    {\footnotesize
-    Physics limit: $\sim$\textbf{12 hours}\\
-    {\scriptsize (8,192 GPUs at 45\% MFU)}\\[0.05cm]
-    Actual: \textbf{2--4 weeks}\\
-    {\scriptsize (comm, bubbles, checkpoints, failures)}\\[0.1cm]
-    Gap: \textbf{15--25$\times$}\\
-    Closing this gap is distributed\\
-    systems engineering.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
-\end{frame}
-
-\begin{frame}{Scaling Efficiency}
-\note{
-[2 min] % -- LINK: The pod showed the 15--25x gap; scaling efficiency quantifies it precisely
-Students saw the gap. This equation and table show how efficiency degrades.
-
-% -- NARRATE: What to SAY while showing this slide
-``Scaling efficiency = compute time over total time. At 8 GPUs: 95\%.
-At 1,024: 60\%. At 8,192: 40\%. Each additional GPU gives less marginal benefit.''
-Point to Amdahl callout: ``Beyond 2,000--4,000 GPUs, the marginal benefit
-per GPU approaches zero for most model sizes.''
-
-% -- WARN: What students will get wrong
-Students extrapolate small-scale efficiency (95\% at 8 GPUs) to fleet scale.
-The table shows efficiency drops 2.4x from 8 to 8,192 GPUs.
-
-% -- FLEX: [CORE] Scaling efficiency connects the pod section to TCO.
-IF SHORT: Show the equation, highlight the 8,192-GPU row, move on.
-}
-
-\small
-$$\eta_{\text{scale}} = \frac{T_{\text{compute}}}{T_{\text{compute}} + T_{\text{comm}} + T_{\text{idle}}}$$
-
-\vspace{0.1cm}
-\renewcommand{\arraystretch}{1.15}
-{\footnotesize
-\begin{tabular}{@{}rrrl@{}}
-  \toprule
-  \textbf{GPUs} & \textbf{Ideal Speedup} & \textbf{Actual} & \textbf{$\eta_{\text{scale}}$} \\
-  \midrule
-  8     &  8$\times$    & 7.6$\times$   & 95\% \\
-  64    &  64$\times$   & 54$\times$    & 85\% \\
-  1,024 & 1,024$\times$ & 615$\times$   & 60\% \\
-  8,192 & 8,192$\times$ & 3,277$\times$ & 40\% \\
-  \bottomrule
-\end{tabular}
-}
-
-\vspace{0.1cm}
-\mlsysalert{Amdahl at scale:}{The first 100 GPUs provide near-linear speedup. Beyond 2,000--4,000, marginal benefit per GPU approaches zero.}
-
-\end{frame}
-
-\begin{frame}{Your Turn: Node Memory Budget}
-\note{
-[4 min] % -- LINK: Scaling efficiency showed diminishing returns; this exercise reveals
-WHY --- the per-GPU memory budget determines what fits on each node.
-
-% -- NARRATE: ``90 seconds. A 70B model with Adam optimizer. Calculate the memory
-per GPU.'' After pause: ``Parameters (FP16): 70B $\times$ 2 bytes = 140 GB.
-Gradients (FP16): 140 GB. Adam states (FP32): 70B $\times$ 12 bytes = 840 GB.
-Total: 1,120 GB. With 8 GPUs per node at 80 GB each = 640 GB. Does NOT fit
-on one node even with all 8 GPUs. Need at least 2 nodes (16 GPUs) or memory
-sharding (ZeRO). Activations add another 30--50 GB depending on batch size.''
-
-% -- ENGAGE: This IS the active learning moment.
-After revealing: ``What is the minimum number of 80 GB GPUs?'' Answer: 14 GPUs
-minimum (1,120 / 80), but you need headroom for activations, so 16--32 in practice.
-
-% -- WARN: Students forget Adam optimizer states (12 bytes/param) and gradients.
-They calculate only parameter memory (140 GB) and think 2 GPUs suffice.
-
-% -- FLEX: [CORE] Memory budgeting is the first step in any parallelism design.
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    {\normalsize\bfseries Memory Budget: 70B Model}
-
-    \vspace{0.15cm}
-    Calculate per-node memory:
-    \begin{itemize}\setlength\itemsep{1pt}
-      \item {\footnotesize Parameters: 70B $\times$ 2 bytes (FP16)}
-      \item {\footnotesize Gradients: same as parameters}
-      \item {\footnotesize Adam optimizer: $m$ + $v$ + FP32 copy = 12 bytes/param}
-      \item {\footnotesize Activations: batch-dependent}
-    \end{itemize}
-
-    \vspace{0.1cm}
-    \textbf{Does it fit on one 8-GPU node (640 GB)?}
-
-    \vspace{0.05cm}
-    {\footnotesize\textcolor{midgray}{(90 seconds)}}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \pause
-    \begin{mlsyscard}{errorstroke}
-    {\scriptsize \textbf{Solution:}\\
-    Params: 140 GB\\
-    Gradients: 140 GB\\
-    Adam: 840 GB\\
-    \textbf{Total: 1,120 GB}\\[0.1cm]
-    8 GPUs $\times$ 80 GB = 640 GB\\
-    \textcolor{errorstroke}{\textbf{Does NOT fit!}}\\[0.05cm]
-    Need 16+ GPUs or ZeRO sharding.\\
-    + 30--50 GB activations.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
-\end{frame}
-
-% --- ACTIVE LEARNING 3: Discussion ---
-\begin{frame}{Discussion: Which Infrastructure Fails First?}
-\note{
-[4 min] % -- LINK: Pod and scaling showed what a cluster looks like; now students reason about failures
-Students have all the infrastructure pieces. This tests interdependency thinking.
-
-% -- NARRATE: What to SAY while showing this slide
-``Turn to your neighbor. A startup orders 256 H100 GPUs, arriving in 6 months.
-What delays their first training run? 90 seconds.'' Cold-call 2--3 pairs.
-Then reveal: ``The right answer is power delivery and cooling. Electrical infrastructure
-upgrades take 12--18 months. The OVH Strasbourg fire in March 2021 is the canonical
-real-world proof: SBG2 was destroyed, SBG1 severely damaged --- the entire site became
-a single failure domain. Fire compartments, power isolation, and backup geography
-determine whether a rack incident becomes a site-scale outage.''
-
-% -- ENGAGE: This IS the active learning moment
-No single right answer. Power delivery and cooling are the most common
-real-world delays --- facility upgrades take 12--18 months. Listen for students who
-identify the power/cooling constraint before being told --- those who do have
-internalized the rack-level physics from the previous slides.
-
-% -- WARN: What students will get wrong
-Students focus on software or GPU availability. Correct: physical infrastructure
-(power, cooling, floor loading) has the longest lead time --- longer than GPU
-delivery itself. The Strasbourg fire confirmed that even a well-run facility can
-become the bottleneck when fire compartments are not properly isolated.
-
-% -- FLEX: [CORE] Synthesizes the entire infrastructure stack.
-IF SHORT: Pose to whole class, take 2 answers, state the power/cooling answer, show the war-story card.
-}
-
-\centering
-\vspace{0.15cm}
-{\normalsize\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
-
-\vspace{0.1cm}
-{\normalsize A startup orders 256 H100 GPUs to train a 70B model. They arrive in 6 months.\\[0.1cm]
-\alert{What infrastructure constraint is most likely to delay their first training run?}}
-
-\vspace{0.15cm}
-\begin{columns}[c]
-  \begin{column}{0.18\textwidth}\centering\footnotesize Power\\ Delivery\end{column}
-  \begin{column}{0.18\textwidth}\centering\footnotesize Cooling\\ Capacity\end{column}
-  \begin{column}{0.18\textwidth}\centering\footnotesize Network\\ Fabric\end{column}
-  \begin{column}{0.18\textwidth}\centering\footnotesize Facility\\ Space\end{column}
-  \begin{column}{0.18\textwidth}\centering\footnotesize Last Mile\\ (Burn-in)\end{column}
-\end{columns}
-
-\vspace{0.15cm}
-\begin{mlsyscard}{errorstroke}
-{\scriptsize \textbf{Real case --- OVH Strasbourg (March 2021):} SBG2 destroyed by fire; SBG1 severely damaged.
-Electrical upgrades take 12--18 months. The data center \emph{site} became the failure domain
-because fire compartments were not isolated. \textbf{Systems lesson:} power/cooling/facility have the longest lead time --- and the widest blast radius.}
-\end{mlsyscard}
-
+\begin{frame}{Diagnose: what binds each workload first?}
+  \mlsysactivity{Diagnose}{3 min}
+  \small
+  \renewcommand{\arraystretch}{1.3}
+  \begin{tabular}{@{}lll@{}}
+    \toprule
+    \textbf{Workload} & \textbf{Binding constraint} & \textbf{Compare by} \\
+    \midrule
+    175B training, large batch & \only<1|handout:0>{?}\only<2-|handout:1>{compute, then interconnect} & \only<2-|handout:1>{sustained throughput} \\
+    70B decode, batch 1 & \only<1|handout:0>{?}\only<2-|handout:1>{memory bandwidth} & \only<2-|handout:1>{GB/s per dollar} \\
+    Recommender, \val{rec_table_tb} TB tables & \only<1|handout:0>{?}\only<2-|handout:1>{memory capacity} & \only<2-|handout:1>{GB per dollar, host DRAM} \\
+    Mixture of experts & \only<1|handout:0>{?}\only<2-|handout:1>{fabric bisection} & \only<2-|handout:1>{AllToAll bandwidth} \\
+    \bottomrule
+  \end{tabular}\\[0.3cm]
+  {\small\uncover<2->{Hardware selection diagnoses the binding constraint, then compares useful work per dollar.}}
+  \mlsyscredit{Compute Infrastructure, \S2.8 (table 17), Lighthouse 2.1 (Archetype B), \S2.8 (Mixtral-8x7B: \val{mixtral_active_b}B of \val{mixtral_total_b}B parameters active).}
+  \note{[3 min] [CORE] ENGAGE: pairs fill the middle column for each workload, two minutes. Step 2: large-batch training of the 175B model reuses each weight across thousands of tokens, so arithmetic binds on each device and the interconnect binds across the cluster. Batch-1 decode is the hook, so the measure is bandwidth per dollar. The recommender of the course's Archetype B holds embedding tables of \val{rec_table_tb} TB or more; even a node's \val{node_hbm_gb} GB nameplate, \val{node_hbm_decimal_gb} GB in decimal bytes, needs at least \val{rec_min_nodes} nodes merely to hold them, so tables live in host DRAM and the comparison is GB per dollar. A mixture-of-experts model such as Mixtral-8x7B activates \val{mixtral_active_b}B of its \val{mixtral_total_b}B parameters per token and routes tokens between GPUs with AllToAll, every GPU sending to every other, so the fabric's bisection bandwidth binds; Lecture 3 defines it. WARN: a workload can be compute-bound on each device and communication-bound across the cluster, as the 175B model is. Land the segment: diagnose the binding constraint first, then compare sustained useful work per dollar.}
 \end{frame}
 
 % =============================================================================
-\section{TCO}
+% SECTION: WRAP-UP
 % =============================================================================
-
-\begin{frame}{Total Cost of Ownership}
-\note{
-[2 min] % -- LINK: Infrastructure showed physics; TCO translates physics into dollars
-Students understand physical constraints. Now: what does it cost?
-
-% -- NARRATE: What to SAY while showing this slide
-``TCO connects every physical constraint to dollars. The key insight:
-utilization is the single variable that flips the build-vs-buy decision.
-Same cluster, same facility --- brilliant at 80\% util, disaster at 20\%.''
-
-% -- ENGAGE: Specific question for THIS slide
-``What utilization do you think a typical research cluster achieves?''
-Expected: students guess 60--80\%. Reality: 30--50\% is common.
-
-% -- WARN: What students will get wrong
-Students assume utilization is a software problem. It depends on workload mix,
-scheduling efficiency, and failure recovery --- all systems-level concerns.
-
-% -- FLEX: [CORE] TCO is the decision framework for the build-vs-buy exercise.
-IF SHORT: State the utilization insight, skip the diagram walkthrough.
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{tco-overview.pdf}
-
-\vspace{0.1cm}
-\mlsysconcept{Central tension:}{Utilization is the single variable that flips the build-vs-buy decision.}
-
-\end{frame}
-
-\begin{frame}{TCO: The Numbers}
-\note{
-[2 min] % -- LINK: TCO overview introduced the framework; this slide provides the numbers
-Students saw the concept. Now: specific dollar amounts.
-
-% -- NARRATE: What to SAY while showing this slide
-``On-prem at 80\% utilization: about \$2.40/GPU-hour. Cloud on-demand: \$4.00.
-Break-even: 55\% sustained utilization. Below 55\%, rent. Above 55\%, build.''
-Point to cards: ``Own if continuous 3+ year workloads. Rent if bursty.''
-
-% -- ENGAGE: Specific question for THIS slide
-``How does the comparison change with reserved instances at 60\% discount?''
-Expected: reserved rate drops to about \$1.60 --- on-prem loses even at high util.
-
-% -- WARN: What students will get wrong
-Students compare sticker prices without factoring utilization. A \$350K node
-at 20\% utilization costs \$6/GPU-hour --- more expensive than cloud.
-
-% -- FLEX: [CORE] The 55\% break-even is the quantitative foundation for the exercise.
-IF SHORT: State the 55\% number, show the two cards, move on.
-}
-
-\small
-\renewcommand{\arraystretch}{1.15}
-{\footnotesize
-\begin{tabular}{@{}lll@{}}
-  \toprule
-  & \textbf{On-Premises} & \textbf{Cloud (On-Demand)} \\
-  \midrule
-  \textbf{CapEx}       & \$350K/node (amortize 3 yr) & \$0 \\
-  \textbf{Electricity} & $\sim$\$5K/yr/node          & Included \\
-  \textbf{Annual cost} & $\sim$\$122K/node (80\% util) & $\sim$\$224K/node (80\% util) \\
-  \textbf{Eff.\ rate}  & $\sim$\$2.40/GPU-hour       & \$4.00/GPU-hour \\
-  \midrule
-  \textbf{Break-even}  & \multicolumn{2}{c}{\alert{$\sim$55\% sustained utilization}} \\
-  \bottomrule
-\end{tabular}
-}
-
-\vspace{0.15cm}
-\begin{columns}[T]
-  \begin{column}{0.48\textwidth}
-    \begin{mlsyscard}{datastroke}
-    {\footnotesize \textbf{Own if}: continuous 24/7 workloads, predictable demand, 3+ year horizon.}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.48\textwidth}
-    \begin{mlsyscard}{errorstroke}
-    {\footnotesize \textbf{Rent if}: bursty demand, rapid experimentation, $<$2 year horizon.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
-\end{frame}
-
-% --- ACTIVE LEARNING 4 (Exercise): Build vs Buy ---
-\begin{frame}{Your Turn: Build vs.\ Buy}
-\note{
-[4 min] % -- LINK: TCO numbers gave unit economics; now students apply them to a scenario
-Students have per-GPU-hour rates. This exercise forces end-to-end cost calculation.
-
-% -- NARRATE: What to SAY while showing this slide
-``90 seconds. Calculate annual cost for cloud and on-prem.''
-After pause: ``Cloud: 500 GPUs times \$4 times 504 hours = \$1.01M/run.
-4 runs = \$4.03M/yr. On-prem: 63 nodes amortized plus electricity = about
-\$7.7M/yr. At 4 runs, cloud wins. Need roughly 8 runs/yr for on-prem break-even.''
-
-% -- ENGAGE: This IS the active learning moment
-After solution: ``What hidden costs did we ignore?''
-Expected: hiring, facility buildout, maintenance, opportunity cost of capital.
-
-% -- WARN: What students will get wrong
-Students forget to amortize CapEx over 3 years, or forget electricity is additive.
-
-% -- FLEX: [CORE] Quantitative capstone of the chapter.
-IF AHEAD: ``What if you get reserved instances at 60\% discount?''
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    {\normalsize\bfseries Build vs.\ Buy Decision}
-
-    \vspace{0.15cm}
-    Your team plans to train a 70B model:
-    \begin{itemize}
-      \item 500 H100 GPUs for 3 weeks per run
-      \item 4 training runs per year
-      \item Cloud rate: \$4.00/GPU-hour
-      \item On-prem: \$350K/node, 3-yr amortization
-    \end{itemize}
-
-    \vspace{0.1cm}
-    \textbf{Calculate} annual cost for both options.\\
-    \textbf{How many runs/year} to justify on-prem?
-
-    {\footnotesize\textcolor{midgray}{(90 seconds)}}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \pause
-    \begin{mlsyscard}{datastroke}
-    \textbf{Solution:}\\[0.05cm]
-    {\footnotesize
-    Cloud: 500$\times$\$4$\times$504h = \$1.01M/run\\
-    4 runs = \textbf{\$4.03M/yr}\\[0.1cm]
-    On-prem: 63 nodes $\times$ \$117K/yr\\
-    + elec = \textbf{$\sim$\$7.7M/yr}\\[0.1cm]
-    Break-even: $\sim$8 runs/yr\\[0.05cm]
-    \textcolor{errorstroke}{\textbf{At 4 runs: cloud wins.}}\\
-    \textcolor{datastroke}{\textbf{At 10+ runs: on-prem wins.}}
-    }
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
-\end{frame}
-
-% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Check the fallacies, then return to the H100 datasheet.}
+\mlsysdivider{How much of the datasheet does the fleet receive?}{Compute Infrastructure, \S2.10 and \S2.11}
 \section{Wrap-Up}
-% =============================================================================
 
-\begin{frame}{Fallacies}
-\note{
-[2 min] % -- LINK: The Roofline exercise just showed that arithmetic intensity determines the bottleneck;
-these fallacies are the common ways that reasoning breaks down in practice.
-
-% -- NARRATE: What to SAY while showing this slide
-``Three claims that sound reasonable but are quantitatively wrong.''
-Spend extra time on the Peak FLOPS fallacy --- it connects directly to the Roofline.
-``We just showed that LLM inference uses less than 1\% of peak. Buying a faster
-GPU for inference is literally wasting money. The number that matters is not
-the spec sheet TFLOPS --- it is where your workload sits on the Roofline.''
-
-% -- ENGAGE: For each fallacy, ask students to explain WHY the fallacy fails
-before reading the rebuttal. ``Why is `more GPUs = faster training' not always true?''
-Expected: communication overhead. ``Why is peak FLOPS not the right metric?''
-Expected: arithmetic intensity below the ridge point means memory is the bottleneck.
-
-% -- WARN: Students who saw the Roofline exercise are most likely to accept the
-Peak FLOPS fallacy because they conflate `our slide used 989/1979 TFLOPS' with
-`TFLOPS determines throughput.' The Roofline exercise showed the opposite:
-at I=1, throughput is bandwidth$\times$1, regardless of TFLOPS.
-
-% -- FLEX: [CORE] Fallacies correct misconceptions before they solidify.
-IF SHORT: Cover the first two fallacies, skip the liquid cooling one.
-}
-
-\small
-\textbf{Fallacy:} \textit{More GPUs always means faster training.}\\
-{\footnotesize Communication overhead grows with cluster size. Scaling from 1,024 to 2,048 GPUs doubles cost but may reduce training time by only 30--40\%.}
-
-\vspace{0.15cm}
-\textbf{Fallacy:} \textit{Peak FLOPS determines training throughput.}\\
-{\footnotesize LLM inference operates at 1--2 FLOP/byte, achieving $<$1\% of peak FLOPS. The Roofline Model's ridge point is the diagnostic that matters, not the spec sheet.}
-
-\vspace{0.15cm}
-\textbf{Fallacy:} \textit{Liquid cooling is too expensive.}\\
-{\footnotesize Over 3 years, a 1,000-GPU cluster saves \$540K in electricity with liquid cooling --- typically exceeding the incremental CapEx.}
-
+\begin{frame}{Of the H100's \val{h100_fp16} TFLOP/s, a fraction becomes progress}
+  \begin{columns}[c]
+    \begin{column}{0.64\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.2cm,keepaspectratio]{delivered.pdf}\\[0.05cm]
+      {\footnotesize Decode: FP16 upper bound. Local: FP8, assumed. 8,192 GPUs: FP8, derived.}
+    \end{column}
+    \begin{column}{0.33\textwidth}
+      \centering\mlsysphoto[width=0.85\textwidth,height=2.2cm,keepaspectratio]{nvidia-h100-pcie.jpg}\\[0.1cm]
+      {\small and around it: 33.5 kW per rack, a failure every \val{pod_fail_h} h at \val{pod_gpus} GPUs.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Compute Infrastructure, Example 2.2 (\val{b1_pct}\%, FP16 bound), Napkin Math 2.4 (\val{local_eff_pct}\% assumed, FP8). \val{chain_share_pct}\% = \val{chain_peak_h} h / \val{chain_total_h} h, derived. Photo: Geekerwan, CC BY 3.0, Wikimedia Commons.}
+  \note{[2 min] [CORE] Return to the hook. The datasheet says \val{h100_fp16} TFLOP/s in FP16 and \val{h100_fp8} in FP8. Batch-1 decode is bounded at \val{b1_pct} percent of the FP16 peak because it waits on HBM for \val{hook_t_mem_ms} ms against \val{hook_t_arith_ms} ms of arithmetic in the opening vote. Large-batch training on one device is assumed to sustain \val{local_eff_pct} percent of the FP8 peak. Across \val{pod8k_gpus} GPUs, after scaling losses, checkpoints, failures, and maintenance, about \val{chain_share_pct} percent of the FP8 peak becomes training progress (derived from \val{chain_peak_h} and \val{chain_total_h} hours). Around the device sit the other walls: the rack must deliver and remove 33.5 kW, and at \val{pod_gpus} GPUs a GPU fails about every five hours. ENGAGE: which number on this slide would you put in a procurement plan? (Expected: a measured sustained rate for the intended workload.) WARN: the three bars mix precisions and an upper bound with assumptions; each label says which.}
 \end{frame}
 
-\begin{frame}{Pitfalls}
-\note{
-[2 min] % -- LINK: Fallacies showed conceptual errors; pitfalls are the operational mistakes
-teams make even when they know the theory.
-
-% -- NARRATE: What to SAY while showing this slide
-``These are mistakes teams actually make.'' The power/cooling pitfall is the
-most common: ``Teams buy GPUs before confirming the facility can handle them.
-Result: expensive silicon in shipping containers in the parking lot.
-The OVH Strasbourg case is the extreme version --- an entire site goes dark
-because one building's fire system is not isolated from the power grid.''
-The arithmetic intensity pitfall connects to the Roofline exercise.
-``We calculated I=1 for the 7B model. That B200 was 2.3x more compute
-but only 2.4x faster --- because the bottleneck is bandwidth, not compute.''
-
-% -- ENGAGE: Cold-call a student: ``What is the B200's FP8 peak TFLOPS, and why
-doesn't that translate to a 2.3x speedup for batch-1 serving?''
-Expected: 4,500 TFLOPS FP8, but at I=1 FLOP/byte the throughput ceiling is BW$\times$I,
-not R\_peak. Arithmetic intensity is the diagnostic that unlocks the answer.
-
-% -- WARN: The arithmetic-intensity pitfall is the most likely to produce expensive
-real-world mistakes. Teams upgrading from H100 to B200 for inference expect linear
-speedup from higher TFLOPS; without a Roofline diagnosis, they will be disappointed.
-
-% -- FLEX: [CORE] Pitfalls prevent expensive operational mistakes.
-IF SHORT: Cover the power/cooling pitfall only --- it is the most impactful.
-}
-
-\footnotesize
-\textbf{Pitfall:} \textit{Ignoring power and cooling constraints during planning.}\\
-A rack of 4 DGX H100s requires 33--40 kW. Upgrading facility electrical infrastructure takes 12--18 months. GPUs arrive in 6 months. Result: expensive silicon in shipping containers in the parking lot.
-
-\vspace{0.15cm}
-\textbf{Pitfall:} \textit{Buying the latest accelerator without checking arithmetic intensity.}\\
-B200 (4,500 TF) for 7B inference at B=1: arithmetic intensity $\approx$ 1 FLOP/byte. The B200 runs only 2.4$\times$ faster than H100 despite 2.3$\times$ higher peak FLOPS. You paid for compute you cannot use.
-
-\vspace{0.15cm}
-\textbf{Pitfall:} \textit{Treating all GPU-hours as equivalent in TCO analysis.}\\
-An H100 GPU-hour delivers 6.3$\times$ the TFLOPS of an A100 hour. The right metric is cost per useful \textbf{TFLOP-hour}, not cost per GPU-hour.
-
+\begin{frame}{Vote: true or false?}
+  \mlsysactivity{Vote}{2.5 min}
+  \footnotesize
+  \renewcommand{\arraystretch}{1.25}
+  \begin{tabular}{@{}P{0.45\textwidth}P{0.49\textwidth}@{}}
+    \toprule
+    \textbf{Claim} & \textbf{Verdict} \\
+    \midrule
+    More GPUs always mean faster training. & \only<1|handout:0>{?}\only<2-|handout:1>{\textbf{\textcolor{RedLine}{False.}} \val{ref_gpus} to \val{pod8k_gpus} GPUs: 8$\times$ hardware, \val{fallacy_speed}$\times$ speed.} \\
+    Size cooling for the average power draw. & \only<1|handout:0>{?}\only<2-|handout:1>{\textbf{\textcolor{RedLine}{False.}} Synchronized phases push many GPUs to \val{tdp_h100} W together.} \\
+    Enough HBM capacity settles the choice. & \only<1|handout:0>{?}\only<2-|handout:1>{\textbf{\textcolor{RedLine}{False.}} 192 GB at \val{a100_bw} TB/s: \val{floor_a100_ms} ms; \val{h100_hbm_gb} GB HBM3, INT8: \val{int8_floor_ms} ms.} \\
+    All GPU-hours are equivalent. & \only<1|handout:0>{?}\only<2-|handout:1>{\textbf{\textcolor{RedLine}{False.}} H100: \val{h100_v100_peak}$\times$ a V100's FP16 peak.} \\
+    \bottomrule
+  \end{tabular}
+  \mlsyscredit{Compute Infrastructure, \S2.10. Scaling efficiencies \val{scale_eff_1k} and \val{scale_eff} are modeled.}
+  \note{[2.5 min] [CORE] ENGAGE: students write T or F for each, then compare. Step 2: all four are false, each from the chapter's fallacies. One: the chapter's modeled scaling efficiency falls from \val{scale_eff_1k} at \val{ref_gpus} GPUs to \val{scale_eff} at \val{pod8k_gpus}, so eight times the hardware gives $8 \times \val{scale_eff}/\val{scale_eff_1k} = \val{fallacy_speed}$ times the speed; \val{fallacy_lost_pct} percent of the larger cluster's local throughput goes to communication and bubbles. Two: a workload average near 500 W hides synchronized compute phases near the \val{tdp_h100} W design target; throttling then lowers throughput with no error message. Three: the 192 GB part holds FP16 weights at a \val{floor_a100_ms} ms floor; the \val{h100_hbm_gb} GB HBM3 part with validated INT8 weights reaches \val{int8_floor_ms} ms, partly from faster memory and partly from fewer bytes. Four: at the same FP16 convention an H100 has \val{h100_v100_peak} times a V100's peak, so \val{v100_job_gpuh} V100 GPU-hours correspond to about \val{v100_in_h100_gpuh} H100 GPU-hours only if both sustain the same share. If many marked the third true, return to the two-tests slide.}
 \end{frame}
 
-% --- RETRIEVAL PRACTICE ---
-
-% --- MUDDIEST POINT ---
-\begin{frame}{Muddiest Point}
-\note{
-[2 min] % -- NARRATE: What to SAY while showing this slide
-``Write the one concept you found most confusing. Anonymous. One sentence.''
-Collect and scan for patterns during the break.
-
-% -- FLEX: [CORE] Address top 2--3 confusions in next lecture's opening.
-% Most common muddy point: the ridge-point precision distinction (FP16 vs FP8).
-}
-
-\centering
-\vspace{1.0cm}
-{\Large\bfseries What was the \alert{muddiest point} today?}
-
-\vspace{0.8cm}
-{\normalsize Write down the concept you found \textbf{most confusing}.}
-
-\vspace{0.5cm}
-{\small\textcolor{midgray}{Anonymous. One sentence. Submit before you leave.}}
-
+\begin{frame}{Takeaways}
+  \normalsize
+  \begin{itemize}\setlength{\itemsep}{0.22cm}
+    \item Four walls bind at four scales; relieving one exposes the next.
+    \item Capacity decides fit and bandwidth decides speed; the roofline tells which binds.
+    \item Each boundary costs about 10$\times$ in bandwidth, so frequent traffic stays on fast links.
+    \item Watts per rack, cooling class, and failure domains bound installable compute.
+    \item Planning on sustained throughput turned \val{chain_compute_h} compute hours into \val{chain_total_h}.
+  \end{itemize}
+  \note{[1 min] [CORE] One line per segment, with the opening map first. Ask students to star the one that changes how they would read a hardware announcement.}
 \end{frame}
 
-\begin{frame}{What Were the Key Ideas?}
-\note{
-[3 min] % -- NARRATE: What to SAY while showing this slide
-``Close your notes. Write the four most important concepts. 90 seconds.''
-Walk around the room. Do NOT show the Key Takeaways slide yet.
-
-% -- FLEX: [CORE] Retrieval practice --- the most effective study technique.
-}
-
-\centering
-\vspace{1.5cm}
-{\Large\bfseries Close your notes.}
-
-\vspace{0.8cm}
-{\large Write down the \textbf{4 most important concepts} from today.}
-
-\vspace{0.8cm}
-{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
-
+\begin{frame}{Open questions}
+  \begin{columns}[c]
+    \begin{column}{0.62\textwidth}
+      \normalsize
+      \begin{itemize}\setlength{\itemsep}{0.3cm}
+        \item A building lasts 15 to 20 years; accelerators turn over every few. What should a facility be designed for?
+        \item Specialized silicon gains efficiency by betting on today's operators. When is the bet worth it?
+        \item Facility redundancy or better checkpoints: which buys more completed training per dollar?
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.35\textwidth}
+      \centering\mlsysphoto[width=\textwidth,height=4.2cm,keepaspectratio]{google-datacenter-dalles-substation.jpg}\\[0.05cm]
+      {\footnotesize\textcolor{midgray}{Google's data center at The Dalles, Oregon, with its substation.}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: Visitor7, CC BY-SA 3.0, Wikimedia Commons.}
+  \note{[0.5 min] [OPTIONAL] No single answer. Use one as a two-minute discussion if time remains, or as a written assignment. For the first, push students toward numbers: TDP growth of about 19 percent per year, the move from air to liquid near the 100 kW class, and the chapter's note that a facility refreshed only for compute density outruns both memory delivery and cooling. For the third, the CDU example gives the price of an outage to compare.}
 \end{frame}
 
-\begin{frame}{Key Takeaways}
-\note{
-[3 min] % -- LINK: Students just wrote their own key ideas; now compare with the official list.
-Bridge explicitly: ``You just retrieved your own version. Here is the official list.
-Where do they match? Where did you miss something?''
-
-% -- NARRATE: What to SAY while showing this slide
-``Check your list. Did you capture: >99\% idealized memory time, 18x bandwidth cliff,
-PUE 1.05 for liquid cooling, 55\% break-even utilization? These numbers
-calibrate your engineering intuition for compute infrastructure.''
-On the Roofline bullet: ``The ridge point formula is R\_peak/BW. For H100 FP16
-that is 989 TFLOPS / 3.35 TB/s = $\approx$295 FLOP/byte --- the threshold that
-separates memory-bound from compute-bound. We also saw that MFU (Model FLOPs
-Utilization) measures how close to peak you actually get: 40--50\% is good for
-LLM training; $<$5\% for batch-1 serving, because serving is deeply memory-bound.''
-
-% -- FLEX: [CORE] Official summary. Read every bullet.
-}
-
-\scriptsize
-\begin{itemize}\setlength\itemsep{0pt}
-  \item \textbf{Generality Tax}: CPUs devote 5--10\% of die to math; GPUs 50--60\%; ASICs 90\%+. Flexibility traded for throughput.
-  \item \textbf{Memory Wall}: Token generation is $>$99\% memory transfer in the idealized one-token model. HBM: 50$\times$ DDR BW, 10$\times$ efficiency.
-  \item \textbf{Roofline Model}: Ridge point = $R_{\text{peak}}/\text{BW}$. Below $\to$ bandwidth-bound. Above $\to$ compute-bound. Diagnose before optimizing.
-  \item \textbf{Bandwidth Hierarchy}: 18$\times$ cliff (NVLink $\to$ IB) dictates parallelism. Tensor parallel within node; data parallel across.
-  \item \textbf{Power \& Cooling}: ML racks: 33--40 kW (10$\times$ traditional). Liquid PUE 1.05 vs.\ air PUE 1.4--1.6.
-  \item \textbf{TCO}: Build-vs-buy break-even at $\sim$55\% utilization. Metric: cost/TFLOP-hour, not cost/GPU-hour.
-  \item \textbf{Stack}: Each level's constraint creates the next level. No component optimized in isolation.
-\end{itemize}
-
+\begin{frame}{Read and explore}
+  \small
+  \begin{itemize}\setlength{\itemsep}{0.15cm}
+    \item \textbf{Read:} Compute Infrastructure, \S2.3, \S2.5, \S2.6, \S2.7; the chapter's self-check questions; redo Napkin Math 2.4 with a scaling efficiency of \val{scale_eff_1k}.
+    \item Jouppi et al., ``In-Datacenter Performance Analysis of a Tensor Processing Unit,'' ISCA 2017.
+    \item Williams, Waterman, and Patterson, ``Roofline,'' CACM 2009.
+    \item Barroso, H\"olzle, and Ranganathan, \emph{The Datacenter as a Computer}, 2019.
+    \item Pilz et al., ``Trends in AI Supercomputers,'' 2025; Epoch AI data on hardware and supercomputers.
+    \item Dubey et al., ``The Llama 3 Herd of Models,'' 2024 (interruptions on 16,384 H100s).
+  \end{itemize}
+  \note{[0.5 min] [CORE] The chapter first; Napkin Math 2.4 with \val{scale_eff_1k}, the \val{ref_gpus}-GPU efficiency, shows how much the scaling factor moves the calendar. Jouppi is the TPU bet in the designers' own words. Williams is the roofline's origin. Barroso is the warehouse-scale computer. Pilz and Epoch AI supply the power data of today's plot. The Llama 3 report shows faulty GPUs and HBM errors causing nearly half of the unexpected interruptions of a real 16,384-GPU run.}
 \end{frame}
 
-\begin{frame}{References}
-\note{
-[1 min] % -- NARRATE: Canonical papers. ``Start with Williams et al. for the Roofline ---
-it is the diagnostic tool you will use most. Barroso for datacenter-as-computer.''
-
-% -- FLEX: [OPTIONAL] Skip if running short. Students have the list.
-}
-
-\small
-\mlsysref{Jouppi+17}{Jouppi et al. ``In-Datacenter Performance Analysis of a Tensor Processing Unit.'' ISCA 2017.}
-\mlsysref{Williams+09}{Williams, Waterman, Patterson. ``Roofline: An Insightful Visual Performance Model.'' CACM 2009.}
-\mlsysref{Barroso+18}{Barroso, Clidaras, H\"{o}lzle. \textit{The Datacenter as a Computer}. 3rd ed.\ Morgan \& Claypool 2018.}
-\mlsysref{Patterson+21}{Patterson et al. ``Carbon Emissions and Large Neural Networks.'' 2021.}
-\mlsysref{Narayanan+21}{Narayanan et al. ``Efficient Large-Scale Language Model Training on GPU Clusters.'' SC 2021.}
-
+\begin{frame}[c]
+  \centering
+  {\small\textcolor{lightgray}{NEXT LECTURE \textbar{} NETWORK FABRICS}}\\[0.5cm]
+  {\LARGE\bfseries What decides how long a collective takes\\on a real fabric?}\\[0.4cm]
+  {\normalsize\textcolor{midgray}{Today the staircase fell \val{nvlink_ib_ratio}$\times$ at the node boundary. The next lecture follows the wires beyond it.}}\\[0.3cm]
+  \safeimg[width=0.4\textwidth,height=2.2cm,keepaspectratio]{infiniband-switch-cables.jpg}
+  \mlsyscredit{Photo: ChrisDag, CC BY 2.0, Wikimedia Commons.}
+  \note{[0.5 min] [CORE] Close on the communication wall. The network fabric is what joins a fleet of nodes into one computer. Lecture 3 asks what decides how long a collective takes on a real fabric, and why a fabric that looks healthy can still leave accelerators waiting.}
 \end{frame}
-
-\begin{frame}{Next Lecture: Network Fabrics}
-\note{
-[1 min] % -- LINK: Today built the physical infrastructure; next lecture wires it together
-The 18x bandwidth cliff is the central constraint that Ch3 addresses.
-
-% -- NARRATE: What to SAY while showing this slide
-``The infrastructure is built. Next: the network that transforms a warehouse
-of expensive space heaters into a unified training system. RDMA, collectives,
-and topology all aim to flatten the bandwidth hierarchy. Central question:
-how do you make 50 GB/s feel like 900 GB/s?''
-
-% -- FLEX: [CORE] Forward hook creates anticipation.
-IF SHORT: State the central question and dismiss.
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.30\textwidth}
-    \centering
-    \begin{mlsyscard}{computestroke}
-    {\large\bfseries RDMA}\\[0.1cm]
-    {\footnotesize Kernel-bypass\\data transfer}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.30\textwidth}
-    \centering
-    \begin{mlsyscard}{routingstroke}
-    {\large\bfseries Collectives}\\[0.1cm]
-    {\footnotesize AllReduce,\\All-to-All}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.30\textwidth}
-    \centering
-    \begin{mlsyscard}{datastroke}
-    {\large\bfseries Topology}\\[0.1cm]
-    {\footnotesize Fat-tree, torus,\\rail-optimized}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
-\vspace{0.3cm}
-\centering
-{\normalsize The network transforms a warehouse of expensive space heaters\\into a unified training system.}\\[0.1cm]
-{\small\textbf{The 18$\times$ bandwidth cliff is the constraint Ch3 addresses.}}
-
-\end{frame}
-
-
-
-\appendix
-
-\begin{frame}{Backup: Extended Roofline Examples}
-\note{
-[3 min] % -- NARRATE: Backup --- extended Roofline examples for different workloads.
-Use if students want more practice with arithmetic intensity classification.
-NOTE: The ridge point in the backup table notes uses R\_peak/BW\_mem.
-For H100 FP16 that is $\approx$295; for H100 FP8 it would be $\approx$591.
-When discussing the Conv2D shift, clarify which precision is being used.
-% -- FLEX: [OPTIONAL] Only show if time permits or students request it.
-}
-
-\footnotesize
-\textbf{Roofline Workload Placement Exercise:}
-
-\vspace{0.15cm}
-\renewcommand{\arraystretch}{1.15}
-\begin{tabular}{@{}lrrrl@{}}
-  \toprule
-  \textbf{Workload} & \textbf{AI (FLOP/byte)} & \textbf{H100 \%} & \textbf{B200 \%} & \textbf{Regime} \\
-  \midrule
-  Embedding lookup  & 0.5   & $<$0.1\% & $<$0.1\% & Memory-bound (always) \\
-  Attention (B=1)   & 2     & 0.7\%    & 0.4\%    & Memory-bound \\
-  Conv2D (ResNet)   & 150   & 51\%     & 27\%     & \textcolor{errorstroke}{\textbf{Shifts!}} \\
-  GEMM (4096$^2$)   & 1,365 & 100\%    & 100\%    & Compute-bound (always) \\
-  \bottomrule
-\end{tabular}
-
-\vspace{0.15cm}
-{\footnotesize Conv2D shifts from compute-bound on H100 to memory-bound on B200 as the ridge point rises. Ridge point = $R_{\text{peak}} / \text{BW}_{\text{mem}}$.}
-
-\vspace{0.1cm}
-{\footnotesize \textbf{Exercise:} Place these three workloads on the H100 Roofline: attention (B=1), GEMM (B=256), embedding lookup. Which is memory-bound? Calculate arithmetic intensity for each.}
-
-\end{frame}
-
-\begin{frame}{Backup: HBM Generations and Memory Budget Reference}
-\note{
-[2 min] % -- NARRATE: Backup --- HBM generation comparison and memory budget formulas.
-% -- FLEX: [OPTIONAL] Reference table only.
-}
-
-\footnotesize
-\renewcommand{\arraystretch}{1.15}
-\begin{tabular}{@{}lrrrr@{}}
-  \toprule
-  \textbf{Generation} & \textbf{Capacity} & \textbf{BW} & \textbf{Stacks} & \textbf{pJ/bit} \\
-  \midrule
-  HBM2   & 16 GB  & 900 GB/s   & 4 & 3.9 \\
-  HBM2e  & 32 GB  & 1,200 GB/s & 4 & 3.0 \\
-  HBM3   & 48 GB  & 2,400 GB/s & 6 & 2.5 \\
-  HBM3e  & 80 GB  & 3,350 GB/s & 8 & 2.0 \\
-  \bottomrule
-\end{tabular}
-
-\vspace{0.2cm}
-\textbf{Training Memory Budget (per GPU, no sharding):}\\
-{\footnotesize
-Params (FP16): $2N$ bytes \;\textbar\;
-Gradients (FP16): $2N$ bytes \;\textbar\;
-Adam ($m$+$v$+FP32): $12N$ bytes\\
-\textbf{Total: $16N$ bytes} + activations (batch-dependent, 30--100 GB for large models)}
-
-\end{frame}
-
 
 \end{document}

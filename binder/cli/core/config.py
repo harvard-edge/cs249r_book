@@ -8,7 +8,7 @@ import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional
 from rich.console import Console
-from .volume_index import volume_index_source, write_volume_index
+from .volume_index import write_volume_index
 
 console = Console()
 
@@ -95,7 +95,8 @@ class ConfigManager:
         """Initialize configuration manager.
 
         Args:
-            root_dir: Root directory of the MLSysBook project
+            root_dir: Directory binder was started from: the repository root,
+                ``books/``, or a sibling such as ``binder/``.
         """
         self.root_dir = Path(root_dir)
 
@@ -120,34 +121,26 @@ class ConfigManager:
             # Fallback
             self.book_dir = self.root_dir
 
+        # Commands treat root_dir as the repository root (bibs/, binder/,
+        # mlsysim/), so normalize it when binder runs from books/ or binder/.
+        if self.book_dir.name == "books" and self.book_dir != self.root_dir / "books":
+            self.root_dir = self.book_dir.parent
+
         # Configuration file paths (default to vol1 configs since combined configs don't exist)
         self.html_config = self.book_dir / "config" / "_quarto-html-vol1.yml"
         self.pdf_config = self.book_dir / "config" / "_quarto-pdf-vol1.yml"
         self.epub_config = self.book_dir / "config" / "_quarto-epub-vol1.yml"
 
-        # Volume-specific configuration file paths
+        # Volume I and II configs, which `binder reset` restores when no volume is given.
         self.html_vol1_config = self.book_dir / "config" / "_quarto-html-vol1.yml"
         self.html_vol2_config = self.book_dir / "config" / "_quarto-html-vol2.yml"
-        self.html_vol3_config = self.book_dir / "config" / "_quarto-html-vol3.yml"
-        self.html_vol4_config = self.book_dir / "config" / "_quarto-html-vol4.yml"
         self.pdf_vol1_config = self.book_dir / "config" / "_quarto-pdf-vol1.yml"
         self.pdf_vol2_config = self.book_dir / "config" / "_quarto-pdf-vol2.yml"
-        self.pdf_vol3_config = self.book_dir / "config" / "_quarto-pdf-vol3.yml"
-        self.pdf_vol4_config = self.book_dir / "config" / "_quarto-pdf-vol4.yml"
         self.epub_vol1_config = self.book_dir / "config" / "_quarto-epub-vol1.yml"
         self.epub_vol2_config = self.book_dir / "config" / "_quarto-epub-vol2.yml"
-        self.epub_vol3_config = self.book_dir / "config" / "_quarto-epub-vol3.yml"
-        self.epub_vol4_config = self.book_dir / "config" / "_quarto-epub-vol4.yml"
 
         self.active_config = self.book_dir / "_quarto.yml"
         self.active_index = self.book_dir / "index.qmd"
-
-        # Canonical sources shared with the Linux and Windows CI builds.
-        self.index_vol1 = self.book_dir / "index-vol1.qmd"
-        self.index_vol2 = self.book_dir / "index-vol2.qmd"
-        self.index_vol3 = self.book_dir / "index-vol3.qmd"
-        self.index_vol4 = volume_index_source(self.book_dir, "vol4", "pdf")
-        self.html_index_vol4 = volume_index_source(self.book_dir, "vol4", "html")
 
     def get_config_file(self, format_type: str, volume: Optional[str] = None) -> Path:
         """Get the configuration file for a specific format and optional volume.
@@ -242,32 +235,19 @@ class ConfigManager:
         Returns:
             Path to the output directory
         """
+        default = self.book_dir / "_build" / f"{format_type}{f'-{volume}' if volume else ''}"
+        config_file = self.get_config_file(format_type, volume)
+        if not config_file.exists():
+            console.print(f"[yellow]⚠️ Config file not found: {config_file}; using {default}[/yellow]")
+            return default
         try:
-            config_file = self.get_config_file(format_type, volume)
-
-            if not config_file.exists():
-                console.print(f"[yellow]⚠️  Config file not found: {config_file}[/yellow]")
-                # Fallback to default
-                suffix = f"-{volume}" if volume else ""
-                return self.book_dir / f"_build/{format_type}{suffix}"
-
-            # Read and parse the YAML config
-            with open(config_file, 'r', encoding='utf-8') as f:
-                config = yaml.safe_load(f)
-
-            # Extract output directory from project.output-dir
-            if config and 'project' in config and 'output-dir' in config['project']:
-                output_path = config['project']['output-dir']
-                return self.book_dir / output_path
-            else:
-                # Fallback to default
-                suffix = f"-{volume}" if volume else ""
-                return self.book_dir / f"_build/{format_type}{suffix}"
-
-        except Exception as e:
-            console.print(f"[yellow]⚠️  Error reading config: {e}[/yellow]")
-            suffix = f"-{volume}" if volume else ""
-            return self.book_dir / f"_build/{format_type}{suffix}"
+            config = yaml.safe_load(config_file.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError) as e:
+            console.print(f"[yellow]⚠️ Could not read project.output-dir from {config_file} ({e}); "
+                          f"using {default}[/yellow]")
+            return default
+        output_path = ((config or {}).get("project") or {}).get("output-dir")
+        return self.book_dir / output_path if output_path else default
 
     def read_config(self, format_type: str, volume: Optional[str] = None) -> Dict[str, Any]:
         """Read and parse a configuration file.

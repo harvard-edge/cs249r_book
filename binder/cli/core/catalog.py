@@ -6,7 +6,7 @@ centrally defined in `binder/cli/data/check_catalog.yaml`.
 """
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 import yaml
 from pydantic import BaseModel, Field
 

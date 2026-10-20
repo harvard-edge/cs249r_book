@@ -148,3 +148,19 @@ def calc_failure_probability(mtbf, job_duration):
     else:
         ratio = job_duration / mtbf
     return 1.0 - math.exp(-ratio)
+
+
+def calc_all_up_availability(availability, n_components):
+    """Probability that all of N independent components are up at once: ``a**N``.
+
+    A synchronous job that needs every one of N components is available only
+    when all are; with independent failures that is the product of the
+    per-component availabilities. Added 2026-10-20.
+    """
+    validate_at_least(n_components, 1, "n_components")
+    return float(availability) ** n_components
+
+
+def calc_downtime(availability, interval):
+    """Expected time down in ``interval`` at a steady-state ``availability``."""
+    return ((1 - float(availability)) * interval)

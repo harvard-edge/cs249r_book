@@ -1,0 +1,581 @@
+% =============================================================================
+% Lecture 9: Spatial Memory
+% Physical AI: Machine Learning Systems That Sense and Act (Volume IV), Chapter 9
+% =============================================================================
+% Thesis: a remembered scene supports motion only until its error bound, grown
+% from the motion the sensors cannot see, reaches the task tolerance; memory
+% adds a deadline to evidence and adds no distance.
+% Running case: the warehouse mobile manipulator at the rack end (aisle run),
+% with the latch slot and the mug as the two manipulation beliefs.
+% Hook and synthesis: Spirit at Troy (War Story 9.1) and Napkin Math 9.2.
+%
+% Build: make deck V=4 D=09_memory   (figures: images/make_figs.py; numbers:
+% images/calcs.py). Plan: lecture_map.yml in this folder.
+% =============================================================================
+
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+\mlsyssetup{
+  volume={Volume IV},
+  chapter={Chapter 9},
+  chaptertitle={Spatial Memory},
+  layer=brain,
+  logo={../../assets/img/logo-mlsysbook.png},
+  instlogo={../../assets/img/logo-harvard.png},
+}
+\usepackage[T1]{fontenc}
+\usepackage[scaled=0.9]{helvet}
+\usepackage{courier}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{booktabs,amsmath}
+\usetikzlibrary{arrows.meta,positioning,calc}
+\graphicspath{{images/}}
+\setcounter{mlsystotalsections}{6}
+
+\title{Spatial Memory}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+% A large answer choice for predict and concept-question slides
+\newcommand{\choice}[2]{\textbf{\textcolor{mlsysaccent}{#1}}\enspace #2}
+% A goals or takeaways line with its text-free thumbnail
+\newcommand{\thumbline}[2]{%
+  \begin{minipage}[c]{0.15\textwidth}\centering
+    \safeimg[width=\textwidth,height=0.95cm,keepaspectratio]{#1}\end{minipage}%
+  \hspace{0.02\textwidth}%
+  \begin{minipage}[c]{0.81\textwidth}\raggedright #2\end{minipage}}
+
+\begin{document}
+
+% =============================================================================
+% TITLE
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Read the thesis aloud once. Lecture 8 ended with an observation that states when it was captured, in which frame, and with what measured error. Today asks how long such an observation stays useful after the sensor loses sight of the thing it measured. The notes total about 70 minutes; the core alone runs about 58 minutes. FLEX: every frame tagged [OPTIONAL] can be cut, and the remaining lecture is complete. The planned second lecture splits after \S9.5, at the Maps divider: estimation and time in the first, representation and expiry in the second.}
+\mlsystitle{Spatial Memory}{A remembered scene supports motion only until its error bound, grown from the motion the sensors cannot see, reaches the task tolerance. Memory adds a deadline to evidence and adds no distance.}{cover_memory_blueprint.png}
+
+% =============================================================================
+% SECTION: THE RACK END
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Open with two places where a machine acted on a remembered scene, a rover on Mars and our warehouse robot at a rack end.}
+\mlsysdivider{What does a robot know about a place it can no longer see?}{Spatial Memory, \S9.1 and War Story 9.1}
+\section{Rack End}
+
+\begin{frame}{Spirit drove onto soil that looked like ground it had crossed}
+  \begin{columns}[c]
+    \begin{column}{0.46\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.4cm,keepaspectratio]{spirit-troy-crust.jpg}
+    \end{column}
+    \begin{column}{0.50\textwidth}
+      \small
+      \textbf{Troy, Mars, April 2009.} Spirit's front hazard camera took this view.\\[0.3cm]
+      The bright soil is loose sand. A wheel broke through the darker crust above it.\\[0.3cm]
+      \uncover<2->{The cameras saw the surface. Nothing on the rover measured the soil's strength.\\[0.3cm]
+      \textcolor{RedLine}{\textbf{Spirit never left. In January 2010 it became a stationary platform.}}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: NASA/JPL-Caltech, public domain, Wikimedia Commons (``Spirit's Robotic Stretch''). Story: Spatial Memory, War Story 9.1; Arvidson et al., JGR Planets 2010.}
+  \note{[1.5 min] [CORE] NARRATE. Step 1: Spirit's front hazard-avoidance camera at the site the team named Troy, west of Home Plate, in 2009. The bright, fluffy soil on the left is sand churned up where the left-front wheel broke through a darker crust. Spirit had been driving backward for three years, dragging a dead right-front wheel. The crust looked like the soil it had already crossed. Step 2: appearance is what the cameras measure; the soil's shear strength is what the wheels needed, and no sensor measured it before the wheels sank. Months of rehearsed extrication failed, and in January 2010 the mission declared Spirit a stationary research platform. ENGAGE: what kind of memory failed here? (Expected: a remembered belief that the terrain ahead was like the terrain behind, with no sensor that could contradict it.) WARN: students will call this a perception failure. The cameras worked; the belief they supported was about a quantity they could not observe. LINK: we return to Troy at the end of the lecture.}
+\end{frame}
+
+\begin{frame}{How long does a seen-empty aisle stay empty?}
+  \mlsysactivity{Predict}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.30\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.3cm,keepaspectratio]{warehouse-aisle-racks.jpg}
+    \end{column}
+    \begin{column}{0.66\textwidth}
+      \small
+      The navigation camera sees the cross aisle empty. Then the rack end hides it.\\[0.15cm]
+      The robot is 1.10 m from the rack end. A person may walk out at 1.6 m/s.\\[0.25cm]
+      {\normalsize How long may that one frame vouch for the space ahead?}\\[0.3cm]
+      {\large\choice{A}{0 ms}\qquad\choice{B}{50 ms}\qquad\choice{C}{0.6 s}}\\[0.15cm]
+      {\large\choice{D}{until a frame shows a person}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: W.carter, CC0, Wikimedia Commons (pallet-rack aisle, IKEA Torp). Scenario: Spatial Memory, \S9.7.1 and Napkin Math 9.2 (1.6 m/s is the ISO 13855 walking speed).}
+  \note{[2 min] [CORE] The photo shows a real pallet-rack aisle; our running machine, the warehouse mobile manipulator, drives such aisles toward a rack end where a cross aisle opens. NARRATE: the camera has just seen the cross aisle empty, and the uprights now hide it. ENGAGE: students vote with fingers and write the answer down. Do not reveal it; the expiry segment computes it. Expected spread: many pick D, because a map keeps saying ``empty'' until something contradicts it; some pick B, the frame period. The answer for the space ahead is C, 593.75 ms; for the space beside the rack end it is A, 0 ms. Both come from one subtraction later. WARN: 1.6 m/s is the walking speed that ISO 13855 adopts for positioning safeguards, a design convention that a running person exceeds.}
+\end{frame}
+
+\begin{frame}{Recall: what must an observation state?}
+  \mlsysactivity{Retrieval}{1 min}
+  \begin{columns}[c]
+    \begin{column}{0.30\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.6cm,keepaspectratio]{thumb_epochs.pdf}
+    \end{column}
+    \begin{column}{0.66\textwidth}
+      {\Large\bfseries Close your notes.}\\[0.2cm]
+      {\normalsize Write the three things an observation must state to serve a moving robot, and how old the aisle frame is when perception dispatches it.}\\[0.35cm]
+      \uncover<2->{{\normalsize When it was captured, in which frame, and with what measured error.\\[0.1cm]
+      Age at dispatch: 51.6 ms, or 77.4 mm of travel at 1.5 m/s.}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Observation contract and latency waterfall: Lecture 8 (Spatial Memory, Napkin Math 9.2, cites the 51.6 ms age). 77.4 mm $=$ 1.5 m/s $\times$ 51.6 ms (derived).}
+  \note{[1 min] [CORE] Retrieval from Lecture 8. Give 45 seconds. Step 2: an observation serves a moving machine only when it carries its capture epoch, its frame, and its measured error. The navigation frame is 51.6 ms old when perception dispatches it; at the 1.5 m/s drive limit the base has moved 77.4 mm by then. LINK: Lecture 8 stopped at the qualified measurement. Today starts where the measurements stop arriving.}
+\end{frame}
+
+\begin{frame}{How long can a robot act on a scene it no longer sees?}
+  \small
+  By the end of today, you will be able to:\\[0.15cm]
+  \thumbline{thumb_kalman_step3.pdf}{Fuse dated measurements and test the spread the filter reports.}\\[0.12cm]
+  \thumbline{thumb_lever.pdf}{Date every belief and every transform by the evidence behind it.}\\[0.12cm]
+  \thumbline{thumb_reads.pdf}{Choose a map by the query the permission path must answer in 2 {\textmu}s.}\\[0.12cm]
+  \thumbline{thumb_erosion_step3.pdf}{Set each belief's expiry from its error growth and the task tolerance.}\\[0.2cm]
+  {\footnotesize\textcolor{midgray}{Thread: the third law, proposal is not permission. Record: the belief record.}}
+  \note{[1 min] [CORE] The title is the driving question. Each line is one segment (estimation, records and frames, maps, and expiry). The bottom line ties today to the course. Memory sits on the proposal side, so it may shape proposals but cannot certify its own freshness; the permission path checks the age of the evidence itself. Today adds the seventh record to the record chain (Lecture 1), the belief record. LINK: Lecture 8 stated the third law, the thread on the bottom line.}
+\end{frame}
+
+% =============================================================================
+% SECTION: ESTIMATION
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Every belief we age today is the output of an estimator. Build it first on one number, the range to the rack-end upright.}
+\mlsysdivider{How does a robot turn dated measurements into one estimate?}{Spatial Memory, \S9.2}
+\section{Estimation}
+
+\begin{frame}{A filter predicts, then each update narrows its spread}
+  \begin{columns}[c]
+    \begin{column}{0.60\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=5.2cm,keepaspectratio]{kalman_step}{3}
+    \end{column}
+    \begin{column}{0.37\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.2cm,keepaspectratio]{ouster-os1-pointcloud.jpg}\\[0.1cm]
+      {\footnotesize Ouster OS1-64 lidar: 30 mm range precision (datasheet).\\Stereo at 1.10 m: 3.8 mm.\\[0.15cm]
+      \textbf{Gain}: how far the estimate moves toward a reading, between 0 and 1.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Point cloud: Daniel L. Lu, CC BY 4.0, Wikimedia Commons. Numbers: Spatial Memory, \S9.2 (odometry disturbance 0.1 m/s is illustrative). Bars: $\pm$1 standard deviation; gray bars are the sensors' own spreads.}
+  \note{[3 min] [CORE] The quantity is the range from the base to the rack-end upright. Each bar spans plus and minus one standard deviation, the spread the filter reports. Step 1: the prior is $\pm$20 mm. Between lidar sweeps 50 ms apart, odometry predicts the base closed in; an illustrative 0.1 m/s speed disturbance adds 5 mm of spread over one sweep. Independent errors add in squares, so the spread grows to 20.6 mm. Prediction always widens. Step 2: the lidar reads with 30 mm precision. The gain is the predicted variance over the sum of both variances, 0.32, so the estimate moves a third of the way toward the reading and the spread falls to 17.0 mm, tighter than either input. Step 3: stereo at 3.8 mm earns a gain of 0.95 and the spread falls to 3.7 mm. ENGAGE: if the stereo spread doubled to 7.6 mm, which sensor would dominate? (Expected: stereo still, with gain 0.83 and fused spread 6.9 mm.) WARN: the lidar also has a 25 mm systematic offset in its datasheet; a zero-mean model cannot absorb a bias, so calibration must remove it. LINK: this recursion keeps only the latest estimate and its covariance, which is why Apollo's guidance computer could run it in 1969 (footnote, \S9.2).}
+\end{frame}
+
+\begin{frame}{A misdated update moves the estimate and keeps the spread}
+  \begin{columns}[c]
+    \begin{column}{0.58\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.3cm,keepaspectratio]{kalman_step4.pdf}
+    \end{column}
+    \begin{column}{0.39\textwidth}
+      \small
+      Stamped on arrival, the stereo frame is paired with a pose 39.9 mm farther along the aisle.\\[0.25cm]
+      \uncover<2->{The filter reports $\pm$3.7 mm and sits 38.0 mm off.\\[0.25cm]
+      \textbf{Fix:} apply the reading at its capture epoch. A 52-slot buffer covers 51.6 ms at 1 kHz.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Spatial Memory, \S9.2 and \S9.2.3. 39.9 mm arrival-stamp travel: the observation contract (Lecture 8). 38.0 mm and 52 slots: images/calcs.py (derived).}
+  \note{[2.5 min] [CORE] LINK: Lecture 8 showed that an arrival stamp hides exposure, readout, and transport; at the drive limit that hidden time is 39.9 mm of travel. NARRATE. Step 1: the red column is the same stereo update stamped with its arrival time. The filter pairs it with a pose 39.9 mm too far along, so the range reads long, and a gain of 0.95 drags the estimate 38.0 mm away. Step 2: the reported spread is still 3.7 mm, because the covariance update uses only the modeled noise and never the residual. The error is about ten reported standard deviations, toward the obstacle. Dropping the frame would leave $\pm$17.0 mm, wider but honest. The fix is out-of-sequence replay. Keep a ring buffer of past predictions, roll back to the sample nearest the capture epoch, apply the update there, and replay the buffered IMU inputs forward. At 1 kHz, a 51.6 ms age needs 52 slots; a reading older than the buffer is rejected and the downstream path is told that visual grounding degraded. WARN: students think a timestamp error is a small time error. It is a distance error at the speed the robot moves.}
+\end{frame}
+
+\begin{frame}{Does a residual gate catch a misdated update?}
+  \mlsysactivity{Vote}{3 min}
+  \small
+  \textbf{Innovation}: the reading minus the filter's prediction of it. \textbf{NIS}: innovation squared over its predicted variance; mean 1 when the model is honest.\\[0.2cm]
+  The misdated update raises the expected NIS to 6.25. A gate rejects any NIS above 3.84.\\[0.1cm]
+  {\normalsize\choice{A}{Always caught}\qquad\choice{B}{About 2 in 3}\qquad\choice{C}{Never}}\\[0.15cm]
+  \uncover<2->{\centering\safeimg[width=0.85\textwidth,height=2.75cm,keepaspectratio]{gates.pdf}\\}
+  \uncover<3->{\small Over 50 innovations the mean NIS sits near 6.25, far above the honest 0.65 to 1.43.}
+  \mlsyscredit{Spatial Memory, \S9.2.1 (NIS, NEES, chi-square gates; Bar-Shalom et al. 2001). Probabilities from the noncentral chi-square distribution: images/calcs.py (derived).}
+  \note{[3 min] [CORE] ENGAGE: vote, discuss with a neighbor for 30 seconds, vote again. Step 2: B. With noise, a single misdated NIS is spread out; it exceeds the 95 percent gate of 3.84 with probability 0.63 and the 99 percent gate of 6.63 only 0.39 of the time. A per-update gate lets a third or more of corrupted updates through. Step 3: averaging independent innovations exposes a persistent bias. For 50 honest innovations the mean NIS falls between 0.65 and 1.43 with 95 percent probability, and repeated misdated updates average near 6.25. Name the two tests. Offline, against ground truth, NEES checks the state error against the reported covariance; a mean above the band flags an overconfident filter, the dangerous kind. Online, NIS checks the innovations. WARN: a sliding NIS monitor catches dating errors only while they show in the innovations; a filter can absorb a steady error into its state, so the monitor never replaces capture-epoch validation. The aha is that a covariance is a claim the filter makes, and a claim must be tested.}
+\end{frame}
+
+\begin{frame}{Over one second, the IMU's bias outgrows its noise}
+  \centering
+  \safeimg[width=0.92\textwidth,height=4.2cm,keepaspectratio]{imu.pdf}\\[0.15cm]
+  \small Bosch BMI088, uncalibrated: gyro bias 1$^\circ$/s, accelerometer offset 20 mg (datasheet). Bias grows with time; noise with its square root.
+  \mlsyscredit{Bosch Sensortec BMI088 data sheet, rev.\ 1.9 (2024), via Spatial Memory, \S9.2. Errors after 1 s: images/calcs.py (derived).}
+  \note{[1.5 min] [OPTIONAL] Why the predict step cannot run long on an inertial sensor alone. The BMI088's gyro noise density, integrated for one second, leaves 0.014 degrees of heading spread, but its 1 degree per second bias leaves a full degree, which at the 1.10 m upright is 19.2 mm sideways. The accelerometer's 20 mg offset, integrated twice, puts the position 98.1 mm off after one second, about twice the 50 mm localization bound; its white noise adds only 0.9 mm. ENGAGE: which term would you estimate online? (Expected: the biases, as extra state, which works only if the motion makes them observable; we return to that limit at the end.) FLEX: cut if short; the point survives in one sentence, that dead reckoning is a bridge between fixes.}
+\end{frame}
+
+\begin{frame}{A tracker's identity must not delay occupancy}
+  \begin{columns}[T]
+    \begin{column}{0.97\textwidth}
+      {\scriptsize\ttfamily
+      class Sort(object):\\
+      \hspace*{1em}def \_\_init\_\_(self, \textbf{\textcolor{BlueLine}{max\_age=1, min\_hits=3}}, iou\_threshold=0.3):\\
+      \hspace*{1em}...\\
+      \hspace*{2em}if (trk.time\_since\_update < 1) and (\textbf{\textcolor{BlueLine}{trk.hit\_streak >= self.min\_hits}} or ...):\\
+      \hspace*{3em}ret.append(...)\hspace*{2em}\textcolor{midgray}{\# only confirmed, currently seen tracks are output}}
+    \end{column}
+  \end{columns}
+  \vspace{0.15cm}
+  \centering\safeimg[width=0.92\textwidth,height=3.6cm,keepaspectratio]{sort_timeline.pdf}
+  \mlsyscredit{Code: abewley/sort, sort.py @ 2236dff (GPL-3.0), shortened; Bewley et al., ICIP 2016. Timeline: illustrative frames. Spatial Memory, \S9.2.2.}
+  \note{[3 min] [CORE] This is the SORT tracker, a widely used baseline, unchanged except for the ellipses. Its defaults output a track only after three associated hits, and only while the track was updated this frame. That is right for a tracking benchmark. Walk the timeline. A person steps into view in frame 1. SORT withholds the track in frames 1 and 2; at the 16.7 ms frame period that is 33.4 ms, or 50.1 mm of travel at the 1.5 m/s drive limit. When the person is hidden in frame 5, the track coasts and is not output at all. The bottom row is the design rule. The raw occupied region goes to the clearance check from frame 1, and when the person is hidden the region becomes unknown, never free. Tracking adds identity and velocity for the planner. ENGAGE: a planner needs the person's velocity. What must its latency budget add? (Expected: the confirmation window, here two frame periods.) WARN: deleting a lost track does not clear the space it occupied. Land the segment. An estimate's spread is a claim to test, it must be dated by its capture epoch, and occupancy reaches the safety path before identity does.}
+\end{frame}
+
+% =============================================================================
+% SECTION: RECORDS AND FRAMES
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] The estimator's output must travel to consumers that never see the estimator. What must it carry?}
+\mlsysdivider{What must a remembered value carry so a consumer can check it?}{Spatial Memory, \S9.3 to \S9.5}
+\section{Records}
+
+\begin{frame}{A stamped pose carries one time and no expiry}
+  \begin{columns}[c]
+    \begin{column}{0.44\textwidth}
+      {\scriptsize\ttfamily
+      \textcolor{midgray}{\# PoseWithCovarianceStamped.msg}\\
+      std\_msgs/Header header\\
+      \hspace*{1em}builtin\_interfaces/Time \textbf{\textcolor{BlueLine}{stamp}}\\
+      \hspace*{1em}string \textbf{\textcolor{BlueLine}{frame\_id}}\\
+      PoseWithCovariance pose\\
+      \hspace*{1em}Pose pose\\
+      \hspace*{1em}float64[36] covariance\par}
+      \vspace{0.3cm}
+      \uncover<2->{\footnotesize\textbf{The belief record adds} an evidence epoch, an error-growth law, a validity region, and an expiry.}
+    \end{column}
+    \begin{column}{0.54\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{epochs.pdf}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{ROS 2 common\_interfaces, geometry\_msgs and std\_msgs @ 56be9f3 (Apache-2.0), nested fields expanded. Spatial Memory, \S9.3, \S9.4, \S9.10.}
+  \note{[2.5 min] [CORE] The left is the real ROS 2 message most robots use to publish an estimated pose, with its nested fields expanded. It carries one stamp, one frame, a pose, and 36 covariance numbers. Step 1: the right shows three instants a remembered value can carry. The acquisition epoch is when photons struck the sensor; for a belief, the evidence epoch is the latest acquisition that constrained it. The estimate epoch is the instant the predicted state describes. The publication epoch is when the message left. One stamp cannot say which it is. A node that predicts forward and republishes with a new stamp makes stale evidence look fresh. Step 2: the belief record keeps the evidence epoch, plus a law for how fast error grows without new evidence, the region where that law holds, and the expiry it implies. Clocks matter too. A 0.2 ms clock-conversion bound is 0.3 mm at the drive limit; a 2.5 ms gap between a camera and an encoder is 4.25 mm at the arm's 1.7 m/s. LINK: the record chain (Lecture 1); this is its seventh record. WARN: a softmax confidence of 0.94 cannot stand in for the record, because it says nothing about millimeters or how fast they grow (Lecture 3).}
+\end{frame}
+
+\begin{frame}{Does one stale frame miss a 1 mm slot?}
+  \mlsysactivity{Predict}{2.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.36\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \footnotesize
+        Finger 0.15 m beyond the wrist.\\
+        Wrist turning at 0.30 rad/s.\\
+        Unseen drift at most 12 mm/s.\\
+        Initial error 0.1 mm.\\
+        Camera frame 16.7 ms.\\
+        Slot tolerance 1 mm.
+      \end{mlsyscard}
+      \vspace{0.1cm}
+      {\footnotesize The code composes the last camera-to-slot edge with the current wrist pose.}
+    \end{column}
+    \begin{column}{0.60\textwidth}
+      \centering
+      \uncover<2->{\safeimg[width=\textwidth,height=4.0cm,keepaspectratio]{lever.pdf}\\[0.1cm]
+      {\small The lever arm, at 0.75 mm, sets the error; a faster clock does not.}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Spatial Memory, \S9.5 and figure 4 (illustrative values, zero ingestion delay). Error terms: images/calcs.py (derived).}
+  \note{[2.5 min] [CORE] The cage door's latch-release slot: the wrist camera sees the slot every 16.7 ms, and the code chains the cached camera-to-slot edge with the wrist pose read now. ENGAGE: inside the 1 mm slot or not? Most students say inside, because 16.7 ms sounds tiny. Step 2: drift adds 12 mm/s times 16.7 ms, 0.20 mm; the wrist rotation swings the computed slot along with the camera, 0.15 m times 0.30 rad/s times 16.7 ms, 0.75 mm. With the 0.1 mm initial error that is 1.05 mm, 5 percent past the tolerance, and the finger drives into the strike plate. Chaining the edge with the wrist pose of its own capture epoch removes the lever term and leaves 0.31 mm. The aha is that a transform is a belief with its own epoch, and its admissible age is set at the point it serves, the fingertip, rather than at the joint it measures. WARN: every matrix multiply succeeds; no exception fires. The edge is wrong at any timestamp resolution.}
+\end{frame}
+
+\begin{frame}{tf2 refuses to compose a chain past its newest sample}
+  \vspace{0.3cm}
+  {\footnotesize\ttfamily
+  \} else \{\hspace{1em}\textcolor{midgray}{// Catch cases that would require extrapolation}\\
+  \hspace*{1em}if (\textbf{\textcolor{BlueLine}{target\_time > latest\_time}}) \{\\
+  \hspace*{2em}cache::createExtrapolationException2(...);\\
+  \hspace*{2em}return 0;\\[0.2cm]
+  \textcolor{RedLine}{"Lookup would require extrapolation into the future. ..."}\par}
+  \vspace{0.4cm}
+  \small Every edge is evaluated at one query time. The hybrid pose appears only when application code caches an edge and pairs it with a live lookup.
+  \mlsyscredit{ros2/geometry2, tf2/src/cache.cpp @ d2b2b74 (BSD-3-Clause), TimeCache::findClosest and createExtrapolationException2, shortened. Foote, TePRA 2013. Spatial Memory, \S9.5.}
+  \note{[1.5 min] [OPTIONAL] Real code from tf2, the ROS transform library. When asked for a chain at time t, tf2 interpolates every edge at t; if t is past the newest sample of any edge, it raises this error instead of guessing. The library already refuses the hybrid pose of the previous slide. The bug lives in application code that caches an edge or republishes it with a fresh stamp. ENGAGE: on the permission path, should a lookup that fails wait for new data? (Expected: no; it must not block, so it fails closed and the motion it supports is refused.) LINK: the lock-free mailbox (Lecture 4) gives the same rule for a torn read: discard it and let the last validated transform age.}
+\end{frame}
+
+\begin{frame}{How far can wheel odometry drive before 50 mm?}
+  \mlsysactivity{Estimate}{3 min}
+  \begin{columns}[c]
+    \begin{column}{0.33\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \footnotesize
+        UMBmark: a 4 m square, 16 m of path.\\[0.05cm]
+        Return error: 317 mm uncalibrated, 21 mm calibrated.\\[0.05cm]
+        Localization bound: 50 mm.\\
+        Aisle: 30 m at 1.3 m/s.
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.64\textwidth}
+      \centering
+      \only<1|handout:0>{\safeimg[width=\textwidth,height=4.3cm,keepaspectratio]{umbmark_step1.pdf}}%
+      \only<2-|handout:1>{\safeimg[width=\textwidth,height=4.3cm,keepaspectratio]{umbmark_step2.pdf}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Borenstein and Feng, IEEE T-RA 1996, via Spatial Memory, \S9.5.1 and figure 5 (lab robot, 0.2 m/s). Rates and distances: images/calcs.py (derived).}
+  \note{[3 min] [CORE] ENGAGE: in pairs, compute the distance at which each rate spends the 50 mm bound. 317 mm over 16 m is 2.0 percent of distance; 50 mm is spent after 2.5 m, 1.9 s at 1.3 m/s. Over one 30 m aisle that is 594.4 mm, 11.9 times the bound. Step 2: calibrating wheel diameters and wheelbase cut the error 15.1 times, to 0.13 percent: 38.1 m, just past one aisle. WARN: the benchmark ran at 0.2 m/s on straight segments; warehouse bases run 6.5 times faster under payload, and the run-to-run spread of about 25 mm already exceeds the calibrated 21 mm. Odometry is a bridge between map corrections, and the bound sets how often they must arrive. LINK: the 50 mm localization bound is the same allowance the stopping budget charges (the reading, \S9.5.1).}
+\end{frame}
+
+\begin{frame}{Every ranked odometry method spends 50 mm within one aisle}
+  \centering
+  \safeimg[width=0.94\textwidth,height=5.0cm,keepaspectratio]{kitti.pdf}\\[0.1cm]
+  \small A loop closure then moves remembered cells without renewing their evidence.
+  \mlsyscredit{KITTI odometry leaderboard, 127 ranked methods (cvlibs.net, verified 2026-10-12); Geiger et al., CVPR 2012. Road driving. Spatial Memory, \S9.5.1.}
+  \note{[1.5 min] [OPTIONAL] Real data: every method on the public KITTI odometry leaderboard, by sensor. Translation error is averaged over 100 to 800 m stretches of held-out road driving. The top-ranked of 127 methods drifts 0.53 percent, which spends 50 mm in 9.4 m; the median lidar method 0.68 percent (7.4 m); the median stereo method 1.23 percent (4.0 m). Every dot sits in the red region, and none lasts one 30 m aisle. These rates include slip and vibration that the calibrated UMBmark figure excludes. Then the map side. When the SLAM back end closes a loop, it re-optimizes the pose graph and shifts remembered cells whose evidence is no newer. The permission snapshot therefore lives in the continuous odom frame and carries the pose-graph revision, so a correction expires or rebuilds it instead of teleporting obstacles. Land the segment. Every remembered value, including every transform, carries its evidence epoch and its frame, and only new evidence renews it.}
+\end{frame}
+
+% =============================================================================
+% SECTION: MAPS
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Memory for the whole scene is a map. Which map? Start from the question the safety path asks.}
+\mlsysdivider{Which map answers a clearance query inside one permission tick?}{Spatial Memory, \S9.6}
+\section{Maps}
+
+\begin{frame}{The permission controller gets 2 {\textmu}s per body sphere}
+  \begin{columns}[c]
+    \begin{column}{0.42\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.0cm,keepaspectratio]{er-flex-mobile-manipulator.jpg}
+    \end{column}
+    \begin{column}{0.55\textwidth}
+      \small
+      The body is covered by 50 spheres. Each tick asks: how far is each sphere from anything not known to be free?\\[0.25cm]
+      1 kHz tick, 100 {\textmu}s for collision checks:\\
+      100 {\textmu}s $\div$ 50 spheres $=$ \textbf{2 {\textmu}s per sphere}.\\[0.15cm]
+      \uncover<2->{On-chip SRAM at 3.2 GB/s, 8-byte cells:\\
+      \textbf{800 reads per query}, before any arithmetic.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: Auledas, CC BY 4.0, Wikimedia Commons (ER-FLEX: MiR250 base, UR16e arm). Allocation: Spatial Memory, \S9.6.1 (illustrative). 800 reads: derived.}
+  \note{[1.5 min] [CORE] A real mobile manipulator of the same class as our running machine: a wheeled base carrying an arm. For collision checks the body is covered by spheres, here 50. Step 1: the permission loop runs at 1 kHz, and the worked design gives collision checks 100 {\textmu}s of each tick, 40 percent of the job's 250 {\textmu}s WCET, leaving 90 percent of the tick for everything else. That is 2 {\textmu}s per sphere. Step 2: the permission microcontroller streams its SRAM at 3.2 GB/s, so 2 {\textmu}s covers at most 800 reads of an 8-byte cell. ENGAGE: is the bottleneck arithmetic or memory reads? (Expected: reads; the representation decides how many.) LINK: worst-case execution time and the permission tick (Lecture 4). WARN: these are allocations to qualify on the real controller; nobody has measured them yet.}
+\end{frame}
+
+\begin{frame}{Only a distance field answers a sphere query in 8 reads}
+  \centering
+  \safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{reads.pdf}\\[0.1cm]
+  \small The representation follows the query. \textbf{ESDF} (Euclidean signed distance field): each cell stores the distance to the nearest obstacle.
+  \mlsyscredit{Spatial Memory, \S9.6.1, table 1 and figure 7: counts for a 0.25 m sphere plus 0.10 m clearance; octree depth $\lceil\log_2(10\,\text{m}/\text{pitch})\rceil$. Read counts (derived, images/calcs.py); latencies are unmeasured.}
+  \note{[2.5 min] [CORE] Reads to certify one sphere, at three voxel sizes. An occupancy grid stores ``is this cell occupied'', so certifying a 0.25 m sphere with 0.10 m of clearance means reading every cell within 0.35 m: 1,437 reads at 5 cm, 22,449 at 2 cm; only the coarse 10 cm grid fits, and its quantization of up to 87 mm eats the clearance. An octree such as OctoMap pays a pointer chase per level, 8 levels at 5 cm: 11,494 reads. An ESDF answers the question directly: 8 corner reads for one trilinear interpolation at any pitch, plus fixed header checks. Two more families are excluded: a TSDF stores distance along the sensor ray, which does not bound off-axis obstacles, and Gaussian splats or radiance fields answer ``what would a camera see'' and never ``how far is the nearest obstacle''. The aha is that the representation follows the query. ENGAGE: why does the ESDF bar not change with pitch? (Expected: one interpolation always reads 8 corners; pitch changes storage and leaves reads alone.)}
+\end{frame}
+
+\begin{frame}{The host builds the distance field outside the tick}
+  \begin{columns}[c]
+    \begin{column}{0.50\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.4cm,keepaspectratio]{nvblox-fig8-corridor.png}\\[0.05cm]
+      {\footnotesize nvblox on a ground robot: a distance-field slice and a person (blue).}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.4cm,keepaspectratio]{nvblox_esdf.pdf}
+    \end{column}
+  \end{columns}
+  \vspace{0.15cm}
+  \centering\small The tick reads a frozen snapshot; it never waits on the map.
+  \mlsyscredit{Millane et al., ``nvblox,'' ICRA 2024 (arXiv 2311.00626): Fig.~8 cropped; Table II, average incremental ESDF runtime (Redwood and Cow and Lady sequences). Spatial Memory, \S9.6.1.}
+  \note{[1.5 min] [OPTIONAL] Real artifact and real data from the nvblox paper. Left: nvblox running on a ground robot in an office corridor, with a horizontal slice of the distance field colored by distance and a segmented person in blue. Right: Table II's average time to update the distance field incrementally, 1.9 ms on a GPU with nvblox, 13 ms for Fiesta and 58 ms for voxblox on a CPU, every one longer than a 1 ms tick. So the host builds and validates the field, extracts a bounded snapshot of the stopping corridor, and hands it to the permission controller, which only reads it. If the host stalls, the snapshot keeps aging on the controller's own clock. LINK: how host map traffic contends with permission reads on shared memory (Lecture 13).}
+\end{frame}
+
+\begin{frame}{A 5 cm snapshot of the stopping corridor fits in 1.05 MB}
+  \centering
+  \safeimg[width=0.92\textwidth,height=4.0cm,keepaspectratio]{snapshot.pdf}\\[0.15cm]
+  \small Host map: a dense 1 cm grid of a 300 m$^3$ workcell takes 2.4 GB. A hashed band around the surfaces takes 76.8 MB, 31$\times$ less.
+  \mlsyscredit{Snapshot: 2.86 m$^3$ corridor, 8 B per cell, 1.05 MB SRAM (Spatial Memory, \S9.6.1). Host map: Napkin Math 9.1 (illustrative workcell). Values: images/calcs.py (derived).}
+  \note{[2 min] [OPTIONAL] Storage now picks the pitch. The snapshot covers the stopping corridor: aisle width by clear distance by a 2 m arm height, 2.86 m$^3$. At 8 bytes per cell that is 183 kB at 5 cm, inside the controller's 1.05 MB of SRAM, and 2.86 MB at 2 cm, which does not fit. The 5 cm pitch costs up to 43 mm of quantization, which the filter subtracts from every clearance. On the host, Napkin Math 9.1 prices the whole map. A dense 1 cm grid of a 10 by 10 by 3 m workcell is $3\times10^8$ voxels, 2.4 GB; obstacle surfaces of 120 m$^2$ with a 4 cm band fill only 3.2 percent of the volume, 76.8 MB in hashed 8$^3$ blocks. ENGAGE: in a band-only map, what does an unallocated block mean? (Expected: it cannot say whether the space was seen free or never seen; allocation is not evidence.)}
+\end{frame}
+
+\begin{frame}{A lidar return renews only the cells its ray crossed}
+  \centering
+  \safeimg[width=0.94\textwidth,height=5.6cm,keepaspectratio]{ray_grid.pdf}
+  \mlsyscredit{Spatial Memory, \S9.6.1, figure 8 and table 2 (cell\_state, cell\_evidence\_epoch, free\_space\_sweep\_epoch). Redrawn at slide size.}
+  \note{[2.5 min] [CORE] What a map can certify comes from how a return updates it. The ray from the sensor marks the cells it crosses free, with the return's epoch t1, and that negative evidence retires a phantom obstacle left on the line. The cell holding the return becomes occupied at t1. Cells behind the return, and every cell off the ray, keep the epoch of their own last evidence, here t0. So a map's publication time dates none of its cells; each cell carries its own evidence epoch and its last free sweep. The legend is the permission snapshot's rule: four states, set explicitly. Unknown and expired cells are obstacles. ENGAGE: a new scan down the aisle passes the rack. Which cells behind the rack does it renew? (Expected: none; they are behind the returns.) WARN: log-odds of 0 means both ``never observed'' and ``as many hits as misses''; the explicit cell state keeps them apart. Land the segment. Choose the map by the query, freeze a dated distance snapshot for the tick, and let only real rays renew space.}
+\end{frame}
+
+\begin{frame}{Which forgetting rule could certify an empty aisle?}
+  \mlsysactivity{Discuss}{3 min}
+  \footnotesize
+  \renewcommand{\arraystretch}{1.12}
+  \begin{tabular}{@{}P{3.9cm}P{6.3cm}P{3.4cm}@{}}
+    \toprule
+    \textbf{Mechanism} & \textbf{A cell nobody observes} & \textbf{Example (2026)} \\
+    \midrule
+    Clamped log-odds & does not change & OctoMap \\
+    Per-cell transition model & relaxes toward a learned long-run value & Markov-chain grids \\
+    Decay toward unknown & relaxes toward 0.5 at a fixed rate & nvblox \\
+    Change detected on revisit & does not change until seen again & Khronos \\
+    \uncover<2->{\textbf{Deterministic expiry}} & \uncover<2->{becomes unknown when a walker could reach it} & \uncover<2->{this lecture's design} \\
+    \bottomrule
+  \end{tabular}\\[0.15cm]
+  \small Two minutes with a neighbor: which rows could the permission path rely on?
+  \mlsyscredit{Spatial Memory, \S9.6.1 and table 3; Hornung et al. 2013; Saarinen et al. 2012; Millane et al. 2024; Schmid et al. 2024.}
+  \note{[3 min] [CORE] ENGAGE: two minutes in pairs, then take three answers. Expected: clamping only speeds change when a cell is seen again; learned transition rates describe past traffic, an average that cannot bound the worst case; revisit-based detection says nothing between visits. nvblox's decay could serve only if its rate were set so that every cell turns unknown no later than the moment a hidden walker at the speed bound could reach it. Step 2: that is the deterministic rule this lecture builds next, worst case by construction. The statistical rules remain useful for route planning, where an average is the right question. WARN: students will treat a slow decay as conservative. It is optimistic whenever the decay is slower than the physical entry speed. LINK: forward occupancy of tracked people is next lecture's job (Lecture 10).}
+\end{frame}
+
+% =============================================================================
+% SECTION: EXPIRY
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Now the hook's question: how long does the empty aisle stay empty?}
+\mlsysdivider{How long does a remembered scene stay true enough to move on?}{Spatial Memory, \S9.7 to \S9.10}
+\section{Expiry}
+
+\begin{frame}{At the rack end, the cross aisle is hidden from the start}
+  \begin{columns}[c]
+    \begin{column}{0.26\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.2cm,keepaspectratio]{warehouse-aisle-racks.jpg}
+    \end{column}
+    \begin{column}{0.71\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.5cm,keepaspectratio]{rack_top.pdf}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: W.carter, CC0, Wikimedia Commons. Top view: Spatial Memory, \S9.7.1 and figure 10 (illustrative 150 mm side gap; 1.10 m clear distance; ISO 13855 walking speed).}
+  \note{[2 min] [CORE] The real aisle on the left; the geometry on the right, from above. The robot drives right. The upper rack ends 1.10 m ahead; past it the cross aisle is hatched, because the camera's sightline never reaches it. Two places matter. Ahead, the nearest unseen space is the rack corner, 1.10 m away. Abreast, the unseen space begins at the rack face, 150 mm from the hull. A hidden person can be anywhere inside a disc that grows at 1.6 m/s from the rack end. ENGAGE: before the numbers, which place has more memory? (Expected: ahead, because the boundary is farther.) WARN: students picture the person as a point that must be seen; the map can only say where a person cannot yet be.}
+\end{frame}
+
+\begin{frame}{The frame certifies 593.75 ms ahead and 0 ms abreast}
+  \begin{columns}[c]
+    \begin{column}{0.66\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=4.6cm,keepaspectratio]{erosion_step}{3}
+    \end{column}
+    \begin{column}{0.31\textwidth}
+      \small
+      $T_{\text{inv}} = \dfrac{d_{\text{free}} - \delta_{\text{loc}} - \delta_{\text{margin}}}{v_{\text{walk}}}$\\[0.25cm]
+      {\footnotesize $d_{\text{free}}$: depth seen free\\$\delta_{\text{loc}}$: 50 mm localization\\$\delta_{\text{margin}}$: 100 mm reserve\\$v_{\text{walk}}$: 1.6 m/s}\\[0.25cm]
+      \uncover<3->{\footnotesize\textbf{Ahead:} 0.95 m $\div$ 1.6 m/s\\\textbf{Abreast:} 0 m $\div$ 1.6 m/s}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Spatial Memory, equation 13 and Napkin Math 9.2. 593.75 ms, 82.6 mm, and 0.625 ms per mm: images/calcs.py (derived).}
+  \note{[3 min] [CORE] Worked example. Free space erodes inward from the unseen boundary at the walking speed. Subtract the localization bound and the protective reserve from the depth seen free, and divide by 1.6 m/s. Step 1: ahead, 1.10 minus 0.05 minus 0.10 leaves 950 mm, which lasts 593.75 ms. Each millimeter of depth buys 0.625 ms. Step 2: the gray band is the frame's 51.6 ms age at dispatch, 82.6 mm of depth spent before memory receives the frame, leaving 542.15 ms, about 33 frame periods. Step 3: abreast, 0.15 minus 0.05 minus 0.10 is zero, so nothing remains, even at capture. The hook's answers: C ahead, A abreast. ENGAGE: will a 120 Hz camera help abreast? (Expected: no; the deadline comes from depth, and frame rate does not enter it. Only a sensor that sees into the cross aisle helps.) WARN: this deadline is for a hull standing still. Driving toward the corner closes the depth at the robot's speed plus the walker's; and a walker approaching during a stop covers 1.6 m/s times delay plus braking, 1.41 m at 1.5 m/s, more than the whole 1.10 m. That bill is Lecture 12's (human separation distance).}
+\end{frame}
+
+\begin{frame}{When must the finger's blind insertion stop?}
+  \mlsysactivity{Estimate}{3 min}
+  \begin{columns}[c]
+    \begin{column}{0.40\textwidth}
+      \small
+      The finger hides the slot from the wrist camera.\\[0.15cm]
+      Error bound after $\Delta t$ seconds unseen:\\ $E(\Delta t) = 0.1 + 12\,\Delta t + 25\,\Delta t^2$ mm\\[0.15cm]
+      Tolerance: 1 mm.\\[0.25cm]
+      \textbf{Invalidation horizon}: the first time the error bound reaches the task tolerance.
+    \end{column}
+    \begin{column}{0.57\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=5.0cm,keepaspectratio]{latch_step}{2}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Spatial Memory, \S9.7.2, \S9.7.3, definition 9.2 (0.1 mm, 12 mm/s, 50 mm/s$^2$ illustrative). Roots: images/calcs.py (derived).}
+  \note{[3 min] [CORE] Worked example 2. The growth law has three parts: 0.1 mm initial error, 12 mm/s drift, and half of a 50 mm/s$^2$ disturbance acceleration. ENGAGE: solve $25\Delta t^2 + 12\Delta t - 0.9 = 0$ with a neighbor. Step 1: the positive root is 66 ms; the shaded region is time for which the belief supports no motion. Step 2: a filter that assumes constant velocity drops the acceleration term and predicts 75 ms; at 75 ms the bounded error is already 1.14 mm, 14.1 percent past the slot wall, 9 ms of blind insertion past the safe bound. A slot machined to 0.30 mm cuts the horizon 4.1 times, to 16.1 ms, more than the 3.3 times the tolerance shrank, because the fixed 0.1 mm initial error takes a larger share. This is belief expiry, a deadline that physics sets; no software timeout chooses it. LINK: computed for the evidence behind one action chunk, this root is the evidence horizon (Lecture 3); the intent lease will cap its expiry here (Lecture 10).}
+\end{frame}
+
+\begin{frame}{Fresh timestamps on a dead camera pass every age check}
+  \begin{columns}[c]
+    \begin{column}{0.50\textwidth}
+      \footnotesize
+      \textbf{ROS 2 QoS policies}, as documented:\\[0.1cm]
+      \textbf{Deadline}: ``the expected maximum amount of time between subsequent messages being published to a topic''\\[0.1cm]
+      \textbf{Lifespan}: ``the maximum amount of time between the publishing and the reception of a message without the message being considered stale or expired''
+    \end{column}
+    \begin{column}{0.47\textwidth}
+      \small
+      The camera dies at 10 ms. A node republishes its last mug pose at 1 kHz with fresh stamps.\\[0.2cm]
+      \uncover<2->{Every message looks under 1 ms old.\\
+      The belt moves the mug \textbf{20 mm in 100 ms}. The grasp tolerates 15 mm.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{ros2/ros2\_documentation, About Quality of Service settings @ da7d703 (CC BY 4.0). Scenario: Spatial Memory, \S9.9 (0.20 m/s belt, illustrative). 20 mm: images/calcs.py (derived).}
+  \note{[2 min] [OPTIONAL] Real documentation text. Both policies measure the transport: Deadline counts time between publications, and Lifespan counts publish-to-receive time. Neither knows when the photons struck. Step 1: the wrist camera's tracker stops at 10 ms; a republisher keeps sending the last transform at 1 kHz with the current clock. Step 2: a consumer checking age against the message stamp sees less than 1 ms and passes it against a 5 ms threshold, while the mug rides the conveyor at 0.20 m/s, 20 mm in 100 ms, past a 15 mm grasp tolerance. This is the frozen transform: a silent failure, well formed and wrong. ENGAGE: what field would have exposed it? (Expected: the evidence epoch, which republishing must preserve.) LINK: Lecture 4 found the same limit for transport, where no middleware setting stands in for the chunk lease.}
+\end{frame}
+
+\begin{frame}{Four beliefs on one robot expire between 0 and 594 ms}
+  \centering
+  \safeimg[width=0.92\textwidth,height=4.2cm,keepaspectratio]{horizons.pdf}\\[0.15cm]
+  \small One staleness timeout for the whole robot over-admits some rows and halts others.
+  \mlsyscredit{Spatial Memory, table 4 (coworker: 15 mm initial error, 150 mm tolerance, 1.6 m/s). 84 ms: images/calcs.py (derived).}
+  \note{[1.5 min] [OPTIONAL] The same robot holds beliefs that expire at very different times, because each has its own initial error, growth law, and tolerance. Free space abreast of the rack end: 0 ms. The latch-slot finger: 66 ms. A coworker tracked beside the arm, 15 mm initial error against a 150 mm tolerance at walking speed: 84 ms. Free space ahead: 593.75 ms. ENGAGE: a single 100 ms timeout; which rows does it get wrong, and how? (Expected: it admits the finger and the coworker after they expire, and refuses the aisle ahead while 0.49 s of certified clearance remains.) Checkpoint for the reading: tighten the coworker tolerance to 100 mm; the horizon becomes 53 ms, below the finger's.}
+\end{frame}
+
+\begin{frame}{The belief record admits the mug grasp with 24.8 ms left}
+  \centering
+  \safeimg[width=0.9\textwidth,height=4.3cm,keepaspectratio]{lifecycle.pdf}\\[0.1cm]
+  \small Mug on a 0.20 m/s belt, 3 mm initial error, 15 mm tolerance, used 35 ms after capture:\\
+  \uncover<2->{$3 + 0.20\times(35 + 0.2) = 10.04$ mm $\le 15$ mm. \textbf{4.96 mm and 24.8 ms remain.}}
+  \mlsyscredit{Spatial Memory, \S9.10, figure 12, and Napkin Math 9.3 (illustrative inputs; 0.2 ms clock-conversion bound). Values: images/calcs.py (derived).}
+  \note{[2.5 min] [CORE] The belief record's lifecycle. A record is VALID while measured, DEGRADED once occluded and growing under its declared law, and EXPIRED when the bound reaches the tolerance or the validity region is breached. It returns to VALID only through fresh evidence, a passing innovation gate, and a revalidated model; prediction and republishing never renew it. UNOBSERVABLE, from any state, needs a restored physical constraint to leave. Step 2: worked example 3, the admission check for the mug handle. The consumer converts the capture epoch to its own clock and adds the 0.2 ms conversion bound: 35.2 ms. The error is 3 plus 0.2 mm per ms times 35.2, 10.04 mm, inside 15 mm. The record expires at 60 ms, so 24.8 ms of lifetime remain, and the latest use age is 59.8 ms. LINK: 60 ms is the freshness deadline derived for this same mug (Lecture 2); the record now carries it beside its epoch. WARN: admission is an input to the permission decision and does not guarantee the grasp finishes in 24.8 ms; a knocked mug expires the record at once.}
+\end{frame}
+
+\begin{frame}{A zero innovation can hide a 60 percent loss of grip}
+  \begin{columns}[c]
+    \begin{column}{0.55\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.0cm,keepaspectratio]{force.pdf}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \footnotesize
+      Wrist sensor reads force $+$ bias. Heat drifts the bias 0.2 N/min.\\[0.1cm]
+      \textbf{Observable}: different true states give different readings. Here they do not, and that observability ceiling binds every estimator.\\[0.15cm]
+      \centering\safeimg[width=0.92\textwidth,height=2.1cm,keepaspectratio]{spirit-testbed-jpl.jpg}\\
+      {\scriptsize JPL test rover rehearsing Spirit's escape, 2009.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Spatial Memory, \S9.8 (illustrative strain-gauge case). Photo: NASA/JPL-Caltech, Wikimedia Commons (``Spirit Sandbox Setup''). 3 N and 60 percent: images/calcs.py (derived).}
+  \note{[3 min] [CORE] A wrist strain gauge reads 5 N. The reading is force plus bias, so 5 N with no bias, 2 N with 3 N of bias, and 0 N with 5 N of bias all give the same number. A filter that assumes a fixed bias contracts its spread to $\pm$0.05 N. Heat from nearby joints drifts the bias 0.2 N per minute; after 15 minutes the true grip is 2 N, a 60 percent loss, and the workpiece can slip. The innovation is zero at every sample, because the reading matches the prediction exactly. That is the ceiling. No estimator, linear or learned, can separate states that give identical readings. The remedies add information. One is a second channel with different failure physics, such as motor current; a deliberate excitation, briefly releasing contact against a fixture to read the bias at 0 N; or an external reference load. The photo: JPL rehearsed Spirit's escape in a sandbox, because the rover's cameras could not observe soil strength. LINK: when no excitation separates two states before the machine must act, they are observationally indistinguishable (Lecture 18). Land the segment. Every belief has a deadline from its growth law, and some states have no measurement that can ever renew them.}
+\end{frame}
+
+% =============================================================================
+% SECTION: WRAP-UP
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Check the ideas, then return to the rack end and to Troy.}
+\mlsysdivider{What can memory certify, and for how long?}{Spatial Memory, \S9.11 and \S9.12}
+\section{Wrap-Up}
+
+\begin{frame}{Vote: true or false?}
+  \mlsysactivity{Vote}{2 min}
+  \footnotesize
+  \renewcommand{\arraystretch}{1.15}
+  \begin{tabular}{@{}>{\raggedright\arraybackslash}m{0.50\textwidth}>{\raggedright\arraybackslash}m{0.44\textwidth}@{}}
+    \toprule
+    \textbf{Claim} & \uncover<2->{\textbf{Verdict}} \\
+    \midrule
+    A voxel a ray found empty stays free until a sensor sees an obstacle. & \uncover<2->{\textbf{\textcolor{RedLine}{False.}} It erodes from the hidden boundary at 1.6 m/s.} \\
+    A compact covariance shows the occluded person is still there. & \uncover<2->{\textbf{\textcolor{RedLine}{False.}} Covariance assumes the person exists.} \\
+    Two records that each pass a freshness check can be subtracted. & \uncover<2->{\textbf{\textcolor{RedLine}{False.}} 20 ms of skew at 3.1 m/s is 62 mm.} \\
+    A faster camera gives memory beside the rack end. & \uncover<2->{\textbf{\textcolor{RedLine}{False.}} Depth sets the deadline; frame rate does not.} \\
+    \bottomrule
+  \end{tabular}
+  \mlsyscredit{Spatial Memory, \S9.11 (fallacies and pitfall). 62 mm $=$ (1.5 $+$ 1.6) m/s $\times$ 20 ms: images/calcs.py (derived).}
+  \note{[2 min] [CORE] ENGAGE: students write T or F for each, then compare. Step 2: all false. One: the static-world fallacy; certified free space shrinks from the occlusion boundary at the walking speed, and lapses at once beside the rack end. Two: a covariance describes position given that the entity exists; whether it still exists is a separate probability, and only negative evidence (an empty ray) or contact retires the track. Three: the pitfall; a base at 1.5 m/s and a person at 1.6 m/s close at 3.1 m/s, so a 20 ms gap between a detection and current odometry is a 62 mm envelope against 50 mm of slack left in 200 mm of separation. Project both to one evaluation epoch. Four: the deadline comes from free depth, which is zero beside the rack end at any frame rate. If many marked the second true, revisit the phantom-track idea in the reading, \S9.9.}
+\end{frame}
+
+\begin{frame}{At the rack end, memory buys 593.75 ms ahead and none beside}
+  \begin{columns}[c]
+    \begin{column}{0.56\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.2cm,keepaspectratio]{erosion_step3.pdf}
+    \end{column}
+    \begin{column}{0.41\textwidth}
+      \centering\safeimg[width=0.70\textwidth,height=2.4cm,keepaspectratio]{spirit-troy-sol1899.jpg}\\[0.1cm]
+      \footnotesize\raggedright
+      Aisle: a fast camera cannot help beside the rack. Only a sensor that sees the cross aisle, or a site rule, can.\\[0.1cm]
+      Troy: appearance never observed strength. Slip was the residual that should have expired the belief.
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Spatial Memory, Napkin Math 9.2 and War Story 9.1. Photo: NASA/JPL-Caltech, public domain, Wikimedia Commons (sol 1899, 6 May 2009).}
+  \note{[2 min] [CORE] Return to the hook. The aisle vote: one frame vouches for the space ahead for 593.75 ms, of which 51.6 ms is spent before memory sees the frame, and for the space beside the rack end not at all. Memory added a deadline to the stopping budget; it added no braking distance. Making the side safe takes an infrastructure sensor at the corner, a marked crossing, or a slower approach, which are site premises the release must record. Troy: the hazard-camera image from sol 1899, wheels half buried after two weeks of attempts. The rover's belief that the ground ahead matched the ground behind was well formed and unobservable from appearance. Slip detection existed and limited how deep each drive dug, but nothing warned before the crust broke. ENGAGE: name the measurement that could have renewed or expired the terrain belief earlier. (Expected: a slip or sinkage measurement on a probing drive, an excitation.) LINK: unqualified site premises go into the residual-claims register (Lecture 18).}
+\end{frame}
+
+\begin{frame}{Takeaways}
+  \small
+  \thumbline{thumb_kalman_step3.pdf}{A filter's covariance is a claim; date every update by capture, and test the spread with NEES offline and NIS online.}\\[0.12cm]
+  \thumbline{thumb_lifecycle.pdf}{Every belief and every transform carries its evidence epoch; only a new measurement advances it.}\\[0.12cm]
+  \thumbline{thumb_reads.pdf}{Choose the map by its query; the tick reads a dated distance snapshot in 8 reads, and unknown means obstacle.}\\[0.12cm]
+  \thumbline{thumb_horizons.pdf}{A belief expires when its error bound reaches the tolerance, 0 to 594 ms on one robot; prediction never renews it.}
+  \note{[1 min] [CORE] One line per segment. Ask students to star the line they would have gotten wrong at the start of class, and to name the number beside it: 38.0 mm, 1.05 mm, 8 reads, 593.75 ms.}
+\end{frame}
+
+\begin{frame}{Open questions}
+  \normalsize
+  \begin{itemize}\setlength{\itemsep}{0.3cm}
+    \item A learned world model predicts the hidden aisle well on average. What would it take for its prediction to count as evidence?
+    \item The walking speed 1.6 m/s is a convention. Who should decide the speed bound on a site, and what evidence should they need?
+    \item Should a robot slow down near every occlusion, or should the site add sensors at every rack end?
+  \end{itemize}
+  \note{[1 min] [OPTIONAL] No single answer. FLEX: use one as a two-minute discussion if time remains, or as a written assignment. For the first, push students toward the record: a prediction has no evidence epoch of its own, so it could at most shape a proposal; certifying space needs a growth bound validated on held-out data. For the third, ask for the numbers: the speed that the visible clear distance allows, and the cost of a corner sensor per rack end.}
+\end{frame}
+
+\begin{frame}{Read and explore}
+  \small
+  \begin{itemize}\setlength{\itemsep}{0.05cm}
+    \item \textbf{Read:} Spatial Memory, \S9.1 to \S9.12; redo Napkin Math 9.2 for a 300 mm side gap.
+    \item Thrun, Burgard, and Fox, \textit{Probabilistic Robotics}, MIT Press, 2005, ch.\ 3 and 9.
+    \item Bar-Shalom, Li, and Kirubarajan, \textit{Estimation with Applications to Tracking and Navigation}, 2001.
+    \item Hornung et al., ``OctoMap,'' \textit{Autonomous Robots}, 2013.
+    \item Oleynikova et al., ``Voxblox,'' IROS 2017; Millane et al., ``nvblox,'' ICRA 2024.
+    \item Orzechowski, Meyer, and Lauer, ``Tackling Occlusions and Limited Sensor Range with Set-Based Safety Verification,'' ITSC 2018.
+  \end{itemize}
+  \note{[0.5 min] [CORE] The chapter first; its Checkpoints 9.1 to 9.3 rehearse today's numbers. Thrun and colleagues for the filter and occupancy grids; Bar-Shalom for NEES, NIS, and gating; OctoMap for keeping unknown apart from free; Voxblox and nvblox for distance fields built from range data; Orzechowski for occluded reachable sets in driving, the same erosion idea.}
+\end{frame}
+
+\begin{frame}[c]
+  \begin{columns}[c]
+    \begin{column}{0.30\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.6cm,keepaspectratio]{er-flex-mobile-manipulator.jpg}
+    \end{column}
+    \begin{column}{0.66\textwidth}
+      {\small\textcolor{lightgray}{NEXT LECTURE \textbar{} GROUNDED INTENT}}\\[0.4cm]
+      {\Large\bfseries Why is recognizing the right object insufficient to authorize a robot to reach for it?}\\[0.35cm]
+      {\small\textcolor{midgray}{Memory now says how long a belief holds. Next: what a valid belief may authorize.}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photo: Auledas, CC BY 4.0, Wikimedia Commons.}
+  \note{[0.5 min] [CORE] Memory rules only on validity. A remembered object lies within a bound until a deadline. It cannot say what the machine should do about that object. Lecture 10 grounds a request such as ``take the mug'' to the handle in the robot's frame and wraps it in an intent lease that inherits this lecture's belief record: its evidence epoch, and an expiry no later than the belief's horizon.}
+\end{frame}
+
+\end{document}

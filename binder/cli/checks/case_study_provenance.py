@@ -71,14 +71,12 @@ class Finding:
 
 
 def volume_bibliographies(repo: Path) -> list[tuple[Path, Path]]:
-    """Map each volume carrying case studies to its designated bibliography file.
+    """Map each volume to the bibliography its case studies must cite from.
 
-    Volumes with dedicated, isolated bibliographies (such as 'vol3' and 'vol4')
-    are always mapped to their specific ``references-{vol}.bib`` file. This
-    guarantees that a missing dedicated bibliography triggers a missing-bibliography
-    error rather than silently falling back to the shared bibliography. Other
-    volumes map to their dedicated bibliography if it exists, falling back to
-    the project-wide ``references.bib``.
+    A volume uses ``references-{vol}.bib`` when one exists and the shared
+    ``references.bib`` otherwise (all four volumes share it since the
+    2026-09-30 unification). A missing file surfaces as a
+    ``missing-bibliography`` error in :func:`collect`.
 
     Args:
         repo: Path to the repository root directory.
@@ -87,18 +85,12 @@ def volume_bibliographies(repo: Path) -> list[tuple[Path, Path]]:
         List of (volume_directory, bibliography_file) tuples.
     """
     books_dir = repo / "books" if (repo / "books").is_dir() else repo
-    dedicated_volumes: set[str] = set()
     pairs = []
     for vol_dir in sorted(books_dir.glob("vol*")):
         if not vol_dir.is_dir():
             continue
-        vol_name = vol_dir.name
-        if vol_name in dedicated_volumes:
-            bib = books_dir / f"references-{vol_name}.bib"
-        else:
-            cand = books_dir / f"references-{vol_name}.bib"
-            bib = cand if cand.exists() else (books_dir / "references.bib")
-        pairs.append((vol_dir, bib))
+        cand = books_dir / f"references-{vol_dir.name}.bib"
+        pairs.append((vol_dir, cand if cand.exists() else books_dir / "references.bib"))
     return pairs or [(books_dir / "vol4", books_dir / "references.bib")]
 
 

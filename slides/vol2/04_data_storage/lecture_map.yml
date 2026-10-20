@@ -1,0 +1,346 @@
+chapter: 04_data_storage
+lecture: "04"
+title: "Data Storage"
+subtitle: "Feeding and saving the fleet"
+layer: fabric
+minutes: 75
+notes_minutes: 71
+core_minutes: 58
+target_ideas: 30
+thesis: "Storage must deliver a streaming rate and absorb burst writes; when it cannot, faster accelerators only wait at the same delivery rate."
+
+hook:
+  minutes: "0-6"
+  setup: "The running case: a 175B-parameter model on 256 nodes of eight H100s (2,048 GPUs) for 30 days. It reads 1.5 trillion 4-byte tokens once (6 TB) and saves a 2,450 GB resumable checkpoint every 10 minutes. Photo of H100 cards (shared library, Geekerwan, CC BY 3.0)."
+  question_to_class: "Which moves more bytes in the run? A) reading the training data B) saving the model C) about the same"
+  payoff: "B. 4,320 saves of 2,450 GB write 10.6 PB, 1,764x the 6 TB read (log-scale bars). The synthesis returns to the run: the read path is staged once and trickles at 2.3 MB/s; the write path pauses 0.34 s per save and is restorable only at its manifest."
+  sources: ["Data Storage §4.1 and figure (10.6 PB against 6 TB)", "§4.6.2 and table 5 (4,320 saves, 1,764x)", "calcs.py (every derived value)"]
+
+driving_question: "How fast must storage feed and save a fleet, and what does each tier cost?"
+
+recall: "Lecture 3 (Network Fabrics): what an RDMA transfer leaves out of the path (the host CPU's payload copies) and why a burst of unrelated traffic slows a collective (shared buffers and links; the slowest flow sets the finish). Both return: GPUDirect Storage copies RDMA's trick, and the checkpoint burst is unrelated traffic."
+
+running_example: "Archetype A instance from the chapter: 175B parameters, 256 nodes x 8 H100s = 2,048 GPUs, 30 days, 1.5T tokens (6 TB of token IDs, about 2,000 shards of 3 GB, staged once on local NVMe), checkpoint 14 B/param = 2,450 GB every 10 minutes, 9.6 GB per node, 0.34 s local write, 2.45 s drain to a 1 TB/s file system, 10.6 PB over the run (§4.1, §4.3.5, Napkin Math 4.7, table 5)."
+
+goals:
+  - "Size the input bandwidth a fleet needs and find the stage that limits it."
+  - "Explain why millions of small files starve a fast file system."
+  - "Plan a checkpoint that pauses training under a second and still restores."
+  - "Price a placement by total delivery cost, not by dollars per gigabyte."
+
+segments:
+  - name: Tiers
+    divider_question: "Why does a faster accelerator stop helping?"
+    read: "§4.2, §4.3"
+    concept_questions: [2, 3, 4, 5]
+    minutes: 12.5
+    land: "Tiers trade bandwidth for capacity at different scopes, and a fast tier helps only as much as its misses allow."
+  - name: Delivery
+    divider_question: "How much bandwidth must storage deliver, and where does it fall short?"
+    read: "§4.3.1, §4.4, §4.5"
+    concept_questions: [6, 7, 8]
+    minutes: 13
+    land: "Size demand with the equation, find the slowest stage, overlap it, and buffer the tail."
+  - name: Shards
+    divider_question: "Why can a 500 GB/s file system deliver under 5 GB/s?"
+    read: "§4.3.5 to §4.3.7"
+    concept_questions: [9, 10]
+    minutes: 9
+    land: "Package samples into shards so metadata stops binding, and protect the tail with prefetch and well-placed hedges."
+  - name: Checkpoints
+    divider_question: "How do we save 2,450 GB every 10 minutes without stopping?"
+    read: "§4.6"
+    concept_questions: [11, 12]
+    minutes: 10.5
+    land: "Write each byte once, pause only for the local write, and declare a save done only when its manifest is published."
+  - name: Versions and Cost
+    divider_question: "What must storage record, and what does delivery cost?"
+    read: "§4.7 to §4.9"
+    concept_questions: [13, 14, 15]
+    minutes: 10.5
+    land: "Record versions at every commit, key the writes, and price placements by the whole delivery bill."
+
+concept_questions:
+  - id: 1
+    q: "Which moves more bytes in the running 30-day run, reading the data or saving the model?"
+    picture: "H100 photo with the setup card; then log-scale bars, 6 TB read against 10.6 PB written"
+    numbers: "2,450 GB x 4,320 saves = 10.6 PB; 6 TB read once; 1,764x (§4.1, table 5; calcs.py)"
+    example: "The chapter's 175B running job"
+    read: "§4.1"
+  - id: 2
+    q: "Why do full-corpus training workloads invert database storage assumptions?"
+    picture: "Photo of a disk head over a platter beside a database-versus-pretraining table"
+    numbers: "NVMe 7 to 14 GB/s sequential against about 0.5 GB/s on random 4 KB reads (§4.2)"
+    example: "A one-epoch scan makes an LRU cache approach a zero hit rate"
+    read: "§4.2, table 1"
+  - id: 3
+    q: "Why does a faster accelerator stop helping when delivery is fixed?"
+    picture: "Throughput against accelerator speed, ideal dashed, actual flat at 4x (built in two steps)"
+    numbers: "Delivery a quarter of compute time, overlapped: 16x faster compute gives 4x throughput (Systems Perspective 4.1; derived curve)"
+    example: "A100 to H100 upgrade on an unchanged input path"
+    read: "§4.2 (Systems Perspective 4.1)"
+  - id: 4
+    q: "What are the six tiers, and at what scope does each quote its bandwidth?"
+    picture: "Redrawn pyramid with capacity, bandwidth with scope, and latency (two steps); then the per-client ladder with ratios beside a data center NVMe photo"
+    numbers: "HBM 3.35 TB/s per GPU; DRAM 200 GB/s per node; 4 NVMe 28 GB/s; file system share 3.9 GB/s; ratios 16.8, 7.1, 7.2 (§4.3.1, table 2; calcs.py)"
+    example: "A 1 TB/s file system shared by 256 nodes"
+    read: "§4.3, §4.3.1"
+  - id: 5
+    q: "How much does a 5 percent miss rate cost a cached tier?"
+    picture: "Predict card, then delivered fraction against hit rate for 100x and 7x miss paths"
+    numbers: "E[T] = 0.95 + 0.05 x 100 = 5.95 T_hot, 17 percent of the hot rate; 35 TB job on 30.7 TB NVMe: 88 percent hits, 16.1 GB/s, 58 percent (eq. 1, §4.4.3; calcs.py)"
+    example: "Multimodal job that overflows local NVMe"
+    read: "§4.3.1, §4.4.3"
+  - id: 6
+    q: "How much input bandwidth must storage deliver?"
+    picture: "Equation anatomy built term by term; estimate card; demand bars; MLPerf Storage scatter with median table and one submission row"
+    numbers: "Text 167.8 MB/s, images 303 GB/s, about 1,800x apart; 175B job average 2.3 MB/s (Napkin Math 4.1; calcs.py). MLPerf Storage v1.0, 124 passing closed results: medians per emulated accelerator 3D U-Net 1.39/2.75, CosmoFlow 0.35/0.55, ResNet-50 0.09/0.18 GB/s (A100/H100); H100 1.6 to 2.0x (MLSysIM, MLCommons 2024)"
+    example: "DDN AI400X2T, CosmoFlow on 64 emulated H100s: 33.87 GB/s at 70.23 percent busy"
+    read: "§4.3.1, §4.4"
+  - id: 7
+    q: "Which stage sets the delivered rate, and what can overlap and prefetch buy?"
+    picture: "Sequential against overlapped timeline (two steps); prefetch strip with one 500 ms read; real PyTorch DataLoader arguments"
+    numbers: "450 ms and 55.6 percent stalled, 250 ms and 20 percent (Napkin Math 4.5); 500 / 200 = 2.5, 3 ready batches; 1 batch for a 50 ms local p99; 1.6 GB of host DRAM per node at depth 5 (§4.4.1; calcs.py)"
+    example: "prefetch_factor counts work in flight, not ready batches"
+    read: "§4.4, §4.4.1"
+  - id: 8
+    q: "What does GPUDirect Storage remove, and when does it matter?"
+    picture: "Two-panel redraw: two DMAs through host DRAM against one direct DMA with CPU control dashed"
+    numbers: "Illustrative: 64,000 images/s per node, 120 against 30 us of CPU each: 7.68 against 1.92 CPU-seconds per second, about 6 cores freed (Napkin Math 4.6; calcs.py)"
+    example: "CPU JPEG decode stays the limit even with GDS"
+    read: "§4.5"
+  - id: 9
+    q: "Why can a 500 GB/s file system deliver under 5 GB/s?"
+    picture: "Redrawn Lustre-style diagram, one metadata server and 100 OSS; real lfs setstripe command; diagnose cards; 3FS read trace relabeled at slide size"
+    numbers: "100 OSS x 10 GB/s = 1 TB/s; MDS a few hundred thousand ops/s (§4.3.6); 200 million files deliver under 1 percent; 50,000 shards, 4,000x fewer files (Example 4.1); running corpus about 2,000 shards (§4.3.5); 3FS 6.6 TiB/s on 180 storage nodes, 37.5 GiB/s per node derived (3FS README)"
+    example: "WebDataset tar shards; DeepSeek 3FS"
+    read: "§4.3.5, §4.3.6"
+  - id: 10
+    q: "Why does one slow server delay most steps, and when does a hedged read help?"
+    picture: "Probability that a step meets a slow server against server count"
+    numbers: "One line: 0.99^100 = 0.366, so 63 percent of steps meet a slow read (§4.3.6; calcs.py); Lecture 10 works the fan-out. Hedge rules: median trigger duplicates about half the reads; p99 trigger about 1 percent; same-rack replica shares the slow switch."
+    example: "Hedge after a tail delay to a replica in another rack"
+    read: "§4.3.6"
+  - id: 11
+    q: "How big is a resumable checkpoint, and who writes which bytes?"
+    picture: "Stacked bar 350 + 700 + 1,400 GB; real PyTorch Distributed Checkpoint save call; storm bars"
+    numbers: "14 B/param, 2,450 GB, 9.6 GB per node (§4.1, §4.6); storm: 70B, 980 GB per replica, 1,024 replicas at 100 GB/s: 10,035 s (167 min) against 9.8 s, 1,024x (Definition 4.5; calcs.py)"
+    example: "Every node writing its FP16 weight copy multiplies weight bytes by 256"
+    read: "§4.6"
+  - id: 12
+    q: "How does tiered staging shrink the pause, and when is the checkpoint restorable?"
+    picture: "Estimate card; four-lane timeline (training, local NVMe, file system, coordinator) built in three steps"
+    numbers: "0.34 s local write, 2.45 s drain, 0.06 percent of a 600 s interval (Napkin Math 4.7; calcs.py); GitLab 2017: six hours of writes lost when no backup restored (War Story 4.1)"
+    example: "Manifest published last with an atomic create or rename"
+    read: "§4.6, §4.6.1, §4.6.2"
+  - id: 13
+    q: "What must the data pipeline record, and how does a replay avoid duplicates?"
+    picture: "Versioned artifact chain to a manifest, with a NERSC tape library photo for the archive tier; the e42 acknowledgment-gap figure in two steps"
+    numbers: "Archive 116.8 TB of lineage at $0.004/GB-month (table 5; calcs.py); synthetic data 1 TB keeps 1.4 TB, moves 4.4 TB (Napkin Math 4.8)"
+    example: "(feature_version, e42) keyed write"
+    read: "§4.7, §4.7.1, §4.7.2"
+  - id: 14
+    q: "What does delivering data cost beyond dollars per gigabyte?"
+    picture: "Bars $24,000 storage against $90,000 egress; real S3 lifecycle rule; stream against stage cost lines (two steps)"
+    numbers: "100 TB: $24,000 a year stored, $9,000 per cross-region read, $90,000 for ten; $40 GET fees for 100M files; $11,000 archive restore; $49,152 per day for 1,024 GPUs, $9,830 per day for 20 points of stall (§4.8, SP 4.3); 50 TB: stream $372,000, stage $90,000, saving $282,000, break-even 4.3 epochs (Napkin Math 4.9; calcs.py)"
+    example: "Multi-epoch vision training stages; single-epoch pretraining could stream"
+    read: "§4.8, §4.8.1"
+  - id: 15
+    q: "How does serving change the storage problem?"
+    picture: "Cold-start bars for 350 GB of weights from five sources"
+    numbers: "350 s, 87.5 s, 25 s, 6.2 s, 1.8 s; rollout 35 TB, 350 s from a 100 GB/s store, 35 s from the 1 TB/s file system (§4.9; calcs.py)"
+    example: "Warm replicas in host DRAM; retrieval hops at about 100 us each"
+    read: "§4.9, §4.9.1"
+
+concept_trace:
+  - concept: "I/O wall"
+    frame: "With delivery fixed, a 16x faster accelerator runs 4x faster"
+    shows: "io_wall_step1-2: throughput flat at 4x beyond 4x compute"
+  - concept: "Scoped storage hierarchy"
+    frame: "Six tiers trade bandwidth for capacity, each at its own scope"
+    shows: "tiers_step1-2 (pyramid, bandwidth with scope); also the ladder frame and the 95 percent hit-rate predict frame (cache curves)"
+  - concept: "Input delivery budget"
+    frame: "Required bandwidth is consumers x batch bytes / compute time"
+    shows: "equation built term by term, plus the slowest-stage line; applied in the 2,048-GPU estimate and the MLPerf frame"
+  - concept: "Metadata-bound shard packaging"
+    frame: "An open goes to one metadata server; bytes come from many"
+    shows: "pfs diagram (MDS against 100 OSS) and the Diagnose frame's reveal (50,000 shards, 4,000x fewer files)"
+  - concept: "Checkpoint write path"
+    frame: "The pause ends at t1; the checkpoint is restorable at t3"
+    shows: "staging_step1-3 four-lane timeline; size from the 14-bytes-per-parameter frame"
+  - concept: "Total cost of data delivery"
+    frame: "Ten reads across regions cost more than a year of storage"
+    shows: "egress bars, S3 lifecycle rule, idle-accelerator line; break-even lines in the stream-or-stage estimate"
+  - concept: "Versioned artifacts and commit boundaries"
+    frame: "At a commit boundary, a replay is safe only with keyed writes"
+    shows: "ackgap_step1-2 (append duplicates, keyed write overwrites); versioned artifact chain on the preceding frame"
+
+worked_examples:
+  - name: "Napkin Math 4.1: text against image input bandwidth"
+    steps: ["given: 2,048 GPUs, 200 ms steps; text one 4,096-token sequence at 4 B; images 256 x 115.7 KB", "text: 2,048 x 4,096 x 4 / 0.2 = 167.8 MB/s", "images: 2,048 x 256 x 115.7 KB / 0.2 = 303 GB/s", "ratio about 1,800x; the 175B job averages 2.3 MB/s", "meaning: representation and compute time set demand, not model size"]
+  - name: "Equation 1: the cost of misses"
+    steps: ["given: 95 percent hits, misses 100x slower", "E[T] = 0.95 + 5 = 5.95 T_hot", "rate = 1/5.95 = 17 percent of the hot rate", "35 TB job on 30.7 TB NVMe: 88 percent hits, 16.1 GB/s, 58 percent", "meaning: misses dominate; check tails too"]
+  - name: "Napkin Math 4.7: tiered checkpoint staging"
+    steps: ["given: 2,450 GB, 256 nodes, 28 GB/s local, 1 TB/s file system, one save per 600 s", "per node 9.57 GB", "local write 0.34 s: the pause", "drain 2,450 GB / 1 TB/s = 2.45 s in the background", "0.34 / 600 = 0.06 percent; restorable only when the manifest is published"]
+  - name: "Napkin Math 4.9: stream or stage"
+    steps: ["given: 50 TB, 20 epochs, 4 runs a year, $0.02/GB-month, $0.09/GB egress, $0.10/GB-month NVMe", "stream: $12,000 + $360,000 = $372,000", "stage: $12,000 + $60,000 + $18,000 = $90,000", "saving $282,000; break-even 4.3 epochs per run", "meaning: tiering is a placement policy from read count and latency need"]
+
+active_learning:
+  - at_minute: 1
+    type: predict
+    prompt: "Which moves more bytes in one 30-day run? A) reading the data B) saving the model C) about the same"
+    answer: "B: 10.6 PB written against 6 TB read, 1,764x."
+  - at_minute: 5.5
+    type: retrieval
+    prompt: "Close your notes: what does an RDMA transfer leave out, and why can unrelated traffic slow a collective?"
+    answer: "The host CPU's payload copies; the burst shares switch buffers and links, and the slowest flow sets the collective's finish (Lecture 3)."
+  - at_minute: 17.5
+    type: predict
+    prompt: "95 percent hits on the fast tier, misses 100x slower: how fast overall? A) 95 percent B) about half C) about one sixth"
+    answer: "C: 5.95 hot service times on average, 17 percent of the hot rate."
+  - at_minute: 23.5
+    type: estimate
+    prompt: "How much bandwidth do 2,048 GPUs need for text (4,096 tokens of 4 B) and images (256 JPEGs of about 116 KB) every 200 ms?"
+    answer: "167.8 MB/s and 303 GB/s, about 1,800x apart."
+  - at_minute: 36
+    type: diagnose
+    prompt: "A 500 GB/s file system delivers 5 GB/s after a move to 200 million JPEGs; data disks idle, loaders wait in open(), metadata server queue full. Why, and what is the fix?"
+    answer: "Metadata-bound: every sample costs an open at the one MDS. Package into 50,000 tar shards (4,000x fewer files) and ship a manifest."
+  - at_minute: 47
+    type: estimate
+    prompt: "9.6 GB per node, 28 GB/s local NVMe, 1 TB/s shared file system, one save per 600 s: how long does training pause? A) 0.34 s B) 2.45 s C) 2.8 s"
+    answer: "A: 0.34 s local write; the 2.45 s drain runs in the background; 0.06 percent of the run."
+  - at_minute: 59
+    type: estimate
+    prompt: "Stream or stage a 50 TB dataset for 20 epochs per run, 4 runs a year?"
+    answer: "Stream $372,000, stage $90,000 a year; break-even 4.3 epochs per run."
+  - at_minute: 64
+    type: concept_question
+    prompt: "True or false: small files are harmless; size checkpoint writes by average bandwidth; compression always speeds input; a faster accelerator always trains faster."
+    answer: "All false (§4.11): metadata binds first; size for the burst; a CPU-bound decoder gets slower; faster compute shortens compute, not delivery."
+
+open_questions:
+  - "How much provenance should a fleet store per generated sample, and who pays for it?"
+  - "Memory pooled over CXL could add a tier between DRAM and NVMe. Which of today's buffers would move there first?"
+  - "A file system shared by ten jobs gives each a tenth. Should checkpoints get priority over input reads, or the reverse?"
+
+more_examples:
+  - "DeepSeek 3FS: 6.6 TiB/s aggregate reads from 180 storage nodes (sixteen 14 TiB NVMe drives and 2 x 200 Gb/s InfiniBand each) serving 500+ clients (3FS README, read stress test)."
+  - "MLPerf Storage v1.0 (MLCommons 2024): 124 passing closed results; per-accelerator demand grows 1.6 to 2.0x from A100 to H100 emulation."
+  - "GitLab, 31 January 2017: five backup paths failed; six hours of production writes lost (War Story 4.1)."
+  - "WebDataset tar shards and Mosaic Streaming for object-store streaming (Aizman et al. 2019; §4.3.5)."
+  - "Archetype B feature store: replay as a point-in-time problem (Lighthouse 4.1)."
+  - "Amazon S3 strong read-after-write consistency since December 2020; per-object consistency still does not make a multi-object checkpoint atomic (§4.3.7)."
+  - "DiskANN and HNSW retrieval indexes: dependent 100 us SSD reads per hop (§4.9.1)."
+
+left_to_reading:
+  - concept: "Data formats in depth (Parquet, Arrow, TFRecord, HDF5 indexes); compression codec arithmetic"
+    why: "Detail better read than heard; the vote frame uses the codec fallacy and the Diagnose frame the shard fix."
+  - concept: "Erasure coding, eleven-nines durability, durability against availability against consistency"
+    why: "Detail better read than heard (§4.3.7); one line in notes would not teach it."
+  - concept: "Multi-worker loading, NUMA placement, SSD endurance (DWPD), shuffle-buffer sizing"
+    why: "Single-node mechanics the course assumes; §4.3.3, §4.3.4, §4.4.2."
+  - concept: "Locality-aware scheduling and restaging after node failure"
+    why: "Placement is owned by Lecture 8; §4.4.3 has the restage arithmetic."
+  - concept: "Streaming watermarks and late data"
+    why: "Detail better read than heard (§4.7.1); the commit boundary is taught."
+  - concept: "CXL, computational storage, persistent memory"
+    why: "Forward-looking (§4.10); one open question."
+
+closing:
+  return_to_hook: "Back to the run: read 6 TB once in about 2,000 shards staged on local NVMe at 2.3 MB/s on average; write 10.6 PB as 9.6 GB per node with a 0.34 s pause (0.06 percent), restorable when the manifest lands. In Fleet Law terms, prefetch keeps input wait hidden and staging shrinks the synchronization pause to the local write."
+  read_and_practice: ["Data Storage §4.3 to §4.8", "self-check questions of §4.2 to §4.11", "Checkpoints 4.3 and 4.4", "redo Napkin Math 4.7 for a 70B model on 64 nodes"]
+  further_reading:
+    - cite: "Data Storage, §4.3 to §4.8"
+      url: "https://mlsysbook.ai"
+      why: "Every number in today's lecture, with the self-checks."
+    - cite: "Aizman, Maltby, and Breuel, High Performance I/O for Large Scale Deep Learning, IEEE Big Data 2019"
+      url: "https://doi.org/10.1109/bigdata47090.2019.9005703"
+      why: "WebDataset-style sharding and streaming."
+    - cite: "Dean and Barroso, The Tail at Scale, CACM 2013"
+      url: "https://doi.org/10.1145/2408776.2408794"
+      why: "Tail latency at fan-out and hedged requests."
+    - cite: "Akidau et al., The Dataflow Model, PVLDB 2015"
+      url: "https://doi.org/10.14778/2824032.2824076"
+      why: "Exactly-once outcomes, watermarks, and late data."
+    - cite: "MLCommons, MLPerf Storage v1.0 results, 2024"
+      url: "https://mlcommons.org/benchmarks/storage/"
+      why: "Measured storage demand per emulated accelerator."
+    - cite: "DeepSeek, Fire-Flyer File System (3FS), 2025"
+      url: "https://github.com/deepseek-ai/3FS"
+      why: "A production AI file system with public throughput numbers."
+  bridge: "Lecture 5 (Collective Communication): how long does it take N accelerators to agree on one gradient?"
+
+callbacks:
+  - {lecture: 3, concept: "RDMA reliable-delivery contract", where: "recall frame (slide and note); GDS note"}
+  - {lecture: 3, concept: "Fabric sharing and isolation", where: "recall frame; fuel-line divider note"}
+  - {lecture: 3, concept: "Alpha-beta model", where: "recall note FLEX; next-lecture note"}
+  - {lecture: 1, concept: "Scaling laws as the demand curve", where: "hook reveal note"}
+  - {lecture: 1, concept: "Fleet Law", where: "goals note"}
+  - {lecture: 2, concept: "Capacity and bandwidth are separate tests", where: "ladder note"}
+  - {lecture: 6, concept: "Sharded data parallelism", where: "14-bytes-per-parameter note (gloss)"}
+  - {lecture: 7, concept: "Consistent checkpoint cut and Young-Daly checkpoint interval", where: "staging timeline note"}
+  - {lecture: 10, concept: "Phase-aware autoscaling and cold start; KV cache as admission budget", where: "serving note (gloss)"}
+  - {lecture: 12, concept: "Feature consistency contract", where: "commit-boundary note"}
+  - {lecture: 12, concept: "Lifecycle TCO", where: "egress note"}
+  - {lecture: 5, concept: "Next lecture", where: "closing frame"}
+  - {lecture: 10, concept: "Tail latency under fan-out (one-line pointer, D3)", where: "hedged-read slide and note"}
+  - {lecture: 1, concept: "Thread: C3 taxonomy and the Fleet Law (D4)", where: "goals slide, Fleet Law term line: T_sync(N), Coordination (C3)"}
+coverage:
+  primary_taught: ["I/O wall", "Scoped storage hierarchy", "Input delivery budget", "Metadata-bound shard packaging", "Checkpoint write path", "Total cost of data delivery", "Versioned artifacts and commit boundaries"]
+  primary_left_to_reading: []
+  secondary: ["Data stall ratio (overlap frame)", "Checkpoint storm (storm frame)", "Hedged reads against storage tail latency (tail frame)", "Serving-time storage (cold-start frame)"]
+  touches_reused: ["Fleet Law (L1)", "Scaling laws (L1)", "Synthetic fuel line (reading, §4.7.2)", "Capacity and bandwidth tests (L2)", "RDMA, fabric sharing (L3)"]
+  previews_glossed: ["Sharded data parallelism (L6)", "Consistent checkpoint cut, Young-Daly interval (L7)", "Cold start and KV cache (L10)", "Feature consistency, lifecycle TCO (L12)"]
+
+storyboard:
+  - "0.5 | title | Data Storage | cover blueprint"
+  - "0.5 | divider | Fuel Line"
+  - "2.5 | predict | Which moves more bytes in one 30-day run? | H100 photo + card"
+  - "2 | data plot | Saving the model moves 1,764x more bytes than reading data | hook_bytes"
+  - "1.5 | retrieval | Recall: RDMA and a shared fabric | card reveal"
+  - "1 | goals | How fast must storage feed and save a fleet?"
+  - "0.5 | divider | Tiers"
+  - "2 | real world [OPT] | Training streams large shards; databases seek small rows | HDD photo + table"
+  - "2.5 | build | With delivery fixed, a 16x faster accelerator runs 4x faster | io_wall 2 steps"
+  - "2.5 | build | Six tiers trade bandwidth for capacity, each at its own scope | tiers 2 steps"
+  - "2 | data + photo | Per-client bandwidth falls 7 to 17x at each step down | ladder + NVMe photo"
+  - "3 | predict | 95% hits on the fast tier: how fast overall? | cache_hit"
+  - "0.5 | divider | Delivery"
+  - "2.5 | equation anatomy | Required bandwidth is consumers x batch bytes / compute time"
+  - "3 | estimate | How much bandwidth do 2,048 GPUs need? | demand"
+  - "1.5 | data plot | MLPerf Storage: measured demand grows with accelerator count | scatter + table + one result"
+  - "2 | build | Overlap turns read plus compute into the longer of the two | stall 2 steps"
+  - "2 | code [OPT] | Prefetch covers the p99 delay but drains under a deficit | prefetch + DataLoader"
+  - "1.5 | diagram [OPT] | GPUDirect Storage removes the host copy but keeps CPU control | gds"
+  - "0.5 | divider | Shards"
+  - "2 | diagram + command | An open goes to one metadata server; bytes come from many | pfs + lfs setstripe"
+  - "3 | diagnose | Why does a 500 GB/s file system deliver 5 GB/s? | cards"
+  - "2 | real trace [OPT] | A production file system serves 6.6 TiB/s from 180 nodes | 3FS trace"
+  - "1.5 | table [OPT] | A hedged read pays only when its trigger sits in the tail | hedge rules"
+  - "0.5 | divider | Checkpoints"
+  - "2 | data + code | A resumable checkpoint at 14 bytes per parameter is 2,450 GB | ckpt_bytes + dcp.save"
+  - "2 | data plot [OPT] | Writing a copy from every replica takes 1,024x longer | storm"
+  - "3 | estimate | How long does training pause for each save? | card reveal"
+  - "3 | build | The pause ends at t1; the checkpoint is restorable at t3 | staging 3 steps"
+  - "0.5 | divider | Versions and Cost"
+  - "1.5 | diagram + photo | Every versioned artifact names its inputs, code, and seed | versions + tape photo"
+  - "2 | build | At a commit boundary, a replay is safe only with keyed writes | ackgap 2 steps"
+  - "2 | data + config | Ten reads across regions cost more than a year of storage | egress + S3 lifecycle rule"
+  - "3 | estimate | Stream or stage a 50 TB dataset? | stage_cost 2 steps"
+  - "1.5 | data plot [OPT] | Serving loads weights once per replica, in 350 s to 1.8 s | coldstart"
+  - "0.5 | divider | Wrap-Up"
+  - "2.5 | vote | Vote: true or false? | four fallacies"
+  - "2 | synthesis | The run reads once, writes 4,320 times, and pauses 0.34 s | H100 photo + two cards"
+  - "1 | takeaways"
+  - "0.5 | open questions [OPT]"
+  - "0.5 | read and explore"
+  - "0.5 | next lecture | racks photo"
+
+notes_for_author:
+  - "Every derived number is computed in images/calcs.py and printed with its label; make_figs.py imports it for drawn values. The drain is 2.45 s (2,450 GB at 1 TB/s); the chapter's Napkin Math 4.7 rounds the same arithmetic to about 2.4 s via 2.4 TB."
+  - "Old-deck files in images/ are unused (listed in the report); the lead removes them."
+  - "The 3FS trace is the README figure cropped to its plot area with the legend blanked; axes are relabeled in TikZ at slide size from the original's ticks (6.0 to 7.0 TiB/s, 07:30 to 07:40)."
+  - "Code and config artifacts use real APIs and formats: torch.utils.data.DataLoader arguments, torch.distributed.checkpoint.save, lfs setstripe -c/-S, and the Amazon S3 lifecycle rule schema; the values in them are illustrative."
+  - "Kit request: the volume's fleet diagram (course plan amendment 2) would let the tiers and complete-data-path frames build on a shared node/rack/storage figure."
+  - "2026-10-19 sweep (D3, D4, D10). D3: Lecture 10 owns the fan-out tail (1 - 0.99^100, Lighthouse 10.2). The hedged-read frame keeps the 63 percent as one line with a pointer to Lecture 10, drops the tail curve, and spends its time on the hedge rules (where to set the trigger, where the replica sits). tail.svg is now unused (listed; not deleted); calcs.py prints the 63.4 percent. D4: the goals slide names the Fleet Law term (T_sync) and C3 axis (Coordination). D10: X-not-Y constructions and reveal colons rewritten."

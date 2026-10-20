@@ -23,7 +23,7 @@
 
 **Comes in from the previous lab:** camera calibration, sim-trained VLA on the UNO Q, sim2real gap table.\
 **Goes out to the next lab:** real-world dataset and dataset card, fine-tuned VLA, untethered loop, loop-latency breakdown, and your capstone proposal.\
-**If the previous lab didn't finish:** staff provide a reference sim-trained checkpoint already deployed on the board.
+**If the previous lab did not finish:** staff provide a reference sim-trained checkpoint already deployed on the board.
 
 ---
 

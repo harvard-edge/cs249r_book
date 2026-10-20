@@ -1,0 +1,355 @@
+chapter: 06_distributed_training
+lecture: "06"
+title: "Distributed Training"
+subtitle: "Splitting one training job across many accelerators"
+volume: "Volume II"
+layer: distributed
+minutes: 75
+notes_minutes: 70.5
+core_minutes: 62.0
+target_ideas: 30
+thesis: "Every parallelism strategy turns memory pressure into communication, waiting, or idle time, and a good plan sends that overhead to the least binding resource."
+
+hook:
+  minutes: "0-4"
+  setup: "Goyal et al. 2017 trained ResNet-50 on ImageNet in about one hour on 256 P100 GPUs (32 servers), against about 29 hours on one 8-GPU server, by growing the global batch 32 times to 8,192; throughput scaled at about 90 percent of ideal over 50 Gb/s Ethernet (paper sections 1, 4.3, 5.5). Photo: the P100's GP100 chip (FritzchensFritz, CC0)."
+  question_to_class: "32 times the batch means 32 times fewer updates per epoch, for the same 90 epochs. Does ResNet-50 keep its accuracy? A) yes, old learning rate B) yes, learning rate x32 C) only with x32 and a warmup D) no"
+  payoff: "C, answered in the Batches segment: 23.60% baseline, 24.84% at 8k without warmup, 23.74% with gradual warmup (Goyal Table 1); past 8k the error rises to 33.96% at 64k (Figure 3 legends). The synthesis returns to the run: the statistical wall, then the 175B job's memory and communication walls."
+  sources: ["Goyal et al. 2017, arXiv:1706.02677, sections 1, 4.3, 5.5, Table 1, Figure 3", "chapter War Story 6.1, section 6.4.5"]
+
+driving_question: "How should one training job that is too large and too slow for one node split across 1,024 GPUs?"
+
+recall: "Lecture 5: a ring AllReduce moves 2(N-1)/N times the payload per worker; for the 175B model's 350 GB of FP16 gradients that is about 699 GB per GPU at N = 1,024, about 14 s at 50 GB/s, whatever N is (calcs.py)."
+
+running_example: "The volume's Archetype A reference job: a 175B dense transformer, 16 B per parameter of mixed-precision Adam state (2,800 GB), on 1,024 H100s in 128 nodes of 8 (NVLink 450 GB/s per direction inside a node, NDR InfiniBand 50 GB/s per port between nodes). Scoreboard: pure data parallelism 15% efficiency (Napkin Math 6.5); TP 8 x DP 128 83%; TP 8 x PP 4 x DP 32 87% with ZeRO-1 to fit about 24 GB per GPU (section 6.6). Shown as the real thing through an 8-GPU NVLink board photo, InfiniBand cables, and Llama 3 405B's published layouts (Dubey et al. 2024, Table 4)."
+
+goals:
+  - "Compute scaling efficiency from the Fleet Law and find the scaling wall."
+  - "Judge when a bigger batch or a looser barrier still buys progress."
+  - "Size sharded state and a pipeline bubble for a model that does not fit."
+  - "Place tensor, pipeline, and data parallelism on the bandwidth tiers."
+
+segments:
+  - name: Replicas
+    divider_question: "When does copying the model and splitting the batch pay?"
+    read: "§6.3, §6.4.1, §6.4.2"
+    concept_questions: [1, 2, 3, 4]
+    minutes: 11
+    land: "Replicas reproduce single-device SGD, but their AllReduce stays near 2M bytes per GPU, so efficiency falls as N grows: 15 percent for the 175B job."
+  - name: Batches
+    divider_question: "Who waits at the barrier, and how large can the batch grow?"
+    read: "§6.3.1 (synchronization models), §6.4.3 to §6.4.6"
+    concept_questions: [5, 6, 7, 8]
+    minutes: 11
+    land: "The barrier makes the slowest worker set the step, and the critical batch caps how many replicas the optimizer can use."
+  - name: Sharding
+    divider_question: "How can replicas stop holding a full copy of the state?"
+    read: "§6.1, §6.3.3, §6.5"
+    concept_questions: [9, 10, 11]
+    minutes: 9.5
+    land: "Sharding buys capacity with messages; for the 175B job the state fits on 64 GPUs but the regather costs about ten times the compute."
+  - name: Splitting
+    divider_question: "How do we split the model's computation, and what does each cut cost?"
+    read: "§6.5.1 to §6.5.5"
+    concept_questions: [12, 13, 14]
+    minutes: 12.5
+    land: "Pipelines pay idle slots that only more microbatches shrink; tensor parallelism pays two exchanges per layer and needs the NVLink domain."
+  - name: Placement
+    divider_question: "How do the cuts combine, and where does each one run?"
+    read: "§6.6 to §6.8"
+    concept_questions: [15]
+    minutes: 10.5
+    land: "A plan is one joint point DP x PP x TP that fits memory and batch and puts each axis on a tier that carries it."
+
+concept_questions:
+  - id: 1
+    q: "Why do data-parallel replicas compute the same update as one device?"
+    picture: "dp_flow build: four GPUs with full copies, local gradients, AllReduce, identical update; the PyTorch DDP call"
+    numbers: "g = (1/N) sum g_k equals the combined-batch gradient for equal local batches (§6.3); conditions: weighting by valid items, matching optimizer state"
+    example: "PyTorch DistributedDataParallel"
+    read: "§6.3"
+  - id: 2
+    q: "What is scaling efficiency, and why does it fall with N?"
+    picture: "Fleet Law, then eta = T_compute / (N T_step) built term by term"
+    numbers: "Equations 1 and 2 (§6.4.1); overhead multiplied by N"
+    example: "a 1% single-device residual fills about 84% of each step at 512 GPUs (§6.4.2)"
+    read: "§6.4.1, §6.4.2"
+  - id: 3
+    q: "Where does pure data parallelism hit the scaling wall for the 175B job?"
+    picture: "eta_bars: illustrative few/many bars, then 2.1 s compute against 11.9 s exposed AllReduce; InfiniBand photo"
+    numbers: "2.1e18 FLOPs per step; 2.07 s compute (FP8 at 50% of 1,979 TFLOP/s, 1,024 GPUs); 350 GB FP16 gradients; 11.9 s exposed; 15.0% (Napkin Math 6.5; calcs.py)"
+    example: "the reference job as a counterfactual"
+    read: "§6.4.1"
+  - id: 4
+    q: "What does leaving the node cost, and what do measured runs keep?"
+    picture: "GPT-2 bars (99.4% against 27.9%); MLPerf Training five series with ideal lines"
+    numbers: "Napkin Math 6.1-6.3: 11.7 ms NVLink sync against 4,650 ms over 10 GbE; 8.9x on 32 GPUs; $100 against $359. MLPerf: Eos GPT-3 58.3 min on 512 H100s, 3.9 min on 10,752 (21x GPUs, 14.9x time, 71%); largest runs keep 71-84% (MLCommons via MLSysIM; calcs.py)"
+    example: "NVIDIA Eos"
+    read: "§6.3.2, §6.4.2"
+  - id: 5
+    q: "Why does the slowest worker set each synchronous step?"
+    picture: "0.99^N curve with 8, 100, 1,000 marked; PyTorch process-group timeout code"
+    numbers: "92.3%, 36.6%, 0.0043% of steps with no late GPU (1% per GPU per step, §6.3.1; calcs.py); NCCL default collective timeout 10 minutes (PyTorch docs)"
+    example: "a thermally throttled GPU"
+    read: "§6.3.1"
+  - id: 6
+    q: "What do BSP, SSP, and ASP trade?"
+    picture: "three timelines with a straggler W3 (after figure 5); one-line staleness definition"
+    numbers: "staleness 0, <= s, unbounded; tables 2 and 4; SSP regret bound O(sqrt((s+1)N/T)) (Ho et al. 2013) in notes"
+    example: "64-worker SSP scenario: 38.1x for $37 against BSP 40.1x for $35 (Napkin Math 6.6, illustrative)"
+    read: "§6.3.1, §6.4.4, §6.4.7"
+  - id: 7
+    q: "What is the critical batch, and how many replicas can the optimizer use?"
+    picture: "gradient-noise model: steps 1 + Bcrit/B and samples 1 + B/Bcrit (after figure 10); B* = tr(Sigma)/|grad L|^2; N ~ Bcrit/b"
+    numbers: "Definition 6.6, McCandlish et al. 2018"
+    example: "pilot trace: Bcrit = 16,000, batch 8,192 = 0.51 of it, crossover at 125 GPUs (Checkpoint 6.2 inputs; calcs.py)"
+    read: "§6.4.6"
+  - id: 8
+    q: "Did ResNet-50 keep its accuracy at batch 8k, and past it?"
+    picture: "Goyal Table 1 bars (column); batch sweep 128 to 64k"
+    numbers: "23.60 / 24.84 / 23.74%; 16k 24.79, 32k 27.55, 64k 33.96%; spread up to 8k 0.26 points (Goyal Table 1, Figure 3 legends; calcs.py)"
+    example: "linear scaling rule with 5-epoch gradual warmup"
+    read: "§6.4.5, War Story 6.1"
+  - id: 9
+    q: "Why must state be split at all?"
+    picture: "memory wall: Epoch AI notable models x 16 B against single-accelerator capacity"
+    numbers: "GPT-3 2.8 TB, about 35x one 80 GB GPU; capacity K80 to B200 about 15x (§6.1, figure 1; MLSysIM)"
+    example: "GPT-3 in 2020"
+    read: "§6.1"
+  - id: 10
+    q: "What does each ZeRO stage shard, and what does it cost in traffic?"
+    picture: "zero build: 7B on 64 GPUs per-GPU stacked bars with traffic; DeepSpeed config key; ZeRO-3 schedule table"
+    numbers: "112, 29.3, 15.5, 1.75 GB; traffic 1x, 1x, 1x, 1.5x; about 3L collectives per step (Napkin Math 6.4, table 3; ZeRO-1/2 derived in calcs.py)"
+    example: "DeepSpeed zero_optimization.stage; PyTorch FSDP FULL_SHARD"
+    read: "§6.3.3"
+  - id: 11
+    q: "Can ZeRO-3 alone train the 175B model?"
+    picture: "predict card, then fits / slow / no layer split"
+    numbers: "2,800/64 = 43.75 GB + 4.8 GB activations = 48.55 GB (chapter rounds 48.6); regather about 1.1 TB per GPU per step, about 10x compute on one NDR port (Napkin Math 6.7, §6.5; calcs.py)"
+    example: "the reference model"
+    read: "§6.5"
+  - id: 12
+    q: "Where does a pipeline idle, and how many microbatches does it need?"
+    picture: "pipe build: naive 6 of 8 idle, GPipe 6 of 14; bubble curve for p = 4, 8, 16; PyTorch Schedule1F1B"
+    numbers: "(p-1)/(m+p-1): 42.9%, 17.9%, 31.9% (p16 m32), 8.6% (p4 m32); m > 9(p-1) = 135 for p = 16 (Napkin Math 6.8, §6.6.2; calcs.py)"
+    example: "GPipe and 1F1B"
+    read: "§6.5.1, §6.5.2"
+  - id: 13
+    q: "How does Megatron split a layer, and why must it stay on NVLink?"
+    picture: "tp build (column then row then AllReduce); HGX board photo beside per-layer bars"
+    numbers: "1.9 ms compute, 0.4 ms over NVLink, 3.5 ms over one NDR port per GPT-3 layer (Systems Perspective 6.1); NVLink 450 against NDR 50 GB/s = 9x"
+    example: "Megatron-LM, two AllReduces per block"
+    read: "§6.5.3"
+  - id: 14
+    q: "How well did tensor parallelism scale in practice, and which other axes exist?"
+    picture: "Megatron-LM Figure 5 bars; three cards: context, experts, embeddings; FP8 line"
+    numbers: "100, 95, 82, 77% (1 to 8 GPUs, one DGX-2H); 96, 83, 79, 74% (64 to 512) (Shoeybi et al. 2019, Figure 5); ring attention chunks >= 1,100 tokens on NVLink, >= 9,900 on NDR (§6.5.4)"
+    example: "Ring Attention, Switch Transformer, DLRM"
+    read: "§6.5.3 to §6.5.6, §6.4.8"
+  - id: 15
+    q: "How do the axes combine into one feasible plan?"
+    picture: "grid3d on the tiers with Megatron-LM flags; hybrid scoreboard build; Llama 3 Table 4"
+    numbers: "configs A/B/C: 15, 83 (54.5 without overlap), 87%; state 2,800, 350, 87.5 GB per GPU, 23.9 GB with ZeRO-1; DP shard 10.94 GB (section 6.6; calcs.py). Llama 3 405B: TP8 PP16 DP64 on 8,192 at 43% MFU; TP8 PP16 DP128 on 16,384 at 41%; TP8 CP16 PP16 DP8 at 38% (Dubey et al. 2024, Table 4)"
+    example: "Llama 3 405B"
+    read: "§6.6, §6.8"
+
+concept_trace:
+  - concept: "Data-parallel update equivalence"
+    frame: "Data parallelism averages N local gradients into one update"
+    shown_by: "dp_flow 3-step build ending in identical updates, with the averaging equation"
+  - concept: "Synchronization models and stragglers"
+    frame: "BSP waits at a barrier; SSP and ASP trade waiting for staleness"
+    shown_by: "three-panel timeline build with straggler W3; preceded by the 0.99^N straggler curve frame"
+  - concept: "Sharded data parallelism"
+    frame: "ZeRO shards optimizer state, then gradients, then weights"
+    shown_by: "4-step per-GPU memory build with traffic labels 1x, 1x, 1x, 1.5x"
+  - concept: "Scaling efficiency and the scaling wall"
+    frame: "The 175B AllReduce leaves 15% efficiency at 1,024 GPUs"
+    shown_by: "eta_bars: schematic shrinking compute against constant communication, then 2.1 s against 11.9 s"
+  - concept: "Critical batch size"
+    frame: "Past the critical batch, more samples buy few fewer steps"
+    shown_by: "steps and samples curves crossing at B = Bcrit, with the B* formula and N ~ Bcrit/b"
+  - concept: "Pipeline parallelism bubble"
+    frame: "A pipeline idles (p-1)/(m+p-1) of each step"
+    shown_by: "bubble curve for p = 4, 8 with marked points; preceded by the GPipe schedule build"
+  - concept: "Tensor parallelism in the fast domain"
+    frame: "Tensor-parallel exchanges fit only inside the NVLink domain"
+    shown_by: "NVLink board photo beside per-layer compute/NVLink/NDR bars (1.9, 0.4, 3.5 ms)"
+  - concept: "Parallelism plan as joint placement"
+    frame: "A parallelism plan is a joint placement of DP, PP, and TP"
+    shown_by: "grid3d layout TP8 x PP4 x DP32 on node/stage/replica tiers with the four tests; then the hybrid scoreboard build"
+
+worked_examples:
+  - name: "Napkin Math 6.5: scaling efficiency of the 175B job"
+    steps: ["given: 175B, 2M tokens per update, 1,024 H100s, FP8 at 50% of 1,979 TFLOP/s, FP16 gradients, 50 GB/s", "6 x 175e9 x 2e6 = 2.1e18 FLOPs; 2.07 s per GPU", "ring transfer of 350 GB about 14 s; 11.9 s exposed", "eta = 2.1 / 14.0 = 15%", "meaning: the scaling wall of pure data parallelism"]
+  - name: "Napkin Math 6.4 and 6.7: ZeRO stages and the 175B fit"
+    steps: ["7B x 16 B = 112 GB > 80 GB", "ZeRO-1 29.3 GB, ZeRO-2 15.5 GB, ZeRO-3 1.75 GB on 64 GPUs", "175B: 2,800/64 = 43.75 GB + 4.8 GB = 48.55 GB, fits", "but regather about 1.1 TB per GPU per step", "meaning: capacity bought with bandwidth"]
+  - name: "Napkin Math 6.8: the pipeline bubble"
+    steps: ["(p-1)/(m+p-1)", "p = 4, m = 4: 42.9%; p = 8, m = 32: 17.9%", "your turn: p = 16, m = 32: 31.9%", "below 10% needs m > 135", "meaning: microbatches must outnumber stages, and they grow the batch"]
+  - name: "Section 6.6: the hybrid scoreboard"
+    steps: ["A: DP-1024, 15%, 2,800 GB per GPU", "B: TP8 x DP128, shard 43.75 GB, 1.75 s, 83% (54.5% without overlap), 350 GB per GPU", "C: TP8 x PP4 x DP32, shard 10.94 GB, 0.44 s, bubble 8.6%, 87%, 87.5 GB per GPU", "ZeRO-1 across 32 replicas: 23.9 GB per GPU", "meaning: match each axis to the tier that carries it"]
+
+active_learning:
+  - at_minute: 2
+    type: predict
+    prompt: "Does ResNet-50 keep its accuracy at batch 8,192? A) old LR B) LR x32 C) x32 with warmup D) no"
+    answer: "C: 24.84% without warmup, 23.74% with gradual warmup, against 23.60% (Goyal Table 1)."
+  - at_minute: 6
+    type: retrieval
+    prompt: "Write the bytes each worker sends in a ring AllReduce of M bytes; price 350 GB at 50 GB/s."
+    answer: "2(N-1)/N x M, about 699 GB per GPU at N = 1,024, about 14 s."
+  - at_minute: 16
+    type: estimate
+    prompt: "GPT-2, 1.8 s compute: estimate efficiency in one NVLink node and across four 10 GbE nodes."
+    answer: "99.4% and 27.9%; 8.9x on 32 GPUs; one node with 4-step accumulation costs $100 against $359."
+  - at_minute: 28.5
+    type: estimate
+    prompt: "tr(Sigma) = 1.6e6, |grad L|^2 = 100, 4 sequences per GPU, 32 accumulation steps, 64 GPUs: is B = 8,192 past the critical batch?"
+    answer: "Bcrit = 16,000; 8,192 is 0.51 of it; crossover near 125 GPUs."
+  - at_minute: 37.5
+    type: predict
+    prompt: "Can ZeRO-3 alone train the 175B model on 64 GPUs of 80 GB? Does it fit? Is it fast?"
+    answer: "Fits at 48.55 GB; slow, about 1.1 TB of regather per GPU per step, about 10x compute; no layer is split."
+  - at_minute: 46
+    type: estimate
+    prompt: "What fraction idles at p = 16, m = 32?"
+    answer: "15/47 = 31.9%; below 10% needs m > 135."
+  - at_minute: 59.5
+    type: diagnose
+    prompt: "Run A: TP 8 spans two nodes; Run B: PP 8, m = 8, MFU 35%, links idle; Run C: pure DP across 128 nodes."
+    answer: "A: TP off its tier (3.5 ms against 1.9 ms per layer). B: bubble 7/15 = 46.7%. C: scaling wall; add TP and PP."
+  - at_minute: 64
+    type: concept_question
+    prompt: "True or false: linear speedup with enough engineering; accumulation is free; LR from 8 GPUs works on 256; 50% node MFU at 83% scaling gives about 41.5% fleet MFU."
+    answer: "F, F, F, T (chapter §6.10 fallacies and pitfalls)."
+
+open_questions:
+  - "NVLink Switch systems stretch the fast domain past one server. Which placement rules change, and which stay?"
+  - "Llama 3 accepted lower MFU to double its GPUs. When is a faster but less efficient run the right purchase?"
+  - "Stale updates trade waiting for convergence. Will heterogeneous fleets make asynchronous training return?"
+
+more_examples:
+  - "Llama 3 405B 4D parallelism and its MFU at 8,192 and 16,384 H100s (Dubey et al. 2024, Table 4)."
+  - "MLPerf Training GPT-3 and Llama 3.1 405B scaling series (MLCommons v3.1 to v5.1)."
+  - "Megatron-LM weak scaling to 512 V100s (Shoeybi et al. 2019, Figure 5)."
+  - "Horovod and the move from parameter servers to ring AllReduce (Sergeev and Del Balso 2018; chapter footnote 1)."
+  - "PPO against DPO alignment budgets: 1,494 GB against 1,260 GB (Napkin Math 6.9)."
+  - "DLRM embedding sharding of 10 TB+ tables (Lighthouse 6.1)."
+
+further_reading:
+  - cite: "Distributed Training, §6.3 to §6.6 and §6.10"
+    url: "https://mlsysbook.ai"
+    why: "Every worked example and fallacy in the lecture."
+  - cite: "Goyal et al., Accurate, Large Minibatch SGD: Training ImageNet in 1 Hour, 2017"
+    url: "https://arxiv.org/abs/1706.02677"
+    why: "The linear scaling rule, warmup, and the batch limit."
+  - cite: "Rajbhandari et al., ZeRO: Memory Optimizations Toward Training Trillion Parameter Models, SC 2020"
+    url: "https://arxiv.org/abs/1910.02054"
+    why: "The three sharding stages and their traffic."
+  - cite: "Narayanan et al., Efficient Large-Scale Language Model Training on GPU Clusters Using Megatron-LM, SC 2021"
+    url: "https://arxiv.org/abs/2104.04473"
+    why: "Combining tensor, pipeline, and data parallelism at scale."
+  - cite: "McCandlish et al., An Empirical Model of Large-Batch Training, 2018"
+    url: "https://arxiv.org/abs/1812.06162"
+    why: "The gradient-noise critical batch."
+  - cite: "Dubey et al., The Llama 3 Herd of Models, 2024, §3.3"
+    url: "https://arxiv.org/abs/2407.21783"
+    why: "A real 16,384-GPU parallelism plan with measured MFU."
+
+callbacks:
+  - {lecture: 1, concept: "Fleet Law", where: "Scaling efficiency frame, credit and note"}
+  - {lecture: 1, concept: "Scaling laws as the demand curve", where: "Memory wall frame, note"}
+  - {lecture: 2, concept: "Bandwidth hierarchy dictates placement", where: "Running-job frame note; NVLink-domain frame note"}
+  - {lecture: 3, concept: "Traffic-matched topology (rail-optimized fabric)", where: "Joint placement frame, note"}
+  - {lecture: 5, concept: "Ring AllReduce and the bandwidth bound", where: "Retrieval frame, slide credit and note"}
+  - {lecture: 5, concept: "Exposed communication under overlap", where: "175B efficiency frame, note"}
+  - {lecture: 5, concept: "Gradient compression with error feedback", where: "SSP table frame, note"}
+  - {lecture: 5, concept: "Collective contracts (ReduceScatter, AllGather)", where: "ZeRO frame, note"}
+  - {lecture: 5, concept: "AllToAll active bound", where: "Long contexts, experts, embeddings frame, note"}
+  - {lecture: 7, concept: "Gray failure detection", where: "Straggler frame, note"}
+  - {lecture: 7, concept: "Fleet failure rate", where: "Next-lecture frame, note"}
+  - {lecture: 9, concept: "MFU as a measure (ML goodput)", where: "Llama 3 frame, note"}
+  - {lecture: 10, concept: "KV cache as admission budget", where: "Alignment frame, note"}
+  - {lecture: 1, concept: "Thread: C3 taxonomy and the Fleet Law (D4)", where: "goals slide, Fleet Law term line: T_comm(N) and T_sync(N); Communication (C2) and Coordination (C3)"}
+left_to_reading:
+  - concept: "FP8 training precision contract"
+    why: "Secondary; one line on the extra-axes slide and in the 175B efficiency note (FP8 compute, FP16 wire)."
+  - concept: "Sequence parallelism and Ulysses mechanics; zero-bubble schedules; interleaved pipelines"
+    why: "Detail better read than heard (§6.5.2, §6.5.4); one line each in notes."
+  - concept: "Convergence theorem 6.1 and the SSP regret bound"
+    why: "Math better read; the lecture uses the batch and staleness consequences."
+  - concept: "Frameworks table (§6.9) beyond DDP/FSDP, DeepSpeed, Megatron-LM, and pipelining code"
+    why: "A translation aid for reading documentation."
+  - concept: "Communication energy envelope (§6.4.2)"
+    why: "Owned in depth by Lectures 5 and 15."
+
+closing:
+  return_to_hook: "Three walls, one per row: the one-hour run hit the statistical wall and needed a scaled learning rate with warmup, which failed past 8k; the 175B job's 2,800 GB hit the memory wall, answered by ZeRO, TP, and PP at the price of bytes, a fast link, and a bubble; pure data parallelism hit the scaling wall at 15 percent, and placing each axis on its tier reached about 87 percent."
+  read_and_practice: ["§6.3 to §6.6 and §6.10", "the section self-checks", "redo Napkin Math 6.8 for p = 16"]
+  bridge: "Lecture 7 (Fault Tolerance): how often does a large job fail, and how often should it save itself? At 1,024 GPUs with a 50,000-hour MTTF, a GPU fails about every 48.8 hours (§6.1; calcs.py)."
+
+storyboard:
+  - {min: 0.5, type: title, title: "Distributed Training", visual: "blueprint cover"}
+  - {min: 0.5, type: divider, title: "The Run"}
+  - {min: 1, type: big number, title: "In 2017, 256 GPUs trained ResNet-50 on ImageNet in one hour", visual: "GP100 photo (CC0); 29 h against 1 h", steps: 3}
+  - {min: 2.5, type: predict, title: "Does ResNet-50 keep its accuracy at batch 8,192?", visual: "Goyal Table 1, baseline only"}
+  - {min: 1.5, type: real world, title: "Today's job is a 175B model whose state needs 35 GPUs", visual: "HGX board and InfiniBand photos; card", steps: 3}
+  - {min: 1.5, type: retrieval, title: "Recall: what does a ring AllReduce cost each GPU?"}
+  - {min: 1.5, type: goals, title: "How should one training job split across 1,024 GPUs?", visual: "Summit photo"}
+  - {min: 0.5, type: divider, title: "Replicas"}
+  - {min: 2, type: build-up, title: "Data parallelism averages N local gradients into one update", visual: "dp_flow + DDP code", steps: 3}
+  - {min: 2, type: equation anatomy, title: "Scaling efficiency is the Fleet Law's overhead over compute", steps: 3}
+  - {min: 2.5, type: build-up, title: "The 175B AllReduce leaves 15% efficiency at 1,024 GPUs", visual: "eta_bars + InfiniBand photo", steps: 2}
+  - {min: 2.5, type: exercise, title: "What does leaving the node cost GPT-2?", visual: "gpt2 bars", steps: 3}
+  - {min: 1.5, type: data plot, title: "In MLPerf, 21x more H100s cut GPT-3's time 14.9x", visual: "MLPerf scaling (real data)"}
+  - {min: 0.5, type: divider, title: "Batches"}
+  - {min: 1.5, type: data plot, title: "One slow GPU in a hundred delays almost every step at 1,000", visual: "0.99^N + timeout code"}
+  - {min: 2.5, type: build-up, title: "BSP waits at a barrier; SSP and ASP trade waiting for staleness", steps: 3}
+  - {min: 2, type: assertion-evidence, title: "Past the critical batch, more samples buy few fewer steps", steps: 2}
+  - {min: 2, type: data plot, title: "ResNet-50 kept its accuracy to batch 8k, with warmup", visual: "Goyal Table 1 + Figure 3 data", steps: 2}
+  - {min: 2, type: exercise, title: "Is a global batch of 8,192 past the critical batch?", visual: "card + DeepSpeed config", steps: 3}
+  - {min: 1, type: table, title: "Relaxing the barrier saved communication but added iterations", optional: true}
+  - {min: 0.5, type: divider, title: "Sharding"}
+  - {min: 1.5, type: data plot, title: "Training state outgrew one accelerator in 2020", visual: "Epoch AI memory wall"}
+  - {min: 2.5, type: build-up, title: "ZeRO shards optimizer state, then gradients, then weights", visual: "zero bars + DeepSpeed config", steps: 4}
+  - {min: 1.5, type: table, title: "Full sharding gathers every layer's weights twice per step", optional: true}
+  - {min: 2.5, type: predict, title: "Can ZeRO-3 alone train the 175B model?", steps: 4}
+  - {min: 1, type: code, title: "DDP and FSDP differ by one wrapper and many bytes", optional: true}
+  - {min: 0.5, type: divider, title: "Splitting"}
+  - {min: 2.5, type: build-up, title: "Microbatches keep pipeline stages busy except at fill and drain", steps: 2}
+  - {min: 2, type: assertion-evidence, title: "A pipeline idles (p-1)/(m+p-1) of each step", visual: "bubble curve + Schedule1F1B code", steps: 2}
+  - {min: 1.5, type: exercise, title: "What fraction idles at p = 16 and m = 32?", steps: 2}
+  - {min: 1.5, type: build-up, title: "Megatron splits columns, then rows, then reduces once", steps: 3}
+  - {min: 2, type: real world, title: "Tensor-parallel exchanges fit only inside the NVLink domain", visual: "HGX photo + per-layer bars"}
+  - {min: 1, type: data plot, title: "Megatron kept 77% at 8-way and 74% on 512 GPUs", optional: true}
+  - {min: 1.5, type: comparison, title: "Long contexts, experts, and embeddings add more split axes", optional: true}
+  - {min: 0.5, type: divider, title: "Placement"}
+  - {min: 1.5, type: assertion-evidence, title: "A parallelism plan is a joint placement of DP, PP, and TP", visual: "grid3d + Megatron-LM flags"}
+  - {min: 2.5, type: build-up, title: "Matching axes to tiers lifts the 175B job from 15% to 87%", steps: 3}
+  - {min: 1.5, type: table, title: "Llama 3 405B trained at TP 8 x PP 16 x DP 128", visual: "Dubey et al. 2024 Table 4"}
+  - {min: 2, type: diagnose, title: "Which axis is binding in each run?", steps: 2}
+  - {min: 1, type: big number, title: "Recomputation buys memory with a third more arithmetic", visual: "checkpoint code", optional: true}
+  - {min: 1, type: table, title: "PPO alignment holds four models in 1,494 GB; DPO needs 1,260", optional: true}
+  - {min: 0.5, type: divider, title: "Wrap-Up"}
+  - {min: 2.5, type: concept question, title: "True or false?", steps: 2}
+  - {min: 1.5, type: synthesis, title: "In the one-hour run, every split moved a cost", visual: "table + HGX thumbnail"}
+  - {min: 1, type: takeaways, title: "Takeaways"}
+  - {min: 0.5, type: open questions, title: "Open questions", optional: true}
+  - {min: 0.5, type: read and practice, title: "Read and explore"}
+  - {min: 0.5, type: next lecture, title: "Fault Tolerance", visual: "Summit photo"}
+
+real_artifacts_note: "Credited photos or real artifacts (code, config) appear at least every fourth frame: GP100 photo, HGX and InfiniBand photos, Summit photo, DDP call, InfiniBand photo, process-group timeout, DeepSpeed batch config, DeepSpeed ZeRO config, FSDP code, Schedule1F1B code, HGX photo, Megatron-LM flags, checkpoint code, HGX thumbnail, Summit photo. Published-measurement plots (Goyal, MLPerf, Epoch AI, Megatron-LM, Llama 3) add more."
+
+coverage:
+  primary_taught: ["Data-parallel update equivalence", "Synchronization models and stragglers", "Sharded data parallelism", "Scaling efficiency and the scaling wall", "Critical batch size", "Pipeline parallelism bubble", "Tensor parallelism in the fast domain", "Parallelism plan as joint placement"]
+  primary_left_to_reading: []
+  secondary: ["Sparse embedding sharding (one card)", "Sequence and context parallelism (one card)", "Expert parallelism (one card)", "Alignment training co-location (optional frame)", "FP8 training precision contract (one line)"]
+
+notes_for_author:
+  - "Derived numbers are computed in images/calcs.py (run it to print every value with its slide label). Where the deck's exact value differs from the chapter's rounded one, the slide shows the computed value and the note names the chapter's: 699 GB (chapter about 700), 48.55 GB (chapter 48.6), 4.64 s (chapter 4,650 ms), 41.5% (chapter about 41%)."
+  - "Outside numbers were read from the papers on 2026-10-18: Goyal et al. 2017 Table 1, Figure 3 legends, sections 4.3 and 5.5 (PDF text); Shoeybi et al. 2019 Figure 5 and section 5 (PDF text); Dubey et al. 2024 Table 4 (arXiv HTML)."
+  - "Code and config lines were checked against PyTorch 2.14 docs (DistributedDataParallel, FSDP ShardingStrategy, init_process_group timeout default 10 minutes for NCCL, torch.distributed.pipelining Schedule1F1B signature, torch.utils.checkpoint) and the DeepSpeed configuration docs (zero_optimization.stage 0-3; train_micro_batch_size_per_gpu; gradient_accumulation_steps)."
+  - "The HGX photo shows a B200 board; the slide labels it so and uses it as the 8-GPU NVLink domain, the same layout as the reference cluster's H100 nodes."
+  - "The plan marks this chapter for a second lecture; this single deck teaches all eight primary concepts with 8.5 optional minutes. A natural split is after the Batches segment."
+  - "Optional share is 8 of 33 content frames (about 24%), below the 30% target; candidates to tag optional if the author wants more: the MLPerf frame or the straggler frame."
+  - "2026-10-19 sweep (D4, D10). D4: the goals slide names, once, the Fleet Law term (T_comm(N) and T_sync(N)) and C3 axis (Communication (C2) and Coordination (C3)) in the volume's one form (the \\fleetterm line). D10: X-not-Y constructions and reveal colons rewritten. No exhibit here is retold from another lecture (D3)."

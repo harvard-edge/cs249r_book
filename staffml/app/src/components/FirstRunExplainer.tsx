@@ -32,28 +32,28 @@ const MODE_CONTENT: Record<ModeKey, ModeContent> = {
   practice: {
     icon: Target,
     title: "Practice mode",
-    tagline: "Untimed. Bring tools. Self-rate honestly. Build a learning loop.",
+    tagline: "Untimed, with tools available. Rate yourself honestly, and review what you miss.",
     bullets: [
       { icon: Calculator, text: "The Napkin Calc panel handles common back-of-envelope formulas (model memory, training time, KV cache, ridge point)." },
-      { icon: Cpu, text: "Hardware Reference has GPU specs, latency hierarchy, and interconnects — open it any time." },
-      { icon: Target, text: "After revealing the answer, rate yourself 1–4. Be honest — the rating is the whole signal." },
-      { icon: Repeat, text: "Wrong answers come back tomorrow. Partial answers in 3 days. Nailed answers in 1–2 weeks. The 'due' counter in the nav tells you what's waiting." },
+      { icon: Cpu, text: "Hardware Reference lists GPU specs, the latency hierarchy, and interconnects. Open it at any time." },
+      { icon: Target, text: "After revealing the answer, rate yourself 1–4. Be honest, because the rating drives the review schedule." },
+      { icon: Repeat, text: "Wrong answers come back tomorrow. Partial answers in 3 days. Nailed answers in 1–2 weeks. The \"due\" counter in the nav shows how many are waiting." },
     ],
   },
   gauntlet: {
     icon: Crosshair,
     title: "Mock Interview",
-    tagline: "Timed. The clock matters. Tools are available but you should know when to reach for them.",
+    tagline: "Timed. Tools are available, but a real interview would not always allow them.",
     bullets: [
       { icon: Clock, text: "Pick a length (5 / 10 / 15 questions, or one deep design problem). The clock starts on Begin." },
-      { icon: Calculator, text: "Hardware Ref and Napkin Calc are collapsed by default. Open them only when a real interview would let you peek." },
+      { icon: Calculator, text: "Hardware Ref and Napkin Calc are collapsed by default. Open them only when a real interview would allow it." },
       { icon: Target, text: "After each question: type your answer, reveal, compare against the model, then self-rate Skip / Wrong / Partial / Nailed." },
     ],
   },
   interview: {
     icon: Mic2,
     title: "Live Interview",
-    tagline: "Conversational. Adaptive. The AI interviewer follows up, probes weak areas, and does napkin math with you.",
+    tagline: "Conversational and adaptive. The AI interviewer follows up, probes weak areas, and works through napkin math with you.",
     bullets: [
       { icon: Mic2, text: "An AI interviewer conducts a conversational mock interview, presenting real vault questions and following up on your answers." },
       { icon: GitBranch, text: "Questions follow chains: the interviewer probes deeper when you struggle and advances to harder follow-ups when you are strong." },

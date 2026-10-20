@@ -12,7 +12,7 @@ showed it, and loading with the OS already dark never exercised the toggle path.
 Checks, per page:
   * text contrast >= 3:1 against the effective background, whole page including navbar,
     sidebar and footer (skips SVG and math)
-  * page regions (body, navbar, sidebar, footer) are dark
+  * page regions (body, navbar, sidebar, footer, announcement bar, mobile breadcrumb bar) are dark
   * callout headers (``details[class*="callout-"] > summary``) are dark
   * fenced code blocks are dark and padded
   * section numbers (``.header-section-number``) reach 4.5:1
@@ -61,10 +61,13 @@ PAGE_JS = r"""
     const r = el.getBoundingClientRect(); if (!r.width || !r.height) continue;
     if (el.closest('svg, mjx-container, .MathJax, script, style')) continue;
     const bg = effBg(el), fg = over(parse(cs.color), bg), c = contrast(fg, bg);
-    if (c < 3.0) add({kind: 'text-contrast', tag: el.tagName, text: t.slice(0, 40), contrast: +c.toFixed(2)});
+    if (c < 3.0) add({kind: 'text-contrast', tag: el.tagName, text: t.slice(0, 40), contrast: +c.toFixed(2),
+      cls: (el.className && el.className.toString ? el.className.toString() : '').slice(0, 40),
+      within: (el.closest('#quarto-sidebar') ? 'sidebar' : el.closest('nav') ? 'nav' : el.closest('#TOC, nav[role=doc-toc]') ? 'toc' : el.closest('footer') ? 'footer' : el.closest('main') ? 'main' : ''),
+      fg: 'rgb(' + fg.slice(0, 3).map(Math.round).join(',') + ')', bg: 'rgb(' + bg.slice(0, 3).map(Math.round).join(',') + ')'});
   }
   // Page regions must themselves be dark. Contrast alone cannot see a white footer under dark text.
-  ['body', '.nav-footer', 'nav.navbar', '#quarto-sidebar', '#quarto-margin-sidebar'].forEach(sel => {
+  ['body', '.nav-footer', 'nav.navbar', '#quarto-sidebar', '#quarto-margin-sidebar', '#quarto-announcement', '.quarto-secondary-nav'].forEach(sel => {
     const el = document.querySelector(sel);
     if (el && el.getBoundingClientRect().height > 0 && lum(effBg(el)) > 0.2) add({kind: 'region-light', region: sel, luminance: +lum(effBg(el)).toFixed(2)});
   });
@@ -98,8 +101,15 @@ class _QuietHandler(http.server.SimpleHTTPRequestHandler):
         pass
 
 
-def serve(root: Path) -> tuple[socketserver.TCPServer, int]:
-    handler = functools.partial(_QuietHandler, directory=str(root))
+def serve(root: Path, base: str = "") -> tuple[socketserver.TCPServer, int]:
+    class Handler(_QuietHandler):
+        def translate_path(self, path: str) -> str:
+            # Pages such as 404.html load assets by deployed absolute path (/instructors/site_libs/...).
+            if base and path.startswith(base + "/"):
+                path = path[len(base):]
+            return super().translate_path(path)
+
+    handler = functools.partial(Handler, directory=str(root))
     server = socketserver.TCPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server, server.server_address[1]
@@ -112,6 +122,7 @@ def main() -> int:
     ap.add_argument("--figures", action="store_true", help="also require figure images to be dimmed (books)")
     ap.add_argument("--json", type=Path, help="write the full result here")
     ap.add_argument("--width", type=int, default=1400)
+    ap.add_argument("--base", default="", help="deployed path prefix, e.g. /instructors; needed to audit 404 pages")
     args = ap.parse_args()
 
     try:
@@ -126,7 +137,7 @@ def main() -> int:
         print(f"no pages match {args.glob} under {root}", file=sys.stderr)
         return 2
 
-    server, port = serve(root)
+    server, port = serve(root, args.base.rstrip('/'))
     results: dict[str, dict] = {}
     failed = 0
     with sync_playwright() as pw:
@@ -138,12 +149,22 @@ def main() -> int:
             try:
                 page.goto(f"http://127.0.0.1:{port}/{rel}", wait_until="load", timeout=45000)
                 page.wait_for_timeout(1500)
-                toggle = page.locator("a.quarto-color-scheme-toggle")
-                if toggle.count() == 0 or not toggle.first.is_visible():
-                    results[rel] = {"skipped": "no usable colour-scheme toggle"}
-                    print(f"skip  {rel} (no usable toggle)")
+                if rel.endswith("404.html") and not args.base:
+                    # 404 pages load their assets by deployed absolute path, so without --base the
+                    # root-served copy renders unstyled and there is nothing to judge.
+                    results[rel] = {"skipped": "404 page (pass --base to audit)"}
+                    print(f"skip  {rel} (404 page; pass --base)")
                     continue
-                toggle.first.click()
+                toggle = page.locator("a.quarto-color-scheme-toggle")
+                if toggle.count() == 0:
+                    results[rel] = {"skipped": "no colour-scheme toggle"}
+                    print(f"skip  {rel} (no toggle)")
+                    continue
+                # On a phone the toggle sits inside the collapsed navbar. Dispatching the click
+                # runs the same handler a reader reaches by opening the menu and tapping it.
+                toggle.first.evaluate("e => e.click()")
+                # Freeze transitions so a color mid-fade is not read as the settled color.
+                page.add_style_tag(content="*, *::before, *::after { transition: none !important; animation: none !important; }")
                 page.wait_for_timeout(800)
                 res = page.evaluate(PAGE_JS, {"figures": args.figures})
                 results[rel] = res

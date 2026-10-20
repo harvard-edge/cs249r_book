@@ -44,7 +44,7 @@ export default function NotFound() {
 
       <h1 className="text-2xl font-extrabold text-textPrimary mb-2">Wrong Combination</h1>
       <p className="text-[15px] text-textSecondary mb-8 max-w-md">
-        This page doesn&apos;t exist — but the vault has {QUESTION_COUNT_DISPLAY} ML systems questions waiting for you.
+        This page does not exist, but the vault has {QUESTION_COUNT_DISPLAY} ML systems questions you can practice.
       </p>
 
       <div className="flex flex-wrap items-center justify-center gap-3">

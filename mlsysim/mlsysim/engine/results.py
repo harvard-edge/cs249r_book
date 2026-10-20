@@ -51,6 +51,20 @@ __all__ = [
     "ParallelismOptimizerResult",
     "BatchingOptimizerResult",
     "PlacementOptimizerResult",
+    # Situation models (2026-10-20): one solver per recurring calculation that
+    # chapters and lecture slides both quote, so the arithmetic has one home.
+    "DecodeBoundResult",
+    "TransferLadderResult",
+    "TensorParallelCommResult",
+    "TrainingRunResult",
+    "TrainingStateResult",
+    "PowerTransientResult",
+    "CoolantFlowResult",
+    "OutageCostResult",
+    "FailureIntervalResult",
+    "GradientSyncResult",
+    "CommunicationIntensityResult",
+    "TrainingGrowthResult",
 ]
 
 
@@ -97,6 +111,11 @@ class CheckpointResult(SolverResult):
     storage_bottleneck: bool
     mfu_penalty_pct: float
 
+    @property
+    def write_time(self) -> Quantity:
+        """Checkpoint write duration as a Pint Quantity."""
+        return self.write_time_seconds
+
 
 class SustainabilityResult(SolverResult):
     """Result from SustainabilityModel: energy, carbon, and water footprint."""
@@ -107,6 +126,34 @@ class SustainabilityResult(SolverResult):
     pue: float
     region_name: str
     embodied_carbon_kg: float = 0.0
+
+    @property
+    def it_energy(self) -> Quantity:
+        """IT energy consumption as a Pint Quantity."""
+        return self.it_energy_kwh
+
+    @property
+    def total_energy(self) -> Quantity:
+        """Total facility energy consumption (post-PUE) as a Pint Quantity."""
+        return self.total_energy_kwh
+
+    @property
+    def carbon_footprint(self) -> Quantity:
+        """Total carbon footprint (operational + embodied) as a Pint Quantity in kg."""
+        from ..core.units import Q_
+        return Q_(self.carbon_footprint_kg, "kg")
+
+    @property
+    def water_usage(self) -> Quantity:
+        """Total cooling water consumption as a Pint Quantity in liters."""
+        from ..core.units import Q_
+        return Q_(self.water_usage_liters, "liter")
+
+    @property
+    def embodied_carbon(self) -> Quantity:
+        """Embodied manufacturing carbon as a Pint Quantity in kg."""
+        from ..core.units import Q_
+        return Q_(self.embodied_carbon_kg, "kg")
 
 
 class ServingResult(SolverResult):
@@ -232,6 +279,58 @@ class EconomicsResult(SolverResult):
     pue: float
     region_name: str
 
+    @property
+    def capex(self) -> Quantity:
+        """Amortized hardware CapEx as a Pint Quantity in USD."""
+        from ..core.units import Q_
+        return Q_(self.capex_usd, "USD")
+
+    @property
+    def opex_energy(self) -> Quantity:
+        """Electricity OpEx as a Pint Quantity in USD."""
+        from ..core.units import Q_
+        return Q_(self.opex_energy_usd, "USD")
+
+    @property
+    def opex_maintenance(self) -> Quantity:
+        """Maintenance OpEx as a Pint Quantity in USD."""
+        from ..core.units import Q_
+        return Q_(self.opex_maintenance_usd, "USD")
+
+    @property
+    def total_opex(self) -> Quantity:
+        """Total OpEx as a Pint Quantity in USD."""
+        from ..core.units import Q_
+        return Q_(self.total_opex_usd, "USD")
+
+    @property
+    def tco(self) -> Quantity:
+        """Total Cost of Ownership (CapEx + OpEx) as a Pint Quantity in USD."""
+        from ..core.units import Q_
+        return Q_(self.tco_usd, "USD")
+
+    @property
+    def it_energy(self) -> Quantity:
+        """IT energy consumption as a Pint Quantity."""
+        return self.it_energy_kwh
+
+    @property
+    def total_energy(self) -> Quantity:
+        """Total facility energy consumption (post-PUE) as a Pint Quantity."""
+        return self.total_energy_kwh
+
+    @property
+    def carbon_footprint(self) -> Quantity:
+        """Carbon footprint as a Pint Quantity in kg."""
+        from ..core.units import Q_
+        return Q_(self.carbon_footprint_kg, "kg")
+
+    @property
+    def water_usage(self) -> Quantity:
+        """Cooling water consumption as a Pint Quantity in liters."""
+        from ..core.units import Q_
+        return Q_(self.water_usage_liters, "liter")
+
 
 class DataResult(SolverResult):
     """Result from DataModel: data pipeline feasibility."""
@@ -306,6 +405,16 @@ class CompressionResult(SolverResult):
     memory_savings_pct: float
     inference_speedup: float = 1.0
 
+    @property
+    def original_size(self) -> Quantity:
+        """Baseline model weight size as a Pint Quantity."""
+        return self.original_size_gb
+
+    @property
+    def compressed_size(self) -> Quantity:
+        """Compressed model weight size as a Pint Quantity."""
+        return self.compressed_size_gb
+
 
 class CompressionCandidate(SolverResult):
     """One evaluated compression configuration with lab-ready feasibility metadata."""
@@ -327,6 +436,16 @@ class CompressionCandidate(SolverResult):
     guardrail_violations: List[str] = Field(default_factory=list)
     pareto_status: str = "unknown"
     source_trace: List[str] = Field(default_factory=list)
+
+    @property
+    def original_size(self) -> Quantity:
+        """Baseline model weight size as a Pint Quantity."""
+        return self.original_size_gb
+
+    @property
+    def compressed_size(self) -> Quantity:
+        """Compressed model weight size as a Pint Quantity."""
+        return self.compressed_size_gb
 
 
 class CompressionSweepResult(SolverResult):
@@ -357,6 +476,11 @@ class OrchestrationResult(SolverResult):
     avg_wait_time_days: Quantity
     avg_queue_length: float
     is_stable: bool
+
+    @property
+    def avg_wait_time(self) -> Quantity:
+        """Expected queue wait time as a Pint Quantity."""
+        return self.avg_wait_time_days
 
 
 class InferenceScalingResult(SolverResult):
@@ -434,3 +558,134 @@ class PlacementOptimizerResult(OptimizerResult):
     carbon_footprint: float
     pue: float
     top_candidates: List[Dict[str, Any]]
+
+
+# ── Situation results (2026-10-20) ────────────────────────────────
+
+class DecodeBoundResult(SolverResult):
+    """Result from DecodeBoundModel: weight-streaming bound on one decode step."""
+    weight_bytes: Quantity
+    flops_per_step: Quantity
+    compute_time: Quantity
+    memory_time: Quantity
+    memory_share: float          # memory_time / (compute_time + memory_time)
+    bound_ratio: float           # memory_time / compute_time
+    intensity: Quantity          # FLOP per weight byte
+    attainable_flops: Quantity   # min(peak, bandwidth x intensity)
+    peak_fraction: float         # attainable / peak
+    bottleneck: str
+
+
+class TransferLadderResult(SolverResult):
+    """Result from TransferLadderModel: one payload moved over each link tier."""
+    payload: Quantity
+    bandwidths: Dict[str, Quantity]
+    times: Dict[str, Quantity]
+
+
+class TensorParallelCommResult(SolverResult):
+    """Result from TensorParallelCommModel: activation AllReduces in one TP step."""
+    payload: Quantity            # one AllReduce's logical tensor
+    ring_factor: float           # 2(N-1)/N
+    traffic_per_device: Quantity
+    collectives_per_step: int
+    per_collective_time: Quantity
+    communication_time: Quantity
+    compute_time: Quantity
+    step_time: Quantity          # compute + communication, no overlap
+    compute_fraction: float
+    communication_fraction: float
+
+
+class TrainingRunResult(SolverResult):
+    """Result from TrainingRunModel: wall-clock chain from peak to delivered time."""
+    total_flops: Quantity
+    peak_time: Quantity          # every device at its peak
+    compute_time: Quantity       # at the local compute efficiency
+    scaled_time: Quantity        # after the scaling efficiency
+    stage_times: Dict[str, Quantity]   # after each overhead, in order
+    total_time: Quantity
+    delivered_fraction: float    # peak_time / total_time
+
+
+class TrainingStateResult(SolverResult):
+    """Result from TrainingStateModel: persistent training state and its shards."""
+    weights: Quantity
+    gradients: Quantity
+    master_weights: Quantity
+    adam_moment: Quantity        # one Adam moment (m or v)
+    optimizer_moments: Quantity  # both moments
+    persistent_state: Quantity
+    activations: Quantity
+    tp_weights_per_device: Quantity
+    tp_gradients_per_device: Quantity
+    tp_master_per_device: Quantity
+    tp_moments_per_device: Quantity
+    tp_activations_per_device: Quantity
+    tp_total_per_device: Quantity
+    tp_offloaded_per_device: Quantity  # after moving master and moments to host
+    zero_moments_per_device: Quantity  # moments sharded over TP x DP
+    zero_moments_per_tp_group: Quantity
+    zero_weights_and_moments_per_device: Quantity
+
+
+class PowerTransientResult(SolverResult):
+    """Result from PowerTransientModel: one device's load step and a cluster's ramp."""
+    power_step: Quantity
+    current_step: Quantity
+    droop: Dict[str, Quantity]         # keyed by rise time label
+    droop_share: Dict[str, float]
+    cluster_power_step: Quantity
+    ramp_rate: Quantity
+
+
+class CoolantFlowResult(SolverResult):
+    """Result from CoolantFlowModel: coolant flow that carries away a heat load."""
+    mass_flow: Quantity
+    volume_flow: Quantity
+
+
+class OutageCostResult(SolverResult):
+    """Result from OutageCostModel: idle cost of a failure domain going down."""
+    direct_cost: float           # dollars, failed devices only
+    job_cost: float              # dollars, a synchronous job idles every device
+    job_cost_with_rollback: Dict[str, float]
+
+
+class FailureIntervalResult(SolverResult):
+    """Result from FailureIntervalModel: series failures across identical components."""
+    interval: Quantity
+    expected_failures: float
+    failures_per_day: float
+
+
+class GradientSyncResult(SolverResult):
+    """Result from GradientSyncModel: one data-parallel gradient exchange per link."""
+    sync_bytes: Quantity
+    compute_time: Quantity
+    transfer_times: Dict[str, Quantity]
+    step_times: Dict[str, Quantity]
+    compute_fractions: Dict[str, float]
+    energy_per_step: Quantity      # on the energy link, per worker
+    energy_total: Quantity         # over all steps, per worker
+
+
+class CommunicationIntensityResult(SolverResult):
+    """Result from CommunicationIntensityModel: bytes sent per local FLOP vs. fabric balance."""
+    local_tokens: int
+    bytes_per_step: Quantity
+    flops_per_step: Quantity
+    intensity: float               # bytes per FLOP
+    balance: float                 # link bytes/s per peak FLOP/s
+    compute_time_at_peak: Quantity
+
+
+class TrainingGrowthResult(SolverResult):
+    """Result from TrainingGrowthModel: annual growth of training compute and its factors."""
+    run_count: int
+    compute_factor: float
+    count_factor: float
+    duration_factor: float
+    rate_factor: float
+    fleet_share: float             # share of the compute exponent from count and duration
+    span_orders: float             # orders of magnitude from AlexNet to the largest run

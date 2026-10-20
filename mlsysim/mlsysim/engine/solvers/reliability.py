@@ -17,6 +17,7 @@ from ...physics import (
     calc_failure_probability,
 )
 from ...core.units import ureg, Q_
+from ...core.types import Quantity
 from ...systems.reliability import Reliability
 from ...systems.types import Fleet
 from .base import ForwardModel
@@ -98,3 +99,26 @@ class ReliabilityModel(ForwardModel):
 __all__ = [
     "ReliabilityModel",
 ]
+
+
+class FailureIntervalModel(ForwardModel):
+    """
+    Interval between failures across identical, independent components.
+
+    With N components that each fail on average once per MTBF, some component
+    fails on average every MTBF / N (the minimum of N exponentials). Over a run
+    of a given length the expected failure count is the run length divided by
+    that interval.
+    """
+    requires = ("component_mtbf", "n_components")
+
+    def solve(self, component_mtbf: Quantity, n_components: int, run_duration: Quantity):
+        from ..results import FailureIntervalResult
+        interval = calc_mtbf_cluster(component_mtbf, n_components)
+        run = run_duration.to("hour")
+        expected = (run / interval).to("").magnitude
+        return FailureIntervalResult(
+            interval=interval,
+            expected_failures=expected,
+            failures_per_day=expected / run.to("day").magnitude,
+        )

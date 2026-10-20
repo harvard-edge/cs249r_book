@@ -150,13 +150,13 @@ class GPT2DataWall:
     corpus_gb_str = fmt_memory(corpus_bytes, unit=GB, precision=0)
     bytes_per_token_str = fmt_count(bytes_per_token.magnitude, precision=0, commas=False)
     params_str = fmt_count(gpt2.parameters.to(param).magnitude, scale='B', precision=1, scale_style='word')
-    unique_tokens_str = fmt_count(unique_tokens, scale='B', precision=0, commas=False, scale_style='word')
+    unique_tokens_str = fmt_count(unique_tokens, scale='B', commas=False, scale_style='word')
     tokens_per_param_opt_str = fmt_count(tokens_per_param_opt, precision=0, commas=False)
     tokens_per_param_have_str = fmt_ratio(tokens_per_param_have, precision=1)
-    optimal_tokens_str = fmt_count(optimal_tokens, scale='B', precision=0, commas=False, scale_style='word')
+    optimal_tokens_str = fmt_count(optimal_tokens, scale='B', commas=False, scale_style='word')
     shortfall_mult_str = fmt_multiple(shortfall, precision=0)
     training_flops_str = fmt_sci_flops(training_flops, precision=1)
-    tokens_processed_str = fmt_count(round(tokens_processed.magnitude, -9), scale='B', precision=0, commas=False, scale_style='word')
+    tokens_processed_str = fmt_count(round(tokens_processed.magnitude, -9), scale='B', commas=False, scale_style='word')
     corpus_passes_str = fmt_count(round(corpus_passes), precision=0, commas=False)
     mfu_pct_str = fmt_percent(round(mfu, 2), precision=0, style='prose')
     node_accelerators_str = fmt_count(node_accelerators, precision=0, commas=False)
@@ -1281,7 +1281,7 @@ class GPT2Deduplication:
     time_saved_high_str = fmt_time(round(time_saved_high.magnitude) * hour, 'hour', precision=0, style='word')
     energy_saved_low_str = fmt_energy(round(energy_saved_low.magnitude) * kWh, unit=kWh, precision=0)
     energy_saved_high_str = fmt_energy(round(energy_saved_high.magnitude, -1) * kWh, unit=kWh, precision=0)
-    document_count_str = fmt_count(document_count, scale='M', precision=0, scale_style='word')
+    document_count_str = fmt_count(document_count, scale='M', scale_style='word')
     minhash_hashes_str = fmt_count(minhash_hashes, precision=0, commas=False)
     signature_gb_str = fmt_memory(signature_bytes, unit=GB, precision=1)
     read_time_str = fmt_time(round(read_time.magnitude) * second, 'second', precision=0, style='word')
@@ -2440,7 +2440,7 @@ class FixmatchLabelEfficiency:
     roi_label_efficiency_mult_str = fmt_multiple(round(roi_label_efficiency), precision=0, commas=False)
     cost_label_str = fmt_usd(cost_label, precision=0, commas=False)
     cost_gpu_hr_str = fmt_usd(cost_gpu_hr, precision=2, commas=False)
-    cifar10_full_labels_k_str = fmt_count(cifar10_full_labels, scale='K', precision=0, commas=False)
+    cifar10_full_labels_k_str = fmt_count(cifar10_full_labels, scale='K', commas=False)
     cifar10_full_frac_pct_str = fmt_percent(cifar10_full_fraction, precision=0, commas=False, style='symbol')
     cifar10_fixmatch_4k_frac_pct_str = fmt_percent(cifar10_fixmatch_4k_fraction, precision=0, commas=False, style='symbol')
     cifar10_fixmatch_250_frac_pct_str = fmt_percent(cifar10_fixmatch_250_fraction, precision=1, commas=False, style='symbol')
@@ -3379,7 +3379,7 @@ The interplay of these four cost terms becomes concrete when evaluating an Image
 # │ How: Calculate total costs for raw data, labeling, storage, and training.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Infrastructure
+from mlsysim import Datasets, Infrastructure
 from mlsysim.core.units import GB, USD, count, hour, month
 from mlsysim.fmt import fmt_percent, fmt_usd, check, fmt_count, fmt_time, fmt_memory
 
@@ -3389,11 +3389,11 @@ class CostBreakdown:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     raw_data_cost = 50000 * USD  # scenario assumption: licensed dataset
-    label_count = 1_200_000 * count  # scenario assumption: images to label
+    label_count = Datasets.ImageNet.training_examples.to(count)  # every training image is labeled
     cost_per_label = Infrastructure.Pricing.Labeling.CrowdHigh.rate / count
     storage_rate = Infrastructure.Pricing.Storage.S3StandardLowPerTbMonth.rate
     gpu_rate = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate
-    storage_size = 150 * GB  # scenario assumption: retained training data
+    storage_size = Datasets.ImageNet.training_archive_size.to(GB)  # retained training archive
     storage_duration = 12 * month  # scenario assumption: retention time
     train_epoch_count = 100
     train_gpu_count = 1  # one H100
@@ -3421,16 +3421,16 @@ class CostBreakdown:
     # Every Amount in the table must be reproducible from the operands printed
     # beside it, so each derived cost is checked against its published rate.
     check(
-        abs(storage_cost.to(USD).magnitude - 36.0) < 1e-9,
-        f"Storage should be 150 GB x $0.02/GB/month x 12 months = $36, got {storage_cost.to(USD).magnitude:.2f}.",
+        abs(storage_cost.to(USD).magnitude - round(storage_size.to(GB).magnitude) * storage_rate.to(USD / GB / month).magnitude * 12) < 0.5,
+        f"Storage must round to the printed 148 GB x $0.02/GB/month x 12 months, got {storage_cost.to(USD).magnitude:.2f}.",
     )
     check(
         train_compute_cost < 0.1 * label_cost,
         f"Prose: even a 30-run campaign's compute stays far below labeling, got {train_compute_cost.to(USD).magnitude:.2f}.",
     )
     check(
-        abs(label_cost.to(USD).magnitude - 60_000.0) < 1e-9,
-        f"Labels should be 1.2M x $0.05 = $60,000, got {label_cost.to(USD).magnitude:.2f}.",
+        abs(label_cost.to(USD).magnitude - 1_281_167 * 0.05) < 0.01,
+        f"Labels should be 1,281,167 x $0.05 = $64,058, got {label_cost.to(USD).magnitude:.2f}.",
     )
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
@@ -3442,9 +3442,10 @@ class CostBreakdown:
     c_total_usd_str = fmt_usd(total_cost, precision=0)
     p_data_str = fmt_percent(p_data, precision=1, commas=False, style='symbol')
     p_compute_str = fmt_percent(p_compute, precision=1, commas=False, style='symbol')
-    n_labels_str = fmt_count(label_count, scale='M', precision=1)
+    n_labels_str = fmt_count(label_count, scale='M', precision=2)
+    n_labels_exact_str = fmt_count(label_count, precision=0, commas=True)
     cb_cost_per_label_str = fmt_usd(cost_per_label.to(USD / count).magnitude, precision=2, commas=False, per="label")
-    storage_size_str = fmt_memory(storage_size, unit=GB, precision=0, commas=False)
+    storage_size_str = fmt_memory(round(storage_size.to(GB).magnitude) * GB, unit=GB, precision=0, commas=False)
     storage_duration_str = fmt_time(storage_duration, month, precision=0, commas=False, style="word")
     cb_storage_rate_str = fmt_usd(storage_rate.to(USD / GB / month).magnitude, precision=2, commas=False, per="GB/month")
     cb_gpu_rate_str = fmt_usd(gpu_rate.to(USD / hour).magnitude, precision=0, commas=False, per="GPU-hour")
@@ -3465,7 +3466,7 @@ class CostBreakdown:
 | **Cost Component**                                                                                                                                                                                                       | **Calculation**                                                                                                                                        |                                        **Amount**                                        |
 |:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------:|
 | **Raw data (`{python} CostBreakdown.n_labels_str` images)**                                                                                                                                                              | Licensed dataset, flat fee                                                                                                                             |                          `{python} CostBreakdown.c_raw_usd_str`                          |
-| **Labels (crowd annotation)**                                                                                                                                                                                            | `{python} CostBreakdown.n_labels_str` $\times$ `{python} CostBreakdown.cb_cost_per_label_str`                                                          |                         `{python} CostBreakdown.c_label_usd_str`                         |
+| **Labels (crowd annotation)**                                                                                                                                                                                            | `{python} CostBreakdown.n_labels_exact_str` $\times$ `{python} CostBreakdown.cb_cost_per_label_str`                                                    |                         `{python} CostBreakdown.c_label_usd_str`                         |
 | **Storage (cloud object store)**                                                                                                                                                                                         | `{python} CostBreakdown.storage_size_str` $\times$ `{python} CostBreakdown.cb_storage_rate_str` $\times$ `{python} CostBreakdown.storage_duration_str` |                         `{python} CostBreakdown.c_store_usd_str`                         |
 | **Training campaign (`{python} CostBreakdown.train_run_count_str`, each `{python} CostBreakdown.train_epoch_count_str` in `{python} CostBreakdown.train_duration_str` on `{python} CostBreakdown.train_gpu_count_str`)** | `{python} CostBreakdown.train_gpu_hours_str` $\times$ `{python} CostBreakdown.cb_gpu_rate_str`                                                         |                         `{python} CostBreakdown.c_train_usd_str`                         |
 | **Total**                                                                                                                                                                                                                |                                                                                                                                                        |                       **`{python} CostBreakdown.c_total_usd_str`**                       |

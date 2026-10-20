@@ -1,0 +1,356 @@
+chapter: 07_fault_tolerance
+lecture: "07"
+title: "Fault Tolerance"
+subtitle: "Checkpointing and recovery when failure is routine"
+layer: reliability
+minutes: 75
+notes_minutes: 70.5
+core_minutes: 57
+target_ideas: 30
+thesis: "At fleet scale failure is the steady state, so a job is engineered to lose a bounded amount of work per failure rather than to avoid failure."
+
+hook:
+  minutes: "0-3"
+  setup: "Meta trained Llama 3 405B on 16,384 H100 GPUs; a 54-day snapshot recorded 419 unexpected interruptions, about one every 3.1 hours (derived in calcs.py). Step 2 reveals that the run kept more than 90 percent effective training time and needed significant manual intervention only 3 times. Photo: one H100 (shared library, Geekerwan, CC BY 3.0)."
+  question_to_class: "If a job stops eight times a day, what fraction of its time do you expect it to lose?"
+  payoff: "The synthesis returns to Llama 3: the failure clock (3.1 h measured, 1.8 h projected) is what arithmetic predicts; most failures were detectable GPU faults; Meta cut startup and checkpoint time, which shrinks the Young-Daly waste and the recovery term; automation handled all but 3 interruptions."
+  sources: ["chapter War Story 7.2 and figure 2 (Dubey et al. 2024, Table 5)", "MLSysIM Literature.TrainingRuns.Llama3_405B_*", "photo: assets/photos nvidia-h100-pcie.jpg"]
+
+driving_question: "How often does a large job fail, and how often should it save itself?"
+
+recall: "Retrieval: a synchronous data-parallel step on 1,024 GPUs; one GPU stops. The other 1,023 wait at the AllReduce barrier, and the wait lands in T_sync of the Fleet Law (Lecture 6 owns the barrier cost; Lecture 1 owns the Fleet Law)."
+
+goals:
+  - "Estimate a job's failure interval from component rates, and state its basis."
+  - "Classify a fault by persistence, manifestation, and scope, and pick the response."
+  - "Choose a checkpoint interval, and price one failure's recovery."
+  - "Contrast training recovery with serving replicas and degradation."
+
+running_example: "The chapter's 175B-parameter reference job: mixed-precision Adam, 14-byte-per-parameter resumable checkpoint of 2.45 TB, written at 100 GB/s in 24.5 s. Failure-rate and interval arithmetic use the chapter's 10,000-GPU cluster (full-system MTBF 3.87 h: GPU 2.0 + PCIe 0.5 + NIC share 0.083 x 1e-5 per hour per GPU). Recovery, straggler, and elastic examples use the 1,024-GPU reference cluster. Llama 3 405B on 16,384 H100s is the measured counterpart and the real system shown in the hook and synthesis."
+
+mtbf_bases: "Each slide names its basis. GPU-only: 50,000 h / N (ladder, predict, daily recovery rows, T/F). Full system: 3.87 h at 10,000 GPUs (estimate, Young-Daly, hot-spare note). Measured: Meta RSC 1,145 h at 8 GPUs and 7.9 h at 1,024 (Kokolis et al. 2025), Llama 3 3.1 h at 16,384 (Dubey et al. 2024); projected 1.8 h at 16,384."
+
+segments:
+  - name: Failure Clock
+    divider_question: "How often does a large training job fail?"
+    read: "§7.1, §7.2, §7.3.4"
+    concept_questions: [1, 2, 3, 4]
+    minutes: 17
+    land: "A job needing every one of N components fails N times as often as one component, measured clusters fail sooner than that, and shared power, switches, and software make failures arrive together."
+  - name: Fault Types
+    divider_question: "What kind of failure arrived, and does anyone notice?"
+    read: "§7.3 to §7.5"
+    concept_questions: [5, 6, 7, 8]
+    minutes: 13
+    land: "Liveness is not correctness: persistence chooses retry, quarantine, or replacement, and detection needs progress and value evidence beside heartbeats, bought selectively with spares and replay."
+  - name: Checkpoints
+    divider_question: "How often should a job save itself, and what counts as saved?"
+    read: "§7.8"
+    concept_questions: [9, 10, 11]
+    minutes: 10.5
+    land: "Save every square root of 2 delta M, and count only a consistent cut whose manifest is published last as saved."
+  - name: Recovery
+    divider_question: "What does one failure cost, and who may write afterward?"
+    read: "§7.9, §7.10"
+    concept_questions: [12, 13, 14, 15]
+    minutes: 14
+    land: "Each failure costs detection, restart, load, and warmup on top of rework; fencing keeps stale workers out, slow workers get mitigation rather than restart, and elastic recovery is valid only while its invariants hold."
+  - name: Serving
+    divider_question: "What changes when a user is waiting?"
+    read: "§7.11 to §7.13"
+    concept_questions: [16, 17]
+    minutes: 8.5
+    land: "Serving buys availability with replicas across failure domains, sizes failover by the state it must rebuild, and degrades along a ladder validated before the incident."
+
+concept_questions:
+  - id: 1
+    q: "How often does a job of N GPUs lose one?"
+    picture: "Predict slide (photo of four H100 cards), then a log ladder of GPU-only MTBF from 8 to 25,000 GPUs revealed in three steps, red where shorter than a week"
+    numbers: "MTBF = MTTF/N; 50,000 h per GPU; 6,250 h at 8, 50 h at 1,000, 5 h at 10,000, 2 h at 25,000 (equation 4, table 1); all 10,000 up together 36.8% at 99.99% each (§7.2.1; calcs.py)"
+    example: "10,000-GPU job: a GPU failure every 5 hours"
+    read: "§7.2"
+  - id: 2
+    q: "What do PCIe links, NICs, and power add, and why do the chapter's MTBF values differ?"
+    picture: "Estimate slide: given card beside an 8-GPU baseboard photo; arithmetic revealed; then a log-log plot of measured MTTF against N with the 50,000/N line, Meta RSC points, Llama 3, projections, and the chapter's 3.87 h model point"
+    numbers: "Per GPU 2.0 + 0.5 + 0.083 = 2.583e-5 per hour; 0.258 per hour on 10,000; MTBF 3.87 h; 6.2 a day (§7.2.2). Kokolis et al. 2025: 1,145 h at 8, 7.9 h at 1,024 measured; 1.8 h at 16,384 projected; Llama 3 3.1 h measured. Measured sits 5.5 and 6.2 times below the GPU-only line (calcs.py)"
+    example: "Three bases for one question: GPU-only 5 h, full system 3.87 h, measured 2 to 3 h at 16,384"
+    read: "§7.2.2"
+  - id: 3
+    q: "What do correlated failures add?"
+    picture: "Photo of server racks beside the failure-domain table (GPU 1, node 8, rack 32-64, power domain 100-500, software version all)"
+    numbers: "Table 2; TPU v4 spare cubes (4,096 chips, cubes of 64; War Story 7.1, Zu et al. 2024) in the note"
+    example: "Three replicas on one power domain survive no power loss"
+    read: "§7.3.4"
+  - id: 4
+    q: "What actually interrupted a large run?"
+    picture: "Bar chart of Llama 3's 419 interruptions by cause (MLSysIM series), H100 photo"
+    numbers: "GPU parts 268 (64%): faulty GPU 148, HBM3 72, other 42; software 56; network 35; host maintenance 32; host hardware 21; NCCL watchdog 7; detected SDC 6"
+    example: "Llama 3 405B, 54 days, 16,384 H100s"
+    read: "§7.3"
+  - id: 5
+    q: "How do we classify a fault so the response follows?"
+    picture: "Three axes line plus the persistence table revealed row by row"
+    numbers: "Table 3 (transient, intermittent, permanent)"
+    example: "Particle strike, cracked solder joint, stuck-at multiplier bit"
+    read: "§7.3, §7.4.1"
+  - id: 6
+    q: "Why can't heartbeats, ECC, or CRCs catch a wrong value?"
+    picture: "Fail-stop against Byzantine message streams (two steps); a registered ECC memory module photo"
+    numbers: "Figure 3; Lamport et al. 1982"
+    example: "W6 sends wrong gradients on time and passes every liveness check"
+    read: "§7.3.3, §7.4.3"
+  - id: 7
+    q: "What does silent corruption look like in a real training job?"
+    picture: "Gradient-norm trace with the SDC anomaly boxed, redrawn at slide size from the photo of Jeff Dean's MLSys 2024 keynote slide (make_figs.py through digitize_sdc.py; no axis values in the original), beside a photo of the keynote"
+    numbers: "Napkin Math 7.1 in the note: illustrative 1e-6 per GPU-hour gives one event per 18,000 two-second steps (about 10 h) on 100,000 GPUs"
+    example: "Google training telemetry"
+    read: "§7.5.1"
+  - id: 8
+    q: "How do fleets verify without computing everything twice?"
+    picture: "Hot-spare N+1 protocol in three steps (replay implicates G2, drain and promote S, refill S')"
+    numbers: "DMR +100%, TMR +200% (§7.5.2)"
+    example: "Google's reactive hot-spare protocol (Dean 2024)"
+    read: "§7.5.2"
+  - id: 9
+    q: "Why does checkpoint waste have a minimum?"
+    picture: "Waste curves: write share delta/tau falling, rework tau/2M rising (two steps); NVMe photo"
+    numbers: "2.45 TB (14 B per parameter, 86% optimizer state) at 100 GB/s: delta 24.5 s; M 3.87 h (equation 8)"
+    example: "175B reference job on 10,000 GPUs"
+    read: "§7.8.1"
+  - id: 10
+    q: "Where is the minimum, and what does an hourly policy cost?"
+    picture: "Your-turn card with the arithmetic revealed beside the total waste curve with the optimum and the hourly point"
+    numbers: "tau* = sqrt(2 x 24.5 x 13,932) = 826 s = 13.8 min, 5.9% waste (2.97% per term); hourly 0.7% + 12.9% = 13.6%; sqrt(2) = 1.4 per halving of M; optimized waste grows as sqrt(N) (Napkin Math 7.2; calcs.py)"
+    example: "Hourly saves cost more than twice the optimum on this cluster"
+    read: "§7.8.2"
+  - id: 11
+    q: "What makes a set of shards a checkpoint?"
+    picture: "Uncoordinated saves with a rollback cascade beside one coordinated cut with the manifest; then PyTorch DCP's finish() code and a measured four-rank save trace"
+    numbers: "Six-step protocol, two-phase commit (§7.8.5); trace: shards at 0.00 to 3.28 ms, .metadata at 24.38 ms, 12.6 MB shards, 2,280-byte manifest (dcp_trace.py)"
+    example: "PyTorch Distributed Checkpoint writes .metadata.tmp, fsyncs, renames"
+    read: "§7.8.5"
+  - id: 12
+    q: "Where does a failure's time go?"
+    picture: "Recovery-time budget bar (detect 60, restart 180, load 24.5, warm up 120 s) plus rework; GPU-only daily table; real torchrun restart log"
+    numbers: "6.4 min (Napkin Math 7.3); 0.49 and 4.8 failures a day, 3 and 31 min a day, 0.2% and 2.1%, 5,127 GPU-hours a day at 10,000 (GPU-only); hot spare $384 a day pays off at 11 s per recovery on the full-system basis (§7.7.2; calcs.py)"
+    example: "Cold restart of the 175B job on 1,024 GPUs"
+    read: "§7.9"
+  - id: 13
+    q: "How do we stop a replaced worker from writing?"
+    picture: "Epoch fencing swim lanes in three steps"
+    numbers: "Figure 15 (epochs 7 and 8)"
+    example: "Old worker resumes with token 7 and is rejected"
+    read: "§7.9.2"
+  - id: 14
+    q: "What should happen to a node that is slow but alive?"
+    picture: "Five representative ranks against the AllReduce barrier, normal then with rank 517 at half speed"
+    numbers: "1,024 GPUs, 1 s step, one at half speed: 50% throughput, $1,024 per hour idle at $2 per GPU-hour (Napkin Math 7.4); break-even n(T_slow - T_healthy) > T_restart + T_replay"
+    example: "Thermal throttling as a gray failure"
+    read: "§7.9.5"
+  - id: 15
+    q: "When can a job shrink and continue?"
+    picture: "Four-node ring, failure and rendezvous, three-node ring at 75%; torchrun elastic command; three invariants"
+    numbers: "99.2% of devices kept after losing one node of 1,024 (definition 7.2; calcs.py); 75% assumes unchanged per-worker rate"
+    example: "1,024 to 1,016 GPUs with no spare"
+    read: "§7.10"
+  - id: 16
+    q: "How does serving buy availability, and what must failover rebuild?"
+    picture: "Downtime ladder for 1 to 3 replicas beside state bars (image retry 0 GB, LLM conversation 43 GB); Kubernetes readiness probe config"
+    numbers: "99% per replica: 3.65 days, 52.6 min, 31.5 s a year (equation 12; calcs.py); 43 GB KV cache for a Llama-family 70B at 128K in BF16 (footnote 19); 12-17 s probe window (§7.11.3)"
+    example: "Stateless image classifier against stateful chat"
+    read: "§7.11"
+  - id: 17
+    q: "What does a service give up when redundancy is not enough, and how is the failure found?"
+    picture: "Degradation ladder plot with torchvision model-card values; cascade diagnosis (metrics card, span bars, logs)"
+    numbers: "ViT-L/16 88.064% 305.2M, EfficientNet-B4 83.384% 19.3M, MobileNet-V3-Large 75.274% 5.5M (torchvision 0.26 weights metadata; chapter quotes 88, 83, 75); Example 7.1: p99 45 to 800 ms, errors 0.1 to 15%, feature span 12 to 700 ms"
+    example: "Embedding-cache loss overloads the database"
+    read: "§7.12, §7.13"
+
+concept_trace:
+  - concept: "Fleet failure rate"
+    frame: "A 50,000-hour GPU fails every 5 hours in a 10,000-GPU job"
+    shown_by: "MTBF = MTTF/N equation and the GPU-only ladder; correlated hazards on 'Correlated failures take down a rack or a power domain at once' (domain table and photo); measured rates on 'Measured clusters fail more often than the GPU-only line'"
+  - concept: "Fault classification by persistence, manifestation, and scope"
+    frame: "Persistence chooses retry, quarantine, or replacement"
+    shown_by: "Three axes named on the slide and the persistence-to-response table, applied on 'Diagnose: which axis, and which response?'"
+  - concept: "Silent data corruption verification"
+    frame: "Liveness checks cannot see a wrong value"
+    shown_by: "Fail-stop against Byzantine evidence build and the ECC photo line; selective verification on 'A fleet keeps one idle spare and runs each step once' (DMR/TMR cost and the hot-spare build)"
+  - concept: "Young-Daly checkpoint interval"
+    frame: "Saving often wastes write time; saving rarely wastes rework"
+    shown_by: "Waste equation and two-term curves; optimum and hourly point computed on 'Which interval wastes the least time?'"
+  - concept: "Consistent checkpoint cut"
+    frame: "A checkpoint exists only when its manifest is published last"
+    shown_by: "Uncoordinated rollback against one coordinated cut, with the prepare and commit rows"
+  - concept: "Recovery-time budget and fencing"
+    frame: "One failure costs 6.4 minutes of recovery plus rework"
+    shown_by: "Recovery-time budget equation and bar; fencing on 'An epoch fence stops a replaced worker from writing' (three-step swim lanes)"
+  - concept: "Gray failure detection"
+    frame: "One of 1,024 GPUs slows to half. Throughput?"
+    shown_by: "Straggler build at the barrier and the replace-when rule on the slide"
+  - concept: "Elastic recovery invariants"
+    frame: "Elastic recovery continues on fewer workers if invariants hold"
+    shown_by: "Ring of 4 to ring of 3 build and the three invariants on the slide"
+
+worked_examples:
+  - name: "Napkin Math 7.2: the Young-Daly interval"
+    steps: ["given: delta 24.5 s (2.45 TB at 100 GB/s), M 3.87 h = 13,932 s", "W(tau) = delta/tau + tau/2M; set dW/dtau = 0", "tau* = sqrt(2 delta M) = 826 s = 13.8 min", "waste 5.9%; hourly 13.6%", "M halves: tau* shrinks by 1.4; optimized waste grows as sqrt(N)"]
+  - name: "MTBF cascade (§7.2.2)"
+    steps: ["given: GPU 50,000 h, PCIe 200,000 h, NIC per node 150,000 h, PSUs 4+2", "rates per GPU 2.0, 0.5, 0.083, power 0 (x 1e-5 per hour)", "sum 2.583e-5; times 10,000 = 0.258 per hour", "MTBF 3.87 h, 6.2 failures a day", "the lecture's default basis from here"]
+  - name: "Napkin Math 7.3: the recovery-time budget"
+    steps: ["given: detect 60 s, restart 3 min, load 24.5 s, warm up 2 min", "sum 6.4 min", "plus rework of half an interval", "GPU-only daily cost: 3 min at 1,024, 31 min at 10,000", "hot spare $384 a day pays off at 11 s per recovery (full-system basis)"]
+  - name: "Napkin Math 7.4: the cost of a straggler"
+    steps: ["given: 1,024 GPUs, 1 s step, one GPU at half speed", "every step waits 2 s at the barrier", "50% throughput, $1,024 per hour idle", "replace when n(T_slow - T_healthy) > T_restart + T_replay"]
+
+active_learning:
+  - at_minute: 3.5
+    type: retrieval
+    prompt: "What do the other 1,023 GPUs do when one stops, and which Fleet Law term grows?"
+    answer: "They wait at the AllReduce barrier; the wait lands in T_sync."
+  - at_minute: 6
+    type: predict
+    prompt: "10,000 GPUs of 50,000 h each: how often does the job lose a GPU?"
+    answer: "D, every 5 hours (50,000 / 10,000)."
+  - at_minute: 10.5
+    type: estimate
+    prompt: "Add PCIe and NIC rates to the 10,000-GPU cluster."
+    answer: "2.583e-5 per GPU-hour, 0.258 per hour, MTBF 3.87 h, 6.2 a day."
+  - at_minute: 22.5
+    type: diagnose
+    prompt: "Classify three incidents (heat-dependent wrong products, silent rank, driver crash on every node) and name a response."
+    answer: "Intermittent: quarantine and stress-test; fail-stop one node: replace and restore; correlated software scope: roll back."
+  - at_minute: 34
+    type: estimate
+    prompt: "Find tau* for delta 24.5 s, M 13,932 s, and price hourly saves."
+    answer: "826 s = 13.8 min, 5.9%; hourly 13.6%."
+  - at_minute: 45.5
+    type: concept_question
+    prompt: "30-min async saves, 12-min reload; promises RPO 15 min and RTO 10 min. Which break?"
+    answer: "D, both."
+  - at_minute: 50
+    type: predict
+    prompt: "One of 1,024 GPUs slows to half. Throughput?"
+    answer: "C, 50%; about $1,024 per hour idle."
+  - at_minute: 61
+    type: diagnose
+    prompt: "p99 45 to 800 ms, errors 0.1 to 15%, GPUs healthy: which component failed?"
+    answer: "The user-embedding cache; load moved to the database. Trip the breaker and serve validated default embeddings."
+  - at_minute: 64
+    type: concept_question
+    prompt: "True or false: ECC makes SDC negligible; MTTF/N is safe; elastic lets a job checkpoint less; hourly saves are safe."
+    answer: "All false (5.5 to 6.2 times sooner measured; 13.6% against 5.9%)."
+
+open_questions:
+  - "At 100,000 GPUs the optimized waste reaches about 19% (calcs.py). Cut delta, raise M, or shorten recovery first?"
+  - "Six of 419 interruptions were detected silent corruption. How much compute should a run spend checking for the undetected ones?"
+  - "For a chat service, which state would you replicate, and which would you rebuild?"
+
+more_examples:
+  - "OPT-175B on 992 A100s: at least 35 manual and an estimated 70+ automatic restarts, 100+ hosts cycled, log-freshness threshold 15 min relaxed to 1 h (§7.15.1; Zhang et al. 2022)"
+  - "Google TPU v4: 99.98% system availability; daily failure rates 0.08% of machines, 0.005% of ICI cables, 0.04% of OCS units (§7.15.2; Zu et al. 2024)"
+  - "Facebook SDC that reported a valid file as size zero (Dixit et al. 2021, §7.5.1)"
+  - "Netflix chaos engineering (Basiri et al. 2016, §7.15.3)"
+  - "Archetype C federated dropout as the normal case (Lighthouse 7.2; Lecture 11 owns participation selection)"
+
+left_to_reading:
+  - concept: "Fault injection at the decision level"
+    why: "Second-order; one line on the cascade slide and its note (chaos tests). Table 4 and §7.14 are better read than heard."
+  - concept: "Observability for one distributed job"
+    why: "Second-order; taught through the cascade diagnosis (metrics, traces, logs). Fleet-wide observability is Lecture 12's."
+  - concept: "Hardware lifecycle and the bathtub curve; software faults (§7.4.2, §7.6)"
+    why: "Detail better read; persistence and burn-in are named in notes."
+  - concept: "Warm restart and recovery automation pipeline (§7.9.3, §7.9.4)"
+    why: "Named in the torchrun and synthesis notes; the cold path is the one shown."
+  - concept: "Model-specific checkpoint and serving state (tables 11, 14)"
+    why: "Detail better read; the KV-cache contrast carries the idea."
+
+closing:
+  return_to_hook: "Llama 3 failed every 3.1 hours, close to the 1.8 h projection; 64% of interruptions were detectable GPU parts; Meta cut startup and checkpoint time and automated recovery, so only 3 of 419 needed manual work and effective training time stayed above 90%."
+  read_and_practice: ["§7.2, §7.3 to §7.5, §7.8 to §7.12", "the chapter's self-check questions", "redo Napkin Math 7.2 for a 20,000-GPU cluster"]
+  further_reading:
+    - cite: "Young, A First Order Approximation to the Optimum Checkpoint Interval, CACM 1974; Daly, FGCS 2006"
+      url: "https://doi.org/10.1145/361147.361115"
+      why: "The derivation of the interval and its higher-order correction."
+    - cite: "Dubey et al., The Llama 3 Herd of Models, 2024"
+      url: "https://arxiv.org/abs/2407.21783"
+      why: "The measured interruption record and its root causes."
+    - cite: "Kokolis et al., Revisiting Reliability in Large-Scale ML Research Clusters, HPCA 2025"
+      url: "https://doi.org/10.1109/hpca61900.2025.00096"
+      why: "Measured job MTTF across job sizes and projections."
+    - cite: "Hochschild et al., Cores That Don't Count, HotOS 2021"
+      url: "https://doi.org/10.1145/3458336.3465297"
+      why: "Processors that compute wrong values without errors."
+    - cite: "Zu et al., Resiliency at Scale: Managing Google's TPUv4 ML Supercomputer, NSDI 2024"
+      url: "https://www.usenix.org/conference/nsdi24/presentation/zu"
+      why: "Spare cubes, optical switching, and recovery software in a pod."
+  next_lecture: "Lecture 8, Fleet Orchestration: who gets which accelerators, when, and where?"
+
+callbacks:
+  - {lecture: 1, concept: "Fleet Law (synchronization term)", where: "recall slide text and note; credit"}
+  - {lecture: 1, concept: "Reliability gap", where: "MTBF ladder note"}
+  - {lecture: 6, concept: "Synchronization models and stragglers (barrier cost)", where: "recall note; straggler note"}
+  - {lecture: 2, concept: "Physical failure domains", where: "correlated-failures note"}
+  - {lecture: 4, concept: "Checkpoint write path and checkpoint storm", where: "Young-Daly note"}
+  - {lecture: 6, concept: "Sharded data parallelism (ZeRO, FSDP)", where: "consistent-cut note"}
+  - {lecture: 6, concept: "Critical batch size", where: "elastic note"}
+  - {lecture: 8, concept: "Interruption economics (preemption)", where: "elastic note (gloss ahead)"}
+  - {lecture: 9, concept: "Runtime goodput", where: "recovery-budget note; synthesis note"}
+  - {lecture: 10, concept: "KV cache as admission budget", where: "serving note (gloss ahead; KV cache glossed on slide)"}
+  - {lecture: 12, concept: "Hierarchical fleet alerting", where: "cascade note (gloss ahead)"}
+  - {lecture: 13, concept: "Breakdown point of the gradient mean", where: "evidence note (gloss ahead)"}
+  - {lecture: 8, concept: "Next lecture title", where: "closing slide"}
+  - {lecture: 1, concept: "Thread: C3 taxonomy and the Fleet Law (D4)", where: "goals slide, Fleet Law term line: T_sync(N); Coordination (C3)"}
+storyboard:
+  # minutes, type, title, visual and source, steps
+  - [0.5, title, "Fault Tolerance", "cover_fault_tolerance_blueprint.png", 1]
+  - [0.5, divider, "Failure Clock", "kit stack, reliability layer", 1]
+  - [2.5, hook, "Llama 3 405B was interrupted 419 times in 54 days", "H100 photo; big number (Dubey 2024)", 2]
+  - [1.5, retrieval, "Recall: what do the other 1,023 GPUs do?", "Fleet Law", 2]
+  - [1.0, goals, "How often does a large job fail, and how often should it save itself?", "text", 1]
+  - [2.0, predict, "Predict: how often does a 10,000-GPU job lose a GPU?", "four-H100 photo", 2]
+  - [2.5, build-up, "A 50,000-hour GPU fails every 5 hours in a 10,000-GPU job", "mtbf_ladder (table 1)", 3]
+  - [2.5, exercise, "What do PCIe links and NICs add to the clock?", "HGX baseboard photo; card; arithmetic", 2]
+  - [2.5, data plot, "Measured clusters fail more often than the GPU-only line", "mttf_measured (Kokolis, Llama 3, MLSysIM)", 3]
+  - [2.0, real world, "Correlated failures take down a rack or a power domain at once", "rack photo; table 2", 2]
+  - [0.5, divider, "Fault Types", "", 1]
+  - [2.0, data plot, "GPU parts caused 268 of Llama 3's 419 interruptions", "llama3_causes (MLSysIM); H100 photo", 1]
+  - [2.0, table, "Persistence chooses retry, quarantine, or replacement", "table 3", 3]
+  - [2.5, diagnose, "Diagnose: which axis, and which response?", "three cards", 2]
+  - [2.0, build-up, "Liveness checks cannot see a wrong value", "evidence (figure 3 redrawn); ECC photo", 3]
+  - [1.5, real world, "Google saw silent corruption as a sudden gradient-norm spike", "sdc_trace (digitized from book figure 9) and keynote photo (book figure 8)", 1]
+  - [2.5, build-up, "A fleet keeps one idle spare and runs each step once", "hotspare (figure 10 redrawn)", 3]
+  - [0.5, divider, "Checkpoints", "", 1]
+  - [3.0, build-up, "Saving often wastes write time; saving rarely wastes rework", "young_daly (figure 11); NVMe photo", 2]
+  - [2.5, exercise, "Which interval wastes the least time?", "card; young_daly_step3", 3]
+  - [2.0, build-up, "A checkpoint exists only when its manifest is published last", "cut (new)", 3]
+  - [2.5, code, "PyTorch writes every shard before the manifest", "DCP finish() code; dcp_trace (measured)", 1]
+  - [0.5, divider, "Recovery", "", 1]
+  - [2.5, build-up, "One failure costs 6.4 minutes of recovery plus rework", "budget (Napkin Math 7.3); daily table", 3]
+  - [1.5, real world, "The launcher restarts the whole group for one crash", "torchrun log (crash_trace.py)", 1]
+  - [2.0, concept question, "Which recovery promise breaks?", "text choices", 2]
+  - [2.5, build-up, "An epoch fence stops a replaced worker from writing", "fencing (figure 15 redrawn)", 3]
+  - [2.5, predict, "One of 1,024 GPUs slows to half. Throughput?", "straggler (Napkin Math 7.4)", 3]
+  - [2.5, build-up, "Elastic recovery continues on fewer workers if invariants hold", "elastic (figure 16 redrawn); torchrun command", 4]
+  - [0.5, divider, "Serving", "", 1]
+  - [2.0, comparison, "Replicas buy availability, and state decides the failover", "serving_state (equation 12, footnote 19)", 1]
+  - [1.5, real world, "Probe settings decide how long a dead replica gets traffic", "Kubernetes readiness probe config", 1]
+  - [1.5, build-up, "A degradation ladder trades accuracy for availability in steps", "degrade; torchvision model cards", 3]
+  - [2.5, diagnose, "Diagnose: which component failed at 14:32?", "card; cascade (Example 7.1)", 3]
+  - [0.5, divider, "Wrap-Up", "", 1]
+  - [2.5, concept question, "Vote: true or false?", "table", 2]
+  - [2.0, synthesis, "Llama 3 kept over 90% of its time by planning for failure", "H100 photo; table", 2]
+  - [1.0, takeaways, "Takeaways", "bullets", 1]
+  - [0.5, open questions, "Open questions", "bullets", 1]
+  - [0.5, read, "Read and explore", "bullets", 1]
+  - [0.5, next, "NEXT LECTURE | FLEET ORCHESTRATION", "Azure data center aerial photo", 1]
+
+coverage:
+  primary_taught: ["Fleet failure rate", "Fault classification by persistence, manifestation, and scope", "Silent data corruption verification", "Young-Daly checkpoint interval", "Consistent checkpoint cut", "Recovery-time budget and fencing", "Gray failure detection", "Elastic recovery invariants"]
+  primary_left_to_reading: []
+  secondary: ["Serving replication sized to state (taught)", "Graceful degradation ladder (taught, optional slide)", "Fault-tolerance investment criterion (hot-spare note)", "Observability for one distributed job (cascade slide)", "Fault injection at the decision level (cascade note)"]
+
+notes_for_author:
+  - "The chapter is marked for a second lecture. This deck fits in 70.5 note minutes by keeping serving to 8.5 minutes; a second deck would split after Checkpoints and give serving, observability, and fault injection a full segment."
+  - "Real artifacts made for this deck: a four-rank PyTorch DCP save trace (dcp_trace.py) and a torchrun restart log (crash_trace.py), both run on a laptop with torch 2.11; the degradation slide quotes torchvision 0.26 weights metadata, which matches the chapter's 88, 83, 75 percent."
+  - "The estimate slide's baseboard photo is an HGX B200, captioned as such; the running case is H100."
+  - "2026-10-19 sweep (D4, D10). D4: the goals slide names, once, the Fleet Law term (T_sync(N)) and C3 axis (Coordination (C3)) in the volume's one form (the \\fleetterm line). D10: X-not-Y constructions and reveal colons rewritten. No exhibit here is retold from another lecture (D3)."

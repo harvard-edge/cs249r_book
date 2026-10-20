@@ -11,10 +11,11 @@ TinyTorch.
 shared/styles/
 ├── _brand.scss               # raw brand colours (single source of truth)
 ├── _ecosystem-base.scss      # light-mode ecosystem defaults
-├── _ecosystem-base-dark.scss # dark-mode ecosystem defaults
+├── _ecosystem-base-dark.scss # dark-mode ecosystem defaults (MLSys·im docs)
 ├── _site-dark.scss           # dark-mode rules used by the site (landing/about/etc.)
+├── _dark-code.scss           # dark inline code, code blocks, syntax tokens (all sites)
+├── _dark-captions.scss       # dark figure/table captions (all sites)
 ├── _book-only.scss           # textbook-only rules
-├── _book-only-dark.scss      # textbook-only dark-mode rules
 ├── style-site.scss           # entrypoint for site pages (landing/about/community/newsletter)
 ├── dark-mode-site.scss       # dark-mode entrypoint for site pages
 ├── BRAND.md                  # palette + non-SCSS hardcoded reference list

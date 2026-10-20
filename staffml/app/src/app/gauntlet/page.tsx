@@ -413,7 +413,7 @@ export default function GauntletPage() {
             </div>
             {isDesignMode && (
               <p className="text-[11px] text-textTertiary mt-3 leading-relaxed">
-                One deep system design question at L5+ difficulty. Think through architecture, tradeoffs, and constraints — then compare against the model answer.
+                One deep system design question at L5+ difficulty. Think through architecture, tradeoffs, and constraints, then compare against the model answer.
               </p>
             )}
           </div>

@@ -1,13 +1,13 @@
-# StaffML — local development
+# StaffML local development
 
 The StaffML web app (Next.js 16) reads the question corpus from local
 YAML files in `staffml/vault/questions/` so contributors can edit a
 question and see their changes in the dev server immediately. This
 README explains the pipeline so the local-rendering gotcha that bit us
 in early 2026 (rendered pages silently fetching from the production
-worker instead of local YAML) doesn't bite anyone again.
+worker instead of local YAML) does not recur.
 
-## TL;DR — first-time setup
+## First-time setup
 
 ```bash
 # 1. Install the vault CLI (Python). Pinned to ≥3.12.
@@ -23,8 +23,8 @@ npm run dev
 
 Open http://localhost:3000 and edit any YAML under
 `staffml/vault/questions/`. Restart `npm run dev` (or just `Ctrl+C`
-and re-run) to pick up the change — the predev hook re-runs `vault
-build --local` automatically and the page reload fetches the fresh
+and re-run) to pick up the change. The predev hook re-runs `vault
+build --local` automatically, and the page reload fetches the fresh
 content.
 
 ## How the data flow works
@@ -70,7 +70,7 @@ YAMLs are the source of truth.
 ## Manual local-corpus rebuild
 
 If you edit a YAML while `npm run dev` is already running, the page
-won't pick it up automatically — Next caches the static JSON for the
+will not pick it up automatically, because Next caches the static JSON for the
 session. To refresh without a full dev restart:
 
 ```bash

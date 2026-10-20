@@ -1,4 +1,4 @@
-# Lab 5: Stress-Testing — Prediction, Language & Recovery
+# Lab 5: Stress-Testing: Prediction, Language, and Recovery
 
 **Status:** `skeleton`\
 **Weeks:** 9 (Part 5A)\
@@ -23,7 +23,7 @@
 
 **Comes in from the previous lab:** fine-tuned VLA running an untethered loop on the UNO Q.\
 **Goes out to the next lab:** chosen action horizon, disturbance-recovery traces, language check.\
-**If the previous lab didn't finish:** staff provide a reference fine-tuned checkpoint.
+**If the previous lab did not finish:** staff provide a reference fine-tuned checkpoint.
 
 ---
 

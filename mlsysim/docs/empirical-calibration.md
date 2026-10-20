@@ -27,7 +27,7 @@ benchmark numbers single-sourced inside MLSys·im.
 | # | Configuration | mlsysim Prediction | Benchmark Anchor | Source | Delta |
 |---|---|---|---|---|---|
 | 1 | ResNet-50 A100 bs=256 training (eta=0.10) | 2,499 img/s | `Literature.Benchmarks.ResNet50A100TrainThroughput` | MLPerf Training v3.0 (single A100-80GB) | -22% |
-| 2 | ResNet-50 H100 bs=256 training (eta=0.10) | 7,677 img/s | `Literature.Benchmarks.ResNet50H100TrainThroughput` | MLPerf Training v3.1 (single H100-80GB) | +54% |
+| 2 | ResNet-50 H100 bs=256 training (eta=0.10) | 7,677 img/s | `Literature.Benchmarks.ResNet50H100TrainThroughput` | MLPerf Training v3.1 (Eos_n8, per H100 of 64) | +54% |
 | 3 | Llama-3-8B H100 bs=1 decode ITL (eta=0.50) | 5.2 ms | `Literature.Benchmarks.Llama3_8B_H100_ITLLower/Upper` | TensorRT-LLM benchmarks (FP16, H100-80GB) | within range |
 | 4 | Llama-3-8B H100 bs=32 decode ITL (eta=0.50) | 7.7 ms | `Literature.Benchmarks.Llama3_8B_H100_ITLLower/Upper` | vLLM / TensorRT-LLM batched benchmarks | within range |
 | 5 | Llama-3-8B H100 bs=1 prefill TTFT (eta=0.50) | 66.5 ms | `Literature.Benchmarks.Llama3_8B_H100_ITLLower/Upper` | TensorRT-LLM benchmarks (seq=2048) | within range |

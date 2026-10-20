@@ -23,7 +23,7 @@
 
 **Comes in from the previous lab:** IK solver, digital twin, the targets you tested in simulation.\
 **Goes out to the next lab:** IK running on the MCU (your nonlearned baseline), the sim-vs-real table, RPC timing, and four-tap logging.\
-**If the previous lab didn't finish:** staff provide a reference IK solver.
+**If the previous lab did not finish:** staff provide a reference IK solver.
 
 ---
 

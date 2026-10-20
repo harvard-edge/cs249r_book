@@ -1,0 +1,288 @@
+chapter: 10_model_compression
+lecture: "10b"
+title: "Model Compression, Part 2"
+subtitle: "Quantizing weights and activations to fewer bits"
+layer: models
+minutes: 75
+notes_minutes: 71.5
+target_ideas: 30
+thesis: "Quantization stores each value as a small integer and a shared scale. The range that scale covers decides how much accuracy survives, and whether fewer bits make the device faster depends on the resource that binds and on a kernel that keeps the bits packed."
+
+hook:
+  minutes: "0-4"
+  setup: "Step 1, two trained classifiers and one recipe: ResNet-50 (75.2 percent top-1) and MobileNetV2, the blur model's backbone (71.9 percent). Both are converted to INT8 by post-training quantization with one scale per tensor, weights and activations. Step 2, ResNet-50 after conversion: 75.0 percent. Step 3, the class predicts MobileNetV2's result. Step 4, the reveal: 0.1 percent, chance on 1,000 classes. Bars from Krishnamoorthi 2018, Table 3; the same collapse is reported independently by Nagel et al. 2019, Table 1 (71.72 to 0.12 percent)."
+  question_to_class: "Same recipe, same 8 bits per value. ResNet-50 loses 0.2 points; MobileNetV2 falls to 0.1 percent. Why? A) MobileNetV2 has too few parameters to spare any precision B) 256 levels cannot represent its weights at all C) one scale per tensor must cover channels whose weight ranges differ widely, so narrow channels round to almost nothing D) the calibration images were the wrong ones"
+  payoff: "C, answered in segment 3. MobileNetV2's depthwise layers have output channels with very different weight ranges (Nagel et al. 2019, Figure 2). A per-tensor scale is set by the widest channel, so the narrow channels get a handful of levels. One scale per channel restores 69.8 percent with no retraining, and quantization-aware training reaches 71.1 percent (Krishnamoorthi 2018, Tables 3 and 4). The synthesis returns to the same model on a phone: 105 ms in FP32 on the CPU, 15.5 ms in INT8 on the DSP."
+  sources:
+    - "Krishnamoorthi 2018, arXiv 1806.08342, Table 3 (post-training INT8, weights and activations): MobileNetV2 1.0 224 asymmetric per-layer 0.001, symmetric per-channel 0.698, asymmetric per-channel 0.697, float 0.719; ResNet-v1-50 0.75, 0.751, 0.751, float 0.752. Table 4 (QAT): MobileNetV2 per-channel 0.711. Read 2026-10-17."
+    - "Nagel, van Baalen, Blankevoort, Welling, Data-Free Quantization Through Weight Equalization and Bias Correction, ICCV 2019, arXiv 1906.04721: Table 1, MobileNetV2 FP32 71.72, INT8 per-tensor 0.12, per-channel 70.65; Figure 2, per-output-channel weight ranges of the first depthwise-separable layer. Read 2026-10-17."
+
+recall: "Part 1: pruning and distillation changed what the model computes. The blur model reached about 87 ms per frame on the phone's CPU against a 33 ms budget (illustrative, fig-compression-waterfall), and GPT-2 XL decoding still streams 3 GB of FP16 weights per token, 59 ms on the phone's 51.2 GB/s bus (table 1). Close your notes: which tier did Part 1 leave alone, and which budget term does each case still break? (Precision. The blur model breaks the frame time and cannot use the integer accelerator; decoding breaks the token time on weight bytes.)"
+
+driving_question: "How few bits can each value keep before accuracy breaks, and when does storing fewer bits make the device faster?"
+
+goals:
+  - "Say what each format from FP32 to INT4 spends its bits on, and what fewer bits save."
+  - "Quantize a tensor with a scale and a zero-point, and trace an integer layer through its 32-bit accumulator."
+  - "Choose a clipping range and a granularity, and predict when per-tensor ranges fail."
+  - "Predict when fewer bits run faster, and judge a quantized model on measured evidence."
+
+running_example: "MobileNetV2, the blur model's backbone, carries the accuracy story with measured data: 71.9 percent in float, 0.1 percent after per-tensor INT8, 69.8 percent per-channel, 71.1 percent after QAT; 62.0 percent with 4-bit weights after QAT (Krishnamoorthi 2018, Tables 3 to 5); on a Pixel 2, 105 ms FP32 on one CPU core, 63 ms INT8 on the CPU, 15.5 ms INT8 on the Hexagon DSP (Table 7). ResNet-50 is the contrast that tolerates per-tensor INT8 and closes the lecture with the chapter's INT8 deployment profile on the H100 (table 13). GPT-2 XL decoding on the phone (3 GB FP16 weights, 0.31 GB KV cache, 51.2 GB/s) carries the speed story (Napkin Math 10.4), with measured LLM decode speedups from GPTQ and AWQ."
+
+segments:
+  - name: Formats
+    divider_question: "What does a narrower number keep, and what does it save?"
+    read: "§10.3.1, §10.3.2"
+    concept_questions: [2, 3, 4]
+    minutes: 8
+    land: "An integer format keeps evenly spaced levels and nothing else, so it needs a scale to reach any range; every bit removed is a byte not moved and a cheaper operation, if the hardware has the path."
+  - name: The mapping
+    divider_question: "How does a quantizer map real numbers onto integers?"
+    read: "§10.3.3 (uniform quantization, tuning ranges, weights and activations), Napkin Math 10.1"
+    concept_questions: [5, 6, 7, 8]
+    focus: "x approx s (x_q - z): s = (beta - alpha) / (2^b - 1), z = round(-alpha / s)"
+    minutes: 13
+    land: "Two numbers per range, a scale and a zero-point, define the whole mapping; inside the range the error is at most half a step, and integer layers add in 32 bits and rescale once."
+  - name: The range
+    divider_question: "Which range should one scale cover?"
+    read: "§10.3.3 (range calibration, granularity, static and dynamic)"
+    concept_questions: [9, 10, 11]
+    minutes: 12
+    land: "The scale is set by the widest values it must cover, so clip rare outliers, give each channel its own scale, and treat the calibration set as part of the model."
+  - name: The limit
+    divider_question: "How few bits before accuracy breaks, and what buys it back?"
+    read: "§10.3.3 (PTQ in practice, QAT), §10.3.4, §10.3.5 (AWQ)"
+    concept_questions: [12, 13]
+    minutes: 10.5
+    land: "Eight bits sit on the plateau for most vision models; at four bits, post-training rounding falls off a cliff unless training adapts the weights or the rounding protects the few channels that matter."
+  - name: The speed
+    divider_question: "When do fewer bits make the device faster?"
+    read: "§10.3.5, §10.4.1 (dequantization fusion), §10.5.4 (the runtime dequantization trap)"
+    concept_questions: [14]
+    minutes: 9.5
+    land: "Fewer bits speed a memory-bound layer by the bytes removed, if dequantization stays inside the kernel, and a compute-bound layer only through a faster integer path, which is often a different processor."
+
+concept_questions:
+  - id: 1
+    q: "Why does one INT8 recipe keep ResNet-50 and wreck MobileNetV2?"
+    picture: "New paired bars (make_figs.py hook_step1..3): float against per-tensor INT8 post-training top-1 for ResNet-v1-50 (75.2, 75.0) and MobileNetV2 (71.9, revealed 0.1)"
+    numbers: "Krishnamoorthi 2018, Table 3: ResNet-v1-50 75.2 float, 75.0 asymmetric per-layer INT8; MobileNetV2 1.0 224 71.9 float, 0.1 per-layer INT8. Nagel et al. 2019, Table 1: MobileNetV2 71.72 to 0.12."
+    example: "The blur model's backbone"
+    read: "§10.3.3"
+  - id: 2
+    q: "What does each format from FP32 to INT4 spend its bits on?"
+    picture: "New bit-layout bars drawn to scale (make_figs.py formats_step1..2): step 1 FP32, BF16, FP16 in gray as a recall of Lecture 8b; step 2 adds FP8 E4M3 (1/4/3), FP8 E5M2 (1/5/2), INT8, INT4, each labeled with its largest value or level count"
+    numbers: "FP16 largest finite value 65,504 (§10.3.1); FP8 E4M3 largest normal 448, E5M2 57,344 (Micikevicius et al. 2022, Table 1); INT8 256 levels, INT4 16; storage 2x, 4x, 8x smaller than FP32 (table 7); on the H100 the FP8 peak equals the INT8 peak, 2x dense FP16 (§10.3.1)"
+    example: "One weight stored six ways"
+    read: "§10.3.1, table 7"
+  - id: 3
+    q: "Why does an integer grid need a scale when a float grid does not?"
+    picture: "New log-scale number line (make_figs.py grids_step1..2), derived from the format definitions: the 127 non-negative FP8 E4M3 values from 0.002 to 448, dense near zero (56 below 1, 7 between 256 and 448); then INT8 stretched to cover the same 448, one level every 3.5, so every value below 1.76 rounds to zero"
+    numbers: "Derived: E4M3 has 127 non-negative finite values, smallest subnormal 2^-9 = 0.002, largest 448; INT8 scaled to 448 has a step of 448 / 127 = 3.53. FP8 needs no zero-point and its exponent absorbs outliers (§10.3.1)."
+    example: "The same 448-wide range under both 8-bit formats"
+    read: "§10.3.1"
+  - id: 4
+    q: "What do fewer bits save: bytes, energy, or capacity?"
+    picture: "Part 1's energy bars (copied: energy_step1..2, FP32 against INT8 add, multiply, multiply-accumulate, then the 640 pJ DRAM read) with a show of hands before step 2; step 3 one capacity line for the keyword spotter"
+    numbers: "Horowitz 2014 via table 8: add 0.90 / 0.03 pJ (30x), multiply 3.70 / 0.20 (18.5x), MAC 4.60 / 0.30 (15x); 32-bit DRAM read 640 pJ, about 2,100x an INT8 MAC (§10.3.2); DS-CNN 800 KB FP32, 200 KB INT8 against about 512 KB SRAM (Lighthouse 10.2)"
+    example: "Keyword spotting in SRAM"
+    read: "§10.3.2, Lighthouse 10.2"
+  - id: 5
+    q: "How does a quantizer map a real range onto integers?"
+    picture: "Focus slide (affine law), then Part 1's worked frame moved here (numline_step1..2 copied): the 2x2 tile, scale, zero-point, integers, and the number line"
+    numbers: "Napkin Math 10.1: range [-1, 3], UINT8, s = 4/255 = 0.0157, z = round(63.75) = 64, X_q = [[0, 128], [64, 255]]; real zero maps exactly to 64"
+    example: "A 2x2 activation tile"
+    read: "§10.3.3, Napkin Math 10.1"
+  - id: 6
+    q: "How large is the rounding error, and where does the larger error come from?"
+    picture: "New strip plot (make_figs.py roundtrip): listing 2's four weights before and after an INT8 round trip, each error bar against the half-step band; then book fig-quantization-error-dist (illustrative) for the clipped tails"
+    numbers: "Derived from listing 2 with symmetric INT8: s = 0.392 / 127 = 0.00309; codes 41, -27, 127, -66; errors 0.00045, 0.00066, 0, 0.00072, each below s/2 = 0.00154. Within-range error bounded by [-s/2, s/2]; tails come from clipping (§10.3.3, figure 19, illustrative)."
+    example: "Four weights from listing 2"
+    read: "§10.3.3 (uniform quantization)"
+  - id: 7
+    q: "When is a zero-point worth its cost?"
+    picture: "Book fig-calibration-ranges (symmetric and asymmetric number lines) at slide size, then new bars: MobileNet-v1 post-training INT8, symmetric per-channel 59.1 against asymmetric per-channel 70.3, float 70.9"
+    numbers: "ReLU6 output [0, 6]: symmetric step 6/127 = 0.047, asymmetric 6/255 = 0.024, half the step (derived); asymmetric costs the cross term z times the sum of weights per output (§10.3.3); MobileNet-v1 59.1 / 70.3 / 70.9 (Krishnamoorthi 2018, Table 3)"
+    example: "Post-ReLU6 activations in MobileNet-v1"
+    read: "§10.3.3 (tuning ranges)"
+  - id: 8
+    q: "How does an integer layer compute without overflowing?"
+    picture: "Book fig-weight-activations-quantization (quantize, INT8 multiply, INT32 accumulate, requantize) in two steps, then a worked three-term dot product as a table build (new)"
+    numbers: "Derived worked example: w = [0.5, -0.25, 0.75], s_w = 0.75/127; x = [1.0, 2.0, 0.5], s_x = 2/127; codes [85, -42, 127] and [64, 127, 32]; INT32 sum 4,170; times s_w s_x gives 0.388 against the exact 0.375; with s_y = 1/127, M = s_w s_x / s_y = 0.0118 and y_q = 49. An 8-bit product needs 14 bits plus sign; INT32 holds a worst-case sum of about 133,000 products (derived from 2^31 / 127^2). Requantization scale M (§10.3.3, table 14)."
+    example: "One output of one INT8 layer"
+    read: "§10.3.3 (weights vs activations)"
+  - id: 9
+    q: "How do we choose the clipping range?"
+    picture: "Book fig-resnet-activations-histogram (copied from Part 1) with two candidate ranges marked, 2.5 and 1.1; step 2 the three methods named on the plot: max, percentile, entropy"
+    numbers: "Bulk below about 1.1, tail past 2.0 (§10.3.3, after Wu et al. 2020); step size 2.5/255 = 0.0098 against 1.1/255 = 0.0043, 2.3x finer for the bulk (derived)"
+    example: "One ResNet-50 layer"
+    read: "§10.3.3 (range calibration)"
+  - id: 10
+    q: "Why give each channel its own scale?"
+    picture: "Outside figure: Nagel et al. 2019 Figure 2 (per-output-channel weight ranges of MobileNetV2's first depthwise layer), reproduced with credit; then new bars from Krishnamoorthi 2018 Table 3 and 4: MobileNetV2 float 71.9, per-tensor 0.1, per-channel 69.8, QAT per-channel 71.1; ResNet-v1-50 beside it, flat at 75.0 to 75.2"
+    numbers: "Krishnamoorthi 2018, Tables 3 and 4; Nagel et al. 2019, Table 1 (0.12 per-tensor, 70.65 per-channel); per-channel is the common default for weights, activations stay per-tensor (table 9; Krishnamoorthi 2018, section 3)"
+    example: "Answers the hook"
+    read: "§10.3.3 (granularity), table 9"
+  - id: 11
+    q: "Why do large language models break per-tensor INT8?"
+    picture: "New line plot from Dettmers et al. 2022 Table 1: C4 perplexity against model size (125M to 13B) for 32-bit float, INT8 absmax per-tensor, and LLM.int8(); outlier emergence marked at 6.7B"
+    numbers: "Dettmers et al. 2022 (arXiv 2208.07339): 13B float 12.45, INT8 absmax 19.08, LLM.int8() 12.45; 6.7B float 13.30, absmax 14.59; outlier features up to 20x larger than other dimensions, in all layers from about 6.7B, concentrated in 6 feature dimensions, about 0.1 percent of input features. Read 2026-10-17."
+    example: "Dense fairseq transformers, 125M to 13B (Dettmers et al. 2022, section 3.3)"
+    read: "§10.3.3 (PTQ: outlier-heavy layers), footnote 15"
+  - id: 12
+    q: "Where does accuracy fall off the cliff, and what does quantization-aware training buy back?"
+    picture: "New grouped bars from Krishnamoorthi 2018 Table 5 (4-bit weights, 8-bit activations) beside Table 3 (8-bit): ResNet-v1-50 and MobileNetV2 under per-tensor PTQ, per-channel PTQ, per-channel QAT, against float; step 3 the QAT loop as book fig-qat with one added line for the straight-through estimator"
+    numbers: "8-bit: ResNet-v1-50 75.0 to 75.1, MobileNetV2 69.8 per-channel (Table 3). 4-bit weights: ResNet-v1-50 0.2 per-tensor PTQ, 54.0 per-channel PTQ, 73.2 QAT, float 75.2; MobileNetV2 0.1, 0.1, 62.0, float 71.9 (Table 5). Fake quantization forward, identity gradient inside the clipping range (§10.3.3, Bengio et al. 2013)."
+    example: "ResNet-50 and MobileNetV2 at 8 and 4 bits"
+    read: "§10.3.3 (QAT), Checkpoint 10.2"
+  - id: 13
+    q: "How do large language models reach four bits, or three, without retraining?"
+    picture: "Two steps. (a) New bars from Frantar et al. 2023 Table 5: OPT-175B WikiText2 perplexity, FP16 8.34, round-to-nearest 4-bit 10.54, GPTQ 4-bit 8.37, round-to-nearest 3-bit 7,300 (bar broken, labeled), GPTQ 3-bit 8.68. (b) Predict card, then new bars from Lin et al. 2024 Table 1: OPT-6.7B INT3 with 1 percent of weights kept in FP16, chosen by weight magnitude 22.37 against by activation magnitude 11.39, round-to-nearest 23.54, FP16 10.86"
+    numbers: "Frantar et al. 2023 (GPTQ, arXiv 2210.17323), Table 5; Lin et al. 2024 (AWQ, arXiv 2306.00978), Table 1, and Table 4: Llama-2-7B INT4 group 128, FP16 5.47, round-to-nearest 5.73, AWQ 5.60. Read 2026-10-17. Chapter: AWQ protects about 1 percent of salient channels (footnote 18)."
+    example: "OPT-175B and OPT-6.7B weight-only quantization"
+    read: "§10.3.5 (AWQ), §10.3.4"
+  - id: 14
+    q: "When do fewer bits make the device faster?"
+    picture: "Three frames. (a) Part 1's schematic roofline (roofline_int_step0..2 copied) with two predict cards, GPT-2 XL decode on the slope and a large-batch MLP on the ceiling; step 4 measured decode bars. (b) New traffic bars for GPT-2 XL per token: FP16 3.31 GB, INT4 fused 1.06 GB, INT4 with a separate dequantize kernel 7.06 GB. (c) New bars from Krishnamoorthi 2018 Table 7: MobileNetV2 on a Pixel 2, 105 ms FP32 CPU, 63 ms INT8 CPU, 15.5 ms INT8 DSP, beside the chapter's illustrative waterfall step 3 (87 to 20 ms)"
+    numbers: "Napkin Math 10.4: 3.3 GB, 65 ms, about 15 tokens/s against 1.06 GB, 21 ms, about 48 tokens/s, 3.1x; Napkin Math 10.2: H100 INT8 1,979 against FP16 989, about 2x; measured: OPT-175B 3-bit on one A100 71 ms per token against FP16 on five A100s 230 ms, 3.24x (Frantar et al. 2023, Table 6); Llama-2-7B on an RTX 4090, a further 3.1x from 4-bit kernels over a fused FP16 baseline (Lin et al. 2024, section 6); separate dequantization: 0.75 GB read, 3 GB written, 3 GB read, plus 0.31 GB KV, 7.06 GB, about 138 ms at 51.2 GB/s, slower than FP16 (derived from §10.4.1 and §10.5.4); Napkin Math 10.3: 4x lanes per 512-bit register; Pixel 2: 1.7x INT8 on the CPU, 6.8x on the DSP (Krishnamoorthi 2018, Table 7)"
+    example: "GPT-2 XL decode on the phone; MobileNetV2 on a Pixel 2"
+    read: "§10.3.5, §10.4.1, §10.5.4"
+  - id: 15
+    q: "Is this INT8 candidate ready to ship?"
+    picture: "Part 1's deployment-card table moved here (rows: accuracy, size, batch-one latency, large-batch throughput, energy, and an empty row for confidence calibration, tail latency, sustained power), with the 'what backs it' column revealed after the vote"
+    numbers: "Table 13 and §10.6.2: top-1 76.1 to 75.8 percent against a 75.5 limit; 102.4 to 25.6 MB; batch one 0.38 to 0.30 ms (1.3x); 15,200 (modeled FP32) to 89,470 img/s (MLPerf-measured INT8), 5.9x; energy 46.1 to 7.8 mJ assuming 700 W in both. Calibration-error values omitted (no source in the chapter)."
+    example: "ResNet-50 INT8 on the H100"
+    read: "§10.6.2, Checkpoint 10.5"
+
+worked_examples:
+  - name: "Napkin Math 10.1: scale and zero-point (student exercise)"
+    steps: ["given: X = [[-1, 1], [0, 3]], range [-1, 3], UINT8", "s = 4/255 = 0.0157", "z = round(1 / 0.0157) = round(63.75) = 64", "X_q = [[0, 128], [64, 255]]", "meaning: real zero is exactly 64, so zero padding adds no error; values outside [-1, 3] clip to 0 or 255"]
+  - name: "One output of an INT8 layer (derived from §10.3.3)"
+    steps: ["given: w = [0.5, -0.25, 0.75] with s_w = 0.75/127; x = [1.0, 2.0, 0.5] with s_x = 2/127; output scale s_y = 1/127", "codes: w_q = [85, -42, 127], x_q = [64, 127, 32]", "INT32 accumulate: 5,440 - 5,334 + 4,064 = 4,170", "real value 4,170 x s_w x s_x = 0.388 against the exact 0.375; requantize with M = 0.0118: y_q = 49", "meaning: products need 14 bits plus sign and sums need 32; one multiply by M per output returns to INT8, and the 3 percent error here comes from rounding x = 1.0 to 64 steps"]
+  - name: "Napkin Math 10.4 extended: GPT-2 XL decode, FP16, INT4 fused, INT4 unfused"
+    steps: ["given: phone bus 51.2 GB/s; GPT-2 XL 1.5B; 1,024-token FP16 KV cache 0.31 GB", "FP16: 3 + 0.31 = 3.3 GB per token, 65 ms, about 15 tokens/s", "INT4, dequantized in registers: 0.75 + 0.31 = 1.06 GB, 21 ms, about 48 tokens/s, 3.1x", "INT4, dequantized by a separate kernel: read 0.75, write 3, read 3, plus 0.31 = 7.06 GB, about 138 ms (derived)", "meaning: the bytes set the gain only when the packed weights are the only weights that cross the bus"]
+  - name: "Table 13: accept or reject the ResNet-50 INT8 candidate (diagnose)"
+    steps: ["given: table 13 and a 75.5 percent top-1 limit", "top-1 75.8 percent: passes; per-tensor INT8 suits ResNet-50 (Krishnamoorthi 2018)", "batch one only 1.3x; the 5.9x pairs measured INT8 with modeled FP32; energy assumes 700 W in both", "confidence calibration, tail latency, sustained power: not measured", "meaning: not yet; measure both precisions on one stack and add the missing quality checks (§10.6.2, Checkpoint 10.5)"]
+
+active_learning:
+  - at_minute: 2
+    type: predict
+    prompt: "ResNet-50 loses 0.2 points under per-tensor INT8. Predict MobileNetV2's top-1 under the same recipe: A) about 71 B) about 65 C) about 40 D) about 0. Then vote on why (hook options A to D)."
+    answer: "D, 0.1 percent (Krishnamoorthi 2018, Table 3; Nagel et al. 2019 report 0.12). Reason C, revealed at minute 33: per-tensor scales cannot serve channels with very different ranges."
+  - at_minute: 5
+    type: retrieval
+    prompt: "Close your notes. Which tier of the stack did Part 1 leave alone, and which budget term does the blur model and GPT-2 XL decoding each still break?"
+    answer: "Precision. Blur: frame time, about 87 ms against 33 (illustrative), and its integer accelerator sits unused. Decode: token time on weight bytes, 59 ms of FP16 weight streaming."
+  - at_minute: 14
+    type: vote
+    prompt: "Show of hands: which costs more energy, an INT8 multiply-accumulate or reading its 32-bit operand from DRAM?"
+    answer: "The DRAM read, 640 pJ, about 2,100x the 0.30 pJ multiply-accumulate (§10.3.2, table 8)."
+  - at_minute: 18.5
+    type: estimate
+    prompt: "Quantize [[-1, 1], [0, 3]] to UINT8 over [-1, 3]. Compute the scale, the zero-point, and the four integers."
+    answer: "s = 4/255 = 0.0157; z = 64; [[0, 128], [64, 255]]; real 0.0 maps exactly to 64 (Napkin Math 10.1)."
+  - at_minute: 30
+    type: estimate
+    prompt: "INT8 over a range of 2.5, or clipped to 1.1. How much finer is each step for the bulk of the activations, and what happens to the values above 1.1?"
+    answer: "2.5/255 = 0.0098 against 1.1/255 = 0.0043, about 2.3x finer; values above 1.1 saturate at the top code (derived; §10.3.3, figure 21)."
+  - at_minute: 39
+    type: diagnose
+    prompt: "A static INT8 model calibrated on 500 daytime images loses 6 points on night images; the FP32 model loses 1. Name two causes and two fixes."
+    answer: "Night activations fall outside or far inside the fixed ranges, so they clip or use few levels; the calibration set did not represent deployment. Fixes: recalibrate on representative data (include night), use dynamic ranges for the affected activations at a runtime cost, or per-channel scales and QAT if PTQ still misses (§10.3.3, static against dynamic; Checkpoint 10.2). Scenario numbers are illustrative and labeled so."
+  - at_minute: 48.5
+    type: predict
+    prompt: "OPT-6.7B at INT3 has perplexity 23.54 (FP16: 10.86). Keep 1 percent of the weights in FP16. Which 1 percent: the largest weights, or the weights in the channels with the largest activations? Predict the perplexity of each."
+    answer: "By activation: 11.39; by weight magnitude: 22.37, barely better than none (Lin et al. 2024, Table 1). A weight matters by what it multiplies."
+  - at_minute: 52.5
+    type: predict
+    prompt: "FP16 to fewer bits. (a) GPT-2 XL decoding on the phone with INT4 weights. (b) A large-batch MLP on an H100 with INT8. Predict each speedup and say what sets it."
+    answer: "(a) About 3.1x from bytes (3.3 to 1.06 GB per token), below 4x because the KV cache stays FP16, and only with fused dequantization. (b) About 2x from the INT8 datapath, 1,979 against 989 (Napkin Math 10.2, 10.4)."
+  - at_minute: 62
+    type: diagnose
+    prompt: "ResNet-50 INT8 profile: top-1 76.1 to 75.8 percent (limit 75.5), batch one 1.3x, large-batch throughput 5.9x, size 4x, energy 5.9x. Which claims are measured, which modeled or assumed, and what is missing?"
+    answer: "Accuracy reported and passes; size is arithmetic; batch-one latency from one engine profile; the 5.9x pairs MLPerf INT8 with modeled FP32; energy assumes 700 W in both; confidence calibration, tail latency, and sustained power are missing. Not yet (§10.6.2, Checkpoint 10.5)."
+  - at_minute: 65
+    type: concept_question
+    prompt: "True or false: (1) INT8 post-training quantization costs at most a point of accuracy. (2) INT4 weights make decoding 4x faster. (3) Post-training quantization needs the labeled training set. (4) Symmetric ranges are always as good as asymmetric ones."
+    answer: "All false. (1) MobileNetV2 per-tensor: 71.9 to 0.1 (Krishnamoorthi 2018). (2) 3.1x on the phone; the KV cache stays FP16, and an unfused dequantize pass makes it slower than FP16 (Napkin Math 10.4; derived). (3) A small unlabeled calibration set suffices (§10.3.3). (4) MobileNet-v1 per-channel: 59.1 symmetric against 70.3 asymmetric (Krishnamoorthi 2018, Table 3). The chapter's fallacy 'aggressive quantization maintains performance' sits under (1)."
+
+open_questions:
+  - "FP8 keeps an exponent and needs almost no calibration; INT8 needs a zero-point and careful ranges but uses smaller multipliers. If a new phone accelerator could support only one 8-bit format, which should it be?"
+  - "Outlier features appear abruptly near 6.7B parameters. Should model designers train models to be easy to quantize, or should quantizers keep adapting to whatever training produces?"
+  - "A calibration set of a few hundred images now decides how a deployed model behaves on inputs it never saw. Who should own that data, and how should it be versioned with the model?"
+
+more_examples:
+  - "Krishnamoorthi 2018: per-channel INT8 within about 2 points of float for seven ImageNet networks; Pixel 2 timings for eight networks (Tables 3 to 7)."
+  - "Nagel et al. 2019: data-free cross-layer equalization brings per-tensor MobileNetV2 INT8 from 0.12 to 70.92 percent without data."
+  - "Dettmers et al. 2022: LLM.int8() keeps 16-bit perplexity to 13B and 16-bit zero-shot accuracy to 175B by keeping outlier dimensions in 16 bits."
+  - "Frantar et al. 2023: GPTQ quantizes OPT-175B to 3 or 4 bits in about four GPU hours; 3-bit OPT-175B fits one 80 GB A100."
+  - "Lin et al. 2024: AWQ and TinyChat, 3.2 to 3.3x measured decode speedups over Hugging Face FP16 on desktop and mobile GPUs."
+  - "Micikevicius et al. 2022: FP8 E4M3 and E5M2 definitions and training and inference results."
+  - "Lighthouse 10.1: DLRM embedding tables 4 to 8x smaller in INT8 or lower, a capacity case (§10.3.2)."
+  - "Binary networks: XNOR and popcount replace multiply-accumulate; ternary packs five values per byte (3^5 = 243) (§10.3.4)."
+  - "MLPerf Inference: ResNet-50 INT8 89,470 img/s on the H100 (table 13)."
+
+left_to_reading:
+  - concept: "Nonuniform quantization and groupwise (Q-BERT) and sub-channel granularity"
+    why: "Named once in the granularity notes; group size 128 appears through the AWQ and GPTQ numbers without its mechanics."
+  - concept: "Fake-quantization formulas for asymmetric ranges, batch-norm freezing during QAT, the two-phase PTQ-then-QAT pipeline"
+    why: "QAT gets one frame on what it changes (forward rounding, straight-through backward); the formulas and recipes read better than they present (§10.3.3)."
+  - concept: "Binary and ternary networks (XNOR and popcount, trit packing)"
+    why: "Extreme quantization is a special case for targets that INT8 and INT4 cannot meet; one note on the cliff frame and one more-examples line (§10.3.4)."
+  - concept: "Microscaling formats (MXFP8, MXFP6, MXFP4)"
+    why: "Awareness item in the chapter; one note on the formats frame."
+  - concept: "FP8 as the default serving precision"
+    why: "Reading; this lecture shows FP8 only as a format. Runtime and precision selection (Example 13.6) is Lecture 13's."
+  - concept: "Low-precision Tensor Core instructions, per-precision ridge points, 2:4 datapath mechanics"
+    why: "Owned by Lecture 11; this lecture keeps two points on a schematic roofline."
+  - concept: "How confidence calibration is measured (reliability diagram, ECE)"
+    why: "Owned by Lecture 12b. This lecture shows table 13's calibration-error row (2.1 to 3.4 percent against a 3.0 percent limit) as the gate the INT8 candidate fails, and defines the term in one line."
+  - concept: "Compression toolchains and diagnostic visualization"
+    why: "The dequantization trap is taught; toolchains and observers are reading (§10.5.4, §10.6.3), and runtime selection is Lecture 13's."
+
+closing:
+  return_to_hook: "Back to MobileNetV2. Per-tensor INT8 took it from 71.9 to 0.1 percent because one scale served channels with very different ranges; one scale per channel gave 69.8 percent with no retraining, and QAT 71.1 percent. On a Pixel 2 the same INT8 model ran in 63 ms on the CPU against 105 ms in FP32, and in 15.5 ms on the DSP, which cannot run FP32 at all. Precision enabled the speed, the integer processor supplied most of it, as the chapter's blur waterfall argued. Part 1's 7B model now fits: 4-bit weights take 3.5 GB (derived), and each token moves a quarter of the weight bytes when dequantization stays in the kernel."
+  read_and_practice: ["§10.3 (all), §10.4.1, §10.5.4, §10.6.2", "self-check questions at the end of §10.3", "Checkpoints 10.2 and 10.3", "Napkin Math 10.1 to 10.4 by hand; redo 10.4 for INT8 weights", "TinyTorch quantization module, if assigned"]
+  further_reading:
+    - cite: "Model Compression, §10.3 Numerical Precision and §10.4.1"
+      url: "https://mlsysbook.ai"
+      why: "Formats, energy, the affine mapping, calibration, PTQ and QAT, extreme quantization, and when fewer bits run faster, with every number."
+    - cite: "Krishnamoorthi, Quantizing Deep Convolutional Networks for Efficient Inference: A Whitepaper, 2018"
+      url: "https://arxiv.org/abs/1806.08342"
+      why: "Per-tensor against per-channel, PTQ against QAT, 8 and 4 bits, and phone timings, measured on the same networks."
+    - cite: "Jacob et al., Quantization and Training of Neural Networks for Efficient Integer-Arithmetic-Only Inference, CVPR 2018"
+      url: "https://doi.org/10.1109/cvpr.2018.00286"
+      why: "The scale and zero-point scheme and the integer-only layer, from the source."
+    - cite: "Nagel et al., A White Paper on Neural Network Quantization, 2021"
+      url: "https://arxiv.org/abs/2106.08295"
+      why: "A clear outside explanation of the quantization pipeline and its standard fixes, from PTQ to QAT."
+    - cite: "Dettmers et al., LLM.int8(): 8-bit Matrix Multiplication for Transformers at Scale, NeurIPS 2022"
+      url: "https://arxiv.org/abs/2208.07339"
+      why: "How outlier features break per-tensor INT8 in large language models, and one fix."
+    - cite: "Lin et al., AWQ: Activation-aware Weight Quantization for On-Device LLM Compression and Acceleration, MLSys 2024"
+      url: "https://arxiv.org/abs/2306.00978"
+      why: "Weight-only 4-bit quantization for decoding, salient channels, and measured speedups."
+  bridge: "Lecture 11: the same INT8 change gave ResNet-50 1.3x at batch one and 5.9x at large batch on one chip. Why does moving data cost more than computing it, and where does each layer sit?"
+
+coverage:
+  primary_taught: ["Quantization regimes and the cliff (measured: Krishnamoorthi Tables 3 to 5, GPTQ, AWQ; PTQ before QAT)", "When fewer bits run faster (roofline points, measured decode, fused dequantization, Pixel 2 CPU against DSP)", "Measured deployment evidence (table 13 diagnose; closes the chapter as Lecture 11 expects)"]
+  primary_touched: ["Compression fits a deployment budget (recall of Part 1's budget terms)", "Combined techniques do not multiply (waterfall step 3 only; ordering taught in Part 1)"]
+  primary_left_to_reading: []
+  secondary: ["Affine quantization mechanics (taught in depth: mapping, error bound, symmetric against asymmetric, INT32 accumulation and requantization, calibration, granularity)", "Compression-specific fusion (fused dequantization here; batch-norm folding in Part 1)"]
+  touches_reused: ["Lecture 8b: FP16 and BF16 bit layouts and range (recalled as gray bars, not retaught)", "Lecture 6b: GPT-2 XL decode and the KV cache", "Lecture 7: fusion traffic rule", "Lecture 2: roofline idea (schematic only)", "Part 1: deployment budget, blur waterfall steps 1 and 2, BN folding"]
+  hand_offs: ["Lecture 11 owns per-precision ridges, Tensor Core datapaths, the energy ladder in full, and why batch one barely moved", "Lecture 12b owns how confidence calibration is measured; Lecture 12 owns latency distributions", "Lecture 13 owns runtime and precision selection and batching; Lecture 13b owns the KV cache in serving"]
+
+notes_for_author:
+  - "Outside numbers were read from the papers on 2026-10-17: Krishnamoorthi 2018 (arXiv 1806.08342) Tables 3, 4, 5, 7; Nagel et al. 2019 (arXiv 1906.04721) Table 1 and Figure 2; Dettmers et al. 2022 (arXiv 2208.07339) Table 1 and section 1; Frantar et al. 2023 (arXiv 2210.17323) Tables 3, 5, 6; Lin et al. 2024 (arXiv 2306.00978) Tables 1 and 4 and section 6; Micikevicius et al. 2022 (arXiv 2209.05433) Table 1. Krishnamoorthi 2018, Lin 2024, and Micikevicius 2022 are in the chapter bibliography (the chapter cites them for other claims; the table values used here are not in the chapter text). Nagel 2019, Dettmers 2022, and Frantar 2023 are not; consider adding them."
+  - "Krishnamoorthi 2018 uses TensorFlow-Slim checkpoints: its ResNet-v1-50 float baseline is 75.2 percent, not table 13's 76.1. The slides label each bar with its source so the two ResNet-50 baselines are not mixed."
+  - "Krishnamoorthi 2018 Table 3 MobileNetV2 is the ImageNet classifier, not the chapter's segmentation model. The slides say 'the blur model's backbone' and keep the chapter's frame times labeled illustrative."
+  - "Nagel et al. 2019 Figure 2 is reproduced with credit, or redrawn as a schematic labeled 'after Nagel et al. 2019' if reuse is not cleared; its per-channel values cannot be read exactly from the plot, so no range ratio is stated on the slide."
+  - "The OPT-175B 3-bit round-to-nearest perplexity (7.3e3) is drawn as a broken bar with its value written on it, because it is about 900x the other bars."
+  - "Derived on the slide, not stated in the chapter: the FP8 E4M3 grid counts, the INT8 step at 448, the listing 2 round trip, the ReLU6 step sizes, the three-term INT8 dot product, the INT32 headroom (about 133,000 products), the 2.3x finer clip, the unfused-dequantize traffic (7.06 GB, about 138 ms), and the 7B INT4 size (3.5 GB). Each is labeled derived. The diagnose scenario at minute 37 (6 points at night) is illustrative and labeled so."
+  - "Moved from Part 1 with their figures copied into this folder's images/ (Part 1's folder is not edited): the energy bars, the affine focus slide and Napkin Math 10.1 frame, the ResNet-50 activation histogram, the roofline predict frame, the ResNet-50 INT8 bars, and the deployment-card diagnose. Part 1's Han et al. 2016 plateau-and-cliff frame stays in Part 1 as the frontier for pruning; Part 2 shows the cliff with quantization-only data."
+  - "Frame count 34 including the title, five dividers, and the focus slide; notes total about 71.5 minutes (storyboard.md)."
+  - "Build changes (2026-10-17). 35 frames, notes 71 minutes ([OPTIONAL] 12.5; cutting them leaves about 59). (1) Cover: the clean blueprint (cover_model_compression_blueprint.png), not the older cover_model_compression.png. (2) New frame after the focus slide: a 3-bit toy grid ([-1, 2.5], s = 0.5, z = 2, derived) built in three steps (range, grid, snap and clamp), so the integer grid over the range is visible before Napkin Math 10.1. (3) Frame 12 uses a new round-trip error plot on the same toy grid (sawtooth within s/2, clipping error outside) beside listing 2's table; the book's figure 19 (an illustrative Gaussian) moved to the notes. (4) Frame 14's pipeline is drawn in TikZ at slide size; the book's fig-weight-activations-quantization is illegible when shrunk. (5) Nagel et al. 2019 Fig. 2 is a schematic redraw (32 channels, a few wide, most narrow; heights not to scale, no values stated); the slide quotes only the paper's own example ([-128, 128] against (-0.5, 0.5)). (6) Dettmers et al. 2022 Table 1 is on fairseq dense transformers, not OPT; the slide says dense transformers, and the notes say the 125M model also fails under absmax (87.76). (7) The measured decode bars (GPTQ Table 6) became one line on the roofline card for fit. (8) Synthesis uses a MobileNetV2-only bar chart (synth_acc.svg) for legibility. (9) The deployment card's last row is tail latency and sustained power; confidence calibration is named in the notes as Lecture 12's check, and its table-13 values stay off the slide as planned. (10) 'A few hundred calibration inputs' was replaced by the chapter's 'small unlabeled sample'."
+  - "All outside numbers re-read from the papers on 2026-10-17 and match the plan: Krishnamoorthi 2018 Tables 3, 4, 5, 7; Nagel et al. 2019 Table 1, Fig. 2 caption and section 3.1; Dettmers et al. 2022 Table 1 and section 1; Frantar et al. 2023 Tables 5 and 6; Lin et al. 2024 Tables 1 and 4 and section 6; Micikevicius et al. 2022 Table 1."
+  - "Round 1 fixes (2026-10-18). 36 handout frames (77 presenting pages), notes 70.5 minutes (CORE 58.5). (1) Zero-point frame: the MobileNet-v1 bars (59.1 against 70.3) compare symmetric and asymmetric per-channel weights, with activations quantized alike (Krishnamoorthi 2018, Table 3); axis, note, and true-or-false card 4 now say so. The book's calibration-ranges figure is redrawn at slide size (calranges.svg; asymmetric zero-point -64, derived). (2) The deployment profile adds table 13's confidence-calibration row (2.1 to 3.4 percent, limit 3.0 percent, fails, per section 10.6.2) and drops the model-size row; the expected verdict is now no, on calibration. (3) The roofline is redrawn (roofint_step1..3, labeled schematic, positions illustrative): the decode point slides up the slope by 3.1x, then an INT8 roof at 2x lifts the MLP point while decode stays put; the measured card names one A100 against five. (4) Callbacks: confidence calibration is Lecture 12b; Lecture 13 is runtime and precision selection (no FP8 serving in its maps). (5) GPTQ and AWQ are separate frames; the AWQ card and the per-channel note define one scale per group of 128 weights (Lin et al. 2024). QAT note trimmed 0.5 minutes. (6) The activation histogram is redrawn at slide size from the book's SVG bars (illustrative) with a third step marking max, percentile, and entropy; the percentile and entropy positions are labeled illustrative. (7) Takeaways gain the plateau-and-cliff line. (8) QAT pipeline redrawn in TikZ; LLM.int8() end labels moved outside the plot; synthesis uses a frame-time-only waterfall (waterfall_time.svg); waterfall credits name the chapter's compression-waterfall figure. (9) Reading list adds Nagel et al. 2019 and Frantar et al. 2023. The chapter bibliography still lacks Nagel 2019, Dettmers 2022, and Frantar 2023; the deck cites them directly. (10) The per-channel note's hook answer is corrected from C to D. (11) The title-slide thesis is shortened to remove an overfull box."
+  - "Visual and real-artifact pass (2026-10-19). 34 content frames, 41 handout pages (83 presenting); notes 71.5 minutes ([OPTIONAL] 11, cutting them leaves about 60). New frames: (1) after the formats slide, a GGUF frame: the Llama 2 7B model card's Provided files table (TheBloke/Llama-2-7B-GGUF, commit b4e04e1) with bits per weight computed from the Hub's byte sizes (Q4_0 4.54, Q2_K 3.35, Q8_0 8.50), and llama.cpp v0.7.0 ggml-common.h block_q4_0 (32 codes plus one FP16 scale, 18 bytes, 4.5 bits per weight); (2) after Napkin Math 10.1, PyTorch output produced by running images/torch_qparams.py (torch 2.13.0, CPU): scale 0.0157, zero-point 64, codes 0, 128, 64, 255; (3) after the clipping estimate, Wu et al. 2020 Figure 2 as published (with larger overlay labels) and a Table 5 excerpt (max, entropy, 99.99 percent across five networks); the illustrative method lines (calhist step 2) are retired; (4) after the LLM.int8() slide, Dettmers et al. 2022 Figure 3(a), the outlier emergence near 6.7B; (5) after the roofline, llama-bench output for Llama 2 7B on an M2 Ultra (discussion 4167, build 8e672efe): Q4_0 generation 2.30x F16, prompt 0.88x. Changed frames: the per-channel slide shows Nagel et al. 2019 Figure 2 as published with TikZ highlights (schematic redraw retired); the Pixel 2 slide shows a photo of the phone (Tinh te Photo, CC0, Commons) instead of the illustrative frame-time waterfall; the synthesis states the 7B model with block scales (3.9 GB, not only 3.5 GB); the roofline note states the 3.31 GB per-token basis (weights plus KV cache) to clear the deckcheck basis warning; the cliff title names the two quantization regimes. Every derived number is now computed in images/calcs.py (new); make_figs.py imports from it. All existing derived numbers agreed with calcs.py; the energy multiply-accumulate ratio is stated as 15.3, not 15. Retired files left on disk for removal: images/chanrange_step1..3.svg/.pdf, images/calhist_step2.svg/.pdf, images/waterfall_time.svg/.pdf."
+  - "PANEL FIX 2026-10-19: goals frame carries the course-thread strip (FLOPs/Sample, A, and Seconds/FLOP, M, with the fast-enough half). OPTIONAL retag for a 50-minute core: the GGUF file estimate, PyTorch observer, measured calibration comparison, GPTQ, and the unpacking-traffic frame are now [OPTIONAL]; notes 71.5 minutes, 50.5 core."

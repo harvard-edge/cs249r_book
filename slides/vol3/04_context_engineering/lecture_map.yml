@@ -1,0 +1,308 @@
+chapter: 04_context_engineering
+lecture: "04"
+title: "Context Engineering"
+subtitle: "Choosing what each model call sees"
+layer: memory
+locator: s
+minutes: 75
+notes_minutes: 71
+core_minutes: 58
+target_ideas: 30
+thesis: "Each call needs a selected working set, ordered for reuse, compacted with its provenance, and cleared of superseded evidence, because a request that fits the window can still fail."
+
+hook:
+  minutes: "0-4"
+  setup: "The repair agent (Lighthouse 1.1) runs in a 128,000-token window under a 30-turn step budget. Build: 8,000-token output reserve, 15,000 tokens of instructions and tools, 24,000 of task state, 81,000 left for tool results; each turn appends a 4,000-token test log."
+  question_to_class: "On which turn does appending first overflow? A) turn 10 B) turn 21 C) turn 30, it fits D) turn 32"
+  payoff: "B. 81,000 / 4,000 = 20 turns fit, turn 21 needs 84,000; lasting 30 turns allows at most 2,700 tokens per result. The overflow is the failure the runtime can see; the lecture is about the failures it cannot see while the history still fits. The synthesis returns to this bar."
+  sources: ["CE Napkin Math 4.1 (scenario values, illustrative)", "images/calcs.py budget()"]
+
+recall: "Close your notes: a 30-turn trajectory resends its whole history; how does input grow, and what sets cost per accepted task? (Lecture 2: 892,500 resent against 51,500 fresh with prefix reuse, 17.3 times; Lecture 1: C_eff = E[C_attempt]/p_acc, $2.10/0.40 = $5.25.)"
+
+driving_question: "Why can an agent lose the thread of a task even when its entire history still fits?"
+
+goals:
+  - "Budget a request by role, and show why appending overflows and bills 2.1 times more."
+  - "Explain why usable context is measured per model and task."
+  - "Order a request by change rate, and bind each observation to its revision."
+  - "Compact and audit, retire stale evidence, and judge a policy by cost per accepted task."
+
+thread_tag: "H·S·A thread: closes the state exposure"   # golden-thread line on the goals slide (sweep D4, 2026-10-19)
+running_example: "The repair agent fixing a connection-pool missed-notification race: src/pool.py and tests/test_pool.py at r17, the agent's patch producing r18, reproducer test_waiter_notified_on_return; 128,000-token window, 30-turn budget, root 15K / trunk 24K / leaf 8K (CE NM 4.1 to 4.4). Shown as a real system once: a toy pool written for this lecture with the same defect, run with pytest 9.1.1 (fails at r17, passes at r18) and git 2.50.1 (stale hunk refused at r18); scripts and outputs in images/artifacts/."
+
+segments:
+  - name: Budget
+    divider_question: "What should the next call carry?"
+    read: "§4.2"
+    concept_questions: [1, 2, 3]
+    land: "The runtime chooses a working set per call; fitting the window sets a ceiling, and the working set is still a choice."
+    minutes: 7.5
+    real: "Photos of Peter Denning and an IBM System/360 Model 67 (Wikimedia Commons)."
+  - name: Usable
+    divider_question: "Can the model use everything that fits?"
+    read: "§4.3"
+    concept_questions: [4, 5, 6, 7]
+    land: "Admitted tokens compete for the model's attention, and stale look-alikes compete hardest; usable context is measured per model and task."
+    minutes: 10.5
+    real: "Fiction.LiveBench (MLSysIM), RULER Table 3, Liu et al. Table 6."
+  - name: Layout
+    divider_question: "How should the request be laid out?"
+    read: "§4.4"
+    concept_questions: [8, 9, 10]
+    land: "Order the request by change rate, and label every observation with its scope."
+    minutes: 12
+    real: "vLLM v0.6.0 source; real tokenizer run; SGLang deployment hit rates."
+  - name: Compaction
+    divider_question: "How can history shrink without losing what matters?"
+    read: "§4.5, §4.6"
+    concept_questions: [11, 12, 13]
+    land: "Compaction is lossy, so pin what must survive, keep handles to the raw records, and audit every record against host state."
+    minutes: 12.5
+    real: "Real pytest run of the toy pool; Maynez et al. Table 2."
+  - name: Invalidation
+    divider_question: "What stops being true after the agent edits a file?"
+    read: "§4.7"
+    concept_questions: [14, 15]
+    land: "Bind each observation to what it read, and let a write turn it into history."
+    minutes: 9.5
+    real: "Real git apply refusal; inotify(7) man page; Shi et al. Tables 2 and 3."
+  - name: Evaluation
+    divider_question: "How do we know a context policy works?"
+    read: "§4.8"
+    concept_questions: [16]
+    land: "Judge complete policies, with every auxiliary call charged and every failed trial counted, by cost per accepted task."
+    minutes: 5.5
+
+concept_questions:
+  - q: "What is a working set, and why must an agent runtime predict it?"
+    picture: "Photos: Peter Denning; IBM System/360 Model 67."
+    numbers: "Denning 1968; no reference bits from the model interface (CE §4.2)."
+    example: "A turn-1 constraint still binds; a fresh 4,000-token log may contribute one exit code."
+    read: "§4.2"
+  - q: "How does the input allowance divide among roles, and what does appending squeeze?"
+    picture: "Redrawn book figure, panel A then B (partition_step1-2)."
+    numbers: "S_system + S_tools + S_state + S_obs <= S_max - K_max; 120,000 allowance, 81,000 for observations (NM 4.1)."
+    example: "Repair agent; Lighthouse 4.1 for the other three workloads."
+    read: "§4.2"
+  - q: "What does appending cost across a trajectory?"
+    picture: "Cumulative input curves (bill.svg)."
+    numbers: "3,030,000 against 1,410,000 input tokens, 2.1x; final request 159,000 tokens (167,000 with reserve) (NM 4.1, calcs.py)."
+    example: "Repair agent, 30 turns."
+    read: "§4.2"
+  - q: "How much of a long context can a model use?"
+    picture: "Fiction.LiveBench median and band, 0 to 60K tokens."
+    numbers: "53 models; median 100% shortest, 58% at 8K, 56% at 60K; 3 of 53 at or above 90% at 60K; range 22 to 100% (MLSysIM Literature.LongContextComprehension)."
+    example: "Same story at many lengths."
+    read: "§4.3"
+  - q: "Does a perfect needle score settle the usable length?"
+    picture: "RULER claimed against effective length dumbbell."
+    numbers: "Hsieh et al. 2024 Table 3: none of 9 plotted rows reaches its claimed length; threshold 85.6%."
+    example: "GPT-4 128K claimed, 64K effective."
+    read: "§4.3.1"
+  - q: "Does position matter?"
+    picture: "Liu et al. U-curve with closed-book line."
+    numbers: "Liu et al. 2024 Table 6 (GPT-3.5-Turbo, 20 documents): 75.8, 57.2, 53.8, 55.4, 63.2%; closed book 56.1% (Table 1)."
+    example: "Answer document moved from first to last."
+    read: "§4.3.1"
+  - q: "Why are stale look-alike tokens worse than filler?"
+    picture: "Toy softmax dilution curve and estimate card."
+    numbers: "96.8% at 100 keys, 2.9% at 100,000; Exercise 3: 6.9% to 3.3%, 850 look-alikes = 46,408 unrelated keys (calcs.py)."
+    example: "The r17 excerpt sharing identifiers with current evidence."
+    read: "§4.3.1"
+  - q: "Why order the request by change rate?"
+    picture: "Redrawn zones figure, three calls."
+    numbers: "Root 15K, trunk 24K, leaf 8K."
+    example: "Call n+1 reuses root and trunk; trunk refresh to r18 ends reuse at the root."
+    read: "§4.4.1, §4.4.3"
+  - q: "What exactly must match for a cache hit?"
+    picture: "vLLM v0.6.0 hash_block_tokens source; real GPT-2 tokenizer run."
+    numbers: "Request id first: shared prefix 7 of 55 tokens; last: 53 of 55 (real run)."
+    example: "Volatile fields belong in the leaf."
+    read: "§4.4.3"
+  - q: "What does a volatile first field cost, and what does a stable layout save?"
+    picture: "Bill bars; SGLang deployment hit rates."
+    numbers: "$4.23 against $1.31, 3.2x; 327,000 uncached, 76.8% cached (NM 4.2); SGLang 52.4% and 74.1% hit rates (Zheng et al. 2024 §6)."
+    example: "Repair trajectory, 30 calls."
+    read: "§4.4.3"
+  - q: "What may an observation support, and what enforces anything?"
+    picture: "Observation envelope diagram (scope.svg)."
+    numbers: "none"
+    example: "r17 failure supports claims about r17 only; host gates enforce."
+    read: "§4.4.2"
+  - q: "What can compaction silently drop, and how is it protected?"
+    picture: "Real pytest output of the toy pool; Maynez et al. bars."
+    numbers: "73.1 to 79.3% of summaries with unsupported content (Maynez et al. 2020 Table 2)."
+    example: "FAILED-only filter loses the causal chain; digest, protected fields, handle."
+    read: "§4.5"
+  - q: "How should compaction be scheduled?"
+    picture: "Sawtooth, two watermark gaps."
+    numbers: "Target 47K, trigger 92K, 4K per turn: 12 turns, 2 passes, 95,000 at trigger, 103,000 with reserve; target 81K: 3 turns, 10 passes, 4x (NM 4.3, calcs.py)."
+    example: "Repair agent."
+    read: "§4.5.3"
+  - q: "How does the host audit a model-written progress record, and what is it worth?"
+    picture: "Listing 2 condensed; survival curve; cost bars."
+    numbers: "(0.95)^10 = 59.9%, (0.95)^40 = 12.9%, below 50% at 14; Exercise 6: C_eff $9.98 without check, $3.99 with (calcs.py)."
+    example: "'Full regression suite passed on r18' rejected by Check 2."
+    read: "§4.6, §4.8.2"
+  - q: "What does a write invalidate, and what does it keep?"
+    picture: "Real git apply refusal; redrawn invalidation graph build; inotify(7) excerpt."
+    numbers: "none"
+    example: "r17 excerpt and test run become historical; hypothesis reassessed; docs unchanged."
+    read: "§4.7"
+  - q: "How is a context policy judged?"
+    picture: "Example 4.1 diagnose card; measurement table."
+    numbers: "p_acc hat = accepted / all assigned trials (eq. 8)."
+    example: "'The waiter test passed; the repair is complete.'"
+    read: "§4.8"
+
+concept_trace:
+  - concept: "Working-set partition"
+    frame: "Appending squeezes task state; selection keeps its share"
+    shows: "Redrawn book figure built in two steps, with equation 1 under it."
+  - concept: "Usable working context"
+    frame: "Predict: what is the median score at 60K?"
+    shows: "Fiction.LiveBench build plus the definition on the reveal; RULER, Liu, and dilution frames support it."
+  - concept: "Change-rate ordering"
+    frame: "Ordering by change rate keeps the longest prefix reusable"
+    shows: "Root, trunk, leaf build over three calls with the first changed token marked."
+  - concept: "Scope rule"
+    frame: "An observation speaks only for its revision and run"
+    shows: "Observation envelope diagram and the rule stated under it."
+  - concept: "Context compaction"
+    frame: "Diagnose: what does a FAILED-only filter lose?"
+    shows: "Real pytest output; reveal of digest, protected fields, and handle."
+  - concept: "Audited progress records"
+    frame: "The host audits a progress record before admitting it"
+    shows: "Condensed Listing 2 with the three checks; rejection of the candidate claim."
+  - concept: "Context invalidation"
+    frame: "A write turns bound observations into history"
+    shows: "Redrawn invalidation graph built in three steps."
+  - concept: "Context policy evaluation"
+    frame: "A policy is judged by its cost per accepted task"
+    shows: "Fixed conditions, charged costs, denominator, and the measurement table; preceded by the Example 4.1 diagnose frame."
+  - concept: "Hysteretic compaction scheduling (secondary)"
+    frame: "Predict: how often does compaction run?"
+    shows: "Sawtooth build for two watermark gaps."
+
+worked_examples:
+  - name: "Napkin Math 4.1: how much of the window is evidence"
+    steps: ["given: 128,000 window, 8,000 reserve, 3,000 + 12,000 + 24,000 fixed, 4,000 per result", "120,000 allowance; 81,000 for observations", "20 turns fit; turn 21 overflows; 2,700 per result for 30 turns", "append 3,030,000 against select 1,410,000 input tokens, 2.1x", "selection is required even with a larger window"]
+  - name: "Napkin Math 4.2: pricing a layout"
+    steps: ["given: root 15K, trunk 24K, leaf 8K, 30 calls, 2 rewrites, $3/M, cached 10%", "volatile first: 1,410,000 uncached, $4.23", "stable: 47,000 + 2 x 32,000 + 27 x 8,000 = 327,000 uncached, 1,083,000 cached", "$1.31, 3.2x lower, 76.8% cached", "keep volatile fields in the leaf; rewrite the trunk only on change"]
+  - name: "Exercise 6: paying for a protected-field check"
+    steps: ["given: 12 constraints, 3% loss per round, 3 rounds, p_acc 0.6, $2 attempt, check catches 90% at $0.05 per round", "no check: 33.4% survive, p_acc 0.200, C_eff $9.98", "check: 0.3% loss, 89.7% survive, p_acc 0.538, attempt $2.15", "C_eff $3.99", "the audit pays for itself many times over"]
+  - name: "Napkin Math 4.4: remove, replace, or append"
+    steps: ["given: 47,000 request, 15,000 root, 850-token r17 excerpt opening the trunk, 24-token marker, 128-token notice", "replace: 46,174 resident, 31,174 prefilled again", "append: 47,128 resident, 128 prefilled again (about 244x fewer)", "but appended stale text stays in every later call (Shi et al.: 95.0 to 72.4, instruction recovers to 77.8)", "replace code the next edit targets; append only for inert history"]
+
+active_learning:
+  - at_minute: 1
+    type: predict
+    prompt: "On which turn does appending overflow?"
+    answer: "Turn 21 (B); 2,700 tokens per result to last 30 turns."
+  - at_minute: 4.5
+    type: retrieval
+    prompt: "What does resending a history cost; what sets cost per accepted task?"
+    answer: "892,500 against 51,500 (17.3x); C_eff = E[C_attempt]/p_acc = $5.25."
+  - at_minute: 15.5
+    type: predict
+    prompt: "What is the median score at 60K?"
+    answer: "C, 56%; only 3 of 53 at or above 90%."
+  - at_minute: 23
+    type: estimate
+    prompt: "What do 850 stale tokens cost?"
+    answer: "6.9% to 3.3% of the target's weight; equal to 46,408 unrelated keys."
+  - at_minute: 32
+    type: estimate
+    prompt: "What does a volatile first field cost?"
+    answer: "$4.23 against $1.31, 3.2x; 76.8% cached."
+  - at_minute: 38
+    type: diagnose
+    prompt: "What does a FAILED-only filter lose?"
+    answer: "The event sequence that separates a registration race, an exhausted pool, and a missed notification."
+  - at_minute: 42
+    type: predict
+    prompt: "How often does compaction run?"
+    answer: "Every 12 turns, 2 passes; with target 81K, every 3 turns, 10 passes."
+  - at_minute: 55.5
+    type: concept_question
+    prompt: "Remove, replace, or append a notice?"
+    answer: "B for code the next edit targets: 31,174 against 128 prefilled, but appended stale tokens persist."
+  - at_minute: 59
+    type: diagnose
+    prompt: "Which check catches 'the repair is complete'?"
+    answer: "Only the evidence probe; schema and constraint checks pass it."
+  - at_minute: 64
+    type: retrieval
+    prompt: "Four ways the agent fails while its history fits, and a fix for each."
+    answer: "Select (2.1x), layout (3.2x), protected fields and audit ($9.98 to $3.99), bind and invalidate."
+
+fallacies_run:
+  - "Every token that fits is usable: Fiction.LiveBench predict and dilution estimate."
+  - "Deterministic extraction is lossless: FAILED-only filter diagnose."
+  - "A valid progress-record schema guarantees compliance: survival frame."
+  - "Keeping obsolete support for a prefix hit: remove/replace/append vote."
+  - "A larger window removes selection: bill frame (159,000-token window still 2.1x)."
+  - "Volatile fields before reusable content: layout estimate and tokenizer run."
+
+open_questions:
+  - "The model reports no reference bits. What signal could a runtime use to learn which staged tokens a decision used?"
+  - "Windows keep growing. At what length, if any, does selection stop paying for a given model and task?"
+  - "Who should write the progress record: the model, the host from its logs, or both?"
+
+more_examples:
+  - "SGLang production deployment: 52.4% and 74.1% cache hit rates, first-token latency 1.7x lower (Zheng et al. 2024, §6)."
+  - "inotify(7): misses network-filesystem changes; races can leave a cache inconsistent (Linux man-pages 6.19)."
+  - "Lighthouse 4.1: research agent (untrusted spans), remediation agent (staleness), support agent (stable root)."
+  - "Make's timestamp rule against content hashes (Feldman 1979; Mokhov et al. 2018)."
+
+further_reading:
+  - cite: "Context Engineering, §4.2 to §4.8, Checkpoints 4.1 to 4.3, Exercises 3 and 6"
+    why: "The chapter's arithmetic and the audit's payback."
+  - cite: "Denning, The Working Set Model for Program Behavior, CACM 1968"
+    url: "https://doi.org/10.1145/363095.363141"
+    why: "Origin of the working set."
+  - cite: "Liu et al., Lost in the Middle, TACL 2024"
+    url: "https://doi.org/10.1162/tacl_a_00638"
+    why: "Position effects measured."
+  - cite: "Hsieh et al., RULER, COLM 2024"
+    url: "https://arxiv.org/abs/2404.06654"
+    why: "Claimed against effective context length."
+  - cite: "Doyle, A Truth Maintenance System, Artificial Intelligence 1979"
+    url: "https://doi.org/10.1016/0004-3702(79)90008-0"
+    why: "Ancestor of dependency-based invalidation."
+  - cite: "Mokhov, Mitchell, and Peyton Jones, Build Systems a la Carte, ICFP 2018"
+    url: "https://doi.org/10.1145/3236774"
+    why: "Separates staleness detection from rebuilding."
+
+callbacks:
+  - {lecture: 1, concept: "Lighthouse workloads", where: "title note; hook note; partition note"}
+  - {lecture: 1, concept: "Cost per accepted task", where: "recall slide and note; bill note; survival note; synthesis"}
+  - {lecture: 1, concept: "H·S·A exposures", where: "goals slide locator and note"}
+  - {lecture: 1, concept: "Horizon compounding", where: "survival note"}
+  - {lecture: 1, concept: "Task contract", where: "audit note"}
+  - {lecture: 2, concept: "Quadratic resend and prefix reuse", where: "recall slide, recall figure title, credit; bill note"}
+  - {lecture: 2, concept: "Token-measured admission", where: "hook note"}
+  - {lecture: 2, concept: "Grammar-constrained decoding (schema-valid is not correct)", where: "audit note"}
+  - {lecture: 2, concept: "Recorded calls replay, served calls do not", where: "evaluation contract note"}
+  - {lecture: 3, concept: "Revisable candidate plans", where: "invalidation graph note; title note"}
+  - {lecture: 5, concept: "Radix prefix cache", where: "vLLM code note"}
+  - {lecture: 5, concept: "Reusable is not applicable", where: "vote note"}
+  - {lecture: 5, concept: "KV footprint (next lecture)", where: "next-lecture slide and note"}
+  - {lecture: 6, concept: "Record roles", where: "pytest diagnose note"}
+  - {lecture: 7, concept: "Action-time preconditions", where: "inotify note"}
+  - {lecture: 9, concept: "Structural prompt injection; information-flow labels", where: "scope note"}
+  - {lecture: 11, concept: "Checkpoint binding", where: "audit note"}
+  - {lecture: 13, concept: "Task acceptance contract; task sampling", where: "evaluation contract note"}
+  - {lecture: 19, concept: "Prefix-cache pricing and compaction payback", where: "layout estimate note"}
+
+bridge: "Next lecture (KV Cache Management): an agent waiting on a tool generates nothing; why does it still hold memory?"
+
+coverage:
+  primary_taught: ["Working-set partition", "Usable working context", "Change-rate ordering", "Scope rule", "Context compaction", "Audited progress records", "Context invalidation", "Context policy evaluation"]
+  primary_left_to_reading: []
+  secondary: ["Hysteretic compaction scheduling"]
+
+notes_for_author:
+  - "Real artifacts were produced by running a toy pool written for the lecture (images/artifacts/run_toy_repair.sh); slides say so. The chapter's Listing 3 is a mock; the slide's git output is real."
+  - "RULER and Liu plots name 2023-2024 models in row labels and credits, as their source tables do; the profile asks agents not to add product names. Kept for the basis rule; easy to anonymize."
+  - "Maynez et al.'s gold references also score 76.9%, which the note explains; the slide is optional."

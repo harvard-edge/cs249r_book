@@ -72,7 +72,7 @@ function inferTaskPrompt(zone: string | undefined, bloom: string | undefined): s
     case "realization":
       return "Sketch the implementation or the concrete steps needed to realize the scenario's goal.";
     case "evaluation":
-      return "Evaluate the scenario's proposed approach — what works, what breaks, and at what cost?";
+      return "Evaluate the scenario's proposed approach. What works, what breaks, and at what cost?";
     case "optimization":
       return "Identify the dominant bottleneck and propose an optimization that addresses it.";
     case "fluency":
@@ -88,7 +88,7 @@ function inferTaskPrompt(zone: string | undefined, bloom: string | undefined): s
   if (b === "remember" || b === "understand") return "Identify the concept the scenario illustrates and explain the underlying principle.";
   if (b === "apply") return "Apply the relevant principle to the scenario and compute or decide the outcome.";
   if (b === "analyze") return "Analyze the trade-offs the scenario presents and recommend an approach with justification.";
-  if (b === "evaluate") return "Evaluate the scenario's setup — what succeeds, what fails, and why?";
+  if (b === "evaluate") return "Evaluate the scenario's setup. What succeeds, what fails, and why?";
   if (b === "create") return "Propose a design or plan that addresses the scenario and defend your choice.";
   return "Based on the scenario above, reason about the trade-offs and decide what approach you would take.";
 }
@@ -1157,7 +1157,7 @@ function PracticePage() {
                           /* Scenario ends with ?; no callout needed but reserve minimal spacing */
                           <div className="flex items-center gap-2 text-[10px] font-mono text-textTertiary uppercase tracking-widest">
                             <Target className="w-3.5 h-3.5" />
-                            Your task — see scenario above
+                            Your task: see the scenario above
                           </div>
                         )}
                       </div>
@@ -1499,7 +1499,7 @@ function PracticePage() {
               <h3 id="think-confirm-title" className="text-sm font-bold text-textPrimary uppercase tracking-widest">Think longer?</h3>
             </div>
             <p className="text-sm text-textSecondary leading-relaxed mb-5">
-              You&apos;ve been on this question for less than 15 seconds and haven&apos;t typed much. The practice works better when you commit to an answer first — even a wrong one sharpens what you learn from the reveal.
+              You&apos;ve been on this question for less than 15 seconds and haven&apos;t typed much. Practice works better when you commit to an answer first. Even a wrong answer sharpens what you learn from the reveal.
             </p>
             <div className="flex gap-3">
               <button

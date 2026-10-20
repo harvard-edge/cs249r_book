@@ -6,11 +6,9 @@ Scans QMD files for external HTTP/HTTPS image references that should be local as
 from __future__ import annotations
 
 import hashlib
-import os
 import re
 from pathlib import Path
 from typing import List, Tuple
-from urllib.parse import urlparse
 
 
 def extract_figure_images(content: str) -> List[Tuple[str, str, str, str, str]]:

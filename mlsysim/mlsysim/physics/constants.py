@@ -19,6 +19,7 @@ SPEED_OF_LIGHT_FIBER_KM_S = 200_000 * ureg.kilometer / second
 AIR_SPECIFIC_HEAT = 1005 * ureg.joule / (ureg.kilogram * ureg.kelvin)    # c_p of dry air
 AIR_DENSITY_SEA_LEVEL = 1.2 * ureg.kilogram / ureg.meter ** 3             # dry air, ~20 degC, 1 atm
 WATER_SPECIFIC_HEAT = 4180 * ureg.joule / (ureg.kilogram * ureg.kelvin)  # liquid water
+WATER_DENSITY = 1.0 * ureg.kilogram / ureg.liter                         # liquid water, ~1 kg per liter (added 2026-10-20)
 THERMAL_CONDUCTIVITY_AIR = 0.026 * ureg.watt / (ureg.meter * ureg.kelvin)
 THERMAL_CONDUCTIVITY_WATER = 0.6 * ureg.watt / (ureg.meter * ureg.kelvin)
 THERMAL_CONDUCTIVITY_COPPER = 400 * ureg.watt / (ureg.meter * ureg.kelvin)

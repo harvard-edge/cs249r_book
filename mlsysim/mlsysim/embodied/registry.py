@@ -117,6 +117,14 @@ class Manipulators(Registry):
             1.7 * (ureg.meter / ureg.second), pc.FRANKA_FER_CONTROL_LIMITS,
             name="FER Cartesian translational velocity limit",
         ),
+        cartesian_acceleration_limit=sourced_qty(
+            13.0 * (ureg.meter / ureg.second**2), pc.FRANKA_FER_CONTROL_LIMITS,
+            name="FER Cartesian translational acceleration limit",
+        ),
+        emergency_stop_time=sourced_qty(
+            552.0 * ureg.millisecond, pc.FRANKA_FER_STOPPING_TIMES,
+            name="FER worst-case stopping time, 48 V cut (EN ISO 10218-1 Annex B)",
+        ),
         metadata=Metadata(
             provenance=pc.FRANKA_EMIKA_PANDA,
             description="Franka Emika Panda 7-DoF collaborative robotic manipulator arm with torque sensing.",

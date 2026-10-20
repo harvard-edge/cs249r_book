@@ -1,0 +1,259 @@
+chapter: 12_ops_scale
+lecture: "12"
+title: "ML Operations at Scale"
+subtitle: "Operating hundreds of models as one graph"
+layer: operations
+minutes: 75
+notes_minutes: 71.5
+core_minutes: 62.5
+target_ideas: 30
+thesis: "At portfolio scale the unit to operate is the dependency graph of models, features, and owners, so releases, alerts, and costs become contracts on that graph."
+
+hook:
+  minutes: "0-3.5"
+  setup: "Example 12.2 (§12.5.2) as a four-row signal timeline. A product-ranking model at 25,000 QPS passed offline validation and its latency gate (under 12 ms). Step 1: HTTP errors and p99 latency stay normal; the feature-null and conversion rows show ???. Step 2: an upstream schema change makes a user-affinity feature null for 8 percent of queries; the server imputes 0.0; conversion falls 3.2 percent for 48 hours unalerted."
+  question_to_class: "Which signal moved in 48 hours? A) HTTP errors B) p99 latency C) feature nulls and conversion D) all four"
+  payoff: "C. Every per-model and service-health check stayed green; the failure lived on an edge of the dependency graph. The synthesis returns to the timeline with one control per segment (registry edge, data-contract null gate, a canary for upstream changes, a quality SLO dimension routed to the data owner, and the price of exposure time)."
+  sources: ["ML Operations at Scale, Example 12.2 (scenario values; timeline shape illustrative)"]
+
+recall: "Lecture 11, close your notes: why can a phone fleet's health report mislead a release? (Participation selection: only admitted devices train and report, so evidence covers a selected population.) Today: the same question in the data center."
+
+driving_question: "How does an organization run hundreds of models without its operations work growing with the square of their count?"
+
+goals:
+  - "Trace a change through a model registry's dependency graph to its impact set."
+  - "Show how a point-in-time join keeps training and serving features consistent."
+  - "Size a canary stage, an experiment, and an alert policy with numbers."
+  - "Decide when owning a fleet beats renting it, from sustained utilization."
+
+running_example: "A recommendation portfolio (Archetype B, DLRM at Scale): embedding model E feeding retrieval, three rankers, and an ensemble (figure 3), and the shared feature user_engagement_score (§12.4.4, §12.4.7, Example 12.3) that carries segments 1 and 2; the hook's ranking service (Example 12.2) returns at the synthesis. Economics uses the chapter's Archetype A reference cluster, 1,024 H100s, and the 10,000-GPU scenario. Real systems shown: Meta FBLearner Flow, Google TFX and its data validator, Google Play, Feast, MLflow, Argo Rollouts, Google SRE burn-rate alerts, Meta's 2021 outage, Microsoft Philly. The portfolio itself is the chapter's constructed case; its real counterparts are Meta's platform (data plot) and Meta's data center (photo)."
+
+segments:
+  - name: Graph
+    divider_question: "Why does running 100 models cost more than 100 times one?"
+    read: "§12.2, §12.3"
+    concept_questions: [1, 2, 3]
+    land: "The operational object is the graph, and every edge is a contract."
+    minutes: 10.5
+  - name: Features
+    divider_question: "How do training and serving agree on what a feature meant?"
+    read: "§12.4"
+    concept_questions: [4, 5, 6]
+    land: "A feature is a versioned interface with a timestamp contract; availability time, version, and lineage make it testable."
+    minutes: 11
+  - name: Releases
+    divider_question: "How much live traffic may a candidate touch before we trust it?"
+    read: "§12.5"
+    concept_questions: [7, 8, 9, 10]
+    land: "Exposure is a budget of traffic share times time, and release evidence is one versioned contract."
+    minutes: 13.5
+  - name: Alerts
+    divider_question: "Which of a thousand alarms deserves a page, and who acts?"
+    read: "§12.6, §12.7"
+    concept_questions: [11, 12, 13]
+    land: "Alerts route through a hierarchy to owners; the worst budget dimension governs; containment comes before root cause."
+    minutes: 15.5
+  - name: Economics
+    divider_question: "When does owning the fleet pay, and who answers for its spend?"
+    read: "§12.8, §12.9"
+    concept_questions: [14, 15]
+    land: "Utilization decides whether capacity pays; the dominant TCO term decides where optimization pays."
+    minutes: 10
+
+concept_questions:
+  - id: 1
+    q: "Why does operational work grow faster than model count?"
+    picture: "Log-log load sketch in three steps: alerts N, deploys N log N, conflicts N^2/2 and total, crossing a team-capacity line near 50 models (redrawn from figure 1's code)."
+    numbers: "Shapes assumed, not measured (chapter says so); crossing at N = 51 (calcs.py); at N = 100, 5,000 pairs against 2,000 alert units."
+    example: "Meta FBLearner Flow: more than 1 million models trained, more than 500,000 workflow runs in one month, fewer than 150 workflow authors (Meta Engineering 2016)."
+    read: "§12.2"
+  - id: 2
+    q: "What must a registry record so a release can find what it breaks?"
+    picture: "Registry graph build: E v3.2, impact set (retrieval, three rankers, ensemble), unrecorded fraud edge; MLflow register_model and alias line."
+    numbers: "Figure 3; listing 1."
+    example: "Upstream embedding change blocked until every consumer passes; compatible version set as the rollback unit."
+    read: "§12.3.1 to §12.3.4"
+  - id: 3
+    q: "Which per-model beliefs fail at fleet scale?"
+    picture: "True/false with three statements; reveal Example 12.3."
+    numbers: "14 models, 5 teams, 12 percent ranking-accuracy drop, 18 hours of debugging (Example 12.3); 14,400 raw false crossings a day (§12.12)."
+    example: "user_engagement_score redefined in place, z-score to min-max."
+    read: "§12.12, §12.7.2"
+  - id: 4
+    q: "Why does a feature store split into two stores under one definition?"
+    picture: "Dual-store diagram plus Feast FeatureView code."
+    numbers: "1 billion recommendations x 100 features a day = 1.16 million lookups/s; 5 to 10 ms of a 50 ms budget (§12.4.6)."
+    example: "Freshness classes: days (demographics) to seconds (last action), table 9."
+    read: "§12.4.1, §12.4.2"
+  - id: 5
+    q: "What value does a training join feed the model?"
+    picture: "Clicks timeline, prediction at noon; point-in-time 4 against naive 10; Feast get_historical_features line."
+    numbers: "2.5x (figure 6); 876 trillion values, 28 PB at 32 B/row, 75 percent metadata (§12.4.3; calcs.py)."
+    example: "Join on availability time, not event time."
+    read: "§12.4.3"
+  - id: 6
+    q: "How often do data checks fire, and what does a missed one cost?"
+    picture: "Breck et al. Table 1 bars; constructed loss bars ($857K against $28.6K)."
+    numbers: "New feature column 10%, missing column 6%, unexpected category 6%, too few examples 3%, data missing 3% of 700+ pipelines in 30 days (Breck et al. 2019); Google Play skew fix +2% installs (Baylor et al. 2017); 0.08 x $15M x 5/7 = $857K, 4 h window $28.6K, 30x (§12.4.7; calcs.py)."
+    example: "Pipeline changed its aggregation window under an unchanged definition."
+    read: "§12.4.7"
+  - id: 7
+    q: "What does a canary buy?"
+    picture: "1928 canary photo; exposure bars 100% against 5%."
+    numbers: "20x less exposure at equal rollback time (Napkin Math 12.5); $1.08M a day for a silent 0.5-point CTR loss at 5,000 requests/s (Napkin Math 12.6)."
+    example: "Risk = P(regression) x harm x exposure (equation 8)."
+    read: "§12.5.5, §12.5.6"
+  - id: 8
+    q: "How long must each stage last?"
+    picture: "Stage ladder 1, 5, 25, 50, 100 percent; Argo Rollouts canary YAML."
+    numbers: "10,000 samples at 1 M requests/h: 1 h at 1%, 12 min at 5%; about 4 h schedule; soak 7 to 14 days (equation 7, table 7)."
+    example: "Slowest outcome sets the schedule."
+    read: "§12.5.5"
+  - id: 9
+    q: "How many users does an experiment need?"
+    picture: "n against minimum detectable effect, two baselines."
+    numbers: "29,792 per variant (5%, 0.5 pt); 620,928 (1%, 0.05 pt; chapter prints 620,800 after rounding an intermediate); 20 uncorrected tests give 64% (calcs.py)."
+    example: "Interleaving: more than 100x fewer users for some ranking tests (Netflix 2017)."
+    read: "§12.5.3, §12.5.4"
+  - id: 10
+    q: "What makes release evidence valid?"
+    picture: "TFX Evaluator threshold code and measured model-load latency; five-plane contract table built in three steps."
+    numbers: "p99.9 during loads 500 to 1,500 ms against 75 to 150 ms with a dedicated load thread (Baylor et al. 2017); table 15."
+    example: "Evaluation contract principle: all evidence refers to one versioned artifact."
+    read: "§12.5.2, §12.5.8"
+  - id: 11
+    q: "Why do per-metric alerts become noise?"
+    picture: "Max Lag panel of a real Wikidata Grafana dashboard, cropped to its plot with the 5 s and 10 s limits (labels set as slide text); 1 - (1 - p)^M curves drawn for the slot below it."
+    numbers: "1,000 x 288 x 0.003 = 864 a day; 14,400 at 2 sigma; 0.95 at M = 1,000 (Napkin Math 12.7, equation 9)."
+    example: "One service's dashboard, multiplied by 100 models."
+    read: "§12.6.2"
+  - id: 12
+    q: "Who gets paged, and what stops a promotion?"
+    picture: "Four-level pyramid with owners; SLO vector bars (0.40, 0.60, 1.30, 0.50; mean 0.70); SRE burn-rate rule."
+    numbers: "Figure 12 (illustrative); burn 14.4 for 1 h = 2 percent of a 30-day budget (SRE Workbook ch. 5; calcs.py)."
+    example: "Correlated anomalies across 60 percent of models point to a shared cause (listing 6)."
+    read: "§12.6.3, §12.6.4"
+  - id: 13
+    q: "How do responders contain an incident whose cause is unknown?"
+    picture: "Meta Prineville photo and Cloudflare-measured outage timeline; Kafka attribution steps."
+    numbers: "15:40 routing peak, unreachable about 15:50 to 21:20 UTC (5.5 h), 30x DNS queries (Cloudflare 2021); consumer lag 10M against 10K, broker disk 95 percent (§12.7.2)."
+    example: "War Story 12.1; runbook control loop (table 23)."
+    read: "§12.7"
+  - id: 14
+    q: "Where does a shared GPU cluster's time go?"
+    picture: "Philly bars: jobs and GPU time by outcome."
+    numbers: "Passed 69.3/killed 13.5/failed 17.2 percent of jobs; 44.5/37.7/17.8 percent of GPU time; in-use utilization 52 percent (Jeon et al. 2019, Tables 3, 6)."
+    example: "Allocated is not useful; Lectures 8 and 9 own the tiers and goodput."
+    read: "§12.8.4, §12.8.5"
+  - id: 15
+    q: "When does owning beat renting, and which cost term to optimize?"
+    picture: "Cumulative cost lines (80 and 50 percent); H100 photo; 10,000-GPU estimate with substation photo; TCO shares."
+    numbers: "$59.8M + $1.5M/yr against $2.39M/month, crossing 26.4 months; 50 percent line never crosses within 36 months (derived); $566.7M against $841.0M, break-even 53.9 percent (Napkin Math 12.9); startup iteration 84 percent, company inference 41 percent (table 31)."
+    example: "Break-even moves with the cost boundary: 42.5, 59.7, 53.9 percent (table 30)."
+    read: "§12.9"
+
+concept_trace:
+  - concept: "Operational load follows coupling"
+    frame: "Pairwise couplings grow as N^2/2 while alerts grow as N"
+    shows: "load_step1..3 build"
+  - concept: "Dependency-aware registry"
+    frame: "A dependency-aware registry turns edges into an impact set"
+    shows: "registry_step1..3 build (impact set, unrecorded edge)"
+  - concept: "Feature consistency contract"
+    frame: "One feature definition feeds two stores with opposite access paths; Predict: what does a naive join feed the model?"
+    shows: "fstore diagram with Feast code; pit_step1..2"
+  - concept: "Staged rollout exposure budget"
+    frame: "Rollout risk is regression probability x harm x exposure; A canary stage lasts until its planned sample arrives"
+    shows: "exposure_step1..2; stages_step1..2 with equation 7"
+  - concept: "Evaluation contract"
+    frame: "One versioned record binds every plane of release evidence"
+    shows: "five-plane table revealed in three steps"
+  - concept: "Hierarchical fleet alerting"
+    frame: "Estimate: false alarms per day from 1,000 checks?; Alerts route by level, and each level has an owner"
+    shows: "alerts curve; pyramid with owners"
+  - concept: "SLO vector of budgets"
+    frame: "The worst SLO dimension stops promotion"
+    shows: "slo_vector bars with max against mean"
+  - concept: "Utilization as the economic invariant"
+    frame: "Owning beats renting only above a sustained utilization; Estimate: own or rent 10,000 H100s for three years?"
+    shows: "buyrent_step1..2; worked break-even"
+
+worked_examples:
+  - name: "Napkin Math 12.7: false alarms across many checks"
+    steps: ["given: 100 models x 10 metrics, every 5 min (288/day), p = 0.003", "1,000 x 288 x 0.003 = 864 raw crossings a day", "2 sigma, p = 0.05: 14,400; 144 after 99 percent dedup", "1 - (1 - p)^M = 0.95 at M = 1,000", "route by hierarchy and owner, not per metric"]
+  - name: "Napkin Math 12.9: own or rent 10,000 H100s"
+    steps: ["given: 1,250 nodes x $350K, $25M network, $75M facility, $4.7M power and $5M staff a year; rent $4/GPU-h at 80 percent", "own: $537.5M + 3 x $9.7M = $566.7M", "rent: $280.3M/yr, $841.0M", "saving $274.3M; break-even 566.7 / 1,051.2 = 53.9 percent", "ownership pays only above a sustained useful utilization"]
+  - name: "Equation 4: experiment size"
+    steps: ["given: p = 0.05, delta = 0.005, 95 percent confidence, 80 percent power", "(1.96 + 0.84)^2 = 7.84", "7.84 x 0.095 / 0.000025 = 29,792 per variant", "1 percent baseline, 0.05 pt: 620,928", "n grows as 1 / delta^2"]
+  - name: "§12.4.7: a broken feature for five days"
+    steps: ["given: CTR 4.2 to 3.87 percent, $15M/week", "0.08 x $15M x 5/7 = $857K", "4-hour alert: $28.6K (derived), 30x shorter", "replay identifies the changed aggregation window", "distribution gate plus semantic tests"]
+
+active_learning:
+  - {at_minute: 0.5, type: predict, prompt: "Which signal moved in 48 hours?", answer: "C: feature nulls and conversion; HTTP errors and latency stayed normal (Example 12.2)."}
+  - {at_minute: 4, type: retrieval, prompt: "Why can a phone fleet's health report mislead a release?", answer: "Participation selection: only admitted devices report (Lecture 11)."}
+  - {at_minute: 14.5, type: concept_question, prompt: "True or false: work grows linearly with model count; per-model metrics suffice; a feature keeping name and type is safe to redefine.", answer: "All false (§12.12; Example 12.3: 14 models, 5 teams, 12 percent, 18 h)."}
+  - {at_minute: 20, type: predict, prompt: "Prediction at noon, 4 of 10 clicks before noon: what value does a naive join feed?", answer: "10, 2.5x; the point-in-time join gives 4."}
+  - {at_minute: 25, type: estimate, prompt: "CTR down 8 percent for 5 days on $15M/week: cost? With a 4-hour alert?", answer: "$857K; $28.6K (derived)."}
+  - {at_minute: 33.5, type: estimate, prompt: "Users per variant for a 0.5-point lift at 5 percent baseline?", answer: "29,792; 620,928 at 1 percent and 0.05 point."}
+  - {at_minute: 41, type: estimate, prompt: "False alarms per day from 1,000 checks every 5 minutes at p = 0.003?", answer: "864; 14,400 at p = 0.05."}
+  - {at_minute: 53, type: diagnose, prompt: "Engagement down 5 percent, servers healthy, no deploy in 4 hours. What first?", answer: "Shared dependencies: feature freshness 3 h stale, Kafka lag 10M, broker disk 95 percent; do not roll back the ranker."}
+  - {at_minute: 61, type: estimate, prompt: "Own or rent 10,000 H100s for three years?", answer: "$566.7M against $841.0M; break-even 53.9 percent."}
+  - {at_minute: 65.5, type: retrieval, prompt: "Name one control per segment that would have stopped the hook's 48 hours.", answer: "Registry edge; null-rate contract gate; canary for upstream changes; quality SLO dimension routed to the data owner; exposure priced per hour."}
+
+open_questions:
+  - "Where should the platform boundary sit for 80 models across four domains (§12.10.4)?"
+  - "Who may change evaluation-contract thresholds after a surprising result, and how is it recorded?"
+  - "Should a fleet hold idle GPUs as insurance against late capacity, and who pays?"
+
+more_examples:
+  - "Uber Michelangelo: one workflow from data to monitoring with shared features (Hermann and Del Balso 2017; §12.11.1)."
+  - "Spotify paved road on TFX and Kubeflow Pipelines with lineage (§12.11.5)."
+  - "Breck et al. 2019: model unit tests ran more than 80K times in a month; 6 percent failed."
+  - "Multi-region rollout in three waves plus validation, 3.5 to 7 days (§12.5.7)."
+  - "SUTVA spillover halves a measured lift under the chapter's sensitivity assumption (§12.5.4)."
+  - "Inference cost spike: Z-score 10 traced to a larger ranking model, 2.5x capacity (§12.9.7)."
+
+further_reading:
+  - {cite: "ML Operations at Scale, §12.2 to §12.9", url: "", why: "The chapter's registry, feature, release, monitoring, and economics models."}
+  - {cite: "Sculley et al., Hidden Technical Debt in Machine Learning Systems, NeurIPS 2015", url: "https://papers.nips.cc/paper/5656-hidden-technical-debt-in-machine-learning-systems", why: "The debt that platforms pay down."}
+  - {cite: "Breck et al., Data Validation for Machine Learning, MLSys 2019", url: "https://mlsys.org/Conferences/2019/doc/2019/167.pdf", why: "Measured data checks over 700 production pipelines."}
+  - {cite: "Kohavi, Tang, and Xu, Trustworthy Online Controlled Experiments, 2020", url: "https://doi.org/10.1017/9781108653985", why: "Experiment sizing, peeking, and interference."}
+  - {cite: "Google, The Site Reliability Workbook, ch. 5, Alerting on SLOs", url: "https://sre.google/workbook/alerting-on-slos/", why: "Error budgets and burn-rate alerts."}
+  - {cite: "Jeon et al., Analysis of Large-Scale Multi-Tenant GPU Clusters for DNN Training Workloads, USENIX ATC 2019", url: "https://www.usenix.org/system/files/atc19-jeon.pdf", why: "Where a shared cluster's GPU time goes."}
+
+left_to_reading:
+  - {concept: "ML technical debt scoring and payback (§12.2.4)", why: "Secondary; payback logic appears in the TCO note; the scoring tables read better than heard."}
+  - {concept: "Ensemble deployment and lifecycle stages, zombie models (§12.3.2, §12.3.3)", why: "Covered in the registry note as the rollback unit; detail is reading."}
+  - {concept: "Multi-region rollout and two-phase rollback (§12.5.7)", why: "One note line; the protocol is better read."}
+  - {concept: "Model-type monitoring tables, dashboards, on-call rotation (§12.6.5, §12.6.7, §12.7.6)", why: "Operational detail with illustrative parameters."}
+  - {concept: "ML platform as a product, abstraction levels, organizational patterns (§12.8.1 to §12.8.3, §12.10)", why: "Secondary concepts; one open question and the TCO note carry the platform break-even; second lecture candidate."}
+  - {concept: "Depreciation, refresh screening, cloud capacity, FinOps attribution (§12.9.3, §12.9.4, §12.9.7)", why: "Secondary; capacity lead time is in the 10,000-GPU note."}
+
+closing:
+  return_to_hook: "Each segment names a control that would have stopped Example 12.2: a registry edge for the feature's consumers, a null-rate data-contract gate, a canary for upstream schema changes, a quality SLO dimension routed to the data owner, and exposure priced per hour (about $45K/hour at Napkin Math 12.6's rate, derived)."
+  read_and_practice: ["§12.2 to §12.9", "Napkin Math 12.5, 12.7, 12.9 by hand", "self-check questions for §12.4 to §12.6"]
+  bridge: "Lecture 13 (Security & Privacy): what can an attacker learn or change through a model that works correctly?"
+
+callbacks:
+  - {lecture: 11, concept: "Participation selection; adaptive fleet release policy", where: "Recall slide and note"}
+  - {lecture: 1, concept: "C3 taxonomy and Fleet Law (coordination axis)", where: "Goals note"}
+  - {lecture: 4, concept: "Versioned artifacts and commit boundaries", where: "Registry note"}
+  - {lecture: 7, concept: "Observability for one distributed job (split)", where: "Pyramid note"}
+  - {lecture: 14, concept: "Drift alert to model update; shift taxonomy", where: "Pyramid note"}
+  - {lecture: 16, concept: "Fairness criteria conflict", where: "Evaluation contract note"}
+  - {lecture: 8, concept: "Utilization tiers", where: "Philly note"}
+  - {lecture: 9, concept: "ML goodput", where: "Philly note"}
+  - {lecture: 10, concept: "Serving cost dominance", where: "TCO note"}
+  - {lecture: 13, concept: "ML threat model (next lecture)", where: "Next-lecture slide and note"}
+  - {lecture: 1, concept: "Thread: C3 taxonomy and the Fleet Law (D4)", where: "goals slide, Fleet Law term line: T_sync(N); Coordination (C3)"}
+coverage:
+  primary_taught: ["Operational load follows coupling", "Dependency-aware registry", "Feature consistency contract", "Staged rollout exposure budget", "Evaluation contract", "Hierarchical fleet alerting", "SLO vector of budgets", "Utilization as the economic invariant"]
+  primary_left_to_reading: []
+  secondary: ["Fleet experiment budgeting (taught: sample-size estimate, multiple tests in note)", "Incident containment and attribution (taught: Meta, Kafka diagnose)", "Lifecycle TCO (taught, optional slide)", "Capacity planning under lead time (note and substation photo)", "Platform break-even (TCO note)", "ML platform as a product (left to reading)"]
+
+notes_for_author:
+  - "The chapter's 620,800 (1 percent baseline, 0.05 point) rounds 7.84 x 0.0198 to 0.1552 before dividing; unrounded arithmetic gives 620,928. The deck shows 620,928 and the note says so; consider fixing the chapter's LEGO cell."
+  - "Example 12.2 gives no dollar value; the synthesis uses Napkin Math 12.6's $1.08M/day rate and labels it a different scenario."
+  - "The 50 percent rental line on the build-against-buy plot is derived from the chapter's rates; the chapter states only the 80 percent line."
+  - "Second lecture: the chapter is marked for one. This deck leaves platform-as-product, org patterns, multi-region coordination, and FinOps attribution to reading; a Part 2 would own them."
+  - "2026-10-19 sweep (D4, D10). D4: the goals slide names, once, the Fleet Law term (T_sync(N)) and C3 axis (Coordination (C3)) in the volume's one form (the \\fleetterm line). D10: X-not-Y constructions and reveal colons rewritten. No exhibit here is retold from another lecture (D3)."

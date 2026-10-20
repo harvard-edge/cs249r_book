@@ -1,2022 +1,651 @@
 % =============================================================================
-% Chapter 7: Fault Tolerance and Reliability — ML Systems Lecture Slides
+% Lecture 7: Fault Tolerance
+% Scaling Machine Learning Systems (Volume II), Chapter 7
 % =============================================================================
-% Volume II, Chapter 7. Prerequisites: Fleet Stack, C3, compute infra,
-% network fabrics, storage, collective communication, distributed training.
+% Thesis: at fleet scale failure is the steady state, so a job is engineered to
+% lose a bounded amount of work per failure rather than to avoid failure.
+% Hook and synthesis: Llama 3 405B, 419 interruptions in 54 days on 16,384
+% H100s, over 90 percent effective training time (Dubey et al. 2024).
+% Running case: the chapter's 175B reference job (2.45 TB checkpoint) on its
+% 10,000-GPU cluster (full-system MTBF 3.87 h) and its 1,024-GPU cluster.
+% MTBF basis: every slide names one of GPU-only (50,000 h / N), full system
+% (GPU + PCIe + NIC, 3.87 h at 10,000), or measured (Meta RSC, Llama 3).
 %
-% IMAGES (SVG -> PDF):
-%   - failure-spectrum.pdf        - reliability-gap.pdf
-%   - young-daly-tradeoff.pdf     - checkpoint-timeline.pdf
-%   - elastic-training.pdf        - training-vs-serving-ft.pdf
-%   - graceful-degradation.pdf    - circuit-breaker-states.pdf
-%   - observability-pillars.pdf   - fault-taxonomy.pdf
-%   - bathtub-curve.pdf           - opt175b-failure-timeline.pdf
+% Build: make deck V=2 D=07_fault_tolerance   (figures: images/make_figs.py)
+% Plan:  lecture_map.yml in this folder (storyboard included).
 % =============================================================================
+
 \documentclass[aspectratio=169, 12pt]{beamer}
 \usepackage{../../assets/beamerthememlsys}
-
 \mlsyssetup{
-  volume       = {Volume II},
-  chapter      = {Chapter 7},
-  logo         = {../../assets/img/logo-mlsysbook.png},
-  instlogo     = {../../assets/img/logo-harvard.png},
-  chaptertitle = {Fault Tolerance and Reliability},
+  volume={Volume II},
+  chapter={Chapter 7},
+  chaptertitle={Fault Tolerance},
+  layer=reliability,
+  logo={../../assets/img/logo-mlsysbook.png},
+  instlogo={../../assets/img/logo-harvard.png},
 }
-
-% --- Fonts ---
 \usepackage[T1]{fontenc}
 \usepackage[scaled=0.9]{helvet}
 \usepackage{courier}
 \renewcommand{\familydefault}{\sfdefault}
+\usepackage{booktabs,amsmath}
+\usetikzlibrary{arrows.meta,positioning,calc}
+\graphicspath{{images/}}
+\setcounter{mlsystotalsections}{6}
 
-% --- Packages ---
-\usepackage{booktabs}
-\usepackage{amsmath}
-
-% --- Image paths ---
-\graphicspath{
-  {images/}
-}
-
-% --- Chapter-specific macros ---
-\newcommand{\MTBF}{\text{MTBF}}
-
-% --- Helper: safe image include ---
-\newcommand{\safeimg}[2][width=\textwidth,keepaspectratio]{%
-  \IfFileExists{images/#2}{\includegraphics[#1]{#2}}{%
-    \IfFileExists{#2}{\includegraphics[#1]{#2}}{%
-      \fbox{\parbox[c][2.5cm][c]{0.85\linewidth}{\centering\footnotesize\textcolor{midgray}{[Missing image]}}}%
-    }%
-  }%
-}
-
-% --- Section count for navigation ---
-\setcounter{mlsystotalsections}{9}
-
-\title{Fault Tolerance and Reliability}
+\title{Fault Tolerance}
 \author{Vijay Janapa Reddi}
 \institute{Harvard University}
 \date{}
 
+% A large answer choice for predict and concept-question slides
+\newcommand{\choice}[2]{\textbf{\textcolor{mlsysaccent}{#1}}\enspace #2}
+% A monospaced line of a real log or config file
+\newcommand{\logline}[1]{{\ttfamily\footnotesize #1}\\}
+% A ragged-right, vertically centered table column (builds stay aligned)
+\newcolumntype{M}[1]{>{\raggedright\arraybackslash}m{#1}}
+
+% Golden thread (D4): the Fleet Law term and C3 axis this lecture acts on, once, on the goals slide
+\newcommand{\fleetterm}[2]{\par\vspace{0.08cm}{\small\textcolor{mlsysaccent}{\textbf{Fleet Law term:}}~#1\qquad\textcolor{mlsysaccent}{\textbf{C$^3$ axis:}}~#2\par}}
+
 \begin{document}
 
 % =============================================================================
-% TITLE SLIDE
+% TITLE
 % =============================================================================
-\mlsystitle{Fault Tolerance}{The Immune System of Infrastructure}{cover_fault_tolerance.png}
-
-% =============================================================================
-% LEARNING OBJECTIVES
-% =============================================================================
-\begin{frame}{Learning Objectives}
-\note{
-[2 min]
-% -- LINK: What prior concept connects to this slide
-Chapters 5--6 covered how to coordinate GPUs for distributed training.
-This chapter transitions to: what happens when those GPUs die.
-
-% -- NARRATE: What to SAY while showing this slide
-Walk through each objective. Emphasize the shift from ``how to
-coordinate'' to ``how to survive.'' Point to the Young-Daly formula
-and checkpoint design as the quantitative core of this chapter.
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``How many of you have lost training progress to a hardware
-crash?'' Show of hands sets the stakes for the lecture.
-
-% -- WARN: What students will get wrong on THIS topic
-Students assume fault tolerance is a corner case. At 10K GPUs,
-failures happen every few hours --- it is the default operating mode.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] Sets the roadmap for the entire lecture.
-IF SHORT: Read objectives quickly and move on; do not elaborate each one.
-}
-
-\small
-\begin{enumerate}\setlength\itemsep{1pt}
-  \item Calculate system-level \textbf{MTBF} from component failure rates and derive optimal checkpoint intervals using the \textbf{Young-Daly formula}
-  \item Design distributed \textbf{checkpoint and recovery} strategies for multi-terabyte model states across thousands of GPUs
-  \item Implement serving \textbf{redundancy}, \textbf{replication}, and \textbf{failover} within millisecond latency requirements
-  \item Apply \textbf{graceful degradation}: model fallback, feature fallback, and load shedding
-  \item Construct \textbf{observability infrastructure} using metrics, logs, and traces to diagnose non-deterministic failures
-  \item Evaluate fault tolerance trade-offs between \textbf{training} and \textbf{serving} workloads
-\end{enumerate}
-
-\end{frame}
-
-\begin{frame}{Visual Language}
-\note{
-[0.5 min]
-% -- NARRATE: What to SAY while showing this slide
-Point to each color card: ``Blue means compute. Green means data flow
-or healthy paths. Orange means routing or scheduling decisions. Red
-means errors, cost, or bottlenecks. You will see these consistently
-in every diagram throughout the course.''
-
-% -- FLEX: [OPTIONAL] + contingency
-[OPTIONAL] Students have seen this in prior chapters.
-IF SHORT: Skip entirely --- they know the palette by now.
-}
-
-\small
-Throughout this course, colors carry meaning:
-
-\vspace{0.3cm}
-\begin{columns}[T]
-  \begin{column}{0.45\textwidth}
-    \begin{mlsyscard}{computestroke}
-    \textbf{Blue} --- Compute / Processing\\
-    {\footnotesize GPU ops, forward/backward pass, inference}
-    \end{mlsyscard}
-    \vspace{0.15cm}
-    \begin{mlsyscard}{datastroke}
-    \textbf{Green} --- Data / Memory\\
-    {\footnotesize Data flow, caches, healthy paths}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.45\textwidth}
-    \begin{mlsyscard}{routingstroke}
-    \textbf{Orange} --- Routing / Scheduling\\
-    {\footnotesize Load balancers, batch windows}
-    \end{mlsyscard}
-    \vspace{0.15cm}
-    \begin{mlsyscard}{errorstroke}
-    \textbf{Red} --- Error / Cost / Bottleneck\\
-    {\footnotesize Loss, decode phase, waste}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-\end{frame}
-
-
+\mlsysnote{[0.5 min] [CORE] Read the thesis aloud once. Last lecture split one training job across a thousand accelerators. Today asks what happens when one of them breaks, which at this scale happens every few hours. The notes total 70.5 minutes; the [CORE] slides alone total 57. FLEX: cutting every [OPTIONAL] slide leaves a complete lecture. If a second lecture is available, split after the Checkpoints segment.}
+\mlsystitle{Fault Tolerance}{At fleet scale failure is the steady state, so a job is engineered to lose a bounded amount of work per failure.}{cover_fault_tolerance_blueprint.png}
 
 % =============================================================================
-\section{Failure at Scale}
+% SECTION: FAILURE CLOCK
 % =============================================================================
+\mlsysnote{[0.5 min] [CORE] Open with a real run that failed every few hours and still finished, then count how often a large job fails.}
+\mlsysdivider{How often does a large training job fail?}{Fault Tolerance, \S7.1 and \S7.2}
+\section{Failure Clock}
 
-\begin{frame}{The ML Failure Spectrum}
-\note{
-[2 min]
-% -- LINK: What prior concept connects to this slide
-Students understand distributed training from Ch 5--6 but assume
-hardware is reliable. This slide reveals the three categories of
-failure they will encounter in production.
-
-% -- NARRATE: What to SAY while showing this slide
-Point to each band in the diagram left-to-right: ``Hard failures are
-obvious --- the machine crashes, the job dies. Partial failures are
-subtle --- one GPU returns wrong gradients but the job continues.
-Silent data corruption is the most dangerous because no error is
-raised and the model silently degrades.''
-ANALOGY: ``Hard failure is a broken bone. Silent corruption is cancer
---- no symptoms until it is too late.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``Which of these three types is hardest to debug, and why?''
-Give 15 seconds, then cold-call. Expected: silent corruption, because
-there is no error signal.
-
-% -- WARN: What students will get wrong on THIS topic
-Students think all failures are hard crashes with stack traces.
-In reality, silent data corruption (bit flips, NaN propagation)
-causes the most expensive incidents because it goes undetected for
-hours.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] Establishes the failure taxonomy used throughout the chapter.
-IF AHEAD: ``What monitoring signal would catch silent corruption?''
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{failure-spectrum.pdf}
-
-\vspace{0.15cm}
-\mlsysinsight{Key:}{Hard failures are easy. Silent data corruption is the real threat at scale.}
-
+\begin{frame}{Llama 3 405B was interrupted 419 times in 54 days}
+  \begin{columns}[c]
+    \begin{column}{0.44\textwidth}
+      \centering\mlsysphoto[width=\textwidth,height=4.6cm,keepaspectratio]{nvidia-h100-pcie.jpg}\\[0.1cm]
+      {\footnotesize\textcolor{midgray}{An H100 accelerator (PCIe card shown).}}
+    \end{column}
+    \begin{column}{0.53\textwidth}
+      \centering
+      {\normalsize 16,384 H100 GPUs, 54 days}\\[0.15cm]
+      {\fontsize{40}{44}\selectfont\bfseries\textcolor{RedLine}{419}}\\[0.05cm]
+      {\normalsize unexpected interruptions:\\one every 3.1 hours}\\[0.4cm]
+      \uncover<2->{{\normalsize Effective training time: \textbf{over 90\%}}\\[0.1cm]
+      {\normalsize Manual interventions: \textbf{3}}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Dubey et al. 2024, The Llama 3 Herd of Models, via Fault Tolerance, War Story 7.2. 3.1 h = 54 days $\times$ 24 / 419 (derived). Photo: Geekerwan, CC BY 3.0, Wikimedia Commons.}
+  \note{[2.5 min] [CORE] Step 1: Meta trained Llama 3 405B on 16,384 H100 GPUs. Over a 54-day snapshot of pretraining it recorded 419 unexpected interruptions: 54 days times 24 hours divided by 419 is about one interruption every 3.1 hours. The photo shows one H100 board for scale; the run used about sixteen thousand of them. ENGAGE: ask the room what fraction of the run they would expect to lose if the job stopped eight times a day. Most students guess a large fraction. Step 2: Meta reported more than 90 percent effective training time, meaning useful training time divided by elapsed time, and only three interruptions needed significant manual intervention. WARN: the GPUs were not unusually fragile; the next slides show that this rate is what arithmetic predicts for any sixteen-thousand-device job. Say the driving tension aloud. The job failed constantly and still kept nine tenths of its time. Today explains how.}
 \end{frame}
 
-\begin{frame}{Hardware Fault Taxonomy}
-\note{
-[2 min]
-% -- LINK: What prior concept connects to this slide
-The failure spectrum gave three broad categories. This slide expands the hardware fault taxonomy into four precise types with quantitative fault rates.
-
-% -- NARRATE: What to SAY while showing this slide
-Walk through the table: ``Transient faults: cosmic ray bit flips, 1 per 10K GPU-hours. They vanish on retry but corrupt results silently. Permanent faults: dead GPU, dead NIC --- obvious and detectable. Intermittent faults: the worst --- a GPU that works 99\% of the time but produces wrong results under thermal stress. Byzantine faults: a component that lies --- sends incorrect data while appearing healthy. At scale, all four types occur daily.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``At 10,000 GPUs, how many transient faults per day?'' Expected: 10,000 / 10,000 = ~1 per hour, or ~24 per day.
-
-% -- WARN: What students will get wrong on THIS topic
-Students think transient means harmless. A single bit flip in a gradient accumulator can cause a NaN that propagates through the entire model within minutes.
-
-% -- FLEX: [CORE] Establishes precise vocabulary for the rest of the chapter.
-IF SHORT: Focus on transient and intermittent only; skip Byzantine.
-}
-
-\footnotesize
-\renewcommand{\arraystretch}{1.15}
-\begin{tabular}{@{}llrl@{}}
-  \toprule
-  \textbf{Fault Type} & \textbf{Behavior} & \textbf{Rate} & \textbf{Detection} \\
-  \midrule
-  \textbf{Transient}    & Vanishes on retry (bit flip)         & 1 per 10K GPU-h  & \textcolor{errorstroke}{Silent} \\
-  \textbf{Permanent}    & Component dead (GPU, NIC, disk)      & 1 per 50K GPU-h  & \textcolor{datastroke}{ECC/heartbeat} \\
-  \textbf{Intermittent} & Works 99\% of the time                & 1 per 25K GPU-h  & \textcolor{errorstroke}{Very hard} \\
-  \textbf{Byzantine}    & Sends incorrect data while ``healthy'' & 1 per 100K GPU-h & \textcolor{errorstroke}{Requires voting} \\
-  \bottomrule
-\end{tabular}
-
-\vspace{0.15cm}
-\begin{mlsyscard}{errorstroke}
-{\footnotesize At \textbf{10K GPUs}: $\sim$24 transient faults/day, $\sim$5 permanent/day, $\sim$10 intermittent/day. Every category occurs \textbf{daily} at scale.}
-\end{mlsyscard}
-
+\begin{frame}{Recall: what do the other 1,023 GPUs do?}
+  \mlsysactivity{Retrieval}{1.5 min}
+  \centering
+  {\Large\bfseries Close your notes.}\\[0.2cm]
+  {\normalsize A synchronous data-parallel step runs on 1,024 GPUs. One GPU stops.\\What do the other 1,023 do, and which Fleet Law term grows?}\\[0.45cm]
+  \uncover<2->{%
+    {\large $T_{\text{step}}(N) = \dfrac{T_{\text{compute}}}{N} + T_{\text{comm}}(N) + \textcolor{RedLine}{\boldsymbol{T_{\text{sync}}(N)}} - T_{\text{overlap}}$}\\[0.3cm]
+    {\normalsize They wait at the AllReduce barrier. The wait lands in $T_{\text{sync}}$.}}
+  \mlsyscredit{Fleet Law: Introduction, equation 1.3. Barrier cost: Distributed Training. Fault Tolerance, \S7.9.}
+  \note{[1.5 min] [CORE] Give 45 seconds. Step 2: AllReduce needs a contribution from every rank before any rank can finish, so the 1,023 healthy GPUs wait at the barrier. LINK: Lecture 6 showed that the slowest worker sets the step time of a synchronous job; Lecture 1 named the term this lands in. In the Fleet Law, the step time on N devices is compute divided by N, plus communication, plus synchronization, minus the communication hidden under compute. Detection, restart, and reload after a failure all add to the synchronization term averaged over the run. That is why a single failure is a whole-job event in synchronous training. FLEX: if students did not see Lecture 6, state the barrier rule in one sentence and move on.}
 \end{frame}
 
-\begin{frame}{Software Faults and the Bathtub Curve}
-\note{
-[2 min]
-% -- LINK: What prior concept connects to this slide
-Hardware faults are physics. Software faults are engineering --- and they cause 30--40\% of all ML training interruptions.
-
-% -- NARRATE: What to SAY while showing this slide
-Point to the bathtub curve: ``Left: infant mortality --- configuration errors, library version mismatches, driver bugs. These dominate the first 24--48 hours of a new training run. Middle: the stable period with random hardware failures. Right: wear-out --- memory leaks, log file accumulation, thermal degradation. The economic question: at what point does fault tolerance investment pay for itself? If your cluster costs \$10M/month and 30\% of time is wasted on failures, fault tolerance worth \$3M/month in recovered compute.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``Which phase of the bathtub curve do most student projects experience?'' Expected: infant mortality --- most projects never run long enough to see wear-out.
-
-% -- WARN: What students will get wrong on THIS topic
-Students focus exclusively on hardware. Software faults (OOM from batch accumulation, NCCL timeout from network jitter, checkpoint corruption from race conditions) are more common and harder to reproduce.
-
-% -- FLEX: [OPTIONAL] Supplements the hardware taxonomy.
-IF SHORT: State ``software causes 30--40\% of failures'' and skip the bathtub curve.
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.52\textwidth}
-    \safeimg[width=\textwidth,height=3.8cm,keepaspectratio]{bathtub-curve.pdf}
-  \end{column}
-  \begin{column}{0.45\textwidth}
-    \textbf{Failure causes in production:}
-    \vspace{0.05cm}
-    {\footnotesize
-    \begin{itemize}\setlength\itemsep{0pt}
-      \item Software bugs: \textbf{30--40\%}
-      \item Config errors: \textbf{20--30\%}
-      \item Hardware: \textbf{15--25\%}
-      \item Network: \textbf{10--15\%}
-    \end{itemize}
-    }
-
-    \vspace{0.1cm}
-    \begin{mlsyscard}{routingstroke}
-    {\scriptsize\textbf{Economic case:} \$10M/month cluster $\times$ 30\% downtime = \textbf{\$3M/month} recoverable via fault tolerance.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
+\begin{frame}{How often does a large job fail, and how often should it save itself?}
+  \normalsize
+  By the end of today, you will be able to:\\[0.2cm]
+  \begin{itemize}\setlength{\itemsep}{0.2cm}
+    \item Estimate a job's failure interval from component rates, and state its basis.
+    \item Classify a fault by persistence, manifestation, and scope, and pick the response.
+    \item Choose a checkpoint interval, and price one failure's recovery.
+    \item Contrast training recovery with serving replicas and degradation.
+  \end{itemize}
+  \vspace{0.2cm}
+  {\small\textcolor{midgray}{Running case: a 175B-parameter job, 2.45 TB checkpoint, on 10,000 (and 1,024) GPUs.}}
+  \fleetterm{$T_{\text{sync}}(N)$}{Coordination ($C_3$)}
+  \note{[1 min] [CORE] The title is the driving question. Each line is one segment, in order: the failure clock, fault types, checkpoints and recovery, and serving. The running case comes from the chapter. It is a 175-billion-parameter dense transformer trained with mixed-precision Adam, whose resumable checkpoint stores 14 bytes per parameter, 2.45 TB. Most arithmetic uses the chapter's 10,000-GPU cluster; recovery and straggler examples use its 1,024-GPU reference cluster. Llama 3 is the measured counterpart. WARN: the lecture uses three different failure intervals for similar clusters. Each slide states which one it uses and why. The accent line at the bottom names the Fleet Law term and C$^3$ axis that today's mechanisms act on; say it once.}
 \end{frame}
 
-\begin{frame}{Silent Data Corruption: The Second Axis}
-\note{
-[3 min]
-% -- LINK: What prior concept connects to this slide
-The failure spectrum showed three temporal categories (transient, intermittent,
-permanent). The bathtub curve added time-dependency. This slide reveals a
-second, orthogonal axis: detection difficulty. Hard failures are easy to detect.
-Silent corruption is the chapter's most distinctive and dangerous threat.
-
-% -- NARRATE: What to SAY while showing this slide
-Point to the table: ``We have been talking about WHEN failures happen.
-But there is a second axis: HOW detectable they are. Hard failures raise
-an error immediately. Silent data corruption produces no error --- the model
-continues training and produces subtly degraded results.''
-ANALOGY: ``Hard failure is a broken bone. Silent corruption is cancer ---
-no symptoms until the model fails in production.''
-Then: ``Google documented gradient norm spikes in TPU pods: a single bit flip
-in an exponent turns $10^{-5}$ into $10^{20}$, destroying weeks of training.
-At 10,000 GPUs, even a 0.01\% annual SDC rate means 1--10 silent events per year.
-Detection requires active monitoring: gradient checksums and statistical checks
-on per-rank gradient distributions.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``Why is silent corruption MORE dangerous than a node crash?''
-Give 20 seconds, then cold-call.
-Expected: A crash stops the job immediately --- you lose only work since the
-last checkpoint. Silent corruption poisons the model for hours before
-detection, requiring rollback to a much earlier checkpoint.
-
-% -- WARN: What students will get wrong on THIS topic
-Students assume ECC memory prevents all silent corruption. ECC corrects
-single-bit errors but cannot handle multi-bit upsets in the same word.
-Large-scale fleet studies confirm SDC events that escape ECC.
-
-% -- FLEX: [CORE] This is the chapter's most distinctive topic.
-IF AHEAD: ``Calculate SDC probability for 100K GPUs: if P = 0.001 per GPU
-per year, what is P(at least one event during a 3-month training run)?''
-IF SHORT: State the gradient norm spike analogy and move on.
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.52\textwidth}
-    \textbf{The failure spectrum has two axes:}
-
-    \vspace{0.1cm}
-    {\footnotesize
-    \renewcommand{\arraystretch}{1.1}
-    \begin{tabular}{@{}lll@{}}
-      \toprule
-      \textbf{Property} & \textbf{Hard Failure} & \textbf{Silent (SDC)} \\
-      \midrule
-      Detection    & Immediate                  & Hours--days \\
-      Error message & Yes                       & \textcolor{errorstroke}{None} \\
-      Blast radius & Single step                & Entire run \\
-      Recovery     & Restart                    & \textcolor{errorstroke}{Rollback far} \\
-      \bottomrule
-    \end{tabular}
-    }
-
-    \vspace{0.15cm}
-    \begin{mlsyscard}{errorstroke}
-    {\scriptsize\textbf{At 10K GPUs}: 0.01--0.1\% SDC rate/GPU/yr\\
-    $\Rightarrow$ \textbf{1--10 silent events/yr}. Gradient NaNs and unexplained loss spikes may be bit flips, not bad batches.}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.44\textwidth}
-    \textbf{SDC detection strategies:}
-
-    \vspace{0.1cm}
-    {\footnotesize
-    \begin{itemize}\setlength\itemsep{2pt}
-      \item \textcolor{computestroke}{\textbf{Gradient checksums}}: Verify AllReduce consistency across ranks
-      \item \textcolor{datastroke}{\textbf{Loss spike detection}}: Pause on sudden 10--100$\times$ spikes
-      \item \textcolor{routingstroke}{\textbf{Statistical monitoring}}: Track per-rank gradient distributions
-      \item \textcolor{errorstroke}{\textbf{Redundant compute}}: Run batch on 2 workers, compare
-    \end{itemize}
-    }
-
-    \vspace{0.05cm}
-    \mlsysalert{Key:}{No error raised = no guarantee of correct computation at scale.}
-  \end{column}
-\end{columns}
-
+\begin{frame}{Predict: how often does a 10,000-GPU job lose a GPU?}
+  \mlsysactivity{Predict}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.30\textwidth}
+      \centering\mlsysphoto[width=\textwidth,height=3.6cm,keepaspectratio]{nvidia-h100-pcie-four.jpg}\\[0.05cm]
+      {\footnotesize\textcolor{midgray}{Four H100 cards. The job needs 10,000.}}
+    \end{column}
+    \begin{column}{0.67\textwidth}
+      {\normalsize Each GPU has a mean time to failure (MTTF) of 50,000 hours, about 5.7 years. Failures are independent.}\\[0.4cm]
+      {\large\choice{A}{once a month}\qquad\choice{B}{once a week}}\\[0.25cm]
+      {\large\choice{C}{once a day}\qquad\choice{D}{every few hours}}\\[0.4cm]
+      {\normalsize\uncover<2->{\textbf{D.} 50,000 h $\div$ 10,000 $=$ \textbf{5 hours} between GPU failures.}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Fault Tolerance, \S7.2 and table 1; GPU-only basis, 50,000 h planning value. Photo: Geekerwan, CC BY 3.0, Wikimedia Commons.}
+  \note{[2 min] [CORE] ENGAGE: students vote with fingers, one to four. Many pick A or B, because 5.7 years sounds like forever. Step 2: D. With independent, constant-rate failures, the job fails when any of its N components fails, so the rates add: N times the per-GPU rate, and the expected interval is the GPU's MTTF divided by N. 50,000 divided by 10,000 is 5 hours. WARN: this counts GPUs only. It is the most optimistic of the three numbers the lecture uses, and the next two slides make it worse. WARN: MTTF here is a population average used for planning; the chapter calls it a planning constant and asks operators to substitute measured rates.}
 \end{frame}
 
-\begin{frame}{The Mathematics of Inevitable Failure}
-\note{
-[3 min]
-% -- LINK: What prior concept connects to this slide
-The failure spectrum showed qualitative categories. Now we quantify:
-how often does the system fail as a function of cluster size?
-
-% -- NARRATE: What to SAY while showing this slide
-Point to the reliability product rule: ``Each component has exponential
-reliability. For N components in series, failure rates add. The system
-MTBF is the component MTBF divided by N.'' Then point to the table:
-``At 8 GPUs you get months between failures. At 10,000 GPUs, you fail
-every 5 hours. At 25,000 GPUs, every 2 hours.''
-ANALOGY: ``One light bulb lasts a year. A stadium with 10,000 bulbs
-has one blow out every hour.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Before showing the table, ask: ``If one GPU fails once per year
-(50,000 hours MTBF), how often does a 10,000-GPU cluster fail?''
-Give 15 seconds. Expected answer: 50000/10000 = 5 hours.
-
-% -- WARN: What students will get wrong on THIS topic
-Students think adding redundancy always helps. Redundancy helps
-individual components but the system MTBF formula is 1/N --- adding
-more GPUs makes the system fail MORE often, not less.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] The MTBF/N equation is the central insight of the chapter.
-IF AHEAD: ``What happens to this formula with correlated failures?''
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.52\textwidth}
-    Individual component reliability:
-    $$R_{single}(t) = e^{-\lambda t}$$
-
-    \vspace{0.1cm}
-    For $N$ identical components (series):
-    $$R_{system}(t) = e^{-N\lambda t}$$
-
-    \vspace{0.1cm}
-    \begin{mlsyscard}{crimson}
-    \textbf{System MTBF:}
-    $$\MTBF_{system} = \frac{\MTBF_{component}}{N}$$
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.44\textwidth}
-    \vspace{0.2cm}
-    \mlsysconcept{Scale inverts reliability:}{}
-
-    \vspace{0.1cm}
-    {\footnotesize
-    \renewcommand{\arraystretch}{1.15}
-    \begin{tabular}{@{}rr@{}}
-      \toprule
-      \textbf{GPUs} & \textbf{Cluster MTBF} \\
-      \midrule
-      8       & 260 days \\
-      1,000   & 2 days \\
-      10,000  & \textbf{5 hours} \\
-      25,000  & \textbf{2 hours} \\
-      \bottomrule
-    \end{tabular}
-    }
-
-    \vspace{0.1cm}
-    {\footnotesize\textcolor{midgray}{Per-GPU MTBF: 50,000 hours}}
-  \end{column}
-\end{columns}
-
+\begin{frame}{A 50,000-hour GPU fails every 5 hours in a 10,000-GPU job}
+  \centering
+  {\normalsize $R_{\text{sys}}(t) = e^{-N\lambda t}$ \qquad $\text{MTBF}_{\text{sys}} = \dfrac{1}{N\lambda} = \dfrac{\text{MTTF}}{N}$}\quad{\small MTBF: mean time between job failures}\\[0.1cm]
+  \mlsyssteps[width=0.95\textwidth,height=5.2cm,keepaspectratio]{mtbf_ladder_step}{3}
+  \mlsyscredit{Fault Tolerance, equations 3 and 4 and table 1. GPU-only basis: 50,000 h per GPU, independent, constant rate.}
+  \note{[2.5 min] [CORE] The equations: R is the probability that no component has failed by time t; lambda is one GPU's failure rate, one per 50,000 hours. With N independent components the rates add, so the system's mean time between failures (MTBF) is MTTF over N. Step 1: 8 GPUs fail about every 6,250 hours, 260 days; 64 GPUs every 33 days. Step 2: 512 GPUs every 4 days, 1,000 every 2 days. Red bars mean a failure more often than once a week. Step 3: 10,000 GPUs every 5 hours, 25,000 every 2 hours. A three-month run on 10,000 GPUs expects hundreds of failures. LINK: Lecture 1's reliability gap, the probability that all N components are up at once, is the same product. At 99.99 percent availability per GPU, all 10,000 are up together only about 36.8 percent of the time. WARN: these are planning averages; they do not schedule incidents, and a short job can finish without a failure.}
 \end{frame}
 
-\begin{frame}{The Reliability Gap}
-\note{
-[2 min]
-% -- LINK: What prior concept connects to this slide
-The MTBF/N equation just showed cluster MTBF dropping with scale.
-This figure visualizes the consequence: at large clusters, MTBF drops
-below training duration.
-
-% -- NARRATE: What to SAY while showing this slide
-Point to the crossing point in the figure: ``Below this line, training
-cannot complete without fault tolerance. Meta reported 419 failures
-in 54 days training Llama 3 on 16K GPUs --- an empirical MTTF of 3.1 hours.''
-Then: ``Here is the key teaching beat. The theoretical formula with 50K-hour
-per-GPU MTBF predicts 5 hours at 16K GPUs. The measured Llama 3 MTTF is
-3.1 hours --- LOWER than theory predicts. Non-GPU failure domains (storage,
-network, cooling) make real clusters fail even faster than the simple GPU-only
-formula estimates. The formula is a floor, not a ceiling.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``At what cluster size does the danger zone begin for a 30-day
-training run?'' Expected: where MTBF drops below 30 days, roughly
-70 GPUs.
-
-% -- WARN: What students will get wrong on THIS topic
-Students underestimate the reliability gap because they have only used
-small clusters. The curve is hyperbolic --- it collapses fast.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] Motivates why checkpointing is physically necessary.
-IF SHORT: Focus only on the 10K GPU data point and move on.
-}
-
-% --- Layout: FULL-WIDTH image ---
-\centering
-\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{reliability-gap.pdf}
-
-\vspace{0.1cm}
-\mlsysalert{Implication:}{At 10K+ GPUs, fault tolerance is not optional --- it is physically necessary.}
-
+\begin{frame}{What do PCIe links and NICs add to the clock?}
+  \mlsysactivity{Estimate}{2.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.16\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.4cm,keepaspectratio]{nvidia-hgx-b200-baseboard.jpg}\\[0.05cm]
+      {\scriptsize\textcolor{midgray}{An 8-GPU baseboard (HGX B200).}}
+    \end{column}
+    \begin{column}{0.34\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \footnotesize
+        \textbf{10,000 H100s, 8 per node}\\[0.1cm]
+        GPU MTTF: 50,000 h\\
+        PCIe link to host, per GPU: 200,000 h\\
+        Network card (NIC) and cables per node: 150,000 h\\
+        6 power supplies per node in 4+2 redundancy: 100,000 h each\\[0.1cm]
+        Rates add in series.
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.47\textwidth}
+      \centering
+      {\normalsize Per GPU, per hour ($\times 10^{-5}$):}\\[0.15cm]
+      {\large\uncover<2->{GPU 2.0 $+$ PCIe 0.5 $+$ NIC 0.083}}\\[0.1cm]
+      {\large\uncover<2->{$=$ 2.583; power 0}}\\[0.25cm]
+      {\normalsize\uncover<2->{$\times$ 10,000 GPUs $=$ 0.258 per hour}}\\[0.25cm]
+      {\Large\uncover<2->{\textbf{\textcolor{RedLine}{MTBF 3.87 h}}}}\\[0.05cm]
+      {\normalsize\uncover<2->{about 6.2 failures a day}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Fault Tolerance, \S7.2.2 (the MTBF cascade). Full-system basis: GPU, PCIe, one eighth of each node's NIC and cables. Photo: Pokiiri, CC BY-SA 4.0, Wikimedia Commons.}
+  \note{[2.5 min] [CORE] ENGAGE: pairs compute the cluster MTBF, 90 seconds. Hint: convert each MTTF to a rate per GPU, and give each GPU one eighth of its node's NIC. Step 2: the GPU contributes 1 over 50,000, or 2.0 times ten to the minus five per hour; the PCIe link 0.5; the NIC share one eighth of 1 over 150,000, 0.083. Power contributes nothing, because with 4+2 redundancy no single supply failure stops the node. Per GPU, 2.583 times ten to the minus five; times 10,000 GPUs, 0.258 failures per hour, an MTBF of 3.87 hours, 6.2 failures a day. This full-system 3.87 hours is the lecture's default input from here on. WARN: double counting. A measured whole-node failure rate already includes PCIe and NIC paths; never add it to these terms. WARN: redundancy removes power from this first-order sum, but losing the circuits that feed a node is a correlated failure, two slides ahead.}
 \end{frame}
 
-\begin{frame}{Correlated Failures (1/2): The Independence Assumption}
-\note{
-[2 min]
-% -- LINK: What prior concept connects to this slide
-The MTBF/N formula and the reliability gap figure both assume independent
-failures. This slide reveals why that assumption breaks in production.
-
-% -- NARRATE: What to SAY while showing this slide
-Point to the formula: ``$\text{MTBF}_{\text{system}} = \text{MTBF}_{\text{component}}/N$
-assumes every GPU fails independently. But in a real rack, a single power
-distribution unit (PDU) can take out 64 GPUs simultaneously. A rack switch
-failure partitions all GPUs on that switch. A NCCL bug triggered by a specific
-batch size fails all replicas at once.''
-Correlated failures change TWO things: (1) incident frequency goes up ---
-correlated hazards add to the base GPU failure rate. (2) blast radius goes up ---
-one incident can remove 10--64 GPUs instead of one.
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``You have 3 replicas for availability. Where should they be placed?''
-Give 15 seconds. Expected: different racks / PDU domains, NOT co-located.
-
-% -- WARN: What students will get wrong on THIS topic
-Students think adding replicas automatically improves reliability.
-Replicas that share a power domain or rack switch provide zero protection
-against that correlated hazard. Redundancy must span independent failure domains.
-
-% -- FLEX: [CORE] The independence assumption is the most important fallacy.
-IF SHORT: State the PDU/rack-switch example and the placement rule; skip the domain table.
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.50\textwidth}
-    \textbf{MTBF formula assumes independence:}
-    $$\MTBF_{system} = \frac{\MTBF_{comp}}{N}$$
-
-    \vspace{0.05cm}
-    \textbf{In production, failures correlate:}
-    \begin{itemize}\setlength\itemsep{0pt}
-      \item \textcolor{errorstroke}{\textbf{PDU failure}}: 1 event $\to$ 64 GPUs down
-      \item \textcolor{errorstroke}{\textbf{Rack switch failure}}: 1 event $\to$ 32--64 GPUs
-      \item \textcolor{errorstroke}{\textbf{Software bug}}: 1 batch triggers all replicas
-      \item \textcolor{errorstroke}{\textbf{Cooling failure}}: cascade across chassis
-    \end{itemize}
-
-    \vspace{0.05cm}
-    \mlsysalert{Impact:}{Correlation raises both incident frequency AND blast radius.}
-  \end{column}
-  \begin{column}{0.46\textwidth}
-    \textbf{Failure domain hierarchy:}
-
-    \vspace{0.05cm}
-    \begin{center}
-    \begin{tabular}{@{}ll@{}}
-      \toprule
-      \textbf{Domain} & \textbf{Blast Radius} \\
-      \midrule
-      GPU          & 1 device \\
-      Node         & 8 GPUs \\
-      Rack switch  & 32--64 GPUs \\
-      PDU          & 1--4 racks \\
-      Network zone & 100s of racks \\
-      \bottomrule
-    \end{tabular}
-    \end{center}
-  \end{column}
-\end{columns}
-
+\begin{frame}{Measured clusters fail more often than the GPU-only line}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=6.0cm,keepaspectratio]{mttf_measured_step}{3}
+  \mlsyscredit{Fault Tolerance, figure 1. Kokolis et al. 2025 (HPCA), Meta Research SuperCluster; Dubey et al. 2024. Values from MLSysIM's Literature registry.}
+  \note{[2.5 min] [CORE] Mean time to failure against GPUs in the job, both axes logarithmic. Step 1: the dashed GPU-only line, 50,000 hours over N, from the last two slides. Step 2: measured job MTTFs from Meta's Research SuperCluster (Kokolis and colleagues, 2025): 1,145 hours at 8 GPUs and 7.9 hours at 1,024. They follow the line's slope but sit 5.5 and 6.2 times below it (6,250 over 1,145 and 48.8 over 7.9, derived in calcs.py), because hosts, network, storage, and software interrupt jobs too. Step 3: the orange cross is the chapter's full-system model, 3.87 hours at 10,000 GPUs. The open circles are Kokolis's projections, 1.8 hours at 16,384 GPUs. The red diamond is Llama 3's measured 3.1 hours at 16,384. ENGAGE: which number would you plan a 16,384-GPU job around? (Expected: two to three hours, bracketed by the projection and the measurement.) WARN: the three bases answer different questions. GPU-only compares cluster sizes; the cascade sizes one design; measurements are what operators should substitute when they have them.}
 \end{frame}
 
-\begin{frame}{Correlated Failures (2/2): Placement Rule}
-\note{
-[1 min]
-% -- LINK: What prior concept connects to this slide
-Part 1 showed the failure domain hierarchy and how correlation amplifies
-both frequency and blast radius. This slide delivers the key design rule.
-
-% -- NARRATE: What to SAY while showing this slide
-``The engineering consequence: redundancy is only effective when replicas
-span independent failure domains. Three replicas on the same rack provide
-no protection if the rack's PDU or top-of-rack switch fails.''
-Give the Google example: TPU slice swaps use physically separate racks
-precisely to ensure different PDU domains.
-
-% -- FLEX: [CORE] Delivers the actionable design rule from Part 1.
-IF SHORT: Read the insight box and move on.
-}
-
-\small
-\vspace{0.4cm}
-\mlsysinsight{Rule:}{Replicas must span independent failure domains --- not just independent GPUs.}
-
-\vspace{0.4cm}
-{\footnotesize
-\begin{itemize}\setlength\itemsep{3pt}
-  \item Three replicas on the \textbf{same rack}: zero protection against PDU/switch failure
-  \item Three replicas on \textbf{different racks, same PDU}: partial protection
-  \item Three replicas across \textbf{different PDU domains}: true independent redundancy
-\end{itemize}
-}
-
-\vspace{0.3cm}
-\begin{mlsyscard}{computestroke}
-{\footnotesize \textbf{Production practice}: Google TPU slice swap, AWS availability zones,
-and multi-rack placement policies all enforce failure domain independence.}
-\end{mlsyscard}
-
-\end{frame}
-
-% --- ACTIVE LEARNING: Micro-Retrieval Cue ---
-\begin{frame}{Quick Check}
-\note{
-[1 min]
-% -- NARRATE: What to SAY while showing this slide
-Read the question aloud. Wait 15 seconds in silence. Then cold-call.
-Expected answer: 50000/10000 = 5 hours.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] Reinforces the MTBF/N calculation before moving to Young-Daly.
-}
-
-\centering
-\vspace{1.0cm}
-{\Large\bfseries Quick Check}
-
-\vspace{0.6cm}
-{\large At 10,000 GPUs with 50,000h per-GPU MTBF,\\what is the cluster MTBF?}
-
-\vspace{0.5cm}
-{\normalsize\textcolor{midgray}{15 seconds --- then I will cold-call.}}
-
-\end{frame}
-
-
-
-% --- ACTIVE LEARNING 1: Predict ---
-\begin{frame}{Predict: The 9s of Reliability}
-\note{
-[2 min]
-% -- LINK: What prior concept connects to this slide
-Students just calculated MTBF/N. This exercise applies the reliability
-product rule to ``five nines'' uptime, which sounds impressive but
-collapses at scale.
-
-% -- NARRATE: What to SAY while showing this slide
-``Each GPU has 99.999\% uptime --- that sounds incredible. But what
-happens when you have 10,000 of them?'' Give 60 seconds to calculate.
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Students calculate $(0.99999)^{10000}$. Expected answer: $\approx 0.90$.
-Only 90\% chance the cluster survives one hour. Ask 2--3 students to
-share. This primes the checkpoint discussion.
-
-% -- WARN: What students will get wrong on THIS topic
-Students confuse per-component and system reliability. ``Five nines
-per GPU'' sounds safe but gives only 90\% system uptime per hour.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] Prediction exercise that motivates the entire checkpoint section.
-IF SHORT: Reduce to 30 seconds and reveal the answer immediately.
-}
-
-\centering
-\vspace{0.8cm}
-{\Large\bfseries Think--Write--Share}
-
-\vspace{0.5cm}
-{\large Each GPU has \textbf{99.999\%} uptime.\\
-You have \textbf{10,000 GPUs}.\\[0.3cm]
-What is the probability the \emph{entire cluster}\\
-survives \textbf{one hour} without a failure?}
-
-\vspace{0.5cm}
-{\normalsize Write your estimate. \textcolor{midgray}{(60 seconds)}}
-
+\begin{frame}{Correlated failures take down a rack or a power domain at once}
+  \begin{columns}[c]
+    \begin{column}{0.40\textwidth}
+      \centering\mlsysphoto[width=\textwidth,height=4.6cm,keepaspectratio]{datacenter-server-racks.jpg}
+    \end{column}
+    \begin{column}{0.57\textwidth}
+      \footnotesize
+      \begin{tabular}{@{}lll@{}}
+        \toprule
+        Failure domain & GPUs lost & Mitigation \\
+        \midrule
+        Single GPU & 1 & hot spare \\
+        Node (power, OS) & 8 & checkpoint, replace \\
+        Rack (ToR switch) & 32--64 & cross-rack spread \\
+        Power domain & 100--500 & multiple feeds \\
+        Software version & all on it & staged rollout \\
+        \bottomrule
+      \end{tabular}\\[0.3cm]
+      \normalsize\uncover<2->{Three replicas on one power domain survive no power loss.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Fault Tolerance, \S7.3.4 and table 2. Photo: Carl Lender, CC BY 2.0, Wikimedia Commons.}
+  \note{[2 min] [CORE] These are real racks. Each holds several nodes behind one top-of-rack (ToR) switch and shares power and cooling with its neighbors. The equation MTTF over N assumed independence. Shared parts break that assumption in two ways. They add incidents the per-device count omits, and each incident removes many GPUs at once, its blast radius. Walk the table from one GPU to a software version; a bad CUDA driver can crash every rank that runs it. LINK: Lecture 2 built the physical nesting from node to rack to building; here each level becomes a failure domain. Step 2: redundancy must cross the boundary of the fault it defends against; three replicas in one power domain give zero protection against that domain's outage. Example: Google's TPU v4 pod of 4,096 chips uses optical circuit switches to swap a spare cube of 64 chips into a job's topology after a machine outage (Zu et al. 2024, War Story 7.1). ENGAGE: which domain does a staged rollout protect? (Expected: the software version.) Land the segment. A job that needs all N parts fails N times as often as one part, and shared parts make failures arrive together.}
 \end{frame}
 
 % =============================================================================
-\section{The Young-Daly Law}
+% SECTION: FAULT TYPES
 % =============================================================================
+\mlsysnote{[0.5 min] [CORE] Counting failures sets how often to prepare. Choosing the response needs to know what kind of failure arrived.}
+\mlsysdivider{What kind of failure arrived, and does anyone notice?}{Fault Tolerance, \S7.3 to \S7.5}
+\section{Fault Types}
 
-\mlsysfocus{The Young-Daly Law}{%
-$\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \MTBF}$%
-}
-
-\begin{frame}{Optimal Checkpoint Interval}
-\note{
-[3 min]
-% -- LINK: What prior concept connects to this slide
-The prediction exercise showed that failures are frequent. The
-Young-Daly formula tells us exactly how often to checkpoint.
-
-% -- NARRATE: What to SAY while showing this slide
-Point to the U-shaped curve: ``Left side: too frequent checkpoints
-waste I/O time writing state. Right side: too infrequent checkpoints
-waste rework after each failure. The minimum is the Young-Daly
-optimum --- the square root of twice the write time times MTBF.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``Which side of the curve is worse --- too frequent or too rare?''
-Expected: too rare is worse because the rework cost after failure is
-unbounded, while I/O overhead is linear.
-
-% -- WARN: What students will get wrong on THIS topic
-Students guess checkpoint intervals by intuition (``every hour'')
-instead of computing the optimum. The formula often gives surprising
-answers (e.g., 27 minutes, not 1 hour).
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] The Young-Daly formula is tested in problem sets.
-IF AHEAD: ``What happens to tau\_opt when you halve the write time?''
-(Answer: decreases by factor of sqrt(2), not 2.)
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.88\textwidth,height=4.0cm,keepaspectratio]{young-daly-tradeoff.pdf}
-
-\vspace{0.1cm}
-\small
-\begin{columns}[T]
-  \begin{column}{0.30\textwidth}
-    \centering
-    \textcolor{computestroke}{\textbf{Too frequent}}\\
-    {\scriptsize I/O overhead dominates}
-  \end{column}
-  \begin{column}{0.30\textwidth}
-    \centering
-    \textcolor{datastroke}{\textbf{Optimal: $\tau_{opt}$}}\\
-    {\scriptsize Minimizes total waste}
-  \end{column}
-  \begin{column}{0.30\textwidth}
-    \centering
-    \textcolor{errorstroke}{\textbf{Too rare}}\\
-    {\scriptsize Rework cost dominates}
-  \end{column}
-\end{columns}
-
+\begin{frame}{GPU parts caused 268 of Llama 3's 419 interruptions}
+  \begin{columns}[c]
+    \begin{column}{0.74\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.8cm,keepaspectratio]{llama3_causes.pdf}
+    \end{column}
+    \begin{column}{0.24\textwidth}
+      \centering\mlsysphoto[width=\textwidth,height=2.6cm,keepaspectratio]{nvidia-h100-pcie.jpg}\\[0.05cm]
+      {\footnotesize\textcolor{midgray}{The GPU and its HBM led the list.}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Dubey et al. 2024, Table 5 counts, via Fault Tolerance, figure 2 and MLSysIM. Other GPU parts: SRAM 19, system processor 17, thermal 6; software: bugs 54, dependency 2. Photo: Geekerwan, CC BY 3.0.}
+  \note{[2 min] [CORE] Back to the hook: Meta traced each of the 419 interruptions to a root cause. GPU components caused 268, 64 percent: 148 faulty GPUs and 72 failures of HBM, the GPU's high-bandwidth memory, lead the list. Software caused 56, network switches and cables 35, and unplanned host maintenance 32. Only 6 were attributed to silent data corruption, wrong values computed without any error. ENGAGE: is 6 of 419 small? (Expected: it counts only the corruption that was caught; corruption that was never detected cannot appear in this chart.) WARN: Meta's table prints one percentage that disagrees with its count; the chapter and this chart use the counts. LINK: most effort goes to frequent, detectable accelerator faults; the rare silent ones need a different kind of defense, which the rest of this segment builds.}
 \end{frame}
 
-\begin{frame}{Young-Daly: Worked Example}
-\note{
-[2 min]
-% -- LINK: What prior concept connects to this slide
-The U-shaped curve showed the trade-off qualitatively. Now we plug
-in real Llama-3 numbers to see the formula in action.
+\begin{frame}{Persistence chooses retry, quarantine, or replacement}
+  \centering
+  {\normalsize Three axes: \textbf{persistence} (does it come back?), \textbf{manifestation} (crash, slow, or wrong?), \textbf{scope} (how many GPUs?).}\\[0.3cm]
+  \footnotesize
+  \begin{tabular}{@{}M{2.2cm}M{4.3cm}M{4.6cm}@{}}
+    \toprule
+    Persistence & Signature & Fleet response \\
+    \midrule
+    \textcolor{GreenLine}{\textbf{Transient}} & One wrong value or lost message; retry succeeds & Correct or retry; roll back if saved state was touched \\
+    \uncover<2->{\textcolor{OrangeLine}{\textbf{Intermittent}}} & \uncover<2->{Returns under specific load, heat, or voltage} & \uncover<2->{Drain and quarantine; readmit only after stress tests under load} \\
+    \uncover<3->{\textcolor{RedLine}{\textbf{Permanent}}} & \uncover<3->{Repeats at the same device, address, or link} & \uncover<3->{Replace; restore a checkpoint from before the fault} \\
+    \bottomrule
+  \end{tabular}
+  \mlsyscredit{Fault Tolerance, \S7.3 and \S7.4.1, table 3; fault, error, failure: Avizienis et al. 2004.}
+  \note{[2 min] [CORE] A fault is the defect, an error the corrupted state it produces, a failure the misbehavior the job sees. The chapter places every fault on three independent axes, each choosing part of the response. Step 1: a transient fault, such as a particle strike flipping one bit, leaves nothing to repair; the question is only whether its effect escaped into saved state. Step 2: an intermittent fault, such as a cracked solder joint, passes a reboot test and fails again under the next job's heat. Keep it suspect until stress tests under load clear it. Step 3: a permanent fault, such as a stuck-at bit in a multiplier, repeats on every retry, so rerunning on the same device reproduces the error instead of exposing it. Manifestation decides whether anyone notices. A crash announces itself; a slow node and a wrong value do not. Scope decides the blast radius from the last segment. WARN: the axes are not exclusive bins; a transient fault can crash a process or silently corrupt a gradient.}
+\end{frame}
 
-% -- NARRATE: What to SAY while showing this slide
-Walk through step by step: ``Checkpoint write time is 2 minutes.
-Cluster MTBF at 16K GPUs is about 3 hours or 180 minutes. Plug in:
-sqrt(2 times 2 times 180) = sqrt(720) = 27 minutes.'' Then compare
-to the overhead percentages: 10 min = 17\%, 60 min = 15\%, 27 min = 7\%.
-Note the square-root relationship: halving MTBF only increases
-frequency by 1.4x, not 2x.
+\begin{frame}{Diagnose: which axis, and which response?}
+  \mlsysactivity{Diagnose}{2.5 min}
+  \small
+  \begin{columns}[T]
+    \begin{column}{0.32\textwidth}
+      \begin{mlsyscard}{BlueLine}
+        \textbf{A.} A node passes cold-boot tests, then returns wrong matrix products under sustained heat.\\[0.15cm]
+        \uncover<2->{\textbf{Intermittent.} Drain, quarantine, stress-test under that load.}
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.32\textwidth}
+      \begin{mlsyscard}{OrangeLine}
+        \textbf{B.} One rank stops sending heartbeats; the collective times out.\\[0.15cm]
+        \uncover<2->{\textbf{Fail-stop, one node.} Replace the node, restore the last checkpoint.}
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.32\textwidth}
+      \begin{mlsyscard}{RedLine}
+        \textbf{C.} After a driver update, ranks crash on every node that runs it.\\[0.15cm]
+        \uncover<2->{\textbf{Correlated, software scope.} Roll back the version.}
+      \end{mlsyscard}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Fault Tolerance, \S7.3, \S7.4, and the \S7.4 self-check.}
+  \note{[2.5 min] [CORE] ENGAGE: pairs classify each incident on the three axes and name a first response, two minutes. Step 2: A is intermittent; it recurs under a load regime, so passing a cold test does not clear it. Quarantine it, collect telemetry, and readmit only after it passes the stress test that exposed it. Replay on known-good hardware should confirm the hardware attribution before repair. B is fail-stop with node scope; silence is the evidence, and the cold-restart path replaces the node and restores a valid checkpoint. C is correlated with software scope. Every GPU running the version is in the blast radius, so replacing hardware does nothing, and the fix is a rollback. WARN: students often call A transient because it passed a test; transient means it does not come back. WARN for C: retrying on new nodes repeats the crash.}
+\end{frame}
 
-% -- WARN: What students will get wrong on THIS topic
-Students expect the optimal to be ``halfway between too frequent and
-too rare.'' The square root makes it much closer to the frequent side.
+\begin{frame}{Liveness checks cannot see a wrong value}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=4.2cm,keepaspectratio]{evidence_step}{2}\\[0.1cm]
+  \uncover<3->{%
+  \begin{columns}[c]
+    \begin{column}{0.30\textwidth}
+      \centering\safeimg[width=\textwidth,height=1.6cm,keepaspectratio]{micron-ecc-rdimm.jpg}
+    \end{column}
+    \begin{column}{0.66\textwidth}
+      {\normalsize ECC memory (left) and link CRCs protect bits stored and moved. No standard check verifies the arithmetic.}
+    \end{column}
+  \end{columns}}
+  \mlsyscredit{Fault Tolerance, \S7.3.2, \S7.3.3, \S7.4.3, figure 3; Lamport et al. 1982. Photo: a registered ECC DDR3 module, Mister rf, CC BY-SA 4.0, Wikimedia Commons.}
+  \note{[2 min] [CORE] Step 1: the fail-stop model. Workers W1 to W4 send periodic heartbeats (violet ticks). W2 stops; after the silence a timeout fires and the coordinator marks it failed. Silence is the evidence. Step 2: the Byzantine model, named after Lamport's Byzantine generals: a component keeps participating but sends incorrect values. W6 sends gradients on schedule, so it passes every liveness check, yet its values are wrong. In an ML fleet the usual cause is faulty hardware; an adversary is the rarer case. Step 3: error-correcting code (ECC) memory and the cyclic redundancy checks (CRC) on links protect stored and transmitted bits. A GPU that computes a wrong gradient and then sends those wrong bytes intact passes both, and a correct AllReduce averages the wrong gradient into every replica. ENGAGE: why does the SDC row in Llama 3's chart undercount? (Expected: only caught corruption is counted.) LINK: Lecture 13 owns the adversarial version, the breakdown point of the gradient mean under a malicious worker.}
+\end{frame}
 
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] Worked example that anchors the formula.
-IF SHORT: Just show the final result (27 min) and the overhead table.
-}
+\begin{frame}{Google saw silent corruption as a sudden gradient-norm spike}
+  \begin{columns}[c]
+    \begin{column}{0.62\textwidth}
+      \centering\safeimg[width=\textwidth,height=5.0cm,keepaspectratio]{sdc_trace.pdf}
+    \end{column}
+    \begin{column}{0.35\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.4cm,keepaspectratio]{dean-mlsys2024-keynote.jpg}\\[0.2cm]
+      {\small A spike flags a suspect step.\\Replay on known-good hardware decides the cause.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Jeff Dean, MLSys 2024 keynote (slides: Google). Left: digitized from a photo of its slide (Fault Tolerance, figure 9), which has no axis values. Right: photo (figure 8).}
+  \note{[1.5 min] [OPTIONAL] Real production telemetry from Jeff Dean's MLSys 2024 keynote. Left: the gradient norm of a Google training job over time, redrawn point by point from a photo of the keynote slide. The original plot shows no axis values, so the redrawing shows none either. Gray points are normal steps; the red points inside the box are the burst Google attributed to silent data corruption, the tallest about three times the height of the normal band on the photographed axis. Right: the keynote slide's claim that at the scale of large training jobs incorrect computations from one buggy chip can spread through the entire run. The plot shows the symptom; it does not identify the damaged circuit. A loss or gradient-norm spike can also come from a bad batch, an optimizer instability, or a synchronization bug, so robust systems pause before the suspect update commits, keep the inputs, and replay the step on known-good hardware. Only a replay that implicates the device sends it to repair. Exposure grows with fleet size. At an illustrative rate of one event per million GPU-hours, a 100,000-GPU fleet expects one event every 18,000 two-second steps, about every 10 hours (Napkin Math 7.1). WARN: clipping the gradient limits the damage of one step; it does not reconstruct the correct gradient.}
+\end{frame}
 
-\small
-\textbf{Scenario: Llama-3 training on 16,000 H100 GPUs}
-
-\vspace{0.1cm}
-\renewcommand{\arraystretch}{1.1}
-{\footnotesize
-\begin{tabular}{@{}lll@{}}
-  \toprule
-  \textbf{Parameter} & \textbf{Value} & \textbf{Source} \\
-  \midrule
-  Checkpoint write time ($T_w$) & 2 min  & Storage BW \\
-  Cluster MTBF                  & 3 hrs (180 min)  & 16K GPUs \\
-  \bottomrule
-\end{tabular}
-}
-
-\vspace{0.1cm}
-$$\tau_{\text{opt}} = \sqrt{2 \cdot 2 \cdot 180} = \sqrt{720} \approx \mathbf{27\text{ min}}$$
-
-\vspace{0.1cm}
-\begin{mlsyscard}{datastroke}
-{\footnotesize
-\textbf{Checkpoint every 10 min}: 17\% overhead (too frequent)\\
-\textbf{Checkpoint every 60 min}: 15\% overhead (too risky)\\
-\textbf{Checkpoint every 27 min}: \textbf{7\% overhead} (optimal)}
-\end{mlsyscard}
-
+\begin{frame}{A fleet keeps one idle spare and runs each step once}
+  \centering
+  {\normalsize Run every step twice: \textbf{+100\%} compute. Three times with a vote: \textbf{+200\%}.}\\[0.25cm]
+  \mlsyssteps[width=0.95\textwidth,height=3.9cm,keepaspectratio]{hotspare_step}{3}\\[0.15cm]
+  {\small\uncover<3->{The cost is one idle device per pool, plus screening, statistical checks, and selective replay.}}
+  \mlsyscredit{Fault Tolerance, \S7.5.2 and figure 10; hot-spare protocol: Dean 2024. Dual and triple modular redundancy: Sheaffer et al. 2007; Arifeen et al. 2020.}
+  \note{[2.5 min] [CORE] Full replication checks the arithmetic directly. Dual modular redundancy runs every computation twice and compares; triple modular redundancy runs it three times and takes a vote. That costs 100 and 200 percent extra hardware, a fair price in a car's braking computer, but on 10,000 GPUs it doubles or triples the compute of every step. Fleets spend redundancy selectively. Step 1: monitors flag an anomalous gradient, and replay on another device implicates G2. Step 2: the scheduler drains G2 to diagnostics and promotes the standby S into the active group. Step 3: a healthy unit refills the spare slot as S prime. The fleet pays for one idle device per pool. ENGAGE: what can selective checking miss? (Expected: corruption on steps nobody replays, and faults shared by both copies.) WARN: a checksum taken after the wrong arithmetic agrees with the wrong bytes; only recomputation, an invariant, or model-level evidence exposes it. Land the segment. A live process can still compute wrong values, so detection needs progress and value evidence beside heartbeats.}
 \end{frame}
 
 % =============================================================================
-\section{Checkpointing}
+% SECTION: CHECKPOINTS
 % =============================================================================
+\mlsysnote{[0.5 min] [CORE] Failures will come every few hours. Saved state bounds what each one costs. Now decide how often to save and what counts as saved.}
+\mlsysdivider{How often should a job save itself, and what counts as saved?}{Fault Tolerance, \S7.8}
+\section{Checkpoints}
 
-\begin{frame}{Checkpoint-Recovery Timeline}
-\note{
-[2 min]
-% -- LINK: What prior concept connects to this slide
-Young-Daly told us WHEN to checkpoint. This Gantt chart shows WHAT
-happens during the checkpoint-failure-recovery cycle.
-
-% -- NARRATE: What to SAY while showing this slide
-Walk through the timeline left-to-right: ``Productive training runs
-until the checkpoint write (blue pause). Training resumes. Then failure
-strikes (red X). All work since the last checkpoint is lost --- on
-average tau/2. Recovery loads the checkpoint and warms up. Total
-failure cost = lost work + recovery latency.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``What determines recovery latency --- the checkpoint size or the
-storage bandwidth?'' Expected: both --- it is checkpoint size divided
-by read bandwidth, plus warmup time. Restart can take 3--5x the
-checkpoint write time.
-
-% -- WARN: What students will get wrong on THIS topic
-Students forget that restart overhead includes warmup (re-priming
-data loaders, re-building communication groups), not just loading
-weights. Total cost is higher than just ``read the file.''
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] The timeline is referenced throughout checkpointing discussion.
-IF SHORT: Focus on the ``lost work = tau/2'' insight and skip warmup details.
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.92\textwidth,height=4.5cm,keepaspectratio]{checkpoint-timeline.pdf}
-
-\vspace{0.1cm}
-\mlsysalert{Total failure cost:}{Lost work ($\approx\tau/2$) + Recovery latency (load + warmup). Restart can take 3--5$\times$ checkpoint time.}
-
+\begin{frame}{Saving often wastes write time; saving rarely wastes rework}
+  \centering
+  \begin{columns}[c]
+    \begin{column}{0.74\textwidth}
+      \centering
+      {\normalsize $W(\tau) \approx \dfrac{\delta}{\tau} + \dfrac{\tau}{2M}$}\\[0.05cm]
+      \mlsyssteps[width=\textwidth,height=5.0cm,keepaspectratio]{young_daly_step}{2}
+    \end{column}
+    \begin{column}{0.24\textwidth}
+      \small $\tau$: interval\\$\delta$: write time\\$M$: system MTBF\\[0.3cm]
+      \safeimg[width=\textwidth,height=1.4cm,keepaspectratio]{samsung-980pro-nvme.jpg}\\[0.05cm]
+      {\footnotesize\textcolor{midgray}{Local NVMe staging sets part of $\delta$.}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Fault Tolerance, equation 8 and figure 11. 175B job: 2.45 TB at 100 GB/s, $\delta = 24.5$ s; full-system $M = 3.87$ h. Photo: D-Kuru, CC BY-SA 4.0, Wikimedia Commons.}
+  \note{[3 min] [CORE] The waste fraction W has two terms. Step 1: every save pauses training for the write time delta, once per interval tau, so the write share is delta over tau. For the running case, the 175B model's resumable checkpoint is 14 bytes per parameter: 2 bytes of BF16 weights, 4 of FP32 master weights, and 8 of Adam moments, 2.45 TB; at the cluster's 100 GB/s of sustained write bandwidth it takes 24.5 seconds. Optimizer state is 86 percent of those bytes. LINK: Lecture 4 owns the write path that sets delta, from local NVMe staging to the checkpoint storm. Step 2: a failure discards the work since the last save; with failures spread uniformly, that is half an interval on average, once per MTBF, so the rework share is tau over 2M. M is the full-system 3.87 hours. ENGAGE: where do the two curves trade off, and is the minimum sharp? Hold the answer for the next slide. WARN: recovery time after a failure (detection, restart) is a separate per-failure term; it does not move this optimum.}
 \end{frame}
 
-\begin{frame}{Checkpoint State: What Gets Saved?}
-\note{
-[3 min]
-% -- LINK: What prior concept connects to this slide
-The timeline showed checkpoint writes as brief pauses. This slide
-reveals why those writes are expensive: the state is massive.
-
-% -- NARRATE: What to SAY while showing this slide
-Walk through the left column: ``Model weights in FP16 are 2 bytes per
-parameter. Adam optimizer stores m and v at 4 bytes each. Total: 12
-bytes per parameter. For GPT-3 at 175B params, that is 2.1 terabytes.''
-Then the right column: ``When 10K GPUs write simultaneously, you get a
-checkpoint storm --- network and file system saturated.'' Walk through
-the three mitigations: async, tiered, sharded.
-
-% -- WARN: What students will get wrong on THIS topic
-Students compute checkpoint size as just the model weights (2 bytes/param).
-The optimizer state (m + v) doubles the naive expectation to 12
-bytes/param total.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] The 2.1 TB number motivates async checkpointing.
-IF SHORT: Focus on the GPT-3 size and the checkpoint storm concept.
-Skip the three mitigation strategies --- they appear in the backup slide.
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.50\textwidth}
-    \textbf{Full training state:}
-    \begin{itemize}\setlength\itemsep{0pt}
-      \item Model weights (FP16): 2 bytes/param
-      \item Adam $m$ (first moment): 4 bytes/param
-      \item Adam $v$ (second moment): 4 bytes/param
-      \item Data loader position, LR schedule
-      \item Random seeds for reproducibility
-    \end{itemize}
-
-    \vspace{0.1cm}
-    \textbf{Total}: 12 bytes/param
-
-    \vspace{0.1cm}
-    \begin{mlsyscard}{errorstroke}
-    {\footnotesize \textbf{GPT-3} (175B params):\\
-    Full checkpoint $\approx$ \textbf{2.1 TB}}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.46\textwidth}
-    \textbf{The Checkpoint Storm:}
-
-    \vspace{0.1cm}
-    When 10,000 GPUs write simultaneously:
-    \begin{itemize}\setlength\itemsep{0pt}
-      \item Network fabric saturated
-      \item Parallel file system overwhelmed
-      \item I/O contention cascades
-    \end{itemize}
-
-    \vspace{0.1cm}
-    \textbf{Mitigation strategies:}
-    \begin{itemize}\setlength\itemsep{0pt}
-      \item \textcolor{computestroke}{Async checkpointing}: write in background
-      \item \textcolor{datastroke}{Tiered staging}: GPU $\to$ CPU $\to$ NVMe $\to$ PFS
-      \item \textcolor{routingstroke}{Sharded writes}: each rank saves its shard
-    \end{itemize}
-  \end{column}
-\end{columns}
-
+\begin{frame}{Which interval wastes the least time?}
+  \mlsysactivity{Your turn}{2.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.36\textwidth}
+      \begin{mlsyscard}{mlsysaccent}
+        \footnotesize
+        $\delta = 24.5$ s\quad $M = 13{,}932$ s\\[0.1cm]
+        Set $dW/d\tau = 0$; price hourly saves.\\[0.1cm]
+        \uncover<2->{$\tau^* = \sqrt{2\delta M} = 826$ s\\$\approx$ \textbf{13.8 min}, waste \textbf{5.9\%}\\[0.15cm]}
+        \uncover<3->{Hourly: $0.7\% + 12.9\% = $ \textbf{13.6\%}\\[0.15cm]
+        Halve $M$: $\tau^*$ shrinks $\sqrt{2}\times$; waste grows as $\sqrt{N}$.}
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.61\textwidth}
+      \centering
+      \uncover<2->{\safeimg[width=\textwidth,height=5.2cm,keepaspectratio]{young_daly_step3.pdf}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Fault Tolerance, equation 7 (Young 1974; Daly 2006) and Napkin Math 7.2. Full-system MTBF 3.87 h on 10,000 GPUs.}
+  \note{[2.5 min] [CORE] ENGAGE: pairs differentiate W and solve, then price hourly saves, two minutes. Step 2: minus delta over tau squared plus 1 over 2M equals zero gives tau star equals the square root of 2 delta M, the Young-Daly interval. Square root of 2 times 24.5 times 13,932 is 826 seconds, 13.8 minutes. At the optimum both terms are equal, 2.97 percent each, 5.9 percent in all. The curve is shallow, so being off by a third costs little. Step 3: saving every hour costs 24.5 over 3,600, 0.7 percent, plus 3,600 over 27,864, 12.9 percent, 13.6 percent, more than twice the optimum. Because the optimum depends on a square root, halving MTBF tightens the interval by only 1.4 times, but the optimized waste, the square root of 2 delta over M, grows as the square root of N. Doubling the cluster raises it 1.4 times. WARN: the formula assumes exponential failures, a fixed write time, and a long run; it is a first-order guide. A recovery point objective can still demand a shorter interval.}
 \end{frame}
 
-% --- ACTIVE LEARNING 2: Exercise ---
-\begin{frame}{Your Turn: Checkpoint Interval}
-\note{
-[2 min]
-% -- LINK: What prior concept connects to this slide
-The Llama-3 worked example used 16K GPUs. This exercise applies the
-same formula to a smaller 1000-GPU cluster with different parameters.
-
-% -- NARRATE: What to SAY while showing this slide
-``Your turn. 1000-GPU cluster, 5-minute checkpoint writes, 4-hour
-MTBF. Apply Young-Daly.'' Give 90 seconds. Then reveal the solution:
-sqrt(2 * 5 * 240) = sqrt(2400) = 49 minutes.
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-After revealing 49 min, ask: ``How does this compare to the common
-guess of `every hour' or `every 15 min'?'' Expected: ``every hour''
-is close but suboptimal (13\% overhead), ``every 15 min'' wastes 2x
-more than optimal (36\% vs 8\%).
-
-% -- WARN: What students will get wrong on THIS topic
-Students round to convenient numbers (``every 30 min'' or ``every hour'').
-The formula gives precise answers that differ meaningfully from intuition.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] Quantitative exercise that tests the Young-Daly formula.
-IF SHORT: Give only 45 seconds, then reveal immediately.
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    {\normalsize\bfseries Calculate the Optimal Interval}
-
-    \vspace{0.2cm}
-    Your 1,000-GPU cluster has:
-    \begin{itemize}
-      \item $T_{\text{write}}$ = 5 min (checkpoint save)
-      \item $\MTBF$ = 4 hours (240 min)
-    \end{itemize}
-
-    \vspace{0.15cm}
-    \textbf{Apply} the Young-Daly formula to find $\tau_{\text{opt}}$.
-
-    \vspace{0.1cm}
-    {\footnotesize Compare your answer to ``every hour'' and ``every 15 min.''}
-
-    \vspace{0.1cm}
-    {\footnotesize\textcolor{midgray}{(90 seconds --- then compare with a neighbor)}}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \pause
-    \begin{mlsyscard}{datastroke}
-    \textbf{Solution:}\\[0.1cm]
-    {\footnotesize
-    $\tau = \sqrt{2 \times 5 \times 240}$\\
-    $\tau = \sqrt{2400} \approx$ \textbf{49 min}\\[0.1cm]
-    Every 60 min: $\approx$13\% overhead\\
-    Every 15 min: $\approx$36\% overhead\\
-    Every 49 min: \textcolor{datastroke}{\textbf{8\% overhead}}
-    }
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
+\begin{frame}{A checkpoint exists only when its manifest is published last}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=4.1cm,keepaspectratio]{cut_step}{2}\\[0.15cm]
+  \footnotesize
+  \uncover<3->{%
+  \begin{tabular}{@{}lP{10.2cm}@{}}
+    \textbf{Prepare} & Each rank writes its shard and digest, then confirms. \\
+    \textbf{Commit} & The coordinator then publishes the manifest naming every shard. \\
+  \end{tabular}}
+  \mlsyscredit{Fault Tolerance, \S7.8.5 (coordinated checkpointing, six-step protocol, two-phase commit: Gray 1978; domino effect: Elnozahy et al. 2002).}
+  \note{[2 min] [CORE] Step 1: if workers save independently at different steps, a failure rolls W1 back to its last save. W2 has already used values W1 sent after that save, so W2 must roll back too, then W3. This is the domino effect. Step 2: coordinated checkpointing saves every shard at the same step boundary, a consistent cut, meaning a set of states that could all have existed at one moment. Synchronous training gives natural step boundaries for this. Step 3: the commit is a two-phase commit. In the prepare phase each rank writes an immutable shard and confirms. In the commit phase the coordinator publishes a manifest naming the step and every shard with its digest. Restore accepts only a published manifest; shards without one are garbage. LINK: with sharded data parallelism (ZeRO, FSDP; Lecture 6) no rank holds the whole state, so every shard must be present and consistent. WARN: a directory full of plausible shard files is not a checkpoint. ENGAGE: what if the coordinator dies after prepare? (Expected: nothing is published, so restore uses the previous generation.) Land the segment. Save at the square-root interval, and count only a published, consistent cut as saved.}
 \end{frame}
 
-% --- ACTIVE LEARNING: Young-Daly at Scale ---
-\begin{frame}{Your Turn: Young-Daly at 10K GPUs}
-\note{
-[2 min]
-% -- LINK: What prior concept connects to this slide
-The previous exercise used 1,000 GPUs. This exercise pushes to 10K GPUs where the math becomes more dramatic.
-
-% -- NARRATE: What to SAY while showing this slide
-``A 10K-GPU cluster with per-GPU MTBF of 50,000 hours. System MTBF is 50,000/10,000 = 5 hours = 300 minutes. Checkpoint takes 5 minutes. Young-Daly: sqrt(2 * 5 * 300) = sqrt(3000) = 55 minutes. Wasted fraction: T\_w/(2 * tau) + tau/(2 * MTBF) = 5/110 + 55/600 = 4.5\% + 9.2\% = 13.7\%.'' Then: ``Nearly 14\% of your \$10M/month cluster is wasted on fault tolerance overhead. That is \$1.4M/month.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-After revealing 13.7\%, ask: ``How would you reduce this?'' Expected: reduce T\_w (async checkpointing: 5 min to 100 ms pause) or increase system MTBF (redundancy, better cooling).
-
-% -- WARN: What students will get wrong on THIS topic
-Students will forget to convert system MTBF from hours to minutes. Also, they often compute overhead as just T\_w/tau and miss the rework term tau/(2*MTBF).
-
-% -- FLEX: [CORE] This exercise quantifies the real cost of fault tolerance at scale.
-IF SHORT: Show the solution immediately with emphasis on the 13.7\% and \$1.4M numbers.
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.55\textwidth}
-    {\normalsize\bfseries Young-Daly at Datacenter Scale}
-
-    \vspace{0.15cm}
-    \textbf{Setup:} 10,000 GPUs. Per-GPU MTBF: 50,000 h.\\
-    Checkpoint write: 5 minutes.
-
-    \vspace{0.1cm}
-    \begin{enumerate}
-      \item System MTBF? \textcolor{midgray}{(MTBF/N)}
-      \item Optimal checkpoint interval $\tau$?
-      \item What fraction of time is wasted?
-    \end{enumerate}
-
-    {\footnotesize\textcolor{midgray}{(90 seconds --- then I will cold-call)}}
-  \end{column}
-  \begin{column}{0.42\textwidth}
-    \pause
-    \begin{mlsyscard}{datastroke}
-    \textbf{Solution:}\\[0.1cm]
-    {\footnotesize
-    MTBF$_{\text{sys}}$ = 50K/10K = \textbf{5 h} = 300 min\\
-    $\tau = \sqrt{2 \times 5 \times 300} = $ \textbf{55 min}\\[0.05cm]
-    Waste = $\frac{5}{110} + \frac{55}{600} = $ \textbf{13.7\%}\\[0.1cm]
-    At \$10M/month:\\
-    \textcolor{errorstroke}{\textbf{\$1.4M/month in FT overhead}}
-    }
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
+\begin{frame}{PyTorch writes every shard before the manifest}
+  \begin{columns}[c]
+    \begin{column}{0.60\textwidth}
+      \begin{mlsyscard}{VioletLine}
+        \logline{def finish(self, metadata, results):}
+        \logline{\ \ tmp = ".metadata.tmp"}
+        \logline{\ \ with create\_stream(tmp, "wb") as f:}
+        \logline{\ \ \ \ pickle.dump(metadata, f)}
+        \logline{\ \ \ \ os.fsync(f.fileno())}
+        \logline{\ \ rename(tmp, ".metadata")}
+      \end{mlsyscard}
+      {\footnotesize\textcolor{midgray}{DCP FileSystemWriter.finish (abridged).}}
+    \end{column}
+    \begin{column}{0.39\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.3cm,keepaspectratio]{dcp_trace.pdf}\\[0.05cm]
+      {\footnotesize\textcolor{midgray}{Shards 12.6 MB each; manifest 2,280 B.}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Code: PyTorch 2.11, torch/distributed/checkpoint/filesystem.py, abridged. Trace: dcp\_trace.py in this deck's images folder, 4 CPU ranks, gloo; file times relative to the first shard.}
+  \note{[2.5 min] [OPTIONAL] A real framework doing the protocol. Left: the coordinator's finish step in PyTorch Distributed Checkpoint (DCP), abridged. It writes the metadata to a temporary file, forces it to disk with fsync, and only then renames it to .metadata. On a POSIX file system the rename is atomic, so a reader sees either no manifest or a complete one. Right: a run of four CPU ranks saving one sharded state (a 4,096 by 1,024 weight and two Adam moment tensors). Each rank wrote its own 12.6 MB shard file within 3.3 ms; the 2,280-byte .metadata, which lists every chunk's file, offset, and length, landed at 24.4 ms, after all of them. ENGAGE: kill the job at 10 ms. What does restore find? (Expected: four shard files and no manifest, so this generation does not exist.) WARN: this laptop trace shows the ordering only; a real 2.45 TB save is bounded by storage bandwidth.}
 \end{frame}
 
 % =============================================================================
-\section{Elastic Training}
+% SECTION: RECOVERY
 % =============================================================================
+\mlsysnote{[0.5 min] [CORE] Saved state bounds the rework. Now count the time between a failure and useful work again, and decide what to do with a node that is slow rather than dead.}
+\mlsysdivider{What does one failure cost, and who may write afterward?}{Fault Tolerance, \S7.9 and \S7.10}
+\section{Recovery}
 
-\begin{frame}{Elastic Training: Dynamic Recovery}
-\note{
-[2 min]
-% -- LINK: What prior concept connects to this slide
-Checkpointing saves state but still requires a full restart. Elastic
-training offers a different approach: adapt to failures without stopping.
-
-% -- NARRATE: What to SAY while showing this slide
-Point to the diagram: ``Static training aborts on any failure. Elastic
-training converts a hard failure into a throughput degradation. The job
-continues with N-1 workers instead of dying. This requires batch size
-adjustment, LR scaling, and state resharding --- all happening
-automatically.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``Why not just wait for a replacement GPU instead of resharding?''
-Expected: replacement takes minutes to hours (provisioning, scheduling),
-while resharding takes seconds. Throughput loss is recoverable;
-downtime is not.
-
-% -- WARN: What students will get wrong on THIS topic
-Students think elastic training eliminates checkpointing. It does not
---- you still need checkpoints for catastrophic failures (e.g., entire
-rack loss). Elastic handles gradual degradation; checkpoints handle
-total loss.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] Key concept that complements checkpointing.
-IF SHORT: Show only the diagram and the one-sentence insight.
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{elastic-training.pdf}
-
-\vspace{0.1cm}
-\mlsysinsight{Key:}{Elastic training converts fatal failures into recoverable throughput drops.}
-
+\begin{frame}{One failure costs 6.4 minutes of recovery plus rework}
+  \centering
+  {\normalsize Recovery-time budget:\ $T_{\text{recovery}} = T_{\text{detect}} + T_{\text{restart}} + T_{\text{load}} + T_{\text{warmup}}$}\\[0.1cm]
+  \mlsyssteps[width=0.95\textwidth,height=3.1cm,keepaspectratio]{budget_step}{2}\\[0.1cm]
+  \footnotesize
+  \uncover<3->{%
+  \begin{tabular}{@{}lrrr@{}}
+    \toprule
+    GPU-only basis & Failures per day & Recovery per day & Share \\
+    \midrule
+    1,024 GPUs & 0.49 & 3 min & 0.2\% \\
+    10,000 GPUs & 4.8 & 31 min & 2.1\% \\
+    \bottomrule
+  \end{tabular}}
+  \mlsyscredit{Fault Tolerance, equation 10 and Napkin Math 7.3 (175B, 1,024 GPUs, 2.45 TB read at 100 GB/s). Daily rows use the GPU-only MTBF of table 1.}
+  \note{[2.5 min] [CORE] Step 1: the chapter's budget for one cold restart of the 175B job on 1,024 GPUs: 60 seconds to detect, with a conservative heartbeat timeout and retries; 3 minutes to restart, covering scheduler queue, container launch, imports, and NCCL setup; 24.5 seconds to load 2.45 TB from shared storage; 2 minutes to warm up kernels and data pipelines. Total 6.4 minutes. Step 2: on top of that, the work since the last save is replayed, half an interval on average, already counted in the Young-Daly waste. Step 3: on the GPU-only basis the chapter compares sizes: 1,024 GPUs lose 3 minutes a day; 10,000 GPUs lose 31 minutes, about 5,127 GPU-hours a day. ENGAGE: on the full-system basis, 6.2 failures a day, a hot-spare node costs \$384 a day (8 GPUs at \$2 per hour); how much must it cut each recovery to pay off? (Expected: about 11 seconds, since each minute removed from every recovery is worth about \$2,067 a day.) The same spare beside an 8-GPU job is waste. LINK: Lecture 9 measures this loss as runtime goodput. Gloss: RPO bounds lost progress, RTO bounds recovery delay.}
 \end{frame}
 
-\begin{frame}{Elastic Training: Mechanisms}
-\note{
-[2 min]
-% -- LINK: What prior concept connects to this slide
-The previous slide showed the concept. Now: the four mechanisms that
-make elasticity work in practice.
+\begin{frame}{The launcher restarts the whole group for one crash}
+  \begin{mlsyscard}{midgray}
+    \logline{\$ torchrun -{}-nproc-per-node=4 -{}-max-restarts=2 crash\_trace.py}
+    \logline{42.876 Sending process 41997 closing signal SIGTERM}
+    \logline{\textcolor{midgray}{(two more SIGTERM lines: pids 41999, 42000)}}
+    \logline{42.885 \textcolor{RedLine}{failed (exitcode: 1) local\_rank: 1 (pid: 41998)}}
+    \logline{42.886 \textcolor{VioletLine}{Worker group FAILED. 2/2 attempts left;}}
+    \logline{\hspace*{3.2em}\textcolor{VioletLine}{will restart worker group}}
+    \logline{42.891 Rendezvous complete for workers. restart\_count=1}
+    \logline{\textcolor{GreenLine}{attempt 1: all 4 ranks passed the barrier}}
+  \end{mlsyscard}
+  \mlsyscredit{PyTorch 2.11 torchrun (TorchElastic) log, abridged; timestamps in seconds after 14:55. Run on 4 CPU ranks with crash\_trace.py in this deck's images folder.}
+  \note{[1.5 min] [OPTIONAL] A real recovery path in a real launcher. The script makes rank 1 exit hard on the first attempt. Read the log top down: the elastic agent sees rank 1's process exit, sends SIGTERM to the three healthy ranks, records the failure, and restarts the whole worker group through a new rendezvous, the protocol by which workers agree on membership and ranks. On the second attempt all four pass the barrier. This is the cold restart of section 7.9.2. Every survivor exits and reloads, which is simple and safe and pays the full restart cost. ENGAGE: why not keep the three healthy ranks running? (Expected: each still holds a communicator that includes the dead rank; keeping them needs warm-restart support that most frameworks lack.) WARN: a laptop restart takes milliseconds; the chapter's 3-minute restart term is the scheduler, containers, and communicator setup at fleet scale.}
+\end{frame}
 
-% -- NARRATE: What to SAY while showing this slide
-Walk through the four mechanisms: ``First, adjust batch size --- reduce
-global batch or increase per-worker load. Second, scale the learning
-rate using the square-root rule (Goyal 2017). Third, use gradient
-accumulation to maintain effective batch size if workers halve. Fourth,
-reshard ZeRO/FSDP state across remaining workers.'' Then point to the
-spot instance card: ``Elastic training transforms cloud preemption
-from a fatal error to a recoverable resize --- 60--90\% cost savings.''
+\begin{frame}{Which recovery promise breaks?}
+  \mlsysactivity{Vote}{2 min}
+  \centering
+  {\normalsize Checkpoint every 30 min, flushed asynchronously. Reload alone takes 12 min.\\The team promises at most 15 min of lost progress (RPO)\\and service back within 10 min (RTO).}\\[0.4cm]
+  {\large\choice{A}{both hold}\qquad\choice{B}{RPO holds, RTO fails}}\\[0.2cm]
+  {\large\choice{C}{RTO holds, RPO fails}\qquad\choice{D}{both fail}}\\[0.4cm]
+  {\normalsize\uncover<2->{\textbf{D.} A 30-min interval can lose up to 30 min; 12 min of reload already exceeds 10.}}
+  \mlsyscredit{Fault Tolerance, \S7.8 (recovery objectives) and its self-check.}
+  \note{[2 min] [OPTIONAL] ENGAGE: vote, then compare with a neighbor. The recovery point objective (RPO) bounds how much completed work a failure may erase; the recovery time objective (RTO) bounds the delay until useful work resumes. Step 2: D. With saves every 30 minutes, a failure just before the next save loses nearly 30 minutes, so an RPO of 15 needs a more frequent durable log or a replica. Asynchronous flushing does not help; it can leave the last durable generation older still. The RTO fails before counting detection, restart, and warmup, because reload alone takes 12 minutes. WARN: students pick B because asynchronous saves feel fast; the write's speed says nothing about the data's age. LINK: Young-Daly minimizes expected waste; RPO and RTO are contracts the chosen interval must also satisfy.}
+\end{frame}
 
-% -- WARN: What students will get wrong on THIS topic
-Students assume all parallelism types are elastic. Tensor parallelism
-is NOT elastic --- it requires a fixed GPU count per group. Only data
-parallelism can resize dynamically.
+\begin{frame}{An epoch fence stops a replaced worker from writing}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=5.2cm,keepaspectratio]{fencing_step}{3}\\[0.1cm]
+  {\small\uncover<3->{A lease decides ownership. The fence at the store enforces it.}}
+  \mlsyscredit{Fault Tolerance, \S7.9.2 and figure 15; fencing tokens: Kleppmann 2016.}
+  \note{[2.5 min] [CORE] Swim lanes over time. Step 1: in epoch 7 the old worker writes checkpoint shards carrying token 7, and the store accepts any token of at least 7. Then the old worker pauses, perhaps in a long garbage-collection stall or a network partition. Step 2: its lease expires. The coordinator starts epoch 8 and, before the replacement writes anything, advances the store's fence to accept only 8 or higher. An epoch here is a membership counter, unrelated to a training epoch over the data. The replacement writes with token 8 and is accepted. Step 3: the old worker wakes up, unaware it lost ownership, and tries to write with token 7. The store rejects it. ENGAGE: why is the lease alone not enough? (Expected: expiry changes only the coordinator's view; the old worker can still reach storage.) WARN: without the fence, the stale worker could overwrite a shard of the recovered checkpoint or publish a manifest for a dead membership. LINK: retries follow the same discipline; each retried operation must be idempotent and share one deadline and retry budget.}
+\end{frame}
 
-% -- FLEX: [OPTIONAL] or contingency
-[OPTIONAL] The mechanism details are secondary to the concept.
-IF SHORT: Focus on batch size and LR adjustment; skip the framework table.
-}
+\begin{frame}{One of 1,024 GPUs slows to half. Throughput?}
+  \mlsysactivity{Predict}{2.5 min}
+  \centering
+  \mlsyssteps[width=0.92\textwidth,height=4.0cm,keepaspectratio]{straggler_step}{2}\\[0.1cm]
+  {\normalsize\only<1|handout:0>{\choice{A}{99.9\%}\quad\choice{B}{90\%}\quad\choice{C}{50\%}\quad\choice{D}{0\%}}%
+  \uncover<2->{\textbf{C.} 1 step per 2 s: \textbf{50\%}, about \$1,024 per hour idle at \$2 per GPU-hour.}}\\[0.15cm]
+  {\small\uncover<3->{Replace when $n\,(T_{\text{slow}} - T_{\text{healthy}}) > T_{\text{restart}} + T_{\text{replay}}$ for the $n$ steps the slowdown lasts.}}
+  \mlsyscredit{Fault Tolerance, Napkin Math 7.4 (1,024 GPUs, 1 s step, compute-bound) and \S7.9.5.}
+  \note{[2.5 min] [CORE] Step 1: a 1,024-GPU job with a 1-second step. One GPU thermally throttles to half speed. ENGAGE: vote; most say A, since one GPU is 0.1 percent of the hardware. Step 2: C. AllReduce cannot finish until every rank contributes, so every step now takes 2 seconds and the other 1,023 GPUs wait (hatched), so the cluster runs at half throughput, about \$1,024 an hour of idle compute at \$2 per GPU-hour. LINK: Lecture 6 owns why the slowest worker sets the step; this lecture owns noticing it. This is a gray failure. The node is alive, answers heartbeats, and never trips a timeout. Detection needs progress metrics, such as per-rank step time, beside liveness. Step 3: the response is mitigation. Rebalance work, use backup workers, or replace the node when the time saved over the slowdown's remaining n steps exceeds restart plus replay; a checkpoint restart is the wrong tool. WARN: an aggressive timeout that treats every slow rank as dead restarts the job for stalls that would have cleared.}
+\end{frame}
 
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.48\textwidth}
-    \textbf{Adapting to $N-1$ workers:}
-
-    \vspace{0.1cm}
-    \textbf{1. Batch size adjustment}\\
-    {\scriptsize Reduce global batch or increase per-worker load}
-
-    \vspace{0.1cm}
-    \textbf{2. Learning rate scaling}
-    $$\eta_{new} = \eta_{base} \times \sqrt{\frac{N_{new}}{N_{base}}}$$
-    {\scriptsize Square-root rule for conservative adjustment}
-
-    \vspace{0.1cm}
-    \textbf{3. Gradient accumulation}\\
-    {\scriptsize Double micro-batches if workers halved}
-
-    \vspace{0.1cm}
-    \textbf{4. State resharding}\\
-    {\scriptsize Redistribute ZeRO/FSDP shards}
-  \end{column}
-  \begin{column}{0.48\textwidth}
-    \textbf{Spot instance arbitrage:}
-
-    \vspace{0.1cm}
-    \begin{mlsyscard}{routingstroke}
-    {\footnotesize Cloud spot instances: 60--90\% discount\\
-    \textbf{Caveat}: Can be reclaimed anytime\\[0.1cm]
-    Elastic training transforms preemption from fatal error to recoverable resize}
-    \end{mlsyscard}
-
-    \vspace{0.1cm}
-    {\footnotesize
-    \renewcommand{\arraystretch}{1.1}
-    \begin{tabular}{@{}lll@{}}
-      \toprule
-      \textbf{Framework} & \textbf{Elastic} & \textbf{Reshard} \\
-      \midrule
-      TorchElastic & Yes & Manual \\
-      DeepSpeed    & Yes & Auto \\
-      Ray Train    & Yes & Auto \\
-      Horovod      & Yes & Manual \\
-      \bottomrule
-    \end{tabular}
-    }
-  \end{column}
-\end{columns}
-
+\begin{frame}{Elastic recovery continues on fewer workers if invariants hold}
+  \centering
+  \mlsyssteps[width=0.95\textwidth,height=3.4cm,keepaspectratio]{elastic_step}{3}\\[0.05cm]
+  {\ttfamily\footnotesize torchrun -{}-nnodes=127:128 -{}-nproc-per-node=8 train.py}\\[0.15cm]
+  \small
+  \uncover<4->{%
+  \begin{tabular}{@{}lll@{}}
+    \textbf{Batch:} same effective batch, & \textbf{Data:} every sample & \textbf{State:} every lost shard \\
+    or a validated learning rate & used exactly once & rebuilt before resuming \\
+  \end{tabular}}
+  \mlsyscredit{Fault Tolerance, \S7.10, definition 7.2, figure 16; 75\% assumes an unchanged per-worker rate. Command: torchrun elastic launch syntax (PyTorch documentation), min:max nodes.}
+  \note{[2.5 min] [CORE] Step 1: a four-node AllReduce ring at full throughput. Step 2: node N3 fails and no spare exists. A fixed-size job would wait for replacement hardware. An elastic job pauses, the survivors meet at a rendezvous, and they reload the last consistent checkpoint. Step 3: the ring re-forms over three nodes, each taking one more data shard, and training resumes at 75 percent throughput if each worker's rate is unchanged. For the reference job, losing one 8-GPU node of 1,024 keeps 99.2 percent of the devices. Step 4: three invariants make the resize valid. The effective batch stays the same through more gradient accumulation, or the changed batch gets a validated learning-rate policy (LINK: Lecture 6's critical batch size). The data loader covers every sample exactly once. Every shard the lost node held is rebuilt from a replica or checkpoint. WARN: elastic training does not replace checkpointing; resizing itself reloads saved state. Tensor- and pipeline-parallel jobs also need a feasible new partition. LINK: Lecture 8 treats preemption, a failure the scheduler chooses. Land the segment. Recovery costs a known budget per failure, and fences and invariants keep it correct.}
 \end{frame}
 
 % =============================================================================
-\section{Serving Resilience}
+% SECTION: SERVING
 % =============================================================================
+\mlsysnote{[0.5 min] [CORE] Training can spend minutes restoring state. A serving request has milliseconds. The budget inverts.}
+\mlsysdivider{What changes when a user is waiting?}{Fault Tolerance, \S7.11 to \S7.13}
+\section{Serving}
 
-\begin{frame}{Training vs Serving Fault Tolerance}
-\note{
-[2 min]
-% -- LINK: What prior concept connects to this slide
-Everything so far focused on training fault tolerance. This slide
-introduces the serving side --- same principles, radically different
-latency budgets.
-
-% -- NARRATE: What to SAY while showing this slide
-Point to the two sides of the diagram: ``Training tolerates minutes of
-recovery. Serving demands milliseconds. Training state is terabytes
-(full model + optimizer). Serving state is gigabytes (KV cache). Same
-principle --- redundancy + detection + recovery --- but the time
-budget differs by 1000x.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``Which is harder to make fault-tolerant --- training or serving?''
-No single right answer. Training has bigger state; serving has tighter
-deadlines. Cold-call 2 students for opposing views.
-
-% -- WARN: What students will get wrong on THIS topic
-Students assume training fault tolerance is harder because the state is
-larger. In practice, serving is harder because the latency requirement
-is 1000x tighter and users experience failures in real time.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] The training-vs-serving comparison structures the rest of the chapter.
-IF SHORT: Show only the diagram and the one-line summary below it.
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{training-vs-serving-ft.pdf}
-
-\vspace{0.1cm}
-{\small Same principle: redundancy + detection + recovery. Different latency budget: \textcolor{computestroke}{\textbf{minutes}} vs \textcolor{routingstroke}{\textbf{milliseconds}}.}
-
+\begin{frame}{Replicas buy availability, and state decides the failover}
+  \centering
+  {\normalsize $A = 1 - (1 - a)^{r}$ \quad {\small $a$: one replica's availability,\ $r$: replicas, independent}}\\[0.1cm]
+  \safeimg[width=0.95\textwidth,height=4.5cm,keepaspectratio]{serving_state.pdf}\\[0.1cm]
+  {\small 43 GB: the KV cache, the attention keys and values kept for a conversation.}
+  \mlsyscredit{Fault Tolerance, equation 12, \S7.11, footnote 19 (Llama-family 70B at 128K context, BF16) and figure of KV live state.}
+  \note{[2 min] [CORE] Serving uses parallel composition, the opposite of training's series composition. The service is up if any replica is up. Left: one replica at 99 percent availability is down 3.65 days a year; two independent replicas, 52.6 minutes; three, 31.5 seconds. WARN: independence again. Three replicas behind one top-of-rack switch or running one buggy version fail together. Right: what failover must rebuild. A stateless image classifier loses nothing; the request is retried on another replica. A language-model conversation keeps a KV cache, the attention keys and values for every earlier token, about 43 GB for a Llama-family 70B model at a 128K-token context in BF16. It is derived state, so a replacement can recompute it from the retained transcript, but that can take seconds to minutes. ENGAGE: which state must be stored durably, and which may be rebuilt? (Expected: keep the authoritative history; rebuild or replicate the cache by latency budget.) LINK: Lecture 10 owns the KV cache as a memory budget.}
 \end{frame}
 
-\begin{frame}{Stateless vs Stateful Serving}
-\note{
-[2 min]
-% -- LINK: What prior concept connects to this slide
-The training-vs-serving comparison showed different latency budgets.
-This slide digs into WHY serving fault tolerance is hard: it depends
-on whether the service holds state.
+\begin{frame}{Probe settings decide how long a dead replica gets traffic}
+  \begin{columns}[c]
+    \begin{column}{0.46\textwidth}
+      \begin{mlsyscard}{midgray}
+        \logline{readinessProbe:}
+        \logline{\ \ httpGet:}
+        \logline{\ \ \ \ path: /v2/health/ready}
+        \logline{\ \ \ \ port: 8000}
+        \logline{\ \ \textcolor{RedLine}{periodSeconds: 5}}
+        \logline{\ \ \textcolor{RedLine}{timeoutSeconds: 2}}
+        \logline{\ \ \textcolor{RedLine}{failureThreshold: 3}}
+        \logline{\ \ successThreshold: 2}
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.50\textwidth}
+      \centering
+      {\normalsize A crashed replica leaves rotation after}\\[0.1cm]
+      {\fontsize{32}{36}\selectfont\bfseries\textcolor{RedLine}{12--17 s}}\\[0.25cm]
+      {\small Shorter settings fail over faster and pull healthy replicas during brief stalls.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Kubernetes readiness probe format; path and port of NVIDIA Triton's readiness endpoint. Probe values and the 12--17 s window: Fault Tolerance, \S7.11.3.}
+  \note{[1.5 min] [OPTIONAL] A real configuration: a Kubernetes readiness probe for an inference server, here pointed at NVIDIA Triton's readiness endpoint. Readiness means the weights are loaded, warmup is done, and dependencies such as the feature store respond. The chapter's settings: probe every 5 seconds, a 2-second timeout, three failures before removal. A replica that crashes leaves the load balancer's rotation 12 to 17 seconds later, depending on where the crash falls between probes; every request routed to it in that window fails or waits for a client retry. ENGAGE: why not probe every second with a threshold of one? (Expected: a brief garbage-collection pause or load spike would remove healthy replicas exactly when load is high.) The success threshold of 2 applies the same caution in reverse before readmitting a replica. WARN: a process can pass readiness while computing wrong answers; the chapter adds an inference check that runs a known input and compares the output.}
+\end{frame}
 
-% -- NARRATE: What to SAY while showing this slide
-Walk through the table row by row: ``Image classification is stateless
---- any replica can serve any request. Just retry. LLM chat is
-stateful --- the KV cache holds the conversation context. Losing that
-state forces reprocessing all previous turns.'' Point to the
-availability formula: two replicas at 99\% each give 99.99\%.
+\begin{frame}{A degradation ladder trades accuracy for availability in steps}
+  \begin{columns}[c]
+    \begin{column}{0.60\textwidth}
+      \centering\mlsyssteps[width=\textwidth,height=4.9cm,keepaspectratio]{degrade_step}{3}
+    \end{column}
+    \begin{column}{0.38\textwidth}
+      \begin{mlsyscard}{midgray}
+        \logline{torchvision 0.26 weights}
+        \logline{ViT\_L\_16 SWAG\_E2E\_V1}
+        \logline{\ \ acc@1 88.064, 305.2M}
+        \logline{EfficientNet\_B4 V1}
+        \logline{\ \ acc@1 83.384, 19.3M}
+        \logline{MobileNet\_V3\_Large V2}
+        \logline{\ \ acc@1 75.274, 5.5M}
+      \end{mlsyscard}
+      {\small Each rung is loaded and validated before the incident.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Fault Tolerance, \S7.12.2 (fallback cascade). Model card values: torchvision 0.26 weights metadata (ImageNet-1K acc@1, parameter counts), read with torch 2.11.}
+  \note{[1.5 min] [OPTIONAL] When redundancy cannot meet the latency budget, the service gives up a named property and keeps running. Step 1: the primary image classifier, ViT-Large, 305.2 million parameters, 88.1 percent ImageNet top-1. Step 2: under pressure, EfficientNet-B4, 19.3 million parameters, 83.4 percent. Step 3: MobileNet-V3-Large, 5.5 million, 75.3 percent. These are the torchvision weights on the card; the chapter rounds them to 307, 19, and 5.4 million. Below the last model come cached labels or an honest unavailable response. The descent and the return need hysteresis, so the service does not oscillate near a threshold. Other rungs give up other properties: feature fallback uses default or cached features, load shedding drops low-priority work first, and admission control rejects work it cannot finish. ENGAGE: what must monitoring report while the service is degraded? (Expected: the share of requests on each rung and the quality gap; availability alone looks healthy.) WARN: a fallback never exercised before the incident is a plan on paper.}
+\end{frame}
 
-% -- WARN: What students will get wrong on THIS topic
-Students treat all serving as stateless. LLM serving with KV cache is
-stateful, and state loss is expensive --- reprocessing 4K tokens of
-context takes seconds, not milliseconds.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] The stateless/stateful distinction determines the entire
-serving fault tolerance architecture.
-IF SHORT: Focus on the table; skip the availability formula.
-}
-
-\footnotesize
-\renewcommand{\arraystretch}{1.15}
-\begin{tabular}{@{}lp{4cm}p{4.5cm}@{}}
-  \toprule
-  \textbf{Aspect} & \textbf{Stateless} & \textbf{Stateful} \\
-  \midrule
-  \textbf{Examples}   & Image classification, embedding generation & LLM chat (KV cache), streaming ASR \\
-  \textbf{Routing}    & Any replica & Session-affine replica \\
-  \textbf{On failure} & Retry on another replica & Potential state loss \\
-  \textbf{Recovery}   & Restart + load weights (seconds) & Reload + reconstruct context (seconds--min) \\
-  \textbf{Redundancy} & Active-active replicas & Replicated state + standby \\
-  \bottomrule
-\end{tabular}
-
-\vspace{0.15cm}
-\begin{mlsyscard}{routingstroke}
-{\footnotesize \textbf{Availability with replication}: $A_{system} = 1 - (1 - A_{single})^R$.
-Two replicas at 99\% each $\to$ 99.99\%. Three replicas $\to$ 99.9999\%.}
-\end{mlsyscard}
-
+\begin{frame}{Diagnose: which component failed at 14:32?}
+  \mlsysactivity{Diagnose}{2.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.34\textwidth}
+      \begin{mlsyscard}{RedLine}
+        \small
+        \textbf{Metrics:} p99 latency 45 $\rightarrow$ 800 ms; errors 0.1 $\rightarrow$ 15\%.\\[0.1cm]
+        GPU replicas report healthy.\\[0.15cm]
+        \uncover<3->{\textbf{Logs, 14:31:} timeouts to the user-embedding cache; requests go to the database.}
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.63\textwidth}
+      \centering
+      \uncover<2->{\mlsyssteps[width=\textwidth,height=3.6cm,keepaspectratio]{cascade_step}{2}}\\[0.2cm]
+      {\small\uncover<3->{Cache loss moved load to the database. Trip the breaker, serve validated default embeddings, then find the cause.}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Fault Tolerance, Example 7.1 and \S7.13; chaos testing: Basiri et al. 2016.}
+  \note{[2.5 min] [OPTIONAL] ENGAGE: pairs name the failing component from the metrics alone, then revise as evidence arrives. Step 2: the trace. The feature-service span rose from 12 ms to 700 ms while model inference stayed at 40 ms, so the accelerators are not the problem. Step 3: the logs show connection timeouts to the user-embedding cache at 14:31, one minute before the latency jump, after which requests bypassed the cache and hit the embedding database directly. Metrics said when, traces said where, logs said what. The mitigation trips a circuit breaker on the database path and serves validated default embeddings within the quality budget, while engineers find whether the cache process, the network, or memory failed. WARN: the evidence does not yet prove the physical cause. LINK: Lecture 12 builds fleet-wide alerting from these signals. Netflix-style chaos tests trip such fallbacks on purpose, because a recovery path is trustworthy only for the faults it has been exercised against.}
 \end{frame}
 
 % =============================================================================
-\section{Graceful Degradation}
+% SECTION: WRAP-UP
 % =============================================================================
-
-\begin{frame}{Graceful Degradation: Model Fallback}
-\note{
-[2 min]
-% -- LINK: What prior concept connects to this slide
-Serving resilience showed redundancy and failover. But what if the
-entire primary system is overwhelmed? Graceful degradation provides a
-controlled retreat instead of a crash.
-
-% -- NARRATE: What to SAY while showing this slide
-Point to the hierarchy in the diagram: ``Primary GPU model is best
-quality. If GPUs are overwhelmed, fall back to a smaller CPU model.
-If CPU is overwhelmed, fall back to cached static results.'' Share
-the war story: ``An e-commerce site used model fallback during a
-traffic spike. The CPU model lost only 2\% of revenue over 3 hours
-compared to a complete outage.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``When is 75\% quality acceptable?'' Expected: when the
-alternative is 0\% availability. A degraded response is better than
-no response.
-
-% -- WARN: What students will get wrong on THIS topic
-Students resist intentionally serving worse results. The correct
-framing: 75\% quality at 100\% availability beats 100\% quality
-at 0\% availability. Perfect is the enemy of available.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] The degradation hierarchy is a key design pattern.
-IF AHEAD: ``How do you decide the quality threshold for each fallback tier?''
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.88\textwidth,height=4.8cm,keepaspectratio]{graceful-degradation.pdf}
-
-\vspace{0.1cm}
-{\small \textcolor{errorstroke}{\textbf{75\%}} quality at \textcolor{datastroke}{\textbf{100\%}} availability beats \textcolor{datastroke}{\textbf{100\%}} quality at \textcolor{errorstroke}{\textbf{0\%}} availability.}
-
-\end{frame}
-
-\begin{frame}{Circuit Breaker Pattern}
-\note{
-[2 min]
-% -- LINK: What prior concept connects to this slide
-Graceful degradation showed intentional quality reduction. The circuit
-breaker is the mechanism that triggers it automatically --- preventing
-one failing dependency from cascading across the fleet.
-
-% -- NARRATE: What to SAY while showing this slide
-Point to the three states: ``Closed is normal --- requests pass through.
-When error rate exceeds a threshold, the breaker Opens --- requests are
-rejected immediately, preventing the failing service from exhausting
-connection pools. After a cooldown, it enters Half-Open and sends a
-probe request to test if the dependency recovered.'' Named after
-electrical circuit breakers that protect wiring from overload.
-
-% -- WARN: What students will get wrong on THIS topic
-Students think circuit breakers just retry. The Open state does the
-opposite: it STOPS retrying. Without this, retries from thousands of
-clients amplify a small failure into a fleet-wide cascade.
-
-% -- FLEX: [OPTIONAL] + contingency
-[OPTIONAL] Important pattern but secondary to the degradation concept.
-IF SHORT: Focus on the Open state preventing cascades; skip Half-Open.
-}
-
-\small
-\begin{columns}[T]
-  \begin{column}{0.48\textwidth}
-    \safeimg[width=\textwidth,height=5.5cm,keepaspectratio]{circuit-breaker-states.pdf}
-  \end{column}
-  \begin{column}{0.48\textwidth}
-    \textbf{Three states:}
-
-    \vspace{0.1cm}
-    \textcolor{datastroke}{\textbf{Closed}} --- Normal flow\\
-    {\footnotesize Requests pass to dependency}
-
-    \vspace{0.1cm}
-    \textcolor{errorstroke}{\textbf{Open}} --- Fail fast\\
-    {\footnotesize Reject immediately, prevent cascade}
-
-    \vspace{0.1cm}
-    \textcolor{routingstroke}{\textbf{Half-Open}} --- Probe\\
-    {\footnotesize Test if dependency recovered}
-
-    \vspace{0.15cm}
-    \begin{mlsyscard}{errorstroke}
-    {\footnotesize \textbf{Without circuit breakers}: one failing model replica exhausts all connection pools $\to$ cascade failure across entire fleet.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
-\end{frame}
-
-% --- ACTIVE LEARNING 3: Discussion ---
-\begin{frame}{Discussion: Which Failure Costs More?}
-\note{
-[3 min]
-% -- LINK: What prior concept connects to this slide
-Students now understand both training fault tolerance (checkpointing,
-elasticity) and serving fault tolerance (redundancy, degradation).
-This discussion forces them to compare the economic impact.
-
-% -- NARRATE: What to SAY while showing this slide
-``A 10,000-GPU cluster crashes during training --- hours of lost compute.
-Meanwhile, the serving fleet drops to 50\% capacity for 10 minutes ---
-lost user trust and revenue in real time. Which costs more?'' Have
-pairs discuss for 90 seconds.
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Turn-and-talk for 90 seconds. Cold-call 2--3 pairs. Training crashes
-waste \$\$\$ in compute. Serving failures lose users and revenue in
-real time. No single right answer --- the point is reasoning about
-cost dimensions (compute cost vs. revenue loss vs. reputation damage).
-
-% -- WARN: What students will get wrong on THIS topic
-Students default to ``training is more expensive'' because the GPU
-costs are more visible. But serving failures compound: lost users may
-never return, and SLO violations trigger contractual penalties.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] Discussion that synthesizes training vs. serving fault tolerance.
-IF SHORT: Do a show-of-hands poll instead of turn-and-talk.
-}
-
-\centering
-\vspace{0.6cm}
-{\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
-
-\vspace{0.4cm}
-{\normalsize A 10,000-GPU cluster crashes during training.\\
-Meanwhile, the serving fleet drops to 50\% capacity for 10 minutes.\\[0.2cm]
-\alert{Which incident costs more?}}
-
-\vspace{0.3cm}
-\begin{columns}[c]
-  \begin{column}{0.40\textwidth}\centering\small
-    \textcolor{computestroke}{\textbf{Training crash}}\\
-    Hours of lost compute
-  \end{column}
-  \begin{column}{0.40\textwidth}\centering\small
-    \textcolor{routingstroke}{\textbf{Serving degradation}}\\
-    Lost user trust + revenue
-  \end{column}
-\end{columns}
-
-\end{frame}
-
-% =============================================================================
-\section{Observability}
-% =============================================================================
-
-\begin{frame}{Three Pillars of Observability}
-\note{
-[2 min]
-% -- LINK: What prior concept connects to this slide
-Fault tolerance requires detection before recovery. The previous
-sections assumed failures are detected. This section asks: how?
-
-% -- NARRATE: What to SAY while showing this slide
-Point to the three pillars in the diagram: ``Metrics tell you WHEN
-something went wrong --- a latency spike at 3:42 PM. Logs tell you
-WHAT happened --- GPU 7 in node 42 reported an ECC error. Traces tell
-you WHY --- the error propagated through AllReduce to corrupt
-gradients on 8 other ranks.'' All three must be correlated to diagnose
-distributed failures.
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``Why can you not just add print statements to debug a distributed
-training failure?'' Expected: Heisenbugs --- adding instrumentation
-changes timing, which can mask the race condition. The bug disappears
-when you try to observe it.
-
-% -- WARN: What students will get wrong on THIS topic
-Students think observability means ``more logging.'' In distributed
-systems, unstructured logging creates noise. Structured, correlated
-observability (metrics + logs + traces with shared request IDs) is
-what enables diagnosis.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] Observability underpins all detection and recovery strategies.
-IF AHEAD: ``What is the Heisenberg problem in distributed debugging?''
-}
-
-% --- Layout: FULL-WIDTH diagram ---
-\centering
-\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{observability-pillars.pdf}
-
-\vspace{0.1cm}
-\mlsysconcept{Heisenbugs:}{Adding logging changes timing --- the bug disappears when you try to observe it.}
-
-\end{frame}
-
-\begin{frame}{Training Failure Signatures}
-\note{
-[2 min]
-% -- LINK: What prior concept connects to this slide
-The three pillars provide the data. This slide shows what patterns
-to look for in that data --- the failure signatures.
-
-% -- NARRATE: What to SAY while showing this slide
-Walk through each pattern on both sides. Left (training): ``A loss
-spike that recovers is transient --- monitor it. Loss divergence means
-silent corruption --- rollback to an earlier checkpoint. A flatline
-means deadlock in collective communication --- timeout and restart.''
-Right (serving): ``Latency spikes mean contention. Error rate increase
-means a dependency failed. Silent quality decay is the serving
-equivalent of silent corruption --- you need distribution monitoring.''
-
-% -- WARN: What students will get wrong on THIS topic
-Students blame loss spikes on bad data batches. In reality, loss spikes
-at scale are often caused by hardware bit flips in GPU memory, not
-data quality issues. The response (monitor vs. rollback) depends on
-whether the spike recovers within a few steps.
-
-% -- FLEX: [OPTIONAL] + contingency
-[OPTIONAL] Pattern recognition details are secondary to the pillar concept.
-IF SHORT: Cover only loss spike vs. divergence on the training side.
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.48\textwidth}
-    \textbf{Pattern recognition for training:}
-
-    \vspace{0.15cm}
-    \textcolor{routingstroke}{\textbf{Loss Spike + Recovery}}\\
-    {\scriptsize Transient data issue or bit flip\\
-    Response: Monitor, investigate if repeated}
-
-    \vspace{0.1cm}
-    \textcolor{errorstroke}{\textbf{Loss Divergence}}\\
-    {\scriptsize Silent corruption or desync\\
-    Response: \textbf{Rollback} to earlier checkpoint}
-
-    \vspace{0.1cm}
-    \textcolor{computestroke}{\textbf{Loss Hang (Flatline)}}\\
-    {\scriptsize Deadlock in collective comm.\\
-    Response: Timeout detection, restart}
-  \end{column}
-  \begin{column}{0.48\textwidth}
-    \textbf{Serving failure signatures:}
-
-    \vspace{0.15cm}
-    \textcolor{routingstroke}{\textbf{Latency Spikes}}\\
-    {\scriptsize Resource contention, cold cache\\
-    Response: Scale up, warm cache}
-
-    \vspace{0.1cm}
-    \textcolor{errorstroke}{\textbf{Error Rate Increase}}\\
-    {\scriptsize Dependency failure, format change\\
-    Response: Circuit breaker, investigate}
-
-    \vspace{0.1cm}
-    \textcolor{computestroke}{\textbf{Silent Quality Decay}}\\
-    {\scriptsize Model drift, feature degradation\\
-    Response: Distribution monitoring}
-
-    \vspace{0.1cm}
-    \textcolor{errorstroke}{\textbf{Cascade Failure}}\\
-    {\scriptsize One failure propagates via retries\\
-    Response: Circuit breakers + isolation}
-  \end{column}
-\end{columns}
-
-\end{frame}
-
-% =============================================================================
-\section{Case Studies}
-% =============================================================================
-
-\begin{frame}{Meta OPT-175B: Training Through Failure}
-\note{
-[3 min]
-% -- LINK: What prior concept connects to this slide
-The chapter covered theory: MTBF, Young-Daly, checkpointing, elasticity.
-This case study shows those concepts in a real 2-month training run.
-
-% -- NARRATE: What to SAY while showing this slide
-``Meta trained OPT-175B on 992 A100 GPUs for 2 months. They hit 35+
-significant hardware failures over 60 days --- roughly 2 hardware events
-per week. Three innovations
-kept them going: 5-minute heartbeat timeout for fast detection, async
-checkpointing that cut overhead from 12\% to 3\%, and `last good
-checkpoint' rollback for loss spikes. Result: sustained over 50\% MFU
-despite daily interruptions.'' Then point to the Netflix card:
-``Chaos engineering discovered 12 unknown failure modes proactively.''
-
-% -- WARN: What students will get wrong on THIS topic
-Students think >50\% MFU with daily failures is poor. It is actually
-impressive --- without fault tolerance, MFU would be near zero because
-the job would never complete.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] Concrete case study that validates the chapter's theory.
-IF SHORT: Focus on async checkpointing win (12\% to 3\%).
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.50\textwidth}
-    \textbf{OPT-175B Training (Meta, 2022):}
-    \begin{itemize}\setlength\itemsep{0pt}
-      \item 992 A100 GPUs, 2 months
-      \item 35+ significant hardware failures
-      \item $\sim$2 hardware failures/week on average
-      \item Manual intervention required 24/7
-    \end{itemize}
-
-    \vspace{0.1cm}
-    \textbf{Key innovations:}
-    \begin{itemize}\setlength\itemsep{0pt}
-      \item 5-min heartbeat timeout detection
-      \item Async checkpointing: 12\% $\to$ \textbf{3\%} overhead
-      \item ``Last good checkpoint'' rollback for loss spikes
-    \end{itemize}
-  \end{column}
-  \begin{column}{0.46\textwidth}
-    \begin{mlsyscard}{computestroke}
-    {\footnotesize \textbf{Result:} Sustained $>$50\% MFU despite daily interruptions.}
-    \end{mlsyscard}
-
-    \vspace{0.1cm}
-    \begin{mlsyscard}{errorstroke}
-    {\footnotesize \textbf{Netflix Chaos Engineering:}\\
-    Injected failures in ML serving. Discovered 12 unknown failure modes. MTTR: 45 min $\to$ \textbf{8 min}.\\[0.05cm]
-    Popularity fallback maintained 94\% of recommendation quality.}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-\mlsyscite{Zhang et al., ``OPT,'' 2022; Meta Llama 3 Report, 2024}
-
-\end{frame}
-
-\begin{frame}{Google TPU Pods \& DeepSpeed Elasticity}
-\note{
-[2 min]
-% -- LINK: What prior concept connects to this slide
-OPT showed fault tolerance for GPU clusters. This slide contrasts two
-different approaches: Google's hardware-centric slice swap vs.
-Microsoft's software-centric elastic resizing.
-
-% -- NARRATE: What to SAY while showing this slide
-Left side: ``Google's TPU v4 pods use a 3D toroidal mesh. One chip
-failure creates a topology hole. Their solution: swap the entire
-slice --- a hardware unit of failure. Keep a hot pool of standby
-capacity. Recovery target: under 3 minutes.'' Right side: ``DeepSpeed
-takes the opposite approach. ZeRO-3 shards state across GPUs. When
-a node fails, redistribute state to N-1 workers. Detect via heartbeat
-at under 2\% overhead.'' The key lesson: the atomic unit of failure
-determines the recovery strategy.
-
-% -- WARN: What students will get wrong on THIS topic
-Students assume one approach is universally better. Google's slice
-swap works for fixed topologies (TPUs). DeepSpeed's elasticity works
-for commodity GPUs. The hardware architecture dictates the strategy.
-
-% -- FLEX: [OPTIONAL] + contingency
-[OPTIONAL] Second case study reinforces the concepts.
-IF SHORT: Cover only the key lesson --- atomic failure unit determines
-recovery strategy.
-}
-
-\footnotesize
-\begin{columns}[T]
-  \begin{column}{0.48\textwidth}
-    \textbf{Google TPU v4 Pods:}
-    \begin{itemize}\setlength\itemsep{0pt}
-      \item 4,096 chips in 3D toroidal mesh
-      \item One chip failure $\to$ topology hole
-      \item Strategy: \textbf{Slice Swap}
-    \end{itemize}
-
-    \vspace{0.1cm}
-    {\scriptsize Don't repair running topology --- replace the entire slice. ``Hot pool'' of standby capacity. Recovery target: $<$3 minutes. Maintains $>$98\% effective throughput.}
-
-    \vspace{0.1cm}
-    \mlsysconcept{Lesson:}{Hardware grouping is the atomic failure unit.}
-  \end{column}
-  \begin{column}{0.48\textwidth}
-    \textbf{Microsoft DeepSpeed:}
-    \begin{itemize}\setlength\itemsep{0pt}
-      \item ZeRO-3: state sharded across GPUs
-      \item Node failure = lost 1/N of state
-      \item Strategy: \textbf{Elastic resizing}
-    \end{itemize}
-
-    \vspace{0.1cm}
-    {\scriptsize Detect via heartbeat ($<$2\% overhead). Redistribute state to $N-1$ workers. Adjust gradient accumulation for batch consistency. Enables training on spot instances.}
-
-    \vspace{0.1cm}
-    \mlsysconcept{Lesson:}{Software masks hardware volatility.}
-  \end{column}
-\end{columns}
-
-\end{frame}
-
-\begin{frame}{War Story: Inside the OPT-175B Failure Log}
-\note{
-[3 min]
-% -- LINK: What prior concept connects to this slide
-The case study showed OPT-175B's headline numbers. This slide dives into the actual failure log to show what training at scale really looks like.
-
-% -- NARRATE: What to SAY while showing this slide
-``Meta published the full training log for OPT-175B --- one of the most transparent accounts of large-scale training ever released. Here is what happened week by week.'' Walk through the timeline: ``Week 1: 3 GPU failures, 2 loss spikes requiring rollback. Week 2: NaN gradients from suspected bit flip --- rolled back to last known good checkpoint. Week 3: NCCL timeout from network switch failure --- 8 hours of lost training. Week 4: manual learning rate intervention to stabilize a diverging run. Across 2 months: 112 manual interventions by on-call engineers.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``Would you want to be the on-call engineer for this training run?'' Then: ``What would have reduced the 112 manual interventions?'' Expected: automated loss spike detection, automated checkpoint rollback, circuit breakers for NaN propagation.
-
-% -- WARN: What students will get wrong on THIS topic
-Students think large-scale training is automated end-to-end. OPT-175B required 24/7 human babysitting. Automation of fault detection and recovery is still an active research area.
-
-% -- FLEX: [CORE] Makes the cost of fault tolerance viscerally real.
-IF SHORT: Show the summary numbers and the timeline diagram only.
-}
-
-\centering
-\safeimg[width=0.90\textwidth,height=3.2cm,keepaspectratio]{opt175b-failure-timeline.pdf}
-
-\vspace{0.05cm}
-\footnotesize
-\renewcommand{\arraystretch}{1.0}
-\begin{tabular}{@{}lrl@{}}
-  \toprule
-  \textbf{Failure Type} & \textbf{Count} & \textbf{Avg Recovery} \\
-  \midrule
-  GPU hardware failures    & 35+   & 15--30 min (checkpoint rollback) \\
-  Loss spikes / NaN        & 20+   & 1--4 h (manual LR adjustment) \\
-  NCCL timeouts            & 15+   & 30--60 min (restart) \\
-  Manual interventions     & \textbf{112} & Human-in-the-loop 24/7 \\
-  \bottomrule
-\end{tabular}
-\mlsyscite{Zhang et al., ``OPT: Open Pre-trained Transformers,'' 2022}
-
-\end{frame}
-
-% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Check the misconceptions, then return to Llama 3.}
+\mlsysdivider{How did Llama 3 keep most of its time?}{Fault Tolerance, \S7.16 and \S7.17}
 \section{Wrap-Up}
-% =============================================================================
 
-\begin{frame}{Fallacies (I)}
-\note{
-[2 min]
-% -- LINK: What prior concept connects to this slide
-The chapter covered training and serving fault tolerance. These
-fallacies challenge common beliefs students may still hold.
-
-% -- NARRATE: What to SAY while showing this slide
-Read each fallacy, then the rebuttal. Emphasize the numbers:
-``Hardware failures are only 15--25\% of incidents. Software bugs
-cause 30--40\%. Silent corruption at 0.01--0.1\% of GPUs per year
-means 1--10 silent events per year at 10K GPUs. The 0.9999 per-GPU
-uptime calculation is the most quantitatively striking: the cluster
-is DOWN 63\% of the time. And elastic training without checkpoints
-fails below minimum worker count.''
-
-% -- ENGAGE: Specific question, prediction, or task for THIS slide
-Before showing the A$^N$ fallacy rebuttal, ask: ``If each GPU is
-99.99\% reliable and you have 10,000 GPUs, what is cluster availability?''
-Expected: $0.9999^{10000} \approx 0.37$ --- down 63\% of the time.
-
-% -- WARN: What students will get wrong on THIS topic
-Students average reliabilities rather than multiplying them. The
-independence assumption (fallacy 3) makes the product formula exact;
-correlated failures make reality even worse.
-
-% -- FLEX: [CORE] Fallacies reinforce quantitative reasoning from the chapter.
-IF SHORT: Cover only the 99.99\% fallacy (most striking) and the hardware-vs-software split.
-}
-
-\footnotesize
-\textbf{Fallacy:} \textit{Hardware failures are the main concern.}\\
-Software bugs cause 30--40\% of incidents, config errors 20--30\%. Hardware is only 15--25\%. Hardware redundancy alone leaves most failure modes unaddressed.
-
-\vspace{0.1cm}
-\textbf{Fallacy:} \textit{If each GPU is 99.99\% reliable, a 10,000-GPU cluster is also 99.99\% reliable.}\\
-Reliability compounds by multiplication, not averaging. With $A = 0.9999$ and $N = 10{,}000$:
-$$A^N = 0.9999^{10000} \approx 0.37$$
-The cluster is \textbf{down 63\% of the time}. Per-component reliability is necessary but nowhere near sufficient at fleet scale.
-
-\vspace{0.1cm}
-\textbf{Fallacy:} \textit{MTBF assumes independent failures.}\\
-$\MTBF_{sys} = \MTBF_{comp}/N$ assumes independence. Shared power domains, rack switches, and software bugs create correlated blasts --- changing both incident frequency and blast radius (see previous slide).
-
+\begin{frame}{Vote: true or false?}
+  \mlsysactivity{Vote}{2.5 min}
+  \small
+  \renewcommand{\arraystretch}{1.2}
+  \begin{tabular}{@{}M{0.46\textwidth}M{0.48\textwidth}@{}}
+    \toprule
+    \textbf{Claim} & \uncover<2->{\textbf{Verdict}} \\
+    \midrule
+    ECC makes silent data corruption negligible. & \uncover<2->{\textbf{\textcolor{RedLine}{False.}} ECC guards stored bits; arithmetic goes unchecked.} \\
+    MTTF over $N$ is a safe planning number. & \uncover<2->{\textbf{\textcolor{RedLine}{False.}} Measured jobs fail 5.5 to 6.2$\times$ sooner.} \\
+    Elastic training lets a job checkpoint less. & \uncover<2->{\textbf{\textcolor{RedLine}{False.}} A resize still reloads consistent state.} \\
+    Saving every hour is the safe choice. & \uncover<2->{\textbf{\textcolor{RedLine}{False.}} 13.6\% waste against 5.9\% at 13.8 min.} \\
+    \bottomrule
+  \end{tabular}
+  \mlsyscredit{Fault Tolerance, \S7.16. Measured ratio derived from Kokolis et al. 2025 (8 and 1,024 GPUs) against 50,000 h / N.}
+  \note{[2.5 min] [CORE] ENGAGE: students write T or F for each, then compare. Step 2: all four are false. One: ECC and link CRCs protect bits stored and moved; a wrong multiply passes both, and Llama 3 still logged six detected corruption interruptions. Two: the formula assumes independence; Meta's measured jobs fail 5.5 to 6.2 times sooner than the GPU-only line (derived), and correlated incidents add blast radius. Three: elastic resizing reloads consistent state, and the checkpoint interval is still set by write time and MTBF. Four: on the 10,000-GPU full-system basis hourly saves waste 13.6 percent against 5.9 percent at 13.8 minutes. The verdict reverses on another basis: with a 5-minute write and a 50-hour GPU-only MTBF (a 1,000-GPU cluster) the optimum is 173 minutes, so hourly saves are too frequent. If many marked the last claim true, return to the waste curve.}
 \end{frame}
 
-\begin{frame}{Fallacies (II)}
-\note{
-[1 min]
-% -- LINK: What prior concept connects to this slide
-Fallacies I covered hardware/software mix, the A^N compounding, and
-the independence assumption. These two complete the quantitative picture.
-
-% -- NARRATE: What to SAY while showing this slide
-``Silent corruption escapes ECC at the extremes --- 0.01\% per GPU per
-year is 1 silent event per year at 10K GPUs. And elastic training
-without checkpoints fails when you hit the minimum viable size.''
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] These two are needed to complete the fallacies coverage.
-IF SHORT: Cover only the SDC fallacy; elastic training was covered in the section.
-}
-
-\footnotesize
-\textbf{Fallacy:} \textit{Silent data corruption is rare in modern hardware.}\\
-0.01--0.1\% of GPUs per year exhibit silent corruption not caught by ECC. For 10K GPUs: 1--10 silent events/year, hundreds of bit flips monthly. Gradient NaNs blamed on LR may be bit flips.
-
-\vspace{0.15cm}
-\textbf{Fallacy:} \textit{Elastic training eliminates the need for checkpointing.}\\
-Elasticity cannot survive below-minimum worker count, accumulated degradation, or software bugs in remaining workers. Elastic + checkpoint is the answer.
-
+\begin{frame}{Llama 3 kept over 90\% of its time by planning for failure}
+  \begin{columns}[c]
+    \begin{column}{0.30\textwidth}
+      \centering\mlsysphoto[width=\textwidth,height=3.6cm,keepaspectratio]{nvidia-h100-pcie.jpg}\\[0.05cm]
+      {\footnotesize\textcolor{midgray}{16,384 of these, 54 days.}}
+    \end{column}
+    \begin{column}{0.67\textwidth}
+      \small
+      \begin{tabular}{@{}M{3.0cm}M{6.6cm}@{}}
+        \toprule
+        Question & What the run shows \\
+        \midrule
+        How often? & every 3.1 h, close to the 1.8 h projection \\
+        What kind? & 64\% GPU parts, mostly detectable \\
+        \uncover<2->{How much lost?} & \uncover<2->{Meta cut startup and checkpoint time} \\
+        \uncover<2->{Who recovers?} & \uncover<2->{automation; 3 manual interventions in 419} \\
+        \bottomrule
+      \end{tabular}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Dubey et al. 2024 via Fault Tolerance, War Story 7.2; Kokolis et al. 2025. Photo: Geekerwan, CC BY 3.0, Wikimedia Commons.}
+  \note{[2 min] [CORE] Return to the hook. Step 1: the failure clock and the failure mix. A 16,384-GPU job fails every two to three hours; Llama 3 measured 3.1, Kokolis projected 1.8. Most interruptions were GPU components, which announce themselves and can be handled by detect, replace, and restore. Step 2: what Meta did with that knowledge. It reduced job startup and checkpointing time, which shrinks both the Young-Daly waste and the per-failure recovery term, and built automated diagnosis and recovery, so only three of 419 interruptions needed significant manual work. Communication traces located stalled collectives and slow workers, the gray failures. ENGAGE: if startup and checkpoint time had stayed at an hour each, what would the waste have been? (Expected: far above 10 percent, since the run failed every three hours.) WARN: the 90 percent is effective training time as Meta defined it, which differs from end-to-end goodput; Lecture 9 composes those measures. Land the lecture. At this scale, reliability is a property of the recovery system more than of the hardware.}
 \end{frame}
 
-\begin{frame}{Pitfalls}
-\note{
-[2 min]
-% -- LINK: What prior concept connects to this slide
-Fallacies addressed misconceptions. Pitfalls address operational
-mistakes students will make when implementing fault tolerance.
-
-% -- NARRATE: What to SAY while showing this slide
-``First pitfall: setting checkpoint interval by intuition. We showed
-that `every hour' can be 2--3x off from optimal. Use the formula.
-Second: ignoring restart overhead. A 5-min save plus 20-min restart
-means 25-min effective cost, not 5. Third: testing fault tolerance
-only during real failures. Chaos engineering lets you discover problems
-before production does.''
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] Operational pitfalls that students will encounter in practice.
-IF SHORT: Cover only the checkpoint interval pitfall.
-}
-
-\footnotesize
-\textbf{Pitfall:} \textit{Setting checkpoint interval by intuition.}\\
-{\scriptsize ``Every hour'' may be 2--3$\times$ off. For MTBF=4h, $T_w$=5min: $\tau_{opt}=49$ min. If $T_w$=15 min: $\tau_{opt}=85$ min, not ``every 15 min.''}
-
-\vspace{0.1cm}
-\textbf{Pitfall:} \textit{Ignoring restart overhead in checkpoint planning.}\\
-{\scriptsize 5-min save + 20-min restart = 25-min effective cost, not 5. Use $T_{save} + T_{restart}$ in the formula.}
-
-\vspace{0.1cm}
-\textbf{Pitfall:} \textit{Testing fault tolerance only during real failures.}\\
-{\scriptsize Checkpoint restoration and circuit breakers may be untested. \textbf{Chaos engineering} transforms ``we think it works'' into ``we know it works.''}
-
+\begin{frame}{Takeaways}
+  \normalsize
+  \begin{itemize}\setlength{\itemsep}{0.18cm}
+    \item A job's failure interval is MTTF over $N$ at best; name the basis, and expect measured clusters to fail sooner.
+    \item Persistence, manifestation, and scope choose the response; liveness checks miss slow and wrong.
+    \item Save every $\sqrt{2\delta M}$, and count only a manifest-published, consistent cut as saved.
+    \item Each failure costs detection, restart, load, and warmup; fencing and elastic invariants keep recovery correct.
+    \item Serving buys availability with replicas, sizes failover by state, and degrades by a validated ladder.
+  \end{itemize}
+  \note{[1 min] [CORE] One line per segment, with recovery split from checkpoints. Ask students to star the line they would have gotten wrong at the start of the lecture.}
 \end{frame}
 
-% --- RETRIEVAL PRACTICE ---
-
-% --- MUDDIEST POINT ---
-\begin{frame}{Muddiest Point}
-\note{
-[2 min]
-% -- LINK: This closes the lecture loop and surfaces persistent confusion points.
-
-% -- NARRATE: What to SAY while showing this slide
-``Before we close, I want to hear from you. Write down the one concept
-from today that was most confusing. Anonymous --- one sentence. This
-helps me adjust the next lecture.''
-
-% -- FLEX: [CORE] Feedback loop. Address top 2--3 confusions in next lecture's opening.
-IF SHORT: Use a hand-raise poll (``how many found Young-Daly intuitive?'')
-instead of written responses if time is under one minute.
-}
-
-\centering
-\vspace{1.0cm}
-{\Large\bfseries What was the \alert{muddiest point} today?}
-
-\vspace{0.8cm}
-{\normalsize Write down the concept you found \textbf{most confusing}.}
-
-\vspace{0.5cm}
-{\small\textcolor{midgray}{Anonymous. One sentence. Submit before you leave.}}
-
+\begin{frame}{Open questions}
+  \normalsize
+  \begin{itemize}\setlength{\itemsep}{0.35cm}
+    \item At 100,000 GPUs the optimized waste $\sqrt{2\delta/M}$ reaches about 19\%. Would you cut $\delta$, raise $M$, or shorten recovery first?
+    \item Six of 419 interruptions were detected silent corruption. How much compute should a run spend checking for the ones nobody detected?
+    \item For a chat service, which state would you replicate, and which would you rebuild?
+  \end{itemize}
+  \note{[0.5 min] [OPTIONAL] No single answer. The 19 percent is derived: on the full-system basis 100,000 GPUs have M of about 0.39 hours, 1,394 seconds, and the square root of 2 times 24.5 over 1,394 is 0.19 (calcs.py). FLEX: use one as a two-minute discussion if time remains, or as a written assignment.}
 \end{frame}
 
-\begin{frame}{What Were the Key Ideas?}
-\note{
-[2 min]
-% -- NARRATE: What to SAY while showing this slide
-``Close your notes. 90 seconds. Write down the 4 most important
-concepts from today. No peeking.'' Walk around the room while
-students write. Do NOT show the next slide yet.
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] Retrieval practice. The struggle to recall is where learning
-consolidates. Do not skip even if running short.
-}
-
-\centering
-\vspace{1.5cm}
-{\Large\bfseries Close your notes.}
-
-\vspace{0.8cm}
-{\large Write down the \textbf{4 most important concepts} from today.}
-
-\vspace{0.8cm}
-{\normalsize\textcolor{midgray}{90 seconds --- no peeking.}}
-
+\begin{frame}{Read and explore}
+  \small
+  \begin{itemize}\setlength{\itemsep}{0.12cm}
+    \item \textbf{Read:} Fault Tolerance, \S7.2, \S7.3 to \S7.5, \S7.8 to \S7.12; the chapter's self-checks; redo Napkin Math 7.2 for a 20,000-GPU cluster.
+    \item Young, ``A First Order Approximation to the Optimum Checkpoint Interval,'' CACM 1974; Daly, FGCS 2006.
+    \item Dubey et al., ``The Llama 3 Herd of Models,'' 2024 (reliability section and Table 5).
+    \item Kokolis et al., ``Revisiting Reliability in Large-Scale ML Research Clusters,'' HPCA 2025.
+    \item Hochschild et al., ``Cores That Don't Count,'' HotOS 2021.
+    \item Zu et al., ``Resiliency at Scale: Managing Google's TPUv4 ML Supercomputer,'' NSDI 2024.
+  \end{itemize}
+  \note{[0.5 min] [CORE] The chapter first; its napkin math repeats today's numbers. Young and Daly derive the interval; Dubey and Kokolis give the measured failure clocks; Hochschild documents processors that compute wrong values without errors; Zu describes spare cubes and recovery in a TPU pod. Kleppmann's Designing Data-Intensive Applications is a readable outside source on leases and fencing tokens.}
 \end{frame}
 
-\begin{frame}{Key Takeaways}
-\note{
-[2 min]
-% -- LINK: What prior concept connects to this slide
-Students just attempted retrieval. Now reveal the answers so they
-can compare and self-correct.
-
-% -- NARRATE: What to SAY while showing this slide
-Walk through each bullet: ``MTBF/N is the central equation. Young-Daly
-governs checkpointing. The checkpoint storm problem is 2.1 TB for
-GPT-3. Elastic training converts failures to throughput drops. Training
-needs minutes of recovery while serving needs milliseconds. 75\% quality
-at 100\% availability beats the alternative. And observability gives
-you metrics (when), logs (what), and traces (why).''
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] Summary slide after retrieval practice.
-IF SHORT: Read bullets quickly without elaboration.
-}
-
-\scriptsize
-\begin{itemize}\setlength\itemsep{0pt}
-  \item \textbf{Scale guarantees failure}: $\MTBF_{sys} = \MTBF_{comp}/N$. A 10K-GPU cluster fails every 5 hours.
-  \item \textbf{Young-Daly governs checkpoints}: $\tau_{opt} = \sqrt{2 \cdot T_w \cdot \MTBF}$. Typical: 20--30 min.
-  \item \textbf{Checkpoint storm}: GPT-3 = 2.1 TB. Async + tiered staging prevents saturation.
-  \item \textbf{Elastic training}: Convert fatal failures to throughput drops via batch/LR/shard adjustment.
-  \item \textbf{Training vs serving}: Minutes of recovery vs millisecond failover.
-  \item \textbf{Graceful degradation}: 75\% quality at 100\% availability $>$ 100\% quality at 0\%.
-  \item \textbf{Observability}: Metrics (when) + Logs (what) + Traces (why) = distributed debugging.
-\end{itemize}
-
+\begin{frame}[c]
+  \centering
+  {\small\textcolor{lightgray}{NEXT LECTURE \textbar{} FLEET ORCHESTRATION}}\\[0.5cm]
+  {\LARGE\bfseries Who gets which accelerators, when, and where?}\\[0.3cm]
+  \mlsysphoto[width=0.5\textwidth,height=3.0cm,keepaspectratio]{azure-datacenter-wenatchee-aerial.jpg}\\[0.2cm]
+  {\normalsize\textcolor{midgray}{Today assumed a spare node was always free to take a failed one's place.}}
+  \mlsyscredit{Photo: Azure data centers, Wenatchee, Washington; Tedder, CC BY 4.0, Wikimedia Commons.}
+  \note{[0.5 min] [CORE] Every recovery today assumed an allocation decision made elsewhere: a spare pool deep enough, a hot spare held idle, replicas placed across failure domains. Lecture 8 asks who decides, while many jobs compete for the same fleet.}
 \end{frame}
-
-\begin{frame}{References}
-\note{
-[1 min]
-% -- NARRATE: What to SAY while showing this slide
-``These are the canonical papers. Young 1974 and Daly 2006 for
-checkpoint theory. OPT and Llama 3 for real-world case studies.
-Kokolis 2025 for GPU failure characterization in the wild.''
-
-% -- FLEX: [OPTIONAL] + contingency
-[OPTIONAL] Reference slide for student self-study.
-IF SHORT: Display briefly and move to Next Lecture.
-}
-
-\small
-\mlsysref{Young74}{J.W. Young. ``A First-Order Checkpoint Interval.'' CACM, 1974.}
-\mlsysref{Daly06}{J. Daly. ``A Higher Order Estimate of Checkpoint Intervals.'' FGCS, 2006.}
-\mlsysref{Zhang+22}{Zhang et al. ``OPT: Open Pre-trained Transformers.'' arXiv, 2022.}
-\mlsysref{Kokolis+25}{Kokolis et al. ``Characterizing GPU Failures in the Wild.'' HPCA, 2025.}
-\mlsysref{Meta24}{Meta. ``The Llama 3 Herd of Models.'' arXiv, 2024.}
-\mlsysref{Rasley+20}{Rasley et al. ``DeepSpeed: System Optimizations.'' KDD, 2020.}
-
-\end{frame}
-
-\begin{frame}{Next Lecture: Fleet Orchestration}
-\note{
-[1 min]
-% -- NARRATE: What to SAY while showing this slide
-``We can survive failures now. But who decides which jobs run where?
-Next lecture: scheduling, preemption, multi-tenancy, capacity planning.
-The `brain' of the fleet.''
-
-% -- FLEX: [CORE] or [OPTIONAL] + contingency
-[CORE] Forward hook. Plant the central question for next time.
-}
-
-\footnotesize
-\begin{columns}[c]
-  \begin{column}{0.30\textwidth}
-    \centering
-    \begin{mlsyscard}{computestroke}
-    {\large\bfseries Scheduling}\\
-    {\footnotesize Slurm, K8s,\\gang scheduling}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.30\textwidth}
-    \centering
-    \begin{mlsyscard}{routingstroke}
-    {\large\bfseries Multi-Tenancy}\\
-    {\footnotesize Fair sharing,\\preemption, quotas}
-    \end{mlsyscard}
-  \end{column}
-  \begin{column}{0.30\textwidth}
-    \centering
-    \begin{mlsyscard}{datastroke}
-    {\large\bfseries Capacity}\\
-    {\footnotesize Planning, bin-packing,\\resource allocation}
-    \end{mlsyscard}
-  \end{column}
-\end{columns}
-
-\vspace{0.2cm}
-\centering
-{\normalsize A fault-tolerant cluster still needs a \textbf{brain}.}\\[0.1cm]
-{\small Who runs what, where, and when?}
-
-\end{frame}
-
-
-
-\appendix
-
-\begin{frame}{Backup: Young-Daly Sensitivity Analysis}
-\note{
-[2 min]
-% -- NARRATE: What to SAY while showing this slide
-Backup table showing how tau\_opt changes with T\_w and MTBF.
-Key insight: halving T\_w reduces interval by sqrt(2) = 1.4x, not 2x.
-
-% -- FLEX: [OPTIONAL] Use if students want deeper parameter exploration.
-}
-
-\footnotesize
-\textbf{$\tau_{\text{opt}} = \sqrt{2 \cdot T_w \cdot \text{MTBF}}$}
-
-\vspace{0.15cm}
-\renewcommand{\arraystretch}{1.15}
-\begin{tabular}{@{}rrrrr@{}}
-  \toprule
-  \textbf{$T_w$ (min)} & \textbf{MTBF=1h} & \textbf{MTBF=4h} & \textbf{MTBF=12h} & \textbf{MTBF=24h} \\
-  \midrule
-  1  & 11 min & 22 min & 38 min & 54 min \\
-  5  & 24 min & 49 min & 85 min & 120 min \\
-  15 & 42 min & 85 min & 147 min & 208 min \\
-  \bottomrule
-\end{tabular}
-
-\vspace{0.1cm}
-{\footnotesize Halving $T_w$ reduces optimal interval by $\sqrt{2} \approx 1.4\times$, not $2\times$.}
-
-\end{frame}
-
-\begin{frame}{Backup: Async Checkpointing Deep Dive}
-\note{
-[2 min]
-% -- NARRATE: Three-phase async checkpoint with OPT-175B numbers.
-% -- FLEX: [OPTIONAL] Use if students ask about async implementation details.
-IF SHORT: Show only Phase 1 (snapshot = ms) vs. full sync write = minutes.
-}
-
-\footnotesize
-\textbf{Three-phase async checkpoint:}
-\begin{enumerate}\setlength\itemsep{1pt}
-  \item \textbf{Snapshot}: Copy GPU state to pinned CPU memory (ms)
-  \item \textbf{Background write}: CPU writes to NVMe/PFS (seconds)
-  \item \textbf{Replication}: Async copy to remote storage (minutes)
-\end{enumerate}
-
-\vspace{0.1cm}
-\textbf{Training pause = Phase 1 only} ($<$100 ms for most models).
-
-\vspace{0.1cm}
-\begin{mlsyscard}{datastroke}
-{\footnotesize OPT-175B: Async reduced checkpoint overhead from \textbf{12\% to 3\%} of training time.}
-\end{mlsyscard}
-
-\end{frame}
-
-\begin{frame}{Backup: Failure Detection Strategies}
-\note{
-[2 min]
-% -- NARRATE: Comparison of failure detection mechanisms at scale.
-% -- FLEX: [OPTIONAL] Use when students ask about monitoring implementation.
-IF SHORT: Focus on heartbeat vs. gradient checksum trade-off only.
-}
-
-\footnotesize
-\textbf{Detection latency determines recovery cost:}
-
-\vspace{0.1cm}
-\renewcommand{\arraystretch}{1.15}
-\begin{tabular}{@{}llrl@{}}
-  \toprule
-  \textbf{Method} & \textbf{Detects} & \textbf{Latency} & \textbf{Limitation} \\
-  \midrule
-  Heartbeat       & Hard failure    & 5--30 s   & Misses silent corruption \\
-  Gradient checksum & Bit flips     & Per-step  & 1--3\% compute overhead \\
-  Loss monitoring  & Training divergence & Minutes & Requires baseline \\
-  Peer voting      & Byzantine faults & Per-step & Requires 3$\times$ redundancy \\
-  \bottomrule
-\end{tabular}
-
-\vspace{0.1cm}
-\begin{mlsyscard}{routingstroke}
-{\scriptsize\textbf{OPT-175B used:} 5-minute heartbeat + manual loss monitoring. Llama 3 added automated gradient anomaly detection, reducing human interventions from 112 to $\sim$30 for a larger run.}
-\end{mlsyscard}
-
-\end{frame}
-
 
 \end{document}

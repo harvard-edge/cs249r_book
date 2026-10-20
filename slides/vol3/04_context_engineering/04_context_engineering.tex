@@ -1,0 +1,508 @@
+% =============================================================================
+% Lecture 4: Context Engineering
+% Agentic Machine Learning Systems (Volume III), Chapter 4
+% =============================================================================
+% Thesis: each call needs a selected working set, ordered for reuse, compacted
+% with its provenance, and cleared of superseded evidence, because a request
+% that fits the window can still fail.
+% Running case: the repair agent's connection-pool fix, r17 to r18, in a
+% 128,000-token window under a 30-turn step budget (Lighthouse 1.1, CE NM 4.1).
+%
+% Build: make deck V=3 D=04_context_engineering   (figures: images/make_figs.py)
+% Plan:  lecture_map.yml in this folder.
+% Numbers: every derived value is printed by images/calcs.py; scenario values
+% from the chapter's Napkin Math notebooks are labeled illustrative.
+% =============================================================================
+
+\documentclass[aspectratio=169, 12pt]{beamer}
+\usepackage{../../assets/beamerthememlsys}
+\mlsyssetup{
+  volume={Volume III},
+  chapter={Chapter 4},
+  chaptertitle={Context Engineering},
+  layer=memory,
+  logo={../../assets/img/logo-mlsysbook.png},
+  instlogo={../../assets/img/logo-harvard.png},
+}
+\usepackage[T1]{fontenc}
+\usepackage[scaled=0.9]{helvet}
+\usepackage{courier}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{booktabs,amsmath}
+\usetikzlibrary{arrows.meta,positioning}
+\graphicspath{{images/}}
+\setcounter{mlsystotalsections}{6}
+
+\title{Context Engineering}
+\author{Vijay Janapa Reddi}
+\institute{Harvard University}
+\date{}
+
+% A large answer choice for predict and concept-question slides
+\newcommand{\choice}[2]{\textbf{\textcolor{mlsysaccent}{#1}}\enspace #2}
+% A choice that is highlighted from overlay #1 on (the answer)
+\newcommand{\answerat}[3]{\alt<#1->{\colorbox{mlsysaccent!15}{\choice{#2}{#3}}}{\choice{#2}{#3}}}
+% A goal or takeaway line with its thumbnail
+\newcommand{\thumbline}[2]{%
+  \begin{minipage}[c]{2.6cm}\centering\includegraphics[width=2.5cm,height=0.95cm,keepaspectratio]{#1}\end{minipage}%
+  \hspace{0.3cm}\begin{minipage}[c]{0.74\textwidth}\small #2\end{minipage}}
+% One line of a worked example: shown from overlay #1 on
+\newcommand{\wstep}[2]{\uncover<#1->{#2}\\[0.22cm]}
+% The chapter's symbols, as the slides write them
+\newcommand{\Smax}{S_{\max}}
+\newcommand{\Kmax}{K_{\max}}
+% Golden-thread tag: one line on the goals slide naming the H·S·A term this lecture acts on
+\newcommand{\hsathread}[1]{{\scriptsize\textbf{\textcolor{mlsysaccent}{H·S·A thread:}} #1\par}}
+
+\begin{document}
+
+% =============================================================================
+% TITLE AND HOOK
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Read the thesis aloud once. Lectures 2 and 3 treated one model call and the deliberation inside it. Today the agent runs for many turns, and the runtime must decide what each call carries. The running case all lecture is the repair agent fixing a connection-pool race, at workspace revisions r17 and r18. The notes total about 71 minutes. FLEX: notes tagged [OPTIONAL] can be cut; cutting all of them leaves a complete lecture of about 58 minutes. Cut first the RULER and lost-in-the-middle plots (the Fiction.LiveBench plot carries the point), then the two real-artifact slides in the layout segment.}
+\mlsystitle{Context Engineering}{Each call needs a selected working set, ordered for reuse, compacted with its provenance, and cleared of superseded evidence, because a request that fits the window can still fail.}{cover_working_sets_blueprint.png}
+
+\begin{frame}{Predict: on which turn does appending overflow?}
+  \mlsysactivity{Predict}{3 min}
+  \centering
+  \mlsyssteps[width=\textwidth,height=5.1cm,keepaspectratio]{hook_step}{4}\\[0.1cm]
+  {\normalsize\choice{A}{turn 10}\qquad\answerat{4}{B}{turn 21}\qquad\choice{C}{turn 30: it fits}\qquad\choice{D}{turn 32}}
+  \mlsyscredit{Context Engineering, Napkin Math 4.1 (the repair harness: 128,000-token window, 30-turn step budget; component sizes are scenario values).}
+  \note{[3.5 min] [CORE] The repair agent from Lecture 1 runs in a 128,000-token window with a budget of 30 turns. Step 1: before any tool result, the runtime reserves 8,000 tokens for the model's output, so the input may use 120,000. System instructions take 3,000 and tool declarations 12,000; the task state (constraints, progress, code excerpts) takes 24,000. That leaves 81,000 tokens for tool results. Each turn appends a 4,000-token test log. Step 2: after 10 turns, 40,000 tokens of results. ENGAGE: vote with fingers, which turn first fails to fit? Step 4: B. 81,000 / 4,000 = 20 turns fit; turn 21 needs 84,000 (calcs.py). To last all 30 turns, each result must stay under 81,000 / 30 = 2,700 tokens. Students who chose C divide 128,000 by 4,000 and forget the reserve, the instructions, the tools, and the state. WARN: these sizes are the chapter's scenario values, so the slide says illustrative; the arithmetic is the lesson. LINK: Lecture 2 counted tokens on the full wire request; the same rule applies here. Then say: the overflow is the easy failure, because the runtime sees it. The rest of the lecture is about failures the runtime does not see.}
+\end{frame}
+
+\begin{frame}{Recall: what does resending a history cost?}
+  \mlsysactivity{Retrieval}{1.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.52\textwidth}
+      {\Large\bfseries Close your notes.}\\[0.3cm]
+      {\normalsize A 30-turn trajectory resends its whole history each turn. How does the input grow? What sets cost per accepted task?}\\[0.3cm]
+      \uncover<2->{\small Resent input grows with the square of the turns.\\[0.1cm]
+      $C_{\text{eff}} = \mathbb{E}[C_{\text{attempt}}]\,/\,p_{\text{acc}}$\\[0.05cm]
+      \$2.10 / 0.40 = \textbf{\textcolor{mlsysaccent}{\$5.25}} per accepted task}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \centering\uncover<2->{\safeimg[width=\textwidth,height=3.0cm,keepaspectratio]{recall_resend.pdf}\\[0.1cm]
+      {\footnotesize 8,000 first, +1,500 per turn: 17.3$\times$ fewer fresh tokens with reuse}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Lecture 2: The Foundation Model, Napkin Math 2.2. Lecture 1: Introduction, Napkin Math 1.2 (illustrative prices).}
+  \note{[2 min] [CORE] Retrieval from Lectures 1 and 2. Give 60 seconds. Step 2: Lecture 2's trajectory starts with an 8,000-token prompt and appends 1,500 tokens per turn. Resending everything for 30 turns sends 892,500 input tokens; reusing the prefix leaves 51,500 fresh, 17.3 times fewer (calcs.py reproduces both). Lecture 1's cost per accepted task divides the expected cost of an attempt by the chance it is accepted: a \$2.10 attempt accepted 40 percent of the time costs \$5.25. ENGAGE: which term of $C_{\text{eff}}$ does a longer prompt raise, and which can a missing fact lower? (Expected: a longer prompt raises the numerator; a dropped fact lowers $p_{\text{acc}}$, the denominator.) Today uses both terms on every slide. FLEX: a student who missed Lectures 1 and 2 needs only this slide.}
+\end{frame}
+
+\begin{frame}{Why can an agent lose the thread of a task?}
+  \begin{columns}[c]
+    \begin{column}{0.28\textwidth}
+      \centering\mlsyskitfig[width=\textwidth,height=3.0cm,keepaspectratio]{stack_memory}\\[0.15cm]
+      \safeimg[width=0.7\textwidth,height=2.3cm,keepaspectratio]{hsa_locator_s.pdf}\\
+      \hsathread{closes the state exposure}
+    \end{column}
+    \begin{column}{0.68\textwidth}
+      {\normalsize\bfseries \ldots even when its whole history still fits?}\\[0.3cm]
+      \small You will be able to:
+      \begin{itemize}\setlength{\itemsep}{0.12cm}
+        \item budget a request by role, and show why appending overflows and bills 2.1$\times$ more;
+        \item explain why usable context is measured per model and task;
+        \item order a request by change rate, and bind each observation to its revision;
+        \item compact and audit, retire stale evidence, and judge a policy by cost per accepted task.
+      \end{itemize}
+    \end{column}
+  \end{columns}
+  \note{[1.5 min] [CORE] Left: this lecture sits on the memory layer of the agent stack, the first of three memory lectures. Below it, the H$\cdot$S$\cdot$A locator from Lecture 1 with the state axis lit: context engineering controls the state the agent carries from one call to the next, within one session. The driving question: why can an agent lose the thread of a task even when its entire history still fits? Four goals; the takeaways at the end return to each. The model is stateless between calls, so everything the agent knows on a turn is what the runtime put in that request. WARN: students often picture the model remembering the conversation; it remembers nothing between calls.}
+\end{frame}
+
+% =============================================================================
+% SECTION: BUDGET
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] First question: what goes into the next request, and how is the space divided?}
+\mlsysdivider{What should the next call carry?}{Context Engineering, \S4.2}
+\section{Budget}
+
+\begin{frame}{A working set is what the next step needs}
+  \begin{columns}[c]
+    \begin{column}{0.25\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.2cm,keepaspectratio]{denning.jpg}\\
+      {\footnotesize Peter Denning, working-set model (1968)}
+    \end{column}
+    \begin{column}{0.42\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.2cm,keepaspectratio]{ibm360_67.jpg}\\
+      {\footnotesize IBM System/360 Model 67, a paged virtual-memory machine}
+    \end{column}
+    \begin{column}{0.29\textwidth}\small
+      An operating system \textbf{measures} a working set from page references.\\[0.25cm]
+      A runtime must \textbf{predict} it before the call: the model reports no reference bits.
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Photos: Louis Fabian Bachrach, Attribution; Dave Mills, public domain (University of Michigan); both Wikimedia Commons. Denning 1968; Context Engineering, \S4.2.}
+  \note{[1.5 min] [OPTIONAL] LINK: the idea is older than language models. In 1968 Peter Denning defined a program's working set as the pages it referenced over a recent time window; an operating system on paged machines such as the IBM System/360 Model 67 keeps those pages in memory and leaves the rest on backing storage, which prevents thrashing. NARRATE: the working-set decision is the runtime's choice of the bounded subset of task information the next step needs. One difference matters. Denning measured the working set from references the program had already made. A model call emits no reference bits: the interface returns generated tokens and never says which input tokens it relied on. So the runtime must predict the working set before the call, from task state and domain rules. ENGAGE: which is safer to drop from the repair agent's request, a constraint set at turn 1 or a 4,000-token log from the last turn? (Expected: often the log, which may contribute one exit code; the constraint still binds. Relevance beats recency.) FLEX: [OPTIONAL]; the next slide carries the concept.}
+\end{frame}
+
+\begin{frame}{Appending squeezes task state; selection keeps its share}
+  \centering
+  \mlsyssteps[width=\textwidth,height=4.5cm,keepaspectratio]{partition_step}{2}\\[0.05cm]
+  {\small $S_{\text{system}} + S_{\text{tools}} + S_{\text{state}} + S_{\text{obs}} \le \Smax - \Kmax$}\\
+  {\footnotesize Handle: a short reference to a stored record, read back on demand. Dashed: the input limit.}
+  \mlsyscredit{Redrawn from Context Engineering, figure ``Selection Protects the State Budget'' and equation 1 (\S4.2).}
+  \note{[3 min] [CORE] The equation divides the input allowance, the window $\Smax$ less the output reserve $\Kmax$, among four roles: system instructions, tool declarations, task state (constraints, the progress record, staged code and test excerpts), and observations (recent tool output). All four share one ceiling, so one term's growth squeezes another. Step 1, panel A: appending every tool result grows the observation term each turn; by turn $t{+}2$ the task state, the part the next decision needs, has been pushed out (red). Step 2, panel B: selection keeps each role's share and moves older results into records outside the request, reachable by a handle, a short reference an authorized tool can read on demand. The handle rule: a payload behind a handle re-enters the request only through an explicit, checked read. WARN: equation 1 is a planning budget; the runtime must still count the assembled wire request, because tokens of joined strings do not add up exactly. LINK: Lecture 1's four lighthouses bind on different terms: the repair agent on observation growth, the research agent on untrusted third-party text, the remediation agent on staleness, the support agent on a repeated block of instructions and tools (CE Lighthouse 4.1). ENGAGE: which term would a 30,000-token tool catalog squeeze? (Expected: every other term; Exercise 1 asks students to compute it.)}
+\end{frame}
+
+\begin{frame}{Appending bills 2.1 times the input of selection}
+  \centering
+  \safeimg[width=0.92\textwidth,height=5.0cm,keepaspectratio]{bill.pdf}\\[0.1cm]
+  {\small Even a window large enough for the final 159,000-token request leaves the bill at 2.1$\times$.}
+  \mlsyscredit{Context Engineering, Napkin Math 4.1 (illustrative scenario values; cumulative sums in calcs.py).}
+  \note{[2 min] [CORE] Worked example 1, the cost side. Each appended request carries the fixed 39,000 tokens (instructions, tools, state) plus every result so far: 39,000 + 4,000$t$ on turn $t$. Summed over 30 turns, 3,030,000 input tokens. A selecting runtime sends the same 39,000 plus an 8,000-token leaf of chosen observations, 47,000 per call, 1,410,000 in all: 2.1 times fewer. Grant the appender a window big enough: its last request holds 159,000 tokens, 167,000 with the output reserve, and the bill does not change. LINK: this is Lecture 2's quadratic resend with a 4,000-token append; Lecture 2 owns the arithmetic. ENGAGE: if a digest cuts each result to 2,000 tokens, how many appended turns fit in 81,000? (Expected: 40, which clears the 30-turn budget.) WARN: the extra tokens enter the numerator of $C_{\text{eff}}$ on every attempt, accepted or not. Land the segment aloud: the runtime chooses a working set per call; fitting the window sets a ceiling, and the working set is still a choice.}
+\end{frame}
+
+% =============================================================================
+% SECTION: USABLE
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Fitting is settled. Now the harder question: can the model use what was admitted?}
+\mlsysdivider{Can the model use everything that fits?}{Context Engineering, \S4.3}
+\section{Usable}
+
+\begin{frame}{Predict: what is the median score at 60K?}
+  \mlsysactivity{Predict}{3 min}
+  \centering
+  \mlsyssteps[width=0.92\textwidth,height=4.7cm,keepaspectratio]{fiction_step}{3}\\[0.05cm]
+  \only<1|handout:0>{{\normalsize\choice{A}{about 95\%}\qquad\choice{B}{about 80\%}\qquad\choice{C}{about 55\%}\qquad\choice{D}{about 20\%}}}%
+  \only<2-|handout:1>{\small\textbf{\textcolor{mlsysaccent}{Usable working context}}: the content, order, and length at which a stated model meets a stated quality bar on a stated task.}
+  \mlsyscredit{Fiction.LiveBench via Epoch AI Benchmarking Hub (CC BY 4.0), MLSysIM Literature.LongContextComprehension; models scored at every length to 60K. Gray band: middle half of models.}
+  \note{[3.5 min] [CORE] Real data. Fiction.LiveBench rewrites each story at lengths from a few hundred tokens to the full text while keeping the details its questions need, so a change in score reflects the surrounding material and never a missing fact. Answering requires following the order of events, closer to a repair decision than to finding one planted fact. Step 1: the shortest version, median 100 percent across 53 fully scored models. ENGAGE: vote, what is the median at 60K tokens, half of the repair agent's window? Step 2: C. The median falls to 58 percent at 8K and 56 percent at 60K; the gray band is the middle half of the models. Step 3: models differ widely: the highest-scoring model holds 100 percent at 60K, the worst 22 percent, and only 3 of 53 stay at or above 90 percent. Read the definition aloud: usable working context belongs to a model, a configuration, and a workload; nominal capacity belongs to the interface. Students who chose A trusted the window size on the model card. WARN: each point rests on 36 questions, so small wiggles (the 16K bump) are sampling noise. Evaluation finds the budget; the window size only bounds it.}
+\end{frame}
+
+\begin{frame}{Every model tested fell short of its claimed length}
+  \centering
+  \safeimg[width=0.92\textwidth,height=5.1cm,keepaspectratio]{ruler.pdf}\\[0.05cm]
+  {\footnotesize Effective: the longest length scoring above 85.6\%, Llama2-7B's score at 4K.}
+  \mlsyscredit{Hsieh et al., ``RULER,'' COLM 2024 (arXiv 2404.06654v3), Table 3: 13 synthetic tasks averaged per length; rows with claimed length up to 128K.}
+  \note{[2 min] [OPTIONAL] A second measurement, from RULER. The models nearly ace the needle-in-a-haystack probe (find one planted fact in long filler), so the authors added tasks that require multi-hop tracing and aggregation. Effective length is the longest length at which a model still beats a fixed bar, 85.6 percent, the score of a small 4K-context model at 4K. Gray: the length each vendor claims. Red: the effective length. None of the nine rows reaches its claim; the strongest reach half. The paper's text says the same for its full set of 17 models (one model with a 1M claim beat the bar at every length the authors tested). ENGAGE: why does a perfect needle score not settle the question? (Expected: retrieving one value is a different task from relating many.) WARN: these models are from early 2024; the numbers move, the method does not. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Evidence in the middle of the context is used least}
+  \centering
+  \safeimg[width=0.88\textwidth,height=5.0cm,keepaspectratio]{liu.pdf}\\[0.05cm]
+  {\small In the middle, the documents help less than giving the model none.}
+  \mlsyscredit{Liu et al., ``Lost in the Middle,'' TACL 2024, Table 6 (GPT-3.5-Turbo, multi-document QA, 20 documents) and Table 1 (closed-book).}
+  \note{[2 min] [OPTIONAL] Order matters as well as length. Liu et al. gave a model 20 retrieved documents, about 4K tokens, one of which holds the answer, and moved that document from first to last. Accuracy is 75.8 percent with the answer first, 63.2 percent last, and 53.8 percent at position 10, below the 56.1 percent the same model scores with no documents at all (closed book). The curve is U-shaped: the start and end are used most reliably. ENGAGE: where should the runtime place the repair agent's current test result, by this measurement? (Expected: near the end of the request, in the leaf, which the layout segment builds; but placement must be tested per model, as the paper's other models show different curves.) WARN: this is one model of 2023; the shape transfers to other models, and the numbers do not. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Estimate: what do 850 stale tokens cost?}
+  \mlsysactivity{Estimate}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.56\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.6cm,keepaspectratio]{dilution.pdf}\\[0.05cm]
+      {\small $a_{\text{target}} = \dfrac{\exp(z_{\text{target}})}{\exp(z_{\text{target}}) + \sum_j \exp(z_j)}$\\ one head, logits $z$ fixed}
+    \end{column}
+    \begin{column}{0.41\textwidth}
+      \begin{mlsyscard}{mlsysaccent}\small
+        \textbf{Given (toy head)}\\[0.05cm]
+        Target logit 6; 40,000 unrelated keys at $-2$\\
+        A stale r17 excerpt: 850 keys at 2
+      \end{mlsyscard}
+      \small
+      \uncover<2->{Without the excerpt: 6.9\%\\ With it: 3.3\%\\[0.05cm]
+      850 look-alike keys weigh as much as \textbf{\textcolor{mlsysaccent}{46,408}} unrelated ones}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Context Engineering, equation 2 and \S4.3.1 (toy head, illustrative); Exercise 3. Values from calcs.py.}
+  \note{[2.5 min] [CORE] A mechanism that explains the measurements. In one attention head, a query gives each key a weight through a softmax: $e$ to the key's logit, divided by the sum over all keys. Every key adds a positive term to the denominator. The plot: target logit 6, every other key at $-2$. Among 100 keys the target holds 96.8 percent of the weight; among 100,000 keys, 2.9 percent, though no single key competes. This is attention dilution. ENGAGE: two minutes in pairs with the card. A stale r17 excerpt shares names (waiter, connection, timeout) with the evidence, so its keys score higher, logit 2. Step 2: without the excerpt the target holds 6.9 percent; with it, 3.3 percent. Each look-alike key counts $e^4$ times an unrelated one, so the 850 excerpt keys equal 46,408 unrelated keys (calcs.py). Dropping the excerpt helps more than dropping half the unrelated keys (6.9 against 4.3 percent). WARN: a trained model sharpens logits and spreads evidence across heads and layers, so this is a sufficient condition for dilution and forecasts no accuracy; that is why Liu et al. measured instead of deriving. Trained models also park leftover weight on the first few tokens (attention sinks). Land the segment aloud: admitted tokens compete for the model's attention, and stale look-alikes compete hardest.}
+\end{frame}
+
+% =============================================================================
+% SECTION: LAYOUT
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] The runtime has chosen what goes in. Next: in what order, and with what labels.}
+\mlsysdivider{How should the request be laid out?}{Context Engineering, \S4.4}
+\section{Layout}
+
+\begin{frame}{Ordering by change rate keeps the longest prefix reusable}
+  \centering
+  \mlsyssteps[width=\textwidth,height=5.9cm,keepaspectratio]{zones_step}{3}
+  \mlsyscredit{Redrawn from Context Engineering, figure ``Reuse Ends at the First Changed Token'' (\S4.4.3); assumes compatible cached state on the server.}
+  \note{[3 min] [CORE] Change-rate ordering. The runtime stages the request in three zones by how often each changes. Root: application instructions and tool definitions, 15,000 tokens, changed only when the contract or a tool changes. Trunk: task constraints, the progress record, and selected source at r17, 24,000 tokens, changed when an artifact is edited or the record is refreshed. Leaf: the latest observation and the next step, 8,000 tokens, new every call. Step 1: call $n$, cold, everything processed. Step 2: call $n{+}1$ changes only the leaf; the server reuses the cached attention state for root and trunk. Step 3: the patch moves the workspace to r18 and the trunk is refreshed; reuse stops at the end of the root and every later token is processed again. The rule: attention state is derived from the token prefix, so reuse ends at the first changed token. WARN: correctness overrides cache economics. The runtime never keeps r17 source in the trunk to keep the prefix warm. ENGAGE: a tool definition changes mid-session. What must the runtime do? (Expected: update the root and accept the miss.)}
+\end{frame}
+
+\begin{frame}{A cached block's key is the whole prefix before it}
+  \centering
+  \safeimg[width=\textwidth,height=4.2cm,keepaspectratio]{art_vllm.pdf}\\[0.15cm]
+  {\small Change one early token and every later block hashes differently.}
+  \mlsyscredit{vLLM v0.6.0, vllm/core/block/prefix\_caching\_block.py, lines 834 to 855 (github.com/vllm-project/vllm), exact text, docstring shortened.}
+  \note{[1.5 min] [OPTIONAL] A real artifact: the function an open-source serving engine used to name a cached block. The hash covers the block's own token ids and the previous block's hash, which in turn covers the block before it. So a block's identity depends on every token before it, and two requests that differ in their first token share no cached block after that point. Prefix caching matches exact tokens and ignores meaning. LINK: Lecture 5 owns the cache mechanism itself (radix and paged prefix caches); today needs only the consequence for layout. ENGAGE: two requests differ only in a timestamp at the very end. How much can they share? (Expected: everything up to the block holding the timestamp.) FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{A request id in the first line ends reuse at token 7}
+  \centering
+  \safeimg[width=\textwidth,height=4.7cm,keepaspectratio]{art_tokens.pdf}\\[0.15cm]
+  {\small Same 55-token request twice; only the request id changes. Volatile fields go in the leaf.}
+  \mlsyscredit{Real run of images/artifacts/tokenize\_demo.py with the GPT-2 byte-pair tokenizer (huggingface.co/openai-community/gpt2) and the tokenizers library 0.22.2.}
+  \note{[1.5 min] [OPTIONAL] A real run. Two consecutive requests carry the same instructions and tool list and differ only in a request id, 7f3a against 7f3b. With the id on the first line, the token sequences differ from position 7, so the shared prefix is 7 of 55 tokens. With the id on the last line, the shared prefix is 53 of 55. In a real request the body behind the id is tens of thousands of tokens, so the same choice decides whether tens of thousands of tokens are reused or reprocessed. WARN: the check must run on the tokenized wire request; key order in JSON, whitespace, and a token merge across a zone boundary can all change the stream while the text looks the same. ENGAGE: where do a wall-clock timestamp and a step counter belong? (Expected: the leaf.) FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Estimate: what does a volatile first field cost?}
+  \mlsysactivity{Estimate}{2.5 min}
+  \begin{columns}[c]
+    \begin{column}{0.42\textwidth}
+      \begin{mlsyscard}{mlsysaccent}\small
+        \textbf{Given (illustrative)}\\[0.05cm]
+        Root 15K, trunk 24K, leaf 8K\\
+        30 calls; 2 trunk rewrites\\
+        \$3/M input; cached reads 10\%
+      \end{mlsyscard}
+      \vspace{0.1cm}\small
+      \uncover<2->{Volatile first: nothing reused\\
+      Stable: 76.8\% of input cached\\
+      \textbf{\textcolor{mlsysaccent}{\$4.23 against \$1.31: 3.2$\times$}}}
+    \end{column}
+    \begin{column}{0.55\textwidth}
+      \centering
+      \uncover<2->{\safeimg[width=\textwidth,height=2.5cm,keepaspectratio]{layout_bars.pdf}}\\[0.1cm]
+      \uncover<3->{{\footnotesize Measured, one month of public serving:}\\
+      \safeimg[width=\textwidth,height=2.3cm,keepaspectratio]{sglang_hits.pdf}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Context Engineering, Napkin Math 4.2 (hypothetical prices). Zheng et al., ``SGLang,'' NeurIPS 2024 (arXiv 2312.07104v2), \S6, production deployment.}
+  \note{[3.5 min] [CORE] Worked example 2. ENGAGE: two minutes with a neighbor. Both layouts send 47,000 tokens per call, 1,410,000 over 30 calls. Step 2: with a request id first, nothing is reused: \$4.23. With the stable layout, the first call is cold (47,000), the two trunk rewrites each prefill trunk and leaf (32,000 each), and the other 27 calls prefill only the 8,000-token leaf: 327,000 uncached tokens. The other 1,083,000, 76.8 percent, are cached reads at a tenth of the price: \$1.31 in all, 3.2 times less (calcs.py). A trunk rewrite costs the prefill of 4 leaf-only calls. Step 3: measured. SGLang reported cache hit rates of 52.4 and 74.1 percent for two models after a month of public serving, with first-token latency 1.7 times lower for one of them; the hits came from common system messages and multi-turn histories. WARN: 3.2 is a billing ratio and says nothing about speed; a high hit rate never justifies stale context. LINK: Lecture 19 owns the pricing of prefix caches and when compaction pays back. Checkpoint 4.1 variant for homework: rewrite the trunk on every fourth call (7 rewrites): 447,000 uncached tokens, \$1.63.}
+\end{frame}
+
+\begin{frame}{An observation speaks only for its revision and run}
+  \centering
+  \safeimg[width=\textwidth,height=5.0cm,keepaspectratio]{scope.pdf}\\[0.05cm]
+  {\small Scope rule: an observation is evidence only for the versions and conditions it was gathered under.}
+  \mlsyscredit{Context Engineering, \S4.4.2 (the scope rule) and Lighthouse 4.1. Run id illustrative.}
+  \note{[2 min] [CORE] The scope rule: an observation is evidence only for the artifact versions and execution conditions under which it was gathered, and every later transformation (summary, compaction, invalidation) must keep those bounds. Left: the runtime itself attaches the test name, the source and test revisions, the schedule, and a run id when it stages the result. The payload is raw tool output, an untrusted span, placed as a literal value inside a structured envelope so quotes or control characters cannot break the schema. Right, top: this result supports claims about r17 under this schedule, and nothing about r18. Right, bottom: provenance labels guide how the model reads text; they enforce nothing. If a log line says to delete a database, the model may still propose it. Host gates (sandbox, read-only mounts, a deployment block) decide what runs. LINK: Lecture 9 owns prompt injection and information-flow labels; the research agent, which reads third-party pages, binds on this boundary more than on token count. ENGAGE: a result moves from the leaf into the progress record. What must travel with it? (Expected: source, revision, test identity, schedule.) Land the segment aloud: order the request by change rate, and label every observation with its scope.}
+\end{frame}
+
+% =============================================================================
+% SECTION: COMPACTION
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Selection and layout do not shrink a long log. When the needed state outgrows the budget, the runtime must shorten it. Which parts can go?}
+\mlsysdivider{How can history shrink without losing what matters?}{Context Engineering, \S4.5 and \S4.6}
+\section{Compaction}
+
+\begin{frame}[t]{Diagnose: what does a FAILED-only filter lose?}
+  \mlsysactivity{Diagnose}{2 min}
+  \centering
+  \safeimg[width=\textwidth,height=3.8cm,keepaspectratio]{art_pytest.pdf}\\[0.15cm]
+  \raggedright\small
+  \only<1|handout:0>{\normalsize A filter keeps only the FAILED line. What can the next turn no longer tell?}%
+  \only<2-|handout:1>{\textbf{Digest:} at r17 the waiter registered before the return, the connection became available, and the waiter did not resume. \textbf{Protected:} revisions, test name, schedule, no-deploy rule. \textbf{Handle:} the full trace, read on demand.}
+  \mlsyscredit{Real pytest 9.1.1 run on a toy pool written for this lecture (images/artifacts/run\_toy\_repair.sh). Digest and protected fields: Context Engineering, \S4.5.}
+  \note{[3 min] [CORE] The running case as real code. A small connection pool, written for this lecture with the chapter's defect, and its reproducer, run with pytest at r17. The test holds the only connection, starts a waiter thread, returns the connection, and checks that the waiter resumes. It does not, because release never notifies. ENGAGE: one minute; a filter keeps only the FAILED line. What is lost? Step 2: whether the failure came from a registration race, an exhausted pool, or a missed notification. The three highlighted lines carry the cause. Context compaction replaces material with a shorter representation chosen for the next decisions, and every method can drop something silently: a regex filter drops the explanatory line, an outline drops the locking code, a model summary invents or misstates. The repair: a structured digest that keeps the causal chain, a protected-field set that every pass must keep (revisions, test identity, the schedule, global constraints), and a handle to the raw log. The set grows during a run: this reproducer fails under the controlled schedule and usually passes under the default one, so tool output that reveals the schedule promotes it into the set. WARN: deterministic means repeatable; it does not mean lossless. LINK: Lecture 6 owns the long-term stores that hold records behind handles.}
+\end{frame}
+
+\begin{frame}{Most summaries from every system added unsupported content}
+  \centering
+  \safeimg[width=0.82\textwidth,height=4.4cm,keepaspectratio]{maynez.pdf}\\[0.1cm]
+  {\small A model-written progress record is a candidate, checked before it replaces history.}
+  \mlsyscredit{Maynez et al., ``On Faithfulness and Factuality in Abstractive Summarization,'' ACL 2020, Table 2 (XSum; three annotators per summary).}
+  \note{[1 min] [OPTIONAL] Real data on model-written summaries. Maynez et al. had three annotators mark every span of 500 single-sentence news summaries per system that the source article did not support. For all four 2020 summarizers, 73.1 to 79.3 percent of summaries held at least one such span. WARN: the gray bar shows that the human reference summaries in this dataset score 76.9 percent too, because the dataset's references add outside facts; the measurement says that fluent summaries routinely state things the source does not; it does not rank every model below a person. Today's models are better, and the audit on the next slides is still required. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Predict: how often does compaction run?}
+  \mlsysactivity{Predict}{1.5 min}
+  \centering
+  \mlsyssteps[width=0.92\textwidth,height=4.8cm,keepaspectratio]{sawtooth_step}{2}\\[0.05cm]
+  {\small Turns between passes $= \left\lceil (\text{trigger} - \text{target}) / \text{growth per turn} \right\rceil$}
+  \mlsyscredit{Context Engineering, Napkin Math 4.3 and equation 3 (illustrative watermarks; 4,000 tokens per turn).}
+  \note{[2.5 min] [CORE] Compacting after every small result would rewrite the trunk every turn and forfeit prefix reuse. So the runtime uses two thresholds, hysteresis: compact when the request reaches a trigger watermark, and compact down to a lower target. ENGAGE: target 47,000, trigger 92,000, growth 4,000 per turn. How many turns between passes, and how many passes in 30 turns? Step 1: $\lceil 45{,}000 / 4{,}000 \rceil = 12$ turns, 2 passes; the request reaches 95,000 before the pass, 3,000 over the trigger, and 103,000 with the output reserve, still inside the window. Those two passes are the two trunk rewrites priced in the layout estimate. Step 2: raise the target to 81,000 and the gap falls to 11,000: a pass every 3 turns, 10 passes, 4 times as often. WARN: the trigger is soft; one oversized result can cross the hard limit, so oversized results go behind a handle. A narrow gap thrashes; a wide gap compresses harder when it fires. The pass cost is amortized over the turns in the cycle (equation 4), and the verdict is cost per accepted task, which charges the pass to the tasks it helps accept. FLEX: [CORE].}
+\end{frame}
+
+\begin{frame}[t]{The host audits a progress record before admitting it}
+  \centering
+  \safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{art_audit.pdf}\\[0.12cm]
+  \raggedright\small
+  \textbf{Candidate:} ``Full regression suite passed on r18.''
+  \uncover<2->{\enspace\textbf{Event log:} only the reproducer ran on r18. \textbf{\textcolor{errorstroke}{Check 2 rejects it}}; the r17 failure stays as history.}
+  \mlsyscredit{Context Engineering, Listing 2 and \S4.6.2, condensed (claim fields compared through one helper).}
+  \note{[3 min] [CORE] A structured progress record carries the repair across compactions in named fields: task and constraints, artifact identities, supported observations, hypotheses, unresolved obligations, the next step, and handles. A model can draft it, but the draft is an untrusted candidate. Read the three checks, each against state the summarizer did not write. Check 1 compares required fields with an inventory the host owns, built from the task contract plus promoted discoveries such as the schedule. Check 2 looks up every claimed milestone in the event log and compares the command, result, artifact, version, and scope. Check 3 requires any claim about current code to cite evidence at the version the workspace holds now. Step 2: the candidate says the full suite passed on r18; the log shows one reproducer. Check 2 rejects it, and Check 3 keeps the r17 failure as history. LINK: Lecture 2 showed that a schema-valid output can still be wrong; the same split applies here. Constraints come from Lecture 1's task contract, never from the summary's own checklist. WARN: on a rejection, the runtime caps correction attempts and then builds a minimal record from its own log or stops with an explicit handoff. LINK: Lecture 11 owns execution checkpoints; this record only feeds the next prompt.}
+\end{frame}
+
+\begin{frame}{Small per-round losses compound across compactions}
+  \begin{columns}[c]
+    \begin{column}{0.53\textwidth}
+      \centering\safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{survival.pdf}\\
+      {\footnotesize $(1 - 0.05)^{n}$: one constraint, 5\% loss per round}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      {\small 12 constraints, 3\% loss per round, 3 rounds; $p_{\text{acc}} = 0.6$ when all survive; \$2 attempt}\\[0.15cm]
+      \uncover<2->{\safeimg[width=\textwidth,height=2.8cm,keepaspectratio]{check_pays.pdf}\\
+      {\footnotesize Check: 90\% of losses caught, \$0.05 per round}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Context Engineering, equation 6 and \S4.8.2 (hypothetical loss rate); Exercise 6 (illustrative). Values from calcs.py.}
+  \note{[2.5 min] [CORE] Worked example 3. When a summary of a summary drops a constraint with probability 5 percent per round, the constraint survives 10 rounds with probability 59.9 percent and 40 rounds with 12.9 percent; it falls below even odds at round 14. LINK: this is Lecture 1's horizon compounding, $(1-\epsilon)^H$, with compaction rounds in place of steps. Every intermediate record still passes its schema. Step 2: what a host check is worth, from Exercise 6. Twelve constraints, 3 percent loss each per round, 3 rounds: all survive with probability 33.4 percent, so $p_{\text{acc}} = 0.6 \times 0.334 = 0.200$ and $C_{\text{eff}} = \$2 / 0.200 = \$9.98$. A check that catches 90 percent of losses leaves 0.3 percent per round: 89.7 percent survive, $p_{\text{acc}} = 0.538$, and the attempt costs \$2.15, so $C_{\text{eff}} = \$3.99$ (calcs.py). ENGAGE: the runtime copies contract constraints straight from the task contract. Which fields remain exposed? (Expected: discoveries made during the run, such as the schedule flag, unless they are promoted into the inventory.) Land the segment aloud: compaction is lossy, so pin what must survive, keep handles to the raw records, and audit every record against host state.}
+\end{frame}
+
+% =============================================================================
+% SECTION: INVALIDATION
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] The record is audited. Then the agent's own patch changes the workspace. What in the request is now wrong?}
+\mlsysdivider{What stops being true after the agent edits a file?}{Context Engineering, \S4.7}
+\section{Invalidation}
+
+\begin{frame}{A hunk planned against r17 does not apply to r18}
+  \centering
+  \safeimg[width=\textwidth,height=4.2cm,keepaspectratio]{art_gitapply.pdf}\\[0.2cm]
+  {\small Planning on a stale excerpt fails loudly here. A fuzzy match would fail silently.}
+  \mlsyscredit{Real git 2.50.1 run on the toy pool (images/artifacts/run\_toy\_repair.sh); after the chapter's Listing 3 (\S4.7).}
+  \note{[1.5 min] [OPTIONAL] A real run. After the patch produced r18, a second edit was planned from the r17 excerpt still in the request. git refuses it because the lines it expects are gone. This is offset drift, the first of three ways stale context misleads. The second is ghost-symptom chasing: the r17 failure trace stays unmarked, and the model keeps diagnosing a bug the patch fixed. The third is regression from old negative evidence: a long early failure log outweighs a short later pass, and the model reverts a working edit. ENGAGE: which of the three gives an error message? (Expected: only the first, and only when the patch tool refuses outright; fuzzy matching into the wrong function reports nothing.) FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{A write turns bound observations into history}
+  \centering
+  \mlsyssteps[width=\textwidth,height=5.9cm,keepaspectratio]{inval_step}{3}
+  \mlsyscredit{Redrawn from Context Engineering, figure ``Invalidation Follows Recorded Dependencies'' and equation 5 (\S4.7.1).}
+  \note{[3 min] [CORE] Context invalidation withdraws an observation's authority to support claims about current state when what it read changes, and keeps it as a true record of the state it read. Step 1: each staged observation carries a binding, $\lambda(o)$: the artifact, its kind, the revision, the range or symbol read, and a content hash. Derived entries hold edges to the observations they rest on. Step 2: the agent's own patch writes src/pool.py, r17 to r18. Step 3: propagation. The source excerpt and the controlled test run become historical and stay in the record, since the r17 failure is still true of r17. Only the conclusion built on them, the missed-notification hypothesis, is flagged for reassessment. The docs excerpt and the note built from it keep their status, because nothing they read changed. LINK: Lecture 3 propagated lost support through a candidate plan's dependency graph; this is the same machinery applied to the request, with one change: an executed observation becomes history instead of being retracted. WARN: a missing edge never proves freshness, so with coarse edges the runtime over-invalidates. ENGAGE: the patch also edits a test assertion. What else is reached? (Expected: every claim that rests on that test.)}
+\end{frame}
+
+\begin{frame}{Change notifications are hints to re-verify}
+  \centering
+  \safeimg[width=\textwidth,height=4.4cm,keepaspectratio]{art_inotify.pdf}\\[0.15cm]
+  {\small The agent's own write is the clearest signal; watchers are hints, and hashes confirm.}
+  \mlsyscredit{inotify(7), Linux man-pages 6.19 (2026-02-14), man7.org, exact excerpt. Context Engineering, \S4.7.2.}
+  \note{[1 min] [OPTIONAL] Changes made outside the agent's tools need other signals. The Linux manual page for inotify, the kernel's file-change notification interface, says it plainly: it misses changes on network filesystems, and races can leave a cache inconsistent, so robust programs re-check and rebuild. The runtime therefore treats a watcher event or a changed modification time as a reason to re-hash the file, and a time-to-live on an external reading as a rule of thumb that guarantees nothing. Before a high-consequence action, it reads the current state directly. LINK: even a fresh read can go stale between assembling the prompt and running the tool; Lecture 7 owns action-time preconditions, such as a revision check at the tool boundary. The request's job is to record the revision the plan was made against. FLEX: [OPTIONAL].}
+\end{frame}
+
+\begin{frame}{Vote: remove, replace, or append a notice?}
+  \mlsysactivity{Vote}{2 min}
+  {\small The 850-token r17 excerpt opens the trunk, and the next edit targets that code.}\\[0.15cm]
+  {\normalsize\choice{A}{remove it}\qquad\answerat{2}{B}{replace with a marker; read r18}\qquad\choice{C}{append ``outdated''}}\\[0.25cm]
+  \uncover<2->{\begin{columns}[T]
+    \begin{column}{0.47\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.7cm,keepaspectratio]{inval_bars.pdf}\\
+      {\footnotesize Appending keeps all 850 stale tokens.}
+    \end{column}
+    \begin{column}{0.50\textwidth}
+      \centering\safeimg[width=\textwidth,height=2.7cm,keepaspectratio]{shi.pdf}\\
+      {\footnotesize Measured: ``ignore it'' recovers 5.4 of 22.6 points.}
+    \end{column}
+  \end{columns}}
+  \mlsyscredit{Context Engineering, Napkin Math 4.4 (illustrative). Shi et al., ``Large Language Models Can Be Easily Distracted by Irrelevant Context,'' ICML 2023, Tables 2 and 3 (code-davinci-002, chain of thought).}
+  \note{[3 min] [CORE] Worked example 4. ENGAGE: vote, then one minute with a neighbor, vote again. Step 2: B for code the next edit targets. The numbers: replacing in place with a 24-token marker changes the request right after the 15,000-token root, so the server prefills 31,174 tokens again; appending a 128-token notice keeps the prefix and prefills only 128, about 244 times fewer (calcs.py). That is why students pick C. But the notice leaves all 850 stale tokens in every later request, and an appended warning does not filter what attention sees. Right, measured: Shi et al. added one irrelevant sentence to grade-school math problems; accuracy fell from 95.0 to 72.4 percent, and telling the model to ignore irrelevant information recovered only to 77.8. A leaves the dependent hypothesis dangling unless the graph is updated. The rule: replace or mark code that upcoming edits target, append notices only for inert history, or fold the replacement into the next scheduled trunk rewrite when the prefix will be recomputed anyway. WARN: none of the three loads r18; the read must be budgeted separately. LINK: Lecture 5 shows why a compatible cache entry does not make its content current. Land the segment aloud: bind each observation to what it read, and let a write turn it into history.}
+\end{frame}
+
+% =============================================================================
+% SECTION: EVALUATION
+% =============================================================================
+\mlsysnote{[0.5 min] [CORE] Selection, layout, compaction, invalidation: how do we know a whole policy works?}
+\mlsysdivider{How do we know a context policy works?}{Context Engineering, \S4.8}
+\section{Evaluation}
+
+\begin{frame}{Diagnose: which check catches this summary?}
+  \mlsysactivity{Diagnose}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.46\textwidth}
+      \begin{mlsyscard}{errorstroke}\small
+        r17: reproducer failed. r18: it passed. Broader behavior: unchecked.\\[0.1cm]
+        Compacted to: \textbf{``The waiter test passed; the repair is complete.''}\\[0.1cm]
+        API rule and no-deploy rule kept verbatim.
+      \end{mlsyscard}
+    \end{column}
+    \begin{column}{0.50\textwidth}\small
+      \choice{1}{Schema validator}\uncover<2->{\enspace\textcolor{errorstroke}{\textbf{passes it}}}\\[0.15cm]
+      \choice{2}{Constraint check}\uncover<2->{\enspace\textcolor{errorstroke}{\textbf{passes it}}}\\[0.15cm]
+      \choice{3}{Evidence probe}\uncover<2->{\enspace\textcolor{GreenLine}{\textbf{catches it}}}\\[0.2cm]
+      \uncover<2->{The probe freezes history, inspects the next decision, and edits a relevant file after the pass; an unrelated edit is the control.}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Context Engineering, Example 4.1 (\S4.8).}
+  \note{[3 min] [CORE] Context policy evaluation starts from a failure at the joins between mechanisms. ENGAGE: one minute; which of three checks catches this compaction? Step 2: the schema validator wants a string-valued test status, and gets one. The constraint check finds both negative constraints. Neither notices that one passing reproducer became a claim of complete success. An evidence probe freezes the history and inspects both the assembled prompt and the model's next decision: are candidate and test identities, the reproducer's scope, and the open checks still there? In a controlled variant, the evaluator edits a relevant source or test file after the passing run; a sound policy makes the agent re-run checks before declaring success. An edit to an unrelated file is the negative control: a sound policy should not invalidate everything. WARN: a policy must preserve relationships and version bindings; matching field names is not enough. ENGAGE follow-up: what makes this a fair comparison between two policies? (Next slide.)}
+\end{frame}
+
+\begin{frame}{A policy is judged by its cost per accepted task}
+  \begin{columns}[c]
+    \begin{column}{0.48\textwidth}\small
+      \textbf{Hold fixed:} model, sampling, tools, acceptance suite, source snapshot, budgets.\\[0.15cm]
+      \textbf{Charge to the policy:} every summary call, handle read, retry, and check.\\[0.15cm]
+      \textbf{Keep in the denominator:} timeouts, crashes, overflows.\\[0.2cm]
+      $\hat{p}_{\text{acc}} = \dfrac{\text{accepted trials}}{\text{all assigned trials}}$
+    \end{column}
+    \begin{column}{0.49\textwidth}
+      \footnotesize
+      \begin{tabular}{@{}P{2.3cm}P{3.6cm}@{}}\toprule
+        \textbf{Measurement} & \textbf{Cannot establish} \\\midrule
+        Field retention & that the inventory lists every needed fact \\[0.05cm]
+        Stale-support rate & that every old observation is irrelevant \\[0.05cm]
+        Compression ratio & lower total cost or enough information \\[0.05cm]
+        Task acceptance & correctness beyond the suite \\\bottomrule
+      \end{tabular}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Context Engineering, \S4.8.1 and \S4.8.2, equations 7 to 9 and table 10.}
+  \note{[2 min] [CORE] A context policy is a complete specification: the selection rule, layout, watermarks, protected-field inventory, and the fallback when a summary fails its audit or a handle read fails. Labels such as sliding window or summarizer leave these out, and the fallbacks often decide the outcome. Left: compare complete policies with everything else fixed, charge every auxiliary call to the policy that made it, and keep failed trials in the denominator. Repeat runs, because served calls vary even with greedy decoding (Lecture 2: recorded calls replay, served calls do not). Right: each measurement needs a stated denominator and has a limit. The stale-support rate counts decisions that used superseded evidence as current, among the decisions that needed current evidence. The compression ratio measures size, and a weak policy can score well by wandering into extra turns that then had to be compacted. The verdict is the policy with the lowest cost per accepted task across the cohort. LINK: Lecture 13 owns the task acceptance contract and how many trials an estimate needs. ENGAGE: a policy cuts prompts by half and re-reads the evicted log every turn. Which rows reveal it? (Expected: total tokens charged to the policy, and cost per accepted task.)}
+\end{frame}
+
+% =============================================================================
+% CLOSE
+% =============================================================================
+\begin{frame}{Turn 21 was the failure the runtime could see}
+  \mlsysactivity{Retrieval}{2 min}
+  \begin{columns}[c]
+    \begin{column}{0.36\textwidth}
+      \centering\safeimg[width=\textwidth,height=3.2cm,keepaspectratio]{hook_col.pdf}\\[0.1cm]
+      {\footnotesize\textcolor{errorstroke}{\textbf{Turn 21 needs 84,000 $>$ 81,000 tokens. Lasting 30 turns allows at most 2,700 per result.}}}
+    \end{column}
+    \begin{column}{0.62\textwidth}
+      \only<1|handout:0>{\normalsize Close your notes. Name four ways the agent fails while its history fits, and a fix for each.}%
+      \only<2-|handout:1>{\small
+      \begin{tabular}{@{}P{2.9cm}P{2.7cm}P{2.6cm}@{}}\toprule
+        \textbf{Failure} & \textbf{Fix} & \textbf{Number} \\\midrule
+        Logs crowd out task state & select a working set & 2.1$\times$ fewer tokens \\[0.05cm]
+        Volatile first field & root, trunk, leaf & 3.2$\times$ lower bill \\[0.05cm]
+        ``Repair is complete'' & protected fields, audit & \$9.98 $\rightarrow$ \$3.99 \\[0.05cm]
+        r17 evidence after the patch & bind and invalidate & replace, read r18 \\\bottomrule
+      \end{tabular}\\[0.1cm]
+      {\footnotesize\textcolor{midgray}{Illustrative scenario values from the chapter.}}}
+    \end{column}
+  \end{columns}
+  \mlsyscredit{Context Engineering, Napkin Math 4.1, 4.2, 4.4; Exercise 6. Values from calcs.py.}
+  \note{[3 min] [CORE] Back to the hook. Step 1: retrieval, 90 seconds. The overflow at turn 21 was the easy failure: the runtime sees it and can stop. Step 2: the driving question asked why an agent loses the thread while its history still fits. Four answers. Appended logs crowd out the constraints the next step needs, and the bill is 2.1 times the selecting policy's. A volatile field at the front ends prefix reuse and the bill is 3.2 times higher. A compaction turns one passing test into a claim of success, and only a host-side audit against the contract and the event log catches it; with the check, cost per accepted task falls from \$9.98 to \$3.99 in Exercise 6. Old r17 evidence stays beside r18 code unless the runtime binds observations to revisions and invalidates on write. The measured slides back each step: comprehension falls with length (median 56 percent at 60K), position matters, and summaries add unsupported content. ENGAGE: which fix needs no model at all? (Expected: all four run in host code; the model only proposes.)}
+\end{frame}
+
+\begin{frame}{Takeaways}
+  \thumbline{thumb_partition_step2.pdf}{The runtime selects a working set for every call; the window size sets only a ceiling.}\\[0.12cm]
+  \thumbline{thumb_fiction_step3.pdf}{Usable context belongs to a model and a task, and is found by evaluation.}\\[0.12cm]
+  \thumbline{thumb_zones_step3.pdf}{Order by change rate for reuse, and keep each observation bound to its revision and run.}\\[0.12cm]
+  \thumbline{thumb_survival.pdf}{Compaction loses detail, so pin protected fields, keep handles, and audit records against host state.}\\[0.12cm]
+  \thumbline{thumb_inval_step3.pdf}{A write turns bound observations into history; judge a policy by cost per accepted task.}
+  \note{[1.5 min] [CORE] One line per segment. Ask students which slide taught each line. If short on time, read the first, third, and fourth.}
+\end{frame}
+
+\begin{frame}{Open questions}
+  \normalsize
+  \begin{itemize}\setlength{\itemsep}{0.3cm}
+    \item The model reports no reference bits. What signal could a runtime use to learn which staged tokens a decision used?
+    \item Windows keep growing. At what length, if any, does selection stop paying for a given model and task?
+    \item Who should write the progress record: the model, the host from its logs, or both?
+  \end{itemize}
+  \note{[1 min] [OPTIONAL] No single answer. The first asks for the agent version of Denning's measurement; candidates are causal probes (remove a field and see whether the next action changes, \S4.8.2), which cost extra calls. The second ties the Fiction.LiveBench and RULER plots to the bill: even a model that uses 60K tokens well pays for them on every call. The third weighs a fluent model summary against a minimal host record built from the event log (\S4.6.2).}
+\end{frame}
+
+\begin{frame}{Read and explore}
+  \small
+  \begin{itemize}\setlength{\itemsep}{0.02cm}
+    \item \textbf{Read:} Context Engineering, \S4.2 to \S4.8; Checkpoints 4.1 to 4.3; Napkin Math 4.1 to 4.4 by hand; Exercises 3 and 6.
+    \item Denning, ``The Working Set Model for Program Behavior,'' CACM 1968.
+    \item Liu et al., ``Lost in the Middle,'' TACL 2024.
+    \item Hsieh et al., ``RULER: What's the Real Context Size of Your Long-Context Language Models?'' COLM 2024.
+    \item Doyle, ``A Truth Maintenance System,'' Artificial Intelligence 1979.
+    \item Mokhov, Mitchell, and Peyton Jones, ``Build Systems \`a la Carte,'' ICFP 2018.
+  \end{itemize}
+  \note{[1 min] [CORE] The chapter first, with its checkpoints and the four notebooks worked by hand; Exercise 3 extends the dilution estimate and Exercise 6 the audit's payback. Denning is the origin of the working set. Liu et al. and Hsieh et al. measure position and length effects. Doyle's truth maintenance system is the ancestor of dependency-based invalidation. Mokhov et al. separate detecting staleness from rebuilding, the same split a context runtime needs. FLEX: add the course's lab, if any, on building a context manager.}
+\end{frame}
+
+\begin{frame}[c]
+  \begin{columns}[c]
+    \begin{column}{0.34\textwidth}
+      \centering\mlsyskitfig[width=\textwidth,height=4.2cm,keepaspectratio]{stack_memory}
+    \end{column}
+    \begin{column}{0.62\textwidth}
+      {\small\textcolor{lightgray}{NEXT LECTURE \textbar{} KV CACHE MANAGEMENT}}\\[0.5cm]
+      {\LARGE\bfseries An agent waiting on a tool generates nothing. Why does it still hold memory?}
+    \end{column}
+  \end{columns}
+  \note{[0.5 min] [CORE] Today priced the reused prefix as a discount on the bill. Behind the discount is attention state held in accelerator memory, even while the agent waits on a tool. Lecture 5 sizes that state and decides how long to keep it.}
+\end{frame}
+
+\end{document}

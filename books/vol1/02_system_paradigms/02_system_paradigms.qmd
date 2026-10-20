@@ -1163,6 +1163,7 @@ from mlsysim.core.units import (
     USD,
     EFLOP,
     PFLOP,
+    TFLOP,
     second,
 )
 
@@ -1187,10 +1188,10 @@ class HardwareSpectrumSetup:
         precision=0,
         commas=True,
     )
-    cloud_mem_tb_str = fmt_memory_capacity(Systems.Pods.TPUv4_4096.memory.to(TiB).magnitude * TB, unit=TB, precision=0, commas=False)
+    cloud_mem_tb_str = fmt_memory_capacity(Systems.Pods.TPUv4_4096.memory, unit=TiB, precision=0, commas=False)
     cloud_pwr_mw_str = fmt_power(Systems.Pods.TPUv4_4096.power, unit=MW, precision=0, commas=False)
-    edge_mem_gb_str = fmt_memory_capacity(Hardware.Workstation.DGX_Spark.memory.capacity.to(GiB).magnitude * GB, unit=GB, precision=0, commas=False)
-    edge_stor_tb_str = fmt_memory_capacity(Hardware.Workstation.DGX_Spark.storage.capacity.to(TiB).magnitude * TB, unit=TB, precision=0, commas=False)
+    edge_mem_gb_str = fmt_memory_capacity(Hardware.Workstation.DGX_Spark.memory.capacity, unit=GiB, precision=0, commas=False)
+    edge_stor_tb_str = fmt_memory_capacity(Hardware.Workstation.DGX_Spark.storage.capacity, unit=TiB, precision=0, commas=False)
     edge_pwr_w_str = fmt_power(Hardware.Workstation.DGX_Spark.tdp, unit=watt, precision=0, commas=False)
     edge_price_min_str = fmt_usd(Hardware.Workstation.DGX_Spark.unit_cost.to(USD).magnitude, precision=0)
     edge_price_max_str = fmt_usd(Hardware.Workstation.DGX_Spark.unit_cost_max.to(USD).magnitude, precision=0)
@@ -1204,6 +1205,7 @@ class HardwareSpectrumSetup:
     )
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    cloud_chip_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.TPUv4.compute.peak_flops, unit=TFLOP / second, precision=0, commas=False)
     cloud_peak_eflop_per_s_str = fmt_flop_rate(cloud_peak_flops, unit=EFLOP / second, precision=1, commas=False)
     edge_peak_pflop_per_s_str = fmt_flop_rate(edge_peak_ai_flops, unit=PFLOP / second, precision=0, commas=False)
 ```
@@ -1269,6 +1271,7 @@ from mlsysim.fmt import (
     check,
     fmt_bandwidth,
     fmt_flop_rate,
+    fmt_multiple,
     fmt_ops_rate,
     fmt_power,
     fmt_range,
@@ -1288,6 +1291,8 @@ class DeploymentThresholdsTable:
     edge_bandwidth_threshold = Platforms.Edge.bandwidth_threshold
     tiny_compute_threshold = Platforms.Tiny.compute_threshold
     tiny_power_threshold = Platforms.Tiny.power_threshold
+    cloud_chip = Hardware.Cloud.TPUv4            # the cloud row's example accelerator
+    edge_box = Hardware.Workstation.DGX_Spark    # the edge row's example workstation
     representative_phones = [
         Hardware.Mobile.Pixel8,
         Hardware.Mobile.iPhone15Pro,
@@ -1299,14 +1304,22 @@ class DeploymentThresholdsTable:
     mobile_npu_hi = max(representative_phones, key=lambda p: p.compute.peak_flops.to(TOPS).magnitude).compute.peak_flops
     mobile_bw_lo = min(representative_phones, key=lambda p: p.memory.bandwidth.to(GB / second).magnitude).memory.bandwidth
     mobile_bw_hi = max(representative_phones, key=lambda p: p.memory.bandwidth.to(GB / second).magnitude).memory.bandwidth
+    # Matched-precision comparison: dense 16-bit peak and memory bandwidth.
+    cloud_edge_flops_ratio = (cloud_chip.compute.peak_flops / edge_box.compute.peak_flops).to("").magnitude
+    cloud_edge_bw_ratio = (cloud_chip.memory.bandwidth / edge_box.memory.bandwidth).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(cloud_compute_threshold is not None, "Cloud compute threshold must be set.")
-    check(cloud_bandwidth_threshold is not None, "Cloud bandwidth threshold must be set.")
-    check(edge_compute_threshold is not None, "Edge compute threshold must be set.")
-    check(edge_bandwidth_threshold is not None, "Edge bandwidth threshold must be set.")
-    check(tiny_compute_threshold is not None, "TinyML compute threshold must be set.")
-    check(tiny_power_threshold is not None, "TinyML power threshold must be set.")
+    check(cloud_compute_threshold == 200 * (TFLOPs / second), "Cloud compute threshold must stay at 200 TFLOP/s.")
+    check(cloud_bandwidth_threshold == 1000 * (GB / second), "Cloud bandwidth threshold must stay at 1,000 GB/s.")
+    check(edge_compute_threshold == 1 * (PFLOP / second), "Edge compute threshold must stay at 1 PFLOP/s.")
+    check(edge_bandwidth_threshold == 270 * (GB / second), "Edge bandwidth threshold must stay at 270 GB/s.")
+    check(tiny_compute_threshold == 1 * TOPS, "TinyML compute threshold must stay at 1 TOPS.")
+    check(tiny_power_threshold == 1 * milliwatt, "TinyML power threshold must stay at 1 mW.")
+    check(cloud_chip.compute.peak_flops >= cloud_compute_threshold, "The cloud row's example chip must clear its own tier floor.")
+    check(cloud_chip.memory.bandwidth >= cloud_bandwidth_threshold, "The cloud row's example chip must clear its own bandwidth floor.")
+    check(edge_box.compute.peak_flops < cloud_compute_threshold, "The edge workstation's dense rate must sit below the cloud floor.")
+    check(2.0 < cloud_edge_flops_ratio < 2.5, f"Prose says about 2.2x dense throughput, got {cloud_edge_flops_ratio:.2f}")
+    check(4.0 < cloud_edge_bw_ratio < 4.8, f"Prose says about 4.4x bandwidth, got {cloud_edge_bw_ratio:.2f}")
     check(mobile_npu_hi.to(TOPS).magnitude > mobile_npu_lo.to(TOPS).magnitude, "Mobile NPU range collapsed to a single value.")
     check(mobile_bw_hi.to(GB / second).magnitude > mobile_bw_lo.to(GB / second).magnitude, "Mobile bandwidth range collapsed to a single value.")
 
@@ -1315,6 +1328,8 @@ class DeploymentThresholdsTable:
     cloud_thresh_bw_gb_per_s_str = fmt_bandwidth(cloud_bandwidth_threshold, unit=GB / second, precision=0, commas=False, lower_bound=True)
     edge_thresh_pflop_per_s_str = fmt_flop_rate(edge_compute_threshold, unit=PFLOP / second, precision=0, commas=False, approx=True)
     edge_thresh_bw_gb_per_s_str = fmt_bandwidth(edge_bandwidth_threshold, unit=GB / second, precision=0, commas=False, lower_bound=True)
+    cloud_edge_flops_mult_str = fmt_multiple(cloud_edge_flops_ratio, precision=1, commas=False)
+    cloud_edge_bw_mult_str = fmt_multiple(cloud_edge_bw_ratio, precision=1, commas=False)
     mobile_npu_range_str = fmt_qty_range(
         mobile_npu_lo,
         mobile_npu_hi,
@@ -1333,7 +1348,7 @@ class DeploymentThresholdsTable:
     tiny_thresh_mw_str = fmt_power(tiny_power_threshold, unit=milliwatt, precision=0, commas=False, upper_bound=True)
 ```
 
-Extending that cloud-versus-mobile comparison across all four deployment tiers grounds the conceptual regimes of @tbl-deployment-paradigms-overview in concrete hardware. @Tbl-representative-systems places one real platform in each paradigm and pairs it with the per-device envelope that marks the tier.[^fn-cost-spectrum-ml] The example-platform and power columns describe complete systems, including a cloud pod, while the tier compute and bandwidth columns describe per-device envelopes. Because vendors quote peak rates at the numerical precisions their chips target, the per-device compute column must be read alongside its format: the cloud floor states dense 16-bit floating-point throughput per accelerator, whereas the edge ceiling reflects 4-bit sparse operations on a high-end workstation. At matched precision and density, a cloud accelerator still delivers several times the throughput and memory bandwidth of an edge workstation. The following spans compare the complete system examples rather than equivalent individual chips. Memory drops from `{python} HardwareSpectrumSetup.cloud_mem_tb_str` (cloud) to 512 KB (TinyML), a 250 million-fold reduction. Power runs from about `{python} HardwareSpectrumSetup.cloud_pwr_mw_str` for the cloud pod to the TinyML tier's average-power target of `{python} DeploymentThresholdsTable.tiny_thresh_mw_str`. Hardware cost spans six orders of magnitude, from multimillion-dollar clusters to \$10 microcontrollers. Together with facility overheads such as power usage effectiveness (PUE),[^fn-pue-facility-efficiency] these spreads decide which paradigm can serve a workload economically, and they explain why model compression becomes essential as the budget tightens.
+Extending that cloud-versus-mobile comparison across all four deployment tiers grounds the conceptual regimes of @tbl-deployment-paradigms-overview in concrete hardware. @Tbl-representative-systems places one real platform in each paradigm and pairs it with the per-device envelope that marks the tier.[^fn-cost-spectrum-ml] The example-platform and power columns describe complete systems, including a cloud pod, while the tier compute and bandwidth columns describe per-device envelopes. Because vendors quote peak rates at the numerical precisions their chips target, the per-device compute column must be read alongside its format: the cloud floor states dense 16-bit floating-point throughput per accelerator, whereas the edge ceiling reflects 4-bit sparse operations on a high-end workstation. At matched precision and density, one TPU v4 chip still delivers `{python} DeploymentThresholdsTable.cloud_edge_flops_mult_str` the dense 16-bit throughput and `{python} DeploymentThresholdsTable.cloud_edge_bw_mult_str` the memory bandwidth of the DGX Spark. The following spans compare the complete system examples rather than equivalent individual chips. Memory drops from `{python} HardwareSpectrumSetup.cloud_mem_tb_str` (cloud) to 512 KB (TinyML), a 250 million-fold reduction. Power runs from about `{python} HardwareSpectrumSetup.cloud_pwr_mw_str` for the cloud pod to the TinyML tier's average-power target of `{python} DeploymentThresholdsTable.tiny_thresh_mw_str`. Hardware cost spans six orders of magnitude, from multimillion-dollar clusters to \$10 microcontrollers. Together with facility overheads such as power usage effectiveness (PUE),[^fn-pue-facility-efficiency] these spreads decide which paradigm can serve a workload economically, and they explain why model compression becomes essential as the budget tightens.
 
 The hardware spectrum\index{Hardware spectrum!resource progression}\index{Hardware spectrum!deployment platforms} turns the bottleneck diagnosis into a fit test, in which each workload must be matched to the tier whose compute, bandwidth, power, and cost envelope it can satisfy. These platforms are products of decades of hardware evolution, from floating-point coprocessors in the 1980s through graphics processors in the 2000s to today's domain-specific AI accelerators.
 
@@ -1348,7 +1363,7 @@ The hardware spectrum\index{Hardware spectrum!resource progression}\index{Hardwa
 
 | **Paradigm**  | **Example Platform**                                                                                                                                                                                                             |                          **Tier Compute**                         |                         **Tier Memory BW**                        | **Power**                                                                                                                                                                              |                                                **Price**                                                 | **Binding Constraint**                            |
 |:--------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------:|:-----------------------------------------------------------------:|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------:|:--------------------------------------------------|
-| **Cloud ML**  | Google TPU v4 Pod: `{python} HardwareSpectrumSetup.tpu_chip_count_str`, `{python} HardwareSpectrumSetup.cloud_peak_eflop_per_s_str` BF16, `{python} HardwareSpectrumSetup.cloud_mem_tb_str` HBM2                                 | `{python} DeploymentThresholdsTable.cloud_thresh_tflop_per_s_str` | `{python} DeploymentThresholdsTable.cloud_thresh_bw_gb_per_s_str` | ~`{python} HardwareSpectrumSetup.cloud_pwr_mw_str` per pod; PUE 1.1–1.3                                                                                                                |                                                  Rental                                                  | Compute (training); memory bandwidth (LLM decode) |
+| **Cloud ML**  | Google TPU v4 Pod: `{python} HardwareSpectrumSetup.tpu_chip_count_str` at `{python} HardwareSpectrumSetup.cloud_chip_tflop_per_s_str` BF16 each (`{python} HardwareSpectrumSetup.cloud_peak_eflop_per_s_str` in total), `{python} HardwareSpectrumSetup.cloud_mem_tb_str` HBM2 | `{python} DeploymentThresholdsTable.cloud_thresh_tflop_per_s_str` | `{python} DeploymentThresholdsTable.cloud_thresh_bw_gb_per_s_str` | ~`{python} HardwareSpectrumSetup.cloud_pwr_mw_str` per pod; PUE 1.1–1.3                                                                                                                |                                                  Rental                                                  | Compute (training); memory bandwidth (LLM decode) |
 | **Edge ML**   | NVIDIA DGX Spark: GB10 Grace Blackwell (`{python} HardwareSpectrumSetup.edge_peak_pflop_per_s_str` sparse FP4), `{python} HardwareSpectrumSetup.edge_mem_gb_str` LPDDR5x, `{python} HardwareSpectrumSetup.edge_stor_tb_str` NVMe |  `{python} DeploymentThresholdsTable.edge_thresh_pflop_per_s_str` |  `{python} DeploymentThresholdsTable.edge_thresh_bw_gb_per_s_str` | ~`{python} HardwareSpectrumSetup.edge_pwr_w_str`; 100 W class typical                                                                                                                  | ~`{python} HardwareSpectrumSetup.edge_price_min_str`–`{python} HardwareSpectrumSetup.edge_price_max_str` | Memory bandwidth                                  |
 | **Mobile ML** | Flagship smartphone: mobile SoC (CPU + GPU + NPU), `{python} RepresentativeSystemsMobileRow.mobile_ram_range_str` RAM, `{python} RepresentativeSystemsMobileRow.mobile_storage_range_str` storage                                |     `{python} DeploymentThresholdsTable.mobile_npu_range_str`     |      `{python} DeploymentThresholdsTable.mobile_bw_range_str`     | `{python} RepresentativeSystemsMobileRow.mobile_tdp_range_str`                                                                                                                         |                                                  \$999+                                                  | Energy (battery and heat)                         |
 | **TinyML**    | ESP32-S3: dual-core @ 240 MHz, 512 KB SRAM, `{python} HardwareSpectrumSetup.tiny_flash_mb_str` flash                                                                                                                             |     `{python} DeploymentThresholdsTable.tiny_thresh_tops_str`     |                                 —                                 | `{python} HardwareSpectrumSetup.tiny_pwr_min_w_str`–`{python} HardwareSpectrumSetup.tiny_pwr_max_w_str` active; `{python} DeploymentThresholdsTable.tiny_thresh_mw_str` average target |                           `{python} HardwareSpectrumSetup.tiny_price_usd_str`                            | Memory capacity (working state must fit in SRAM)  |
@@ -1543,7 +1558,7 @@ class DistancePenalty:
     overrun = -deficit
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(overrun > 0 * millisecond, f"Round trip should exceed the safety budget; got {overrun}.")
+    check(abs(overrun.to(millisecond).magnitude - 5.0) < 0.1, f"Round trip should exceed the safety budget by ~5 ms; got {overrun}.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     sol_km_per_s_str = fmt_velocity(SPEED_OF_LIGHT_FIBER_KM_S, unit=kilometer / second, precision=0, commas=True)
@@ -3577,7 +3592,7 @@ class VoiceAssistantWall:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     # Economics Strings
-    ww_devices_b_str = fmt_count(ww_devices_b * BILLION, scale="B", precision=0, commas=False)
+    ww_devices_b_str = fmt_count(ww_devices_b * BILLION, scale="B", commas=False)
     ww_cloud_cost_str = fmt_usd(ww_cloud_cost_per_device, precision=2, commas=False, per="device/year")
     ww_total_cost_str = fmt_usd(ww_total_cloud_cost, precision=0, commas=True, per="year")
     ww_edge_power_range_str = fmt_qty_range(

@@ -99,7 +99,7 @@ from mlsysim.fmt import fmt_flop_rate, fmt_percent, fmt_time, fmt_multiple, fmt_
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Hardware, Literature
 from mlsysim.core.units import GFLOPs, TFLOP, second
-from mlsysim.fmt import check, fmt_flop_rate, fmt_flops, fmt_rate, fmt_percent
+from mlsysim.fmt import check, fmt_count, fmt_flop_rate, fmt_flops, fmt_rate, fmt_percent
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ResNet50H100Sustained:
@@ -108,8 +108,9 @@ class ResNet50H100Sustained:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     resnet = Models.Vision.ResNet50
     h100 = Hardware.Cloud.H100
-    # MLPerf Training v3.1 per-accelerator throughput anchor (images per second)
+    # MLPerf Training v3.1, NVIDIA Eos_n8: logged images/s divided by its accelerators
     measured_rate = Literature.Benchmarks.ResNet50H100TrainThroughput.value / second
+    mlperf_accelerators = int(Literature.Benchmarks.ResNet50H100TrainThroughputAccelerators.value)
     # convention: the backward pass costs about twice the forward pass
     train_to_forward = 3
 
@@ -121,11 +122,13 @@ class ResNet50H100Sustained:
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(0.08 < mfu < 0.2, f"Prose says ResNet-50 sustains about 12 percent of H100 peak, got {mfu:.3f}.")
+    check(mlperf_accelerators == 64, f"Prose names a 64-accelerator MLPerf system, got {mlperf_accelerators}.")
     check(abs(flops_per_image.to(GFLOPs).magnitude - 24.6) < 0.1, f"Expected 24.6 GFLOP per training image, got {flops_per_image}.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     peak_tflop_per_s_str = fmt_flop_rate(peak, unit=TFLOP / second, precision=0, commas=False)
     measured_ips_str = fmt_rate(measured_rate.to(1 / second).magnitude, "images/s", precision=0, commas=True)
+    mlperf_accelerators_str = fmt_count(mlperf_accelerators, precision=0, commas=False)
     forward_gflop_str = fmt_flops(resnet.inference_flops, unit=GFLOPs, precision=1, commas=False)
     train_gflop_str = fmt_flops(flops_per_image, unit=GFLOPs, precision=1, commas=False)
     achieved_tflop_per_s_str = fmt_flop_rate(achieved, unit=TFLOP / second, precision=0, commas=False)
@@ -136,7 +139,7 @@ class ResNet50H100Sustained:
 
 ***Machine learning benchmarking***\index{Benchmarking!definition} is the empirical measurement of ML workloads under specified conditions, used to test claims about components, models, or end-to-end systems against representative evidence rather than peak specifications alone.
 
-1.  **Significance**: The gap between peak and sustained performance can be large. An H100 delivers `{python} ResNet50H100Sustained.peak_tflop_per_s_str` of dense FP16 arithmetic at peak, yet ResNet-50 training at the MLPerf per-accelerator throughput of about `{python} ResNet50H100Sustained.measured_ips_str` sustains about `{python} ResNet50H100Sustained.achieved_tflop_per_s_str` of model arithmetic. That is a model FLOPs utilization (MFU, achieved model FLOP/s divided by the hardware's peak FLOP/s) of about `{python} ResNet50H100Sustained.mfu_pct_str`. Memory-bound layers, the input pipeline, and launch and synchronization overhead account for the difference. Benchmarking quantifies the actual $\EfficiencyHw$ gap for a workload; vendor spec sheets do not.
+1.  **Significance**: The gap between peak and sustained performance can be large. An H100 delivers `{python} ResNet50H100Sustained.peak_tflop_per_s_str` of dense FP16 arithmetic at peak, yet ResNet-50 training at about `{python} ResNet50H100Sustained.measured_ips_str` per accelerator, the rate NVIDIA's `{python} ResNet50H100Sustained.mlperf_accelerators_str`-accelerator H100 system logged in MLPerf Training v3.1 [@mlcommons2023trainingv31], sustains about `{python} ResNet50H100Sustained.achieved_tflop_per_s_str` of model arithmetic. That is a model FLOPs utilization (MFU, achieved model FLOP/s divided by the hardware's peak FLOP/s) of about `{python} ResNet50H100Sustained.mfu_pct_str`. Memory-bound layers, the input pipeline, and launch and synchronization overhead account for the difference. Benchmarking quantifies the actual $\EfficiencyHw$ gap for a workload; vendor spec sheets do not.
 2.  **Distinction**: ML benchmarking spans multiple scopes. Micro-benchmarks isolate operations such as matrix multiplication, model-level benchmarks evaluate complete training or inference workloads, and end-to-end benchmarks include surrounding work such as data loading, preprocessing, optimization, checkpoint I/O, or serving infrastructure. The scope must match the engineering claim.
 3.  **Common pitfall**: A frequent misconception is that benchmark numbers are stable references. Both the workload (new model architectures) and the hardware (new GPU generations) evolve, so a result that leads a benchmark under one version often becomes the baseline under a later version. Year-over-year comparisons are therefore meaningful only when the benchmark version is held constant.
 
@@ -1187,7 +1190,7 @@ class ResNet50RooflineCheck:
 
 **Prediction**: One training image costs about `{python} ResNet50H100Sustained.train_gflop_str`, three times the `{python} ResNet50H100Sustained.forward_gflop_str` forward pass, because the backward pass computes gradients with respect to both activations and weights. At training batch sizes, the convolution layers reuse each weight across hundreds of images and sit above the `{python} H100Roofline.h100_ridge_str` ridge, so the roofline places the step on the compute roof. Dividing the `{python} ResNet50H100Sustained.peak_tflop_per_s_str` peak by the work per image gives a ceiling of about `{python} ResNet50RooflineCheck.predicted_ips_str`.
 
-**Measurement**: The MLPerf Training per-accelerator result for H100-class systems is about `{python} ResNet50H100Sustained.measured_ips_str`, which delivers about `{python} ResNet50H100Sustained.achieved_tflop_per_s_str` of model arithmetic, `{python} ResNet50H100Sustained.mfu_pct_str` of peak.
+**Measurement**: In MLPerf Training v3.1, NVIDIA's `{python} ResNet50H100Sustained.mlperf_accelerators_str`-accelerator H100 system trained ResNet-50 at about `{python} ResNet50H100Sustained.measured_ips_str` per accelerator, which delivers about `{python} ResNet50H100Sustained.achieved_tflop_per_s_str` of model arithmetic, `{python} ResNet50H100Sustained.mfu_pct_str` of peak.
 
 **Diagnosis**: The measurement sits `{python} ResNet50RooflineCheck.gap_mult_str` below the prediction. The roofline did not err; it bounded the convolutions and omitted the rest of the step. Normalization and elementwise layers have intensities far below the ridge and run on the bandwidth slope, the host must decode and augment thousands of JPEG images every second, and every step pays launch and synchronization overhead. The prediction cannot say which of these dominates. A profiler attributes the gap among them (perspective \ref{psp-benchmarking-measuring-iron-law-terms}), and @sec-model-training-identifying-bottlenecks-f57f works that attribution for a training step.
 
@@ -2440,30 +2443,29 @@ from mlsysim.fmt import fmt, check, fmt_memory, fmt_multiple, fmt_percent, fmt_p
 class MobileNetTradeoffCalc:
     """MobileNetV2 FP32 vs INT8 edge-deployment trade-off."""
 
-    # LOAD
-    latency_fp32_ms = 50  # scenario assumption: FP32 on the board's host CPU
-    latency_int8_ms = MobileNetLighthouseSetup.cpu_int8_latency.to(ms).magnitude  # same composite board as the lighthouse setup
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    latency_fp32 = 50 * ms  # scenario assumption: FP32 on the board's host CPU
+    latency_int8 = MobileNetLighthouseSetup.cpu_int8_latency  # same composite board as the lighthouse setup
     acc_fp32 = 71.8
     acc_int8 = 70.9
     size_fp32 = Models.Vision.MobileNetV2.size_in_bytes(BYTES_FP32)
     size_int8 = Models.Vision.MobileNetV2.size_in_bytes(BYTES_INT8)
-    milliseconds_per_second = 1000
 
-    # EXECUTE
-    latency_speedup = latency_fp32_ms / latency_int8_ms
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    latency_speedup = (latency_fp32 / latency_int8).to("").magnitude
     size_reduction = (size_fp32 / size_int8).to_base_units().magnitude
     acc_drop = acc_fp32 - acc_int8
-    fps_fp32 = milliseconds_per_second / latency_fp32_ms
-    fps_int8 = milliseconds_per_second / latency_int8_ms
+    fps_fp32 = (1 * second / latency_fp32).to("").magnitude
+    fps_int8 = (1 * second / latency_int8).to("").magnitude
 
-    # GUARD
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(size_reduction == 4.0, f"Expected 4x size reduction, got {size_reduction:.1f}x")
     check(latency_speedup > 3, f"Expected >3x latency speedup, got {latency_speedup:.1f}x")
     check(acc_drop < 1.0, f"Accuracy drop should stay below 1 point, got {acc_drop:.1f}")
 
-    # OUTPUT
-    latency_fp32_ms_str = fmt_time(latency_fp32_ms, unit="millisecond", precision=0, commas=False)
-    latency_int8_ms_str = fmt_time(latency_int8_ms, unit="millisecond", precision=0, commas=False)
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    latency_fp32_ms_str = fmt_time(latency_fp32, unit="millisecond", precision=0, commas=False)
+    latency_int8_ms_str = fmt_time(latency_int8, unit="millisecond", precision=0, commas=False)
     acc_fp32_str = fmt_percent(acc_fp32 / 100, precision=1, commas=False, style='symbol')
     acc_int8_str = fmt_percent(acc_int8 / 100, precision=1, commas=False, style='symbol')
     size_fp32_mb_str = fmt_memory(size_fp32, unit=MB, commas=False)
@@ -2595,7 +2597,7 @@ fig, (ax_lat, ax_en) = plt.subplots(1, 2, figsize=(6.2, 3.9), gridspec_kw={'widt
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 T, E = MobileNetTradeoffCalc, EdgeAccelSpeedupCalc
-host_fp32 = T.latency_fp32_ms
+host_fp32 = T.latency_fp32.to(ms).magnitude
 host_int8 = E.cpu_latency.to(ms).magnitude
 acc_int8 = E.accel_latency.to(ms).magnitude
 host_e2e = E.cpu_e2e.to(ms).magnitude

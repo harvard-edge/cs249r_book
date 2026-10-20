@@ -18,7 +18,7 @@ _m8 = mlsysim.Models.Language.Llama3_8B
 _gpu_hw = mlsysim.Hardware.Cloud.H100
 _ws_hw = mlsysim.Hardware.Cloud.Cerebras_CS3
 
-_params_b = _model.parameters.to("dimensionless").magnitude / 1e9
+_params_b = _model.parameters.to("Bparam").magnitude
 _weights_gb = _model.size_in_bytes("fp16").to("GB").magnitude
 _layers = _model.layers
 
@@ -60,7 +60,7 @@ _gpu_sens_fit = _sens_solver.solve(model=_m8, hardware=_gpu_hw, precision="fp16"
 A fundamentally different architecture can change *which* wall binds. GPUs are
 **weight-stationary**: weights live in HBM (`{python} f"{_gpu_cap_gib:.0f} GiB"` at `{python} f"{_gpu_bw_tbs:.2f} TB/s"` on `{python} _gpu_hw.name`), and the bottleneck is HBM capacity and bandwidth.
 The `{python} _ws_hw.name` takes the opposite approach: it is **activation-stationary**,
-holding activations on `{python} f"{_ws_sram_gib:.0f} GiB"` (`{python} f"{_ws_sram_gb:.1f} GB"`) of on-wafer SRAM (`{python} f"{_ws_sram_bw_pbs:.0f} PB/s"`) and streaming weights from external
+holding activations on `{python} f"{_ws_sram_gib:.0f} GiB"` of on-wafer SRAM (`{python} f"{_ws_sram_bw_pbs:.0f} PB/s"`) and streaming weights from external
 MemoryX nodes (`{python} f"{_ws_inject_bw_tbs:.1f} TB/s"`). Does this eliminate the memory wall, or does it move the wall somewhere else?
 
 ::: {.callout-note}
@@ -87,7 +87,7 @@ Conventional GPUs use a two-level memory hierarchy: fast but small on-chip SRAM
 (registers, L1/L2 cache) and large but slower off-chip HBM. The central idea
 of wafer-scale computing is to make the chip large enough that SRAM alone can hold the
 working set. The `{python} _ws_hw.name` is an entire silicon wafer (46,225 $\text{mm}^2$
-vs. ~800 $\text{mm}^2$ for an `{python} _gpu_hw.name` die) with `{python} f"{_ws_sram_gib:.0f} GiB"` (`{python} f"{_ws_sram_gb:.1f} GB"`) of on-wafer SRAM delivering `{python} f"{_ws_sram_bw_pbs:.0f} PB/s"` of bandwidth and `{python} f"{_ws_flops_pflops:.0f} PFLOP/s"` of peak compute across 900,000
+vs. ~800 $\text{mm}^2$ for an `{python} _gpu_hw.name` die) with `{python} f"{_ws_sram_gib:.0f} GiB"` of on-wafer SRAM delivering `{python} f"{_ws_sram_bw_pbs:.0f} PB/s"` of bandwidth and `{python} f"{_ws_flops_pflops:.0f} PFLOP/s"` of peak compute across 900,000
 cores.
 
 **GPU (weight-stationary):** Model weights live in HBM (`{python} f"{_gpu_cap_gib:.0f} GiB"` at `{python} f"{_gpu_bw_tbs:.2f} TB/s"` on `{python} _gpu_hw.name`). At each decode step, the entire
@@ -135,7 +135,7 @@ gpu_result = gpu_solver.solve(
 )
 
 info("GPU Baseline",
-     Model=f"{model.name} ({model.parameters.to('Gparam'):.0f})",
+     Model=f"{model.name} ({model.parameters.to('Bparam').magnitude:.0f}B)",
      Hardware=gpu_hw.name,
      Bottleneck=gpu_result.bottleneck,
      Latency=gpu_result.latency.to('ms'),
@@ -144,7 +144,7 @@ info("GPU Baseline",
 ```
 
 At batch size 1, `{python} _model.name` performs 2 FLOPs per parameter per token and must stream `{python} f"{_params_b:.0f}B"`
-parameters (`{python} f"{_weights_gb:.0f} GB"` at FP16). Its arithmetic intensity is `{python} f"{_gpu_ai:.2f} FLOP/byte"`, far below the `{python} _gpu_hw.name` ridge point of `{python} f"{_gpu_ridge:.1f} FLOP/byte"`. Because `{python} f"{_weights_gb:.0f} GB"` exceeds a single `{python} _gpu_hw.name`'s `{python} f"{_gpu_cap_gib:.0f} GiB"` (`{python} f"{_gpu_cap_gb:.1f} GB"`) HBM capacity, single-device execution spills over PCIe (`{python} f"{_gpu_result.offload_effective_bw.to('GB/s').magnitude:.0f} GB/s"`) for a latency of `{python} f"{_gpu_lat_ms:,.1f} ms"`, and even across a multi-GPU node where weights fit in `{python} f"{_gpu_bw_tbs:.2f} TB/s"` HBM, pure weight transfer requires `{python} f"{_gpu_hbm_only_ms:.1f} ms"` while the `{python} f"{_gpu_flops_tflops:.0f} TFLOP/s"` compute units take `{python} f"{_gpu_result.latency_compute.to('ms').magnitude:.2f} ms"`.
+parameters (`{python} f"{_weights_gb:.0f} GB"` at FP16). Its arithmetic intensity is `{python} f"{_gpu_ai:.2f} FLOP/byte"`, far below the `{python} _gpu_hw.name` ridge point of `{python} f"{_gpu_ridge:.1f} FLOP/byte"`. Because `{python} f"{_weights_gb:.0f} GB"` exceeds a single `{python} _gpu_hw.name`'s `{python} f"{_gpu_cap_gib:.0f} GiB"` HBM capacity, single-device execution spills over PCIe (`{python} f"{_gpu_result.offload_effective_bw.to('GB/s').magnitude:.0f} GB/s"`) for a latency of `{python} f"{_gpu_lat_ms:,.1f} ms"`, and even across a multi-GPU node where weights fit in `{python} f"{_gpu_bw_tbs:.2f} TB/s"` HBM, pure weight transfer requires `{python} f"{_gpu_hbm_only_ms:.1f} ms"` while the `{python} f"{_gpu_flops_tflops:.0f} TFLOP/s"` compute units take `{python} f"{_gpu_result.latency_compute.to('ms').magnitude:.2f} ms"`.
 
 ---
 
@@ -228,7 +228,7 @@ but "which wall does it move, and what new wall does it create?"
 
 The WSE-3 has a distinct optimization knob: batch size controls how much compute is performed per weight injection.
 At the theoretical balance point $B^* = `{python} f"{_ws_result.optimal_batch_size:,}"`$, per-layer compute time matches the `{python} f"{_ws_layer_inj_ms:.2f} ms"` injection time.
-Activations and KV-cache, however, must fit in `{python} f"{_ws_sram_gib:.0f} GiB"` (`{python} f"{_ws_sram_gb:.1f} GB"`) of on-wafer SRAM, and that limit is the SRAM ceiling.
+Activations and KV-cache, however, must fit in `{python} f"{_ws_sram_gib:.0f} GiB"` of on-wafer SRAM, and that limit is the SRAM ceiling.
 
 ```{python}
 rows = []

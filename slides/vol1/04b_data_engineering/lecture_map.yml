@@ -1,0 +1,252 @@
+chapter: 04_data_engineering
+lecture: "04b"
+title: "Data Engineering, Part 2"
+subtitle: "Feeding the accelerator and detecting drift"
+layer: data
+minutes: 75
+notes_minutes: 71
+target_ideas: 30
+thesis: "A released dataset must still reach the accelerator as fast as it computes and stay close to the data the world now sends; neither failure raises an error, so each is measured against a budget."
+hook:
+  minutes: "0-4"
+  setup: "Two failures in which nothing crashed. First, measured: profiling nine vision and audio models found training time often dominated by data stalls, time spent waiting for data to be fetched and preprocessed; a better loader cut training time by as much as 5x on one server with the same model and the same accelerators (Mohan et al. 2021). Second, the chapter's illustrative keyword spotter: six months after launch its detection rate measured four points below target, and no one had touched the model."
+  question_to_class: "Neither system raised an error. What number would have exposed each one, and when?"
+  payoff: "The first is the min-of-rates law: training runs at the slower of compute and data supply, so the share of each step spent waiting on input belongs on the dashboard. The second is drift statistics plus a controlled comparison of fixed versions. The synthesis redraws both failures with the measurement that catches each."
+  sources: ["Mohan et al., Analyzing and Mitigating Data Stalls in DNN Training, VLDB 2021 (abstract: training time often dominated by data stall time; up to 5x on a single server)", "chapter §4.9.3", "chapter §4.12 (illustrative scenario)"]
+driving_question: "How do we know the data pipeline is keeping pace with the accelerator and with the world?"
+running_example: "ResNet-50 on one A100 carries delivery: 312 TFLOP/s peak, 24.6 GFLOP per training image, ceiling 12,682 img/s, 3,200 img/s sustained, 150 KB JPEG, 602 KB decoded FP32 (§4.9.3). The keyword spotter (KWS) from Part 1 carries drift: 98 percent detection at launch, four points lower six months later (illustrative scenario, §4.12)."
+recall: "Part 1: the KWS dataset release records, for every clip, a split from a hash of the speaker key, a label with its rubric version, and the feature configuration with its frozen statistics. Name two fields and the failure each prevents (leakage across speakers; a rubric change mistaken for a data change; training-serving skew)."
+
+concept_questions:
+  - q: "What does it cost to move a dataset to the computation?"
+    picture: "Given card and line-by-line calculation; then two bars of transfer time, 10 Gb/s against 100 Gb/s, beside a line for a 20-hour training run."
+    numbers: "1 PB over 100 Gb/s = 12.5 GB/s -> 80,000 s, about 22 h; egress $20,000 at $0.02/GB (about 5,000 TPU v4 hours); over 10 Gb/s about 9.3 days (Napkin Math 4.7, §4.9.1)."
+    example: "Petabyte in US East, accelerators free in US West; lakehouse engines query data where it sits."
+    read: "§4.9.1"
+  - q: "Why has cheap storage not removed the need for storage tiers?"
+    picture: "Book figure fig-storage-price-trend (Our World in Data), annotated at 1956 and 2023 and with the 2023 gaps between media."
+    numbers: "Hard disk $88B/TB (1956) to $10.6/TB (2023), about 10 orders of magnitude; in 2023 DRAM 42x solid state per TB, solid state 2.4x hard disk (§4.10.2, figure 16)."
+    example: "Each medium fell in price, but the ratios between media held since the 1980s."
+    read: "§4.10.2"
+  - q: "Does a workload need low latency or high bandwidth?"
+    picture: "Build on one slide: the latency ladder against a 1 ms line (from Part 1); then sequential bandwidth bars per tier; then the two access patterns tagged on them."
+    numbers: "Latency: DRAM 100 ns, local NVMe 100 us, remote SSD 2 ms, object store 20 ms. Bandwidth: in-memory cache 20-50 GB/s, local NVMe 5-7 GB/s, object store 100-500 MB/s per connection. Serving 10,000 req/s x 10 reads = 100,000 IOPS; KWS corpus 748.8 GB loads in 149.8 s at 5 GB/s against 7,488 s at 100 MB/s, and costs $17.2/month in object storage against $74.9-224.6/month on NVMe (§4.10, table 8)."
+    example: "Feature lookup per request (latency); an epoch scan of images (bandwidth)."
+    read: "§4.10.1 to §4.10.2"
+  - q: "How fast does the accelerator consume images, and what is the feeding loss when storage cannot keep up?"
+    picture: "Two bars (arithmetic ceiling 12,682 img/s, sustained 3,200 img/s, gap labeled 25 percent); then the three-stage pipeline built step by step (storage -> host decode -> accelerator) with each stage's rate; then the estimate."
+    numbers: "312 TFLOP/s / 24.6 GFLOP per training image = 12,682 img/s; sustained 3,200 img/s, about 25 percent; 3,200 img/s x 150 KB = 480 MB/s needed; attached volume 250 MB/s; 250/480 = 0.52, so 48 percent of the training rate lost (§4.9.3)."
+    example: "ResNet-50 on one A100 reading JPEGs from a cloud block volume."
+    read: "§4.9.3"
+  - q: "Which bytes count: compressed or decoded?"
+    picture: "Predict card, then paired bars of required bandwidth for JPEG (480 MB/s) and decoded FP32 (1.9 GB/s) against the 250 MB/s supply."
+    numbers: "Decoded FP32 image 602 KB, about 4x the JPEG; 1.9 GB/s needed; modeled loss 87 percent; caching decoded tensors also freezes the random crops augmentation varies each epoch (§4.9.3)."
+    example: "A team caches pre-decoded tensors to save CPU decode."
+    read: "§4.9.3"
+  - q: "Which storage tier covers the rate the pipeline is heading toward?"
+    picture: "Bars of sequential bandwidth per option against two demand lines (480 MB/s today, 1.9 GB/s ceiling); third step adds the eight-accelerator demand."
+    numbers: "Object store about 100 MB/s per connection, 19 streams for the ceiling; SATA 500 MB/s -> 3,333 img/s, enough today, 26 percent of the ceiling; NVMe 5-7 GB/s covers it; eight accelerators: 25,600 img/s, 3.8 GB/s compressed, 15.4 GB/s decoded (Napkin Math 4.8, §4.10.1)."
+    example: "Size for the rate the pipeline is heading toward; data that fits in host memory is served from the page cache after the first epoch."
+    read: "§4.10.1, §4.10.3"
+  - q: "Once storage keeps up, what binds next?"
+    picture: "Book figure fig-dataloader-choke-point: throughput rising with loader workers to the 3,200 img/s saturation line at about 9 workers."
+    numbers: "375 img/s per worker -> 9 workers match one A100 (§4.10.4); data stalls measured across nine models, up to 5x training-time reduction on one server from a better loader (Mohan et al. 2021)."
+    example: "JPEG decode on host CPUs; MFCC extraction for KWS. Lecture 8 counts the workers for an H100."
+    read: "§4.10.4"
+  - q: "How does file layout change the bytes read?"
+    picture: "Bars of bytes read: row format all 100 columns, columnar 20; second step a column of 200 country codes collapsing under dictionary encoding."
+    numbers: "20 of 100 equal columns: 5x effective bandwidth (Napkin Math 4.9, equation 6); dictionary encoding of a 200-value country code over 100M rows 20-50x; projection plus compression 20-100x against uncompressed rows (§4.10.5)."
+    example: "Fraud features in Parquet."
+    read: "§4.10.5"
+  - q: "Which codec should a loader use: the denser one or the faster one?"
+    picture: "Diagnose card with two symptoms; then bars of CPU decompression minutes per epoch for 100 GB."
+    numbers: "gzip 6-8x at 120 MB/s, Snappy 2-3x at 500 MB/s; 100 GB costs 13.9 against 3.3 min per epoch; over 50 epochs about 9 h of host CPU (§4.10.5; 9 h is the chapter's rounding of 8.8 h)."
+    example: "CPU-bound loader -> Snappy; storage-bound path -> denser codec, because fewer bytes per sample raise the supply rate (equation 5)."
+    read: "§4.10.5"
+  - q: "Why pack small files into shards, and what does sharding cost?"
+    picture: "Millions of 150 KB files against a few long shards (diagram); a shuffle buffer drawn between shard and batch; then eight worker bars, seven at 12 ms and one at 180 ms."
+    numbers: "One straggler partition: 180 ms against 12 ms holds the whole step (§4.10.5); FFCV trains ResNet-50 on ImageNet to 75 percent in about 20 minutes on one machine by redesigning format and loader together (Leclerc et al. 2023)."
+    example: "WebDataset or TFRecord shards; KWS corpus partitioned by speaker and date."
+    read: "§4.10.5"
+  - q: "What are the three kinds of drift, and which signal detects each?"
+    picture: "Three panels p(x), p(y), p(y|x), each with an example and its detector (build). Lecture 1's ImageNetV2 drop is recalled in one line on the divider and classified as covariate shift on the panels."
+    numbers: "Recall only: re-collecting ImageNet's test set by the original procedure cost 11-14 points (Recht et al. 2019; Lecture 1 tells it); PSI bands below 0.1, 0.1 to 0.25, above 0.25 (§4.12.1)."
+    example: "New microphone (covariate), flu season (label), adapting fraudsters (concept)."
+    read: "§4.12.1"
+  - q: "How does the K-S test flag drift in one continuous feature?"
+    picture: "Two empirical CDFs of clip loudness, D marked (illustrative curves; chapter numbers), then the critical value as n grows."
+    numbers: "n = 1,000 each: critical value 1.36 sqrt(2000/10^6) = 0.061; observed D = 0.08 -> flag (Napkin Math 4.5); n = 100,000 each: 0.006 (derived from the same formula)."
+    example: "A phone app update halves microphone gain on 15 percent of crowdsourced clips; every file passes the schema (§4.5.3)."
+    read: "§4.5.3, §4.12.1"
+  - q: "How does PSI score a shift across bins?"
+    picture: "Paired bars for five loudness bins (baseline 20 percent each against recent 30/25/20/15/10), then each bin's term written on its bar, then the sum against the bands."
+    numbers: "Illustrative: terms 0.041, 0.011, 0, 0.014, 0.069; PSI = 0.135, moderate band (formula and bands §4.12.1; bins derived for the slide). KL: asymmetric and infinite on empty bins, so smooth them (§4.12.1)."
+    example: "The same quieter-microphone shift, binned."
+    read: "§4.12.1"
+  - q: "What can input monitors not see?"
+    picture: "Three-row table built row by row: missed wake words (no recording uploaded), label quality drift (kappa 0.85 -> 0.72 with features flat), concept drift (labels arrive late), each with the collection that does see it."
+    numbers: "Kappa 0.85 to 0.72 in six months (§4.6.4, illustrative campaign); misses leave no log (§4.12.1, §4.13)."
+    example: "The deployed KWS uploads audio only when it wakes."
+    read: "§4.6.4, §4.12.1, §4.13"
+  - q: "How is a regression with no model change traced to its cause?"
+    picture: "The six-month KWS regression: three silent changes, then three controlled comparisons, each holding all else fixed; book figure fig-debug-flowchart as the general order; then the debt categories with example thresholds."
+    numbers: "Detection four points below the 98 percent target six months after launch (illustrative, §4.12); thresholds PSI 0.1 / 0.25, label error 1 / 5 percent, schema branches 3 / 10, data cards 80 / 50 percent (table 9, examples, not standards)."
+    example: "Replay fixed audio through old and new preprocessing; rescore fixed predictions under old and new rubrics; compare microphone cohorts through one pipeline and one rubric."
+    read: "§4.12.2 to §4.12.5"
+
+worked_examples:
+  - name: "Napkin Math 4.7: move a petabyte or move the code"
+    steps: ["1 PB in US East; accelerators in US West; 100 Gb/s link; $0.02/GB egress", "100 Gb/s / 8 = 12.5 GB/s", "10^6 GB / 12.5 GB/s = 80,000 s, about 22 h", "10^6 GB x $0.02 = $20,000", "a run shorter than 22 h or cheaper than $20,000 costs less than its own transfer: move the code; the wire time is the optimistic part of a migration"]
+  - name: "§4.9.3 and Napkin Math 4.8: feeding ResNet-50"
+    steps: ["ceiling 312 TFLOP/s / 24.6 GFLOP = 12,682 img/s; sustained 3,200 img/s", "3,200 x 150 KB = 480 MB/s", "250 MB/s supplies 52 percent: 48 percent lost", "decoded 602 KB: 1.9 GB/s, 87 percent lost", "SATA 500 MB/s: 3,333 img/s today, 26 percent of the ceiling; NVMe covers it; eight accelerators need 3.8 GB/s"]
+  - name: "§4.10.5: choosing a codec"
+    steps: ["100 GB per epoch; gzip 6-8x at 120 MB/s, Snappy 2-3x at 500 MB/s", "gzip 13.9 min of decode per epoch, Snappy 3.3 min", "50 epochs: about 9 h of host CPU difference", "matters only when decode is on the critical path", "storage-bound path: the denser codec raises the supply rate instead"]
+  - name: "Napkin Math 4.5 and a PSI example: detecting a quieter microphone"
+    steps: ["K-S: D = 0.08 against critical 0.061 at n = 1,000 each: flag", "at n = 100,000 each the critical value is 0.006: significance alone flags harmless shifts", "PSI over five baseline quintiles: recent shares 30/25/20/15/10 percent (illustrative)", "terms 0.041 + 0.011 + 0 + 0.014 + 0.069 = 0.135: moderate", "a flag starts an investigation and an outcome check, not a retrain"]
+
+active_learning:
+  - at_minute: 2
+    type: discuss
+    prompt: "Two failures, no error in either. What number would have exposed each one?"
+    answer: "For the stalled training, the share of each step spent waiting on input against the compute time; for the keyword spotter, input distribution statistics against the training baseline and a measured detection rate on fresh labeled audio. Answered in full at the synthesis."
+  - at_minute: 5
+    type: retrieval
+    prompt: "Close your notes. Name two fields the KWS release records for every clip, and the failure each prevents."
+    answer: "Speaker-hash split (leakage of a voice into the test set); label with rubric version (a rubric change mistaken for a data change); feature configuration and frozen statistics (training-serving skew); content hash (duplicates)."
+  - at_minute: 8
+    type: estimate
+    prompt: "1 PB, 100 Gb/s, $0.02/GB egress. How long, and how much, to move it?"
+    answer: "12.5 GB/s; 80,000 s, about 22 h; $20,000."
+  - at_minute: 21
+    type: estimate
+    prompt: "ResNet-50 at 3,200 img/s, 150 KB per JPEG, storage at 250 MB/s. What fraction of the training rate survives?"
+    answer: "480 MB/s needed; 250/480 = 52 percent survives; 48 percent lost."
+  - at_minute: 25
+    type: predict
+    prompt: "To spare the CPU, the team stores decoded FP32 tensors instead of JPEGs. Training gets A) faster B) no change C) slower."
+    answer: "C: 602 KB per image needs 1.9 GB/s; the loss rises to 87 percent, and fixed tensors freeze augmentation."
+  - at_minute: 35
+    type: diagnose
+    prompt: "Two loaders read the same 100 GB dataset. Loader 1: CPU at 100 percent, disk mostly idle. Loader 2: disk saturated, CPU mostly idle. Which codec for each?"
+    answer: "Loader 1 is CPU-bound: Snappy (3.3 against 13.9 min per epoch). Loader 2 is storage-bound: the denser codec, because fewer bytes per sample raise the data supply rate."
+  - at_minute: 46
+    type: concept_question
+    prompt: "Classify three shifts: new microphone; flu-season prevalence; fraudsters adapt."
+    answer: "Covariate, label, concept. Only concept drift needs labels to detect."
+  - at_minute: 55
+    type: concept_question
+    prompt: "True or false: production logs show where the model fails; a drift flag means retrain; flat input statistics mean the labels are fine."
+    answer: "All false: misses leave no log (§4.13); a flag starts an investigation and outcome check (§4.5.3); label quality drift moved kappa from 0.85 to 0.72 with features flat (§4.6.4)."
+  - at_minute: 59
+    type: diagnose
+    prompt: "Detection fell four points in six months. A new microphone shipped, the labeling rubric was revised, and the metadata schema changed. Which comparison do you run first, and what do you hold fixed?"
+    answer: "Usually the rubric comparison first: rescore fixed predictions under old and new rubrics, needing no new audio. Then replay fixed recordings through old and new preprocessing with weights fixed; then compare microphone cohorts through one pipeline and one rubric (§4.12.5)."
+
+open_questions:
+  - "The ResNet-50 pipeline passes on a SATA drive today. How much headroom would you buy, and what evidence would tell you the rate is about to rise?"
+  - "Input monitors see covariate shift but not concept drift, and labels arrive weeks late. How long should a team wait for labels before acting on a drift alert, and who bears the cost of waiting?"
+  - "Moving compute to the data avoids egress fees but ties a team to one provider's region. When is paying to move a petabyte the right call?"
+
+more_examples:
+  - "Data stalls dominate training time across nine vision and audio models; a coordinated loader cut training time by up to 5x on one server (Mohan et al. 2021)."
+  - "Meta's recommendation training: data storage and ingestion became a dominant constraint on training performance and capacity (Zhao et al. 2022, cited in §4.9.3)."
+  - "FFCV: ResNet-50 on ImageNet to 75 percent in about 20 minutes on one machine by redesigning format and loader (Leclerc et al. 2023)."
+  - "Storage price per TB fell about 10 orders of magnitude since 1956 while the tier gaps stayed (Our World in Data, figure 16)."
+  - "Lakehouse engines query data where it sits, a direct answer to data gravity (Zaharia et al. 2021; §4.9.1)."
+  - "GPT-3 weights: about 700 GB in FP32, 350 GB in FP16; checkpoints compete with training reads (§4.10.2)."
+
+segments:
+  - name: "Moving Data"
+    divider: "What does it cost to move a dataset?"
+    read: "§4.9.1, §4.10.1, §4.10.2"
+    questions: [1, 2, 3]
+    land: "Large data pulls computation to it, and each tier is chosen for its access pattern: latency to serve, bandwidth to train."
+    minutes: 11
+  - name: "Feeding"
+    divider: "Can storage keep the accelerator fed?"
+    read: "§4.9.3, §4.10.3, §4.10.4"
+    questions: [4, 5, 6, 7]
+    focus: "Throughput <= min(compute rate, data supply rate); supply = BW(1 - overhead) / bytes per sample (equations 4 and 5)."
+    land: "Training runs at the slower of compute and data supply, and each fix to the slowest stage exposes the next."
+    minutes: 15.5
+  - name: "Fewer Bytes"
+    divider: "How do we cut the bytes each sample costs?"
+    read: "§4.10.5, §4.11"
+    questions: [8, 9, 10]
+    land: "Layout, codec, and shards change bytes per sample, the other lever in the supply rate; the right choice depends on which stage binds."
+    minutes: 10
+  - name: "Drift"
+    divider: "How do we detect that the world has moved?"
+    read: "§4.5.3, §4.6.4, §4.12.1"
+    questions: [11, 12, 13, 14]
+    land: "Input statistics flag covariate shift cheaply; label shift shows in the prediction mix; concept drift and missed detections need labels and collection designed for them."
+    minutes: 14.5
+  - name: "Debt"
+    divider: "Why does a pipeline decay when no one touches it?"
+    read: "§4.12.2 to §4.12.5"
+    questions: [15]
+    land: "A regression with no model change is debugged by comparing fixed versions, which only a recorded release makes possible."
+    minutes: 6.5
+
+closing:
+  return_to_hook: "Both hook failures were silent and both had a number. The stalled training run violated the min-of-rates law; the waiting share of each step, set against equation 4, names the stage to fix. The keyword spotter's regression showed as input drift (PSI, K-S on per-band statistics) and was traced by three controlled comparisons against the release Part 1 built."
+  read_and_practice: ["§4.9 to §4.12", "chapter self-check questions after §4.9, §4.10, §4.12", "Napkin Math 4.5, 4.7, 4.8, 4.9"]
+  further_reading:
+    - cite: "Chapter 4, Data Engineering, §4.9 to §4.12"
+      url: "https://mlsysbook.ai"
+      why: "Every number in today's delivery and drift arguments."
+    - cite: "Mohan, Phanishayee, Raniwala, Chidambaram, Analyzing and Mitigating Data Stalls in DNN Training, VLDB 2021"
+      url: "https://doi.org/10.14778/3446095.3446100"
+      why: "Measured data stalls across nine models and a loader that removes them."
+    - cite: "Leclerc et al., FFCV: Accelerating Training by Removing Data Bottlenecks, CVPR 2023"
+      url: "https://arxiv.org/abs/2306.12517"
+      why: "What redesigning format and loader together buys."
+    - cite: "Recht, Roelofs, Schmidt, Shankar, Do ImageNet Classifiers Generalize to ImageNet? ICML 2019"
+      url: "https://arxiv.org/abs/1902.10811"
+      why: "A careful measurement of what a small shift in collection costs."
+    - cite: "Sculley et al., Hidden Technical Debt in Machine Learning Systems, NeurIPS 2015"
+      url: "https://papers.nips.cc/paper/5656-hidden-technical-debt-in-machine-learning-systems"
+      why: "The origin of the pipeline-jungle and data-debt vocabulary."
+  bridge: "Lecture 5: the accelerator consumed 24.6 GFLOP per image today; what does a neural network actually compute?"
+
+left_to_reading:
+  - concept: "Energy cost of data movement (table 6)"
+    why: "Owned by Lecture 11 (energy ladder); one line in the gravity notes."
+  - concept: "Task-relevant signal and the data selection gain (equation 3)"
+    why: "Developed in Lecture 9; one line in the gravity notes."
+  - concept: "Database, warehouse, and lake (table 7), schema-on-read, data swamp"
+    why: "Descriptive taxonomy; the access-pattern build carries the idea."
+  - concept: "Loader worker scaling, prefetching, and overlap"
+    why: "Owned by Lecture 8 (training input pipeline); shown once as the next binding stage."
+  - concept: "Retraining decisions, detection delay, layered monitoring"
+    why: "Owned by Lectures 14 and 14b; drift flags here end at 'investigate'."
+  - concept: "Debt compounding (equation 7) and remediation strategies (§4.12.4)"
+    why: "Planning heuristic with assumed rates; one line in the debt notes."
+
+coverage:
+  primary_taught: ["The feeding problem", "Drift statistics"]
+  primary_recalled_from_part1: ["Data as code practice (release as the basis of debugging)", "Training-serving consistency (contrasted with drift)", "Labels are the specification (label quality drift)"]
+  primary_left_to_reading: []
+  secondary: ["Storage tiers and access patterns (taught)", "Data debt (taught)", "Dataset releases and lineage (applied in debugging)", "Validation at the ingestion boundary (K-S on the halved-gain batch)"]
+
+callbacks:
+  - {lecture: 1, concept: "ImageNetV2 re-collection (Recht et al. 2019)", where: "Drift divider note (one-line recall); drift-kinds ENGAGE (classified as covariate shift)"}
+
+notes_for_author:
+  - "2026-10-19 sweep (D3): the ImageNetV2 range-bar frame is removed; Lecture 1 tells the dataset in full and this deck recalls it on the Drift divider. Its minute goes to the divider recall (0.5) and to the drift-kinds frame, which now classifies it (0.5). images/recht_ranges.* is no longer used."
+  - "2026-10-19, panel fixes. Goals slide carries the course-thread strip with both halves of the dual mandate and the data factor filled (H1). The caching predict, the SATA SSD supply bars, and the K-S sample-size plot moved to [OPTIONAL], so the core runs about 49.5 minutes (M1); the title note says so."
+  - "The PSI bins (baseline quintiles, recent 30/25/20/15/10 percent) are illustrative and derived for the slide; the formula and bands are the chapter's. The slide says illustrative."
+  - "The K-S critical value at n = 100,000 (0.006) is derived from Napkin Math 4.5's formula."
+  - "Recht et al. 2019 and Mohan et al. 2021 numbers are from their abstracts (3-15 and 11-14 points; up to 5x on a single server). The chapter cites both papers but prints neither number."
+  - "The codec difference over 50 epochs computes to 8.8 h; the chapter prints 9 h. The slide shows 'about 9 h'."
+  - "Lecture 8 has its own Feeding segment (H100, 14 workers x 375 = 5,250 img/s). This deck shows the A100 worker crossing once as 'what binds next' and links forward; it does not teach worker scaling."
+  - "Lecture 14b recalls K-S and PSI from Lecture 4b. Part 1 taught PSI only in notes; this deck now teaches it, so Lecture 14b's recall line holds."
+  - "Images from Part 1 (latency ladder, storage supply bars, format bars, drift panels, K-S CDFs) are regenerated in this folder's images/make_figs.py from Part 1's code; decks do not share an images folder."
+
+build_notes:
+  - date: "2026-10-17"
+    note: "Built as 04b_data_engineering.tex: 34 frames, 71 minutes of notes, 25 notes tagged CORE and 8 OPTIONAL. Title slide reads 'Delivery and Drift' over the chapter's blueprint cover; the footer carries 'Data Engineering, Part 2'. Departures from the storyboard: the debugging frame drops the small copy of fig-debug-flowchart, which was illegible at slide size, and names figure 18 in the notes instead; the storage price trend and dataloader choke point are slide variants regenerated from the book's data and parameters (MLSysIM storage price series; 375 img/s per worker, 3,500 img/s illustrative cap); the straggler plot shows two bars (workers 1 to 7, worker 8); the K-S frame swaps the CDF build for the critical-value plot on its last step; the codec slide lists the ratios and decode rates on the given card."
+  - date: "2026-10-18"
+    note: "Round 1 fixes: 35 frames, 71 minutes of notes. The dataloader plot now draws training throughput, min(375 w, 3,200), with the loader's capacity as a thin dashed line past the crossing. The K-S frame is split: the CDF build and the D_crit formula (display-style fraction), then the critical value against sample size. The debugging frame adds figure 18's order of checks as a four-box strip. The tier slide drops the KWS corpus line to the notes, enlarges both plots, and names the online and offline feature stores in the notes. The petabyte slide drops the hard-drive photo. The PSI label reads 'moderate band'; baked-in figure captions removed. The synthesis drops the panel sub-captions, labels its question hypothetical, and carries the credit. Callbacks corrected: the slowest-stage principle is Lecture 1's overlapped iron law; K-S and PSI go to Lecture 14b; retraining to Lectures 14 and 14b."
+  - date: "2026-10-18"
+    note: "Visual and technical-depth pass (visual audit plus deckcheck): 39 pages in the handout (32 frames plus title, five dividers, and the focus slide), 71 minutes of notes. Every derived number now comes from images/calcs.py, which make_figs.py imports. Added real artifacts: the PyTorch profiler Overview page from the official TensorBoard profiler tutorial (DataLoader 58.4 percent of a 132.8 ms step; 76.2 ms with four workers), a pyarrow metadata session on the NYC TLC yellow-taxi Parquet file for January 2024 (payment_type 8.4 MB raw, 258 KB dictionary-encoded, 143 KB ZSTD), a tar listing of WebDataset's PubLayNet shard with the README's shuffle pipeline (replacing the drawn seek-versus-stream sketch), Evidently v0.7.23's default drift-test selection source (K-S at 1,000 rows or fewer, normed Wasserstein above), and Warden 2018's Speech Commands v1 versus v2 table (plus 4.3 points on the fixed v1 test set). The appetite plot adds NVIDIA's measured 2,470 img/s on one A100 (DeepLearningExamples README). The hook labels its left panel measured and its right panel an illustrative scenario. The tier note cites AWS's 100 to 200 ms S3 first-byte latency. Skipped: an AWS Snowball photo (no Commons image; AWS docs say Snowball Edge is no longer available to new customers). Notes trimmed by half a minute on fifteen frames to pay for the four new frames."

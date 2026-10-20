@@ -1,0 +1,289 @@
+chapter: 04_nervous
+lecture: "4"
+title: "The Nervous System"
+subtitle: "Bounded delays from the proposer to the drives"
+layer: nervous
+minutes: 75
+notes_minutes: 71.5
+core_minutes: 57.5
+target_ideas: 28
+thesis: "The path from proposer to drives must bound every delay, never wait on the proposer, and grant authority that expires on its own; the chunk lease is where those requirements meet the stopping budget."
+law: "Closes Part I by returning to the first law, irreversibility, which Lecture 2 stated for Part I: motion granted to a proposal cannot be recalled."
+thread_line: "Thread: the first law, irreversibility. Record: the handoff record."
+record: "Handoff record (the second record in the chain, after Lecture 2's limit record)."
+
+hook:
+  minutes: "0.5-4"
+  setup: "Mars Pathfinder, July 1997 (War Story 4.1): lander photo; the highest-priority bus task missed its deadline and the watchdog reset the computer, repeatedly."
+  question_to_class: "Why did the top-priority task stall? A) processor too slow B) it waited on a lock a low-priority task held C) memory error D) watchdog too strict"
+  payoff: "B. A medium-priority task starved the low-priority lock holder, so the blocking term B of R = C + B + I had no bound. Segment 4 names the term; the synthesis contrasts the lander's reset with the moving base's lease-driven stop."
+  sources: ["The Nervous System, War Story 4.1", "Jones 1997 (cs.cornell.edu/courses/cs614/1999sp/papers/pathfinder.html)", "Reeves 1997"]
+
+recall: "Lecture 3: intent model 336 ms at 2 Hz (503 mm of travel at 1.5 m/s), chunk policy 40 ms p99 renewed every 50 ms with 16 setpoints 25 ms apart (60 mm). Lecture 1: the elementary stop needs 762.9 mm of 1.10 m."
+driving_question: "Why must a moving machine keep checking its commands when its learned model stops responding?"
+goals:
+  - "Derive each tier's rate from a time constant; show why fast loops close in the drive."
+  - "Explain how a mailbox gives the tick a fresh proposal without waiting."
+  - "Size a chunk lease between its renewal floor and the pre-brake ceiling."
+  - "Tell a measured percentile from a response bound, and find the term that lost its bound."
+running_example: "The warehouse mobile manipulator (the running machine) on the aisle run at its 1.5 m/s drive limit toward a rack end with 1.10 m clear, with the two-speed brain (2 Hz intent model, 20 Hz chunk policy) above a 1 kHz permission tick on a safety microcontroller. A real machine of the class (ER-FLEX: MiR250 base, UR16e arm) is shown once. The stopping-budget row this lecture adds: the lease path, 93 mm, running total 835.5 mm (Napkin Math 4.1)."
+
+segments:
+  - name: Tiers
+    divider_question: "Why can the learned model never sit inside the motor loop?"
+    read: "§4.1 to §4.3.1, §4.6"
+    concept_questions: [1, 2, 3, 4, 5]
+    land: "Each tier takes its rate from physics, fast loops close where their sensors are, and the permission path runs on hardware the proposer cannot stall."
+    real_data: "Measured 1 ms task lateness on a laptop OS (data/jitter_*.npy); Pilz PNOZ s4 datasheet times."
+    minutes: 15
+  - name: Mailbox
+    divider_question: "How do two clocks hand over a proposal without waiting?"
+    read: "§4.3.2"
+    concept_questions: [6, 7, 8]
+    land: "The tick reads the freshest complete proposal in one bounded attempt and never waits for the writer; what it reads may still be old, so something must end its authority."
+    real_data: "Measured reader wait: mutex 3,766 us against seqlock 3.7 us (data/mailbox_*.npy); Linux v6.6 and ros2_control 5.4.0 source."
+    minutes: 12.5
+  - name: Lease
+    divider_question: "How long may a stalled proposal keep driving?"
+    read: "§4.4, §4.9 (Napkin Math 4.1)"
+    concept_questions: [9, 10, 11, 12, 13]
+    land: "The lease is a term in the stopping budget, sized between what the proposer can renew and what the brakes can still absorb."
+    real_data: "OpenVLA-7B measured on Jetson AGX Orin (Franklin 2024): 840, 471, 336 ms per frame, with the tool's log line; ROS 2 rmw jazzy QoS source."
+    minutes: 16.5
+  - name: Bounds
+    divider_question: "When is a deadline a guarantee?"
+    read: "§4.2, §4.5 (Napkin Math 4.2 and 4.3)"
+    concept_questions: [14, 15, 16]
+    land: "A deadline is a guarantee only when every term of the response time has a bound."
+    real_data: "Running maximum and p99 of the measured laptop task; oscilloscope trace of a 1 Mbit/s CAN frame (47 us)."
+    minutes: 11.5
+
+concept_questions:
+  - id: 1
+    q: "Why do the four tiers run at four different rates?"
+    picture: "rate_ladder (two steps): log axis of 500 ms, 50 ms, 1 ms, 50 us; step 2 adds what sets each rate (compute cost for the two upper tiers, a physical time constant for the two lower). Brushless servo drive photo (Ingenia i127) beside it."
+    numbers: "NS §4.1, §4.3.1: intent 500 ms, chunk 50 ms, tick 1 ms, current 50 us (20 kHz); L/R 2.7 ms, pole near 59 Hz (derived 58.9); 1.5 mm per tick at 1.5 m/s."
+    example: "Field-oriented control needs a fresh rotor angle every switching period, so it lives in the drive."
+    read: "§4.1, §4.3.1"
+  - id: 2
+    q: "Can a faster tick close a 20 Hz joint loop across a 1 ms bus?"
+    picture: "phase (three steps): stacked phase-lag bar hold 3.6, compute 1.8, bus 7.2 = 12.6 degrees against a 5 degree allowance; an infinitely fast tick still leaves 7.2."
+    numbers: "NS §4.3.1, equation 1 (illustrative crossover and allowance): 12.6 degrees, 2.5 times the allowance; 0.69 ms tolerable; 7.9 Hz highest crossover."
+    example: "Loop placement: velocity and current loops close in the drives; the tick supervises."
+    read: "§4.3.1"
+  - id: 3
+    q: "Why can the permission tick not share a general-purpose OS with the model?"
+    picture: "jitter: measured p50, p99, p99.9, max lateness of a 1 ms task, ordinary load and all cores loaded."
+    numbers: "Measured by the lecture authors (Apple M5 Max, macOS 26.4, 60,000 releases): max 9.9 ms and 35.8 ms; p99 252 and 598 us; 401 releases more than 1 ms late under load; 35.8 ms is 53.7 mm at 1.5 m/s (derived)."
+    example: "Page faults, interrupts, and memory contention from weight sweeps."
+    read: "§4.2"
+  - id: 4
+    q: "What does the two-processor split require, and who may write the drives?"
+    picture: "twoproc (three steps): application processor, untrusted board link, safety microcontroller with mailbox, tick, sole-writer drive registers; step 3: no wire from host to drives; independence is a hypothesis."
+    numbers: "NS §4.2 and §4.6: 2 Hz and 20 Hz proposers, 1 kHz tick, CRC and sequence number per frame."
+    example: "The 35 A calibration-port pitfall (§4.10) in the note."
+    read: "§4.2, §4.6"
+  - id: 5
+    q: "What stops the drives if the safety microcontroller itself hangs?"
+    picture: "E-stop and Pilz PNOZ s4 photos; relay plot: datasheet 10 ms typical, 20 ms maximum, against the laptop's 35.8 ms."
+    numbers: "Pilz PNOZ s4 datasheet 1001742-EN-05, Times; 30 mm and 53.7 mm at 1.5 m/s (derived)."
+    example: "Dual-channel STO circuit, NS §4.6 figure 8; torque off may coast."
+    read: "§4.6"
+  - id: 6
+    q: "Why must proposals cross the rate boundary as state messages?"
+    picture: "queue (two steps): FIFO of proposals read oldest first; one-slot mailbox overwritten in place."
+    numbers: "none (mechanism)"
+    example: "Event messages stay for diagnostic logs."
+    read: "§4.3.2"
+  - id: 7
+    q: "How long can each exchange hold up the reader when the writer stalls?"
+    picture: "mailbox_meas (predict, two steps): measured maximum read time for blocking mutex, one try-lock, one-attempt seqlock."
+    numbers: "Measured by the lecture authors (mailbox.c, 20,000 reads each): mutex 3,766 us with 99 reads over 1 ms; try-lock 4.4 us; seqlock 3.7 us with 358 torn reads rejected."
+    example: "ros2_control's RealtimeBuffer uses one try-lock."
+    read: "§4.3.2"
+  - id: 8
+    q: "How does a seqlock reader detect a torn read in one bounded attempt?"
+    picture: "seqlock (three steps): clean exchange 8/8; tick preempts a write, reads 9 (odd), rejects; host stalls, counter stays 10. Code slide: Linux v6.6 retry loop against ros2_control try-lock."
+    numbers: "NS §4.3.2 figure 4 panel b."
+    example: "DMB barrier on Cortex-M; three- and four-slot mailboxes."
+    read: "§4.3.2"
+  - id: 9
+    q: "What happens in the milliseconds after the proposer stalls?"
+    picture: "lease (three steps): renewals at 40 and 90 ms, stall at 100, lease 60 ms to 150, tick + bus + onset 22 ms, brake onset 172."
+    numbers: "NS §4.4 figure 4 panel a; 82 ms and 123 mm from last admission (derived)."
+    example: "A page fault or thermal throttling stalls the chunk policy."
+    read: "§4.4"
+  - id: 10
+    q: "What does the lease cost in the stopping budget?"
+    picture: "budget (two steps): braking 562.5, margins 150, onset 30 (742.5 mm), plus lease path 93 = 835.5 mm of 1,100."
+    numbers: "Napkin Math 4.1: ceiling 258.3 ms; lease path 93 mm; 82 ms; 176.3 ms left; floor 55 ms."
+    example: "The aisle run at 1.5 m/s."
+    read: "§4.4"
+  - id: 11
+    q: "Could the intent model hold the chunk lease?"
+    picture: "openvla: measured OpenVLA-7B time per frame against the 60 ms lease and 258.3 ms ceiling. The measurement is Lecture 3's, recalled in one line; the tool's log line stays in Lecture 3 (2026-10-19 sweep)."
+    numbers: "Franklin 2024, Jetson AGX Orin 64GB, Bridge table: 840, 471, 336 ms; INT4 is 1.30 times the ceiling and 5.6 times the lease (derived)."
+    example: "Goals expire under the intent lease (Lecture 10)."
+    read: "§4.1, §4.3.1"
+  - id: 12
+    q: "Between which two limits must the lease sit?"
+    picture: "leaserule (two steps): waterfall 258.3, minus 22, minus 51.6, minus 63.3, to 121.4; floor 55 and lease 60."
+    numbers: "NS §4.9.1, equation 4 and table 1 (51.6 and 63.3 ms are allocations); 236.3 and 114.9 derived."
+    example: "If floor exceeds ceiling, no lease works at that speed."
+    read: "§4.9.1"
+  - id: 13
+    q: "What ends authority, and why can a heartbeat not renew it? Where are the limits kept?"
+    picture: "timers diagram with ROS 2 sensor-data QoS source; events timeline (capture, dispatch, admission, brake onset) with a handoff-record card."
+    numbers: "NS §4.4.1: lease 60 ms, heartbeat 100 Hz with 30 ms timeout, self-watchdog 5 ms; table 1: 51.6, 63.3, 82, 196.9 ms."
+    example: "Bookout v. Toyota watchdog dispute (note); bench p99 recorded as a measured distribution."
+    read: "§4.4.1, §4.9"
+  - id: 14
+    q: "What is a response time made of, and what is a WCET?"
+    picture: "rta (three steps): unloaded 135 us; declared WCET 250 (115 to justify); B 50, I 40, R 340; deadline 400, margin 60."
+    numbers: "NS §4.2 figure 1, Definition 4.1, Napkin Math 4.2."
+    example: "Estimate: blocking 120 us gives R = 410 us, a 10 us miss."
+    read: "§4.2, §4.5.1"
+  - id: 15
+    q: "Why can no test campaign establish the worst case?"
+    picture: "runmax: running maximum and running p99 of the measured laptop task against releases tested; then the Pathfinder quote with B highlighted."
+    numbers: "Measured: max 0.3 ms after 100 releases, 5.8 ms after 1,000, 35.8 ms after 60,000; p99 settles near 600 us."
+    example: "Nominal logs prove isolation (fallacy); priority inheritance (Sha et al. 1990)."
+    read: "§4.5.1, §4.10"
+  - id: 16
+    q: "Do nine axes fit one CAN FD bus in a 1 ms cycle?"
+    picture: "bus: serialization time per cycle for one CAN FD bus, per-limb buses, and EtherCAT; oscilloscope photo of a real CAN frame; EtherCAT slave controller chip."
+    numbers: "Napkin Math 4.3: 56.6 us per frame; 1,018.8 us (101.9 percent); arm 792.4 (79.2); EtherCAT 22.0 (2.2); 8 axes per CAN FD bus (derived). Photo: 47 us for a 1-byte CAN frame at 1 Mbit/s."
+    example: "Occupancy is a necessary check that falls short of a response bound; clock synchronization bounds jitter and leaves delay unbounded."
+    read: "§4.5.2 to §4.5.4"
+
+concept_trace:
+  - concept: "Independence requirement"
+    frame: "The permission path runs where the proposer cannot reach"
+    shows: "twoproc build, step 3 text: independence requirement and the two-chip hypothesis"
+  - concept: "Rate tiers from time constants"
+    frame: "Each tier's rate comes from a time constant or a compute cost"
+    shows: "rate_ladder build with what sets each rate"
+  - concept: "Delay spends phase margin"
+    frame: "Predict: can a faster tick close the loop?"
+    shows: "phase-lag stacked bars against the 5 degree allowance"
+  - concept: "Freshest-proposal mailbox"
+    frame: "A queue hands the tick old plans; a mailbox the newest"
+    shows: "queue build (FIFO against one-slot mailbox); measured reader wait; seqlock three cases"
+  - concept: "Chunk lease"
+    frame: "A stalled proposal keeps driving until its lease ends"
+    shows: "lease timeline build; the kit stopping-budget bar on the next frame (budget_bar_step3, then budget_bar_step4, which names the 93 mm lease path inside the delay)"
+  - concept: "Authority-expiry timers"
+    frame: "Four events end authority; a heartbeat renews none"
+    shows: "timers diagram (four events, earliest ends authority)"
+  - concept: "Response bound not percentile"
+    frame: "Response time adds waiting to running: R = C + B + I"
+    shows: "rta build; measured running maximum on a later frame"
+  - concept: "Sole-writer actuation authority"
+    frame: "Only the tick writes a drive register"
+    shows: "solewriter build (2 steps): the tick as the only path to the drive registers; then the 35.0 A calibration-port write the mailbox never sees (NS 4.6)"
+
+worked_examples:
+  - name: "Napkin Math 4.1: the price of a lease"
+    steps: ["given: 1.5 m/s, 2 m/s^2, 1,100 mm, 150 mm margins, 20 ms onset, 1 ms tick and bus, 60 ms lease", "braking 562.5 mm; ceiling 258.3 ms", "lease path 62 ms = 93 mm; total 835.5 mm", "82 ms from last admission to brake onset; 176.3 ms left", "meaning: every lease millisecond costs 1.5 mm; sit just above the 55 ms floor"]
+  - name: "Napkin Math 4.2: the response-time margin"
+    steps: ["given: C 250, B 50, I 40, D 400 us", "R = 340 us; margin 60", "blocking 120 us: R = 410, misses by 10", "meaning: the margin is only as dependable as its weakest bound"]
+  - name: "Napkin Math 4.3: fieldbus serialization"
+    steps: ["given: 9 axes, 8-byte records, CAN FD 1/5 Mbps, EtherCAT 100 Mbps", "one CAN FD frame 56.6 us; 18 frames 1,018.8 us", "arm bus 792.4 us; EtherCAT 22.0 us", "meaning: occupancy is a necessary check; a response bound needs blocking and retransmission too"]
+
+active_learning:
+  - at_minute: 0.5
+    type: predict
+    prompt: "Why did Pathfinder's top-priority task stall?"
+    answer: "B: it waited on a mutex held by a low-priority task that medium-priority work starved."
+  - at_minute: 4
+    type: retrieval
+    prompt: "How often do the two proposers renew, and how far does the base move while each computes?"
+    answer: "336 ms at 2 Hz, 503 mm; 40 ms p99 renewed every 50 ms, 60 mm."
+  - at_minute: 12.5
+    type: predict
+    prompt: "Can a faster tick close a 20 Hz loop over a 1 ms bus?"
+    answer: "No: the bus alone costs 7.2 degrees against a 5 degree allowance; close the loop in the drive."
+  - at_minute: 27
+    type: predict
+    prompt: "How long can each exchange hold up the reader?"
+    answer: "Mutex 3,766 us measured; try-lock 4.4 us; seqlock 3.7 us with 358 torn reads rejected."
+  - at_minute: 34.5
+    type: concept_question
+    prompt: "True or false: zero packet loss means on-time delivery."
+    answer: "False: reliable delivery releases a backlog of stale samples; the path needs a delivery bound and a freshness deadline."
+  - at_minute: 44
+    type: estimate
+    prompt: "What does a 100 ms lease cost?"
+    answer: "40 ms more lease is 60 mm; total 895.5 mm; still under the 121.4 ms limit, but it spends margin."
+  - at_minute: 56.5
+    type: estimate
+    prompt: "Blocking grows to 120 us; does the tick meet 400 us?"
+    answer: "R = 410 us, a 10 us miss; at most 110 us of blocking fits."
+  - at_minute: 65
+    type: retrieval
+    prompt: "For the lander and the stalled robot: which delay had no bound, and what bounds it?"
+    answer: "Pathfinder: B, bounded by priority inheritance. Robot: no lock, R bounded at 340 us, and the 60 ms lease starts braking 82 ms after the last admission."
+
+open_questions:
+  - "If a learned policy runs as fast as the enforcer, what does the separate permission path still guarantee?"
+  - "When can one system-on-chip with partitioned cores meet the same independence requirement?"
+  - "Who should own the lease's number: the model team, the controls team, or the safety assessor?"
+
+more_examples:
+  - "Mars Pathfinder priority inversion, 1997 (Jones 1997; Reeves 1997)."
+  - "Bookout v. Toyota (2013) and the watchdog fed from a timer interrupt (Barr 2013; NASA NESC 2011)."
+  - "ros2_control RealtimeBuffer one-attempt try-lock (realtime_tools 5.4.0)."
+  - "Safety over EtherCAT and PROFIsafe black-channel frames (IEC 61784-3)."
+  - "OpenVLA-7B on Jetson AGX Orin (Franklin 2024)."
+  - "Humanoid capstone: a 303 ms balance divergence timescale (Systems Perspective 4.2), left to the reading."
+
+left_to_reading:
+  - concept: "Command interface check burden (position, velocity, torque, impedance)"
+    why: "Second-order; the time budget goes to the eight primary concepts. §4.6.1."
+  - concept: "Setpoint interpolation across rates (quintic spline bridge)"
+    why: "Second-order; named in the lease-slide note only. §4.4.2."
+  - concept: "Handoffs matrix in full (table 3) and the humanoid capstone"
+    why: "Detail better read than heard; the handoff record card carries the idea. §4.9, Systems Perspective 4.2."
+
+further_reading:
+  - cite: "Sha, Rajkumar, and Lehoczky, Priority Inheritance Protocols, IEEE Trans. Computers, 1990"
+    why: "The protocol the Pathfinder fix enabled, and the blocking bound."
+  - cite: "Kopetz, Real-Time Systems, 2nd ed., Springer, 2011"
+    why: "State messages and temporal accuracy behind the mailbox and proposal header."
+  - cite: "Gray and Cheriton, Leases, SOSP 1989"
+    why: "The distributed-systems lease the chunk lease adapts."
+  - cite: "Jones, What really happened on Mars Rover Pathfinder, 1997, and Reeves's reply"
+    url: "https://www.cs.cornell.edu/courses/cs614/1999sp/papers/pathfinder.html"
+    why: "The story from the conference room and from JPL."
+  - cite: "Buttazzo, Hard Real-Time Computing Systems, 3rd ed., 2011"
+    why: "Response-time analysis with task sets to work by hand."
+
+callbacks:
+  - {lecture: "1", concept: "Elementary stopping budget (762.9 mm of 1.10 m)", where: "Recall slide card and credit; price-of-a-lease note"}
+  - {lecture: "1", concept: "Proposal boundary and five-level machine", where: "Map slide note and credit (The Causal Boundary, §1.7)"}
+  - {lecture: "1", concept: "Four bedrock laws (first law, irreversibility)", where: "Goals slide footer"}
+  - {lecture: "2", concept: "Credible deceleration", where: "Price-of-a-lease note"}
+  - {lecture: "2", concept: "Measurement freshness deadline", where: "Timers slide note"}
+  - {lecture: "2", concept: "Limit record (record chain)", where: "Goals note; handoff record note"}
+  - {lecture: "3", concept: "Two-speed brain (336 ms, 50 ms chunks); Lecture 3's measured OpenVLA latency (840, 471, 336 ms), recalled in one line", where: "Recall slide, credit, note; rate ladder note; OpenVLA slide line, credit, and note"}
+  - {lecture: "15", concept: "Bookout v. Toyota, the timer-fed watchdog (Lecture 15 tells the case)", where: "Four-events note"}
+  - {lecture: "2", concept: "Part I's law, stated in Lecture 2; the stopping-budget bar at step 3", where: "Goals note; lease-budget slide step 1"}
+  - {lecture: "8", concept: "Observation age 51.6 ms", where: "leaserule figure label; events figure label; lease rule note; handoff note"}
+  - {lecture: "10", concept: "Expiring intent lease", where: "OpenVLA note"}
+  - {lecture: "11", concept: "Replacement latency 114.9 ms", where: "Handoff record note"}
+  - {lecture: "12", concept: "Certified floor beneath an unrated layer", where: "Hardwired-stop note"}
+  - {lecture: "13", concept: "Dispatch-to-admission allocation 63.3 ms", where: "leaserule figure label; events figure label; lease rule note; handoff note"}
+  - {lecture: "13", concept: "Per-resource independence inventory", where: "Two-processor note"}
+  - {lecture: "13", concept: "Placement trade-off (one SoC against two chips)", where: "Open questions note"}
+  - {lecture: "15", concept: "Fault-list derivation and fault injection", where: "Running-maximum note"}
+  - {lecture: "5", concept: "Next lecture: Physical Data", where: "Next-lecture slide"}
+
+coverage:
+  primary_taught: ["Independence requirement", "Rate tiers from time constants", "Delay spends phase margin", "Freshest-proposal mailbox", "Chunk lease", "Authority-expiry timers", "Response bound not percentile", "Sole-writer actuation authority"]
+  primary_left_to_reading: []
+  secondary: ["Fieldbus occupancy vs response (taught, optional slide)", "Handoff record and event timing (taught)", "Worst-case execution time (taught)", "Safety microcontroller (note on two-processor slide)", "Command interface check burden (reading)", "Setpoint interpolation across rates (note)"]
+
+notes_for_author:
+  - "2026-10-19 sweep (author decisions D3, D4, D10): the goals slide carries the volume's one thread line (thread_line); law callbacks follow the course plan (each part's first lecture states its law: L2, L5, L8, L14); remaining 'X, not Y' constructions and reveal colons in this deck's slides and notes were rewritten as claims."
+  - "Two figures plot measurements the lecture authors ran on a laptop (images/data, with C sources). They are labeled as such on the slides; rerun them on the teaching machine if preferred."
+  - "2026-10-19 sweep: the kit stopping-budget bar replaced the deck's own (budget_step1/2): step 3 (Lecture 2's bar), then step 4 (this lecture's lease path, 93 mm, cut out of the delay). The slide text keeps the numbers the old bar showed (835.5 mm for the lease path and onset alone, 264.5 left). images/budget_step1-2 and thumb_budget_step2 are unused on disk; the retrieval slide no longer shows the bar thumbnail."

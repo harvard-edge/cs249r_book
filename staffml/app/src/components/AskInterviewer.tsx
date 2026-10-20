@@ -285,7 +285,7 @@ export default function AskInterviewer({
       ? userTurns.map((m, i) => `${i + 1}. ${m.text}`).join("\n")
       : draft.trim()
       ? `1. ${draft.trim()}`
-      : "(no clarifying questions yet — write yours below this prompt)";
+      : "(no clarifying questions yet; write yours below this prompt)";
 
     // Copy-as-prompt body mirrors what the worker assembles so users get
     // the same behavior in their own LLM. Study mode embeds the canonical
@@ -319,7 +319,7 @@ Please answer each as the interviewer.`;
     // navigator.clipboard is undefined on insecure-context (http on non-localhost)
     // and may throw on permission denial. Handle both cleanly.
     if (typeof navigator === "undefined" || !navigator.clipboard) {
-      setError("Clipboard API not available — try using a secure (https) context.");
+      setError("Clipboard API not available. Try using a secure (https) context.");
       return;
     }
     try {
@@ -377,7 +377,7 @@ Please answer each as the interviewer.`;
                   ) : (
                     <>
                       Practice the clarification ritual real interviews reward. Your questions go to a
-                      small AI interviewer with a Socratic constraint — it can answer constraints, never
+                      small AI interviewer with a Socratic constraint: it can answer constraints but never
                       solve the problem.{" "}
                       <span className="font-semibold text-textPrimary">Free, rate-limited,
                       best-effort. AI may be wrong.</span>
@@ -461,8 +461,8 @@ Please answer each as the interviewer.`;
             onKeyDown={onKeyDown}
             placeholder={
               isStudyMode
-                ? "Ask the tutor — e.g. 'walk me through the arithmetic intensity' or 'why 16, not 32?'"
-                : "Ask a clarifying question — e.g. 'what's the latency budget?' or 'how many concurrent users?'"
+                ? "Ask the tutor, e.g. 'walk me through the arithmetic intensity' or 'why 16, not 32?'"
+                : "Ask a clarifying question, e.g. 'what's the latency budget?' or 'how many concurrent users?'"
             }
             rows={2}
             className="w-full bg-background border border-border rounded-md p-2 font-mono text-[11px] text-textPrimary resize-none focus:outline-none focus:border-accentBlue/50 placeholder:text-textTertiary leading-relaxed"
@@ -508,7 +508,7 @@ Please answer each as the interviewer.`;
                 </>
               ) : (
                 <>
-                  Journal mode — nothing leaves your browser. Use Copy-as-prompt and paste into the
+                  Journal mode: nothing leaves your browser. Use Copy-as-prompt and paste into the
                   LLM of your choice if you want answers.
                 </>
               )}
