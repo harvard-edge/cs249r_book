@@ -2035,6 +2035,33 @@ DUBEY_LLAMA3_2024 = _lit(
         "required only three times."
     ),
 )
+# Added 2026-10-20: model-training lecture sources (LoRA memory, the Llama 3.1
+# model card's compute table, the OPT-175B logbook).
+HU_LORA_2021 = _lit(
+    "prov:hu-lora-2021",
+    "Hu et al. (2021), LoRA: Low-Rank Adaptation of Large Language Models",
+    url="https://arxiv.org/abs/2106.09685",
+    verified="2026-10-20",
+    notes="Sec. 4.2 (v2): on GPT-3 175B, training VRAM falls from 1.2 TB to 350 GB.",
+)
+META_LLAMA31_MODEL_CARD = _ds(
+    "prov:meta-llama31-model-card",
+    "Meta, Llama 3.1 model card, models/llama3_1/MODEL_CARD.md (commit 0e0b8c5), Training Energy Use",
+    "https://github.com/meta-llama/llama-models/blob/0e0b8c5/models/llama3_1/MODEL_CARD.md",
+    verified="2026-10-20",
+    notes=(
+        "Training time (GPU hours): 8B 1.46M, 70B 7.0M, 405B 30.84M, total 39.3M; training "
+        "power consumption 700 W (H100-80GB, TDP 700 W, peak capacity adjusted for PUE); "
+        "location-based emissions 405B 8,930 tons CO2eq."
+    ),
+)
+META_OPT_CHRONICLES_2021 = _ds(
+    "prov:meta-opt175b-logbook-2021",
+    "Zhang et al. (Meta AI), OPT-175B chronicles: logbook screenshot and 27_percent_update.md",
+    "https://github.com/facebookresearch/metaseq/tree/main/projects/OPT/chronicles",
+    verified="2026-10-20",
+    notes="Logbook entries run 12.17 (2021-11-24) to 12.38 (2021-12-01); 12.27 to 12.33 are dated 2021-11-28.",
+)
 DOSOVITSKIY_VIT_2021 = _lit(
     "prov:dosovitskiy-vit-2021",
     "Dosovitskiy et al. (2021), An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale",

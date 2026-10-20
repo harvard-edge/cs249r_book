@@ -3516,3 +3516,77 @@ def test_sensor_perception_error_scales():
     assert (k.min_count, k.rank, k.rank_from_top) == (99, 991, 10)
     assert Scenarios.DenseFogVisibility.result.visibility_range.to("m").magnitude == approx(59.915)
     assert Scenarios.AluminumLinkWarming.result.expansion.to("mm").magnitude == approx(0.231)
+
+
+def test_gpt2_xl_training_run_and_step_on_one_h100():
+    r = Scenarios.Gpt2XlRunOnOneH100
+    assert r.training_time.to("day").magnitude == approx(35.108)
+    assert r.step_operations.to("TFLOP").magnitude == approx(294.912)
+    assert r.step_time.to("s").magnitude == approx(0.59638)
+    assert r.steps == approx(5.0863e6)
+    assert r.energy.to("kWh").magnitude == approx(589.82) and r.step_energy.to("J").magnitude == approx(417.47)
+    assert r.rental_cost.to("USD").magnitude == approx(3370.4)
+    assert r.training_tokens.to("count").magnitude == approx(1.6667e11)
+    assert Scenarios.Gpt2XlRunOnOneH100HalfUtilization.step_time.to("s").magnitude == approx(1.1928)
+    assert Scenarios.Gpt2XlRunOnOneDgxH100.training_time.to("day").magnitude == approx(4.3886)
+    a2 = Scenarios.Gpt2XlBatch32ActivationsAt2048
+    assert a2.per_token_activations.to("GB").magnitude == approx(171.13)
+    assert a2.score_activations.to("GB").magnitude == approx(805.31)
+    b = Scenarios.Gpt2XlBatch32Block
+    assert b.layer_forward_flops.to("GFLOP").magnitude == approx(2228.0)
+    assert b.training_step_flops.to("TFLOP").magnitude == approx(320.83)
+    assert b.six_p_step_flops.to("TFLOP").magnitude == approx(294.91)
+    assert b.attention_step_flops.to("TFLOP").magnitude == approx(30.924)
+
+
+def test_gpt2_xl_training_memory():
+    a = Scenarios.Gpt2XlBatch32Activations
+    assert a.activations("none").to("GB").magnitude == approx(286.89)
+    assert a.per_token_activations.to("GB").magnitude == approx(85.564)
+    assert a.score_activations.to("GB").magnitude == approx(201.33)
+    assert a.projection_activations_per_layer.to("MB").magnitude == approx(419.43)
+    assert a.ffn_activations_per_layer.to("MB").magnitude == approx(419.43)
+    assert a.line_items_per_layer.to("MB").magnitude == approx(5043.2)
+    assert a.line_items_total.to("GB").magnitude == approx(242.07)
+    m = Scenarios.Gpt2MixedPrecisionAdamOnH100
+    assert m.total.to("GB").magnitude == approx(24.0) and m.master_weights.to("GB").magnitude == approx(6.0)
+    assert m.bytes_per_trained_parameter.to("byte").magnitude == 16
+    assert m.training_total.to("GB").magnitude == approx(310.89)
+    assert m.capacity_share == approx(0.27940) and m.training_capacity_multiple == approx(3.6192)
+    assert m.checkpoint.to("GB").magnitude == approx(21.0)
+    f = Scenarios.Gpt2Fp32AdamBatch32OnH100
+    assert f.training_total.to("GB").magnitude == approx(597.78) and f.training_capacity_multiple == approx(6.9591)
+    u = Scenarios.Gpt2Fp32AdamOnH100
+    assert u.update_bytes_per_parameter.to("byte").magnitude == 28
+    assert u.update_traffic.to("GB").magnitude == approx(42.0) and u.update_time.to("ms").magnitude == approx(12.537)
+    assert Scenarios.Llama2_7BMixedPrecisionAdam.total.to("GB").magnitude == approx(112.0)
+    p = Scenarios.Palm540BMixedPrecisionAdam
+    assert p.total.to("TB").magnitude == approx(8.64) and p.checkpoint.to("TB").magnitude == approx(7.56)
+    assert p.capacity_share == approx(100.58)
+
+
+def test_llama3_8b_fine_tuning_scope_on_one_h100():
+    full = Scenarios.Llama3_8BFullFineTuneOnH100
+    assert full.total.to("GB").magnitude == approx(128.48)
+    assert full.activations.to("GB").magnitude == approx(36.507)
+    assert full.training_total.to("GB").magnitude == approx(164.99) and not full.fits
+    lora = Scenarios.Llama3_8BLoraOnH100
+    assert lora.adapter_parameters == 6_815_744 and lora.adapter_fraction == approx(8.4879e-4)
+    assert lora.adapter_state.to("GB").magnitude == approx(0.10905)
+    assert lora.training_total.to("GB").magnitude == approx(52.676)
+
+
+def test_training_input_and_loader_stalls():
+    f = Scenarios.ResNet50H100InputFeed
+    assert f.sustained_rate.to("count/s").magnitude == approx(10143.6)
+    assert f.host_supply.to("count/s").magnitude == approx(5250.0) and f.busy_fraction == approx(0.51757)
+    g = Scenarios.GilThreadedLoaderStall.result
+    assert g.sequential_step.to("ms").magnitude == approx(262.0) and 1 - g.sequential_stall == approx(0.045802)
+    assert Scenarios.GilThreadedLoaderFasterAccelerator.result.sequential_step.to("ms").magnitude == approx(256.0)
+
+
+def test_llama31_405b_model_card_run():
+    c = Scenarios.Llama31_405BModelCardRun
+    assert c.training_operations.to("flop").magnitude == approx(3.7908e25)
+    assert c.achieved_rate.to("TFLOP/s").magnitude == approx(341.44)
+    assert c.energy.to("GWh").magnitude == approx(21.588)
