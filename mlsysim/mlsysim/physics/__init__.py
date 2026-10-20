@@ -524,6 +524,7 @@ from .layers import (
     calc_layers_for_receptive_field,
     calc_separable_cost_fraction,
     calc_gradient_product,
+    calc_resnet_bottleneck_macs,
 )
 
 __all__ += [
@@ -531,6 +532,7 @@ __all__ += [
     "calc_layers_for_receptive_field",
     "calc_separable_cost_fraction",
     "calc_gradient_product",
+    "calc_resnet_bottleneck_macs",
 ]
 
 # --- Neural computation and number formats (added 2026-10-20) ---

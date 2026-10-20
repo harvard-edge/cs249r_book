@@ -169,6 +169,8 @@ v("job_min", m(JOB.required_runtime, "minute"), "{:.0f}", "runtime, minutes")
 v("job_h", m(JOB.required_runtime, "hour"), "{:.1f}", "runtime, hours")
 v("job_wh", m(JOB.required_energy, "Wh"), "{:.2f}", "energy, Wh")
 v("job_pct", JOB.budget_ratio * 100, "{:.0f}", "battery share, %")
+v("job_min_err_pct", m(JOB.power_draw, "W") * m(JOB.required_runtime, "min") / m(JOB.battery_energy, "Wh") * 100,
+  "{:,.0f}", "share if watts are multiplied by minutes (the unit mistake), %")
 
 print("== A training second against wake-word checks")
 kws = {d["name"].split("\n")[0] + " " + d["name"].split("\n")[1]: d["energy_uj"]
