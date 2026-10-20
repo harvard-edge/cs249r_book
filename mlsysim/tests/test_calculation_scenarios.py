@@ -5781,3 +5781,18 @@ def test_course_overview_bloom_allocation_and_cluster_growth():
     assert b.min_launches == 27 and b.accelerators_per_replica == 48
     g = Scenarios.LandmarkClusterGrowth2012to2024
     assert len(g.points) == 6 and g.growth == pytest.approx(1.9337027, rel=1e-6)
+
+
+def test_swe_bench_verified_leaderboard_one_attempt():
+    """SWE-bench Verified leaderboard: the one-attempt frontier and the same-model loop
+    comparison of 2 April 2024 (added 2026-10-20)."""
+    from mlsysim import Literature
+    s = Scenarios.SweBenchVerifiedLeaderboardOneAttempt
+    assert s.tasks == 500 and len(s.submissions) == 128 and len(s.comparable) == 45
+    assert s.first["resolved"] == 22 and s.share(s.first["resolved"]) == pytest.approx(0.044)
+    assert s.best["resolved"] == 396 and s.share(s.best["resolved"]) == pytest.approx(0.792)
+    assert s.frontier[0] == ("2023-10-10", pytest.approx(0.044)) and s.frontier[-1][1] == pytest.approx(0.792)
+    assert s.ratio("20240402_sweagent_gpt4", "20240402_rag_gpt4") == pytest.approx(112 / 14)
+    assert s.ratio("20240402_sweagent_claude3opus", "20240402_rag_claude3opus") == pytest.approx(79 / 35)
+    calls = Literature.SweBenchMiniSonnet4Django12050Calls.entries
+    assert len(calls) == 22 and calls[0]["context_chars"] == 5499

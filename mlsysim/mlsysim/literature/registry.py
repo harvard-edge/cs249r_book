@@ -478,6 +478,8 @@ class Literature(Registry):
     FrontierSweTrials = _series.FrontierSweTrials
     SweBenchTrajectories = _series.SweBenchTrajectories
     SweBenchMiniSonnet4Run = _series.SweBenchMiniSonnet4Run  # added 2026-10-20
+    SweBenchVerifiedLeaderboard = _series.SweBenchVerifiedLeaderboard  # added 2026-10-20
+    SweBenchMiniSonnet4Django12050Calls = _series.SweBenchMiniSonnet4Django12050Calls  # added 2026-10-20
     ImitationSuperTuxKart = _series.ImitationSuperTuxKart  # added 2026-10-20
     GrpoPassAtKSteps = _series.GrpoPassAtKSteps  # added 2026-10-20
     RlTrainingDynamics = RlTrainingDynamics  # added 2026-10-20

@@ -11171,3 +11171,12 @@ class Scenarios(Registry):
             (2024, _Models.Language.Llama3_405B.training_accelerators_ref.to("count").magnitude),
         ],
     )
+
+    # --- SWE-bench Verified leaderboard (added 2026-10-20) ------------------------
+    SweBenchVerifiedLeaderboardOneAttempt = _st.BenchmarkLeaderboardScenario(
+        name="SWE-bench Verified submissions with one attempt per task",
+        description="Every submission folder with a results file (Literature.SweBenchVerifiedLeaderboard); "
+                    "the one-attempt submissions and their best score so far.",
+        series_name="SweBenchVerifiedLeaderboard",
+        tasks=int(_Literature.AgentEvaluation.SweBenchVerifiedTasks),
+    )

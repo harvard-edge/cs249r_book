@@ -5369,3 +5369,11 @@ TECHCRUNCH_ALTMAN_DEVDAY_2025 = _report(
     notes=("Altman: 'More than 800 million people use ChatGPT every week, and we process over 6 billion "
            "tokens per minute on the API.' A company statement, not audited. Read 2026-10-20."),
 )
+
+# --- SWE-bench Verified: task count and the public leaderboard (added 2026-10-20) ---
+OPENAI_SWE_BENCH_VERIFIED_2024 = _report(
+    "prov:openai-swe-bench-verified-2024",
+    "Chowdhury et al. (OpenAI, 2024), Introducing SWE-bench Verified, 13 August 2024",
+    "https://openai.com/index/introducing-swe-bench-verified/",
+    notes="A human-validated subset of 500 SWE-bench tasks.",
+)
