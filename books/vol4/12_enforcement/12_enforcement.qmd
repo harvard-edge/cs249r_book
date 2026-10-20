@@ -265,13 +265,14 @@ This division of responsibilities cleanly separates trajectory tracking from saf
 # │          base stall at the aisle speed (distance added, overrun past D_clear);
 # │          the Delta_da allocation charged against the timing allowance and
 # │          the reserve it leaves.
-# │ How:     RM/AISLE fields; jerk bound = peak jerk of the reference C2
-# │          polynomial at the drive limit (calc_c2_stop_suffix);
-# │          calc_scurve_stop_distance / _time (row 6, stop rows);
-# │          calc_scurve_max_permitted_velocity (ceilings, solved numerically);
-# │          calc_safe_stopping_distance with tau + a/(2j) (closed-form
-# │          cross-check above a^2/j); RM.intent_inference_latency, the
-# │          computed prefill-plus-decode latency (time row).
+# │ How:     the Scenarios.WarehouseFinishedStop* budgets (StoppingBudgetModel
+# │          with the S-curve jerk bound AISLE.j_brake, the tracking inset, and
+# │          the walking person) give the totals, spares, and ceilings;
+# │          WarehouseHostLeaseStall prices the stall; RM/AISLE fields split the
+# │          delay travel into rows 3-5; calc_max_permitted_velocity with
+# │          tau + a/(2j) is the closed-form cross-check above a^2/j;
+# │          RM.intent_inference_latency, the computed prefill-plus-decode
+# │          latency (time row).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.core.units import standard_gravity
@@ -279,15 +280,15 @@ from mlsysim.physics.robotics import (
     calc_c2_stop_suffix,
     calc_scurve_stop_distance,
     calc_scurve_stop_time,
-    calc_scurve_max_permitted_velocity,
     calc_max_permitted_velocity,
-    calc_safe_stopping_distance,
     calc_free_space_expiry,
 )
 from mlsysim.fmt import fmt, fmt_int, fmt_length, fmt_velocity, fmt_latency, fmt_acceleration, fmt_jerk, fmt_magnitude, fmt_math, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
+DRIVE_STOP = Scenarios.WarehouseFinishedStopAtDriveLimit
+AISLE_STOP = Scenarios.WarehouseFinishedStopAtAisleSpeed
 
 class EnforcementStoppingBudget:
     # ┌── 1. LOAD ───────────────────────────────────────────────────────────
@@ -310,25 +311,27 @@ class EnforcementStoppingBudget:
     v_human = AISLE.v_human_approach  # category: datasheet (ISO 13855 K)
     mu_inspected = AISLE.mu_inspected_floor  # category: illustrative
     t_intent = RM.intent_inference_latency  # category: derived (deployed INT4 prefill plus decode, @sec-brain-memory-wall)
-    t_stall = 200.0 * millisecond  # category: illustrative (proposer stall before any brake)
+    # Jerk bound: the peak jerk of the reference C2 polynomial at the drive limit (@sec-planning-c2-stopping-suffix)
+    j_brake = AISLE.j_brake  # category: derived
+    t_stall = (Scenarios.WarehouseHostLeaseStall.added_delay + t_lease).to(
+        millisecond
+    )  # category: illustrative (proposer stall before any brake)
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
+    drive = DRIVE_STOP.result
+    aisle = AISLE_STOP.result
     lease_path = (t_lease + t_tick + t_bus).to(millisecond)
-    overhead = (delta_loc + delta_margin).to(millimeter)
-    # Jerk bound: the peak jerk of the reference C2 polynomial at the drive limit (@sec-planning-c2-stopping-suffix)
-    j_brake = calc_c2_stop_suffix(v_drive, a_brake)["peak_jerk"].to(meter / second**3)
-    v_plateau = (a_brake**2 / j_brake).to(meter / second)
-    ramp_delay = (a_brake / (2 * j_brake)).to(millisecond)
-    c2_drive = calc_scurve_stop_distance(v_drive, a_brake, j_brake).to(millimeter)
-    c2_aisle = calc_scurve_stop_distance(v_aisle, a_brake, j_brake).to(millimeter)
+    overhead = drive.overhead.to(millimeter)
+    v_plateau = drive.jerk_plateau_speed.to(meter / second)
+    ramp_delay = drive.ramp_delay.to(millisecond)
 
     # Rows 1-7 at the drive limit, in book order
-    brake_drive = (v_drive**2 / (2 * a_brake)).to(millimeter)
+    brake_drive = drive.braking_travel.to(millimeter)
     onset_drive = (v_drive * t_act).to(millimeter)
     lease_drive = (v_drive * lease_path).to(millimeter)
     age_drive = (v_drive * t_age).to(millimeter)
-    shape_drive = (c2_drive - brake_drive).to(millimeter)
-    inset = eps_track.to(millimeter)
+    shape_drive = drive.jerk_ramp_travel.to(millimeter)
+    inset = drive.tracking_inset.to(millimeter)
     run1 = brake_drive
     run2 = run1 + overhead
     run3 = run2 + onset_drive
@@ -347,29 +350,25 @@ class EnforcementStoppingBudget:
     ]
 
     # The same terms at the aisle speed
-    brake_aisle = (v_aisle**2 / (2 * a_brake)).to(millimeter)
+    brake_aisle = aisle.braking_travel.to(millimeter)
     onset_aisle = (v_aisle * t_act).to(millimeter)
     lease_aisle = (v_aisle * lease_path).to(millimeter)
     age_aisle = (v_aisle * t_age).to(millimeter)
-    shape_aisle = (c2_aisle - brake_aisle).to(millimeter)
-    total_aisle = (brake_aisle + overhead + onset_aisle + lease_aisle + age_aisle + shape_aisle + inset).to(millimeter)
-    spare = (d_clear - total_aisle).to(millimeter)
+    shape_aisle = aisle.jerk_ramp_travel.to(millimeter)
+    total_aisle = aisle.required_distance.to(millimeter)
+    spare = aisle.spare.to(millimeter)
     # Base stall: a last proposal that keeps authority for the stall instead of
     # the lease adds the extra delay's travel to the finished budget.
-    stall_added = (v_aisle * (t_stall - t_lease)).to(millimeter)
+    stall_added = Scenarios.WarehouseHostLeaseStall.result.added_delay_travel.to(millimeter)
     stall_breach = (total_aisle + stall_added - d_clear).to(millimeter)
 
     # Speed is the one free term: the subtotal ceiling before dispatch allocation
-    ceiling = calc_scurve_max_permitted_velocity(
-        d_clear, tau_delay, a_brake, j_brake, loc_margin=delta_loc, physical_margin=delta_margin + eps_track
-    ).to(meter / second)
+    ceiling = aisle.speed_ceiling.to(meter / second)
     # Above a^2/j the S-curve is constant braking at a_brake with the delay lengthened by a/(2j)
     ceiling_closed = calc_max_permitted_velocity(
         d_clear, tau_delay + ramp_delay, a_brake, loc_margin=delta_loc, physical_margin=delta_margin + eps_track
     ).to(meter / second)
-    total_check = calc_safe_stopping_distance(
-        v_drive, tau_delay + ramp_delay, a_brake, loc_margin=delta_loc, physical_margin=delta_margin + eps_track
-    ).to(millimeter)
+    total_check = drive.required_distance.to(millimeter)
     # Operands of @eq-enforce-speed-ceiling for the napkin-math notebook
     tau_eff = (tau_delay + ramp_delay).to(millisecond)
     d_avail = (d_clear - delta_loc - delta_margin - eps_track).to(millimeter)
@@ -384,27 +383,23 @@ class EnforcementStoppingBudget:
     # the free depth is the hull-to-rack side clearance.
     belief_life = calc_free_space_expiry(AISLE.side_clearance, delta_loc, delta_margin, v_human).to(millisecond)
     missed_tick = (v_aisle * t_tick).to(millimeter)
-    t_latest = (spare / v_aisle).to(millisecond)
+    t_latest = aisle.delay_spare.to(millisecond)
     capture_to_admission_max = (t_age + t_latest).to(millisecond)
     capture_to_onset_max = (tau_delay + t_latest).to(millisecond)
     # Delta_da is not a term of tau_delay; the timing allowance pays for it.
     travel_da = (v_aisle * delta_da).to(millimeter)
-    reserve_t = (t_latest - delta_da).to(millisecond)
-    reserve_d = (spare - travel_da).to(millimeter)
+    reserve_t = Scenarios.WarehouseFinishedStopWithDispatch.result.delay_spare.to(millisecond)
+    reserve_d = Scenarios.WarehouseFinishedStopWithDispatch.result.spare.to(millimeter)
     capture_to_onset = AISLE.t_capture_to_brake_onset.to(millisecond)  # rows 1-3 of @tbl-04-event-timing
     mu_min = (a_brake / standard_gravity).to("dimensionless").magnitude
-    a_inspected = min(a_brake, (mu_inspected * standard_gravity).to(meter / second**2))
+    a_inspected = Scenarios.WarehouseFinishedStopInspectedFloor.a_brake.to(meter / second**2)
     # The floor caps the deceleration; the jerk bound belongs to the load and is unchanged.
-    ceiling_inspected = calc_scurve_max_permitted_velocity(
-        d_clear, tau_delay, a_inspected, j_brake, loc_margin=delta_loc, physical_margin=delta_margin + eps_track
-    ).to(meter / second)
+    ceiling_inspected = Scenarios.WarehouseFinishedStopInspectedFloor.result.speed_ceiling.to(meter / second)
 
     # Walking person: v tau + d_stop(v) + v_h (tau + T_stop(v)) + overhead = d_clear.
     # The S-curve's distance and time are not one polynomial in v, so MLSysIM solves it numerically.
     overhead_all = AISLE.fixed_overhead  # category: derived (delta_loc + delta_margin + eps_track)
-    v_walk = calc_scurve_max_permitted_velocity(
-        d_clear, tau_delay, a_brake, j_brake, loc_margin=delta_loc, physical_margin=delta_margin + eps_track, approach_velocity=v_human
-    ).to(meter / second)
+    v_walk = Scenarios.WarehouseFinishedStopWalkingPerson.result.speed_ceiling.to(meter / second)
     d_walk = (
         v_walk * tau_delay
         + calc_scurve_stop_distance(v_walk, a_brake, j_brake)
@@ -414,16 +409,12 @@ class EnforcementStoppingBudget:
     # Complete scenario roots charge dispatch travel once; moving humans also
     # close the gap during that interval. The inspected case remains an
     # optimistic all-weight traction screen, not a qualified braking bound.
-    tau_complete = tau_delay + delta_da
-    ceiling_complete = calc_scurve_max_permitted_velocity(
-        d_clear, tau_complete, a_brake, j_brake, loc_margin=delta_loc, physical_margin=delta_margin + eps_track
-    ).to(meter / second)
-    ceiling_inspected_complete = calc_scurve_max_permitted_velocity(
-        d_clear, tau_complete, a_inspected, j_brake, loc_margin=delta_loc, physical_margin=delta_margin + eps_track
-    ).to(meter / second)
-    v_walk_complete = calc_scurve_max_permitted_velocity(
-        d_clear, tau_complete, a_brake, j_brake, loc_margin=delta_loc, physical_margin=delta_margin + eps_track, approach_velocity=v_human
-    ).to(meter / second)
+    tau_complete = Scenarios.WarehouseFinishedStopWithDispatch.delay
+    ceiling_complete = Scenarios.WarehouseFinishedStopWithDispatch.result.speed_ceiling.to(meter / second)
+    ceiling_inspected_complete = Scenarios.WarehouseFinishedStopInspectedFloorWithDispatch.result.speed_ceiling.to(
+        meter / second
+    )
+    v_walk_complete = Scenarios.WarehouseFinishedStopWalkingPersonWithDispatch.result.speed_ceiling.to(meter / second)
     complete_walk_distance = (
         v_walk_complete * tau_complete
         + calc_scurve_stop_distance(v_walk_complete, a_brake, j_brake)
@@ -446,9 +437,7 @@ class EnforcementStoppingBudget:
     _qc = v_human * tau_delay + overhead_all - d_clear
     v_walk_const = ((-_qb + (_qb**2 - 4 * _qa * _qc) ** 0.5) / (2 * _qa)).to(meter / second)
     # Latency sensitivity of the static ceiling: 10 ms more pre-brake delay
-    ceiling_plus10 = calc_scurve_max_permitted_velocity(
-        d_clear, tau_delay + 10 * millisecond, a_brake, j_brake, loc_margin=delta_loc, physical_margin=delta_margin + eps_track
-    ).to(meter / second)
+    ceiling_plus10 = Scenarios.WarehouseFinishedStopTenMsSlower.result.speed_ceiling.to(meter / second)
     ceiling_drop_10ms = (ceiling - ceiling_plus10).to(millimeter / second)
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
@@ -698,10 +687,11 @@ At this candidate speed, dividing the `{python} EnforcementStoppingBudget.spare_
 # │ Goal:    show each chapter's term accumulating against the clear distance
 # │ Show:    seven stacked bars at the drive limit, one at the aisle speed,
 # │          and the clear-distance line
-# │ How:     the terms of @tbl-enforcement-stopping-budget from RM/AISLE
+# │ How:     the terms of @tbl-enforcement-stopping-budget: the finished
+# │          budgets Scenarios.WarehouseFinishedStopAtDriveLimit and
+# │          _AtAisleSpeed, delay travel split by the AISLE timing fields
 # ├─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_scurve_stop_distance
 from mlsysim.fmt import check
 from mlsysim import viz
 
@@ -711,28 +701,25 @@ AISLE = Embodied.Scenario.WarehouseAisle
 # ┌── 1. LOAD ─────────────────────────────────────────────────────────────────
 v_drive = RM.base.max_velocity  # category: illustrative (drive limit)
 v_aisle = AISLE.v_aisle  # category: chosen
-a_brake = AISLE.a_brake  # category: illustrative
-j_brake = calc_c2_stop_suffix(v_drive, a_brake)["peak_jerk"]  # category: derived (reference polynomial's peak jerk)
 lease_path = AISLE.t_lease + AISLE.t_tick + AISLE.t_bus  # category: chosen (lease, tick) + illustrative (bus)
 d_clear_mm = AISLE.d_clear.to(millimeter).magnitude  # category: illustrative
 
 # ┌── 2. EXECUTE ──────────────────────────────────────────────────────────────
-def terms(v):
-    brake = (v**2 / (2 * a_brake)).to(millimeter).magnitude
-    c2 = calc_scurve_stop_distance(v, a_brake, j_brake).to(millimeter).magnitude
+def terms(r):
+    v = r.speed
     return {
-        "braking": brake,
-        "overhead": (AISLE.delta_loc + AISLE.delta_margin).to(millimeter).magnitude,
+        "braking": r.braking_travel.to(millimeter).magnitude,
+        "overhead": r.overhead.to(millimeter).magnitude,
         "brake onset": (v * AISLE.t_brake_onset).to(millimeter).magnitude,
         "lease path": (v * lease_path).to(millimeter).magnitude,
         "observation age": (v * AISLE.perception_age).to(millimeter).magnitude,
-        "stop-suffix shape": c2 - brake,
-        "tracking inset": AISLE.eps_track.to(millimeter).magnitude,
+        "stop-suffix shape": r.jerk_ramp_travel.to(millimeter).magnitude,
+        "tracking inset": r.tracking_inset.to(millimeter).magnitude,
     }
 
-order = list(terms(v_drive).keys())
-drive = terms(v_drive)
-aisle = terms(v_aisle)
+drive = terms(Scenarios.WarehouseFinishedStopAtDriveLimit.result)
+aisle = terms(Scenarios.WarehouseFinishedStopAtAisleSpeed.result)
+order = list(drive.keys())
 bars = [{k: (drive[k] if i <= n else 0.0) for i, k in enumerate(order)} for n in range(len(order))]
 bars.append(aisle)
 totals = [sum(b.values()) for b in bars]
@@ -1030,7 +1017,7 @@ Checking velocity against a fixed scalar limit fails as soon as obstacle distanc
 # ├─────────────────────────────────────────────────────────────────────────────
 import numpy as np
 from mlsysim import *
-from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_max_permitted_velocity, calc_scurve_max_permitted_velocity
+from mlsysim.physics.robotics import calc_max_permitted_velocity, calc_scurve_max_permitted_velocity
 from mlsysim.fmt import check
 from mlsysim import viz
 
@@ -1043,8 +1030,7 @@ TAU_DELAY = AISLE.tau_delay.to(second).magnitude  # category: derived
 OVERHEAD = AISLE.fixed_overhead.to(meter).magnitude  # category: illustrative + chosen
 D_CLEAR = AISLE.d_clear.to(meter).magnitude  # category: illustrative
 V_AISLE = AISLE.v_aisle.to(meter / second).magnitude  # category: chosen
-_v_ref = RM.base.max_velocity  # category: illustrative (drive limit)
-J_BRAKE = calc_c2_stop_suffix(_v_ref, AISLE.a_brake)["peak_jerk"]  # category: derived (reference polynomial's peak jerk)
+J_BRAKE = AISLE.j_brake  # category: derived (reference polynomial's peak jerk)
 
 # ┌── 2. EXECUTE ──────────────────────────────────────────────────────────────
 def _ceiling_at(d):
@@ -1180,49 +1166,45 @@ When required braking effort exceeds physical actuator limits, no safety filter 
 # │ Goal:    show that bias torque quarters the arm's braking and that windup
 # │          delay on the base overruns the spare.
 # │ Show:    arm stop with and without bias; unbraked windup travel vs. spare.
-# │ How:     RM.arm.max_torque, RM.tcp_speed_limit, AISLE fields,
-# │          calc_scurve_stop_distance for the finished budget at the aisle
-# │          speed (jerk bound from calc_c2_stop_suffix at the drive limit).
+# │ How:     Scenarios.LoadedArmJointGravityStop (RM.arm.max_torque and the
+# │          stated joint inertia, lever, speed, and bias share);
+# │          Scenarios.WarehouseIntegratorUnwind (the finished budget at the
+# │          aisle speed, S-curve stop included, with the unwind as added delay).
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsysim import *
-from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_scurve_stop_distance
 from mlsysim.fmt import fmt, fmt_length, fmt_latency, fmt_velocity, fmt_torque, fmt_inertia, fmt_percent, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
+JOINT = Scenarios.LoadedArmJointGravityStop
+UNWIND = Scenarios.WarehouseIntegratorUnwind
 
 class EnforcementAuthorityLoss:
     # ┌── 1. LOAD ───────────────────────────────────────────────────────────
-    torque_limit = RM.arm.max_torque  # category: datasheet (peak torque, axes 1-4)
+    torque_limit = JOINT.torque_limit  # category: datasheet (peak torque, axes 1-4)
     tcp_limit = RM.tcp_speed_limit  # category: chosen
-    inertia = 3.0 * kilogram * meter**2  # scenario assumption; category: illustrative (joint with payload)
-    link_length = 0.80 * meter  # scenario assumption; category: illustrative
-    joint_speed = 1.2 / second  # rad/s; scenario assumption; category: illustrative
-    bias_fraction = 0.75  # scenario assumption; share of peak torque holding the load on descent; category: illustrative
+    inertia = JOINT.inertia  # scenario assumption; category: illustrative (joint with payload)
+    link_length = JOINT.lever  # scenario assumption; category: illustrative
+    joint_speed = JOINT.joint_speed  # rad/s; scenario assumption; category: illustrative
+    bias_fraction = JOINT.bias_fraction  # scenario assumption; share of peak torque holding the load on descent; category: illustrative
     windup_span = 200 * millisecond  # scenario assumption; category: illustrative
-    unwind = 150 * millisecond  # scenario assumption; category: illustrative
+    unwind = UNWIND.added_delay  # scenario assumption; category: illustrative
     v_aisle = AISLE.v_aisle  # category: chosen
-    a_brake = AISLE.a_brake  # category: illustrative
-    tau_delay = AISLE.tau_delay  # category: derived
-    fixed_overhead = AISLE.fixed_overhead  # category: illustrative + chosen
-    d_clear = AISLE.d_clear  # category: illustrative
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
-    bias = (torque_limit * bias_fraction).to(newton * meter)
-    net_torque = (torque_limit - bias).to(newton * meter)
-    alpha_nom = (torque_limit / inertia).to(1 / second**2)
-    alpha_eff = (net_torque / inertia).to(1 / second**2)
-    angle_nom = (joint_speed**2 / (2 * alpha_nom)).to("dimensionless").magnitude
-    angle_eff = (joint_speed**2 / (2 * alpha_eff)).to("dimensionless").magnitude
-    d_nom = (link_length * angle_nom).to(millimeter)
-    d_eff = (link_length * angle_eff).to(millimeter)
-    overrun = (d_eff - d_nom).to(millimeter)
-    tcp_speed = (link_length * joint_speed).to(meter / second)
-    windup_travel = (v_aisle * unwind).to(millimeter)
-    j_brake = calc_c2_stop_suffix(RM.base.max_velocity, a_brake)["peak_jerk"]  # reference polynomial's peak jerk
-    budget = (v_aisle * tau_delay + calc_scurve_stop_distance(v_aisle, a_brake, j_brake) + fixed_overhead).to(millimeter)
-    spare = (d_clear - budget).to(millimeter)
+    bias = JOINT.bias
+    net_torque = JOINT.torque_descending
+    alpha_nom = JOINT.alpha_free
+    alpha_eff = JOINT.alpha_descending
+    angle_nom = JOINT.stop_angle(alpha_nom)
+    angle_eff = JOINT.stop_angle(alpha_eff)
+    d_nom = JOINT.tool_stop_free
+    d_eff = JOINT.tool_stop_descending
+    overrun = JOINT.overrun
+    tcp_speed = JOINT.tcp_speed
+    windup_travel = UNWIND.result.added_delay_travel.to(millimeter)
+    spare = UNWIND.result.spare.to(millimeter)
     windup_excess = (windup_travel - spare).to(millimeter)
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
@@ -1475,32 +1457,29 @@ In this sign convention, positive angular velocity $\JointAngularSpeed$, positiv
 # │ Context: the loaded-arm paragraph immediately below (@eq-enforce-kinetic-torque).
 # │ Goal:    evaluate the torque ceiling of the kinetic barrier at three clearances.
 # │ Show:    alpha, h at 110 mm, the h = 0 clearance, and the braking torque demanded.
-# │ How:     reuses the joint scenario of EnforcementAuthorityLoss (RM.arm torque).
+# │ How:     Scenarios.LoadedArmJointGravityStop, the joint scenario of
+# │          EnforcementAuthorityLoss, with its barrier gain and clearances.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.fmt import fmt, fmt_length, fmt_torque, check
 
+JOINT = Scenarios.LoadedArmJointGravityStop
+
 class KineticBarrierArm:
     # ┌── 1. LOAD ───────────────────────────────────────────────────────────
-    inertia = EnforcementAuthorityLoss.inertia  # scenario assumption; category: illustrative
-    bias = EnforcementAuthorityLoss.bias  # scenario assumption; category: illustrative
-    torque_limit = EnforcementAuthorityLoss.torque_limit  # category: datasheet
-    speed = EnforcementAuthorityLoss.joint_speed  # rad/s; scenario assumption; category: illustrative
-    radius = EnforcementAuthorityLoss.link_length  # scenario assumption; category: illustrative
-    gamma = 10.0 / second  # scenario assumption; category: chosen (barrier gain)
-    clear_far = 110 * millimeter  # scenario assumption; category: illustrative
-    clear_near = 70 * millimeter  # scenario assumption; category: illustrative
+    torque_limit = JOINT.torque_limit  # category: datasheet
+    radius = JOINT.lever  # scenario assumption; category: illustrative
+    gamma = JOINT.barrier_gain  # scenario assumption; category: chosen (barrier gain)
+    clear_far, clear_near = JOINT.barrier_clearances  # scenario assumption; category: illustrative
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
-    alpha = ((torque_limit - bias) / inertia).to(1 / second**2)
-    stop_angle = (speed**2 / (2 * alpha)).to("dimensionless")
-    clear_zero = (radius * stop_angle).to(millimeter)
+    alpha = JOINT.alpha_descending
+    clear_zero = JOINT.tool_stop_descending
     angle_far = (clear_far / radius).to("dimensionless")
-    h_far = angle_far - stop_angle
-    h_near = (clear_near / radius).to("dimensionless") - stop_angle
-    ceiling_far = (-bias + inertia * alpha * (gamma * h_far / speed - 1)).to(newton * meter)
-    ceiling_zero = (-bias + inertia * alpha * (0 - 1)).to(newton * meter)
-    ceiling_near = (-bias + inertia * alpha * (gamma * h_near / speed - 1)).to(newton * meter)
+    h_far = JOINT.barrier_margin(clear_far)
+    ceiling_far = -JOINT.barrier_torque_demand(clear_far)
+    ceiling_zero = -JOINT.barrier_torque_demand(clear_zero)
+    ceiling_near = -JOINT.barrier_torque_demand(clear_near)
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
     check(abs(alpha.magnitude - 7.25) < 1e-9, "Net braking headroom gives 7.25 rad/s^2.")
@@ -1515,7 +1494,7 @@ class KineticBarrierArm:
     alpha_str = fmt(alpha.magnitude, precision=2)
     gamma_str = fmt(gamma.magnitude, precision=0)
     angle_far_str = fmt(angle_far.magnitude, precision=4)
-    h_far_str = fmt(h_far.magnitude, precision=4)
+    h_far_str = fmt(h_far, precision=4)
     clear_far_str = fmt_length(clear_far, unit=millimeter, precision=0)
     clear_zero_str = fmt_length(clear_zero, unit=millimeter, precision=2)
     clear_near_str = fmt_length(clear_near, unit=millimeter, precision=0)
@@ -1637,9 +1616,11 @@ When the arm approaches the cage-door latch too quickly while still proposing a 
 #| warning: false
 #| message: false
 # ┌── LOAD: declared enforcer cycle budget ────────────────────────────────
-from mlsysim import Embodied
+from mlsysim import Embodied, Scenarios
 from mlsysim.core.units import microsecond, millisecond
 from mlsysim.fmt import fmt, fmt_latency, fmt_frequency, check
+
+CYCLE = Scenarios.WarehouseEnforcerCycleBudget
 
 class EnforcementCycleBudget:
     scenario = Embodied.Scenario.WarehouseAisle
@@ -1647,16 +1628,16 @@ class EnforcementCycleBudget:
     deadline = scenario.enforcer_deadline  # category: chosen
     tick = scenario.t_tick  # category: chosen
     unloaded = scenario.enforcer_unloaded  # category: illustrative (unloaded observed cycle)
-    acquisition = 30 * microsecond  # category: chosen (sub-budget; with the proposal check it covers the unloaded 40 us read in Ch13)
-    proposal_lease = 15 * microsecond  # category: chosen (sub-budget)
-    tracking = 10 * microsecond  # category: chosen (sub-budget)
-    qp = 150 * microsecond  # category: chosen (sub-budget)
-    write = 15 * microsecond  # category: chosen (sub-budget)
-    reserve = 30 * microsecond  # category: chosen (sub-budget)
+    acquisition = CYCLE.stage("state acquisition")  # category: chosen (sub-budget; with the proposal check it covers the unloaded 40 us read in Ch13)
+    proposal_lease = CYCLE.stage("proposal and lease check")  # category: chosen (sub-budget)
+    tracking = CYCLE.stage("tracking check")  # category: chosen (sub-budget)
+    qp = CYCLE.stage("QP solve")  # category: chosen (sub-budget)
+    write = CYCLE.stage("output write")  # category: chosen (sub-budget)
+    reserve = CYCLE.stage("reserve")  # category: chosen (sub-budget)
     window = 500 * millisecond  # category: illustrative (rolling window of the intervention metric)
 
     # ┌── EXECUTE ───────────────────────────────────────────────────────────
-    total = (acquisition + proposal_lease + tracking + qp + write + reserve).to(microsecond)
+    total = CYCLE.total
 
     # ┌── GUARD ─────────────────────────────────────────────────────────────
     check(abs((total - wcet.to(microsecond)).magnitude) < 1e-9, "The stage sub-budgets must sum to the declared WCET.")
@@ -1696,29 +1677,30 @@ Clamping each joint axis independently, or projecting a command onto a barrier a
 #| echo: false
 #| warning: false
 #| message: false
-import math
-from mlsysim.physics.robotics import calc_cbf_qp_orthogonal_projection
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, check
 
-class CBFQPProjection:
-    u_nom = [3.5, 3.0]  # N·m; category: illustrative (abstract proposal)
-    a_vec = [2.0, 1.0]  # category: illustrative (abstract half-space normal)
-    b_scalar = 5.0  # N·m; category: illustrative (abstract threshold)
-    u_clip = [2.0, 3.0]  # N·m; category: illustrative (per-axis clamp for contrast)
-    u_lim = 5.0  # N·m; category: illustrative (symmetric per-joint actuator limit)
+PROJ = Scenarios.TwoJointTorqueProjection
 
-    res = calc_cbf_qp_orthogonal_projection(u_nom, a_vec, b_scalar)
+class CBFQPProjection:
+    u_nom = PROJ.proposal  # N·m; category: illustrative (abstract proposal)
+    a_vec = PROJ.normal  # category: illustrative (abstract half-space normal)
+    b_scalar = PROJ.bound  # N·m; category: illustrative (abstract threshold)
+    u_clip = PROJ.clamp  # N·m; category: illustrative (per-axis clamp for contrast)
+    u_lim = PROJ.actuator_limit  # N·m; category: illustrative (symmetric per-joint actuator limit)
+
+    res = PROJ.projection
     u_proj = res["u_projected"]
     lambda_star = res["lambda_star"]
     correction_norm = res["correction_norm"]
 
-    a_dot_u_nom = a_vec[0] * u_nom[0] + a_vec[1] * u_nom[1]
-    breach = a_dot_u_nom - b_scalar
-    a_dot_u_clip = a_vec[0] * u_clip[0] + a_vec[1] * u_clip[1]
-    clip_penetration = a_dot_u_clip - b_scalar
+    a_dot_u_nom = PROJ.proposal_value
+    breach = PROJ.breach
+    a_dot_u_clip = PROJ.clamp_value
+    clip_penetration = PROJ.clamp_penetration
 
-    theta_nom_deg = math.degrees(math.atan2(u_nom[1], u_nom[0]))
-    theta_clip_deg = math.degrees(math.atan2(u_clip[1], u_clip[0]))
+    theta_nom_deg = PROJ.angle_deg(u_nom)
+    theta_clip_deg = PROJ.angle_deg(u_clip)
     skew_deg = theta_clip_deg - theta_nom_deg
 
     check(abs(u_proj[0]) <= u_lim and abs(u_proj[1]) <= u_lim, "The projected command stays within the joint limits.")
@@ -2113,24 +2095,22 @@ The handover channel is therefore a transient-contact ceiling. It holds only whi
 # │ Context: the discretization condition below and the ZOH fallacy.
 # │ Goal:    size the inter-sample buffer v T + a T^2 / 2 on the base.
 # │ Show:    drive limit, independent approach-acceleration upper bound, buffer.
-# │ How:     RM.base.max_velocity, stipulated approach upper bound, AISLE.t_tick.
+# │ How:     Scenarios.WarehouseBaseHoldDrift (RM.base.max_velocity, the
+# │          stipulated approach upper bound, AISLE.t_tick).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.fmt import fmt_length, fmt_velocity, fmt_acceleration, check
 
-RM = Embodied.MobileManipulator.WarehouseMobileManipulator
-AISLE = Embodied.Scenario.WarehouseAisle
+HOLD = Scenarios.WarehouseBaseHoldDrift
 
 class EnforcementZOHBuffer:
     # ┌── 1. LOAD ───────────────────────────────────────────────────────────
-    v_max = RM.base.max_velocity  # category: illustrative (drive limit)
-    a_approach_upper = (
-        2.0 * meter / second**2
-    )  # scenario assumption; category: illustrative (independent approach-acceleration upper bound, not credited braking)
-    t_ctrl = AISLE.t_tick  # category: chosen
+    v_max = HOLD.speed  # category: illustrative (drive limit)
+    a_approach_upper = HOLD.acceleration  # scenario assumption; category: illustrative (independent approach-acceleration upper bound, not credited braking)
+    t_ctrl = HOLD.period  # category: chosen
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
-    d_zoh = (v_max * t_ctrl + 0.5 * a_approach_upper * t_ctrl**2).to(millimeter)
+    d_zoh = HOLD.drift.to(millimeter)
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
     check(abs(d_zoh.magnitude - 1.501) < 1e-9, "The ZOH buffer at the drive limit is 1.501 mm.")
@@ -2297,25 +2277,23 @@ Walking down protective responses one step at a time like a software exception c
 # │ Context: the controlled-stop paragraph immediately below.
 # │ Goal:    show that the stop rung executes the resident C2 suffix.
 # │ Show:    aisle speed, credible deceleration, suffix duration and distance.
-# │ How:     calc_scurve_stop_time / _distance on AISLE.v_aisle and
-# │          AISLE.a_brake; jerk bound from calc_c2_stop_suffix at the drive limit.
+# │ How:     Scenarios.WarehouseFinishedStopAtAisleSpeed: the S-curve stop
+# │          (braking plus jerk-ramp travel, and its duration) at AISLE.v_aisle
+# │          and AISLE.a_brake with the jerk bound AISLE.j_brake.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_scurve_stop_distance, calc_scurve_stop_time
 from mlsysim.fmt import fmt_length, fmt_latency, fmt_velocity, fmt_acceleration, check
 
-RM = Embodied.MobileManipulator.WarehouseMobileManipulator
-AISLE = Embodied.Scenario.WarehouseAisle
+STOP = Scenarios.WarehouseFinishedStopAtAisleSpeed
 
 class EnforcementStopRung:
     # ┌── 1. LOAD ───────────────────────────────────────────────────────────
-    v_aisle = AISLE.v_aisle  # category: chosen
-    a_brake = AISLE.a_brake  # category: illustrative
+    v_aisle = STOP.speed  # category: chosen
+    a_brake = STOP.a_brake  # category: illustrative
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
-    j_brake = calc_c2_stop_suffix(RM.base.max_velocity, a_brake)["peak_jerk"]  # reference polynomial's peak jerk
-    duration = calc_scurve_stop_time(v_aisle, a_brake, j_brake).to(millisecond)
-    distance = calc_scurve_stop_distance(v_aisle, a_brake, j_brake).to(millimeter)
+    duration = STOP.result.stop_time.to(millisecond)
+    distance = (STOP.result.braking_travel + STOP.result.jerk_ramp_travel).to(millimeter)
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
     check(abs(duration.magnitude - 931.25) < 1e-6, "The S-curve stop from 1.3 m/s takes 931.25 ms.")
@@ -2444,21 +2422,21 @@ The four rungs run on two paths (@fig-12-fallback-ladder). `PROJECT`, `HOLD`, an
 # │ Goal:    print the investigators' values instead of hand-typed literals.
 # │ Show:    Tempe first detection 5.6 s and recognition 1.2 s before impact;
 # │          Cruise pullover about 20 ft (6.1 m) at up to 7.7 mph (3.4 m/s).
-# │ How:     literature values from NTSB/HAR-19/03 and the Quinn Emanuel
-# │          report, the same values as @sec-boundary-when-fails loads, kept
-# │          here until the literature registry holds them.
+# │ How:     Literature.IncidentReports (NTSB/HAR-19/03 and the Quinn
+# │          Emanuel report), the same values @sec-boundary-when-fails loads.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Literature
 from mlsysim.core.units import *
 from mlsysim.fmt import fmt_latency, fmt_length, fmt_velocity, check
 
 class EnforcementIncidentRecord:
     # ┌── 1. LOAD ───────────────────────────────────────────────────────────
     # category: literature. NTSB/HAR-19/03 (2019), p. v and table pp. 15-16
-    t_detect = 5.6 * second  # first detection, before impact
-    t_recognize = 1.2 * second  # imminent collision recognized, before impact
+    t_detect = float(Literature.IncidentReports.TempeFirstDetectionS) * second  # first detection, before impact
+    t_recognize = float(Literature.IncidentReports.TempeEmergencyRecognitionS) * second  # imminent collision recognized, before impact
     # category: literature. Quinn Emanuel report to the Cruise boards (2024), p. 10
-    d_drag = 20 * foot  # approximate distance moved during the pullover
-    v_drag = 7.7 * mph  # maximum speed during the pullover
+    d_drag = float(Literature.IncidentReports.CruisePulloverDistanceFt) * foot  # approximate distance moved during the pullover
+    v_drag = float(Literature.IncidentReports.CruisePulloverMaxSpeedMph) * mph  # maximum speed during the pullover
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
     d_drag_m = d_drag.to(meter)
@@ -2521,15 +2499,17 @@ Citing an unrated numerical QP solver or software evidence-age check as the prim
 # │          SSM protective separation distance that the chapter already owns.
 # │ Show:    arm mass against the Class I limit; S_h, S_r, S_s and their sum;
 # │          the human term's share.
-# │ How:     RM.arm.mass; EnforcementAuthorityLoss (descending-joint stop);
-# │          AISLE.tau_delay as the reaction time if the vision path were the
-# │          separation sensor; AISLE.v_human_approach (ISO 13855 K).
+# │ How:     RM.arm.mass; Scenarios.LoadedArmJointGravityStop (descending-
+# │          joint stop and its separation terms, with AISLE.tau_delay as the
+# │          reaction time if the vision path were the separation sensor and
+# │          AISLE.v_human_approach, ISO 13855 K).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
 from mlsysim.fmt import fmt, fmt_length, fmt_latency, fmt_velocity, fmt_percent, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
 AISLE = Embodied.Scenario.WarehouseAisle
+JOINT = Scenarios.LoadedArmJointGravityStop
 
 class EnforcementCertifiedFunctions:
     # ┌── 1. LOAD ───────────────────────────────────────────────────────────
@@ -2538,17 +2518,15 @@ class EnforcementCertifiedFunctions:
     class1_speed = 0.25 * meter / second  # category: standard (ISO 10218-1:2025 Class I limit)
     v_h = AISLE.v_human_approach  # category: datasheet (ISO 13855 K)
     t_r = AISLE.tau_delay  # category: derived (vision-path delay; not a safety-rated sensing path)
-    v_r = EnforcementAuthorityLoss.tcp_speed  # category: illustrative (descending tool point)
-    omega = EnforcementAuthorityLoss.joint_speed  # category: illustrative
-    alpha_net = EnforcementAuthorityLoss.alpha_eff  # category: illustrative (bias-reduced)
-    s_s = EnforcementAuthorityLoss.d_eff  # category: illustrative (biased tool stop)
+    v_r = JOINT.tcp_speed  # category: illustrative (descending tool point)
+    s_s = JOINT.tool_stop_descending  # category: illustrative (biased tool stop)
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
-    t_s = (omega / alpha_net).to(millisecond)
-    s_h = (v_h * (t_r + t_s)).to(millimeter)
-    s_r = (v_r * t_r).to(millimeter)
-    s_partial = (s_h + s_r + s_s).to(millimeter)
-    share_h = (s_h / s_partial).to("dimensionless").magnitude
+    t_s = JOINT.stop_time_descending.to(millisecond)
+    s_h = JOINT.separation_person.to(millimeter)
+    s_r = JOINT.separation_reaction.to(millimeter)
+    s_partial = JOINT.separation_total.to(millimeter)
+    share_h = JOINT.separation_person_share
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
     check(arm_mass > class1_mass, "The registered arm exceeds the Class I mass limit, so it is Class II.")
@@ -2712,10 +2690,12 @@ class EnforcementRecordMachine:
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
     j_brake = EnforcementStoppingBudget.j_brake  # category: derived (reference polynomial's peak jerk)
-    t_stop_aisle = calc_scurve_stop_time(v_aisle, a_brake, j_brake).to(millisecond)
-    d_stop_aisle = calc_scurve_stop_distance(v_aisle, a_brake, j_brake).to(millimeter)
-    t_stop_drive = calc_scurve_stop_time(v_drive, a_brake, j_brake).to(millisecond)
-    d_stop_drive = calc_scurve_stop_distance(v_drive, a_brake, j_brake).to(millimeter)
+    _aisle = Scenarios.WarehouseFinishedStopAtAisleSpeed.result
+    _drive = Scenarios.WarehouseFinishedStopAtDriveLimit.result
+    t_stop_aisle = _aisle.stop_time.to(millisecond)
+    d_stop_aisle = (_aisle.braking_travel + _aisle.jerk_ramp_travel).to(millimeter)
+    t_stop_drive = _drive.stop_time.to(millisecond)
+    d_stop_drive = (_drive.braking_travel + _drive.jerk_ramp_travel).to(millimeter)
     t_stop_restricted = calc_scurve_stop_time(v_restricted, a_inspected, j_brake).to(millisecond)
     d_stop_restricted = calc_scurve_stop_distance(v_restricted, a_inspected, j_brake).to(millimeter)
     t_yield_high = calc_contact_yield_deadline(f_latch_limit, k_latch, v_latch_high).to(millisecond)
@@ -2865,11 +2845,11 @@ Runtime enforcement grants an admitted plan continuing, conditional permission t
 # │ Context: the summary paragraph immediately below.
 # │ Goal:    restate the finished stopping budget term by term at the aisle speed.
 # │ Show:    reaction, C2 stop, overheads, inset, total, and spare.
-# │ How:     RM/AISLE fields; calc_scurve_stop_distance for the resident
-# │          stop, jerk bound from calc_c2_stop_suffix at the drive limit.
+# │ How:     Scenarios.WarehouseFinishedStopAtAisleSpeed and _AtDriveLimit
+# │          (the resident S-curve stop, the overheads, and the inset); RM/AISLE
+# │          fields for the constant-deceleration contrast.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
-from mlsysim.physics.robotics import calc_c2_stop_suffix, calc_scurve_stop_distance
 from mlsysim.fmt import fmt_length, fmt_velocity, check
 
 RM = Embodied.MobileManipulator.WarehouseMobileManipulator
@@ -2886,14 +2866,14 @@ class EnforcementSummaryBudget:
     v_drive = RM.base.max_velocity  # category: illustrative (drive limit)
 
     # ┌── 2. EXECUTE ────────────────────────────────────────────────────────
-    j_brake = calc_c2_stop_suffix(v_drive, a_brake)["peak_jerk"]  # reference polynomial's peak jerk
-    reaction = (v_aisle * tau_delay).to(millimeter)
-    braking = calc_scurve_stop_distance(v_aisle, a_brake, j_brake).to(millimeter)
-    total = (reaction + braking + overhead + eps_track).to(millimeter)
-    spare = (d_clear - total).to(millimeter)
+    _aisle = Scenarios.WarehouseFinishedStopAtAisleSpeed.result
+    reaction = _aisle.delay_travel.to(millimeter)
+    braking = (_aisle.braking_travel + _aisle.jerk_ramp_travel).to(millimeter)
+    total = _aisle.required_distance.to(millimeter)
+    spare = _aisle.spare.to(millimeter)
     # The drive limit under constant-deceleration braking and under the C2 stop
     total_const_drive = (v_drive * tau_delay + v_drive**2 / (2 * a_brake) + overhead + eps_track).to(millimeter)
-    total_c2_drive = (v_drive * tau_delay + calc_scurve_stop_distance(v_drive, a_brake, j_brake) + overhead + eps_track).to(millimeter)
+    total_c2_drive = Scenarios.WarehouseFinishedStopAtDriveLimit.result.required_distance.to(millimeter)
 
     # ┌── 3. GUARD ──────────────────────────────────────────────────────────
     check(abs(reaction.magnitude - 173.68) < 1e-6, "Reaction over tau_delay at 1.3 m/s is 173.68 mm.")

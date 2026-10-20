@@ -4086,3 +4086,49 @@ def test_megascale_and_tail_at_scale_series():
     tail = {(r["leaves_awaited"], r["percentile"]): r["latency_ms"]
             for r in Literature.Series.TailAtScaleLeafLatency.entries}
     assert tail[("all leaves", 99.0)] / tail[("one random leaf", 99.0)] == approx(14.0)
+def test_warehouse_finished_stopping_budget():
+    d = Scenarios.WarehouseFinishedStopAtDriveLimit.result
+    assert d.jerk.to("m/s**3").magnitude == approx(64.0 / 9.0)
+    assert d.jerk_ramp_travel.to("mm").magnitude == approx(210.9375)
+    assert d.required_distance.to("mm").magnitude == approx(1163.8375)
+    assert d.spare.to("mm").magnitude == approx(-63.8375)
+    assert d.stop_time.to("ms").magnitude == approx(1031.25)
+    assert d.speed_ceiling.to("m/s").magnitude == approx(1.43669, rel=1e-5)
+    assert d.ramp_delay.to("ms").magnitude == approx(140.625)
+    a = Scenarios.WarehouseFinishedStopAtAisleSpeed.result
+    assert a.required_distance.to("mm").magnitude == approx(968.9925)
+    assert a.spare.to("mm").magnitude == approx(131.0075)
+    assert a.delay_spare.to("ms").magnitude == approx(100.775)
+    assert a.stop_time.to("ms").magnitude == approx(931.25)
+    w = Scenarios.WarehouseFinishedStopWithDispatch.result
+    assert w.spare.to("mm").magnitude == approx(48.7036)
+    assert w.speed_ceiling.to("m/s").magnitude == approx(1.34872, rel=1e-5)
+    assert Scenarios.WarehouseFinishedStopInspectedFloor.result.speed_ceiling.to("m/s").magnitude == approx(1.23087, rel=1e-5)
+    assert Scenarios.WarehouseFinishedStopWalkingPerson.result.speed_ceiling.to("m/s").magnitude == approx(0.25994, rel=1e-5)
+    assert (Scenarios.WarehouseFinishedStopWalkingPersonWithDispatch.result.speed_ceiling.to("m/s").magnitude
+            == approx(0.19188, rel=1e-4))
+    assert (Scenarios.WarehouseFinishedStopInspectedFloorWithDispatch.result.speed_ceiling.to("m/s").magnitude
+            == approx(1.17093, rel=1e-5))
+    assert Scenarios.WarehouseFinishedStopTenMsSlower.result.speed_ceiling.to("m/s").magnitude == approx(1.42231, rel=1e-5)
+    assert Scenarios.WarehouseHostLeaseStall.result.added_delay_travel.to("mm").magnitude == approx(182.0)
+    assert Scenarios.WarehouseIntegratorUnwind.result.added_delay_travel.to("mm").magnitude == approx(195.0)
+
+
+def test_loaded_joint_barrier_projection_and_cycle():
+    g = Scenarios.LoadedArmJointGravityStop
+    assert g.bias.to("N*m").magnitude == approx(65.25)
+    assert g.alpha_descending.to("1/s**2").magnitude == approx(7.25)
+    assert g.tool_stop_free.to("mm").magnitude == approx(19.8621)
+    assert g.tool_stop_descending.to("mm").magnitude == approx(79.4483)
+    assert g.tool_stop_ascending.to("mm").magnitude == approx(11.3498)
+    assert g.stop_time_descending.to("ms").magnitude == approx(165.517)
+    far, near = g.barrier_demands
+    assert far.to("N*m").magnitude == approx(80.078125) and near.to("N*m").magnitude == approx(89.140625)
+    assert g.barrier_torque_demand(g.tool_stop_descending).to("N*m").magnitude == approx(87.0)
+    assert g.separation_total.to("mm").magnitude == approx(686.292) and g.separation_person_share == approx(0.69735)
+    p = Scenarios.TwoJointTorqueProjection
+    assert p.projection["u_projected"] == [1.5, 2.0] and p.projection["lambda_star"] == approx(1.0)
+    assert p.breach == approx(5.0) and p.clamp_value == approx(7.0)
+    c = Scenarios.WarehouseEnforcerCycleBudget
+    assert c.total.to("us").magnitude == approx(250.0) and c.headroom.to("us").magnitude == approx(150.0)
+    assert Scenarios.WarehouseBaseHoldDrift.drift.to("mm").magnitude == approx(1.501)

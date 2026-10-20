@@ -1,376 +1,383 @@
 #!/usr/bin/env python3
-"""Every derived number in Lecture 12 (Safety Enforcement), one block per slide.
+"""Every number on the Lecture 12 slides and notes (Safety Enforcement), read from MLSysIM.
 
-Inputs carry their source. "SE" is the rendered chapter, Safety Enforcement
-(Volume IV, Chapter 12). Outside sources are named where they are used.
-Every printed value is what the slide or its note shows, with the label used
-there. make_figs.py imports from this file.
+MLSysIM holds the inputs (the Embodied.* running machine and its aisle record,
+the SICK nanoScan3 in Sensors.SafetyScanner, Literature.* for the Therac-25,
+Cruise, and Kirschner et al. records) and the calculations: the finished
+stopping budgets (Scenarios.WarehouseFinishedStop*, StoppingBudgetModel with
+the S-curve jerk bound, tracking inset, and walking person), the loaded arm
+joint and its kinetic barrier (Scenarios.LoadedArmJointGravityStop), the
+two-joint projection, the permission check's stage budget, the hold drift,
+and the physics.robotics latch and contact-force equations. The chapter reads
+the same scenarios. This file only selects values, converts units, and
+formats them; it types no numbers. Each value is recorded with v() under the
+key the deck prints as \\val{key}; running this file writes images/numbers.tex.
+make_figs.py imports it for the scenario objects and plot inputs.
 
 Run from this folder: python3 calcs.py
 """
 
 import math
+import sys
+from pathlib import Path
 
-G = 9.80665  # standard gravity, m/s^2
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "assets" / "kit"))
+from deckvals import v, write, mlsysim  # noqa: E402
 
+from mlsysim.physics.robotics import (  # noqa: E402
+    calc_cbf_qp_orthogonal_projection,
+    calc_latch_contact_stopping_profile,
+    calc_reduced_mass,
+    calc_scurve_stop_distance,
+    calc_scurve_stop_time,
+    calc_transient_contact_speed_limit,
+    calc_transient_impact_force,
+)
 
-def head(title):
-    print(f"\n--- {title}")
+Embodied, Scenarios, Literature = mlsysim.Embodied, mlsysim.Scenarios, mlsysim.Literature
+Sensors = mlsysim.Sensors
+Q_ = mlsysim.core.units.Q_
 
+RM = Embodied.MobileManipulator.WarehouseMobileManipulator
+AISLE = Embodied.Scenario.WarehouseAisle
+REPORTS = Literature.IncidentReports
+FORCES = Literature.ContactForceMeasurements
+SCANNER = Sensors.SafetyScanner.SICK_nanoScan3
 
-def show(label, value):
-    print(f"  {label}: {value}")
-
-
-# =============================================================================
-# Shared inputs: the running machine at the rack end (SE Napkin Math 12.1, table 1)
-# =============================================================================
-D_CLEAR = 1.100        # m, clear distance at the rack end (illustrative)
-LOC = 0.050            # m, localization bound (illustrative)
-PROT = 0.100           # m, protective clearance (chosen)
-TRACK = 0.040          # m, tracking bound (illustrative qualification target)
-A_BRAKE = 2.0          # m/s^2, credible loaded deceleration, dry floor (illustrative)
-V_DRIVE = 1.5          # m/s, drive limit (illustrative)
-V_AISLE = 1.3          # m/s, candidate aisle speed (SE 12.2.1)
-T_ACT = 0.020          # s, brake onset (SE table 1 row 3: 30 mm at 1.5 m/s)
-T_LEASE_PATH = 0.062   # s, lease 60 ms + one tick + one bus cycle (SE table 1 row 4)
-T_LEASE = 0.060        # s, chunk lease (SE 12.5)
-T_AGE = 0.0516         # s, observation age (SE table 1 row 5)
-T_DISPATCH = 0.0633    # s, dispatch-to-admission allocation (SE 12.2.1, owned by Lecture 13)
-# Jerk limit: SE stipulates 7.11 m/s^3. Lecture 11's S-curve from 1.5 m/s takes
-# 1,031.25 ms against 750 ms at constant deceleration (SE 12.10), so
-# a/J = 0.28125 s and J = 2 / 0.28125 (derived; prints as 7.11).
-T_SCURVE_DRIVE = 1.03125
-T_CONST_DRIVE = V_DRIVE / A_BRAKE
-J = A_BRAKE / (T_SCURVE_DRIVE - T_CONST_DRIVE)
-T_DELAY = T_ACT + T_LEASE_PATH + T_AGE   # pre-brake delay, s
-
-
-def stop_dist(v, a=A_BRAKE, j=J):
-    """Jerk-limited resident stop distance (SE equation 11.17 form), m."""
-    if v >= a * a / j:
-        return v * v / (2 * a) + v * a / (2 * j)
-    t = 2 * math.sqrt(v / j)      # triangular deceleration, peak never reached
-    return v * t / 2
+DRIVE_STOP = Scenarios.WarehouseFinishedStopAtDriveLimit
+AISLE_STOP = Scenarios.WarehouseFinishedStopAtAisleSpeed
+DISPATCH = Scenarios.WarehouseFinishedStopWithDispatch
+INSPECTED = Scenarios.WarehouseFinishedStopInspectedFloor
+INSPECTED_DISPATCH = Scenarios.WarehouseFinishedStopInspectedFloorWithDispatch
+WALKER = Scenarios.WarehouseFinishedStopWalkingPerson
+WALKER_DISPATCH = Scenarios.WarehouseFinishedStopWalkingPersonWithDispatch
+SLOWER = Scenarios.WarehouseFinishedStopTenMsSlower
+STALL = Scenarios.WarehouseHostLeaseStall
+UNWIND = Scenarios.WarehouseIntegratorUnwind
+JOINT = Scenarios.LoadedArmJointGravityStop
+PROJ = Scenarios.TwoJointTorqueProjection
+CYCLE = Scenarios.WarehouseEnforcerCycleBudget
+HOLD = Scenarios.WarehouseBaseHoldDrift
 
 
-def stop_time(v, a=A_BRAKE, j=J):
-    if v >= a * a / j:
-        return v / a + a / j
-    return 2 * math.sqrt(v / j)
+def m(q, unit):
+    """Magnitude of a Pint quantity in ``unit``."""
+    return q.to(unit).magnitude
 
 
-def rows(v):
-    """Table 1 rows 1 to 7 at speed v, in mm."""
-    return [
-        ("Braking", v * v / (2 * A_BRAKE) * 1e3),
-        ("Fixed allowances", (LOC + PROT) * 1e3),
-        ("Brake onset", v * T_ACT * 1e3),
-        ("Lease path", v * T_LEASE_PATH * 1e3),
-        ("Observation age", v * T_AGE * 1e3),
-        ("Jerk ramps", v * A_BRAKE / (2 * J) * 1e3),
-        ("Tracking inset", TRACK * 1e3),
-    ]
+drive, aisle, dispatch = DRIVE_STOP.result, AISLE_STOP.result, DISPATCH.result
+walker = WALKER.result
+
+# Plot inputs for make_figs.py, SI magnitudes at full precision.
+V_DRIVE = m(DRIVE_STOP.speed, "m/s")
+V_AISLE = m(AISLE_STOP.speed, "m/s")
+A_BRAKE = m(AISLE.a_brake, "m/s**2")
+A_INSP = m(INSPECTED.a_brake, "m/s**2")
+J = m(AISLE.j_brake, "m/s**3")
+D_CLEAR = m(AISLE.d_clear, "m")
+FIXED = m(AISLE.fixed_overhead, "m")
+T_DELAY = m(AISLE.tau_delay, "s")
+V_WALK = m(AISLE.v_human_approach, "m/s")
+V_CEIL = m(aisle.speed_ceiling, "m/s")
+V_CEIL_INSP = m(INSPECTED.result.speed_ceiling, "m/s")
+V_WALKER = m(walker.speed_ceiling, "m/s")
+T_SCURVE_DRIVE = m(drive.stop_time, "s")
+T_CONST_DRIVE = m(drive.braking_time, "s")
 
 
-def ceiling(delay, a=A_BRAKE, avail=D_CLEAR - LOC - PROT - TRACK, j=J, walker=0.0):
-    """Highest speed whose stop subtotal fits the clear distance (root search)."""
-    lo, hi = 0.0, 5.0
-    for _ in range(200):
-        v = (lo + hi) / 2
-        need = v * delay + stop_dist(v, a, j) + walker * (delay + stop_time(v, a, j))
-        if need <= avail:
-            lo = v
-        else:
-            hi = v
-    return lo
+def stop_dist(speed, decel=A_BRAKE):
+    """Resident S-curve stop distance in m (calc_scurve_stop_distance)."""
+    return m(calc_scurve_stop_distance(Q_(speed, "m/s"), Q_(decel, "m/s**2"), AISLE.j_brake), "m")
 
 
-# =============================================================================
-# Slide: Recall (Lecture 11): constant-deceleration stop against the S-curve
-# =============================================================================
-head("Recall: Lecture 11 stop from 1.5 m/s")
-show("constant deceleration (ms)", f"{T_CONST_DRIVE * 1e3:.0f}")
-show("S-curve (ms)", f"{T_SCURVE_DRIVE * 1e3:,.2f}")
-show("jerk limit J (m/s^3)", f"{J:.2f}")
-show("a/(2J) (ms)", f"{A_BRAKE / (2 * J) * 1e3:.1f}")
-
-# =============================================================================
-# Slide: the finished budget overruns at the drive limit (budget build)
-# =============================================================================
-head("Budget at the drive limit and at the aisle speed")
-run = 0.0
-for name, mm in rows(V_DRIVE):
-    run += mm
-    show(f"{name} at 1.5 (mm) / running total", f"{mm:,.2f} / {run:,.2f}")
-TOT_DRIVE = sum(mm for _, mm in rows(V_DRIVE))
-SUB5_DRIVE = sum(mm for _, mm in rows(V_DRIVE)[:5])
-SUB6_DRIVE = sum(mm for _, mm in rows(V_DRIVE)[:6])
-show("rows 1-5 total at 1.5 (mm)", f"{SUB5_DRIVE:,.1f}")
-show("rows 1-6 overrun at 1.5 (mm)", f"{SUB6_DRIVE - D_CLEAR * 1e3:,.2f}")
-show("rows 1-7 overrun at 1.5 (mm)", f"{TOT_DRIVE - D_CLEAR * 1e3:,.2f}")
-for name, mm in rows(V_AISLE):
-    show(f"{name} at 1.3 (mm)", f"{mm:,.2f}")
-TOT_AISLE = sum(mm for _, mm in rows(V_AISLE))
-SPARE = D_CLEAR * 1e3 - TOT_AISLE
-show("total at 1.3 (mm)", f"{TOT_AISLE:,.2f}")
-show("spare at 1.3 (mm)", f"{SPARE:,.2f}")
-show("wear doubles tracking error: unbudgeted (mm)", f"{(2 * TRACK - TRACK) * 1e3:.0f}")
-
-# =============================================================================
-# Worked example: the ceiling the budget sets (SE Napkin Math 12.1)
-# =============================================================================
-head("Napkin Math 12.1")
-avail = D_CLEAR - LOC - PROT - TRACK
-t_eff = T_DELAY + A_BRAKE / (2 * J)
-a_t = A_BRAKE * t_eff
-root = math.sqrt(a_t ** 2 + 2 * A_BRAKE * avail)
-V_CEIL = -a_t + root
-show("pre-brake delay (ms)", f"{T_DELAY * 1e3:.1f}")
-show("available braking distance (mm)", f"{avail * 1e3:,.0f}")
-show("effective delay (ms)", f"{t_eff * 1e3:.1f}")
-show("a * t_eff (m/s)", f"{a_t:.4f}")
-show("(a t)^2", f"{a_t ** 2:.4f}")
-show("2 a D", f"{2 * A_BRAKE * avail:.2f}")
-show("root (m/s)", f"{root:.4f}")
-show("ceiling (m/s)", f"{V_CEIL:.2f}")
-SPARE_MS = SPARE / V_AISLE
-show("spare as delay at 1.3 (ms)", f"{SPARE_MS:.1f}")
-DISP_MM = V_AISLE * T_DISPATCH * 1e3
-show("dispatch-to-admission travel (mm)", f"{DISP_MM:.1f}")
-RESERVE = SPARE - DISP_MM
-show("reserve after dispatch (mm)", f"{RESERVE:.1f}")
-show("reserve as time (ms)", f"{RESERVE / V_AISLE:.1f}")
-show("ceiling with dispatch charged (m/s)", f"{ceiling(T_DELAY + T_DISPATCH):.2f}")
-show("one ms of delay at 1.3 (mm)", f"{V_AISLE * 1e-3 * 1e3:.1f}")
-show("10 ms more delay lowers ceiling by (mm/s)",
-     f"{(V_CEIL - ceiling(T_DELAY + 0.010)) * 1e3:.0f}")
-
-# =============================================================================
-# Activity: a 200 ms host stall instead of the 60 ms lease (SE 12.2.1)
-# =============================================================================
-head("Estimate: host-enforced lease, 200 ms stall")
-STALL = 0.200
-extra = (STALL - T_LEASE) * V_AISLE * 1e3
-show("extra unbraked travel (mm)", f"{extra:.0f}")
-show("overrun past the spare (mm)", f"{extra - SPARE:.2f}")
-show("integrator unwind 150 ms at 1.3 (mm)", f"{0.150 * V_AISLE * 1e3:.0f}")
-show("unwind overrun past spare (mm)", f"{0.150 * V_AISLE * 1e3 - SPARE:.2f}")
-
-# =============================================================================
-# Slide: three ceilings (SE 12.2.1, figure 3)
-# =============================================================================
-head("Three ceilings, before dispatch allocation")
-MU_INSP = 0.12
-A_INSP = MU_INSP * G
-V_WALK = 1.6       # m/s, ISO 13855 approach speed (SE 12.2.1)
-show("dry floor (m/s)", f"{ceiling(T_DELAY):.2f}")
-show("inspected floor decel (m/s^2)", f"{A_INSP:.3f}")
-show("inspected floor mu=0.12 (m/s)", f"{ceiling(T_DELAY, a=A_INSP):.2f}")
-V_WALKER = ceiling(T_DELAY, walker=V_WALK)
-show("walking person (m/s)", f"{V_WALKER:.2f}")
-show("min mu for 2 m/s^2", f"{A_BRAKE / G:.3f}")
-show("jerk threshold a^2/J (m/s)", f"{A_BRAKE ** 2 / J:.2f}")
-show("stop time from walker ceiling (ms)", f"{stop_time(V_WALKER) * 1e3:.0f}")
-show("base stop travel at walker ceiling (mm)", f"{stop_dist(V_WALKER) * 1e3:.0f}")
-show("person travel during that stop (mm)", f"{V_WALK * stop_time(V_WALKER) * 1e3:.0f}")
-show("dry, dispatch charged (m/s)", f"{ceiling(T_DELAY + T_DISPATCH):.2f}")
-show("inspected, dispatch charged (m/s)", f"{ceiling(T_DELAY + T_DISPATCH, a=A_INSP):.2f}")
-show("walker, dispatch charged (m/s)", f"{ceiling(T_DELAY + T_DISPATCH, walker=V_WALK):.2f}")
-
-# =============================================================================
-# Slide: the scanner path (SICK nanoScan3 NANS3-CAAZ30AA1 datasheet, 2024-12-17)
-# =============================================================================
-head("Certified scanner path")
-SCAN_RESP = 0.085   # s, response time (datasheet)
-show("scanner response travel at 1.3 (mm)", f"{SCAN_RESP * V_AISLE * 1e3:.1f}")
-show("software pre-brake delay travel at 1.3 (mm)", f"{T_DELAY * V_AISLE * 1e3:.2f}")
-show("scanner response travel at 1.5 (mm)", f"{SCAN_RESP * V_DRIVE * 1e3:.1f}")
-
-# =============================================================================
-# Slide: the gravity braking tax (SE Napkin Math 12.2)
-# Franka Research 3 datasheet R02212 2.3: A1-A4 +/-87 Nm, A5-A7 +/-12 Nm, ~18.3 kg
-# =============================================================================
-head("Napkin Math 12.2")
-W0 = 1.2          # rad/s (illustrative)
-LEVER = 0.80      # m (illustrative)
-INERTIA = 3.0     # kg m^2 (illustrative)
-TAU_MAX = 87.0    # N m (datasheet)
-TAU_BIAS = 0.75 * TAU_MAX   # N m (illustrative, 75 percent of peak)
+def stop_time(speed, decel=A_BRAKE):
+    """Resident S-curve stop duration in s (calc_scurve_stop_time)."""
+    return m(calc_scurve_stop_time(Q_(speed, "m/s"), Q_(decel, "m/s**2"), AISLE.j_brake), "s")
 
 
-def tool_stop_mm(alpha):
-    return W0 ** 2 / (2 * alpha) * LEVER * 1e3
+def ceiling_at(clear):
+    """Pre-dispatch speed ceiling in m/s at a clear distance in m (the aisle budget's root)."""
+    if clear <= FIXED:
+        return 0.0
+    return m(AISLE_STOP.variant(clear_distance=Q_(clear, "m")).result.speed_ceiling, "m/s")
 
 
-A_FREE = TAU_MAX / INERTIA
-A_DOWN = (TAU_MAX - TAU_BIAS) / INERTIA
-A_UP = (TAU_MAX + TAU_BIAS) / INERTIA
-show("bias torque (N m)", f"{TAU_BIAS:.2f}")
-show("no bias: decel / angle deg / tool mm",
-     f"{A_FREE:.2f} / {math.degrees(W0**2/(2*A_FREE)):.2f} / {tool_stop_mm(A_FREE):.2f}")
-show("descending: torque left / decel / tool mm",
-     f"{TAU_MAX - TAU_BIAS:.2f} / {A_DOWN:.2f} / {tool_stop_mm(A_DOWN):.2f}")
-show("ascending: torque / decel / tool mm",
-     f"{TAU_MAX + TAU_BIAS:.2f} / {A_UP:.2f} / {tool_stop_mm(A_UP):.2f}")
-show("descending / free", f"{tool_stop_mm(A_DOWN) / tool_stop_mm(A_FREE):.1f}")
-show("unbudgeted overrun (mm)", f"{tool_stop_mm(A_DOWN) - tool_stop_mm(A_FREE):.2f}")
-show("joint stop time descending (ms)", f"{W0 / A_DOWN * 1e3:.0f}")
-show("FR3 half mass + payload (kg)", f"{18.3 / 2 + 3:.1f}")
+print("== Hook: Therac-25 (SE War Story 12.1; Leveson and Turner 1993)")
+v("therac_mev", REPORTS.TheracBeamEnergyMeV, "{:.0f}", "beam energy, MeV")
+v("therac_patients_words", REPORTS.TheracOverdosedPatients, "words", "patients overdosed")
+v("therac_deaths_words", REPORTS.TheracDeaths, "words", "patients who died")
+v("therac_dose_low", REPORTS.TheracDoseLowRads, "{:,.0f}", "dose estimate, low, rad")
+v("therac_dose_high", REPORTS.TheracDoseHighRads, "{:,.0f}", "dose estimate, high, rad")
+v("therac_over", REPORTS.TheracDoseOverTherapeutic, "{:.0f}", "times the therapeutic dose")
 
-# =============================================================================
-# Slide: the barrier's torque demand (SE 12.4.1, equation 6)
-# =============================================================================
-head("Kinetic barrier torque demand")
-GAMMA = 10.0
+print("== Recall and the permission tick (Lecture 11; SE 12.1, 12.10)")
+v("v_drive", V_DRIVE, "{:.1f}", "drive limit, m/s")
+v("a_brake", A_BRAKE, "{:.0f}", "credible deceleration, m/s^2")
+v("j_brake", J, "{:.2f}", "jerk bound, m/s^3")
+v("t_const_drive", m(drive.braking_time, "ms"), "{:.0f}", "constant-deceleration stop from the drive limit, ms")
+v("t_scurve_drive", m(drive.stop_time, "ms"), "{:,.2f}", "S-curve stop from the drive limit, ms")
+v("t_tick", m(AISLE.t_tick, "ms"), "{:.0f}", "permission tick, ms")
+v("tick_rate", m(1 / AISLE.t_tick, "Hz"), "{:,.0f}", "ticks per second")
+v("chunk_period", m(1 / RM.chunk_rate, "ms"), "{:.0f}", "chunk renewal period, ms")
 
+print("== The finished budget at the drive limit and the aisle speed (SE table 1)")
+lease_path = AISLE.t_lease + AISLE.t_tick + AISLE.t_bus
+rows_drive = [drive.braking_travel, drive.overhead, drive.travel_over(AISLE.t_brake_onset),
+              drive.travel_over(lease_path), drive.travel_over(AISLE.perception_age),
+              drive.jerk_ramp_travel, drive.tracking_inset]
+run = [sum(rows_drive[:i + 1], 0 * rows_drive[0]) for i in range(len(rows_drive))]
+v("d_clear_m", m(AISLE.d_clear, "m"), "{:.2f}", "clear distance, m")
+v("d_clear_mm", m(AISLE.d_clear, "mm"), "{:,.0f}", "clear distance, mm")
+v("brake_drive", m(drive.braking_travel, "mm"), "{:.1f}", "row 1 at the drive limit, mm")
+v("overhead", m(drive.overhead, "mm"), "{:.0f}", "row 2, localization plus protective, mm")
+v("run5", m(run[4], "mm"), "{:.1f}", "rows 1-5 at the drive limit, mm")
+v("shape_drive", m(drive.jerk_ramp_travel, "mm"), "{:.2f}", "row 6, jerk ramps at the drive limit, mm")
+v("run6", m(run[5], "mm"), "{:,.1f}", "rows 1-6 at the drive limit, mm")
+v("over6", m(run[5] - AISLE.d_clear, "mm"), "{:.1f}", "rows 1-6 overrun, mm")
+v("run7", m(drive.required_distance, "mm"), "{:,.1f}", "rows 1-7 at the drive limit, mm")
+v("over7", m(-drive.spare, "mm"), "{:.1f}", "rows 1-7 overrun, mm")
+v("eps_track", m(AISLE.eps_track, "mm"), "{:.0f}", "tracking bound, mm")
+v("eps_doubled", m(AISLE.eps_track + AISLE.eps_track, "mm"), "{:.0f}", "tracking error doubled by wear, mm")
+v("v_aisle", V_AISLE, "{:.1f}", "candidate aisle speed, m/s")
+v("total_aisle", m(aisle.required_distance, "mm"), "{:.1f}", "rows 1-7 at the aisle speed, mm")
+v("total_aisle_2", m(aisle.required_distance, "mm"), "{:.2f}", "the same, two decimals")
+v("spare", m(aisle.spare, "mm"), "{:.1f}", "spare at the aisle speed, mm")
+travel_da = AISLE_STOP.result.travel_over(AISLE.t_dispatch_to_admission)
+v("travel_da", m(travel_da, "mm"), "{:.1f}", "dispatch-to-admission travel, mm")
+v("delta_da", m(AISLE.t_dispatch_to_admission, "ms"), "{:.1f}", "dispatch-to-admission allocation, ms")
 
-def barrier_brake_torque(clear_m, w=W0):
-    theta = clear_m / LEVER
-    h = theta - w * w / (2 * A_DOWN)
-    # equation 6: tau <= -bias + I a_net (gamma h / w - 1); braking demand is its negative
-    return -(-TAU_BIAS + INERTIA * A_DOWN * (GAMMA * h / w - 1)), theta, h
+print("== Worked example: the ceiling (SE Napkin Math 12.1, equation 2)")
+tau_eff = AISLE.tau_delay + drive.ramp_delay
+d_avail = AISLE.d_clear - AISLE.fixed_overhead
+a_tau = AISLE.a_brake * tau_eff
+root = aisle.speed_ceiling + a_tau  # equation 2: the ceiling is the root less a tau
+v("delta_loc", m(AISLE.delta_loc, "mm"), "{:.0f}", "localization bound, mm")
+v("delta_margin", m(AISLE.delta_margin, "mm"), "{:.0f}", "protective clearance, mm")
+v("fixed_all", m(AISLE.fixed_overhead, "mm"), "{:.0f}", "all three allowances, mm")
+v("d_avail", m(d_avail, "mm"), "{:.0f}", "room to brake, mm")
+v("tau_delay", m(AISLE.tau_delay, "ms"), "{:.1f}", "pre-brake delay, ms")
+v("ramp_delay", m(drive.ramp_delay, "ms"), "{:.1f}", "jerk ramps as delay, a/2J, ms")
+v("tau_eff", m(tau_eff, "ms"), "{:.1f}", "effective delay, ms")
+v("a_tau", m(a_tau, "m/s"), "{:.3f}", "a times the effective delay, m/s")
+v("root", m(root, "m/s"), "{:.3f}", "square-root term, m/s")
+v("ceiling", V_CEIL, "{:.2f}", "pre-dispatch ceiling, m/s")
+v("v_plateau", m(drive.jerk_plateau_speed, "m/s"), "{:.2f}", "a^2/J, m/s")
+v("t_latest", m(aisle.delay_spare, "ms"), "{:.1f}", "spare as delay at the aisle speed, ms")
+v("reserve_d", m(dispatch.spare, "mm"), "{:.1f}", "reserve after dispatch travel, mm")
+v("reserve_t", m(dispatch.delay_spare, "ms"), "{:.1f}", "reserve as time, ms")
+v("mm_per_ms", m(AISLE_STOP.result.travel_over(AISLE.t_tick), "mm"), "{:.1f}", "travel per ms at the aisle speed, mm")
+v("slower_ms", m(SLOWER.delay - AISLE.tau_delay, "ms"), "{:.0f}", "added pre-brake delay of the sensitivity case, ms")
+v("ceiling_drop_10ms", m(aisle.speed_ceiling - SLOWER.result.speed_ceiling, "mm/s"), "{:.0f}",
+  "ceiling drop for 10 ms more delay, mm/s")
 
+print("== Certified scanner path (SICK nanoScan3 data sheet)")
+v("scanner_range", m(SCANNER.protective_field_range, "m"), "{:.0f}", "protective field range, m")
+v("scanner_resp", m(SCANNER.response_time, "ms"), "{:.0f}", "response time, ms")
+v("scanner_travel", m(AISLE_STOP.result.travel_over(SCANNER.response_time), "mm"), "{:.1f}",
+  "travel during the response at the aisle speed, mm")
 
-for c in (0.110, tool_stop_mm(A_DOWN) / 1e3, 0.070):
-    tq, th, h = barrier_brake_torque(c)
-    show(f"clearance {c * 1e3:.2f} mm: theta / h / braking torque",
-         f"{th:.4f} / {h:.4f} / {tq:.1f}")
+print("== Estimate: host-enforced lease stall (SE 12.2.1, 12.3)")
+stall = STALL.added_delay + AISLE.t_lease
+v("t_lease", m(AISLE.t_lease, "ms"), "{:.0f}", "chunk lease, ms")
+v("t_stall", m(stall, "ms"), "{:.0f}", "host stall, ms")
+v("stall_extra", m(STALL.added_delay, "ms"), "{:.0f}", "stall beyond the lease, ms")
+v("stall_extra_s", m(STALL.added_delay, "s"), "{:.3f}", "the same, s")
+v("stall_added", m(STALL.result.added_delay_travel, "mm"), "{:.0f}", "extra unbraked travel, mm")
+v("stall_breach", m(STALL.result.added_delay_travel - aisle.spare, "mm"), "{:.2f}", "overrun past the spare, mm")
+v("t_unwind", m(UNWIND.added_delay, "ms"), "{:.0f}", "integrator unwind, ms")
+v("unwind_added", m(UNWIND.result.added_delay_travel, "mm"), "{:.0f}", "unwind travel, mm")
+v("unwind_excess", m(UNWIND.result.added_delay_travel - aisle.spare, "mm"), "{:.2f}", "unwind past the spare, mm")
 
-# =============================================================================
-# Activity + slide: projection against per-axis clamp (SE 12.6.1)
-# =============================================================================
-head("Two-axis projection")
-u = (3.5, 3.0)
-a = (2.0, 1.0)
-b = 5.0
-au = a[0] * u[0] + a[1] * u[1]
-lam = max(0.0, (au - b) / (a[0] ** 2 + a[1] ** 2))
-ustar = (u[0] - lam * a[0], u[1] - lam * a[1])
-clamp = (2.0, 3.0)
-show("a.u_nom", f"{au:g}")
-show("breach", f"{au - b:g}")
-show("lambda*", f"{lam:g}")
-show("u*", f"({ustar[0]:g}, {ustar[1]:g})")
-show("a.u*", f"{a[0] * ustar[0] + a[1] * ustar[1]:g}")
-show("intervention norm", f"{math.hypot(u[0] - ustar[0], u[1] - ustar[1]):.3f}")
-show("a.clamp", f"{a[0] * clamp[0] + a[1] * clamp[1]:g}")
-show("nominal angle (deg)", f"{math.degrees(math.atan2(u[1], u[0])):.1f}")
-show("clamp angle (deg)", f"{math.degrees(math.atan2(clamp[1], clamp[0])):.1f}")
-show("projected angle (deg)", f"{math.degrees(math.atan2(ustar[1], ustar[0])):.1f}")
-show("latch speed projection lambda (1-D, a=1)", f"{0.10 - 0.03:.2f}")
+print("== Three ceilings (SE 12.2.1, figure 3)")
+v("mu_inspected", AISLE.mu_inspected_floor, "{:.2f}", "inspected-floor friction")
+v("a_inspected", A_INSP, "{:.2f}", "inspected-floor deceleration, m/s^2")
+v("ceiling_inspected", V_CEIL_INSP, "{:.2f}", "inspected-floor ceiling, m/s")
+v("v_human", V_WALK, "{:.1f}", "approach speed, ISO 13855, m/s")
+v("v_walk", V_WALKER, "{:.2f}", "walking-person ceiling, m/s")
+t_stop_walk = calc_scurve_stop_time(walker.speed_ceiling, AISLE.a_brake, AISLE.j_brake)
+v("t_stop_walk", m(t_stop_walk, "ms"), "{:.0f}", "S-curve stop from the walking-person ceiling, ms")
+v("closure_walk", m(AISLE.v_human_approach * t_stop_walk, "mm"), "{:.0f}", "person travel during that stop, mm")
+v("ceiling_complete", m(dispatch.speed_ceiling, "m/s"), "{:.2f}", "dry ceiling, dispatch charged, m/s")
+v("ceiling_inspected_complete", m(INSPECTED_DISPATCH.result.speed_ceiling, "m/s"), "{:.2f}",
+  "inspected ceiling, dispatch charged, m/s")
+v("v_walk_complete", m(WALKER_DISPATCH.result.speed_ceiling, "m/s"), "{:.2f}", "walking ceiling, dispatch charged, m/s")
 
-# =============================================================================
-# Slide: force rises at the latch (SE 12.6.2, equations 11 and 12)
-# =============================================================================
-head("Latch")
-K_PLATE = 4.0e5     # N/m (SE)
-TRIP = 15.0         # N
-T_LOOP = 0.002      # s
-F_LATCH = 100.0     # N
+print("== Gravity braking tax (SE Napkin Math 12.2)")
+v("bias_pct", 100 * JOINT.bias_fraction, "{:.0f}", "share of peak torque gravity holds, %")
+v("joint_speed", m(JOINT.joint_speed, "1/s"), "{:.1f}", "joint speed, rad/s")
+v("lever", m(JOINT.lever, "m"), "{:.2f}", "lever, m")
+v("bias", m(JOINT.bias, "N*m"), "{:.2f}", "bias torque, N m")
+v("tau_max", m(JOINT.torque_limit, "N*m"), "{:.0f}", "peak joint torque, N m")
+v("inertia", m(JOINT.inertia, "kg*m**2"), "{:.0f}", "joint inertia, kg m^2")
+v("torque_down", m(JOINT.torque_descending, "N*m"), "{:.2f}", "braking torque left, descending, N m")
+v("alpha_free", m(JOINT.alpha_free, "1/s**2"), "{:.0f}", "deceleration, no bias, rad/s^2")
+v("alpha_down", m(JOINT.alpha_descending, "1/s**2"), "{:.2f}", "deceleration, descending, rad/s^2")
+v("stop_free", m(JOINT.tool_stop_free, "mm"), "{:.2f}", "tool stop, no bias, mm")
+v("stop_down", m(JOINT.tool_stop_descending, "mm"), "{:.2f}", "tool stop, descending, mm")
+v("stop_up", m(JOINT.tool_stop_ascending, "mm"), "{:.2f}", "tool stop, ascending, mm")
+v("stop_ratio_words", (JOINT.tool_stop_descending / JOINT.tool_stop_free).to("").magnitude, "words",
+  "descending over unbiased stop")
+v("overrun", m(JOINT.overrun, "mm"), "{:.2f}", "unbudgeted overrun, mm")
+v("arm_mass", m(RM.arm.mass, "kg"), "{:.0f}", "arm mass, kg")
 
+print("== Kinetic barrier torque demand (SE 12.4.1, equation 6)")
+clear_far, clear_near = JOINT.barrier_clearances
+far_demand, near_demand = JOINT.barrier_demands
+v("gamma", m(JOINT.barrier_gain, "1/s"), "{:.0f}", "barrier gain, 1/s")
+v("clear_far", m(clear_far, "mm"), "{:.0f}", "far clearance, mm")
+v("clear_near", m(clear_near, "mm"), "{:.0f}", "near clearance, mm")
+v("brake_far", m(far_demand, "N*m"), "{:.1f}", "demand at the far clearance, N m")
+v("brake_near", m(near_demand, "N*m"), "{:.1f}", "demand at the near clearance, N m")
 
-def latch(v):
-    rate = K_PLATE * v
-    f_on = TRIP + rate * T_LOOP
-    room = (F_LATCH - f_on) / K_PLATE
-    acc = v * v / (2 * room) if room > 0 else float("inf")
-    return rate, f_on, room, acc, v / acc
+print("== Two-axis projection (SE 12.6.1)")
+proj = PROJ.projection
+v("proj_a1", PROJ.normal[0], "{:.0f}", "normal, joint 1 coefficient")
+v("proj_b", PROJ.bound, "{:.0f}", "barrier bound, N m")
+v("proj_u1", PROJ.proposal[0], "{:.1f}", "proposal, joint 1, N m")
+v("proj_u2", PROJ.proposal[1], "{:.0f}", "proposal, joint 2, N m")
+v("proj_value", PROJ.proposal_value, "{:.0f}", "a . u_nom")
+v("proj_breach", PROJ.breach, "{:.0f}", "breach")
+v("proj_clamp1", PROJ.clamp[0], "{:.0f}", "clamp, joint 1, N m")
+v("proj_clamp2", PROJ.clamp[1], "{:.0f}", "clamp, joint 2, N m")
+v("proj_clamp_value", PROJ.clamp_value, "{:.0f}", "a . clamp")
+v("proj_clamp_pen", PROJ.clamp_penetration, "{:.0f}", "clamp still outside by")
+v("proj_lambda", proj["lambda_star"], "{:.0f}", "lambda*")
+v("proj_us1", proj["u_projected"][0], "{:.1f}", "projection, joint 1, N m")
+v("proj_us2", proj["u_projected"][1], "{:.0f}", "projection, joint 2, N m")
+v("proj_norm", proj["correction_norm"], "{:.3f}", "intervention norm, N m")
+v("proj_angle_nom", PROJ.angle_deg(PROJ.proposal), "{:.1f}", "proposal direction, deg")
+v("proj_angle_clamp", PROJ.angle_deg(PROJ.clamp), "{:.1f}", "clamp direction, deg")
+v("qp_us", m(CYCLE.stage("QP solve"), "us"), "{:.0f}", "QP solve allocation, us")
+latch_proj = calc_cbf_qp_orthogonal_projection([m(AISLE.v_latch_high, "m/s")], [1.0], m(AISLE.v_latch_approach, "m/s"))
+v("latch_lambda", latch_proj["lambda_star"], "{:.2f}", "latch speed projection lambda, m/s")
 
+print("== Latch (SE 12.6.2, equations 11 and 12)")
+lo = calc_latch_contact_stopping_profile(AISLE.v_latch_approach, scenario=AISLE)
+hi = calc_latch_contact_stopping_profile(AISLE.v_latch_high, scenario=AISLE)
+k_exp = math.floor(math.log10(m(AISLE.k_latch, "N/m")))
+v("k_latch_mant", m(AISLE.k_latch, "N/m") / 10 ** k_exp, "{:.1f}", "plate stiffness mantissa")
+v("k_latch_exp", k_exp, "{:.0f}", "plate stiffness exponent")
+v("v_latch", m(AISLE.v_latch_approach, "m/s"), "{:.2f}", "guarded approach, m/s")
+v("v_latch_high", m(AISLE.v_latch_high, "m/s"), "{:.2f}", "proposed approach, m/s")
+v("df_dt", m(lo["df_dt"], "N/ms"), "{:.0f}", "force rise at the guarded approach, N/ms")
+v("f_trip", m(AISLE.f_latch_tripwire, "N"), "{:.0f}", "tripwire, N")
+v("t_contact", m(AISLE.t_contact_response, "ms"), "{:.0f}", "contact loop, ms")
+v("f_cmd", m(lo["f_at_brake_onset"], "N"), "{:.0f}", "force at brake onset, guarded, N")
+v("x_rem", m(lo["x_remaining"], "mm"), "{:.2f}", "plate travel left, mm")
+v("f_latch", m(AISLE.f_latch_limit, "N"), "{:.0f}", "latch limit, N")
+v("a_arm", m(lo["a_arm_needed"], "m/s**2"), "{:.0f}", "stop deceleration, guarded, m/s^2")
+v("t_arm_stop", m(lo["t_arm_stop"], "ms"), "{:.0f}", "stop time, guarded, ms")
+v("f_cmd_hi", m(hi["f_at_brake_onset"], "N"), "{:.0f}", "force at brake onset, fast, N")
+v("x_rem_hi_um", m(hi["x_remaining"], "um"), "{:.1f}", "plate travel left, fast, um")
+v("a_arm_hi", m(hi["a_arm_needed"], "m/s**2"), "{:.0f}", "stop deceleration, fast, m/s^2")
 
-for v in (0.03, 0.10):
-    rate, f_on, room, acc, t = latch(v)
-    show(f"v={v}: rate N/ms / force at brake / room mm / decel / stop ms",
-         f"{rate / 1e3:.0f} / {f_on:.0f} / {room * 1e3:.4f} / {acc:.2f} / {t * 1e3:.1f}")
-show("0.10: time from first contact to 100 N, unbraked (ms)", f"{F_LATCH / (K_PLATE * 0.10) * 1e3:.1f}")
-show("0.03: time from first contact to 100 N, unbraked (ms)", f"{F_LATCH / (K_PLATE * 0.03) * 1e3:.1f}")
+print("== Clamped-hand penalty (SE Napkin Math 12.3)")
+m_eff, m_hand, k_hand = RM.arm_effective_contact_mass, AISLE.m_contact_human, AISLE.k_contact_human
+m_red = calc_reduced_mass(m_eff, m_hand)
+s_free = (k_hand * m_red) ** 0.5
+s_clamp = (k_hand * m_eff) ** 0.5
+f_free = calc_transient_impact_force(AISLE.v_handover, m_eff, k_hand, human_mass=m_hand)
+f_clamp = calc_transient_impact_force(AISLE.v_handover, m_eff, k_hand)
+v("m_eff", m(m_eff, "kg"), "{:.0f}", "arm-side effective mass, kg")
+v("m_hand", m(m_hand, "kg"), "{:.1f}", "hand effective mass, kg")
+v("k_hand_n_mm", m(k_hand, "N/mm"), "{:.0f}", "hand spring, N/mm")
+v("k_hand_n_m", m(k_hand, "N/m"), "{:,.0f}", "hand spring, N/m")
+v("m_red", m(m_red, "kg"), "{:.3f}", "reduced mass, kg")
+v("v_handover", m(AISLE.v_handover, "m/s"), "{:.2f}", "handover speed, m/s")
+v("s_free", m(s_free, "N*s/m"), "{:.0f}", "free stiffness term, N per m/s")
+v("s_clamp", m(s_clamp, "N*s/m"), "{:.0f}", "clamped stiffness term, N per m/s")
+v("f_free", m(f_free, "N"), "{:.1f}", "free-hand force, N")
+v("f_clamp", m(f_clamp, "N"), "{:.1f}", "clamped-hand force, N")
+v("f_crit", m(AISLE.f_contact_criterion, "N"), "{:.0f}", "force criterion, N")
+v("v_free_ceiling", m(calc_transient_contact_speed_limit(AISLE.f_contact_criterion, m_eff, k_hand, human_mass=m_hand), "m/s"),
+  "{:.2f}", "free-hand speed ceiling, m/s")
+v("v_clamp_ceiling", m(calc_transient_contact_speed_limit(AISLE.f_contact_criterion, m_eff, k_hand), "m/s"),
+  "{:.3f}", "clamped-hand speed ceiling, m/s")
 
-# =============================================================================
-# Activity: the clamped-hand penalty (SE Napkin Math 12.3)
-# =============================================================================
-head("Napkin Math 12.3")
-M_ROBOT = 12.0      # kg (SE, half-arm mass plus payload)
-M_HAND = 0.6        # kg (ISO/TS 15066 body model, via SE and Kirschner et al. 2022)
-K_HAND = 75e3       # N/m (75 N/mm)
-V_HAND = 0.10       # m/s (chosen)
-F_CRIT = 50.0       # N (chosen)
-mu = 1 / (1 / M_HAND + 1 / M_ROBOT)
-s_free = math.sqrt(K_HAND * mu)
-s_clamp = math.sqrt(K_HAND * M_ROBOT)
-show("reduced mass (kg)", f"{mu:.3f}")
-show("free stiffness term (N per m/s)", f"{s_free:.0f}")
-show("free force at 0.10 (N)", f"{V_HAND * s_free:.1f}")
-show("free speed ceiling (m/s)", f"{F_CRIT / s_free:.2f}")
-show("clamped stiffness term (N per m/s)", f"{s_clamp:.0f}")
-show("clamped force at 0.10 (N)", f"{V_HAND * s_clamp:.1f}")
-show("clamped speed ceiling (m/s)", f"{F_CRIT / s_clamp:.3f}")
-show("clamp multiplier", f"{s_clamp / s_free:.1f}")
-show("free force at 1 m/s (N) / multiple of 50", f"{s_free:.0f} / {s_free / F_CRIT:.1f}")
-
-# =============================================================================
-# Slide: measured clamped-hand forces (Kirschner et al. 2022, arXiv 2203.02706, Table II)
-# Interpretation B1: TS hand values, constrained hand (m_h -> infinity),
-# speeds set for F_max = 280 N; forces measured with a Pilz PRMS2 device.
-# =============================================================================
-head("Kirschner et al. Table II, hand, B1")
-KIRSCHNER = {  # robot: (v_B1 m/s, F at C-position N, F at N-position N)
-    "UR10e": (0.28, 316, 230),
-    "Franka (FE)": (0.40, 289, 228),
-    "KUKA LBR iiwa 14": (0.36, 368, 279),
-    "Techman TM5": (0.28, 427, 292),
+print("== Kirschner et al. 2022, Table II, hand, B1")
+KIRSCHNER = {  # robot: (allowed speed m/s, force at C N, force at N N)
+    "UR10e": (FORCES.KirschnerUr10eSpeedMps, FORCES.KirschnerUr10eForceCentralN, FORCES.KirschnerUr10eForceOuterN),
+    "Franka (FE)": (FORCES.KirschnerFrankaSpeedMps, FORCES.KirschnerFrankaForceCentralN,
+                    FORCES.KirschnerFrankaForceOuterN),
+    "KUKA LBR iiwa 14": (FORCES.KirschnerIiwaSpeedMps, FORCES.KirschnerIiwaForceCentralN,
+                         FORCES.KirschnerIiwaForceOuterN),
+    "Techman TM5": (FORCES.KirschnerTm5SpeedMps, FORCES.KirschnerTm5ForceCentralN, FORCES.KirschnerTm5ForceOuterN),
 }
-F_TS = 280
-allf = [f for _, c, n in KIRSCHNER.values() for f in (c, n)]
-show("measured range (N)", f"{min(allf)} to {max(allf)}")
-show("largest over 280 (N)", f"{max(allf) - F_TS}")
-show("largest / 280", f"{max(allf) / F_TS:.2f}")
-show("FR3 clamped speed from formula, 280 N, m_r=5.54 (m/s)",
-     f"{F_TS / math.sqrt(K_HAND * 5.54):.2f}")
+KIRSCHNER = {k: tuple(float(x) for x in row) for k, row in KIRSCHNER.items()}
+F_TS = float(FORCES.KirschnerHandForceThresholdN)
+forces = [f for _, c, n in KIRSCHNER.values() for f in (c, n)]
+speeds = [s for s, _, _ in KIRSCHNER.values()]
+v("f_ts", F_TS, "{:.0f}", "force the speeds were set for, N")
+v("kirschner_min", min(forces), "{:.0f}", "smallest measured force, N")
+v("kirschner_max", max(forces), "{:.0f}", "largest measured force, N")
+v("kirschner_excess", max(forces) - F_TS, "{:.0f}", "largest over the threshold, N")
+v("kirschner_ratio", max(forces) / F_TS, "{:.2f}", "largest over the threshold, ratio")
+v("kirschner_v_min", min(speeds), "{:.2f}", "slowest allowed speed, m/s")
+v("kirschner_v_max", max(speeds), "{:.2f}", "fastest allowed speed, m/s")
 
-# =============================================================================
-# Slide: speed and separation monitoring (SE 12.8.3)
-# =============================================================================
-head("Protective separation distance, descending arm")
-T_R = T_DELAY       # 133.6 ms vision-path latency
-T_S = W0 / A_DOWN   # s, gravity-biased joint stop
-V_TCP = 0.96        # m/s
-S_STOP = tool_stop_mm(A_DOWN)
-s_h = V_WALK * (T_R + T_S) * 1e3
-s_r = V_TCP * T_R * 1e3
-show("stop duration (ms)", f"{T_S * 1e3:.0f}")
-show("person travel (mm)", f"{s_h:.0f}")
-show("robot reaction travel (mm)", f"{s_r:.0f}")
-show("robot stop travel (mm)", f"{S_STOP:.0f}")
-show("sum (mm)", f"{s_h + s_r + S_STOP:.0f}")
-show("person share", f"{s_h / (s_h + s_r + S_STOP):.0%}")
+print("== Speed and separation monitoring (SE 12.8.3)")
+v("t_stop_down", m(JOINT.stop_time_descending, "ms"), "{:.0f}", "descending joint stop, ms")
+v("v_tcp", m(JOINT.tcp_speed, "m/s"), "{:.2f}", "descending tool speed, m/s")
+v("ssm_person", m(JOINT.separation_person, "mm"), "{:.0f}", "person travel, mm")
+v("ssm_reaction", m(JOINT.separation_reaction, "mm"), "{:.0f}", "robot reaction travel, mm")
+v("ssm_stop", m(JOINT.tool_stop_descending, "mm"), "{:.0f}", "robot stop travel, mm")
+v("ssm_total", m(JOINT.separation_total, "mm"), "{:.0f}", "sum, mm")
+v("ssm_share", 100 * JOINT.separation_person_share, "{:.0f}", "person share, %")
 
-# =============================================================================
-# Slide: the cycle budget and the hold (SE 12.6.3, 12.6.4)
-# =============================================================================
-head("Cycle budget")
-STAGES = [("State in", 30), ("Lease check", 15), ("Tracking", 10),
-          ("QP solve", 150), ("Output", 15), ("Reserve", 30)]
-show("declared WCET (us)", f"{sum(s for _, s in STAGES)}")
-show("headroom to 400 us deadline (us)", f"{400 - sum(s for _, s in STAGES)}")
-show("QP share of WCET", f"{150 / sum(s for _, s in STAGES):.0%}")
-zoh = V_DRIVE * 1e-3 + 0.5 * 2.0 * 1e-6
-show("zero-order-hold drift at 1.5 m/s, 2 m/s^2 (mm)", f"{zoh * 1e3:.3f}")
-show("missed tick at 1.3 (mm)", f"{V_AISLE * 1e-3 * 1e3:.1f}")
+print("== Cycle budget and the hold (SE 12.6.3, 12.6.4)")
+v("cyc_state", m(CYCLE.stage("state acquisition"), "us"), "{:.0f}", "state in, us")
+v("cyc_lease", m(CYCLE.stage("proposal and lease check"), "us"), "{:.0f}", "proposal and lease, us")
+v("cyc_tracking", m(CYCLE.stage("tracking check"), "us"), "{:.0f}", "tracking, us")
+v("cyc_output", m(CYCLE.stage("output write"), "us"), "{:.0f}", "output, us")
+v("cyc_reserve", m(CYCLE.stage("reserve"), "us"), "{:.0f}", "reserve, us")
+v("wcet", m(CYCLE.total, "us"), "{:.0f}", "declared WCET, us")
+v("deadline", m(AISLE.enforcer_deadline, "us"), "{:.0f}", "deadline, us")
+v("unloaded", m(AISLE.enforcer_unloaded, "us"), "{:.0f}", "unloaded run, us")
+v("hold_accel", m(HOLD.acceleration, "m/s**2"), "{:.0f}", "approach-acceleration bound, m/s^2")
+v("hold_drift", m(HOLD.drift, "mm"), "{:.3f}", "drift over one held tick, mm")
 
-# =============================================================================
-# Slide + activity: STOP against STO from the aisle speed (SE 12.8.1)
-# =============================================================================
-head("Resident stop from 1.3 m/s")
-show("STOP duration (ms)", f"{stop_time(V_AISLE) * 1e3:.2f}")
-show("STOP distance (mm)", f"{stop_dist(V_AISLE) * 1e3:.2f}")
-show("STOP from 1.5 duration / distance", f"{stop_time(V_DRIVE) * 1e3:.2f} / {stop_dist(V_DRIVE) * 1e3:.2f}")
-show("lease stall onset bound (ms)", f"{(T_LEASE_PATH + T_ACT) * 1e3:.0f}")
-show("coast at 1.3 for 80 ms brake set (mm)", f"{V_AISLE * 0.080 * 1e3:.0f}")
-show("direct-control lease row at 1.3: 2 ms (mm)", f"{V_AISLE * 0.002 * 1e3:.1f}")
+print("== STOP against STO (SE 12.8.1, 12.8.2)")
+v("t_stop_aisle", m(aisle.stop_time, "ms"), "{:,.2f}", "S-curve stop from the aisle speed, ms")
+v("d_stop_aisle", m(aisle.braking_travel + aisle.jerk_ramp_travel, "mm"), "{:.2f}", "its distance, mm")
+v("heartbeat_timeout", m(AISLE.heartbeat_timeout, "ms"), "{:.0f}", "heartbeat trips within, ms")
+v("brake_set_min", m(RM.spring_brake_engage_min, "ms"), "{:.0f}", "spring brakes set, earliest, ms")
+v("brake_set_max", m(RM.spring_brake_engage_max, "ms"), "{:.0f}", "spring brakes set, latest, ms")
 
-# =============================================================================
-# Slide: Cruise, October 2023 (SE War Story 12.2)
-# =============================================================================
-head("Cruise")
-show("20 ft in m", f"{20 * 0.3048:.1f}")
-show("7.7 mph in m/s", f"{7.7 * 0.44704:.1f}")
+print("== Cruise, October 2, 2023 (SE War Story 12.2)")
+v("cruise_drag_ft", REPORTS.CruisePulloverDistanceFt, "{:.0f}", "pullover distance, ft")
+v("cruise_drag_m", m(Q_(float(REPORTS.CruisePulloverDistanceFt), "ft"), "m"), "{:.1f}", "the same, m")
+v("cruise_mph", REPORTS.CruisePulloverMaxSpeedMph, "{:.1f}", "pullover speed, mph")
+v("cruise_ms", m(Q_(float(REPORTS.CruisePulloverMaxSpeedMph), "mph"), "m/s"), "{:.1f}", "the same, m/s")
+v("cruise_recall", REPORTS.CruiseRecallVehicles, "{:.0f}", "vehicles recalled")
+
+# Plot inputs for make_figs.py (SI magnitudes and recorded rows).
+STOP_UP, STOP_FREE, STOP_DOWN = (m(q, "mm") for q in (JOINT.tool_stop_ascending, JOINT.tool_stop_free,
+                                                       JOINT.tool_stop_descending))
+TAU_MAX, TAU_BIAS = m(JOINT.torque_limit, "N*m"), m(JOINT.bias, "N*m")
+CLEAR_FAR, CLEAR_NEAR = m(clear_far, "m"), m(clear_near, "m")
+v("brake_zero", m(JOINT.barrier_torque_demand(JOINT.tool_stop_descending), "N*m"), "{:.1f}",
+  "demand at the barrier's zero set, N m")
+
+
+def barrier_demand(clear):
+    """Braking torque in N m the kinetic barrier demands at a tool clearance in m."""
+    return m(JOINT.barrier_torque_demand(Q_(clear, "m")), "N*m")
+
+
+V_LATCH, V_LATCH_HI = m(AISLE.v_latch_approach, "m/s"), m(AISLE.v_latch_high, "m/s")
+K_PLATE, TRIP = m(AISLE.k_latch, "N/m"), m(AISLE.f_latch_tripwire, "N")
+T_LOOP, F_LATCH = m(AISLE.t_contact_response, "s"), m(AISLE.f_latch_limit, "N")
+F_FREE, F_CLAMP, F_CRIT = m(f_free, "N"), m(f_clamp, "N"), m(AISLE.f_contact_criterion, "N")
+S_H, S_R, S_STOP = (m(q, "mm") for q in (JOINT.separation_person, JOINT.separation_reaction,
+                                         JOINT.tool_stop_descending))
+STAGES = [(name, m(q, "us")) for name, q in CYCLE.stages]
+WCET, DEADLINE, UNLOADED = m(CYCLE.total, "us"), m(AISLE.enforcer_deadline, "us"), m(AISLE.enforcer_unloaded, "us")
+BRAKE_SET = (m(RM.spring_brake_engage_min, "ms"), m(RM.spring_brake_engage_max, "ms"))
+
+# The two-axis example for the figure.
+u, a, b = PROJ.proposal, PROJ.normal, PROJ.bound
+clamp, ustar = PROJ.clamp, proj["u_projected"]
+LATCH_LO, LATCH_HI = lo, hi
+
+if __name__ == "__main__":
+    write(__file__)
