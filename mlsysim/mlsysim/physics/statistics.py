@@ -352,3 +352,51 @@ def calc_dagger_cost_bound(horizon_steps, per_step_error, recoverability=1.0):
     the recoverability constant ``u`` stays bounded.
     """
     return recoverability * horizon_steps * per_step_error
+
+
+# --- Poisson reserve sizing (added 2026-10-20) ---
+def calc_poisson_tail(mean, at_least):
+    """``P(N >= s)`` for ``N ~ Poisson(mean)``: ``1 - sum_{k<s} e^-m m^k / k!``.
+
+    The chance that at least ``s`` events fall in an interval whose expected
+    count is ``mean``; 1 for ``s <= 0``. A pool with ``s`` standby instances
+    and a constant replenishment lead time misses a request exactly when at
+    least ``s`` earlier replacements are still outstanding.
+    """
+    if at_least <= 0:
+        return 1.0
+    return 1 - sum(math.exp(-mean) * mean**k / math.factorial(k) for k in range(at_least))
+
+
+def calc_poisson_reserve(mean, target):
+    """Smallest reserve ``s`` whose Poisson tail ``P(N >= s)`` is below ``target``."""
+    reserve = 0
+    while calc_poisson_tail(mean, reserve) >= target:
+        reserve += 1
+    return reserve
+
+
+def calc_poisson_mean_for_reserve(reserve, target, iterations=60):
+    """Largest Poisson mean at which ``reserve`` still holds ``P(N >= reserve)`` below ``target``.
+
+    Bisection on the tail, which rises monotonically with the mean.
+    """
+    lo, hi = 0.0, 1.0
+    while calc_poisson_tail(hi, reserve) < target:
+        hi *= 2
+    for _ in range(iterations):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if calc_poisson_tail(mid, reserve) < target else (lo, mid)
+    return lo
+
+
+def calc_cdf_quantile(values, cumulative, fraction):
+    """First value whose empirical cumulative fraction reaches ``fraction``.
+
+    ``values`` ascend with ``cumulative`` (a released CDF); past the end the
+    last value is returned.
+    """
+    for v, c in zip(values, cumulative):
+        if c >= fraction:
+            return v
+    return values[-1]

@@ -2388,3 +2388,56 @@ def test_repair_and_support_residency():
     assert s.shared_fraction == approx(0.75) and s.residency_factor == approx(11)
     assert s.recompute.to("s").magnitude == approx(0.32488215)
     assert s.reload.to("ms").magnitude == approx(5.24288)
+
+
+# --- Agent sandboxes (added 2026-10-20) ---
+def test_syscall_tax_per_million_calls():
+    r = Scenarios.SyscallTaxPerMillionCalls.result
+    assert r.container_total.to("s").magnitude == approx(0.15)
+    assert r.microvm_total.to("s").magnitude == approx(0.10)
+    assert r.userspace_total.to("s").magnitude == approx(3.6)
+    assert r.userspace_vs_microvm == approx(36)
+    assert r.microvm_call < r.container_call < r.userspace_call
+
+
+def test_parser_calls_envelope_setup():
+    r = Scenarios.ParserCallsEnvelopeSetup.result
+    assert r.useful_work.to("ms").magnitude == approx(300)
+    assert r.per_call_total.to("ms").magnitude == approx(1800)
+    assert r.per_trajectory_total.to("ms").magnitude == approx(315)
+    assert r.setup_saved.to("ms").magnitude == approx(1485)
+    assert r.reuse_speedup == approx(5.7142857)
+    assert r.setup_share == approx(0.8333333)
+    assert r.work_for_cap.to("ms").magnitude == approx(135)
+
+
+def test_copy_on_write_repair_workspaces():
+    r = Scenarios.CopyOnWriteRepairWorkspaces.result
+    assert r.full_copy.to("GB").magnitude == approx(76.8)
+    assert r.cow_written.to("GB").magnitude == approx(1.28)
+    assert r.full_copy_time.to("s").magnitude == approx(10.971429)
+    assert r.cow_time.to("s").magnitude == approx(0.18285714)
+    assert r.copy_vs_cow == approx(60)
+    assert r.file_copy.to("GB").magnitude == approx(38.4)
+    assert r.block_copy.to("MB").magnitude == approx(2.048)
+    assert r.logical_changes.to("byte").magnitude == approx(32)
+    assert r.file_vs_block == approx(18750)
+
+
+def test_coding_sandbox_pool_two_per_second():
+    r = Scenarios.CodingSandboxPoolTwoPerSecond.result
+    assert r.active == approx(600) and r.restore_arrivals == approx(0.03)
+    assert r.initial_miss == approx(0.029554466) and r.reserve == 2
+    assert r.reserve_miss == approx(0.00044110045)
+    assert r.private_memory.to("GB").magnitude == approx(322.12255)
+    assert r.pool_memory.to("GB").magnitude == approx(38.952871)
+    assert r.memory_ratio == approx(8.2695457)
+    assert r.max_restore.to("ms").magnitude == approx(22.701009)
+    assert r.slow_arrivals == approx(0.3) and r.slow_reserve == 4
+
+
+def test_firecracker_preconfigured_boot():
+    s = Scenarios.FirecrackerPreconfiguredBootSerial.result
+    assert s.median.to("ms").magnitude == approx(110) and s.tail.to("ms").magnitude == approx(115)
+    h = Scenarios.FirecrackerPreconfiguredBootHundred.result
+    assert h.median.to("ms").magnitude == approx(120) and h.tail.to("ms").magnitude == approx(153)

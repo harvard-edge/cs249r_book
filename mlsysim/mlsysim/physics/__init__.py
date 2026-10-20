@@ -471,3 +471,17 @@ __all__ += [
     "calc_residency_factor",
     "calc_weight_only_step_time",
 ]
+
+# --- Agent sandboxes: setup amortization and Poisson reserve (added 2026-10-20) ---
+from .agents import calc_setup_share, calc_work_for_setup_cap
+from .statistics import calc_poisson_tail, calc_poisson_reserve, calc_poisson_mean_for_reserve
+from .statistics import calc_cdf_quantile
+
+__all__ += [
+    "calc_setup_share",
+    "calc_work_for_setup_cap",
+    "calc_poisson_tail",
+    "calc_poisson_reserve",
+    "calc_poisson_mean_for_reserve",
+    "calc_cdf_quantile",
+]

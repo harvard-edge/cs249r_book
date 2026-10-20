@@ -2365,3 +2365,62 @@ class KvResidencyArchetypeResult(SolverResult):
     recompute_share: float                   # recompute / turn cycle
     shared_retained_rate: Quantity           # fit shared / turn cycle
     shared_released_rate: Quantity           # fit shared / generation
+
+
+# --- Agent sandboxes (added 2026-10-20) ---
+class SyscallTaxResult(SolverResult):
+    """Result from SyscallTaxModel: per-call mediation cost and added time by envelope."""
+    container_call: Quantity                 # trap + in-kernel filter
+    microvm_call: Quantity                   # native trap in the guest
+    userspace_call: Quantity                 # trap + emulation + switch
+    container_total: Quantity                # over all ordinary calls
+    microvm_total: Quantity
+    userspace_total: Quantity
+    userspace_vs_microvm: float              # per-call ratio
+
+
+class EnvelopeAmortizationResult(SolverResult):
+    """Result from EnvelopeAmortizationModel: setup paid per call or once per trajectory."""
+    useful_work: Quantity                    # calls x work per call
+    per_call_setup: Quantity                 # calls x setup
+    per_call_total: Quantity                 # fresh envelope per call
+    per_trajectory_total: Quantity           # one envelope retained
+    setup_saved: Quantity
+    reuse_speedup: float                     # per-call total / per-trajectory total
+    setup_share: float                       # setup / (setup + work) of a fresh call
+    work_for_cap: Quantity                   # work per call that holds setup to the cap
+
+
+class WorkspaceProvisioningResult(SolverResult):
+    """Result from WorkspaceProvisioningModel: full copy against copy-on-write, and first-write granularity."""
+    full_copy: Quantity                      # workspaces x base image
+    cow_written: Quantity                    # workspaces x bytes written
+    full_copy_time: Quantity                 # lower bound at the drive's sequential rate
+    cow_time: Quantity
+    copy_vs_cow: float                       # base image / bytes written
+    file_copy: Quantity                      # workspaces x fixture
+    block_copy: Quantity                     # workspaces x one block
+    logical_changes: Quantity                # workspaces x bytes modified
+    file_vs_block: float                     # fixture / block
+
+
+class SandboxPoolReserveResult(SolverResult):
+    """Result from SandboxPoolReserveModel: active leases, standby reserve, and resident memory."""
+    active: float                            # Little's law, arrival rate x hold time
+    restore_arrivals: float                  # arrivals during one restore (Poisson mean)
+    initial_miss: float                      # miss probability with the initial reserve
+    reserve: int                             # smallest reserve meeting the target
+    reserve_miss: float
+    private_memory: Quantity                 # every active lease with a private image
+    pool_memory: Quantity                    # copy-on-write: one image + dirty pages + standby
+    memory_ratio: float
+    max_restore: Quantity                    # longest restore the reserve tolerates
+    slow_arrivals: float                     # arrivals during a slower restore
+    slow_reserve: int
+
+
+class BootTimeCdfResult(SolverResult):
+    """Result from BootTimeCdfModel: the median and a tail percentile of a released boot-time CDF."""
+    booting: int                             # instances booting at once
+    median: Quantity
+    tail: Quantity

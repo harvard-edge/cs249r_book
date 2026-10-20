@@ -58,6 +58,7 @@ AgentRetrieval = _load("agent_retrieval", "AgentRetrieval", "Cited results on ho
 SummarizationFaithfulness = _load("summarization_faithfulness", "SummarizationFaithfulness", "Cited summarization-faithfulness results (Maynez et al. 2020, XSum).")
 PrefixCaching = _load("prefix_caching", "PrefixCaching", "Cited prefix-cache results from a public serving deployment (SGLang 2024).")
 ToolInterception = _load("tool_interception", "ToolInterception", "Cited tool-interception results for augmented LLM serving (InferCept 2024).")  # added 2026-10-20
+SandboxIsolation = _load("sandbox_isolation", "SandboxIsolation", "Cited results on containing agent code: Cybench task count, gVisor system-call latency.")  # added 2026-10-20
 # Published vision-language-action and dual-system robot policies (added 2026-10-20)
 VlaSystems = _load("vla_systems", "VlaSystems", "Cited figures of published VLA and dual-system robot policies (OpenVLA, ACT, pi0, FAST, Helix, GR00T N1).")
 # Robot demonstration data and event data recorders (added 2026-10-20)
@@ -344,6 +345,7 @@ class Literature(Registry):
     SummarizationFaithfulness = SummarizationFaithfulness  # added 2026-10-20
     PrefixCaching = PrefixCaching  # added 2026-10-20
     ToolInterception = ToolInterception  # added 2026-10-20
+    SandboxIsolation = SandboxIsolation  # added 2026-10-20
     VlaSystems = VlaSystems  # added 2026-10-20
     WakeWordBenchmarks = WakeWordBenchmarks  # added 2026-10-20
     AnnotationTimes = AnnotationTimes  # added 2026-10-20
@@ -370,6 +372,7 @@ class Literature(Registry):
     AttentionSinkPerplexity = _series.AttentionSinkPerplexity  # added 2026-10-20
     SweBenchVerifiedRuns = _series.SweBenchVerifiedRuns
     CybenchSolveRate = _series.CybenchSolveRate
+    FirecrackerBootPreconfigured = _series.FirecrackerBootPreconfigured  # added 2026-10-20
     OSWorldStepBudget = _series.OSWorldStepBudget
     FrontierSweTrials = _series.FrontierSweTrials
     SweBenchTrajectories = _series.SweBenchTrajectories
