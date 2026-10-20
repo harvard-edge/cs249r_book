@@ -11,6 +11,7 @@ reference-statistics counterpart — sourced numbers the prose cites, not things
 from ..core.provenance import sourced, sourced_qty
 from ..core.registry import Registry
 from ..core import provenance_catalog as pc
+from ..models.registry import Models
 from ..core.units import (
     ureg,
     GB,
@@ -1173,22 +1174,17 @@ class PhysicalAINumbers(Registry):
 class TorchvisionParameterCounts(Registry):
     """Exact parameter counts of three torchvision model constructors (a counted run, added 2026-10-20).
 
-    ``Models.Vision`` carries the papers' rounded counts (ResNet-50 25.6M, VGG-16 138M);
-    these are the exact counts a library run prints, for slides that show the run.
+    ``Models.Vision`` holds these exact counts for ResNet-50, VGG-16, and MobileNetV2
+    (provenance prov:torchvision-0-28-parameter-counts); the aliases below keep the run's
+    three counts together for slides that show the run.
     """
 
-    MobileNetV2 = sourced_qty(
-        3_504_872 * param, pc.TORCHVISION_0_28_PARAMETER_COUNTS,
-        name="torchvision mobilenet_v2 parameters",
-        description="Parameters of torchvision.models.mobilenet_v2() (1000-class head).")
-    ResNet50 = sourced_qty(
-        25_557_032 * param, pc.TORCHVISION_0_28_PARAMETER_COUNTS,
-        name="torchvision resnet50 parameters",
-        description="Parameters of torchvision.models.resnet50() (1000-class head).")
-    VGG16 = sourced_qty(
-        138_357_544 * param, pc.TORCHVISION_0_28_PARAMETER_COUNTS,
-        name="torchvision vgg16 parameters",
-        description="Parameters of torchvision.models.vgg16() (1000-class head).")
+    MobileNetV2 = sourced_qty(Models.Vision.MobileNetV2.parameters, pc.TORCHVISION_0_28_PARAMETER_COUNTS,
+                              name="torchvision mobilenet_v2 parameters")
+    ResNet50 = sourced_qty(Models.Vision.ResNet50.parameters, pc.TORCHVISION_0_28_PARAMETER_COUNTS,
+                           name="torchvision resnet50 parameters")
+    VGG16 = sourced_qty(Models.Vision.VGG16.parameters, pc.TORCHVISION_0_28_PARAMETER_COUNTS,
+                        name="torchvision vgg16 parameters")
 
 
 class ReferenceStats(Registry):
