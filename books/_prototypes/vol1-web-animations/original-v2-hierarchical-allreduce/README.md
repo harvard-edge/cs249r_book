@@ -1,0 +1,3 @@
+Original three-panel hierarchical AllReduce. Five paused endpoints preserve source geometry and resource colors. Rank provenance is independently checked for every tile; final AllGather copies completed sums. Run `python3 check.py --engine chromium` or `--engine webkit`. The generated file fixture retains the actual collective-communication chapter and static image; packaged Quarto acceptance remains separate.
+
+Normal-motion checks pause every action before arrival and verify that the prior authoritative state remains intact. The fixture uses an explicit four-second movement interval to leave a deterministic inspection window under concurrent browser rendering; production reads the shared YAML timing. Reduced-motion playback commits directly.

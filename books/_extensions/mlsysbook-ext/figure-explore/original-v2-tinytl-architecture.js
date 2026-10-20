@@ -1,0 +1,48 @@
+(() => {
+'use strict';
+const NS='http://www.w3.org/2000/svg';
+const el=(tag,a={},text)=>{const n=document.createElementNS(NS,tag);Object.entries(a).forEach(([k,v])=>n.setAttribute(k,v));if(text!==undefined)n.textContent=text;return n;};
+window.MLSysFigureLessons=window.MLSysFigureLessons||{};
+window.MLSysFigureLessons["original-v2-tinytl-architecture"]=async(root,context)=>{
+ if(!context.verifiedArtwork||!window.MLSysOriginalPlayer)throw Error('Verified source artwork and shared player required');
+ if(context.verifiedArtwork.getAttribute('viewBox')!=="0 0 900 420")throw Error('Source geometry changed; review required');
+ root.classList.add('v2c-lesson');
+ const art=el('svg',{viewBox:"0 0 815 425",role:'img','aria-label':"Why does a frozen backbone still need a backward pass?"});
+ const base=el('g'),moving=el('g',{'aria-hidden':'true'});art.append(base,moving);
+ const text=(x,y,t,a={})=>el('text',{x,y,'font-size':14,fill:'#14294e',...a},t);
+ const box=(x,y,w,h,label,fill='#edf2fa',stroke='#45699b')=>{const g=el('g');g.append(el('rect',{x,y,width:w,height:h,rx:2,fill,stroke}),text(x+w/2,y+h/2+5,label,{'text-anchor':'middle','font-weight':600}));return g;};
+ const line=(pts,color='#8b9bb0',dash='')=>{const g=el('g'),a=pts.at(-2),b=pts.at(-1),theta=Math.atan2(b[1]-a[1],b[0]-a[0]),tip=[b,[b[0]-8*Math.cos(theta)+4*Math.sin(theta),b[1]-8*Math.sin(theta)-4*Math.cos(theta)],[b[0]-8*Math.cos(theta)-4*Math.sin(theta),b[1]-8*Math.sin(theta)+4*Math.cos(theta)]];g.append(el('polyline',{points:pts.map(p=>p.join(',')).join(' '),fill:'none',stroke:color,'stroke-width':2,'stroke-dasharray':dash}),el('polygon',{points:tip.map(p=>p.join(',')).join(' '),fill:color}));return g;};
+ const token=(x,y,label,color='#edf2fa',attrs={})=>{const g=el('g',{'data-object':label,...attrs}),w=Math.max(28,label.length*7+10);g.append(el('rect',{x:x-w/2,y:y-12,width:w,height:24,rx:2,fill:color,stroke:'#45699b'}),text(x,y+5,label,{'text-anchor':'middle','font-size':12,'font-weight':700}));return g;};
+ const status=document.createElement('p');status.className='v2c-status';status.setAttribute('aria-live','polite');
+ const note=document.createElement('p');note.className='v2c-reading';note.textContent="A tile is released after the backward consumer shown here. Its width identifies full input versus small lite input; it does not encode a measured reduction ratio. Gray TinyTL blocks remain on the entire backward path.";
+ note.textContent+=' On narrow screens, the view follows the active transfer; pause to swipe across the full diagram.';
+ let mounted=false,stageNode=null;
+ function camera(x){if(!stageNode)return;const scale=art.getBoundingClientRect().width/art.viewBox.baseVal.width;stageNode.scrollLeft=Math.max(0,x*scale-stageNode.clientWidth/2);}
+ const ys=[100,162,224,302];const saved=index=>ys.map((_,i)=>index>=i+1&&(index<5||i<8-index));
+ const controller=window.MLSysOriginalPlayer.create({root,outer:context.outer,title:"Why does a frozen backbone still need a backward pass?",scope:"The original three-block comparison. Saved input tiles are schematic, not a memory-byte model. TinyTL freezes backbone weights and trains biases, lite residuals, and the classifier. Mask and normalization state may be retained or recomputed.",steps:[{"label": "Before forward", "description": "Both models hold persistent weights. Full fine-tuning marks backbone weights trainable; TinyTL keeps them frozen. No saved input tile is live yet."}, {"label": "Forward \u00b7 block 1", "description": "Full fine-tuning retains the shown full input for block 1. TinyTL retains the smaller lite-residual input shown for that block; its frozen backbone weights remain available."}, {"label": "Forward \u00b7 block 2", "description": "Both models advance through block 2 and retain the state needed by its later backward consumers. Earlier saved inputs remain live."}, {"label": "Forward \u00b7 block 3", "description": "The third block executes. Three block-input records are now live in each schematic, with different state requirements."}, {"label": "Classifier forward", "description": "The classifier receives its input. Its saved input joins the block records; none can be released before its last backward consumer."}, {"label": "Classifier backward", "description": "The classifier computes its gradients and passes an activation gradient to block 3. The shown classifier input can now be released."}, {"label": "Backward \u00b7 block 3", "description": "The activation gradient traverses block 3 in both models. Full fine-tuning forms its weight gradients; TinyTL forms bias and lite-residual gradients without changing the frozen backbone weight. The consumed saved input is released."}, {"label": "Backward \u00b7 block 2", "description": "Backward traverses the second frozen TinyTL block as well. Only after its consumers finish is its shown saved input released."}, {"label": "Backward \u00b7 block 1", "description": "Backward reaches the first block in both models. Its saved input is consumed and released. Frozen weights did not truncate gradient propagation."}, {"label": "Optimizer update", "description": "Full fine-tuning updates all trainable weights. TinyTL updates biases, lite residuals, and the classifier; the backbone weights keep their original values. These tiles are saved inputs, not total training memory."}].map((step,i)=>({label:step.label,get description(){return Number(root.dataset.modelState)===i?step.description:"On arrival: "+step.description;}})),
+ render(index,{stage,details}){
+  if(!mounted){stageNode=stage;stage.classList.add('v2c-stage');stage.tabIndex=0;stage.setAttribute('aria-label','Mechanism diagram; swipe horizontally on a narrow screen or use Expand');stage.append(art);details.append(status,note);mounted=true;}
+  base.replaceChildren();moving.replaceChildren();root.dataset.modelState=String(index);
+  const live=saved(index);root.dataset.saved=JSON.stringify(live);root.dataset.tinyBackbone=index===9?'W0,W0,W0':'W0,W0,W0';root.dataset.backwardBlock=index>=6&&index<=8?String(9-index):'';
+for(let panel=0;panel<2;panel++){const x=panel?545:175;const sx=panel?420:20;base.append(text(x+30,25,panel?'B · TinyTL':'A · Full fine-tuning',{'text-anchor':'middle','font-weight':700}),box(x,44,110,30,'Input','#f8fafc'));
+for(let b=0;b<4;b++){const y=ys[b];if(b<3){base.append(box(x,y-15,110,35,'',panel?'#e5e7eb':'#edf2fa',panel?'#9ca3af':'#45699b'),text(x+(panel?43:55),y-1,`Block ${b+1}`,{'text-anchor':'middle','font-weight':600}));if(panel){base.append(box(x+85,y-8,20,22,index===9?'b′':'b'),box(x+125,y-15,95,35,index===9?'lite updated':'lite residual'),line([[x+110,y],[x+125,y]]));}}else base.append(box(x,y-15,110,35,index===9?'Classifier ✓':'Classifier'));
+if(b>0)base.append(line([[x+55,ys[b-1]+20],[x+55,y-15]]));else base.append(line([[x+55,74],[x+55,y-15]]));
+const w=panel&&b<3?25:90;const g=el('g',{'data-saved-panel':panel,'data-saved-block':b+1,'data-live':String(live[b])});g.append(el('rect',{x:sx,y:y-10,width:w,height:25,fill:live[b]?'#d5ecf5':'#fff',stroke:live[b]?'#1887b5':'#cbd5e1','stroke-dasharray':live[b]?'':'3 3'}),text(sx+w/2,y+7,live[b]?(panel&&b<3?`s${b+1}`:`A${b+1}`):'—',{'text-anchor':'middle','font-size':12}));base.append(g);
+if(b<3)base.append(text(x+(panel?43:55),y+15,panel?'W frozen':index===9?'W updated':'W trainable',{'text-anchor':'middle','font-size':11,fill:panel?'#64748b':'#45699b','data-weight':panel?'frozen':'trainable','data-version':panel?'0':index===9?'1':'0'}));}
+base.append(text(sx,373,panel?'small lite inputs':'full input maps',{'font-size':12}),line([[x-20,315],[x-20,87]],'#45699b','4 3'));
+if(index>=5&&index<=8){const y=index===5?302:ys[8-index];base.append(token(x-20,y,'∂L','#fff3cd',{'data-gradient-panel':panel,'data-gradient-at':index===5?'classifier':9-index}));}}
+base.append(text(20,403,'Saved-input tiles are schematic. Masks / normalization state are omitted; persistent weights remain.'));
+status.textContent=index===9?'Update committed: full backbone weights change; TinyTL backbone W₀ stays frozen. Biases, lite residuals, and classifier train.':index>=5?`Backward reaches ${index===5?'the classifier':`block ${9-index}`} in both models. Shown live saved-input records per model: ${live.filter(Boolean).length}.`:`Forward progress: ${Math.min(index,4)} blocks/classifier stages complete; shown live saved-input records per model: ${live.filter(Boolean).length}.`;
+ camera(600);
+ },
+ transition({from,to,onFrame}){
+  if(to!==from+1)return;
+  const motions=to<=4?[0,1].map(panel=>({label:to===1?'X':`x${to-1}`,path:[[panel?600:230,to===1?59:ys[to-2]],[panel?600:230,ys[to-1]]]})):to<=8?[0,1].map(panel=>({label:'∂L',path:[[panel?525:155,to===5?335:ys[9-to]],[panel?525:155,to===5?302:ys[8-to]]]})):to===9?[{label:'update',path:[[680,302],[680,100]]}]:[];
+  status.textContent="Transition in progress; destination state is pending. "+status.textContent;
+  if(motions.length===16)base.querySelectorAll("[data-live-token]").forEach(n=>n.setAttribute("visibility","hidden"));
+  const packets=motions.map(m=>{const g=token(0,0,m.label,m.color||'#fff3cd',{'data-motion-object':'true'});moving.append(g);const lengths=m.path.slice(1).map((p,i)=>Math.hypot(p[0]-m.path[i][0],p[1]-m.path[i][1]));return {...m,g,lengths,total:lengths.reduce((a,b)=>a+b,0)};});
+  onFrame(p=>{root.dataset.animationProgress=String(p);packets.forEach(m=>{let d=p*m.total,i=0;while(i<m.lengths.length-1&&d>m.lengths[i])d-=m.lengths[i++];const a=m.path[i],b=m.path[i+1],f=m.lengths[i]?d/m.lengths[i]:1;const px=a[0]+(b[0]-a[0])*f;m.g.setAttribute('transform',`translate(${px},${a[1]+(b[1]-a[1])*f})`);if(m===packets[Math.min(1,packets.length-1)])camera(px);});});
+ }});
+ return controller;
+};
+})();
