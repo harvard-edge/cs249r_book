@@ -391,3 +391,21 @@ __all__ += [
     "calc_zoned_prefill_tokens",
     "calc_compaction_cycle",
 ]
+
+
+# --- Serving at scale (added 2026-10-20) ---
+from .serving import (
+    calc_littles_law_occupancy,
+    calc_batch_knee,
+    calc_batch_throughput_share,
+    calc_padding_waste_fraction,
+    calc_speculative_expected_tokens,
+)
+
+__all__ += [
+    "calc_littles_law_occupancy",
+    "calc_batch_knee",
+    "calc_batch_throughput_share",
+    "calc_padding_waste_fraction",
+    "calc_speculative_expected_tokens",
+]

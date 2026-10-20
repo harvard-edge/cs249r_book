@@ -20,6 +20,7 @@ from ..datasets.registry import Datasets as _Datasets
 from ..physics.quantities import memory_from_params as _memory_from_params
 from ..core.units import BYTES_FP16 as _BYTES_FP16, param as _param
 from ..core.units import BYTES_FP32 as _BYTES_FP32, BYTES_INT8 as _BYTES_INT8
+from ..core.units import BYTES_INT4 as _BYTES_INT4  # serving at scale (added 2026-10-20)
 from ..core.units import BYTES_TRAINING_STATE_MIXED_PRECISION as _BYTES_TRAINING_STATE
 from ..literature.registry import Literature as _Literature
 from ..systems.reliability import Reliability as _Reliability
@@ -3494,4 +3495,298 @@ class Scenarios(Registry):
             ("bert-99", "BERT-Large"),
             ("resnet50", "ResNet-50"),
         ],
+    )
+
+    # --- Serving at scale (added 2026-10-20) --------------------------------
+    # What counts as a served request, how many one replica admits, and what a
+    # fleet of replicas costs. The reference replica is the Llama-3 70B GQA
+    # model on one DGX H100 node; the measured traffic is the Azure LLM
+    # inference traces; the measured frontier is InferenceX.
+    LlmServingFirstYear = _st.ServingCostScenario(
+        name="A 70B model trained once, then served for a year",
+        description="One million daily users send 50 requests each at an assumed tenth of a cent "
+                    "per request; training cost $2M once.",
+        training_cost=2_000_000,  # scenario assumption: one-time training spend, USD
+        daily_users=1_000_000,  # scenario assumption
+        requests_per_user_per_day=50,  # scenario assumption
+        cost_per_request=0.001,  # scenario assumption: serving cost per request, USD
+        efficiency_gain=0.10,  # scenario assumption: cut in cost per request
+        days_per_year=_DAYS_PER_YEAR,
+    )
+
+    SloGoodputTwoConfigurations = _st.SloGoodputScenario(
+        name="Two serving configurations on the same request mix and targets",
+        description="X completes more requests per second; Y completes fewer but more of them "
+                    "meet both TTFT and TPOT targets.",
+        completed={"X": Q_(1200, "1/second"), "Y": Q_(1000, "1/second")},  # scenario assumption
+        met_share={"X": 0.70, "Y": 0.95},  # scenario assumption
+    )
+
+    InteractiveRequestServingTax = _st.ServingTaxScenario(
+        name="A 100 ms interactive request with 70 ms of model execution",
+        description="Everything outside the model (routing, network, serialization, coordination, "
+                    "queueing) shares what is left; four sequential exchanges of 50 to 500 us.",
+        latency_target=Q_(100, "ms"),  # scenario assumption
+        model_time=Q_(70, "ms"),  # scenario assumption: idle-replica model execution
+        exchanges=4,  # scenario assumption: sequential network exchanges
+        exchange_low=Q_(50, "microsecond"),  # scenario assumption
+        exchange_high=Q_(500, "microsecond"),  # scenario assumption
+    )
+
+    VisionBatchingKnee = _st.BatchingKneeScenario(
+        name="Vision batch: 2 ms fixed, 1 ms per image",
+        description="A compute-bound vision model whose fixed cost per batch is small.",
+        fixed_time=Q_(2, "ms"),  # scenario assumption
+        per_request_time=Q_(1, "ms"),  # scenario assumption
+    )
+    LlmDecodeBatchingKnee = VisionBatchingKnee.variant(
+        name="LLM decode batch: 40 ms fixed, 0.5 ms per sequence",
+        description="About 40 ms streams a 70B model's FP16 weights through one H100's HBM "
+                    "(Llama3_70B_DecodeH100); 0.5 ms reads one sequence's own KV state.",
+        fixed_time=Q_(40, "ms"),  # scenario assumption: rounded weight-stream time
+        per_request_time=Q_(0.5, "ms"),  # scenario assumption: per-sequence KV read
+    )
+
+    VisionServingLittlesLaw = _st.LittlesLawScenario(
+        name="Vision service at 1,000 requests per second, 100 ms mean latency",
+        description="Replicas run batches of 8 in 80 ms; the fleet targets 80 percent mean "
+                    "service utilization.",
+        arrival_rate=Q_(1000, "1/second"),  # scenario assumption
+        time_in_system=Q_(100, "ms"),  # scenario assumption: mean end-to-end latency
+        batch_size=8,  # scenario assumption
+        batch_service_time=Q_(80, "ms"),  # scenario assumption
+        utilization_target=0.8,  # scenario assumption
+    )
+
+    LlmChatTrace2023 = _st.RequestTraceScenario(
+        name="Azure LLM chat trace 2023, one hour",
+        description="19,366 production chat requests; idle share for fixed batches of 8 "
+                    "consecutive requests.",
+        series=_Literature.LlmInferenceTraceConversation2023,
+        batch_size=8,  # scenario assumption: fixed batch of consecutive requests
+    )
+    LlmCodeTrace2023 = LlmChatTrace2023.variant(
+        name="Azure LLM code-completion trace 2023, one hour",
+        description="8,819 production code-completion requests, same batching.",
+        series=_Literature.LlmInferenceTraceCode2023,
+    )
+    LlmChatWeekTraffic2024 = _st.TrafficProfileScenario(
+        name="Azure LLM chat traffic 2024, one week in 10-minute bins",
+        description="Request rate per bin, 12 to 18 May 2024; weekday nightly trough and "
+                    "afternoon peak.",
+        series=_Literature.LlmInferenceTraceConversation2024TenMinute,
+        bin_column="bin10min",
+        count_column="requests",
+        bin_width=Q_(10, "minute"),
+    )
+
+    Llama3_70B_ReplicaDecodeBudget = _st.DecodeBudgetScenario(
+        name="Constructed batch-one decode budget of a 70B replica on 8 H100s",
+        description="An 85 ms baseline step split over GEMM, attention, element-wise, AllReduce, and "
+                    "launch; INT4 weights cut GEMM, then fusion and graph replay cut the rest.",
+        workload=_Models.Language.Llama2_70B,
+        tp_size=int(_ReferenceStats.ServingProfiles.PrecisionDividendTensorParallelDegree),
+        accelerator=_Hardware.Cloud.H100,
+        weight_bytes_per_param=_BYTES_FP16,
+        tpot_target=Q_(50, "ms"),  # scenario assumption: illustrative endpoint TPOT target
+        baseline_step=Q_(85, "ms"),  # scenario assumption: constructed baseline step
+        intervals=["GEMM", "attention", "element-wise", "AllReduce", "launch"],
+        baseline_shares=[0.40, 0.24, 0.12, 0.12, 0.12],  # scenario assumption
+        gemm_cut=0.45,  # scenario assumption: INT4 weights
+        attention_cut=0.25,  # scenario assumption: fused decode-attention kernel
+        fused_elementwise=Q_(3.4, "ms"),  # scenario assumption
+        replay_overhead=Q_(2.0, "ms"),  # scenario assumption: graph replay
+        collective_launch=Q_(5, "microsecond"),  # scenario assumption: collective launch latency
+    )
+    Llama3_70B_ReplicaSpeculation = _st.SpeculativeRoundScenario(
+        name="Speculative decoding on the tuned 70B replica step",
+        description="A draft proposes 5 tokens in 4 ms; the target verifies them in one tuned step; "
+                    "each candidate is accepted with probability 0.78.",
+        acceptance=0.78,  # scenario assumption: draft/target pair
+        draft_length=5,  # scenario assumption
+        draft_time=Q_(4, "ms"),  # scenario assumption
+        verify_time=Q_(Llama3_70B_ReplicaDecodeBudget.totals[2], "ms"),
+    )
+
+    LlmChatLittlesLaw = VisionServingLittlesLaw.variant(
+        name="Chat requests at 1,000 per second, each streaming the trace's mean answer",
+        description="Time in system is the Azure chat trace's mean answer, rounded to whole "
+                    "tokens, at the replica's 50 ms TPOT target (prefill ignored).",
+        time_in_system=(round(LlmChatTrace2023.mean_output_tokens)
+                        * Llama3_70B_ReplicaDecodeBudget.tpot_target).to("second"),
+        batch_size=None, batch_service_time=None, utilization_target=None,
+    )
+
+    Llama3_70BLongContextAdmissionDgxH100 = _st.KvAdmissionScenario(
+        name="128K-token requests on the 70B GQA replica (8 H100s)",
+        description="FP16 weights and KV cache; HBM at the registered byte capacity, less a 20 GB "
+                    "runtime reserve.",
+        workload=_Models.Language.Llama3_70B,
+        accelerators=_Nodes.DGX_H100.accelerators_per_node,
+        hbm_per_accelerator=_ReferenceStats.ServingProfiles.H100VendorMemoryBudget,
+        weight_bytes_per_param=_BYTES_FP16,
+        reserve=Q_(20, "GB"),  # scenario assumption: system reserve
+        context_tokens=_Models.Language.Llama3_70B.context_length,
+        kv_bytes_per_elem=_BYTES_FP16,
+    )
+    Llama3_70BChatAdmissionDgxH100 = Llama3_70BLongContextAdmissionDgxH100.variant(
+        name="Median chat requests on the 70B GQA replica (8 H100s)",
+        description="Each request holds the Azure chat trace's median prompt plus median answer.",
+        context_tokens=LlmChatTrace2023.median_request_tokens,
+    )
+    LlmChatKvInFlight = _st.KvInFlightScenario(
+        name="KV state of every chat request in flight at 1,000 per second",
+        description="Each request holds its prompt plus half its answer on average (trace means).",
+        occupancy=LlmChatLittlesLaw,
+        resident_tokens=LlmChatTrace2023.mean_resident_tokens,
+        admission=Llama3_70BLongContextAdmissionDgxH100,
+    )
+    MedianChatKvHandoff = BufferTransfer10GB.variant(
+        name="Median chat KV cache handed from a prefill to a decode pool",
+        description="The 70B replica's FP16 KV for the median chat request, over NVLink inside a "
+                    "node or InfiniBand NDR between nodes. Bandwidth term only.",
+        payload=Llama3_70BChatAdmissionDgxH100.result.kv_per_request,
+        links={"NVLink": BufferTransfer10GB.links["NVLink"],
+               "InfiniBand": BufferTransfer10GB.links["InfiniBand"]},
+    )
+    LongContextKvHandoff = MedianChatKvHandoff.variant(
+        name="128K-token KV cache handed from a prefill to a decode pool",
+        payload=Llama3_70BLongContextAdmissionDgxH100.result.kv_per_request,
+    )
+
+    ChatbotSharedSystemPrompt = _st.PrefixSharingScenario(
+        name="1,000 chat users sharing a 2,000-token system prompt",
+        description="Full-width multi-head KV (64 heads of 128, FP16) with Llama-2 70B's 80 layers; "
+                    "500 unique response tokens per user.",
+        workload=_Models.Language.Llama2_70B,
+        prefix_tokens=2000,  # scenario assumption
+        users=1000,  # scenario assumption
+        unique_tokens_per_user=500,  # scenario assumption: mean response
+        kv_width=_Models.Language.Llama2_70B.hidden_dim,  # full-width MHA: heads x head width
+        bytes_per_elem=_BYTES_FP16,
+    )
+
+    Llama2_70BPrecisionDividendGqaTp8 = _st.PrecisionDividendScenario(
+        name="Precision dividend of a 70B GQA model on 8 H100s",
+        description="INT4 weights and an INT8 KV cache against FP16 for both, at a 4,096-token "
+                    "context, with a decimal 80 GB budget per GPU.",
+        workload=_Models.Language.Llama2_70B,
+        tp_size=int(_ReferenceStats.ServingProfiles.PrecisionDividendTensorParallelDegree),
+        hbm_per_accelerator=Q_(_ReferenceStats.ServingProfiles.H100VendorMemoryBudget.to("GiB").magnitude,
+                               "GB"),  # nameplate label read as decimal GB
+        context_tokens=int(_ReferenceStats.ServingProfiles.PrecisionDividendContextLengthTokens),
+        kv_heads=_Models.Language.Llama2_70B.kv_heads,
+        weight_bytes=_BYTES_FP16, weight_bytes_low=_BYTES_INT4,
+        kv_bytes=_BYTES_FP16, kv_bytes_low=_BYTES_INT8,
+    )
+    Llama2_70BPrecisionDividendMhaTp8 = Llama2_70BPrecisionDividendGqaTp8.variant(
+        name="Precision dividend of the same 70B model with 64-head attention",
+        kv_heads=_Models.Language.Llama2_70B.heads,
+    )
+
+    LongPromptChunkedPrefill = _st.ChunkedPrefillScenario(
+        name="A 10,000-token prompt in 512-token chunks",
+        description="Each iteration runs the active streams' decode tokens plus one chunk.",
+        prompt_tokens=10_000,  # scenario assumption
+        chunk_tokens=512,  # scenario assumption
+    )
+
+    Llama2_70BPrefillTensorParallel8 = _st.TensorParallelSpeedupScenario(
+        name="Long-prompt prefill layer of a 70B model, 8-way tensor parallel",
+        description="Stated 30 ms of serial compute per layer (12 attention, 18 feed-forward) and "
+                    "0.3 ms per AllReduce, two per layer.",
+        serial_layer_times={"attention": Q_(12, "ms"), "feed-forward": Q_(18, "ms")},  # scenario assumption
+        tp_size=_Nodes.DGX_H100.accelerators_per_node,
+        allreduce_time=Q_(0.3, "ms"),  # scenario assumption
+        layers=_Models.Language.Llama2_70B.layers,
+    )
+
+    HeterogeneousH100A100Routing = _st.WeightedRoutingScenario(
+        name="15,000 QPS over 10 H100 and 20 A100 servers",
+        description="Weights proportional to each server's capacity equalize utilization.",
+        servers={"H100": int(_ReferenceStats.ServingProfiles.HeterogeneousRoutingH100Servers),
+                 "A100": int(_ReferenceStats.ServingProfiles.HeterogeneousRoutingA100Servers)},
+        capacity={"H100": int(_ReferenceStats.ServingProfiles.HeterogeneousRoutingH100CapacityQps),
+                  "A100": int(_ReferenceStats.ServingProfiles.HeterogeneousRoutingA100CapacityQps)},
+        offered=int(_ReferenceStats.ServingProfiles.HeterogeneousRoutingTargetQps),
+    )
+    ServingFanout100Leaves = _st.AvailabilityScenario(
+        name="A request that waits for 100 independent leaves",
+        description="Each leaf meets its own p99 (fast 99 percent of the time); 1 - all_up is the "
+                    "share of slow requests.",
+        availability=0.99,  # scenario assumption: each leaf fast at its p99
+        n_components=100,  # scenario assumption: leaves per request
+    )
+    RecommenderTailEvents = _st.TailEventRateScenario(
+        name="A one-in-10,000 slow request at recommender platform scale",
+        description="Archetype B request rate times a rare per-request event.",
+        request_rate=_ReferenceStats.RecommenderAtScaleProfile.PlatformQps,
+        event_probability=1e-4,  # scenario assumption: rare slow-request event
+    )
+    Llama70BReplicaColdStart = _st.ColdStartScenario(
+        name="Cold start of a 70B FP16 serving replica",
+        description="Provision, fetch the FP16 weights from object storage, load and warm up; a "
+                    "forecast that starts replicas early lowers the peak fleet.",
+        workload=_Models.Language.Llama2_70B,
+        weight_bytes_per_param=_BYTES_FP16,
+        fetch_bandwidth=_ReferenceStats.ReplicaColdStartProfile.ArtifactFetchBandwidth,
+        provisioning_time=_ReferenceStats.ReplicaColdStartProfile.ProvisioningTime,
+        load_warmup_time=_ReferenceStats.ReplicaColdStartProfile.LoadWarmupTime,
+        reactive_peak_replicas=45,  # scenario assumption: reactive-only peak fleet
+        predictive_peak_replicas=30,  # scenario assumption: forecast peak fleet
+        prewarm_lead=Q_(30, "minute"),  # scenario assumption: pre-warm lead before each ramp
+    )
+    SharedPoolNoisyNeighbor = _st.NoisyNeighborScenario(
+        name="Ten tenants on shared H100s, one bursting fivefold",
+        description="Three tenants share a 60 GB KV pool; one swells to 45 GB. Latencies are "
+                    "scenario values, not measurements.",
+        kv_pool=Q_(60, "GB"),  # scenario assumption
+        pool_tenants=3,  # scenario assumption
+        swollen_share=Q_(45, "GB"),  # scenario assumption
+        base_sequences=200,  # scenario assumption
+        base_rate=100,  # scenario assumption: QPS per tenant
+        burst_rate=500,  # scenario assumption
+        slo=Q_(50, "ms"),  # scenario assumption: p99 SLO
+        unprotected_p99_low=Q_(22, "ms"),  # scenario assumption
+        unprotected_p99_high=Q_(45, "ms"),  # scenario assumption
+        quota_rate=120,  # scenario assumption: quota-enforced QPS
+        protected_p99=Q_(15, "ms"),  # scenario assumption
+    )
+    ReasoningTokenLatency = _st.ReasoningLatencyScenario(
+        name="128 serial reasoning tokens at 100 ms per token",
+        description="A round figure per token; the ratio does not depend on it.",
+        per_token_time=Q_(100, "ms"),  # scenario assumption
+        reasoning_tokens=128,  # scenario assumption
+    )
+    FourRequestDecodeBatch = _st.FixedBatchScheduleScenario(
+        name="Four concurrent requests with answers of 50 to 200 tokens",
+        description="One token per 20 ms decode iteration; fixed membership keeps every slot until "
+                    "the longest answer ends.",
+        output_lengths=[50, 200, 100, 150],  # scenario assumption
+        prompt_lengths=[100, 80, 120, 90],  # scenario assumption
+        iteration_time=Q_(20, "ms"),  # scenario assumption
+    )
+    RandomVsTwoChoicePlacement = _st.BallsIntoBinsScenario(
+        name="n equal jobs into n replicas: random against two random probes",
+        description="Static placement, no departures; 20 trials per size (5 at 100,000), seed 7.",
+        bins=[10, 100, 1000, 10_000, 100_000],
+        choices=[1, 2],
+        trials={10: 20, 100: 20, 1000: 20, 10_000: 20, 100_000: 5},  # simulation budget
+        seed=7,
+    )
+
+    InferenceXServingFrontier = _st.ServingFrontierScenario(
+        name="InferenceX: DeepSeek-R1 FP8, 1,024 tokens in and out",
+        description="Measured per-GPU output against per-user interactivity, per accelerator.",
+        series=_Literature.Series.InferenceXDeepSeekR1,
+        targets=[25, 50, 100],  # scenario assumption: per-user rates for split-versus-colocated comparison
+    )
+    H100OutputTokenCost = _st.TokenCostScenario(
+        name="Output-token cost on the best measured H100 configuration",
+        description="At 13, 50, and 100 output tokens per second per user, priced at a hypothetical "
+                    "$4.00 per H100-hour (on-demand, US-East, in a regional price snapshot).",
+        frontier=InferenceXServingFrontier,
+        hardware="h100",
+        targets=[13, 50, 100],  # scenario assumption: per-user rates compared
+        gpu_hour_price=Q_(4.00, "USD/hour"),  # scenario assumption: hypothetical on-demand price
     )

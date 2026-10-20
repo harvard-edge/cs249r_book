@@ -2049,3 +2049,81 @@ class RuntimeGoodputResult(SolverResult):
     runtime_goodput: float
     interruption_interval: Quantity          # MTBF with forced preemptions counted as interruptions
     interruption_checkpoint_interval: Quantity
+# --- Serving at scale: traces, frontiers, admission (added 2026-10-20) --------
+
+class RequestTraceResult(SolverResult):
+    """Result from RequestTraceModel: arrivals and token lengths of a request trace."""
+    requests: int
+    duration: Quantity                       # first to last arrival
+    arrival_rate: Quantity                   # requests / duration
+    median_prompt: float
+    median_output: float
+    mean_prompt: float
+    mean_output: float
+    max_output: float
+    batch_size: int
+    fixed_batch_idle_share: float            # mean of 1 - mean/max over consecutive batches
+    per_second_mean: float                   # arrivals per one-second bin, empty seconds included
+    per_second_peak: int                     # busiest one-second bin
+
+
+class TrafficProfileResult(SolverResult):
+    """Result from TrafficProfileModel: request rate over a binned week."""
+    peak_rate: Quantity
+    min_rate: Quantity
+    weekday_trough_low: Quantity             # lowest and highest nightly minimum, weekdays
+    weekday_trough_high: Quantity
+    weekday_peak_low: Quantity               # lowest and highest daily maximum, weekdays
+    weekday_peak_high: Quantity
+    weekday_peak_to_trough: float            # mean over weekdays of max / min
+
+
+class ServingFrontierResult(SolverResult):
+    """Result from ServingFrontierModel: one accelerator's measured frontier and its best rate at a target."""
+    frontier: List[Tuple[float, float]]      # (interactivity, throughput), no point beaten on both
+    peak_interactivity: float                # interactivity of the highest-throughput point
+    peak_throughput: float
+    best_at: float                           # highest throughput among rows meeting the target
+
+
+class KvAdmissionResult(SolverResult):
+    """Result from KvAdmissionModel: requests of one context length that fit a replica's KV budget."""
+    head_dim: int
+    weights: Quantity
+    hbm_total: Quantity
+    kv_budget: Quantity                      # HBM - weights - reserve
+    kv_per_token: Quantity
+    kv_per_request: Quantity
+    max_requests: int                        # floor(kv_budget / kv_per_request)
+
+
+class PrecisionDividendResult(SolverResult):
+    """Result from PrecisionDividendModel: maximum batch before and after lower precision."""
+    weights_per_device: Quantity
+    weights_per_device_low: Quantity
+    kv_budget_per_device: Quantity
+    kv_budget_per_device_low: Quantity
+    kv_per_request: Quantity                 # whole request at the base KV precision
+    kv_per_request_low: Quantity
+    kv_per_request_per_device: Quantity
+    kv_per_request_per_device_low: Quantity
+    max_batch: int
+    max_batch_low: int
+    dividend: float                          # max_batch_low / max_batch
+    budget_gain: float                       # KV budget low / KV budget base
+
+
+class BallsIntoBinsResult(SolverResult):
+    """Result from BallsIntoBinsModel: simulated busiest-bin load, n balls into n bins."""
+    bins: List[int]
+    max_load: Dict[int, List[float]]         # choices -> mean busiest-bin load per bin count
+
+
+__all__ += [
+    "RequestTraceResult",
+    "TrafficProfileResult",
+    "ServingFrontierResult",
+    "KvAdmissionResult",
+    "PrecisionDividendResult",
+    "BallsIntoBinsResult",
+]

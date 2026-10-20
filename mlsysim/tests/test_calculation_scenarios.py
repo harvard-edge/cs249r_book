@@ -1924,3 +1924,160 @@ def test_compilation_payback_trace_volume_and_software_gains():
     assert sg.gain("gptj-99") == approx(2.69091)
     assert sg.gain("resnet50") == approx(0.999089, rel=1e-4)
     assert sg.months() == 19
+
+
+# --- Serving at scale (added 2026-10-20) ---------------------------------------
+
+def test_serving_cost_goodput_tax_and_knees():
+    c = Scenarios.LlmServingFirstYear
+    assert c.annual_requests == approx(18.25e9)
+    assert c.annual_serving_cost == approx(18.25e6)
+    assert c.serving_to_training == approx(9.125)
+    assert c.efficiency_savings == approx(1.825e6)
+    assert round(c.crossover_weeks) == 6
+    g = Scenarios.SloGoodputTwoConfigurations
+    assert g.goodput("X").magnitude == approx(840)
+    assert g.goodput("Y").magnitude == approx(950)
+    assert g.best == "Y"
+    t = Scenarios.InteractiveRequestServingTax
+    assert t.outside_model.to("ms").magnitude == approx(30)
+    assert t.exchanges_low.to("ms").magnitude == approx(0.2)
+    assert t.exchanges_high.to("ms").magnitude == approx(2)
+    assert Scenarios.VisionBatchingKnee.knee == approx(2)
+    assert Scenarios.LlmDecodeBatchingKnee.knee == approx(80)
+    assert Scenarios.LlmDecodeBatchingKnee.throughput_share(80) == approx(0.5)
+
+
+def test_littles_law_vision_and_chat():
+    v = Scenarios.VisionServingLittlesLaw
+    assert v.in_flight == approx(100)
+    assert v.replica_throughput.to("1/s").magnitude == approx(100)
+    assert v.throughput_floor == 10
+    assert v.replicas_needed == 13
+    assert v.mean_executing == approx(80)
+    assert v.service_utilization == approx(0.769231)
+    c = Scenarios.LlmChatLittlesLaw
+    assert c.time_in_system.to("s").magnitude == approx(10.55)
+    assert c.in_flight == approx(10550)
+
+
+def test_request_traces_and_week_traffic():
+    chat = Scenarios.LlmChatTrace2023.result
+    assert chat.requests == 19366
+    assert chat.arrival_rate.to("1/s").magnitude == approx(5.53042, rel=1e-5)
+    assert (chat.median_prompt, chat.median_output, chat.max_output) == (1020, 129, 1000)
+    assert chat.mean_output == approx(211.126, rel=1e-5)
+    assert chat.fixed_batch_idle_share == approx(0.502929, rel=1e-5)
+    assert Scenarios.LlmChatTrace2023.median_request_tokens == 1149
+    code = Scenarios.LlmCodeTrace2023.result
+    assert (code.median_prompt, code.median_output) == (1469, 13)
+    assert code.fixed_batch_idle_share == approx(0.628734, rel=1e-5)
+    assert code.per_second_mean == approx(2.56665, rel=1e-5)
+    assert code.per_second_peak == 67
+    w = Scenarios.LlmChatWeekTraffic2024.result
+    assert w.peak_rate.to("1/s").magnitude == approx(79.685)
+    assert w.min_rate.to("1/s").magnitude == approx(19.6283, rel=1e-5)
+    assert w.weekday_trough_low.magnitude == approx(24.93)
+    assert w.weekday_trough_high.magnitude == approx(37.98)
+    assert w.weekday_peak_low.magnitude == approx(62.3)
+    assert w.weekday_peak_to_trough == approx(2.24912, rel=1e-5)
+
+
+def test_kv_admission_in_flight_and_handoff():
+    long = Scenarios.Llama3_70BLongContextAdmissionDgxH100.result
+    assert long.kv_per_token.to("byte").magnitude == 327_680
+    assert long.head_dim == 128
+    assert long.weights.to("GB").magnitude == approx(141.2)
+    assert long.hbm_total.to("GB").magnitude == approx(687.194767)
+    assert long.kv_budget.to("GB").magnitude == approx(525.994767)
+    assert long.kv_per_request.to("GB").magnitude == approx(42.949673)
+    assert long.max_requests == 12
+    chat = Scenarios.Llama3_70BChatAdmissionDgxH100.result
+    assert chat.kv_per_request.to("MB").magnitude == approx(376.50432)
+    assert chat.max_requests == 1397
+    f = Scenarios.LlmChatKvInFlight
+    assert f.kv_in_flight.to("TB").magnitude == approx(4.35675, rel=1e-5)
+    assert f.replicas_by_kv == approx(8.28288, rel=1e-5)
+    m = Scenarios.MedianChatKvHandoff.result.times
+    assert m["NVLink"].to("ms").magnitude == approx(0.836676, rel=1e-5)
+    assert m["InfiniBand"].to("ms").magnitude == approx(7.53009, rel=1e-5)
+    assert Scenarios.LongContextKvHandoff.result.times["NVLink"].to("ms").magnitude == approx(95.4437, rel=1e-5)
+
+
+def test_prefix_sharing_and_precision_dividend():
+    p = Scenarios.ChatbotSharedSystemPrompt
+    assert p.kv_unshared.to("TB").magnitude == approx(6.5536)
+    assert p.kv_shared.to("TB").magnitude == approx(1.315963)
+    assert p.reduction == approx(0.7992)
+    g = Scenarios.Llama2_70BPrecisionDividendGqaTp8.result
+    assert g.kv_budget_per_device.to("GB").magnitude == approx(62.5)
+    assert g.weights_per_device_low.to("GB").magnitude == approx(4.375)
+    assert (g.max_batch, g.max_batch_low) == (372, 901)
+    assert g.dividend == approx(2.42204, rel=1e-5)
+    assert g.budget_gain == approx(1.21)
+    m = Scenarios.Llama2_70BPrecisionDividendMhaTp8.result
+    assert (m.max_batch, m.max_batch_low) == (46, 112)
+
+
+def test_chunk_tp_decode_budget_and_speculation():
+    assert Scenarios.LongPromptChunkedPrefill.iterations == 20
+    t = Scenarios.Llama2_70BPrefillTensorParallel8
+    assert t.sharded("attention").to("ms").magnitude == approx(1.5)
+    assert t.sharded("feed-forward").to("ms").magnitude == approx(2.25)
+    assert t.parallel_layer_time.to("ms").magnitude == approx(4.35)
+    assert t.speedup == approx(6.89655, rel=1e-5)
+    assert t.parallel_total.to("ms").magnitude == approx(348)
+    b = Scenarios.Llama3_70B_ReplicaDecodeBudget
+    assert b.totals == approx([85.0, 69.7, 49.6])
+    assert b.floor.to("ms").magnitude == approx(5.223881, rel=1e-5)
+    assert b.allreduces_per_step == 160
+    assert b.allreduce_per_collective.to("microsecond").magnitude == approx(63.75)
+    assert b.collective_estimate.to("microsecond").magnitude == approx(5.07282, rel=1e-5)
+    s = Scenarios.Llama3_70B_ReplicaSpeculation
+    assert s.expected_tokens == approx(3.52182, rel=1e-5)
+    assert s.round_time.to("ms").magnitude == approx(53.6)
+    assert s.per_token_time.to("ms").magnitude == approx(15.2194, rel=1e-5)
+    assert s.tpot_gain == approx(3.259, rel=1e-4)
+
+
+def test_fleet_routing_tail_cold_start_and_tenants():
+    h = Scenarios.HeterogeneousH100A100Routing
+    assert h.utilization("H100") == approx(0.681818, rel=1e-5)
+    assert h.utilization("A100") == approx(h.utilization("H100"))
+    f = Scenarios.ServingFanout100Leaves
+    assert 1 - f.all_up == approx(0.633968, rel=1e-5)
+    assert 1 - f.required_availability(0.99) == approx(1.00498e-4, rel=1e-4)
+    assert Scenarios.ServingFanout100Leaves.variant(availability=0.9999).all_up == approx(0.990049, rel=1e-5)
+    assert Scenarios.RecommenderTailEvents.events_per_second == approx(1000)
+    c = Scenarios.Llama70BReplicaColdStart
+    assert c.artifact.to("GB").magnitude == approx(140)
+    assert c.fetch_time.to("minute").magnitude == approx(4.66667, rel=1e-5)
+    assert c.cold_start_time.to("minute").magnitude == approx(6.66667, rel=1e-5)
+    assert c.peak_saving == approx(1 / 3)
+    n = Scenarios.SharedPoolNoisyNeighbor
+    assert n.other_sequences == 75
+    assert n.batch_reduction == approx(0.625)
+    assert n.burst_multiple == approx(5)
+    assert Scenarios.ReasoningTokenLatency.reasoning_time.to("s").magnitude == approx(12.8)
+    b = Scenarios.FourRequestDecodeBatch
+    assert b.idle_share == approx(0.375)
+    assert (b.slot_iterations, b.useful_iterations, b.requests_advanced) == (800, 500, 7)
+    assert b.total_tokens == [150, 280, 220, 240]
+    p = Scenarios.RandomVsTwoChoicePlacement.result.max_load
+    assert p[1][-1] == approx(7.6)
+    assert p[2][-1] == approx(3.6)
+
+
+def test_inferencex_frontier_and_token_cost():
+    x = Scenarios.InferenceXServingFrontier
+    assert x.config_count == 325
+    b = x.solve("b200", 100)
+    assert (b.peak_interactivity, b.peak_throughput) == approx((13.34, 6256.29))
+    assert b.best_at == approx(208.02)
+    assert x.best_at("h100", 50) == approx(82.1)
+    assert x.best_at("gb200", 50) == approx(3653.27)
+    assert x.max_concurrency_at("b200", 50, framework="sglang") == 64
+    assert x.split_gain("b200", 100) == approx(148.18 / 208.02)
+    k = Scenarios.H100OutputTokenCost
+    assert k.cost_per_million(50).to("USD").magnitude == approx(13.5336, rel=1e-5)
+    assert k.spread == approx(34.651, rel=1e-4)
