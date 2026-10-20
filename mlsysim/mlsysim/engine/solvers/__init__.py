@@ -37,7 +37,6 @@ from .storage import (
     SyntheticFootprintModel,
     StorageBenchmarkDemandModel,
 )
-from .trends import DomainComputeGapModel, TrainingGrowthModel
 from .embodied import StoppingBudgetModel, TractionLossModel  # added 2026-10-20
 # Agent trajectories (added 2026-10-20)
 from .agents import (AcceptedTaskCostModel, AgentRunSummaryModel, AppendOnlyContextModel,
@@ -45,6 +44,9 @@ from .agents import (AcceptedTaskCostModel, AgentRunSummaryModel, AppendOnlyCont
 # Model calls and agent trajectories (added 2026-10-20)
 from .model_call import (CheckerPosteriorModel, ContextAdmissionModel, ModelCallModel, SamplingModel,
                          TokenMixModel, TrajectoryResendModel)
+from .trends import DomainComputeGapModel, MemoryWallModel, ScalingSeriesModel, TrainingGrowthModel
+from .parallelism import (AlignmentMemoryModel, DataParallelScaleOutModel, ParallelLayoutModel,
+                          TensorParallelLayerModel, ZeroShardingModel)
 from .training import CheckpointModel, ScalingModel, TrainingMemoryModel, TrainingRunModel, TrainingStateModel
 
 __all__ = [
@@ -79,6 +81,13 @@ __all__ = [
     "DomainComputeGapModel",
     "StoppingBudgetModel",
     "TractionLossModel",
+    "ScalingSeriesModel",
+    "MemoryWallModel",
+    "ParallelLayoutModel",
+    "ZeroShardingModel",
+    "DataParallelScaleOutModel",
+    "TensorParallelLayerModel",
+    "AlignmentMemoryModel",
     "StorageFootprintModel",
     "TieredCheckpointModel",
     "CheckpointStormModel",

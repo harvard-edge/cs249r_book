@@ -721,6 +721,32 @@ class Series:
         "Time-to-train of MLPerf Training LLM benchmarks by accelerator count and system.",
         numeric=("accelerators", "runs", "min_minutes", "mean_minutes", "score_minutes", "global_batch_size", "trained_samples_median"),
     )
+    # Added 2026-10-20 (verified against the arXiv HTML on 2026-10-20).
+    GoyalLargeMinibatchResNet50 = TrendSeries(
+        "goyal_resnet50_large_minibatch",
+        _lit("Goyal et al. (2017), Accurate, Large Minibatch SGD: Training ImageNet in 1 Hour, "
+             "arXiv:1706.02677, Table 1 and Figure 3",
+             "https://arxiv.org/abs/1706.02677",
+             "ResNet-50 ImageNet top-1 validation error, mean of 5 runs. source=table1: the 256 baseline "
+             "and the three 8k warmup variants of Table 1 (text). source=figure3: the validation errors in "
+             "the legends of Figure 3 (linear scaling rule with gradual warmup), read from the figure; "
+             "256 to 16k match Table 3(a) in the text, while 128, 32k and 64k appear only in the figure"),
+        "ResNet-50 ImageNet validation error by global minibatch and warmup schedule.",
+        numeric=("global_batch", "top1_error_pct"),
+    )
+    MegatronLmWeakScaling = TrendSeries(
+        "megatron_lm_weak_scaling",
+        _lit("Shoeybi et al. (2019), Megatron-LM, arXiv:1909.08053, Figure 5 and Section 5.1.1",
+             "https://arxiv.org/abs/1909.08053",
+             "weak-scaling efficiency against the 1.2B-parameter one-GPU baseline on DGX-2H V100 servers "
+             "(NVSwitch, 300 GB/s inside a server); mode=model is tensor parallelism inside one server, "
+             "model+data adds data parallelism across servers. Bar values read from Figure 5; the 8-GPU "
+             "77 percent and 512-GPU 74 percent are also stated in Section 5.1.1. The abstract's 76 percent "
+             "(Literature.TrainingRuns.MegatronLm2019ScalingEfficiency) is sustained FLOP/s against the "
+             "39 TFLOP/s single-GPU baseline, a different measure"),
+        "Megatron-LM weak-scaling efficiency by GPU count, model and model-plus-data parallel.",
+        numeric=("gpus", "efficiency_pct"),
+    )
     Llama3Interruptions = TrendSeries(
         "llama3_interruptions",
         _lit("Llama Team, AI @ Meta (2024), The Llama 3 Herd of Models, arXiv:2407.21783 v3, Table 5 "

@@ -11,7 +11,7 @@ import math
 
 import numpy as np
 
-from ..results import DomainComputeGapResult, TrainingGrowthResult
+from ..results import DomainComputeGapResult, ScalingSeriesResult, TrainingGrowthResult
 from .base import ForwardModel
 
 
@@ -80,4 +80,70 @@ class DomainComputeGapModel(ForwardModel):
             gap=ref["training_flop"] / row["training_flop"],
             domain_models_with_compute=sum(1 for r in rows if r["domain_group"] == row["domain_group"]
                                            and r["training_flop"]),
+        )
+
+
+class ScalingSeriesModel(ForwardModel):
+    """
+    Relative scaling efficiency of benchmark series measured at several sizes.
+
+    A series is one submitter's same-round runs of one benchmark on one
+    accelerator. Its efficiency is ``(T0 N0) / (T N)`` between the smallest
+    configuration ``(N0, T0)`` and the largest ``(N, T)``: 1 when time falls in
+    proportion to accelerators, below 1 when the larger run wastes some of them.
+    Added 2026-10-20.
+    """
+    requires = ("series",)
+    produces = ScalingSeriesResult
+
+    def solve(self, rows, specs) -> ScalingSeriesResult:
+        labels, series, effs = [], [], []
+        for label, (rnd, submitter, benchmark, accelerator) in specs:
+            pts = sorted((r for r in rows if r["round"] == rnd and r["submitter"].startswith(submitter)
+                          and r["benchmark"] == benchmark and accelerator in r["accelerator"]),
+                         key=lambda r: r["accelerators"])
+            a, z = pts[0], pts[-1]
+            labels.append(label)
+            series.append(list(pts))
+            effs.append((a["score_minutes"] * a["accelerators"]) / (z["score_minutes"] * z["accelerators"]))
+        return ScalingSeriesResult(labels=labels, series=series, efficiencies=effs)
+
+
+class MemoryWallModel(ForwardModel):
+    """
+    Training-state demand against single-accelerator memory, and where they cross.
+
+    Demand is each model's parameter count times the bytes of training state
+    per parameter; capacity is each accelerator's memory at its release year
+    (vendors label 80 GiB as 80 GB, so capacity is read in GiB). The crossover is
+    the first model whose demand exceeds the largest accelerator available in
+    its publication year. Added 2026-10-20.
+    """
+    requires = ("models", "accelerators")
+
+    def solve(self, models, accelerators, bytes_per_param):
+        from ..results import MemoryWallResult
+        from ...hardware.registry import Hardware
+        from ...literature.registry import Literature
+        rows = []
+        for label, name in models:
+            r = next(m for m in Literature.Series.NotableModels.entries if m["model"] == name)
+            rows.append({"Year": int(r["date"][:4]), "Date": r["date"], "Name": label, "Type": "Model",
+                         "Memory_GB": (r["parameters"] * bytes_per_param).to("GB").magnitude})
+        for key in accelerators:
+            h = getattr(Hardware.Cloud, key)
+            rows.append({"Year": int(h.release_year), "Date": None, "Name": key, "Type": "GPU",
+                         "Memory_GB": h.memory.capacity.to("GiB").magnitude})
+        gpus = sorted((r for r in rows if r["Type"] == "GPU"), key=lambda r: r["Year"])
+        demand = sorted((r for r in rows if r["Type"] == "Model"), key=lambda r: r["Year"])
+        cross = next(r for r in demand
+                     if r["Memory_GB"] > max((g["Memory_GB"] for g in gpus if g["Year"] <= r["Year"]),
+                                         default=float("inf")))  # no accelerator yet: no crossover
+        largest = max(g["Memory_GB"] for g in gpus if g["Year"] <= cross["Year"])
+        return MemoryWallResult(
+            rows=rows,
+            capacity_growth=max(g["Memory_GB"] for g in gpus) / min(g["Memory_GB"] for g in gpus),
+            demand_orders=math.log10(max(r["Memory_GB"] for r in demand) / min(r["Memory_GB"] for r in demand)),
+            crossover_name=cross["Name"], crossover_year=cross["Year"],
+            crossover_gap=cross["Memory_GB"] / largest,
         )

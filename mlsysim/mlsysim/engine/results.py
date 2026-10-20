@@ -95,6 +95,14 @@ __all__ = [
     "ModelCallResult",
     "TrajectoryResendResult",
     "TokenMixResult",
+    # Distributed training (added 2026-10-20)
+    "ParallelLayoutResult",
+    "ZeroShardingResult",
+    "DataParallelScaleOutResult",
+    "TensorParallelLayerResult",
+    "AlignmentMemoryResult",
+    "ScalingSeriesResult",
+    "MemoryWallResult",
 ]
 
 
@@ -1183,3 +1191,103 @@ class OverlapBudgetResult(SolverResult):
     exposed_per_layer: Quantity
     overlapped_time: Quantity
     savings_fraction: float
+# --- Distributed training (added 2026-10-20) ---------------------------------
+
+class ParallelLayoutResult(SolverResult):
+    """Result from ParallelLayoutModel: one TP x PP x DP layout's step and state."""
+    n_devices: int
+    step_flops: Quantity
+    compute_time: Quantity           # per device per step (T_compute / N)
+    gradient_bytes: Quantity         # full gradient at the communication precision
+    dp_shard: Quantity               # gradient bytes each data-parallel rank reduces
+    ring_bytes: Quantity             # 2(DP-1)/DP x shard, exact ring volume per device
+    allreduce_time: Quantity         # 2 x shard / link bandwidth (large-N ring bound)
+    hidden_time: Quantity
+    exposed_time: Quantity
+    bubble: float                    # pipeline idle fraction
+    efficiency: float                # with overlap and bubble
+    efficiency_no_overlap: float
+    overlap_share: float             # hidden / allreduce
+    step_time: Quantity              # compute / (1 - bubble) + exposed
+    state_total: Quantity            # persistent mixed-precision Adam state
+    state_per_device: Quantity       # split by TP x PP
+    zero1_state_per_device: Quantity # plus optimizer state sharded across DP
+    fleet_mfu: float                 # local efficiency x scaling efficiency
+    double_counted_mfu: float        # the pitfall: scaling efficiency applied twice
+    min_devices_for_state: Optional[int] = None
+
+
+class ZeroShardingResult(SolverResult):
+    """Result from ZeroShardingModel: per-device state at each ZeRO stage."""
+    weights: Quantity
+    gradients: Quantity
+    optimizer_state: Quantity
+    stage_state: Dict[str, Quantity]       # "DDP", "ZeRO-1", "ZeRO-2", "ZeRO-3" per device
+    traffic_multiple: Dict[str, float]     # per-device bytes relative to DDP's AllReduce
+    activations: Quantity
+    zero3_total_per_device: Quantity       # ZeRO-3 state plus activations
+    gather_traffic: Quantity               # ZeRO-3 per-device bytes per step
+    gather_time: Optional[Quantity] = None
+
+
+class DataParallelScaleOutResult(SolverResult):
+    """Result from DataParallelScaleOutModel: a data-parallel job inside and across nodes."""
+    n_devices: int
+    gradient_bytes: Quantity
+    intra_bytes: Quantity
+    inter_bytes: Quantity
+    intra_time: Quantity
+    inter_time: Quantity
+    communication_time: Quantity
+    compute_time: Quantity           # per optimizer update (accumulation x step)
+    update_time: Quantity
+    communication_overhead: float    # communication / compute per update
+    compute_share: float
+    communication_share: float
+    speedup: float
+    efficiency: float
+    global_batch: int
+    training_time: Quantity
+    cost: Optional[float] = None     # dollars
+
+
+class TensorParallelLayerResult(SolverResult):
+    """Result from TensorParallelLayerModel: one layer's compute against its TP exchange."""
+    layer_flops: Quantity
+    compute_time: Quantity
+    layer_bytes: Quantity
+    transfer_times: Dict[str, Quantity]
+
+
+class AlignmentMemoryResult(SolverResult):
+    """Result from AlignmentMemoryModel: PPO and DPO model state for RLHF."""
+    policy_state: Quantity
+    reference_weights: Quantity
+    reward_weights: Quantity
+    value_state: Quantity
+    ppo_total: Quantity
+    dpo_total: Quantity
+    dpo_reduction: float
+    model_parallel_devices: int
+    policy_per_device: Quantity
+    reference_per_device: Quantity
+    kv_cache: Quantity
+    kv_per_device: Quantity
+    min_devices_for_ppo: Optional[int] = None
+
+
+class ScalingSeriesResult(SolverResult):
+    """Result from ScalingSeriesModel: same-round benchmark series and their efficiencies."""
+    labels: List[str]
+    series: List[List[Dict[str, Any]]]   # each series' rows, smallest configuration first
+    efficiencies: List[float]            # largest configuration relative to the smallest
+
+
+class MemoryWallResult(SolverResult):
+    """Result from MemoryWallModel: demand and capacity rows and the crossover."""
+    rows: List[Dict[str, Any]]           # Year, Date, Name, Type ("Model" or "GPU"), Memory_GB
+    capacity_growth: float               # largest over smallest accelerator memory
+    demand_orders: float                 # log10 of largest over smallest demand
+    crossover_name: str
+    crossover_year: int
+    crossover_gap: float                 # crossover demand over that year's largest accelerator

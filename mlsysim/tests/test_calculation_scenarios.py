@@ -743,3 +743,132 @@ def test_compression_and_overlap():
     assert o.sequential_time.to("ms").magnitude == approx(1344)
     assert o.overlapped_time.to("ms").magnitude == approx(879)
     assert Scenarios.OverlapBudget7B64GpuIdealBuckets.result.overlapped_time.to("ms").magnitude == approx(487.63)
+# --- Distributed training (added 2026-10-20) ---------------------------------
+
+def test_parallel_layouts_175b():
+    a = Scenarios.Gpt3DataParallel1K.result
+    assert a.n_devices == 1024
+    assert a.step_flops.to("flop").magnitude == approx(2.1e18)
+    assert a.compute_time.to("s").magnitude == approx(2.1)
+    assert a.ring_bytes.to("GB").magnitude == approx(699.32)
+    assert a.allreduce_time.to("s").magnitude == approx(14.0)
+    assert a.exposed_time.to("s").magnitude == approx(11.9)
+    assert a.efficiency == approx(0.15)
+    assert a.overlap_share == approx(0.15)
+    assert a.state_per_device.to("GB").magnitude == approx(2800)
+    assert a.min_devices_for_state == 35
+    b = Scenarios.Gpt3TensorDataParallel1K.result
+    assert b.dp_shard.to("GB").magnitude == approx(43.75)
+    assert b.allreduce_time.to("s").magnitude == approx(1.75)
+    assert b.efficiency_no_overlap == approx(0.54545)
+    assert b.efficiency == approx(0.82759)
+    assert b.fleet_mfu == approx(0.41379)
+    assert b.double_counted_mfu == approx(0.34245)
+    c = Scenarios.Gpt3ThreeDParallel1K.result
+    assert c.dp_shard.to("GB").magnitude == approx(10.9375)
+    assert c.bubble == approx(3 / 35)
+    assert c.efficiency == approx(0.87273)
+    assert c.state_per_device.to("GB").magnitude == approx(87.5)
+    assert c.zero1_state_per_device.to("GB").magnitude == approx(23.926)
+    d = Scenarios.Gpt3ThreeDParallel16K.result
+    assert d.n_devices == 16384
+    assert d.bubble == approx(15 / 47)
+    assert d.state_per_device.to("GB").magnitude == approx(21.875)
+
+
+def test_zero_sharding_and_activations():
+    z = Scenarios.Llama2_7B_ZeroStages64.result
+    assert z.stage_state["DDP"].to("GB").magnitude == approx(112)
+    assert z.stage_state["ZeRO-1"].to("GB").magnitude == approx(29.3125)
+    assert z.stage_state["ZeRO-2"].to("GB").magnitude == approx(15.53125)
+    assert z.stage_state["ZeRO-3"].to("GB").magnitude == approx(1.75)
+    assert z.optimizer_state.to("GB").magnitude == approx(84)
+    assert z.traffic_multiple["ZeRO-3"] == approx(1.5)
+    g = Scenarios.Gpt3Zero3On64.result
+    assert g.stage_state["ZeRO-3"].to("GB").magnitude == approx(43.75)
+    assert g.activations.to("GB").magnitude == approx(4.8318)
+    assert g.zero3_total_per_device.to("GB").magnitude == approx(48.582)
+    assert g.gather_traffic.to("TB").magnitude == approx(1.05)
+    assert g.gather_time.to("s").magnitude == approx(21)
+    act = Scenarios.Gpt3ActivationsMicrobatch4
+    assert act.activations("none").to("TB").magnitude == approx(1.1017)
+    assert act.activations("full").to("GB").magnitude == approx(19.327)
+    assert act.recompute_overhead == approx(1 / 3)
+
+
+def test_gpt2_data_parallel_scale_out():
+    one = Scenarios.Gpt2DataParallelOneNode.result
+    assert one.intra_bytes.to("GB").magnitude == approx(5.25)
+    assert one.communication_time.to("ms").magnitude == approx(11.667)
+    assert one.efficiency == approx(0.99356)
+    assert one.training_time.to("hour").magnitude == approx(3.1453)
+    four = Scenarios.Gpt2DataParallelFourNodes10GbE.result
+    assert four.inter_bytes.to("GB").magnitude == approx(5.8125)
+    assert four.inter_time.to("ms").magnitude == approx(4650)
+    assert four.update_time.to("ms").magnitude == approx(6461.7)
+    assert four.speedup == approx(8.9141)
+    assert four.efficiency == approx(0.27857)
+    assert four.cost == approx(358.98)
+    acc = Scenarios.Gpt2GradientAccumulationOneNode.result
+    assert acc.global_batch == 512
+    assert acc.communication_overhead == approx(0.0016204)
+    assert acc.training_time.to("hour").magnitude == approx(3.1301)
+    assert acc.cost == approx(100.16)
+
+
+def test_pipeline_tensor_parallel_and_ring_attention():
+    g = Scenarios.GPipeFourStageWalkthrough
+    assert (g.slots, g.idle_slots) == (14, 6)
+    assert g.bubble == approx(3 / 7)
+    assert Scenarios.Pipeline8Stage32Micro.bubble == approx(7 / 39)
+    assert Scenarios.Pipeline16Stage32Micro.microbatches_for_bubble(0.1) == approx(135)
+    assert Scenarios.Pipeline8Stage8Micro.bubble == approx(7 / 15)
+    t = Scenarios.Gpt3TensorParallelLayerTp8.result
+    assert t.compute_time.to("ms").magnitude == approx(1.8874)
+    assert t.transfer_times["NVLink"].to("ms").magnitude == approx(0.39147)
+    assert t.transfer_times["InfiniBand NDR"].to("ms").magnitude == approx(3.5232)
+    r = Scenarios.H100RingAttentionChunk.min_chunk_tokens
+    assert r["NVLink"] == approx(1098.9)
+    assert r["InfiniBand NDR"] == approx(9890)
+
+
+def test_sync_strategies_and_critical_batch():
+    b8, b64, s64 = (Scenarios.TransformerBsp8Workers, Scenarios.TransformerBsp64Workers,
+                    Scenarios.TransformerSsp64Workers)
+    assert (b8.speedup, b64.speedup, s64.speedup) == (approx(6.7935), approx(40.096), approx(38.095))
+    assert (b8.cost, b64.cost, s64.cost) == (approx(26.169), approx(35.470), approx(37.333))
+    assert s64.stale_lr_factor == approx(0.44721)
+    c = Scenarios.CriticalBatchPilotTrace7B
+    assert c.critical_batch == approx(16000)
+    assert c.global_batch == 8192
+    assert c.crossover_devices == approx(125)
+
+
+def test_alignment_memory_and_fleet_facts():
+    a = Scenarios.Llama2_70B_PpoAlignment.result
+    assert a.policy_state.to("GB").magnitude == approx(1120)
+    assert a.ppo_total.to("GB").magnitude == approx(1494)
+    assert a.dpo_total.to("GB").magnitude == approx(1260)
+    assert a.dpo_reduction == approx(0.15663)
+    assert a.policy_per_device.to("GB").magnitude == approx(35)
+    assert a.kv_cache.to("GB").magnitude == approx(85.899)
+    assert a.min_devices_for_ppo == 19
+    m = Scenarios.MLPerfLlmScalingSeries.result
+    assert min(m.efficiencies) == approx(0.70786)
+    assert max(m.efficiencies) == approx(0.83852)
+    assert Scenarios.GpuFailuresTraining1K.result.interval.to("hour").magnitude == approx(48.828)
+    assert Scenarios.StragglerFreeStep1K.all_up == approx(4.3171e-5)
+
+
+def test_memory_wall_residual_share_and_recompute():
+    w = Scenarios.NotableModelMemoryWall.result
+    assert w.capacity_growth == approx(15)
+    assert w.demand_orders == approx(3.9545)
+    assert (w.crossover_name, w.crossover_year) == ("GPT-3", 2020)
+    assert w.crossover_gap == approx(34.92)
+    r = Scenarios.ResidualOnePercent512
+    assert r.residual_share == approx(0.83797)
+    n = Scenarios.NaiveFourStagePipeline
+    assert (n.slots, n.idle_slots, n.fill_slots, n.phase_slots) == (8, 6, 3, 4)
+    a = Scenarios.Gpt3ActivationsMicrobatch4
+    assert (a.forward_equivalents, a.recompute_forward_equivalents) == (approx(3), approx(4))
