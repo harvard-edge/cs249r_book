@@ -473,3 +473,93 @@ def calc_smoothing_radius(noise_sd, top_class_probability):
 def calc_linf_corner_l2(linf_budget, coordinates):
     """Euclidean length of a corner of the l-infinity ball of radius ``linf_budget`` in ``coordinates`` dimensions."""
     return linf_budget * math.sqrt(coordinates)
+# --- Sequential tests, exact two-arm tests, and Poisson intervals (added 2026-10-20) ---
+def calc_sprt_increments(p_unacceptable, p_acceptable):
+    """Wald SPRT log-likelihood increments per success and per failure, failure-probability convention.
+
+    With per-trial failure probability ``p0`` under H0 (unacceptable) and
+    ``p1`` under H1 (acceptable), a success adds ``ln((1 - p1)/(1 - p0))`` and
+    a failure adds ``ln(p1/p0)`` to the log-likelihood ratio of H1 over H0.
+    Source: Wald, "Sequential Tests of Statistical Hypotheses," Ann. Math.
+    Statist. 16(2), 1945.
+    """
+    p0, p1 = float(p_unacceptable), float(p_acceptable)
+    if not (0.0 < p1 < p0 < 1.0):
+        raise ValueError("need 0 < p_acceptable < p_unacceptable < 1.")
+    return math.log((1 - p1) / (1 - p0)), math.log(p1 / p0)
+
+
+def calc_sprt_boundaries(alpha, beta):
+    """Wald's accept and reject boundaries on the log-likelihood ratio: ``ln((1-b)/a)``, ``ln(b/(1-a))``.
+
+    ``alpha`` is the allowed false acceptance of H1 under H0 and ``beta`` the
+    allowed false rejection of H1 under H1 (Wald 1945).
+    """
+    if not (0.0 < alpha < 1.0 and 0.0 < beta < 1.0):
+        raise ValueError("alpha and beta must lie in (0, 1).")
+    return math.log((1 - beta) / alpha), math.log(beta / (1 - alpha))
+
+
+def calc_fisher_exact_two_sided(a, b, c, d):
+    """Two-sided Fisher exact p for the 2x2 table [[a, b], [c, d]] (rows are the two arms).
+
+    Sums the hypergeometric probabilities of every table with the observed
+    margins that is no more probable than the observed one. Source: Fisher,
+    *Statistical Methods for Research Workers* (1934 ed.), sec. 21.02.
+    """
+    r1, c1, n = a + b, a + c, a + b + c + d
+
+    def _prob(x):
+        return math.comb(c1, x) * math.comb(n - c1, r1 - x) / math.comb(n, r1)
+
+    p_obs = _prob(a)
+    lo, hi = max(0, r1 + c1 - n), min(r1, c1)
+    return sum(_prob(x) for x in range(lo, hi + 1) if _prob(x) <= p_obs * (1 + 1e-9))
+
+
+def calc_cohens_h(p_high, p_low):
+    """Cohen's effect size for two proportions: ``h = 2 asin sqrt(p1) - 2 asin sqrt(p2)`` (Cohen 1988, ch. 6)."""
+    return 2 * math.asin(math.sqrt(p_high)) - 2 * math.asin(math.sqrt(p_low))
+
+
+def calc_arcsine_two_arm_sample_size(effect_h, alpha=0.05, power=0.80):
+    """Runs per arm to detect Cohen's ``h`` two-sided at ``alpha`` with ``power``.
+
+    Each arcsine-transformed fraction has variance 1/n, so a difference of two
+    arms has variance 2/n: ``n = ceil(2 ((z_{1-a/2} + z_power) / h)^2)``
+    (Cohen 1988, Table 6.4.1 lists 392 per arm at h = 0.2).
+    """
+    from statistics import NormalDist
+    z = NormalDist().inv_cdf
+    return math.ceil(2 * ((z(1 - alpha / 2) + z(power)) / effect_h) ** 2)
+
+
+def _poisson_cdf(k, mu):
+    """P(N <= k) for N ~ Poisson(mu)."""
+    term, total = math.exp(-mu), math.exp(-mu)
+    for j in range(1, k + 1):
+        term *= mu / j
+        total += term
+    return total
+
+
+def calc_poisson_exact_interval(events, alpha=0.05):
+    """Exact (Garwood) two-sided ``1 - alpha`` interval on a Poisson mean after ``events`` events.
+
+    Solves the Poisson tails ``P(N >= k) = alpha/2`` (lower) and
+    ``P(N <= k) = alpha/2`` (upper) by bisection. Divide by the exposure to get
+    a rate interval. Source: Garwood, "Fiducial Limits for the Poisson
+    Distribution," Biometrika 28(3/4), 1936.
+    """
+    k = int(events)
+
+    def _solve(f):
+        lo, hi = 0.0, 10.0 * (k + 10)
+        for _ in range(200):
+            mid = 0.5 * (lo + hi)
+            lo, hi = (mid, hi) if f(mid) > 0 else (lo, mid)
+        return 0.5 * (lo + hi)
+
+    lower = 0.0 if k == 0 else _solve(lambda mu: alpha / 2 - (1.0 - _poisson_cdf(k - 1, mu)))
+    upper = _solve(lambda mu: _poisson_cdf(k, mu) - alpha / 2)
+    return lower, upper

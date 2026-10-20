@@ -10986,3 +10986,502 @@ class StepCeilingReturnScenario(BaseScenario):
         rows = getattr(Literature, self.series_name).entries
         steps = self.steps or sorted({int(r["steps"]) for r in rows})
         return StepCeilingReturnModel().solve(rows, steps)
+# --- Closed-loop evaluation: trial campaigns, sequential tests, and exposure (added 2026-10-20) ---
+
+class ClosedLoopCampaignScenario(BaseScenario):
+    """``clean_runs`` failure-free closed-loop trials of a frozen policy in one cell of ``table`` on
+    ``site``, each ``run`` long with an automated ``reset``, bounded at one-sided ``confidence``.
+
+    What a success target ``1 - target_rate`` costs in runs, cell time, and operator time; the
+    exact bound when ``recorded_failures`` runs fail; and the contrasts the bound is taught with:
+    a policy that fails one run in ``weak_policy_one_in``, ``fallacy_runs`` clean runs against the
+    target, ``looks`` independent looks at the significance level, and a Bonferroni split of the
+    significance level over ``joint_cells`` cells. A run that jams costs ``jam_reset`` instead of
+    ``reset``.
+    """
+    site: Any                        # EmbodiedSiteScenario (latch limits and approach speed)
+    table: Any                       # ScenarioTableCoverageScenario (the cells the campaign samples)
+    standoff: Quantity
+    run: Quantity
+    reset: Quantity
+    jam_reset: Quantity
+    operators: int
+    shift: Quantity
+    clean_runs: int
+    confidence: float
+    target_rate: float               # failure rate the campaign argues toward
+    estimate_target_rate: float      # failure rate of the trial-budget estimate
+    weak_policy_one_in: int
+    recorded_failures: int
+    joint_cells: int
+    looks: int
+    omissions: int                   # unclosed departures in the policy manifest's omission log
+    fallacy_runs: int
+
+    @property
+    def alpha(self) -> float:
+        return 1.0 - self.confidence
+
+    @property
+    def ln_inv_alpha(self) -> float:
+        """The numerator of every zero-failure count, about 3 at 95 percent."""
+        return -_math.log(self.alpha)
+
+    def lower_bound_at(self, trials: int, confidence: Optional[float] = None) -> float:
+        from ..physics.robotics.assurance import calc_clopper_pearson_zero_failure_bound
+        return calc_clopper_pearson_zero_failure_bound(trials, self.confidence if confidence is None else confidence)
+
+    def runs_for(self, target: float, confidence: Optional[float] = None) -> int:
+        from ..physics.robotics.assurance import calc_zero_failure_sample_size
+        return calc_zero_failure_sample_size(target, self.confidence if confidence is None else confidence)
+
+    @property
+    def lower_bound(self) -> float:
+        return self.lower_bound_at(self.clean_runs)
+
+    @property
+    def failure_upper(self) -> float:
+        return 1.0 - self.lower_bound
+
+    @property
+    def rule_of_three(self) -> float:
+        from ..physics.robotics.assurance import calc_rule_of_three_bound
+        return calc_rule_of_three_bound(self.clean_runs)
+
+    @property
+    def target(self) -> float:
+        return 1.0 - self.target_rate
+
+    @property
+    def nine_targets(self) -> List[float]:
+        """Success targets with one, two, ... nines, up to the campaign target (0.9, 0.99, 0.999)."""
+        nines = round(-_math.log10(self.target_rate))
+        return [1.0 - 10.0 ** -k for k in range(1, nines + 1)]
+
+    @property
+    def target_runs(self) -> int:
+        return self.runs_for(self.target)
+
+    @property
+    def joint_runs(self) -> int:
+        """Runs per cell when the significance level is split evenly over ``joint_cells``."""
+        return self.runs_for(self.target, 1.0 - self.alpha / self.joint_cells)
+
+    @property
+    def estimate_target(self) -> float:
+        return 1.0 - self.estimate_target_rate
+
+    @property
+    def estimate_runs(self) -> int:
+        return self.runs_for(self.estimate_target)
+
+    @property
+    def estimate_rule_of_three_runs(self) -> float:
+        from ..physics.robotics.assurance import calc_rule_of_three_trials
+        return calc_rule_of_three_trials(self.estimate_target)
+
+    def clean_probability(self, success: float) -> float:
+        """Chance that a policy of per-run success ``success`` logs the campaign clean."""
+        return success ** self.clean_runs
+
+    @property
+    def weak_policy_success(self) -> float:
+        return 1.0 - 1.0 / self.weak_policy_one_in
+
+    @property
+    def weak_policy_clean_probability(self) -> float:
+        return self.clean_probability(self.weak_policy_success)
+
+    @property
+    def lower_bound_with_failures(self) -> float:
+        from ..physics.robotics.assurance import calc_clopper_pearson_lower_bound
+        return calc_clopper_pearson_lower_bound(self.clean_runs - self.recorded_failures, self.clean_runs,
+                                                self.confidence)
+
+    @property
+    def observed_rate_with_failures(self) -> float:
+        return (self.clean_runs - self.recorded_failures) / self.clean_runs
+
+    @property
+    def fallacy_lower_bound(self) -> float:
+        return self.lower_bound_at(self.fallacy_runs)
+
+    @property
+    def any_false_positive(self) -> float:
+        """At least one false positive across ``looks`` independent looks at ``alpha``."""
+        from ..physics.agents import calc_independent_success
+        return calc_independent_success(self.alpha, self.looks)
+
+    @property
+    def cycle(self) -> Quantity:
+        return (self.run + self.reset).to("s")
+
+    def campaign_time(self, trials: Optional[int] = None) -> Quantity:
+        return ((self.clean_runs if trials is None else trials) * self.cycle).to("s")
+
+    def operator_time(self, trials: int) -> Quantity:
+        return (self.operators * self.campaign_time(trials)).to("hour")
+
+    def shifts(self, trials: int) -> float:
+        return (self.operator_time(trials) / self.shift).to("").magnitude
+
+    @property
+    def jam_reset_share(self) -> float:
+        return (self.jam_reset / (self.run + self.jam_reset)).to("").magnitude
+
+    @property
+    def jam_cycle(self) -> Quantity:
+        return (self.run + self.jam_reset).to("s")
+
+
+class SequentialTestScenario(BaseScenario):
+    """Wald's SPRT between an unacceptable failure rate ``p_unacceptable`` and an acceptable one
+    ``p_acceptable`` at error rates ``alpha`` and ``beta``; the score after ``trace_clean_runs``
+    clean runs and one failure; and the fixed zero-failure test for success ``1 - p_unacceptable``
+    at the same ``alpha``."""
+    p_unacceptable: float
+    p_acceptable: float
+    alpha: float
+    beta: float
+    trace_clean_runs: int
+
+    @property
+    def success_increment(self) -> float:
+        from ..physics.statistics import calc_sprt_increments
+        return calc_sprt_increments(self.p_unacceptable, self.p_acceptable)[0]
+
+    @property
+    def failure_increment(self) -> float:
+        from ..physics.statistics import calc_sprt_increments
+        return calc_sprt_increments(self.p_unacceptable, self.p_acceptable)[1]
+
+    @property
+    def accept(self) -> float:
+        from ..physics.statistics import calc_sprt_boundaries
+        return calc_sprt_boundaries(self.alpha, self.beta)[0]
+
+    @property
+    def reject(self) -> float:
+        from ..physics.statistics import calc_sprt_boundaries
+        return calc_sprt_boundaries(self.alpha, self.beta)[1]
+
+    @property
+    def runs_to_accept(self) -> int:
+        return _math.ceil(self.accept / self.success_increment)
+
+    @property
+    def false_accept_bound(self) -> float:
+        """Ville's inequality: ``e^-A = alpha / (1 - beta)``."""
+        return _math.exp(-self.accept)
+
+    @property
+    def false_reject_bound(self) -> float:
+        return _math.exp(self.reject)
+
+    @property
+    def trace_score(self) -> float:
+        return self.trace_clean_runs * self.success_increment + self.failure_increment
+
+    @property
+    def fixed_runs(self) -> int:
+        from ..physics.robotics.assurance import calc_zero_failure_sample_size
+        return calc_zero_failure_sample_size(1.0 - self.p_unacceptable, 1.0 - self.alpha)
+
+    @property
+    def fixed_rejects_acceptable(self) -> float:
+        """Chance that a policy at the acceptable rate fails the fixed zero-failure test."""
+        return 1.0 - (1.0 - self.p_acceptable) ** self.fixed_runs
+
+
+class ArmComparisonScenario(BaseScenario):
+    """Two policies run ``arm_runs`` times each, with ``successes_a`` and ``successes_b``
+    successes; Fisher's exact test, and the runs per arm that separate ``p_high`` from ``p_low``
+    two-sided at ``alpha`` with ``power``."""
+    arm_runs: int
+    successes_a: int
+    successes_b: int
+    alpha: float
+    power: float
+    p_high: float
+    p_low: float
+
+    @property
+    def fisher_p(self) -> float:
+        from ..physics.statistics import calc_fisher_exact_two_sided
+        n = self.arm_runs
+        return calc_fisher_exact_two_sided(self.successes_a, n - self.successes_a, self.successes_b, n - self.successes_b)
+
+    @property
+    def total_runs(self) -> int:
+        return 2 * self.arm_runs
+
+    @property
+    def failures(self) -> int:
+        return self.total_runs - self.successes_a - self.successes_b
+
+    @property
+    def all_in_one_arm(self) -> float:
+        """Chance that every failure lands in one named arm under the null."""
+        return _math.comb(self.arm_runs, self.failures) / _math.comb(2 * self.arm_runs, self.failures)
+
+    @property
+    def z_alpha(self) -> float:
+        from statistics import NormalDist
+        return NormalDist().inv_cdf(1 - self.alpha / 2)
+
+    @property
+    def z_power(self) -> float:
+        from statistics import NormalDist
+        return NormalDist().inv_cdf(self.power)
+
+    @property
+    def cohens_h(self) -> float:
+        from ..physics.statistics import calc_cohens_h
+        return calc_cohens_h(self.p_high, self.p_low)
+
+    def runs_per_arm_for(self, effect_h: float) -> int:
+        from ..physics.statistics import calc_arcsine_two_arm_sample_size
+        return calc_arcsine_two_arm_sample_size(effect_h, self.alpha, self.power)
+
+    @property
+    def runs_per_arm(self) -> int:
+        return self.runs_per_arm_for(self.cohens_h)
+
+
+class HazardExposureScenario(BaseScenario):
+    """Failure-free exposure that bounds each of ``rates`` (constant hazards per hour) at one-sided
+    ``confidence``, against what ``rigs`` rigs or one rig over ``rig_time`` accumulate."""
+    rates: List[Quantity]
+    confidence: float
+    rigs: int
+    rig_time: Quantity
+
+    @property
+    def ln_inv_alpha(self) -> float:
+        return -_math.log(1.0 - self.confidence)
+
+    def exposure(self, rate: Quantity) -> Quantity:
+        from ..physics.robotics.assurance import calc_empirical_testing_exposure
+        return calc_empirical_testing_exposure(rate, confidence=self.confidence).to("hour")
+
+    def fleet_time(self, rate: Quantity) -> Quantity:
+        return (self.exposure(rate) / self.rigs).to("hour")
+
+    @property
+    def rig_rate(self) -> Quantity:
+        """The smallest constant rate one rig running for ``rig_time`` can bound."""
+        return (self.ln_inv_alpha / self.rig_time).to("1/hour")
+
+    def shortfall(self, rate: Quantity) -> float:
+        return (self.rig_rate / rate).to("").magnitude
+
+
+class MissionExposureScenario(BaseScenario):
+    """Failure-free missions of ``mission`` at ``machine``'s drive limit, with ``reset`` between
+    them, that bound ``hazard_rate`` at one-sided ``confidence``; and the exposure a relaxed
+    target of one failure per ``relaxed_mtbf`` needs."""
+    machine: Any                     # MobileManipulator (drive limit, wheel diameter)
+    hazard_rate: Quantity
+    mission: Quantity
+    reset: Quantity
+    confidence: float
+    relaxed_mtbf: Quantity
+
+    @property
+    def mission_distance(self) -> Quantity:
+        return (self.machine.base.max_velocity * self.mission).to("m")
+
+    @property
+    def cycle(self) -> Quantity:
+        return (self.mission + self.reset).to("s")
+
+    @property
+    def continuous_exposure(self) -> Quantity:
+        from ..physics.robotics.assurance import calc_empirical_testing_exposure
+        return calc_empirical_testing_exposure(self.hazard_rate, confidence=self.confidence).to("hour")
+
+    @property
+    def mission_failure_probability(self) -> float:
+        return (self.hazard_rate * self.mission).to("").magnitude
+
+    @property
+    def missions_needed(self) -> float:
+        from ..physics.robotics.assurance import calc_zero_failure_mission_count
+        return calc_zero_failure_mission_count(self.hazard_rate, self.mission, self.confidence)
+
+    @property
+    def calendar_time(self) -> Quantity:
+        return (self.missions_needed * self.cycle).to("hour")
+
+    @property
+    def wheel_revolutions(self) -> float:
+        return (self.missions_needed * self.mission_distance
+                / (_math.pi * self.machine.drive_unit.wheel_diameter)).to("").magnitude
+
+    @property
+    def relaxed_exposure(self) -> Quantity:
+        from ..physics.robotics.assurance import calc_empirical_testing_exposure
+        return calc_empirical_testing_exposure(1 / self.relaxed_mtbf, confidence=self.confidence).to("hour")
+
+
+class InterventionCampaignScenario(BaseScenario):
+    """``interventions`` interventions in ``missions`` supervised runs of ``mission``: burden per
+    hour and per kilometer, and an exact two-sided ``1 - alpha`` interval on the rate."""
+    mission: MissionExposureScenario
+    missions: int
+    interventions: int
+    alpha: float
+
+    @property
+    def active_time(self) -> Quantity:
+        return (self.missions * self.mission.mission).to("hour")
+
+    @property
+    def distance(self) -> Quantity:
+        return (self.missions * self.mission.mission_distance).to("km")
+
+    @property
+    def mtbi(self) -> Quantity:
+        return (self.active_time / self.interventions).to("minute")
+
+    @property
+    def density(self) -> Quantity:
+        return (self.interventions / self.distance).to("1/km")
+
+    @property
+    def rate(self) -> Quantity:
+        return (self.interventions / self.active_time).to("1/hour")
+
+    @property
+    def count_interval(self):
+        from ..physics.statistics import calc_poisson_exact_interval
+        return calc_poisson_exact_interval(self.interventions, self.alpha)
+
+    @property
+    def rate_interval(self):
+        lo, hi = self.count_interval
+        return (lo / self.active_time).to("1/hour"), (hi / self.active_time).to("1/hour")
+
+
+class HeadingDriftScenario(BaseScenario):
+    """A persistent ``heading_offset`` at ``machine``'s drive limit in ``site``'s aisle: the
+    angular error an open-loop replay scores, and where the closed loop spends the side clearance
+    (``y = v sin(eps) t``)."""
+    machine: Any
+    site: Any
+    heading_offset: Quantity
+
+    @property
+    def speed(self) -> Quantity:
+        return self.machine.base.max_velocity
+
+    @property
+    def heading(self) -> float:
+        """The offset in radians."""
+        return _math.radians(self.heading_offset.to("degree").magnitude)
+
+    @property
+    def angular_mse(self) -> Quantity:
+        return (Q_(self.heading, "radian") ** 2).to("radian**2")
+
+    @property
+    def time_to_clearance(self) -> Quantity:
+        return (self.site.side_clearance / (self.speed * _math.sin(self.heading))).to("s")
+
+    @property
+    def distance_to_clearance(self) -> Quantity:
+        return (self.speed * self.time_to_clearance).to("m")
+
+    @property
+    def aisle_fraction(self) -> float:
+        return (self.distance_to_clearance / self.site.aisle_length).to("").magnitude
+
+
+class StiffContactScenario(BaseScenario):
+    """A stiff contact of ``stiffness`` (a linear spring, ``F = k x``): the force a ``residual``
+    penetration commands, and the penetrations at ``site``'s latch tripwire and limit."""
+    site: Any
+    stiffness: Quantity
+    residual: Quantity
+
+    @property
+    def residual_force(self) -> Quantity:
+        return (self.stiffness * self.residual).to("N")
+
+    def penetration_at(self, force: Quantity) -> Quantity:
+        return (force / self.stiffness).to("mm")
+
+    @property
+    def tripwire_penetration(self) -> Quantity:
+        return self.penetration_at(self.site.f_latch_tripwire)
+
+    @property
+    def limit_penetration(self) -> Quantity:
+        return self.penetration_at(self.site.f_latch_limit)
+
+
+class ForceTailScenario(BaseScenario):
+    """A contact force over ``trials`` trials with a benign ``mean_force`` and a ``p99_force`` tail,
+    against ``site``'s tripwire and structural limit."""
+    site: Any
+    trials: int
+    mean_force: Quantity
+    p99_force: Quantity
+
+    @property
+    def tail_over_limit(self) -> Quantity:
+        return (self.p99_force - self.site.f_latch_limit).to("N")
+
+    @property
+    def tail_over_mean(self) -> float:
+        return (self.p99_force / self.mean_force).to("").magnitude
+
+
+class RoadExposureScenario(BaseScenario):
+    """Miles-to-demonstrate requirements per event class (zero failures, precision, improvement),
+    in millions of miles at human benchmark ``rates`` per 100 million miles, against one dated
+    ``fleet_miles`` total (millions) at one-sided ``confidence``."""
+    rates: Dict[str, float]
+    zero_failure: Dict[str, float]
+    precision: Dict[str, float]
+    improvement: Dict[str, float]
+    fleet_miles: float
+    confidence: float
+
+    def recomputed_zero_failure(self, event: str) -> float:
+        """``-ln(1 - C) / rate``, in millions of miles: RAND's row (1) re-derived."""
+        return -_math.log(1.0 - self.confidence) / (self.rates[event] / 100.0)
+
+    def requirements(self, event: str):
+        """RAND's three rows for one event class: zero failures, precision, improvement (millions)."""
+        return tuple(float(t[event]) for t in (self.zero_failure, self.precision, self.improvement))
+
+    def shortfall(self, event: str) -> float:
+        return self.zero_failure[event] / self.fleet_miles
+
+    def precision_over_fleet(self, event: str) -> float:
+        return self.precision[event] / self.fleet_miles
+
+    @property
+    def cleared(self) -> List[float]:
+        """Requirements, of every event class and question, the fleet total exceeds."""
+        rows = list(self.zero_failure.values()) + list(self.precision.values()) + list(self.improvement.values())
+        return [m for m in rows if m < self.fleet_miles]
+
+
+class CrashRateDenominatorScenario(BaseScenario):
+    """A reported before-and-after crash rate and the same comparison on the cohort whose exposure
+    is complete (rates per million miles)."""
+    reported_before: float
+    reported_after: float
+    cohort_before: float
+    cohort_after: float
+    exact_exposure_share: float      # fraction of vehicles with exact exposure
+
+    @property
+    def reported_change(self) -> float:
+        return self.reported_after / self.reported_before - 1.0
+
+    @property
+    def cohort_change(self) -> float:
+        return self.cohort_after / self.cohort_before - 1.0

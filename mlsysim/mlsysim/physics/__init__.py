@@ -643,3 +643,32 @@ __all__ += [
     "calc_drr_calls_per_round",
     "calc_used_fraction",
 ]
+
+# --- Closed-loop evaluation statistics (added 2026-10-20) ---
+from .robotics.assurance import (
+    calc_clopper_pearson_lower_bound,
+    calc_rule_of_three_bound,
+    calc_rule_of_three_trials,
+    calc_zero_failure_mission_count,
+)
+from .statistics import (
+    calc_sprt_increments,
+    calc_sprt_boundaries,
+    calc_fisher_exact_two_sided,
+    calc_cohens_h,
+    calc_arcsine_two_arm_sample_size,
+    calc_poisson_exact_interval,
+)
+
+__all__ += [
+    "calc_clopper_pearson_lower_bound",
+    "calc_rule_of_three_bound",
+    "calc_rule_of_three_trials",
+    "calc_zero_failure_mission_count",
+    "calc_sprt_increments",
+    "calc_sprt_boundaries",
+    "calc_fisher_exact_two_sided",
+    "calc_cohens_h",
+    "calc_arcsine_two_arm_sample_size",
+    "calc_poisson_exact_interval",
+]
