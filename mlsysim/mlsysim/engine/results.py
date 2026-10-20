@@ -3110,3 +3110,215 @@ __all__ += [
     "BreakerWindowResult",
     "RetrySustainedOutagesResult",
 ]
+# --- Spatial memory: estimation, belief expiry, and map queries (added 2026-10-20) ---
+
+class RangeFusionResult(SolverResult):
+    """Result from RangeFusionModel: one predict and two updates of a scalar range, and a misdated update."""
+    process_sigma: Quantity          # speed disturbance x interval
+    predicted_sigma: Quantity
+    first_gain: float
+    first_sigma: Quantity            # spread after the first update
+    second_sensor_sigma: Quantity
+    second_gain: float
+    fused_sigma: Quantity            # spread after both updates
+    innovation_variance: Quantity    # second update's predicted innovation variance
+    misdating_bias: Quantity         # reading-to-pose offset of the misdated update
+    misdated_shift: Quantity         # gain x bias: how far the estimate moves off
+    misdated_shift_sigmas: float     # that shift in reported standard deviations
+    nis_expected: float              # 1 + bias^2 / S
+    noncentrality: float             # bias^2 / S
+    comparison_gain: float           # second update with its spread scaled
+    comparison_sigma: Quantity
+
+
+class EstimatorConsistencyResult(SolverResult):
+    """Result from EstimatorConsistencyModel: acceptance band for mean NEES or NIS, and single-update gates."""
+    band_low: float
+    band_high: float
+    gates: List[float]               # chi-square thresholds, one per gate confidence
+    detection: List[float]           # probability each gate rejects the biased update
+    nis_expected: float
+
+
+class ReplayBufferResult(SolverResult):
+    """Result from ReplayBufferModel: slots a rewind buffer needs to cover an observation age."""
+    sample_period: Quantity
+    slots: int
+
+
+class InertialCoastResult(SolverResult):
+    """Result from InertialCoastModel: an IMU integrated open loop between fixes."""
+    heading_noise: Quantity
+    heading_bias: Quantity
+    lateral_bias: Quantity           # heading bias seen at the target range
+    position_noise: Quantity
+    position_bias: Quantity
+    bias_over_reference: float       # position bias / reference bound
+    bias_over_noise: float
+
+
+class OdometryDriftResult(SolverResult):
+    """Result from OdometryDriftModel: a benchmark return error as a drift rate against a bound."""
+    path_length: Quantity
+    rate_uncalibrated: float         # error per distance driven
+    rate_calibrated: float
+    distance_uncalibrated: Quantity  # distance that spends the bound
+    distance_calibrated: Quantity
+    time_uncalibrated: Quantity      # that distance at the operating speed
+    time_calibrated: Quantity
+    segment_error_uncalibrated: Quantity
+    segment_error_calibrated: Quantity
+    segment_over_bound_uncalibrated: float
+    calibration_gain: float
+    speed_ratio: float               # operating speed / benchmark speed
+
+
+class OdometryLeaderboardResult(SolverResult):
+    """Result from OdometryLeaderboardModel: ranked odometry drift rates against a bound."""
+    count: int
+    stereo_count: int
+    laser_count: int
+    best_pct: float
+    stereo_median_pct: float
+    laser_median_pct: float
+    distance_best: Quantity
+    distance_stereo_median: Quantity
+    distance_laser_median: Quantity
+    segment_threshold_pct: float     # rate that spends the bound in exactly one segment
+    count_below_threshold: int
+
+
+class BeliefExpiryResult(SolverResult):
+    """Result from BeliefExpiryModel: a belief's error growth, its invalidation horizon, and an admission check."""
+    initial_error: Quantity
+    growth_rate: Quantity
+    growth_acceleration: Quantity
+    tolerance: Quantity
+    horizon: Quantity
+    constant_velocity_horizon: Quantity   # the horizon if the acceleration term is dropped
+    error_at_constant_velocity_horizon: Quantity
+    overshoot: float                      # that error / tolerance - 1
+    overrun: Quantity                     # constant-velocity horizon - horizon
+    use_age_upper: Optional[Quantity] = None  # stated use age plus the clock-conversion bound
+    error_at_use: Optional[Quantity] = None
+    margin_at_use: Optional[Quantity] = None
+    time_left: Optional[Quantity] = None
+    latest_use_age: Optional[Quantity] = None
+
+    @property
+    def quadratic_coefficient(self) -> Quantity:
+        """The ``a / 2`` that multiplies ``dt^2`` in the error bound."""
+        return self.growth_acceleration / 2
+
+    def error_after(self, elapsed: Quantity) -> Quantity:
+        """Error bound after ``elapsed`` without new evidence."""
+        from ..physics.robotics.estimation import calc_belief_error_bound
+        return calc_belief_error_bound(self.initial_error, self.growth_rate, elapsed, self.growth_acceleration)
+
+
+class StaleTransformResult(SolverResult):
+    """Result from StaleTransformModel: a cached edge composed with a current pose, one frame stale."""
+    interval: Quantity
+    drift_term: Quantity
+    lever_term: Quantity
+    total: Quantity                       # initial error + drift + lever arm
+    over_tolerance: float                 # total / tolerance - 1
+    lever_over_drift: float
+    same_epoch_error: Quantity            # the belief's own bound over one interval
+
+
+class FreeSpaceExpiryResult(SolverResult):
+    """Result from FreeSpaceExpiryModel: occluded free space eroding at an approach speed."""
+    certified_depth_ahead: Quantity       # d_free - delta_loc - delta_margin, floored at zero
+    certified_depth_abreast: Quantity
+    horizon_ahead: Quantity
+    horizon_abreast: Quantity
+    time_left_at_dispatch: Quantity
+    frames_bridged: float
+    depth_eroded_by_age: Quantity
+    time_per_depth: Quantity              # 1 / v_h
+    walker_intrusion: Quantity            # v_h (tau_delay + v / a_brake)
+    timeout_refused: Optional[Quantity] = None  # horizon ahead minus a uniform staleness timeout
+
+
+class EpochGapResult(SolverResult):
+    """Result from EpochGapModel: travel across the gap between two acquisition epochs."""
+    gap: Quantity
+    speed: Quantity
+    travel: Quantity
+    slack: Optional[Quantity] = None      # separation less the committed terms
+
+
+class SensorBiasDriftResult(SolverResult):
+    """Result from SensorBiasDriftModel: an unobservable bias drifting under a steady reading."""
+    shift: Quantity
+    true_value: Quantity
+    lost_share: float
+
+
+class FrozenTransformResult(SolverResult):
+    """Result from FrozenTransformModel: a republished stale transform passing a publish-time check."""
+    republish_rate: Quantity
+    error: Quantity
+    passes_freshness: bool
+    exceeds_tolerance: bool
+
+
+class TrackConfirmationResult(SolverResult):
+    """Result from TrackConfirmationModel: the wait before a tracker outputs a new track."""
+    frame_period: Quantity
+    held_frames: int
+    wait: Quantity
+    travel: Quantity
+
+
+class ClearanceQueryRow(SolverResult):
+    """One voxel pitch in ClearanceQueryResult."""
+    pitch: Quantity
+    occupancy_reads: float
+    octree_depth: int
+    octree_reads: float
+    esdf_reads: int
+    esdf_bytes: Quantity
+    occupancy_bytes: Quantity
+    quantization: Quantity
+
+
+class ClearanceQueryResult(SolverResult):
+    """Result from ClearanceQueryModel: read budget per sphere query, and reads and snapshot bytes per representation."""
+    tick: Quantity
+    query_time: Quantity
+    tick_spare_share: float
+    reads_budget: float
+    reach: Quantity
+    slab_volume: Quantity
+    rows: Dict[int, ClearanceQueryRow]    # keyed by pitch in whole centimeters
+    wcet_share: Optional[float] = None
+
+
+class HostMapSizingResult(SolverResult):
+    """Result from HostMapSizingModel: a dense grid against a hashed narrow band."""
+    workspace_volume: Quantity
+    dense_voxels: float
+    dense_bytes: Quantity
+    band_volume: Quantity
+    band_share: float
+    blocks: float
+    block_bytes: Quantity
+    hashed_bytes: Quantity
+    ratio: float
+
+
+class RaymarchTrafficResult(SolverResult):
+    """Result from RaymarchTrafficModel: naive per-ray map-update traffic against DRAM bandwidth."""
+    rays: int
+    steps: float
+    traffic: Quantity
+    share: float
+
+
+class EncoderRateResult(SolverResult):
+    """Result from EncoderRateModel: a per-frame encoder's sustained rate against a peak."""
+    required: Quantity
+    peak: Quantity
+    shortfall: float

@@ -714,3 +714,28 @@ __all__ += [
     "calc_checkpoint_stride",
     "calc_stride_overhead",
 ]
+
+# --- Spatial memory: estimation, belief expiry, clearance queries (added 2026-10-20) ---
+from .robotics import (
+    calc_sphere_scan_cells,
+    calc_octree_depth,
+    calc_voxel_quantization_error,
+    calc_scalar_kalman_update,
+    calc_inertial_coast_errors,
+    calc_belief_error_bound,
+    calc_quadratic_invalidation_horizon,
+)
+from .statistics import calc_chi2_gate, calc_chi2_mean_band, calc_noncentral_gate_detection
+
+__all__ += [
+    "calc_sphere_scan_cells",
+    "calc_octree_depth",
+    "calc_voxel_quantization_error",
+    "calc_scalar_kalman_update",
+    "calc_inertial_coast_errors",
+    "calc_belief_error_bound",
+    "calc_quadratic_invalidation_horizon",
+    "calc_chi2_gate",
+    "calc_chi2_mean_band",
+    "calc_noncentral_gate_detection",
+]

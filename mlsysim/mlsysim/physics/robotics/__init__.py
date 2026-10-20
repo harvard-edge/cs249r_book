@@ -55,6 +55,16 @@ from .perception import (
     calc_linear_invalidation_horizon,
     calc_free_space_expiry,
     calc_teleop_ingestion_budget,
+    calc_sphere_scan_cells,
+    calc_octree_depth,
+    calc_voxel_quantization_error,
+)
+# State estimation and belief expiry (added 2026-10-20)
+from .estimation import (
+    calc_scalar_kalman_update,
+    calc_inertial_coast_errors,
+    calc_belief_error_bound,
+    calc_quadratic_invalidation_horizon,
 )
 from .assurance import (
     calc_empirical_testing_exposure,
@@ -166,4 +176,15 @@ __all__ += [
     "calc_scan_sector_angle",
     "calc_contrast_visibility_range",
     "calc_thermal_expansion",
+]
+
+# Spatial memory: estimation, belief expiry, and clearance queries (added 2026-10-20)
+__all__ += [
+    "calc_sphere_scan_cells",
+    "calc_octree_depth",
+    "calc_voxel_quantization_error",
+    "calc_scalar_kalman_update",
+    "calc_inertial_coast_errors",
+    "calc_belief_error_bound",
+    "calc_quadratic_invalidation_horizon",
 ]

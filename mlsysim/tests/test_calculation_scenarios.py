@@ -3737,3 +3737,68 @@ def test_failure_recovery_loop_and_containment():
     m = Scenarios.RetrySustainedMetastableOutages.result
     assert (m.incidents, m.retry_sustained, m.over_hours) == (21, 12, 3) and m.without_duration == ["SPF1"]
     assert m.with_duration[0] == ("IBM1", 73.53)
+def test_spatial_memory_estimation():
+    f = Scenarios.WarehouseRackEndRangeFusion.result
+    assert f.process_sigma.to("mm").magnitude == approx(5.0) and f.predicted_sigma.to("mm").magnitude == approx(20.6155)
+    assert f.first_gain == approx(0.320755) and f.first_sigma.to("mm").magnitude == approx(16.9906)
+    assert f.second_gain == approx(0.952809) and f.fused_sigma.to("mm").magnitude == approx(3.69095)
+    assert f.misdated_shift.to("mm").magnitude == approx(38.0171) and f.misdated_shift_sigmas == approx(10.3001)
+    assert f.nis_expected == approx(6.25456)
+    assert f.comparison_gain == approx(0.834645) and f.comparison_sigma.to("mm").magnitude == approx(6.90902)
+    c = Scenarios.RackEndMisdatedUpdateConsistency.result
+    assert (c.band_low, c.band_high) == (approx(0.647147), approx(1.428404))
+    assert c.gates == [approx(3.841459), approx(6.634897)] and c.detection == [approx(0.630186), approx(0.388379)]
+    assert Scenarios.WarehouseObservationReplayBuffer.result.slots == 52
+    i = Scenarios.WarehouseImuOneSecondCoast.result
+    assert i.heading_noise.to("deg").magnitude == approx(0.014) and i.lateral_bias.to("mm").magnitude == approx(19.1986)
+    assert i.position_noise.to("mm").magnitude == approx(0.905900) and i.position_bias.to("mm").magnitude == approx(98.0665)
+    o = Scenarios.WarehouseUmbmarkOdometryDrift.result
+    assert o.rate_uncalibrated == approx(0.0198125) and o.distance_calibrated.to("m").magnitude == approx(38.0952)
+    assert o.segment_error_uncalibrated.to("mm").magnitude == approx(594.375) and o.speed_ratio == approx(6.5)
+    k = Scenarios.WarehouseKittiOdometryDrift.result
+    assert (k.count, k.best_pct, k.laser_median_pct, k.count_below_threshold) == (127, 0.53, 0.68, 0)
+    assert k.distance_best.to("m").magnitude == approx(9.43396)
+    t = Scenarios.WarehouseTrackConfirmationDelay.result
+    assert t.wait.to("ms").magnitude == approx(33.3333) and t.travel.to("mm").magnitude == approx(50.0)
+
+
+def test_spatial_memory_belief_expiry():
+    b = Scenarios.LatchSlotFingerBelief.result
+    assert b.horizon.to("ms").magnitude == approx(65.9412) and b.constant_velocity_horizon.to("ms").magnitude == approx(75.0)
+    assert b.error_at_constant_velocity_horizon.to("mm").magnitude == approx(1.140625) and b.overshoot == approx(0.140625)
+    assert Scenarios.LatchSlotFingerBeliefTightSlot.result.horizon.to("ms").magnitude == approx(16.1250)
+    s = Scenarios.LatchSlotStaleWristTransform.result
+    assert s.drift_term.to("mm").magnitude == approx(0.2) and s.lever_term.to("mm").magnitude == approx(0.75)
+    assert s.total.to("mm").magnitude == approx(1.05) and s.same_epoch_error.to("mm").magnitude == approx(0.306944)
+    m = Scenarios.ConveyorMugHandleBelief.result
+    assert m.horizon.to("ms").magnitude == approx(60.0) and m.error_at_use.to("mm").magnitude == approx(10.04)
+    assert m.time_left.to("ms").magnitude == approx(24.8) and m.latest_use_age.to("ms").magnitude == approx(59.8)
+    assert Scenarios.CoworkerBesideArmBelief.result.horizon.to("ms").magnitude == approx(84.375)
+    assert Scenarios.CoworkerBesideArmBeliefTightTolerance.result.horizon.to("ms").magnitude == approx(53.125)
+    r = Scenarios.WarehouseRackEndFreeSpace.result
+    assert r.horizon_ahead.to("ms").magnitude == approx(593.75) and r.horizon_abreast.to("ms").magnitude == 0.0
+    assert r.time_left_at_dispatch.to("ms").magnitude == approx(542.15) and r.frames_bridged == approx(32.529)
+    assert r.depth_eroded_by_age.to("mm").magnitude == approx(82.56) and r.walker_intrusion.to("m").magnitude == approx(1.41376)
+    assert r.timeout_refused.to("ms").magnitude == approx(493.75)
+    assert Scenarios.ArmSensorEpochGap.result.travel.to("mm").magnitude == approx(4.25)
+    k = Scenarios.WarehouseSkewedRecordPair.result
+    assert k.travel.to("mm").magnitude == approx(62.0) and k.slack.to("mm").magnitude == approx(50.0)
+    w = Scenarios.WristForceBiasDrift.result
+    assert w.shift.to("N").magnitude == approx(3.0) and w.lost_share == approx(0.6)
+    z = Scenarios.ConveyorMugFrozenTransform.result
+    assert z.error.to("mm").magnitude == approx(20.0) and z.passes_freshness and z.exceeds_tolerance
+
+
+def test_spatial_memory_maps():
+    q = Scenarios.WarehousePermissionClearanceQuery.result
+    assert q.query_time.to("us").magnitude == approx(2.0) and q.reads_budget == approx(800.0)
+    assert q.tick_spare_share == approx(0.9) and q.wcet_share == approx(0.4)
+    assert [round(q.rows[p].occupancy_reads) for p in (2, 5, 10)] == [22449, 1437, 180]
+    assert q.rows[5].octree_depth == 8 and round(q.rows[5].octree_reads) == 11494
+    assert q.rows[5].esdf_bytes.to("kB").magnitude == approx(182.88) and q.rows[10].quantization.to("mm").magnitude == approx(86.6025)
+    h = Scenarios.WorkcellHostMapSizing.result
+    assert h.dense_bytes.to("GB").magnitude == approx(2.4) and h.hashed_bytes.to("MB").magnitude == approx(76.8)
+    assert h.blocks == approx(18750) and h.ratio == approx(31.25)
+    r = Scenarios.WarehouseDepthRaymarchTraffic.result
+    assert r.traffic.to("GB/s").magnitude == approx(7.3728) and r.share == approx(0.0361412)
+    assert Scenarios.WarehouseFoundationEncoderAtCameraRate.result.shortfall == approx(4.18605)

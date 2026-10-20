@@ -77,6 +77,7 @@ EventDataRecorders = _load("event_data_recorders", "EventDataRecorders", "Pre-cr
 # Published vision-language-action and dual-system robot policies (added 2026-10-20)
 # Robot policy training: sim-to-real, parallel simulation, on-robot RL (added 2026-10-20)
 RobotLearning = _load("robot_learning", "RobotLearning", "Cited figures of published robot-learning runs (Dactyl, legged_gym, HIL-SERL, QT-Opt, a grasping farm, Diffusion Policy, OpenVLA pretraining).")
+RobotPerception = _load("robot_perception", "RobotPerception", "Cited figures of robot odometry, mapping, and tracking systems (UMBmark, nvblox Table II, SORT defaults).")  # added 2026-10-20
 # Road-vehicle safety demonstrated from driven exposure (added 2026-10-20)
 RoadVehicleSafety = _load("road_vehicle_safety", "RoadVehicleSafety", "Cited miles-to-demonstrate requirements (RAND RR-1478) and a dated driverless-fleet exposure total (Kusano et al. 2025).")
 # Network architectures (added 2026-10-20)
@@ -387,6 +388,7 @@ class Literature(Registry):
     EventDataRecorders = EventDataRecorders  # added 2026-10-20
     OnDeviceLearning = OnDeviceLearning  # added 2026-10-20
     RobotLearning = RobotLearning  # added 2026-10-20
+    RobotPerception = RobotPerception  # added 2026-10-20
     RoadVehicleSafety = RoadVehicleSafety  # added 2026-10-20
     NetflixPrize = NetflixPrize  # network architectures (added 2026-10-20)
     KerasApplications = KerasApplications  # network architectures (added 2026-10-20)
