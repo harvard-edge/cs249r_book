@@ -59,14 +59,37 @@ class DecodeScenario(BaseScenario):
 
 
 class TransferScenario(BaseScenario):
-    """``copies`` of one ``payload`` moved at once over each named link tier."""
+    """``copies`` of one ``payload`` moved at once over each named link tier.
+
+    Optional (added 2026-10-20): ``egress_rate`` prices the bytes leaving a
+    provider's network, ``compute_price`` converts that fee into accelerator
+    hours, and ``job_time`` is the computation the move would serve, so a
+    transfer can be set against the job it feeds (data gravity).
+    """
     payload: Quantity
     links: Dict[str, Quantity]
     copies: int = 1
+    egress_rate: Optional[Quantity] = None      # USD per byte moved out
+    compute_price: Optional[Quantity] = None    # USD per accelerator-hour
+    job_time: Optional[Quantity] = None
 
     @property
     def total_bytes(self) -> Quantity:
         return self.copies * self.payload
+
+    def transfer_time(self, link: str) -> Quantity:
+        """Bandwidth-only time to move every copy over one named link."""
+        from ..physics import transfer_time
+        return transfer_time(self.total_bytes, self.links[link])
+
+    @property
+    def egress_cost(self) -> Quantity:
+        return (self.total_bytes * self.egress_rate).to("dollar")
+
+    @property
+    def egress_compute_hours(self) -> Quantity:
+        """Accelerator-hours the egress fee would buy at ``compute_price``."""
+        return (self.egress_cost / self.compute_price).to("hour")
 
     @property
     def result(self):
@@ -3106,3 +3129,250 @@ class DesignTradeoffScenario(BaseScenario):
     @property
     def ratio(self) -> float:
         return self.alternative / self.baseline
+
+
+# --- Data delivery and drift: feeding an accelerator, storage tiers, formats, drift tests (added 2026-10-20) ---
+
+class AcceleratorInputFeedScenario(BaseScenario):
+    """``accelerators`` copies of ``hardware`` training ``workload`` at ``sustained_rate`` samples a second each,
+    fed from ``supply`` with ``encoded_sample`` bytes stored per sample and ``decoded_sample`` bytes after decode.
+
+    The arithmetic ceiling is peak FLOP/s over the training FLOPs of one sample
+    (``training_flops_factor`` times the forward pass). Demand is rate times bytes
+    per sample; the feeding loss is the share of the training rate a slower
+    supply removes (``DataModel``). ``worker_rate`` is what one host loader
+    worker decodes and augments a second; ``host_decode_cap`` is where adding
+    workers stops helping because the host's cores run out.
+    """
+    workload: Workload
+    hardware: HardwareNode
+    sustained_rate: Quantity          # samples per second per accelerator
+    encoded_sample: Quantity          # bytes per sample as stored
+    decoded_sample: Quantity          # bytes per sample after decode
+    supply: Any                       # StorageSubsystem that feeds the accelerators
+    training_flops_factor: float = 3.0
+    accelerators: int = 1
+    worker_rate: Optional[Quantity] = None   # samples per second per loader worker
+    host_decode_cap: Optional[Quantity] = None   # samples per second the whole host can decode
+
+    @property
+    def training_flops_per_sample(self) -> Quantity:
+        return (self.workload.inference_flops * self.training_flops_factor).to("flop")
+
+    @property
+    def ceiling_rate(self) -> Quantity:
+        """Samples a second one accelerator could train at its peak arithmetic rate."""
+        return (self.hardware.compute.peak_flops / self.training_flops_per_sample).to("count/second")
+
+    @property
+    def sustained_fraction(self) -> float:
+        return (self.sustained_rate / self.ceiling_rate).to("").magnitude
+
+    @property
+    def total_rate(self) -> Quantity:
+        return (self.accelerators * self.sustained_rate).to("count/second")
+
+    def demand(self, decoded: bool = False, rate: Optional[Quantity] = None) -> Quantity:
+        """Storage bandwidth for every accelerator at ``rate`` (default: the sustained rate)."""
+        per = self.sustained_rate if rate is None else rate
+        size = self.decoded_sample if decoded else self.encoded_sample
+        return (self.accelerators * per * size / Q_(1, "count")).to("MB/s")
+
+    @property
+    def ceiling_demand(self) -> Quantity:
+        return self.demand(rate=self.ceiling_rate)
+
+    @property
+    def decode_expansion(self) -> float:
+        return (self.decoded_sample / self.encoded_sample).to("").magnitude
+
+    def feeding_loss(self, decoded: bool = False) -> float:
+        """Share of the sustained training rate lost when ``supply`` is the slowest stage."""
+        from .solvers import DataModel
+        node = self.hardware.model_copy(update={"storage": self.supply})
+        r = DataModel().solve(self.demand(decoded), node)
+        return 1.0 - 1.0 / max(r.utilization, 1.0)
+
+    @property
+    def supplied_fraction(self) -> float:
+        """Share of the sustained demand ``supply`` delivers (capped at one)."""
+        return min((self.supply.bandwidth / self.demand()).to("").magnitude, 1.0)
+
+    def samples_supplied(self, bandwidth: Quantity) -> Quantity:
+        """Encoded samples a second a storage path of ``bandwidth`` delivers."""
+        return (bandwidth / self.encoded_sample * Q_(1, "count")).to("count/second")
+
+    def streams_needed(self, bandwidth: Quantity, rate: Optional[Quantity] = None) -> float:
+        """Parallel streams of ``bandwidth`` each that meet the demand at ``rate`` (default: the ceiling)."""
+        target = self.ceiling_demand if rate is None else self.demand(rate=rate)
+        return (target / bandwidth).to("").magnitude
+
+    @property
+    def worker_crossing(self) -> float:
+        """Loader workers whose combined rate equals one accelerator's sustained rate."""
+        return (self.sustained_rate / self.worker_rate).to("").magnitude
+
+    @property
+    def workers_per_accelerator(self) -> int:
+        import math
+        return math.ceil(self.worker_crossing - 1e-9)
+
+    @property
+    def workers_pooled(self) -> int:
+        """Whole workers for every accelerator's rate drawn from one shared pool."""
+        import math
+        return math.ceil((self.total_rate / self.worker_rate).to("").magnitude - 1e-9)
+
+
+class FeatureLookupScenario(BaseScenario):
+    """An online service at ``request_rate`` that reads ``reads_per_request`` stored features per request."""
+    request_rate: Quantity            # requests per second
+    reads_per_request: int
+    feature_bytes: Optional[Quantity] = None
+    raw_sample_bytes: Optional[Quantity] = None   # the raw record a feature vector summarizes
+
+    @property
+    def reads_per_second(self) -> float:
+        return (self.request_rate * self.reads_per_request).to("1/second").magnitude
+
+    @property
+    def storage_reduction(self) -> float:
+        return (self.raw_sample_bytes / self.feature_bytes).to("").magnitude
+
+
+class CorpusTierScenario(BaseScenario):
+    """An audio corpus (``dataset``) kept on storage tiers at ``storage_rates`` and read at ``read_bandwidths``."""
+    dataset: Any                      # DatasetProfile with count, duration, sample rate and width
+    storage_rates: Dict[str, Quantity]    # USD per byte-month, by tier
+    read_bandwidths: Dict[str, Quantity]  # sequential read, by tier
+
+    @property
+    def corpus_bytes(self) -> Quantity:
+        d = self.dataset
+        return (d.training_examples.to("count").magnitude * d.sample_duration * d.sample_rate
+                * d.sample_width).to("GB")
+
+    def monthly_cost(self, tier: str) -> Quantity:
+        return (self.corpus_bytes * self.storage_rates[tier]).to("dollar/month")
+
+    def load_time(self, tier: str) -> Quantity:
+        return (self.corpus_bytes / self.read_bandwidths[tier]).to("second")
+
+
+class ColumnProjectionScenario(BaseScenario):
+    """A model that uses ``columns_used`` of ``columns_total`` equal-size columns, read from a row or a columnar file."""
+    columns_used: int
+    columns_total: int
+
+    @property
+    def read_fraction(self) -> float:
+        """Share of the table a columnar reader fetches."""
+        return self.columns_used / self.columns_total
+
+    @property
+    def wasted_fraction(self) -> float:
+        """Share of a row-format scan the model discards."""
+        return 1 - self.read_fraction
+
+    @property
+    def speedup(self) -> float:
+        """Effective-bandwidth gain of reading only the used columns."""
+        return 1 / self.read_fraction
+
+
+class CodecEpochScenario(BaseScenario):
+    """``epoch_bytes`` decompressed on the host each epoch for ``epochs`` epochs, at each codec's ``decode_rates``."""
+    epoch_bytes: Quantity
+    epochs: int
+    decode_rates: Dict[str, Quantity]
+
+    def decode_time(self, codec: str) -> Quantity:
+        """Host CPU time to decompress one epoch."""
+        return (self.epoch_bytes / self.decode_rates[codec]).to("minute")
+
+    def time_saved(self, slow: str, fast: str) -> Quantity:
+        """Per-epoch decompression time the faster codec saves."""
+        return self.decode_time(slow) - self.decode_time(fast)
+
+    def run_time_saved(self, slow: str, fast: str) -> Quantity:
+        return (self.epochs * self.time_saved(slow, fast)).to("hour")
+
+    def rate_ratio(self, fast: str, slow: str) -> float:
+        return (self.decode_rates[fast] / self.decode_rates[slow]).to("").magnitude
+
+
+class KsDriftScenario(BaseScenario):
+    """A two-sample K-S drift test of ``n_reference`` training against ``n_current`` recent values of one feature."""
+    coefficient: float                # Ops.Monitoring.KsTestCoefficient at the 0.05 level
+    n_reference: int
+    n_current: int
+    observed_statistic: Optional[float] = None
+
+    @property
+    def critical_value(self) -> float:
+        from ..physics import calc_ks_critical_value
+        return calc_ks_critical_value(self.coefficient, self.n_reference, self.n_current)
+
+    @property
+    def flags(self) -> bool:
+        return self.observed_statistic > self.critical_value
+
+    def flags_statistic(self, statistic: float) -> bool:
+        return statistic > self.critical_value
+
+
+class LocationShiftScenario(BaseScenario):
+    """A normally distributed feature (``reference_mean``, ``feature_sd``) whose mean moves by ``shift``.
+
+    Values are plain numbers in the feature's own unit (loudness in dBFS is
+    logarithmic, so it is not carried as a Pint quantity). For a pure location
+    shift, the K-S distance is ``2 Phi(shift / 2 sd) - 1`` and the Wasserstein
+    distance equals the shift, so the normed Wasserstein is ``shift / sd``.
+    """
+    reference_mean: float
+    feature_sd: float
+    shift: float                      # signed: negative moves the mean down
+
+    @property
+    def current_mean(self) -> float:
+        return self.reference_mean + self.shift
+
+    @property
+    def shift_sd(self) -> float:
+        return abs(self.shift / self.feature_sd)
+
+    @property
+    def ks_statistic(self) -> float:
+        from ..physics import calc_ks_normal_location_shift
+        return calc_ks_normal_location_shift(self.shift_sd)
+
+    @property
+    def normed_wasserstein(self) -> float:
+        return self.shift_sd
+
+
+class BinShareShiftScenario(BaseScenario):
+    """A feature binned at the training quantiles: training shares against recent shares, scored by PSI."""
+    baseline_shares: List[float]
+    current_shares: List[float]
+
+    @property
+    def terms(self) -> List[float]:
+        import math
+        return [(c - b) * math.log(c / b) for b, c in zip(self.baseline_shares, self.current_shares)]
+
+    @property
+    def psi(self) -> float:
+        from ..physics import calc_population_stability_index
+        return calc_population_stability_index(self.baseline_shares, self.current_shares)
+
+    def ratio(self, i: int) -> float:
+        """Recent share over training share in bin ``i``."""
+        return self.current_shares[i] / self.baseline_shares[i]
+
+
+class MetricRegressionScenario(BaseScenario):
+    """A deployed model's metric at launch and its fall, in points, after ``elapsed`` with the model unchanged."""
+    launch_value: float               # fraction
+    drop: float                       # fraction (points / 100)
+    elapsed: Quantity

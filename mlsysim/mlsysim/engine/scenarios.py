@@ -2312,3 +2312,116 @@ class Scenarios(Registry):
         description="Least-squares fit of log tokens on release date (Literature.Series.PretrainingTokens).",
         series_name="PretrainingTokens", x_key="date", y_key="tokens", x_is_date=True,
     )
+
+    # --- Data engineering: delivering a dataset to the accelerator, and watching it drift (added 2026-10-20) ---
+    # ResNet-50 on one A100 carries delivery: the arithmetic ceiling, the bytes a
+    # sustained rate demands, what each storage tier supplies, and the loader
+    # workers that decode it. The keyword spotter's loudness feature carries drift:
+    # a K-S test at two sample sizes, an illustrative location shift, and PSI on
+    # quintile bins. Cited figures come from Hardware, Models, Datasets, Systems,
+    # Infrastructure, Ops, and Literature; the rest are stated scenario assumptions.
+
+    PetabyteCrossRegionMove = _st.TransferScenario(
+        name="One petabyte moved between cloud regions",
+        description="A training corpus in US East and accelerators in US West, over a dedicated 100 Gb/s or a "
+                    "10 Gb/s link, priced at an inter-region egress rate and set against a 20-hour training run.",
+        payload=Q_(1, "PB"),              # scenario assumption: the corpus
+        links={"100 Gb/s": _Fabrics.Ethernet_100G.bandwidth, "10 Gb/s": _Fabrics.Ethernet_10G.bandwidth},
+        egress_rate=Q_(0.02, "USD/GB"),   # scenario assumption: AWS inter-region transfer rate (2024)
+        compute_price=_Infrastructure.Pricing.Cloud.TpuV4PerHour.rate,
+        job_time=Q_(20, "hour"),          # scenario assumption: the training run the data would feed
+    )
+    ResNet50A100InputFeed = _st.AcceleratorInputFeedScenario(
+        name="ResNet-50 training on one A100, fed JPEGs from a cloud block volume",
+        description="The A100's arithmetic ceiling for ResNet-50 training, the well-tuned sustained rate, 150 KB "
+                    "JPEGs that decode to 224x224x3 FP32 tensors, a 250 MB/s attached volume, and host loader "
+                    "workers at 375 images a second each.",
+        workload=_Models.Vision.ResNet50,
+        hardware=_Hardware.Cloud.A100,
+        sustained_rate=ImageNetLabelingVersusResNetRun.throughput_per_accelerator,
+        encoded_sample=Q_(150, "KB"),     # scenario assumption: average ImageNet-class JPEG as stored
+        decoded_sample=(_Datasets.ImageNet.image_width * _Datasets.ImageNet.image_height
+                        * _Datasets.ImageNet.image_channels * _BYTES_FP32),
+        supply=_Storage.CloudBlockStorageBaseline,
+        training_flops_factor=3,          # forward pass plus a backward pass of about twice its cost
+        worker_rate=Q_(375, "count/second"),  # scenario assumption: JPEG decode and augment per CPU worker
+        host_decode_cap=Q_(3500, "count/second"),  # scenario assumption: illustrative host-wide decode ceiling
+    )
+    ResNet50EightA100InputFeed = ResNet50A100InputFeed.variant(
+        name="ResNet-50 training on eight A100s in one server, fed from one storage path",
+        description="The one-A100 feed scaled to the eight accelerators of one server.",
+        accelerators=8,                   # one 8-GPU server
+    )
+    RecommendationFeatureLookups = _st.FeatureLookupScenario(
+        name="A recommendation service reading ten stored features per request",
+        description="10,000 requests a second, ten feature reads each, 5 KB feature vectors summarizing 150 KB images.",
+        request_rate=Q_(10_000, "1/second"),  # scenario assumption
+        reads_per_request=10,             # scenario assumption
+        feature_bytes=Q_(5, "KB"),        # scenario assumption: one stored feature vector
+        raw_sample_bytes=ResNet50A100InputFeed.encoded_sample,
+    )
+    MswcCorpusStorageTiers = _st.CorpusTierScenario(
+        name="The Multilingual Spoken Words Corpus on object storage and on local NVMe",
+        description="Every clip at 16 kHz and 16 bits, priced per month and read sequentially on each tier.",
+        dataset=_Datasets.MSWC,
+        storage_rates={"object store": _Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate,
+                       "NVMe low": _Infrastructure.Pricing.Storage.NvmeLowPerTbMonth.rate,
+                       "NVMe high": _Infrastructure.Pricing.Storage.NvmeHighPerTbMonth.rate},
+        read_bandwidths={"object store": _Storage.ObjectStoreSingleStream.bandwidth,
+                         "NVMe": _Storage.LocalNvmeTrainingTypical.bandwidth},
+    )
+    FraudModelColumnProjection = _st.ColumnProjectionScenario(
+        name="A fraud model that uses 20 of a table's 100 equal-size columns",
+        description="A row format reads every column; a columnar format reads only the 20.",
+        columns_used=20,                  # scenario assumption
+        columns_total=100,                # scenario assumption
+    )
+    GzipVersusSnappyEpochs = _st.CodecEpochScenario(
+        name="A 100 GB epoch decompressed with gzip or Snappy for 50 epochs",
+        description="Host CPU decompression time per epoch and over the run, at each codec's decompression rate.",
+        epoch_bytes=Q_(100, "GB"),        # scenario assumption
+        epochs=50,                        # scenario assumption
+        decode_rates={"gzip": Q_(120, "MB/s"),    # scenario assumption: typical gzip decompression
+                      "Snappy": Q_(500, "MB/s")},  # scenario assumption: typical Snappy decompression
+    )
+    LoudnessDriftKs1000 = _st.KsDriftScenario(
+        name="K-S drift test on clip loudness, 1,000 training against 1,000 recent clips",
+        description="A quieter microphone on part of the fleet; the observed largest CDF gap against the "
+                    "critical value at the 0.05 level.",
+        coefficient=_Ops.Monitoring.KsTestCoefficient,
+        n_reference=1000,                 # scenario assumption
+        n_current=1000,                   # scenario assumption
+        observed_statistic=0.08,          # scenario assumption: observed largest CDF gap
+    )
+    LoudnessDriftKs100k = LoudnessDriftKs1000.variant(
+        name="K-S drift test on clip loudness, 100,000 clips per sample",
+        description="The same observed gap against the critical value of a monitor that sees all traffic.",
+        n_reference=100_000,              # scenario assumption
+        n_current=100_000,                # scenario assumption
+    )
+    LoudnessShiftMatchingObservedGap = _st.LocationShiftScenario(
+        name="Clip loudness shifted 1.2 dB quieter",
+        description="Illustrative normal loudness curves, sd 6 dB about -30 dBFS; a 1.2 dB shift opens a K-S gap "
+                    "of about the observed 0.08.",
+        reference_mean=-30,               # scenario assumption: training loudness, dBFS
+        feature_sd=6,                     # scenario assumption: dB
+        shift=-1.2,                       # scenario assumption: dB
+    )
+    LoudnessShiftHarmless = LoudnessShiftMatchingObservedGap.variant(
+        name="Clip loudness shifted 0.3 dB quieter",
+        description="A shift too small to matter, on the same illustrative curves.",
+        shift=-0.3,                       # scenario assumption: dB
+    )
+    QuieterMicrophoneLoudnessBins = _st.BinShareShiftScenario(
+        name="Clip loudness in training quintiles after a quieter microphone ships",
+        description="Recent clips pile into the quiet bins; illustrative shares scored by PSI.",
+        baseline_shares=[0.20] * 5,       # training quintiles
+        current_shares=[0.30, 0.25, 0.20, 0.15, 0.10],  # scenario assumption: recent shares, quietest first
+    )
+    KeywordSpotterSilentRegression = _st.MetricRegressionScenario(
+        name="The keyword spotter's detection rate six months after launch",
+        description="Launched at the 98 percent target; four points lower six months later with the model unchanged.",
+        launch_value=KeywordSpotterTargets.detection_target,
+        drop=0.04,                        # scenario assumption: fall below the target, in points / 100
+        elapsed=Q_(6, "month"),           # scenario assumption
+    )

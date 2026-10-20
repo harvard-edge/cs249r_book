@@ -83,6 +83,8 @@ from .statistics import (
     calc_multilegged_confidence,
     calc_chance_agreement,
     calc_cohens_kappa,
+    calc_ks_critical_value,
+    calc_ks_normal_location_shift,
 )
 from .agents import (
     calc_kv_cache_bytes_per_token,
@@ -237,6 +239,8 @@ __all__ = [
     "calc_multilegged_confidence",
     "calc_chance_agreement",
     "calc_cohens_kappa",
+    "calc_ks_critical_value",
+    "calc_ks_normal_location_shift",
     "calc_two_proportion_sample_size",
     "calc_kv_cache_bytes_per_token",
     "calc_unchecked_success",

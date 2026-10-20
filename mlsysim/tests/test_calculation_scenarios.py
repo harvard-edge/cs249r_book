@@ -1245,3 +1245,77 @@ def test_speech_commands_split_ingest_cost_and_corpus_growth():
     c = Scenarios.PretrainingCorpusGrowth
     assert c.growth == approx(2.8954)
     assert c.crossing(3e14) == approx(2027.65, rel=1e-4)
+
+
+# --- Data engineering: delivery to the accelerator and drift (added 2026-10-20) ---
+
+def test_petabyte_cross_region_move():
+    t = Scenarios.PetabyteCrossRegionMove
+    assert t.transfer_time("100 Gb/s").to("second").magnitude == approx(80_000)
+    assert t.transfer_time("10 Gb/s").to("day").magnitude == approx(9.25926)
+    assert t.egress_cost.to("USD").magnitude == approx(20_000)
+    assert t.egress_compute_hours.to("hour").magnitude == approx(5_000)
+    assert t.job_time.to("hour").magnitude == approx(20)
+
+
+def test_resnet50_a100_input_feed():
+    from mlsysim.core.units import Q_
+    f = Scenarios.ResNet50A100InputFeed
+    assert f.training_flops_per_sample.to("GFLOP").magnitude == approx(24.6)
+    assert f.ceiling_rate.to("count/second").magnitude == approx(12_682.93, rel=1e-6)
+    assert f.demand().to("MB/s").magnitude == approx(480)
+    assert f.decoded_sample.to("KB").magnitude == approx(602.112)
+    assert f.demand(decoded=True).to("GB/s").magnitude == approx(1.92676)
+    assert f.feeding_loss() == approx(0.479167, rel=1e-5)
+    assert f.feeding_loss(decoded=True) == approx(0.870248, rel=1e-5)
+    assert f.supplied_fraction == approx(0.520833, rel=1e-5)
+    assert f.ceiling_demand.to("GB/s").magnitude == approx(1.90244, rel=1e-5)
+    assert f.samples_supplied(Q_(500, "MB/s")).to("count/second").magnitude == approx(3333.33, rel=1e-5)
+    assert f.streams_needed(Q_(100, "MB/s")) == approx(19.0244, rel=1e-5)
+    assert f.worker_crossing == approx(8.53333, rel=1e-5)
+    assert f.workers_per_accelerator == 9
+    e = Scenarios.ResNet50EightA100InputFeed
+    assert e.total_rate.to("count/second").magnitude == approx(25_600)
+    assert e.demand().to("GB/s").magnitude == approx(3.84)
+    assert e.demand(decoded=True).to("GB/s").magnitude == approx(15.4141, rel=1e-5)
+    assert e.workers_pooled == 69
+    r = Scenarios.RecommendationFeatureLookups
+    assert r.reads_per_second == approx(100_000)
+    assert r.storage_reduction == approx(30)
+
+
+def test_corpus_tiers_columns_and_codecs():
+    c = Scenarios.MswcCorpusStorageTiers
+    assert c.corpus_bytes.to("GB").magnitude == approx(748.8)
+    assert c.monthly_cost("object store").to("USD/month").magnitude == approx(17.2224)
+    assert c.monthly_cost("NVMe high").to("USD/month").magnitude == approx(224.64)
+    assert c.load_time("object store").to("second").magnitude == approx(7488)
+    assert c.load_time("NVMe").to("second").magnitude == approx(149.76)
+    p = Scenarios.FraudModelColumnProjection
+    assert p.read_fraction == approx(0.2)
+    assert p.speedup == approx(5)
+    g = Scenarios.GzipVersusSnappyEpochs
+    assert g.decode_time("gzip").to("minute").magnitude == approx(13.8889, rel=1e-5)
+    assert g.decode_time("Snappy").to("minute").magnitude == approx(3.33333, rel=1e-5)
+    assert g.run_time_saved("gzip", "Snappy").to("hour").magnitude == approx(8.7963, rel=1e-5)
+    assert g.rate_ratio("Snappy", "gzip") == approx(4.16667, rel=1e-5)
+
+
+def test_loudness_drift_statistics():
+    k = Scenarios.LoudnessDriftKs1000
+    assert k.critical_value == approx(0.060821, rel=1e-5)
+    assert k.flags
+    assert Scenarios.LoudnessDriftKs100k.critical_value == approx(0.0060821, rel=1e-5)
+    big, small = Scenarios.LoudnessShiftMatchingObservedGap, Scenarios.LoudnessShiftHarmless
+    assert big.ks_statistic == approx(0.0796557, rel=1e-5)
+    assert small.ks_statistic == approx(0.0199450, rel=1e-5)
+    assert small.normed_wasserstein == approx(0.05)
+    assert Scenarios.LoudnessDriftKs100k.flags_statistic(small.ks_statistic)
+    assert not Scenarios.LoudnessDriftKs1000.flags_statistic(small.ks_statistic)
+    b = Scenarios.QuieterMicrophoneLoudnessBins
+    assert b.psi == approx(0.135403, rel=1e-5)
+    assert b.terms[0] == approx(0.0405465, rel=1e-5)
+    assert b.terms[-1] == approx(0.0693147, rel=1e-5)
+    assert b.ratio(0) == approx(1.5)
+    r = Scenarios.KeywordSpotterSilentRegression
+    assert r.launch_value - r.drop == approx(0.94)

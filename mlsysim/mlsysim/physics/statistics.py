@@ -302,3 +302,25 @@ def calc_cohens_kappa(observed_agreement, chance_agreement):
     if not 0.0 <= chance_agreement < 1.0:
         raise ValueError("chance_agreement must be in [0, 1).")
     return (observed_agreement - chance_agreement) / (1.0 - chance_agreement)
+
+
+# --- Two-sample drift statistics (added 2026-10-20) ---------------------------
+def calc_ks_critical_value(coefficient, n_reference, n_current):
+    """Large-sample two-sample Kolmogorov-Smirnov critical value.
+
+    ``D_crit = c * sqrt((n_0 + n_t) / (n_0 * n_t))``, where ``c`` is the
+    coefficient for the chosen significance level (1.36 at 0.05,
+    ``Ops.Monitoring.KsTestCoefficient``).
+    """
+    if n_reference <= 0 or n_current <= 0:
+        raise ValueError("sample sizes must be positive.")
+    return coefficient * math.sqrt((n_reference + n_current) / (n_reference * n_current))
+
+
+def calc_ks_normal_location_shift(shift_sd):
+    """K-S distance between two equal-variance normals whose means differ by ``shift_sd`` sds.
+
+    The CDF gap is largest midway between the means: ``2 * Phi(shift_sd / 2) - 1``,
+    which equals ``erf(shift_sd / (2 * sqrt(2)))``.
+    """
+    return math.erf(abs(shift_sd) / (2 * math.sqrt(2)))
