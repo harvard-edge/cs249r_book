@@ -794,6 +794,26 @@ class Series:
         "Measured NCCL all-reduce time and bandwidth by message size on one eight-H100 node.",
         numeric=("size_bytes", "count", "oop_time_us", "oop_algbw_GBps", "oop_busbw_GBps", "ip_time_us", "ip_algbw_GBps", "ip_busbw_GBps"),
     )
+    HorovodScaling128Gpu = TrendSeries(
+        "horovod_scaling_128gpu",
+        _lit("Sergeev and Del Balso (2018), Horovod, arXiv:1802.05799, scaling bar chart (Figure 7 in v3)",
+             "https://arxiv.org/abs/1802.05799",
+             "images per second at 128 NVIDIA Pascal GPUs over 25GbE TCP: ideal (one-GPU rate times 128), "
+             "standard distributed TensorFlow, and Horovod; bar heights read from the figure to about "
+             "+/-250 images/s, added 2026-10-20"),
+        "Training throughput of two image models at 128 GPUs: ideal, distributed TensorFlow, and Horovod.",
+        numeric=("ideal_images_per_s", "tensorflow_images_per_s", "horovod_images_per_s"),
+    )
+    HorovodTimelineTrace = TrendSeries(
+        "horovod_timeline_trace",
+        _lit("Sergeev and Del Balso (2018), Horovod, arXiv:1802.05799, Horovod Timeline screenshot (Figure 6 in v3)",
+             "https://arxiv.org/abs/1802.05799",
+             "phase edges of five gradient tensors' AllReduces, read against the screenshot's 100 ms ticks to "
+             "about +/-2 ms, in ms after its first tick (Literature.Communication.HorovodTimelineOriginMs); "
+             "tensors 0-1 and 2-4 share their rows' phases; added 2026-10-20"),
+        "Phase edges (negotiate, wait, schedule, NCCL, copy) of AllReduces in a Horovod Timeline trace.",
+        numeric=("start_ms", "end_ms"),
+    )
     InterconnectGenerations = TrendSeries(
         "interconnect_generations",
         _lit("Interconnect generation rates and dates from IEEE 802.3, IBTA, PCI-SIG, and NVIDIA primary "

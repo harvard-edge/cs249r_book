@@ -443,3 +443,101 @@ def test_codec_decode_cores():
     assert c.output_bandwidth("light").to("GB/s").magnitude == approx(84)
     assert c.decode_cores("light") == approx(56)
     assert c.decode_cores("dense") == approx(224)
+
+
+# --- Collective communication (added 2026-10-20) ---------------------------
+
+def test_critical_size_and_fusion():
+    x = Scenarios.CriticalSizeByInterconnect.result.crossovers
+    assert x["NVLink"].to("KB").magnitude == approx(675)
+    assert x["PCIe Gen5"].to("KB").magnitude == approx(224)
+    assert x["RoCE"].to("KB").magnitude == approx(93.75)
+    assert x["HDR"].to("KB").magnitude == approx(87.5)
+    assert x["NDR"].to("KB").magnitude == approx(75)
+    f = Scenarios.RoutingMessageFusionNdr
+    assert f.separate_time.to("microsecond").magnitude == approx(150)
+    assert f.fused_time.to("microsecond").magnitude == approx(9.5)
+    assert f.speedup == approx(15.789)
+
+
+def test_allreduce_schedules():
+    b = Scenarios.DdpBucketRingNdr.result
+    assert b.chunk[64].to("KB").magnitude == approx(390.625)
+    assert b.chunk[1024].to("KB").magnitude == approx(24.414)
+    assert b.ring_rounds[1024] == 2046
+    assert b.ring_time[64].to("ms").magnitude == approx(1.1734)
+    assert b.ring_time[1024].to("ms").magnitude == approx(4.0680)
+    g = Scenarios.GradientBufferAllReduceNdr.result
+    assert g.ring_byte_time[64].to("ms").magnitude == approx(39.375)
+    assert g.tree_byte_time[64].to("ms").magnitude == approx(240)
+    assert g.star_byte_time[64].to("ms").magnitude == approx(1280)
+    assert g.star_ring_limit[64] == 32
+    assert g.tree_rounds == {8: 6, 64: 12, 1024: 20}
+    assert g.crossover_estimate[1024].to("MB").magnitude == approx(7.68)
+    r = Scenarios.RingVsTreeSmallBuffer.result
+    assert r.ring_startup_time[64].to("microsecond").magnitude == 1260
+    assert r.tree_startup_time[64].to("microsecond").magnitude == 120
+    assert r.ring_time[64].to("microsecond").magnitude == approx(1456.875)
+    assert r.tree_time[64].to("microsecond").magnitude == approx(1320)
+    assert r.crossover_estimate[64].to("MB").magnitude == approx(1.0667)
+    assert r.crossover_exact[64].to("MB").magnitude == approx(1.1364)
+    s = Scenarios.Llama2_70BGradientRing64Ndr
+    assert s.result.ring_byte_time[64].to("ms").magnitude == approx(5512.5)
+    assert s.result.ring_startup_time[64].to("ms").magnitude == approx(0.189)
+    assert s.saved_device_hours(64) == approx(4900.2)
+
+
+def test_hierarchical_allreduce():
+    h = Scenarios.HierarchicalAllReduce8x8DgxH100.result
+    assert h.reduce_scatter_time.to("ms").magnitude == approx(1.9444)
+    assert h.inter_time.to("ms").magnitude == approx(4.396)
+    assert h.total_time.to("ms").magnitude == approx(8.2849)
+    assert h.flat_bound_time.to("ms").magnitude == approx(40)
+    assert h.speedup_vs_flat_bound == approx(4.8281)
+    a = Scenarios.HierarchicalAllReduceReferenceCluster.result
+    assert a.flat_ring_time.to("s").magnitude == approx(13.9864, rel=1e-2)
+    assert 4 < a.speedup_vs_flat_ring < 5
+    assert Scenarios.HierarchicalAllReduceBucket100MB.result.total_time.to("ms").magnitude == approx(0.84748)
+
+
+def test_moe_dispatch():
+    d = Scenarios.MoeDispatch8Gpu64Experts.result
+    assert d.tokens_per_pair == 64
+    assert d.sent_bytes.to("MB").magnitude == approx(1.835)
+    assert d.injection_bound.to("microsecond").magnitude == approx(38.20016)
+    assert d.hot_remote_tokens == 672
+    assert d.uniform_receive_bound.to("microsecond").magnitude == approx(36.70016)
+    assert d.hot_receive_bound.to("microsecond").magnitude == approx(55.05024)
+
+
+def test_ring_trace_and_error_feedback():
+    t = Scenarios.RingTraceFourGpu.result
+    assert t.totals == [10, 26, 18, 34]
+    assert t.scatter_reduce[0] == [(3, 17), (0, 3), (1, 13), (2, 11)]
+    assert t.held == [{0, 1, 2, 3}] * 4
+    e = Scenarios.ErrorFeedbackFiveSteps.result
+    assert e.sent == [0, 1, 0, 0, 1]
+    assert e.final_error == approx(-0.4)
+    assert e.naive_total_sent == 0
+    assert Scenarios.ErrorFeedbackConstantGradient.result.total_sent == 3
+
+
+def test_compression_and_overlap():
+    p = Scenarios.CompressionPayback8x
+    assert p.total_time.to("ms").magnitude == approx(7)
+    assert p.speedup == approx(5.7143)
+    assert p.pays(p.communication_time) and not p.pays(p.fast_communication_time)
+    c = Scenarios.Int8CompressionRun.result
+    assert c.compressed_totals["slow"].to("s").magnitude == approx(38500)
+    assert c.compressed_totals["fast"].to("s").magnitude == approx(33825)
+    assert c.changes["slow"] == approx(-0.23)
+    r = Scenarios.GradientEncodingRatios
+    assert r.ratio("INT8", "FP32") == approx(4)
+    assert r.ratio("Top-k", "FP32") == approx(50)
+    assert r.ratio("1-bit", "BF16") == approx(16)
+    assert Scenarios.ShardedDataParallelCalls7B.calls("FSDP, reshard after forward") == 96
+    o = Scenarios.OverlapBudget7B64Gpu.result
+    assert o.buckets_per_layer == 9
+    assert o.sequential_time.to("ms").magnitude == approx(1344)
+    assert o.overlapped_time.to("ms").magnitude == approx(879)
+    assert Scenarios.OverlapBudget7B64GpuIdealBuckets.result.overlapped_time.to("ms").magnitude == approx(487.63)
