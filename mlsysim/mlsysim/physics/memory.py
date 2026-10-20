@@ -63,6 +63,20 @@ def model_memory(params, bytes_per_param, unit=MB):
     return total_bytes.to(unit).magnitude
 
 
+# Korthikanti et al. (2023), Table 2: bytes one transformer layer saves for the
+# backward pass, per token and per unit of width (s*b*h), in 16-bit storage.
+# The score term saves three copies of every attention entry: the softmax
+# probabilities (2 B), the dropout mask (1 B), and the probabilities after
+# dropout (2 B), 5 B per entry, so it is 5*a*s^2*b. Full recomputation keeps
+# only each layer's 16-bit input, 2 B per element. (Named 2026-10-20.)
+KORTHIKANTI_PER_TOKEN_BYTES = 34
+SCORE_SOFTMAX_BYTES = 2
+SCORE_DROPOUT_MASK_BYTES = 1
+SCORE_DROPPED_BYTES = 2
+KORTHIKANTI_SCORE_BYTES = SCORE_SOFTMAX_BYTES + SCORE_DROPOUT_MASK_BYTES + SCORE_DROPPED_BYTES
+KORTHIKANTI_LAYER_INPUT_BYTES = 2
+
+
 def calc_activation_memory(
     n_layers,
     seq_len,
@@ -123,9 +137,9 @@ def calc_activation_memory(
     s, b, h = seq_len, batch_size, hidden_dim
     precision_scale = precision_bytes / 2  # Korthikanti constants are FP16 bytes
     if strategy == "full":
-        bytes_per_layer = 2 * s * b * h * precision_scale
+        bytes_per_layer = KORTHIKANTI_LAYER_INPUT_BYTES * s * b * h * precision_scale
     elif strategy == "selective":
-        bytes_per_layer = 34 * s * b * h * precision_scale
+        bytes_per_layer = KORTHIKANTI_PER_TOKEN_BYTES * s * b * h * precision_scale
     elif strategy == "none":
         if n_heads is None:
             raise ValueError(
@@ -133,13 +147,28 @@ def calc_activation_memory(
                 "attention term scales with the head count (Korthikanti et al. "
                 "2023, Sec. 4.1)."
             )
-        bytes_per_layer = (34 * s * b * h + 5 * n_heads * s * s * b) * precision_scale
+        bytes_per_layer = (KORTHIKANTI_PER_TOKEN_BYTES * s * b * h
+                           + KORTHIKANTI_SCORE_BYTES * n_heads * s * s * b) * precision_scale
     else:
         raise ValueError(
             f"Unknown activation strategy {strategy!r}; expected 'none', "
             "'selective', or 'full'."
         )
     return (n_layers * bytes_per_layer) * ureg.byte
+
+
+def calc_checkpoint_memory_units(n_layers: int, checkpoints: int) -> float:
+    """
+    Activation memory of evenly spaced checkpointing, in units of one layer's activations.
+
+    With ``k`` checkpoints over ``L`` equal layers, the forward pass keeps the
+    ``k`` checkpoint activations and the backward pass rebuilds one segment of
+    ``L/k`` layers at a time: ``k + L/k``, smallest near ``k = sqrt(L)``
+    (Chen et al. 2016). (Added 2026-10-20.)
+    """
+    validate_at_least(n_layers, 1, "n_layers")
+    validate_at_least(checkpoints, 1, "checkpoints")
+    return checkpoints + n_layers / checkpoints
 
 
 def calc_checkpoint_size(n_params, bytes_per_param=14):

@@ -1363,6 +1363,25 @@ FlashAttentionBenchmark = _Series(
     "Attention runtime and memory against sequence length, standard PyTorch and FlashAttention (A100).",
 )
 
+# --- Fitting a training step on one accelerator (added 2026-10-20) -------------
+SsdGradientHistogram = _Series(
+    "micikevicius_ssd_gradient_histogram",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref="Micikevicius et al. (2018), Mixed Precision Training, ICLR 2018, Figure 3",
+        url="https://arxiv.org/abs/1710.03740",
+        verified="2026-10-18",
+        notes=(
+            "Activation-gradient magnitudes of the SSD detector in FP32 training, binned by log2 magnitude "
+            "[log2_low, log2_high). bar_top_px is the pixel row of each bar top, read from the figure "
+            "image (arXiv 1710.03740v3, page 4, 898 x 575 px; log-scale y axis, gridline rows 35 at 64 "
+            "percent and 504 at 1/512 percent). An empty cell marks an empty bin; the 67 percent of "
+            "exact zeros (caption) is not a bar."
+        ),
+    ),
+    "SSD activation-gradient histogram by log2 magnitude, read from Micikevicius et al. (2018), Figure 3.",
+)
+
 ToolInterceptionTimes = _Series(
     "infercept_interception_times",
     Provenance(

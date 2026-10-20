@@ -1678,10 +1678,68 @@ class ActivationMemoryScenario(BaseScenario):
     precision_bytes: float = 2
     normalization_per_layer: Optional[Quantity] = None
     ffn_multiple: int = 4
+    # Optional (added 2026-10-20): checkpoint the layers in this many equal
+    # segments, keeping each segment's input and rebuilding one segment at a
+    # time in the backward pass.
+    checkpoint_segments: Optional[int] = None
 
     @property
     def sequence(self) -> int:
         return self.seq_len if self.seq_len is not None else self.workload.context_length
+
+    # Korthikanti et al. Table 2 per layer, sbh(34 + 5as/h) (added 2026-10-20).
+    @property
+    def per_token_bytes_coefficient(self) -> float:
+        """The 34 of sbh(34 + 5as/h): bytes per token and unit of width, at this precision."""
+        from ..physics.memory import KORTHIKANTI_PER_TOKEN_BYTES
+        return KORTHIKANTI_PER_TOKEN_BYTES * self.precision_bytes / 2
+
+    @property
+    def score_bytes_coefficient(self) -> float:
+        """The 5as/h of sbh(34 + 5as/h): the attention scores, in the same units."""
+        from ..physics.memory import KORTHIKANTI_SCORE_BYTES
+        w = self.workload
+        return KORTHIKANTI_SCORE_BYTES * w.heads * self.sequence / w.hidden_dim * self.precision_bytes / 2
+
+    @property
+    def score_share(self) -> float:
+        """The scores' share of the saved activations, 5as/h over (34 + 5as/h)."""
+        c = self.score_bytes_coefficient
+        return c / (self.per_token_bytes_coefficient + c)
+
+    @property
+    def per_sequence_activations(self) -> Quantity:
+        """Per-token activations of one sequence (scores not stored): the slope against batch size."""
+        return (self.per_token_activations / self.micro_batch).to("GB")
+
+    # Segment checkpointing (added 2026-10-20).
+    @property
+    def segment_layers(self) -> int:
+        return self.workload.layers // self.checkpoint_segments
+
+    @property
+    def segment_input(self) -> Quantity:
+        """One segment's input, kept for the backward pass: b x s x h values."""
+        return Q_(self._elements(self.workload.hidden_dim) * self.precision_bytes, "byte").to("MB")
+
+    @property
+    def segment_inputs(self) -> Quantity:
+        return (self.checkpoint_segments * self.segment_input).to("GB")
+
+    @property
+    def live_segment(self) -> Quantity:
+        """One segment's per-token activations, rebuilt in the backward pass (scores not stored)."""
+        return (self.per_token_activations / self.workload.layers * self.segment_layers).to("GB")
+
+    @property
+    def checkpointed_activations(self) -> Quantity:
+        """Segment inputs plus one live rebuilt segment (its input counted twice: conservative)."""
+        return (self.segment_inputs + self.live_segment).to("GB")
+
+    def checkpoint_memory_units(self, checkpoints: int) -> float:
+        """Activation memory with ``checkpoints`` evenly spaced checkpoints, in layers: k + L/k."""
+        from ..physics.memory import calc_checkpoint_memory_units
+        return calc_checkpoint_memory_units(self.workload.layers, checkpoints)
 
     def activations(self, strategy: str) -> Quantity:
         from ..physics.memory import calc_activation_memory
@@ -2274,11 +2332,22 @@ class ClusterTrainingTimeScenario(BaseScenario):
     efficiency: float
     tokens_per_step: Optional[int] = None
     hourly_price: Optional[Quantity] = None
+    # Optional (added 2026-10-20): run on the peak of another number format
+    # (a key of hardware.compute.precision_flops, "fp32" or "tf32"); None uses
+    # the dense 16-bit peak, hardware.compute.peak_flops.
+    peak_precision: Optional[str] = None
+
+    @property
+    def peak_rate(self) -> Quantity:
+        """Peak rate of one device in ``peak_precision``."""
+        if self.peak_precision is None:
+            return self.hardware.compute.peak_flops
+        return self.hardware.compute.precision_flops[self.peak_precision]
 
     def _time(self, ops) -> Quantity:
         from ..physics.performance import dTime
         return dTime(total_ops=ops, num_devices=self.n_devices,
-                     peak_flops_per_device=self.hardware.compute.peak_flops,
+                     peak_flops_per_device=self.peak_rate,
                      efficiency_eta=self.efficiency)
 
     @property
@@ -2288,7 +2357,7 @@ class ClusterTrainingTimeScenario(BaseScenario):
     @property
     def delivered_rate(self) -> Quantity:
         """FLOP/s the devices deliver together: peak times utilization."""
-        return (self.n_devices * self.hardware.compute.peak_flops * self.efficiency).to("TFLOP/s")
+        return (self.n_devices * self.peak_rate * self.efficiency).to("TFLOP/s")
 
     @property
     def training_tokens(self) -> Quantity:
@@ -9168,6 +9237,16 @@ class TrainingStateFitScenario(BaseScenario):
         return (self.training_total / self.hardware.memory.capacity).to("").magnitude
 
     @property
+    def resident_batch_limit(self) -> float:
+        """Sequences whose activations fit beside the state in ``hardware``'s memory (added 2026-10-20)."""
+        per_sequence = self.activations / self.batch_size
+        return ((self.hardware.memory.capacity - self.total) / per_sequence).to("").magnitude
+
+    @property
+    def max_resident_batch(self) -> int:
+        return _math.floor(self.resident_batch_limit)
+
+    @property
     def checkpoint(self) -> Quantity:
         """A resumable checkpoint: weights, master copy, and optimizer state; gradients are recomputed."""
         return (self.weights + self.master_weights + self.optimizer_state).to("byte")
@@ -14690,3 +14769,281 @@ class FamilywiseErrorScenario(BaseScenario):
     def per_test(self) -> float:
         """Bonferroni: the level each verdict gets so the family stays at ``significance``."""
         return self.significance / self.family_size
+
+# ── Fitting a training step on one accelerator (added 2026-10-20) ────────────
+# Number formats and the updates and gradients they lose, loss scaling on a
+# measured gradient histogram, softmax one block at a time, and the tiles and
+# stored tensors of attention.
+
+
+class FloatAccumulationScenario(BaseScenario):
+    """A weight stored in a binary float format receiving the same small update ``repeats`` times.
+
+    ``formats`` maps a label to (exponent bits, fraction bits). Each add rounds
+    to the format, so an update below half the spacing near the weight rounds
+    away (swamping).
+    """
+    weight: float
+    update: float
+    repeats: int
+    formats: Dict[str, Any]
+
+    def spacing(self, fmt: str) -> float:
+        """Gap from ``weight`` to the next larger value of ``fmt``."""
+        from ..physics.numerics import calc_float_spacing
+        return calc_float_spacing(self.weight, *self.formats[fmt])
+
+    def next_value(self, fmt: str) -> float:
+        return self.weight + self.spacing(fmt)
+
+    def stored_after_one(self, fmt: str) -> float:
+        return self.trace(fmt)[1]
+
+    def trace(self, fmt: str) -> List[float]:
+        """Stored weight before and after each update."""
+        from ..physics.numerics import calc_repeated_add
+        return calc_repeated_add(self.weight, self.update, self.repeats, *self.formats[fmt])
+
+    def final(self, fmt: str) -> float:
+        return self.trace(fmt)[-1]
+
+    def vanishing_ratio(self, fmt: str) -> float:
+        """Weight over the largest update that rounds away (half the spacing)."""
+        return self.weight / (self.spacing(fmt) / 2)
+
+
+class LossScalingScenario(BaseScenario):
+    """A measured gradient-magnitude histogram against a 16-bit float format, before and after loss scaling.
+
+    ``histogram`` rows hold log2 bin edges and the bar-top pixel row read from
+    the published figure; ``grid_*`` are the two gridlines that calibrate the
+    figure's log-scale y axis. ``scale`` multiplies the loss (and so every
+    gradient). ``dynamic_scale`` and ``probe_gradient`` illustrate a dynamic
+    scaler's setting.
+    """
+    histogram: List[Dict[str, Any]]
+    grid_high_px: float
+    grid_high_pct: float
+    grid_low_px: float
+    grid_low_pct: float
+    zero_fraction: float
+    scale: float
+    float_bits: Any                    # (exponent bits, fraction bits)
+    dynamic_scale: Optional[float] = None
+    probe_gradient: Optional[float] = None
+
+    @property
+    def _range(self):
+        from ..physics.numerics import calc_float_range
+        return calc_float_range(*self.float_bits)
+
+    @property
+    def largest(self) -> float:
+        return self._range[0]
+
+    @property
+    def smallest_normal(self) -> float:
+        return self._range[1]
+
+    @property
+    def smallest_subnormal(self) -> float:
+        return self._range[2]
+
+    @property
+    def normal_floor_log2(self) -> float:
+        return _math.log2(self._range[1])
+
+    @property
+    def subnormal_floor_log2(self) -> float:
+        return _math.log2(self._range[2])
+
+    @property
+    def bins(self) -> List[Dict[str, Any]]:
+        """Bins with their share of all values, in percent (None for an empty bin)."""
+        doublings = _math.log2(self.grid_high_pct / self.grid_low_pct)
+        px_per_doubling = (self.grid_low_px - self.grid_high_px) / doublings
+        out = []
+        for row in self.histogram:
+            px = row["bar_top_px"]
+            pct = None if px is None else self.grid_high_pct * 2 ** (-(px - self.grid_high_px) / px_per_doubling)
+            out.append(dict(low=row["log2_low"], high=row["log2_high"], percent=pct))
+        return out
+
+    def _sum(self, keep) -> float:
+        return sum(b["percent"] for b in self.bins if b["percent"] and keep(b))
+
+    @property
+    def below_subnormal_pct(self) -> float:
+        """Values that become zero in the format: bins wholly below the smallest subnormal."""
+        return self._sum(lambda b: b["high"] <= self.subnormal_floor_log2)
+
+    @property
+    def subnormal_pct(self) -> float:
+        return self._sum(lambda b: b["low"] >= self.subnormal_floor_log2 and b["high"] <= self.normal_floor_log2)
+
+    @property
+    def normal_pct(self) -> float:
+        return self._sum(lambda b: b["low"] >= self.normal_floor_log2)
+
+    @property
+    def nonzero_pct(self) -> float:
+        return self._sum(lambda b: True)
+
+    @property
+    def below_share_of_nonzero(self) -> float:
+        return self.below_subnormal_pct / self.nonzero_pct
+
+    @property
+    def shift(self) -> float:
+        """Doublings the scale adds to every gradient: log2 of the scale."""
+        return _math.log2(self.scale)
+
+    @property
+    def rescued_pct(self) -> float:
+        """Values the scale lifts from below the smallest subnormal to at or above it (whole bins)."""
+        f = self.subnormal_floor_log2
+        return self._sum(lambda b: b["high"] <= f and b["low"] >= f - self.shift)
+
+    @property
+    def top_edge_log2(self) -> float:
+        return max(b["high"] for b in self.bins if b["percent"])
+
+    @property
+    def headroom_doublings(self) -> float:
+        """Doublings from the largest occupied bin edge up to the format's largest value."""
+        return _math.log2(self.largest) - self.top_edge_log2
+
+    @property
+    def scaled_probe(self) -> float:
+        return self.probe_gradient * self.dynamic_scale
+
+    @property
+    def dynamic_overflow_threshold(self) -> float:
+        """Unscaled gradient above which the dynamic scale overflows the format."""
+        return self.largest / self.dynamic_scale
+
+
+class OnlineSoftmaxScenario(BaseScenario):
+    """One row of attention scores and values, softmax-weighted one block at a time."""
+    scores: List[float]
+    values: List[float]
+    block_size: int
+
+    @property
+    def blocks(self) -> List[Dict[str, float]]:
+        from ..physics.transformer import calc_online_softmax
+        return calc_online_softmax(self.scores, self.values, self.block_size)
+
+    @property
+    def whole_row(self) -> Dict[str, float]:
+        from ..physics.transformer import calc_online_softmax
+        return calc_online_softmax(self.scores, self.values, len(self.scores))[-1]
+
+    @property
+    def weighted_average(self) -> float:
+        last = self.blocks[-1]
+        return last["output"] / last["sum"]
+
+    def block_terms(self, block: int) -> List[float]:
+        """exp(x - m) of each score of ``block`` against the running maximum after it."""
+        m = self.blocks[block]["max"]
+        xs = self.scores[block * self.block_size:(block + 1) * self.block_size]
+        return [_math.exp(x - m) for x in xs]
+
+
+class AttentionTilingScenario(BaseScenario):
+    """One head's attention at ``seq_len`` tokens, whole or in square tiles, and what each kernel stores.
+
+    Standard attention stores the scores and the probabilities (``seq_len``
+    squared each) beside Q, K, V, and the output; FlashAttention stores a
+    running maximum and sum per row instead.
+    """
+    seq_len: int
+    head_dim: int
+    tile: int
+    heads: int
+    bytes_per_value: Quantity
+    io_tensors: int = 4              # Q, K, V, and the output
+    stored_square_matrices: int = 2  # scores and probabilities
+    row_statistics: int = 2          # running maximum and sum
+
+    @property
+    def score_matrix(self) -> Quantity:
+        return (self.seq_len ** 2 * self.bytes_per_value).to("MB")
+
+    @property
+    def all_heads_scores(self) -> Quantity:
+        return (self.heads * self.score_matrix).to("GB")
+
+    @property
+    def tile_bytes(self) -> Quantity:
+        return (self.tile ** 2 * self.bytes_per_value).to("KB")
+
+    @property
+    def tiles_per_side(self) -> int:
+        return self.seq_len // self.tile
+
+    @property
+    def tile_count(self) -> int:
+        return self.tiles_per_side ** 2
+
+    @property
+    def qkv_bytes(self) -> Quantity:
+        """Q, K, and V: three tensors of seq_len x head_dim."""
+        return (3 * self.seq_len * self.head_dim * self.bytes_per_value).to("MB")
+
+    @property
+    def io_bytes(self) -> Quantity:
+        return (self.io_tensors * self.seq_len * self.head_dim * self.bytes_per_value).to("MB")
+
+    @property
+    def stored_standard(self) -> Quantity:
+        return (self.io_bytes + self.stored_square_matrices * self.score_matrix).to("MB")
+
+    @property
+    def stored_flash(self) -> Quantity:
+        return (self.io_bytes + self.row_statistics * self.seq_len * self.bytes_per_value).to("MB")
+
+    @property
+    def stored_ratio(self) -> float:
+        return (self.stored_standard / self.stored_flash).to("").magnitude
+
+
+class TokenizedBatchFeedScenario(BaseScenario):
+    """A host that tokenizes each batch and copies it to the accelerator, against the device's step.
+
+    Without prefetching the host and the device run back to back, so the
+    device is busy ``compute_time`` out of every ``prep_time + compute_time``.
+    """
+    compute_time: Quantity
+    tokens_per_batch: int
+    token_rate: Quantity             # tokens per second on one host core
+    bytes_per_token: Quantity        # token ids as stored for the copy
+    link_bandwidth: Quantity
+    workers: int = 1
+
+    @property
+    def tokenization_time(self) -> Quantity:
+        return (self.tokens_per_batch / self.token_rate).to("s")
+
+    @property
+    def parallel_tokenization_time(self) -> Quantity:
+        return (self.tokenization_time / self.workers).to("s")
+
+    @property
+    def batch_bytes(self) -> Quantity:
+        return (self.tokens_per_batch * self.bytes_per_token).to("byte")
+
+    @property
+    def transfer_time(self) -> Quantity:
+        return (self.batch_bytes / self.link_bandwidth).to("s")
+
+    @property
+    def prep_time(self) -> Quantity:
+        """Single-core preparation: tokenization plus the copy."""
+        return (self.tokenization_time + self.transfer_time).to("s")
+
+    @property
+    def busy_fraction(self) -> float:
+        """Share of time the device computes when preparation and compute run in sequence."""
+        return (self.compute_time / (self.prep_time + self.compute_time)).to("").magnitude

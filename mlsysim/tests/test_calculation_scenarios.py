@@ -4288,3 +4288,59 @@ def test_openai_sycophancy_timeline_and_dapper():
     rows = {r["sampling_frequency"]: r for r in Literature.DapperSamplingOverhead.entries}
     assert rows["1/1"]["latency_change_pct"] == 16.3 and rows["1/1024"]["latency_change_pct"] == -0.20
     assert Literature.DistributedTracing.DapperFirstProductionSamplingDenominator == 1024
+def test_gpt2_xl_step_fits_one_h100():
+    flash = Scenarios.Gpt2MixedPrecisionFlashAttentionOnH100
+    assert flash.training_total.to("GB").magnitude == approx(109.5638)
+    assert flash.resident_batch_limit == approx(23.1497)
+    assert flash.max_resident_batch == 23
+    assert Scenarios.Gpt2MixedPrecisionTwoMicroBatchesOnH100.training_total.to("GB").magnitude == approx(66.7819)
+    assert Scenarios.Gpt2MixedPrecisionSegmentCheckpointedOnH100.training_total.to("GB").magnitude == approx(35.5343)
+    ckpt = Scenarios.Gpt2XlBatch32SegmentCheckpointed
+    assert ckpt.segment_layers == 6
+    assert ckpt.segment_input.to("MB").magnitude == approx(104.8576)
+    assert ckpt.segment_inputs.to("GB").magnitude == approx(0.83886)
+    assert ckpt.live_segment.to("GB").magnitude == approx(10.69548)
+    assert ckpt.checkpoint_memory_units(7) == approx(13.857143)
+    act = Scenarios.Gpt2XlBatch32Activations
+    assert act.per_token_bytes_coefficient == approx(34)
+    assert act.score_bytes_coefficient == approx(80)
+    assert act.score_share == approx(0.701754)
+    assert act.per_sequence_activations.to("GB").magnitude == approx(2.67387)
+    assert Scenarios.Gpt2XlRunOnOneH100Fp32.training_time.to("day").magnitude == approx(518.2421)
+    assert Scenarios.Gpt2XlRunOnOneH100Tf32.rental_cost.to("USD").magnitude == approx(6747.638)
+    assert Scenarios.Gpt2XlSingleCoreTokenizerFeed.busy_fraction == approx(0.476441)
+
+
+def test_number_formats_and_loss_scaling():
+    f = Scenarios.Fp16WeightSmallUpdates
+    assert f.spacing("fp16") == 2 ** -11
+    assert f.spacing("bf16") == 2 ** -8
+    assert f.stored_after_one("fp16") == 0.5
+    assert f.final("fp16") == 0.5
+    assert f.final("fp32") == approx(1.50017)
+    assert f.vanishing_ratio("fp16") == 2048
+    s = Scenarios.SsdGradientLossScaling
+    assert s.below_subnormal_pct == approx(26.2213)
+    assert s.below_share_of_nonzero == approx(0.815987)
+    assert s.subnormal_pct == approx(5.85519)
+    assert s.nonzero_pct == approx(32.1344)
+    assert s.shift == 3
+    assert s.rescued_pct == approx(5.83949)
+    assert s.headroom_doublings == approx(25.9993)
+    assert s.dynamic_overflow_threshold == approx(63.96875)
+
+
+def test_online_softmax_and_attention_tiles():
+    o = Scenarios.OnlineSoftmaxFourScores
+    assert o.blocks[0]["sum"] == approx(1.135335)
+    assert o.blocks[1]["rescale"] == approx(0.135335)
+    assert o.blocks[1]["sum"] == approx(o.whole_row["sum"])
+    assert o.blocks[1]["output"] == approx(44.38347)
+    assert o.weighted_average == approx(36.8810)
+    a = Scenarios.AttentionScores4096TokensFp32
+    assert a.score_matrix.to("MB").magnitude == approx(67.108864)
+    assert a.tile_bytes.to("KB").magnitude == approx(65.536)
+    assert a.tile_count == 1024
+    assert a.stored_standard.to("MB").magnitude == approx(138.412)
+    assert a.stored_flash.to("MB").magnitude == approx(4.22707)
+    assert a.stored_ratio == approx(32.7442)

@@ -1809,6 +1809,7 @@ plt.close()
 # │
 # │ Note: The ridge-point values in the prose come from H100Ridge below.
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.physics import calc_score_matrix_intensity
 from mlsysim.fmt import check, fmt, fmt_arithmetic_intensity
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -1826,7 +1827,7 @@ class AttentionIntensity:
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Materialized score attention: QK^T costs 2*S*S*d_head FLOPs per head,
     # while writing and later reading the S*S FP16 score matrix costs 4 bytes.
-    intensity = (head_dim / 2) * flop / byte
+    intensity = calc_score_matrix_intensity(head_dim, BYTES_FP16)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(round(intensity.magnitude) == 32, f"Attention intensity mismatch: {intensity}")
@@ -2492,7 +2493,7 @@ class PipelineThroughputHardware:
 # │ How: Calculate latency for tokenization and PCIe transfer phases.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Models
+from mlsysim import Hardware, Models, Scenarios
 from mlsysim.core.units import GB, KB, THOUSAND, byte, flop, millisecond, second
 from mlsysim.fmt import fmt_int, fmt, fmt_time, fmt_count, fmt_rate, fmt_memory, fmt_bandwidth, fmt_math, fmt_percent, check
 
@@ -2504,37 +2505,38 @@ class GPT2DataPipeline:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    batch_size = 32
-    seq_len = 1024
-    token_rate = 50_000  # scenario assumption: tokens/s/core
-    workers = 8
+    feed = Scenarios.Gpt2XlSingleCoreTokenizerFeed
+    batch_size = Scenarios.Gpt2XlBatch32Block.batch_size
+    seq_len = Scenarios.Gpt2XlBatch32Block.context_tokens
+    token_rate = feed.token_rate.to("1/s").magnitude  # scenario assumption: tokens/s/core
+    workers = feed.workers
     dataset = Models.Language.GPT2.training_dataset_size
     bpe_vocab = 50_257
     f_access = 0.1
     # Device service interval: one H100 step over the batch at the chapter's utilization
-    effective_step_time = GPT2RunTimeEnergy.step_time.to(millisecond)
+    effective_step_time = feed.compute_time.to(millisecond)
 
-    pcie_bw = Hardware.Cloud.H100.interconnect.bandwidth
+    pcie_bw = feed.link_bandwidth
     # Same Gen4 device as the sequential figure quoted beside it (2026-06-07:
     # was Gen3, so 7 GB/s sequential sat next to a Gen3-derived 0.35 GB/s).
     random_access_bw = Hardware.Tech.Storage.NvmeGen4.bandwidth * f_access
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    tokens_per_batch = batch_size * seq_len
-    tokenization_time = (tokens_per_batch / token_rate) * second
+    tokens_per_batch = feed.tokens_per_batch
+    tokenization_time = feed.tokenization_time
 
-    batch_bytes = tokens_per_batch * 8 * byte  # int64
+    batch_bytes = feed.batch_bytes  # int64
 
-    transfer_time = (batch_bytes / pcie_bw).to(second)
+    transfer_time = feed.transfer_time
 
-    parallel_token_time = tokenization_time / workers
+    parallel_token_time = feed.parallel_tokenization_time
     # Single-core host preparation: the stage trace's tokenization plus
     # PCIe transfer. Stated in the Systems insight, so derive it here.
-    prep_time = tokenization_time + transfer_time
+    prep_time = feed.prep_time
     throughput_samples = batch_size / effective_step_time.to(second).magnitude
     # Without prefetching the host and the accelerator run back to back,
     # so the step budget carries both terms.
-    serial_service_fraction = round((effective_step_time / (prep_time + effective_step_time)).to("").magnitude, 2)
+    serial_service_fraction = round(feed.busy_fraction, 2)
 
     # ┌── 3. GUARD (Invariants) ────────────────────────────────────────
     check(
@@ -4354,9 +4356,8 @@ Once dynamic loss scaling or BF16 preserves gradient fidelity, mixed-precision t
 # │ How:     Registry GPT-2 XL shape; per-layer activation estimate with the
 # │          quadratic attention term (no recomputation).
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Models, BYTES_ADAM_STATE, BYTES_FP16, BYTES_FP32
+from mlsysim import Scenarios
 from mlsysim.core.units import GB, GiB, byte
-from mlsysim.physics import calc_activation_memory
 from mlsysim.fmt import check, fmt, fmt_memory, fmt_memory_capacity, fmt_multiple, fmt_params
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -4364,32 +4365,27 @@ class MixedPrecisionMemory:
     """GPT-2 XL FP32 versus mixed-precision memory at batch 32 on one H100."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    gpt2 = Models.Language.GPT2
-    capacity = Hardware.Cloud.H100.memory.capacity
-    batch_size = 32
-    seq_len = 1024
+    fp32 = Scenarios.Gpt2Fp32AdamBatch32OnH100
+    amp = Scenarios.Gpt2MixedPrecisionAdamOnH100
+    acts = Scenarios.Gpt2XlBatch32Activations
+    gpt2 = amp.workload
+    capacity = amp.hardware.memory.capacity
+    batch_size = amp.batch_size
+    seq_len = acts.sequence
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    act_fp16 = calc_activation_memory(
-        n_layers=gpt2.layers,
-        seq_len=seq_len,
-        batch_size=batch_size,
-        hidden_dim=gpt2.hidden_dim,
-        n_heads=gpt2.heads,
-        precision_bytes=BYTES_FP16.to(byte).magnitude,
-        strategy="none",
-    )
-    act_fp32 = act_fp16 * 2
-    p_fp32 = gpt2.size_in_bytes(BYTES_FP32)
-    g_fp32 = p_fp32
-    opt_fp32 = gpt2.size_in_bytes(BYTES_ADAM_STATE)
-    total_fp32 = p_fp32 + g_fp32 + opt_fp32 + act_fp32
-    p_fp16 = gpt2.size_in_bytes(BYTES_FP16)
-    g_fp16 = p_fp16
-    master_fp32 = p_fp32
-    static_mp = p_fp16 + g_fp16 + master_fp32 + opt_fp32
-    total_mp = static_mp + act_fp16
-    mp_over_capacity = (total_mp / capacity).to("").magnitude
+    act_fp16 = amp.activations
+    act_fp32 = fp32.activations
+    p_fp32 = fp32.weights
+    g_fp32 = fp32.gradients
+    opt_fp32 = fp32.optimizer_state
+    total_fp32 = fp32.training_total
+    p_fp16 = amp.weights
+    g_fp16 = amp.gradients
+    master_fp32 = amp.master_weights
+    static_mp = amp.total
+    total_mp = amp.training_total
+    mp_over_capacity = amp.training_capacity_multiple
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(total_mp < total_fp32, "Mixed precision must reduce the total.")
@@ -4461,7 +4457,7 @@ Once numerical stability is established, reduced-precision arithmetic and reduce
 # │ How:     T = O / (R_peak(precision) x eta) with the registry H100 peak for
 # │          each path; cost = T x registry training price per accelerator-hour.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Models, Literature, Infrastructure
+from mlsysim import Scenarios
 from mlsysim.core.units import second, day, hour, USD
 from mlsysim.fmt import check, fmt_flop_rate, fmt_multiple, fmt_time, fmt_usd
 from mlsysim.core.units import TFLOP
@@ -4471,21 +4467,22 @@ class MixedPrecisionThroughputCost:
     """GPT-2 XL run time and rental cost on one H100 by precision path."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    gpt2 = Models.Language.GPT2
-    h100 = Hardware.Cloud.H100
-    eta = Literature.Training.MfuHigh  # held fixed across paths: a bound, not a benchmark
-    price = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate
-    rate_fp32 = h100.compute.precision_flops["fp32"]
-    rate_tf32 = h100.compute.precision_flops["tf32"]
-    rate_bf16 = h100.compute.peak_flops
+    run_fp32 = Scenarios.Gpt2XlRunOnOneH100Fp32
+    run_tf32 = Scenarios.Gpt2XlRunOnOneH100Tf32
+    run_bf16 = Scenarios.Gpt2XlRunOnOneH100
+    eta = run_bf16.efficiency  # held fixed across paths: a bound, not a benchmark
+    price = run_bf16.hourly_price
+    rate_fp32 = run_fp32.peak_rate
+    rate_tf32 = run_tf32.peak_rate
+    rate_bf16 = run_bf16.peak_rate
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    t_fp32 = (gpt2.training_ops / (rate_fp32 * eta)).to(day)
-    t_tf32 = (gpt2.training_ops / (rate_tf32 * eta)).to(day)
-    t_bf16 = (gpt2.training_ops / (rate_bf16 * eta)).to(day)
-    cost_fp32 = (t_fp32 * price).to(USD)
-    cost_tf32 = (t_tf32 * price).to(USD)
-    cost_bf16 = (t_bf16 * price).to(USD)
+    t_fp32 = run_fp32.training_time
+    t_tf32 = run_tf32.training_time
+    t_bf16 = run_bf16.training_time
+    cost_fp32 = run_fp32.rental_cost
+    cost_tf32 = run_tf32.rental_cost
+    cost_bf16 = run_bf16.rental_cost
     bf16_over_tf32 = (rate_bf16 / rate_tf32).to("").magnitude
     bf16_over_fp32 = (rate_bf16 / rate_fp32).to("").magnitude
 
@@ -4660,9 +4657,8 @@ Mixed-precision training addresses two bottlenecks, compute throughput because T
 # │ How:     Per-layer estimate with (strategy none) and without (selective)
 # │          the 5*a*S^2*B term; static state 16 B/param.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Models, BYTES_ADAM_STATE, BYTES_FP16, BYTES_FP32
+from mlsysim import Scenarios
 from mlsysim.core.units import GB, GiB
-from mlsysim.physics import calc_activation_memory
 from mlsysim.fmt import check, fmt_memory, fmt_memory_capacity, fmt_percent
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -4670,18 +4666,17 @@ class GPT2FlashAttentionMemory:
     """GPT-2 XL activations with and without stored attention scores, batch 32."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    gpt2 = Models.Language.GPT2
-    capacity = Hardware.Cloud.H100.memory.capacity
-    batch_size = 32
-    seq_len = 1024
+    acts = Scenarios.Gpt2XlBatch32Activations
+    flash = Scenarios.Gpt2MixedPrecisionFlashAttentionOnH100
+    capacity = flash.hardware.memory.capacity
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    act_stored = calc_activation_memory(gpt2.layers, seq_len, batch_size, gpt2.hidden_dim, gpt2.heads, 2, "none")
-    act_flash = calc_activation_memory(gpt2.layers, seq_len, batch_size, gpt2.hidden_dim, gpt2.heads, 2, "selective")
+    act_stored = acts.activations("none")
+    act_flash = acts.activations("selective")
     score_term = act_stored - act_flash
     score_share = (score_term / act_stored).to("").magnitude
-    static = gpt2.size_in_bytes(BYTES_FP16) * 2 + gpt2.size_in_bytes(BYTES_FP32) + gpt2.size_in_bytes(BYTES_ADAM_STATE)
-    total_flash = static + act_flash
+    static = flash.total
+    total_flash = flash.training_total
     excess = total_flash - capacity
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -4726,6 +4721,7 @@ Here, $\AttentionQueryMatrix$, $\AttentionKeyMatrix$, and $\AttentionValuesMatri
 # │ How: Calculate total bytes for S×S scores across multiple attention heads.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_count, MarkdownStr, fmt_memory
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -4733,13 +4729,14 @@ class AttentionMemoryCalc:
     """Quadratic memory cost of materializing the S×S attention matrix."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    seq_len = 4096
-    embed_dim = 64  # per head
-    n_heads = 16
+    tiles = Scenarios.AttentionScores4096TokensFp32
+    seq_len = tiles.seq_len
+    embed_dim = tiles.head_dim  # per head
+    n_heads = tiles.heads
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    attn_matrix = seq_len**2 * BYTES_FP32
-    total_attn = attn_matrix * n_heads
+    attn_matrix = tiles.score_matrix
+    total_attn = tiles.all_heads_scores
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(round(attn_matrix.to(MB).magnitude, 1) == 67.1, f"Attention matrix MB mismatch: {attn_matrix}")
@@ -4871,15 +4868,16 @@ class FlashAttentionCalc:
     """Standard vs FlashAttention per-head memory comparison."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    fa_n = 4096  # sequence length
-    fa_d = 64  # head dimension
+    tiles = Scenarios.AttentionScores4096TokensFp32
+    fa_n = tiles.seq_len  # sequence length
+    fa_d = tiles.head_dim  # head dimension
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Standard attention: n^2 attention matrix
-    fa_standard = fa_n**2 * BYTES_FP32
+    fa_standard = tiles.score_matrix
 
     # FlashAttention: 3 input tensors (Q, K, V) each n x d
-    fa_flash = 3 * fa_n * fa_d * BYTES_FP32
+    fa_flash = tiles.qkv_bytes
 
     # Reduction factor
     fa_reduction = (fa_standard / fa_flash).to("").magnitude
@@ -4906,17 +4904,18 @@ from mlsysim.fmt import check, fmt_memory, fmt_multiple
 
 class FlashAttentionTotal:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    s_len = FlashAttentionCalc.fa_n
-    d_head = FlashAttentionCalc.fa_d
-    n_io_tensors = 4  # Q, K, V inputs and the output Y, each S x d_head
-    n_quadratic = 2  # standard attention keeps scores and probabilities (S x S)
-    n_row_stats = 2  # FlashAttention keeps a running max and sum per row
+    tiles = FlashAttentionCalc.tiles
+    s_len = tiles.seq_len
+    d_head = tiles.head_dim
+    n_io_tensors = tiles.io_tensors  # Q, K, V inputs and the output Y, each S x d_head
+    n_quadratic = tiles.stored_square_matrices  # standard attention keeps scores and probabilities (S x S)
+    n_row_stats = tiles.row_statistics  # FlashAttention keeps a running max and sum per row
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    io_bytes = n_io_tensors * s_len * d_head * BYTES_FP32
-    standard_total = io_bytes + n_quadratic * s_len**2 * BYTES_FP32
-    flash_total = io_bytes + n_row_stats * s_len * BYTES_FP32
-    ratio = (standard_total / flash_total).to("").magnitude
+    io_bytes = tiles.io_bytes
+    standard_total = tiles.stored_standard
+    flash_total = tiles.stored_flash
+    ratio = tiles.stored_ratio
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(ratio > 10, f"Standard attention should store an order of magnitude more per head, got {ratio:.1f}x")
@@ -5245,9 +5244,8 @@ The GPT-2 notebook below uses eight equal segments of six layers. It applies the
 # │ How:     8 equal segments of 6 layers; boundary = segments x B x S x d x 2
 # │          bytes; live segment = per-layer FlashAttention activations x 6.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Models, BYTES_ADAM_STATE, BYTES_FP16, BYTES_FP32
+from mlsysim import Scenarios
 from mlsysim.core.units import GB, byte
-from mlsysim.physics import calc_activation_memory
 from mlsysim.fmt import check, fmt, fmt_memory, fmt_multiple
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -5255,23 +5253,25 @@ class GPT2SegmentCheckpoint:
     """Segment checkpointing for GPT-2 XL at batch 32 with FlashAttention-style attention."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    gpt2 = Models.Language.GPT2
-    capacity = Hardware.Cloud.H100.memory.capacity
-    batch_size = 32
-    seq_len = 1024
-    checkpoint_segments = 8
+    acts = Scenarios.Gpt2XlBatch32SegmentCheckpointed
+    step = Scenarios.Gpt2MixedPrecisionSegmentCheckpointedOnH100
+    gpt2 = acts.workload
+    capacity = step.hardware.memory.capacity
+    batch_size = acts.micro_batch
+    seq_len = acts.sequence
+    checkpoint_segments = acts.checkpoint_segments
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    segment_layers = gpt2.layers // checkpoint_segments
-    act_flash = calc_activation_memory(gpt2.layers, seq_len, batch_size, gpt2.hidden_dim, gpt2.heads, 2, "selective")
+    segment_layers = acts.segment_layers
+    act_flash = acts.activations("selective")
     # Keep all segment inputs while reconstructing one full segment. The live-state
     # estimate includes that segment's input again: conservative double counting.
-    boundary_memory = checkpoint_segments * batch_size * seq_len * gpt2.hidden_dim * BYTES_FP16
-    live_segment_memory = (act_flash / gpt2.layers) * segment_layers
-    act_ckpt = boundary_memory + live_segment_memory
+    boundary_memory = acts.segment_inputs
+    live_segment_memory = acts.live_segment
+    act_ckpt = acts.checkpointed_activations
     checkpoint_factor = (act_flash / act_ckpt).to("").magnitude
-    static = gpt2.size_in_bytes(BYTES_FP16) * 2 + gpt2.size_in_bytes(BYTES_FP32) + gpt2.size_in_bytes(BYTES_ADAM_STATE)
-    total_ckpt = static + act_ckpt
+    static = step.total
+    total_ckpt = step.training_total
     headroom = capacity - total_ckpt
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -5343,9 +5343,8 @@ Both techniques reduce activation-memory requirements without adding hardware, t
 # │ How:     Micro-batch 16 fits one H100 with FlashAttention-style attention;
 # │          accelerator-hours = one-H100 run time; ideal scaling.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, Models, Infrastructure, BYTES_ADAM_STATE, BYTES_FP16, BYTES_FP32
+from mlsysim import Hardware, Models, Infrastructure, Scenarios
 from mlsysim.core.units import GB, GiB, USD, hour
-from mlsysim.physics import calc_activation_memory
 from mlsysim.fmt import check, fmt, fmt_count, fmt_memory, fmt_memory_capacity, fmt_multiple, fmt_percent, fmt_time, fmt_usd, MarkdownStr
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -5355,15 +5354,14 @@ class GradientAccumulation:
     # ┌── 1. PARAMETERS ────────────────────────────────────────────────────────
     gpt2 = Models.Language.GPT2
     h100_mem = Hardware.Cloud.H100.memory.capacity
-    micro_batch = 16  # sequences per accelerator that fit with FlashAttention-style attention
+    micro_batch = Scenarios.Gpt2MixedPrecisionTwoMicroBatchesOnH100.batch_size  # sequences per accelerator that fit with FlashAttention-style attention
     effective_batch = 512  # scenario assumption: target effective batch
     gpus_accum = 8  # one eight-accelerator server
     gpu_hourly_rate = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate
     accel_hours = GPT2RunTimeEnergy.run_time.to(hour)  # one-H100 run time = total accelerator-hours
 
     # ┌── 2. CALCULATION ───────────────────────────────────────────────────────
-    static = gpt2.size_in_bytes(BYTES_FP16) * 2 + gpt2.size_in_bytes(BYTES_FP32) + gpt2.size_in_bytes(BYTES_ADAM_STATE)
-    micro_total = static + calc_activation_memory(gpt2.layers, 1024, micro_batch, gpt2.hidden_dim, gpt2.heads, 2, "selective")
+    micro_total = Scenarios.Gpt2MixedPrecisionTwoMicroBatchesOnH100.training_total
     accum_steps = effective_batch // (gpus_accum * micro_batch)
     gpus_naive = effective_batch // micro_batch
     batch_per_gpu = micro_batch * accum_steps
@@ -5524,9 +5522,8 @@ Training GPT-2 XL at batch 32 on a single H100 exposes the physical boundaries t
 # │          electricity price, and grid carbon intensity from the registry.
 # └─────────────────────────────────────────────────────────────────────────────
 import math
-from mlsysim import Hardware, Models, Infrastructure, BYTES_ADAM_STATE, BYTES_FP16, BYTES_FP32
+from mlsysim import Infrastructure, Scenarios
 from mlsysim.core.units import GB, GiB, USD, kWh, kilogram, metric_ton, second, day
-from mlsysim.physics import calc_activation_memory
 from mlsysim.fmt import (
     check,
     fmt,
@@ -5547,31 +5544,35 @@ class GPT2WalkthroughCalc:
     """GPT-2 XL at batch 32 on one H100: memory steps, feed, and run totals."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    gpt2 = Models.Language.GPT2
-    capacity = Hardware.Cloud.H100.memory.capacity
-    batch_size = 32
-    micro_batch = 16  # accumulation micro-batch (two per update)
-    seq_len = 1024
+    fp32_step = Scenarios.Gpt2Fp32AdamBatch32OnH100
+    amp_step = Scenarios.Gpt2MixedPrecisionAdamOnH100
+    flash_step = Scenarios.Gpt2MixedPrecisionFlashAttentionOnH100
+    accum_step = Scenarios.Gpt2MixedPrecisionTwoMicroBatchesOnH100
+    gpt2 = amp_step.workload
+    capacity = amp_step.hardware.memory.capacity
+    batch_size = amp_step.batch_size
+    micro_batch = accum_step.batch_size  # accumulation micro-batch (two per update)
+    seq_len = Scenarios.Gpt2XlBatch32Activations.sequence
     grid = Infrastructure.Grids.US_Avg
     electricity_rate = Infrastructure.Pricing.Cloud.ElectricityPerKwh.rate
-    recompute_overhead = 1 / 3  # one extra forward pass over a three-forward-pass step
+    recompute_overhead = Scenarios.Gpt2XlBatch32Activations.recompute_overhead  # one extra forward pass over a three-forward-pass step
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    p32 = gpt2.size_in_bytes(BYTES_FP32)
-    p16 = gpt2.size_in_bytes(BYTES_FP16)
-    static_fp32 = 2 * p32 + gpt2.size_in_bytes(BYTES_ADAM_STATE)
-    static_amp = 2 * p16 + p32 + gpt2.size_in_bytes(BYTES_ADAM_STATE)
-    act_none = calc_activation_memory(gpt2.layers, seq_len, batch_size, gpt2.hidden_dim, gpt2.heads, 2, "none")
-    act_flash = calc_activation_memory(gpt2.layers, seq_len, batch_size, gpt2.hidden_dim, gpt2.heads, 2, "selective")
-    act_flash_micro = calc_activation_memory(gpt2.layers, seq_len, micro_batch, gpt2.hidden_dim, gpt2.heads, 2, "selective")
-    total_fp32 = static_fp32 + 2 * act_none
-    total_amp = static_amp + act_none
-    total_flash = static_amp + act_flash
-    total_accum = static_amp + act_flash_micro
+    p32 = fp32_step.weights
+    p16 = amp_step.weights
+    static_fp32 = fp32_step.total
+    static_amp = amp_step.total
+    act_none = amp_step.activations
+    act_flash = flash_step.activations
+    act_flash_micro = accum_step.activations
+    total_fp32 = fp32_step.training_total
+    total_amp = amp_step.training_total
+    total_flash = flash_step.training_total
+    total_accum = accum_step.training_total
     total_ckpt = GPT2SegmentCheckpoint.total_ckpt
     per_sequence_flash = act_flash / batch_size
-    max_resident_batch = math.floor(((capacity - static_amp) / per_sequence_flash).to("").magnitude)
-    fp32_over = (total_fp32 / capacity).to("").magnitude
+    max_resident_batch = flash_step.max_resident_batch
+    fp32_over = fp32_step.training_capacity_multiple
     memory_reduction = (total_fp32 / total_accum).to("").magnitude
 
     busy_before = GPT2DataPipeline.serial_service_fraction
@@ -5596,7 +5597,7 @@ class GPT2WalkthroughCalc:
     capacity_label_str = fmt_memory_capacity(capacity, unit=GiB, precision=0, commas=False)
     static_gb_str = fmt_memory(round((static_amp).to(GB).magnitude) * GB, unit=GB, precision=0, commas=False)
     p32_gb_str = fmt_memory(round((p32).to(GB).magnitude) * GB, unit=GB, precision=0, commas=False)
-    adam_gb_str = fmt_memory(round((gpt2.size_in_bytes(BYTES_ADAM_STATE)).to(GB).magnitude) * GB, unit=GB, precision=0, commas=False)
+    adam_gb_str = fmt_memory(round((amp_step.optimizer_state).to(GB).magnitude) * GB, unit=GB, precision=0, commas=False)
     act_fp32_gb_str = fmt_memory(round((2 * act_none).to(GB).magnitude) * GB, unit=GB, precision=0, commas=False)
     act_accum_gb_str = fmt_memory(act_flash_micro, unit=GB, precision=1, commas=False)
     total_fp32_gb_str = fmt_memory(round((total_fp32).to(GB).magnitude) * GB, unit=GB, precision=0, commas=False)
