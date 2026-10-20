@@ -4555,3 +4555,12 @@ def test_trajectory_planning_seam_bridge_and_shoulder_swing():
     assert c.peak_acceleration.to("rad/s**2").magnitude == approx(30.0)
     assert c.peak_torque.to("N*m").magnitude == approx(5.505) and c.torque_rate.to("N*m/s").magnitude == approx(2202.0)
     assert not c.within_rate_limit and c.torque_rate_share == approx(2.202)
+
+
+def test_warehouse_jerk_limited_stop_matches_finished_budget():
+    """The trajectory chapter's S-curve stop and the enforcement chapter's finished budget share one jerk bound and one stop."""
+    base = Scenarios.WarehouseBaseJerkLimitedStop.result
+    budget = Scenarios.WarehouseFinishedStopAtDriveLimit.result
+    assert base.jerk.m_as("m/s**3") == pytest.approx(budget.jerk.m_as("m/s**3"))
+    assert base.stop_distance.m_as("mm") == pytest.approx(budget.stop_distance.m_as("mm"))
+    assert base.jerk_ramp_travel.m_as("mm") == pytest.approx(budget.jerk_ramp_travel.m_as("mm"))

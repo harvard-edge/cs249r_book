@@ -8271,6 +8271,7 @@ class Scenarios(Registry):
                     "polynomial's peak at the drive limit.",
         speed=_Embodied.MobileManipulator.WarehouseMobileManipulator.base.max_velocity,
         deceleration=_Embodied.Scenario.WarehouseAisle.a_brake,
+        jerk=_Embodied.Scenario.WarehouseAisle.j_brake,  # the site's stop jerk bound, shared with WarehouseFinishedStopAtDriveLimit
         delay=_Embodied.Scenario.WarehouseAisle.tau_delay,
         site=_Embodied.Scenario.WarehouseAisle,
     )
