@@ -407,6 +407,7 @@ The Training and Monitoring rows mix release prerequisites with later refinement
 # │ How: Calculate total dataset size needed to capture a 1% minority subgroup.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt, fmt_count, fmt_int, fmt_multiple, fmt_percent, fmt_pp
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -417,14 +418,15 @@ class RepresentationStats:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    target_imgs = 10_000
-    minority_fraction = 0.01
-    target_margin_pp = 1
-    confidence = 0.95
+    budget = Scenarios.OnePercentGroupEvaluationBudget
+    target_imgs = budget.target_per_group
+    minority_fraction = budget.group_share
+    target_margin_pp = budget.half_width * 100
+    confidence = budget.confidence
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    random_total = target_imgs / minority_fraction
-    multiplier = random_total / target_imgs
+    random_total = budget.random_collection
+    multiplier = budget.random_multiple
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(multiplier == 100, "Multiplier should be 100.")
@@ -631,6 +633,7 @@ An operational release gate must distinguish absence of evidence from evidence o
 # │ How: Compute metrics from confusion matrices for two demographic groups.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, check, fmt_math, fmt_percent, fmt_pp
 
 def _math_int(n):
@@ -645,33 +648,35 @@ class LoanFairness:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    a_tp, a_fn = 4500, 500
-    a_fp, a_tn = 1000, 4000
-    b_tp, b_fn = 600, 400
-    b_fp, b_tn = 200, 800
+    credit = Scenarios.CreditServiceTwoGroups
+    group_a, group_b = credit.groups["A"], credit.groups["B"]
+    a_tp, a_fn = int(group_a["tp"]), int(group_a["fn"])
+    a_fp, a_tn = int(group_a["fp"]), int(group_a["tn"])
+    b_tp, b_fn = int(group_b["tp"]), int(group_b["fn"])
+    b_fp, b_tn = int(group_b["fp"]), int(group_b["tn"])
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     a_total = a_tp + a_fn + a_fp + a_tn
     b_total = b_tp + b_fn + b_fp + b_tn
 
-    a_app_pct = (a_tp + a_fp) / a_total * 100
-    b_app_pct = (b_tp + b_fp) / b_total * 100
+    a_app_pct = credit.positive_rate("A") * 100
+    b_app_pct = credit.positive_rate("B") * 100
     dp_disparity = a_app_pct - b_app_pct
 
-    a_tpr_pct = a_tp / (a_tp + a_fn) * 100
-    b_tpr_pct = b_tp / (b_tp + b_fn) * 100
+    a_tpr_pct = credit.tpr("A") * 100
+    b_tpr_pct = credit.tpr("B") * 100
     tpr_disparity = a_tpr_pct - b_tpr_pct
 
-    a_fpr_pct = a_fp / (a_fp + a_tn) * 100
-    b_fpr_pct = b_fp / (b_fp + b_tn) * 100
-    a_fnr_pct = a_fn / (a_tp + a_fn) * 100
-    b_fnr_pct = b_fn / (b_tp + b_fn) * 100
+    a_fpr_pct = credit.fpr("A") * 100
+    b_fpr_pct = credit.fpr("B") * 100
+    a_fnr_pct = credit.fnr("A") * 100
+    b_fnr_pct = credit.fnr("B") * 100
 
     fpr_disparity = a_fpr_pct - b_fpr_pct
     a_qualified = a_tp + a_fn
     b_qualified = b_tp + b_fn
-    majority_acc_pct = (a_tp + a_tn) / a_total * 100
-    overall_acc_pct = (a_tp + a_tn + b_tp + b_tn) / (a_total + b_total) * 100
+    majority_acc_pct = credit.accuracy("A") * 100
+    overall_acc_pct = credit.overall_accuracy * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(tpr_disparity >= 25, f"TPR Disparity ({tpr_disparity:.1f}%) is too low.")
@@ -912,25 +917,27 @@ Each mitigation on the credit service, whether sample reweighting, adversarial d
 # │ Visualize Pareto frontier: accuracy vs demographic disparity; show
 import numpy as np
 from binder.tools.figures import style as book_style
+from mlsysim import Scenarios
 
 fig, ax, COLORS, plt = book_style.setup_plot(figsize=(6.2, 4))
+frontier = Scenarios.FairnessAccuracyFrontierSketch
 
 # =============================================================================
 # PLOT: The Fairness-Accuracy Pareto Frontier
 # =============================================================================
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-disparity = np.linspace(0.0, 0.18, 100)
-accuracy = 0.85 + 0.10 * (1 - np.exp(-20 * disparity))
+disparity = np.linspace(0.0, frontier.candidates["A"], 100)
+accuracy = frontier.accuracy(disparity)
 
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
 ax.plot(disparity, accuracy, color=COLORS['primary'], linewidth=2, linestyle='--')
 
-# Assumed candidate coordinates from the original illustrative example.
-_a_gap, _a_accuracy = 0.18, 0.947
-_b_gap, _b_accuracy = 0.05, 0.913
-_c_gap, _c_accuracy = 0.0, 0.85
-_gap_ratio = _a_gap / _b_gap
+# Candidate models on the hypothetical frontier.
+_a_gap, _a_accuracy = frontier.point("A")
+_b_gap, _b_accuracy = frontier.point("B")
+_c_gap, _c_accuracy = frontier.point("C")
+_gap_ratio = frontier.disparity_ratio("A", "B")
 ax.plot(_a_gap, _a_accuracy, 'o', color=COLORS['primary'], markersize=8)
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
@@ -999,6 +1006,7 @@ A real deployment locates its own candidate configurations on the plane of @fig-
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_usd, check, fmt_math, fmt_percent, fmt_pp
 from mlsysim.core.units import USD
 
@@ -1006,26 +1014,27 @@ class FairnessPrice:
     """Utility cost of closing the credit service's TPR gap via threshold adjustment."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    repay_margin = 1_500 * USD  # scenario assumption: lifetime margin on a repaid loan
-    default_loss = 3_000 * USD  # scenario assumption: loss on a loan that defaults
-    fp_increase_pp = 20  # scenario assumption: Group B FPR increase to close the TPR gap (pp)
-    group_a_tpr = LoanFairness.a_tpr_pct / 100  # credit service worked example
-    group_b_tpr = LoanFairness.b_tpr_pct / 100
-    group_b_fpr = LoanFairness.b_fpr_pct / 100
-    positive_base_rate = LoanFairness.b_qualified / LoanFairness.b_total  # Group B applicants who would repay
-    minority_group_share = LoanFairness.b_total / (LoanFairness.a_total + LoanFairness.b_total)
+    price = Scenarios.CreditServiceEqualOpportunityPrice  # the credit service worked example
+    repay_margin = price.repay_margin  # scenario assumption: lifetime margin on a repaid loan
+    default_loss = price.default_loss  # scenario assumption: loss on a loan that defaults
+    fp_increase_pp = price.fpr_increase * 100  # scenario assumption: Group B FPR increase to close the TPR gap (pp)
+    group_a_tpr = price.tpr_after
+    group_b_tpr = price.tpr_before
+    group_b_fpr = price.fpr_before
+    positive_base_rate = price.base_rate  # Group B applicants who would repay
+    minority_group_share = price.group_share
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Two-sided accounting: raising Group B's TPR adds repaid loans among
     # applicants who would repay (+margin), and the matching FPR rise adds
     # defaults among those who would not (-loss).
-    tpr_gap_pp = (group_a_tpr - group_b_tpr) * 100
-    extra_tp_value = (tpr_gap_pp / 100.0) * positive_base_rate * repay_margin
-    extra_fp_cost = (fp_increase_pp / 100.0) * (1 - positive_base_rate) * default_loss
-    net_change_per_applicant = extra_tp_value - extra_fp_cost
-    baseline_utility_per_applicant = group_b_tpr * positive_base_rate * repay_margin - group_b_fpr * (1 - positive_base_rate) * default_loss
-    loss_fraction_within_group = (-net_change_per_applicant / baseline_utility_per_applicant).to("").magnitude
-    population_average_loss = -net_change_per_applicant * minority_group_share
+    tpr_gap_pp = price.tpr_gap * 100
+    extra_tp_value = price.added_repaid_value
+    extra_fp_cost = price.added_default_cost
+    net_change_per_applicant = price.net_change
+    baseline_utility_per_applicant = price.baseline_utility
+    loss_fraction_within_group = price.loss_fraction
+    population_average_loss = price.population_average_loss
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(baseline_utility_per_applicant.to(USD).magnitude - 150.0) < 1e-6, "Baseline lending utility per Group B applicant should be $150.")
@@ -1635,27 +1644,28 @@ Where service-health monitoring catches crashes and timeouts, the technical debt
 # │
 # │ Note:    Reads LoanFairness.tpr_disparity from fairness-metrics-calc.
 # └─────────────────────────────────────────────────────────────────────────────
-import math
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, fmt_pp, fmt_count, check
 
 class BiasFeedbackLoop:
     """Loan-model disparity iterated over quarterly retraining cycles."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    gate_pp = 5.0  # release threshold used in the loan example
-    launch_gap_pp = 3.0  # scenario assumption: residual TPR gap after mitigation
-    next_audit_gap_pp = 3.3  # scenario assumption: gap at the next quarterly audit
-    alpha_sampled = 0.90  # scenario assumption: fitted factor once outcomes of marginal denials are sampled
-    unmitigated_gap_pp = LoanFairness.tpr_disparity  # pre-mitigation TPR gap from the worked example
-    horizon_cycles = 4  # one year of quarterly retraining
+    loop = Scenarios.CreditServiceBiasFeedback
+    gate_pp = loop.gate  # release threshold used in the loan example
+    launch_gap_pp = loop.launch_gap  # scenario assumption: residual TPR gap after mitigation
+    next_audit_gap_pp = loop.next_audit_gap  # scenario assumption: gap at the next quarterly audit
+    alpha_sampled = loop.sampled_factor  # scenario assumption: fitted factor once outcomes of marginal denials are sampled
+    unmitigated_gap_pp = loop.unmitigated_gap  # pre-mitigation TPR gap from the worked example
+    horizon_cycles = loop.horizon_cycles  # one year of quarterly retraining
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    alpha_fb = next_audit_gap_pp / launch_gap_pp
-    breach_cycles = math.ceil(math.log(gate_pp / launch_gap_pp) / math.log(alpha_fb))
-    gap_at_breach_pp = launch_gap_pp * alpha_fb**breach_cycles
-    gap_before_breach_pp = launch_gap_pp * alpha_fb ** (breach_cycles - 1)
-    unmitigated_horizon_pp = unmitigated_gap_pp * alpha_fb**horizon_cycles
-    sampled_gap_pp = launch_gap_pp * alpha_sampled**breach_cycles
+    alpha_fb = loop.factor
+    breach_cycles = loop.breach_cycle
+    gap_at_breach_pp = loop.gap_at_breach
+    gap_before_breach_pp = loop.gap_at(breach_cycles - 1)
+    unmitigated_horizon_pp = loop.unmitigated_at_horizon
+    sampled_gap_pp = loop.sampled_gap_at_breach
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(abs(alpha_fb - 1.10) < 1e-9, f"Fitted feedback factor should be 1.10, got {alpha_fb:.3f}.")
@@ -1710,21 +1720,23 @@ class BiasFeedbackLoop:
 # │ How:     impressions = users x slots; coverage = slots / catalog.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import check, fmt_count, fmt_percent
 
 class DLRMExposure:
     """Exposure feedback in the DLRM ranking service."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    users_daily = 10_000_000  # scenario assumption: daily active users of the ranking service
-    slots_per_user = 20  # scenario assumption: ranked items shown to each user per day
-    catalog_items = 1_000_000  # scenario assumption: items eligible for ranking
-    explore_fraction = 0.01  # scenario assumption: share of slots served by randomized exploration
+    exposure = Scenarios.RecommenderExplorationExposure
+    users_daily = exposure.daily_users  # scenario assumption: daily active users of the ranking service
+    slots_per_user = exposure.slots_per_user  # scenario assumption: ranked items shown to each user per day
+    catalog_items = exposure.catalog_items  # scenario assumption: items eligible for ranking
+    explore_fraction = exposure.explore_share  # scenario assumption: share of slots served by randomized exploration
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    impressions_daily = users_daily * slots_per_user
-    catalog_coverage = slots_per_user / catalog_items
-    explore_impressions_daily = impressions_daily * explore_fraction
+    impressions_daily = exposure.impressions
+    catalog_coverage = exposure.catalog_coverage
+    explore_impressions_daily = exposure.explore_impressions
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(catalog_coverage < 1e-4, "Each user should see a tiny fraction of the catalog.")
@@ -3203,6 +3215,7 @@ Teams assume fairness constraints can be retrofitted once models demonstrate str
 # │ How: Recompute from the confusion matrices in the worked example.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Scenarios
 from mlsysim.fmt import fmt, check, fmt_pp
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -3210,15 +3223,14 @@ class FairnessPitfallAnchor:
     """Local fairness metric recap for the aggregate-metrics pitfall."""
 
     # ┌── 1. LOAD (Confusion Matrices) ───────────────────────────────────────
-    a_tp, a_fn = 4500, 500
-    b_tp, b_fn = 600, 400
+    credit = Scenarios.CreditServiceTwoGroups
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    a_tpr_pct = a_tp / (a_tp + a_fn) * 100
-    b_tpr_pct = b_tp / (b_tp + b_fn) * 100
+    a_tpr_pct = credit.tpr("A") * 100
+    b_tpr_pct = credit.tpr("B") * 100
     tpr_disparity = a_tpr_pct - b_tpr_pct
-    a_fnr_pct = a_fn / (a_tp + a_fn) * 100
-    b_fnr_pct = b_fn / (b_tp + b_fn) * 100
+    a_fnr_pct = credit.fnr("A") * 100
+    b_fnr_pct = credit.fnr("B") * 100
     fnr_ratio = b_fnr_pct / a_fnr_pct
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
