@@ -253,3 +253,50 @@ def calc_attention_crossover(width, ffn_multiple=4, attention_projections=4):
     six times the width for the classic block."""
     _, _, total = calc_transformer_block_weights(width, ffn_multiple, attention_projections)
     return total / (2 * width)
+
+
+def calc_online_softmax(scores, values, block_size: int):
+    """
+    Softmax-weighted sum of ``values`` over ``scores``, one block of scores at a time.
+
+    Each block updates a running maximum ``m``, a running sum
+    ``l = sum exp(x - m)``, and a running output ``O = sum exp(x - m) v``;
+    when the maximum rises, the old ``l`` and ``O`` are rescaled by
+    ``exp(m_old - m_new)`` (Milakov and Gimelshein 2018; the inner loop of
+    FlashAttention, Dao et al. 2022). The result after the last block equals
+    the whole-row computation exactly.
+
+    Returns a list with one dict per block: ``max``, ``rescale`` (the factor
+    applied to the previous ``l`` and ``O``), ``sum``, and ``output``
+    (added 2026-10-20).
+    """
+    import math as _m
+    if len(scores) != len(values):
+        raise ValueError("scores and values must have the same length")
+    if block_size < 1:
+        raise ValueError("block_size must be at least 1")
+    rows = []
+    m, ell, out = -_m.inf, 0.0, 0.0
+    for start in range(0, len(scores), block_size):
+        xs = scores[start:start + block_size]
+        vs = values[start:start + block_size]
+        m_new = max(m, max(xs))
+        rescale = _m.exp(m - m_new) if m != -_m.inf else 0.0
+        ell = ell * rescale + sum(_m.exp(x - m_new) for x in xs)
+        out = out * rescale + sum(_m.exp(x - m_new) * v for x, v in zip(xs, vs))
+        m = m_new
+        rows.append(dict(max=m, rescale=rescale, sum=ell, output=out))
+    return rows
+
+
+def calc_score_matrix_intensity(head_dim, bytes_per_value):
+    """
+    Arithmetic intensity of materializing one head's attention scores in memory.
+
+    Each score costs ``2 d_head`` FLOPs (a dot product of length ``d_head``) and
+    is written once and read back once, ``2 x bytes_per_value`` bytes, so the
+    intensity is ``d_head / bytes_per_value`` FLOP per byte: 32 for 64-wide
+    heads in FP16, far below an accelerator's ridge point (added 2026-10-20).
+    """
+    bpv = _ensure_unit(bytes_per_value, ureg.byte).to(ureg.byte).magnitude
+    return (2 * head_dim / (2 * bpv)) * ureg.flop / ureg.byte

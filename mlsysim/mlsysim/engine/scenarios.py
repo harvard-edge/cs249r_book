@@ -7359,3 +7359,93 @@ class Scenarios(Registry):
         requests_per_day=10_000_000,  # scenario assumption: high-volume deployed model
         energy_per_request=Q_(0.001, "kWh"),  # scenario assumption: pedagogical per-query energy
     )
+
+    # ── Fitting GPT-2 XL's training step on one H100 (added 2026-10-20) ──────
+    # The batch-32 step from FP32 through mixed precision, FlashAttention,
+    # micro-batches, and segment checkpointing; the number formats and loss
+    # scaling behind mixed precision; and the attention tiles and online
+    # softmax behind FlashAttention.
+    Gpt2XlRunOnOneH100Fp32 = Gpt2XlRunOnOneH100.variant(
+        name="GPT-2 XL's training run on one H100's FP32 cores",
+        description="The same run at the H100's FP32 (non-tensor) peak, utilization held at 50 percent.",
+        peak_precision="fp32",
+    )
+    Gpt2XlRunOnOneH100Tf32 = Gpt2XlRunOnOneH100.variant(
+        name="GPT-2 XL's training run on one H100's TF32 tensor path",
+        description="The same run at the H100's dense TF32 peak, utilization held at 50 percent.",
+        peak_precision="tf32",
+    )
+    Gpt2XlMicroBatch16Activations = Gpt2XlBatch32Activations.variant(
+        name="GPT-2 XL's saved activations for a micro-batch of 16 sequences of 1,024 tokens, 16-bit",
+        description="Half the batch resident at a time, accumulated twice per update.",
+        micro_batch=Gpt2XlBatch32Block.batch_size // 2,  # scenario assumption: two micro-batches per update
+    )
+    Gpt2XlBatch32SegmentCheckpointed = Gpt2XlBatch32Activations.variant(
+        name="GPT-2 XL's batch-32 activations, checkpointed in 8 segments of 6 layers, scores not stored",
+        description="Each segment's 16-bit input is kept; the backward pass rebuilds one segment at a time.",
+        checkpoint_segments=8,  # scenario assumption: 48 layers in 8 equal segments
+    )
+    Gpt2MixedPrecisionFlashAttentionOnH100 = Gpt2MixedPrecisionAdamOnH100.variant(
+        name="GPT-2 XL in mixed precision at batch 32 on one H100, attention scores not stored",
+        description="16 B per parameter of state and the per-token activations only (FlashAttention).",
+        activations=Gpt2XlBatch32Activations.per_token_activations,
+    )
+    Gpt2MixedPrecisionTwoMicroBatchesOnH100 = Gpt2MixedPrecisionFlashAttentionOnH100.variant(
+        name="GPT-2 XL's batch of 32 as two accumulated micro-batches of 16 on one H100",
+        description="Mixed precision, FlashAttention, and 16 sequences' activations resident at a time.",
+        batch_size=Gpt2XlMicroBatch16Activations.micro_batch,
+        activations=Gpt2XlMicroBatch16Activations.per_token_activations,
+    )
+    Gpt2MixedPrecisionSegmentCheckpointedOnH100 = Gpt2MixedPrecisionFlashAttentionOnH100.variant(
+        name="GPT-2 XL's batch of 32 with segment checkpointing on one H100",
+        description="Mixed precision, FlashAttention, and 8 kept segment inputs plus one rebuilt segment.",
+        activations=Gpt2XlBatch32SegmentCheckpointed.checkpointed_activations,
+    )
+    Gpt2XlSingleCoreTokenizerFeed = _st.TokenizedBatchFeedScenario(
+        name="GPT-2 XL's batch of 32 tokenized on one host core and copied to an H100, in sequence",
+        description="Host tokenization and the PCIe copy of the token ids before every step, no prefetching.",
+        compute_time=Gpt2XlRunOnOneH100.step_time,
+        tokens_per_batch=Gpt2XlRunOnOneH100.tokens_per_step,
+        token_rate=Q_(50_000, "1/s"),  # scenario assumption: tokens per second on one host core
+        bytes_per_token=_BYTES_INT64,  # token ids as int64
+        link_bandwidth=_Hardware.Cloud.H100.interconnect.bandwidth,
+        workers=8,  # scenario assumption: loader workers in the parallel case
+    )
+    Fp16WeightSmallUpdates = _st.FloatAccumulationScenario(
+        name="A weight of 0.5 in FP16, BF16, and FP32 receiving updates of 0.0001",
+        description="One update, then 10,000; each sum is rounded to the format.",
+        weight=0.5,  # scenario assumption
+        update=1e-4,  # scenario assumption: learning rate times gradient
+        repeats=10_000,  # scenario assumption
+        formats=_FLOAT_FORMAT_BITS,
+    )
+    SsdGradientLossScaling = _st.LossScalingScenario(
+        name="SSD's activation gradients against FP16, unscaled and scaled by 8",
+        description="Micikevicius et al. (2018), Figure 3 histogram, and a dynamic scaler at 1,024.",
+        histogram=list(_Literature.SsdGradientHistogram.entries),
+        grid_high_px=35,  # read from the figure: gridline row of 64 percent
+        grid_high_pct=64,  # the figure's gridline label
+        grid_low_px=504,  # read from the figure: gridline row of 1/512 percent
+        grid_low_pct=2 ** -9,  # the figure's gridline label, 1/512 percent
+        zero_fraction=float(_Literature.TrainingMemory.SsdActivationGradientZeroFraction),
+        scale=float(_Literature.TrainingMemory.SsdLossScale),
+        float_bits=_FLOAT_FORMAT_BITS["fp16"],
+        dynamic_scale=2 ** 10,  # scenario assumption: a dynamic scaler's setting
+        probe_gradient=1e-6,  # scenario assumption: a small late-layer gradient
+    )
+    OnlineSoftmaxFourScores = _st.OnlineSoftmaxScenario(
+        name="Online softmax over four scores in two blocks",
+        description="Scores 1, 3, 2, 5 with values 10, 20, 30, 40, two scores per block.",
+        scores=[1, 3, 2, 5],  # scenario assumption: toy row
+        values=[10, 20, 30, 40],  # scenario assumption: toy row
+        block_size=2,  # scenario assumption
+    )
+    AttentionScores4096TokensFp32 = _st.AttentionTilingScenario(
+        name="One attention head at 4,096 tokens in FP32, in 128 x 128 tiles",
+        description="The score matrix, a tile, 16 heads, and what standard and FlashAttention store per head.",
+        seq_len=4096,  # scenario assumption: long-context example
+        head_dim=_Models.Language.GPT2.hidden_dim // _Models.Language.GPT2.heads,
+        tile=128,  # scenario assumption: tile side
+        heads=16,  # scenario assumption: heads in the example layer
+        bytes_per_value=_BYTES_FP32,
+    )

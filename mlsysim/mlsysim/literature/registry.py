@@ -49,6 +49,8 @@ DataPipelineResults = _load("data_pipeline_results", "DataPipelineResults", "Mea
 DataFileMeasurements = _load("data_file_measurements", "DataFileMeasurements", "Metadata of real public data files (a Parquet file, a WebDataset shard).")  # added 2026-10-20
 SpeechCommandsReleases = _load("speech_commands_releases", "SpeechCommandsReleases", "Speech Commands v1 and v2 sizes and cross-release accuracy (Warden 2018).")  # added 2026-10-20
 CompilerResults = _load("compiler_results", "CompilerResults", "Cited results of ML compilers and fused kernels (PyTorch 2, FlashAttention).")  # added 2026-10-20
+# Fitting a training step on one accelerator (added 2026-10-20)
+TrainingMemory = _load("training_memory", "TrainingMemory", "Cited results on fitting a training step in memory (loss scaling, recomputation, checkpointing, framework defaults).")
 SpaceflightAnomalies = _load("spaceflight_anomalies", "SpaceflightAnomalies", "Cited results of spaceflight anomaly inquiries (ESA Schiaparelli 2017).")
 # Diabetic retinopathy screening studies (added 2026-10-20)
 ScreeningStudies = _load("screening_studies", "ScreeningStudies", "Cited results of diabetic retinopathy screening systems (Gulshan 2016, Beede 2020, FDA DEN180001).")
@@ -367,6 +369,7 @@ class Literature(Registry):
     DeviceMeasurements = DeviceMeasurements  # added 2026-10-20
     SpaceflightAnomalies = SpaceflightAnomalies  # added 2026-10-20
     CompilerResults = CompilerResults  # added 2026-10-20
+    TrainingMemory = TrainingMemory  # added 2026-10-20
     ScreeningStudies = ScreeningStudies  # added 2026-10-20
     TestTimeCompute = TestTimeCompute  # added 2026-10-20
     ContextUse = ContextUse  # added 2026-10-20
@@ -401,6 +404,7 @@ class Literature(Registry):
     RecommendationSystems = RecommendationSystems  # network architectures (added 2026-10-20)
     ServingMemoryLayout = ServingMemoryLayout  # network architectures (added 2026-10-20)
     FlashAttentionBenchmark = _series.FlashAttentionBenchmark  # network architectures (added 2026-10-20)
+    SsdGradientHistogram = _series.SsdGradientHistogram  # added 2026-10-20
     RobustnessStudies = RobustnessStudies  # added 2026-10-20
     DataSelectionResults = DataSelectionResults  # added 2026-10-20
     ComputeTrend = ComputeTrend

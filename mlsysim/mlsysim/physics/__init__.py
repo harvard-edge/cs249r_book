@@ -755,3 +755,19 @@ from .scaling import calc_loss_reduction_compute_multiple  # added 2026-10-20
 __all__ += [
     "calc_loss_reduction_compute_multiple",
 ]
+
+# Fitting a training step on one accelerator (added 2026-10-20)
+from .memory import calc_checkpoint_memory_units
+from .numerics import calc_float_spacing, calc_repeated_add
+from .transformer import calc_online_softmax
+
+__all__ += [
+    "calc_checkpoint_memory_units",
+    "calc_float_spacing",
+    "calc_repeated_add",
+    "calc_online_softmax",
+]
+from .numerics import calc_float_decimal_digits
+from .transformer import calc_score_matrix_intensity
+
+__all__ += ["calc_float_decimal_digits", "calc_score_matrix_intensity"]

@@ -3517,7 +3517,10 @@ DAO_2022_FLASHATTENTION = _lit(
     url="https://arxiv.org/abs/2205.14135",
     verified="2026-10-20",
     notes=("Figure 2 (left), GPT-2 medium on an A100: HBM reads and writes 40.3 GB for standard "
-           "attention against 4.4 GB for FlashAttention; Sec. 1: up to 9x fewer HBM accesses."),
+           "attention against 4.4 GB for FlashAttention; Sec. 1: up to 9x fewer HBM accesses. "
+           "Figure 2 (left) also gives 66.6 against 75.2 GFLOPs and 41.7 against 7.3 ms (forward and "
+           "backward). Figure 1, left panel labels (A100): SRAM 19 TB/s (20 MB), HBM 1.5 TB/s (40 GB); "
+           "right panel caption: 7.6x speedup on the attention computation of GPT-2 (added 2026-10-20)."),
 )
 
 # Attacks on and defenses of learned systems (added 2026-10-20).
@@ -4121,4 +4124,54 @@ LUCCIONI_BLOOM_2023 = _lit(
     verified="2026-10-20",
     notes=("Table 3: final BLOOM training on the French grid (57 gCO2eq/kWh); embodied 11.2 t of 50.5 t "
            "total, 22.2 percent. Table 5: project dynamic emissions by process."),
+)
+
+
+# Fitting a training step on one accelerator (added 2026-10-20)
+MICIKEVICIUS_MIXED_PRECISION_2018 = _lit(
+    "prov:micikevicius-mixed-precision-2018",
+    "Micikevicius et al. (2018), Mixed Precision Training, ICLR 2018",
+    url="https://arxiv.org/abs/1710.03740",
+    verified="2026-10-18",
+    notes=("arXiv 1710.03740v3, page 4, Figure 3: histogram of activation-gradient magnitudes of the "
+           "SSD detector during FP32 training, log2 bins; the caption gives 67 percent of the values as "
+           "zero. Sec. 3.2: SSD diverges in FP16 without scaling; scaling the loss by 8 matches FP32. "
+           "The bar heights in the series micikevicius_ssd_gradient_histogram are pixel rows read from "
+           "the figure image (898 x 575 px)."),
+)
+CHEN_SUBLINEAR_MEMORY_2016 = _lit(
+    "prov:chen-sublinear-memory-2016",
+    "Chen et al. (2016), Training Deep Nets with Sublinear Memory Cost",
+    url="https://arxiv.org/abs/1604.06174",
+    verified="2026-10-18",
+    notes=("Abstract: the memory of a 1,000-layer deep residual network falls from 48 GB to 7 GB at "
+           "about 30 percent more running time."),
+)
+KORTHIKANTI_RECOMPUTATION_2023 = _lit(
+    "prov:korthikanti-recomputation-2023",
+    "Korthikanti et al. (2023), Reducing Activation Recomputation in Large Transformer Models, MLSys 2023",
+    url="https://arxiv.org/abs/2205.05198",
+    verified="2026-10-18",
+    notes=("arXiv 2205.05198v1. Table 2: activation bytes per layer sbh(34 + 5as/h) storing "
+           "everything, 34sbh with selective recomputation, 2sbh with full recomputation. Table 4: one "
+           "layer of the 22B GPT on A100s, forward plus backward, 19.6 ms without recomputation, 27.2 ms "
+           "with full recomputation, 20.9 ms with selective recomputation. Abstract: the 530B model on "
+           "2,240 A100s reaches 54.2 percent MFU, against 42.1 percent with full recomputation."),
+)
+HUGGINGFACE_PERF_TRAIN_GPU_ONE_V5 = _lit(
+    "prov:huggingface-perf-train-gpu-one-v5",
+    "Hugging Face Transformers v5.0.0 documentation, Efficient training on a single GPU "
+    "(docs/source/en/perf_train_gpu_one.md)",
+    url="https://huggingface.co/docs/transformers/perf_train_gpu_one",
+    verified="2026-10-18",
+    notes=("Gradient checkpointing: \"slower training speed (~20%)\". The accumulation example sets "
+           "per_device_train_batch_size=4 and gradient_accumulation_steps=16 (Apache-2.0)."),
+)
+ACCELERATOR_ONCHIP_SRAM_RANGE = _est(
+    "prov:accelerator-onchip-sram-range",
+    "MLSysBook, Model Training: on-chip SRAM of a modern accelerator",
+    ("The book's rounded range for one accelerator chip's on-chip SRAM (registers, shared memory, L1 and "
+     "L2 together): 30 to 50 MB at roughly 15 to 20 TB/s. The H100 has 50 MiB of L2 and 228 KiB of shared "
+     "memory per SM across 132 SMs; Dao et al. (2022) label the A100's SRAM 20 MB at 19 TB/s."),
+    verified="2026-10-20",
 )
