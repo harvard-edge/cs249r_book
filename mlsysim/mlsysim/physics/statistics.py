@@ -407,3 +407,30 @@ def calc_sample_collection_time(samples, request_rate, traffic_share):
     its planned guardrail sample in ``t = n / (r p)``.
     """
     return samples / (request_rate * traffic_share)
+
+
+def calc_split_conformal_rank(calibration_count: int, alpha: float) -> int:
+    """Rank of the sorted calibration score that bounds new scores at level 1 - alpha (added 2026-10-20).
+
+    Split conformal prediction takes the ``ceil((n + 1)(1 - alpha))``-th
+    smallest of ``n`` exchangeable calibration scores; a new score exceeds it
+    with probability at most ``alpha``. A rank above ``n`` means the
+    calibration set is too small to state the bound.
+
+    Source: Angelopoulos and Bates, "Conformal Prediction: A Gentle
+    Introduction," Found. Trends Mach. Learn. 16(4), 2023, Sec. 1.
+    """
+    if calibration_count < 1 or not 0.0 < alpha < 1.0:
+        raise ValueError("calibration_count must be >= 1 and alpha in (0, 1)")
+    return math.ceil((calibration_count + 1) * (1 - alpha))
+
+
+def calc_split_conformal_min_count(alpha: float) -> int:
+    """Fewest calibration scores for which the split-conformal rank exists (added 2026-10-20).
+
+    The rank ``ceil((n + 1)(1 - alpha))`` must not exceed ``n``, which holds
+    from ``n = ceil((1 - alpha) / alpha)``.
+    """
+    if not 0.0 < alpha < 1.0:
+        raise ValueError("alpha must be in (0, 1)")
+    return math.ceil((1 - alpha) / alpha)

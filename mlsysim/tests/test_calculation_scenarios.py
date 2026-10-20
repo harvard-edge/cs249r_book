@@ -3032,3 +3032,52 @@ def test_lifecycle_tco_payback_and_platform_benefit():
     assert Scenarios.TrainingOptimizationPayback.payback.to("month").magnitude == approx(1.777778)
     assert Scenarios.SharedPlatformBenefit50.benefit_cost_ratio == approx(1.25)
     assert Scenarios.SharedPlatformBenefit20.benefit_cost_ratio == approx(0.5)
+
+
+def test_sensor_perception_capture_and_age():
+    a = Scenarios.WarehouseNavCameraAge.result
+    assert [round(st[2].to("ms").magnitude, 1) for st in a.stages] == [8.0, 24.6, 25.4, 26.6, 29.1, 51.1, 51.6]
+    assert a.age.to("ms").magnitude == approx(51.6) and a.age_travel.to("mm").magnitude == approx(77.4)
+    assert a.arrival_offset.to("ms").magnitude == approx(26.6) and a.arrival_travel.to("mm").magnitude == approx(39.9)
+    assert a.trigger_travel.to("mm").magnitude == approx(12.0) and a.exposure_travel.to("mm").magnitude == approx(24.0)
+    assert a.sensor_age_middle_row.to("ms").magnitude == approx(16.3)
+    assert a.top_row_excess.to("ms").magnitude == approx(7.9333)
+    assert a.frame_travel.to("mm").magnitude == approx(25.0)
+    assert a.batch_wait.to("ms").magnitude == approx(50.0) and a.batched_age.to("ms").magnitude == approx(101.6)
+    assert round(100 * a.capture_share) == 48 and round(100 * a.backbone_share) == 43
+    r = Scenarios.WarehouseNavCameraRollingShutter.result
+    assert r.row_interval.to("us").magnitude == approx(5.4605) and r.skew.to("mm").magnitude == approx(24.9)
+    assert r.lateral_skew.to("mm").magnitude == approx(9.13) and r.lateral_share == approx(0.060867)
+    assert Scenarios.WarehouseNavCameraRollingShutterAisleSpeed.result.skew.to("mm").magnitude == approx(21.58)
+    e = Scenarios.WarehouseRackEndTimingAttitude.result
+    assert e.timing_travel.to("mm").magnitude == approx(1.5) and e.timing_lateral.to("mm").magnitude == approx(0.55)
+    assert e.angle_lateral.to("mm").magnitude == approx(19.198)
+    m = Scenarios.WarehouseLongAisleMountError.result
+    assert m.angle_lateral.to("mm").magnitude == approx(261.80) and m.angle_lateral_share == approx(1.7453)
+    assert Scenarios.WarehouseLidarExtrinsicShift.result.angle_lateral_share == approx(1.0)
+    l = Scenarios.WarehouseRackEndLidarAge.result
+    assert l.sweep_travel.to("mm").magnitude == approx(75.0) and l.sweep_rotation.to("mrad").magnitude == approx(25.0)
+    assert l.sector_angle.to("deg").magnitude == approx(61.158) and l.age_streamed.to("ms").magnitude == approx(19.494)
+    assert l.age_full.to("ms").magnitude == approx(61.0) and l.slack_streamed.to("ms").magnitude == approx(32.106)
+    assert Scenarios.WarehouseChunkLease.result.renewal_lateness_limit.to("ms").magnitude == approx(10.0)
+    c = Scenarios.WarehouseLidarClockConversion.result
+    assert c.drift_per_interval.to("us").magnitude == approx(10.0)
+    assert c.dispatch_age_limit.to("ms").magnitude == approx(51.8) and c.bound_travel.to("mm").magnitude == approx(0.3)
+
+
+def test_sensor_perception_error_scales():
+    s = Scenarios.WarehouseStereoRigDepthError.result
+    assert s.sigma_near.to("mm").magnitude == approx(12.5) and s.sigma_far.to("mm").magnitude == approx(312.5)
+    assert s.sigma_target.to("mm").magnitude == approx(3.78125) and s.sigma_growth == approx(25.0)
+    assert s.inset_near.to("mm").magnitude == approx(162.5) and s.inset_far.to("mm").magnitude == approx(462.5)
+    assert s.range_at_loc_allowance.to("m").magnitude == approx(4.0)
+    assert s.range_at_side_clearance.to("m").magnitude == approx(6.9282)
+    assert s.range_at_side_clearance_half_baseline.to("m").magnitude == approx(4.8990)
+    assert s.baseline_bias.to("mm").magnitude == approx(10.0)
+    p = Scenarios.VisualServoDelayPhaseMargin.result
+    assert p.delay_ceiling.to("ms").magnitude == approx(78.540) and p.share_used == approx(0.76394)
+    assert p.crossover_frequency.to("Hz").magnitude == approx(1.5915)
+    k = Scenarios.ClearanceInsetConformalRank.result
+    assert (k.min_count, k.rank, k.rank_from_top) == (99, 991, 10)
+    assert Scenarios.DenseFogVisibility.result.visibility_range.to("m").magnitude == approx(59.915)
+    assert Scenarios.AluminumLinkWarming.result.expansion.to("mm").magnitude == approx(0.231)

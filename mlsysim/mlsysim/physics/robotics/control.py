@@ -741,3 +741,25 @@ def calc_axi_fifo_contention(
         "total_fifo": (compute + queue_fifo + own_read).to(ureg.microsecond),
         "total_priority_bypass": (compute + queue_bypass + own_read).to(ureg.microsecond),
     }
+
+
+def calc_delay_phase_margin_ceiling(phase_margin, crossover):
+    """
+    Longest pure delay a loop can absorb before its phase margin is gone (added 2026-10-20).
+
+    Equation:
+        phase lost = omega_c tau  =>  tau_max = PM / omega_c
+
+    A pure delay leaves the gain unchanged and removes phase in proportion to
+    frequency, so at the gain crossover omega_c it spends the nominal margin
+    PM (radians) at tau_max.
+
+    Source: Franklin, Powell, and Emami-Naeini, Feedback Control of Dynamic
+    Systems, 8th ed. (2019), Sec. 6.4 (time delay); the delay margin.
+    """
+    validate_positive(crossover, "crossover")
+    pm = phase_margin.to(ureg.radian).magnitude
+    if pm <= 0:
+        raise ValueError("phase_margin must be positive")
+    wc = crossover.to(ureg.radian / ureg.second).magnitude
+    return (pm / wc * ureg.second).to(ureg.millisecond)

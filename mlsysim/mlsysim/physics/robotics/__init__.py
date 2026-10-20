@@ -144,3 +144,26 @@ __all__ = [
     "calc_contact_timescale",
 ]
 
+
+# Sensing error scales (added 2026-10-20)
+from .control import calc_delay_phase_margin_ceiling
+from .sensing import (
+    calc_stereo_depth_sigma,
+    calc_stereo_range_for_sigma,
+    calc_stereo_baseline_bias,
+    calc_lever_arm_error,
+    calc_scan_sector_angle,
+    calc_contrast_visibility_range,
+    calc_thermal_expansion,
+)
+
+__all__ += [
+    "calc_delay_phase_margin_ceiling",
+    "calc_stereo_depth_sigma",
+    "calc_stereo_range_for_sigma",
+    "calc_stereo_baseline_bias",
+    "calc_lever_arm_error",
+    "calc_scan_sector_angle",
+    "calc_contrast_visibility_range",
+    "calc_thermal_expansion",
+]

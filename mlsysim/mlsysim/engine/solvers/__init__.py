@@ -385,3 +385,29 @@ from .neural import DenseNetworkModel, EpochOverheadModel  # neural computation 
 __all__ += ["DenseNetworkModel", "EpochOverheadModel"]
 from .trends import ParameterGrowthModel  # added 2026-10-20
 __all__ += ["ParameterGrowthModel"]
+# --- Sensor perception (added 2026-10-20) ---
+from .perception import (
+    ObservationAgeModel,
+    RollingShutterSkewModel,
+    TimingAttitudeErrorModel,
+    LidarSweepAgeModel,
+    StereoDepthErrorModel,
+    DelayPhaseMarginModel,
+    ConformalInsetModel,
+    ClockConversionModel,
+    VisibilityRangeModel,
+    ThermalExpansionModel,
+)
+
+__all__ += [
+    "ObservationAgeModel",
+    "RollingShutterSkewModel",
+    "TimingAttitudeErrorModel",
+    "LidarSweepAgeModel",
+    "StereoDepthErrorModel",
+    "DelayPhaseMarginModel",
+    "ConformalInsetModel",
+    "ClockConversionModel",
+    "VisibilityRangeModel",
+    "ThermalExpansionModel",
+]

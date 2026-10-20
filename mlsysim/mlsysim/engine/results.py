@@ -2453,6 +2453,7 @@ class LeaseBudgetResult(SolverResult):
     stall_last_admission: Quantity           # second renewal completes, then the proposer stalls
     stall_lease_expiry: Quantity
     stall_brake_onset: Quantity
+    renewal_lateness_limit: Optional[Quantity] = None  # lease - renewal period: a renewal this late lapses the lease (added 2026-10-20)
 
 
 class LatencyTailResult(SolverResult):
@@ -2685,3 +2686,114 @@ class ParameterGrowthResult(SolverResult):
 
 
 __all__ += ["ParameterGrowthResult"]
+
+
+# --- Sensor perception: capture timing, age, and error scales (added 2026-10-20) ---
+
+class ObservationAgeResult(SolverResult):
+    """Result from ObservationAgeModel: a camera observation's age from exposure midpoint to dispatch."""
+    stages: List[Tuple[str, Quantity, Quantity]]  # (stage, duration, age after the stage)
+    age: Quantity                    # exposure midpoint to dispatch
+    age_travel: Quantity
+    arrival_offset: Quantity         # exposure midpoint to DMA completion (an arrival stamp's error)
+    arrival_travel: Quantity
+    trigger_offset: Quantity         # exposure start to midpoint (a trigger stamp's error)
+    trigger_travel: Quantity
+    exposure_travel: Quantity        # travel during the exposure itself (blur scale)
+    capture_before_compute: Quantity  # half the exposure plus the readout: top-row sensor age
+    sensor_age_middle_row: Quantity  # half the exposure plus half the readout
+    top_row_excess: Quantity         # top-row sensor age minus one frame period
+    capture_share: float             # capture_before_compute / age
+    backbone_share: float            # backbone stage / age
+    frame_period: Quantity
+    frame_travel: Quantity           # travel during one frame period (one dropped frame)
+    batch_frames: int
+    batch_waits: List[Quantity]      # wait of each batched frame but the newest, oldest first
+    batch_wait: Quantity             # the oldest frame's wait, (n - 1) frame periods
+    batch_wait_travel: Quantity
+    batched_age: Quantity            # age + batch_wait
+    batched_age_ratio: float
+
+
+class RollingShutterSkewResult(SolverResult):
+    """Result from RollingShutterSkewModel: row timing and the skew a moving camera records."""
+    row_interval: Quantity
+    midpoint_lag: Quantity           # half the exposure
+    skew: Quantity                   # along-track travel between the first and last rows
+    skew_over_allowance: float
+    lateral_skew: Quantity           # sideways shift of a target at range while turning
+    lateral_share: float             # of the side clearance
+    exposure_travel: Quantity        # blur: travel during one row's exposure
+
+
+class TimingAttitudeErrorResult(SolverResult):
+    """Result from TimingAttitudeErrorModel: position errors from a timing error and an angle error."""
+    timing_travel: Quantity          # v dt
+    misorientation: Quantity         # omega dt
+    timing_lateral: Quantity         # d omega dt
+    angle_lateral: Quantity          # d theta (small angle)
+    angle_lateral_share: Optional[float] = None  # of the stated reference distance
+
+
+class LidarSweepAgeResult(SolverResult):
+    """Result from LidarSweepAgeModel: one sweep's motion and a sector's age, streamed or whole."""
+    sweep_period: Quantity
+    sweep_travel: Quantity
+    sweep_rotation: Quantity
+    sector_angle: Quantity
+    sector_time: Quantity
+    age_streamed: Quantity           # sector time + data latency + sync bound
+    age_full: Quantity               # sweep period + data latency + sync bound
+    travel_streamed: Quantity
+    travel_full: Quantity
+    slack_streamed: Quantity         # reference age - streamed age
+
+
+class StereoDepthErrorResult(SolverResult):
+    """Result from StereoDepthErrorModel: one-sigma depth error against range and the clearances it spends."""
+    sigma_near: Quantity
+    sigma_far: Quantity
+    sigma_target: Quantity
+    range_ratio: float               # far / near
+    sigma_growth: float              # sigma_far / sigma_near = range_ratio ** 2
+    inset_near: Quantity             # ray clearance + one sigma (the shortcut inset)
+    inset_far: Quantity
+    range_at_loc_allowance: Quantity
+    range_at_side_clearance: Quantity
+    range_at_side_clearance_half_baseline: Quantity
+    baseline_bias: Quantity
+
+
+class DelayPhaseMarginResult(SolverResult):
+    """Result from DelayPhaseMarginModel: the delay a loop's phase margin can absorb."""
+    phase_margin: Quantity           # radians
+    crossover_frequency: Quantity    # Hz
+    delay_ceiling: Quantity
+    delay: Quantity
+    share_used: float
+
+
+class ConformalInsetResult(SolverResult):
+    """Result from ConformalInsetModel: the calibration rank behind a split-conformal bound."""
+    alpha: float
+    calibration_count: int
+    min_count: int
+    rank: int
+    rank_from_top: int
+
+
+class ClockConversionResult(SolverResult):
+    """Result from ClockConversionModel: drift between syncs and the dispatch limit a conversion bound sets."""
+    drift_per_interval: Quantity
+    dispatch_age_limit: Quantity
+    bound_travel: Quantity
+
+
+class VisibilityRangeResult(SolverResult):
+    """Result from VisibilityRangeModel: the range at which fog erases contrast."""
+    visibility_range: Quantity
+
+
+class ThermalExpansionResult(SolverResult):
+    """Result from ThermalExpansionModel: a heated member's length change."""
+    expansion: Quantity
