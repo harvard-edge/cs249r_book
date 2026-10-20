@@ -32,6 +32,7 @@
 \usepackage{booktabs,amsmath}
 \usetikzlibrary{arrows.meta,positioning,calc}
 \graphicspath{{images/}}
+\input{images/numbers.tex}
 \setcounter{mlsystotalsections}{6}
 
 \title{Network Fabrics}
@@ -79,15 +80,15 @@
   \note{[2.5 min] [CORE] Microsoft ran RDMA over Ethernet (RoCE) across data centers with tens of thousands of servers, with the fabric configured so that it never drops a packet. A server died with an incomplete mapping from its IP address to its hardware address. Traffic for it then hit switches that did not know where to send it, and the lossless traffic class froze on switches the dead server never used. ENGAGE: students vote by raising fingers, then write the letter down. Do not reveal it; Segment 4 answers it with a diagram. Most students pick A or C, because they picture one broken component sending bad traffic. The answer is a property of the fabric's own flow control. WARN: the photo shows a generic data center; it is not Microsoft's. LINK: the same mechanism is a hazard for any training cluster built on RoCE.}
 \end{frame}
 
-\begin{frame}{Recall: what does 10 GB cost at each tier?}
+\begin{frame}{Recall: what does \val{buffer_gb} GB cost at each tier?}
   \mlsysactivity{Retrieval}{1 min}
   \centering
   {\Large\bfseries Close your notes.}\\[0.2cm]
-  {\normalsize Estimate the time to move 10 GB one hop through HBM (accelerator memory),\\NVLink (GPU to GPU inside a node), and InfiniBand (node to node).}\\[0.35cm]
+  {\normalsize Estimate the time to move \val{buffer_gb} GB one hop through HBM (accelerator memory),\\NVLink (GPU to GPU inside a node), and InfiniBand (node to node).}\\[0.35cm]
   \uncover<2->{\safeimg[width=0.82\textwidth,height=2.8cm,keepaspectratio]{staircase_recall.pdf}\\[0.05cm]
-  {\small 3,350, 450, and 50 GB/s per direction. The last tier is today's subject.}}
+  {\small \val{hbm_gbs}, \val{nvlink_gbs}, and \val{ib_gbs} GB/s per direction. The last tier is today's subject.}}
   \mlsyscredit{Lecture 2; Compute Infrastructure, Napkin Math 2.3 (H100 HBM, NVLink, and one NDR InfiniBand port).}
-  \note{[1 min] [CORE] Retrieval from Lecture 2, the bandwidth staircase. Give 30 seconds. Step 2: 10 GB over HBM at 3,350 GB/s takes 3.0 ms; over NVLink at 450 GB/s per direction, 22.2 ms; over one InfiniBand port at 50 GB/s, 200 ms. Each step down the staircase costs about an order of magnitude. Lecture 2 placed tensor parallelism on NVLink and let data parallelism cross InfiniBand. Today asks what happens past that last step, where the fabric begins.}
+  \note{[1 min] [CORE] Retrieval from Lecture 2, the bandwidth staircase. Give 30 seconds. Step 2: \val{buffer_gb} GB over HBM at \val{hbm_gbs} GB/s takes \val{stair_hbm_ms} ms; over NVLink at \val{nvlink_gbs} GB/s per direction, \val{stair_nvlink_ms} ms; over one InfiniBand port at \val{ib_gbs} GB/s, \val{stair_ib_ms} ms. Each step down the staircase costs about an order of magnitude. Lecture 2 placed tensor parallelism on NVLink and let data parallelism cross InfiniBand. Today asks what happens past that last step, where the fabric begins.}
 \end{frame}
 
 \begin{frame}{What decides how long a collective takes on a fabric?}
@@ -101,12 +102,12 @@
   \end{itemize}
   \vspace{0.1cm}
   {\small\textcolor{midgray}{Collective: an operation all workers perform together, such as AllReduce.}}\\[0.05cm]
-  {\small\textcolor{midgray}{Running case: 175B model, 16-bit gradients, 1,024 H100s, one 400 Gb/s port per GPU.}}
+  {\small\textcolor{midgray}{Running case: \val{params_b}B model, 16-bit gradients, \val{ref_gpus} H100s, one \val{ndr_gbps} Gb/s port per GPU.}}
   \fleetterm{$T_{\text{comm}}(N)$}{Communication ($C_2$)}
-  \note{[1.5 min] [CORE] The title is the driving question; a collective is an operation that a group of workers performs together, such as AllReduce, which combines every worker's gradients and returns the result to all. Each goal is one or two segments. The running case is the volume's reference job, Archetype A: a 175-billion-parameter dense transformer whose gradients are 350 GB at 2 bytes per parameter, trained on 1,024 H100 GPUs in 128 nodes of 8. Each GPU has its own network interface card (NIC) with one 400 Gb/s NDR InfiniBand port, 50 GB/s per direction. LINK: in Lecture 1's Fleet Law, $T_{\text{step}}(N) = T_{\text{compute}}/N + T_{\text{comm}}(N) + T_{\text{sync}}(N) - T_{\text{overlap}}$, today's mechanisms live in $T_{\text{comm}}$ and hand their waiting to $T_{\text{sync}}$. Every mechanism slide names its term. The accent line at the bottom names the Fleet Law term and C$^3$ axis that today's mechanisms act on; say it once.}
+  \note{[1.5 min] [CORE] The title is the driving question; a collective is an operation that a group of workers performs together, such as AllReduce, which combines every worker's gradients and returns the result to all. Each goal is one or two segments. The running case is the volume's reference job, Archetype A: a \val{params_b}-billion-parameter dense transformer whose gradients are \val{grad_gb} GB at \val{grad_bytes} bytes per parameter, trained on \val{ref_gpus} H100 GPUs in \val{ref_nodes} nodes of \val{gpus_per_node}. Each GPU has its own network interface card (NIC) with one \val{ndr_gbps} Gb/s NDR InfiniBand port, \val{ib_gbs} GB/s per direction. LINK: in Lecture 1's Fleet Law, $T_{\text{step}}(N) = T_{\text{compute}}/N + T_{\text{comm}}(N) + T_{\text{sync}}(N) - T_{\text{overlap}}$, today's mechanisms live in $T_{\text{comm}}$ and hand their waiting to $T_{\text{sync}}$. Every mechanism slide names its term. The accent line at the bottom names the Fleet Law term and C$^3$ axis that today's mechanisms act on; say it once.}
 \end{frame}
 
-\begin{frame}{Leaving the node, each GPU drops from 450 to 50 GB/s}
+\begin{frame}{Leaving the node, each GPU drops from \val{nvlink_gbs} to \val{ib_gbs} GB/s}
   \begin{columns}[c]
     \begin{column}{0.4\textwidth}
       \centering\safeimg[width=\textwidth,height=4.2cm,keepaspectratio]{hgx-b200-board.jpg}\\[0.1cm]
@@ -117,15 +118,15 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Photo: Pokiiri, CC BY-SA 4.0, Wikimedia Commons. Data: MLSysIM interconnect series (IEEE 802.3, IBTA, NVIDIA specs), Network Fabrics figure 1, redrawn; per direction, NVLink summed over one GPU's links.}
-  \note{[2.5 min] [CORE] Real, then abstract. Left: an eight-GPU board of the kind the reference node uses; this photo is the newer B200 generation. Inside the board the GPUs talk over NVLink. Outside, the reference DGX H100 node pairs each GPU with one NIC. Right: per-direction bandwidth by first product year. Violet solid is NVLink, summed over one GPU's links; orange dashed is one InfiniBand port; gray is one Ethernet port. For the H100 in 2022, NVLink gives 450 GB/s per direction (half of 900 GB/s bidirectional) and an NDR port 50 GB/s, 9 times less. Every generation since 2016 keeps a gap of this size. ENGAGE: if NVLink and ports both double each generation, does the problem shrink? (Expected: no; the ratio stays.) WARN: the 9 times bounds the cost of crossing the boundary; how much a job feels depends on what it sends across, which the next slides take up. Fleet Law term: this ratio sets the floor of $T_{\text{comm}}$ for traffic that leaves the node.}
+  \note{[2.5 min] [CORE] Real, then abstract. Left: an eight-GPU board of the kind the reference node uses; this photo is the newer B200 generation. Inside the board the GPUs talk over NVLink. Outside, the reference DGX H100 node pairs each GPU with one NIC. Right: per-direction bandwidth by first product year. Violet solid is NVLink, summed over one GPU's links; orange dashed is one InfiniBand port; gray is one Ethernet port. For the H100 in 2022, NVLink gives \val{nvlink_gbs} GB/s per direction (half of \val{nvlink_bidir_gbs} GB/s bidirectional) and an NDR port \val{ib_gbs} GB/s, \val{nvlink_ib_ratio} times less. Every generation since 2016 keeps a gap of this size. ENGAGE: if NVLink and ports both double each generation, does the problem shrink? (Expected: no; the ratio stays.) WARN: the \val{nvlink_ib_ratio} times bounds the cost of crossing the boundary; how much a job feels depends on what it sends across, which the next slides take up. Fleet Law term: this ratio sets the floor of $T_{\text{comm}}$ for traffic that leaves the node.}
 \end{frame}
 
-\begin{frame}{A 30 ms exposed AllReduce is 13\% of every step}
+\begin{frame}{A \val{ar_inter_ms} ms exposed AllReduce is \val{exposed_pct}\% of every step}
   \centering
   \mlsyssteps[width=0.92\textwidth,height=4.0cm,keepaspectratio]{step_timeline_step}{2}\\[0.15cm]
   {\normalsize Exposed communication: $T_{\text{comm}}(N) - T_{\text{overlap}}$, the part no computation hides.}
   \mlsyscredit{Network Fabrics, figure 2. Both AllReduce durations are illustrative inputs that the chapter did not derive from link rates.}
-  \note{[1.5 min] [OPTIONAL] Step 1: an illustrative step on eight GPUs inside one node: 100 ms of forward computation, 100 ms of backward, and an AllReduce of 1 ms over NVLink. Step 2: the same compute on 64 GPUs across nodes, with an assumed 30 ms AllReduce over InfiniBand. During those 30 ms, every GPU waits. That is 30 of 230 ms, about 13 percent of every step, paid on every accelerator-hour of the run. In Fleet Law terms the red block is $T_{\text{comm}}(N)$ minus whatever $T_{\text{overlap}}$ hides; here nothing hides it. WARN: the chapter chose both durations to show the effect; they are not computed from the link rates, and 87 percent is a share of the schedule rather than arithmetic utilization. LINK: Lecture 5 develops overlap and exposed communication. FLEX: if short on time, state the 13 percent on the previous slide.}
+  \note{[1.5 min] [OPTIONAL] Step 1: an illustrative step on eight GPUs inside one node: \val{step_fwd_ms} ms of forward computation, \val{step_bwd_ms} ms of backward, and an AllReduce of \val{ar_intra_ms} ms over NVLink. Step 2: the same compute on 64 GPUs across nodes, with an assumed \val{ar_inter_ms} ms AllReduce over InfiniBand. During those \val{ar_inter_ms} ms, every GPU waits. That is \val{ar_inter_ms} of \val{step_inter_ms} ms, about \val{exposed_pct} percent of every step, paid on every accelerator-hour of the run. In Fleet Law terms the red block is $T_{\text{comm}}(N)$ minus whatever $T_{\text{overlap}}$ hides; here nothing hides it. WARN: the chapter chose both durations to show the effect; they are not computed from the link rates, and \val{step_compute_pct} percent is a share of the schedule rather than arithmetic utilization. LINK: Lecture 5 develops overlap and exposed communication. FLEX: if short on time, state the \val{exposed_pct} percent on the previous slide.}
 \end{frame}
 
 \begin{frame}{Synchronous training releases its flows together}
@@ -142,8 +143,8 @@
   {\small ECMP (equal-cost multipath) hashes each flow to one fixed path.}\\[0.15cm]
   \mlsyssteps[width=0.86\textwidth,height=3.7cm,keepaspectratio]{ecmp_step}{2}\\[0.1cm]
   {\normalsize\uncover<2->{Path 1 drains last, at twice the even split.}}
-  \mlsyscredit{Network Fabrics, \S3.2 and \S3.6.4 (4 paths, 8 large gradient flows).}
-  \note{[2.5 min] [CORE] Step 1: eight large gradient flows across four equal-cost paths. An even split puts two on each path; each path drains in 2 units, where 1 unit is one flow alone on a path. ENGAGE: ECMP picks each flow's path by hashing its header, so placement is effectively random and fixed for the flow's life. What is the worst likely outcome, and how long does the exchange take? Give a minute; pairs answer. Step 2: one hash outcome the chapter describes: 4, 2, 2, 0. Path 1 carries four flows and drains at 4 units while path 4 sits idle. The exchange takes twice as long, and the barrier waits for it. With millions of short flows hashing averages out; with eight elephants it does not, and the collision lasts as long as the flows. WARN: this is not a capacity shortage; the four paths together have room. Fleet Law term: $T_{\text{comm}}$ doubles. Land the segment: a training fabric is judged by when its last required transfer completes, and synchronized elephant flows break the averages that data-center networks rely on.}
+  \mlsyscredit{Network Fabrics, \S3.2 and \S3.6.4 (\val{ecmp_paths} paths, \val{ecmp_flows} large gradient flows).}
+  \note{[2.5 min] [CORE] Step 1: eight large gradient flows across four equal-cost paths. An even split puts two on each path; each path drains in \val{ecmp_even} units, where 1 unit is one flow alone on a path. ENGAGE: ECMP picks each flow's path by hashing its header, so placement is effectively random and fixed for the flow's life. What is the worst likely outcome, and how long does the exchange take? Give a minute; pairs answer. Step 2: one hash outcome the chapter describes: \val{ecmp_load_0}, \val{ecmp_load_1}, \val{ecmp_load_2}, \val{ecmp_load_3}. Path 1 carries four flows and drains at \val{ecmp_worst} units while path 4 sits idle. The exchange takes twice as long, and the barrier waits for it. With millions of short flows hashing averages out; with eight elephants it does not, and the collision lasts as long as the flows. WARN: this is not a capacity shortage; the four paths together have room. Fleet Law term: $T_{\text{comm}}$ doubles. Land the segment: a training fabric is judged by when its last required transfer completes, and synchronized elephant flows break the averages that data-center networks rely on.}
 \end{frame}
 
 % =============================================================================
@@ -167,16 +168,16 @@
         \toprule
         Medium & Reach & Cost \\
         \midrule
-        Copper (DAC) & 1 to 3 m & about \$50 \\
-        Active optical & 3 to 30 m & about \$500 \\
+        Copper (DAC) & 1 to 3 m & about \$\val{dac_usd} \\
+        Active optical & 3 to 30 m & about \$\val{aoc_usd} \\
         Pluggable optics & over 30 m & highest \\
         \bottomrule
       \end{tabular}\\[0.3cm]
-      \small 10,000 GPUs: about 20,000 spine links, \$10M and 400 kW for the optics alone.
+      \small \val{optics_gpus} GPUs: about \val{optics_links} spine links, \$\val{optics_musd}M and \val{optics_kw} kW for the optics alone.
     \end{column}
   \end{columns}
-  \mlsyscredit{Photos: Labsy, CC BY-SA 4.0; Jesseschulman, CC BY-SA 3.0; Wikimedia Commons. Network Fabrics, table 3 and Systems Perspective 3.2 (2 spine links per GPU, \$500 and 20 W per link, assumed).}
-  \note{[1.5 min] [OPTIONAL] Level 1, the wire. Left: a direct-attach copper cable (DAC), and a pluggable optical module, which converts electrical signals to light; these photos show older 10G and 40G parts with the same form. At 400 Gb/s, links send PAM4 signals, four voltage levels carrying 2 bits per symbol, with one third the spacing between levels of 2-level signaling, so they need forward error correction (FEC), which costs roughly 100 ns at each switch. Copper loses more signal as lane rates rise, so a passive copper cable reaches only 1 to 3 m, about one rack. Beyond that, active optical cables and pluggable optics cost ten times more and draw power. The chapter's estimate: 10,000 GPUs with two spine links each need about 20,000 optical links, \$10M of cabling, and 400 kW for one module per link. ENGAGE: why pack 70 to 100 kW into one rack? (Expected: to keep links short enough for cheap copper.) FLEX: cut, and say that distance is money.}
+  \mlsyscredit{Photos: Labsy, CC BY-SA 4.0; Jesseschulman, CC BY-SA 3.0; Wikimedia Commons. Network Fabrics, table 3 and Systems Perspective 3.2 (\val{optics_per_gpu} spine links per GPU, \$\val{optics_link_usd} and \val{optics_link_w} W per link, assumed).}
+  \note{[1.5 min] [OPTIONAL] Level 1, the wire. Left: a direct-attach copper cable (DAC), and a pluggable optical module, which converts electrical signals to light; these photos show older 10G and 40G parts with the same form. At 400 Gb/s, links send PAM4 signals, four voltage levels carrying 2 bits per symbol, with one third the spacing between levels of 2-level signaling, so they need forward error correction (FEC), which costs roughly \val{fec_ns} ns at each switch. Copper loses more signal as lane rates rise, so a passive copper cable reaches only 1 to 3 m, about one rack. Beyond that, active optical cables and pluggable optics cost \val{aoc_dac_word} times more and draw power. The chapter's estimate: \val{optics_gpus} GPUs with \val{optics_per_gpu_word} spine links each need about \val{optics_links} optical links, \$\val{optics_musd}M of cabling, and \val{optics_kw} kW for one module per link. ENGAGE: why pack \val{rack_low_kw} to \val{rack_high_kw} kW into one rack? (Expected: to keep links short enough for cheap copper.) FLEX: cut, and say that distance is money.}
 \end{frame}
 
 \begin{frame}{RDMA takes the kernel and host copies off the data path}
@@ -195,22 +196,22 @@
     \end{column}
     \begin{column}{0.66\textwidth}
       \small The reliable-delivery contract: completion with a bounded recovery tail.\\[0.1cm]
-      {\footnotesize A drop on a Go-Back-N NIC at 50 GB/s resends about 250 KB.}
+      {\footnotesize A drop on a Go-Back-N NIC at \val{ib_gbs} GB/s resends about \val{gbn_kb} KB.}
     \end{column}
   \end{columns}
   \mlsyscredit{Photo: InfiniBand switch and cables, older generation (ChrisDag, CC BY 2.0, Wikimedia Commons). Network Fabrics, \S3.4.2, \S3.4.3, table 4.}
-  \note{[2.5 min] [CORE] Both RDMA stacks must keep switch buffers from overflowing under synchronized bursts. Left: InfiniBand uses credits. Each receiver advertises its free buffer space, and the sender sends only into advertised space, so a buffer cannot overflow; congestion shows up as senders waiting. Right: RoCE carries RDMA over Ethernet, which normally drops packets when buffers fill. To avoid drops, a filling switch port sends a PAUSE frame (priority flow control, PFC) that stops its upstream neighbor for one traffic class, and explicit congestion notification (ECN) marks packets so senders slow down first. Why care about drops at all? Some RDMA NICs recover by Go-Back-N: they resend everything after the lost packet. The resent window is line rate times detection delay: 50 GB/s times a 5 microsecond round trip is 250 KB, and the barrier waits for it. ENGAGE: is losslessness a property of RDMA? (Expected: no; it is a deployment choice; PFC-free designs instead use selective retransmission.) Bottom left: an older InfiniBand switch and cables. LINK: Segment 4 shows what PAUSE frames can do.}
+  \note{[2.5 min] [CORE] Both RDMA stacks must keep switch buffers from overflowing under synchronized bursts. Left: InfiniBand uses credits. Each receiver advertises its free buffer space, and the sender sends only into advertised space, so a buffer cannot overflow; congestion shows up as senders waiting. Right: RoCE carries RDMA over Ethernet, which normally drops packets when buffers fill. To avoid drops, a filling switch port sends a PAUSE frame (priority flow control, PFC) that stops its upstream neighbor for one traffic class, and explicit congestion notification (ECN) marks packets so senders slow down first. Why care about drops at all? Some RDMA NICs recover by Go-Back-N: they resend everything after the lost packet. The resent window is line rate times detection delay: \val{ib_gbs} GB/s times a \val{gbn_rtt_us} microsecond round trip is \val{gbn_kb} KB, and the barrier waits for it. ENGAGE: is losslessness a property of RDMA? (Expected: no; it is a deployment choice; PFC-free designs instead use selective retransmission.) Bottom left: an older InfiniBand switch and cables. LINK: Segment 4 shows what PAUSE frames can do.}
 \end{frame}
 
-\begin{frame}{A 4 KB message pays startup; a 350 MB shard pays bandwidth}
+\begin{frame}{A \val{ctrl_kb} KB message pays startup; a \val{shard_mb} MB shard pays bandwidth}
   \begin{columns}[T]
     \begin{column}{0.38\textwidth}
       \begin{mlsyscard}{mlsysaccent}
         \textbf{Alpha-beta model}\\[0.1cm]
         $T(n) = \alpha + n/\beta$\\[0.05cm]
         {\footnotesize $\alpha$: fixed startup latency\\$\beta$: sustained bandwidth\\$n$: message bytes}\\[0.15cm]
-        NDR: $\alpha$ 1.5 \textmu s, $\beta$ 50 GB/s\\
-        RoCE, 100 Gb/s:\\ \quad $\alpha$ 5 \textmu s, $\beta$ 12.5 GB/s
+        NDR: $\alpha$ \val{ndr_alpha_us} \textmu s, $\beta$ \val{ib_gbs} GB/s\\
+        RoCE, \val{roce_gbps} Gb/s:\\ \quad $\alpha$ \val{roce_alpha_us} \textmu s, $\beta$ \val{roce_beta_gbs} GB/s
       \end{mlsyscard}
     \end{column}
     \begin{column}{0.59\textwidth}
@@ -219,24 +220,24 @@
         \toprule
         & NDR & RoCE & Ratio \\
         \midrule
-        \uncover<2->{4 KB control & 1.58 \textmu s & 5.32 \textmu s & 3.4$\times$ } \\
-        \uncover<3->{350 MB shard & 7.0 ms & 28.0 ms & 4$\times$ } \\
-        \uncover<4->{RoCE at 400 Gb/s & & 5.08 \textmu s; 7.0 ms & } \\
+        \uncover<2->{\val{ctrl_kb} KB control & \val{ctrl_ndr_us} \textmu s & \val{ctrl_roce_us} \textmu s & \val{ctrl_ratio}$\times$ } \\
+        \uncover<3->{\val{shard_mb} MB shard & \val{shard_ndr_ms} ms & \val{shard_roce_ms} ms & \val{shard_ratio}$\times$ } \\
+        \uncover<4->{RoCE at \val{roce400_gbps} Gb/s & & \val{ctrl_roce400_us} \textmu s; \val{shard_roce400_ms} ms & } \\
         \bottomrule
       \end{tabular}\\[0.3cm]
-      \uncover<5->{\normalsize Crossover: $n^* = \alpha\beta = $ \textbf{75 KB} on NDR.}
+      \uncover<5->{\normalsize Crossover: $n^* = \alpha\beta = $ \textbf{\val{cross_ndr_kb} KB} on NDR.}
     \end{column}
   \end{columns}
   \mlsyscredit{Network Fabrics, Napkin Math 3.1 and \S3.4.4 (modeled paths whose values vary by deployment; Hockney 1994).}
-  \note{[2.5 min] [CORE] The $\alpha$-$\beta$ model (Hockney): a message of $n$ bytes takes a fixed startup time $\alpha$ (NIC processing, switch hops, error correction) plus $n$ over the sustained bandwidth $\beta$. In this volume $\alpha$ and $\beta$ always mean these two things. Step 2: a 4 KB control message, the kind that tells a pipeline stage its next microbatch is ready: $1.5 + 4{,}000/50\times10^9$ s $= 1.5 + 0.08 = 1.58$ \textmu s on NDR; $5 + 0.32 = 5.32$ \textmu s on RoCE at 100 Gb/s. 3.4 times, from $\alpha$. Step 3: a 350 MB gradient shard, the chapter's rounding of one rank's 1/1,024 share of 350 GB (342 MB): 7.0 ms against 28.0 ms, 4 times, from $\beta$. Step 4: separate the two effects. RoCE on a 400 Gb/s link still takes 5.08 \textmu s for 4 KB, but 7.0 ms for 350 MB. Step 5: the two terms are equal at $n^* = \alpha\beta = 1.5\times10^{-6} \times 50\times10^9 = 75$ KB. WARN: the parameters describe modeled paths; measured values vary with NIC, switches, software, and load. Fleet Law term: this is $T_{\text{comm}}$ for one transfer.}
+  \note{[2.5 min] [CORE] The $\alpha$-$\beta$ model (Hockney): a message of $n$ bytes takes a fixed startup time $\alpha$ (NIC processing, switch hops, error correction) plus $n$ over the sustained bandwidth $\beta$. In this volume $\alpha$ and $\beta$ always mean these two things. Step 2: a \val{ctrl_kb} KB control message, the kind that tells a pipeline stage its next microbatch is ready: $\val{ndr_alpha_us} + \val{ctrl_bytes}/\val{ib_gbs}\times10^9$ s $= \val{ndr_alpha_us} + \val{ctrl_ndr_wire_us} = \val{ctrl_ndr_us}$ \textmu s on NDR; $\val{roce_alpha_us} + \val{ctrl_roce_wire_us} = \val{ctrl_roce_us}$ \textmu s on RoCE at \val{roce_gbps} Gb/s. \val{ctrl_ratio} times, from $\alpha$. Step 3: a \val{shard_mb} MB gradient shard, the chapter's rounding of one rank's 1/\val{ref_gpus} share of \val{grad_gb} GB (\val{shard_exact_mb} MB): \val{shard_ndr_ms} ms against \val{shard_roce_ms} ms, \val{shard_ratio} times, from $\beta$. Step 4: separate the two effects. RoCE on a \val{roce400_gbps} Gb/s link still takes \val{ctrl_roce400_us} \textmu s for \val{ctrl_kb} KB, but \val{shard_roce400_ms} ms for \val{shard_mb} MB. Step 5: the two terms are equal at $n^* = \alpha\beta = \val{ndr_alpha_us}\times10^{-6} \times \val{ib_gbs}\times10^9 = \val{cross_ndr_kb}$ KB. WARN: the parameters describe modeled paths; measured values vary with NIC, switches, software, and load. Fleet Law term: this is $T_{\text{comm}}$ for one transfer.}
 \end{frame}
 
-\begin{frame}{Below 75 KB, startup latency sets the transfer time}
+\begin{frame}{Below \val{cross_ndr_kb} KB, startup latency sets the transfer time}
   \centering
   \safeimg[width=0.92\textwidth,height=4.8cm,keepaspectratio]{alphabeta_crossover.pdf}\\[0.05cm]
-  {\small Knees: 75 KB on NDR, 62.5 KB on RoCE. Gradients sit far right; pipeline handoffs far left.}
+  {\small Knees: \val{cross_ndr_kb} KB on NDR, \val{cross_roce_kb} KB on RoCE. Gradients sit far right; pipeline handoffs far left.}
   \mlsyscredit{Network Fabrics, figure 7 and Napkin Math 3.1, redrawn (modeled $\alpha$ and $\beta$).}
-  \note{[1.5 min] [OPTIONAL] Transfer time against message size, log-log, for both modeled paths. Each path is flat while $\alpha$ dominates and becomes a straight line once $n/\beta$ dominates; the dots are the knees, 75 KB on NDR and 62.5 KB on RoCE at 100 Gb/s. The two squares are the worked example: the 4 KB control message sits on the flat part, where only a lower $\alpha$ helps (fewer hops, a better transport); the 350 MB shard sits on the straight part, where only a higher $\beta$ helps. ENGAGE: a team wants to speed up its pipeline handoffs and proposes buying 800 Gb/s links. What do you tell them? (Expected: the handoffs are latency bound; cut hops or software overhead.) LINK: Lecture 5 multiplies this cost by a collective's round count. FLEX: skip if the worked example landed.}
+  \note{[1.5 min] [OPTIONAL] Transfer time against message size, log-log, for both modeled paths. Each path is flat while $\alpha$ dominates and becomes a straight line once $n/\beta$ dominates; the dots are the knees, \val{cross_ndr_kb} KB on NDR and \val{cross_roce_kb} KB on RoCE at \val{roce_gbps} Gb/s. The two squares are the worked example: the \val{ctrl_kb} KB control message sits on the flat part, where only a lower $\alpha$ helps (fewer hops, a better transport); the \val{shard_mb} MB shard sits on the straight part, where only a higher $\beta$ helps. ENGAGE: a team wants to speed up its pipeline handoffs and proposes buying 800 Gb/s links. What do you tell them? (Expected: the handoffs are latency bound; cut hops or software overhead.) LINK: Lecture 5 multiplies this cost by a collective's round count. FLEX: skip if the worked example landed.}
 \end{frame}
 
 \begin{frame}{Does 2$\times$ bandwidth speed up a 10 KB message?}
@@ -245,21 +246,21 @@
     \begin{column}{0.42\textwidth}
       \begin{mlsyscard}{mlsysaccent}
         \textbf{Given}\\[0.1cm]
-        $\alpha = 1.5$ \textmu s\\
-        HDR, 200 Gb/s: $\beta = 25$ GB/s\\
-        NDR, 400 Gb/s: $\beta = 50$ GB/s\\
-        $n = 10$ KB
+        $\alpha = \val{ndr_alpha_us}$ \textmu s\\
+        HDR, \val{hdr_gbps} Gb/s: $\beta = \val{hdr_gbs}$ GB/s\\
+        NDR, \val{ndr_gbps} Gb/s: $\beta = \val{ib_gbs}$ GB/s\\
+        $n = \val{small_kb}$ KB
       \end{mlsyscard}
     \end{column}
     \begin{column}{0.55\textwidth}
       \normalsize
-      \uncover<2->{HDR: $1.5 + 0.40 = 1.90$ \textmu s\\[0.1cm]
-      NDR: $1.5 + 0.20 = 1.70$ \textmu s\\[0.25cm]}
-      \uncover<3->{{\large\textbf{10.5\% faster}} for twice the link rate.}
+      \uncover<2->{HDR: $\val{ndr_alpha_us} + \val{small_hdr_wire_us} = \val{small_hdr_us}$ \textmu s\\[0.1cm]
+      NDR: $\val{ndr_alpha_us} + \val{small_ndr_wire_us} = \val{small_ndr_us}$ \textmu s\\[0.25cm]}
+      \uncover<3->{{\large\textbf{\val{small_gain_pct}\% faster}} for twice the link rate.}
     \end{column}
   \end{columns}
   \mlsyscredit{Network Fabrics, \S3.11 (fallacy: more bandwidth always means faster training).}
-  \note{[2 min] [CORE] ENGAGE: one minute alone, then compare with a neighbor. Step 2: the transmission term is $10{,}000 / 25\times10^9$ s $= 0.40$ \textmu s on HDR and 0.20 \textmu s on NDR. Add the 1.5 \textmu s startup: 1.90 against 1.70 \textmu s. Step 3: doubling the link rate makes this message 10.5 percent faster, because 10 KB is far below the 75 KB crossover. The chapter lists this as a fallacy: more bandwidth always means faster training. A bandwidth upgrade pays roughly in proportion only when messages sit well above $n^*$. WARN: students often apply the line-rate ratio to every transfer; check the message size first.}
+  \note{[2 min] [CORE] ENGAGE: one minute alone, then compare with a neighbor. Step 2: the transmission term is $\val{small_bytes} / \val{hdr_gbs}\times10^9$ s $= \val{small_hdr_wire_us}$ \textmu s on HDR and \val{small_ndr_wire_us} \textmu s on NDR. Add the \val{ndr_alpha_us} \textmu s startup: \val{small_hdr_us} against \val{small_ndr_us} \textmu s. Step 3: doubling the link rate makes this message \val{small_gain_pct} percent faster, because \val{small_kb} KB is far below the \val{cross_ndr_kb} KB crossover. The chapter lists this as a fallacy: more bandwidth always means faster training. A bandwidth upgrade pays roughly in proportion only when messages sit well above $n^*$. WARN: students often apply the line-rate ratio to every transfer; check the message size first.}
 \end{frame}
 
 \begin{frame}[fragile]{Measured NCCL time fits the model at both ends only}
@@ -269,12 +270,12 @@
 \begin{semiverbatim}\scriptsize
        size   time  algbw  busbw
         (B)   (us) (GB/s) (GB/s)
-          8  13.67   0.00   0.00
-      65536  19.54   3.35   5.87
-    8388608  83.04 101.01 176.77
-  134217728  586.4 228.88 400.53
- 1073741824 4029.4 266.48 466.33
-17179869184  62648 274.23 479.90
+          \val{nccl_size_0}  \val{nccl_time_0}   \val{nccl_algbw_0}   \val{nccl_busbw_0}
+      \val{nccl_size_1}  \val{nccl_time_1}   \val{nccl_algbw_1}   \val{nccl_busbw_1}
+    \val{nccl_size_2}  \val{nccl_time_2} \val{nccl_algbw_2} \val{nccl_busbw_2}
+  \val{nccl_size_3}  \val{nccl_time_3} \val{nccl_algbw_3} \val{nccl_busbw_3}
+ \val{nccl_size_4} \val{nccl_time_4} \val{nccl_algbw_4} \val{nccl_busbw_4}
+\val{nccl_size_5}  \val{nccl_time_5} \val{nccl_algbw_5} \val{nccl_busbw_5}
 \end{semiverbatim}
       {\footnotesize 8 H100s in one node, over NVLink.}
     \end{column}
@@ -282,8 +283,8 @@
       \centering\safeimg[width=\textwidth,height=5.0cm,keepaspectratio]{nccl_measured.pdf}
     \end{column}
   \end{columns}
-  \mlsyscredit{NVIDIA exemplar-performance, nccl-tests all\_reduce\_perf sample output (out-of-place columns), via MLSysIM; Network Fabrics, figure 8. Model: floor = median time up to 64 KB; $\beta$ = algbw at 16 GB.}
-  \note{[2 min] [CORE] Left: real output from the standard NCCL benchmark, all\_reduce\_perf, published by NVIDIA for one node of eight H100s connected by NVLink; six of 32 rows. "algbw" is bytes over time; "busbw" rescales it by $2(N-1)/N$ so it compares with link speed. Right: all 32 measured points (red) against a two-parameter model built from two summary values: the small-message floor, about 17 \textmu s, as $\alpha$, and the 16 GB rate, 274 GB/s, as $\beta$. The model puts the knee at 4.7 MB, which the chapter rounds to 5 MB. It is close at both ends but optimistic in the middle. From 8 to 128 MB the measurement runs up to 1.7 times the model, because delivered bandwidth is still ramping. Data-parallel gradient buckets often fall in exactly that range. ENGAGE: why would a real collective underperform the model at mid sizes? (Expected: per-round startup inside the algorithm, protocol switches, pipelining not yet full.) WARN: this collective runs over NVLink inside one node and never touches the network; it shows the model's shape, and NDR numbers differ. Land the segment: startup latency prices small messages and bandwidth prices large ones; check where your messages sit before buying either.}
+  \mlsyscredit{NVIDIA exemplar-performance, nccl-tests all\_reduce\_perf sample output (out-of-place columns), via MLSysIM; Network Fabrics, figure 8. Model: floor = median time up to \val{nccl_floor_cut_kb} KB; $\beta$ = algbw at \val{nccl_top_gb} GB.}
+  \note{[2 min] [CORE] Left: real output from the standard NCCL benchmark, all\_reduce\_perf, published by NVIDIA for one node of eight H100s connected by NVLink; six of \val{nccl_rows} rows. "algbw" is bytes over time; "busbw" rescales it by $2(N-1)/N$ so it compares with link speed. Right: all \val{nccl_rows} measured points (red) against a two-parameter model built from two summary values: the small-message floor, about \val{nccl_floor_us} \textmu s, as $\alpha$, and the \val{nccl_top_gb} GB rate, \val{nccl_bw_gbs} GB/s, as $\beta$. The model puts the knee at \val{nccl_knee_mb} MB, which the chapter rounds to \val{nccl_knee_round_mb} MB. It is close at both ends but optimistic in the middle. From \val{nccl_mid_lo_mb} to \val{nccl_mid_hi_mb} MB the measurement runs up to \val{nccl_mid_ratio} times the model, because delivered bandwidth is still ramping. Data-parallel gradient buckets often fall in exactly that range. ENGAGE: why would a real collective underperform the model at mid sizes? (Expected: per-round startup inside the algorithm, protocol switches, pipelining not yet full.) WARN: this collective runs over NVLink inside one node and never touches the network; it shows the model's shape, and NDR numbers differ. Land the segment: startup latency prices small messages and bandwidth prices large ones; check where your messages sit before buying either.}
 \end{frame}
 
 % =============================================================================
@@ -297,8 +298,8 @@
   \centering
   \mlsyssteps[width=0.88\textwidth,height=4.4cm,keepaspectratio]{bisection_step}{2}\\[0.1cm]
   {\small Bisection bandwidth: the smallest total link capacity across any cut into two equal halves.}
-  \mlsyscredit{Network Fabrics, Definition 3.4 (1,024 GPUs, 400 Gb/s links).}
-  \note{[2 min] [CORE] Step 1: split the 1,024 GPUs into two halves of 512. Traffic from one half to the other must cross the cut. In a non-blocking fabric, 512 links of 50 GB/s cross it, 25.6 TB/s in each direction. Bisection bandwidth is the smallest such capacity over every possible equal split, so it is the worst-case ceiling for traffic that must cross. Step 2: a spine oversubscribed 4:1, with a quarter as much uplink as downlink, leaves 6.4 TB/s. For a fixed payload that saturates the cut, the transfer time quadruples. WARN: aggregate bandwidth, the sum of all edge links, can be large while bisection is small; a star of 1,000 links meeting at one switch is limited by that switch. WARN: whether a real AllReduce slows by 4 times depends on how many of its bytes cross the cut, which placement and the collective schedule decide. Fleet Law term: the cut bounds $T_{\text{comm}}$ for cut-crossing bytes.}
+  \mlsyscredit{Network Fabrics, Definition 3.4 (\val{ref_gpus} GPUs, \val{ndr_gbps} Gb/s links).}
+  \note{[2 min] [CORE] Step 1: split the \val{ref_gpus} GPUs into two halves of \val{cut_half}. Traffic from one half to the other must cross the cut. In a non-blocking fabric, \val{cut_half} links of \val{ib_gbs} GB/s cross it, \val{cut_full_tbs} TB/s in each direction. Bisection bandwidth is the smallest such capacity over every possible equal split, so it is the worst-case ceiling for traffic that must cross. Step 2: a spine oversubscribed \val{oversub}:1, with a quarter as much uplink as downlink, leaves \val{cut_over_tbs} TB/s. For a fixed payload that saturates the cut, the transfer time quadruples. WARN: aggregate bandwidth, the sum of all edge links, can be large while bisection is small; a star of 1,000 links meeting at one switch is limited by that switch. WARN: whether a real AllReduce slows by \val{cut_slowdown} times depends on how many of its bytes cross the cut, which placement and the collective schedule decide. Fleet Law term: the cut bounds $T_{\text{comm}}$ for cut-crossing bytes.}
 \end{frame}
 
 \begin{frame}{A fat-tree adds spines until uplinks match downlinks}
@@ -317,12 +318,12 @@
     \toprule
     Switch, ports at 400 Gb/s ($k$) & 2 tiers: $k^2/2$ & 3 tiers: $k^3/4$ & 3-tier switches \\
     \midrule
-    Quantum-2 class, $k = 64$ & 2,048 & 65,536 & 5,120 \\
-    102.4 Tb/s class, $k = 256$ (derived) & 32,768 & 4,194,304 & \\
+    Quantum-2 class, $k = \val{k64}$ & \val{k64_two} & \val{k64_three} & \val{k64_switches} \\
+    \val{asic_tbps} Tb/s class, $k = \val{k256}$ (derived) & \val{k256_two} & \val{k256_three} & \\
     \bottomrule
   \end{tabular}
-  \mlsyscredit{Photo: older InfiniBand switch module (CC BY 2.5, Wikimedia Commons). Network Fabrics, fig. 9, Def. 3.6, \S3.5.2, \S3.10.1 (Al-Fares et al. 2008). $k = 256$ derived.}
-  \note{[2.5 min] [CORE] Step 1: a three-tier fat-tree built from 4-port switches: leaf switches attach GPUs, spines join leaves in a pod, core switches join pods. Each tier boundary carries 16 links, as many as the 16 GPUs below, so no tier is oversubscribed. Step 2: from a GPU in pod 1 to one in pod 4 there are 4 equal-cost paths of 5 switches each (thick orange is one). The capacity exists only if routing spreads traffic across them, which is the ECMP problem from Segment 1. Right: an older InfiniBand switch module; each port is one unit of radix. The table: with radix $k$, the number of ports per switch, two tiers reach $k^2/2$ hosts and three reach $k^3/4$. NVIDIA's Quantum-2 has 64 ports at 400 Gb/s, which reach 2,048 GPUs in two tiers, enough for our 1,024, or 65,536 in three, at about $5k^2/4 = 5{,}120$ switches. A 102.4 Tb/s switch split into 256 ports of 400 Gb/s (derived) would reach 32,768 in two tiers. ENGAGE: why does higher radix matter more than faster ports? (Expected: it removes a tier, and with it hops and optics.) WARN: a third tier also adds hops: 3 switch traversals inside a pod, 5 between pods.}
+  \mlsyscredit{Photo: older InfiniBand switch module (CC BY 2.5, Wikimedia Commons). Network Fabrics, fig. 9, Def. 3.6, \S3.5.2, \S3.10.1 (Al-Fares et al. 2008). $k = \val{k256}$ derived.}
+  \note{[2.5 min] [CORE] Step 1: a three-tier fat-tree built from 4-port switches: leaf switches attach GPUs, spines join leaves in a pod, core switches join pods. Each tier boundary carries 16 links, as many as the 16 GPUs below, so no tier is oversubscribed. Step 2: from a GPU in pod 1 to one in pod 4 there are 4 equal-cost paths of 5 switches each (thick orange is one). The capacity exists only if routing spreads traffic across them, which is the ECMP problem from Segment 1. Right: an older InfiniBand switch module; each port is one unit of radix. The table: with radix $k$, the number of ports per switch, two tiers reach $k^2/2$ hosts and three reach $k^3/4$. NVIDIA's Quantum-2 has \val{k64} ports at \val{ndr_gbps} Gb/s, which reach \val{k64_two} GPUs in two tiers, enough for our \val{ref_gpus}, or \val{k64_three} in three, at about $5k^2/4 = \val{k64_switches}$ switches. A \val{asic_tbps} Tb/s switch split into \val{k256} ports of \val{ndr_gbps} Gb/s (derived) would reach \val{k256_two} in two tiers. ENGAGE: why does higher radix matter more than faster ports? (Expected: it removes a tier, and with it hops and optics.) WARN: a third tier also adds hops: \val{hops_pod} switch traversals inside a pod, \val{hops_core} between pods.}
 \end{frame}
 
 \begin{frame}{What does a 4:1 spine cost a \$300M cluster?}
@@ -331,29 +332,29 @@
     \begin{column}{0.43\textwidth}
       \begin{mlsyscard}{mlsysaccent}
         \textbf{Given (scenario)}\\[0.05cm]
-        1,024 GPUs, \$300M\\
-        5 GB gradient payload per GPU\\
+        \val{ref_gpus} GPUs, \$\val{os_cost_musd}M\\
+        \val{os_payload_gb} GB gradient payload per GPU\\
         Ring crosses the cut on every edge\\
-        30\% of each step communicates
+        \val{os_comm_pct}\% of each step communicates
       \end{mlsyscard}\par\vspace{0.05cm}
       \footnotesize
-      \uncover<2->{Crossing: $5 \times 1.998 \times 512 = 5{,}115$ GB\\}
-      \uncover<3->{$1/(0.70 + 0.30 \times 4) = $ \textbf{0.53}\\}
-      \uncover<4->{47.4\% of \$300M: \textbf{\$142.1M} idle}
+      \uncover<2->{Crossing: $\val{os_payload_gb} \times \val{os_ring_factor} \times \val{cut_half} = \val{os_crossing_gb}$ GB\\}
+      \uncover<3->{$1/(\val{os_noncomm} + \val{os_comm} \times \val{oversub}) = $ \textbf{\val{os_rel}}\\}
+      \uncover<4->{\val{os_loss_pct}\% of \$\val{os_cost_musd}M: \textbf{\$\val{os_idle_musd}M} idle}
     \end{column}
     \begin{column}{0.54\textwidth}
       \centering\uncover<2->{\safeimg[width=\textwidth,height=4.2cm,keepaspectratio]{oversub_bars.pdf}}
     \end{column}
   \end{columns}
-  \mlsyscredit{Network Fabrics, Napkin Math 3.2 (30\% communication share is a scenario input; an equivalent-capacity cost with no equipment lost).}
-  \note{[3 min] [CORE] ENGAGE: pairs, two minutes; ask for the slowdown of the collective first, then the dollars. Step 2: the scenario arranges the ring so every edge crosses the cut. ReduceScatter plus AllGather moves $2(N-1)/N = 1.998$ times the payload per GPU, and 512 GPUs send each way: 5,115 GB. At 25,600 GB/s that is 0.200 s; at 6,400 GB/s, 0.799 s, 4 times longer. Step 3: if 30 percent of the step communicates and only that part stretches 4 times, throughput is $1/(0.70 + 1.20) = 0.53$. Step 4: losing 47.4 percent of a \$300M cluster's throughput is \$142.1M of equivalent idle capacity. The same formula gives 23.1 percent for a 2:1 spine. WARN: this placement is the worst case; a ring that stays within each half crosses the cut far less, so the 4 times is an upper bound that most placements do not reach. Fleet Law term: the cut stretches $T_{\text{comm}}$, which every GPU waits through. LINK: Lecture 5 derives the ring's traffic factor.}
+  \mlsyscredit{Network Fabrics, Napkin Math 3.2 (\val{os_comm_pct}\% communication share is a scenario input; an equivalent-capacity cost with no equipment lost).}
+  \note{[3 min] [CORE] ENGAGE: pairs, two minutes; ask for the slowdown of the collective first, then the dollars. Step 2: the scenario arranges the ring so every edge crosses the cut. ReduceScatter plus AllGather moves $2(N-1)/N = \val{os_ring_factor}$ times the payload per GPU, and \val{cut_half} GPUs send each way: \val{os_crossing_gb} GB. At \val{cut_full_gbs} GB/s that is \val{os_t_full_s} s; at \val{cut_over_gbs} GB/s, \val{os_t_over_s} s, \val{cut_slowdown} times longer. Step 3: if \val{os_comm_pct} percent of the step communicates and only that part stretches \val{oversub} times, throughput is $1/(\val{os_noncomm} + \val{os_stretched}) = \val{os_rel}$. Step 4: losing \val{os_loss_pct} percent of a \$\val{os_cost_musd}M cluster's throughput is \$\val{os_idle_musd}M of equivalent idle capacity. The same formula gives \val{os2_loss_pct} percent for a \val{os2_ratio}:1 spine. WARN: this placement is the worst case; a ring that stays within each half crosses the cut far less, so the \val{cut_slowdown} times is an upper bound that most placements do not reach. Fleet Law term: the cut stretches $T_{\text{comm}}$, which every GPU waits through. LINK: Lecture 5 derives the ring's traffic factor.}
 \end{frame}
 
 \begin{frame}{Rails give each GPU rank its own switch network}
   \centering
   \mlsyssteps[width=0.9\textwidth,height=4.6cm,keepaspectratio]{rails_step}{3}
   \mlsyscredit{Network Fabrics, figure 10, \S3.5.3, Napkin Math 3.3, and Lighthouse 3.1. Three nodes and four GPUs per node drawn.}
-  \note{[2.5 min] [CORE] Step 1: instead of one switch per rack, each GPU's port is cabled by its slot number. Inside each node, NVSwitch joins the GPUs, and tensor parallelism stays there. Step 2: GPU 0 of every node connects to the rail 0 switch, GPU 1 to rail 1, and so on. Data parallelism synchronizes the same model shard across nodes, so GPU 0 talks to other GPU 0s; a rail gives that group its own network. On the reference cluster: 8 rails of 128 GPUs. If a rail fits on one switch, a same-rank message crosses 1 switch instead of 3. At an assumed 0.6 \textmu s per traversal, 0.6 instead of 1.8 \textmu s of $\alpha$. That needs at least 128 ports; with 64-port switches each rail is a small two-tier fabric, and rails reliably buy isolation, because the eight rails run concurrently without sharing spine capacity. Step 3: traffic between different ranks (expert routing in mixture-of-experts models, misaligned pipeline handoffs) must cross a spine that bridges the rails. ENGAGE: which parallelism dimension benefits most? (Expected: data parallelism.) LINK: Lecture 6 builds the parallelism plan this wiring follows; Lecture 8 places jobs on it.}
+  \note{[2.5 min] [CORE] Step 1: instead of one switch per rack, each GPU's port is cabled by its slot number. Inside each node, NVSwitch joins the GPUs, and tensor parallelism stays there. Step 2: GPU 0 of every node connects to the rail 0 switch, GPU 1 to rail 1, and so on. Data parallelism synchronizes the same model shard across nodes, so GPU 0 talks to other GPU 0s; a rail gives that group its own network. On the reference cluster: \val{gpus_per_node} rails of \val{rail_gpus} GPUs. If a rail fits on one switch, a same-rank message crosses \val{rail_hops} switch instead of \val{hops_pod}. At an assumed \val{hop_us} \textmu s per traversal, \val{hops_rail_us} instead of \val{hops_pod_us} \textmu s of $\alpha$. That needs at least \val{rail_gpus} ports; with \val{k64}-port switches each rail is a small two-tier fabric, and rails reliably buy isolation, because the \val{gpus_per_node_word} rails run concurrently without sharing spine capacity. Step 3: traffic between different ranks (expert routing in mixture-of-experts models, misaligned pipeline handoffs) must cross a spine that bridges the rails. ENGAGE: which parallelism dimension benefits most? (Expected: data parallelism.) LINK: Lecture 6 builds the parallelism plan this wiring follows; Lecture 8 places jobs on it.}
 \end{frame}
 
 \begin{frame}{A torus suits neighbor rings and narrows AllToAll}
@@ -364,11 +365,11 @@
     \end{column}
     \begin{column}{0.57\textwidth}
       \centering\safeimg[width=\textwidth,height=4.6cm,keepaspectratio]{torus_fattree.pdf}\\
-      {\footnotesize 4,096 endpoints: $16{\times}16{\times}16$ torus against a 3-tier fat-tree (derived).}
+      {\footnotesize \val{torus_n} endpoints: $\val{torus_side}{\times}\val{torus_side}{\times}\val{torus_side}$ torus against a 3-tier fat-tree (derived).}
     \end{column}
   \end{columns}
   \mlsyscredit{Photo: Norman P. Jouppi et al., CC BY 4.0, Wikimedia Commons. Network Fabrics, \S3.5.4 and \S3.5.5 (Jouppi et al. 2023; Kim et al. 2008).}
-  \note{[2 min] [OPTIONAL] A torus wires each node to its six neighbors in a 3D grid, with no external switches. Right, for 4,096 endpoints: a $16\times16\times16$ torus has 512 links across its bisection, 25.6 TB/s at 50 GB/s per link, against 2,048 links and 102.4 TB/s in a non-blocking fat-tree; its worst path is 24 neighbor hops against 5 switch traversals. A ring AllReduce scheduled along each torus dimension only talks to neighbors, so it barely touches the narrow cut; this is why Google's TPU pods use tori. A mixture-of-experts AllToAll, where every rank sends to every other, drives traffic straight into the cut. Left: a TPU v4 board. TPU v4 joins 4,096 chips as $4\times4\times4$ cubes linked through MEMS optical circuit switches, mirrors that redirect light. Reconfiguring takes 10 to 30 ms, so it is done per job or around a failed cube, never per packet. Dragonfly topologies, another option, trade global links for cost at very large scale. Land the segment: bisection bandwidth prices the cut, and the right wiring follows the traffic the parallelism plan sends across it. FLEX: if cut, land the segment on the rails slide.}
+  \note{[2 min] [OPTIONAL] A torus wires each node to its six neighbors in a 3D grid, with no external switches. Right, for \val{torus_n} endpoints: a $\val{torus_side}\times\val{torus_side}\times\val{torus_side}$ torus has \val{torus_cut} links across its bisection, \val{torus_cut_tbs} TB/s at \val{ib_gbs} GB/s per link, against \val{ft_cut} links and \val{ft_cut_tbs} TB/s in a non-blocking fat-tree; its worst path is \val{torus_hops} neighbor hops against \val{hops_core} switch traversals. A ring AllReduce scheduled along each torus dimension only talks to neighbors, so it barely touches the narrow cut; this is why Google's TPU pods use tori. A mixture-of-experts AllToAll, where every rank sends to every other, drives traffic straight into the cut. Left: a TPU v4 board. TPU v4 joins 4,096 chips as $4\times4\times4$ cubes linked through MEMS optical circuit switches, mirrors that redirect light. Reconfiguring takes 10 to 30 ms, so it is done per job or around a failed cube, never per packet. Dragonfly topologies, another option, trade global links for cost at very large scale. Land the segment: bisection bandwidth prices the cut, and the right wiring follows the traffic the parallelism plan sends across it. FLEX: if cut, land the segment on the rails slide.}
 \end{frame}
 
 % =============================================================================
@@ -389,12 +390,12 @@
       \centering
       {\small Incast: many senders transmit to one receiver port at once.}\\[0.1cm]
       \uncover<2->{\safeimg[width=\textwidth,height=2.6cm,keepaspectratio]{incast_bars.pdf}\\[0.05cm]
-      {\small No. A 32 MB buffer fills in \textbf{2.5 \textmu s} and takes \textbf{640 \textmu s} to drain.}\\[0.1cm]}
+      {\small No. A \val{incast_buffer_mb} MB buffer fills in \textbf{\val{incast_fill_us} \textmu s} and takes \textbf{\val{incast_drain_us} \textmu s} to drain.}\\[0.1cm]}
       \uncover<3->{\footnotesize Spread it in time (staggered buckets), space (staged reductions), and priority (traffic classes).}
     \end{column}
   \end{columns}
-  \mlsyscredit{Photo: Parkis, CC BY-SA 3.0, Wikimedia Commons. Network Fabrics, Def. 3.10 and \S3.6.5 (worst case: 256 senders at 50 GB/s into one 400 Gb/s egress). Fill and drain times derived.}
-  \note{[2.5 min] [CORE] Left: ordinary Ethernet switches; every port has a finite packet buffer. ENGAGE: vote yes or no, with one reason. Step 2: no. Incast is an endpoint bottleneck. Here 256 senders at 50 GB/s offer 12.8 TB/s to one 50 GB/s egress port, 256 times its rate, even if every spine link is idle. The net fill rate is about 12.75 TB/s, so a 32 MB buffer fills in about 2.5 \textmu s; once full it holds 640 \textmu s of waiting at 50 GB/s. Then the switch drops or, in a lossless Ethernet fabric, pauses upstream; the next slide follows that pause. Training creates fan-in on a schedule: many GPUs reading shards from or writing checkpoints to one storage node, and the aggregation step of tree reductions. A ring AllReduce does not, though its flows can still collide at a shared egress. Step 3: production clusters spread the burst. In time: launch each gradient bucket's AllReduce as backpropagation produces it, which is also overlap. In space: reduce hierarchically so no port absorbs every sender. In priority: put gradients in their own traffic class. WARN: none of these eliminates the tail. LINK: Lecture 4 meets this traffic from the storage side.}
+  \mlsyscredit{Photo: Parkis, CC BY-SA 3.0, Wikimedia Commons. Network Fabrics, Def. 3.10 and \S3.6.5 (worst case: \val{incast_senders} senders at \val{ib_gbs} GB/s into one \val{ndr_gbps} Gb/s egress). Fill and drain times derived.}
+  \note{[2.5 min] [CORE] Left: ordinary Ethernet switches; every port has a finite packet buffer. ENGAGE: vote yes or no, with one reason. Step 2: no. Incast is an endpoint bottleneck. Here \val{incast_senders} senders at \val{ib_gbs} GB/s offer \val{incast_offered_tbs} TB/s to one \val{incast_egress_gbs} GB/s egress port, \val{incast_ratio} times its rate, even if every spine link is idle. The net fill rate is about \val{incast_net_tbs} TB/s, so a \val{incast_buffer_mb} MB buffer fills in about \val{incast_fill_us} \textmu s; once full it holds \val{incast_drain_us} \textmu s of waiting at \val{incast_egress_gbs} GB/s. Then the switch drops or, in a lossless Ethernet fabric, pauses upstream; the next slide follows that pause. Training creates fan-in on a schedule: many GPUs reading shards from or writing checkpoints to one storage node, and the aggregation step of tree reductions. A ring AllReduce does not, though its flows can still collide at a shared egress. Step 3: production clusters spread the burst. In time: launch each gradient bucket's AllReduce as backpropagation produces it, which is also overlap. In space: reduce hierarchically so no port absorbs every sender. In priority: put gradients in their own traffic class. WARN: none of these eliminates the tail. LINK: Lecture 4 meets this traffic from the storage side.}
 \end{frame}
 
 \begin{frame}{A full queue pauses its sender, and the pause spreads}
@@ -402,7 +403,7 @@
   \mlsyssteps[width=0.9\textwidth,height=4.6cm,keepaspectratio]{pfc_spread_step}{3}\\[0.05cm]
   {\small PFC (priority flow control): a per-class PAUSE frame to the upstream port.}
   \mlsyscredit{Network Fabrics, Definition 3.8 and \S3.6.1 (Guo et al. 2016; Gangidi et al. 2024).}
-  \note{[2.5 min] [CORE] LINK: the incast port just filled. Step 1: one receiver port fills (red). In a PFC-based RoCE fabric it does not drop; it sends PAUSE frames to the switches feeding it. Step 2: those switches stop sending, their own buffers fill, and they pause their senders. Pauses climb tier by tier. Step 3: the green flow at the bottom goes to a different receiver, but it shares a paused switch, so it stops too. This is congestion spreading, and the stalled flow is a victim flow: it never touched the full queue. One slow receiver, such as a GPU stalled on memory traffic or a degrading transceiver, can do this; the chapter estimates that a 4,096-GPU cluster with 24,576 transceivers has a 21.8 percent daily chance that at least one starts degrading, assuming a 0.001 percent daily rate each. ENGAGE: in synchronous training, what does one victim flow cost? (Expected: the whole step, because the barrier waits for it.) WARN: PFC does not remove congestion; it converts loss into spreading. Fleet Law terms: delayed transfers add to $T_{\text{comm}}$, waiting at the barrier to $T_{\text{sync}}$.}
+  \note{[2.5 min] [CORE] LINK: the incast port just filled. Step 1: one receiver port fills (red). In a PFC-based RoCE fabric it does not drop; it sends PAUSE frames to the switches feeding it. Step 2: those switches stop sending, their own buffers fill, and they pause their senders. Pauses climb tier by tier. Step 3: the green flow at the bottom goes to a different receiver, but it shares a paused switch, so it stops too. This is congestion spreading, and the stalled flow is a victim flow: it never touched the full queue. One slow receiver, such as a GPU stalled on memory traffic or a degrading transceiver, can do this; the chapter estimates that a \val{xcvr_gpus}-GPU cluster with \val{xcvr_count} transceivers has a \val{xcvr_any_pct} percent daily chance that at least one starts degrading, assuming a \val{xcvr_p_pct} percent daily rate each. ENGAGE: in synchronous training, what does one victim flow cost? (Expected: the whole step, because the barrier waits for it.) WARN: PFC does not remove congestion; it converts loss into spreading. Fleet Law terms: delayed transfers add to $T_{\text{comm}}$, waiting at the barrier to $T_{\text{sync}}$.}
 \end{frame}
 
 \begin{frame}{Four full queues waiting on each other never drain}
@@ -444,8 +445,8 @@
     \toprule
     & \textbf{NVIDIA DGX SuperPOD} & \textbf{Meta Grand Teton (RoCE)} \\
     \midrule
-    Scale & 32-node units of 256 H100s; 4 units = 1,024 GPUs & 24,576 H100s per cluster \\
-    Link & 400 Gb/s NDR per GPU & 400 Gb/s endpoints \\
+    Scale & \val{su_nodes}-node units of \val{su_gpus} H100s; \val{su_count} units = \val{ref_gpus} GPUs & \val{meta_gpus} H100s per cluster \\
+    Link & \val{ndr_gbps} Gb/s NDR per GPU & \val{meta_gbps} Gb/s endpoints \\
     Losslessness & InfiniBand credits & PFC with watchdogs; ran without DCQCN \\
     Topology & Rail-optimized fat-tree, adaptive routing & Routing designs beyond plain ECMP \\
     \bottomrule
@@ -459,7 +460,7 @@
     \end{column}
   \end{columns}
   \mlsyscredit{Photo: Pokiiri, CC BY-SA 4.0, Wikimedia Commons. Network Fabrics, \S3.7 (NVIDIA RA-11333-001, 2023; Meta Engineering 2024; Gangidi et al., SIGCOMM 2024).}
-  \note{[2.5 min] [CORE] Level 5: two production fabrics built for the same job; NVIDIA and Meta made opposite transport choices. NVIDIA's DGX SuperPOD reference architecture joins 32 DGX H100 nodes, 256 GPUs, into a scalable unit with 12.8 TB/s of injection bandwidth; four units make our 1,024-GPU cluster. It takes losslessness from InfiniBand credits, wires the GPUs as rails into a fat-tree, and uses hardware adaptive routing at the spine, so hardware sets its tail behavior. Meta disclosed two Grand Teton clusters of 24,576 H100s each, one on RoCE over Ethernet and one on InfiniBand, both with 400 Gb/s endpoints, and trained Llama 3 on both. The RoCE cluster accepts the tuning burden in exchange for multi-vendor switches and the tooling of Meta's serving fleet; its study reports PFC watchdogs, routing beyond plain ECMP, and a 400G deployment that ran without DCQCN. ENGAGE: pairs, two minutes: which would you build for a dedicated training cluster, and what would change your answer? (Expected: InfiniBand for predictable tails; Ethernet when supply and shared operations dominate.) Land the segment: under synchronized load, losslessness, congestion control, and routing decide whether provisioned bandwidth becomes completed collectives.}
+  \note{[2.5 min] [CORE] Level 5: two production fabrics built for the same job; NVIDIA and Meta made opposite transport choices. NVIDIA's DGX SuperPOD reference architecture joins \val{su_nodes} DGX H100 nodes, \val{su_gpus} GPUs, into a scalable unit with \val{incast_offered_tbs} TB/s of injection bandwidth; \val{su_count_word} units make our \val{ref_gpus}-GPU cluster. It takes losslessness from InfiniBand credits, wires the GPUs as rails into a fat-tree, and uses hardware adaptive routing at the spine, so hardware sets its tail behavior. Meta disclosed two Grand Teton clusters of \val{meta_gpus} H100s each, one on RoCE over Ethernet and one on InfiniBand, both with \val{meta_gbps} Gb/s endpoints, and trained Llama 3 on both. The RoCE cluster accepts the tuning burden in exchange for multi-vendor switches and the tooling of Meta's serving fleet; its study reports PFC watchdogs, routing beyond plain ECMP, and a \val{meta_gbps}G deployment that ran without DCQCN. ENGAGE: pairs, two minutes: which would you build for a dedicated training cluster, and what would change your answer? (Expected: InfiniBand for predictable tails; Ethernet when supply and shared operations dominate.) Land the segment: under synchronized load, losslessness, congestion control, and routing decide whether provisioned bandwidth becomes completed collectives.}
 \end{frame}
 
 % =============================================================================
@@ -469,12 +470,12 @@
 \mlsysdivider{Why does a slow fabric raise no alarm, and how is it found?}{Network Fabrics, \S3.8 and \S3.9}
 \section{Operations}
 
-\begin{frame}{A 10\% bandwidth loss can waste 22,000 GPU-hours unseen}
+\begin{frame}{A \val{sw_bw_loss_pct}\% bandwidth loss can waste \val{sw_lost_high_round} GPU-hours unseen}
   \centering
   \safeimg[width=0.88\textwidth,height=4.2cm,keepaspectratio]{silent_waste.pdf}\\[0.1cm]
-  {\small A link that trains at 200 instead of 400 Gb/s stays up at half bandwidth.}
-  \mlsyscredit{Network Fabrics, \S3.9 and \S3.9.1 (scenario: 10\% bandwidth loss slows each step 2 to 3\%; lines derived at \$2 per GPU-hour).}
-  \note{[2 min] [CORE] A degraded transceiver cuts a link's effective bandwidth by 10 percent. The step slows only 2 to 3 percent, because only the exposed communication share stretches, and a drift that small hides inside the normal variance of checkpoints and data loading. Over 30 days on 1,024 GPUs (737,280 GPU-hours), 2 to 3 percent is 14,746 to 22,118 GPU-hours, or \$29,491 to \$44,237 at \$2 per GPU-hour (the chapter rounds to \$30,000 to \$44,000), with no alarm. Without any overlap the same loss would cost 3.3 percent (derived), so 2 to 3 is plausible. Silent faults are common. A link that negotiates HDR instead of NDR, or trains with two of its four lanes, stays connected at half bandwidth. With about 3,000 links and an assumed 0.1 percent chance that any one is degraded, the cluster holds about 3 degraded links at any moment and has a 95 percent chance of at least one. On a ring AllReduce's path, one such link paces every rank. ENGAGE: why do ping and SNMP miss this? (Expected: they test connectivity and never measure sustained RDMA throughput.) LINK: Lecture 7 develops the general case, gray failure. WARN: these rates are scenario assumptions.}
+  {\small A link that trains at \val{hdr_gbps} instead of \val{ndr_gbps} Gb/s stays up at half bandwidth.}
+  \mlsyscredit{Network Fabrics, \S3.9 and \S3.9.1 (scenario: \val{sw_bw_loss_pct}\% bandwidth loss slows each step \val{sw_low_pct} to \val{sw_high_pct}\%; lines derived at \$\val{sw_rate_usd} per GPU-hour).}
+  \note{[2 min] [CORE] A degraded transceiver cuts a link's effective bandwidth by \val{sw_bw_loss_pct} percent. The step slows only \val{sw_low_pct} to \val{sw_high_pct} percent, because only the exposed communication share stretches, and a drift that small hides inside the normal variance of checkpoints and data loading. Over \val{sw_days} days on \val{ref_gpus} GPUs (\val{sw_gpuh} GPU-hours), \val{sw_low_pct} to \val{sw_high_pct} percent is \val{sw_lost_low} to \val{sw_lost_high} GPU-hours, or \$\val{sw_cost_low} to \$\val{sw_cost_high} at \$\val{sw_rate_usd} per GPU-hour (the chapter rounds to \$\val{sw_cost_low_book} to \$\val{sw_cost_high_book}), with no alarm. Without any overlap the same loss would cost \val{sw_no_overlap_pct} percent (derived), so \val{sw_low_pct} to \val{sw_high_pct} is plausible. Silent faults are common. A link that negotiates HDR instead of NDR, or trains with two of its four lanes, stays connected at half bandwidth. With about \val{links_n} links and an assumed \val{links_p_pct} percent chance that any one is degraded, the cluster holds about \val{links_expected} degraded links at any moment and has a \val{links_any_pct} percent chance of at least one. On a ring AllReduce's path, one such link paces every rank. ENGAGE: why do ping and SNMP miss this? (Expected: they test connectivity and never measure sustained RDMA throughput.) LINK: Lecture 7 develops the general case, gray failure. WARN: these rates are scenario assumptions.}
 \end{frame}
 
 \begin{frame}{Healthy bus bandwidth depends on message size}
@@ -482,7 +483,7 @@
   \safeimg[width=0.88\textwidth,height=4.3cm,keepaspectratio]{nccl_busbw.pdf}\\[0.05cm]
   {\small Compare a job against a baseline measured at the job's own message sizes.}
   \mlsyscredit{NVIDIA exemplar-performance nccl-tests output via MLSysIM (8 H100s, one node, NVLink); Network Fabrics, \S3.9.2.}
-  \note{[1.5 min] [CORE] Detection means comparing delivered throughput with a baseline. This is a published baseline, the bus bandwidth that the same NCCL AllReduce benchmark measured on one eight-H100 node, by message size. It reaches 480 GB/s only above 1 GB. Between 8 and 128 MB, where gradient buckets often fall, the healthy value is 177 to 401 GB/s. A team that compares a 32 MB bucket against the 480 GB/s peak will chase a fault that does not exist; a team with no baseline will miss one that does. The same holds across the network: run nccl-tests over the job's worker group and perftest tools such as ib\_write\_bw pairwise, and keep the results. ENGAGE: what baseline would you record before a 30-day run? (Expected: all-pairs RDMA bandwidth and collective bandwidth at the job's message sizes.) WARN: iperf measures the kernel TCP path; it says nothing about the RDMA path the job uses.}
+  \note{[1.5 min] [CORE] Detection means comparing delivered throughput with a baseline. This is a published baseline, the bus bandwidth that the same NCCL AllReduce benchmark measured on one eight-H100 node, by message size. It reaches \val{nccl_peak_busbw} GB/s only above 1 GB. Between \val{nccl_mid_lo_mb} and \val{nccl_mid_hi_mb} MB, where gradient buckets often fall, the healthy value is \val{nccl_mid_busbw_lo} to \val{nccl_mid_busbw_hi} GB/s. A team that compares a 32 MB bucket against the \val{nccl_peak_busbw} GB/s peak will chase a fault that does not exist; a team with no baseline will miss one that does. The same holds across the network: run nccl-tests over the job's worker group and perftest tools such as ib\_write\_bw pairwise, and keep the results. ENGAGE: what baseline would you record before a 30-day run? (Expected: all-pairs RDMA bandwidth and collective bandwidth at the job's message sizes.) WARN: iperf measures the kernel TCP path; it says nothing about the RDMA path the job uses.}
 \end{frame}
 
 \begin{frame}{Step time rose 14\%. Where do you look first?}
@@ -491,28 +492,28 @@
     \begin{column}{0.4\textwidth}
       \begin{mlsyscard}[fontupper=\footnotesize\raggedright]{mlsysaccent}
         \textbf{Symptoms}\\[0.1cm]
-        175B job, 1,024 GPUs, day 3\\
-        Step: 4.2 s $\rightarrow$ 4.8 s\\
-        GPU utilization: 92\% $\rightarrow$ 85\%\\
+        \val{params_b}B job, \val{ref_gpus} GPUs, day \val{diag_day}\\
+        Step: \val{diag_before_s} s $\rightarrow$ \val{diag_after_s} s\\
+        GPU utilization: \val{diag_util_before}\% $\rightarrow$ \val{diag_util_after}\%\\
         No errors in the job log
       \end{mlsyscard}\par\vspace{0.2cm}
       \centering\safeimg[width=0.7\textwidth,height=1.5cm,keepaspectratio]{qsfp-optical-module.jpg}
     \end{column}
     \begin{column}{0.57\textwidth}
       \centering\uncover<2->{\safeimg[width=\textwidth,height=3.8cm,keepaspectratio]{diag_ladder.pdf}}\\[0.1cm]
-      {\footnotesize\uncover<3->{ib\_write\_bw: one pair at \textbf{24 GB/s}, expected 48. Check lanes, rate, and symbol errors.}}
+      {\footnotesize\uncover<3->{ib\_write\_bw: one pair at \textbf{\val{diag_measured_gbs} GB/s}, expected \val{diag_expected_gbs}. Check lanes, rate, and symbol errors.}}
     \end{column}
   \end{columns}
   \mlsyscredit{Photo: an optical module, the usual suspect (Jesseschulman, CC BY-SA 3.0, Wikimedia Commons). Network Fabrics, \S3.9.3 and Checkpoint 3.5.}
-  \note{[2.5 min] [CORE] ENGAGE: pairs name the first tool and what evidence would separate compute from communication. Step 2: the chapter's order, from the application down to the wire. (1) Check utilization against the step timeline; low utilization can also mean a starved input pipeline, so confirm the data path first. (2) Turn on the collective library's debug log (NCCL\_DEBUG=INFO) to see which transport it chose and whether it fell back. (3) Run pairwise RDMA tests between the job's nodes. (4) Read PFC pause and ECN counters along the path. (5) Read symbol errors and CRC counts at the ports. Step 3: here the pairwise test finds one pair at 24 GB/s against an expected 48, which points to a link at half rate, perhaps negotiated down or missing lanes; symbol errors confirm a failing cable or transceiver. On a ring AllReduce that one link paces every rank. WARN: a rising counter makes a link a candidate; correlate it with the slow collective before replacing hardware. The order mirrors the five levels, top down. Land the segment: fabric faults appear as slowdowns, so detection compares delivered throughput with a baseline and diagnoses from the application down.}
+  \note{[2.5 min] [CORE] ENGAGE: pairs name the first tool and what evidence would separate compute from communication. Step 2: the chapter's order, from the application down to the wire. (1) Check utilization against the step timeline; low utilization can also mean a starved input pipeline, so confirm the data path first. (2) Turn on the collective library's debug log (NCCL\_DEBUG=INFO) to see which transport it chose and whether it fell back. (3) Run pairwise RDMA tests between the job's nodes. (4) Read PFC pause and ECN counters along the path. (5) Read symbol errors and CRC counts at the ports. Step 3: here the pairwise test finds one pair at \val{diag_measured_gbs} GB/s against an expected \val{diag_expected_gbs}, which points to a link at half rate, perhaps negotiated down or missing lanes; symbol errors confirm a failing cable or transceiver. On a ring AllReduce that one link paces every rank. WARN: a rising counter makes a link a candidate; correlate it with the slow collective before replacing hardware. The order mirrors the five levels, top down. Land the segment: fabric faults appear as slowdowns, so detection compares delivered throughput with a baseline and diagnoses from the application down.}
 \end{frame}
 
 \begin{frame}{Slicing a NIC caps a tenant and never adds bandwidth}
   \centering
   \safeimg[width=0.82\textwidth,height=3.4cm,keepaspectratio]{sriov_slices.pdf}\\[0.15cm]
   {\small Virtual lanes and traffic classes keep separate buffers on one link; they share its bandwidth.}
-  \mlsyscredit{Network Fabrics, \S3.8.1 and \S3.8.2 (8 VFs at 50 Gb/s on a 400 Gb/s NIC; up to 16 InfiniBand virtual lanes).}
-  \note{[1.5 min] [OPTIONAL] Clusters are shared. SR-IOV (single-root I/O virtualization) lets one physical NIC appear as several virtual functions, each assigned to a tenant with its own hardware queues, so RDMA keeps bypassing the host. A rate cap such as 50 Gb/s per function on a 400 Gb/s NIC stops a neighbor from taking a job's bandwidth, but it is also a hard ceiling, because the job cannot burst past its slice even when the other functions are idle. Inside the fabric, a neighbor's 100 GB checkpoint at line rate fills a 400 Gb/s port for 2 s and stretches every AllReduce that crosses those links. InfiniBand virtual lanes, up to 16 per link, keep separate credits so a storage burst that exhausts its lane does not block the gradient lane; Ethernet uses traffic classes. They reduce interference but share link bandwidth and arbitration. LINK: Lecture 4 sizes that checkpoint traffic. FLEX: cut, and say that sharing caps a job.}
+  \mlsyscredit{Network Fabrics, \S3.8.1 and \S3.8.2 (\val{vf_count} VFs at \val{vf_gbps} Gb/s on a \val{nic_gbps} Gb/s NIC; up to 16 InfiniBand virtual lanes).}
+  \note{[1.5 min] [OPTIONAL] Clusters are shared. SR-IOV (single-root I/O virtualization) lets one physical NIC appear as several virtual functions, each assigned to a tenant with its own hardware queues, so RDMA keeps bypassing the host. A rate cap such as \val{vf_gbps} Gb/s per function on a \val{nic_gbps} Gb/s NIC stops a neighbor from taking a job's bandwidth, but it is also a hard ceiling, because the job cannot burst past its slice even when the other functions are idle. Inside the fabric, a neighbor's \val{burst_gb} GB checkpoint at line rate fills a \val{nic_gbps} Gb/s port for \val{burst_s} s and stretches every AllReduce that crosses those links. InfiniBand virtual lanes, up to 16 per link, keep separate credits so a storage burst that exhausts its lane does not block the gradient lane; Ethernet uses traffic classes. They reduce interference but share link bandwidth and arbitration. LINK: Lecture 4 sizes that checkpoint traffic. FLEX: cut, and say that sharing caps a job.}
 \end{frame}
 
 % =============================================================================
@@ -530,14 +531,14 @@
     \toprule
     \textbf{Claim} & \uncover<2->{\textbf{Verdict}} \\
     \midrule
-    Doubling link bandwidth halves every transfer. & \uncover<2->{\textbf{\textcolor{RedLine}{False.}} A 10 KB message gains 10.5\%.} \\
+    Doubling link bandwidth halves every transfer. & \uncover<2->{\textbf{\textcolor{RedLine}{False.}} A \val{small_kb} KB message gains \val{small_gain_pct}\%.} \\
     A TCP test with iperf validates the training fabric. & \uncover<2->{\textbf{\textcolor{RedLine}{False.}} Training uses RDMA; test with perftest.} \\
     Adaptive routing removes the need for careful placement. & \uncover<2->{\textbf{\textcolor{RedLine}{False.}} It spreads load but adds no capacity.} \\
     Fabric problems show up as errors. & \uncover<2->{\textbf{\textcolor{RedLine}{False.}} Most show up as slower steps.} \\
     \bottomrule
   \end{tabular}
   \mlsyscredit{Network Fabrics, \S3.11 (fallacies and pitfalls).}
-  \note{[2.5 min] [CORE] ENGAGE: students write T or F for each, then compare with a neighbor. Step 2: all four are false, and each is one of the chapter's fallacies or pitfalls. One: $\alpha$ dominates small messages; HDR to NDR takes a 10 KB message from 1.90 to 1.70 \textmu s. Two: iperf measures the kernel TCP path, which depends on host tuning; the job exercises RDMA, so validate with RDMA tools and nccl-tests. Three: a job split across an oversubscribed boundary is limited by that boundary's capacity; routing can only balance it, and placement must keep traffic off it (Lecture 8). Four: a link at half rate keeps running, and the job slows a few percent. If many students marked the first true, return to the $\alpha$-$\beta$ plot.}
+  \note{[2.5 min] [CORE] ENGAGE: students write T or F for each, then compare with a neighbor. Step 2: all four are false, and each is one of the chapter's fallacies or pitfalls. One: $\alpha$ dominates small messages; HDR to NDR takes a \val{small_kb} KB message from \val{small_hdr_us} to \val{small_ndr_us} \textmu s. Two: iperf measures the kernel TCP path, which depends on host tuning; the job exercises RDMA, so validate with RDMA tools and nccl-tests. Three: a job split across an oversubscribed boundary is limited by that boundary's capacity; routing can only balance it, and placement must keep traffic off it (Lecture 8). Four: a link at half rate keeps running, and the job slows a few percent. If many students marked the first true, return to the $\alpha$-$\beta$ plot.}
 \end{frame}
 
 \begin{frame}{Microsoft's 2016 freeze lived at Level 4}
@@ -552,14 +553,14 @@
   \vspace{0.1cm}\centering
   {\small Every link was healthy; flow control decided when traffic completed.}
   \mlsyscredit{Photo: generic data center (Carl Lender, CC BY 2.0, Wikimedia Commons). Network Fabrics, figure 3, \S3.12, War Story 3.1. Numbers from today's slides.}
-  \note{[2.5 min] [CORE] The chapter's five-level model, with today's numbers. Level 1, the wire: PAM4 and error correction, copper for 1 to 3 m, optics beyond. Level 2, transport: $\alpha$ 1.5 \textmu s and $\beta$ 50 GB/s, crossing at 75 KB. Level 3, topology: 25.6 TB/s across the cut at 1:1; a 4:1 spine leaves 0.53 of the throughput in the worst placement. Level 4, behavior under load: PAUSE frames, incast, congestion control, routing. Level 5, the cluster: four SuperPOD units make the running case's 1,024 GPUs. Return to the hook. Every link in Microsoft's fabric was healthy and fast; the dead server froze it through Level 4, the flow-control machinery that exists so that synchronous jobs never see a drop. That incident carries the lecture's claim. A fabric is judged by whether its collectives complete, and when, and link speed is only the ceiling. ENGAGE: at which level would you look first if a job slowed 3 percent? (Expected: the top, then down, as in the diagnosis order.) The three numbers to keep: the 9 times node cliff, the 75 KB crossover, and the 4 times cost of a 4:1 cut.}
+  \note{[2.5 min] [CORE] The chapter's five-level model, with today's numbers. Level 1, the wire: PAM4 and error correction, copper for 1 to 3 m, optics beyond. Level 2, transport: $\alpha$ \val{ndr_alpha_us} \textmu s and $\beta$ \val{ib_gbs} GB/s, crossing at \val{cross_ndr_kb} KB. Level 3, topology: \val{cut_full_tbs} TB/s across the cut at 1:1; a \val{oversub}:1 spine leaves \val{os_rel} of the throughput in the worst placement. Level 4, behavior under load: PAUSE frames, incast, congestion control, routing. Level 5, the cluster: \val{su_count_word} SuperPOD units make the running case's \val{ref_gpus} GPUs. Return to the hook. Every link in Microsoft's fabric was healthy and fast; the dead server froze it through Level 4, the flow-control machinery that exists so that synchronous jobs never see a drop. That incident carries the lecture's claim. A fabric is judged by whether its collectives complete, and when, and link speed is only the ceiling. ENGAGE: at which level would you look first if a job slowed 3 percent? (Expected: the top, then down, as in the diagnosis order.) The three numbers to keep: the \val{nvlink_ib_ratio} times node cliff, the \val{cross_ndr_kb} KB crossover, and the \val{cut_slowdown} times cost of a \val{oversub}:1 cut.}
 \end{frame}
 
 \begin{frame}{Takeaways}
   \normalsize
   \begin{itemize}\setlength{\itemsep}{0.2cm}
     \item Synchronous training waits for its slowest transfer, so completion time and its tail measure a fabric.
-    \item $T(n) = \alpha + n/\beta$: below $n^* = \alpha\beta$ (75 KB on NDR) startup sets the time; above it, bandwidth.
+    \item $T(n) = \alpha + n/\beta$: below $n^* = \alpha\beta$ (\val{cross_ndr_kb} KB on NDR) startup sets the time; above it, bandwidth.
     \item Bisection bandwidth caps cut-crossing traffic; wiring such as rails should follow the parallelism plan.
     \item Lossless flow control can spread pauses and deadlock; congestion control and routing act first.
     \item Fabric faults usually slow a job silently; compare with a baseline and diagnose top down.
@@ -580,14 +581,14 @@
 \begin{frame}{Read and explore}
   \small
   \begin{itemize}\setlength{\itemsep}{0.15cm}
-    \item \textbf{Read:} Network Fabrics, \S3.2 to \S3.9 and \S3.11; redo Napkin Math 3.2 for a 2:1 spine.
+    \item \textbf{Read:} Network Fabrics, \S3.2 to \S3.9 and \S3.11; redo Napkin Math 3.2 for a \val{os2_ratio}:1 spine.
     \item Hockney, ``The Communication Challenge for MPP,'' \emph{Parallel Computing}, 1994.
     \item Al-Fares, Loukissas, and Vahdat, ``A Scalable, Commodity Data Center Network Architecture,'' SIGCOMM 2008.
     \item Guo et al., ``RDMA over Commodity Ethernet at Scale,'' SIGCOMM 2016.
     \item Gangidi et al., ``RDMA over Ethernet for Distributed AI Training at Meta Scale,'' SIGCOMM 2024.
     \item Jouppi et al., ``TPU v4: An Optically Reconfigurable Supercomputer for Machine Learning,'' ISCA 2023.
   \end{itemize}
-  \note{[0.5 min] [CORE] The chapter first; the 2:1 exercise should give 23.1 percent. Each paper backs one segment: the $\alpha$-$\beta$ model (Hockney), the fat-tree from commodity switches (Al-Fares), RoCE at scale and the deadlock story (Guo), a modern RoCE training fabric (Gangidi), and optical circuit switching (Jouppi).}
+  \note{[0.5 min] [CORE] The chapter first; the \val{os2_ratio}:1 exercise should give \val{os2_loss_pct} percent. Each paper backs one segment: the $\alpha$-$\beta$ model (Hockney), the fat-tree from commodity switches (Al-Fares), RoCE at scale and the deadlock story (Guo), a modern RoCE training fabric (Gangidi), and optical circuit switching (Jouppi).}
 \end{frame}
 
 \begin{frame}[c]
