@@ -3853,6 +3853,56 @@ OBERMEYER_2019 = _lit(
            "patients among those auto-identified rises from 17.7 to 46.5 percent."),
 )
 
+PROPUBLICA_COMPAS_METHOD_2016 = _lit(
+    "prov:propublica-compas-method-2016",
+    "Larson, Mattu, Kirchner, and Angwin (2016), How We Analyzed the COMPAS Recidivism Algorithm, "
+    "ProPublica",
+    url="https://www.propublica.org/article/how-we-analyzed-the-compas-recidivism-algorithm",
+    verified="2026-10-20",
+    notes=("Contingency tables for Black and White defendants (survived or recidivated against low "
+           "or high score): false positive rate 44.85 and 23.45 percent, false negative rate 27.99 "
+           "and 47.72 percent; 1,901 of 3,696 Black and 966 of 2,454 White defendants recidivated; "
+           "positive predictive value 0.63 and 0.59; 7,214 defendants in the Broward County data."),
+)
+
+LUM_ISAAC_2016 = _lit(
+    "prov:lum-isaac-2016",
+    "Lum and Isaac (2016), To predict and serve?, Significance 13(5), 14-19",
+    url="https://doi.org/10.1111/j.1740-9713.2016.00960.x",
+    verified="2026-10-20",
+    notes="PredPol run on Oakland drug-crime records; the feedback simulation adds 20 percent "
+          "more recorded crime in flagged locations each day (Fig. 3).",
+)
+
+RAJI_BUOLAMWINI_2019 = _lit(
+    "prov:raji-buolamwini-2019",
+    "Raji and Buolamwini (2019), Actionable Auditing: Investigating the Impact of Publicly Naming "
+    "Biased Performance Results of Commercial AI Products, AIES 2019",
+    url="https://doi.org/10.1145/3306618.3314244",
+    verified="2026-10-20",
+    notes="The three audited companies released new API versions 66 to 190 days after the "
+          "original audit results were sent to them.",
+)
+
+CHEN_TOPK_OFF_POLICY_2019 = _lit(
+    "prov:chen-topk-off-policy-2019",
+    "Chen, Beutel, Covington, Jain, Belletti, and Chi (2019), Top-K Off-Policy Correction for a "
+    "REINFORCE Recommender System, WSDM 2019, Sec. 6.2",
+    url="https://doi.org/10.1145/3289600.3290999",
+    verified="2026-10-20",
+    notes="Exploration data from 5 percent of users raised watch time 0.07 percent.",
+)
+
+STRUBELL_2019 = _lit(
+    "prov:strubell-2019",
+    "Strubell, Ganesh, and McCallum (2019), Energy and Policy Considerations for Deep Learning in "
+    "NLP, ACL 2019, Table 1",
+    url="https://aclanthology.org/P19-1355/",
+    verified="2026-10-20",
+    notes="Table 1 in pounds of CO2e: Transformer (big) with neural architecture search 626,155; "
+          "one car over its lifetime, including fuel, 126,000.",
+)
+
 NYDFS_APPLE_CARD_2021 = _report(
     "prov:nydfs-apple-card-2021",
     "New York State Department of Financial Services (2021), Report on Apple Card Investigation",

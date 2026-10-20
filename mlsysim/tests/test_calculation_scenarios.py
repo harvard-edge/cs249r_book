@@ -5456,3 +5456,53 @@ def test_token_serving_scenarios():
     assert Scenarios.Llama2_70BInteractiveDecodeStreams.in_flight == pytest.approx(519.176)
     syn = Scenarios.Llama3_70BFp16ConversationsEightH100.result
     assert syn.max_requests == 1326 and Scenarios.Llama3_70BInt8ConversationsEightH100.result.max_requests == 2996
+def test_fairness_gates_price_and_feedback():
+    """Credit service rates, price, feedback loop, evaluation budget, COMPAS identity (added 2026-10-20)."""
+    from mlsysim import Literature
+    from mlsysim.physics import (calc_cycles_to_gate, calc_feedback_disparity, calc_fpr_from_ppv,
+                                 calc_gap_samples_per_group)
+    c = Scenarios.CreditServiceTwoGroups
+    assert (c.size("A"), c.size("B")) == (10000, 2000)
+    assert c.positive_rate("A") == pytest.approx(0.55) and c.positive_rate("B") == pytest.approx(0.40)
+    assert c.tpr("A") == pytest.approx(0.9) and c.tpr("B") == pytest.approx(0.6)
+    assert c.fpr("A") == pytest.approx(0.2) == c.fpr("B")
+    assert c.fnr("B") / c.fnr("A") == 4 and c.overall_accuracy == pytest.approx(0.825)
+    assert c.share("B") == pytest.approx(1 / 6) and c.base_rate("A") == c.base_rate("B") == 0.5
+    p = Scenarios.CreditServiceEqualOpportunityPrice
+    assert p.baseline_utility.m_as("dollar") == pytest.approx(150.0)
+    assert p.added_repaid_value.m_as("dollar") == pytest.approx(225.0)
+    assert p.added_default_cost.m_as("dollar") == pytest.approx(300.0)
+    assert p.net_change.m_as("dollar") == pytest.approx(-75.0) and p.loss_fraction == pytest.approx(0.5)
+    assert p.population_average_loss.m_as("dollar") == pytest.approx(12.5)
+    f = Scenarios.CreditServiceBiasFeedback
+    assert f.factor == pytest.approx(1.1) and f.crossing == pytest.approx(5.3596124, rel=1e-7)
+    assert f.breach_cycle == 6 and f.gap_at_breach == pytest.approx(5.314683, rel=1e-6)
+    assert f.unmitigated_at_horizon == pytest.approx(43.923, rel=1e-6)
+    assert f.sampled_gap_at_breach == pytest.approx(1.594323, rel=1e-6)
+    assert calc_feedback_disparity(3.0, 1.1, 2) == pytest.approx(3.63)
+    assert calc_cycles_to_gate(1.0, 2.0, 8.0) == pytest.approx(3.0)
+    b = Scenarios.OnePercentGroupEvaluationBudget
+    assert b.samples_needed == 9604 and b.random_collection == pytest.approx(1e6) and b.random_multiple == 100
+    assert b.gap_samples_per_group() == 1568 and b.gap_samples_per_group(0.01) == 19208
+    assert b.gap_half_width_at(9604) == pytest.approx(0.0141419, rel=1e-5)
+    assert calc_gap_samples_per_group(0.5, 0.01, 1.96) == 19208
+    k = Scenarios.CompasPublishedRateIdentity
+    assert k.base_rate("Black") == pytest.approx(1901 / 3696)
+    assert k.fpr("Black") == pytest.approx(0.4478903, rel=1e-6) and k.fpr("White") == pytest.approx(0.2358531, rel=1e-6)
+    assert abs(k.fpr("Black") - k.groups["Black"]["fpr"]) < 0.001 and abs(k.fpr("White") - k.groups["White"]["fpr"]) < 0.002
+    assert calc_fpr_from_ppv(0.5, 0.5, 0.0) == pytest.approx(1.0)
+    t = Scenarios.SharedThresholdSixteenApplicants
+    assert [t.errors(g, t.uniform_threshold) for g in "AB"] == [3, 1]
+    assert [t.errors(g, t.alternative_threshold) for g in "AB"] == [0, 3]
+    assert t.accuracy(t.uniform_threshold) == pytest.approx(0.75) and t.accuracy(t.alternative_threshold) == pytest.approx(0.8125)
+    fr = Scenarios.FairnessAccuracyFrontierSketch
+    assert fr.point("A")[1] == pytest.approx(0.9472676, rel=1e-6) and fr.point("B")[1] == pytest.approx(0.9132121, rel=1e-6)
+    assert fr.point("C")[1] == pytest.approx(0.85) and fr.disparity_ratio("A", "B") == pytest.approx(3.6)
+    q = Scenarios.ClicksAgainstSatisfaction
+    assert (q.proxy_end, q.goal_end) == (pytest.approx(1.2), pytest.approx(0.95)) and q.gap == pytest.approx(0.25)
+    x = Scenarios.RecommenderExplorationExposure
+    assert x.impressions == 200_000_000 and x.catalog_coverage == pytest.approx(2e-5)
+    assert x.explore_impressions == pytest.approx(2e6)
+    F = Literature.Fairness
+    assert float(F.ObermeyerChronicConditionsBlackAt97th) / float(F.ObermeyerChronicConditionsWhiteAt97th) == pytest.approx(1.2631579, rel=1e-6)
+    assert float(Literature.TrainingRuns.StrubellNasTransformerCo2eLb) / float(Literature.TrainingRuns.StrubellCarLifetimeCo2eLb) == pytest.approx(4.9694841, rel=1e-6)

@@ -12431,6 +12431,26 @@ class GroupConfusionScenario(BaseScenario):
         c = self._c(group)
         return (c["tp"] + c["fn"]) / self.size(group)
 
+    def fnr(self, group: str) -> float:
+        """Share of the positive-label members given a negative decision (added 2026-10-20)."""
+        c = self._c(group)
+        return c["fn"] / (c["tp"] + c["fn"])
+
+    def accuracy(self, group: str) -> float:
+        """Share of the group decided correctly (added 2026-10-20)."""
+        c = self._c(group)
+        return (c["tp"] + c["tn"]) / self.size(group)
+
+    @property
+    def overall_accuracy(self) -> float:
+        """Share of all members of all groups decided correctly (added 2026-10-20)."""
+        right = sum(c["tp"] + c["tn"] for c in self.groups.values())
+        return right / sum(self.size(g) for g in self.groups)
+
+    def share(self, group: str) -> float:
+        """The group's share of all members (added 2026-10-20)."""
+        return self.size(group) / sum(self.size(g) for g in self.groups)
+
     def gap(self, metric: str) -> float:
         """``metric`` (positive_rate, tpr, fpr, ppv, base_rate) of the first group minus the second's."""
         f = getattr(self, metric)
@@ -12502,7 +12522,8 @@ class ThresholdPolicyScenario(BaseScenario):
     one ``uniform_threshold`` or group-adapted ``group_thresholds`` (approve at or above)."""
     scores: Dict[str, Dict[str, List[float]]]
     uniform_threshold: float
-    group_thresholds: Dict[str, float]
+    group_thresholds: Dict[str, float] = {}
+    alternative_threshold: Optional[float] = None   # a second shared threshold (added 2026-10-20)
 
     def tpr(self, group: str, threshold: float) -> float:
         q = self.scores[group]["qualified"]
@@ -12511,6 +12532,19 @@ class ThresholdPolicyScenario(BaseScenario):
     def fpr(self, group: str, threshold: float) -> float:
         d = self.scores[group]["default"]
         return sum(s >= threshold for s in d) / len(d)
+
+    def errors(self, group: str, threshold: float) -> int:
+        """Qualified members rejected plus defaulting members approved (added 2026-10-20)."""
+        q, d = self.scores[group]["qualified"], self.scores[group]["default"]
+        return sum(s < threshold for s in q) + sum(s >= threshold for s in d)
+
+    def size(self, group: str) -> int:
+        return len(self.scores[group]["qualified"]) + len(self.scores[group]["default"])
+
+    def accuracy(self, threshold: float) -> float:
+        """Share of all scored members decided correctly at one shared threshold (added 2026-10-20)."""
+        total = sum(self.size(g) for g in self.scores)
+        return 1 - sum(self.errors(g, threshold) for g in self.scores) / total
 
 
 class ConstraintAccuracyCostScenario(BaseScenario):
@@ -20155,3 +20189,240 @@ class KvPoolAccountingScenario(BaseScenario):
     def last_block_waste(self) -> Quantity:
         """Most a request wastes: all but one slot of its last block."""
         return ((self.block_tokens - 1) * self.kv_per_token).to("MB")
+# --- Fairness release gates, their price, and their stability (added 2026-10-20) ---------
+class SubgroupEvaluationBudgetScenario(BaseScenario):
+    """The labeled data a per-group evaluation needs: one group's rate within ``half_width`` at
+    ``confidence`` (worst case ``rate`` 0.5), the collection random sampling needs to reach a
+    ``target_per_group`` from a group of ``group_share``, and the per-group count that pins a gap
+    between two equal-size groups to ``gap_half_width``."""
+    rate: float = 0.5
+    half_width: float
+    confidence: float
+    group_share: float
+    target_per_group: int
+    gap_half_width: Optional[float] = None
+
+    @property
+    def z(self) -> float:
+        from statistics import NormalDist
+        return NormalDist().inv_cdf(0.5 + self.confidence / 2)
+
+    @property
+    def variance(self) -> float:
+        """``p (1 - p)``, 0.25 at the worst case."""
+        return self.rate * (1 - self.rate)
+
+    @property
+    def samples_needed(self) -> int:
+        from ..physics.statistics import calc_samples_for_half_width
+        return calc_samples_for_half_width(self.rate, self.half_width, self.z)
+
+    @property
+    def random_collection(self) -> float:
+        """Examples drawn at random to expect ``target_per_group`` from the group."""
+        return self.target_per_group / self.group_share
+
+    @property
+    def random_multiple(self) -> float:
+        return self.random_collection / self.target_per_group
+
+    def gap_samples_per_group(self, half_width: Optional[float] = None) -> int:
+        from ..physics.fairness import calc_gap_samples_per_group
+        return calc_gap_samples_per_group(self.rate, half_width or self.gap_half_width, self.z)
+
+    def gap_half_width_at(self, n_per_group: int) -> float:
+        from ..physics.statistics import calc_proportion_gap_se
+        return self.z * calc_proportion_gap_se(self.rate, self.rate, n_per_group, n_per_group)
+
+
+class EqualOpportunityPriceScenario(BaseScenario):
+    """Utility per applicant of raising ``group``'s TPR to ``reference_group``'s by moving its
+    threshold, when that move raises its FPR by ``fpr_increase``: a repaid loan earns
+    ``repay_margin``, a default loses ``default_loss`` (both USD)."""
+    confusion: GroupConfusionScenario
+    group: str
+    reference_group: str
+    repay_margin: Quantity
+    default_loss: Quantity
+    fpr_increase: float
+
+    @property
+    def base_rate(self) -> float:
+        return self.confusion.base_rate(self.group)
+
+    @property
+    def tpr_before(self) -> float:
+        return self.confusion.tpr(self.group)
+
+    @property
+    def tpr_after(self) -> float:
+        return self.confusion.tpr(self.reference_group)
+
+    @property
+    def fpr_before(self) -> float:
+        return self.confusion.fpr(self.group)
+
+    @property
+    def tpr_gap(self) -> float:
+        return self.tpr_after - self.tpr_before
+
+    @property
+    def baseline_utility(self) -> Quantity:
+        p = self.base_rate
+        return self.tpr_before * p * self.repay_margin - self.fpr_before * (1 - p) * self.default_loss
+
+    @property
+    def added_repaid_value(self) -> Quantity:
+        return self.tpr_gap * self.base_rate * self.repay_margin
+
+    @property
+    def added_default_cost(self) -> Quantity:
+        return self.fpr_increase * (1 - self.base_rate) * self.default_loss
+
+    @property
+    def net_change(self) -> Quantity:
+        return self.added_repaid_value - self.added_default_cost
+
+    @property
+    def utility_after(self) -> Quantity:
+        return self.baseline_utility + self.net_change
+
+    @property
+    def loss_fraction(self) -> float:
+        """Utility given up as a fraction of the group's baseline."""
+        return (-self.net_change / self.baseline_utility).to("").magnitude
+
+    @property
+    def group_share(self) -> float:
+        return self.confusion.share(self.group)
+
+    @property
+    def population_average_loss(self) -> Quantity:
+        """The group's net loss spread over every applicant."""
+        return -self.net_change * self.group_share
+
+
+class BiasFeedbackScenario(BaseScenario):
+    """A gap passed at launch, refit from the next audit, iterated over retraining cycles:
+    ``gap(k) = launch_gap * factor^k`` against a release ``gate`` (all in percentage points)."""
+    launch_gap: float
+    next_audit_gap: float
+    gate: float
+    sampled_factor: float              # the refit factor once censored outcomes are sampled
+    unmitigated_gap: float
+    horizon_cycles: int
+
+    @property
+    def factor(self) -> float:
+        return self.next_audit_gap / self.launch_gap
+
+    @property
+    def crossing(self) -> float:
+        from ..physics.fairness import calc_cycles_to_gate
+        return calc_cycles_to_gate(self.launch_gap, self.factor, self.gate)
+
+    @property
+    def breach_cycle(self) -> int:
+        return _math.ceil(self.crossing)
+
+    def gap_at(self, cycles: int, factor: Optional[float] = None) -> float:
+        from ..physics.fairness import calc_feedback_disparity
+        return calc_feedback_disparity(self.launch_gap, factor or self.factor, cycles)
+
+    @property
+    def gap_at_breach(self) -> float:
+        return self.gap_at(self.breach_cycle)
+
+    @property
+    def unmitigated_at_horizon(self) -> float:
+        from ..physics.fairness import calc_feedback_disparity
+        return calc_feedback_disparity(self.unmitigated_gap, self.factor, self.horizon_cycles)
+
+    @property
+    def sampled_gap_at_breach(self) -> float:
+        return self.gap_at(self.breach_cycle, self.sampled_factor)
+
+
+class ExplorationExposureScenario(BaseScenario):
+    """A ranking service showing ``slots_per_user`` items a day to ``daily_users`` from a catalog of
+    ``catalog_items``, with ``explore_share`` of slots served by randomized exploration."""
+    daily_users: int
+    slots_per_user: int
+    catalog_items: int
+    explore_share: float
+
+    @property
+    def impressions(self) -> int:
+        return self.daily_users * self.slots_per_user
+
+    @property
+    def catalog_coverage(self) -> float:
+        """Share of the catalog one user sees in a day."""
+        return self.slots_per_user / self.catalog_items
+
+    @property
+    def explore_impressions(self) -> float:
+        return self.impressions * self.explore_share
+
+
+class PpvErrorRateIdentityScenario(BaseScenario):
+    """Published per-group rates checked against Chouldechova's identity:
+    ``groups = {name: {positives, total, ppv, fnr, fpr}}`` (``fpr`` as published, a fraction)."""
+    groups: Dict[str, Dict[str, float]]
+
+    def base_rate(self, group: str) -> float:
+        g = self.groups[group]
+        return g["positives"] / g["total"]
+
+    def odds(self, group: str) -> float:
+        p = self.base_rate(group)
+        return p / (1 - p)
+
+    def precision_term(self, group: str) -> float:
+        ppv = self.groups[group]["ppv"]
+        return (1 - ppv) / ppv
+
+    def fpr(self, group: str) -> float:
+        from ..physics.fairness import calc_fpr_from_ppv
+        g = self.groups[group]
+        return calc_fpr_from_ppv(self.base_rate(group), g["ppv"], g["fnr"])
+
+
+class AccuracyFrontierScenario(BaseScenario):
+    """A hypothetical accuracy-against-disparity frontier, ``floor + span (1 - exp(-rate x))``, with
+    named candidate disparities on it."""
+    floor: float
+    span: float
+    rate: float
+    candidates: Dict[str, float]
+
+    def accuracy(self, disparity):
+        import numpy as np
+        return self.floor + self.span * (1 - np.exp(-self.rate * np.asarray(disparity)))
+
+    def point(self, name: str):
+        x = self.candidates[name]
+        return x, float(self.accuracy(x))
+
+    def disparity_ratio(self, worse: str, better: str) -> float:
+        return self.candidates[worse] / self.candidates[better]
+
+
+class ProxyGoalGapScenario(BaseScenario):
+    """A proxy and its goal from a common normalized start: proxy changes by ``proxy_change``,
+    the goal by ``goal_change`` (fractions); the gap is proxy minus goal."""
+    proxy_change: float
+    goal_change: float
+    start: float = 1.0
+
+    @property
+    def proxy_end(self) -> float:
+        return self.start * (1 + self.proxy_change)
+
+    @property
+    def goal_end(self) -> float:
+        return self.start * (1 + self.goal_change)
+
+    @property
+    def gap(self) -> float:
+        return self.proxy_end - self.goal_end

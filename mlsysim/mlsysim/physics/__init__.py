@@ -963,3 +963,18 @@ __all__ += [
     "calc_expected_calibration_error",
     "calc_spearman_rank_correlation",
 ]
+
+# --- Fairness: error-rate identity, bias feedback, gap sample sizes (added 2026-10-20) ---
+from .fairness import (
+    calc_fpr_from_ppv,
+    calc_feedback_disparity,
+    calc_cycles_to_gate,
+    calc_gap_samples_per_group,
+)
+
+__all__ += [
+    "calc_fpr_from_ppv",
+    "calc_feedback_disparity",
+    "calc_cycles_to_gate",
+    "calc_gap_samples_per_group",
+]
