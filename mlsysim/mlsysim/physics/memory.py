@@ -435,3 +435,26 @@ def calc_expected_paged_kv_tokens(mean_request_tokens, max_seq_len, page_size_to
     internal_frag = max(0.0, 1.0 - mean_request_tokens / allocated_tokens)
     return allocated_tokens, internal_frag
 
+
+
+# --- Decoder weight matrices (added 2026-10-20) ------------------------------
+
+def calc_decoder_matmul_weights(layers, hidden_dim, vocab_size, mlp_ratio=4):
+    """
+    Weights in the matrix multiplies of a GPT-style decoder, by kind.
+
+    Each block has four weight matrices: the fused query-key-value projection
+    (d x 3d), the attention output projection (d x d), and the two MLP
+    matrices (d x r d and r d x d). The output layer projects d to the
+    vocabulary (d x V). Biases, layer norms, and position embeddings are not
+    matrix multiplies and are left out.
+
+    Returns
+    -------
+    dict
+        ``block`` (weights in all blocks), ``block_matrices`` (count of block
+        weight matrices), and ``output`` (output-layer weights).
+    """
+    d = hidden_dim
+    per_block = d * 3 * d + d * d + 2 * d * mlp_ratio * d
+    return {"block": layers * per_block, "block_matrices": 4 * layers, "output": vocab_size * d}

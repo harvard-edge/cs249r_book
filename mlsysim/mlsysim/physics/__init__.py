@@ -33,6 +33,7 @@ from .memory import (
     calc_capped_exponential_scale,
     calc_expected_paged_kv_tokens,
 )
+from .memory import calc_decoder_matmul_weights  # added 2026-10-20
 from .communication import (
     calc_alpha_beta_crossover,
     calc_ring_collective_data_factor,
@@ -283,5 +284,6 @@ __all__ = [
     "carbon_from_energy",
     "memory_from_params",
     "token_throughput",
+    "calc_decoder_matmul_weights",  # added 2026-10-20
 ]
 

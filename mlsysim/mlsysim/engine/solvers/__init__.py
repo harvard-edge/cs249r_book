@@ -36,6 +36,9 @@ from .storage import (
     StorageBenchmarkDemandModel,
 )
 from .trends import TrainingGrowthModel
+# Single-machine iron law, Amdahl, and silent-degradation solvers (added 2026-10-20)
+from .performance import AmdahlModel, IronLawModel
+from .quality import ProxyDriftModel, ShiftedTestSetModel
 from .training import CheckpointModel, ScalingModel, TrainingMemoryModel, TrainingRunModel, TrainingStateModel
 
 __all__ = [
@@ -60,6 +63,11 @@ __all__ = [
     "IncastModel",
     "CollectiveFitModel",
     "TrainingGrowthModel",
+    # Single-machine iron law, Amdahl, and silent-degradation solvers (added 2026-10-20)
+    "IronLawModel",
+    "AmdahlModel",
+    "ShiftedTestSetModel",
+    "ProxyDriftModel",
     "StorageFootprintModel",
     "TieredCheckpointModel",
     "CheckpointStormModel",
