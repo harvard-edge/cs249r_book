@@ -21827,3 +21827,39 @@ class BenchmarkLeaderboardScenario(BaseScenario):
     def ratio(self, folder: str, baseline: str) -> float:
         """Resolved count of ``folder`` over that of ``baseline``."""
         return self.resolved(folder) / self.resolved(baseline)
+class ChatServiceDayScenario(BaseScenario):
+    """One day of a chat service's prompts: their energy against a reference energy, and the
+    accelerators that keep up with their tokens at average load (added 2026-10-20).
+
+    ``prompts_per_day`` prompts, each ``energy_per_prompt`` and ``tokens_per_prompt`` long;
+    one accelerator generates ``accelerator_token_rate`` tokens per second. Average load
+    spreads the day's tokens evenly over the day: no peak, no spare capacity.
+    """
+    prompts_per_day: float
+    energy_per_prompt: Quantity
+    tokens_per_prompt: int
+    accelerator_token_rate: Quantity     # tokens per second per accelerator
+    reference_energy: Optional[Quantity] = None
+
+    @property
+    def daily_energy(self) -> Quantity:
+        return (self.prompts_per_day * self.energy_per_prompt).to("MWh")
+
+    @property
+    def reference_share(self) -> float:
+        """One day's energy over the reference energy."""
+        return (self.daily_energy / self.reference_energy).to("").magnitude
+
+    @property
+    def days_per_reference(self) -> float:
+        """Days of prompts that use the reference energy."""
+        return 1 / self.reference_share
+
+    @property
+    def token_rate(self) -> Quantity:
+        """The day's tokens spread evenly over the day."""
+        return (self.prompts_per_day * self.tokens_per_prompt / Q_(1, "day")).to("1/second")
+
+    @property
+    def accelerators_average(self) -> float:
+        return (self.token_rate / self.accelerator_token_rate).to("").magnitude

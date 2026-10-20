@@ -5796,3 +5796,17 @@ def test_swe_bench_verified_leaderboard_one_attempt():
     assert s.ratio("20240402_sweagent_claude3opus", "20240402_rag_claude3opus") == pytest.approx(79 / 35)
     calls = Literature.SweBenchMiniSonnet4Django12050Calls.entries
     assert len(calls) == 22 and calls[0]["context_chars"] == 5499
+def test_chat_service_day_scenario():
+    """One day of ChatGPT prompts at the Gemini median prompt (added 2026-10-20)."""
+    c = Scenarios.ChatGptDayAtGeminiMedianPrompt
+    assert c.energy_per_prompt.m_as("Wh") == pytest.approx(0.24)
+    assert c.daily_energy.m_as("MWh") == pytest.approx(600)
+    assert c.reference_share == pytest.approx(600 / 1287)
+    assert c.days_per_reference == pytest.approx(1287 / 600)
+    assert c.token_rate.m_as("1/s") == pytest.approx(2.5e9 * 500 / 86400)
+    assert c.accelerators_average == pytest.approx(2.5e9 * 500 / 86400 / 912)
+    from mlsysim import Literature, ReferenceStats
+    assert float(ReferenceStats.TextTokenization.WordsPerToken) == 0.75
+    d = Literature.DatacenterElectricity
+    assert float(d.CraneUnit1CapacityMw) == 837 and float(d.CraneMicrosoftPpaYears) == 20
+    assert float(d.CraneUnit1ExpectedOnlineYear) - float(d.CraneUnit1RetiredYear) == 9
