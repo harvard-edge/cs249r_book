@@ -69,3 +69,81 @@ def calc_kv_cache_bytes_per_token(
     total = 2 * layers * kv_heads * d_head * bpe
     return total.to(ureg.byte) if hasattr(total, "to") else total * ureg.byte
 
+
+
+# --- Trajectory reliability and cost per accepted task (added 2026-10-20) ----
+# Horizon compounding, cost per accepted task, independent retries, and the
+# input an append-only trajectory resends. Each is the closed form of a
+# recurring agent calculation; the solvers in engine/solvers/agents.py use them.
+
+
+def calc_unchecked_success(step_success: float, horizon: float) -> float:
+    """
+    Success of a task whose ``horizon`` steps must all be right, unchecked.
+
+        Pr(success) = (1 - eps)^H = p_step^H
+
+    Assumes independent steps, no check between them, and no recovery.
+    """
+    return step_success ** horizon
+
+
+def calc_step_error_for_target(target_success: float, horizon: float) -> float:
+    """
+    Per-step error rate that holds ``target_success`` over ``horizon`` unchecked steps.
+
+        eps = 1 - target^(1/H)
+
+    For small eps, eps * H ~ -ln(target) at any horizon.
+    """
+    return 1 - target_success ** (1 / horizon)
+
+
+def calc_cost_per_accepted(attempt_cost, acceptance_probability: float):
+    """
+    Expected cost per accepted task when attempts repeat until one is accepted.
+
+        C_eff = E[C_attempt] / p_acc
+
+    Attempts are geometric with mean 1 / p_acc, so every rejected attempt is
+    charged to the accepted one.
+    """
+    return attempt_cost / acceptance_probability
+
+
+def calc_break_even_acceptance(acceptance_probability: float, cut: float, share: float) -> float:
+    """
+    Acceptance that matches a price cut on one component of the attempt cost.
+
+    Removing a fraction ``cut`` of a component that is ``share`` of the attempt
+    cost gives the same cost per accepted task as raising acceptance to
+
+        p' = p_acc / (1 - cut * share)
+    """
+    return acceptance_probability / (1 - cut * share)
+
+
+def calc_independent_success(acceptance_probability: float, attempts: int) -> float:
+    """
+    Chance that at least one of ``attempts`` independent attempts is accepted.
+
+        1 - (1 - p_acc)^k
+    """
+    return 1 - (1 - acceptance_probability) ** attempts
+
+
+def calc_append_only_context(initial_tokens, tokens_per_turn, turns: int):
+    """
+    Context of the last call and total input sent by an append-only trajectory.
+
+    Turn t (from 1) reads s0 + delta (t - 1) tokens, so the last of H turns reads
+    s0 + delta (H - 1), and the H calls together send
+
+        H s0 + delta H (H - 1) / 2
+
+    tokens: input grows quadratically with the horizon when every turn resends
+    the history. Returns (last_call, cumulative).
+    """
+    last_call = initial_tokens + tokens_per_turn * (turns - 1)
+    cumulative = turns * initial_tokens + tokens_per_turn * (turns * (turns - 1) // 2)
+    return last_call, cumulative

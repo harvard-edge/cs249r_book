@@ -194,6 +194,33 @@ SweBenchTrajectories = _Series(
     "Per-trajectory model calls, role-split characters, tokens, and cost for public repair-agent runs.",
 )
 
+# --- One mini-SWE-agent run, per task (added 2026-10-20) ---------------------
+SweBenchMiniSonnet4Run = _Series(
+    "swe_bench_verified_mini_v1_sonnet4_run",
+    Provenance(
+        kind=ProvenanceKind.LITERATURE,
+        ref=(
+            "SWE-bench Verified submission 20250726_mini-v1.0.0_claude-sonnet-4-20250514 "
+            "(mini-swe-agent 1.0.0 with Claude 4 Sonnet, bash only, one attempt per task), per task"
+        ),
+        url=(
+            "https://github.com/SWE-bench/experiments/tree/main/evaluation/verified/"
+            "20250726_mini-v1.0.0_claude-sonnet-4-20250514"
+        ),
+        verified="2026-10-17",
+        notes=(
+            "500 tasks. Cost, model calls, and resolved flag from the submission's "
+            "per_instance_details.json; exit status, observations, nonzero exit codes, "
+            "truncation warnings, syntax errors seen, command classes (read, write, run, "
+            "net, by command pattern), and files in the submitted diff from the public "
+            "trajectories (swe-bench-submissions S3 bucket, bash-only/<submission>/trajs). "
+            "Reduced by extract_run.py (slides tree, images/ of the deck that plots it); command "
+            "classes are pattern matches and so approximate."
+        ),
+    ),
+    "Per-task cost, model calls, acceptance, and command classes of one public repair-agent run.",
+)
+
 _MONKEYS_NOTES = (
     "Brown et al. (2024), Large Language Monkeys. Recomputed from the released "
     "per-sample correctness labels: Hugging Face ScalingIntelligence/monkey_business "

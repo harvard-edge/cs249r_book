@@ -443,3 +443,68 @@ def test_codec_decode_cores():
     assert c.output_bandwidth("light").to("GB/s").magnitude == approx(84)
     assert c.decode_cores("light") == approx(56)
     assert c.decode_cores("dense") == approx(224)
+
+
+# --- Agent trajectories (added 2026-10-20) -----------------------------------
+
+def test_unchecked_horizon_compounding():
+    r = Scenarios.UncheckedRepairHorizon.result
+    assert r.success[10] == approx(0.904382)
+    assert r.success[100] == approx(0.366032)
+    assert r.success[200] == approx(r.success[100] ** 2)
+    assert r.required_step_error == approx(0.0010530503)
+    assert r.error_ratio == approx(9.49622)
+    assert r.required_error_horizon == approx(0.105305)
+    assert r.small_error_limit == approx(0.1053605)
+
+
+def test_cost_per_accepted_task_levers():
+    r = Scenarios.RepairAttemptCostLevers.result
+    assert r.attempt_cost == approx(2.10)
+    assert r.cost_per_accepted == approx(5.25)
+    assert r.attempts_per_acceptance == approx(2.5)
+    assert r.accepted_only_understatement == approx(2.5)
+    assert r.cheaper_attempt_cost == approx(1.45)
+    assert r.cost_per_accepted_cheaper_tokens == approx(3.625)
+    assert r.cost_per_accepted_improved == approx(3.50)
+    assert r.token_share == approx(0.6190476)
+    assert r.break_even_acceptance == approx(0.5793103)
+    # the break-even acceptance prices the cheaper attempt at the original attempt cost
+    assert r.attempt_cost / r.break_even_acceptance == approx(r.cost_per_accepted_cheaper_tokens)
+    assert r.cost_per_accepted_cheaper_other == approx(4.25)
+    assert r.cost_per_accepted_acceptance_gain == approx(4.20)
+    assert r.independent_success == approx(0.92224)
+
+
+def test_append_only_context():
+    r = Scenarios.AppendOnlyRepairContext.result
+    assert r.last_call_tokens.to("token").magnitude == 51500
+    assert r.window_fraction == approx(0.40234375)
+    assert r.cumulative_input_tokens.to("token").magnitude == 892500
+    assert r.reread_ratio == approx(17.330097)
+
+
+def test_task_horizon_trend_reproduces_source():
+    s = Scenarios.FrontierTaskHorizonTrend
+    r = s.result
+    assert r.doubling_recent.to("day").magnitude == pytest.approx(s.published_recent_doubling.to("day").magnitude, abs=1)
+    assert r.doubling_all.to("day").magnitude == approx(187.7775, rel=1e-4)
+    assert r.growth == approx(19427.65, rel=1e-4)
+    assert r.first_date == "2019-02-14"
+
+
+def test_recorded_repair_agent_run():
+    r = Scenarios.MiniSweAgentSonnet4Run.result
+    assert (r.tasks, r.accepted, r.rejected, r.submitted) == (500, 324, 176, 500)
+    assert r.total_cost == approx(185.726585)
+    assert r.cost_per_accepted == approx(r.total_cost / r.accepted)
+    assert r.accepted_mean_cost == approx(0.3200875)
+    assert r.accepted_only_understatement == approx(1.790854)
+    assert (r.calls_median, r.calls_min, r.calls_max) == (33, 9, 123)
+    assert r.commands == {"read": 8826, "write": 5284, "run": 4463, "net": 9}
+    assert (r.observations, r.nonzero_exits, r.truncated_outputs) == (18076, 1349, 298)
+    assert sum(b["tasks"] for b in r.call_bins) == r.tasks
+    assert [b["accepted"] for b in r.call_bins] == [54, 112, 80, 57, 21]
+    t = Scenarios.AstropyBitmaskRepair
+    assert (t.model_calls, t.resolved, t.files_in_submission, t.hidden_tests) == (28, True, 6, 180)
+    assert t.cost == approx(0.342415)

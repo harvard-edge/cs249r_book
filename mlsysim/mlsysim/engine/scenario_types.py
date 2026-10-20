@@ -995,3 +995,133 @@ class CompressedReadScenario(BaseScenario):
     def decode_cores(self, codec: str) -> float:
         """Cores needed to decode at that output rate."""
         return (self.output_bandwidth(codec) / self.decode_rates[codec]).to("").magnitude
+
+
+# --- Agent trajectories (added 2026-10-20) -----------------------------------
+
+class HorizonCompoundingScenario(BaseScenario):
+    """Independent, unchecked steps each right with ``step_success``; success at each horizon."""
+    step_success: float
+    short_horizon: int
+    long_horizon: int                         # the horizon the target must hold at
+    target_success: float
+    extended_horizon: Optional[int] = None    # a further horizon to price (for example, twice the long one)
+
+    @property
+    def horizons(self):
+        return tuple(h for h in (self.short_horizon, self.long_horizon, self.extended_horizon) if h is not None)
+
+    @property
+    def result(self):
+        from .solvers import HorizonCompoundingModel
+        return HorizonCompoundingModel().solve(self.step_success, self.horizons, self.target_success,
+                                               self.long_horizon)
+
+
+class AcceptedTaskCostScenario(BaseScenario):
+    """An attempt of model tokens plus other cost, retried until accepted; optional levers on it."""
+    model_cost: Quantity                       # USD per attempt
+    other_cost: Quantity                       # USD per attempt: sandbox, tests, review
+    acceptance: float
+    token_price_cut: Optional[float] = None    # fraction of the token price removed
+    improved_acceptance: Optional[float] = None
+    other_cost_cut: Optional[float] = None     # fraction of the other cost removed
+    acceptance_gain: Optional[float] = None    # added to acceptance
+    independent_attempts: Optional[int] = None
+
+    @property
+    def result(self):
+        from .solvers import AcceptedTaskCostModel
+        return AcceptedTaskCostModel().solve(self.model_cost, self.other_cost, self.acceptance,
+                                             self.token_price_cut, self.improved_acceptance,
+                                             self.other_cost_cut, self.acceptance_gain,
+                                             self.independent_attempts)
+
+
+class AppendOnlyContextScenario(BaseScenario):
+    """A trajectory that appends each turn to its prompt and resends the whole history."""
+    initial_tokens: Quantity
+    tokens_per_turn: Quantity
+    turns: int
+    context_window: Quantity
+
+    @property
+    def result(self):
+        from .solvers import AppendOnlyContextModel
+        return AppendOnlyContextModel().solve(self.initial_tokens, self.tokens_per_turn, self.turns,
+                                              self.context_window)
+
+
+class TaskHorizonTrendScenario(BaseScenario):
+    """Doubling time of the frontier 50% task horizon in a published series."""
+    series_name: str
+    fit_cap: Quantity                          # longest horizon the fits include
+    recent_from: str                           # ISO date the recent fit starts
+    published_recent_doubling: Optional[Quantity] = None   # the source's own figure, to check the refit
+
+    @property
+    def rows(self):
+        from ..literature.registry import Literature
+        return getattr(Literature, self.series_name).entries
+
+    @property
+    def result(self):
+        from .solvers import TaskHorizonTrendModel
+        return TaskHorizonTrendModel().solve(self.rows, self.fit_cap, self.recent_from)
+
+    def fitted_minutes(self, when) -> float:
+        """Horizon in minutes on the recent fit line at datetime ``when`` (fractional days count)."""
+        r = self.result
+        day = when.toordinal() + (when.hour * 3600 + when.minute * 60 + when.second) / 86400
+        return 2 ** (r.recent_intercept + r.recent_slope_per_day * day)
+
+
+class AgentRunScenario(BaseScenario):
+    """One recorded agent run over a benchmark (a per-task ``Literature`` series)."""
+    series_name: str
+    call_bin_edges: List[int]                  # model-call bin edges for the acceptance-by-length table
+
+    @property
+    def rows(self):
+        from ..literature.registry import Literature
+        return getattr(Literature, self.series_name).entries
+
+    def task(self, instance_id: str) -> dict:
+        return next(r for r in self.rows if r["instance_id"] == instance_id)
+
+    @property
+    def result(self):
+        from .solvers import AgentRunSummaryModel
+        return AgentRunSummaryModel().solve(self.rows, self.call_bin_edges)
+
+
+class BenchmarkTaskScenario(BaseScenario):
+    """One task of a recorded run, with the hidden tests that judged it."""
+    run: AgentRunScenario
+    instance_id: str
+    fail_to_pass_tests: int                    # new tests the fix must make pass
+    pass_to_pass_tests: int                    # existing tests that must keep passing
+
+    @property
+    def record(self) -> dict:
+        return self.run.task(self.instance_id)
+
+    @property
+    def model_calls(self) -> int:
+        return int(self.record["model_calls"])
+
+    @property
+    def cost(self) -> float:
+        return self.record["cost_usd"]
+
+    @property
+    def resolved(self) -> bool:
+        return bool(self.record["resolved"])
+
+    @property
+    def files_in_submission(self) -> int:
+        return int(self.record["files_in_submission"])
+
+    @property
+    def hidden_tests(self) -> int:
+        return self.fail_to_pass_tests + self.pass_to_pass_tests
