@@ -2758,35 +2758,26 @@ Two fixed costs dominate at small batch sizes. Kernel launch overhead\index{Kern
 ↩ Per-kernel launch overhead, and why fusion and graph execution attack it, are established in @sec-ml-frameworks-dispatch-overhead-law-9e0a.
 :::
 
-Larger batches improve hardware efficiency but inflate per-request latency. The engineering objective is to identify the operating point that maximizes sustainable throughput while satisfying the request deadline. For the reference ResNet-50 profile quantified in @tbl-model-serving-batching-throughput-tradeoff below, serving batch size 8 with a `{python} BatchThroughputCalc.batch_window_ms_str` batching window requires a mean formation-plus-inference budget of approximately `{python} BatchThroughputCalc.batch8_budget_ms_str`. An arriving request waits on average half the window (`{python} BatchThroughputCalc.half_window_ms_str`, as derived in @sec-model-serving-queue-waiting-time-analysis-8d5c) and requires `{python} BatchThroughputCalc.batch8_inference_ms_str` of inference. If the service must meet a `{python} BatchThroughputCalc.slo_ms_str` SLO, the remaining `{python} BatchThroughputCalc.batch8_headroom_ms_str` provides headroom for worker backlog and auxiliary pipeline stages, while delivering `{python} BatchThroughputCalc.batch8_vs_batch1_mult_str` higher service throughput than batch 1 on identical hardware. On this accelerator the batching window, not the computation, is most of the batch-8 budget. Batch size cannot grow indefinitely, and @fig-throughput-latency-knee shows why by modeling this relationship across batch sizes on a logarithmic axis. To isolate the planning knee under worst-case scheduling conditions, the figure assumes a strictly serialized single worker that waits out the full batching window before executing each batch, without pipelined overlap ($\text{Latency} = \BatchingWindow + \BatchServiceTime(\BatchSize)$). Under this unpipelined assumption, batch-1 throughput is `{python} BatchThroughputCalc.serial_b1_rps_str` rather than the `{python} BatchThroughputCalc.b1_rps_str` sustained when inference runs back to back. Throughput rises almost in proportion to batch size while the fixed overhead dominates each batch, because each added image costs only `{python} ResNetH100Profile.per_image_fp16_us_str` of device time. The planning knee sits where the batch's total per-image work equals the fixed part of its latency, the window plus the fixed cost, near batch `{python} BatchThroughputCalc.knee_batch_str`. There latency is twice that of batch one and throughput is half its ceiling. Beyond it, each doubling of the batch roughly doubles latency while throughput gains less and less. In this model throughput never declines; it saturates, so latency, not throughput, sets the largest useful batch.
+Larger batches improve hardware efficiency but inflate per-request latency. The engineering objective is to identify the operating point that maximizes sustainable throughput while satisfying the request deadline. For the reference ResNet-50 profile quantified in @tbl-model-serving-batching-throughput-tradeoff below, serving batch size 8 with a `{python} BatchThroughputCalc.batch_window_ms_str` batching window requires a mean formation-plus-inference budget of approximately `{python} BatchThroughputCalc.batch8_budget_ms_str`. An arriving request waits on average half the window (`{python} BatchThroughputCalc.half_window_ms_str`, as derived in @sec-model-serving-queue-waiting-time-analysis-8d5c) and requires `{python} BatchThroughputCalc.batch8_inference_ms_str` of inference. If the service must meet a `{python} BatchThroughputCalc.slo_ms_str` SLO, the remaining `{python} BatchThroughputCalc.batch8_headroom_ms_str` provides headroom for worker backlog and auxiliary pipeline stages, while delivering `{python} BatchThroughputCalc.batch8_vs_batch1_mult_str` higher service throughput than batch 1 on identical hardware. On this accelerator the batching window, not the computation, is most of the batch-8 budget. Batch size cannot grow indefinitely, and @fig-throughput-latency-knee shows why by modeling this relationship across batch sizes on a logarithmic axis. To isolate the planning knee under worst-case scheduling conditions, the figure assumes a strictly serialized single worker that waits out the full batching window before executing each batch, without pipelined overlap ($\text{Latency} = \BatchingWindow + \BatchServiceTime(\BatchSize)$). Under this unpipelined assumption, batch-1 throughput is `{python} BatchThroughputCalc.serial_b1_rps_str` rather than the `{python} BatchThroughputCalc.b1_rps_str` sustained when inference runs back to back. Throughput rises almost in proportion to batch size while the fixed overhead dominates each batch, because each added image costs only `{python} ResNetH100Profile.per_image_fp16_us_str` of device time. The planning knee sits where the batch's total per-image work equals the fixed part of its latency, the window plus the fixed cost, near batch `{python} BatchThroughputCalc.knee_batch_str`. There latency is approximately twice that of batch one and throughput is half its ceiling. Beyond it, each doubling of the batch roughly doubles latency while throughput gains less and less. In this model throughput never declines; it saturates, so latency, not throughput, sets the largest useful batch.
 
-::: {#fig-throughput-latency-knee fig-env="figure" fig-pos="htb" fig-cap="**The Throughput-Latency Knee**: Batch size vs. throughput (blue) and latency (orange) for the reference ResNet-50 profile on the H100. Throughput rises nearly in proportion to batch size while fixed overhead dominates, then flattens toward its ceiling. Latency grows slowly at first and roughly in proportion to batch size beyond the marked planning knee, where it is twice the batch-one latency and throughput reaches half its ceiling. Each throughput value is batch size divided by the plotted formation-plus-service latency, for a single worker that waits out a 10 ms window and then serves each batch; pipelined serving sustains higher throughput. Values are modeled, not measured." fig-alt="Dual-axis line chart on a log batch-size axis. Blue line (throughput) rises steeply and then flattens. Orange line (latency) stays nearly flat through batch 32 and then climbs. A vertical dashed line labeled Planning Knee marks batch size near 400."}
+::: {#fig-throughput-latency-knee fig-env="figure" fig-pos="htb" fig-cap="**The Throughput-Latency Knee**: The top panel shows throughput and the bottom panel shows latency for the same batch sizes in the reference ResNet-50 profile on the H100. Aligned dashed markers locate the planning knee, where fixed and per-image costs contribute equally to latency and throughput reaches half its ceiling. Beyond it, latency continues to rise while throughput approaches its ceiling. Each throughput value is batch size divided by formation-plus-inference latency for a single worker that waits out the full batching window before serving each batch. Pipelined serving sustains higher throughput. Values are modeled, not measured." fig-alt="Two stacked line charts share a logarithmic batch-size axis. The top blue throughput curve rises and flattens; the bottom orange latency curve rises more sharply at larger batches. Aligned vertical dashed lines labeled Planning knee mark the same batch size in both panels."}
 
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ THROUGHPUT-LATENCY KNEE FIGURE
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-throughput-latency-knee—dual-axis plot preceding the
-# │          dynamic batching section, illustrating the throughput/latency trade-off
-# │
-# │ Goal: Show that throughput saturates and latency spikes at the same batch
-# │       size threshold, revealing the optimal operating point.
-# │ Show: Throughput (req/s) and latency (ms) as a function of batch size on
-# │       log-scale x-axis with an annotated optimal point.
-# │ How: Plot tabular BATCHING_DATA on dual y-axes; mark optimal with axvline.
-# │
+# │ Context: @fig-throughput-latency-knee—throughput optimization.
+# │ Goal: Compare throughput saturation with formation-plus-inference latency.
+# │ Show: Two vertically aligned panels with the same batch sizes and knee.
+# │ How: Retain the serialized-worker model; give each metric its own panel.
 # └─────────────────────────────────────────────────────────────────────────────
-
-# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
-# │ Show that throughput saturates and latency spikes at the same batch
 import pandas as pd
 from binder.tools.figures import style as book_style
 
-fig, ax1, COLORS, plt = book_style.setup_plot(figsize=(6.2, 4.5))
-# =============================================================================
-# DATA
-# =============================================================================
+fig, _, COLORS, plt = book_style.setup_plot(figsize=(6.2, 5.0))
+fig.clear()
+ax1, ax2 = fig.subplots(2, 1, sharex=True)
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 # One worker waits out the batching window, then serves the batch (reference profile).
@@ -2801,46 +2792,39 @@ check(
 )
 df = pd.DataFrame(BATCHING_DATA)
 
-# =============================================================================
-# PLOT: The Throughput-Latency Knee
-# =============================================================================
-color_tp, color_lat = COLORS['BlueLine'], COLORS['OrangeLine']
-
 # ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-
-ax1.plot(df['BatchSize'], df['Throughput'], 'o-', color=color_tp, label='Throughput')
-ax1.set_xlabel('Batch Size')
-ax1.set_ylabel('Throughput (Requests/sec)', color=color_tp, fontweight='bold')
-ax1.tick_params(axis='y', labelcolor=color_tp)
-ax1.set_xscale('log', base=2)
-
-ax2 = ax1.twinx()
-ax2.plot(df['BatchSize'], df['Latency'], 's-', color=color_lat, label='Latency')
-ax2.set_ylabel('Latency (ms)', color=color_lat, fontweight='bold', rotation=270, labelpad=15)
-ax2.tick_params(axis='y', labelcolor=color_lat)
-ax2.spines['right'].set_visible(True)
-ax2.spines['top'].set_visible(False)
-
-_knee = BatchThroughputCalc.knee_batch_value
-ax1.axvline(_knee, color='gray', linestyle='--', alpha=0.5)
-ax1.text(
-    _knee * 0.92,
-    df['Throughput'].max() * 0.62,
-    " Planning\n Knee",
-    ha='right',
-    color='gray',
-    fontsize=9,
-    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.5),
-)
-plt.show()
-plt.close()
+ax1.plot(df['BatchSize'], df['Throughput'], 'o-', color=COLORS['BlueLine'])
+ax1.set_title('(a) Throughput', loc='left')
+ax1.set_ylabel('Throughput (requests/s)')
+ax2.plot(df['BatchSize'], df['Latency'], 's-', color=COLORS['OrangeLine'])
+ax2.set_title('(b) Formation plus inference', loc='left')
+ax2.set_ylabel('Latency (ms)')
+ax2.set_xlabel('Batch size')
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
+_knee = BatchThroughputCalc.knee_batch_value
+for _ax in (ax1, ax2):
+    _ax.set_xscale('log', base=2)
+    _ax.axvline(_knee, color=COLORS['secondary'], linestyle='--', linewidth=1)
+    _ax.text(
+        _knee * 0.90,
+        0.84,
+        'Planning knee',
+        transform=_ax.get_xaxis_transform(),
+        ha='right',
+        va='top',
+        fontsize=book_style.MIN_FONT_PT,
+        color=COLORS['secondary'],
+        bbox=dict(facecolor='white', alpha=0.85, edgecolor='none', pad=1),
+    )
+fig.tight_layout(h_pad=1.1)
+plt.show()
+plt.close()
 ```
 
 :::
 
-The vertical dashed marker near batch size `{python} BatchThroughputCalc.knee_batch_str` in @fig-throughput-latency-knee marks the point where per-image work equals the fixed part of a batch's latency. The knee illustrates a general systems trade-off rather than a fixed operating setting. Under unpipelined serial dispatch, throughput is bounded by $\BatchSize / (\BatchingWindow + \BatchServiceTime(\BatchSize))$. In contrast, when the serving runtime pipelines batch formation with accelerator execution, saturated throughput depends solely on accelerator service time ($\EffectiveServiceRate(\BatchSize) = \BatchSize / \BatchServiceTime(\BatchSize)$), achieving the higher capacities documented in @tbl-model-serving-batching-throughput-tradeoff.
+The aligned dashed markers near batch size `{python} BatchThroughputCalc.knee_batch_str` in @fig-throughput-latency-knee mark the point where per-image work equals the fixed part of a batch's latency. The knee illustrates a general systems trade-off rather than a fixed operating setting. Under unpipelined serial dispatch, throughput is bounded by $\BatchSize / (\BatchingWindow + \BatchServiceTime(\BatchSize))$. In contrast, when the serving runtime pipelines batch formation with accelerator execution, saturated throughput depends solely on accelerator service time ($\EffectiveServiceRate(\BatchSize) = \BatchSize / \BatchServiceTime(\BatchSize)$), achieving the higher capacities documented in @tbl-model-serving-batching-throughput-tradeoff.
 
 ::: {#nbk-model-serving-resnet-50-batching-efficiency .callout-notebook title="ResNet-50 batching efficiency"}
 
