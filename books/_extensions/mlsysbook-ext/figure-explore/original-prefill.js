@@ -81,7 +81,7 @@
       if(kind==='handoff')return[trajectory({x:center(gb[k*2-1]).x,y:gb[k*2-1].y},{x:center(gb[k*2]).x,y:gb[k*2].y},8)];
       return[];
     }
-    const controller=window.MLSysOriginalPlayer.create({root,outer,title:'How does a prompt become a growing KV cache?',scope:'One request. Words stand for tokens; cache cells stand for their keys and values. Attention includes the current input’s newly computed keys and values; arrows emphasize earlier entries. Append marks retention for later passes. Motion is illustrative.',steps:lesson.map(([label,description])=>({label,description})),render,transition:async({to,onFrame,signal})=>{
+    const controller=window.MLSysOriginalPlayer.create({root,outer,title:'How does a prompt become a growing KV cache?',scope:'One request. Words stand for tokens; cache cells stand for their keys and values. Attention includes the current input’s newly computed keys and values; arrows emphasize earlier entries. Append marks retention for later passes. Motion is illustrative.',steps:lesson.map(([label,description],i)=>({label,get description(){return current===i?description:'On completion: '+description;}})),render,transition:async({to,onFrame,signal})=>{
       const tracks=pathsFor(to);
       if(lesson[to][2]==='release'){
         onFrame(t=>cacheLabels.forEach(el=>el.style.opacity=String(1-t)));

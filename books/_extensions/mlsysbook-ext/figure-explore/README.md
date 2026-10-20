@@ -139,44 +139,49 @@ learner readability; this does not constitute student testing. A source-art
 mapping must preserve the illustrated workload and spatial relationships.
 Alternative toy cases must remain explicit supporting examples.
 
-The most recent full four-volume HTML run is
-`books/_build/parallel/20261020-141018-96957`; all four full-volume HTML jobs
-passed. All 100 selected figures are enrolled exactly once in their owning
-chapters, with matching packaged controller, data, source, and artwork hashes.
-The other 637 cataloged figures retain their static presentation.
+The complete four-volume HTML baseline is
+`books/_build/parallel/20261020-161134-58948`; all four genuine full-volume jobs
+passed. Final Vol1 chapter delivery uses the genuine follow-up run
+`books/_build/parallel/20261020-164427-53372` after the convolution playback-label and im2col phone-layout corrections.
+Vol2–4 retain their unchanged baseline outputs. The actual review routes name
+these runs explicitly; byte-identical copies are preserved in the permanent
+books build directory. All 100 selected figures are enrolled exactly
+once in their owning chapters, with matching packaged controller, data, source,
+and artwork hashes. The fresh canonical artwork index covers all 737 figures;
+the other 637 figures retain their static presentation.
 
-A later focused quantization refinement is reviewed in the selective chapter
-run `books/_build/parallel/20261020-151608-32249`. It distinguishes stored sums
-from in-transit products, selects the current multiplier pair, and recenters
-the next operation after phone panning. Separate technical and learner-view
-retakes cover this controller; the other implementations retain their existing
-records and runtime bytes. The original diagram, prose, numerical exports,
-and shared player are unchanged. This selective build does not constitute a
-new full-volume HTML, PDF, or EPUB review.
+The final volume audits read the selected source sections and captions against
+their drawings and controllers. They check the illustrated workload, causal
+order, ownership and lifetime rules, and the distinction between pending work
+and a committed result. Bounded narration fixes keep in-transit operations
+separate from stored values. Reproducible mechanism diagnostics check the
+reported finite examples and invariants; unchanged mathematical models retain
+their earlier numerical scope rather than receiving a new blanket arithmetic
+approval. Earlier focused quantization refinements are included in this full
+build.
 
-The 86 newer modules have separate technical and learner-view role records.
-The asynchronous timing and arm comparison receive new production reviews;
-prior numerical evidence is retained only where source context, model, artwork,
-and runtime compatibility are established. Historical role records remain
-available rather than being relabeled as new inspections. Independent agent
-review is not student testing. The original-art catalog binds acceptance to
-source, artwork, runtime, and actual owning chapter HTML; stale records return
-to awaiting review.
+The 86 newer modules have current technical and learner-view role records.
+Each records the relevant aspect of the final volume agent audit, the current
+artifact fingerprint, finite rendered coverage, and preserved prior review
+history. Volume agents review both technical and learner-view aspects; the
+prior independent role reviews remain a separate part of the evidence. The
+original-art catalog binds all 100 reviewed
+implementations to source, artwork, runtime, and actual owning chapter HTML;
+stale records return to awaiting review.
 
-The full four-volume run includes controls checks for all 100 implementations
-in Chromium and WebKit, on desktop and phone, in both themes: 800 passing
-profiles against that full build.
+Fresh controls checks cover every implementation in Chromium and WebKit, on
+desktop and phone, in both themes: 800 passing profiles against these final per-volume outputs.
 They verify speed choices, paused diagram identity, scoped shortcuts, restart,
-full-window bounds, sticky controls, and Escape focus restoration. None of
-these UI profiles is inherited from the preceding build. Separate integration
-checks exercise initial mounting, the first step, and Diagram restoration for
-all 100 figures at desktop and phone widths. These checks do not replace
-mechanism-specific numerical or all-state review.
+full-window bounds, sticky controls, and Escape focus restoration. No UI
+profile is inherited from an earlier build. Mechanism-specific endpoint and
+progressed-pause captures complement this controls sweep; each volume report
+states its finite cases and limitations. These checks do not prove continuous
+correctness at every instant or replace numerical diagnostics.
 
-The preceding controls work restored convolution after closing its expanded
-view, scheduled FSDP resize work outside observer delivery, and remeasured moving
-HTML values when tensor layout, block-sparse GEMM, and im2col expand or return
-inline. Those controller bytes remain unchanged in this integration.
+The shared player and timing contract are unchanged in this pass. The current
+full build includes the earlier convolution expansion restoration, FSDP resize
+scheduling, and paused HTML-value geometry corrections for tensor layout,
+block-sparse GEMM, and im2col.
 
 A separate WebKit phone orientation/repeated-expansion stress trace can still
 emit a ResizeObserver delivery warning. The warning also occurs with the prior
@@ -273,10 +278,10 @@ queueing, failures, or another relevant state actually changes.
 Selection requires four answers:
 
 1. What precise systems question does the figure teach?
-2. What changes visibly, and how does the state demonstrate cause and effect?
-3. What can the reader learn by stepping or varying a parameter that the static
+1. What changes visibly, and how does the state demonstrate cause and effect?
+1. What can the reader learn by stepping or varying a parameter that the static
    figure and prose do not already convey as clearly?
-4. Does that learning value justify the controls and added visual complexity?
+1. Does that learning value justify the controls and added visual complexity?
 
 Preserve the original technical meaning, labels, assumptions, palette, and
 caption; the web geometry may change. State any worked-case simplification. Reading-time playback must not
@@ -451,20 +456,20 @@ only an HTML enrollment attribute; figure content and caption AST are unchanged.
 
 1. Author its manifest in `lessons/`, then compile the exact figure binding.
    Specialized factories also declare their script and stylesheet there.
-2. Supply a factory under `window.MLSysFigureLessons[lessonName]`. It receives
+1. Supply a factory under `window.MLSysFigureLessons[lessonName]`. It receives
    an empty, uniquely identified, initially detached Explore panel. It builds
    scoped semantic controls/diagram and returns `{pause, destroy}`.
-3. `pause()` must stop timers and interpolation without resetting the state.
+1. `pause()` must stop timers and interpolation without resetting the state.
    `destroy()` removes lesson listeners/observers and releases resources.
-4. Do not initialize tabs or change the original figure/caption inside a lesson.
+1. Do not initialize tabs or change the original figure/caption inside a lesson.
    The shared controller mounts transactionally and handles view switching.
-5. A lesson must pause on document hiding and leaving the viewport; it must
+1. A lesson must pause on document hiding and leaving the viewport; it must
    never autoplay on initialization, view activation, or theme changes.
-6. Derive narration, highlights, equations, and counters from one state. Expose
+1. Derive narration, highlights, equations, and counters from one state. Expose
    changing quantities in readable text, not only color or movement.
-7. Scope classes and DOM queries. Inherit chapter typography and theme surfaces.
+1. Scope classes and DOM queries. Inherit chapter typography and theme surfaces.
    Preserve the original composition and existing color roles.
-8. Add only declared toy data or chapter-owned numerical exports. Real specs
+1. Add only declared toy data or chapter-owned numerical exports. Real specs
    and calculations continue to use the book's MLSysIM/LEGO data sources.
 
 The dependency manager emits shared assets once per page, and the browser

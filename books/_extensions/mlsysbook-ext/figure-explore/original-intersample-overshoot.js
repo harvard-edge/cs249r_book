@@ -47,6 +47,7 @@
       ['Use the same rise from the contracted baseline','The same positive acceleration area now takes pine exactly to the physical velocity ceiling. This comparison changes endpoint velocity, not acceleration.'],
       ['Complete the bounded comparison','The negative area returns pine to its contracted endpoint. Its maximum just reaches the ceiling under these assumptions; the bronze counterexample remains visible for comparison.']
     ].map(([label,description])=>({label,description}));
+    steps.forEach((step,i)=>{const description=step.description;Object.defineProperty(step,'description',{get(){return root.dataset.lessonCommittedIndex===String(i)?description:'On completion: '+description;}});});
     const f=v=>String(Number(v.toFixed(4)));
     function relation(value){
       const difference=value-d.limit, tolerance=Number.EPSILON*Math.max(1,Math.abs(value),Math.abs(d.limit))*8;
@@ -91,7 +92,7 @@
       status.dataset.velocity=String(current);status.dataset.time=String(t);equation.dataset.velocity=String(current);equation.dataset.rise=String(v.rise);
       return v;
     }
-    function render(index,{stage,details}){
+    function render(index,{stage,details}){root.dataset.lessonCommittedIndex=String(index);
       if(!canvas.isConnected)stage.append(canvas,key,hint,status,equation);if(!caveat.isConnected)details.append(caveat);
       const s=states[index],v=draw(s.t,s.pine);
       if(index===0)equation.textContent=`Bronze samples: ${f(d.candidate_endpoint)} ≤ ${f(d.limit)}. Interior extrema have not been checked by these two tests.`;

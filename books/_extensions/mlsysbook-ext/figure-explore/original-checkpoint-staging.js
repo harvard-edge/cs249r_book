@@ -120,7 +120,7 @@
       current.textContent=`Live training: ${s.running?'running from step i+1':'paused at step i'} · Captured g1: step i${s.local?' · local snapshot retained':index>=8?' · local staging released':''}`;
       current.dataset.liveStep=s.live;current.dataset.snapshotStep='i';
     }
-    const player=window.MLSysOriginalPlayer.create({root,outer:context.outer,title:'Why can training resume before a checkpoint is restorable?',scope:'Generation g1 captures step i on representative ranks A and B; g0 is already committed. This local-NVMe-first schedule waits for every local write before resuming separate live state. Motion does not encode measured duration or bandwidth.',steps,
+    const player=window.MLSysOriginalPlayer.create({root,outer:context.outer,title:'Why can training resume before a checkpoint is restorable?',scope:'Generation g1 captures step i on representative ranks A and B; g0 is already committed. This local-NVMe-first schedule waits for every local write before resuming separate live state. Motion does not encode measured duration or bandwidth.',steps:steps.map((step,index)=>({label:step.label,get description(){return currentIndex===index?step.description:'On completion: '+step.description;}})),
       render(index,{stage,details}){
         currentIndex=index;
         if(!mounted){stageNode=stage;stage.classList.add('original-checkpoint-stage');stage.tabIndex=0;stage.setAttribute('aria-label','Original checkpoint timeline; scroll horizontally to inspect stages');stage.before(restore,current,statusBoard);stage.append(art);details.append(note);stage.addEventListener('scroll',keepLabels,{passive:true});observer=new ResizeObserver(()=>center(currentIndex));observer.observe(stage);mounted=true;}

@@ -41,9 +41,10 @@
       ['Release the last reference','The GPU releases the last consumer reference to A. DMA completion and handoff requirements are already satisfied, so A is now eligible for requeue. Eligibility is not a new DMA write.'],
       ['Requeue A for a later capture','The driver returns A to capture. No consumer from F still holds A. Converted pages B keep F independently; requeuing A does not overwrite B. A later frame has not been captured in this illustration.']
     ].map(([label,description])=>({label,description}));
+    steps.forEach((step,i)=>{const description=step.description;Object.defineProperty(step,'description',{get(){return root.dataset.lessonCommittedIndex===String(i)?description:'On completion: '+description;}});});
     const initialFills=new Map([...copy,dma,pages,...mappings,converted,...owners].map(n=>[n,n.getAttribute('fill')]));
     const focusPoints=[[340,75],[92.5,72],[257.5,72],[422.5,72],[587.5,72],[200,215],[200,215],[310,310],[310,365],[110,310],[310,310],[435,460],[595,460]];
-    function render(index,{stage,details}){
+    function render(index,{stage,details}){root.dataset.lessonCommittedIndex=String(index);
       if(!canvas.isConnected)stage.append(canvas,summary,inspect);inspect.hidden=index!==12;inspectingB=false;inspect.textContent='Inspect retained B';if(!invariant.isConnected)details.append(invariant);
       const shared=index>=5, admitted=index>=7, holds=mappings.map((_,i)=>admitted&&index<9+i), refs=holds.filter(Boolean).length, bExists=index>=8, eligible=index>=11;
       [...copy,dma,pages,...mappings,converted,...owners].forEach(n=>{n.classList.remove('ocb-active');n.setAttribute('fill',initialFills.get(n));});

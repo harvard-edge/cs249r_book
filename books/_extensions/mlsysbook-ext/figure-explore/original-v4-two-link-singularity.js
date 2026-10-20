@@ -35,6 +35,7 @@ window.MLSysFigureLessons['original-v4-two-link-singularity']=async(root,context
   'Check each joint against its own drive limit. Reducing tool speed can satisfy these velocity bounds at this posture; it does not establish acceleration, torque, or collision feasibility.'
  ];
  const steps=labels.map((label,i)=>({label,description:descriptions[i]}));
+ steps.forEach((step,i)=>{const description=step.description;Object.defineProperty(step,'description',{get(){return root.dataset.lessonCommittedIndex===String(i)?description:'On completion: '+description;}});});
  function draw(deg,phase){const k=Math.max(0,Math.min(D.samples.length-1,Math.round((90-deg)*10))),s=D.samples[k],p0=px([0,0]),p1=px(s.elbow),p2=px(s.tool);
   arm.setAttribute('d',path([p0,p1,p2]));[p0,p1,p2].forEach((p,i)=>{joints[i].setAttribute('cx',p[0]);joints[i].setAttribute('cy',p[1]);});
   toolLabel.setAttribute('x',p2[0]+12);toolLabel.setAttribute('y',p2[1]+24);elbowLabel.setAttribute('x',p1[0]+12);elbowLabel.setAttribute('y',p1[1]+24);
@@ -53,7 +54,7 @@ window.MLSysFigureLessons['original-v4-two-link-singularity']=async(root,context
   summary.textContent=phase===0?'First identify shoulder, elbow, and tool. Next adds the velocity ellipse.':phase===5?'A tool-speed limit alone cannot enforce individual joint-speed limits.':`As the elbow opens, the ellipse narrows and joint-rate demand grows. Grey links retain the initial pose for comparison.`;
   root.dataset.values=JSON.stringify({...s,joint_limit:D.joint_limit,requested_speed:D.speed,phase});root.dataset.sceneStep=String(phase);
  }
- function render(i,{stage}){if(!wrap.isConnected)stage.append(compact,wrap,legend,summary);draw(angles[i],i);}
+ function render(i,{stage}){root.dataset.lessonCommittedIndex=String(i);if(!wrap.isConnected)stage.append(compact,wrap,legend,summary);draw(angles[i],i);}
  function transition({from,to,onFrame}){if(to!==from+1)return;onFrame(p=>draw(angles[from]+(angles[to]-angles[from])*p,p===0?from:to));}
  return window.MLSysOriginalPlayer.create({root,outer:context.outer,title:'Why does the same tool speed demand faster joints?',scope:'The original two-link arm comes to life. Compare a fixed speed magnitude along each posture’s current weakest direction; the direction is not a fixed Cartesian vector.',steps,render,transition});
 };})();
