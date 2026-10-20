@@ -64,3 +64,8 @@ ALUMINUM_THERMAL_EXPANSION_COEFFICIENT = 23.1e-6 / ureg.kelvin
 # Source: WMO Guide to Instruments and Methods of Observation (WMO-No. 8),
 # Vol. I, Ch. 9: a contrast threshold of 0.05.
 MOR_CONTRAST_THRESHOLD = 0.05
+
+# Latent heat of vaporization of water near 100 degC (steam-table handbook value,
+# about 2,257 kJ/kg, quoted as 2,260). Evaporative cooling carries heat away as
+# this latent heat. Added 2026-10-20.
+WATER_LATENT_HEAT_VAPORIZATION = 2260 * ureg.kilojoule / ureg.kilogram

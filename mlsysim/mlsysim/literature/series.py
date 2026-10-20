@@ -1175,6 +1175,61 @@ class Series:
         numeric=("epsilon", "delta", "accuracy_pct"),
     )
 
+    # --- Training and fleet footprints (added 2026-10-20) ---------------------
+    PattersonTrainingFootprints = TrendSeries(
+        "patterson_training_footprints",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="Patterson et al. (2021), Carbon Emissions and Large Neural Network Training, Table 4 "
+                       "(arXiv:2104.10350)",
+                   url="https://arxiv.org/abs/2104.10350", verified="2026-10-20",
+                   notes=("Final-run figures for the five NLP models (the Evolved Transformer NAS column is "
+                          "omitted); kg_per_kwh is the data center's CO2e per kWh when the model ran, gross "
+                          "and net of carbon-free purchases; measured_w is the measured system average power "
+                          "per accelerator including memory, network interface, fans, and host CPU; "
+                          "activated_pct is the percent of the model activated on every token; transcribed "
+                          "exactly from the PDF table.")),
+        "Final-run energy, grid factor, PUE, measured power, and emissions of five NLP models (2021).",
+        numeric=("params_b", "activated_pct", "gross_kg_per_kwh", "net_kg_per_kwh", "pue", "tdp_w",
+                 "measured_w", "chips", "days", "energy_mwh", "gross_tco2e", "net_tco2e"),
+    )
+    BloomProjectEmissions = TrendSeries(
+        "bloom_project_emissions",
+        Provenance(kind=ProvenanceKind.LITERATURE,
+                   ref="Luccioni, Viguier, and Ligozat (2023), Estimating the Carbon Footprint of BLOOM, a 176B "
+                       "Parameter Language Model, JMLR 24(253), Table 5 (arXiv:2211.02001)",
+                   url="https://arxiv.org/abs/2211.02001", verified="2026-10-20",
+                   notes=("Dynamic-power emissions of the BigScience project by process, t CO2eq, French grid "
+                          "at 57 gCO2eq/kWh, GPU energy on a TDP basis; transcribed for the Sustainable AI "
+                          "lecture and moved into MLSysIM 2026-10-20.")),
+        "Dynamic-power emissions of the BLOOM project by model and process.",
+        numeric=("tco2e",),
+    )
+    CsoIrelandDatacenterElectricity = TrendSeries(
+        "cso_ireland_datacenter_electricity",
+        Provenance(kind=ProvenanceKind.INDUSTRY_REPORT,
+                   ref="Central Statistics Office (Ireland), Data Centres Metered Electricity Consumption 2023, "
+                       "statistical release of 23 July 2024, Table 1",
+                   url="https://www.cso.ie/en/releasesandpublications/ep/p-dcmec/datacentresmeteredelectricityconsumption2023/",
+                   verified="2026-10-20",
+                   notes=("share_pct is data centers' percent of total metered electricity consumption; gwh is "
+                          "their consumption, transcribed for 2015 and 2023 only (other years left empty).")),
+        "Irish data centers' share of metered electricity, 2015 to 2023.",
+        numeric=("year", "share_pct", "gwh"),
+    )
+    EuropeGenerationWeek47 = TrendSeries(
+        "europe_generation_2023w47",
+        Provenance(kind=ProvenanceKind.DATASHEET,
+                   ref="Energy-Charts (Fraunhofer ISE), public net electricity generation and load, EU, "
+                       "20 to 26 November 2023, hourly (api.energy-charts.info/public_power, country=eu)",
+                   url="https://api.energy-charts.info/public_power?country=eu",
+                   verified="2026-10-20",
+                   notes=("Hourly generation by source class in MW (time_cet is the hour start in CET); "
+                          "coal_oil groups hard coal, lignite, and oil; copied from the Sustainable AI "
+                          "chapter's data file, which this series replaces.")),
+        "Hourly EU electricity generation by source and load, one week of November 2023 (MW).",
+        numeric=("nuclear", "hydro", "biomass_other", "wind", "solar", "gas", "coal_oil", "load"),
+    )
+
 # --- Context engineering (added 2026-10-20) ----------------------------------
 RulerEffectiveLength = _Series(
     "ruler_effective_length",

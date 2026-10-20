@@ -642,11 +642,19 @@ class ScalingOverheadScenario(BaseScenario):
 class PowerLawScenario(BaseScenario):
     """A power-law term ``A R^-alpha`` and the resource multiple that halves it."""
     exponent: float
+    # Optional (added 2026-10-20): a fractional reduction of the term; the
+    # resource multiple that buys it is ``reduction_multiple``.
+    loss_reduction: Optional[float] = None
 
     @property
     def halving_multiple(self) -> float:
         from ..physics.scaling import calc_halving_multiple
         return calc_halving_multiple(self.exponent)
+
+    @property
+    def reduction_multiple(self) -> float:
+        from ..physics.scaling import calc_loss_reduction_compute_multiple
+        return calc_loss_reduction_compute_multiple(self.exponent, self.loss_reduction)
 
 
 class TrainingGrowthScenario(BaseScenario):
@@ -12591,6 +12599,282 @@ class RetrySustainedOutagesScenario(BaseScenario):
         from .solvers import RetrySustainedOutagesModel
         return RetrySustainedOutagesModel().solve(self.rows, "incident", "retry_sustained",
                                                   "duration_h", self.threshold_hours)
+# --- Sustainability (added 2026-10-20) ---------------------------------------
+
+def _rack_it_ratio(rack) -> float:
+    """IT load over accelerator power for a rack profile (hosts, switches, conversion inside IT)."""
+    return (rack.it_power / rack.accelerator_power).to("").magnitude
+
+
+class FacilityPowerScenario(BaseScenario):
+    """``devices`` accelerators at ``device_power`` in racks shaped like ``rack``, at ``pue``."""
+    devices: float
+    device_power: Quantity
+    rack: Any                 # a Systems.Racks profile: supplies the IT-to-accelerator ratio
+    pue: float
+
+    @property
+    def it_ratio(self) -> float:
+        return _rack_it_ratio(self.rack)
+
+    @property
+    def result(self):
+        from .solvers import FacilityPowerModel
+        return FacilityPowerModel().solve(self.devices, self.device_power, self.it_ratio, self.pue)
+
+
+class RunFootprintScenario(BaseScenario):
+    """A training run of ``device_hours`` on ``devices`` of ``device``: energy, carbon, embodied carbon, water."""
+    device_hours: Quantity
+    devices: float
+    device: HardwareNode      # rated power (TDP) and embodied carbon per device
+    rack: Any                 # a Systems.Racks profile (IT-to-accelerator ratio)
+    pue: float
+    grids: Dict[str, Any]     # named Infrastructure.Grids profiles
+    service_life: Quantity
+    wue: Dict[str, Quantity] = {}
+
+    @property
+    def it_ratio(self) -> float:
+        return _rack_it_ratio(self.rack)
+
+    @property
+    def result(self):
+        from .solvers import RunFootprintModel
+        return RunFootprintModel().solve(
+            self.device_hours, self.devices, self.device.tdp, self.it_ratio, self.pue,
+            {k: g.carbon_intensity for k, g in self.grids.items()},
+            self.device.embodied_carbon, self.service_life, self.wue,
+        )
+
+
+class WaterUseScenario(BaseScenario):
+    """An IT load held for ``period`` at each named WUE."""
+    it_power: Quantity
+    period: Quantity
+    wue: Dict[str, Quantity]
+
+    @property
+    def it_energy(self) -> Quantity:
+        return (self.it_power * self.period).to("kWh")
+
+    @property
+    def result(self):
+        from .solvers import WaterUseModel
+        return WaterUseModel().solve(self.it_energy, self.wue)
+
+
+class PueRetrofitScenario(BaseScenario):
+    """A fixed IT load moved from ``pue_before`` to ``pue_after`` for ``period`` at an electricity price."""
+    it_power: Quantity
+    pue_before: float
+    pue_after: float
+    period: Quantity
+    electricity_price: Quantity
+
+    @property
+    def result(self):
+        from .solvers import PueRetrofitModel
+        return PueRetrofitModel().solve(self.it_power, self.pue_before, self.pue_after, self.period,
+                                        self.electricity_price)
+
+
+class FacilityCarbonRateScenario(BaseScenario):
+    """Named sites with one IT load, each at its own PUE and grid intensity."""
+    it_power: Quantity
+    pues: Dict[str, float]
+    intensities: Dict[str, Quantity]
+
+    @property
+    def result(self):
+        from .solvers import FacilityCarbonRateModel
+        return FacilityCarbonRateModel().solve(self.it_power, self.pues, self.intensities)
+
+
+class GridPlacementScenario(BaseScenario):
+    """One facility ``energy`` placed on each named grid, with an optional fractional energy cut."""
+    energy: Quantity
+    grids: Dict[str, Any]
+    energy_cut: float = 0.0
+
+    @property
+    def intensities(self) -> Dict[str, Quantity]:
+        return {k: g.carbon_intensity for k, g in self.grids.items()}
+
+    @property
+    def result(self):
+        from .solvers import GridPlacementModel
+        return GridPlacementModel().solve(self.energy, self.intensities, self.energy_cut)
+
+
+class EmbodiedPaybackScenario(BaseScenario):
+    """A replacement for ``device`` that does its work with ``saved_fraction`` less energy, on named grids."""
+    device: HardwareNode
+    saved_fraction: float
+    grids: Dict[str, Any]
+
+    @property
+    def result(self):
+        from .solvers import EmbodiedPaybackModel
+        return EmbodiedPaybackModel().solve(self.device.embodied_carbon, self.device.tdp, self.saved_fraction,
+                                            {k: g.carbon_intensity for k, g in self.grids.items()})
+
+
+class ServiceLifeExtensionScenario(BaseScenario):
+    """A hardware service life extended from ``short_life`` to ``long_life``."""
+    short_life: Quantity
+    long_life: Quantity
+
+    @property
+    def result(self):
+        from .solvers import ServiceLifeExtensionModel
+        return ServiceLifeExtensionModel().solve(self.short_life, self.long_life)
+
+
+class PowerCapScenario(BaseScenario):
+    """A run needing ``required_power`` for ``planned_duration`` behind a ``feed_power`` grid feed."""
+    required_power: Quantity
+    feed_power: Quantity
+    planned_duration: Quantity
+
+    @property
+    def result(self):
+        from .solvers import PowerCapModel
+        return PowerCapModel().solve(self.required_power, self.feed_power, self.planned_duration)
+
+
+class RepeatedWorkEnergyScenario(BaseScenario):
+    """``fleet``'s accelerators at rated power, rolled back by each named interval."""
+    fleet: Fleet
+    rollbacks: Dict[str, Quantity]
+
+    @property
+    def result(self):
+        from .solvers import RepeatedWorkEnergyModel
+        return RepeatedWorkEnergyModel().solve(self.fleet.total_accelerators, self.fleet.node.accelerator.tdp,
+                                               self.rollbacks)
+
+
+class ServingCrossoverScenario(BaseScenario):
+    """Serving ``requests_per_day`` at ``energy_per_request`` against a one-time energy."""
+    one_time_energy: Quantity
+    requests_per_day: float
+    energy_per_request: Quantity
+
+    @property
+    def result(self):
+        from .solvers import ServingCrossoverModel
+        return ServingCrossoverModel().solve(self.one_time_energy, self.requests_per_day, self.energy_per_request)
+
+
+class CascadeEnergyScenario(BaseScenario):
+    """An edge model on every input, escalating a fraction to a cloud model over a radio link."""
+    edge_energy: Quantity
+    transmit_energy: Quantity
+    cloud_energy: Quantity
+    escalation: float
+
+    @property
+    def result(self):
+        from .solvers import CascadeEnergyModel
+        return CascadeEnergyModel().solve(self.edge_energy, self.transmit_energy, self.cloud_energy, self.escalation)
+
+
+class DutyCycledPowerScenario(BaseScenario):
+    """An always-on detector, a stage active a share of the time, and a full model run per event."""
+    always_on_power: Quantity
+    stage_power: Quantity
+    stage_activity: float
+    full_power: Quantity
+    event_rate: Quantity
+    full_duration: Quantity
+
+    @property
+    def full_duty(self) -> float:
+        return (self.event_rate * self.full_duration).to("").magnitude
+
+    @property
+    def result(self):
+        from .solvers import DutyCycledPowerModel
+        return DutyCycledPowerModel().solve(
+            {"always_on": self.always_on_power, "stage": self.stage_power, "full": self.full_power},
+            {"always_on": 1.0, "stage": self.stage_activity, "full": self.full_duty},
+            self.full_power,
+        )
+
+
+class DataMovementEnergyScenario(BaseScenario):
+    """One weight of ``bytes_per_param`` used for ``flops_per_param`` FLOPs at stated per-op energies."""
+    energy_per_flop: Quantity
+    energy_per_byte: Quantity
+    flops_per_param: float
+    bytes_per_param: Quantity
+    operand_bytes: Quantity
+
+    @property
+    def result(self):
+        from .solvers import DataMovementEnergyModel
+        return DataMovementEnergyModel().solve(self.energy_per_flop, self.energy_per_byte, self.flops_per_param,
+                                               self.bytes_per_param, self.operand_bytes)
+
+
+class DemandReboundScenario(BaseScenario):
+    """Per-unit energy scaled by a factor (or by a unit-price ratio) while volume scales by another."""
+    volume_factor: float
+    per_unit_factor: Optional[float] = None
+    unit_price_before: Optional[float] = None   # used when per_unit_factor is None: energy tracks price
+    unit_price_after: Optional[float] = None
+
+    @property
+    def unit_factor(self) -> float:
+        if self.per_unit_factor is not None:
+            return self.per_unit_factor
+        return self.unit_price_after / self.unit_price_before
+
+    @property
+    def result(self):
+        from .solvers import DemandReboundModel
+        return DemandReboundModel().solve(self.unit_factor, self.volume_factor)
+
+
+class DevelopmentSweepScenario(BaseScenario):
+    """A sweep of ``candidates`` runs, each costing ``relative_cost`` of the final run."""
+    candidates: float
+    relative_cost: float
+
+    @property
+    def result(self):
+        from .solvers import DevelopmentSweepModel
+        return DevelopmentSweepModel().solve(self.candidates, self.relative_cost)
+
+
+class RollingShareScenario(BaseScenario):
+    """Hourly share of ``share_columns`` in ``total_columns`` of a Literature series, over rolling windows."""
+    series_name: str
+    time_column: str
+    share_columns: List[str]
+    total_columns: List[str]
+    window: int
+
+    @property
+    def rows(self):
+        from ..literature.registry import Literature
+        return getattr(Literature.Series, self.series_name).entries
+
+    @property
+    def shares(self) -> List[float]:
+        """Hourly share, percent."""
+        return [100 * sum(r[c] for c in self.share_columns) / sum(r[c] for c in self.total_columns)
+                for r in self.rows]
+
+    @property
+    def times(self) -> List[str]:
+        return [r[self.time_column] for r in self.rows]
+
+    @property
+    def result(self):
+        from .solvers import RollingWindowModel
+        return RollingWindowModel().solve(self.shares, self.window)
 # --- Spatial memory: estimation, belief expiry, and volumetric maps (added 2026-10-20) ---
 # A site scenario (``Embodied.Scenario.*``) supplies the machine, the
 # clearances, the walking speed, and the observation age; the solvers live in
@@ -13692,3 +13976,19 @@ class DataScalingReturnScenario(BaseScenario):
     @property
     def scale(self) -> float:
         return (self.scaled_examples / self.base_examples).to("").magnitude
+
+
+class CarbonPricedPlacementScenario(BaseScenario):
+    """A run of ``it_energy`` on ``fleet`` placed among ``regions`` with and without a carbon price."""
+    fleet: Fleet
+    it_energy: Quantity
+    regions: List[str]
+    carbon_price_per_ton: float     # dollars per tonne CO2
+    mfu: float
+    reference_grid: Any
+
+    @property
+    def result(self):
+        from .solvers import CarbonPricedPlacementModel
+        return CarbonPricedPlacementModel().solve(self.fleet, self.it_energy, self.regions,
+                                                  self.carbon_price_per_ton, self.mfu, self.reference_grid)

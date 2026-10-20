@@ -4101,3 +4101,24 @@ TF_PROFILER_GUIDE = Provenance(
     notes="Summary line: 81.4 percent of the total step time sampled is waiting for input. The step-time chart "
           "shows steps of about 1.1 s with about 0.2 s of device compute (read from the chart).",
 )
+
+# --- Training footprints and lifecycle carbon (added 2026-10-20) -------------
+LLAMA31_MODEL_CARD_EMISSIONS = _ds(
+    "prov:llama31-model-card-emissions",
+    "Meta, Llama 3.1 model card (meta-llama/llama-models, models/llama3_1/MODEL_CARD.md), "
+    "Training Greenhouse Gas Emissions table",
+    "https://github.com/meta-llama/llama-models/blob/main/models/llama3_1/MODEL_CARD.md",
+    verified="2026-10-20",
+    notes=("Llama 3.1 405B row: 30.84M training GPU-hours at 700 W (H100-80GB TDP), 8,930 t CO2eq "
+           "location-based, 0 t market-based (Meta matches its electricity with renewable purchases)."),
+)
+
+LUCCIONI_BLOOM_2023 = _lit(
+    "prov:luccioni-bloom-2023",
+    "Luccioni, Viguier, and Ligozat (2023), Estimating the Carbon Footprint of BLOOM, a 176B Parameter "
+    "Language Model, JMLR 24(253) (arXiv:2211.02001)",
+    url="https://arxiv.org/abs/2211.02001",
+    verified="2026-10-20",
+    notes=("Table 3: final BLOOM training on the French grid (57 gCO2eq/kWh); embodied 11.2 t of 50.5 t "
+           "total, 22.2 percent. Table 5: project dynamic emissions by process."),
+)

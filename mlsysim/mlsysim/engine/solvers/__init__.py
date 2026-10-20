@@ -526,3 +526,46 @@ __all__ += [
     "ReferentSetModel",
     "ConfidenceRegionModel",
 ]
+
+# --- Sustainability (added 2026-10-20) ---
+from .sustainability import (
+    FacilityPowerModel,
+    WaterUseModel,
+    RunFootprintModel,
+    PueRetrofitModel,
+    FacilityCarbonRateModel,
+    GridPlacementModel,
+    EmbodiedPaybackModel,
+    ServiceLifeExtensionModel,
+    PowerCapModel,
+    RepeatedWorkEnergyModel,
+    ServingCrossoverModel,
+    CascadeEnergyModel,
+    DutyCycledPowerModel,
+    DataMovementEnergyModel,
+    DemandReboundModel,
+    DevelopmentSweepModel,
+    RollingWindowModel,
+    CarbonPricedPlacementModel,
+)
+
+__all__ += [
+    "FacilityPowerModel",
+    "WaterUseModel",
+    "RunFootprintModel",
+    "PueRetrofitModel",
+    "FacilityCarbonRateModel",
+    "GridPlacementModel",
+    "EmbodiedPaybackModel",
+    "ServiceLifeExtensionModel",
+    "PowerCapModel",
+    "RepeatedWorkEnergyModel",
+    "ServingCrossoverModel",
+    "CascadeEnergyModel",
+    "DutyCycledPowerModel",
+    "DataMovementEnergyModel",
+    "DemandReboundModel",
+    "DevelopmentSweepModel",
+    "RollingWindowModel",
+    "CarbonPricedPlacementModel",
+]

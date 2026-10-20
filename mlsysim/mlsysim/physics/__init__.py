@@ -749,3 +749,9 @@ __all__ += [
     "calc_lsh_threshold",
     "calc_allocation_growth",
 ]
+
+from .scaling import calc_loss_reduction_compute_multiple  # added 2026-10-20
+
+__all__ += [
+    "calc_loss_reduction_compute_multiple",
+]
