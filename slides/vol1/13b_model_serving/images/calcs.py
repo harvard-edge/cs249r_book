@@ -52,8 +52,8 @@ DS = Scenarios.DistServe13BPoolsA100
 ENERGY = Scenarios.H100ChatEnergyPerToken
 STREAMS200 = Scenarios.Llama2_70BConversationalDecodeStreams
 STREAMS40 = Scenarios.Llama2_70BInteractiveDecodeStreams
-SYN16 = Scenarios.Llama3_70BFp16ConversationsEightH100
-SYN8 = Scenarios.Llama3_70BInt8ConversationsEightH100
+SYN16 = Scenarios.Llama2_70BFp16ConversationsEightH100
+SYN8 = Scenarios.Llama2_70BInt8ConversationsEightH100
 COST = Scenarios.ResNet50BatchOneVersusEightCostH100     # Lecture 13's hook
 PLAN = Scenarios.ResNet50FleetPlanH100                   # Lecture 13's fleet plan
 
@@ -428,7 +428,7 @@ PRICES = {r["model"]: r["usd_per_mtok_input"] for r in SERIES.LlmApiInputPrices.
 v("price_gpt4", PRICES["GPT-4 (Original)"], "{:.0f}", "GPT-4 (original), $ per million input tokens")
 v("price_flash", PRICES["Gemini 1.5 Flash"], "{:.3f}", "Gemini 1.5 Flash, $ per million input tokens")
 
-print("== Synthesis (Scenarios.Llama2_70B*DecodeStreams, Llama3_70B*ConversationsEightH100)")
+print("== Synthesis (Scenarios.Llama2_70B*DecodeStreams, Llama2_70B*ConversationsEightH100)")
 S200, S40 = STREAMS200.in_flight, STREAMS40.in_flight
 R16, R8b = SYN16.result, SYN8.result
 v("llama_conv_tpot_s", m(STREAMS200.time_in_system, "s"), "{:.1f}", "200 ms, s")
