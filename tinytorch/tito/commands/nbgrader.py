@@ -857,10 +857,12 @@ class NBGraderCommand(BaseCommand):
                 exec_cmd = [sys.executable, "-m", exec_cmd[0]] + exec_cmd[1:]
 
         env = dict(os.environ)
-        py_bin_dir = str(Path(sys.executable).resolve().parent)
+        # No .resolve(): a venv's python symlinks to the base interpreter, and
+        # resolving it would put the base install's bin dir on PATH instead.
+        py_bin_dir = str(Path(sys.executable).parent)
         current_path = env.get("PATH", "")
-        if py_bin_dir not in current_path:
-            env["PATH"] = f"{py_bin_dir}:{current_path}"
+        if py_bin_dir not in current_path.split(os.pathsep):
+            env["PATH"] = f"{py_bin_dir}{os.pathsep}{current_path}"
 
         try:
             return subprocess.run(
