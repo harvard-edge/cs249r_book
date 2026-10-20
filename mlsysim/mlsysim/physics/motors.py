@@ -35,9 +35,15 @@ def calc_first_order_temperature(elapsed, start, asymptote, time_constant):
 
 
 def calc_first_order_time_to_temperature(start, target, asymptote, time_constant):
-    """Time for a first-order winding to rise from ``start`` to ``target``:
-    ``t = tau ln((T_inf - T_0) / (T_inf - T_target))``; None if the asymptote never reaches it."""
+    """Time for a first-order body to move from ``start`` to ``target``:
+    ``t = tau ln((T_inf - T_0) / (T_inf - T_target))``; None if the asymptote never reaches it.
+
+    Rising toward a higher asymptote, or (added 2026-10-20) cooling toward a lower
+    one when ``target`` lies between the asymptote and ``start``."""
     head = (_k(asymptote) - _k(target)).to(ureg.kelvin).magnitude
+    if head < 0 and _k(target) <= _k(start):  # cooling toward a lower asymptote
+        ratio = ((_k(start) - _k(asymptote)) / (_k(target) - _k(asymptote))).to("").magnitude
+        return (time_constant * math.log(ratio)).to(ureg.second)
     if head <= 0:
         return None
     ratio = ((_k(asymptote) - _k(start)) / (_k(asymptote) - _k(target))).to("").magnitude

@@ -354,6 +354,8 @@ from .realtime import (
     EtherCatCycleModel,
     LeaseBudgetModel,
     LatencyTailModel,
+    SharedDramReadModel,
+    ThermalThrottleModel,
 )
 
 __all__ += [
@@ -363,6 +365,8 @@ __all__ += [
     "EtherCatCycleModel",
     "LeaseBudgetModel",
     "LatencyTailModel",
+    "SharedDramReadModel",
+    "ThermalThrottleModel",
 ]
 
 # --- Agent sandboxes (added 2026-10-20) ---

@@ -14698,6 +14698,178 @@ class HoldIntervalDriftScenario(BaseScenario):
     @property
     def drift(self) -> Quantity:
         return (self.speed * self.period + 0.5 * self.acceleration * self.period ** 2).to("mm")
+
+
+# --- Workload placement: what a permission tick shares with its proposer (added 2026-10-20) ---
+# Solvers SharedDramReadModel and ThermalThrottleModel in engine/solvers/realtime.py;
+# the droop, stall-share, and trace scenarios are closed forms over physics/.
+
+class SharedDramReadScenario(BaseScenario):
+    """``site``'s permission tick placed on the machine's application SoC, its snapshot read
+    queued behind backlogs on the shared DRAM controller.
+
+    Bandwidth is the SoC memory's peak; the row-conflict time is ``memory_tech``'s
+    t_RP + t_RCD. Addresses interleave across every channel unless
+    ``one_channel`` confines the backlog and the read to one, which divides the
+    bandwidth by the channel count (bus width over channel width).
+    """
+    site: Any                         # EmbodiedSiteScenario: WCET, deadline, blocking, interference
+    memory_tech: Any                  # MemoryTier: t_rp, t_rcd, channel_width
+    sense: Quantity                   # the tick's sense allowance (the snapshot read happens here)
+    compute_after_sense: Quantity     # constraint check and drive-frame staging
+    tile_bytes: int
+    camera_bytes: int
+    telemetry_bytes: int
+    snapshot_bytes: int
+    transaction_bytes: int
+    bank_switches: int
+    one_channel: bool = False
+
+    @property
+    def memory(self):
+        return self.site.machine.brain_soc.memory
+
+    @property
+    def channels(self) -> int:
+        return int(round((self.memory.bus_width / self.memory_tech.channel_width).to("").magnitude))
+
+    @property
+    def bank_switch_time(self) -> Quantity:
+        return (self.memory_tech.t_rp + self.memory_tech.t_rcd).to("ns")
+
+    @property
+    def bandwidth(self) -> Quantity:
+        bw = self.memory.bandwidth
+        return bw / self.channels if self.one_channel else bw
+
+    @property
+    def result(self):
+        from .solvers import SharedDramReadModel
+        s = self.site
+        return SharedDramReadModel().solve(
+            tile_bytes=self.tile_bytes, camera_bytes=self.camera_bytes,
+            telemetry_bytes=self.telemetry_bytes, snapshot_bytes=self.snapshot_bytes,
+            transaction_bytes=self.transaction_bytes, bandwidth=self.bandwidth,
+            bank_switches=self.bank_switches, bank_switch_time=self.bank_switch_time,
+            sense=self.sense, compute_after_sense=self.compute_after_sense, wcet=s.enforcer_wcet,
+            execution_ceiling=s.enforcer_deadline - s.enforcer_blocking - s.enforcer_interference)
+
+
+class StallShareScenario(BaseScenario):
+    """``site``'s unloaded permission tick with a share of it slowed ``slowdown`` times.
+
+    The tick may stretch to ``bound`` (default the declared WCET); the
+    break-even share is ``(bound / unloaded - 1) / (slowdown - 1)``
+    (``calc_stall_share_breakeven``).
+    """
+    site: Any                         # EmbodiedSiteScenario
+    slowdown: float
+    bound: Optional[Quantity] = None
+
+    @property
+    def budget(self) -> Quantity:
+        return (self.site.enforcer_wcet if self.bound is None else self.bound).to("us")
+
+    @property
+    def allowed_stretch(self) -> float:
+        return float((self.budget / self.site.enforcer_unloaded).to("").magnitude)
+
+    @property
+    def breakeven_share(self) -> float:
+        from ..physics import calc_stall_share_breakeven
+        return calc_stall_share_breakeven(self.allowed_stretch, self.slowdown)
+
+    @property
+    def breakeven_stall(self) -> Quantity:
+        """The break-even share as time of the unloaded tick."""
+        return (self.breakeven_share * self.site.enforcer_unloaded).to("us")
+
+
+class RailDroopScenario(BaseScenario):
+    """A current step ``delta_i`` in ``rise_time`` through a package's inductance and resistance,
+    and the alpha-power gate-delay stretch at the drooped rail."""
+    rail_voltage: Quantity
+    inductance: Quantity
+    resistance: Quantity
+    delta_i: Quantity
+    rise_time: Quantity
+    threshold_voltage: Quantity
+    alpha: float
+
+    @property
+    def inductive_droop(self) -> Quantity:
+        from ..physics.robotics import calc_inductive_voltage_droop
+        return calc_inductive_voltage_droop(self.inductance, self.delta_i / self.rise_time).to("mV")
+
+    @property
+    def resistive_droop(self) -> Quantity:
+        from ..physics.robotics import calc_voltage_droop
+        return calc_voltage_droop(self.delta_i, self.resistance).to("mV")
+
+    @property
+    def droop(self) -> Quantity:
+        return (self.inductive_droop + self.resistive_droop).to("mV")
+
+    @property
+    def drooped_voltage(self) -> Quantity:
+        return (self.rail_voltage - self.droop).to("V")
+
+    @property
+    def delay_expansion_percent(self) -> float:
+        from ..physics.robotics import calc_alpha_power_gate_delay_stretch
+        return calc_alpha_power_gate_delay_stretch(
+            nominal_voltage=self.rail_voltage, drooped_voltage=self.drooped_voltage,
+            threshold_voltage=self.threshold_voltage, alpha=self.alpha)["delay_expansion_percent"]
+
+
+class ThermalThrottleScenario(BaseScenario):
+    """``site``'s permission tick on a cluster whose clock a thermal governor halves.
+
+    The tick is sized to the declared WCET at ``nominal_clock``; the junction
+    follows a first-order model from ``quiet_power`` to ``loaded_power`` through
+    ``theta``; the clock throttles at ``trip`` and returns at ``clear``.
+    """
+    site: Any                         # EmbodiedSiteScenario: WCET, deadline, B + I, tick
+    nominal_clock: Quantity
+    throttled_clock: Quantity
+    time_constant: Quantity
+    ambient: Quantity                 # degC
+    theta: Quantity                   # junction-to-ambient, K/W
+    quiet_power: Quantity
+    loaded_power: Quantity
+    trip: Quantity                    # degC
+    clear: Quantity                   # degC
+
+    @property
+    def result(self):
+        from .solvers import ThermalThrottleModel
+        s = self.site
+        return ThermalThrottleModel().solve(
+            wcet=s.enforcer_wcet, blocking_and_interference=s.enforcer_blocking + s.enforcer_interference,
+            deadline=s.enforcer_deadline, tick=s.t_tick, nominal_clock=self.nominal_clock,
+            throttled_clock=self.throttled_clock, time_constant=self.time_constant,
+            ambient=self.ambient, theta=self.theta, quiet_power=self.quiet_power,
+            loaded_power=self.loaded_power, trip=self.trip, clear=self.clear)
+
+
+class TickTraceScenario(BaseScenario):
+    """Percentiles of a permission tick's execution time over a trace of ``ticks`` periods,
+    cold and warm, against ``site``'s declared WCET and deadline."""
+    site: Any                         # EmbodiedSiteScenario
+    ticks: int
+    cold: Dict[str, Quantity]         # percentile label -> execution time
+    warm: Dict[str, Quantity]
+
+    @property
+    def duration(self) -> Quantity:
+        return (self.ticks * self.site.t_tick).to("s")
+
+    @property
+    def hours_minutes_seconds(self):
+        total = int(round(self.duration.to("s").magnitude))
+        h, rem = divmod(total, 3600)
+        m, sec = divmod(rem, 60)
+        return h, m, sec
 # --- Agent operations: traces, retention, postmortems, staged release (added 2026-10-20) ---
 # What a trial's spans explain, which trace bodies a selection keeps, what a
 # controlled diagnostic branch bounds, and how a release is staged and gated.

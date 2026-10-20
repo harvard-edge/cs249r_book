@@ -4564,3 +4564,63 @@ def test_warehouse_jerk_limited_stop_matches_finished_budget():
     assert base.jerk.m_as("m/s**3") == pytest.approx(budget.jerk.m_as("m/s**3"))
     assert base.stop_distance.m_as("mm") == pytest.approx(budget.stop_distance.m_as("mm"))
     assert base.jerk_ramp_travel.m_as("mm") == pytest.approx(budget.jerk_ramp_travel.m_as("mm"))
+
+
+# --- Workload placement: the permission tick against what it shares (added 2026-10-20) ---
+def test_placement_unloaded_tick_and_response():
+    t = Scenarios.WarehouseEnforcerUnloadedTick
+    assert t.total.to("us").magnitude == approx(135.0)
+    r = Scenarios.WarehousePermissionTickResponse.result
+    assert r.execution_ceiling.to("us").magnitude == approx(310.0)
+    c = Scenarios.WarehouseLoadedCycleCheckpoint.result
+    assert c.response.to("us").magnitude == approx(390.0) and c.margin.to("us").magnitude == approx(10.0)
+    assert Scenarios.WarehouseLoadedTickExample.result.margin.to("us").magnitude == approx(50.0)
+
+
+def test_placement_shared_dram_read():
+    r = Scenarios.WarehouseSharedDieLoadedRead.result
+    assert r.queued_transactions == 88 and r.tile_transactions == 64 and r.backlog_bytes == 360_448
+    assert r.backlog_wait.to("us").magnitude == pytest.approx(1.8794, abs=5e-4)
+    assert r.snapshot_read.to("us").magnitude == pytest.approx(0.0201, abs=5e-4)
+    assert r.bypass_read.to("us").magnitude == pytest.approx(0.0402, abs=5e-4)
+    assert (r.backlogs_sense, r.backlogs_wcet, r.backlogs_deadline) == (21, 82, 114)
+    assert r.read_ceiling_wcet.to("us").magnitude == approx(155.0)
+    assert r.read_ceiling_deadline.to("us").magnitude == approx(215.0)
+    assert r.end_deadline.to("us").magnitude == pytest.approx(309.27, abs=0.01)
+    one = Scenarios.WarehouseSharedDieLoadedReadOneChannel
+    assert one.channels == 16 and one.bank_switch_time.to("ns").magnitude == approx(37.5)
+    o = one.result
+    assert o.backlog_wait.to("us").magnitude == pytest.approx(28.38, abs=0.01)
+    assert (o.backlogs_sense, o.backlogs_wcet) == (1, 5)
+
+
+def test_placement_stall_shares_and_droop():
+    assert Scenarios.WarehouseTickMshrStallShare.breakeven_share == pytest.approx(0.042593, abs=1e-6)
+    assert Scenarios.WarehouseTickMshrStallShareAtDeadline.breakeven_share == pytest.approx(0.064815, abs=1e-6)
+    assert Scenarios.WarehouseTickWritebackStallShare.breakeven_share == pytest.approx(0.002849, abs=1e-6)
+    ten = Scenarios.WarehouseTickTenfoldStallShare
+    assert ten.breakeven_share == pytest.approx(0.094650, abs=1e-6)
+    assert ten.breakeven_stall.to("us").magnitude == pytest.approx(12.778, abs=1e-3)
+    d = Scenarios.PackageRailDroop
+    assert d.inductive_droop.to("mV").magnitude == approx(90.0)
+    assert d.resistive_droop.to("mV").magnitude == approx(48.0)
+    assert d.drooped_voltage.to("V").magnitude == approx(0.712)
+    assert round(d.delay_expansion_percent) == 39
+
+
+def test_placement_thermal_throttle_and_trace():
+    r = Scenarios.WarehouseSharedDieThermalThrottle.result
+    assert r.cycles == approx(3.0e5)
+    assert r.execution_throttled.to("us").magnitude == approx(500.0)
+    assert r.response_throttled.to("us").magnitude == approx(590.0)
+    assert r.overrun.to("us").magnitude == approx(190.0) and r.overrun_ratio == approx(0.475)
+    assert r.junction_quiet.to("degC").magnitude == approx(53.0)
+    assert r.junction_loaded.to("degC").magnitude == approx(97.0)
+    assert r.time_to_trip.to("s").magnitude == pytest.approx(24.728, abs=1e-3)
+    assert r.recovery.to("s").magnitude == pytest.approx(2.1755, abs=1e-4)
+    assert r.recovery_from_loaded.to("s").magnitude == pytest.approx(2.5476, abs=1e-4)
+    assert (r.ticks_exposed, r.ticks_exposed_from_loaded) == (2175, 2547)
+    assert r.heat_capacity.to("J/K").magnitude == approx(4.0)
+    assert r.theta_never_trips.to("K/W").magnitude == pytest.approx(1.9231, abs=1e-4)
+    t = Scenarios.WarehouseRejectedPlacementTrace
+    assert t.hours_minutes_seconds == (2, 46, 40)
