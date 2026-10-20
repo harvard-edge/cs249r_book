@@ -755,3 +755,24 @@ from .scaling import calc_loss_reduction_compute_multiple  # added 2026-10-20
 __all__ += [
     "calc_loss_reduction_compute_multiple",
 ]
+
+# --- Agent operations: score intervals, paired differences, drift, sequential samples (added 2026-10-20) ---
+from .statistics import (
+    calc_wilson_interval,
+    calc_wilson_clean_runs,
+    calc_newcombe_paired_difference,
+    calc_mcnemar_exact_two_sided,
+    calc_paired_difference_variance,
+    calc_jensen_shannon_divergence,
+    calc_sprt_expected_samples,
+)
+
+__all__ += [
+    "calc_wilson_interval",
+    "calc_wilson_clean_runs",
+    "calc_newcombe_paired_difference",
+    "calc_mcnemar_exact_two_sided",
+    "calc_paired_difference_variance",
+    "calc_jensen_shannon_divergence",
+    "calc_sprt_expected_samples",
+]

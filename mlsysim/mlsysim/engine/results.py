@@ -3554,3 +3554,82 @@ __all__ += [
     "RollingWindowResult",
     "CarbonPricedPlacementResult",
 ]
+
+
+# --- Agent operations (added 2026-10-20) ------------------------------------
+
+class SpanCriticalPathResult(SolverResult):
+    """Result from SpanCriticalPathModel: what one trial's spans explain of its elapsed time."""
+    leaf_sum: Quantity                       # every span's duration added, overlap counted twice
+    critical_path: Quantity                  # longest chain of dependent span durations
+    elapsed: Quantity                        # the enclosing segment
+    unexplained: Quantity                    # elapsed time no span on the path covers
+    changed_elapsed: Quantity                # elapsed time after the intervention, waits kept
+    saving: Quantity
+    changed_critical: List[str]              # spans on the path after the intervention
+
+
+class TraceRetentionResult(SolverResult):
+    """Result from TraceRetentionModel: diagnostic trace bodies kept under three selections."""
+    head_count: float                        # traces kept per cohort period, head sampling
+    head_failed: float                       # expected failed traces among them
+    head_unresolved: float
+    tail_control: float                      # ordinary traces kept as the control sample
+    tail_count: float                        # verdict-aware selection
+    full_volume: Quantity                    # every body, over the window
+    head_volume: Quantity
+    tail_volume: Quantity
+    full_over_tail: float
+    floor_volume: Quantity                   # failed and unresolved bodies alone
+    per_point_volume: Quantity               # one percentage point of control sampling
+
+
+class SequentialCanaryResult(SolverResult):
+    """Result from SequentialCanaryModel: a Wald SPRT canary monitor in labels and calendar time."""
+    upper: float                             # log boundary: hold (select the degraded hypothesis)
+    lower: float                             # log boundary: select the baseline hypothesis
+    failure_step: float                      # log-likelihood added by one failure
+    success_step: float                      # log-likelihood added by one success
+    drift: float                             # expected step under the degraded hypothesis
+    terminal: float                          # expected terminal log-likelihood, no overshoot
+    expected_samples: float                  # labeled tasks, under the degraded hypothesis
+    failures_to_hold: int                    # consecutive failures from the start that cross the upper boundary
+    candidate_rate: Quantity                 # candidate tasks admitted per hour
+    admission_time: Quantity                 # to admit the expected samples
+    decision_time: Quantity                  # plus the label delay
+    pending: float                           # candidate tasks admitted while labels are pending
+    excess_failures: float                   # measured regression's cost at this fraction
+    full_pending: float
+    full_excess_failures: float              # the same at full allocation
+    exposure_share: float                    # unmeasured-harm exposure against full allocation
+
+
+class PairedComparisonResult(SolverResult):
+    """Result from PairedComparisonModel: a candidate against a baseline on the same tasks."""
+    pairs: int
+    candidate_rate: float
+    baseline_rate: float
+    difference: float                    # candidate minus baseline
+    lower: float                         # Newcombe method-10 interval
+    upper: float
+    noninferior: bool                    # lower > -tolerance
+    superior: bool                       # lower > 0
+    exact_p: float                       # McNemar, two-sided
+    lower_width: float                   # difference - lower
+    clear_width: float                   # difference + tolerance, the half-width the gate needs
+    pairs_if_gain_holds: int             # pairs that center the expected lower limit on the margin
+    pairs_if_no_gain: int                # pairs that fit the lower half-width inside the tolerance
+    discordant_fraction: float
+    paired_variance: float               # per pair, d - delta^2
+    independent_variance: float          # per task, two independent arms
+    paired_share: float                  # paired / independent
+    paired_half_width: float             # normal approximation
+    independent_multiple: float          # independent / paired
+
+
+__all__ += [
+    "PairedComparisonResult",
+    "SpanCriticalPathResult",
+    "TraceRetentionResult",
+    "SequentialCanaryResult",
+]

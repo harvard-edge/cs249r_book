@@ -9366,10 +9366,16 @@ class RolloutExposureScenario(BaseScenario):
 
 class CanaryScheduleScenario(BaseScenario):
     """A staged rollout that needs ``samples_per_variant`` guardrail samples per stage at
-    ``request_rate``; ``stages`` is the configured ladder of (traffic share, duration)."""
+    ``request_rate``; ``stages`` is the configured ladder of (traffic share, duration).
+
+    Optional (added 2026-10-20): ``label_delay`` is the time from admission to a
+    verdict, so ``labeled_by_completion`` counts the candidate tasks whose labels
+    exist when the ladder ends (admitted at least that long before the end).
+    """
     samples_per_variant: float
     request_rate: Quantity            # requests per hour
     stages: List[Any]                 # [(share, Quantity duration), ...]
+    label_delay: Optional[Quantity] = None
 
     def stage_minimum(self, share: float) -> Quantity:
         from ..physics.statistics import calc_sample_collection_time
@@ -9383,6 +9389,23 @@ class CanaryScheduleScenario(BaseScenario):
     def first_stage_buffer(self) -> float:
         share, duration = self.stages[0]
         return (duration / self.stage_minimum(share)).to("").magnitude
+
+    @property
+    def admitted_by_completion(self) -> float:
+        """Candidate tasks admitted over the whole ladder."""
+        return sum((share * self.request_rate * d).to("").magnitude for share, d in self.stages)
+
+    @property
+    def labeled_by_completion(self) -> float:
+        """Candidate tasks whose verdicts have arrived when the last stage ends."""
+        cutoff = self.total - self.label_delay
+        labeled, t = 0.0, Q_(0, "hour")
+        for share, d in self.stages:
+            end = t + d
+            overlap = max(Q_(0, "hour"), min(end, cutoff) - t)
+            labeled += (share * self.request_rate * overlap).to("").magnitude
+            t = end
+        return labeled
 
 
 class TwoProportionTestScenario(BaseScenario):
@@ -13992,3 +14015,183 @@ class CarbonPricedPlacementScenario(BaseScenario):
         from .solvers import CarbonPricedPlacementModel
         return CarbonPricedPlacementModel().solve(self.fleet, self.it_energy, self.regions,
                                                   self.carbon_price_per_ton, self.mfu, self.reference_grid)
+
+
+# --- Agent operations: traces, retention, postmortems, staged release (added 2026-10-20) ---
+# What a trial's spans explain, which trace bodies a selection keeps, what a
+# controlled diagnostic branch bounds, and how a release is staged and gated.
+# Solvers in engine/solvers/operations.py; the closed forms in physics/statistics.py.
+
+class SpanCriticalPathScenario(BaseScenario):
+    """One trial's observed spans on a shared clock, the spans each waits for, and one intervention."""
+    intervals: Dict[str, Any]          # span -> (start, end) Quantity pair after segment start
+    depends_on: Dict[str, List[str]]
+    intervention: Dict[str, Any] = {}  # span -> new duration (Quantity); others keep theirs
+
+    @property
+    def result(self):
+        from .solvers import SpanCriticalPathModel
+        return SpanCriticalPathModel().solve(self.intervals, self.depends_on, self.intervention)
+
+    def duration(self, span: str) -> Quantity:
+        start, end = self.intervals[span]
+        return (end - start).to("s")
+
+
+class HeadSamplingMissScenario(BaseScenario):
+    """Head sampling keeps each trial with ``retention_probability``, decided before its outcome;
+    a failure mode that occurs ``occurrences`` times leaves no detailed trace with ``miss``."""
+    retention_probability: float
+    occurrences: int
+
+    @property
+    def miss(self) -> float:
+        """``(1 - p)^n``: no occurrence retained, the complement of ``calc_independent_success``."""
+        from ..physics.agents import calc_independent_success
+        return 1 - calc_independent_success(self.retention_probability, self.occurrences)
+
+
+class TraceRetentionScenario(BaseScenario):
+    """One cohort period of trials in disjoint verdict classes, each with a ``trace_size`` body,
+    retained over ``window`` by keeping everything, head sampling, or verdict-aware selection."""
+    failed: int                        # failed a criterion or violated a policy
+    unresolved: int                    # pending or unknown verdict
+    ordinary: int                      # ordinary accepted
+    cohort_period: Quantity            # the period the counts cover
+    trace_size: Quantity               # one permitted trace body
+    window: Quantity
+    head_probability: float
+    control_probability: float         # control sample of ordinary accepted trials
+    control_step: float = 0.01         # one percentage point of control sampling
+
+    @property
+    def trials(self) -> int:
+        return self.failed + self.unresolved + self.ordinary
+
+    @property
+    def result(self):
+        from .solvers import TraceRetentionModel
+        return TraceRetentionModel().solve(self.failed, self.unresolved, self.ordinary, self.cohort_period,
+                                           self.trace_size, self.window, self.head_probability,
+                                           self.control_probability, self.control_step)
+
+
+class ControlledBranchScenario(BaseScenario):
+    """Fresh continuations from one saved prefix under several branches, counted by outcome;
+    the Wilson bound a clean branch leaves and the clean runs a ``target_bound`` needs."""
+    outcomes: Dict[str, Dict[str, int]]   # branch -> outcome class -> runs
+    accepted_class: str = "accepted"
+    target_bound: float                   # failure-rate upper limit to demonstrate
+    confidence: float = 0.95              # two-sided
+
+    @property
+    def z(self) -> float:
+        from statistics import NormalDist
+        return NormalDist().inv_cdf(1 - (1 - self.confidence) / 2)
+
+    def runs(self, branch: str) -> int:
+        return sum(self.outcomes[branch].values())
+
+    def accepted(self, branch: str) -> int:
+        return self.outcomes[branch].get(self.accepted_class, 0)
+
+    def acceptance_interval(self, branch: str):
+        """Wilson interval on the branch's acceptance rate."""
+        from ..physics.statistics import calc_wilson_interval
+        return calc_wilson_interval(self.accepted(branch), self.runs(branch), self.z)
+
+    def failure_upper(self, branch: str) -> float:
+        """Wilson upper limit on the branch's non-acceptance rate."""
+        from ..physics.statistics import calc_wilson_interval
+        n = self.runs(branch)
+        return calc_wilson_interval(n - self.accepted(branch), n, self.z)[1]
+
+    def clean_failure_upper(self, runs: int) -> float:
+        """Wilson upper limit on the failure rate after ``runs`` clean runs."""
+        from ..physics.statistics import calc_wilson_interval
+        return calc_wilson_interval(0, runs, self.z)[1]
+
+    @property
+    def clean_runs_for_target(self) -> int:
+        from ..physics.statistics import calc_wilson_clean_runs
+        return calc_wilson_clean_runs(self.target_bound, self.z)
+
+
+class PairedComparisonScenario(BaseScenario):
+    """One candidate and one baseline trial on each sampled task, outcomes kept in pairs."""
+    both: int                        # tasks both configurations accepted
+    candidate_only: int
+    baseline_only: int
+    neither: int
+    tolerance: float                 # noninferiority tolerance, as a fraction
+    confidence: float = 0.95
+
+    @property
+    def result(self):
+        from .solvers import PairedComparisonModel
+        return PairedComparisonModel().solve(self.both, self.candidate_only, self.baseline_only, self.neither,
+                                             self.tolerance, self.confidence)
+
+
+class ToolDriftScenario(BaseScenario):
+    """Baseline and candidate distributions of tool calls over the same tools, compared by
+    the Jensen-Shannon divergence (natural logarithms)."""
+    baseline: Dict[str, float]
+    candidate: Dict[str, float]
+
+    @property
+    def divergence(self) -> float:
+        from ..physics.statistics import calc_jensen_shannon_divergence
+        keys = list(self.baseline)
+        return calc_jensen_shannon_divergence([self.baseline[k] for k in keys],
+                                              [self.candidate[k] for k in keys])
+
+    @property
+    def maximum(self) -> float:
+        """``ln 2``, reached by two distributions with no tool in common."""
+        return _math.log(2)
+
+    @property
+    def share_of_maximum(self) -> float:
+        return self.divergence / self.maximum
+
+
+class SequentialCanaryScenario(BaseScenario):
+    """A canary monitor: Wald's SPRT between acceptance ``p_base`` and a specified degraded
+    ``p_degraded`` at targets ``alpha`` (false hold) and ``beta`` (missed degradation), on
+    ``fraction`` of eligible tasks arriving at ``arrival_rate``, labels ``label_delay`` late."""
+    p_base: float
+    p_degraded: float
+    alpha: float
+    beta: float
+    arrival_rate: Quantity             # eligible tasks per hour
+    fraction: float
+    label_delay: Quantity
+
+    @property
+    def result(self):
+        from .solvers import SequentialCanaryModel
+        return SequentialCanaryModel().solve(self.p_base, self.p_degraded, self.alpha, self.beta,
+                                             self.arrival_rate, self.fraction, self.label_delay)
+
+
+class FamilywiseErrorScenario(BaseScenario):
+    """``family_size`` statistical verdicts, each allowed ``significance`` of being wrong."""
+    family_size: int
+    significance: float
+
+    @property
+    def union_bound(self) -> float:
+        """At most the sum of the individual error probabilities."""
+        return min(1.0, self.family_size * self.significance)
+
+    @property
+    def independent(self) -> float:
+        """Chance at least one is wrong if the errors are independent."""
+        from ..physics.agents import calc_independent_success
+        return calc_independent_success(self.significance, self.family_size)
+
+    @property
+    def per_test(self) -> float:
+        """Bonferroni: the level each verdict gets so the family stays at ``significance``."""
+        return self.significance / self.family_size

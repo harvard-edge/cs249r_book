@@ -68,6 +68,7 @@ PromptCacheAudit = _load("prompt_cache_audit", "PromptCacheAudit", "Cited result
 MlOperations = _load("ml_operations", "MlOperations", "Measured ML-operations results (data validation anomalies, model-load latency, interleaving).")  # added 2026-10-20
 ToolInterception = _load("tool_interception", "ToolInterception", "Cited tool-interception results for augmented LLM serving (InferCept 2024).")  # added 2026-10-20
 SandboxIsolation = _load("sandbox_isolation", "SandboxIsolation", "Cited results on containing agent code: Cybench task count, gVisor system-call latency.")  # added 2026-10-20
+DistributedTracing = _load("distributed_tracing", "DistributedTracing", "Cited results of production distributed tracing (Dapper sampling).")  # added 2026-10-20
 # Published vision-language-action and dual-system robot policies (added 2026-10-20)
 VlaSystems = _load("vla_systems", "VlaSystems", "Cited figures of published VLA and dual-system robot policies (OpenVLA, ACT, pi0, FAST, Helix, GR00T N1).")
 # Robot demonstration data and event data recorders (added 2026-10-20)
@@ -376,6 +377,7 @@ class Literature(Registry):
     PromptCacheAudit = PromptCacheAudit  # added 2026-10-20
     ToolInterception = ToolInterception  # added 2026-10-20
     SandboxIsolation = SandboxIsolation  # added 2026-10-20
+    DistributedTracing = DistributedTracing  # added 2026-10-20
     MlOperations = MlOperations  # added 2026-10-20
     ExtractionAttacks = ExtractionAttacks  # added 2026-10-20
     DataPoisoning = DataPoisoning  # added 2026-10-20
@@ -419,6 +421,7 @@ class Literature(Registry):
     PagedAttentionMemoryBreakdown = _series.PagedAttentionMemoryBreakdown  # added 2026-10-20
     ToolInterceptionTimes = _series.ToolInterceptionTimes  # added 2026-10-20
     MetastableFailures = _series.MetastableFailures  # added 2026-10-20
+    DapperSamplingOverhead = _series.DapperSamplingOverhead  # added 2026-10-20
     MultiAgentFailures = MultiAgentFailures  # added 2026-10-20
     AttentionSinkPerplexity = _series.AttentionSinkPerplexity  # added 2026-10-20
     SweBenchVerifiedRuns = _series.SweBenchVerifiedRuns
