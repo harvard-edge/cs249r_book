@@ -1,59 +1,14 @@
 #!/usr/bin/env python3
 """Figures for Lecture 13b (Model Serving, Part 2: Serving a Stream of Tokens).
 
-Every value is sourced. "MS" is the rendered chapter, Model Serving. Values
-computed here are labeled "derived" on the figure or its slide.
-
-Moved from Part 1 (Lecture 13) and regenerated from a copy of its code:
-ttft (extended with the A100 row and the book's targets), decode_bytes,
-kv_budget, vllm (split into two single-panel figures), joules_token, and
-Part 1's hook_cost bars as the recall thumbnail.
-
-  - MLPerf Inference v5.0, closed, datacenter, summary_results.json
-    (mlcommons/inference_results_v5.0), 5.0-0020 Dell PowerEdge XE9680,
-    8x H100-SXM-80GB: llama2-70b-99 Offline 31,216.8 tokens/s, Server
-    30,903.6 (TTFT/TPOT 2,000/200 ms); llama2-70b-interactive-99 Server
-    12,979.4 (450/40 ms). Bounds from the v5.0-era inference rules.
-    Ratios and Little's law bounds derived: 0.990, 0.420; 6,181 and 519.
-  - Splitwise (Patel et al., ISCA 2024, Table IV): Llama 2 70B, P50, no
-    batching, conversation trace: DGX-H100 TTFT 84 ms, TBT 28 ms, E2E
-    3,387 ms; DGX-A100 155, 40, 4,957 ms. Decode share derived (97 percent).
-  - Book targets (MS Systems Perspective 13.5, illustrative): TTFT < 500 ms,
-    TPOT < 50 ms.
-  - Prefill and decode (MS Sec. 13.9.2, Sec. 13.10.3): GPT-2 XL 512-token
-    prefill 3.9 ms, decode floor 0.9 ms, eager 576 kernels 8.6 ms; Llama 3
-    8B 1,000-token prefill 41.9 ms, INT4 floor 1.2 ms, modeled TPOT 1.57 ms,
-    TPOT target 20 ms.
-  - Speculative decoding (MS Sec. 13.9.4, equation 15): draft 0.30 ms,
-    verify 0.90 ms, k = 4, acceptance 0.7 (assumed), 2.8 tokens per round.
-  - GPT-2 XL decode bytes (MS Sec. 13.9.2): weights 3.0 GB, cache 0.3146 GB
-    per full 1,024-token context. Batch curve derived: step time =
-    (3.0 + 0.3146 B) GB / 3.35 TB/s; memory full at B = 263 (85.9 GB).
-  - Continuous batching schedule: illustrative lengths, one token per step,
-    prefill omitted.
-  - Stall timeline, derived: Llama 3 8B INT4 with 32 decodes of 1,256 tokens:
-    (4 GB + 32 x 1,256 x 131,072 B) / 3.35 TB/s = 2.8 ms; prefill 41.9 ms
-    per 1,000 tokens (MS Sec. 13.10.3), linear in tokens.
-  - KV budget, 70B class (MS figure 8 variant): 327,680 B per token assumed
-    (80 layers, 8 KV heads of 128, FP16); budget 50.6 GB.
-  - vLLM (Kwon et al., SOSP 2023): token-state share of KV memory, Orca (Max)
-    20.4, (Pow2) 26.8, (Oracle) 38.2, vLLM 96.3 percent (Fig. 2); average
-    batched requests, OPT-13B, ShareGPT: Orca (Oracle) 13.62, vLLM 30.42
-    (Fig. 13a; shown on a card). Block table after Fig. 6 (block size 4 here; vLLM default 16).
-  - Derived values now come from calcs.py (imported as K); figures flagged by
-    tools/legibility.py are drawn at their slot size and saved with save_slot.
-  - Prefix sharing, derived: 2,000 tokens x 131,072 B = 262 MB per copy
-    (MS Sec. 13.9.5).
-  - DistServe (Zhong et al., OSDI 2024, Fig. 1 and Sec. 1): 13B model, one
-    A100, 512 in, 64 out: colocated 1.6, prefill only 5.6, decode only 10
-    requests/s per GPU; 2 prefill + 1 decode, 3.3 per GPU. Sec. 3.3: 1.13 GB
-    per 512-token OPT-66B request, 11.3 GB/s at 10 requests/s; NVLink
-    600 GB/s.
-  - Joules per token, derived: 1,000 W node (MS Napkin Math 13.5) over
-    1,010 and 8,200 tokens/s; 600 W (300 W GPU + 300 W host at low use,
-    Napkin Math 13.5) over 1,010 tokens/s = 0.59 J.
-  - KV budget, Llama 3 8B, derived: 131,072 B per token, 69.8 GB free;
-    65 conversations of 8,192 tokens = 69.8 GB (MS Sec. 13.9.5).
+Every number comes from calcs.py (imported as K), which reads MLSysIM:
+the token-serving Scenarios.* and the cited results in Literature (MLPerf
+Inference v5.0 Llama 2 70B; Splitwise; DistServe; PagedAttention; the API
+price series behind the chapter's figure 9). Labels print the formatted
+strings calcs.py records (deckvals.val), so a figure and its slide show the
+same digits. Values computed here are labeled "derived" on the figure or its
+slide. Illustrative geometry (the fragmentation strip, the paging example,
+slot placement in the schedules) is layout and stays in this file.
 
 Run from this folder: python3 make_figs.py
 """
@@ -73,6 +28,7 @@ import io  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 with contextlib.redirect_stdout(io.StringIO()):
     import calcs as K  # noqa: E402  every derived value comes from calcs.py
+from deckvals import val, num  # noqa: E402
 
 C = sp.C
 plt = sp.plt
@@ -104,11 +60,11 @@ def hide_axis(ax):
 
 
 # ------------------------------------------------------------------ hook
-HOOK = [("No deadline\n(Offline)", K.MLP_OFFLINE, "neutral", f"{K.MLP_OFFLINE:,.0f}"),
-        ("TTFT 2 s,\nTPOT 200 ms", K.MLP_SERVER, "compute",
-         f"{K.MLP_SERVER:,.0f}  ({K.MLP_SERVER / K.MLP_OFFLINE:.0%})"),
-        ("TTFT 450 ms,\nTPOT 40 ms", K.MLP_INTER, "danger",
-         f"{K.MLP_INTER:,.0f}  ({K.MLP_INTER / K.MLP_SERVER:.0%})")]
+HOOK = [("No deadline\n(Offline)", K.MLP_OFFLINE, "neutral", val("llama_off")),
+        (f"TTFT {val('llama_conv_ttft_s')} s,\nTPOT {val('llama_conv_tpot')} ms", K.MLP_SERVER, "compute",
+         f"{val('llama_conv')}  ({val('llama_conv_pct')}%)"),
+        (f"TTFT {val('llama_int_ttft')} ms,\nTPOT {val('llama_int_tpot')} ms", K.MLP_INTER, "danger",
+         f"{val('llama_int')}  ({val('llama_int_pct')}%)")]
 
 
 def hook_fig(path, k, size=(5.8, 2.6), note=True, fs=12, xlabel=True, rows=None):
@@ -125,8 +81,8 @@ def hook_fig(path, k, size=(5.8, 2.6), note=True, fs=12, xlabel=True, rows=None)
         ax.text(v / 1000 + 0.5, y, txt, va="center", fontsize=fs, fontweight="bold",
                 color=C[ck], alpha=1.0 if shown else 0.0)
     if note:
-        ax.text(39, -0.75, f"The same server keeps {K.MLP_SERVER / K.MLP_INTER:.1f} times fewer tokens "
-                f"per second when TPOT tightens {200 / 40:g} times.",
+        ax.text(39, -0.75, f"The same server keeps {val('hook_fewer')} times fewer tokens "
+                f"per second when TPOT tightens {val('tpot_tighten')} times.",
                 ha="right", va="center", fontsize=11, color=C["danger"],
                 fontweight="bold", alpha=1.0 if k >= 4 else 0.0)
     ax.set_yticks([])
@@ -134,7 +90,7 @@ def hook_fig(path, k, size=(5.8, 2.6), note=True, fs=12, xlabel=True, rows=None)
     ax.set_ylim(-1.1 if note else -0.5, 2.5)
     ax.spines["left"].set_visible(False)
     if xlabel:
-        ax.set_xlabel("Thousand tokens/s, Llama 2 70B on one 8× H100 server")
+        ax.set_xlabel(f"Thousand tokens/s, Llama 2 70B on one {val('mlperf_gpus')}× H100 server")
     else:
         ax.set_xticks([])
         ax.spines["bottom"].set_visible(False)
@@ -144,16 +100,16 @@ def hook_fig(path, k, size=(5.8, 2.6), note=True, fs=12, xlabel=True, rows=None)
 for k in (1, 2, 3, 4):
     hook_fig(out / f"hook_step{k}.svg", k)
 # Synthesis thumbnail: three values in large type, no axis title.
-THUMB = [("Offline", K.MLP_OFFLINE, "neutral", f"{K.MLP_OFFLINE:,.0f}"),
-         ("200 ms", 30903.6, "compute", "30,904"),
-         ("40 ms", 12979.4, "danger", "12,979")]
+THUMB = [("Offline", K.MLP_OFFLINE, "neutral", val("llama_off")),
+         (f"{val('llama_conv_tpot')} ms", K.MLP_SERVER, "compute", val("llama_conv")),
+         (f"{val('llama_int_tpot')} ms", K.MLP_INTER, "danger", val("llama_int"))]
 hook_fig(out / "hook_thumb.svg", 4, size=(3.6, 1.6), note=False, fs=16, xlabel=False,
          rows=THUMB)
 
 # ------------------------------------------- recall thumbnail (Part 1 hook)
 sp.hbars(out / "recall_cost.svg", [
-    ("Batch 1", 3.92, "danger", "\\$3.92"),
-    ("Batch 8", 0.52, "compute", "\\$0.52"),
+    ("Batch 1", num("recall_b1_usd"), "danger", f"\\${val('recall_b1_usd')}"),
+    (f"Batch {val('batch_8')}", num("recall_b8_usd"), "compute", f"\\${val('recall_b8_usd')}"),
 ], "", log=False, size=(4.0, 1.4),
     xlabel="ResNet-50, \\$ per million requests (modeled)")
 
@@ -169,16 +125,17 @@ for k in (1, 2, 3, 4):
             ax.plot([t, t], [y - 0.2, y + 0.2], color=C["memory"], lw=1.1, alpha=a)
         ax.text(-60, y, name, ha="right", va="center", fontsize=12,
                 fontweight="bold", alpha=a)
-        ax.text(e2e + 50, y, f"{e2e:,} ms", va="center", fontsize=11,
+        ax.text(e2e + 50, y, f"{e2e:,.0f} ms", va="center", fontsize=11,
                 fontweight="bold", alpha=a)
-        ax.text(600, y + 0.3, f"first token {ttft} ms, then one every {tbt} ms",
+        ax.text(600, y + 0.3, f"first token {ttft:.0f} ms, then one every {tbt:.0f} ms",
                 fontsize=10.5, color=C["memory"], fontweight="bold", alpha=a)
     if k >= 2:
-        ax.text(600, 0.82, f"decode: {K.DECODE_SHARE:.0%} of the request (derived)", ha="left",
+        ax.text(600, 0.82, f"decode: {val('sw_decode_pct')}% of the request (derived)", ha="left",
                 va="center", fontsize=10.5, color=C["memory"], fontweight="bold")
     if k >= 4:
-        ax.axvline(500, color=C["danger"], lw=2, ls="--")
-        ax.text(600, -0.62, "book target: TTFT < 500 ms;  TPOT < 50 ms (20 tokens/s)",
+        ax.axvline(num("target_ttft"), color=C["danger"], lw=2, ls="--")
+        ax.text(600, -0.62, f"book target: TTFT < {val('target_ttft')} ms;  TPOT < {val('target_tpot')} ms "
+                f"({val('target_rate')} tokens/s)",
                 fontsize=10.5, color=C["danger"], fontweight="bold", va="center")
     ax.set_xlim(0, 5600)
     ax.set_ylim(-0.85, 1.85)
@@ -189,27 +146,27 @@ for k in (1, 2, 3, 4):
 
 # ------------------------------------------------- prefill against decode
 # Slot: 10.4 x 5.0 cm beside the H100 photo. Values from calcs.py.
-PHASE_PRE = [("GPT-2 XL,\n512 tokens", round(K.GPT2_PREFILL_MS, 1)),
-             ("Llama 3 8B,\n1,000 tokens", round(K.PRE_MS, 1))]
-PHASE_DEC = [("GPT-2 XL", K.GPT2_FLOOR_MS, "memory", f"{K.GPT2_FLOOR_MS:.1f} ms"),
-             ("Llama 3 8B,\nINT4", K.L3_TPOT_MODEL * 1e3, "memory",
-              f"{K.L3_FLOOR_MS:.1f} floor, {K.L3_TPOT_MODEL * 1e3:.2f}"),
-             ("GPT-2 XL,\neager", 8.6, "neutral", "8.6 ms")]   # MS Sec. 13.9.2, 576 kernels
+PHASE_PRE = [(f"GPT-2 XL,\n{val('gpt2_prompt')} tokens", K.GPT2_PREFILL_MS, val("gpt2_prefill_ms")),
+             (f"Llama 3 8B,\n{val('cs_prompt')} tokens", K.PRE_MS, val("cs_ttft"))]
+PHASE_DEC = [("GPT-2 XL", K.GPT2_FLOOR_MS, "memory", f"{val('gpt2_floor_ms')} ms"),
+             ("Llama 3 8B,\nINT4", K.L3_TPOT_MS, "memory",
+              f"{val('cs_floor_ms')} floor, {val('cs_tpot_ms')}"),
+             ("GPT-2 XL,\neager", K.EAGER_MS, "neutral", f"{val('eager_ms')} ms")]
 FS = 9
 for k in (1, 2, 3, 4):
     fig = plt.figure(figsize=cm(10.4, 5.0))
     ax = fig.add_axes([0.21, 0.46, 0.25, 0.40])
     bx = fig.add_axes([0.71, 0.46, 0.27, 0.40])
     cx = fig.add_axes([0.21, 0.10, 0.77, 0.12])
-    for i, (lab, v) in enumerate(PHASE_PRE):
+    for i, (lab, v, vtxt) in enumerate(PHASE_PRE):
         y = 1 - i
         ax.barh(y, v, color=C["compute"], height=0.6)
-        ax.text(v + 1.5 if v < 30 else v - 1.5, y, f"{v} ms", va="center",
+        ax.text(v + 1.5 if v < 30 else v - 1.5, y, f"{vtxt} ms", va="center",
                 ha="left" if v < 30 else "right", fontsize=FS, fontweight="bold",
                 color=C["compute"] if v < 30 else "white")
         ax.text(-2, y, lab, ha="right", va="center", fontsize=FS - 0.5, fontweight="bold")
     ax.set_xlim(0, 50)
-    ax.set_title("Prefill: FLOP ÷ (40% of peak)", fontsize=FS, loc="left",
+    ax.set_title(f"Prefill: FLOP ÷ ({val('prefill_eff')}% of peak)", fontsize=FS, loc="left",
                  fontweight="bold", color=C["compute"])
     ax.set_xlabel("ms (sets TTFT)", fontsize=FS - 0.5, labelpad=1)
     a2 = 1.0 if k >= 2 else 0.0
@@ -223,7 +180,7 @@ for k in (1, 2, 3, 4):
         bx.text(-0.4, y, lab, ha="right", va="center", fontsize=FS - 0.5,
                 fontweight="bold", alpha=a)
     bx.set_xlim(0, 10)
-    bx.set_title("Decode: GB ÷ 3.35 TB/s", fontsize=FS, loc="right",
+    bx.set_title(f"Decode: GB ÷ {val('h100_bw')} TB/s", fontsize=FS, loc="right",
                  fontweight="bold", color=C["memory"], alpha=a2)
     bx.set_xlabel("ms (sets TPOT)", fontsize=FS - 0.5, alpha=a2, labelpad=1)
     if k < 2:
@@ -235,16 +192,16 @@ for k in (1, 2, 3, 4):
         a_.set_ylim(-0.5, 2.5 if a_ is bx else 1.5)
         a_.tick_params(axis="x", labelsize=8, pad=1)
     a4 = 1.0 if k >= 4 else 0.0
-    tp = K.L3_TPOT_MODEL * 1e3
+    tp = K.L3_TPOT_MS
     cx.barh(0, tp, color=C["memory"], height=0.8, alpha=a4)
-    cx.barh(0, K.TPOT_TARGET * 1e3 - tp, left=tp, color=C["data_l"], edgecolor=C["data"],
+    cx.barh(0, K.TPOT_TARGET_MS - tp, left=tp, color=C["data_l"], edgecolor=C["data"],
             hatch="//", height=0.8, lw=0, alpha=a4)
-    cx.text(10.8, 0, f"{K.ROOM_MS:.1f} ms: room to share this read (derived)", ha="center",
+    cx.text(10.8, 0, f"{val('cs_room_ms')} ms: room to share this read (derived)", ha="center",
             va="center", fontsize=FS - 0.5, fontweight="bold", color=C["data"], alpha=a4,
             bbox=dict(facecolor="white", edgecolor="none", pad=1, alpha=a4))
-    cx.text(-0.3, 0, "Llama 3 8B,\n20 ms TPOT", ha="right", va="center",
+    cx.text(-0.3, 0, f"Llama 3 8B,\n{val('cs_tpot_target')} ms TPOT", ha="right", va="center",
             fontsize=FS - 0.5, fontweight="bold", alpha=a4)
-    cx.set_xlim(0, 20)
+    cx.set_xlim(0, K.TPOT_TARGET_MS)
     cx.set_ylim(-0.6, 0.6)
     cx.set_yticks([])
     cx.set_xticks([0, 5, 10, 15, 20])
@@ -262,12 +219,13 @@ for k in (1, 2):
     ax.add_patch(Rectangle((0, 1.0), K.DRAFT * s, 0.5, color=C["data"]))
     ax.text(K.DRAFT / 2 * s, 1.25, "draft", ha="center", va="center", fontsize=9,
             color="white", fontweight="bold")
-    ax.text(0.0, 1.62, "Draft proposes 4 tokens (0.30 ms); the target checks all 5 positions in one pass.",
+    ax.text(0.0, 1.62, f"Draft proposes {val('spec_k')} tokens ({val('spec_draft_ms')} ms); the target checks all "
+            f"{val('spec_k1')} positions in one pass.",
             ha="left", va="bottom", fontsize=9.5, color=C["text"], fontweight="bold")
     ax.add_patch(Rectangle((K.DRAFT * s, 1.0), K.VERIFY * s, 0.5, color=C["memory"]))
-    ax.text((K.DRAFT + K.VERIFY / 2) * s, 1.25, "target: 0.90 ms", ha="center", va="center",
+    ax.text((K.DRAFT + K.VERIFY / 2) * s, 1.25, f"target: {val('spec_verify_ms')} ms", ha="center", va="center",
             fontsize=9, color="white", fontweight="bold")
-    ax.text(K.ROUND * s + 0.05, 1.25, f"{K.ROUND:.2f} ms per round", va="center", fontsize=9.5,
+    ax.text(K.ROUND * s + 0.05, 1.25, f"{val('spec_round_ms')} ms per round", va="center", fontsize=9.5,
             fontweight="bold")
     a = 1.0 if k >= 2 else 0.0
     marks = [("t1", "data", "kept"), ("t2", "data", "kept"), ("t3", "danger", "rejected"),
@@ -290,27 +248,27 @@ for k in (1, 2):
 # ------------------------------------------------------- decode bytes
 for k in (1, 2):
     fig, ax = plt.subplots(figsize=(5.8, 1.9))
-    for i, b in enumerate((1, 32)):
-        cache = b * K.KV_SEQ / K.GB
-        ms = f"{K.step_s(b) * 1e3:.1f} ms"
-        rate = f"{K.rate(b):,.0f} tokens/s"
+    for i, b in enumerate((K.B1, K.B32)):
+        cache = b * K.KV_SEQ_GB
+        ms = f"{val(f'step_ms_{b}')} ms"
+        rate = f"{val(f'rate_{b}')} tokens/s"
         y = 1 - i
         a = 1.0 if (k == 2 or b == 1) else 0.0
-        ax.barh(y, 3.0, color=C["memory"], height=0.55, alpha=a)
-        ax.barh(y, cache, left=3.0, color=C["data"], height=0.55, alpha=a)
-        ax.text(3.0 + cache + 0.2, y, f"{3.0 + cache:.1f} GB: {ms}, {rate}", va="center",
+        ax.barh(y, K.GPT2_W_GB, color=C["memory"], height=0.55, alpha=a)
+        ax.barh(y, cache, left=K.GPT2_W_GB, color=C["data"], height=0.55, alpha=a)
+        ax.text(K.GPT2_W_GB + cache + 0.2, y, f"{val(f'step_gb_{b}')} GB: {ms}, {rate}", va="center",
                 fontsize=11, fontweight="bold", color=C["text"], alpha=a)
         ax.text(-0.15, y, f"Batch {b}", ha="right", va="center", fontsize=12,
                 fontweight="bold", alpha=a)
-    ax.text(1.5, 1.45, "weights 3 GB", ha="center", color=C["memory"], fontsize=11,
+    ax.text(1.5, 1.45, f"weights {val('gpt2_w_gb')} GB", ha="center", color=C["memory"], fontsize=11,
             fontweight="bold")
-    ax.text(8.0, -0.55, f"KV cache, {K.KV_SEQ / K.GB:.2f} GB per sequence", ha="center", va="top",
+    ax.text(8.0, -0.55, f"KV cache, {val('gpt2_kv_seq_gb')} GB per sequence", ha="center", va="top",
             color=C["data"], fontsize=11, fontweight="bold", alpha=1.0 if k == 2 else 0.0)
     ax.set_xlim(0, 22)
     ax.set_ylim(-0.9, 1.7)
     ax.set_yticks([])
     ax.spines["left"].set_visible(False)
-    ax.set_xlabel("Bytes read per decode step (GB; GPT-2 XL, 1,024-token context, modeled)")
+    ax.set_xlabel(f"Bytes read per decode step (GB; GPT-2 XL, {val('gpt2_ctx')}-token context, modeled)")
     sp.save(fig, out / f"decode_bytes_step{k}.svg")
 
 # ------------------------------------------------- batch curve and TPOT cap
@@ -318,7 +276,8 @@ for k in (1, 2):
 
 
 def step_ms(b):
-    return K.step_s(b) * 1e3
+    """Step time in ms at batch b (a number or an array), from the scenario."""
+    return np.array([K.m(K.CHAT.step_time(int(x)), "ms") for x in np.atleast_1d(b)]).reshape(np.shape(b))
 
 
 for k in (1, 2, 3):
@@ -327,24 +286,24 @@ for k in (1, 2, 3):
     top = {1: 32, 2: K.B_TPOT, 3: K.B_MEM}[k]
     bs = np.arange(1, top + 1)
     ax.plot(bs / step_ms(bs) * 1000, step_ms(bs), color=C["memory"], lw=2.5)
-    pts = [(1, "batch 1"), (8, "8"), (32, "32"), (64, "64"), (128, "128"),
-           (K.B_TPOT, f"{K.B_TPOT}"), (K.B_MEM, "")]
+    pts = [(K.B1, f"batch {K.B1}"), (K.B8, f"{K.B8}"), (K.B32, f"{K.B32}"), (K.B64, f"{K.B64}"),
+           (K.B128, f"{K.B128}"), (K.B_TPOT, f"{K.B_TPOT}"), (K.B_MEM, "")]
     for b, lab in pts:
         if b > top:
             continue
         x, y = b / step_ms(b) * 1000, step_ms(b)
-        derived = b > 32
+        derived = b > K.B32
         ax.plot([x], [y], "o", ms=6, color=C["neutral"] if derived else C["memory"],
                 mec="white", zorder=5)
         ax.annotate(lab, (x, y), xytext=(-7, 3), textcoords="offset points",
                     ha="right", fontsize=9, fontweight="bold",
                     color=C["neutral"] if derived else C["memory"])
     if k >= 2:
-        ax.axhline(20, color=C["danger"], lw=2, ls="--")
-        ax.text(200, 21, f"TPOT target 20 ms: at most batch {K.B_TPOT}", fontsize=9,
+        ax.axhline(K.TPOT_TARGET_MS, color=C["danger"], lw=2, ls="--")
+        ax.text(200, 21, f"TPOT target {val('cs_tpot_target')} ms: at most batch {K.B_TPOT}", fontsize=9,
                 color=C["danger"], fontweight="bold")
         ax.axvline(K.CEILING, color=C["neutral"], lw=1.5, ls=":")
-        ax.text(K.CEILING + 150, 8, f"ceiling:\n{K.CEILING:,.0f} tokens/s",
+        ax.text(K.CEILING + 150, 8, f"ceiling:\n{val('ceiling')} tokens/s",
                 ha="left", va="bottom", fontsize=9, color=C["neutral"], fontweight="bold")
     if k >= 3:
         ax.text(K.CEILING + 150, 25.0, f"{K.B_MEM}: memory full", ha="left", fontsize=9,
@@ -356,7 +315,7 @@ for k in (1, 2, 3):
     ax.tick_params(labelsize=8.5, pad=1)
     ax.set_xlabel("Aggregate tokens/s", fontsize=9, labelpad=1)
     ax.set_ylabel("TPOT (ms)", fontsize=9, labelpad=1)
-    tag(ax, "GPT-2 XL, one H100, full 1,024-token contexts. Book: batch 1 and 32; "
+    tag(ax, f"GPT-2 XL, one H100, full {val('gpt2_ctx')}-token contexts. Book: batch 1 and {K.B32}; "
         "gray: derived (bandwidth floor).", y=-0.30)
     for t in ax.texts[-1:]:
         t.set_fontsize(8)
@@ -365,8 +324,12 @@ for k in (1, 2, 3):
 # ------------------------------------------------ continuous batching grid
 # Illustrative lengths (calcs.py: REQ1, REQ2). Slots: steps 1 to 3 at
 # 14.2 x 6.0 cm, steps 4 to 7 at 14.2 x 4.9 cm.
-REQ1 = K.REQ1
-REQ2 = K.REQ2
+REQ1 = [(n, K.LENGTHS[n]) for n in "ABCD"]
+REQ2 = {n: K.LENGTHS[n] for n in "EFGH"}
+LONGEST = max(L for _, L in REQ1)
+END = K.SCHED.request_level_iterations
+WAITING = "waiting:\n" + ", ".join(f"{n} {L}" for n, L in list(REQ2.items())[:2]) + ",\n" + \
+          ", ".join(f"{n} {L}" for n, L in list(REQ2.items())[2:])
 
 
 def grid(ax, title):
@@ -376,9 +339,9 @@ def grid(ax, title):
     ax.set_yticklabels(["slot 1", "slot 2", "slot 3", "slot 4"], fontsize=9)
     ax.tick_params(axis="y", length=0, pad=2)
     ax.spines["left"].set_visible(False)
-    ax.set_xlim(0, 150)
+    ax.set_xlim(0, END)
     ax.set_ylim(-0.6, 3.6)
-    ax.set_xticks([0, 10, 40, 60, 100, 150])
+    ax.set_xticks(sorted({0, END, *(L for _, L in REQ1)}))
     ax.tick_params(axis="x", labelsize=8.5, pad=1)
     ax.set_xlabel("Decode step (lengths illustrative; one token per step, prefill omitted)",
                   fontsize=8.5, labelpad=1)
@@ -401,8 +364,8 @@ def summary(ax, text, color):
             color=color, transform=ax.transAxes)
 
 
-used1 = sum(L for _, L in REQ1)
-used_all = used1 + sum(REQ2.values())
+used1 = K.SCHED.useful_iterations
+used_all = K.SCHED.all_useful_iterations
 for k in range(1, 8):
     h = 6.0 if k <= 3 else 4.9
     fig, ax = plt.subplots(figsize=cm(14.2, h))
@@ -412,40 +375,42 @@ for k in range(1, 8):
         for s, (n, L) in enumerate(REQ1):
             bar(ax, s, 0, L, n, "memory")
         if k == 1:
-            idle(ax, 0, 10, 90)
+            idle(ax, 0, K.LENGTHS["A"], LONGEST - K.LENGTHS["A"])
         if k >= 2:
             for s, (n, L) in enumerate(REQ1):
-                if L < 100:
-                    idle(ax, s, L, 100 - L)
-            ax.text(55, 3, f"{used1} of {4 * 100} slot-steps used", ha="center", va="center",
+                if L < LONGEST:
+                    idle(ax, s, L, LONGEST - L)
+            ax.text(55, 3, f"{used1} of {K.SCHED.slot_iterations} slot-steps used", ha="center", va="center",
                     fontsize=9, color=C["danger"], fontweight="bold",
                     bbox=dict(facecolor="white", edgecolor="none", pad=1.5))
         if k == 3:
             for s, n in enumerate("EFGH"):
-                bar(ax, s, 100, REQ2[n], n, "data")
-            summary(ax, f"done at step 150; {used_all} of {4 * 150} slot-steps used "
-                    f"({used_all / 600:.0%})", C["danger"])
+                bar(ax, s, K.REQ_SPAN[n][0], REQ2[n], n, "data")
+            summary(ax, f"done at step {val('req_steps')}; {val('all_used')} of {val('req_total')} slot-steps used "
+                    f"({val('req_util')}%)", C["danger"])
         else:
-            ax.text(125, 1.5, "waiting:\nE 30, F 50,\nG 20, H 40", ha="center",
+            ax.text(125, 1.5, WAITING, ha="center",
                     va="center", fontsize=9, color=C["data"], fontweight="bold")
     else:
         grid(ax, "Continuous: a freed slot takes the next request at the next step")
         for s, (n, L) in enumerate(REQ1):
             bar(ax, s, 0, L, n, "memory")
         if k == 4:
-            ax.text(125, 1.5, "waiting:\nE 30, F 50,\nG 20, H 40", ha="center",
+            ax.text(125, 1.5, WAITING, ha="center",
                     va="center", fontsize=9, color=C["data"], fontweight="bold")
+        # Slots are figure layout; start and length come from the continuous schedule.
+        cb = {n: (K.CB_SPAN[n][0], K.LENGTHS[n]) for n in "EFGH"}
         if k >= 5:
-            bar(ax, 0, 10, 30, "E", "data")
+            bar(ax, 0, *cb["E"], "E", "data")
         if k >= 6:
-            bar(ax, 2, 40, 50, "F", "data")
-            bar(ax, 0, 40, 20, "G", "data")
-            bar(ax, 0, 60, 40, "H", "data")
-            idle(ax, 2, 90, 10)
-            idle(ax, 3, 60, 40)
+            bar(ax, 2, *cb["F"], "F", "data")
+            bar(ax, 0, *cb["G"], "G", "data")
+            bar(ax, 0, *cb["H"], "H", "data")
+            idle(ax, 2, K.CB_SPAN["F"][1], K.SCHED.continuous_iterations - K.CB_SPAN["F"][1])
+            idle(ax, 3, K.CB_SPAN["D"][1], K.SCHED.continuous_iterations - K.CB_SPAN["D"][1])
         if k >= 7:
-            summary(ax, f"done at step 100; {used_all} of {4 * 100} slot-steps used "
-                    f"({used_all / 400:.1%})", C["data"])
+            summary(ax, f"done at step {val('cb_steps')}; {val('all_used')} of {val('cb_total')} slot-steps used "
+                    f"({val('cb_util')}%)", C["data"])
     save_slot(fig, out / f"cb_step{k}.svg")
 
 # ---------------------------------------------------------- stall timeline
@@ -461,7 +426,7 @@ for k in (1, 2, 3):
         tall = i == 4
         a = 1.0 if (not tall or k >= 2) else 0.0
         ax.bar(i, v, color=C["compute"] if tall else C["memory"], width=0.75, alpha=a)
-    ax.text(4, DEC + PRE + 1.5, f"{K.STALL_MS:.1f} ms", ha="center", fontsize=9,
+    ax.text(4, DEC + PRE + 1.5, f"{val('st_stall_ms')} ms", ha="center", fontsize=9,
             fontweight="bold", color=C["compute"], alpha=1.0 if k >= 2 else 0.0)
     ax.set_title("Whole prompt in one step", fontsize=8.5, loc="left",
                  fontweight="bold", pad=3)
@@ -470,23 +435,23 @@ for k in (1, 2, 3):
     for i, v in enumerate(right):
         chunk = 2 <= i <= 5
         bx.bar(i, v, color=C["compute"] if chunk else C["memory"], width=0.75, alpha=a3)
-    bx.text(4.0, 27, f"4 chunks of 250:\n{K.CHUNK_MS:.1f} ms each", ha="center",
+    bx.text(4.0, 27, f"{K.CHUNKS} chunks of {val('st_chunk_tok')}:\n{val('st_chunk_ms')} ms each", ha="center",
             fontsize=8.5, fontweight="bold", color=C["compute"], alpha=a3)
     bx.set_title("Four chunks", fontsize=8.5, loc="left", fontweight="bold",
                  alpha=a3, pad=3)
     for a_, show in ((ax, True), (bx, k >= 3)):
-        a_.axhline(20, color=C["danger"], lw=1.8, ls="--", alpha=1.0 if show else 0.0)
+        a_.axhline(K.TPOT_TARGET_MS, color=C["danger"], lw=1.8, ls="--", alpha=1.0 if show else 0.0)
         a_.set_xticks([])
         a_.set_xlabel("decode steps", fontsize=8.5, alpha=1.0 if show else 0.0, labelpad=2)
         a_.set_ylim(0, 52)
         if not show:
             a_.spines["bottom"].set_alpha(0.0)
     ax.tick_params(axis="y", labelsize=8, pad=1)
-    ax.set_yticks([0, 20, 40])
-    ax.set_yticklabels(["0", "TPOT 20", "40"])
+    ax.set_yticks([0, K.TPOT_TARGET_MS, 2 * K.TPOT_TARGET_MS])
+    ax.set_yticklabels(["0", f"TPOT {val('cs_tpot_target')}", f"{2 * K.TPOT_TARGET_MS:.0f}"])
     ax.get_yticklabels()[1].set_color(C["danger"])
     ax.get_yticklabels()[1].set_fontweight("bold")
-    ax.text(0, DEC + 1.5, f"{DEC:.1f} ms", ha="left", fontsize=8.5, color=C["memory"],
+    ax.text(0, DEC + 1.5, f"{val('st_dec_ms')} ms", ha="left", fontsize=8.5, color=C["memory"],
             fontweight="bold")
     ax.set_ylabel("Step time (ms)", fontsize=8.5, labelpad=1)
     save_slot(fig, out / f"stall_step{k}.svg")
@@ -496,21 +461,21 @@ for k in (1, 2, 3):
 ctx8 = np.linspace(0, 16384, 200)
 fig, ax = plt.subplots(figsize=cm(8.7, 4.6))
 fig.subplots_adjust(left=0.13, right=0.80, top=0.88, bottom=0.21)
-FREE_GB = K.FREE / K.GB
+FREE_GB = K.FREE_GB
 ax.axhspan(FREE_GB, 125, color=C["danger_l"], alpha=0.6, lw=0)
 ax.axhline(FREE_GB, color=C["danger"], lw=2, ls="--")
-ax.text(16200, FREE_GB + 2, f"budget: {FREE_GB:.1f} GB", ha="right", va="bottom",
+ax.text(16200, FREE_GB + 2, f"budget: {val('free_gb')} GB", ha="right", va="bottom",
         fontsize=9, color=C["danger"], fontweight="bold")
-N8 = round(K.N8K)
-for b, ck in ((16, "data"), (32, "compute"), (N8, "network")):
-    kv = b * ctx8 * K.L3_KV_TOK / K.GB
+N8 = K.N8K
+for b, ck in ((16, "data"), (32, "compute"), (N8, "network")):   # 16 and 32: illustrative batch sizes
+    kv = b * ctx8 * K.L3_KV_TOK / 1e9
     ax.plot(ctx8, kv, color=C[ck], lw=2.5)
     if b < N8:
-        ax.text(16600, b * 16384 * K.L3_KV_TOK / K.GB, f"{b} chats", ha="left",
+        ax.text(16600, b * 16384 * K.L3_KV_TOK / 1e9, f"{b} chats", ha="left",
                 va="center", fontsize=9, color=C[ck], fontweight="bold")
-ax.plot([8192], [N8 * K.PER_CONV8K / K.GB], "o", ms=7, color=C["network"], mec="white",
+ax.plot([K.CONV8.context_tokens], [N8 * K.PER_CONV_GB], "o", ms=7, color=C["network"], mec="white",
         mew=1.5, zorder=5)
-ax.text(300, 97, f"{N8} chats:\nfull at 8,192 tokens", ha="left", va="top",
+ax.text(300, 97, f"{N8} chats:\nfull at {val('conv_tokens')} tokens", ha="left", va="top",
         fontsize=9, color=C["network"], fontweight="bold")
 ax.set_xlim(0, 16384)
 ax.set_ylim(0, 100)
@@ -527,24 +492,24 @@ save_slot(fig, out / "kv_budget_8b.svg")
 ctx = np.linspace(0, 32768, 200)
 fig, ax = plt.subplots(figsize=cm(8.7, 4.6))
 fig.subplots_adjust(left=0.13, right=0.98, top=0.88, bottom=0.21)
-B70 = K.BUDGET70 / K.GB
+B70 = K.BUDGET70_GB
 ax.axhspan(B70, 125, color=C["danger_l"], alpha=0.6, lw=0)
 ax.axhline(B70, color=C["danger"], lw=2, ls="--")
-ax.text(32000, B70 + 2.5, f"budget: {B70:.1f} GB", ha="right", va="bottom",
+ax.text(32000, B70 + 2.5, f"budget: {val('kv70_budget')} GB", ha="right", va="bottom",
         fontsize=8.5, color=C["danger"], fontweight="bold")
 for b, ck in ((1, "memory"), (4, "data"), (16, "compute"), (32, "network")):
-    kv = b * ctx * K.KV70_TOK / K.GB
+    kv = b * ctx * K.KV70_TOK / 1e9
     ax.plot(ctx, kv, color=C[ck], lw=2.5)
     if b > 4:
         xe = 102e9 / (b * K.KV70_TOK)
         lx, ly = xe * 0.96, 102
     else:
         lx = 24000 if b == 4 else 32000
-        ly = b * lx * K.KV70_TOK / K.GB + 3
+        ly = b * lx * K.KV70_TOK / 1e9 + 3
     ax.text(lx, ly, f"batch {b}", ha="right", fontsize=8.5, color=C[ck], fontweight="bold")
-x32 = K.BUDGET70 / (32 * K.KV70_TOK)
+x32 = K.X32
 ax.plot([x32], [B70], "o", ms=7, color=C["network"], mec="white", mew=1.5, zorder=5)
-ax.annotate(f"32 chats full near\n{round(x32, -2):,.0f} tokens", (x32, B70), xytext=(19500, 72),
+ax.annotate(f"{val('kv70_batch')} chats full near\n{val('kv70_cross')} tokens", (x32, B70), xytext=(19500, 72),
             fontsize=8.5, color=C["network"], fontweight="bold",
             arrowprops=dict(arrowstyle="-", color=C["network"]))
 ax.set_xlim(0, 32768)
@@ -598,8 +563,8 @@ for k in (1, 2, 3):
 
 # ------------------------------------------------------------ vLLM measured
 # Slot: 12.0 x 2.7 cm. Kwon et al., SOSP 2023, Fig. 2.
-names = ["Orca (Max)", "Orca (Pow2)", "Orca (Oracle)", "vLLM"]
-used = [20.4, 26.8, 38.2, 96.3]
+names = list(K.USED)
+used = [K.USED[n] for n in names]
 fig, ax = plt.subplots(figsize=cm(12.0, 2.7))
 fig.subplots_adjust(left=0.17, right=0.97, top=0.98, bottom=0.30)
 for i, n in enumerate(names):
@@ -684,7 +649,7 @@ for k in (1, 2, 3, 4):
     ax.text(0.05, 1.3, captions[k], fontsize=10.5, fontweight="bold")
     ax.text(0.05, 0.9, "Request B: logical 0 → 5, 1 → 2", fontsize=10.5,
             color=C["data"], fontweight="bold", alpha=1.0 if k >= 4 else 0.0)
-    ax.text(0.05, 0.5, "Block size 4 for legibility (vLLM default: 16)", fontsize=9,
+    ax.text(0.05, 0.5, f"Block size 4 for legibility (vLLM default: {val('block_default')})", fontsize=9,
             color=C["neutral"])
     ax.set_xlim(-0.2, 6.95)
     ax.set_ylim(0.3, 3.8)
@@ -693,16 +658,15 @@ for k in (1, 2, 3, 4):
 
 # ------------------------------------------------------ prefix sharing
 # Slot: 7.6 x 3.4 cm, drawn in centimeters. Sizes from calcs.py (2,000 tokens x 131,072 B).
-P_MB = K.PREFIX / 1e6
-COPIES = 100 * K.PREFIX / K.GB
-ONE = K.PREFIX / K.GB
+COPIES = K.m(K.PREFIX.kv_unshared, "GB")
+ONE = K.m(K.PREFIX.kv_shared, "GB")
 for k in (1, 2):
     fig = plt.figure(figsize=cm(7.6, 3.4))
     ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
     for j in range(5):
         ax.add_patch(Rectangle((0.15 + j * 0.62, 2.15), 0.55, 0.55, facecolor=C["network_l"],
                                edgecolor=C["network"], lw=1.2))
-    ax.text(0.15, 2.95, f"system prompt: 2,000 tokens, {P_MB:.0f} MB, stored once",
+    ax.text(0.15, 2.95, f"system prompt: {val('prefix_tokens')} tokens, {val('prefix_mb')} MB, stored once",
             ha="left", fontsize=8.5, color=C["network"], fontweight="bold")
     for i in range(3):
         x = 0.15 + i * 1.05
@@ -716,8 +680,8 @@ for k in (1, 2):
     ax.text(0.15, 0.12, "each block table points at the shared blocks", ha="left",
             fontsize=8, color=C["neutral"])
     a = 1.0 if k >= 2 else 0.0
-    bars = [("100 copies", COPIES, "danger", f"{COPIES:.1f} GB"),
-            ("Shared", ONE, "data", f"{ONE:.2f} GB")]
+    bars = [(f"{val('prefix_users')} copies", COPIES, "danger", f"{val('prefix_copies_gb')} GB"),
+            ("Shared", ONE, "data", f"{val('prefix_shared_gb')} GB")]
     for i, (lab, v, ck, txt) in enumerate(bars):
         y = 1.55 - i * 0.65
         ax.add_patch(Rectangle((4.75, y), v / COPIES * 1.4, 0.45, color=C[ck], alpha=a))
@@ -725,7 +689,7 @@ for k in (1, 2):
                 fontweight="bold", alpha=a)
         ax.text(4.75 + v / COPIES * 1.4 + 0.07, y + 0.22, txt, va="center", fontsize=8.5,
                 fontweight="bold", color=C[ck], alpha=a)
-    ax.text(7.45, 0.55, "100 conversations\n(derived)", ha="right", fontsize=8,
+    ax.text(7.45, 0.55, f"{val('prefix_users')} conversations\n(derived)", ha="right", fontsize=8,
             color=C["neutral"], alpha=a)
     ax.set_xlim(0, 7.6)
     ax.set_ylim(0, 3.4)
@@ -741,14 +705,14 @@ DS = [("Both phases", K.COLO, "neutral"), ("Prefill only", K.PRE_ONLY, "compute"
 for i, (lab, v, ck) in enumerate(DS):
     y = 2 - i
     ax.barh(y, v, color=C[ck], height=0.62)
-    ax.text(v + 0.15, y, f"{v:g}", va="center", fontsize=9.5, fontweight="bold", color=C[ck])
+    ax.text(v + 0.15, y, f"{v:g}", va="center", fontsize=9.5, fontweight="bold", color=C[ck])  # measured values as printed
     ax.text(-0.2, y, lab, ha="right", va="center", fontsize=9, fontweight="bold")
 ax.set_xlim(0, 11.5)
 ax.set_yticks([])
 ax.set_ylim(-0.5, 2.5)
 ax.spines["left"].set_visible(False)
 ax.tick_params(axis="x", labelsize=8, pad=1)
-ax.set_xlabel("Requests/s per A100 meeting both deadlines\n(13B model, measured)",
+ax.set_xlabel(f"Requests/s per A100 meeting both deadlines\n({val('ds_params')}B model, measured)",
               fontsize=8.5, labelpad=1)
 save_slot(fig, out / "distserve_bars.svg")
 
@@ -767,20 +731,19 @@ for yy in (1.65, 0.65):
                                  mutation_scale=12, color=C["network"], lw=1.6))
 ax.text(1.95, 1.85, "KV cache", ha="center", fontsize=10, color=C["network"],
         fontweight="bold")
-ax.text(2.0, -0.05, f"{K.DEC_ONLY:g} requests/s on {K.n_pre + 1} GPUs: {K.per_gpu:.1f} each, "
-        f"{K.per_gpu / K.COLO:.1f}× colocated", ha="center",
+ax.text(2.0, -0.05, f"{val('ds_dec')} requests/s on {val('ds_gpus')} GPUs: {val('ds_per_gpu')} each, "
+        f"{val('ds_gain')}× colocated", ha="center",
         fontsize=10.5, fontweight="bold", color=C["data"])
 ax.set_xlim(0, 4.0)
 ax.set_ylim(-0.3, 2.1)
 hide_axis(ax)
 sp.save(fig, out / "distserve_pool.svg")
 
-XFER_GBS = K.XFER * 10 / K.GB
 sp.hbars(out / "split_link.svg", [
-    ("Cache traffic at 10 req/s", XFER_GBS, "network", f"{XFER_GBS:.1f} GB/s"),
-    ("NVLink, A100", 600, "memory", "600 GB/s"),
+    (f"Cache traffic at {val('ds_kv_rate')} req/s", num("ds_traffic"), "network", f"{val('ds_traffic')} GB/s"),
+    ("NVLink, A100", num("ds_link"), "memory", f"{val('ds_link')} GB/s"),
 ], "", log=False, size=(5.0, 1.5),
-    xlabel="GB/s (OPT-66B, 512-token prompts; DistServe)")
+    xlabel=f"GB/s (OPT-66B, {val('ds_in')}-token prompts; DistServe)")
 
 # ------------------------------------------- API prices (book figure 9 variant)
 # Slide variant of MS figure 9, drawn from the same series the book uses:
@@ -811,7 +774,7 @@ for k in (1, 2):
                     ha=ha, fontsize=7.5, color=C["text"])
     if k >= 2:
         ax.axhline(K.COST_M, color=C["data"], lw=2.2)
-        ax.text(2022.75, K.COST_M * 0.86, f"\\${K.COST_M:.3f}: Llama 3 8B\ncase-study bound (derived)",
+        ax.text(2022.75, K.COST_M * 0.86, f"\\${val('cs_usd_m')}: Llama 3 8B\ncase-study bound (derived)",
                 ha="left", va="top", fontsize=8, color=C["data"], fontweight="bold")
     ax.set_yscale("log")
     ax.set_ylim(0.02, 80)
@@ -827,9 +790,9 @@ for k in (1, 2):
 # ------------------------------------------------------ joules per token
 # Values from calcs.py (1,000 W and 600 W, MS Napkin Math 13.5).
 sp.hbars(out / "joules_token.svg", [
-    ("Batch 1, 1 kW", K.J1, "danger", f"{K.J1:.2f} J per token"),
-    ("Batch 1, 600 W", K.J1_LOW, "neutral", f"{K.J1_LOW:.2f} J per token"),
-    ("Batch 32, 1 kW", K.J32, "data", f"{K.J32:.2f} J per token"),
+    (f"Batch 1, {val('p_node_kw')} kW", K.J1, "danger", f"{val('j1')} J per token"),
+    (f"Batch 1, {val('p_low')} W", K.J1_LOW, "neutral", f"{val('j1_low')} J per token"),
+    (f"Batch {val('batch_32')}, {val('p_node_kw')} kW", K.J32, "data", f"{val('j32')} J per token"),
 ], "", log=False, value_fmt="{:.2f}", size=sp.SHORT,
     xlabel="GPT-2 XL decode, joules per token (derived; gray: the chapter's low-use power)")
 
