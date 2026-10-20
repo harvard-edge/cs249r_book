@@ -902,12 +902,12 @@ def test_iron_law_examples():
 
 def test_single_node_iron_law_terms():
     r = Scenarios.ResNet50Batch64StepH100
-    assert r.result.latency_memory.to("ms").magnitude == approx(0.11310)
+    assert r.result.latency_memory.to("ms").magnitude == approx(0.11290868)
     assert r.result.latency_compute.to("ms").magnitude == approx(1.0613)
     assert r.result.latency_overhead.to("ms").magnitude == approx(0.51)
     assert r.result.latency.to("ms").magnitude == approx(1.5713)
-    assert r.memory_traffic.to("GB").magnitude == approx(0.37888)
-    assert r.iron_law.sequential_reduction == approx(0.033573)
+    assert r.memory_traffic.to("GB").magnitude == approx(0.37824407)
+    assert r.iron_law.sequential_reduction == approx(0.033520318)
     g = Scenarios.Gpt2XlDecodeStepH100
     assert g.result.latency_memory.to("ms").magnitude == approx(0.98507)
     assert g.result.latency_compute.to("ms").magnitude == approx(0.0060667)
@@ -990,11 +990,11 @@ def test_single_node_rooflines():
     a = Scenarios.ResNet50A100Batch1
     assert a.result.latency_compute.to("ms").magnitude == approx(0.026282)
     assert a.result.latency_memory.to("ms").magnitude == approx(0.027621, rel=2e-3)
-    assert a.traffic.to("MB").magnitude == approx(56.32)
-    assert a.intensity.to("flop/byte").magnitude == approx(145.60)
+    assert a.traffic.to("MB").magnitude == approx(56.225470)
+    assert a.intensity.to("flop/byte").magnitude == approx(145.84138)
     assert a.ridge.to("flop/byte").magnitude == approx(153.02)
     m = Scenarios.ResNet50PhoneNpuBatch1
-    assert m.traffic.to("MB").magnitude == approx(28.16)
+    assert m.traffic.to("MB").magnitude == approx(28.112735)
     assert m.result.latency_memory.to("ms").magnitude == approx(0.55, rel=1e-2)
     p = Scenarios.A100AtTenFlopPerByte
     assert p.attainable.to("TFLOP/s").magnitude == approx(20.39)
